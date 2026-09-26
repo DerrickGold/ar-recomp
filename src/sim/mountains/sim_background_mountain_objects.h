@@ -1,5 +1,10 @@
 #ifndef AR_SIM_BACKGROUND_MOUNTAIN_OBJECTS_H
 #define AR_SIM_BACKGROUND_MOUNTAIN_OBJECTS_H
+/* SimBackgroundMountainObjects: splits a town's classified mountains into
+ * complete source-art stamps, each with its own ground contact, for towns
+ * with validated stamp data; other towns keep the connected-range fallback.
+ * Phase: pure.
+ * Tests: tests/sim_background_mountains_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

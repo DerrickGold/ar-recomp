@@ -1,5 +1,10 @@
 #ifndef AR_SIM_BACKGROUND_MOUNTAIN_RELIEF_H
 #define AR_SIM_BACKGROUND_MOUNTAIN_RELIEF_H
+/* SimBackgroundMountainRelief: turns the voxel detail setting into mountain
+ * relief: how many copies of the authentic art to stack, how deep, and how
+ * each copy tapers toward the shared ridge.
+ * Phase: pure.
+ * Tests: tests/sim_background_mountain_relief_test.c */
 
 #include <stdint.h>
 

@@ -1,5 +1,11 @@
 #ifndef AR_SIM_WORLD_NAVIGATION_CAPTURE_H
 #define AR_SIM_WORLD_NAVIGATION_CAPTURE_H
+/* SimWorldNavigationCapture: captures the world-navigation frame's native OAM
+ * compositions (the Palace, location label and plaque) into host-owned
+ * transparent buffers, or on a Sky Palace frame validates the sky-mask
+ * capture. Any structural failure selects the authentic frame instead.
+ * Phase: capture (reads the runner, mutates no emulated state).
+ * Tests: tests/ppu_render_pipeline_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

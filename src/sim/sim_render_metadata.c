@@ -44,7 +44,7 @@ typedef struct SimMetadataProducer {
   SrPpuObjPart parts[kSimMaxResolvedParts];
 } SimMetadataProducer;
 
-static SimMetadataProducer g_sim_metadata;
+static SimMetadataProducer s_sim_metadata;
 
 typedef struct SimEffectLifetime {
   bool active;
@@ -138,8 +138,8 @@ static bool EffectKindTravels(SimEffectKind kind) {
  * indices. Keep both tiers in the same bounded tracker without letting fixed
  * slot N alias world slot N; current semantic emitters happen to be world
  * records, but fixed-tier effects remain representable without aliasing. */
-static SimEffectLifetime g_effect_lifetimes[kSimMaxSourceRecords];
-static uint32_t g_next_effect_generation;
+static SimEffectLifetime s_effect_lifetimes[kSimMaxSourceRecords];
+static uint32_t s_next_effect_generation;
 static int RecordIndex(uint16_t record_address, bool world_record);
 static int EffectLifetimeIndex(const SimSourceRecord *source);
 
@@ -148,12 +148,12 @@ static uint16_t SaturatingTick(uint16_t value) {
 }
 
 static uint32_t NextEffectGeneration(void) {
-  if (++g_next_effect_generation == 0) ++g_next_effect_generation;
-  return g_next_effect_generation;
+  if (++s_next_effect_generation == 0) ++s_next_effect_generation;
+  return s_next_effect_generation;
 }
 
 static void ClearEffectLifetimes(void) {
-  memset(g_effect_lifetimes, 0, sizeof(g_effect_lifetimes));
+  memset(s_effect_lifetimes, 0, sizeof(s_effect_lifetimes));
 }
 
 static void ResetProjectileArcs(void);
@@ -161,7 +161,7 @@ static void ResetProjectileArcs(void);
 static void ResetEffectLifetimes(void) {
   ClearEffectLifetimes();
   ResetProjectileArcs();
-  g_next_effect_generation = 0;
+  s_next_effect_generation = 0;
 }
 
 /* D3c classification tables.  Every entry is transcribed from the locked
@@ -967,7 +967,7 @@ typedef struct SimProjectileArc {
   int32_t apex;
 } SimProjectileArc;
 
-static SimProjectileArc g_projectile_arc[kActRaiserSimWorldRecordCount];
+static SimProjectileArc s_projectile_arc[kActRaiserSimWorldRecordCount];
 
 /* Is this frame actually being presented as a projected town?
  *
@@ -1022,7 +1022,7 @@ typedef struct SimEruptionSource {
   int16_t x, y;
 } SimEruptionSource;
 
-static SimEruptionSource g_eruption_source;
+static SimEruptionSource s_eruption_source;
 
 /* Where the renderer drew the crater mouth on the previous frame, and how
  * high above the map plane it put it. This is the launch point when it is
@@ -1032,21 +1032,21 @@ typedef struct SimEruptionMouth {
   int16_t x, y, height;
 } SimEruptionMouth;
 
-static SimEruptionMouth g_eruption_mouth;
+static SimEruptionMouth s_eruption_mouth;
 
 void SimRenderMetadata_SetEruptionCraterAnchor(
     bool valid, int16_t map_x, int16_t map_y, int16_t height) {
-  g_eruption_mouth = (SimEruptionMouth){ valid, map_x, map_y, height };
+  s_eruption_mouth = (SimEruptionMouth){ valid, map_x, map_y, height };
 }
 
 /* Which rule produced the positions currently retained in the trails. */
-static SimEruptionPath g_published_path = kSimEruptionPath_Authentic;
+static SimEruptionPath s_published_path = kSimEruptionPath_Authentic;
 
 /* The town whose fireball arcs and crater are currently held. Both are
  * town-scoped: the crater is learned from whichever town is erupting, so
  * carrying it into another town would launch that town's fireballs out of a
  * volcano it does not have. */
-static uint8_t g_arc_town;
+static uint8_t s_arc_town;
 
 
 /* Advance one record's throw for this build and return its height above the
@@ -1056,7 +1056,7 @@ static int16_t UpdateProjectileArc(const SimSourceRecord *source,
                                    uint32_t build_serial) {
   int index = RecordIndex(source->record_address, true);
   if (index < 0) return 0;
-  SimProjectileArc *arc = &g_projectile_arc[index];
+  SimProjectileArc *arc = &s_projectile_arc[index];
   if (arc->active && arc->last_serial == build_serial) return arc->height;
 
   const SimEruptionFlightPlan *plan = &source->flight;
@@ -1066,14 +1066,14 @@ static int16_t UpdateProjectileArc(const SimSourceRecord *source,
   /* Keep the learned crater current for records whose own backward walk
    * cannot be replayed. */
   if (plan->crater_valid)
-    g_eruption_source =
+    s_eruption_source =
         (SimEruptionSource){ true, plan->crater_x, plan->crater_y };
 
   int16_t crater_x = plan->crater_valid ? plan->crater_x
-                                        : g_eruption_source.x;
+                                        : s_eruption_source.x;
   int16_t crater_y = plan->crater_valid ? plan->crater_y
-                                        : g_eruption_source.y;
-  bool have_crater = plan->crater_valid || g_eruption_source.valid;
+                                        : s_eruption_source.y;
+  bool have_crater = plan->crater_valid || s_eruption_source.valid;
 
   /* The volcano's MOUTH, not the map cell it stands on -- and read live on
    * every build rather than snapshotted with the rest of the throw. The mouth
@@ -1082,12 +1082,12 @@ static int16_t UpdateProjectileArc(const SimSourceRecord *source,
    * fireball already in the air trailing back to where the crater used to be
    * the instant the player panned. The derived offsets are the fallback for a
    * frame that drew no mountains. */
-  const int16_t from_x = g_eruption_mouth.valid ? g_eruption_mouth.x
+  const int16_t from_x = s_eruption_mouth.valid ? s_eruption_mouth.x
                                                 : crater_x;
-  const int16_t from_y = g_eruption_mouth.valid
-      ? g_eruption_mouth.y : (int16_t)(crater_y + kSimEruptionCraterDrop);
-  const int32_t from_height = g_eruption_mouth.valid
-      ? g_eruption_mouth.height : kSimEruptionCraterLift;
+  const int16_t from_y = s_eruption_mouth.valid
+      ? s_eruption_mouth.y : (int16_t)(crater_y + kSimEruptionCraterDrop);
+  const int32_t from_height = s_eruption_mouth.valid
+      ? s_eruption_mouth.height : kSimEruptionCraterLift;
 
   /* Where this fireball is going: read out of the script while the staging
    * teleport is still ahead of the cursor, which is the crater placement and
@@ -1205,10 +1205,10 @@ static int16_t UpdateProjectileArc(const SimSourceRecord *source,
 }
 
 static void ResetProjectileArcs(void) {
-  memset(g_projectile_arc, 0, sizeof(g_projectile_arc));
-  g_eruption_source = (SimEruptionSource){0};
-  g_arc_town = 0;
-  g_published_path = kSimEruptionPath_Authentic;
+  memset(s_projectile_arc, 0, sizeof(s_projectile_arc));
+  s_eruption_source = (SimEruptionSource){0};
+  s_arc_town = 0;
+  s_published_path = kSimEruptionPath_Authentic;
 }
 
 /* The retained path holds PUBLISHED visual positions, so when the rule that
@@ -1218,19 +1218,19 @@ static void ResetProjectileArcs(void) {
  * refill under the new rule. */
 static void ClearEffectTrails(void) {
   for (size_t i = 0;
-       i < sizeof(g_effect_lifetimes) / sizeof(g_effect_lifetimes[0]); i++) {
-    g_effect_lifetimes[i].trail_count = 0;
-    g_effect_lifetimes[i].trail_skip = 0;
-    memset(g_effect_lifetimes[i].trail, 0,
-           sizeof(g_effect_lifetimes[i].trail));
+       i < sizeof(s_effect_lifetimes) / sizeof(s_effect_lifetimes[0]); i++) {
+    s_effect_lifetimes[i].trail_count = 0;
+    s_effect_lifetimes[i].trail_skip = 0;
+    memset(s_effect_lifetimes[i].trail, 0,
+           sizeof(s_effect_lifetimes[i].trail));
   }
 }
 
 static void CaptureEffectInstances(SimFrameData *dst) {
   SimEruptionPath path = EruptionPathForFrame(dst);
-  if (path != g_published_path) {
+  if (path != s_published_path) {
     ClearEffectTrails();
-    g_published_path = path;
+    s_published_path = path;
   }
   dst->effect_metadata_valid = dst->metadata_valid;
   dst->effect_count = 0;
@@ -1264,13 +1264,13 @@ static void CaptureEffectInstances(SimFrameData *dst) {
       int arc_index = RecordIndex(source->record_address, true);
       if (path == kSimEruptionPath_Ballistic && arc_index >= 0) {
         desc.geometry.data.point.height = arc_height;
-        arc_offset_x = g_projectile_arc[arc_index].offset_x;
-        arc_offset_y = g_projectile_arc[arc_index].offset_y;
-        arc_hidden = g_projectile_arc[arc_index].hidden != 0;
-        travel_x = g_projectile_arc[arc_index].travel_x;
-        travel_y = g_projectile_arc[arc_index].travel_y;
-        travel_height = g_projectile_arc[arc_index].travel_height;
-        travel_valid = g_projectile_arc[arc_index].flying;
+        arc_offset_x = s_projectile_arc[arc_index].offset_x;
+        arc_offset_y = s_projectile_arc[arc_index].offset_y;
+        arc_hidden = s_projectile_arc[arc_index].hidden != 0;
+        travel_x = s_projectile_arc[arc_index].travel_x;
+        travel_y = s_projectile_arc[arc_index].travel_y;
+        travel_height = s_projectile_arc[arc_index].travel_height;
+        travel_valid = s_projectile_arc[arc_index].flying;
       }
     }
     /* A queued fireball has not launched. It emits no light and leaves no
@@ -1280,7 +1280,7 @@ static void CaptureEffectInstances(SimFrameData *dst) {
     int record_index = EffectLifetimeIndex(source);
     if (record_index < 0) continue;
     bool visible = EffectPhaseVisible(desc.phase);
-    SimEffectLifetime *lifetime = &g_effect_lifetimes[record_index];
+    SimEffectLifetime *lifetime = &s_effect_lifetimes[record_index];
     UpdateEffectLifetime(lifetime, dst->build_serial, desc.kind,
                          desc.phase, desc.color_family, visible,
                          (uint16_t)(source->world_x + arc_offset_x),
@@ -1327,8 +1327,8 @@ static void CaptureEffectInstances(SimFrameData *dst) {
    * Retire every slot absent from this immutable producer build, so immediate
    * record reuse cannot inherit an old kind or generation. */
   for (size_t i = 0;
-       i < sizeof(g_effect_lifetimes) / sizeof(g_effect_lifetimes[0]); i++) {
-    SimEffectLifetime *lifetime = &g_effect_lifetimes[i];
+       i < sizeof(s_effect_lifetimes) / sizeof(s_effect_lifetimes[0]); i++) {
+    SimEffectLifetime *lifetime = &s_effect_lifetimes[i];
     if (lifetime->active &&
         lifetime->last_build_serial != dst->build_serial)
       memset(lifetime, 0, sizeof(*lifetime));
@@ -1580,14 +1580,14 @@ static int EffectLifetimeIndex(const SimSourceRecord *source) {
 }
 
 static void BeginBuild(void) {
-  uint32_t next_serial = g_sim_metadata.build_serial + 1;
-  memset(&g_sim_metadata, 0, sizeof(g_sim_metadata));
-  g_sim_metadata.active = true;
-  g_sim_metadata.build_serial = next_serial;
+  uint32_t next_serial = s_sim_metadata.build_serial + 1;
+  memset(&s_sim_metadata, 0, sizeof(s_sim_metadata));
+  s_sim_metadata.active = true;
+  s_sim_metadata.build_serial = next_serial;
 }
 
 void SimRenderMetadata_Reset(void) {
-  memset(&g_sim_metadata, 0, sizeof(g_sim_metadata));
+  memset(&s_sim_metadata, 0, sizeof(s_sim_metadata));
   SimWorldNavigationTowns_ResetCache();
   SimRenderMetadata_ResetHeightSlew();
   ResetEffectLifetimes();
@@ -1602,36 +1602,36 @@ bool SimRenderMetadata_BeginRecord(
    * order.  <= (not merely <) also recognizes a one-record pass repeated on
    * the next emulated tick.  A clipped record followed by a later record at
    * the same zero cursor does not reset because its address increased. */
-  bool began_build = !g_sim_metadata.active ||
+  bool began_build = !s_sim_metadata.active ||
       (oam_cursor_before == 0 &&
-       record_address <= g_sim_metadata.last_record_address);
+       record_address <= s_sim_metadata.last_record_address);
   if (began_build)
     BeginBuild();
 
-  if (g_sim_metadata.record_active)
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
+  if (s_sim_metadata.record_active)
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
   if ((oam_cursor_before & 3) ||
       oam_cursor_before > kActRaiserOamLowTableBytes)
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
-  if (g_sim_metadata.source_count &&
-      record_address <= g_sim_metadata.last_record_address)
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_RecordOrder;
-  if (oam_cursor_before != g_sim_metadata.last_oam_cursor)
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
+  if (s_sim_metadata.source_count &&
+      record_address <= s_sim_metadata.last_record_address)
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_RecordOrder;
+  if (oam_cursor_before != s_sim_metadata.last_oam_cursor)
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
   if (RecordIndex(record_address, world_record) < 0)
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_InvalidRecord;
-  if (!world_record && g_sim_metadata.world_started)
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_RecordOrder |
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_InvalidRecord;
+  if (!world_record && s_sim_metadata.world_started)
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_RecordOrder |
                                       kSimMetadataIntegrity_WorldSuffix;
 
-  if (g_sim_metadata.source_count >= kSimMaxSourceRecords) {
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overflow;
-    g_sim_metadata.record_active = false;
+  if (s_sim_metadata.source_count >= kSimMaxSourceRecords) {
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overflow;
+    s_sim_metadata.record_active = false;
     return began_build;
   }
 
-  uint8_t source_index = g_sim_metadata.source_count++;
-  SimSourceRecord *source = &g_sim_metadata.sources[source_index];
+  uint8_t source_index = s_sim_metadata.source_count++;
+  SimSourceRecord *source = &s_sim_metadata.sources[source_index];
   *source = (SimSourceRecord){
     .record_address = record_address,
     .composition = composition,
@@ -1641,39 +1641,39 @@ bool SimRenderMetadata_BeginRecord(
     .semantic_state = world_record ? semantic_state : 0,
     .status = status,
     .oam_first = (uint16_t)(oam_cursor_before / 4),
-    .fragment_first = g_sim_metadata.object_count,
+    .fragment_first = s_sim_metadata.object_count,
     .tier = world_record ? kSimRecordTier_World : kSimRecordTier_Fixed,
     .alternate_attributes = alternate_attributes ? 1 : 0,
   };
-  g_sim_metadata.current_source = source_index;
-  g_sim_metadata.record_active = true;
+  s_sim_metadata.current_source = source_index;
+  s_sim_metadata.record_active = true;
   return began_build;
 }
 
 void SimRenderMetadata_RecordAnchor(int16_t base_x, int16_t base_y) {
-  if (!g_sim_metadata.record_active) return;
+  if (!s_sim_metadata.record_active) return;
   SimSourceRecord *source =
-      &g_sim_metadata.sources[g_sim_metadata.current_source];
+      &s_sim_metadata.sources[s_sim_metadata.current_source];
   source->anchor_x = base_x;
   source->anchor_y = base_y;
   source->anchor_valid = 1;
 }
 
 void SimRenderMetadata_RecordWord06(uint16_t value) {
-  if (!g_sim_metadata.record_active) return;
-  g_sim_metadata.sources[g_sim_metadata.current_source].record_word06 = value;
+  if (!s_sim_metadata.record_active) return;
+  s_sim_metadata.sources[s_sim_metadata.current_source].record_word06 = value;
 }
 
 
 void SimRenderMetadata_RecordFlightPlan(SimEruptionFlightPlan plan) {
-  if (!g_sim_metadata.record_active) return;
-  g_sim_metadata.sources[g_sim_metadata.current_source].flight = plan;
+  if (!s_sim_metadata.record_active) return;
+  s_sim_metadata.sources[s_sim_metadata.current_source].flight = plan;
 }
 
 void SimRenderMetadata_RecordClippedPart(uint8_t reason) {
-  if (!g_sim_metadata.record_active) return;
+  if (!s_sim_metadata.record_active) return;
   SimSourceRecord *source =
-      &g_sim_metadata.sources[g_sim_metadata.current_source];
+      &s_sim_metadata.sources[s_sim_metadata.current_source];
   source->clip_reason |= reason;
   if (source->clipped_parts < 0xFFFF) source->clipped_parts++;
 }
@@ -1682,26 +1682,26 @@ static SimRenderObject *RecordObjectForPart(uint16_t slot,
                                             uint16_t attributes,
                                             bool oam_backed) {
   SimSourceRecord *source =
-      &g_sim_metadata.sources[g_sim_metadata.current_source];
+      &s_sim_metadata.sources[s_sim_metadata.current_source];
   uint8_t priority = (uint8_t)((attributes >> 12) & 3);
   uint8_t color_math_eligible = (attributes & 0x0800) != 0;
-  SimRenderObject *prior = g_sim_metadata.object_count
-      ? &g_sim_metadata.objects[g_sim_metadata.object_count - 1] : NULL;
-  if (prior && prior->source_index == g_sim_metadata.current_source &&
+  SimRenderObject *prior = s_sim_metadata.object_count
+      ? &s_sim_metadata.objects[s_sim_metadata.object_count - 1] : NULL;
+  if (prior && prior->source_index == s_sim_metadata.current_source &&
       prior->priority == priority &&
       prior->color_math_eligible == color_math_eligible &&
       (!oam_backed || prior->oam_first + prior->oam_count == slot))
     return prior;
 
-  if (g_sim_metadata.object_count >= kSimMaxRenderObjects) {
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overflow;
+  if (s_sim_metadata.object_count >= kSimMaxRenderObjects) {
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overflow;
     return NULL;
   }
   SimObjectClassification classification = Sim3D_ClassifyObject(
       source->tier, source->type, source->semantic_state,
       source->record_address, source->composition);
   SimRenderObject *object =
-      &g_sim_metadata.objects[g_sim_metadata.object_count++];
+      &s_sim_metadata.objects[s_sim_metadata.object_count++];
   *object = (SimRenderObject){
     .record_address = source->record_address,
     .composition = source->composition,
@@ -1710,9 +1710,9 @@ static SimRenderObject *RecordObjectForPart(uint16_t slot,
     .type = source->type,
     .semantic_state = source->semantic_state,
     .oam_first = slot,
-    .part_first = g_sim_metadata.part_count,
+    .part_first = s_sim_metadata.part_count,
     .priority = priority,
-    .source_index = g_sim_metadata.current_source,
+    .source_index = s_sim_metadata.current_source,
     .tier = source->tier,
     .color_math_eligible = color_math_eligible,
     .traits = classification.traits,
@@ -1731,17 +1731,17 @@ static SimRenderObject *RecordObjectForPart(uint16_t slot,
 static bool AppendExactPart(SimRenderObject *object,
                             const SrPpuObjPart *part, bool synthetic) {
   if (!object || !part || !part->size ||
-      object->part_first + object->part_count != g_sim_metadata.part_count) {
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_PartContract;
+      object->part_first + object->part_count != s_sim_metadata.part_count) {
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_PartContract;
     return false;
   }
-  if (g_sim_metadata.part_count >= kSimMaxResolvedParts) {
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overflow;
-    if (synthetic && g_sim_metadata.synthetic_part_overflow_count < UINT16_MAX)
-      g_sim_metadata.synthetic_part_overflow_count++;
+  if (s_sim_metadata.part_count >= kSimMaxResolvedParts) {
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overflow;
+    if (synthetic && s_sim_metadata.synthetic_part_overflow_count < UINT16_MAX)
+      s_sim_metadata.synthetic_part_overflow_count++;
     return false;
   }
-  g_sim_metadata.parts[g_sim_metadata.part_count++] = *part;
+  s_sim_metadata.parts[s_sim_metadata.part_count++] = *part;
   object->part_count++;
   if (synthetic) object->synthetic_part_count++;
   return true;
@@ -1749,37 +1749,37 @@ static bool AppendExactPart(SimRenderObject *object,
 
 void SimRenderMetadata_RecordPart(uint16_t oam_cursor,
                                   uint16_t attributes) {
-  if (!g_sim_metadata.record_active) {
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
+  if (!s_sim_metadata.record_active) {
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
     return;
   }
   if ((oam_cursor & 3) || oam_cursor >= kActRaiserOamLowTableBytes) {
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
     return;
   }
 
   uint16_t slot = (uint16_t)(oam_cursor / 4);
   SimSourceRecord *source =
-      &g_sim_metadata.sources[g_sim_metadata.current_source];
+      &s_sim_metadata.sources[s_sim_metadata.current_source];
   uint8_t obj_palette = (uint8_t)((attributes >> 9) & 7);
-  if (g_sim_metadata.claimed_oam[slot])
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overlap;
+  if (s_sim_metadata.claimed_oam[slot])
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overlap;
   else {
-    g_sim_metadata.claimed_oam[slot] = 1;
-    g_sim_metadata.claimed_oam_count++;
+    s_sim_metadata.claimed_oam[slot] = 1;
+    s_sim_metadata.claimed_oam_count++;
   }
-  g_sim_metadata.emitted_oam_count++;
+  s_sim_metadata.emitted_oam_count++;
   source->oam_count++;
   source->obj_palette_mask |= (uint8_t)(1u << obj_palette);
 
   if (source->tier == kSimRecordTier_World) {
-    if (!g_sim_metadata.world_started) {
-      g_sim_metadata.world_started = true;
-      g_sim_metadata.world_oam_first = (uint8_t)slot;
+    if (!s_sim_metadata.world_started) {
+      s_sim_metadata.world_started = true;
+      s_sim_metadata.world_oam_first = (uint8_t)slot;
     }
-    g_sim_metadata.world_emitted_count++;
-  } else if (g_sim_metadata.world_started) {
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_WorldSuffix;
+    s_sim_metadata.world_emitted_count++;
+  } else if (s_sim_metadata.world_started) {
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_WorldSuffix;
   }
 
   SimRenderObject *object = RecordObjectForPart(slot, attributes, true);
@@ -1787,16 +1787,16 @@ void SimRenderMetadata_RecordPart(uint16_t oam_cursor,
 }
 
 void SimRenderMetadata_RecordExactOamPart(const SrPpuObjPart *part) {
-  if (!g_sim_metadata.record_active || !g_sim_metadata.object_count || !part) {
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_PartContract;
+  if (!s_sim_metadata.record_active || !s_sim_metadata.object_count || !part) {
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_PartContract;
     return;
   }
   SimRenderObject *object =
-      &g_sim_metadata.objects[g_sim_metadata.object_count - 1];
-  if (object->source_index != g_sim_metadata.current_source ||
+      &s_sim_metadata.objects[s_sim_metadata.object_count - 1];
+  if (object->source_index != s_sim_metadata.current_source ||
       object->priority != (uint8_t)((part->tile_attr >> 12) & 3) ||
       object->color_math_eligible != ((part->tile_attr & 0x0800) != 0)) {
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_PartContract;
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_PartContract;
     return;
   }
   AppendExactPart(object, part, false);
@@ -1804,19 +1804,19 @@ void SimRenderMetadata_RecordExactOamPart(const SrPpuObjPart *part) {
 
 void SimRenderMetadata_RecordSyntheticPart(uint16_t oam_cursor,
                                            const SrPpuObjPart *part) {
-  if (!g_sim_metadata.record_active || !part || !part->size ||
+  if (!s_sim_metadata.record_active || !part || !part->size ||
       (oam_cursor & 3) || oam_cursor > kActRaiserOamLowTableBytes) {
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_PartContract;
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_PartContract;
     return;
   }
-  if (g_sim_metadata.part_count >= kSimMaxResolvedParts) {
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overflow;
-    if (g_sim_metadata.synthetic_part_overflow_count < UINT16_MAX)
-      g_sim_metadata.synthetic_part_overflow_count++;
+  if (s_sim_metadata.part_count >= kSimMaxResolvedParts) {
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_Overflow;
+    if (s_sim_metadata.synthetic_part_overflow_count < UINT16_MAX)
+      s_sim_metadata.synthetic_part_overflow_count++;
     return;
   }
   SimSourceRecord *source =
-      &g_sim_metadata.sources[g_sim_metadata.current_source];
+      &s_sim_metadata.sources[s_sim_metadata.current_source];
   SimRenderObject *object = RecordObjectForPart(
       (uint16_t)(oam_cursor / 4), part->tile_attr, false);
   if (!object) return;
@@ -1824,49 +1824,49 @@ void SimRenderMetadata_RecordSyntheticPart(uint16_t oam_cursor,
   uint8_t obj_palette = (uint8_t)((part->tile_attr >> 9) & 7);
   source->obj_palette_mask |= (uint8_t)(1u << obj_palette);
   if (source->synthetic_parts < UINT16_MAX) source->synthetic_parts++;
-  if (g_sim_metadata.synthetic_part_count < UINT16_MAX)
-    g_sim_metadata.synthetic_part_count++;
+  if (s_sim_metadata.synthetic_part_count < UINT16_MAX)
+    s_sim_metadata.synthetic_part_count++;
 }
 
 void SimRenderMetadata_EndRecord(uint16_t oam_cursor_after) {
-  if (!g_sim_metadata.record_active) {
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
+  if (!s_sim_metadata.record_active) {
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
     return;
   }
   SimSourceRecord *source =
-      &g_sim_metadata.sources[g_sim_metadata.current_source];
+      &s_sim_metadata.sources[s_sim_metadata.current_source];
   uint16_t expected =
       (uint16_t)((source->oam_first + source->oam_count) * 4);
   if ((oam_cursor_after & 3) ||
       oam_cursor_after > kActRaiserOamLowTableBytes ||
       oam_cursor_after != expected)
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
 
   source->fragment_count =
-      (uint16_t)(g_sim_metadata.object_count - source->fragment_first);
-  if (!source->oam_count) g_sim_metadata.zero_oam_source_count++;
-  g_sim_metadata.last_record_address = source->record_address;
-  g_sim_metadata.last_oam_cursor = oam_cursor_after;
-  g_sim_metadata.record_active = false;
+      (uint16_t)(s_sim_metadata.object_count - source->fragment_first);
+  if (!source->oam_count) s_sim_metadata.zero_oam_source_count++;
+  s_sim_metadata.last_record_address = source->record_address;
+  s_sim_metadata.last_oam_cursor = oam_cursor_after;
+  s_sim_metadata.record_active = false;
 }
 
 bool SimRenderMetadata_CopyAtlasInput(SimAtlasBuildInput *out) {
-  if (!out || !g_sim_metadata.active || g_sim_metadata.record_active)
+  if (!out || !s_sim_metadata.active || s_sim_metadata.record_active)
     return false;
   memset(out, 0, sizeof(*out));
-  out->build_serial = g_sim_metadata.build_serial;
-  out->object_count = g_sim_metadata.object_count;
-  out->part_count = g_sim_metadata.part_count;
-  memcpy(out->objects, g_sim_metadata.objects,
+  out->build_serial = s_sim_metadata.build_serial;
+  out->object_count = s_sim_metadata.object_count;
+  out->part_count = s_sim_metadata.part_count;
+  memcpy(out->objects, s_sim_metadata.objects,
          sizeof(SimRenderObject) * out->object_count);
-  memcpy(out->parts, g_sim_metadata.parts,
+  memcpy(out->parts, s_sim_metadata.parts,
          sizeof(SrPpuObjPart) * out->part_count);
   return true;
 }
 
 bool SimRenderMetadata_AtlasReady(void) {
-  return g_sim_metadata.active && !g_sim_metadata.record_active &&
-      g_sim_metadata.atlas_valid && !g_sim_metadata.integrity_flags;
+  return s_sim_metadata.active && !s_sim_metadata.record_active &&
+      s_sim_metadata.atlas_valid && !s_sim_metadata.integrity_flags;
 }
 
 bool SimRenderMetadata_CommitAtlas(
@@ -1875,37 +1875,37 @@ bool SimRenderMetadata_CommitAtlas(
     uint16_t atlas_width, uint16_t atlas_height,
     uint16_t atlas_used_width, uint16_t atlas_used_height,
     uint32_t integrity_flags) {
-  if (!g_sim_metadata.active || g_sim_metadata.record_active ||
-      build_serial != g_sim_metadata.build_serial ||
-      object_count != g_sim_metadata.object_count ||
+  if (!s_sim_metadata.active || s_sim_metadata.record_active ||
+      build_serial != s_sim_metadata.build_serial ||
+      object_count != s_sim_metadata.object_count ||
       (object_count && !objects))
     return false;
 
   const uint32_t atlas_failures =
       kSimMetadataIntegrity_AtlasOverflow |
       kSimMetadataIntegrity_AtlasRasterFailure;
-  g_sim_metadata.integrity_flags |= integrity_flags & atlas_failures;
+  s_sim_metadata.integrity_flags |= integrity_flags & atlas_failures;
   /* SimRenderAtlas_Build owns packing, descriptor bounds and overlap. Commit
    * only closes the matching build transaction and publishes its result; a
    * second O(n^2) verification here used to re-prove the builder's output. */
   bool dimensions_valid = atlas_valid && atlas_width && atlas_height &&
       atlas_used_width <= atlas_width && atlas_used_height <= atlas_height;
   if (!dimensions_valid &&
-      !(g_sim_metadata.integrity_flags & atlas_failures))
-    g_sim_metadata.integrity_flags |= kSimMetadataIntegrity_AtlasRasterFailure;
+      !(s_sim_metadata.integrity_flags & atlas_failures))
+    s_sim_metadata.integrity_flags |= kSimMetadataIntegrity_AtlasRasterFailure;
 
-  g_sim_metadata.atlas_valid = dimensions_valid &&
-      !(g_sim_metadata.integrity_flags & atlas_failures);
-  g_sim_metadata.atlas_width = g_sim_metadata.atlas_valid ? atlas_width : 0;
-  g_sim_metadata.atlas_height = g_sim_metadata.atlas_valid ? atlas_height : 0;
-  g_sim_metadata.atlas_used_width =
-      g_sim_metadata.atlas_valid ? atlas_used_width : 0;
-  g_sim_metadata.atlas_used_height =
-      g_sim_metadata.atlas_valid ? atlas_used_height : 0;
+  s_sim_metadata.atlas_valid = dimensions_valid &&
+      !(s_sim_metadata.integrity_flags & atlas_failures);
+  s_sim_metadata.atlas_width = s_sim_metadata.atlas_valid ? atlas_width : 0;
+  s_sim_metadata.atlas_height = s_sim_metadata.atlas_valid ? atlas_height : 0;
+  s_sim_metadata.atlas_used_width =
+      s_sim_metadata.atlas_valid ? atlas_used_width : 0;
+  s_sim_metadata.atlas_used_height =
+      s_sim_metadata.atlas_valid ? atlas_used_height : 0;
 
   for (uint16_t i = 0; i < object_count; i++) {
-    SimRenderObject *dst = &g_sim_metadata.objects[i];
-    if (g_sim_metadata.atlas_valid) {
+    SimRenderObject *dst = &s_sim_metadata.objects[i];
+    if (s_sim_metadata.atlas_valid) {
       dst->foot_x = objects[i].foot_x;
       dst->foot_y = objects[i].foot_y;
       dst->local_x0 = objects[i].local_x0;
@@ -1937,10 +1937,10 @@ typedef struct SimHeightSlew {
   bool active;
 } SimHeightSlew;
 
-static SimHeightSlew g_height_slew[kActRaiserSimWorldRecordCount];
+static SimHeightSlew s_height_slew[kActRaiserSimWorldRecordCount];
 
 void SimRenderMetadata_ResetHeightSlew(void) {
-  memset(g_height_slew, 0, sizeof(g_height_slew));
+  memset(s_height_slew, 0, sizeof(s_height_slew));
 }
 
 /* Read the arc the effect pass already advanced this build and apply it to
@@ -2014,7 +2014,7 @@ static void ApplyProjectileArc(SimFrameData *dst) {
       continue;
     int index = RecordIndex(object->record_address, true);
     if (index < 0) continue;
-    const SimProjectileArc *arc = &g_projectile_arc[index];
+    const SimProjectileArc *arc = &s_projectile_arc[index];
     /* CaptureEffectInstances stepped this arc earlier in the same build. A
      * stale serial means it did not -- the record was not classified as a
      * fireball this build, or effect capture bailed on invalid metadata -- and
@@ -2039,7 +2039,7 @@ static void ApplyHeightSlew(SimFrameData *dst) {
    * enable starts every actor on its classified plane instead of replaying a
    * stale ramp. */
   if (!SimFrameIsProjected(dst)) {
-    memset(g_height_slew, 0, sizeof(g_height_slew));
+    memset(s_height_slew, 0, sizeof(s_height_slew));
     return;
   }
 
@@ -2048,7 +2048,7 @@ static void ApplyHeightSlew(SimFrameData *dst) {
     if (object->tier != kSimRecordTier_World) continue;
     int index = RecordIndex(object->record_address, true);
     if (index < 0) continue;
-    SimHeightSlew *slew = &g_height_slew[index];
+    SimHeightSlew *slew = &s_height_slew[index];
 
     /* Every fragment of one record shares its source's classification, so the
      * record steps once per build and later fragments only read the result. */
@@ -2280,16 +2280,16 @@ void SimRenderMetadata_CaptureFrame(
       if (ReadMirror16(wram, address) != 0)
         dst->world_record_occupancy++;
     }
-    dst->build_serial = g_sim_metadata.build_serial;
-    dst->integrity_flags = g_sim_metadata.integrity_flags;
-    dst->atlas_valid = g_sim_metadata.atlas_valid;
-    dst->atlas_width = g_sim_metadata.atlas_width;
-    dst->atlas_height = g_sim_metadata.atlas_height;
-    dst->atlas_used_width = g_sim_metadata.atlas_used_width;
-    dst->atlas_used_height = g_sim_metadata.atlas_used_height;
-    if (g_sim_metadata.record_active)
+    dst->build_serial = s_sim_metadata.build_serial;
+    dst->integrity_flags = s_sim_metadata.integrity_flags;
+    dst->atlas_valid = s_sim_metadata.atlas_valid;
+    dst->atlas_width = s_sim_metadata.atlas_width;
+    dst->atlas_height = s_sim_metadata.atlas_height;
+    dst->atlas_used_width = s_sim_metadata.atlas_used_width;
+    dst->atlas_used_height = s_sim_metadata.atlas_used_height;
+    if (s_sim_metadata.record_active)
       dst->integrity_flags |= kSimMetadataIntegrity_CursorMismatch;
-    dst->metadata_valid = g_sim_metadata.active && !dst->integrity_flags;
+    dst->metadata_valid = s_sim_metadata.active && !dst->integrity_flags;
     dst->view_reason = dst->master_enabled
         ? kSimViewReason_Enabled : kSimViewReason_Disabled;
 #if AR_SIM3D_PICKER_TOPDOWN
@@ -2331,35 +2331,35 @@ void SimRenderMetadata_CaptureFrame(
    * them on the way out AND on a direct town change, so a later eruption
    * cannot inherit a crater from a different map or resume a record slot's
    * flight as though no time had passed. */
-  if (!town || dst->town != g_arc_town) ResetProjectileArcs();
-  g_arc_town = dst->town;
+  if (!town || dst->town != s_arc_town) ResetProjectileArcs();
+  s_arc_town = dst->town;
 
   /* The semantic record producer describes simulation-town records only.
    * Never leak its last town build into a $09 frame: navigation OAM has a
    * separate Palace/UI contract and will be captured explicitly in Step 4. */
   if (town) {
-    dst->emitted_oam_count = g_sim_metadata.emitted_oam_count;
-    dst->claimed_oam_count = g_sim_metadata.claimed_oam_count;
-    dst->synthetic_part_count = g_sim_metadata.synthetic_part_count;
+    dst->emitted_oam_count = s_sim_metadata.emitted_oam_count;
+    dst->claimed_oam_count = s_sim_metadata.claimed_oam_count;
+    dst->synthetic_part_count = s_sim_metadata.synthetic_part_count;
     dst->synthetic_part_overflow_count =
-        g_sim_metadata.synthetic_part_overflow_count;
-    dst->source_count = g_sim_metadata.source_count;
-    dst->zero_oam_source_count = g_sim_metadata.zero_oam_source_count;
-    dst->object_count = g_sim_metadata.object_count;
-    if (g_sim_metadata.world_started) {
-      uint16_t world_end = g_sim_metadata.last_oam_cursor / 4;
-      dst->world_oam_first = g_sim_metadata.world_oam_first;
+        s_sim_metadata.synthetic_part_overflow_count;
+    dst->source_count = s_sim_metadata.source_count;
+    dst->zero_oam_source_count = s_sim_metadata.zero_oam_source_count;
+    dst->object_count = s_sim_metadata.object_count;
+    if (s_sim_metadata.world_started) {
+      uint16_t world_end = s_sim_metadata.last_oam_cursor / 4;
+      dst->world_oam_first = s_sim_metadata.world_oam_first;
       if (world_end >= dst->world_oam_first)
         dst->world_oam_count =
             (uint8_t)(world_end - dst->world_oam_first);
-      if (dst->world_oam_count != g_sim_metadata.world_emitted_count) {
+      if (dst->world_oam_count != s_sim_metadata.world_emitted_count) {
         dst->integrity_flags |= kSimMetadataIntegrity_WorldSuffix;
         dst->metadata_valid = false;
       }
     }
-    memcpy(dst->sources, g_sim_metadata.sources,
+    memcpy(dst->sources, s_sim_metadata.sources,
            sizeof(SimSourceRecord) * dst->source_count);
-    memcpy(dst->objects, g_sim_metadata.objects,
+    memcpy(dst->objects, s_sim_metadata.objects,
            sizeof(SimRenderObject) * dst->object_count);
     CaptureEffectInstances(dst);
   }

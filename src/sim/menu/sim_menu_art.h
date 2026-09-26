@@ -1,5 +1,10 @@
 #ifndef AR_SIM_MENU_ART_H
 #define AR_SIM_MENU_ART_H
+/* SimMenuArt: captures the SimMenuFrame the menu presenter draws: the menu
+ * model and help page, localized labels, and icon art the runner decodes from
+ * the scene's OBJ VRAM and CGRAM using the ROM's own composition tables.
+ * Phase: capture (reads the runner).
+ * Tests: tests/sim_menu_art_test.c */
 
 #include "sim/menu/sim_menu_model.h"
 #include "sim/menu/sim_menu_help.h"

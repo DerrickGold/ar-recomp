@@ -179,10 +179,10 @@ static struct {
 /* Scene rebuild scratch. Every classified source rectangle, including static
  * terrain, is marked before a replacement tile is selected, so authentic art
  * is never considered as the town's general ground. */
-static uint8_t g_object_mask[kCanvasPixelCount];
+static uint8_t s_object_mask[kCanvasPixelCount];
 /* Precomputed alpha ownership for the cutout atlas. Mountain silhouettes are
  * semantic; authored models retain their complete authentic source blocks. */
-static uint8_t g_atlas_alpha[kCanvasPixelCount];
+static uint8_t s_atlas_alpha[kCanvasPixelCount];
 /* A quiet ground-only chunk needs only a bulk equality check. Classification
  * marks chunks that require object replacement or cutout-alpha work once per
  * scene revision, keeping the pixel refresh's common path branch-light. */
@@ -190,13 +190,13 @@ static RefreshChunkPlan
     g_refresh_chunks[kSimTownCanvasPixels][kRefreshChunksPerRow];
 /* Reset clears publish state when leaving a town, but a later town must never
  * reuse a serial whose GPU texture may still exist. */
-static uint32_t g_next_serial;
-static SimBackgroundVoxelBuildStats g_build_stats;
+static uint32_t s_next_serial;
+static SimBackgroundVoxelBuildStats s_build_stats;
 
 static uint32_t NextSerial(void) {
-  g_next_serial++;
-  if (!g_next_serial) g_next_serial = 1;
-  return g_next_serial;
+  s_next_serial++;
+  if (!s_next_serial) s_next_serial = 1;
+  return s_next_serial;
 }
 
 static size_t CellIndex(int x, int y) {
@@ -887,7 +887,7 @@ static bool CellIsMasked(int cell_x, int cell_y) {
   int y0 = cell_y * kSimBackgroundCellPixels;
   for (int y = 0; y < kSimBackgroundCellPixels; y++)
     for (int x = 0; x < kSimBackgroundCellPixels; x++)
-      if (g_object_mask[(size_t)(y0 + y) * kSimTownCanvasPixels +
+      if (s_object_mask[(size_t)(y0 + y) * kSimTownCanvasPixels +
                         (size_t)(x0 + x)])
         return true;
   return false;
@@ -961,7 +961,7 @@ static void BuildCleanMountainSourcePlan(void) {
     const int y0 = cell_y * kSimBackgroundCellPixels;
     for (int y = 0; y < kSimBackgroundCellPixels; y++)
       for (int x = 0; x < kSimBackgroundCellPixels; x++)
-        g_atlas_alpha[(size_t)(y0 + y) * kSimTownCanvasPixels +
+        s_atlas_alpha[(size_t)(y0 + y) * kSimTownCanvasPixels +
                       (size_t)(x0 + x)] =
             kAtlasAlpha_CleanMountainSource;
   }
@@ -973,12 +973,12 @@ static void BuildRefreshChunkPlan(void) {
       const int x0 = chunk * kRefreshChunkPixels;
       const size_t at = (size_t)y * kSimTownCanvasPixels + (size_t)x0;
       RefreshChunkPlan plan = {
-        .replacement = g_object_mask[at], .alpha = g_atlas_alpha[at],
+        .replacement = s_object_mask[at], .alpha = s_atlas_alpha[at],
       };
       for (int x = 1; x < kRefreshChunkPixels; x++) {
         plan.mixed_replacement |=
-            g_object_mask[at + (size_t)x] != plan.replacement;
-        plan.mixed_alpha |= g_atlas_alpha[at + (size_t)x] != plan.alpha;
+            s_object_mask[at + (size_t)x] != plan.replacement;
+        plan.mixed_alpha |= s_atlas_alpha[at + (size_t)x] != plan.alpha;
       }
       g_refresh_chunks[y][chunk] = plan;
     }
@@ -1130,8 +1130,8 @@ static void BuildStructureHeights(const SimBackgroundVoxelScene *scene) {
 
 static void BuildEnhancedReplacementPlan(
     const uint8_t *wram, const SimBackgroundVoxelScene *scene) {
-  memset(g_object_mask, 0, sizeof(g_object_mask));
-  memset(g_atlas_alpha, 0, sizeof(g_atlas_alpha));
+  memset(s_object_mask, 0, sizeof(s_object_mask));
+  memset(s_atlas_alpha, 0, sizeof(s_atlas_alpha));
   /* Mountain cells keep the current town's authored colours but take their
    * alpha from a palette-independent semantic silhouette. This preserves
    * Northwall's white snow faces without lifting the opaque snow/grass pixels
@@ -1153,12 +1153,12 @@ static void BuildEnhancedReplacementPlan(
           bool opaque = false;
           if (!SimBackgroundMountainSilhouette_Lookup(
                   tile, x, y, &opaque)) {
-            g_atlas_alpha[at] = kAtlasAlpha_Source;
+            s_atlas_alpha[at] = kAtlasAlpha_Source;
           } else {
-            g_atlas_alpha[at] = opaque
+            s_atlas_alpha[at] = opaque
                 ? kAtlasAlpha_Opaque : kAtlasAlpha_Transparent;
           }
-          g_object_mask[at] = kEnhancedReplacement_Ground;
+          s_object_mask[at] = kEnhancedReplacement_Ground;
         }
     }
   for (uint16_t i = 0; i < scene->object_count; i++) {
@@ -1180,10 +1180,10 @@ static void BuildEnhancedReplacementPlan(
         }
         size_t at = (size_t)(y0 + y) * kSimTownCanvasPixels +
             (size_t)(x0 + x);
-        g_object_mask[at] = (uint8_t)replacement_kind;
+        s_object_mask[at] = (uint8_t)replacement_kind;
         /* Retained for diagnostic/catalog consumers. The enhanced renderer
          * uses its authored model and never samples this authentic cutout. */
-        g_atlas_alpha[at] = kAtlasAlpha_Opaque;
+        s_atlas_alpha[at] = kAtlasAlpha_Opaque;
       }
   }
 
@@ -1324,7 +1324,7 @@ static void RefreshEnhancedPixels(
     SimBackgroundRowDispatch dispatch, void *context) {
   RefreshRowsWork work = {
     .pixels = pixels, .source_opaque = source_opaque,
-    .object_mask = g_object_mask, .atlas_alpha = g_atlas_alpha,
+    .object_mask = s_object_mask, .atlas_alpha = s_atlas_alpha,
     .plans = g_refresh_chunks,
     .ground = g_background.ground, .atlas = g_background.atlas,
     .ground_first = g_background.ground_dirty_x0,
@@ -1373,9 +1373,9 @@ static void RefreshEnhancedPixels(
   }
   RefreshCleanMountainSources(wram, &atlas_changed_pixels);
 
-  g_build_stats.pixel_refreshes++;
-  g_build_stats.ground_pixels_changed += ground_changed_pixels;
-  g_build_stats.atlas_pixels_changed += atlas_changed_pixels;
+  s_build_stats.pixel_refreshes++;
+  s_build_stats.ground_pixels_changed += ground_changed_pixels;
+  s_build_stats.atlas_pixels_changed += atlas_changed_pixels;
   if (ground_changed_pixels) g_background.ground_serial = NextSerial();
   if (atlas_changed_pixels) g_background.atlas_serial = NextSerial();
 }
@@ -1539,8 +1539,8 @@ static void SaveSceneInputs(uint8_t town, const uint8_t *wram,
 
 void SimBackgroundVoxels_Reset(void) {
   memset(&g_background, 0, sizeof(g_background));
-  memset(g_object_mask, 0, sizeof(g_object_mask));
-  memset(g_atlas_alpha, 0, sizeof(g_atlas_alpha));
+  memset(s_object_mask, 0, sizeof(s_object_mask));
+  memset(s_atlas_alpha, 0, sizeof(s_atlas_alpha));
   memset(g_refresh_chunks, 0, sizeof(g_refresh_chunks));
 }
 
@@ -1562,7 +1562,7 @@ void SimBackgroundVoxels_BuildWithRows(uint8_t town, const uint8_t *wram,
   if (!town || town > kSimBackgroundTownCount || !wram || !canvas_pixels ||
       !canvas_serial || !canvas_layout_serial)
     return;
-  g_build_stats.build_calls++;
+  s_build_stats.build_calls++;
   bool scene_changed = SceneInputsChanged(
       town, wram, canvas_layout_serial, wind_stops_all);
   bool pixels_changed = g_background.canvas_serial != canvas_serial;
@@ -1579,7 +1579,7 @@ void SimBackgroundVoxels_BuildWithRows(uint8_t town, const uint8_t *wram,
     BuildStructureHeights(&g_background.scene);
     SaveSceneInputs(town, wram, canvas_layout_serial, wind_stops_all);
     g_background.scene_serial = NextSerial();
-    g_build_stats.scene_rebuilds++;
+    s_build_stats.scene_rebuilds++;
   }
   uint32_t prior_ground_serial = g_background.ground_serial;
   uint32_t prior_atlas_serial = g_background.atlas_serial;
@@ -1668,11 +1668,11 @@ bool SimBackgroundVoxels_TakeAtlasDirtyRect(
 }
 
 SimBackgroundVoxelBuildStats SimBackgroundVoxels_BuildStats(void) {
-  return g_build_stats;
+  return s_build_stats;
 }
 
 void SimBackgroundVoxels_ResetBuildStats(void) {
-  memset(&g_build_stats, 0, sizeof(g_build_stats));
+  memset(&s_build_stats, 0, sizeof(s_build_stats));
 }
 
 bool SimBackgroundVoxels_CellIsMountain(int cell_x, int cell_y) {

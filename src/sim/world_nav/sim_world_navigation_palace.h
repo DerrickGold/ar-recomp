@@ -1,5 +1,10 @@
 #ifndef AR_SIM_WORLD_NAVIGATION_PALACE_H
 #define AR_SIM_WORLD_NAVIGATION_PALACE_H
+/* SimWorldNavigationPalace: separates the Sky Palace's native foreground from
+ * its sky using the PPU's BG1-winner mask so the enhanced sky can show
+ * through, and reports PPU states where that separation is unsafe.
+ * Phase: pure.
+ * Tests: tests/sim_world_navigation_palace_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

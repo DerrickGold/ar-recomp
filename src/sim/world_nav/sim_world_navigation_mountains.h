@@ -1,5 +1,11 @@
 #ifndef AR_SIM_WORLD_NAVIGATION_MOUNTAINS_H
 #define AR_SIM_WORLD_NAVIGATION_MOUNTAINS_H
+/* SimWorldNavigationMountains: builds the world view's mountain faces from
+ * every town's native mountain stamps (plus continuations over confirmed
+ * exterior rock) with one shared atlas, and replays Aitos' lava palette pulse
+ * from the game clock.
+ * Phase: pure (presentation-owned retained scene).
+ * Tests: tests/sim_world_navigation_materials_test.c */
 
 #include <stddef.h>
 #include "sim/mountains/sim_background_mountain_mesh.h"

@@ -1,5 +1,10 @@
 #ifndef AR_SIM_RENDER_ATLAS_H
 #define AR_SIM_RENDER_ATLAS_H
+/* SimRenderAtlas: packs the SIM town's objects into one 512 x 512 atlas each
+ * frame and publishes where each object landed. A failed build flags the
+ * frame, which then falls back to the authentic image.
+ * Phase: capture (reads the runner).
+ * Tests: tests/ppu_render_pipeline_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

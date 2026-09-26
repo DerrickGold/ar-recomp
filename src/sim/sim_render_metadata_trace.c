@@ -7,8 +7,8 @@
 
 #include "deterministic_hash.h"
 
-static FILE *g_sim_d1_trace;
-static bool g_sim_d1_trace_env_checked;
+static FILE *s_sim_d1_trace;
+static bool s_sim_d1_trace_env_checked;
 
 static uint64_t FrameHash(const uint8_t *rgba, int width, int height,
                           int pitch) {
@@ -22,12 +22,12 @@ static uint64_t FrameHash(const uint8_t *rgba, int width, int height,
 }
 
 static void TraceInitFromEnvironment(void) {
-  if (g_sim_d1_trace_env_checked) return;
-  g_sim_d1_trace_env_checked = true;
+  if (s_sim_d1_trace_env_checked) return;
+  s_sim_d1_trace_env_checked = true;
   const char *path = getenv("AR_SIM3D_D1_TRACE");
   if (!path || !path[0]) return;
-  g_sim_d1_trace = sr_fopen(path, "w");
-  if (!g_sim_d1_trace) {
+  s_sim_d1_trace = sr_fopen(path, "w");
+  if (!s_sim_d1_trace) {
     fprintf(stderr, "[sim3d-d1] cannot open %s\n", path);
     return;
   }
@@ -41,7 +41,7 @@ static void TraceInitFromEnvironment(void) {
  * later in the same frame and finds it already done. */
 bool SimRenderMetadata_TraceArmed(void) {
   TraceInitFromEnvironment();
-  return g_sim_d1_trace != NULL;
+  return s_sim_d1_trace != NULL;
 }
 
 void SimRenderMetadata_TraceFrame(uint32_t host_frame,
@@ -49,12 +49,12 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
                                   const uint8_t *rgba, int width, int height,
                                   int pitch) {
   TraceInitFromEnvironment();
-  if (!g_sim_d1_trace || !frame ||
+  if (!s_sim_d1_trace || !frame ||
       (frame->view == kSimView_None &&
        frame->view_reason == kSimViewReason_OutsideScene)) return;
   const SimPresentationDecision decision = Sim3D_PresentationDecision(frame);
 
-  fprintf(g_sim_d1_trace,
+  fprintf(s_sim_d1_trace,
           "{\"host_frame\":%u,\"game_frame\":%u,\"town\":%u,"
           "\"view\":\"%s\",\"picker_flag\":%u,"
           "\"presentation_view\":\"%s\",\"presentation_reason\":\"%s\","
@@ -223,8 +223,8 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
           (unsigned long long)FrameHash(rgba, width, height, pitch));
   for (unsigned i = 0; i < frame->source_count; i++) {
     const SimSourceRecord *source = &frame->sources[i];
-    if (i) fputc(',', g_sim_d1_trace);
-    fprintf(g_sim_d1_trace,
+    if (i) fputc(',', s_sim_d1_trace);
+    fprintf(s_sim_d1_trace,
             "{\"record\":%u,\"tier\":%u,\"composition\":%u,"
             "\"type\":%u,\"state\":%u,\"word06\":%u,"
             "\"x\":%u,\"y\":%u,"
@@ -242,11 +242,11 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
             (unsigned)source->fragment_first,
             (unsigned)source->fragment_count);
   }
-  fputs("],\"objects\":[", g_sim_d1_trace);
+  fputs("],\"objects\":[", s_sim_d1_trace);
   for (unsigned i = 0; i < frame->object_count; i++) {
     const SimRenderObject *object = &frame->objects[i];
-    if (i) fputc(',', g_sim_d1_trace);
-    fprintf(g_sim_d1_trace,
+    if (i) fputc(',', s_sim_d1_trace);
+    fprintf(s_sim_d1_trace,
             "{\"record\":%u,\"source_index\":%u,\"tier\":%u,"
             "\"composition\":%u,\"priority\":%u,\"traits\":%u,"
             "\"height_class\":%u,\"height_class_name\":\"%s\","
@@ -277,11 +277,11 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
             (unsigned)object->atlas_x, (unsigned)object->atlas_y,
             (unsigned)object->atlas_w, (unsigned)object->atlas_h);
   }
-  fputs("],\"effects\":[", g_sim_d1_trace);
+  fputs("],\"effects\":[", s_sim_d1_trace);
   for (unsigned i = 0; i < frame->effect_count; i++) {
     const SimEffectInstance *effect = &frame->effects[i];
-    if (i) fputc(',', g_sim_d1_trace);
-    fprintf(g_sim_d1_trace,
+    if (i) fputc(',', s_sim_d1_trace);
+    fprintf(s_sim_d1_trace,
             "{\"kind\":%u,\"kind_name\":\"%s\","
             "\"phase\":%u,\"phase_name\":\"%s\","
             "\"color_family\":%u,\"color_name\":\"%s\",\"flags\":%u,"
@@ -318,13 +318,13 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
                 (SimEffectGeometrySpace)effect->geometry.space));
     switch ((SimEffectGeometryKind)effect->geometry.kind) {
       case kSimEffectGeometry_Point:
-        fprintf(g_sim_d1_trace, ",\"point\":[%d,%d,%d]",
+        fprintf(s_sim_d1_trace, ",\"point\":[%d,%d,%d]",
                 effect->geometry.data.point.x,
                 effect->geometry.data.point.y,
                 effect->geometry.data.point.height);
         break;
       case kSimEffectGeometry_Segment:
-        fprintf(g_sim_d1_trace,
+        fprintf(s_sim_d1_trace,
                 ",\"segment\":[[%d,%d,%d],[%d,%d,%d]]",
                 effect->geometry.data.segment.start.x,
                 effect->geometry.data.segment.start.y,
@@ -334,7 +334,7 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
                 effect->geometry.data.segment.end.height);
         break;
       case kSimEffectGeometry_Area:
-        fprintf(g_sim_d1_trace, ",\"area\":[%d,%d,%d,%d,%d]",
+        fprintf(s_sim_d1_trace, ",\"area\":[%d,%d,%d,%d,%d]",
                 effect->geometry.data.area.x,
                 effect->geometry.data.area.y,
                 effect->geometry.data.area.width,
@@ -345,24 +345,24 @@ void SimRenderMetadata_TraceFrame(uint32_t host_frame,
       case kSimEffectGeometry_Scene:
         break;
     }
-    fputs("}", g_sim_d1_trace);
+    fputs("}", s_sim_d1_trace);
     /* The retained path, newest first, so a trail can be checked against the
      * record's own motion instead of against what the renderer drew. */
     if (effect->trail_count) {
-      fputs(",\"trail\":[", g_sim_d1_trace);
+      fputs(",\"trail\":[", s_sim_d1_trace);
       for (unsigned n = 0; n < effect->trail_count; n++)
-        fprintf(g_sim_d1_trace, "%s[%u,%u]", n ? "," : "",
+        fprintf(s_sim_d1_trace, "%s[%u,%u]", n ? "," : "",
                 (unsigned)effect->trail[n].world_x,
                 (unsigned)effect->trail[n].world_y);
-      fputc(']', g_sim_d1_trace);
+      fputc(']', s_sim_d1_trace);
     }
-    fputs("}", g_sim_d1_trace);
+    fputs("}", s_sim_d1_trace);
   }
-  fputs("]}\n", g_sim_d1_trace);
-  fflush(g_sim_d1_trace);
+  fputs("]}\n", s_sim_d1_trace);
+  fflush(s_sim_d1_trace);
 }
 
 void SimRenderMetadata_TraceClose(void) {
-  if (g_sim_d1_trace) fclose(g_sim_d1_trace);
-  g_sim_d1_trace = NULL;
+  if (s_sim_d1_trace) fclose(s_sim_d1_trace);
+  s_sim_d1_trace = NULL;
 }

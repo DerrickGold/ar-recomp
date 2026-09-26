@@ -1,5 +1,10 @@
 #ifndef AR_SIM_MENU_HELP_H
 #define AR_SIM_MENU_HELP_H
+/* SimMenuHelp: splits help text into native-sized read-only pages (22 x 6
+ * glyphs) tracked by UTF-8 source boundaries, which both text renderers share,
+ * and names the help entries for menu actions, categories and items.
+ * Phase: pure.
+ * Tests: tests/sim_menu_help_test.c */
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

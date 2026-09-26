@@ -1,5 +1,10 @@
 #ifndef AR_PRESENT_SIM3D_UNDERLAY_H
 #define AR_PRESENT_SIM3D_UNDERLAY_H
+/* PresentSim3DUnderlay: textures of the baked Mode-7 world map drawn under the
+ * town as distant ground, a sharp copy and an optional 4 x 4 box-blurred one,
+ * uploaded again only when the world map's serial changes.
+ * Phase: present.
+ * Tests: tests/present_sim3d_underlay_test.c */
 
 #include "render/render_device.h"
 

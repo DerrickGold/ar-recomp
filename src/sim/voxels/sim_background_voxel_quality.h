@@ -1,5 +1,10 @@
 #ifndef AR_SIM_BACKGROUND_VOXEL_QUALITY_H
 #define AR_SIM_BACKGROUND_VOXEL_QUALITY_H
+/* SimBackgroundVoxel quality settings: the player-facing enums for the voxel
+ * presets and their individual controls (detail, level of detail, shading,
+ * style, facing, render scale). settings.ini stores these values, so append
+ * new ones and never reorder.
+ * Phase: pure (types only). */
 
 typedef enum SimBackgroundVoxelPreset {
   kSimBackgroundVoxelPreset_Off = 0,

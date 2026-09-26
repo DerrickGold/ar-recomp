@@ -1,5 +1,11 @@
 #ifndef AR_SIM_BACKGROUND_VOXEL_RENDERER_H
 #define AR_SIM_BACKGROUND_VOXEL_RENDERER_H
+/* SimBackgroundVoxelRenderer: render-thread half of the voxel town. Uploads the
+ * ground and atlas textures, projects and depth-tests models and terrain,
+ * draws ground actors before the composite and mountain-standing actors after
+ * it, and adds the models to the shadow mask.
+ * Phase: present (render thread).
+ * Tests: tests/present_world_nav_gpu_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

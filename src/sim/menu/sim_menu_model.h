@@ -1,5 +1,11 @@
 #ifndef AR_SIM_MENU_MODEL_H
 #define AR_SIM_MENU_MODEL_H
+/* SimMenuModel: the SIM town menu's state machine (browse, inventory,
+ * describe, confirm, dialogue hand-offs) and its controller repeat and
+ * release rules. The game fiber owns and polls it; the presenter receives a
+ * value copy.
+ * Phase: pure.
+ * Tests: tests/sim_menu_model_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

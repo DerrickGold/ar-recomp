@@ -1,5 +1,9 @@
 #ifndef AR_SIM_BACKGROUND_VOXEL_PROPORTIONS_H
 #define AR_SIM_BACKGROUND_VOXEL_PROPORTIONS_H
+/* SimBackgroundVoxelProportions: per-kind footprint and height scale, the one
+ * table that balances model families against each other in the 3D town.
+ * Phase: pure.
+ * Tests: tests/sim_background_voxel_proportions_test.c */
 
 #include "sim/voxels/sim_background_voxel_types.h"
 

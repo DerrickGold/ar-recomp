@@ -1,5 +1,10 @@
 #ifndef AR_SIM_WORLD_NAVIGATION_CLIFFS_H
 #define AR_SIM_WORLD_NAVIGATION_CLIFFS_H
+/* SimWorldNavigationCliffs: sparse cliff geometry for the world overview. Only
+ * cells with an authored cliff material or a differing corner get their own
+ * cap in place of the shared grid, in absolute world heights.
+ * Phase: pure.
+ * Tests: tests/sim_world_navigation_terrain_test.c */
 
 #include <stddef.h>
 #include "sim/sim_world_map.h"

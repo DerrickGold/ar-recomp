@@ -155,7 +155,7 @@ typedef struct MountainSkirtProfile {
  * change, not on Reset. It is filled lazily from the present thread, which is
  * the only thread that renders; a second renderer thread would need this
  * built up front instead. */
-static MountainSkirtProfile g_skirt_profiles[256][2];
+static MountainSkirtProfile s_skirt_profiles[256][2];
 
 static bool MountainSilhouetteOpaque(uint8_t tile, int column, int row) {
   bool opaque = false;
@@ -219,7 +219,7 @@ static void MountainFitOutline(uint8_t tile, int edge, int step,
 
 static const MountainSkirtProfile *MountainSkirtProfileFor(uint8_t tile,
                                                            bool right_edge) {
-  MountainSkirtProfile *profile = &g_skirt_profiles[tile][right_edge ? 1 : 0];
+  MountainSkirtProfile *profile = &s_skirt_profiles[tile][right_edge ? 1 : 0];
   if (profile->resolved) return profile;
   profile->resolved = true;
   int step = right_edge ? -1 : 1;

@@ -1,5 +1,11 @@
 #ifndef AR_SIM_BACKGROUND_MOUNTAIN_MESH_H
 #define AR_SIM_BACKGROUND_MOUNTAIN_MESH_H
+/* SimBackgroundMountainMesh: builds camera-independent mountain faces (stacked
+ * relief tiles and skirt walls) in native town pixels and hands each quad to
+ * the caller's emit callback, so the town and globe renderers project the
+ * same geometry.
+ * Phase: pure.
+ * Tests: tests/sim_world_navigation_materials_test.c */
 
 #include "sim/mountains/sim_background_mountain_relief.h"
 #include "sim/mountains/sim_background_mountains.h"

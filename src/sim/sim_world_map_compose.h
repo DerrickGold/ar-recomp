@@ -1,5 +1,11 @@
 #ifndef AR_SIM_WORLD_MAP_COMPOSE_H
 #define AR_SIM_WORLD_MAP_COMPOSE_H
+/* SimWorldMap composition: host equivalent of the ROM's developed-world
+ * overlay ($02:B475 / $02:865C). Composes the 128 x 128 world tilemap from the
+ * base map and the six towns' cell maps, using translation tables decoded
+ * once from the ROM.
+ * Phase: pure.
+ * Tests: tests/sim_world_map_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

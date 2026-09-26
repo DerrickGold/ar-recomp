@@ -22,11 +22,11 @@ typedef struct SimPhase0TraceKey {
   uint8 cgadsub;
 } SimPhase0TraceKey;
 
-static FILE *g_sim_phase0_trace;
-static bool g_sim_phase0_env_checked;
-static bool g_sim_phase0_key_valid;
-static bool g_sim_phase0_prior_town;
-static SimPhase0TraceKey g_sim_phase0_key;
+static FILE *s_sim_phase0_trace;
+static bool s_sim_phase0_env_checked;
+static bool s_sim_phase0_key_valid;
+static bool s_sim_phase0_prior_town;
+static SimPhase0TraceKey s_sim_phase0_key;
 
 static uint16 ReadMirror16(const uint8 *wram, uint32 address) {
   return (uint16)(wram[address] | (wram[address + 1] << 8));
@@ -49,10 +49,10 @@ static bool TraceKeysEqual(const SimPhase0TraceKey *a,
 
 bool SimPhase0Trace_Open(const char *path) {
   SimPhase0Trace_Close();
-  g_sim_phase0_env_checked = true;
+  s_sim_phase0_env_checked = true;
   if (!path || !path[0]) return false;
-  g_sim_phase0_trace = sr_fopen(path, "w");
-  if (!g_sim_phase0_trace) {
+  s_sim_phase0_trace = sr_fopen(path, "w");
+  if (!s_sim_phase0_trace) {
     fprintf(stderr, "[sim3d-phase0] cannot open %s\n", path);
     return false;
   }
@@ -61,12 +61,12 @@ bool SimPhase0Trace_Open(const char *path) {
 }
 
 void SimPhase0Trace_InitFromEnvironment(void) {
-  if (g_sim_phase0_env_checked) return;
-  g_sim_phase0_env_checked = true;
+  if (s_sim_phase0_env_checked) return;
+  s_sim_phase0_env_checked = true;
   const char *path = getenv("AR_SIM3D_TRACE");
   if (!path || !path[0]) return;
-  g_sim_phase0_trace = sr_fopen(path, "w");
-  if (!g_sim_phase0_trace) {
+  s_sim_phase0_trace = sr_fopen(path, "w");
+  if (!s_sim_phase0_trace) {
     fprintf(stderr, "[sim3d-phase0] cannot open %s\n", path);
     return;
   }
@@ -96,12 +96,12 @@ void SimPhase0Trace_Frame(uint32 host_frame, const uint8 *wram,
   SrPpuFrameSnapshot frame = {.struct_size = sizeof(frame)};
   bool have_ppu = false;
   SimPhase0Trace_InitFromEnvironment();
-  if (!g_sim_phase0_trace || !wram) return;
+  if (!s_sim_phase0_trace || !wram) return;
 
   uint8 map_group = wram[kActRaiserWram_MapGroup];
   uint8 map_number = wram[kActRaiserWram_CurrentMap];
   bool town = ActRaiser_IsSimulationTown(map_group, map_number);
-  if (!town && !g_sim_phase0_prior_town) return;
+  if (!town && !s_sim_phase0_prior_town) return;
 
   api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
   if (runner != NULL && api != NULL &&
@@ -127,13 +127,13 @@ void SimPhase0Trace_Frame(uint32 host_frame, const uint8 *wram,
     .cgwsel = have_ppu ? ppu.color_math_control : 0,
     .cgadsub = have_ppu ? ppu.color_math_designation : 0,
   };
-  if (g_sim_phase0_key_valid && TraceKeysEqual(&key, &g_sim_phase0_key)) {
-    g_sim_phase0_prior_town = town;
+  if (s_sim_phase0_key_valid && TraceKeysEqual(&key, &s_sim_phase0_key)) {
+    s_sim_phase0_prior_town = town;
     return;
   }
-  g_sim_phase0_key = key;
-  g_sim_phase0_key_valid = true;
-  g_sim_phase0_prior_town = town;
+  s_sim_phase0_key = key;
+  s_sim_phase0_key_valid = true;
+  s_sim_phase0_prior_town = town;
 
   bool picker_active = ActRaiser_SimMapPickerActiveForState(
       map_group, map_number, key.picker_flag);
@@ -144,7 +144,7 @@ void SimPhase0Trace_Frame(uint32 host_frame, const uint8 *wram,
   const char *view = !town ? "out_of_scope" :
       picker_active ? "authentic_picker" : "enhanced_candidate";
 
-  fprintf(g_sim_phase0_trace,
+  fprintf(s_sim_phase0_trace,
           "{\"host_frame\":%u,\"game_frame\":%u,\"map_group\":%u,"
           "\"map\":%u,\"town\":%s,\"picker_flag\":%u,"
           "\"pending_world_type\":%u,"
@@ -167,12 +167,12 @@ void SimPhase0Trace_Frame(uint32 host_frame, const uint8 *wram,
           (unsigned)ReadMirror16(wram, kActRaiserWram_Bg1CameraY));
 
   if (!have_ppu) {
-    fputs("\"ppu\":null}\n", g_sim_phase0_trace);
-    fflush(g_sim_phase0_trace);
+    fputs("\"ppu\":null}\n", s_sim_phase0_trace);
+    fflush(s_sim_phase0_trace);
     return;
   }
 
-  fprintf(g_sim_phase0_trace,
+  fprintf(s_sim_phase0_trace,
           "\"ppu\":{\"bgmode\":%u,\"inidisp\":%u,"
           "\"windowsel\":%u,\"wbgobjlog\":%u,"
           "\"screen_main\":%u,\"screen_sub\":%u,"
@@ -200,14 +200,14 @@ void SimPhase0Trace_Frame(uint32 host_frame, const uint8 *wram,
           (unsigned)ppu.backgrounds[1].v_scroll,
           (unsigned)ppu.backgrounds[2].v_scroll,
           (unsigned)ppu.backgrounds[3].v_scroll);
-  WriteCaptureArray(g_sim_phase0_trace, &frame);
-  fputs("}}\n", g_sim_phase0_trace);
-  fflush(g_sim_phase0_trace);
+  WriteCaptureArray(s_sim_phase0_trace, &frame);
+  fputs("}}\n", s_sim_phase0_trace);
+  fflush(s_sim_phase0_trace);
 }
 
 void SimPhase0Trace_Close(void) {
-  if (g_sim_phase0_trace) fclose(g_sim_phase0_trace);
-  g_sim_phase0_trace = NULL;
-  g_sim_phase0_key_valid = false;
-  g_sim_phase0_prior_town = false;
+  if (s_sim_phase0_trace) fclose(s_sim_phase0_trace);
+  s_sim_phase0_trace = NULL;
+  s_sim_phase0_key_valid = false;
+  s_sim_phase0_prior_town = false;
 }

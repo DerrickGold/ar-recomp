@@ -1,5 +1,11 @@
 #ifndef AR_SIM_WORLD_NAVIGATION_GLOBE_H
 #define AR_SIM_WORLD_NAVIGATION_GLOBE_H
+/* SimWorldNavigationGlobe: the planet the world map wraps onto: a fixed
+ * stereographic chart from map tiles to unit-sphere directions and back, the
+ * orientation frame around the focus, orbiting, and a conservative
+ * behind-the-horizon test.
+ * Phase: pure.
+ * Tests: tests/sim_world_navigation_globe_test.c */
 
 #include <stdbool.h>
 

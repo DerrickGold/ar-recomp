@@ -1,5 +1,10 @@
 #ifndef AR_SIM_BACKGROUND_VOXEL_REGION_H
 #define AR_SIM_BACKGROUND_VOXEL_REGION_H
+/* SimBackgroundVoxelRegion: each town's regional look: house style per
+ * development level (after the ROM's $03:DCC6 lookup), tree and palette
+ * styles, and the authored model heights used before a model is built.
+ * Phase: pure.
+ * Tests: tests/sim_background_voxel_region_test.c */
 
 #include <stdint.h>
 

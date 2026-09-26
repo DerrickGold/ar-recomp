@@ -1,5 +1,11 @@
 #ifndef AR_SIM_CLOUD_EFFECT_BACKEND_H
 #define AR_SIM_CLOUD_EFFECT_BACKEND_H
+/* SimCloudEffectBackend: optional GPU effect for composing the SIM cloud bank
+ * in one ordered pass. The presenter chooses the samples; the platform adapter
+ * owns shaders and state. Callers keep the multi-draw fallback when the effect
+ * is unavailable.
+ * Phase: present (render owner thread).
+ * Tests: tests/present_sim3d_clouds_test.c */
 
 #include "render/render_device.h"
 

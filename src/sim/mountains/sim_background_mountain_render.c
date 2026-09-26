@@ -336,12 +336,12 @@ static bool EmitCraterGlowRing(SimBackgroundMountainEffectEmit emit, void *user,
 /* The crater mouth of the volcano drawn this frame. See the header: this is
  * published so the eruption's fireball arcs can launch from the point the
  * player sees smoking rather than from a constant kept beside the model. */
-static SimBackgroundCraterAnchor g_crater_anchor;
+static SimBackgroundCraterAnchor s_crater_anchor;
 
 bool SimBackgroundVoxelRenderer_CraterAnchor(SimBackgroundCraterAnchor *out) {
   if (!out) return false;
-  *out = g_crater_anchor;
-  return g_crater_anchor.valid;
+  *out = s_crater_anchor;
+  return s_crater_anchor.valid;
 }
 
 static SimBackgroundCraterSource ResolveCraterSource(
@@ -672,7 +672,7 @@ static int BuildProjectedMountainObjectFaces(
 static void AppendMountainObjectEffects(
     const MountainTileContext *shared,
     const SimBackgroundMountainObjectList *objects) {
-  g_crater_anchor.valid = false;
+  s_crater_anchor.valid = false;
   for (uint8_t at = 0; at < objects->count; at++) {
     const SimBackgroundMountainObject *object = &objects->objects[at];
     MountainTileContext context = *shared;
@@ -685,7 +685,7 @@ static void AppendMountainObjectEffects(
     if (!(object->flags & kSimBackgroundMountainObject_Volcano)) continue;
     const SimBackgroundCraterSource crater = ResolveCraterSource(
         context.axis,context.relief,object,baseline,context.height_scale);
-    g_crater_anchor = (SimBackgroundCraterAnchor){true,
+    s_crater_anchor = (SimBackgroundCraterAnchor){true,
       crater.x+crater.z*crater.axis.x_per_height,
       crater.y+crater.z*crater.axis.y_per_height,crater.z*crater.axis.height_scale};
     (void)EmitCraterEffects(&crater,context.params->game_frame,
@@ -849,7 +849,7 @@ static int BuildMountainFaces(const SimBackgroundVoxelRenderParams *params,
     g_mountain_state.projection_valid = true;
     return g_mountain_state.projected_count;
   }
-  if (!source_only) g_crater_anchor.valid = false;
+  if (!source_only) s_crater_anchor.valid = false;
   if (cache_hit) return g_mountain_state.projected_count;
   /* Each connected range shares one baseline. Mapping source Y partly into
    * height and partly into ground depth turns the original pseudo-perspective
@@ -963,7 +963,7 @@ void SimBackgroundMountainRender_SubmitFaces(int count) {
 }
 
 void SimBackgroundMountainRender_Reset(void) {
-  g_crater_anchor = (SimBackgroundCraterAnchor){0};
+  s_crater_anchor = (SimBackgroundCraterAnchor){0};
   g_mountain_state.projection_valid = false;
   g_mountain_state.mountain_objects_valid = false;
   g_mountain_state.projected_count = 0;

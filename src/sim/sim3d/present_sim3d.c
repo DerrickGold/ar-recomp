@@ -1276,7 +1276,7 @@ typedef struct SimDynamicCameraState {
   bool active;
 } SimDynamicCameraState;
 
-static SimDynamicCameraState g_sim_dyncam;
+static SimDynamicCameraState s_sim_dyncam;
 
 /* Folds the reactive offsets into the camera the projection is built from.
  * Returns with `camera` unchanged when the feature is off, so the pose stays
@@ -1296,18 +1296,18 @@ static void ApplySimDynamicCamera(const FrameSlot *slot,
 
   uint64_t now_ns = HostClock_Nanoseconds();
   float dt = 0.0f;
-  if (g_sim_dyncam.last_ns != 0) {
-    dt = (float)(now_ns - g_sim_dyncam.last_ns) / 1e9f;
+  if (s_sim_dyncam.last_ns != 0) {
+    dt = (float)(now_ns - s_sim_dyncam.last_ns) / 1e9f;
     if (dt < 0.0f) dt = 0.0f;
     if (dt > 1.0f) dt = 1.0f;   /* resuming from a pause is not a huge step */
   }
-  g_sim_dyncam.last_ns = now_ns;
+  s_sim_dyncam.last_ns = now_ns;
 
   if (!dynamic) {
     /* Cleared rather than left to decay, so switching the feature off is
      * immediate and switching it back on starts level instead of resuming a
      * lean from whenever it was turned off. */
-    g_sim_dyncam = (SimDynamicCameraState){ .last_ns = now_ns };
+    s_sim_dyncam = (SimDynamicCameraState){ .last_ns = now_ns };
     return;
   }
 
@@ -1316,42 +1316,42 @@ static void ApplySimDynamicCamera(const FrameSlot *slot,
   float target_y = kSimLeanYaw * gain * slot->sim_dyncam_lean_yaw;
 
   if (!reactive) {
-    g_sim_dyncam.lean_x = 0.0f;
-    g_sim_dyncam.lean_y = 0.0f;
-    g_sim_dyncam.kick_pitch = 0.0f;
-    g_sim_dyncam.kick_zoom = 0.0f;
-    g_sim_dyncam.active = false;
-  } else if (!g_sim_dyncam.active || mode_changed || dt <= 0.0f) {
-    g_sim_dyncam.lean_x = target_x;
-    g_sim_dyncam.lean_y = target_y;
-    g_sim_dyncam.active = true;
+    s_sim_dyncam.lean_x = 0.0f;
+    s_sim_dyncam.lean_y = 0.0f;
+    s_sim_dyncam.kick_pitch = 0.0f;
+    s_sim_dyncam.kick_zoom = 0.0f;
+    s_sim_dyncam.active = false;
+  } else if (!s_sim_dyncam.active || mode_changed || dt <= 0.0f) {
+    s_sim_dyncam.lean_x = target_x;
+    s_sim_dyncam.lean_y = target_y;
+    s_sim_dyncam.active = true;
   } else {
     float alpha = 1.0f - expf(-dt / kSimDampTau);
-    g_sim_dyncam.lean_x += (target_x - g_sim_dyncam.lean_x) * alpha;
-    g_sim_dyncam.lean_y += (target_y - g_sim_dyncam.lean_y) * alpha;
+    s_sim_dyncam.lean_x += (target_x - s_sim_dyncam.lean_x) * alpha;
+    s_sim_dyncam.lean_y += (target_y - s_sim_dyncam.lean_y) * alpha;
   }
 
   /* Impulses fire only on a genuinely new capture. Re-presenting a slot already
    * processed must not re-trigger, or a paused frame would
    * shake forever. Stacking is additive so a hit taken mid-jolt reads as
    * stronger rather than restarting. */
-  if (reactive && slot->timestamp_ns != g_sim_dyncam.last_slot_ns) {
-    g_sim_dyncam.last_slot_ns = slot->timestamp_ns;
+  if (reactive && slot->timestamp_ns != s_sim_dyncam.last_slot_ns) {
+    s_sim_dyncam.last_slot_ns = slot->timestamp_ns;
     if (slot->sim_dyncam_event_hit) {
-      g_sim_dyncam.kick_pitch += kSimKickPitch * gain;
-      g_sim_dyncam.kick_zoom += kSimKickZoom * gain;
+      s_sim_dyncam.kick_pitch += kSimKickPitch * gain;
+      s_sim_dyncam.kick_zoom += kSimKickZoom * gain;
     }
   }
   if (reactive && dt > 0.0f) {
     float decay = expf(-dt / kSimKickTau);
-    g_sim_dyncam.kick_pitch *= decay;
-    g_sim_dyncam.kick_zoom *= decay;
+    s_sim_dyncam.kick_pitch *= decay;
+    s_sim_dyncam.kick_zoom *= decay;
   }
 
-  camera->tilt_x += g_sim_dyncam.lean_x + g_sim_dyncam.kick_pitch +
+  camera->tilt_x += s_sim_dyncam.lean_x + s_sim_dyncam.kick_pitch +
       slot->sim_manual_orbit_pitch;
-  camera->tilt_y += g_sim_dyncam.lean_y + slot->sim_manual_orbit_yaw;
-  camera->distance *= 1.0f + g_sim_dyncam.kick_zoom;
+  camera->tilt_y += s_sim_dyncam.lean_y + slot->sim_manual_orbit_yaw;
+  camera->distance *= 1.0f + s_sim_dyncam.kick_zoom;
   if (camera->distance < 2.0f) camera->distance = 2.0f;
 }
 

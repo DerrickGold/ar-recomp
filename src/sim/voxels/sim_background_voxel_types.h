@@ -1,5 +1,9 @@
 #ifndef AR_SIM_BACKGROUND_VOXEL_TYPES_H
 #define AR_SIM_BACKGROUND_VOXEL_TYPES_H
+/* SimBackgroundVoxel types: the object record the voxel pipeline passes
+ * around, one per enhanced town object (houses, landmarks, trees, bridges),
+ * with its kind, footprint, construction state and animation phase.
+ * Phase: pure (types only). */
 
 #include <stdint.h>
 

@@ -1,5 +1,10 @@
 #ifndef AR_SIM_BACKGROUND_VOXEL_SURFACE_H
 #define AR_SIM_BACKGROUND_VOXEL_SURFACE_H
+/* SimBackgroundVoxelSurface: the outward normal of a model face, correcting
+ * the model builders' mixed winding in one place for lighting and any later
+ * surface analysis.
+ * Phase: pure.
+ * Tests: tests/sim_background_voxel_lighting_test.c */
 
 #include <stdbool.h>
 

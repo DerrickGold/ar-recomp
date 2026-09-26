@@ -1,5 +1,10 @@
 #ifndef AR_SIM_WORLD_NAVIGATION_SKY_CLOUDS_H
 #define AR_SIM_WORLD_NAVIGATION_SKY_CLOUDS_H
+/* SimWorldNavigationSkyClouds: bakes the sky's lit 3D cloud volumes (sixteen
+ * density slices per bank plus a flat fallback tile) into one atlas, and
+ * measures each slice's visible bounds once after the bake.
+ * Phase: pure.
+ * Tests: tests/sim_world_navigation_materials_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

@@ -1,5 +1,11 @@
 #ifndef AR_SIM_WORLD_NAVIGATION_MOUNTAIN_TRANSITION_H
 #define AR_SIM_WORLD_NAVIGATION_MOUNTAIN_TRANSITION_H
+/* SimWorldNavigationMountainTransition: blends town mountains into the world
+ * terrain around them with native rock material patches and ridge, join and
+ * continuation heights. Rebuilt only when the source, geography or chart
+ * radius changes.
+ * Phase: pure.
+ * Tests: tests/sim_world_navigation_materials_test.c */
 
 #include "sim/world_nav/sim_world_navigation_mountains.h"
 

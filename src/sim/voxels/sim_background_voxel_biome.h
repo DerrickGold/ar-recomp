@@ -1,5 +1,10 @@
 #ifndef AR_SIM_BACKGROUND_VOXEL_BIOME_H
 #define AR_SIM_BACKGROUND_VOXEL_BIOME_H
+/* SimBackgroundVoxelBiome: each town's biome (temperate, wetland, desert,
+ * volcanic, tropical, snow) and the material substitutions it applies, such
+ * as snow on Northwall's upward faces at High detail and above.
+ * Phase: pure.
+ * Tests: tests/sim_background_voxel_biome_test.c */
 
 #include <stdint.h>
 

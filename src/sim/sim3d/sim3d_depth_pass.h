@@ -1,5 +1,12 @@
 #ifndef AR_SIM3D_DEPTH_PASS_H
 #define AR_SIM3D_DEPTH_PASS_H
+/* Sim3DDepthPass: the depth-tested draw contract shared by the enhanced SIM
+ * town and the world view. Between Begin and Submit, callers append quads,
+ * billboards and retained meshes by layer (depth occluders, models,
+ * mountains, shadows, ground, clouds, effects); the SDL adapter implements it
+ * on the GPU.
+ * Phase: present (render owner thread).
+ * Tests: tests/sim3d_depth_pass_gpu_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

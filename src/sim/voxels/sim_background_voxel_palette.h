@@ -1,5 +1,9 @@
 #ifndef AR_SIM_BACKGROUND_VOXEL_PALETTE_H
 #define AR_SIM_BACKGROUND_VOXEL_PALETTE_H
+/* SimBackgroundVoxelPalette: an object's material colors as four-step
+ * brightness ramps, chosen from its regional palette style and biome.
+ * Phase: pure.
+ * Tests: tests/sim_background_voxel_palette_test.c */
 
 #include <stdint.h>
 

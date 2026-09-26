@@ -1,5 +1,9 @@
 #ifndef AR_SIM_TOWN_LAYOUT_H
 #define AR_SIM_TOWN_LAYOUT_H
+/* SimTownLayout: where each town's 32 x 32 cell map lives in WRAM ($7F:2000,
+ * $400 bytes per town) and how a cell coordinate maps into it.
+ * Phase: pure.
+ * Tests: tests/sim_render_metadata_test.c */
 
 #include <stddef.h>
 #include <stdint.h>

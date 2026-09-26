@@ -1,5 +1,11 @@
 #ifndef AR_SIM_WORLD_NAVIGATION_SCENE_H
 #define AR_SIM_WORLD_NAVIGATION_SCENE_H
+/* SimWorldNavigationScene: the immutable contract between world-navigation
+ * capture and presentation: raw camera state (the $09 matrix, focus, zoom),
+ * the native OAM composition, and the world texture with its transform to the
+ * authentic screen, plus pure helpers for atmosphere, haze and fades.
+ * Phase: pure.
+ * Tests: tests/sim_render_metadata_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

@@ -1,5 +1,11 @@
 #ifndef AR_SIM_WORLD_NAVIGATION_ART_H
 #define AR_SIM_WORLD_NAVIGATION_ART_H
+/* SimWorldNavigationArt: builds the 2048-pixel world navigation texture from
+ * the developed and pristine world maps (town windows feathered, Scale2x),
+ * overlays each town's ground art at native resolution, and redraws only the
+ * rows whose animated cells changed.
+ * Phase: pure.
+ * Tests: tests/sim_world_navigation_art_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

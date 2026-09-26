@@ -1,5 +1,10 @@
 #ifndef AR_SIM_BACKDROP_RENDER_H
 #define AR_SIM_BACKDROP_RENDER_H
+/* SimBackdropRender: builds the sky gradient behind the SIM town and world
+ * views (at most two quads, anchored to the real ground horizon when a camera
+ * matrix is given) as a backend-neutral vertex batch.
+ * Phase: pure.
+ * Tests: tests/sim_backdrop_render_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

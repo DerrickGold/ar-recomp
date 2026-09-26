@@ -1,5 +1,10 @@
 #ifndef AR_SIM_BACKGROUND_VOXEL_LIGHTING_H
 #define AR_SIM_BACKGROUND_VOXEL_LIGHTING_H
+/* SimBackgroundVoxelLighting: brightness of model faces and vertices for a sun
+ * direction and shading mode (directional light, ambient occlusion, material
+ * response), kept out of the renderer so it can be tested on its own.
+ * Phase: pure.
+ * Tests: tests/sim_background_voxel_lighting_test.c */
 
 #include <stdint.h>
 

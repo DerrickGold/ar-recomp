@@ -1,5 +1,10 @@
 #ifndef AR_SIM_WORLD_NAVIGATION_CLOUDS_H
 #define AR_SIM_WORLD_NAVIGATION_CLOUDS_H
+/* SimWorldNavigationClouds: the globe's weather layer. Bakes a seamless
+ * spherical cloud texture, rotates it rigidly over the planet, and splits
+ * faces that cross the longitude seam or a pole so the texture never tears.
+ * Phase: pure.
+ * Tests: tests/sim_world_navigation_materials_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

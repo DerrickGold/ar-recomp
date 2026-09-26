@@ -1,5 +1,11 @@
 #ifndef AR_SIM_WORLD_NAVIGATION_TOWNS_H
 #define AR_SIM_WORLD_NAVIGATION_TOWNS_H
+/* SimWorldNavigationTowns: captures every developed town's ground and model
+ * objects from the all-town cell maps and structure records, so the world
+ * view can show all six towns in one frame. The cached form skips
+ * reclassifying unchanged towns.
+ * Phase: capture (reads WRAM).
+ * Tests: tests/sim_render_metadata_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

@@ -1,5 +1,11 @@
 #ifndef AR_SIM_BACKGROUND_MOUNTAINS_H
 #define AR_SIM_BACKGROUND_MOUNTAINS_H
+/* SimBackgroundMountains: classifies a town's 32 x 32 cell map into mountain
+ * terrain (occupied cells, lava caps, connected components, source-art cells)
+ * and completes peaks that the map's north edge cuts off. Callers pass WRAM or
+ * an immutable cell snapshot.
+ * Phase: pure.
+ * Tests: tests/sim_background_mountains_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

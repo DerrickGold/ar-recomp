@@ -1,5 +1,11 @@
 #ifndef AR_SIM_BACKGROUND_VOXELS_H
 #define AR_SIM_BACKGROUND_VOXELS_H
+/* SimBackgroundVoxels: game-side half of the voxel town. Classifies a town's
+ * structures, trees, bridges and mountains from WRAM into a scene of voxel
+ * objects, and builds the cutout atlas and inpainted ground the renderer
+ * uploads, each published under its own serial.
+ * Phase: capture (reads WRAM on the game thread).
+ * Tests: tests/sim_background_voxels_test.c */
 
 #include <stdbool.h>
 #include <stddef.h>

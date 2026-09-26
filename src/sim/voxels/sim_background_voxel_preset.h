@@ -1,5 +1,10 @@
 #ifndef AR_SIM_BACKGROUND_VOXEL_PRESET_H
 #define AR_SIM_BACKGROUND_VOXEL_PRESET_H
+/* SimBackgroundVoxelPreset: resolves a preset (Performance, Balanced,
+ * Quality or Custom) to one immutable frame configuration without overwriting
+ * the player's stored Custom controls.
+ * Phase: pure.
+ * Tests: tests/sim_background_voxel_preset_test.c */
 
 #include <stdbool.h>
 

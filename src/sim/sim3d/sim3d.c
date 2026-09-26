@@ -79,8 +79,8 @@ typedef struct Sim3DCaptureState {
   uint64_t separated_hash;
 } Sim3DCaptureState;
 
-static Sim3DCaptureState g_sim3d;
-static uint32_t g_sim3d_hud_obj_mask[kSim3DMaxWidth * kSim3DMaxHeight];
+static Sim3DCaptureState s_sim3d;
+static uint32_t s_sim3d_hud_obj_mask[kSim3DMaxWidth * kSim3DMaxHeight];
 
 static bool DemoArtifactsArmable(void);
 
@@ -225,54 +225,54 @@ static bool OverlayPolicyConflicts(
 }
 
 static void ClearPriorHudObjMask(void) {
-  int width = g_sim3d.hud_obj_mask_width;
-  int x0 = g_sim3d.hud_obj_mask_x0;
-  int y0 = g_sim3d.hud_obj_mask_y0;
-  int x1 = g_sim3d.hud_obj_mask_x1;
-  int y1 = g_sim3d.hud_obj_mask_y1;
+  int width = s_sim3d.hud_obj_mask_width;
+  int x0 = s_sim3d.hud_obj_mask_x0;
+  int y0 = s_sim3d.hud_obj_mask_y0;
+  int x1 = s_sim3d.hud_obj_mask_x1;
+  int y1 = s_sim3d.hud_obj_mask_y1;
   if (width > 0 && x0 >= 0 && x1 <= width && x1 > x0 &&
       y0 >= 0 && y1 <= kSim3DMaxHeight && y1 > y0) {
     for (int y = y0; y < y1; y++)
-      memset(&g_sim3d_hud_obj_mask[
+      memset(&s_sim3d_hud_obj_mask[
                  (size_t)y * (size_t)width + (size_t)x0], 0,
-             (size_t)(x1 - x0) * sizeof(g_sim3d_hud_obj_mask[0]));
+             (size_t)(x1 - x0) * sizeof(s_sim3d_hud_obj_mask[0]));
   }
-  g_sim3d.hud_obj_mask_x0 = g_sim3d.hud_obj_mask_y0 = 0;
-  g_sim3d.hud_obj_mask_x1 = g_sim3d.hud_obj_mask_y1 = 0;
+  s_sim3d.hud_obj_mask_x0 = s_sim3d.hud_obj_mask_y0 = 0;
+  s_sim3d.hud_obj_mask_x1 = s_sim3d.hud_obj_mask_y1 = 0;
 }
 
 static bool PrepareHudHandoff(
     const SnesRunnerApi *api, SrRunnerHandle *runner,
     const SrPpuFrameTransactionContext *context, int width) {
   const SrPpuOverlayCaptureState *bg3 =
-      &g_sim3d.prior_captures[SR_PPU_OVERLAY_BG3];
+      &s_sim3d.prior_captures[SR_PPU_OVERLAY_BG3];
   const SrPpuOverlayCaptureState *obj =
-      &g_sim3d.prior_captures[SR_PPU_OVERLAY_OBJ];
-  g_sim3d.hud_bg3 = !CaptureIsEmpty(bg3);
-  g_sim3d.hud_obj = !CaptureIsEmpty(obj);
-  g_sim3d.hud_handoff = g_sim3d.hud_bg3 || g_sim3d.hud_obj;
-  if (!g_sim3d.hud_handoff) return true;
+      &s_sim3d.prior_captures[SR_PPU_OVERLAY_OBJ];
+  s_sim3d.hud_bg3 = !CaptureIsEmpty(bg3);
+  s_sim3d.hud_obj = !CaptureIsEmpty(obj);
+  s_sim3d.hud_handoff = s_sim3d.hud_bg3 || s_sim3d.hud_obj;
+  if (!s_sim3d.hud_handoff) return true;
 
-  g_sim3d.runner = runner;
-  g_sim3d.api = api;
-  g_sim3d.lifetime_generation = context->lifetime_generation;
+  s_sim3d.runner = runner;
+  s_sim3d.api = api;
+  s_sim3d.lifetime_generation = context->lifetime_generation;
   const SrPpuWritableSurfaceView *bg_surface =
       &context->overlays[SR_PPU_OVERLAY_BG3];
   const SrPpuWritableSurfaceView *obj_surface =
       &context->overlays[SR_PPU_OVERLAY_OBJ];
-  g_sim3d.hud_bg_pixels = bg_surface->data;
-  g_sim3d.hud_obj_pixels = obj_surface->data;
-  g_sim3d.hud_bg_pitch = bg_surface->pitch_bytes <= UINT32_MAX
+  s_sim3d.hud_bg_pixels = bg_surface->data;
+  s_sim3d.hud_obj_pixels = obj_surface->data;
+  s_sim3d.hud_bg_pitch = bg_surface->pitch_bytes <= UINT32_MAX
       ? (uint32_t)bg_surface->pitch_bytes : 0u;
-  g_sim3d.hud_obj_pitch = obj_surface->pitch_bytes <= UINT32_MAX
+  s_sim3d.hud_obj_pitch = obj_surface->pitch_bytes <= UINT32_MAX
       ? (uint32_t)obj_surface->pitch_bytes : 0u;
   /* Only the prior frame's nontransparent raster can be dirty. Remember the
    * pitch it used because a display-mode change can alter `width` between
    * captures; clearing the entire 448x240 ceiling here used to write 430 KB
    * every enhanced town frame for a HUD icon that is at most 32x32 pixels. */
   ClearPriorHudObjMask();
-  g_sim3d.hud_obj_mask_width = width;
-  if (!g_sim3d.hud_obj) return true;
+  s_sim3d.hud_obj_mask_width = width;
+  if (!s_sim3d.hud_obj) return true;
 
   if (obj->oam_count == 0u || context->oam.data == NULL ||
       (uint64_t)obj->oam_first * 2u + 1u >= context->oam.element_count)
@@ -316,7 +316,7 @@ static bool PrepareHudHandoff(
       uint32_t pixel = raster[
           (size_t)y * kHudRasterLimit + (size_t)x];
       if (!pixel) continue;
-      g_sim3d_hud_obj_mask[
+      s_sim3d_hud_obj_mask[
           (size_t)screen_y * (size_t)width + (size_t)texture_x] = pixel;
       if (texture_x < mask_x0) mask_x0 = texture_x;
       if (screen_y < mask_y0) mask_y0 = screen_y;
@@ -325,35 +325,35 @@ static bool PrepareHudHandoff(
     }
   }
   if (mask_x1 > mask_x0 && mask_y1 > mask_y0) {
-    g_sim3d.hud_obj_mask_x0 = mask_x0;
-    g_sim3d.hud_obj_mask_y0 = mask_y0;
-    g_sim3d.hud_obj_mask_x1 = mask_x1;
-    g_sim3d.hud_obj_mask_y1 = mask_y1;
+    s_sim3d.hud_obj_mask_x0 = mask_x0;
+    s_sim3d.hud_obj_mask_y0 = mask_y0;
+    s_sim3d.hud_obj_mask_x1 = mask_x1;
+    s_sim3d.hud_obj_mask_y1 = mask_y1;
   }
-  g_sim3d.hud_obj_priority = priority;
+  s_sim3d.hud_obj_priority = priority;
   return true;
 }
 
 bool Sim3D_BeginFrame(void) {
-  bool restore_bindings = g_sim3d.bindings_owned;
-  g_sim3d.active = false;
-  g_sim3d.bindings_owned = false;
-  g_sim3d.inspector_active = false;
-  g_sim3d.separated_valid = false;
-  g_sim3d.flat_stage_requested = false;
-  g_sim3d.billboard_renderer_ready = false;
-  g_sim3d.raw_obj_planes = false;
-  g_sim3d.hud_handoff = false;
-  g_sim3d.hud_bg3 = false;
-  g_sim3d.hud_obj = false;
-  g_sim3d.object_half_add = false;
-  g_sim3d.runner = NULL;
-  g_sim3d.api = NULL;
-  g_sim3d.lifetime_generation = 0u;
-  g_sim3d.status = kSim3DCapture_Inactive;
-  g_sim3d.mismatch_pixels = 0;
-  g_sim3d.separated_hash = 0;
-  g_sim3d.captured_plane_mask = 0;
+  bool restore_bindings = s_sim3d.bindings_owned;
+  s_sim3d.active = false;
+  s_sim3d.bindings_owned = false;
+  s_sim3d.inspector_active = false;
+  s_sim3d.separated_valid = false;
+  s_sim3d.flat_stage_requested = false;
+  s_sim3d.billboard_renderer_ready = false;
+  s_sim3d.raw_obj_planes = false;
+  s_sim3d.hud_handoff = false;
+  s_sim3d.hud_bg3 = false;
+  s_sim3d.hud_obj = false;
+  s_sim3d.object_half_add = false;
+  s_sim3d.runner = NULL;
+  s_sim3d.api = NULL;
+  s_sim3d.lifetime_generation = 0u;
+  s_sim3d.status = kSim3DCapture_Inactive;
+  s_sim3d.mismatch_pixels = 0;
+  s_sim3d.separated_hash = 0;
+  s_sim3d.captured_plane_mask = 0;
   return restore_bindings;
 }
 
@@ -410,21 +410,21 @@ static SrResult PrepareCaptureFromPpuView(
   const SrPpuStateSnapshot *ppu = &context->state;
   for (int source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; source++)
     CaptureStateFromOverlay(
-        &g_sim3d.prior_captures[source],
+        &s_sim3d.prior_captures[source],
         &context->frame.overlays[source]);
 
   if (request->diorama_active || OverlayPolicyConflicts(context)) {
-    g_sim3d.status = kSim3DCapture_OverlayConflict;
+    s_sim3d.status = kSim3DCapture_OverlayConflict;
     return SR_RESULT_OK;
   }
   /* Recorded before any gate can reject, so a rejection reports the state
    * that caused it rather than the last state that passed. */
-  g_sim3d.cgwsel = ppu->color_math_control;
-  g_sim3d.cgadsub = ppu->color_math_designation;
-  g_sim3d.fixed_color = ppu->fixed_color;
-  g_sim3d.screen_main = ppu->main_screen;
-  g_sim3d.screen_sub = ppu->sub_screen;
-  g_sim3d.brightness = ppu->brightness;
+  s_sim3d.cgwsel = ppu->color_math_control;
+  s_sim3d.cgadsub = ppu->color_math_designation;
+  s_sim3d.fixed_color = ppu->fixed_color;
+  s_sim3d.screen_main = ppu->main_screen;
+  s_sim3d.screen_sub = ppu->sub_screen;
+  s_sim3d.brightness = ppu->brightness;
 
   bool ordinary_screen =
       (ppu->main_screen == 0x15 || ppu->main_screen == 0x17) &&
@@ -437,7 +437,7 @@ static SrResult PrepareCaptureFromPpuView(
       ppu->bg_mode_control != 9 ||
       (ppu->flags & SR_PPU_STATE_FORCED_BLANK) != 0u ||
       (!ordinary_screen && !targeted_miracle_screen)) {
-    g_sim3d.status = kSim3DCapture_UnsupportedPpu;
+    s_sim3d.status = kSim3DCapture_UnsupportedPpu;
     return SR_RESULT_OK;
   }
   /* No designated layers leave even a nonzero fixed colour unused. Otherwise
@@ -475,22 +475,22 @@ static SrResult PrepareCaptureFromPpuView(
       ppu->fixed_color == 0 && ppu->brightness == 15;
   if ((!targeted_miracle_screen && !no_op_color_math && !fixed_color_add) ||
       (targeted_miracle_screen && !targeted_miracle_half_add)) {
-    g_sim3d.status = kSim3DCapture_UnsupportedColorMath;
+    s_sim3d.status = kSim3DCapture_UnsupportedColorMath;
     return SR_RESULT_OK;
   }
   if (context->cgram.data == NULL ||
       context->cgram.element_count < SR_PPU_CGRAM_WORD_COUNT) {
-    g_sim3d.status = kSim3DCapture_UnsupportedPpu;
+    s_sim3d.status = kSim3DCapture_UnsupportedPpu;
     return SR_RESULT_OK;
   }
-  g_sim3d.object_half_add = targeted_miracle_half_add;
-  g_sim3d.fixed_add_mask = fixed_color_add
+  s_sim3d.object_half_add = targeted_miracle_half_add;
+  s_sim3d.fixed_add_mask = fixed_color_add
       ? (ppu->color_math_designation & 0x3f) : 0;
-  g_sim3d.fixed_add_r = (uint8_t)(ppu->fixed_color & 0x1f);
-  g_sim3d.fixed_add_g = (uint8_t)((ppu->fixed_color >> 5) & 0x1f);
-  g_sim3d.fixed_add_b = (uint8_t)((ppu->fixed_color >> 10) & 0x1f);
+  s_sim3d.fixed_add_r = (uint8_t)(ppu->fixed_color & 0x1f);
+  s_sim3d.fixed_add_g = (uint8_t)((ppu->fixed_color >> 5) & 0x1f);
+  s_sim3d.fixed_add_b = (uint8_t)((ppu->fixed_color >> 10) & 0x1f);
   for (int value = 0; value < 32; value++)
-    g_sim3d.brightness_mult[value] =
+    s_sim3d.brightness_mult[value] =
         (uint8_t)ExpandColor5(value, ppu->brightness);
   /* Raw OBJ is redundant only when this exact frame has both a complete atlas
    * and a renderer that can consume it. Diagnostics retain the raw planes so
@@ -502,18 +502,18 @@ static SrResult PrepareCaptureFromPpuView(
   bool billboards_requested =
       (request->requested_features & kSimFeature_GroundProjection) &&
       (request->requested_features & kSimFeature_ObjectBillboards);
-  g_sim3d.billboard_renderer_ready = request->billboard_renderer_ready;
-  g_sim3d.raw_obj_planes = diagnostics_armed || !billboards_requested ||
+  s_sim3d.billboard_renderer_ready = request->billboard_renderer_ready;
+  s_sim3d.raw_obj_planes = diagnostics_armed || !billboards_requested ||
       !request->billboard_atlas_ready || !request->billboard_renderer_ready;
   uint32_t captured_plane_mask = kSim3DAllPlaneMask;
-  if (!g_sim3d.raw_obj_planes)
+  if (!s_sim3d.raw_obj_planes)
     captured_plane_mask &= ~Sim3D_ObjPlaneMask();
   if (!AllocatePlanes(captured_plane_mask)) {
-    g_sim3d.status = kSim3DCapture_AllocationFailure;
+    s_sim3d.status = kSim3DCapture_AllocationFailure;
     return SR_RESULT_OK;
   }
   if (!PrepareHudHandoff(api, runner, context, request->width)) {
-    g_sim3d.status = kSim3DCapture_OverlayConflict;
+    s_sim3d.status = kSim3DCapture_OverlayConflict;
     return SR_RESULT_OK;
   }
 
@@ -524,12 +524,12 @@ static SrResult PrepareCaptureFromPpuView(
   /* PpuSetOverlayCapture replaces geometry/flags/OAM ownership but preserves
    * a source's transparent-fill policy. Start from the exact prior values so
    * the ABI path has identical semantics; BG4 remains wholly untouched. */
-  memcpy(g_sim3d.active_captures, g_sim3d.prior_captures,
-         sizeof(g_sim3d.active_captures));
+  memcpy(s_sim3d.active_captures, s_sim3d.prior_captures,
+         sizeof(s_sim3d.active_captures));
   for (int source = SR_PPU_OVERLAY_BG1;
        source <= SR_PPU_OVERLAY_BG3; source++) {
     SrPpuOverlayCaptureState *capture =
-        &g_sim3d.active_captures[source];
+        &s_sim3d.active_captures[source];
     capture->x0 = (int16_t)-extra;
     capture->x1 = (int16_t)(request->width - extra);
     capture->y0 = 0;
@@ -538,9 +538,9 @@ static SrResult PrepareCaptureFromPpuView(
     capture->oam_first = 0u;
     capture->oam_count = 0u;
   }
-  if (g_sim3d.raw_obj_planes) {
+  if (s_sim3d.raw_obj_planes) {
     SrPpuOverlayCaptureState *capture =
-        &g_sim3d.active_captures[SR_PPU_OVERLAY_OBJ];
+        &s_sim3d.active_captures[SR_PPU_OVERLAY_OBJ];
     capture->x0 = (int16_t)-extra;
     capture->x1 = (int16_t)(request->width - extra);
     capture->y0 = 0;
@@ -551,19 +551,19 @@ static SrResult PrepareCaptureFromPpuView(
     capture->oam_count = 128u;
   } else {
     /* A null base binding clears the complete OBJ source family. */
-    memset(&g_sim3d.active_captures[SR_PPU_OVERLAY_OBJ], 0,
-           sizeof(g_sim3d.active_captures[SR_PPU_OVERLAY_OBJ]));
+    memset(&s_sim3d.active_captures[SR_PPU_OVERLAY_OBJ], 0,
+           sizeof(s_sim3d.active_captures[SR_PPU_OVERLAY_OBJ]));
   }
   if (!ExchangeCapturePolicy(
           api, runner, context->lifetime_generation,
-          g_sim3d.prior_captures, g_sim3d.active_captures)) {
-    g_sim3d.status = kSim3DCapture_OverlayConflict;
+          s_sim3d.prior_captures, s_sim3d.active_captures)) {
+    s_sim3d.status = kSim3DCapture_OverlayConflict;
     return SR_RESULT_OK;
   }
   /* Binding a primary surface replaces that source's complete priority-band
    * family. Remember ownership before the first binding so a partial bind is
    * repaired at the start of the next frame. */
-  g_sim3d.bindings_owned = true;
+  s_sim3d.bindings_owned = true;
   bool ok = true;
   ok &= BindCaptureSurface(
       api, runner, context->lifetime_generation, SR_PPU_OUTPUT_OVERLAY,
@@ -595,7 +595,7 @@ static SrResult PrepareCaptureFromPpuView(
       SR_PPU_OUTPUT_OVERLAY_PRIORITY, SR_PPU_OVERLAY_BG3, 1u,
       (uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg3High], pitch,
       kSim3DMaxHeight);
-  if (g_sim3d.raw_obj_planes) {
+  if (s_sim3d.raw_obj_planes) {
     ok &= BindCaptureSurface(
         api, runner, context->lifetime_generation, SR_PPU_OUTPUT_OVERLAY,
         SR_PPU_OVERLAY_OBJ, 0u,
@@ -620,22 +620,22 @@ static SrResult PrepareCaptureFromPpuView(
      * the next frame's host rebind repairs any partial surface ownership. */
     (void)ExchangeCapturePolicy(
         api, runner, context->lifetime_generation,
-        g_sim3d.active_captures, g_sim3d.prior_captures);
-    g_sim3d.status = kSim3DCapture_AllocationFailure;
+        s_sim3d.active_captures, s_sim3d.prior_captures);
+    s_sim3d.status = kSim3DCapture_AllocationFailure;
     return SR_RESULT_OK;
   }
 
-  g_sim3d.active = true;
-  g_sim3d.status = kSim3DCapture_Capturing;
-  g_sim3d.width = request->width;
-  g_sim3d.height = request->height;
-  g_sim3d.live_x0 = extra - ppu->margin_left;
-  g_sim3d.live_x1 =
+  s_sim3d.active = true;
+  s_sim3d.status = kSim3DCapture_Capturing;
+  s_sim3d.width = request->width;
+  s_sim3d.height = request->height;
+  s_sim3d.live_x0 = extra - ppu->margin_left;
+  s_sim3d.live_x1 =
       extra + (int)SR_PPU_NATIVE_WIDTH + ppu->margin_right;
-  g_sim3d.backdrop_argb =
+  s_sim3d.backdrop_argb =
       ActRaiser_BackdropArgb(context->cgram.data[0], ppu->brightness);
-  g_sim3d.diagnostic_layer_mask = request->diagnostic_layer_mask;
-  g_sim3d.captured_plane_mask = captured_plane_mask;
+  s_sim3d.diagnostic_layer_mask = request->diagnostic_layer_mask;
+  s_sim3d.captured_plane_mask = captured_plane_mask;
   transaction->prepared = true;
   return SR_RESULT_OK;
 }
@@ -645,23 +645,23 @@ bool Sim3D_PrepareCapture(
   if (!runner || !request || !request->town) return false;
   /* Retained for FinishCapture, which is where the diagnostic-only passes are
    * decided and which does not see the request. */
-  g_sim3d.inspector_active = request->inspector_active;
+  s_sim3d.inspector_active = request->inspector_active;
   if (!request->master_enabled) {
-    g_sim3d.status = kSim3DCapture_MasterOff;
+    s_sim3d.status = kSim3DCapture_MasterOff;
     return false;
   }
   if (!(request->requested_features & kSimFeature_SeparatedComposite)) {
-    g_sim3d.status = kSim3DCapture_NotRequested;
+    s_sim3d.status = kSim3DCapture_NotRequested;
     return false;
   }
   /* The flat texture is a real presentation dependency only when the
    * perspective ground stage is disabled. Retain that request here because
    * FinishCapture runs after scanout and no longer has the settings payload. */
-  g_sim3d.flat_stage_requested =
+  s_sim3d.flat_stage_requested =
       !(request->requested_features & kSimFeature_GroundProjection);
 #if AR_SIM3D_PICKER_TOPDOWN
   if (request->picker_active) {
-    g_sim3d.status = kSim3DCapture_Picker;
+    s_sim3d.status = kSim3DCapture_Picker;
     return false;
   }
 #else
@@ -671,7 +671,7 @@ bool Sim3D_PrepareCapture(
   (void)request->picker_active;
 #endif
   if (!request->renderer_ready) {
-    g_sim3d.status = kSim3DCapture_NoRenderer;
+    s_sim3d.status = kSim3DCapture_NoRenderer;
     return false;
   }
   const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
@@ -684,7 +684,7 @@ bool Sim3D_PrepareCapture(
           (SR_RUNNER_CAP_PPU_FRAME_TRANSACTIONS |
            SR_RUNNER_CAP_PPU_OUTPUT_CONTROL |
            SR_RUNNER_CAP_PPU_OBJ_RASTER)) {
-    g_sim3d.status = kSim3DCapture_UnsupportedPpu;
+    s_sim3d.status = kSim3DCapture_UnsupportedPpu;
     return false;
   }
   Sim3DPrepareTransaction transaction = {
@@ -698,7 +698,7 @@ bool Sim3D_PrepareCapture(
   };
   if (api->visit_ppu_frame_transaction(
           runner, &transaction_request) != SR_RESULT_OK) {
-    g_sim3d.status = kSim3DCapture_UnsupportedPpu;
+    s_sim3d.status = kSim3DCapture_UnsupportedPpu;
     return false;
   }
   return transaction.prepared;
@@ -859,11 +859,11 @@ static void MaybeDumpDemoArtifacts(const uint8_t *authentic_pixels,
   if (!DemoArtifactsArmable()) return;
   const char *prefix = g_demo_dump.prefix;
   bool triggered = g_demo_dump.on_mismatch
-      ? g_sim3d.mismatch_pixels > 0
+      ? s_sim3d.mismatch_pixels > 0
       : game_frame >= g_demo_dump.target_game_frame;
   if (!triggered ||
-      (g_sim3d.status != kSim3DCapture_Capturing &&
-       g_sim3d.status != kSim3DCapture_Ready))
+      (s_sim3d.status != kSim3DCapture_Capturing &&
+       s_sim3d.status != kSim3DCapture_Ready))
     return;
   g_demo_dump.attempted = true;
 
@@ -874,13 +874,13 @@ static void MaybeDumpDemoArtifacts(const uint8_t *authentic_pixels,
   snprintf(path_difference, sizeof(path_difference), "%s-difference.ppm",
            prefix);
   snprintf(path_json, sizeof(path_json), "%s.json", prefix);
-  bool ok = WritePpm(path_a, authentic_pixels, g_sim3d.width,
-                     g_sim3d.height, authentic_pitch) &&
+  bool ok = WritePpm(path_a, authentic_pixels, s_sim3d.width,
+                     s_sim3d.height, authentic_pitch) &&
       WritePpm(path_b, (const uint8_t *)g_sim3d_flat_pixels,
-               g_sim3d.width, g_sim3d.height, g_sim3d.width * 4) &&
+               s_sim3d.width, s_sim3d.height, s_sim3d.width * 4) &&
       WritePpm(path_difference,
                (const uint8_t *)g_sim3d_difference_pixels,
-               g_sim3d.width, g_sim3d.height, g_sim3d.width * 4);
+               s_sim3d.width, s_sim3d.height, s_sim3d.width * 4);
   static const char *const plane_names[kSim3DPlane_Count] = {
     "bg3-low", "obj0", "obj1", "bg2-low", "bg1-low",
     "obj2", "bg2-high", "bg1-high", "obj3", "bg3-high",
@@ -890,7 +890,7 @@ static void MaybeDumpDemoArtifacts(const uint8_t *authentic_pixels,
     snprintf(plane_path, sizeof(plane_path), "%s-plane-%02d-%s.ppm",
              prefix, plane, plane_names[plane]);
     ok &= WritePpm(plane_path, (const uint8_t *)g_sim3d_layer_pixels[plane],
-                   g_sim3d.width, g_sim3d.height, g_sim3d.width * 4);
+                   s_sim3d.width, s_sim3d.height, s_sim3d.width * 4);
   }
   FILE *metadata = sr_fopen(path_json, "w");
   if (metadata) {
@@ -899,9 +899,9 @@ static void MaybeDumpDemoArtifacts(const uint8_t *authentic_pixels,
                   "\"game_frame\":%u,\"width\":%d,\"height\":%d,"
                   "\"mismatch_pixels\":%u,"
                   "\"separated_hash\":\"%016llx\"}\n",
-                  (unsigned)game_frame, g_sim3d.width, g_sim3d.height,
-                  (unsigned)g_sim3d.mismatch_pixels,
-                  (unsigned long long)g_sim3d.separated_hash) > 0;
+                  (unsigned)game_frame, s_sim3d.width, s_sim3d.height,
+                  (unsigned)s_sim3d.mismatch_pixels,
+                  (unsigned long long)s_sim3d.separated_hash) > 0;
     ok &= fclose(metadata) == 0;
   } else {
     ok = false;
@@ -917,15 +917,15 @@ static uint32_t BuildDifference(const uint8_t *authentic_pixels,
                                 uint64_t *out_flat_hash) {
   uint32_t mismatch = 0;
   uint64_t hash = UINT64_C(1469598103934665603);
-  for (int y = 0; y < g_sim3d.height; y++) {
+  for (int y = 0; y < s_sim3d.height; y++) {
     const uint8_t *authentic =
         authentic_pixels + (size_t)y * (size_t)authentic_pitch;
     const uint32_t *flat =
-        &g_sim3d_flat_pixels[(size_t)y * (size_t)g_sim3d.width];
+        &g_sim3d_flat_pixels[(size_t)y * (size_t)s_sim3d.width];
     uint32_t *difference = write_image
         ? &g_sim3d_difference_pixels[
-              (size_t)y * (size_t)g_sim3d.width] : NULL;
-    for (int x = 0; x < g_sim3d.width; x++) {
+              (size_t)y * (size_t)s_sim3d.width] : NULL;
+    for (int x = 0; x < s_sim3d.width; x++) {
       uint32_t a;
       memcpy(&a, authentic + (size_t)x * sizeof(a), sizeof(a));
       uint32_t b = flat[x];
@@ -954,28 +954,28 @@ static uint32_t BuildDifference(const uint8_t *authentic_pixels,
 
 static uint32_t ComposeTownPixelWithoutHud(int x, int y,
                                            bool skip_bg3, bool skip_obj) {
-  bool live = x >= g_sim3d.live_x0 && x < g_sim3d.live_x1;
-  bool hud_composite_span = g_sim3d.hud_bg3 &&
-      y < g_sim3d.prior_captures[SR_PPU_OVERLAY_BG3].y1;
+  bool live = x >= s_sim3d.live_x0 && x < s_sim3d.live_x1;
+  bool hud_composite_span = s_sim3d.hud_bg3 &&
+      y < s_sim3d.prior_captures[SR_PPU_OVERLAY_BG3].y1;
   uint32_t color = (live || hud_composite_span)
-      ? g_sim3d.backdrop_argb : 0xff000000u;
+      ? s_sim3d.backdrop_argb : 0xff000000u;
 
   for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
-    if (!(g_sim3d.captured_plane_mask & (1u << plane))) continue;
+    if (!(s_sim3d.captured_plane_mask & (1u << plane))) continue;
     if (skip_bg3 &&
         (plane == kSim3DPlane_Bg3Low || plane == kSim3DPlane_Bg3High))
       continue;
     if (skip_obj &&
-        plane == Sim3D_ObjPlaneForPriority(g_sim3d.hud_obj_priority))
+        plane == Sim3D_ObjPlaneForPriority(s_sim3d.hud_obj_priority))
       continue;
     /* Same live-area rule the composed side uses: a wrapped-negative OBJ
      * rasterizes into margin columns the hardware leaves black. */
     if (!live && !hud_composite_span) continue;
     size_t index =
-        (size_t)y * (size_t)g_sim3d.width + (size_t)x;
+        (size_t)y * (size_t)s_sim3d.width + (size_t)x;
     uint32_t pixel = g_sim3d_layer_pixels[plane][index];
     if (!(pixel >> 24)) continue;
-    if (g_sim3d.object_half_add && IsObjPlane(plane) &&
+    if (s_sim3d.object_half_add && IsObjPlane(plane) &&
         ObjPixelUsesColorMath(pixel)) {
       uint32_t bg1_high =
           g_sim3d_layer_pixels[kSim3DPlane_Bg1High][index];
@@ -993,23 +993,23 @@ static uint32_t ComposeTownPixelWithoutHud(int x, int y,
 }
 
 static bool TownBg3HasPixel(size_t index) {
-  return ((g_sim3d.captured_plane_mask & (1u << kSim3DPlane_Bg3Low)) &&
+  return ((s_sim3d.captured_plane_mask & (1u << kSim3DPlane_Bg3Low)) &&
           (g_sim3d_layer_pixels[kSim3DPlane_Bg3Low][index] >> 24)) ||
-      ((g_sim3d.captured_plane_mask & (1u << kSim3DPlane_Bg3High)) &&
+      ((s_sim3d.captured_plane_mask & (1u << kSim3DPlane_Bg3High)) &&
        (g_sim3d_layer_pixels[kSim3DPlane_Bg3High][index] >> 24));
 }
 
 static bool ComposeTownBg3WinnerPixel(int x, int y, uint32_t *out_color) {
-  if (!out_color || x < 0 || x >= g_sim3d.width ||
-      y < 0 || y >= g_sim3d.height)
+  if (!out_color || x < 0 || x >= s_sim3d.width ||
+      y < 0 || y >= s_sim3d.height)
     return false;
   const size_t index =
-      (size_t)y * (size_t)g_sim3d.width + (size_t)x;
+      (size_t)y * (size_t)s_sim3d.width + (size_t)x;
   if (!TownBg3HasPixel(index)) return false;
   /* Painter order's last opaque plane wins. Do not read the remaining planes
    * once that winner is known; most of the full-height HUD rectangle is empty. */
   for (int plane = kSim3DPlane_Count - 1; plane >= 0; plane--) {
-    if ((g_sim3d.captured_plane_mask & (1u << plane)) == 0u)
+    if ((s_sim3d.captured_plane_mask & (1u << plane)) == 0u)
       continue;
     const uint32_t pixel = g_sim3d_layer_pixels[plane][index];
     if (!(pixel >> 24)) continue;
@@ -1025,7 +1025,7 @@ static void RestoreTownHudPixel(uint8_t *authentic_pixels,
                                 int authentic_pitch, int x, int y,
                                 bool skip_bg3, bool skip_obj) {
   size_t index =
-      (size_t)y * (size_t)g_sim3d.width + (size_t)x;
+      (size_t)y * (size_t)s_sim3d.width + (size_t)x;
   uint32_t color = ComposeTownPixelWithoutHud(x, y, skip_bg3, skip_obj);
   memcpy(authentic_pixels + (size_t)y * (size_t)authentic_pitch +
              (size_t)x * sizeof(color),
@@ -1036,30 +1036,30 @@ static void RestoreTownHudPixel(uint8_t *authentic_pixels,
     g_sim3d_layer_pixels[kSim3DPlane_Bg3High][index] = 0;
   }
   if (skip_obj) {
-    int plane = Sim3D_ObjPlaneForPriority(g_sim3d.hud_obj_priority);
-    if (g_sim3d.captured_plane_mask & (1u << plane))
+    int plane = Sim3D_ObjPlaneForPriority(s_sim3d.hud_obj_priority);
+    if (s_sim3d.captured_plane_mask & (1u << plane))
       g_sim3d_layer_pixels[plane][index] = 0;
   }
 }
 
 static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
                                  int authentic_pitch) {
-  if (!g_sim3d.hud_handoff || !g_sim3d.runner) return;
+  if (!s_sim3d.hud_handoff || !s_sim3d.runner) return;
   const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_SimHud);
 
   /* Recreate the two standard host HUD surfaces that the full-plane capture
    * temporarily superseded. BG3's two priority bands are mutually exclusive
    * per source pixel; the exact OAM-range raster was prepared before scanout. */
-  if (g_sim3d.hud_bg_pixels && g_sim3d.hud_bg_pitch) {
+  if (s_sim3d.hud_bg_pixels && s_sim3d.hud_bg_pitch) {
     const SrPpuOverlayCaptureState *capture =
-        &g_sim3d.prior_captures[SR_PPU_OVERLAY_BG3];
-    memset(g_sim3d.hud_bg_pixels, 0,
-           (size_t)g_sim3d.hud_bg_pitch * (size_t)capture->y1);
+        &s_sim3d.prior_captures[SR_PPU_OVERLAY_BG3];
+    memset(s_sim3d.hud_bg_pixels, 0,
+           (size_t)s_sim3d.hud_bg_pitch * (size_t)capture->y1);
     for (int y = capture->y0; y < capture->y1; y++) {
-      uint8_t *dst = g_sim3d.hud_bg_pixels +
-          (size_t)y * (size_t)g_sim3d.hud_bg_pitch;
+      uint8_t *dst = s_sim3d.hud_bg_pixels +
+          (size_t)y * (size_t)s_sim3d.hud_bg_pitch;
       for (int x = capture->x0; x < capture->x1; x++) {
-        int texture_x = x + (g_sim3d.width - kActRaiserAuthenticWidth) / 2;
+        int texture_x = x + (s_sim3d.width - kActRaiserAuthenticWidth) / 2;
         uint32_t color;
         if (ComposeTownBg3WinnerPixel(texture_x, y, &color))
           memcpy(dst + (size_t)texture_x * sizeof(color),
@@ -1067,15 +1067,15 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
       }
     }
   }
-  if (g_sim3d.hud_obj_pixels && g_sim3d.hud_obj_pitch) {
-    memset(g_sim3d.hud_obj_pixels, 0,
-           (size_t)g_sim3d.hud_obj_pitch * kActRaiserSimulationHudHeight);
+  if (s_sim3d.hud_obj_pixels && s_sim3d.hud_obj_pitch) {
+    memset(s_sim3d.hud_obj_pixels, 0,
+           (size_t)s_sim3d.hud_obj_pitch * kActRaiserSimulationHudHeight);
     for (int y = 0; y < kActRaiserSimulationHudHeight; y++) {
-      uint8_t *dst = g_sim3d.hud_obj_pixels +
-          (size_t)y * (size_t)g_sim3d.hud_obj_pitch;
-      memcpy(dst, &g_sim3d_hud_obj_mask[
-                      (size_t)y * (size_t)g_sim3d.width],
-             (size_t)g_sim3d.width * sizeof(uint32_t));
+      uint8_t *dst = s_sim3d.hud_obj_pixels +
+          (size_t)y * (size_t)s_sim3d.hud_obj_pitch;
+      memcpy(dst, &s_sim3d_hud_obj_mask[
+                      (size_t)y * (size_t)s_sim3d.width],
+             (size_t)s_sim3d.width * sizeof(uint32_t));
     }
   }
 
@@ -1088,28 +1088,28 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
    * Published SIM textures omit the HUD too; PresentSim3D adds the anchored
    * host overlay after either A/B profile has rendered. */
   int bg_x0 = 0, bg_y0 = 0, bg_x1 = 0, bg_y1 = 0;
-  if (g_sim3d.hud_bg3) {
+  if (s_sim3d.hud_bg3) {
     const SrPpuOverlayCaptureState *capture =
-        &g_sim3d.prior_captures[SR_PPU_OVERLAY_BG3];
-    int extra = (g_sim3d.width - kActRaiserAuthenticWidth) / 2;
+        &s_sim3d.prior_captures[SR_PPU_OVERLAY_BG3];
+    int extra = (s_sim3d.width - kActRaiserAuthenticWidth) / 2;
     bg_x0 = capture->x0 + extra;
     bg_x1 = capture->x1 + extra;
     bg_y0 = capture->y0;
     bg_y1 = capture->y1;
     if (bg_x0 < 0) bg_x0 = 0;
-    if (bg_x1 > g_sim3d.width) bg_x1 = g_sim3d.width;
+    if (bg_x1 > s_sim3d.width) bg_x1 = s_sim3d.width;
     if (bg_y0 < 0) bg_y0 = 0;
-    if (bg_y1 > g_sim3d.height) bg_y1 = g_sim3d.height;
+    if (bg_y1 > s_sim3d.height) bg_y1 = s_sim3d.height;
     for (int y = bg_y0; y < bg_y1; y++) {
       for (int x = bg_x0; x < bg_x1; x++) {
-        bool skip_obj = g_sim3d.hud_obj &&
-            g_sim3d_hud_obj_mask[
-                (size_t)y * (size_t)g_sim3d.width + (size_t)x] != 0;
+        bool skip_obj = s_sim3d.hud_obj &&
+            s_sim3d_hud_obj_mask[
+                (size_t)y * (size_t)s_sim3d.width + (size_t)x] != 0;
         /* Full-plane scanout already produced the correct authentic pixel
          * when neither promoted source exists here. Keep that pixel verbatim,
          * including its hardware colour math, and avoid a ten-plane rebuild. */
         if (!skip_obj && !TownBg3HasPixel(
-                (size_t)y * (size_t)g_sim3d.width + (size_t)x))
+                (size_t)y * (size_t)s_sim3d.width + (size_t)x))
           continue;
         RestoreTownHudPixel(authentic_pixels, authentic_pitch, x, y,
                             true, skip_obj);
@@ -1117,15 +1117,15 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
     }
   }
 
-  if (g_sim3d.hud_obj) {
-    int obj_y1 = g_sim3d.hud_obj_mask_y1;
-    if (obj_y1 > g_sim3d.height) obj_y1 = g_sim3d.height;
-    for (int y = g_sim3d.hud_obj_mask_y0;
+  if (s_sim3d.hud_obj) {
+    int obj_y1 = s_sim3d.hud_obj_mask_y1;
+    if (obj_y1 > s_sim3d.height) obj_y1 = s_sim3d.height;
+    for (int y = s_sim3d.hud_obj_mask_y0;
          y < obj_y1; y++) {
-      for (int x = g_sim3d.hud_obj_mask_x0;
-           x < g_sim3d.hud_obj_mask_x1; x++) {
-        if (!g_sim3d_hud_obj_mask[
-                (size_t)y * (size_t)g_sim3d.width + (size_t)x])
+      for (int x = s_sim3d.hud_obj_mask_x0;
+           x < s_sim3d.hud_obj_mask_x1; x++) {
+        if (!s_sim3d_hud_obj_mask[
+                (size_t)y * (size_t)s_sim3d.width + (size_t)x])
           continue;
         if (x >= bg_x0 && x < bg_x1 && y >= bg_y0 && y < bg_y1)
           continue;  /* The BG3 loop patched the union once already. */
@@ -1135,11 +1135,11 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
     }
   }
 
-  if (g_sim3d.api && g_sim3d.api->struct_size >=
+  if (s_sim3d.api && s_sim3d.api->struct_size >=
                          SNES_RUNNER_API_PPU_FRAME_TRANSACTION_SIZE)
     (void)ExchangeCapturePolicy(
-        g_sim3d.api, g_sim3d.runner, g_sim3d.lifetime_generation,
-        g_sim3d.active_captures, g_sim3d.prior_captures);
+        s_sim3d.api, s_sim3d.runner, s_sim3d.lifetime_generation,
+        s_sim3d.active_captures, s_sim3d.prior_captures);
   PerformanceMetrics_End(performance);
 }
 
@@ -1175,23 +1175,23 @@ static uint8_t ColorMathLayerBit(int plane) {
  * full brightness, which the capture gate requires), added with the hardware's
  * clamp at 31, and mapped forward again. */
 static void ApplyFixedColorAdd(void) {
-  if (!g_sim3d.fixed_add_mask) return;
+  if (!s_sim3d.fixed_add_mask) return;
 
   uint8_t inverse[256];
   memset(inverse, 0xFF, sizeof(inverse));
   for (int i = 0; i < 32; i++)
-    inverse[g_sim3d.brightness_mult[i]] = (uint8_t)i;
+    inverse[s_sim3d.brightness_mult[i]] = (uint8_t)i;
 
   const uint8_t add[3] = {
-    g_sim3d.fixed_add_r, g_sim3d.fixed_add_g, g_sim3d.fixed_add_b,
+    s_sim3d.fixed_add_r, s_sim3d.fixed_add_g, s_sim3d.fixed_add_b,
   };
   const int shift[3] = { 16, 8, 0 };  /* ARGB: red, green, blue */
-  size_t count = (size_t)g_sim3d.width * (size_t)g_sim3d.height;
+  size_t count = (size_t)s_sim3d.width * (size_t)s_sim3d.height;
 
   for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
-    if (!(g_sim3d.captured_plane_mask & (1u << plane))) continue;
+    if (!(s_sim3d.captured_plane_mask & (1u << plane))) continue;
     uint8_t bit = ColorMathLayerBit(plane);
-    if (!bit || !(g_sim3d.fixed_add_mask & bit) || !g_sim3d_layer_pixels[plane])
+    if (!bit || !(s_sim3d.fixed_add_mask & bit) || !g_sim3d_layer_pixels[plane])
       continue;
     bool obj = IsObjPlane(plane);
     uint32_t *pixels = g_sim3d_layer_pixels[plane];
@@ -1215,7 +1215,7 @@ static void ApplyFixedColorAdd(void) {
         }
         int sum = five + add[c];
         if (sum > 31) sum = 31;
-        out |= (uint32_t)g_sim3d.brightness_mult[sum] << shift[c];
+        out |= (uint32_t)s_sim3d.brightness_mult[sum] << shift[c];
       }
       pixels[i] = out;
     }
@@ -1240,8 +1240,8 @@ static void ReportFidelityChange(uint32_t mismatch, uint16_t game_frame) {
 
 void Sim3D_FinishCapture(uint8_t *authentic_pixels,
                          int authentic_pitch, uint16_t game_frame) {
-  if (!g_sim3d.active || !authentic_pixels ||
-      authentic_pitch < g_sim3d.width * 4)
+  if (!s_sim3d.active || !authentic_pixels ||
+      authentic_pitch < s_sim3d.width * 4)
     return;
 
   /* Before anything reads the planes, including the authentic rebuild inside
@@ -1254,34 +1254,34 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
   bool dump_armable = DemoArtifactsArmable();
   bool trace_armed = SimRenderMetadata_TraceArmed();
   bool diagnostics_armed =
-      g_sim3d.inspector_active || dump_armable || trace_armed;
+      s_sim3d.inspector_active || dump_armable || trace_armed;
 
   /* The promoted HUD owns the full width of its own rows, so those rows keep
    * every captured pixel; the same span the authentic-side restore uses. */
-  int hud_span_rows = g_sim3d.hud_bg3
+  int hud_span_rows = s_sim3d.hud_bg3
       ? kActRaiserSimulationHudHeight : 0;
   /* Ground projection consumes the individual planes directly. Building a
    * second full-frame CPU composite in that profile was pure dead work unless
    * a diagnostic reader needed its hash/difference. */
-  if (g_sim3d.flat_stage_requested || diagnostics_armed)
+  if (s_sim3d.flat_stage_requested || diagnostics_armed)
     ComposeFlatPixelsPolicy(
-        g_sim3d_flat_pixels, g_sim3d.width, g_sim3d.height,
-        g_sim3d.width * (int)sizeof(uint32_t), g_sim3d.backdrop_argb,
-        g_sim3d.live_x0, g_sim3d.live_x1, g_sim3d_layer_pixels,
-        g_sim3d.captured_plane_mask,
-        g_sim3d.object_half_add, hud_span_rows);
+        g_sim3d_flat_pixels, s_sim3d.width, s_sim3d.height,
+        s_sim3d.width * (int)sizeof(uint32_t), s_sim3d.backdrop_argb,
+        s_sim3d.live_x0, s_sim3d.live_x1, g_sim3d_layer_pixels,
+        s_sim3d.captured_plane_mask,
+        s_sim3d.object_half_add, hud_span_rows);
   uint32_t mismatch = 0;
   uint64_t flat_hash = 0;
   if (diagnostics_armed)
     mismatch = BuildDifference(authentic_pixels, authentic_pitch,
                                dump_armable, &flat_hash);
-  g_sim3d.mismatch_pixels = mismatch;
+  s_sim3d.mismatch_pixels = mismatch;
   /* Difference count and composed-frame hash are diagnostics now that a pixel
    * mismatch no longer vetoes the enhanced frame. Checkpoints arm the D1 trace,
    * while the inspector and dump paths identify themselves explicitly. Fold the
    * hash into the diagnostic comparison so those modes scan the frame once; in
    * ordinary play neither value has a reader and both stay zero. */
-  g_sim3d.separated_hash = flat_hash;
+  s_sim3d.separated_hash = flat_hash;
   /* A requested diagnostic dump is useful for failed fidelity gates too: it
    * preserves the authentic/composed/difference triplet that names which
    * pixels the recomposition got wrong. Since the gate stopped vetoing this is
@@ -1290,11 +1290,11 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
   PerformanceMetrics_End(performance);
 
   bool atlas_ready = SimRenderMetadata_AtlasReady();
-  if (!atlas_ready && !g_sim3d.raw_obj_planes) {
+  if (!atlas_ready && !s_sim3d.raw_obj_planes) {
     /* The atlas state is immutable between the pre-scanout decision and here,
      * so this is a broken producer contract rather than an ordinary fallback.
      * Fail closed instead of publishing a frame with neither sprite source. */
-    g_sim3d.status = kSim3DCapture_AtlasInvalid;
+    s_sim3d.status = kSim3DCapture_AtlasInvalid;
     RestoreTownHudPolicy(authentic_pixels, authentic_pitch);
     return;
   }
@@ -1306,8 +1306,8 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
    * checkpoints, where it is free: they still assert
    * separated_mismatch_pixels_total == 0, and the count and status below still
    * carry the failure into the D1 trace and the console. */
-  g_sim3d.separated_valid = true;
-  g_sim3d.status = !atlas_ready
+  s_sim3d.separated_valid = true;
+  s_sim3d.status = !atlas_ready
       ? kSim3DCapture_AtlasInvalid
       : diagnostics_armed && mismatch
           ? kSim3DCapture_PixelMismatch : kSim3DCapture_Ready;
@@ -1316,12 +1316,12 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
 
   /* A nonzero diagnostic mask intentionally produces an incomplete A1 while
    * retaining the full-composite equality result above as the safety gate. */
-  if (g_sim3d.flat_stage_requested && g_sim3d.diagnostic_layer_mask) {
+  if (s_sim3d.flat_stage_requested && s_sim3d.diagnostic_layer_mask) {
     ComposeFlatPixelsPolicy(
-        g_sim3d_flat_pixels, g_sim3d.width, g_sim3d.height,
-        g_sim3d.width * (int)sizeof(uint32_t), g_sim3d.backdrop_argb,
-        g_sim3d.live_x0, g_sim3d.live_x1, g_sim3d_layer_pixels,
-        g_sim3d.diagnostic_layer_mask, g_sim3d.object_half_add,
+        g_sim3d_flat_pixels, s_sim3d.width, s_sim3d.height,
+        s_sim3d.width * (int)sizeof(uint32_t), s_sim3d.backdrop_argb,
+        s_sim3d.live_x0, s_sim3d.live_x1, g_sim3d_layer_pixels,
+        s_sim3d.diagnostic_layer_mask, s_sim3d.object_half_add,
         hud_span_rows);
     /* The diagnostic dump above deliberately records the complete A/B image;
      * this masked rebuild is only the flat presentation selected on screen. */
@@ -1329,13 +1329,13 @@ void Sim3D_FinishCapture(uint8_t *authentic_pixels,
 }
 
 Sim3DCaptureContractFailure Sim3D_GetCaptureContractFailure(void) {
-  switch (g_sim3d.status) {
+  switch (s_sim3d.status) {
     case kSim3DCapture_NoRenderer:
       return kSim3DCaptureContract_RendererUnavailable;
     case kSim3DCapture_AllocationFailure:
       return kSim3DCaptureContract_SurfaceAllocation;
     case kSim3DCapture_AtlasInvalid:
-      return g_sim3d.separated_valid
+      return s_sim3d.separated_valid
           ? kSim3DCaptureContract_Ok
           : kSim3DCaptureContract_ObjectSourcesUnavailable;
     default:
@@ -1361,25 +1361,25 @@ static void InitOutputSurfaceView(SrPpuSurfaceView *view,
 void Sim3D_CaptureOutputSurfaceViews(Sim3DOutputSurfaceViews *views) {
   if (!views) return;
   memset(views, 0, sizeof(*views));
-  if (!g_sim3d.separated_valid || g_sim3d.width <= 0 ||
-      g_sim3d.height <= 0)
+  if (!s_sim3d.separated_valid || s_sim3d.width <= 0 ||
+      s_sim3d.height <= 0)
     return;
   const uint32_t pitch =
-      (uint32_t)g_sim3d.width * (uint32_t)sizeof(uint32_t);
+      (uint32_t)s_sim3d.width * (uint32_t)sizeof(uint32_t);
   for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
-    if ((g_sim3d.captured_plane_mask & (1u << plane)) == 0u) continue;
+    if ((s_sim3d.captured_plane_mask & (1u << plane)) == 0u) continue;
     InitOutputSurfaceView(
         &views->planes[plane],
         (const uint8_t *)g_sim3d_layer_pixels[plane], pitch,
-        (uint32_t)g_sim3d.height);
+        (uint32_t)s_sim3d.height);
   }
-  if (g_sim3d.hud_bg3)
+  if (s_sim3d.hud_bg3)
     InitOutputSurfaceView(
-        &views->hud_bg, g_sim3d.hud_bg_pixels, g_sim3d.hud_bg_pitch,
-        (uint32_t)g_sim3d.prior_captures[SR_PPU_OVERLAY_BG3].y1);
-  if (g_sim3d.hud_obj)
+        &views->hud_bg, s_sim3d.hud_bg_pixels, s_sim3d.hud_bg_pitch,
+        (uint32_t)s_sim3d.prior_captures[SR_PPU_OVERLAY_BG3].y1);
+  if (s_sim3d.hud_obj)
     InitOutputSurfaceView(
-        &views->hud_obj, g_sim3d.hud_obj_pixels, g_sim3d.hud_obj_pitch,
+        &views->hud_obj, s_sim3d.hud_obj_pixels, s_sim3d.hud_obj_pitch,
         kActRaiserSimulationHudHeight);
 }
 
@@ -1448,10 +1448,10 @@ void Sim3D_LogViewTransition(const SimFrameData *frame) {
 }
 
 bool Sim3D_TownCanvasNeedsPpuView(const SimFrameData *frame) {
-  return frame && frame->town && g_sim3d.separated_valid &&
-      (g_sim3d.status == kSim3DCapture_Ready ||
-       g_sim3d.status == kSim3DCapture_PixelMismatch ||
-       g_sim3d.status == kSim3DCapture_AtlasInvalid);
+  return frame && frame->town && s_sim3d.separated_valid &&
+      (s_sim3d.status == kSim3DCapture_Ready ||
+       s_sim3d.status == kSim3DCapture_PixelMismatch ||
+       s_sim3d.status == kSim3DCapture_AtlasInvalid);
 }
 
 void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
@@ -1486,7 +1486,7 @@ void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
     return;
   PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_CanvasRaster);
   SimTownCanvas_Render(frame->town, wram, vram->data, cgram->data,
-                       ppu->brightness, g_sim3d.backdrop_argb);
+                       ppu->brightness, s_sim3d.backdrop_argb);
   PerformanceMetrics_End(performance);
   performance = PerformanceMetrics_Begin(kPerformance_CanvasEnhance);
   if (frame->background_voxel_enabled) {
@@ -1503,9 +1503,9 @@ void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
 }
 
 SimRenderFeatureMask Sim3D_ImplementedFeatures(void) {
-  if (!g_sim3d.separated_valid) return 0;
+  if (!s_sim3d.separated_valid) return 0;
   SimRenderFeatureMask features = kSim3DShippedFeatures;
-  if (!g_sim3d.billboard_renderer_ready)
+  if (!s_sim3d.billboard_renderer_ready)
     features &= (SimRenderFeatureMask)~(
         (SimRenderFeatureMask)kSimFeature_ObjectBillboards);
   return features;
@@ -1590,8 +1590,8 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
    * expressed in captured-texture columns. Asking the producer rather than
    * re-deriving it means drawable reach and cover cannot drift apart. */
   {
-    int screen_x0 = g_sim3d.width > kActRaiserAuthenticWidth
-        ? (g_sim3d.width - kActRaiserAuthenticWidth) / 2 : 0;
+    int screen_x0 = s_sim3d.width > kActRaiserAuthenticWidth
+        ? (s_sim3d.width - kActRaiserAuthenticWidth) / 2 : 0;
     int clear_x0 = screen_x0 - tuning->sprite_margin_left;
     int clear_x1 = screen_x0 + kActRaiserAuthenticWidth +
         tuning->sprite_margin_right;
@@ -1646,22 +1646,22 @@ void Sim3D_AnnotateFrame(SimFrameData *frame, const Sim3DTuning *tuning) {
   /* The capture is centred on the authentic 256-column window, so this is the
    * captured-texture column that holds SNES x = 0 — the offset the underlay
    * needs to turn a texture column into a town pixel. */
-  frame->underlay_screen_x0 = g_sim3d.width > kActRaiserAuthenticWidth
-      ? (uint16_t)((g_sim3d.width - kActRaiserAuthenticWidth) / 2) : 0;
-  frame->separated_valid = g_sim3d.separated_valid;
-  frame->separated_status = (uint8_t)g_sim3d.status;
+  frame->underlay_screen_x0 = s_sim3d.width > kActRaiserAuthenticWidth
+      ? (uint16_t)((s_sim3d.width - kActRaiserAuthenticWidth) / 2) : 0;
+  frame->separated_valid = s_sim3d.separated_valid;
+  frame->separated_status = (uint8_t)s_sim3d.status;
   frame->separated_plane_mask =
-      (uint16_t)g_sim3d.captured_plane_mask;
-  frame->separated_mismatch_pixels = g_sim3d.mismatch_pixels;
-  frame->separated_hash = g_sim3d.separated_hash;
-  frame->separated_backdrop_argb = g_sim3d.backdrop_argb;
-  frame->separated_cgwsel = g_sim3d.cgwsel;
-  frame->separated_cgadsub = g_sim3d.cgadsub;
-  frame->separated_fixed_color = g_sim3d.fixed_color;
-  frame->separated_screen_main = g_sim3d.screen_main;
-  frame->separated_screen_sub = g_sim3d.screen_sub;
-  frame->separated_brightness = g_sim3d.brightness;
-  frame->object_half_add = g_sim3d.object_half_add;
+      (uint16_t)s_sim3d.captured_plane_mask;
+  frame->separated_mismatch_pixels = s_sim3d.mismatch_pixels;
+  frame->separated_hash = s_sim3d.separated_hash;
+  frame->separated_backdrop_argb = s_sim3d.backdrop_argb;
+  frame->separated_cgwsel = s_sim3d.cgwsel;
+  frame->separated_cgadsub = s_sim3d.cgadsub;
+  frame->separated_fixed_color = s_sim3d.fixed_color;
+  frame->separated_screen_main = s_sim3d.screen_main;
+  frame->separated_screen_sub = s_sim3d.screen_sub;
+  frame->separated_brightness = s_sim3d.brightness;
+  frame->object_half_add = s_sim3d.object_half_add;
   /* The camera snapshot resolves town and navigation controls separately.
    * Navigation uses native affine zoom with a visit-local inspection offset;
    * it must not inherit the persisted town camera's distance or tilt. */

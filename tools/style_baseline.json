@@ -499,9 +499,6 @@
  "src/actraiser/actraiser_story_snapshot.h": {
   "header-guard": 1
  },
- "src/actraiser/actraiser_text_ink_bindings.h": {
-  "header-guard": 1
- },
  "src/actraiser/actraiser_town_census.c": {
   "long-line": 4
  },
@@ -1160,155 +1157,11 @@
  "src/settings_overlay/settings_overlay_palette.h": {
   "header-guard": 1
  },
- "src/sim/menu/present_sim_menu.h": {
-  "header-comment": 1
- },
- "src/sim/menu/sim_menu_art.h": {
-  "header-comment": 1
- },
  "src/sim/menu/sim_menu_help.c": {
   "long-line": 9
  },
- "src/sim/menu/sim_menu_help.h": {
-  "header-comment": 1
- },
- "src/sim/menu/sim_menu_model.h": {
-  "header-comment": 1
- },
- "src/sim/mountains/sim_background_mountain_mesh.c": {
-  "static-g-prefix": 1
- },
- "src/sim/mountains/sim_background_mountain_mesh.h": {
-  "header-comment": 1
- },
- "src/sim/mountains/sim_background_mountain_objects.h": {
-  "header-comment": 1
- },
- "src/sim/mountains/sim_background_mountain_relief.h": {
-  "header-comment": 1
- },
- "src/sim/mountains/sim_background_mountain_render.c": {
-  "static-g-prefix": 1
- },
- "src/sim/mountains/sim_background_mountains.h": {
-  "header-comment": 1
- },
- "src/sim/sim3d/present_sim3d.c": {
-  "static-g-prefix": 1
- },
- "src/sim/sim3d/present_sim3d_underlay.h": {
-  "header-comment": 1
- },
- "src/sim/sim3d/sim3d.c": {
-  "static-g-prefix": 2
- },
- "src/sim/sim3d/sim3d.h": {
-  "header-comment": 1
- },
- "src/sim/sim3d/sim3d_depth_pass.h": {
-  "header-comment": 1
- },
- "src/sim/sim3d/sim_backdrop_render.h": {
-  "header-comment": 1
- },
- "src/sim/sim3d/sim_cloud_effect_backend.h": {
-  "header-comment": 1
- },
- "src/sim/sim_phase0_trace.c": {
-  "static-g-prefix": 5
- },
- "src/sim/sim_render_atlas.h": {
-  "header-comment": 1
- },
- "src/sim/sim_render_metadata.c": {
-  "static-g-prefix": 9
- },
- "src/sim/sim_render_metadata_trace.c": {
-  "static-g-prefix": 2
- },
- "src/sim/sim_world_map_compose.h": {
-  "header-comment": 1
- },
- "src/sim/town/sim_town_layout.h": {
-  "header-comment": 1
- },
- "src/sim/voxels/sim_background_voxel_biome.h": {
-  "header-comment": 1
- },
- "src/sim/voxels/sim_background_voxel_lighting.h": {
-  "header-comment": 1
- },
- "src/sim/voxels/sim_background_voxel_model_cache.h": {
-  "header-comment": 1
- },
- "src/sim/voxels/sim_background_voxel_models.h": {
-  "header-comment": 1
- },
- "src/sim/voxels/sim_background_voxel_palette.h": {
-  "header-comment": 1
- },
- "src/sim/voxels/sim_background_voxel_preset.h": {
-  "header-comment": 1
- },
- "src/sim/voxels/sim_background_voxel_proportions.h": {
-  "header-comment": 1
- },
- "src/sim/voxels/sim_background_voxel_quality.h": {
-  "header-comment": 1
- },
- "src/sim/voxels/sim_background_voxel_region.h": {
-  "header-comment": 1
- },
- "src/sim/voxels/sim_background_voxel_renderer.h": {
-  "header-comment": 1
- },
- "src/sim/voxels/sim_background_voxel_surface.h": {
-  "header-comment": 1
- },
- "src/sim/voxels/sim_background_voxel_types.h": {
-  "header-comment": 1
- },
- "src/sim/voxels/sim_background_voxels.c": {
-  "static-g-prefix": 4
- },
- "src/sim/voxels/sim_background_voxels.h": {
-  "header-comment": 1
- },
  "src/sim/world_nav/present_world_nav.c": {
   "long-line": 1
- },
- "src/sim/world_nav/sim_world_navigation_art.h": {
-  "header-comment": 1
- },
- "src/sim/world_nav/sim_world_navigation_capture.h": {
-  "header-comment": 1
- },
- "src/sim/world_nav/sim_world_navigation_cliffs.h": {
-  "header-comment": 1
- },
- "src/sim/world_nav/sim_world_navigation_clouds.h": {
-  "header-comment": 1
- },
- "src/sim/world_nav/sim_world_navigation_globe.h": {
-  "header-comment": 1
- },
- "src/sim/world_nav/sim_world_navigation_mountain_transition.h": {
-  "header-comment": 1
- },
- "src/sim/world_nav/sim_world_navigation_mountains.h": {
-  "header-comment": 1
- },
- "src/sim/world_nav/sim_world_navigation_palace.h": {
-  "header-comment": 1
- },
- "src/sim/world_nav/sim_world_navigation_scene.h": {
-  "header-comment": 1
- },
- "src/sim/world_nav/sim_world_navigation_sky_clouds.h": {
-  "header-comment": 1
- },
- "src/sim/world_nav/sim_world_navigation_towns.h": {
-  "header-comment": 1
  },
  "src/snes_bgr555.h": {
   "header-guard": 1

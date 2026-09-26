@@ -1,5 +1,11 @@
 #ifndef AR_SIM3D_H
 #define AR_SIM3D_H
+/* Sim3D: capture side of the enhanced 3D SIM town. Each frame it prepares the
+ * separated BG/OBJ planes and the whole-town canvas the presenter draws,
+ * resolves the frame's presentation tuning, and owns the host camera controls
+ * (orbit, zoom, drag). Drawing lives in present_sim3d*.c.
+ * Phase: capture.
+ * Tests: tests/sim3d_camera_test.c */
 
 #include "sim/voxels/sim_background_voxel_quality.h"
 #include "sim/voxels/sim_background_voxels.h"

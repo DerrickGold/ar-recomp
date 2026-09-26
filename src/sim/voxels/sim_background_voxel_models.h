@@ -1,5 +1,10 @@
 #ifndef AR_SIM_BACKGROUND_VOXEL_MODELS_H
 #define AR_SIM_BACKGROUND_VOXEL_MODELS_H
+/* SimBackgroundVoxelModel: builds each town object's voxel model (houses,
+ * landmarks, trees, bridges) as faces in authentic town pixels, within the
+ * face budget of the chosen detail level, plus conservative height bounds.
+ * Phase: pure.
+ * Tests: tests/sim_background_voxel_models_test.c */
 
 #include <stdbool.h>
 #include <stdint.h>

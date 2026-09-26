@@ -1,5 +1,10 @@
 #ifndef AR_SIM_BACKGROUND_VOXEL_MODEL_CACHE_H
 #define AR_SIM_BACKGROUND_VOXEL_MODEL_CACHE_H
+/* SimBackgroundVoxelModelCache: render-thread cache of compiled voxel models
+ * and their resolved per-face lighting, keyed by object, detail, style and
+ * lighting state, and shared by the town and globe views.
+ * Phase: present (render thread, CPU data only).
+ * Tests: tests/sim_background_voxel_model_cache_test.c */
 
 #include <stdint.h>
 #include <stddef.h>

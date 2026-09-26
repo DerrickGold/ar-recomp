@@ -46,7 +46,8 @@ MAX_COLUMNS = 100
 STATIC_G = re.compile(
     r'^static\s+(?!const\b)(?!inline\b)[^;(){}=]*?\bg_\w+\s*(\[[^\]]*\])*\s*(=[^;]*)?;')
 CASE_LABEL = re.compile(r'\s*(case\b.*?:|default\s*:)')
-GENERATED_MARK = re.compile(r'generated (by|from)|generated file|do not edit', re.I)
+GENERATED_MARK = re.compile(
+    r'generated (by|from)|generated file|do not edit|^/\* generated\b', re.I | re.M)
 
 
 def is_generated(path):
