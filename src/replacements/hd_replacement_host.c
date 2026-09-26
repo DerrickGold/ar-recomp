@@ -39,8 +39,10 @@ enum {
  * bindings exist because RemoveFromGame only engages for a bound source;
  * BG3 and OBJ reuse the dedicated HUD surfaces. */
 static uint8_t *s_overlay_pixels[SR_PPU_OVERLAY_SOURCE_COUNT];
-uint8_t *g_m7_overlay_pixels;
-ArRenderTexture g_m7_texture;
+static uint8_t *s_m7_overlay_pixels;
+static ArRenderTexture s_m7_texture;
+
+ArRenderTexture HdReplacementHost_Mode7Texture(void) { return s_m7_texture; }
 
 void HdReplacementHost_LoadTextures(void) {
   Settings_SetHdReplacementsAvailable(false);
@@ -145,7 +147,7 @@ void HdReplacementHost_BindSurfaces(void) {
   for (int i = 0; i < g_hd_replacement_count; i++) {
     const HdReplacement *entry = &g_hd_replacements[i];
     if (entry->plane == kHdPlane_Mode7 && entry->pixels &&
-        !g_m7_overlay_pixels && ArRenderDevice_IsReady(&g_render_device)) {
+        !s_m7_overlay_pixels && ArRenderDevice_IsReady(&g_render_device)) {
       const size_t capacity_pitch =
           (size_t)SR_PPU_SURFACE_MAX_WIDTH * kHdMode7Scale *
           kArgbBytesPerPixel;
@@ -153,7 +155,7 @@ void HdReplacementHost_BindSurfaces(void) {
           (size_t)g_snes_width * kHdMode7Scale * kArgbBytesPerPixel;
       const size_t capacity_bytes =
           capacity_pitch * kActRaiserAuthenticHeight * kHdMode7Scale;
-      g_m7_overlay_pixels = calloc(
+      s_m7_overlay_pixels = calloc(
           1, capacity_bytes);
       const ArRenderTextureDesc texture_desc = {
         .width = SR_PPU_SURFACE_MAX_WIDTH * kHdMode7Scale,
@@ -164,18 +166,18 @@ void HdReplacementHost_BindSurfaces(void) {
         .blend = kArRenderBlendMode_Alpha,
       };
       (void)ArRenderDevice_CreateTexture(
-          &g_render_device, &texture_desc, &g_m7_texture);
-      if (g_m7_overlay_pixels && ArRenderTexture_IsValid(g_m7_texture)) {
+          &g_render_device, &texture_desc, &s_m7_texture);
+      if (s_m7_overlay_pixels && ArRenderTexture_IsValid(s_m7_texture)) {
         if (output_available)
           (void)HostPpuOutputControl_Bind(
               &output, SR_PPU_OUTPUT_MODE7, 0u, 0u, kHdMode7Scale,
-              g_m7_overlay_pixels, capacity_bytes, active_pitch,
+              s_m7_overlay_pixels, capacity_bytes, active_pitch,
               kActRaiserAuthenticHeight * kHdMode7Scale, 0u);
       } else {
-        ArRenderDevice_DestroyTexture(&g_render_device, g_m7_texture);
-        g_m7_texture = ArRenderTexture_Invalid();
-        free(g_m7_overlay_pixels);
-        g_m7_overlay_pixels = NULL;
+        ArRenderDevice_DestroyTexture(&g_render_device, s_m7_texture);
+        s_m7_texture = ArRenderTexture_Invalid();
+        free(s_m7_overlay_pixels);
+        s_m7_overlay_pixels = NULL;
         fprintf(stderr,
                 "[hd-manifest] mode7 host-surface allocation failed: %s\n",
                 ArRenderDevice_LastError(&g_render_device));
@@ -220,10 +222,10 @@ void HdReplacementHost_RebindSurfaces(const HostPpuOutputControl *output) {
             kHostDisplayFramebufferHeight,
         pitch, kHostDisplayFramebufferHeight, 0u);
   }
-  if (g_m7_overlay_pixels)
+  if (s_m7_overlay_pixels)
     (void)HostPpuOutputControl_Bind(
         output, SR_PPU_OUTPUT_MODE7, 0u, 0u, kHdMode7Scale,
-        g_m7_overlay_pixels,
+        s_m7_overlay_pixels,
         (uint64_t)SR_PPU_SURFACE_MAX_WIDTH * kHdMode7Scale *
             kArgbBytesPerPixel * kActRaiserAuthenticHeight * kHdMode7Scale,
         (size_t)g_snes_width * kHdMode7Scale * kArgbBytesPerPixel,
@@ -253,10 +255,10 @@ void HdReplacementHost_Shutdown(void) {
     free(g_hd_replacements[i].pixels);
     g_hd_replacements[i].pixels = NULL;
   }
-  ArRenderDevice_DestroyTexture(&g_render_device, g_m7_texture);
-  g_m7_texture = ArRenderTexture_Invalid();
-  free(g_m7_overlay_pixels);
-  g_m7_overlay_pixels = NULL;
+  ArRenderDevice_DestroyTexture(&g_render_device, s_m7_texture);
+  s_m7_texture = ArRenderTexture_Invalid();
+  free(s_m7_overlay_pixels);
+  s_m7_overlay_pixels = NULL;
   for (int source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; source++) {
     free(s_overlay_pixels[source]);
     s_overlay_pixels[source] = NULL;

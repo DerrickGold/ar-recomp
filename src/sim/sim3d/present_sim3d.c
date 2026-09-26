@@ -1,14 +1,5 @@
-/* T2a: the SIM-mode 3D town + world-navigation renderer, split verbatim out of
- * present.c (which was ~4,550 lines, the majority of it this renderer). Every
- * definition here was moved unchanged; the split introduced no behaviour.
- *
- * The D6 no-live-globals invariant that present.c carries applies here too:
- * this file must NOT declare or extern g_ppu, g_settings, g_snes_width,
- * g_ws_extra, g_active_pixel_aspect, or call Settings_Visible*(). Every
- * present-time decision comes from the `const FrameSlot *` handed in.
- * present_internal.h is the present.c<->present_sim3d.c boundary; it exposes
- * present.c internals to this file, never live game state. */
-
+/* Town scene composition from captured inputs. Stage helpers own their GPU
+ * resources; this module selects their order and the active town view. */
 #include "sim/sim3d/present_sim3d_internal.h"
 #include "render/present_hud.h"
 #include "sim/menu/present_sim_menu.h"
@@ -39,7 +30,8 @@
 /* kPixelAspect_Crt43 and kDioramaCam_Free/kDioramaCam_Dynamic are plain enum
  * constants (not live state) — fine to pull in just for those. */
 #include "app/settings.h"
-#include "present/present_internal.h"
+#include "sim/sim3d/present_sim3d.h"
+#include "sim/sim3d/present_sim3d_environment.h"
 #include "render/render_device.h"
 #include "render/render_output.h"
 #include "sim/sim3d/present_sim3d_canvas.h"
@@ -2051,10 +2043,7 @@ PresentationOutcome PresentSim3D(const FrameSlot *slot) {
   Sim3DPerformance_EndPresentation();
   return outcome;
 }
-/* T2a: the sim half of PresentRendererResources_Reset. present.c keeps the
- * HUD-composite and effect-capability half and calls this. Defined after the
- * sim statics above because C requires file-scope statics be declared before
- * use. See the comment on PresentRendererResources_Reset for why this exists. */
+/* Town caches are released after the frame is finished using them. */
 void PresentSim3D_ResetResources(void) {
   PresentSim3DShadows_ResetResources();
   ArRenderDevice_DestroyTexture(&g_render_device, s_sim_rim_texture);
@@ -2068,5 +2057,4 @@ void PresentSim3D_ResetResources(void) {
   memset(s_sim_ground_mesh_cache, 0, sizeof(s_sim_ground_mesh_cache));
   SimBackgroundVoxelRenderer_Reset(&g_render_device);
   PresentSim3DClouds_ResetResources();
-  PresentWorldNav_ResetResources();
 }

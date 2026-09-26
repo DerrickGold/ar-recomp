@@ -23,6 +23,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RULES = {
+    'present/present_internal.h': [
+        'src/present/*.c', 'tests/present_frame_order_test.c'],
+    'sim/sim3d/present_sim3d_internal.h': [
+        'src/sim/sim3d/*.c', 'tests/present_world_nav_gpu_test.c'],
+    'settings_overlay/settings_overlay_internal.h': [
+        'src/settings_overlay/*', 'tests/settings_overlay_test.c'],
     'actraiser/enhancements/actraiser_enhancements_internal.h': [
         'src/actraiser/enhancements/*'],
     'actraiser/actraiser_rtl_internal.h': [
@@ -66,16 +72,21 @@ def tracked_sources():
 
 
 def self_test():
-    outside = {'src/present/present.c':
-               '#include "actraiser/enhancements/actraiser_enhancements_internal.h"\n',
-               'src/actraiser/enhancements/actraiser_frame_draw.c':
-               '#include "actraiser/enhancements/actraiser_enhancements_internal.h"\n'}
-    found = violations(outside)
-    if found != [('src/present/present.c',
-                  'actraiser/enhancements/actraiser_enhancements_internal.h')]:
-        print(f'self-test failed: {found}', file=sys.stderr)
-        return 1
-    print('Private header self-test: an outside include is reported, an inside one is not')
+    cases = [
+        ('actraiser/enhancements/actraiser_enhancements_internal.h',
+         'src/actraiser/enhancements/actraiser_frame_draw.c'),
+        ('present/present_internal.h', 'src/present/present_frame.c'),
+        ('sim/sim3d/present_sim3d_internal.h', 'src/sim/sim3d/present_sim3d.c'),
+        ('settings_overlay/settings_overlay_internal.h',
+         'src/settings_overlay/save_slots/save_slot_menu.c'),
+    ]
+    for header, owner in cases:
+        include = f'#include "{header}"\n'
+        found = violations({'src/main.c': include, owner: include})
+        if found != [('src/main.c', header)]:
+            print(f'self-test failed for {header}: {found}', file=sys.stderr)
+            return 1
+    print('Private header self-test: outside includes rejected; family includes accepted')
     return 0
 
 

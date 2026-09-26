@@ -32,7 +32,7 @@
  * Ownership mirrors the overlay contract: this module owns parsing and the
  * per-frame gate/capture policy (game side); the host owns image decoding,
  * textures and binding (hd_replacement_host.c) and final composition
- * (present.c). With no texture loaded (headless, missing file) an entry never
+ * (present_hd_replacements.c). With no texture loaded (headless, missing file) an entry never
  * requests a capture, so emulated output is untouched. */
 
 typedef enum HdPlane {
@@ -102,5 +102,10 @@ void HdReplacements_BindRunner(SrRunnerHandle *runner);
  * capture policies (HUD split, magic OAM) so source conflicts are detected
  * rather than clobbered. */
 void HdReplacements_EvaluateFrame(void);
+
+/* Capture after frame policy, before presentation. Texture handles remain owned
+ * by the host and must stay alive until this frame has been presented. */
+struct FrameSlot;
+void HdReplacements_CaptureFrame(struct FrameSlot *dst);
 
 #endif /* AR_HD_REPLACEMENTS_H */

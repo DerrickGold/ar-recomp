@@ -1,3 +1,4 @@
+#include "sim/world_nav/present_world_nav.h"
 /* Standalone world-navigation composition over the shared authored town
  * models and portable globe terrain/art. Camera-dependent memoization lives
  * here; model compilation/cache policy stays in the portable SIM modules.
@@ -1029,7 +1030,7 @@ static void ResetWorldNavigationWorkers(void) {
   s_world_workers_attempted = false;
 }
 
-/* The world-map half of PresentSim3D_ResetResources. All resource releases
+/* World navigation resource reset. All resource releases
  * stay private to this view; no cache survives a renderer replacement. */
 void PresentWorldNav_ResetResources(void) {
   ResetWorldNavigationWorkers();

@@ -1,5 +1,6 @@
-#include "present/present_internal.h"
-#include "sim/sim3d/present_sim3d_internal.h"
+#include "sim/world_nav/present_world_nav.h"
+#include "sim/world_nav/present_world_nav_composition.h"
+#include "sim/sim3d/present_sim3d_environment.h"
 #include "sim/world_nav/present_sim_globe.h"
 #include "sim/world_nav/present_world_nav_geometry.h"
 #include "sim/world_nav/present_world_nav_model_mesh.h"

@@ -11,6 +11,7 @@ typedef struct WorldNavigationCompositionTextures {
 } WorldNavigationCompositionTextures;
 const WorldNavigationCompositionTextures *WorldNavigationComposition_Get(void);
 void WorldNavigationComposition_Reset(void);
+void UploadWorldNavigationComposition(const FrameSlot *slot);
 ArRenderPointF WorldNavigationComposition_ProjectPoint(const FrameSlot *slot,
                                                        ArRenderRectI viewport, float x, float y);
 bool WorldNavigationComposition_DrawLayer(const FrameSlot *slot, ArRenderRectI viewport,

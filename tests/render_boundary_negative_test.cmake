@@ -20,6 +20,11 @@ if(NOT _result STREQUAL "0")
 endif()
 
 set(_cases
+    "sim/sim3d/present_sim3d.h"
+    "sim/sim3d/present_sim3d_environment.h"
+    "sim/world_nav/present_world_nav.h"
+    "replacements/present_hd_replacements.c"
+    "replacements/present_hd_replacements.h"
     "host/host_ppu_output.c"
     "host/host_ppu_output.h"
     "sim/sim3d/sim3d_textures.c"
@@ -134,6 +139,20 @@ foreach(_probe IN ITEMS "g_settings.hud_scale_percent" "g_ram[0]" "HostClock_Nan
     endif()
 endforeach()
 file(WRITE "${_hud_path}" "${_original}")
+
+set(_hd_path "${_scratch}/replacements/present_hd_replacements.c")
+file(READ "${_hd_path}" _original)
+foreach(_probe IN ITEMS "g_settings.hd_replacements" "g_ram[0]" "g_render_device" "g_hd_replacements[0]")
+    file(WRITE "${_hd_path}" "${_original}\nvoid hd_probe(void) { (void)${_probe}; }\n")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" "-DGAME_SOURCE_ROOT=${_scratch}" -P "${BOUNDARY_CHECK}"
+        RESULT_VARIABLE _result OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
+    if(_result STREQUAL "0" OR NOT _stderr MATCHES "HD presentation bypasses its captured inputs")
+        file(REMOVE_RECURSE "${_scratch}")
+        message(FATAL_ERROR "HD boundary accepted or misclassified ${_probe}: ${_stdout}${_stderr}")
+    endif()
+endforeach()
+file(WRITE "${_hd_path}" "${_original}")
 
 set(_diorama_path "${_scratch}/diorama/present_diorama.c")
 file(READ "${_diorama_path}" _original)

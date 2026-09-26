@@ -6,7 +6,7 @@
 #include "render/render_types.h"
 #include "sim/sim_render_metadata.h"
 
-/* SimShadowLight is declared in present_sim3d_internal.h: the world-map
+/* SimShadowLight is declared in present_sim3d_environment.h: the world-map
  * renderer shares it. */
 
 /* Where an object is actually drawn in world units, which is what its shadow

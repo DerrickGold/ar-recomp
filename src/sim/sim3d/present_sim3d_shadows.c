@@ -11,8 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "present/present_internal.h"
-#include "sim/sim3d/present_sim3d_internal.h"
+#include "sim/sim3d/present_sim3d_environment.h"
 #include "sim/sim3d/present_sim3d_project.h"
 #include "sim/sim3d/present_sim3d_shadows.h"
 #include "render/render_device.h"

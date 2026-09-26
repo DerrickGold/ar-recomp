@@ -11,6 +11,7 @@
 #include "present/display_geometry.h"
 #include "host/host_clock.h"
 #include "present/present.h"
+#include "replacements/hd_replacements.h"
 #include "snesrecomp/game/types.h"
 #include "app/settings.h"
 #include "diorama/diorama_capture.h"
@@ -94,7 +95,7 @@ static int CaptureElapsedTicks(int current_tick) {
 
 /* The sole FrameSlot writer.
  * Reads the coherent ABI PPU view, g_settings, g_snes_width/height,
- * g_scene_inspector_presentation, g_hd_replacements: legitimate here (this
+ * g_scene_inspector_presentation: legitimate here (this
  * runs on the game thread, immediately after RtlDrawPpuFrame() returns,
  * before the game thread touches any of this state again). present.c must
  * never do this; it only reads the FrameSlot this produces. */
@@ -338,16 +339,7 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
     }
   }
 
-  dst->hd_entry_count = 0;
-  for (int i = 0; i < g_hd_replacement_count && i < kHdMaxReplacements; i++) {
-    const HdReplacement *e = &g_hd_replacements[i];
-    FrameSlotHdEntry *d = &dst->hd_entries[dst->hd_entry_count++];
-    d->active = e->active;
-    d->source = e->source;
-    d->brightness_mod = e->brightness_mod;
-    d->image_inset_left = e->image_inset_left;
-    d->texture = e->texture;
-  }
+  HdReplacements_CaptureFrame(dst);
 
   dst->scene_inspector_enabled = g_settings.scene_inspector;
   dst->inspector_selection = *HostDevTools_InspectorPresentation();

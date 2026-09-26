@@ -62,7 +62,7 @@
  * constants (not live state) — fine to pull in just for those. */
 #include "app/settings.h"
 #include "host/host_video.h"
-#include "sim/sim3d/present_sim3d_internal.h"
+#include "sim/sim3d/present_sim3d_environment.h"
 #include "sim/world_nav/present_sim_globe.h"
 #include "sim/world_nav/present_sim_globe_mountains.h"
 #include "sim/world_nav/present_sim_globe_terrain.h"

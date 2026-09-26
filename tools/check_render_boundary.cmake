@@ -24,6 +24,13 @@ if(_hud_contents MATCHES
     message(FATAL_ERROR "HUD presentation bypasses its captured inputs")
 endif()
 
+# HD composition consumes the captured frame and explicit device/texture handles.
+file(READ "${GAME_SOURCE_ROOT}/replacements/present_hd_replacements.c" _hd_contents)
+if(_hd_contents MATCHES
+   "(^|[^A-Za-z0-9_])(g_settings|g_ram|g_ppu|g_render_device|g_hd_replacements|g_m7_texture|ActRaiser_ReadWram16)([^A-Za-z0-9_]|$)")
+    message(FATAL_ERROR "HD presentation bypasses its captured inputs")
+endif()
+
 # Reactive cameras receive observations and clocks explicitly. Host adapters
 # capture live state; the response models cannot silently recapture it.
 foreach(_camera IN ITEMS diorama/diorama_camera.c sim/sim3d/sim3d_camera_motion.c)
@@ -91,6 +98,8 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/replacements/hd_replacement_host.c"
     "${GAME_SOURCE_ROOT}/replacements/hd_replacement_host.h"
     "${GAME_SOURCE_ROOT}/replacements/hd_replacements.h"
+    "${GAME_SOURCE_ROOT}/replacements/present_hd_replacements.c"
+    "${GAME_SOURCE_ROOT}/replacements/present_hd_replacements.h"
     "${GAME_SOURCE_ROOT}/render/crt_post.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_upload.c"
     "${GAME_SOURCE_ROOT}/diorama/diorama_upload.h"
@@ -130,6 +139,8 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/sim/world_nav/present_sim_globe.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_internal.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_environment.h"
     "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_environment.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_clouds.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_clouds.h"
@@ -313,6 +324,8 @@ set(_resource_owner_files
     "${GAME_SOURCE_ROOT}/present/present.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_internal.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d.h"
+    "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_environment.h"
     "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_effects.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_shadows.c")
 set(_native_resource_violations "")

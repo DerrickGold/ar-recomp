@@ -25,6 +25,7 @@
 #include "diorama/present_diorama.h"
 #include "present/presentation_surface.h"
 #include "replacements/hd_replacement_host.h"
+#include "replacements/present_hd_replacements.h"
 #include "settings_overlay/settings_overlay_render.h"
 #include "dev/present_scene_inspector.h"
 #include "render/render_capabilities.h"
@@ -36,6 +37,9 @@
 /* Pixel-aspect enum constants only; never live settings. */
 #include "app/settings.h"
 #include "present/present_internal.h"
+#include "sim/sim3d/present_sim3d.h"
+#include "sim/world_nav/present_world_nav.h"
+#include "sim/world_nav/present_world_nav_composition.h"
 #include "present/render_comparison.h"
 #include "app/session_fatal.h"
 #include "present/presentation_upload_mirror.h"
@@ -97,12 +101,6 @@ static bool PresentationConsumesMainPpuTexture(const FrameSlot *slot) {
             kSimFeature_SeparatedComposite) != 0);
 }
 
-static ArRenderRectF ToRenderRectF(ArRenderRectI rectangle) {
-  return (ArRenderRectF){
-    (float)rectangle.x, (float)rectangle.y,
-    (float)rectangle.w, (float)rectangle.h,
-  };
-}
 
 ArRenderRectI ComputePresentationViewport(
     ArRenderDevice *device, bool ignore_aspect_ratio,
@@ -126,61 +124,6 @@ ArRenderRectI ComputePresentationViewportWithOutput(
   return ArPresentationLayout_ResolveViewport(
       out_w, out_h, ignore_aspect_ratio,
       pixel_aspect == kPixelAspect_Crt43, visible_width, snes_height);
-}
-
-static void PresentMode7Composite(const FrameSlot *slot,
-                                  ArRenderRectI viewport) {
-  if (!ArRenderTexture_IsValid(g_m7_texture) || !slot->m7_active) return;
-  const ArRenderRectI src = {
-    slot->visible_x0 * kHdMode7Scale, 0,
-    slot->visible_width * kHdMode7Scale,
-    slot->snes_height * kHdMode7Scale,
-  };
-  const ArRenderRectF source = ToRenderRectF(src);
-  const ArRenderRectF destination = ToRenderRectF(viewport);
-  (void)ArRenderDevice_DrawTexture(
-      &g_render_device, g_m7_texture, &source, &destination);
-}
-
-/* Draw every active HD replacement over the region its capture removed this
- * frame. Master brightness is resolved on the host texture so INIDISP fades
- * apply to the substituted art; forced blank suppresses it entirely. */
-static void PresentHdReplacements(const FrameSlot *slot,
-                                  ArRenderRectI viewport) {
-  if (slot->inidisp & 0x80) return;
-
-  int vis_w = slot->visible_width;
-  int vis_x0 = slot->visible_x0;
-  int extra = (slot->snes_width - kFrameSlotAuthenticWidth) / 2;
-  double scale_x = (double)viewport.w / vis_w;
-  double scale_y = (double)viewport.h / slot->snes_height;
-
-  for (int i = 0; i < slot->hd_entry_count; i++) {
-    const FrameSlotHdEntry *entry = &slot->hd_entries[i];
-    if (!entry->active || !ArRenderTexture_IsValid(entry->texture)) continue;
-    const FrameSlotOverlayCapture *capture =
-        &slot->overlay_captures[entry->source];
-    if (capture->x1 <= capture->x0 || capture->y1 <= capture->y0 ||
-        !(capture->flags & kFrameSlotOverlayFlag_RemoveFromGame))
-      continue;
-    int dx0 = (int)((capture->x0 + entry->image_inset_left + extra - vis_x0) *
-                    scale_x + 0.5);
-    int dx1 = (int)((capture->x1 + extra - vis_x0) * scale_x + 0.5);
-    int dy0 = (int)(capture->y0 * scale_y + 0.5);
-    int dy1 = (int)(capture->y1 * scale_y + 0.5);
-    const ArRenderRectI dst = {
-      viewport.x + dx0, viewport.y + dy0, dx1 - dx0, dy1 - dy0,
-    };
-    if (dst.w <= 0 || dst.h <= 0) continue;
-
-    const uint8_t mod = entry->brightness_mod
-        ? (uint8_t)((slot->inidisp & 0xf) * 255 / 15) : 255;
-    const float modulation = (float)mod / 255.0f;
-    const ArRenderRectF destination = ToRenderRectF(dst);
-    (void)ArRenderDevice_DrawTextureTinted(
-        &g_render_device, entry->texture, NULL, &destination,
-        (ArRenderColorF){modulation, modulation, modulation, 1.0f});
-  }
 }
 
 void PresentUpload(const FrameSlot *slot) {
@@ -268,24 +211,9 @@ void PresentUpload(const FrameSlot *slot) {
   if (hud.background_bytes) Sim3DPerformance_AddUpload(hud.background_bytes);
   if (hud.object_bytes) Sim3DPerformance_AddUpload(hud.object_bytes);
 
-  if (ArRenderTexture_IsValid(g_m7_texture) && slot->m7_active) {
-    const ArRenderRectI src = {
-      slot->visible_x0 * kHdMode7Scale, 0,
-      slot->visible_width * kHdMode7Scale,
-      slot->snes_height * kHdMode7Scale,
-    };
-    const SrPpuSurfaceView *surface =
-        PresentationSurface_Bound(&slot->ppu_surfaces.mode7);
-    const uint8_t *pixels =
-        PresentationSurface_Region(surface, src.x, src.y, src.w, src.h);
-    const ArRenderRectI destination = {src.x, src.y, src.w, src.h};
-    if (pixels && ArRenderDevice_UpdateTexture(
-            &g_render_device, g_m7_texture, &destination, pixels,
-            (int)surface->pitch_bytes)) {
-      Sim3DPerformance_AddUpload(
-          (uint64_t)src.w * (uint64_t)src.h * sizeof(uint32_t));
-    }
-  }
+  const uint64_t mode7_bytes = PresentHdReplacements_UploadMode7(
+      &g_render_device, HdReplacementHost_Mode7Texture(), slot);
+  if (mode7_bytes) Sim3DPerformance_AddUpload(mode7_bytes);
 
   Sim3DTextures_Upload(&g_render_device, slot);
   UploadWorldNavigationComposition(slot);
@@ -495,6 +423,7 @@ void PresentRendererResources_Reset(void) {
   PresentActionEffects_Reset(&g_render_device);
   EffectRenderer_Reset();
   PresentSim3D_ResetResources();
+  PresentWorldNav_ResetResources();
   PresentSimMenu_Reset();
 }
 
@@ -615,7 +544,8 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
     return;
   }
 
-  PresentMode7Composite(slot, local_viewport);
+  PresentHdReplacements_DrawMode7(
+      &g_render_device, HdReplacementHost_Mode7Texture(), slot, local_viewport);
   if (!PresentActionEffects_DrawFlatPlanes(
           &g_render_device, slot, local_viewport)) {
     ArRenderOutputFrame_Abort(&output_frame);
@@ -633,7 +563,7 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   }
   PresentActionHeat_End(&g_render_device, slot, output_viewport);
   if (SessionFatal_Requested()) return;
-  PresentHdReplacements(slot, output_viewport);
+  PresentHdReplacements_DrawScreen(&g_render_device, slot, output_viewport);
   /* The captured BG3 surface is transparent outside its visible cells, so it
    * can be the final single unit without covering a BG1/BG2 HD replacement.
    * Drawing replacements first also makes the ordering explicit for future

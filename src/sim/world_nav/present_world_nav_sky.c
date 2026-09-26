@@ -1,7 +1,7 @@
 /* Palace-only backdrop, mist and density banks. Owns its atlas publication
  * state, but neither the caller's output/depth pass nor native foreground. */
 #include "sim/world_nav/present_world_nav_sky.h"
-#include "sim/sim3d/present_sim3d_internal.h"
+#include "sim/sim3d/present_sim3d_environment.h"
 #include "sim/world_nav/sim_world_navigation_sky_clouds.h"
 #include "sim/sim3d/sim3d_performance.h"
 #include <math.h>

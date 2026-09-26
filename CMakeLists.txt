@@ -2063,6 +2063,14 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_sim3d_textures COMMAND actraiser_sim3d_textures_test)
 
+    add_executable(actraiser_present_hd_replacements_test
+        tests/present_hd_replacements_test.c src/replacements/present_hd_replacements.c
+        src/render/render_device.c)
+    target_include_directories(actraiser_present_hd_replacements_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_present_hd_replacements_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_present_hd_replacements COMMAND actraiser_present_hd_replacements_test)
+
     add_executable(actraiser_present_hud_test
         tests/present_hud_test.c src/render/present_hud.c
         src/render/hud_layout.c src/render/text_cell_composite.c src/render/render_device.c

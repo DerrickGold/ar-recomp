@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "replacements/hd_replacements.h"
+#include "present/present.h"
 #include "app/settings.h"
 
 static int g_failures;
@@ -397,6 +398,29 @@ static void TestRegionalTitleCoverage(void) {
   free(rgba);
 }
 
+static void TestCapturedReplacementLifetime(void) {
+  static FrameSlot frame;
+  CHECK(HdReplacements_Load(WriteManifest(kTitleManifest)) == 1);
+  HdReplacement *entry = &g_hd_replacements[0];
+  entry->active = true;
+  entry->texture = (ArRenderTexture){42};
+  entry->image_inset_left = 3;
+  HdReplacements_CaptureFrame(&frame);
+  CHECK(frame.hd_entry_count == 1);
+  CHECK(frame.hd_entries[0].active && frame.hd_entries[0].texture.value == 42);
+  CHECK(frame.hd_entries[0].source == entry->source);
+  CHECK(frame.hd_entries[0].brightness_mod == entry->brightness_mod);
+  CHECK(frame.hd_entries[0].image_inset_left == 3);
+  entry->active = false;
+  entry->texture = ArRenderTexture_Invalid();
+  entry->image_inset_left = 0;
+  CHECK(frame.hd_entries[0].active && frame.hd_entries[0].texture.value == 42);
+  CHECK(frame.hd_entries[0].image_inset_left == 3);
+  g_hd_replacement_count = 0;
+  HdReplacements_CaptureFrame(&frame);
+  CHECK(frame.hd_entry_count == 0);
+}
+
 int main(void) {
   TestParseTitleEntry();
   TestParseRejections();
@@ -404,6 +428,7 @@ int main(void) {
   TestMode7Entries();
   TestEvaluateGates();
   TestRegionalTitleCoverage();
+  TestCapturedReplacementLifetime();
   if (g_failures) {
     fprintf(stderr, "hd manifest tests: %d failure(s)\n", g_failures);
     return 1;

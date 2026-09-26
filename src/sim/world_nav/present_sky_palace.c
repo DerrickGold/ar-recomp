@@ -1,5 +1,5 @@
 #include "sim/world_nav/present_sky_palace.h"
-#include "present/present_internal.h"
+#include "sim/world_nav/present_world_nav.h"
 #include "present/presentation_surface.h"
 #include "sim/world_nav/sim_world_navigation_palace.h"
 

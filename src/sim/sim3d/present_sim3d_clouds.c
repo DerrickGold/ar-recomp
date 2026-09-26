@@ -2,11 +2,11 @@
  * the shroud mesh that covers the permanently actor-free ground beyond OAM's
  * reach. Its camera-dependent mesh is retained; drift changes only sampling.
  *
- * The noise and the layer table are shared with the world-map sky through
- * present_sim3d_internal.h, so the two skies cannot drift apart in look. */
+ * The layer table is shared with the world-map sky through
+ * present_sim3d_environment.h; town texture generation stays here. */
 
 #include "sim/sim3d/present_sim3d_clouds.h"
-#include "sim/sim3d/present_sim3d_internal.h"
+#include "sim/sim3d/present_sim3d_environment.h"
 #include "sim/sim3d/present_sim3d_project.h"
 
 #include <math.h>
@@ -282,7 +282,9 @@ static float CloudNoise(float x, float y, int period) {
   return top + (bottom - top) * fy;
 }
 
-uint32_t SimCloudTexel(int x, int y) {
+enum { kSimCloudTexturePixels = 512 };
+
+static uint32_t SimCloudTexel(int x, int y) {
   float amplitude = 0.5f, total = 0.0f, sum = 0.0f;
   int period = 4;
   for (int octave = 0; octave < kSimCloudOctaves; octave++) {

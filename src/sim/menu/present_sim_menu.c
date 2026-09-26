@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
-#include "present/present_internal.h"
 #include "settings_overlay/settings_overlay_artwork.h"
 #include "app/session_fatal.h"
 #include "render/localized_text_presenter.h"

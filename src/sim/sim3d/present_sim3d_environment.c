@@ -1,9 +1,10 @@
 /* Shared immutable atmosphere style and frame-owned directional light.
  * Kept separate from town effect resources so globe rendering and focused
  * GPU tests use the same definitions without linking the town compositor. */
-#include "sim/sim3d/present_sim3d_internal.h"
+#include "sim/sim3d/present_sim3d_environment.h"
 
 #include <math.h>
+#include "present/present.h"
 
 const float kPi = 3.14159265f;
 const SimCloudLayer kSimCloudLayers[kSimCloudLayerCount] = {

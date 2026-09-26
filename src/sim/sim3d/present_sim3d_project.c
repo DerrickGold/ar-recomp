@@ -1,7 +1,6 @@
 /* Actor/effect placement over the shared SIM camera geometry. Native path
  * positions and altitude classes stay here; geometry.c owns their common
  * texture/world projection without depending on live actor/effect state. */
-#include "sim/sim3d/present_sim3d_internal.h"
 #include "sim/sim3d/present_sim3d_project.h"
 #include "sim/sim3d/sim3d.h"
 #include "sim/world_nav/sim_world_navigation_terrain.h"

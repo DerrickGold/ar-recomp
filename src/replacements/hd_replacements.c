@@ -9,6 +9,7 @@
 #include "replacements/hd_replacements.h"
 #include "replacements/manifest_utils.h"
 #include "app/settings.h"
+#include "present/present.h"
 
 HdReplacement g_hd_replacements[kHdMaxReplacements];
 int g_hd_replacement_count;
@@ -314,5 +315,19 @@ void HdReplacements_EvaluateFrame(void) {
       continue;
     }
     entry->active = result == SR_RESULT_OK;
+  }
+}
+
+/* Freeze policy results and borrowed texture handles for synchronous presentation. */
+void HdReplacements_CaptureFrame(FrameSlot *dst) {
+  dst->hd_entry_count = 0;
+  for (int i = 0; i < g_hd_replacement_count && i < kHdMaxReplacements; i++) {
+    const HdReplacement *e = &g_hd_replacements[i];
+    FrameSlotHdEntry *d = &dst->hd_entries[dst->hd_entry_count++];
+    d->active = e->active;
+    d->source = e->source;
+    d->brightness_mod = e->brightness_mod;
+    d->image_inset_left = e->image_inset_left;
+    d->texture = e->texture;
   }
 }
