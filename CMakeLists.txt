@@ -2415,7 +2415,7 @@ if(BUILD_TESTING)
         src/render/presentation_layout.c
         src/render/render_output.c
         src/platform/sdl/render_sdl.c
-        src/platform/sdl/host_clock_sdl.c
+        tests/host_clock_stub.c
         src/host/host_display_status.c
         src/app/input_map.c
         src/app/user_data_dir.c

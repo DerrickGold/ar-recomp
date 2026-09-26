@@ -165,9 +165,6 @@ void SettingsOverlay_Tick(void);
 struct SettingDesc;
 long SettingsOverlay_HoldStepForTest(const struct SettingDesc *desc,
                                      uint64_t held_ms);
-/* Drives the hold tick with an injected clock so a test can cross the ramp
- * thresholds deterministically without sleeping. */
-void SettingsOverlay_TickAtForTest(uint64_t now_ms);
 
 /* Returns true when the event belongs to the overlay and must not reach the
  * host hotkey/SNES input paths. F2 is deliberately left available so visual

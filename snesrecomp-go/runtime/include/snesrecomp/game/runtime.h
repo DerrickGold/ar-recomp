@@ -129,6 +129,8 @@ void RtlApuProfileReset(void);
 void RtlApuProfileRead(RtlApuProfile *out_profile);
 void RtlApuProfileRecordHostWait(uint64_t wait_ns, bool lock_wait);
 uint64_t RtlApuProfileTakeAudioWaitMax(void);
+/** Cumulative SPC catch-up calls/cycles; either output may be NULL. */
+void RtlApuProfileReadCatchupStats(uint64_t *calls, uint64_t *cycles);
 
 enum {
     kJoypadL_A = 0x80, kJoypadL_X = 0x40,

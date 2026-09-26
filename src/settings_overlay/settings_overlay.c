@@ -1914,12 +1914,6 @@ long SettingsOverlay_HoldStepForTest(const struct SettingDesc *desc,
   return desc ? HoldStepMultiplier((const SettingDesc *)desc, held_ms) : 0;
 }
 
-void SettingsOverlay_TickAtForTest(uint64_t now_ms) {
-  SettingsOverlay_Refresh();
-  TickHold(now_ms);
-  SettingsOverlay_Refresh();
-}
-
 /* Logical menu commands. Both the keyboard path and the gamepad path funnel
  * through these so the two never drift apart, and so a rebound pad drives the
  * menu with the player's own buttons. */

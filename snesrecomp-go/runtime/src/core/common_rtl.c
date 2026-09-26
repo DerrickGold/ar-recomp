@@ -83,6 +83,10 @@ static int g_audio_output_rate = 44100;
 static double g_audio_phase;
 static bool g_apu_catchup_suppressed;
 
+void RtlApuProfileReadCatchupStats(uint64_t *calls, uint64_t *cycles) {
+  snes_catchup_stats(calls, cycles);
+}
+
 bool RtlApuProfileIsEnabled(void) {
     int enabled = atomic_load_explicit(
         &s_apu_profile_enabled, memory_order_relaxed);

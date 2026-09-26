@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "diorama_layer_editor.h"
+#include "host_clock_stub.h"
 #include "action/action_bg_tuner.h"
 #include "present/display_geometry.h"
 #include "app/input_map.h"
@@ -2603,7 +2604,8 @@ int main(int argc, char **argv) {
           kSettingChange_Unchanged);
     CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
     CHECK(g_settings.hud_scale_percent == 0);
-    SettingsOverlay_TickAtForTest(SDL_GetTicks() + 5000);
+    HostClockStub_SetMilliseconds(HostClock_Milliseconds() + 5000);
+    SettingsOverlay_Tick();
     CHECK(g_settings.hud_scale_percent == 0);  /* held Right stops at wrap */
     char formatted[32];
     CHECK(Settings_FormatValue(hud_scale, formatted, sizeof(formatted)) > 0);
@@ -2851,9 +2853,11 @@ int main(int argc, char **argv) {
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));  /* press up */
   int after_press = g_settings.input_cam_sensitivity;
   CHECK(after_press == 151);  /* one base step up from 150 */
-  uint64_t base = SDL_GetTicks();
-  for (int i = 1; i <= 40; i++)
-    SettingsOverlay_TickAtForTest(base + (uint64_t)i * 60);
+  uint64_t base = HostClock_Milliseconds();
+  for (int i = 1; i <= 40; i++) {
+    HostClockStub_SetMilliseconds(base + (uint64_t)i * 60);
+    SettingsOverlay_Tick();
+  }
   CHECK(g_settings.input_cam_sensitivity > after_press + 5);  /* accelerated */
   CHECK(g_settings.input_cam_sensitivity <= 400);  /* normalized to range */
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, false, false));  /* release */
