@@ -161,3 +161,22 @@ records are loaded for the relationships the preview can represent and remain
 preserved; they are not background-tile authoring targets. The in-game debug
 editor is therefore optional for diagnosis, while this standalone editor owns
 the action-background configuration consumed by the game.
+
+## Source layout and checks
+
+`build.sh` compiles/runs the shared ROM exporter; `build.py` bundles the result.
+`editor.head.html` owns styles and `editor.body.html` owns markup and script order.
+The browser code is authored in ordinary JavaScript files, checked by the local
+`make check-quality` gate:
+
+- `native_frame.js`: room decoding, raster state and native-frame parity.
+- `layer_editor.js`: sparse classification/INI model and the 2D map view.
+- `painting.js`: undo/redo and brush gestures.
+- `diorama_view.js`: WebGL preview and orbit interaction.
+- `editor.js`: reference actor, UI controls and startup.
+- `help.js`: the embedded help content.
+
+These are ordered classic scripts with shared bindings. The builder embeds them
+verbatim so the exported editor still opens offline as one file. The Python
+bundle tests check script order, missing optional INI input and lossless data
+embedding, including text containing HTML script delimiters.

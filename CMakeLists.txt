@@ -547,6 +547,11 @@ if(BUILD_TESTING)
                 ${CMAKE_SOURCE_DIR}/tests/pipeline_performance_tool_test.py)
         set_tests_properties(actraiser_pipeline_performance_tool PROPERTIES
             ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+        add_test(NAME actraiser_action_editor_build
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/action_editor_build_test.py)
+        set_tests_properties(actraiser_action_editor_build PROPERTIES
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
         add_test(NAME actraiser_sim3d_metadata_tool
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tests/sim3d_metadata_tool_test.py)
