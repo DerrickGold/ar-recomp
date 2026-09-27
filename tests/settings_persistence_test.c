@@ -4,7 +4,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CHECK(x) do { if (!(x)) { fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #x); abort(); } } while (0)
+#define CHECK(x)                                                                                   \
+  do {                                                                                             \
+    if (!(x)) {                                                                                    \
+      fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #x);                                      \
+      abort();                                                                                     \
+    }                                                                                              \
+  } while (0)
 static SDL_Semaphore *s_started, *s_release;
 static unsigned s_writes;
 static char s_last[32];

@@ -14,7 +14,7 @@ static void TestHorizonBounds(void) {
   const float limb[3] = {sinf(1.6f), 0, cosf(1.6f)};
   assert(SimWorldNavigationGlobe_CapOccluded(eye, limb, 0, 1, 1));
   assert(!SimWorldNavigationGlobe_CapOccluded(eye, limb, 0, 1.5f, 1)); /* Tower tip. */
-  assert(!SimWorldNavigationGlobe_CapOccluded(eye, limb, .4f, 1, 1)); /* Overhanging crown. */
+  assert(!SimWorldNavigationGlobe_CapOccluded(eye, limb, .4f, 1, 1));  /* Overhanging crown. */
   assert(!SimWorldNavigationGlobe_CapOccluded(eye, limb, NAN, 1, 1));
   assert(!SimWorldNavigationGlobe_CapOccluded(eye, limb, 0, INFINITY, 1));
   assert(!SimWorldNavigationGlobe_CapOccluded(eye, limb, 0, 1, -1));
@@ -45,14 +45,16 @@ static void TestHorizonBounds(void) {
                 const float azimuth = sector * 6.28318530718f / 16;
                 const float r = radius * height / 3;
                 const float point[3] = {
-                  r * (cosf(angle) * axis[0] + sinf(angle) * cosf(azimuth) * cosf(theta)),
-                  r * sinf(angle) * sinf(azimuth),
-                  r * (cosf(angle) * axis[2] - sinf(angle) * cosf(azimuth) * sinf(theta)),
+                    r * (cosf(angle) * axis[0] + sinf(angle) * cosf(azimuth) * cosf(theta)),
+                    r * sinf(angle) * sinf(azimuth),
+                    r * (cosf(angle) * axis[2] - sinf(angle) * cosf(azimuth) * sinf(theta)),
                 };
                 float ray[3], closest[3];
-                for (int i = 0; i < 3; i++) ray[i] = point[i] - camera[i];
+                for (int i = 0; i < 3; i++)
+                  ray[i] = point[i] - camera[i];
                 const float at = fminf(1, fmaxf(0, -Dot(camera, ray) / Dot(ray, ray)));
-                for (int i = 0; i < 3; i++) closest[i] = camera[i] + at * ray[i];
+                for (int i = 0; i < 3; i++)
+                  closest[i] = camera[i] + at * ray[i];
                 assert(Dot(closest, closest) < 1);
               }
         }
@@ -61,7 +63,7 @@ static void TestHorizonBounds(void) {
 
 static void TestChart(float radius) {
   const float focus[][2] = {
-    {96, 64}, {64, 64}, {32, 80}, {32, 48}, {80, 112}, {48, 16}, {0, 128},
+      {96, 64}, {64, 64}, {32, 80}, {32, 48}, {80, 112}, {48, 16}, {0, 128},
   };
   float a[3], b[3], rotated_a[3], rotated_b[3];
   for (int y = 0; y <= 128; y += 4) {
@@ -100,17 +102,16 @@ static void TestChart(float radius) {
        * Model height uses this same metric to retain authored proportions. */
       assert(fabsf(dx_length / dy_length - 1) < 0.001f);
       assert(fabsf(Dot(dx, dy) / (dx_length * dy_length)) < 0.001f);
-      assert(fabsf(dx_length * (2 * radius) - scale)
-          < 0.0001f);
+      assert(fabsf(dx_length * (2 * radius) - scale) < 0.0001f);
       for (unsigned f = 0; f < sizeof(focus) / sizeof(focus[0]); f++) {
         for (int spin = 0; spin < 4; spin++) {
           SimWorldNavigationGlobeFrame frame;
-          assert(SimWorldNavigationGlobe_BuildFrameAtRadius(
-              radius, focus[f][0], focus[f][1], spin * 1.57079632679f, &frame));
+          assert(SimWorldNavigationGlobe_BuildFrameAtRadius(radius, focus[f][0], focus[f][1],
+                                                            spin * 1.57079632679f, &frame));
           if (radius == kSimWorldNavigationGlobeRadiusTiles) {
             SimWorldNavigationGlobeFrame legacy;
-            assert(SimWorldNavigationGlobe_BuildFrame(
-                focus[f][0], focus[f][1], spin * 1.57079632679f, &legacy));
+            assert(SimWorldNavigationGlobe_BuildFrame(focus[f][0], focus[f][1],
+                                                      spin * 1.57079632679f, &legacy));
             assert(!memcmp(&legacy, &frame, sizeof(frame)));
           }
           assert(fabsf(Dot(frame.right, frame.up)) < 0.000001f);
@@ -123,8 +124,7 @@ static void TestChart(float radius) {
           /* Moving the Palace is a rigid rotation: angular distances between
            * arbitrary town/terrain points must not change with focus/spin. */
           assert(fabsf(Dot(rotated_a, rotated_b) - original_dot) < 0.000001f);
-          SimWorldNavigationGlobe_TransformNormal(
-              &frame, frame.outward, rotated_a);
+          SimWorldNavigationGlobe_TransformNormal(&frame, frame.outward, rotated_a);
           assert(fabsf(rotated_a[0]) < 0.000001f);
           assert(fabsf(rotated_a[1]) < 0.000001f);
           assert(fabsf(rotated_a[2] - 1) < 0.000001f);
@@ -146,7 +146,8 @@ static void TestChart(float radius) {
   SimWorldNavigationGlobeFrame frame;
   assert(!SimWorldNavigationGlobe_BuildFrame(64, 64, NAN, &frame));
   for (unsigned f = 0; f < sizeof(focus) / sizeof(focus[0]); f++) {
-    assert(SimWorldNavigationGlobe_BuildFrameAtRadius(radius, focus[f][0], focus[f][1], .37f, &frame));
+    assert(
+        SimWorldNavigationGlobe_BuildFrameAtRadius(radius, focus[f][0], focus[f][1], .37f, &frame));
     const SimWorldNavigationGlobeFrame original = frame;
     assert(SimWorldNavigationGlobe_OrbitFrame(&frame, 0, 0));
     assert(!memcmp(&frame, &original, sizeof(frame)));
@@ -155,7 +156,8 @@ static void TestChart(float radius) {
     for (int yaw = -8; yaw <= 8; yaw++)
       for (int pitch = -4; pitch <= 4; pitch++) {
         frame = original;
-        assert(SimWorldNavigationGlobe_OrbitFrame(&frame, yaw * .7853981634f, pitch * .3926990817f));
+        assert(
+            SimWorldNavigationGlobe_OrbitFrame(&frame, yaw * .7853981634f, pitch * .3926990817f));
         assert(fabsf(Dot(frame.right, frame.up)) < .000001f);
         assert(fabsf(Dot(frame.right, frame.outward)) < .000001f);
         assert(fabsf(Dot(frame.up, frame.outward)) < .000001f);
@@ -163,7 +165,7 @@ static void TestChart(float radius) {
         assert(fabsf(Dot(frame.up, frame.up) - 1) < .000001f);
         assert(fabsf(Dot(frame.outward, frame.outward) - 1) < .000001f);
         SimWorldNavigationGlobe_TransformNormal(&frame, original.outward, a);
-        if (yaw == 4 && !pitch) assert(a[2] < -.999999f); /* Real far hemisphere. */
+        if (yaw == 4 && !pitch) assert(a[2] < -.999999f);       /* Real far hemisphere. */
         if (!yaw && pitch == 4) assert(fabsf(a[2]) < .000001f); /* Pole, no singularity. */
       }
   }

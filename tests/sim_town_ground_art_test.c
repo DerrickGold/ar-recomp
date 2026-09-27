@@ -8,9 +8,13 @@
 #include "byte_order.h"
 
 static int failures;
-#define CHECK(e) do { if (!(e)) { \
-  fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #e); failures++; \
-} } while (0)
+#define CHECK(e)                                                                                   \
+  do {                                                                                             \
+    if (!(e)) {                                                                                    \
+      fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #e);                                      \
+      failures++;                                                                                  \
+    }                                                                                              \
+  } while (0)
 
 /* Independent oracle: feed the existing live-town renderer the native
  * loader's exact VRAM, palette and byte-swapped metatile definitions. Check
@@ -20,7 +24,11 @@ static void CheckAgainstTownCanvas(const uint8_t *rom, size_t size) {
   uint16_t *vram = calloc(0x8000, sizeof(*vram));
   uint16_t cgram[256] = {0};
   CHECK(wram && vram);
-  if (!wram || !vram) { free(wram); free(vram); return; }
+  if (!wram || !vram) {
+    free(wram);
+    free(vram);
+    return;
+  }
   CHECK(SimTownGroundArt_Init(rom, size));
   for (unsigned i = 0; i < 2048; i += 2) {
     wram[0x2100 + i] = rom[0xC881A + i + 1];
@@ -30,11 +38,9 @@ static void CheckAgainstTownCanvas(const uint8_t *rom, size_t size) {
     const uint8_t town = variant & 2 ? 6 : 1;
     const uint8_t tier = variant & 1 ? 2 : 1;
     for (unsigned i = 0; i < 0x2000; i++)
-      vram[i] = ByteOrder_ReadLe16(
-          rom + 0x60000 + (variant & 1) * 0x4000 + i * 2);
+      vram[i] = ByteOrder_ReadLe16(rom + 0x60000 + (variant & 1) * 0x4000 + i * 2);
     for (unsigned i = 0; i < 128; i++)
-      cgram[i] = ByteOrder_ReadLe16(
-          rom + (variant & 2 ? 0xE3D93 : 0xE3B93) + i * 2);
+      cgram[i] = ByteOrder_ReadLe16(rom + (variant & 2 ? 0xE3D93 : 0xE3B93) + i * 2);
     SimTownCanvas_Reset();
     const uint32_t backdrop = 0xFF3F17B5u;
     /* Isolate source index $21 with the independent town renderer. Expanded
@@ -49,39 +55,44 @@ static void CheckAgainstTownCanvas(const uint8_t *rom, size_t size) {
       uint8_t mask[256];
       CHECK(SimTownCanvas_RenderTerrainMetatile(wram, (uint8_t)tile, expected));
       CHECK(SimTownGroundArt_ColorIndexMask(town, tier, (uint8_t)tile, 0x21, mask));
-      for (unsigned p = 0; p < 256; p++) CHECK(mask[p] == (expected[p] == 0xFFFF0000u));
+      for (unsigned p = 0; p < 256; p++)
+        CHECK(mask[p] == (expected[p] == 0xFFFF0000u));
       CHECK(SimTownGroundArt_ColorIndexMask(town, tier, (uint8_t)tile, 0, mask));
-      for (unsigned p = 0; p < 256; p++) CHECK(mask[p] == 0);
+      for (unsigned p = 0; p < 256; p++)
+        CHECK(mask[p] == 0);
     }
     /* Independent palette-identity oracle across ALL native DMA phases.
      * A land/transparent texel in any phase protects the complete metatile. */
     bool open_water[256];
     uint8_t water_pixels[256][256];
-    memset(water_pixels,1,sizeof(water_pixels));
-    for (unsigned tile=0;tile<256;++tile) open_water[tile]=true;
-    memset(cgram,0,sizeof(cgram)); cgram[0x17]=cgram[0x18]=31;
-    for (unsigned phase=0;phase<kSimTownGroundAnimationFrames;++phase) {
+    memset(water_pixels, 1, sizeof(water_pixels));
+    for (unsigned tile = 0; tile < 256; ++tile)
+      open_water[tile] = true;
+    memset(cgram, 0, sizeof(cgram));
+    cgram[0x17] = cgram[0x18] = 31;
+    for (unsigned phase = 0; phase < kSimTownGroundAnimationFrames; ++phase) {
       if (SimTownGroundArt_AnimationAvailable())
-        for (unsigned word=0;word<0x80;++word)
-          vram[word]=ByteOrder_ReadLe16(rom+0x60000+(variant&1)*0x4000+phase*0x100+word*2);
-      SimTownCanvas_Render(town,wram,vram,cgram,15,backdrop);
-      for (unsigned tile=0;tile<256;++tile) {
+        for (unsigned word = 0; word < 0x80; ++word)
+          vram[word] =
+              ByteOrder_ReadLe16(rom + 0x60000 + (variant & 1) * 0x4000 + phase * 0x100 + word * 2);
+      SimTownCanvas_Render(town, wram, vram, cgram, 15, backdrop);
+      for (unsigned tile = 0; tile < 256; ++tile) {
         uint32_t expected[256];
-        CHECK(SimTownCanvas_RenderTerrainMetatile(wram,tile,expected));
-        for (unsigned p=0;p<256;++p) {
-          open_water[tile] &= expected[p]==0xffff0000u;
-          water_pixels[tile][p] &= expected[p]==0xffff0000u;
+        CHECK(SimTownCanvas_RenderTerrainMetatile(wram, tile, expected));
+        for (unsigned p = 0; p < 256; ++p) {
+          open_water[tile] &= expected[p] == 0xffff0000u;
+          water_pixels[tile][p] &= expected[p] == 0xffff0000u;
         }
       }
     }
-    for (unsigned tile=0;tile<256;++tile) {
+    for (unsigned tile = 0; tile < 256; ++tile) {
       uint8_t mask[256];
-      CHECK(SimTownGroundArt_OpenWaterMask(town,tier,tile,mask));
-      CHECK(!memcmp(mask,water_pixels[tile],sizeof(mask)));
-      CHECK(SimTownGroundArt_IsOpenWater(town,tier,tile)==open_water[tile]);
-      CHECK(SimTownGroundArt_IsOpenWater(town,tier,tile)==open_water[tile]); /* cached */
-      CHECK(SimTownGroundArt_OpenWaterMask(town,tier,tile,mask));
-      CHECK(!memcmp(mask,water_pixels[tile],sizeof(mask))); /* cached */
+      CHECK(SimTownGroundArt_OpenWaterMask(town, tier, tile, mask));
+      CHECK(!memcmp(mask, water_pixels[tile], sizeof(mask)));
+      CHECK(SimTownGroundArt_IsOpenWater(town, tier, tile) == open_water[tile]);
+      CHECK(SimTownGroundArt_IsOpenWater(town, tier, tile) == open_water[tile]); /* cached */
+      CHECK(SimTownGroundArt_OpenWaterMask(town, tier, tile, mask));
+      CHECK(!memcmp(mask, water_pixels[tile], sizeof(mask))); /* cached */
     }
     memcpy(cgram, original_cgram, sizeof(cgram));
     for (uint8_t phase = 0; phase < kSimTownGroundAnimationFrames; phase++) {
@@ -90,13 +101,14 @@ static void CheckAgainstTownCanvas(const uint8_t *rom, size_t size) {
        * from a previously animated VRAM window (which corrupts later phases). */
       if (SimTownGroundArt_AnimationAvailable())
         for (unsigned word = 0; word < 0x80; word++)
-          vram[word] = ByteOrder_ReadLe16(rom + 0x60000 +
-              (variant & 1) * 0x4000 + phase * 0x100 + word * 2);
+          vram[word] =
+              ByteOrder_ReadLe16(rom + 0x60000 + (variant & 1) * 0x4000 + phase * 0x100 + word * 2);
       SimTownCanvas_Render(town, wram, vram, cgram, 15, backdrop);
       for (unsigned tile = 0; tile < 256; tile++) {
         uint32_t expected[256];
         CHECK(SimTownCanvas_RenderTerrainMetatile(wram, (uint8_t)tile, expected));
-        const uint32_t *actual = SimTownGroundArt_AnimatedMetatile(town, tier, (uint8_t)tile, phase);
+        const uint32_t *actual =
+            SimTownGroundArt_AnimatedMetatile(town, tier, (uint8_t)tile, phase);
         CHECK(actual);
         if (!actual) continue;
         for (unsigned p = 0; p < 256; p++)
@@ -119,13 +131,14 @@ static void CheckAgainstTownCanvas(const uint8_t *rom, size_t size) {
   SimTownGroundArt_Shutdown();
   CHECK(!SimTownGroundArt_Available());
   CHECK(!SimTownGroundArt_Metatile(1, 1, 8));
-  CHECK(!SimTownGroundArt_IsOpenWater(1,1,0x25));
-  CHECK(!SimTownGroundArt_IsOpenWater(0,1,0x25));
-  CHECK(!SimTownGroundArt_IsOpenWater(7,1,0x25));
+  CHECK(!SimTownGroundArt_IsOpenWater(1, 1, 0x25));
+  CHECK(!SimTownGroundArt_IsOpenWater(0, 1, 0x25));
+  CHECK(!SimTownGroundArt_IsOpenWater(7, 1, 0x25));
   uint8_t mask[256], original[256];
-  memset(mask,0x5a,sizeof(mask)); memcpy(original,mask,sizeof(mask));
-  CHECK(!SimTownGroundArt_OpenWaterMask(1,1,0x25,mask));
-  CHECK(!memcmp(mask,original,sizeof(mask)));
+  memset(mask, 0x5a, sizeof(mask));
+  memcpy(original, mask, sizeof(mask));
+  CHECK(!SimTownGroundArt_OpenWaterMask(1, 1, 0x25, mask));
+  CHECK(!memcmp(mask, original, sizeof(mask)));
   free(wram);
   free(vram);
 }
@@ -143,8 +156,8 @@ static void TestSyntheticSources(void) {
     rom[i] = (uint8_t)(i * 17 + i / 11);
   for (unsigned tile = 0; tile < 256; tile++)
     for (unsigned q = 0; q < 4; q++) {
-      const uint16_t entry = (uint16_t)(
-          ((tile * 7 + q) & 511) | 0x0200 | ((tile & 7) << 10) | (q << 14));
+      const uint16_t entry =
+          (uint16_t)(((tile * 7 + q) & 511) | 0x0200 | ((tile & 7) << 10) | (q << 14));
       rom[0xC881A + tile * 8 + q * 2] = (uint8_t)(entry >> 8);
       rom[0xC881B + tile * 8 + q * 2] = (uint8_t)entry;
     }
@@ -161,10 +174,10 @@ static void TestSyntheticSources(void) {
   uint8_t mask[256], untouched[256];
   memset(mask, 0x5A, sizeof(mask));
   memcpy(untouched, mask, sizeof(mask));
-  CHECK(!SimTownGroundArt_OpenWaterMask(0,1,8,mask));
-  CHECK(!SimTownGroundArt_OpenWaterMask(7,1,8,mask));
-  CHECK(!SimTownGroundArt_OpenWaterMask(1,1,8,NULL));
-  CHECK(!memcmp(mask,untouched,sizeof(mask)));
+  CHECK(!SimTownGroundArt_OpenWaterMask(0, 1, 8, mask));
+  CHECK(!SimTownGroundArt_OpenWaterMask(7, 1, 8, mask));
+  CHECK(!SimTownGroundArt_OpenWaterMask(1, 1, 8, NULL));
+  CHECK(!memcmp(mask, untouched, sizeof(mask)));
   CHECK(!SimTownGroundArt_ColorIndexMask(0, 1, 8, 0x21, mask));
   CHECK(!SimTownGroundArt_ColorIndexMask(7, 1, 8, 0x21, mask));
   CHECK(!SimTownGroundArt_ColorIndexMask(4, 1, 8, 128, mask));
@@ -173,15 +186,19 @@ static void TestSyntheticSources(void) {
   uint32_t copy[4][4][256];
   for (unsigned variant = 0; variant < 4; variant++) {
     for (uint8_t phase = 0; phase < 4; phase++) {
-      const uint32_t *pixels = SimTownGroundArt_AnimatedMetatile(
-          variant & 2 ? 6 : 1, variant & 1 ? 2 : 1, 0, phase);
+      const uint32_t *pixels =
+          SimTownGroundArt_AnimatedMetatile(variant & 2 ? 6 : 1, variant & 1 ? 2 : 1, 0, phase);
       CHECK(pixels);
-      if (!pixels) { free(rom); return; }
+      if (!pixels) {
+        free(rom);
+        return;
+      }
       memcpy(copy[variant][phase], pixels, sizeof(copy[variant][phase]));
     }
     CHECK(memcmp(copy[variant][0], copy[variant][1], sizeof(copy[variant][0])));
-    CHECK(!memcmp(copy[variant][0], SimTownGroundArt_Metatile(
-        variant & 2 ? 6 : 1, variant & 1 ? 2 : 1, 0), sizeof(copy[variant][0])));
+    CHECK(!memcmp(copy[variant][0],
+                  SimTownGroundArt_Metatile(variant & 2 ? 6 : 1, variant & 1 ? 2 : 1, 0),
+                  sizeof(copy[variant][0])));
   }
   /* Reinitialization drops every decoded atlas. Overwrite the original ROM
    * before the first decode in this new lifetime, not after a cache hit. */
@@ -190,8 +207,8 @@ static void TestSyntheticSources(void) {
   /* Lazy decoding must use owned source bytes, never a borrowed ROM lifetime. */
   for (unsigned variant = 0; variant < 4; variant++) {
     for (uint8_t phase = 0; phase < 4; phase++) {
-      const uint32_t *pixels = SimTownGroundArt_AnimatedMetatile(
-          variant & 2 ? 6 : 2, variant & 1 ? 2 : 1, 0, phase);
+      const uint32_t *pixels =
+          SimTownGroundArt_AnimatedMetatile(variant & 2 ? 6 : 2, variant & 1 ? 2 : 1, 0, phase);
       CHECK(pixels);
       if (pixels) CHECK(!memcmp(pixels, copy[variant][phase], sizeof(copy[variant][phase])));
     }

@@ -16,17 +16,16 @@ typedef struct TestVfs {
 static int failures;
 static uint8_t wram[kActRaiserWramSize];
 
-#define CHECK(expression) do {                                             \
-  if (!(expression)) {                                                     \
-    fprintf(stderr, "%s:%d: check failed: %s\n",                          \
-            __FILE__, __LINE__, #expression);                              \
-    ++failures;                                                            \
-  }                                                                        \
-} while (0)
+#define CHECK(expression)                                                                          \
+  do {                                                                                             \
+    if (!(expression)) {                                                                           \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expression);               \
+      ++failures;                                                                                  \
+    }                                                                                              \
+  } while (0)
 
 static bool ReadFile(void *context, const char *path, size_t maximum_bytes,
-                     ArLanguagePackBlob *blob, char *error,
-                     size_t error_capacity) {
+                     ArLanguagePackBlob *blob, char *error, size_t error_capacity) {
   TestVfs *vfs = (TestVfs *)context;
   const uint8_t *data = NULL;
   size_t bytes = 0;
@@ -42,7 +41,9 @@ static bool ReadFile(void *context, const char *path, size_t maximum_bytes,
     return false;
   }
   *blob = (ArLanguagePackBlob){
-      .struct_size = sizeof(*blob), .data = data, .size = bytes,
+      .struct_size = sizeof(*blob),
+      .data = data,
+      .size = bytes,
   };
   return true;
 }
@@ -58,48 +59,45 @@ static void Write16(size_t address, uint16_t value) {
 }
 
 static bool Resolve(ActRaiserLocalizationValues *values, const char *name,
-                    ArLanguagePlaceholderKind kind,
-                    ArDialogueValue *value) {
+                    ArLanguagePlaceholderKind kind, ArDialogueValue *value) {
   char error[256];
-  const bool resolved = ActRaiserLocalizationValues_Resolve(
-      values, name, kind, value, error, sizeof(error));
+  const bool resolved =
+      ActRaiserLocalizationValues_Resolve(values, name, kind, value, error, sizeof(error));
   if (!resolved) fprintf(stderr, "resolve %s: %s\n", name, error);
   return resolved;
 }
 
 int main(void) {
-  static const char manifest[] =
-      "[pack]\n"
-      "format = actraiser-language-pack\n"
-      "version = 1\n"
-      "id = fixture.values\n"
-      "locale = en-US\n"
-      "name = Values Fixture\n"
-      "autonym = Values Fixture\n"
-      "author = Test\n"
-      "license = MIT\n"
-      "direction = ltr\n"
-      "target = us-runtime\n"
-      "source_profile = us\n"
-      "fallback = native-us\n"
-      "coverage = partial\n"
-      "[fonts]\n"
-      "primary = builtin:actraiser-sans\n"
-      "[scripts]\n"
-      "source = text/source.artext\n";
-  static const char script[] =
-      ":: city.fillmore.name\n"
-      "Fíllmore\n"
-      "@end\n"
-      ":: enemy.name.slot_02\n"
-      "Démon\n"
-      "@end\n"
-      ":: sim.miracle.earthquake.insufficient_sp\n"
-      "Cost {miracle_earthquake_sp} SP\n"
-      "@end\n"
-      ":: sim.miracle.lightning.insufficient_sp\n"
-      "Cost 10 SP\n"
-      "@end\n";
+  static const char manifest[] = "[pack]\n"
+                                 "format = actraiser-language-pack\n"
+                                 "version = 1\n"
+                                 "id = fixture.values\n"
+                                 "locale = en-US\n"
+                                 "name = Values Fixture\n"
+                                 "autonym = Values Fixture\n"
+                                 "author = Test\n"
+                                 "license = MIT\n"
+                                 "direction = ltr\n"
+                                 "target = us-runtime\n"
+                                 "source_profile = us\n"
+                                 "fallback = native-us\n"
+                                 "coverage = partial\n"
+                                 "[fonts]\n"
+                                 "primary = builtin:actraiser-sans\n"
+                                 "[scripts]\n"
+                                 "source = text/source.artext\n";
+  static const char script[] = ":: city.fillmore.name\n"
+                               "Fíllmore\n"
+                               "@end\n"
+                               ":: enemy.name.slot_02\n"
+                               "Démon\n"
+                               "@end\n"
+                               ":: sim.miracle.earthquake.insufficient_sp\n"
+                               "Cost {miracle_earthquake_sp} SP\n"
+                               "@end\n"
+                               ":: sim.miracle.lightning.insufficient_sp\n"
+                               "Cost 10 SP\n"
+                               "@end\n";
   TestVfs vfs = {
       .manifest = (const uint8_t *)manifest,
       .manifest_bytes = sizeof(manifest) - 1u,
@@ -137,93 +135,92 @@ int main(void) {
   Write16(0x02B3, 0x1234);
 
   ActRaiserLocalizationValues values;
-  CHECK(ActRaiserLocalizationValues_Capture(
-      &values, wram, sizeof(wram), &pack, NULL, "Maître"));
+  CHECK(ActRaiserLocalizationValues_Capture(&values, wram, sizeof(wram), &pack, NULL, "Maître"));
   ArDialogueValue value;
-  CHECK(Resolve(&values,"miracle_earthquake_sp",kArLanguagePlaceholder_Number,&value));
-  CHECK(value.number==160);
+  CHECK(Resolve(&values, "miracle_earthquake_sp", kArLanguagePlaceholder_Number, &value));
+  CHECK(value.number == 160);
   ArRegionalCostPolicy jp;
-  CHECK(ArRegionalCosts_Init(&jp,kArRegionalSource_Japan));
-  CHECK(ArRegionalCosts_Resolve(&jp,&values.prices));
-  static const char *const miracle_names[]={"miracle_lightning_sp","miracle_rain_sp",
-      "miracle_sunlight_sp","miracle_wind_sp","miracle_earthquake_sp"};
-  static const unsigned jp_prices[]={12,16,18,24,60};
-  for (unsigned i=0;i<5;++i) {
-    CHECK(Resolve(&values,miracle_names[i],kArLanguagePlaceholder_Number,&value));
-    CHECK(value.number==jp_prices[i]);
+  CHECK(ArRegionalCosts_Init(&jp, kArRegionalSource_Japan));
+  CHECK(ArRegionalCosts_Resolve(&jp, &values.prices));
+  static const char *const miracle_names[] = {"miracle_lightning_sp", "miracle_rain_sp",
+                                              "miracle_sunlight_sp", "miracle_wind_sp",
+                                              "miracle_earthquake_sp"};
+  static const unsigned jp_prices[] = {12, 16, 18, 24, 60};
+  for (unsigned i = 0; i < 5; ++i) {
+    CHECK(Resolve(&values, miracle_names[i], kArLanguagePlaceholder_Number, &value));
+    CHECK(value.number == jp_prices[i]);
   }
-  ArDialogueContentSelection selected={.presentation=kArDialoguePresentation_Enhanced,
-      .selected_pack=&pack,.native_us_enhanced_pack=&pack};
-  ActRaiserMiracle_ConstrainText(&selected,"sim.miracle.earthquake.insufficient_sp",&values.prices);
-  CHECK(selected.selected_pack==&pack && selected.presentation==kArDialoguePresentation_Enhanced);
-  selected.selected_pack=NULL;
-  ActRaiserMiracle_ConstrainText(&selected,"sim.miracle.earthquake.insufficient_sp",&values.prices);
-  CHECK(selected.native_us_enhanced_pack==&pack && selected.presentation==kArDialoguePresentation_Enhanced);
-  selected.selected_pack=&pack;
-  ActRaiserMiracle_ConstrainText(&selected,"sim.miracle.lightning.insufficient_sp",&values.prices);
+  ArDialogueContentSelection selected = {.presentation = kArDialoguePresentation_Enhanced,
+                                         .selected_pack = &pack,
+                                         .native_us_enhanced_pack = &pack};
+  ActRaiserMiracle_ConstrainText(&selected, "sim.miracle.earthquake.insufficient_sp",
+                                 &values.prices);
+  CHECK(selected.selected_pack == &pack &&
+        selected.presentation == kArDialoguePresentation_Enhanced);
+  selected.selected_pack = NULL;
+  ActRaiserMiracle_ConstrainText(&selected, "sim.miracle.earthquake.insufficient_sp",
+                                 &values.prices);
+  CHECK(selected.native_us_enhanced_pack == &pack &&
+        selected.presentation == kArDialoguePresentation_Enhanced);
+  selected.selected_pack = &pack;
+  ActRaiserMiracle_ConstrainText(&selected, "sim.miracle.lightning.insufficient_sp",
+                                 &values.prices);
   CHECK(!selected.selected_pack && !selected.native_us_enhanced_pack &&
-      selected.presentation==kArDialoguePresentation_NativeRetail);
-  selected=(ArDialogueContentSelection){.presentation=kArDialoguePresentation_Enhanced,.selected_pack=&pack};
+        selected.presentation == kArDialoguePresentation_NativeRetail);
+  selected = (ArDialogueContentSelection){.presentation = kArDialoguePresentation_Enhanced,
+                                          .selected_pack = &pack};
   ArRegionalCostPolicy us;
   ArRegionalCostSnapshot us_prices;
-  ArRegionalCosts_Init(&us,kArRegionalSource_US); ArRegionalCosts_Resolve(&us,&us_prices);
-  ActRaiserMiracle_ConstrainText(&selected,"sim.miracle.lightning.insufficient_sp",&us_prices);
-  CHECK(selected.selected_pack==&pack && selected.presentation==kArDialoguePresentation_Enhanced);
+  ArRegionalCosts_Init(&us, kArRegionalSource_US);
+  ArRegionalCosts_Resolve(&us, &us_prices);
+  ActRaiserMiracle_ConstrainText(&selected, "sim.miracle.lightning.insufficient_sp", &us_prices);
+  CHECK(selected.selected_pack == &pack &&
+        selected.presentation == kArDialoguePresentation_Enhanced);
   Write16(0x0010, 22);
   Write16(0x0012, 38);
   CHECK(Resolve(&values, "sound_music_id", kArLanguagePlaceholder_Number, &value));
   CHECK(value.number == 22);
   CHECK(Resolve(&values, "sound_effect_id", kArLanguagePlaceholder_Number, &value));
   CHECK(value.number == 38);
-  CHECK(Resolve(&values, "master_name",
-                kArLanguagePlaceholder_LocalizedText, &value));
+  CHECK(Resolve(&values, "master_name", kArLanguagePlaceholder_LocalizedText, &value));
   CHECK(!strcmp(value.text, "Maître"));
-  CHECK(Resolve(&values, "current_city_name",
-                kArLanguagePlaceholder_LocalizedText, &value));
+  CHECK(Resolve(&values, "current_city_name", kArLanguagePlaceholder_LocalizedText, &value));
   CHECK(!strcmp(value.text, "Fíllmore"));
-  CHECK(Resolve(&values, "enemy_name",
-                kArLanguagePlaceholder_LocalizedText, &value));
+  CHECK(Resolve(&values, "enemy_name", kArLanguagePlaceholder_LocalizedText, &value));
   CHECK(!strcmp(value.text, "Démon"));
-  CHECK(Resolve(&values, "lair_count",
-                kArLanguagePlaceholder_Number, &value));
+  CHECK(Resolve(&values, "lair_count", kArLanguagePlaceholder_Number, &value));
   CHECK(value.number == 17);
-  CHECK(Resolve(&values, "city_fillmore_population",
-                kArLanguagePlaceholder_Number, &value));
+  CHECK(Resolve(&values, "city_fillmore_population", kArLanguagePlaceholder_Number, &value));
   CHECK(value.number == 1234);
-  CHECK(Resolve(&values, "city_fillmore_growth_state",
-                kArLanguagePlaceholder_LocalizedTerm, &value));
+  CHECK(
+      Resolve(&values, "city_fillmore_growth_state", kArLanguagePlaceholder_LocalizedTerm, &value));
   CHECK(!strcmp(value.text, "growth_state.04"));
-  CHECK(Resolve(&values, "score_fillmore_act_1",
-                kArLanguagePlaceholder_Number, &value));
+  CHECK(Resolve(&values, "score_fillmore_act_1", kArLanguagePlaceholder_Number, &value));
   CHECK(value.number == 12340);
-  CHECK(Resolve(&values, "total_score",
-                kArLanguagePlaceholder_Number, &value));
+  CHECK(Resolve(&values, "total_score", kArLanguagePlaceholder_Number, &value));
   CHECK(value.number == 12340);
-  CHECK(Resolve(&values, "icon.status.life",
-                kArLanguagePlaceholder_Icon, &value));
+  CHECK(Resolve(&values, "icon.status.life", kArLanguagePlaceholder_Icon, &value));
   CHECK(!strcmp(value.text, "icon.status.life"));
 
-  const uint64_t revision =
-      ActRaiserLocalizationValues_ReportRevision(&values);
+  const uint64_t revision = ActRaiserLocalizationValues_ReportRevision(&values);
   CHECK(revision != 0);
   Write16(0x0218, 4322);
   CHECK(ActRaiserLocalizationValues_ReportRevision(&values) != revision);
-  CHECK(!Resolve(&values, "selected_offering_action",
-                 kArLanguagePlaceholder_LocalizedText, &value));
+  CHECK(
+      !Resolve(&values, "selected_offering_action", kArLanguagePlaceholder_LocalizedText, &value));
 
   // A partial community pack may translate a dialogue but omit the city/enemy
   // dictionary it references. Missing terms use the native pack, while local
   // overrides win. The fallback is an explicit borrowed input, not a global.
-  static const char partial_script[] =
-      ":: city.bloodpool.name\nElsewhere\n@end\n"
-      ":: enemy.name.slot_02\nExcellent demon\n@end\n";
+  static const char partial_script[] = ":: city.bloodpool.name\nElsewhere\n@end\n"
+                                       ":: enemy.name.slot_02\nExcellent demon\n@end\n";
   vfs.script = (const uint8_t *)partial_script;
   vfs.script_bytes = sizeof(partial_script) - 1;
   ArLanguagePack partial;
   ArLanguagePack_Init(&partial);
   CHECK(ArLanguagePack_Load(&partial, &io, "pack/pack.ini", &pack_error));
-  CHECK(ActRaiserLocalizationValues_Capture(
-      &values, wram, sizeof(wram), &partial, &pack, "Maître"));
+  CHECK(
+      ActRaiserLocalizationValues_Capture(&values, wram, sizeof(wram), &partial, &pack, "Maître"));
   CHECK(Resolve(&values, "current_city_name", kArLanguagePlaceholder_LocalizedText, &value));
   CHECK(!strcmp(value.text, "Fíllmore"));
   CHECK(Resolve(&values, "town_name", kArLanguagePlaceholder_LocalizedText, &value));
@@ -240,8 +237,8 @@ int main(void) {
   vfs.script_bytes = sizeof(empty_script) - 1;
   ArLanguagePack_Init(&partial);
   CHECK(ArLanguagePack_Load(&partial, &io, "pack/pack.ini", &pack_error));
-  CHECK(ActRaiserLocalizationValues_Capture(
-      &values, wram, sizeof(wram), &partial, &pack, "Maître"));
+  CHECK(
+      ActRaiserLocalizationValues_Capture(&values, wram, sizeof(wram), &partial, &pack, "Maître"));
   CHECK(!Resolve(&values, "current_city_name", kArLanguagePlaceholder_LocalizedText, &value));
   CHECK(Resolve(&values, "enemy_name", kArLanguagePlaceholder_LocalizedText, &value));
   CHECK(!strcmp(value.text, "Démon"));

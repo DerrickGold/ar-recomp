@@ -13,13 +13,14 @@
 #define STB_VORBIS_HEADER_ONLY
 #include "stb_vorbis.c"
 
-static int g_failures;
-#define CHECK(cond) do { \
-  if (!(cond)) { \
-    fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #cond); \
-    g_failures++; \
-  } \
-} while (0)
+static int s_failures;
+#define CHECK(cond)                                                                                \
+  do {                                                                                             \
+    if (!(cond)) {                                                                                 \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #cond);                     \
+      s_failures++;                                                                                \
+    }                                                                                              \
+  } while (0)
 
 /* ---- stubs -------------------------------------------------------------- */
 
@@ -46,10 +47,12 @@ void NativeAudioMixer_SetMusicReplacementActive(bool active) {
 static const char *WriteManifest(const char *body) {
   static char path[512];
   const char *dir = getenv("TMPDIR");
-  snprintf(path, sizeof(path), "%s/music_manifest_test.ini",
-           dir ? dir : "/tmp");
+  snprintf(path, sizeof(path), "%s/music_manifest_test.ini", dir ? dir : "/tmp");
   FILE *f = fopen(path, "w");
-  if (!f) { fprintf(stderr, "cannot write %s\n", path); exit(1); }
+  if (!f) {
+    fprintf(stderr, "cannot write %s\n", path);
+    exit(1);
+  }
   fputs(body, f);
   fclose(f);
   return path;
@@ -58,21 +61,20 @@ static const char *WriteManifest(const char *body) {
 /* ---- tests -------------------------------------------------------------- */
 
 static void TestParseEntries(void) {
-  CHECK(MusicReplacements_Load(WriteManifest(
-      "# comment\n"
-      "[music:title-theme]\n"
-      "src = 1A:94B8\n"
-      "file = audio/title.ogg\n"
-      "\n"
-      "[music:boss]\n"
-      "src = 0B:8000\n"
-      "file = audio/boss.ogg\n"
-      "song = 2\n"
-      "loop = 0\n"
-      "loop_start = 44100\n"
-      "loop_end = 220500\n"
-      "gain = 80\n"
-      "when = wram[00A2]==0x03\n")) == 2);
+  CHECK(MusicReplacements_Load(WriteManifest("# comment\n"
+                                             "[music:title-theme]\n"
+                                             "src = 1A:94B8\n"
+                                             "file = audio/title.ogg\n"
+                                             "\n"
+                                             "[music:boss]\n"
+                                             "src = 0B:8000\n"
+                                             "file = audio/boss.ogg\n"
+                                             "song = 2\n"
+                                             "loop = 0\n"
+                                             "loop_start = 44100\n"
+                                             "loop_end = 220500\n"
+                                             "gain = 80\n"
+                                             "when = wram[00A2]==0x03\n")) == 2);
 
   const MusicReplacement *title = &g_music_replacements[0];
   CHECK(!strcmp(title->name, "title-theme"));
@@ -99,45 +101,40 @@ static void TestParseEntries(void) {
 
 static void TestParseRejections(void) {
   /* Missing src drops the entry; the next one still parses. */
-  CHECK(MusicReplacements_Load(WriteManifest(
-      "[music:broken]\n"
-      "file = audio/x.ogg\n"
-      "[music:ok]\n"
-      "src = 06:AC00\n"
-      "file = audio/y.ogg\n")) == 1);
+  CHECK(MusicReplacements_Load(WriteManifest("[music:broken]\n"
+                                             "file = audio/x.ogg\n"
+                                             "[music:ok]\n"
+                                             "src = 06:AC00\n"
+                                             "file = audio/y.ogg\n")) == 1);
   CHECK(!strcmp(g_music_replacements[0].name, "ok"));
 
   /* Bad src syntax drops the entry. */
-  CHECK(MusicReplacements_Load(WriteManifest(
-      "[music:bad-src]\n"
-      "src = not-an-address\n"
-      "file = audio/x.ogg\n")) == 0);
+  CHECK(MusicReplacements_Load(WriteManifest("[music:bad-src]\n"
+                                             "src = not-an-address\n"
+                                             "file = audio/x.ogg\n")) == 0);
 
   /* Song numbers collide with driver commands ($F0+) — rejected. */
-  CHECK(MusicReplacements_Load(WriteManifest(
-      "[music:bad-song]\n"
-      "src = 01:8000\n"
-      "file = audio/x.ogg\n"
-      "song = 0xF0\n")) == 0);
+  CHECK(MusicReplacements_Load(WriteManifest("[music:bad-song]\n"
+                                             "src = 01:8000\n"
+                                             "file = audio/x.ogg\n"
+                                             "song = 0xF0\n")) == 0);
 
   /* Bad gate syntax drops the entry. */
-  CHECK(MusicReplacements_Load(WriteManifest(
-      "[music:bad-when]\n"
-      "src = 01:8000\n"
-      "file = audio/x.ogg\n"
-      "when = mood==grim\n")) == 0);
+  CHECK(MusicReplacements_Load(WriteManifest("[music:bad-when]\n"
+                                             "src = 01:8000\n"
+                                             "file = audio/x.ogg\n"
+                                             "when = mood==grim\n")) == 0);
 
   /* [replace:] sections in the shared manifest are ignored here. */
-  CHECK(MusicReplacements_Load(WriteManifest(
-      "[replace:title-logo]\n"
-      "plane = screen\n"
-      "layer = bg1\n"
-      "rect = 0,0,8,8\n"
-      "image = hd/x.png\n"
-      "when = mode==7\n"
-      "[music:tune]\n"
-      "src = 02:C000\n"
-      "file = audio/z.ogg\n")) == 1);
+  CHECK(MusicReplacements_Load(WriteManifest("[replace:title-logo]\n"
+                                             "plane = screen\n"
+                                             "layer = bg1\n"
+                                             "rect = 0,0,8,8\n"
+                                             "image = hd/x.png\n"
+                                             "when = mode==7\n"
+                                             "[music:tune]\n"
+                                             "src = 02:C000\n"
+                                             "file = audio/z.ogg\n")) == 1);
   CHECK(!strcmp(g_music_replacements[0].name, "tune"));
 
   /* Missing manifest file is silent and empty. */
@@ -146,35 +143,33 @@ static void TestParseRejections(void) {
 
 static void TestSharedManifestHdSideIgnoresMusic(void) {
   /* The HD parser must skip [music:] sections without dropping its own. */
-  CHECK(HdReplacements_Load(WriteManifest(
-      "[music:tune]\n"
-      "src = 02:C000\n"
-      "file = audio/z.ogg\n"
-      "[replace:logo]\n"
-      "plane = screen\n"
-      "layer = bg1\n"
-      "rect = 0,0,8,8\n"
-      "image = hd/x.png\n"
-      "when = mode==7\n")) == 1);
+  CHECK(HdReplacements_Load(WriteManifest("[music:tune]\n"
+                                          "src = 02:C000\n"
+                                          "file = audio/z.ogg\n"
+                                          "[replace:logo]\n"
+                                          "plane = screen\n"
+                                          "layer = bg1\n"
+                                          "rect = 0,0,8,8\n"
+                                          "image = hd/x.png\n"
+                                          "when = mode==7\n")) == 1);
   CHECK(!strcmp(g_hd_replacements[0].name, "logo"));
 }
 
 static void TestSelection(void) {
-  CHECK(MusicReplacements_Load(WriteManifest(
-      "[music:act-fillmore]\n"
-      "src = 1A:94B8\n"
-      "file = audio/fillmore.ogg\n"
-      "when = wram[00A2]==0x01\n"
-      "[music:act-song2]\n"
-      "src = 1A:94B8\n"
-      "file = audio/second.ogg\n"
-      "song = 2\n"
-      "[music:act-fallback]\n"
-      "src = 1A:94B8\n"
-      "file = audio/generic.ogg\n"
-      "[music:other]\n"
-      "src = 0B:8000\n"
-      "file = audio/other.ogg\n")) == 4);
+  CHECK(MusicReplacements_Load(WriteManifest("[music:act-fillmore]\n"
+                                             "src = 1A:94B8\n"
+                                             "file = audio/fillmore.ogg\n"
+                                             "when = wram[00A2]==0x01\n"
+                                             "[music:act-song2]\n"
+                                             "src = 1A:94B8\n"
+                                             "file = audio/second.ogg\n"
+                                             "song = 2\n"
+                                             "[music:act-fallback]\n"
+                                             "src = 1A:94B8\n"
+                                             "file = audio/generic.ogg\n"
+                                             "[music:other]\n"
+                                             "src = 0B:8000\n"
+                                             "file = audio/other.ogg\n")) == 4);
   memset(g_ram, 0, sizeof(g_ram));
   memset(&g_settings, 0, sizeof(g_settings));
   g_settings.music_replacements = true;
@@ -201,7 +196,6 @@ static void TestSelection(void) {
   CHECK(MusicReplacements_Select(0x1A94B8, 1) == NULL);
 }
 
-
 /* Selection is by specificity, not position. Position deciding on its own made
  * a manifest depend on an invariant nothing enforced: an ungated catch-all
  * written above a gated variant shadowed it completely, and the builder GUI
@@ -209,18 +203,16 @@ static void TestSelection(void) {
  * correct hand-authored split could stop applying the first time someone
  * dropped a file into the catch-all slot, with no diagnostic either way. */
 static void TestGatedVariantsBeatAnUngatedEntryInAnyOrder(void) {
-  const char *catch_all_first =
-      "[music:song-09]\nsrc = 0E:F69F\nfile = audio/act2.ogg\n"
-      "[music:act2-fillmore]\nsrc = 0E:F69F\nwhen = wram[0018]==0x01\n"
-      "file = audio/act2-fillmore.ogg\n"
-      "[music:act2-kasandora]\nsrc = 0E:F69F\nwhen = wram[0018]==0x03\n"
-      "file = audio/act2-kasandora.ogg\n";
-  const char *catch_all_last =
-      "[music:act2-fillmore]\nsrc = 0E:F69F\nwhen = wram[0018]==0x01\n"
-      "file = audio/act2-fillmore.ogg\n"
-      "[music:act2-kasandora]\nsrc = 0E:F69F\nwhen = wram[0018]==0x03\n"
-      "file = audio/act2-kasandora.ogg\n"
-      "[music:song-09]\nsrc = 0E:F69F\nfile = audio/act2.ogg\n";
+  const char *catch_all_first = "[music:song-09]\nsrc = 0E:F69F\nfile = audio/act2.ogg\n"
+                                "[music:act2-fillmore]\nsrc = 0E:F69F\nwhen = wram[0018]==0x01\n"
+                                "file = audio/act2-fillmore.ogg\n"
+                                "[music:act2-kasandora]\nsrc = 0E:F69F\nwhen = wram[0018]==0x03\n"
+                                "file = audio/act2-kasandora.ogg\n";
+  const char *catch_all_last = "[music:act2-fillmore]\nsrc = 0E:F69F\nwhen = wram[0018]==0x01\n"
+                               "file = audio/act2-fillmore.ogg\n"
+                               "[music:act2-kasandora]\nsrc = 0E:F69F\nwhen = wram[0018]==0x03\n"
+                               "file = audio/act2-kasandora.ogg\n"
+                               "[music:song-09]\nsrc = 0E:F69F\nfile = audio/act2.ogg\n";
 
   for (int variant = 0; variant < 2; variant++) {
     const char *body = variant ? catch_all_last : catch_all_first;
@@ -255,9 +247,9 @@ static void TestGatedVariantsBeatAnUngatedEntryInAnyOrder(void) {
   /* Overlapping gates are the one case position still decides, because
    * specificity cannot separate them. */
   CHECK(MusicReplacements_Load(WriteManifest(
-      "[music:broad]\nsrc = 0E:F69F\nwhen = wram[0018]==0x01\nfile = a.ogg\n"
-      "[music:narrow]\nsrc = 0E:F69F\nwhen = wram[0018]==0x01, wram[0019]==0x02\n"
-      "file = b.ogg\n")) == 2);
+            "[music:broad]\nsrc = 0E:F69F\nwhen = wram[0018]==0x01\nfile = a.ogg\n"
+            "[music:narrow]\nsrc = 0E:F69F\nwhen = wram[0018]==0x01, wram[0019]==0x02\n"
+            "file = b.ogg\n")) == 2);
   for (int i = 0; i < g_music_replacement_count; i++)
     g_music_replacements[i].has_audio = true;
   g_ram[0x18] = 0x01;
@@ -299,10 +291,9 @@ static void TestLoopSlicing(void) {
 static void TestTriggerStateMachine(void) {
   /* Entries whose files don't exist: a play command must leave the DSP
    * un-gated (authentic fallback), and driver commands must be inert. */
-  CHECK(MusicReplacements_Load(WriteManifest(
-      "[music:tune]\n"
-      "src = 1A:94B8\n"
-      "file = audio/missing.ogg\n")) == 1);
+  CHECK(MusicReplacements_Load(WriteManifest("[music:tune]\n"
+                                             "src = 1A:94B8\n"
+                                             "file = audio/missing.ogg\n")) == 1);
   memset(&g_settings, 0, sizeof(g_settings));
   g_settings.music_replacements = true;
   MusicReplacements_InstallHooks();
@@ -370,15 +361,14 @@ static void TestTriggerStateMachine(void) {
  * audible-quality payoff (48k against a 44.1k OGG) is the Wave-3 listening gate. */
 static double CatmullRom(double p0, double p1, double p2, double p3, double frac) {
   return p1 + 0.5 * frac *
-         ((p2 - p0) +
-          frac * ((2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) +
-                  frac * (3.0 * (p1 - p2) + p3 - p0)));
+                  ((p2 - p0) + frac * ((2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) +
+                                       frac * (3.0 * (p1 - p2) + p3 - p0)));
 }
 static void TestMusicResamplerMath(void) {
   /* Claim 1: Catmull-Rom at frac==0 returns exactly p1 (== src[idx]), so the
    * native-rate default path is byte-identical to the old linear lerp. */
   for (int t = 0; t < 4; t++) {
-    double p[4] = { -1000.0 + t, 4321.0, -8765.0, 20000.0 };
+    double p[4] = {-1000.0 + t, 4321.0, -8765.0, 20000.0};
     double v = CatmullRom(p[0], p[1], p[2], p[3], 0.0);
     CHECK((int)v == (int)p[1]);
   }
@@ -392,9 +382,9 @@ static void TestMusicResamplerMath(void) {
       double per_block = (double)out_frames * file_rate / output_rate + phase0;
       int src_frames = (int)per_block;
       src_carry = per_block - src_frames;
-      CHECK(src_frames == out_frames);   /* 512 in, 512 out */
-      CHECK(src_carry == 0.0);           /* no drift */
-      CHECK(phase0 == 0.0);              /* frac==0 everywhere -> identity */
+      CHECK(src_frames == out_frames); /* 512 in, 512 out */
+      CHECK(src_carry == 0.0);         /* no drift */
+      CHECK(phase0 == 0.0);            /* frac==0 everywhere -> identity */
     }
   }
   /* Claim 3: phase continuity at a non-native rate — the carry recurrence
@@ -407,9 +397,9 @@ static void TestMusicResamplerMath(void) {
    * sides were the same arithmetic, so it could never fail.) */
   {
     int file_rate = 44100, output_rate = 48000, out_frames = 1024;
-    double step = (double)file_rate / output_rate;   /* 0.91875 */
+    double step = (double)file_rate / output_rate; /* 0.91875 */
     double src_carry = 0.0;
-    long long total_decoded = 0;   /* integer source frames consumed */
+    long long total_decoded = 0; /* integer source frames consumed */
     for (int block = 0; block < 32; block++) {
       double phase0 = src_carry;
       double per_block = (double)out_frames * file_rate / output_rate + phase0;
@@ -508,9 +498,9 @@ static void TestCachedPlayback(const char *fixture) {
   CHECK(fclose(input) == 0);
   CHECK(fclose(copy) == 0);
   snprintf(manifest, sizeof(manifest),
-      "[music:one-shot]\nsrc = 01:8000\nsong = 1\nloop = 0\nfile = %s\n"
-      "[music:loop]\nsrc = 01:8000\nsong = 2\nloop = 1\nfile = %s\n",
-      cached_path, cached_path);
+           "[music:one-shot]\nsrc = 01:8000\nsong = 1\nloop = 0\nfile = %s\n"
+           "[music:loop]\nsrc = 01:8000\nsong = 2\nloop = 1\nfile = %s\n",
+           cached_path, cached_path);
   CHECK(MusicReplacements_Load(WriteManifest(manifest)) == 2);
   CHECK(g_music_replacements[0].has_audio && g_music_replacements[1].has_audio);
   /* Both entries share one immutable compressed asset. Remove the original
@@ -529,7 +519,8 @@ static void TestCachedPlayback(const char *fixture) {
   CHECK(memcmp(actual, expected, 1024 * sizeof(int16_t)) == 0);
   MusicReplacements_OnApuPortWrite(0, 0xF2);
   MusicReplacements_MixOutput(actual + 1024, 512);
-  for (int i = 1024; i < 2048; ++i) CHECK(actual[i] == 0);
+  for (int i = 1024; i < 2048; ++i)
+    CHECK(actual[i] == 0);
   MusicReplacements_OnApuPortWrite(0, 1);
   MusicReplacements_MixOutput(actual + 1024, 512);
   CHECK(memcmp(actual, expected, sizeof(actual)) == 0);
@@ -547,7 +538,8 @@ static void TestCachedPlayback(const char *fixture) {
     memset(tail, 0, sizeof(tail));
     MusicReplacements_MixOutput(tail, 4096);
     bool audible = false;
-    for (size_t i = 0; i < sizeof(tail) / sizeof(tail[0]); ++i) audible |= tail[i] != 0;
+    for (size_t i = 0; i < sizeof(tail) / sizeof(tail[0]); ++i)
+      audible |= tail[i] != 0;
     CHECK(audible && s_music_replacement_active);
   }
   CHECK(MusicReplacements_GetOneShotSnapshot(&complete) == 0);
@@ -573,8 +565,8 @@ int main(int argc, char **argv) {
   TestTriggerStateMachine();
   CHECK(argc == 2);
   if (argc == 2) TestCachedPlayback(argv[1]);
-  if (g_failures) {
-    fprintf(stderr, "music manifest tests: %d failure(s)\n", g_failures);
+  if (s_failures) {
+    fprintf(stderr, "music manifest tests: %d failure(s)\n", s_failures);
     return 1;
   }
   printf("music manifest tests: all passed\n");

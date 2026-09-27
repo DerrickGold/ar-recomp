@@ -14,7 +14,8 @@ static void CheckPolicies(void) {
     unsigned digits = mix;
     assert(ArRegionalTimers_Init(&policy, kArRegionalSource_US));
     for (unsigned i = 0; i < 6; ++i) {
-      assert(ArRegionalTimers_SetRule(&policy, (ArRegionalTimerRule)i, (ArRegionalSource)(digits % 3)));
+      assert(ArRegionalTimers_SetRule(&policy, (ArRegionalTimerRule)i,
+                                      (ArRegionalSource)(digits % 3)));
       digits /= 3;
       const ArRegionalTimerDescriptor *desc = ArRegionalTimers_Descriptor((ArRegionalTimerRule)i);
       assert(desc && desc->key[0] && desc->us_profile == profiles[i]);
@@ -33,7 +34,8 @@ static void CheckPolicies(void) {
       assert(ArRegionalTimers_Resolve(&policy, (uint8_t)profile, baseline, &actual));
       assert(actual == expected);
       actual = 42;
-      assert(ArRegionalTimers_Resolve(&policy, (uint8_t)profile, 0xbeef, &actual) == (expected == baseline));
+      assert(ArRegionalTimers_Resolve(&policy, (uint8_t)profile, 0xbeef, &actual) ==
+             (expected == baseline));
       assert(actual == (expected == baseline ? 0xbeef : 42));
     }
     ArRegionalSource source;
@@ -65,14 +67,16 @@ static void CheckRoms(char **paths) {
   uint8_t tables[5][0x2f * 28];
   const size_t bases[] = {0x1093e, 0x107e7, 0x1093e, 0x1093e, 0x1093e};
   for (unsigned r = 0; r < 5; ++r) {
-    FILE *file = fopen(paths[r], "rb"); assert(file);
+    FILE *file = fopen(paths[r], "rb");
+    assert(file);
     assert(!fseek(file, 0, SEEK_END) && ftell(file) == 0x100000);
     assert(!fseek(file, (long)bases[r], SEEK_SET));
     assert(fread(tables[r], 1, sizeof(tables[r]), file) == sizeof(tables[r]));
     assert(!fclose(file));
     ArRegionalTimerPolicy policy;
-    assert(ArRegionalTimers_Init(&policy, r == 1 ? kArRegionalSource_Japan :
-        r == 0 ? kArRegionalSource_US : kArRegionalSource_Europe));
+    assert(ArRegionalTimers_Init(&policy, r == 1   ? kArRegionalSource_Japan
+                                          : r == 0 ? kArRegionalSource_US
+                                                   : kArRegionalSource_Europe));
     for (unsigned profile = 3; profile <= 0x2e; ++profile) {
       if (profile == 8) continue;
       const uint8_t *us = tables[0] + profile * 28;
@@ -87,8 +91,10 @@ static void CheckRoms(char **paths) {
 
 int main(int argc, char **argv) {
   CheckPolicies();
-  if (argc == 6) CheckRoms(argv + 1);
-  else assert(argc == 1);
+  if (argc == 6)
+    CheckRoms(argv + 1);
+  else
+    assert(argc == 1);
   puts("PASS 729 timer mixes across 256 profiles; native fields preserved outside changed rules");
   return 0;
 }

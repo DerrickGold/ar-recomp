@@ -8,27 +8,25 @@
 #include "snes_bgr555.h"
 #include "text_parse_utils.h"
 
-static int g_failures;
+static int s_failures;
 
-#define CHECK(condition) do { \
-  if (!(condition)) { \
-    fprintf(stderr, "%s:%d: check failed: %s\n", \
-            __FILE__, __LINE__, #condition); \
-    g_failures++; \
-  } \
-} while (0)
+#define CHECK(condition)                                                                           \
+  do {                                                                                             \
+    if (!(condition)) {                                                                            \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #condition);                \
+      s_failures++;                                                                                \
+    }                                                                                              \
+  } while (0)
 
 static void TestByteOrder(void) {
   uint8_t bytes[4] = {0};
   ByteOrder_WriteLe32(bytes, UINT32_C(0x78563412));
-  CHECK(bytes[0] == 0x12 && bytes[1] == 0x34 &&
-        bytes[2] == 0x56 && bytes[3] == 0x78);
+  CHECK(bytes[0] == 0x12 && bytes[1] == 0x34 && bytes[2] == 0x56 && bytes[3] == 0x78);
   CHECK(ByteOrder_ReadLe16(bytes) == UINT16_C(0x3412));
   CHECK(ByteOrder_ReadLe32(bytes) == UINT32_C(0x78563412));
 
   ByteOrder_WriteBe32(bytes, UINT32_C(0x12345678));
-  CHECK(bytes[0] == 0x12 && bytes[1] == 0x34 &&
-        bytes[2] == 0x56 && bytes[3] == 0x78);
+  CHECK(bytes[0] == 0x12 && bytes[1] == 0x34 && bytes[2] == 0x56 && bytes[3] == 0x78);
   CHECK(ByteOrder_ReadBe16(bytes) == UINT16_C(0x1234));
 }
 
@@ -39,9 +37,8 @@ static void TestHashes(void) {
     hash32 = DeterministicHash_Fnv1a32Byte(hash32, (uint8_t)kHello[i]);
   CHECK(hash32 == UINT32_C(0x4F9F2CAB));
 
-  CHECK(DeterministicHash_Fnv1a64(
-            DETERMINISTIC_HASH_FNV1A64_OFFSET,
-            kHello, sizeof(kHello) - 1) == UINT64_C(0xA430D84680AABD0B));
+  CHECK(DeterministicHash_Fnv1a64(DETERMINISTIC_HASH_FNV1A64_OFFSET, kHello, sizeof(kHello) - 1) ==
+        UINT64_C(0xA430D84680AABD0B));
 }
 
 static void TestManifestUtilities(void) {
@@ -49,24 +46,19 @@ static void TestManifestUtilities(void) {
   CHECK(!strcmp(Manifest_Trim(text), "value"));
 
   char path[128];
-  Manifest_ResolvePath("packs/default/manifest.ini", "art/title.png",
-                       path, sizeof(path));
+  Manifest_ResolvePath("packs/default/manifest.ini", "art/title.png", path, sizeof(path));
   CHECK(!strcmp(path, "packs/default/art/title.png"));
 
-  Manifest_ResolvePath("packs\\default\\manifest.ini", "art\\title.png",
-                       path, sizeof(path));
+  Manifest_ResolvePath("packs\\default\\manifest.ini", "art\\title.png", path, sizeof(path));
   CHECK(!strcmp(path, "packs\\default/art\\title.png"));
 
-  Manifest_ResolvePath("packs/manifest.ini", "/opt/art/title.png",
-                       path, sizeof(path));
+  Manifest_ResolvePath("packs/manifest.ini", "/opt/art/title.png", path, sizeof(path));
   CHECK(!strcmp(path, "/opt/art/title.png"));
 
-  Manifest_ResolvePath("packs/manifest.ini", "C:\\art\\title.png",
-                       path, sizeof(path));
+  Manifest_ResolvePath("packs/manifest.ini", "C:\\art\\title.png", path, sizeof(path));
   CHECK(!strcmp(path, "C:\\art\\title.png"));
 
-  Manifest_ResolvePath("packs/manifest.ini", "\\\\server\\art\\title.png",
-                       path, sizeof(path));
+  Manifest_ResolvePath("packs/manifest.ini", "\\\\server\\art\\title.png", path, sizeof(path));
   CHECK(!strcmp(path, "\\\\server\\art\\title.png"));
 }
 
@@ -94,8 +86,8 @@ int main(void) {
   TestManifestUtilities();
   TestTextParsing();
   TestColorExpansion();
-  if (g_failures) {
-    fprintf(stderr, "%d consolidated utility test(s) failed\n", g_failures);
+  if (s_failures) {
+    fprintf(stderr, "%d consolidated utility test(s) failed\n", s_failures);
     return 1;
   }
   puts("consolidated utility tests passed");

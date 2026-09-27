@@ -11,29 +11,27 @@
 #include <string.h>
 
 #define kSentinel 0xDEADBEEFu
-#define kFill     0xFF1030A0u
+#define kFill 0xFF1030A0u
 
-enum { kBudget = 120, kAuthentic = 256, kWidth = kAuthentic + 2 * kBudget,
-       kHeight = 8 };
+enum { kBudget = 120, kAuthentic = 256, kWidth = kAuthentic + 2 * kBudget, kHeight = 8 };
 
-static int g_failures;
+static int s_failures;
 
-static uint32_t g_buffer[kHeight][kWidth];
+static uint32_t s_buffer[kHeight][kWidth];
 
 static void Reset(void) {
   for (int y = 0; y < kHeight; y++)
     for (int x = 0; x < kWidth; x++)
-      g_buffer[y][x] = kSentinel;
+      s_buffer[y][x] = kSentinel;
 }
 
 /* Assert every column in [x0,x1) equals `want`, on every row. */
 static void ExpectSpan(const char *label, int x0, int x1, uint32_t want) {
   for (int y = 0; y < kHeight; y++) {
     for (int x = x0; x < x1; x++) {
-      if (g_buffer[y][x] != want) {
-        printf("FAIL %s: [%d][%d] = 0x%08X, want 0x%08X\n",
-               label, y, x, g_buffer[y][x], want);
-        g_failures++;
+      if (s_buffer[y][x] != want) {
+        printf("FAIL %s: [%d][%d] = 0x%08X, want 0x%08X\n", label, y, x, s_buffer[y][x], want);
+        s_failures++;
         return;
       }
     }
@@ -41,8 +39,8 @@ static void ExpectSpan(const char *label, int x0, int x1, uint32_t want) {
 }
 
 static void Fill(int live_left, int live_right, uint32_t fill) {
-  ActRaiserFillMarginGaps((uint8_t *)g_buffer, sizeof(g_buffer[0]), kHeight,
-                          kBudget, live_left, live_right, fill);
+  ActRaiserFillMarginGaps((uint8_t *)s_buffer, sizeof(s_buffer[0]), kHeight, kBudget, live_left,
+                          live_right, fill);
 }
 
 /* At a level's START the left margin has collapsed: the left gap must be
@@ -74,12 +72,10 @@ static void TestPartialMarginRamp(void) {
   /* Left gap: columns [0, budget - live). */
   ExpectSpan("partial left filled", 0, kBudget - live, kFill);
   /* The live window and the authentic centre must survive untouched. */
-  ExpectSpan("partial live-left untouched", kBudget - live,
-             kBudget + kAuthentic + live, kSentinel);
+  ExpectSpan("partial live-left untouched", kBudget - live, kBudget + kAuthentic + live, kSentinel);
   /* Right gap starts after the live window's last column, not after the
    * authentic 256. */
-  ExpectSpan("partial right filled", kBudget + kAuthentic + live, kWidth,
-             kFill);
+  ExpectSpan("partial right filled", kBudget + kAuthentic + live, kWidth, kFill);
 }
 
 /* Asymmetric partial margins -- the two sides collapse independently, so a fix
@@ -89,8 +85,7 @@ static void TestAsymmetricPartialMargins(void) {
   Reset();
   Fill(10, 70, kFill);
   ExpectSpan("asym left filled", 0, kBudget - 10, kFill);
-  ExpectSpan("asym middle untouched", kBudget - 10,
-             kBudget + kAuthentic + 70, kSentinel);
+  ExpectSpan("asym middle untouched", kBudget - 10, kBudget + kAuthentic + 70, kSentinel);
   ExpectSpan("asym right filled", kBudget + kAuthentic + 70, kWidth, kFill);
 }
 
@@ -127,11 +122,14 @@ static void TestZeroFillMatchesLegacyBlack(void) {
  * a margin wider than the budget has a bug, and silently painting over real
  * pixels would hide it. Also proves there is no out-of-bounds store. */
 static void TestOutOfRangeInputsWriteNothing(void) {
-  const struct { int left, right; const char *label; } cases[] = {
-    { 200, 0, "left > budget" },
-    { 0, 200, "right > budget" },
-    { -1, 0, "negative left" },
-    { 0, -1, "negative right" },
+  const struct {
+    int left, right;
+    const char *label;
+  } cases[] = {
+      {200, 0, "left > budget"},
+      {0, 200, "right > budget"},
+      {-1, 0, "negative left"},
+      {0, -1, "negative right"},
   };
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
     Reset();
@@ -144,18 +142,15 @@ static void TestOutOfRangeInputsWriteNothing(void) {
  * (4:3 / g_ws_extra == 0), so there is nothing to fill. */
 static void TestZeroBudgetWritesNothing(void) {
   Reset();
-  ActRaiserFillMarginGaps((uint8_t *)g_buffer, sizeof(g_buffer[0]), kHeight,
-                          0, 0, 0, kFill);
+  ActRaiserFillMarginGaps((uint8_t *)s_buffer, sizeof(s_buffer[0]), kHeight, 0, 0, 0, kFill);
   ExpectSpan("zero budget", 0, kWidth, kSentinel);
 }
 
 /* A NULL buffer or non-positive height must be a no-op, not a crash. */
 static void TestNullAndEmptyAreSafe(void) {
-  ActRaiserFillMarginGaps(NULL, sizeof(g_buffer[0]), kHeight,
-                          kBudget, 0, 0, kFill);
+  ActRaiserFillMarginGaps(NULL, sizeof(s_buffer[0]), kHeight, kBudget, 0, 0, kFill);
   Reset();
-  ActRaiserFillMarginGaps((uint8_t *)g_buffer, sizeof(g_buffer[0]), 0,
-                          kBudget, 0, 0, kFill);
+  ActRaiserFillMarginGaps((uint8_t *)s_buffer, sizeof(s_buffer[0]), 0, kBudget, 0, 0, kFill);
   ExpectSpan("zero height", 0, kWidth, kSentinel);
 }
 
@@ -170,8 +165,8 @@ int main(void) {
   TestOutOfRangeInputsWriteNothing();
   TestZeroBudgetWritesNothing();
   TestNullAndEmptyAreSafe();
-  if (g_failures) {
-    printf("actraiser_ws_gap_test: %d failure(s)\n", g_failures);
+  if (s_failures) {
+    printf("actraiser_ws_gap_test: %d failure(s)\n", s_failures);
     return 1;
   }
   printf("actraiser_ws_gap_test: all checks passed\n");

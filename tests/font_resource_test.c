@@ -4,18 +4,23 @@
 #include <string.h>
 
 static int failures;
-#define CHECK(value) do { if (!(value)) { \
-  fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #value); ++failures; \
-} } while (0)
+#define CHECK(value)                                                                               \
+  do {                                                                                             \
+    if (!(value)) {                                                                                \
+      fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #value);                                  \
+      ++failures;                                                                                  \
+    }                                                                                              \
+  } while (0)
 
 typedef struct Provider {
   unsigned acquisitions, releases;
   int mode;
 } Provider;
 
-static bool Acquire(void *context, ArFontResourceId id,
-                     ArFontResourceData *data, char *error, size_t capacity) {
-  (void)error; (void)capacity;
+static bool Acquire(void *context, ArFontResourceId id, ArFontResourceData *data, char *error,
+                    size_t capacity) {
+  (void)error;
+  (void)capacity;
   Provider *provider = context;
   ++provider->acquisitions;
   CHECK(id == 7);
@@ -32,8 +37,10 @@ static void Release(void *context, ArFontResourceData *data) {
   *data = (ArFontResourceData){0};
 }
 static const ArFontResourceOps kOps = {
-    .struct_size = sizeof(kOps), .abi_version = AR_FONT_RESOURCE_ABI_VERSION,
-    .acquire = Acquire, .release = Release,
+    .struct_size = sizeof(kOps),
+    .abi_version = AR_FONT_RESOURCE_ABI_VERSION,
+    .acquire = Acquire,
+    .release = Release,
 };
 
 static void TestProviderContract(void) {
@@ -111,7 +118,8 @@ static void TestHostSnapshots(void) {
   ArFontResource_Release(&b);
   CHECK(ArHostFontResources_Destroy(&store));
   CHECK(WriteFixture(path, "third"));
-  const ArFontResourceId third = ArHostFontResources_RegisterFile(&store, path, error, sizeof(error));
+  const ArFontResourceId third =
+      ArHostFontResources_RegisterFile(&store, path, error, sizeof(error));
   CHECK(third > second);
   CHECK(!ArFontResource_Acquire(&a, &resources, second, error, sizeof(error)));
   CHECK(ArHostFontResources_Destroy(&store));

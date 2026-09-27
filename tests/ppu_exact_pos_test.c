@@ -26,11 +26,24 @@
 
 /* Externs the PPU references; only fire under instrumentation. */
 int sr_trace_active(void) { return 0; }
-void sr_trace_ppumem(uint16_t a, uint8_t v) { (void)a; (void)v; }
-void sr_trace_reg(uint16_t a, uint8_t v) { (void)a; (void)v; }
+void sr_trace_ppumem(uint16_t a, uint8_t v) {
+  (void)a;
+  (void)v;
+}
+void sr_trace_reg(uint16_t a, uint8_t v) {
+  (void)a;
+  (void)v;
+}
 void sr_trace_vmadd(uint16_t a) { (void)a; }
-void sr_trace_vram(uint16_t a, uint16_t v) { (void)a; (void)v; }
-void sr_vram_trace_raw(uint16_t a, uint8_t v, int p) { (void)a; (void)v; (void)p; }
+void sr_trace_vram(uint16_t a, uint16_t v) {
+  (void)a;
+  (void)v;
+}
+void sr_vram_trace_raw(uint16_t a, uint8_t v, int p) {
+  (void)a;
+  (void)v;
+  (void)p;
+}
 void debug_server_on_oam_render(void) {}
 void CpuDispatchLogWriteFile(const char *path) { (void)path; }
 unsigned g_sr_block_index;
@@ -39,10 +52,8 @@ const char *g_last_recomp_func;
 uint8_t g_ram[0x20000];
 int snes_frame_counter;
 SrEventMask g_sr_runner_event_mask;
-void sr_runner_emit_ppu_memory_write(Ppu *ppu, SrMemoryRegion region,
-                                     uint32_t address,
-                                     uint32_t previous_value,
-                                     uint32_t value,
+void sr_runner_emit_ppu_memory_write(Ppu *ppu, SrMemoryRegion region, uint32_t address,
+                                     uint32_t previous_value, uint32_t value,
                                      uint32_t width_bytes) {
   (void)ppu;
   (void)region;
@@ -52,16 +63,16 @@ void sr_runner_emit_ppu_memory_write(Ppu *ppu, SrMemoryRegion region,
   (void)width_bytes;
 }
 
-static int g_failures;
+static int s_failures;
 
-#define CHECK(cond, ...)                                        \
-  do {                                                          \
-    if (!(cond)) {                                              \
-      g_failures++;                                             \
-      fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);      \
-      fprintf(stderr, __VA_ARGS__);                             \
-      fprintf(stderr, "\n");                                    \
-    }                                                           \
+#define CHECK(cond, ...)                                                                           \
+  do {                                                                                             \
+    if (!(cond)) {                                                                                 \
+      s_failures++;                                                                                \
+      fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__);                                         \
+      fprintf(stderr, __VA_ARGS__);                                                                \
+      fprintf(stderr, "\n");                                                                       \
+    }                                                                                              \
   } while (0)
 
 /* Write slot 0's OAM exactly as an emitter stores a screen position:
@@ -70,7 +81,7 @@ static void write_slot0(Ppu *ppu, int screen_x, int screen_y) {
   uint16_t x9 = (uint16_t)(screen_x & 0x1FF);
   uint16_t yb = (uint16_t)(screen_y & 0xFF);
   ppu->oam[0] = (uint16_t)((x9 & 0xFF) | (yb << 8));
-  ppu->oam[1] = 0; /* tile 0, palette 0, priority 0, no flips */
+  ppu->oam[1] = 0;                            /* tile 0, palette 0, priority 0, no flips */
   ppu->highOam[0] = (uint8_t)((x9 >> 8) & 1); /* bit 0 = X bit 8; small size */
 }
 
@@ -101,10 +112,10 @@ int main(void) {
 
       CHECK(got_decoded && got_exact, "bounds failed at (%d,%d)", sx, sy);
       if (got_decoded && got_exact) {
-        CHECK(decoded.x0 == exact.x0 && decoded.y0 == exact.y0 &&
-                  decoded.x1 == exact.x1 && decoded.y1 == exact.y1,
-              "exact != decoded at (%d,%d): byte (%d,%d) vs exact (%d,%d)",
-              sx, sy, decoded.x0, decoded.y0, exact.x0, exact.y0);
+        CHECK(decoded.x0 == exact.x0 && decoded.y0 == exact.y0 && decoded.x1 == exact.x1 &&
+                  decoded.y1 == exact.y1,
+              "exact != decoded at (%d,%d): byte (%d,%d) vs exact (%d,%d)", sx, sy, decoded.x0,
+              decoded.y0, exact.x0, exact.y0);
       }
       checked++;
     }
@@ -121,8 +132,8 @@ int main(void) {
     PpuClearObjExactPositions(ppu);
     PpuObjRangeBounds decoded;
     CHECK(PpuGetObjRangeBounds(ppu, 0, 1, 0, &decoded), "decode past cap");
-    CHECK(decoded.x0 == sx - kPpuObjXWrap,
-          "expected the wrap at the threshold, got x0=%d", decoded.x0);
+    CHECK(decoded.x0 == sx - kPpuObjXWrap, "expected the wrap at the threshold, got x0=%d",
+          decoded.x0);
     PpuSetObjExactPosition(ppu, 0, sx, 10);
     PpuObjRangeBounds exact;
     CHECK(PpuGetObjRangeBounds(ppu, 0, 1, 0, &exact), "exact past cap");
@@ -152,22 +163,19 @@ int main(void) {
     int w = bounds.x1 - bounds.x0, h = bounds.y1 - bounds.y0;
     uint32_t via_range[32 * 32], via_parts[32 * 32];
     CHECK(w * h <= 32 * 32, "unexpected pair bounds %dx%d", w, h);
-    CHECK(PpuRasterizeObjRange(ppu, 0, 2, 0, &bounds, via_range, w, h,
-                               (size_t)w * 4),
+    CHECK(PpuRasterizeObjRange(ppu, 0, 2, 0, &bounds, via_range, w, h, (size_t)w * 4),
           "range rasterize");
     PpuObjPart parts[2];
     int n = 0;
-    CHECK(PpuResolveObjSlots(ppu, 0, 2, 0, parts, 2, &n) && n == 2,
-          "resolve pair");
-    CHECK(PpuRasterizeParts(ppu, parts, n, &bounds, via_parts, w, h,
-                            (size_t)w * 4),
+    CHECK(PpuResolveObjSlots(ppu, 0, 2, 0, parts, 2, &n) && n == 2, "resolve pair");
+    CHECK(PpuRasterizeParts(ppu, parts, n, &bounds, via_parts, w, h, (size_t)w * 4),
           "part rasterize");
     CHECK(memcmp(via_range, via_parts, (size_t)w * h * 4) == 0,
           "range and explicit-part rasterization diverged");
   }
 
-  if (g_failures) {
-    fprintf(stderr, "%d failure(s)\n", g_failures);
+  if (s_failures) {
+    fprintf(stderr, "%d failure(s)\n", s_failures);
     return 1;
   }
   fprintf(stderr, "ppu_exact_pos_test: all checks passed\n");

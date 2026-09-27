@@ -21,20 +21,20 @@ static float ReferenceSmooth(float x) {
 
 /* Independent fallback oracle deliberately samples ALL six towns, including
  * zero-weight ones. It must not share the production influence rejection. */
-static float ReferenceRegisteredFloor(float x, float y, uint8_t owner,
-                                      int cx, int cy, float *influence) {
+static float ReferenceRegisteredFloor(float x, float y, uint8_t owner, int cx, int cy,
+                                      float *influence) {
   static const float datum[] = {0, 3, 4, 4, 0, 4};
-  x = ReferenceClamp(x, 0, 128); y = ReferenceClamp(y, 0, 128);
+  x = ReferenceClamp(x, 0, 128);
+  y = ReferenceClamp(y, 0, 128);
   float total = 0, weights = 0;
   for (uint8_t town = 1; town <= kSimTownCount; town++) {
     int ox, oy;
     assert(SimWorldMap_OriginForTown(town, &ox, &oy));
     const float lx = x - ox, ly = y - oy;
-    const float weight = ReferenceSmooth((lx + 4) / 8) *
-        ReferenceSmooth((32 - lx + 4) / 8) *
-        ReferenceSmooth((ly + 4) / 8) * ReferenceSmooth((32 - ly + 4) / 8);
-    float height = SimTownTerrain_HeightUnitsAt(town,
-        ReferenceClamp(lx, 0, 32) * 16, ReferenceClamp(ly, 0, 32) * 16);
+    const float weight = ReferenceSmooth((lx + 4) / 8) * ReferenceSmooth((32 - lx + 4) / 8) *
+                         ReferenceSmooth((ly + 4) / 8) * ReferenceSmooth((32 - ly + 4) / 8);
+    float height = SimTownTerrain_HeightUnitsAt(town, ReferenceClamp(lx, 0, 32) * 16,
+                                                ReferenceClamp(ly, 0, 32) * 16);
     if (town == owner) {
       SimTownTerrainSample sample;
       assert(SimTownTerrain_SampleCell(town, cx, cy, lx - cx, ly - cy, &sample));
@@ -62,7 +62,8 @@ static void TestTownInfluenceRejection(void) {
   /* Half-tile mesh plus the floats immediately inside/outside all four
    * feather edges, including corners and overlapping town influences. */
   for (int y = -2; y <= 258; y++)
-    for (int x = -2; x <= 258; x++) CheckRegisteredPoint(x * .5f, y * .5f);
+    for (int x = -2; x <= 258; x++)
+      CheckRegisteredPoint(x * .5f, y * .5f);
   for (uint8_t town = 1; town <= kSimTownCount; town++) {
     int ox, oy;
     assert(SimWorldMap_OriginForTown(town, &ox, &oy));
@@ -75,7 +76,8 @@ static void TestTownInfluenceRejection(void) {
         for (int p = 0; p < 3; p++) {
           CheckRegisteredPoint(xx[p], oy + at);
           CheckRegisteredPoint(ox + at, yy[p]);
-          for (int q = 0; q < 3; q++) CheckRegisteredPoint(xx[p], yy[q]);
+          for (int q = 0; q < 3; q++)
+            CheckRegisteredPoint(xx[p], yy[q]);
         }
     }
     static const int dx[] = {0, 1, 1, 0}, dy[] = {0, 0, 1, 1};
@@ -85,12 +87,13 @@ static void TestTownInfluenceRejection(void) {
         assert(SimWorldNavigationTerrain_TownCellCorners(town, cx, cy, height));
         for (int p = 0; p < 4; p++) {
           float influence;
-          assert(height[p] == ReferenceRegisteredFloor(
-              ox + cx + dx[p], oy + cy + dy[p], town, cx, cy, &influence));
+          assert(height[p] == ReferenceRegisteredFloor(ox + cx + dx[p], oy + cy + dy[p], town, cx,
+                                                       cy, &influence));
           float registered;
-          assert(SimWorldNavigationTerrain_RegisterTownFloor(town,cx+dx[p],cy+dy[p],
-              SimTownTerrain_CornerUnits(town,cx,cy,p),&registered));
-          assert(fabsf(registered-height[p]) < .00001f);
+          assert(SimWorldNavigationTerrain_RegisterTownFloor(
+              town, cx + dx[p], cy + dy[p], SimTownTerrain_CornerUnits(town, cx, cy, p),
+              &registered));
+          assert(fabsf(registered - height[p]) < .00001f);
         }
       }
   }
@@ -101,8 +104,8 @@ static void TestSampleConsistency(void) {
    * mesh. Optional native constraints must affect its total and derivatives
    * exactly as they affect the height-only API, never its floor datum. */
   static const float points[][2] = {
-    {28, 61}, {32, 64}, {32.5f, 64.5f}, {10, 50}, {60, 74}, {50, 74},
-    {28, 76}, {48, 16}, {-1, 50}, {129, 129},
+      {28, 61}, {32, 64}, {32.5f, 64.5f}, {10, 50}, {60, 74},
+      {50, 74}, {28, 76}, {48, 16},       {-1, 50}, {129, 129},
   };
   for (size_t i = 0; i < sizeof(points) / sizeof(points[0]); i++) {
     const float x = points[i][0], y = points[i][1];
@@ -116,9 +119,9 @@ static void TestSampleConsistency(void) {
     assert(sample.height_units == SimWorldNavigationTerrain_HeightUnits(x, y));
     assert(sample.floor_height_units == SimWorldNavigationTerrain_FloorHeightUnits(x, y));
     assert(sample.slope_x == SimWorldNavigationTerrain_HeightUnits(x + .5f, y) -
-        SimWorldNavigationTerrain_HeightUnits(x - .5f, y));
+                                 SimWorldNavigationTerrain_HeightUnits(x - .5f, y));
     assert(sample.slope_y == SimWorldNavigationTerrain_HeightUnits(x, y + .5f) -
-        SimWorldNavigationTerrain_HeightUnits(x, y - .5f));
+                                 SimWorldNavigationTerrain_HeightUnits(x, y - .5f));
     assert(sample.authored_weight >= 0 && sample.authored_weight <= 1);
   }
 }
@@ -151,7 +154,8 @@ static void TestCliffOwnership(void) {
         if (cx >= 4 && cx < 28 && cy >= 4 && cy < 28) {
           static const float datum[] = {0, 3, 4, 4, 0, 4};
           for (int p = 0; p < 4; p++)
-            assert(fabsf(height[p] - SimTownTerrain_CornerUnits(town, cx, cy, p) - datum[town - 1]) < .00001f);
+            assert(fabsf(height[p] - SimTownTerrain_CornerUnits(town, cx, cy, p) -
+                         datum[town - 1]) < .00001f);
         }
       }
   }
@@ -171,7 +175,8 @@ static void TestCliffOwnership(void) {
   printf("native cliffs: %zu caps, %zu closed skirts\n", caps, scene.face_count - caps);
   assert(SimWorldNavigationCliffs_Build(0, &scene));
   assert(!scene.faces && !scene.face_count && !scene.town_mask);
-  for (int i = 0; i < 128 * 128; i++) assert(!scene.replacement[i]);
+  for (int i = 0; i < 128 * 128; i++)
+    assert(!scene.replacement[i]);
   SimWorldNavigationCliffs_Destroy(&scene);
   SimWorldNavigationCliffs_Destroy(&scene);
   float h[4];
@@ -180,51 +185,55 @@ static void TestCliffOwnership(void) {
   assert(!SimWorldNavigationTerrain_TownCellCorners(1, 0, 32, h));
   assert(!SimWorldNavigationTerrain_TownCellCorners(1, 0, 0, NULL));
   h[0] = 123;
-  assert(!SimWorldNavigationTerrain_RegisterTownFloor(0,0,0,0,h));
-  assert(!SimWorldNavigationTerrain_RegisterTownFloor(1,-.1f,0,0,h));
-  assert(!SimWorldNavigationTerrain_RegisterTownFloor(1,0,32.1f,0,h));
-  assert(!SimWorldNavigationTerrain_RegisterTownFloor(1,NAN,0,0,h));
-  assert(!SimWorldNavigationTerrain_RegisterTownFloor(1,0,0,INFINITY,h));
-  assert(!SimWorldNavigationTerrain_RegisterTownFloor(1,0,0,0,NULL));
+  assert(!SimWorldNavigationTerrain_RegisterTownFloor(0, 0, 0, 0, h));
+  assert(!SimWorldNavigationTerrain_RegisterTownFloor(1, -.1f, 0, 0, h));
+  assert(!SimWorldNavigationTerrain_RegisterTownFloor(1, 0, 32.1f, 0, h));
+  assert(!SimWorldNavigationTerrain_RegisterTownFloor(1, NAN, 0, 0, h));
+  assert(!SimWorldNavigationTerrain_RegisterTownFloor(1, 0, 0, INFINITY, h));
+  assert(!SimWorldNavigationTerrain_RegisterTownFloor(1, 0, 0, 0, NULL));
   assert(h[0] == 123);
 }
 
 static void TestCoastalLandPreserved(void) {
   uint8_t map[kSimWorldMapBytes];
-  memset(map,4,sizeof(map)); /* Broad connected ocean. */
+  memset(map, 4, sizeof(map)); /* Broad connected ocean. */
   for (int y = 48; y < 65; ++y)
-    for (int x = 48; x < 112; ++x) map[y*128+x] = 0;
+    for (int x = 48; x < 112; ++x)
+      map[y * 128 + x] = 0;
   assert(SimWorldMap_PublishBuiltTilemap(map));
   assert(SimWorldNavigationTerrain_RebuildWorldPrior());
   /* A coastal connection between two equally registered plains cannot dip
    * just because there is ocean next to the road. Include the shoreline
    * vertices, not merely far-inland samples or continuity at a single seam. */
-  for (float x = 76; x <= 82; x += .25f) for (float y = 64; y <= 65; y += .25f) {
-    float influence;
-    const float expected = ReferenceRegisteredFloor(x,y,0,0,0,&influence);
-    assert(fabsf(expected-4) < .00001f);
-    assert(fabsf(SimWorldNavigationTerrain_FloorHeightUnits(x,y)-expected) < .00001f);
-  }
-  memset(map,4,sizeof(map));
+  for (float x = 76; x <= 82; x += .25f)
+    for (float y = 64; y <= 65; y += .25f) {
+      float influence;
+      const float expected = ReferenceRegisteredFloor(x, y, 0, 0, 0, &influence);
+      assert(fabsf(expected - 4) < .00001f);
+      assert(fabsf(SimWorldNavigationTerrain_FloorHeightUnits(x, y) - expected) < .00001f);
+    }
+  memset(map, 4, sizeof(map));
   for (int y = 0; y < 128; ++y)
-    for (int x = 24; x < 128; ++x) map[y*128+x] = 0;
+    for (int x = 24; x < 128; ++x)
+      map[y * 128 + x] = 0;
   assert(SimWorldMap_PublishBuiltTilemap(map));
   assert(SimWorldNavigationTerrain_RebuildWorldPrior());
   /* Kasandora's authored contour reaches the coast unchanged; no invented
    * four-cell descent through otherwise flat, buildable land. */
   for (float x = 24; x <= 30; x += .25f) {
-    const float native = SimTownTerrain_HeightUnitsAt(3,(x-16)*16,16*16)+4;
-    assert(fabsf(SimWorldNavigationTerrain_FloorHeightUnits(x,80)-native) < .00001f);
+    const float native = SimTownTerrain_HeightUnitsAt(3, (x - 16) * 16, 16 * 16) + 4;
+    assert(fabsf(SimWorldNavigationTerrain_FloorHeightUnits(x, 80) - native) < .00001f);
   }
   /* Even inside water-looking artwork, the native town owns its water floor.
    * Only the inferred ocean outside the town fades to the global sea datum. */
-  assert(SimWorldNavigationTerrain_FloorHeightUnits(20,80) ==
-      SimTownTerrain_HeightUnitsAt(3,4*16,16*16)+4);
-  assert(SimWorldNavigationTerrain_FloorHeightUnits(10,80) == 0);
-  assert(SimWorldNavigationTerrain_FloorHeightUnits(14,80) > 0);
-  assert(SimWorldNavigationTerrain_FloorHeightUnits(14,80) <
-      SimWorldNavigationTerrain_FloorHeightUnits(20,80));
-  puts("coastal registration: level connecting road; native land/water contours preserved; inferred ocean grades outside town");
+  assert(SimWorldNavigationTerrain_FloorHeightUnits(20, 80) ==
+         SimTownTerrain_HeightUnitsAt(3, 4 * 16, 16 * 16) + 4);
+  assert(SimWorldNavigationTerrain_FloorHeightUnits(10, 80) == 0);
+  assert(SimWorldNavigationTerrain_FloorHeightUnits(14, 80) > 0);
+  assert(SimWorldNavigationTerrain_FloorHeightUnits(14, 80) <
+         SimWorldNavigationTerrain_FloorHeightUnits(20, 80));
+  puts("coastal registration: level connecting road; native land/water contours preserved; "
+       "inferred ocean grades outside town");
 }
 
 static void TestPaletteIndependentWorldMaterials(void) {
@@ -236,7 +245,8 @@ static void TestPaletteIndependentWorldMaterials(void) {
   uint8_t map[kSimWorldMapBytes], temporary[kSimWorldMapBytes];
   memset(temporary, 2, sizeof(temporary));
   for (int y = 0; y < 128; ++y)
-    for (int x = 0; x < 128; ++x) map[y*128+x] = x < 8 ? 1 : 0;
+    for (int x = 0; x < 128; ++x)
+      map[y * 128 + x] = x < 8 ? 1 : 0;
   memcpy(rom + kMapOffset, map, sizeof(map));
   float heights[3];
   const uint16_t palettes[] = {0x7c00, 0x0000, 0x03e0};
@@ -244,8 +254,8 @@ static void TestPaletteIndependentWorldMaterials(void) {
     /* Every material has the SAME colour, then all go black, then green.
      * This is deliberately impossible for an RGB classifier to distinguish. */
     for (unsigned index = 0; index < 256; ++index) {
-      rom[0xe3f93 + index*2] = (uint8_t)palettes[variant];
-      rom[0xe3f94 + index*2] = (uint8_t)(palettes[variant] >> 8);
+      rom[0xe3f93 + index * 2] = (uint8_t)palettes[variant];
+      rom[0xe3f94 + index * 2] = (uint8_t)(palettes[variant] >> 8);
     }
     assert(SimWorldMap_Init(rom, kRomBytes));
     for (unsigned change = 0; change <= variant; ++change) {
@@ -254,12 +264,15 @@ static void TestPaletteIndependentWorldMaterials(void) {
     }
     assert(SimWorldNavigationTerrain_RebuildWorldPrior());
     const float samples[] = {
-      SimWorldNavigationTerrain_HeightUnits(1, 50),
-      SimWorldNavigationTerrain_HeightUnits(8, 50),
-      SimWorldNavigationTerrain_HeightUnits(12, 50),
+        SimWorldNavigationTerrain_HeightUnits(1, 50),
+        SimWorldNavigationTerrain_HeightUnits(8, 50),
+        SimWorldNavigationTerrain_HeightUnits(12, 50),
     };
-    if (!variant) memcpy(heights, samples, sizeof(heights));
-    else for (unsigned i = 0; i < 3; ++i) assert(samples[i] == heights[i]);
+    if (!variant)
+      memcpy(heights, samples, sizeof(heights));
+    else
+      for (unsigned i = 0; i < 3; ++i)
+        assert(samples[i] == heights[i]);
     assert(samples[0] == 0 && samples[2] > 0);
     assert(SimWorldMap_VegetationCoverage(12, 50) == 1);
     assert(SimWorldMap_VegetationCoverage(1, 50) == 0);
@@ -306,16 +319,21 @@ int main(void) {
   }
   uint8_t map[kSimWorldMapBytes] = {0};
   for (int y = 58; y < 70; y++)
-    for (int x = 26; x < 38; x++) map[y * 128 + x] = 3;
+    for (int x = 26; x < 38; x++)
+      map[y * 128 + x] = 3;
   for (int y = 44; y < 56; y++)
-    for (int x = 4; x < 16; x++) map[y * 128 + x] = 3;
+    for (int x = 4; x < 16; x++)
+      map[y * 128 + x] = 3;
   map[76 * 128 + 28] = 1;
   map[16 * 128 + 48] = 2;
   for (int y = 0; y < 128; y++)
-    for (int x = 0; x < 4; x++) map[y * 128 + x] = 4;
-  for (int x = 4; x < 58; x++) map[74 * 128 + x] = 4;
+    for (int x = 0; x < 4; x++)
+      map[y * 128 + x] = 4;
+  for (int x = 4; x < 58; x++)
+    map[74 * 128 + x] = 4;
   for (int y = 72; y < 78; y++)
-    for (int x = 58; x < 64; x++) map[y * 128 + x] = 4;
+    for (int x = 58; x < 64; x++)
+      map[y * 128 + x] = 4;
   assert(SimWorldMap_PublishBuiltTilemap(map) > 0);
   assert(SimWorldNavigationTerrain_RebuildWorldPrior());
   /* Mountain relief must survive exact-town constraints and continue through
@@ -328,10 +346,8 @@ int main(void) {
   assert(SimWorldNavigationTerrain_HeightUnits(1, 50) == 0.0f);
   assert(SimWorldNavigationTerrain_HeightUnits(60, 74) == lake_floor);
   assert(SimWorldNavigationTerrain_HeightUnits(50, 74) == river_floor);
-  assert(fabsf(SimWorldNavigationTerrain_HeightUnits(28, 76) -
-               desert_floor) < 0.001f);
-  assert(fabsf(SimWorldNavigationTerrain_HeightUnits(48, 16) -
-               snow_floor) < 0.001f);
+  assert(fabsf(SimWorldNavigationTerrain_HeightUnits(28, 76) - desert_floor) < 0.001f);
+  assert(fabsf(SimWorldNavigationTerrain_HeightUnits(48, 16) - snow_floor) < 0.001f);
   const float north = SimWorldNavigationTerrain_HeightUnits(32, 63.999f);
   const float south = SimWorldNavigationTerrain_HeightUnits(32, 64.001f);
   assert(fabsf(north - south) < 0.02f);
@@ -339,8 +355,7 @@ int main(void) {
   assert(SimWorldNavigationTerrain_Sample(28, 61, &sample));
   assert(sample.floor_height_units == SimWorldNavigationTerrain_FloorHeightUnits(28, 61));
   assert(sample.floor_height_units < sample.height_units);
-  assert(isfinite(sample.height_units) && isfinite(sample.slope_x) &&
-         isfinite(sample.slope_y));
+  assert(isfinite(sample.height_units) && isfinite(sample.slope_x) && isfinite(sample.slope_y));
   assert(sample.height_units > 0.5f && fabsf(sample.slope_x) > 0.1f);
   TestSampleConsistency();
   assert(!SimWorldNavigationTerrain_Sample(NAN, 0, &sample));
@@ -357,7 +372,8 @@ int main(void) {
   assert(SimWorldNavigationTerrain_HeightUnits(32, 64) == height);
   uint8_t replacement[kSimWorldMapBytes] = {0};
   for (int y = 58; y < 70; y++)
-    for (int x = 26; x < 38; x++) replacement[y * 128 + x] = 1;
+    for (int x = 26; x < 38; x++)
+      replacement[y * 128 + x] = 1;
   SimWorldNavigationTerrain_SetMountainReplacement(replacement);
   TestSampleConsistency();
   assert(SimWorldNavigationTerrain_FloorHeightUnits(32, 64) == native_floor);
@@ -367,18 +383,20 @@ int main(void) {
   SimWorldNavigationTerrain_SetMountainReplacement(NULL);
   assert(SimWorldNavigationTerrain_HeightUnits(32, 64) == height);
   float ridge_scale[129 * 129];
-  for (int i = 0; i < 129 * 129; i++) ridge_scale[i] = .5f;
+  for (int i = 0; i < 129 * 129; i++)
+    ridge_scale[i] = .5f;
   SimWorldNavigationTerrain_SetMountainTransition(ridge_scale);
   TestSampleConsistency();
   assert(SimWorldNavigationTerrain_FloorHeightUnits(32, 64) == native_floor);
   assert(fabsf(SimWorldNavigationTerrain_HeightUnits(32, 64) -
-      (seam_floor + (height - seam_floor) * .5f)) < .001f);
+               (seam_floor + (height - seam_floor) * .5f)) < .001f);
   assert(SimWorldNavigationTerrain_HeightUnits(60, 74) == lake_floor);
   assert(SimWorldNavigationTerrain_HeightUnits(50, 74) == river_floor);
   SimWorldNavigationTerrain_SetMountainTransition(NULL);
   assert(SimWorldNavigationTerrain_HeightUnits(32, 64) == height);
   float join_rise[129 * 129], join_weight[129 * 129] = {0};
-  for (int i = 0; i < 129 * 129; i++) join_rise[i] = NAN;
+  for (int i = 0; i < 129 * 129; i++)
+    join_rise[i] = NAN;
   const int anchor = 64 * 129 + 32;
   join_rise[anchor] = 2;
   join_weight[anchor] = 1;
@@ -391,25 +409,27 @@ int main(void) {
   /* Premultiplication prevents the target from fading a second time when
    * the other three corners are inactive (or contain rejected data). */
   assert(fabsf(SimWorldNavigationTerrain_HeightUnits(32.5f, 64.5f) -
-      (centre_floor + centre_rise * .75f + .5f)) < .00001f);
+               (centre_floor + centre_rise * .75f + .5f)) < .00001f);
   assert(SimWorldNavigationTerrain_HeightUnits(60, 74) == lake_floor);
   assert(SimWorldNavigationTerrain_HeightUnits(50, 74) == river_floor);
   SimWorldNavigationTerrain_SetMountainJoin(join_rise, join_weight, 2);
   assert(SimWorldNavigationTerrain_HeightUnits(32, 64) == native_floor + 4);
-  join_rise[anchor] = 100; join_weight[anchor] = 0;
+  join_rise[anchor] = 100;
+  join_weight[anchor] = 0;
   assert(SimWorldNavigationTerrain_HeightUnits(32, 64) == native_floor + 4); /* copied */
   SimWorldNavigationTerrain_SetMountainJoin(join_rise, join_weight, 0);
   assert(SimWorldNavigationTerrain_HeightUnits(32, 64) == height);
   SimWorldNavigationTerrain_SetMountainJoin(join_rise, join_weight, NAN);
   assert(SimWorldNavigationTerrain_HeightUnits(32, 64) == height);
   SimWorldNavigationTerrain_SetMountainJoin(NULL, NULL, 0);
-  join_rise[anchor] = .5f; join_weight[anchor] = 1;
+  join_rise[anchor] = .5f;
+  join_weight[anchor] = 1;
   SimWorldNavigationTerrain_SetMountainContinuationLimit(join_rise, join_weight, 1);
   TestSampleConsistency();
   assert(SimWorldNavigationTerrain_HeightUnits(32, 64) == native_floor + .5f);
   assert(SimWorldNavigationTerrain_FloorHeightUnits(32, 64) == native_floor);
   assert(fabsf(SimWorldNavigationTerrain_HeightUnits(32.5f, 64.5f) -
-      (centre_floor + fminf(centre_rise, centre_rise * .75f + .125f))) < .00001f);
+               (centre_floor + fminf(centre_rise, centre_rise * .75f + .125f))) < .00001f);
   assert(SimWorldNavigationTerrain_HeightUnits(60, 74) == lake_floor);
   assert(SimWorldNavigationTerrain_HeightUnits(50, 74) == river_floor);
   SimWorldNavigationTerrain_SetMountainContinuationLimit(join_rise, join_weight, 2);

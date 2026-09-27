@@ -8,12 +8,18 @@ static int failures, calls, history_checks;
 void ActRaiserRegional_CheckLairHistory(CpuState *cpu) {
   ++history_checks;
   /* Audit sees the original writer's completed registers, before capture. */
-  if (cpu->A!=0x5721 || cpu->DB!=0x42 || cpu->S!=0x1e03) ++failures;
+  if (cpu->A != 0x5721 || cpu->DB != 0x42 || cpu->S != 0x1e03) ++failures;
 }
 static uint8_t image[kActRaiserSramSize], old[kActRaiserSramSize];
 static RecompReturn outcome;
 static const char *path = "actraiser-save-seam-test.srm";
-#define CHECK(c) do { if (!(c)) { fprintf(stderr, "line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
+#define CHECK(c)                                                                                   \
+  do {                                                                                             \
+    if (!(c)) {                                                                                    \
+      fprintf(stderr, "line %d: %s\n", __LINE__, #c);                                              \
+      ++failures;                                                                                  \
+    }                                                                                              \
+  } while (0)
 
 /* This stub models native dispatch/return ownership, not native copy logic.
  * Real-ROM replay covers the latter. In particular the wrapper must delegate
@@ -46,11 +52,13 @@ int main(void) {
       memset(image, 0, sizeof(image));
       Save_RecomputeChecksum(image);
       memcpy(old, image, sizeof(old));
-      CHECK(SaveSystem_Attach(image, sizeof(image), kSaveBackend_NativeSrm,
-                             path, "unused.ini", &error));
+      CHECK(SaveSystem_Attach(image, sizeof(image), kSaveBackend_NativeSrm, path, "unused.ini",
+                              &error));
       CHECK(SaveSystem_WriteActive(&error));
       CpuState cpu = {0};
-      cpu.PB = 3; cpu.m_flag = width; cpu.S = 0x1e00;
+      cpu.PB = 3;
+      cpu.m_flag = width;
+      cpu.S = 0x1e00;
       CHECK(ActRaiser_SaveStoryEntry(&cpu));
       cpu.x_flag = 1;
       CHECK(!ActRaiser_SaveStoryEntry(&cpu));

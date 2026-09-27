@@ -19,21 +19,21 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static int g_failures;
+static int s_failures;
 
-#define CHECK(cond)                                                        \
-  do {                                                                     \
-    if (!(cond)) {                                                         \
-      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);               \
-      g_failures++;                                                        \
-    }                                                                      \
+#define CHECK(cond)                                                                                \
+  do {                                                                                             \
+    if (!(cond)) {                                                                                 \
+      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                                       \
+      s_failures++;                                                                                \
+    }                                                                                              \
   } while (0)
 
 /* Merge onto the heap, asserting the two-pass sizing contract every time: the
  * size-0 probe must predict the write exactly, since that is what the caller
  * relies on to size its buffer. */
-static char *MergeAs(const char *live, const char *shipped,
-                     IniUpgradeSectionKind kind, int *added) {
+static char *MergeAs(const char *live, const char *shipped, IniUpgradeSectionKind kind,
+                     int *added) {
   size_t need = IniUpgrade_Merge(live, shipped, kind, NULL, 0, NULL);
   char *out = (char *)malloc(need + 1);
   CHECK(out != NULL);
@@ -58,41 +58,37 @@ static char *MergeRecords(const char *live, const char *shipped, int *added) {
 /* THE headline guarantee: a value the user changed is never touched, even when
  * the shipped default now says something different. */
 static void TestUserValuesAlwaysWin(void) {
-  const char *live =
-      "[Graphics]\n"
-      "WindowScale = 3\n"      /* user raised this */
-      "Fullscreen = 1\n";
-  const char *shipped =
-      "[Graphics]\n"
-      "WindowScale = 2\n"      /* shipped default is lower */
-      "Fullscreen = 0\n";
+  const char *live = "[Graphics]\n"
+                     "WindowScale = 3\n" /* user raised this */
+                     "Fullscreen = 1\n";
+  const char *shipped = "[Graphics]\n"
+                        "WindowScale = 2\n" /* shipped default is lower */
+                        "Fullscreen = 0\n";
 
   int added = -1;
   char *out = Merge(live, shipped, &added);
   if (!out) return;
-  CHECK(strstr(out, "WindowScale = 3") != NULL);   /* kept */
-  CHECK(strstr(out, "WindowScale = 2") == NULL);   /* shipped NOT applied */
+  CHECK(strstr(out, "WindowScale = 3") != NULL); /* kept */
+  CHECK(strstr(out, "WindowScale = 2") == NULL); /* shipped NOT applied */
   CHECK(strstr(out, "Fullscreen = 1") != NULL);
-  CHECK(added == 0);                                /* nothing to add */
-  CHECK(!IniUpgrade_NeedsMerge(live, shipped, kIniUpgrade_Namespaces));      /* so no rewrite needed */
+  CHECK(added == 0);                                                    /* nothing to add */
+  CHECK(!IniUpgrade_NeedsMerge(live, shipped, kIniUpgrade_Namespaces)); /* so no rewrite needed */
   free(out);
 }
 
 /* A key that is new in this version arrives, in its own section. */
 static void TestNewKeyIsAppended(void) {
-  const char *live =
-      "[Graphics]\n"
-      "WindowScale = 3\n";
-  const char *shipped =
-      "[Graphics]\n"
-      "WindowScale = 2\n"
-      "NewShinyOption = 42\n";
+  const char *live = "[Graphics]\n"
+                     "WindowScale = 3\n";
+  const char *shipped = "[Graphics]\n"
+                        "WindowScale = 2\n"
+                        "NewShinyOption = 42\n";
 
   int added = 0;
   char *out = Merge(live, shipped, &added);
   if (!out) return;
-  CHECK(strstr(out, "WindowScale = 3") != NULL);        /* still the user's */
-  CHECK(strstr(out, "NewShinyOption = 42") != NULL);    /* arrived */
+  CHECK(strstr(out, "WindowScale = 3") != NULL);     /* still the user's */
+  CHECK(strstr(out, "NewShinyOption = 42") != NULL); /* arrived */
   CHECK(added == 1);
   CHECK(IniUpgrade_NeedsMerge(live, shipped, kIniUpgrade_Namespaces));
   /* It must be attributed to the right section, or re-reading puts it nowhere. */
@@ -121,8 +117,7 @@ static void TestSameKeyInTwoSectionsIsNotConflated(void) {
   /* Case A: [KeyMap] is wholly new -- arrives as a block. */
   {
     const char *live = "[Graphics]\nFullscreen = 0\n";
-    const char *shipped =
-        "[Graphics]\nFullscreen = 0\n\n[KeyMap]\nFullscreen = Alt+Return\n";
+    const char *shipped = "[Graphics]\nFullscreen = 0\n\n[KeyMap]\nFullscreen = Alt+Return\n";
     int added = 0;
     char *out = Merge(live, shipped, &added);
     if (out) {
@@ -136,12 +131,10 @@ static void TestSameKeyInTwoSectionsIsNotConflated(void) {
    * while [Graphics] has one. Only a section-scoped lookup notices the binding
    * is missing; a global one sees "Fullscreen" and adds nothing. */
   {
-    const char *live =
-        "[Graphics]\nFullscreen = 0\n"
-        "[KeyMap]\nReset = Ctrl+r\n";
-    const char *shipped =
-        "[Graphics]\nFullscreen = 0\n"
-        "[KeyMap]\nReset = Ctrl+r\nFullscreen = Alt+Return\n";
+    const char *live = "[Graphics]\nFullscreen = 0\n"
+                       "[KeyMap]\nReset = Ctrl+r\n";
+    const char *shipped = "[Graphics]\nFullscreen = 0\n"
+                          "[KeyMap]\nReset = Ctrl+r\nFullscreen = Alt+Return\n";
     int added = 0;
     char *out = Merge(live, shipped, &added);
     if (out) {
@@ -160,14 +153,12 @@ static void TestSameKeyInTwoSectionsIsNotConflated(void) {
  * Verified by re-reading: the appended key's nearest preceding header is its own
  * section, not some other one. */
 static void TestAppendedKeyCarriesItsSectionHeader(void) {
-  const char *live =
-      "[Graphics]\nWindowScale = 3\n"
-      "[Sound]\nEnableAudio = 1\n";
+  const char *live = "[Graphics]\nWindowScale = 3\n"
+                     "[Sound]\nEnableAudio = 1\n";
   /* The new key belongs to [Graphics], but [Sound] is the last section in the
    * live file -- so an append without a header would land in [Sound]. */
-  const char *shipped =
-      "[Graphics]\nWindowScale = 3\nAspectPAR = 4:3\n"
-      "[Sound]\nEnableAudio = 1\n";
+  const char *shipped = "[Graphics]\nWindowScale = 3\nAspectPAR = 4:3\n"
+                        "[Sound]\nEnableAudio = 1\n";
 
   int added = 0;
   char *out = Merge(live, shipped, &added);
@@ -193,19 +184,18 @@ static void TestAppendedKeyCarriesItsSectionHeader(void) {
 /* An entirely new section is appended as a block. */
 static void TestNewSectionIsAppendedWhole(void) {
   const char *live = "[General]\nAutosave = 1\n";
-  const char *shipped =
-      "[General]\n"
-      "Autosave = 0\n"
-      "\n"
-      "# what this new section is for\n"
-      "[Sound]\n"
-      "EnableAudio = 1\n"
-      "AudioFreq = 32040\n";
+  const char *shipped = "[General]\n"
+                        "Autosave = 0\n"
+                        "\n"
+                        "# what this new section is for\n"
+                        "[Sound]\n"
+                        "EnableAudio = 1\n"
+                        "AudioFreq = 32040\n";
 
   int added = 0;
   char *out = Merge(live, shipped, &added);
   if (!out) return;
-  CHECK(strstr(out, "Autosave = 1") != NULL);      /* user's value kept */
+  CHECK(strstr(out, "Autosave = 1") != NULL); /* user's value kept */
   CHECK(strstr(out, "[Sound]") != NULL);
   CHECK(strstr(out, "EnableAudio = 1") != NULL);
   CHECK(strstr(out, "AudioFreq = 32040") != NULL);
@@ -216,15 +206,14 @@ static void TestNewSectionIsAppendedWhole(void) {
  * section or key we do not ship at all. This is the property that makes the
  * merge safe to run unattended on every launch. */
 static void TestUserContentSurvivesVerbatim(void) {
-  const char *live =
-      "# my own notes, do not delete\n"
-      "\n"
-      "[Graphics]\n"
-      "; why I set this\n"
-      "WindowScale = 3   ; inline comment\n"
-      "\n"
-      "[MyOwnSection]\n"
-      "SomethingWeNeverShipped = yes\n";
+  const char *live = "# my own notes, do not delete\n"
+                     "\n"
+                     "[Graphics]\n"
+                     "; why I set this\n"
+                     "WindowScale = 3   ; inline comment\n"
+                     "\n"
+                     "[MyOwnSection]\n"
+                     "SomethingWeNeverShipped = yes\n";
   const char *shipped = "[Graphics]\nWindowScale = 2\n";
 
   char *out = Merge(live, shipped, NULL);
@@ -251,7 +240,7 @@ static void TestFirstRunSeedsFromTemplate(void) {
     if (!out) continue;
     CHECK(strcmp(out, shipped) == 0);
     CHECK(added == 0);
-    CHECK(IniUpgrade_NeedsMerge(live, shipped, kIniUpgrade_Namespaces));   /* still needs writing */
+    CHECK(IniUpgrade_NeedsMerge(live, shipped, kIniUpgrade_Namespaces)); /* still needs writing */
     free(out);
   }
 }
@@ -269,8 +258,8 @@ static void TestMergeIsIdempotent(void) {
   char *twice = Merge(once, shipped, &added);
   if (twice) {
     CHECK(strcmp(once, twice) == 0);
-    CHECK(added == 0);                              /* nothing left to add */
-    CHECK(!IniUpgrade_NeedsMerge(once, shipped, kIniUpgrade_Namespaces));    /* so no third rewrite */
+    CHECK(added == 0);                                                    /* nothing left to add */
+    CHECK(!IniUpgrade_NeedsMerge(once, shipped, kIniUpgrade_Namespaces)); /* so no third rewrite */
     free(twice);
   }
   free(once);
@@ -279,9 +268,8 @@ static void TestMergeIsIdempotent(void) {
 /* The merge must never DELETE. Asserted directly by checking that every key the
  * live file had is still present, whatever the shipped file says. */
 static void TestMergeNeverRemovesAnything(void) {
-  const char *live =
-      "[A]\nKeepMe = 1\nAlsoKeepMe = 2\n"
-      "[B]\nAndMe = 3\n";
+  const char *live = "[A]\nKeepMe = 1\nAlsoKeepMe = 2\n"
+                     "[B]\nAndMe = 3\n";
   /* A shipped file that mentions none of them, and renames the sections. */
   const char *shipped = "[C]\nSomethingElse = 9\n";
 
@@ -304,19 +292,18 @@ static void TestKeyMatchIsCaseInsensitive(void) {
   int added = -1;
   char *out = Merge(live, shipped, &added);
   if (!out) return;
-  CHECK(added == 0);                                  /* recognised as present */
-  CHECK(strstr(out, "WindowScale = 2") == NULL);       /* no duplicate */
+  CHECK(added == 0);                             /* recognised as present */
+  CHECK(strstr(out, "WindowScale = 2") == NULL); /* no duplicate */
   free(out);
 }
 
 /* Degenerate and malformed input must be handled without losing the user's file:
  * unterminated sections, a bare `= value`, and a file with no trailing newline. */
 static void TestMalformedInputIsPassedThrough(void) {
-  const char *live =
-      "[Unterminated\n"
-      "= orphan value\n"
-      "[Graphics]\n"
-      "WindowScale = 3";           /* no trailing newline */
+  const char *live = "[Unterminated\n"
+                     "= orphan value\n"
+                     "[Graphics]\n"
+                     "WindowScale = 3"; /* no trailing newline */
   const char *shipped = "[Graphics]\nWindowScale = 2\nBrandNew = 1\n";
 
   char *out = Merge(live, shipped, NULL);
@@ -355,10 +342,10 @@ static void TestSizingContract(void) {
 
   char small[8];
   memset(small, 0x7F, sizeof(small));
-  size_t wrote = IniUpgrade_Merge(live, shipped, kIniUpgrade_Namespaces, small,
-                                  sizeof(small), NULL);
-  CHECK(wrote == need);                        /* true length still reported */
-  CHECK(small[sizeof(small) - 1] == '\0');     /* never overran */
+  size_t wrote =
+      IniUpgrade_Merge(live, shipped, kIniUpgrade_Namespaces, small, sizeof(small), NULL);
+  CHECK(wrote == need);                    /* true length still reported */
+  CHECK(small[sizeof(small) - 1] == '\0'); /* never overran */
 
   /* A zero-size buffer with a non-NULL pointer must not write at all. */
   char guard = 'x';
@@ -369,36 +356,34 @@ static void TestSizingContract(void) {
 /* The real config.ini shape: the two-Fullscreen case plus a realistic upgrade
  * where the new version adds one key to an existing section. */
 static void TestRealisticConfigUpgrade(void) {
-  const char *live =
-      "[General]\n"
-      "Autosave = 1\n"
-      "\n"
-      "[Graphics]\n"
-      "WindowScale = 4\n"
-      "Fullscreen = 0\n"
-      "\n"
-      "[KeyMap]\n"
-      "Fullscreen = Alt+Return\n";
-  const char *shipped =
-      "[General]\n"
-      "Autosave = 0\n"
-      "\n"
-      "[Graphics]\n"
-      "WindowScale = 3\n"
-      "Fullscreen = 0\n"
-      "AspectPAR = 4:3\n"         /* the new setting this version adds */
-      "\n"
-      "[KeyMap]\n"
-      "Fullscreen = Alt+Return\n";
+  const char *live = "[General]\n"
+                     "Autosave = 1\n"
+                     "\n"
+                     "[Graphics]\n"
+                     "WindowScale = 4\n"
+                     "Fullscreen = 0\n"
+                     "\n"
+                     "[KeyMap]\n"
+                     "Fullscreen = Alt+Return\n";
+  const char *shipped = "[General]\n"
+                        "Autosave = 0\n"
+                        "\n"
+                        "[Graphics]\n"
+                        "WindowScale = 3\n"
+                        "Fullscreen = 0\n"
+                        "AspectPAR = 4:3\n" /* the new setting this version adds */
+                        "\n"
+                        "[KeyMap]\n"
+                        "Fullscreen = Alt+Return\n";
 
   int added = 0;
   char *out = Merge(live, shipped, &added);
   if (!out) return;
-  CHECK(added == 1);                                 /* exactly the one */
-  CHECK(strstr(out, "WindowScale = 4") != NULL);      /* user's scale kept */
-  CHECK(strstr(out, "Autosave = 1") != NULL);         /* user's autosave kept */
-  CHECK(strstr(out, "AspectPAR = 4:3") != NULL);      /* new setting arrived */
-  CHECK(strstr(out, "Alt+Return") != NULL);           /* binding untouched */
+  CHECK(added == 1);                             /* exactly the one */
+  CHECK(strstr(out, "WindowScale = 4") != NULL); /* user's scale kept */
+  CHECK(strstr(out, "Autosave = 1") != NULL);    /* user's autosave kept */
+  CHECK(strstr(out, "AspectPAR = 4:3") != NULL); /* new setting arrived */
+  CHECK(strstr(out, "Alt+Return") != NULL);      /* binding untouched */
   free(out);
 }
 
@@ -459,10 +444,8 @@ static void TestApplierKeepsUserValuesAndAddsNewOnes(void) {
   /* The user's played install, and a NEW default that adds a key -- so a write
    * genuinely happens. (With nothing to add the applier correctly does not
    * write at all, which is why an earlier probe run looked inert.) */
-  CHECK(WriteFileText("config.ini",
-                      "[Graphics]\nWindowScale = 9   ; mine\nMyOwnKey = keep\n"));
-  CHECK(WriteFileText("defaults/config.ini",
-                      "[Graphics]\nWindowScale = 3\nBrandNewKey = 7\n"));
+  CHECK(WriteFileText("config.ini", "[Graphics]\nWindowScale = 9   ; mine\nMyOwnKey = keep\n"));
+  CHECK(WriteFileText("defaults/config.ini", "[Graphics]\nWindowScale = 3\nBrandNewKey = 7\n"));
 
   IniUpgrade_ApplyShippedDefaults();
 
@@ -472,7 +455,7 @@ static void TestApplierKeepsUserValuesAndAddsNewOnes(void) {
     /* THE data-loss assertions: the user's value and their own key survive. */
     CHECK(strstr(after, "WindowScale = 9   ; mine") != NULL);
     CHECK(strstr(after, "MyOwnKey = keep") != NULL);
-    CHECK(strstr(after, "WindowScale = 3") == NULL);   /* default NOT applied */
+    CHECK(strstr(after, "WindowScale = 3") == NULL); /* default NOT applied */
     /* And the upgrade actually delivered the new setting. */
     CHECK(strstr(after, "BrandNewKey = 7") != NULL);
   }
@@ -513,8 +496,7 @@ static void TestApplierSkipsALiveFileItCannotRead(void) {
   }
   CHECK(chdir(template_dir) == 0);
   CHECK(mkdir("defaults", 0755) == 0);
-  CHECK(WriteFileText("defaults/config.ini",
-                      "[Graphics]\nWindowScale = 3\nBrandNewKey = 7\n"));
+  CHECK(WriteFileText("defaults/config.ini", "[Graphics]\nWindowScale = 3\nBrandNewKey = 7\n"));
 
   /* CASE 1: present but past the size cap (kIniUpgradeMaxFileBytes). */
   {
@@ -523,14 +505,15 @@ static void TestApplierSkipsALiveFileItCannotRead(void) {
     if (big) {
       fputs("[Graphics]\nWindowScale = 9   ; mine\n", big);
       /* Comfortably past the 4 MB cap. */
-      for (long i = 0; i < 700000; i++) fputs("# pad\n", big);
+      for (long i = 0; i < 700000; i++)
+        fputs("# pad\n", big);
       fclose(big);
     }
   }
   long before = FileSize("config.ini");
   CHECK(before > 4 << 20);
   IniUpgrade_ApplyShippedDefaults();
-  CHECK(FileSize("config.ini") == before);   /* NOT replaced by the default */
+  CHECK(FileSize("config.ini") == before); /* NOT replaced by the default */
 
   /* CASE 2: present, small, but unreadable. Skipped where a test runs as a user
    * that can read anything regardless of mode (root, or some CI sandboxes),
@@ -539,7 +522,7 @@ static void TestApplierSkipsALiveFileItCannotRead(void) {
   if (chmod("config.ini", 0) == 0) {
     FILE *probe = fopen("config.ini", "rb");
     if (probe) {
-      fclose(probe);        /* we can read it anyway -- nothing to assert */
+      fclose(probe); /* we can read it anyway -- nothing to assert */
     } else {
       IniUpgrade_ApplyShippedDefaults();
       CHECK(chmod("config.ini", 0644) == 0);
@@ -585,17 +568,14 @@ static void TestApplierUsesTheRightSectionKindPerFile(void) {
   CHECK(mkdir("defaults/game-assets", 0755) == 0);
 
   /* Each live file has had a shipped key REMOVED by the user. */
-  CHECK(WriteFileText("defaults/diorama-layers.ini",
-                      "[layers:01:02]\nbg1 = z:0.5\nbg2hi = z:0.9\n"));
-  CHECK(WriteFileText("diorama-layers.ini",
-                      "[layers:01:02]\nbg1 = z:0.77\n"));
+  CHECK(
+      WriteFileText("defaults/diorama-layers.ini", "[layers:01:02]\nbg1 = z:0.5\nbg2hi = z:0.9\n"));
+  CHECK(WriteFileText("diorama-layers.ini", "[layers:01:02]\nbg1 = z:0.77\n"));
   CHECK(WriteFileText("defaults/game-assets/manifest.ini",
                       "[replace:logo]\nimage = a.png\nplane = screen\n"));
-  CHECK(WriteFileText("game-assets/manifest.ini",
-                      "[replace:logo]\nimage = mine.png\n"));
+  CHECK(WriteFileText("game-assets/manifest.ini", "[replace:logo]\nimage = mine.png\n"));
   /* config.ini is a NAMESPACE file, so its missing key IS new. */
-  CHECK(WriteFileText("defaults/config.ini",
-                      "[Graphics]\nWindowScale = 3\nBrandNewKey = 7\n"));
+  CHECK(WriteFileText("defaults/config.ini", "[Graphics]\nWindowScale = 3\nBrandNewKey = 7\n"));
   CHECK(WriteFileText("config.ini", "[Graphics]\nWindowScale = 9\n"));
 
   IniUpgrade_ApplyShippedDefaults();
@@ -650,23 +630,21 @@ static void TestOverlongNamesAreComparedTruncated(void) {
  * This is the layer editor's "clear this plane": the manifest merge correctly
  * writes the room without it, then the startup upgrade put it straight back. */
 static void TestRecordsModeDoesNotResurrectADeletedKey(void) {
-  const char *shipped =
-      "[layers:01:02]\n"
-      "bg1 = z:0.5\n"
-      "bg2hi = z:0.9\n";
+  const char *shipped = "[layers:01:02]\n"
+                        "bg1 = z:0.5\n"
+                        "bg2hi = z:0.9\n";
   /* The user cleared bg2hi in the editor and tweaked bg1. */
-  const char *live =
-      "[layers:01:02]\n"
-      "bg1 = z:0.77   ; my tweak\n";
+  const char *live = "[layers:01:02]\n"
+                     "bg1 = z:0.77   ; my tweak\n";
 
   int added = -1;
   char *out = MergeRecords(live, shipped, &added);
   CHECK(out != NULL);
   if (!out) return;
-  CHECK(added == 0);                             /* nothing was new */
-  CHECK(strstr(out, "bg2hi") == NULL);           /* the deletion HELD */
-  CHECK(strstr(out, "z:0.77") != NULL);          /* their value survived */
-  CHECK(strstr(out, "; my tweak") != NULL);      /* and its comment */
+  CHECK(added == 0);                        /* nothing was new */
+  CHECK(strstr(out, "bg2hi") == NULL);      /* the deletion HELD */
+  CHECK(strstr(out, "z:0.77") != NULL);     /* their value survived */
+  CHECK(strstr(out, "; my tweak") != NULL); /* and its comment */
   /* One header only: the resurrection worked by re-stating it, which is also
    * what made the file grow a duplicate per cycle. */
   const char *first = strstr(out, "[layers:01:02]");
@@ -691,17 +669,15 @@ static void TestRecordsModeDoesNotResurrectADeletedKey(void) {
 /* Records mode must not disable upgrades: a record that is genuinely new in
  * this version still has to arrive, or the user never gets new content. */
 static void TestRecordsModeStillAppendsAWhollyNewRecord(void) {
-  const char *shipped =
-      "[layers:01:02]\n"
-      "bg1 = z:0.5\n"
-      "\n"
-      "[layers:07:01]\n"
-      "# a room added in this version\n"
-      "bg3 = z:0.2\n"
-      "bg4 = z:0.3\n";
-  const char *live =
-      "[layers:01:02]\n"
-      "bg1 = z:0.77\n";
+  const char *shipped = "[layers:01:02]\n"
+                        "bg1 = z:0.5\n"
+                        "\n"
+                        "[layers:07:01]\n"
+                        "# a room added in this version\n"
+                        "bg3 = z:0.2\n"
+                        "bg4 = z:0.3\n";
+  const char *live = "[layers:01:02]\n"
+                     "bg1 = z:0.77\n";
 
   int added = -1;
   char *out = MergeRecords(live, shipped, &added);
@@ -727,14 +703,12 @@ static void TestRecordsModeStillAppendsAWhollyNewRecord(void) {
  * holding one field. It fails validation, is dropped with a warning, and since
  * the merge then reports nothing more to do, the stub is permanent. */
 static void TestRecordsModeDoesNotFabricateAStubEntry(void) {
-  const char *shipped =
-      "[replace:title-logo]\n"
-      "image = title.png\n"
-      "plane = screen\n";
+  const char *shipped = "[replace:title-logo]\n"
+                        "image = title.png\n"
+                        "plane = screen\n";
   /* The user pruned `plane`, which happens to be the documented default. */
-  const char *live =
-      "[replace:title-logo]\n"
-      "image = mine.png\n";
+  const char *live = "[replace:title-logo]\n"
+                     "image = mine.png\n";
 
   int added = -1;
   char *out = MergeRecords(live, shipped, &added);
@@ -753,10 +727,9 @@ static void TestRecordsModeDoesNotFabricateAStubEntry(void) {
  * idempotence test re-feeds the merge's own output, where nothing was ever
  * removed -- which is exactly why it could not see the resurrection loop. */
 static void TestRecordsModeConvergesAfterADeletion(void) {
-  const char *shipped =
-      "[layers:01:02]\n"
-      "bg1 = z:0.5\n"
-      "bg2hi = z:0.9\n";
+  const char *shipped = "[layers:01:02]\n"
+                        "bg1 = z:0.5\n"
+                        "bg2hi = z:0.9\n";
   char *current = (char *)malloc(64);
   CHECK(current != NULL);
   if (!current) return;
@@ -769,7 +742,7 @@ static void TestRecordsModeConvergesAfterADeletion(void) {
     CHECK(next != NULL);
     if (!next) break;
     CHECK(added == 0);
-    CHECK(strlen(next) == previous);   /* byte-stable, no growth per cycle */
+    CHECK(strlen(next) == previous); /* byte-stable, no growth per cycle */
     CHECK(strstr(next, "bg2hi") == NULL);
     free(current);
     current = next;
@@ -801,8 +774,8 @@ int main(void) {
   TestRecordsModeDoesNotFabricateAStubEntry();
   TestRecordsModeConvergesAfterADeletion();
 
-  if (g_failures) {
-    printf("ini_upgrade_test: %d failure(s)\n", g_failures);
+  if (s_failures) {
+    printf("ini_upgrade_test: %d failure(s)\n", s_failures);
     return 1;
   }
   printf("ini_upgrade_test: all checks passed\n");

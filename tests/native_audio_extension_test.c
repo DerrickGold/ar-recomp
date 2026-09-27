@@ -42,50 +42,43 @@ void dsp_setVoiceBus(Dsp *dsp, int ch, DspVoiceBus bus) {
   s_bus_voice = ch;
   s_bus = bus;
 }
-void dsp_writeVirtualVoiceRegister(Dsp *dsp, int ch, uint8_t source_addr,
-                                   uint8_t val) {
+void dsp_writeVirtualVoiceRegister(Dsp *dsp, int ch, uint8_t source_addr, uint8_t val) {
   (void)dsp;
   s_register_voice = ch;
   s_register_source = source_addr;
   s_register_value = val;
 }
-void dsp_writeVirtualVoiceControl(Dsp *dsp, int ch, uint8_t global_addr,
-                                  bool enabled) {
+void dsp_writeVirtualVoiceControl(Dsp *dsp, int ch, uint8_t global_addr, bool enabled) {
   (void)dsp;
   s_control_voice = ch;
   s_control_addr = global_addr;
   s_control_enabled = enabled;
 }
-void dsp_writeHardwareVoiceMask(Dsp *dsp, uint8_t addr, uint8_t val,
-                                uint8_t update_mask) {
+void dsp_writeHardwareVoiceMask(Dsp *dsp, uint8_t addr, uint8_t val, uint8_t update_mask) {
   (void)dsp;
   s_hardware_addr = addr;
   s_hardware_value = val;
   s_hardware_update_mask = update_mask;
 }
 
-static bool TestDspOperation(
-    void *service_context, uint32_t operation, uint32_t voice,
-    uint8_t address, uint8_t value, uint8_t update_mask) {
+static bool TestDspOperation(void *service_context, uint32_t operation, uint32_t voice,
+                             uint8_t address, uint8_t value, uint8_t update_mask) {
   Apu *apu = (Apu *)service_context;
   switch ((RtlAudioDspOperation)operation) {
-    case RTL_AUDIO_DSP_SET_VOICE_BUS:
-      dsp_setVoiceBus(apu->dsp, (int)voice, (DspVoiceBus)value);
-      return true;
-    case RTL_AUDIO_DSP_WRITE_VIRTUAL_REGISTER:
-      dsp_writeVirtualVoiceRegister(
-          apu->dsp, (int)voice, address, value);
-      return true;
-    case RTL_AUDIO_DSP_WRITE_VIRTUAL_CONTROL:
-      dsp_writeVirtualVoiceControl(
-          apu->dsp, (int)voice, address, value != 0u);
-      return true;
-    case RTL_AUDIO_DSP_WRITE_HARDWARE_MASK:
-      dsp_writeHardwareVoiceMask(
-          apu->dsp, address, value, update_mask);
-      return true;
-    default:
-      return false;
+  case RTL_AUDIO_DSP_SET_VOICE_BUS:
+    dsp_setVoiceBus(apu->dsp, (int)voice, (DspVoiceBus)value);
+    return true;
+  case RTL_AUDIO_DSP_WRITE_VIRTUAL_REGISTER:
+    dsp_writeVirtualVoiceRegister(apu->dsp, (int)voice, address, value);
+    return true;
+  case RTL_AUDIO_DSP_WRITE_VIRTUAL_CONTROL:
+    dsp_writeVirtualVoiceControl(apu->dsp, (int)voice, address, value != 0u);
+    return true;
+  case RTL_AUDIO_DSP_WRITE_HARDWARE_MASK:
+    dsp_writeHardwareVoiceMask(apu->dsp, address, value, update_mask);
+    return true;
+  default:
+    return false;
   }
 }
 
@@ -107,8 +100,7 @@ static RtlAudioExtensionContext TestAudioContext(Apu *apu) {
 
 static bool TestDspWriteBridge(Apu *apu, uint8_t address, uint8_t *value) {
   RtlAudioExtensionContext context = TestAudioContext(apu);
-  return NativeAudioExtension_FilterDspWrite(
-      &context, address, value);
+  return NativeAudioExtension_FilterDspWrite(&context, address, value);
 }
 
 static void TestSpcOpcodeBridge(Spc *spc, uint16_t opcode_pc) {
@@ -125,29 +117,28 @@ static int TestSpcCycleBridge(Spc *spc, uint16_t opcode_pc, int cycles) {
   return NativeAudioExtension_AdjustSpcOpcodeCycles(opcode_pc, cycles);
 }
 
-static bool TestSaveTransfer(
-    void *service_context, uint32_t kind, void *values, uint64_t count) {
+static bool TestSaveTransfer(void *service_context, uint32_t kind, void *values, uint64_t count) {
   SaveLoadInfo *info = (SaveLoadInfo *)service_context;
   uint64_t index;
   switch ((RtlAudioSaveValueKind)kind) {
-    case RTL_AUDIO_SAVE_BYTES:
-    case RTL_AUDIO_SAVE_U8:
-      info->func(info, values, (size_t)count);
-      return true;
-    case RTL_AUDIO_SAVE_U16:
-      for (index = 0; index < count; ++index)
-        saveload_u16(info, &((uint16_t *)values)[index]);
-      return true;
-    case RTL_AUDIO_SAVE_U32:
-      for (index = 0; index < count; ++index)
-        saveload_u32(info, &((uint32_t *)values)[index]);
-      return true;
-    case RTL_AUDIO_SAVE_U64:
-      for (index = 0; index < count; ++index)
-        saveload_u64(info, &((uint64_t *)values)[index]);
-      return true;
-    default:
-      return false;
+  case RTL_AUDIO_SAVE_BYTES:
+  case RTL_AUDIO_SAVE_U8:
+    info->func(info, values, (size_t)count);
+    return true;
+  case RTL_AUDIO_SAVE_U16:
+    for (index = 0; index < count; ++index)
+      saveload_u16(info, &((uint16_t *)values)[index]);
+    return true;
+  case RTL_AUDIO_SAVE_U32:
+    for (index = 0; index < count; ++index)
+      saveload_u32(info, &((uint32_t *)values)[index]);
+    return true;
+  case RTL_AUDIO_SAVE_U64:
+    for (index = 0; index < count; ++index)
+      saveload_u64(info, &((uint64_t *)values)[index]);
+    return true;
+  default:
+    return false;
   }
 }
 
@@ -172,27 +163,23 @@ void RtlAudioExtensionConfigure(bool enabled) {
 }
 
 static int s_failures;
-#define CHECK(expr) do { \
-  if (!(expr)) { \
-    fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr); \
-    s_failures++; \
-  } \
-} while (0)
+#define CHECK(expr)                                                                                \
+  do {                                                                                             \
+    if (!(expr)) {                                                                                 \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr);                     \
+      s_failures++;                                                                                \
+    }                                                                                              \
+  } while (0)
 
 static void TestPureRouting(void) {
   int hardware = -1, virtual_voice = -1;
-  CHECK(NativeAudioExtension_RouteVoiceWrite(
-      0x64, 0x10, 0x40, 0x00, &hardware, &virtual_voice));
+  CHECK(NativeAudioExtension_RouteVoiceWrite(0x64, 0x10, 0x40, 0x00, &hardware, &virtual_voice));
   CHECK(hardware == 6 && virtual_voice == 14);
-  CHECK(NativeAudioExtension_RouteVoiceWrite(
-      0x75, 0x12, 0x80, 0x00, &hardware, &virtual_voice));
+  CHECK(NativeAudioExtension_RouteVoiceWrite(0x75, 0x12, 0x80, 0x00, &hardware, &virtual_voice));
   CHECK(hardware == 7 && virtual_voice == 15);
-  CHECK(NativeAudioExtension_RouteVoiceWrite(
-      0x64, 0x64, 0x40, 0x40, &hardware, &virtual_voice));
-  CHECK(!NativeAudioExtension_RouteVoiceWrite(
-      0x64, 0x0c, 0x40, 0x40, &hardware, &virtual_voice));
-  CHECK(!NativeAudioExtension_RouteVoiceWrite(
-      0x4c, 0x10, 0x40, 0x40, &hardware, &virtual_voice));
+  CHECK(NativeAudioExtension_RouteVoiceWrite(0x64, 0x64, 0x40, 0x40, &hardware, &virtual_voice));
+  CHECK(!NativeAudioExtension_RouteVoiceWrite(0x64, 0x0c, 0x40, 0x40, &hardware, &virtual_voice));
+  CHECK(!NativeAudioExtension_RouteVoiceWrite(0x4c, 0x10, 0x40, 0x40, &hardware, &virtual_voice));
 
   CHECK(NativeAudioExtension_RoutedGlobalMask(0x10, 0x40, 0) == 0x40);
   CHECK(NativeAudioExtension_RoutedGlobalMask(0x12, 0x80, 0) == 0x80);
@@ -200,16 +187,11 @@ static void TestPureRouting(void) {
   CHECK(NativeAudioExtension_RoutedGlobalMask(0x0c, 0x40, 0x40) == 0);
   CHECK(NativeAudioExtension_RoutedGlobalMask(0x0c, 0x40, 0) == 0);
 
-  CHECK(NativeAudioExtension_ShouldBypassMusicSuppression(
-      0x04d4, 0x0c, 0x40, 0x40));
-  CHECK(NativeAudioExtension_ShouldBypassMusicSuppression(
-      0x05b6, 0x0e, 0x80, 0x80));
-  CHECK(NativeAudioExtension_ShouldBypassMusicSuppression(
-      0x080e, 0x0c, 0x40, 0x40));
-  CHECK(!NativeAudioExtension_ShouldBypassMusicSuppression(
-      0x04d4, 0x10, 0x40, 0x40));
-  CHECK(!NativeAudioExtension_ShouldBypassMusicSuppression(
-      0x04d0, 0x0c, 0x40, 0x40));
+  CHECK(NativeAudioExtension_ShouldBypassMusicSuppression(0x04d4, 0x0c, 0x40, 0x40));
+  CHECK(NativeAudioExtension_ShouldBypassMusicSuppression(0x05b6, 0x0e, 0x80, 0x80));
+  CHECK(NativeAudioExtension_ShouldBypassMusicSuppression(0x080e, 0x0c, 0x40, 0x40));
+  CHECK(!NativeAudioExtension_ShouldBypassMusicSuppression(0x04d4, 0x10, 0x40, 0x40));
+  CHECK(!NativeAudioExtension_ShouldBypassMusicSuppression(0x04d0, 0x0c, 0x40, 0x40));
 }
 
 static void TestInstalledBridge(void) {
@@ -234,16 +216,13 @@ static void TestInstalledBridge(void) {
 
   uint8_t value = 0x09;
   CHECK(!g_apu_spc_dsp_write_filter_hook(&apu, 0x64, &value));
-  CHECK(s_register_voice == 14 && s_register_source == 0x64 &&
-        s_register_value == 0x09);
+  CHECK(s_register_voice == 14 && s_register_source == 0x64 && s_register_value == 0x09);
   CHECK(s_bus_voice == 14 && s_bus == kDspVoiceBus_Sfx);
 
   value = 0x40;
   CHECK(!g_apu_spc_dsp_write_filter_hook(&apu, 0x4c, &value));
-  CHECK(s_control_voice == 14 && s_control_addr == 0x4c &&
-        s_control_enabled);
-  CHECK(s_hardware_addr == 0x4c && s_hardware_value == 0x40 &&
-        s_hardware_update_mask == 0xbf);
+  CHECK(s_control_voice == 14 && s_control_addr == 0x4c && s_control_enabled);
+  CHECK(s_hardware_addr == 0x4c && s_hardware_value == 0x40 && s_hardware_update_mask == 0xbf);
 
   /* The $0834 helper has replaced X with the DSP address and $1A can be zero;
    * provenance captured at $080A must still carry instrument writes to 14. */
@@ -253,8 +232,7 @@ static void TestInstalledBridge(void) {
   spc.x = 0x64;
   value = 0x0d;
   CHECK(!g_apu_spc_dsp_write_filter_hook(&apu, 0x64, &value));
-  CHECK(s_register_voice == 14 && s_register_source == 0x64 &&
-        s_register_value == 0x0d);
+  CHECK(s_register_voice == 14 && s_register_source == 0x64 && s_register_value == 0x0d);
 
   spc.x = 0x0c;
   spc.z = false;
@@ -275,8 +253,7 @@ static void TestInstalledBridge(void) {
   spc.x = 0x46;
   value = 0x40;
   CHECK(!g_apu_spc_dsp_write_filter_hook(&apu, 0x5c, &value));
-  CHECK(s_control_voice == 14 && s_control_addr == 0x5c &&
-        s_control_enabled);
+  CHECK(s_control_voice == 14 && s_control_addr == 0x5c && s_control_enabled);
   CHECK(s_hardware_value == 0 && s_hardware_update_mask == 0xff);
 }
 
@@ -309,8 +286,7 @@ static void TestVirtualLifecycleUsesCentralMaskFlush(void) {
   spc.apu = &apu;
   SetSequencePointer(&apu, 0x10, 0x2676);
 
-  CHECK(NativeAudioExtension_QueueRequest(
-      false, 0x10, 0x01bb6d, 150, 1, 2, 0));
+  CHECK(NativeAudioExtension_QueueRequest(false, 0x10, 0x01bb6d, 150, 1, 2, 0));
   g_spc_opcode_patch_hook(&spc, 0x0da0);
   CHECK(NativeAudioExtension_ActiveInstanceCount() == 1);
   apu.ram[0x45] = 0x80;
@@ -323,21 +299,17 @@ static void TestVirtualLifecycleUsesCentralMaskFlush(void) {
   spc.x = 0x46;
   apu.ram[0x47] = 0;
   CHECK(g_apu_spc_dsp_write_filter_hook(&apu, 0x5c, &value));
-  CHECK(s_control_voice == 15 && s_control_addr == 0x5c &&
-        s_control_enabled);
+  CHECK(s_control_voice == 15 && s_control_addr == 0x5c && s_control_enabled);
   spc.x = 0x45;
   CHECK(g_apu_spc_dsp_write_filter_hook(&apu, 0x4c, &value));
-  CHECK(s_control_voice == 15 && s_control_addr == 0x4c &&
-        s_control_enabled);
+  CHECK(s_control_voice == 15 && s_control_addr == 0x4c && s_control_enabled);
 
   spc.x = 0x46;
   CHECK(g_apu_spc_dsp_write_filter_hook(&apu, 0x5c, &value));
-  CHECK(s_control_voice == 15 && s_control_addr == 0x5c &&
-        !s_control_enabled);
+  CHECK(s_control_voice == 15 && s_control_addr == 0x5c && !s_control_enabled);
   spc.x = 0x45;
   CHECK(g_apu_spc_dsp_write_filter_hook(&apu, 0x4c, &value));
-  CHECK(s_control_voice == 15 && s_control_addr == 0x4c &&
-        !s_control_enabled);
+  CHECK(s_control_voice == 15 && s_control_addr == 0x4c && !s_control_enabled);
 
   /* Once startup has cleared, an ordinary note-ending KOF is routed while
    * the logical lane is loaded. The driver's next central zero write must
@@ -347,14 +319,12 @@ static void TestVirtualLifecycleUsesCentralMaskFlush(void) {
   CHECK(spc.x == 0x12 && apu.ram[0x47] == 0x80);
   value = 0x80;
   CHECK(!g_apu_spc_dsp_write_filter_hook(&apu, 0x5c, &value));
-  CHECK(s_control_voice == 15 && s_control_addr == 0x5c &&
-        s_control_enabled);
+  CHECK(s_control_voice == 15 && s_control_addr == 0x5c && s_control_enabled);
   g_spc_opcode_patch_hook(&spc, 0x0f0b);
   spc.x = 0x46;
   value = 0;
   CHECK(g_apu_spc_dsp_write_filter_hook(&apu, 0x5c, &value));
-  CHECK(s_control_voice == 15 && s_control_addr == 0x5c &&
-        !s_control_enabled);
+  CHECK(s_control_voice == 15 && s_control_addr == 0x5c && !s_control_enabled);
 
   g_spc_opcode_patch_hook(&spc, 0x0da0);
   g_spc_opcode_patch_hook(&spc, 0x0e7e);
@@ -362,16 +332,14 @@ static void TestVirtualLifecycleUsesCentralMaskFlush(void) {
 
   /* The ending slot remains reserved through KOF true, KOF clear, and the
    * matching KON clear. Releasing sooner can overlap a new KON on voice 15. */
-  CHECK(NativeAudioExtension_QueueRequest(
-      false, 0x10, 0x01bb6d, 151, 3, 4, 0));
+  CHECK(NativeAudioExtension_QueueRequest(false, 0x10, 0x01bb6d, 151, 3, 4, 0));
   g_spc_opcode_patch_hook(&spc, 0x0da0);
   CHECK(NativeAudioExtension_ActiveInstanceCount() == 1);
   CHECK(s_bus_voice == 23);
   g_spc_opcode_patch_hook(&spc, 0x0e7e);
   FlushVirtualLifecycle(&apu, &spc);
 
-  CHECK(NativeAudioExtension_QueueRequest(
-      false, 0x10, 0x01bb6d, 152, 5, 6, 0));
+  CHECK(NativeAudioExtension_QueueRequest(false, 0x10, 0x01bb6d, 152, 5, 6, 0));
   g_spc_opcode_patch_hook(&spc, 0x0da0);
   CHECK(NativeAudioExtension_ActiveInstanceCount() == 1);
   CHECK(s_bus_voice == 15);
@@ -411,14 +379,11 @@ static void TestIndependentSequencerInstances(void) {
   SetSequencePointer(&apu, 0x03, 0x2478);
   SetSequencePointer(&apu, 0x07, 0x2549);
 
-  CHECK(NativeAudioExtension_QueueRequest(
-      false, 0x10, 0x01bb6d, 100, 7, 9, 0));
-  CHECK(NativeAudioExtension_QueueRequest(
-      false, 0x10, 0x01bb6d, 100, 7, 9, 0));
+  CHECK(NativeAudioExtension_QueueRequest(false, 0x10, 0x01bb6d, 100, 7, 9, 0));
+  CHECK(NativeAudioExtension_QueueRequest(false, 0x10, 0x01bb6d, 100, 7, 9, 0));
   CHECK(NativeAudioExtension_QueuedRequestCount() == 1);
   /* Same producer and frame but a different actor remains independent. */
-  CHECK(NativeAudioExtension_QueueRequest(
-      false, 0x10, 0x01bb6d, 100, 7, 10, 0));
+  CHECK(NativeAudioExtension_QueueRequest(false, 0x10, 0x01bb6d, 100, 7, 10, 0));
   CHECK(NativeAudioExtension_QueuedRequestCount() == 2);
 
   g_spc_opcode_patch_hook(&spc, 0x0da0);
@@ -451,8 +416,7 @@ static void TestIndependentSequencerInstances(void) {
 
   /* High-bit events are one request but retain the native paired X=$10/$12
    * contexts and delayed second-lane countdown. */
-  CHECK(NativeAudioExtension_QueueRequest(
-      true, 0x83, 0x00f68c, 101, 0, 0, 0));
+  CHECK(NativeAudioExtension_QueueRequest(true, 0x83, 0x00f68c, 101, 0, 0, 0));
   g_spc_opcode_patch_hook(&spc, 0x0da0);
   CHECK(NativeAudioExtension_ActiveInstanceCount() == 2);
   CHECK(spc.x == 0x10 && apu.ram[0x80] == 2);
@@ -465,18 +429,15 @@ static void TestIndependentSequencerInstances(void) {
   CHECK(NativeAudioExtension_ActiveInstanceCount() == 0);
 
   FlushVirtualLifecycle(&apu, &spc);
-  CHECK(NativeAudioExtension_QueueRequest(
-      true, 0x07, 0x01902d, 102, 1, 2, 0));
-  CHECK(NativeAudioExtension_QueueRequest(
-      true, 0x07, 0x01902d, 102, 30, 40, 0));
+  CHECK(NativeAudioExtension_QueueRequest(true, 0x07, 0x01902d, 102, 1, 2, 0));
+  CHECK(NativeAudioExtension_QueueRequest(true, 0x07, 0x01902d, 102, 30, 40, 0));
   CHECK(NativeAudioExtension_QueuedRequestCount() == 1);
   g_spc_opcode_patch_hook(&spc, 0x0da0);
   g_spc_opcode_patch_hook(&spc, 0x0e7e);
 
   FlushVirtualLifecycle(&apu, &spc);
   for (uint16_t actor = 0; actor < 3; actor++)
-    CHECK(NativeAudioExtension_QueueRequest(
-        false, 0x10, 0x01bb6d, 103, actor, 0, 0));
+    CHECK(NativeAudioExtension_QueueRequest(false, 0x10, 0x01bb6d, 103, actor, 0, 0));
   g_spc_opcode_patch_hook(&spc, 0x0da0);
   CHECK(g_spc_opcode_cycle_hook(&spc, 0x0e7f, 5) == 5);
   g_spc_opcode_patch_hook(&spc, 0x0f0b);
@@ -503,8 +464,7 @@ static void TestExtensionStateSerialization(void) {
   spc.apu = &apu;
   SetSequencePointer(&apu, 0x10, 0x2676);
 
-  CHECK(NativeAudioExtension_QueueRequest(
-      false, 0x10, 0x01bb6d, 200, 1, 2, 0));
+  CHECK(NativeAudioExtension_QueueRequest(false, 0x10, 0x01bb6d, 200, 1, 2, 0));
   TestSaveLoad state;
   memset(&state, 0, sizeof(state));
   state.base.func = TransferTestState;
@@ -528,8 +488,7 @@ static void TestExtensionStateSerialization(void) {
 
   /* The canonical snapshot path transfers each fixed-width member through
    * the adapter instead of relying on application structure layout. */
-  CHECK(NativeAudioExtension_QueueRequest(
-      false, 0x10, 0x01bb6d, 201, 3, 4, 0));
+  CHECK(NativeAudioExtension_QueueRequest(false, 0x10, 0x01bb6d, 201, 3, 4, 0));
   memset(&state, 0, sizeof(state));
   state.base.func = TransferTestState;
   state.base.saving = true;
@@ -577,27 +536,35 @@ static void InitFixture(Apu *apu, Spc *spc, Dsp *dsp) {
   apu->spc = spc;
   apu->dsp = dsp;
   spc->apu = apu;
-  for (int id = 1; id < 0x27; ++id) SetSequencePointer(apu, id, 0x2676);
+  for (int id = 1; id < 0x27; ++id)
+    SetSequencePointer(apu, id, 0x2676);
   memset(s_policy_count, 0, sizeof(s_policy_count));
   s_start_count = 0;
   g_native_audio_extension_trace_policy_hook = OnPolicy;
   g_native_audio_extension_trace_start_hook = OnStart;
 }
-static void Queue(uint64_t source, uint64_t serial, uint8_t id,
-                  bool event, NativeAudioOverlapPolicy policy) {
+static void Queue(uint64_t source, uint64_t serial, uint8_t id, bool event,
+                  NativeAudioOverlapPolicy policy) {
   NativeAudioRequest request = {
-    .source_key = source, .trace_serial = serial, .game_frame = (uint32_t)serial,
-    .id = id, .event_request = event, .policy = policy,
+      .source_key = source,
+      .trace_serial = serial,
+      .game_frame = (uint32_t)serial,
+      .id = id,
+      .event_request = event,
+      .policy = policy,
   };
   CHECK(NativeAudioExtension_QueueIdentifiedRequest(&request));
 }
 static void Tick(Spc *spc) {
   g_spc_opcode_patch_hook(spc, 0x0da0);
   const int count = NativeAudioExtension_ActiveInstanceCount();
-  for (int i = 0; i < count; ++i) g_spc_opcode_patch_hook(spc, 0x0f0b);
+  for (int i = 0; i < count; ++i)
+    g_spc_opcode_patch_hook(spc, 0x0f0b);
 }
 static void TestBankCapacityAndPairedOwnership(void) {
-  Apu apu; Spc spc; Dsp dsp;
+  Apu apu;
+  Spc spc;
+  Dsp dsp;
   InitFixture(&apu, &spc, &dsp);
   SetSequencePointer(&apu, 0x10, 0);
   Queue(1, 1, 0x10, false, kNativeAudio_Independent);
@@ -607,17 +574,21 @@ static void TestBankCapacityAndPairedOwnership(void) {
   CHECK(NativeAudioExtension_ActiveInstanceCount() == 0);
   CHECK(NativeAudioExtension_QueuedRequestCount() == 0);
   InitFixture(&apu, &spc, &dsp);
-  for (int i = 1; i <= 5; ++i) Queue(i, i, 0x10, false, kNativeAudio_Independent);
+  for (int i = 1; i <= 5; ++i)
+    Queue(i, i, 0x10, false, kNativeAudio_Independent);
   Tick(&spc);
   CHECK(NativeAudioExtension_ActiveInstanceCount() == 4);
   CHECK(NativeAudioExtension_QueuedRequestCount() == 0);
   CHECK(s_policy_count[kNativeAudioDisposition_CapacityDrop] == 1);
-  for (int i = 0; i < 4; ++i) CHECK(s_started_voice[i] == 15 + i * 8);
+  for (int i = 0; i < 4; ++i)
+    CHECK(s_started_voice[i] == 15 + i * 8);
   /* Busy ordinary destinations do not consume the independent event lanes. */
-  for (int i = 1; i <= 4; ++i) Queue(i, 10 + i, 7, true, kNativeAudio_Independent);
+  for (int i = 1; i <= 4; ++i)
+    Queue(i, 10 + i, 7, true, kNativeAudio_Independent);
   Tick(&spc);
   CHECK(NativeAudioExtension_ActiveInstanceCount() == 8);
-  for (int i = 0; i < 4; ++i) CHECK(s_started_voice[4 + i] == 14 + i * 8);
+  for (int i = 0; i < 4; ++i)
+    CHECK(s_started_voice[4 + i] == 14 + i * 8);
 
   InitFixture(&apu, &spc, &dsp);
   Queue(1, 1, 0x83, true, kNativeAudio_RestartSelf);
@@ -636,7 +607,9 @@ static void TestBankCapacityAndPairedOwnership(void) {
   CHECK(NativeAudioExtension_ActiveInstanceCount() == 3);
 }
 static void TestSelfPolicies(void) {
-  Apu apu; Spc spc; Dsp dsp;
+  Apu apu;
+  Spc spc;
+  Dsp dsp;
   InitFixture(&apu, &spc, &dsp);
   Queue(1, 1, 0x10, false, kNativeAudio_BlockSelf);
   Tick(&spc);
@@ -686,7 +659,9 @@ static void TestSelfPolicies(void) {
   state.base.saving = state.base.portable = true;
   g_apu_extra_saveload_hook(&apu, &state.base);
   NativeAudioExtension_Install();
-  state.offset = 0; state.loading = true; state.base.saving = false;
+  state.offset = 0;
+  state.loading = true;
+  state.base.saving = false;
   g_apu_extra_saveload_hook(&apu, &state.base);
   CHECK(NativeAudioExtension_QueuedRequestCount() == 1);
   g_spc_opcode_patch_hook(&spc, 0x0da0);
@@ -699,16 +674,20 @@ static void TestSelfPolicies(void) {
 }
 
 static void TestObservedSources(void) {
-  Apu apu; Spc spc; Dsp dsp;
+  Apu apu;
+  Spc spc;
+  Dsp dsp;
   uint8_t ram[0x20000] = {0};
   InitFixture(&apu, &spc, &dsp);
-  for (int i = 0; i < 44; ++i) ram[0xa11 + i * 0x26] = 0x80;
+  for (int i = 0; i < 44; ++i)
+    ram[0xa11 + i * 0x26] = 0x80;
   ram[0xa11] = 0;
   ram[0xa0e] = 2; /* live dragon */
   NativeAudioExtension_ObserveGameState(ram, sizeof(ram));
   CHECK(NativeAudioExtension_QueueRequest(false, 0x10, 0x01bb6a, 1, 0xa00, 0, 1));
   Tick(&spc);
-  ram[0xa14] = 7; ram[0xa06] = 3; /* countdown/flags must not change identity */
+  ram[0xa14] = 7;
+  ram[0xa06] = 3; /* countdown/flags must not change identity */
   NativeAudioExtension_ObserveGameState(ram, sizeof(ram));
   CHECK(NativeAudioExtension_QueueRequest(false, 0x10, 0x01bb6a, 2, 0xa00, 0, 2));
   Tick(&spc);
@@ -739,8 +718,8 @@ static void TestObservedSources(void) {
   const uint32_t paired_sites[] = {0x01cb40, 0x01ccbc};
   for (unsigned effect = 0; effect < 2; ++effect) {
     for (int frame = 1; frame <= 8; ++frame) {
-      CHECK(NativeAudioExtension_QueueRequest(true, paired_ids[effect],
-          paired_sites[effect], frame, 0xa00, frame, frame));
+      CHECK(NativeAudioExtension_QueueRequest(true, paired_ids[effect], paired_sites[effect], frame,
+                                              0xa00, frame, frame));
       Tick(&spc);
       CHECK(NativeAudioExtension_ActiveInstanceCount() == (int)(effect + 1) * 2);
       CHECK(NativeAudioExtension_QueuedRequestCount() == 0);
@@ -751,8 +730,7 @@ static void TestObservedSources(void) {
 
   InitFixture(&apu, &spc, &dsp);
   for (int frame = 1; frame <= 60; ++frame) {
-    CHECK(NativeAudioExtension_QueueRequest(true, 7, 0x01902d, frame,
-                                           frame, frame * 2, frame));
+    CHECK(NativeAudioExtension_QueueRequest(true, 7, 0x01902d, frame, frame, frame * 2, frame));
     Tick(&spc);
     CHECK(NativeAudioExtension_ActiveInstanceCount() == 1);
     CHECK(NativeAudioExtension_QueuedRequestCount() == 0);
@@ -770,7 +748,9 @@ static void TestObservedSources(void) {
 }
 
 static void TestBurstCompactionAndReservations(void) {
-  Apu apu; Spc spc; Dsp dsp;
+  Apu apu;
+  Spc spc;
+  Dsp dsp;
   InitFixture(&apu, &spc, &dsp);
   Queue(1, 1, 0x10, false, kNativeAudio_LatestPending);
   Queue(2, 2, 7, true, kNativeAudio_LatestPending);
@@ -795,11 +775,14 @@ static void TestBurstCompactionAndReservations(void) {
   state.base.saving = state.base.portable = true;
   g_apu_extra_saveload_hook(&apu, &state.base);
   NativeAudioExtension_Install();
-  state.offset = 0; state.loading = true; state.base.saving = false;
+  state.offset = 0;
+  state.loading = true;
+  state.base.saving = false;
   g_apu_extra_saveload_hook(&apu, &state.base);
   CHECK(NativeAudioExtension_QueuedRequestCount() == 2);
   g_spc_opcode_patch_hook(&spc, 0x0da0);
-  for (int i = 0; i < 8; ++i) g_spc_opcode_patch_hook(&spc, 0x0e7e);
+  for (int i = 0; i < 8; ++i)
+    g_spc_opcode_patch_hook(&spc, 0x0e7e);
   FlushVirtualLifecycle(&apu, &spc);
   Tick(&spc);
   CHECK(NativeAudioExtension_QueuedRequestCount() == 0);
@@ -826,10 +809,13 @@ static void TestBurstCompactionAndReservations(void) {
 }
 
 static void TestCombinedGameRequestObservation(void) {
-  Apu apu; Spc spc; Dsp dsp;
+  Apu apu;
+  Spc spc;
+  Dsp dsp;
   uint8_t ram[0x20000] = {0};
   InitFixture(&apu, &spc, &dsp);
-  for (int i = 0; i < 44; ++i) ram[0xa11 + i * 0x26] = 0x80;
+  for (int i = 0; i < 44; ++i)
+    ram[0xa11 + i * 0x26] = 0x80;
   ram[0xa11] = 0;
   ram[0xa0e] = 2;
   NativeAudioExtension_ObserveGameState(ram, sizeof(ram));
@@ -841,8 +827,8 @@ static void TestCombinedGameRequestObservation(void) {
   g_apu_extra_saveload_hook(&apu, &expected.base);
   InitFixture(&apu, &spc, &dsp);
   int locks = s_lock_count;
-  CHECK(NativeAudioExtension_QueueGameRequest(ram, sizeof(ram),
-      false, 0x10, 0x01bb6a, 1, 0xa00, 0, 1));
+  CHECK(NativeAudioExtension_QueueGameRequest(ram, sizeof(ram), false, 0x10, 0x01bb6a, 1, 0xa00, 0,
+                                              1));
   CHECK(s_lock_count == locks + 1);
   g_apu_extra_saveload_hook(&apu, &actual.base);
   CHECK(actual.offset == expected.offset);
@@ -851,26 +837,25 @@ static void TestCombinedGameRequestObservation(void) {
   /* A dialogue request must still observe the other emitter's inactive phase.
    * Skipping full sweeps for singleton sounds would lose this lifetime edge. */
   ram[0xa11] = 0x80;
-  CHECK(NativeAudioExtension_QueueGameRequest(ram, sizeof(ram),
-      true, 7, 0x01902d, 2, 0, 0, 2));
+  CHECK(NativeAudioExtension_QueueGameRequest(ram, sizeof(ram), true, 7, 0x01902d, 2, 0, 0, 2));
   Tick(&spc);
   ram[0xa11] = 0;
-  CHECK(NativeAudioExtension_QueueGameRequest(ram, sizeof(ram),
-      false, 0x10, 0x01bb6a, 3, 0xa00, 0, 3));
+  CHECK(NativeAudioExtension_QueueGameRequest(ram, sizeof(ram), false, 0x10, 0x01bb6a, 3, 0xa00, 0,
+                                              3));
   Tick(&spc);
   CHECK(s_started_voice[2] == 23);
   CHECK(s_policy_count[kNativeAudioDisposition_RestartedSelf] == 0);
   locks = s_lock_count;
-  CHECK(!NativeAudioExtension_QueueGameRequest(ram, 3,
-      false, 0x10, 0, 0, 0, 0, 4));
+  CHECK(!NativeAudioExtension_QueueGameRequest(ram, 3, false, 0x10, 0, 0, 0, 0, 4));
   CHECK(s_lock_count == locks);
 }
 
 static void TestOpcodeFilterEquivalence(void) {
-  Apu apu; Spc spc; Dsp dsp;
-  static const uint16_t pcs[] = {0x0da0, 0x1000, 0x0f0b, 0x1001,
-      0x080a, 0x04d4, 0x05b6, 0x080e, 0x0f0b, 0x1234,
-      0x0e7e, 0x0e83, 0x2000};
+  Apu apu;
+  Spc spc;
+  Dsp dsp;
+  static const uint16_t pcs[] = {0x0da0, 0x1000, 0x0f0b, 0x1001, 0x080a, 0x04d4, 0x05b6,
+                                 0x080e, 0x0f0b, 0x1234, 0x0e7e, 0x0e83, 0x2000};
   InitFixture(&apu, &spc, &dsp);
   for (int i = 1; i <= 4; ++i)
     Queue(i, i, 0x10, false, kNativeAudio_Independent);
@@ -887,9 +872,12 @@ static void TestOpcodeFilterEquivalence(void) {
     const int expected_cycles = NativeAudioExtension_AdjustSpcOpcodeCycles(pcs[n], 5);
     TestSaveBridge(&apu, &expected.base);
     memcpy(expected_ram, apu.ram, sizeof(expected_ram));
-    before.offset = 0; before.loading = true; before.base.saving = false;
+    before.offset = 0;
+    before.loading = true;
+    before.base.saving = false;
     TestSaveBridge(&apu, &before.base);
-    memcpy(apu.ram, old_ram, sizeof(old_ram)); spc = old_spc;
+    memcpy(apu.ram, old_ram, sizeof(old_ram));
+    spc = old_spc;
     TestSpcOpcodeBridge(&spc, pcs[n]);
     CHECK(NativeAudioExtension_AdjustSpcOpcodeCycles(pcs[n], 5) == expected_cycles);
     TestSaveBridge(&apu, &actual.base);

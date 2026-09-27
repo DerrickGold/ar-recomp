@@ -51,21 +51,19 @@ static const SettingDesc *s_action_desc;
 static int s_inspector_info_calls;
 static bool s_fake_manual_available = true;
 
-static bool FakeManualAvailable(void) {
-  return s_fake_manual_available;
-}
+static bool FakeManualAvailable(void) { return s_fake_manual_available; }
 
 static const SettingsOverlayManualHooks kFakeManualHooks = {
-  .available = FakeManualAvailable,
+    .available = FakeManualAvailable,
 };
 
-#define CHECK(expr) do { \
-  if (!(expr)) { \
-    fprintf(stderr, "%s:%d: check failed: %s\n", \
-            __FILE__, __LINE__, #expr); \
-    s_failures++; \
-  } \
-} while (0)
+#define CHECK(expr)                                                                                \
+  do {                                                                                             \
+    if (!(expr)) {                                                                                 \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr);                     \
+      s_failures++;                                                                                \
+    }                                                                                              \
+  } while (0)
 
 static bool ActionObserved(const SettingDesc *desc) {
   s_action_calls++;
@@ -219,38 +217,47 @@ static unsigned s_region_edits;
 static bool FakeRegionalView(ActRaiserRegionalRulesView *out) {
   if (!s_fake_region_active) return false;
   *out = s_fake_region;
-  CHECK(ArRegionalProfiles_Describe(&out->requested,out->profiles));
-  CHECK(ArRegionalProfiles_Describe(&out->effective,out->active_profiles));
-  CHECK(ArRegionalProfiles_Changes(&out->requested,&out->effective,&out->pending_groups));
-  s_fake_region=*out;
+  CHECK(ArRegionalProfiles_Describe(&out->requested, out->profiles));
+  CHECK(ArRegionalProfiles_Describe(&out->effective, out->active_profiles));
+  CHECK(ArRegionalProfiles_Changes(&out->requested, &out->effective, &out->pending_groups));
+  s_fake_region = *out;
   return true;
 }
 static ActRaiserRegionalEditResult FakeRegionalEdit(const ActRaiserRegionalRulesView *view,
-    ArRegionalProfileGroup group, ArRegionalSource source) {
+                                                    ArRegionalProfileGroup group,
+                                                    ArRegionalSource source) {
   if (view->revision != s_fake_region.revision) return kActRaiserRegionalEdit_Stale;
   if (!s_fake_region.editable) return kActRaiserRegionalEdit_Locked;
   ++s_region_edits;
-  CHECK(!memcmp(view->campaign,s_fake_region.campaign,16));
-  if((group==kArRegionalProfile_Population || group==kArRegionalProfile_Gameplay) &&
-      source==kArRegionalSource_Japan) {
-    s_fake_region.population_pending=s_fake_region.pending_profile=true;
-    s_fake_region.pending_profile_group=group;s_fake_region.pending_population=source;
+  CHECK(!memcmp(view->campaign, s_fake_region.campaign, 16));
+  if ((group == kArRegionalProfile_Population || group == kArRegionalProfile_Gameplay) &&
+      source == kArRegionalSource_Japan) {
+    s_fake_region.population_pending = s_fake_region.pending_profile = true;
+    s_fake_region.pending_profile_group = group;
+    s_fake_region.pending_population = source;
     return kActRaiserRegionalEdit_Deferred;
   }
-  CHECK(ArRegionalProfiles_Expand(&s_fake_region.requested,group,source,&s_fake_region.requested));
-  ActRaiserRegionalSettings_DescribeChoices(&s_fake_region.requested, &s_fake_region.effective, s_fake_region.choices);
-  s_fake_region.population_pending=false;
+  CHECK(
+      ArRegionalProfiles_Expand(&s_fake_region.requested, group, source, &s_fake_region.requested));
+  ActRaiserRegionalSettings_DescribeChoices(&s_fake_region.requested, &s_fake_region.effective,
+                                            s_fake_region.choices);
+  s_fake_region.population_pending = false;
   ++s_fake_region.revision;
   return kActRaiserRegionalEdit_Applied;
 }
-static ActRaiserRegionalEditResult FakeDifficultyEdit(const ActRaiserRegionalRulesView *view,ArRegionalDifficultyChoice choice) {
-  CHECK(view->revision==s_fake_region.revision && (unsigned)choice<kArRegionalDifficultyChoice_Count);
+static ActRaiserRegionalEditResult FakeDifficultyEdit(const ActRaiserRegionalRulesView *view,
+                                                      ArRegionalDifficultyChoice choice) {
+  CHECK(view->revision == s_fake_region.revision &&
+        (unsigned)choice < kArRegionalDifficultyChoice_Count);
   CHECK(ArRegionalDifficulty_Select(choice, &s_fake_region.requested.difficulty));
-  ++s_region_edits;++s_fake_region.revision;
+  ++s_region_edits;
+  ++s_fake_region.revision;
   return kActRaiserRegionalEdit_Applied;
 }
 static ActRaiserRegionalEditResult FakeRegionalPreview(const ActRaiserRegionalRulesView *view,
-    ArRegionalProfileGroup group, ArRegionalSource source, ActRaiserRegionalEditImpact *out) {
+                                                       ArRegionalProfileGroup group,
+                                                       ArRegionalSource source,
+                                                       ActRaiserRegionalEditImpact *out) {
   if (view->revision != s_fake_region.revision) return kActRaiserRegionalEdit_Stale;
   if (!s_fake_region.editable) return kActRaiserRegionalEdit_Locked;
   ArRegionalRules next;
@@ -263,7 +270,8 @@ static ActRaiserRegionalEditResult FakeRegionalPreview(const ActRaiserRegionalRu
     // Match the fixture's US effective support; the runtime tests verify actual values.
     if (out->towns == kArRegionalTownImpact_Redevelopment && source != kArRegionalSource_Japan)
       out->towns = kArRegionalTownImpact_Future;
-    out->estimated_history = (group == kArRegionalProfile_Lairs || group == kArRegionalProfile_Resources) &&
+    out->estimated_history =
+        (group == kArRegionalProfile_Lairs || group == kArRegionalProfile_Resources) &&
         (view->lair_history_estimated || view->lair_reload_estimated);
   }
   return kActRaiserRegionalEdit_Applied;
@@ -277,248 +285,303 @@ static void AcceptRegionalWarning(void) {
 /* UI fixture only: copies the selected row's display state. Narrow policy
  * writes and unchanged neighboring fields are verified in the runtime tests. */
 static ActRaiserRegionalEditResult FakeSettingEdit(const ActRaiserRegionalRulesView *view,
-    ActRaiserRegionalSettingGroup setting, ArRegionalSource source) {
+                                                   ActRaiserRegionalSettingGroup setting,
+                                                   ArRegionalSource source) {
   if (view->revision != s_fake_region.revision) return kActRaiserRegionalEdit_Stale;
   if (!s_fake_region.editable) return kActRaiserRegionalEdit_Locked;
   ++s_region_edits;
   if (setting == kActRaiserRegionalSetting_Population && source == kArRegionalSource_Japan) {
-    s_fake_region.population_pending = true; s_fake_region.pending_profile = false;
+    s_fake_region.population_pending = true;
+    s_fake_region.pending_profile = false;
     s_fake_region.pending_population = source;
     return kActRaiserRegionalEdit_Deferred;
   }
   s_fake_region.population_pending = false;
   if (setting == kActRaiserRegionalSetting_ActorArt)
-    for (unsigned i = 0; i < kArRegionalActorArtwork_Count; ++i) s_fake_region.requested.actor_artwork.source[i] = source;
+    for (unsigned i = 0; i < kArRegionalActorArtwork_Count; ++i)
+      s_fake_region.requested.actor_artwork.source[i] = source;
   s_fake_region.choices[setting].source = source;
   s_fake_region.choices[setting].pending = source != s_fake_region.choices[setting].active_source;
   ++s_fake_region.revision;
   return kActRaiserRegionalEdit_Applied;
 }
 static ActRaiserRegionalEditResult FakeSettingPreview(const ActRaiserRegionalRulesView *view,
-    ActRaiserRegionalSettingGroup setting, ArRegionalSource source, ActRaiserRegionalEditImpact *out) {
+                                                      ActRaiserRegionalSettingGroup setting,
+                                                      ArRegionalSource source,
+                                                      ActRaiserRegionalEditImpact *out) {
   if (view->revision != s_fake_region.revision) return kActRaiserRegionalEdit_Stale;
   if (!s_fake_region.editable) return kActRaiserRegionalEdit_Locked;
   *out = (ActRaiserRegionalEditImpact){0};
-  if (view->new_game || view->choices[setting].source == source) return kActRaiserRegionalEdit_Unchanged;
+  if (view->new_game || view->choices[setting].source == source)
+    return kActRaiserRegionalEdit_Unchanged;
   for (unsigned i = 0; i < OverlayRegionMenu_Count(kOverlayRegionPage_Towns); ++i) {
     const OverlayRegionRow *row = OverlayRegionMenu_Row(kOverlayRegionPage_Towns, i);
     if (row->kind != kOverlayRegionRow_Setting || row->setting != setting) continue;
-    if (setting != kActRaiserRegionalSetting_TownStatus && setting != kActRaiserRegionalSetting_Arrival &&
+    if (setting != kActRaiserRegionalSetting_TownStatus &&
+        setting != kActRaiserRegionalSetting_Arrival &&
         setting != kActRaiserRegionalSetting_CompassReturn)
-      out->towns = setting == kActRaiserRegionalSetting_Population && source == kArRegionalSource_Japan
-          ? kArRegionalTownImpact_Redevelopment : kArRegionalTownImpact_Future;
+      out->towns =
+          setting == kActRaiserRegionalSetting_Population && source == kArRegionalSource_Japan
+              ? kArRegionalTownImpact_Redevelopment
+              : kArRegionalTownImpact_Future;
   }
-  out->estimated_history = (setting == kActRaiserRegionalSetting_LairReserves || setting == kActRaiserRegionalSetting_LairReloads ||
-      setting == kActRaiserRegionalSetting_HouseCredit || setting == kActRaiserRegionalSetting_ScoreFeedback) &&
-      (view->lair_history_estimated || view->lair_reload_estimated);
+  out->estimated_history = (setting == kActRaiserRegionalSetting_LairReserves ||
+                            setting == kActRaiserRegionalSetting_LairReloads ||
+                            setting == kActRaiserRegionalSetting_HouseCredit ||
+                            setting == kActRaiserRegionalSetting_ScoreFeedback) &&
+                           (view->lair_history_estimated || view->lair_reload_estimated);
   return kActRaiserRegionalEdit_Applied;
 }
 
 static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) {
-  SettingsOverlay_Close(); SettingsOverlay_Open();
+  SettingsOverlay_Close();
+  SettingsOverlay_Open();
   const Settings before = g_settings;
-  const SettingsOverlayRegionalHooks hooks = {
-      .copy=FakeRegionalView, .request=FakeRegionalEdit, .difficulty=FakeDifficultyEdit,
-      .preview=FakeRegionalPreview, .setting=FakeSettingEdit, .preview_setting=FakeSettingPreview};
+  const SettingsOverlayRegionalHooks hooks = {.copy = FakeRegionalView,
+                                              .request = FakeRegionalEdit,
+                                              .difficulty = FakeDifficultyEdit,
+                                              .preview = FakeRegionalPreview,
+                                              .setting = FakeSettingEdit,
+                                              .preview_setting = FakeSettingPreview};
   SettingsOverlay_SetRegionalHooks(&hooks);
-  NavToSection(kSection_Regional); NavToTab(kOverlayRegionPage_Presets);
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"regional_no_campaign"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false) && !s_region_edits);
+  NavToSection(kSection_Regional);
+  NavToTab(kOverlayRegionPage_Presets);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_no_campaign"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false) && !s_region_edits);
   s_fake_region_active = true;
-  s_fake_region = (ActRaiserRegionalRulesView){.revision=7,.editable=true,
-      .lair_history_ready=true,.lair_reload_ready=true,.campaign={42}};
+  s_fake_region = (ActRaiserRegionalRulesView){.revision = 7,
+                                               .editable = true,
+                                               .lair_history_ready = true,
+                                               .lair_reload_ready = true,
+                                               .campaign = {42}};
   SettingsOverlay_Refresh();
   // Preset arrows select a candidate only; Confirm opens a cancel-default
   // review even for non-destructive presets. Palette browsing never applies.
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false) && !s_region_edits);
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false) && !s_region_edits);
   int preset_tab = -1;
   CHECK(SettingsOverlay_GetTabState(&preset_tab, NULL) && preset_tab == kOverlayRegionPage_Presets);
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false) && !s_region_edits);
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false) && !s_region_edits); // Cancel.
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false) && !s_region_edits);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false) && !s_region_edits); // Cancel.
   CHECK(SettingsOverlay_IsOpen());
   CHECK(SettingsOverlay_GetTabState(&preset_tab, NULL) && preset_tab == kOverlayRegionPage_Presets);
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "regional_profile_gameplay"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false) && !s_region_edits);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false) && !s_region_edits);
   AcceptRegionalWarning();
-  CHECK(s_region_edits==1 && s_fake_region.population_pending && !s_fake_region.requested.retry_score);
-  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT,true,false) && s_region_edits==1);
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false) && s_region_edits==1);
+  CHECK(s_region_edits == 1 && s_fake_region.population_pending &&
+        !s_fake_region.requested.retry_score);
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false) && s_region_edits == 1);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false) && s_region_edits == 1);
   AcceptRegionalWarning();
-  CHECK(s_region_edits==2);
+  CHECK(s_region_edits == 2);
   CHECK(!s_fake_region.population_pending);
   // Every row is directly reachable from a tab; no nested page state survives Back.
-  for (unsigned page=0; page<kOverlayRegionPage_Count; ++page) {
+  for (unsigned page = 0; page < kOverlayRegionPage_Count; ++page) {
     NavToTab(page);
-    for (unsigned i=0; i<OverlayRegionMenu_Count(page); ++i) {
-      const OverlayRegionRow *row=OverlayRegionMenu_Row(page,i);
+    for (unsigned i = 0; i < OverlayRegionMenu_Count(page); ++i) {
+      const OverlayRegionRow *row = OverlayRegionMenu_Row(page, i);
       RowToKey(row->key);
-      const unsigned edits=s_region_edits;
-      ActRaiserRegionalEditImpact impact={0};
-      if (row->kind==kOverlayRegionRow_Preset) {
-        const ArRegionalSource current=OverlayRegionMenu_RowSource(&s_fake_region,row,false);
-        FakeRegionalPreview(&s_fake_region,row->group,current==kArRegionalSource_Count?0:(current+1)%3,&impact);
-      } else if (row->kind==kOverlayRegionRow_Setting) {
-        const ArRegionalSource current=OverlayRegionMenu_RowSource(&s_fake_region,row,false);
-        FakeSettingPreview(&s_fake_region,row->setting,current==kArRegionalSource_Count?0:row->binary?(current==1?0:1):(current+1)%3,&impact);
-      }
-      CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+      const unsigned edits = s_region_edits;
+      ActRaiserRegionalEditImpact impact = {0};
       if (row->kind == kOverlayRegionRow_Preset) {
-        CHECK(s_region_edits==edits);
-        CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-        CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-        CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+        const ArRegionalSource current = OverlayRegionMenu_RowSource(&s_fake_region, row, false);
+        FakeRegionalPreview(&s_fake_region, row->group,
+                            current == kArRegionalSource_Count ? 0 : (current + 1) % 3, &impact);
+      } else if (row->kind == kOverlayRegionRow_Setting) {
+        const ArRegionalSource current = OverlayRegionMenu_RowSource(&s_fake_region, row, false);
+        FakeSettingPreview(&s_fake_region, row->setting,
+                           current == kArRegionalSource_Count ? 0
+                           : row->binary                      ? (current == 1 ? 0 : 1)
+                                                              : (current + 1) % 3,
+                           &impact);
+      }
+      CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+      if (row->kind == kOverlayRegionRow_Preset) {
+        CHECK(s_region_edits == edits);
+        CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+        CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+        CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
         AcceptRegionalWarning();
       } else if (impact.towns || impact.estimated_history) {
-        CHECK(s_region_edits==edits);
-        CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false) && SettingsOverlay_IsOpen());
-        CHECK(!strcmp(SettingsOverlay_SelectedKey(),row->key));
-        CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
+        CHECK(s_region_edits == edits);
+        CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false) && SettingsOverlay_IsOpen());
+        CHECK(!strcmp(SettingsOverlay_SelectedKey(), row->key));
+        CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
         AcceptRegionalWarning();
       }
-      CHECK(s_region_edits==edits+1);
+      CHECK(s_region_edits == edits + 1);
     }
   }
-  CHECK(!memcmp(&before,&g_settings,sizeof(before)));
-  CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_None);
+  CHECK(!memcmp(&before, &g_settings, sizeof(before)));
+  CHECK(SettingsOverlay_TakeDecisionResult() == kOverlayDecision_None);
   // Stale acceptance cannot edit a different revision.
-  NavToTab(kOverlayRegionPage_Towns); RowToKey("regional_development");
-  unsigned edits=s_region_edits;
-  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT,true,false) && s_region_edits==edits);
+  NavToTab(kOverlayRegionPage_Towns);
+  RowToKey("regional_development");
+  unsigned edits = s_region_edits;
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false) && s_region_edits == edits);
   ++s_fake_region.revision;
   AcceptRegionalWarning();
-  CHECK(s_region_edits==edits);
+  CHECK(s_region_edits == edits);
   // Reset uses the same warning path. Closing while warned cancels the edit.
-  CHECK(SettingsOverlay_HandleKey(SDLK_A,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
   SettingsOverlay_Close();
-  CHECK(s_region_edits==edits && SettingsOverlay_TakeDecisionResult()==kOverlayDecision_None);
-  SettingsOverlay_Open(); NavToSection(kSection_Regional);
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  s_fake_region.editable=false; SettingsOverlay_Refresh();
-  for (unsigned page=0;page<kOverlayRegionPage_Count;++page) {
+  CHECK(s_region_edits == edits && SettingsOverlay_TakeDecisionResult() == kOverlayDecision_None);
+  SettingsOverlay_Open();
+  NavToSection(kSection_Regional);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  s_fake_region.editable = false;
+  SettingsOverlay_Refresh();
+  for (unsigned page = 0; page < kOverlayRegionPage_Count; ++page) {
     NavToTab(page);
-    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false) && s_region_edits==edits);
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false) && s_region_edits == edits);
   }
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false)); // Back exits the tab, not a hidden group.
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-  int selected=-1;
-  CHECK(SettingsOverlay_GetNavigationState(&selected,NULL,NULL,NULL) && selected==kSection_Randomizer);
-  s_fake_region.editable=true;
-  SettingsOverlay_Close(); SettingsOverlay_Open();
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false)); // Back exits the tab, not a hidden group.
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  int selected = -1;
+  CHECK(SettingsOverlay_GetNavigationState(&selected, NULL, NULL, NULL) &&
+        selected == kSection_Randomizer);
+  s_fake_region.editable = true;
+  SettingsOverlay_Close();
+  SettingsOverlay_Open();
   // Regional selection must not change the common footer/panel geometry.
   int ordinary_visible = 0, regional_visible = 0;
   if (renderer && surface) {
     NavToSection(kSection_Video);
-    SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h});
-    CHECK(SettingsOverlay_GetNavigationState(NULL,NULL,&ordinary_visible,NULL));
+    SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
+    CHECK(SettingsOverlay_GetNavigationState(NULL, NULL, &ordinary_visible, NULL));
   }
   NavToSection(kSection_Regional);
   if (renderer && surface) {
-    SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h});
-    CHECK(SettingsOverlay_GetNavigationState(NULL,NULL,&regional_visible,NULL));
+    SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
+    CHECK(SettingsOverlay_GetNavigationState(NULL, NULL, &regional_visible, NULL));
     CHECK(ordinary_visible == regional_visible);
   }
-  const char *page_text=getenv("AR_OVERLAY_REGIONAL_PAGE_PREVIEW");
-  unsigned page=page_text?(unsigned)atoi(page_text):0;
-  if (page>=kOverlayRegionPage_Count) page=0;
-  NavToTab(page); CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  const char *preview_row=getenv("AR_OVERLAY_REGIONAL_ROW_PREVIEW");
-  if(preview_row && preview_row[0])RowToKey(preview_row);
-  if(renderer && surface)for(int locale=0;locale<kArUiLocale_Count;++locale) {
-    g_settings.interface_language=locale;
-    SDL_SetRenderDrawColor(renderer,32,24,16,255); CHECK(SDL_RenderClear(renderer));
-    SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h}); CHECK(SDL_RenderPresent(renderer));
-    const char *preview=getenv("AR_OVERLAY_REGIONAL_TEST_BMP");
-    if(preview && preview[0]) {
-      char path[1024]; const int n=snprintf(path,sizeof(path),"%s-%s.bmp",preview,ArUiCatalog_LocaleTag(locale));
-      CHECK(n>0 && (size_t)n<sizeof(path)); if(n>0 && (size_t)n<sizeof(path))CHECK(SDL_SaveBMP(surface,path));
+  const char *page_text = getenv("AR_OVERLAY_REGIONAL_PAGE_PREVIEW");
+  unsigned page = page_text ? (unsigned)atoi(page_text) : 0;
+  if (page >= kOverlayRegionPage_Count) page = 0;
+  NavToTab(page);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  const char *preview_row = getenv("AR_OVERLAY_REGIONAL_ROW_PREVIEW");
+  if (preview_row && preview_row[0]) RowToKey(preview_row);
+  if (renderer && surface)
+    for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
+      g_settings.interface_language = locale;
+      SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
+      CHECK(SDL_RenderClear(renderer));
+      SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
+      CHECK(SDL_RenderPresent(renderer));
+      const char *preview = getenv("AR_OVERLAY_REGIONAL_TEST_BMP");
+      if (preview && preview[0]) {
+        char path[1024];
+        const int n =
+            snprintf(path, sizeof(path), "%s-%s.bmp", preview, ArUiCatalog_LocaleTag(locale));
+        CHECK(n > 0 && (size_t)n < sizeof(path));
+        if (n > 0 && (size_t)n < sizeof(path)) CHECK(SDL_SaveBMP(surface, path));
+      }
+      const char *key = SettingsOverlay_SelectedKey();
+      const unsigned edits_before = s_region_edits;
+      int tab_before = -1, tab_after = -1;
+      CHECK(SettingsOverlay_GetTabState(&tab_before, NULL));
+      CHECK(SettingsOverlay_HandleKey(SDLK_F3, true, false));
+      CHECK(SDL_RenderClear(renderer));
+      SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
+      CHECK(SDL_RenderPresent(renderer));
+      if (preview && *preview) {
+        char path[1024];
+        const int n = snprintf(path, sizeof(path), "%s-details-%s.bmp", preview,
+                               ArUiCatalog_LocaleTag(locale));
+        CHECK(n > 0 && (size_t)n < sizeof(path));
+        if (n > 0 && (size_t)n < sizeof(path)) CHECK(SDL_SaveBMP(surface, path));
+      }
+      CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+      CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+      CHECK(SettingsOverlay_HandleKey(SDLK_RIGHTBRACKET, true, false));
+      CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false)); // Reset is inert in Details.
+      CHECK(SettingsOverlay_GetTabState(&tab_after, NULL) && tab_after == tab_before);
+      CHECK(!strcmp(SettingsOverlay_SelectedKey(), key) && s_region_edits == edits_before);
+      CHECK(SettingsOverlay_TakeDecisionResult() == kOverlayDecision_None);
+      CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE, true, false));
+      CHECK(SettingsOverlay_IsOpen() && !strcmp(SettingsOverlay_SelectedKey(), key));
+      // The player's bound X button opens the same read-only view as F3.
+      const SDL_Keycode details_key = SDL_GetKeyFromScancode(
+          INPUT_BIND_CODE(g_settings.input_bind[kInputClass_Keyboard][kInputAction_X]),
+          SDL_KMOD_NONE, false);
+      CHECK(SettingsOverlay_HandleKey(details_key, true, false));
+      CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+      CHECK(!strcmp(SettingsOverlay_SelectedKey(), key));
+      CHECK(SettingsOverlay_HandleKey(SDLK_RETURN, true, false));
+      CHECK(SettingsOverlay_IsOpen() && s_region_edits == edits_before);
+      // Closing the overlay cannot leave the reader intercepting the next visit.
+      CHECK(SettingsOverlay_HandleKey(SDLK_F3, true, false));
+      SettingsOverlay_Close();
+      SettingsOverlay_Open();
+      CHECK(SettingsOverlay_HandleKey(SDLK_RETURN, true, false));
+      RowToKey(key);
+      CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+      CHECK(strcmp(SettingsOverlay_SelectedKey(), key) != 0);
+      RowToKey(key);
+      CHECK(s_region_edits == edits_before);
     }
-    const char *key = SettingsOverlay_SelectedKey();
-    const unsigned edits_before = s_region_edits;
-    int tab_before = -1, tab_after = -1;
-    CHECK(SettingsOverlay_GetTabState(&tab_before, NULL));
-    CHECK(SettingsOverlay_HandleKey(SDLK_F3, true, false));
-    CHECK(SDL_RenderClear(renderer));
-    SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h}); CHECK(SDL_RenderPresent(renderer));
-    if (preview && *preview) {
-      char path[1024];
-      const int n = snprintf(path, sizeof(path), "%s-details-%s.bmp", preview, ArUiCatalog_LocaleTag(locale));
-      CHECK(n > 0 && (size_t)n < sizeof(path));
-      if (n > 0 && (size_t)n < sizeof(path)) CHECK(SDL_SaveBMP(surface, path));
-    }
-    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
-    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHTBRACKET, true, false));
-    CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false)); // Reset is inert in Details.
-    CHECK(SettingsOverlay_GetTabState(&tab_after, NULL) && tab_after == tab_before);
-    CHECK(!strcmp(SettingsOverlay_SelectedKey(), key) && s_region_edits == edits_before);
-    CHECK(SettingsOverlay_TakeDecisionResult() == kOverlayDecision_None);
-    CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE, true, false));
-    CHECK(SettingsOverlay_IsOpen() && !strcmp(SettingsOverlay_SelectedKey(), key));
-    // The player's bound X button opens the same read-only view as F3.
-    const SDL_Keycode details_key = SDL_GetKeyFromScancode(
-        INPUT_BIND_CODE(g_settings.input_bind[kInputClass_Keyboard][kInputAction_X]), SDL_KMOD_NONE, false);
-    CHECK(SettingsOverlay_HandleKey(details_key, true, false));
-    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-    CHECK(!strcmp(SettingsOverlay_SelectedKey(), key));
-    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN, true, false));
-    CHECK(SettingsOverlay_IsOpen() && s_region_edits == edits_before);
-    // Closing the overlay cannot leave the reader intercepting the next visit.
-    CHECK(SettingsOverlay_HandleKey(SDLK_F3, true, false));
-    SettingsOverlay_Close(); SettingsOverlay_Open();
-    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN, true, false));
-    RowToKey(key);
-    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
-    CHECK(strcmp(SettingsOverlay_SelectedKey(), key) != 0);
-    RowToKey(key);
-    CHECK(s_region_edits == edits_before);
-  }
-  g_settings.interface_language=before.interface_language;
+  g_settings.interface_language = before.interface_language;
   // Full-description and confirmation budgets in every shipped language.
-  for(unsigned p=0;p<kOverlayRegionPage_Count;++p)
-    for(unsigned r=0;r<OverlayRegionMenu_Count(p);++r)
-      for(unsigned locale=0;locale<kArUiLocale_Count;++locale)
-        for(unsigned pending=0;pending<2;++pending) {
-          ActRaiserRegionalRulesView display=s_fake_region;
-          display.population_pending=display.pending_profile=pending!=0;
-          display.pending_profile_group=kArRegionalProfile_Gameplay;display.pending_population=1;
-          display.pending_groups=(1u << kArRegionalProfile_GroupCount) - 1;
-          const OverlayRegionRow *row=OverlayRegionMenu_Row(p,r);
-          char help[2048]; CHECK(OverlayRegionMenu_Description(locale,&display,row,help,sizeof(help)));
+  for (unsigned p = 0; p < kOverlayRegionPage_Count; ++p)
+    for (unsigned r = 0; r < OverlayRegionMenu_Count(p); ++r)
+      for (unsigned locale = 0; locale < kArUiLocale_Count; ++locale)
+        for (unsigned pending = 0; pending < 2; ++pending) {
+          ActRaiserRegionalRulesView display = s_fake_region;
+          display.population_pending = display.pending_profile = pending != 0;
+          display.pending_profile_group = kArRegionalProfile_Gameplay;
+          display.pending_population = 1;
+          display.pending_groups = (1u << kArRegionalProfile_GroupCount) - 1;
+          const OverlayRegionRow *row = OverlayRegionMenu_Row(p, r);
+          char help[2048];
+          CHECK(OverlayRegionMenu_Description(locale, &display, row, help, sizeof(help)));
           // Impact leads both views and fits within two compact-footer lines.
           const char *mechanics = strchr(help, '\n');
           CHECK(mechanics && mechanics > help && !strchr(help, '{'));
-          size_t used=0,length=mechanics ? (size_t)(mechanics-help) : strlen(help);
-          for(unsigned line=0;line<2 && used<length;++line) {
+          size_t used = 0, length = mechanics ? (size_t)(mechanics - help) : strlen(help);
+          for (unsigned line = 0; line < 2 && used < length; ++line) {
             ArInterfaceTextLine slice;
-            CHECK(ArInterfaceText_WrapLine(help+used,length-used,70,kArInterfaceTextMaximumBytes,&slice));
-            CHECK(slice.consumed);used+=slice.consumed;
+            CHECK(ArInterfaceText_WrapLine(help + used, length - used, 70,
+                                           kArInterfaceTextMaximumBytes, &slice));
+            CHECK(slice.consumed);
+            used += slice.consumed;
           }
-          if(used<length)fprintf(stderr,"regional impact overflow %s locale=%u\n",row->key,locale);
-          CHECK(used==length);
+          if (used < length)
+            fprintf(stderr, "regional impact overflow %s locale=%u\n", row->key, locale);
+          CHECK(used == length);
           // Mechanics and caveats may scroll in Details; they need not fit the footer.
-          used=0;length=strlen(help);
-          for(unsigned line=0;line<40 && used<length;++line) {
+          used = 0;
+          length = strlen(help);
+          for (unsigned line = 0; line < 40 && used < length; ++line) {
             ArInterfaceTextLine slice;
-            CHECK(ArInterfaceText_WrapLine(help+used,length-used,70,kArInterfaceTextMaximumBytes,&slice));
-            CHECK(slice.consumed);used+=slice.consumed;
+            CHECK(ArInterfaceText_WrapLine(help + used, length - used, 70,
+                                           kArInterfaceTextMaximumBytes, &slice));
+            CHECK(slice.consumed);
+            used += slice.consumed;
           }
-          CHECK(used==length);
-          const char *impact=OverlayRegionMenu_ImpactLabel(locale,&display,row);
-          CHECK(impact && *impact && !strstr(impact,"overlay.region."));
-          for(unsigned kind=kArRegionalTownImpact_Future;kind<=kArRegionalTownImpact_Redevelopment;++kind) {
-            const ActRaiserRegionalEditImpact warning={.towns=kind,.estimated_history=true};
-            CHECK(row->kind == kOverlayRegionRow_Preset
-                ? OverlayRegionMenu_PresetWarning(locale,row,1,&warning,help,sizeof(help))
-                : SettingsOverlayRegions_EditWarning(locale,OverlayRegionMenu_Label(locale,row),1,&warning,help,sizeof(help)));
-            CHECK(!strchr(help,'{'));
-            used=0;length=strlen(help);
-            for(unsigned line=0;line<19 && used<length;++line) {
+          CHECK(used == length);
+          const char *impact = OverlayRegionMenu_ImpactLabel(locale, &display, row);
+          CHECK(impact && *impact && !strstr(impact, "overlay.region."));
+          for (unsigned kind = kArRegionalTownImpact_Future;
+               kind <= kArRegionalTownImpact_Redevelopment; ++kind) {
+            const ActRaiserRegionalEditImpact warning = {.towns = kind, .estimated_history = true};
+            CHECK(
+                row->kind == kOverlayRegionRow_Preset
+                    ? OverlayRegionMenu_PresetWarning(locale, row, 1, &warning, help, sizeof(help))
+                    : SettingsOverlayRegions_EditWarning(locale,
+                                                         OverlayRegionMenu_Label(locale, row), 1,
+                                                         &warning, help, sizeof(help)));
+            CHECK(!strchr(help, '{'));
+            used = 0;
+            length = strlen(help);
+            for (unsigned line = 0; line < 19 && used < length; ++line) {
               ArInterfaceTextLine slice;
-              CHECK(ArInterfaceText_WrapLine(help+used,length-used,72,kArInterfaceTextMaximumBytes,&slice));
-              used+=slice.consumed;
+              CHECK(ArInterfaceText_WrapLine(help + used, length - used, 72,
+                                             kArInterfaceTextMaximumBytes, &slice));
+              used += slice.consumed;
             }
-            CHECK(used==length);
+            CHECK(used == length);
           }
         }
   // The selected behavior is fully visible without opening Details, in every
@@ -534,65 +597,100 @@ static void CheckRegionalControls(SDL_Renderer *renderer, SDL_Surface *surface) 
         size_t used = 0, length = strlen(text);
         for (unsigned line = 0; line < 3 && used < length; ++line) {
           ArInterfaceTextLine slice;
-          CHECK(ArInterfaceText_WrapLine(text + used, length - used, 70, kArInterfaceTextMaximumBytes, &slice));
-          CHECK(slice.consumed); used += slice.consumed;
+          CHECK(ArInterfaceText_WrapLine(text + used, length - used, 70,
+                                         kArInterfaceTextMaximumBytes, &slice));
+          CHECK(slice.consumed);
+          used += slice.consumed;
         }
         CHECK(used == length);
       }
-  SettingsOverlay_SetRegionalHooks(NULL); SettingsOverlay_Close();
+  SettingsOverlay_SetRegionalHooks(NULL);
+  SettingsOverlay_Close();
 }
 
 /* Optional visual-review artifact: real overlay input/rendering with an
  * isolated campaign model. No game launch, SRAM or player settings writes.
  * The concat manifest preserves dwell times without duplicating large BMPs. */
-static void RegionalReviewFrame(SDL_Renderer *renderer, SDL_Surface *surface,
-    FILE *timeline, const char *directory, unsigned *index, double seconds) {
+static void RegionalReviewFrame(SDL_Renderer *renderer, SDL_Surface *surface, FILE *timeline,
+                                const char *directory, unsigned *index, double seconds) {
   char path[1024];
-  const int n=snprintf(path,sizeof(path),"%s/%03u.bmp",directory,*index);
-  CHECK(n>0 && (size_t)n<sizeof(path));
-  if(n<=0 || (size_t)n>=sizeof(path))return;
-  SDL_SetRenderDrawColor(renderer,12,20,32,255); CHECK(SDL_RenderClear(renderer));
-  SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h});
+  const int n = snprintf(path, sizeof(path), "%s/%03u.bmp", directory, *index);
+  CHECK(n > 0 && (size_t)n < sizeof(path));
+  if (n <= 0 || (size_t)n >= sizeof(path)) return;
+  SDL_SetRenderDrawColor(renderer, 12, 20, 32, 255);
+  CHECK(SDL_RenderClear(renderer));
+  SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
   CHECK(SDL_RenderPresent(renderer));
-  CHECK(SDL_SaveBMP(surface,path));
-  fprintf(timeline,"file '%03u.bmp'\nduration %.2f\n",(*index)++,seconds);
+  CHECK(SDL_SaveBMP(surface, path));
+  fprintf(timeline, "file '%03u.bmp'\nduration %.2f\n", (*index)++, seconds);
 }
 
 /* A chronological highlights capture: render after EVERY input, including
  * confirmation cancellation and intermediate tab/row navigation. Never splice
  * frames from another visit with a different horizontal tab-scroll position. */
-static void CaptureRegionalHighlights(SDL_Renderer *renderer, SDL_Surface *surface,
-    FILE *timeline, const char *directory, unsigned *frame) {
-  NavToSection(kSection_Regional); NavToTab(kOverlayRegionPage_Presets);
+static void CaptureRegionalHighlights(SDL_Renderer *renderer, SDL_Surface *surface, FILE *timeline,
+                                      const char *directory, unsigned *frame) {
+  NavToSection(kSection_Regional);
+  NavToTab(kOverlayRegionPage_Presets);
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   RowToKey("regional_profile_gameplay");
   RegionalReviewFrame(renderer, surface, timeline, directory, frame, 1.0);
-  const struct { SDL_Keycode key; double seconds; const char *row; } steps[] = {
-    {SDLK_RIGHT, 0.9, NULL}, {SDLK_Z, 2.4, NULL},
-    {SDLK_X, 0.9, "regional_profile_gameplay"},
-    {SDLK_RIGHTBRACKET, 0.7, "regional_difficulty_level"},
-    {SDLK_RIGHT, 0.6, NULL}, {SDLK_RIGHT, 0.6, NULL}, {SDLK_RIGHT, 0.9, NULL},
-    {SDLK_DOWN, 0.7, "regional_terrain"}, {SDLK_F3, 2.4, NULL},
-    {SDLK_ESCAPE, 0.5, "regional_terrain"},
-    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL},
-    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL},
-    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL},
-    {SDLK_DOWN, 0.8, "regional_bosses"},
-    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.7, "regional_scrolls"},
-    {SDLK_RIGHTBRACKET, 1.0, "regional_profile_population"},
-    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL},
-    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.8, "regional_lair_reserves"},
-    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL},
-    {SDLK_DOWN, 0.7, "regional_miracles"},
-    {SDLK_RIGHTBRACKET, 1.0, "regional_magic_gesture"},
-    {SDLK_RIGHT, 1.6, "regional_magic_gesture"},
-    {SDLK_DOWN, 0.6, "regional_lives_display"}, {SDLK_DOWN, 0.12, NULL},
-    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.7, "regional_speed_range"},
-    {SDLK_RIGHTBRACKET, 0.9, "regional_actor_art"},
-    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL},
-    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.6, "regional_title_art"},
-    {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.12, NULL}, {SDLK_DOWN, 0.8, "regional_music"},
-    {SDLK_DOWN, 1.0, "regional_sequences"},
+  const struct {
+    SDL_Keycode key;
+    double seconds;
+    const char *row;
+  } steps[] = {
+      {SDLK_RIGHT, 0.9, NULL},
+      {SDLK_Z, 2.4, NULL},
+      {SDLK_X, 0.9, "regional_profile_gameplay"},
+      {SDLK_RIGHTBRACKET, 0.7, "regional_difficulty_level"},
+      {SDLK_RIGHT, 0.6, NULL},
+      {SDLK_RIGHT, 0.6, NULL},
+      {SDLK_RIGHT, 0.9, NULL},
+      {SDLK_DOWN, 0.7, "regional_terrain"},
+      {SDLK_F3, 2.4, NULL},
+      {SDLK_ESCAPE, 0.5, "regional_terrain"},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.8, "regional_bosses"},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.7, "regional_scrolls"},
+      {SDLK_RIGHTBRACKET, 1.0, "regional_profile_population"},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.8, "regional_lair_reserves"},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.7, "regional_miracles"},
+      {SDLK_RIGHTBRACKET, 1.0, "regional_magic_gesture"},
+      {SDLK_RIGHT, 1.6, "regional_magic_gesture"},
+      {SDLK_DOWN, 0.6, "regional_lives_display"},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.7, "regional_speed_range"},
+      {SDLK_RIGHTBRACKET, 0.9, "regional_actor_art"},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.6, "regional_title_art"},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.12, NULL},
+      {SDLK_DOWN, 0.8, "regional_music"},
+      {SDLK_DOWN, 1.0, "regional_sequences"},
   };
   for (unsigned i = 0; i < sizeof(steps) / sizeof(steps[0]); ++i) {
     CHECK(SettingsOverlay_HandleKey(steps[i].key, true, false));
@@ -606,84 +704,101 @@ static void CaptureRegionalHighlights(SDL_Renderer *renderer, SDL_Surface *surfa
 }
 
 static void CaptureRegionalReview(SDL_Renderer *renderer, SDL_Surface *surface) {
-  const char *directory=getenv("AR_OVERLAY_REGIONAL_TOUR_DIR");
-  if(!directory || !*directory || !renderer || !surface)return;
+  const char *directory = getenv("AR_OVERLAY_REGIONAL_TOUR_DIR");
+  if (!directory || !*directory || !renderer || !surface) return;
   char path[1024];
-  const int n=snprintf(path,sizeof(path),"%s/tour.ffconcat",directory);
-  CHECK(n>0 && (size_t)n<sizeof(path));
-  if(n<=0 || (size_t)n>=sizeof(path))return;
-  FILE *timeline=fopen(path,"wb"); CHECK(timeline);
-  if(!timeline)return;
-  fprintf(timeline,"ffconcat version 1.0\n");
-  const Settings saved=g_settings;
-  g_settings.show_debug_settings=false;
-  const char *locale=getenv("AR_OVERLAY_REGIONAL_TOUR_LOCALE");
-  g_settings.interface_language=locale?atoi(locale):0;
-  s_fake_region_active=true;
-  s_fake_region=(ActRaiserRegionalRulesView){.campaign={42},.revision=1,.editable=true,
-      .lair_history_ready=true,.lair_reload_ready=true};
-  const SettingsOverlayRegionalHooks hooks={.copy=FakeRegionalView,.request=FakeRegionalEdit,
-      .difficulty=FakeDifficultyEdit,.preview=FakeRegionalPreview,
-      .setting=FakeSettingEdit,.preview_setting=FakeSettingPreview};
+  const int n = snprintf(path, sizeof(path), "%s/tour.ffconcat", directory);
+  CHECK(n > 0 && (size_t)n < sizeof(path));
+  if (n <= 0 || (size_t)n >= sizeof(path)) return;
+  FILE *timeline = fopen(path, "wb");
+  CHECK(timeline);
+  if (!timeline) return;
+  fprintf(timeline, "ffconcat version 1.0\n");
+  const Settings saved = g_settings;
+  g_settings.show_debug_settings = false;
+  const char *locale = getenv("AR_OVERLAY_REGIONAL_TOUR_LOCALE");
+  g_settings.interface_language = locale ? atoi(locale) : 0;
+  s_fake_region_active = true;
+  s_fake_region = (ActRaiserRegionalRulesView){.campaign = {42},
+                                               .revision = 1,
+                                               .editable = true,
+                                               .lair_history_ready = true,
+                                               .lair_reload_ready = true};
+  const SettingsOverlayRegionalHooks hooks = {.copy = FakeRegionalView,
+                                              .request = FakeRegionalEdit,
+                                              .difficulty = FakeDifficultyEdit,
+                                              .preview = FakeRegionalPreview,
+                                              .setting = FakeSettingEdit,
+                                              .preview_setting = FakeSettingPreview};
   SettingsOverlay_SetRegionalHooks(&hooks);
-  SettingsOverlay_Close(); SettingsOverlay_Open(); NavToSection(kSection_Video);
-  unsigned frame=0;
+  SettingsOverlay_Close();
+  SettingsOverlay_Open();
+  NavToSection(kSection_Video);
+  unsigned frame = 0;
   if (getenv("AR_OVERLAY_REGIONAL_TOUR_SHORT")) {
     CaptureRegionalHighlights(renderer, surface, timeline, directory, &frame);
   } else {
-    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,0.6);
-    for(unsigned section=0;section<kSection_Regional;++section) {
-      CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-      RegionalReviewFrame(renderer,surface,timeline,directory,&frame,0.22);
+    RegionalReviewFrame(renderer, surface, timeline, directory, &frame, 0.6);
+    for (unsigned section = 0; section < kSection_Regional; ++section) {
+      CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+      RegionalReviewFrame(renderer, surface, timeline, directory, &frame, 0.22);
     }
     NavToTab(kOverlayRegionPage_Presets);
-    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,1.8);
-    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-    for(unsigned page=0;page<kOverlayRegionPage_Count;++page) {
+    RegionalReviewFrame(renderer, surface, timeline, directory, &frame, 1.8);
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    for (unsigned page = 0; page < kOverlayRegionPage_Count; ++page) {
       NavToTab(page);
-      for(unsigned row=0;row<OverlayRegionMenu_Count(page);++row) {
-        RowToKey(OverlayRegionMenu_Row(page,row)->key);
-        RegionalReviewFrame(renderer,surface,timeline,directory,&frame,3.0);
+      for (unsigned row = 0; row < OverlayRegionMenu_Count(page); ++row) {
+        RowToKey(OverlayRegionMenu_Row(page, row)->key);
+        RegionalReviewFrame(renderer, surface, timeline, directory, &frame, 3.0);
       }
     }
     // Review both warnings without accepting edits or queuing redevelopment.
-    NavToTab(kOverlayRegionPage_Towns); RowToKey("regional_development");
-    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,4.0);
-    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-    RowToKey("regional_profile_population"); CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,5.0);
-    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-    s_fake_region.lair_history_estimated=s_fake_region.lair_reload_estimated=true;
+    NavToTab(kOverlayRegionPage_Towns);
+    RowToKey("regional_development");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    RegionalReviewFrame(renderer, surface, timeline, directory, &frame, 4.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+    RowToKey("regional_profile_population");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    RegionalReviewFrame(renderer, surface, timeline, directory, &frame, 5.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+    s_fake_region.lair_history_estimated = s_fake_region.lair_reload_estimated = true;
     RowToKey("regional_lair_reserves");
-    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,3.0);
-    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,4.0);
-    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+    RegionalReviewFrame(renderer, surface, timeline, directory, &frame, 3.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    RegionalReviewFrame(renderer, surface, timeline, directory, &frame, 4.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
     // Requested JP art without a donor stays JP; help explains the US fallback.
-    NavToTab(kOverlayRegionPage_Presentation); RowToKey("regional_actor_art");
-    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-    SettingsOverlay_Close(); SettingsOverlay_Open(); CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,3.0);
-    CHECK(SettingsOverlay_HandleKey(SDLK_F3,true,false));
-    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,5.0);
-    CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE,true,false));
-    NavToTab(kOverlayRegionPage_Action); RowToKey("regional_difficulty_level");
+    NavToTab(kOverlayRegionPage_Presentation);
+    RowToKey("regional_actor_art");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    SettingsOverlay_Close();
+    SettingsOverlay_Open();
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    RegionalReviewFrame(renderer, surface, timeline, directory, &frame, 3.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_F3, true, false));
+    RegionalReviewFrame(renderer, surface, timeline, directory, &frame, 5.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE, true, false));
+    NavToTab(kOverlayRegionPage_Action);
+    RowToKey("regional_difficulty_level");
     for (unsigned choice = 0; choice < kArRegionalDifficultyChoice_Count; ++choice) {
-      if (choice) CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-      RegionalReviewFrame(renderer,surface,timeline,directory,&frame,3.0);
+      if (choice) CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+      RegionalReviewFrame(renderer, surface, timeline, directory, &frame, 3.0);
     }
-    NavToTab(kOverlayRegionPage_Presets); RowToKey("regional_profile_gameplay");
-    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,2.0);
-    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-    RegionalReviewFrame(renderer,surface,timeline,directory,&frame,5.0);
-    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+    NavToTab(kOverlayRegionPage_Presets);
+    RowToKey("regional_profile_gameplay");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    RegionalReviewFrame(renderer, surface, timeline, directory, &frame, 2.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    RegionalReviewFrame(renderer, surface, timeline, directory, &frame, 5.0);
+    CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
   }
-  fprintf(timeline,"file '%03u.bmp'\n",frame-1);
+  fprintf(timeline, "file '%03u.bmp'\n", frame - 1);
   CHECK(!fclose(timeline));
-  SettingsOverlay_Close(); SettingsOverlay_SetRegionalHooks(NULL);
-  g_settings=saved;
+  SettingsOverlay_Close();
+  SettingsOverlay_SetRegionalHooks(NULL);
+  g_settings = saved;
 }
 
 static bool s_dump_catalog;
@@ -709,25 +824,28 @@ static void CheckLayerHelpCatalog(void) {
     snprintf(key, sizeof(key), "overlay.layer.action.help.%d", kind);
     CheckCatalogEntry(key, ActionBgTuner_RowHelp(&row));
   }
-  CheckCatalogEntry("overlay.layer.diorama.help.header", DioramaLayerEditor_RowHelp(
-      kDioramaEditorRow_Header, kDioramaEditorParam_None, kDioramaDepth_Flat));
-  CheckCatalogEntry("overlay.layer.diorama.help.reset", DioramaLayerEditor_RowHelp(
-      kDioramaEditorRow_ResetRoom, kDioramaEditorParam_None, kDioramaDepth_Flat));
+  CheckCatalogEntry("overlay.layer.diorama.help.header",
+                    DioramaLayerEditor_RowHelp(kDioramaEditorRow_Header, kDioramaEditorParam_None,
+                                               kDioramaDepth_Flat));
+  CheckCatalogEntry("overlay.layer.diorama.help.reset",
+                    DioramaLayerEditor_RowHelp(kDioramaEditorRow_ResetRoom,
+                                               kDioramaEditorParam_None, kDioramaDepth_Flat));
   for (int shape = 0; shape < kDioramaDepth_StrategyCount; ++shape) {
     snprintf(key, sizeof(key), "overlay.layer.diorama.help.shape.%d", shape);
-    CheckCatalogEntry(key, DioramaLayerEditor_RowHelp(kDioramaEditorRow_Plane,
-        kDioramaEditorParam_None, (DioramaDepthStrategy)shape));
+    CheckCatalogEntry(key,
+                      DioramaLayerEditor_RowHelp(kDioramaEditorRow_Plane, kDioramaEditorParam_None,
+                                                 (DioramaDepthStrategy)shape));
   }
   for (int param = kDioramaEditorParam_Depth; param <= kDioramaEditorParam_Order; ++param) {
     snprintf(key, sizeof(key), "overlay.layer.diorama.help.param.%d", param);
-    CheckCatalogEntry(key, DioramaLayerEditor_RowHelp(kDioramaEditorRow_Param,
-        (DioramaEditorParam)param, kDioramaDepth_Flat));
+    CheckCatalogEntry(key,
+                      DioramaLayerEditor_RowHelp(kDioramaEditorRow_Param, (DioramaEditorParam)param,
+                                                 kDioramaDepth_Flat));
   }
 }
 
 static void CheckLayerCaptionParity(const char *label, const char *value,
-                                     const SettingsOverlayLayerText *text,
-                                     ArUiLocale locale) {
+                                    const SettingsOverlayLayerText *text, ArUiLocale locale) {
   CHECK(text->label[0] && text->help && text->help[0]);
   if (locale == kArUiLocale_English) {
     /* The authentic atlas uppercases ASCII. Capitalization of keyed captions
@@ -738,15 +856,18 @@ static void CheckLayerCaptionParity(const char *label, const char *value,
 }
 
 static void CheckLayerRowPresentation(void) {
-  const struct { const char *family; int count; } enums[] = {
-    {"action.edge", kActionBgEdge_RawWrap + 1},
-    {"action.motion", kActionBgMotion_NormalScroll + 1},
-    {"action.anchor", kActionBgBandAnchor_World + 1},
-    {"action.extent", kActionBgExtent_Fixed + 1},
-    {"action.source", kActionBgSource_AuthenticViewport + 1},
-    {"action.role", kActionBgLayerRole_Backdrop + 1},
-    {"diorama.shape", kDioramaDepth_StrategyCount},
-    {"diorama.direction", kDioramaStack_DirectionCount},
+  const struct {
+    const char *family;
+    int count;
+  } enums[] = {
+      {"action.edge", kActionBgEdge_RawWrap + 1},
+      {"action.motion", kActionBgMotion_NormalScroll + 1},
+      {"action.anchor", kActionBgBandAnchor_World + 1},
+      {"action.extent", kActionBgExtent_Fixed + 1},
+      {"action.source", kActionBgSource_AuthenticViewport + 1},
+      {"action.role", kActionBgLayerRole_Backdrop + 1},
+      {"diorama.shape", kDioramaDepth_StrategyCount},
+      {"diorama.direction", kDioramaStack_DirectionCount},
   };
   for (size_t f = 0; f < sizeof(enums) / sizeof(enums[0]); ++f) {
     for (int v = 0; v < enums[f].count; ++v) {
@@ -777,11 +898,14 @@ static void CheckLayerRowPresentation(void) {
         DioramaEditorRow before = rows[i];
         CHECK(rows[i].room_live && rows[i].map_group == 1 && rows[i].map_number == 2);
         if (rows[i].param) params |= 1u << rows[i].param;
-        if (rows[i].kind == kDioramaEditorRow_Param || rows[i].kind == kDioramaEditorRow_ParamEnum) {
+        if (rows[i].kind == kDioramaEditorRow_Param ||
+            rows[i].kind == kDioramaEditorRow_ParamEnum) {
           char key[128];
-          if (rows[i].param == kDioramaEditorParam_Copies && rows[i].strategy == kDioramaDepth_Voxel)
+          if (rows[i].param == kDioramaEditorParam_Copies &&
+              rows[i].strategy == kDioramaDepth_Voxel)
             snprintf(key, sizeof(key), "overlay.layer.diorama.slices");
-          else snprintf(key, sizeof(key), "overlay.layer.diorama.param.%d", rows[i].param);
+          else
+            snprintf(key, sizeof(key), "overlay.layer.diorama.param.%d", rows[i].param);
           CheckCatalogEntry(key, rows[i].label);
         }
         for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
@@ -800,7 +924,8 @@ static void CheckLayerRowPresentation(void) {
   CHECK(!offline[0].room_live);
   SettingsOverlayLayerText text;
   SettingsOverlay_LocalizedDioramaRow(kArUiLocale_French, &offline[0], &text);
-  CHECK(!strcmp(text.label, ArUiCatalog_Text(kArUiLocale_French, "overlay.layer.diorama.enter", NULL)));
+  CHECK(!strcmp(text.label,
+                ArUiCatalog_Text(kArUiLocale_French, "overlay.layer.diorama.enter", NULL)));
 
   ActionBgTuner_ResetSession();
   ActionBgPlan plan;
@@ -812,18 +937,22 @@ static void CheckLayerRowPresentation(void) {
   plan.layer[0].horizontal_extent = (ActionBgHorizontalExtent){kActionBgExtent_Fixed, 32, 48};
   plan.layer[0].vertical_extent = (ActionBgVerticalExtent){kActionBgExtent_Fixed, 16, 24};
   plan.layer[0].band_count = 1;
-  plan.layer[0].bands[0] = (ActionBgBand){.y0 = 136, .y1 = 224,
-      .edge = kActionBgEdge_Repeat,
-      .horizontal_extent = {kActionBgExtent_Fixed, 16, 24}};
-  CHECK(ActionBgTuner_ObservePlan(1, 2, &plan, (ActionBgTunerLimits){120,120,64,64}));
-  ActionBgTunerRow layer = {.kind = kActionBgTunerRow_Layer, .layer = 0, .band = -1, .selectable = true};
-  ActionBgTunerRow band = {.kind = kActionBgTunerRow_BandHeader, .layer = 0, .band = 0, .selectable = true};
+  plan.layer[0].bands[0] = (ActionBgBand){.y0 = 136,
+                                          .y1 = 224,
+                                          .edge = kActionBgEdge_Repeat,
+                                          .horizontal_extent = {kActionBgExtent_Fixed, 16, 24}};
+  CHECK(ActionBgTuner_ObservePlan(1, 2, &plan, (ActionBgTunerLimits){120, 120, 64, 64}));
+  ActionBgTunerRow layer = {
+      .kind = kActionBgTunerRow_Layer, .layer = 0, .band = -1, .selectable = true};
+  ActionBgTunerRow band = {
+      .kind = kActionBgTunerRow_BandHeader, .layer = 0, .band = 0, .selectable = true};
   CHECK(ActionBgTuner_Activate(&layer) == kActionBgTunerResult_Changed);
   CHECK(ActionBgTuner_Activate(&band) == kActionBgTunerResult_Changed);
   ActionBgTunerRow rows[kActionBgTunerRowMax];
   int count = ActionBgTuner_BuildRows(rows, kActionBgTunerRowMax);
   unsigned kinds = 0;
-  for (int i = 0; i < count; ++i) kinds |= 1u << rows[i].kind;
+  for (int i = 0; i < count; ++i)
+    kinds |= 1u << rows[i].kind;
   CHECK(kinds == ((1u << (kActionBgTunerRow_Reset + 1)) - 1));
   /* Changing the owner after building a snapshot must not change its captions.
    * This catches accidental presentation-time access to the live draft. */
@@ -864,8 +993,7 @@ static void CheckCompleteDescriptorCatalog(void) {
   /* Controller names come from the input owner; adding a named button/axis
    * requires a caption without affecting the numeric persisted identity. */
   for (int kind = kInputBind_PadButton; kind <= kInputBind_PadAxis; ++kind) {
-    int count = kind == kInputBind_PadButton ? SDL_GAMEPAD_BUTTON_COUNT
-                                            : SDL_GAMEPAD_AXIS_COUNT;
+    int count = kind == kInputBind_PadButton ? SDL_GAMEPAD_BUTTON_COUNT : SDL_GAMEPAD_AXIS_COUNT;
     for (int code = 0; code < count; ++code) {
       for (int negative = 0; negative <= (kind == kInputBind_PadAxis); ++negative) {
         uint32 binding = INPUT_BIND_MAKE(kind, code, negative);
@@ -885,14 +1013,18 @@ static void CheckDynamicInterfaceValues(void) {
   int hz = HostDisplayStatus_NominalRefreshHz();
   bool vsync = HostDisplayStatus_VsyncActive();
   char value[512], serialized[512];
-  struct { const char *setting; const char *text; const char *key; } cases[] = {
-    {"hud_scale_percent", "match", "overlay.value.match_game"},
-    {"menu_scale_percent", "auto", "overlay.value.auto"},
-    {"save_master_hp", "leave-as-is", "overlay.value.leave"},
-    {"save_angel_hp_current", "leave-as-is", "overlay.value.leave"},
-    {"save_score_fillmore_1", "leave-as-is", "overlay.value.leave"},
-    {"save_player_name", "", "overlay.value.leave"},
-    {"bind_key_up", "Unbound", "overlay.binding.unbound"},
+  struct {
+    const char *setting;
+    const char *text;
+    const char *key;
+  } cases[] = {
+      {"hud_scale_percent", "match", "overlay.value.match_game"},
+      {"menu_scale_percent", "auto", "overlay.value.auto"},
+      {"save_master_hp", "leave-as-is", "overlay.value.leave"},
+      {"save_angel_hp_current", "leave-as-is", "overlay.value.leave"},
+      {"save_score_fillmore_1", "leave-as-is", "overlay.value.leave"},
+      {"save_player_name", "", "overlay.value.leave"},
+      {"bind_key_up", "Unbound", "overlay.binding.unbound"},
   };
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
     const SettingDesc *desc = Settings_Find(cases[i].setting);
@@ -907,10 +1039,9 @@ static void CheckDynamicInterfaceValues(void) {
   snprintf(g_settings.save_player_name, sizeof(g_settings.save_player_name), "Auto");
   g_settings.save_master_hp = 15;
   g_settings.save_angel_hp_current = 1;
-  CHECK(Settings_SetText(Settings_Find("save_score_fillmore_1"), "210") !=
-        kSettingChange_Rejected);
+  CHECK(Settings_SetText(Settings_Find("save_score_fillmore_1"), "210") != kSettingChange_Rejected);
   const char *literal[] = {"save_player_name", "save_master_hp", "save_angel_hp_current",
-                          "save_score_fillmore_1"};
+                           "save_score_fillmore_1"};
   for (size_t i = 0; i < sizeof(literal) / sizeof(literal[0]); ++i) {
     const SettingDesc *desc = Settings_Find(literal[i]);
     Settings_FormatValue(desc, serialized, sizeof(serialized));
@@ -921,7 +1052,8 @@ static void CheckDynamicInterfaceValues(void) {
   g_settings.refresh_mode = kRefreshMode_Vsync;
   HostDisplayStatus_SetVsyncActive(false);
   SettingsOverlay_LocalizedValue(kArUiLocale_French, refresh, value, sizeof(value));
-  CHECK(!strcmp(value, ArUiCatalog_Text(kArUiLocale_French, "overlay.value.vsync_unavailable", NULL)));
+  CHECK(!strcmp(value,
+                ArUiCatalog_Text(kArUiLocale_French, "overlay.value.vsync_unavailable", NULL)));
   HostDisplayStatus_SetNominalRefreshHz(144);
   HostDisplayStatus_SetVsyncActive(true);
   SettingsOverlay_LocalizedValue(kArUiLocale_Japanese, refresh, value, sizeof(value));
@@ -942,27 +1074,27 @@ static void CheckDynamicInterfaceValues(void) {
   /* The harness has no connected controllers: test both hotplug-following and
    * explicit disconnected slot captions without depending on local hardware. */
   g_settings.input_gamepad_slot = 0;
-  SettingsOverlay_LocalizedValue(kArUiLocale_Japanese,
-      Settings_Find("input_gamepad_slot"), value, sizeof(value));
+  SettingsOverlay_LocalizedValue(kArUiLocale_Japanese, Settings_Find("input_gamepad_slot"), value,
+                                 sizeof(value));
   CHECK(!strcmp(value, "最初の接続"));
   g_settings.input_gamepad_slot = 7;
-  SettingsOverlay_LocalizedValue(kArUiLocale_French,
-      Settings_Find("input_gamepad_slot"), value, sizeof(value));
+  SettingsOverlay_LocalizedValue(kArUiLocale_French, Settings_Find("input_gamepad_slot"), value,
+                                 sizeof(value));
   CHECK(!strcmp(value, "Manette 7 (déconnectée)"));
   const SettingsLocalizationPack packs[] = {
-    {.id = "literal", .name = "common.save {slot}", .locale = "en-CA", .manifest = "pack.ini"},
+      {.id = "literal", .name = "common.save {slot}", .locale = "en-CA", .manifest = "pack.ini"},
   };
   CHECK(Settings_SetLocalizationPacks(packs, 1));
   g_settings.localization_content = 2;
-  SettingsOverlay_LocalizedValue(kArUiLocale_Japanese,
-      Settings_Find("localization_content"), value, sizeof(value));
+  SettingsOverlay_LocalizedValue(kArUiLocale_Japanese, Settings_Find("localization_content"), value,
+                                 sizeof(value));
   CHECK(!strcmp(value, "common.save {slot} (en-CA) [literal]"));
   CHECK(Settings_SetLocalizationPacks(NULL, 0));
   /* Small buffers must never split a translated UTF-8 caption. */
   g_settings.menu_scale_percent = 0;
   char tiny[4] = {0};
-  CHECK(SettingsOverlay_LocalizedValue(kArUiLocale_Japanese,
-      Settings_Find("menu_scale_percent"), tiny, sizeof(tiny)) == 6);
+  CHECK(SettingsOverlay_LocalizedValue(kArUiLocale_Japanese, Settings_Find("menu_scale_percent"),
+                                       tiny, sizeof(tiny)) == 6);
   CHECK(!strcmp(tiny, "自"));
   HostDisplayStatus_SetNominalRefreshHz(hz);
   HostDisplayStatus_SetVsyncActive(vsync);
@@ -971,61 +1103,73 @@ static void CheckDynamicInterfaceValues(void) {
 
 static void CheckDecisions(SDL_Renderer *renderer, SDL_Surface *surface) {
   SettingsOverlay_Close();
-  CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_None);
-  const int language=g_settings.interface_language;
-  for (int locale=0; locale<kArUiLocale_Count; ++locale) {
-    g_settings.interface_language=locale;
+  CHECK(SettingsOverlay_TakeDecisionResult() == kOverlayDecision_None);
+  const int language = g_settings.interface_language;
+  for (int locale = 0; locale < kArUiLocale_Count; ++locale) {
+    g_settings.interface_language = locale;
     CHECK(SettingsOverlay_BeginDecision("overlay.region.continue_title",
-        "overlay.region.legacy_estimate","overlay.region.acknowledge"));
+                                        "overlay.region.legacy_estimate",
+                                        "overlay.region.acknowledge"));
     CHECK(SettingsOverlay_IsOpen());
-    CHECK(!SettingsOverlay_BeginDecision("a","b","c"));
-    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Pending);
-    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN,true,true)); /* Held key never consents. */
+    CHECK(!SettingsOverlay_BeginDecision("a", "b", "c"));
+    CHECK(SettingsOverlay_TakeDecisionResult() == kOverlayDecision_Pending);
+    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN, true, true)); /* Held key never consents. */
     CHECK(SettingsOverlay_IsOpen());
-    SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h});
+    SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
     SDL_RenderPresent(renderer);
-    const char *directory=getenv("AR_OVERLAY_DECISION_PREVIEW_DIR");
-    if(directory && *directory) {
+    const char *directory = getenv("AR_OVERLAY_DECISION_PREVIEW_DIR");
+    if (directory && *directory) {
       char path[1024];
-      snprintf(path,sizeof(path),"%s/continue-%s.bmp",directory,ArUiCatalog_LocaleTag((ArUiLocale)locale));
-      CHECK(SDL_SaveBMP(surface,path));
+      snprintf(path, sizeof(path), "%s/continue-%s.bmp", directory,
+               ArUiCatalog_LocaleTag((ArUiLocale)locale));
+      CHECK(SDL_SaveBMP(surface, path));
     }
-    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN,true,false)); /* Default is Cancel. */
+    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN, true, false)); /* Default is Cancel. */
     CHECK(!SettingsOverlay_IsOpen());
-    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Cancelled);
-    char body[2048];const uint16_t removed[6]={128,128,128,128,128,128};
-    CHECK(SettingsOverlayRegions_PopulationConfirmation((ArUiLocale)locale,kArRegionalSource_Japan,removed,body,sizeof(body)));
-    CHECK(SettingsOverlay_BeginDecisionText("overlay.region.population_label",body,"overlay.region.population_accept"));
-    memset(body,'X',strlen(body)); /* Overlay owns its copy, not the caller's buffer. */
-    SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h});SDL_RenderPresent(renderer);
-    if(directory && *directory) {
-      char path[1024];snprintf(path,sizeof(path),"%s/population-%s.bmp",directory,ArUiCatalog_LocaleTag((ArUiLocale)locale));
-      CHECK(SDL_SaveBMP(surface,path));
+    CHECK(SettingsOverlay_TakeDecisionResult() == kOverlayDecision_Cancelled);
+    char body[2048];
+    const uint16_t removed[6] = {128, 128, 128, 128, 128, 128};
+    CHECK(SettingsOverlayRegions_PopulationConfirmation((ArUiLocale)locale, kArRegionalSource_Japan,
+                                                        removed, body, sizeof(body)));
+    CHECK(SettingsOverlay_BeginDecisionText("overlay.region.population_label", body,
+                                            "overlay.region.population_accept"));
+    memset(body, 'X', strlen(body)); /* Overlay owns its copy, not the caller's buffer. */
+    SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
+    SDL_RenderPresent(renderer);
+    if (directory && *directory) {
+      char path[1024];
+      snprintf(path, sizeof(path), "%s/population-%s.bmp", directory,
+               ArUiCatalog_LocaleTag((ArUiLocale)locale));
+      CHECK(SDL_SaveBMP(surface, path));
     }
-    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN,true,false));
-    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Cancelled);
-    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_None);
+    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN, true, false));
+    CHECK(SettingsOverlay_TakeDecisionResult() == kOverlayDecision_Cancelled);
+    CHECK(SettingsOverlay_TakeDecisionResult() == kOverlayDecision_None);
     CHECK(SettingsOverlay_BeginDecision("overlay.region.continue_title",
-        "overlay.region.legacy_estimate","overlay.region.acknowledge"));
-    CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
-    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN,true,false));
-    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Accepted);
+                                        "overlay.region.legacy_estimate",
+                                        "overlay.region.acknowledge"));
+    CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN, true, false));
+    CHECK(SettingsOverlay_TakeDecisionResult() == kOverlayDecision_Accepted);
     CHECK(!SettingsOverlay_IsOpen());
     CHECK(SettingsOverlay_BeginDecision("overlay.region.continue_title",
-        "overlay.region.adoption_failed","overlay.decision.retry"));
-    CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE,true,false));
-    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Cancelled);
+                                        "overlay.region.adoption_failed",
+                                        "overlay.decision.retry"));
+    CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE, true, false));
+    CHECK(SettingsOverlay_TakeDecisionResult() == kOverlayDecision_Cancelled);
     CHECK(SettingsOverlay_BeginNotice("overlay.region.population_label",
-        "overlay.region.population_complete","overlay.region.acknowledge"));
-    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN,true,true));
-    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Pending);
-    SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h});SDL_RenderPresent(renderer);
-    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN,true,false));
-    CHECK(SettingsOverlay_TakeDecisionResult()==kOverlayDecision_Accepted);
+                                      "overlay.region.population_complete",
+                                      "overlay.region.acknowledge"));
+    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN, true, true));
+    CHECK(SettingsOverlay_TakeDecisionResult() == kOverlayDecision_Pending);
+    SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
+    SDL_RenderPresent(renderer);
+    CHECK(SettingsOverlay_HandleKey(SDLK_RETURN, true, false));
+    CHECK(SettingsOverlay_TakeDecisionResult() == kOverlayDecision_Accepted);
   }
-  CHECK(!SettingsOverlay_BeginDecision(NULL,"b","c"));
-  g_settings.interface_language=language;
+  CHECK(!SettingsOverlay_BeginDecision(NULL, "b", "c"));
+  g_settings.interface_language = language;
   SettingsOverlay_Open();
 }
 
@@ -1061,17 +1205,13 @@ static void CheckInterfaceCatalogs(SDL_Renderer *renderer, SDL_Surface *surface)
     Settings_FormatValue(font, serialized, sizeof(serialized));
     CHECK(!strcmp(serialized, native_sampling == 0 ? "Crisp" : "Smooth"));
     CHECK(!strcmp(SettingsOverlay_LocalizedLabel((ArUiLocale)locale, language),
-        ArUiCatalog_Text((ArUiLocale)locale, "setting.interface_language.label", NULL)));
-    CHECK(!strcmp(SettingsOverlay_LocalizedGameChangeHeading(
-                      (ArUiLocale)locale,
-                      kSettingGameChange_OriginalBugFix),
-                  ArUiCatalog_Text((ArUiLocale)locale,
-                      "overlay.group.original_bug_fixes", NULL)));
-    CHECK(!strcmp(SettingsOverlay_LocalizedGameChangeHeading(
-                      (ArUiLocale)locale,
-                      kSettingGameChange_QualityOfLife),
-                  ArUiCatalog_Text((ArUiLocale)locale,
-                      "overlay.group.quality_of_life", NULL)));
+                  ArUiCatalog_Text((ArUiLocale)locale, "setting.interface_language.label", NULL)));
+    CHECK(!strcmp(SettingsOverlay_LocalizedGameChangeHeading((ArUiLocale)locale,
+                                                             kSettingGameChange_OriginalBugFix),
+                  ArUiCatalog_Text((ArUiLocale)locale, "overlay.group.original_bug_fixes", NULL)));
+    CHECK(!strcmp(SettingsOverlay_LocalizedGameChangeHeading((ArUiLocale)locale,
+                                                             kSettingGameChange_QualityOfLife),
+                  ArUiCatalog_Text((ArUiLocale)locale, "overlay.group.quality_of_life", NULL)));
     /* Traversal, help, and reset prompts use the actual shaped overlay. The
      * same loop also runs in no-TTF builds, which must remain English/readable. */
     int tab_count = 0;
@@ -1087,7 +1227,7 @@ static void CheckInterfaceCatalogs(SDL_Renderer *renderer, SDL_Surface *surface)
         if (prefix && prefix[0]) {
           char path[1024];
           int size = snprintf(path, sizeof(path), "%s-%s-%d.bmp", prefix,
-                               ArUiCatalog_LocaleTag((ArUiLocale)locale), tab);
+                              ArUiCatalog_LocaleTag((ArUiLocale)locale), tab);
           CHECK(size > 0 && size < (int)sizeof(path));
           if (size > 0 && size < (int)sizeof(path)) CHECK(SDL_SaveBMP(surface, path));
         }
@@ -1173,13 +1313,14 @@ static void CheckMenuInputHints(void) {
   /* Every displayed keyboard hint must actually invoke its command. Reserved
    * keys win, duplicate imported bindings use dispatch order, and an unbound
    * control is omitted unless a universal shortcut can perform it. */
-  const SDL_Scancode keys[] = {SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_F1, SDL_SCANCODE_F2,
-      SDL_SCANCODE_F3, SDL_SCANCODE_ESCAPE, SDL_SCANCODE_RETURN, SDL_SCANCODE_UP,
-      SDL_SCANCODE_TAB, SDL_SCANCODE_LEFTBRACKET, SDL_SCANCODE_G};
+  const SDL_Scancode keys[] = {SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_F1,     SDL_SCANCODE_F2,
+                               SDL_SCANCODE_F3,      SDL_SCANCODE_ESCAPE, SDL_SCANCODE_RETURN,
+                               SDL_SCANCODE_UP,      SDL_SCANCODE_TAB,    SDL_SCANCODE_LEFTBRACKET,
+                               SDL_SCANCODE_G};
   for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
     for (int action = kInputAction_B; action <= kInputAction_R; ++action)
-      g_settings.input_bind[kInputClass_Keyboard][action] = keys[i]
-          ? INPUT_BIND_MAKE(kInputBind_Key, keys[i], false) : 0;
+      g_settings.input_bind[kInputClass_Keyboard][action] =
+          keys[i] ? INPUT_BIND_MAKE(kInputBind_Key, keys[i], false) : 0;
     for (int command = kMenuNav_Up; command <= kMenuNav_Details; ++command) {
       if (!OverlayMenuInput_Hint(text, sizeof(text), command, kInputClass_Keyboard)) continue;
       SDL_Scancode code = SDL_GetScancodeFromName(text);
@@ -1189,12 +1330,15 @@ static void CheckMenuInputHints(void) {
     }
   }
   g_settings = saved;
-  g_settings.input_bind[kInputClass_Keyboard][kInputAction_L] = INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_F2, false);
+  g_settings.input_bind[kInputClass_Keyboard][kInputAction_L] =
+      INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_F2, false);
   CHECK(OverlayMenuInput_Hint(text, sizeof(text), kMenuNav_TabPrev, kInputClass_Keyboard));
   CHECK(!strcmp(text, "["));
-  CHECK(OverlayMenuInput_PairHint(text, sizeof(text), kMenuNav_TabPrev, kMenuNav_TabNext, kInputClass_Gamepad));
+  CHECK(OverlayMenuInput_PairHint(text, sizeof(text), kMenuNav_TabPrev, kMenuNav_TabNext,
+                                  kInputClass_Gamepad));
   CHECK(!strcmp(text, "LB/RB"));
-  CHECK(OverlayMenuInput_PairHint(text, sizeof(text), kMenuNav_Up, kMenuNav_Down, kInputClass_Gamepad));
+  CHECK(OverlayMenuInput_PairHint(text, sizeof(text), kMenuNav_Up, kMenuNav_Down,
+                                  kInputClass_Gamepad));
   CHECK(!strcmp(text, "D-Pad Up/Down"));
   g_settings.input_bind[kInputClass_Gamepad][kInputAction_Up] = 0;
   g_settings.input_stick_as_dpad = true;
@@ -1223,30 +1367,42 @@ static void CheckMenuHintDevice(SDL_Renderer *renderer, SDL_Surface *surface) {
   desc.name = "Overlay hint test";
   const SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
   CHECK(id != 0);
-  if (!id) { SDL_QuitSubSystem(SDL_INIT_GAMEPAD); return; }
+  if (!id) {
+    SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    return;
+  }
   SDL_Event event = {0};
-  event.type = SDL_EVENT_GAMEPAD_ADDED; event.gdevice.which = id;
+  event.type = SDL_EVENT_GAMEPAD_ADDED;
+  event.gdevice.which = id;
   InputMap_HandleEvent(&event);
   CHECK(InputMap_GamepadCount() == 1);
   s_fake_region_active = true;
-  s_fake_region = (ActRaiserRegionalRulesView){.revision = 1, .editable = true,
-      .lair_history_ready = true, .lair_reload_ready = true, .campaign = {42}};
+  s_fake_region = (ActRaiserRegionalRulesView){.revision = 1,
+                                               .editable = true,
+                                               .lair_history_ready = true,
+                                               .lair_reload_ready = true,
+                                               .campaign = {42}};
   s_fake_region.effective.retry_score = kArRegionalSource_Japan;
   s_fake_region.requested = s_fake_region.effective;
-  const SettingsOverlayRegionalHooks hooks = {.copy = FakeRegionalView, .request = FakeRegionalEdit,
-      .difficulty = FakeDifficultyEdit, .preview = FakeRegionalPreview,
-      .setting = FakeSettingEdit, .preview_setting = FakeSettingPreview};
+  const SettingsOverlayRegionalHooks hooks = {.copy = FakeRegionalView,
+                                              .request = FakeRegionalEdit,
+                                              .difficulty = FakeDifficultyEdit,
+                                              .preview = FakeRegionalPreview,
+                                              .setting = FakeSettingEdit,
+                                              .preview_setting = FakeSettingPreview};
   SettingsOverlay_SetRegionalHooks(&hooks);
   g_settings.input_device = kInputDevice_Gamepad;
   SettingsOverlay_Open();
   CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Gamepad);
   g_settings.input_device = kInputDevice_Auto;
-  NavToSection(kSection_Regional); NavToTab(kOverlayRegionPage_Presets);
+  NavToSection(kSection_Regional);
+  NavToTab(kOverlayRegionPage_Presets);
   SettingsOverlay_HandleKey(SDLK_RETURN, true, false);
   RowToKey("regional_profile_presentation");
   CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Keyboard);
   event.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
-  event.gbutton.which = id + 1; event.gbutton.button = SDL_GAMEPAD_BUTTON_NORTH;
+  event.gbutton.which = id + 1;
+  event.gbutton.button = SDL_GAMEPAD_BUTTON_NORTH;
   SettingsOverlay_HandleGamepadEvent(&event);
   CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Keyboard);
   event.gbutton.which = id;
@@ -1270,7 +1426,8 @@ static void CheckMenuHintDevice(SDL_Renderer *renderer, SDL_Surface *surface) {
     const char *preview = getenv("AR_OVERLAY_HINT_TEST_BMP");
     if (preview && *preview) {
       char path[1024];
-      const int n = snprintf(path, sizeof(path), "%s-%s.bmp", preview, ArUiCatalog_LocaleTag(locale));
+      const int n =
+          snprintf(path, sizeof(path), "%s-%s.bmp", preview, ArUiCatalog_LocaleTag(locale));
       CHECK(n > 0 && (size_t)n < sizeof(path));
       if (n > 0 && (size_t)n < sizeof(path)) CHECK(SDL_SaveBMP(surface, path));
     }
@@ -1298,7 +1455,8 @@ static void CheckMenuHintDevice(SDL_Renderer *renderer, SDL_Surface *surface) {
   CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Keyboard);
   g_settings.input_device = kInputDevice_Gamepad;
   CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Gamepad);
-  event.type = SDL_EVENT_GAMEPAD_REMOVED; event.gdevice.which = id;
+  event.type = SDL_EVENT_GAMEPAD_REMOVED;
+  event.gdevice.which = id;
   InputMap_HandleEvent(&event);
   CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Keyboard);
   SettingsOverlay_Close();
@@ -1320,34 +1478,26 @@ static void CheckMenuDeviceGateTruthTable(void) {
     bool keyboard_active;
   } rows[] = {
       /* input_device,       pads, active, gamepad, keyboard */
-      { kInputDevice_Auto,     0, false, false, true  },
-      { kInputDevice_Auto,     1, false, true,  true  },
-      { kInputDevice_Auto,     1, true,  true,  false },
-      { kInputDevice_Keyboard, 0, false, false, true  },
-      { kInputDevice_Keyboard, 2, true,  false, true  },
-      { kInputDevice_Gamepad,  1, false, true,  false },
-      { kInputDevice_Gamepad,  0, false, false, true  },
+      {kInputDevice_Auto, 0, false, false, true},    {kInputDevice_Auto, 1, false, true, true},
+      {kInputDevice_Auto, 1, true, true, false},     {kInputDevice_Keyboard, 0, false, false, true},
+      {kInputDevice_Keyboard, 2, true, false, true}, {kInputDevice_Gamepad, 1, false, true, false},
+      {kInputDevice_Gamepad, 0, false, false, true},
   };
   for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
     bool pad = MenuGamepadOwns(rows[i].input_device, rows[i].gamepad_count);
-    bool kbd = InputMap_ShouldAcceptKeyboard(
-        (InputDeviceMode)rows[i].input_device, rows[i].gamepad_count > 0,
-        rows[i].pad_input_active);
+    bool kbd = InputMap_ShouldAcceptKeyboard((InputDeviceMode)rows[i].input_device,
+                                             rows[i].gamepad_count > 0, rows[i].pad_input_active);
     CHECK(pad == rows[i].gamepad_enabled);
     CHECK(kbd == rows[i].keyboard_active);
     /* At least one device is always active — never a total lockout. */
     CHECK(pad || kbd);
   }
 
-  const uint32 keyboard = (1u << kInputAction_Up) |
-                          (1u << kInputAction_B);
+  const uint32 keyboard = (1u << kInputAction_Up) | (1u << kInputAction_B);
   const uint32 gamepad = (1u << kInputAction_Right);
-  CHECK(InputMap_ArbitrateState(kInputDevice_Auto, true, true,
-                                keyboard, gamepad) == gamepad);
-  CHECK(InputMap_ArbitrateState(kInputDevice_Auto, true, false,
-                                keyboard, gamepad) == keyboard);
-  CHECK(InputMap_ArbitrateState(kInputDevice_Gamepad, false, false,
-                                keyboard, gamepad) == keyboard);
+  CHECK(InputMap_ArbitrateState(kInputDevice_Auto, true, true, keyboard, gamepad) == gamepad);
+  CHECK(InputMap_ArbitrateState(kInputDevice_Auto, true, false, keyboard, gamepad) == keyboard);
+  CHECK(InputMap_ArbitrateState(kInputDevice_Gamepad, false, false, keyboard, gamepad) == keyboard);
 }
 
 /* ── Layer editor harness ────────────────────────────────────────────────
@@ -1358,15 +1508,13 @@ static void CheckMenuDeviceGateTruthTable(void) {
  * indirection exists. */
 static DioramaLayerOrderTable s_fake_layer_table;
 static bool s_fake_room_live;
-static uint8_t s_fake_group = 0x01;   /* Fillmore */
-static uint8_t s_fake_map = 0x02;     /* act 2, the reported room */
+static uint8_t s_fake_group = 0x01; /* Fillmore */
+static uint8_t s_fake_map = 0x02;   /* act 2, the reported room */
 static uint8_t s_fake_section = kDioramaLayerSection_Room;
 static int s_fake_saves;
 static uint16_t s_fake_cgram[kSettingsOverlayLayerPaletteEntries];
 
-static DioramaLayerOrderTable *FakeLayerTable(void) {
-  return &s_fake_layer_table;
-}
+static DioramaLayerOrderTable *FakeLayerTable(void) { return &s_fake_layer_table; }
 
 static bool FakeLayerRoom(uint8_t *group, uint8_t *map, uint8_t *section) {
   if (!s_fake_room_live) return false;
@@ -1381,8 +1529,7 @@ static bool FakeLayerSave(void) {
   return true;
 }
 
-static bool FakeLayerPalette(
-    uint16_t out_cgram[kSettingsOverlayLayerPaletteEntries]) {
+static bool FakeLayerPalette(uint16_t out_cgram[kSettingsOverlayLayerPaletteEntries]) {
   memcpy(out_cgram, s_fake_cgram, sizeof(s_fake_cgram));
   return true;
 }
@@ -1393,8 +1540,7 @@ static bool FakeLayerPalette(
  * disappears without debug settings, and that an edit persists. The row model
  * itself is covered by tests/diorama_layer_editor_test.c. */
 static void CheckLayerEditorSection(void) {
-  SettingsOverlay_SetLayerEditorHooks(FakeLayerTable, FakeLayerRoom,
-                                      FakeLayerSave);
+  SettingsOverlay_SetLayerEditorHooks(FakeLayerTable, FakeLayerRoom, FakeLayerSave);
   SettingsOverlay_SetLayerPaletteProvider(FakeLayerPalette);
   memset(&s_fake_layer_table, 0, sizeof(s_fake_layer_table));
   for (int i = 0; i < kSettingsOverlayLayerPaletteEntries; i++)
@@ -1474,10 +1620,10 @@ static void CheckLayerEditorSection(void) {
     CHECK(SettingsOverlay_GetTabState(NULL, &tabs));
     CHECK(tabs == 4);
   }
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));   /* into the rows */
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false)); /* into the rows */
   NavToTab(0);
   RowToKey("rando_enable");
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));  /* master on */
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false)); /* master on */
   CHECK(g_settings.rando_enable);
   NavToTab(0);
   RowToKey("rando_seed");
@@ -1501,14 +1647,20 @@ static void CheckLayerEditorSection(void) {
   CHECK(!g_settings.rando_enable);
   CHECK(!Settings_IsAvailable(Settings_Find("rando_seed")));
   {
-    RandomizerConfig saved=RandomizerConfig_Default();saved.enabled=true;saved.seed=654321;saved.hp_percent=200;
+    RandomizerConfig saved = RandomizerConfig_Default();
+    saved.enabled = true;
+    saved.seed = 654321;
+    saved.hp_percent = 200;
     CHECK(Randomizer_BindCampaign(&saved));
-    CHECK(g_settings.rando_seed==654321);
-    CHECK(!Settings_IsAvailable(Settings_Find("rando_enable")) && !Settings_IsAvailable(Settings_Find("rando_seed")));
-    CHECK(Settings_SetLong(Settings_Find("rando_seed"),7)==kSettingChange_Rejected);
-    CHECK(Settings_SetLong(Settings_Find("rando_enable"),0)==kSettingChange_Rejected);
-    Randomizer_Reroll();CHECK(Randomizer_CurrentConfig().seed==654321);
-    Randomizer_ReleaseCampaign();CHECK(!g_settings.rando_enable);
+    CHECK(g_settings.rando_seed == 654321);
+    CHECK(!Settings_IsAvailable(Settings_Find("rando_enable")) &&
+          !Settings_IsAvailable(Settings_Find("rando_seed")));
+    CHECK(Settings_SetLong(Settings_Find("rando_seed"), 7) == kSettingChange_Rejected);
+    CHECK(Settings_SetLong(Settings_Find("rando_enable"), 0) == kSettingChange_Rejected);
+    Randomizer_Reroll();
+    CHECK(Randomizer_CurrentConfig().seed == 654321);
+    Randomizer_ReleaseCampaign();
+    CHECK(!g_settings.rando_enable);
   }
   /* Back out to the nav column so the sections below start where they expect. */
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
@@ -1516,7 +1668,7 @@ static void CheckLayerEditorSection(void) {
   NavToSection(kSection_Layers);
   /* Tab 0 is Fillmore, which is where the fake room is. */
   NavToTab(0);
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));   /* open submenu */
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false)); /* open submenu */
 
   /* The cursor must never rest on the room caption, which is row 0 and is not
    * selectable -- so opening the submenu has already stepped past it onto a real
@@ -1540,8 +1692,7 @@ static void CheckLayerEditorSection(void) {
       CHECK(strcmp(key, "reset_section_defaults") != 0);
       /* Every editor key is a plane token, a "token.param", or the room reset. */
       const bool known = !strcmp(key, "layer_reset_room") ||
-                         DioramaLayerOrder_PlaneFromToken(key) >= 0 ||
-                         strchr(key, '.') != NULL;
+                         DioramaLayerOrder_PlaneFromToken(key) >= 0 || strchr(key, '.') != NULL;
       CHECK(known);
       if (Settings_Find(key)) CHECK(!"editor row matched a settings descriptor");
       rows++;
@@ -1555,7 +1706,7 @@ static void CheckLayerEditorSection(void) {
   RowToKey("bg2hi");
   const int saves_before = s_fake_saves;
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
-  CHECK(s_fake_saves > saves_before);   /* the edit was persisted */
+  CHECK(s_fake_saves > saves_before); /* the edit was persisted */
   const DioramaRoomOverride *room =
       DioramaLayerOrder_Find(&s_fake_layer_table, s_fake_group, s_fake_map);
   CHECK(room != NULL);
@@ -1585,7 +1736,7 @@ static void CheckLayerEditorSection(void) {
   CHECK(DioramaLayerOrder_RoomIsActive(room));
 
   RowToKey("layer_reset_room");
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));   /* confirm */
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false)); /* confirm */
 
   /* A room with no overrides left must be INACTIVE, so Resolve returns the
    * built-in table and the unedited-game guarantee holds. */
@@ -1601,38 +1752,34 @@ static void CheckLayerEditorSection(void) {
   const int saves_before_palette = s_fake_saves;
   /* Opening and cancelling the picker is read-only: it must not consume one
    * of the bounded room override slots before a colour is confirmed. */
-  CHECK(!DioramaLayerOrder_Find(
-      &s_fake_layer_table, s_fake_group, s_fake_map));
+  CHECK(!DioramaLayerOrder_Find(&s_fake_layer_table, s_fake_group, s_fake_map));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
-  CHECK(!DioramaLayerOrder_Find(
-      &s_fake_layer_table, s_fake_group, s_fake_map));
+  CHECK(!DioramaLayerOrder_Find(&s_fake_layer_table, s_fake_group, s_fake_map));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   room = DioramaLayerOrder_Find(&s_fake_layer_table, s_fake_group, s_fake_map);
-  const DioramaPlaneOverride *filled =
-      room ? &room->planes[SR_PPU_OVERLAY_BG2] : NULL;
+  const DioramaPlaneOverride *filled = room ? &room->planes[SR_PPU_OVERLAY_BG2] : NULL;
   CHECK(filled && filled->set_transparent_fill);
-  CHECK(filled && filled->transparent_fill_kind ==
-                      kDioramaTransparentFill_Cgram);
+  CHECK(filled && filled->transparent_fill_kind == kDioramaTransparentFill_Cgram);
   CHECK(filled && filled->transparent_fill_cgram == 0x12);
   CHECK(s_fake_saves > saves_before_palette);
   CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
   room = DioramaLayerOrder_Find(&s_fake_layer_table, s_fake_group, s_fake_map);
-  CHECK(room == NULL);  /* clearing the final key recycles the bounded slot */
+  CHECK(room == NULL); /* clearing the final key recycles the bounded slot */
 
   /* The production room hook also carries a camera-local section. Edits while
    * that section is live must land in its refining record, never the base room. */
   s_fake_section = kDioramaLayerSection_AitosWaterfall;
   RowToKey("backdrop");
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));  /* expand */
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false)); /* expand */
   RowToKey("backdrop.source");
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
-  const DioramaRoomOverride *scoped = DioramaLayerOrder_FindSection(
-      &s_fake_layer_table, s_fake_group, s_fake_map, s_fake_section);
+  const DioramaRoomOverride *scoped =
+      DioramaLayerOrder_FindSection(&s_fake_layer_table, s_fake_group, s_fake_map, s_fake_section);
   CHECK(scoped != NULL);
   CHECK(scoped && scoped->planes[kDioramaPlane_Backdrop].set_source);
   CHECK(scoped && scoped->planes[kDioramaPlane_Backdrop].source ==
@@ -1642,37 +1789,33 @@ static void CheckLayerEditorSection(void) {
 
   /* Left in a scoped section authors OFF, rather than merely clearing the
    * local key and exposing an inherited base-room fill again. */
-  DioramaRoomOverride *base = DioramaLayerOrder_FindOrAdd(
-      &s_fake_layer_table, s_fake_group, s_fake_map);
+  DioramaRoomOverride *base =
+      DioramaLayerOrder_FindOrAdd(&s_fake_layer_table, s_fake_group, s_fake_map);
   CHECK(base != NULL);
   if (base) {
     base->planes[SR_PPU_OVERLAY_BG2].set_transparent_fill = true;
-    base->planes[SR_PPU_OVERLAY_BG2].transparent_fill_kind =
-        kDioramaTransparentFill_Black;
+    base->planes[SR_PPU_OVERLAY_BG2].transparent_fill_kind = kDioramaTransparentFill_Black;
   }
   RowToKey("bg2");
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   RowToKey("bg2.transparent");
   CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
-  scoped = DioramaLayerOrder_FindSection(
-      &s_fake_layer_table, s_fake_group, s_fake_map, s_fake_section);
+  scoped =
+      DioramaLayerOrder_FindSection(&s_fake_layer_table, s_fake_group, s_fake_map, s_fake_section);
+  CHECK(scoped && scoped->planes[SR_PPU_OVERLAY_BG2].set_transparent_fill);
   CHECK(scoped &&
-        scoped->planes[SR_PPU_OVERLAY_BG2].set_transparent_fill);
-  CHECK(scoped &&
-        scoped->planes[SR_PPU_OVERLAY_BG2].transparent_fill_kind ==
-            kDioramaTransparentFill_None);
+        scoped->planes[SR_PPU_OVERLAY_BG2].transparent_fill_kind == kDioramaTransparentFill_None);
   DioramaTransparentFill effective_fill = kDioramaTransparentFill_Black;
   uint8_t effective_cgram = 0xff;
-  CHECK(DioramaLayerOrder_ResolveTransparentFill(
-      &s_fake_layer_table, s_fake_group, s_fake_map, s_fake_section,
-      SR_PPU_OVERLAY_BG2, &effective_fill, &effective_cgram));
+  CHECK(DioramaLayerOrder_ResolveTransparentFill(&s_fake_layer_table, s_fake_group, s_fake_map,
+                                                 s_fake_section, SR_PPU_OVERLAY_BG2,
+                                                 &effective_fill, &effective_cgram));
   CHECK(effective_fill == kDioramaTransparentFill_None);
   RowToKey("layer_reset_room");
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
-  CHECK(!DioramaLayerOrder_FindSection(
-      &s_fake_layer_table, s_fake_group, s_fake_map, s_fake_section));
-  DioramaLayerOrder_ResetRoom(
-      &s_fake_layer_table, s_fake_group, s_fake_map);
+  CHECK(!DioramaLayerOrder_FindSection(&s_fake_layer_table, s_fake_group, s_fake_map,
+                                       s_fake_section));
+  DioramaLayerOrder_ResetRoom(&s_fake_layer_table, s_fake_group, s_fake_map);
   s_fake_section = kDioramaLayerSection_Room;
 
   /* The final Layers tab is a separate, session-only action-BG tuner. It uses
@@ -1691,12 +1834,13 @@ static void CheckLayerEditorSection(void) {
     canonical.layer[1].world_width = 256;
     canonical.layer[1].world_height = 256;
     canonical.layer[1].default_edge = kActionBgEdge_Mirror;
-    canonical.layer[1].vertical_extent = (ActionBgVerticalExtent) {
-      .mode = kActionBgExtent_Fixed, .top = 8, .bottom = 12,
+    canonical.layer[1].vertical_extent = (ActionBgVerticalExtent){
+        .mode = kActionBgExtent_Fixed,
+        .top = 8,
+        .bottom = 12,
     };
     ActionBgTuner_ResetSession();
-    CHECK(ActionBgTuner_ObservePlan(
-        1, 1, &canonical, (ActionBgTunerLimits){120, 120, 32, 32}));
+    CHECK(ActionBgTuner_ObservePlan(1, 1, &canonical, (ActionBgTunerLimits){120, 120, 32, 32}));
     const int saves_before_bg_tuner = s_fake_saves;
     NavToTab(kDioramaEditorLevelCount);
     RowToKey("bg_tuner.apply");
@@ -1708,14 +1852,12 @@ static void CheckLayerEditorSection(void) {
     CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
     ActionBgPlan unbounded = canonical;
     CHECK(ActionBgTuner_ApplyDraft(&unbounded));
-    CHECK(unbounded.layer[1].horizontal_extent.mode ==
-          kActionBgExtent_Available);
+    CHECK(unbounded.layer[1].horizontal_extent.mode == kActionBgExtent_Available);
     RowToKey("bg2.ignore_vertical_bounds");
     CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
     unbounded = canonical;
     CHECK(ActionBgTuner_ApplyDraft(&unbounded));
-    CHECK(unbounded.layer[1].vertical_extent.mode ==
-          kActionBgExtent_Available);
+    CHECK(unbounded.layer[1].vertical_extent.mode == kActionBgExtent_Available);
     CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
     RowToKey("bg2.ignore_side_bounds");
     CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
@@ -1743,7 +1885,7 @@ static void CheckLayerEditorSection(void) {
   NavToTab(1);
   const int saves_at_foreign = s_fake_saves;
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
-  CHECK(s_fake_saves == saves_at_foreign);   /* nothing authored */
+  CHECK(s_fake_saves == saves_at_foreign); /* nothing authored */
 
   /* And with no room live at all, no tab edits anything. */
   NavToTab(0);
@@ -1765,7 +1907,7 @@ static void CheckLayerEditorSection(void) {
   g_settings.show_debug_settings = true;
   SettingsOverlay_Refresh();
 
-  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));   /* leave submenu */
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false)); /* leave submenu */
   /* Leave no hooks behind: later blocks drive other sections. */
   SettingsOverlay_SetLayerEditorHooks(NULL, NULL, NULL);
   SettingsOverlay_SetLayerPaletteProvider(NULL);
@@ -1773,11 +1915,15 @@ static void CheckLayerEditorSection(void) {
 }
 
 static void CheckPerformanceOverlay(ArRenderDevice *device, SDL_Renderer *renderer,
-                                     SDL_Surface *surface) {
-  PerformanceSnapshot sample = {.revision = 1, .ready = true, .fps = 40,
-      .frame_mean_ms = 25, .frame_p95_ms = 27, .frame_max_ms = 29};
-  sample.context = (PerformanceContext){.scene = kPerformanceScene_World,
-      .width = surface->w, .height = surface->h, .map_number = 9};
+                                    SDL_Surface *surface) {
+  PerformanceSnapshot sample = {.revision = 1,
+                                .ready = true,
+                                .fps = 40,
+                                .frame_mean_ms = 25,
+                                .frame_p95_ms = 27,
+                                .frame_max_ms = 29};
+  sample.context = (PerformanceContext){
+      .scene = kPerformanceScene_World, .width = surface->w, .height = surface->h, .map_number = 9};
   for (int i = 0; i < kPerformanceStage_Count; i++)
     sample.stages[i] = (PerformanceValue){.mean_ms = .25, .maximum_ms = .5, .calls = 40};
   const ArRenderExtentI output = {surface->w, surface->h};
@@ -1810,7 +1956,7 @@ static void CheckPerformanceOverlay(ArRenderDevice *device, SDL_Renderer *render
 }
 
 static uint64_t CheckRegionBadges(ArRenderDevice *device, SDL_Renderer *renderer,
-                                SDL_Surface *surface, bool capture) {
+                                  SDL_Surface *surface, bool capture) {
   if (!surface || surface->w < 448 || surface->h < 88) {
     CHECK(surface && surface->w >= 448 && surface->h >= 88);
     return 0;
@@ -1821,8 +1967,8 @@ static uint64_t CheckRegionBadges(ArRenderDevice *device, SDL_Renderer *renderer
   CHECK(ArRenderDevice_Clear(device, (ArRenderColorF){0.04f, 0.06f, 0.10f, 1}));
   static const char *labels[] = {"US", "JAPAN", "EUROPE", "CUSTOM"};
   for (int badge = 0; badge < kOverlayRegionBadge_Count; ++badge) {
-    const ArRenderRectF source = {
-      (float)(badge * kRegionBadgeWidth), 0, kRegionBadgeWidth, kRegionBadgeHeight};
+    const ArRenderRectF source = {(float)(badge * kRegionBadgeWidth), 0, kRegionBadgeWidth,
+                                  kRegionBadgeHeight};
     const ArRenderRectF destination = {(float)(8 + badge * 112), 8, 96, 64};
     CHECK(ArRenderDevice_DrawTexture(device, art->region_badges, &source, &destination));
     for (unsigned i = 0; labels[badge][i]; ++i) {
@@ -1838,14 +1984,17 @@ static uint64_t CheckRegionBadges(ArRenderDevice *device, SDL_Renderer *renderer
   uint64_t hash = UINT64_C(14695981039346656037);
   for (int y = 8; y < 72; ++y) {
     const uint32_t *row = (const uint32_t *)((const uint8_t *)surface->pixels + y * surface->pitch);
-    for (int x = 8; x < 440; ++x) { hash ^= row[x]; hash *= UINT64_C(1099511628211); }
+    for (int x = 8; x < 440; ++x) {
+      hash ^= row[x];
+      hash *= UINT64_C(1099511628211);
+    }
   }
-  const uint32_t *flag_row = (const uint32_t *)((const uint8_t *)surface->pixels +
-                                              (8 + 7 * 4) * surface->pitch);
-  CHECK(flag_row[8 + 20 * 4] == 0xffff0000u);          /* US red stripe */
-  CHECK(flag_row[8 + 112 + 11 * 4] == 0xffff0000u);    /* Japanese disc */
-  CHECK(flag_row[8 + 112 + 3 * 4] == 0xffffffffu);     /* Japanese field */
-  CHECK(flag_row[8 + 224 + 2 * 4] == 0xff3152a4u);     /* European field */
+  const uint32_t *flag_row =
+      (const uint32_t *)((const uint8_t *)surface->pixels + (8 + 7 * 4) * surface->pitch);
+  CHECK(flag_row[8 + 20 * 4] == 0xffff0000u);       /* US red stripe */
+  CHECK(flag_row[8 + 112 + 11 * 4] == 0xffff0000u); /* Japanese disc */
+  CHECK(flag_row[8 + 112 + 3 * 4] == 0xffffffffu);  /* Japanese field */
+  CHECK(flag_row[8 + 224 + 2 * 4] == 0xff3152a4u);  /* European field */
   if (capture) {
     const char *preview = getenv("AR_OVERLAY_REGION_BADGES_BMP");
     if (preview && *preview) CHECK(SDL_SaveBMP(surface, preview));
@@ -1855,169 +2004,228 @@ static uint64_t CheckRegionBadges(ArRenderDevice *device, SDL_Renderer *renderer
 
 static int slot_start_calls;
 static bool slot_start_succeeds, slot_fixture_full, slot_fixture_prepared, slot_fixture_unavailable;
-static bool slot_fixture_randomized=true;
-static uint32_t slot_fixture_seed=678901;
+static bool slot_fixture_randomized = true;
+static uint32_t slot_fixture_seed = 678901;
 static unsigned slot_draft_calls;
-static uint64_t slot_active_fingerprint=111;
-static uint64_t slot_empty_fingerprint=222;
+static uint64_t slot_active_fingerprint = 111;
+static uint64_t slot_empty_fingerprint = 222;
 static ArRegionalSession slot_started_draft;
 static bool FakeSlotsScan(SaveSlotCollection *out) {
-  *out=(SaveSlotCollection){.active=0,.writable=true};
-  out->slots[0]=(SaveSlotDetails){.state=kSaveSlot_Ready,.fingerprint=slot_active_fingerprint,.saved_at=1790270000,
-      .summary={.name="ASTRA",.level=5,.acts_cleared=3,.death_heim=0}};
-  out->slots[0].randomizer=RandomizerConfig_Default();
-  for(int i=1;i<kSaveSlotCount;++i)out->slots[i]=(SaveSlotDetails){.state=kSaveSlot_Empty,.fingerprint=slot_empty_fingerprint};
-  out->slots[2]=out->slots[0];
-  snprintf(out->slots[2].summary.name,sizeof(out->slots[2].summary.name),"LUNA");
-  out->slots[2].summary.level=10;out->slots[2].summary.acts_cleared=8;
-  out->slots[2].randomizer.enabled=slot_fixture_randomized;out->slots[2].randomizer.seed=slot_fixture_seed;
-  CHECK(ArRegionalProfiles_Expand(&out->slots[0].regions.requested,kArRegionalProfile_Gameplay,
-      kArRegionalSource_Japan,&out->slots[2].regions.requested));
-  out->slots[2].regions.effective=out->slots[2].regions.requested;
-  for(int i=0;i<kSaveSlotCount;++i)if(out->slots[i].state==kSaveSlot_Ready) {
-    ActRaiserRegionalRulesView *view=&out->slots[i].regions;
-    CHECK(ArRegionalProfiles_Describe(&view->requested,view->profiles));
-    CHECK(ArRegionalProfiles_Describe(&view->effective,view->active_profiles));
-    ActRaiserRegionalSettings_DescribeChoices(&view->requested,&view->effective,view->choices);
+  *out = (SaveSlotCollection){.active = 0, .writable = true};
+  out->slots[0] = (SaveSlotDetails){
+      .state = kSaveSlot_Ready,
+      .fingerprint = slot_active_fingerprint,
+      .saved_at = 1790270000,
+      .summary = {.name = "ASTRA", .level = 5, .acts_cleared = 3, .death_heim = 0}};
+  out->slots[0].randomizer = RandomizerConfig_Default();
+  for (int i = 1; i < kSaveSlotCount; ++i)
+    out->slots[i] =
+        (SaveSlotDetails){.state = kSaveSlot_Empty, .fingerprint = slot_empty_fingerprint};
+  out->slots[2] = out->slots[0];
+  snprintf(out->slots[2].summary.name, sizeof(out->slots[2].summary.name), "LUNA");
+  out->slots[2].summary.level = 10;
+  out->slots[2].summary.acts_cleared = 8;
+  out->slots[2].randomizer.enabled = slot_fixture_randomized;
+  out->slots[2].randomizer.seed = slot_fixture_seed;
+  CHECK(ArRegionalProfiles_Expand(&out->slots[0].regions.requested, kArRegionalProfile_Gameplay,
+                                  kArRegionalSource_Japan, &out->slots[2].regions.requested));
+  out->slots[2].regions.effective = out->slots[2].regions.requested;
+  for (int i = 0; i < kSaveSlotCount; ++i)
+    if (out->slots[i].state == kSaveSlot_Ready) {
+      ActRaiserRegionalRulesView *view = &out->slots[i].regions;
+      CHECK(ArRegionalProfiles_Describe(&view->requested, view->profiles));
+      CHECK(ArRegionalProfiles_Describe(&view->effective, view->active_profiles));
+      ActRaiserRegionalSettings_DescribeChoices(&view->requested, &view->effective, view->choices);
+    }
+  if (slot_fixture_prepared) {
+    out->slots[1].prepared = true;
+    out->slots[1].regions = out->slots[2].regions;
+    out->slots[1].randomizer = out->slots[2].randomizer;
   }
-  if(slot_fixture_prepared) {
-    out->slots[1].prepared=true;
-    out->slots[1].regions=out->slots[2].regions;
-    out->slots[1].randomizer=out->slots[2].randomizer;
-  }
-  if(slot_fixture_full)
-    for(int i=1;i<kSaveSlotCount;++i)out->slots[i]=out->slots[0];
-  if(slot_fixture_unavailable)out->slots[1].state=kSaveSlot_Unavailable;
+  if (slot_fixture_full)
+    for (int i = 1; i < kSaveSlotCount; ++i)
+      out->slots[i] = out->slots[0];
+  if (slot_fixture_unavailable) out->slots[1].state = kSaveSlot_Unavailable;
   return true;
 }
-static bool FakeSlotDraft(unsigned slot,ArRegionalSession *out,SaveError *error) {
-  (void)error;*out=(ArRegionalSession){.slot=slot,.campaign={7},.revision=1};
+static bool FakeSlotDraft(unsigned slot, ArRegionalSession *out, SaveError *error) {
+  (void)error;
+  *out = (ArRegionalSession){.slot = slot, .campaign = {7}, .revision = 1};
   ++slot_draft_calls;
-  out->randomizer=RandomizerConfig_Default();out->randomizer.seed=42;
-  if(slot_fixture_prepared){out->randomizer.enabled=slot_fixture_randomized;out->randomizer.seed=slot_fixture_seed;}
+  out->randomizer = RandomizerConfig_Default();
+  out->randomizer.seed = 42;
+  if (slot_fixture_prepared) {
+    out->randomizer.enabled = slot_fixture_randomized;
+    out->randomizer.seed = slot_fixture_seed;
+  }
   return true;
 }
-static bool FakeSlotView(const ArRegionalSession *draft,ActRaiserRegionalRulesView *out) {
-  *out=(ActRaiserRegionalRulesView){.requested=draft->requested,.effective=draft->effective,
-      .new_game=true,.editable=true,.revision=draft->revision};
-  memcpy(out->campaign,draft->campaign,sizeof(out->campaign));
-  if(!ArRegionalProfiles_Describe(&out->requested,out->profiles) ||
-      !ArRegionalProfiles_Describe(&out->effective,out->active_profiles))return false;
-  ActRaiserRegionalSettings_DescribeChoices(&out->requested,&out->effective,out->choices);
+static bool FakeSlotView(const ArRegionalSession *draft, ActRaiserRegionalRulesView *out) {
+  *out = (ActRaiserRegionalRulesView){.requested = draft->requested,
+                                      .effective = draft->effective,
+                                      .new_game = true,
+                                      .editable = true,
+                                      .revision = draft->revision};
+  memcpy(out->campaign, draft->campaign, sizeof(out->campaign));
+  if (!ArRegionalProfiles_Describe(&out->requested, out->profiles) ||
+      !ArRegionalProfiles_Describe(&out->effective, out->active_profiles))
+    return false;
+  ActRaiserRegionalSettings_DescribeChoices(&out->requested, &out->effective, out->choices);
   return true;
 }
-static bool FakeSlotStart(unsigned slot,uint64_t fingerprint,const ArRegionalSession *draft,SaveError *error) {
-  CHECK(slot==1 && fingerprint==slot_empty_fingerprint && draft);++slot_start_calls;
-  if(draft)slot_started_draft=*draft;
-  if(!slot_start_succeeds){slot_empty_fingerprint=333;snprintf(error->message,sizeof(error->message),"Fixture write failed; source retained.");return false;}
-  SettingsOverlay_Close();return true;
+static bool FakeSlotStart(unsigned slot, uint64_t fingerprint, const ArRegionalSession *draft,
+                          SaveError *error) {
+  CHECK(slot == 1 && fingerprint == slot_empty_fingerprint && draft);
+  ++slot_start_calls;
+  if (draft) slot_started_draft = *draft;
+  if (!slot_start_succeeds) {
+    slot_empty_fingerprint = 333;
+    snprintf(error->message, sizeof(error->message), "Fixture write failed; source retained.");
+    return false;
+  }
+  SettingsOverlay_Close();
+  return true;
 }
-static void SlotReviewFrame(SDL_Renderer *renderer,SDL_Surface *surface,const char *name) {
-  const char *directory=getenv("AR_SAVE_SLOTS_REVIEW_DIR");if(!renderer || !directory)return;
-  SDL_SetRenderDrawColor(renderer,12,22,34,255);CHECK(SDL_RenderClear(renderer));
-  SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h});CHECK(SDL_RenderPresent(renderer));
-  char path[1024];snprintf(path,sizeof(path),"%s/%s.bmp",directory,name);CHECK(SDL_SaveBMP(surface,path));
+static void SlotReviewFrame(SDL_Renderer *renderer, SDL_Surface *surface, const char *name) {
+  const char *directory = getenv("AR_SAVE_SLOTS_REVIEW_DIR");
+  if (!renderer || !directory) return;
+  SDL_SetRenderDrawColor(renderer, 12, 22, 34, 255);
+  CHECK(SDL_RenderClear(renderer));
+  SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
+  CHECK(SDL_RenderPresent(renderer));
+  char path[1024];
+  snprintf(path, sizeof(path), "%s/%s.bmp", directory, name);
+  CHECK(SDL_SaveBMP(surface, path));
 }
-static void TestSaveSlotMenu(SDL_Renderer *renderer,SDL_Surface *surface) {
-  SettingsOverlay_Close();Settings_Init();g_settings.show_debug_settings=true;
-  const SettingsOverlaySaveSlotHooks hooks={.scan=FakeSlotsScan,.draft=FakeSlotDraft,.view=FakeSlotView,.start=FakeSlotStart};
-  SettingsOverlay_SetSaveSlotHooks(&hooks);SettingsOverlay_Open();
+static void TestSaveSlotMenu(SDL_Renderer *renderer, SDL_Surface *surface) {
+  SettingsOverlay_Close();
+  Settings_Init();
+  g_settings.show_debug_settings = true;
+  const SettingsOverlaySaveSlotHooks hooks = {
+      .scan = FakeSlotsScan, .draft = FakeSlotDraft, .view = FakeSlotView, .start = FakeSlotStart};
+  SettingsOverlay_SetSaveSlotHooks(&hooks);
+  SettingsOverlay_Open();
   NavToSection(kSection_Save);
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false)); /* Direct entry, no Actions tab. */
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_list"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_advanced"));
-  SlotReviewFrame(renderer,surface,"slots-advanced-button");
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false)); /* Direct entry, no Actions tab. */
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_list"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_advanced"));
+  SlotReviewFrame(renderer, surface, "slots-advanced-button");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   RowToKey("save_export_srm");
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_advanced"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-  SlotReviewFrame(renderer,surface,"slots-summary");
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_use"));
-  SlotReviewFrame(renderer,surface,"slots-focus");
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(!slot_start_calls); /* active occupied slot */
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_advanced"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  SlotReviewFrame(renderer, surface, "slots-summary");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_use"));
+  SlotReviewFrame(renderer, surface, "slots-focus");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!slot_start_calls); /* active occupied slot */
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
   CHECK(SettingsOverlay_IsOpen()); /* Back returns to the settings overlay */
   CHECK(SettingsOverlay_OpenSaveSlots(true));
-  int original_seed=g_settings.rando_seed;bool original_enabled=g_settings.rando_enable;
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_type"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_seed"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
-  SlotReviewFrame(renderer,surface,"slots-seed");
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_seed"));
-  RowToKey("slot_options");CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"rando_regional_action"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_W,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"rando_enemy_hp"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-  SlotReviewFrame(renderer,surface,"slots-options");
-  CHECK(SettingsOverlay_HandleKey(SDLK_F3,true,false));
-  SlotReviewFrame(renderer,surface,"slots-option-help");
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_options"));
+  int original_seed = g_settings.rando_seed;
+  bool original_enabled = g_settings.rando_enable;
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_type"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_seed"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  SlotReviewFrame(renderer, surface, "slots-seed");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_seed"));
+  RowToKey("slot_options");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "rando_regional_action"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_W, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "rando_enemy_hp"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  SlotReviewFrame(renderer, surface, "slots-options");
+  CHECK(SettingsOverlay_HandleKey(SDLK_F3, true, false));
+  SlotReviewFrame(renderer, surface, "slots-option-help");
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_options"));
   /* Returning to the list and reopening this draft must not reroll its seed. */
-  unsigned drafts_before=slot_draft_calls;
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(slot_draft_calls==drafts_before);
-  RowToKey("slot_regions");CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_regions"));
+  unsigned drafts_before = slot_draft_calls;
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(slot_draft_calls == drafts_before);
+  RowToKey("slot_regions");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_regions"));
   RowToKey("slot_start");
-  SlotReviewFrame(renderer,surface,"slots-new-game");
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_confirm"));
-  SlotReviewFrame(renderer,surface,"slots-confirm");
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(!slot_start_calls); /* Cancel is default */
-  CHECK(SettingsOverlay_IsOpen() && !strcmp(SettingsOverlay_SelectedKey(),"slot_start"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(slot_start_calls==1 && SettingsOverlay_IsOpen());
-  CHECK(slot_started_draft.randomizer.enabled && slot_started_draft.randomizer.seed==100000042);
-  CHECK(slot_started_draft.randomizer.regional_action && slot_started_draft.randomizer.hp_percent==101);
-  CHECK(g_settings.rando_seed==original_seed && g_settings.rando_enable==original_enabled);
-  slot_start_succeeds=true;
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(slot_start_calls==2 && !SettingsOverlay_IsOpen());
+  SlotReviewFrame(renderer, surface, "slots-new-game");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_confirm"));
+  SlotReviewFrame(renderer, surface, "slots-confirm");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!slot_start_calls); /* Cancel is default */
+  CHECK(SettingsOverlay_IsOpen() && !strcmp(SettingsOverlay_SelectedKey(), "slot_start"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(slot_start_calls == 1 && SettingsOverlay_IsOpen());
+  CHECK(slot_started_draft.randomizer.enabled && slot_started_draft.randomizer.seed == 100000042);
+  CHECK(slot_started_draft.randomizer.regional_action &&
+        slot_started_draft.randomizer.hp_percent == 101);
+  CHECK(g_settings.rando_seed == original_seed && g_settings.rando_enable == original_enabled);
+  slot_start_succeeds = true;
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(slot_start_calls == 2 && !SettingsOverlay_IsOpen());
   /* Prepared campaigns remain distinct from truly free slots; reopening one
    * preserves its recipe even from the ordinary (non-randomizer) entry. */
-  slot_fixture_prepared=true;
-  g_settings.show_debug_settings=false;
-  SettingsOverlay_Open();CHECK(SettingsOverlay_OpenSaveSlots(false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-  SlotReviewFrame(renderer,surface,"slots-prepared");
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_regions"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_start"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_regions")); /* No hidden type/seed/options rows. */
-  RowToKey("slot_start");CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  SlotReviewFrame(renderer,surface,"slots-prepared-confirm-debug-off");
-  CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(slot_start_calls==3);
-  CHECK(slot_started_draft.randomizer.enabled && slot_started_draft.randomizer.seed==678901);
-  SettingsOverlay_Close();slot_fixture_prepared=false;
-  slot_fixture_full=true;g_settings.show_debug_settings=true;
-  SettingsOverlay_Open();CHECK(SettingsOverlay_OpenSaveSlots(true));
-  SlotReviewFrame(renderer,surface,"slots-full");
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_use"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(slot_start_calls==3);
-  SettingsOverlay_Close();slot_fixture_full=false;
-  slot_fixture_unavailable=true;
-  SettingsOverlay_Open();CHECK(SettingsOverlay_OpenSaveSlots(false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(slot_start_calls==3);
-  SlotReviewFrame(renderer,surface,"slots-unavailable");
-  SettingsOverlay_Close();slot_fixture_unavailable=false;
-  slot_empty_fingerprint=222;
+  slot_fixture_prepared = true;
+  g_settings.show_debug_settings = false;
+  SettingsOverlay_Open();
+  CHECK(SettingsOverlay_OpenSaveSlots(false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  SlotReviewFrame(renderer, surface, "slots-prepared");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_regions"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_start"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(),
+                "slot_regions")); /* No hidden type/seed/options rows. */
+  RowToKey("slot_start");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  SlotReviewFrame(renderer, surface, "slots-prepared-confirm-debug-off");
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(slot_start_calls == 3);
+  CHECK(slot_started_draft.randomizer.enabled && slot_started_draft.randomizer.seed == 678901);
+  SettingsOverlay_Close();
+  slot_fixture_prepared = false;
+  slot_fixture_full = true;
+  g_settings.show_debug_settings = true;
+  SettingsOverlay_Open();
+  CHECK(SettingsOverlay_OpenSaveSlots(true));
+  SlotReviewFrame(renderer, surface, "slots-full");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_use"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(slot_start_calls == 3);
+  SettingsOverlay_Close();
+  slot_fixture_full = false;
+  slot_fixture_unavailable = true;
+  SettingsOverlay_Open();
+  CHECK(SettingsOverlay_OpenSaveSlots(false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(slot_start_calls == 3);
+  SlotReviewFrame(renderer, surface, "slots-unavailable");
+  SettingsOverlay_Close();
+  slot_fixture_unavailable = false;
+  slot_empty_fingerprint = 222;
   SettingsOverlay_SetSaveSlotHooks(NULL);
 }
 
@@ -2061,214 +2269,292 @@ static void TestSaveSlotParentNavigation(void) {
   SettingsOverlay_SetSaveSlotHooks(NULL);
 }
 
-static uint64_t SlotFrameHash(SDL_Renderer *renderer,SDL_Surface *surface) {
-  CHECK(SDL_SetRenderDrawColor(renderer,12,22,34,255));CHECK(SDL_RenderClear(renderer));
-  SettingsOverlay_Render((ArRenderRectI){0,0,surface->w,surface->h});CHECK(SDL_RenderPresent(renderer));
-  uint64_t hash=UINT64_C(14695981039346656037);
-  const uint8_t *pixels=surface->pixels;
-  for(int i=0;i<surface->pitch*surface->h;++i){hash^=pixels[i];hash*=UINT64_C(1099511628211);}
+static uint64_t SlotFrameHash(SDL_Renderer *renderer, SDL_Surface *surface) {
+  CHECK(SDL_SetRenderDrawColor(renderer, 12, 22, 34, 255));
+  CHECK(SDL_RenderClear(renderer));
+  SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
+  CHECK(SDL_RenderPresent(renderer));
+  uint64_t hash = UINT64_C(14695981039346656037);
+  const uint8_t *pixels = surface->pixels;
+  for (int i = 0; i < surface->pitch * surface->h; ++i) {
+    hash ^= pixels[i];
+    hash *= UINT64_C(1099511628211);
+  }
   return hash;
 }
-static void TestSaveSlotRandomizerGate(SDL_Renderer *renderer,SDL_Surface *surface) {
-  const SettingsOverlaySaveSlotHooks hooks={.scan=FakeSlotsScan,.draft=FakeSlotDraft,.view=FakeSlotView,.start=FakeSlotStart};
-  uint64_t frames[2][3][2]={0};
-  for(int debug=0;debug<2;++debug)for(int variant=0;variant<3;++variant) {
-    SettingsOverlay_Close();Settings_Init();g_settings.show_debug_settings=debug;
-    slot_fixture_seed=variant==1?123456789:678901;
-    slot_fixture_randomized=variant!=2;
-    SettingsOverlay_SetSaveSlotHooks(&hooks);SettingsOverlay_Open();
-    if(!debug)CHECK(!SettingsOverlay_OpenSaveSlots(true));
-    CHECK(SettingsOverlay_OpenSaveSlots(false));
-    int tab=-1,count=0;
-    CHECK(SettingsOverlay_GetTabState(&tab,&count) && tab==0 && count==(debug?3:2));
-    CHECK(SettingsOverlay_HandleKey(SDLK_LEFT,true,false));
-    CHECK(SettingsOverlay_GetTabState(&tab,NULL) && tab==count-1);
-    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-    CHECK(SettingsOverlay_GetTabState(&tab,NULL) && tab==0);
-    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false)); /* Saved randomized campaign. */
-    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-    for(int row=0;row<10;++row)CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-    frames[debug][variant][0]=SlotFrameHash(renderer,surface);
-    if(!variant)SlotReviewFrame(renderer,surface,debug?"slots-debug-on":"slots-debug-off");
-    CHECK(SettingsOverlay_HandleKey(SDLK_F3,true,false));
-    for(int row=0;row<10;++row) {
-      frames[debug][variant][1]^=SlotFrameHash(renderer,surface);
-      frames[debug][variant][1]*=UINT64_C(1099511628211);
-      CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+static void TestSaveSlotRandomizerGate(SDL_Renderer *renderer, SDL_Surface *surface) {
+  const SettingsOverlaySaveSlotHooks hooks = {
+      .scan = FakeSlotsScan, .draft = FakeSlotDraft, .view = FakeSlotView, .start = FakeSlotStart};
+  uint64_t frames[2][3][2] = {0};
+  for (int debug = 0; debug < 2; ++debug)
+    for (int variant = 0; variant < 3; ++variant) {
+      SettingsOverlay_Close();
+      Settings_Init();
+      g_settings.show_debug_settings = debug;
+      slot_fixture_seed = variant == 1 ? 123456789 : 678901;
+      slot_fixture_randomized = variant != 2;
+      SettingsOverlay_SetSaveSlotHooks(&hooks);
+      SettingsOverlay_Open();
+      if (!debug) CHECK(!SettingsOverlay_OpenSaveSlots(true));
+      CHECK(SettingsOverlay_OpenSaveSlots(false));
+      int tab = -1, count = 0;
+      CHECK(SettingsOverlay_GetTabState(&tab, &count) && tab == 0 && count == (debug ? 3 : 2));
+      CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
+      CHECK(SettingsOverlay_GetTabState(&tab, NULL) && tab == count - 1);
+      CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+      CHECK(SettingsOverlay_GetTabState(&tab, NULL) && tab == 0);
+      CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+      CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false)); /* Saved randomized campaign. */
+      CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+      for (int row = 0; row < 10; ++row)
+        CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+      frames[debug][variant][0] = SlotFrameHash(renderer, surface);
+      if (!variant)
+        SlotReviewFrame(renderer, surface, debug ? "slots-debug-on" : "slots-debug-off");
+      CHECK(SettingsOverlay_HandleKey(SDLK_F3, true, false));
+      for (int row = 0; row < 10; ++row) {
+        frames[debug][variant][1] ^= SlotFrameHash(renderer, surface);
+        frames[debug][variant][1] *= UINT64_C(1099511628211);
+        CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+      }
     }
+  for (int view = 0; view < 2; ++view) {
+    CHECK(frames[0][0][view] == frames[0][1][view]); /* Seed does not affect hidden UI. */
+    CHECK(frames[0][0][view] == frames[0][2][view]); /* Neither does the on/off status. */
+    CHECK(frames[1][0][view] != frames[1][1][view]); /* Debug UI still shows the stored seed. */
   }
-  for(int view=0;view<2;++view) {
-    CHECK(frames[0][0][view]==frames[0][1][view]); /* Seed does not affect hidden UI. */
-    CHECK(frames[0][0][view]==frames[0][2][view]); /* Neither does the on/off status. */
-    CHECK(frames[1][0][view]!=frames[1][1][view]); /* Debug UI still shows the stored seed. */
-  }
-  slot_fixture_seed=678901;slot_fixture_randomized=true;
-  SettingsOverlay_Close();Settings_Init();g_settings.show_debug_settings=true;
-  SettingsOverlay_SetSaveSlotHooks(&hooks);SettingsOverlay_Open();
+  slot_fixture_seed = 678901;
+  slot_fixture_randomized = true;
+  SettingsOverlay_Close();
+  Settings_Init();
+  g_settings.show_debug_settings = true;
+  SettingsOverlay_SetSaveSlotHooks(&hooks);
+  SettingsOverlay_Open();
   CHECK(SettingsOverlay_OpenSaveSlots(true));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  RowToKey("slot_seed");CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  g_settings.show_debug_settings=false;SettingsOverlay_Refresh();
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_regions"));
-  RowToKey("slot_start");CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  RowToKey("slot_seed");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  g_settings.show_debug_settings = false;
+  SettingsOverlay_Refresh();
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_regions"));
+  RowToKey("slot_start");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(!slot_started_draft.randomizer.enabled); /* A fresh draft cannot bypass the gate. */
-  SettingsOverlay_Open();CHECK(SettingsOverlay_OpenSaveSlots(false));
-  g_settings.show_debug_settings=true;SettingsOverlay_Refresh();NavToTab(2);
-  CHECK(SettingsOverlay_HandleKey(SDLK_F3,true,false));
-  g_settings.show_debug_settings=false;SettingsOverlay_Refresh();
-  int tab=-1,count=0;
-  CHECK(SettingsOverlay_GetTabState(&tab,&count) && tab==0 && count==2);
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_regions")); /* Details were dismissed. */
-  SettingsOverlay_Close();SettingsOverlay_SetSaveSlotHooks(NULL);
+  SettingsOverlay_Open();
+  CHECK(SettingsOverlay_OpenSaveSlots(false));
+  g_settings.show_debug_settings = true;
+  SettingsOverlay_Refresh();
+  NavToTab(2);
+  CHECK(SettingsOverlay_HandleKey(SDLK_F3, true, false));
+  g_settings.show_debug_settings = false;
+  SettingsOverlay_Refresh();
+  int tab = -1, count = 0;
+  CHECK(SettingsOverlay_GetTabState(&tab, &count) && tab == 0 && count == 2);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_regions")); /* Details were dismissed. */
+  SettingsOverlay_Close();
+  SettingsOverlay_SetSaveSlotHooks(NULL);
 }
 
 /* Exercise localized layout through the same input path as the release tour.
  * Native-renderer snapshots are optional; navigation assertions always run. */
-static void TestSaveAdvancedShortcut(SDL_Renderer *renderer,SDL_Surface *surface) {
-  SettingsOverlay_Close();Settings_Init();
-  const SettingsOverlaySaveSlotHooks hooks={.scan=FakeSlotsScan};
-  SettingsOverlay_SetSaveSlotHooks(&hooks);SettingsOverlay_Open();
+static void TestSaveAdvancedShortcut(SDL_Renderer *renderer, SDL_Surface *surface) {
+  SettingsOverlay_Close();
+  Settings_Init();
+  const SettingsOverlaySaveSlotHooks hooks = {.scan = FakeSlotsScan};
+  SettingsOverlay_SetSaveSlotHooks(&hooks);
+  SettingsOverlay_Open();
   CHECK(SettingsOverlay_OpenSaveSlots(false));
-  int actions=s_action_calls,starts=slot_start_calls;
+  int actions = s_action_calls, starts = slot_start_calls;
   /* No wrap/scroll to the footer required from the initially active slot. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_A,true,true));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_list"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_A,true,false));
-  CHECK(strncmp(SettingsOverlay_SelectedKey(),"slot_",5));
-  g_settings.save_backend=kSaveBackend_Ini;
-  CHECK(SettingsOverlay_HandleKey(SDLK_A,true,true)); /* held shortcut must not reset Advanced's row */
-  CHECK(g_settings.save_backend==kSaveBackend_Ini);
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_list"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_A, true, true));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_list"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
+  CHECK(strncmp(SettingsOverlay_SelectedKey(), "slot_", 5));
+  g_settings.save_backend = kSaveBackend_Ini;
+  CHECK(SettingsOverlay_HandleKey(SDLK_A, true,
+                                  true)); /* held shortcut must not reset Advanced's row */
+  CHECK(g_settings.save_backend == kSaveBackend_Ini);
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_list"));
   /* Browsing another save must not retarget the active-save tools, switch
    * slots, or lose the selected preview/page/detail focus on return. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_use"));
-  SlotReviewFrame(renderer,surface,"slots-advanced-shortcut-hint");
-  g_settings.input_bind[kInputClass_Keyboard][kInputAction_Y]=INPUT_BIND_MAKE(kInputBind_Key,SDL_SCANCODE_V,false);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_use"));
+  SlotReviewFrame(renderer, surface, "slots-advanced-shortcut-hint");
+  g_settings.input_bind[kInputClass_Keyboard][kInputAction_Y] =
+      INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_V, false);
   char hint[64];
-  CHECK(OverlayMenuInput_Hint(hint,sizeof(hint),kMenuNav_Reset,kInputClass_Keyboard) && !strcmp(hint,"V"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_A,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_use"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_V,true,false));
-  CHECK(strncmp(SettingsOverlay_SelectedKey(),"slot_",5));
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_use"));
-  int tab=-1;CHECK(SettingsOverlay_GetTabState(&tab,NULL) && tab==1);
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_confirm"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_V,true,false)); /* shortcut cannot escape a confirmation */
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_confirm"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_F3,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_V,true,false)); /* or a read-only Details dialog */
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_use"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_F3,true,false));
+  CHECK(OverlayMenuInput_Hint(hint, sizeof(hint), kMenuNav_Reset, kInputClass_Keyboard) &&
+        !strcmp(hint, "V"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_use"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_V, true, false));
+  CHECK(strncmp(SettingsOverlay_SelectedKey(), "slot_", 5));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_use"));
+  int tab = -1;
+  CHECK(SettingsOverlay_GetTabState(&tab, NULL) && tab == 1);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_confirm"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_V, true, false)); /* shortcut cannot escape a confirmation */
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_confirm"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_F3, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_V, true, false)); /* or a read-only Details dialog */
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_use"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_F3, true, false));
   CHECK(SDL_InitSubSystem(SDL_INIT_GAMEPAD));
   SDL_VirtualJoystickDesc pad;
   SDL_INIT_INTERFACE(&pad);
-  pad.type=SDL_JOYSTICK_TYPE_GAMEPAD;pad.nbuttons=SDL_GAMEPAD_BUTTON_COUNT;
-  pad.button_mask=(1u<<SDL_GAMEPAD_BUTTON_COUNT)-1;pad.name="Save shortcut test";
-  const SDL_JoystickID id=SDL_AttachVirtualJoystick(&pad);CHECK(id!=0);
-  SDL_Event event={0};event.type=SDL_EVENT_GAMEPAD_ADDED;event.gdevice.which=id;
+  pad.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+  pad.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+  pad.button_mask = (1u << SDL_GAMEPAD_BUTTON_COUNT) - 1;
+  pad.name = "Save shortcut test";
+  const SDL_JoystickID id = SDL_AttachVirtualJoystick(&pad);
+  CHECK(id != 0);
+  SDL_Event event = {0};
+  event.type = SDL_EVENT_GAMEPAD_ADDED;
+  event.gdevice.which = id;
   InputMap_HandleEvent(&event);
-  event.type=SDL_EVENT_GAMEPAD_BUTTON_DOWN;event.gbutton.which=id;
-  const uint32 binding=g_settings.input_bind[kInputClass_Gamepad][kInputAction_Y];
-  CHECK(INPUT_BIND_KIND(binding)==kInputBind_PadButton);
-  event.gbutton.button=INPUT_BIND_CODE(binding);
+  event.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+  event.gbutton.which = id;
+  const uint32 binding = g_settings.input_bind[kInputClass_Gamepad][kInputAction_Y];
+  CHECK(INPUT_BIND_KIND(binding) == kInputBind_PadButton);
+  event.gbutton.button = INPUT_BIND_CODE(binding);
   CHECK(SettingsOverlay_HandleGamepadEvent(&event));
-  CHECK(strncmp(SettingsOverlay_SelectedKey(),"slot_",5));
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_use"));
-  CHECK(s_action_calls==actions && slot_start_calls==starts);
-  event.type=SDL_EVENT_GAMEPAD_REMOVED;event.gdevice.which=id;InputMap_HandleEvent(&event);
-  InputMap_Shutdown();SDL_DetachVirtualJoystick(id);SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
-  SettingsOverlay_Close();SettingsOverlay_SetSaveSlotHooks(NULL);Settings_Init();
+  CHECK(strncmp(SettingsOverlay_SelectedKey(), "slot_", 5));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_use"));
+  CHECK(s_action_calls == actions && slot_start_calls == starts);
+  event.type = SDL_EVENT_GAMEPAD_REMOVED;
+  event.gdevice.which = id;
+  InputMap_HandleEvent(&event);
+  InputMap_Shutdown();
+  SDL_DetachVirtualJoystick(id);
+  SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+  SettingsOverlay_Close();
+  SettingsOverlay_SetSaveSlotHooks(NULL);
+  Settings_Init();
 }
-static void TestSaveAdvancedActions(SDL_Renderer *renderer,SDL_Surface *surface) {
-  SettingsOverlay_Close();Settings_Init();g_settings.show_debug_settings=true;
-  const SettingsOverlaySaveSlotHooks hooks={.scan=FakeSlotsScan};
-  SettingsOverlay_SetSaveSlotHooks(&hooks);SettingsOverlay_Open();NavToSection(kSection_Save);
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false)); /* Preview LUNA. */
-  for(unsigned i=0;i<3;++i)CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_advanced"));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  RowToKey("save_import");SlotReviewFrame(renderer,surface,"advanced-active-target");
-  int calls=s_action_calls;
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_confirm"));
-  SlotReviewFrame(renderer,surface,"advanced-import-confirm");
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(s_action_calls==calls); /* Default cancel. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));CHECK(s_action_calls==calls);
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
+static void TestSaveAdvancedActions(SDL_Renderer *renderer, SDL_Surface *surface) {
+  SettingsOverlay_Close();
+  Settings_Init();
+  g_settings.show_debug_settings = true;
+  const SettingsOverlaySaveSlotHooks hooks = {.scan = FakeSlotsScan};
+  SettingsOverlay_SetSaveSlotHooks(&hooks);
+  SettingsOverlay_Open();
+  NavToSection(kSection_Save);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false)); /* Preview LUNA. */
+  for (unsigned i = 0; i < 3; ++i)
+    CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_advanced"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  RowToKey("save_import");
+  SlotReviewFrame(renderer, surface, "advanced-active-target");
+  int calls = s_action_calls;
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_confirm"));
+  SlotReviewFrame(renderer, surface, "advanced-import-confirm");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(s_action_calls == calls); /* Default cancel. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(s_action_calls == calls);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   ++slot_active_fingerprint;
-  CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));CHECK(s_action_calls==calls); /* Changed target. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-  CHECK(s_action_calls==++calls && s_action_desc==Settings_Find("save_import"));
-  const char *edits[]={"save_apply_session","save_apply_persist"};
-  for(unsigned i=0;i<2;++i) {
-    RowToKey(edits[i]);CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-    CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_confirm"));
-    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));CHECK(s_action_calls==calls);
-    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-    CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-    CHECK(s_action_calls==++calls && s_action_desc==Settings_Find(edits[i]));
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(s_action_calls == calls); /* Changed target. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(s_action_calls == ++calls && s_action_desc == Settings_Find("save_import"));
+  const char *edits[] = {"save_apply_session", "save_apply_persist"};
+  for (unsigned i = 0; i < 2; ++i) {
+    RowToKey(edits[i]);
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_confirm"));
+    CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+    CHECK(s_action_calls == calls);
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    CHECK(s_action_calls == ++calls && s_action_desc == Settings_Find(edits[i]));
   }
-  SettingsOverlay_Close();SettingsOverlay_SetSaveSlotHooks(NULL);slot_active_fingerprint=111;
+  SettingsOverlay_Close();
+  SettingsOverlay_SetSaveSlotHooks(NULL);
+  slot_active_fingerprint = 111;
 }
-static void TestSaveSlotLocales(SDL_Renderer *renderer,SDL_Surface *surface) {
-  for(unsigned locale=0;locale<kArUiLocale_Count;++locale) {
-    SettingsOverlay_Close();Settings_Init();g_settings.show_debug_settings=true;
-    g_settings.interface_language=locale;
-    const SettingsOverlaySaveSlotHooks hooks={.scan=FakeSlotsScan,.draft=FakeSlotDraft,.view=FakeSlotView};
-    SettingsOverlay_SetSaveSlotHooks(&hooks);SettingsOverlay_Open();NavToSection(kSection_Save);
+static void TestSaveSlotLocales(SDL_Renderer *renderer, SDL_Surface *surface) {
+  for (unsigned locale = 0; locale < kArUiLocale_Count; ++locale) {
+    SettingsOverlay_Close();
+    Settings_Init();
+    g_settings.show_debug_settings = true;
+    g_settings.interface_language = locale;
+    const SettingsOverlaySaveSlotHooks hooks = {
+        .scan = FakeSlotsScan, .draft = FakeSlotDraft, .view = FakeSlotView};
+    SettingsOverlay_SetSaveSlotHooks(&hooks);
+    SettingsOverlay_Open();
+    NavToSection(kSection_Save);
     char name[96];
-#define SLOT_LOCALE_FRAME(label) do { \
-      snprintf(name,sizeof(name),"%s-%s",ArUiCatalog_LocaleTag(locale),label); \
-      SlotReviewFrame(renderer,surface,name); \
-    } while(0)
+#define SLOT_LOCALE_FRAME(label)                                                                   \
+  do {                                                                                             \
+    snprintf(name, sizeof(name), "%s-%s", ArUiCatalog_LocaleTag(locale), label);                   \
+    SlotReviewFrame(renderer, surface, name);                                                      \
+  } while (0)
     SLOT_LOCALE_FRAME("navigation");
-    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-    CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_list"));
-    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
-    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN,true,false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_list"));
+    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
     SLOT_LOCALE_FRAME("summary");
-    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));SLOT_LOCALE_FRAME("regions");
-    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT,true,false));SLOT_LOCALE_FRAME("randomizer");
-    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));SLOT_LOCALE_FRAME("switch-action");
-    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-    CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_confirm"));SLOT_LOCALE_FRAME("switch-confirm");
-    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-    CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));
-    CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_type"));
-    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false)); /* Randomized setup. */
-    RowToKey("slot_regions");CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));SLOT_LOCALE_FRAME("setup-regions");
-    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-    CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_regions"));
-    RowToKey("slot_start");CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));SLOT_LOCALE_FRAME("setup-confirm");
-    CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));CHECK(SettingsOverlay_HandleKey(SDLK_X,true,false));
-    CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));CHECK(SettingsOverlay_HandleKey(SDLK_UP,true,false));
-    CHECK(!strcmp(SettingsOverlay_SelectedKey(),"slot_advanced"));
-    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));RowToKey("save_import");SLOT_LOCALE_FRAME("advanced-target");
-    CHECK(SettingsOverlay_HandleKey(SDLK_Z,true,false));SLOT_LOCALE_FRAME("advanced-confirm");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    SLOT_LOCALE_FRAME("regions");
+    CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+    SLOT_LOCALE_FRAME("randomizer");
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    SLOT_LOCALE_FRAME("switch-action");
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_confirm"));
+    SLOT_LOCALE_FRAME("switch-confirm");
+    CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_type"));
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false)); /* Randomized setup. */
+    RowToKey("slot_regions");
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    SLOT_LOCALE_FRAME("setup-regions");
+    CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_regions"));
+    RowToKey("slot_start");
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    SLOT_LOCALE_FRAME("setup-confirm");
+    CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_advanced"));
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    RowToKey("save_import");
+    SLOT_LOCALE_FRAME("advanced-target");
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    SLOT_LOCALE_FRAME("advanced-confirm");
 #undef SLOT_LOCALE_FRAME
     SettingsOverlay_Close();
   }
-  Settings_Init();SettingsOverlay_SetSaveSlotHooks(NULL);
+  Settings_Init();
+  SettingsOverlay_SetSaveSlotHooks(NULL);
 }
 
 #include "save_slots_release_capture.inc"
@@ -2281,10 +2567,9 @@ int main(int argc, char **argv) {
   }
   char settings_path[160];
   char settings_temporary[164];
-  snprintf(settings_path, sizeof(settings_path),
-           "/tmp/actraiser-overlay-settings-%ld.ini", (long)getpid());
-  snprintf(settings_temporary, sizeof(settings_temporary), "%s.tmp",
-           settings_path);
+  snprintf(settings_path, sizeof(settings_path), "/tmp/actraiser-overlay-settings-%ld.ini",
+           (long)getpid());
+  snprintf(settings_temporary, sizeof(settings_temporary), "%s.tmp", settings_path);
   setenv("AR_OVERLAY_TEST_SETTINGS_PATH", settings_path, 1);
   remove(settings_path);
   remove(settings_temporary);
@@ -2306,22 +2591,19 @@ int main(int argc, char **argv) {
   int surface_width = 640;
   int surface_height = 480;
   const char *preview_size = getenv("AR_OVERLAY_TEST_SIZE");
-  if (preview_size)
-    (void)sscanf(preview_size, "%dx%d", &surface_width, &surface_height);
+  if (preview_size) (void)sscanf(preview_size, "%dx%d", &surface_width, &surface_height);
   if (surface_width <= 0) surface_width = 640;
   if (surface_height <= 0) surface_height = 480;
 
   CHECK(SDL_Init(SDL_INIT_VIDEO));
   CheckMenuInputHints();
-  SDL_Surface *surface = SDL_CreateSurface(
-      surface_width, surface_height, SDL_PIXELFORMAT_ARGB8888);
+  SDL_Surface *surface = SDL_CreateSurface(surface_width, surface_height, SDL_PIXELFORMAT_ARGB8888);
   CHECK(surface != NULL);
   SDL_Renderer *renderer = surface ? SDL_CreateSoftwareRenderer(surface) : NULL;
   CHECK(renderer != NULL);
   ArRenderDevice render_device = {0};
   ArSdlRenderBackend render_backend = {0};
-  CHECK(ArSdlRenderBackend_Bind(
-      &render_device, &render_backend, renderer));
+  CHECK(ArSdlRenderBackend_Bind(&render_device, &render_backend, renderer));
   size_t rom_size = 0;
   uint8_t *rom_data = ReadOptionalRom(&rom_size);
   CHECK(SettingsOverlay_Init(&render_device, NULL, rom_data, rom_size));
@@ -2341,8 +2623,7 @@ int main(int argc, char **argv) {
    * index/UV layout cannot turn the performance overlay into an invisible
    * one while the ordinary per-glyph menu continues to pass. */
   if (renderer && surface) {
-    CHECK(SDL_SetRenderLogicalPresentation(
-        renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED));
+    CHECK(SDL_SetRenderLogicalPresentation(renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED));
     CHECK(SDL_SetRenderViewport(renderer, NULL));
     CHECK(SDL_SetRenderClipRect(renderer, NULL));
     SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
@@ -2374,8 +2655,7 @@ int main(int argc, char **argv) {
     /* Malformed input must not run past the terminator or hang. */
     /* A bad byte costs one cell and never swallows the rest of the name. */
     const char malformed[] = {'a', (char)0xff, (char)0xfe, 'b', 0};
-    CHECK(SettingsOverlay_GameTextWidth(malformed, 2) ==
-          SettingsOverlay_GameTextWidth("abcd", 2));
+    CHECK(SettingsOverlay_GameTextWidth(malformed, 2) == SettingsOverlay_GameTextWidth("abcd", 2));
     CHECK(SettingsOverlay_GameTextWidth("", 2) == 0);
     SettingsOverlay_DrawGameText(8, 40, 2, 255, "Fran\u00e7ais \u65e5\u672c");
 #ifdef AR_OVERLAY_UI_FONT
@@ -2385,34 +2665,42 @@ int main(int argc, char **argv) {
         ArHostFontResources_RegisterFile(&s_font_store, AR_OVERLAY_UI_JP_FONT, NULL, 0),
         ArHostFontResources_RegisterFile(&s_font_store, AR_OVERLAY_UI_AR_FONT, NULL, 0),
         ArHostFontResources_RegisterFile(&s_font_store, AR_OVERLAY_UI_HE_FONT, NULL, 0)};
-    const ArTextBackendConfig ui_fonts = {.struct_size = sizeof(ui_fonts),
+    const ArTextBackendConfig ui_fonts = {
+        .struct_size = sizeof(ui_fonts),
         .abi_version = AR_TEXT_BACKEND_CONFIG_ABI_VERSION,
         .font_stack_id = "test-interface",
         .resources = ArHostFontResources_Provider(&s_font_store),
-        .primary_font = ArHostFontResources_RegisterFile(&s_font_store, AR_OVERLAY_UI_FONT, NULL, 0),
+        .primary_font =
+            ArHostFontResources_RegisterFile(&s_font_store, AR_OVERLAY_UI_FONT, NULL, 0),
         .fallback_fonts = ui_fallbacks,
         .fallback_font_count = sizeof(ui_fallbacks) / sizeof(ui_fallbacks[0]),
-        .font_revision = 2, .cached_size_capacity = 16};
+        .font_revision = 2,
+        .cached_size_capacity = 16};
     char ui_error[kArTextRasterErrorCapacity] = {0};
-    bool ui_ready = SettingsOverlay_SetTextBackend(&ui_backend, &ui_fonts, ui_error, sizeof(ui_error));
+    bool ui_ready =
+        SettingsOverlay_SetTextBackend(&ui_backend, &ui_fonts, ui_error, sizeof(ui_error));
     if (!ui_ready) fprintf(stderr, "interface font: %s\n", ui_error);
     CHECK(ui_ready);
     /* Metadata must be readable before any game pack is activated. Exercise
      * the same trusted host stack, with no selected-pack font resources. */
     ArTextBackendInstance metadata_font = {0};
-    CHECK(ArTextBackendInstance_Create(&metadata_font, &ui_backend, &ui_fonts,
-                                      ui_error, sizeof(ui_error)));
+    CHECK(ArTextBackendInstance_Create(&metadata_font, &ui_backend, &ui_fonts, ui_error,
+                                       sizeof(ui_error)));
     const ArTextRasterizer *metadata_rasterizer = ArTextBackendInstance_Get(&metadata_font);
-    const char *metadata_names[] = {
-        "العَرَبِيَّة (AR 123)", "עִבְרִית (HE 123)", "فارسی", "اردو ٹ ڈ ڑ ں ھ ے"};
-    for (size_t name = 0; name < sizeof(metadata_names)/sizeof(metadata_names[0]); ++name) {
+    const char *metadata_names[] = {"العَرَبِيَّة (AR 123)", "עִבְרִית (HE 123)", "فارسی",
+                                    "اردو ٹ ڈ ڑ ں ھ ے"};
+    for (size_t name = 0; name < sizeof(metadata_names) / sizeof(metadata_names[0]); ++name) {
       const char *text = metadata_names[name];
       for (size_t i = 0, bytes = strlen(text); i < bytes;) {
         uint32_t scalar = 0;
-        if (!ArUnicode_DecodeScalar(text, bytes, i, &scalar, &i)) { CHECK(false); break; }
+        if (!ArUnicode_DecodeScalar(text, bytes, i, &scalar, &i)) {
+          CHECK(false);
+          break;
+        }
         bool present = false;
-        CHECK(ArTextRasterizer_HasGlyph(metadata_rasterizer, scalar, &present,
-                                        ui_error, sizeof(ui_error)) && present);
+        CHECK(ArTextRasterizer_HasGlyph(metadata_rasterizer, scalar, &present, ui_error,
+                                        sizeof(ui_error)) &&
+              present);
       }
       SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
       CHECK(SDL_RenderClear(renderer));
@@ -2422,7 +2710,8 @@ int main(int argc, char **argv) {
       const int width = SettingsOverlay_GameTextWidth(text, 3);
       CHECK(width > 0);
       for (int y = 0; y < surface->h; ++y) {
-        const uint32_t *pixels = (const uint32_t *)((const uint8_t *)surface->pixels + y * surface->pitch);
+        const uint32_t *pixels =
+            (const uint32_t *)((const uint8_t *)surface->pixels + y * surface->pitch);
         for (int x = 0; x < surface->w; ++x) {
           if (pixels[x] == UINT32_C(0xff201810)) continue;
           ++ink;
@@ -2449,9 +2738,11 @@ int main(int argc, char **argv) {
     if (reference) CHECK(memcmp(reference, surface->pixels, reference_size) != 0);
     const int unicode_width = SettingsOverlay_GameTextWidth("Français 日本語", 3);
     CHECK(unicode_width > 0 && unicode_width < SettingsOverlay_GameTextWidth("Fran?ais ???", 3));
-    CHECK(SettingsOverlay_GameTextWidth("Français", 3) == SettingsOverlay_GameTextWidth("Franc\u0327ais", 3));
+    CHECK(SettingsOverlay_GameTextWidth("Français", 3) ==
+          SettingsOverlay_GameTextWidth("Franc\u0327ais", 3));
     for (int y = 0; y < surface->h; ++y) {
-      const uint32_t *pixels = (const uint32_t *)((const uint8_t *)surface->pixels + y * surface->pitch);
+      const uint32_t *pixels =
+          (const uint32_t *)((const uint8_t *)surface->pixels + y * surface->pitch);
       for (int x = 0; x < surface->w; ++x)
         if (x < 9 || x >= 9 + unicode_width || y < 41 || y >= 65)
           CHECK(pixels[x] == UINT32_C(0xff201810));
@@ -2474,25 +2765,21 @@ int main(int argc, char **argv) {
      * the checked draw seam with exact scaled-tile dimensions; it must render
      * both with a real ROM atlas and with the normal host-frame fallback used
      * by this test when AR_OVERLAY_TEST_ROM is absent. */
-    const ArRenderRectI comparison_frame = { 80, 56, 176, 144 };
+    const ArRenderRectI comparison_frame = {80, 56, 176, 144};
     SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
     CHECK(SDL_RenderClear(renderer));
     CHECK(SettingsOverlay_DrawGameFrame(comparison_frame, 2));
     CHECK(SDL_RenderPresent(renderer));
     changed_pixels = 0;
-    for (int y = comparison_frame.y;
-         y < comparison_frame.y + comparison_frame.h; y++)
-      for (int x = comparison_frame.x;
-           x < comparison_frame.x + comparison_frame.w; x++) {
+    for (int y = comparison_frame.y; y < comparison_frame.y + comparison_frame.h; y++)
+      for (int x = comparison_frame.x; x < comparison_frame.x + comparison_frame.w; x++) {
         Uint8 r = 0, g = 0, b = 0, a = 0;
         CHECK(SDL_ReadSurfacePixel(surface, x, y, &r, &g, &b, &a));
         if (r != 32 || g != 24 || b != 16) changed_pixels++;
       }
     CHECK(changed_pixels > 0);
-    const char *frame_preview =
-        getenv("AR_OVERLAY_GAME_FRAME_TEST_BMP");
-    if (frame_preview && frame_preview[0])
-      CHECK(SDL_SaveBMP(surface, frame_preview));
+    const char *frame_preview = getenv("AR_OVERLAY_GAME_FRAME_TEST_BMP");
+    if (frame_preview && frame_preview[0]) CHECK(SDL_SaveBMP(surface, frame_preview));
   }
 
   /* Headless SDL reports no refresh rate; let a preview inject one so the
@@ -2513,23 +2800,21 @@ int main(int argc, char **argv) {
      * output. The overlay is terminal host UI: it discards that coordinate
      * space and game-local clip, draws into the bars, and deliberately leaves
      * full-output coordinates active for the host UI that follows it. */
-    CHECK(SDL_SetRenderLogicalPresentation(
-        renderer, 1024, 768, SDL_LOGICAL_PRESENTATION_LETTERBOX));
-    SDL_Rect game_clip = { 0, 0, 1024, 768 };
+    CHECK(
+        SDL_SetRenderLogicalPresentation(renderer, 1024, 768, SDL_LOGICAL_PRESENTATION_LETTERBOX));
+    SDL_Rect game_clip = {0, 0, 1024, 768};
     CHECK(SDL_SetRenderClipRect(renderer, &game_clip));
     SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
     SDL_RenderClear(renderer);
-    SettingsOverlay_Render(
-        (ArRenderRectI){0, 0, surface_width, surface_height});
+    SettingsOverlay_Render((ArRenderRectI){0, 0, surface_width, surface_height});
     int logical_width = -1, logical_height = -1;
-    SDL_RendererLogicalPresentation logical_mode =
-        SDL_LOGICAL_PRESENTATION_LETTERBOX;
-    CHECK(SDL_GetRenderLogicalPresentation(
-        renderer, &logical_width, &logical_height, &logical_mode));
+    SDL_RendererLogicalPresentation logical_mode = SDL_LOGICAL_PRESENTATION_LETTERBOX;
+    CHECK(
+        SDL_GetRenderLogicalPresentation(renderer, &logical_width, &logical_height, &logical_mode));
     CHECK(logical_width == 0 && logical_height == 0);
     CHECK(logical_mode == SDL_LOGICAL_PRESENTATION_DISABLED);
     CHECK(!SDL_RenderViewportSet(renderer));
-    SDL_Rect overlay_viewport = { -1, -1, -1, -1 };
+    SDL_Rect overlay_viewport = {-1, -1, -1, -1};
     CHECK(SDL_GetRenderViewport(renderer, &overlay_viewport));
     const SDL_Rect full_output = {0, 0, surface_width, surface_height};
     CHECK(SDL_RectsEqual(&overlay_viewport, &full_output));
@@ -2564,8 +2849,7 @@ int main(int argc, char **argv) {
       RowToKey("refresh_mode");
       SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
       SDL_RenderClear(renderer);
-      SettingsOverlay_Render(
-          (ArRenderRectI){0, 0, surface_width, surface_height});
+      SettingsOverlay_Render((ArRenderRectI){0, 0, surface_width, surface_height});
       SDL_RenderPresent(renderer);
       CHECK(SDL_SaveBMP(surface, rpreview));
       CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
@@ -2581,11 +2865,11 @@ int main(int argc, char **argv) {
     int start = -1, count = -1;
     CHECK(SettingsOverlay_GetTabState(&start, &count));
     CHECK(count >= 2);
-    CHECK(SettingsOverlay_HandleKey(SDLK_W, true, false));  /* SNES R */
+    CHECK(SettingsOverlay_HandleKey(SDLK_W, true, false)); /* SNES R */
     int after_r = -1;
     CHECK(SettingsOverlay_GetTabState(&after_r, NULL));
     CHECK(after_r == (start + 1) % count);
-    CHECK(SettingsOverlay_HandleKey(SDLK_Q, true, false));  /* SNES L */
+    CHECK(SettingsOverlay_HandleKey(SDLK_Q, true, false)); /* SNES L */
     int after_l = -1;
     CHECK(SettingsOverlay_GetTabState(&after_l, NULL));
     CHECK(after_l == start);
@@ -2600,13 +2884,12 @@ int main(int argc, char **argv) {
   CHECK(hud_scale != NULL);
   if (hud_scale) {
     CHECK(hud_scale->maxval == 400);
-    CHECK(Settings_SetLong(hud_scale, hud_scale->maxval) >=
-          kSettingChange_Unchanged);
+    CHECK(Settings_SetLong(hud_scale, hud_scale->maxval) >= kSettingChange_Unchanged);
     CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
     CHECK(g_settings.hud_scale_percent == 0);
     HostClockStub_SetMilliseconds(HostClock_Milliseconds() + 5000);
     SettingsOverlay_Tick();
-    CHECK(g_settings.hud_scale_percent == 0);  /* held Right stops at wrap */
+    CHECK(g_settings.hud_scale_percent == 0); /* held Right stops at wrap */
     char formatted[32];
     CHECK(Settings_FormatValue(hud_scale, formatted, sizeof(formatted)) > 0);
     CHECK(!strcmp(formatted, "Match game"));
@@ -2626,7 +2909,7 @@ int main(int argc, char **argv) {
   if (auto_scale > 800) auto_scale = 800;
   int expected_scale = auto_scale < 800 ? auto_scale + 25 : 800;
   CHECK(g_settings.menu_scale_percent == expected_scale);
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, false, false));  /* release flushes */
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, false, false)); /* release flushes */
   FILE *saved = fopen(settings_path, "rb");
   CHECK(saved != NULL);
   if (saved) fclose(saved);
@@ -2668,23 +2951,18 @@ int main(int argc, char **argv) {
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(g_settings.sim3d_mode);
   RowToKey("sim3d_voxel_preset");
-  CHECK(g_settings.sim3d_voxel_preset ==
-        kSimBackgroundVoxelPreset_Balanced);
+  CHECK(g_settings.sim3d_voxel_preset == kSimBackgroundVoxelPreset_Balanced);
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
-  CHECK(g_settings.sim3d_voxel_preset ==
-        kSimBackgroundVoxelPreset_Custom);
+  CHECK(g_settings.sim3d_voxel_preset == kSimBackgroundVoxelPreset_Custom);
 #if AR_SIM3D_TERRAIN_ELEVATION
   RowToKey("sim3d_landscape_height_pct");
-  CHECK(g_settings.sim3d_landscape_height_pct ==
-        kSimTownTerrainLandscapeHeightDefaultPct);
+  CHECK(g_settings.sim3d_landscape_height_pct == kSimTownTerrainLandscapeHeightDefaultPct);
   CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
   CHECK(g_settings.sim3d_landscape_height_pct ==
-        kSimTownTerrainLandscapeHeightDefaultPct -
-            kSimTownTerrainLandscapeHeightStepPct);
+        kSimTownTerrainLandscapeHeightDefaultPct - kSimTownTerrainLandscapeHeightStepPct);
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
-  CHECK(g_settings.sim3d_landscape_height_pct ==
-        kSimTownTerrainLandscapeHeightDefaultPct);
+  CHECK(g_settings.sim3d_landscape_height_pct == kSimTownTerrainLandscapeHeightDefaultPct);
 #endif
   RowToKey("sim3d_voxel_detail");
   CHECK(g_settings.sim3d_voxel_detail == kSimBackgroundVoxelDetail_High);
@@ -2697,19 +2975,15 @@ int main(int argc, char **argv) {
   CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
   CHECK(g_settings.sim3d_voxel_lod == kSimBackgroundVoxelLod_Fixed);
   RowToKey("sim3d_voxel_shading");
-  CHECK(g_settings.sim3d_voxel_shading ==
-        kSimBackgroundVoxelShading_MaterialAware);
+  CHECK(g_settings.sim3d_voxel_shading == kSimBackgroundVoxelShading_MaterialAware);
   CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
-  CHECK(g_settings.sim3d_voxel_shading ==
-        kSimBackgroundVoxelShading_AmbientOcclusion);
+  CHECK(g_settings.sim3d_voxel_shading == kSimBackgroundVoxelShading_AmbientOcclusion);
   RowToKey("sim3d_voxel_style");
   CHECK(g_settings.sim3d_voxel_style == kSimBackgroundVoxelStyle_Varied);
   RowToKey("sim3d_voxel_facing");
-  CHECK(g_settings.sim3d_voxel_facing ==
-        kSimBackgroundVoxelFacing_PerModel);
+  CHECK(g_settings.sim3d_voxel_facing == kSimBackgroundVoxelFacing_PerModel);
   RowToKey("sim3d_voxel_render_scale");
-  CHECK(g_settings.sim3d_voxel_render_scale ==
-        kSimBackgroundVoxelRenderScale_PixelClean);
+  CHECK(g_settings.sim3d_voxel_render_scale == kSimBackgroundVoxelRenderScale_PixelClean);
   /* Walk to a stage toggle by key rather than counting rows: the stage list
    * grows every time a render stage lands. Toggling one from the menu must
    * also change what the renderer is asked for, since the fold is the only
@@ -2738,28 +3012,26 @@ int main(int argc, char **argv) {
   const SettingDesc *sim_shadow = Settings_Find("sim3d_shadow_opacity_pct");
   const SettingDesc *sim_corner = Settings_Find("sim3d_cull_corner_px");
   const SettingDesc *volume = Settings_Find("audio_master_volume");
-  CHECK(Settings_SetLong(sim_tilt, sim_tilt->defval - sim_tilt->step) ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetLong(sim_tilt, sim_tilt->defval - sim_tilt->step) == kSettingChange_Applied);
   CHECK(Settings_SetLong(sim_shadow, sim_shadow->defval - sim_shadow->step) ==
         kSettingChange_Applied);
   CHECK(Settings_SetLong(sim_corner, sim_corner->defval + sim_corner->step) ==
         kSettingChange_Applied);
   CHECK(Settings_SetLong(volume, 75) == kSettingChange_Applied);
-  CHECK(g_settings.sim3d_mode);  /* made non-default by the Scene test above */
+  CHECK(g_settings.sim3d_mode); /* made non-default by the Scene test above */
   RowToKey("reset_section_defaults");
   const char *reset_preview = getenv("AR_OVERLAY_RESET_TEST_BMP");
   if (renderer && reset_preview && reset_preview[0]) {
     SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
     SDL_RenderClear(renderer);
-    SettingsOverlay_Render(
-        (ArRenderRectI){0, 0, surface_width, surface_height});
+    SettingsOverlay_Render((ArRenderRectI){0, 0, surface_width, surface_height});
     SDL_RenderPresent(renderer);
     CHECK(SDL_SaveBMP(surface, reset_preview));
   }
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));  /* arm */
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false)); /* arm */
   CHECK(g_settings.sim3d_mode);
   CHECK(g_settings.sim3d_tilt_x_mrad != sim_tilt->defval);
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));  /* confirm */
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false)); /* confirm */
   CHECK(!g_settings.sim3d_mode);
   CHECK(g_settings.sim3d_tilt_x_mrad == sim_tilt->defval);
   CHECK(g_settings.sim3d_shadow_opacity_pct == sim_shadow->defval);
@@ -2787,8 +3059,7 @@ int main(int argc, char **argv) {
    * both directions. The value names what Automatic is running on. */
   {
     const SettingDesc *api = Settings_Find("gpu_backend");
-    Settings_SetGpuBackendsOffered((1u << kGpuBackend_Direct3D12) |
-                                   (1u << kGpuBackend_Vulkan));
+    Settings_SetGpuBackendsOffered((1u << kGpuBackend_Direct3D12) | (1u << kGpuBackend_Vulkan));
     NavToSection(kSection_Video);
     NavToTab(0);
     CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
@@ -2832,12 +3103,12 @@ int main(int argc, char **argv) {
   const SettingDesc *sens = Settings_Find("input_cam_sensitivity");
   CHECK(sens && sens->type == kSettingType_Int && sens->step == 1);
   int sens_default = g_settings.input_cam_sensitivity;
-  CHECK(Settings_SetLong(sens, 150) >= kSettingChange_Applied);  /* != default */
+  CHECK(Settings_SetLong(sens, 150) >= kSettingChange_Applied); /* != default */
   RowToKey("input_cam_sensitivity");
-  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));   /* tap down */
-  CHECK(g_settings.input_cam_sensitivity == 149);  /* stepped, not text-edited */
-  CHECK(!SettingsOverlay_IsEditing());            /* numeric never opens a field */
-  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, false, false));  /* release */
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));  /* tap down */
+  CHECK(g_settings.input_cam_sensitivity == 149);            /* stepped, not text-edited */
+  CHECK(!SettingsOverlay_IsEditing());                       /* numeric never opens a field */
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, false, false)); /* release */
   /* Confirm (B) on a numeric row is a single fine step up, still no editor. */
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(g_settings.input_cam_sensitivity == 150);
@@ -2850,17 +3121,17 @@ int main(int argc, char **argv) {
   /* Drive the tick with an injected clock so acceleration is deterministic:
    * press up, let the initial delay pass, then repeats well past the ramp knee
    * move the value by far more than a tap — and it clamps to the range. */
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));  /* press up */
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false)); /* press up */
   int after_press = g_settings.input_cam_sensitivity;
-  CHECK(after_press == 151);  /* one base step up from 150 */
+  CHECK(after_press == 151); /* one base step up from 150 */
   uint64_t base = HostClock_Milliseconds();
   for (int i = 1; i <= 40; i++) {
     HostClockStub_SetMilliseconds(base + (uint64_t)i * 60);
     SettingsOverlay_Tick();
   }
   CHECK(g_settings.input_cam_sensitivity > after_press + 5);  /* accelerated */
-  CHECK(g_settings.input_cam_sensitivity <= 400);  /* normalized to range */
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, false, false));  /* release */
+  CHECK(g_settings.input_cam_sensitivity <= 400);             /* normalized to range */
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, false, false)); /* release */
   CHECK(Settings_SetLong(sens, sens_default) >= kSettingChange_Applied);
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
 
@@ -2872,7 +3143,7 @@ int main(int argc, char **argv) {
   RowToKey("pins");
   CHECK(Settings_Find("pins")->type == kSettingType_Custom);
   CHECK(!SettingsOverlay_IsEditing());
-  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));   /* B opens the field */
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false)); /* B opens the field */
   CHECK(SettingsOverlay_IsEditing());
   CHECK(SettingsOverlay_HandleKey(SDLK_ESCAPE, true, false));
   CHECK(!SettingsOverlay_IsEditing());
@@ -2912,8 +3183,7 @@ int main(int argc, char **argv) {
   if (renderer && controls_preview && controls_preview[0]) {
     SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
     SDL_RenderClear(renderer);
-    SettingsOverlay_Render(
-        (ArRenderRectI){0, 0, surface_width, surface_height});
+    SettingsOverlay_Render((ArRenderRectI){0, 0, surface_width, surface_height});
     SDL_RenderPresent(renderer);
     CHECK(SDL_SaveBMP(surface, controls_preview));
   }
@@ -2962,8 +3232,7 @@ int main(int argc, char **argv) {
   CHECK(SettingsOverlay_HandleCaptureEvent(&pad));
   CHECK(!SettingsOverlay_IsCapturing());
   CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_Up] ==
-        INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_NORTH,
-                        false));
+        INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_NORTH, false));
   NavToTab(1);
   CHECK(g_settings.input_bind_page == kInputClass_Keyboard);
   /* Read-only diagnostics must not re-synchronize a page selector behind the
@@ -2992,14 +3261,13 @@ int main(int argc, char **argv) {
   CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.save_edit_armed);
-  CHECK(Settings_SetText(Settings_Find("save_prog_fillmore"),
-                         "act2-cleared") == kSettingChange_Applied);
+  CHECK(Settings_SetText(Settings_Find("save_prog_fillmore"), "act2-cleared") ==
+        kSettingChange_Applied);
   const char *save_preview = getenv("AR_OVERLAY_SAVE_TEST_BMP");
   if (renderer && save_preview && save_preview[0]) {
     SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
     SDL_RenderClear(renderer);
-    SettingsOverlay_Render(
-        (ArRenderRectI){0, 0, surface_width, surface_height});
+    SettingsOverlay_Render((ArRenderRectI){0, 0, surface_width, surface_height});
     SDL_RenderPresent(renderer);
     CHECK(SDL_SaveBMP(surface, save_preview));
   }
@@ -3061,8 +3329,7 @@ int main(int argc, char **argv) {
   CHECK(g_settings.scene_inspector);
   if (renderer) {
     int calls_before = s_inspector_info_calls;
-    SettingsOverlay_Render(
-        (ArRenderRectI){0, 0, surface_width, surface_height});
+    SettingsOverlay_Render((ArRenderRectI){0, 0, surface_width, surface_height});
     CHECK(s_inspector_info_calls == calls_before + 1);
   }
   RowToKey("dump_scene_assets");
@@ -3074,7 +3341,7 @@ int main(int argc, char **argv) {
   /* Debug-settings gate: with the switch on (set at startup) the town dials,
    * their A/B toggles, and the inspector are all visible. */
   const SettingDesc *debug_row = Settings_Find("show_debug_settings");
-  CHECK(debug_row && !Settings_IsDebugOnly(debug_row));  /* never hides itself */
+  CHECK(debug_row && !Settings_IsDebugOnly(debug_row)); /* never hides itself */
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_tilt_x_mrad")));
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_diagnostic_layers")));
   CHECK(Settings_IsMenuVisible(Settings_Find("scene_inspector")));
@@ -3082,7 +3349,7 @@ int main(int argc, char **argv) {
   {
     int tabs = -1;
     CHECK(SettingsOverlay_GetTabState(NULL, &tabs));
-    CHECK(tabs == 4);  /* Scene, Camera, Light, Weather */
+    CHECK(tabs == 4); /* Scene, Camera, Light, Weather */
   }
 
   /* Turn it off through the menu the way a player would (System > Tools). */
@@ -3090,7 +3357,7 @@ int main(int argc, char **argv) {
   NavToTab(0);
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   RowToKey("show_debug_settings");
-  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));  /* on -> off */
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false)); /* on -> off */
   CHECK(!g_settings.show_debug_settings);
 
   /* The dials, internal A/B toggles, and inspector collapse out... */
@@ -3102,10 +3369,8 @@ int main(int argc, char **argv) {
   /* ...while master toggles, major on/off effects, and camera mode stay. */
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_mode")));
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_world_navigation")));
-  CHECK(Settings_IsMenuVisible(
-      Settings_Find("sim3d_world_navigation_lighting")));
-  CHECK(Settings_IsMenuVisible(
-      Settings_Find("sim3d_world_navigation_clouds")));
+  CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_world_navigation_lighting")));
+  CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_world_navigation_clouds")));
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_world_navigation_cloud_shadows")));
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_world_navigation_atmosphere")));
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_world_navigation_towns")));
@@ -3115,11 +3380,9 @@ int main(int argc, char **argv) {
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_shadows")));
   CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_camera_mode")));
 #if AR_SIM3D_TERRAIN_ELEVATION
-  CHECK(Settings_IsMenuVisible(
-      Settings_Find("sim3d_landscape_height_pct")));
+  CHECK(Settings_IsMenuVisible(Settings_Find("sim3d_landscape_height_pct")));
 #else
-  CHECK(!Settings_IsMenuVisible(
-      Settings_Find("sim3d_landscape_height_pct")));
+  CHECK(!Settings_IsMenuVisible(Settings_Find("sim3d_landscape_height_pct")));
 #endif
   CHECK(Settings_IsMenuVisible(Settings_Find("diorama_skybox")));
   /* System drops the all-debug Inspector tab, leaving Tools and Game. */
@@ -3128,7 +3391,7 @@ int main(int argc, char **argv) {
     CHECK(SettingsOverlay_GetTabState(NULL, &tabs));
     CHECK(tabs == 2);
   }
-  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));  /* back to nav column */
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false)); /* back to nav column */
   /* Town 3D collapses to Scene + Camera; cycling never lands on a hidden tab. */
   NavToSection(kSection_Town3D);
   {
@@ -3156,27 +3419,23 @@ int main(int argc, char **argv) {
    * planes, one of them expanded into its parameters. Fillmore act 2 with the
    * shipped rake on its water is the case the whole feature exists for. */
   if (preview_dir && preview_dir[0]) {
-    SettingsOverlay_SetLayerEditorHooks(FakeLayerTable, FakeLayerRoom,
-                                        FakeLayerSave);
+    SettingsOverlay_SetLayerEditorHooks(FakeLayerTable, FakeLayerRoom, FakeLayerSave);
     memset(&s_fake_layer_table, 0, sizeof(s_fake_layer_table));
     s_fake_room_live = true;
-    DioramaRoomOverride *preview_room = DioramaLayerOrder_FindOrAdd(
-        &s_fake_layer_table, s_fake_group, s_fake_map);
+    DioramaRoomOverride *preview_room =
+        DioramaLayerOrder_FindOrAdd(&s_fake_layer_table, s_fake_group, s_fake_map);
     if (preview_room) {
       DioramaLayerEditor_SetStrategy(&preview_room->planes[kDioramaPlane_Bg2Hi],
                                      kDioramaDepth_Stack);
-      DioramaLayerEditor_SetStrategy(&preview_room->planes[SR_PPU_OVERLAY_BG1],
-                                     kDioramaDepth_Rake);
+      DioramaLayerEditor_SetStrategy(&preview_room->planes[SR_PPU_OVERLAY_BG1], kDioramaDepth_Rake);
     }
   }
   for (int section = 0; section < kDebugSectionCount; section++) {
     NavToSection(section);
     if (!renderer) continue;
-    SettingsOverlay_Render(
-        (ArRenderRectI){0, 0, surface_width, surface_height});
+    SettingsOverlay_Render((ArRenderRectI){0, 0, surface_width, surface_height});
     int selected = -1, top = -1, visible = -1, total = -1;
-    CHECK(SettingsOverlay_GetNavigationState(
-        &selected, &top, &visible, &total));
+    CHECK(SettingsOverlay_GetNavigationState(&selected, &top, &visible, &total));
     CHECK(selected == section);
     CHECK(total == kDebugSectionCount);
     CHECK(selected >= top && selected < top + visible);
@@ -3190,8 +3449,7 @@ int main(int argc, char **argv) {
       /* Park the cursor on the authored water plane so its parameter block is
        * expanded in the shot -- the expansion is the layout decision most worth
        * reviewing, and it is only visible on the selected plane. */
-      if (section == kSection_Layers &&
-          strcmp(SettingsOverlay_SelectedKey(), "") != 0) {
+      if (section == kSection_Layers && strcmp(SettingsOverlay_SelectedKey(), "") != 0) {
         for (int guard = 0; guard < 32; guard++) {
           if (!strcmp(SettingsOverlay_SelectedKey(), "bg2hi")) break;
           CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
@@ -3201,12 +3459,10 @@ int main(int argc, char **argv) {
         CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
       }
       char path[256];
-      snprintf(path, sizeof(path), "%s/section%d-tab%d.bmp",
-               preview_dir, section, tab);
+      snprintf(path, sizeof(path), "%s/section%d-tab%d.bmp", preview_dir, section, tab);
       SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
       SDL_RenderClear(renderer);
-      SettingsOverlay_Render(
-          (ArRenderRectI){0, 0, surface_width, surface_height});
+      SettingsOverlay_Render((ArRenderRectI){0, 0, surface_width, surface_height});
       SDL_RenderPresent(renderer);
       CHECK(SDL_SaveBMP(surface, path));
     }
@@ -3227,12 +3483,10 @@ int main(int argc, char **argv) {
       for (int tab = 0; tab < tabs; tab++) {
         NavToTab(tab);
         char path[256];
-        snprintf(path, sizeof(path), "%s/section%d-tab%d-dbgoff.bmp",
-                 preview_dir, section, tab);
+        snprintf(path, sizeof(path), "%s/section%d-tab%d-dbgoff.bmp", preview_dir, section, tab);
         SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
         SDL_RenderClear(renderer);
-        SettingsOverlay_Render(
-            (ArRenderRectI){0, 0, surface_width, surface_height});
+        SettingsOverlay_Render((ArRenderRectI){0, 0, surface_width, surface_height});
         SDL_RenderPresent(renderer);
         CHECK(SDL_SaveBMP(surface, path));
       }
@@ -3264,50 +3518,42 @@ int main(int argc, char **argv) {
   if (renderer) {
     SDL_SetRenderDrawColor(renderer, 22, 28, 34, 255);
     SDL_RenderClear(renderer);
-    SettingsOverlay_RenderDebugPanel(
-        "SCENE INSPECTOR",
-        "CLICK 474,170  WORLD $008E,$00C6\n"
-        "GF $016C STATE $00/$00 CAM $0080,$0080 MAP $0000,$0000\n"
-        "PPU MODE 7 BRIGHT 15 MAIN $01 SUB $00 MARGIN 0/0\n"
-        "BG1 T$03A P1 PAL3 PIX2 CENTER MAP$7104\n"
-        "OBJ#12 16X16 BASE$80 SUB$91 PAL4 PRI2 PIX7\n"
-        "CANDIDATES; WINDOWS/COLOR MATH MAY MASK A LAYER\n"
-        "LEFT CLICK INSPECT  RIGHT CLICK CLEAR  F3 DISABLE",
-        (ArRenderPointI){ surface_width / 2, surface_height - 1 });
+    SettingsOverlay_RenderDebugPanel("SCENE INSPECTOR",
+                                     "CLICK 474,170  WORLD $008E,$00C6\n"
+                                     "GF $016C STATE $00/$00 CAM $0080,$0080 MAP $0000,$0000\n"
+                                     "PPU MODE 7 BRIGHT 15 MAIN $01 SUB $00 MARGIN 0/0\n"
+                                     "BG1 T$03A P1 PAL3 PIX2 CENTER MAP$7104\n"
+                                     "OBJ#12 16X16 BASE$80 SUB$91 PAL4 PRI2 PIX7\n"
+                                     "CANDIDATES; WINDOWS/COLOR MATH MAY MASK A LAYER\n"
+                                     "LEFT CLICK INSPECT  RIGHT CLICK CLEAR  F3 DISABLE",
+                                     (ArRenderPointI){surface_width / 2, surface_height - 1});
     SDL_RenderPresent(renderer);
     const char *debug_preview = getenv("AR_OVERLAY_DEBUG_TEST_BMP");
-    if (debug_preview && debug_preview[0])
-      CHECK(SDL_SaveBMP(surface, debug_preview));
+    if (debug_preview && debug_preview[0]) CHECK(SDL_SaveBMP(surface, debug_preview));
     ArRenderRectI panel_before = {0};
     CHECK(SettingsOverlay_GetDebugPanelRect(&panel_before));
     CHECK(panel_before.y < surface_height / 2);
     CHECK(panel_before.w < surface_width - 40);
-    CHECK(!SettingsOverlay_BeginDebugPanelDrag(
-        panel_before.x + 4, panel_before.y + panel_before.h - 4));
-    CHECK(SettingsOverlay_BeginDebugPanelDrag(
-        panel_before.x + 4, panel_before.y + 4));
+    CHECK(!SettingsOverlay_BeginDebugPanelDrag(panel_before.x + 4,
+                                               panel_before.y + panel_before.h - 4));
+    CHECK(SettingsOverlay_BeginDebugPanelDrag(panel_before.x + 4, panel_before.y + 4));
     CHECK(SettingsOverlay_IsDebugPanelDragging());
-    SettingsOverlay_DragDebugPanel(
-        panel_before.x + 4, surface_height / 2);
+    SettingsOverlay_DragDebugPanel(panel_before.x + 4, surface_height / 2);
     SettingsOverlay_EndDebugPanelDrag();
     CHECK(!SettingsOverlay_IsDebugPanelDragging());
-    SettingsOverlay_RenderDebugPanel(
-        "DEBUG", "FIRST LINE\nSECOND LINE",
-        (ArRenderPointI){ surface_width / 2, surface_height - 1 });
+    SettingsOverlay_RenderDebugPanel("DEBUG", "FIRST LINE\nSECOND LINE",
+                                     (ArRenderPointI){surface_width / 2, surface_height - 1});
     ArRenderRectI panel_after = {0};
     CHECK(SettingsOverlay_GetDebugPanelRect(&panel_after));
     CHECK(panel_after.y != panel_before.y);
-    CHECK(SettingsOverlay_BeginDebugPanelDrag(
-        panel_after.x + panel_after.w - 4,
-        panel_after.y + panel_after.h - 4));
+    CHECK(SettingsOverlay_BeginDebugPanelDrag(panel_after.x + panel_after.w - 4,
+                                              panel_after.y + panel_after.h - 4));
     CHECK(SettingsOverlay_IsDebugPanelDragging());
-    SettingsOverlay_DragDebugPanel(
-        panel_after.x + panel_after.w - 4 - panel_after.w / 4,
-        panel_after.y + panel_after.h - 4 - panel_after.h / 4);
+    SettingsOverlay_DragDebugPanel(panel_after.x + panel_after.w - 4 - panel_after.w / 4,
+                                   panel_after.y + panel_after.h - 4 - panel_after.h / 4);
     SettingsOverlay_EndDebugPanelDrag();
-    SettingsOverlay_RenderDebugPanel(
-        "DEBUG", "FIRST LINE\nSECOND LINE",
-        (ArRenderPointI){ surface_width / 2, surface_height - 1 });
+    SettingsOverlay_RenderDebugPanel("DEBUG", "FIRST LINE\nSECOND LINE",
+                                     (ArRenderPointI){surface_width / 2, surface_height - 1});
     ArRenderRectI panel_resized = {0};
     CHECK(SettingsOverlay_GetDebugPanelRect(&panel_resized));
     CHECK(panel_resized.w < panel_after.w);
@@ -3317,13 +3563,13 @@ int main(int argc, char **argv) {
     CHECK(!SettingsOverlay_BeginDebugPanelDrag(0, 0));
   }
 
-  TestSaveSlotMenu(renderer,surface);
+  TestSaveSlotMenu(renderer, surface);
   TestSaveSlotParentNavigation();
-  TestSaveSlotRandomizerGate(renderer,surface);
-  TestSaveAdvancedShortcut(renderer,surface);
-  TestSaveAdvancedActions(renderer,surface);
-  TestSaveSlotLocales(renderer,surface);
-  CaptureSaveSlotsReleaseTour(renderer,surface);
+  TestSaveSlotRandomizerGate(renderer, surface);
+  TestSaveAdvancedShortcut(renderer, surface);
+  TestSaveAdvancedActions(renderer, surface);
+  TestSaveSlotLocales(renderer, surface);
+  CaptureSaveSlotsReleaseTour(renderer, surface);
   SettingsOverlay_SetManualHooks(NULL);
   SettingsOverlay_Destroy();
 #ifdef AR_OVERLAY_UI_FONT

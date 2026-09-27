@@ -13,19 +13,18 @@
  * carry colour. */
 
 static int s_failures;
-#define CHECK(expr) do { \
-  if (!(expr)) { \
-    fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr); \
-    s_failures++; \
-  } \
-} while (0)
+#define CHECK(expr)                                                                                \
+  do {                                                                                             \
+    if (!(expr)) {                                                                                 \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr);                     \
+      s_failures++;                                                                                \
+    }                                                                                              \
+  } while (0)
 
-static bool ReferenceSlantAsciiNumerals(ArTextBitmap *b,
-                                        const char *utf8, size_t bytes) {
-  if (!b || !utf8 || !b->pixel_owners || !b->reveal_clusters ||
-      !b->reveal_cluster_count || b->reveal_cluster_count > 65536 ||
-      b->format != kArRenderPixelFormat_Rgba8888 || !b->pixels || b->width <= 0 ||
-      b->width > INT32_MAX / 4 || b->pitch_bytes < b->width * 4 ||
+static bool ReferenceSlantAsciiNumerals(ArTextBitmap *b, const char *utf8, size_t bytes) {
+  if (!b || !utf8 || !b->pixel_owners || !b->reveal_clusters || !b->reveal_cluster_count ||
+      b->reveal_cluster_count > 65536 || b->format != kArRenderPixelFormat_Rgba8888 || !b->pixels ||
+      b->width <= 0 || b->width > INT32_MAX / 4 || b->pitch_bytes < b->width * 4 ||
       b->height <= 0 || (uint64_t)b->width * b->height > (UINT64_C(64) << 20) / 16)
     return false;
   const size_t area = (size_t)b->width * b->height;
@@ -33,7 +32,9 @@ static bool ReferenceSlantAsciiNumerals(ArTextBitmap *b,
   uint32_t *pixels = calloc(area, sizeof(*pixels));
   uint32_t *owners = calloc(area, sizeof(*owners));
   if (!bottom || !pixels || !owners) {
-    free(bottom); free(pixels); free(owners);
+    free(bottom);
+    free(pixels);
+    free(owners);
     return false;
   }
   bottom[0] = -1;
@@ -43,14 +44,38 @@ static bool ReferenceSlantAsciiNumerals(ArTextBitmap *b,
     bool number = start < end && end <= bytes;
     /* Omitted break whitespace does not belong to the next ink cluster. */
     static const char *const omitted[] = {
-      " ", "\t", "\n", "\r", "\xc2\x85", "\xd8\x9c", "\xe1\x9a\x80",
-      "\xe2\x80\x80", "\xe2\x80\x81", "\xe2\x80\x82", "\xe2\x80\x83",
-      "\xe2\x80\x84", "\xe2\x80\x85", "\xe2\x80\x86", "\xe2\x80\x88",
-      "\xe2\x80\x89", "\xe2\x80\x8a", "\xe2\x80\x8e", "\xe2\x80\x8f",
-      "\xe2\x80\xa8", "\xe2\x80\xa9", "\xe2\x80\xaa", "\xe2\x80\xab",
-      "\xe2\x80\xac", "\xe2\x80\xad", "\xe2\x80\xae", "\xe2\x81\x9f",
-      "\xe2\x81\xa6", "\xe2\x81\xa7", "\xe2\x81\xa8", "\xe2\x81\xa9",
-      "\xe3\x80\x80",
+        " ",
+        "\t",
+        "\n",
+        "\r",
+        "\xc2\x85",
+        "\xd8\x9c",
+        "\xe1\x9a\x80",
+        "\xe2\x80\x80",
+        "\xe2\x80\x81",
+        "\xe2\x80\x82",
+        "\xe2\x80\x83",
+        "\xe2\x80\x84",
+        "\xe2\x80\x85",
+        "\xe2\x80\x86",
+        "\xe2\x80\x88",
+        "\xe2\x80\x89",
+        "\xe2\x80\x8a",
+        "\xe2\x80\x8e",
+        "\xe2\x80\x8f",
+        "\xe2\x80\xa8",
+        "\xe2\x80\xa9",
+        "\xe2\x80\xaa",
+        "\xe2\x80\xab",
+        "\xe2\x80\xac",
+        "\xe2\x80\xad",
+        "\xe2\x80\xae",
+        "\xe2\x81\x9f",
+        "\xe2\x81\xa6",
+        "\xe2\x81\xa7",
+        "\xe2\x81\xa8",
+        "\xe2\x81\xa9",
+        "\xe3\x80\x80",
     };
     while (number && start < end) {
       size_t skipped = 0;
@@ -74,7 +99,9 @@ static bool ReferenceSlantAsciiNumerals(ArTextBitmap *b,
     for (int x = 0; x < b->width; ++x) {
       const uint32_t owner = b->pixel_owners[(size_t)y * b->width + x];
       if (owner > b->reveal_cluster_count) {
-        free(bottom); free(pixels); free(owners);
+        free(bottom);
+        free(pixels);
+        free(owners);
         return false;
       }
       if (owner && bottom[owner] >= 0) bottom[owner] = y;
@@ -88,26 +115,27 @@ static bool ReferenceSlantAsciiNumerals(ArTextBitmap *b,
         if (!owner || (bottom[owner] >= 0) != (pass != 0)) continue;
         const int target_x = x + (pass ? (bottom[owner] - y + 2) / 4 : 0);
         if (target_x >= b->width) {
-          free(bottom); free(pixels); free(owners);
+          free(bottom);
+          free(pixels);
+          free(owners);
           return false;
         }
         const size_t at = (size_t)y * b->width + target_x;
         uint32_t pixel;
-        memcpy(&pixel, (const uint8_t *)b->pixels +
-            (size_t)y * b->pitch_bytes + (size_t)x * 4, 4);
-        if (owners[at] && (bottom[owners[at]] < 0 ||
-                          (pixels[at] & 255) >= (pixel & 255))) continue;
+        memcpy(&pixel, (const uint8_t *)b->pixels + (size_t)y * b->pitch_bytes + (size_t)x * 4, 4);
+        if (owners[at] && (bottom[owners[at]] < 0 || (pixels[at] & 255) >= (pixel & 255))) continue;
         pixels[at] = pixel;
         owners[at] = owner;
       }
   for (int y = 0; y < b->height; ++y)
-    memcpy((uint8_t *)b->pixels + (size_t)y * b->pitch_bytes,
-           pixels + (size_t)y * b->width, (size_t)b->width * 4);
+    memcpy((uint8_t *)b->pixels + (size_t)y * b->pitch_bytes, pixels + (size_t)y * b->width,
+           (size_t)b->width * 4);
   memcpy((void *)b->pixel_owners, owners, area * sizeof(*owners));
-  free(bottom); free(pixels); free(owners);
+  free(bottom);
+  free(pixels);
+  free(owners);
   return true;
 }
-
 
 static uint32_t Random(uint32_t *state) {
   *state ^= *state << 13;
@@ -127,9 +155,8 @@ typedef struct Page {
 
 /* `padding` trailing columns stay unowned, like the rasterizer's slant
  * padding, so most pages have room for their numerals to lean. */
-static void BuildPage(Page *page, uint32_t *state, int width, int height,
-                      int pitch, int padding, size_t clusters,
-                      bool valid_owners) {
+static void BuildPage(Page *page, uint32_t *state, int width, int height, int pitch, int padding,
+                      size_t clusters, bool valid_owners) {
   memset(page, 0, sizeof(*page));
   page->pixels = malloc((size_t)pitch * (size_t)height);
   page->owners = malloc((size_t)width * (size_t)height * sizeof(uint32_t));
@@ -147,16 +174,19 @@ static void BuildPage(Page *page, uint32_t *state, int width, int height,
     page->pixels[i] = (uint8_t)Random(state);
   for (int i = 0; i < width * height; ++i) {
     const uint32_t roll = Random(state) % 4;
-    page->owners[i] = roll == 0 || i % width >= width - padding
-        ? 0 : 1 + Random(state) % (uint32_t)clusters;
-    if (!valid_owners && Random(state) % 97 == 0)
-      page->owners[i] = (uint32_t)clusters + 1;
+    page->owners[i] =
+        roll == 0 || i % width >= width - padding ? 0 : 1 + Random(state) % (uint32_t)clusters;
+    if (!valid_owners && Random(state) % 97 == 0) page->owners[i] = (uint32_t)clusters + 1;
   }
   page->bitmap = (ArTextBitmap){
-    .pixels = page->pixels, .width = width, .height = height,
-    .pitch_bytes = pitch, .format = kArRenderPixelFormat_Rgba8888,
-    .reveal_clusters = page->clusters, .reveal_cluster_count = clusters,
-    .pixel_owners = page->owners,
+      .pixels = page->pixels,
+      .width = width,
+      .height = height,
+      .pitch_bytes = pitch,
+      .format = kArRenderPixelFormat_Rgba8888,
+      .reveal_clusters = page->clusters,
+      .reveal_cluster_count = clusters,
+      .pixel_owners = page->owners,
   };
 }
 
@@ -172,24 +202,27 @@ static void TestSlantMatchesFullPageReference(void) {
     const int padding = Random(&state) % 5 ? (height + 2) / 4 : 0;
     Page reference, candidate;
     uint32_t seed = state;
-    BuildPage(&reference, &seed, width, height, pitch, padding, clusters,
-              valid_owners);
+    BuildPage(&reference, &seed, width, height, pitch, padding, clusters, valid_owners);
     seed = state;
-    BuildPage(&candidate, &seed, width, height, pitch, padding, clusters,
-              valid_owners);
+    BuildPage(&candidate, &seed, width, height, pitch, padding, clusters, valid_owners);
     state = seed;
-    const bool expected = ReferenceSlantAsciiNumerals(
-        &reference.bitmap, reference.utf8, reference.bytes);
-    const bool actual = ArTextBitmap_SlantAsciiNumerals(
-        &candidate.bitmap, candidate.utf8, candidate.bytes);
+    const bool expected =
+        ReferenceSlantAsciiNumerals(&reference.bitmap, reference.utf8, reference.bytes);
+    const bool actual =
+        ArTextBitmap_SlantAsciiNumerals(&candidate.bitmap, candidate.utf8, candidate.bytes);
     CHECK(expected == actual);
     CHECK(!memcmp(reference.pixels, candidate.pixels, (size_t)pitch * (size_t)height));
     CHECK(!memcmp(reference.owners, candidate.owners,
                   (size_t)width * (size_t)height * sizeof(uint32_t)));
     ++compared;
-    if (expected) ++succeeded; else ++failed;
-    free(reference.pixels); free(reference.owners);
-    free(candidate.pixels); free(candidate.owners);
+    if (expected)
+      ++succeeded;
+    else
+      ++failed;
+    free(reference.pixels);
+    free(reference.owners);
+    free(candidate.pixels);
+    free(candidate.owners);
   }
   /* Both outcomes must actually be exercised, or equality proves little. */
   CHECK(compared == 6000 && succeeded > 1000 && failed > 100);

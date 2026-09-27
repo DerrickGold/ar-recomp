@@ -15,7 +15,10 @@ const uint32_t *SimTownCanvas_Pixels(void) { return source; }
 bool SimTownCanvas_TakeDirtyRect(int *x, int *y, int *w, int *h) {
   if (dirty_at == dirty_count) return false;
   const ArRenderRectI rect = dirty[dirty_at++];
-  *x = rect.x; *y = rect.y; *w = rect.w; *h = rect.h;
+  *x = rect.x;
+  *y = rect.y;
+  *w = rect.w;
+  *h = rect.h;
   return true;
 }
 void Sim3DPerformance_AddUpload(uint64_t bytes) { assert(bytes); }
@@ -31,22 +34,27 @@ static void Destroy(void *context, ArRenderTexture texture) {
   (void)context;
   if (ArRenderTexture_IsValid(texture)) ++destroys;
 }
-static const char *Error(void *context) { (void)context; return "injected failure"; }
+static const char *Error(void *context) {
+  (void)context;
+  return "injected failure";
+}
 static bool Update(void *context, ArRenderTexture texture, const ArRenderRectI *rect,
-    const void *pixels, int pitch) {
-  (void)context; (void)texture;
+                   const void *pixels, int pitch) {
+  (void)context;
+  (void)texture;
   assert(rect && pixels && pitch == kSimTownCanvasPixels * 4);
   last_upload = *rect;
   if (++updates == fail_at) return false;
   for (int y = 0; y < rect->h; ++y)
     memcpy(uploaded + (rect->y + y) * kSimTownCanvasPixels + rect->x,
-        (const uint8_t *)pixels + y * pitch, rect->w * sizeof(uint32_t));
+           (const uint8_t *)pixels + y * pitch, rect->w * sizeof(uint32_t));
   return true;
 }
 
 static void Change(int x, int y) {
   source[y * kSimTownCanvasPixels + x] = ++serial;
-  dirty_count = 1; dirty_at = 0;
+  dirty_count = 1;
+  dirty_at = 0;
   dirty[0] = (ArRenderRectI){x, y, 1, 1};
 }
 static void CheckFull(void) {
@@ -58,8 +66,10 @@ static void CheckFull(void) {
 }
 
 int main(void) {
-  const ArRenderBackendOps ops = {.create_texture = Create, .destroy_texture = Destroy,
-    .update_texture = Update, .last_error = Error};
+  const ArRenderBackendOps ops = {.create_texture = Create,
+                                  .destroy_texture = Destroy,
+                                  .update_texture = Update,
+                                  .last_error = Error};
   ArRenderDevice device = {.ops = &ops, .context = &creates};
   PresentSim3DCanvas_Upload(&device, false);
   assert(!creates && !updates);

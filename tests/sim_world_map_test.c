@@ -8,13 +8,12 @@
 #include "sim/sim_world_map_compose.h"
 
 static int s_failures;
-#define CHECK(expression)                                                  \
-  do {                                                                     \
-    if (!(expression)) {                                                   \
-      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__,     \
-              #expression);                                                \
-      s_failures++;                                                        \
-    }                                                                      \
+#define CHECK(expression)                                                                          \
+  do {                                                                                             \
+    if (!(expression)) {                                                                           \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expression);               \
+      s_failures++;                                                                                \
+    }                                                                                              \
   } while (0)
 
 enum {
@@ -35,7 +34,7 @@ enum {
 };
 
 static const uint16_t kTownDestinations[kSimWorldMapTownCount] = {
-  0x1850, 0x1830, 0x2010, 0x1010, 0x3040, 0x0020,
+    0x1850, 0x1830, 0x2010, 0x1010, 0x3040, 0x0020,
 };
 
 /* Tile t is painted entirely with colour index t, and palette entry i is a
@@ -64,21 +63,18 @@ static uint32_t ColorForTile(uint8_t tile) {
 static void ReferenceFullBake(const uint8_t *tilemap, uint32_t *out) {
   for (int tile_y = 0; tile_y < kSimWorldMapTiles; tile_y++)
     for (int tile_x = 0; tile_x < kSimWorldMapTiles; tile_x++) {
-      uint32_t color =
-          ColorForTile(tilemap[tile_y * kSimWorldMapTiles + tile_x]);
+      uint32_t color = ColorForTile(tilemap[tile_y * kSimWorldMapTiles + tile_x]);
       for (int row = 0; row < kSimWorldMapTilePixels; row++) {
-        uint32_t *p = out +
-            (size_t)(tile_y * kSimWorldMapTilePixels + row) *
-                kSimWorldMapPixels +
-            tile_x * kSimWorldMapTilePixels;
-        for (int col = 0; col < kSimWorldMapTilePixels; col++) p[col] = color;
+        uint32_t *p = out + (size_t)(tile_y * kSimWorldMapTilePixels + row) * kSimWorldMapPixels +
+                      tile_x * kSimWorldMapTilePixels;
+        for (int col = 0; col < kSimWorldMapTilePixels; col++)
+          p[col] = color;
       }
     }
 }
 
 static size_t FirstPixelForTile(size_t tile) {
-  return (tile / kSimWorldMapTiles) * kSimWorldMapTilePixels *
-             kSimWorldMapPixels +
+  return (tile / kSimWorldMapTiles) * kSimWorldMapTilePixels * kSimWorldMapPixels +
          (tile % kSimWorldMapTiles) * kSimWorldMapTilePixels;
 }
 
@@ -87,14 +83,16 @@ static void TestOpenWaterMaterial(void) {
   memset(rom + kTilesOffset, 0x10, 64);
   memset(rom + kTilesOffset + 0xAA * 64, 0x11, 64);
   memset(rom + kWaterFramesOffset, 0x10, 4 * 64);
-  for (int f = 0; f < 4; f++) rom[kWaterFramesOffset + f * 64 + f] = 0x11;
+  for (int f = 0; f < 4; f++)
+    rom[kWaterFramesOffset + f * 64 + f] = 0x11;
   memset(rom + kTilesOffset + 64, 0x10, 64);
   rom[kTilesOffset + 127] = 0x20; /* Just one land texel protects a shore. */
   CHECK(SimWorldMap_Init(rom, kRomSize));
   CHECK(SimWorldMap_CellIsOpenWater(0, 0));
   uint8_t mask[64];
-  CHECK(SimWorldMap_OpenWaterMask(1,0,mask));
-  for (int p=0;p<64;++p) CHECK(mask[p]==(p!=63));
+  CHECK(SimWorldMap_OpenWaterMask(1, 0, mask));
+  for (int p = 0; p < 64; ++p)
+    CHECK(mask[p] == (p != 63));
   CHECK(!SimWorldMap_CellIsOpenWater(1, 0));
   CHECK(SimWorldMap_CellIsOpenWater(0x10, 0));
   CHECK(!SimWorldMap_CellIsOpenWater(0x12, 0)); /* Also blue in this fake palette. */
@@ -105,36 +103,41 @@ static void TestOpenWaterMaterial(void) {
     SimWorldMap_SetWaterAnimationSource(0xB000 + f * 64);
     CHECK(SimWorldMap_CellIsOpenWater(0, 0));
     CHECK(SimWorldMap_GeographySerial() == geography);
-    CHECK(SimWorldMap_OpenWaterMask(0,0,mask));
-    for (int p=0;p<64;++p) CHECK(mask[p]==1);
+    CHECK(SimWorldMap_OpenWaterMask(0, 0, mask));
+    for (int p = 0; p < 64; ++p)
+      CHECK(mask[p] == 1);
   }
   uint8_t map[kSimWorldMapBytes];
   memcpy(map, SimWorldMap_Baseline(), sizeof(map));
-  map[0] = 1; map[1] = 0xAA;
+  map[0] = 1;
+  map[1] = 0xAA;
   CHECK(SimWorldMap_PublishBuiltTilemap(map) == 2);
   CHECK(!SimWorldMap_CellIsOpenWater(0, 0) && SimWorldMap_CellIsOpenWater(1, 0));
-  CHECK(SimWorldMap_OpenWaterMask(0,0,mask));
-  for (int p=0;p<64;++p) CHECK(mask[p]==(p!=63));
+  CHECK(SimWorldMap_OpenWaterMask(0, 0, mask));
+  for (int p = 0; p < 64; ++p)
+    CHECK(mask[p] == (p != 63));
   /* A changed/custom animation cannot make the opacity pulse by phase. */
   rom[kWaterFramesOffset + 3 * 64] = 0x20;
   CHECK(SimWorldMap_Init(rom, kRomSize));
   CHECK(!SimWorldMap_CellIsOpenWater(0, 0));
   SimWorldMap_SetWaterAnimationSource(0xB000);
   CHECK(!SimWorldMap_CellIsOpenWater(0, 0));
-  CHECK(SimWorldMap_OpenWaterMask(0,0,mask));
-  for (int p=0;p<64;++p) CHECK(mask[p]==(p!=0));
+  CHECK(SimWorldMap_OpenWaterMask(0, 0, mask));
+  for (int p = 0; p < 64; ++p)
+    CHECK(mask[p] == (p != 0));
   uint8_t original[64];
-  memset(mask,0x5a,sizeof(mask)); memcpy(original,mask,sizeof(mask));
-  CHECK(!SimWorldMap_OpenWaterMask(-1,0,mask));
-  CHECK(!SimWorldMap_OpenWaterMask(0,-1,mask));
-  CHECK(!SimWorldMap_OpenWaterMask(128,0,mask));
-  CHECK(!SimWorldMap_OpenWaterMask(0,128,mask));
-  CHECK(!SimWorldMap_OpenWaterMask(0,0,NULL));
-  CHECK(!memcmp(mask,original,sizeof(mask)));
+  memset(mask, 0x5a, sizeof(mask));
+  memcpy(original, mask, sizeof(mask));
+  CHECK(!SimWorldMap_OpenWaterMask(-1, 0, mask));
+  CHECK(!SimWorldMap_OpenWaterMask(0, -1, mask));
+  CHECK(!SimWorldMap_OpenWaterMask(128, 0, mask));
+  CHECK(!SimWorldMap_OpenWaterMask(0, 128, mask));
+  CHECK(!SimWorldMap_OpenWaterMask(0, 0, NULL));
+  CHECK(!memcmp(mask, original, sizeof(mask)));
   SimWorldMap_Shutdown();
   CHECK(!SimWorldMap_CellIsOpenWater(0, 0));
-  CHECK(!SimWorldMap_OpenWaterMask(0,0,mask));
-  CHECK(!memcmp(mask,original,sizeof(mask)));
+  CHECK(!SimWorldMap_OpenWaterMask(0, 0, mask));
+  CHECK(!memcmp(mask, original, sizeof(mask)));
   free(rom);
 }
 
@@ -145,8 +148,7 @@ static void TestWaterAnimation(void) {
   rom[kTilemapOffset + 1] = 0xAA;
   CHECK(SimWorldMap_Init(rom, kRomSize));
 
-  uint32_t *pixels =
-      calloc((size_t)kSimWorldMapPixels * kSimWorldMapPixels, 4);
+  uint32_t *pixels = calloc((size_t)kSimWorldMapPixels * kSimWorldMapPixels, 4);
   CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
   CHECK(pixels[FirstPixelForTile(0)] == ColorForTile(0x00));
   CHECK(pixels[FirstPixelForTile(1)] == ColorForTile(0xAA));
@@ -201,7 +203,7 @@ static void TestWaterAnimation(void) {
 }
 
 static void TestUnavailableRom(void) {
-  uint8_t tiny[16] = { 0 };
+  uint8_t tiny[16] = {0};
   CHECK(!SimWorldMap_Init(tiny, sizeof(tiny)));
   CHECK(!SimWorldMap_Available());
   CHECK(!SimWorldMap_DevelopedAvailable());
@@ -242,13 +244,15 @@ static void TestCopyTileArt(void) {
   }
   memset(indices, 0xA5, sizeof(indices));
   CHECK(!SimWorldMap_CopyTileArt(0xA6, NULL, indices));
-  for (int p = 0; p < 64; p++) CHECK(indices[p] == 0xA5);
+  for (int p = 0; p < 64; p++)
+    CHECK(indices[p] == 0xA5);
   CHECK(SimWorldMap_Serial() == serial && SimWorldMap_GeographySerial() == geography);
   /* Owned copies survive subsequent animation/provider lifetime changes. */
   CHECK(SimWorldMap_SetWaterAnimationSource(0xB000) > 0);
   CHECK(SimWorldMap_CopyTileArt(0, art, indices));
   SimWorldMap_Shutdown();
-  for (int p = 0; p < 64; p++) CHECK(indices[p] == 0x11 && art[p] == ColorForTile(0x11));
+  for (int p = 0; p < 64; p++)
+    CHECK(indices[p] == 0x11 && art[p] == ColorForTile(0x11));
   free(rom);
 }
 
@@ -275,26 +279,31 @@ static void TestDecodedTileParity(void) {
       rom[kPaletteOffset + 2 * i] = (uint8_t)packed;
       rom[kPaletteOffset + 2 * i + 1] = (uint8_t)(packed >> 8);
       const unsigned r = packed & 31, g = (packed >> 5) & 31, b = packed >> 10;
-      palette[i] = 0xff000000u | ((r * 8 + r / 4) << 16) |
-          ((g * 8 + g / 4) << 8) | (b * 8 + b / 4);
+      palette[i] = 0xff000000u | ((r * 8 + r / 4) << 16) | ((g * 8 + g / 4) << 8) | (b * 8 + b / 4);
     }
     CHECK(SimWorldMap_Init(rom, kRomSize));
     uint8_t map[kSimWorldMapBytes];
     memcpy(map, rom + kTilemapOffset, sizeof(map));
-    map[7] = 0xaa; map[800] = 0; map[1324] = 79;
+    map[7] = 0xaa;
+    map[800] = 0;
+    map[1324] = 79;
     CHECK(SimWorldMap_PublishBuiltTilemap(map) > 0);
     for (int phase = -1; phase < 4; ++phase) {
       if (phase >= 0) CHECK(SimWorldMap_SetWaterAnimationSource(0xb000 + phase * 64) > 0);
       for (int tile = 0; tile < 256; ++tile) {
         const uint8_t *source = phase >= 0 && (tile == 0 || tile == 0xaa)
-            ? rom + kWaterFramesOffset + phase * 64 : rom + kTilesOffset + tile * 64;
-        uint32_t pixels[64]; uint8_t indices[64];
+                                    ? rom + kWaterFramesOffset + phase * 64
+                                    : rom + kTilesOffset + tile * 64;
+        uint32_t pixels[64];
+        uint8_t indices[64];
         CHECK(SimWorldMap_CopyTileArt((uint8_t)tile, pixels, indices));
         CHECK(!memcmp(indices, source, sizeof(indices)));
-        for (int p = 0; p < 64; ++p) CHECK(pixels[p] == palette[source[p]]);
+        for (int p = 0; p < 64; ++p)
+          CHECK(pixels[p] == palette[source[p]]);
       }
       /* Neither output may assume that the destination retained old pixels. */
-      memset(baseline, 0xa5, bytes); memset(live, 0xa5, bytes);
+      memset(baseline, 0xa5, bytes);
+      memset(live, 0xa5, bytes);
       CHECK(SimWorldMap_BakeBaseline(baseline, kPitch));
       CHECK(SimWorldMap_Bake(live, kPitch));
       const uint32_t *borrowed = SimWorldMap_BakedPixels();
@@ -310,7 +319,8 @@ static void TestDecodedTileParity(void) {
           for (int kind = 0; kind < 2; ++kind) {
             const uint8_t tile = kind ? map[cell] : rom[kTilemapOffset + cell];
             const uint8_t *source = phase >= 0 && (tile == 0 || tile == 0xaa)
-                ? rom + kWaterFramesOffset + phase * 64 : rom + kTilesOffset + tile * 64;
+                                        ? rom + kWaterFramesOffset + phase * 64
+                                        : rom + kTilesOffset + tile * 64;
             CHECK((kind ? live : baseline)[at] == palette[source[(y % 8) * 8 + x % 8]]);
           }
           CHECK(live[at] == borrowed[(size_t)y * kSimWorldMapPixels + x]);
@@ -318,7 +328,9 @@ static void TestDecodedTileParity(void) {
       }
     }
   }
-  free(live); free(baseline); free(rom);
+  free(live);
+  free(baseline);
+  free(rom);
   SimWorldMap_Shutdown();
 }
 
@@ -337,9 +349,11 @@ static void TestMountainMaterialCoverage(void) {
   CHECK(SimWorldMap_MountainCoverage(4, 0) == 0.5f);
   uint8_t shades[64];
   CHECK(SimWorldMap_MountainShades(4, 0, shades));
-  for (int i = 0; i < 64; i++) CHECK(i < 32 ? shades[i] >= 1 && shades[i] <= 6 : shades[i] == 0);
+  for (int i = 0; i < 64; i++)
+    CHECK(i < 32 ? shades[i] >= 1 && shades[i] <= 6 : shades[i] == 0);
   CHECK(SimWorldMap_MountainShades(1, 0, shades));
-  for (int i = 0; i < 64; i++) CHECK(shades[i] == 0);
+  for (int i = 0; i < 64; i++)
+    CHECK(shades[i] == 0);
   CHECK(!SimWorldMap_MountainShades(-1, 0, shades));
   CHECK(!SimWorldMap_MountainShades(128, 0, shades));
   CHECK(!SimWorldMap_MountainShades(0, 0, NULL));
@@ -364,20 +378,15 @@ static void TestMountainMaterialCoverage(void) {
 static void TestTownWindows(void) {
   int x[6], y[6];
   for (int town = 1; town <= 6; town++) {
-    CHECK(SimWorldMap_OriginForTown((uint8_t)town, &x[town - 1],
-                                    &y[town - 1]));
+    CHECK(SimWorldMap_OriginForTown((uint8_t)town, &x[town - 1], &y[town - 1]));
     CHECK(x[town - 1] % 16 == 0 && y[town - 1] % 16 == 0);
-    CHECK(x[town - 1] >= 0 &&
-          x[town - 1] + kSimTownCells <= kSimWorldMapTiles);
-    CHECK(y[town - 1] >= 0 &&
-          y[town - 1] + kSimTownCells <= kSimWorldMapTiles);
+    CHECK(x[town - 1] >= 0 && x[town - 1] + kSimTownCells <= kSimWorldMapTiles);
+    CHECK(y[town - 1] >= 0 && y[town - 1] + kSimTownCells <= kSimWorldMapTiles);
   }
   for (int a = 0; a < 6; a++)
     for (int b = a + 1; b < 6; b++) {
-      bool disjoint_x = x[a] + kSimTownCells <= x[b] ||
-          x[b] + kSimTownCells <= x[a];
-      bool disjoint_y = y[a] + kSimTownCells <= y[b] ||
-          y[b] + kSimTownCells <= y[a];
+      bool disjoint_x = x[a] + kSimTownCells <= x[b] || x[b] + kSimTownCells <= x[a];
+      bool disjoint_y = y[a] + kSimTownCells <= y[b] || y[b] + kSimTownCells <= y[a];
       CHECK(disjoint_x || disjoint_y);
     }
   CHECK(!SimWorldMap_OriginForTown(0, NULL, NULL));
@@ -409,16 +418,13 @@ static void TestBuiltTilemapPublication(void) {
   CHECK(baseline[second] == (uint8_t)(second & 0x7F));
 
   uint32_t *pixels = calloc(kSimWorldMapPixels * kSimWorldMapPixels, 4);
-  uint32_t *baseline_pixels = calloc(
-      kSimWorldMapPixels * kSimWorldMapPixels, 4);
+  uint32_t *baseline_pixels = calloc(kSimWorldMapPixels * kSimWorldMapPixels, 4);
   CHECK(SimWorldMap_Bake(pixels, kSimWorldMapPixels));
   CHECK(SimWorldMap_BakeBaseline(baseline_pixels, kSimWorldMapPixels));
   CHECK(pixels[FirstPixelForTile(first)] == ColorForTile(0x33));
   CHECK(pixels[FirstPixelForTile(second)] == ColorForTile(0x71));
-  CHECK(baseline_pixels[FirstPixelForTile(first)] ==
-        ColorForTile((uint8_t)(first & 0x7F)));
-  CHECK(baseline_pixels[FirstPixelForTile(second)] ==
-        ColorForTile((uint8_t)(second & 0x7F)));
+  CHECK(baseline_pixels[FirstPixelForTile(first)] == ColorForTile((uint8_t)(first & 0x7F)));
+  CHECK(baseline_pixels[FirstPixelForTile(second)] == ColorForTile((uint8_t)(second & 0x7F)));
 
   serial = SimWorldMap_Serial();
   CHECK(SimWorldMap_PublishBuiltTilemap(built) == 0);
@@ -449,8 +455,7 @@ static void TestBakeIsFullyCovered(void) {
   for (int town = 1; town <= 6; town++) {
     int origin_x = 0, origin_y = 0;
     CHECK(SimWorldMap_OriginForTown((uint8_t)town, &origin_x, &origin_y));
-    uint32_t pixel = pixels[(size_t)origin_y * kSimWorldMapTilePixels *
-                            kSimWorldMapPixels +
+    uint32_t pixel = pixels[(size_t)origin_y * kSimWorldMapTilePixels * kSimWorldMapPixels +
                             origin_x * kSimWorldMapTilePixels];
     int tile = (origin_y * kSimWorldMapTiles + origin_x) & 0x7F;
     CHECK(pixel == ColorForTile((uint8_t)tile));
@@ -476,8 +481,7 @@ static void TestDirtyTrackingMatchesFullBake(void) {
   CHECK(SimWorldMap_Bake(baked, kSimWorldMapPixels));
   const uint32_t *persistent = SimWorldMap_BakedPixels();
   CHECK(persistent != NULL);
-  CHECK(persistent &&
-        memcmp(persistent, baked, (size_t)count * sizeof(uint32_t)) == 0);
+  CHECK(persistent && memcmp(persistent, baked, (size_t)count * sizeof(uint32_t)) == 0);
   ReferenceFullBake(expected, reference);
   CHECK(memcmp(baked, reference, count * 4) == 0);
 
@@ -537,8 +541,7 @@ static void TestDownsampleMatchesBake(void) {
       for (int sy = 0; sy < divisor; sy++) {
         for (int sx = 0; sx < divisor; sx++) {
           uint32_t texel =
-              baked[(size_t)(y * divisor + sy) * kSimWorldMapPixels +
-                    (size_t)x * divisor + sx];
+              baked[(size_t)(y * divisor + sy) * kSimWorldMapPixels + (size_t)x * divisor + sx];
           a += (texel >> 24) & 0xFF;
           r += (texel >> 16) & 0xFF;
           g += (texel >> 8) & 0xFF;
@@ -547,22 +550,19 @@ static void TestDownsampleMatchesBake(void) {
       }
       const uint32_t taps = (uint32_t)(divisor * divisor);
       reference[(size_t)y * extent + x] =
-          ((a / taps) << 24) | ((r / taps) << 16) | ((g / taps) << 8) |
-          (b / taps);
+          ((a / taps) << 24) | ((r / taps) << 16) | ((g / taps) << 8) | (b / taps);
     }
   }
 
   memset(mip, 0xAA, (size_t)pitch * extent * 4);
   CHECK(SimWorldMap_Downsample(mip, pitch, divisor));
   for (int y = 0; y < extent; y++)
-    CHECK(memcmp(mip + (size_t)y * pitch, reference + (size_t)y * extent,
-                 (size_t)extent * 4) == 0);
+    CHECK(memcmp(mip + (size_t)y * pitch, reference + (size_t)y * extent, (size_t)extent * 4) == 0);
 
   memset(mip, 0x5C, (size_t)pitch * extent * 4);
   CHECK(SimWorldMap_Downsample(mip, pitch, divisor));
   for (int y = 0; y < extent; y++)
-    CHECK(memcmp(mip + (size_t)y * pitch, reference + (size_t)y * extent,
-                 (size_t)extent * 4) == 0);
+    CHECK(memcmp(mip + (size_t)y * pitch, reference + (size_t)y * extent, (size_t)extent * 4) == 0);
 
   CHECK(!SimWorldMap_Downsample(mip, pitch, 3));
   CHECK(!SimWorldMap_Downsample(mip, pitch, 0));
@@ -582,30 +582,23 @@ static size_t TestTownCellIndex(int x, int y) {
 
 static void BuildSyntheticTables(SimWorldMapRomTables *tables) {
   memset(tables, 0, sizeof(*tables));
-  for (int i = 1; i < 0xE3; i++) tables->ordinary[i] = (uint8_t)i;
-  for (int special = 0; special < kSimWorldMapSpecialTranslationCount;
-       special++)
+  for (int i = 1; i < 0xE3; i++)
+    tables->ordinary[i] = (uint8_t)i;
+  for (int special = 0; special < kSimWorldMapSpecialTranslationCount; special++)
     for (int tile = 0; tile < kSimWorldMapSpecialTilesPerCell; tile++)
-      tables->special[special][tile] =
-          (uint8_t)(0x20 + special * 4 + tile);
-  memcpy(tables->town_destination, kTownDestinations,
-         sizeof(kTownDestinations));
+      tables->special[special][tile] = (uint8_t)(0x20 + special * 4 + tile);
+  memcpy(tables->town_destination, kTownDestinations, sizeof(kTownDestinations));
 }
 
 static void TestRomTableLoading(void) {
   uint8_t *rom = BuildRom();
   for (int i = 0; i < kSimWorldMapOrdinaryTranslationCount; i++)
     rom[kOrdinaryTranslationOffset + i] = (uint8_t)(i ^ 0x5A);
-  for (int i = 0;
-       i < kSimWorldMapSpecialTranslationCount *
-               kSimWorldMapSpecialTilesPerCell;
-       i++)
+  for (int i = 0; i < kSimWorldMapSpecialTranslationCount * kSimWorldMapSpecialTilesPerCell; i++)
     rom[kSpecialTranslationOffset + i] = (uint8_t)(0x80 + i);
   for (int town = 0; town < kSimWorldMapTownCount; town++) {
-    rom[kTownDestinationOffset + town * 2] =
-        (uint8_t)kTownDestinations[town];
-    rom[kTownDestinationOffset + town * 2 + 1] =
-        (uint8_t)(kTownDestinations[town] >> 8);
+    rom[kTownDestinationOffset + town * 2] = (uint8_t)kTownDestinations[town];
+    rom[kTownDestinationOffset + town * 2 + 1] = (uint8_t)(kTownDestinations[town] >> 8);
   }
 
   SimWorldMapRomTables tables;
@@ -613,18 +606,14 @@ static void TestRomTableLoading(void) {
   CHECK(SimWorldMap_LoadRomTables(&tables, rom, kRomSize));
   for (int i = 0; i < kSimWorldMapOrdinaryTranslationCount; i++)
     CHECK(tables.ordinary[i] == (uint8_t)(i ^ 0x5A));
-  for (int i = 0;
-       i < kSimWorldMapSpecialTranslationCount *
-               kSimWorldMapSpecialTilesPerCell;
-       i++)
+  for (int i = 0; i < kSimWorldMapSpecialTranslationCount * kSimWorldMapSpecialTilesPerCell; i++)
     CHECK(((const uint8_t *)tables.special)[i] == (uint8_t)(0x80 + i));
   for (int town = 0; town < kSimWorldMapTownCount; town++)
     CHECK(tables.town_destination[town] == kTownDestinations[town]);
 
   SimWorldMapRomTables unchanged = tables;
-  CHECK(!SimWorldMap_LoadRomTables(
-      &tables, rom, kTownDestinationOffset +
-                        kSimWorldMapTownCount * 2 - 1));
+  CHECK(!SimWorldMap_LoadRomTables(&tables, rom,
+                                   kTownDestinationOffset + kSimWorldMapTownCount * 2 - 1));
   CHECK(memcmp(&tables, &unchanged, sizeof(tables)) == 0);
   CHECK(!SimWorldMap_LoadRomTables(NULL, rom, kRomSize));
   CHECK(!SimWorldMap_LoadRomTables(&tables, NULL, kRomSize));
@@ -643,8 +632,7 @@ static void TestComposeQuadrantPagingAndPurity(void) {
 
   for (int y = 0; y < 32; y++)
     for (int x = 0; x < 32; x++)
-      town_maps[0][TestTownCellIndex(x, y)] =
-          (uint8_t)(1 + ((y * 32 + x) % 0xD0));
+      town_maps[0][TestTownCellIndex(x, y)] = (uint8_t)(1 + ((y * 32 + x) % 0xD0));
   /* A zero translation preserves the pristine base at this one cell. */
   town_maps[0][TestTownCellIndex(7, 9)] = 0xD2;
   tables.ordinary[0xD2] = 0;
@@ -659,8 +647,7 @@ static void TestComposeQuadrantPagingAndPurity(void) {
   tables_before = tables;
 
   memset(out, 0xCD, sizeof(out));
-  CHECK(SimWorldMap_ComposeDeveloped(
-      out, baseline, town_maps, enabled, 1, &tables));
+  CHECK(SimWorldMap_ComposeDeveloped(out, baseline, town_maps, enabled, 1, &tables));
   memcpy(expected, out, sizeof(expected));
   const size_t destination = tables.town_destination[0];
   for (int y = 0; y < 32; y++) {
@@ -676,8 +663,7 @@ static void TestComposeQuadrantPagingAndPurity(void) {
   /* Composition is repeatable into dirty memory and reads no mutable global
    * state. Its explicit inputs are byte-identical afterward. */
   memset(out, 0x71, sizeof(out));
-  CHECK(SimWorldMap_ComposeDeveloped(
-      out, baseline, town_maps, enabled, 1, &tables));
+  CHECK(SimWorldMap_ComposeDeveloped(out, baseline, town_maps, enabled, 1, &tables));
   CHECK(memcmp(out, expected, sizeof(out)) == 0);
   CHECK(memcmp(baseline, baseline_before, sizeof(baseline)) == 0);
   CHECK(memcmp(town_maps, maps_before, sizeof(town_maps)) == 0);
@@ -687,12 +673,10 @@ static void TestComposeQuadrantPagingAndPurity(void) {
   /* The ROM tests an enable word only for zero/nonzero. */
   enabled[0] = 0xBEEF;
   memset(out, 0, sizeof(out));
-  CHECK(SimWorldMap_ComposeDeveloped(
-      out, baseline, town_maps, enabled, 1, &tables));
+  CHECK(SimWorldMap_ComposeDeveloped(out, baseline, town_maps, enabled, 1, &tables));
   CHECK(memcmp(out, expected, sizeof(out)) == 0);
   enabled[0] = 0;
-  CHECK(SimWorldMap_ComposeDeveloped(
-      out, baseline, town_maps, enabled, 1, &tables));
+  CHECK(SimWorldMap_ComposeDeveloped(out, baseline, town_maps, enabled, 1, &tables));
   CHECK(memcmp(out, baseline, sizeof(out)) == 0);
 }
 
@@ -705,8 +689,7 @@ static void TestComposeSpecialExpansions(void) {
   BuildSyntheticTables(&tables);
   memset(baseline, 0xA5, sizeof(baseline));
 
-  for (int special = 0; special < kSimWorldMapSpecialTranslationCount;
-       special++) {
+  for (int special = 0; special < kSimWorldMapSpecialTranslationCount; special++) {
     const int x = (special % 8) * 2;
     const int y = (special / 8) * 2;
     town_maps[0][TestTownCellIndex(x, y)] = (uint8_t)(0xE3 + special);
@@ -714,11 +697,9 @@ static void TestComposeSpecialExpansions(void) {
   /* $02:8726 samples aligned even cells only. */
   town_maps[0][TestTownCellIndex(1, 10)] = 0xE3;
 
-  CHECK(SimWorldMap_ComposeDeveloped(
-      out, baseline, town_maps, enabled, 1, &tables));
+  CHECK(SimWorldMap_ComposeDeveloped(out, baseline, town_maps, enabled, 1, &tables));
   const size_t destination = tables.town_destination[0];
-  for (int special = 0; special < kSimWorldMapSpecialTranslationCount;
-       special++) {
+  for (int special = 0; special < kSimWorldMapSpecialTranslationCount; special++) {
     const int x = (special % 8) * 2;
     const int y = (special / 8) * 2;
     const size_t at = destination + (size_t)y * 128 + x;
@@ -739,12 +720,10 @@ static void TestComposeWorldFlagClear(void) {
   BuildSyntheticTables(&tables);
   memset(baseline, 0x7B, sizeof(baseline));
 
-  CHECK(SimWorldMap_ComposeDeveloped(
-      out, baseline, town_maps, enabled, 1, &tables));
+  CHECK(SimWorldMap_ComposeDeveloped(out, baseline, town_maps, enabled, 1, &tables));
   CHECK(memcmp(out, baseline, sizeof(out)) == 0);
 
-  CHECK(SimWorldMap_ComposeDeveloped(
-      out, baseline, town_maps, enabled, 0, &tables));
+  CHECK(SimWorldMap_ComposeDeveloped(out, baseline, town_maps, enabled, 0, &tables));
   int cleared = 0;
   for (size_t i = 0; i < sizeof(out); i++) {
     const int y = (int)(i / 128);
@@ -772,13 +751,11 @@ static void TestComposeIndividualTownEnables(void) {
   for (int active = 0; active < kSimWorldMapTownCount; active++) {
     memset(enabled, 0, sizeof(enabled));
     enabled[active] = 1;
-    CHECK(SimWorldMap_ComposeDeveloped(
-        out, baseline, town_maps, enabled, 1, &tables));
+    CHECK(SimWorldMap_ComposeDeveloped(out, baseline, town_maps, enabled, 1, &tables));
     for (int town = 0; town < kSimWorldMapTownCount; town++) {
       const size_t at = tables.town_destination[town];
       CHECK(out[at] == (town == active ? (uint8_t)(0x70 + town) : 0xA5));
-      CHECK(out[at + 31 * 128 + 31] ==
-            (town == active ? (uint8_t)(0x70 + town) : 0xA5));
+      CHECK(out[at + 31 * 128 + 31] == (town == active ? (uint8_t)(0x70 + town) : 0xA5));
     }
   }
 
@@ -787,19 +764,14 @@ static void TestComposeIndividualTownEnables(void) {
   memset(out, 0xCC, sizeof(out));
   memset(enabled, 0, sizeof(enabled));
   enabled[0] = 1;
-  CHECK(!SimWorldMap_ComposeDeveloped(
-      out, baseline, town_maps, enabled, 1, &bad));
-  for (size_t i = 0; i < sizeof(out); i++) CHECK(out[i] == 0xCC);
-  CHECK(!SimWorldMap_ComposeDeveloped(
-      NULL, baseline, town_maps, enabled, 1, &tables));
-  CHECK(!SimWorldMap_ComposeDeveloped(
-      out, NULL, town_maps, enabled, 1, &tables));
-  CHECK(!SimWorldMap_ComposeDeveloped(
-      out, baseline, NULL, enabled, 1, &tables));
-  CHECK(!SimWorldMap_ComposeDeveloped(
-      out, baseline, town_maps, NULL, 1, &tables));
-  CHECK(!SimWorldMap_ComposeDeveloped(
-      out, baseline, town_maps, enabled, 1, NULL));
+  CHECK(!SimWorldMap_ComposeDeveloped(out, baseline, town_maps, enabled, 1, &bad));
+  for (size_t i = 0; i < sizeof(out); i++)
+    CHECK(out[i] == 0xCC);
+  CHECK(!SimWorldMap_ComposeDeveloped(NULL, baseline, town_maps, enabled, 1, &tables));
+  CHECK(!SimWorldMap_ComposeDeveloped(out, NULL, town_maps, enabled, 1, &tables));
+  CHECK(!SimWorldMap_ComposeDeveloped(out, baseline, NULL, enabled, 1, &tables));
+  CHECK(!SimWorldMap_ComposeDeveloped(out, baseline, town_maps, NULL, 1, &tables));
+  CHECK(!SimWorldMap_ComposeDeveloped(out, baseline, town_maps, enabled, 1, NULL));
 }
 
 static uint8_t *ReadExactFile(const char *path, size_t expected_size) {
@@ -820,24 +792,20 @@ static uint8_t *ReadExactFile(const char *path, size_t expected_size) {
   return data;
 }
 
-static bool ComposeFixture(uint8_t out[kSimWorldMapBytes],
-                           const uint8_t *baseline,
-                           const uint8_t *wram,
-                           const SimWorldMapRomTables *tables) {
+static bool ComposeFixture(uint8_t out[kSimWorldMapBytes], const uint8_t *baseline,
+                           const uint8_t *wram, const SimWorldMapRomTables *tables) {
   uint16_t enabled[kSimWorldMapTownCount];
   for (int town = 0; town < kSimWorldMapTownCount; town++) {
     const uint8_t *word = wram + kTownEnabledWramOffset + town * 2;
     enabled[town] = (uint16_t)(word[0] | ((uint16_t)word[1] << 8));
   }
   const uint8_t (*town_maps)[kSimWorldMapTownCells] =
-      (const uint8_t (*)[kSimWorldMapTownCells])
-          (wram + kTownMapsWramOffset);
-  return SimWorldMap_ComposeDeveloped(
-      out, baseline, town_maps, enabled, wram[kWorldFlagsWramOffset], tables);
+      (const uint8_t (*)[kSimWorldMapTownCells])(wram + kTownMapsWramOffset);
+  return SimWorldMap_ComposeDeveloped(out, baseline, town_maps, enabled,
+                                      wram[kWorldFlagsWramOffset], tables);
 }
 
-static int CountByteDifferences(const uint8_t *a, const uint8_t *b,
-                                size_t size) {
+static int CountByteDifferences(const uint8_t *a, const uint8_t *b, size_t size) {
   int differences = 0;
   for (size_t i = 0; i < size; i++)
     if (a[i] != b[i]) differences++;
@@ -845,8 +813,7 @@ static int CountByteDifferences(const uint8_t *a, const uint8_t *b,
 }
 
 static void TestCapturedFixtures(const char *rom_path, const char *act_path,
-                                 const char *navigation_path,
-                                 const char *animation_path) {
+                                 const char *navigation_path, const char *animation_path) {
   uint8_t *rom = ReadExactFile(rom_path, kRomSize);
   uint8_t *act = ReadExactFile(act_path, kWramBytes);
   uint8_t *navigation = ReadExactFile(navigation_path, kWramBytes);
@@ -877,10 +844,8 @@ static void TestCapturedFixtures(const char *rom_path, const char *act_path,
   CHECK(memcmp(navigation_out, authentic, kSimWorldMapBytes) == 0);
   CHECK(memcmp(animation_out, authentic, kSimWorldMapBytes) == 0);
   CHECK(CountByteDifferences(act_out, baseline, kSimWorldMapBytes) == 447);
-  CHECK(CountByteDifferences(navigation_out, baseline, kSimWorldMapBytes) ==
-        447);
-  CHECK(CountByteDifferences(animation_out, baseline, kSimWorldMapBytes) ==
-        447);
+  CHECK(CountByteDifferences(navigation_out, baseline, kSimWorldMapBytes) == 447);
+  CHECK(CountByteDifferences(animation_out, baseline, kSimWorldMapBytes) == 447);
   printf("sim world map fixture parity: 16384/16384 bytes, 447 developed\n");
 
   free(animation);
@@ -909,9 +874,7 @@ int main(int argc, char **argv) {
   if (argc == 6 && strcmp(argv[1], "--fixtures") == 0)
     TestCapturedFixtures(argv[2], argv[3], argv[4], argv[5]);
   else if (argc != 1) {
-    fprintf(stderr,
-            "usage: %s [--fixtures ROM ACT_WRAM NAV_WRAM ANIMATION_WRAM]\n",
-            argv[0]);
+    fprintf(stderr, "usage: %s [--fixtures ROM ACT_WRAM NAV_WRAM ANIMATION_WRAM]\n", argv[0]);
     s_failures++;
   }
   SimWorldMap_Shutdown();

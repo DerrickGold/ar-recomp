@@ -15,10 +15,26 @@ static SimRenderFeatureMask requested_features = kSimFeature_All;
 uint64_t HostClock_Milliseconds(void) { return 1000; }
 SimRenderFeatureMask Sim3D_ImplementedFeatures(void) { return kSimFeature_All; }
 SimRenderFeatureMask Settings_Sim3DRequestedFeatures(void) { return requested_features; }
-const SettingDesc *Settings_Find(const char *key) { (void)key; settings_writes++; return NULL; }
-SettingChangeResult Settings_Reset(const SettingDesc *desc) { (void)desc; settings_writes++; return kSettingChange_Applied; }
-bool Settings_SaveDeferred(const char *path) { (void)path; settings_writes++; return true; }
-char *UserDataFile(char *buf, size_t size, const char *leaf) { (void)size; (void)leaf; return buf; }
+const SettingDesc *Settings_Find(const char *key) {
+  (void)key;
+  settings_writes++;
+  return NULL;
+}
+SettingChangeResult Settings_Reset(const SettingDesc *desc) {
+  (void)desc;
+  settings_writes++;
+  return kSettingChange_Applied;
+}
+bool Settings_SaveDeferred(const char *path) {
+  (void)path;
+  settings_writes++;
+  return true;
+}
+char *UserDataFile(char *buf, size_t size, const char *leaf) {
+  (void)size;
+  (void)leaf;
+  return buf;
+}
 
 static void TestTownZoomFromVisiblePose(void) {
   g_settings.sim3d_mode = true;
@@ -27,9 +43,9 @@ static void TestTownZoomFromVisiblePose(void) {
     g_settings.sim3d_camera_mode = mode;
     g_settings.sim3d_distance_x100 = g_settings.sim3d_dyncam_baseline_distance_x100 = 2000;
     int *distance = mode == kSimCam_Free ? &g_settings.sim3d_distance_x100
-        : &g_settings.sim3d_dyncam_baseline_distance_x100;
+                                         : &g_settings.sim3d_dyncam_baseline_distance_x100;
     const int *other = mode == kSimCam_Free ? &g_settings.sim3d_dyncam_baseline_distance_x100
-        : &g_settings.sim3d_distance_x100;
+                                            : &g_settings.sim3d_distance_x100;
     Sim3DCameraPresentationState state;
     assert(Sim3DCamera_ControlsAvailable(true));
     Sim3DCamera_CapturePresentationState(&state);
@@ -78,8 +94,7 @@ static void TestTownZoomFromVisiblePose(void) {
 static float CapturedTownYaw(void) {
   Sim3DCameraPresentationState state;
   Sim3DCamera_CapturePresentationState(&state);
-  return state.yaw_mrad / 1000.0f +
-      (state.mode == kSimCam_Dynamic ? state.orbit_yaw : 0);
+  return state.yaw_mrad / 1000.0f + (state.mode == kSimCam_Dynamic ? state.orbit_yaw : 0);
 }
 
 static void ResetTownOrbit(void) {
@@ -96,21 +111,21 @@ static void TestTownRotationFromVisiblePose(void) {
     for (int sign = -1; sign <= 1; sign += 2) {
       ResetTownOrbit();
       g_settings.sim3d_camera_mode = mode;
-      g_settings.sim3d_tilt_y_mrad = g_settings.sim3d_dyncam_baseline_tilt_y_mrad = sign*700;
+      g_settings.sim3d_tilt_y_mrad = g_settings.sim3d_dyncam_baseline_tilt_y_mrad = sign * 700;
       const Settings saved = g_settings;
-      assert(fabsf(CapturedTownYaw() - sign*limit) < .00001f);
+      assert(fabsf(CapturedTownYaw() - sign * limit) < .00001f);
       assert(!memcmp(&saved, &g_settings, sizeof(saved))); /* Capture is not a save migration. */
-      Sim3DCamera_Adjust(-sign*.05f, 0, 0);
-      assert(fabsf(CapturedTownYaw() - sign*(limit-.05f)) < .00001f);
-      Sim3DCamera_Adjust(sign*100, 0, 0);
-      assert(fabsf(CapturedTownYaw() - sign*limit) < .00001f);
-      Sim3DCamera_Adjust(-sign*.05f, 0, 0);
-      assert(fabsf(CapturedTownYaw() - sign*(limit-.05f)) < .00001f);
+      Sim3DCamera_Adjust(-sign * .05f, 0, 0);
+      assert(fabsf(CapturedTownYaw() - sign * (limit - .05f)) < .00001f);
+      Sim3DCamera_Adjust(sign * 100, 0, 0);
+      assert(fabsf(CapturedTownYaw() - sign * limit) < .00001f);
+      Sim3DCamera_Adjust(-sign * .05f, 0, 0);
+      assert(fabsf(CapturedTownYaw() - sign * (limit - .05f)) < .00001f);
       if (mode == kSimCam_Dynamic) {
-        assert(g_settings.sim3d_dyncam_baseline_tilt_y_mrad == sign*700);
+        assert(g_settings.sim3d_dyncam_baseline_tilt_y_mrad == sign * 700);
         Sim3DCamera_UpdateDynamic(.035f, false);
-        const float returned = sign*CapturedTownYaw();
-        assert(returned > limit-.05f && returned < limit);
+        const float returned = sign * CapturedTownYaw();
+        assert(returned > limit - .05f && returned < limit);
       }
     }
   }
@@ -122,19 +137,19 @@ static void TestTownRotationFromVisiblePose(void) {
       g_settings.sim3d_camera_mode = kSimCam_Dynamic;
       g_settings.sim3d_dyncam_baseline_tilt_y_mrad = 0;
       requested_features &= ~kSimFeature_GlobeUnderlay;
-      Sim3DCamera_Adjust(sign*100, 0, 0);
-      assert(fabsf(CapturedTownYaw() - sign*.7f) < .00001f);
+      Sim3DCamera_Adjust(sign * 100, 0, 0);
+      assert(fabsf(CapturedTownYaw() - sign * .7f) < .00001f);
       requested_features = kSimFeature_All;
-      assert(fabsf(CapturedTownYaw() - sign*limit) < .00001f);
+      assert(fabsf(CapturedTownYaw() - sign * limit) < .00001f);
       float yaw;
       Sim3DCamera_GetDynamicOrbit(&yaw, NULL);
-      assert(fabsf(yaw - sign*limit) < .00001f);
+      assert(fabsf(yaw - sign * limit) < .00001f);
       if (release) {
         assert(Sim3DCamera_UpdateDynamic(.035f, false));
-        assert(sign*CapturedTownYaw() > 0 && sign*CapturedTownYaw() < limit);
+        assert(sign * CapturedTownYaw() > 0 && sign * CapturedTownYaw() < limit);
       } else {
-        Sim3DCamera_Adjust(-sign*.05f, 0, 0);
-        assert(fabsf(CapturedTownYaw() - sign*(limit-.05f)) < .00001f);
+        Sim3DCamera_Adjust(-sign * .05f, 0, 0);
+        assert(fabsf(CapturedTownYaw() - sign * (limit - .05f)) < .00001f);
       }
     }
   }
@@ -243,7 +258,8 @@ int main(void) {
   const float single_step_yaw = state.orbit_yaw, single_step_pitch = state.orbit_pitch;
   Sim3DCamera_Reset();
   Sim3DCamera_Adjust(.8f, -.4f, 0);
-  for (int i = 0; i < 60; i++) Sim3DCamera_UpdateDynamic(.01f, false);
+  for (int i = 0; i < 60; i++)
+    Sim3DCamera_UpdateDynamic(.01f, false);
   Sim3DCamera_CapturePresentationState(&state);
   assert(fabsf(single_step_yaw - state.orbit_yaw) < .000001f);
   assert(fabsf(single_step_pitch - state.orbit_pitch) < .000001f);

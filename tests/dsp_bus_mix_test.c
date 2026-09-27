@@ -10,37 +10,44 @@
 int snes_frame_counter;
 DspShadow *dsp_shadow_create(void) { return NULL; }
 void dsp_shadow_free(DspShadow *shadow) { (void)shadow; }
-void dsp_shadow_process(DspShadow *shadow, Dsp *dsp, int canon_l, int canon_r,
-                        int *out_l, int *out_r) {
-  (void)shadow; (void)dsp;
-  *out_l = canon_l; *out_r = canon_r;
+void dsp_shadow_process(DspShadow *shadow, Dsp *dsp, int canon_l, int canon_r, int *out_l,
+                        int *out_r) {
+  (void)shadow;
+  (void)dsp;
+  *out_l = canon_l;
+  *out_r = canon_r;
 }
-void audio_trace_on_sample(int16_t l, int16_t r, int dropped,
-                           uint32_t ring_fill) {
-  (void)l; (void)r; (void)dropped; (void)ring_fill;
+void audio_trace_on_sample(int16_t l, int16_t r, int dropped, uint32_t ring_fill) {
+  (void)l;
+  (void)r;
+  (void)dropped;
+  (void)ring_fill;
 }
 void audio_trace_on_reg_write(uint8_t addr, uint8_t val) {
-  (void)addr; (void)val;
+  (void)addr;
+  (void)val;
 }
-void audio_trace_on_consume(uint64_t read_idx, uint32_t count,
-                            uint32_t avail_after) {
-  (void)read_idx; (void)count; (void)avail_after;
+void audio_trace_on_consume(uint64_t read_idx, uint32_t count, uint32_t avail_after) {
+  (void)read_idx;
+  (void)count;
+  (void)avail_after;
 }
 
 static int s_failures;
-#define CHECK(expr) do { \
-  if (!(expr)) { \
-    fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr); \
-    s_failures++; \
-  } \
-} while (0)
+#define CHECK(expr)                                                                                \
+  do {                                                                                             \
+    if (!(expr)) {                                                                                 \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr);                     \
+      s_failures++;                                                                                \
+    }                                                                                              \
+  } while (0)
 
 static void InstallBrr(uint8_t *ram) {
-  static const uint8_t payload[8] = {
-    0x01, 0x23, 0x45, 0x67, 0x01, 0x23, 0x45, 0x67
-  };
-  ram[0x0208] = 0x00; ram[0x0209] = 0x03;
-  ram[0x020a] = 0x00; ram[0x020b] = 0x03;
+  static const uint8_t payload[8] = {0x01, 0x23, 0x45, 0x67, 0x01, 0x23, 0x45, 0x67};
+  ram[0x0208] = 0x00;
+  ram[0x0209] = 0x03;
+  ram[0x020a] = 0x00;
+  ram[0x020b] = 0x03;
   ram[0x0300] = 0xc3;
   memcpy(ram + 0x0301, payload, sizeof(payload));
 }
@@ -63,8 +70,7 @@ static void WriteVoice(Dsp *dsp, int voice, uint8_t reg, uint8_t value) {
   if (voice < 8)
     dsp_write(dsp, (uint8_t)(voice * 0x10 + reg), value);
   else
-    dsp_writeVirtualVoiceRegister(
-      dsp, voice, (uint8_t)((voice & 7) * 0x10 + reg), value);
+    dsp_writeVirtualVoiceRegister(dsp, voice, (uint8_t)((voice & 7) * 0x10 + reg), value);
 }
 
 static void ControlVoice(Dsp *dsp, int voice, uint8_t reg, bool enabled) {
@@ -76,8 +82,7 @@ static void ControlVoice(Dsp *dsp, int voice, uint8_t reg, bool enabled) {
   }
 }
 
-static void ConfigureVoice(Dsp *dsp, int voice, DspVoiceBus bus,
-                           bool echo) {
+static void ConfigureVoice(Dsp *dsp, int voice, DspVoiceBus bus, bool echo) {
   WriteVoice(dsp, voice, 0, 83);
   WriteVoice(dsp, voice, 1, (uint8_t)-37);
   WriteVoice(dsp, voice, 2, 0);
@@ -92,7 +97,8 @@ static void ConfigureVoice(Dsp *dsp, int voice, DspVoiceBus bus,
 }
 
 static void Run(Dsp *dsp, int samples) {
-  while (samples-- > 0) dsp_cycle(dsp);
+  while (samples-- > 0)
+    dsp_cycle(dsp);
 }
 
 static void TestUnityAndIndependentGains(void) {
@@ -109,15 +115,16 @@ static void TestUnityAndIndependentGains(void) {
   dsp_setBusGains(100, 100);
   Run(reference, 16);
   Run(tagged, 16);
-  CHECK(memcmp(reference->sampleBuffer, tagged->sampleBuffer,
-               16 * 2 * sizeof(int16_t)) == 0);
+  CHECK(memcmp(reference->sampleBuffer, tagged->sampleBuffer, 16 * 2 * sizeof(int16_t)) == 0);
   CHECK(reference->sampleBuffer[10 * 2] != 0);
 
   dsp_setBusGains(0, 100);
   Run(muted, 16);
   CHECK(muted->sampleBuffer[10 * 2] == 0);
 done:
-  dsp_free(reference); dsp_free(tagged); dsp_free(muted);
+  dsp_free(reference);
+  dsp_free(tagged);
+  dsp_free(muted);
   dsp_setBusGains(100, 100);
 }
 
@@ -133,8 +140,7 @@ static void TestExtendedControlAndPcmParity(void) {
   ConfigureVoice(virtual_dsp, 8, kDspVoiceBus_Sfx, false);
   Run(hardware, 256);
   Run(virtual_dsp, 256);
-  CHECK(memcmp(hardware->sampleBuffer, virtual_dsp->sampleBuffer,
-               256 * 2 * sizeof(int16_t)) == 0);
+  CHECK(memcmp(hardware->sampleBuffer, virtual_dsp->sampleBuffer, 256 * 2 * sizeof(int16_t)) == 0);
   CHECK(hardware->sampleBuffer[128 * 2] != 0);
 
   dsp_writeHardwareVoiceMask(virtual_dsp, 0x4c, 0x40, 0x40);
@@ -144,7 +150,8 @@ static void TestExtendedControlAndPcmParity(void) {
   CHECK(virtual_dsp->channel[8].keyOn);
   CHECK((dsp_read(virtual_dsp, 0x4c) & 0x40) != 0);
 done:
-  dsp_free(hardware); dsp_free(virtual_dsp);
+  dsp_free(hardware);
+  dsp_free(virtual_dsp);
   dsp_setExtendedVoicesEnabled(false);
 }
 
@@ -176,7 +183,8 @@ static void TestVirtualEchoUsesSharedUnitAndBusGain(void) {
   Run(muted, 32);
   CHECK(!EchoRegionNonzero(muted_ram));
 done:
-  dsp_free(live); dsp_free(muted);
+  dsp_free(live);
+  dsp_free(muted);
   dsp_setBusGains(100, 100);
   dsp_setExtendedVoicesEnabled(false);
 }
@@ -220,8 +228,7 @@ static void TestExtendedVoiceStateIsSerialized(void) {
   dsp_saveload(dsp, &state.sli);
   CHECK(!state.sli.failed && state.offset > sizeof(dsp->sampleBuffer));
   Run(dsp, 16);
-  memcpy(expected, dsp->sampleBuffer +
-         (cursor & (DSP_SAMPLE_RING - 1u)) * 2, sizeof(expected));
+  memcpy(expected, dsp->sampleBuffer + (cursor & (DSP_SAMPLE_RING - 1u)) * 2, sizeof(expected));
 
   state.offset = 0;
   state.loading = true;
@@ -229,8 +236,7 @@ static void TestExtendedVoiceStateIsSerialized(void) {
   dsp_saveload(dsp, &state.sli);
   CHECK(!state.sli.failed && dsp->sampleWrite == cursor);
   Run(dsp, 16);
-  memcpy(actual, dsp->sampleBuffer +
-         (cursor & (DSP_SAMPLE_RING - 1u)) * 2, sizeof(actual));
+  memcpy(actual, dsp->sampleBuffer + (cursor & (DSP_SAMPLE_RING - 1u)) * 2, sizeof(actual));
   CHECK(memcmp(expected, actual, sizeof(actual)) == 0);
 
   dsp_free(dsp);
@@ -264,13 +270,10 @@ static void TestDormantVirtualBankResumesAtNativeParity(void) {
     const uint32_t virtual_cursor = virtual_dsp->sampleWrite;
     Run(hardware, 24);
     Run(virtual_dsp, 24);
-    CHECK(memcmp(hardware->sampleBuffer +
-                     (hardware_cursor & (DSP_SAMPLE_RING - 1u)) * 2,
-                 virtual_dsp->sampleBuffer +
-                     (virtual_cursor & (DSP_SAMPLE_RING - 1u)) * 2,
+    CHECK(memcmp(hardware->sampleBuffer + (hardware_cursor & (DSP_SAMPLE_RING - 1u)) * 2,
+                 virtual_dsp->sampleBuffer + (virtual_cursor & (DSP_SAMPLE_RING - 1u)) * 2,
                  24 * 2 * sizeof(int16_t)) == 0);
-    CHECK(virtual_dsp->sampleBuffer[
-              ((virtual_cursor + 16) & (DSP_SAMPLE_RING - 1u)) * 2] != 0);
+    CHECK(virtual_dsp->sampleBuffer[((virtual_cursor + 16) & (DSP_SAMPLE_RING - 1u)) * 2] != 0);
   }
 done:
   dsp_free(hardware);

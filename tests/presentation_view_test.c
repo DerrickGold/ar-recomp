@@ -7,7 +7,10 @@ static int backdrop_calls, foreground_calls;
 static bool reject_foreground;
 static PresentationOutcome backdrop_outcome;
 PresentationOutcome PresentWorldNavigationBackdrop(const FrameSlot *slot, ArRenderRectI viewport) {
-  (void)slot; (void)viewport; ++backdrop_calls; return backdrop_outcome;
+  (void)slot;
+  (void)viewport;
+  ++backdrop_calls;
+  return backdrop_outcome;
 }
 static bool fail_create, fail_upload;
 static int texture_created, texture_destroyed;
@@ -44,14 +47,21 @@ static bool Draw(void *ctx, ArRenderTexture texture, const ArRenderRectF *source
   return !reject_foreground;
 }
 static const ArRenderBackendOps ops = {
-  .struct_size = sizeof(ops), .create_texture = Create, .destroy_texture = Destroy,
-  .update_texture = Update, .draw_texture = Draw,
+    .struct_size = sizeof(ops),
+    .create_texture = Create,
+    .destroy_texture = Destroy,
+    .update_texture = Update,
+    .draw_texture = Draw,
 };
 static uint32_t native_pixels[16 * 8], mask_pixels[16 * 8];
 static SrPpuSurfaceView Surface(uint32_t *pixels) {
-  return (SrPpuSurfaceView){.data = (uint8_t *)pixels, .byte_size = sizeof(native_pixels),
-    .pitch_bytes = 16 * 4, .width_pixels = 16, .height_pixels = 8,
-    .flags = SR_PPU_SURFACE_BOUND, .pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32};
+  return (SrPpuSurfaceView){.data = (uint8_t *)pixels,
+                            .byte_size = sizeof(native_pixels),
+                            .pitch_bytes = 16 * 4,
+                            .width_pixels = 16,
+                            .height_pixels = 8,
+                            .flags = SR_PPU_SURFACE_BOUND,
+                            .pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32};
 }
 int main(void) {
   static FrameSlot slot;
@@ -70,11 +80,14 @@ int main(void) {
   assert(view.scene == kPerformanceScene_Native && !view.unexpected_native);
   slot.sim.effective_features = slot.sim.requested_features;
   slot.sim.view = kSimView_WorldNavigation;
-  assert(PresentationView_Resolve(&slot, kRenderComparison_Enhanced).scene == kPerformanceScene_World);
+  assert(PresentationView_Resolve(&slot, kRenderComparison_Enhanced).scene ==
+         kPerformanceScene_World);
   slot.sim.view = kSimView_Enhanced;
   slot.diorama_active = true;
-  assert(PresentationView_Resolve(&slot, kRenderComparison_Enhanced).scene == kPerformanceScene_Action);
-  assert(PresentationView_Resolve(&slot, kRenderComparison_Authentic).scene == kPerformanceScene_Native);
+  assert(PresentationView_Resolve(&slot, kRenderComparison_Enhanced).scene ==
+         kPerformanceScene_Action);
+  assert(PresentationView_Resolve(&slot, kRenderComparison_Authentic).scene ==
+         kPerformanceScene_Native);
   slot.diorama_active = false;
   slot.sim.master_enabled = false;
   view = PresentationView_Resolve(&slot, kRenderComparison_Enhanced);
@@ -89,18 +102,21 @@ int main(void) {
   assert(PresentationView_Resolve(&slot, kRenderComparison_Enhanced).unexpected_native);
   assert(!PresentationView_Resolve(&slot, kRenderComparison_Authentic).unexpected_native);
   slot.sim.view = kSimView_SkyPalace;
-  assert(PresentationView_Resolve(&slot, kRenderComparison_Enhanced).scene == kPerformanceScene_Palace);
-  ArRenderDevice device = {.ops = &ops, .context = &texture_created,
-      .capabilities = {.flags = kArRenderCapability_StreamingTextures}};
+  assert(PresentationView_Resolve(&slot, kRenderComparison_Enhanced).scene ==
+         kPerformanceScene_Palace);
+  ArRenderDevice device = {.ops = &ops,
+                           .context = &texture_created,
+                           .capabilities = {.flags = kArRenderCapability_StreamingTextures}};
   slot.snes_width = 16;
   slot.snes_height = 8;
   slot.ppu_surfaces.main = Surface(native_pixels);
   slot.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][0] = Surface(mask_pixels);
-  for (int i = 0; i < 16 * 8; i++) mask_pixels[i] = 0xff000000;
+  for (int i = 0; i < 16 * 8; i++)
+    mask_pixels[i] = 0xff000000;
   native_pixels[0] = 0x123456;
   const ArRenderRectI viewport = {0, 0, 640, 480};
-  assert(PresentSkyPalace_Draw(&device, &slot, viewport, NULL, NULL)
-      == kPresentationOutcome_CoreFailure);
+  assert(PresentSkyPalace_Draw(&device, &slot, viewport, NULL, NULL) ==
+         kPresentationOutcome_CoreFailure);
   assert(backdrop_calls == 0 && foreground_calls == 0);
   fail_create = true;
   PresentSkyPalace_Upload(&device, &slot);
@@ -109,27 +125,27 @@ int main(void) {
   PresentSkyPalace_Upload(&device, &slot);
   assert(PresentSkyPalace_ForegroundReady() && uploaded_first == 0xff123456);
   backdrop_outcome = kPresentationOutcome_CoreFailure;
-  assert(PresentSkyPalace_Draw(&device, &slot, viewport, NULL, NULL)
-      == kPresentationOutcome_CoreFailure);
+  assert(PresentSkyPalace_Draw(&device, &slot, viewport, NULL, NULL) ==
+         kPresentationOutcome_CoreFailure);
   assert(backdrop_calls == 1 && foreground_calls == 0);
   backdrop_outcome = kPresentationOutcome_OptionalOmitted;
-  assert(PresentSkyPalace_Draw(&device, &slot, viewport, NULL, NULL)
-      == kPresentationOutcome_OptionalOmitted);
+  assert(PresentSkyPalace_Draw(&device, &slot, viewport, NULL, NULL) ==
+         kPresentationOutcome_OptionalOmitted);
   assert(foreground_calls == 1);
   backdrop_outcome = kPresentationOutcome_Complete;
   reject_foreground = true;
-  assert(PresentSkyPalace_Draw(&device, &slot, viewport, NULL, NULL)
-      == kPresentationOutcome_CoreFailure);
+  assert(PresentSkyPalace_Draw(&device, &slot, viewport, NULL, NULL) ==
+         kPresentationOutcome_CoreFailure);
   reject_foreground = false;
   native_pixels[0] = 0x654321;
-  assert(PresentSkyPalace_Draw(&device, &slot, viewport, NULL, NULL)
-      == kPresentationOutcome_Complete);
+  assert(PresentSkyPalace_Draw(&device, &slot, viewport, NULL, NULL) ==
+         kPresentationOutcome_Complete);
   assert(uploaded_first == 0xff123456); /* Retained drawing never re-reads producer pixels. */
   fail_upload = true;
   PresentSkyPalace_Upload(&device, &slot);
   assert(!PresentSkyPalace_ForegroundReady());
-  assert(PresentSkyPalace_Draw(&device, &slot, viewport, NULL, NULL)
-      == kPresentationOutcome_CoreFailure);
+  assert(PresentSkyPalace_Draw(&device, &slot, viewport, NULL, NULL) ==
+         kPresentationOutcome_CoreFailure);
   fail_upload = false;
   PresentSkyPalace_Upload(&device, &slot);
   assert(PresentSkyPalace_ForegroundReady() && uploaded_first == 0xff654321);

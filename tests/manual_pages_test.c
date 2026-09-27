@@ -19,14 +19,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int g_failures;
+static int s_failures;
 
-#define CHECK(cond)                                                        \
-  do {                                                                     \
-    if (!(cond)) {                                                         \
-      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);               \
-      g_failures++;                                                        \
-    }                                                                      \
+#define CHECK(cond)                                                                                \
+  do {                                                                                             \
+    if (!(cond)) {                                                                                 \
+      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                                       \
+      s_failures++;                                                                                \
+    }                                                                                              \
   } while (0)
 
 /* ── Album fixtures ───────────────────────────────────────────────────────── */
@@ -34,23 +34,31 @@ static int g_failures;
 /* A minimal but STRUCTURALLY REAL baseline JPEG: SOI, an APP0, a SOF0 carrying
  * the geometry, a SOS, some entropy bytes, EOI. Real enough that the carver's
  * marker walk is exercised rather than bypassed. */
-static size_t AppendJpeg(unsigned char *out, size_t at, int w, int h,
-                         size_t filler) {
+static size_t AppendJpeg(unsigned char *out, size_t at, int w, int h, size_t filler) {
   const unsigned char head[] = {
-    0xFF, 0xD8,                                     /* SOI */
-    0xFF, 0xE0, 0x00, 0x04, 'J', 'F',               /* APP0, len 4 */
+      0xFF, 0xD8,                       /* SOI */
+      0xFF, 0xE0, 0x00, 0x04, 'J', 'F', /* APP0, len 4 */
   };
   memcpy(out + at, head, sizeof head);
   at += sizeof head;
   const unsigned char sof[] = {
-    0xFF, 0xC0, 0x00, 0x0B, 0x08,
-    (unsigned char)(h >> 8), (unsigned char)(h & 0xFF),
-    (unsigned char)(w >> 8), (unsigned char)(w & 0xFF),
-    0x01, 0x01, 0x11, 0x00,
+      0xFF,
+      0xC0,
+      0x00,
+      0x0B,
+      0x08,
+      (unsigned char)(h >> 8),
+      (unsigned char)(h & 0xFF),
+      (unsigned char)(w >> 8),
+      (unsigned char)(w & 0xFF),
+      0x01,
+      0x01,
+      0x11,
+      0x00,
   };
   memcpy(out + at, sof, sizeof sof);
   at += sizeof sof;
-  const unsigned char sos[] = { 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00 };
+  const unsigned char sos[] = {0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00};
   memcpy(out + at, sos, sizeof sos);
   at += sizeof sos;
   /* Entropy-coded bytes, with 0xFF BYTE-STUFFED as 0xFF00 exactly as a real
@@ -62,7 +70,7 @@ static size_t AppendJpeg(unsigned char *out, size_t at, int w, int h,
     if (byte == 0xFF) out[at++] = 0x00;
   }
   out[at++] = 0xFF;
-  out[at++] = 0xD9;                                 /* EOI */
+  out[at++] = 0xD9; /* EOI */
   return at;
 }
 
@@ -79,33 +87,31 @@ static const struct ManualShape {
   const char *name;
   int w, h;
 } kShapes[] = {
-  { "portrait (ActRaiser)", 739, 1080 },
-  { "square (GBC)",         900,  900 },
-  { "wide (GBA)",          1000,  620 },
-  { "extreme",             1400,  500 },
+    {"portrait (ActRaiser)", 739, 1080},
+    {"square (GBC)", 900, 900},
+    {"wide (GBA)", 1000, 620},
+    {"extreme", 1400, 500},
 };
 enum { kShapeCount = sizeof kShapes / sizeof kShapes[0] };
 
 /* Windows to check every shape in. Portrait, landscape, and a high-density
  * display -- the last because two of the defects these tests cover scale with
  * the VIEW, and so were invisible at the size the reader was authored in. */
-static const int kViews[][2] = { { 1600, 900 }, { 960, 1040 }, { 2560, 1440 } };
+static const int kViews[][2] = {{1600, 900}, {960, 1040}, {2560, 1440}};
 enum { kViewCount = sizeof kViews / sizeof kViews[0] };
 
 /* The reader's camera, built exactly as the renderer builds it: preferred lens,
  * narrowed if this sheet would otherwise swing into it. Shared so the tests
  * cannot drift away from the projection they claim to be measuring. */
-static void ShapeCamera(int pw, int ph, int view_w, int view_h, bool tilt,
-                        bool spread, float out_matrix[16], ManualSheet *out_sheet) {
+static void ShapeCamera(int pw, int ph, int view_w, int view_h, bool tilt, bool spread,
+                        float out_matrix[16], ManualSheet *out_sheet) {
   float page_w = 0.0f, page_h = 0.0f;
-  ManualView_FittedSize(pw * ManualPages_LayoutPageWidths(spread), ph,
-                        view_w, view_h, 1.0f, &page_w, &page_h);
-  const float fov = ManualSheet_CameraFov(
-      ManualSheet_PixelWidth(page_w, spread), view_h, 0.9f);
-  Scene3DCamera camera = { tilt ? -0.35f : 0.0f, tilt ? 0.22f : 0.0f, 2.6f, fov };
+  ManualView_FittedSize(pw * ManualPages_LayoutPageWidths(spread), ph, view_w, view_h, 1.0f,
+                        &page_w, &page_h);
+  const float fov = ManualSheet_CameraFov(ManualSheet_PixelWidth(page_w, spread), view_h, 0.9f);
+  Scene3DCamera camera = {tilt ? -0.35f : 0.0f, tilt ? 0.22f : 0.0f, 2.6f, fov};
   Scene3D_BuildViewProjection(&camera, view_w, view_h, out_matrix);
-  CHECK(ManualSheet_Solve(out_matrix, view_w, view_h, page_w, page_h, spread,
-                          out_sheet));
+  CHECK(ManualSheet_Solve(out_matrix, view_w, view_h, page_w, page_h, spread, out_sheet));
 }
 
 static void TestCarvesEveryPageOfAnAlbum(void) {
@@ -113,7 +119,8 @@ static void TestCarvesEveryPageOfAnAlbum(void) {
   CHECK(buf != NULL);
   if (!buf) return;
   size_t at = 0;
-  for (int i = 0; i < 6; i++) at = AppendJpeg(buf, at, 739, 1080, 400);
+  for (int i = 0; i < 6; i++)
+    at = AppendJpeg(buf, at, 739, 1080, 400);
 
   ManualPageIndex index;
   const int found = ManualPages_CarveAlbum(buf, at, &index);
@@ -132,8 +139,7 @@ static void TestCarvesEveryPageOfAnAlbum(void) {
   }
   /* Ranges must not overlap, or a page would be decoded twice from one stream. */
   for (int i = 1; i < index.count; i++) {
-    CHECK(index.pages[i].offset >=
-          index.pages[i - 1].offset + index.pages[i - 1].length);
+    CHECK(index.pages[i].offset >= index.pages[i - 1].offset + index.pages[i - 1].length);
   }
   CHECK(ManualPages_LooksLikeAlbum(&index, at));
   free(buf);
@@ -175,9 +181,10 @@ static void TestASingleDominantImageIsNotAnAlbum(void) {
   ManualPageIndex index;
   CHECK(ManualPages_CarveAlbum(buf, at, &index) == 1);
   uint64_t bytes = 0;
-  for (int i = 0; i < index.count; i++) bytes += index.pages[i].length;
-  CHECK(bytes * 100u >= (uint64_t)at * 80u);   /* dominance would pass */
-  CHECK(!ManualPages_LooksLikeAlbum(&index, at));   /* but it is not an album */
+  for (int i = 0; i < index.count; i++)
+    bytes += index.pages[i].length;
+  CHECK(bytes * 100u >= (uint64_t)at * 80u);      /* dominance would pass */
+  CHECK(!ManualPages_LooksLikeAlbum(&index, at)); /* but it is not an album */
   free(buf);
 }
 
@@ -190,8 +197,10 @@ static void TestScannerDriftIsStillAnAlbum(void) {
   CHECK(buf != NULL);
   if (!buf) return;
   size_t at = 0;
-  for (int i = 0; i < 8; i++) at = AppendJpeg(buf, at, 1009, 1767, 2048);
-  for (int i = 0; i < 4; i++) at = AppendJpeg(buf, at, 1010, 1767, 2048);
+  for (int i = 0; i < 8; i++)
+    at = AppendJpeg(buf, at, 1009, 1767, 2048);
+  for (int i = 0; i < 4; i++)
+    at = AppendJpeg(buf, at, 1010, 1767, 2048);
   at = AppendJpeg(buf, at, 1014, 1770, 2048);
   ManualPageIndex index;
   CHECK(ManualPages_CarveAlbum(buf, at, &index) == 13);
@@ -214,14 +223,15 @@ static void TestAnOddCoverDoesNotRejectTheBook(void) {
   CHECK(buf != NULL);
   if (!buf) return;
   size_t at = 0;
-  at = AppendJpeg(buf, at, 1040, 1800, 2048);          /* the cover, off by 3% */
-  for (int i = 0; i < 12; i++) at = AppendJpeg(buf, at, 1009, 1767, 2048);
+  at = AppendJpeg(buf, at, 1040, 1800, 2048); /* the cover, off by 3% */
+  for (int i = 0; i < 12; i++)
+    at = AppendJpeg(buf, at, 1009, 1767, 2048);
   ManualPageIndex index;
   CHECK(ManualPages_CarveAlbum(buf, at, &index) == 13);
   CHECK(ManualPages_LooksLikeAlbum(&index, at));
   int w = 0, h = 0;
   CHECK(ManualPages_NominalGeometry(&index, &w, &h));
-  CHECK(w == 1009);   /* the body, not the cover */
+  CHECK(w == 1009); /* the body, not the cover */
   CHECK(h == 1767);
   free(buf);
 }
@@ -233,8 +243,9 @@ static void TestAnEmbeddedFigureStillFailsTheTolerance(void) {
   CHECK(buf != NULL);
   if (!buf) return;
   size_t at = 0;
-  for (int i = 0; i < 12; i++) at = AppendJpeg(buf, at, 1009, 1767, 2048);
-  at = AppendJpeg(buf, at, 1120, 1767, 2048);   /* 11% wider: not a sheet */
+  for (int i = 0; i < 12; i++)
+    at = AppendJpeg(buf, at, 1009, 1767, 2048);
+  at = AppendJpeg(buf, at, 1120, 1767, 2048); /* 11% wider: not a sheet */
   ManualPageIndex index;
   CHECK(ManualPages_CarveAlbum(buf, at, &index) == 13);
   CHECK(!ManualPages_LooksLikeAlbum(&index, at));
@@ -248,7 +259,7 @@ static void TestMixedGeometryIsNotAnAlbum(void) {
   size_t at = 0;
   at = AppendJpeg(buf, at, 739, 1080, 800);
   at = AppendJpeg(buf, at, 739, 1080, 800);
-  at = AppendJpeg(buf, at, 512, 512, 800);   /* an embedded figure */
+  at = AppendJpeg(buf, at, 512, 512, 800); /* an embedded figure */
   ManualPageIndex index;
   CHECK(ManualPages_CarveAlbum(buf, at, &index) == 3);
   CHECK(!ManualPages_LooksLikeAlbum(&index, at));
@@ -259,7 +270,8 @@ static void TestVectorDocumentYieldsNothing(void) {
   /* No SOI anywhere: a text-and-fonts PDF. Zero is the CORRECT answer, and the
    * caller must rasterise or refuse rather than ship an empty manual. */
   unsigned char buf[4096];
-  for (size_t i = 0; i < sizeof buf; i++) buf[i] = (unsigned char)(i * 31u + 7u);
+  for (size_t i = 0; i < sizeof buf; i++)
+    buf[i] = (unsigned char)(i * 31u + 7u);
   for (size_t i = 0; i + 1 < sizeof buf; i++) {
     if (buf[i] == 0xFF && buf[i + 1] == 0xD8) buf[i] = 0x00;
   }
@@ -274,22 +286,27 @@ static void TestThumbnailEoiDoesNotTruncateAPage(void) {
   unsigned char buf[8192];
   memset(buf, 0, sizeof buf);
   size_t at = 0;
-  const unsigned char head[] = { 0xFF, 0xD8, 0xFF, 0xE1, 0x00, 0x0A };
-  memcpy(buf + at, head, sizeof head); at += sizeof head;
+  const unsigned char head[] = {0xFF, 0xD8, 0xFF, 0xE1, 0x00, 0x0A};
+  memcpy(buf + at, head, sizeof head);
+  at += sizeof head;
   /* APP1 payload of 8 bytes containing a decoy EOI. */
-  const unsigned char decoy[] = { 'E', 'x', 0xFF, 0xD9, 0x00, 0x00, 0x00, 0x00 };
-  memcpy(buf + at, decoy, sizeof decoy); at += sizeof decoy;
-  const unsigned char sof[] = { 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x04, 0x38,
-                                0x02, 0xE3, 0x01, 0x01, 0x11, 0x00 };
-  memcpy(buf + at, sof, sizeof sof); at += sizeof sof;
-  const unsigned char sos[] = { 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00 };
-  memcpy(buf + at, sos, sizeof sos); at += sizeof sos;
+  const unsigned char decoy[] = {'E', 'x', 0xFF, 0xD9, 0x00, 0x00, 0x00, 0x00};
+  memcpy(buf + at, decoy, sizeof decoy);
+  at += sizeof decoy;
+  const unsigned char sof[] = {0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x04, 0x38,
+                               0x02, 0xE3, 0x01, 0x01, 0x11, 0x00};
+  memcpy(buf + at, sof, sizeof sof);
+  at += sizeof sof;
+  const unsigned char sos[] = {0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00};
+  memcpy(buf + at, sos, sizeof sos);
+  at += sizeof sos;
   for (int i = 0; i < 500; i++) {
     const unsigned char byte = (unsigned char)(i + 1);
     buf[at++] = byte;
     if (byte == 0xFF) buf[at++] = 0x00;
   }
-  buf[at++] = 0xFF; buf[at++] = 0xD9;
+  buf[at++] = 0xFF;
+  buf[at++] = 0xD9;
   const size_t total = at;
 
   ManualPageIndex index;
@@ -310,17 +327,20 @@ static void TestRestartMarkersInScanDataAreNotMistakenForStructure(void) {
   unsigned char buf[4096];
   memset(buf, 0, sizeof buf);
   size_t at = 0;
-  const unsigned char head[] = { 0xFF, 0xD8 };
-  memcpy(buf + at, head, sizeof head); at += sizeof head;
+  const unsigned char head[] = {0xFF, 0xD8};
+  memcpy(buf + at, head, sizeof head);
+  at += sizeof head;
   /* DRI: define restart interval. */
-  const unsigned char dri[] = { 0xFF, 0xDD, 0x00, 0x04, 0x00, 0x01 };
-  memcpy(buf + at, dri, sizeof dri); at += sizeof dri;
-  const unsigned char sof[] = { 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x04, 0x38,
-                                0x02, 0xE3, 0x01, 0x01, 0x11, 0x00 };
-  memcpy(buf + at, sof, sizeof sof); at += sizeof sof;
-  const unsigned char sos[] = { 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01,
-                                0x00, 0x00, 0x3F, 0x00 };
-  memcpy(buf + at, sos, sizeof sos); at += sizeof sos;
+  const unsigned char dri[] = {0xFF, 0xDD, 0x00, 0x04, 0x00, 0x01};
+  memcpy(buf + at, dri, sizeof dri);
+  at += sizeof dri;
+  const unsigned char sof[] = {0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x04, 0x38,
+                               0x02, 0xE3, 0x01, 0x01, 0x11, 0x00};
+  memcpy(buf + at, sof, sizeof sof);
+  at += sizeof sof;
+  const unsigned char sos[] = {0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00};
+  memcpy(buf + at, sos, sizeof sos);
+  at += sizeof sos;
   /* Entropy data interleaved with all eight restart markers. */
   for (int block = 0; block < 8; block++) {
     for (int i = 0; i < 24; i++) {
@@ -329,9 +349,10 @@ static void TestRestartMarkersInScanDataAreNotMistakenForStructure(void) {
       if (byte == 0xFF) buf[at++] = 0x00;
     }
     buf[at++] = 0xFF;
-    buf[at++] = (unsigned char)(0xD0 + block);   /* RSTn */
+    buf[at++] = (unsigned char)(0xD0 + block); /* RSTn */
   }
-  buf[at++] = 0xFF; buf[at++] = 0xD9;
+  buf[at++] = 0xFF;
+  buf[at++] = 0xD9;
   const size_t total = at;
 
   ManualPageIndex index;
@@ -362,25 +383,30 @@ static void TestNestedThumbnailIsNotCarvedAsItsOwnPage(void) {
   CHECK(thumb_len < sizeof thumb);
 
   size_t at = 0;
-  buf[at++] = 0xFF; buf[at++] = 0xD8;                     /* outer SOI */
+  buf[at++] = 0xFF;
+  buf[at++] = 0xD8; /* outer SOI */
   /* APP1 whose payload IS the complete thumbnail. */
   const size_t seg = thumb_len + 2;
-  buf[at++] = 0xFF; buf[at++] = 0xE1;
+  buf[at++] = 0xFF;
+  buf[at++] = 0xE1;
   buf[at++] = (unsigned char)(seg >> 8);
   buf[at++] = (unsigned char)(seg & 0xFF);
-  memcpy(buf + at, thumb, thumb_len); at += thumb_len;
-  const unsigned char sof[] = { 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x04, 0x38,
-                                0x02, 0xE3, 0x01, 0x01, 0x11, 0x00 };
-  memcpy(buf + at, sof, sizeof sof); at += sizeof sof;
-  const unsigned char sos[] = { 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01,
-                                0x00, 0x00, 0x3F, 0x00 };
-  memcpy(buf + at, sos, sizeof sos); at += sizeof sos;
+  memcpy(buf + at, thumb, thumb_len);
+  at += thumb_len;
+  const unsigned char sof[] = {0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x04, 0x38,
+                               0x02, 0xE3, 0x01, 0x01, 0x11, 0x00};
+  memcpy(buf + at, sof, sizeof sof);
+  at += sizeof sof;
+  const unsigned char sos[] = {0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00};
+  memcpy(buf + at, sos, sizeof sos);
+  at += sizeof sos;
   for (int i = 0; i < 300; i++) {
     const unsigned char byte = (unsigned char)(i * 13u + 5u);
     buf[at++] = byte;
     if (byte == 0xFF) buf[at++] = 0x00;
   }
-  buf[at++] = 0xFF; buf[at++] = 0xD9;                     /* outer EOI */
+  buf[at++] = 0xFF;
+  buf[at++] = 0xD9; /* outer EOI */
   const size_t total = at;
 
   ManualPageIndex index;
@@ -388,7 +414,7 @@ static void TestNestedThumbnailIsNotCarvedAsItsOwnPage(void) {
   CHECK(ManualPages_CarveAlbum(buf, total, &index) == 1);
   if (index.count == 1) {
     CHECK(index.pages[0].length == total);
-    CHECK(index.pages[0].width == 0x02E3);   /* the OUTER geometry, not 160x120 */
+    CHECK(index.pages[0].width == 0x02E3); /* the OUTER geometry, not 160x120 */
     CHECK(index.pages[0].height == 0x0438);
   }
 }
@@ -441,7 +467,7 @@ static void TestPanIsClampedToTheOverhang(void) {
   ManualView_Zoom(&view, 3.0f, 739, 1080, 1920, 1080);
   float lx = 0, ly = 0;
   ManualView_PanLimit(&view, 739, 1080, 1920, 1080, &lx, &ly);
-  CHECK(ly > 0.0f);   /* zoomed 3x, the page overhangs vertically */
+  CHECK(ly > 0.0f); /* zoomed 3x, the page overhangs vertically */
   ManualView_Pan(&view, 0.0f, 99999.0f, 739, 1080, 1920, 1080);
   CHECK(fabsf(view.pan_y - ly) < 0.01f);
   ManualView_Pan(&view, 0.0f, -99999.0f, 739, 1080, 1920, 1080);
@@ -458,7 +484,7 @@ static void TestZoomingOutReClampsPan(void) {
   const float panned = view.pan_y;
   CHECK(panned > 0.0f);
 
-  ManualView_Zoom(&view, 0.2f, 739, 1080, 1920, 1080);   /* back to fit */
+  ManualView_Zoom(&view, 0.2f, 739, 1080, 1920, 1080); /* back to fit */
   float lx = 0, ly = 0;
   ManualView_PanLimit(&view, 739, 1080, 1920, 1080, &lx, &ly);
   CHECK(fabsf(view.pan_y) <= ly + 0.01f);
@@ -487,13 +513,14 @@ static void TestZoomIsClampedBothWays(void) {
 static void TestTurnsStopAtBothEndsOfTheBooklet(void) {
   ManualView view;
   ManualView_Init(&view);
-  CHECK(!ManualView_BeginTurn(&view, -1, 40));   /* already on page 0 */
+  CHECK(!ManualView_BeginTurn(&view, -1, 40)); /* already on page 0 */
   CHECK(ManualView_BeginTurn(&view, +1, 40));
-  while (ManualView_AdvanceTurn(&view, 0.05f, 0.35f)) { /* run it out */ }
+  while (ManualView_AdvanceTurn(&view, 0.05f, 0.35f)) { /* run it out */
+  }
   CHECK(view.item == 1);
 
   ManualView_GoTo(&view, 39, 40);
-  CHECK(!ManualView_BeginTurn(&view, +1, 40));   /* past the last page */
+  CHECK(!ManualView_BeginTurn(&view, +1, 40)); /* past the last page */
   CHECK(view.item == 39);
 }
 
@@ -520,7 +547,8 @@ static void TestTurnLandsAndResetsZoom(void) {
   CHECK(view.pan_x == 0.0f && view.pan_y == 0.0f);
 
   int guard = 0;
-  while (ManualView_AdvanceTurn(&view, 1.0f / 60.0f, 0.35f) && guard++ < 1000) {}
+  while (ManualView_AdvanceTurn(&view, 1.0f / 60.0f, 0.35f) && guard++ < 1000) {
+  }
   CHECK(view.turn == 0.0f);
   CHECK(view.item == 1);
 }
@@ -528,7 +556,7 @@ static void TestTurnLandsAndResetsZoom(void) {
 /* Frame-rate independence: the turn must take the same wall-clock time whether
  * the host is running at 60 or 144 Hz. */
 static void TestTurnDurationIsClockDriven(void) {
-  const float dts[] = { 1.0f / 60.0f, 1.0f / 144.0f };
+  const float dts[] = {1.0f / 60.0f, 1.0f / 144.0f};
   for (int i = 0; i < 2; i++) {
     ManualView view;
     ManualView_Init(&view);
@@ -727,8 +755,8 @@ static void TestBackwardTurnLeavesTheRightPageAlone(void) {
   for (int i = 1; i < 40; i++) {
     view.turn = -(float)i / 40.0f;
     CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
-    CHECK(frame.right_page == settled.right);   /* unchanged */
-    CHECK(frame.left_page == target.left);      /* revealed */
+    CHECK(frame.right_page == settled.right); /* unchanged */
+    CHECK(frame.left_page == target.left);    /* revealed */
   }
   /* Continuity at the boundary, mirrored. */
   view.turn = -0.99f;
@@ -755,14 +783,16 @@ static void TestLeafShowsTheSheetsOwnTwoPages(void) {
   ManualView_GoTo(&view, 5, ManualPages_SpreadCount(pages));
   ManualTurnFrame frame;
 
-  view.turn = 0.2f;   view.turn_target = 6;
+  view.turn = 0.2f;
+  view.turn_target = 6;
   CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
-  CHECK(frame.leaf_page == settled.right);    /* the page being lifted */
+  CHECK(frame.leaf_page == settled.right); /* the page being lifted */
   view.turn = 0.8f;
   CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
-  CHECK(frame.leaf_page == next.left);        /* its reverse */
+  CHECK(frame.leaf_page == next.left); /* its reverse */
 
-  view.turn = -0.2f;  view.turn_target = 4;
+  view.turn = -0.2f;
+  view.turn_target = 4;
   CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
   CHECK(frame.leaf_page == settled.left);
   view.turn = -0.8f;
@@ -782,11 +812,15 @@ static void TestLeafMirrorIsDirectionXorFace(void) {
   ManualView_GoTo(&view, 5, ManualPages_SpreadCount(pages));
   ManualTurnFrame frame;
 
-  const struct { float turn; bool want_mirror; const char *why; } cases[] = {
-    {  0.2f, false, "forward, front: a RIGHT page, gutter on its left"  },
-    {  0.8f, true,  "forward, back: a LEFT page, gutter on its right"   },
-    { -0.2f, true,  "backward, front: a LEFT page"                      },
-    { -0.8f, false, "backward, back: a RIGHT page"                      },
+  const struct {
+    float turn;
+    bool want_mirror;
+    const char *why;
+  } cases[] = {
+      {0.2f, false, "forward, front: a RIGHT page, gutter on its left"},
+      {0.8f, true, "forward, back: a LEFT page, gutter on its right"},
+      {-0.2f, true, "backward, front: a LEFT page"},
+      {-0.8f, false, "backward, back: a RIGHT page"},
   };
   for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
     view.turn = cases[i].turn;
@@ -799,10 +833,12 @@ static void TestLeafMirrorIsDirectionXorFace(void) {
   }
   /* Forward and backward at the SAME face must disagree -- that is the xor, and
    * it is what a face-only implementation gets wrong. */
-  view.turn = 0.2f;  view.turn_target = 6;
+  view.turn = 0.2f;
+  view.turn_target = 6;
   CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
   const bool forward_front = frame.leaf_mirrored;
-  view.turn = -0.2f; view.turn_target = 4;
+  view.turn = -0.2f;
+  view.turn_target = 4;
   CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
   CHECK(frame.leaf_mirrored != forward_front);
 }
@@ -821,11 +857,11 @@ static void TestSinglePageModeResolves(void) {
   CHECK(ManualView_BeginTurn(&view, +1, pages));
   view.turn = 0.3f;
   CHECK(ManualTurn_ResolveFrame(&view, pages, false, &frame));
-  CHECK(frame.right_page == 8);       /* revealed */
-  CHECK(frame.leaf_page == 7);        /* lifting */
+  CHECK(frame.right_page == 8); /* revealed */
+  CHECK(frame.leaf_page == 7);  /* lifting */
   view.turn = 0.8f;
   CHECK(ManualTurn_ResolveFrame(&view, pages, false, &frame));
-  CHECK(frame.leaf_page >= 0);        /* a real page, never -1 */
+  CHECK(frame.leaf_page >= 0); /* a real page, never -1 */
 }
 
 /* Covers stand alone, so a turn off them must still resolve without asking for a
@@ -891,9 +927,11 @@ static void TestLayoutWidthNeverDependsOnTheOpening(void) {
       /* Whatever the opening holds -- one page or two -- the layout is the same. */
       CHECK(ManualPages_LayoutPageWidths(true) == expected);
       float w = 0.0f, h = 0.0f;
-      ManualView_FittedSize(kShapes[s].w * expected, kShapes[s].h, 1600, 1040,
-                            1.0f, &w, &h);
-      if (i == 0) { first_w = w; first_h = h; }
+      ManualView_FittedSize(kShapes[s].w * expected, kShapes[s].h, 1600, 1040, 1.0f, &w, &h);
+      if (i == 0) {
+        first_w = w;
+        first_h = h;
+      }
       CHECK(fabsf(w - first_w) < 0.001f);
       CHECK(fabsf(h - first_h) < 0.001f);
       /* Fit really did fit, on whichever axis constrained it. */
@@ -965,11 +1003,11 @@ static void TestBackwardTurnDrivenThroughTheRealApi(void) {
     /* And the resolved frame agrees on the direction every single step. */
     ManualTurnFrame frame;
     CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
-    CHECK(!frame.leaf_on_right);                /* backward lifts the LEFT leaf */
+    CHECK(!frame.leaf_on_right); /* backward lifts the LEFT leaf */
     previous = view.turn;
     if (++steps > 1000) break;
   }
-  CHECK(steps > 3);                             /* it really animated */
+  CHECK(steps > 3); /* it really animated */
   CHECK(view.turn == 0.0f);
   CHECK(view.item == 5);
 
@@ -981,7 +1019,7 @@ static void TestBackwardTurnDrivenThroughTheRealApi(void) {
     CHECK(view.turn > 0.0f);
     ManualTurnFrame frame;
     CHECK(ManualTurn_ResolveFrame(&view, pages, true, &frame));
-    CHECK(frame.leaf_on_right);                 /* forward lifts the RIGHT leaf */
+    CHECK(frame.leaf_on_right); /* forward lifts the RIGHT leaf */
   }
   CHECK(view.item == 7);
 }
@@ -1001,8 +1039,7 @@ static void TestLeafNeverGoesBehindASettledPage(void) {
     for (int ui = 0; ui <= 20; ui++) {
       for (int vi = 0; vi <= 4; vi++) {
         float x = 0, y = 0, z = 0;
-        ManualTurn_LeafPoint(turn, (float)ui / 20.0f, (float)vi / 4.0f,
-                             &x, &y, &z);
+        ManualTurn_LeafPoint(turn, (float)ui / 20.0f, (float)vi / 4.0f, &x, &y, &z);
         CHECK(z >= 0.0f);
         CHECK(isfinite(x) && isfinite(y) && isfinite(z));
         /* The sheet is a UNIT sheet centred on the origin: x and y each stay
@@ -1086,8 +1123,7 @@ static void TestBowVanishesAtTheEndsAndEdges(void) {
   float peak = 0.0f;
   for (int i = -100; i <= 100; i++)
     for (int iu = 0; iu <= 100; iu++) {
-      const float b = fabsf(ManualTurn_BowOffset((float)i / 100.0f,
-                                                 (float)iu / 100.0f));
+      const float b = fabsf(ManualTurn_BowOffset((float)i / 100.0f, (float)iu / 100.0f));
       if (b > peak) peak = b;
     }
   CHECK(peak <= (float)kManualCurlLimitPermille / 1000.0f + 1e-4f);
@@ -1130,7 +1166,7 @@ static void TestBowFollowsTheSurfaceNormal(void) {
     CHECK(fabsf((px - 0.25f * cosf(a)) - expected_dx) < 1e-4f);
     if (fabsf(expected_dx) > peak_dx) peak_dx = fabsf(expected_dx);
   }
-  CHECK(peak_dx > 0.01f);   /* the normal really does tilt out of z */
+  CHECK(peak_dx > 0.01f); /* the normal really does tilt out of z */
 }
 
 /* At rest the bowed sheet must STILL be exactly the settled page -- the bow
@@ -1177,7 +1213,7 @@ static void TestHingeSweepsAHalfTurnAndIsMonotonic(void) {
  * a mirror of two zeroes is still a mirror. */
 static void TestBackwardTurnMirrorsTheHinge(void) {
   /* Off-centre phases, where x is substantially non-zero on both sides. */
-  const float phases[] = { 0.15f, 0.3f, 0.7f, 0.85f };
+  const float phases[] = {0.15f, 0.3f, 0.7f, 0.85f};
   for (size_t i = 0; i < sizeof phases / sizeof phases[0]; i++) {
     const float t = phases[i];
     float fx = 0, fy = 0, fz = 0, bx = 0, by = 0, bz = 0;
@@ -1188,8 +1224,8 @@ static void TestBackwardTurnMirrorsTheHinge(void) {
     CHECK(fabsf(bx) > 0.05f);
     /* OPPOSITE SIGNS -- this is what a deleted mirror breaks. */
     CHECK(fx * bx < 0.0f);
-    CHECK(fabsf(fx + bx) < 1e-5f);   /* and an exact mirror */
-    CHECK(fabsf(fz - bz) < 1e-5f);   /* same lift either way */
+    CHECK(fabsf(fx + bx) < 1e-5f); /* and an exact mirror */
+    CHECK(fabsf(fz - bz) < 1e-5f); /* same lift either way */
   }
 
   /* The landing is the strongest single assertion: a forward turn ends on the
@@ -1203,12 +1239,12 @@ static void TestBackwardTurnMirrorsTheHinge(void) {
   /* And across the whole sweep the sheet stays on its own side of the gutter
    * until it crosses, so a mid-turn frame can never be on the wrong half. */
   for (int i = 1; i < 50; i++) {
-    const float t = (float)i / 100.0f;     /* first half only: not yet crossed */
+    const float t = (float)i / 100.0f; /* first half only: not yet crossed */
     float fwd = 0, back = 0, ignored = 0;
     ManualTurn_LeafPoint(t, 1.0f, 0.5f, &fwd, &ignored, &ignored);
     ManualTurn_LeafPoint(-t, 1.0f, 0.5f, &back, &ignored, &ignored);
-    CHECK(fwd > 0.0f);    /* forward lifts from the RIGHT half */
-    CHECK(back < 0.0f);   /* backward from the LEFT */
+    CHECK(fwd > 0.0f);  /* forward lifts from the RIGHT half */
+    CHECK(back < 0.0f); /* backward from the LEFT */
   }
 }
 
@@ -1266,28 +1302,23 @@ static void TestSheetExtentsReproduceTheRequestedSize(void) {
    * meant to hold and asserting it would be asserting the absence of perspective.
    * What must hold for BOTH is that the flat page and the leaf agree, which
    * TestTurnPivotsOnTheGutter and the ordering test cover. */
-  const float tilts[][2] = { { 0.0f, 0.0f } };
+  const float tilts[][2] = {{0.0f, 0.0f}};
   for (int t = 0; t < 1; t++) {
-    Scene3DCamera camera = { tilts[t][0], tilts[t][1], 2.6f, 0.9f };
+    Scene3DCamera camera = {tilts[t][0], tilts[t][1], 2.6f, 0.9f};
     float matrix[16];
     Scene3D_BuildViewProjection(&camera, view_w, view_h, matrix);
     float half_x = 0.0f, half_y = 0.0f;
-    CHECK(ManualTurn_SheetExtents(matrix, view_w, view_h, page_w, page_h,
-                                  &half_x, &half_y));
+    CHECK(ManualTurn_SheetExtents(matrix, view_w, view_h, page_w, page_h, &half_x, &half_y));
     CHECK(half_x > 0.0f && half_y > 0.0f);
 
     /* A one-unit step must be exactly the requested pixel count, on both axes.
      * That equality IS the fix: hand-picked scale factors had the leaf at 80% of
      * the page's height, so the page appeared to shrink at the start of a turn. */
     Scene3DPoint left, right, top, bottom;
-    CHECK(Scene3D_ProjectWorldPoint(matrix, -half_x, 0.0f, 0.0f,
-                                    view_w, view_h, &left));
-    CHECK(Scene3D_ProjectWorldPoint(matrix, half_x, 0.0f, 0.0f,
-                                    view_w, view_h, &right));
-    CHECK(Scene3D_ProjectWorldPoint(matrix, 0.0f, half_y, 0.0f,
-                                    view_w, view_h, &top));
-    CHECK(Scene3D_ProjectWorldPoint(matrix, 0.0f, -half_y, 0.0f,
-                                    view_w, view_h, &bottom));
+    CHECK(Scene3D_ProjectWorldPoint(matrix, -half_x, 0.0f, 0.0f, view_w, view_h, &left));
+    CHECK(Scene3D_ProjectWorldPoint(matrix, half_x, 0.0f, 0.0f, view_w, view_h, &right));
+    CHECK(Scene3D_ProjectWorldPoint(matrix, 0.0f, half_y, 0.0f, view_w, view_h, &top));
+    CHECK(Scene3D_ProjectWorldPoint(matrix, 0.0f, -half_y, 0.0f, view_w, view_h, &bottom));
     CHECK(fabsf((right.x - left.x) - page_w) < 0.05f);
     CHECK(fabsf((bottom.y - top.y) - page_h) < 0.05f);
 
@@ -1297,15 +1328,15 @@ static void TestSheetExtentsReproduceTheRequestedSize(void) {
     ManualTurn_LeafPoint(0.0f, 0.0f, 0.5f, &lx0, &ly0, &lz0);
     ManualTurn_LeafPoint(0.0f, 1.0f, 0.5f, &lx1, &ly1, &lz1);
     Scene3DPoint gutter, edge;
-    CHECK(Scene3D_ProjectWorldPoint(matrix, lx0 * 2.0f * half_x, 0.0f, 0.0f,
-                                    view_w, view_h, &gutter));
-    CHECK(Scene3D_ProjectWorldPoint(matrix, lx1 * 2.0f * half_x, 0.0f, 0.0f,
-                                    view_w, view_h, &edge));
+    CHECK(Scene3D_ProjectWorldPoint(matrix, lx0 * 2.0f * half_x, 0.0f, 0.0f, view_w, view_h,
+                                    &gutter));
+    CHECK(
+        Scene3D_ProjectWorldPoint(matrix, lx1 * 2.0f * half_x, 0.0f, 0.0f, view_w, view_h, &edge));
     CHECK(fabsf(fabsf(edge.x - gutter.x) - page_w * 0.5f) < 0.05f);
   }
   /* Degenerate inputs are refused rather than producing nonsense extents. */
   float matrix[16];
-  Scene3DCamera camera = { 0.0f, 0.0f, 2.6f, 0.9f };
+  Scene3DCamera camera = {0.0f, 0.0f, 2.6f, 0.9f};
   Scene3D_BuildViewProjection(&camera, view_w, view_h, matrix);
   float hx = 0.0f, hy = 0.0f;
   CHECK(!ManualTurn_SheetExtents(matrix, 0, view_h, page_w, page_h, &hx, &hy));
@@ -1323,7 +1354,7 @@ static void TestNominalGeometryIsTheBooksNotAPages(void) {
   memset(&index, 0, sizeof index);
   int w = 0, h = 0;
 
-  CHECK(!ManualPages_NominalGeometry(&index, &w, &h));   /* empty */
+  CHECK(!ManualPages_NominalGeometry(&index, &w, &h)); /* empty */
   CHECK(!ManualPages_NominalGeometry(NULL, &w, &h));
 
   /* A uniform album is the easy case: every page agrees, so does the book. */
@@ -1345,16 +1376,21 @@ static void TestNominalGeometryIsTheBooksNotAPages(void) {
   /* Zero dimensions are not a geometry and must not win the vote even when they
    * are the most common thing in the index. */
   memset(&index, 0, sizeof index);
-  for (int i = 0; i < 9; i++) { index.pages[i].width = 0; index.pages[i].height = 0; }
-  index.pages[9].width = 900;  index.pages[9].height = 900;
-  index.pages[10].width = 900; index.pages[10].height = 900;
+  for (int i = 0; i < 9; i++) {
+    index.pages[i].width = 0;
+    index.pages[i].height = 0;
+  }
+  index.pages[9].width = 900;
+  index.pages[9].height = 900;
+  index.pages[10].width = 900;
+  index.pages[10].height = 900;
   index.count = 11;
   CHECK(ManualPages_NominalGeometry(&index, &w, &h));
   CHECK(w == 900 && h == 900);
 
   memset(&index, 0, sizeof index);
   index.count = 3;
-  CHECK(!ManualPages_NominalGeometry(&index, &w, &h));   /* nothing but zeroes */
+  CHECK(!ManualPages_NominalGeometry(&index, &w, &h)); /* nothing but zeroes */
 }
 
 /* Carving is a byte walk over JPEG markers and has no business caring what shape
@@ -1398,8 +1434,7 @@ static void TestTheLeafCoversItsWholeSheetInBothLayouts(void) {
     for (int spread = 0; spread <= 1; spread++) {
       float matrix[16];
       ManualSheet sheet;
-      ShapeCamera(kShapes[s].w, kShapes[s].h, 1600, 900, false, spread != 0,
-                  matrix, &sheet);
+      ShapeCamera(kShapes[s].w, kShapes[s].h, 1600, 900, false, spread != 0, matrix, &sheet);
 
       /* Where the settled pages are drawn: the layout area spans +/- half_x, and
        * in a spread the gutter splits it at 0. */
@@ -1418,8 +1453,7 @@ static void TestTheLeafCoversItsWholeSheetInBothLayouts(void) {
       /* And the sheet is as wide as the area it turns off: one half in a spread,
        * the whole thing on its own. THIS is the assertion the bug fails -- it
        * measured half_x in both. */
-      CHECK(fabsf(sheet.width - (spread ? sheet.half_x : 2.0f * sheet.half_x))
-            < 1e-4f);
+      CHECK(fabsf(sheet.width - (spread ? sheet.half_x : 2.0f * sheet.half_x)) < 1e-4f);
     }
   }
 }
@@ -1433,11 +1467,11 @@ static void TestTheHingeMirrorsWithTheTurnDirection(void) {
     ShapeCamera(1000, 620, 1600, 900, false, spread != 0, matrix, &sheet);
 
     float fx = 0.0f, bx = 0.0f, y = 0.0f, z = 0.0f;
-    ManualTurn_LeafPoint(0.0f, 0.0f, 0.5f, &fx, &y, &z);   /* hinge end, forward */
+    ManualTurn_LeafPoint(0.0f, 0.0f, 0.5f, &fx, &y, &z); /* hinge end, forward */
     ManualTurn_LeafPoint(-0.0001f, 0.0f, 0.5f, &bx, &y, &z);
     const float forward_hinge = ManualTurn_LeafWorldX(&sheet, 1.0f, fx);
     const float backward_hinge = ManualTurn_LeafWorldX(&sheet, -1.0f, bx);
-    CHECK(fabsf(forward_hinge + backward_hinge) < 1e-4f);   /* reflections */
+    CHECK(fabsf(forward_hinge + backward_hinge) < 1e-4f); /* reflections */
 
     /* At rest a backward sheet covers the same rectangle as a forward one. */
     float lx = 0.0f;
@@ -1466,8 +1500,8 @@ static void TestTheSheetNeverSwingsIntoTheCamera(void) {
         for (int tilt = 0; tilt <= 1; tilt++) {
           float matrix[16];
           ManualSheet sheet;
-          ShapeCamera(kShapes[s].w, kShapes[s].h, kViews[v][0], kViews[v][1],
-                      tilt != 0, spread != 0, matrix, &sheet);
+          ShapeCamera(kShapes[s].w, kShapes[s].h, kViews[v][0], kViews[v][1], tilt != 0,
+                      spread != 0, matrix, &sheet);
 
           float worst = 1e30f;
           for (int p = -32; p <= 32; p++) {
@@ -1475,26 +1509,24 @@ static void TestTheSheetNeverSwingsIntoTheCamera(void) {
             for (int ui = 0; ui <= 24; ui++) {
               for (int vi = 0; vi <= 6; vi++) {
                 float lx = 0.0f, ly = 0.0f, lz = 0.0f;
-                ManualTurn_LeafPoint(turn, (float)ui / 24.0f, (float)vi / 6.0f,
-                                     &lx, &ly, &lz);
-                const float w = Scene3D_ClipDepth(
-                    matrix, ManualTurn_LeafWorldX(&sheet, turn, lx),
-                    -ly * 2.0f * sheet.half_y, lz * 2.0f * sheet.width);
+                ManualTurn_LeafPoint(turn, (float)ui / 24.0f, (float)vi / 6.0f, &lx, &ly, &lz);
+                const float w =
+                    Scene3D_ClipDepth(matrix, ManualTurn_LeafWorldX(&sheet, turn, lx),
+                                      -ly * 2.0f * sheet.half_y, lz * 2.0f * sheet.width);
                 if (w < worst) worst = w;
                 /* And every vertex must actually project -- which is the
                  * consequence the renderer sees. */
                 Scene3DPoint screen;
-                CHECK(Scene3D_ProjectWorldPoint(
-                    matrix, ManualTurn_LeafWorldX(&sheet, turn, lx),
-                    -ly * 2.0f * sheet.half_y, lz * 2.0f * sheet.width,
-                    kViews[v][0], kViews[v][1], &screen));
+                CHECK(Scene3D_ProjectWorldPoint(matrix, ManualTurn_LeafWorldX(&sheet, turn, lx),
+                                                -ly * 2.0f * sheet.half_y, lz * 2.0f * sheet.width,
+                                                kViews[v][0], kViews[v][1], &screen));
               }
             }
           }
           if (!(worst > 0.0f))
             printf("  %s %s %s in %dx%d: min clip depth %.3f\n", kShapes[s].name,
-                   spread ? "spread" : "single", tilt ? "tilt" : "flat",
-                   kViews[v][0], kViews[v][1], (double)worst);
+                   spread ? "spread" : "single", tilt ? "tilt" : "flat", kViews[v][0], kViews[v][1],
+                   (double)worst);
           CHECK(worst > 0.0f);
         }
       }
@@ -1506,8 +1538,8 @@ static void TestTheSheetNeverSwingsIntoTheCamera(void) {
  * keeps exactly the camera it had. If this fails, the reader's existing look
  * changed as a side effect of supporting other shapes. */
 static void TestTheLensOnlyNarrowsAndLeavesPortraitAlone(void) {
-  CHECK(ManualSheet_CameraFov(10.0f, 900, 0.9f) == 0.9f);   /* tiny sheet: inert */
-  CHECK(ManualSheet_CameraFov(4000.0f, 900, 0.9f) < 0.9f);  /* huge sheet: narrows */
+  CHECK(ManualSheet_CameraFov(10.0f, 900, 0.9f) == 0.9f);  /* tiny sheet: inert */
+  CHECK(ManualSheet_CameraFov(4000.0f, 900, 0.9f) < 0.9f); /* huge sheet: narrows */
   /* Degenerate inputs return the preferred lens rather than a nonsense one. */
   CHECK(ManualSheet_CameraFov(0.0f, 900, 0.9f) == 0.9f);
   CHECK(ManualSheet_CameraFov(800.0f, 0, 0.9f) == 0.9f);
@@ -1517,10 +1549,10 @@ static void TestTheLensOnlyNarrowsAndLeavesPortraitAlone(void) {
   for (int v = 0; v < kViewCount; v++) {
     for (int spread = 0; spread <= 1; spread++) {
       float page_w = 0.0f, page_h = 0.0f;
-      ManualView_FittedSize(739 * ManualPages_LayoutPageWidths(spread != 0), 1080,
-                            kViews[v][0], kViews[v][1], 1.0f, &page_w, &page_h);
-      CHECK(ManualSheet_CameraFov(ManualSheet_PixelWidth(page_w, spread != 0),
-                                  kViews[v][1], 0.9f) == 0.9f);
+      ManualView_FittedSize(739 * ManualPages_LayoutPageWidths(spread != 0), 1080, kViews[v][0],
+                            kViews[v][1], 1.0f, &page_w, &page_h);
+      CHECK(ManualSheet_CameraFov(ManualSheet_PixelWidth(page_w, spread != 0), kViews[v][1],
+                                  0.9f) == 0.9f);
     }
   }
   /* The clearance is the reason: it sits just above what portrait already
@@ -1544,8 +1576,8 @@ static void TestMeshDensityHoldsItsBudgetAtEveryShape(void) {
         for (int tilt = 0; tilt <= 1; tilt++) {
           float matrix[16];
           ManualSheet sheet;
-          ShapeCamera(kShapes[s].w, kShapes[s].h, kViews[v][0], kViews[v][1],
-                      tilt != 0, spread != 0, matrix, &sheet);
+          ShapeCamera(kShapes[s].w, kShapes[s].h, kViews[v][0], kViews[v][1], tilt != 0,
+                      spread != 0, matrix, &sheet);
 
           ManualMesh mesh;
           ManualTurn_SolveMesh(matrix, &sheet, budget, &mesh);
@@ -1555,12 +1587,11 @@ static void TestMeshDensityHoldsItsBudgetAtEveryShape(void) {
           CHECK(mesh.rows <= kManualMeshMaxRows);
 
           float column_px = 0.0f, row_px = 0.0f;
-          CHECK(ManualTurn_MeshUvError(matrix, &sheet, mesh.columns, mesh.rows,
-                                       &column_px, &row_px));
+          CHECK(
+              ManualTurn_MeshUvError(matrix, &sheet, mesh.columns, mesh.rows, &column_px, &row_px));
           if (column_px > budget || row_px > budget)
-            printf("  %s %s %s in %dx%d: %dx%d -> %.2f / %.2f px\n",
-                   kShapes[s].name, spread ? "spread" : "single",
-                   tilt ? "tilt" : "flat", kViews[v][0], kViews[v][1],
+            printf("  %s %s %s in %dx%d: %dx%d -> %.2f / %.2f px\n", kShapes[s].name,
+                   spread ? "spread" : "single", tilt ? "tilt" : "flat", kViews[v][0], kViews[v][1],
                    mesh.columns, mesh.rows, (double)column_px, (double)row_px);
           CHECK(column_px <= budget);
           CHECK(row_px <= budget);
@@ -1587,8 +1618,7 @@ static void TestFlatPagesPayNothingForRows(void) {
   ManualSheet sheet;
   ShapeCamera(739, 1080, 1600, 900, false, true, matrix, &sheet);
   float column_px = 0.0f, row_px = 0.0f;
-  CHECK(ManualTurn_MeshUvError(matrix, &sheet, 16, kManualMeshMinRows,
-                               &column_px, &row_px));
+  CHECK(ManualTurn_MeshUvError(matrix, &sheet, 16, kManualMeshMinRows, &column_px, &row_px));
   CHECK(row_px == 0.0f);
   ManualMesh mesh;
   ManualTurn_SolveMesh(matrix, &sheet, 1.0f, &mesh);
@@ -1668,7 +1698,7 @@ static void TestTheCurlCeilingIsDerivedNotChosen(void) {
   const float amplitude = (float)kManualCurlPermille / 1000.0f;
   CHECK(0.5f - amplitude * (float)M_PI > 0.0f);
   for (int i = 1; i <= 200; i++) {
-    const float u = (float)i / 4000.0f;    /* the first 5% of the sheet */
+    const float u = (float)i / 4000.0f; /* the first 5% of the sheet */
     float x = 0.0f, y = 0.0f, z = 0.0f;
     ManualTurn_LeafPoint(1.0f, u, 0.5f, &x, &y, &z);
     CHECK(z >= 0.0f);
@@ -1677,7 +1707,7 @@ static void TestTheCurlCeilingIsDerivedNotChosen(void) {
 
 static void TestSheetExtentsRejectsNonFiniteGeometry(void) {
   float matrix[16];
-  Scene3DCamera camera = { 0.0f, 0.0f, 2.6f, 0.9f };
+  Scene3DCamera camera = {0.0f, 0.0f, 2.6f, 0.9f};
   Scene3D_BuildViewProjection(&camera, 1600, 900, matrix);
   float hx = 0.0f, hy = 0.0f;
 
@@ -1716,7 +1746,7 @@ static void TestShadeIsBoundedAndDimmestEdgeOn(void) {
     for (int ui = 0; ui <= 10; ui++) {
       const float s = ManualTurn_LeafShade(t, (float)ui / 10.0f);
       CHECK(s >= 0.0f && s <= 1.0f);
-      CHECK(s > 0.0f);            /* never pure black */
+      CHECK(s > 0.0f); /* never pure black */
     }
   }
   /* Edge-on (halfway) is dimmer than flat at either end. */
@@ -1793,8 +1823,8 @@ int main(void) {
   TestTheCurlCeilingIsDerivedNotChosen();
   TestSheetExtentsRejectsNonFiniteGeometry();
 
-  if (g_failures) {
-    printf("manual_pages_test: %d failure(s)\n", g_failures);
+  if (s_failures) {
+    printf("manual_pages_test: %d failure(s)\n", s_failures);
     return 1;
   }
   printf("manual_pages_test: all checks passed\n");

@@ -11,26 +11,31 @@ static uint32_t marker = 1;
 
 void Sim3DPerformance_AddUpload(uint64_t bytes) { assert(bytes); }
 const char *ArRenderDevice_LastError(const ArRenderDevice *device) {
-  (void)device; return "injected failure";
+  (void)device;
+  return "injected failure";
 }
 bool ArRenderDevice_CreateTexture(ArRenderDevice *device, const ArRenderTextureDesc *desc,
-    ArRenderTexture *out) {
+                                  ArRenderTexture *out) {
   (void)device;
   bool blur = desc->width != kSimWorldMapPixels;
   assert(desc->width == desc->height && desc->width == (blur ? 256 : 1024));
   assert(desc->filter == (blur ? kArRenderFilter_Linear : kArRenderFilter_Nearest));
   creates[blur]++;
-  *out = (ArRenderTexture){fail_create[blur] ? 0 : 1+blur};
+  *out = (ArRenderTexture){fail_create[blur] ? 0 : 1 + blur};
   if (out->value) live++;
   return out->value != 0;
 }
 void ArRenderDevice_DestroyTexture(ArRenderDevice *device, ArRenderTexture texture) {
   (void)device;
-  if (texture.value) { assert(live); live--; }
+  if (texture.value) {
+    assert(live);
+    live--;
+  }
 }
 bool ArRenderDevice_UpdateTexture(ArRenderDevice *device, ArRenderTexture texture,
-    const ArRenderRectI *rect, const void *pixels, int pitch) {
-  (void)device; assert(!rect && pixels);
+                                  const ArRenderRectI *rect, const void *pixels, int pitch) {
+  (void)device;
+  assert(!rect && pixels);
   const bool blur = texture.value == 2;
   assert(texture.value == 1 || blur);
   assert(pitch == (blur ? 256 : 1024) * (int)sizeof(uint32_t));
@@ -38,7 +43,10 @@ bool ArRenderDevice_UpdateTexture(ArRenderDevice *device, ArRenderTexture textur
   uploads[blur]++;
   return !fail_upload[blur];
 }
-const uint32_t *SimWorldMap_BakedPixels(void) { bakes++; return fail_bake ? NULL : &marker; }
+const uint32_t *SimWorldMap_BakedPixels(void) {
+  bakes++;
+  return fail_bake ? NULL : &marker;
+}
 bool SimWorldMap_Downsample(uint32_t *pixels, int pitch, int divisor) {
   assert(pitch == 256 && divisor == 4);
   downsamples++;

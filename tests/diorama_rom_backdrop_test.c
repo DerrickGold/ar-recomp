@@ -9,20 +9,18 @@
 
 static int failures;
 
-#define CHECK(condition)                                                    \
-  do {                                                                      \
-    if (!(condition)) {                                                     \
-      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #condition);           \
-      failures++;                                                           \
-    }                                                                       \
+#define CHECK(condition)                                                                           \
+  do {                                                                                             \
+    if (!(condition)) {                                                                            \
+      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #condition);                                  \
+      failures++;                                                                                  \
+    }                                                                                              \
   } while (0)
 
-static void PutBits(uint8_t *bytes, size_t *bit, unsigned value,
-                    unsigned count) {
+static void PutBits(uint8_t *bytes, size_t *bit, unsigned value, unsigned count) {
   for (unsigned i = 0; i < count; i++) {
     const unsigned shift = count - 1 - i;
-    if ((value >> shift) & 1u)
-      bytes[*bit >> 3] |= (uint8_t)(1u << (7 - (*bit & 7)));
+    if ((value >> shift) & 1u) bytes[*bit >> 3] |= (uint8_t)(1u << (7 - (*bit & 7)));
     (*bit)++;
   }
 }
@@ -43,31 +41,26 @@ static void TestLiterals(void) {
     PutBits(packed, &bit, 1, 1);
     PutBits(packed, &bit, value, 8);
   }
-  CHECK(DioramaRomBackdrop_DecompressAsset(
-      packed, StreamBytes(bit), output, sizeof(output)));
+  CHECK(DioramaRomBackdrop_DecompressAsset(packed, StreamBytes(bit), output, sizeof(output)));
   CHECK(!memcmp(output, "ABC", sizeof(output)));
-  CHECK(!DioramaRomBackdrop_DecompressAsset(
-      packed, StreamBytes(bit), output, sizeof(output) + 1));
+  CHECK(!DioramaRomBackdrop_DecompressAsset(packed, StreamBytes(bit), output, sizeof(output) + 1));
 }
 
 static void TestOverlappingDictionaryCopyAndTruncation(void) {
   uint8_t packed[32], output[6] = {0};
   size_t bit = StartStream(packed, sizeof(output));
-  PutBits(packed, &bit, 1, 1);       /* literal A at dictionary $EF */
+  PutBits(packed, &bit, 1, 1); /* literal A at dictionary $EF */
   PutBits(packed, &bit, 'A', 8);
-  PutBits(packed, &bit, 0, 1);       /* copy from $EF, length 3+2 */
+  PutBits(packed, &bit, 0, 1); /* copy from $EF, length 3+2 */
   PutBits(packed, &bit, 0xEF, 8);
   PutBits(packed, &bit, 3, 4);
   const size_t size = StreamBytes(bit);
-  CHECK(DioramaRomBackdrop_DecompressAsset(
-      packed, size, output, sizeof(output)));
+  CHECK(DioramaRomBackdrop_DecompressAsset(packed, size, output, sizeof(output)));
   CHECK(!memcmp(output, "AAAAAA", sizeof(output)));
-  CHECK(!DioramaRomBackdrop_DecompressAsset(
-      packed, size - 1, output, sizeof(output)));
+  CHECK(!DioramaRomBackdrop_DecompressAsset(packed, size - 1, output, sizeof(output)));
 }
 
-static size_t WriteLiteralAsset(uint8_t *dst, const uint8_t *source,
-                                size_t output_size) {
+static size_t WriteLiteralAsset(uint8_t *dst, const uint8_t *source, size_t output_size) {
   const size_t packed_size = 2 + (output_size * 9 + 7) / 8;
   memset(dst, 0, packed_size);
   dst[0] = (uint8_t)output_size;
@@ -109,12 +102,9 @@ static void TestGenericRoomScriptAndInheritance(void) {
   uint8_t *chars1 = calloc(1, 0x2000);
   uint8_t *meta1 = calloc(1, 0x0800);
   uint8_t *meta2 = calloc(1, 0x0800);
-  uint32_t *pixels = calloc(
-      kDioramaRomBackdropPixels * kDioramaRomBackdropPixels,
-      sizeof(*pixels));
+  uint32_t *pixels = calloc(kDioramaRomBackdropPixels * kDioramaRomBackdropPixels, sizeof(*pixels));
   CHECK(rom && zeros && chars0 && chars1 && meta1 && meta2 && pixels);
-  if (!rom || !zeros || !chars0 || !chars1 || !meta1 || !meta2 || !pixels)
-    goto done;
+  if (!rom || !zeros || !chars0 || !chars1 || !meta1 || !meta2 || !pixels) goto done;
 
   /* `$02:B6D3-$B6F6` masks definition words with $ECFF, then `$02:B4E8`
    * merges attribute byte $10 into BG1 and $01 into BG2. Pin both operations
@@ -124,8 +114,8 @@ static void TestGenericRoomScriptAndInheritance(void) {
    * definition, omitting the attribute, or selecting the wrong character bank
    * cannot accidentally produce the expected pixel. */
   for (unsigned row = 0; row < 8; row++) {
-    chars0[row * 2] = 0xFF;          /* tile $000: colour 1 */
-    chars1[row * 2 + 1] = 0xFF;      /* tile $100: colour 2 */
+    chars0[row * 2] = 0xFF;     /* tile $000: colour 1 */
+    chars1[row * 2 + 1] = 0xFF; /* tile $100: colour 2 */
     /* Local tile 2/global tile $102 is solid non-zero colour 3. Its palette
      * entry is deliberately left at opaque black, distinguishing authored
      * black artwork from colour-zero handling. */
@@ -138,13 +128,12 @@ static void TestGenericRoomScriptAndInheritance(void) {
   }
   chars1[3 * 32] &= 0x7F;
   for (unsigned quadrant = 0; quadrant < 4; quadrant++) {
-    meta1[quadrant * 2] = 0x01;      /* byte-swapped SNES word $0100 */
-    meta2[quadrant * 2] = 0x02;      /* byte-swapped SNES word $0200 */
+    meta1[quadrant * 2] = 0x01; /* byte-swapped SNES word $0100 */
+    meta2[quadrant * 2] = 0x02; /* byte-swapped SNES word $0200 */
     /* Metatile 1 selects the solid-black $102, mixed-detail $103, then two
      * zero-filled $101 cells after the permanent BG2 attribute merge. */
     meta2[8 + quadrant * 2] = 0x02;
-    meta2[9 + quadrant * 2] =
-        quadrant == 0 ? 0x02 : quadrant == 1 ? 0x03 : 0x01;
+    meta2[9 + quadrant * 2] = quadrant == 0 ? 0x02 : quadrant == 1 ? 0x03 : 0x01;
   }
   WriteLiteralAsset(rom + kChr0, chars0, 0x2000);
   WriteLiteralAsset(rom + kChr1, chars1, 0x2000);
@@ -154,132 +143,183 @@ static void TestGenericRoomScriptAndInheritance(void) {
   rom[kMap2] = rom[kMap2 + 1] = 1;
   WriteLiteralAsset(rom + kMap1 + 2, zeros, 0x0100);
   WriteLiteralAsset(rom + kMap2 + 2, zeros, 0x0100);
-  rom[kPalette + 2] = 0xFF;         /* wrong-path palette 0 colour 1: white */
+  rom[kPalette + 2] = 0xFF; /* wrong-path palette 0 colour 1: white */
   rom[kPalette + 3] = 0x7F;
-  rom[kPalette + 4] = 0x1F;         /* BGR15 red at palette 0 colour 2 */
-  rom[kPalette2 + 4] = 0xE0;        /* BGR15 green at palette 0 colour 2 */
+  rom[kPalette + 4] = 0x1F;  /* BGR15 red at palette 0 colour 2 */
+  rom[kPalette2 + 4] = 0xE0; /* BGR15 green at palette 0 colour 2 */
   rom[kPalette2 + 5] = 0x03;
-  rom[kPalette2] = 0x1F;             /* inherited colour zero: red, not black */
+  rom[kPalette2] = 0x1F; /* inherited colour zero: red, not black */
   rom[kPalette2 + 1] = 0x00;
-  rom[kPaletteUpper + 2] = 0x00;    /* BGR15 blue at palette 4 colour 1 */
+  rom[kPaletteUpper + 2] = 0x00; /* BGR15 blue at palette 4 colour 1 */
   rom[kPaletteUpper + 3] = 0x7C;
-  rom[kPalette + 0x32 * 2] = 0xE0;  /* unrelated palette entry: BGR15 green */
+  rom[kPalette + 0x32 * 2] = 0xE0; /* unrelated palette entry: BGR15 green */
   rom[kPalette + 0x32 * 2 + 1] = 0x03;
   rom[kPalette2 + 0x32 * 2] = 0xE0;
   rom[kPalette2 + 0x32 * 2 + 1] = 0x03;
   /* Profile bit 1 forces common priority onto BG2 independently of the
    * permanent $01 character-bank attribute. */
-  rom[kVideoProfiles + kProfile * kActionRoomSceneVideoProfileBytes + 4] =
-      0x02;
+  rom[kVideoProfiles + kProfile * kActionRoomSceneVideoProfileBytes + 4] = 0x02;
 
   size_t at = kScript;
-  rom[at++] = 'S'; rom[at++] = 'Y'; rom[at++] = 0;
-  rom[at++] = 0x04; rom[at++] = 0x01;
-#define COMMAND(byte, count) rom[at++] = (byte); size_t ops = at; at += (count)
-  { COMMAND(0x08, 1); rom[ops] = kProfile; }
-  { COMMAND(0x40, 6); rom[ops] = 0; rom[ops + 1] = 0x40;
-    rom[ops + 2] = 0; Put24(rom + ops + 3, kPalette); }
-  { COMMAND(0x40, 6); rom[ops] = 0; rom[ops + 1] = 0x40;
-    rom[ops + 2] = 0x40; Put24(rom + ops + 3, kPaletteUpper); }
-  { COMMAND(0x20, 7); rom[ops + 3] = 1; Put24(rom + ops + 4, kMeta1); }
-  { COMMAND(0x20, 7); rom[ops + 3] = 2; Put24(rom + ops + 4, kMeta2); }
-  { COMMAND(0x80, 6); rom[ops] = 0; rom[ops + 1] = 0x10;
-    rom[ops + 2] = 0; Put24(rom + ops + 3, kChr0); }
-  { COMMAND(0x80, 6); rom[ops] = 0; rom[ops + 1] = 0x10;
-    rom[ops + 2] = 0x10; Put24(rom + ops + 3, kChr1); }
-  { COMMAND(0x10, 4); rom[ops] = 1; Put24(rom + ops + 1, kMap1); }
-  { COMMAND(0x10, 4); rom[ops] = 2; Put24(rom + ops + 1, kMap2); }
+  rom[at++] = 'S';
+  rom[at++] = 'Y';
+  rom[at++] = 0;
+  rom[at++] = 0x04;
+  rom[at++] = 0x01;
+#define COMMAND(byte, count)                                                                       \
+  rom[at++] = (byte);                                                                              \
+  size_t ops = at;                                                                                 \
+  at += (count)
+  {
+    COMMAND(0x08, 1);
+    rom[ops] = kProfile;
+  }
+  {
+    COMMAND(0x40, 6);
+    rom[ops] = 0;
+    rom[ops + 1] = 0x40;
+    rom[ops + 2] = 0;
+    Put24(rom + ops + 3, kPalette);
+  }
+  {
+    COMMAND(0x40, 6);
+    rom[ops] = 0;
+    rom[ops + 1] = 0x40;
+    rom[ops + 2] = 0x40;
+    Put24(rom + ops + 3, kPaletteUpper);
+  }
+  {
+    COMMAND(0x20, 7);
+    rom[ops + 3] = 1;
+    Put24(rom + ops + 4, kMeta1);
+  }
+  {
+    COMMAND(0x20, 7);
+    rom[ops + 3] = 2;
+    Put24(rom + ops + 4, kMeta2);
+  }
+  {
+    COMMAND(0x80, 6);
+    rom[ops] = 0;
+    rom[ops + 1] = 0x10;
+    rom[ops + 2] = 0;
+    Put24(rom + ops + 3, kChr0);
+  }
+  {
+    COMMAND(0x80, 6);
+    rom[ops] = 0;
+    rom[ops + 1] = 0x10;
+    rom[ops + 2] = 0x10;
+    Put24(rom + ops + 3, kChr1);
+  }
+  {
+    COMMAND(0x10, 4);
+    rom[ops] = 1;
+    Put24(rom + ops + 1, kMap1);
+  }
+  {
+    COMMAND(0x10, 4);
+    rom[ops] = 2;
+    Put24(rom + ops + 1, kMap2);
+  }
   rom[at++] = 0;
   /* Room 2 deliberately has no graphics commands. The stock game inherits
    * them within the act, and an arbitrary ROM-background selection must do the
    * same rather than depending on room visit order. */
-  rom[at++] = 0x04; rom[at++] = 0x02; rom[at++] = 0;
+  rom[at++] = 0x04;
+  rom[at++] = 0x02;
+  rom[at++] = 0;
   /* Room 3 changes only the inherited palette. This pins arbitrary-source
    * switching: the output must follow the complete selected room identity,
    * not a texture/pixel cache left behind by the previous source. */
-  rom[at++] = 0x04; rom[at++] = 0x03;
-  { COMMAND(0x40, 6); rom[ops] = 0; rom[ops + 1] = 0x40;
-    rom[ops + 2] = 0; Put24(rom + ops + 3, kPalette2); }
+  rom[at++] = 0x04;
+  rom[at++] = 0x03;
+  {
+    COMMAND(0x40, 6);
+    rom[ops] = 0;
+    rom[ops + 1] = 0x40;
+    rom[ops + 2] = 0;
+    Put24(rom + ops + 3, kPalette2);
+  }
   rom[at++] = 0;
   memset(zeros, 1, 0x0100);
   rom[kMap5] = rom[kMap5 + 1] = 1;
   WriteLiteralAsset(rom + kMap5 + 2, zeros, 0x0100);
-  rom[at++] = 0x04; rom[at++] = 0x05;
-  { COMMAND(0x10, 4); rom[ops] = 2; Put24(rom + ops + 1, kMap5); }
+  rom[at++] = 0x04;
+  rom[at++] = 0x05;
+  {
+    COMMAND(0x10, 4);
+    rom[ops] = 2;
+    Put24(rom + ops + 1, kMap5);
+  }
   rom[at++] = 0;
-  rom[at++] = 0x04; rom[at++] = 0x06;
-  { COMMAND(0x10, 4); rom[ops] = 2; Put24(rom + ops + 1, kMap5); }
+  rom[at++] = 0x04;
+  rom[at++] = 0x06;
+  {
+    COMMAND(0x10, 4);
+    rom[ops] = 2;
+    Put24(rom + ops + 1, kMap5);
+  }
   rom[at++] = 0;
 #undef COMMAND
 
-  const size_t pixel_count =
-      kDioramaRomBackdropPixels * kDioramaRomBackdropPixels;
-  CHECK(DioramaRomBackdrop_LoadActionBg(
-      rom, kRomSize, 0x04, 0x01, 2, pixels, pixel_count));
+  const size_t pixel_count = kDioramaRomBackdropPixels * kDioramaRomBackdropPixels;
+  CHECK(DioramaRomBackdrop_LoadActionBg(rom, kRomSize, 0x04, 0x01, 2, pixels, pixel_count));
   CHECK(pixels[0] == 0xFFFF0000u);
   CHECK(pixels[pixel_count - 1] == 0xFFFF0000u);
   memset(pixels, 0, pixel_count * sizeof(*pixels));
-  CHECK(DioramaRomBackdrop_LoadActionBg(
-      rom, kRomSize, 0x04, 0x02, 1, pixels, pixel_count));
+  CHECK(DioramaRomBackdrop_LoadActionBg(rom, kRomSize, 0x04, 0x02, 1, pixels, pixel_count));
   CHECK(pixels[12345] == 0xFF0000FFu);
-  CHECK(DioramaRomBackdrop_LoadActionBg(
-      rom, kRomSize, 0x04, 0x03, 2, pixels, pixel_count));
+  CHECK(DioramaRomBackdrop_LoadActionBg(rom, kRomSize, 0x04, 0x03, 2, pixels, pixel_count));
   CHECK(pixels[12345] == 0xFF00FF00u);
-  CHECK(DioramaRomBackdrop_LoadActionBg(
-      rom, kRomSize, 0x04, 0x05, 2, pixels, pixel_count));
-  CHECK(pixels[0] == 0xFF000000u);  /* opaque-black cell remains authored */
-  CHECK(pixels[8] == 0xFF00FF00u);  /* mixed cell remains authored */
-  CHECK(pixels[9] == 0xFF000000u);  /* mixed-cell black survives */
+  CHECK(DioramaRomBackdrop_LoadActionBg(rom, kRomSize, 0x04, 0x05, 2, pixels, pixel_count));
+  CHECK(pixels[0] == 0xFF000000u); /* opaque-black cell remains authored */
+  CHECK(pixels[8] == 0xFF00FF00u); /* mixed cell remains authored */
+  CHECK(pixels[9] == 0xFF000000u); /* mixed-cell black survives */
   CHECK(pixels[8 * kDioramaRomBackdropPixels] ==
-        0xFFFF0000u);               /* ordinary decode uses palette zero */
-  CHECK(DioramaRomBackdrop_LoadActionBgTransparentBlack(
-      rom, kRomSize, 0x04, 0x05, 2, pixels, pixel_count));
-  CHECK(pixels[0] == 0xFF000000u);  /* opaque black is not deleted */
+        0xFFFF0000u); /* ordinary decode uses palette zero */
+  CHECK(DioramaRomBackdrop_LoadActionBgTransparentBlack(rom, kRomSize, 0x04, 0x05, 2, pixels,
+                                                        pixel_count));
+  CHECK(pixels[0] == 0xFF000000u); /* opaque black is not deleted */
   CHECK(pixels[8] == 0xFF00FF00u);
   CHECK(pixels[9] == 0xFF000000u);
+  CHECK(pixels[8 * kDioramaRomBackdropPixels] == 0xFF000000u); /* empty art retains black prefill */
+  CHECK(DioramaRomBackdrop_LoadActionBgTransparentFill(rom, kRomSize, 0x04, 0x05, 2, 0xFF123456u,
+                                                       pixels, pixel_count));
+  CHECK(pixels[0] == 0xFF000000u); /* authored opaque black still wins */
+  CHECK(pixels[8] == 0xFF00FF00u); /* non-zero tile art still wins */
   CHECK(pixels[8 * kDioramaRomBackdropPixels] ==
-        0xFF000000u);               /* empty art retains black prefill */
-  CHECK(DioramaRomBackdrop_LoadActionBgTransparentFill(
-      rom, kRomSize, 0x04, 0x05, 2, 0xFF123456u, pixels, pixel_count));
-  CHECK(pixels[0] == 0xFF000000u);  /* authored opaque black still wins */
-  CHECK(pixels[8] == 0xFF00FF00u);  /* non-zero tile art still wins */
-  CHECK(pixels[8 * kDioramaRomBackdropPixels] ==
-        0xFF123456u);               /* empty cells retain arbitrary backing */
-  CHECK(!DioramaRomBackdrop_LoadActionBgTransparentFill(
-      rom, kRomSize, 0x04, 0x05, 2, 0x00123456u, pixels, pixel_count));
+        0xFF123456u); /* empty cells retain arbitrary backing */
+  CHECK(!DioramaRomBackdrop_LoadActionBgTransparentFill(rom, kRomSize, 0x04, 0x05, 2, 0x00123456u,
+                                                        pixels, pixel_count));
   uint32_t default_fill = 0;
-  CHECK(DioramaRomBackdrop_LoadActionBgSparse(
-      rom, kRomSize, 0x04, 0x05, 2, pixels, pixel_count, &default_fill));
+  CHECK(DioramaRomBackdrop_LoadActionBgSparse(rom, kRomSize, 0x04, 0x05, 2, pixels, pixel_count,
+                                              &default_fill));
   CHECK(default_fill == 0xFFFF0000u); /* source palette colour zero */
-  CHECK(pixels[0] == 0xFF000000u);   /* authored black remains opaque */
-  CHECK(pixels[8] == 0xFF00FF00u);   /* authored colour remains opaque */
+  CHECK(pixels[0] == 0xFF000000u);    /* authored black remains opaque */
+  CHECK(pixels[8] == 0xFF00FF00u);    /* authored colour remains opaque */
   CHECK(pixels[8 * kDioramaRomBackdropPixels] == 0);
-  CHECK(!DioramaRomBackdrop_LoadActionBgSparse(
-      rom, kRomSize, 0x04, 0x05, 2, pixels, pixel_count, NULL));
-  CHECK(DioramaRomBackdrop_LoadActionBg(
-      rom, kRomSize, 0x04, 0x06, 2, pixels, pixel_count));
+  CHECK(!DioramaRomBackdrop_LoadActionBgSparse(rom, kRomSize, 0x04, 0x05, 2, pixels, pixel_count,
+                                               NULL));
+  CHECK(DioramaRomBackdrop_LoadActionBg(rom, kRomSize, 0x04, 0x06, 2, pixels, pixel_count));
   CHECK(pixels[0] == 0xFF000000u);
   CHECK(pixels[8] == 0xFF00FF00u);
   CHECK(pixels[9] == 0xFF000000u);
-  CHECK(!DioramaRomBackdrop_LoadActionBg(
-      rom, kRomSize, 0x04, 0x04, 1, pixels, pixel_count));
-  CHECK(!DioramaRomBackdrop_LoadActionBg(
-      rom, kRomSize, 0x04, 0x01, 3, pixels, pixel_count));
+  CHECK(!DioramaRomBackdrop_LoadActionBg(rom, kRomSize, 0x04, 0x04, 1, pixels, pixel_count));
+  CHECK(!DioramaRomBackdrop_LoadActionBg(rom, kRomSize, 0x04, 0x01, 3, pixels, pixel_count));
 
   ActionRoomScene scene;
   CHECK(ActionRoomScene_Load(&scene, rom, kRomSize, 0x04, 0x02));
   CHECK(scene.have_video_profile);
   CHECK(scene.have_raster_workspace);
-  CHECK(!memcmp(scene.raster_workspace, chars1,
-                kActionRoomSceneRasterWorkspaceBytes));
+  CHECK(!memcmp(scene.raster_workspace, chars1, kActionRoomSceneRasterWorkspaceBytes));
   CHECK(scene.video_profile_index == kProfile);
   CHECK(scene.video_profile[4] == 0x02);
   CHECK(ActionRoomScene_TileWidth(&scene, 1) == 32);
   CHECK(ActionRoomScene_TileHeight(&scene, 2) == 32);
   uint16_t entry = 0;
   uint8_t metatile = 0xFF;
-  CHECK(ActionRoomScene_LookupTile(
-      &scene, 2, 0, 0, &entry, &metatile));
+  CHECK(ActionRoomScene_LookupTile(&scene, 2, 0, 0, &entry, &metatile));
   CHECK(entry == 0x2100);
   CHECK(metatile == 0);
 
@@ -299,8 +339,8 @@ static void TestScenePhaseResolvers(void) {
   scene.have_character_bank[0] = true;
   scene.have_character_bank[1] = true;
   scene.have_video_profile = true;
-  scene.video_profile[23] = 0x24;  /* target 0000, stride 256, four phases */
-  scene.video_profile[24] = 0x88;  /* continuation, eight-frame cadence */
+  scene.video_profile[23] = 0x24; /* target 0000, stride 256, four phases */
+  scene.video_profile[24] = 0x88; /* continuation, eight-frame cadence */
   for (unsigned phase = 0; phase < 4; phase++)
     scene.characters[phase * 0x100] = (uint8_t)(0xA0 + phase);
 
@@ -315,11 +355,11 @@ static void TestScenePhaseResolvers(void) {
   uint8_t *characters = malloc(kActionRoomSceneCharacterBytes);
   CHECK(characters != NULL);
   if (characters) {
-    CHECK(ActionRoomScene_BuildCharacters(
-        &scene, 16, -1, characters, kActionRoomSceneCharacterBytes));
+    CHECK(ActionRoomScene_BuildCharacters(&scene, 16, -1, characters,
+                                          kActionRoomSceneCharacterBytes));
     CHECK(characters[0] == 0xA2);
-    CHECK(ActionRoomScene_BuildCharacters(
-        &scene, 0, 1, characters, kActionRoomSceneCharacterBytes));
+    CHECK(
+        ActionRoomScene_BuildCharacters(&scene, 0, 1, characters, kActionRoomSceneCharacterBytes));
     CHECK(characters[0] == 0xA1);
     free(characters);
   }
@@ -350,8 +390,7 @@ static void InitFrameScene(ActionRoomScene *scene) {
   scene->video_profile[10] = 0x14;
   for (unsigned i = 0; i < kActionRoomSceneRasterWaveformBytes; i++)
     scene->raster_waveform[i] = (uint8_t)i;
-  for (unsigned i = 0;
-       i < kActionRoomSceneRasterMosaicWaveWindowBytes; i++)
+  for (unsigned i = 0; i < kActionRoomSceneRasterMosaicWaveWindowBytes; i++)
     scene->raster_mosaic_wave_window[i] = (uint8_t)(i + 1u);
   for (unsigned bg = 0; bg < 2; bg++) {
     scene->bg[bg].have_map = true;
@@ -366,11 +405,11 @@ static void TestFrameStateAndRasterEffects(void) {
   ActionRoomScene scene;
   InitFrameScene(&scene);
   const ActionRoomSceneFrameRequest request = {
-    .camera_x = 64,
-    .camera_y = 32,
-    .game_frame = 10,
-    .animation_phase = -1,
-    .page_phase = -1,
+      .camera_x = 64,
+      .camera_y = 32,
+      .game_frame = 10,
+      .animation_phase = -1,
+      .page_phase = -1,
   };
   ActionRoomSceneFrameState state;
 
@@ -447,15 +486,12 @@ static void TestFrameStateAndRasterEffects(void) {
   CHECK(state.mosaic[223] == 0x02);
   ActionRoomSceneFrameRequest r4_high_clock = request;
   r4_high_clock.game_frame = 0x010A;
-  memset(scene.raster_mosaic_wave_window, 0,
-         sizeof(scene.raster_mosaic_wave_window));
+  memset(scene.raster_mosaic_wave_window, 0, sizeof(scene.raster_mosaic_wave_window));
   scene.raster_mosaic_wave_window[2] = 1;
-  CHECK(ActionRoomScene_BuildFrameState(
-      &scene, &r4_high_clock, &state));
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &r4_high_clock, &state));
   CHECK(state.mosaic[0] == 0x12);
   r4_high_clock.raster_entry_frame = true;
-  CHECK(ActionRoomScene_BuildFrameState(
-      &scene, &r4_high_clock, &state));
+  CHECK(ActionRoomScene_BuildFrameState(&scene, &r4_high_clock, &state));
   CHECK(state.mosaic[0] == 0x02);
   CHECK(state.mosaic[223] == 0x02);
 
@@ -531,8 +567,7 @@ static void TestFrameStateAndRasterEffects(void) {
   CHECK(state.bg_hscroll[0][223] == 206);
 }
 
-static void FillSolidCharacter(uint8_t *characters, unsigned tile,
-                               uint8_t color) {
+static void FillSolidCharacter(uint8_t *characters, unsigned tile, uint8_t color) {
   uint8_t *target = characters + (size_t)tile * 32;
   for (unsigned row = 0; row < 8; row++) {
     if (color & 1) target[row * 2] = 0xff;
@@ -558,12 +593,11 @@ static void TestNativeFrameCompositor(void) {
   scene.palette[0x02 * 2 + 1] = 0x7c;
 
   const ActionRoomSceneFrameRequest request = {
-    .animation_phase = -1,
-    .page_phase = -1,
+      .animation_phase = -1,
+      .page_phase = -1,
   };
   ActionRoomSceneFrameState state;
-  uint32_t *pixels = malloc(
-      kActionRoomSceneFramePixels * sizeof(*pixels));
+  uint32_t *pixels = malloc(kActionRoomSceneFramePixels * sizeof(*pixels));
   CHECK(pixels != NULL);
   if (!pixels) return;
 
@@ -573,37 +607,34 @@ static void TestNativeFrameCompositor(void) {
   scene.video_profile[3] = 0;
   scene.video_profile[4] = 0;
   CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
-  CHECK(ActionRoomScene_RenderNativeFrame(
-      &scene, &state, pixels, kActionRoomSceneFramePixels));
-  CHECK(pixels[0] == 0xffff0000u);  /* BG1 low outranks BG2 low. */
+  CHECK(ActionRoomScene_RenderNativeFrame(&scene, &state, pixels, kActionRoomSceneFramePixels));
+  CHECK(pixels[0] == 0xffff0000u); /* BG1 low outranks BG2 low. */
 
   scene.video_profile[4] = 2;
   CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
-  CHECK(ActionRoomScene_RenderNativeFrame(
-      &scene, &state, pixels, kActionRoomSceneFramePixels));
-  CHECK(pixels[1234] == 0xff0000ffu);  /* Forced-high BG2 wins. */
+  CHECK(ActionRoomScene_RenderNativeFrame(&scene, &state, pixels, kActionRoomSceneFramePixels));
+  CHECK(pixels[1234] == 0xff0000ffu); /* Forced-high BG2 wins. */
 
   scene.video_profile[0] = 2;
   scene.video_profile[1] = 1;
   scene.video_profile[2] = 2;
   scene.video_profile[3] = 0x42;
   CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
-  CHECK(ActionRoomScene_RenderNativeFrame(
-      &scene, &state, pixels, kActionRoomSceneFramePixels));
+  CHECK(ActionRoomScene_RenderNativeFrame(&scene, &state, pixels, kActionRoomSceneFramePixels));
   CHECK(pixels[kActionRoomSceneFramePixels - 1] == 0xff7b007bu);
   free(pixels);
 }
 
 static void TestStockRomCatalogue(const char *path) {
   static const uint8_t kExpectedProfiles[8][9] = {
-    {0},
-    {0, 0x03, 0x04, 0x05, 0x06},
-    {0, 0x07, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F},
-    {0, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15},
-    {0, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C},
-    {0, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24},
-    {0, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C},
-    {0, 0x2D, 0x06, 0x0F, 0x15, 0x1C, 0x24, 0x2C, 0x2E},
+      {0},
+      {0, 0x03, 0x04, 0x05, 0x06},
+      {0, 0x07, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F},
+      {0, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15},
+      {0, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C},
+      {0, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24},
+      {0, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C},
+      {0, 0x2D, 0x06, 0x0F, 0x15, 0x1C, 0x24, 0x2C, 0x2E},
   };
   FILE *file = fopen(path, "rb");
   CHECK(file != NULL);
@@ -614,23 +645,27 @@ static void TestStockRomCatalogue(const char *path) {
   rewind(file);
   uint8_t *rom = length > 0 ? malloc((size_t)length) : NULL;
   CHECK(rom != NULL);
-  if (!rom) { fclose(file); return; }
+  if (!rom) {
+    fclose(file);
+    return;
+  }
   CHECK(fread(rom, 1, (size_t)length, file) == (size_t)length);
   fclose(file);
 
-  const size_t pixel_count =
-      kDioramaRomBackdropPixels * kDioramaRomBackdropPixels;
+  const size_t pixel_count = kDioramaRomBackdropPixels * kDioramaRomBackdropPixels;
   uint32_t *pixels = malloc(pixel_count * sizeof(*pixels));
   CHECK(pixels != NULL);
-  if (!pixels) { free(rom); return; }
+  if (!pixels) {
+    free(rom);
+    return;
+  }
   int decoded = 0, scenes = 0, rendered = 0, animated = 0;
   int page_cycles = 0, raster = 0;
   int forced_bg2_priority = 0;
   for (uint8_t group = 1; group <= 7; group++) {
     for (uint8_t map = 1; map <= ActRaiser_ActionMapLast(group); map++) {
       ActionRoomScene scene;
-      if (!ActionRoomScene_Load(
-              &scene, rom, (size_t)length, group, map)) {
+      if (!ActionRoomScene_Load(&scene, rom, (size_t)length, group, map)) {
         printf("FAIL stock room scene %02X/%02X\n", group, map);
         failures++;
       } else {
@@ -642,13 +677,12 @@ static void TestStockRomCatalogue(const char *path) {
         CHECK((scene.video_profile[4] & 0x04) != 0);
         ActionRoomSceneFrameState state;
         const ActionRoomSceneFrameRequest request = {
-          .game_frame = 37,
-          .animation_phase = -1,
-          .page_phase = -1,
+            .game_frame = 37,
+            .animation_phase = -1,
+            .page_phase = -1,
         };
         CHECK(ActionRoomScene_BuildFrameState(&scene, &request, &state));
-        if (ActionRoomScene_RenderNativeFrame(
-                &scene, &state, pixels, kActionRoomSceneFramePixels))
+        if (ActionRoomScene_RenderNativeFrame(&scene, &state, pixels, kActionRoomSceneFramePixels))
           rendered++;
         else {
           printf("FAIL stock native frame %02X/%02X\n", group, map);
@@ -660,28 +694,24 @@ static void TestStockRomCatalogue(const char *path) {
         if (scene.video_profile[4] & 0x02) forced_bg2_priority++;
       }
       for (uint8_t bg = 1; bg <= 2; bg++) {
-        if (!DioramaRomBackdrop_LoadActionBg(
-                rom, (size_t)length, group, map, bg, pixels,
-                pixel_count)) {
-          printf("FAIL stock ROM backdrop %02X/%02X BG%u\n",
-                 group, map, bg);
+        if (!DioramaRomBackdrop_LoadActionBg(rom, (size_t)length, group, map, bg, pixels,
+                                             pixel_count)) {
+          printf("FAIL stock ROM backdrop %02X/%02X BG%u\n", group, map, bg);
           failures++;
         } else {
           decoded++;
-          if (group == kActRaiserMapGroup_Aitos &&
-              (map == 0x05 || map == 0x06) && bg == 2) {
-            CHECK(DioramaRomBackdrop_LoadActionBgTransparentBlack(
-                rom, (size_t)length, group, map, bg, pixels,
-                pixel_count));
+          if (group == kActRaiserMapGroup_Aitos && (map == 0x05 || map == 0x06) && bg == 2) {
+            CHECK(DioramaRomBackdrop_LoadActionBgTransparentBlack(rom, (size_t)length, group, map,
+                                                                  bg, pixels, pixel_count));
             unsigned opaque_black_cells = 0;
             for (unsigned tile_y = 0; tile_y < 32; tile_y++) {
               for (unsigned tile_x = 0; tile_x < 32; tile_x++) {
                 unsigned black = 0;
                 for (unsigned py = 0; py < 8; py++)
                   for (unsigned px = 0; px < 8; px++)
-                    black += pixels[(tile_y * 8 + py) *
-                                        kDioramaRomBackdropPixels +
-                                    tile_x * 8 + px] == 0xFF000000u;
+                    black +=
+                        pixels[(tile_y * 8 + py) * kDioramaRomBackdropPixels + tile_x * 8 + px] ==
+                        0xFF000000u;
                 if (black == 64) opaque_black_cells++;
               }
             }

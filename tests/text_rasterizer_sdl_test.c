@@ -21,41 +21,40 @@
 #error AR_TEST_ARABIC_FONT_PATH must identify the Arabic fallback font
 #endif
 
-static int g_failures;
+static int s_failures;
 static ArHostFontResources s_font_store;
 static ArFontResourceId s_test_font;
 
-#define CHECK(condition) do {                                                \
-  if (!(condition)) {                                                        \
-    fprintf(stderr, "%s:%d: CHECK failed: %s\n",                            \
-            __FILE__, __LINE__, #condition);                                 \
-    ++g_failures;                                                            \
-  }                                                                          \
-} while (0)
+#define CHECK(condition)                                                                           \
+  do {                                                                                             \
+    if (!(condition)) {                                                                            \
+      fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #condition);                \
+      ++s_failures;                                                                                \
+    }                                                                                              \
+  } while (0)
 
 static ArTextRasterRequest Request(const char *text) {
   return (ArTextRasterRequest){
-    .struct_size = sizeof(ArTextRasterRequest),
-    .abi_version = AR_TEXT_RASTER_REQUEST_ABI_VERSION,
-    .utf8 = text,
-    .utf8_bytes = strlen(text),
-    .font_stack_id = "actraiser-default",
-    .font_stack_id_bytes = strlen("actraiser-default"),
-    .source_revision = 1,
-    .font_revision = 7,
-    .style_id = kArTextStyle_RetailBlueWhiteBands,
-    .flags = kArTextRasterFlag_WrapWords |
-             kArTextRasterFlag_PreserveHardBreaks |
-             kArTextRasterFlag_CropHorizontalWhitespace,
-    .direction = kArTextDirection_LeftToRight,
-    .alignment = kArTextHorizontalAlignment_Leading,
-    .font_pixels = 24,
-    .minimum_font_pixels = 24,
-    .maximum_width = 220,
-    .maximum_height = 160,
-    .filter = kArRenderFilter_Linear,
-    .language_bcp47 = "fr",
-    .language_bcp47_bytes = 2,
+      .struct_size = sizeof(ArTextRasterRequest),
+      .abi_version = AR_TEXT_RASTER_REQUEST_ABI_VERSION,
+      .utf8 = text,
+      .utf8_bytes = strlen(text),
+      .font_stack_id = "actraiser-default",
+      .font_stack_id_bytes = strlen("actraiser-default"),
+      .source_revision = 1,
+      .font_revision = 7,
+      .style_id = kArTextStyle_RetailBlueWhiteBands,
+      .flags = kArTextRasterFlag_WrapWords | kArTextRasterFlag_PreserveHardBreaks |
+               kArTextRasterFlag_CropHorizontalWhitespace,
+      .direction = kArTextDirection_LeftToRight,
+      .alignment = kArTextHorizontalAlignment_Leading,
+      .font_pixels = 24,
+      .minimum_font_pixels = 24,
+      .maximum_width = 220,
+      .maximum_height = 160,
+      .filter = kArRenderFilter_Linear,
+      .language_bcp47 = "fr",
+      .language_bcp47_bytes = 2,
   };
 }
 
@@ -81,15 +80,13 @@ static void TestPreferredLineBreaks(const ArTextRasterizer *rasterizer) {
     const char *marker;
     int width;
   } cases[] = {
-      {"Sir Derrick continues the adventure.",
-       "Sir Derrick\ncontinues the adventure.", " continues", 300},
+      {"Sir Derrick continues the adventure.", "Sir Derrick\ncontinues the adventure.",
+       " continues", 300},
       {"This preceding segment has already wrapped across the window short tail.",
-       "This preceding segment has already wrapped across the window short tail.",
-       " short", 140},
+       "This preceding segment has already wrapped across the window short tail.", " short", 140},
   };
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
-    const size_t at = (size_t)(strstr(cases[i].text, cases[i].marker) -
-                               cases[i].text);
+    const size_t at = (size_t)(strstr(cases[i].text, cases[i].marker) - cases[i].text);
     uint8_t preferred[AR_TEXT_BOUNDARY_BYTES(128)] = {0};
     ArTextBoundary_Set(preferred, at, true);
     ArTextRasterRequest request = Request(cases[i].text);
@@ -100,34 +97,29 @@ static void TestPreferredLineBreaks(const ArTextRasterizer *rasterizer) {
     request.preferred_line_break_capacity = 128;
     ArTextBitmap actual = {0}, reference = {0};
     char error[256] = {0};
-    CHECK(ArTextRasterizer_Rasterize(
-        rasterizer, &request, &actual, NULL, error, sizeof(error)));
+    CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &actual, NULL, error, sizeof(error)));
     request.utf8 = cases[i].resolved;
     request.utf8_bytes = strlen(cases[i].resolved);
     request.preferred_line_breaks = NULL;
     request.preferred_line_break_capacity = 0;
-    CHECK(ArTextRasterizer_Rasterize(
-        rasterizer, &request, &reference, NULL, error, sizeof(error)));
-    if (actual.pixels && reference.pixels)
-      CHECK(BitmapHash(&actual) == BitmapHash(&reference));
+    CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &reference, NULL, error, sizeof(error)));
+    if (actual.pixels && reference.pixels) CHECK(BitmapHash(&actual) == BitmapHash(&reference));
     if (actual.pixels) ArTextRasterizer_ReleaseBitmap(rasterizer, &actual);
-    if (reference.pixels)
-      ArTextRasterizer_ReleaseBitmap(rasterizer, &reference);
+    if (reference.pixels) ArTextRasterizer_ReleaseBitmap(rasterizer, &reference);
   }
 }
 
 static uint32_t Pixel(const ArTextBitmap *bitmap, int x, int y) {
   uint32_t pixel = 0;
   if (x >= 0 && y >= 0 && x < bitmap->width && y < bitmap->height)
-    memcpy(&pixel, (const uint8_t *)bitmap->pixels +
-        (size_t)y * bitmap->pitch_bytes + (size_t)x * 4, 4);
+    memcpy(&pixel,
+           (const uint8_t *)bitmap->pixels + (size_t)y * bitmap->pitch_bytes + (size_t)x * 4, 4);
   return pixel;
 }
 
 static int ClusterX(const ArTextBitmap *bitmap, size_t end) {
   for (size_t i = 0; i < bitmap->reveal_cluster_count; ++i)
-    if (bitmap->reveal_clusters[i].end_utf8_byte == end)
-      return bitmap->reveal_clusters[i].x;
+    if (bitmap->reveal_clusters[i].end_utf8_byte == end) return bitmap->reveal_clusters[i].x;
   return -1;
 }
 
@@ -143,28 +135,37 @@ static int ClusterLine(const ArTextBitmap *bitmap, size_t end) {
  * or the implementation's own bidi resolver. */
 static void TestBidiOrder(const ArTextRasterizer *rasterizer) {
   static const char *const samples[] = {
-      "القوة 123", "مرحبا ABC", "Video ABC 123", "Sir مرحبا 123",
-      "مرحبا ABC 123", "مرحبا \xe2\x81\xa8" "ABC" "\xe2\x81\xa9 123",
+      "القوة 123",
+      "مرحبا ABC",
+      "Video ABC 123",
+      "Sir مرحبا 123",
+      "مرحبا ABC 123",
+      "مرحبا \xe2\x81\xa8"
+      "ABC"
+      "\xe2\x81\xa9 123",
       "مرحبا\nABC 123",
-      "שלום ABC 123", "فارسی ABC 123", "اردو ABC 123",
+      "שלום ABC 123",
+      "فارسی ABC 123",
+      "اردو ABC 123",
   };
-  for (int direction = kArTextDirection_Auto;
-       direction <= kArTextDirection_RightToLeft; ++direction) {
+  for (int direction = kArTextDirection_Auto; direction <= kArTextDirection_RightToLeft;
+       ++direction) {
     for (size_t i = 0; i < sizeof(samples) / sizeof(samples[0]); ++i) {
       ArTextRasterRequest request = Request(samples[i]);
       request.direction = (ArTextDirection)direction;
-      request.flags = kArTextRasterFlag_WrapWords |
-          kArTextRasterFlag_PreserveHardBreaks | kArTextRasterFlag_IncludeRevealClusters;
+      request.flags = kArTextRasterFlag_WrapWords | kArTextRasterFlag_PreserveHardBreaks |
+                      kArTextRasterFlag_IncludeRevealClusters;
       request.maximum_width = 600;
       ArTextBitmap bitmap = {0};
       char error[256] = {0};
-      const bool ok = ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap,
-                                                NULL, error, sizeof(error));
+      const bool ok =
+          ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error));
       CHECK(ok);
       if (!ok) continue;
       CHECK(bitmap.paragraph_direction == (direction == kArTextDirection_Auto
-          ? ((i == 2 || i == 3) ? kArTextDirection_LeftToRight : kArTextDirection_RightToLeft)
-          : (ArTextDirection)direction));
+                                               ? ((i == 2 || i == 3) ? kArTextDirection_LeftToRight
+                                                                     : kArTextDirection_RightToLeft)
+                                               : (ArTextDirection)direction));
       size_t previous = 0;
       for (size_t c = 0; c < bitmap.reveal_cluster_count; ++c) {
         CHECK(bitmap.reveal_clusters[c].end_utf8_byte > previous);
@@ -197,71 +198,112 @@ static void TestBidiOrder(const ArTextRasterizer *rasterizer) {
 }
 
 static void TestValueIsolation(const ArTextRasterizer *rasterizer) {
-  static const struct { const char *text, *marked, *value; ArTextDirection direction; } cases[] = {
-    {"مرحبا A-B 123!", "مرحبا \xe2\x81\xa8" "A-B" "\xe2\x81\xa9 123!", "A-B", kArTextDirection_Auto},
-    {"مرحبا -123.45!", "مرحبا \xe2\x81\xa6" "-123.45" "\xe2\x81\xa9!", "-123.45", kArTextDirection_LeftToRight},
-    {"Sir (مرحبا), 42", "Sir (\xe2\x81\xa8مرحبا\xe2\x81\xa9), 42", "مرحبا", kArTextDirection_Auto},
-    {"Sir (שָׁלוֹם), 42", "Sir (\xe2\x81\xa8שָׁלוֹם\xe2\x81\xa9), 42", "שָׁלוֹם", kArTextDirection_Auto},
-    {"Sir فارسی, 42", "Sir \xe2\x81\xa8فارسی\xe2\x81\xa9, 42", "فارسی", kArTextDirection_Auto},
-    {"Sir اردو, 42", "Sir \xe2\x81\xa8اردو\xe2\x81\xa9, 42", "اردو", kArTextDirection_Auto},
-    {"Sir ABC\nDEF!", "Sir \xe2\x81\xa8" "ABC\xe2\x81\xa9\n\xe2\x81\xa8" "DEF\xe2\x81\xa9!", "ABC\nDEF", kArTextDirection_Auto},
-    /* Inserted text cannot close its host isolate or leave a nested isolate
-     * open across the value boundary. Only the private layout copy changes. */
-    {"مرحبا A\xe2\x81\xa9-B!", "مرحبا \xe2\x81\xa8" "A\xe2\x81\xa0-B\xe2\x81\xa9!", "A\xe2\x81\xa9-B", kArTextDirection_Auto},
-    {"Sir A\xe2\x81\xa7مرحبا!", "Sir \xe2\x81\xa8" "A\xe2\x81\xa7مرحبا\xe2\x81\xa9\xe2\x81\xa9!", "A\xe2\x81\xa7مرحبا", kArTextDirection_Auto},
-    {"Sir A\xe2\x81\xa7مرحبا\xe2\x81\xa9-B!", "Sir \xe2\x81\xa8" "A\xe2\x81\xa7مرحبا\xe2\x81\xa9-B\xe2\x81\xa9!", "A\xe2\x81\xa7مرحبا\xe2\x81\xa9-B", kArTextDirection_Auto},
+  static const struct {
+    const char *text, *marked, *value;
+    ArTextDirection direction;
+  } cases[] = {
+      {"مرحبا A-B 123!",
+       "مرحبا \xe2\x81\xa8"
+       "A-B"
+       "\xe2\x81\xa9 123!",
+       "A-B", kArTextDirection_Auto},
+      {"مرحبا -123.45!",
+       "مرحبا \xe2\x81\xa6"
+       "-123.45"
+       "\xe2\x81\xa9!",
+       "-123.45", kArTextDirection_LeftToRight},
+      {"Sir (مرحبا), 42", "Sir (\xe2\x81\xa8مرحبا\xe2\x81\xa9), 42", "مرحبا",
+       kArTextDirection_Auto},
+      {"Sir (שָׁלוֹם), 42", "Sir (\xe2\x81\xa8שָׁלוֹם\xe2\x81\xa9), 42", "שָׁלוֹם",
+       kArTextDirection_Auto},
+      {"Sir فارسی, 42", "Sir \xe2\x81\xa8فارسی\xe2\x81\xa9, 42", "فارسی", kArTextDirection_Auto},
+      {"Sir اردو, 42", "Sir \xe2\x81\xa8اردو\xe2\x81\xa9, 42", "اردو", kArTextDirection_Auto},
+      {"Sir ABC\nDEF!",
+       "Sir \xe2\x81\xa8"
+       "ABC\xe2\x81\xa9\n\xe2\x81\xa8"
+       "DEF\xe2\x81\xa9!",
+       "ABC\nDEF", kArTextDirection_Auto},
+      /* Inserted text cannot close its host isolate or leave a nested isolate
+       * open across the value boundary. Only the private layout copy changes. */
+      {"مرحبا A\xe2\x81\xa9-B!",
+       "مرحبا \xe2\x81\xa8"
+       "A\xe2\x81\xa0-B\xe2\x81\xa9!",
+       "A\xe2\x81\xa9-B", kArTextDirection_Auto},
+      {"Sir A\xe2\x81\xa7مرحبا!",
+       "Sir \xe2\x81\xa8"
+       "A\xe2\x81\xa7مرحبا\xe2\x81\xa9\xe2\x81\xa9!",
+       "A\xe2\x81\xa7مرحبا", kArTextDirection_Auto},
+      {"Sir A\xe2\x81\xa7مرحبا\xe2\x81\xa9-B!",
+       "Sir \xe2\x81\xa8"
+       "A\xe2\x81\xa7مرحبا\xe2\x81\xa9-B\xe2\x81\xa9!",
+       "A\xe2\x81\xa7مرحبا\xe2\x81\xa9-B", kArTextDirection_Auto},
   };
-  for (size_t c = 0; c < sizeof(cases)/sizeof(cases[0]); ++c)
-  for (int direction = kArTextDirection_Auto; direction <= kArTextDirection_RightToLeft; ++direction)
-  for (int width = 100; width <= 500; width += 200) {
-    ArTextRasterRequest request = Request(cases[c].text);
-    const size_t start = (size_t)(strstr(cases[c].text, cases[c].value) - cases[c].text);
-    ArTextBidiSpan span = {(uint32_t)start, (uint32_t)(start+strlen(cases[c].value)), cases[c].direction};
-    request.bidi_spans = &span; request.bidi_span_count = 1;
-    request.direction = direction;
-    request.flags |= kArTextRasterFlag_IncludeRevealClusters | kArTextRasterFlag_SlantAsciiNumerals;
-    request.shadow_enabled = true;
-    request.maximum_width = width; request.maximum_height = 600;
-    ArTextBitmap actual, reference;
-    char error[256] = {0};
-    bool ok = ArTextRasterizer_Rasterize(rasterizer, &request, &actual, NULL, error, sizeof(error));
-    CHECK(ok);
-    if (!ok) { fprintf(stderr,"value isolation: %s\n",error); continue; }
-    ArTextRasterRequest manual = request;
-    manual.utf8 = cases[c].marked; manual.utf8_bytes = strlen(manual.utf8);
-    manual.bidi_spans = NULL; manual.bidi_span_count = 0;
-    ok = ArTextRasterizer_Rasterize(rasterizer, &manual, &reference, NULL, error, sizeof(error));
-    CHECK(ok);
-    if (ok) {
-      CHECK(BitmapHash(&actual) == BitmapHash(&reference));
-      if (BitmapHash(&actual) != BitmapHash(&reference)) fprintf(stderr,
-          "isolation pixels c=%zu d=%d w=%d size=%dx%d vs %dx%d\n",c,direction,width,
-          actual.width,actual.height,reference.width,reference.height);
-      ArTextRasterizer_ReleaseBitmap(rasterizer,&reference);
-    }
-    else fprintf(stderr,"manual isolate c=%zu d=%d w=%d: %s\n",c,direction,width,error);
-    size_t last = 0;
-    for (size_t i = 0; i < actual.reveal_cluster_count; ++i) {
-      const ArTextRevealCluster *cluster = &actual.reveal_clusters[i];
-      CHECK(cluster->end_utf8_byte > last && cluster->end_utf8_byte <= request.utf8_bytes);
-      last = cluster->end_utf8_byte;
-    }
-    CHECK(last == request.utf8_bytes);
-    ArTextRasterizer_ReleaseBitmap(rasterizer,&actual);
-  }
+  for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); ++c)
+    for (int direction = kArTextDirection_Auto; direction <= kArTextDirection_RightToLeft;
+         ++direction)
+      for (int width = 100; width <= 500; width += 200) {
+        ArTextRasterRequest request = Request(cases[c].text);
+        const size_t start = (size_t)(strstr(cases[c].text, cases[c].value) - cases[c].text);
+        ArTextBidiSpan span = {(uint32_t)start, (uint32_t)(start + strlen(cases[c].value)),
+                               cases[c].direction};
+        request.bidi_spans = &span;
+        request.bidi_span_count = 1;
+        request.direction = direction;
+        request.flags |=
+            kArTextRasterFlag_IncludeRevealClusters | kArTextRasterFlag_SlantAsciiNumerals;
+        request.shadow_enabled = true;
+        request.maximum_width = width;
+        request.maximum_height = 600;
+        ArTextBitmap actual, reference;
+        char error[256] = {0};
+        bool ok =
+            ArTextRasterizer_Rasterize(rasterizer, &request, &actual, NULL, error, sizeof(error));
+        CHECK(ok);
+        if (!ok) {
+          fprintf(stderr, "value isolation: %s\n", error);
+          continue;
+        }
+        ArTextRasterRequest manual = request;
+        manual.utf8 = cases[c].marked;
+        manual.utf8_bytes = strlen(manual.utf8);
+        manual.bidi_spans = NULL;
+        manual.bidi_span_count = 0;
+        ok =
+            ArTextRasterizer_Rasterize(rasterizer, &manual, &reference, NULL, error, sizeof(error));
+        CHECK(ok);
+        if (ok) {
+          CHECK(BitmapHash(&actual) == BitmapHash(&reference));
+          if (BitmapHash(&actual) != BitmapHash(&reference))
+            fprintf(stderr, "isolation pixels c=%zu d=%d w=%d size=%dx%d vs %dx%d\n", c, direction,
+                    width, actual.width, actual.height, reference.width, reference.height);
+          ArTextRasterizer_ReleaseBitmap(rasterizer, &reference);
+        } else
+          fprintf(stderr, "manual isolate c=%zu d=%d w=%d: %s\n", c, direction, width, error);
+        size_t last = 0;
+        for (size_t i = 0; i < actual.reveal_cluster_count; ++i) {
+          const ArTextRevealCluster *cluster = &actual.reveal_clusters[i];
+          CHECK(cluster->end_utf8_byte > last && cluster->end_utf8_byte <= request.utf8_bytes);
+          last = cluster->end_utf8_byte;
+        }
+        CHECK(last == request.utf8_bytes);
+        ArTextRasterizer_ReleaseBitmap(rasterizer, &actual);
+      }
   /* A fitted table cell can borrow a source span crossing its view boundary. */
-  ArTextBidiSpan spans[] = {{0,3,kArTextDirection_Auto},{3,6,kArTextDirection_LeftToRight}};
+  ArTextBidiSpan spans[] = {{0, 3, kArTextDirection_Auto}, {3, 6, kArTextDirection_LeftToRight}};
   ArTextRasterRequest request = Request("A12");
   request.flags = kArTextRasterFlag_IncludeRevealClusters;
-  request.bidi_spans = spans; request.bidi_span_count = 2; request.bidi_source_offset = 2;
+  request.bidi_spans = spans;
+  request.bidi_span_count = 2;
+  request.bidi_source_offset = 2;
   request.direction = kArTextDirection_RightToLeft;
-  ArTextBitmap bitmap; char error[256];
-  bool ok = ArTextRasterizer_Rasterize(rasterizer,&request,&bitmap,NULL,error,sizeof(error));
+  ArTextBitmap bitmap;
+  char error[256];
+  bool ok = ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error));
   CHECK(ok);
   if (ok) {
-    CHECK(ClusterX(&bitmap,2) < ClusterX(&bitmap,3));
+    CHECK(ClusterX(&bitmap, 2) < ClusterX(&bitmap, 3));
     CHECK(bitmap.reveal_cluster_count == 3);
-    ArTextRasterizer_ReleaseBitmap(rasterizer,&bitmap);
+    ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
   }
 }
 
@@ -269,40 +311,51 @@ static void TestBidiSeparators(const ArTextRasterizer *rasterizer) {
   const char *separators[] = {"\n", "\r", "\r\n", "\xc2\x85", "\xe2\x80\xa8", "\xe2\x80\xa9"};
   const char *prefixes[] = {"مرحبا", "ABC"};
   for (size_t p = 0; p < 2; ++p)
-  for (size_t s = 0; s < sizeof(separators)/sizeof(separators[0]); ++s)
-  for (int d = kArTextDirection_Auto; d <= kArTextDirection_RightToLeft; ++d) {
-    char text[128], manual[128], error[256];
-    snprintf(text, sizeof(text), "%s%sXYZ 123", prefixes[p], separators[s]);
-    snprintf(manual, sizeof(manual), "%s\nXYZ 123", prefixes[p]);
-    ArTextRasterRequest request = Request(text);
-    request.direction = d; request.maximum_width = 500;
-    request.flags |= kArTextRasterFlag_IncludeRevealClusters;
-    ArTextBitmap actual, reference;
-    bool ok = ArTextRasterizer_Rasterize(rasterizer, &request, &actual, NULL, error, sizeof(error));
-    CHECK(ok); if (!ok) continue;
-    request.utf8 = manual; request.utf8_bytes = strlen(manual);
-    /* Compare separator handling within the run-layout backend, not hinting
-     * differences in SDL_ttf's ordinary ASCII multiline fast path. A source
-     * range outside this sliced view adds no isolate or changed text. */
-    const ArTextBidiSpan outside = {200, 201, kArTextDirection_Auto};
-    if (s) { request.bidi_spans = &outside; request.bidi_span_count = 1; }
-    /* U+2028 is a line break, not a new bidi paragraph: retain its base. */
-    if (s == 4 && d == kArTextDirection_Auto)
-      request.direction = p ? kArTextDirection_LeftToRight : kArTextDirection_RightToLeft;
-    ok = ArTextRasterizer_Rasterize(rasterizer, &request, &reference, NULL, error, sizeof(error));
-    CHECK(ok);
-    if (ok) {
-      CHECK(BitmapHash(&actual) == BitmapHash(&reference));
-      if (BitmapHash(&actual) != BitmapHash(&reference)) fprintf(stderr, "separator p=%zu s=%zu d=%d: %dx%d vs %dx%d\n", p, s, d, actual.width, actual.height, reference.width, reference.height);
-      ArTextRasterizer_ReleaseBitmap(rasterizer, &reference);
-    }
-    CHECK(actual.reveal_cluster_count > 0);
-    if (actual.reveal_cluster_count) {
-      const ArTextRevealCluster *last = &actual.reveal_clusters[actual.reveal_cluster_count-1];
-      CHECK(last->line_index == 1 && last->end_utf8_byte == strlen(text));
-    }
-    ArTextRasterizer_ReleaseBitmap(rasterizer, &actual);
-  }
+    for (size_t s = 0; s < sizeof(separators) / sizeof(separators[0]); ++s)
+      for (int d = kArTextDirection_Auto; d <= kArTextDirection_RightToLeft; ++d) {
+        char text[128], manual[128], error[256];
+        snprintf(text, sizeof(text), "%s%sXYZ 123", prefixes[p], separators[s]);
+        snprintf(manual, sizeof(manual), "%s\nXYZ 123", prefixes[p]);
+        ArTextRasterRequest request = Request(text);
+        request.direction = d;
+        request.maximum_width = 500;
+        request.flags |= kArTextRasterFlag_IncludeRevealClusters;
+        ArTextBitmap actual, reference;
+        bool ok =
+            ArTextRasterizer_Rasterize(rasterizer, &request, &actual, NULL, error, sizeof(error));
+        CHECK(ok);
+        if (!ok) continue;
+        request.utf8 = manual;
+        request.utf8_bytes = strlen(manual);
+        /* Compare separator handling within the run-layout backend, not hinting
+         * differences in SDL_ttf's ordinary ASCII multiline fast path. A source
+         * range outside this sliced view adds no isolate or changed text. */
+        const ArTextBidiSpan outside = {200, 201, kArTextDirection_Auto};
+        if (s) {
+          request.bidi_spans = &outside;
+          request.bidi_span_count = 1;
+        }
+        /* U+2028 is a line break, not a new bidi paragraph: retain its base. */
+        if (s == 4 && d == kArTextDirection_Auto)
+          request.direction = p ? kArTextDirection_LeftToRight : kArTextDirection_RightToLeft;
+        ok = ArTextRasterizer_Rasterize(rasterizer, &request, &reference, NULL, error,
+                                        sizeof(error));
+        CHECK(ok);
+        if (ok) {
+          CHECK(BitmapHash(&actual) == BitmapHash(&reference));
+          if (BitmapHash(&actual) != BitmapHash(&reference))
+            fprintf(stderr, "separator p=%zu s=%zu d=%d: %dx%d vs %dx%d\n", p, s, d, actual.width,
+                    actual.height, reference.width, reference.height);
+          ArTextRasterizer_ReleaseBitmap(rasterizer, &reference);
+        }
+        CHECK(actual.reveal_cluster_count > 0);
+        if (actual.reveal_cluster_count) {
+          const ArTextRevealCluster *last =
+              &actual.reveal_clusters[actual.reveal_cluster_count - 1];
+          CHECK(last->line_index == 1 && last->end_utf8_byte == strlen(text));
+        }
+        ArTextRasterizer_ReleaseBitmap(rasterizer, &actual);
+      }
 }
 
 static void TestBidiLines(const ArTextRasterizer *rasterizer) {
@@ -310,8 +363,8 @@ static void TestBidiLines(const ArTextRasterizer *rasterizer) {
   for (int alignment = kArTextHorizontalAlignment_Leading;
        alignment <= kArTextHorizontalAlignment_Right; ++alignment) {
     ArTextRasterRequest request = Request("مرحبا بكم\nمرحبا");
-    request.flags = kArTextRasterFlag_WrapWords |
-        kArTextRasterFlag_PreserveHardBreaks | kArTextRasterFlag_IncludeRevealClusters;
+    request.flags = kArTextRasterFlag_WrapWords | kArTextRasterFlag_PreserveHardBreaks |
+                    kArTextRasterFlag_IncludeRevealClusters;
     request.direction = kArTextDirection_RightToLeft;
     request.alignment = (ArTextHorizontalAlignment)alignment;
     request.maximum_width = 350;
@@ -328,18 +381,21 @@ static void TestBidiLines(const ArTextRasterizer *rasterizer) {
       if (c->x + c->width > right[c->line_index]) right[c->line_index] = c->x + c->width;
     }
     for (int line = 0; line < 2; ++line) {
-      if (alignment == kArTextHorizontalAlignment_Leading || alignment == kArTextHorizontalAlignment_Right)
+      if (alignment == kArTextHorizontalAlignment_Leading ||
+          alignment == kArTextHorizontalAlignment_Right)
         CHECK(abs(right[line] - 350) <= 3);
-      else if (alignment == kArTextHorizontalAlignment_Trailing || alignment == kArTextHorizontalAlignment_Left)
+      else if (alignment == kArTextHorizontalAlignment_Trailing ||
+               alignment == kArTextHorizontalAlignment_Left)
         CHECK(left[line] <= 3);
-      else CHECK(abs(left[line] - (350 - right[line])) <= 3);
+      else
+        CHECK(abs(left[line] - (350 - right[line])) <= 3);
     }
     ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
   }
   for (int width = 100; width <= 200; width += 25) {
     ArTextRasterRequest request = Request("مرحبا ABC 123 مرحبا ABC 123 مرحبا");
-    request.flags = kArTextRasterFlag_WrapWords |
-        kArTextRasterFlag_PreserveHardBreaks | kArTextRasterFlag_IncludeRevealClusters;
+    request.flags = kArTextRasterFlag_WrapWords | kArTextRasterFlag_PreserveHardBreaks |
+                    kArTextRasterFlag_IncludeRevealClusters;
     request.direction = kArTextDirection_RightToLeft;
     request.maximum_width = width;
     request.maximum_height = 600;
@@ -369,14 +425,15 @@ static void TestBidiLines(const ArTextRasterizer *rasterizer) {
   }
   /* RTL word wrapping recognizes breakable Unicode spacing, rather than
    * splitting the following Latin word as if the spacing were a glyph. */
-  ArTextRasterRequest spaced = Request("مرحبا\xe2\x80\x83" "ABCDEFGHIJ");
+  ArTextRasterRequest spaced = Request("مرحبا\xe2\x80\x83"
+                                       "ABCDEFGHIJ");
   spaced.flags |= kArTextRasterFlag_IncludeRevealClusters;
   spaced.direction = kArTextDirection_RightToLeft;
   spaced.maximum_width = 110;
   spaced.maximum_height = 600;
   ArTextBitmap spaced_bitmap = {0};
-  CHECK(ArTextRasterizer_Rasterize(rasterizer, &spaced, &spaced_bitmap,
-                                    NULL, error, sizeof(error)));
+  CHECK(
+      ArTextRasterizer_Rasterize(rasterizer, &spaced, &spaced_bitmap, NULL, error, sizeof(error)));
   if (spaced_bitmap.pixels) {
     const size_t latin_first_end = strlen("مرحبا\xe2\x80\x83") + 1u;
     CHECK(ClusterLine(&spaced_bitmap, latin_first_end) >= 1);
@@ -389,8 +446,7 @@ static void TestBidiLines(const ArTextRasterizer *rasterizer) {
  * ligatures, accents and RTL text. Cropping must retain that contract. */
 static void TestEffectOwnership(const ArTextRasterizer *rasterizer) {
   static const char *const samples[] = {
-      "Fillmore", "Égj", "j", "0123456789/", "M g", "E\xcc\x81quipe",
-      "office", "日本語", "العربية",
+      "Fillmore", "Égj", "j", "0123456789/", "M g", "E\xcc\x81quipe", "office", "日本語", "العربية",
   };
   const int sizes[] = {8, 16, 24, 32, 40};
   char error[256];
@@ -401,12 +457,11 @@ static void TestEffectOwnership(const ArTextRasterizer *rasterizer) {
         request.font_pixels = request.minimum_font_pixels = sizes[s];
         request.maximum_width = 2048;
         request.maximum_height = 512;
-        request.flags = kArTextRasterFlag_IncludeRevealClusters |
-            (italic ? kArTextRasterFlag_Italic : 0u);
+        request.flags =
+            kArTextRasterFlag_IncludeRevealClusters | (italic ? kArTextRasterFlag_Italic : 0u);
         request.direction = kArTextDirection_Auto;
         ArTextBitmap plain;
-        if (!ArTextRasterizer_Rasterize(rasterizer, &request, &plain, NULL,
-                                        error, sizeof(error))) {
+        if (!ArTextRasterizer_Rasterize(rasterizer, &request, &plain, NULL, error, sizeof(error))) {
           CHECK(false);
           continue;
         }
@@ -415,11 +470,12 @@ static void TestEffectOwnership(const ArTextRasterizer *rasterizer) {
         for (int shape = kArTextShadow_Diagonal; shape <= kArTextShadow_Keyline; ++shape) {
           request.shadow_shape = (ArTextShadowShape)shape;
           for (int crop = 0; crop <= 1; ++crop) {
-            if (crop) request.flags |= kArTextRasterFlag_CropHorizontalWhitespace |
-                                       kArTextRasterFlag_CropVerticalWhitespace;
+            if (crop)
+              request.flags |= kArTextRasterFlag_CropHorizontalWhitespace |
+                               kArTextRasterFlag_CropVerticalWhitespace;
             ArTextBitmap styled;
-            const bool ok = ArTextRasterizer_Rasterize(rasterizer, &request,
-                &styled, NULL, error, sizeof(error));
+            const bool ok = ArTextRasterizer_Rasterize(rasterizer, &request, &styled, NULL, error,
+                                                       sizeof(error));
             CHECK(ok);
             if (!ok) continue;
             CHECK(styled.pixel_owners != NULL);
@@ -438,8 +494,8 @@ static void TestEffectOwnership(const ArTextRasterizer *rasterizer) {
                 if (crop) continue;
                 uint32_t expected = Pixel(&plain, x, y);
                 if (!(expected & 255)) {
-                  uint32_t alpha = Pixel(&plain, x - step,
-                      shape == kArTextShadow_Diagonal ? y - step : y) & 255;
+                  uint32_t alpha =
+                      Pixel(&plain, x - step, shape == kArTextShadow_Diagonal ? y - step : y) & 255;
                   if (shape == kArTextShadow_Keyline) {
                     const uint32_t below = Pixel(&plain, x, y - step) & 255;
                     if (below > alpha) alpha = below;
@@ -458,9 +514,8 @@ static void TestEffectOwnership(const ArTextRasterizer *rasterizer) {
       }
 }
 
-static bool BottomClusterInk(
-    const ArTextBitmap *bitmap, size_t end_utf8_byte,
-    int *bottom_y, uint8_t *red, uint8_t *green, uint8_t *blue) {
+static bool BottomClusterInk(const ArTextBitmap *bitmap, size_t end_utf8_byte, int *bottom_y,
+                             uint8_t *red, uint8_t *green, uint8_t *blue) {
   if (!bitmap || !bitmap->pixels || !bitmap->reveal_clusters) return false;
   const ArTextRevealCluster *owner = NULL;
   for (size_t index = 0; index < bitmap->reveal_cluster_count; ++index) {
@@ -470,16 +525,14 @@ static bool BottomClusterInk(
     }
   }
   if (!owner) return false;
-  const SDL_PixelFormatDetails *details =
-      SDL_GetPixelFormatDetails(SDL_PIXELFORMAT_RGBA8888);
+  const SDL_PixelFormatDetails *details = SDL_GetPixelFormatDetails(SDL_PIXELFORMAT_RGBA8888);
   if (!details) return false;
   const uint8_t *pixels = (const uint8_t *)bitmap->pixels;
   for (int y = owner->y + owner->height - 1; y >= owner->y; --y) {
     for (int x = owner->x; x < owner->x + owner->width; ++x) {
       uint32_t pixel;
       uint8_t alpha;
-      memcpy(&pixel, pixels + (size_t)y * bitmap->pitch_bytes +
-             (size_t)x * 4u, sizeof(pixel));
+      memcpy(&pixel, pixels + (size_t)y * bitmap->pitch_bytes + (size_t)x * 4u, sizeof(pixel));
       SDL_GetRGBA(pixel, details, NULL, red, green, blue, &alpha);
       if (!alpha) continue;
       if (bottom_y) *bottom_y = y;
@@ -490,9 +543,20 @@ static bool BottomClusterInk(
 }
 
 static void TestNumeralStyling(const ArTextRasterizer *rasterizer) {
-  const char *const samples[] = {"ACT 1", "Étage 9", "日本 2", "العربية 3", "A 1\xcc\x81",
-      "Level 300", "Level  \t300", "Level 9 needs 300", "Level\n300",
-      "Level\xe2\x80\x83" "300", "Level\xe3\x80\x80" "300", "Level\r\n300"};
+  const char *const samples[] = {"ACT 1",
+                                 "Étage 9",
+                                 "日本 2",
+                                 "العربية 3",
+                                 "A 1\xcc\x81",
+                                 "Level 300",
+                                 "Level  \t300",
+                                 "Level 9 needs 300",
+                                 "Level\n300",
+                                 "Level\xe2\x80\x83"
+                                 "300",
+                                 "Level\xe3\x80\x80"
+                                 "300",
+                                 "Level\r\n300"};
   char error[256];
   for (unsigned i = 0; i < sizeof(samples) / sizeof(samples[0]); ++i) {
     ArTextRasterRequest request = Request(samples[i]);
@@ -507,7 +571,8 @@ static void TestNumeralStyling(const ArTextRasterizer *rasterizer) {
       for (size_t at = 0; at < request.utf8_bytes; ++at) {
         if (samples[i][at] < '0' || samples[i][at] > '9') continue;
         const size_t start = at;
-        while (at < request.utf8_bytes && samples[i][at] >= '0' && samples[i][at] <= '9') ++at;
+        while (at < request.utf8_bytes && samples[i][at] >= '0' && samples[i][at] <= '9')
+          ++at;
         spans[span_count++] = (ArTextBidiSpan){start, at, kArTextDirection_LeftToRight};
       }
       request.bidi_spans = spans;
@@ -525,12 +590,13 @@ static void TestNumeralStyling(const ArTextRasterizer *rasterizer) {
     CHECK(plain.ascent == slanted.ascent && plain.line_advance == slanted.line_advance);
     bool moved = false;
     for (size_t c = 0; c < plain.reveal_cluster_count; ++c) {
-      CHECK(!memcmp(&plain.reveal_clusters[c], &slanted.reveal_clusters[c], sizeof(ArTextRevealCluster)));
+      CHECK(!memcmp(&plain.reveal_clusters[c], &slanted.reveal_clusters[c],
+                    sizeof(ArTextRevealCluster)));
       const size_t end = plain.reveal_clusters[c].end_utf8_byte;
       /* Expected numeral membership comes from the authored sample, not the
        * production classifier's inferred start (which may include a gap). */
-      const bool number = i != 4 && end > 0 &&
-          samples[i][end - 1] >= '0' && samples[i][end - 1] <= '9';
+      const bool number =
+          i != 4 && end > 0 && samples[i][end - 1] >= '0' && samples[i][end - 1] <= '9';
       if (wrapped && number) {
         CHECK(plain.reveal_clusters[c].y >= plain.reveal_clusters[0].y + plain.line_advance);
         if (samples[i][end - 1] == '3') {
@@ -567,26 +633,26 @@ static void TestRasterization(void) {
   ArSdlTextRasterizer adapter = {0};
   char error[256];
   const ArFontResourceId fallback_fonts[] = {
-    ArHostFontResources_RegisterFile(&s_font_store, AR_TEST_JAPANESE_FONT_PATH, error, sizeof(error)),
-    ArHostFontResources_RegisterFile(&s_font_store, AR_TEST_ARABIC_FONT_PATH, error, sizeof(error)),
-    ArHostFontResources_RegisterFile(&s_font_store, AR_TEST_HEBREW_FONT_PATH, error, sizeof(error)),
+      ArHostFontResources_RegisterFile(&s_font_store, AR_TEST_JAPANESE_FONT_PATH, error,
+                                       sizeof(error)),
+      ArHostFontResources_RegisterFile(&s_font_store, AR_TEST_ARABIC_FONT_PATH, error,
+                                       sizeof(error)),
+      ArHostFontResources_RegisterFile(&s_font_store, AR_TEST_HEBREW_FONT_PATH, error,
+                                       sizeof(error)),
   };
   const ArSdlTextRasterizerConfig config = {
-    .struct_size = sizeof(ArSdlTextRasterizerConfig),
-    .abi_version = AR_SDL_TEXT_RASTERIZER_CONFIG_ABI_VERSION,
-    .font_stack_id = "actraiser-default",
-    .resources = ArHostFontResources_Provider(&s_font_store),
-    .primary_font = s_test_font,
-    .fallback_fonts = fallback_fonts,
-    .fallback_font_count =
-        sizeof(fallback_fonts) / sizeof(fallback_fonts[0]),
-    .font_revision = 7,
-    .cached_size_capacity = 3,
+      .struct_size = sizeof(ArSdlTextRasterizerConfig),
+      .abi_version = AR_SDL_TEXT_RASTERIZER_CONFIG_ABI_VERSION,
+      .font_stack_id = "actraiser-default",
+      .resources = ArHostFontResources_Provider(&s_font_store),
+      .primary_font = s_test_font,
+      .fallback_fonts = fallback_fonts,
+      .fallback_font_count = sizeof(fallback_fonts) / sizeof(fallback_fonts[0]),
+      .font_revision = 7,
+      .cached_size_capacity = 3,
   };
-  CHECK(ArSdlTextRasterizer_Init(
-      &adapter, &config, error, sizeof(error)));
-  const ArTextRasterizer *rasterizer =
-      ArSdlTextRasterizer_Get(&adapter);
+  CHECK(ArSdlTextRasterizer_Init(&adapter, &config, error, sizeof(error)));
+  const ArTextRasterizer *rasterizer = ArSdlTextRasterizer_Get(&adapter);
   CHECK(rasterizer != NULL);
   TestEffectOwnership(rasterizer);
   TestNumeralStyling(rasterizer);
@@ -608,8 +674,7 @@ static void TestRasterization(void) {
   TTF_CloseFont(japanese);
   TTF_CloseFont(arabic);
 
-  ArTextRasterRequest request = Request(
-      "Crème brûlée — Élévation\nUtiliser un don");
+  ArTextRasterRequest request = Request("Crème brûlée — Élévation\nUtiliser un don");
   ArTextBitmap bitmap;
   CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(bitmap.format == kArRenderPixelFormat_Rgba8888);
@@ -620,22 +685,18 @@ static void TestRasterization(void) {
 
   bool saw_blue = false;
   bool saw_white = false;
-  const SDL_PixelFormatDetails *details =
-      SDL_GetPixelFormatDetails(SDL_PIXELFORMAT_RGBA8888);
+  const SDL_PixelFormatDetails *details = SDL_GetPixelFormatDetails(SDL_PIXELFORMAT_RGBA8888);
   CHECK(details != NULL);
   const uint8_t *pixels = (const uint8_t *)bitmap.pixels;
   for (int y = 0; y < bitmap.height; ++y) {
     for (int x = 0; x < bitmap.width; ++x) {
       uint32_t pixel;
       uint8_t red, green, blue, alpha;
-      memcpy(&pixel, pixels + (size_t)y * bitmap.pitch_bytes +
-             (size_t)x * 4u, sizeof(pixel));
+      memcpy(&pixel, pixels + (size_t)y * bitmap.pitch_bytes + (size_t)x * 4u, sizeof(pixel));
       SDL_GetRGBA(pixel, details, NULL, &red, &green, &blue, &alpha);
       if (!alpha) continue;
-      if (red < 220 && green < 235 && blue > 240)
-        saw_blue = true;
-      if (red > 245 && green > 245 && blue > 245)
-        saw_white = true;
+      if (red < 220 && green < 235 && blue > 240) saw_blue = true;
+      if (red > 245 && green > 245 && blue > 245) saw_white = true;
     }
   }
   CHECK(saw_blue && saw_white);
@@ -647,24 +708,27 @@ static void TestRasterization(void) {
   request.style_id = kArTextStyle_PlainWhite;
   request.accent_end_utf8_byte = 5;
   request.accent_rgb = 0xff9400;
-  CHECK(ArTextRasterizer_Rasterize(rasterizer,&request,&bitmap,NULL,error,sizeof(error)));
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   bool gold = false, white = false;
-  for (int y=0;y<bitmap.height;++y) for (int x=0;x<bitmap.width;++x) {
-    uint32_t pixel;
-    memcpy(&pixel,(const uint8_t *)bitmap.pixels+y*bitmap.pitch_bytes+x*4,4);
-    if (!(pixel&255)) continue;
-    gold |= pixel>>8 == 0xff9400;
-    white |= pixel>>8 == 0xffffff;
-  }
+  for (int y = 0; y < bitmap.height; ++y)
+    for (int x = 0; x < bitmap.width; ++x) {
+      uint32_t pixel;
+      memcpy(&pixel, (const uint8_t *)bitmap.pixels + y * bitmap.pitch_bytes + x * 4, 4);
+      if (!(pixel & 255)) continue;
+      gold |= pixel >> 8 == 0xff9400;
+      white |= pixel >> 8 == 0xffffff;
+    }
   CHECK(gold && white);
-  ArTextRasterizer_ReleaseBitmap(rasterizer,&bitmap);
-  request.accent_end_utf8_byte=4; // Inside the combining scalar.
+  ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
+  request.accent_end_utf8_byte = 4; // Inside the combining scalar.
   CHECK(!ArTextRasterRequest_IsValid(&request));
-  uint32_t pixels_accent[] = {0xffffff80u,0xffffff40u,0xffffff20u};
-  const ArTextRevealCluster accent_clusters[] = {{8,0,0,0,1,1},{5,0,1,0,1,1},{2,0,2,0,1,1}};
-  CHECK(ArTextBitmap_ApplyClusterAccent(pixels_accent,3,1,12,
-      kArRenderPixelFormat_Rgba8888,accent_clusters,3,4,0x123456));
-  CHECK(pixels_accent[0]==0xffffff80u && pixels_accent[1]==0x12345640u && pixels_accent[2]==0xffffff20u);
+  uint32_t pixels_accent[] = {0xffffff80u, 0xffffff40u, 0xffffff20u};
+  const ArTextRevealCluster accent_clusters[] = {
+      {8, 0, 0, 0, 1, 1}, {5, 0, 1, 0, 1, 1}, {2, 0, 2, 0, 1, 1}};
+  CHECK(ArTextBitmap_ApplyClusterAccent(pixels_accent, 3, 1, 12, kArRenderPixelFormat_Rgba8888,
+                                        accent_clusters, 3, 4, 0x123456));
+  CHECK(pixels_accent[0] == 0xffffff80u && pixels_accent[1] == 0x12345640u &&
+        pixels_accent[2] == 0xffffff20u);
 
   /* HUD gold uses the live palette; italic digits cannot contaminate a
    * subsequent upright request sharing the same cached font size. */
@@ -707,8 +771,8 @@ static void TestRasterization(void) {
   for (int y = 0; y < padded.height; ++y) {
     const uint8_t *row = (const uint8_t *)padded.pixels + y * padded.pitch_bytes;
     if (y >= removed_top && y < removed_top + bitmap.height) {
-      CHECK(!memcmp(row, (const uint8_t *)bitmap.pixels +
-          (y - removed_top) * bitmap.pitch_bytes, (size_t)bitmap.width * 4));
+      CHECK(!memcmp(row, (const uint8_t *)bitmap.pixels + (y - removed_top) * bitmap.pitch_bytes,
+                    (size_t)bitmap.width * 4));
     } else {
       for (int x = 0; x < padded.width; ++x) {
         uint32_t pixel;
@@ -756,16 +820,13 @@ static void TestRasterization(void) {
   int descender_bottom = -1;
   uint8_t capital_red = 0, capital_green = 0, capital_blue = 0;
   uint8_t descender_red = 0, descender_green = 0, descender_blue = 0;
-  CHECK(BottomClusterInk(
-      &bitmap, 1u, &capital_bottom,
-      &capital_red, &capital_green, &capital_blue));
-  CHECK(BottomClusterInk(
-      &bitmap, 2u, &descender_bottom,
-      &descender_red, &descender_green, &descender_blue));
+  CHECK(
+      BottomClusterInk(&bitmap, 1u, &capital_bottom, &capital_red, &capital_green, &capital_blue));
+  CHECK(BottomClusterInk(&bitmap, 2u, &descender_bottom, &descender_red, &descender_green,
+                         &descender_blue));
   CHECK(capital_bottom < descender_bottom);
   CHECK(capital_red == 156 && capital_green == 206 && capital_blue == 255);
-  CHECK(descender_red == capital_red &&
-        descender_green == capital_green &&
+  CHECK(descender_red == capital_red && descender_green == capital_green &&
         descender_blue == capital_blue);
   ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
 
@@ -780,38 +841,45 @@ static void TestRasterization(void) {
     int maximum_height;
     int minimum_line_advances;
   } status_fixtures[] = {
-    {
-      "Villes — population 3032\n"
-      "VILLE ÉTOILE: 922, Maximale, N3, O0\n"
-      "LAC POURPRE: 514, Normale, N3, O1\n"
-      "DÉSERT D'OR: 776, Normale, N3, O0\n"
-      "MONT AZUR: 362, Normale, N3, O1\n"
-      "ÎLE VERTE: 456, Lente, N3, O1\n"
-      "MUR DU NORD: 2, Lente, N1, O0",
-      28, 832, 640, 6,
-    },
-    {
-      "Score total : 98850\n"
-      "VILLE ÉTOILE : A1 10440 • A2 14670\n"
-      "LAC POURPRE : A1 11090 • A2 14500\n"
-      "DÉSERT D'OR : A1 0 • A2 14540\n"
-      "MONT AZUR : A1 13020 • A2 0\n"
-      "ÎLE VERTE : A1 10080 • A2 10510\n"
-      "MUR DU NORD : A1 0 • A2 0",
-      28, 832, 640, 6,
-    },
-    {
-      "Derrick — 9 vies\n"
-      "Niveau 17 • PV 24\n"
-      "SP 170 • PM 10\n"
-      "Prochain niveau : 3300\n"
-      "Population totale : 3032",
-      24, 384, 352, 4,
-    },
+      {
+          "Villes — population 3032\n"
+          "VILLE ÉTOILE: 922, Maximale, N3, O0\n"
+          "LAC POURPRE: 514, Normale, N3, O1\n"
+          "DÉSERT D'OR: 776, Normale, N3, O0\n"
+          "MONT AZUR: 362, Normale, N3, O1\n"
+          "ÎLE VERTE: 456, Lente, N3, O1\n"
+          "MUR DU NORD: 2, Lente, N1, O0",
+          28,
+          832,
+          640,
+          6,
+      },
+      {
+          "Score total : 98850\n"
+          "VILLE ÉTOILE : A1 10440 • A2 14670\n"
+          "LAC POURPRE : A1 11090 • A2 14500\n"
+          "DÉSERT D'OR : A1 0 • A2 14540\n"
+          "MONT AZUR : A1 13020 • A2 0\n"
+          "ÎLE VERTE : A1 10080 • A2 10510\n"
+          "MUR DU NORD : A1 0 • A2 0",
+          28,
+          832,
+          640,
+          6,
+      },
+      {
+          "Derrick — 9 vies\n"
+          "Niveau 17 • PV 24\n"
+          "SP 170 • PM 10\n"
+          "Prochain niveau : 3300\n"
+          "Population totale : 3032",
+          24,
+          384,
+          352,
+          4,
+      },
   };
-  for (size_t index = 0;
-       index < sizeof(status_fixtures) / sizeof(status_fixtures[0]);
-       ++index) {
+  for (size_t index = 0; index < sizeof(status_fixtures) / sizeof(status_fixtures[0]); ++index) {
     request = Request(status_fixtures[index].text);
     request.font_pixels = status_fixtures[index].font_pixels;
     request.minimum_font_pixels = status_fixtures[index].font_pixels;
@@ -820,8 +888,7 @@ static void TestRasterization(void) {
     CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
     CHECK(bitmap.width > 0 && bitmap.width <= request.maximum_width);
     CHECK(bitmap.height > 0 && bitmap.height <= request.maximum_height);
-    CHECK(bitmap.height >=
-          bitmap.line_advance * status_fixtures[index].minimum_line_advances);
+    CHECK(bitmap.height >= bitmap.line_advance * status_fixtures[index].minimum_line_advances);
     ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
   }
 
@@ -837,12 +904,10 @@ static void TestRasterization(void) {
     CHECK(cluster->x >= 0 && cluster->y >= 0);
     CHECK(cluster->x + cluster->width <= bitmap.width);
     CHECK(cluster->y + cluster->height <= bitmap.height);
-    if (cluster->end_utf8_byte == request.utf8_bytes)
-      saw_complete_text = true;
+    if (cluster->end_utf8_byte == request.utf8_bytes) saw_complete_text = true;
     /* byte 3 is immediately after the bare 'e'; the following U+0301 must
      * remain in the same reveal cluster. */
-    if (cluster->end_utf8_byte == 3u)
-      saw_naked_combining_base = true;
+    if (cluster->end_utf8_byte == 3u) saw_naked_combining_base = true;
   }
   CHECK(saw_complete_text);
   CHECK(!saw_naked_combining_base);
@@ -866,8 +931,7 @@ static void TestRasterization(void) {
   bool split_japanese_dakuten = false;
   bool saw_complete_japanese = false;
   for (size_t index = 0; index < bitmap.reveal_cluster_count; ++index) {
-    if (bitmap.reveal_clusters[index].end_utf8_byte == 3u)
-      split_japanese_dakuten = true;
+    if (bitmap.reveal_clusters[index].end_utf8_byte == 3u) split_japanese_dakuten = true;
     if (bitmap.reveal_clusters[index].end_utf8_byte == request.utf8_bytes)
       saw_complete_japanese = true;
   }
@@ -877,50 +941,39 @@ static void TestRasterization(void) {
 
   ArSdlTextRasterizer primary_only = {0};
   const ArSdlTextRasterizerConfig primary_only_config = {
-    .struct_size = sizeof(ArSdlTextRasterizerConfig),
-    .abi_version = AR_SDL_TEXT_RASTERIZER_CONFIG_ABI_VERSION,
-    .font_stack_id = "primary-only",
-    .resources = ArHostFontResources_Provider(&s_font_store),
-    .primary_font = s_test_font,
-    .font_revision = 8,
-    .cached_size_capacity = 1,
+      .struct_size = sizeof(ArSdlTextRasterizerConfig),
+      .abi_version = AR_SDL_TEXT_RASTERIZER_CONFIG_ABI_VERSION,
+      .font_stack_id = "primary-only",
+      .resources = ArHostFontResources_Provider(&s_font_store),
+      .primary_font = s_test_font,
+      .font_revision = 8,
+      .cached_size_capacity = 1,
   };
-  CHECK(ArSdlTextRasterizer_Init(
-      &primary_only, &primary_only_config, error, sizeof(error)));
+  CHECK(ArSdlTextRasterizer_Init(&primary_only, &primary_only_config, error, sizeof(error)));
   request.font_stack_id = "primary-only";
   request.font_stack_id_bytes = strlen("primary-only");
   request.font_revision = 8;
-  const ArTextRasterizer *primary_rasterizer =
-      ArSdlTextRasterizer_Get(&primary_only);
+  const ArTextRasterizer *primary_rasterizer = ArSdlTextRasterizer_Get(&primary_only);
   bool provided = false;
-  CHECK(ArTextRasterizer_HasGlyph(rasterizer, 0x65e5, &provided, error,
-                                  sizeof(error)));
+  CHECK(ArTextRasterizer_HasGlyph(rasterizer, 0x65e5, &provided, error, sizeof(error)));
   CHECK(provided); /* Ordered Japanese fallback, without rasterizing. */
-  CHECK(ArTextRasterizer_HasGlyph(primary_rasterizer, 0x65e5, &provided, error,
-                                  sizeof(error)));
+  CHECK(ArTextRasterizer_HasGlyph(primary_rasterizer, 0x65e5, &provided, error, sizeof(error)));
   CHECK(!provided);
-  CHECK(ArTextRasterizer_HasGlyph(rasterizer, 0x0627, &provided, error,
-                                  sizeof(error)));
+  CHECK(ArTextRasterizer_HasGlyph(rasterizer, 0x0627, &provided, error, sizeof(error)));
   CHECK(provided); /* Arabic fallback. */
-  CHECK(ArTextRasterizer_HasGlyph(rasterizer, 0x0301, &provided, error,
-                                  sizeof(error)));
+  CHECK(ArTextRasterizer_HasGlyph(rasterizer, 0x0301, &provided, error, sizeof(error)));
   CHECK(provided); /* Real combining marks must be checked. */
   CHECK(ArTextGlyphNeedsCoverage(0x0301) && ArTextGlyphNeedsCoverage(' '));
   CHECK(!ArTextGlyphNeedsCoverage(0x200d) && !ArTextGlyphNeedsCoverage(0xfe0f));
-  CHECK(!ArTextGlyphNeedsCoverage(0xe0100) &&
-        !ArTextGlyphNeedsCoverage(0xfffc));
+  CHECK(!ArTextGlyphNeedsCoverage(0xe0100) && !ArTextGlyphNeedsCoverage(0xfffc));
   CHECK(!ArTextGlyphNeedsCoverage('\n') && !ArTextGlyphNeedsCoverage(0x034f));
-  CHECK(ArTextRasterizer_HasGlyph(primary_rasterizer, 0x200d, &provided, error,
-                                  sizeof(error)) &&
+  CHECK(ArTextRasterizer_HasGlyph(primary_rasterizer, 0x200d, &provided, error, sizeof(error)) &&
         provided);
-  CHECK(ArTextRasterizer_HasGlyph(rasterizer, 0x10ffff, &provided, error,
-                                  sizeof(error)) &&
+  CHECK(ArTextRasterizer_HasGlyph(rasterizer, 0x10ffff, &provided, error, sizeof(error)) &&
         !provided);
-  CHECK(!ArTextRasterizer_HasGlyph(rasterizer, 0xd800, &provided, error,
-                                   sizeof(error)) &&
+  CHECK(!ArTextRasterizer_HasGlyph(rasterizer, 0xd800, &provided, error, sizeof(error)) &&
         !provided);
-  CHECK(!ArTextRasterizer_HasGlyph(rasterizer, 0x110000, &provided, error,
-                                   sizeof(error)));
+  CHECK(!ArTextRasterizer_HasGlyph(rasterizer, 0x110000, &provided, error, sizeof(error)));
   /* Appended optional ABI fields must never be read from an older provider. */
   ArTextRasterizerOps old_ops = *rasterizer->ops;
   old_ops.struct_size = offsetof(ArTextRasterizerOps, has_glyph);
@@ -928,9 +981,8 @@ static void TestRasterization(void) {
   old.ops = &old_ops;
   CHECK(ArTextRasterizer_IsReady(&old));
   CHECK(!ArTextRasterizer_HasGlyph(&old, 'A', &provided, error, sizeof(error)));
-  if (ArTextRasterizer_Rasterize(
-          primary_rasterizer, &request, &bitmap, NULL, error,
-          sizeof(error))) {
+  if (ArTextRasterizer_Rasterize(primary_rasterizer, &request, &bitmap, NULL, error,
+                                 sizeof(error))) {
     CHECK(BitmapHash(&bitmap) != japanese_fallback_hash);
     ArTextRasterizer_ReleaseBitmap(primary_rasterizer, &bitmap);
   } else {
@@ -948,8 +1000,8 @@ static void TestRasterization(void) {
   request = Request("\xE2\x81\xA6\xE2\x81\xA9");
   request.flags |= kArTextRasterFlag_IncludeRevealClusters;
   ArTextRasterFailure no_ink_failure = kArTextRasterFailure_None;
-  CHECK(!ArTextRasterizer_Rasterize(
-      rasterizer, &request, &bitmap, &no_ink_failure, error, sizeof(error)));
+  CHECK(!ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, &no_ink_failure, error,
+                                    sizeof(error)));
   CHECK(no_ink_failure == kArTextRasterFailure_Deterministic);
   CHECK(strstr(error, "no rasterizable ink") != NULL);
 
@@ -972,8 +1024,7 @@ static void TestRasterization(void) {
 
   request.direction = kArTextDirection_LeftToRight;
   CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
-  CHECK(ClusterX(&bitmap, request.utf8_bytes - 2) <
-        ClusterX(&bitmap, request.utf8_bytes - 1));
+  CHECK(ClusterX(&bitmap, request.utf8_bytes - 2) < ClusterX(&bitmap, request.utf8_bytes - 1));
   ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
 
   /* Auto bidi must leave a fallback English paragraph readable inside an RTL
@@ -1009,8 +1060,8 @@ typedef struct CountingResources {
   unsigned acquires, releases;
 } CountingResources;
 
-static bool CountAcquire(void *context, ArFontResourceId id,
-                          ArFontResourceData *data, char *error, size_t capacity) {
+static bool CountAcquire(void *context, ArFontResourceId id, ArFontResourceData *data, char *error,
+                         size_t capacity) {
   CountingResources *counts = context;
   ++counts->acquires;
   return counts->source.ops->acquire(counts->source.context, id, data, error, capacity);
@@ -1023,9 +1074,10 @@ static void CountRelease(void *context, ArFontResourceData *data) {
 }
 
 static void TestFontSnapshotLifetime(void) {
-  static const ArFontResourceOps ops = {
-      .struct_size = sizeof(ops), .abi_version = AR_FONT_RESOURCE_ABI_VERSION,
-      .acquire = CountAcquire, .release = CountRelease};
+  static const ArFontResourceOps ops = {.struct_size = sizeof(ops),
+                                        .abi_version = AR_FONT_RESOURCE_ABI_VERSION,
+                                        .acquire = CountAcquire,
+                                        .release = CountRelease};
   CountingResources counts = {.source = ArHostFontResources_Provider(&s_font_store)};
   ArFontResourceLease source = {0};
   char error[256];
@@ -1033,7 +1085,10 @@ static void TestFontSnapshotLifetime(void) {
   if (!source.data.bytes) return;
   FILE *file = fopen(AR_TEST_SNAPSHOT_FONT_PATH, "wb");
   CHECK(file);
-  if (!file) { ArFontResource_Release(&source); return; }
+  if (!file) {
+    ArFontResource_Release(&source);
+    return;
+  }
   CHECK(fwrite(source.data.bytes, 1, source.data.size, file) == source.data.size);
   CHECK(!fclose(file));
   ArFontResource_Release(&source);
@@ -1041,9 +1096,13 @@ static void TestFontSnapshotLifetime(void) {
       &s_font_store, AR_TEST_SNAPSHOT_FONT_PATH, error, sizeof(error));
   CHECK(id);
   ArSdlTextRasterizerConfig config = {
-      .struct_size = sizeof(config), .abi_version = AR_SDL_TEXT_RASTERIZER_CONFIG_ABI_VERSION,
-      .font_stack_id = "snapshot", .resources = {&ops, &counts},
-      .primary_font = id, .font_revision = 1, .cached_size_capacity = 1,
+      .struct_size = sizeof(config),
+      .abi_version = AR_SDL_TEXT_RASTERIZER_CONFIG_ABI_VERSION,
+      .font_stack_id = "snapshot",
+      .resources = {&ops, &counts},
+      .primary_font = id,
+      .font_revision = 1,
+      .cached_size_capacity = 1,
   };
   ArSdlTextRasterizer adapter = {0};
   CHECK(ArSdlTextRasterizer_Init(&adapter, &config, error, sizeof(error)));
@@ -1059,7 +1118,10 @@ static void TestFontSnapshotLifetime(void) {
    * retiring registration cannot change these already-acquired bytes. */
   file = fopen(AR_TEST_SNAPSHOT_FONT_PATH, "wb");
   CHECK(file);
-  if (file) { CHECK(fputs("not a font", file) >= 0); CHECK(!fclose(file)); }
+  if (file) {
+    CHECK(fputs("not a font", file) >= 0);
+    CHECK(!fclose(file));
+  }
   CHECK(!remove(AR_TEST_SNAPSHOT_FONT_PATH));
   ArHostFontResources_Retire(&s_font_store, id);
   CHECK(!ArHostFontResources_Destroy(&s_font_store));
@@ -1072,8 +1134,8 @@ static void TestFontSnapshotLifetime(void) {
       request.font_pixels = request.minimum_font_pixels = size;
       request.maximum_width = request.maximum_height = 1024;
       ArTextBitmap bitmap = {0};
-      CHECK(ArTextRasterizer_Rasterize(ArSdlTextRasterizer_Get(&adapter),
-          &request, &bitmap, NULL, error, sizeof(error)));
+      CHECK(ArTextRasterizer_Rasterize(ArSdlTextRasterizer_Get(&adapter), &request, &bitmap, NULL,
+                                       error, sizeof(error)));
       CHECK(bitmap.pixels && bitmap.width > 0 && bitmap.height > 0);
       ArTextRasterizer_ReleaseBitmap(ArSdlTextRasterizer_Get(&adapter), &bitmap);
     }
@@ -1108,8 +1170,8 @@ static void TestMissingGlyphWarnings(void) {
       ArTextRasterRequest request = Request(text);
       for (int repeat = 0; repeat < 2; ++repeat) {
         ArTextBitmap bitmap = {0};
-        CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL,
-                                         error, sizeof(error)));
+        CHECK(
+            ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
         ArTextRasterizer_ReleaseBitmap(rasterizer, &bitmap);
       }
     }
@@ -1128,9 +1190,8 @@ static void TestStyleShadow(void) {
   pixels[1][1] = UINT32_C(0xffffffff);
   pixels[1][2] = UINT32_C(0xffffffff);
 
-  CHECK(ArTextBitmap_ApplyStyleShadow(
-      pixels, kWidth, kHeight, kWidth * 4, kArRenderPixelFormat_Rgba8888,
-      1, 1, UINT32_C(0x000000)));
+  CHECK(ArTextBitmap_ApplyStyleShadow(pixels, kWidth, kHeight, kWidth * 4,
+                                      kArRenderPixelFormat_Rgba8888, 1, 1, UINT32_C(0x000000)));
   /* Shadow lands one right and one down of each ink pixel. */
   CHECK((pixels[2][2] & UINT32_C(0xff)) == 0xffu);
   CHECK((pixels[2][3] & UINT32_C(0xff)) == 0xffu);
@@ -1144,17 +1205,14 @@ static void TestStyleShadow(void) {
   /* Rejected inputs leave the caller's pixels alone. */
   uint32_t guard[kHeight][kWidth];
   memcpy(guard, pixels, sizeof(guard));
-  CHECK(!ArTextBitmap_ApplyStyleShadow(
-      pixels, kWidth, kHeight, kWidth * 4, kArRenderPixelFormat_Rgba8888,
-      0, 0, 0));
-  CHECK(!ArTextBitmap_ApplyStyleShadow(
-      NULL, kWidth, kHeight, kWidth * 4, kArRenderPixelFormat_Rgba8888,
-      1, 1, 0));
+  CHECK(!ArTextBitmap_ApplyStyleShadow(pixels, kWidth, kHeight, kWidth * 4,
+                                       kArRenderPixelFormat_Rgba8888, 0, 0, 0));
+  CHECK(!ArTextBitmap_ApplyStyleShadow(NULL, kWidth, kHeight, kWidth * 4,
+                                       kArRenderPixelFormat_Rgba8888, 1, 1, 0));
   CHECK(!memcmp(guard, pixels, sizeof(guard)));
   /* An offset past the surface succeeds and changes nothing. */
-  CHECK(ArTextBitmap_ApplyStyleShadow(
-      pixels, kWidth, kHeight, kWidth * 4, kArRenderPixelFormat_Rgba8888,
-      kWidth, 0, 0));
+  CHECK(ArTextBitmap_ApplyStyleShadow(pixels, kWidth, kHeight, kWidth * 4,
+                                      kArRenderPixelFormat_Rgba8888, kWidth, 0, 0));
   CHECK(!memcmp(guard, pixels, sizeof(guard)));
 }
 
@@ -1163,9 +1221,10 @@ static void TestStyleShadowTraversalMatchesSnapshot(void) {
   uint32_t original[kHeight][kStride];
   for (int y = 0; y < kHeight; ++y)
     for (int x = 0; x < kStride; ++x)
-      original[y][x] = x >= kWidth ? UINT32_C(0xdeadbeef)
-          : (x + y * 3) % 4 == 0 ? UINT32_C(0xffffff80)
-          : (x + y) % 3 == 0 ? UINT32_C(0xffccffff) : 0;
+      original[y][x] = x >= kWidth            ? UINT32_C(0xdeadbeef)
+                       : (x + y * 3) % 4 == 0 ? UINT32_C(0xffffff80)
+                       : (x + y) % 3 == 0     ? UINT32_C(0xffccffff)
+                                              : 0;
   for (int dy = -kHeight; dy <= kHeight; ++dy) {
     for (int dx = -kWidth; dx <= kWidth; ++dx) {
       if (!dx && !dy) continue;
@@ -1175,14 +1234,14 @@ static void TestStyleShadowTraversalMatchesSnapshot(void) {
       for (int y = 0; y < kHeight; ++y) {
         for (int x = 0; x < kWidth; ++x) {
           const int sx = x - dx, sy = y - dy;
-          if ((original[y][x] & 255u) || sx < 0 || sx >= kWidth ||
-              sy < 0 || sy >= kHeight) continue;
+          if ((original[y][x] & 255u) || sx < 0 || sx >= kWidth || sy < 0 || sy >= kHeight)
+            continue;
           const uint32_t alpha = original[sy][sx] & 255u;
           if (alpha) expected[y][x] = UINT32_C(0x12345600) | alpha;
         }
       }
-      CHECK(ArTextBitmap_ApplyStyleShadow(actual, kWidth, kHeight,
-          kStride * 4, kArRenderPixelFormat_Rgba8888, dx, dy, 0x123456));
+      CHECK(ArTextBitmap_ApplyStyleShadow(actual, kWidth, kHeight, kStride * 4,
+                                          kArRenderPixelFormat_Rgba8888, dx, dy, 0x123456));
       CHECK(!memcmp(expected, actual, sizeof(expected)));
     }
   }
@@ -1206,24 +1265,21 @@ static void TestFontRoleCacheOwnership(void) {
   CHECK(TTF_Init());
   CHECK(ArSdlTextFonts_Init(&fonts, &config, error, sizeof(error)));
   ArSdlTextFonts_BeginLayout(&fonts);
-  ArSdlFontSet *body = ArSdlTextFonts_Acquire(&fonts, "body", 24, false, NULL,
-                                              error, sizeof(error));
-  ArSdlFontSet *italic = ArSdlTextFonts_Acquire(&fonts, "hud", 24, true, NULL,
-                                                error, sizeof(error));
+  ArSdlFontSet *body =
+      ArSdlTextFonts_Acquire(&fonts, "body", 24, false, NULL, error, sizeof(error));
+  ArSdlFontSet *italic =
+      ArSdlTextFonts_Acquire(&fonts, "hud", 24, true, NULL, error, sizeof(error));
   CHECK(body && italic && body->primary != italic->primary);
   if (body && italic) {
     CHECK(TTF_GetFontStyle(body->primary) == TTF_STYLE_NORMAL);
     CHECK(TTF_GetFontStyle(italic->primary) == TTF_STYLE_ITALIC);
-    CHECK(!ArSdlTextFonts_Acquire(&fonts, "hud", 30, false, NULL, error,
-                                  sizeof(error)));
+    CHECK(!ArSdlTextFonts_Acquire(&fonts, "hud", 30, false, NULL, error, sizeof(error)));
     CHECK(strstr(error, "too many distinct font variants"));
     CHECK(TTF_GetFontSize(body->primary) == 24.0f);
     CHECK(TTF_GetFontSize(italic->primary) == 24.0f);
     ArSdlTextFonts_BeginLayout(&fonts);
-    CHECK(ArSdlTextFonts_Acquire(&fonts, "hud", 30, false, NULL, error,
-                                 sizeof(error)));
-    CHECK(!ArSdlTextFonts_Acquire(&fonts, "unknown", 24, false, NULL, error,
-                                  sizeof(error)));
+    CHECK(ArSdlTextFonts_Acquire(&fonts, "hud", 30, false, NULL, error, sizeof(error)));
+    CHECK(!ArSdlTextFonts_Acquire(&fonts, "unknown", 24, false, NULL, error, sizeof(error)));
   }
   ArSdlTextFonts_Destroy(&fonts);
   TTF_Quit();
@@ -1243,8 +1299,8 @@ int main(int argc, char **argv) {
     TestFontSnapshotLifetime();
   }
   CHECK(ArHostFontResources_Destroy(&s_font_store));
-  if (g_failures) {
-    fprintf(stderr, "%d SDL text rasterizer test(s) failed\n", g_failures);
+  if (s_failures) {
+    fprintf(stderr, "%d SDL text rasterizer test(s) failed\n", s_failures);
     return 1;
   }
   puts("SDL text rasterizer tests passed");

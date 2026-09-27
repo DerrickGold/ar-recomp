@@ -14,13 +14,13 @@
 
 static int s_failures;
 
-#define CHECK(expr) do { \
-  if (!(expr)) { \
-    fprintf(stderr, "%s:%d: check failed: %s\n", \
-            __FILE__, __LINE__, #expr); \
-    s_failures++; \
-  } \
-} while (0)
+#define CHECK(expr)                                                                                \
+  do {                                                                                             \
+    if (!(expr)) {                                                                                 \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr);                     \
+      s_failures++;                                                                                \
+    }                                                                                              \
+  } while (0)
 
 static void MakeFixture(uint8_t image[kActRaiserSramSize]) {
   static const int states[kActRaiserSaveRegionCount] = {0, 2, 3, 4, 0, 2};
@@ -31,9 +31,8 @@ static void MakeFixture(uint8_t image[kActRaiserSramSize]) {
   Save_RecomputeChecksum(image);
 }
 
-static bool CopyWithRewrite(const char *source, const char *destination,
-                            const char *match, const char *replacement,
-                            bool duplicate) {
+static bool CopyWithRewrite(const char *source, const char *destination, const char *match,
+                            const char *replacement, bool duplicate) {
   FILE *in = fopen(source, "r");
   FILE *out = fopen(destination, "w");
   if (!in || !out) {
@@ -86,8 +85,8 @@ static void TestChecksumAndFields(void) {
    * legitimately has none — that is a skip, not a failure. Only a fixture
    * that exists and fails to load or checksum is a real defect. */
   char fixture_path[1024];
-  snprintf(fixture_path, sizeof(fixture_path),
-           "%s/test-saves/save.sim-blank.bak.srm", ACTRAISER_SOURCE_DIR);
+  snprintf(fixture_path, sizeof(fixture_path), "%s/test-saves/save.sim-blank.bak.srm",
+           ACTRAISER_SOURCE_DIR);
   FILE *fixture = fopen(fixture_path, "rb");
   if (fixture) {
     fclose(fixture);
@@ -96,8 +95,7 @@ static void TestChecksumAndFields(void) {
     CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, fixture_path, real, &error));
     CHECK(Save_ChecksumValid(real));
   } else {
-    printf("save system tests: skipping real-save fixture (%s absent)\n",
-           fixture_path);
+    printf("save system tests: skipping real-save fixture (%s absent)\n", fixture_path);
   }
 #endif
 }
@@ -109,8 +107,12 @@ static void TestNativeAndIniCodecs(void) {
   static const char missing_path[] = "actraiser-save-codec-missing.ini";
   static const char duplicate_path[] = "actraiser-save-codec-duplicate.ini";
   static const char short_path[] = "actraiser-save-codec-short.srm";
-  remove(native_path); remove(ini_path); remove(edited_path);
-  remove(missing_path); remove(duplicate_path); remove(short_path);
+  remove(native_path);
+  remove(ini_path);
+  remove(edited_path);
+  remove(missing_path);
+  remove(duplicate_path);
+  remove(short_path);
 
   uint8_t original[kActRaiserSramSize];
   uint8_t decoded[kActRaiserSramSize];
@@ -119,11 +121,9 @@ static void TestNativeAndIniCodecs(void) {
   memset(sentinel, 0xa5, sizeof(sentinel));
   SaveError error = {{0}};
 
-  CHECK(Save_WriteFile(kSaveFileFormat_NativeSrm, native_path,
-                       original, &error));
+  CHECK(Save_WriteFile(kSaveFileFormat_NativeSrm, native_path, original, &error));
   memset(decoded, 0, sizeof(decoded));
-  CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, native_path,
-                      decoded, &error));
+  CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, native_path, decoded, &error));
   CHECK(!memcmp(decoded, original, sizeof(decoded)));
 
   CHECK(Save_WriteFile(kSaveFileFormat_Ini, ini_path, original, &error));
@@ -131,13 +131,13 @@ static void TestNativeAndIniCodecs(void) {
   CHECK(Save_LoadFile(kSaveFileFormat_Ini, ini_path, decoded, &error));
   CHECK(!memcmp(decoded, original, sizeof(decoded)));
 
-  CHECK(CopyWithRewrite(ini_path, edited_path, "bloodpool = ",
-                        "bloodpool = act2-cleared\n", false));
+  CHECK(
+      CopyWithRewrite(ini_path, edited_path, "bloodpool = ", "bloodpool = act2-cleared\n", false));
   CHECK(Save_LoadFile(kSaveFileFormat_Ini, edited_path, decoded, &error));
   for (int i = 0; i < kActRaiserSramSize; i++) {
-    bool expected_change = i == g_save_region_fields[1].offset ||
-        (i >= kActRaiserSramChecksumOffset &&
-         i < kActRaiserSramChecksumOffset + 4);
+    bool expected_change =
+        i == g_save_region_fields[1].offset ||
+        (i >= kActRaiserSramChecksumOffset && i < kActRaiserSramChecksumOffset + 4);
     if (!expected_change) CHECK(decoded[i] == original[i]);
   }
   int bloodpool_state = -1;
@@ -158,36 +158,39 @@ static void TestNativeAndIniCodecs(void) {
   FILE *short_file = fopen(short_path, "wb");
   CHECK(short_file != NULL);
   if (short_file) {
-    CHECK(fwrite(original, 1, sizeof(original) - 1, short_file) ==
-          sizeof(original) - 1);
+    CHECK(fwrite(original, 1, sizeof(original) - 1, short_file) == sizeof(original) - 1);
     fclose(short_file);
   }
   memcpy(decoded, sentinel, sizeof(decoded));
-  CHECK(!Save_LoadFile(kSaveFileFormat_NativeSrm, short_path,
-                       decoded, &error));
+  CHECK(!Save_LoadFile(kSaveFileFormat_NativeSrm, short_path, decoded, &error));
   CHECK(!memcmp(decoded, sentinel, sizeof(decoded)));
 
-  remove(native_path); remove(ini_path); remove(edited_path);
-  remove(missing_path); remove(duplicate_path); remove(short_path);
+  remove(native_path);
+  remove(ini_path);
+  remove(edited_path);
+  remove(missing_path);
+  remove(duplicate_path);
+  remove(short_path);
 }
 
 static void TestLegacyMigration(void) {
   static const char legacy_path[] = "actraiser-save-legacy-test.srm";
   static const char native_path[] = "actraiser-save-migrated-test.srm";
   static const char ini_path[] = "actraiser-save-migrated-test.ini";
-  remove(legacy_path); remove(native_path); remove(ini_path);
+  remove(legacy_path);
+  remove(native_path);
+  remove(ini_path);
 
   uint8_t original[kActRaiserSramSize];
   uint8_t live[kActRaiserSramSize];
   uint8_t disk[kActRaiserSramSize];
   SaveError error = {{0}};
   MakeFixture(original);
-  CHECK(Save_WriteFile(kSaveFileFormat_NativeSrm, legacy_path,
-                       original, &error));
+  CHECK(Save_WriteFile(kSaveFileFormat_NativeSrm, legacy_path, original, &error));
 
   memset(live, 0x60, sizeof(live));
-  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_NativeSrm,
-                          native_path, ini_path, &error));
+  CHECK(
+      SaveSystem_Attach(live, sizeof(live), kSaveBackend_NativeSrm, native_path, ini_path, &error));
   CHECK(SaveSystem_MigrateLegacyNative(legacy_path, &error));
   CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, native_path, disk, &error));
   CHECK(!memcmp(original, disk, sizeof(disk)));
@@ -195,14 +198,16 @@ static void TestLegacyMigration(void) {
 
   /* A selected INI backend converts the legacy native image rather than
    * populating an inactive native path. */
-  remove(native_path); remove(ini_path);
-  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_Ini,
-                          native_path, ini_path, &error));
+  remove(native_path);
+  remove(ini_path);
+  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_Ini, native_path, ini_path, &error));
   CHECK(SaveSystem_MigrateLegacyNative(legacy_path, &error));
   CHECK(Save_LoadFile(kSaveFileFormat_Ini, ini_path, disk, &error));
   CHECK(!memcmp(original, disk, sizeof(disk)));
 
-  remove(legacy_path); remove(native_path); remove(ini_path);
+  remove(legacy_path);
+  remove(native_path);
+  remove(ini_path);
   remove("actraiser-save-migrated-test.srm.tmp");
   remove("actraiser-save-migrated-test.ini.tmp");
 }
@@ -212,7 +217,9 @@ static void TestRuntimeTransactions(void) {
   static const char ini_path[] = "actraiser-save-active-test.ini";
   static const char import_path[] = "actraiser-save-import-test.srm";
   static const char export_path[] = "actraiser-save-export-test.ini";
-  remove(native_path); remove(ini_path); remove(import_path);
+  remove(native_path);
+  remove(ini_path);
+  remove(import_path);
   remove(export_path);
 
   uint8_t original[kActRaiserSramSize];
@@ -220,11 +227,10 @@ static void TestRuntimeTransactions(void) {
   uint8_t disk[kActRaiserSramSize];
   MakeFixture(original);
   SaveError error = {{0}};
-  CHECK(Save_WriteFile(kSaveFileFormat_NativeSrm, native_path,
-                       original, &error));
+  CHECK(Save_WriteFile(kSaveFileFormat_NativeSrm, native_path, original, &error));
   memset(live, 0x60, sizeof(live));
-  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_NativeSrm,
-                          native_path, ini_path, &error));
+  CHECK(
+      SaveSystem_Attach(live, sizeof(live), kSaveBackend_NativeSrm, native_path, ini_path, &error));
   CHECK(SaveSystem_LoadActive(&error));
   CHECK(!memcmp(live, original, sizeof(live)));
 
@@ -253,8 +259,7 @@ static void TestRuntimeTransactions(void) {
   int edits[kActRaiserSaveRegionCount] = {-1, -1, -1, -1, -1, 3};
   CHECK(!SaveSystem_ApplyRegionEdits(edits, false, false, false, &error));
   CHECK(SaveSystem_ApplyRegionEdits(edits, true, false, false, &error));
-  CHECK((live[g_save_region_fields[5].offset] * 2 +
-         (live[0x13b6 + 5 * 2] & 1)) == 3);
+  CHECK((live[g_save_region_fields[5].offset] * 2 + (live[0x13b6 + 5 * 2] & 1)) == 3);
   SaveEditRequest status_edits;
   SaveEditRequest_Clear(&status_edits);
   status_edits.master_level = 17;
@@ -267,8 +272,7 @@ static void TestRuntimeTransactions(void) {
   status_edits.angel_hp_max = 24;
   status_edits.message_speed = 9;
   status_edits.player_name_set = true;
-  snprintf(status_edits.player_name, sizeof(status_edits.player_name),
-           "CODEX");
+  snprintf(status_edits.player_name, sizeof(status_edits.player_name), "CODEX");
   status_edits.professional_mode = 1;
   status_edits.death_heim_state = 4;
   status_edits.equipped_magic = 2;
@@ -277,10 +281,9 @@ static void TestRuntimeTransactions(void) {
   status_edits.magic_slots[2] = 2;
   status_edits.magic_slots[3] = 3;
   static const int item_values[8] = {
-    0x00, 0x05, 0x06, 0x07, 0x0a, 0x0f, 0x12, 0x14,
+      0x00, 0x05, 0x06, 0x07, 0x0a, 0x0f, 0x12, 0x14,
   };
-  memcpy(status_edits.item_slots, item_values,
-         sizeof(status_edits.item_slots));
+  memcpy(status_edits.item_slots, item_values, sizeof(status_edits.item_slots));
   status_edits.scores[0][0] = 99990;
   status_edits.scores[5][1] = 12340;
   CHECK(SaveSystem_ApplyEdits(&status_edits, true, false, false, &error));
@@ -299,10 +302,10 @@ static void TestRuntimeTransactions(void) {
   CHECK(!SaveSystem_CopyPlayerName(player_name, 3));
   CHECK(!memcmp(live + 0x1ff0, "ACT", 3));
   CHECK(live[0x120c] == 3 && (live[0x1240] & 1));
-  CHECK(live[0x144a] == 4 && live[0x144b] == 1 &&
-        live[0x144c] == 0x82 && live[0x144d] == 3);
+  CHECK(live[0x144a] == 4 && live[0x144b] == 1 && live[0x144c] == 0x82 && live[0x144d] == 3);
   CHECK(live[0x145d] == 2);
-  for (int i = 0; i < 8; i++) CHECK(live[0x1453 + i] == item_values[i]);
+  for (int i = 0; i < 8; i++)
+    CHECK(live[0x1453 + i] == item_values[i]);
   CHECK(live[0x1464] == 0x99 && live[0x1465] == 0x99);
   CHECK(live[0x147a] == 0x34 && live[0x147b] == 0x12);
   CHECK(Save_ChecksumValid(live));
@@ -316,14 +319,14 @@ static void TestRuntimeTransactions(void) {
   CHECK(!memcmp(before_invalid, live, sizeof(live)));
 
   SaveEditRequest_Clear(&invalid_edits);
-  for (int i = 0; i < 4; i++) invalid_edits.magic_slots[i] = 0;
+  for (int i = 0; i < 4; i++)
+    invalid_edits.magic_slots[i] = 0;
   invalid_edits.equipped_magic = 4;
   CHECK(!SaveSystem_ApplyEdits(&invalid_edits, true, false, false, &error));
   CHECK(!memcmp(before_invalid, live, sizeof(live)));
   CHECK(SaveSystem_AutoPersistIfChanged(&error));
   CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, native_path, disk, &error));
-  CHECK((disk[g_save_region_fields[5].offset] * 2 +
-         (disk[0x13b6 + 5 * 2] & 1)) != 3);
+  CHECK((disk[g_save_region_fields[5].offset] * 2 + (disk[0x13b6 + 5 * 2] & 1)) != 3);
   CHECK(disk[0x1442] != 17);
 
   edits[5] = -1;
@@ -341,8 +344,7 @@ static void TestRuntimeTransactions(void) {
   memcpy(imported, original, sizeof(imported));
   CHECK(Save_SetRegionState(imported, 3, 4));
   Save_RecomputeChecksum(imported);
-  CHECK(Save_WriteFile(kSaveFileFormat_NativeSrm, import_path,
-                       imported, &error));
+  CHECK(Save_WriteFile(kSaveFileFormat_NativeSrm, import_path, imported, &error));
   CHECK(SaveSystem_Import(import_path, false, &error));
   CHECK(!memcmp(live, imported, sizeof(live)));
   CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, native_path, disk, &error));
@@ -356,11 +358,9 @@ static void TestRuntimeTransactions(void) {
   CHECK(Save_SetRegionState(ini_original, 1, 4));
   Save_RecomputeChecksum(ini_original);
   CHECK(Save_WriteFile(kSaveFileFormat_Ini, ini_path, ini_original, &error));
-  CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, native_path,
-                      native_before, &error));
+  CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, native_path, native_before, &error));
   memset(live, 0x60, sizeof(live));
-  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_Ini,
-                          native_path, ini_path, &error));
+  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_Ini, native_path, ini_path, &error));
   CHECK(SaveSystem_LoadActive(&error));
   CHECK(!memcmp(live, ini_original, sizeof(live)));
   CHECK(Save_SetRegionState(live, 2, 3));
@@ -371,7 +371,9 @@ static void TestRuntimeTransactions(void) {
   CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, native_path, disk, &error));
   CHECK(!memcmp(native_before, disk, sizeof(disk)));
 
-  remove(native_path); remove(ini_path); remove(import_path);
+  remove(native_path);
+  remove(ini_path);
+  remove(import_path);
   remove(export_path);
   remove("actraiser-save-active-test.srm.tmp");
   remove("actraiser-save-active-test.ini.tmp");
@@ -383,20 +385,19 @@ static void TestLocalizedNameExtension(SaveBackend backend) {
   const char *localized_path = backend == kSaveBackend_NativeSrm
                                    ? "actraiser-name-extension-test.srm.arname"
                                    : "actraiser-name-extension-test.ini.arname";
-  const char *active_path =
-      backend == kSaveBackend_NativeSrm ? native_path : ini_path;
-  const SaveFileFormat format = backend == kSaveBackend_NativeSrm
-                                    ? kSaveFileFormat_NativeSrm
-                                    : kSaveFileFormat_Ini;
-  remove(native_path); remove(ini_path); remove(localized_path);
+  const char *active_path = backend == kSaveBackend_NativeSrm ? native_path : ini_path;
+  const SaveFileFormat format =
+      backend == kSaveBackend_NativeSrm ? kSaveFileFormat_NativeSrm : kSaveFileFormat_Ini;
+  remove(native_path);
+  remove(ini_path);
+  remove(localized_path);
 
   uint8_t live[kActRaiserSramSize];
   MakeFixture(live);
   memcpy(live + 0x1439, "OLD\0\0\0\0\0\0", 9);
   Save_RecomputeChecksum(live);
   SaveError error = {{0}};
-  CHECK(SaveSystem_Attach(live, sizeof(live), backend, native_path, ini_path,
-                          &error));
+  CHECK(SaveSystem_Attach(live, sizeof(live), backend, native_path, ini_path, &error));
   CHECK(SaveSystem_WriteActive(&error));
 
   /* Unicode names remain associated with the exact retail save and native
@@ -416,13 +417,10 @@ static void TestLocalizedNameExtension(SaveBackend backend) {
   CHECK(!memcmp(before, disk, sizeof(before)));
   FILE *sidecar = fopen(localized_path, "rb");
   CHECK(sidecar == NULL);
-  if (sidecar)
-    fclose(sidecar);
+  if (sidecar) fclose(sidecar);
   char unicode_name[64];
-  CHECK(!SaveSystem_CopyLocalizedPlayerName("OLD", unicode_name,
-                                            sizeof(unicode_name)));
-  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
-                                           sizeof(unicode_name)));
+  CHECK(!SaveSystem_CopyLocalizedPlayerName("OLD", unicode_name, sizeof(unicode_name)));
+  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name, sizeof(unicode_name)));
   CHECK(!strcmp(unicode_name, localized_name));
   /* Native game code performs its ordinary save, including its checksum. */
   memcpy(live + 0x1439, "ELISE\0\0\0\0", 9);
@@ -433,11 +431,9 @@ static void TestLocalizedNameExtension(SaveBackend backend) {
   CHECK(Save_LoadFile(format, active_path, disk, &error));
   CHECK(!memcmp(before, disk, sizeof(before)) && Save_ChecksumValid(disk));
   memset(live, 0, sizeof(live));
-  CHECK(SaveSystem_Attach(live, sizeof(live), backend, native_path, ini_path,
-                          &error));
+  CHECK(SaveSystem_Attach(live, sizeof(live), backend, native_path, ini_path, &error));
   CHECK(SaveSystem_LoadActive(&error));
-  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
-                                           sizeof(unicode_name)));
+  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name, sizeof(unicode_name)));
   CHECK(!strcmp(unicode_name, localized_name));
 
   /* Ordinary gameplay changes rebind the companion to the new checksum. */
@@ -461,8 +457,7 @@ static void TestLocalizedNameExtension(SaveBackend backend) {
 #endif
   CHECK(SaveSystem_AutoPersistIfChanged(&error));
   CHECK(SaveSystem_LoadActive(&error));
-  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
-                                           sizeof(unicode_name)));
+  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name, sizeof(unicode_name)));
 
   SaveEditRequest edits;
   SaveEditRequest_Clear(&edits);
@@ -470,8 +465,7 @@ static void TestLocalizedNameExtension(SaveBackend backend) {
   CHECK(SaveSystem_ApplyEdits(&edits, true, true, false, &error));
   CHECK(SaveSystem_AutoPersistIfChanged(&error));
   CHECK(SaveSystem_LoadActive(&error));
-  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
-                                           sizeof(unicode_name)));
+  CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name, sizeof(unicode_name)));
 
   /* Embedded NUL cannot silently shorten a length-delimited Unicode name. */
   sidecar = fopen(localized_path, "r+b");
@@ -482,8 +476,7 @@ static void TestLocalizedNameExtension(SaveBackend backend) {
     CHECK(fclose(sidecar) == 0);
   }
   CHECK(SaveSystem_LoadActive(&error));
-  CHECK(!SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
-                                            sizeof(unicode_name)));
+  CHECK(!SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name, sizeof(unicode_name)));
   CHECK(SaveSystem_SetLocalizedPlayerName(localized_name, "ELISE"));
   CHECK(SaveSystem_AutoPersistIfChanged(&error));
 
@@ -492,18 +485,15 @@ static void TestLocalizedNameExtension(SaveBackend backend) {
   Save_RecomputeChecksum(live);
   CHECK(Save_WriteFile(format, active_path, live, &error));
   memset(live, 0, sizeof(live));
-  CHECK(SaveSystem_Attach(live, sizeof(live), backend, native_path, ini_path,
-                          &error));
+  CHECK(SaveSystem_Attach(live, sizeof(live), backend, native_path, ini_path, &error));
   CHECK(SaveSystem_LoadActive(&error));
-  CHECK(!SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
-                                            sizeof(unicode_name)));
+  CHECK(!SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name, sizeof(unicode_name)));
 
   /* A missing/invalid companion cannot make an otherwise valid save fail. */
   remove(localized_path);
   CHECK(SaveSystem_LoadActive(&error));
   CHECK(Save_ChecksumValid(live));
-  CHECK(!SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
-                                            sizeof(unicode_name)));
+  CHECK(!SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name, sizeof(unicode_name)));
   sidecar = fopen(localized_path, "wb");
   CHECK(sidecar != NULL);
   if (sidecar) {
@@ -512,8 +502,7 @@ static void TestLocalizedNameExtension(SaveBackend backend) {
   }
   CHECK(SaveSystem_LoadActive(&error));
   CHECK(Save_ChecksumValid(live));
-  CHECK(!SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
-                                            sizeof(unicode_name)));
+  CHECK(!SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name, sizeof(unicode_name)));
 
   CHECK(SaveSystem_SetLocalizedPlayerName(localized_name, "ELISE"));
   CHECK(SaveSystem_AutoPersistIfChanged(&error));
@@ -523,10 +512,11 @@ static void TestLocalizedNameExtension(SaveBackend backend) {
   Save_RecomputeChecksum(live);
   CHECK(Save_WriteFile(format, active_path, live, &error));
   CHECK(SaveSystem_Import(active_path, false, &error));
-  CHECK(!SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name,
-                                            sizeof(unicode_name)));
+  CHECK(!SaveSystem_CopyLocalizedPlayerName("ELISE", unicode_name, sizeof(unicode_name)));
 
-  remove(native_path); remove(ini_path); remove(localized_path);
+  remove(native_path);
+  remove(ini_path);
+  remove(localized_path);
   remove("actraiser-name-extension-test.srm.tmp");
   remove("actraiser-name-extension-test.srm.arname.tmp");
 }
@@ -535,12 +525,13 @@ static void TestNativeWriteBoundary(SaveBackend backend) {
   const char *native = "actraiser-save-boundary-test.srm";
   const char *ini = "actraiser-save-boundary-test.ini";
   const char *path = backend == kSaveBackend_Ini ? ini : native;
-  SaveFileFormat format = backend == kSaveBackend_Ini
-      ? kSaveFileFormat_Ini : kSaveFileFormat_NativeSrm;
+  SaveFileFormat format =
+      backend == kSaveBackend_Ini ? kSaveFileFormat_Ini : kSaveFileFormat_NativeSrm;
   uint8_t live[kActRaiserSramSize], original[kActRaiserSramSize], disk[kActRaiserSramSize];
   MakeFixture(live);
   memcpy(original, live, sizeof(live));
-  remove(native); remove(ini);
+  remove(native);
+  remove(ini);
   SaveError error = {{0}};
   CHECK(SaveSystem_Attach(live, sizeof(live), backend, native, ini, &error));
   memset(disk, 0xa5, sizeof(disk));
@@ -603,7 +594,8 @@ static void TestNativeWriteBoundary(SaveBackend backend) {
   CHECK(SaveSystem_Import(path, false, &error));
   CHECK(SaveSystem_CopyDurableImage(disk));
   CHECK(!memcmp(original, disk, sizeof(disk)));
-  remove(native); remove(ini);
+  remove(native);
+  remove(ini);
 }
 
 static void TestRecoveryWithoutFeatureHost(void) {
@@ -611,14 +603,17 @@ static void TestRecoveryWithoutFeatureHost(void) {
   const char *directory = "actraiser-recovery-test-copy";
   const char *copy = "actraiser-recovery-test-copy/save.srm";
   uint8_t live[kActRaiserSramSize], original[kActRaiserSramSize], disk[kActRaiserSramSize];
-  MakeFixture(live); memcpy(original, live, sizeof(live));
+  MakeFixture(live);
+  memcpy(original, live, sizeof(live));
   SaveError error = {{0}};
-  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_NativeSrm,
-                         path, "unused-recovery-test.ini", &error));
+  CHECK(SaveSystem_Attach(live, sizeof(live), kSaveBackend_NativeSrm, path,
+                          "unused-recovery-test.ini", &error));
   CHECK(SaveSystem_WriteActive(&error));
   CHECK(!SaveSystem_CreateRecoveryCopy(NULL, &error));
   CHECK(!SaveSystem_CreateRecoveryCopy("", &error));
-  char long_path[600]; memset(long_path, 'x', sizeof(long_path)); long_path[599] = 0;
+  char long_path[600];
+  memset(long_path, 'x', sizeof(long_path));
+  long_path[599] = 0;
   CHECK(!SaveSystem_CreateRecoveryCopy(long_path, &error));
   CHECK(SaveSystem_CreateRecoveryCopy(directory, &error));
   CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, copy, disk, &error));

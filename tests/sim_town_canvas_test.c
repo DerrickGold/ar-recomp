@@ -15,13 +15,12 @@
 #include "snes_bgr555.h"
 
 static int s_failures;
-#define CHECK(expression)                                                  \
-  do {                                                                     \
-    if (!(expression)) {                                                   \
-      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__,     \
-              #expression);                                                \
-      s_failures++;                                                        \
-    }                                                                      \
+#define CHECK(expression)                                                                          \
+  do {                                                                                             \
+    if (!(expression)) {                                                                           \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expression);               \
+      s_failures++;                                                                                \
+    }                                                                                              \
   } while (0)
 
 enum {
@@ -35,27 +34,27 @@ enum {
   kMarahnaTown = 5,
 };
 
-static uint8_t *g_wram;
-static uint16_t *g_vram;
-static uint16_t g_cgram[0x100];
+static uint8_t *s_wram;
+static uint16_t *s_vram;
+static uint16_t s_cgram[0x100];
 
 static void SetupSources(void) {
-  memset(g_wram, 0, kWramSize);
-  memset(g_vram, 0, kVramWords * sizeof(uint16_t));
-  memset(g_cgram, 0, sizeof(g_cgram));
+  memset(s_wram, 0, kWramSize);
+  memset(s_vram, 0, kVramWords * sizeof(uint16_t));
+  memset(s_cgram, 0, sizeof(s_cgram));
   /* Palette bank 1 entry 1 = pure red, bank 2 entry 1 = pure blue. */
-  g_cgram[16 + 1] = 0x001F;
-  g_cgram[32 + 1] = 0x7C00;
+  s_cgram[16 + 1] = 0x001F;
+  s_cgram[32 + 1] = 0x7C00;
   /* Tile 1: colour index 1 in the top-left pixel only, colour 0 elsewhere. */
-  g_vram[1 * 16 + 0] = 0x0080;   /* bitplane 0, bit 7 of row 0 */
+  s_vram[1 * 16 + 0] = 0x0080; /* bitplane 0, bit 7 of row 0 */
 }
 
 static void SetTile(int tile_x, int tile_y, uint16_t entry) {
   int quadrant = (tile_y >= 32 ? 2 : 0) + (tile_x >= 32 ? 1 : 0);
-  size_t word = (size_t)quadrant * kSimTownQuadrantWords +
-      (size_t)(tile_y & 31) * 32 + (tile_x & 31);
-  g_wram[kSimTownTilemapWram + word * 2] = (uint8_t)(entry & 0xFF);
-  g_wram[kSimTownTilemapWram + word * 2 + 1] = (uint8_t)(entry >> 8);
+  size_t word =
+      (size_t)quadrant * kSimTownQuadrantWords + (size_t)(tile_y & 31) * 32 + (tile_x & 31);
+  s_wram[kSimTownTilemapWram + word * 2] = (uint8_t)(entry & 0xFF);
+  s_wram[kSimTownTilemapWram + word * 2 + 1] = (uint8_t)(entry >> 8);
 }
 
 static uint32_t CanvasAt(int x, int y) {
@@ -68,7 +67,7 @@ static uint8_t SourceOpacityAt(int x, int y) {
 }
 
 static void Render(uint8_t town) {
-  SimTownCanvas_Render(town, g_wram, g_vram, g_cgram, kBrightness, kBackdrop);
+  SimTownCanvas_Render(town, s_wram, s_vram, s_cgram, kBrightness, kBackdrop);
 }
 
 /* One tile in each quadrant, at a position that would collide with another
@@ -76,9 +75,14 @@ static void Render(uint8_t town) {
 static void TestQuadrantAddressing(void) {
   SimTownCanvas_Reset();
   SetupSources();
-  const struct { int tx, ty; uint16_t bank; } probes[] = {
-    {  1,  1, 1 << 10 }, { 33,  1, 2 << 10 },
-    {  1, 33, 1 << 10 }, { 33, 33, 2 << 10 },
+  const struct {
+    int tx, ty;
+    uint16_t bank;
+  } probes[] = {
+      {1, 1, 1 << 10},
+      {33, 1, 2 << 10},
+      {1, 33, 1 << 10},
+      {33, 33, 2 << 10},
   };
   for (int i = 0; i < 4; i++)
     SetTile(probes[i].tx, probes[i].ty, (uint16_t)(1 | probes[i].bank));
@@ -93,8 +97,7 @@ static void TestQuadrantAddressing(void) {
     CHECK(SourceOpacityAt(probes[i].tx * 8, probes[i].ty * 8) == 1);
     /* Everything else in the tile is colour 0, i.e. the backdrop. */
     CHECK(CanvasAt(probes[i].tx * 8 + 1, probes[i].ty * 8) == kBackdrop);
-    CHECK(SourceOpacityAt(probes[i].tx * 8 + 1,
-                          probes[i].ty * 8) == 0);
+    CHECK(SourceOpacityAt(probes[i].tx * 8 + 1, probes[i].ty * 8) == 0);
   }
   /* A tile left empty stays backdrop, never transparent: the canvas must not
    * punch a hole in the world map drawn beneath it. */
@@ -105,16 +108,16 @@ static void TestQuadrantAddressing(void) {
 static void TestFlips(void) {
   SimTownCanvas_Reset();
   SetupSources();
-  SetTile(0, 0, (uint16_t)(1 | (1 << 10)));                 /* no flip */
-  SetTile(2, 0, (uint16_t)(1 | (1 << 10) | 0x4000));        /* flip x */
-  SetTile(4, 0, (uint16_t)(1 | (1 << 10) | 0x8000));        /* flip y */
-  SetTile(6, 0, (uint16_t)(1 | (1 << 10) | 0xC000));        /* flip both */
+  SetTile(0, 0, (uint16_t)(1 | (1 << 10)));          /* no flip */
+  SetTile(2, 0, (uint16_t)(1 | (1 << 10) | 0x4000)); /* flip x */
+  SetTile(4, 0, (uint16_t)(1 | (1 << 10) | 0x8000)); /* flip y */
+  SetTile(6, 0, (uint16_t)(1 | (1 << 10) | 0xC000)); /* flip both */
   Render(1);
   const uint32_t red = 0xFFFF0000;
-  CHECK(CanvasAt(0, 0) == red);                  /* top-left */
-  CHECK(CanvasAt(2 * 8 + 7, 0) == red);          /* top-right */
-  CHECK(CanvasAt(4 * 8, 7) == red);              /* bottom-left */
-  CHECK(CanvasAt(6 * 8 + 7, 7) == red);          /* bottom-right */
+  CHECK(CanvasAt(0, 0) == red);         /* top-left */
+  CHECK(CanvasAt(2 * 8 + 7, 0) == red); /* top-right */
+  CHECK(CanvasAt(4 * 8, 7) == red);     /* bottom-left */
+  CHECK(CanvasAt(6 * 8 + 7, 7) == red); /* bottom-right */
 }
 
 /* Re-rendering 512x512 on every frame would be wasteful, and re-rendering on
@@ -127,8 +130,7 @@ static void TestChangeDetection(void) {
   uint32_t serial = SimTownCanvas_Serial();
   int x, y, w, h;
   CHECK(SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
-  CHECK(x == 0 && y == 0 && w == kSimTownCanvasPixels &&
-        h == kSimTownCanvasPixels);
+  CHECK(x == 0 && y == 0 && w == kSimTownCanvasPixels && h == kSimTownCanvasPixels);
 
   Render(1);
   CHECK(SimTownCanvas_Serial() == serial);
@@ -146,7 +148,7 @@ static void TestChangeDetection(void) {
 
   /* Animated tile graphics land in VRAM, not the tilemap. */
   serial = SimTownCanvas_Serial();
-  g_vram[1 * 16 + 0] = 0x0040;   /* move the lit pixel one column right */
+  s_vram[1 * 16 + 0] = 0x0040; /* move the lit pixel one column right */
   Render(1);
   CHECK(SimTownCanvas_Serial() != serial);
   CHECK(CanvasAt(1 * 8 + 1, 1 * 8) == 0xFFFF0000);
@@ -162,7 +164,7 @@ static void TestChangeDetection(void) {
 
   /* So does a palette fade. */
   serial = SimTownCanvas_Serial();
-  g_cgram[16 + 1] = 0x03E0;
+  s_cgram[16 + 1] = 0x03E0;
   Render(1);
   CHECK(SimTownCanvas_Serial() != serial);
   CHECK(CanvasAt(1 * 8 + 1, 1 * 8) == 0xFF00FF00);
@@ -174,7 +176,7 @@ static void TestChangeDetection(void) {
   SetTile(1, 1, (uint16_t)(1 | (1 << 10) | 0x2000)); /* priority only */
   Render(1);
   CHECK(SimTownCanvas_Serial() == serial);
-  g_vram[2 * 16] = 0x0080;                            /* unused character */
+  s_vram[2 * 16] = 0x0080; /* unused character */
   Render(1);
   CHECK(SimTownCanvas_Serial() == serial);
 
@@ -196,7 +198,7 @@ static void TestChangeDetection(void) {
   CHECK(x == 2 * 8 && y == 2 * 8 && w == 8 && h == 8);
 
   serial = SimTownCanvas_Serial();
-  g_cgram[3 * 16 + 1] = 0x7C00;                  /* unused BG palette bank */
+  s_cgram[3 * 16 + 1] = 0x7C00; /* unused BG palette bank */
   Render(1);
   CHECK(SimTownCanvas_Serial() == serial);
   SetTile(3, 3, (uint16_t)(1 | (3 << 10)));
@@ -207,10 +209,10 @@ static void TestChangeDetection(void) {
   CHECK(x == 3 * 8 && y == 3 * 8 && w == 8 && h == 8);
 
   serial = SimTownCanvas_Serial();
-  g_cgram[16] = 0x7FFF;                 /* transparent palette colour zero */
+  s_cgram[16] = 0x7FFF; /* transparent palette colour zero */
   Render(1);
   CHECK(SimTownCanvas_Serial() == serial);
-  g_cgram[200] = 0x7FFF;                           /* OBJ palette storage */
+  s_cgram[200] = 0x7FFF; /* OBJ palette storage */
   Render(1);
   CHECK(SimTownCanvas_Serial() == serial);
   CHECK(!SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
@@ -226,10 +228,8 @@ static void TestIndependentSourceRevisions(void) {
   CHECK(SimTownCanvas_PaletteSerial() != 0);
   CHECK(SimTownCanvas_DisplaySerial() != 0);
   CHECK(SimTownCanvas_LastChangeMask() ==
-        (kSimTownCanvasChange_Tilemap |
-         kSimTownCanvasChange_Characters |
-         kSimTownCanvasChange_Palette |
-         kSimTownCanvasChange_Display));
+        (kSimTownCanvasChange_Tilemap | kSimTownCanvasChange_Characters |
+         kSimTownCanvasChange_Palette | kSimTownCanvasChange_Display));
 
   uint32_t image = SimTownCanvas_Serial();
   uint32_t tilemap = SimTownCanvas_TilemapSerial();
@@ -241,15 +241,14 @@ static void TestIndependentSourceRevisions(void) {
 
   /* Unused art is still snapshotted and publishes its own source revision,
    * but it cannot force an image upload or a scene-layout rebuild. */
-  g_vram[2 * 16] = 0x0080;
+  s_vram[2 * 16] = 0x0080;
   Render(1);
   CHECK(SimTownCanvas_Serial() == image);
   CHECK(SimTownCanvas_TilemapSerial() == tilemap);
   CHECK(SimTownCanvas_CharacterSerial() != characters);
   CHECK(SimTownCanvas_PaletteSerial() == palette);
   CHECK(SimTownCanvas_DisplaySerial() == display);
-  CHECK(SimTownCanvas_LastChangeMask() ==
-        kSimTownCanvasChange_Characters);
+  CHECK(SimTownCanvas_LastChangeMask() == kSimTownCanvasChange_Characters);
   characters = SimTownCanvas_CharacterSerial();
 
   /* Priority changes PPU painter order but not the opaque town-space layout
@@ -261,15 +260,14 @@ static void TestIndependentSourceRevisions(void) {
   CHECK(SimTownCanvas_CharacterSerial() == characters);
   CHECK(SimTownCanvas_LastChangeMask() == kSimTownCanvasChange_None);
 
-  g_cgram[3 * 16 + 1] = 0x7C00;  /* unused bank */
+  s_cgram[3 * 16 + 1] = 0x7C00; /* unused bank */
   Render(1);
   CHECK(SimTownCanvas_Serial() == image);
   CHECK(SimTownCanvas_PaletteSerial() != palette);
   CHECK(SimTownCanvas_LastChangeMask() == kSimTownCanvasChange_Palette);
   palette = SimTownCanvas_PaletteSerial();
 
-  SimTownCanvas_Render(1, g_wram, g_vram, g_cgram,
-                       kBrightness - 1, kBackdrop);
+  SimTownCanvas_Render(1, s_wram, s_vram, s_cgram, kBrightness - 1, kBackdrop);
   CHECK(SimTownCanvas_Serial() != image);
   CHECK(SimTownCanvas_TilemapSerial() == tilemap);
   CHECK(SimTownCanvas_CharacterSerial() == characters);
@@ -299,12 +297,10 @@ static void TestMarahnaEarthquakeCanvasPublication(void) {
       SetTile(tile_x + x, tile_y + y, water);
 
   Render(kMarahnaTown);
-  CHECK(CanvasAt(cell_x * kTerrainMetatilePixels,
-                 cell_y * kTerrainMetatilePixels) == 0xFF0000FF);
+  CHECK(CanvasAt(cell_x * kTerrainMetatilePixels, cell_y * kTerrainMetatilePixels) == 0xFF0000FF);
   int x, y, w, h;
   CHECK(SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
-  CHECK(x == 0 && y == 0 && w == kSimTownCanvasPixels &&
-        h == kSimTownCanvasPixels);
+  CHECK(x == 0 && y == 0 && w == kSimTownCanvasPixels && h == kSimTownCanvasPixels);
   uint32_t water_serial = SimTownCanvas_Serial();
 
   for (int local_y = 0; local_y < kTerrainMetatileTiles; local_y++)
@@ -312,13 +308,11 @@ static void TestMarahnaEarthquakeCanvasPublication(void) {
       SetTile(tile_x + local_x, tile_y + local_y, land);
   Render(kMarahnaTown);
   CHECK(SimTownCanvas_Serial() != water_serial);
-  CHECK(CanvasAt(cell_x * kTerrainMetatilePixels,
-                 cell_y * kTerrainMetatilePixels) == 0xFFFF0000);
+  CHECK(CanvasAt(cell_x * kTerrainMetatilePixels, cell_y * kTerrainMetatilePixels) == 0xFFFF0000);
   CHECK(CanvasAt((cell_x + 1) * kTerrainMetatilePixels - 1,
                  (cell_y + 1) * kTerrainMetatilePixels - 1) == kBackdrop);
   CHECK(SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
-  CHECK(x == cell_x * kTerrainMetatilePixels &&
-        y == cell_y * kTerrainMetatilePixels &&
+  CHECK(x == cell_x * kTerrainMetatilePixels && y == cell_y * kTerrainMetatilePixels &&
         w == kTerrainMetatilePixels && h == kTerrainMetatilePixels);
   CHECK(!SimTownCanvas_TakeDirtyRect(&x, &y, &w, &h));
 }
@@ -327,16 +321,16 @@ static void TestBrightnessAndTownChange(void) {
   SimTownCanvas_Reset();
   SetupSources();
   SetTile(0, 0, (uint16_t)(1 | (1 << 10)));
-  SimTownCanvas_Render(1, g_wram, g_vram, g_cgram, 0, kBackdrop);
+  SimTownCanvas_Render(1, s_wram, s_vram, s_cgram, 0, kBackdrop);
   /* Force blank scales every channel to zero, exactly as the captured planes
    * do, so a fade-out does not leave a bright town hanging outside it. */
   CHECK(CanvasAt(0, 0) == 0xFF000000);
-  SimTownCanvas_Render(1, g_wram, g_vram, g_cgram, kBrightness, kBackdrop);
+  SimTownCanvas_Render(1, s_wram, s_vram, s_cgram, kBrightness, kBackdrop);
   CHECK(CanvasAt(0, 0) == 0xFFFF0000);
 
   /* A different town must not inherit this one's ground. */
-  memset(g_wram + kSimTownTilemapWram, 0, 0x2000);
-  SimTownCanvas_Render(2, g_wram, g_vram, g_cgram, kBrightness, kBackdrop);
+  memset(s_wram + kSimTownTilemapWram, 0, 0x2000);
+  SimTownCanvas_Render(2, s_wram, s_vram, s_cgram, kBrightness, kBackdrop);
   CHECK(SimTownCanvas_Town() == 2);
   CHECK(CanvasAt(0, 0) == kBackdrop);
 }
@@ -344,16 +338,16 @@ static void TestBrightnessAndTownChange(void) {
 static void TestRawTerrainMetatile(void) {
   SimTownCanvas_Reset();
   SetupSources();
-  Render(3);  /* Publish the current town's characters, palette and fade. */
+  Render(3); /* Publish the current town's characters, palette and fade. */
   const int definition = 0x2100 + 0x8B * 8;
   for (int quadrant = 0; quadrant < 4; quadrant++) {
     /* Bit 9 is terrain traversal metadata, not character-index bit 9. */
     uint16_t entry = (uint16_t)(1 | (1 << 10) | 0x0200);
-    g_wram[definition + quadrant * 2] = (uint8_t)entry;
-    g_wram[definition + quadrant * 2 + 1] = (uint8_t)(entry >> 8);
+    s_wram[definition + quadrant * 2] = (uint8_t)entry;
+    s_wram[definition + quadrant * 2 + 1] = (uint8_t)(entry >> 8);
   }
   uint32_t pixels[16 * 16];
-  CHECK(SimTownCanvas_RenderTerrainMetatile(g_wram, 0x8B, pixels));
+  CHECK(SimTownCanvas_RenderTerrainMetatile(s_wram, 0x8B, pixels));
   CHECK(pixels[0] == 0xFFFF0000);
   CHECK(pixels[7] == kBackdrop);
   CHECK(pixels[8] == 0xFFFF0000);
@@ -364,11 +358,11 @@ static void TestRawTerrainMetatile(void) {
 static void TestRejectsMissingSources(void) {
   SimTownCanvas_Reset();
   SetupSources();
-  SimTownCanvas_Render(0, g_wram, g_vram, g_cgram, kBrightness, kBackdrop);
+  SimTownCanvas_Render(0, s_wram, s_vram, s_cgram, kBrightness, kBackdrop);
   CHECK(SimTownCanvas_Serial() == 0);
-  SimTownCanvas_Render(1, NULL, g_vram, g_cgram, kBrightness, kBackdrop);
-  SimTownCanvas_Render(1, g_wram, NULL, g_cgram, kBrightness, kBackdrop);
-  SimTownCanvas_Render(1, g_wram, g_vram, NULL, kBrightness, kBackdrop);
+  SimTownCanvas_Render(1, NULL, s_vram, s_cgram, kBrightness, kBackdrop);
+  SimTownCanvas_Render(1, s_wram, NULL, s_cgram, kBrightness, kBackdrop);
+  SimTownCanvas_Render(1, s_wram, s_vram, NULL, kBrightness, kBackdrop);
   CHECK(SimTownCanvas_Serial() == 0);
 }
 
@@ -381,41 +375,45 @@ static void TestDecodedCacheAgainstReference(void) {
   SimTownCanvas_Reset();
   SetupSources();
   uint32_t seed = 7;
-  for (int i = 0; i < 128; i++) g_cgram[i] = (uint16_t)RandomWord(&seed);
-  for (int i = 0; i < 1024 * 16; i++) g_vram[i] = (uint16_t)RandomWord(&seed);
+  for (int i = 0; i < 128; i++)
+    s_cgram[i] = (uint16_t)RandomWord(&seed);
+  for (int i = 0; i < 1024 * 16; i++)
+    s_vram[i] = (uint16_t)RandomWord(&seed);
   for (int y = 0; y < 64; y++)
-    for (int x = 0; x < 64; x++) SetTile(x, y, (uint16_t)(RandomWord(&seed) >> 8));
+    for (int x = 0; x < 64; x++)
+      SetTile(x, y, (uint16_t)(RandomWord(&seed) >> 8));
   for (int frame = 0; frame < 20; frame++) {
     const int brightness = frame % 16;
     const uint32_t backdrop = RandomWord(&seed) | 0xff000000u;
     for (int i = 0; i < 23; i++) {
       const unsigned character_word = RandomWord(&seed) % (1024 * 16);
       const unsigned palette_color = RandomWord(&seed) % 128;
-      g_vram[character_word] = (uint16_t)RandomWord(&seed);
-      g_cgram[palette_color] = (uint16_t)RandomWord(&seed);
+      s_vram[character_word] = (uint16_t)RandomWord(&seed);
+      s_cgram[palette_color] = (uint16_t)RandomWord(&seed);
     }
     /* Alternate display changes and character/palette-only changes. */
     for (int pass = 0; pass < 2; pass++) {
-      if (pass) g_vram[RandomWord(&seed) % (1024 * 16)] ^= 0xffffu;
-      SimTownCanvas_Render(1, g_wram, g_vram, g_cgram, brightness, backdrop);
+      if (pass) s_vram[RandomWord(&seed) % (1024 * 16)] ^= 0xffffu;
+      SimTownCanvas_Render(1, s_wram, s_vram, s_cgram, brightness, backdrop);
       for (int y = 0; y < 512; y++)
         for (int x = 0; x < 512; x++) {
           const int tx = x / 8, ty = y / 8;
           const int quadrant = (ty >= 32 ? 2 : 0) + (tx >= 32 ? 1 : 0);
           const int word = quadrant * kSimTownQuadrantWords + (ty & 31) * 32 + (tx & 31);
-          const uint8_t *map = g_wram + kSimTownTilemapWram + word * 2;
+          const uint8_t *map = s_wram + kSimTownTilemapWram + word * 2;
           const uint16_t entry = (uint16_t)(map[0] | map[1] << 8);
           const int px = (entry & 0x4000) ? 7 - (x % 8) : x % 8;
           const int py = (entry & 0x8000) ? 7 - (y % 8) : y % 8;
-          const uint16_t *art = g_vram + (entry & 1023) * 16;
+          const uint16_t *art = s_vram + (entry & 1023) * 16;
           unsigned index = 0;
           for (int bit = 0; bit < 4; bit++)
             index |= ((art[py + (bit / 2) * 8] >> (7 - px + (bit % 2) * 8)) & 1u) << bit;
-          const uint16_t color = g_cgram[((entry >> 10) & 7) * 16 + index];
-          const uint32_t expected = index ? 0xff000000u |
-              (uint32_t)ExpandColor5(color & 31, brightness) << 16 |
-              (uint32_t)ExpandColor5((color >> 5) & 31, brightness) << 8 |
-              ExpandColor5((color >> 10) & 31, brightness) : backdrop;
+          const uint16_t color = s_cgram[((entry >> 10) & 7) * 16 + index];
+          const uint32_t expected =
+              index ? 0xff000000u | (uint32_t)ExpandColor5(color & 31, brightness) << 16 |
+                          (uint32_t)ExpandColor5((color >> 5) & 31, brightness) << 8 |
+                          ExpandColor5((color >> 10) & 31, brightness)
+                    : backdrop;
           CHECK(CanvasAt(x, y) == expected);
           CHECK(SourceOpacityAt(x, y) == (index != 0));
         }
@@ -424,8 +422,8 @@ static void TestDecodedCacheAgainstReference(void) {
 }
 
 int main(void) {
-  g_wram = malloc(kWramSize);
-  g_vram = malloc(kVramWords * sizeof(uint16_t));
+  s_wram = malloc(kWramSize);
+  s_vram = malloc(kVramWords * sizeof(uint16_t));
   TestQuadrantAddressing();
   TestFlips();
   TestDecodedCacheAgainstReference();
@@ -436,8 +434,8 @@ int main(void) {
   TestRawTerrainMetatile();
   TestRejectsMissingSources();
   SimTownCanvas_Reset();
-  free(g_wram);
-  free(g_vram);
+  free(s_wram);
+  free(s_vram);
   printf("sim town canvas tests: %s\n", s_failures ? "FAIL" : "pass");
   return s_failures ? 1 : 0;
 }

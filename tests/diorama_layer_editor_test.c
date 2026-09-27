@@ -30,37 +30,29 @@
 #include "actraiser_game.h"
 #include "diorama_layer_order.h"
 
-static int g_failures;
+static int s_failures;
 
-#define CHECK(cond)                                                        \
-  do {                                                                     \
-    if (!(cond)) {                                                         \
-      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);               \
-      g_failures++;                                                        \
-    }                                                                      \
+#define CHECK(cond)                                                                                \
+  do {                                                                                             \
+    if (!(cond)) {                                                                                 \
+      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                                       \
+      s_failures++;                                                                                \
+    }                                                                                              \
   } while (0)
 
 /* diorama.c's real kDioramaLayers table, so a failure maps onto what the
  * game would actually draw. */
 static const DioramaResolvedLayer kDefaults[] = {
-  { kDioramaPlane_Backdrop, 0.00f, 255 },
-  { SR_PPU_OVERLAY_OBJ,  0.51f, 255 },
-  { kDioramaPlane_Obj1,     0.51f, 255 },
-  { kDioramaPlane_Bg2Far,   0.05f, 255 },
-  { SR_PPU_OVERLAY_BG2,  0.20f, 255 },
-  { kDioramaPlane_Bg1Far,   0.35f, 255 },
-  { SR_PPU_OVERLAY_BG1,  0.50f, 255 },
-  { kDioramaPlane_Obj2,     0.51f, 255 },
-  { kDioramaPlane_Bg2Hi,    0.21f, 255 },
-  { kDioramaPlane_Bg1Hi,    0.51f, 255 },
-  { kDioramaPlane_Obj3,     0.52f, 255 },
-  { SR_PPU_OVERLAY_BG3,  0.95f, 255 },
+    {kDioramaPlane_Backdrop, 0.00f, 255}, {SR_PPU_OVERLAY_OBJ, 0.51f, 255},
+    {kDioramaPlane_Obj1, 0.51f, 255},     {kDioramaPlane_Bg2Far, 0.05f, 255},
+    {SR_PPU_OVERLAY_BG2, 0.20f, 255},     {kDioramaPlane_Bg1Far, 0.35f, 255},
+    {SR_PPU_OVERLAY_BG1, 0.50f, 255},     {kDioramaPlane_Obj2, 0.51f, 255},
+    {kDioramaPlane_Bg2Hi, 0.21f, 255},    {kDioramaPlane_Bg1Hi, 0.51f, 255},
+    {kDioramaPlane_Obj3, 0.52f, 255},     {SR_PPU_OVERLAY_BG3, 0.95f, 255},
 };
-static const int kDefaultCount =
-    (int)(sizeof(kDefaults) / sizeof(kDefaults[0]));
+static const int kDefaultCount = (int)(sizeof(kDefaults) / sizeof(kDefaults[0]));
 
-static const DioramaResolvedLayer *FindResolved(
-    const DioramaResolvedLayer *out, int n, int plane) {
+static const DioramaResolvedLayer *FindResolved(const DioramaResolvedLayer *out, int n, int plane) {
   for (int i = 0; i < n; i++)
     if (out[i].plane == plane) return &out[i];
   return NULL;
@@ -76,8 +68,7 @@ static void TestEachStrategyResolvesToItself(void) {
   for (int s = 0; s < kDioramaDepth_StrategyCount; s++) {
     DioramaLayerOrderTable table;
     memset(&table, 0, sizeof(table));
-    DioramaRoomOverride *room =
-        DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+    DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
     CHECK(room != NULL);
     if (!room) continue;
     DioramaPlaneOverride *plane = &room->planes[kDioramaPlane_Bg2Hi];
@@ -85,23 +76,27 @@ static void TestEachStrategyResolvesToItself(void) {
     /* Author EVERY shape first, so each iteration starts from the worst case:
      * a plane carrying all of them at once. A SetStrategy that forgets to clear
      * one will be caught here and nowhere else. */
-    plane->set_rake = true;       plane->rake = 0.40f;
-    plane->set_bow = true;        plane->bow = 0.30f;
-    plane->set_thickness = true;  plane->thickness = 0.25f;
-    plane->set_stack = true;      plane->stack = 0.35f;
-    plane->set_stack_copies = true; plane->stack_copies = 5;
-    plane->set_voxel = true;      plane->voxel = 0.15f;
-    plane->set_voxel_copies = true; plane->voxel_copies = 20;
+    plane->set_rake = true;
+    plane->rake = 0.40f;
+    plane->set_bow = true;
+    plane->bow = 0.30f;
+    plane->set_thickness = true;
+    plane->thickness = 0.25f;
+    plane->set_stack = true;
+    plane->stack = 0.35f;
+    plane->set_stack_copies = true;
+    plane->stack_copies = 5;
+    plane->set_voxel = true;
+    plane->voxel = 0.15f;
+    plane->set_voxel_copies = true;
+    plane->voxel_copies = 20;
 
     DioramaLayerEditor_SetStrategy(plane, (DioramaDepthStrategy)s);
-    CHECK(DioramaLayerEditor_StrategyOfPlane(plane) ==
-          (DioramaDepthStrategy)s);
+    CHECK(DioramaLayerEditor_StrategyOfPlane(plane) == (DioramaDepthStrategy)s);
 
     DioramaResolvedLayer out[16];
-    int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
-                                      kDefaultCount, out, 16);
-    const DioramaResolvedLayer *layer =
-        FindResolved(out, n, kDioramaPlane_Bg2Hi);
+    int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults, kDefaultCount, out, 16);
+    const DioramaResolvedLayer *layer = FindResolved(out, n, kDioramaPlane_Bg2Hi);
     CHECK(layer != NULL);
     if (!layer) continue;
     /* The renderer's own verdict, not the editor's. */
@@ -113,48 +108,48 @@ static void TestEachStrategyResolvesToItself(void) {
      * that reports "stack" while still carrying a thickness would draw a skirt
      * nobody asked for. */
     switch (s) {
-      case kDioramaDepth_Flat:
-        CHECK(layer->rake == 0.0f);
-        CHECK(layer->bow == 0.0f);
-        CHECK(layer->thickness == 0.0f);
-        CHECK(layer->stack == 0.0f);
-        break;
-      case kDioramaDepth_Rake:
-        CHECK(layer->rake != 0.0f);
-        CHECK(layer->bow == 0.0f);
-        CHECK(layer->thickness == 0.0f);
-        CHECK(layer->stack == 0.0f);
-        break;
-      case kDioramaDepth_Bow:
-        CHECK(layer->bow != 0.0f);
-        CHECK(layer->rake == 0.0f);
-        CHECK(layer->thickness == 0.0f);
-        CHECK(layer->stack == 0.0f);
-        break;
-      case kDioramaDepth_Thick:
-        CHECK(layer->thickness > 0.0f);
-        CHECK(layer->rake == 0.0f);
-        CHECK(layer->bow == 0.0f);
-        CHECK(layer->stack == 0.0f);
-        break;
-      case kDioramaDepth_Stack:
-        CHECK(layer->stack > 0.0f);
-        CHECK(layer->stack_copies > 1);
-        CHECK(!layer->stack_solid);   /* a faded stack, not a solid voxel */
-        CHECK(layer->rake == 0.0f);
-        CHECK(layer->bow == 0.0f);
-        CHECK(layer->thickness == 0.0f);
-        break;
-      case kDioramaDepth_Voxel:
-        CHECK(layer->stack > 0.0f);
-        CHECK(layer->stack_solid);
-        CHECK(layer->stack_copies > 1);
-        CHECK(layer->rake == 0.0f);
-        CHECK(layer->bow == 0.0f);
-        CHECK(layer->thickness == 0.0f);
-        break;
-      default:
-        break;
+    case kDioramaDepth_Flat:
+      CHECK(layer->rake == 0.0f);
+      CHECK(layer->bow == 0.0f);
+      CHECK(layer->thickness == 0.0f);
+      CHECK(layer->stack == 0.0f);
+      break;
+    case kDioramaDepth_Rake:
+      CHECK(layer->rake != 0.0f);
+      CHECK(layer->bow == 0.0f);
+      CHECK(layer->thickness == 0.0f);
+      CHECK(layer->stack == 0.0f);
+      break;
+    case kDioramaDepth_Bow:
+      CHECK(layer->bow != 0.0f);
+      CHECK(layer->rake == 0.0f);
+      CHECK(layer->thickness == 0.0f);
+      CHECK(layer->stack == 0.0f);
+      break;
+    case kDioramaDepth_Thick:
+      CHECK(layer->thickness > 0.0f);
+      CHECK(layer->rake == 0.0f);
+      CHECK(layer->bow == 0.0f);
+      CHECK(layer->stack == 0.0f);
+      break;
+    case kDioramaDepth_Stack:
+      CHECK(layer->stack > 0.0f);
+      CHECK(layer->stack_copies > 1);
+      CHECK(!layer->stack_solid); /* a faded stack, not a solid voxel */
+      CHECK(layer->rake == 0.0f);
+      CHECK(layer->bow == 0.0f);
+      CHECK(layer->thickness == 0.0f);
+      break;
+    case kDioramaDepth_Voxel:
+      CHECK(layer->stack > 0.0f);
+      CHECK(layer->stack_solid);
+      CHECK(layer->stack_copies > 1);
+      CHECK(layer->rake == 0.0f);
+      CHECK(layer->bow == 0.0f);
+      CHECK(layer->thickness == 0.0f);
+      break;
+    default:
+      break;
     }
   }
 }
@@ -199,18 +194,15 @@ static void TestAuthoredStrategyIsNonZero(void) {
     room->planes[SR_PPU_OVERLAY_BG1] = plane;
 
     DioramaResolvedLayer out[16];
-    int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
-                                      kDefaultCount, out, 16);
-    const DioramaResolvedLayer *layer =
-        FindResolved(out, n, SR_PPU_OVERLAY_BG1);
+    int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults, kDefaultCount, out, 16);
+    const DioramaResolvedLayer *layer = FindResolved(out, n, SR_PPU_OVERLAY_BG1);
     CHECK(layer != NULL);
     if (!layer) continue;
     /* Whichever shape it is, SOMETHING must be non-zero, and a repeat-based
      * shape needs more than one copy or the renderer's layer_stack_copies gate
      * skips it entirely. */
-    const bool visible =
-        layer->rake != 0.0f || layer->bow != 0.0f || layer->thickness > 0.0f ||
-        (layer->stack > 0.0f && layer->stack_copies > 1);
+    const bool visible = layer->rake != 0.0f || layer->bow != 0.0f || layer->thickness > 0.0f ||
+                         (layer->stack > 0.0f && layer->stack_copies > 1);
     CHECK(visible);
   }
 }
@@ -226,7 +218,7 @@ static void TestMagnitudeCarriesBetweenRelatedShapes(void) {
   plane.rake = 0.15f;
   DioramaLayerEditor_SetStrategy(&plane, kDioramaDepth_Bow);
   CHECK(plane.bow == 0.15f);
-  CHECK(plane.rake == 0.0f);   /* and the old key is gone, not merely unflagged */
+  CHECK(plane.rake == 0.0f); /* and the old key is gone, not merely unflagged */
   CHECK(!plane.set_rake);
 
   DioramaLayerEditor_SetStrategy(&plane, kDioramaDepth_Stack);
@@ -267,8 +259,7 @@ static void TestStrategyRoundTripsThroughManifest(void) {
      * direction to choose -- and StepParam must refuse it on the others rather
      * than authoring a key the renderer would ignore. */
     const bool directional = s == kDioramaDepth_Stack || s == kDioramaDepth_Voxel;
-    CHECK(DioramaLayerEditor_StepParam(plane, kDioramaEditorParam_Direction,
-                                       +1) == directional);
+    CHECK(DioramaLayerEditor_StepParam(plane, kDioramaEditorParam_Direction, +1) == directional);
 
     char text[1024];
     size_t need = DioramaLayerOrder_FormatRoom(room, text, sizeof(text));
@@ -281,9 +272,8 @@ static void TestStrategyRoundTripsThroughManifest(void) {
     reloaded.map_group = 0x03;
     reloaded.map_number = 0x04;
     char *save = NULL;
-    for (char *line = strtok_r(text, "\n", &save); line;
-         line = strtok_r(NULL, "\n", &save)) {
-      if (line[0] == '[' || !line[0]) continue;   /* section header */
+    for (char *line = strtok_r(text, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+      if (line[0] == '[' || !line[0]) continue; /* section header */
       const char *error = NULL;
       CHECK(DioramaLayerOrder_ParseLine(&reloaded, line, &error));
     }
@@ -336,8 +326,7 @@ static void TestUndoLeavesRoomInactive(void) {
   CHECK(!DioramaLayerOrder_RoomIsActive(room));
 
   DioramaResolvedLayer out[16];
-  int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
-                                    kDefaultCount, out, 16);
+  int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults, kDefaultCount, out, 16);
   CHECK(n == kDefaultCount);
   for (int i = 0; i < n; i++) {
     CHECK(out[i].plane == kDefaults[i].plane);
@@ -369,9 +358,8 @@ static void TestClearingDepthRemovesTheShape(void) {
  * drives each key to both ends and re-parses the result. */
 static void TestSteppingStaysWithinParserBounds(void) {
   static const DioramaEditorParam kParams[] = {
-    kDioramaEditorParam_Depth, kDioramaEditorParam_Copies,
-    kDioramaEditorParam_Density, kDioramaEditorParam_Z,
-    kDioramaEditorParam_Alpha, kDioramaEditorParam_Order,
+      kDioramaEditorParam_Depth, kDioramaEditorParam_Copies, kDioramaEditorParam_Density,
+      kDioramaEditorParam_Z,     kDioramaEditorParam_Alpha,  kDioramaEditorParam_Order,
   };
   for (int s = kDioramaDepth_Rake; s < kDioramaDepth_StrategyCount; s++) {
     for (size_t k = 0; k < sizeof(kParams) / sizeof(kParams[0]); k++) {
@@ -406,8 +394,7 @@ static void TestSteppingStaysWithinParserBounds(void) {
         DioramaRoomOverride reloaded;
         memset(&reloaded, 0, sizeof(reloaded));
         reloaded.used = true;
-        for (char *line = strtok_r(text, "\n", &save); line;
-             line = strtok_r(NULL, "\n", &save)) {
+        for (char *line = strtok_r(text, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
           if (line[0] == '[' || !line[0]) continue;
           const char *error = NULL;
           /* THE assertion: the parser must accept every value the UI produced.
@@ -471,13 +458,13 @@ static void TestStepSnapsToGrid(void) {
    * distinguish the two implementations assert nothing about which is used.
    *
    * 0.297 / 0.01 = 29.7 -> rounds to 30, truncates to 29. Hand-computed. */
-  plane.rake = 0.297f;   /* as if loaded from a hand-edited manifest */
+  plane.rake = 0.297f; /* as if loaded from a hand-edited manifest */
   DioramaLayerEditor_StepParam(&plane, kDioramaEditorParam_Depth, +1);
-  CHECK(plane.rake > 0.3099f && plane.rake < 0.3101f);   /* 31, not 30 */
+  CHECK(plane.rake > 0.3099f && plane.rake < 0.3101f); /* 31, not 30 */
 
   plane.rake = 0.297f;
   DioramaLayerEditor_StepParam(&plane, kDioramaEditorParam_Depth, -1);
-  CHECK(plane.rake > 0.2899f && plane.rake < 0.2901f);   /* 29, not 28 */
+  CHECK(plane.rake > 0.2899f && plane.rake < 0.2901f); /* 29, not 28 */
 
   /* Negative side: a rake may be negative (a ceiling), and the rounding must be
    * symmetric about zero rather than biased toward it -- which is exactly what a
@@ -501,8 +488,8 @@ static void TestStepSnapsToGrid(void) {
 
 /* ── 5. rows match the shape ─────────────────────────────────────────────── */
 
-static const DioramaEditorRow *FindRow(const DioramaEditorRow *rows, int n,
-                                       int plane, DioramaEditorParam param) {
+static const DioramaEditorRow *FindRow(const DioramaEditorRow *rows, int n, int plane,
+                                       DioramaEditorParam param) {
   for (int i = 0; i < n; i++)
     if (rows[i].plane == plane && rows[i].param == param) return &rows[i];
   return NULL;
@@ -519,11 +506,9 @@ static void TestForeignLevelTabExplainsItself(void) {
   ctx.selected_plane = -1;
 
   DioramaEditorRow rows[kDioramaEditorRowMax];
-  int bloodpool = DioramaLayerEditor_LevelIndexOfGroup(
-      kActRaiserMapGroup_Bloodpool);
+  int bloodpool = DioramaLayerEditor_LevelIndexOfGroup(kActRaiserMapGroup_Bloodpool);
   CHECK(bloodpool >= 0);
-  int n = DioramaLayerEditor_BuildRows(NULL, &ctx, bloodpool, rows,
-                                       kDioramaEditorRowMax);
+  int n = DioramaLayerEditor_BuildRows(NULL, &ctx, bloodpool, rows, kDioramaEditorRowMax);
   CHECK(n == 1);
   CHECK(rows[0].kind == kDioramaEditorRow_Header);
   CHECK(!rows[0].selectable);
@@ -548,8 +533,7 @@ static void TestLiveTabListsEveryPlane(void) {
 
   DioramaEditorRow rows[kDioramaEditorRowMax];
   int level = DioramaLayerEditor_LevelIndexOfGroup(kActRaiserMapGroup_Fillmore);
-  int n = DioramaLayerEditor_BuildRows(NULL, &ctx, level, rows,
-                                       kDioramaEditorRowMax);
+  int n = DioramaLayerEditor_BuildRows(NULL, &ctx, level, rows, kDioramaEditorRowMax);
   int planes = 0;
   for (int i = 0; i < n; i++)
     if (rows[i].kind == kDioramaEditorRow_Plane) planes++;
@@ -564,8 +548,7 @@ static void TestLiveTabListsEveryPlane(void) {
   /* With nothing authored every plane reads FLAT, which is the honest report of
    * a room the file does not mention. */
   for (int i = 0; i < n; i++)
-    if (rows[i].kind == kDioramaEditorRow_Plane)
-      CHECK(!strcmp(rows[i].value, "FLAT"));
+    if (rows[i].kind == kDioramaEditorRow_Plane) CHECK(!strcmp(rows[i].value, "FLAT"));
 }
 
 /* Only the SELECTED plane expands, and only into the parameters its active
@@ -585,38 +568,32 @@ static void TestParamRowsFollowTheActiveShape(void) {
   ctx.map_group = kActRaiserMapGroup_Fillmore;
   ctx.map_number = 0x02;
   ctx.selected_plane = kDioramaPlane_Bg2Hi;
-  const int level =
-      DioramaLayerEditor_LevelIndexOfGroup(kActRaiserMapGroup_Fillmore);
+  const int level = DioramaLayerEditor_LevelIndexOfGroup(kActRaiserMapGroup_Fillmore);
   DioramaEditorRow rows[kDioramaEditorRowMax];
 
   /* Flat: no depth row at all, because there is no magnitude to step. */
-  int n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows,
-                                      kDioramaEditorRowMax);
+  int n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows, kDioramaEditorRowMax);
   CHECK(!FindRow(rows, n, kDioramaPlane_Bg2Hi, kDioramaEditorParam_Depth));
-  CHECK(!FindRow(rows, n, kDioramaPlane_Bg2Hi,
-                 kDioramaEditorParam_TransparentFill));
+  CHECK(!FindRow(rows, n, kDioramaPlane_Bg2Hi, kDioramaEditorParam_TransparentFill));
   /* But z/alpha/order apply to any plane, shape or not. */
   CHECK(FindRow(rows, n, kDioramaPlane_Bg2Hi, kDioramaEditorParam_Z));
 
   /* Rake: a depth row, and NO copies/direction -- a tilt has neither. */
   DioramaLayerEditor_SetStrategy(plane, kDioramaDepth_Rake);
-  n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows,
-                                   kDioramaEditorRowMax);
+  n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows, kDioramaEditorRowMax);
   CHECK(FindRow(rows, n, kDioramaPlane_Bg2Hi, kDioramaEditorParam_Depth));
   CHECK(!FindRow(rows, n, kDioramaPlane_Bg2Hi, kDioramaEditorParam_Copies));
   CHECK(!FindRow(rows, n, kDioramaPlane_Bg2Hi, kDioramaEditorParam_Direction));
 
   /* Thick: a depth row, still no copies -- a skirt is one extrusion. */
   DioramaLayerEditor_SetStrategy(plane, kDioramaDepth_Thick);
-  n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows,
-                                   kDioramaEditorRowMax);
+  n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows, kDioramaEditorRowMax);
   CHECK(FindRow(rows, n, kDioramaPlane_Bg2Hi, kDioramaEditorParam_Depth));
   CHECK(!FindRow(rows, n, kDioramaPlane_Bg2Hi, kDioramaEditorParam_Copies));
 
   /* Stack: depth, copies and direction; density only once authored. */
   DioramaLayerEditor_SetStrategy(plane, kDioramaDepth_Stack);
-  n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows,
-                                   kDioramaEditorRowMax);
+  n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows, kDioramaEditorRowMax);
   CHECK(FindRow(rows, n, kDioramaPlane_Bg2Hi, kDioramaEditorParam_Copies));
   CHECK(FindRow(rows, n, kDioramaPlane_Bg2Hi, kDioramaEditorParam_Direction));
   CHECK(!FindRow(rows, n, kDioramaPlane_Bg2Hi, kDioramaEditorParam_Density));
@@ -625,16 +602,14 @@ static void TestParamRowsFollowTheActiveShape(void) {
   CHECK(copies && !strcmp(copies->label, "copies"));
 
   DioramaLayerEditor_StepParam(plane, kDioramaEditorParam_Density, +1);
-  n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows,
-                                   kDioramaEditorRowMax);
+  n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows, kDioramaEditorRowMax);
   CHECK(FindRow(rows, n, kDioramaPlane_Bg2Hi, kDioramaEditorParam_Density));
 
   /* Voxel: the same rows, but the count is called "slices" -- the manifest key
    * differs, and a row labelled "copies" would send the player to the wrong
    * key when they hand-edit the file. */
   DioramaLayerEditor_SetStrategy(plane, kDioramaDepth_Voxel);
-  n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows,
-                                   kDioramaEditorRowMax);
+  n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows, kDioramaEditorRowMax);
   const DioramaEditorRow *count_row =
       FindRow(rows, n, kDioramaPlane_Bg2Hi, kDioramaEditorParam_Copies);
   CHECK(count_row && !strcmp(count_row->label, "slices"));
@@ -655,31 +630,24 @@ static void TestUnauthoredKnobsShowDash(void) {
   ctx.selected_plane = SR_PPU_OVERLAY_BG1;
 
   DioramaEditorRow rows[kDioramaEditorRowMax];
-  const int level =
-      DioramaLayerEditor_LevelIndexOfGroup(kActRaiserMapGroup_Fillmore);
-  int n = DioramaLayerEditor_BuildRows(NULL, &ctx, level, rows,
-                                       kDioramaEditorRowMax);
-  const DioramaEditorRow *z =
-      FindRow(rows, n, SR_PPU_OVERLAY_BG1, kDioramaEditorParam_Z);
+  const int level = DioramaLayerEditor_LevelIndexOfGroup(kActRaiserMapGroup_Fillmore);
+  int n = DioramaLayerEditor_BuildRows(NULL, &ctx, level, rows, kDioramaEditorRowMax);
+  const DioramaEditorRow *z = FindRow(rows, n, SR_PPU_OVERLAY_BG1, kDioramaEditorParam_Z);
   CHECK(z && !strcmp(z->value, "--"));
-  const DioramaEditorRow *fill = FindRow(
-      rows, n, SR_PPU_OVERLAY_BG1,
-      kDioramaEditorParam_TransparentFill);
+  const DioramaEditorRow *fill =
+      FindRow(rows, n, SR_PPU_OVERLAY_BG1, kDioramaEditorParam_TransparentFill);
   CHECK(fill && fill->kind == kDioramaEditorRow_ParamEnum);
   CHECK(fill && !strcmp(fill->value, "OFF"));
 
   DioramaPlaneOverride plane;
   memset(&plane, 0, sizeof(plane));
-  CHECK(DioramaLayerEditor_StepParam(
-      &plane, kDioramaEditorParam_TransparentFill, +1));
+  CHECK(DioramaLayerEditor_StepParam(&plane, kDioramaEditorParam_TransparentFill, +1));
   CHECK(plane.set_transparent_fill);
   CHECK(plane.transparent_fill_kind == kDioramaTransparentFill_Black);
-  CHECK(DioramaLayerEditor_StepParam(
-      &plane, kDioramaEditorParam_TransparentFill, -1));
+  CHECK(DioramaLayerEditor_StepParam(&plane, kDioramaEditorParam_TransparentFill, -1));
   CHECK(plane.set_transparent_fill);
   CHECK(plane.transparent_fill_kind == kDioramaTransparentFill_None);
-  DioramaLayerEditor_ClearParam(
-      &plane, kDioramaEditorParam_TransparentFill);
+  DioramaLayerEditor_ClearParam(&plane, kDioramaEditorParam_TransparentFill);
   CHECK(!plane.set_transparent_fill);
 }
 
@@ -687,13 +655,11 @@ static void TestBackdropSourceIsScopedAndEditable(void) {
   DioramaLayerOrderTable table;
   memset(&table, 0, sizeof(table));
   DioramaRoomOverride *waterfall = DioramaLayerOrder_FindOrAddSection(
-      &table, kActRaiserMapGroup_Aitos, 0x02,
-      kDioramaLayerSection_AitosWaterfall);
+      &table, kActRaiserMapGroup_Aitos, 0x02, kDioramaLayerSection_AitosWaterfall);
   CHECK(waterfall != NULL);
   if (!waterfall) return;
   waterfall->planes[kDioramaPlane_Backdrop].set_source = true;
-  waterfall->planes[kDioramaPlane_Backdrop].source =
-      kDioramaLayerSource_AitosSky;
+  waterfall->planes[kDioramaPlane_Backdrop].source = kDioramaLayerSource_AitosSky;
 
   DioramaEditorContext ctx;
   memset(&ctx, 0, sizeof(ctx));
@@ -703,42 +669,33 @@ static void TestBackdropSourceIsScopedAndEditable(void) {
   ctx.section = kDioramaLayerSection_AitosWaterfall;
   ctx.selected_plane = kDioramaPlane_Backdrop;
   DioramaEditorRow rows[kDioramaEditorRowMax];
-  const int level =
-      DioramaLayerEditor_LevelIndexOfGroup(kActRaiserMapGroup_Aitos);
-  int n = DioramaLayerEditor_BuildRows(
-      &table, &ctx, level, rows, kDioramaEditorRowMax);
+  const int level = DioramaLayerEditor_LevelIndexOfGroup(kActRaiserMapGroup_Aitos);
+  int n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows, kDioramaEditorRowMax);
   CHECK(strstr(rows[0].label, "waterfall") != NULL);
-  const DioramaEditorRow *source = FindRow(
-      rows, n, kDioramaPlane_Backdrop, kDioramaEditorParam_Source);
+  const DioramaEditorRow *source =
+      FindRow(rows, n, kDioramaPlane_Backdrop, kDioramaEditorParam_Source);
   CHECK(source != NULL);
   CHECK(source && source->kind == kDioramaEditorRow_ParamEnum);
   CHECK(source && !strcmp(source->label, "skybox source"));
   CHECK(source && !strcmp(source->value, "ROM-04-01-BG2"));
   /* Other planes cannot offer a source row the manifest would reject. */
   ctx.selected_plane = SR_PPU_OVERLAY_BG1;
-  n = DioramaLayerEditor_BuildRows(
-      &table, &ctx, level, rows, kDioramaEditorRowMax);
-  CHECK(!FindRow(rows, n, SR_PPU_OVERLAY_BG1,
-                 kDioramaEditorParam_Source));
+  n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows, kDioramaEditorRowMax);
+  CHECK(!FindRow(rows, n, SR_PPU_OVERLAY_BG1, kDioramaEditorParam_Source));
 
   /* A scoped record with no local source displays the renderer's inherited
    * base-room source, not a misleading raw zero/Captured value. */
-  DioramaRoomOverride *base = DioramaLayerOrder_FindOrAdd(
-      &table, kActRaiserMapGroup_Aitos, 0x02);
+  DioramaRoomOverride *base = DioramaLayerOrder_FindOrAdd(&table, kActRaiserMapGroup_Aitos, 0x02);
   CHECK(base != NULL);
   if (base) {
     waterfall->planes[kDioramaPlane_Backdrop].set_source = false;
     base->planes[kDioramaPlane_Backdrop].set_source = true;
-    base->planes[kDioramaPlane_Backdrop].source =
-        DioramaLayerOrder_ActionBgSource(0x06, 0x08, 1);
+    base->planes[kDioramaPlane_Backdrop].source = DioramaLayerOrder_ActionBgSource(0x06, 0x08, 1);
     ctx.selected_plane = kDioramaPlane_Backdrop;
-    n = DioramaLayerEditor_BuildRows(
-        &table, &ctx, level, rows, kDioramaEditorRowMax);
-    source = FindRow(rows, n, kDioramaPlane_Backdrop,
-                     kDioramaEditorParam_Source);
+    n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows, kDioramaEditorRowMax);
+    source = FindRow(rows, n, kDioramaPlane_Backdrop, kDioramaEditorParam_Source);
     CHECK(source && !strcmp(source->value, "ROM-06-08-BG1"));
-    CHECK(source && source->effective_source ==
-                        DioramaLayerOrder_ActionBgSource(0x06, 0x08, 1));
+    CHECK(source && source->effective_source == DioramaLayerOrder_ActionBgSource(0x06, 0x08, 1));
   }
 }
 
@@ -756,22 +713,19 @@ static void TestRowsFitTheDocumentedMaximum(void) {
   ctx.room_live = true;
   ctx.map_group = kActRaiserMapGroup_Fillmore;
   ctx.map_number = 0x02;
-  const int level =
-      DioramaLayerEditor_LevelIndexOfGroup(kActRaiserMapGroup_Fillmore);
+  const int level = DioramaLayerEditor_LevelIndexOfGroup(kActRaiserMapGroup_Fillmore);
 
   /* Worst case: every plane authored with the shape that expands into the most
    * rows, and the cursor on each in turn. */
   for (int p = 0; p < kDioramaPlane_Count; p++) {
     if (!DioramaLayerOrder_PlaneToken(p)) continue;
     DioramaLayerEditor_SetStrategy(&room->planes[p], kDioramaDepth_Stack);
-    DioramaLayerEditor_StepParam(&room->planes[p],
-                                 kDioramaEditorParam_Density, +1);
+    DioramaLayerEditor_StepParam(&room->planes[p], kDioramaEditorParam_Density, +1);
   }
   for (int p = 0; p < kDioramaPlane_Count; p++) {
     ctx.selected_plane = p;
     DioramaEditorRow rows[kDioramaEditorRowMax];
-    int n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows,
-                                        kDioramaEditorRowMax);
+    int n = DioramaLayerEditor_BuildRows(&table, &ctx, level, rows, kDioramaEditorRowMax);
     CHECK(n > 0);
     CHECK(n <= kDioramaEditorRowMax);
   }
@@ -789,8 +743,7 @@ static void TestLevelTabsAreTheActionGroups(void) {
     CHECK(DioramaLayerEditor_LevelIndexOfGroup(group) == i);
     CHECK(DioramaLayerEditor_LevelName(i)[0] != '\0');
   }
-  CHECK(DioramaLayerEditor_LevelIndexOfGroup(
-            kActRaiserMapGroup_NonAction) < 0);
+  CHECK(DioramaLayerEditor_LevelIndexOfGroup(kActRaiserMapGroup_NonAction) < 0);
   CHECK(DioramaLayerEditor_LevelIndexOfGroup(kActRaiserMapGroup_Ending) < 0);
 }
 
@@ -846,36 +799,47 @@ static void TestFullyAuthoredRoomRoundTrips(void) {
   room.map_number = 0x02;
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
     DioramaPlaneOverride *p = &room.planes[plane];
-    p->set_order = true;      p->order = kDioramaPlane_Count * 4 - 1;
-    p->set_z = true;          p->z = -0.123456f;   /* widest %.4g */
-    p->set_alpha = true;      p->alpha = kDioramaLayerAlphaOpaque;
-    p->set_rake = true;       p->rake = -0.987654f;
-    p->set_bow = true;        p->bow = -0.987654f;
-    p->set_thickness = true;  p->thickness = 0.987654f;
-    p->set_stack = true;      p->stack = 0.987654f;
-    p->set_stack_copies = true;  p->stack_copies = kDioramaStackMax;
+    p->set_order = true;
+    p->order = kDioramaPlane_Count * 4 - 1;
+    p->set_z = true;
+    p->z = -0.123456f; /* widest %.4g */
+    p->set_alpha = true;
+    p->alpha = kDioramaLayerAlphaOpaque;
+    p->set_rake = true;
+    p->rake = -0.987654f;
+    p->set_bow = true;
+    p->bow = -0.987654f;
+    p->set_thickness = true;
+    p->thickness = 0.987654f;
+    p->set_stack = true;
+    p->stack = 0.987654f;
+    p->set_stack_copies = true;
+    p->stack_copies = kDioramaStackMax;
     /* Widest density the GRAMMAR accepts: positive (the parser rejects <= 0, and
      * the editor clamps to >= 1, so a negative one is unreachable and would make
      * this a test of an impossible state) and as many characters as %.4g emits. */
-    p->set_stack_density = true; p->stack_density = 99.9876f;
+    p->set_stack_density = true;
+    p->stack_density = 99.9876f;
     /* "backward" is the longest direction token. */
-    p->set_stack_direction = true; p->stack_direction = kDioramaStack_Backward;
-    p->set_voxel = true;      p->voxel = 0.987654f;
-    p->set_voxel_copies = true;  p->voxel_copies = kDioramaVoxelMax;
+    p->set_stack_direction = true;
+    p->stack_direction = kDioramaStack_Backward;
+    p->set_voxel = true;
+    p->voxel = 0.987654f;
+    p->set_voxel_copies = true;
+    p->voxel_copies = kDioramaVoxelMax;
   }
 
   char text[4096];
   size_t need = DioramaLayerOrder_FormatRoom(&room, text, sizeof(text));
   CHECK(need > 0);
-  CHECK(need < sizeof(text));          /* the probe's own buffer sufficed */
+  CHECK(need < sizeof(text)); /* the probe's own buffer sufficed */
 
   /* And it must reload: a room that fits but does not parse back is no better. */
   DioramaRoomOverride reloaded;
   memset(&reloaded, 0, sizeof(reloaded));
   reloaded.used = true;
   char *save = NULL;
-  for (char *line = strtok_r(text, "\n", &save); line;
-       line = strtok_r(NULL, "\n", &save)) {
+  for (char *line = strtok_r(text, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
     if (line[0] == '[' || !line[0]) continue;
     const char *error = NULL;
     CHECK(DioramaLayerOrder_ParseLine(&reloaded, line, &error));
@@ -902,16 +866,16 @@ static void TestFullyAuthoredRoomRoundTrips(void) {
  * bounds and checks the invariant at every step. */
 static void TestSteppingNeverDisagreesWithTheRenderer(void) {
   static const DioramaEditorParam kParams[] = {
-    kDioramaEditorParam_Depth, kDioramaEditorParam_Copies,
-    kDioramaEditorParam_Density,
+      kDioramaEditorParam_Depth,
+      kDioramaEditorParam_Copies,
+      kDioramaEditorParam_Density,
   };
   for (int s = kDioramaDepth_Rake; s < kDioramaDepth_StrategyCount; s++) {
     for (size_t k = 0; k < sizeof(kParams) / sizeof(kParams[0]); k++) {
       for (int dir = -1; dir <= 1; dir += 2) {
         DioramaLayerOrderTable table;
         memset(&table, 0, sizeof(table));
-        DioramaRoomOverride *room =
-            DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
+        DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&table, 0x01, 0x02);
         CHECK(room != NULL);
         if (!room) continue;
         DioramaPlaneOverride *plane = &room->planes[kDioramaPlane_Bg2Hi];
@@ -922,39 +886,43 @@ static void TestSteppingNeverDisagreesWithTheRenderer(void) {
           DioramaLayerEditor_StepParam(plane, kParams[k], dir);
 
           DioramaResolvedLayer out[16];
-          int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults,
-                                           kDefaultCount, out, 16);
-          const DioramaResolvedLayer *layer =
-              FindResolved(out, n, kDioramaPlane_Bg2Hi);
+          int n = DioramaLayerOrder_Resolve(&table, 0x01, 0x02, kDefaults, kDefaultCount, out, 16);
+          const DioramaResolvedLayer *layer = FindResolved(out, n, kDioramaPlane_Bg2Hi);
           CHECK(layer != NULL);
           if (!layer) break;
 
           /* (1) The two verdicts must agree, always. */
-          CHECK(DioramaLayerEditor_StrategyOfPlane(plane) ==
-                DioramaLayerOrder_StrategyOf(layer));
+          CHECK(DioramaLayerEditor_StrategyOfPlane(plane) == DioramaLayerOrder_StrategyOf(layer));
 
           /* (2) Whatever shape is reported must actually DRAW. These mirror
            * Diorama_Composite's shape gates. */
           switch (DioramaLayerEditor_StrategyOfPlane(plane)) {
-            case kDioramaDepth_Rake:  CHECK(layer->rake != 0.0f); break;
-            case kDioramaDepth_Bow:   CHECK(layer->bow != 0.0f); break;
-            case kDioramaDepth_Thick: CHECK(layer->thickness > 0.0f); break;
-            case kDioramaDepth_Stack:
-            case kDioramaDepth_Voxel:
-              CHECK(layer->stack > 0.0f);
-              CHECK(layer->stack_copies > 1);   /* the gate copies:1 failed */
-              break;
-            case kDioramaDepth_Flat:
-              /* (3) And flat must be GENUINELY flat: not one shape key left
-               * behind, or the room stays authored while drawing nothing. */
-              CHECK(!DioramaLayerOrder_RoomIsActive(room) ||
-                    plane->set_z || plane->set_alpha || plane->set_order);
-              CHECK(layer->rake == 0.0f);
-              CHECK(layer->bow == 0.0f);
-              CHECK(layer->thickness == 0.0f);
-              CHECK(layer->stack == 0.0f);
-              break;
-            default: break;
+          case kDioramaDepth_Rake:
+            CHECK(layer->rake != 0.0f);
+            break;
+          case kDioramaDepth_Bow:
+            CHECK(layer->bow != 0.0f);
+            break;
+          case kDioramaDepth_Thick:
+            CHECK(layer->thickness > 0.0f);
+            break;
+          case kDioramaDepth_Stack:
+          case kDioramaDepth_Voxel:
+            CHECK(layer->stack > 0.0f);
+            CHECK(layer->stack_copies > 1); /* the gate copies:1 failed */
+            break;
+          case kDioramaDepth_Flat:
+            /* (3) And flat must be GENUINELY flat: not one shape key left
+             * behind, or the room stays authored while drawing nothing. */
+            CHECK(!DioramaLayerOrder_RoomIsActive(room) || plane->set_z || plane->set_alpha ||
+                  plane->set_order);
+            CHECK(layer->rake == 0.0f);
+            CHECK(layer->bow == 0.0f);
+            CHECK(layer->thickness == 0.0f);
+            CHECK(layer->stack == 0.0f);
+            break;
+          default:
+            break;
           }
         }
       }
@@ -984,11 +952,9 @@ static void TestSteppingToZeroClearsTheShape(void) {
      * instead, half of their authorable range would be unreachable from the UI
      * while still being authorable by hand. */
     if (s == kDioramaDepth_Rake || s == kDioramaDepth_Bow) {
-      CHECK(DioramaLayerEditor_StrategyOfPlane(plane) ==
-            (DioramaDepthStrategy)s);
+      CHECK(DioramaLayerEditor_StrategyOfPlane(plane) == (DioramaDepthStrategy)s);
       /* And it is genuinely on the far side of zero, not parked at it. */
-      const float magnitude = (s == kDioramaDepth_Rake) ? plane->rake
-                                                        : plane->bow;
+      const float magnitude = (s == kDioramaDepth_Rake) ? plane->rake : plane->bow;
       CHECK(magnitude < 0.0f);
     } else {
       CHECK(DioramaLayerEditor_StrategyOfPlane(plane) == kDioramaDepth_Flat);
@@ -1042,8 +1008,8 @@ int main(void) {
   TestRowsFitTheDocumentedMaximum();
   TestLevelTabsAreTheActionGroups();
 
-  if (g_failures) {
-    printf("diorama layer editor: %d failure(s)\n", g_failures);
+  if (s_failures) {
+    printf("diorama layer editor: %d failure(s)\n", s_failures);
     return 1;
   }
   printf("diorama layer editor: all checks passed\n");

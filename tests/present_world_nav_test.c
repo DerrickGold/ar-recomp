@@ -104,17 +104,24 @@ bool Sim3DDepthPass_IsCollecting(void) { return depth_collecting; }
  * the mutable publication path. Real snapshots are tested by both GPU suites. */
 Sim3DDepthAtlasCache *Sim3DDepthPass_CreateAtlasCache(void) { return NULL; }
 bool Sim3DDepthPass_HasAtlasVersion(const Sim3DDepthAtlasCache *cache, unsigned version) {
-  (void)cache; (void)version; return false;
+  (void)cache;
+  (void)version;
+  return false;
 }
 bool Sim3DDepthPass_SelectAtlasVersion(Sim3DDepthAtlasCache *cache, unsigned version) {
   return !cache && version == 0;
 }
 bool Sim3DDepthPass_CaptureAtlasVersion(Sim3DDepthAtlasCache *cache, unsigned version) {
-  (void)cache; (void)version; return false;
+  (void)cache;
+  (void)version;
+  return false;
 }
 void Sim3DDepthPass_DestroyAtlasCache(Sim3DDepthAtlasCache *cache) { assert(!cache); }
 enum { kDepthSurfaceSlots = 131072 };
-static struct { bool used, terrain; float point[3]; } depth_surface[kDepthSurfaceSlots];
+static struct {
+  bool used, terrain;
+  float point[3];
+} depth_surface[kDepthSurfaceSlots];
 
 static bool CheckDepthSurface(const Sim3DDepthVertex *v, bool insert) {
   const float point[3] = {v->x, v->y, v->depth};
@@ -127,23 +134,25 @@ static bool CheckDepthSurface(const Sim3DDepthVertex *v, bool insert) {
     depth_surface[at].used = true;
     depth_surface[at].terrain = v->uv.x >= 0;
     memcpy(depth_surface[at].point, point, sizeof(point));
-  } else assert(depth_surface[at].used); /* Weather uses exact opaque geometry. */
+  } else
+    assert(depth_surface[at].used); /* Weather uses exact opaque geometry. */
   return depth_surface[at].terrain;
 }
 
 static bool QuadTouchesViewport(const Sim3DDepthVertex vertices[4]) {
   float left = vertices[0].x, right = left, top = vertices[0].y, bottom = top;
   for (int p = 1; p < 4; p++) {
-    left = fminf(left, vertices[p].x); right = fmaxf(right, vertices[p].x);
-    top = fminf(top, vertices[p].y); bottom = fmaxf(bottom, vertices[p].y);
+    left = fminf(left, vertices[p].x);
+    right = fmaxf(right, vertices[p].x);
+    top = fminf(top, vertices[p].y);
+    bottom = fmaxf(bottom, vertices[p].y);
   }
   return right >= -1 && left <= depth_width + 1 && bottom >= -1 && top <= depth_height + 1;
 }
 
-bool Sim3DDepthPass_UploadAtlasRegions(
-    ArRenderDevice *device, Sim3DDepthPassLayer layer,
-    const uint32_t *pixels, int width, int height, int pitch,
-    const ArRenderRectI *regions, int region_count) {
+bool Sim3DDepthPass_UploadAtlasRegions(ArRenderDevice *device, Sim3DDepthPassLayer layer,
+                                       const uint32_t *pixels, int width, int height, int pitch,
+                                       const ArRenderRectI *regions, int region_count) {
   (void)device;
   assert(layer == kSim3DDepthPass_Ground || layer == kSim3DDepthPass_GroundBlur ||
          layer == kSim3DDepthPass_Cloud || layer == kSim3DDepthPass_WorldMountain ||
@@ -169,10 +178,10 @@ bool Sim3DDepthPass_UploadAtlasRegions(
       for (int i = 0; i < region_count; i++)
         for (int y = regions[i].y; y < regions[i].y + regions[i].h; y++)
           memcpy(backend->ground_upload_mirror + y * width + regions[i].x,
-              (const uint8_t *)pixels + y * pitch + regions[i].x * 4, regions[i].w * 4);
+                 (const uint8_t *)pixels + y * pitch + regions[i].x * 4, regions[i].w * 4);
       for (int y = 0; y < height; y++)
         assert(!memcmp(backend->ground_upload_mirror + y * width,
-            (const uint8_t *)pixels + y * pitch, width * 4));
+                       (const uint8_t *)pixels + y * pitch, width * 4));
     }
   }
   if (layer == kSim3DDepthPass_WorldMountain) {
@@ -186,10 +195,10 @@ bool Sim3DDepthPass_UploadAtlasRegions(
       for (int i = 0; i < region_count; i++)
         for (int y = regions[i].y; y < regions[i].y + regions[i].h; y++)
           memcpy(backend->mountain_upload_mirror + y * width + regions[i].x,
-              (const uint8_t *)pixels + y * pitch + regions[i].x * 4, regions[i].w * 4);
+                 (const uint8_t *)pixels + y * pitch + regions[i].x * 4, regions[i].w * 4);
       for (int y = 0; y < height; y++)
         assert(!memcmp(backend->mountain_upload_mirror + y * width,
-            (const uint8_t *)pixels + y * pitch, width * 4));
+                       (const uint8_t *)pixels + y * pitch, width * 4));
     }
   }
   if (layer == kSim3DDepthPass_Cloud) {
@@ -200,21 +209,22 @@ bool Sim3DDepthPass_UploadAtlasRegions(
      * Unwrapped quads must sample the same filtered texels on either copy. */
     for (int y = 0; y < height; y++) {
       const uint32_t *row = (const uint32_t *)((const uint8_t *)pixels + y * pitch);
-      for (int x = period; x < width; x++) assert(row[x] == row[x - period]);
+      for (int x = period; x < width; x++)
+        assert(row[x] == row[x - period]);
     }
   }
   return true;
 }
 
-bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height,
-                         ArRenderFilter filter) {
+bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height, ArRenderFilter filter) {
   assert(device && device->context);
   /* Backdrops inherit output setup from their caller, so bind this pass's
    * device directly instead of relying on UseOutputCoordinates being called. */
   s_backend = device->context;
   (void)filter;
   assert(width > 0 && height > 0);
-  depth_width = width; depth_height = height;
+  depth_width = width;
+  depth_height = height;
   depth_expected_shadow_terrain_faces = 0;
   depth_shadow_terrain_faces = depth_shadow_ocean_faces = depth_cloud_faces = 0;
   depth_solid_faces = depth_terrain_faces = 0;
@@ -235,8 +245,7 @@ bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height,
   return depth_collecting;
 }
 
-bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
-                              const Sim3DDepthVertex vertices[4]) {
+bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer, const Sim3DDepthVertex vertices[4]) {
   assert(depth_collecting);
   for (int i = 0; i < 4; i++) {
     assert(isfinite(vertices[i].x) && isfinite(vertices[i].y));
@@ -248,18 +257,20 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
     }
     if (layer == kSim3DDepthPass_Ground) CheckDepthSurface(&vertices[i], true);
     if (layer == kSim3DDepthPass_CloudShadow || layer == kSim3DDepthPass_GroundHaze ||
-        layer == kSim3DDepthPass_GroundBlur) CheckDepthSurface(&vertices[i], false);
+        layer == kSim3DDepthPass_GroundBlur)
+      CheckDepthSurface(&vertices[i], false);
   }
   if (layer == kSim3DDepthPass_Solid) {
     depth_solid_faces++;
-    if (hash_models) for (int p = 0; p < 4; ++p) {
-      const Sim3DDepthVertex *v = &vertices[p];
-      const float values[] = {v->x, v->y, v->depth, v->uv.x, v->uv.y,
-        v->color.r, v->color.g, v->color.b, v->color.a};
-      const uint8_t *bytes = (const uint8_t *)values;
-      for (size_t i = 0; i < sizeof(values); ++i)
-        model_hash = (model_hash ^ bytes[i]) * UINT64_C(1099511628211);
-    }
+    if (hash_models)
+      for (int p = 0; p < 4; ++p) {
+        const Sim3DDepthVertex *v = &vertices[p];
+        const float values[] = {v->x,       v->y,       v->depth,   v->uv.x,   v->uv.y,
+                                v->color.r, v->color.g, v->color.b, v->color.a};
+        const uint8_t *bytes = (const uint8_t *)values;
+        for (size_t i = 0; i < sizeof(values); ++i)
+          model_hash = (model_hash ^ bytes[i]) * UINT64_C(1099511628211);
+      }
   }
   if (layer == kSim3DDepthPass_VolumeCloud) {
     assert(QuadTouchesViewport(vertices));
@@ -271,50 +282,59 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
     volume_previous_depth = vertices[0].depth;
     depth_volume_faces++;
     bool upper = true;
-    for (int p = 0; p < 4; p++) upper &= vertices[p].y < depth_height * .34f;
+    for (int p = 0; p < 4; p++)
+      upper &= vertices[p].y < depth_height * .34f;
     if (upper) depth_upper_volume_faces++;
     if (vertices[0].color.a < .699f) {
       depth_near_volume_faces++;
       near_volume_max_depth = fmaxf(near_volume_max_depth, vertices[0].depth);
-    } else far_volume_min_depth = fminf(far_volume_min_depth, vertices[0].depth);
+    } else
+      far_volume_min_depth = fminf(far_volume_min_depth, vertices[0].depth);
   }
   if (layer == kSim3DDepthPass_Ground && vertices[0].uv.x < 0) depth_ocean_quads++;
   if (layer == kSim3DDepthPass_CloudShadow || layer == kSim3DDepthPass_Cloud) {
     assert(QuadTouchesViewport(vertices));
-    if (layer == kSim3DDepthPass_Cloud) depth_cloud_faces++;
-    else if (CheckDepthSurface(vertices, false)) depth_shadow_terrain_faces++;
-    else depth_shadow_ocean_faces++;
+    if (layer == kSim3DDepthPass_Cloud)
+      depth_cloud_faces++;
+    else if (CheckDepthSurface(vertices, false))
+      depth_shadow_terrain_faces++;
+    else
+      depth_shadow_ocean_faces++;
   }
   if (layer == kSim3DDepthPass_WorldMountain) {
     depth_world_mountain_faces++;
     for (int p = 0; p < 4; p++) {
       const Sim3DDepthVertex *v = &vertices[p];
-      const float values[] = {v->x, v->y, v->depth, v->uv.x, v->uv.y,
-          v->color.r, v->color.g, v->color.b, v->color.a};
+      const float values[] = {v->x,       v->y,       v->depth,   v->uv.x,   v->uv.y,
+                              v->color.r, v->color.g, v->color.b, v->color.a};
       const uint8_t *bytes = (const uint8_t *)values;
       for (size_t i = 0; i < sizeof(values); i++)
-        depth_world_mountain_hash = (depth_world_mountain_hash ^ bytes[i]) * UINT64_C(1099511628211);
+        depth_world_mountain_hash =
+            (depth_world_mountain_hash ^ bytes[i]) * UINT64_C(1099511628211);
     }
   }
   if (layer == kSim3DDepthPass_Ground && vertices[0].uv.x >= 0.0f) {
-    if (s_backend->hash_ground) for (int p = 0; p < 4; ++p) {
-      const Sim3DDepthVertex *v = &vertices[p];
-      const float values[] = {v->x, v->y, v->depth, v->uv.x, v->uv.y,
-        v->color.r, v->color.g, v->color.b, v->color.a};
-      const uint8_t *bytes = (const uint8_t *)values;
-      for (size_t i = 0; i < sizeof(values); ++i)
-        s_backend->ground_hash = (s_backend->ground_hash ^ bytes[i]) * UINT64_C(1099511628211);
-    }
+    if (s_backend->hash_ground)
+      for (int p = 0; p < 4; ++p) {
+        const Sim3DDepthVertex *v = &vertices[p];
+        const float values[] = {v->x,       v->y,       v->depth,   v->uv.x,   v->uv.y,
+                                v->color.r, v->color.g, v->color.b, v->color.a};
+        const uint8_t *bytes = (const uint8_t *)values;
+        for (size_t i = 0; i < sizeof(values); ++i)
+          s_backend->ground_hash = (s_backend->ground_hash ^ bytes[i]) * UINT64_C(1099511628211);
+      }
     if (s_backend->check_map_edge_opacity) {
       const int x = (int)lroundf(vertices[0].uv.x * 128);
       const int y = (int)lroundf(vertices[0].uv.y * 128);
       if (x < 10 || y < 10 || x >= 118 || y >= 118) {
         bool opaque = true;
-        for (int p = 0; p < 4; p++) opaque &= vertices[p].color.a == 1;
+        for (int p = 0; p < 4; p++)
+          opaque &= vertices[p].color.a == 1;
         if (!SimWorldMap_CellIsOpenWater(x, y)) {
           assert(opaque); /* No corner of a mixed coast/land cell may fade. */
           s_backend->opaque_edge_land++;
-        } else if (!opaque) s_backend->faded_edge_water++;
+        } else if (!opaque)
+          s_backend->faded_edge_water++;
       }
     }
     depth_terrain_faces++;
@@ -324,17 +344,18 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
     for (int i = 0; i < 4; i++) {
       const Sim3DDepthVertex *v = &vertices[i];
       const float u = v->uv.x, t = v->uv.y;
-      if (s_backend->track_palace_focus &&
-          fabsf(u - s_backend->palace_focus_uv.x) < .000001f &&
+      if (s_backend->track_palace_focus && fabsf(u - s_backend->palace_focus_uv.x) < .000001f &&
           fabsf(t - s_backend->palace_focus_uv.y) < .000001f) {
         s_backend->palace_focus_vertices++;
         s_backend->palace_focus_position = (ArRenderPointF){v->x, v->y};
       }
-      int at = u == 0 && t == 0 ? 0 :
-          u == 0.5f && t == 0.5f ? 1 :
-          u == 1 && t == 1 ? 2 : u == 0.5f && t == 0 ? 3 : -1;
-      if (at >= 0) s_backend->ground_vertices[at] =
-          (ArRenderVertex2D){{v->x, v->y}, v->color, v->uv};
+      int at = u == 0 && t == 0         ? 0
+               : u == 0.5f && t == 0.5f ? 1
+               : u == 1 && t == 1       ? 2
+               : u == 0.5f && t == 0    ? 3
+                                        : -1;
+      if (at >= 0)
+        s_backend->ground_vertices[at] = (ArRenderVertex2D){{v->x, v->y}, v->color, v->uv};
       if (s_backend->check_atmosphere_enclosure) {
         assert(s_backend->atmosphere_seen);
         for (int direction = 0; direction < 64; direction++) {
@@ -354,50 +375,82 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,
 Sim3DDepthMesh *Sim3DDepthPass_CreateMesh(void) { return NULL; }
 Sim3DDepthMesh *Sim3DDepthPass_CreateGeometryMesh(void) { return NULL; }
 Sim3DDepthMesh *Sim3DDepthPass_CreateLinearMesh(void) { return NULL; }
-bool Sim3DDepthPass_UpdateLinearMesh(Sim3DDepthMesh *mesh,
-    const Sim3DDepthLinearVertex *vertices, size_t count) {
-  (void)mesh; (void)vertices; (void)count; return false;
+bool Sim3DDepthPass_UpdateLinearMesh(Sim3DDepthMesh *mesh, const Sim3DDepthLinearVertex *vertices,
+                                     size_t count) {
+  (void)mesh;
+  (void)vertices;
+  (void)count;
+  return false;
 }
-bool Sim3DDepthPass_AppendLinearMeshes(Sim3DDepthMesh *const *meshes,
-    size_t count, const Sim3DDepthLinearTransform *transform) {
-  (void)meshes; (void)count; (void)transform; return false;
+bool Sim3DDepthPass_AppendLinearMeshes(Sim3DDepthMesh *const *meshes, size_t count,
+                                       const Sim3DDepthLinearTransform *transform) {
+  (void)meshes;
+  (void)count;
+  (void)transform;
+  return false;
 }
-bool Sim3DDepthPass_AppendSurfaceMeshBatches(
-    const Sim3DDepthSurfaceMeshBatch *batches, size_t count) {
-  (void)batches; (void)count; return false;
+bool Sim3DDepthPass_AppendSurfaceMeshBatches(const Sim3DDepthSurfaceMeshBatch *batches,
+                                             size_t count) {
+  (void)batches;
+  (void)count;
+  return false;
 }
 static unsigned surface_mesh_attempts;
-Sim3DDepthMesh *Sim3DDepthPass_CreateSurfaceMesh(void) { ++surface_mesh_attempts; return NULL; }
-bool Sim3DDepthPass_SelectSurfaceMesh(Sim3DDepthMesh *mesh,
-    const Sim3DDepthMeshRange *ranges, size_t count) {
-  (void)mesh; (void)ranges; (void)count; return false;
+Sim3DDepthMesh *Sim3DDepthPass_CreateSurfaceMesh(void) {
+  ++surface_mesh_attempts;
+  return NULL;
 }
-bool Sim3DDepthPass_UpdateSurfaceMesh(Sim3DDepthMesh *mesh,
-    const Sim3DDepthSurfaceVertex *vertices, size_t count) {
-  (void)mesh; (void)vertices; (void)count; return false;
+bool Sim3DDepthPass_SelectSurfaceMesh(Sim3DDepthMesh *mesh, const Sim3DDepthMeshRange *ranges,
+                                      size_t count) {
+  (void)mesh;
+  (void)ranges;
+  (void)count;
+  return false;
+}
+bool Sim3DDepthPass_UpdateSurfaceMesh(Sim3DDepthMesh *mesh, const Sim3DDepthSurfaceVertex *vertices,
+                                      size_t count) {
+  (void)mesh;
+  (void)vertices;
+  (void)count;
+  return false;
 }
 bool Sim3DDepthPass_UpdateSurfaceMeshWithMask(Sim3DDepthMesh *mesh,
-    const Sim3DDepthSurfaceVertex *vertices, const ArRenderPointF *mask_uv, size_t count) {
-  (void)mask_uv; return Sim3DDepthPass_UpdateSurfaceMesh(mesh,vertices,count);
+                                              const Sim3DDepthSurfaceVertex *vertices,
+                                              const ArRenderPointF *mask_uv, size_t count) {
+  (void)mask_uv;
+  return Sim3DDepthPass_UpdateSurfaceMesh(mesh, vertices, count);
 }
 bool Sim3DDepthPass_AppendSurfaceBatches(Sim3DDepthMesh *mesh,
-    const Sim3DDepthSurfaceBatch *batches, size_t count) {
-  (void)mesh; (void)batches; (void)count; return false;
+                                         const Sim3DDepthSurfaceBatch *batches, size_t count) {
+  (void)mesh;
+  (void)batches;
+  (void)count;
+  return false;
 }
-bool Sim3DDepthPass_AppendSurfaceLayers(Sim3DDepthMesh *mesh,
-    const Sim3DDepthSurfaceTransform *t, const Sim3DDepthSphericalSample *s, size_t ns,
-    const Sim3DDepthSurfaceOverlay *o, size_t no) {
-  (void)mesh; (void)t; (void)s; (void)ns; (void)o; (void)no; return false;
+bool Sim3DDepthPass_AppendSurfaceLayers(Sim3DDepthMesh *mesh, const Sim3DDepthSurfaceTransform *t,
+                                        const Sim3DDepthSphericalSample *s, size_t ns,
+                                        const Sim3DDepthSurfaceOverlay *o, size_t no) {
+  (void)mesh;
+  (void)t;
+  (void)s;
+  (void)ns;
+  (void)o;
+  (void)no;
+  return false;
 }
-struct Sim3DDepthMesh { bool ready; };
+struct Sim3DDepthMesh {
+  bool ready;
+};
 static struct Sim3DDepthMesh radial_mesh;
 static bool radial_accept, radial_reject_selection;
 static unsigned radial_publications, radial_selections, radial_appends;
 static size_t radial_vertices;
 static unsigned radial_variants;
-Sim3DDepthMesh *Sim3DDepthPass_CreateRadialMesh(void) { return radial_accept ? &radial_mesh : NULL; }
-bool Sim3DDepthPass_UpdateRadialMesh(Sim3DDepthMesh *mesh,
-    const Sim3DDepthRadialVertex *vertices, size_t count) {
+Sim3DDepthMesh *Sim3DDepthPass_CreateRadialMesh(void) {
+  return radial_accept ? &radial_mesh : NULL;
+}
+bool Sim3DDepthPass_UpdateRadialMesh(Sim3DDepthMesh *mesh, const Sim3DDepthRadialVertex *vertices,
+                                     size_t count) {
   assert(radial_accept && mesh == &radial_mesh && vertices && count);
   radial_vertices = count * 4;
   radial_variants = 0;
@@ -410,80 +463,121 @@ bool Sim3DDepthPass_UpdateRadialMesh(Sim3DDepthMesh *mesh,
   return true;
 }
 bool Sim3DDepthPass_AppendRadialMesh(Sim3DDepthMesh *mesh,
-    const Sim3DDepthRadialTransform *transform) {
+                                     const Sim3DDepthRadialTransform *transform) {
   assert(radial_accept && mesh == &radial_mesh && mesh->ready && transform);
   ++radial_appends;
   return true;
 }
-bool Sim3DDepthPass_SelectRadialMesh(Sim3DDepthMesh *mesh,
-    const Sim3DDepthMeshRange *ranges, size_t count) {
+bool Sim3DDepthPass_SelectRadialMesh(Sim3DDepthMesh *mesh, const Sim3DDepthMeshRange *ranges,
+                                     size_t count) {
   assert(radial_accept && mesh == &radial_mesh && mesh->ready && ranges && count);
   for (size_t i = 0; i < count; ++i)
-    assert(ranges[i].quad_count && ranges[i].first_quad + ranges[i].quad_count <= radial_vertices / 4);
+    assert(ranges[i].quad_count &&
+           ranges[i].first_quad + ranges[i].quad_count <= radial_vertices / 4);
   ++radial_selections;
   return !radial_reject_selection;
 }
-bool Sim3DDepthPass_UpdateGeometryMesh(Sim3DDepthMesh *mesh,
-    const Sim3DDepthVertex *vertices, size_t count) {
-  (void)mesh; (void)vertices; (void)count; return false;
+bool Sim3DDepthPass_UpdateGeometryMesh(Sim3DDepthMesh *mesh, const Sim3DDepthVertex *vertices,
+                                       size_t count) {
+  (void)mesh;
+  (void)vertices;
+  (void)count;
+  return false;
 }
-bool Sim3DDepthPass_AppendGeometryMeshRange(Sim3DDepthPassLayer layer,
-    Sim3DDepthMesh *mesh, size_t first, size_t count) {
-  (void)layer; (void)mesh; (void)first; (void)count; return false;
+bool Sim3DDepthPass_AppendGeometryMeshRange(Sim3DDepthPassLayer layer, Sim3DDepthMesh *mesh,
+                                            size_t first, size_t count) {
+  (void)layer;
+  (void)mesh;
+  (void)first;
+  (void)count;
+  return false;
 }
 bool Sim3DDepthPass_AppendGeometryMesh(Sim3DDepthPassLayer layer, Sim3DDepthMesh *mesh) {
-  (void)layer; (void)mesh; return false;
+  (void)layer;
+  (void)mesh;
+  return false;
 }
 bool Sim3DDepthPass_CaptureGeometryMesh(Sim3DDepthPassLayer layer, Sim3DDepthMesh *mesh) {
-  (void)layer; (void)mesh; return false;
+  (void)layer;
+  (void)mesh;
+  return false;
 }
-bool Sim3DDepthPass_CaptureGeometryLayers(Sim3DDepthMesh *mesh,
-    const Sim3DDepthPassLayer *layers, size_t count, Sim3DDepthGeometryRange *ranges) {
-  (void)mesh; (void)layers; (void)count; (void)ranges; return false;
+bool Sim3DDepthPass_CaptureGeometryLayers(Sim3DDepthMesh *mesh, const Sim3DDepthPassLayer *layers,
+                                          size_t count, Sim3DDepthGeometryRange *ranges) {
+  (void)mesh;
+  (void)layers;
+  (void)count;
+  (void)ranges;
+  return false;
 }
 bool Sim3DDepthPass_AppendGeometryRanges(Sim3DDepthMesh *mesh,
-    const Sim3DDepthGeometryRange *ranges, size_t count) {
-  (void)mesh; (void)ranges; (void)count; return false;
+                                         const Sim3DDepthGeometryRange *ranges, size_t count) {
+  (void)mesh;
+  (void)ranges;
+  (void)count;
+  return false;
 }
 Sim3DDepthMesh *Sim3DDepthPass_CreateSphericalMesh(void) { return NULL; }
 Sim3DDepthMesh *Sim3DDepthPass_CreateSphericalBodyMesh(void) { return NULL; }
 bool Sim3DDepthPass_UpdateSphericalBodyMesh(Sim3DDepthMesh *mesh,
-    const Sim3DDepthSphericalBodyVertex *vertices, size_t count) {
-  (void)mesh; (void)vertices; (void)count; return false;
+                                            const Sim3DDepthSphericalBodyVertex *vertices,
+                                            size_t count) {
+  (void)mesh;
+  (void)vertices;
+  (void)count;
+  return false;
 }
 bool Sim3DDepthPass_AppendSphericalBodies(Sim3DDepthMesh *mesh,
-    const Sim3DDepthSphericalBodyTransform *transform,
-    const Sim3DDepthSphericalSample *samples, size_t count) {
-  (void)mesh; (void)transform; (void)samples; (void)count; return false;
+                                          const Sim3DDepthSphericalBodyTransform *transform,
+                                          const Sim3DDepthSphericalSample *samples, size_t count) {
+  (void)mesh;
+  (void)transform;
+  (void)samples;
+  (void)count;
+  return false;
 }
-bool Sim3DDepthPass_UpdateSphericalMesh(Sim3DDepthMesh *mesh,
-    const Sim3DDepthSphericalQuad *quads, size_t count) {
-  (void)mesh; (void)quads; (void)count; return false;
+bool Sim3DDepthPass_UpdateSphericalMesh(Sim3DDepthMesh *mesh, const Sim3DDepthSphericalQuad *quads,
+                                        size_t count) {
+  (void)mesh;
+  (void)quads;
+  (void)count;
+  return false;
 }
-bool Sim3DDepthPass_AppendSphericalSample(Sim3DDepthPassLayer layer,
-    Sim3DDepthMesh *mesh, const Sim3DDepthSphericalSample *sample) {
-  (void)layer; (void)mesh; (void)sample; return false;
+bool Sim3DDepthPass_AppendSphericalSample(Sim3DDepthPassLayer layer, Sim3DDepthMesh *mesh,
+                                          const Sim3DDepthSphericalSample *sample) {
+  (void)layer;
+  (void)mesh;
+  (void)sample;
+  return false;
 }
 bool Sim3DDepthPass_MeshReady(const Sim3DDepthMesh *mesh) {
   return radial_accept && mesh == &radial_mesh && radial_mesh.ready;
 }
-bool Sim3DDepthPass_UpdateMesh(Sim3DDepthMesh *mesh,
-    const Sim3DDepthPosition *positions, size_t count) {
-  (void)mesh; (void)positions; (void)count; return false;
+bool Sim3DDepthPass_UpdateMesh(Sim3DDepthMesh *mesh, const Sim3DDepthPosition *positions,
+                               size_t count) {
+  (void)mesh;
+  (void)positions;
+  (void)count;
+  return false;
 }
-bool Sim3DDepthPass_AppendMeshSample(Sim3DDepthPassLayer layer,
-    Sim3DDepthMesh *mesh, const ArRenderPointF *uv, size_t count, ArRenderColorF color) {
-  (void)layer; (void)mesh; (void)uv; (void)count; (void)color; return false;
+bool Sim3DDepthPass_AppendMeshSample(Sim3DDepthPassLayer layer, Sim3DDepthMesh *mesh,
+                                     const ArRenderPointF *uv, size_t count, ArRenderColorF color) {
+  (void)layer;
+  (void)mesh;
+  (void)uv;
+  (void)count;
+  (void)color;
+  return false;
 }
 void Sim3DDepthPass_DestroyMesh(Sim3DDepthMesh *mesh) {
   assert(!mesh || mesh == &radial_mesh);
   if (mesh) radial_mesh.ready = false;
 }
 
-bool Sim3DDepthPass_AppendQuads(Sim3DDepthPassLayer layer,
-                               const Sim3DDepthVertex *vertices, size_t count) {
-  assert(layer == kSim3DDepthPass_Solid || layer == kSim3DDepthPass_Cloud || layer == kSim3DDepthPass_CloudShadow ||
-         layer == kSim3DDepthPass_VolumeCloud ||
+bool Sim3DDepthPass_AppendQuads(Sim3DDepthPassLayer layer, const Sim3DDepthVertex *vertices,
+                                size_t count) {
+  assert(layer == kSim3DDepthPass_Solid || layer == kSim3DDepthPass_Cloud ||
+         layer == kSim3DDepthPass_CloudShadow || layer == kSim3DDepthPass_VolumeCloud ||
          layer == kSim3DDepthPass_WorldMountain || layer == kSim3DDepthPass_Ground ||
          layer == kSim3DDepthPass_GroundHaze || layer == kSim3DDepthPass_GroundBlur);
   const bool ocean = layer == kSim3DDepthPass_Ground && count && vertices[0].uv.x < 0;
@@ -501,16 +595,18 @@ bool Sim3DDepthPass_AppendQuads(Sim3DDepthPassLayer layer,
     }
     assert(Sim3DDepthPass_AppendQuad(layer, vertices + i * 4));
   }
-  if (layer == kSim3DDepthPass_Cloud) s_backend->cloud_body_draws++;
+  if (layer == kSim3DDepthPass_Cloud)
+    s_backend->cloud_body_draws++;
   else if (layer == kSim3DDepthPass_CloudShadow) {
-    if (CheckDepthSurface(vertices, false)) s_backend->cloud_shadow_draws++;
-    else s_backend->cloud_ocean_shadow_draws++;
+    if (CheckDepthSurface(vertices, false))
+      s_backend->cloud_shadow_draws++;
+    else
+      s_backend->cloud_ocean_shadow_draws++;
   }
   return true;
 }
 
-ArRenderTexture Sim3DDepthPass_Submit(ArRenderDevice *device,
-                                     ArRenderTexture shadow_texture) {
+ArRenderTexture Sim3DDepthPass_Submit(ArRenderDevice *device, ArRenderTexture shadow_texture) {
   (void)device;
   (void)shadow_texture;
   assert(depth_collecting);
@@ -518,15 +614,12 @@ ArRenderTexture Sim3DDepthPass_Submit(ArRenderDevice *device,
   return (ArRenderTexture){303};
 }
 
-uint32_t g_sim_world_navigation_palace_pixels[
-    kSimWorldNavigationCompositionWidth *
-    kSimWorldNavigationCompositionHeight];
-uint32_t g_sim_world_navigation_label_pixels[
-    kSimWorldNavigationCompositionWidth *
-    kSimWorldNavigationCompositionHeight];
-uint32_t g_sim_world_navigation_plaque_pixels[
-    kSimWorldNavigationCompositionWidth *
-    kSimWorldNavigationCompositionHeight];
+uint32_t g_sim_world_navigation_palace_pixels[kSimWorldNavigationCompositionWidth *
+                                              kSimWorldNavigationCompositionHeight];
+uint32_t g_sim_world_navigation_label_pixels[kSimWorldNavigationCompositionWidth *
+                                             kSimWorldNavigationCompositionHeight];
+uint32_t g_sim_world_navigation_plaque_pixels[kSimWorldNavigationCompositionWidth *
+                                              kSimWorldNavigationCompositionHeight];
 
 static bool s_localized_record_available;
 static bool s_localized_prepare_success;
@@ -534,20 +627,22 @@ static int s_localized_draws;
 static float s_localized_brightness;
 static ArRenderRectI s_localized_bounds;
 
-const ArLocalizationScreenTextRecord *ArLocalizationFrame_FindScreenText(
-    const ArLocalizationFrame *frame, uint32_t surface_id) {
+const ArLocalizationScreenTextRecord *
+ArLocalizationFrame_FindScreenText(const ArLocalizationFrame *frame, uint32_t surface_id) {
   (void)frame;
   static const ArLocalizationScreenTextRecord record = {
       .surface_id = kActRaiserLocalizationWorldNavigationSurface,
-      .x = 156, .y = 25, .width = 76, .height = 8};
-  return s_localized_record_available && surface_id == record.surface_id
-      ? &record : NULL;
+      .x = 156,
+      .y = 25,
+      .width = 76,
+      .height = 8};
+  return s_localized_record_available && surface_id == record.surface_id ? &record : NULL;
 }
 
-bool ArLocalizedTextPresenter_PrepareScreenText(
-    ArRenderDevice *device, const ArLocalizationFrame *frame,
-    uint32_t surface_id, ArRenderRectI bounds,
-    ArLocalizedPreparedFrame *prepared) {
+bool ArLocalizedTextPresenter_PrepareScreenText(ArRenderDevice *device,
+                                                const ArLocalizationFrame *frame,
+                                                uint32_t surface_id, ArRenderRectI bounds,
+                                                ArLocalizedPreparedFrame *prepared) {
   (void)device;
   (void)frame;
   (void)surface_id;
@@ -556,9 +651,9 @@ bool ArLocalizedTextPresenter_PrepareScreenText(
   return s_localized_prepare_success;
 }
 
-bool ArLocalizedTextPresenter_DrawWithBrightness(
-    ArRenderDevice *device, const ArLocalizedPreparedFrame *prepared,
-    float brightness) {
+bool ArLocalizedTextPresenter_DrawWithBrightness(ArRenderDevice *device,
+                                                 const ArLocalizedPreparedFrame *prepared,
+                                                 float brightness) {
   (void)device;
   (void)prepared;
   ++s_localized_draws;
@@ -582,8 +677,7 @@ static void DestroyTexture(void *context, ArRenderTexture texture) {
   (void)texture;
 }
 
-static bool UpdateTexture(void *context, ArRenderTexture texture,
-                          const ArRenderRectI *destination,
+static bool UpdateTexture(void *context, ArRenderTexture texture, const ArRenderRectI *destination,
                           const void *pixels, int pitch_bytes) {
   FakeBackend *backend = context;
   (void)texture;
@@ -635,10 +729,8 @@ static bool Clear(void *context, ArRenderColorF color) {
   return true;
 }
 
-static bool DrawTexture(void *context, ArRenderTexture texture,
-                        const ArRenderRectF *source,
-                        const ArRenderRectF *destination,
-                        const ArRenderDrawState *state) {
+static bool DrawTexture(void *context, ArRenderTexture texture, const ArRenderRectF *source,
+                        const ArRenderRectF *destination, const ArRenderDrawState *state) {
   FakeBackend *backend = context;
   (void)texture;
   (void)source;
@@ -650,31 +742,34 @@ static bool DrawTexture(void *context, ArRenderTexture texture,
   }
   if (backend->track_markers && source) {
     if (source->w == 16 && source->h == 16) {
-      backend->palace_draws++; backend->palace_rect = *destination;
+      backend->palace_draws++;
+      backend->palace_rect = *destination;
     } else if (source->w == 32 && source->h == 8) {
-      backend->ui_draws++; backend->ui_rect = *destination;
+      backend->ui_draws++;
+      backend->ui_rect = *destination;
     } else if (source->w == 24 && source->h == 8) {
-      backend->label_draws++; backend->label_rect = *destination;
+      backend->label_draws++;
+      backend->label_rect = *destination;
     }
   }
   return true;
 }
 
-static bool DrawGeometry(void *context, ArRenderTexture texture,
-                         const ArRenderVertex2D *vertices, int vertex_count,
-                         const int32_t *indices, int index_count,
+static bool DrawGeometry(void *context, ArRenderTexture texture, const ArRenderVertex2D *vertices,
+                         int vertex_count, const int32_t *indices, int index_count,
                          const ArRenderDrawState *state) {
   FakeBackend *backend = context;
   (void)state;
-  if (backend->hash_geometry) for (int i = 0; i < index_count; ++i) {
-    assert(indices[i] >= 0 && indices[i] < vertex_count);
-    const ArRenderVertex2D *v = &vertices[indices[i]];
-    const float values[] = {v->position.x, v->position.y,
-        v->color.r, v->color.g, v->color.b, v->color.a, v->tex_coord.x, v->tex_coord.y};
-    const unsigned char *bytes = (const unsigned char *)values;
-    for (size_t b = 0; b < sizeof(values); ++b)
-      backend->geometry_hash = (backend->geometry_hash ^ bytes[b]) * UINT64_C(1099511628211);
-  }
+  if (backend->hash_geometry)
+    for (int i = 0; i < index_count; ++i) {
+      assert(indices[i] >= 0 && indices[i] < vertex_count);
+      const ArRenderVertex2D *v = &vertices[indices[i]];
+      const float values[] = {v->position.x, v->position.y, v->color.r,     v->color.g,
+                              v->color.b,    v->color.a,    v->tex_coord.x, v->tex_coord.y};
+      const unsigned char *bytes = (const unsigned char *)values;
+      for (size_t b = 0; b < sizeof(values); ++b)
+        backend->geometry_hash = (backend->geometry_hash ^ bytes[b]) * UINT64_C(1099511628211);
+    }
   backend->draw_geometry_count++;
   if (!ArRenderTexture_IsValid(texture) && vertex_count == 12 && index_count == 18) {
     assert(state && (state->flags & kArRenderDrawState_Blend));
@@ -695,11 +790,9 @@ static bool DrawGeometry(void *context, ArRenderTexture texture,
     assert(vertices[2].position.y > vertices[8].position.y * .19f);
     assert(!memcmp(&vertices[0].color, &vertices[2].color, sizeof(vertices[0].color)));
   }
-  if (backend->draw_geometry_count == backend->fail_geometry_call)
-    return false;
-  if (backend->check_atmosphere_enclosure &&
-      !ArRenderTexture_IsValid(texture) && vertex_count == 1 + 48 * 96 &&
-      vertices[0].color.a < 1.0f) {
+  if (backend->draw_geometry_count == backend->fail_geometry_call) return false;
+  if (backend->check_atmosphere_enclosure && !ArRenderTexture_IsValid(texture) &&
+      vertex_count == 1 + 48 * 96 && vertices[0].color.a < 1.0f) {
     backend->atmosphere_seen = true;
     float previous_alpha = vertices[0].color.a;
     for (int ring = 0; ring < 48; ring++) {
@@ -715,8 +808,7 @@ static bool DrawGeometry(void *context, ArRenderTexture texture,
       const float dx = cosf(angle), dy = sinf(angle);
       float support = -INFINITY;
       for (int i = 0; i < vertex_count; i++)
-        support = fmaxf(support,
-            dx * vertices[i].position.x + dy * vertices[i].position.y);
+        support = fmaxf(support, dx * vertices[i].position.x + dy * vertices[i].position.y);
       backend->atmosphere_support[direction] = support;
     }
   }
@@ -726,8 +818,10 @@ static bool DrawGeometry(void *context, ArRenderTexture texture,
     assert(index_count == 6 + 256 * 6);
   } else if (ArRenderTexture_IsValid(texture) && vertex_count == 48 * 48 * 4) {
     assert(index_count == 48 * 48 * 6);
-    if (vertices[0].color.r > 0.0f) backend->cloud_body_draws++;
-    else backend->cloud_shadow_draws++;
+    if (vertices[0].color.r > 0.0f)
+      backend->cloud_body_draws++;
+    else
+      backend->cloud_shadow_draws++;
     for (int i = 0; i < vertex_count; i++) {
       assert(isfinite(vertices[i].position.x) && isfinite(vertices[i].position.y));
       assert(vertices[i].tex_coord.x >= 0 && vertices[i].tex_coord.x <= 1);
@@ -752,20 +846,20 @@ static const char *LastError(void *context) {
 }
 
 static const ArRenderBackendOps kFakeOps = {
-  .struct_size = sizeof(ArRenderBackendOps),
-  .create_texture = CreateTexture,
-  .destroy_texture = DestroyTexture,
-  .update_texture = UpdateTexture,
-  .set_render_target = SetRenderTarget,
-  .use_output_coordinates = UseOutputCoordinates,
-  .get_output_size = GetOutputSize,
-  .set_viewport = SetViewport,
-  .set_clip_rect = SetClipRect,
-  .clear = Clear,
-  .draw_texture = DrawTexture,
-  .draw_geometry = DrawGeometry,
-  .present = Present,
-  .last_error = LastError,
+    .struct_size = sizeof(ArRenderBackendOps),
+    .create_texture = CreateTexture,
+    .destroy_texture = DestroyTexture,
+    .update_texture = UpdateTexture,
+    .set_render_target = SetRenderTarget,
+    .use_output_coordinates = UseOutputCoordinates,
+    .get_output_size = GetOutputSize,
+    .set_viewport = SetViewport,
+    .set_clip_rect = SetClipRect,
+    .clear = Clear,
+    .draw_texture = DrawTexture,
+    .draw_geometry = DrawGeometry,
+    .present = Present,
+    .last_error = LastError,
 };
 
 static FrameSlot WorldNavigationSlot(void) {
@@ -794,52 +888,46 @@ static FrameSlot WorldNavigationSlot(void) {
   scene->valid = true;
   scene->composition.valid = true;
   scene->composition.empty_animation = true;
-  scene->source_to_screen[0] =
-      (float)kActRaiserAuthenticWidth / kSimWorldMapPixels;
-  scene->source_to_screen[4] =
-      (float)kActRaiserAuthenticHeight / kSimWorldMapPixels;
+  scene->source_to_screen[0] = (float)kActRaiserAuthenticWidth / kSimWorldMapPixels;
+  scene->source_to_screen[4] = (float)kActRaiserAuthenticHeight / kSimWorldMapPixels;
   scene->ground[0] = (SimWorldNavigationGroundVertex){0, 0, 0.0f, 0.0f};
   scene->ground[1] = (SimWorldNavigationGroundVertex){128, 0, 1.0f, 0.0f};
-  scene->ground[2] =
-      (SimWorldNavigationGroundVertex){128, 128, 1.0f, 1.0f};
+  scene->ground[2] = (SimWorldNavigationGroundVertex){128, 128, 1.0f, 1.0f};
   scene->ground[3] = (SimWorldNavigationGroundVertex){0, 128, 0.0f, 1.0f};
   return slot;
 }
 
 static void TestNativeNavigationZoom(void) {
-  FakeBackend backend = {.output_width = 896, .output_height = 784,
-    .track_palace_focus = true};
-  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
-      (ArRenderCapabilities){0}));
+  FakeBackend backend = {.output_width = 896, .output_height = 784, .track_palace_focus = true};
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   FrameSlot slot = WorldNavigationSlot();
   slot.pixel_aspect = kPixelAspect_Square;
   slot.sim.projection_distance_x100 = 0;
   slot.sim.world_navigation_models = slot.sim.world_navigation_relief = false;
   slot.sim.world_navigation_atmosphere = slot.sim.world_navigation_cloud_shadows = false;
   const int zooms[] = {kSimWorldNavigationZoomNear, kSimWorldNavigationZoomMiddle,
-      kSimWorldNavigationZoomFar};
-  const int focus[][2] = {{64,64}, {96,64}, {32,48}, {48,16}};
-  for (unsigned f = 0; f < sizeof(focus)/sizeof(*focus); ++f) {
+                       kSimWorldNavigationZoomFar};
+  const int focus[][2] = {{64, 64}, {96, 64}, {32, 48}, {48, 16}};
+  for (unsigned f = 0; f < sizeof(focus) / sizeof(*focus); ++f) {
     slot.sim.world_navigation.focus_x = focus[f][0] * kSimWorldMapTilePixels;
     slot.sim.world_navigation.focus_y = focus[f][1] * kSimWorldMapTilePixels;
-    for (unsigned z = 0; z < sizeof(zooms)/sizeof(*zooms); ++z) {
+    for (unsigned z = 0; z < sizeof(zooms) / sizeof(*zooms); ++z) {
       slot.sim.world_navigation.matrix[0] = slot.sim.world_navigation.matrix[3] = zooms[z];
       assert(SimWorldNavigationScene_Build(&slot.sim.world_navigation_scene,
-          &slot.sim.world_navigation, SimWorldMap_Serial()));
+                                           &slot.sim.world_navigation, SimWorldMap_Serial()));
       slot.sim.world_navigation_scene.composition.valid = true;
       UploadWorldNavigationComposition(&slot);
       ArRenderPointF points[3];
       for (unsigned p = 0; p < 3; ++p) {
-        backend.palace_focus_uv = (ArRenderPointF){
-          (focus[f][0] + (p == 1)) / 128.0f,
-          (focus[f][1] + (p == 2)) / 128.0f};
+        backend.palace_focus_uv =
+            (ArRenderPointF){(focus[f][0] + (p == 1)) / 128.0f, (focus[f][1] + (p == 2)) / 128.0f};
         backend.palace_focus_vertices = 0;
         assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
         assert(backend.palace_focus_vertices);
         points[p] = backend.palace_focus_position;
       }
       const float native_pixels = kSimWorldMapTilePixels * 256.0f / zooms[z] *
-          backend.output_height / kActRaiserAuthenticHeight;
+                                  backend.output_height / kActRaiserAuthenticHeight;
       for (unsigned p = 1; p < 3; ++p) {
         const float actual = hypotf(points[p].x - points[0].x, points[p].y - points[0].y);
         /* Finite tiles curve away from the tangent; the focal scale must
@@ -859,14 +947,19 @@ static void TestRejectedNavigationModelsStayCached(void) {
   PresentWorldNav_ResetResources();
   radial_accept = radial_reject_selection = true;
   FakeBackend backend = {.output_width = 960, .output_height = 720};
-  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
-      (ArRenderCapabilities){0}));
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   FrameSlot slot = WorldNavigationSlot();
   slot.sim.world_navigation_towns.object_count = 1;
   slot.sim.world_navigation_towns.objects[0] = (SimBackgroundVoxelObject){
-    .town = 2, .kind = kSimBackgroundVoxel_Factory, .cell_x = 15, .cell_y = 15,
-    .source_cells_w = 2, .source_cells_h = 2, .footprint_cells_w = 2, .footprint_cells_d = 2,
-    .visual_state = kSimStructureVisualState_Finished,
+      .town = 2,
+      .kind = kSimBackgroundVoxel_Factory,
+      .cell_x = 15,
+      .cell_y = 15,
+      .source_cells_w = 2,
+      .source_cells_h = 2,
+      .footprint_cells_w = 2,
+      .footprint_cells_d = 2,
+      .visual_state = kSimStructureVisualState_Finished,
   };
   UploadWorldNavigationComposition(&slot);
   for (unsigned frame = 0; frame < 3; ++frame)
@@ -888,8 +981,10 @@ static void TestRejectedNavigationModelsStayCached(void) {
   assert(radial_appends > appends);
   PresentWorldNav_ResetResources();
   radial_accept = false;
-  if (saved) assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
-  else assert(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+  if (saved)
+    assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
+  else
+    assert(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
   SDL_free(saved);
   PresentWorldNav_ResetResources();
 }
@@ -911,9 +1006,15 @@ static void TestCacheBudgetRecovery(void) {
   slot.sim.shadow_softness_pct = 100;
   slot.sim.world_navigation_towns.object_count = 1;
   slot.sim.world_navigation_towns.objects[0] = (SimBackgroundVoxelObject){
-    .town = 2, .kind = kSimBackgroundVoxel_Factory, .cell_x = 15, .cell_y = 15,
-    .source_cells_w = 2, .source_cells_h = 2, .footprint_cells_w = 2, .footprint_cells_d = 2,
-    .visual_state = kSimStructureVisualState_Finished,
+      .town = 2,
+      .kind = kSimBackgroundVoxel_Factory,
+      .cell_x = 15,
+      .cell_y = 15,
+      .source_cells_w = 2,
+      .source_cells_h = 2,
+      .footprint_cells_w = 2,
+      .footprint_cells_d = 2,
+      .visual_state = kSimStructureVisualState_Finished,
   };
   UploadWorldNavigationComposition(&slot);
   for (unsigned frame = 0; frame < 3; ++frame)
@@ -938,23 +1039,22 @@ static void TestCacheBudgetRecovery(void) {
   assert(SimBackgroundVoxelModelCache_Stats().hits == warm.hits);
   assert(SimBackgroundVoxelModelCache_Stats().misses == warm.misses);
   PresentWorldNav_ResetResources();
-  if (saved) assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
-  else assert(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+  if (saved)
+    assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
+  else
+    assert(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
   SDL_free(saved);
 }
 
 static void TestAspectFitAndLocalGeometry(void) {
   FakeBackend backend = {
-    .output_width = 1280,
-    .output_height = 720,
+      .output_width = 1280,
+      .output_height = 720,
   };
-  assert(ArRenderDevice_Init(
-      &g_render_device, &kFakeOps, &backend,
-      (ArRenderCapabilities){0}));
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   FrameSlot slot = WorldNavigationSlot();
   UploadWorldNavigationComposition(&slot);
-  assert(PresentWorldNavigation3D(&slot) ==
-         kPresentationOutcome_Complete);
+  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(backend.use_output_coordinates_count == 1);
   assert(backend.get_output_size_count == 1);
   assert(backend.clear_count == 1);
@@ -980,8 +1080,7 @@ static void TestAspectFitAndLocalGeometry(void) {
   assert(backend.ground_vertices[0].position.y > 0.0f);
   assert(isfinite(backend.ground_vertices[2].position.y));
   assert(fabsf(backend.ground_vertices[2].position.y - 720.0f) > 1.0f);
-  assert(backend.ground_vertices[3].position.y <
-         backend.ground_vertices[1].position.y);
+  assert(backend.ground_vertices[3].position.y < backend.ground_vertices[1].position.y);
 }
 
 static void TestTownReliefRegistration(void) {
@@ -991,21 +1090,18 @@ static void TestTownReliefRegistration(void) {
     assert(SimWorldMap_OriginForTown(town, &origin_x, &origin_y));
     const float local_x = 11.25f, local_y = 17.5f;
     SimWorldNavigationTerrainSample sample;
-    assert(SimWorldNavigationTerrain_Sample(
-        origin_x + local_x, origin_y + local_y, &sample));
-    const float expected = SimTownTerrain_HeightUnitsAt(
-        town, local_x * kSimTownCellPixels,
-        local_y * kSimTownCellPixels) + datum_offset[town - 1];
-    assert(sample.height_units > expected - 0.0001f &&
-           sample.height_units < expected + 0.0001f);
+    assert(SimWorldNavigationTerrain_Sample(origin_x + local_x, origin_y + local_y, &sample));
+    const float expected = SimTownTerrain_HeightUnitsAt(town, local_x * kSimTownCellPixels,
+                                                        local_y * kSimTownCellPixels) +
+                           datum_offset[town - 1];
+    assert(sample.height_units > expected - 0.0001f && sample.height_units < expected + 0.0001f);
     assert(sample.authored_weight == 1.0f);
   }
   assert(!SimWorldNavigationTerrain_Sample(0.0f, 0.0f, NULL));
 }
 
 static void AssertPerformanceScopeRestored(void) {
-  const Sim3DPerformanceScope scope =
-      Sim3DPerformance_Begin(kSim3DPerformance_HostUi);
+  const Sim3DPerformanceScope scope = Sim3DPerformance_Begin(kSim3DPerformance_HostUi);
   assert(scope.previous_stage == -1); /* No failed stage owns later work. */
   Sim3DPerformance_End(scope);
 }
@@ -1014,18 +1110,15 @@ static void TestFailureRestoresFullOutput(void) {
   /* First draw fails in either the atmosphere or the optional space stage. */
   for (int backdrop = 0; backdrop <= 1; backdrop++) {
     FakeBackend backend = {
-      .output_width = 1280,
-      .output_height = 720,
-      .fail_geometry_call = 1,
+        .output_width = 1280,
+        .output_height = 720,
+        .fail_geometry_call = 1,
     };
-    assert(ArRenderDevice_Init(
-        &g_render_device, &kFakeOps, &backend,
-        (ArRenderCapabilities){0}));
+    assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
     FrameSlot slot = WorldNavigationSlot();
     slot.sim.world_navigation_backdrop = backdrop != 0;
     UploadWorldNavigationComposition(&slot);
-    assert(PresentWorldNavigation3D(&slot) ==
-           kPresentationOutcome_CoreFailure);
+    assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_CoreFailure);
     assert(backend.set_viewport_count == 3);
     assert(!backend.viewport_set);
     AssertPerformanceScopeRestored();
@@ -1034,19 +1127,22 @@ static void TestFailureRestoresFullOutput(void) {
 
 static void TestAuthoredTownModelsUseSharedCacheAndDepth(void) {
   FakeBackend backend = {.output_width = 1280, .output_height = 720};
-  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
-                            (ArRenderCapabilities){0}));
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   FrameSlot slot = WorldNavigationSlot();
   slot.sim.world_navigation.active_location = 2;
   slot.sim.world_navigation_towns.object_count = 1;
-  SimBackgroundVoxelObject *object =
-      &slot.sim.world_navigation_towns.objects[0];
+  SimBackgroundVoxelObject *object = &slot.sim.world_navigation_towns.objects[0];
   *object = (SimBackgroundVoxelObject){
-    .town = 2, .kind = kSimBackgroundVoxel_Factory,
-    .cell_x = 15, .cell_y = 15, .record_slot = 7,
-    .source_cells_w = 2, .source_cells_h = 2,
-    .footprint_cells_w = 2, .footprint_cells_d = 2,
-    .visual_state = kSimStructureVisualState_Finished,
+      .town = 2,
+      .kind = kSimBackgroundVoxel_Factory,
+      .cell_x = 15,
+      .cell_y = 15,
+      .record_slot = 7,
+      .source_cells_w = 2,
+      .source_cells_h = 2,
+      .footprint_cells_w = 2,
+      .footprint_cells_d = 2,
+      .visual_state = kSimStructureVisualState_Finished,
   };
   SimBackgroundVoxelModelCache_Reset();
   slot.sim.world_navigation_brightness = 0;
@@ -1068,8 +1164,8 @@ static void TestAuthoredTownModelsUseSharedCacheAndDepth(void) {
   assert(SimBackgroundVoxelModelCache_Stats().hits == 1);
   /* Even with Ultra enabled globally, this overview-sized object must have
    * fetched the authored Low model. A lookup must hit the exact same entry. */
-  assert(SimBackgroundVoxelModelCache_Get(
-      object, kSimBackgroundVoxelDetail_Low, kSimBackgroundVoxelStyle_Varied, NULL, NULL));
+  assert(SimBackgroundVoxelModelCache_Get(object, kSimBackgroundVoxelDetail_Low,
+                                          kSimBackgroundVoxelStyle_Varied, NULL, NULL));
   assert(SimBackgroundVoxelModelCache_Stats().hits == 2);
   assert(SimBackgroundVoxelModelCache_Stats().misses == 1);
   depth_begin_failure = true;
@@ -1081,8 +1177,7 @@ static void TestAuthoredTownModelsUseSharedCacheAndDepth(void) {
 
 static void TestOceanBatchFailureRecovery(void) {
   FakeBackend backend = {.output_width = 1280, .output_height = 720};
-  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
-                            (ArRenderCapabilities){0}));
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   FrameSlot slot = WorldNavigationSlot();
   UploadWorldNavigationComposition(&slot);
   for (int failed_batch = 1; failed_batch <= 2; failed_batch++) {
@@ -1101,8 +1196,7 @@ static void TestOceanBatchFailureRecovery(void) {
 
 static void TestSpaceAndCloudCover(void) {
   FakeBackend backend = {.output_width = 1280, .output_height = 720};
-  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
-                            (ArRenderCapabilities){0}));
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   PresentWorldNav_ResetResources();
   FrameSlot slot = WorldNavigationSlot();
   slot.sim.world_navigation_backdrop = true;
@@ -1121,7 +1215,8 @@ static void TestSpaceAndCloudCover(void) {
   /* Only longitude-chart crossings add faces; cap extra geometry at 25%.
    * Batching must still fit the original API-call budget above. */
   assert(depth_cloud_faces > 0 && depth_cloud_faces <= 3 * 48 * 96 * 5 / 4);
-  assert(depth_expected_shadow_terrain_faces > 0 && depth_expected_shadow_terrain_faces <= 128 * 128);
+  assert(depth_expected_shadow_terrain_faces > 0 &&
+         depth_expected_shadow_terrain_faces <= 128 * 128);
   assert(depth_shadow_terrain_faces == 9 * depth_expected_shadow_terrain_faces);
   assert(depth_shadow_ocean_faces > 0);
   assert(backend.cloud_ocean_shadow_draws > 0 && backend.cloud_ocean_shadow_draws <= 9 * 48);
@@ -1133,7 +1228,8 @@ static void TestSpaceAndCloudCover(void) {
   const int body_draws = backend.cloud_body_draws;
   slot.sim.world_navigation.zoom_current = 0x0206;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
-  assert(backend.cloud_body_draws == body_draws && depth_cloud_faces == 0); /* Below the cloud deck. */
+  assert(backend.cloud_body_draws == body_draws &&
+         depth_cloud_faces == 0); /* Below the cloud deck. */
   assert(depth_shadow_terrain_faces == 9 * depth_expected_shadow_terrain_faces);
   slot.sim.world_navigation_backdrop = false;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
@@ -1151,7 +1247,8 @@ static void TestSpaceAndCloudCover(void) {
     backend.output_width = 640 + view * 192;
     backend.output_height = 480 + view * 64;
     assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
-    assert(depth_expected_shadow_terrain_faces > 0 && depth_expected_shadow_terrain_faces < 128 * 128);
+    assert(depth_expected_shadow_terrain_faces > 0 &&
+           depth_expected_shadow_terrain_faces < 128 * 128);
     assert(depth_shadow_terrain_faces == 9 * depth_expected_shadow_terrain_faces);
   }
   slot.sim.world_navigation.zoom_current = 0x040A;
@@ -1164,10 +1261,9 @@ static void TestSpaceAndCloudCover(void) {
 static void TestAdventAuthoredModelClearance(void) {
   /* At the last top-down zoom the hidden far hemisphere extends past the
    * far plane. The real GPU clips it; the near-side models must all survive. */
-  FakeBackend backend = {.output_width = 800, .output_height = 600,
-      .allow_far_clipped_depth = true};
-  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
-                            (ArRenderCapabilities){0}));
+  FakeBackend backend = {
+      .output_width = 800, .output_height = 600, .allow_far_clipped_depth = true};
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   FrameSlot slot = WorldNavigationSlot();
   slot.sim.world_navigation_relief = false;
   slot.sim.world_navigation_cloud_shadows = false;
@@ -1176,23 +1272,27 @@ static void TestAdventAuthoredModelClearance(void) {
   slot.sim.world_navigation_towns.object_count = 1;
   SimBackgroundVoxelObject *object = &slot.sim.world_navigation_towns.objects[0];
   *object = (SimBackgroundVoxelObject){
-    .town = 2, .kind = kSimBackgroundVoxel_BloodpoolCastle,
-    .cell_x = 15, .cell_y = 15,
-    .source_cells_w = 2, .source_cells_h = 2,
-    .footprint_cells_w = 2, .footprint_cells_d = 2,
-    .visual_state = kSimStructureVisualState_Finished,
+      .town = 2,
+      .kind = kSimBackgroundVoxel_BloodpoolCastle,
+      .cell_x = 15,
+      .cell_y = 15,
+      .source_cells_w = 2,
+      .source_cells_h = 2,
+      .footprint_cells_w = 2,
+      .footprint_cells_d = 2,
+      .visual_state = kSimStructureVisualState_Finished,
   };
   const int heights[] = {100, 400, 200, 300, 100};
   const int zooms[] = {50, 30, 10, 30, 50};
-  for (int detail = kSimBackgroundVoxelDetail_Low;
-       detail < kSimBackgroundVoxelDetail_Count; detail++) {
+  for (int detail = kSimBackgroundVoxelDetail_Low; detail < kSimBackgroundVoxelDetail_Count;
+       detail++) {
     slot.sim.background_voxel_detail = detail;
-    for (int style = kSimBackgroundVoxelStyle_Basic;
-         style < kSimBackgroundVoxelStyle_Count; style++) {
+    for (int style = kSimBackgroundVoxelStyle_Basic; style < kSimBackgroundVoxelStyle_Count;
+         style++) {
       slot.sim.background_voxel_style = style;
       SimBackgroundVoxelModel model;
       SimBackgroundVoxelModel_BuildStyled(object, (SimBackgroundVoxelDetail)detail,
-          (SimBackgroundVoxelStyle)style, &model);
+                                          (SimBackgroundVoxelStyle)style, &model);
       for (size_t h = 0; h < sizeof(heights) / sizeof(heights[0]); h++) {
         slot.sim.height_scale_x100 = heights[h];
         for (size_t z = 0; z < sizeof(zooms) / sizeof(zooms[0]); z++) {
@@ -1228,7 +1328,7 @@ static void TestAdventAuthoredModelClearance(void) {
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   SimBackgroundVoxelModel restored;
   SimBackgroundVoxelModel_BuildStyled(object, kSimBackgroundVoxelDetail_Ultra,
-      kSimBackgroundVoxelStyle_Varied, &restored);
+                                      kSimBackgroundVoxelStyle_Varied, &restored);
   assert(depth_solid_faces == restored.face_count);
   slot.sim.world_navigation_models = false;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
@@ -1249,8 +1349,7 @@ static void TestAdventAuthoredModelClearance(void) {
 
 static void TestGroundCacheInvalidation(void) {
   FakeBackend backend = {.output_width = 1280, .output_height = 720};
-  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
-                            (ArRenderCapabilities){0}));
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   FrameSlot slot = WorldNavigationSlot();
   UploadWorldNavigationComposition(&slot);
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
@@ -1298,22 +1397,29 @@ static void TestGroundWorkerParity(void) {
       slot.sim.world_navigation.focus_y = 450 + i * 5;
       slot.sim_camera.orbit_yaw = i * .03f;
       const ArRenderRectI viewport = {0, 0, 640 + i * 4, 480 + i * 3};
-      backend.output_width = viewport.w; backend.output_height = viewport.h;
+      backend.output_width = viewport.w;
+      backend.output_height = viewport.h;
       if (slot.sim.view == kSimView_WorldNavigation) UploadWorldNavigationComposition(&slot);
-      assert((slot.sim.view == kSimView_SkyPalace ? PresentWorldNavigationBackdrop(&slot, viewport)
-          : PresentWorldNavigation3D(&slot)) == kPresentationOutcome_Complete);
+      assert((slot.sim.view == kSimView_SkyPalace
+                  ? PresentWorldNavigationBackdrop(&slot, viewport)
+                  : PresentWorldNavigation3D(&slot)) == kPresentationOutcome_Complete);
       assert(backend.ground_hash != UINT64_C(14695981039346656037));
-      if (!mode) expected[i] = backend.ground_hash;
-      else assert(expected[i] == backend.ground_hash);
+      if (!mode)
+        expected[i] = backend.ground_hash;
+      else
+        assert(expected[i] == backend.ground_hash);
       const uint64_t held = backend.ground_hash;
-      assert((slot.sim.view == kSimView_SkyPalace ? PresentWorldNavigationBackdrop(&slot, viewport)
-          : PresentWorldNavigation3D(&slot)) == kPresentationOutcome_Complete);
+      assert((slot.sim.view == kSimView_SkyPalace
+                  ? PresentWorldNavigationBackdrop(&slot, viewport)
+                  : PresentWorldNavigation3D(&slot)) == kPresentationOutcome_Complete);
       assert(held == backend.ground_hash);
     }
     PresentWorldNav_ResetResources(); /* joins before the fake backend leaves scope */
   }
-  if (saved) assert(SDL_SetEnvironmentVariable(environment, "AR_RENDER_WORKERS", saved, true));
-  else assert(SDL_UnsetEnvironmentVariable(environment, "AR_RENDER_WORKERS"));
+  if (saved)
+    assert(SDL_SetEnvironmentVariable(environment, "AR_RENDER_WORKERS", saved, true));
+  else
+    assert(SDL_UnsetEnvironmentVariable(environment, "AR_RENDER_WORKERS"));
   SDL_free(saved);
 }
 
@@ -1334,56 +1440,66 @@ static void TestModelWorkerParity(void) {
     slot.sim.world_navigation_towns.object_count = 256;
     for (int i = 0; i < 256; ++i) {
       slot.sim.world_navigation_towns.objects[i] = (SimBackgroundVoxelObject){
-        .town = 2, .kind = i % 3 == 0 ? kSimBackgroundVoxel_Windmill :
-            i % 3 == 1 ? kSimBackgroundVoxel_Factory : kSimBackgroundVoxel_BroadTree,
-        .cell_x = 8 + i % 16, .cell_y = 8 + i / 16,
-        .record_slot = (uint16_t)i,
-        .source_cells_w = 2, .source_cells_h = 2,
-        .footprint_cells_w = 2, .footprint_cells_d = 2,
-        .visual_state = kSimStructureVisualState_Finished,
+          .town = 2,
+          .kind = i % 3 == 0   ? kSimBackgroundVoxel_Windmill
+                  : i % 3 == 1 ? kSimBackgroundVoxel_Factory
+                               : kSimBackgroundVoxel_BroadTree,
+          .cell_x = 8 + i % 16,
+          .cell_y = 8 + i / 16,
+          .record_slot = (uint16_t)i,
+          .source_cells_w = 2,
+          .source_cells_h = 2,
+          .footprint_cells_w = 2,
+          .footprint_cells_d = 2,
+          .visual_state = kSimStructureVisualState_Finished,
       };
     }
     hash_models = true;
     for (int c = 0; c < kCases; ++c) {
       slot.sim.view = c & 1 ? kSimView_SkyPalace : kSimView_WorldNavigation;
       slot.sim.world_navigation_lighting = (c / 2) & 1;
-      slot.sim.background_voxel_detail = c < 4 ? kSimBackgroundVoxelDetail_Low : kSimBackgroundVoxelDetail_Ultra;
+      slot.sim.background_voxel_detail =
+          c < 4 ? kSimBackgroundVoxelDetail_Low : kSimBackgroundVoxelDetail_Ultra;
       slot.sim.world_navigation_relief = (c / 4) & 1;
       slot.sim.light_azimuth_deg = c * 43;
       slot.sim.world_navigation.active_location = 2;
       slot.sim_camera.orbit_yaw = c * .02f;
       const ArRenderRectI viewport = {0, 0, 1792 - c * 16, 1344 - c * 8};
-      backend.output_width = viewport.w; backend.output_height = viewport.h;
+      backend.output_width = viewport.w;
+      backend.output_height = viewport.h;
       for (int frame = 0; frame < kRepeats; ++frame) {
         slot.sim.game_frame = frame == 3 ? 0 : 12 * frame;
         model_hash = UINT64_C(14695981039346656037);
         const SimBackgroundVoxelModelCacheStats before = SimBackgroundVoxelModelCache_Stats();
         if (slot.sim.view == kSimView_WorldNavigation) UploadWorldNavigationComposition(&slot);
-        assert((slot.sim.view == kSimView_SkyPalace ? PresentWorldNavigationBackdrop(&slot, viewport)
-            : PresentWorldNavigation3D(&slot)) == kPresentationOutcome_Complete);
+        assert((slot.sim.view == kSimView_SkyPalace
+                    ? PresentWorldNavigationBackdrop(&slot, viewport)
+                    : PresentWorldNavigation3D(&slot)) == kPresentationOutcome_Complete);
         assert(depth_solid_faces > 1000);
         if (!frame) {
           const SimBackgroundVoxelModelCacheStats after = SimBackgroundVoxelModelCache_Stats();
           assert(after.hits + after.misses - before.hits - before.misses >= 128);
         }
-        if (!mode) expected[c][frame] = model_hash;
-        else assert(expected[c][frame] == model_hash);
+        if (!mode)
+          expected[c][frame] = model_hash;
+        else
+          assert(expected[c][frame] == model_hash);
       }
       assert(expected[c][0] == expected[c][3]); /* cached rewind, same static spans */
     }
     hash_models = false;
     PresentWorldNav_ResetResources();
   }
-  if (saved) assert(SDL_SetEnvironmentVariable(environment, "AR_RENDER_WORKERS", saved, true));
-  else assert(SDL_UnsetEnvironmentVariable(environment, "AR_RENDER_WORKERS"));
+  if (saved)
+    assert(SDL_SetEnvironmentVariable(environment, "AR_RENDER_WORKERS", saved, true));
+  else
+    assert(SDL_UnsetEnvironmentVariable(environment, "AR_RENDER_WORKERS"));
   SDL_free(saved);
 }
 
 static void TestMapEdgeLandOpacity(void) {
-  FakeBackend backend = {.output_width = 800, .output_height = 600,
-                         .check_map_edge_opacity = true};
-  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
-                            (ArRenderCapabilities){0}));
+  FakeBackend backend = {.output_width = 800, .output_height = 600, .check_map_edge_opacity = true};
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   uint8_t *rom = calloc(1, 0x100000);
   assert(rom);
   memset(rom + 0x70000, 0x10, 64);
@@ -1431,8 +1547,7 @@ static void TestMapEdgeLandOpacity(void) {
 
 static void TestTallModelViewportClearance(void) {
   FakeBackend backend = {.output_width = 800, .output_height = 600};
-  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
-                            (ArRenderCapabilities){0}));
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   FrameSlot slot = WorldNavigationSlot();
   slot.sim.world_navigation_relief = false;
   slot.sim.world_navigation_cloud_shadows = false;
@@ -1444,11 +1559,15 @@ static void TestTallModelViewportClearance(void) {
   slot.sim.world_navigation_towns.object_count = 1;
   SimBackgroundVoxelObject *object = &slot.sim.world_navigation_towns.objects[0];
   *object = (SimBackgroundVoxelObject){
-    .town = 2, .kind = kSimBackgroundVoxel_BloodpoolCastle,
-    .cell_x = 15, .cell_y = 15,
-    .source_cells_w = 2, .source_cells_h = 2,
-    .footprint_cells_w = 2, .footprint_cells_d = 2,
-    .visual_state = kSimStructureVisualState_Finished,
+      .town = 2,
+      .kind = kSimBackgroundVoxel_BloodpoolCastle,
+      .cell_x = 15,
+      .cell_y = 15,
+      .source_cells_w = 2,
+      .source_cells_h = 2,
+      .footprint_cells_w = 2,
+      .footprint_cells_d = 2,
+      .visual_state = kSimStructureVisualState_Finished,
   };
   const ArRenderRectI viewport = {0, 0, 800, 600};
   /* Its raised roof enters the viewport although the short castle remains
@@ -1470,16 +1589,20 @@ static void TestTallModelViewportClearance(void) {
 
 static void TestOptionalStagesSkipWorkAndRestore(void) {
   FakeBackend backend = {.output_width = 1280, .output_height = 720};
-  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
-                            (ArRenderCapabilities){0}));
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   FrameSlot slot = WorldNavigationSlot();
   slot.sim.world_navigation_towns.object_count = 1;
   slot.sim.world_navigation_towns.objects[0] = (SimBackgroundVoxelObject){
-    .town = 2, .kind = kSimBackgroundVoxel_Factory,
-    .cell_x = 15, .cell_y = 15, .record_slot = 7,
-    .source_cells_w = 2, .source_cells_h = 2,
-    .footprint_cells_w = 2, .footprint_cells_d = 2,
-    .visual_state = kSimStructureVisualState_Finished,
+      .town = 2,
+      .kind = kSimBackgroundVoxel_Factory,
+      .cell_x = 15,
+      .cell_y = 15,
+      .record_slot = 7,
+      .source_cells_w = 2,
+      .source_cells_h = 2,
+      .footprint_cells_w = 2,
+      .footprint_cells_d = 2,
+      .visual_state = kSimStructureVisualState_Finished,
   };
   slot.sim.world_navigation.active_location = 2;
   slot.sim.world_navigation_atmosphere = false;
@@ -1532,8 +1655,7 @@ static void TestOptionalStagesSkipWorkAndRestore(void) {
 
 static void TestDetailedGroundLiveInvalidation(void) {
   FakeBackend backend = {.output_width = 1280, .output_height = 720};
-  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
-                            (ArRenderCapabilities){0}));
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   PresentWorldNav_ResetResources();
   uint8_t *rom = calloc(0x100000, 1);
   assert(rom && SimTownGroundArt_Init(rom, 0x100000));
@@ -1608,9 +1730,10 @@ static void TestDetailedGroundLiveInvalidation(void) {
 
 static void TestNativeMountainRestoration(void) {
   static const uint32_t rows[32] = {
-    0xFFFFFFFFu, 0xFFFC3C3Fu, 0xFFF0000Fu, 0xFFC00003u, 0xF0000000u,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0x00000600u, 0x00000F00u, 0x00006F00u, 0x0000FF80u, 0x0000FFE0u, 0x0000FFF8u,
+      0xFFFFFFFFu, 0xFFFC3C3Fu, 0xFFF0000Fu, 0xFFC00003u, 0xF0000000u, 0, 0, 0, 0,
+      0,           0,           0,           0,           0,           0, 0, 0, 0,
+      0,           0,           0,           0,           0,           0, 0, 0, 0x00000600u,
+      0x00000F00u, 0x00006F00u, 0x0000FF80u, 0x0000FFE0u, 0x0000FFF8u,
   };
   FakeBackend backend = {.output_width = 1280, .output_height = 720};
   backend.ground_upload_mirror = calloc(2048u * 2048, sizeof(uint32_t));
@@ -1671,10 +1794,12 @@ static void TestNativeMountainRestoration(void) {
   slot.sim.landscape_height_pct = 100;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(depth_world_mountain_hash == moved_hash);
-  backend.output_width = 960; backend.output_height = 540;
+  backend.output_width = 960;
+  backend.output_height = 540;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(depth_world_mountain_hash != moved_hash);
-  backend.output_width = 1280; backend.output_height = 720;
+  backend.output_width = 1280;
+  backend.output_height = 720;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(depth_world_mountain_hash == moved_hash);
   assert(backend.mountain_uploads == 1 && backend.ground_uploads == 1);
@@ -1712,7 +1837,8 @@ static void TestNativeMountainRestoration(void) {
   /* Exterior continuations depend on surrounding rock. A geography edit
    * invalidates their retained scene even with an unchanged image serial. */
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
-  assert(backend.mountain_uploads == native_uploads + 1 && backend.ground_uploads == ground_uploads + 1);
+  assert(backend.mountain_uploads == native_uploads + 1 &&
+         backend.ground_uploads == ground_uploads + 1);
   native_uploads = backend.mountain_uploads;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(backend.ground_uploads == ground_uploads + 1);
@@ -1748,8 +1874,7 @@ static void TestNativeMountainRestoration(void) {
   const uint64_t full_failure_bytes = backend.ground_upload_bytes;
   slot.sim.world_navigation_ground_detail = true;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
-  assert(backend.ground_upload_bytes ==
-         full_failure_bytes + UINT64_C(2048) * 2048 * 4);
+  assert(backend.ground_upload_bytes == full_failure_bytes + UINT64_C(2048) * 2048 * 4);
   const uint64_t repaired_bytes = backend.ground_upload_bytes;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(backend.ground_upload_bytes == repaired_bytes); /* frozen after repair */
@@ -1815,14 +1940,11 @@ static void TestLavaUploadRecovery(void) {
   /* Same audited occupancy as the material test, with entirely synthetic
    * palette/CHR data. The overhead crater uses a single atlas rectangle. */
   static const uint32_t rows[32] = {
-    0xFFFCFFFFu, 0xFFFCFFFFu, 0xFCFCFFFFu, 0xDE3C3C3Fu,
-    0xFF003C0Fu, 0xFF003C03u, 0xFF000000u, 0xFF000000u,
-    0xC0000300u, 0xC0000780u, 0x00000FC1u, 0x00000FC3u,
-    0x80000FC3u, 0xE0006FC3u, 0xF000F003u, 0xF000F003u,
-    0xF000F001u, 0xF0000003u, 0xF0000003u, 0xC0000003u,
-    0x18000000u, 0x3C000006u, 0x3C00000Fu, 0x3C00000Fu,
-    0x1800000Fu, 0x3E000007u, 0x3F00000Fu, 0x3F00000Fu,
-    0x3F98001Fu, 0x3FFE667Fu, 0x0FFFFFFFu, 0x0FFFFFFFu,
+      0xFFFCFFFFu, 0xFFFCFFFFu, 0xFCFCFFFFu, 0xDE3C3C3Fu, 0xFF003C0Fu, 0xFF003C03u, 0xFF000000u,
+      0xFF000000u, 0xC0000300u, 0xC0000780u, 0x00000FC1u, 0x00000FC3u, 0x80000FC3u, 0xE0006FC3u,
+      0xF000F003u, 0xF000F003u, 0xF000F001u, 0xF0000003u, 0xF0000003u, 0xC0000003u, 0x18000000u,
+      0x3C000006u, 0x3C00000Fu, 0x3C00000Fu, 0x1800000Fu, 0x3E000007u, 0x3F00000Fu, 0x3F00000Fu,
+      0x3F98001Fu, 0x3FFE667Fu, 0x0FFFFFFFu, 0x0FFFFFFFu,
   };
   FakeBackend backend = {.output_width = 800, .output_height = 600};
   backend.mountain_upload_mirror = calloc(512u * 512, sizeof(uint32_t));
@@ -1838,7 +1960,8 @@ static void TestLavaUploadRecovery(void) {
       rom[0xC881B + tile * 8 + q * 2] = 1;
     }
   for (int bank = 0; bank < 2; bank++)
-    for (int y = 0; y < 8; y++) rom[0x60000 + bank * 0x4000 + 32 + y * 2] = 255;
+    for (int y = 0; y < 8; y++)
+      rom[0x60000 + bank * 0x4000 + 32 + y * 2] = 255;
   assert(SimTownGroundArt_Init(rom, 0x100000));
   free(rom);
   FrameSlot slot = WorldNavigationSlot();
@@ -1847,7 +1970,8 @@ static void TestLavaUploadRecovery(void) {
   SimWorldNavigationTownGround *ground = &slot.sim.world_navigation_towns.ground;
   ground->enabled_town_mask = 8;
   for (int y = 0; y < 32; y++)
-    for (int x = 0; x < 32; x++) ground->terrain[3][y * 32 + x] = rows[y] & (1u << x) ? 0x89 : 8;
+    for (int x = 0; x < 32; x++)
+      ground->terrain[3][y * 32 + x] = rows[y] & (1u << x) ? 0x89 : 8;
   UploadWorldNavigationComposition(&slot);
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(backend.mountain_uploads == 1 && backend.mountain_upload_bytes == 512u * 512 * 4);
@@ -1887,16 +2011,15 @@ static void TestLavaUploadRecovery(void) {
 
 static void TestAtmosphereEnclosesRaisedTerrain(void) {
   FakeBackend backend = {
-    .output_width = 1280, .output_height = 720,
-    .check_atmosphere_enclosure = true,
+      .output_width = 1280,
+      .output_height = 720,
+      .check_atmosphere_enclosure = true,
   };
-  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
-                            (ArRenderCapabilities){0}));
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   FrameSlot slot = WorldNavigationSlot();
   const int heights[] = {0, 50, 100, 150};
   const int focus[][2] = {
-    {768, 512}, {590, 512}, {208, 512},
-    {208, 414}, {466, 192}, {710, 792},
+      {768, 512}, {590, 512}, {208, 512}, {208, 414}, {466, 192}, {710, 792},
   };
   for (unsigned h = 0; h < sizeof(heights) / sizeof(heights[0]); h++) {
     slot.sim.landscape_height_pct = heights[h];
@@ -1957,9 +2080,12 @@ static void TestGlobeInspection(void) {
   assert(!memcmp(&palace, &backend.palace_rect, sizeof(palace)));
   assert(!memcmp(&slot.sim.world_navigation, &navigation, sizeof(navigation)));
   assert(backend.ground_uploads == 1); /* Camera never rebuilds native artwork. */
-  const struct { uint16_t distance; float scale; } zooms[] = {
-    {100, 1}, {200, 1}, {225, 1}, {300, .75f}, {500, .45f},
-    {900, .35f}, {2000, .35f}, {300, .75f},
+  const struct {
+    uint16_t distance;
+    float scale;
+  } zooms[] = {
+      {100, 1},    {200, 1},    {225, 1},     {300, .75f},
+      {500, .45f}, {900, .35f}, {2000, .35f}, {300, .75f},
   };
   for (size_t i = 0; i < sizeof(zooms) / sizeof(zooms[0]); i++) {
     slot.sim.projection_distance_x100 = zooms[i].distance;
@@ -1976,9 +2102,15 @@ static void TestGlobeInspection(void) {
   slot.sim.world_navigation.focus_x = slot.sim.world_navigation.focus_y = 0;
   slot.sim.world_navigation_towns.object_count = 1;
   slot.sim.world_navigation_towns.objects[0] = (SimBackgroundVoxelObject){
-    .town = 2, .kind = kSimBackgroundVoxel_Factory, .cell_x = 15, .cell_y = 15,
-    .source_cells_w = 2, .source_cells_h = 2, .footprint_cells_w = 2, .footprint_cells_d = 2,
-    .visual_state = kSimStructureVisualState_Finished,
+      .town = 2,
+      .kind = kSimBackgroundVoxel_Factory,
+      .cell_x = 15,
+      .cell_y = 15,
+      .source_cells_w = 2,
+      .source_cells_h = 2,
+      .footprint_cells_w = 2,
+      .footprint_cells_d = 2,
+      .visual_state = kSimStructureVisualState_Finished,
   };
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   const int visible_faces = depth_solid_faces;
@@ -2009,25 +2141,18 @@ static void TestGlobeInspection(void) {
 }
 
 static void TestLocalizedNavigationLabelHandoff(void) {
-  FakeBackend backend = {
-      .output_width = 1280, .output_height = 720, .track_markers = true};
-  assert(ArRenderDevice_Init(
-      &g_render_device, &kFakeOps, &backend,
-      (ArRenderCapabilities){0}));
+  FakeBackend backend = {.output_width = 1280, .output_height = 720, .track_markers = true};
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   PresentWorldNav_ResetResources();
   FrameSlot slot = WorldNavigationSlot();
-  SimWorldNavigationComposition *composition =
-      &slot.sim.world_navigation_scene.composition;
+  SimWorldNavigationComposition *composition = &slot.sim.world_navigation_scene.composition;
   composition->empty_animation = false;
   composition->palace = (SimWorldNavigationCompositionLayer){
-      .visible = true, .screen_x = 120, .screen_y = 104,
-      .width = 16, .height = 16};
+      .visible = true, .screen_x = 120, .screen_y = 104, .width = 16, .height = 16};
   composition->plaque = (SimWorldNavigationCompositionLayer){
-      .visible = true, .screen_x = 8, .screen_y = 8,
-      .width = 32, .height = 8};
+      .visible = true, .screen_x = 8, .screen_y = 8, .width = 32, .height = 8};
   composition->label = (SimWorldNavigationCompositionLayer){
-      .visible = true, .screen_x = 156, .screen_y = 25,
-      .width = 24, .height = 8};
+      .visible = true, .screen_x = 156, .screen_y = 25, .width = 24, .height = 8};
   UploadWorldNavigationComposition(&slot);
 
   s_localized_record_available = false;
@@ -2069,7 +2194,8 @@ static void TestPalaceMarkerAutoFitAndRasterBounds(void) {
   const float scale = fminf(1, fmaxf(.35f, 2.25f / Scene3D_AutoFitDistance(.4f)));
   const int sizes[][3] = {{800, 600, 800}, {1280, 720, 960}, {1920, 1080, 1440}};
   for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
-    backend.output_width = sizes[i][0]; backend.output_height = sizes[i][1];
+    backend.output_width = sizes[i][0];
+    backend.output_height = sizes[i][1];
     assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
     const float x_scale = sizes[i][2] / 256.0f, y_scale = sizes[i][1] / 224.0f;
     const ArRenderRectF actual = backend.palace_rect;
@@ -2105,8 +2231,11 @@ static void TestAtmosphereDrawCache(void) {
       const int before = backend.draw_geometry_count;
       assert(PresentWorldNavigationBackdrop(&slot, viewport) == kPresentationOutcome_Complete);
       const int draws = backend.draw_geometry_count - before;
-      if (!frame) { expected = backend.geometry_hash; cold_draws = draws; }
-      else assert(backend.geometry_hash == expected);
+      if (!frame) {
+        expected = backend.geometry_hash;
+        cold_draws = draws;
+      } else
+        assert(backend.geometry_hash == expected);
       if (frame >= 2) assert(draws < cold_draws);
     }
     /* A cached submission failure remains a core failure; retry/reset must
@@ -2127,10 +2256,9 @@ static void TestAtmosphereDrawCache(void) {
 
 static void TestSkyPalaceClippingAndOwnership(void) {
   PresentWorldNav_ResetResources();
-  FakeBackend backend = {.output_width = 1280, .output_height = 720,
-      .require_frustum_clipped = true};
-  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
-                            (ArRenderCapabilities){0}));
+  FakeBackend backend = {
+      .output_width = 1280, .output_height = 720, .require_frustum_clipped = true};
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   FrameSlot slot = WorldNavigationSlot();
   slot.sim.view = kSimView_SkyPalace;
   slot.sim.sky_palace_volumetric_clouds = true;
@@ -2188,8 +2316,8 @@ static void TestSkyPalaceClippingAndOwnership(void) {
   slot.sim.world_navigation_backdrop = false;
   assert(PresentWorldNavigationBackdrop(&slot, viewport) == kPresentationOutcome_Complete);
   for (int i = 1; i < 10; i++)
-    assert(!memcmp(&backend.sky_backdrop_vertices[0].color,
-        &backend.sky_backdrop_vertices[i].color, sizeof(ArRenderColorF)));
+    assert(!memcmp(&backend.sky_backdrop_vertices[0].color, &backend.sky_backdrop_vertices[i].color,
+                   sizeof(ArRenderColorF)));
   slot.sim.world_navigation_backdrop = true;
   const int uploads = volume_uploads;
   slot.sim.sky_palace_volumetric_clouds = false;
@@ -2227,16 +2355,17 @@ static void TestShadowClipPlanParity(void) {
   const ArRenderColorF color = {0, 0, 0, .1275f};
   for (int axis = 0; axis < 6; axis++)
     for (int phase = 0; phase < 13; phase++) {
-      Scene3DClipPoint clip[4] = {{-.5f, -.4f, 0, 1}, {.5f, -.4f, 0, 1},
-          {.5f, .4f, 0, 1}, {-.5f, .4f, 0, 1}};
+      Scene3DClipPoint clip[4] = {
+          {-.5f, -.4f, 0, 1}, {.5f, -.4f, 0, 1}, {.5f, .4f, 0, 1}, {-.5f, .4f, 0, 1}};
       float *component = axis / 2 == 0 ? &clip[0].x : axis / 2 == 1 ? &clip[0].y : &clip[0].z;
       *component = (axis & 1 ? -1 : 1) * (phase + 1) * .25f;
       Sim3DDepthVertex input[4];
       ArRenderPointF uv[4];
       for (int p = 0; p < 4; p++) {
         uv[p] = (ArRenderPointF){(p + phase) * .023f, (3 - p + phase) * .017f};
-        input[p] = (Sim3DDepthVertex){(clip[p].x * .5f + .5f) * viewport.w,
-            (1 - (clip[p].y * .5f + .5f)) * viewport.h, .5f, color, uv[p]};
+        input[p] =
+            (Sim3DDepthVertex){(clip[p].x * .5f + .5f) * viewport.w,
+                               (1 - (clip[p].y * .5f + .5f)) * viewport.h, .5f, color, uv[p]};
       }
       Sim3DDepthVertex expected[kWorldNavigationClippedQuads * 4];
       WorldNavigationClipPlan plans[kWorldNavigationClippedQuads];
@@ -2274,8 +2403,10 @@ static void TestRadialModelDefault(void) {
   assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", "1", 1));
   WorldNavigationModelMesh_Reset();
   assert(WorldNavigationModelMesh_Enabled());
-  if (saved) assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
-  else assert(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+  if (saved)
+    assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
+  else
+    assert(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
   SDL_free(saved);
   WorldNavigationModelMesh_Reset();
 }
@@ -2286,26 +2417,38 @@ static void TestRadialModelResidency(void) {
   WorldNavigationModelSource sources[2] = {0};
   for (unsigned i = 0; i < 2; ++i) {
     sources[i].object = (SimBackgroundVoxelObject){
-      .town = 2, .kind = i ? kSimBackgroundVoxel_Factory : kSimBackgroundVoxel_Windmill,
-      .cell_x = 10 + i * 2, .cell_y = 10, .source_cells_w = 2, .source_cells_h = 2,
-      .footprint_cells_w = 2, .footprint_cells_d = 2, .visual_state = kSimStructureVisualState_Finished,
+        .town = 2,
+        .kind = i ? kSimBackgroundVoxel_Factory : kSimBackgroundVoxel_Windmill,
+        .cell_x = 10 + i * 2,
+        .cell_y = 10,
+        .source_cells_w = 2,
+        .source_cells_h = 2,
+        .footprint_cells_w = 2,
+        .footprint_cells_d = 2,
+        .visual_state = kSimStructureVisualState_Finished,
     };
     sources[i].object_index = (uint16_t)i;
     sources[i].detail = kSimBackgroundVoxelDetail_Low;
-    sources[i].source_x = 256 + i * 32; sources[i].source_y = 128;
+    sources[i].source_x = 256 + i * 32;
+    sources[i].source_y = 128;
     sources[i].centre_x = sources[i].centre_y = kSimTownCellPixels;
     sources[i].anchor_height = 2;
   }
   WorldNavigationModelSourceStyle style = {0};
-  style.chart_radius_tiles = 96; style.tile_world = 1; style.height_percent = 100;
-  style.lighting = true; style.light_azimuth = 45; style.light_elevation = 60;
+  style.chart_radius_tiles = 96;
+  style.tile_world = 1;
+  style.height_percent = 100;
+  style.lighting = true;
+  style.light_azimuth = 45;
+  style.light_elevation = 60;
   Sim3DDepthRadialTransform transform = {.variant = 1};
   assert(WorldNavigationModelMesh_Draw(sources, 2, &style, &transform));
   assert(radial_publications == 1 && radial_selections == 1 && radial_appends == 1);
   assert(radial_variants == 15); /* Static and all three actual windmill models. */
   const size_t first_vertices = radial_vertices;
   for (unsigned frame = 0; frame < 8; ++frame) {
-    transform.matrix[12] = (float)frame; transform.variant = frame % 3 + 1;
+    transform.matrix[12] = (float)frame;
+    transform.variant = frame % 3 + 1;
     assert(WorldNavigationModelMesh_Draw(sources, 2, &style, &transform));
   }
   assert(radial_publications == 1 && radial_selections == 1);
@@ -2323,7 +2466,7 @@ static void TestRadialModelResidency(void) {
   sources[0].detail = kSimBackgroundVoxelDetail_Low;
   assert(WorldNavigationModelMesh_Draw(sources, 2, &style, &transform));
   assert(radial_publications == 2); /* Returning LOD is already resident. */
-  radial_mesh.ready = false; /* Renderer reset: republish source AND indices. */
+  radial_mesh.ready = false;        /* Renderer reset: republish source AND indices. */
   assert(!WorldNavigationModelMesh_Repeat(&transform));
   assert(WorldNavigationModelMesh_Draw(sources, 2, &style, &transform));
   assert(radial_publications == 3);
@@ -2361,8 +2504,10 @@ static void TestRadialModelCapacityRecovery(void) {
   const bool enabled = WorldNavigationModelMesh_Enabled();
   WorldNavigationModelSource sources[kBatch] = {0};
   WorldNavigationModelSourceStyle style = {
-    .chart_radius_tiles = 96, .tile_world = 1, .height_percent = 100,
-    .style = kSimBackgroundVoxelStyle_Varied,
+      .chart_radius_tiles = 96,
+      .tile_world = 1,
+      .height_percent = 100,
+      .style = kSimBackgroundVoxelStyle_Varied,
   };
   Sim3DDepthRadialTransform transform = {.variant = 1};
   size_t previous_vertices = 0;
@@ -2372,14 +2517,21 @@ static void TestRadialModelCapacityRecovery(void) {
   for (unsigned cohort = 0; cohort < kCohorts; ++cohort) {
     for (unsigned i = 0; i < kBatch; ++i) {
       sources[i] = (WorldNavigationModelSource){
-        .object = {.town = 2, .kind = kSimBackgroundVoxel_Windmill,
-          .cell_x = i, .cell_y = cohort, .source_cells_w = 2, .source_cells_h = 2,
-          .footprint_cells_w = 2, .footprint_cells_d = 2,
-          .visual_state = kSimStructureVisualState_Finished},
-        .object_index = (uint16_t)(cohort * kBatch + i),
-        .detail = kSimBackgroundVoxelDetail_Ultra,
-        .source_x = 256 + i * 8, .source_y = 256 + cohort * 8,
-        .centre_x = kSimTownCellPixels, .centre_y = kSimTownCellPixels,
+          .object = {.town = 2,
+                     .kind = kSimBackgroundVoxel_Windmill,
+                     .cell_x = i,
+                     .cell_y = cohort,
+                     .source_cells_w = 2,
+                     .source_cells_h = 2,
+                     .footprint_cells_w = 2,
+                     .footprint_cells_d = 2,
+                     .visual_state = kSimStructureVisualState_Finished},
+          .object_index = (uint16_t)(cohort * kBatch + i),
+          .detail = kSimBackgroundVoxelDetail_Ultra,
+          .source_x = 256 + i * 8,
+          .source_y = 256 + cohort * 8,
+          .centre_x = kSimTownCellPixels,
+          .centre_y = kSimTownCellPixels,
       };
     }
     assert(WorldNavigationModelMesh_Draw(sources, kBatch, &style, &transform));
@@ -2416,208 +2568,238 @@ static void TestRadialModelCapacityRecovery(void) {
 }
 
 static void TestRadialBounds(void) {
-  const WorldNavigationRadialBounds point = {.normal_min={0,0,1},.normal_max={0,0,1}};
+  const WorldNavigationRadialBounds point = {.normal_min = {0, 0, 1}, .normal_max = {0, 0, 1}};
   const Sim3DDepthRadialTransform identity = {
-    .matrix={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1},
-    .basis={{1,0,0},{0,1,0},{0,0,1}}, .sphere_radius=1,.height_scale=1,
+      .matrix = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1},
+      .basis = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
+      .sphere_radius = 1,
+      .height_scale = 1,
   };
-  assert(!WorldNavigationRadialBoundsOutside(&point,&identity));
-  for (int plane=0;plane<6;++plane) {
-    Sim3DDepthRadialTransform t=identity;
-    const int axis=plane/2; const float sign=plane&1?-1:1;
-    t.matrix[12+axis]=sign*2;
-    assert(WorldNavigationRadialBoundsOutside(&point,&t));
-    t.matrix[12+axis]=sign;
-    assert(!WorldNavigationRadialBoundsOutside(&point,&t)); /* Exactly on the plane. */
-    t.matrix[12+axis]=sign*nextafterf(1,2);
-    assert(!WorldNavigationRadialBoundsOutside(&point,&t)); /* Uncertain rounding edge. */
+  assert(!WorldNavigationRadialBoundsOutside(&point, &identity));
+  for (int plane = 0; plane < 6; ++plane) {
+    Sim3DDepthRadialTransform t = identity;
+    const int axis = plane / 2;
+    const float sign = plane & 1 ? -1 : 1;
+    t.matrix[12 + axis] = sign * 2;
+    assert(WorldNavigationRadialBoundsOutside(&point, &t));
+    t.matrix[12 + axis] = sign;
+    assert(!WorldNavigationRadialBoundsOutside(&point, &t)); /* Exactly on the plane. */
+    t.matrix[12 + axis] = sign * nextafterf(1, 2);
+    assert(!WorldNavigationRadialBoundsOutside(&point, &t)); /* Uncertain rounding edge. */
   }
-  Sim3DDepthRadialTransform t=identity;
-  t.matrix[14]=-2;
-  assert(WorldNavigationRadialBoundsOutside(&point,&t));
-  WorldNavigationRadialBounds raised=point; raised.height_max=2;
-  assert(!WorldNavigationRadialBoundsOutside(&raised,&t)); /* Raised land can enter view. */
-  raised.height_min=3;
-  assert(!WorldNavigationRadialBoundsOutside(&raised,&t)); /* Invalid bounds retain source. */
-  raised=point; raised.normal_max[1]=NAN;
-  assert(!WorldNavigationRadialBoundsOutside(&raised,&t));
-  t.matrix[1]=INFINITY;
-  assert(!WorldNavigationRadialBoundsOutside(&point,&t));
-  assert(!WorldNavigationRadialBoundsOutside(NULL,&identity));
-  assert(!WorldNavigationRadialBoundsOutside(&point,NULL));
+  Sim3DDepthRadialTransform t = identity;
+  t.matrix[14] = -2;
+  assert(WorldNavigationRadialBoundsOutside(&point, &t));
+  WorldNavigationRadialBounds raised = point;
+  raised.height_max = 2;
+  assert(!WorldNavigationRadialBoundsOutside(&raised, &t)); /* Raised land can enter view. */
+  raised.height_min = 3;
+  assert(!WorldNavigationRadialBoundsOutside(&raised, &t)); /* Invalid bounds retain source. */
+  raised = point;
+  raised.normal_max[1] = NAN;
+  assert(!WorldNavigationRadialBoundsOutside(&raised, &t));
+  t.matrix[1] = INFINITY;
+  assert(!WorldNavigationRadialBoundsOutside(&point, &t));
+  assert(!WorldNavigationRadialBoundsOutside(NULL, &identity));
+  assert(!WorldNavigationRadialBoundsOutside(&point, NULL));
 
   /* Independent source-point oracle using the shader's float/FMA operation
    * order. Every rejected bound must put ALL of its points outside a common
    * clip plane. Include rotations, negative heights, cancellation at large
    * radius, nonuniform projections, and negative/near-zero W. */
-  uint32_t random=0x72616469u;
-  unsigned rejected=0, retained=0;
-  for (unsigned trial=0;trial<4096;++trial) {
-    float source[16][4]; WorldNavigationRadialBounds b={0};
-    const float longitude=BoundsRandom(&random)*6.28f, latitude=(BoundsRandom(&random)-.5f)*3;
-    for (unsigned p=0;p<16;++p) {
-      const float lon=longitude+(BoundsRandom(&random)-.5f)*.25f;
-      const float lat=latitude+(BoundsRandom(&random)-.5f)*.25f;
-      source[p][0]=cosf(lon)*cosf(lat); source[p][1]=sinf(lat);
-      source[p][2]=sinf(lon)*cosf(lat); source[p][3]=(BoundsRandom(&random)-.5f)*8;
-      for (int axis=0;axis<3;++axis) {
-        b.normal_min[axis]=p?fminf(b.normal_min[axis],source[p][axis]):source[p][axis];
-        b.normal_max[axis]=p?fmaxf(b.normal_max[axis],source[p][axis]):source[p][axis];
+  uint32_t random = 0x72616469u;
+  unsigned rejected = 0, retained = 0;
+  for (unsigned trial = 0; trial < 4096; ++trial) {
+    float source[16][4];
+    WorldNavigationRadialBounds b = {0};
+    const float longitude = BoundsRandom(&random) * 6.28f,
+                latitude = (BoundsRandom(&random) - .5f) * 3;
+    for (unsigned p = 0; p < 16; ++p) {
+      const float lon = longitude + (BoundsRandom(&random) - .5f) * .25f;
+      const float lat = latitude + (BoundsRandom(&random) - .5f) * .25f;
+      source[p][0] = cosf(lon) * cosf(lat);
+      source[p][1] = sinf(lat);
+      source[p][2] = sinf(lon) * cosf(lat);
+      source[p][3] = (BoundsRandom(&random) - .5f) * 8;
+      for (int axis = 0; axis < 3; ++axis) {
+        b.normal_min[axis] = p ? fminf(b.normal_min[axis], source[p][axis]) : source[p][axis];
+        b.normal_max[axis] = p ? fmaxf(b.normal_max[axis], source[p][axis]) : source[p][axis];
       }
-      b.height_min=p?fminf(b.height_min,source[p][3]):source[p][3];
-      b.height_max=p?fmaxf(b.height_max,source[p][3]):source[p][3];
+      b.height_min = p ? fminf(b.height_min, source[p][3]) : source[p][3];
+      b.height_max = p ? fmaxf(b.height_max, source[p][3]) : source[p][3];
     }
-    t=identity;
-    const float radius[]={.25f,2,96,288,1000000};
-    t.sphere_radius=radius[trial%5]; t.reference_height=(BoundsRandom(&random)-.5f)*8;
-    t.height_scale=BoundsRandom(&random)*2;
-    const float angle=BoundsRandom(&random)*6.28f;
-    t.basis[0][0]=t.basis[2][2]=cosf(angle);
-    t.basis[0][2]=sinf(angle); t.basis[2][0]=-sinf(angle);
-    for (int axis=0;axis<3;++axis) {
-      t.matrix[axis*5]=(.25f+BoundsRandom(&random)*2)/t.sphere_radius;
-      t.matrix[12+axis]=(BoundsRandom(&random)-.5f)*4;
+    t = identity;
+    const float radius[] = {.25f, 2, 96, 288, 1000000};
+    t.sphere_radius = radius[trial % 5];
+    t.reference_height = (BoundsRandom(&random) - .5f) * 8;
+    t.height_scale = BoundsRandom(&random) * 2;
+    const float angle = BoundsRandom(&random) * 6.28f;
+    t.basis[0][0] = t.basis[2][2] = cosf(angle);
+    t.basis[0][2] = sinf(angle);
+    t.basis[2][0] = -sinf(angle);
+    for (int axis = 0; axis < 3; ++axis) {
+      t.matrix[axis * 5] = (.25f + BoundsRandom(&random) * 2) / t.sphere_radius;
+      t.matrix[12 + axis] = (BoundsRandom(&random) - .5f) * 4;
     }
-    t.matrix[11]=(BoundsRandom(&random)-.5f)*2/t.sphere_radius;
-    t.matrix[15]=(BoundsRandom(&random)-.25f)*2;
-    if (!WorldNavigationRadialBoundsOutside(&b,&t)) { ++retained; continue; }
-    ++rejected; uint8_t common=63;
-    for (unsigned p=0;p<16;++p) {
+    t.matrix[11] = (BoundsRandom(&random) - .5f) * 2 / t.sphere_radius;
+    t.matrix[15] = (BoundsRandom(&random) - .25f) * 2;
+    if (!WorldNavigationRadialBoundsOutside(&b, &t)) {
+      ++retained;
+      continue;
+    }
+    ++rejected;
+    uint8_t common = 63;
+    for (unsigned p = 0; p < 16; ++p) {
       float world[3], clip[4];
-      const float r=fmaf(t.reference_height,t.height_scale,t.sphere_radius);
-      const float rise=(source[p][3]-t.reference_height)*t.height_scale;
-      for (int axis=0;axis<3;++axis) {
-        const float n=fmaf(t.basis[axis][2],source[p][2],
-            fmaf(t.basis[axis][0],source[p][0],t.basis[axis][1]*source[p][1]));
-        world[axis]=fmaf(n,rise,r*(n-(axis==2?1:0)));
+      const float r = fmaf(t.reference_height, t.height_scale, t.sphere_radius);
+      const float rise = (source[p][3] - t.reference_height) * t.height_scale;
+      for (int axis = 0; axis < 3; ++axis) {
+        const float n = fmaf(t.basis[axis][2], source[p][2],
+                             fmaf(t.basis[axis][0], source[p][0], t.basis[axis][1] * source[p][1]));
+        world[axis] = fmaf(n, rise, r * (n - (axis == 2 ? 1 : 0)));
       }
-      for (int axis=0;axis<4;++axis)
-        clip[axis]=fmaf(t.matrix[8+axis],world[2],
-            fmaf(t.matrix[axis],world[0],t.matrix[4+axis]*world[1]))+t.matrix[12+axis];
-      common &= WorldNavigationClipOutside((Scene3DClipPoint){clip[0],clip[1],clip[2],clip[3]});
+      for (int axis = 0; axis < 4; ++axis)
+        clip[axis] = fmaf(t.matrix[8 + axis], world[2],
+                          fmaf(t.matrix[axis], world[0], t.matrix[4 + axis] * world[1])) +
+                     t.matrix[12 + axis];
+      common &= WorldNavigationClipOutside((Scene3DClipPoint){clip[0], clip[1], clip[2], clip[3]});
     }
     assert(common);
   }
-  assert(rejected>100 && retained>100);
+  assert(rejected > 100 && retained > 100);
 }
 
 static void TestAtmosphereOcclusionBounds(void) {
-  WorldNavigationProjection p = {.globe_radius_world=1, .clip_frustum=true};
-  Scene3DCamera camera = {.distance=3, .fov_y=1};
-  p.camera_world[2]=camera.distance;
-  Scene3D_BuildViewProjection(&camera,800,600,p.matrix);
-  const int first = WorldNavigationOccludedShellRings(&p,1.1f,4,48,96);
+  WorldNavigationProjection p = {.globe_radius_world = 1, .clip_frustum = true};
+  Scene3DCamera camera = {.distance = 3, .fov_y = 1};
+  p.camera_world[2] = camera.distance;
+  Scene3D_BuildViewProjection(&camera, 800, 600, p.matrix);
+  const int first = WorldNavigationOccludedShellRings(&p, 1.1f, 4, 48, 96);
   assert(first > 0 && first < 48);
-  assert(!WorldNavigationOccludedShellRings(NULL,1.1f,4,48,96));
-  assert(!WorldNavigationOccludedShellRings(&p,1,4,48,96));
-  assert(!WorldNavigationOccludedShellRings(&p,1.1f,1,48,96));
-  assert(!WorldNavigationOccludedShellRings(&p,NAN,4,48,96));
-  assert(!WorldNavigationOccludedShellRings(&p,1.1f,4,3,3));
-  p.clip_frustum=false;
+  assert(!WorldNavigationOccludedShellRings(NULL, 1.1f, 4, 48, 96));
+  assert(!WorldNavigationOccludedShellRings(&p, 1, 4, 48, 96));
+  assert(!WorldNavigationOccludedShellRings(&p, 1.1f, 1, 48, 96));
+  assert(!WorldNavigationOccludedShellRings(&p, NAN, 4, 48, 96));
+  assert(!WorldNavigationOccludedShellRings(&p, 1.1f, 4, 3, 3));
+  p.clip_frustum = false;
   /* Radial navigation uses the same perspective matrix without CPU
    * triangle clipping. Its opaque GPU ocean still provides this coverage. */
-  assert(WorldNavigationOccludedShellRings(&p,1.1f,4,48,96)==first);
-  p.clip_frustum=true;
-  p.camera_world[2]+=1;
-  assert(!WorldNavigationOccludedShellRings(&p,1.1f,4,48,96));
-  p.camera_world[2]=INFINITY;
-  assert(!WorldNavigationOccludedShellRings(&p,1.1f,4,48,96));
-  p.camera_world[2]=camera.distance;
-  p.matrix[12]+=1; /* Does not project from the supplied eye. */
-  assert(!WorldNavigationOccludedShellRings(&p,1.1f,4,48,96));
-  p.matrix[12]-=1;
+  assert(WorldNavigationOccludedShellRings(&p, 1.1f, 4, 48, 96) == first);
+  p.clip_frustum = true;
+  p.camera_world[2] += 1;
+  assert(!WorldNavigationOccludedShellRings(&p, 1.1f, 4, 48, 96));
+  p.camera_world[2] = INFINITY;
+  assert(!WorldNavigationOccludedShellRings(&p, 1.1f, 4, 48, 96));
+  p.camera_world[2] = camera.distance;
+  p.matrix[12] += 1; /* Does not project from the supplied eye. */
+  assert(!WorldNavigationOccludedShellRings(&p, 1.1f, 4, 48, 96));
+  p.matrix[12] -= 1;
   const float old = p.matrix[14];
   /* Move the far plane through the planet's centre. It cannot be trusted
    * as a closed occluder even though its angular silhouette is unchanged. */
-  p.matrix[14] = p.matrix[15] - (p.matrix[11]-p.matrix[10]);
-  assert(!WorldNavigationOccludedShellRings(&p,1.1f,4,48,96));
-  p.matrix[14]=old; p.matrix[0]=NAN;
-  assert(!WorldNavigationOccludedShellRings(&p,1.1f,4,48,96));
+  p.matrix[14] = p.matrix[15] - (p.matrix[11] - p.matrix[10]);
+  assert(!WorldNavigationOccludedShellRings(&p, 1.1f, 4, 48, 96));
+  p.matrix[14] = old;
+  p.matrix[0] = NAN;
+  assert(!WorldNavigationOccludedShellRings(&p, 1.1f, 4, 48, 96));
   const double pi = 3.14159265358979323846;
-  int checked=0;
-  for (int probe=0; probe<100; ++probe) {
-    const float radius=.25f+(probe%10)*.75f;
-    const float shell=radius*(1.03f+(probe%7)*.05f);
-    const float distance=shell*(1.2f+(probe%9)*.4f);
-    p.globe_radius_world=radius;
-    camera.distance=distance-radius;
-    p.camera_world[2]=camera.distance;
-    Scene3D_BuildViewProjection(&camera,800,600,p.matrix);
-    const int hidden=WorldNavigationOccludedShellRings(&p,shell,distance,48,96);
-    const double cap=acos((double)shell/distance);
-    const double bound=radius*.9975*cos(pi/48+2*pi/96);
+  int checked = 0;
+  for (int probe = 0; probe < 100; ++probe) {
+    const float radius = .25f + (probe % 10) * .75f;
+    const float shell = radius * (1.03f + (probe % 7) * .05f);
+    const float distance = shell * (1.2f + (probe % 9) * .4f);
+    p.globe_radius_world = radius;
+    camera.distance = distance - radius;
+    p.camera_world[2] = camera.distance;
+    Scene3D_BuildViewProjection(&camera, 800, 600, p.matrix);
+    const int hidden = WorldNavigationOccludedShellRings(&p, shell, distance, 48, 96);
+    const double cap = acos((double)shell / distance);
+    const double bound = radius * .9975 * cos(pi / 48 + 2 * pi / 96);
     /* Independent ray-to-centre distance at triangle interiors, not just
      * ring vertices. Every rejected original triangle stays in the cone. */
-    for (int ring=0; ring<hidden; ++ring) for (int sample=0; sample<11; ++sample) {
-      double point[3]={0};
-      const double weights[3]={sample/20.0, (10-sample)/20.0, .5};
-      for (int corner=0; corner<3; ++corner) {
-        const double angle=cap*(ring+(corner!=0))/48;
-        const double longitude=corner==2 ? 2*pi/96 : 0;
-        point[0]+=weights[corner]*shell*sin(angle)*cos(longitude);
-        point[1]+=weights[corner]*shell*sin(angle)*sin(longitude);
-        point[2]+=weights[corner]*shell*cos(angle);
+    for (int ring = 0; ring < hidden; ++ring)
+      for (int sample = 0; sample < 11; ++sample) {
+        double point[3] = {0};
+        const double weights[3] = {sample / 20.0, (10 - sample) / 20.0, .5};
+        for (int corner = 0; corner < 3; ++corner) {
+          const double angle = cap * (ring + (corner != 0)) / 48;
+          const double longitude = corner == 2 ? 2 * pi / 96 : 0;
+          point[0] += weights[corner] * shell * sin(angle) * cos(longitude);
+          point[1] += weights[corner] * shell * sin(angle) * sin(longitude);
+          point[2] += weights[corner] * shell * cos(angle);
+        }
+        const double impact = distance * hypot(point[0], point[1]) /
+                              hypot(hypot(point[0], point[1]), distance - point[2]);
+        assert(impact < bound);
+        ++checked;
       }
-      const double impact=distance*hypot(point[0],point[1]) /
-          hypot(hypot(point[0],point[1]),distance-point[2]);
-      assert(impact < bound); ++checked;
-    }
   }
   assert(checked > 10000);
   /* Palace-style horizon camera. Backside near-plane intersection alone
    * must not prevent safe rejection of covered front-screen pixels. */
-  p.globe_radius_world=12; p.camera_world[2]=3;
-  camera=(Scene3DCamera){.tilt_x=-.956f, .distance=0, .fov_y=1.05f};
-  Scene3D_BuildViewProjection(&camera,800,600,p.matrix);
-  for (int row=0; row<4; ++row) p.matrix[12+row]-=p.matrix[8+row]*3;
-  assert(WorldNavigationOccludedShellRings(&p,12.5f,15,48,96)>0);
-  p.camera_world[2]=.001f; camera.tilt_x=0;
-  Scene3D_BuildViewProjection(&camera,800,600,p.matrix);
-  for (int row=0; row<4; ++row) p.matrix[12+row]-=p.matrix[8+row]*.001f;
-  assert(!WorldNavigationOccludedShellRings(&p,12.0001f,12.001f,48,96));
+  p.globe_radius_world = 12;
+  p.camera_world[2] = 3;
+  camera = (Scene3DCamera){.tilt_x = -.956f, .distance = 0, .fov_y = 1.05f};
+  Scene3D_BuildViewProjection(&camera, 800, 600, p.matrix);
+  for (int row = 0; row < 4; ++row)
+    p.matrix[12 + row] -= p.matrix[8 + row] * 3;
+  assert(WorldNavigationOccludedShellRings(&p, 12.5f, 15, 48, 96) > 0);
+  p.camera_world[2] = .001f;
+  camera.tilt_x = 0;
+  Scene3D_BuildViewProjection(&camera, 800, 600, p.matrix);
+  for (int row = 0; row < 4; ++row)
+    p.matrix[12 + row] -= p.matrix[8 + row] * .001f;
+  assert(!WorldNavigationOccludedShellRings(&p, 12.0001f, 12.001f, 48, 96));
 }
 
 static void TestClippedBatch(void) {
-  FakeBackend backend={0};
-  ArRenderDevice device={.context=&backend};
-  const ArRenderRectI viewport={0,0,640,480};
-  const Scene3DClipPoint clip[4]={{-1.5f,-.4f,0,1},{.5f,-.4f,0,1},
-      {.5f,.4f,0,1},{-1.5f,.4f,0,1}};
+  FakeBackend backend = {0};
+  ArRenderDevice device = {.context = &backend};
+  const ArRenderRectI viewport = {0, 0, 640, 480};
+  const Scene3DClipPoint clip[4] = {
+      {-1.5f, -.4f, 0, 1}, {.5f, -.4f, 0, 1}, {.5f, .4f, 0, 1}, {-1.5f, .4f, 0, 1}};
   Sim3DDepthVertex source[4];
-  for (unsigned p=0;p<4;++p) source[p]=(Sim3DDepthVertex){
-      (clip[p].x*.5f+.5f)*viewport.w,(1-clip[p].y*.5f-.5f)*viewport.h,.5f,
-      {.25f,.5f,.75f,1},{p*.1f,p*.2f}};
-  Sim3DDepthVertex expected[kWorldNavigationClippedQuads*4]; size_t produced;
-  assert(WorldNavigationClipQuad(source,clip,viewport,expected,&produced) && produced>1);
-  assert(Sim3DDepthPass_Begin(&device,640,480,kArRenderFilter_Linear));
+  for (unsigned p = 0; p < 4; ++p)
+    source[p] = (Sim3DDepthVertex){(clip[p].x * .5f + .5f) * viewport.w,
+                                   (1 - clip[p].y * .5f - .5f) * viewport.h,
+                                   .5f,
+                                   {.25f, .5f, .75f, 1},
+                                   {p * .1f, p * .2f}};
+  Sim3DDepthVertex expected[kWorldNavigationClippedQuads * 4];
+  size_t produced;
+  assert(WorldNavigationClipQuad(source, clip, viewport, expected, &produced) && produced > 1);
+  assert(Sim3DDepthPass_Begin(&device, 640, 480, kArRenderFilter_Linear));
   /* Cross the clipped submission batch boundary without a second CPU cache. */
-  Sim3DDepthVertex batch[65*4]; Scene3DClipPoint clips[65*4];
-  for (unsigned i=0;i<65;++i) {
-    memcpy(batch+i*4,source,sizeof(source));
-    memcpy(clips+i*4,clip,sizeof(clip));
-    assert(Sim3DDepthPass_AppendQuads(kSim3DDepthPass_WorldMountain,expected,produced));
+  Sim3DDepthVertex batch[65 * 4];
+  Scene3DClipPoint clips[65 * 4];
+  for (unsigned i = 0; i < 65; ++i) {
+    memcpy(batch + i * 4, source, sizeof(source));
+    memcpy(clips + i * 4, clip, sizeof(clip));
+    assert(Sim3DDepthPass_AppendQuads(kSim3DDepthPass_WorldMountain, expected, produced));
   }
-  const uint64_t hash=depth_world_mountain_hash;
-  assert(Sim3DDepthPass_Begin(&device,640,480,kArRenderFilter_Linear));
-  assert(WorldNavigationAppendClippedQuads(kSim3DDepthPass_WorldMountain,batch,clips,65,viewport));
-  assert(depth_world_mountain_hash==hash);
-  const int faces=depth_world_mountain_faces;
+  const uint64_t hash = depth_world_mountain_hash;
+  assert(Sim3DDepthPass_Begin(&device, 640, 480, kArRenderFilter_Linear));
+  assert(
+      WorldNavigationAppendClippedQuads(kSim3DDepthPass_WorldMountain, batch, clips, 65, viewport));
+  assert(depth_world_mountain_hash == hash);
+  const int faces = depth_world_mountain_faces;
   /* Empty clipped output succeeds; a failed ordinary submission does not. */
-  Scene3DClipPoint invisible[4]={{2,0,0,1},{3,0,0,1},{3,1,0,1},{2,1,0,1}};
-  assert(WorldNavigationAppendClippedQuads(kSim3DDepthPass_WorldMountain,source,invisible,1,viewport));
-  assert(depth_world_mountain_faces==faces);
-  for (int p=0;p<4;++p) source[p].uv=(ArRenderPointF){-1,-1};
-  assert(Sim3DDepthPass_Begin(&device,640,480,kArRenderFilter_Linear));
-  depth_fail_ocean_batch=1;
-  assert(!WorldNavigationAppendProjectedQuads(kSim3DDepthPass_Ground,source,NULL,1,viewport));
-  depth_fail_ocean_batch=0;
-  Sim3DDepthPass_Submit(&device,ArRenderTexture_Invalid());
+  Scene3DClipPoint invisible[4] = {{2, 0, 0, 1}, {3, 0, 0, 1}, {3, 1, 0, 1}, {2, 1, 0, 1}};
+  assert(WorldNavigationAppendClippedQuads(kSim3DDepthPass_WorldMountain, source, invisible, 1,
+                                           viewport));
+  assert(depth_world_mountain_faces == faces);
+  for (int p = 0; p < 4; ++p)
+    source[p].uv = (ArRenderPointF){-1, -1};
+  assert(Sim3DDepthPass_Begin(&device, 640, 480, kArRenderFilter_Linear));
+  depth_fail_ocean_batch = 1;
+  assert(!WorldNavigationAppendProjectedQuads(kSim3DDepthPass_Ground, source, NULL, 1, viewport));
+  depth_fail_ocean_batch = 0;
+  Sim3DDepthPass_Submit(&device, ArRenderTexture_Invalid());
 }
 
 static void TestCompositionUploadMirrors(void) {
   FakeBackend backend = {0};
-  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
-      (ArRenderCapabilities){0}));
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
   PresentWorldNav_ResetResources();
   FrameSlot slot = WorldNavigationSlot();
   SimWorldNavigationComposition *composition = &slot.sim.world_navigation_scene.composition;
@@ -2633,7 +2815,7 @@ static void TestCompositionUploadMirrors(void) {
   UploadWorldNavigationComposition(&slot);
   assert(backend.ui_uploads == 4);
   assert(backend.last_ui_upload.x == 1 && backend.last_ui_upload.y == 0 &&
-      backend.last_ui_upload.w == 1 && backend.last_ui_upload.h == 1);
+         backend.last_ui_upload.w == 1 && backend.last_ui_upload.h == 1);
   composition->label.visible = false;
   g_sim_world_navigation_label_pixels[2] ^= 0x00ffffff;
   UploadWorldNavigationComposition(&slot);
@@ -2671,25 +2853,25 @@ static void TestCompositionUploadMirrors(void) {
 
 int main(void) {
   TestCompositionUploadMirrors();
-  Scene3DCamera camera = {-.575f,0,3,.4f};
+  Scene3DCamera camera = {-.575f, 0, 3, .4f};
   const Scene3DCamera original_camera = camera;
   PresentSimGlobe_ClampCamera(&camera);
-  assert(!memcmp(&camera,&original_camera,sizeof(camera)));
+  assert(!memcmp(&camera, &original_camera, sizeof(camera)));
   const float supported_pitches[] = {-.575f, -.85f, -1.0f, -1.2f, -1.35f};
-  for (unsigned i = 0; i < sizeof(supported_pitches)/sizeof(supported_pitches[0]); ++i) {
+  for (unsigned i = 0; i < sizeof(supported_pitches) / sizeof(supported_pitches[0]); ++i) {
     camera = (Scene3DCamera){supported_pitches[i], .2f, 3, .4f};
     const Scene3DCamera requested = camera;
     PresentSimGlobe_ClampCamera(&camera);
     assert(!memcmp(&camera, &requested, sizeof(camera)));
   }
-  camera = (Scene3DCamera){-1.4f,2,10,.4f};
+  camera = (Scene3DCamera){-1.4f, 2, 10, .4f};
   PresentSimGlobe_ClampCamera(&camera);
   assert(camera.tilt_x == -1.35f && camera.tilt_y == .35f && camera.distance == 4.5f);
   camera.tilt_y = -2;
   PresentSimGlobe_ClampCamera(&camera);
   assert(camera.tilt_y == -.35f);
-  assert(PresentSimGlobeTown(NULL,(ArRenderRectI){0},(ArRenderRectI){0},
-      &camera,NULL,NULL,NULL) == kPresentationOutcome_CoreFailure);
+  assert(PresentSimGlobeTown(NULL, (ArRenderRectI){0}, (ArRenderRectI){0}, &camera, NULL, NULL,
+                             NULL) == kPresentationOutcome_CoreFailure);
   /* These counters/vertex oracles exercise the complete compatibility path.
    * The default's declining-adapter behavior is checked separately below. */
   setenv("AR_SIM3D_WORLD_GPU_GRID", "0", 1);

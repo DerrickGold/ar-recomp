@@ -11,9 +11,13 @@ static uint8_t ram[0x20000];
 static CpuState upload_input, upload_output;
 static RecompReturn upload_result;
 
-#define CHECK(x) do { if (!(x)) { \
-  fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #x); ++failures; \
-} } while (0)
+#define CHECK(x)                                                                                   \
+  do {                                                                                             \
+    if (!(x)) {                                                                                    \
+      fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #x);                                      \
+      ++failures;                                                                                  \
+    }                                                                                              \
+  } while (0)
 
 uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 address) {
   (void)cpu;
@@ -22,8 +26,7 @@ uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 address) {
 }
 
 uint16 cpu_read16(CpuState *cpu, uint8 bank, uint16 address) {
-  return cpu_read8(cpu, bank, address) |
-      (uint16)cpu_read8(cpu, bank, (uint16)(address + 1)) << 8;
+  return cpu_read8(cpu, bank, address) | (uint16)cpu_read8(cpu, bank, (uint16)(address + 1)) << 8;
 }
 
 /* Model the generated entry's re-entry predicate and native side effects.
@@ -39,8 +42,15 @@ RecompReturn bank_02_AEEB_M1X0(CpuState *cpu) {
 }
 
 static CpuState Cpu(void) {
-  return (CpuState){.A = 0xa500, .X = 0x1234, .Y = 0x5678, .S = 0x1f0,
-      .PB = 2, .DB = 0, .P = 0x24, .m_flag = 1, .host_return_valid = 1};
+  return (CpuState){.A = 0xa500,
+                    .X = 0x1234,
+                    .Y = 0x5678,
+                    .S = 0x1f0,
+                    .PB = 2,
+                    .DB = 0,
+                    .P = 0x24,
+                    .m_flag = 1,
+                    .host_return_valid = 1};
 }
 
 static void Select(unsigned page) {
@@ -66,8 +76,15 @@ static void Upload(bool lower_rows) {
   CpuState cpu = Cpu();
   CHECK(ActRaiser_Bg3UploadEntry(&cpu));
   upload_input = cpu;
-  upload_output = (CpuState){.A = 0xa501, .X = 0x05c0, .Y = 0x6789,
-      .S = 0x1f2, .PB = 2, .DB = 0, .P = 0x21, .m_flag = 1, ._flag_C = 1};
+  upload_output = (CpuState){.A = 0xa501,
+                             .X = 0x05c0,
+                             .Y = 0x6789,
+                             .S = 0x1f2,
+                             .PB = 2,
+                             .DB = 0,
+                             .P = 0x21,
+                             .m_flag = 1,
+                             ._flag_C = 1};
   expected_presented = ActRaiserCredits_PresentedPage();
   ram[0xf1] = lower_rows ? 3 : 0; /* A dirty counter, not a page index. */
   const int before = uploads;
@@ -140,39 +157,59 @@ static void TestMissingOrInvalidEvidence(void) {
   CHECK(ActRaiserCredits_PresentedPage() == kActRaiserCreditsNoPage);
 
   CpuState cpu = Cpu();
-  cpu.DB = 0x7f; CHECK(!ActRaiser_Bg3UploadEntry(&cpu));
-  cpu = Cpu(); cpu.D = 0x100; CHECK(!ActRaiser_Bg3UploadEntry(&cpu));
-  cpu = Cpu(); cpu.x_flag = 1; CHECK(!ActRaiser_Bg3UploadEntry(&cpu));
-  cpu = Cpu(); cpu.m_flag = 0; CHECK(!ActRaiser_Bg3UploadEntry(&cpu));
-  cpu = Cpu(); cpu.PB = 1; CHECK(!ActRaiser_Bg3UploadEntry(&cpu));
-  cpu = Cpu(); cpu.emulation = 1; CHECK(!ActRaiser_Bg3UploadEntry(&cpu));
+  cpu.DB = 0x7f;
+  CHECK(!ActRaiser_Bg3UploadEntry(&cpu));
+  cpu = Cpu();
+  cpu.D = 0x100;
+  CHECK(!ActRaiser_Bg3UploadEntry(&cpu));
+  cpu = Cpu();
+  cpu.x_flag = 1;
+  CHECK(!ActRaiser_Bg3UploadEntry(&cpu));
+  cpu = Cpu();
+  cpu.m_flag = 0;
+  CHECK(!ActRaiser_Bg3UploadEntry(&cpu));
+  cpu = Cpu();
+  cpu.PB = 1;
+  CHECK(!ActRaiser_Bg3UploadEntry(&cpu));
+  cpu = Cpu();
+  cpu.emulation = 1;
+  CHECK(!ActRaiser_Bg3UploadEntry(&cpu));
   CHECK(!ActRaiser_Bg3UploadEntry(NULL));
   CHECK(!ActRaiser_CreditsObserveSelection(NULL));
   ActRaiserCredits_ObserveWait(NULL);
 }
 
 static void TestSceneResetAndNativeReturn(void) {
-  EnterScene(); Select(1); Wait(1, 0xab67); Upload(true);
+  EnterScene();
+  Select(1);
+  Wait(1, 0xab67);
+  Upload(true);
   ActRaiserCredits_ObserveScene(8, 1);
   CHECK(ActRaiserCredits_PresentedPage() == 1);
   ActRaiserCredits_ObserveScene(8, 2);
   CHECK(ActRaiserCredits_PresentedPage() == kActRaiserCreditsNoPage);
   ActRaiserCredits_ObserveScene(8, 1);
-  Wait(1, 0xab67); Upload(true); /* Re-entry needs a fresh selection. */
+  Wait(1, 0xab67);
+  Upload(true); /* Re-entry needs a fresh selection. */
   CHECK(ActRaiserCredits_PresentedPage() == kActRaiserCreditsNoPage);
-  Select(4); Wait(4, 0xab67); Upload(true);
+  Select(4);
+  Wait(4, 0xab67);
+  Upload(true);
   CHECK(ActRaiserCredits_PresentedPage() == 4);
   ActRaiserBg3Upload_Reset();
   Upload(true);
   CHECK(ActRaiserCredits_PresentedPage() == kActRaiserCreditsNoPage);
-  Select(5); Wait(5, 0xab67);
+  Select(5);
+  Wait(5, 0xab67);
   upload_result = RECOMP_RETURN_OWNED_UNWIND;
   Upload(true);
   CHECK(ActRaiserCredits_PresentedPage() == kActRaiserCreditsNoPage);
   upload_result = RECOMP_RETURN_NORMAL;
   Upload(true); /* Re-entry guard was released even on a nonlocal return. */
   CHECK(ActRaiserCredits_PresentedPage() == kActRaiserCreditsNoPage);
-  Select(5); Wait(5, 0xab67); Upload(true);
+  Select(5);
+  Wait(5, 0xab67);
+  Upload(true);
   CHECK(ActRaiserCredits_PresentedPage() == 5);
   ram[kActRaiserWram_MapGroup] = 0;
   CpuState cpu = Cpu();

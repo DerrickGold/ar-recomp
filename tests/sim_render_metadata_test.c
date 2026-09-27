@@ -11,31 +11,30 @@
 
 static int failures;
 
-#define CHECK(expr) do {                                                    \
-  if (!(expr)) {                                                            \
-    fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #expr); \
-    failures++;                                                             \
-  }                                                                         \
-} while (0)
+#define CHECK(expr)                                                                                \
+  do {                                                                                             \
+    if (!(expr)) {                                                                                 \
+      fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #expr);                     \
+      failures++;                                                                                  \
+    }                                                                                              \
+  } while (0)
 
 static void Write16(uint8 *wram, uint32 address, uint16 value) {
   wram[address] = (uint8)value;
   wram[address + 1] = (uint8)(value >> 8);
 }
 
-static void Begin(uint16 record, bool world, uint16 composition,
-                  uint16 cursor) {
-  SimRenderMetadata_BeginRecord(
-      record, world, false, composition, 0x0120, 0x00A0,
-      world ? 0x13 : 0x02, world ? 7 : 0, 0, cursor);
+static void Begin(uint16 record, bool world, uint16 composition, uint16 cursor) {
+  SimRenderMetadata_BeginRecord(record, world, false, composition, 0x0120, 0x00A0,
+                                world ? 0x13 : 0x02, world ? 7 : 0, 0, cursor);
 }
 
 static void TestPresentationDecision(void) {
   SimFrameData frame = {
-    .view = kSimView_Enhanced,
-    .view_reason = kSimViewReason_Enabled,
-    .master_enabled = true,
-    .separated_status = kSim3DCapture_AllocationFailure,
+      .view = kSimView_Enhanced,
+      .view_reason = kSimViewReason_Enabled,
+      .master_enabled = true,
+      .separated_status = kSim3DCapture_AllocationFailure,
   };
   SimPresentationDecision decision = Sim3D_PresentationDecision(&frame);
   CHECK(decision.view == kSimView_AuthenticFallback);
@@ -51,23 +50,17 @@ static void TestPresentationDecision(void) {
 
 static void TestFeatureDependencies(void) {
   SimRenderFeatureMask all = kSimFeature_All;
-  CHECK(Sim3D_ResolveFeatureMask(all, all, kSimView_Enhanced,
-                                 true, true) == all);
-  CHECK(Sim3D_ResolveFeatureMask(all, 0, kSimView_Enhanced,
-                                 true, true) == 0);
-  CHECK(Sim3D_ResolveFeatureMask(all, all, kSimView_AuthenticPicker,
-                                 true, true) == 0);
+  CHECK(Sim3D_ResolveFeatureMask(all, all, kSimView_Enhanced, true, true) == all);
+  CHECK(Sim3D_ResolveFeatureMask(all, 0, kSimView_Enhanced, true, true) == 0);
+  CHECK(Sim3D_ResolveFeatureMask(all, all, kSimView_AuthenticPicker, true, true) == 0);
   /* Step 3 publishes the full-plane scene, but its presentation feature
    * profile does not become effective until Step 4 adds Palace/UI ownership. */
-  CHECK(Sim3D_ResolveFeatureMask(all, all, kSimView_WorldNavigation,
-                                 true, true) == 0);
-  CHECK(Sim3D_ResolveFeatureMask(all, all, kSimView_Enhanced,
-                                 false, true) == 0);
+  CHECK(Sim3D_ResolveFeatureMask(all, all, kSimView_WorldNavigation, true, true) == 0);
+  CHECK(Sim3D_ResolveFeatureMask(all, all, kSimView_Enhanced, false, true) == 0);
 
-  SimRenderFeatureMask no_billboards =
-      all & ~kSimFeature_ObjectBillboards;
-  SimRenderFeatureMask resolved = Sim3D_ResolveFeatureMask(
-      no_billboards, all, kSimView_Enhanced, true, true);
+  SimRenderFeatureMask no_billboards = all & ~kSimFeature_ObjectBillboards;
+  SimRenderFeatureMask resolved =
+      Sim3D_ResolveFeatureMask(no_billboards, all, kSimView_Enhanced, true, true);
   CHECK(!(resolved & kSimFeature_VirtualHeight));
   CHECK(!(resolved & kSimFeature_Shadows));
   CHECK(!(resolved & kSimFeature_SoftShadows));
@@ -82,38 +75,32 @@ static void TestFeatureDependencies(void) {
    * contract it must NOT be cleared for want of a shader — a missing blur
    * target degrades to the hard silhouette at draw time instead. */
   SimRenderFeatureMask no_shadows = all & ~kSimFeature_Shadows;
-  resolved = Sim3D_ResolveFeatureMask(
-      no_shadows, all, kSimView_Enhanced, true, true);
+  resolved = Sim3D_ResolveFeatureMask(no_shadows, all, kSimView_Enhanced, true, true);
   CHECK(!(resolved & kSimFeature_SoftShadows));
-  resolved = Sim3D_ResolveFeatureMask(
-      all, all, kSimView_Enhanced, true, true);
+  resolved = Sim3D_ResolveFeatureMask(all, all, kSimView_Enhanced, true, true);
   CHECK(resolved & kSimFeature_Shadows);
   CHECK(resolved & kSimFeature_SoftShadows);
 
   SimRenderFeatureMask no_ground = all & ~kSimFeature_GroundProjection;
-  resolved = Sim3D_ResolveFeatureMask(
-      no_ground, all, kSimView_Enhanced, true, true);
+  resolved = Sim3D_ResolveFeatureMask(no_ground, all, kSimView_Enhanced, true, true);
   CHECK(!(resolved & kSimFeature_EffectLighting));
   CHECK(!(resolved & kSimFeature_Particles));
 
-  resolved = Sim3D_ResolveFeatureMask(
-      all, all, kSimView_Enhanced, true, false);
+  resolved = Sim3D_ResolveFeatureMask(all, all, kSimView_Enhanced, true, false);
   CHECK(!(resolved & kSimFeature_EffectLighting));
   CHECK(!(resolved & kSimFeature_Particles));
 }
 
-static void SetTownCell(
-    uint8 *wram, uint8_t town, int x, int y, uint8_t value) {
+static void SetTownCell(uint8 *wram, uint8_t town, int x, int y, uint8_t value) {
   wram[SimTownLayout_CellMapIndex(town, x, y)] = value;
 }
 
-static const SimWorldNavigationTownObject *FindNavigationTownObject(
-    const SimWorldNavigationTowns *towns, uint8_t town, uint8_t kind,
-    uint8_t x, uint8_t y) {
+static const SimWorldNavigationTownObject *
+FindNavigationTownObject(const SimWorldNavigationTowns *towns, uint8_t town, uint8_t kind,
+                         uint8_t x, uint8_t y) {
   for (uint16_t i = 0; i < towns->object_count; i++) {
     const SimWorldNavigationTownObject *object = &towns->objects[i];
-    if (object->town == town && object->kind == kind &&
-        object->cell_x == x && object->cell_y == y)
+    if (object->town == town && object->kind == kind && object->cell_x == x && object->cell_y == y)
       return object;
   }
   return NULL;
@@ -162,31 +149,24 @@ static void TestWorldNavigationAllTownObjects(void) {
   SimWorldNavigationTowns_Capture(wram, &towns);
   CHECK(towns.enabled_town_mask == 0x03);
   CHECK(!towns.overflow);
-  const SimWorldNavigationTownObject *house = FindNavigationTownObject(
-      &towns, 1, kSimBackgroundVoxel_House, 4, 5);
+  const SimWorldNavigationTownObject *house =
+      FindNavigationTownObject(&towns, 1, kSimBackgroundVoxel_House, 4, 5);
   CHECK(house != NULL);
   if (house) CHECK(house->development_level == 2);
-  CHECK(FindNavigationTownObject(
-      &towns, 1, kSimBackgroundVoxel_Windmill, 10, 11) != NULL);
-  CHECK(FindNavigationTownObject(
-      &towns, 2, kSimBackgroundVoxel_Bridge, 7, 8) != NULL);
-  CHECK(FindNavigationTownObject(
-      &towns, 3, kSimBackgroundVoxel_House, 1, 1) == NULL);
-  CHECK(FindNavigationTownObject(
-      &towns, 1, kSimBackgroundVoxel_Cathedral, 13, 13) != NULL);
-  const SimWorldNavigationTownObject *trees = FindNavigationTownObject(
-      &towns, 1, kSimBackgroundVoxel_Tree, 0, 0);
+  CHECK(FindNavigationTownObject(&towns, 1, kSimBackgroundVoxel_Windmill, 10, 11) != NULL);
+  CHECK(FindNavigationTownObject(&towns, 2, kSimBackgroundVoxel_Bridge, 7, 8) != NULL);
+  CHECK(FindNavigationTownObject(&towns, 3, kSimBackgroundVoxel_House, 1, 1) == NULL);
+  CHECK(FindNavigationTownObject(&towns, 1, kSimBackgroundVoxel_Cathedral, 13, 13) != NULL);
+  const SimWorldNavigationTownObject *trees =
+      FindNavigationTownObject(&towns, 1, kSimBackgroundVoxel_Tree, 0, 0);
   CHECK(trees != NULL);
   if (trees) {
     CHECK(trees->footprint_cells_w == 1 && trees->footprint_cells_d == 1);
     CHECK(trees->tree_edges & kSimBackgroundTreeEdge_East);
   }
-  CHECK(FindNavigationTownObject(
-      &towns, 1, kSimBackgroundVoxel_Tree, 1, 0) != NULL);
-  CHECK(FindNavigationTownObject(
-      &towns, 1, kSimBackgroundVoxel_BroadTree, 2, 0) != NULL);
-  CHECK(FindNavigationTownObject(
-      &towns, 1, kSimBackgroundVoxel_Palm, 4, 0) != NULL);
+  CHECK(FindNavigationTownObject(&towns, 1, kSimBackgroundVoxel_Tree, 1, 0) != NULL);
+  CHECK(FindNavigationTownObject(&towns, 1, kSimBackgroundVoxel_BroadTree, 2, 0) != NULL);
+  CHECK(FindNavigationTownObject(&towns, 1, kSimBackgroundVoxel_Palm, 4, 0) != NULL);
 
   Write16(wram, kDevelopmentTiersWram + 4, 1);
   SimWorldNavigationTowns_Capture(wram, &towns);
@@ -198,10 +178,9 @@ static void TestWorldNavigationAllTownObjects(void) {
       for (int x = 0; x < 32; x++)
         CHECK(towns.ground.terrain[town - 1][y * 32 + x] ==
               wram[SimTownLayout_CellMapIndex(town, x, y)]);
-  CHECK(towns.ground.object_rows[0][0] & 1u); /* tree source */
+  CHECK(towns.ground.object_rows[0][0] & 1u);          /* tree source */
   CHECK(towns.ground.object_rows[0][13] & (1u << 13)); /* cathedral */
-  CHECK(FindNavigationTownObject(
-      &towns, 3, kSimBackgroundVoxel_House, 1, 1) != NULL);
+  CHECK(FindNavigationTownObject(&towns, 3, kSimBackgroundVoxel_House, 1, 1) != NULL);
 }
 
 static void TestWorldNavigationSanctuaryVariants(void) {
@@ -220,8 +199,8 @@ static void TestWorldNavigationSanctuaryVariants(void) {
     CHECK(towns.object_count == 6 && !towns.overflow);
     for (uint8 town = 1; town <= 6; town++) {
       const SimWorldNavigationTownObject *object = FindNavigationTownObject(
-          &towns, town, base == 0xC0 ? kSimBackgroundVoxel_MarahnaTemple
-                                   : kSimBackgroundVoxel_Cathedral, 15, 15);
+          &towns, town,
+          base == 0xC0 ? kSimBackgroundVoxel_MarahnaTemple : kSimBackgroundVoxel_Cathedral, 15, 15);
       CHECK(object && object->source_cells_w == 2 && object->source_cells_h == 2);
       CHECK(towns.ground.object_rows[town - 1][15] == (3u << 15));
       CHECK(towns.ground.object_rows[town - 1][16] == (3u << 15));
@@ -265,7 +244,9 @@ static void TestWorldNavigationCaptureCache(void) {
     }
     for (int slot = 0; slot < 128; slot += 127) {
       uint8 *record = wram + 0x16BE7 + (town - 1) * 0x200 + slot * 4;
-      record[0] = 5; record[1] = 7; record[2] = 0x80;
+      record[0] = 5;
+      record[1] = 7;
+      record[2] = 0x80;
       CheckCachedNavigationScene(wram);
       for (int byte = 0; byte < 4; byte++) {
         record[byte] ^= 1;
@@ -312,25 +293,23 @@ static void TestLightningMiracleEffectCapture(void) {
     uint32_t pulse_generation;
     bool visible;
   } sequence[] = {
-    { 0xD9E5, kSimEffectPhase_LightningCloud,   64, 0, 0, 0, UINT16_MAX, 0, false },
-    { 0xDA4B, kSimEffectPhase_LightningLead,    60, 1, 0, 0, 0,          1, true  },
-    { 0xDA4B, kSimEffectPhase_LightningLead,    60, 2, 1, 1, 0,          1, true  },
-    { 0xDAA1, kSimEffectPhase_LightningBranch,  60, 3, 0, 2, 0,          1, true  },
-    { 0xD9E5, kSimEffectPhase_LightningCloud,   64, 4, 0, 3, 1,          1, false },
-    { 0xDB5C, kSimEffectPhase_LightningImpactB, 64, 5, 0, 0, 0,          2, true  },
+      {0xD9E5, kSimEffectPhase_LightningCloud, 64, 0, 0, 0, UINT16_MAX, 0, false},
+      {0xDA4B, kSimEffectPhase_LightningLead, 60, 1, 0, 0, 0, 1, true},
+      {0xDA4B, kSimEffectPhase_LightningLead, 60, 2, 1, 1, 0, 1, true},
+      {0xDAA1, kSimEffectPhase_LightningBranch, 60, 3, 0, 2, 0, 1, true},
+      {0xD9E5, kSimEffectPhase_LightningCloud, 64, 4, 0, 3, 1, 1, false},
+      {0xDB5C, kSimEffectPhase_LightningImpactB, 64, 5, 0, 0, 0, 2, true},
   };
 
   SimRenderMetadata_Reset();
   SimFrameData frame;
   uint32_t generation = 0;
   for (size_t i = 0; i < sizeof(sequence) / sizeof(sequence[0]); i++) {
-    SimRenderMetadata_BeginRecord(
-        kActRaiserWram_SimWorldRecords, true, false,
-        sequence[i].composition, 152, 112, 0x02, 2, 0, 0);
+    SimRenderMetadata_BeginRecord(kActRaiserWram_SimWorldRecords, true, false,
+                                  sequence[i].composition, 152, 112, 0x02, 2, 0, 0);
     SimRenderMetadata_RecordPart(0, 2u << 12);
     SimRenderMetadata_EndRecord(4);
-    SimRenderMetadata_CaptureFrame(
-        &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+    SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
     CHECK(frame.metadata_valid);
     CHECK(frame.effect_metadata_valid);
     CHECK(frame.effect_count == 1);
@@ -355,81 +334,66 @@ static void TestLightningMiracleEffectCapture(void) {
     CHECK(effect->geometry.data.point.x == 8);
     CHECK(effect->geometry.data.point.y == sequence[i].strike_y);
     CHECK(effect->geometry.data.point.height == 0);
-    CHECK(((effect->flags & kSimEffectFlag_Visible) != 0) ==
-          sequence[i].visible);
+    CHECK(((effect->flags & kSimEffectFlag_Visible) != 0) == sequence[i].visible);
     CHECK(effect->flags & kSimEffectFlag_UserLifecycle);
     CHECK(effect->flags & kSimEffectFlag_VisualComplete);
     CHECK(effect->flags & kSimEffectFlag_ActorDone);
   }
 
-  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_LightningMiracle),
-                "lightning_miracle"));
-  CHECK(!strcmp(Sim3D_EffectPhaseName(kSimEffectPhase_LightningImpactB),
-                "lightning_impact_b"));
+  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_LightningMiracle), "lightning_miracle"));
+  CHECK(!strcmp(Sim3D_EffectPhaseName(kSimEffectPhase_LightningImpactB), "lightning_impact_b"));
   CHECK(!strcmp(Sim3D_EffectGeometryName(kSimEffectGeometry_Point), "point"));
-  CHECK(!strcmp(Sim3D_EffectSpaceName(kSimEffectSpace_RecordLocal),
-                "record_local"));
+  CHECK(!strcmp(Sim3D_EffectSpaceName(kSimEffectSpace_RecordLocal), "record_local"));
 
   /* Recapturing one immutable producer build must not advance lifecycle age. */
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.effects[0].age_ticks == 5);
   CHECK(frame.effects[0].pulse_ticks == 0);
 
   /* Either authentic outer lifecycle is sufficient; kind alone is not. */
   Write16(wram, kActRaiserWram_SimUserMiracleActive, 0);
   Write16(wram, kActRaiserWram_SimPostedMiracleActive, 1);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.effect_count == 1);
   CHECK(!(frame.effects[0].flags & kSimEffectFlag_UserLifecycle));
   CHECK(frame.effects[0].flags & kSimEffectFlag_PostedLifecycle);
   Write16(wram, kActRaiserWram_SimPostedMiracleActive, 0);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.effect_count == 0);
   Write16(wram, kActRaiserWram_SimUserMiracleActive, 1);
   Write16(wram, kActRaiserWram_SimMiracleKind, 2);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.effect_count == 0);
 
   /* Lifecycle context cannot turn an unrelated composition or class into an
    * emitter. These are separate producer builds so stale tracker state cannot
    * accidentally make the assertion pass. */
   Write16(wram, kActRaiserWram_SimMiracleKind, 1);
-  SimRenderMetadata_BeginRecord(
-      kActRaiserWram_SimWorldRecords, true, false, 0xDA22,
-      152, 112, 0x02, 2, 0, 0);
+  SimRenderMetadata_BeginRecord(kActRaiserWram_SimWorldRecords, true, false, 0xDA22, 152, 112, 0x02,
+                                2, 0, 0);
   SimRenderMetadata_RecordPart(0, 2u << 12);
   SimRenderMetadata_EndRecord(4);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.effect_count == 0);
-  SimRenderMetadata_BeginRecord(
-      kActRaiserWram_SimWorldRecords, true, false, 0xDA4B,
-      152, 112, 0x03, 2, 0, 0);
+  SimRenderMetadata_BeginRecord(kActRaiserWram_SimWorldRecords, true, false, 0xDA4B, 152, 112, 0x03,
+                                2, 0, 0);
   SimRenderMetadata_RecordPart(0, 2u << 12);
   SimRenderMetadata_EndRecord(4);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.effect_count == 0);
 
   /* Stopping the outer lifecycle retires identity even if the same immutable
    * producer build is recaptured immediately with the slot reused. */
   Write16(wram, kActRaiserWram_SimMiracleKind, 1);
-  SimRenderMetadata_BeginRecord(
-      kActRaiserWram_SimWorldRecords, true, false, 0xDA4B,
-      152, 112, 0x02, 2, 0, 0);
+  SimRenderMetadata_BeginRecord(kActRaiserWram_SimWorldRecords, true, false, 0xDA4B, 152, 112, 0x02,
+                                2, 0, 0);
   SimRenderMetadata_RecordPart(0, 2u << 12);
   SimRenderMetadata_EndRecord(4);
   Write16(wram, kActRaiserWram_SimUserMiracleActive, 0);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.effect_count == 0);
   Write16(wram, kActRaiserWram_SimUserMiracleActive, 1);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.effect_count == 1);
   CHECK(frame.effects[0].generation != generation);
   CHECK(frame.effects[0].age_ticks == 0);
@@ -440,7 +404,8 @@ static void TestTownCreationLightningEffectCapture(void) {
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
   wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
   const uint16_t records[] = {
-    0x0E02, 0x0E28,
+      0x0E02,
+      0x0E28,
   };
   static const struct {
     uint16_t composition;
@@ -450,22 +415,22 @@ static void TestTownCreationLightningEffectCapture(void) {
     uint16_t ticks_since_visible;
     bool visible;
   } sequence[] = {
-    { 0xE9CC, kSimEffectPhase_TownCreationBoltA, 1, 0, 0, true },
-    { 0xE9CC, kSimEffectPhase_TownCreationBoltA, 1, 1, 0, true },
-    { 0xE527, kSimEffectPhase_TownCreationGap,   1, 0, 1, false },
-    { 0xE527, kSimEffectPhase_TownCreationGap,   1, 1, 2, false },
-    { 0xEA27, kSimEffectPhase_TownCreationBoltB, 2, 0, 0, true },
-    { 0xEA27, kSimEffectPhase_TownCreationBoltB, 2, 1, 0, true },
-    { 0xE527, kSimEffectPhase_TownCreationGap,   2, 0, 1, false },
-    { 0xE527, kSimEffectPhase_TownCreationGap,   2, 1, 2, false },
-    { 0xEA82, kSimEffectPhase_TownCreationBoltC, 3, 0, 0, true },
-    { 0xEA82, kSimEffectPhase_TownCreationBoltC, 3, 1, 0, true },
-    { 0xE527, kSimEffectPhase_TownCreationGap,   3, 0, 1, false },
-    { 0xE527, kSimEffectPhase_TownCreationGap,   3, 1, 2, false },
-    { 0xEAEC, kSimEffectPhase_TownCreationBoltD, 4, 0, 0, true },
-    { 0xEAEC, kSimEffectPhase_TownCreationBoltD, 4, 1, 0, true },
-    { 0xE527, kSimEffectPhase_TownCreationGap,   4, 0, 1, false },
-    { 0xE527, kSimEffectPhase_TownCreationGap,   4, 1, 2, false },
+      {0xE9CC, kSimEffectPhase_TownCreationBoltA, 1, 0, 0, true},
+      {0xE9CC, kSimEffectPhase_TownCreationBoltA, 1, 1, 0, true},
+      {0xE527, kSimEffectPhase_TownCreationGap, 1, 0, 1, false},
+      {0xE527, kSimEffectPhase_TownCreationGap, 1, 1, 2, false},
+      {0xEA27, kSimEffectPhase_TownCreationBoltB, 2, 0, 0, true},
+      {0xEA27, kSimEffectPhase_TownCreationBoltB, 2, 1, 0, true},
+      {0xE527, kSimEffectPhase_TownCreationGap, 2, 0, 1, false},
+      {0xE527, kSimEffectPhase_TownCreationGap, 2, 1, 2, false},
+      {0xEA82, kSimEffectPhase_TownCreationBoltC, 3, 0, 0, true},
+      {0xEA82, kSimEffectPhase_TownCreationBoltC, 3, 1, 0, true},
+      {0xE527, kSimEffectPhase_TownCreationGap, 3, 0, 1, false},
+      {0xE527, kSimEffectPhase_TownCreationGap, 3, 1, 2, false},
+      {0xEAEC, kSimEffectPhase_TownCreationBoltD, 4, 0, 0, true},
+      {0xEAEC, kSimEffectPhase_TownCreationBoltD, 4, 1, 0, true},
+      {0xE527, kSimEffectPhase_TownCreationGap, 4, 0, 1, false},
+      {0xE527, kSimEffectPhase_TownCreationGap, 4, 1, 2, false},
   };
 
   SimRenderMetadata_Reset();
@@ -474,17 +439,15 @@ static void TestTownCreationLightningEffectCapture(void) {
   for (size_t tick = 0; tick < sizeof(sequence) / sizeof(sequence[0]); tick++) {
     uint16_t cursor = 0;
     for (size_t strike = 0; strike < 2; strike++) {
-      SimRenderMetadata_BeginRecord(
-          records[strike], true, false, sequence[tick].composition,
-          (uint16_t)(0x0150 + strike * 0x10), 0x0068,
-          0x000E, 0, 0, cursor);
+      SimRenderMetadata_BeginRecord(records[strike], true, false, sequence[tick].composition,
+                                    (uint16_t)(0x0150 + strike * 0x10), 0x0068, 0x000E, 0, 0,
+                                    cursor);
       SimRenderMetadata_RecordWord06(0xA8BB);
       SimRenderMetadata_RecordPart(cursor, 2u << 9);
       cursor = (uint16_t)(cursor + 4);
       SimRenderMetadata_EndRecord(cursor);
     }
-    SimRenderMetadata_CaptureFrame(
-        &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+    SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
     CHECK(frame.metadata_valid);
     CHECK(frame.effect_metadata_valid);
     CHECK(frame.effect_count == 2);
@@ -504,8 +467,7 @@ static void TestTownCreationLightningEffectCapture(void) {
       CHECK(effect->age_ticks == tick);
       CHECK(effect->phase_ticks == sequence[tick].phase_ticks);
       CHECK(effect->pulse_generation == sequence[tick].pulse_generation);
-      CHECK(effect->ticks_since_visible ==
-            sequence[tick].ticks_since_visible);
+      CHECK(effect->ticks_since_visible == sequence[tick].ticks_since_visible);
       CHECK(effect->geometry.kind == kSimEffectGeometry_Point);
       CHECK(effect->geometry.space == kSimEffectSpace_RecordLocal);
       CHECK(effect->geometry.data.point.x == 8);
@@ -514,48 +476,36 @@ static void TestTownCreationLightningEffectCapture(void) {
       CHECK(effect->world_x == (uint16_t)(0x0150 + strike * 0x10));
       CHECK(effect->world_y == 0x0068);
       CHECK(effect->flags & kSimEffectFlag_RecordLifecycle);
-      CHECK(((effect->flags & kSimEffectFlag_Visible) != 0) ==
-            sequence[tick].visible);
+      CHECK(((effect->flags & kSimEffectFlag_Visible) != 0) == sequence[tick].visible);
     }
     CHECK(generations[0] != generations[1]);
   }
 
-  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_TownCreationLightning),
-                "town_creation_lightning"));
-  CHECK(!strcmp(Sim3D_EffectPhaseName(
-                    kSimEffectPhase_TownCreationBoltD),
-                "town_creation_bolt_d"));
+  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_TownCreationLightning), "town_creation_lightning"));
+  CHECK(!strcmp(Sim3D_EffectPhaseName(kSimEffectPhase_TownCreationBoltD), "town_creation_bolt_d"));
 
   /* World tier, process identity, script base, and an exact composition are
    * all required. In particular, $E527 also belongs to cursor lists 40-48. */
   SimRenderMetadata_Reset();
-  SimRenderMetadata_BeginRecord(
-      records[0], true, false, 0xE9CC, 0x0150, 0x0068,
-      0x000D, 0, 0, 0);
+  SimRenderMetadata_BeginRecord(records[0], true, false, 0xE9CC, 0x0150, 0x0068, 0x000D, 0, 0, 0);
   SimRenderMetadata_RecordWord06(0xA8BB);
   SimRenderMetadata_RecordPart(0, 2u << 9);
   SimRenderMetadata_EndRecord(4);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.effect_count == 0);
-  SimRenderMetadata_BeginRecord(
-      records[0], true, false, 0xE527, 0x0150, 0x0068,
-      0x000E, 0, 0, 0);
+  SimRenderMetadata_BeginRecord(records[0], true, false, 0xE527, 0x0150, 0x0068, 0x000E, 0, 0, 0);
   SimRenderMetadata_RecordWord06(0xA840);
   SimRenderMetadata_RecordPart(0, 0);
   SimRenderMetadata_EndRecord(4);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.effect_count == 0);
 
-  SimRenderMetadata_BeginRecord(
-      kActRaiserWram_SimFixedRecords, false, false, 0xE9CC,
-      0x0150, 0x0068, 0x000E, 0, 0, 0);
+  SimRenderMetadata_BeginRecord(kActRaiserWram_SimFixedRecords, false, false, 0xE9CC, 0x0150,
+                                0x0068, 0x000E, 0, 0, 0);
   SimRenderMetadata_RecordWord06(0xA8BB);
   SimRenderMetadata_RecordPart(0, 2u << 9);
   SimRenderMetadata_EndRecord(4);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.effect_count == 0);
 }
 
@@ -566,15 +516,14 @@ static void TestEnemyLightningAndFireEffectCapture(void) {
   SimFrameData frame;
   const uint16_t record = kActRaiserWram_SimWorldRecords;
 
-  #define CAPTURE_EFFECT(type_, state_, composition_, palette_) do {       \
-    SimRenderMetadata_BeginRecord(                                        \
-        record, true, false, (composition_), 0x00F1, 0x0056,              \
-        (type_), (state_), 0, 0);                                         \
-    SimRenderMetadata_RecordPart(0, (uint16_t)(palette_) << 9);            \
-    SimRenderMetadata_EndRecord(4);                                       \
-    SimRenderMetadata_CaptureFrame(                                       \
-        &frame, wram, true, false, kSimFeature_All, 0,                    \
-        kSimFeature_All);                                                 \
+#define CAPTURE_EFFECT(type_, state_, composition_, palette_)                                      \
+  do {                                                                                             \
+    SimRenderMetadata_BeginRecord(record, true, false, (composition_), 0x00F1, 0x0056, (type_),    \
+                                  (state_), 0, 0);                                                 \
+    SimRenderMetadata_RecordPart(0, (uint16_t)(palette_) << 9);                                    \
+    SimRenderMetadata_EndRecord(4);                                                                \
+    SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0,                  \
+                                   kSimFeature_All);                                               \
   } while (0)
 
   SimRenderMetadata_Reset();
@@ -624,8 +573,7 @@ static void TestEnemyLightningAndFireEffectCapture(void) {
   CHECK(frame.effects[0].generation == demon_generation);
   CHECK(frame.effects[0].phase == kSimEffectPhase_RedFireSmall);
   CHECK(frame.effects[0].geometry.data.point.y == 18);
-  CHECK(frame.effects[0].geometry.data.point.height ==
-        kSimVirtualHeight_Flying);
+  CHECK(frame.effects[0].geometry.data.point.height == kSimVirtualHeight_Flying);
   CAPTURE_EFFECT(0x14, 7, 0xE35A, 1);
   CHECK(frame.effects[0].phase == kSimEffectPhase_RedFireMedium);
   CHECK(frame.effects[0].geometry.data.point.y == 20);
@@ -693,19 +641,17 @@ static void TestEnemyLightningAndFireEffectCapture(void) {
 
   /* Reproduce the three simultaneous records in snap_00_gf19950 rather than
    * proving only an isolated synthetic slot. */
-  static const uint16_t house_records[] = { 0x0F0C, 0x0F32, 0x0F58 };
-  static const uint16_t house_x[] = { 0x00F0, 0x00F0, 0x00C0 };
-  static const uint16_t house_y[] = { 0x0080, 0x0090, 0x00B0 };
+  static const uint16_t house_records[] = {0x0F0C, 0x0F32, 0x0F58};
+  static const uint16_t house_x[] = {0x00F0, 0x00F0, 0x00C0};
+  static const uint16_t house_y[] = {0x0080, 0x0090, 0x00B0};
   SimRenderMetadata_Reset();
   for (size_t i = 0; i < 3; i++) {
-    SimRenderMetadata_BeginRecord(
-        house_records[i], true, false, 0xDD33, house_x[i], house_y[i],
-        0x0A01, 2, 0, (uint16_t)(i * 4));
+    SimRenderMetadata_BeginRecord(house_records[i], true, false, 0xDD33, house_x[i], house_y[i],
+                                  0x0A01, 2, 0, (uint16_t)(i * 4));
     SimRenderMetadata_RecordPart((uint16_t)(i * 4), 1u << 9);
     SimRenderMetadata_EndRecord((uint16_t)((i + 1) * 4));
   }
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.effect_count == 3);
   CHECK(frame.effect_visible_count == 3);
   for (size_t i = 0; i < 3; i++) {
@@ -725,24 +671,16 @@ static void TestEnemyLightningAndFireEffectCapture(void) {
   CAPTURE_EFFECT(0x0A01, 2, 0xDD2E, 1);
   CHECK(frame.effect_count == 0);
 
-  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_BlueDragonLightning),
-                "blue_dragon_lightning"));
-  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_RedDemonFire),
-                "red_demon_fire"));
-  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_GroundFire),
-                "ground_fire"));
-  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_HouseFire),
-                "house_fire"));
-  CHECK(!strcmp(Sim3D_EffectColorName(kSimEffectColor_FireRed),
-                "fire_red"));
-  CHECK(!strcmp(Sim3D_EffectColorName(kSimEffectColor_FireBlue),
-                "fire_blue"));
-  CHECK(!strcmp(Sim3D_EffectPhaseName(kSimEffectPhase_RedFireLarge),
-                "red_fire_large"));
-  CHECK(!strcmp(Sim3D_EffectPhaseName(kSimEffectPhase_HouseFireC),
-                "house_fire_c"));
+  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_BlueDragonLightning), "blue_dragon_lightning"));
+  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_RedDemonFire), "red_demon_fire"));
+  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_GroundFire), "ground_fire"));
+  CHECK(!strcmp(Sim3D_EffectKindName(kSimEffect_HouseFire), "house_fire"));
+  CHECK(!strcmp(Sim3D_EffectColorName(kSimEffectColor_FireRed), "fire_red"));
+  CHECK(!strcmp(Sim3D_EffectColorName(kSimEffectColor_FireBlue), "fire_blue"));
+  CHECK(!strcmp(Sim3D_EffectPhaseName(kSimEffectPhase_RedFireLarge), "red_fire_large"));
+  CHECK(!strcmp(Sim3D_EffectPhaseName(kSimEffectPhase_HouseFireC), "house_fire_c"));
 
-  #undef CAPTURE_EFFECT
+#undef CAPTURE_EFFECT
 }
 
 static void TestEffectOverflowFailsClosed(void) {
@@ -755,19 +693,17 @@ static void TestEffectOverflowFailsClosed(void) {
 
   const int emitter_count = kSimMaxEffectInstances + 1;
   for (int i = 0; i < emitter_count; i++) {
-    uint16_t record = (uint16_t)(kActRaiserWram_SimWorldRecords +
-        i * kActRaiserSimWorldRecordStride);
+    uint16_t record =
+        (uint16_t)(kActRaiserWram_SimWorldRecords + i * kActRaiserSimWorldRecordStride);
     uint16_t cursor = (uint16_t)(i * 4);
-    SimRenderMetadata_BeginRecord(
-        record, true, false, 0xDA4B, (uint16_t)(100 + i), 112,
-        0x02, 2, 0, cursor);
+    SimRenderMetadata_BeginRecord(record, true, false, 0xDA4B, (uint16_t)(100 + i), 112, 0x02, 2, 0,
+                                  cursor);
     SimRenderMetadata_RecordPart(cursor, 2u << 12);
     SimRenderMetadata_EndRecord((uint16_t)(cursor + 4));
   }
 
   SimFrameData frame;
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.metadata_valid);
   CHECK(!frame.effect_metadata_valid);
   CHECK(frame.effect_count == kSimMaxEffectInstances);
@@ -785,18 +721,17 @@ static void TestResolvedPartOverflowFailsClosed(void) {
 
   Begin(kActRaiserWram_SimWorldRecords, true, 0xE71B, 0);
   const SrPpuObjPart synthetic = {
-    .x = 258,
-    .y = 112,
-    .tile_attr = 2u << 12,
-    .size = 16,
+      .x = 258,
+      .y = 112,
+      .tile_attr = 2u << 12,
+      .size = 16,
   };
   for (int i = 0; i <= kSimMaxResolvedParts; i++)
     SimRenderMetadata_RecordSyntheticPart(0, &synthetic);
   SimRenderMetadata_EndRecord(0);
 
   SimFrameData frame;
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(!frame.metadata_valid);
   CHECK(frame.integrity_flags & kSimMetadataIntegrity_Overflow);
   CHECK(frame.synthetic_part_count == kSimMaxResolvedParts);
@@ -808,10 +743,10 @@ static void TestResolvedPartContractFailsClosed(void) {
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
   wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
   const SrPpuObjPart part = {
-    .x = 258,
-    .y = 112,
-    .tile_attr = 2u << 12,
-    .size = 16,
+      .x = 258,
+      .y = 112,
+      .tile_attr = 2u << 12,
+      .size = 16,
   };
 
   SimRenderMetadata_Reset();
@@ -823,17 +758,15 @@ static void TestResolvedPartContractFailsClosed(void) {
   SimRenderMetadata_EndRecord(4);
 
   SimFrameData frame;
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(!frame.metadata_valid);
   CHECK(frame.integrity_flags & kSimMetadataIntegrity_PartContract);
 
   SimRenderMetadata_Reset();
   Begin(kActRaiserWram_SimWorldRecords, true, 0xE71B, 0);
-  SimRenderMetadata_RecordSyntheticPart(2, &part);  /* unaligned cursor */
+  SimRenderMetadata_RecordSyntheticPart(2, &part); /* unaligned cursor */
   SimRenderMetadata_EndRecord(0);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(!frame.metadata_valid);
   CHECK(frame.integrity_flags & kSimMetadataIntegrity_PartContract);
 }
@@ -853,8 +786,7 @@ static void TestRecordPartitionAndClippedReset(void) {
   Begin(kActRaiserWram_SimFixedRecords, false, 0xD000, 0);
   SimRenderMetadata_EndRecord(0);
 
-  Begin(kActRaiserWram_SimFixedRecords + kActRaiserSimFixedRecordStride,
-        false, 0xD100, 0);
+  Begin(kActRaiserWram_SimFixedRecords + kActRaiserSimFixedRecordStride, false, 0xD100, 0);
   SimRenderMetadata_RecordPart(0, 1u << 12);
   SimRenderMetadata_EndRecord(4);
 
@@ -865,8 +797,7 @@ static void TestRecordPartitionAndClippedReset(void) {
   SimRenderMetadata_EndRecord(16);
 
   SimFrameData frame;
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.view == kSimView_Enhanced);
   CHECK(frame.game_frame == 123);
   CHECK(frame.build_serial == 1);
@@ -904,11 +835,9 @@ static void TestRecordPartitionAndClippedReset(void) {
     atlas.objects[i].atlas_h = 8;
     atlas.objects[i].atlas_valid = 1;
   }
-  CHECK(SimRenderMetadata_CommitAtlas(
-      atlas.build_serial, atlas.objects, atlas.object_count, true,
-      64, 64, 28, 9, 0));
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  CHECK(SimRenderMetadata_CommitAtlas(atlas.build_serial, atlas.objects, atlas.object_count, true,
+                                      64, 64, 28, 9, 0));
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.atlas_valid);
   CHECK(frame.atlas_width == 64 && frame.atlas_height == 64);
   CHECK(frame.atlas_used_width == 28 && frame.atlas_used_height == 9);
@@ -916,8 +845,7 @@ static void TestRecordPartitionAndClippedReset(void) {
   CHECK(frame.objects[2].local_x0 == -4);
 
   Write16(wram, kActRaiserWram_SimMapPickerFlag, 0x0100);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   /* $7F:9215 is still published either way; only the resulting view depends
    * on the compiled picker policy. */
   CHECK(frame.picker_flag == 0x0100);
@@ -933,8 +861,7 @@ static void TestRecordPartitionAndClippedReset(void) {
   Begin(kActRaiserWram_SimFixedRecords, false, 0xD200, 0);
   SimRenderMetadata_EndRecord(0);
   Write16(wram, kActRaiserWram_SimMapPickerFlag, 0);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, false, false, kSimFeature_SeparatedComposite, 0, 0);
+  SimRenderMetadata_CaptureFrame(&frame, wram, false, false, kSimFeature_SeparatedComposite, 0, 0);
   CHECK(frame.build_serial == 2);
   CHECK(frame.source_count == 1);
   CHECK(frame.zero_oam_source_count == 1);
@@ -950,12 +877,11 @@ static void TestIntegrityFallback(void) {
   SimRenderMetadata_Reset();
   Begin(kActRaiserWram_SimWorldRecords, true, 0xE000, 0);
   SimRenderMetadata_RecordPart(0, 0);
-  SimRenderMetadata_RecordPart(0, 0);  /* duplicate OAM ownership */
+  SimRenderMetadata_RecordPart(0, 0); /* duplicate OAM ownership */
   SimRenderMetadata_EndRecord(8);
 
   SimFrameData frame;
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(!frame.metadata_valid);
   CHECK(frame.integrity_flags & kSimMetadataIntegrity_Overlap);
   /* Broken object metadata costs the sprites, not the view. Dropping the
@@ -966,9 +892,8 @@ static void TestIntegrityFallback(void) {
    * semantic record pass at all. */
   CHECK(frame.view == kSimView_Enhanced);
   CHECK(frame.effective_features ==
-        (kSimFeature_SeparatedComposite | kSimFeature_GroundProjection |
-         kSimFeature_Backdrop | kSimFeature_PickerExitEase |
-         kSimFeature_WorldUnderlay | kSimFeature_CloudShroud |
+        (kSimFeature_SeparatedComposite | kSimFeature_GroundProjection | kSimFeature_Backdrop |
+         kSimFeature_PickerExitEase | kSimFeature_WorldUnderlay | kSimFeature_CloudShroud |
          kSimFeature_CullHaze | kSimFeature_GlobeUnderlay));
 }
 
@@ -983,8 +908,7 @@ static void TestMapPlaneSelectorTrait(void) {
   SimRenderMetadata_EndRecord(4);
 
   SimFrameData frame;
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.object_count == 1);
   CHECK(frame.objects[0].traits & kSimObjectTrait_MapPlane);
   CHECK(frame.objects[0].traits & kSimObjectTrait_SelectionOverlay);
@@ -994,8 +918,7 @@ static void TestMapPlaneSelectorTrait(void) {
   Begin(kActRaiserWram_SimWorldRecords, true, 0xD32B, 0);
   SimRenderMetadata_RecordPart(0, 2u << 12);
   SimRenderMetadata_EndRecord(4);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(!(frame.objects[0].traits & kSimObjectTrait_MapPlane));
   CHECK(!(frame.objects[0].traits & kSimObjectTrait_SelectionOverlay));
 }
@@ -1012,136 +935,105 @@ static void TestVirtualHeightClassification(void) {
     int16 virtual_height;
     uint8 traits;
   } cases[] = {
-    { "person", kSimRecordTier_World, 0x00, 0, world, 0xE85C,
-      kSimHeightClass_Grounded, 0, 0 },
-    { "people group", kSimRecordTier_World, 0x00, 0, world, 0xE676,
-      kSimHeightClass_Grounded, 0, 0 },
-    { "horse", kSimRecordTier_World, 0x00, 0, world, 0xE940,
-      kSimHeightClass_Grounded, 0, 0 },
-    { "boat", kSimRecordTier_World, 0x00, 0, world, 0xE9B4,
-      kSimHeightClass_WaterPlane, 0,
-      kSimObjectTrait_WaterPlane | kSimObjectTrait_NoShadow },
-    { "blue dragon", kSimRecordTier_World, 0x12, 3, world, 0xE0A0,
-      kSimHeightClass_Flying, kSimVirtualHeight_Flying,
-      kSimObjectTrait_Overhead },
-    { "napper bat", kSimRecordTier_World, 0x13, 5, world, 0xE500,
-      kSimHeightClass_Flying, kSimVirtualHeight_Flying,
-      kSimObjectTrait_Overhead },
-    { "red demon", kSimRecordTier_World, 0x14, 1, world, 0xE300,
-      kSimHeightClass_Flying, kSimVirtualHeight_Flying,
-      kSimObjectTrait_Overhead },
-    { "skull head", kSimRecordTier_World, 0x15, 1, world, 0xE400,
-      kSimHeightClass_Flying, kSimVirtualHeight_Flying,
-      kSimObjectTrait_Overhead },
-    { "angel record", kSimRecordTier_World, 0x0C, 0,
-      kActRaiserWram_SimAngelRecord, 0xA627,
-      kSimHeightClass_Flying, kSimVirtualHeight_Flying,
-      kSimObjectTrait_Overhead },
-    /* Miracle cloud family: the art spans cloud to ground, so it stays on the
-     * map plane with the ROM's own anchor and shadow -- and is Overhead, so
-     * D3b's row sort cannot let a nearer tree draw over a cloud. */
-    { "miracle cloud", kSimRecordTier_World, 0x02, 1, world, 0xD9E5,
-      kSimHeightClass_GroundEffect, 0,
-      kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow |
-      kSimObjectTrait_Overhead },
-    { "miracle bolt", kSimRecordTier_World, 0x02, 2, world, 0xDA4B,
-      kSimHeightClass_GroundEffect, 0,
-      kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow |
-      kSimObjectTrait_Overhead },
-    { "miracle rain", kSimRecordTier_World, 0x03, 2, world, 0xDC77,
-      kSimHeightClass_GroundEffect, 0,
-      kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow |
-      kSimObjectTrait_Overhead },
-    /* The one member of the range that must NOT come forward: it is the ROM's
-     * own shadow ellipse, drawn 40-72px below the shared anchor. It lies on
-     * the ground and anything standing there should occlude it. */
-    { "miracle cloud shadow", kSimRecordTier_World, 0x08, 1, world, 0xDA22,
-      kSimHeightClass_GroundEffect, 0,
-      kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow },
-    /* The angel's pose frames are borrowed by miracle effect records; only
-     * the angel's own record/class may claim the flight plane. */
-    { "borrowed angel pose", kSimRecordTier_World, 0x04, 0,
-      kActRaiserWram_SimWorldRecords + kActRaiserSimWorldRecordStride, 0xA627,
-      kSimHeightClass_Grounded, 0, 0 },
-    { "arrow record", kSimRecordTier_World, 0x00, 0,
-      kActRaiserWram_SimAngelArrowRecord, 0xD967,
-      kSimHeightClass_FlyingProjectile, kSimVirtualHeight_Flying,
-      kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow },
-    { "arrow composition", kSimRecordTier_World, 0x14, 2, world, 0xD988,
-      kSimHeightClass_FlyingProjectile, kSimVirtualHeight_Flying,
-      kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow },
-    { "building zap", kSimRecordTier_World, 0x12, 9, world, 0xE209,
-      kSimHeightClass_GroundEffect, 0,
-      kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow },
-    { "town creation bolt", kSimRecordTier_World, 0x000E, 0,
-      0x0E02, 0xEA82,
-      kSimHeightClass_GroundEffect, 0,
-      kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow },
-    { "town creation range interior", kSimRecordTier_World, 0x19, 0,
-      world, 0xEA00, kSimHeightClass_Grounded, 0, 0 },
-    { "ground fire", kSimRecordTier_World, 0x19, 0, world, 0xE6D0,
-      kSimHeightClass_GroundEffect, 0, kSimObjectTrait_NoShadow },
-    { "scripted house fire", kSimRecordTier_World, 0x0A01, 2, world, 0xDD33,
-      kSimHeightClass_GroundEffect, 0, kSimObjectTrait_NoShadow },
-    /* Eruption ground fire burns on the map exactly as the house fire does;
-     * its centre-anchored art is the only difference. */
-    { "eruption ground fire", kSimRecordTier_World, 0x0E01, 2, world, 0xDDA5,
-      kSimHeightClass_GroundEffect, 0, kSimObjectTrait_NoShadow },
-    /* A fireball still in the air: terrain may neither raise nor hide it, and
-     * its art is centred on the record origin rather than standing on a foot. */
-    { "eruption fireball high", kSimRecordTier_World, 0x0E01, 2, world, 0xE7D0,
-      kSimHeightClass_FlyingProjectile, kSimVirtualHeight_Flying,
-      kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow |
-      kSimObjectTrait_Overhead },
-    { "eruption fireball low", kSimRecordTier_World, 0x0E01, 3, world, 0xE7A6,
-      kSimHeightClass_FlyingProjectile, kSimVirtualHeight_Flying,
-      kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow |
-      kSimObjectTrait_Overhead },
-    /* Neighbouring bytes inside each authored composition are part records,
-     * not further identities. */
-    { "eruption ground fire interior", kSimRecordTier_World, 0x0E01, 2, world,
-      0xDDA6, kSimHeightClass_Grounded, 0, 0 },
-    { "napper pluck", kSimRecordTier_World, 0x13, 11, world, 0xE73A,
-      kSimHeightClass_SemiGrounded, kSimVirtualHeight_SemiGrounded, 0 },
-    { "map cursor", kSimRecordTier_World, 0x11, 0, world, 0xD2C4,
-      kSimHeightClass_MapPlane, 0,
-      kSimObjectTrait_MapPlane | kSimObjectTrait_NoShadow |
-      kSimObjectTrait_SelectionOverlay },
-    /* The 64x64 hollow path-selection square arrives on a class-$09 record
-     * and sits between the cursor family and the miracle cloud effects; it
-     * must lie on the ground, not billboard. */
-    { "path select square", kSimRecordTier_World, 0x09, 1, world, 0xD993,
-      kSimHeightClass_MapPlane, 0,
-      kSimObjectTrait_MapPlane | kSimObjectTrait_NoShadow |
-      kSimObjectTrait_SelectionOverlay },
-    { "fixed UI", kSimRecordTier_Fixed, 0x02, 0,
-      kActRaiserWram_SimFixedRecords, 0xD32B,
-      kSimHeightClass_None, 0, 0 },
+      {"person", kSimRecordTier_World, 0x00, 0, world, 0xE85C, kSimHeightClass_Grounded, 0, 0},
+      {"people group", kSimRecordTier_World, 0x00, 0, world, 0xE676, kSimHeightClass_Grounded, 0,
+       0},
+      {"horse", kSimRecordTier_World, 0x00, 0, world, 0xE940, kSimHeightClass_Grounded, 0, 0},
+      {"boat", kSimRecordTier_World, 0x00, 0, world, 0xE9B4, kSimHeightClass_WaterPlane, 0,
+       kSimObjectTrait_WaterPlane | kSimObjectTrait_NoShadow},
+      {"blue dragon", kSimRecordTier_World, 0x12, 3, world, 0xE0A0, kSimHeightClass_Flying,
+       kSimVirtualHeight_Flying, kSimObjectTrait_Overhead},
+      {"napper bat", kSimRecordTier_World, 0x13, 5, world, 0xE500, kSimHeightClass_Flying,
+       kSimVirtualHeight_Flying, kSimObjectTrait_Overhead},
+      {"red demon", kSimRecordTier_World, 0x14, 1, world, 0xE300, kSimHeightClass_Flying,
+       kSimVirtualHeight_Flying, kSimObjectTrait_Overhead},
+      {"skull head", kSimRecordTier_World, 0x15, 1, world, 0xE400, kSimHeightClass_Flying,
+       kSimVirtualHeight_Flying, kSimObjectTrait_Overhead},
+      {"angel record", kSimRecordTier_World, 0x0C, 0, kActRaiserWram_SimAngelRecord, 0xA627,
+       kSimHeightClass_Flying, kSimVirtualHeight_Flying, kSimObjectTrait_Overhead},
+      /* Miracle cloud family: the art spans cloud to ground, so it stays on the
+       * map plane with the ROM's own anchor and shadow -- and is Overhead, so
+       * D3b's row sort cannot let a nearer tree draw over a cloud. */
+      {"miracle cloud", kSimRecordTier_World, 0x02, 1, world, 0xD9E5, kSimHeightClass_GroundEffect,
+       0, kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow | kSimObjectTrait_Overhead},
+      {"miracle bolt", kSimRecordTier_World, 0x02, 2, world, 0xDA4B, kSimHeightClass_GroundEffect,
+       0, kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow | kSimObjectTrait_Overhead},
+      {"miracle rain", kSimRecordTier_World, 0x03, 2, world, 0xDC77, kSimHeightClass_GroundEffect,
+       0, kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow | kSimObjectTrait_Overhead},
+      /* The one member of the range that must NOT come forward: it is the ROM's
+       * own shadow ellipse, drawn 40-72px below the shared anchor. It lies on
+       * the ground and anything standing there should occlude it. */
+      {"miracle cloud shadow", kSimRecordTier_World, 0x08, 1, world, 0xDA22,
+       kSimHeightClass_GroundEffect, 0,
+       kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow},
+      /* The angel's pose frames are borrowed by miracle effect records; only
+       * the angel's own record/class may claim the flight plane. */
+      {"borrowed angel pose", kSimRecordTier_World, 0x04, 0,
+       kActRaiserWram_SimWorldRecords + kActRaiserSimWorldRecordStride, 0xA627,
+       kSimHeightClass_Grounded, 0, 0},
+      {"arrow record", kSimRecordTier_World, 0x00, 0, kActRaiserWram_SimAngelArrowRecord, 0xD967,
+       kSimHeightClass_FlyingProjectile, kSimVirtualHeight_Flying,
+       kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow},
+      {"arrow composition", kSimRecordTier_World, 0x14, 2, world, 0xD988,
+       kSimHeightClass_FlyingProjectile, kSimVirtualHeight_Flying,
+       kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow},
+      {"building zap", kSimRecordTier_World, 0x12, 9, world, 0xE209, kSimHeightClass_GroundEffect,
+       0, kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow},
+      {"town creation bolt", kSimRecordTier_World, 0x000E, 0, 0x0E02, 0xEA82,
+       kSimHeightClass_GroundEffect, 0,
+       kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow},
+      {"town creation range interior", kSimRecordTier_World, 0x19, 0, world, 0xEA00,
+       kSimHeightClass_Grounded, 0, 0},
+      {"ground fire", kSimRecordTier_World, 0x19, 0, world, 0xE6D0, kSimHeightClass_GroundEffect, 0,
+       kSimObjectTrait_NoShadow},
+      {"scripted house fire", kSimRecordTier_World, 0x0A01, 2, world, 0xDD33,
+       kSimHeightClass_GroundEffect, 0, kSimObjectTrait_NoShadow},
+      /* Eruption ground fire burns on the map exactly as the house fire does;
+       * its centre-anchored art is the only difference. */
+      {"eruption ground fire", kSimRecordTier_World, 0x0E01, 2, world, 0xDDA5,
+       kSimHeightClass_GroundEffect, 0, kSimObjectTrait_NoShadow},
+      /* A fireball still in the air: terrain may neither raise nor hide it, and
+       * its art is centred on the record origin rather than standing on a foot. */
+      {"eruption fireball high", kSimRecordTier_World, 0x0E01, 2, world, 0xE7D0,
+       kSimHeightClass_FlyingProjectile, kSimVirtualHeight_Flying,
+       kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow | kSimObjectTrait_Overhead},
+      {"eruption fireball low", kSimRecordTier_World, 0x0E01, 3, world, 0xE7A6,
+       kSimHeightClass_FlyingProjectile, kSimVirtualHeight_Flying,
+       kSimObjectTrait_RecordOriginAnchor | kSimObjectTrait_NoShadow | kSimObjectTrait_Overhead},
+      /* Neighbouring bytes inside each authored composition are part records,
+       * not further identities. */
+      {"eruption ground fire interior", kSimRecordTier_World, 0x0E01, 2, world, 0xDDA6,
+       kSimHeightClass_Grounded, 0, 0},
+      {"napper pluck", kSimRecordTier_World, 0x13, 11, world, 0xE73A, kSimHeightClass_SemiGrounded,
+       kSimVirtualHeight_SemiGrounded, 0},
+      {"map cursor", kSimRecordTier_World, 0x11, 0, world, 0xD2C4, kSimHeightClass_MapPlane, 0,
+       kSimObjectTrait_MapPlane | kSimObjectTrait_NoShadow | kSimObjectTrait_SelectionOverlay},
+      /* The 64x64 hollow path-selection square arrives on a class-$09 record
+       * and sits between the cursor family and the miracle cloud effects; it
+       * must lie on the ground, not billboard. */
+      {"path select square", kSimRecordTier_World, 0x09, 1, world, 0xD993, kSimHeightClass_MapPlane,
+       0, kSimObjectTrait_MapPlane | kSimObjectTrait_NoShadow | kSimObjectTrait_SelectionOverlay},
+      {"fixed UI", kSimRecordTier_Fixed, 0x02, 0, kActRaiserWram_SimFixedRecords, 0xD32B,
+       kSimHeightClass_None, 0, 0},
   };
 
   for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
     SimObjectClassification result = Sim3D_ClassifyObject(
-        cases[i].tier, cases[i].type, cases[i].state, cases[i].record,
-        cases[i].composition);
+        cases[i].tier, cases[i].type, cases[i].state, cases[i].record, cases[i].composition);
     if (result.height_class != cases[i].height_class ||
-        result.virtual_height != cases[i].virtual_height ||
-        result.traits != cases[i].traits) {
-      fprintf(stderr,
-              "%s:%d: %s classified as %s/%d/$%02X, expected %s/%d/$%02X\n",
-              __FILE__, __LINE__, cases[i].label,
-              Sim3D_HeightClassName((SimHeightClass)result.height_class),
+        result.virtual_height != cases[i].virtual_height || result.traits != cases[i].traits) {
+      fprintf(stderr, "%s:%d: %s classified as %s/%d/$%02X, expected %s/%d/$%02X\n", __FILE__,
+              __LINE__, cases[i].label, Sim3D_HeightClassName((SimHeightClass)result.height_class),
               (int)result.virtual_height, (unsigned)result.traits,
-              Sim3D_HeightClassName(cases[i].height_class),
-              (int)cases[i].virtual_height, (unsigned)cases[i].traits);
+              Sim3D_HeightClassName(cases[i].height_class), (int)cases[i].virtual_height,
+              (unsigned)cases[i].traits);
       failures++;
     }
     /* Only classified flight planes may lift, and a lifted object is never
      * simultaneously painted onto the map plane. */
     CHECK(result.virtual_height >= 0);
-    CHECK(!result.virtual_height ||
-          !(result.traits & kSimObjectTrait_MapPlane));
-    CHECK(result.height_class != kSimHeightClass_Grounded ||
-          result.virtual_height == 0);
+    CHECK(!result.virtual_height || !(result.traits & kSimObjectTrait_MapPlane));
+    CHECK(result.height_class != kSimHeightClass_Grounded || result.virtual_height == 0);
   }
 
   /* The producer must publish the classification with the fragment. */
@@ -1154,8 +1046,7 @@ static void TestVirtualHeightClassification(void) {
   SimRenderMetadata_RecordPart(0, 0);
   SimRenderMetadata_EndRecord(4);
   SimFrameData frame;
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.object_count == 1);
   CHECK(frame.objects[0].height_class == kSimHeightClass_Flying);
   CHECK(frame.objects[0].virtual_height == kSimVirtualHeight_Flying);
@@ -1165,27 +1056,26 @@ static void TestVirtualHeightClassification(void) {
  * the bolt itself keeps its ROM-positioned record-origin anchor. */
 static void TestGroundStrikeOverride(void) {
   const uint16 world = kActRaiserWram_SimWorldRecords;
-  SimObjectClassification cruising = Sim3D_ClassifyObject(
-      kSimRecordTier_World, 0x12, 1, world, 0xE13F);
+  SimObjectClassification cruising =
+      Sim3D_ClassifyObject(kSimRecordTier_World, 0x12, 1, world, 0xE13F);
   CHECK(cruising.height_class == kSimHeightClass_Flying);
   CHECK(cruising.virtual_height == kSimVirtualHeight_Flying);
 
-  SimObjectClassification striking = Sim3D_ClassifyObject(
-      kSimRecordTier_World, 0x12, 6, world, 0xE13F);
+  SimObjectClassification striking =
+      Sim3D_ClassifyObject(kSimRecordTier_World, 0x12, 6, world, 0xE13F);
   CHECK(striking.height_class == kSimHeightClass_GroundStrike);
   CHECK(striking.virtual_height == 0);
   CHECK(Sim3D_HeightClassIsContactExact(kSimHeightClass_GroundStrike));
 
-  SimObjectClassification bolt = Sim3D_ClassifyObject(
-      kSimRecordTier_World, 0x12, 6, world, 0xE1BD);
+  SimObjectClassification bolt = Sim3D_ClassifyObject(kSimRecordTier_World, 0x12, 6, world, 0xE1BD);
   CHECK(bolt.height_class == kSimHeightClass_GroundEffect);
   CHECK(bolt.virtual_height == 0);
   CHECK(bolt.traits & kSimObjectTrait_RecordOriginAnchor);
   CHECK(Sim3D_HeightClassIsContactExact(kSimHeightClass_GroundEffect));
 
   /* Only the Blue Dragon's state 6 is proven; other enemies keep flying. */
-  CHECK(Sim3D_ClassifyObject(kSimRecordTier_World, 0x13, 6, world, 0xE3FA)
-            .height_class == kSimHeightClass_Flying);
+  CHECK(Sim3D_ClassifyObject(kSimRecordTier_World, 0x13, 6, world, 0xE3FA).height_class ==
+        kSimHeightClass_Flying);
 }
 
 /* Height easing runs only for an enhanced 3D frame, ramps continuous records,
@@ -1196,17 +1086,16 @@ static void TestHeightSlew(void) {
   wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
   SimFrameData frame;
 
-  /* One world record whose composition selects the requested plane. */
-  #define BUILD(composition, state, master, picker) do {                     \
-    Write16(wram, kActRaiserWram_SimMapPickerFlag, (picker));                \
-    SimRenderMetadata_BeginRecord(                                          \
-        kActRaiserWram_SimWorldRecords, true, false, (composition),         \
-        0x0120, 0x00A0, 0x13, (state), 0, 0);                               \
-    SimRenderMetadata_RecordPart(0, 0);                                     \
-    SimRenderMetadata_EndRecord(4);                                         \
-    SimRenderMetadata_CaptureFrame(                                         \
-        &frame, wram, (master), false, kSimFeature_All, 0,                  \
-        kSimFeature_All);                                                   \
+/* One world record whose composition selects the requested plane. */
+#define BUILD(composition, state, master, picker)                                                  \
+  do {                                                                                             \
+    Write16(wram, kActRaiserWram_SimMapPickerFlag, (picker));                                      \
+    SimRenderMetadata_BeginRecord(kActRaiserWram_SimWorldRecords, true, false, (composition),      \
+                                  0x0120, 0x00A0, 0x13, (state), 0, 0);                            \
+    SimRenderMetadata_RecordPart(0, 0);                                                            \
+    SimRenderMetadata_EndRecord(4);                                                                \
+    SimRenderMetadata_CaptureFrame(&frame, wram, (master), false, kSimFeature_All, 0,              \
+                                   kSimFeature_All);                                               \
   } while (0)
 
   SimRenderMetadata_Reset();
@@ -1265,7 +1154,7 @@ static void TestHeightSlew(void) {
   BUILD(0xE71B, 5, true, 1);
   CHECK(frame.objects[0].virtual_height == 16);
 #endif
-  #undef BUILD
+#undef BUILD
 }
 
 static void TestObjColorMathPartition(void) {
@@ -1282,8 +1171,7 @@ static void TestObjColorMathPartition(void) {
   SimRenderMetadata_EndRecord(16);
 
   SimFrameData frame;
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.object_count == 3);
   CHECK(!frame.objects[0].color_math_eligible);
   CHECK(frame.objects[1].color_math_eligible);
@@ -1306,13 +1194,11 @@ static void TestAtlasFailureFallback(void) {
   CHECK(SimRenderMetadata_CopyAtlasInput(&atlas));
   CHECK(atlas.object_count == 2);
   /* A failure reported by the sole atlas builder fails the atlas closed. */
-  CHECK(SimRenderMetadata_CommitAtlas(
-      atlas.build_serial, atlas.objects, atlas.object_count, false,
-      64, 64, 0, 0, kSimMetadataIntegrity_AtlasRasterFailure));
+  CHECK(SimRenderMetadata_CommitAtlas(atlas.build_serial, atlas.objects, atlas.object_count, false,
+                                      64, 64, 0, 0, kSimMetadataIntegrity_AtlasRasterFailure));
 
   SimFrameData frame;
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(!frame.atlas_valid);
   CHECK(!frame.metadata_valid);
   CHECK(frame.integrity_flags & kSimMetadataIntegrity_AtlasRasterFailure);
@@ -1335,12 +1221,10 @@ static void TestCloudCoverage(void) {
    * the ramp -- otherwise there is a band that culls sprites while still
    * looking like clear sky. */
   float at_edge = Sim3D_CloudCoverage(x0, 100, x0, x1, y0, y1, inset, falloff);
-  CHECK(at_edge > 0.30f && at_edge < 0.36f);   /* inset / (inset + falloff) */
+  CHECK(at_edge > 0.30f && at_edge < 0.36f); /* inset / (inset + falloff) */
   /* Full cover once past the falloff, and it saturates rather than growing. */
-  CHECK(Sim3D_CloudCoverage(x0 - falloff, 100, x0, x1, y0, y1, inset,
-                            falloff) == 1.0f);
-  CHECK(Sim3D_CloudCoverage(x0 - 500, 100, x0, x1, y0, y1, inset,
-                            falloff) == 1.0f);
+  CHECK(Sim3D_CloudCoverage(x0 - falloff, 100, x0, x1, y0, y1, inset, falloff) == 1.0f);
+  CHECK(Sim3D_CloudCoverage(x0 - 500, 100, x0, x1, y0, y1, inset, falloff) == 1.0f);
   /* Clear well inside, so the playable centre is never veiled. */
   CHECK(Sim3D_CloudCoverage(200, 112, x0, x1, y0, y1, inset, falloff) == 0.0f);
   /* Monotonic outward. */
@@ -1351,26 +1235,19 @@ static void TestCloudCoverage(void) {
   /* Symmetric on every edge -- OAM cannot place a sprite above or below the
    * window either -- and a corner takes the larger axis, so it is never
    * thinner than the edges meeting there. */
-  CHECK(Sim3D_CloudCoverage(x1, 100, x0, x1, y0, y1, inset, falloff)
-        == at_edge);
-  CHECK(Sim3D_CloudCoverage(200, y0, x0, x1, y0, y1, inset, falloff)
-        == at_edge);
-  CHECK(Sim3D_CloudCoverage(200, y1, x0, x1, y0, y1, inset, falloff)
-        == at_edge);
-  CHECK(Sim3D_CloudCoverage(x0, y0, x0, x1, y0, y1, inset, falloff)
-        == at_edge);
+  CHECK(Sim3D_CloudCoverage(x1, 100, x0, x1, y0, y1, inset, falloff) == at_edge);
+  CHECK(Sim3D_CloudCoverage(200, y0, x0, x1, y0, y1, inset, falloff) == at_edge);
+  CHECK(Sim3D_CloudCoverage(200, y1, x0, x1, y0, y1, inset, falloff) == at_edge);
+  CHECK(Sim3D_CloudCoverage(x0, y0, x0, x1, y0, y1, inset, falloff) == at_edge);
 
   /* The inset is charged against BOTH sides of each axis, and the vertical
    * extent is much the shorter, so an unclamped inset would meet itself in
    * the middle and veil the playable centre. A huge inset must still leave
    * the centre clear. */
-  CHECK(Sim3D_CloudCoverage(200, 112, x0, x1, y0, y1, 5000.0f, falloff)
-        == 0.0f);
-  CHECK(Sim3D_CloudCoverage(200, 112, x0, x1, y0, y1, 100.0f, falloff)
-        == 0.0f);
+  CHECK(Sim3D_CloudCoverage(200, 112, x0, x1, y0, y1, 5000.0f, falloff) == 0.0f);
+  CHECK(Sim3D_CloudCoverage(200, 112, x0, x1, y0, y1, 100.0f, falloff) == 0.0f);
   /* A negative inset is treated as none rather than pushing the ramp out. */
-  CHECK(Sim3D_CloudCoverage(x0, 100, x0, x1, y0, y1, -50.0f, falloff)
-        == 0.0f);
+  CHECK(Sim3D_CloudCoverage(x0, 100, x0, x1, y0, y1, -50.0f, falloff) == 0.0f);
 
   /* A degenerate ramp is a hard edge, not a division by zero. */
   CHECK(Sim3D_CloudCoverage(200, 112, x0, x1, y0, y1, 0.0f, 0.0f) == 0.0f);
@@ -1388,36 +1265,30 @@ static void TestCullProximity(void) {
   CHECK(Sim3D_CullProximity((int16_t)x1, 120, ml, mr, 0, 0, lead, sq, li) == 1.0f);
   CHECK(Sim3D_CullProximity((int16_t)-ml, 120, ml, mr, 0, 0, lead, sq, li) == 1.0f);
   /* Past the edge stays saturated rather than overshooting. */
-  CHECK(Sim3D_CullProximity((int16_t)(x1 + 400), 120, ml, mr, 0, 0, lead, sq, li)
-        == 1.0f);
+  CHECK(Sim3D_CullProximity((int16_t)(x1 + 400), 120, ml, mr, 0, 0, lead, sq, li) == 1.0f);
 
   /* The ramp lives entirely inside the window: `lead` px short of the edge is
    * where it starts, and it rises monotonically from there. */
-  CHECK(Sim3D_CullProximity((int16_t)(x1 - lead), 120, ml, mr, 0, 0, lead, sq, li)
-        == 0.0f);
+  CHECK(Sim3D_CullProximity((int16_t)(x1 - lead), 120, ml, mr, 0, 0, lead, sq, li) == 0.0f);
   float near = Sim3D_CullProximity((int16_t)(x1 - 8), 120, ml, mr, 0, 0, lead, sq, li);
   float far = Sim3D_CullProximity((int16_t)(x1 - 40), 120, ml, mr, 0, 0, lead, sq, li);
   CHECK(near > far && far > 0.0f && near < 1.0f);
 
   /* With zero vertical margins the authentic top/bottom edges retain their
    * old behavior. */
-  CHECK(Sim3D_CullProximity(136, kSimSpriteWindowBiasedHeight, ml, mr, 0, 0, lead,
-                            sq, li) == 1.0f);
+  CHECK(Sim3D_CullProximity(136, kSimSpriteWindowBiasedHeight, ml, mr, 0, 0, lead, sq, li) == 1.0f);
   CHECK(Sim3D_CullProximity(136, -1, ml, mr, 0, 0, lead, sq, li) == 1.0f);
   /* Exact synthetic parts make top/bottom reach explicit. The same old edge
    * is now inside the clear window, and the cues move to the new boundaries. */
-  CHECK(Sim3D_CullProximity(136, kSimSpriteWindowBiasedHeight,
-                            ml, mr, 32, 48, lead, sq, li) == 0.0f);
-  CHECK(Sim3D_CullProximity(136,
-                            kSimSpriteWindowBiasedHeight + 48,
-                            ml, mr, 32, 48, lead, sq, li) == 1.0f);
-  CHECK(Sim3D_CullProximity(136, -32, ml, mr, 32, 48,
-                            lead, sq, li) == 1.0f);
+  CHECK(Sim3D_CullProximity(136, kSimSpriteWindowBiasedHeight, ml, mr, 32, 48, lead, sq, li) ==
+        0.0f);
+  CHECK(Sim3D_CullProximity(136, kSimSpriteWindowBiasedHeight + 48, ml, mr, 32, 48, lead, sq, li) ==
+        1.0f);
+  CHECK(Sim3D_CullProximity(136, -32, ml, mr, 32, 48, lead, sq, li) == 1.0f);
 
   /* A corner is covered at least as much as either edge meeting there. */
   float corner = Sim3D_CullProximity((int16_t)(x1 - 16), 8, ml, mr, 0, 0, lead, sq, li);
-  CHECK(corner >=
-        Sim3D_CullProximity((int16_t)(x1 - 16), 120, ml, mr, 0, 0, lead, sq, li));
+  CHECK(corner >= Sim3D_CullProximity((int16_t)(x1 - 16), 120, ml, mr, 0, 0, lead, sq, li));
 
   /* A degenerate lead is a hard edge, not a division by zero. */
   CHECK(Sim3D_CullProximity(136, 120, ml, mr, 0, 0, 0, sq, li) == 0.0f);
@@ -1442,22 +1313,20 @@ static void TestCullCornerRounding(void) {
    * the edge, so the cull boundary itself does not shift. */
   CHECK(Sim3D_CullProximity((int16_t)x1, 120, ml, mr, 0, 0, lead, radius, li) == 1.0f);
   CHECK(Sim3D_CullProximity((int16_t)-ml, 120, ml, mr, 0, 0, lead, radius, li) == 1.0f);
-  CHECK(Sim3D_CullProximity(136, kSimSpriteWindowBiasedHeight, ml, mr, 0, 0, lead,
-                            radius, li) == 1.0f);
+  CHECK(Sim3D_CullProximity(136, kSimSpriteWindowBiasedHeight, ml, mr, 0, 0, lead, radius, li) ==
+        1.0f);
 
   /* The centre stays clear whatever the radius says. */
   CHECK(Sim3D_CullProximity(136, 120, ml, mr, 0, 0, lead, radius, li) == 0.0f);
 
   /* Diagonals gain cover, which is what rounds the corner inward. */
   for (int inset = 0; inset <= 40; inset += 8) {
-    float flat = Sim3D_CullProximity((int16_t)(x1 - inset),
-                                     (int16_t)(kSimSpriteWindowBiasedHeight -
-                                               inset),
-                                     ml, mr, 0, 0, lead, 0, li);
-    float round = Sim3D_CullProximity((int16_t)(x1 - inset),
-                                      (int16_t)(kSimSpriteWindowBiasedHeight -
-                                                inset),
-                                      ml, mr, 0, 0, lead, radius, li);
+    float flat =
+        Sim3D_CullProximity((int16_t)(x1 - inset), (int16_t)(kSimSpriteWindowBiasedHeight - inset),
+                            ml, mr, 0, 0, lead, 0, li);
+    float round =
+        Sim3D_CullProximity((int16_t)(x1 - inset), (int16_t)(kSimSpriteWindowBiasedHeight - inset),
+                            ml, mr, 0, 0, lead, radius, li);
     CHECK(round >= flat);
   }
 
@@ -1476,13 +1345,13 @@ static void TestCullCornerRounding(void) {
 static void TestSourceCullCover(void) {
   const int lead = 48, ml = 0, mr = 0, sq = 0, li = 0;
   SimSourceRecord clipping = {
-    .tier = kSimRecordTier_World,
-    .anchor_valid = 1,
-    .anchor_x = (int16_t)(kSimSpriteWindowBiasedWidth - 4),
-    .anchor_y = 120,
-    .oam_count = 2,
-    .clipped_parts = 3,
-    .clip_reason = kSimClip_Horizontal,
+      .tier = kSimRecordTier_World,
+      .anchor_valid = 1,
+      .anchor_x = (int16_t)(kSimSpriteWindowBiasedWidth - 4),
+      .anchor_y = 120,
+      .oam_count = 2,
+      .clipped_parts = 3,
+      .clip_reason = kSimClip_Horizontal,
   };
   CHECK(Sim3D_SourceCullCover(&clipping, ml, mr, 0, 0, lead, sq, li) > 0.9f);
 
@@ -1504,8 +1373,7 @@ static void TestSourceCullCover(void) {
   synthetic.oam_count = 0;
   synthetic.clipped_parts = 0;
   synthetic.synthetic_parts = 1;
-  CHECK(Sim3D_SourceCullCover(&synthetic, ml, mr, 0, 0,
-                              lead, sq, li) > 0.9f);
+  CHECK(Sim3D_SourceCullCover(&synthetic, ml, mr, 0, 0, lead, sq, li) > 0.9f);
 
   /* Fixed-tier furniture is screen space and has no town position. */
   SimSourceRecord fixed = clipping;
@@ -1530,28 +1398,24 @@ static void TestCullLiftInset(void) {
 
   /* The bottom edge moves up by the inset: what used to be the boundary is
    * now well past it, and the new boundary sits `inset` rows higher. */
-  CHECK(Sim3D_CullProximity(136, (int16_t)(bottom - inset), ml, mr, 0, 0, lead, sq,
-                            inset) == 1.0f);
+  CHECK(Sim3D_CullProximity(136, (int16_t)(bottom - inset), ml, mr, 0, 0, lead, sq, inset) == 1.0f);
   /* ...and a record that far in was still clear without the inset. */
-  CHECK(Sim3D_CullProximity(136, (int16_t)(bottom - inset), ml, mr, 0, 0, lead, sq,
-                            0) < 1.0f);
+  CHECK(Sim3D_CullProximity(136, (int16_t)(bottom - inset), ml, mr, 0, 0, lead, sq, 0) < 1.0f);
 
   /* A lifted record culls on its unlifted anchor, so the test that matters is
    * that the anchor's cull row is already fully covered. */
-  CHECK(Sim3D_CullProximity(136, (int16_t)bottom, ml, mr, 0, 0, lead, sq, inset)
-        == 1.0f);
+  CHECK(Sim3D_CullProximity(136, (int16_t)bottom, ml, mr, 0, 0, lead, sq, inset) == 1.0f);
 
   /* The TOP edge is untouched -- lift is toward negative y, so that side is
    * already conservative and insetting it would only cost bright area. */
   CHECK(Sim3D_CullProximity(136, 0, ml, mr, 0, 0, lead, sq, inset) ==
         Sim3D_CullProximity(136, 0, ml, mr, 0, 0, lead, sq, 0));
-  CHECK(Sim3D_CullProximity(136, (int16_t)(0 + inset), ml, mr, 0, 0, lead, sq,
-                            inset) ==
+  CHECK(Sim3D_CullProximity(136, (int16_t)(0 + inset), ml, mr, 0, 0, lead, sq, inset) ==
         Sim3D_CullProximity(136, (int16_t)(0 + inset), ml, mr, 0, 0, lead, sq, 0));
 
   /* Horizontal is untouched too: the lift is vertical. */
-  CHECK(Sim3D_CullProximity((int16_t)(kSimSpriteWindowBiasedWidth + mr), 120,
-                            ml, mr, 0, 0, lead, sq, inset) == 1.0f);
+  CHECK(Sim3D_CullProximity((int16_t)(kSimSpriteWindowBiasedWidth + mr), 120, ml, mr, 0, 0, lead,
+                            sq, inset) == 1.0f);
   CHECK(Sim3D_CullProximity(136, 120, ml, mr, 0, 0, lead, sq, inset) ==
         Sim3D_CullProximity(136, 120, ml, mr, 0, 0, lead, sq, 0));
 
@@ -1559,9 +1423,8 @@ static void TestCullLiftInset(void) {
   CHECK(Sim3D_CullProximity(136, 120, ml, mr, 0, 0, lead, sq, 100000) >= 0.0f);
   CHECK(Sim3D_CullProximity(136, 120, ml, mr, 0, 0, lead, sq, 100000) <= 1.0f);
   /* Negative is treated as none. */
-  CHECK(Sim3D_CullProximity(136, (int16_t)(bottom - 8), ml, mr, 0, 0, lead, sq, -9)
-        == Sim3D_CullProximity(136, (int16_t)(bottom - 8), ml, mr, 0, 0, lead, sq,
-                               0));
+  CHECK(Sim3D_CullProximity(136, (int16_t)(bottom - 8), ml, mr, 0, 0, lead, sq, -9) ==
+        Sim3D_CullProximity(136, (int16_t)(bottom - 8), ml, mr, 0, 0, lead, sq, 0));
 }
 
 /* The inset must be a constant of the classifier, not of the live record
@@ -1575,11 +1438,11 @@ static void TestMaxDrawLift(void) {
   /* No record may ever be lifted past the inset, or it would cull inside the
    * bright area after all. */
   SimSourceRecord flying = {
-    .tier = kSimRecordTier_World,
-    .anchor_valid = 1,
-    .record_address = kActRaiserWram_SimAngelRecord,
-    .type = 0x0C,
-    .clipped_parts = 1,
+      .tier = kSimRecordTier_World,
+      .anchor_valid = 1,
+      .record_address = kActRaiserWram_SimAngelRecord,
+      .type = 0x0C,
+      .clipped_parts = 1,
   };
   for (unsigned scale = 50; scale <= 400; scale += 50)
     CHECK(Sim3D_SourceDrawLift(&flying, scale) <= Sim3D_MaxDrawLift(scale));
@@ -1590,12 +1453,12 @@ static void TestMaxDrawLift(void) {
  * entry in objects[], and it is the one whose placement matters most. */
 static void TestSourceDrawLift(void) {
   SimSourceRecord flying = {
-    .tier = kSimRecordTier_World,
-    .anchor_valid = 1,
-    .record_address = kActRaiserWram_SimAngelRecord,
-    .type = 0x0C,
-    .oam_count = 0,       /* fully culled: no fragment to read a height from */
-    .clipped_parts = 4,
+      .tier = kSimRecordTier_World,
+      .anchor_valid = 1,
+      .record_address = kActRaiserWram_SimAngelRecord,
+      .type = 0x0C,
+      .oam_count = 0, /* fully culled: no fragment to read a height from */
+      .clipped_parts = 4,
   };
   CHECK(Sim3D_SourceDrawLift(&flying, 100) == kSimVirtualHeight_Flying);
   /* The presentation height scale carries through, so cover follows the
@@ -1623,11 +1486,10 @@ static void TestSourceDrawLift(void) {
  * is the ROM's), must not resurrect a shadow, and must not spread to either
  * the cloud shadow ellipse or ordinary grounded actors. */
 static void TestOverheadTrait(void) {
-  const uint16_t sky[] = { 0xD9E5, 0xDA4B, 0xDAA1, 0xDAF7, 0xDB5C,
-                           0xDC77, 0xDBC1, 0xDC1C, 0xDCD2 };
+  const uint16_t sky[] = {0xD9E5, 0xDA4B, 0xDAA1, 0xDAF7, 0xDB5C, 0xDC77, 0xDBC1, 0xDC1C, 0xDCD2};
   for (unsigned i = 0; i < sizeof(sky) / sizeof(sky[0]); i++) {
-    SimObjectClassification c = Sim3D_ClassifyObject(
-        kSimRecordTier_World, 0x02, 1, kActRaiserWram_SimWorldRecords, sky[i]);
+    SimObjectClassification c =
+        Sim3D_ClassifyObject(kSimRecordTier_World, 0x02, 1, kActRaiserWram_SimWorldRecords, sky[i]);
     CHECK(c.traits & kSimObjectTrait_Overhead);
     /* Still ground-anchored: an overhead sort must not become a lift, or the
      * bolt detaches from the terrain it strikes. */
@@ -1637,30 +1499,27 @@ static void TestOverheadTrait(void) {
     CHECK(c.traits & kSimObjectTrait_RecordOriginAnchor);
   }
 
-  SimObjectClassification shadow = Sim3D_ClassifyObject(
-      kSimRecordTier_World, 0x08, 1, kActRaiserWram_SimWorldRecords, 0xDA22);
+  SimObjectClassification shadow =
+      Sim3D_ClassifyObject(kSimRecordTier_World, 0x08, 1, kActRaiserWram_SimWorldRecords, 0xDA22);
   CHECK(!(shadow.traits & kSimObjectTrait_Overhead));
 
   /* The player angel and airborne enemies are above voxel terrain, while an
    * ordinary grounded record stays in the terrain depth sort. */
-  SimObjectClassification angel = Sim3D_ClassifyObject(
-      kSimRecordTier_World, 0x0C, 0,
-      kActRaiserWram_SimAngelRecord, 0xA627);
+  SimObjectClassification angel =
+      Sim3D_ClassifyObject(kSimRecordTier_World, 0x0C, 0, kActRaiserWram_SimAngelRecord, 0xA627);
   CHECK(angel.traits & kSimObjectTrait_Overhead);
   CHECK(angel.height_class == kSimHeightClass_Flying);
   CHECK(angel.virtual_height == kSimVirtualHeight_Flying);
 
-  SimObjectClassification grounded = Sim3D_ClassifyObject(
-      kSimRecordTier_World, 0x02, 0, kActRaiserWram_SimWorldRecords, 0xE000);
+  SimObjectClassification grounded =
+      Sim3D_ClassifyObject(kSimRecordTier_World, 0x02, 0, kActRaiserWram_SimWorldRecords, 0xE000);
   CHECK(!(grounded.traits & kSimObjectTrait_Overhead));
-  SimObjectClassification enemy = Sim3D_ClassifyObject(
-      kSimRecordTier_World, 0x12, 0,
-      kActRaiserWram_SimWorldRecords, 0xE0A0);
+  SimObjectClassification enemy =
+      Sim3D_ClassifyObject(kSimRecordTier_World, 0x12, 0, kActRaiserWram_SimWorldRecords, 0xE0A0);
   CHECK(enemy.traits & kSimObjectTrait_Overhead);
   /* A classified contact state must not inherit the airborne ordering. */
-  SimObjectClassification striking = Sim3D_ClassifyObject(
-      kSimRecordTier_World, 0x12, 6,
-      kActRaiserWram_SimWorldRecords, 0xE0A0);
+  SimObjectClassification striking =
+      Sim3D_ClassifyObject(kSimRecordTier_World, 0x12, 6, kActRaiserWram_SimWorldRecords, 0xE0A0);
   CHECK(!(striking.traits & kSimObjectTrait_Overhead));
   CHECK(striking.height_class == kSimHeightClass_GroundStrike);
 }
@@ -1670,10 +1529,14 @@ static void TestOverheadTrait(void) {
  * deliberately do not. */
 static void TestShadowCasterSelection(void) {
   SimRenderObject object = {
-    .tier = kSimRecordTier_World,
-    .atlas_valid = 1,
-    .atlas_w = 16, .atlas_h = 24,
-    .local_x0 = -8, .local_y0 = -24, .local_x1 = 8, .local_y1 = 0,
+      .tier = kSimRecordTier_World,
+      .atlas_valid = 1,
+      .atlas_w = 16,
+      .atlas_h = 24,
+      .local_x0 = -8,
+      .local_y0 = -24,
+      .local_x1 = 8,
+      .local_y1 = 0,
   };
   CHECK(Sim3D_ObjectCastsShadow(&object));
 
@@ -1715,15 +1578,14 @@ static void TestShadowCasterSelection(void) {
 
   /* Spot-check that the classifier's own output agrees, so the two cannot
    * drift apart: the classified traits are the only input that matters. */
-  SimObjectClassification arrow = Sim3D_ClassifyObject(
-      kSimRecordTier_World, 0x04, 0, kActRaiserWram_SimAngelArrowRecord,
-      0xD967);
+  SimObjectClassification arrow = Sim3D_ClassifyObject(kSimRecordTier_World, 0x04, 0,
+                                                       kActRaiserWram_SimAngelArrowRecord, 0xD967);
   SimRenderObject arrow_object = object;
   arrow_object.traits = arrow.traits;
   CHECK(!Sim3D_ObjectCastsShadow(&arrow_object));
 
-  SimObjectClassification person = Sim3D_ClassifyObject(
-      kSimRecordTier_World, 0x02, 0, 0x0B34, 0xE676);
+  SimObjectClassification person =
+      Sim3D_ClassifyObject(kSimRecordTier_World, 0x02, 0, 0x0B34, 0xE676);
   SimRenderObject person_object = object;
   person_object.traits = person.traits;
   CHECK(Sim3D_ObjectCastsShadow(&person_object));
@@ -1752,28 +1614,29 @@ static void TestConnectedWorldFrameContract(void) {
   SetTownCell(wram, 1, 5, 5, 0x02);
   for (uint8_t town = 1; town <= kSimTownCount; ++town) {
     wram[kActRaiserWram_CurrentMap] = town;
-    SimRenderMetadata_CaptureFrame(frame, wram, true, false,
-        kSim3DShippedFeatures, 0, kSim3DShippedFeatures);
+    SimRenderMetadata_CaptureFrame(frame, wram, true, false, kSim3DShippedFeatures, 0,
+                                   kSim3DShippedFeatures);
     CHECK(frame->effective_features & kSimFeature_GlobeUnderlay);
     CHECK(frame->world_navigation_towns.enabled_town_mask & 1);
     SimWorldNavigationTowns expected;
     SimWorldNavigationTowns_Capture(wram, &expected);
     CHECK(!memcmp(&frame->world_navigation_towns, &expected, sizeof(expected)));
-    const SimRenderFeatureMask required[] = {kSimFeature_GlobeUnderlay,
-        kSimFeature_WorldUnderlay, kSimFeature_GroundProjection,
-        kSimFeature_SeparatedComposite};
-    for (unsigned i = 0; i < sizeof(required)/sizeof(required[0]); ++i) {
-      SimRenderMetadata_CaptureFrame(frame, wram, true, false,
-          kSim3DShippedFeatures & ~required[i], 0, kSim3DShippedFeatures);
+    const SimRenderFeatureMask required[] = {kSimFeature_GlobeUnderlay, kSimFeature_WorldUnderlay,
+                                             kSimFeature_GroundProjection,
+                                             kSimFeature_SeparatedComposite};
+    for (unsigned i = 0; i < sizeof(required) / sizeof(required[0]); ++i) {
+      SimRenderMetadata_CaptureFrame(frame, wram, true, false, kSim3DShippedFeatures & ~required[i],
+                                     0, kSim3DShippedFeatures);
       CHECK(!(frame->effective_features & kSimFeature_GlobeUnderlay));
       CHECK(!frame->world_navigation_towns.enabled_town_mask);
       CHECK(!frame->world_navigation_towns.object_count);
     }
-    SimRenderMetadata_CaptureFrame(frame, wram, false, false,
-        kSim3DShippedFeatures, 0, kSim3DShippedFeatures);
+    SimRenderMetadata_CaptureFrame(frame, wram, false, false, kSim3DShippedFeatures, 0,
+                                   kSim3DShippedFeatures);
     CHECK(!frame->world_navigation_towns.enabled_town_mask);
   }
-  free(frame); free(wram);
+  free(frame);
+  free(wram);
   SimWorldMap_Shutdown();
 }
 
@@ -1788,8 +1651,7 @@ static void TestSkyPalaceFrameContract(void) {
   wram[kActRaiserWram_WorldFocusY + 1] = 2;
   /* The Palace must not require or rewrite a meaningful Mode-7 matrix. */
   SimFrameData frame;
-  SimRenderMetadata_CaptureFrame(&frame, wram, false, true,
-      kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, false, true, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.view == kSimView_None);
   SimRenderMetadata_CaptureSkyPalaceFrame(&frame, wram, false);
   CHECK(frame.view == kSimView_None);
@@ -1816,8 +1678,7 @@ static void TestSkyPalaceFrameContract(void) {
 
 static void CheckSteadyWorldNavigation(const uint8 *wram) {
   SimFrameData frame;
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, true, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, true, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.view == kSimView_WorldNavigation);
   CHECK(frame.master_enabled);
   CHECK(frame.town == 0);
@@ -1830,8 +1691,7 @@ static void CheckSteadyWorldNavigation(const uint8 *wram) {
   CHECK(frame.world_navigation.matrix[1] == 0);
   CHECK(frame.world_navigation.matrix[2] == 0);
   CHECK(frame.world_navigation.matrix[3] == 0x0200);
-  CHECK(memcmp(frame.world_navigation.matrix,
-               frame.world_navigation.next_matrix,
+  CHECK(memcmp(frame.world_navigation.matrix, frame.world_navigation.next_matrix,
                sizeof(frame.world_navigation.matrix)) == 0);
   CHECK(frame.world_navigation.rotation == 0);
   CHECK(frame.world_navigation.zoom_current == 0x040A);
@@ -1841,8 +1701,7 @@ static void CheckSteadyWorldNavigation(const uint8 *wram) {
   CHECK(frame.underlay_origin_tile_x == 0);
   CHECK(frame.underlay_origin_tile_y == 0);
   CHECK(frame.world_navigation_scene.valid);
-  CHECK(frame.world_navigation_scene.texture_serial ==
-        frame.underlay_serial);
+  CHECK(frame.world_navigation_scene.texture_serial == frame.underlay_serial);
   CHECK(frame.world_navigation_scene.texture_width == 1024);
   CHECK(frame.world_navigation_scene.texture_height == 1024);
   CHECK(frame.world_navigation_scene.tile_width == 128);
@@ -1861,28 +1720,26 @@ static void CheckSteadyWorldNavigation(const uint8 *wram) {
   CHECK(frame.world_navigation_scene.active_region_y == 384);
   CHECK(frame.world_navigation_scene.active_region_width == 256);
   CHECK(frame.world_navigation_scene.active_region_height == 256);
-  CHECK(SimWorldNavigationScene_LocationHaze(
-            &frame.world_navigation_scene, 768.0f, 512.0f, 104.0f) == 0.0f);
-  CHECK(SimWorldNavigationScene_LocationHaze(
-            &frame.world_navigation_scene, 640.0f, 384.0f, 104.0f) == 0.0f);
-  CHECK(SimWorldNavigationScene_LocationHaze(
-            &frame.world_navigation_scene, 500.0f, 384.0f, 104.0f) == 1.0f);
+  CHECK(SimWorldNavigationScene_LocationHaze(&frame.world_navigation_scene, 768.0f, 512.0f,
+                                             104.0f) == 0.0f);
+  CHECK(SimWorldNavigationScene_LocationHaze(&frame.world_navigation_scene, 640.0f, 384.0f,
+                                             104.0f) == 0.0f);
+  CHECK(SimWorldNavigationScene_LocationHaze(&frame.world_navigation_scene, 500.0f, 384.0f,
+                                             104.0f) == 1.0f);
   {
-    const float halfway = SimWorldNavigationScene_LocationHaze(
-        &frame.world_navigation_scene, 588.0f, 512.0f, 104.0f);
+    const float halfway =
+        SimWorldNavigationScene_LocationHaze(&frame.world_navigation_scene, 588.0f, 512.0f, 104.0f);
     CHECK(halfway > 0.49f && halfway < 0.51f);
   }
   float screen_x = 0.0f, screen_y = 0.0f;
-  CHECK(SimWorldNavigationScene_ProjectSource(
-      &frame.world_navigation_scene, 768.0f, 512.0f,
-      &screen_x, &screen_y));
+  CHECK(SimWorldNavigationScene_ProjectSource(&frame.world_navigation_scene, 768.0f, 512.0f,
+                                              &screen_x, &screen_y));
   CHECK(fabsf(screen_x - 128.0f) < 0.001f);
   CHECK(fabsf(screen_y - 112.0f) < 0.001f);
   /* $0200 is 2.0 source pixels per screen pixel, so the steady visible
    * 256x224 window covers exactly 512x448 source pixels. */
-  CHECK(SimWorldNavigationScene_ProjectSource(
-      &frame.world_navigation_scene, 512.0f, 288.0f,
-      &screen_x, &screen_y));
+  CHECK(SimWorldNavigationScene_ProjectSource(&frame.world_navigation_scene, 512.0f, 288.0f,
+                                              &screen_x, &screen_y));
   CHECK(fabsf(screen_x - 0.0f) < 0.001f);
   CHECK(fabsf(screen_y - 0.0f) < 0.001f);
   CHECK(frame.object_count == 0);
@@ -1893,8 +1750,7 @@ static void CheckSteadyWorldNavigation(const uint8 *wram) {
 
 static void CheckAnimatedWorldNavigation(const uint8 *wram) {
   SimFrameData frame;
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, false, true, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, false, true, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.view == kSimView_WorldNavigation);
   CHECK(frame.world_navigation_state_valid);
   CHECK(frame.world_navigation.focus_x == 0x0348);
@@ -1905,8 +1761,7 @@ static void CheckAnimatedWorldNavigation(const uint8 *wram) {
   CHECK(frame.world_navigation.matrix[1] == (int16_t)0x026C);
   CHECK(frame.world_navigation.matrix[2] == (int16_t)0xFD93);
   CHECK(frame.world_navigation.matrix[3] == (int16_t)0x00BC);
-  CHECK(memcmp(frame.world_navigation.matrix,
-               frame.world_navigation.next_matrix,
+  CHECK(memcmp(frame.world_navigation.matrix, frame.world_navigation.next_matrix,
                sizeof(frame.world_navigation.matrix)) == 0);
   CHECK(frame.world_navigation.rotation == 0x0034);
   CHECK(frame.world_navigation.zoom_current == 0x0516);
@@ -1914,9 +1769,8 @@ static void CheckAnimatedWorldNavigation(const uint8 *wram) {
   CHECK(frame.world_navigation.active_location == 1);
   CHECK(frame.world_navigation_scene.valid);
   float screen_x = 0.0f, screen_y = 0.0f;
-  CHECK(SimWorldNavigationScene_ProjectSource(
-      &frame.world_navigation_scene, 840.0f, 568.0f,
-      &screen_x, &screen_y));
+  CHECK(SimWorldNavigationScene_ProjectSource(&frame.world_navigation_scene, 840.0f, 568.0f,
+                                              &screen_x, &screen_y));
   CHECK(fabsf(screen_x - 128.0f) < 0.001f);
   CHECK(fabsf(screen_y - 112.0f) < 0.001f);
 
@@ -1926,15 +1780,12 @@ static void CheckAnimatedWorldNavigation(const uint8 *wram) {
   const float authentic_x = 37.0f, authentic_y = 181.0f;
   const float delta_x = authentic_x - 128.0f;
   const float delta_y = authentic_y - 112.0f;
-  const float source_x = 840.0f +
-      ((float)(int16_t)0x00BC * delta_x +
-       (float)(int16_t)0x026C * delta_y) / 256.0f;
-  const float source_y = 568.0f +
-      ((float)(int16_t)0xFD93 * delta_x +
-       (float)(int16_t)0x00BC * delta_y) / 256.0f;
-  CHECK(SimWorldNavigationScene_ProjectSource(
-      &frame.world_navigation_scene, source_x, source_y,
-      &screen_x, &screen_y));
+  const float source_x =
+      840.0f + ((float)(int16_t)0x00BC * delta_x + (float)(int16_t)0x026C * delta_y) / 256.0f;
+  const float source_y =
+      568.0f + ((float)(int16_t)0xFD93 * delta_x + (float)(int16_t)0x00BC * delta_y) / 256.0f;
+  CHECK(SimWorldNavigationScene_ProjectSource(&frame.world_navigation_scene, source_x, source_y,
+                                              &screen_x, &screen_y));
   CHECK(fabsf(screen_x - authentic_x) < 0.001f);
   CHECK(fabsf(screen_y - authentic_y) < 0.001f);
 }
@@ -1982,8 +1833,7 @@ static void TestWorldNavigationFrameContract(void) {
   /* The setting is independently off by default. State is still captured for
    * diagnostics, but the authentic renderer remains the selected view. */
   SimFrameData frame;
-  SimRenderMetadata_CaptureFrame(
-      &frame, steady, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, steady, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.view == kSimView_None);
   CHECK(!frame.master_enabled);
   CHECK(frame.world_navigation_state_valid);
@@ -1991,39 +1841,34 @@ static void TestWorldNavigationFrameContract(void) {
 
   CheckSteadyWorldNavigation(steady);
   CheckAnimatedWorldNavigation(animated);
-  CHECK(!strcmp(Sim3D_ViewName(kSimView_WorldNavigation),
-                "world_navigation"));
+  CHECK(!strcmp(Sim3D_ViewName(kSimView_WorldNavigation), "world_navigation"));
 
   /* The seventh ROM region is Death Heim, outside the six simulation-town
    * origin table. Zero/unknown selector states have no clear-region cutout:
    * presentation keeps the complete world hazed while the scene stays safe. */
   steady[kActRaiserWram_WorldLocation] = 7;
-  SimRenderMetadata_CaptureFrame(
-      &frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.view == kSimView_WorldNavigation);
   CHECK(frame.world_navigation_scene.active_region_valid);
   CHECK(frame.world_navigation_scene.active_region_x == 640);
   CHECK(frame.world_navigation_scene.active_region_y == 0);
   steady[kActRaiserWram_WorldLocation] = 0;
-  SimRenderMetadata_CaptureFrame(
-      &frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.view == kSimView_WorldNavigation);
   CHECK(!frame.world_navigation_scene.active_region_valid);
-  CHECK(SimWorldNavigationScene_LocationHaze(
-            &frame.world_navigation_scene, 768.0f, 512.0f, 104.0f) == 1.0f);
+  CHECK(SimWorldNavigationScene_LocationHaze(&frame.world_navigation_scene, 768.0f, 512.0f,
+                                             104.0f) == 1.0f);
   steady[kActRaiserWram_WorldLocation] = 8;
-  SimRenderMetadata_CaptureFrame(
-      &frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.view == kSimView_WorldNavigation);
   CHECK(!frame.world_navigation_scene.active_region_valid);
-  CHECK(SimWorldNavigationScene_LocationHaze(
-            &frame.world_navigation_scene, 0.0f, 0.0f, 104.0f) == 1.0f);
+  CHECK(SimWorldNavigationScene_LocationHaze(&frame.world_navigation_scene, 0.0f, 0.0f, 104.0f) ==
+        1.0f);
   steady[kActRaiserWram_WorldLocation] = 1;
 
   /* No complete HLE tilemap means fail closed to authentic Mode 7. */
   SimWorldMap_Shutdown();
-  SimRenderMetadata_CaptureFrame(
-      &frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.view == kSimView_AuthenticFallback);
   CHECK(frame.underlay_serial == 0);
   CHECK(!strcmp(Sim3D_PresentationDecision(&frame).reason, "world_map_unavailable"));
@@ -2035,16 +1880,14 @@ static void TestWorldNavigationFrameContract(void) {
    * authentic renderer for this frame. */
   MakeDevelopedWorldMapAvailable();
   memset(steady + kActRaiserWram_WorldMatrixA, 0, 8);
-  SimRenderMetadata_CaptureFrame(
-      &frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.view == kSimView_AuthenticFallback);
   CHECK(frame.master_enabled);
   CHECK(!strcmp(Sim3D_PresentationDecision(&frame).reason, "invalid_world_transform"));
   CHECK(!frame.world_navigation_scene.valid);
 
   steady[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Title;
-  SimRenderMetadata_CaptureFrame(
-      &frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, steady, false, true, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.view == kSimView_None);
   CHECK(!frame.world_navigation_state_valid);
   CHECK(!frame.world_navigation_scene.valid);
@@ -2113,7 +1956,8 @@ static void TestWorldNavigationCloudCeiling(void) {
     const float cloud = SimWorldNavigationScene_CloudLimbOpacity(t);
     CHECK(isfinite(air) && air >= 0 && air <= .32f && air <= previous_air);
     CHECK(isfinite(cloud) && cloud >= previous_cloud && cloud <= 1);
-    previous_air = air; previous_cloud = cloud;
+    previous_air = air;
+    previous_cloud = cloud;
   }
   CHECK(SimWorldNavigationScene_AtmosphereOpacity(-1) == .32f);
   CHECK(SimWorldNavigationScene_AtmosphereOpacity(1) == 0);
@@ -2131,24 +1975,16 @@ static void TestWorldNavigationCloudCeiling(void) {
   CHECK(SimWorldNavigationScene_CloudLimbOpacity(INFINITY) == 0);
 
   const uint16_t altitude = kSimCloudAltitudeDefaultPx;
-  CHECK(SimWorldNavigationScene_CloudVisibility(
-            kSimWorldNavigationZoomNear, altitude) == 0.0f);
-  CHECK(SimWorldNavigationScene_CloudVisibility(
-            kSimWorldNavigationZoomMiddle, altitude) == 1.0f);
-  CHECK(SimWorldNavigationScene_CloudVisibility(
-            kSimWorldNavigationZoomFar, altitude) == 1.0f);
-  CHECK(SimWorldNavigationScene_CloudVisibility(
-            kSimWorldNavigationZoomNear, 0) == 1.0f);
+  CHECK(SimWorldNavigationScene_CloudVisibility(kSimWorldNavigationZoomNear, altitude) == 0.0f);
+  CHECK(SimWorldNavigationScene_CloudVisibility(kSimWorldNavigationZoomMiddle, altitude) == 1.0f);
+  CHECK(SimWorldNavigationScene_CloudVisibility(kSimWorldNavigationZoomFar, altitude) == 1.0f);
+  CHECK(SimWorldNavigationScene_CloudVisibility(kSimWorldNavigationZoomNear, 0) == 1.0f);
 
-  const uint16_t crossing_zoom =
-      (uint16_t)(kSimWorldNavigationZoomNear + altitude * 4);
-  const float crossing = SimWorldNavigationScene_CloudVisibility(
-      crossing_zoom, altitude);
+  const uint16_t crossing_zoom = (uint16_t)(kSimWorldNavigationZoomNear + altitude * 4);
+  const float crossing = SimWorldNavigationScene_CloudVisibility(crossing_zoom, altitude);
   CHECK(crossing > 0.49f && crossing < 0.51f);
-  CHECK(SimWorldNavigationScene_CloudVisibility(
-            crossing_zoom - 16, altitude) < crossing);
-  CHECK(SimWorldNavigationScene_CloudVisibility(
-            crossing_zoom + 16, altitude) > crossing);
+  CHECK(SimWorldNavigationScene_CloudVisibility(crossing_zoom - 16, altitude) < crossing);
+  CHECK(SimWorldNavigationScene_CloudVisibility(crossing_zoom + 16, altitude) > crossing);
 
   CHECK(SimWorldNavigationScene_MasterFadeAlpha(0) == 255);
   CHECK(SimWorldNavigationScene_MasterFadeAlpha(1) == 238);
@@ -2227,27 +2063,29 @@ static void TestCapturedWorldNavigationFixtures(const char *steady_path,
  * buildings. This pins every class in both, so a future edit that
  * re-merges them fails here rather than on screen. */
 static void TestTerrainHeightClassPredicates(void) {
-  struct { SimHeightClass height_class; bool raised; bool occludable; } cases[] = {
-    /* Standing on the ground: terrain raises them AND may hide them. */
-    { kSimHeightClass_Grounded,         true,  true  },
-    { kSimHeightClass_WaterPlane,       true,  true  },
-    /* Dipping toward the ground: terrain raises them, but they are above the
-     * roofs they reach over and must stay visible. */
-    { kSimHeightClass_GroundEffect,     true,  false },
-    { kSimHeightClass_SemiGrounded,     true,  false },
-    { kSimHeightClass_GroundStrike,     true,  false },
-    /* Absolute altitude above the town: neither raised nor hidden. */
-    { kSimHeightClass_Flying,           false, false },
-    { kSimHeightClass_FlyingProjectile, false, false },
-    { kSimHeightClass_MapPlane,         false, false },
-    { kSimHeightClass_None,             false, false },
+  struct {
+    SimHeightClass height_class;
+    bool raised;
+    bool occludable;
+  } cases[] = {
+      /* Standing on the ground: terrain raises them AND may hide them. */
+      {kSimHeightClass_Grounded, true, true},
+      {kSimHeightClass_WaterPlane, true, true},
+      /* Dipping toward the ground: terrain raises them, but they are above the
+       * roofs they reach over and must stay visible. */
+      {kSimHeightClass_GroundEffect, true, false},
+      {kSimHeightClass_SemiGrounded, true, false},
+      {kSimHeightClass_GroundStrike, true, false},
+      /* Absolute altitude above the town: neither raised nor hidden. */
+      {kSimHeightClass_Flying, false, false},
+      {kSimHeightClass_FlyingProjectile, false, false},
+      {kSimHeightClass_MapPlane, false, false},
+      {kSimHeightClass_None, false, false},
   };
   bool covered[kSimHeightClass_Count] = {false};
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-    CHECK(Sim3D_HeightClassStandsOnTerrain(cases[i].height_class) ==
-          cases[i].raised);
-    CHECK(Sim3D_HeightClassIsOccludable(cases[i].height_class) ==
-          cases[i].occludable);
+    CHECK(Sim3D_HeightClassStandsOnTerrain(cases[i].height_class) == cases[i].raised);
+    CHECK(Sim3D_HeightClassIsOccludable(cases[i].height_class) == cases[i].occludable);
     /* Occludable must imply raised: anything terrain can hide is something
      * terrain also lifts. The converse is the whole point of the split. */
     CHECK(!Sim3D_HeightClassIsOccludable(cases[i].height_class) ||
@@ -2259,12 +2097,10 @@ static void TestTerrainHeightClassPredicates(void) {
     CHECK(covered[i]);
 }
 
-
 static const SimEffectInstance *FindEruptionEffect(const SimFrameData *frame,
-                                                  uint16_t record_address) {
+                                                   uint16_t record_address) {
   for (unsigned i = 0; i < frame->effect_count; i++)
-    if (frame->effects[i].record_address == record_address)
-      return &frame->effects[i];
+    if (frame->effects[i].record_address == record_address) return &frame->effects[i];
   return NULL;
 }
 
@@ -2281,30 +2117,30 @@ static void TestVolcanicEruptionEffectCapture(void) {
   SimFrameData frame;
   const uint16_t record = kActRaiserWram_SimWorldRecords;
 
-  #define CAPTURE_ERUPTION_V(record_, composition_, x_, y_, vy_) do {       \
-    SimRenderMetadata_BeginRecord(                                          \
-        (record_), true, false, (composition_), (x_), (y_),                 \
-        0x0E01, 2, 0, 0);                                                   \
-    SimRenderMetadata_RecordPart(0, 1u << 9);                               \
-    SimRenderMetadata_EndRecord(4);                                         \
-    SimRenderMetadata_CaptureFrame(                                         \
-        &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);    \
+#define CAPTURE_ERUPTION_V(record_, composition_, x_, y_, vy_)                                     \
+  do {                                                                                             \
+    SimRenderMetadata_BeginRecord((record_), true, false, (composition_), (x_), (y_), 0x0E01, 2,   \
+                                  0, 0);                                                           \
+    SimRenderMetadata_RecordPart(0, 1u << 9);                                                      \
+    SimRenderMetadata_EndRecord(4);                                                                \
+    SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0,                  \
+                                   kSimFeature_All);                                               \
   } while (0)
-  #define CAPTURE_ERUPTION_FLAT(composition_, y_, vy_) do {                 \
-    SimRenderMetadata_BeginRecord(                                          \
-        record, true, false, (composition_), 0x0090, (y_),                  \
-        0x0E01, 2, 0, 0);                                                   \
-    SimRenderMetadata_RecordPart(0, 1u << 9);                               \
-    SimRenderMetadata_EndRecord(4);                                         \
-    SimRenderMetadata_CaptureFrame(                                         \
-        &frame, wram, false, false, kSimFeature_All, 0, kSimFeature_All);   \
+#define CAPTURE_ERUPTION_FLAT(composition_, y_, vy_)                                               \
+  do {                                                                                             \
+    SimRenderMetadata_BeginRecord(record, true, false, (composition_), 0x0090, (y_), 0x0E01, 2, 0, \
+                                  0);                                                              \
+    SimRenderMetadata_RecordPart(0, 1u << 9);                                                      \
+    SimRenderMetadata_EndRecord(4);                                                                \
+    SimRenderMetadata_CaptureFrame(&frame, wram, false, false, kSimFeature_All, 0,                 \
+                                   kSimFeature_All);                                               \
   } while (0)
 
-  /* Defaults to a falling fireball. A fireball at zero velocity is the
-   * ROM's unlaunched spawn queue, which the ballistic path deliberately
-   * withholds, so it is never the right default for a visibility test. */
-  #define CAPTURE_ERUPTION(record_, composition_, x_, y_)                   \
-    CAPTURE_ERUPTION_V(record_, composition_, x_, y_, 8)
+/* Defaults to a falling fireball. A fireball at zero velocity is the
+ * ROM's unlaunched spawn queue, which the ballistic path deliberately
+ * withholds, so it is never the right default for a visibility test. */
+#define CAPTURE_ERUPTION(record_, composition_, x_, y_)                                            \
+  CAPTURE_ERUPTION_V(record_, composition_, x_, y_, 8)
 
   /* The ground-impact frames are the burning house's own animation: tiles
    * $086/$088/$08A in palette 1, re-anchored to the sprite centre. They keep
@@ -2370,29 +2206,24 @@ static void TestVolcanicEruptionEffectCapture(void) {
    * build of one throw. Discover it, then hold the ring to it. */
   const unsigned kSpan = kSimEffectTrailSamples * kSimEffectTrailStride;
   unsigned kDelay = 0;
-  for (unsigned i = 1;
-       i < kSimEffectTrailLaunchDelay + kSimEffectTrailLaunchJitter + kSpan +
-           8u;
+  for (unsigned i = 1; i < kSimEffectTrailLaunchDelay + kSimEffectTrailLaunchJitter + kSpan + 8u;
        i++) {
     CAPTURE_ERUPTION_FLAT(0xE7A6, (uint16_t)(0x0010 + i * 8), 8);
     CHECK(frame.effects[0].generation == flight_generation);
     if (!kDelay) {
       if (!frame.effects[0].trail_count) {
         /* Never before the base delay, whatever the jitter rolled. */
-        CHECK(i < (unsigned)kSimEffectTrailLaunchDelay +
-                      kSimEffectTrailLaunchJitter);
+        CHECK(i < (unsigned)kSimEffectTrailLaunchDelay + kSimEffectTrailLaunchJitter);
         continue;
       }
       kDelay = i;
       CHECK(kDelay >= (unsigned)kSimEffectTrailLaunchDelay);
-      CHECK(kDelay < (unsigned)kSimEffectTrailLaunchDelay +
-                         kSimEffectTrailLaunchJitter);
+      CHECK(kDelay < (unsigned)kSimEffectTrailLaunchDelay + kSimEffectTrailLaunchJitter);
     }
     /* One shift every stride builds once retention starts, capped at the
      * capacity. */
     unsigned shifts = (i - kDelay) / kSimEffectTrailStride;
-    unsigned expected = 1 + shifts < kSimEffectTrailSamples
-        ? 1 + shifts : kSimEffectTrailSamples;
+    unsigned expected = 1 + shifts < kSimEffectTrailSamples ? 1 + shifts : kSimEffectTrailSamples;
     CHECK(frame.effects[0].trail_count == expected);
     /* Index 0 is ALWAYS this tick, whatever the stride is doing. */
     CHECK(frame.effects[0].trail[0].world_y == (uint16_t)(0x0010 + i * 8));
@@ -2405,8 +2236,8 @@ static void TestVolcanicEruptionEffectCapture(void) {
    * not (samples - 1): index 1 holds the most recent shift, so index n is n-1
    * shifts behind it and the last index reaches back samples-2 of them. */
   CHECK((uint16_t)(frame.effects[0].trail[0].world_y -
-                   frame.effects[0].trail[kSimEffectTrailSamples - 1].world_y)
-        >= (kSimEffectTrailSamples - 2) * kSimEffectTrailStride * 8);
+                   frame.effects[0].trail[kSimEffectTrailSamples - 1].world_y) >=
+        (kSimEffectTrailSamples - 2) * kSimEffectTrailStride * 8);
 
   /* Landing in the same record slot changes kind, which breaks lifetime
    * continuity: the new ground fire starts its own generation and must not
@@ -2427,29 +2258,27 @@ static void TestVolcanicEruptionEffectCapture(void) {
       tick++;
     }
     CHECK(frame.effects[0].trail_count == 2);
-    SimRenderMetadata_CaptureFrame(
-        &frame, wram, false, false, kSimFeature_All, 0, kSimFeature_All);
+    SimRenderMetadata_CaptureFrame(&frame, wram, false, false, kSimFeature_All, 0, kSimFeature_All);
     CHECK(frame.effects[0].trail_count == 2);
     CHECK(frame.effects[0].trail[0].world_y == (uint16_t)(0x0010 + tick * 8));
   }
 
   /* Three simultaneous fireballs keep independent paths, as the capture's
    * three co-live records do. */
-  static const uint16_t erupt_records[] = { 0x0FA4, 0x0FCA, 0x0FF0 };
-  static const uint16_t erupt_x[] = { 0x00D0, 0x00A0, 0x0110 };
+  static const uint16_t erupt_records[] = {0x0FA4, 0x0FCA, 0x0FF0};
+  static const uint16_t erupt_x[] = {0x00D0, 0x00A0, 0x0110};
   SimRenderMetadata_Reset();
-  const unsigned kSharedTicks = (unsigned)kSimEffectTrailLaunchDelay +
-      kSimEffectTrailLaunchJitter + 2 * kSimEffectTrailStride + 1;
+  const unsigned kSharedTicks = (unsigned)kSimEffectTrailLaunchDelay + kSimEffectTrailLaunchJitter +
+                                2 * kSimEffectTrailStride + 1;
   for (unsigned tick = 0; tick < kSharedTicks; tick++) {
     for (size_t i = 0; i < 3; i++) {
-      SimRenderMetadata_BeginRecord(
-          erupt_records[i], true, false, 0xE7A6, erupt_x[i],
-          (uint16_t)(0x0040 + tick * 16), 0x0E01, 1, 0, (uint16_t)(i * 4));
+      SimRenderMetadata_BeginRecord(erupt_records[i], true, false, 0xE7A6, erupt_x[i],
+                                    (uint16_t)(0x0040 + tick * 16), 0x0E01, 1, 0,
+                                    (uint16_t)(i * 4));
       SimRenderMetadata_RecordPart((uint16_t)(i * 4), 1u << 9);
       SimRenderMetadata_EndRecord((uint16_t)((i + 1) * 4));
     }
-    SimRenderMetadata_CaptureFrame(
-        &frame, wram, false, false, kSimFeature_All, 0, kSimFeature_All);
+    SimRenderMetadata_CaptureFrame(&frame, wram, false, false, kSimFeature_All, 0, kSimFeature_All);
   }
   CHECK(frame.effect_count == 3);
   for (size_t i = 0; i < 3; i++) {
@@ -2458,8 +2287,7 @@ static void TestVolcanicEruptionEffectCapture(void) {
      * agree -- what must hold is that each has a path of its own and that no
      * sample of one ever carries another's column. */
     CHECK(frame.effects[i].trail_count >= 1);
-    CHECK(frame.effects[i].trail[0].world_y ==
-          (uint16_t)(0x0040 + (kSharedTicks - 1) * 16));
+    CHECK(frame.effects[i].trail[0].world_y == (uint16_t)(0x0040 + (kSharedTicks - 1) * 16));
     for (unsigned n = 0; n < frame.effects[i].trail_count; n++)
       CHECK(frame.effects[i].trail[n].world_x == erupt_x[i]);
   }
@@ -2476,56 +2304,68 @@ static void TestVolcanicEruptionEffectCapture(void) {
   CAPTURE_ERUPTION(record, 0xDDA0, 0x00D0, 0x0060);
   CHECK(frame.effect_count == 0);
   SimRenderMetadata_Reset();
-  SimRenderMetadata_BeginRecord(
-      record, true, false, 0xDD9F, 0x00D0, 0x0060, 0x0A01, 2, 0, 0);
+  SimRenderMetadata_BeginRecord(record, true, false, 0xDD9F, 0x00D0, 0x0060, 0x0A01, 2, 0, 0);
   SimRenderMetadata_RecordPart(0, 1u << 9);
   SimRenderMetadata_EndRecord(4);
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(frame.effect_count == 0);
 
-  /* The flight. There is no authentic altitude in this family, so the whole
-   * airborne visual belongs to this pass -- and nothing about it is guessed:
-   * the crater, the impact cell and the time between them are all authored in
-   * the fireball's own script.
-   *
-   * ONE parabola replaces the ROM's THREE phases, and the test drives all
-   * three exactly as record $0FA4 was measured running them: a crater
-   * placement at (144,128), a climb up the crater column to y = -16, a
-   * staging teleport sideways to the landing column, a 76-frame countdown,
-   * and a descent to the landing row. The clock is FRAMES TO LANDING, which
-   * is the only quantity that spans all three -- the record's own position
-   * freezes for the whole countdown, and an arc driven by it has to hide the
-   * fireball there and bring it back at the apex.
-   *
-   * Drives plans directly; the resolver that reads them out of real ROM bytes
-   * is covered by TestEruptionScriptWalk. */
-  #define CAPTURE_ERUPTION_FLIGHT(x_, y_, vy_, plan_) do {                  \
-    SimRenderMetadata_BeginRecord(                                          \
-        record, true, false, 0xE7A6, (x_), (y_), 0x0E01, 2, 0, 0);          \
-    SimRenderMetadata_RecordFlightPlan(plan_);                              \
-    SimRenderMetadata_RecordPart(0, 1u << 9);                               \
-    SimRenderMetadata_EndRecord(4);                                         \
-    SimRenderMetadata_CaptureFrame(                                         \
-        &frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);    \
+/* The flight. There is no authentic altitude in this family, so the whole
+ * airborne visual belongs to this pass -- and nothing about it is guessed:
+ * the crater, the impact cell and the time between them are all authored in
+ * the fireball's own script.
+ *
+ * ONE parabola replaces the ROM's THREE phases, and the test drives all
+ * three exactly as record $0FA4 was measured running them: a crater
+ * placement at (144,128), a climb up the crater column to y = -16, a
+ * staging teleport sideways to the landing column, a 76-frame countdown,
+ * and a descent to the landing row. The clock is FRAMES TO LANDING, which
+ * is the only quantity that spans all three -- the record's own position
+ * freezes for the whole countdown, and an arc driven by it has to hide the
+ * fireball there and bring it back at the apex.
+ *
+ * Drives plans directly; the resolver that reads them out of real ROM bytes
+ * is covered by TestEruptionScriptWalk. */
+#define CAPTURE_ERUPTION_FLIGHT(x_, y_, vy_, plan_)                                                \
+  do {                                                                                             \
+    SimRenderMetadata_BeginRecord(record, true, false, 0xE7A6, (x_), (y_), 0x0E01, 2, 0, 0);       \
+    SimRenderMetadata_RecordFlightPlan(plan_);                                                     \
+    SimRenderMetadata_RecordPart(0, 1u << 9);                                                      \
+    SimRenderMetadata_EndRecord(4);                                                                \
+    SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0,                  \
+                                   kSimFeature_All);                                               \
   } while (0)
 
-  /* What the script says while the staging teleport is still ahead of the
-   * cursor -- the crater placement and the whole climb. */
-  #define ERUPTION_PLAN(landing_x_, landing_y_, frames_)                     \
-      ((SimEruptionFlightPlan){                                              \
-        .fall_pixels = (landing_y_) + 16, .crater_x = 144, .crater_y = 128,  \
-        .landing_x = (landing_x_), .landing_y = (landing_y_),                \
-        .entry_y = -16, .frames_to_land = (frames_), .valid = 1,             \
-        .crater_valid = 1, .landing_valid = 1 })
-  /* And what it says once that teleport has executed: the clock still runs,
-   * the destination is no longer readable. The arc must fly the snapshot it
-   * took during the climb rather than lose the throw here. */
-  #define ERUPTION_PLAN_FLYING(frames_) ((SimEruptionFlightPlan){            \
-      .crater_x = 144, .crater_y = 128, .frames_to_land = (frames_),         \
-      .valid = 1, .crater_valid = 1 })
-  enum { kCraterX = 144, kCraterY = 128, kEntryRow = -16,
-         kLandX = 208, kLandY = 96, kThrowFrames = 93 };
+/* What the script says while the staging teleport is still ahead of the
+ * cursor -- the crater placement and the whole climb. */
+#define ERUPTION_PLAN(landing_x_, landing_y_, frames_)                                             \
+  ((SimEruptionFlightPlan){.fall_pixels = (landing_y_) + 16,                                       \
+                           .crater_x = 144,                                                        \
+                           .crater_y = 128,                                                        \
+                           .landing_x = (landing_x_),                                              \
+                           .landing_y = (landing_y_),                                              \
+                           .entry_y = -16,                                                         \
+                           .frames_to_land = (frames_),                                            \
+                           .valid = 1,                                                             \
+                           .crater_valid = 1,                                                      \
+                           .landing_valid = 1})
+/* And what it says once that teleport has executed: the clock still runs,
+ * the destination is no longer readable. The arc must fly the snapshot it
+ * took during the climb rather than lose the throw here. */
+#define ERUPTION_PLAN_FLYING(frames_)                                                              \
+  ((SimEruptionFlightPlan){.crater_x = 144,                                                        \
+                           .crater_y = 128,                                                        \
+                           .frames_to_land = (frames_),                                            \
+                           .valid = 1,                                                             \
+                           .crater_valid = 1})
+  enum {
+    kCraterX = 144,
+    kCraterY = 128,
+    kEntryRow = -16,
+    kLandX = 208,
+    kLandY = 96,
+    kThrowFrames = 93
+  };
 
   /* A record still parked out of play resolves a perfectly good flight -- its
    * script walks to a landing from wherever the cursor is -- so the throw
@@ -2543,13 +2383,11 @@ static void TestVolcanicEruptionEffectCapture(void) {
    * down-map by the same rise, so both offsets apply or the fireball leaves
    * from behind the mountain it is coming out of. */
   SimRenderMetadata_Reset();
-  CAPTURE_ERUPTION_FLIGHT(kCraterX, kCraterY, 0,
-                          ERUPTION_PLAN(kLandX, kLandY, kThrowFrames));
+  CAPTURE_ERUPTION_FLIGHT(kCraterX, kCraterY, 0, ERUPTION_PLAN(kLandX, kLandY, kThrowFrames));
   CHECK(frame.effect_count == 1);
   CHECK(frame.effects[0].world_x == kCraterX);
   CHECK(frame.effects[0].world_y == kCraterY + kSimEruptionCraterDrop);
-  CHECK(frame.effects[0].geometry.data.point.height ==
-        kSimEruptionCraterLift);
+  CHECK(frame.effects[0].geometry.data.point.height == kSimEruptionCraterLift);
 
   /* Now fly the rest of the measured life cycle. The record climbs its own
    * column, teleports sideways, sits out the countdown and drops; the throw
@@ -2560,30 +2398,33 @@ static void TestVolcanicEruptionEffectCapture(void) {
   for (int frames = kThrowFrames - 1; frames >= 0; frames--) {
     int16_t x, y;
     SimEruptionFlightPlan plan;
-    if (frames > kThrowFrames - 10) {          /* climbing the crater column */
+    if (frames > kThrowFrames - 10) { /* climbing the crater column */
       x = kCraterX;
       y = (int16_t)(kCraterY - (kThrowFrames - 1 - frames) * 16);
       plan = ERUPTION_PLAN(kLandX, kLandY, frames);
     } else {
       /* Staged and then descending. Position is the ROM's; the arc is not. */
       x = kLandX;
-      y = frames > 8 ? (int16_t)kEntryRow
-                     : (int16_t)(kLandY - frames * 12);
+      y = frames > 8 ? (int16_t)kEntryRow : (int16_t)(kLandY - frames * 12);
       if (y > kLandY) y = kLandY;
       plan = ERUPTION_PLAN_FLYING(frames);
     }
-    CAPTURE_ERUPTION_FLIGHT((uint16_t)x, (uint16_t)y, frames > 8 ? 0 : 8,
-                            plan);
+    CAPTURE_ERUPTION_FLIGHT((uint16_t)x, (uint16_t)y, frames > 8 ? 0 : 8, plan);
     /* THE POINT OF THE WHOLE CLOCK: never withheld between launch and
      * landing. The countdown is two thirds of the flight, and an arc driven
      * by the record's position has to hide the fireball for all of it. */
     /* The EFFECT is the throw while the art is suppressed, so this asks
      * whether the fireball exists at all, not whether its billboard drew. */
-    if (frame.effect_count == 0) { ever_hidden = true; continue; }
+    if (frame.effect_count == 0) {
+      ever_hidden = true;
+      continue;
+    }
     int16_t h = frame.effects[0].geometry.data.point.height;
     if (h > apex) apex = h;
-    if (rising) { if (h < previous_h) rising = false; }
-    else CHECK(h <= previous_h);   /* one apex, not a sawtooth */
+    if (rising) {
+      if (h < previous_h) rising = false;
+    } else
+      CHECK(h <= previous_h); /* one apex, not a sawtooth */
     previous_h = h;
     int here = (int)frame.effects[0].world_x, step = here - previous_x;
     if (step < min_step) min_step = step;
@@ -2591,8 +2432,8 @@ static void TestVolcanicEruptionEffectCapture(void) {
     previous_x = here;
   }
   CHECK(!ever_hidden);
-  CHECK(!rising);                            /* came back down */
-  CHECK(apex > kSimEruptionCraterLift);      /* actually thrown, not dropped */
+  CHECK(!rising);                       /* came back down */
+  CHECK(apex > kSimEruptionCraterLift); /* actually thrown, not dropped */
   CHECK(apex <= kSimEruptionArcApexMax);
   /* A steady ground track is the whole difference between a throw and the
    * sideways lerp this replaces: a decaying correction covers most of its
@@ -2619,15 +2460,12 @@ static void TestVolcanicEruptionEffectCapture(void) {
   CHECK(frame.effects[0].travel_valid);
   /* Pointing somewhere: a zero tangent leaves the art upright, which on a
    * ballistic arc reads as a sprite being slid around. */
-  CHECK(frame.effects[0].travel_x || frame.effects[0].travel_y ||
-        frame.effects[0].travel_height);
+  CHECK(frame.effects[0].travel_x || frame.effects[0].travel_y || frame.effects[0].travel_height);
   /* And the art the renderer reaches for is found by composition, so a record
    * whose own sprite the window dropped can borrow a sibling's identical
    * entry from the same frame. */
-  CHECK(Sim3D_VolcanoFireballPhase(0xE7A6) ==
-        kSimEffectPhase_VolcanoFireballB);
-  CHECK(Sim3D_VolcanoFireballPhase(0xE7D0) ==
-        kSimEffectPhase_VolcanoFireballA);
+  CHECK(Sim3D_VolcanoFireballPhase(0xE7A6) == kSimEffectPhase_VolcanoFireballB);
+  CHECK(Sim3D_VolcanoFireballPhase(0xE7D0) == kSimEffectPhase_VolcanoFireballA);
   CHECK(Sim3D_VolcanoFireballPhase(0xDD9F) == kSimEffectPhase_None);
   /* And the two frames are not interchangeable. The ROM draws a climbing
    * fireball pointing up and a falling one pointing down, and swaps between
@@ -2646,9 +2484,8 @@ static void TestVolcanicEruptionEffectCapture(void) {
     SimRenderMetadata_Reset();
     for (int frames = kThrowFrames + 40; frames >= 0; frames--) {
       CAPTURE_ERUPTION_FLIGHT(kLandX, (uint16_t)(int16_t)kEntryRow, 0,
-                              frames == kThrowFrames + 40
-                                  ? ERUPTION_PLAN(kLandX, kLandY, frames)
-                                  : ERUPTION_PLAN_FLYING(frames));
+                              frames == kThrowFrames + 40 ? ERUPTION_PLAN(kLandX, kLandY, frames)
+                                                          : ERUPTION_PLAN_FLYING(frames));
       int16_t h = frame.effects[0].geometry.data.point.height;
       if (h > slow_apex) slow_apex = h;
     }
@@ -2686,8 +2523,7 @@ static void TestVolcanicEruptionEffectCapture(void) {
   CHECK(frame.view == kSimView_Enhanced);
   CHECK(!frame.master_enabled);
   CHECK(frame.effect_count == 1);
-  CHECK(frame.effects[0].geometry.data.point.height ==
-        kSimVirtualHeight_Flying);
+  CHECK(frame.effects[0].geometry.data.point.height == kSimVirtualHeight_Flying);
   CHECK(frame.effects[0].world_x == 0x0090);
   CHECK(frame.effects[0].world_y == 0xFFF0);
 
@@ -2697,8 +2533,7 @@ static void TestVolcanicEruptionEffectCapture(void) {
     CAPTURE_ERUPTION_FLAT(0xE7A6, (uint16_t)(0xFFF0 + tick * 8), 8);
     /* The plane never moves and the published position is the record's own,
      * however far it travels. */
-    CHECK(frame.effects[0].geometry.data.point.height ==
-          kSimVirtualHeight_Flying);
+    CHECK(frame.effects[0].geometry.data.point.height == kSimVirtualHeight_Flying);
     CHECK(frame.effects[0].world_x == 0x0090);
     CHECK(frame.effects[0].world_y == (uint16_t)(0xFFF0 + tick * 8));
   }
@@ -2718,9 +2553,8 @@ static void TestVolcanicEruptionEffectCapture(void) {
      * that lands on -- the launch delay is rolled per throw. */
     int n = 0;
     while (frame.effects[0].trail_count < 4 && n < 512) {
-      CAPTURE_ERUPTION_FLIGHT(
-          kCraterX, (uint16_t)(kCraterY - n * 16), 0,
-          ERUPTION_PLAN(kLandX, kLandY, kThrowFrames - n));
+      CAPTURE_ERUPTION_FLIGHT(kCraterX, (uint16_t)(kCraterY - n * 16), 0,
+                              ERUPTION_PLAN(kLandX, kLandY, kThrowFrames - n));
       n++;
     }
     CHECK(frame.effects[0].trail_count == 4);
@@ -2731,19 +2565,15 @@ static void TestVolcanicEruptionEffectCapture(void) {
   /* Landing exactness over every landing row measured across runs
    * 20260818-070141/073137/073455/080109. */
   static const uint16_t kMeasuredLandingRows[] = {
-    64, 96, 112, 144, 160, 192, 208, 224, 256, 272, 288, 320, 336, 352,
+      64, 96, 112, 144, 160, 192, 208, 224, 256, 272, 288, 320, 336, 352,
   };
-  for (size_t n = 0;
-       n < sizeof(kMeasuredLandingRows) / sizeof(kMeasuredLandingRows[0]);
-       n++) {
+  for (size_t n = 0; n < sizeof(kMeasuredLandingRows) / sizeof(kMeasuredLandingRows[0]); n++) {
     const int row = (int)kMeasuredLandingRows[n];
     SimRenderMetadata_Reset();
-    CAPTURE_ERUPTION_FLIGHT(kCraterX, kCraterY, 0,
-                            ERUPTION_PLAN(64, row, kThrowFrames));
+    CAPTURE_ERUPTION_FLIGHT(kCraterX, kCraterY, 0, ERUPTION_PLAN(64, row, kThrowFrames));
     for (int frames = kThrowFrames - 1; frames >= 0; frames--)
-      CAPTURE_ERUPTION_FLIGHT(64, (uint16_t)(int16_t)(frames > 8 ? kEntryRow
-                                                                 : row),
-                              8, ERUPTION_PLAN_FLYING(frames));
+      CAPTURE_ERUPTION_FLIGHT(64, (uint16_t)(int16_t)(frames > 8 ? kEntryRow : row), 8,
+                              ERUPTION_PLAN_FLYING(frames));
     CHECK(frame.effects[0].world_x == 64);
     CHECK(frame.effects[0].world_y == kMeasuredLandingRows[n]);
     CHECK(frame.effects[0].geometry.data.point.height == 0);
@@ -2757,39 +2587,35 @@ static void TestVolcanicEruptionEffectCapture(void) {
    * looking at it. */
   {
     SimRenderMetadata_Reset();
-    CAPTURE_ERUPTION_FLIGHT(kCraterX, kCraterY, 0,
-                            ERUPTION_PLAN(kLandX, kLandY, kThrowFrames));
+    CAPTURE_ERUPTION_FLIGHT(kCraterX, kCraterY, 0, ERUPTION_PLAN(kLandX, kLandY, kThrowFrames));
     for (int frames = kThrowFrames - 1; frames >= 60; frames--)
       CAPTURE_ERUPTION_FLIGHT(kLandX, (uint16_t)(int16_t)kEntryRow, 0,
                               ERUPTION_PLAN_FLYING(frames));
     int16_t before = frame.effects[0].geometry.data.point.height;
     uint16_t before_x = frame.effects[0].world_x;
     CHECK(before > kSimEruptionCraterLift);
-    CHECK(before_x > kCraterX);              /* already left the crater */
+    CHECK(before_x > kCraterX); /* already left the crater */
     for (int frames = 59; frames >= 40; frames--) {
-      SimRenderMetadata_BeginRecord(
-          record, true, false, 0xE7A6, kLandX,
-          (uint16_t)(int16_t)kEntryRow, 0x0E01, 2, 0, 0);
+      SimRenderMetadata_BeginRecord(record, true, false, 0xE7A6, kLandX,
+                                    (uint16_t)(int16_t)kEntryRow, 0x0E01, 2, 0, 0);
       SimRenderMetadata_RecordFlightPlan(ERUPTION_PLAN_FLYING(frames));
       SimRenderMetadata_RecordPart(0, 1u << 9);
       SimRenderMetadata_EndRecord(4);
-      SimRenderMetadata_CaptureFrame(
-          &frame, wram, false, false, kSimFeature_All, 0, kSimFeature_All);
+      SimRenderMetadata_CaptureFrame(&frame, wram, false, false, kSimFeature_All, 0,
+                                     kSimFeature_All);
     }
-    CAPTURE_ERUPTION_FLIGHT(kLandX, (uint16_t)(int16_t)kEntryRow, 0,
-                            ERUPTION_PLAN_FLYING(39));
+    CAPTURE_ERUPTION_FLIGHT(kLandX, (uint16_t)(int16_t)kEntryRow, 0, ERUPTION_PLAN_FLYING(39));
     /* Resumed further along the ground track, not back at the crater. */
     CHECK(frame.effects[0].world_x > before_x);
   }
 
-  #undef ERUPTION_PLAN_FLYING
-  #undef ERUPTION_PLAN
-  #undef CAPTURE_ERUPTION_FLIGHT
-  #undef CAPTURE_ERUPTION_FLAT
-  #undef CAPTURE_ERUPTION
-  #undef CAPTURE_ERUPTION_V
+#undef ERUPTION_PLAN_FLYING
+#undef ERUPTION_PLAN
+#undef CAPTURE_ERUPTION_FLIGHT
+#undef CAPTURE_ERUPTION_FLAT
+#undef CAPTURE_ERUPTION
+#undef CAPTURE_ERUPTION_V
 }
-
 
 /* Captured eruption records, copied byte for byte out of run
  * 20260818-070141. These are the eight live world records $0F0C-$1016 at the
@@ -2801,136 +2627,662 @@ static void TestVolcanicEruptionEffectCapture(void) {
  * ground fire script at the same world_x. */
 static const uint8 kEruptionRecordsGf20723[8 * kActRaiserSimWorldRecordStride] = {
     /* $0F0C */
-    0x00, 0x00, 0x5A, 0xA8, 0x00, 0x00, 0x57, 0xA8,
-    0xA6, 0xE7, 0xB0, 0x00, 0x30, 0x00, 0x01, 0x0E,
-    0x01, 0x00, 0x03, 0x00, 0x37, 0xD1, 0x74, 0xD1,
-    0xFF, 0xFF, 0x00, 0x00, 0x08, 0x00, 0x02, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00,
+    0x00,
+    0x5A,
+    0xA8,
+    0x00,
+    0x00,
+    0x57,
+    0xA8,
+    0xA6,
+    0xE7,
+    0xB0,
+    0x00,
+    0x30,
+    0x00,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x03,
+    0x00,
+    0x37,
+    0xD1,
+    0x74,
+    0xD1,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0x08,
+    0x00,
+    0x02,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
     /* $0F32 */
-    0xE4, 0xFF, 0x56, 0xA8, 0x00, 0x00, 0x53, 0xA8,
-    0xD0, 0xE7, 0xC0, 0x00, 0xF0, 0xFF, 0x01, 0x0E,
-    0x01, 0x00, 0x02, 0x00, 0xB9, 0xD1, 0xF7, 0xD1,
-    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x24, 0x00, 0x00, 0x00,
+    0xE4,
+    0xFF,
+    0x56,
+    0xA8,
+    0x00,
+    0x00,
+    0x53,
+    0xA8,
+    0xD0,
+    0xE7,
+    0xC0,
+    0x00,
+    0xF0,
+    0xFF,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x02,
+    0x00,
+    0xB9,
+    0xD1,
+    0xF7,
+    0xD1,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x24,
+    0x00,
+    0x00,
+    0x00,
     /* $0F58 */
-    0xE6, 0xFF, 0x56, 0xA8, 0x00, 0x00, 0x53, 0xA8,
-    0xD0, 0xE7, 0x70, 0x00, 0xF0, 0xFF, 0x01, 0x0E,
-    0x01, 0x00, 0x02, 0x00, 0x2B, 0xD2, 0x6D, 0xD2,
-    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
+    0xE6,
+    0xFF,
+    0x56,
+    0xA8,
+    0x00,
+    0x00,
+    0x53,
+    0xA8,
+    0xD0,
+    0xE7,
+    0x70,
+    0x00,
+    0xF0,
+    0xFF,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x02,
+    0x00,
+    0x2B,
+    0xD2,
+    0x6D,
+    0xD2,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x06,
+    0x00,
+    0x00,
+    0x00,
     /* $0F7E */
-    0x00, 0x00, 0x56, 0xA8, 0x00, 0x00, 0x53, 0xA8,
-    0xD0, 0xE7, 0x90, 0x00, 0x50, 0x00, 0x01, 0x0E,
-    0x01, 0x00, 0x03, 0x00, 0xB6, 0xD2, 0xE8, 0xD2,
-    0xFF, 0xFF, 0x00, 0x00, 0xF8, 0xFF, 0x02, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00,
+    0x00,
+    0x56,
+    0xA8,
+    0x00,
+    0x00,
+    0x53,
+    0xA8,
+    0xD0,
+    0xE7,
+    0x90,
+    0x00,
+    0x50,
+    0x00,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x03,
+    0x00,
+    0xB6,
+    0xD2,
+    0xE8,
+    0xD2,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0xF8,
+    0xFF,
+    0x02,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
     /* $0FA4 */
-    0xFE, 0xFF, 0x5A, 0xA8, 0x00, 0x00, 0x57, 0xA8,
-    0xA6, 0xE7, 0xD0, 0x00, 0x40, 0x00, 0x01, 0x0E,
-    0x01, 0x00, 0x01, 0x00, 0x30, 0xD3, 0x4E, 0xD3,
-    0xFF, 0xFF, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xFE,
+    0xFF,
+    0x5A,
+    0xA8,
+    0x00,
+    0x00,
+    0x57,
+    0xA8,
+    0xA6,
+    0xE7,
+    0xD0,
+    0x00,
+    0x40,
+    0x00,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x01,
+    0x00,
+    0x30,
+    0xD3,
+    0x4E,
+    0xD3,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0x08,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
     /* $0FCA */
-    0x00, 0x00, 0x5A, 0xA8, 0x00, 0x00, 0x57, 0xA8,
-    0xA6, 0xE7, 0xA0, 0x00, 0x90, 0x00, 0x01, 0x0E,
-    0x01, 0x00, 0x03, 0x00, 0xA8, 0xD3, 0xCC, 0xD3,
-    0xFF, 0xFF, 0x00, 0x00, 0x08, 0x00, 0x02, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00,
+    0x00,
+    0x5A,
+    0xA8,
+    0x00,
+    0x00,
+    0x57,
+    0xA8,
+    0xA6,
+    0xE7,
+    0xA0,
+    0x00,
+    0x90,
+    0x00,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x03,
+    0x00,
+    0xA8,
+    0xD3,
+    0xCC,
+    0xD3,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0x08,
+    0x00,
+    0x02,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
     /* $0FF0 */
-    0xFE, 0xFF, 0x5A, 0xA8, 0x00, 0x00, 0x57, 0xA8,
-    0xA6, 0xE7, 0x10, 0x01, 0xC0, 0x00, 0x01, 0x0E,
-    0x01, 0x00, 0x01, 0x00, 0x19, 0xD4, 0x3F, 0xD4,
-    0xFF, 0xFF, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xFE,
+    0xFF,
+    0x5A,
+    0xA8,
+    0x00,
+    0x00,
+    0x57,
+    0xA8,
+    0xA6,
+    0xE7,
+    0x10,
+    0x01,
+    0xC0,
+    0x00,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x01,
+    0x00,
+    0x19,
+    0xD4,
+    0x3F,
+    0xD4,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0x08,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
     /* $1016 */
-    0xC1, 0xFF, 0x56, 0xA8, 0x00, 0x00, 0x53, 0xA8,
-    0xD0, 0xE7, 0x50, 0x00, 0xF0, 0xFF, 0x01, 0x0E,
-    0x01, 0x00, 0x02, 0x00, 0x98, 0xD4, 0xB1, 0xD4,
-    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x0D, 0x00, 0x00, 0x00,
+    0xC1,
+    0xFF,
+    0x56,
+    0xA8,
+    0x00,
+    0x00,
+    0x53,
+    0xA8,
+    0xD0,
+    0xE7,
+    0x50,
+    0x00,
+    0xF0,
+    0xFF,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x02,
+    0x00,
+    0x98,
+    0xD4,
+    0xB1,
+    0xD4,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x0D,
+    0x00,
+    0x00,
+    0x00,
 };
 
 static const uint8 kEruptionRecordsGf20744[8 * kActRaiserSimWorldRecordStride] = {
     /* $0F0C */
-    0x00, 0x00, 0x5A, 0xA8, 0x00, 0x00, 0x57, 0xA8,
-    0xA6, 0xE7, 0xB0, 0x00, 0xA0, 0x00, 0x01, 0x0E,
-    0x01, 0x00, 0x03, 0x00, 0x37, 0xD1, 0x7B, 0xD1,
-    0xFF, 0xFF, 0x00, 0x00, 0x08, 0x00, 0x02, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00,
+    0x00,
+    0x5A,
+    0xA8,
+    0x00,
+    0x00,
+    0x57,
+    0xA8,
+    0xA6,
+    0xE7,
+    0xB0,
+    0x00,
+    0xA0,
+    0x00,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x03,
+    0x00,
+    0x37,
+    0xD1,
+    0x7B,
+    0xD1,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0x08,
+    0x00,
+    0x02,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
     /* $0F32 */
-    0xCF, 0xFF, 0x56, 0xA8, 0x00, 0x00, 0x53, 0xA8,
-    0xD0, 0xE7, 0xC0, 0x00, 0xF0, 0xFF, 0x01, 0x0E,
-    0x01, 0x00, 0x02, 0x00, 0xB9, 0xD1, 0xF7, 0xD1,
-    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x0F, 0x00, 0x00, 0x00,
+    0xCF,
+    0xFF,
+    0x56,
+    0xA8,
+    0x00,
+    0x00,
+    0x53,
+    0xA8,
+    0xD0,
+    0xE7,
+    0xC0,
+    0x00,
+    0xF0,
+    0xFF,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x02,
+    0x00,
+    0xB9,
+    0xD1,
+    0xF7,
+    0xD1,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x0F,
+    0x00,
+    0x00,
+    0x00,
     /* $0F58 */
-    0xFE, 0xFF, 0x5A, 0xA8, 0x00, 0x00, 0x57, 0xA8,
-    0xA6, 0xE7, 0x70, 0x00, 0x40, 0x00, 0x01, 0x0E,
-    0x01, 0x00, 0x01, 0x00, 0x2B, 0xD2, 0x72, 0xD2,
-    0xFF, 0xFF, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xFE,
+    0xFF,
+    0x5A,
+    0xA8,
+    0x00,
+    0x00,
+    0x57,
+    0xA8,
+    0xA6,
+    0xE7,
+    0x70,
+    0x00,
+    0x40,
+    0x00,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x01,
+    0x00,
+    0x2B,
+    0xD2,
+    0x72,
+    0xD2,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0x08,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
     /* $0F7E */
-    0xFA, 0xFF, 0x56, 0xA8, 0x00, 0x00, 0x53, 0xA8,
-    0xD0, 0xE7, 0x80, 0x00, 0xF0, 0xFF, 0x01, 0x0E,
-    0x01, 0x00, 0x02, 0x00, 0xB6, 0xD2, 0xF3, 0xD2,
-    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x2E, 0x00, 0x00, 0x00,
+    0xFA,
+    0xFF,
+    0x56,
+    0xA8,
+    0x00,
+    0x00,
+    0x53,
+    0xA8,
+    0xD0,
+    0xE7,
+    0x80,
+    0x00,
+    0xF0,
+    0xFF,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x02,
+    0x00,
+    0xB6,
+    0xD2,
+    0xF3,
+    0xD2,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x2E,
+    0x00,
+    0x00,
+    0x00,
     /* $0FA4 */
-    0x02, 0x00, 0x5E, 0xA8, 0xFF, 0xFF, 0x5B, 0xA8,
-    0x9F, 0xDD, 0xD0, 0x00, 0x60, 0x00, 0x01, 0x0E,
-    0x01, 0x00, 0x02, 0x00, 0x30, 0xD3, 0x54, 0xD3,
-    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x07, 0x00, 0x00, 0x00,
+    0x02,
+    0x00,
+    0x5E,
+    0xA8,
+    0xFF,
+    0xFF,
+    0x5B,
+    0xA8,
+    0x9F,
+    0xDD,
+    0xD0,
+    0x00,
+    0x60,
+    0x00,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x02,
+    0x00,
+    0x30,
+    0xD3,
+    0x54,
+    0xD3,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x07,
+    0x00,
+    0x00,
+    0x00,
     /* $0FCA */
-    0x04, 0x00, 0x5E, 0xA8, 0xFF, 0xFF, 0x5B, 0xA8,
-    0x9F, 0xDD, 0xA0, 0x00, 0xC0, 0x00, 0x01, 0x0E,
-    0x01, 0x00, 0x02, 0x00, 0xA8, 0xD3, 0xD2, 0xD3,
-    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x09, 0x00, 0x00, 0x00,
+    0x04,
+    0x00,
+    0x5E,
+    0xA8,
+    0xFF,
+    0xFF,
+    0x5B,
+    0xA8,
+    0x9F,
+    0xDD,
+    0xA0,
+    0x00,
+    0xC0,
+    0x00,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x02,
+    0x00,
+    0xA8,
+    0xD3,
+    0xD2,
+    0xD3,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x09,
+    0x00,
+    0x00,
+    0x00,
     /* $0FF0 */
-    0x02, 0x00, 0x5E, 0xA8, 0x00, 0x00, 0x5B, 0xA8,
-    0x9F, 0xDD, 0x10, 0x01, 0x20, 0x01, 0x01, 0x0E,
-    0x01, 0x00, 0x02, 0x00, 0x19, 0xD4, 0x49, 0xD4,
-    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x13, 0x00, 0x00, 0x00,
+    0x02,
+    0x00,
+    0x5E,
+    0xA8,
+    0x00,
+    0x00,
+    0x5B,
+    0xA8,
+    0x9F,
+    0xDD,
+    0x10,
+    0x01,
+    0x20,
+    0x01,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x02,
+    0x00,
+    0x19,
+    0xD4,
+    0x49,
+    0xD4,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x13,
+    0x00,
+    0x00,
+    0x00,
     /* $1016 */
-    0xFF, 0xFF, 0x5A, 0xA8, 0x00, 0x00, 0x57, 0xA8,
-    0xA6, 0xE7, 0x50, 0x00, 0x18, 0x00, 0x01, 0x0E,
-    0x01, 0x00, 0x03, 0x00, 0x98, 0xD4, 0xB4, 0xD4,
-    0xFF, 0xFF, 0x00, 0x00, 0x08, 0x00, 0x01, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xFF,
+    0xFF,
+    0x5A,
+    0xA8,
+    0x00,
+    0x00,
+    0x57,
+    0xA8,
+    0xA6,
+    0xE7,
+    0x50,
+    0x00,
+    0x18,
+    0x00,
+    0x01,
+    0x0E,
+    0x01,
+    0x00,
+    0x03,
+    0x00,
+    0x98,
+    0xD4,
+    0xB4,
+    0xD4,
+    0xFF,
+    0xFF,
+    0x00,
+    0x00,
+    0x08,
+    0x00,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
 };
 
-static uint16_t EruptionField(const uint8 *records, unsigned slot,
-                              unsigned offset) {
+static uint16_t EruptionField(const uint8 *records, unsigned slot, unsigned offset) {
   const uint8 *record = records + slot * kActRaiserSimWorldRecordStride;
   return (uint16_t)(record[offset] | (record[offset + 1] << 8));
 }
 
 /* Replay one captured frame through the producer exactly as the sprite
  * builder does, reading each field at its documented record offset. */
-static void CaptureEruptionFixture(SimFrameData *frame, uint8 *wram,
-                                   const uint8 *records) {
+static void CaptureEruptionFixture(SimFrameData *frame, uint8 *wram, const uint8 *records) {
   enum {
-    kOffsetActorFlags = 0x06, kOffsetComposition = 0x08,
-    kOffsetWorldX = 0x0A, kOffsetWorldY = 0x0C,
-    kOffsetType = 0x0E, kOffsetStatus = 0x10, kOffsetState = 0x12,
-    kOffsetVelocityX = 0x1A, kOffsetVelocityY = 0x1C,
+    kOffsetActorFlags = 0x06,
+    kOffsetComposition = 0x08,
+    kOffsetWorldX = 0x0A,
+    kOffsetWorldY = 0x0C,
+    kOffsetType = 0x0E,
+    kOffsetStatus = 0x10,
+    kOffsetState = 0x12,
+    kOffsetVelocityX = 0x1A,
+    kOffsetVelocityY = 0x1C,
   };
   for (unsigned slot = 0; slot < 8; slot++) {
-    uint16_t address = (uint16_t)(0x0F0C +
-                                  slot * kActRaiserSimWorldRecordStride);
+    uint16_t address = (uint16_t)(0x0F0C + slot * kActRaiserSimWorldRecordStride);
     SimRenderMetadata_BeginRecord(
-        address, true, false,
-        EruptionField(records, slot, kOffsetComposition),
-        EruptionField(records, slot, kOffsetWorldX),
-        EruptionField(records, slot, kOffsetWorldY),
+        address, true, false, EruptionField(records, slot, kOffsetComposition),
+        EruptionField(records, slot, kOffsetWorldX), EruptionField(records, slot, kOffsetWorldY),
         EruptionField(records, slot, kOffsetType),
         (uint16_t)(EruptionField(records, slot, kOffsetState) & 0x7FFF),
-        EruptionField(records, slot, kOffsetStatus),
-        (uint16_t)(slot * 4));
-    SimRenderMetadata_RecordWord06(
-        EruptionField(records, slot, kOffsetActorFlags));
+        EruptionField(records, slot, kOffsetStatus), (uint16_t)(slot * 4));
+    SimRenderMetadata_RecordWord06(EruptionField(records, slot, kOffsetActorFlags));
     SimRenderMetadata_RecordPart((uint16_t)(slot * 4), 1u << 9);
     SimRenderMetadata_EndRecord((uint16_t)((slot + 1) * 4));
   }
@@ -2938,8 +3290,7 @@ static void CaptureEruptionFixture(SimFrameData *frame, uint8 *wram,
    * classify and carry the velocities they do; the projected town's emitter
    * withholds everything airborne it is not flying, which would leave nothing
    * here to inspect and is covered by the synthetic flight tests instead. */
-  SimRenderMetadata_CaptureFrame(
-      frame, wram, false, false, kSimFeature_All, 0, kSimFeature_All);
+  SimRenderMetadata_CaptureFrame(frame, wram, false, false, kSimFeature_All, 0, kSimFeature_All);
 }
 
 static void TestCapturedEruptionRecords(void) {
@@ -2967,8 +3318,7 @@ static void TestCapturedEruptionRecords(void) {
   CHECK(frame.effect_visible_count == 8);
   for (unsigned i = 0; i < frame.source_count; i++) {
     CHECK(frame.sources[i].type == 0x0E01);
-    const SimEffectInstance *effect =
-        FindEruptionEffect(&frame, frame.sources[i].record_address);
+    const SimEffectInstance *effect = FindEruptionEffect(&frame, frame.sources[i].record_address);
     CHECK(effect != NULL);
     if (!effect) continue;
     CHECK(effect->kind == kSimEffect_VolcanoFireball);
@@ -2986,7 +3336,7 @@ static void TestCapturedEruptionRecords(void) {
    * three that landed move to the ground fire's own kind and to the house
    * fire's phase family, at the same world_x they fell down. */
   CaptureEruptionFixture(&frame, wram, kEruptionRecordsGf20744);
-  static const uint16_t kLanded[] = { 0x0FA4, 0x0FCA, 0x0FF0 };
+  static const uint16_t kLanded[] = {0x0FA4, 0x0FCA, 0x0FF0};
   for (size_t n = 0; n < sizeof(kLanded) / sizeof(kLanded[0]); n++) {
     const SimEffectInstance *fire = FindEruptionEffect(&frame, kLanded[n]);
     CHECK(fire != NULL);
@@ -3032,44 +3382,35 @@ static void TestCapturedEruptionRecords(void) {
 
 /* $0A:D330, record $0FA4 */
 static const uint8 kEruptScript0FA4[64] = {
-    0x09, 0x50, 0x00, 0x0E, 0xFF, 0x11, 0x10, 0x10,
-    0x09, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-    0x01, 0x01, 0x01, 0x10, 0x0D, 0xFF, 0x09, 0x4C,
-    0x00, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
-    0x0F, 0x09, 0x14, 0x00, 0x10, 0x09, 0x08, 0x01,
-    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-    0x10, 0x0E, 0xFF, 0x09, 0x14, 0x00, 0x03, 0x03,
-    0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+    0x09, 0x50, 0x00, 0x0E, 0xFF, 0x11, 0x10, 0x10, 0x09, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x10, 0x0D, 0xFF, 0x09, 0x4C, 0x00, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+    0x0F, 0x09, 0x14, 0x00, 0x10, 0x09, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x10, 0x0E, 0xFF, 0x09, 0x14, 0x00, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
 };
 
 /* $0A:D419, record $0FF0 */
 static const uint8 kEruptScript0FF0[64] = {
-    0x09, 0x68, 0x00, 0x0E, 0xFF, 0x11, 0x10, 0x10,
-    0x09, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-    0x01, 0x01, 0x01, 0x10, 0x11, 0xFF, 0x09, 0x1C,
-    0x00, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
-    0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
-    0x03, 0x03, 0x03, 0x03, 0x0F, 0x09, 0x14, 0x00,
-    0x10, 0x09, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01,
-    0x01, 0x01, 0x01, 0x01, 0x10, 0x03, 0xFF, 0x09,
+    0x09, 0x68, 0x00, 0x0E, 0xFF, 0x11, 0x10, 0x10, 0x09, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x10, 0x11, 0xFF, 0x09, 0x1C, 0x00, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+    0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x0F, 0x09, 0x14, 0x00,
+    0x10, 0x09, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x10, 0x03, 0xFF, 0x09,
 };
 
 /* $0A:D498, record $1016 */
 static const uint8 kEruptScript1016[64] = {
-    0x09, 0x70, 0x00, 0x0E, 0xFF, 0x11, 0x10, 0x10,
-    0x09, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-    0x01, 0x01, 0x01, 0x10, 0x05, 0xFF, 0x09, 0x48,
-    0x00, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
-    0x03, 0x0F, 0x09, 0x14, 0x00, 0x10, 0x09, 0x08,
-    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-    0x01, 0x10, 0x04, 0xFF, 0x09, 0x38, 0x00, 0x03,
-    0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+    0x09, 0x70, 0x00, 0x0E, 0xFF, 0x11, 0x10, 0x10, 0x09, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x10, 0x05, 0xFF, 0x09, 0x48, 0x00, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+    0x03, 0x0F, 0x09, 0x14, 0x00, 0x10, 0x09, 0x08, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x10, 0x04, 0xFF, 0x09, 0x38, 0x00, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
 };
 
 /* The walker is driven over a byte fetch so a test can supply captured script
  * bytes directly; here the base address is folded away and the cursor is a
  * plain index into the array. */
-typedef struct EruptScriptFixture { const uint8 *bytes; uint16_t base; } EruptScriptFixture;
+typedef struct EruptScriptFixture {
+  const uint8 *bytes;
+  uint16_t base;
+} EruptScriptFixture;
 
 static uint8_t EruptScriptFetch(void *context, uint16_t address) {
   const EruptScriptFixture *f = (const EruptScriptFixture *)context;
@@ -3082,37 +3423,43 @@ static uint8_t EruptScriptFetch(void *context, uint16_t address) {
  * decision -- the fact the arc previously compensated for with a split span.
  * These are the real bytes behind three captured records. */
 static void TestEruptionScriptWalk(void) {
-  struct { const char *label; const uint8 *bytes; uint16_t base; int cursor_at; int expect; } cases[] = {
-    /* Cursor placed on the first $03 of the descent: seven downs then $0F. */
-    { "$0FA4 descent", kEruptScript0FA4, 0xD330, 25, 7 * 16 },
-    { "$0FF0 descent", kEruptScript0FF0, 0xD419, 25, 19 * 16 },
-    { "$1016 descent", kEruptScript1016, 0xD498, 25, 8 * 16 },
-    /* From the very start the walk crosses the wait, the speed modifier, the
-     * trap, the crater teleport, the nine climbing commands and the staging
-     * teleport -- operand skipping has to be right for all of them or the
-     * count lands somewhere else entirely. */
-    { "$0FA4 from launch", kEruptScript0FA4, 0xD330, 0, 7 * 16 },
-    { "$0FF0 from launch", kEruptScript0FF0, 0xD419, 0, 19 * 16 },
-    { "$1016 from launch", kEruptScript1016, 0xD498, 0, 8 * 16 },
+  struct {
+    const char *label;
+    const uint8 *bytes;
+    uint16_t base;
+    int cursor_at;
+    int expect;
+  } cases[] = {
+      /* Cursor placed on the first $03 of the descent: seven downs then $0F. */
+      {"$0FA4 descent", kEruptScript0FA4, 0xD330, 25, 7 * 16},
+      {"$0FF0 descent", kEruptScript0FF0, 0xD419, 25, 19 * 16},
+      {"$1016 descent", kEruptScript1016, 0xD498, 25, 8 * 16},
+      /* From the very start the walk crosses the wait, the speed modifier, the
+       * trap, the crater teleport, the nine climbing commands and the staging
+       * teleport -- operand skipping has to be right for all of them or the
+       * count lands somewhere else entirely. */
+      {"$0FA4 from launch", kEruptScript0FA4, 0xD330, 0, 7 * 16},
+      {"$0FF0 from launch", kEruptScript0FF0, 0xD419, 0, 19 * 16},
+      {"$1016 from launch", kEruptScript1016, 0xD498, 0, 8 * 16},
   };
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-    EruptScriptFixture fixture = { cases[i].bytes, cases[i].base };
-    int got = SimEruptionScript_ResolveFlight(
-        EruptScriptFetch, &fixture, cases[i].base,
-        (uint16_t)(cases[i].base + cases[i].cursor_at), 0).fall_pixels;
+    EruptScriptFixture fixture = {cases[i].bytes, cases[i].base};
+    int got = SimEruptionScript_ResolveFlight(EruptScriptFetch, &fixture, cases[i].base,
+                                              (uint16_t)(cases[i].base + cases[i].cursor_at), 0)
+                  .fall_pixels;
     if (got != cases[i].expect) {
-      fprintf(stderr, "erupt script %s: got %d expected %d\n",
-              cases[i].label, got, cases[i].expect);
+      fprintf(stderr, "erupt script %s: got %d expected %d\n", cases[i].label, got,
+              cases[i].expect);
       failures++;
     }
   }
   /* $0FA4's descent is 7 x 16 = 112 map pixels from the staging row at -16,
    * which lands it on row 96 -- the row that record was captured burning on
    * in run 20260818-073455. */
-  EruptScriptFixture fixture = { kEruptScript0FA4, 0xD330 };
-  CHECK(-16 + SimEruptionScript_ResolveFlight(
-                  EruptScriptFetch, &fixture, 0xD330, 0xD330 + 25, 0)
-                  .fall_pixels == 96);
+  EruptScriptFixture fixture = {kEruptScript0FA4, 0xD330};
+  CHECK(-16 + SimEruptionScript_ResolveFlight(EruptScriptFetch, &fixture, 0xD330, 0xD330 + 25, 0)
+                  .fall_pixels ==
+        96);
 
   /* The full plan: replaying the script from its base to the record's cursor
    * also recovers the launch point. Every eruption script places the actor at
@@ -3120,25 +3467,28 @@ static void TestEruptionScriptWalk(void) {
    * teleports it to a negative row to stage the fall, so requiring a
    * non-negative row is what tells the two apart. THE CRATER IS AUTHORED:
    * nothing about it needs learning from watching jets. */
-  static const struct { const char *label; const uint8 *bytes; uint16_t base;
-                        int cursor_at; int fall; } plans[] = {
-    { "$0FA4", kEruptScript0FA4, 0xD330, 25, 7 * 16 },
-    { "$0FF0", kEruptScript0FF0, 0xD419, 25, 19 * 16 },
-    { "$1016", kEruptScript1016, 0xD498, 25, 8 * 16 },
+  static const struct {
+    const char *label;
+    const uint8 *bytes;
+    uint16_t base;
+    int cursor_at;
+    int fall;
+  } plans[] = {
+      {"$0FA4", kEruptScript0FA4, 0xD330, 25, 7 * 16},
+      {"$0FF0", kEruptScript0FF0, 0xD419, 25, 19 * 16},
+      {"$1016", kEruptScript1016, 0xD498, 25, 8 * 16},
   };
   for (size_t i = 0; i < sizeof(plans) / sizeof(plans[0]); i++) {
-    EruptScriptFixture f = { plans[i].bytes, plans[i].base };
+    EruptScriptFixture f = {plans[i].bytes, plans[i].base};
     SimEruptionFlightPlan plan = SimEruptionScript_ResolveFlight(
-        EruptScriptFetch, &f, plans[i].base,
-        (uint16_t)(plans[i].base + plans[i].cursor_at), 0);
-    if (!plan.valid || !plan.crater_valid ||
-        plan.fall_pixels != plans[i].fall ||
+        EruptScriptFetch, &f, plans[i].base, (uint16_t)(plans[i].base + plans[i].cursor_at), 0);
+    if (!plan.valid || !plan.crater_valid || plan.fall_pixels != plans[i].fall ||
         plan.crater_x != 144 || plan.crater_y != 128) {
       fprintf(stderr,
               "erupt plan %s: valid=%u crater=%u (%d,%d) fall=%d "
               "expected crater (144,128) fall %d\n",
-              plans[i].label, plan.valid, plan.crater_valid,
-              plan.crater_x, plan.crater_y, plan.fall_pixels, plans[i].fall);
+              plans[i].label, plan.valid, plan.crater_valid, plan.crater_x, plan.crater_y,
+              plan.fall_pixels, plans[i].fall);
       failures++;
     }
   }
@@ -3151,23 +3501,23 @@ static void TestEruptionScriptWalk(void) {
    * the cursor steps past the $09 before its countdown starts -- so it comes
    * in as the +$22 argument and is added on top. */
   {
-    EruptScriptFixture f = { kEruptScript0FA4, 0xD330 };
-    SimEruptionFlightPlan whole = SimEruptionScript_ResolveFlight(
-        EruptScriptFetch, &f, 0xD330, 0xD330, 0);
+    EruptScriptFixture f = {kEruptScript0FA4, 0xD330};
+    SimEruptionFlightPlan whole =
+        SimEruptionScript_ResolveFlight(EruptScriptFetch, &f, 0xD330, 0xD330, 0);
     CHECK(whole.frames_to_land == 176);
     /* Sitting on the second wait with 40 of its 76 frames left: everything
      * from the cursor on is 7 descents, so 47. */
-    SimEruptionFlightPlan waiting = SimEruptionScript_ResolveFlight(
-        EruptScriptFetch, &f, 0xD330, 0xD330 + 25, 40);
+    SimEruptionFlightPlan waiting =
+        SimEruptionScript_ResolveFlight(EruptScriptFetch, &f, 0xD330, 0xD330 + 25, 40);
     CHECK(waiting.frames_to_land == 40 + 7);
   }
 
   /* A cursor that is not on a command at all -- inside the wait's operands --
    * resolves nothing rather than counting whatever those bytes decode to. */
   {
-    EruptScriptFixture f = { kEruptScript0FA4, 0xD330 };
-    SimEruptionFlightPlan plan = SimEruptionScript_ResolveFlight(
-        EruptScriptFetch, &f, 0xD330, 0xD330 + 1, 0);
+    EruptScriptFixture f = {kEruptScript0FA4, 0xD330};
+    SimEruptionFlightPlan plan =
+        SimEruptionScript_ResolveFlight(EruptScriptFetch, &f, 0xD330, 0xD330 + 1, 0);
     CHECK(!plan.valid);
   }
 
@@ -3179,9 +3529,9 @@ static void TestEruptionScriptWalk(void) {
    * watching. Tying the descent to the crater's success is what once left a
    * fountain of thirty fireballs with six arcs. */
   {
-    EruptScriptFixture f = { kEruptScript0FA4, 0xD330 };
-    SimEruptionFlightPlan plan = SimEruptionScript_ResolveFlight(
-        EruptScriptFetch, &f, 0xD330 + 1, 0xD330 + 25, 0);
+    EruptScriptFixture f = {kEruptScript0FA4, 0xD330};
+    SimEruptionFlightPlan plan =
+        SimEruptionScript_ResolveFlight(EruptScriptFetch, &f, 0xD330 + 1, 0xD330 + 25, 0);
     CHECK(plan.valid);
     CHECK(plan.fall_pixels == 7 * 16);
     CHECK(!plan.crater_valid);
@@ -3189,10 +3539,8 @@ static void TestEruptionScriptWalk(void) {
 
   /* Fails closed rather than returning a plausible number: a walk that runs
    * off the end of what is readable, and a missing fetch. */
-  CHECK(!SimEruptionScript_ResolveFlight(
-             EruptScriptFetch, &fixture, 0xD330, 0xD330 + 33, 0).valid);
-  CHECK(!SimEruptionScript_ResolveFlight(
-             NULL, &fixture, 0xD330, 0xD330, 0).valid);
+  CHECK(!SimEruptionScript_ResolveFlight(EruptScriptFetch, &fixture, 0xD330, 0xD330 + 33, 0).valid);
+  CHECK(!SimEruptionScript_ResolveFlight(NULL, &fixture, 0xD330, 0xD330, 0).valid);
 }
 
 int main(int argc, char **argv) {
@@ -3236,8 +3584,7 @@ int main(int argc, char **argv) {
   if (argc == 4 && strcmp(argv[1], "--fixtures") == 0)
     TestCapturedWorldNavigationFixtures(argv[2], argv[3]);
   else if (argc != 1) {
-    fprintf(stderr,
-            "usage: %s [--fixtures STEADY_WRAM ANIMATION_WRAM]\n", argv[0]);
+    fprintf(stderr, "usage: %s [--fixtures STEADY_WRAM ANIMATION_WRAM]\n", argv[0]);
     failures++;
   }
   if (failures) {

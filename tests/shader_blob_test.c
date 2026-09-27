@@ -54,12 +54,13 @@ typedef struct {
 #include "shaders/sim_cloud_frag.h"
 
 static int s_failures;
-#define CHECK(expr) do { \
-  if (!(expr)) { \
-    fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr); \
-    s_failures++; \
-  } \
-} while (0)
+#define CHECK(expr)                                                                                \
+  do {                                                                                             \
+    if (!(expr)) {                                                                                 \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr);                     \
+      s_failures++;                                                                                \
+    }                                                                                              \
+  } while (0)
 
 /* Every shader the game ships. Adding a .frag.glsl without adding it here
  * would leave it unguarded, so keep this list in step with the platform effect
@@ -71,75 +72,96 @@ static const struct {
   Uint32 samplers;
   Uint32 uniforms;
 } kShaders[] = {
-  { "sim3d_shadow_batch_vertex", { kSim3dShadowBatchVertMSL, kSim3dShadowBatchVertMSLSize,
-      kSim3dShadowBatchVertSPV, kSim3dShadowBatchVertSPVSize,
-      kSim3dShadowBatchVertDXIL, kSim3dShadowBatchVertDXILSize }, SDL_GPU_SHADERSTAGE_VERTEX, 0, 1 },
-  { "sim3d_shadow_batch_fragment", { kSim3dShadowBatchFragMSL, kSim3dShadowBatchFragMSLSize,
-      kSim3dShadowBatchFragSPV, kSim3dShadowBatchFragSPVSize,
-      kSim3dShadowBatchFragDXIL, kSim3dShadowBatchFragDXILSize }, SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0 },
-  { "sim3d_linear_vertex", { kSim3dLinearVertMSL, kSim3dLinearVertMSLSize,
-                            kSim3dLinearVertSPV, kSim3dLinearVertSPVSize,
-                            kSim3dLinearVertDXIL, kSim3dLinearVertDXILSize },
-                            SDL_GPU_SHADERSTAGE_VERTEX, 0, 1 },
-  { "blur",        { kBlurFragMSL, kBlurFragMSLSize,
-                     kBlurFragSPV, kBlurFragSPVSize,
-                     kBlurFragDXIL, kBlurFragDXILSize },
-                     SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
-  { "crt",         { kCrtFragMSL, kCrtFragMSLSize,
-                     kCrtFragSPV, kCrtFragSPVSize,
-                     kCrtFragDXIL, kCrtFragDXILSize },
-                     SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
-  { "dof_edge",    { kDofEdgeFragMSL, kDofEdgeFragMSLSize,
-                     kDofEdgeFragSPV, kDofEdgeFragSPVSize,
-                     kDofEdgeFragDXIL, kDofEdgeFragDXILSize },
-                     SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
-  { "rim",         { kRimFragMSL, kRimFragMSLSize,
-                     kRimFragSPV, kRimFragSPVSize,
-                     kRimFragDXIL, kRimFragDXILSize },
-                     SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
-  { "billboard rim", { kSim3dBillboardRimFragMSL, kSim3dBillboardRimFragMSLSize,
-                        kSim3dBillboardRimFragSPV, kSim3dBillboardRimFragSPVSize,
-                        kSim3dBillboardRimFragDXIL, kSim3dBillboardRimFragDXILSize },
-                        SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
-  { "sim3d_depth_fragment",
-                    { kSim3dDepthFragMSL, kSim3dDepthFragMSLSize,
-                      kSim3dDepthFragSPV, kSim3dDepthFragSPVSize,
-                      kSim3dDepthFragDXIL, kSim3dDepthFragDXILSize },
-                      SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0 },
-  { "sim3d_depth_vertex",
-                    { kSim3dDepthVertMSL, kSim3dDepthVertMSLSize,
-                      kSim3dDepthVertSPV, kSim3dDepthVertSPVSize,
-                      kSim3dDepthVertDXIL, kSim3dDepthVertDXILSize },
-                      SDL_GPU_SHADERSTAGE_VERTEX, 0, 0 },
-  { "sim3d_spherical_vertex",
-                    { kSim3dSphericalVertMSL, kSim3dSphericalVertMSLSize,
-                      kSim3dSphericalVertSPV, kSim3dSphericalVertSPVSize,
-                      kSim3dSphericalVertDXIL, kSim3dSphericalVertDXILSize },
-                      SDL_GPU_SHADERSTAGE_VERTEX, 0, 1 },
-  { "sim3d_model_vertex",
-                    { kSim3dModelVertMSL, kSim3dModelVertMSLSize,
-                      kSim3dModelVertSPV, kSim3dModelVertSPVSize,
-                      kSim3dModelVertDXIL, kSim3dModelVertDXILSize },
-                      SDL_GPU_SHADERSTAGE_VERTEX, 0, 1 },
-  { "sim_shadow_blur",
-                    { kSimShadowBlurFragMSL, kSimShadowBlurFragMSLSize,
-                      kSimShadowBlurFragSPV, kSimShadowBlurFragSPVSize,
-                      kSimShadowBlurFragDXIL, kSimShadowBlurFragDXILSize },
-                      SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
-  { "sim_cloud", { kSimCloudFragMSL, kSimCloudFragMSLSize,
-                   kSimCloudFragSPV, kSimCloudFragSPVSize,
-                   kSimCloudFragDXIL, kSimCloudFragDXILSize },
-                   SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1 },
+    {"sim3d_shadow_batch_vertex",
+     {kSim3dShadowBatchVertMSL, kSim3dShadowBatchVertMSLSize, kSim3dShadowBatchVertSPV,
+      kSim3dShadowBatchVertSPVSize, kSim3dShadowBatchVertDXIL, kSim3dShadowBatchVertDXILSize},
+     SDL_GPU_SHADERSTAGE_VERTEX,
+     0,
+     1},
+    {"sim3d_shadow_batch_fragment",
+     {kSim3dShadowBatchFragMSL, kSim3dShadowBatchFragMSLSize, kSim3dShadowBatchFragSPV,
+      kSim3dShadowBatchFragSPVSize, kSim3dShadowBatchFragDXIL, kSim3dShadowBatchFragDXILSize},
+     SDL_GPU_SHADERSTAGE_FRAGMENT,
+     1,
+     0},
+    {"sim3d_linear_vertex",
+     {kSim3dLinearVertMSL, kSim3dLinearVertMSLSize, kSim3dLinearVertSPV, kSim3dLinearVertSPVSize,
+      kSim3dLinearVertDXIL, kSim3dLinearVertDXILSize},
+     SDL_GPU_SHADERSTAGE_VERTEX,
+     0,
+     1},
+    {"blur",
+     {kBlurFragMSL, kBlurFragMSLSize, kBlurFragSPV, kBlurFragSPVSize, kBlurFragDXIL,
+      kBlurFragDXILSize},
+     SDL_GPU_SHADERSTAGE_FRAGMENT,
+     1,
+     1},
+    {"crt",
+     {kCrtFragMSL, kCrtFragMSLSize, kCrtFragSPV, kCrtFragSPVSize, kCrtFragDXIL, kCrtFragDXILSize},
+     SDL_GPU_SHADERSTAGE_FRAGMENT,
+     1,
+     1},
+    {"dof_edge",
+     {kDofEdgeFragMSL, kDofEdgeFragMSLSize, kDofEdgeFragSPV, kDofEdgeFragSPVSize, kDofEdgeFragDXIL,
+      kDofEdgeFragDXILSize},
+     SDL_GPU_SHADERSTAGE_FRAGMENT,
+     1,
+     1},
+    {"rim",
+     {kRimFragMSL, kRimFragMSLSize, kRimFragSPV, kRimFragSPVSize, kRimFragDXIL, kRimFragDXILSize},
+     SDL_GPU_SHADERSTAGE_FRAGMENT,
+     1,
+     1},
+    {"billboard rim",
+     {kSim3dBillboardRimFragMSL, kSim3dBillboardRimFragMSLSize, kSim3dBillboardRimFragSPV,
+      kSim3dBillboardRimFragSPVSize, kSim3dBillboardRimFragDXIL, kSim3dBillboardRimFragDXILSize},
+     SDL_GPU_SHADERSTAGE_FRAGMENT,
+     1,
+     1},
+    {"sim3d_depth_fragment",
+     {kSim3dDepthFragMSL, kSim3dDepthFragMSLSize, kSim3dDepthFragSPV, kSim3dDepthFragSPVSize,
+      kSim3dDepthFragDXIL, kSim3dDepthFragDXILSize},
+     SDL_GPU_SHADERSTAGE_FRAGMENT,
+     1,
+     0},
+    {"sim3d_depth_vertex",
+     {kSim3dDepthVertMSL, kSim3dDepthVertMSLSize, kSim3dDepthVertSPV, kSim3dDepthVertSPVSize,
+      kSim3dDepthVertDXIL, kSim3dDepthVertDXILSize},
+     SDL_GPU_SHADERSTAGE_VERTEX,
+     0,
+     0},
+    {"sim3d_spherical_vertex",
+     {kSim3dSphericalVertMSL, kSim3dSphericalVertMSLSize, kSim3dSphericalVertSPV,
+      kSim3dSphericalVertSPVSize, kSim3dSphericalVertDXIL, kSim3dSphericalVertDXILSize},
+     SDL_GPU_SHADERSTAGE_VERTEX,
+     0,
+     1},
+    {"sim3d_model_vertex",
+     {kSim3dModelVertMSL, kSim3dModelVertMSLSize, kSim3dModelVertSPV, kSim3dModelVertSPVSize,
+      kSim3dModelVertDXIL, kSim3dModelVertDXILSize},
+     SDL_GPU_SHADERSTAGE_VERTEX,
+     0,
+     1},
+    {"sim_shadow_blur",
+     {kSimShadowBlurFragMSL, kSimShadowBlurFragMSLSize, kSimShadowBlurFragSPV,
+      kSimShadowBlurFragSPVSize, kSimShadowBlurFragDXIL, kSimShadowBlurFragDXILSize},
+     SDL_GPU_SHADERSTAGE_FRAGMENT,
+     1,
+     1},
+    {"sim_cloud",
+     {kSimCloudFragMSL, kSimCloudFragMSLSize, kSimCloudFragSPV, kSimCloudFragSPVSize,
+      kSimCloudFragDXIL, kSimCloudFragDXILSize},
+     SDL_GPU_SHADERSTAGE_FRAGMENT,
+     1,
+     1},
 };
 static const int kShaderCount = (int)(sizeof(kShaders) / sizeof(kShaders[0]));
 
 /* Mirrors GpuShaderBlob_Create. `entrypoint` is a parameter here only so the
  * test can feed it a deliberately wrong name. */
-static SDL_GPUShader *CreateFrom(SDL_GPUDevice *device,
-                                 const GpuShaderBlobs *blobs,
-                                 const char *entrypoint,
-                                 SDL_GPUShaderStage stage,
-                                 Uint32 samplers, Uint32 uniforms) {
+static SDL_GPUShader *CreateFrom(SDL_GPUDevice *device, const GpuShaderBlobs *blobs,
+                                 const char *entrypoint, SDL_GPUShaderStage stage, Uint32 samplers,
+                                 Uint32 uniforms) {
   const SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
   SDL_GPUShaderCreateInfo info;
   SDL_zero(info);
@@ -174,14 +196,14 @@ int main(void) {
   /* Advertising both formats is what lets SDL pick a backend it can actually
    * feed — the call shape render_preparation.c uses at renderer creation. */
   SDL_GPUDevice *device = SDL_CreateGPUDevice(
-      SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL |
-          SDL_GPU_SHADERFORMAT_MSL,
-      false, NULL);
+      SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL, false,
+      NULL);
   if (!device) {
     fprintf(stderr,
             "shader_blob_test: SKIP — no GPU device supporting SPIR-V, DXIL, "
             "or MSL "
-            "(%s)\n", SDL_GetError());
+            "(%s)\n",
+            SDL_GetError());
     SDL_Quit();
     return 0;
   }
@@ -198,13 +220,11 @@ int main(void) {
 
   /* 1. Every committed blob compiles on this backend. */
   for (int i = 0; i < kShaderCount; i++) {
-    SDL_GPUShader *shader = CreateFrom(
-        device, &kShaders[i].blobs, good, kShaders[i].stage,
-        kShaders[i].samplers, kShaders[i].uniforms);
+    SDL_GPUShader *shader = CreateFrom(device, &kShaders[i].blobs, good, kShaders[i].stage,
+                                       kShaders[i].samplers, kShaders[i].uniforms);
     CHECK(shader != NULL);
     if (!shader)
-      fprintf(stderr, "  %s blob rejected: %s\n",
-              kShaders[i].name, SDL_GetError());
+      fprintf(stderr, "  %s blob rejected: %s\n", kShaders[i].name, SDL_GetError());
     else
       SDL_ReleaseGPUShader(device, shader);
   }
@@ -215,9 +235,8 @@ int main(void) {
     printf("shader_blob_test: negative case follows; one backend "
            "shader-compile error below is expected\n");
     fflush(stdout);
-    SDL_GPUShader *wrong = CreateFrom(
-        device, &kShaders[0].blobs, bad, kShaders[0].stage,
-        kShaders[0].samplers, kShaders[0].uniforms);
+    SDL_GPUShader *wrong = CreateFrom(device, &kShaders[0].blobs, bad, kShaders[0].stage,
+                                      kShaders[0].samplers, kShaders[0].uniforms);
     CHECK(wrong == NULL);
     if (wrong) {
       fprintf(stderr,

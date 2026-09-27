@@ -25,16 +25,14 @@ const SnesRunnerApi *sr_runner_get_api(uint32_t requested_abi_version) {
   return s_use_fake_api ? &s_fake_api : NULL;
 }
 
-static SrResult FakeQueryGenerations(
-    SrRunnerHandle *runner, SrGenerationSnapshot *out) {
+static SrResult FakeQueryGenerations(SrRunnerHandle *runner, SrGenerationSnapshot *out) {
   (void)runner;
   if (!out) return SR_RESULT_INVALID_ARGUMENT;
   out->lifetime_generation = 7u;
   return SR_RESULT_OK;
 }
 
-static SrResult FakeQueryInputState(
-    SrRunnerHandle *runner, SrInputStateSnapshot *out) {
+static SrResult FakeQueryInputState(SrRunnerHandle *runner, SrInputStateSnapshot *out) {
   (void)runner;
   if (!out) return SR_RESULT_INVALID_ARGUMENT;
   out->lifetime_generation = 7u;
@@ -44,12 +42,11 @@ static SrResult FakeQueryInputState(
   return SR_RESULT_OK;
 }
 
-static SrResult FakeQuerySemanticDigest(
-    SrRunnerHandle *runner, const SrSemanticDigestRequest *request,
-    SrSemanticDigestResult *out) {
+static SrResult FakeQuerySemanticDigest(SrRunnerHandle *runner,
+                                        const SrSemanticDigestRequest *request,
+                                        SrSemanticDigestResult *out) {
   (void)runner;
-  if (!request || !out || request->lifetime_generation != 7u)
-    return SR_RESULT_INVALID_ARGUMENT;
+  if (!request || !out || request->lifetime_generation != 7u) return SR_RESULT_INVALID_ARGUMENT;
   out->lifetime_generation = 7u;
   out->frame_counter = s_fake_frame_counter;
   out->schema_version = SR_DETERMINISM_SEMANTIC_SCHEMA_VERSION;
@@ -57,41 +54,37 @@ static SrResult FakeQuerySemanticDigest(
   return SR_RESULT_OK;
 }
 
-static SrRunnerHandle *FakeRunner(void) {
-  return (SrRunnerHandle *)&s_fake_runner_storage;
-}
+static SrRunnerHandle *FakeRunner(void) { return (SrRunnerHandle *)&s_fake_runner_storage; }
 
 static void ConfigureFakeApi(void) {
   s_fake_api = (SnesRunnerApi){
-    .abi_version = SR_RUNNER_ABI_VERSION,
-    .struct_size = SNES_RUNNER_API_SEMANTIC_DIGEST_SIZE,
-    .capabilities = SR_RUNNER_CAP_GENERATION_COUNTERS |
-        SR_RUNNER_CAP_INPUT_STATE | SR_RUNNER_CAP_SEMANTIC_DIGEST,
-    .query_generations = FakeQueryGenerations,
-    .query_input_state = FakeQueryInputState,
-    .query_semantic_digest = FakeQuerySemanticDigest,
+      .abi_version = SR_RUNNER_ABI_VERSION,
+      .struct_size = SNES_RUNNER_API_SEMANTIC_DIGEST_SIZE,
+      .capabilities = SR_RUNNER_CAP_GENERATION_COUNTERS | SR_RUNNER_CAP_INPUT_STATE |
+                      SR_RUNNER_CAP_SEMANTIC_DIGEST,
+      .query_generations = FakeQueryGenerations,
+      .query_input_state = FakeQueryInputState,
+      .query_semantic_digest = FakeQuerySemanticDigest,
   };
   s_use_fake_api = true;
 }
 
-static SrResult ReadExact(void *user_data, uint8_t *bytes,
-                          uint32_t byte_count) {
+static SrResult ReadExact(void *user_data, uint8_t *bytes, uint32_t byte_count) {
   FILE *file = (FILE *)user_data;
   size_t count = fread(bytes, 1, byte_count, file);
   if (count == byte_count) return SR_RESULT_OK;
-  return count == 0 && feof(file)
-      ? SR_RESULT_UNAVAILABLE : SR_RESULT_INVALID_ARGUMENT;
+  return count == 0 && feof(file) ? SR_RESULT_UNAVAILABLE : SR_RESULT_INVALID_ARGUMENT;
 }
 
 static int s_failures;
 
-#define CHECK(expression) do { \
-  if (!(expression)) { \
-    fprintf(stderr, "%s:%d: check failed: %s\n", \
-            __FILE__, __LINE__, #expression); \
-    s_failures++; \
-  } \
-} while (0)
+#define CHECK(expression)                                                                          \
+  do {                                                                                             \
+    if (!(expression)) {                                                                           \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expression);               \
+      s_failures++;                                                                                \
+    }                                                                                              \
+  } while (0)
 
 static void Write32(uint8_t *bytes, uint32_t value) {
   bytes[0] = (uint8_t)value;
@@ -238,16 +231,14 @@ static void TestLiveHandoffAndCombinedRecording(const char *path) {
   if (record) {
     SrInputReplayReader reader = SR_INPUT_REPLAY_READER_INIT;
     SrInputReplayHeader header = {
-      .struct_size = SR_INPUT_REPLAY_HEADER_V1_SIZE,
+        .struct_size = SR_INPUT_REPLAY_HEADER_V1_SIZE,
     };
-    CHECK(sr_input_replay_reader_begin(
-              &reader, ReadExact, record, &header) == SR_RESULT_OK);
+    CHECK(sr_input_replay_reader_begin(&reader, ReadExact, record, &header) == SR_RESULT_OK);
     CHECK(!strcmp(header.game_id, "actraiser"));
     const uint16_t expected[] = {0, 0x11, 0x22, 0x33, 0x44};
-    for (size_t index = 0; index < sizeof(expected) / sizeof(expected[0]);
-         index++) {
+    for (size_t index = 0; index < sizeof(expected) / sizeof(expected[0]); index++) {
       SrInputReplayRecord item = {
-        .struct_size = SR_INPUT_REPLAY_RECORD_V1_SIZE,
+          .struct_size = SR_INPUT_REPLAY_RECORD_V1_SIZE,
       };
       CHECK(sr_input_replay_reader_next(&reader, &item) == SR_RESULT_OK);
       CHECK(item.type == SR_INPUT_REPLAY_RECORD_FRAME);
@@ -255,7 +246,7 @@ static void TestLiveHandoffAndCombinedRecording(const char *path) {
       CHECK(item.frame.packed_buttons[0] == expected[index]);
     }
     SrInputReplayRecord end = {
-      .struct_size = SR_INPUT_REPLAY_RECORD_V1_SIZE,
+        .struct_size = SR_INPUT_REPLAY_RECORD_V1_SIZE,
     };
     CHECK(sr_input_replay_reader_next(&reader, &end) == SR_RESULT_UNAVAILABLE);
     CHECK(fclose(record) == 0);
@@ -273,15 +264,12 @@ static void TestLiveHandoffAndCombinedRecording(const char *path) {
   InputReplay_Init();
   CHECK(InputReplay_BeginSession(FakeRunner(), "actraiser"));
   const uint16_t canonical_expected[] = {0, 0x11, 0x22, 0x33, 0x44};
-  for (size_t index = 0;
-       index < sizeof(canonical_expected) / sizeof(canonical_expected[0]);
+  for (size_t index = 0; index < sizeof(canonical_expected) / sizeof(canonical_expected[0]);
        index++) {
-    const InputReplayFrameResult canonical =
-        ResolveAt((uint16_t)(400u - index * 7u), 0xAA);
+    const InputReplayFrameResult canonical = ResolveAt((uint16_t)(400u - index * 7u), 0xAA);
     CHECK(canonical.inputs == canonical_expected[index]);
     CHECK(canonical.stop_requested ==
-          (index + 1u == sizeof(canonical_expected) /
-                           sizeof(canonical_expected[0])));
+          (index + 1u == sizeof(canonical_expected) / sizeof(canonical_expected[0])));
   }
   InputReplay_Shutdown();
 
@@ -321,15 +309,14 @@ static void TestCanonicalIdentityAndCheckpoint(void) {
   if (record) {
     SrInputReplayReader reader = SR_INPUT_REPLAY_READER_INIT;
     SrInputReplayHeader header = {
-      .struct_size = SR_INPUT_REPLAY_HEADER_V1_SIZE,
+        .struct_size = SR_INPUT_REPLAY_HEADER_V1_SIZE,
     };
-    CHECK(sr_input_replay_reader_begin(
-              &reader, ReadExact, record, &header) == SR_RESULT_OK);
+    CHECK(sr_input_replay_reader_begin(&reader, ReadExact, record, &header) == SR_RESULT_OK);
     CHECK(header.start_frame_ordinal == 10u);
     CHECK((header.flags & SR_INPUT_REPLAY_INITIAL_STATE_DIGEST_VALID) != 0u);
     CHECK(header.initial_state_sha256[0] == 0x5au);
     SrInputReplayRecord item = {
-      .struct_size = SR_INPUT_REPLAY_RECORD_V1_SIZE,
+        .struct_size = SR_INPUT_REPLAY_RECORD_V1_SIZE,
     };
     CHECK(sr_input_replay_reader_next(&reader, &item) == SR_RESULT_OK);
     CHECK(item.type == SR_INPUT_REPLAY_RECORD_FRAME);
@@ -337,7 +324,7 @@ static void TestCanonicalIdentityAndCheckpoint(void) {
     CHECK(item.frame.packed_buttons[0] == 0x321u);
     CHECK(item.frame.packed_buttons[1] == 0x654u);
     item = (SrInputReplayRecord){
-      .struct_size = SR_INPUT_REPLAY_RECORD_V1_SIZE,
+        .struct_size = SR_INPUT_REPLAY_RECORD_V1_SIZE,
     };
     CHECK(sr_input_replay_reader_next(&reader, &item) == SR_RESULT_OK);
     CHECK(item.type == SR_INPUT_REPLAY_RECORD_CHECKPOINT);
@@ -366,8 +353,7 @@ static void TestCanonicalIdentityAndCheckpoint(void) {
   s_fake_digest_byte = 0x33u;
   CHECK(!InputReplay_CompleteTick(FakeRunner()));
   CHECK(InputReplay_Failed());
-  CHECK(strstr(InputReplay_LastError(), "semantic checkpoint mismatch") !=
-        NULL);
+  CHECK(strstr(InputReplay_LastError(), "semantic checkpoint mismatch") != NULL);
   InputReplay_Shutdown();
 
   CHECK(unlink(record_path) == 0);
@@ -376,8 +362,7 @@ static void TestCanonicalIdentityAndCheckpoint(void) {
 }
 
 static SrResult WriteExact(void *context, const uint8_t *bytes, uint32_t count) {
-  return fwrite(bytes, 1, count, context) == count
-      ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
+  return fwrite(bytes, 1, count, context) == count ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
 }
 
 static bool Policy(void *context, uint8_t out[32], bool *baseline) {
@@ -397,7 +382,8 @@ static void TestPolicyIdentity(const char *legacy_path) {
   close(fd);
   for (int recorded = 0; recorded <= 1; ++recorded) {
     ConfigureFakeApi();
-    s_fake_frame_counter = 0; s_fake_digest_byte = 0x71;
+    s_fake_frame_counter = 0;
+    s_fake_digest_byte = 0x71;
     int policy = recorded;
     CHECK(setenv("AR_INPUT_RECORD", path, 1) == 0);
     CHECK(setenv("AR_REPLAY_CHECKPOINT_INTERVAL", "1", 1) == 0);
@@ -464,13 +450,14 @@ static int ProcessFixture(int argc, char **argv) {
     if (!file) return 1;
     SrInputReplayWriter writer = {0};
     SrInputReplayHeader header = {
-      .struct_size = SR_INPUT_REPLAY_HEADER_V1_SIZE,
-      .game_id = "actraiser",
+        .struct_size = SR_INPUT_REPLAY_HEADER_V1_SIZE,
+        .game_id = "actraiser",
     };
     CHECK(sr_input_replay_writer_begin(&writer, WriteExact, file, &header) == SR_RESULT_OK);
     for (unsigned i = 0; i < 3; ++i) {
       SrInputReplayFrame frame = {
-        .struct_size = SR_INPUT_REPLAY_FRAME_V1_SIZE, .frame_ordinal = i,
+          .struct_size = SR_INPUT_REPLAY_FRAME_V1_SIZE,
+          .frame_ordinal = i,
       };
       CHECK(sr_input_replay_writer_append_frame(&writer, &frame) == SR_RESULT_OK);
     }
@@ -504,16 +491,16 @@ static void TestPolicyEditPermission(void) {
   ClearEnvironment();
   InputReplay_Init();
   CHECK(!InputReplay_PolicyChangesAllowed());
-  CHECK(InputReplay_BeginSession(NULL,"actraiser"));
+  CHECK(InputReplay_BeginSession(NULL, "actraiser"));
   CHECK(InputReplay_PolicyChangesAllowed());
   InputReplay_Shutdown();
   CHECK(!InputReplay_PolicyChangesAllowed());
-  CHECK(setenv("AR_INPUT_REPLAY","/nonexistent-regional-replay.rec",1)==0);
+  CHECK(setenv("AR_INPUT_REPLAY", "/nonexistent-regional-replay.rec", 1) == 0);
   InputReplay_Init();
   CHECK(!InputReplay_PolicyChangesAllowed());
   InputReplay_Shutdown();
   ClearEnvironment();
-  CHECK(setenv("AR_INPUT_RECORD","/nonexistent-regional-output/record.rec",1)==0);
+  CHECK(setenv("AR_INPUT_RECORD", "/nonexistent-regional-output/record.rec", 1) == 0);
   InputReplay_Init();
   CHECK(!InputReplay_PolicyChangesAllowed());
   InputReplay_Shutdown();

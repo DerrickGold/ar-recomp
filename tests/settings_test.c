@@ -22,16 +22,12 @@ bool g_gpu_shaders_active;
 /* W4-2: present.c owns the real value (latched when a renderer rejects the rim
  * mask blend mode); stubbed true here so the row's availability is exercised. */
 static bool s_sim_rim_mask_supported = true;
-bool Present_SimRimMaskSupported(void) {
-  return s_sim_rim_mask_supported;
-}
+bool Present_SimRimMaskSupported(void) { return s_sim_rim_mask_supported; }
 /* Simulation and action effects use SDL's built-in additive blend. As with
  * the rim mask, present.c latches an actual backend rejection; this
  * renderer-free harness supplies the optimistic initial capability. */
 static bool s_effect_renderer_supported = true;
-bool Present_EffectRendererSupported(void) {
-  return s_effect_renderer_supported;
-}
+bool Present_EffectRendererSupported(void) { return s_effect_renderer_supported; }
 /* Host-side diorama geometry rebind; no renderer in this harness. */
 void Diorama_OnModeChanged(void) {}
 static int s_failures;
@@ -43,15 +39,15 @@ static const SettingDesc *s_action_desc;
 static int s_input_action_calls;
 static InputAction s_last_input_action;
 
-#define CHECK(expr) do { \
-  if (!(expr)) { \
-    fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr); \
-    s_failures++; \
-  } \
-} while (0)
+#define CHECK(expr)                                                                                \
+  do {                                                                                             \
+    if (!(expr)) {                                                                                 \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr);                     \
+      s_failures++;                                                                                \
+    }                                                                                              \
+  } while (0)
 
-static void ChangeObserved(const SettingDesc *desc,
-                           SettingChangeResult result) {
+static void ChangeObserved(const SettingDesc *desc, SettingChangeResult result) {
   s_observer_calls++;
   s_observer_desc = desc;
   s_observer_result = result;
@@ -72,8 +68,7 @@ static void ClearSettingsEnv(void) {
   unsetenv("AR_LOCALIZATION_PACK");
   Settings_ClearConfigLayer();
   for (int i = 0; i < g_setting_desc_count; i++) {
-    if (g_setting_descs[i].env)
-      unsetenv(g_setting_descs[i].env);
+    if (g_setting_descs[i].env) unsetenv(g_setting_descs[i].env);
   }
 }
 
@@ -115,14 +110,14 @@ static void TestDefaultsAndMetadata(void) {
    * The Graphics API choice adds one restart-class Display row. Modern SIM
    * adds its presentation choice, player scale, and two independent Describe bindings.
    * Seeded regional rolls add two options; save slots add two entry actions. */
-  if(g_setting_desc_count != 301)fprintf(stderr,"Setting descriptors: expected 301, got %d\n",g_setting_desc_count);
+  if (g_setting_desc_count != 301)
+    fprintf(stderr, "Setting descriptors: expected 301, got %d\n", g_setting_desc_count);
   CHECK(g_setting_desc_count == 302);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
     CHECK((a->type == kSettingType_Action) == (a->field == NULL));
-    CHECK((a->type == kSettingType_Action) ==
-          (a->action != kSettingAction_None));
+    CHECK((a->type == kSettingType_Action) == (a->action != kSettingAction_None));
     CHECK(a->action >= kSettingAction_None && a->action < kSettingAction_Count);
     CHECK(a->game_change_kind >= kSettingGameChange_None &&
           a->game_change_kind < kSettingGameChange_Count);
@@ -133,8 +128,7 @@ static void TestDefaultsAndMetadata(void) {
     CHECK(Settings_Find(a->key) == a);
     for (int j = i + 1; j < g_setting_desc_count; j++) {
       CHECK(strcmp(a->key, g_setting_descs[j].key) != 0);
-      if (a->field && g_setting_descs[j].field)
-        CHECK(a->field != g_setting_descs[j].field);
+      if (a->field && g_setting_descs[j].field) CHECK(a->field != g_setting_descs[j].field);
     }
     char formatted[512];
     Settings_FormatValue(a, formatted, sizeof(formatted));
@@ -155,8 +149,7 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.refresh_mode == kRefreshMode_Vsync);
   CHECK(g_settings.gpu_interp_source_rate == kInterpolationSource_Native);
   {
-    const SettingDesc *source_rate =
-        Settings_Find("gpu_interp_source_rate");
+    const SettingDesc *source_rate = Settings_Find("gpu_interp_source_rate");
     CHECK(source_rate && !Settings_IsAvailable(source_rate));
     g_settings.diorama_mode = true;
     CHECK(!Settings_IsAvailable(source_rate));
@@ -175,7 +168,7 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(!g_settings.ignore_aspect_ratio);
   CHECK(g_settings.audio_enabled);
   CHECK(g_settings.audio_frequency == kAudioFrequency_Auto);
-  CHECK(Settings_AudioFrequencyHz() == 0);   /* 0 = device-native at open */
+  CHECK(Settings_AudioFrequencyHz() == 0); /* 0 = device-native at open */
   CHECK(g_settings.audio_samples == 2048);
   CHECK(g_settings.audio_master_volume == 100);
   CHECK(g_settings.audio_music_volume == 100);
@@ -189,9 +182,8 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.sim_view_range == 0);
   {
     const SettingDesc *range = Settings_Find("sim_view_range");
-    CHECK(range && range->type == kSettingType_Int &&
-          range->minval == 0 && range->maxval == 256 && range->step == 16 &&
-          range->player_visible);
+    CHECK(range && range->type == kSettingType_Int && range->minval == 0 && range->maxval == 256 &&
+          range->step == 16 && range->player_visible);
   }
   CHECK(!g_settings.sim3d_world_navigation);
   CHECK(g_settings.sim3d_sky_palace);
@@ -214,17 +206,13 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(Settings_Sim3DRequestedFeatures() == kSim3DShippedFeatures);
   CHECK(g_settings.sim3d_separated_composite);
   CHECK(g_settings.sim3d_ground_projection);
-  CHECK(g_settings.sim3d_voxel_preset ==
-        kSimBackgroundVoxelPreset_Balanced);
+  CHECK(g_settings.sim3d_voxel_preset == kSimBackgroundVoxelPreset_Balanced);
   CHECK(g_settings.sim3d_voxel_detail == kSimBackgroundVoxelDetail_High);
   CHECK(g_settings.sim3d_voxel_lod == kSimBackgroundVoxelLod_Adaptive);
-  CHECK(g_settings.sim3d_voxel_shading ==
-        kSimBackgroundVoxelShading_MaterialAware);
+  CHECK(g_settings.sim3d_voxel_shading == kSimBackgroundVoxelShading_MaterialAware);
   CHECK(g_settings.sim3d_voxel_style == kSimBackgroundVoxelStyle_Varied);
-  CHECK(g_settings.sim3d_voxel_facing ==
-        kSimBackgroundVoxelFacing_PerModel);
-  CHECK(g_settings.sim3d_voxel_render_scale ==
-        kSimBackgroundVoxelRenderScale_PixelClean);
+  CHECK(g_settings.sim3d_voxel_facing == kSimBackgroundVoxelFacing_PerModel);
+  CHECK(g_settings.sim3d_voxel_render_scale == kSimBackgroundVoxelRenderScale_PixelClean);
   CHECK(g_settings.sim3d_object_billboards);
   CHECK(g_settings.sim3d_virtual_height);
   CHECK(g_settings.sim3d_shadows);
@@ -243,63 +231,49 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.sim3d_tilt_x_mrad == -575);
   CHECK(g_settings.sim3d_tilt_y_mrad == 0);
   CHECK(g_settings.sim3d_distance_x100 == 300);
-  CHECK(g_settings.sim3d_landscape_height_pct ==
-        kSimTownTerrainLandscapeHeightDefaultPct);
+  CHECK(g_settings.sim3d_landscape_height_pct == kSimTownTerrainLandscapeHeightDefaultPct);
   CHECK(g_settings.sim3d_landscape_height_pct == 40);
-  const SettingDesc *landscape_height =
-      Settings_Find("sim3d_landscape_height_pct");
-  CHECK(landscape_height &&
-        landscape_height->category == kSettingCat_Simulation);
-  CHECK(landscape_height &&
-        landscape_height->minval ==
-            kSimTownTerrainLandscapeHeightMinimumPct &&
-        landscape_height->maxval ==
-            kSimTownTerrainLandscapeHeightMaximumPct &&
-        landscape_height->step ==
-            kSimTownTerrainLandscapeHeightStepPct &&
-        landscape_height->defval ==
-            kSimTownTerrainLandscapeHeightDefaultPct);
+  const SettingDesc *landscape_height = Settings_Find("sim3d_landscape_height_pct");
+  CHECK(landscape_height && landscape_height->category == kSettingCat_Simulation);
+  CHECK(landscape_height && landscape_height->minval == kSimTownTerrainLandscapeHeightMinimumPct &&
+        landscape_height->maxval == kSimTownTerrainLandscapeHeightMaximumPct &&
+        landscape_height->step == kSimTownTerrainLandscapeHeightStepPct &&
+        landscape_height->defval == kSimTownTerrainLandscapeHeightDefaultPct);
 #if AR_SIM3D_TERRAIN_ELEVATION
   CHECK(landscape_height && landscape_height->player_visible);
 #else
   CHECK(landscape_height && !landscape_height->player_visible);
 #endif
   const SettingDesc *sim_pitch = Settings_Find("sim3d_tilt_x_mrad");
-  const SettingDesc *dynamic_pitch =
-      Settings_Find("sim3d_dyncam_baseline_tilt_x_mrad");
-  CHECK(sim_pitch &&
-        sim_pitch->minval == kSim3DCameraPitchMinimumMrad &&
+  const SettingDesc *dynamic_pitch = Settings_Find("sim3d_dyncam_baseline_tilt_x_mrad");
+  CHECK(sim_pitch && sim_pitch->minval == kSim3DCameraPitchMinimumMrad &&
         sim_pitch->maxval == kSim3DCameraPitchMaximumMrad);
-  CHECK(dynamic_pitch &&
-        dynamic_pitch->minval == kSim3DCameraPitchMinimumMrad &&
+  CHECK(dynamic_pitch && dynamic_pitch->minval == kSim3DCameraPitchMinimumMrad &&
         dynamic_pitch->maxval == kSim3DCameraPitchMaximumMrad);
   /* D3c ships the catalogue heights unscaled; 0 is a valid "ground every
    * billboard" tuning value, so it must not double as the default. */
   CHECK(g_settings.sim3d_height_scale_x100 == 100);
   const SettingDesc *height_scale = Settings_Find("sim3d_height_scale_x100");
   CHECK(height_scale && height_scale->category == kSettingCat_Simulation);
-  CHECK(height_scale && height_scale->minval == 0 &&
-        height_scale->maxval == 400 && height_scale->defval == 100);
+  CHECK(height_scale && height_scale->minval == 0 && height_scale->maxval == 400 &&
+        height_scale->defval == 100);
   CHECK(g_settings.save_backend == 0);
   CHECK(!g_settings.save_edit_armed && g_settings.save_autobackup);
   CHECK(g_settings.save_editor_page == kSaveEditorPage_Actions);
   for (int i = 0; i < 6; i++)
     CHECK(g_settings.save_region_progress[i] == kSaveProgressEdit_LeaveAsIs);
-  CHECK(g_settings.save_master_level == 0 &&
-        g_settings.save_master_hp == 0 &&
-        g_settings.save_master_mp == 0 &&
-        g_settings.save_lives == 0 &&
-        g_settings.save_angel_sp_current == 0 &&
-        g_settings.save_angel_sp_max == 0 &&
-        g_settings.save_angel_hp_current == 0 &&
-        g_settings.save_angel_hp_max == 0 &&
+  CHECK(g_settings.save_master_level == 0 && g_settings.save_master_hp == 0 &&
+        g_settings.save_master_mp == 0 && g_settings.save_lives == 0 &&
+        g_settings.save_angel_sp_current == 0 && g_settings.save_angel_sp_max == 0 &&
+        g_settings.save_angel_hp_current == 0 && g_settings.save_angel_hp_max == 0 &&
         g_settings.save_message_speed == 0);
   CHECK(!g_settings.save_player_name[0]);
-  CHECK(g_settings.save_professional_mode == 0 &&
-        g_settings.save_death_heim_state == 0 &&
+  CHECK(g_settings.save_professional_mode == 0 && g_settings.save_death_heim_state == 0 &&
         g_settings.save_equipped_magic == 0);
-  for (int i = 0; i < 4; i++) CHECK(g_settings.save_magic_slots[i] == 0);
-  for (int i = 0; i < 8; i++) CHECK(g_settings.save_item_slots[i] == 0);
+  for (int i = 0; i < 4; i++)
+    CHECK(g_settings.save_magic_slots[i] == 0);
+  for (int i = 0; i < 8; i++)
+    CHECK(g_settings.save_item_slots[i] == 0);
   for (int region = 0; region < 6; region++)
     for (int act = 0; act < 2; act++)
       CHECK(g_settings.save_scores[region][act] == 0);
@@ -315,8 +289,7 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *volume = Settings_Find("audio_master_volume");
   const SettingDesc *music_volume = Settings_Find("audio_music_volume");
   const SettingDesc *sfx_volume = Settings_Find("audio_sfx_volume");
-  const SettingDesc *extended_channels =
-      Settings_Find("audio_extended_channels");
+  const SettingDesc *extended_channels = Settings_Find("audio_extended_channels");
   const SettingDesc *warp = Settings_Find("warp_target");
   const SettingDesc *warp_action = Settings_Find("warp_now");
   const SettingDesc *save_state_action = Settings_Find("save_state");
@@ -330,10 +303,8 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *stretch = Settings_Find("ignore_aspect_ratio");
   const SettingDesc *legacy_bg_refresh = Settings_Find("ws_bgrefresh");
   const SettingDesc *bridge_limit = Settings_Find("fix_bridge_limit");
-  const SettingDesc *aitos_event_queue =
-      Settings_Find("fix_aitos_event_queue");
-  const SettingDesc *windmill_wind_stop =
-      Settings_Find("fix_windmill_wind_stop");
+  const SettingDesc *aitos_event_queue = Settings_Find("fix_aitos_event_queue");
+  const SettingDesc *windmill_wind_stop = Settings_Find("fix_windmill_wind_stop");
   const SettingDesc *turbo = Settings_Find("turbo_multiplier");
   const SettingDesc *save_backend = Settings_Find("save_backend");
   const SettingDesc *save_fillmore = Settings_Find("save_prog_fillmore");
@@ -342,32 +313,24 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *inspector = Settings_Find("scene_inspector");
   const SettingDesc *dump_assets = Settings_Find("dump_scene_assets");
   const SettingDesc *sim_mode = Settings_Find("sim3d_mode");
-  const SettingDesc *world_navigation =
-      Settings_Find("sim3d_world_navigation");
-  const SettingDesc *world_navigation_lighting =
-      Settings_Find("sim3d_world_navigation_lighting");
-  const SettingDesc *world_navigation_clouds =
-      Settings_Find("sim3d_world_navigation_clouds");
+  const SettingDesc *world_navigation = Settings_Find("sim3d_world_navigation");
+  const SettingDesc *world_navigation_lighting = Settings_Find("sim3d_world_navigation_lighting");
+  const SettingDesc *world_navigation_clouds = Settings_Find("sim3d_world_navigation_clouds");
   const SettingDesc *sim_reset = Settings_Find("sim3d_reset_camera");
   CHECK(display && display->type == kSettingType_Enum);
   CHECK(display && display->enum_count == kDisplayMode_PresetCount);
   CHECK(display && display->apply == kApply_Callback);
   CHECK(volume && volume->category == kSettingCat_Audio);
   CHECK(volume && volume->apply == kApply_Callback);
-  CHECK(volume && volume->minval == 0 && volume->maxval == 100 &&
-        volume->step == 5);
+  CHECK(volume && volume->minval == 0 && volume->maxval == 100 && volume->step == 5);
   CHECK(music_volume && music_volume->category == kSettingCat_Audio &&
-        music_volume->apply == kApply_Callback &&
-        music_volume->minval == 0 && music_volume->maxval == 100 &&
-        music_volume->step == 5);
+        music_volume->apply == kApply_Callback && music_volume->minval == 0 &&
+        music_volume->maxval == 100 && music_volume->step == 5);
   CHECK(sfx_volume && sfx_volume->category == kSettingCat_Audio &&
-        sfx_volume->apply == kApply_Callback &&
-        sfx_volume->minval == 0 && sfx_volume->maxval == 100 &&
-        sfx_volume->step == 5);
-  CHECK(extended_channels &&
-        extended_channels->category == kSettingCat_Audio &&
-        extended_channels->type == kSettingType_Bool &&
-        extended_channels->apply == kApply_Restart);
+        sfx_volume->apply == kApply_Callback && sfx_volume->minval == 0 &&
+        sfx_volume->maxval == 100 && sfx_volume->step == 5);
+  CHECK(extended_channels && extended_channels->category == kSettingCat_Audio &&
+        extended_channels->type == kSettingType_Bool && extended_channels->apply == kApply_Restart);
   CHECK(warp && warp->type == kSettingType_Custom);
   CHECK(!Settings_IsMenuVisible(warp));
   CHECK(!Settings_IsMenuVisible(warp_action));
@@ -379,22 +342,18 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(exit_action && exit_action->type == kSettingType_Action);
   CHECK(music && music->apply == kApply_Callback);
   CHECK(frequency && frequency->type == kSettingType_Enum &&
-        frequency->enum_count == kAudioFrequency_Count &&
-        frequency->apply == kApply_Restart);
+        frequency->enum_count == kAudioFrequency_Count && frequency->apply == kApply_Restart);
   CHECK(screen_ratio && screen_ratio->category == kSettingCat_Display);
   CHECK(stretch && stretch->category == kSettingCat_Display);
   CHECK(!Settings_IsMenuVisible(stretch));
-  CHECK(legacy_bg_refresh &&
-        legacy_bg_refresh->category == kSettingCat_Widescreen);
+  CHECK(legacy_bg_refresh && legacy_bg_refresh->category == kSettingCat_Widescreen);
   CHECK(!Settings_IsMenuVisible(legacy_bg_refresh));
   CHECK(!Settings_IsMenuVisible(Settings_Find("uncapped_framerate")));
   CHECK(!Settings_IsMenuVisible(Settings_Find("sim3d_picker_exit_ease")));
   /* Screen ratio > Stretch derives the ignore-aspect field the runtime reads. */
-  CHECK(Settings_SetLong(screen_ratio, kScreenAspect_Stretch) ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetLong(screen_ratio, kScreenAspect_Stretch) == kSettingChange_Applied);
   CHECK(g_settings.ignore_aspect_ratio);
-  CHECK(Settings_SetLong(screen_ratio, kScreenAspect_169) ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetLong(screen_ratio, kScreenAspect_169) == kSettingChange_Applied);
   CHECK(!g_settings.ignore_aspect_ratio);
   /* Transient host-display status is not part of the settings layer:
    * refresh_mode formats as its plain persisted enum label. */
@@ -406,25 +365,19 @@ static void TestDefaultsAndMetadata(void) {
   Settings_FormatValue(refresh, refresh_value, sizeof(refresh_value));
   CHECK(!strcmp(refresh_value, "Vsync"));
   CHECK(bridge_limit && bridge_limit->category == kSettingCat_Enhancements &&
-        bridge_limit->game_change_kind ==
-            kSettingGameChange_QualityOfLife);
-  CHECK(aitos_event_queue &&
-        aitos_event_queue->category == kSettingCat_Enhancements &&
-        aitos_event_queue->type == kSettingType_Bool &&
-        aitos_event_queue->defval == 0 && !aitos_event_queue->sticky &&
-        aitos_event_queue->game_change_kind ==
-            kSettingGameChange_OriginalBugFix);
+        bridge_limit->game_change_kind == kSettingGameChange_QualityOfLife);
+  CHECK(aitos_event_queue && aitos_event_queue->category == kSettingCat_Enhancements &&
+        aitos_event_queue->type == kSettingType_Bool && aitos_event_queue->defval == 0 &&
+        !aitos_event_queue->sticky &&
+        aitos_event_queue->game_change_kind == kSettingGameChange_OriginalBugFix);
   CHECK(windmill_wind_stop &&
-        windmill_wind_stop->game_change_kind ==
-            kSettingGameChange_OriginalBugFix);
-  CHECK(turbo && turbo->game_change_kind ==
-                       kSettingGameChange_QualityOfLife);
+        windmill_wind_stop->game_change_kind == kSettingGameChange_OriginalBugFix);
+  CHECK(turbo && turbo->game_change_kind == kSettingGameChange_QualityOfLife);
   CHECK(inspector && inspector->category == kSettingCat_Inspector);
   CHECK(dump_assets && dump_assets->category == kSettingCat_Inspector &&
         dump_assets->type == kSettingType_Action);
   CHECK(sim_mode && sim_mode->category == kSettingCat_Simulation);
-  CHECK(world_navigation &&
-        world_navigation->category == kSettingCat_Simulation &&
+  CHECK(world_navigation && world_navigation->category == kSettingCat_Simulation &&
         world_navigation->type == kSettingType_Bool);
   CHECK(world_navigation_lighting && world_navigation_clouds);
   CHECK(!Settings_IsAvailable(world_navigation_lighting));
@@ -444,11 +397,9 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(Settings_IsDebugOnly(Settings_Find("sim3d_tilt_x_mrad")));
   CHECK(Settings_IsDebugOnly(Settings_Find("sim3d_shadow_opacity_pct")));
 #if AR_SIM3D_TERRAIN_ELEVATION
-  CHECK(!Settings_IsDebugOnly(
-      Settings_Find("sim3d_landscape_height_pct")));
+  CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_landscape_height_pct")));
 #else
-  CHECK(Settings_IsDebugOnly(
-      Settings_Find("sim3d_landscape_height_pct")));
+  CHECK(Settings_IsDebugOnly(Settings_Find("sim3d_landscape_height_pct")));
 #endif
   CHECK(Settings_IsDebugOnly(Settings_Find("sim3d_diagnostic_layers")));
   CHECK(Settings_IsDebugOnly(Settings_Find("sim3d_separated_composite")));
@@ -469,10 +420,8 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_mode")));
   CHECK(!Settings_IsDebugOnly(Settings_Find("sim_view_range")));
   CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_world_navigation")));
-  CHECK(!Settings_IsDebugOnly(
-      Settings_Find("sim3d_world_navigation_lighting")));
-  CHECK(!Settings_IsDebugOnly(
-      Settings_Find("sim3d_world_navigation_clouds")));
+  CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_world_navigation_lighting")));
+  CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_world_navigation_clouds")));
   CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_shadows")));
   CHECK(!Settings_IsDebugOnly(Settings_Find("sim3d_camera_mode")));
   CHECK(!Settings_IsDebugOnly(Settings_Find("diorama_skybox")));
@@ -547,12 +496,14 @@ static void TestSim3DEnvironmentLabels(void) {
   CHECK(!g_settings.sim3d_world_navigation_ground_detail);
   CHECK(!g_settings.sim3d_world_navigation_mountains);
   const char *navigation_gates[] = {
-    "sim3d_sky_palace",
-    "sim3d_sky_palace_volumetric",
-    "sim3d_world_navigation_cloud_shadows", "sim3d_world_navigation_atmosphere",
-    "sim3d_world_navigation_towns", "sim3d_world_navigation_relief",
-    "sim3d_world_navigation_ground_detail",
-    "sim3d_world_navigation_mountains",
+      "sim3d_sky_palace",
+      "sim3d_sky_palace_volumetric",
+      "sim3d_world_navigation_cloud_shadows",
+      "sim3d_world_navigation_atmosphere",
+      "sim3d_world_navigation_towns",
+      "sim3d_world_navigation_relief",
+      "sim3d_world_navigation_ground_detail",
+      "sim3d_world_navigation_mountains",
   };
   for (unsigned i = 0; i < sizeof(navigation_gates) / sizeof(navigation_gates[0]); i++) {
     const SettingDesc *desc = Settings_Find(navigation_gates[i]);
@@ -569,10 +520,8 @@ static void TestSim3DEnvironmentLabels(void) {
   CHECK(!Settings_IsAvailable(volume_clouds));
   g_settings.sim3d_world_navigation_clouds = true;
   CHECK(g_settings.sim3d_world_navigation_clouds);
-  CHECK(Settings_IsAvailable(
-      Settings_Find("sim3d_world_navigation_lighting")));
-  CHECK(Settings_IsAvailable(
-      Settings_Find("sim3d_world_navigation_clouds")));
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_world_navigation_lighting")));
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_world_navigation_clouds")));
   /* Shared atmosphere rows must remain usable when navigation is the only
    * 3D master. Town-only cull shape controls stay unavailable. */
   g_settings.sim3d_mode = false;
@@ -585,21 +534,15 @@ static void TestSim3DEnvironmentLabels(void) {
   CHECK(!Settings_IsAvailable(Settings_Find("sim3d_voxel_lod")));
   g_settings.sim3d_voxel_preset = old_preset;
   CHECK(Settings_IsAvailable(Settings_Find("sim3d_backdrop")));
-  CHECK(Settings_IsAvailable(
-      Settings_Find("sim3d_backdrop_strength_pct")));
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_backdrop_strength_pct")));
   CHECK(Settings_IsAvailable(Settings_Find("sim3d_cull_haze")));
-  CHECK(Settings_IsAvailable(
-      Settings_Find("sim3d_underlay_haze_pct")));
-  CHECK(Settings_IsAvailable(
-      Settings_Find("sim3d_cull_haze_lead_px")));
-  CHECK(Settings_IsAvailable(
-      Settings_Find("sim3d_underlay_defocus_pct")));
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_underlay_haze_pct")));
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_cull_haze_lead_px")));
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_underlay_defocus_pct")));
 #if AR_SIM3D_TERRAIN_ELEVATION
-  CHECK(Settings_IsAvailable(
-      Settings_Find("sim3d_landscape_height_pct")));
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_landscape_height_pct")));
 #else
-  CHECK(!Settings_IsAvailable(
-      Settings_Find("sim3d_landscape_height_pct")));
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_landscape_height_pct")));
 #endif
   CHECK(!Settings_IsAvailable(Settings_Find("sim3d_cull_dim_pct")));
   CHECK(!Settings_IsAvailable(Settings_Find("sim3d_cull_corner_px")));
@@ -609,13 +552,11 @@ static void TestSim3DEnvironmentLabels(void) {
   CHECK(!g_settings.sim3d_shadows && !g_settings.sim3d_virtual_height);
   CHECK(Settings_Sim3DRequestedFeatures() ==
         (kSimFeature_SeparatedComposite | kSimFeature_GroundProjection |
-         kSimFeature_ObjectBillboards | kSimFeature_SoftShadows |
-         kSimFeature_RimLight | kSimFeature_WorldUnderlay | kSimFeature_GlobeUnderlay |
-         kSimFeature_CloudShroud | kSimFeature_CullHaze |
-         kSimFeature_Backdrop | kSimFeature_EffectLighting |
+         kSimFeature_ObjectBillboards | kSimFeature_SoftShadows | kSimFeature_RimLight |
+         kSimFeature_WorldUnderlay | kSimFeature_GlobeUnderlay | kSimFeature_CloudShroud |
+         kSimFeature_CullHaze | kSimFeature_Backdrop | kSimFeature_EffectLighting |
          kSimFeature_Particles));
-  CHECK(g_settings.sim3d_tilt_x_mrad ==
-        kSim3DCameraPitchMaximumMrad);
+  CHECK(g_settings.sim3d_tilt_x_mrad == kSim3DCameraPitchMaximumMrad);
   ClearSettingsEnv();
 }
 
@@ -672,8 +613,8 @@ typedef struct DeferredSettingsProbe {
   bool fail_write, reject_submit;
 } DeferredSettingsProbe;
 
-static bool CaptureDeferredSettings(void *context, const char *path,
-                                    const char *text, size_t size) {
+static bool CaptureDeferredSettings(void *context, const char *path, const char *text,
+                                    size_t size) {
   DeferredSettingsProbe *probe = context;
   CHECK(!strcmp(path, probe->path));
   if (probe->reject_submit) return false;
@@ -690,8 +631,8 @@ static bool CaptureDeferredSettings(void *context, const char *path,
 static bool DrainDeferredSettings(void *context) {
   DeferredSettingsProbe *probe = context;
   ++probe->drains;
-  const bool ok = !probe->text ||
-      (!probe->fail_write && Settings_WriteSnapshot(probe->path, probe->text, probe->size));
+  const bool ok = !probe->text || (!probe->fail_write &&
+                                   Settings_WriteSnapshot(probe->path, probe->text, probe->size));
   free(probe->text);
   probe->text = NULL;
   return ok;
@@ -749,13 +690,23 @@ static void TestSettingsWriterRecovery(void) {
    * including on Windows and when the test runs with elevated privileges. */
   const bool exists = SDL_GetPathInfo(blocked, &info);
   CHECK(!exists);
-  if (exists) { SDL_Quit(); return; }
+  if (exists) {
+    SDL_Quit();
+    return;
+  }
   const bool created = SDL_CreateDirectory(blocked);
   CHECK(created);
-  if (!created) { SDL_Quit(); return; }
+  if (!created) {
+    SDL_Quit();
+    return;
+  }
   SettingsPersistence *writer = SettingsPersistence_Create();
   CHECK(writer);
-  if (!writer) { SDL_RemovePath(blocked); SDL_Quit(); return; }
+  if (!writer) {
+    SDL_RemovePath(blocked);
+    SDL_Quit();
+    return;
+  }
   const SettingsSaveHost host = SettingsPersistence_Host(writer);
   Settings_SetSaveHost(&host);
   g_settings.audio_master_volume = 20;
@@ -816,8 +767,7 @@ static void TestLandscapeHeightDefaultAndPersistence(void) {
   Settings_InitWithFile(path);
   CHECK(g_settings.sim3d_landscape_height_pct == 100);
 #if AR_SIM3D_TERRAIN_ELEVATION
-  CHECK(Settings_Reset(Settings_Find("sim3d_landscape_height_pct")) ==
-        kSettingChange_Applied);
+  CHECK(Settings_Reset(Settings_Find("sim3d_landscape_height_pct")) == kSettingChange_Applied);
   CHECK(g_settings.sim3d_landscape_height_pct == 40);
 #endif
   remove(path);
@@ -830,12 +780,9 @@ static void TestFogDefaultsAndPersistence(void) {
     long shipping;
     long previous;
   } changed[] = {
-    {"sim3d_underlay_haze_pct", 20, 40},
-    {"sim3d_cloud_inset_px", 48, 80},
-    {"sim3d_cull_haze_pct", 0, 10},
-    {"sim3d_cull_dim_pct", 30, 35},
-    {"sim3d_cull_corner_px", 0, 96},
-    {"sim3d_underlay_defocus_pct", 0, 40},
+      {"sim3d_underlay_haze_pct", 20, 40}, {"sim3d_cloud_inset_px", 48, 80},
+      {"sim3d_cull_haze_pct", 0, 10},      {"sim3d_cull_dim_pct", 30, 35},
+      {"sim3d_cull_corner_px", 0, 96},     {"sim3d_underlay_defocus_pct", 0, 40},
   };
   ClearSettingsEnv();
   Settings_SetPersistenceEnabled(true);
@@ -865,14 +812,13 @@ static void TestFogDefaultsAndPersistence(void) {
 
   /* Explicit pre-update preferences must survive loading and saving. Missing
    * keys alone inherit the new baseline; this is not a settings migration. */
-  CHECK(WriteTextFile(path,
-      "sim3d_mode = On\n"
-      "sim3d_underlay_haze_pct = 40\n"
-      "sim3d_cloud_inset_px = 80\n"
-      "sim3d_cull_haze_pct = 10\n"
-      "sim3d_cull_dim_pct = 35\n"
-      "sim3d_cull_corner_px = 96\n"
-      "sim3d_underlay_defocus_pct = 40\n"));
+  CHECK(WriteTextFile(path, "sim3d_mode = On\n"
+                            "sim3d_underlay_haze_pct = 40\n"
+                            "sim3d_cloud_inset_px = 80\n"
+                            "sim3d_cull_haze_pct = 10\n"
+                            "sim3d_cull_dim_pct = 35\n"
+                            "sim3d_cull_corner_px = 96\n"
+                            "sim3d_underlay_defocus_pct = 40\n"));
   Settings_InitWithFile(path);
   CHECK(Settings_Save(path));
   Settings_InitWithFile(path);
@@ -908,35 +854,33 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   remove("actraiser-settings-saved-test.ini.tmp");
 
   ClearSettingsEnv();
-  CHECK(WriteTextFile(config_path,
-      "[Graphics]\n"
-      "WindowScale = 4\n"
-      "Fullscreen = 1\n"
-      "ExtendedAspectRatio = 16:9\n"
-      "AspectPAR = 4:3\n"
-      "[Sound]\n"
-      "AudioFreq = 32040\n"
-      "AR_AUDIO_VOLUME = 65\n"
-      "[Cheats]\n"
-      "AR_DISPLAY_MODE = 2\n"
-      "AR_WS_SPRITES = 1\n"
-      "[KeyMap]\n"
-      "Fullscreen = Alt+Return\n"));
+  CHECK(WriteTextFile(config_path, "[Graphics]\n"
+                                   "WindowScale = 4\n"
+                                   "Fullscreen = 1\n"
+                                   "ExtendedAspectRatio = 16:9\n"
+                                   "AspectPAR = 4:3\n"
+                                   "[Sound]\n"
+                                   "AudioFreq = 32040\n"
+                                   "AR_AUDIO_VOLUME = 65\n"
+                                   "[Cheats]\n"
+                                   "AR_DISPLAY_MODE = 2\n"
+                                   "AR_WS_SPRITES = 1\n"
+                                   "[KeyMap]\n"
+                                   "Fullscreen = Alt+Return\n"));
   ParseConfigFile(config_path);
 
-  CHECK(WriteTextFile(settings_path,
-      "# menu-owned layer\n"
-      "window_scale = 5\n"
-      "audio_master_volume = 70%\n"
-      "audio_music_volume = 60%\n"
-      "audio_sfx_volume = 75%\n"
-      "audio_extended_channels = On\n"
-      "extended_aspect = 16:10\n"
-      "pixel_aspect = Square pixels\n"
-      "ws_sprites = On\n"
-      "cheat_moonjump_speed = 9\n"
-      "cheat_moonjump_button = $4000\n"
-      "unknown_future_key = retained-by-future-version\n"));
+  CHECK(WriteTextFile(settings_path, "# menu-owned layer\n"
+                                     "window_scale = 5\n"
+                                     "audio_master_volume = 70%\n"
+                                     "audio_music_volume = 60%\n"
+                                     "audio_sfx_volume = 75%\n"
+                                     "audio_extended_channels = On\n"
+                                     "extended_aspect = 16:10\n"
+                                     "pixel_aspect = Square pixels\n"
+                                     "ws_sprites = On\n"
+                                     "cheat_moonjump_speed = 9\n"
+                                     "cheat_moonjump_button = $4000\n"
+                                     "unknown_future_key = retained-by-future-version\n"));
 
   /* Real environment values must remain distinguishable from config.ini's
    * staged AR_* compatibility values and win over both file layers. */
@@ -947,7 +891,7 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   Settings_InitWithFile(settings_path);
   Settings_FinalizeDisplayMode();
 
-  CHECK(g_settings.window_scale == 5);       /* settings > config */
+  CHECK(g_settings.window_scale == 5); /* settings > config */
   /* Legacy [Graphics] Fullscreen=1 maps to Borderless; [KeyMap] Fullscreen did
    * not clobber it. */
   CHECK(g_settings.window_mode == kWindowMode_Borderless);
@@ -961,13 +905,11 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(g_settings.display_mode == kDisplayMode_Custom);
   CHECK(Settings_ExtendedAspectX() == 16 && Settings_ExtendedAspectY() == 10);
   CHECK(g_settings.pixel_aspect == kPixelAspect_Square);
-  CHECK(g_settings.cheat_moonjump);  /* migrated from the old speed-only row */
+  CHECK(g_settings.cheat_moonjump); /* migrated from the old speed-only row */
   CHECK(g_settings.cheat_moonjump_speed == 9);
 
-  CHECK(Settings_SetLong(Settings_Find("window_scale"), 6) ==
-        kSettingChange_Applied);
-  CHECK(Settings_SetLong(Settings_Find("audio_master_volume"), 40) ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetLong(Settings_Find("window_scale"), 6) == kSettingChange_Applied);
+  CHECK(Settings_SetLong(Settings_Find("audio_master_volume"), 40) == kSettingChange_Applied);
   CHECK(Settings_SetText(Settings_Find("localization_presentation"), "Enhanced") ==
         kSettingChange_Applied);
   CHECK(Settings_SetLong(Settings_Find("localization_font_scale_percent"), 115) ==
@@ -998,9 +940,8 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(!FileContains(saved_path, "toggle_pause ="));
   CHECK(!FileContains(saved_path, "display_mode ="));
   CHECK(!FileContains("actraiser-settings-saved-test.ini.tmp", "anything"));
-  CHECK(Settings_SetLong(Settings_Find("audio_master_volume"), 45) ==
-        kSettingChange_Applied);
-  CHECK(Settings_Save(saved_path));  /* atomically replace an existing file */
+  CHECK(Settings_SetLong(Settings_Find("audio_master_volume"), 45) == kSettingChange_Applied);
+  CHECK(Settings_Save(saved_path)); /* atomically replace an existing file */
   CHECK(FileContains(saved_path, "audio_master_volume = 45%"));
 
   ClearSettingsEnv();
@@ -1096,8 +1037,7 @@ static void TestMutationApi(void) {
   const SettingDesc *volume = Settings_Find("audio_master_volume");
   const SettingDesc *music_volume = Settings_Find("audio_music_volume");
   const SettingDesc *sfx_volume = Settings_Find("audio_sfx_volume");
-  const SettingDesc *extended_channels =
-      Settings_Find("audio_extended_channels");
+  const SettingDesc *extended_channels = Settings_Find("audio_extended_channels");
   CHECK(Settings_SetLong(volume, 87) == kSettingChange_Applied);
   CHECK(g_settings.audio_master_volume == 85);
   CHECK(s_observer_desc == volume);
@@ -1112,8 +1052,7 @@ static void TestMutationApi(void) {
   CHECK(g_settings.audio_music_volume == 65);
   CHECK(Settings_SetLong(sfx_volume, 42) == kSettingChange_Applied);
   CHECK(g_settings.audio_sfx_volume == 40);
-  CHECK(Settings_SetLong(extended_channels, 1) ==
-        kSettingChange_RestartPending);
+  CHECK(Settings_SetLong(extended_channels, 1) == kSettingChange_RestartPending);
   CHECK(g_settings.audio_extended_channels);
 
   const SettingDesc *dialog_blip = Settings_Find("audio_dialog_blip");
@@ -1121,8 +1060,7 @@ static void TestMutationApi(void) {
   CHECK(!g_settings.audio_dialog_blip);
 
   const SettingDesc *frequency = Settings_Find("audio_frequency");
-  CHECK(Settings_SetText(frequency, "48 kHz") ==
-        kSettingChange_RestartPending);
+  CHECK(Settings_SetText(frequency, "48 kHz") == kSettingChange_RestartPending);
   CHECK(g_settings.audio_frequency == kAudioFrequency_48000);
   CHECK(Settings_AudioFrequencyHz() == 48000);
   CHECK(Settings_SetText(frequency, "32000") == kSettingChange_Rejected);
@@ -1134,14 +1072,11 @@ static void TestMutationApi(void) {
 
   char value[512];
   const SettingDesc *save_backend = Settings_Find("save_backend");
-  CHECK(Settings_SetText(save_backend, "ini") ==
-        kSettingChange_RestartPending);
+  CHECK(Settings_SetText(save_backend, "ini") == kSettingChange_RestartPending);
   CHECK(g_settings.save_backend == 1);
   const SettingDesc *save_fillmore = Settings_Find("save_prog_fillmore");
-  CHECK(Settings_SetText(save_fillmore, "act2-cleared") ==
-        kSettingChange_Applied);
-  CHECK(g_settings.save_region_progress[0] ==
-        kSaveProgressEdit_Act2Cleared);
+  CHECK(Settings_SetText(save_fillmore, "act2-cleared") == kSettingChange_Applied);
+  CHECK(g_settings.save_region_progress[0] == kSaveProgressEdit_Act2Cleared);
   Settings_FormatValue(save_fillmore, value, sizeof(value));
   CHECK(!strcmp(value, "Act 2 cleared"));
   const SettingDesc *save_level = Settings_Find("save_master_level");
@@ -1162,30 +1097,23 @@ static void TestMutationApi(void) {
   const SettingDesc *save_name = Settings_Find("save_player_name");
   CHECK(Settings_SetText(save_name, "CODEX") == kSettingChange_Applied);
   CHECK(!strcmp(g_settings.save_player_name, "CODEX"));
-  CHECK(Settings_SetText(save_name, "TOO-LONG-NAME") ==
-        kSettingChange_Rejected);
+  CHECK(Settings_SetText(save_name, "TOO-LONG-NAME") == kSettingChange_Rejected);
   const SettingDesc *save_magic = Settings_Find("save_magic_slot_1");
-  CHECK(Settings_SetLong(save_page, kSaveEditorPage_Magic) ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetLong(save_page, kSaveEditorPage_Magic) == kSettingChange_Applied);
   CHECK(Settings_IsMenuVisible(save_magic));
   CHECK(!Settings_IsMenuVisible(save_level));
-  CHECK(Settings_SetText(save_magic, "Magical Aura") ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetText(save_magic, "Magical Aura") == kSettingChange_Applied);
   CHECK(g_settings.save_magic_slots[0] == 4);
   const SettingDesc *save_equipped = Settings_Find("save_equipped_magic");
-  CHECK(Settings_SetText(save_equipped, "Magical Stardust") ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetText(save_equipped, "Magical Stardust") == kSettingChange_Applied);
   CHECK(g_settings.save_equipped_magic == 3);
   const SettingDesc *save_item = Settings_Find("save_item_slot_8");
-  CHECK(Settings_SetLong(save_page, kSaveEditorPage_Items) ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetLong(save_page, kSaveEditorPage_Items) == kSettingChange_Applied);
   CHECK(Settings_IsMenuVisible(save_item));
-  CHECK(Settings_SetText(save_item, "Strength of Angel") ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetText(save_item, "Strength of Angel") == kSettingChange_Applied);
   CHECK(g_settings.save_item_slots[7] == 14);
   const SettingDesc *save_score = Settings_Find("save_score_northwall_2");
-  CHECK(Settings_SetLong(save_page, kSaveEditorPage_Scores) ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetLong(save_page, kSaveEditorPage_Scores) == kSettingChange_Applied);
   CHECK(Settings_IsMenuVisible(save_score));
   CHECK(Settings_SetText(save_score, "12340") == kSettingChange_Applied);
   CHECK(g_settings.save_scores[5][1] == 1235);
@@ -1213,8 +1141,7 @@ static void TestMutationApi(void) {
   CHECK(!strcmp(value, "16:9"));
   CHECK(Settings_SetText(aspect, "21:9") == kSettingChange_Rejected);
   const SettingDesc *pixel_aspect = Settings_Find("pixel_aspect");
-  CHECK(Settings_SetText(pixel_aspect, "Square pixels") ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetText(pixel_aspect, "Square pixels") == kSettingChange_Applied);
   const SettingDesc *window_scale = Settings_Find("window_scale");
   CHECK(Settings_SetLong(window_scale, 4) == kSettingChange_Applied);
   CHECK(g_settings.window_scale == 4);
@@ -1270,31 +1197,25 @@ static void TestCategoryReset(void) {
   const SettingDesc *frequency = Settings_Find("audio_frequency");
   CHECK(sim_mode && sim_tilt && volume && frequency);
   CHECK(Settings_SetLong(sim_mode, 1) == kSettingChange_Applied);
-  CHECK(Settings_SetLong(sim_tilt, sim_tilt->defval - sim_tilt->step) ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetLong(sim_tilt, sim_tilt->defval - sim_tilt->step) == kSettingChange_Applied);
   CHECK(Settings_SetLong(volume, 55) == kSettingChange_Applied);
-  CHECK(Settings_SetLong(frequency, kAudioFrequency_48000) ==
-        kSettingChange_RestartPending);
+  CHECK(Settings_SetLong(frequency, kAudioFrequency_48000) == kSettingChange_RestartPending);
 
   /* A registry category is narrow: resetting Town camera must not reset the
    * Town scene master toggle or an unrelated Audio setting. */
-  CHECK(Settings_ResetCategory(kSettingCat_SimCamera) ==
-        kSettingChange_Applied);
+  CHECK(Settings_ResetCategory(kSettingCat_SimCamera) == kSettingChange_Applied);
   CHECK(g_settings.sim3d_tilt_x_mrad == sim_tilt->defval);
   CHECK(g_settings.sim3d_mode);
   CHECK(g_settings.audio_master_volume == 55);
   CHECK(g_settings.audio_frequency == kAudioFrequency_48000);
-  CHECK(Settings_ResetCategory(kSettingCat_SimCamera) ==
-        kSettingChange_Unchanged);
+  CHECK(Settings_ResetCategory(kSettingCat_SimCamera) == kSettingChange_Unchanged);
 
   /* Batch results preserve the strongest consequence from any row. */
-  CHECK(Settings_ResetCategory(kSettingCat_Audio) ==
-        kSettingChange_RestartPending);
+  CHECK(Settings_ResetCategory(kSettingCat_Audio) == kSettingChange_RestartPending);
   CHECK(g_settings.audio_master_volume == volume->defval);
   CHECK(g_settings.audio_frequency == frequency->defval);
   CHECK(g_settings.sim3d_mode);
-  CHECK(Settings_ResetCategory(kSettingCat_Count) ==
-        kSettingChange_Rejected);
+  CHECK(Settings_ResetCategory(kSettingCat_Count) == kSettingChange_Rejected);
 }
 
 static void TestCheatsCanBeStagedOutsideTheirRuntimeMode(void) {
@@ -1309,8 +1230,7 @@ static void TestCheatsCanBeStagedOutsideTheirRuntimeMode(void) {
   const SettingDesc *hp = Settings_Find("cheat_inf_hp");
   const SettingDesc *freeze = Settings_Find("cheat_freeze_timer");
   const SettingDesc *moonjump = Settings_Find("cheat_moonjump");
-  const SettingDesc *moonjump_speed =
-      Settings_Find("cheat_moonjump_speed");
+  const SettingDesc *moonjump_speed = Settings_Find("cheat_moonjump_speed");
   const SettingDesc *no_knockback = Settings_Find("cheat_no_knockback");
   CHECK(Settings_IsAvailable(hp));
   CHECK(Settings_IsAvailable(freeze));
@@ -1338,12 +1258,11 @@ static void TestNoWideBudget(void) {
   DisplayGeometry_SetHorizontal(0, 0);
   Settings_Init();
   CHECK(g_settings.display_mode == kDisplayMode_43);
-  CHECK(Settings_SetLong(Settings_Find("display_mode"),
-                         kDisplayMode_WideRaw) == kSettingChange_Unchanged);
+  CHECK(Settings_SetLong(Settings_Find("display_mode"), kDisplayMode_WideRaw) ==
+        kSettingChange_Unchanged);
   CHECK(Settings_VisibleX0() == 0);
   CHECK(Settings_VisibleWidth() == 256);
 }
-
 
 /* Input bindings: defaults reproduce the pre-rebinding hard-coded keyboard
  * layout, every row survives the ini text round trip, and claiming a control
@@ -1351,17 +1270,19 @@ static void TestNoWideBudget(void) {
 static void TestInputBindingHints(void) {
   Settings_Init();
   char hint[64];
-  const uint32 north=INPUT_BIND_MAKE(kInputBind_PadButton,SDL_GAMEPAD_BUTTON_NORTH,false);
-  InputMap_FormatBindingHint(hint,sizeof(hint),north,SDL_GAMEPAD_TYPE_XBOXONE);
-  CHECK(!strcmp(hint,"Y"));
-  InputMap_FormatBindingHint(hint,sizeof(hint),north,SDL_GAMEPAD_TYPE_PS5);
-  CHECK(!strcmp(hint,"Triangle"));
-  InputMap_FormatBindingHint(hint,sizeof(hint),north,SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO);
-  CHECK(!strcmp(hint,"X"));
-  InputMap_FormatBindingHint(hint,sizeof(hint),
-      INPUT_BIND_MAKE(kInputBind_PadButton,SDL_GAMEPAD_BUTTON_WEST,false),SDL_GAMEPAD_TYPE_PS4);
-  CHECK(!strcmp(hint,"Square"));
-  const uint32 shoulder = INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, false);
+  const uint32 north = INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_NORTH, false);
+  InputMap_FormatBindingHint(hint, sizeof(hint), north, SDL_GAMEPAD_TYPE_XBOXONE);
+  CHECK(!strcmp(hint, "Y"));
+  InputMap_FormatBindingHint(hint, sizeof(hint), north, SDL_GAMEPAD_TYPE_PS5);
+  CHECK(!strcmp(hint, "Triangle"));
+  InputMap_FormatBindingHint(hint, sizeof(hint), north, SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO);
+  CHECK(!strcmp(hint, "X"));
+  InputMap_FormatBindingHint(hint, sizeof(hint),
+                             INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_WEST, false),
+                             SDL_GAMEPAD_TYPE_PS4);
+  CHECK(!strcmp(hint, "Square"));
+  const uint32 shoulder =
+      INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, false);
   InputMap_FormatBindingHint(hint, sizeof(hint), shoulder, SDL_GAMEPAD_TYPE_XBOXONE);
   CHECK(!strcmp(hint, "LB"));
   InputMap_FormatBindingHint(hint, sizeof(hint), shoulder, SDL_GAMEPAD_TYPE_PS5);
@@ -1372,77 +1293,85 @@ static void TestInputBindingHints(void) {
   CHECK(!strcmp(hint, "Z"));
   CHECK(InputMap_ActionHintForDevice(hint, sizeof(hint), kInputAction_B, kInputClass_Gamepad));
   CHECK(!strcmp(hint, "A"));
-  CHECK(!InputMap_ActionHintForDevice(hint, sizeof(hint), kInputAction_Count, kInputClass_Keyboard));
+  CHECK(
+      !InputMap_ActionHintForDevice(hint, sizeof(hint), kInputAction_Count, kInputClass_Keyboard));
   CHECK(!*hint);
   CHECK(!InputMap_ActionHintForDevice(hint, sizeof(hint), kInputAction_B, -1));
   CHECK(!*hint);
-  InputMap_FormatBindingHint(hint,sizeof(hint),0,SDL_GAMEPAD_TYPE_STANDARD);
+  InputMap_FormatBindingHint(hint, sizeof(hint), 0, SDL_GAMEPAD_TYPE_STANDARD);
   CHECK(!hint[0]);
-  InputMap_FormatBindingHint(hint,sizeof(hint),
-      INPUT_BIND_MAKE(kInputBind_PadAxis,SDL_GAMEPAD_AXIS_RIGHTX,true),SDL_GAMEPAD_TYPE_STANDARD);
-  CHECK(!strcmp(hint,"RS Left"));
+  InputMap_FormatBindingHint(hint, sizeof(hint),
+                             INPUT_BIND_MAKE(kInputBind_PadAxis, SDL_GAMEPAD_AXIS_RIGHTX, true),
+                             SDL_GAMEPAD_TYPE_STANDARD);
+  CHECK(!strcmp(hint, "RS Left"));
   /* Forced gamepad mode retains the same disconnected-pad keyboard safety
    * valve as gameplay; the hint follows a remap and disappears when unbound. */
-  g_settings.input_device=kInputDevice_Gamepad;
-  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
-  CHECK(!strcmp(hint,"S"));
-  g_settings.input_bind[kInputClass_Keyboard][kInputAction_SimDescribe]=
-      INPUT_BIND_MAKE(kInputBind_Key,SDL_SCANCODE_F1,false);
-  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
-  CHECK(!strcmp(hint,"F1"));
-  g_settings.input_bind[kInputClass_Keyboard][kInputAction_SimDescribe]=0;
-  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
+  g_settings.input_device = kInputDevice_Gamepad;
+  InputMap_GameActionHint(hint, sizeof(hint), kInputAction_SimDescribe);
+  CHECK(!strcmp(hint, "S"));
+  g_settings.input_bind[kInputClass_Keyboard][kInputAction_SimDescribe] =
+      INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_F1, false);
+  InputMap_GameActionHint(hint, sizeof(hint), kInputAction_SimDescribe);
+  CHECK(!strcmp(hint, "F1"));
+  g_settings.input_bind[kInputClass_Keyboard][kInputAction_SimDescribe] = 0;
+  InputMap_GameActionHint(hint, sizeof(hint), kInputAction_SimDescribe);
   CHECK(!hint[0]);
 }
 
 static void TestInputHintDeviceRetention(void) {
   Settings_Init();
   InputMap_Clear();
-  const bool initialized=SDL_InitSubSystem(SDL_INIT_GAMEPAD);
+  const bool initialized = SDL_InitSubSystem(SDL_INIT_GAMEPAD);
   CHECK(initialized);
   if (!initialized) return;
   SDL_VirtualJoystickDesc desc;
   SDL_INIT_INTERFACE(&desc);
-  desc.type=SDL_JOYSTICK_TYPE_GAMEPAD;
-  desc.nbuttons=SDL_GAMEPAD_BUTTON_COUNT;
-  desc.button_mask=(1u<<SDL_GAMEPAD_BUTTON_COUNT)-1;
-  desc.name="Describe hint test";
-  const SDL_JoystickID id=SDL_AttachVirtualJoystick(&desc);
-  CHECK(id!=0);
-  if (!id) { SDL_QuitSubSystem(SDL_INIT_GAMEPAD); return; }
-  SDL_Event event={0};
-  event.type=SDL_EVENT_GAMEPAD_ADDED; event.gdevice.which=id;
+  desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+  desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+  desc.button_mask = (1u << SDL_GAMEPAD_BUTTON_COUNT) - 1;
+  desc.name = "Describe hint test";
+  const SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
+  CHECK(id != 0);
+  if (!id) {
+    SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    return;
+  }
+  SDL_Event event = {0};
+  event.type = SDL_EVENT_GAMEPAD_ADDED;
+  event.gdevice.which = id;
   InputMap_HandleEvent(&event);
-  CHECK(InputMap_GamepadCount()==1);
+  CHECK(InputMap_GamepadCount() == 1);
   char hint[64];
-  event.type=SDL_EVENT_GAMEPAD_BUTTON_DOWN;
-  event.gbutton.which=id; event.gbutton.button=SDL_GAMEPAD_BUTTON_NORTH;
+  event.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+  event.gbutton.which = id;
+  event.gbutton.button = SDL_GAMEPAD_BUTTON_NORTH;
   InputMap_HandleEvent(&event);
-  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
-  CHECK(!strcmp(hint,"Y"));
-  event.type=SDL_EVENT_GAMEPAD_BUTTON_UP;
+  InputMap_GameActionHint(hint, sizeof(hint), kInputAction_SimDescribe);
+  CHECK(!strcmp(hint, "Y"));
+  event.type = SDL_EVENT_GAMEPAD_BUTTON_UP;
   InputMap_HandleEvent(&event);
-  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
-  CHECK(!strcmp(hint,"Y")); /* Release must not flash the keyboard hint. */
-  InputMap_HandleKey(SDL_SCANCODE_UP,true,false);
-  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
-  CHECK(!strcmp(hint,"S"));
-  InputMap_HandleKey(SDL_SCANCODE_UP,false,false);
-  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
-  CHECK(!strcmp(hint,"S"));
-  g_settings.input_device=kInputDevice_Gamepad;
-  g_settings.input_bind[kInputClass_Gamepad][kInputAction_SimDescribe]=
-      INPUT_BIND_MAKE(kInputBind_PadButton,SDL_GAMEPAD_BUTTON_WEST,false);
-  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
-  CHECK(!strcmp(hint,"X"));
-  g_settings.input_device=kInputDevice_Keyboard;
-  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
-  CHECK(!strcmp(hint,"S"));
-  g_settings.input_device=kInputDevice_Gamepad;
-  event.type=SDL_EVENT_GAMEPAD_REMOVED; event.gdevice.which=id;
+  InputMap_GameActionHint(hint, sizeof(hint), kInputAction_SimDescribe);
+  CHECK(!strcmp(hint, "Y")); /* Release must not flash the keyboard hint. */
+  InputMap_HandleKey(SDL_SCANCODE_UP, true, false);
+  InputMap_GameActionHint(hint, sizeof(hint), kInputAction_SimDescribe);
+  CHECK(!strcmp(hint, "S"));
+  InputMap_HandleKey(SDL_SCANCODE_UP, false, false);
+  InputMap_GameActionHint(hint, sizeof(hint), kInputAction_SimDescribe);
+  CHECK(!strcmp(hint, "S"));
+  g_settings.input_device = kInputDevice_Gamepad;
+  g_settings.input_bind[kInputClass_Gamepad][kInputAction_SimDescribe] =
+      INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_WEST, false);
+  InputMap_GameActionHint(hint, sizeof(hint), kInputAction_SimDescribe);
+  CHECK(!strcmp(hint, "X"));
+  g_settings.input_device = kInputDevice_Keyboard;
+  InputMap_GameActionHint(hint, sizeof(hint), kInputAction_SimDescribe);
+  CHECK(!strcmp(hint, "S"));
+  g_settings.input_device = kInputDevice_Gamepad;
+  event.type = SDL_EVENT_GAMEPAD_REMOVED;
+  event.gdevice.which = id;
   InputMap_HandleEvent(&event);
-  InputMap_GameActionHint(hint,sizeof(hint),kInputAction_SimDescribe);
-  CHECK(!strcmp(hint,"S"));
+  InputMap_GameActionHint(hint, sizeof(hint), kInputAction_SimDescribe);
+  CHECK(!strcmp(hint, "S"));
   InputMap_Shutdown();
   SDL_DetachVirtualJoystick(id);
   SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
@@ -1507,15 +1436,12 @@ static void TestInputBindings(void) {
   CHECK(key_cycle && pad_cycle);
   CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_MagicCycle] ==
         INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_M, false));
-  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_MagicCycle] ==
-        0);
+  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_MagicCycle] == 0);
   const SettingDesc *key_compare = Settings_Find("bind_key_render_compare");
   const SettingDesc *pad_compare = Settings_Find("bind_pad_render_compare");
   CHECK(key_compare && pad_compare);
-  CHECK(g_settings.input_bind[kInputClass_Keyboard]
-                             [kInputAction_RenderCompare] == 0);
-  CHECK(g_settings.input_bind[kInputClass_Gamepad]
-                             [kInputAction_RenderCompare] == 0);
+  CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_RenderCompare] == 0);
+  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_RenderCompare] == 0);
   const SettingDesc *cycle_cheat = Settings_Find("cheat_magic_cycle");
   CHECK(cycle_cheat != NULL);
   CHECK(!g_settings.cheat_magic_cycle);
@@ -1523,11 +1449,9 @@ static void TestInputBindings(void) {
   CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_B] ==
         INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_Z, false));
   CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_B] ==
-        INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_SOUTH,
-                        false));
+        INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_SOUTH, false));
   CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_Menu] ==
-        INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_LEFT_STICK,
-                        false));
+        INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_LEFT_STICK, false));
 
   char text[64];
   /* R7: keys persist as "Key <scancode> <name>" — the NUMBER is authoritative
@@ -1540,13 +1464,11 @@ static void TestInputBindings(void) {
   CHECK(!strcmp(text, "Key 29 Z"));
   /* The numeric field alone is enough, extra name text is ignored, and the
    * legacy name-only form still loads. All three land on the same binding. */
-  const uint32 z_binding =
-      INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_Z, false);
+  const uint32 z_binding = INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_Z, false);
   uint32 parsed = 0;
   CHECK(InputMap_ParseBinding("Key 29", &parsed) && parsed == z_binding);
   CHECK(InputMap_ParseBinding("Key 29 Z", &parsed) && parsed == z_binding);
-  CHECK(InputMap_ParseBinding("Key 29 whatever", &parsed) &&
-        parsed == z_binding);
+  CHECK(InputMap_ParseBinding("Key 29 whatever", &parsed) && parsed == z_binding);
   CHECK(InputMap_ParseBinding("Key Z", &parsed) && parsed == z_binding);
   /* A scancode whose NAME is itself a digit must still resolve by name, not be
    * misread as a scancode number ("1" is SDL_SCANCODE_1 == 30, not scancode 1). */
@@ -1561,8 +1483,7 @@ static void TestInputBindings(void) {
   CHECK(!strcmp(text, "Pad A / south"));
 
   /* Rebinding B to the key A already holds must clear A, not duplicate it. */
-  CHECK(InputMap_ApplyBinding(
-            key_b, INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_X, false)) ==
+  CHECK(InputMap_ApplyBinding(key_b, INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_X, false)) ==
         kSettingChange_Applied);
   CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_B] ==
         INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_X, false));
@@ -1577,10 +1498,8 @@ static void TestInputBindings(void) {
 
   /* Axis bindings keep their direction across the text round trip. */
   const SettingDesc *pad_up = Settings_Find("bind_pad_up");
-  CHECK(InputMap_ApplyBinding(
-            pad_up, INPUT_BIND_MAKE(kInputBind_PadAxis,
-                                    SDL_GAMEPAD_AXIS_LEFTY, true)) ==
-        kSettingChange_Applied);
+  CHECK(InputMap_ApplyBinding(pad_up, INPUT_BIND_MAKE(kInputBind_PadAxis, SDL_GAMEPAD_AXIS_LEFTY,
+                                                      true)) == kSettingChange_Applied);
   Settings_FormatValue(pad_up, text, sizeof(text));
   CHECK(!strcmp(text, "Pad L-Stick Up"));
   CHECK(Settings_SetText(pad_up, text) == kSettingChange_Unchanged);
@@ -1589,8 +1508,8 @@ static void TestInputBindings(void) {
    * This is the exact sequence hold-to-comparison uses: the initial edge
    * crosses 20000, natural trigger settling must not turn it into a click,
    * and only crossing back below 12000 releases it. */
-  const uint32 positive_axis = INPUT_BIND_MAKE(
-      kInputBind_PadAxis, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, false);
+  const uint32 positive_axis =
+      INPUT_BIND_MAKE(kInputBind_PadAxis, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, false);
   CHECK(InputMap_AxisBindingHeld(positive_axis, 21000, false));
   CHECK(InputMap_AxisBindingHeld(positive_axis, 16000, true));
   CHECK(!InputMap_AxisBindingHeld(positive_axis, 11000, true));
@@ -1652,14 +1571,11 @@ static void TestInputBindings(void) {
   CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_CamPitchUp] ==
         INPUT_BIND_MAKE(kInputBind_PadAxis, SDL_GAMEPAD_AXIS_RIGHTY, true));
   CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_CamZoomIn] ==
-        INPUT_BIND_MAKE(kInputBind_PadAxis, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER,
-                        false));
+        INPUT_BIND_MAKE(kInputBind_PadAxis, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, false));
   CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_CamReset] ==
-        INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_RIGHT_STICK,
-                        false));
+        INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_RIGHT_STICK, false));
   /* Camera keys are unbound by default: the desktop path is the mouse. */
-  CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_CamYawLeft] ==
-        0);
+  CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_CamYawLeft] == 0);
   /* Two rows legitimately share the right-stick X axis with opposite signs;
    * the duplicate-steal pass must not treat them as a collision. */
   const SettingDesc *yaw_left = Settings_Find("bind_pad_cam_yaw_left");
@@ -1695,15 +1611,15 @@ static void TestScalePercentToOutput(void) {
   CHECK(Settings_ScalePercentToOutput(100) == 100);
   CHECK(Settings_ScalePercentToOutput(250) == 250);
 
-  Settings_SetHostPixelDensity(2.0f);          /* Retina */
+  Settings_SetHostPixelDensity(2.0f); /* Retina */
   CHECK(Settings_ScalePercentToOutput(100) == 200);
   CHECK(Settings_ScalePercentToOutput(250) == 500);
-  CHECK(Settings_ScalePercentToOutput(0) == 0);        /* auto untouched */
-  CHECK(Settings_ScalePercentToOutput(-1) == -1);      /* sentinel untouched */
+  CHECK(Settings_ScalePercentToOutput(0) == 0);   /* auto untouched */
+  CHECK(Settings_ScalePercentToOutput(-1) == -1); /* sentinel untouched */
 
-  Settings_SetHostPixelDensity(1.5f);          /* Wayland fractional */
+  Settings_SetHostPixelDensity(1.5f); /* Wayland fractional */
   CHECK(Settings_ScalePercentToOutput(100) == 150);
-  CHECK(Settings_ScalePercentToOutput(75) == 113);     /* rounds, never 0 */
+  CHECK(Settings_ScalePercentToOutput(75) == 113); /* rounds, never 0 */
 
   /* A bogus density can never zero out or invert a pinned scale. */
   Settings_SetHostPixelDensity(0.0f);
@@ -1712,7 +1628,7 @@ static void TestScalePercentToOutput(void) {
   Settings_SetHostPixelDensity(-3.0f);
   CHECK(Settings_HostPixelDensity() == 1.0f);
   CHECK(Settings_ScalePercentToOutput(1) == 1);
-  Settings_SetHostPixelDensity(1.0f);          /* restore for later tests */
+  Settings_SetHostPixelDensity(1.0f); /* restore for later tests */
 }
 
 /* The launcher selects portable/custom/per-user CWD before data IO. */
@@ -1724,7 +1640,8 @@ static void TestUserDataFile(void) {
   char srm[1024];
   UserDataFile(srm, sizeof srm, "saves/save.srm");
   CHECK(strcmp(srm, "saves/save.srm") == 0);
-  char short_path[4]="old";UserDataFile(short_path,sizeof(short_path),"settings.ini");
+  char short_path[4] = "old";
+  UserDataFile(short_path, sizeof(short_path), "settings.ini");
   CHECK(!short_path[0]);
 }
 
@@ -1775,12 +1692,10 @@ static void TestRimLightAvailabilityFollowsBlendSupport(void) {
 static void TestEffectAvailabilityFollowsRendererSupport(void) {
   const SettingDesc *lighting = Settings_Find("sim3d_effect_lighting");
   const SettingDesc *particles = Settings_Find("sim3d_particles");
-  const SettingDesc *action_lighting =
-      Settings_Find("action_effect_lighting");
-  const SettingDesc *action_particles =
-      Settings_Find("action_effect_particles");
-  CHECK(lighting != NULL && particles != NULL &&
-        action_lighting != NULL && action_particles != NULL);
+  const SettingDesc *action_lighting = Settings_Find("action_effect_lighting");
+  const SettingDesc *action_particles = Settings_Find("action_effect_particles");
+  CHECK(lighting != NULL && particles != NULL && action_lighting != NULL &&
+        action_particles != NULL);
   if (!lighting || !particles || !action_lighting || !action_particles) return;
   const bool restore_support = s_effect_renderer_supported;
   const int restore_mode = g_settings.sim3d_mode;
@@ -1863,13 +1778,11 @@ static void TestVideoSettingAudit(void) {
   g_settings.diorama_mode = true;
   g_settings.diorama_camera_mode = kDioramaCam_Free;
   CHECK(Settings_IsAvailable(Settings_Find("diorama_tilt_x_mrad")));
-  CHECK(!Settings_IsAvailable(
-      Settings_Find("diorama_dyncam_baseline_tilt_x_mrad")));
+  CHECK(!Settings_IsAvailable(Settings_Find("diorama_dyncam_baseline_tilt_x_mrad")));
   CHECK(!Settings_IsAvailable(Settings_Find("diorama_reactive_strength")));
   g_settings.diorama_camera_mode = kDioramaCam_Dynamic;
   CHECK(!Settings_IsAvailable(Settings_Find("diorama_tilt_x_mrad")));
-  CHECK(Settings_IsAvailable(
-      Settings_Find("diorama_dyncam_baseline_tilt_x_mrad")));
+  CHECK(Settings_IsAvailable(Settings_Find("diorama_dyncam_baseline_tilt_x_mrad")));
   CHECK(Settings_IsAvailable(Settings_Find("diorama_reactive_strength")));
 
   /* Town 3D availability mirrors the resolver's parent dependencies. */
@@ -1885,11 +1798,9 @@ static void TestVideoSettingAudit(void) {
   g_settings.sim3d_cull_haze = true;
   g_settings.sim3d_camera_mode = kSimCam_Dynamic;
 #if AR_SIM3D_TERRAIN_ELEVATION
-  CHECK(Settings_IsAvailable(
-      Settings_Find("sim3d_landscape_height_pct")));
+  CHECK(Settings_IsAvailable(Settings_Find("sim3d_landscape_height_pct")));
 #else
-  CHECK(!Settings_IsAvailable(
-      Settings_Find("sim3d_landscape_height_pct")));
+  CHECK(!Settings_IsAvailable(Settings_Find("sim3d_landscape_height_pct")));
 #endif
   CHECK(Settings_IsAvailable(Settings_Find("sim3d_reactive_strength")));
   CHECK(!Settings_IsAvailable(Settings_Find("sim3d_tilt_x_mrad")));
@@ -1918,21 +1829,17 @@ static void TestVideoSettingAudit(void) {
 
   /* Old generated files carried both keys. False aliases must not override a
    * modern ratio/mode, while true aliases still migrate to the replacement. */
-  CHECK(WriteTextFile(
-      legacy_path,
-      "extended_aspect = 16:10\n"
-      "ignore_aspect_ratio = Off\n"
-      "refresh_mode = Limit\n"
-      "uncapped_framerate = Off\n"));
+  CHECK(WriteTextFile(legacy_path, "extended_aspect = 16:10\n"
+                                   "ignore_aspect_ratio = Off\n"
+                                   "refresh_mode = Limit\n"
+                                   "uncapped_framerate = Off\n"));
   Settings_InitWithFile(legacy_path);
   CHECK(g_settings.extended_aspect == kScreenAspect_1610);
   CHECK(!Settings_IgnoreAspectRatio());
   CHECK(g_settings.refresh_mode == kRefreshMode_Limit);
 
-  CHECK(WriteTextFile(
-      legacy_path,
-      "ignore_aspect_ratio = On\n"
-      "uncapped_framerate = On\n"));
+  CHECK(WriteTextFile(legacy_path, "ignore_aspect_ratio = On\n"
+                                   "uncapped_framerate = On\n"));
   Settings_InitWithFile(legacy_path);
   CHECK(g_settings.extended_aspect == kScreenAspect_Stretch);
   CHECK(Settings_IgnoreAspectRatio());
@@ -1948,17 +1855,13 @@ static void TestVideoSettingAudit(void) {
   CHECK(g_settings.show_fps);
   CHECK(g_settings.performance_overlay == 2);
 
-  CHECK(WriteTextFile(
-      legacy_path,
-      "refresh_mode = Uncapped\n"
-      "show_fps = On\n"));
+  CHECK(WriteTextFile(legacy_path, "refresh_mode = Uncapped\n"
+                                   "show_fps = On\n"));
   Settings_InitWithFile(legacy_path);
   CHECK(g_settings.refresh_mode == kRefreshMode_Uncapped);
   CHECK(g_settings.show_fps);
 
-  CHECK(WriteTextFile(
-      legacy_path,
-      "refresh_mode = Unlimited\n"));
+  CHECK(WriteTextFile(legacy_path, "refresh_mode = Unlimited\n"));
   Settings_InitWithFile(legacy_path);
   CHECK(g_settings.refresh_mode == kRefreshMode_Unlimited);
 
@@ -2035,8 +1938,8 @@ static void TestLocalizationPreferences(void) {
   CHECK(g_settings.localization_font_scale_percent == 80);
   CHECK(Settings_SetLong(pixel, 7) == kSettingChange_Applied);
   CHECK(g_settings.localization_font_pixel_size == 6);
-  CHECK(Settings_SetText(Settings_Find("localization_font_pixelation"),
-                         "None") == kSettingChange_Applied);
+  CHECK(Settings_SetText(Settings_Find("localization_font_pixelation"), "None") ==
+        kSettingChange_Applied);
   CHECK(!pixel->available());
   CHECK(Settings_IsMenuVisible(source));
 
@@ -2071,8 +1974,14 @@ static void TestLocalizationPreferences(void) {
 static void TestLocalizationPackIdentity(void) {
   ClearSettingsEnv();
   SettingsLocalizationPack packs[2] = {
-    {.id="community.stellar", .name="Stellar English", .locale="en-US", .manifest="game-assets/languages/packs/community.stellar/pack.ini"},
-    {.id="community.excellent", .name="Excellent English", .locale="en-US", .manifest="game-assets/languages/packs/community.excellent/pack.ini"},
+      {.id = "community.stellar",
+       .name = "Stellar English",
+       .locale = "en-US",
+       .manifest = "game-assets/languages/packs/community.stellar/pack.ini"},
+      {.id = "community.excellent",
+       .name = "Excellent English",
+       .locale = "en-US",
+       .manifest = "game-assets/languages/packs/community.excellent/pack.ini"},
   };
   CHECK(Settings_SetLocalizationPacks(packs, 2));
   Settings_Init();
@@ -2112,23 +2021,32 @@ static void TestLocalizationPackIdentity(void) {
  * localization audits never need a second C-preprocessor/parser in a script. */
 static void PrintJsonString(const char *text) {
   putchar('"');
-  for (const unsigned char *p=(const unsigned char *)(text?text:"");*p;++p) {
-    if (*p=='"'||*p=='\\') printf("\\%c",*p);
-    else if (*p<32) printf("\\u%04x",*p);
-    else putchar(*p);
+  for (const unsigned char *p = (const unsigned char *)(text ? text : ""); *p; ++p) {
+    if (*p == '"' || *p == '\\')
+      printf("\\%c", *p);
+    else if (*p < 32)
+      printf("\\u%04x", *p);
+    else
+      putchar(*p);
   }
   putchar('"');
 }
 static void DumpInterfaceInventory(void) {
   puts("[");
-  for(int i=0;i<g_setting_desc_count;++i) {
-    const SettingDesc *desc=&g_setting_descs[i];
-    if(i)puts(",");
-    printf("{\"key\":");PrintJsonString(desc->key);
-    printf(",\"label\":");PrintJsonString(desc->label);
-    printf(",\"help\":");PrintJsonString(desc->tooltip);
-    printf(",\"debug\":%s,\"values\":[",Settings_IsDebugOnly(desc)?"true":"false");
-    for(int j=0;j<desc->enum_count;++j) {if(j)putchar(',');PrintJsonString(desc->enum_labels[j]);}
+  for (int i = 0; i < g_setting_desc_count; ++i) {
+    const SettingDesc *desc = &g_setting_descs[i];
+    if (i) puts(",");
+    printf("{\"key\":");
+    PrintJsonString(desc->key);
+    printf(",\"label\":");
+    PrintJsonString(desc->label);
+    printf(",\"help\":");
+    PrintJsonString(desc->tooltip);
+    printf(",\"debug\":%s,\"values\":[", Settings_IsDebugOnly(desc) ? "true" : "false");
+    for (int j = 0; j < desc->enum_count; ++j) {
+      if (j) putchar(',');
+      PrintJsonString(desc->enum_labels[j]);
+    }
     printf("]}");
   }
   puts("\n]");
@@ -2141,7 +2059,8 @@ static void TestHardwareCapabilities(void) {
   const SettingDesc *crt = Settings_Find("crt_enabled");
   CHECK(Settings_SetLong(town, 1) != kSettingChange_Rejected);
   CHECK(Settings_SetLong(crt, 1) != kSettingChange_Rejected);
-  Settings_ApplyRenderCapabilities(kRenderFeature_All & ~kRenderFeature_Depth & ~kRenderFeature_Crt);
+  Settings_ApplyRenderCapabilities(kRenderFeature_All & ~kRenderFeature_Depth &
+                                   ~kRenderFeature_Crt);
   CHECK(!g_settings.sim3d_mode && !g_settings.crt_enabled);
   CHECK(!Settings_IsAvailable(town) && !Settings_IsAvailable(crt));
   CHECK(Settings_HardwareUnavailableReason(town) != NULL);
@@ -2178,22 +2097,20 @@ static void TestGpuBackendChoice(void) {
   Settings_Init();
   const SettingDesc *api = Settings_Find("gpu_backend");
   CHECK(api && api->type == kSettingType_Enum && api->apply == kApply_Restart &&
-        api->category == kSettingCat_Display &&
-        api->defval == kGpuBackend_Automatic && api->value_available);
+        api->category == kSettingCat_Display && api->defval == kGpuBackend_Automatic &&
+        api->value_available);
   if (!api) return;
   CHECK(g_settings.gpu_backend == kGpuBackend_Automatic);
 
   /* Nothing published (tests, tools): only Automatic, so no row. */
   CHECK(!Settings_IsMenuVisible(api));
   /* One compiled backend is what Automatic already selects. */
-  Settings_SetGpuBackendsOffered((1u << kGpuBackend_Automatic) |
-                                 (1u << kGpuBackend_Metal));
+  Settings_SetGpuBackendsOffered((1u << kGpuBackend_Automatic) | (1u << kGpuBackend_Metal));
   CHECK(!Settings_IsMenuVisible(api));
   CHECK(!Settings_ValueAvailable(api, kGpuBackend_Metal));
 
   /* Windows: Direct3D 12 and Vulkan. */
-  Settings_SetGpuBackendsOffered((1u << kGpuBackend_Direct3D12) |
-                                 (1u << kGpuBackend_Vulkan));
+  Settings_SetGpuBackendsOffered((1u << kGpuBackend_Direct3D12) | (1u << kGpuBackend_Vulkan));
   CHECK(Settings_IsMenuVisible(api));
   CHECK(Settings_ValueAvailable(api, kGpuBackend_Automatic));
   CHECK(Settings_ValueAvailable(api, kGpuBackend_Direct3D12));
@@ -2235,17 +2152,14 @@ static void TestRandomizerDraftEdits(void) {
   const SettingDesc *seed = Settings_Find("rando_seed");
   CHECK(!Settings_IsAvailable(seed));
   CHECK(Settings_SetText(seed, "12345") == kSettingChange_Applied);
-  CHECK(Settings_SetLong(Settings_Find("rando_enable"), 1) ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetLong(Settings_Find("rando_enable"), 1) == kSettingChange_Applied);
   CHECK(Randomizer_LastSummary()->applied);
   CHECK(Randomizer_LastSummary()->seed == 12345);
   CHECK(Settings_SetLong(seed, 54321) == kSettingChange_Applied);
   CHECK(Randomizer_LastSummary()->seed == 54321);
-  CHECK(Settings_SetLong(Settings_Find("rando_enemy_hp"), 250) ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetLong(Settings_Find("rando_enemy_hp"), 250) == kSettingChange_Applied);
   CHECK(Randomizer_AppliedStatScale().hp_percent == 250);
-  CHECK(Settings_SetText(Settings_Find("rando_enemy_atk"), "175") ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetText(Settings_Find("rando_enemy_atk"), "175") == kSettingChange_Applied);
   CHECK(Randomizer_AppliedStatScale().attack_percent == 175);
 
   RandomizerConfig campaign = Randomizer_CurrentConfig();
@@ -2253,13 +2167,12 @@ static void TestRandomizerDraftEdits(void) {
   CHECK(!Randomizer_CanEditDraft());
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *desc = &g_setting_descs[i];
-    if (!Settings_IsRandomizer(desc) || desc->type == kSettingType_Action)
-      continue;
+    if (!Settings_IsRandomizer(desc) || desc->type == kSettingType_Action) continue;
     long before = 0, after = 0;
     CHECK(Settings_GetLong(desc, &before));
     CHECK(Settings_SetLong(desc, before) == kSettingChange_Rejected);
-    CHECK(Settings_SetLong(desc, before == desc->minval
-        ? desc->maxval : desc->minval) == kSettingChange_Rejected);
+    CHECK(Settings_SetLong(desc, before == desc->minval ? desc->maxval : desc->minval) ==
+          kSettingChange_Rejected);
     CHECK(Settings_SetText(desc, "1") == kSettingChange_Rejected);
     CHECK(Settings_Reset(desc) == kSettingChange_Rejected);
     CHECK(Settings_GetLong(desc, &after) && after == before);
@@ -2268,17 +2181,18 @@ static void TestRandomizerDraftEdits(void) {
   CHECK(Randomizer_AppliedStatScale().hp_percent == 250);
   Randomizer_ReleaseCampaign();
   CHECK(Randomizer_CanEditDraft());
-  CHECK(Settings_Reset(Settings_Find("rando_enemy_hp")) ==
-        kSettingChange_Applied);
+  CHECK(Settings_Reset(Settings_Find("rando_enemy_hp")) == kSettingChange_Applied);
   CHECK(Randomizer_AppliedStatScale().hp_percent == 100);
-  CHECK(Settings_SetLong(Settings_Find("rando_enable"), 0) ==
-        kSettingChange_Applied);
+  CHECK(Settings_SetLong(Settings_Find("rando_enable"), 0) == kSettingChange_Applied);
   CHECK(!Randomizer_LastSummary()->applied);
   CHECK(Randomizer_AppliedStatScale().attack_percent == 100);
 }
 
-int main(int argc,char **argv) {
-  if(argc==2&&!strcmp(argv[1],"--dump-ui-catalog")) {DumpInterfaceInventory();return 0;}
+int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "--dump-ui-catalog")) {
+    DumpInterfaceInventory();
+    return 0;
+  }
   TestLocalizationPackIdentity();
   TestLocalizationPreferences();
   TestPersistenceCanBeDisabled();

@@ -9,15 +9,15 @@
 #include "host/font_resources.h"
 #include "render/ui_text_renderer.h"
 
-static int g_failures;
+static int s_failures;
 
-#define CHECK(condition) do { \
-  if (!(condition)) { \
-    fprintf(stderr, "%s:%d: check failed: %s\n", \
-            __FILE__, __LINE__, #condition); \
-    ++g_failures; \
-  } \
-} while (0)
+#define CHECK(condition)                                                                           \
+  do {                                                                                             \
+    if (!(condition)) {                                                                            \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #condition);                \
+      ++s_failures;                                                                                \
+    }                                                                                              \
+  } while (0)
 
 typedef struct FakeRenderBackend {
   uintptr_t next_texture;
@@ -48,8 +48,7 @@ static void DestroyTexture(void *context, ArRenderTexture texture) {
   if (ArRenderTexture_IsValid(texture)) ++backend->destroys;
 }
 
-static bool UpdateTexture(void *context, ArRenderTexture texture,
-                          const ArRenderRectI *destination,
+static bool UpdateTexture(void *context, ArRenderTexture texture, const ArRenderRectI *destination,
                           const void *pixels, int pitch_bytes) {
   FakeRenderBackend *backend = (FakeRenderBackend *)context;
   (void)texture;
@@ -58,8 +57,7 @@ static bool UpdateTexture(void *context, ArRenderTexture texture,
   ++backend->uploads;
   backend->uploaded_pitch = pitch_bytes;
   if (backend->last_descriptor.format == kArRenderPixelFormat_Rgba8888 &&
-      backend->last_descriptor.width <= 64 &&
-      backend->last_descriptor.height <= 32) {
+      backend->last_descriptor.width <= 64 && backend->last_descriptor.height <= 32) {
     for (int y = 0; y < backend->last_descriptor.height; ++y)
       memcpy(&backend->uploaded_pixels[y * 64],
              (const uint8_t *)pixels + (size_t)y * (size_t)pitch_bytes,
@@ -98,10 +96,8 @@ static bool AlwaysClear(void *context, ArRenderColorF color) {
   return true;
 }
 
-static bool AlwaysDrawTexture(void *context, ArRenderTexture texture,
-                              const ArRenderRectF *source,
-                              const ArRenderRectF *destination,
-                              const ArRenderDrawState *state) {
+static bool AlwaysDrawTexture(void *context, ArRenderTexture texture, const ArRenderRectF *source,
+                              const ArRenderRectF *destination, const ArRenderDrawState *state) {
   FakeRenderBackend *backend = context;
   ++backend->draws;
   backend->last_destination = *destination;
@@ -113,9 +109,8 @@ static bool AlwaysDrawTexture(void *context, ArRenderTexture texture,
 }
 
 static bool AlwaysDrawGeometry(void *context, ArRenderTexture texture,
-                               const ArRenderVertex2D *vertices,
-                               int vertex_count, const int32_t *indices,
-                               int index_count,
+                               const ArRenderVertex2D *vertices, int vertex_count,
+                               const int32_t *indices, int index_count,
                                const ArRenderDrawState *state) {
   (void)context;
   (void)texture;
@@ -138,20 +133,20 @@ static const char *LastError(void *context) {
 }
 
 static const ArRenderBackendOps kRenderOps = {
-  .struct_size = sizeof(ArRenderBackendOps),
-  .create_texture = CreateTexture,
-  .destroy_texture = DestroyTexture,
-  .update_texture = UpdateTexture,
-  .set_render_target = AlwaysRenderTarget,
-  .use_output_coordinates = AlwaysOutputCoordinates,
-  .get_output_size = OutputSize,
-  .set_viewport = AlwaysRect,
-  .set_clip_rect = AlwaysRect,
-  .clear = AlwaysClear,
-  .draw_texture = AlwaysDrawTexture,
-  .draw_geometry = AlwaysDrawGeometry,
-  .present = AlwaysPresent,
-  .last_error = LastError,
+    .struct_size = sizeof(ArRenderBackendOps),
+    .create_texture = CreateTexture,
+    .destroy_texture = DestroyTexture,
+    .update_texture = UpdateTexture,
+    .set_render_target = AlwaysRenderTarget,
+    .use_output_coordinates = AlwaysOutputCoordinates,
+    .get_output_size = OutputSize,
+    .set_viewport = AlwaysRect,
+    .set_clip_rect = AlwaysRect,
+    .clear = AlwaysClear,
+    .draw_texture = AlwaysDrawTexture,
+    .draw_geometry = AlwaysDrawGeometry,
+    .present = AlwaysPresent,
+    .last_error = LastError,
 };
 
 typedef struct FakeRasterizer {
@@ -175,46 +170,42 @@ typedef struct FakeRasterizer {
   int pitch_bytes;
 } FakeRasterizer;
 
-static bool Rasterize(void *context, const ArTextRasterRequest *request,
-                      ArTextBitmap *bitmap, ArTextRasterFailure *failure,
-                      char *error, size_t error_capacity) {
+static bool Rasterize(void *context, const ArTextRasterRequest *request, ArTextBitmap *bitmap,
+                      ArTextRasterFailure *failure, char *error, size_t error_capacity) {
   FakeRasterizer *fake = (FakeRasterizer *)context;
   ++fake->calls;
   fake->last_request = *request;
   if (fake->fail) {
-    *failure = fake->fail_kind ? fake->fail_kind
-                               : kArTextRasterFailure_Deterministic;
-    if (error && error_capacity)
-      snprintf(error, error_capacity, "fake raster failure");
+    *failure = fake->fail_kind ? fake->fail_kind : kArTextRasterFailure_Deterministic;
+    if (error && error_capacity) snprintf(error, error_capacity, "fake raster failure");
     return false;
   }
-  const int width = fake->invalid_bitmap
-      ? request->maximum_width + 1 : (int)request->utf8_bytes * 2;
+  const int width =
+      fake->invalid_bitmap ? request->maximum_width + 1 : (int)request->utf8_bytes * 2;
   for (int y = 0; y < 16; ++y)
     for (int x = 0; x < 64; ++x)
-      fake->pixels[y * 64 + x] =
-          UINT32_C(0xff000000) | (uint32_t)(y << 8) | (uint32_t)x;
+      fake->pixels[y * 64 + x] = UINT32_C(0xff000000) | (uint32_t)(y << 8) | (uint32_t)x;
   fake->cluster = (ArTextRevealCluster){
-    .end_utf8_byte = request->utf8_bytes,
-    .line_index = 0,
-    .x = fake->invalid_cluster_bounds ? INT32_MAX : 0,
-    .width = width,
-    .height = 16,
+      .end_utf8_byte = request->utf8_bytes,
+      .line_index = 0,
+      .x = fake->invalid_cluster_bounds ? INT32_MAX : 0,
+      .width = width,
+      .height = 16,
   };
   *bitmap = (ArTextBitmap){
-    .struct_size = sizeof(*bitmap),
-    .abi_version = AR_TEXT_BITMAP_ABI_VERSION,
-    .pixels = fake->pixels,
-    .width = width,
-    .height = 16,
-    .pitch_bytes = fake->pitch_bytes ? fake->pitch_bytes : 64 * (int)sizeof(uint32_t),
-    .format = fake->pitch_bytes ? fake->format : kArRenderPixelFormat_Rgba8888,
-    .ascent = 11,
-    .descent = 3,
-    .line_advance = fake->line_advance ? fake->line_advance : 16,
-    .reveal_clusters = &fake->cluster,
-    .reveal_cluster_count = 1,
-    .token = 1,
+      .struct_size = sizeof(*bitmap),
+      .abi_version = AR_TEXT_BITMAP_ABI_VERSION,
+      .pixels = fake->pixels,
+      .width = width,
+      .height = 16,
+      .pitch_bytes = fake->pitch_bytes ? fake->pitch_bytes : 64 * (int)sizeof(uint32_t),
+      .format = fake->pitch_bytes ? fake->format : kArRenderPixelFormat_Rgba8888,
+      .ascent = 11,
+      .descent = 3,
+      .line_advance = fake->line_advance ? fake->line_advance : 16,
+      .reveal_clusters = &fake->cluster,
+      .reveal_cluster_count = 1,
+      .token = 1,
   };
   if (fake->with_owners) {
     fake->owned_clusters[0] = fake->cluster;
@@ -258,35 +249,34 @@ static void ReleaseBitmap(void *context, ArTextBitmap *bitmap) {
 }
 
 static const ArTextRasterizerOps kRasterOps = {
-  .struct_size = sizeof(ArTextRasterizerOps),
-  .abi_version = AR_TEXT_RASTERIZER_ABI_VERSION,
-  .rasterize = Rasterize,
-  .release_bitmap = ReleaseBitmap,
+    .struct_size = sizeof(ArTextRasterizerOps),
+    .abi_version = AR_TEXT_RASTERIZER_ABI_VERSION,
+    .rasterize = Rasterize,
+    .release_bitmap = ReleaseBitmap,
 };
 
 static ArTextRasterRequest Request(const char *text) {
   return (ArTextRasterRequest){
-    .struct_size = sizeof(ArTextRasterRequest),
-    .abi_version = AR_TEXT_RASTER_REQUEST_ABI_VERSION,
-    .utf8 = text,
-    .utf8_bytes = strlen(text),
-    .font_stack_id = "actraiser-default",
-    .font_stack_id_bytes = strlen("actraiser-default"),
-    .source_revision = 7,
-    .font_revision = 11,
-    .style_id = 2,
-    .flags = kArTextRasterFlag_WrapWords |
-             kArTextRasterFlag_PreserveHardBreaks |
-             kArTextRasterFlag_IncludeRevealClusters,
-    .direction = kArTextDirection_LeftToRight,
-    .alignment = kArTextHorizontalAlignment_Leading,
-    .font_pixels = 24,
-    .minimum_font_pixels = 24,
-    .maximum_width = 256,
-    .maximum_height = 64,
-    .filter = kArRenderFilter_Linear,
-    .language_bcp47 = "fr",
-    .language_bcp47_bytes = 2,
+      .struct_size = sizeof(ArTextRasterRequest),
+      .abi_version = AR_TEXT_RASTER_REQUEST_ABI_VERSION,
+      .utf8 = text,
+      .utf8_bytes = strlen(text),
+      .font_stack_id = "actraiser-default",
+      .font_stack_id_bytes = strlen("actraiser-default"),
+      .source_revision = 7,
+      .font_revision = 11,
+      .style_id = 2,
+      .flags = kArTextRasterFlag_WrapWords | kArTextRasterFlag_PreserveHardBreaks |
+               kArTextRasterFlag_IncludeRevealClusters,
+      .direction = kArTextDirection_LeftToRight,
+      .alignment = kArTextHorizontalAlignment_Leading,
+      .font_pixels = 24,
+      .minimum_font_pixels = 24,
+      .maximum_width = 256,
+      .maximum_height = 64,
+      .filter = kArRenderFilter_Linear,
+      .language_bcp47 = "fr",
+      .language_bcp47_bytes = 2,
   };
 }
 
@@ -301,29 +291,22 @@ static void TestAbiValidation(void) {
 
   ArTextRasterRequest request = Request("Texte");
   CHECK(ArTextRasterRequest_IsValid(&request));
-  ArTextRunAppearance appearance = {.font_role = "body",
-                                    .scale_basis = 10000,
-                                    .band_rgb = 0xffffff,
-                                    .body_rgb = 0xffffff};
-  const ArTextCacheKey unstyled =
-      ArTextSurfaceCache_MakeKey(&rasterizer, &request);
+  ArTextRunAppearance appearance = {
+      .font_role = "body", .scale_basis = 10000, .band_rgb = 0xffffff, .body_rgb = 0xffffff};
+  const ArTextCacheKey unstyled = ArTextSurfaceCache_MakeKey(&rasterizer, &request);
   request.appearance = &appearance;
   CHECK(ArTextRasterRequest_IsValid(&request));
-  const ArTextCacheKey styled =
-      ArTextSurfaceCache_MakeKey(&rasterizer, &request);
+  const ArTextCacheKey styled = ArTextSurfaceCache_MakeKey(&rasterizer, &request);
   CHECK(!ArTextCacheKey_Equals(unstyled, styled));
-  ArTextAppearanceSpan painted = {
-      .start = 1, .end = 4, .appearance = appearance};
+  ArTextAppearanceSpan painted = {.start = 1, .end = 4, .appearance = appearance};
   painted.appearance.body_rgb = 0xffcc00;
   request.appearance_spans = &painted;
   request.appearance_span_count = 1;
   CHECK(ArTextRasterRequest_IsValid(&request));
-  const ArTextCacheKey painted_key =
-      ArTextSurfaceCache_MakeKey(&rasterizer, &request);
+  const ArTextCacheKey painted_key = ArTextSurfaceCache_MakeKey(&rasterizer, &request);
   CHECK(!ArTextCacheKey_Equals(styled, painted_key));
   painted.appearance.scale_basis = 8000;
-  CHECK(!ArTextCacheKey_Equals(
-      painted_key, ArTextSurfaceCache_MakeKey(&rasterizer, &request)));
+  CHECK(!ArTextCacheKey_Equals(painted_key, ArTextSurfaceCache_MakeKey(&rasterizer, &request)));
   painted.appearance.scale_basis = 0;
   CHECK(!ArTextRasterRequest_IsValid(&request));
   painted.appearance = appearance;
@@ -336,41 +319,43 @@ static void TestAbiValidation(void) {
   CHECK(!ArTextRasterRequest_IsValid(&request)); /* interior UTF-8 byte */
   uint8_t preferred[AR_TEXT_BOUNDARY_BYTES(16)] = {0};
   request = Request("A B");
-  const ArTextCacheKey ordinary =
-      ArTextSurfaceCache_MakeKey(&rasterizer, &request);
+  const ArTextCacheKey ordinary = ArTextSurfaceCache_MakeKey(&rasterizer, &request);
   request.preferred_line_breaks = preferred;
   request.preferred_line_break_capacity = 16;
   request.preferred_line_break_source_offset = 3;
   CHECK(ArTextRasterRequest_IsValid(&request));
-  CHECK(ArTextCacheKey_Equals(
-      ordinary, ArTextSurfaceCache_MakeKey(&rasterizer, &request)));
+  CHECK(ArTextCacheKey_Equals(ordinary, ArTextSurfaceCache_MakeKey(&rasterizer, &request)));
   ArTextBoundary_Set(preferred, 4, true);
-  CHECK(!ArTextCacheKey_Equals(
-      ordinary, ArTextSurfaceCache_MakeKey(&rasterizer, &request)));
+  CHECK(!ArTextCacheKey_Equals(ordinary, ArTextSurfaceCache_MakeKey(&rasterizer, &request)));
   request.flags = 0;
   CHECK(!ArTextRasterRequest_IsValid(&request));
-  request.flags = kArTextRasterFlag_WrapWords |
-                  kArTextRasterFlag_PreserveHardBreaks;
+  request.flags = kArTextRasterFlag_WrapWords | kArTextRasterFlag_PreserveHardBreaks;
   request.preferred_line_break_capacity = 5;
   CHECK(!ArTextRasterRequest_IsValid(&request));
   request = Request("A B");
   request.preferred_line_break_source_offset = 3;
   CHECK(!ArTextRasterRequest_IsValid(&request));
   request = Request("Texte");
-  ArTextBidiSpan span = {0,5,kArTextDirection_Auto};
-  request.bidi_spans = &span; request.bidi_span_count = 1;
+  ArTextBidiSpan span = {0, 5, kArTextDirection_Auto};
+  request.bidi_spans = &span;
+  request.bidi_span_count = 1;
   CHECK(ArTextRasterRequest_IsValid(&request));
-  const ArTextCacheKey isolated = ArTextSurfaceCache_MakeKey(&rasterizer,&request);
+  const ArTextCacheKey isolated = ArTextSurfaceCache_MakeKey(&rasterizer, &request);
   span.direction = kArTextDirection_LeftToRight;
-  CHECK(!ArTextCacheKey_Equals(isolated,ArTextSurfaceCache_MakeKey(&rasterizer,&request)));
+  CHECK(!ArTextCacheKey_Equals(isolated, ArTextSurfaceCache_MakeKey(&rasterizer, &request)));
   request.bidi_span_count = kArTextMaximumBidiSpans + 1;
   CHECK(!ArTextRasterRequest_IsValid(&request));
-  request.bidi_span_count = 1; request.bidi_spans = NULL;
+  request.bidi_span_count = 1;
+  request.bidi_spans = NULL;
   CHECK(!ArTextRasterRequest_IsValid(&request));
-  request.bidi_spans = &span; span.end = 0;
+  request.bidi_spans = &span;
+  span.end = 0;
   CHECK(!ArTextRasterRequest_IsValid(&request));
-  request = Request("Élise"); span.start = 1; span.end = 3;
-  request.bidi_spans = &span; request.bidi_span_count = 1;
+  request = Request("Élise");
+  span.start = 1;
+  span.end = 3;
+  request.bidi_spans = &span;
+  request.bidi_span_count = 1;
   CHECK(!ArTextRasterRequest_IsValid(&request));
   request = Request("Texte");
   request.utf8_bytes++;
@@ -406,28 +391,24 @@ static void TestAbiValidation(void) {
   fake.invalid_bitmap = true;
   ArTextBitmap bitmap;
   char error[256];
-  CHECK(!ArTextRasterizer_Rasterize(
-      &rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
+  CHECK(!ArTextRasterizer_Rasterize(&rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(fake.calls == 1 && fake.releases == 1);
   CHECK(strstr(error, "invalid bitmap") != NULL);
   fake.invalid_bitmap = false;
   fake.invalid_cluster_bounds = true;
-  CHECK(!ArTextRasterizer_Rasterize(
-      &rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
+  CHECK(!ArTextRasterizer_Rasterize(&rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(fake.calls == 2 && fake.releases == 2);
   CHECK(strstr(error, "invalid bitmap") != NULL);
   fake.invalid_cluster_bounds = false;
   fake.invalid_cluster_order = true;
   request = Request("ab");
-  CHECK(!ArTextRasterizer_Rasterize(
-      &rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
+  CHECK(!ArTextRasterizer_Rasterize(&rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(fake.calls == 3 && fake.releases == 3);
   CHECK(strstr(error, "invalid bitmap") != NULL);
   fake.invalid_cluster_order = false;
   fake.invalid_cluster_utf8_boundary = true;
   request = Request("\xC3\xA9x");
-  CHECK(!ArTextRasterizer_Rasterize(
-      &rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
+  CHECK(!ArTextRasterizer_Rasterize(&rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   CHECK(fake.calls == 4 && fake.releases == 4);
   CHECK(strstr(error, "invalid bitmap") != NULL);
   ArTextRasterizer_Reset(&rasterizer);
@@ -437,10 +418,10 @@ static void TestCacheHitsMissesAndFailureAtomicity(void) {
   FakeRenderBackend render = {0};
   ArRenderDevice device;
   CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render,
-      (ArRenderCapabilities){
-        .maximum_texture_width = 512,
-        .maximum_texture_height = 512,
-      }));
+                            (ArRenderCapabilities){
+                                .maximum_texture_width = 512,
+                                .maximum_texture_height = 512,
+                            }));
   FakeRasterizer fake = {0};
   ArTextRasterizer rasterizer;
   CHECK(ArTextRasterizer_Init(&rasterizer, &kRasterOps, &fake, 19));
@@ -450,9 +431,8 @@ static void TestCacheHitsMissesAndFailureAtomicity(void) {
   ArTextRasterRequest first_request = Request("Menu");
   ArTextSurface first;
   char error[256];
-  CHECK(ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &first_request,
-      &first, error, sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &first_request, &first, error,
+                                   sizeof(error)));
   CHECK(ArRenderTexture_IsValid(first.texture));
   CHECK(first.width == 8 && first.height == 16);
   CHECK(first.ascent == 11 && first.line_advance == 16);
@@ -462,34 +442,30 @@ static void TestCacheHitsMissesAndFailureAtomicity(void) {
   CHECK(first.ink_bounds.x == 1 && first.ink_bounds.w == 7);
   CHECK(first.ink_bounds.y == 0 && first.ink_bounds.h == 16);
   CHECK(first.cluster_ink_bounds != NULL);
-  CHECK(!memcmp(&first.ink_bounds, &first.cluster_ink_bounds[0],
-                sizeof(first.ink_bounds)));
+  CHECK(!memcmp(&first.ink_bounds, &first.cluster_ink_bounds[0], sizeof(first.ink_bounds)));
   CHECK(fake.calls == 1 && fake.releases == 1);
   CHECK(render.creates == 1 && render.uploads == 1);
   CHECK(render.last_descriptor.usage == kArRenderTextureUsage_Static);
   CHECK(render.last_descriptor.filter == kArRenderFilter_Linear);
 
   ArTextSurface same;
-  CHECK(ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &first_request,
-      &same, error, sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &first_request, &same, error,
+                                   sizeof(error)));
   CHECK(ArRenderTexture_Equals(first.texture, same.texture));
   CHECK(first.cluster_ink_bounds == same.cluster_ink_bounds);
   CHECK(fake.calls == 1 && render.uploads == 1);
 
   ArTextRasterRequest second_request = Request("Status");
   ArTextSurface second;
-  CHECK(ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &second_request,
-      &second, error, sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &second_request, &second, error,
+                                   sizeof(error)));
   CHECK(fake.calls == 2 && render.uploads == 2);
   CHECK(!ArRenderTexture_Equals(first.texture, second.texture));
 
   ArTextRasterRequest third_request = Request("Offerings");
   ArTextSurface third;
-  CHECK(ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &third_request,
-      &third, error, sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &third_request, &third, error,
+                                   sizeof(error)));
   CHECK(render.destroys == 1);
   CHECK(cache.stats.evictions == 1);
 
@@ -498,9 +474,8 @@ static void TestCacheHitsMissesAndFailureAtomicity(void) {
   fake.fail = true;
   ArTextRasterRequest failed_request = Request("Failure");
   ArTextSurface failed;
-  CHECK(!ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &failed_request,
-      &failed, error, sizeof(error)));
+  CHECK(!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &failed_request, &failed, error,
+                                    sizeof(error)));
   CHECK(strstr(error, "fake raster failure") != NULL);
   CHECK(render.destroys == destroys_before_failure);
   fake.fail = false;
@@ -509,9 +484,8 @@ static void TestCacheHitsMissesAndFailureAtomicity(void) {
   const int calls_before_repeat = fake.calls;
   const int uploads_before_repeat = render.uploads;
   for (int frame = 0; frame < 120; ++frame) {
-    CHECK(ArTextSurfaceCache_Acquire(
-        &cache, &device, &rasterizer, &third_request,
-        &same, error, sizeof(error)));
+    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &third_request, &same, error,
+                                     sizeof(error)));
   }
   CHECK(fake.calls == calls_before_repeat);
   CHECK(render.uploads == uploads_before_repeat);
@@ -525,9 +499,8 @@ static void TestCacheHitsMissesAndFailureAtomicity(void) {
   CHECK(stats && stats->failures == 1);
 
   for (unsigned i = 0; i < 120; ++i) {
-    CHECK(!ArTextSurfaceCache_Acquire(
-        &cache, &device, &rasterizer, &failed_request,
-        &failed, error, sizeof(error)));
+    CHECK(!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &failed_request, &failed, error,
+                                      sizeof(error)));
     CHECK(strstr(error, "fake raster failure") != NULL);
   }
   CHECK(fake.calls == calls_before_repeat);
@@ -535,29 +508,24 @@ static void TestCacheHitsMissesAndFailureAtomicity(void) {
   /* Retry after any relevant layout/content/font change, without needing a
    * restart, while successful entries remain independent of failed work. */
   failed_request.maximum_width += 10;
-  CHECK(ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &failed_request,
-      &failed, error, sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &failed_request, &failed, error,
+                                   sizeof(error)));
   CHECK(fake.calls == calls_before_repeat + 1);
 
   ArTextRasterRequest font_changed = third_request;
   ++font_changed.font_revision;
-  const ArTextCacheKey old_key = ArTextSurfaceCache_MakeKey(
-      &rasterizer, &third_request);
-  const ArTextCacheKey new_key = ArTextSurfaceCache_MakeKey(
-      &rasterizer, &font_changed);
+  const ArTextCacheKey old_key = ArTextSurfaceCache_MakeKey(&rasterizer, &third_request);
+  const ArTextCacheKey new_key = ArTextSurfaceCache_MakeKey(&rasterizer, &font_changed);
   CHECK(!ArTextCacheKey_Equals(old_key, new_key));
 
   ArTextRasterRequest fit_changed = third_request;
   fit_changed.minimum_font_pixels = 20;
-  CHECK(!ArTextCacheKey_Equals(
-      old_key, ArTextSurfaceCache_MakeKey(&rasterizer, &fit_changed)));
+  CHECK(!ArTextCacheKey_Equals(old_key, ArTextSurfaceCache_MakeKey(&rasterizer, &fit_changed)));
 
   ArTextRasterRequest language_changed = third_request;
   language_changed.language_bcp47 = "de";
   language_changed.language_bcp47_bytes = 2;
-  const ArTextCacheKey language_key = ArTextSurfaceCache_MakeKey(
-      &rasterizer, &language_changed);
+  const ArTextCacheKey language_key = ArTextSurfaceCache_MakeKey(&rasterizer, &language_changed);
   CHECK(!ArTextCacheKey_Equals(old_key, language_key));
 
   ArTextRasterRequest ink_changed = third_request;
@@ -595,10 +563,10 @@ static void TestTransientFailureRecovers(void) {
   FakeRenderBackend render = {0};
   ArRenderDevice device;
   CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render,
-      (ArRenderCapabilities){
-        .maximum_texture_width = 512,
-        .maximum_texture_height = 512,
-      }));
+                            (ArRenderCapabilities){
+                                .maximum_texture_width = 512,
+                                .maximum_texture_height = 512,
+                            }));
   FakeRasterizer fake = {0};
   ArTextRasterizer rasterizer;
   CHECK(ArTextRasterizer_Init(&rasterizer, &kRasterOps, &fake, 23));
@@ -610,15 +578,15 @@ static void TestTransientFailureRecovers(void) {
   ArTextSurface surface;
   fake.fail = true;
   fake.fail_kind = kArTextRasterFailure_Retryable;
-  CHECK(!ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &request, &surface, error, sizeof(error)));
+  CHECK(!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request, &surface, error,
+                                    sizeof(error)));
   CHECK(fake.calls == 1);
 
   /* The identical request recovers on the next lookup once the backend does,
    * with no settings, font or window change. */
   fake.fail = false;
-  CHECK(ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &request, &surface, error, sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request, &surface, error,
+                                   sizeof(error)));
   CHECK(fake.calls == 2 && cache.stats.negative_hits == 0);
 
   /* A backend that stays broken is asked again with growing backoff, not once
@@ -627,9 +595,8 @@ static void TestTransientFailureRecovers(void) {
   fake.fail = true;
   const int calls_before = fake.calls;
   for (int frame = 0; frame < 200; ++frame) {
-    CHECK(!ArTextSurfaceCache_Acquire(
-        &cache, &device, &rasterizer, &broken, &surface, error,
-        sizeof(error)));
+    CHECK(!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &broken, &surface, error,
+                                      sizeof(error)));
     CHECK(strstr(error, "fake raster failure") != NULL);
   }
   const int retries = fake.calls - calls_before;
@@ -640,14 +607,12 @@ static void TestTransientFailureRecovers(void) {
    * the bounded negative cache. */
   fake.fail_kind = kArTextRasterFailure_Deterministic;
   ArTextRasterRequest impossible = Request("Impossible");
-  CHECK(!ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &impossible, &surface, error,
-      sizeof(error)));
+  CHECK(!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &impossible, &surface, error,
+                                    sizeof(error)));
   const int calls_after_impossible = fake.calls;
   for (int frame = 0; frame < 50; ++frame) {
-    CHECK(!ArTextSurfaceCache_Acquire(
-        &cache, &device, &rasterizer, &impossible, &surface, error,
-        sizeof(error)));
+    CHECK(!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &impossible, &surface, error,
+                                      sizeof(error)));
   }
   CHECK(fake.calls == calls_after_impossible);
 
@@ -656,14 +621,13 @@ static void TestTransientFailureRecovers(void) {
    * deterministic answer stands. */
   fake.fail = false;
   ArTextRasterRequest other = Request("Sky Palace");
-  CHECK(ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &other, &surface, error, sizeof(error)));
-  CHECK(ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &broken, &surface, error, sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &other, &surface, error,
+                                   sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &broken, &surface, error,
+                                   sizeof(error)));
   const int calls_after_recovery = fake.calls;
-  CHECK(!ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &impossible, &surface, error,
-      sizeof(error)));
+  CHECK(!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &impossible, &surface, error,
+                                    sizeof(error)));
   CHECK(fake.calls == calls_after_recovery);
 
   ArTextSurfaceCache_Destroy(&cache, &device);
@@ -677,10 +641,10 @@ static void TestByteBudgetAndOversizeRejection(void) {
   FakeRenderBackend render = {0};
   ArRenderDevice device;
   CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render,
-      (ArRenderCapabilities){
-        .maximum_texture_width = 8192,
-        .maximum_texture_height = 8192,
-      }));
+                            (ArRenderCapabilities){
+                                .maximum_texture_width = 8192,
+                                .maximum_texture_height = 8192,
+                            }));
   FakeRasterizer fake = {0};
   ArTextRasterizer rasterizer;
   CHECK(ArTextRasterizer_Init(&rasterizer, &kRasterOps, &fake, 23));
@@ -694,18 +658,18 @@ static void TestByteBudgetAndOversizeRejection(void) {
   ArTextRasterRequest huge = Request("Impossible");
   huge.maximum_width = 60000;
   huge.maximum_height = 60000;
-  CHECK(!ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &huge, &surface, error, sizeof(error)));
+  CHECK(!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &huge, &surface, error,
+                                    sizeof(error)));
   CHECK(fake.calls == 0 && render.uploads == 0);
   CHECK(cache.stats.oversize_rejects == 1);
   CHECK(strstr(error, "per-request texture ceiling") != NULL);
 
   /* Ordinary entries report what they own, and the peak is not forgotten. */
-  static const char *const kTexts[] = {"Aitos", "Bloodpool", "Fillmore",
-                                       "Kasandora", "Marahna", "Northwall"};
+  static const char *const kTexts[] = {"Aitos",     "Bloodpool", "Fillmore",
+                                       "Kasandora", "Marahna",   "Northwall"};
   ArTextRasterRequest first = Request(kTexts[0]);
-  CHECK(ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &first, &surface, error, sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &first, &surface, error,
+                                   sizeof(error)));
   const uint64_t one = cache.stats.texture_bytes;
   CHECK(one == (uint64_t)surface.width * surface.height * 4);
   CHECK(cache.stats.peak_texture_bytes == one);
@@ -715,9 +679,8 @@ static void TestByteBudgetAndOversizeRejection(void) {
   ArTextSurfaceCache_SetByteBudget(&cache, one * 2u);
   for (size_t i = 1; i < sizeof(kTexts) / sizeof(kTexts[0]); ++i) {
     ArTextRasterRequest request = Request(kTexts[i]);
-    CHECK(ArTextSurfaceCache_Acquire(
-        &cache, &device, &rasterizer, &request, &surface, error,
-        sizeof(error)));
+    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request, &surface, error,
+                                     sizeof(error)));
   }
   CHECK(cache.stats.texture_bytes <= one * 2u);
   CHECK(cache.stats.peak_texture_bytes >= cache.stats.texture_bytes);
@@ -732,16 +695,14 @@ static void TestByteBudgetAndOversizeRejection(void) {
   ArTextSurface held[4];
   for (int i = 0; i < 4; ++i) {
     ArTextRasterRequest request = Request(kTexts[i]);
-    CHECK(ArTextSurfaceCache_Acquire(
-        &cache, &device, &rasterizer, &request, &held[i], error,
-        sizeof(error)));
+    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request, &held[i], error,
+                                     sizeof(error)));
   }
   for (int i = 0; i < 4; ++i) {
     bool live = false;
     for (size_t entry = 0; entry < cache.capacity; ++entry)
       if (cache.entries[entry].valid &&
-          ArRenderTexture_Equals(cache.entries[entry].surface.texture,
-                                 held[i].texture))
+          ArRenderTexture_Equals(cache.entries[entry].surface.texture, held[i].texture))
         live = true;
     CHECK(live);
   }
@@ -753,18 +714,19 @@ static void TestByteBudgetAndOversizeRejection(void) {
 }
 
 static void TestOwnershipAcrossStatsResetAndEviction(void) {
-  static const struct { ArRenderPixelFormat format; int bytes; } formats[] = {
-    {kArRenderPixelFormat_Argb8888, 4}, {kArRenderPixelFormat_Abgr8888, 4},
-    {kArRenderPixelFormat_Rgba8888, 4}, {kArRenderPixelFormat_Rgb565, 2},
-    {kArRenderPixelFormat_Rgba4444, 2}, {kArRenderPixelFormat_A8, 1},
+  static const struct {
+    ArRenderPixelFormat format;
+    int bytes;
+  } formats[] = {
+      {kArRenderPixelFormat_Argb8888, 4}, {kArRenderPixelFormat_Abgr8888, 4},
+      {kArRenderPixelFormat_Rgba8888, 4}, {kArRenderPixelFormat_Rgb565, 2},
+      {kArRenderPixelFormat_Rgba4444, 2}, {kArRenderPixelFormat_A8, 1},
   };
   for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); ++i) {
     FakeRenderBackend render = {0};
     ArRenderDevice device;
-    CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render,
-                             (ArRenderCapabilities){0}));
-    FakeRasterizer fake = {.format = formats[i].format,
-                           .pitch_bytes = 64 * formats[i].bytes};
+    CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render, (ArRenderCapabilities){0}));
+    FakeRasterizer fake = {.format = formats[i].format, .pitch_bytes = 64 * formats[i].bytes};
     ArTextRasterizer rasterizer;
     CHECK(ArTextRasterizer_Init(&rasterizer, &kRasterOps, &fake, 23));
     ArTextSurfaceCache cache;
@@ -775,8 +737,8 @@ static void TestOwnershipAcrossStatsResetAndEviction(void) {
     /* Even without a frame pin, a successful acquisition must own a live
      * texture when the budget is smaller than a single entry. */
     ArTextSurfaceCache_SetByteBudget(&cache, 1);
-    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &a,
-                                     &first, error, sizeof(error)));
+    CHECK(
+        ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &a, &first, error, sizeof(error)));
     const uint64_t first_bytes = 8u * 16u * (unsigned)formats[i].bytes;
     CHECK(render.destroys == 0);
     CHECK(cache.entries[0].valid);
@@ -788,12 +750,12 @@ static void TestOwnershipAcrossStatsResetAndEviction(void) {
     CHECK(cache.stats.lookups == 0 && cache.stats.upload_calls == 0);
     CHECK(cache.stats.texture_bytes == first_bytes);
     CHECK(cache.stats.peak_texture_bytes == first_bytes);
-    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &a,
-                                     &second, error, sizeof(error)));
+    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &a, &second, error,
+                                     sizeof(error)));
     CHECK(ArRenderTexture_Equals(first.texture, second.texture));
     CHECK(fake.calls == 1 && cache.stats.hits == 1);
-    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &b,
-                                     &second, error, sizeof(error)));
+    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &b, &second, error,
+                                     sizeof(error)));
     const uint64_t second_bytes = 12u * 16u * (unsigned)formats[i].bytes;
     CHECK(render.destroys == 1);
     CHECK(cache.entries[1].valid);
@@ -813,8 +775,7 @@ static void TestOwnershipAcrossStatsResetAndEviction(void) {
 static void TestFramePinsSurviveEntryPressure(void) {
   FakeRenderBackend render = {0};
   ArRenderDevice device;
-  CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render,
-                           (ArRenderCapabilities){0}));
+  CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render, (ArRenderCapabilities){0}));
   FakeRasterizer fake = {0};
   ArTextRasterizer rasterizer;
   CHECK(ArTextRasterizer_Init(&rasterizer, &kRasterOps, &fake, 23));
@@ -825,25 +786,23 @@ static void TestFramePinsSurviveEntryPressure(void) {
   char error[256];
   ArTextSurfaceCache_SetByteBudget(&cache, 1);
   ArTextSurfaceCache_BeginFrame(&cache);
-  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &a,
-                                   &first, error, sizeof(error)));
-  CHECK(!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &b,
-                                    &second, error, sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &a, &first, error, sizeof(error)));
+  CHECK(
+      !ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &b, &second, error, sizeof(error)));
   CHECK(strstr(error, "all in use") != NULL);
   CHECK(!ArRenderTexture_IsValid(second.texture));
   CHECK(fake.calls == 1 && render.destroys == 0);
-  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &a,
-                                   &second, error, sizeof(error)));
+  CHECK(
+      ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &a, &second, error, sizeof(error)));
   CHECK(ArRenderTexture_Equals(first.texture, second.texture));
   /* The next frame can retry the identical request: capacity failures must
    * neither poison the negative cache nor retain the previous frame's pins. */
   ArTextSurfaceCache_BeginFrame(&cache);
-  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &b,
-                                   &second, error, sizeof(error)));
+  CHECK(
+      ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &b, &second, error, sizeof(error)));
   CHECK(fake.calls == 2 && render.destroys == 1);
   ArTextSurfaceCache_EndFrame(&cache);
-  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &a,
-                                   &first, error, sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &a, &first, error, sizeof(error)));
   CHECK(fake.calls == 3 && render.destroys == 2);
   ArTextSurfaceCache_Destroy(&cache, &device);
   CHECK(render.destroys == render.creates);
@@ -855,10 +814,10 @@ static void TestPixelationTreatments(void) {
   FakeRenderBackend render = {0};
   ArRenderDevice device;
   CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render,
-      (ArRenderCapabilities){
-        .maximum_texture_width = 512,
-        .maximum_texture_height = 512,
-      }));
+                            (ArRenderCapabilities){
+                                .maximum_texture_width = 512,
+                                .maximum_texture_height = 512,
+                            }));
   FakeRasterizer fake = {0};
   ArTextRasterizer rasterizer;
   CHECK(ArTextRasterizer_Init(&rasterizer, &kRasterOps, &fake, 23));
@@ -872,9 +831,8 @@ static void TestPixelationTreatments(void) {
   low.pixelation = kArTextPixelation_LowResolution;
   low.pixelation_size = 2;
   ArTextSurface low_surface;
-  CHECK(ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &low,
-      &low_surface, error, sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &low, &low_surface, error,
+                                   sizeof(error)));
   CHECK(fake.last_request.font_pixels == 11);
   CHECK(fake.last_request.minimum_font_pixels == 11);
   CHECK(fake.last_request.maximum_width == 127);
@@ -895,9 +853,8 @@ static void TestPixelationTreatments(void) {
   mosaic.pixelation = kArTextPixelation_Mosaic;
   mosaic.pixelation_size = 2;
   ArTextSurface mosaic_surface;
-  CHECK(ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &mosaic,
-      &mosaic_surface, error, sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &mosaic, &mosaic_surface, error,
+                                   sizeof(error)));
   CHECK(fake.last_request.font_pixels == 24);
   CHECK(fake.last_request.maximum_width == 256);
   CHECK(mosaic_surface.width == 8 && mosaic_surface.height == 16);
@@ -908,29 +865,24 @@ static void TestPixelationTreatments(void) {
   CHECK(render.uploaded_pixels[0] == render.uploaded_pixels[64]);
   CHECK(render.uploaded_pixels[2] != render.uploaded_pixels[0]);
 
-  const ArTextCacheKey low_key = ArTextSurfaceCache_MakeKey(
-      &rasterizer, &low);
-  const ArTextCacheKey mosaic_key = ArTextSurfaceCache_MakeKey(
-      &rasterizer, &mosaic);
+  const ArTextCacheKey low_key = ArTextSurfaceCache_MakeKey(&rasterizer, &low);
+  const ArTextCacheKey mosaic_key = ArTextSurfaceCache_MakeKey(&rasterizer, &mosaic);
   CHECK(!ArTextCacheKey_Equals(low_key, mosaic_key));
   mosaic.pixelation_size = 3;
-  CHECK(!ArTextCacheKey_Equals(
-      mosaic_key, ArTextSurfaceCache_MakeKey(&rasterizer, &mosaic)));
+  CHECK(!ArTextCacheKey_Equals(mosaic_key, ArTextSurfaceCache_MakeKey(&rasterizer, &mosaic)));
 
   fake.line_advance = 8;
   ++mosaic.source_revision;
   mosaic.pixelation_size = 4;
-  CHECK(ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &mosaic,
-      &mosaic_surface, error, sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &mosaic, &mosaic_surface, error,
+                                   sizeof(error)));
   CHECK(render.uploaded_pixels[0] != render.uploaded_pixels[1]);
   CHECK(render.uploaded_pixels[0] != render.uploaded_pixels[64]);
   ++low.source_revision;
   low.font_pixels = low.minimum_font_pixels = 10;
   low.pixelation_size = 4;
-  CHECK(ArTextSurfaceCache_Acquire(
-      &cache, &device, &rasterizer, &low,
-      &low_surface, error, sizeof(error)));
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &low, &low_surface, error,
+                                   sizeof(error)));
   CHECK(fake.last_request.font_pixels == 10);
   CHECK(low_surface.width == 8 && low_surface.height == 16);
 
@@ -941,9 +893,8 @@ static void TestPixelationTreatments(void) {
 
 static void TestInkFormatsAndBounds(void) {
   const ArRenderPixelFormat formats[] = {
-    kArRenderPixelFormat_Argb8888, kArRenderPixelFormat_Abgr8888,
-    kArRenderPixelFormat_Rgba8888, kArRenderPixelFormat_Rgba4444,
-    kArRenderPixelFormat_A8, kArRenderPixelFormat_Rgb565,
+      kArRenderPixelFormat_Argb8888, kArRenderPixelFormat_Abgr8888, kArRenderPixelFormat_Rgba8888,
+      kArRenderPixelFormat_Rgba4444, kArRenderPixelFormat_A8,       kArRenderPixelFormat_Rgb565,
   };
   for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); ++i) {
     uint8_t storage[8 * 32] = {0}; /* Deliberately padded pitch. */
@@ -957,11 +908,12 @@ static void TestInkFormatsAndBounds(void) {
         } else if (bytes == 2) {
           const uint16_t word = 8;
           memcpy(pixel, &word, sizeof(word));
-        } else *pixel = 128;
+        } else
+          *pixel = 128;
       }
     }
-    ArTextBitmap bitmap = {.pixels = storage, .width = 7, .height = 8,
-                          .pitch_bytes = 32, .format = formats[i]};
+    ArTextBitmap bitmap = {
+        .pixels = storage, .width = 7, .height = 8, .pitch_bytes = 32, .format = formats[i]};
     ArRenderRectI ink = ArTextBitmap_InkBounds(&bitmap, (ArRenderRectI){0, 0, 7, 8});
     if (formats[i] == kArRenderPixelFormat_Rgb565) {
       CHECK(ink.x == 0 && ink.y == 0 && ink.w == 7 && ink.h == 8);
@@ -980,15 +932,15 @@ static void TestInkFormatsAndBounds(void) {
 }
 
 static bool CreateUiFont(void *context, ArTextBackendInstance *instance,
-                          const ArTextBackendConfig *config,
-                          char *error, size_t error_capacity) {
-  (void)error; (void)error_capacity;
+                         const ArTextBackendConfig *config, char *error, size_t error_capacity) {
+  (void)error;
+  (void)error_capacity;
   instance->implementation = context;
-  return ArTextRasterizer_Init(&instance->rasterizer, &kRasterOps, context,
-                                config->font_revision);
+  return ArTextRasterizer_Init(&instance->rasterizer, &kRasterOps, context, config->font_revision);
 }
 static void DestroyUiFont(void *context, ArTextBackendInstance *instance) {
-  (void)context; (void)instance;
+  (void)context;
+  (void)instance;
 }
 
 static void TestInterfaceTextCacheAndLifecycle(void) {
@@ -998,21 +950,26 @@ static void TestInterfaceTextCacheAndLifecycle(void) {
   ArRenderDevice device = {0};
   CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render, (ArRenderCapabilities){0}));
   const ArTextBackendOps ops = {.struct_size = sizeof(ops),
-      .abi_version = AR_TEXT_BACKEND_ABI_VERSION,
-      .create = CreateUiFont, .destroy = DestroyUiFont};
+                                .abi_version = AR_TEXT_BACKEND_ABI_VERSION,
+                                .create = CreateUiFont,
+                                .destroy = DestroyUiFont};
   const ArTextBackend backend = {.ops = &ops, .context = &raster};
   const ArTextBackendConfig fonts = {.struct_size = sizeof(fonts),
-      .abi_version = AR_TEXT_BACKEND_CONFIG_ABI_VERSION,
-      .font_stack_id = "interface", .primary_font = 1,
-      .resources = ArHostFontResources_Provider(&font_store),
-      .font_revision = 7, .cached_size_capacity = 4};
+                                     .abi_version = AR_TEXT_BACKEND_CONFIG_ABI_VERSION,
+                                     .font_stack_id = "interface",
+                                     .primary_font = 1,
+                                     .resources = ArHostFontResources_Provider(&font_store),
+                                     .font_revision = 7,
+                                     .cached_size_capacity = 4};
   ArUiTextRenderer ui = {0};
   CHECK(ArUiTextRenderer_Init(&ui, &device, &backend, &fonts, NULL, 0));
   CHECK(raster.calls == 1); /* Preflight before transactional publication. */
   ArUiTextRun run = {.struct_size = sizeof(run),
-      .abi_version = AR_UI_TEXT_RUN_ABI_VERSION,
-      .utf8 = "Français 日本語", .utf8_bytes = strlen("Français 日本語"),
-      .bounds = {10, 20, 256, 32}, .tint = {1, 1, 1, 1}};
+                     .abi_version = AR_UI_TEXT_RUN_ABI_VERSION,
+                     .utf8 = "Français 日本語",
+                     .utf8_bytes = strlen("Français 日本語"),
+                     .bounds = {10, 20, 256, 32},
+                     .tint = {1, 1, 1, 1}};
   CHECK(ArUiTextRenderer_Draw(&ui, &run));
   CHECK(raster.calls == 2 && render.draws == 1);
   CHECK(raster.last_request.utf8_bytes == run.utf8_bytes);
@@ -1062,9 +1019,13 @@ static void TestInterfaceTextCacheAndLifecycle(void) {
 static void TestEffectPieces(void) {
   const uint32_t pixels[6] = {255, 255, 255, 255, 255, 255};
   const ArTextRevealCluster clusters[] = {{1, 0, 0, 0, 4, 1}, {2, 0, 2, 0, 4, 1}};
-  const ArTextBitmap overlap = {.pixels = pixels, .width = 6, .height = 1,
-      .pitch_bytes = 24, .format = kArRenderPixelFormat_Rgba8888,
-      .reveal_clusters = clusters, .reveal_cluster_count = 2};
+  const ArTextBitmap overlap = {.pixels = pixels,
+                                .width = 6,
+                                .height = 1,
+                                .pitch_bytes = 24,
+                                .format = kArRenderPixelFormat_Rgba8888,
+                                .reveal_clusters = clusters,
+                                .reveal_cluster_count = 2};
   uint32_t *owners = ArTextBitmap_BuildOwnership(&overlap);
   CHECK(owners != NULL);
   if (owners) {
@@ -1085,10 +1046,10 @@ static void TestEffectPieces(void) {
     request.pixelation = (ArTextPixelation)effect;
     request.pixelation_size = effect ? 2 : 0;
     ArTextSurface surface;
-    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request,
-                                    &surface, NULL, 0));
+    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request, &surface, NULL, 0));
     CHECK(surface.reveal_piece_count > 0);
-    CHECK(cache.stats.effect_metadata_bytes >= surface.reveal_piece_count * sizeof(ArTextRevealPiece));
+    CHECK(cache.stats.effect_metadata_bytes >=
+          surface.reveal_piece_count * sizeof(ArTextRevealPiece));
     unsigned visits[64 * 32] = {0};
     for (size_t i = 0; i < surface.reveal_piece_count; ++i) {
       const ArTextRevealPiece *piece = &surface.reveal_pieces[i];
@@ -1098,8 +1059,14 @@ static void TestEffectPieces(void) {
           CHECK(x >= 0 && x < surface.width && y >= 0 && y < surface.height);
           CHECK(++visits[y * 64 + x] == 1);
           int sx = x, sy = y;
-          if (effect == kArTextPixelation_LowResolution) { sx /= 2; sy /= 2; }
-          if (effect == kArTextPixelation_Mosaic) { sx = x / 2 * 2 + 1; sy = y / 2 * 2 + 1; }
+          if (effect == kArTextPixelation_LowResolution) {
+            sx /= 2;
+            sy /= 2;
+          }
+          if (effect == kArTextPixelation_Mosaic) {
+            sx = x / 2 * 2 + 1;
+            sy = y / 2 * 2 + 1;
+          }
           CHECK(fake.owners[sy * 8 + sx] == piece->cluster_index + 1);
         }
     }
@@ -1109,13 +1076,11 @@ static void TestEffectPieces(void) {
     const uint64_t metadata = cache.stats.effect_metadata_bytes;
     ArTextSurfaceCache_ResetStats(&cache);
     CHECK(cache.stats.effect_metadata_bytes == metadata);
-    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request,
-                                    &surface, NULL, 0));
+    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request, &surface, NULL, 0));
     CHECK(fake.calls == 1 && render.uploads == 1);
     ArTextSurfaceCache_SetByteBudget(&cache, cache.stats.texture_bytes + metadata);
     request.source_revision++;
-    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request,
-                                    &surface, NULL, 0));
+    CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request, &surface, NULL, 0));
     CHECK(cache.stats.evictions == 1); /* CPU effects count against the budget. */
     ArTextSurfaceCache_Destroy(&cache, &device);
     CHECK(cache.stats.effect_metadata_bytes == 0);
@@ -1129,30 +1094,25 @@ static void TestEffectPieces(void) {
 /* ApplyMosaic's loops as they stood before the band-row rewrite (2026-09-17),
  * kept verbatim apart from the allocation helpers, as the oracle for the
  * bytes the cache now uploads. */
-static void ReferenceMosaic(const ArTextBitmap *source, int block_size,
-                            uint8_t *output, int output_pitch) {
+static void ReferenceMosaic(const ArTextBitmap *source, int block_size, uint8_t *output,
+                            int output_pitch) {
   const int bytes_per_pixel = 4;
   const uint8_t *input = (const uint8_t *)source->pixels;
-  for (int block_y = 0; block_y < source->height;
-       block_y += block_size) {
-    const int sample_y = block_y + block_size / 2 < source->height
-        ? block_y + block_size / 2 : source->height - 1;
-    for (int block_x = 0; block_x < source->width;
-         block_x += block_size) {
-      const int sample_x = block_x + block_size / 2 < source->width
-          ? block_x + block_size / 2 : source->width - 1;
-      const uint8_t *sample =
-          input + (size_t)sample_y * (size_t)source->pitch_bytes +
-          (size_t)sample_x * (size_t)bytes_per_pixel;
-      const int end_y = block_y + block_size < source->height
-          ? block_y + block_size : source->height;
-      const int end_x = block_x + block_size < source->width
-          ? block_x + block_size : source->width;
+  for (int block_y = 0; block_y < source->height; block_y += block_size) {
+    const int sample_y =
+        block_y + block_size / 2 < source->height ? block_y + block_size / 2 : source->height - 1;
+    for (int block_x = 0; block_x < source->width; block_x += block_size) {
+      const int sample_x =
+          block_x + block_size / 2 < source->width ? block_x + block_size / 2 : source->width - 1;
+      const uint8_t *sample = input + (size_t)sample_y * (size_t)source->pitch_bytes +
+                              (size_t)sample_x * (size_t)bytes_per_pixel;
+      const int end_y =
+          block_y + block_size < source->height ? block_y + block_size : source->height;
+      const int end_x = block_x + block_size < source->width ? block_x + block_size : source->width;
       for (int y = block_y; y < end_y; ++y) {
         uint8_t *row = output + (size_t)y * (size_t)output_pitch;
         for (int x = block_x; x < end_x; ++x)
-          memcpy(row + (size_t)x * (size_t)bytes_per_pixel,
-                 sample, (size_t)bytes_per_pixel);
+          memcpy(row + (size_t)x * (size_t)bytes_per_pixel, sample, (size_t)bytes_per_pixel);
       }
     }
   }
@@ -1162,10 +1122,10 @@ static void TestMosaicMatchesOriginal(void) {
   FakeRenderBackend render = {0};
   ArRenderDevice device;
   CHECK(ArRenderDevice_Init(&device, &kRenderOps, &render,
-      (ArRenderCapabilities){
-        .maximum_texture_width = 512,
-        .maximum_texture_height = 512,
-      }));
+                            (ArRenderCapabilities){
+                                .maximum_texture_width = 512,
+                                .maximum_texture_height = 512,
+                            }));
   FakeRasterizer fake = {0};
   ArTextRasterizer rasterizer;
   CHECK(ArTextRasterizer_Init(&rasterizer, &kRasterOps, &fake, 23));
@@ -1186,15 +1146,17 @@ static void TestMosaicMatchesOriginal(void) {
       request.pixelation = kArTextPixelation_Mosaic;
       request.pixelation_size = block;
       ArTextSurface surface;
-      if (!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request,
-                                      &surface, error, sizeof(error))) {
+      if (!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request, &surface, error,
+                                      sizeof(error))) {
         CHECK(!"mosaic acquire failed");
         continue;
       }
       const ArTextBitmap source = {
-        .pixels = fake.pixels, .width = (int)length * 2, .height = 16,
-        .pitch_bytes = 64 * (int)sizeof(uint32_t),
-        .format = kArRenderPixelFormat_Rgba8888,
+          .pixels = fake.pixels,
+          .width = (int)length * 2,
+          .height = 16,
+          .pitch_bytes = 64 * (int)sizeof(uint32_t),
+          .format = kArRenderPixelFormat_Rgba8888,
       };
       uint32_t expected[64 * 16];
       ReferenceMosaic(&source, block, (uint8_t *)expected, 64 * 4);
@@ -1220,8 +1182,8 @@ typedef struct ScriptedRasterizer {
 } ScriptedRasterizer;
 
 static bool ScriptedRasterize(void *context, const ArTextRasterRequest *request,
-                              ArTextBitmap *bitmap, ArTextRasterFailure *failure,
-                              char *error, size_t error_capacity) {
+                              ArTextBitmap *bitmap, ArTextRasterFailure *failure, char *error,
+                              size_t error_capacity) {
   ScriptedRasterizer *scripted = (ScriptedRasterizer *)context;
   (void)failure;
   (void)error;
@@ -1230,20 +1192,25 @@ static bool ScriptedRasterize(void *context, const ArTextRasterRequest *request,
   for (int i = 0; i < scripted->width * scripted->height; ++i)
     scripted->owners[i] = (scripted->pixels[i] & 255u) ? 1u : 0u;
   scripted->cluster = (ArTextRevealCluster){
-      .end_utf8_byte = request->utf8_bytes,
-      .width = scripted->width, .height = scripted->height};
+      .end_utf8_byte = request->utf8_bytes, .width = scripted->width, .height = scripted->height};
   *bitmap = (ArTextBitmap){
       .struct_size = sizeof(*bitmap),
       .abi_version = AR_TEXT_BITMAP_ABI_VERSION,
       .pixels = scripted->pixels,
-      .width = scripted->width, .height = scripted->height,
+      .width = scripted->width,
+      .height = scripted->height,
       .pitch_bytes = scripted->width * 4,
       .format = kArRenderPixelFormat_Rgba8888,
-      .ascent = 11, .descent = 3, .line_advance = scripted->line_advance,
-      .reveal_clusters = &scripted->cluster, .reveal_cluster_count = 1,
-      .token = 1, .pixel_owners = scripted->owners,
+      .ascent = 11,
+      .descent = 3,
+      .line_advance = scripted->line_advance,
+      .reveal_clusters = &scripted->cluster,
+      .reveal_cluster_count = 1,
+      .token = 1,
+      .pixel_owners = scripted->owners,
       .font_pixels = request->font_pixels,
-      .crop_left = scripted->crop_left, .crop_top = scripted->crop_top,
+      .crop_left = scripted->crop_left,
+      .crop_top = scripted->crop_top,
   };
   return true;
 }
@@ -1254,10 +1221,10 @@ static void ScriptedRelease(void *context, ArTextBitmap *bitmap) {
 }
 
 static const ArTextRasterizerOps kScriptedOps = {
-  .struct_size = sizeof(ArTextRasterizerOps),
-  .abi_version = AR_TEXT_RASTERIZER_ABI_VERSION,
-  .rasterize = ScriptedRasterize,
-  .release_bitmap = ScriptedRelease,
+    .struct_size = sizeof(ArTextRasterizerOps),
+    .abi_version = AR_TEXT_RASTERIZER_ABI_VERSION,
+    .rasterize = ScriptedRasterize,
+    .release_bitmap = ScriptedRelease,
 };
 
 /* Keeps the last uploaded texture whole, whatever its size. */
@@ -1275,8 +1242,7 @@ static bool CaptureCreate(void *context, const ArRenderTextureDesc *descriptor,
   return CreateTexture(&capture->base, descriptor, texture);
 }
 
-static bool CaptureUpdate(void *context, ArRenderTexture texture,
-                          const ArRenderRectI *destination,
+static bool CaptureUpdate(void *context, ArRenderTexture texture, const ArRenderRectI *destination,
                           const void *pixels, int pitch_bytes) {
   TextureCapture *capture = (TextureCapture *)context;
   (void)texture;
@@ -1304,9 +1270,9 @@ static void TestGridAlignedMosaicMatchesPage(void) {
   ops.create_texture = CaptureCreate;
   ops.update_texture = CaptureUpdate;
   ArRenderDevice device;
-  CHECK(ArRenderDevice_Init(&device, &ops, &capture,
-      (ArRenderCapabilities){
-        .maximum_texture_width = 256, .maximum_texture_height = 256}));
+  CHECK(ArRenderDevice_Init(
+      &device, &ops, &capture,
+      (ArRenderCapabilities){.maximum_texture_width = 256, .maximum_texture_height = 256}));
   static ScriptedRasterizer scripted;
   static uint32_t page_pixels[128 * 96], line_pixels[128 * 96];
   static uint32_t page_owners[128 * 96], line_owners[128 * 96];
@@ -1327,10 +1293,8 @@ static void TestGridAlignedMosaicMatchesPage(void) {
     /* Clear of the page's far edges by a block: a page clamps its last
      * partial block's sample to its own edge, which a line inside it never
      * sees (the presenter's documented condition). */
-    const int line_x = (int)(NextRandom(&random) %
-                             (uint32_t)(width - line_width - block + 1));
-    const int line_y = (int)(NextRandom(&random) %
-                             (uint32_t)(height - line_height - block + 1));
+    const int line_x = (int)(NextRandom(&random) % (uint32_t)(width - line_width - block + 1));
+    const int line_y = (int)(NextRandom(&random) % (uint32_t)(height - line_height - block + 1));
     memset(page_pixels, 0, sizeof(page_pixels));
     for (int y = 0; y < line_height; ++y)
       for (int x = 0; x < line_width; ++x) {
@@ -1340,39 +1304,38 @@ static void TestGridAlignedMosaicMatchesPage(void) {
         page_pixels[(line_y + y) * width + line_x + x] = pixel;
       }
 
-    scripted = (ScriptedRasterizer){
-        .pixels = page_pixels, .owners = page_owners,
-        .width = width, .height = height,
-        .crop_left = (int)(NextRandom(&random) % 11),
-        .crop_top = (int)(NextRandom(&random) % 5),
-        .line_advance = block * 8};
+    scripted = (ScriptedRasterizer){.pixels = page_pixels,
+                                    .owners = page_owners,
+                                    .width = width,
+                                    .height = height,
+                                    .crop_left = (int)(NextRandom(&random) % 11),
+                                    .crop_top = (int)(NextRandom(&random) % 5),
+                                    .line_advance = block * 8};
     ArTextRasterRequest page_request = Request("page");
     page_request.source_revision = (uint64_t)trial + 100u;
     page_request.pixelation = kArTextPixelation_Mosaic;
     page_request.pixelation_size = block;
     page_request.maximum_height = 256;
     ArTextSurface page;
-    if (!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer,
-                                    &page_request, &page, error,
+    if (!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &page_request, &page, error,
                                     sizeof(error))) {
       CHECK(!"page acquire failed");
       continue;
     }
     CHECK(page.mosaic_block == block && page.raster_scale == 1);
-    CHECK(page.origin_x == -scripted.crop_left &&
-          page.origin_y == -scripted.crop_top);
+    CHECK(page.origin_x == -scripted.crop_left && page.origin_y == -scripted.crop_top);
     CHECK(page.width == width && page.height == height);
-    memcpy(page_texture, capture.pixels,
-           (size_t)width * (size_t)height * sizeof(uint32_t));
+    memcpy(page_texture, capture.pixels, (size_t)width * (size_t)height * sizeof(uint32_t));
     /* The line's layout origin, in the page's layout coordinates. */
     const int origin_x = line_x - page.origin_x;
     const int origin_y = line_y - page.origin_y;
 
     for (int aligned = 1; aligned >= 0; --aligned) {
-      scripted = (ScriptedRasterizer){
-          .pixels = line_pixels, .owners = line_owners,
-          .width = line_width, .height = line_height,
-          .line_advance = block * 8};
+      scripted = (ScriptedRasterizer){.pixels = line_pixels,
+                                      .owners = line_owners,
+                                      .width = line_width,
+                                      .height = line_height,
+                                      .line_advance = block * 8};
       ArTextRasterRequest line_request = Request("line");
       line_request.source_revision = page_request.source_revision;
       line_request.pixelation = kArTextPixelation_Mosaic;
@@ -1384,16 +1347,15 @@ static void TestGridAlignedMosaicMatchesPage(void) {
         line_request.pixelation_grid_y = -page.origin_y - origin_y;
       }
       ArTextSurface line;
-      if (!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer,
-                                      &line_request, &line, error,
+      if (!ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &line_request, &line, error,
                                       sizeof(error))) {
         CHECK(!"line acquire failed");
         continue;
       }
       if (aligned) {
         CHECK(line.width % block == 0 && line.height % block == 0);
-        CHECK(line.origin_x >= 0 && line.origin_x < block &&
-              line.origin_y >= 0 && line.origin_y < block);
+        CHECK(line.origin_x >= 0 && line.origin_x < block && line.origin_y >= 0 &&
+              line.origin_y < block);
         CHECK(line.ascent == 11 + line.origin_y);
         CHECK(line.reveal_clusters[0].x == line.origin_x &&
               line.reveal_clusters[0].y == line.origin_y);
@@ -1406,11 +1368,9 @@ static void TestGridAlignedMosaicMatchesPage(void) {
         for (int x = 0; x < width; ++x) {
           const int u = x - dx, v = y - dy;
           const uint32_t expected = page_texture[y * width + x];
-          const bool inside = u >= 0 && v >= 0 && u < line.width &&
-                              v < line.height;
+          const bool inside = u >= 0 && v >= 0 && u < line.width && v < line.height;
           const uint32_t actual = inside ? capture.pixels[v * line.width + u] : 0u;
-          if ((expected & 255u) || (actual & 255u))
-            mismatches += expected != actual;
+          if ((expected & 255u) || (actual & 255u)) mismatches += expected != actual;
         }
       for (int v = 0; v < line.height; ++v)
         for (int u = 0; u < line.width; ++u) {
@@ -1443,12 +1403,13 @@ static void TestExactRasterSize(void) {
   ops.create_texture = CaptureCreate;
   ops.update_texture = CaptureUpdate;
   ArRenderDevice device;
-  CHECK(ArRenderDevice_Init(&device, &ops, &capture,
-      (ArRenderCapabilities){
-        .maximum_texture_width = 256, .maximum_texture_height = 256}));
+  CHECK(ArRenderDevice_Init(
+      &device, &ops, &capture,
+      (ArRenderCapabilities){.maximum_texture_width = 256, .maximum_texture_height = 256}));
   static ScriptedRasterizer scripted;
   static uint32_t pixels[16 * 8], owners[16 * 8];
-  for (int i = 0; i < 16 * 8; ++i) pixels[i] = UINT32_C(0xffffffff);
+  for (int i = 0; i < 16 * 8; ++i)
+    pixels[i] = UINT32_C(0xffffffff);
   ArTextRasterizer rasterizer;
   CHECK(ArTextRasterizer_Init(&rasterizer, &kScriptedOps, &scripted, 37));
   ArTextSurfaceCache cache;
@@ -1472,27 +1433,25 @@ static void TestExactRasterSize(void) {
   request.minimum_font_pixels = 26;
   const ArTextCacheKey fitted = ArTextSurfaceCache_MakeKey(&rasterizer, &request);
   request.raster_font_pixels = 31;
-  CHECK(!ArTextCacheKey_Equals(
-      fitted, ArTextSurfaceCache_MakeKey(&rasterizer, &request)));
+  CHECK(!ArTextCacheKey_Equals(fitted, ArTextSurfaceCache_MakeKey(&rasterizer, &request)));
   ArTextRasterRequest aligned = request;
   aligned.align_pixelation_grid = true;
-  const ArTextCacheKey aligned_key =
-      ArTextSurfaceCache_MakeKey(&rasterizer, &aligned);
-  CHECK(!ArTextCacheKey_Equals(
-      ArTextSurfaceCache_MakeKey(&rasterizer, &request), aligned_key));
+  const ArTextCacheKey aligned_key = ArTextSurfaceCache_MakeKey(&rasterizer, &aligned);
+  CHECK(!ArTextCacheKey_Equals(ArTextSurfaceCache_MakeKey(&rasterizer, &request), aligned_key));
   aligned.pixelation_grid_y = -5;
-  CHECK(!ArTextCacheKey_Equals(
-      aligned_key, ArTextSurfaceCache_MakeKey(&rasterizer, &aligned)));
-  scripted = (ScriptedRasterizer){.pixels = pixels, .owners = owners,
-      .width = 16, .height = 8, .crop_left = 2, .crop_top = 1,
-      .line_advance = 8};
+  CHECK(!ArTextCacheKey_Equals(aligned_key, ArTextSurfaceCache_MakeKey(&rasterizer, &aligned)));
+  scripted = (ScriptedRasterizer){.pixels = pixels,
+                                  .owners = owners,
+                                  .width = 16,
+                                  .height = 8,
+                                  .crop_left = 2,
+                                  .crop_top = 1,
+                                  .line_advance = 8};
   ArTextSurface surface;
-  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request,
-                                   &surface, error, sizeof(error)));
-  CHECK(scripted.last_request.font_pixels == 31 &&
-        scripted.last_request.minimum_font_pixels == 31);
-  CHECK(!scripted.last_request.raster_font_pixels &&
-        !scripted.last_request.align_pixelation_grid);
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request, &surface, error,
+                                   sizeof(error)));
+  CHECK(scripted.last_request.font_pixels == 31 && scripted.last_request.minimum_font_pixels == 31);
+  CHECK(!scripted.last_request.raster_font_pixels && !scripted.last_request.align_pixelation_grid);
   CHECK(surface.raster_font_pixels == 31 && surface.raster_scale == 1);
   CHECK(surface.mosaic_block == 1);
   CHECK(surface.origin_x == -2 && surface.origin_y == -1);
@@ -1505,10 +1464,9 @@ static void TestExactRasterSize(void) {
   request.raster_font_pixels = 7;
   request.align_pixelation_grid = true;
   request.pixelation_grid_x = 1;
-  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request,
-                                   &surface, error, sizeof(error)));
-  CHECK(scripted.last_request.font_pixels == 7 &&
-        scripted.last_request.minimum_font_pixels == 7);
+  CHECK(ArTextSurfaceCache_Acquire(&cache, &device, &rasterizer, &request, &surface, error,
+                                   sizeof(error)));
+  CHECK(scripted.last_request.font_pixels == 7 && scripted.last_request.minimum_font_pixels == 7);
   CHECK(scripted.last_request.maximum_width == request.maximum_width / 4);
   CHECK(surface.raster_font_pixels == 7 && surface.raster_scale == 4);
   CHECK(surface.width == 64 && surface.height == 32);
@@ -1532,8 +1490,8 @@ int main(void) {
   TestMosaicMatchesOriginal();
   TestInkFormatsAndBounds();
   TestInterfaceTextCacheAndLifecycle();
-  if (g_failures) {
-    fprintf(stderr, "%d text-surface cache test(s) failed\n", g_failures);
+  if (s_failures) {
+    fprintf(stderr, "%d text-surface cache test(s) failed\n", s_failures);
     return 1;
   }
   puts("text-surface cache tests passed");

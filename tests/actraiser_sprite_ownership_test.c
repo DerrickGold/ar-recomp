@@ -8,15 +8,20 @@ uint8 g_ram[kActRaiserWramSize];
 static unsigned failures, builds, uploads;
 static RecompReturn native_result = RECOMP_RETURN_NORMAL;
 static CpuState native_input;
-#define CHECK(x) do { if (!(x)) { fprintf(stderr, "%s:%d: %s\n", \
-    __FILE__, __LINE__, #x); ++failures; } } while (0)
+#define CHECK(x)                                                                                   \
+  do {                                                                                             \
+    if (!(x)) {                                                                                    \
+      fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #x);                                      \
+      ++failures;                                                                                  \
+    }                                                                                              \
+  } while (0)
 extern bool ActRaiser_SimSpriteBuildEntry(CpuState *);
 extern bool ActRaiser_SpriteUploadEntry(CpuState *);
 extern RecompReturn ActRaiser_SimSpriteBuild(CpuState *);
 extern RecompReturn ActRaiser_SpriteUpload(CpuState *);
 
-static void Expect(uint8_t group, uint8_t map, ActRaiserSpriteRole role,
-                   unsigned first, unsigned count) {
+static void Expect(uint8_t group, uint8_t map, ActRaiserSpriteRole role, unsigned first,
+                   unsigned count) {
   const ActRaiserSpriteOwnership owner = ActRaiserSpriteOwnership_Presented(group, map);
   uint8_t actual_first = 255, actual_count = 255;
   CHECK(ActRaiserSpriteOwnership_Range(&owner, role, &actual_first, &actual_count) == (count != 0));
@@ -31,9 +36,7 @@ RecompReturn bank_01_ACD9_M0X0(CpuState *cpu) {
   cpu->S += 3;
   return native_result;
 }
-RecompReturn bank_01_ACD9_M1X0(CpuState *cpu) {
-  return bank_01_ACD9_M0X0(cpu);
-}
+RecompReturn bank_01_ACD9_M1X0(CpuState *cpu) { return bank_01_ACD9_M0X0(cpu); }
 RecompReturn bank_02_ACA3_M1X0(CpuState *cpu) {
   ++uploads;
   CHECK(!ActRaiser_SpriteUploadEntry(cpu));
@@ -45,7 +48,8 @@ RecompReturn bank_02_ACA3_M1X0(CpuState *cpu) {
 static void TestNativeWrappers(void) {
   for (unsigned m = 0; m < 2; ++m) {
     ActRaiserSpriteOwnership_Reset();
-    g_ram[0x18] = 0; g_ram[0x19] = 7;
+    g_ram[0x18] = 0;
+    g_ram[0x19] = 7;
     CpuState cpu = {.PB = 1, .DB = 0x7f, .m_flag = m, .S = 0x1e0};
     native_input = cpu;
     CHECK(ActRaiser_SimSpriteBuildEntry(&cpu));
@@ -62,17 +66,24 @@ static void TestNativeWrappers(void) {
   CHECK(!ActRaiser_SpriteUploadEntry(NULL));
   CpuState cpu = {.PB = 2, .DB = 0x7f, .m_flag = 1};
   CHECK(!ActRaiser_SpriteUploadEntry(&cpu));
-  cpu.DB = 0; cpu.D = 0x100;
+  cpu.DB = 0;
+  cpu.D = 0x100;
   CHECK(!ActRaiser_SpriteUploadEntry(&cpu));
-  cpu.D = 0; cpu.x_flag = 1;
+  cpu.D = 0;
+  cpu.x_flag = 1;
   CHECK(!ActRaiser_SpriteUploadEntry(&cpu));
-  cpu.x_flag = 0; cpu.emulation = 1;
+  cpu.x_flag = 0;
+  cpu.emulation = 1;
   CHECK(!ActRaiser_SpriteUploadEntry(&cpu));
-  cpu.emulation = 0; cpu.m_flag = 0;
+  cpu.emulation = 0;
+  cpu.m_flag = 0;
   CHECK(!ActRaiser_SpriteUploadEntry(&cpu));
-  cpu.PB = 1; cpu.emulation = 1;
+  cpu.PB = 1;
+  cpu.emulation = 1;
   CHECK(!ActRaiser_SimSpriteBuildEntry(&cpu));
-  cpu.emulation = 0; cpu.S = 0x1e0; native_input = cpu;
+  cpu.emulation = 0;
+  cpu.S = 0x1e0;
+  native_input = cpu;
   native_result = RECOMP_RETURN_TAILCALL;
   CHECK(ActRaiser_SimSpriteBuild(&cpu) == native_result);
   Expect(0, 7, kActRaiserSprite_HudIcon, 0, 0);
@@ -123,20 +134,21 @@ static void TestPublication(void) {
 
 static void TestArtIndependentRoles(void) {
   uint8_t shadow[kActRaiserSpriteShadowBytes] = {0};
-  const uint16_t eyes[] = {0xf3fa,0xf408,0xf430,0xf458,0xf486,0xf494,0xf4b2};
+  const uint16_t eyes[] = {0xf3fa, 0xf408, 0xf430, 0xf458, 0xf486, 0xf494, 0xf4b2};
   for (unsigned parts = 1; parts <= 6; ++parts) {
     ActRaiserSpriteOwnership_Begin(7, 1, 0);
     for (unsigned i = 0; i < 7; ++i)
-      ActRaiserSpriteOwnership_RecordAction(eyes[i], (5+i*parts)*4, (5+(i+1)*parts)*4);
+      ActRaiserSpriteOwnership_RecordAction(eyes[i], (5 + i * parts) * 4,
+                                            (5 + (i + 1) * parts) * 4);
     ActRaiserSpriteOwnership_Complete(shadow);
     ActRaiserSpriteOwnership_Upload(7, 1, shadow);
-    Expect(7, 1, kActRaiserSprite_StatueEyes, 5, 7*parts);
+    Expect(7, 1, kActRaiserSprite_StatueEyes, 5, 7 * parts);
     Expect(7, 2, kActRaiserSprite_StatueEyes, 0, 0);
   }
   for (unsigned spell = 0; spell < 4; ++spell) {
     ActRaiserSpriteOwnership_Begin(0, 7, 0);
-    ActRaiserSpriteOwnership_RecordSim(0x081a, 0x25+spell, 0, 4); /* Menu copy. */
-    ActRaiserSpriteOwnership_RecordSim(0x083e, 0x25+spell, 4, spell ? 8 : 20);
+    ActRaiserSpriteOwnership_RecordSim(0x081a, 0x25 + spell, 0, 4); /* Menu copy. */
+    ActRaiserSpriteOwnership_RecordSim(0x083e, 0x25 + spell, 4, spell ? 8 : 20);
     ActRaiserSpriteOwnership_Complete(shadow);
     ActRaiserSpriteOwnership_Upload(0, 7, shadow);
     Expect(0, 7, kActRaiserSprite_HudIcon, 1, spell ? 1 : 4);
@@ -155,6 +167,8 @@ static void TestArtIndependentRoles(void) {
   ActRaiserSpriteOwnership_Reset();
 }
 int main(void) {
-  TestNativeWrappers(); TestPublication(); TestArtIndependentRoles();
+  TestNativeWrappers();
+  TestPublication();
+  TestArtIndependentRoles();
   return failures ? 1 : 0;
 }

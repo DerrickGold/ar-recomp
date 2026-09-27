@@ -7,12 +7,12 @@ static uint8_t wram[0x20000];
 static uint8_t source_bank[0x10000];
 static int failures;
 
-#define CHECK(condition)                                                   \
-  do {                                                                     \
-    if (!(condition)) {                                                    \
-      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #condition);          \
-      failures++;                                                          \
-    }                                                                      \
+#define CHECK(condition)                                                                           \
+  do {                                                                                             \
+    if (!(condition)) {                                                                            \
+      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #condition);                                  \
+      failures++;                                                                                  \
+    }                                                                                              \
   } while (0)
 
 uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 address) {
@@ -55,20 +55,20 @@ static void PutBits(size_t *bit, unsigned value, unsigned count) {
   for (unsigned i = 0; i < count; i++) {
     const unsigned shift = count - 1 - i;
     if ((value >> shift) & 1u)
-      source_bank[0x9000u + (*bit >> 3)] |=
-          (uint8)(1u << (7 - (*bit & 7)));
+      source_bank[0x9000u + (*bit >> 3)] |= (uint8)(1u << (7 - (*bit & 7)));
     (*bit)++;
   }
 }
 
 static unsigned observations;
-static void Observe(void *context,uint32_t source,uint16_t destination,
-    const uint8_t *bytes,size_t size) {
-  CHECK(context==&observations);++observations;
-  CHECK(source==0x059000);
-  CHECK((destination==0x4000 && size==6) || (destination==0x4100 && size==1));
-  CHECK(bytes!=wram+destination && !memcmp(bytes,wram+destination,size));
-  CHECK(!memcmp(bytes,size==6?"AAAAAA":"Z",size));
+static void Observe(void *context, uint32_t source, uint16_t destination, const uint8_t *bytes,
+                    size_t size) {
+  CHECK(context == &observations);
+  ++observations;
+  CHECK(source == 0x059000);
+  CHECK((destination == 0x4000 && size == 6) || (destination == 0x4100 && size == 1));
+  CHECK(bytes != wram + destination && !memcmp(bytes, wram + destination, size));
+  CHECK(!memcmp(bytes, size == 6 ? "AAAAAA" : "Z", size));
 }
 
 static void TestCpuContract(void) {
@@ -76,11 +76,11 @@ static void TestCpuContract(void) {
   memset(source_bank, 0, sizeof(source_bank));
 
   size_t bit = 0;
-  PutBits(&bit, 1, 1);       /* literal */
+  PutBits(&bit, 1, 1); /* literal */
   PutBits(&bit, 'A', 8);
-  PutBits(&bit, 0, 1);       /* match */
+  PutBits(&bit, 0, 1); /* match */
   PutBits(&bit, 0xEF, 8);
-  PutBits(&bit, 3, 4);       /* length = 3 + 2 */
+  PutBits(&bit, 3, 4); /* length = 3 + 2 */
   CHECK(bit == 22);
 
   WriteWram16(0x00A5, 0x9000);
@@ -104,7 +104,8 @@ static void TestCpuContract(void) {
 
   CHECK(ActRaiser_LzssDecompress(&cpu) == RECOMP_RETURN_NORMAL);
   CHECK(!memcmp(&wram[0x4000], "AAAAAA", 6));
-  for (unsigned i = 0; i < 6; i++) CHECK(wram[0x20EF + i] == 'A');
+  for (unsigned i = 0; i < 6; i++)
+    CHECK(wram[0x20EF + i] == 'A');
   CHECK(wram[0x2000] == 0x20);
   CHECK(wram[0x20EE] == 0x20);
   CHECK(wram[0x20F5] == 0x20);
@@ -116,8 +117,7 @@ static void TestCpuContract(void) {
   CHECK(ReadWram16(0x00B1) == 0x20F4);
   CHECK(ReadWram16(0x00B3) == 6);
   CHECK(ReadWram16(0x00B5) == 0x4000);
-  const uint16 source_window =
-      (uint16)((uint16)source_bank[0x9001] << 8 | source_bank[0x9002]);
+  const uint16 source_window = (uint16)((uint16)source_bank[0x9001] << 8 | source_bank[0x9002]);
   CHECK(ReadWram16(0x00B7) == (uint16)(source_window << 2));
 
   CHECK(cpu.A == 0x0141);
@@ -172,14 +172,14 @@ static void TestLiteralAccumulatorExit(void) {
 int main(void) {
   TestCpuContract();
   TestLiteralAccumulatorExit();
-  CHECK(observations==0);
-  ActRaiserLzss_SetObserver(Observe,&observations);
+  CHECK(observations == 0);
+  ActRaiserLzss_SetObserver(Observe, &observations);
   TestCpuContract();
   TestLiteralAccumulatorExit();
-  CHECK(observations==2);
-  ActRaiserLzss_SetObserver(NULL,NULL);
+  CHECK(observations == 2);
+  ActRaiserLzss_SetObserver(NULL, NULL);
   TestCpuContract();
-  CHECK(observations==2);
+  CHECK(observations == 2);
   if (failures) {
     printf("actraiser lzss HLE: %d failure(s)\n", failures);
     return 1;

@@ -19,22 +19,19 @@ typedef struct MemoryVfs {
 
 static int failures;
 
-#define CHECK(condition)                                                        \
-  do {                                                                          \
-    if (!(condition)) {                                                         \
-      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__,         \
-              #condition);                                                      \
-      failures++;                                                               \
-    }                                                                            \
+#define CHECK(condition)                                                                           \
+  do {                                                                                             \
+    if (!(condition)) {                                                                            \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #condition);                \
+      failures++;                                                                                  \
+    }                                                                                              \
   } while (0)
 
 static bool ReadFile(void *context, const char *path, size_t maximum_bytes,
-                     ArLanguagePackBlob *blob, char *error,
-                     size_t error_capacity) {
+                     ArLanguagePackBlob *blob, char *error, size_t error_capacity) {
   MemoryVfs *vfs = (MemoryVfs *)context;
   for (size_t i = 0; i < vfs->count; i++) {
-    if (strcmp(vfs->files[i].path, path) != 0)
-      continue;
+    if (strcmp(vfs->files[i].path, path) != 0) continue;
     if (vfs->files[i].size > maximum_bytes) {
       snprintf(error, error_capacity, "file is too large");
       return false;
@@ -54,31 +51,30 @@ static void ReleaseFile(void *context, ArLanguagePackBlob *blob) {
   memset(blob, 0, sizeof(*blob));
 }
 
-static bool LoadPackVersion(ArLanguagePack *pack, const char *id,
-                            const char *locale, const char *script, int version,
-                            ArLanguagePackError *error) {
+static bool LoadPackVersion(ArLanguagePack *pack, const char *id, const char *locale,
+                            const char *script, int version, ArLanguagePackError *error) {
   char manifest[1024];
-  const int manifest_size = snprintf(manifest, sizeof(manifest),
-                                     "[pack]\n"
-                                     "format = actraiser-language-pack\n"
-                                     "version = %d\n"
-                                     "id = %s\n"
-                                     "locale = %s\n"
-                                     "name = Synthetic %s\n"
-                                     "autonym = Synthetic %s\n"
-                                     "author = Test Author\n"
-                                     "license = MIT\n"
-                                     "direction = %s\n"
-                                     "target = us-runtime\n"
-                                     "source_profile = us\n"
-                                     "fallback = native-us\n"
-                                     "coverage = partial\n"
-                                     "[fonts]\n"
-                                     "primary = builtin:actraiser-sans\n"
-                                     "[scripts]\n"
-                                     "source = text/main.artext\n",
-                                     version, id, locale, id, id,
-                                     !strcmp(locale, "ar") ? "rtl" : "ltr");
+  const int manifest_size =
+      snprintf(manifest, sizeof(manifest),
+               "[pack]\n"
+               "format = actraiser-language-pack\n"
+               "version = %d\n"
+               "id = %s\n"
+               "locale = %s\n"
+               "name = Synthetic %s\n"
+               "autonym = Synthetic %s\n"
+               "author = Test Author\n"
+               "license = MIT\n"
+               "direction = %s\n"
+               "target = us-runtime\n"
+               "source_profile = us\n"
+               "fallback = native-us\n"
+               "coverage = partial\n"
+               "[fonts]\n"
+               "primary = builtin:actraiser-sans\n"
+               "[scripts]\n"
+               "source = text/main.artext\n",
+               version, id, locale, id, id, !strcmp(locale, "ar") ? "rtl" : "ltr");
   CHECK(manifest_size > 0 && (size_t)manifest_size < sizeof(manifest));
   const MemoryFile files[] = {
       {"pack.ini", (const uint8_t *)manifest, (size_t)manifest_size},
@@ -95,14 +91,14 @@ static bool LoadPackVersion(ArLanguagePack *pack, const char *id,
   return ArLanguagePack_Load(pack, &io, "pack.ini", error);
 }
 
-static bool LoadPack(ArLanguagePack *pack, const char *id, const char *locale,
-                     const char *script, ArLanguagePackError *error) {
+static bool LoadPack(ArLanguagePack *pack, const char *id, const char *locale, const char *script,
+                     ArLanguagePackError *error) {
   return LoadPackVersion(pack, id, locale, script, 1, error);
 }
 
-static ArDialogueContentSelection Selection(
-    ArDialoguePresentation presentation, const ArLanguagePack *selected,
-    const ArLanguagePack *native_pack) {
+static ArDialogueContentSelection Selection(ArDialoguePresentation presentation,
+                                            const ArLanguagePack *selected,
+                                            const ArLanguagePack *native_pack) {
   return (ArDialogueContentSelection){
       .struct_size = sizeof(ArDialogueContentSelection),
       .abi_version = AR_DIALOGUE_SESSION_ABI_VERSION,
@@ -124,17 +120,14 @@ static void RevealPage(ArDialogueSession *session) {
 }
 
 static void TestLongerShorterAndNativeSwitch(void) {
-  static const char native_script[] =
-      ":: dialogue.event.relay.aitos\nNative source\n";
-  static const char long_script[] =
-      ":: dialogue.event.relay.aitos\n"
-      "Première page café\n"
-      "@page\n"
-      "Deuxième page\n"
-      "@page\n"
-      "Troisième page\n";
-  static const char short_script[] =
-      ":: dialogue.event.relay.aitos\nBref\n";
+  static const char native_script[] = ":: dialogue.event.relay.aitos\nNative source\n";
+  static const char long_script[] = ":: dialogue.event.relay.aitos\n"
+                                    "Première page café\n"
+                                    "@page\n"
+                                    "Deuxième page\n"
+                                    "@page\n"
+                                    "Troisième page\n";
+  static const char short_script[] = ":: dialogue.event.relay.aitos\nBref\n";
   ArLanguagePack native_pack, long_pack, short_pack;
   ArLanguagePack_Init(&native_pack);
   ArLanguagePack_Init(&long_pack);
@@ -142,8 +135,7 @@ static void TestLongerShorterAndNativeSwitch(void) {
   ArLanguagePackError error;
   CHECK(LoadPack(&native_pack, "native.us", "en-US", native_script, &error));
   CHECK(LoadPack(&long_pack, "community.long", "fr-CA", long_script, &error));
-  CHECK(LoadPack(&short_pack, "community.short", "fr-FR", short_script,
-                 &error));
+  CHECK(LoadPack(&short_pack, "community.short", "fr-FR", short_script, &error));
 
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
@@ -151,8 +143,8 @@ static void TestLongerShorterAndNativeSwitch(void) {
       Selection(kArDialoguePresentation_Enhanced, &long_pack, &native_pack);
   ArDialogueContentSelection short_selection =
       Selection(kArDialoguePresentation_Enhanced, &short_pack, &native_pack);
-  CHECK(ArDialogueSession_Begin(&session, &long_selection,
-                                "dialogue.event.relay.aitos", NULL, &error));
+  CHECK(ArDialogueSession_Begin(&session, &long_selection, "dialogue.event.relay.aitos", NULL,
+                                &error));
   ArDialoguePageSnapshot page;
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(page.page_count == 3);
@@ -165,8 +157,7 @@ static void TestLongerShorterAndNativeSwitch(void) {
     CHECK(ArDialogueSession_Next(&session, &token, &error));
     CHECK(token.kind == kArDialogueToken_Grapheme);
   }
-  const uint32_t revealed_before_native =
-      session.state.revealed_cluster_count;
+  const uint32_t revealed_before_native = session.state.revealed_cluster_count;
   ArDialogueContentSelection native_selection =
       Selection(kArDialoguePresentation_NativeRetail, NULL, &native_pack);
   CHECK(ArDialogueSession_Switch(&session, &native_selection, &error));
@@ -192,8 +183,8 @@ static void TestLongerShorterAndNativeSwitch(void) {
 
   ArDialogueSession_Destroy(&session);
   ArDialogueSession_Init(&session);
-  CHECK(ArDialogueSession_Begin(&session, &long_selection,
-                                "dialogue.event.relay.aitos", NULL, &error));
+  CHECK(ArDialogueSession_Begin(&session, &long_selection, "dialogue.event.relay.aitos", NULL,
+                                &error));
   RevealPage(&session);
   CHECK(ArDialogueSession_Next(&session, &token, &error));
   CHECK(token.kind == kArDialogueToken_PageComplete);
@@ -218,8 +209,8 @@ static void TestLongerShorterAndNativeSwitch(void) {
    * zero and leaves every additional authored page reachable. */
   ArDialogueSession_Destroy(&session);
   ArDialogueSession_Init(&session);
-  CHECK(ArDialogueSession_Begin(&session, &short_selection,
-                                "dialogue.event.relay.aitos", NULL, &error));
+  CHECK(ArDialogueSession_Begin(&session, &short_selection, "dialogue.event.relay.aitos", NULL,
+                                &error));
   CHECK(ArDialogueSession_Next(&session, &token, &error));
   CHECK(ArDialogueSession_Switch(&session, &long_selection, &error));
   CHECK(ArDialogueSession_GetPage(&session, &page));
@@ -254,8 +245,8 @@ static void TestIntentionalEmptySource(void) {
   ArLanguagePackError error;
   CHECK(LoadPack(&native_pack, "native.us", "en-US",
                  ":: dialogue.event.relay.aitos\nNative fallback\n", &error));
-  CHECK(LoadPack(&empty_pack, "test.empty", "en-CA",
-                 ":: dialogue.event.relay.aitos\n@empty\n", &error));
+  CHECK(LoadPack(&empty_pack, "test.empty", "en-CA", ":: dialogue.event.relay.aitos\n@empty\n",
+                 &error));
   ArDialogueContentSelection selection =
       Selection(kArDialoguePresentation_Enhanced, &empty_pack, &native_pack);
   ArDialogueSession session;
@@ -263,9 +254,13 @@ static void TestIntentionalEmptySource(void) {
   CHECK(ArDialogueSession_Begin(&session, &selection, "dialogue.event.relay.aitos", NULL, &error));
   for (uint32_t native_page = 0; native_page < 3; ++native_page) {
     ArDialogueNativeProgress progress = {
-        .struct_size = sizeof(progress), .abi_version = AR_DIALOGUE_SESSION_ABI_VERSION,
-        .authored_page_index = native_page, .revealed_unit_count = 3, .page_unit_count = 8,
-        .awaiting_page_advance = native_page < 2, .terminal = native_page == 2,
+        .struct_size = sizeof(progress),
+        .abi_version = AR_DIALOGUE_SESSION_ABI_VERSION,
+        .authored_page_index = native_page,
+        .revealed_unit_count = 3,
+        .page_unit_count = 8,
+        .awaiting_page_advance = native_page < 2,
+        .terminal = native_page == 2,
     };
     CHECK(ArDialogueSession_SynchronizeNativeProgress(&session, &progress, &error));
     ArDialoguePageSnapshot page;
@@ -285,33 +280,29 @@ static void TestIntentionalEmptySource(void) {
 }
 
 static void TestNativeProgressBridge(void) {
-  static const char native_script[] =
-      ":: dialogue.event.relay.aitos\nNative source\n";
-  static const char enhanced_script[] =
-      ":: dialogue.event.relay.aitos\n"
-      "Alpha\n"
-      "@page\n"
-      "Éléphant\n"
-      "@page\n"
-      "Omega\n";
-  static const char short_script[] =
-      ":: dialogue.event.relay.aitos\nFin\n";
+  static const char native_script[] = ":: dialogue.event.relay.aitos\nNative source\n";
+  static const char enhanced_script[] = ":: dialogue.event.relay.aitos\n"
+                                        "Alpha\n"
+                                        "@page\n"
+                                        "Éléphant\n"
+                                        "@page\n"
+                                        "Omega\n";
+  static const char short_script[] = ":: dialogue.event.relay.aitos\nFin\n";
   ArLanguagePack native_pack, enhanced_pack, short_pack;
   ArLanguagePack_Init(&native_pack);
   ArLanguagePack_Init(&enhanced_pack);
   ArLanguagePack_Init(&short_pack);
   ArLanguagePackError error;
   CHECK(LoadPack(&native_pack, "native.us", "en-US", native_script, &error));
-  CHECK(LoadPack(&enhanced_pack, "enhanced.fr", "fr-FR", enhanced_script,
-                 &error));
+  CHECK(LoadPack(&enhanced_pack, "enhanced.fr", "fr-FR", enhanced_script, &error));
   CHECK(LoadPack(&short_pack, "short.fr", "fr-FR", short_script, &error));
 
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
   ArDialogueContentSelection native_selection =
       Selection(kArDialoguePresentation_NativeRetail, NULL, &native_pack);
-  CHECK(ArDialogueSession_Begin(&session, &native_selection,
-                                "dialogue.event.relay.aitos", NULL, &error));
+  CHECK(ArDialogueSession_Begin(&session, &native_selection, "dialogue.event.relay.aitos", NULL,
+                                &error));
   ArDialogueNativeProgress observed = {
       .struct_size = sizeof(observed),
       .abi_version = AR_DIALOGUE_SESSION_ABI_VERSION,
@@ -321,8 +312,8 @@ static void TestNativeProgressBridge(void) {
   };
   CHECK(ArDialogueSession_ObserveNativeProgress(&session, &observed, &error));
 
-  ArDialogueContentSelection enhanced_selection = Selection(
-      kArDialoguePresentation_Enhanced, &enhanced_pack, &native_pack);
+  ArDialogueContentSelection enhanced_selection =
+      Selection(kArDialoguePresentation_Enhanced, &enhanced_pack, &native_pack);
   CHECK(ArDialogueSession_Switch(&session, &enhanced_selection, &error));
   ArDialoguePageSnapshot page;
   CHECK(ArDialogueSession_GetPage(&session, &page));
@@ -358,33 +349,27 @@ static void TestNativeProgressBridge(void) {
 }
 
 static void TestFallbackAndTransactionalFailure(void) {
-  static const char native_script[] =
-      ":: dialogue.event.relay.aitos\nNative enhanced fallback\n";
+  static const char native_script[] = ":: dialogue.event.relay.aitos\nNative enhanced fallback\n";
   static const char missing_script[] =
       ":: dialogue.event.relay.bloodpool\nUnrelated translated message\n";
-  static const char malformed_script[] =
-      ":: dialogue.event.relay.aitos\nForbidden {master_name}\n";
+  static const char malformed_script[] = ":: dialogue.event.relay.aitos\nForbidden {master_name}\n";
   ArLanguagePack native_pack, missing_pack, malformed_pack;
   ArLanguagePack_Init(&native_pack);
   ArLanguagePack_Init(&missing_pack);
   ArLanguagePack_Init(&malformed_pack);
   ArLanguagePackError error;
   CHECK(LoadPack(&native_pack, "native.us", "en-US", native_script, &error));
-  CHECK(LoadPack(&missing_pack, "community.partial", "ar", missing_script,
-                 &error));
-  CHECK(LoadPack(&malformed_pack, "community.invalid", "fr-FR",
-                 malformed_script, &error));
+  CHECK(LoadPack(&missing_pack, "community.partial", "ar", missing_script, &error));
+  CHECK(LoadPack(&malformed_pack, "community.invalid", "fr-FR", malformed_script, &error));
 
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
-  ArDialogueContentSelection selection = Selection(
-      kArDialoguePresentation_Enhanced, &missing_pack, &native_pack);
-  CHECK(ArDialogueSession_Begin(&session, &selection, "dialogue.event.relay.aitos",
-                                NULL, &error));
+  ArDialogueContentSelection selection =
+      Selection(kArDialoguePresentation_Enhanced, &missing_pack, &native_pack);
+  CHECK(ArDialogueSession_Begin(&session, &selection, "dialogue.event.relay.aitos", NULL, &error));
   ArDialoguePageSnapshot page;
   CHECK(ArDialogueSession_GetPage(&session, &page));
-  CHECK(session.state.resolved_source ==
-        kArDialogueResolvedSource_NativeEnhanced);
+  CHECK(session.state.resolved_source == kArDialogueResolvedSource_NativeEnhanced);
   CHECK(strcmp(page.package_id, "native.us") == 0);
   CHECK(strstr(page.utf8, "fallback") != NULL);
   CHECK(!strcmp(page.locale, "en-US"));
@@ -394,8 +379,8 @@ static void TestFallbackAndTransactionalFailure(void) {
 
   const uint64_t revision = session.state.source_revision;
   const uint32_t revealed = session.state.revealed_cluster_count;
-  ArDialogueContentSelection bad = Selection(
-      kArDialoguePresentation_Enhanced, &malformed_pack, &native_pack);
+  ArDialogueContentSelection bad =
+      Selection(kArDialoguePresentation_Enhanced, &malformed_pack, &native_pack);
   CHECK(!ArDialogueSession_Switch(&session, &bad, &error));
   CHECK(strstr(error.message, "unavailable on this route") != NULL);
   CHECK(session.state.source_revision == revision);
@@ -408,8 +393,8 @@ static void TestFallbackAndTransactionalFailure(void) {
   CHECK(session.state.resolved_source == kArDialogueResolvedSource_NativeRom);
 
   selection.native_us_enhanced_pack = &native_pack;
-  CHECK(ArDialogueSession_Begin(&session, &selection, "dialogue.event.relay.bloodpool",
-                                NULL, &error));
+  CHECK(ArDialogueSession_Begin(&session, &selection, "dialogue.event.relay.bloodpool", NULL,
+                                &error));
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(!strcmp(page.locale, "ar") && page.direction == kArLanguageDirection_RightToLeft);
 
@@ -420,10 +405,8 @@ static void TestFallbackAndTransactionalFailure(void) {
 }
 
 static void TestWaitSwitchAndRestore(void) {
-  static const char first_script[] =
-      ":: dialogue.event.relay.aitos\nAB\n@wait 10\nCD\n";
-  static const char second_script[] =
-      ":: dialogue.event.relay.aitos\nWX\n@wait 20\nYZ\n";
+  static const char first_script[] = ":: dialogue.event.relay.aitos\nAB\n@wait 10\nCD\n";
+  static const char second_script[] = ":: dialogue.event.relay.aitos\nWX\n@wait 20\nYZ\n";
   ArLanguagePack first, second;
   ArLanguagePack_Init(&first);
   ArLanguagePack_Init(&second);
@@ -437,8 +420,8 @@ static void TestWaitSwitchAndRestore(void) {
 
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
-  CHECK(ArDialogueSession_Begin(&session, &first_selection,
-                                "dialogue.event.relay.aitos", NULL, &error));
+  CHECK(ArDialogueSession_Begin(&session, &first_selection, "dialogue.event.relay.aitos", NULL,
+                                &error));
   ArDialogueToken token;
   CHECK(ArDialogueSession_Next(&session, &token, &error));
   CHECK(token.kind == kArDialogueToken_Grapheme);
@@ -463,8 +446,7 @@ static void TestWaitSwitchAndRestore(void) {
       .wait_frames_remaining = 7,
       .wait_frames_total = 10,
   };
-  CHECK(ArDialogueSession_ObserveNativeProgress(&session, &native_progress,
-                                                &error));
+  CHECK(ArDialogueSession_ObserveNativeProgress(&session, &native_progress, &error));
   CHECK(ArDialogueSession_Switch(&session, &second_selection, &error));
   CHECK(session.state.wait_frames_remaining == 7);
   CHECK(session.state.wait_frames_total == 10);
@@ -476,8 +458,7 @@ static void TestWaitSwitchAndRestore(void) {
   CHECK(ArDialogueSession_ExportState(&session, &saved));
   ArDialogueSession_Destroy(&session);
   ArDialogueSession_Init(&session);
-  CHECK(ArDialogueSession_Restore(&session, &second_selection, &saved, NULL,
-                                  &error));
+  CHECK(ArDialogueSession_Restore(&session, &second_selection, &saved, NULL, &error));
   CHECK(session.state.wait_frames_remaining == 7);
   ArDialogueSession_TickWait(&session, 7);
   CHECK(ArDialogueSession_Next(&session, &token, &error));
@@ -494,10 +475,8 @@ typedef struct ResolverState {
   const char *master_name;
 } ResolverState;
 
-static bool ResolveValue(void *context, const char *name,
-                         ArLanguagePlaceholderKind expected,
-                         ArDialogueValue *value, char *error,
-                         size_t error_capacity) {
+static bool ResolveValue(void *context, const char *name, ArLanguagePlaceholderKind expected,
+                         ArDialogueValue *value, char *error, size_t error_capacity) {
   ResolverState *state = (ResolverState *)context;
   state->calls++;
   value->kind = expected;
@@ -527,49 +506,9 @@ static void TestNumberFormatting(void) {
   ArLanguagePack_Init(&pack);
   ArLanguagePackError error;
   CHECK(LoadPack(&pack, "format.test", "en-US",
-      ":: status.report.master_report\n"
-      "{master_level:03}/{master_level:01}/{master_level}\n@end\n", &error));
-  ResolverState values = {0};
-  const ArDialogueValueResolver resolver = {
-      .struct_size = sizeof(resolver),
-      .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
-      .context = &values, .resolve = ResolveValue,
-  };
-  const ArDialogueContentSelection selection =
-      Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
-  ArDialogueSession session;
-  ArDialogueSession_Init(&session);
-  CHECK(ArDialogueSession_Begin(&session, &selection,
-                                "status.report.master_report", &resolver, &error));
-  ArDialoguePageSnapshot page;
-  CHECK(ArDialogueSession_GetPage(&session, &page));
-  CHECK(!strcmp(page.utf8, "002/2/2"));
-  CHECK(page.bidi_span_count == 3);
-  CHECK(page.bidi_spans[0].start == 0 && page.bidi_spans[0].end == 3);
-  CHECK(page.bidi_spans[1].start == 4 && page.bidi_spans[1].end == 5);
-  CHECK(page.bidi_spans[2].start == 6 && page.bidi_spans[2].end == 7);
-  for (size_t i = 0; i < page.bidi_span_count; ++i)
-    CHECK(page.bidi_spans[i].direction == kArTextDirection_LeftToRight);
-  CHECK((uint32_t)values.calls == ArLanguageContract_AllowedPlaceholderCount(
-      "status.report.master_report")); /* One capture per allowed value. */
-  ArDialogueSession_Destroy(&session);
-  ArLanguagePack_Destroy(&pack);
-  CHECK(LoadPack(&pack, "format.bad", "en-US",
-      ":: status.report.master_report\n{master_name:03}\n@end\n", &error));
-  CHECK(!ArLanguageContract_ValidatePack(&pack, NULL, &error));
-  ArLanguagePack_Destroy(&pack);
-}
-
-static void TestStyledValuesAndSourceOwnership(void) {
-  ArLanguagePack pack;
-  ArLanguagePack_Init(&pack);
-  ArLanguagePackError error;
-  CHECK(LoadPackVersion(
-      &pack, "styles.test", "en-US",
-      ":: status.report.master_report\n@layout master_status\n@font "
-      "body\n@scale 110%\n"
-      "Level <i>{master_level:03}</i> <span scale=\"80%\">small</span>\n@end\n",
-      2, &error));
+                 ":: status.report.master_report\n"
+                 "{master_level:03}/{master_level:01}/{master_level}\n@end\n",
+                 &error));
   ResolverState values = {0};
   const ArDialogueValueResolver resolver = {
       .struct_size = sizeof(resolver),
@@ -581,8 +520,50 @@ static void TestStyledValuesAndSourceOwnership(void) {
       Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
-  CHECK(ArDialogueSession_Begin(
-      &session, &selection, "status.report.master_report", &resolver, &error));
+  CHECK(ArDialogueSession_Begin(&session, &selection, "status.report.master_report", &resolver,
+                                &error));
+  ArDialoguePageSnapshot page;
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(!strcmp(page.utf8, "002/2/2"));
+  CHECK(page.bidi_span_count == 3);
+  CHECK(page.bidi_spans[0].start == 0 && page.bidi_spans[0].end == 3);
+  CHECK(page.bidi_spans[1].start == 4 && page.bidi_spans[1].end == 5);
+  CHECK(page.bidi_spans[2].start == 6 && page.bidi_spans[2].end == 7);
+  for (size_t i = 0; i < page.bidi_span_count; ++i)
+    CHECK(page.bidi_spans[i].direction == kArTextDirection_LeftToRight);
+  CHECK((uint32_t)values.calls ==
+        ArLanguageContract_AllowedPlaceholderCount(
+            "status.report.master_report")); /* One capture per allowed value. */
+  ArDialogueSession_Destroy(&session);
+  ArLanguagePack_Destroy(&pack);
+  CHECK(LoadPack(&pack, "format.bad", "en-US",
+                 ":: status.report.master_report\n{master_name:03}\n@end\n", &error));
+  CHECK(!ArLanguageContract_ValidatePack(&pack, NULL, &error));
+  ArLanguagePack_Destroy(&pack);
+}
+
+static void TestStyledValuesAndSourceOwnership(void) {
+  ArLanguagePack pack;
+  ArLanguagePack_Init(&pack);
+  ArLanguagePackError error;
+  CHECK(LoadPackVersion(&pack, "styles.test", "en-US",
+                        ":: status.report.master_report\n@layout master_status\n@font "
+                        "body\n@scale 110%\n"
+                        "Level <i>{master_level:03}</i> <span scale=\"80%\">small</span>\n@end\n",
+                        2, &error));
+  ResolverState values = {0};
+  const ArDialogueValueResolver resolver = {
+      .struct_size = sizeof(resolver),
+      .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
+      .context = &values,
+      .resolve = ResolveValue,
+  };
+  const ArDialogueContentSelection selection =
+      Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
+  ArDialogueSession session;
+  ArDialogueSession_Init(&session);
+  CHECK(ArDialogueSession_Begin(&session, &selection, "status.report.master_report", &resolver,
+                                &error));
   ArDialoguePageSnapshot page;
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(!strcmp(page.utf8, "Level 002 small"));
@@ -593,12 +574,10 @@ static void TestStyledValuesAndSourceOwnership(void) {
     CHECK(page.style_spans[1].start == 10 && page.style_spans[1].end == 15 &&
           page.style_spans[1].style.scale_percent == 80);
   }
-  CHECK(page.default_style.scale_percent == 110 &&
-        !strcmp(page.default_style.font, "body"));
+  CHECK(page.default_style.scale_percent == 110 && !strcmp(page.default_style.font, "body"));
   ArDialogueStableState saved;
   CHECK(ArDialogueSession_ExportState(&session, &saved));
-  CHECK(ArDialogueSession_Restore(&session, &selection, &saved, &resolver,
-                                  &error));
+  CHECK(ArDialogueSession_Restore(&session, &selection, &saved, &resolver, &error));
   ArLanguagePack_Destroy(&pack);
   CHECK(ArDialogueSession_GetAuthoredPage(&session, 0, &page));
   CHECK(!strcmp(page.source_path, "text/main.artext"));
@@ -607,11 +586,9 @@ static void TestStyledValuesAndSourceOwnership(void) {
   ArDialogueSession_Destroy(&session);
 
   CHECK(LoadPackVersion(&pack, "styles.invalid", "en-US",
-                        ":: action.hud.act_1\ne<i>\xcc\x81</i>\n@end\n", 2,
-                        &error));
+                        ":: action.hud.act_1\ne<i>\xcc\x81</i>\n@end\n", 2, &error));
   ArDialogueSession_Init(&session);
-  CHECK(!ArDialogueSession_Begin(&session, &selection, "action.hud.act_1", NULL,
-                                 &error));
+  CHECK(!ArDialogueSession_Begin(&session, &selection, "action.hud.act_1", NULL, &error));
   CHECK(strstr(error.message, "style boundary splits") != NULL);
   ArDialogueSession_Destroy(&session);
   ArLanguagePack_Destroy(&pack);
@@ -619,59 +596,75 @@ static void TestStyledValuesAndSourceOwnership(void) {
 
 static void TestValueSpanBoundaries(void) {
   ArLanguagePack pack, native;
-  ArLanguagePack_Init(&pack); ArLanguagePack_Init(&native);
+  ArLanguagePack_Init(&pack);
+  ArLanguagePack_Init(&native);
   ArLanguagePackError error;
-  CHECK(LoadPack(&pack,"spans.test","ar",
+  CHECK(LoadPack(
+      &pack, "spans.test", "ar",
       ":: status.report.master_report\nA{master_name}Z\n@end\n"
-      ":: status.report.cities_report\n{city_fillmore_growth_state}|{total_population}\n@end\n",&error));
-  CHECK(LoadPack(&native,"spans.native","en-US",
-      ":: growth_state.01\nNative term\n@end\n",&error));
+      ":: status.report.cities_report\n{city_fillmore_growth_state}|{total_population}\n@end\n",
+      &error));
+  CHECK(LoadPack(&native, "spans.native", "en-US", ":: growth_state.01\nNative term\n@end\n",
+                 &error));
   ResolverState values = {.master_name = "\xcc\x81"};
   ArDialogueValueResolver resolver = {.struct_size = sizeof(resolver),
-      .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION, .context = &values, .resolve = ResolveValue};
-  ArDialogueContentSelection selection = Selection(kArDialoguePresentation_Enhanced,&pack,&native);
-  ArDialogueSession session; ArDialogueSession_Init(&session);
-  CHECK(ArDialogueSession_Begin(&session,&selection,"status.report.master_report",&resolver,&error));
+                                      .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
+                                      .context = &values,
+                                      .resolve = ResolveValue};
+  ArDialogueContentSelection selection =
+      Selection(kArDialoguePresentation_Enhanced, &pack, &native);
+  ArDialogueSession session;
+  ArDialogueSession_Init(&session);
+  CHECK(ArDialogueSession_Begin(&session, &selection, "status.report.master_report", &resolver,
+                                &error));
   ArDialoguePageSnapshot page;
-  CHECK(ArDialogueSession_GetPage(&session,&page));
-  CHECK(!strcmp(page.utf8,"A\xcc\x81Z") && page.cluster_count == 2);
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(!strcmp(page.utf8, "A\xcc\x81Z") && page.cluster_count == 2);
   CHECK(page.bidi_span_count == 1 && page.bidi_spans[0].start == 0 && page.bidi_spans[0].end == 3);
   ArDialogueToken token;
-  CHECK(ArDialogueSession_Next(&session,&token,&error));
+  CHECK(ArDialogueSession_Next(&session, &token, &error));
   CHECK(token.kind == kArDialogueToken_Grapheme && token.end_utf8_byte == 3);
-  CHECK(ArDialogueSession_Next(&session,&token,&error));
+  CHECK(ArDialogueSession_Next(&session, &token, &error));
   CHECK(token.kind == kArDialogueToken_Grapheme && token.end_utf8_byte == 4);
-  CHECK(ArDialogueSession_Begin(&session,&selection,"status.report.cities_report",&resolver,&error));
-  CHECK(ArDialogueSession_GetPage(&session,&page));
-  CHECK(!strcmp(page.utf8,"Native term|2") && page.direction == kArLanguageDirection_RightToLeft);
+  CHECK(ArDialogueSession_Begin(&session, &selection, "status.report.cities_report", &resolver,
+                                &error));
+  CHECK(ArDialogueSession_GetPage(&session, &page));
+  CHECK(!strcmp(page.utf8, "Native term|2") && page.direction == kArLanguageDirection_RightToLeft);
   CHECK(page.bidi_span_count == 2);
   CHECK(page.bidi_spans[0].direction == kArTextDirection_LeftToRight);
   CHECK(page.bidi_spans[0].start == 0 && page.bidi_spans[0].end == 11);
   CHECK(page.bidi_spans[1].start == 12 && page.bidi_spans[1].end == 13);
-  ArDialogueSession_Destroy(&session); ArLanguagePack_Destroy(&pack); ArLanguagePack_Destroy(&native);
+  ArDialogueSession_Destroy(&session);
+  ArLanguagePack_Destroy(&pack);
+  ArLanguagePack_Destroy(&native);
 }
 
 static void TestValueSpanBudget(void) {
   char script[8192];
   size_t bytes = (size_t)snprintf(script, sizeof(script),
-      ":: sky.action_mode.confirm\n@anchor reset_text_cursor.00\n");
+                                  ":: sky.action_mode.confirm\n@anchor reset_text_cursor.00\n");
   for (unsigned i = 0; i < kArTextMaximumBidiSpans; ++i)
     bytes += (size_t)snprintf(script + bytes, sizeof(script) - bytes, "{master_name}");
   const size_t boundary = bytes;
   snprintf(script + bytes, sizeof(script) - bytes, "\n@anchor yield.01\n");
   ArLanguagePack pack, over;
-  ArLanguagePack_Init(&pack); ArLanguagePack_Init(&over);
+  ArLanguagePack_Init(&pack);
+  ArLanguagePack_Init(&over);
   ArLanguagePackError error;
   CHECK(LoadPack(&pack, "spans.limit", "en-US", script, &error));
   snprintf(script + boundary, sizeof(script) - boundary,
-      "\n@page\n{master_name}\n@anchor yield.01\n");
+           "\n@page\n{master_name}\n@anchor yield.01\n");
   CHECK(LoadPack(&over, "spans.over", "en-US", script, &error));
   ResolverState values = {.master_name = "A"};
   const ArDialogueValueResolver resolver = {.struct_size = sizeof(resolver),
-      .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION, .context = &values, .resolve = ResolveValue};
+                                            .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
+                                            .context = &values,
+                                            .resolve = ResolveValue};
   ArDialogueContentSelection selection = Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
-  ArDialogueSession session; ArDialogueSession_Init(&session);
-  CHECK(ArDialogueSession_Begin(&session, &selection, "sky.action_mode.confirm", &resolver, &error));
+  ArDialogueSession session;
+  ArDialogueSession_Init(&session);
+  CHECK(
+      ArDialogueSession_Begin(&session, &selection, "sky.action_mode.confirm", &resolver, &error));
   ArDialoguePageSnapshot page;
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(page.bidi_span_count == kArTextMaximumBidiSpans);
@@ -681,14 +674,17 @@ static void TestValueSpanBudget(void) {
   CHECK(strstr(error.message, "inserted value spans") != NULL);
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(!strcmp(page.package_id, "spans.limit") && page.page_count == 1);
-  ArDialogueSession_Destroy(&session); ArLanguagePack_Destroy(&pack); ArLanguagePack_Destroy(&over);
+  ArDialogueSession_Destroy(&session);
+  ArLanguagePack_Destroy(&pack);
+  ArLanguagePack_Destroy(&over);
 }
 
 static void TestAuthoredBoundaries(void) {
   ArLanguagePack pack;
   ArLanguagePack_Init(&pack);
   ArLanguagePackError error;
-  CHECK(LoadPack(&pack, "boundaries.test", "en-US",
+  CHECK(LoadPack(
+      &pack, "boundaries.test", "en-US",
       ":: status.report.master_report\n"
       "{master_name}\n@line\n@line\n@line\n"
       "{master_name}|{master_level}|left|right\n@end\n"
@@ -698,16 +694,16 @@ static void TestAuthoredBoundaries(void) {
       ":: dialogue.event.relay.aitos\nFirst short\n@preferred-line\nsecond line\n@end\n",
       &error));
   ResolverState values = {.master_name = "É|li\nse"};
-  const ArDialogueValueResolver resolver = {
-      .struct_size = sizeof(resolver),
-      .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
-      .context = &values, .resolve = ResolveValue};
+  const ArDialogueValueResolver resolver = {.struct_size = sizeof(resolver),
+                                            .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
+                                            .context = &values,
+                                            .resolve = ResolveValue};
   const ArDialogueContentSelection selection =
       Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
-  const bool began = ArDialogueSession_Begin(&session, &selection,
-      "status.report.master_report", &resolver, &error);
+  const bool began = ArDialogueSession_Begin(&session, &selection, "status.report.master_report",
+                                             &resolver, &error);
   CHECK(began);
   if (!began) {
     fprintf(stderr, "boundary fixture: %s\n", error.message);
@@ -724,25 +720,34 @@ static void TestAuthoredBoundaries(void) {
   unsigned pipes = 0, lines = 0, literal_pipes = 0, literal_lines = 0;
   for (size_t i = 0; i < page.utf8_bytes; ++i) {
     const bool boundary = ArTextBoundary_Get(page.structural_boundaries, i);
-    if (page.utf8[i] == '|') { if (boundary) ++pipes; else ++literal_pipes; }
-    else if (page.utf8[i] == '\n') { if (boundary) ++lines; else ++literal_lines; }
-    else CHECK(!boundary);
+    if (page.utf8[i] == '|') {
+      if (boundary)
+        ++pipes;
+      else
+        ++literal_pipes;
+    } else if (page.utf8[i] == '\n') {
+      if (boundary)
+        ++lines;
+      else
+        ++literal_lines;
+    } else
+      CHECK(!boundary);
   }
   CHECK(pipes == 3 && lines == 3 && literal_pipes == 2 && literal_lines == 2);
   ArDialoguePageSnapshot authored;
   CHECK(ArDialogueSession_GetAuthoredPage(&session, 0, &authored));
   CHECK(authored.structural_boundaries == page.structural_boundaries);
   CHECK(authored.bidi_spans == page.bidi_spans && authored.bidi_span_count == page.bidi_span_count);
-  CHECK(ArDialogueSession_Begin(&session, &selection,
-      "status.report.cities_report", &resolver, &error));
+  CHECK(ArDialogueSession_Begin(&session, &selection, "status.report.cities_report", &resolver,
+                                &error));
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(!strcmp(page.utf8, "Max|growth|2"));
   CHECK(page.bidi_span_count == 2 && page.bidi_spans[0].end == 10);
   CHECK(page.bidi_spans[0].direction == kArTextDirection_LeftToRight);
   for (size_t i = 0; i < page.utf8_bytes; ++i)
     CHECK(ArTextBoundary_Get(page.structural_boundaries, i) == (i == 10));
-  CHECK(ArDialogueSession_Begin(&session, &selection,
-      "dialogue.event.relay.aitos", &resolver, &error));
+  CHECK(ArDialogueSession_Begin(&session, &selection, "dialogue.event.relay.aitos", &resolver,
+                                &error));
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(!strcmp(page.utf8, "First short second line"));
   for (size_t i = 0; i < page.utf8_bytes; ++i)
@@ -752,20 +757,17 @@ static void TestAuthoredBoundaries(void) {
 }
 
 static void TestControlsValuesAndIcons(void) {
-  static const char first_script[] =
-      ":: sky.action_mode.confirm\n"
-      "@anchor reset_text_cursor.00\n"
-      "Hello {master_name}\n"
-      "@anchor yield.01\n";
-  static const char second_script[] =
-      ":: sky.action_mode.confirm\n"
-      "Texte placé avant le même point sémantique\n"
-      "@anchor reset_text_cursor.00\n"
-      "Bonjour {master_name}, avec davantage de texte\n"
-      "@anchor yield.01\n";
-  static const char icon_script[] =
-      ":: name_entry.prompt_and_alphabet\n"
-      AR_TEST_KEYBOARD_PAGE("É") "@page\n" AR_TEST_KEYBOARD_PAGE("α");
+  static const char first_script[] = ":: sky.action_mode.confirm\n"
+                                     "@anchor reset_text_cursor.00\n"
+                                     "Hello {master_name}\n"
+                                     "@anchor yield.01\n";
+  static const char second_script[] = ":: sky.action_mode.confirm\n"
+                                      "Texte placé avant le même point sémantique\n"
+                                      "@anchor reset_text_cursor.00\n"
+                                      "Bonjour {master_name}, avec davantage de texte\n"
+                                      "@anchor yield.01\n";
+  static const char icon_script[] = ":: name_entry.prompt_and_alphabet\n" AR_TEST_KEYBOARD_PAGE(
+      "É") "@page\n" AR_TEST_KEYBOARD_PAGE("α");
   ArLanguagePack first, second, icons;
   ArLanguagePack_Init(&first);
   ArLanguagePack_Init(&second);
@@ -788,8 +790,8 @@ static void TestControlsValuesAndIcons(void) {
 
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
-  CHECK(ArDialogueSession_Begin(&session, &first_selection,
-                                "sky.action_mode.confirm", &resolver, &error));
+  CHECK(ArDialogueSession_Begin(&session, &first_selection, "sky.action_mode.confirm", &resolver,
+                                &error));
   CHECK(resolver_state.calls == 1);
   ArDialogueToken token;
   CHECK(ArDialogueSession_Next(&session, &token, &error));
@@ -807,8 +809,7 @@ static void TestControlsValuesAndIcons(void) {
   CHECK(ArDialogueSession_ExportState(&session, &pending));
   ArDialogueSession scratch;
   ArDialogueSession_Init(&scratch);
-  CHECK(ArDialogueSession_Restore(&scratch, &second_selection, &pending,
-                                  &resolver, &error));
+  CHECK(ArDialogueSession_Restore(&scratch, &second_selection, &pending, &resolver, &error));
   CHECK(ArDialogueSession_Next(&scratch, &token, &error));
   CHECK(token.kind == kArDialogueToken_Control && token.control_ordinal == 0);
   ArDialogueSession_Destroy(&scratch);
@@ -817,8 +818,7 @@ static void TestControlsValuesAndIcons(void) {
 
   for (;;) {
     CHECK(ArDialogueSession_Next(&session, &token, &error));
-    if (token.kind == kArDialogueToken_Control)
-      break;
+    if (token.kind == kArDialogueToken_Control) break;
     CHECK(token.kind == kArDialogueToken_Grapheme);
   }
   CHECK(token.control_ordinal == 1);
@@ -837,8 +837,7 @@ static void TestControlsValuesAndIcons(void) {
       .completed_control_count = session.state.completed_control_count,
       .completed_wait_count = session.state.completed_wait_count,
   };
-  CHECK(ArDialogueSession_ObserveNativeProgress(&session, &native_progress,
-                                                &error));
+  CHECK(ArDialogueSession_ObserveNativeProgress(&session, &native_progress, &error));
   CHECK(ArDialogueSession_Switch(&session, &first_selection, &error));
   CHECK(!ArDialogueSession_ResumeInput(&session));
   CHECK(ArDialogueSession_Next(&session, &token, &error));
@@ -850,9 +849,8 @@ static void TestControlsValuesAndIcons(void) {
   ArDialogueContentSelection icon_selection =
       Selection(kArDialoguePresentation_Enhanced, &icons, &icons);
   resolver_state.calls = 0;
-  CHECK(ArDialogueSession_Begin(&session, &icon_selection,
-                                "name_entry.prompt_and_alphabet", &resolver,
-                                &error));
+  CHECK(ArDialogueSession_Begin(&session, &icon_selection, "name_entry.prompt_and_alphabet",
+                                &resolver, &error));
   ArDialoguePageSnapshot page;
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(page.inline_object_count == 2);
@@ -870,26 +868,27 @@ static void TestControlsValuesAndIcons(void) {
 }
 
 static void TestEnhancedNativeControlProgress(void) {
-  const char script[] =
-      ":: sky.action_mode.confirm\n"
-      "Été\n"
-      "@anchor reset_text_cursor.00\n"
-      "Après\n"
-      "@anchor yield.01\n";
+  const char script[] = ":: sky.action_mode.confirm\n"
+                        "Été\n"
+                        "@anchor reset_text_cursor.00\n"
+                        "Après\n"
+                        "@anchor yield.01\n";
   ArLanguagePack pack;
   ArLanguagePack_Init(&pack);
   ArLanguagePackError error;
   CHECK(LoadPack(&pack, "control.sync", "fr-FR", script, &error));
-  ArDialogueContentSelection selection =
-      Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
+  ArDialogueContentSelection selection = Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
   ResolverState values = {0};
   const ArDialogueValueResolver resolver = {
-      .struct_size = sizeof(resolver), .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
-      .context = &values, .resolve = ResolveValue,
+      .struct_size = sizeof(resolver),
+      .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
+      .context = &values,
+      .resolve = ResolveValue,
   };
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
-  CHECK(ArDialogueSession_Begin(&session, &selection, "sky.action_mode.confirm", &resolver, &error));
+  CHECK(
+      ArDialogueSession_Begin(&session, &selection, "sky.action_mode.confirm", &resolver, &error));
   uint32_t page_index = 99;
   size_t offset = 99;
   const ArDialogueStableState original = session.state;
@@ -899,8 +898,11 @@ static void TestEnhancedNativeControlProgress(void) {
   CHECK(!ArDialogueSession_GetControlPosition(&session, 2, &page_index, &offset));
   CHECK(page_index == 0 && offset == strlen("Été"));
   ArDialogueNativeProgress progress = {
-      .struct_size = sizeof(progress), .abi_version = AR_DIALOGUE_SESSION_ABI_VERSION,
-      .revealed_unit_count = 1, .page_unit_count = 8, .control_pending = true,
+      .struct_size = sizeof(progress),
+      .abi_version = AR_DIALOGUE_SESSION_ABI_VERSION,
+      .revealed_unit_count = 1,
+      .page_unit_count = 8,
+      .control_pending = true,
   };
   CHECK(ArDialogueSession_SynchronizeNativeProgress(&session, &progress, &error));
   ArDialoguePageSnapshot page;
@@ -962,8 +964,10 @@ static void TestCueCannotSplitGrapheme(void) {
         Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
     ResolverState values = {0};
     const ArDialogueValueResolver resolver = {
-        .struct_size = sizeof(resolver), .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
-        .context = &values, .resolve = ResolveValue,
+        .struct_size = sizeof(resolver),
+        .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
+        .context = &values,
+        .resolve = ResolveValue,
     };
     ArDialogueSession session;
     ArDialogueSession_Init(&session);
@@ -981,17 +985,14 @@ static void TestCorruptStateRejected(void) {
   ArLanguagePack_Init(&pack);
   ArLanguagePackError error;
   CHECK(LoadPack(&pack, "safe.pack", "en-US", script, &error));
-  ArDialogueContentSelection selection =
-      Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
+  ArDialogueContentSelection selection = Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
-  CHECK(ArDialogueSession_Begin(&session, &selection, "dialogue.event.relay.aitos",
-                                NULL, &error));
+  CHECK(ArDialogueSession_Begin(&session, &selection, "dialogue.event.relay.aitos", NULL, &error));
   ArDialogueStableState saved;
   CHECK(ArDialogueSession_ExportState(&session, &saved));
   memset(saved.message_id, 'x', sizeof(saved.message_id));
-  CHECK(!ArDialogueSession_Restore(&session, &selection, &saved, NULL,
-                                   &error));
+  CHECK(!ArDialogueSession_Restore(&session, &selection, &saved, NULL, &error));
   ArDialoguePageSnapshot page;
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(strcmp(page.package_id, "safe.pack") == 0);
@@ -1000,22 +1001,19 @@ static void TestCorruptStateRejected(void) {
 }
 
 static void TestEnhancedNativeProgressSynchronization(void) {
-  static const char script[] =
-      ":: dialogue.event.relay.aitos\n"
-      "ABCDE\n"
-      "@page\n"
-      "XYZ\n"
-      "@end\n";
+  static const char script[] = ":: dialogue.event.relay.aitos\n"
+                               "ABCDE\n"
+                               "@page\n"
+                               "XYZ\n"
+                               "@end\n";
   ArLanguagePack pack;
   ArLanguagePack_Init(&pack);
   ArLanguagePackError error;
   CHECK(LoadPack(&pack, "sync.pack", "en-US", script, &error));
-  ArDialogueContentSelection selection =
-      Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
+  ArDialogueContentSelection selection = Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
-  CHECK(ArDialogueSession_Begin(&session, &selection, "dialogue.event.relay.aitos",
-                                NULL, &error));
+  CHECK(ArDialogueSession_Begin(&session, &selection, "dialogue.event.relay.aitos", NULL, &error));
 
   ArDialogueNativeProgress progress = {
       .struct_size = sizeof(progress),
@@ -1024,8 +1022,7 @@ static void TestEnhancedNativeProgressSynchronization(void) {
       .revealed_unit_count = 2,
       .page_unit_count = 4,
   };
-  CHECK(ArDialogueSession_SynchronizeNativeProgress(
-      &session, &progress, &error));
+  CHECK(ArDialogueSession_SynchronizeNativeProgress(&session, &progress, &error));
   ArDialoguePageSnapshot page;
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(page.page_index == 0);
@@ -1047,15 +1044,13 @@ static void TestEnhancedNativeProgressSynchronization(void) {
   progress.authored_page_index = 9;
   progress.revealed_unit_count = 1;
   progress.page_unit_count = 3;
-  CHECK(ArDialogueSession_SynchronizeNativeProgress(
-      &session, &progress, &error));
+  CHECK(ArDialogueSession_SynchronizeNativeProgress(&session, &progress, &error));
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(page.page_index == 1);
   CHECK(page.revealed_cluster_count == 1);
 
   progress.revealed_unit_count = 4;
-  CHECK(!ArDialogueSession_SynchronizeNativeProgress(
-      &session, &progress, &error));
+  CHECK(!ArDialogueSession_SynchronizeNativeProgress(&session, &progress, &error));
   CHECK(ArDialogueSession_GetPage(&session, &page));
   CHECK(page.page_index == 1 && page.revealed_cluster_count == 1);
 
@@ -1078,27 +1073,24 @@ static void TestPresentationBudget(void) {
   ArLanguagePack pack;
   ArLanguagePack_Init(&pack);
   ArLanguagePackError error;
-  CHECK(LoadPack(&pack, "budget.test", "en-US",
-                 ":: dialogue.event.relay.aitos\nÉ\n@page\nZ\n", &error));
+  CHECK(LoadPack(&pack, "budget.test", "en-US", ":: dialogue.event.relay.aitos\nÉ\n@page\nZ\n",
+                 &error));
   const ArDialogueContentSelection selection =
       Selection(kArDialoguePresentation_Enhanced, &pack, &pack);
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
   /* Two bytes for É, one for Z and two page separators: exact-fit succeeds. */
-  CHECK(ArDialogueSession_BeginBounded(&session, &selection, "dialogue.event.relay.aitos",
-                                       NULL, 5, &error));
+  CHECK(ArDialogueSession_BeginBounded(&session, &selection, "dialogue.event.relay.aitos", NULL, 5,
+                                       &error));
   const ArDialogueStableState before = session.state;
   const void *program = session.private_program;
   CHECK(!ArDialogueSession_SwitchBounded(&session, &selection, 4, &error));
   CHECK(strstr(error.message, "presentation budget"));
-  CHECK(session.private_program == program &&
-        !memcmp(&session.state, &before, sizeof(before)));
-  CHECK(!ArDialogueSession_BeginBounded(&session, &selection,
-                                        "dialogue.event.relay.aitos", NULL, 4, &error));
-  CHECK(session.private_program == program &&
-        !memcmp(&session.state, &before, sizeof(before)));
-  ArDialogueContentSelection native =
-      Selection(kArDialoguePresentation_NativeRetail, NULL, NULL);
+  CHECK(session.private_program == program && !memcmp(&session.state, &before, sizeof(before)));
+  CHECK(!ArDialogueSession_BeginBounded(&session, &selection, "dialogue.event.relay.aitos", NULL, 4,
+                                        &error));
+  CHECK(session.private_program == program && !memcmp(&session.state, &before, sizeof(before)));
+  ArDialogueContentSelection native = Selection(kArDialoguePresentation_NativeRetail, NULL, NULL);
   CHECK(ArDialogueSession_SwitchBounded(&session, &native, 1, &error));
   CHECK(session.state.resolved_source == kArDialogueResolvedSource_NativeRom);
   ArDialogueSession_Destroy(&session);
@@ -1116,8 +1108,8 @@ static void TestPresentationBudget(void) {
       .resolve = ResolveValue,
   };
   ArDialogueSession_Init(&session);
-  CHECK(!ArDialogueSession_BeginBounded(
-      &session, &selection, "sky.action_mode.confirm", &resolver, 1, &error));
+  CHECK(!ArDialogueSession_BeginBounded(&session, &selection, "sky.action_mode.confirm", &resolver,
+                                        1, &error));
   CHECK(strstr(error.message, "presentation budget") && state.calls == 1);
   CHECK(!session.state.message_id[0] && !session.state.wait_frames_remaining);
   ArDialogueSession_Destroy(&session);

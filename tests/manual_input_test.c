@@ -19,14 +19,14 @@
 #include <stdio.h>
 #include <string.h>
 
-static int g_failures;
+static int s_failures;
 
-#define CHECK(cond)                                                        \
-  do {                                                                     \
-    if (!(cond)) {                                                         \
-      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);               \
-      g_failures++;                                                        \
-    }                                                                      \
+#define CHECK(cond)                                                                                \
+  do {                                                                                             \
+    if (!(cond)) {                                                                                 \
+      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                                       \
+      s_failures++;                                                                                \
+    }                                                                                              \
   } while (0)
 
 /* ── Keyboard ─────────────────────────────────────────────────────────────── */
@@ -54,15 +54,13 @@ static void TestArrowsPageAtFitAndPanWhenZoomed(void) {
 /* A way to turn pages that does NOT change meaning with the zoom, or a reader
  * zoomed into a map has no way forward but to zoom out first. */
 static void TestSomeKeysAlwaysPage(void) {
-  const SDL_Keycode forward[] = { SDLK_PAGEDOWN, SDLK_SPACE };
-  const SDL_Keycode back[] = { SDLK_PAGEUP, SDLK_BACKSPACE };
+  const SDL_Keycode forward[] = {SDLK_PAGEDOWN, SDLK_SPACE};
+  const SDL_Keycode back[] = {SDLK_PAGEUP, SDLK_BACKSPACE};
   for (int zoomed = 0; zoomed <= 1; zoomed++) {
     for (size_t i = 0; i < sizeof forward / sizeof forward[0]; i++)
-      CHECK(ManualInput_KeyIntent(forward[i], zoomed != 0) ==
-            kManualIntent_PageForward);
+      CHECK(ManualInput_KeyIntent(forward[i], zoomed != 0) == kManualIntent_PageForward);
     for (size_t i = 0; i < sizeof back / sizeof back[0]; i++)
-      CHECK(ManualInput_KeyIntent(back[i], zoomed != 0) ==
-            kManualIntent_PageBack);
+      CHECK(ManualInput_KeyIntent(back[i], zoomed != 0) == kManualIntent_PageBack);
   }
 }
 
@@ -85,7 +83,7 @@ static void TestZoomAndJumpKeys(void) {
  * stops someone "completing" the table and moving that guarantee. */
 static void TestUnmappedKeysMeanNothing(void) {
   const SDL_Keycode unmapped[] = {
-    SDLK_ESCAPE, SDLK_F1, SDLK_A, SDLK_TAB, SDLK_RETURN, SDLK_LSHIFT,
+      SDLK_ESCAPE, SDLK_F1, SDLK_A, SDLK_TAB, SDLK_RETURN, SDLK_LSHIFT,
   };
   for (size_t i = 0; i < sizeof unmapped / sizeof unmapped[0]; i++) {
     CHECK(ManualInput_KeyIntent(unmapped[i], false) == kManualIntent_None);
@@ -100,24 +98,16 @@ static void TestPadMirrorsTheKeyboardsLogic(void) {
    * is what leaves the d-pad free to follow the same rule the arrows do. */
   for (int zoomed = 0; zoomed <= 1; zoomed++) {
     const bool z = zoomed != 0;
-    CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, z) ==
-          kManualIntent_PageForward);
-    CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, z) ==
-          kManualIntent_PageBack);
+    CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, z) == kManualIntent_PageForward);
+    CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, z) == kManualIntent_PageBack);
   }
 
-  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, false) ==
-        kManualIntent_PageForward);
-  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, true) ==
-        kManualIntent_PanRight);
-  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_LEFT, false) ==
-        kManualIntent_PageBack);
-  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_LEFT, true) ==
-        kManualIntent_PanLeft);
-  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_UP, false) ==
-        kManualIntent_None);
-  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_UP, true) ==
-        kManualIntent_PanUp);
+  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, false) == kManualIntent_PageForward);
+  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, true) == kManualIntent_PanRight);
+  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_LEFT, false) == kManualIntent_PageBack);
+  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_LEFT, true) == kManualIntent_PanLeft);
+  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_UP, false) == kManualIntent_None);
+  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_UP, true) == kManualIntent_PanUp);
 
   /* The d-pad and the arrows must agree, or the reader has two control schemes
    * and the player has to learn which device they are holding. */
@@ -130,14 +120,10 @@ static void TestPadMirrorsTheKeyboardsLogic(void) {
 
   /* East is "back" everywhere else in this menu, and the manual does not get to
    * disagree; a reader you cannot leave with the usual button is a trap. */
-  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_EAST, false) ==
-        kManualIntent_Close);
-  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_BACK, false) ==
-        kManualIntent_Close);
-  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_SOUTH, false) ==
-        kManualIntent_ZoomIn);
-  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_INVALID, false) ==
-        kManualIntent_None);
+  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_EAST, false) == kManualIntent_Close);
+  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_BACK, false) == kManualIntent_Close);
+  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_SOUTH, false) == kManualIntent_ZoomIn);
+  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_INVALID, false) == kManualIntent_None);
 }
 
 /* ── The hint line ────────────────────────────────────────────────────────── */
@@ -150,9 +136,7 @@ static void TestPadMirrorsTheKeyboardsLogic(void) {
  * ManualInput_*Intent actually implements, and the close button it names has to
  * be the one that actually closes. That is what makes this more than a spell
  * check -- change the mapping without the caption and it goes red. */
-static bool Mentions(const char *text, const char *needle) {
-  return strstr(text, needle) != NULL;
-}
+static bool Mentions(const char *text, const char *needle) { return strstr(text, needle) != NULL; }
 
 static void TestTheHintNamesTheDeviceInHand(void) {
   for (int zoomed = 0; zoomed <= 1; zoomed++) {
@@ -173,15 +157,13 @@ static void TestTheHintNamesTheDeviceInHand(void) {
     CHECK(!Mentions(kbd, "L/R"));
 
     /* Each names the button that really closes, per the mapping above. */
-    CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_EAST, z) ==
-          kManualIntent_Close);
+    CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_EAST, z) == kManualIntent_Close);
     CHECK(Mentions(pad, "B BACK"));
     CHECK(Mentions(kbd, "ESC BACK"));
 
     /* And each names a way to PAGE, which is the one thing a reader must be
      * able to do. The shoulders page at any zoom; the arrows only when not. */
-    CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, z) ==
-          kManualIntent_PageForward);
+    CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, z) == kManualIntent_PageForward);
     CHECK(Mentions(pad, "PAGE"));
     CHECK(Mentions(kbd, "PAGE"));
   }
@@ -204,8 +186,7 @@ static void TestTheHintNamesTheDeviceInHand(void) {
   const char *pad_fit = ManualInput_HintText(kManualHintDevice_Gamepad, false);
   const char *pad_zoom = ManualInput_HintText(kManualHintDevice_Gamepad, true);
   CHECK(strcmp(pad_fit, pad_zoom) != 0);
-  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, true) ==
-        kManualIntent_PanRight);
+  CHECK(ManualInput_PadIntent(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, true) == kManualIntent_PanRight);
   CHECK(Mentions(pad_zoom, "D-PAD PANS"));
   /* And the stick, which is the pan control someone will actually reach for on
    * a zoomed page -- the d-pad only nudges. */
@@ -216,8 +197,7 @@ static void TestTheHintNamesTheDeviceInHand(void) {
    * marks. Cheap to assert, and invisible until someone looks at a screen. */
   for (int device = 0; device <= 1; device++) {
     for (int zoomed = 0; zoomed <= 1; zoomed++) {
-      const char *text =
-          ManualInput_HintText((ManualHintDevice)device, zoomed != 0);
+      const char *text = ManualInput_HintText((ManualHintDevice)device, zoomed != 0);
       for (int i = 0; text[i]; i++)
         CHECK(!(text[i] >= 'a' && text[i] <= 'z'));
     }
@@ -225,7 +205,7 @@ static void TestTheHintNamesTheDeviceInHand(void) {
 }
 
 static void TestLocalizedCaptionLayout(void) {
-  const int views[][2] = {{320,224}, {464,208}, {1280,720}, {3840,2160}, {720,1280}};
+  const int views[][2] = {{320, 224}, {464, 208}, {1280, 720}, {3840, 2160}, {720, 1280}};
   for (int device = 0; device <= 1; ++device) {
     for (int zoomed = 0; zoomed <= 1; ++zoomed) {
       char key[64];
@@ -238,8 +218,8 @@ static void TestLocalizedCaptionLayout(void) {
         for (int spread = 0; spread <= 1; ++spread) {
           for (size_t v = 0; v < sizeof(views) / sizeof(views[0]); ++v) {
             ManualCaption caption;
-            CHECK(ManualCaption_Build((ArUiLocale)locale, (ManualHintDevice)device,
-                zoomed, spread, 12, 99, views[v][0], views[v][1], 8, &caption));
+            CHECK(ManualCaption_Build((ArUiLocale)locale, (ManualHintDevice)device, zoomed, spread,
+                                      12, 99, views[v][0], views[v][1], 8, &caption));
             CHECK(caption.scale >= 1 && caption.scale <= 4);
             CHECK(caption.height <= views[v][1]);
             CHECK(caption.line_count > 0 && caption.line_count <= kManualCaptionLines);
@@ -273,11 +253,11 @@ static void TestLocalizedCaptionLayout(void) {
   ManualCaption unchanged;
   memset(&unchanged, 0x5a, sizeof(unchanged));
   ManualCaption before = unchanged;
-  CHECK(!ManualCaption_Build(kArUiLocale_Japanese, kManualHintDevice_Gamepad,
-      true, false, 1, 10, 1, 1, 8, &unchanged));
+  CHECK(!ManualCaption_Build(kArUiLocale_Japanese, kManualHintDevice_Gamepad, true, false, 1, 10, 1,
+                             1, 8, &unchanged));
   CHECK(!memcmp(&unchanged, &before, sizeof(before)));
-  CHECK(!ManualCaption_Build(kArUiLocale_English, kManualHintDevice_Keyboard,
-      false, false, 0, 10, 640, 480, 8, &unchanged));
+  CHECK(!ManualCaption_Build(kArUiLocale_English, kManualHintDevice_Keyboard, false, false, 0, 10,
+                             640, 480, 8, &unchanged));
   CHECK(!memcmp(&unchanged, &before, sizeof(before)));
 }
 
@@ -290,7 +270,7 @@ static void TestLocalizedCaptionLayout(void) {
  * already a fast one and fine positioning on a zoomed page is impossible. The
  * remainder of the travel has to be rescaled to the full range. */
 static void TestStickStartsFromRestAtTheDeadzoneEdge(void) {
-  const int dz = 20;   /* percent */
+  const int dz = 20; /* percent */
   const int edge = 32767 * dz / 100;
 
   /* Inside the deadzone: nothing at all, both directions and at the boundary. */
@@ -328,10 +308,10 @@ static void TestStickStartsFromRestAtTheDeadzoneEdge(void) {
 static void TestStickDeadzoneMatchesTheGamesClamp(void) {
   /* Out-of-range settings clamp rather than misbehave: 0 becomes 5, 200
    * becomes 90. Checked by behaviour, since the clamp is not exported. */
-  CHECK(ManualInput_StickAxis(32767 * 4 / 100, 0) == 0.0f);      /* under 5% */
-  CHECK(ManualInput_StickAxis(32767 * 6 / 100, 0) > 0.0f);       /* over 5% */
-  CHECK(ManualInput_StickAxis(32767 * 89 / 100, 200) == 0.0f);   /* under 90% */
-  CHECK(ManualInput_StickAxis(32767 * 95 / 100, 200) > 0.0f);    /* over 90% */
+  CHECK(ManualInput_StickAxis(32767 * 4 / 100, 0) == 0.0f);    /* under 5% */
+  CHECK(ManualInput_StickAxis(32767 * 6 / 100, 0) > 0.0f);     /* over 5% */
+  CHECK(ManualInput_StickAxis(32767 * 89 / 100, 200) == 0.0f); /* under 90% */
+  CHECK(ManualInput_StickAxis(32767 * 95 / 100, 200) > 0.0f);  /* over 90% */
 
   /* A larger deadzone must mean a smaller reading at the same displacement, or
    * the setting is not doing anything. */
@@ -365,7 +345,7 @@ static void TestOneDecodePerFrame(void) {
   memset(&fixture, 0, sizeof fixture);
 
   /* A turn's frame: leaf first, then the revealed side, then the settled side. */
-  const int wanted[] = { 7, 8, 6 };
+  const int wanted[] = {7, 8, 6};
 
   /* Nothing resident: the LEAF is chosen, not the lowest-numbered page. */
   CHECK(ManualInput_NextDecode(wanted, 3, FixtureCached, &fixture) == 7);
@@ -389,10 +369,10 @@ static void TestOneDecodePerFrame(void) {
 static void TestEmptySidesAreSkipped(void) {
   CacheFixture fixture;
   memset(&fixture, 0, sizeof fixture);
-  const int cover[] = { -1, 0, -1 };
+  const int cover[] = {-1, 0, -1};
   CHECK(ManualInput_NextDecode(cover, 3, FixtureCached, &fixture) == 0);
 
-  const int nothing[] = { -1, -1, -1 };
+  const int nothing[] = {-1, -1, -1};
   CHECK(ManualInput_NextDecode(nothing, 3, FixtureCached, &fixture) == -1);
   /* And an empty side is never even asked about. */
   const int before = fixture.queries;
@@ -412,14 +392,14 @@ static void TestAPermanentlyFailedPageDoesNotStarveTheOthers(void) {
   memset(&fixture, 0, sizeof fixture);
   /* Page 7 is the failed one, reported resident the way the reader reports it. */
   fixture.resident[fixture.count++] = 7;
-  const int wanted[] = { 7, 8, 6 };
+  const int wanted[] = {7, 8, 6};
   CHECK(ManualInput_NextDecode(wanted, 3, FixtureCached, &fixture) == 8);
 }
 
 static void TestDegenerateArguments(void) {
   CacheFixture fixture;
   memset(&fixture, 0, sizeof fixture);
-  const int wanted[] = { 1, 2 };
+  const int wanted[] = {1, 2};
   CHECK(ManualInput_NextDecode(NULL, 2, FixtureCached, &fixture) == -1);
   CHECK(ManualInput_NextDecode(wanted, 2, NULL, &fixture) == -1);
   CHECK(ManualInput_NextDecode(wanted, 0, FixtureCached, &fixture) == -1);
@@ -442,8 +422,8 @@ int main(void) {
   TestAPermanentlyFailedPageDoesNotStarveTheOthers();
   TestDegenerateArguments();
 
-  if (g_failures) {
-    printf("manual_input_test: %d failure(s)\n", g_failures);
+  if (s_failures) {
+    printf("manual_input_test: %d failure(s)\n", s_failures);
     return 1;
   }
   printf("manual_input_test: all checks passed\n");

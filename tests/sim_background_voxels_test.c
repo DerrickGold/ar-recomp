@@ -26,12 +26,13 @@ enum {
 };
 
 static int failures;
-#define CHECK(condition) do { \
-  if (!(condition)) { \
-    fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #condition); \
-    failures++; \
-  } \
-} while (0)
+#define CHECK(condition)                                                                           \
+  do {                                                                                             \
+    if (!(condition)) {                                                                            \
+      fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #condition);                         \
+      failures++;                                                                                  \
+    }                                                                                              \
+  } while (0)
 
 static bool s_reverse_rows;
 static unsigned s_dispatched_refreshes;
@@ -39,8 +40,7 @@ static unsigned s_dispatched_refreshes;
 static HostParallelWork *s_test_work;
 #endif
 
-static void DispatchTestRows(void *context, size_t count,
-    SimBackgroundRowRange range, void *work) {
+static void DispatchTestRows(void *context, size_t count, SimBackgroundRowRange range, void *work) {
   (void)context;
   s_dispatched_refreshes++;
 #ifdef AR_TEST_THREADED_ROWS
@@ -57,15 +57,14 @@ static void DispatchTestRows(void *context, size_t count,
 #endif
 }
 
-static void BuildForTest(uint8_t town, const uint8_t *wram,
-    const uint32_t *pixels, const uint8_t *opacity, uint32_t serial,
-    uint32_t layout_serial, bool wind_stops_all) {
+static void BuildForTest(uint8_t town, const uint8_t *wram, const uint32_t *pixels,
+                         const uint8_t *opacity, uint32_t serial, uint32_t layout_serial,
+                         bool wind_stops_all) {
   if (s_reverse_rows)
-    SimBackgroundVoxels_BuildWithRows(town, wram, pixels, opacity,
-        serial, layout_serial, wind_stops_all, DispatchTestRows, NULL);
+    SimBackgroundVoxels_BuildWithRows(town, wram, pixels, opacity, serial, layout_serial,
+                                      wind_stops_all, DispatchTestRows, NULL);
   else
-    SimBackgroundVoxels_Build(town, wram, pixels, opacity,
-        serial, layout_serial, wind_stops_all);
+    SimBackgroundVoxels_Build(town, wram, pixels, opacity, serial, layout_serial, wind_stops_all);
 }
 #define SimBackgroundVoxels_Build BuildForTest
 
@@ -80,12 +79,10 @@ static size_t TownCellIndex(int town, int x, int y) {
 
 static size_t CanvasTileWord(int tile_x, int tile_y) {
   int quadrant = (tile_y >= 32 ? 2 : 0) + (tile_x >= 32 ? 1 : 0);
-  return (size_t)quadrant * kSimTownQuadrantWords +
-      (size_t)(tile_y & 31) * 32 + (tile_x & 31);
+  return (size_t)quadrant * kSimTownQuadrantWords + (size_t)(tile_y & 31) * 32 + (tile_x & 31);
 }
 
-static void SetCanvasTile(uint8_t *wram, int tile_x, int tile_y,
-                          uint16_t entry) {
+static void SetCanvasTile(uint8_t *wram, int tile_x, int tile_y, uint16_t entry) {
   size_t at = kSimTownTilemapWram + CanvasTileWord(tile_x, tile_y) * 2;
   wram[at] = (uint8_t)entry;
   wram[at + 1] = (uint8_t)(entry >> 8);
@@ -99,30 +96,23 @@ static void SetSolidColourOneTile(uint16_t *vram, int tile) {
 static void FillCell(uint32_t *pixels, int x, int y, uint32_t colour) {
   for (int row = 0; row < 16; row++)
     for (int column = 0; column < 16; column++)
-      pixels[(size_t)(y * 16 + row) * kSimTownCanvasPixels + x * 16 + column] =
-          colour;
+      pixels[(size_t)(y * 16 + row) * kSimTownCanvasPixels + x * 16 + column] = colour;
 }
 
-static bool ApplyAtlasDirtyRects(uint32_t *mirror,
-                                 uint64_t *published_pixels) {
+static bool ApplyAtlasDirtyRects(uint32_t *mirror, uint64_t *published_pixels) {
   const uint32_t *atlas = SimBackgroundVoxels_AtlasPixels();
   bool published = false;
   int x, y, width, height;
-  while (SimBackgroundVoxels_TakeAtlasDirtyRect(
-             &x, &y, &width, &height)) {
+  while (SimBackgroundVoxels_TakeAtlasDirtyRect(&x, &y, &width, &height)) {
     CHECK(x >= 0 && y >= 0 && width > 0 && height > 0);
-    CHECK(x <= kSimTownCanvasPixels - width &&
-          y <= kSimTownCanvasPixels - height);
-    if (x < 0 || y < 0 || width <= 0 || height <= 0 ||
-        x > kSimTownCanvasPixels - width ||
+    CHECK(x <= kSimTownCanvasPixels - width && y <= kSimTownCanvasPixels - height);
+    if (x < 0 || y < 0 || width <= 0 || height <= 0 || x > kSimTownCanvasPixels - width ||
         y > kSimTownCanvasPixels - height)
       return published;
     for (int row = y; row < y + height; row++)
       memcpy(mirror + (size_t)row * kSimTownCanvasPixels + x,
-             atlas + (size_t)row * kSimTownCanvasPixels + x,
-             (size_t)width * sizeof(uint32_t));
-    if (published_pixels)
-      *published_pixels += (uint64_t)width * (uint64_t)height;
+             atlas + (size_t)row * kSimTownCanvasPixels + x, (size_t)width * sizeof(uint32_t));
+    if (published_pixels) *published_pixels += (uint64_t)width * (uint64_t)height;
     published = true;
   }
   return published;
@@ -144,9 +134,8 @@ enum {
   kTerrainDefinitions = 0x2100,
 };
 
-static void SetTerrainDefinition(uint8_t *wram, int metatile,
-                                 uint16_t a, uint16_t b,
-                                 uint16_t c, uint16_t d) {
+static void SetTerrainDefinition(uint8_t *wram, int metatile, uint16_t a, uint16_t b, uint16_t c,
+                                 uint16_t d) {
   const uint16_t entries[4] = {a, b, c, d};
   size_t at = kTerrainDefinitions + (size_t)metatile * 8;
   for (int entry = 0; entry < 4; entry++) {
@@ -156,16 +145,16 @@ static void SetTerrainDefinition(uint8_t *wram, int metatile,
 }
 
 /* The four live 8x8 entries a cell is currently displaying. */
-static void SetCanvasCell(uint8_t *wram, int x, int y,
-                          uint16_t a, uint16_t b, uint16_t c, uint16_t d) {
+static void SetCanvasCell(uint8_t *wram, int x, int y, uint16_t a, uint16_t b, uint16_t c,
+                          uint16_t d) {
   SetCanvasTile(wram, x * 2, y * 2, a);
   SetCanvasTile(wram, x * 2 + 1, y * 2, b);
   SetCanvasTile(wram, x * 2, y * 2 + 1, c);
   SetCanvasTile(wram, x * 2 + 1, y * 2 + 1, d);
 }
 
-static const SimBackgroundVoxelObject *FindKind(
-    const SimBackgroundVoxelScene *scene, SimBackgroundVoxelKind kind) {
+static const SimBackgroundVoxelObject *FindKind(const SimBackgroundVoxelScene *scene,
+                                                SimBackgroundVoxelKind kind) {
   for (uint16_t i = 0; i < scene->object_count; i++)
     if (scene->objects[i].kind == kind) return &scene->objects[i];
   return NULL;
@@ -173,9 +162,8 @@ static const SimBackgroundVoxelObject *FindKind(
 
 enum { kStructureDefinitions = 0x3100 };
 
-static void SetStructureDefinition(uint8_t *wram, int metatile,
-                                   uint16_t a, uint16_t b,
-                                   uint16_t c, uint16_t d) {
+static void SetStructureDefinition(uint8_t *wram, int metatile, uint16_t a, uint16_t b, uint16_t c,
+                                   uint16_t d) {
   const uint16_t entries[4] = {a, b, c, d};
   size_t at = kStructureDefinitions + (size_t)metatile * 8;
   for (int entry = 0; entry < 4; entry++) {
@@ -205,17 +193,15 @@ static uint64_t ModelHash(const SimBackgroundVoxelModel *model) {
 
 /* Give every catalog frame a unique synthetic atlas definition while keeping
  * all live words below attribute bit 9, which the native copier strips. */
-static bool CatalogFrameEntries(SimStructureVisualFamily target_family,
-                                uint8_t target_metatile,
+static bool CatalogFrameEntries(SimStructureVisualFamily target_family, uint8_t target_metatile,
                                 uint16_t entries[4]) {
   int ordinal = 0;
   for (int family = 0; family < kSimStructureVisualFamilyCount; family++) {
     size_t count = 0;
-    const SimStructureVisualFrame *frames = SimStructureVisuals_Frames(
-        (SimStructureVisualFamily)family, &count);
+    const SimStructureVisualFrame *frames =
+        SimStructureVisuals_Frames((SimStructureVisualFamily)family, &count);
     for (size_t frame = 0; frame < count; frame++, ordinal++)
-      if (family == target_family &&
-          frames[frame].metatile == target_metatile) {
+      if (family == target_family && frames[frame].metatile == target_metatile) {
         for (int entry = 0; entry < 4; entry++)
           entries[entry] = (uint16_t)(0x0100 + ordinal * 4 + entry);
         return true;
@@ -227,24 +213,22 @@ static bool CatalogFrameEntries(SimStructureVisualFamily target_family,
 static void SeedStructureVisualCatalog(uint8_t *wram) {
   for (int family = 0; family < kSimStructureVisualFamilyCount; family++) {
     size_t count = 0;
-    const SimStructureVisualFrame *frames = SimStructureVisuals_Frames(
-        (SimStructureVisualFamily)family, &count);
+    const SimStructureVisualFrame *frames =
+        SimStructureVisuals_Frames((SimStructureVisualFamily)family, &count);
     for (size_t frame = 0; frame < count; frame++) {
       uint16_t entries[4];
-      CHECK(CatalogFrameEntries((SimStructureVisualFamily)family,
-                                frames[frame].metatile, entries));
-      SetStructureDefinition(wram, frames[frame].metatile,
-                             entries[0], entries[1], entries[2], entries[3]);
+      CHECK(CatalogFrameEntries((SimStructureVisualFamily)family, frames[frame].metatile, entries));
+      SetStructureDefinition(wram, frames[frame].metatile, entries[0], entries[1], entries[2],
+                             entries[3]);
     }
   }
 }
 
-static void SetCatalogFrame(uint8_t *wram, SimStructureVisualFamily family,
-                            uint8_t metatile, int cell_x, int cell_y) {
+static void SetCatalogFrame(uint8_t *wram, SimStructureVisualFamily family, uint8_t metatile,
+                            int cell_x, int cell_y) {
   uint16_t entries[4] = {0};
   CHECK(CatalogFrameEntries(family, metatile, entries));
-  SetCanvasCell(wram, cell_x, cell_y,
-                entries[0], entries[1], entries[2], entries[3]);
+  SetCanvasCell(wram, cell_x, cell_y, entries[0], entries[1], entries[2], entries[3]);
 }
 
 /* A mountain hides only what is BEHIND it, and only within the reach of its
@@ -295,33 +279,28 @@ static void CheckMarahnaEarthquakeCanvasRebuild(void) {
   const uint32_t land_canvas_serial = water_canvas_serial + 1;
   memset(wram, 0, sizeof(wram));
   memset(vram, 0, sizeof(vram));
-  for (size_t at = 0;
-       at < (size_t)kSimTownCanvasPixels * kSimTownCanvasPixels; at++)
+  for (size_t at = 0; at < (size_t)kSimTownCanvasPixels * kSimTownCanvasPixels; at++)
     pixels[at] = water;
 
   SimBackgroundVoxels_Reset();
-  SimBackgroundVoxels_Build(
-      kMarahnaTown, wram, pixels, NULL,
-      water_canvas_serial, water_canvas_serial, true);
+  SimBackgroundVoxels_Build(kMarahnaTown, wram, pixels, NULL, water_canvas_serial,
+                            water_canvas_serial, true);
   const size_t centre =
-      (size_t)(revealed_y * kSimBackgroundCellPixels +
-               kSimBackgroundCellPixels / 2) * kSimTownCanvasPixels +
-      revealed_x * kSimBackgroundCellPixels +
-      kSimBackgroundCellPixels / 2;
+      (size_t)(revealed_y * kSimBackgroundCellPixels + kSimBackgroundCellPixels / 2) *
+          kSimTownCanvasPixels +
+      revealed_x * kSimBackgroundCellPixels + kSimBackgroundCellPixels / 2;
   const uint32_t water_serial = SimBackgroundVoxels_Serial();
   CHECK(water_serial != 0);
   CHECK(SimBackgroundVoxels_GroundPixels()[centre] == water);
 
   FillCell(pixels, revealed_x, revealed_y, land);
-  SimBackgroundVoxels_Build(
-      kMarahnaTown, wram, pixels, NULL,
-      water_canvas_serial, water_canvas_serial, true);
+  SimBackgroundVoxels_Build(kMarahnaTown, wram, pixels, NULL, water_canvas_serial,
+                            water_canvas_serial, true);
   CHECK(SimBackgroundVoxels_Serial() == water_serial);
   CHECK(SimBackgroundVoxels_GroundPixels()[centre] == water);
 
-  SimBackgroundVoxels_Build(
-      kMarahnaTown, wram, pixels, NULL,
-      land_canvas_serial, land_canvas_serial, true);
+  SimBackgroundVoxels_Build(kMarahnaTown, wram, pixels, NULL, land_canvas_serial,
+                            land_canvas_serial, true);
   CHECK(SimBackgroundVoxels_Serial() != water_serial);
   CHECK(SimBackgroundVoxels_GroundPixels()[centre] == land);
 }
@@ -343,23 +322,20 @@ static void BeginGroundSourceFade(uint8_t town) {
   memset(&s_ground_source_fade, 0, sizeof(s_ground_source_fade));
   for (int cell_y = 0; cell_y < kSimBackgroundTownCells; cell_y++)
     for (int cell_x = 0; cell_x < kSimBackgroundTownCells; cell_x++)
-      s_ground_source_fade.wram[
-          TownCellIndex(town - 1, cell_x, cell_y)] = kTileWater;
-  for (size_t at = 0;
-       at < (size_t)kSimTownCanvasPixels * kSimTownCanvasPixels; at++)
+      s_ground_source_fade.wram[TownCellIndex(town - 1, cell_x, cell_y)] = kTileWater;
+  for (size_t at = 0; at < (size_t)kSimTownCanvasPixels * kSimTownCanvasPixels; at++)
     s_ground_source_fade.pixels[at] = kGroundSourceBlack;
 }
 
 static void RevealGroundSourcePixels(void) {
-  for (size_t at = 0;
-       at < (size_t)kSimTownCanvasPixels * kSimTownCanvasPixels; at++)
+  for (size_t at = 0; at < (size_t)kSimTownCanvasPixels * kSimTownCanvasPixels; at++)
     s_ground_source_fade.pixels[at] = kGroundSourceWater;
 }
 
 static size_t CellCentre(int cell_x, int cell_y) {
-  return (size_t)(cell_y * kSimBackgroundCellPixels +
-                  kSimBackgroundCellPixels / 2) * kSimTownCanvasPixels +
-      cell_x * kSimBackgroundCellPixels + kSimBackgroundCellPixels / 2;
+  return (size_t)(cell_y * kSimBackgroundCellPixels + kSimBackgroundCellPixels / 2) *
+             kSimTownCanvasPixels +
+         cell_x * kSimBackgroundCellPixels + kSimBackgroundCellPixels / 2;
 }
 
 /* Map entry can publish the scene during a black fade, when an RGB-only source
@@ -370,34 +346,24 @@ static void CheckMarahnaGroundSourceRejectsWaterDuringFade(void) {
   const int shrub_x = 4, shrub_y = 4;
   const int land_x = 20, land_y = 20;
   BeginGroundSourceFade(kMarahnaTown);
-  s_ground_source_fade.wram[
-      TownCellIndex(kMarahnaTown - 1, shrub_x, shrub_y)] = kTileShrub;
-  s_ground_source_fade.wram[
-      TownCellIndex(kMarahnaTown - 1, land_x, land_y)] = kTileGrass;
-  SetTerrainDefinition(s_ground_source_fade.wram, kTileGrass,
-      0x0101, 0x0101, 0x0101, 0x0101);
-  SetCanvasCell(s_ground_source_fade.wram, land_x, land_y,
-      0x0101, 0x0101, 0x0101, 0x0101);
+  s_ground_source_fade.wram[TownCellIndex(kMarahnaTown - 1, shrub_x, shrub_y)] = kTileShrub;
+  s_ground_source_fade.wram[TownCellIndex(kMarahnaTown - 1, land_x, land_y)] = kTileGrass;
+  SetTerrainDefinition(s_ground_source_fade.wram, kTileGrass, 0x0101, 0x0101, 0x0101, 0x0101);
+  SetCanvasCell(s_ground_source_fade.wram, land_x, land_y, 0x0101, 0x0101, 0x0101, 0x0101);
 
   SimBackgroundVoxels_Reset();
-  SimBackgroundVoxels_Build(
-      kMarahnaTown, s_ground_source_fade.wram,
-      s_ground_source_fade.pixels, NULL, 1, 1, true);
+  SimBackgroundVoxels_Build(kMarahnaTown, s_ground_source_fade.wram, s_ground_source_fade.pixels,
+                            NULL, 1, 1, true);
   const uint32_t scene_serial = SimBackgroundVoxels_SceneSerial();
-  CHECK(FindKind(SimBackgroundVoxels_Scene(),
-                 kSimBackgroundVoxel_Shrub) != NULL);
+  CHECK(FindKind(SimBackgroundVoxels_Scene(), kSimBackgroundVoxel_Shrub) != NULL);
 
   RevealGroundSourcePixels();
-  FillCell(s_ground_source_fade.pixels,
-           land_x, land_y, kGroundSourceLand);
-  FillCell(s_ground_source_fade.pixels,
-           shrub_x, shrub_y, kGroundSourceObject);
-  SimBackgroundVoxels_Build(
-      kMarahnaTown, s_ground_source_fade.wram,
-      s_ground_source_fade.pixels, NULL, 2, 1, true);
+  FillCell(s_ground_source_fade.pixels, land_x, land_y, kGroundSourceLand);
+  FillCell(s_ground_source_fade.pixels, shrub_x, shrub_y, kGroundSourceObject);
+  SimBackgroundVoxels_Build(kMarahnaTown, s_ground_source_fade.wram, s_ground_source_fade.pixels,
+                            NULL, 2, 1, true);
   CHECK(SimBackgroundVoxels_SceneSerial() == scene_serial);
-  CHECK(SimBackgroundVoxels_GroundPixels()[CellCentre(shrub_x, shrub_y)] ==
-        kGroundSourceLand);
+  CHECK(SimBackgroundVoxels_GroundPixels()[CellCentre(shrub_x, shrub_y)] == kGroundSourceLand);
 }
 
 /* Marahna's plateau walls are a separate authored topology, not part of the
@@ -408,45 +374,31 @@ static void CheckMarahnaGroundSourceRejectsCliffDuringFade(void) {
   const int shrub_x = 4, shrub_y = 4;
   const int cliff_x = 8, cliff_y = 21;
   const int land_x = 14, land_y = 21;
-  CHECK(SimTownTerrain_FaceKind(kMarahnaTown, cliff_x, cliff_y) ==
-        kSimTownTerrainFace_Cliff);
+  CHECK(SimTownTerrain_FaceKind(kMarahnaTown, cliff_x, cliff_y) == kSimTownTerrainFace_Cliff);
   CHECK(!SimTownTerrain_IsFaceCell(kMarahnaTown, land_x, land_y));
 
   BeginGroundSourceFade(kMarahnaTown);
-  s_ground_source_fade.wram[
-      TownCellIndex(kMarahnaTown - 1, shrub_x, shrub_y)] = kTileShrub;
-  s_ground_source_fade.wram[
-      TownCellIndex(kMarahnaTown - 1, cliff_x, cliff_y)] = kTileGrass;
-  SetCanvasCell(s_ground_source_fade.wram, cliff_x, cliff_y,
-      0x0101, 0x0101, 0x0101, 0x0101);
-  s_ground_source_fade.wram[
-      TownCellIndex(kMarahnaTown - 1, land_x, land_y)] = kTileGrass;
-  SetTerrainDefinition(s_ground_source_fade.wram, kTileGrass,
-      0x0101, 0x0101, 0x0101, 0x0101);
-  SetCanvasCell(s_ground_source_fade.wram, land_x, land_y,
-      0x0101, 0x0101, 0x0101, 0x0101);
+  s_ground_source_fade.wram[TownCellIndex(kMarahnaTown - 1, shrub_x, shrub_y)] = kTileShrub;
+  s_ground_source_fade.wram[TownCellIndex(kMarahnaTown - 1, cliff_x, cliff_y)] = kTileGrass;
+  SetCanvasCell(s_ground_source_fade.wram, cliff_x, cliff_y, 0x0101, 0x0101, 0x0101, 0x0101);
+  s_ground_source_fade.wram[TownCellIndex(kMarahnaTown - 1, land_x, land_y)] = kTileGrass;
+  SetTerrainDefinition(s_ground_source_fade.wram, kTileGrass, 0x0101, 0x0101, 0x0101, 0x0101);
+  SetCanvasCell(s_ground_source_fade.wram, land_x, land_y, 0x0101, 0x0101, 0x0101, 0x0101);
 
   SimBackgroundVoxels_Reset();
-  SimBackgroundVoxels_Build(
-      kMarahnaTown, s_ground_source_fade.wram,
-      s_ground_source_fade.pixels, NULL, 1, 1, true);
+  SimBackgroundVoxels_Build(kMarahnaTown, s_ground_source_fade.wram, s_ground_source_fade.pixels,
+                            NULL, 1, 1, true);
   const uint32_t scene_serial = SimBackgroundVoxels_SceneSerial();
-  CHECK(FindKind(SimBackgroundVoxels_Scene(),
-                 kSimBackgroundVoxel_Shrub) != NULL);
+  CHECK(FindKind(SimBackgroundVoxels_Scene(), kSimBackgroundVoxel_Shrub) != NULL);
 
   RevealGroundSourcePixels();
-  FillCell(s_ground_source_fade.pixels,
-           cliff_x, cliff_y, kGroundSourceCliff);
-  FillCell(s_ground_source_fade.pixels,
-           land_x, land_y, kGroundSourceLand);
-  FillCell(s_ground_source_fade.pixels,
-           shrub_x, shrub_y, kGroundSourceObject);
-  SimBackgroundVoxels_Build(
-      kMarahnaTown, s_ground_source_fade.wram,
-      s_ground_source_fade.pixels, NULL, 2, 1, true);
+  FillCell(s_ground_source_fade.pixels, cliff_x, cliff_y, kGroundSourceCliff);
+  FillCell(s_ground_source_fade.pixels, land_x, land_y, kGroundSourceLand);
+  FillCell(s_ground_source_fade.pixels, shrub_x, shrub_y, kGroundSourceObject);
+  SimBackgroundVoxels_Build(kMarahnaTown, s_ground_source_fade.wram, s_ground_source_fade.pixels,
+                            NULL, 2, 1, true);
   CHECK(SimBackgroundVoxels_SceneSerial() == scene_serial);
-  CHECK(SimBackgroundVoxels_GroundPixels()[CellCentre(shrub_x, shrub_y)] ==
-        kGroundSourceLand);
+  CHECK(SimBackgroundVoxels_GroundPixels()[CellCentre(shrub_x, shrub_y)] == kGroundSourceLand);
 }
 
 static void CheckIndependentSceneAndPixelPublications(void) {
@@ -455,8 +407,7 @@ static void CheckIndependentSceneAndPixelPublications(void) {
   static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
   memset(wram, 0, sizeof(wram));
   memset(vram, 0, sizeof(vram));
-  for (size_t at = 0;
-       at < (size_t)kSimTownCanvasPixels * kSimTownCanvasPixels; at++)
+  for (size_t at = 0; at < (size_t)kSimTownCanvasPixels * kSimTownCanvasPixels; at++)
     pixels[at] = 0xFF647814;
 
   SimBackgroundVoxels_Reset();
@@ -470,12 +421,9 @@ static void CheckIndependentSceneAndPixelPublications(void) {
   uint32_t ground_serial = SimBackgroundVoxels_GroundSerial();
   uint32_t atlas_serial = SimBackgroundVoxels_AtlasSerial();
   int x, y, width, height;
-  CHECK(SimBackgroundVoxels_TakeGroundDirtyRect(
-      &x, &y, &width, &height));
-  CHECK(x == 0 && y == 0 && width == kSimTownCanvasPixels &&
-        height == kSimTownCanvasPixels);
-  CHECK(!SimBackgroundVoxels_TakeGroundDirtyRect(
-      &x, &y, &width, &height));
+  CHECK(SimBackgroundVoxels_TakeGroundDirtyRect(&x, &y, &width, &height));
+  CHECK(x == 0 && y == 0 && width == kSimTownCanvasPixels && height == kSimTownCanvasPixels);
+  CHECK(!SimBackgroundVoxels_TakeGroundDirtyRect(&x, &y, &width, &height));
 
   /* A live pixel update keeps the classified scene and mountain atlas, and
    * publishes only the enhanced-ground pixel that actually changed. */
@@ -488,11 +436,9 @@ static void CheckIndependentSceneAndPixelPublications(void) {
   CHECK(SimBackgroundVoxels_SceneSerial() == scene_serial);
   CHECK(SimBackgroundVoxels_GroundSerial() != ground_serial);
   CHECK(SimBackgroundVoxels_AtlasSerial() == atlas_serial);
-  CHECK(SimBackgroundVoxels_TakeGroundDirtyRect(
-      &x, &y, &width, &height));
+  CHECK(SimBackgroundVoxels_TakeGroundDirtyRect(&x, &y, &width, &height));
   CHECK(x == 0 && y == 0 && width == 1 && height == 1);
-  CHECK(!SimBackgroundVoxels_TakeGroundDirtyRect(
-      &x, &y, &width, &height));
+  CHECK(!SimBackgroundVoxels_TakeGroundDirtyRect(&x, &y, &width, &height));
 
   /* A quiet call does no publication work. */
   SimBackgroundVoxels_Build(1, wram, pixels, NULL, 2, 1, true);
@@ -524,8 +470,7 @@ static void CheckCleanMountainAtlasPublication(void) {
   static uint16_t vram[kVramWords];
   static uint16_t cgram[256];
   static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
-  static uint32_t atlas_before[
-      kSimTownCanvasPixels * kSimTownCanvasPixels];
+  static uint32_t atlas_before[kSimTownCanvasPixels * kSimTownCanvasPixels];
   memset(wram, 0, sizeof(wram));
   memset(vram, 0, sizeof(vram));
   memset(cgram, 0, sizeof(cgram));
@@ -541,24 +486,21 @@ static void CheckCleanMountainAtlasPublication(void) {
   memcpy(pixels, SimTownCanvas_Pixels(), sizeof(pixels));
 
   SimBackgroundVoxels_Reset();
-  SimBackgroundVoxels_Build(
-      6, wram, pixels, SimTownCanvas_SourceOpacity(), 1, 1, true);
+  SimBackgroundVoxels_Build(6, wram, pixels, SimTownCanvas_SourceOpacity(), 1, 1, true);
   int source_x = 0, source_y = 0;
-  CHECK(SimBackgroundVoxels_MountainTileSource(
-      0x81, &source_x, &source_y));
+  CHECK(SimBackgroundVoxels_MountainTileSource(0x81, &source_x, &source_y));
   const uint32_t *atlas = SimBackgroundVoxels_AtlasPixels();
   bool source_visible = false;
   for (int y = 0; y < 16; y++)
     for (int x = 0; x < 16; x++)
-      source_visible |= atlas[
-          (size_t)(source_y * 16 + y) * kSimTownCanvasPixels +
-          (size_t)(source_x * 16 + x)] != 0;
+      source_visible |=
+          atlas[(size_t)(source_y * 16 + y) * kSimTownCanvasPixels + (size_t)(source_x * 16 + x)] !=
+          0;
   CHECK(source_visible);
   size_t released_mountain_pixel = SIZE_MAX;
   for (int y = 0; y < 16 && released_mountain_pixel == SIZE_MAX; y++)
     for (int x = 0; x < 16; x++) {
-      size_t at = (size_t)(6 * 16 + y) * kSimTownCanvasPixels +
-          (size_t)(6 * 16 + x);
+      size_t at = (size_t)(6 * 16 + y) * kSimTownCanvasPixels + (size_t)(6 * 16 + x);
       if (atlas[at]) {
         released_mountain_pixel = at;
         break;
@@ -566,12 +508,10 @@ static void CheckCleanMountainAtlasPublication(void) {
     }
   CHECK(released_mountain_pixel != SIZE_MAX);
   memcpy(atlas_before, atlas, sizeof(atlas_before));
-  const uint32_t initial_atlas_serial =
-      SimBackgroundVoxels_AtlasSerial();
+  const uint32_t initial_atlas_serial = SimBackgroundVoxels_AtlasSerial();
   int dirty_x, dirty_y, dirty_width, dirty_height;
   bool had_initial_dirty = false;
-  while (SimBackgroundVoxels_TakeAtlasDirtyRect(
-             &dirty_x, &dirty_y, &dirty_width, &dirty_height))
+  while (SimBackgroundVoxels_TakeAtlasDirtyRect(&dirty_x, &dirty_y, &dirty_width, &dirty_height))
     had_initial_dirty = true;
   CHECK(had_initial_dirty);
 
@@ -581,62 +521,56 @@ static void CheckCleanMountainAtlasPublication(void) {
   cgram[1] = 0x001F;
   SimTownCanvas_Render(6, wram, vram, cgram, 15, 0xFF000000);
   memcpy(pixels, SimTownCanvas_Pixels(), sizeof(pixels));
-  SimBackgroundVoxels_Build(
-      6, wram, pixels, SimTownCanvas_SourceOpacity(), 2, 1, true);
+  SimBackgroundVoxels_Build(6, wram, pixels, SimTownCanvas_SourceOpacity(), 2, 1, true);
   CHECK(SimBackgroundVoxels_AtlasSerial() != initial_atlas_serial);
   uint64_t published_pixels = 0;
   CHECK(ApplyAtlasDirtyRects(atlas_before, &published_pixels));
   CHECK(published_pixels > 0 &&
-        published_pixels <
-            (uint64_t)kSimTownCanvasPixels * kSimTownCanvasPixels);
-  CHECK(memcmp(atlas_before, SimBackgroundVoxels_AtlasPixels(),
-               sizeof(atlas_before)) == 0);
+        published_pixels < (uint64_t)kSimTownCanvasPixels * kSimTownCanvasPixels);
+  CHECK(memcmp(atlas_before, SimBackgroundVoxels_AtlasPixels(), sizeof(atlas_before)) == 0);
   const uint32_t atlas_serial = SimBackgroundVoxels_AtlasSerial();
 
   pixels[0] ^= 0x00010101u;
-  SimBackgroundVoxels_Build(
-      6, wram, pixels, SimTownCanvas_SourceOpacity(), 3, 1, true);
-  CHECK(memcmp(atlas_before, SimBackgroundVoxels_AtlasPixels(),
-               sizeof(atlas_before)) == 0);
+  SimBackgroundVoxels_Build(6, wram, pixels, SimTownCanvas_SourceOpacity(), 3, 1, true);
+  CHECK(memcmp(atlas_before, SimBackgroundVoxels_AtlasPixels(), sizeof(atlas_before)) == 0);
   CHECK(SimBackgroundVoxels_AtlasSerial() == atlas_serial);
-  CHECK(!SimBackgroundVoxels_TakeAtlasDirtyRect(
-      &dirty_x, &dirty_y, &dirty_width, &dirty_height));
+  CHECK(!SimBackgroundVoxels_TakeAtlasDirtyRect(&dirty_x, &dirty_y, &dirty_width, &dirty_height));
 
   /* Releasing a formerly complex chunk must clear atlas storage left by the
    * old plan. The optimized direct path owns that transition and publishes
    * it through the same dirty-region contract. */
   wram[TownCellIndex(5, 6, 6)] = 0;
-  SimBackgroundVoxels_Build(
-      6, wram, pixels, SimTownCanvas_SourceOpacity(), 3, 2, true);
+  SimBackgroundVoxels_Build(6, wram, pixels, SimTownCanvas_SourceOpacity(), 3, 2, true);
   CHECK(released_mountain_pixel == SIZE_MAX ||
         SimBackgroundVoxels_AtlasPixels()[released_mountain_pixel] == 0);
   published_pixels = 0;
   CHECK(ApplyAtlasDirtyRects(atlas_before, &published_pixels));
   CHECK(published_pixels > 0);
-  CHECK(memcmp(atlas_before, SimBackgroundVoxels_AtlasPixels(),
-               sizeof(atlas_before)) == 0);
+  CHECK(memcmp(atlas_before, SimBackgroundVoxels_AtlasPixels(), sizeof(atlas_before)) == 0);
 }
 
 static void CheckStructureVisualCatalog(void) {
   static const uint8_t expected_metatiles[kSimStructureVisualFamilyCount][32] = {
-    {
-      0x00, 0x01, 0x02, 0x03, 0x08, 0x09, 0x0A, 0x0B,
-      0x10, 0x11, 0x12, 0x13, 0x18, 0x19, 0x1A, 0x1B,
-      0x20, 0x21, 0x22, 0x23, 0x28, 0x29, 0x2A, 0x2B,
-      0x30, 0x31, 0x32, 0x33, 0x38, 0x39, 0x3A, 0x3B,
-    },
-    {0x4C, 0x44, 0x4D, 0x45, 0xEA, 0xE2, 0xEB, 0xE3},
-    {0x04, 0x06, 0x14, 0x24, 0x26, 0x16},
-    {0x34, 0x36},
+      {
+          0x00, 0x01, 0x02, 0x03, 0x08, 0x09, 0x0A, 0x0B, 0x10, 0x11, 0x12,
+          0x13, 0x18, 0x19, 0x1A, 0x1B, 0x20, 0x21, 0x22, 0x23, 0x28, 0x29,
+          0x2A, 0x2B, 0x30, 0x31, 0x32, 0x33, 0x38, 0x39, 0x3A, 0x3B,
+      },
+      {0x4C, 0x44, 0x4D, 0x45, 0xEA, 0xE2, 0xEB, 0xE3},
+      {0x04, 0x06, 0x14, 0x24, 0x26, 0x16},
+      {0x34, 0x36},
   };
   static const size_t expected_counts[kSimStructureVisualFamilyCount] = {
-    32, 8, 6, 2,
+      32,
+      8,
+      6,
+      2,
   };
   bool seen[256] = {false};
   for (int family = 0; family < kSimStructureVisualFamilyCount; family++) {
     size_t count = 0;
-    const SimStructureVisualFrame *frames = SimStructureVisuals_Frames(
-        (SimStructureVisualFamily)family, &count);
+    const SimStructureVisualFrame *frames =
+        SimStructureVisuals_Frames((SimStructureVisualFamily)family, &count);
     CHECK(frames != NULL);
     CHECK(count == expected_counts[family]);
     for (size_t frame = 0; frame < count; frame++) {
@@ -647,31 +581,25 @@ static void CheckStructureVisualCatalog(void) {
       CHECK(frames[frame].state < kSimStructureVisualStateCount);
       if (family == kSimStructureVisual_House) {
         uint8_t position = (uint8_t)(frame % 4);
-        uint8_t expected_state = position == 0
-            ? kSimStructureVisualState_Construction0
-            : position == 1
-                ? kSimStructureVisualState_Construction1
-                : kSimStructureVisualState_Finished;
+        uint8_t expected_state = position == 0   ? kSimStructureVisualState_Construction0
+                                 : position == 1 ? kSimStructureVisualState_Construction1
+                                                 : kSimStructureVisualState_Finished;
         CHECK(frames[frame].state == expected_state);
       } else if (family == kSimStructureVisual_Bridge) {
-        CHECK(frames[frame].state == ((frame & 1)
-            ? kSimStructureVisualState_Finished
-            : kSimStructureVisualState_Construction0));
+        CHECK(frames[frame].state == ((frame & 1) ? kSimStructureVisualState_Finished
+                                                  : kSimStructureVisualState_Construction0));
       } else if (family == kSimStructureVisual_Windmill) {
         CHECK(frames[frame].animation_phase == (uint8_t)(frame % 3));
-        CHECK(frames[frame].state == (frame < 3
-            ? kSimStructureVisualState_Construction0 + frame
-            : kSimStructureVisualState_Finished));
+        CHECK(frames[frame].state == (frame < 3 ? kSimStructureVisualState_Construction0 + frame
+                                                : kSimStructureVisualState_Finished));
       } else {
-        CHECK(frames[frame].state == (frame == 0
-            ? kSimStructureVisualState_Construction0
-            : kSimStructureVisualState_Finished));
+        CHECK(frames[frame].state == (frame == 0 ? kSimStructureVisualState_Construction0
+                                                 : kSimStructureVisualState_Finished));
       }
     }
   }
   size_t invalid_count = 99;
-  CHECK(SimStructureVisuals_Frames(
-      kSimStructureVisualFamilyCount, &invalid_count) == NULL);
+  CHECK(SimStructureVisuals_Frames(kSimStructureVisualFamilyCount, &invalid_count) == NULL);
   CHECK(invalid_count == 0);
 }
 
@@ -683,44 +611,36 @@ static void CheckHouseFramesEndToEnd(void) {
   memset(wram, 0, sizeof(wram));
   SeedStructureVisualCatalog(wram);
   size_t frame_count = 0;
-  const SimStructureVisualFrame *frames = SimStructureVisuals_Frames(
-      kSimStructureVisual_House, &frame_count);
+  const SimStructureVisualFrame *frames =
+      SimStructureVisuals_Frames(kSimStructureVisual_House, &frame_count);
   uint64_t construction_hash[2] = {0, 0};
   const int cell_x = 6, cell_y = 6;
   for (int town = 1; town <= kSimBackgroundTownCount; town++)
-    for (int level = 0;
-         level < kSimBackgroundDevelopmentLevelCount; level++)
+    for (int level = 0; level < kSimBackgroundDevelopmentLevelCount; level++)
       for (int facing = 0; facing < 2; facing++)
         for (size_t frame = 0; frame < frame_count; frame++) {
-          uint8_t *record = wram + kRecords +
-              (size_t)(town - 1) * kRecordsPerTown;
+          uint8_t *record = wram + kRecords + (size_t)(town - 1) * kRecordsPerTown;
           record[0] = cell_x;
           record[1] = cell_y;
-          record[2] = (uint8_t)(0x80 | level << 4 |
-              (facing ? 0x40 : 0));
-          SetCatalogFrame(wram, kSimStructureVisual_House,
-                          frames[frame].metatile, cell_x, cell_y);
+          record[2] = (uint8_t)(0x80 | level << 4 | (facing ? 0x40 : 0));
+          SetCatalogFrame(wram, kSimStructureVisual_House, frames[frame].metatile, cell_x, cell_y);
           SimBackgroundVoxelScene scene;
           SimBackgroundVoxels_Classify((uint8_t)town, wram, true, &scene);
-          const SimBackgroundVoxelObject *house =
-              FindKind(&scene, kSimBackgroundVoxel_House);
+          const SimBackgroundVoxelObject *house = FindKind(&scene, kSimBackgroundVoxel_House);
           CHECK(scene.unmatched_visual_count == 0);
           CHECK(house != NULL);
           if (!house) continue;
           CHECK(house->visual_metatile == frames[frame].metatile);
           CHECK(house->visual_state == frames[frame].state);
           CHECK(house->animation_phase == frames[frame].animation_phase);
-          CHECK(((house->flags & kSimBackgroundVoxel_AlternateFacing) != 0) ==
-                (facing != 0));
-          bool under_construction =
-              SimStructureVisuals_IsConstruction(frames[frame].state);
+          CHECK(((house->flags & kSimBackgroundVoxel_AlternateFacing) != 0) == (facing != 0));
+          bool under_construction = SimStructureVisuals_IsConstruction(frames[frame].state);
           CHECK(((house->flags & kSimBackgroundVoxel_UnderConstruction) != 0) ==
                 under_construction);
 
           SimBackgroundVoxelModel model;
-          SimBackgroundVoxelModel_BuildStyled(
-              house, kSimBackgroundVoxelDetail_Balanced,
-              kSimBackgroundVoxelStyle_Basic, &model);
+          SimBackgroundVoxelModel_BuildStyled(house, kSimBackgroundVoxelDetail_Balanced,
+                                              kSimBackgroundVoxelStyle_Basic, &model);
           CHECK(!model.overflow && model.face_count > 0);
           if (under_construction) {
             CHECK(MaterialFaces(&model, kSimVoxelMaterial_Wood) > 0);
@@ -738,26 +658,22 @@ static void CheckHouseFramesEndToEnd(void) {
 static void CheckAitosSnapshotHouseFrame(void) {
   static uint8_t wram[kWramBytes];
   memset(wram, 0, sizeof(wram));
-  uint8_t *record = wram + kRecords +
-      (size_t)(kAitosBuildTown - 1) * kRecordsPerTown +
-      kAitosBuildRecordSlot * 4;
+  uint8_t *record =
+      wram + kRecords + (size_t)(kAitosBuildTown - 1) * kRecordsPerTown + kAitosBuildRecordSlot * 4;
   memcpy(record, kAitosBuildRecord, sizeof(kAitosBuildRecord));
-  memcpy(wram + kStepSlots + kAitosBuildRecordSlot * kStepSlotBytes,
-         kAitosBuildStepSlot, sizeof(kAitosBuildStepSlot));
-  SetStructureDefinition(wram, kAitosBuildMetatile,
-                         kAitosBuildDefinition[0], kAitosBuildDefinition[1],
-                         kAitosBuildDefinition[2], kAitosBuildDefinition[3]);
-  SetCanvasCell(wram, kAitosBuildCellX, kAitosBuildCellY,
-                kAitosBuildLiveCell[0], kAitosBuildLiveCell[1],
-                kAitosBuildLiveCell[2], kAitosBuildLiveCell[3]);
-  wram[TownCellIndex(kAitosBuildTown - 1,
-                     kAitosBuildCellX, kAitosBuildCellY)] =
+  memcpy(wram + kStepSlots + kAitosBuildRecordSlot * kStepSlotBytes, kAitosBuildStepSlot,
+         sizeof(kAitosBuildStepSlot));
+  SetStructureDefinition(wram, kAitosBuildMetatile, kAitosBuildDefinition[0],
+                         kAitosBuildDefinition[1], kAitosBuildDefinition[2],
+                         kAitosBuildDefinition[3]);
+  SetCanvasCell(wram, kAitosBuildCellX, kAitosBuildCellY, kAitosBuildLiveCell[0],
+                kAitosBuildLiveCell[1], kAitosBuildLiveCell[2], kAitosBuildLiveCell[3]);
+  wram[TownCellIndex(kAitosBuildTown - 1, kAitosBuildCellX, kAitosBuildCellY)] =
       kAitosBuildCellMarker;
 
   SimBackgroundVoxelScene scene;
   SimBackgroundVoxels_Classify(kAitosBuildTown, wram, true, &scene);
-  const SimBackgroundVoxelObject *house =
-      FindKind(&scene, kSimBackgroundVoxel_House);
+  const SimBackgroundVoxelObject *house = FindKind(&scene, kSimBackgroundVoxel_House);
   CHECK(scene.unmatched_visual_count == 0);
   CHECK(house != NULL);
   if (!house) return;
@@ -769,8 +685,7 @@ static void CheckAitosSnapshotHouseFrame(void) {
   CHECK(house->flags & kSimBackgroundVoxel_UnderConstruction);
 
   SimBackgroundVoxelModel model;
-  SimBackgroundVoxelModel_Build(
-      house, kSimBackgroundVoxelDetail_Balanced, &model);
+  SimBackgroundVoxelModel_Build(house, kSimBackgroundVoxelDetail_Balanced, &model);
   CHECK(!model.overflow && model.face_count > 0);
   CHECK(MaterialFaces(&model, kSimVoxelMaterial_Wood) > 0);
   CHECK(MaterialFaces(&model, kSimVoxelMaterial_Roof) == 0);
@@ -780,31 +695,25 @@ static void CheckAitosSnapshotHouseFrame(void) {
    * atlas. The enhanced models must progress scaffold -> taller scaffold ->
    * finished rather than collapsing the first publication into the last. */
   static const uint8_t expected_state[3] = {
-    kSimStructureVisualState_Construction0,
-    kSimStructureVisualState_Construction1,
-    kSimStructureVisualState_Finished,
+      kSimStructureVisualState_Construction0,
+      kSimStructureVisualState_Construction1,
+      kSimStructureVisualState_Finished,
   };
   uint64_t sequence_hash[3] = {0};
   for (int step = 0; step < 3; step++) {
     SetStructureDefinition(
-        wram, kAitosBuildSequenceMetatiles[step],
-        kAitosBuildSequenceDefinitions[step][0],
-        kAitosBuildSequenceDefinitions[step][1],
-        kAitosBuildSequenceDefinitions[step][2],
+        wram, kAitosBuildSequenceMetatiles[step], kAitosBuildSequenceDefinitions[step][0],
+        kAitosBuildSequenceDefinitions[step][1], kAitosBuildSequenceDefinitions[step][2],
         kAitosBuildSequenceDefinitions[step][3]);
-    SetCanvasCell(
-        wram, kAitosBuildCellX, kAitosBuildCellY,
-        kAitosBuildSequenceDefinitions[step][0],
-        kAitosBuildSequenceDefinitions[step][1],
-        kAitosBuildSequenceDefinitions[step][2],
-        kAitosBuildSequenceDefinitions[step][3]);
+    SetCanvasCell(wram, kAitosBuildCellX, kAitosBuildCellY, kAitosBuildSequenceDefinitions[step][0],
+                  kAitosBuildSequenceDefinitions[step][1], kAitosBuildSequenceDefinitions[step][2],
+                  kAitosBuildSequenceDefinitions[step][3]);
     SimBackgroundVoxels_Classify(kAitosBuildTown, wram, true, &scene);
     house = FindKind(&scene, kSimBackgroundVoxel_House);
     CHECK(house != NULL && scene.unmatched_visual_count == 0);
     if (!house) continue;
     CHECK(house->visual_state == expected_state[step]);
-    SimBackgroundVoxelModel_Build(
-        house, kSimBackgroundVoxelDetail_Balanced, &model);
+    SimBackgroundVoxelModel_Build(house, kSimBackgroundVoxelDetail_Balanced, &model);
     sequence_hash[step] = ModelHash(&model);
   }
   CHECK(sequence_hash[0] != sequence_hash[1]);
@@ -821,9 +730,9 @@ static void CheckUnknownFramesFailClosed(void) {
     uint8_t kind;
     uint8_t family;
   } record_cases[] = {
-    {0, kSimBackgroundVoxel_House, kSimStructureVisual_House},
-    {3, kSimBackgroundVoxel_Windmill, kSimStructureVisual_Windmill},
-    {4, kSimBackgroundVoxel_Factory, kSimStructureVisual_Factory},
+      {0, kSimBackgroundVoxel_House, kSimStructureVisual_House},
+      {3, kSimBackgroundVoxel_Windmill, kSimStructureVisual_Windmill},
+      {4, kSimBackgroundVoxel_Factory, kSimStructureVisual_Factory},
   };
   for (size_t at = 0; at < sizeof(record_cases) / sizeof(record_cases[0]); at++) {
     memset(wram, 0, sizeof(wram));
@@ -833,8 +742,7 @@ static void CheckUnknownFramesFailClosed(void) {
     record[2] = (uint8_t)(0x80 | record_cases[at].structure_class);
     SimBackgroundVoxelScene scene;
     SimBackgroundVoxels_Classify(1, wram, true, &scene);
-    CHECK(FindKind(&scene, (SimBackgroundVoxelKind)record_cases[at].kind) ==
-          NULL);
+    CHECK(FindKind(&scene, (SimBackgroundVoxelKind)record_cases[at].kind) == NULL);
     CHECK(scene.unmatched_visual_count == 1);
     CHECK(scene.unmatched_visuals[0].family == record_cases[at].family);
     CHECK(scene.unmatched_visuals[0].record_slot == 0);
@@ -846,16 +754,14 @@ static void CheckUnknownFramesFailClosed(void) {
   SimBackgroundVoxels_Classify(1, wram, true, &bridge_scene);
   CHECK(FindKind(&bridge_scene, kSimBackgroundVoxel_Bridge) == NULL);
   CHECK(bridge_scene.unmatched_visual_count == 1);
-  CHECK(bridge_scene.unmatched_visuals[0].family ==
-        kSimStructureVisual_Bridge);
+  CHECK(bridge_scene.unmatched_visuals[0].family == kSimStructureVisual_Bridge);
 
   /* The fail-safe is visible behavior, not just a diagnostic counter: an
    * unknown house source cell remains byte-for-byte authentic in the enhanced
    * ground and is absent from the replacement atlas. */
   memset(wram, 0, sizeof(wram));
   memset(vram, 0, sizeof(vram));
-  for (size_t at = 0;
-       at < (size_t)kSimTownCanvasPixels * kSimTownCanvasPixels; at++)
+  for (size_t at = 0; at < (size_t)kSimTownCanvasPixels * kSimTownCanvasPixels; at++)
     pixels[at] = 0xFF2468AC;
   uint8_t *record = wram + kRecords;
   record[0] = 4;
@@ -871,30 +777,24 @@ static void CheckUnknownFramesFailClosed(void) {
 static void CheckBridgeFramesEndToEnd(void) {
   static uint8_t wram[kWramBytes];
   const int cell_x = 10, cell_y = 10, record_slot = 7;
-  for (size_t at = 0;
-       at < sizeof(kBridgeBuildProgramFrames) /
-                sizeof(kBridgeBuildProgramFrames[0]); at++) {
-    const SimBridgeBuildProgramFixture *frame =
-        &kBridgeBuildProgramFrames[at];
+  for (size_t at = 0; at < sizeof(kBridgeBuildProgramFrames) / sizeof(kBridgeBuildProgramFrames[0]);
+       at++) {
+    const SimBridgeBuildProgramFixture *frame = &kBridgeBuildProgramFrames[at];
     memset(wram, 0, sizeof(wram));
     uint16_t entries[4];
-    CHECK(CatalogFrameEntries(
-        kSimStructureVisual_Bridge, frame->metatile, entries));
-    SetStructureDefinition(wram, frame->metatile,
-                           entries[0], entries[1], entries[2], entries[3]);
-    SetCanvasCell(wram, cell_x, cell_y,
-                  entries[0], entries[1], entries[2], entries[3]);
+    CHECK(CatalogFrameEntries(kSimStructureVisual_Bridge, frame->metatile, entries));
+    SetStructureDefinition(wram, frame->metatile, entries[0], entries[1], entries[2], entries[3]);
+    SetCanvasCell(wram, cell_x, cell_y, entries[0], entries[1], entries[2], entries[3]);
     wram[TownCellIndex(frame->town - 1, cell_x, cell_y)] = frame->marker;
-    uint8_t *record = wram + kRecords +
-        (size_t)(frame->town - 1) * kRecordsPerTown + record_slot * 4;
+    uint8_t *record =
+        wram + kRecords + (size_t)(frame->town - 1) * kRecordsPerTown + record_slot * 4;
     record[0] = cell_x;
     record[1] = cell_y;
     record[2] = (uint8_t)(0x81 | (frame->marker == 0xE1 ? 0x10 : 0));
 
     SimBackgroundVoxelScene scene;
     SimBackgroundVoxels_Classify(frame->town, wram, true, &scene);
-    const SimBackgroundVoxelObject *bridge =
-        FindKind(&scene, kSimBackgroundVoxel_Bridge);
+    const SimBackgroundVoxelObject *bridge = FindKind(&scene, kSimBackgroundVoxel_Bridge);
     CHECK(scene.unmatched_visual_count == 0);
     CHECK(bridge != NULL);
     if (!bridge) continue;
@@ -904,12 +804,10 @@ static void CheckBridgeFramesEndToEnd(void) {
     CHECK(frame->program == (uint16_t)(0xD754 + at * 6));
     CHECK(frame->draw_list == (uint16_t)(0xDC18 + at * 4));
     bool construction = SimStructureVisuals_IsConstruction(frame->state);
-    CHECK(((bridge->flags & kSimBackgroundVoxel_UnderConstruction) != 0) ==
-          construction);
+    CHECK(((bridge->flags & kSimBackgroundVoxel_UnderConstruction) != 0) == construction);
 
     SimBackgroundVoxelModel model;
-    SimBackgroundVoxelModel_Build(
-        bridge, kSimBackgroundVoxelDetail_Balanced, &model);
+    SimBackgroundVoxelModel_Build(bridge, kSimBackgroundVoxelDetail_Balanced, &model);
     CHECK(!model.overflow && model.face_count > 0);
     if (construction) {
       CHECK(MaterialFaces(&model, kSimVoxelMaterial_Wood) > 0);
@@ -935,25 +833,19 @@ static void CheckWindmillFrames(void) {
     for (int frame = 0; frame < 6; frame++) {
       memset(wram, 0, sizeof(wram));
       for (int at = 0; at < 6; at++)
-        SetStructureDefinition(wram, kFrames[at],
-                               (uint16_t)(0x0100 + at * 4),
-                               (uint16_t)(0x0101 + at * 4),
-                               (uint16_t)(0x0102 + at * 4),
+        SetStructureDefinition(wram, kFrames[at], (uint16_t)(0x0100 + at * 4),
+                               (uint16_t)(0x0101 + at * 4), (uint16_t)(0x0102 + at * 4),
                                (uint16_t)(0x0103 + at * 4));
       uint8_t *record = wram + kRecords;
       record[0] = 10;
       record[1] = 11;
       record[2] = (uint8_t)(stopped ? 0xC3 : 0x83);
-      SetCanvasCell(wram, 10, 11,
-                    (uint16_t)(0x0100 + frame * 4),
-                    (uint16_t)(0x0101 + frame * 4),
-                    (uint16_t)(0x0102 + frame * 4),
-                    (uint16_t)(0x0103 + frame * 4));
+      SetCanvasCell(wram, 10, 11, (uint16_t)(0x0100 + frame * 4), (uint16_t)(0x0101 + frame * 4),
+                    (uint16_t)(0x0102 + frame * 4), (uint16_t)(0x0103 + frame * 4));
 
       SimBackgroundVoxelScene scene;
       SimBackgroundVoxels_Classify(1, wram, true, &scene);
-      const SimBackgroundVoxelObject *mill =
-          FindKind(&scene, kSimBackgroundVoxel_Windmill);
+      const SimBackgroundVoxelObject *mill = FindKind(&scene, kSimBackgroundVoxel_Windmill);
       CHECK(mill != NULL);
       if (!mill) continue;
       CHECK(((mill->flags & kSimBackgroundVoxel_UnderConstruction) != 0) ==
@@ -961,8 +853,7 @@ static void CheckWindmillFrames(void) {
       /* `$C3` is the parked "no wind" record, so a built mill holds phase 0
        * however far round its plot happens to be drawn. A scaffold keeps its
        * own build step - construction is not wind-driven. */
-      uint8_t expected = (stopped && !kConstruction[frame])
-          ? 0 : kPhase[frame];
+      uint8_t expected = (stopped && !kConstruction[frame]) ? 0 : kPhase[frame];
       CHECK(mill->animation_phase == expected);
     }
 
@@ -973,9 +864,13 @@ static void CheckWindmillFrames(void) {
   SetStructureDefinition(wram, 0x24, 0x0100, 0x0101, 0x0102, 0x0103);
   SetStructureDefinition(wram, 0x26, 0x0104, 0x0105, 0x0106, 0x0107);
   uint8_t *stamped = wram + kRecords;
-  stamped[0] = 10; stamped[1] = 11; stamped[2] = 0xC3;
+  stamped[0] = 10;
+  stamped[1] = 11;
+  stamped[2] = 0xC3;
   uint8_t *unstamped = stamped + 4;
-  unstamped[0] = 4; unstamped[1] = 5; unstamped[2] = 0x83;
+  unstamped[0] = 4;
+  unstamped[1] = 5;
+  unstamped[2] = 0x83;
   SetCanvasCell(wram, 10, 11, 0x0100, 0x0101, 0x0102, 0x0103);
   SetCanvasCell(wram, 4, 5, 0x0104, 0x0105, 0x0106, 0x0107);
   SimBackgroundVoxelScene stopped_scene;
@@ -1011,8 +906,7 @@ static void CheckWindmillFrames(void) {
   int released = 0;
   for (uint16_t i = 0; i < stopped_scene.object_count; i++) {
     const SimBackgroundVoxelObject *o = &stopped_scene.objects[i];
-    if (o->kind == kSimBackgroundVoxel_Windmill && o->animation_phase == 1)
-      released++;
+    if (o->kind == kSimBackgroundVoxel_Windmill && o->animation_phase == 1) released++;
   }
   CHECK(released == 1);
 
@@ -1025,8 +919,7 @@ static void CheckWindmillFrames(void) {
   record[2] = 0xC3;
   SimBackgroundVoxelScene scene;
   SimBackgroundVoxels_Classify(1, wram, true, &scene);
-  const SimBackgroundVoxelObject *mill =
-      FindKind(&scene, kSimBackgroundVoxel_Windmill);
+  const SimBackgroundVoxelObject *mill = FindKind(&scene, kSimBackgroundVoxel_Windmill);
   CHECK(mill == NULL);
   CHECK(scene.unmatched_visual_count == 1);
   CHECK(scene.unmatched_visuals[0].family == kSimStructureVisual_Windmill);
@@ -1043,8 +936,7 @@ static void CheckWindmillFrames(void) {
   record[2] = 0x84;
   SetCanvasCell(wram, 20, 20, 0x0200, 0x0201, 0x0202, 0x0203);
   SimBackgroundVoxels_Classify(1, wram, true, &scene);
-  const SimBackgroundVoxelObject *factory =
-      FindKind(&scene, kSimBackgroundVoxel_Factory);
+  const SimBackgroundVoxelObject *factory = FindKind(&scene, kSimBackgroundVoxel_Factory);
   CHECK(factory && (factory->flags & kSimBackgroundVoxel_UnderConstruction));
   SetCanvasCell(wram, 20, 20, 0x0204, 0x0205, 0x0206, 0x0207);
   SimBackgroundVoxels_Classify(1, wram, true, &scene);
@@ -1088,21 +980,15 @@ static void CheckStoneBridgeClassificationAndInpaint(void) {
     const SimBackgroundVoxelObject *bridge = &scene.objects[i];
     if (bridge->kind != kSimBackgroundVoxel_Bridge) continue;
     bridge_count++;
-    if (bridge->bridge_axis == kSimBackgroundBridgeAxis_EastWest)
-      east_west = bridge;
-    if (bridge->bridge_axis == kSimBackgroundBridgeAxis_NorthSouth)
-      north_south = bridge;
+    if (bridge->bridge_axis == kSimBackgroundBridgeAxis_EastWest) east_west = bridge;
+    if (bridge->bridge_axis == kSimBackgroundBridgeAxis_NorthSouth) north_south = bridge;
   }
   CHECK(bridge_count == 2);
   CHECK(scene.unmatched_visual_count == 0);
-  CHECK(east_west && east_west->source_cells_w == 2 &&
-        east_west->source_cells_h == 1);
-  CHECK(east_west && east_west->bridge_bank_a_x == 8 &&
-        east_west->bridge_bank_b_x == 13);
-  CHECK(north_south && north_south->source_cells_w == 1 &&
-        north_south->source_cells_h == 1);
-  CHECK(north_south && north_south->bridge_bank_a_y == 4 &&
-        north_south->bridge_bank_b_y == 8);
+  CHECK(east_west && east_west->source_cells_w == 2 && east_west->source_cells_h == 1);
+  CHECK(east_west && east_west->bridge_bank_a_x == 8 && east_west->bridge_bank_b_x == 13);
+  CHECK(north_south && north_south->source_cells_w == 1 && north_south->source_cells_h == 1);
+  CHECK(north_south && north_south->bridge_bank_a_y == 4 && north_south->bridge_bank_b_y == 8);
 
   /* Pale native rail pixels extend outside the nominal rows 4-13 deck band.
    * The whole bridge metatile must therefore be replaced by the original $3A
@@ -1113,29 +999,23 @@ static void CheckStoneBridgeClassificationAndInpaint(void) {
   SetSolidColourOneTile(vram, 2);
   SetTerrainDefinition(wram, 0x3A, 1, 1, 1, 1);
   const uint16_t north_south_entry = 2 | (1u << 10);
-  SetTerrainDefinition(wram, 0x41,
-                       north_south_entry, north_south_entry,
-                       north_south_entry, north_south_entry);
+  SetTerrainDefinition(wram, 0x41, north_south_entry, north_south_entry, north_south_entry,
+                       north_south_entry);
   cgram[1] = 0x7C00;
   cgram[17] = 0x03E0;
   SimTownCanvas_Reset();
   SimTownCanvas_Render(1, wram, vram, cgram, 15, 0xFF000000);
   uint32_t original_river[16 * 16];
   uint32_t original_river_ns[16 * 16];
-  CHECK(SimTownCanvas_RenderTerrainMetatile(
-      wram, 0x3A, original_river));
-  CHECK(SimTownCanvas_RenderTerrainMetatile(
-      wram, 0x41, original_river_ns));
+  CHECK(SimTownCanvas_RenderTerrainMetatile(wram, 0x3A, original_river));
+  CHECK(SimTownCanvas_RenderTerrainMetatile(wram, 0x41, original_river_ns));
   FillCell(pixels, 9, 10, 0xFF204878);
   FillCell(pixels, 12, 10, 0xFF204878);
   for (int cell_x = 10; cell_x <= 11; cell_x++)
     for (int local_y = 0; local_y < 16; local_y++)
       for (int local_x = 0; local_x < 16; local_x++) {
-        size_t at = (size_t)(10 * 16 + local_y) * kSimTownCanvasPixels +
-            cell_x * 16 + local_x;
-        pixels[at] = local_y == 2 ||
-            (local_y >= 4 && local_y < 14)
-            ? 0xFFB0A080 : 0xFF204878;
+        size_t at = (size_t)(10 * 16 + local_y) * kSimTownCanvasPixels + cell_x * 16 + local_x;
+        pixels[at] = local_y == 2 || (local_y >= 4 && local_y < 14) ? 0xFFB0A080 : 0xFF204878;
       }
   SimBackgroundVoxels_Reset();
   SimBackgroundVoxels_Build(1, wram, pixels, NULL, 91, 91, true);
@@ -1143,8 +1023,7 @@ static void CheckStoneBridgeClassificationAndInpaint(void) {
   const uint32_t *atlas = SimBackgroundVoxels_AtlasPixels();
   size_t deck = (size_t)(10 * 16 + 8) * kSimTownCanvasPixels + 10 * 16 + 8;
   size_t water = (size_t)(10 * 16 + 2) * kSimTownCanvasPixels + 10 * 16 + 8;
-  size_t north_south_deck =
-      (size_t)(6 * 16 + 8) * kSimTownCanvasPixels + 20 * 16 + 8;
+  size_t north_south_deck = (size_t)(6 * 16 + 8) * kSimTownCanvasPixels + 20 * 16 + 8;
   CHECK(ground[deck] == original_river[8 * 16 + 8]);
   CHECK(ground[water] == original_river[2 * 16 + 8]);
   CHECK(ground[north_south_deck] == original_river_ns[8 * 16 + 8]);
@@ -1162,8 +1041,7 @@ int main(int argc, char **argv) {
   static uint8_t wram[kWramBytes];
   static uint16_t vram[kVramWords];
   static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
-  static uint8_t source_opacity[
-      kSimTownCanvasPixels * kSimTownCanvasPixels];
+  static uint8_t source_opacity[kSimTownCanvasPixels * kSimTownCanvasPixels];
   for (int y = 0; y < kSimTownCanvasPixels; y++)
     for (int x = 0; x < kSimTownCanvasPixels; x++)
       pixels[(size_t)y * kSimTownCanvasPixels + x] =
@@ -1180,13 +1058,21 @@ int main(int argc, char **argv) {
   wram[CellIndex(6, 6)] = 0x78;
 
   uint8_t *house = wram + kRecords;
-  house[0] = 4; house[1] = 5; house[2] = 0xC0;
+  house[0] = 4;
+  house[1] = 5;
+  house[2] = 0xC0;
   uint8_t *windmill = house + 4;
-  windmill[0] = 10; windmill[1] = 11; windmill[2] = 0x83;
+  windmill[0] = 10;
+  windmill[1] = 11;
+  windmill[2] = 0x83;
   uint8_t *factory = windmill + 4;
-  factory[0] = 20; factory[1] = 20; factory[2] = 0x84;
+  factory[0] = 20;
+  factory[1] = 20;
+  factory[2] = 0x84;
   uint8_t *field = factory + 4;
-  field[0] = 25; field[1] = 25; field[2] = 0x82;
+  field[0] = 25;
+  field[1] = 25;
+  field[2] = 0x82;
   SetStructureDefinition(wram, 0x03, 0x0400, 0x0401, 0x0402, 0x0403);
   SetStructureDefinition(wram, 0x24, 0x0404, 0x0405, 0x0406, 0x0407);
   SetStructureDefinition(wram, 0x36, 0x0408, 0x0409, 0x040A, 0x040B);
@@ -1220,12 +1106,10 @@ int main(int argc, char **argv) {
   pixels[(size_t)(6 * 16) * kSimTownCanvasPixels + 6 * 16] = 0xFF647814;
   /* Authentic dark trunk/outline pixels must disappear with the whole tree
    * cell, not survive because only canopy green was treated as foreground. */
-  pixels[(size_t)(1 * 16 + 14) * kSimTownCanvasPixels + 1 * 16 + 8] =
-      0xFF352010;
+  pixels[(size_t)(1 * 16 + 14) * kSimTownCanvasPixels + 1 * 16 + 8] = 0xFF352010;
   /* Every classified source cell is reference-only, including pixels that
    * resemble terrain rather than the building silhouette. */
-  pixels[(size_t)(5 * 16 + 8) * kSimTownCanvasPixels + 4 * 16 + 8] =
-      0xFFC06020;
+  pixels[(size_t)(5 * 16 + 8) * kSimTownCanvasPixels + 4 * 16 + 8] = 0xFFC06020;
 
   /* The mountain's top-left 8x8 source remains transparent while its
    * bottom-right source is opaque. This exercises exact BG palette-index
@@ -1248,28 +1132,21 @@ int main(int argc, char **argv) {
   CHECK(scene.brush_cell_count == 2);
   CHECK(scene.mountains.cell_count == 1);
 
-  const SimBackgroundVoxelObject *object =
-      FindKind(&scene, kSimBackgroundVoxel_House);
-  CHECK(object && object->footprint_cells_w == 1 &&
-        object->footprint_cells_d == 1);
-  CHECK(object &&
-        (object->flags & kSimBackgroundVoxel_AlternateFacing));
-  CHECK(object &&
-        !(object->flags & kSimBackgroundVoxel_UnderConstruction));
+  const SimBackgroundVoxelObject *object = FindKind(&scene, kSimBackgroundVoxel_House);
+  CHECK(object && object->footprint_cells_w == 1 && object->footprint_cells_d == 1);
+  CHECK(object && (object->flags & kSimBackgroundVoxel_AlternateFacing));
+  CHECK(object && !(object->flags & kSimBackgroundVoxel_UnderConstruction));
   CHECK(object && object->town == 1 && object->development_level == 0);
 
   object = FindKind(&scene, kSimBackgroundVoxel_Cathedral);
   CHECK(object && object->cell_x == 15 && object->cell_y == 15);
-  CHECK(object && object->source_cells_h == 2 &&
-        object->footprint_cells_d == 2);
+  CHECK(object && object->source_cells_h == 2 && object->footprint_cells_d == 2);
 
   object = FindKind(&scene, kSimBackgroundVoxel_Windmill);
-  CHECK(object && object->source_cells_w == 2 &&
-        object->footprint_cells_d == 1);
+  CHECK(object && object->source_cells_w == 2 && object->footprint_cells_d == 1);
 
   object = FindKind(&scene, kSimBackgroundVoxel_Factory);
-  CHECK(object && object->footprint_cells_w == 2 &&
-        object->footprint_cells_d == 2);
+  CHECK(object && object->footprint_cells_w == 2 && object->footprint_cells_d == 2);
 
   int isolated = 0, joined = 0;
   for (uint16_t i = 0; i < scene.object_count; i++)
@@ -1298,27 +1175,21 @@ int main(int argc, char **argv) {
   CHECK(shrubs == 2);
   CHECK(shrub_beside_wood == 1);
 
-  SimBackgroundVoxels_Build(
-      1, wram, pixels, source_opacity, 1, 1, true);
+  SimBackgroundVoxels_Build(1, wram, pixels, source_opacity, 1, 1, true);
   const uint32_t *atlas = SimBackgroundVoxels_AtlasPixels();
   const uint32_t *ground = SimBackgroundVoxels_GroundPixels();
   size_t house_corner = (size_t)(5 * 16) * kSimTownCanvasPixels + 4 * 16;
-  size_t house_center =
-      (size_t)(5 * 16 + 8) * kSimTownCanvasPixels + 4 * 16 + 8;
+  size_t house_center = (size_t)(5 * 16 + 8) * kSimTownCanvasPixels + 4 * 16 + 8;
   CHECK((atlas[house_corner] >> 24) == 0xFF);
   CHECK((atlas[house_center] >> 24) == 0xFF);
   CHECK(ground[house_center] == 0xFF6A8018);
-  size_t tree_center = (size_t)(1 * 16 + 8) * kSimTownCanvasPixels +
-      1 * 16 + 8;
-  size_t tree_trunk = (size_t)(1 * 16 + 14) * kSimTownCanvasPixels +
-      1 * 16 + 8;
+  size_t tree_center = (size_t)(1 * 16 + 8) * kSimTownCanvasPixels + 1 * 16 + 8;
+  size_t tree_trunk = (size_t)(1 * 16 + 14) * kSimTownCanvasPixels + 1 * 16 + 8;
   CHECK((atlas[tree_center] >> 24) == 0xFF);
   CHECK(ground[tree_center] == 0xFF6A8018);
   CHECK(ground[tree_trunk] == 0xFF647814);
-  size_t mountain_corner =
-      (size_t)(6 * 16) * kSimTownCanvasPixels + 6 * 16;
-  size_t mountain_center =
-      (size_t)(6 * 16 + 8) * kSimTownCanvasPixels + 6 * 16 + 8;
+  size_t mountain_corner = (size_t)(6 * 16) * kSimTownCanvasPixels + 6 * 16;
+  size_t mountain_center = (size_t)(6 * 16 + 8) * kSimTownCanvasPixels + 6 * 16 + 8;
   CHECK(ground[mountain_corner] == 0xFF647814);
   CHECK(ground[mountain_center] == 0xFF6A8018);
   CHECK((atlas[mountain_corner] >> 24) == 0);
@@ -1326,8 +1197,7 @@ int main(int argc, char **argv) {
   uint32_t first_serial = SimBackgroundVoxels_Serial();
   SimBackgroundVoxels_Reset();
   CHECK(SimBackgroundVoxels_Serial() == 0);
-  SimBackgroundVoxels_Build(
-      1, wram, pixels, source_opacity, 1, 1, true);
+  SimBackgroundVoxels_Build(1, wram, pixels, source_opacity, 1, 1, true);
   CHECK(SimBackgroundVoxels_Serial() != 0);
   CHECK(SimBackgroundVoxels_Serial() != first_serial);
 
@@ -1354,8 +1224,7 @@ int main(int argc, char **argv) {
   CHECK(FindKind(&scene, kSimBackgroundVoxel_Palm) != NULL);
   for (uint16_t i = 0; i < scene.object_count; i++) {
     uint8_t kind = scene.objects[i].kind;
-    CHECK(kind == kSimBackgroundVoxel_BroadTree ||
-          kind == kSimBackgroundVoxel_Palm);
+    CHECK(kind == kSimBackgroundVoxel_BroadTree || kind == kSimBackgroundVoxel_Palm);
     /* A palm never joins a forest component, however it is surrounded. */
     if (kind == kSimBackgroundVoxel_Palm)
       CHECK(scene.objects[i].group == 0 &&
@@ -1421,8 +1290,7 @@ int main(int argc, char **argv) {
   SimBackgroundVoxels_Classify(5, wram, true, &scene);
   object = FindKind(&scene, kSimBackgroundVoxel_MarahnaTemple);
   CHECK(object && object->cell_x == 17 && object->cell_y == 17);
-  CHECK(object && object->footprint_cells_w == 2 &&
-        object->footprint_cells_d == 2);
+  CHECK(object && object->footprint_cells_w == 2 && object->footprint_cells_d == 2);
   CHECK(FindKind(&scene, kSimBackgroundVoxel_Cathedral) == NULL);
 
   /* The eraser is selected from the current town rather than hardcoded to
@@ -1461,8 +1329,7 @@ int main(int argc, char **argv) {
   ground = SimBackgroundVoxels_GroundPixels();
   CHECK(ground[tree_center] == 0xFFFFFFFF);
   CHECK(ground[house_center] == 0xFFFFFFFF);
-  size_t cathedral_center =
-      (size_t)(14 * 16 + 8) * kSimTownCanvasPixels + 14 * 16 + 8;
+  size_t cathedral_center = (size_t)(14 * 16 + 8) * kSimTownCanvasPixels + 14 * 16 + 8;
   CHECK(ground[cathedral_center] == 0xFFFFFFFF);
   CHECK(ground[mountain_corner] == 0xFFF0F2E8);
 
@@ -1478,8 +1345,7 @@ int main(int argc, char **argv) {
   CHECK(ground[house_center] == 0xFFFFFFFF);
   CHECK(ground[cathedral_center] == 0xFFFFFFFF);
   CHECK(ground[mountain_corner] == 0xFFF0F2E8);
-  CHECK(ground[(size_t)(2 * 16 + 8) * kSimTownCanvasPixels + 2 * 16 + 8] ==
-        0xFF708030);
+  CHECK(ground[(size_t)(2 * 16 + 8) * kSimTownCanvasPixels + 2 * 16 + 8] == 0xFF708030);
 
   /* Once the last clearable snow melts, the permanent snow between peaks is
    * still a valid source. Neither thawed patch may replace distant snow. */
@@ -1496,8 +1362,7 @@ int main(int argc, char **argv) {
   CHECK(ground[cathedral_center] == 0xFFFFFFFF);
   CHECK(ground[mountain_corner] == 0xFFF0F2E8);
   CHECK(ground[8 * kSimTownCanvasPixels + 8] == 0xFF708030);
-  CHECK(ground[(size_t)(2 * 16 + 8) * kSimTownCanvasPixels + 2 * 16 + 8] ==
-        0xFF708030);
+  CHECK(ground[(size_t)(2 * 16 + 8) * kSimTownCanvasPixels + 2 * 16 + 8] == 0xFF708030);
 
   /* A snow-coloured Northwall mountain follows the palette-independent rock
    * silhouette. The prior RGB mask erased white rock, while source alpha alone
@@ -1513,8 +1378,7 @@ int main(int argc, char **argv) {
   SetCanvasTile(wram, 13, 13, 1);
   SimBackgroundVoxels_Build(6, wram, pixels, NULL, 5, 5, true);
   atlas = SimBackgroundVoxels_AtlasPixels();
-  size_t north_mountain_opaque =
-      (size_t)(6 * 16 + 3) * kSimTownCanvasPixels + 6 * 16 + 12;
+  size_t north_mountain_opaque = (size_t)(6 * 16 + 3) * kSimTownCanvasPixels + 6 * 16 + 12;
   CHECK((atlas[mountain_corner] >> 24) == 0);
   CHECK((atlas[north_mountain_opaque] >> 24) == 0xFF);
 

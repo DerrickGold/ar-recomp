@@ -6,16 +6,27 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CHECK(expr) do { if (!(expr)) { \
-  fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #expr); abort(); \
-} } while (0)
+#define CHECK(expr)                                                                                \
+  do {                                                                                             \
+    if (!(expr)) {                                                                                 \
+      fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #expr);                                   \
+      abort();                                                                                     \
+    }                                                                                              \
+  } while (0)
 #define NEAR(a, b) CHECK(fabs((a) - (b)) < 0.000001)
 static uint64_t s_now, s_clock_reads;
 static unsigned s_text_calls;
-uint64_t HostClock_Nanoseconds(void) { s_clock_reads++; return s_now; }
+uint64_t HostClock_Nanoseconds(void) {
+  s_clock_reads++;
+  return s_now;
+}
 uint64_t HostClock_Milliseconds(void) { return s_now / 1000000; }
 void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha, const char *text) {
-  (void)x; (void)y; (void)scale; (void)alpha; (void)text;
+  (void)x;
+  (void)y;
+  (void)scale;
+  (void)alpha;
+  (void)text;
   s_text_calls++;
 }
 
@@ -30,69 +41,113 @@ static bool Create(void *p, const ArRenderTextureDesc *desc, ArRenderTexture *ou
   CHECK(desc->usage == kArRenderTextureUsage_Target);
   CHECK(desc->blend == kArRenderBlendMode_AlphaPremultiplied);
   if (mock->fail_create) return false;
-  *out = (ArRenderTexture){mock->creates}; return true;
+  *out = (ArRenderTexture){mock->creates};
+  return true;
 }
-static void Destroy(void *p, ArRenderTexture texture) { (void)texture; ((MockRender *)p)->destroys++; }
+static void Destroy(void *p, ArRenderTexture texture) {
+  (void)texture;
+  ((MockRender *)p)->destroys++;
+}
 static bool Capture(void *p, ArRenderTargetState *out) {
-  MockRender *mock = p; mock->captures++;
+  MockRender *mock = p;
+  mock->captures++;
   *out = (ArRenderTargetState){.target = mock->target, .valid = true};
   return !mock->fail_capture;
 }
 static bool Bind(void *p, ArRenderTexture texture) {
   MockRender *mock = p;
   if (mock->fail_bind) return false;
-  mock->target = texture; return true;
+  mock->target = texture;
+  return true;
 }
-static bool Viewport(void *p, const ArRenderRectI *rect) { (void)rect; return !((MockRender *)p)->fail_viewport; }
-static bool Clip(void *p, const ArRenderRectI *rect) { (void)p; (void)rect; return true; }
+static bool Viewport(void *p, const ArRenderRectI *rect) {
+  (void)rect;
+  return !((MockRender *)p)->fail_viewport;
+}
+static bool Clip(void *p, const ArRenderRectI *rect) {
+  (void)p;
+  (void)rect;
+  return true;
+}
 static bool Restore(void *p, const ArRenderTargetState *state) {
-  MockRender *mock = p; mock->restores++;
+  MockRender *mock = p;
+  mock->restores++;
   if (mock->fail_restore) return false;
-  mock->target = state->target; return true;
+  mock->target = state->target;
+  return true;
 }
 static bool Clear(void *p, ArRenderColorF color) {
-  (void)color; MockRender *mock = p; mock->clears++; return !mock->fail_clear;
+  (void)color;
+  MockRender *mock = p;
+  mock->clears++;
+  return !mock->fail_clear;
 }
 static bool Draw(void *p, ArRenderTexture texture, const ArRenderRectF *source,
-    const ArRenderRectF *destination, const ArRenderDrawState *state) {
-  (void)texture; (void)source; (void)destination; (void)state;
-  MockRender *mock = p; mock->draws++; return !mock->fail_draw;
+                 const ArRenderRectF *destination, const ArRenderDrawState *state) {
+  (void)texture;
+  (void)source;
+  (void)destination;
+  (void)state;
+  MockRender *mock = p;
+  mock->draws++;
+  return !mock->fail_draw;
 }
-static bool Geometry(void *p, ArRenderTexture texture, const ArRenderVertex2D *v,
-    int count, const int32_t *indices, int index_count, const ArRenderDrawState *state) {
-  (void)texture; (void)v; (void)count; (void)indices; (void)index_count; (void)state;
-  ((MockRender *)p)->geometry++; return true;
+static bool Geometry(void *p, ArRenderTexture texture, const ArRenderVertex2D *v, int count,
+                     const int32_t *indices, int index_count, const ArRenderDrawState *state) {
+  (void)texture;
+  (void)v;
+  (void)count;
+  (void)indices;
+  (void)index_count;
+  (void)state;
+  ((MockRender *)p)->geometry++;
+  return true;
 }
 
 static void TestOverlayResources(void) {
-  static const ArRenderBackendOps ops = {.struct_size = sizeof(ops), .create_texture = Create,
-      .destroy_texture = Destroy, .capture_render_target_state = Capture, .set_render_target = Bind,
-      .set_viewport = Viewport, .set_clip_rect = Clip, .restore_render_target_state = Restore,
-      .clear = Clear, .draw_texture = Draw, .draw_geometry = Geometry};
+  static const ArRenderBackendOps ops = {.struct_size = sizeof(ops),
+                                         .create_texture = Create,
+                                         .destroy_texture = Destroy,
+                                         .capture_render_target_state = Capture,
+                                         .set_render_target = Bind,
+                                         .set_viewport = Viewport,
+                                         .set_clip_rect = Clip,
+                                         .restore_render_target_state = Restore,
+                                         .clear = Clear,
+                                         .draw_texture = Draw,
+                                         .draw_geometry = Geometry};
   MockRender mock = {.target = {123}};
-  ArRenderDevice device = {.ops = &ops, .context = &mock, .capabilities = {
-      .flags = kArRenderCapability_RenderTargets | kArRenderCapability_ScopedRenderTargets}};
+  ArRenderDevice device = {.ops = &ops,
+                           .context = &mock,
+                           .capabilities = {.flags = kArRenderCapability_RenderTargets |
+                                                     kArRenderCapability_ScopedRenderTargets}};
   PerformanceSnapshot snapshot = {.revision = 1, .ready = true};
   ArRenderExtentI output = {1280, 800};
   CHECK(PerformanceOverlay_Render(&device, &snapshot, 2, output));
   CHECK(mock.creates == 1 && mock.captures == 1 && mock.restores == 1 && mock.target.value == 123);
   const unsigned cold_glyphs = s_text_calls;
   CHECK(cold_glyphs > 0);
-  for (int i = 0; i < 120; i++) CHECK(PerformanceOverlay_Render(&device, &snapshot, 2, output));
+  for (int i = 0; i < 120; i++)
+    CHECK(PerformanceOverlay_Render(&device, &snapshot, 2, output));
   CHECK(s_text_calls == cold_glyphs && mock.draws == 121 && mock.clears == 1);
   snapshot.revision++;
   CHECK(PerformanceOverlay_Render(&device, &snapshot, 2, output));
   CHECK(mock.creates == 1 && mock.clears == 2 && s_text_calls == cold_glyphs * 2);
-  CHECK(PerformanceOverlay_Render(&device, &snapshot, 2, (ArRenderExtentI){640,480}));
+  CHECK(PerformanceOverlay_Render(&device, &snapshot, 2, (ArRenderExtentI){640, 480}));
   CHECK(mock.creates == 2 && mock.destroys == 1);
   CHECK(PerformanceOverlay_Render(&device, &snapshot, 0, output));
   CHECK(mock.destroys == 2);
-  PerformanceOverlay_Reset(&device); CHECK(mock.destroys == 2);
+  PerformanceOverlay_Reset(&device);
+  CHECK(mock.destroys == 2);
   for (int failure = 0; failure < 8; failure++) {
-    mock = (MockRender){.target = {123}, .fail_create = failure == 0,
-        .fail_capture = failure == 1, .fail_bind = failure == 2,
-        .fail_clear = failure == 3, .fail_draw = failure == 4,
-        .fail_restore = failure == 5 || failure == 6, .fail_viewport = failure == 6};
+    mock = (MockRender){.target = {123},
+                        .fail_create = failure == 0,
+                        .fail_capture = failure == 1,
+                        .fail_bind = failure == 2,
+                        .fail_clear = failure == 3,
+                        .fail_draw = failure == 4,
+                        .fail_restore = failure == 5 || failure == 6,
+                        .fail_viewport = failure == 6};
     if (failure == 7) device.capabilities.flags = 0;
     const bool state_lost = failure == 5 || failure == 6;
     CHECK(PerformanceOverlay_Render(&device, &snapshot, 2, output) == !state_lost);
@@ -146,8 +201,10 @@ static void TestToggleAndWindow(void) {
     CHECK(snapshot.ready == (i == 100));
   }
   CHECK(snapshot.presents == 101);
-  NEAR(snapshot.fps, 100); NEAR(snapshot.frame_mean_ms, 10);
-  NEAR(snapshot.frame_p95_ms, 10); NEAR(snapshot.frame_max_ms, 10);
+  NEAR(snapshot.fps, 100);
+  NEAR(snapshot.frame_mean_ms, 10);
+  NEAR(snapshot.frame_p95_ms, 10);
+  NEAR(snapshot.frame_max_ms, 10);
   NEAR(snapshot.stages[kPerformance_Emulation].mean_ms, 2);
   CHECK(snapshot.stages[kPerformance_Emulation].calls == 101);
   CHECK(snapshot.stages[kPerformance_Ppu].calls == 0);
@@ -205,7 +262,8 @@ static void TestParallelAndCapacity(void) {
     CHECK(threads[i]);
   }
   Worker(&epoch);
-  for (int i = 0; i < 3; i++) SDL_WaitThread(threads[i], NULL);
+  for (int i = 0; i < 3; i++)
+    SDL_WaitThread(threads[i], NULL);
   PerformanceMetrics_PresentCompleted(0);
   PerformanceMetrics_PresentCompleted(1000000000);
   PerformanceSnapshot snapshot;
@@ -244,14 +302,15 @@ static void TestOverlayLayout(void) {
   snapshot.counts[kPerformanceCount_AtlasCopyBytes] = 4194304;
   snapshot.counts[kPerformanceCount_AtlasCopyCalls] = 2;
   PerformanceOverlayModel copy_model;
-  PerformanceOverlay_Build(&snapshot, 2, (ArRenderExtentI){1280,800}, &copy_model);
+  PerformanceOverlay_Build(&snapshot, 2, (ArRenderExtentI){1280, 800}, &copy_model);
   bool copy_line = false, atlas_line = false;
   for (int i = 0; i < copy_model.line_count; ++i) {
     copy_line |= !strcmp(copy_model.lines[i].text, "GPU copy 2.00 MiB / 3.0 calls");
     atlas_line |= !strcmp(copy_model.lines[i].text, "Atlas hit 1.0 copy 4.00MiB/2.0");
   }
   CHECK(copy_line && atlas_line);
-  const ArRenderExtentI sizes[] = {{1280,800}, {800,1280}, {640,480}, {560,390}, {320,240}, {240,120}, {0,0}};
+  const ArRenderExtentI sizes[] = {{1280, 800}, {800, 1280}, {640, 480}, {560, 390},
+                                   {320, 240},  {240, 120},  {0, 0}};
   for (int i = 0; i < kPerformanceStage_Count; i++) {
     const char *name = PerformanceMetrics_StageName((PerformanceStage)i);
     CHECK(name && *name);
@@ -262,10 +321,14 @@ static void TestOverlayLayout(void) {
     for (int host = 0; host < 4; host++)
       for (int level = 0; level <= 2; level++)
         for (size_t s = 0; s < sizeof(sizes) / sizeof(*sizes); s++) {
-          snapshot.context = (PerformanceContext){.scene = (PerformanceScene)scene, .host_mode = host};
+          snapshot.context =
+              (PerformanceContext){.scene = (PerformanceScene)scene, .host_mode = host};
           PerformanceOverlayModel model;
           PerformanceOverlay_Build(&snapshot, level, sizes[s], &model);
-          if (!level || !sizes[s].width) { CHECK(!model.line_count); continue; }
+          if (!level || !sizes[s].width) {
+            CHECK(!model.line_count);
+            continue;
+          }
           CHECK(model.panel.x >= 0 && model.panel.y >= 0);
           CHECK(model.panel.x + model.panel.w <= sizes[s].width);
           CHECK(model.panel.y + model.panel.h <= sizes[s].height);
@@ -273,7 +336,8 @@ static void TestOverlayLayout(void) {
           for (int line = 0; line < model.line_count; line++) {
             const PerformanceOverlayLine *text = &model.lines[line];
             CHECK(text->x >= model.panel.x && text->y >= model.panel.y);
-            CHECK(text->x + (int)strlen(text->text) * 8 * model.scale <= model.panel.x + model.panel.w);
+            CHECK(text->x + (int)strlen(text->text) * 8 * model.scale <=
+                  model.panel.x + model.panel.w);
             CHECK(text->y + 8 * model.scale <= model.panel.y + model.panel.h);
           }
         }

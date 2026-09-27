@@ -19,17 +19,19 @@ const char *g_last_recomp_func;
 static int failures;
 static uint16_t fake_spc_pc;
 static int control_calls;
-static bool sequence_enabled,sequence_available,sequence_ready=true;
+static bool sequence_enabled, sequence_available, sequence_ready = true;
 static unsigned sequence_calls;
 static uint8_t sequence_data[2197];
-bool ActRaiserRegional_BeginSongSequence(unsigned rule,bool *enabled) {
+bool ActRaiserRegional_BeginSongSequence(unsigned rule, bool *enabled) {
   ++sequence_calls;
-  if(!enabled || rule>=2 || !sequence_ready)return false;
-  *enabled=sequence_enabled;return true;
+  if (!enabled || rule >= 2 || !sequence_ready) return false;
+  *enabled = sequence_enabled;
+  return true;
 }
-ArRegionalMediaBytes ActRaiserRegionalMedia_Sequence(unsigned rule,bool enabled) {
-  return rule<2 && enabled && sequence_available?
-      (ArRegionalMediaBytes){sequence_data,rule?1325u:2197u}:(ArRegionalMediaBytes){0};
+ArRegionalMediaBytes ActRaiserRegionalMedia_Sequence(unsigned rule, bool enabled) {
+  return rule < 2 && enabled && sequence_available
+             ? (ArRegionalMediaBytes){sequence_data, rule ? 1325u : 2197u}
+             : (ArRegionalMediaBytes){0};
 }
 
 static void check(bool condition, const char *message) {
@@ -39,14 +41,13 @@ static void check(bool condition, const char *message) {
 }
 
 uint8 *RomPtr(uint32 address) {
-  size_t offset = ((size_t)(address >> 16) & 0x7fu) * 0x8000u +
-      (address & 0x7fffu);
+  size_t offset = ((size_t)(address >> 16) & 0x7fu) * 0x8000u + (address & 0x7fffu);
   return test_rom + (offset & (sizeof(test_rom) - 1u));
 }
 
-static SrResult fake_compare_exchange_spc_pc(
-    SrRunnerHandle *runner, const SrSpcPcControlRequest *request,
-    SrSpcPcControlResult *result) {
+static SrResult fake_compare_exchange_spc_pc(SrRunnerHandle *runner,
+                                             const SrSpcPcControlRequest *request,
+                                             SrSpcPcControlResult *result) {
   bool matches;
   (void)runner;
   ++control_calls;
@@ -57,15 +58,13 @@ static SrResult fake_compare_exchange_spc_pc(
   memset(result, 0, SR_SPC_PC_CONTROL_RESULT_V2_SIZE);
   result->struct_size = SR_SPC_PC_CONTROL_RESULT_V2_SIZE;
   result->observed_pc = fake_spc_pc;
-  matches = fake_spc_pc >= request->expected_pc_low &&
-      fake_spc_pc <= request->expected_pc_high &&
-      request->expected_aram_count <= SR_SPC_PC_EXPECTED_ARAM_MAX &&
-      memcmp(test_aram + request->expected_aram_address,
-             request->expected_aram, request->expected_aram_count) == 0;
+  matches = fake_spc_pc >= request->expected_pc_low && fake_spc_pc <= request->expected_pc_high &&
+            request->expected_aram_count <= SR_SPC_PC_EXPECTED_ARAM_MAX &&
+            memcmp(test_aram + request->expected_aram_address, request->expected_aram,
+                   request->expected_aram_count) == 0;
   if (matches) {
     fake_spc_pc = request->replacement_pc;
-    result->flags = SR_SPC_PC_CONTROL_MATCHED |
-                    SR_SPC_PC_CONTROL_WRITTEN;
+    result->flags = SR_SPC_PC_CONTROL_MATCHED | SR_SPC_PC_CONTROL_WRITTEN;
   }
   result->current_pc = fake_spc_pc;
   return SR_RESULT_OK;
@@ -137,11 +136,10 @@ static void test_sample_pool_policy(CpuState *cpu) {
   g_last_recomp_func = "Func_02_9964";
   check(ActRaiser_SpcUploadCustomize(cpu, &upload, 0x088000u),
         "ActRaiser second-stage sample pool is accepted");
-  check(test_aram[0xfffe] == 0x20u && test_aram[0xffff] == 0x21u &&
-            test_aram[0] == 0x10u && test_aram[2] == 0x12u,
+  check(test_aram[0xfffe] == 0x20u && test_aram[0xffff] == 0x21u && test_aram[0] == 0x10u &&
+            test_aram[2] == 0x12u,
         "sample chunks pack and wrap in ARAM");
-  check(g_ram[0x0102] == 0u && g_ram[0x0103] == 0u &&
-            g_ram[0x0108] == 3u && g_ram[0x0109] == 0u,
+  check(g_ram[0x0102] == 0u && g_ram[0x0103] == 0u && g_ram[0x0108] == 3u && g_ram[0x0109] == 0u,
         "upload result metadata is returned through direct page");
 
   upload.struct_size = sizeof(upload.struct_size);
@@ -151,8 +149,7 @@ static void test_sample_pool_policy(CpuState *cpu) {
 
 static void test_bootstrap_and_resident_completion(void) {
   static const uint8 entry[] = {
-      0x20, 0xcd, 0xcf, 0xbd, 0xe8, 0x00, 0x5d, 0xaf,
-      0xc8, 0xf0, 0xd0, 0xfb, 0xc5, 0xff, 0x11,
+      0x20, 0xcd, 0xcf, 0xbd, 0xe8, 0x00, 0x5d, 0xaf, 0xc8, 0xf0, 0xd0, 0xfb, 0xc5, 0xff, 0x11,
   };
   static const uint8 idle[] = {0xeb, 0xfd, 0xf0, 0xfc};
   SrSpcUploadContext upload = make_upload();
@@ -166,10 +163,8 @@ static void test_bootstrap_and_resident_completion(void) {
   upload.spc_pc = 0x0400u;
   ActRaiser_SpcUploadCommit(&upload);
   check(upload.control_flags == SR_SPC_UPLOAD_CONTROL_RUN_UNTIL_PC &&
-            upload.max_cycles == 131072u &&
-            upload.stop_pc_count == 2u &&
-            upload.stop_pc[0] == 0x0460u &&
-            upload.stop_pc[1] == 0x0462u,
+            upload.max_cycles == 131072u && upload.stop_pc_count == 2u &&
+            upload.stop_pc[0] == 0x0460u && upload.stop_pc[1] == 0x0462u,
         "initial bootstrap requests a bounded synchronous run to idle");
 
   upload = make_upload();
@@ -183,43 +178,62 @@ static void test_bootstrap_and_resident_completion(void) {
   check(fake_spc_pc == 0x0f48u && control_calls == 1,
         "deferred resident upload resumes through atomic SPC control");
   ActRaiser_SpcUploaderCompleteTick();
-  check(control_calls == 1,
-        "completed resident upload clears its deferred request");
+  check(control_calls == 1, "completed resident upload clears its deferred request");
   ActRaiser_SpcUploadBindRunner(NULL);
 }
 
 static void test_regional_sequences(void) {
   uint8_t expected[SR_APU_RAM_BYTE_COUNT];
-  for(unsigned i=0;i<sizeof(sequence_data);++i)sequence_data[i]=(uint8_t)(i*37+5);
-  for(unsigned rule=0;rule<2;++rule)for(unsigned enabled=0;enabled<2;++enabled)
-    for(unsigned available=0;available<2;++available)for(unsigned malformed=0;malformed<7;++malformed) {
-    CpuState cpu={0};SrSpcUploadContext upload=make_upload();
-    const uint32_t source=rule?0x19fa4b:0x0ef69f;
-    upload.script_offset=(rule?0xcfa4bu:0x7769fu)+(rule?1435u:2353u);
-    upload.entry_point=rule?0x1d06:0x1108;upload.block_count=5;
-    memset(test_rom,0,sizeof(test_rom));memset(test_aram,0x5a,sizeof(test_aram));memset(g_ram,0,sizeof(g_ram));
-    sequence_enabled=enabled;sequence_available=available;sequence_calls=0;
-    g_last_recomp_func="Func_02_9964";
-    if(malformed==1)++upload.script_offset;
-    if(malformed==2)--upload.block_count;
-    if(malformed==3)upload.entry_point^=0x100;
-    if(malformed==4)g_last_recomp_func="Func_02_9A56";
-    if(malformed==5)upload.entry_point=0;
-    memcpy(expected,test_aram,sizeof(expected));
-    if(!malformed && enabled && available)memcpy(expected+0x1200,sequence_data,rule?1325:2197);
-    check(ActRaiser_SpcUploadCustomize(&cpu,&upload,source+(malformed==6)),"regional sequence upload accepted");
-    check(sequence_calls==!malformed,"only the recognized song upload activates its sequence policy");
-    check(!memcmp(test_aram,expected,sizeof(expected)),"regional sequence changes only its ARAM span; missing donors preserve US data");
-    check(!cpu.A && !cpu.X && !cpu.Y && !cpu.P && !cpu.S && !cpu.D,"sequence projection preserves CPU state");
-  }
-  sequence_ready=false;sequence_calls=0;
-  CpuState cpu={0};SrSpcUploadContext upload=make_upload();
-  upload.script_offset=0x7769f+2353;upload.entry_point=0x1108;upload.block_count=5;
-  g_last_recomp_func="Func_02_9964";
-  memcpy(expected,test_aram,sizeof(expected));
-  check(!ActRaiser_SpcUploadCustomize(&cpu,&upload,0x0ef69f),"failed policy activation refuses donor projection");
-  check(sequence_calls==1 && !memcmp(expected,test_aram,sizeof(expected)),"failed activation leaves ARAM intact");
-  sequence_ready=true;
+  for (unsigned i = 0; i < sizeof(sequence_data); ++i)
+    sequence_data[i] = (uint8_t)(i * 37 + 5);
+  for (unsigned rule = 0; rule < 2; ++rule)
+    for (unsigned enabled = 0; enabled < 2; ++enabled)
+      for (unsigned available = 0; available < 2; ++available)
+        for (unsigned malformed = 0; malformed < 7; ++malformed) {
+          CpuState cpu = {0};
+          SrSpcUploadContext upload = make_upload();
+          const uint32_t source = rule ? 0x19fa4b : 0x0ef69f;
+          upload.script_offset = (rule ? 0xcfa4bu : 0x7769fu) + (rule ? 1435u : 2353u);
+          upload.entry_point = rule ? 0x1d06 : 0x1108;
+          upload.block_count = 5;
+          memset(test_rom, 0, sizeof(test_rom));
+          memset(test_aram, 0x5a, sizeof(test_aram));
+          memset(g_ram, 0, sizeof(g_ram));
+          sequence_enabled = enabled;
+          sequence_available = available;
+          sequence_calls = 0;
+          g_last_recomp_func = "Func_02_9964";
+          if (malformed == 1) ++upload.script_offset;
+          if (malformed == 2) --upload.block_count;
+          if (malformed == 3) upload.entry_point ^= 0x100;
+          if (malformed == 4) g_last_recomp_func = "Func_02_9A56";
+          if (malformed == 5) upload.entry_point = 0;
+          memcpy(expected, test_aram, sizeof(expected));
+          if (!malformed && enabled && available)
+            memcpy(expected + 0x1200, sequence_data, rule ? 1325 : 2197);
+          check(ActRaiser_SpcUploadCustomize(&cpu, &upload, source + (malformed == 6)),
+                "regional sequence upload accepted");
+          check(sequence_calls == !malformed,
+                "only the recognized song upload activates its sequence policy");
+          check(!memcmp(test_aram, expected, sizeof(expected)),
+                "regional sequence changes only its ARAM span; missing donors preserve US data");
+          check(!cpu.A && !cpu.X && !cpu.Y && !cpu.P && !cpu.S && !cpu.D,
+                "sequence projection preserves CPU state");
+        }
+  sequence_ready = false;
+  sequence_calls = 0;
+  CpuState cpu = {0};
+  SrSpcUploadContext upload = make_upload();
+  upload.script_offset = 0x7769f + 2353;
+  upload.entry_point = 0x1108;
+  upload.block_count = 5;
+  g_last_recomp_func = "Func_02_9964";
+  memcpy(expected, test_aram, sizeof(expected));
+  check(!ActRaiser_SpcUploadCustomize(&cpu, &upload, 0x0ef69f),
+        "failed policy activation refuses donor projection");
+  check(sequence_calls == 1 && !memcmp(expected, test_aram, sizeof(expected)),
+        "failed activation leaves ARAM intact");
+  sequence_ready = true;
 }
 
 int main(void) {

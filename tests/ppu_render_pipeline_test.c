@@ -32,11 +32,24 @@
  * (SNESRECOMP_TRACE / debug server). Stub them so this standalone harness links
  * without pulling in the whole runtime. None run in a normal render. */
 int sr_trace_active(void) { return 0; }
-void sr_trace_ppumem(uint16_t a, uint8_t v) { (void)a; (void)v; }
-void sr_trace_reg(uint16_t a, uint8_t v) { (void)a; (void)v; }
+void sr_trace_ppumem(uint16_t a, uint8_t v) {
+  (void)a;
+  (void)v;
+}
+void sr_trace_reg(uint16_t a, uint8_t v) {
+  (void)a;
+  (void)v;
+}
 void sr_trace_vmadd(uint16_t a) { (void)a; }
-void sr_trace_vram(uint16_t a, uint16_t v) { (void)a; (void)v; }
-void sr_vram_trace_raw(uint16_t a, uint8_t v, int p) { (void)a; (void)v; (void)p; }
+void sr_trace_vram(uint16_t a, uint16_t v) {
+  (void)a;
+  (void)v;
+}
+void sr_vram_trace_raw(uint16_t a, uint8_t v, int p) {
+  (void)a;
+  (void)v;
+  (void)p;
+}
 void CpuDispatchLogWriteFile(const char *path) { (void)path; }
 unsigned g_sr_block_index;
 uint32_t g_sr_block_ring[256];
@@ -44,33 +57,27 @@ const char *g_last_recomp_func;
 uint8_t g_ram[0x20000];
 int snes_frame_counter;
 
-void snes_setBeamPosition(
-    Snes *snes, uint16_t h_master_cycles, uint16_t v_line) {
+void snes_setBeamPosition(Snes *snes, uint16_t h_master_cycles, uint16_t v_line) {
   if (!snes) return;
   snes->hPos = h_master_cycles;
   snes->vPos = v_line;
   snes->inVblank = v_line >= 225u;
 }
 
-void snes_beginVblank(Snes *snes) {
-  snes_setBeamPosition(snes, 0u, 225u);
-}
+void snes_beginVblank(Snes *snes) { snes_setBeamPosition(snes, 0u, 225u); }
 
 uint16_t SwapInputBits(uint16_t value) {
-  value = (uint16_t)(((value & 0x5555u) << 1) |
-                     ((value >> 1) & 0x5555u));
-  value = (uint16_t)(((value & 0x3333u) << 2) |
-                     ((value >> 2) & 0x3333u));
-  value = (uint16_t)(((value & 0x0f0fu) << 4) |
-                     ((value >> 4) & 0x0f0fu));
+  value = (uint16_t)(((value & 0x5555u) << 1) | ((value >> 1) & 0x5555u));
+  value = (uint16_t)(((value & 0x3333u) << 2) | ((value >> 2) & 0x3333u));
+  value = (uint16_t)(((value & 0x0f0fu) << 4) | ((value >> 4) & 0x0f0fu));
   return (uint16_t)((value << 8) | (value >> 8));
 }
 
 /* This focused harness embeds runner.c but never advances or samples input.
  * Keep the runner's input hooks inert rather than importing the complete
  * device protocol into a PPU/presentation test. */
-void snes_input_submit(Snes *snes, unsigned port, unsigned device,
-                       unsigned buttons, int32_t dx, int32_t dy) {
+void snes_input_submit(Snes *snes, unsigned port, unsigned device, unsigned buttons, int32_t dx,
+                       int32_t dy) {
   (void)snes;
   (void)port;
   (void)device;
@@ -88,12 +95,13 @@ uint16_t snes_input_auto_result(const Snes *snes, unsigned port) {
 }
 
 static int s_failures;
-#define CHECK(expr) do { \
-  if (!(expr)) { \
-    fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr); \
-    s_failures++; \
-  } \
-} while (0)
+#define CHECK(expr)                                                                                \
+  do {                                                                                             \
+    if (!(expr)) {                                                                                 \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr);                     \
+      s_failures++;                                                                                \
+    }                                                                                              \
+  } while (0)
 
 enum { kW = 256, kH = 224 };
 
@@ -135,8 +143,7 @@ static void set_solid_4bpp_tile(Ppu *ppu, int tile, int color) {
   }
 }
 
-static void set_solid_2bpp_tile(Ppu *ppu, int word_address,
-                                int tile, int color) {
+static void set_solid_2bpp_tile(Ppu *ppu, int word_address, int tile, int color) {
   for (int row = 0; row < 8; row++) {
     uint16_t bits = 0;
     if (color & 1) bits |= 0x00ff;
@@ -155,8 +162,8 @@ typedef struct VirtualTilemapFixture {
   int first_y, last_y;
 } VirtualTilemapFixture;
 
-static PpuVirtualTilemapLookupResult lookup_virtual_tile(
-    const void *context, int32_t tile_x, int32_t tile_y, uint16_t *entry) {
+static PpuVirtualTilemapLookupResult lookup_virtual_tile(const void *context, int32_t tile_x,
+                                                         int32_t tile_y, uint16_t *entry) {
   VirtualTilemapFixture *map = (VirtualTilemapFixture *)context;
   if (!map || !entry) return false;
   if (!map->calls) {
@@ -169,15 +176,13 @@ static PpuVirtualTilemapLookupResult lookup_virtual_tile(
     if (tile_y > map->last_y) map->last_y = tile_y;
   }
   map->calls++;
-  if (tile_x < map->min_x || tile_x > map->max_x ||
-      tile_y < map->min_y || tile_y > map->max_y)
+  if (tile_x < map->min_x || tile_x > map->max_x || tile_y < map->min_y || tile_y > map->max_y)
     return false;
   *entry = (tile_x & 1) ? map->odd_entry : map->even_entry;
   return true;
 }
 
-static bool lookup_virtual_band(const void *context, int32_t tile_x,
-                                int32_t tile_y, uint16_t entry,
+static bool lookup_virtual_band(const void *context, int32_t tile_x, int32_t tile_y, uint16_t entry,
                                 uint8_t *band) {
   (void)context;
   (void)tile_y;
@@ -188,12 +193,10 @@ static bool lookup_virtual_band(const void *context, int32_t tile_x,
 }
 
 static uint32_t rgb555(int r5, int g5, int b5) {
-  return (uint32_t)expand5(r5) << 16 |
-      (uint32_t)expand5(g5) << 8 | expand5(b5);
+  return (uint32_t)expand5(r5) << 16 | (uint32_t)expand5(g5) << 8 | expand5(b5);
 }
 
-static void setup_virtual_bg(Ppu *ppu, int extra, uint8_t *fb,
-                             size_t pitch) {
+static void setup_virtual_bg(Ppu *ppu, int extra, uint8_t *fb, size_t pitch) {
   const int bg1 = kActRaiserPpuLayer_Bg1;
   ppu_reset(ppu);
   memset(fb, 0, pitch);
@@ -232,20 +235,16 @@ static void render_first_line_with_winner_mask(Ppu *ppu) {
   PpuZbufType sentinel[kW];
   memset(sentinel, 0xa5, sizeof(sentinel));
   memset(&ppu->bgBuffers[0], 0xa5, sizeof(ppu->bgBuffers[0]));
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1,
-                             (uint8_t *)overlay, sizeof(overlay)));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, (uint8_t *)overlay, sizeof(overlay)));
   render_first_line(ppu);
-  CHECK(memcmp(ppu->bgBuffers[0].data + kPpuExtraLeftRight,
-               sentinel, sizeof(sentinel)) != 0);
+  CHECK(memcmp(ppu->bgBuffers[0].data + kPpuExtraLeftRight, sentinel, sizeof(sentinel)) != 0);
 }
 
-static void fill_virtual_native_ring(Ppu *ppu, uint16_t even_entry,
-                                     uint16_t odd_entry) {
+static void fill_virtual_native_ring(Ppu *ppu, uint16_t even_entry, uint16_t odd_entry) {
   for (int tile_y = 0; tile_y < 64; tile_y++) {
     for (int tile_x = 0; tile_x < 64; tile_x++) {
-      int address = 0x2000 + (tile_x & 31) + ((tile_y & 31) << 5) +
-          ((tile_x & 32) ? 0x400 : 0) +
-          ((tile_y & 32) ? 0x800 : 0);
+      int address = 0x2000 + (tile_x & 31) + ((tile_y & 31) << 5) + ((tile_x & 32) ? 0x400 : 0) +
+                    ((tile_y & 32) ? 0x800 : 0);
       ppu->vram[address] = (tile_x & 1) ? odd_entry : even_entry;
     }
   }
@@ -265,24 +264,24 @@ static void TestVirtualTilemapMargins(void) {
    * and the PPU's priority/color words. */
   setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
   render_first_line_with_winner_mask(ppu);
-  memcpy(center_pixels, (uint32_t *)(void *)fb + kExtra,
-         sizeof(center_pixels));
-  memcpy(center_priority,
-         ppu->bgBuffers[0].data + kPpuExtraLeftRight,
-         sizeof(center_priority));
+  memcpy(center_pixels, (uint32_t *)(void *)fb + kExtra, sizeof(center_pixels));
+  memcpy(center_priority, ppu->bgBuffers[0].data + kPpuExtraLeftRight, sizeof(center_priority));
 
   VirtualTilemapFixture map = {
-    .min_x = 0, .max_x = 33, .min_y = 0, .max_y = 0,
-    .even_entry = (uint16_t)(2 | (2 << 10)),
-    .odd_entry = (uint16_t)(3 | (3 << 10)),
+      .min_x = 0,
+      .max_x = 33,
+      .min_y = 0,
+      .max_y = 0,
+      .even_entry = (uint16_t)(2 | (2 << 10)),
+      .odd_entry = (uint16_t)(3 | (3 << 10)),
   };
   PpuVirtualTilemapBinding binding = {
-    .lookup = lookup_virtual_tile,
-    .context = &map,
-    .camera_x = 8,
-    .camera_y = 0,
-    .hscroll_anchor = 8,
-    .vscroll_anchor = 0,
+      .lookup = lookup_virtual_tile,
+      .context = &map,
+      .camera_x = 8,
+      .camera_y = 0,
+      .hscroll_anchor = 8,
+      .vscroll_anchor = 0,
   };
   setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
   CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
@@ -291,8 +290,8 @@ static void TestVirtualTilemapMargins(void) {
   CHECK(row[0] == rgb555(0, 0, 31));
   CHECK(row[kWidth - 1] == rgb555(0, 31, 0));
   CHECK(memcmp(row + kExtra, center_pixels, sizeof(center_pixels)) == 0);
-  CHECK(memcmp(ppu->bgBuffers[0].data + kPpuExtraLeftRight,
-               center_priority, sizeof(center_priority)) == 0);
+  CHECK(memcmp(ppu->bgBuffers[0].data + kPpuExtraLeftRight, center_priority,
+               sizeof(center_priority)) == 0);
 
   /* CGRAM stays live: the same provider tile word immediately follows a
    * palette swap without rebuilding or mutating the virtual map. */
@@ -352,17 +351,20 @@ static void TestVirtualTilemapEffects(void) {
   static uint8_t fb[kWidth * 4];
 
   VirtualTilemapFixture map = {
-    .min_x = -8, .max_x = 64, .min_y = -8, .max_y = 64,
-    .even_entry = (uint16_t)(2 | (2 << 10)),
-    .odd_entry = (uint16_t)(3 | (3 << 10) | 0x2000),
+      .min_x = -8,
+      .max_x = 64,
+      .min_y = -8,
+      .max_y = 64,
+      .even_entry = (uint16_t)(2 | (2 << 10)),
+      .odd_entry = (uint16_t)(3 | (3 << 10) | 0x2000),
   };
   PpuVirtualTilemapBinding binding = {
-    .lookup = lookup_virtual_tile,
-    .context = &map,
-    .camera_x = 8,
-    .camera_y = 0,
-    .hscroll_anchor = 0,
-    .vscroll_anchor = 0,
+      .lookup = lookup_virtual_tile,
+      .context = &map,
+      .camera_x = 8,
+      .camera_y = 0,
+      .hscroll_anchor = 0,
+      .vscroll_anchor = 0,
   };
 
   /* Signed 10-bit anchoring preserves the nearest phase displacement across
@@ -479,18 +481,21 @@ static void TestVirtualTilemapAuthenticParity(void) {
   static PpuZbufType native_priority[kW];
 
   VirtualTilemapFixture map = {
-    .min_x = 0, .max_x = 63, .min_y = 0, .max_y = 63,
-    .even_entry = even_entry,
-    .odd_entry = odd_entry,
+      .min_x = 0,
+      .max_x = 63,
+      .min_y = 0,
+      .max_y = 63,
+      .even_entry = even_entry,
+      .odd_entry = odd_entry,
   };
   const PpuVirtualTilemapBinding binding = {
-    .lookup = lookup_virtual_tile,
-    .context = &map,
-    .camera_x = 8,
-    .camera_y = 0,
-    .hscroll_anchor = 8,
-    .vscroll_anchor = 0,
-    .flags = kPpuVirtualTilemapFlag_IncludeAuthentic,
+      .lookup = lookup_virtual_tile,
+      .context = &map,
+      .camera_x = 8,
+      .camera_y = 0,
+      .hscroll_anchor = 8,
+      .vscroll_anchor = 0,
+      .flags = kPpuVirtualTilemapFlag_IncludeAuthentic,
   };
 
   /* A full-viewport provider with the same words as the native 64x64 ring
@@ -500,9 +505,7 @@ static void TestVirtualTilemapAuthenticParity(void) {
   fill_virtual_native_ring(ppu, even_entry, odd_entry);
   render_first_line_with_winner_mask(ppu);
   memcpy(native_pixels, fb, sizeof(native_pixels));
-  memcpy(native_priority,
-         ppu->bgBuffers[0].data + kPpuExtraLeftRight,
-         sizeof(native_priority));
+  memcpy(native_priority, ppu->bgBuffers[0].data + kPpuExtraLeftRight, sizeof(native_priority));
 
   setup_virtual_bg(ppu, 0, fb, sizeof(fb));
   fill_virtual_native_ring(ppu, even_entry, odd_entry);
@@ -512,8 +515,8 @@ static void TestVirtualTilemapAuthenticParity(void) {
   CHECK(map.first_x == 1 && map.last_x == 32);
   CHECK(map.first_y == 0 && map.last_y == 0);
   CHECK(memcmp(fb, native_pixels, sizeof(native_pixels)) == 0);
-  CHECK(memcmp(ppu->bgBuffers[0].data + kPpuExtraLeftRight,
-               native_priority, sizeof(native_priority)) == 0);
+  CHECK(memcmp(ppu->bgBuffers[0].data + kPpuExtraLeftRight, native_priority,
+               sizeof(native_priority)) == 0);
 
   /* Mosaic samples a coarser set of source pixels, but ownership must remain
    * invisible there as well. */
@@ -522,9 +525,7 @@ static void TestVirtualTilemapAuthenticParity(void) {
   ppu->mosaic = (uint8_t)((3 << 4) | (1u << bg1));
   render_first_line_with_winner_mask(ppu);
   memcpy(native_pixels, fb, sizeof(native_pixels));
-  memcpy(native_priority,
-         ppu->bgBuffers[0].data + kPpuExtraLeftRight,
-         sizeof(native_priority));
+  memcpy(native_priority, ppu->bgBuffers[0].data + kPpuExtraLeftRight, sizeof(native_priority));
 
   setup_virtual_bg(ppu, 0, fb, sizeof(fb));
   fill_virtual_native_ring(ppu, even_entry, odd_entry);
@@ -534,8 +535,8 @@ static void TestVirtualTilemapAuthenticParity(void) {
   render_first_line_with_winner_mask(ppu);
   CHECK(map.calls > 0);
   CHECK(memcmp(fb, native_pixels, sizeof(native_pixels)) == 0);
-  CHECK(memcmp(ppu->bgBuffers[0].data + kPpuExtraLeftRight,
-               native_priority, sizeof(native_priority)) == 0);
+  CHECK(memcmp(ppu->bgBuffers[0].data + kPpuExtraLeftRight, native_priority,
+               sizeof(native_priority)) == 0);
 
   ppu_free(ppu);
 }
@@ -550,18 +551,21 @@ static void TestVirtualTilemapPresentationBandsPreserveFlatOutput(void) {
   static uint32_t primary[kW], high[kW], far[kW];
 
   VirtualTilemapFixture map = {
-    .min_x = 0, .max_x = 63, .min_y = 0, .max_y = 63,
-    .even_entry = (uint16_t)(2 | (2 << 10)),
-    .odd_entry = (uint16_t)(3 | (3 << 10) | 0x2000),
+      .min_x = 0,
+      .max_x = 63,
+      .min_y = 0,
+      .max_y = 63,
+      .even_entry = (uint16_t)(2 | (2 << 10)),
+      .odd_entry = (uint16_t)(3 | (3 << 10) | 0x2000),
   };
   PpuVirtualTilemapBinding binding = {
-    .lookup = lookup_virtual_tile,
-    .context = &map,
-    .camera_x = 8,
-    .camera_y = 0,
-    .hscroll_anchor = 8,
-    .vscroll_anchor = 0,
-    .flags = kPpuVirtualTilemapFlag_IncludeAuthentic,
+      .lookup = lookup_virtual_tile,
+      .context = &map,
+      .camera_x = 8,
+      .camera_y = 0,
+      .hscroll_anchor = 8,
+      .vscroll_anchor = 0,
+      .flags = kPpuVirtualTilemapFlag_IncludeAuthentic,
   };
 
   setup_virtual_bg(ppu, 0, fb, sizeof(fb));
@@ -575,14 +579,10 @@ static void TestVirtualTilemapPresentationBandsPreserveFlatOutput(void) {
   memset(far, 0, sizeof(far));
   binding.band_lookup = lookup_virtual_band;
   CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
-  CHECK(PpuBindOverlaySurface(
-      ppu, kPpuOverlaySource_Bg1, (uint8_t *)primary, sizeof(primary)));
-  CHECK(PpuBindOverlayPrioSurface(
-      ppu, kPpuOverlaySource_Bg1, 1, (uint8_t *)high));
-  CHECK(PpuBindOverlayPrioSurface(
-      ppu, kPpuOverlaySource_Bg1, 2, (uint8_t *)far));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1, 0));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, (uint8_t *)primary, sizeof(primary)));
+  CHECK(PpuBindOverlayPrioSurface(ppu, kPpuOverlaySource_Bg1, 1, (uint8_t *)high));
+  CHECK(PpuBindOverlayPrioSurface(ppu, kPpuOverlaySource_Bg1, 2, (uint8_t *)far));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1, 0));
   render_first_line(ppu);
 
   /* World x begins at tile 1: ordinary, high, far, then repeats. Each
@@ -623,17 +623,20 @@ static void TestVirtualTilemapVerticalMargin(void) {
   PpuBeginDrawing(ppu, fb, kW * sizeof(uint32_t), 0);
 
   VirtualTilemapFixture map = {
-    .min_x = 0, .max_x = 31, .min_y = 0, .max_y = 0,
-    .even_entry = (uint16_t)(2 | (2 << 10)),
-    .odd_entry = (uint16_t)(2 | (2 << 10)),
+      .min_x = 0,
+      .max_x = 31,
+      .min_y = 0,
+      .max_y = 0,
+      .even_entry = (uint16_t)(2 | (2 << 10)),
+      .odd_entry = (uint16_t)(2 | (2 << 10)),
   };
   PpuVirtualTilemapBinding binding = {
-    .lookup = lookup_virtual_tile,
-    .context = &map,
-    .camera_x = 0,
-    .camera_y = 6,
-    .hscroll_anchor = 0,
-    .vscroll_anchor = 0x3ff,
+      .lookup = lookup_virtual_tile,
+      .context = &map,
+      .camera_x = 0,
+      .camera_y = 6,
+      .hscroll_anchor = 0,
+      .vscroll_anchor = 0x3ff,
   };
   CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)bg1, &binding));
   ppu_runLine(ppu, 0);
@@ -655,7 +658,7 @@ static void TestObjRangeRaster(void) {
   if (!ppu) return;
   ppu_reset(ppu);
   ppu->inidisp = 0x0f;
-  ppu->obsel = 0;  /* 8x8 small objects; OBJ tiles start at VRAM word 0. */
+  ppu->obsel = 0; /* 8x8 small objects; OBJ tiles start at VRAM word 0. */
   ppu->cgram[0x81] = bgr555(31, 0, 0);
   ppu->cgram[0x82] = bgr555(0, 0, 31);
   set_solid_4bpp_tile(ppu, 0, 1);
@@ -669,19 +672,16 @@ static void TestObjRangeRaster(void) {
   ppu->oam[3] = 1 | (2 << 12);
   PpuObjRangeBounds bounds;
   CHECK(PpuGetObjRangeBounds(ppu, 0, 2, 2, &bounds));
-  CHECK(bounds.x0 == 10 && bounds.y0 == 20 &&
-        bounds.x1 == 18 && bounds.y1 == 28);
+  CHECK(bounds.x0 == 10 && bounds.y0 == 20 && bounds.x1 == 18 && bounds.y1 == 28);
 
   uint32_t pixels[8 * 8];
-  CHECK(PpuRasterizeObjRange(ppu, 0, 2, 2, &bounds, pixels, 8, 8,
-                             8 * sizeof(uint32_t)));
+  CHECK(PpuRasterizeObjRange(ppu, 0, 2, 2, &bounds, pixels, 8, 8, 8 * sizeof(uint32_t)));
   CHECK(pixels[0] == 0xffff0000u);
   CHECK(pixels[63] == 0xffff0000u);
 
   ppu->oamaddh = 0x80;
-  ppu->oamaddl = 2;  /* byte index 2 = OAM slot 1 */
-  CHECK(PpuRasterizeObjRange(ppu, 0, 2, 2, &bounds, pixels, 8, 8,
-                             8 * sizeof(uint32_t)));
+  ppu->oamaddl = 2; /* byte index 2 = OAM slot 1 */
+  CHECK(PpuRasterizeObjRange(ppu, 0, 2, 2, &bounds, pixels, 8, 8, 8 * sizeof(uint32_t)));
   CHECK(pixels[0] == 0xff0000ffu);
 
   /* High-OAM x/size bits and vertical OAM wrap are interpreted by the same
@@ -690,24 +690,21 @@ static void TestObjRangeRaster(void) {
   ppu->oam[5] = 0 | (1 << 12);
   ppu->highOam[0] = (1 << 4) | (1 << 5);
   CHECK(PpuGetObjRangeBounds(ppu, 2, 1, 1, &bounds));
-  CHECK(bounds.x0 == -4 && bounds.y0 == -6 &&
-        bounds.x1 == 12 && bounds.y1 == 10);
+  CHECK(bounds.x0 == -4 && bounds.y0 == -6 && bounds.x1 == 12 && bounds.y1 == 10);
   CHECK(!PpuGetObjRangeBounds(ppu, 2, 1, 0, &bounds));
 
   /* An asymmetric source pixel proves horizontal and vertical flip handling
    * is shared with scanout rather than approximated by the atlas caller. */
   memset(&ppu->vram[2 * 16], 0, 16 * sizeof(ppu->vram[0]));
-  ppu->vram[2 * 16] = 1u << 6;  /* source (x=1,y=0), color index 1 */
+  ppu->vram[2 * 16] = 1u << 6; /* source (x=1,y=0), color index 1 */
   ppu->oamaddh = 0;
   ppu->oam[6] = 30 | (40 << 8);
   ppu->oam[7] = 2;
   CHECK(PpuGetObjRangeBounds(ppu, 3, 1, 0, &bounds));
-  CHECK(PpuRasterizeObjRange(ppu, 3, 1, 0, &bounds, pixels, 8, 8,
-                             8 * sizeof(uint32_t)));
+  CHECK(PpuRasterizeObjRange(ppu, 3, 1, 0, &bounds, pixels, 8, 8, 8 * sizeof(uint32_t)));
   CHECK(pixels[1] == 0xffff0000u && pixels[0] == 0);
-  ppu->oam[7] |= 0xc000;  /* H+V flip -> destination (x=6,y=7). */
-  CHECK(PpuRasterizeObjRange(ppu, 3, 1, 0, &bounds, pixels, 8, 8,
-                             8 * sizeof(uint32_t)));
+  ppu->oam[7] |= 0xc000; /* H+V flip -> destination (x=6,y=7). */
+  CHECK(PpuRasterizeObjRange(ppu, 3, 1, 0, &bounds, pixels, 8, 8, 8 * sizeof(uint32_t)));
   CHECK(pixels[7 * 8 + 6] == 0xffff0000u && pixels[1] == 0);
 
   ppu_free(ppu);
@@ -738,9 +735,7 @@ static void TestObjRangeScanoutCapture(void) {
   memset(capture, 0x5a, sizeof(capture));
   PpuSetExtraSpace(ppu, 0);
   PpuBeginDrawing(ppu, framebuffer, kW * sizeof(uint32_t), 0);
-  CHECK(PpuSetObjRangeCapture(
-      ppu, 1, 1, 10, 20, 8, 8, (uint8_t *)capture,
-      kW * sizeof(uint32_t)));
+  CHECK(PpuSetObjRangeCapture(ppu, 1, 1, 10, 20, 8, 8, (uint8_t *)capture, kW * sizeof(uint32_t)));
   ppu_runLine(ppu, 0);
   ppu_runLine(ppu, 21);
   const uint32_t *frame = (const uint32_t *)(const void *)framebuffer;
@@ -792,8 +787,7 @@ static void TestWorldNavigationPartialBrightnessCapture(void) {
     frame.view = kSimView_WorldNavigation;
     frame.world_navigation_scene.valid = true;
     ppu->inidisp = brightness;
-    CHECK(SimWorldNavigationCapture_Capture(
-        &frame, sr_runner_handle(&snes)));
+    CHECK(SimWorldNavigationCapture_Capture(&frame, sr_runner_handle(&snes)));
     CHECK(frame.view == kSimView_WorldNavigation);
     CHECK(frame.world_navigation_brightness == brightness);
     CHECK(frame.separated_backdrop_argb == 0xffff0000u);
@@ -809,31 +803,23 @@ static void TestWorldNavigationPartialBrightnessCapture(void) {
   ppu->cgram[0x81] = bgr555(31, 0, 0);
   ppu->cgram[0x91] = bgr555(0, 0, 31);
   for (int slot = 0; slot < 8; slot++) {
-    ppu->oam[slot * 2] =
-        (uint16_t)((25u << 8) | (uint8_t)(156 + slot * 8));
+    ppu->oam[slot * 2] = (uint16_t)((25u << 8) | (uint8_t)(156 + slot * 8));
     ppu->oam[slot * 2 + 1] = (uint16_t)(0x3000u | (uint8_t)slot);
   }
   for (int cell = 0; cell < 12; ++cell) {
     const int slot = 8 + cell;
-    ppu->oam[slot * 2] = (uint16_t)(
-        (17u + (unsigned)(cell / 6) * 8u) << 8 |
-        (144u + (unsigned)(cell % 6) * 16u));
-    ppu->oam[slot * 2 + 1] =
-        (uint16_t)(0x3200u | (cell < 6 ? 0x28u : 0x38u));
+    ppu->oam[slot * 2] =
+        (uint16_t)((17u + (unsigned)(cell / 6) * 8u) << 8 | (144u + (unsigned)(cell % 6) * 16u));
+    ppu->oam[slot * 2 + 1] = (uint16_t)(0x3200u | (cell < 6 ? 0x28u : 0x38u));
     const unsigned high_bit = (unsigned)(slot & 3) * 2u + 1u;
     ppu->highOam[slot >> 2] |= (uint8_t)(1u << high_bit);
   }
-  static const uint8_t palace_x[9] =
-      {104, 120, 136, 104, 120, 136, 104, 120, 136};
-  static const uint8_t palace_y[9] =
-      {81, 81, 81, 97, 97, 97, 113, 113, 113};
-  static const uint8_t palace_tile[9] =
-      {0x06, 0x08, 0x0a, 0x0c, 0x0e, 0x26, 0x60, 0x62, 0x64};
+  static const uint8_t palace_x[9] = {104, 120, 136, 104, 120, 136, 104, 120, 136};
+  static const uint8_t palace_y[9] = {81, 81, 81, 97, 97, 97, 113, 113, 113};
+  static const uint8_t palace_tile[9] = {0x06, 0x08, 0x0a, 0x0c, 0x0e, 0x26, 0x60, 0x62, 0x64};
   for (int i = 0; i < 9; i++) {
-    ppu->oam[(20 + i) * 2] =
-        (uint16_t)(palace_x[i] | ((uint16_t)palace_y[i] << 8));
-    ppu->oam[(20 + i) * 2 + 1] =
-        (uint16_t)(palace_tile[i] | 0x3200u);
+    ppu->oam[(20 + i) * 2] = (uint16_t)(palace_x[i] | ((uint16_t)palace_y[i] << 8));
+    ppu->oam[(20 + i) * 2 + 1] = (uint16_t)(palace_tile[i] | 0x3200u);
   }
   ActRaiserSpriteOwnership_Begin(0, 9, 1);
   ActRaiserSpriteOwnership_RecordSim(0x06a0, 0x33, 0, 32);
@@ -845,8 +831,7 @@ static void TestWorldNavigationPartialBrightnessCapture(void) {
   composed.view = kSimView_WorldNavigation;
   composed.world_navigation_scene.valid = true;
   ppu->inidisp = 0x0f;
-  CHECK(SimWorldNavigationCapture_Capture(
-      &composed, sr_runner_handle(&snes)));
+  CHECK(SimWorldNavigationCapture_Capture(&composed, sr_runner_handle(&snes)));
   CHECK(composed.world_navigation_scene.composition.label.screen_x == 156);
   CHECK(composed.world_navigation_scene.composition.label.screen_y == 25);
   CHECK(composed.world_navigation_scene.composition.label.width == 64);
@@ -867,8 +852,7 @@ static void TestWorldNavigationPartialBrightnessCapture(void) {
   blank.view = kSimView_WorldNavigation;
   blank.world_navigation_scene.valid = true;
   ppu->inidisp = 0x8f;
-  CHECK(!SimWorldNavigationCapture_Capture(
-      &blank, sr_runner_handle(&snes)));
+  CHECK(!SimWorldNavigationCapture_Capture(&blank, sr_runner_handle(&snes)));
   CHECK(blank.view == kSimView_AuthenticFallback);
   CHECK(blank.world_navigation_brightness == 15);
 
@@ -876,10 +860,9 @@ static void TestWorldNavigationPartialBrightnessCapture(void) {
   ppu_free(ppu);
 }
 
-static void BeginSimRecord(uint16_t record, bool world, uint16_t cursor,
-                           uint16_t world_x, uint16_t world_y) {
-  SimRenderMetadata_BeginRecord(
-      record, world, false, 0xe000, world_x, world_y, 1, 0, 0, cursor);
+static void BeginSimRecord(uint16_t record, bool world, uint16_t cursor, uint16_t world_x,
+                           uint16_t world_y) {
+  SimRenderMetadata_BeginRecord(record, world, false, 0xe000, world_x, world_y, 1, 0, 0, cursor);
 }
 
 static void TestSemanticAtlasPacking(void) {
@@ -916,8 +899,7 @@ static void TestSemanticAtlasPacking(void) {
   CHECK(atlas.objects[0].local_y0 == -13);
   CHECK(atlas.objects[0].foot_x == 113 && atlas.objects[0].foot_y == 65);
   CHECK(atlas.objects[1].foot_x == 113 && atlas.objects[1].foot_y == 65);
-  CHECK(g_sim_obj_atlas_pixels[1 * kSimObjAtlasWidth + 1] ==
-        0xffffffffu);
+  CHECK(g_sim_obj_atlas_pixels[1 * kSimObjAtlasWidth + 1] == 0xffffffffu);
 
   /* A mixed real/synthetic composition is packed from exact parts in emitter
    * order. The second part sits past OAM's positive-X decode boundary: an OAM
@@ -979,16 +961,15 @@ static void TestSemanticAtlasPacking(void) {
    * checkpoint still fails on it -- it just no longer costs the frame. */
   ppu_reset(ppu);
   ppu->inidisp = 0x0f;
-  ppu->obsel = 2 << 5;  /* size pair 8/64 */
+  ppu->obsel = 2 << 5; /* size pair 8/64 */
   SimRenderMetadata_Reset();
   for (int slot = 0; slot < 50; slot++) {
     bool world = slot >= kActRaiserSimFixedRecordCount;
     int record_index = world ? slot - kActRaiserSimFixedRecordCount : slot;
-    uint16_t record = (uint16_t)(
-        (world ? kActRaiserWram_SimWorldRecords
-               : kActRaiserWram_SimFixedRecords) +
-        record_index * (world ? kActRaiserSimWorldRecordStride
-                              : kActRaiserSimFixedRecordStride));
+    uint16_t record =
+        (uint16_t)((world ? kActRaiserWram_SimWorldRecords : kActRaiserWram_SimFixedRecords) +
+                   record_index *
+                       (world ? kActRaiserSimWorldRecordStride : kActRaiserSimFixedRecordStride));
     BeginSimRecord(record, world, (uint16_t)(slot * 4), 0, 0);
     SimRenderMetadata_RecordPart((uint16_t)(slot * 4), 1u << 12);
     SimRenderMetadata_EndRecord((uint16_t)((slot + 1) * 4));
@@ -1003,16 +984,17 @@ static void TestSemanticAtlasPacking(void) {
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
   wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
   SimFrameData frame;
-  SimRenderMetadata_CaptureFrame(
-      &frame, wram, true, false, 0, 0, 0);
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, 0, 0, 0);
   /* The frame survives, which is the entire point of the reversal. */
   CHECK(frame.metadata_valid);
   CHECK(frame.atlas_valid);
   CHECK(!(frame.integrity_flags & kSimMetadataIntegrity_AtlasOverflow));
   int packed = 0, purged = 0;
   for (int i = 0; i < frame.object_count; i++) {
-    if (frame.objects[i].atlas_valid) packed++;
-    else purged++;
+    if (frame.objects[i].atlas_valid)
+      packed++;
+    else
+      purged++;
   }
   /* 512 / (64 + 1) = 7 columns of 7 rows, so 49 of the 50 pack. */
   CHECK(packed == 49);
@@ -1039,9 +1021,8 @@ static void TestSim3DFlatComposition(void) {
 
   uint32_t output[(width + 1) * height];
   memset(output, 0xcc, sizeof(output));
-  Sim3D_ComposeFlatPixels(
-      output, width, height, (width + 1) * (int)sizeof(uint32_t),
-      0xff112233u, 1, 3, planes, 0, 0);
+  Sim3D_ComposeFlatPixels(output, width, height, (width + 1) * (int)sizeof(uint32_t), 0xff112233u,
+                          1, 3, planes, 0, 0);
   CHECK(output[0] == 0xff000000u);
   CHECK(output[1] == 0xffff00ffu); /* last hardware-rank plane wins */
   CHECK(output[2] == 0xff112233u);
@@ -1049,14 +1030,12 @@ static void TestSim3DFlatComposition(void) {
   CHECK(output[width + 2] == 0xff112233u);
   CHECK(output[width + 3] == 0xff112233u);
 
-  Sim3D_ComposeFlatPixels(
-      output, width, 1, (width + 1) * (int)sizeof(uint32_t),
-      0xff112233u, 1, 3, planes, 1u << kSim3DPlane_Obj0, 0);
+  Sim3D_ComposeFlatPixels(output, width, 1, (width + 1) * (int)sizeof(uint32_t), 0xff112233u, 1, 3,
+                          planes, 1u << kSim3DPlane_Obj0, 0);
   CHECK(output[1] == 0xff00ff00u);
 
-  Sim3D_ComposeFlatPixels(
-      output, width, 1, (width + 1) * (int)sizeof(uint32_t),
-      0xff112233u, 1, 3, planes, 1u << kSim3DPlane_Obj1, 0);
+  Sim3D_ComposeFlatPixels(output, width, 1, (width + 1) * (int)sizeof(uint32_t), 0xff112233u, 1, 3,
+                          planes, 1u << kSim3DPlane_Obj1, 0);
   CHECK(output[1] == 0xff112233u); /* alpha-zero capture cannot cover */
 }
 
@@ -1081,9 +1060,12 @@ static void TestSim3DInertColorMath(void) {
       render_first_line(ppu);
       CHECK(!memcmp(reference, pixels, sizeof(reference)));
       const Sim3DCaptureRequest request = {
-        .town = true, .master_enabled = true, .renderer_ready = true,
-        .requested_features = kSimFeature_SeparatedComposite | kSimFeature_GroundProjection,
-        .width = kW, .height = 1,
+          .town = true,
+          .master_enabled = true,
+          .renderer_ready = true,
+          .requested_features = kSimFeature_SeparatedComposite | kSimFeature_GroundProjection,
+          .width = kW,
+          .height = 1,
       };
       Sim3D_BeginFrame();
       CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
@@ -1110,13 +1092,12 @@ static void TestSim3DFlatCompositionDemand(void) {
   enum { width = kActRaiserAuthenticWidth, height = 1 };
   uint32_t authentic[width] = {0};
   Sim3DCaptureRequest request = {
-    .town = true,
-    .master_enabled = true,
-    .renderer_ready = true,
-    .requested_features = kSimFeature_SeparatedComposite |
-                          kSimFeature_GroundProjection,
-    .width = width,
-    .height = height,
+      .town = true,
+      .master_enabled = true,
+      .renderer_ready = true,
+      .requested_features = kSimFeature_SeparatedComposite | kSimFeature_GroundProjection,
+      .width = width,
+      .height = height,
   };
 
   /* Capture reports a selected-resource contract failure without reaching
@@ -1125,8 +1106,7 @@ static void TestSim3DFlatCompositionDemand(void) {
   Sim3D_BeginFrame();
   request.renderer_ready = false;
   CHECK(!Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
-  CHECK(Sim3D_GetCaptureContractFailure() ==
-        kSim3DCaptureContract_RendererUnavailable);
+  CHECK(Sim3D_GetCaptureContractFailure() == kSim3DCaptureContract_RendererUnavailable);
   request.renderer_ready = true;
 
   /* The projected profile has no flat-buffer reader. A sentinel proves the
@@ -1135,7 +1115,8 @@ static void TestSim3DFlatCompositionDemand(void) {
   CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   for (int plane = 0; plane < kSim3DPlane_Count; plane++)
     memset(g_sim3d_layer_pixels[plane], 0, width * sizeof(uint32_t));
-  for (int x = 0; x < width; x++) g_sim3d_flat_pixels[x] = 0x5a5a5a5au;
+  for (int x = 0; x < width; x++)
+    g_sim3d_flat_pixels[x] = 0x5a5a5a5au;
   Sim3D_FinishCapture((uint8_t *)authentic, width * (int)sizeof(uint32_t), 1);
   for (int x = 0; x < width; x++)
     CHECK(g_sim3d_flat_pixels[x] == 0x5a5a5a5au);
@@ -1152,8 +1133,7 @@ static void TestSim3DFlatCompositionDemand(void) {
     memset(g_sim3d_layer_pixels[plane], 0, width * sizeof(uint32_t));
   Sim3D_FinishCapture((uint8_t *)authentic, width * (int)sizeof(uint32_t), 2);
   CHECK(g_sim3d_flat_pixels[0] != 0x5a5a5a5au);
-  CHECK(g_sim3d_flat_pixels[0] ==
-        ActRaiser_BackdropArgb(ppu->cgram[0], PPU_brightness(ppu)));
+  CHECK(g_sim3d_flat_pixels[0] == ActRaiser_BackdropArgb(ppu->cgram[0], PPU_brightness(ppu)));
 
   Sim3D_BeginFrame();
   ppu_free(ppu);
@@ -1170,34 +1150,28 @@ static void TestSim3DPlaneTextureUploadMask(void) {
   CHECK(Sim3D_ResolveGroundSource(underlay, false, true) == kSim3DGround_Canvas);
   CHECK(Sim3D_ResolveGroundSource(underlay, true, false) == kSim3DGround_Canvas);
   CHECK(Sim3D_ResolveGroundSource(underlay, true, true) == kSim3DGround_Voxels);
-  CHECK(Sim3D_ResolveGroundSource(underlay | kSimFeature_GlobeUnderlay, true, true) == kSim3DGround_Voxels);
+  CHECK(Sim3D_ResolveGroundSource(underlay | kSimFeature_GlobeUnderlay, true, true) ==
+        kSim3DGround_Voxels);
   const uint32_t all_planes = (1u << kSim3DPlane_Count) - 1u;
   CHECK(Sim3D_PlaneTextureUploadMask(0, all_planes) == 0);
-  CHECK(Sim3D_PlaneTextureUploadMask(
-            kSimFeature_SeparatedComposite, all_planes) == 0);
-  CHECK(Sim3D_PlaneTextureUploadMask(
-            kSimFeature_SeparatedComposite |
-            kSimFeature_GroundProjection, all_planes) == all_planes);
+  CHECK(Sim3D_PlaneTextureUploadMask(kSimFeature_SeparatedComposite, all_planes) == 0);
+  CHECK(Sim3D_PlaneTextureUploadMask(kSimFeature_SeparatedComposite | kSimFeature_GroundProjection,
+                                     all_planes) == all_planes);
 
   uint32_t billboard_mask = Sim3D_PlaneTextureUploadMask(
-      kSimFeature_SeparatedComposite |
-      kSimFeature_GroundProjection |
-      kSimFeature_ObjectBillboards, all_planes);
+      kSimFeature_SeparatedComposite | kSimFeature_GroundProjection | kSimFeature_ObjectBillboards,
+      all_planes);
   int uploaded_planes = 0;
   for (int plane = 0; plane < kSim3DPlane_Count; plane++)
     if (billboard_mask & (1u << plane)) uploaded_planes++;
   for (int priority = 0; priority < 4; priority++)
-    CHECK(!(billboard_mask &
-            (1u << Sim3D_ObjPlaneForPriority(priority))));
+    CHECK(!(billboard_mask & (1u << Sim3D_ObjPlaneForPriority(priority))));
   CHECK(uploaded_planes == 6);
   /* A missing producer bit always wins over feature selection. Presentation
    * must not sample a stale texture even if a future caller violates the
    * capture/fallback contract. */
-  CHECK(Sim3D_PlaneTextureUploadMask(
-            kSimFeature_SeparatedComposite |
-            kSimFeature_GroundProjection,
-            1u << kSim3DPlane_Bg1Low) ==
-        (1u << kSim3DPlane_Bg1Low));
+  CHECK(Sim3D_PlaneTextureUploadMask(kSimFeature_SeparatedComposite | kSimFeature_GroundProjection,
+                                     1u << kSim3DPlane_Bg1Low) == (1u << kSim3DPlane_Bg1Low));
 }
 
 static void TestSim3DRawObjCaptureFallbackContract(void) {
@@ -1212,16 +1186,15 @@ static void TestSim3DRawObjCaptureFallbackContract(void) {
   ppu->screenEnabled[1] = 0;
 
   Sim3DCaptureRequest request = {
-    .town = true,
-    .master_enabled = true,
-    .renderer_ready = true,
-    .billboard_atlas_ready = true,
-    .billboard_renderer_ready = true,
-    .requested_features = kSimFeature_SeparatedComposite |
-                          kSimFeature_GroundProjection |
-                          kSimFeature_ObjectBillboards,
-    .width = kActRaiserAuthenticWidth,
-    .height = 1,
+      .town = true,
+      .master_enabled = true,
+      .renderer_ready = true,
+      .billboard_atlas_ready = true,
+      .billboard_renderer_ready = true,
+      .requested_features = kSimFeature_SeparatedComposite | kSimFeature_GroundProjection |
+                            kSimFeature_ObjectBillboards,
+      .width = kActRaiserAuthenticWidth,
+      .height = 1,
   };
   uint32_t authentic[kActRaiserAuthenticWidth] = {0};
 
@@ -1256,8 +1229,7 @@ static void TestSim3DRawObjCaptureFallbackContract(void) {
   SimRenderMetadata_Reset();
   CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] != NULL);
-  Sim3D_FinishCapture((uint8_t *)authentic,
-                      kActRaiserAuthenticWidth * (int)sizeof(uint32_t), 1);
+  Sim3D_FinishCapture((uint8_t *)authentic, kActRaiserAuthenticWidth * (int)sizeof(uint32_t), 1);
   SimFrameData fallback_frame = {0};
   Sim3DTuning fallback_tuning = {0};
   fallback_tuning.landscape_height_pct = 55;
@@ -1267,17 +1239,13 @@ static void TestSim3DRawObjCaptureFallbackContract(void) {
   CHECK(fallback_frame.height_scale_x100 == 130);
   fallback_tuning.landscape_height_pct = -1;
   Sim3D_AnnotateFrame(&fallback_frame, &fallback_tuning);
-  CHECK(fallback_frame.landscape_height_pct ==
-        kSimTownTerrainLandscapeHeightMinimumPct);
-  fallback_tuning.landscape_height_pct =
-      kSimTownTerrainLandscapeHeightMaximumPct + 1;
+  CHECK(fallback_frame.landscape_height_pct == kSimTownTerrainLandscapeHeightMinimumPct);
+  fallback_tuning.landscape_height_pct = kSimTownTerrainLandscapeHeightMaximumPct + 1;
   Sim3D_AnnotateFrame(&fallback_frame, &fallback_tuning);
-  CHECK(fallback_frame.landscape_height_pct ==
-        kSimTownTerrainLandscapeHeightMaximumPct);
+  CHECK(fallback_frame.landscape_height_pct == kSimTownTerrainLandscapeHeightMaximumPct);
   CHECK(fallback_frame.separated_valid);
   CHECK(fallback_frame.separated_status == kSim3DCapture_AtlasInvalid);
-  CHECK(fallback_frame.separated_plane_mask ==
-        (1u << kSim3DPlane_Count) - 1u);
+  CHECK(fallback_frame.separated_plane_mask == (1u << kSim3DPlane_Count) - 1u);
   CHECK(Sim3D_BeginFrame());
   PpuClearOverlayBindings(ppu);
   request.billboard_atlas_ready = true;
@@ -1287,8 +1255,7 @@ static void TestSim3DRawObjCaptureFallbackContract(void) {
   request.billboard_renderer_ready = false;
   CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] != NULL);
-  Sim3D_FinishCapture((uint8_t *)authentic,
-                      kActRaiserAuthenticWidth * (int)sizeof(uint32_t), 1);
+  Sim3D_FinishCapture((uint8_t *)authentic, kActRaiserAuthenticWidth * (int)sizeof(uint32_t), 1);
   CHECK(Sim3D_ImplementedFeatures() & kSimFeature_GroundProjection);
   CHECK(!(Sim3D_ImplementedFeatures() & kSimFeature_ObjectBillboards));
   CHECK(Sim3D_BeginFrame());
@@ -1320,30 +1287,26 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
   ppu->bgmode = 9;
   ppu->screenEnabled[0] = 0x17;
   ppu->screenEnabled[1] = 0;
-  PpuSetWidescreenHudSplit(
-      ppu, kActRaiserSimulationHudHeight,
-      kActRaiserSimulationHudSplit, kActRaiserSimulationHudSplit,
-      kActRaiserSimulationHudHeight, kActRaiserSimulationHudHeight);
+  PpuSetWidescreenHudSplit(ppu, kActRaiserSimulationHudHeight, kActRaiserSimulationHudSplit,
+                           kActRaiserSimulationHudSplit, kActRaiserSimulationHudHeight,
+                           kActRaiserSimulationHudHeight);
   /* The exact gf18992 menu-open hourglass: earlier menu sprites own slots
    * 0-10, while phase $ED's four pieces move to slots 11-14. The enhanced-view
    * overlay gate must follow the validated capture range rather than assume
    * the ordinary slots 0-3. */
   enum { kMenuHourglassFirst = 11 };
   static const uint16_t kMenuHourglass[] = {
-    0x0B94, 0x31ED, 0x0B9B, 0x71ED,
-    0x1394, 0x31FD, 0x139B, 0x71FD,
+      0x0B94, 0x31ED, 0x0B9B, 0x71ED, 0x1394, 0x31FD, 0x139B, 0x71FD,
   };
-  memcpy(&ppu->oam[kMenuHourglassFirst * 2], kMenuHourglass,
-         sizeof(kMenuHourglass));
+  memcpy(&ppu->oam[kMenuHourglassFirst * 2], kMenuHourglass, sizeof(kMenuHourglass));
   uint8_t shadow[kActRaiserSpriteShadowBytes] = {0};
   g_ram[kActRaiserWram_MapGroup] = 0;
   g_ram[kActRaiserWram_CurrentMap] = 1;
   ActRaiserSpriteOwnership_Begin(0, 1, 0);
-  ActRaiserSpriteOwnership_RecordSim(0x083e, 2,
-      kMenuHourglassFirst * 4, (kMenuHourglassFirst + 4) * 4);
+  ActRaiserSpriteOwnership_RecordSim(0x083e, 2, kMenuHourglassFirst * 4,
+                                     (kMenuHourglassFirst + 4) * 4);
   ActRaiserSpriteOwnership_Complete(shadow);
   ActRaiserSpriteOwnership_Upload(0, 1, shadow);
-
 
   /* PpuSetOverlayCapture stores flags through a WHITELIST, so a flag that is
    * declared in ppu.h but missing from that mask is accepted by the setter and
@@ -1352,33 +1315,24 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
    * the F4 log line reported "captured at 50% alpha" while every captured pixel
    * came back 0xff. Assert every declared flag survives a round trip. */
   {
-    const uint8_t kAllFlags = kPpuOverlayFlag_RemoveFromGame |
-                              kPpuOverlayFlag_MarkObjColorMath |
-                              kPpuOverlayFlag_MarkBgHalfAdd |
-                              kPpuOverlayFlag_ApplyBgFixedColorSubtract |
-                              kPpuOverlayFlag_MarkFullAddSubscreen |
-                              kPpuOverlayFlag_MarkMainScreenWinner |
-                              kPpuOverlayFlag_MarkOwningScreenWinner;
-    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0,
-                               kActRaiserAuthenticWidth,
-                               kActRaiserAuthenticHeight,
-                               (uint8_t)(kAllFlags | 0x80u)));
+    const uint8_t kAllFlags =
+        kPpuOverlayFlag_RemoveFromGame | kPpuOverlayFlag_MarkObjColorMath |
+        kPpuOverlayFlag_MarkBgHalfAdd | kPpuOverlayFlag_ApplyBgFixedColorSubtract |
+        kPpuOverlayFlag_MarkFullAddSubscreen | kPpuOverlayFlag_MarkMainScreenWinner |
+        kPpuOverlayFlag_MarkOwningScreenWinner;
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0, kActRaiserAuthenticWidth,
+                               kActRaiserAuthenticHeight, (uint8_t)(kAllFlags | 0x80u)));
     /* Fill is structured capture state now; its former high bit is once again
      * unknown and must be rejected by the flag whitelist. */
     CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg2].flags == kAllFlags);
     PpuClearOverlayCaptures(ppu);
   }
 
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg3, 0, 0,
-      kActRaiserAuthenticWidth, kActRaiserAuthenticHeight,
-      kPpuOverlayFlag_RemoveFromGame));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Obj, 0, 0,
-      kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
-      kPpuOverlayFlag_RemoveFromGame));
-  CHECK(PpuSetOverlayOamRange(
-      ppu, kMenuHourglassFirst, kActRaiserHudObjOamCount));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg3, 0, 0, kActRaiserAuthenticWidth,
+                             kActRaiserAuthenticHeight, kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Obj, 0, 0, kActRaiserAuthenticWidth,
+                             kActRaiserSimulationHudHeight, kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayOamRange(ppu, kMenuHourglassFirst, kActRaiserHudObjOamCount));
 
   const int extra = 43;
   const int width = kActRaiserAuthenticWidth + 2 * extra;
@@ -1390,30 +1344,24 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
    * makes its output observable without running a complete PPU frame. */
   memset(ppu->vram, 0xff, sizeof(ppu->vram));
   ppu->cgram[0xff] = bgr555(31, 0, 31);
-  CHECK(PpuBindOverlaySurface(
-      ppu, kPpuOverlaySource_Obj, (uint8_t *)hud_obj,
-      (size_t)width * sizeof(uint32_t)));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Obj, 0, 0,
-      kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
-      kPpuOverlayFlag_RemoveFromGame));
-  CHECK(PpuSetOverlayOamRange(
-      ppu, kMenuHourglassFirst, kActRaiserHudObjOamCount));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, (uint8_t *)hud_obj,
+                              (size_t)width * sizeof(uint32_t)));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Obj, 0, 0, kActRaiserAuthenticWidth,
+                             kActRaiserSimulationHudHeight, kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayOamRange(ppu, kMenuHourglassFirst, kActRaiserHudObjOamCount));
 
   Sim3DCaptureRequest request = {
-    .town = true,
-    .master_enabled = true,
-    .renderer_ready = true,
-    .requested_features = kSimFeature_SeparatedComposite,
-    .width = width,
-    .height = kActRaiserAuthenticHeight,
+      .town = true,
+      .master_enabled = true,
+      .renderer_ready = true,
+      .requested_features = kSimFeature_SeparatedComposite,
+      .width = width,
+      .height = kActRaiserAuthenticHeight,
   };
   Sim3D_BeginFrame();
   CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
-  const PpuOverlayCapture *bg3 =
-      &ppu->overlayCaptures[kPpuOverlaySource_Bg3];
-  const PpuOverlayCapture *obj =
-      &ppu->overlayCaptures[kPpuOverlaySource_Obj];
+  const PpuOverlayCapture *bg3 = &ppu->overlayCaptures[kPpuOverlaySource_Bg3];
+  const PpuOverlayCapture *obj = &ppu->overlayCaptures[kPpuOverlaySource_Obj];
   CHECK(bg3->x0 == -extra && bg3->x1 == kActRaiserAuthenticWidth + extra);
   CHECK(bg3->y0 == 0 && bg3->y1 == kActRaiserAuthenticHeight);
   CHECK(bg3->flags == 0);
@@ -1431,32 +1379,22 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
     memset(hud_bg, 0, sizeof(hud_bg));
     memset(hud_obj, 0, sizeof(hud_obj));
     memset(authentic, 0, sizeof(authentic));
-    CHECK(PpuBindOverlaySurface(
-        ppu, kPpuOverlaySource_Bg3, (uint8_t *)hud_bg,
-        (size_t)width * sizeof(uint32_t)));
-    CHECK(PpuBindOverlaySurface(
-        ppu, kPpuOverlaySource_Obj, (uint8_t *)hud_obj,
-        (size_t)width * sizeof(uint32_t)));
-    CHECK(PpuSetOverlayCapture(
-        ppu, kPpuOverlaySource_Bg3, 0, 0,
-        kActRaiserAuthenticWidth, kActRaiserAuthenticHeight,
-        kPpuOverlayFlag_RemoveFromGame));
-    CHECK(PpuSetOverlayCapture(
-        ppu, kPpuOverlaySource_Obj, 0, 0,
-        kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
-        kPpuOverlayFlag_RemoveFromGame));
-    CHECK(PpuSetOverlayOamRange(
-        ppu, kMenuHourglassFirst, kActRaiserHudObjOamCount));
-    CHECK(PpuSetOverlayTransparentFill(
-        ppu, kPpuOverlaySource_Bg3,
-        kPpuOverlayTransparentFill_Cgram, 0x21));
-    CHECK(PpuSetOverlayTransparentFill(
-        ppu, kPpuOverlaySource_Obj,
-        kPpuOverlayTransparentFill_Black, 0));
-    request.requested_features = kSimFeature_SeparatedComposite |
-        (suppress_raw ? kSimFeature_GroundProjection |
-                            kSimFeature_ObjectBillboards
-                      : 0);
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3, (uint8_t *)hud_bg,
+                                (size_t)width * sizeof(uint32_t)));
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, (uint8_t *)hud_obj,
+                                (size_t)width * sizeof(uint32_t)));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg3, 0, 0, kActRaiserAuthenticWidth,
+                               kActRaiserAuthenticHeight, kPpuOverlayFlag_RemoveFromGame));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Obj, 0, 0, kActRaiserAuthenticWidth,
+                               kActRaiserSimulationHudHeight, kPpuOverlayFlag_RemoveFromGame));
+    CHECK(PpuSetOverlayOamRange(ppu, kMenuHourglassFirst, kActRaiserHudObjOamCount));
+    CHECK(PpuSetOverlayTransparentFill(ppu, kPpuOverlaySource_Bg3, kPpuOverlayTransparentFill_Cgram,
+                                       0x21));
+    CHECK(PpuSetOverlayTransparentFill(ppu, kPpuOverlaySource_Obj, kPpuOverlayTransparentFill_Black,
+                                       0));
+    request.requested_features =
+        kSimFeature_SeparatedComposite |
+        (suppress_raw ? kSimFeature_GroundProjection | kSimFeature_ObjectBillboards : 0);
     request.billboard_atlas_ready = suppress_raw;
     request.billboard_renderer_ready = suppress_raw;
     /* A supported fixed-colour add may designate BG3 without making BG3 a
@@ -1469,66 +1407,52 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
       ppu->fixedColor = bgr555(1, 1, 1);
     }
     CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
-    CHECK((ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] == NULL) ==
-          (suppress_raw != 0));
+    CHECK((ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] == NULL) == (suppress_raw != 0));
     /* Exercise a body row, not just the historical 32-row status handoff.
      * BG3-high survives as the native winner; BG3-low behind BG1-low remains
      * transparent in the late composite. */
     enum { kBodyProbeY = 100, kBg3WinnerX = 20, kBg3OccludedX = 21 };
     for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
-      g_sim3d_layer_pixels[plane][
-          (size_t)kBodyProbeY * width + extra + kBg3WinnerX] = 0;
-      g_sim3d_layer_pixels[plane][
-          (size_t)kBodyProbeY * width + extra + kBg3OccludedX] = 0;
+      g_sim3d_layer_pixels[plane][(size_t)kBodyProbeY * width + extra + kBg3WinnerX] = 0;
+      g_sim3d_layer_pixels[plane][(size_t)kBodyProbeY * width + extra + kBg3OccludedX] = 0;
     }
-    g_sim3d_layer_pixels[kSim3DPlane_Bg3High][
-        (size_t)kBodyProbeY * width + extra + kBg3WinnerX] = 0xffffffffu;
-    g_sim3d_layer_pixels[kSim3DPlane_Bg3Low][
-        (size_t)kBodyProbeY * width + extra + kBg3OccludedX] = 0xffffffffu;
-    g_sim3d_layer_pixels[kSim3DPlane_Bg1Low][
-        (size_t)kBodyProbeY * width + extra + kBg3OccludedX] = 0xffff0000u;
+    g_sim3d_layer_pixels[kSim3DPlane_Bg3High][(size_t)kBodyProbeY * width + extra + kBg3WinnerX] =
+        0xffffffffu;
+    g_sim3d_layer_pixels[kSim3DPlane_Bg3Low][(size_t)kBodyProbeY * width + extra + kBg3OccludedX] =
+        0xffffffffu;
+    g_sim3d_layer_pixels[kSim3DPlane_Bg1Low][(size_t)kBodyProbeY * width + extra + kBg3OccludedX] =
+        0xffff0000u;
     /* An empty promoted footprint must keep the PPU pixel, not rebuild it
      * from separated planes that need not represent all hardware colour math. */
     const size_t untouched = (size_t)150 * width + extra + 70;
     g_sim3d_layer_pixels[kSim3DPlane_Bg3Low][untouched] = 0;
     g_sim3d_layer_pixels[kSim3DPlane_Bg3High][untouched] = 0;
     authentic[untouched] = 0x00123456u;
-    Sim3D_FinishCapture(
-        (uint8_t *)authentic, width * (int)sizeof(uint32_t), 1);
+    Sim3D_FinishCapture((uint8_t *)authentic, width * (int)sizeof(uint32_t), 1);
     CHECK(authentic[untouched] == 0x00123456u);
     CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].x0 == 0);
-    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].x1 ==
-          kActRaiserAuthenticWidth);
-    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].flags ==
-          kPpuOverlayFlag_RemoveFromGame);
-    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3]
-              .transparentFillConfigured == 1);
-    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3]
-              .transparentFillMode == kPpuOverlayTransparentFill_Cgram);
-    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3]
-              .transparentFillCgram == 0x21);
-    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Obj].oamFirst ==
-          kMenuHourglassFirst);
-    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Obj].oamCount ==
-          kActRaiserHudObjOamCount);
-    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Obj]
-              .transparentFillMode == kPpuOverlayTransparentFill_Black);
-    CHECK(hud_obj[(size_t)kActRaiserHudObjUpperY * width +
-                  extra + kActRaiserSimulationHourglassLeftX] != 0);
-    CHECK(hud_bg[(size_t)kBodyProbeY * width +
-                 extra + kBg3WinnerX] == 0xffffffffu);
-    CHECK(hud_bg[(size_t)kBodyProbeY * width +
-                 extra + kBg3OccludedX] == 0u);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].x1 == kActRaiserAuthenticWidth);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].flags == kPpuOverlayFlag_RemoveFromGame);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].transparentFillConfigured == 1);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].transparentFillMode ==
+          kPpuOverlayTransparentFill_Cgram);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].transparentFillCgram == 0x21);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Obj].oamFirst == kMenuHourglassFirst);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Obj].oamCount == kActRaiserHudObjOamCount);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Obj].transparentFillMode ==
+          kPpuOverlayTransparentFill_Black);
+    CHECK(hud_obj[(size_t)kActRaiserHudObjUpperY * width + extra +
+                  kActRaiserSimulationHourglassLeftX] != 0);
+    CHECK(hud_bg[(size_t)kBodyProbeY * width + extra + kBg3WinnerX] == 0xffffffffu);
+    CHECK(hud_bg[(size_t)kBodyProbeY * width + extra + kBg3OccludedX] == 0u);
     if (!suppress_raw) {
       Sim3DOutputSurfaceViews views = {0};
       Sim3D_CaptureOutputSurfaceViews(&views);
       CHECK(views.planes[kSim3DPlane_Bg3Low].data ==
             (const uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Bg3Low]);
       CHECK(views.planes[kSim3DPlane_Bg3Low].width_pixels == (uint32_t)width);
-      CHECK(views.planes[kSim3DPlane_Bg3Low].height_pixels ==
-            kActRaiserAuthenticHeight);
-      CHECK((views.planes[kSim3DPlane_Bg3Low].flags &
-             SR_PPU_SURFACE_HAS_CONTENT) != 0u);
+      CHECK(views.planes[kSim3DPlane_Bg3Low].height_pixels == kActRaiserAuthenticHeight);
+      CHECK((views.planes[kSim3DPlane_Bg3Low].flags & SR_PPU_SURFACE_HAS_CONTENT) != 0u);
       CHECK(views.planes[kSim3DPlane_Obj0].data ==
             (const uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Obj0]);
       CHECK(views.hud_bg.data == (const uint8_t *)hud_bg);
@@ -1545,24 +1469,18 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
   /* The same four-slot-sized capture at the old allocation is not the
    * promoted icon and must remain an overlay conflict. */
   PpuClearOverlayCaptures(ppu);
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg3, 0, 0,
-      kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
-      kPpuOverlayFlag_RemoveFromGame));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Obj, 0, 0,
-      kActRaiserAuthenticWidth, kActRaiserSimulationHudHeight,
-      kPpuOverlayFlag_RemoveFromGame));
-  CHECK(PpuSetOverlayOamRange(
-      ppu, kActRaiserHudObjOamFirst, kActRaiserHudObjOamCount));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg3, 0, 0, kActRaiserAuthenticWidth,
+                             kActRaiserSimulationHudHeight, kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Obj, 0, 0, kActRaiserAuthenticWidth,
+                             kActRaiserSimulationHudHeight, kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayOamRange(ppu, kActRaiserHudObjOamFirst, kActRaiserHudObjOamCount));
   CHECK(!Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   CHECK(!Sim3D_BeginFrame());
 
   /* An unrelated layer capture still owns its source and must fail closed. */
   PpuClearOverlayCaptures(ppu);
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg1, 0, 0, 16, 16,
-      kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, 16, 16,
+                             kPpuOverlayFlag_RemoveFromGame));
   CHECK(!Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
   CHECK(!Sim3D_BeginFrame());
   ppu_free(ppu);
@@ -1580,15 +1498,13 @@ static void TestDioramaFixedColorSubtractCapture(void) {
   ppu->cgram[0x11] = bgr555(10, 1, 3);
   ppu->fixedColor = bgr555(2, 1, 2); /* snap_02_gf4230: fixed=$0822 */
   ppu->cgwsel = 0x00;
-  ppu->cgadsub = 0x81;               /* full subtract, math on BG1 */
+  ppu->cgadsub = 0x81; /* full subtract, math on BG1 */
   render_first_line(ppu);
   const uint32_t flat_pixel = ((const uint32_t *)(const void *)fb)[0];
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1,
-                              (uint8_t *)capture, sizeof(capture)));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
-      kPpuOverlayFlag_RemoveFromGame |
-          kPpuOverlayFlag_ApplyBgFixedColorSubtract));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, (uint8_t *)capture, sizeof(capture)));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+                             kPpuOverlayFlag_RemoveFromGame |
+                                 kPpuOverlayFlag_ApplyBgFixedColorSubtract));
   render_first_line(ppu);
 
   /* Subtraction happens before 5->8-bit expansion and clamps each component. */
@@ -1618,13 +1534,11 @@ static void TestSubscreenOnlyOverlayCapture(void) {
    * to sub and enable subscreen colour math so the PPU actually renders TS. */
   ppu->screenEnabled[0] = 0;
   ppu->screenEnabled[1] = 1u << kActRaiserPpuLayer_Bg1;
-  ppu->cgwsel = 0x02;   /* colour-math addend is the subscreen */
-  ppu->cgadsub = 0x01;  /* nonzero math mask makes the sub pass live */
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1,
-                              (uint8_t *)capture, sizeof(capture)));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
-      kPpuOverlayFlag_RemoveFromGame));
+  ppu->cgwsel = 0x02;  /* colour-math addend is the subscreen */
+  ppu->cgadsub = 0x01; /* nonzero math mask makes the sub pass live */
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, (uint8_t *)capture, sizeof(capture)));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+                             kPpuOverlayFlag_RemoveFromGame));
   render_first_line(ppu);
 
   CHECK(capture[0] == (0xff000000u | rgb555(31, 0, 0)));
@@ -1666,11 +1580,10 @@ static void TestSubscreenOnlyOverlayCapture(void) {
   ppu->oam[0] = (uint16_t)(24 | (0u << 8));
   ppu->oam[1] = 0;
   PpuBeginDrawing(ppu, fb, sizeof(fb), 0);
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj,
-                              (uint8_t *)obj_capture, sizeof(obj_capture)));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Obj, 0, 0, kW, 1,
-      kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, (uint8_t *)obj_capture,
+                              sizeof(obj_capture)));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Obj, 0, 0, kW, 1,
+                             kPpuOverlayFlag_RemoveFromGame));
   CHECK(PpuSetOverlayOamRange(ppu, 0, 1));
   render_first_line(ppu);
   CHECK(obj_capture[24] == (0xff000000u | rgb555(31, 31, 0)));
@@ -1704,14 +1617,12 @@ static void TestFullAddSubscreenWinnerCapture(void) {
   ppu->inidisp = 0x0f;
   ppu->bgmode = 1;
   ppu->screenEnabled[0] = 1u << kActRaiserPpuLayer_Bg2;
-  ppu->screenEnabled[1] =
-      (1u << kActRaiserPpuLayer_Bg1) |
-      (1u << kPpuOverlaySource_Obj);
+  ppu->screenEnabled[1] = (1u << kActRaiserPpuLayer_Bg1) | (1u << kPpuOverlaySource_Obj);
   ppu->cgwsel = 0x02;
   ppu->cgadsub = 0x03;
-  ppu->cgram[0x11] = bgr555(31, 0, 0);  /* TS BG1: red addend */
-  ppu->cgram[0x21] = bgr555(0, 0, 31);  /* TM BG2: blue base */
-  ppu->cgram[0x81] = bgr555(0, 31, 0);  /* TS OBJ: green addend */
+  ppu->cgram[0x11] = bgr555(31, 0, 0); /* TS BG1: red addend */
+  ppu->cgram[0x21] = bgr555(0, 0, 31); /* TM BG2: blue base */
+  ppu->cgram[0x81] = bgr555(0, 31, 0); /* TS OBJ: green addend */
   set_solid_4bpp_tile(ppu, 0, 1);
   set_solid_4bpp_tile(ppu, 1, 1);
   ppu->bgTileAdr = 0;
@@ -1727,23 +1638,20 @@ static void TestFullAddSubscreenWinnerCapture(void) {
   ppu->oam[1] = (uint16_t)(3u << 12); /* priority 3 wins TS over BG1 */
 
   PpuBeginDrawing(ppu, fb, sizeof(fb), 0);
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1,
-                              (uint8_t *)bg1_capture, sizeof(bg1_capture)));
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
-                              (uint8_t *)bg2_capture, sizeof(bg2_capture)));
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj,
-                              (uint8_t *)obj_capture, sizeof(obj_capture)));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
-      kPpuOverlayFlag_RemoveFromGame |
-          kPpuOverlayFlag_MarkFullAddSubscreen));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg2, 0, 0, kW, 1,
-      kPpuOverlayFlag_RemoveFromGame));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Obj, 0, 0, kW, 1,
-      kPpuOverlayFlag_RemoveFromGame |
-          kPpuOverlayFlag_MarkFullAddSubscreen));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, (uint8_t *)bg1_capture,
+                              sizeof(bg1_capture)));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, (uint8_t *)bg2_capture,
+                              sizeof(bg2_capture)));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, (uint8_t *)obj_capture,
+                              sizeof(obj_capture)));
+  CHECK(
+      PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+                           kPpuOverlayFlag_RemoveFromGame | kPpuOverlayFlag_MarkFullAddSubscreen));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0, kW, 1,
+                             kPpuOverlayFlag_RemoveFromGame));
+  CHECK(
+      PpuSetOverlayCapture(ppu, kPpuOverlaySource_Obj, 0, 0, kW, 1,
+                           kPpuOverlayFlag_RemoveFromGame | kPpuOverlayFlag_MarkFullAddSubscreen));
   CHECK(PpuSetOverlayOamRange(ppu, 0, 1));
   render_first_line(ppu);
 
@@ -1757,17 +1665,15 @@ static void TestFullAddSubscreenWinnerCapture(void) {
    * mask is white where BG1 supplies the colour addend and opaque black where
    * the higher-priority OBJ sprite wins, which lets a host wall light retain
    * Viper's authentic sprite occlusion. */
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
-      kPpuOverlayFlag_MarkOwningScreenWinner));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+                             kPpuOverlayFlag_MarkOwningScreenWinner));
   memset(bg1_capture, 0, sizeof(bg1_capture));
   render_first_line(ppu);
   CHECK(bg1_capture[0] == 0xffffffffu);
   CHECK(bg1_capture[24] == 0xff000000u);
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
-      kPpuOverlayFlag_RemoveFromGame |
-          kPpuOverlayFlag_MarkFullAddSubscreen));
+  CHECK(
+      PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+                           kPpuOverlayFlag_RemoveFromGame | kPpuOverlayFlag_MarkFullAddSubscreen));
 
   /* A host-relocated OBJ (the Marahna status icon in flat-HUD mode) is not a
    * world addend. Removing it must reveal the BG1 pixel it covered rather than
@@ -1793,11 +1699,10 @@ static void TestFullAddSubscreenWinnerCapture(void) {
   set_solid_2bpp_tile(ppu, 0x4000, 0, 1);
   for (int i = 0; i < 0x400; i++)
     ppu->vram[0x2800 + i] = (uint16_t)((1 << 10) | (1 << 13));
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3,
-                              (uint8_t *)bg3_capture, sizeof(bg3_capture)));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg3, 0, 0, kW, 1,
-      kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3, (uint8_t *)bg3_capture,
+                              sizeof(bg3_capture)));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg3, 0, 0, kW, 1,
+                             kPpuOverlayFlag_RemoveFromGame));
   memset(bg1_capture, 0, sizeof(bg1_capture));
   render_first_line(ppu);
   CHECK(bg3_capture[0] == (0xff000000u | rgb555(31, 31, 31)));
@@ -1850,20 +1755,22 @@ static void TestSkyPalaceWinnerCapture(void) {
     ppu->inidisp = brightness;
     PpuBeginDrawing(ppu, native, kW * 4, 0);
     PpuClearOverlayCaptures(ppu);
-    for (int line = 0; line <= kH; line++) ppu_runLine(ppu, line);
+    for (int line = 0; line <= kH; line++)
+      ppu_runLine(ppu, line);
     memcpy(reference, native, sizeof(reference));
     CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, (uint8_t *)mask, kW * 4));
     CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, kH,
-        kPpuOverlayFlag_MarkMainScreenWinner));
-    for (int line = 0; line <= kH; line++) ppu_runLine(ppu, line);
+                               kPpuOverlayFlag_MarkMainScreenWinner));
+    for (int line = 0; line <= kH; line++)
+      ppu_runLine(ppu, line);
     CHECK(!memcmp(reference, native, sizeof(native)));
     SimFrameData frame = {.view = kSimView_SkyPalace};
     frame.world_navigation_scene.valid = true;
     CHECK(SimWorldNavigationCapture_Capture(&frame, sr_runner_handle(&snes)));
     CHECK(frame.view == kSimView_SkyPalace);
     CHECK(frame.world_navigation_brightness == brightness);
-    CHECK(SimWorldNavigationPalace_ComposeForeground(foreground, kW * 4,
-        native, kW * 4, (uint8_t *)mask, kW * 4, kW, kH));
+    CHECK(SimWorldNavigationPalace_ComposeForeground(foreground, kW * 4, native, kW * 4,
+                                                     (uint8_t *)mask, kW * 4, kW, kH));
     CHECK(foreground[10 * kW + 16] == 0xff000000u);
     CHECK(foreground[10 * kW + 240] == 0);
     CHECK(mask[10 * kW + 16] == 0xff000000u);
@@ -1873,8 +1780,9 @@ static void TestSkyPalaceWinnerCapture(void) {
   PpuClearOverlayCaptures(ppu);
   CHECK(!SimWorldNavigationCapture_Capture(&frame, sr_runner_handle(&snes)));
   CHECK(frame.view == kSimView_AuthenticFallback);
-  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, kH,
-      kPpuOverlayFlag_MarkMainScreenWinner | kPpuOverlayFlag_RemoveFromGame));
+  CHECK(
+      PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, kH,
+                           kPpuOverlayFlag_MarkMainScreenWinner | kPpuOverlayFlag_RemoveFromGame));
   frame.view = kSimView_SkyPalace;
   CHECK(!SimWorldNavigationCapture_Capture(&frame, sr_runner_handle(&snes)));
   CHECK(frame.view == kSimView_AuthenticFallback);
@@ -1893,9 +1801,7 @@ static void TestMainScreenWinnerMask(void) {
   memset(mask, 0, sizeof(mask));
   ppu->inidisp = 0x0f;
   ppu->bgmode = 1;
-  ppu->screenEnabled[0] =
-      (1u << kActRaiserPpuLayer_Bg1) |
-      (1u << kActRaiserPpuLayer_Bg2);
+  ppu->screenEnabled[0] = (1u << kActRaiserPpuLayer_Bg1) | (1u << kActRaiserPpuLayer_Bg2);
   ppu->cgram[0x11] = bgr555(31, 0, 0);
   ppu->cgram[0x21] = bgr555(0, 0, 31);
   set_solid_4bpp_tile(ppu, 1, 1);
@@ -1905,16 +1811,13 @@ static void TestMainScreenWinnerMask(void) {
   ppu->bgXsc[kActRaiserPpuLayer_Bg2] = 0x24;
   for (int x = 0; x < 32; x++) {
     /* Transparent BG1 on the left; high-priority BG1 on the right. */
-    ppu->vram[0x2000 + x] = x < 16 ? 0 : (uint16_t)(1 | (1 << 10) |
-                                                     (1 << 13));
+    ppu->vram[0x2000 + x] = x < 16 ? 0 : (uint16_t)(1 | (1 << 10) | (1 << 13));
     ppu->vram[0x2400 + x] = (uint16_t)(2 | (2 << 10));
   }
   PpuBeginDrawing(ppu, fb, sizeof(fb), 0);
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
-                              (uint8_t *)mask, sizeof(mask)));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg2, 0, 0, kW, 1,
-      kPpuOverlayFlag_MarkMainScreenWinner));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, (uint8_t *)mask, sizeof(mask)));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0, kW, 1,
+                             kPpuOverlayFlag_MarkMainScreenWinner));
   render_first_line(ppu);
   CHECK(mask[0] == 0xffffffffu);
   CHECK(mask[127] == 0xffffffffu);
@@ -1924,9 +1827,8 @@ static void TestMainScreenWinnerMask(void) {
 
   /* The owning-screen form must reduce to the same mask for a TM source; its
    * extra behavior is only the TS fallback exercised by the Marahna fixture. */
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg2, 0, 0, kW, 1,
-      kPpuOverlayFlag_MarkOwningScreenWinner));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0, kW, 1,
+                             kPpuOverlayFlag_MarkOwningScreenWinner));
   memset(mask, 0, sizeof(mask));
   render_first_line(ppu);
   CHECK(mask[0] == 0xffffffffu);
@@ -1952,9 +1854,7 @@ static void TestBg3NativeParityComposite(void) {
   static uint32_t capture[kW];
   ppu_reset(ppu);
   ppu->bgmode = 9;
-  ppu->screenEnabled[0] =
-      (1u << kActRaiserPpuLayer_Bg1) |
-      (1u << kActRaiserPpuLayer_Bg3);
+  ppu->screenEnabled[0] = (1u << kActRaiserPpuLayer_Bg1) | (1u << kActRaiserPpuLayer_Bg3);
   ppu->screenWindowed[0] = 1u << kActRaiserPpuLayer_Bg3;
   ppu->windowsel = 0x200; /* BG3 main: window 1 enabled, inside disabled. */
   ppu->window1left = 128;
@@ -1971,8 +1871,7 @@ static void TestBg3NativeParityComposite(void) {
     ppu->vram[0x2800 + x] = (uint16_t)((1 << 10) | (1 << 13));
   }
   PpuBeginDrawing(ppu, fb, sizeof(fb), 0);
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3,
-                              (uint8_t *)capture, sizeof(capture)));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3, (uint8_t *)capture, sizeof(capture)));
 
   static const uint8_t kBrightness[] = {15, 7};
   for (size_t pass = 0; pass < sizeof(kBrightness); pass++) {
@@ -1982,16 +1881,15 @@ static void TestBg3NativeParityComposite(void) {
     render_first_line(ppu);
     memcpy(reference, fb, sizeof(reference));
 
-    CHECK(PpuSetOverlayCapture(
-        ppu, kPpuOverlaySource_Bg3, 0, 0, kW, 1,
-        kPpuOverlayFlag_RemoveFromGame));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg3, 0, 0, kW, 1,
+                               kPpuOverlayFlag_RemoveFromGame));
     memset(fb, 0, sizeof(fb));
     memset(capture, 0, sizeof(capture));
     render_first_line(ppu);
     for (int x = 0; x < kW; x++) {
       const uint32_t reconstructed = capture[x] >> 24
-          ? capture[x] & 0x00ffffffu
-          : ((const uint32_t *)(const void *)fb)[x] & 0x00ffffffu;
+                                         ? capture[x] & 0x00ffffffu
+                                         : ((const uint32_t *)(const void *)fb)[x] & 0x00ffffffu;
       CHECK(reconstructed == (reference[x] & 0x00ffffffu));
     }
     CHECK(capture[0] >> 24 == 0xffu);
@@ -2028,13 +1926,10 @@ static void TestOverlayContentMetadata(void) {
     ppu->vram[0x2000 + i] = (uint16_t)(1 | (2 << 10));
 
   PpuBeginDrawing(ppu, fb, kW * sizeof(uint32_t), 0);
-  CHECK(PpuBindOverlaySurface(
-      ppu, kPpuOverlaySource_Bg2, (uint8_t *)primary,
-      kW * sizeof(uint32_t)));
-  CHECK(PpuBindOverlayPrioSurface(
-      ppu, kPpuOverlaySource_Bg2, 1, (uint8_t *)high));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg2, 0, 0, kW, 2, 0));
+  CHECK(
+      PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, (uint8_t *)primary, kW * sizeof(uint32_t)));
+  CHECK(PpuBindOverlayPrioSurface(ppu, kPpuOverlaySource_Bg2, 1, (uint8_t *)high));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0, kW, 2, 0));
 
   ppu_runLine(ppu, 0);
   ppu_runLine(ppu, 1);
@@ -2059,16 +1954,11 @@ static void TestOverlayContentMetadata(void) {
   ppu->vram[0x2000] = (uint16_t)(1 | (2 << 10) | (1u << 13));
   /* Fill and geometry are independently configured. Setting the fill first
    * must survive PpuSetOverlayCapture; call order is not presentation policy. */
-  CHECK(PpuSetOverlayTransparentFill(
-      ppu, kPpuOverlaySource_Bg2,
-      kPpuOverlayTransparentFill_Black, 0));
-  CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg2]
-            .transparentFillConfigured == 1);
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg2, 0, 0, kW, 2,
-      0));
-  CHECK(PpuOverlayTransparentFillColor(
-            ppu, kPpuOverlaySource_Bg2) == 0xff000000u);
+  CHECK(PpuSetOverlayTransparentFill(ppu, kPpuOverlaySource_Bg2, kPpuOverlayTransparentFill_Black,
+                                     0));
+  CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg2].transparentFillConfigured == 1);
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0, kW, 2, 0));
+  CHECK(PpuOverlayTransparentFillColor(ppu, kPpuOverlaySource_Bg2) == 0xff000000u);
   ppu_runLine(ppu, 0);
   ppu_runLine(ppu, 1);
   CHECK(primary[0] == 0xff000000u);
@@ -2081,20 +1971,16 @@ static void TestOverlayContentMetadata(void) {
 
   /* CGRAM index zero is a valid opaque fill choice even though tile colour
    * zero remains transparent. A non-zero index follows live palette changes. */
-  CHECK(PpuSetOverlayTransparentFill(
-      ppu, kPpuOverlaySource_Bg2,
-      kPpuOverlayTransparentFill_Cgram, 0));
-  CHECK(PpuOverlayTransparentFillColor(
-            ppu, kPpuOverlaySource_Bg2) == 0xff00ff00u);
+  CHECK(PpuSetOverlayTransparentFill(ppu, kPpuOverlaySource_Bg2, kPpuOverlayTransparentFill_Cgram,
+                                     0));
+  CHECK(PpuOverlayTransparentFillColor(ppu, kPpuOverlaySource_Bg2) == 0xff00ff00u);
   ppu_runLine(ppu, 0);
   ppu_runLine(ppu, 1);
   CHECK(primary[8] == 0xff00ff00u);
   ppu->cgram[0x21] = bgr555(0, 0, 31);
-  CHECK(PpuSetOverlayTransparentFill(
-      ppu, kPpuOverlaySource_Bg2,
-      kPpuOverlayTransparentFill_Cgram, 0x21));
-  CHECK(PpuOverlayTransparentFillColor(
-            ppu, kPpuOverlaySource_Bg2) == 0xff0000ffu);
+  CHECK(PpuSetOverlayTransparentFill(ppu, kPpuOverlaySource_Bg2, kPpuOverlayTransparentFill_Cgram,
+                                     0x21));
+  CHECK(PpuOverlayTransparentFillColor(ppu, kPpuOverlaySource_Bg2) == 0xff0000ffu);
 
   /* An active capture with its layer disabled still clears the surfaces, but
    * correctly reports no content in either destination. */
@@ -2105,21 +1991,15 @@ static void TestOverlayContentMetadata(void) {
   CHECK(!PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 1));
   CHECK(!PpuOverlaySurfaceHasContent(ppu, kPpuOverlaySource_Bg2, 4));
   CHECK(!PpuOverlaySurfaceHasContent(NULL, kPpuOverlaySource_Bg2, 0));
-  CHECK(!PpuSetOverlayTransparentFill(
-      ppu, kPpuOverlaySource_Bg2,
-      (PpuOverlayTransparentFill)99, 0));
-  CHECK(PpuSetOverlayTransparentFill(
-      ppu, kPpuOverlaySource_Bg2,
-      kPpuOverlayTransparentFill_None, 0));
-  CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg2]
-            .transparentFillConfigured == 1);
-  CHECK(PpuOverlayTransparentFillColor(
-            ppu, kPpuOverlaySource_Bg2) == 0);
+  CHECK(
+      !PpuSetOverlayTransparentFill(ppu, kPpuOverlaySource_Bg2, (PpuOverlayTransparentFill)99, 0));
+  CHECK(
+      PpuSetOverlayTransparentFill(ppu, kPpuOverlaySource_Bg2, kPpuOverlayTransparentFill_None, 0));
+  CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg2].transparentFillConfigured == 1);
+  CHECK(PpuOverlayTransparentFillColor(ppu, kPpuOverlaySource_Bg2) == 0);
   PpuClearOverlayCaptures(ppu);
-  CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg2]
-            .transparentFillConfigured == 0);
-  CHECK(PpuOverlayTransparentFillColor(
-            ppu, kPpuOverlaySource_Bg2) == 0);
+  CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg2].transparentFillConfigured == 0);
+  CHECK(PpuOverlayTransparentFillColor(ppu, kPpuOverlaySource_Bg2) == 0);
 
   ppu_free(ppu);
 }
@@ -2144,9 +2024,8 @@ static void TestVerticalMarginLayerClip(void) {
   static uint32_t bg2_capture[kW * kRows];
   uint32_t authentic_bg2 = 0;
 
-  static const int clip_cases[] = { -1, 0, 4 };
-  for (size_t case_index = 0;
-       case_index < sizeof(clip_cases) / sizeof(clip_cases[0]);
+  static const int clip_cases[] = {-1, 0, 4};
+  for (size_t case_index = 0; case_index < sizeof(clip_cases) / sizeof(clip_cases[0]);
        case_index++) {
     const int clip_rows = clip_cases[case_index];
     ppu_reset(ppu);
@@ -2181,19 +2060,13 @@ static void TestVerticalMarginLayerClip(void) {
     ppu->vScroll[bg1] = ppu->vScroll[bg2] = 0;
 
     PpuSetExtraVerticalSpace(ppu, kTop, 0);
-    if (clip_rows >= 0)
-      PpuSetVerticalMarginLayerClip(
-          ppu, (uint8_t)bg2, clip_rows, kTop);
+    if (clip_rows >= 0) PpuSetVerticalMarginLayerClip(ppu, (uint8_t)bg2, clip_rows, kTop);
     PpuBeginDrawing(ppu, fb, kPitch, 0);
-    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1,
-                                (uint8_t *)bg1_capture, kPitch));
-    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
-                                (uint8_t *)bg2_capture, kPitch));
-    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1,
-                               0, -kTop, kW, kRows,
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, (uint8_t *)bg1_capture, kPitch));
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, (uint8_t *)bg2_capture, kPitch));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, -kTop, kW, kRows,
                                kPpuOverlayFlag_RemoveFromGame));
-    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
-                               0, -kTop, kW, kRows,
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, -kTop, kW, kRows,
                                kPpuOverlayFlag_RemoveFromGame));
 
     ppu_runLine(ppu, 0);
@@ -2248,9 +2121,8 @@ static void TestVerticalMarginBottomLayerClip(void) {
   static uint8_t fb[kW * (kPpuYPixels + kBottom) * 4];
   static uint32_t capture[kW * (kPpuYPixels + kBottom)];
 
-  static const int clip_cases[] = { -1, 0, 4 };
-  for (size_t case_index = 0;
-       case_index < sizeof(clip_cases) / sizeof(clip_cases[0]);
+  static const int clip_cases[] = {-1, 0, 4};
+  for (size_t case_index = 0; case_index < sizeof(clip_cases) / sizeof(clip_cases[0]);
        case_index++) {
     const int clip_rows = clip_cases[case_index];
     ppu_reset(ppu);
@@ -2266,17 +2138,13 @@ static void TestVerticalMarginBottomLayerClip(void) {
       ppu->vram[0x2000 + i] = (uint16_t)(1 | (2 << 10));
 
     PpuSetExtraVerticalSpace(ppu, 0, kBottom);
-    if (clip_rows >= 0)
-      PpuSetVerticalMarginLayerClip(ppu, (uint8_t)bg2, 0, clip_rows);
+    if (clip_rows >= 0) PpuSetVerticalMarginLayerClip(ppu, (uint8_t)bg2, 0, clip_rows);
     PpuBeginDrawing(ppu, fb, kPitch, 0);
-    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
-                                (uint8_t *)capture, kPitch));
-    CHECK(PpuSetOverlayCapture(
-        ppu, kPpuOverlaySource_Bg2, 0, kPpuYPixels - 1,
-        kW, kRows, kPpuOverlayFlag_RemoveFromGame));
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, (uint8_t *)capture, kPitch));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, kPpuYPixels - 1, kW, kRows,
+                               kPpuOverlayFlag_RemoveFromGame));
     ppu_runLine(ppu, kPpuYPixels);
-    for (int line = kPpuYPixels + 1;
-         line <= kPpuYPixels + kBottom; line++)
+    for (int line = kPpuYPixels + 1; line <= kPpuYPixels + kBottom; line++)
       ppu_runMarginLine(ppu, line);
 
     const int base = kPpuYPixels - 1;
@@ -2310,18 +2178,16 @@ static void TestVerticalMarginExactObj(void) {
   memset(fb, 0, sizeof(fb));
   memset(capture, 0, sizeof(capture));
   ppu->inidisp = 0x0f;
-  ppu->screenEnabled[0] = 1u << 4;  /* OBJ */
+  ppu->screenEnabled[0] = 1u << 4; /* OBJ */
   ppu->cgram[0x81] = bgr555(31, 31, 0);
   set_solid_4bpp_tile(ppu, 0, 1);
   ppu->oam[0] = (uint16_t)(24 | ((kSpriteY & 0xff) << 8));
   ppu->oam[1] = 0;
   PpuSetExtraVerticalSpace(ppu, 0, kBottom);
   PpuBeginDrawing(ppu, fb, kPitch, 0);
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj,
-                              (uint8_t *)capture, kPitch));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Obj, 0, 0, kW,
-      kPpuYPixels + kBottom, kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, (uint8_t *)capture, kPitch));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Obj, 0, 0, kW, kPpuYPixels + kBottom,
+                             kPpuOverlayFlag_RemoveFromGame));
   CHECK(PpuSetOverlayOamRange(ppu, 0, 1));
 
   PpuSetObjExactPosition(ppu, 0, 24, kSpriteY);
@@ -2367,18 +2233,14 @@ static void TestLayerPresentationExtents(void) {
   PpuSetExtraSpace(ppu, kBudget);
   PpuSetWidescreenLayerMirror(ppu, (uint8_t)(1u << bg2));
   PpuSetWidescreenPadCapturedToBudget(ppu, 1);
-  PpuSetWidescreenLayerExtent(
-      ppu, (uint8_t)bg2, 3, 5,
-      kPpuWidescreenExtentAvailable, kPpuWidescreenExtentAvailable);
-  PpuSetWidescreenLayerExtentBand(
-      ppu, (uint8_t)bg2, 1, 2,
-      kPpuWidescreenExtentAvailable, kPpuWidescreenExtentAvailable);
+  PpuSetWidescreenLayerExtent(ppu, (uint8_t)bg2, 3, 5, kPpuWidescreenExtentAvailable,
+                              kPpuWidescreenExtentAvailable);
+  PpuSetWidescreenLayerExtentBand(ppu, (uint8_t)bg2, 1, 2, kPpuWidescreenExtentAvailable,
+                                  kPpuWidescreenExtentAvailable);
 
   PpuBeginDrawing(ppu, fb, kWidth * 4, 0);
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
-                              (uint8_t *)capture, kWidth * 4));
-  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
-                             -kBudget, 0, kWidth, 3,
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, (uint8_t *)capture, kWidth * 4));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, -kBudget, 0, kWidth, 3,
                              kPpuOverlayFlag_RemoveFromGame));
   ppu_runLine(ppu, 1);
   ppu_runLine(ppu, 2);
@@ -2409,15 +2271,11 @@ static void TestLayerPresentationExtents(void) {
   for (int i = 0; i < 0x1000; i++)
     ppu->vram[0x2000 + i] = (uint16_t)(1 | (2 << 10));
   PpuSetExtraVerticalSpace(ppu, kTop, 0);
-  PpuSetWidescreenLayerExtent(
-      ppu, (uint8_t)bg2,
-      kPpuWidescreenExtentAvailable, kPpuWidescreenExtentAvailable,
-      2, kPpuWidescreenExtentAvailable);
+  PpuSetWidescreenLayerExtent(ppu, (uint8_t)bg2, kPpuWidescreenExtentAvailable,
+                              kPpuWidescreenExtentAvailable, 2, kPpuWidescreenExtentAvailable);
   PpuBeginDrawing(ppu, fb, kW * 4, 0);
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
-                              (uint8_t *)vertical_capture, kW * 4));
-  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
-                             0, -kTop, kW, kRows,
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, (uint8_t *)vertical_capture, kW * 4));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, -kTop, kW, kRows,
                              kPpuOverlayFlag_RemoveFromGame));
   ppu_runLine(ppu, 0);
   for (int line = 1 - kTop; line <= 0; line++)
@@ -2432,18 +2290,13 @@ static void TestLayerPresentationExtents(void) {
   enum { kBottom = 3, kBottomRows = kBottom + 1 };
   static uint32_t bottom_capture[kW * (kPpuYPixels + kBottom)];
   memset(bottom_capture, 0, sizeof(bottom_capture));
-  PpuSetWidescreenLayerExtent(
-      ppu, (uint8_t)bg2,
-      kPpuWidescreenExtentAvailable, kPpuWidescreenExtentAvailable,
-      kPpuWidescreenExtentAvailable, 1);
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
-                              (uint8_t *)bottom_capture, kW * 4));
-  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
-                             0, kPpuYPixels - 1, kW, kBottomRows,
+  PpuSetWidescreenLayerExtent(ppu, (uint8_t)bg2, kPpuWidescreenExtentAvailable,
+                              kPpuWidescreenExtentAvailable, kPpuWidescreenExtentAvailable, 1);
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, (uint8_t *)bottom_capture, kW * 4));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, kPpuYPixels - 1, kW, kBottomRows,
                              kPpuOverlayFlag_RemoveFromGame));
   ppu_runLine(ppu, kPpuYPixels);
-  for (int line = kPpuYPixels + 1;
-       line <= kPpuYPixels + kBottom; line++)
+  for (int line = kPpuYPixels + 1; line <= kPpuYPixels + kBottom; line++)
     ppu_runMarginLine(ppu, line);
   const int bottom_y0 = kPpuYPixels - 1;
   CHECK((bottom_capture[(bottom_y0 + 0) * kW] & 0xffffffu) != 0);
@@ -2489,41 +2342,34 @@ static void TestMovingEdgePoliciesInVerticalMargins(void) {
   /* Alternate tile columns so both edge selection and motion-phase
    * compensation remain observable after a non-zero horizontal scroll. */
   for (int i = 0; i < 0x1000; i++)
-    ppu->vram[0x2000 + i] = (uint16_t)(
-        ((i & 31) & 1 ? 2 : 1) | (2 << 10));
+    ppu->vram[0x2000 + i] = (uint16_t)(((i & 31) & 1 ? 2 : 1) | (2 << 10));
 
   PpuSetExtraSpace(ppu, kBudget);
   PpuSetWidescreenLayerMirror(ppu, (uint8_t)(1u << bg2));
   PpuSetWidescreenLayerRepeatBand(ppu, (uint8_t)bg2, 136, 224);
   PpuSetWidescreenPadCapturedToBudget(ppu, 1);
-  PpuSetWidescreenLayerExtent(
-      ppu, (uint8_t)bg2, 0, 0,
-      kPpuWidescreenExtentAvailable, kPpuWidescreenExtentAvailable);
-  PpuSetWidescreenLayerExtentBand(
-      ppu, (uint8_t)bg2, 136, 224,
-      kPpuWidescreenExtentAvailable, kPpuWidescreenExtentAvailable);
+  PpuSetWidescreenLayerExtent(ppu, (uint8_t)bg2, 0, 0, kPpuWidescreenExtentAvailable,
+                              kPpuWidescreenExtentAvailable);
+  PpuSetWidescreenLayerExtentBand(ppu, (uint8_t)bg2, 136, 224, kPpuWidescreenExtentAvailable,
+                                  kPpuWidescreenExtentAvailable);
   PpuSetExtraVerticalSpace(ppu, 0, 1);
 
   PpuBeginDrawing(ppu, fb, kWidth * 4, 0);
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
-                              (uint8_t *)capture, kWidth * 4));
-  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
-                             -kBudget, kPpuYPixels, kWidth, 1,
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, (uint8_t *)capture, kWidth * 4));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, -kBudget, kPpuYPixels, kWidth, 1,
                              kPpuOverlayFlag_RemoveFromGame));
   ppu_runLine(ppu, kPpuYPixels);
   ppu_runMarginLine(ppu, kPpuYPixels + 1);
 
   const uint32_t *bottom_row = capture + kPpuYPixels * kWidth;
-  const uint32_t left_margin =
-      bottom_row[kBudget - 1];                          /* screen x=-1 */
+  const uint32_t left_margin = bottom_row[kBudget - 1]; /* screen x=-1 */
   const uint32_t left_source = bottom_row[kBudget + 255];
   const uint32_t reflected_left_source = bottom_row[kBudget + 1];
   CHECK((left_margin & 0xffffffu) != 0);
   CHECK(left_margin == left_source);
   CHECK(left_margin != reflected_left_source);
 
-  const uint32_t right_margin =
-      bottom_row[kBudget + kW];                         /* screen x=256 */
+  const uint32_t right_margin = bottom_row[kBudget + kW]; /* screen x=256 */
   const uint32_t right_source = bottom_row[kBudget];
   const uint32_t reflected_right_source = bottom_row[kBudget + 254];
   CHECK((right_margin & 0xffffffu) != 0);
@@ -2542,10 +2388,8 @@ static void TestMovingEdgePoliciesInVerticalMargins(void) {
   PpuSetWidescreenLayerRepeat(ppu, (uint8_t)(1u << bg2));
   PpuSetWidescreenPadCapturedToBudget(ppu, 1);
   PpuBeginDrawing(ppu, fb, kWidth * 4, 0);
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
-                              (uint8_t *)capture, kWidth * 4));
-  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
-                             -kBudget, 0, kWidth, 1,
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, (uint8_t *)capture, kWidth * 4));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, -kBudget, 0, kWidth, 1,
                              kPpuOverlayFlag_RemoveFromGame));
   ppu_runLine(ppu, 1);
   CHECK(capture[kBudget - 1] == capture[kBudget + 255]);
@@ -2561,36 +2405,28 @@ static void TestMovingEdgePoliciesInVerticalMargins(void) {
   ppu->hScroll[bg2] = 4;
   PpuSetExtraSpace(ppu, kBudget);
   PpuSetWidescreenLayerClamp(ppu, (uint8_t)(1u << bg2));
-  PpuSetWidescreenLayerBand(
-      ppu, (uint8_t)bg2, 0, 64, kPpuWidescreenBandFill_Mirror,
-      kPpuWidescreenMotion_NormalScroll);
-  PpuSetWidescreenLayerBand(
-      ppu, (uint8_t)bg2, 64, 128, kPpuWidescreenBandFill_Repeat,
-      kPpuWidescreenMotion_FillRelative);
+  PpuSetWidescreenLayerBand(ppu, (uint8_t)bg2, 0, 64, kPpuWidescreenBandFill_Mirror,
+                            kPpuWidescreenMotion_NormalScroll);
+  PpuSetWidescreenLayerBand(ppu, (uint8_t)bg2, 64, 128, kPpuWidescreenBandFill_Repeat,
+                            kPpuWidescreenMotion_FillRelative);
   PpuSetWidescreenPadCapturedToBudget(ppu, 1);
   int mapped_x = 0;
   PpuWidescreenLayerPolicy mapped_policy;
-  CHECK(PpuMapWidescreenLayerX(
-      ppu, (uint8_t)bg2, 0, -1, &mapped_x, &mapped_policy));
+  CHECK(PpuMapWidescreenLayerX(ppu, (uint8_t)bg2, 0, -1, &mapped_x, &mapped_policy));
   CHECK(mapped_x == 249 && mapped_policy.band_override &&
         mapped_policy.fill == kPpuWidescreenBandFill_Mirror &&
         mapped_policy.motion == kPpuWidescreenMotion_NormalScroll);
-  CHECK(PpuMapWidescreenLayerX(
-      ppu, (uint8_t)bg2, 80, -1, &mapped_x, &mapped_policy));
+  CHECK(PpuMapWidescreenLayerX(ppu, (uint8_t)bg2, 80, -1, &mapped_x, &mapped_policy));
   CHECK(mapped_x == 255 && mapped_policy.band_override &&
         mapped_policy.fill == kPpuWidescreenBandFill_Repeat);
-  CHECK(!PpuMapWidescreenLayerX(
-      ppu, (uint8_t)bg2, 160, -1, &mapped_x, &mapped_policy));
-  CHECK(!mapped_policy.band_override &&
-        mapped_policy.fill == kPpuWidescreenBandFill_Clamp);
+  CHECK(!PpuMapWidescreenLayerX(ppu, (uint8_t)bg2, 160, -1, &mapped_x, &mapped_policy));
+  CHECK(!mapped_policy.band_override && mapped_policy.fill == kPpuWidescreenBandFill_Clamp);
   PpuBeginDrawing(ppu, fb, kWidth * 4, 0);
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
-                              (uint8_t *)capture, kWidth * 4));
-  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
-                             -kBudget, 0, kWidth, 128,
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, (uint8_t *)capture, kWidth * 4));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, -kBudget, 0, kWidth, 128,
                              kPpuOverlayFlag_RemoveFromGame));
-  ppu_runLine(ppu, 1);   /* authentic row 0: normal-motion Mirror */
-  ppu_runLine(ppu, 81);  /* authentic row 80: legacy Repeat */
+  ppu_runLine(ppu, 1);  /* authentic row 0: normal-motion Mirror */
+  ppu_runLine(ppu, 81); /* authentic row 80: legacy Repeat */
 
   const uint32_t *mirror_row = capture;
   CHECK(mirror_row[kBudget - 1] == mirror_row[kBudget + 249]);
@@ -2612,10 +2448,8 @@ static void TestMovingEdgePoliciesInVerticalMargins(void) {
   PpuSetWidescreenPadCapturedToBudget(ppu, 1);
   PpuSetExtraVerticalSpace(ppu, 1, 0);
   PpuBeginDrawing(ppu, fb, kWidth * 4, 0);
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
-                              (uint8_t *)capture, kWidth * 4));
-  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
-                             -kBudget, -1, kWidth, 1,
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, (uint8_t *)capture, kWidth * 4));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, -kBudget, -1, kWidth, 1,
                              kPpuOverlayFlag_RemoveFromGame));
   ppu_runMarginLine(ppu, 0);
 
@@ -2641,8 +2475,7 @@ static void TestMovingEdgePoliciesInVerticalMargins(void) {
  * and after the fix, so it is the guard against a flat-mode regression.
  */
 static void TestCapturedPaddingReachesBudget(void) {
-  enum { kBudget = 120, kLiveRight = 120,
-         kCaptureWidth = 256 + 2 * kBudget };
+  enum { kBudget = 120, kLiveRight = 120, kCaptureWidth = 256 + 2 * kBudget };
   const int bg2 = kActRaiserPpuLayer_Bg2;
 
   Ppu *ppu = ppu_init();
@@ -2675,7 +2508,7 @@ static void TestCapturedPaddingReachesBudget(void) {
     /* BG2 tilemap at word 0x2000: PPU_bgTilemapAdr is (bgXsc & 0xfc) << 8, so
      * 0x20 << 8 == 0x2000. Fill the whole 64x64 map with that tile, palette 2
      * (bits 10-12), so every column the renderer touches is non-transparent. */
-    ppu->bgXsc[bg2] = 0x20 | 0x3;      /* wider + higher tilemap */
+    ppu->bgXsc[bg2] = 0x20 | 0x3; /* wider + higher tilemap */
     for (int i = 0; i < 0x1000; i++)
       ppu->vram[0x2000 + i] = (uint16_t)(1 | (2 << 10));
     ppu->hScroll[bg2] = 0;
@@ -2688,11 +2521,9 @@ static void TestCapturedPaddingReachesBudget(void) {
     PpuSetExtraSideSpace(ppu, 0, kLiveRight, 0);
 
     PpuBeginDrawing(ppu, fb, kCaptureWidth * 4, 0);
-    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
-                                (uint8_t *)capture,
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, (uint8_t *)capture,
                                 kCaptureWidth * sizeof(uint32_t)));
-    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, -kBudget, 0,
-                               kCaptureWidth, 2,
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, -kBudget, 0, kCaptureWidth, 2,
                                kPpuOverlayFlag_RemoveFromGame));
     ppu_runLine(ppu, 1);
 
@@ -2740,18 +2571,18 @@ static void TestCapturedPaddingReachesBudget(void) {
     PpuSetExtraSpace(ppu, kBudget);
     PpuSetWidescreenLayerMirror(ppu, (uint8_t)(1u << bg2));
     PpuSetWidescreenPadCapturedToBudget(ppu, (uint8_t)enabled);
-    PpuSetExtraSideSpace(ppu, kBudget, 0, 0);   /* right margin collapsed */
+    PpuSetExtraSideSpace(ppu, kBudget, 0, 0); /* right margin collapsed */
 
     PpuBeginDrawing(ppu, fb, kCaptureWidth * 4, 0);
-    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
-                                (uint8_t *)capture,
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, (uint8_t *)capture,
                                 kCaptureWidth * sizeof(uint32_t)));
-    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, -kBudget, 0,
-                               kCaptureWidth, 2,
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, -kBudget, 0, kCaptureWidth, 2,
                                kPpuOverlayFlag_RemoveFromGame));
     ppu_runLine(ppu, 1);
-    if (enabled) right_on = capture[kCaptureWidth - 1];
-    else right_off = capture[kCaptureWidth - 1];
+    if (enabled)
+      right_on = capture[kCaptureWidth - 1];
+    else
+      right_off = capture[kCaptureWidth - 1];
     /* The already-live LEFT side renders either way. */
     CHECK((capture[0] & 0xffffffu) != 0);
     PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
@@ -2785,11 +2616,9 @@ static void TestCapturedPaddingReachesBudget(void) {
     PpuSetExtraSideSpace(ppu, 0, kLiveRight, 0);
 
     PpuBeginDrawing(ppu, fb, kCaptureWidth * 4, 0);
-    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3,
-                                (uint8_t *)capture,
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3, (uint8_t *)capture,
                                 kCaptureWidth * sizeof(uint32_t)));
-    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg3, -kBudget, 0,
-                               kCaptureWidth, 2, 0));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg3, -kBudget, 0, kCaptureWidth, 2, 0));
     ppu_runLine(ppu, 1);
 
     CHECK(capture[0] == 0);
@@ -2831,7 +2660,7 @@ static void TestCapturedPaddingReachesBudget(void) {
     ppu->vScroll[bg2] = 0;
     PpuSetExtraSpace(ppu, kBudget);
     PpuSetWidescreenLayerMirror(ppu, (uint8_t)(1u << bg2));
-    PpuSetWidescreenPadCapturedToBudget(ppu, 1);  /* enabled, yet must be inert */
+    PpuSetWidescreenPadCapturedToBudget(ppu, 1); /* enabled, yet must be inert */
     /* A HUD split is REQUIRED to observe this. Outside the split the compositor
      * clamps the framebuffer to the live window (ppu.c: composite_left =
      * extraLeftCur), so a widened layer buffer is discarded and the leak is
@@ -2842,7 +2671,7 @@ static void TestCapturedPaddingReachesBudget(void) {
     PpuSetExtraSideSpace(ppu, 0, kLiveRight, 0);
 
     PpuBeginDrawing(ppu, fb, kCaptureWidth * 4, 0);
-    ppu_runLine(ppu, 1);   /* screen y = 0, inside the split */
+    ppu_runLine(ppu, 1); /* screen y = 0, inside the split */
 
     const uint32_t *row = (const uint32_t *)(const void *)fb;
     /* Screen x = -120 .. -1 is the collapsed left margin: it must stay backdrop
@@ -2885,7 +2714,6 @@ static void TestCapturedPaddingReachesBudget(void) {
     CHECK((row[1] & 0xffffffu) != 0);
     CHECK((row[kCaptureWidth - 2] & 0xffffffu) != 0);
   }
-
 }
 
 static void TestAuthenticComparisonSurface(void) {
@@ -2903,14 +2731,11 @@ static void TestAuthenticComparisonSurface(void) {
   setup_virtual_bg(ppu, 0, fb, sizeof(fb));
   memset(authentic, 0, sizeof(authentic));
   memset(isolated_bg1, 0, sizeof(isolated_bg1));
-  CHECK(PpuBindAuthenticSurface(
-      ppu, (uint8_t *)authentic, sizeof(authentic)));
-  CHECK(PpuBindOverlaySurface(
-      ppu, kPpuOverlaySource_Bg1,
-      (uint8_t *)isolated_bg1, sizeof(isolated_bg1)));
-  CHECK(PpuSetOverlayCapture(
-      ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
-      kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuBindAuthenticSurface(ppu, (uint8_t *)authentic, sizeof(authentic)));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, (uint8_t *)isolated_bg1,
+                              sizeof(isolated_bg1)));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+                             kPpuOverlayFlag_RemoveFromGame));
   render_first_line(ppu);
   CHECK((isolated_bg1[0] & 0x00ffffffu) == rgb555(31, 0, 0));
   CHECK((((const uint32_t *)(const void *)fb)[0] & 0x00ffffffu) == 0);
@@ -2923,8 +2748,7 @@ static void TestAuthenticComparisonSurface(void) {
   memset(fb, 0, sizeof(fb));
   memset(authentic, 0x5a, sizeof(authentic));
   PpuBeginDrawing(ppu, fb, sizeof(fb), 0);
-  CHECK(PpuBindAuthenticSurface(
-      ppu, (uint8_t *)authentic, sizeof(authentic)));
+  CHECK(PpuBindAuthenticSurface(ppu, (uint8_t *)authentic, sizeof(authentic)));
   ppu->inidisp = 0x0f;
   ppu->cgram[0] = bgr555(7, 13, 29);
   render_first_line(ppu);
@@ -2949,20 +2773,15 @@ static void TestAuthenticCameraAndSurfaceContract(void) {
    * composited widescreen image: the authentic pass consumes its own BG1
    * scroll phase before priority/color resolve. */
   setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
-  fill_virtual_native_ring(
-      ppu, (uint16_t)(1 | (1 << 10)),
-      (uint16_t)(2 | (2 << 10)));
+  fill_virtual_native_ring(ppu, (uint16_t)(1 | (1 << 10)), (uint16_t)(2 | (2 << 10)));
   ppu->hScroll[kActRaiserPpuLayer_Bg1] = 0;
-  for (int y = 0; y < kH; y++) native_bg1[y] = 8;
+  for (int y = 0; y < kH; y++)
+    native_bg1[y] = 8;
   memset(authentic, 0, sizeof(authentic));
-  CHECK(PpuBindAuthenticSurface(
-      ppu, (uint8_t *)authentic, sizeof(authentic)));
-  CHECK(PpuSetAuthenticCameraFrame(
-      ppu, kPpuAuthenticCameraLayer_Bg1, native_bg1, NULL, 8));
-  CHECK(PpuAuthenticCameraFrameReady(
-      ppu, kPpuAuthenticCameraLayer_Bg1));
-  CHECK(!PpuAuthenticCameraFrameReady(
-      ppu, kPpuAuthenticCameraLayer_All));
+  CHECK(PpuBindAuthenticSurface(ppu, (uint8_t *)authentic, sizeof(authentic)));
+  CHECK(PpuSetAuthenticCameraFrame(ppu, kPpuAuthenticCameraLayer_Bg1, native_bg1, NULL, 8));
+  CHECK(PpuAuthenticCameraFrameReady(ppu, kPpuAuthenticCameraLayer_Bg1));
+  CHECK(!PpuAuthenticCameraFrameReady(ppu, kPpuAuthenticCameraLayer_All));
   render_first_line(ppu);
   const uint32_t *enhanced = (const uint32_t *)(const void *)fb;
   CHECK(enhanced[kExtra] == rgb555(31, 0, 0));
@@ -2972,19 +2791,15 @@ static void TestAuthenticCameraAndSurfaceContract(void) {
   /* BG2 receives its own phase rather than inheriting a BG1-sized crop. This
    * pins parallax and camera-driven raster layers to the independent pass. */
   setup_virtual_bg(ppu, kExtra, fb, sizeof(fb));
-  ppu->screenEnabled[0] =
-      (uint8_t)(1u << kActRaiserPpuLayer_Bg2);
+  ppu->screenEnabled[0] = (uint8_t)(1u << kActRaiserPpuLayer_Bg2);
   ppu->bgXsc[kActRaiserPpuLayer_Bg2] = 0x20 | 3;
-  fill_virtual_native_ring(
-      ppu, (uint16_t)(1 | (1 << 10)),
-      (uint16_t)(2 | (2 << 10)));
+  fill_virtual_native_ring(ppu, (uint16_t)(1 | (1 << 10)), (uint16_t)(2 | (2 << 10)));
   ppu->hScroll[kActRaiserPpuLayer_Bg2] = 0;
-  for (int y = 0; y < kH; y++) native_bg2[y] = 8;
+  for (int y = 0; y < kH; y++)
+    native_bg2[y] = 8;
   memset(authentic, 0, sizeof(authentic));
-  CHECK(PpuBindAuthenticSurface(
-      ppu, (uint8_t *)authentic, sizeof(authentic)));
-  CHECK(PpuSetAuthenticCameraFrame(
-      ppu, kPpuAuthenticCameraLayer_Bg2, NULL, native_bg2, 8));
+  CHECK(PpuBindAuthenticSurface(ppu, (uint8_t *)authentic, sizeof(authentic)));
+  CHECK(PpuSetAuthenticCameraFrame(ppu, kPpuAuthenticCameraLayer_Bg2, NULL, native_bg2, 8));
   render_first_line(ppu);
   enhanced = (const uint32_t *)(const void *)fb;
   CHECK(enhanced[kExtra] == rgb555(31, 0, 0));
@@ -3019,25 +2834,21 @@ static void TestAuthenticCameraAndSurfaceContract(void) {
   PpuSetObjExactPosition(ppu, 1, 100, 0);
   PpuSetObjCameraRelative(ppu, 0, true);
   PpuSetExtraSpace(ppu, kExtra);
-  PpuBeginDrawing(
-      ppu, fb, sizeof(fb), kPpuRenderFlags_NoSpriteLimits);
-  CHECK(PpuBindAuthenticSurface(
-      ppu, (uint8_t *)authentic, sizeof(authentic)));
+  PpuBeginDrawing(ppu, fb, sizeof(fb), kPpuRenderFlags_NoSpriteLimits);
+  CHECK(PpuBindAuthenticSurface(ppu, (uint8_t *)authentic, sizeof(authentic)));
   CHECK(PpuSetAuthenticCameraFrame(ppu, 0, NULL, NULL, 8));
   static const uint32_t mode7_sentinel = 0xff00ff00u;
   ppu->m7Override = (PpuMode7Override){
-    .rgba = &mode7_sentinel,
-    .width = 1,
-    .height = 1,
-    .canvasX1 = 1,
-    .canvasY1 = 1,
-    .wrap = 1,
+      .rgba = &mode7_sentinel,
+      .width = 1,
+      .height = 1,
+      .canvasX1 = 1,
+      .canvasY1 = 1,
+      .wrap = 1,
   };
   const PpuMode7Override expected_m7_override = ppu->m7Override;
-  uint8_t *const expected_overlay =
-      ppu->overlayRenderBuffer[kPpuOverlaySource_Bg1];
-  const uint32_t expected_overlay_pitch =
-      ppu->overlayRenderPitch[kPpuOverlaySource_Bg1];
+  uint8_t *const expected_overlay = ppu->overlayRenderBuffer[kPpuOverlaySource_Bg1];
+  const uint32_t expected_overlay_pitch = ppu->overlayRenderPitch[kPpuOverlaySource_Bg1];
   render_first_line(ppu);
   enhanced = (const uint32_t *)(const void *)fb;
   CHECK(enhanced[kExtra + 40] == rgb555(31, 31, 0));
@@ -3049,13 +2860,9 @@ static void TestAuthenticCameraAndSurfaceContract(void) {
   CHECK(ppu->extraLeftCur == kExtra && ppu->extraRightCur == kExtra);
   CHECK(ppu->renderFlags == kPpuRenderFlags_NoSpriteLimits);
   CHECK(!ppu->rangeOver && !ppu->timeOver);
-  CHECK(!memcmp(
-      &ppu->m7Override, &expected_m7_override,
-      sizeof(expected_m7_override)));
-  CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Bg1] ==
-        expected_overlay);
-  CHECK(ppu->overlayRenderPitch[kPpuOverlaySource_Bg1] ==
-        expected_overlay_pitch);
+  CHECK(!memcmp(&ppu->m7Override, &expected_m7_override, sizeof(expected_m7_override)));
+  CHECK(ppu->overlayRenderBuffer[kPpuOverlaySource_Bg1] == expected_overlay);
+  CHECK(ppu->overlayRenderPitch[kPpuOverlaySource_Bg1] == expected_overlay_pitch);
 
   /* A surface that was valid before margins widened must fail closed instead
    * of accepting writes past its 256-pixel pitch. Guard words prove both the
@@ -3067,16 +2874,14 @@ static void TestAuthenticCameraAndSurfaceContract(void) {
   } guarded;
   memset(&guarded, 0x5a, sizeof(guarded));
   setup_virtual_bg(ppu, 0, fb, sizeof(fb));
-  CHECK(PpuBindAuthenticSurface(
-      ppu, (uint8_t *)guarded.pixels, sizeof(guarded.pixels)));
+  CHECK(PpuBindAuthenticSurface(ppu, (uint8_t *)guarded.pixels, sizeof(guarded.pixels)));
   CHECK(PpuAuthenticSurfaceReady(ppu));
   PpuSetExtraSpace(ppu, kExtra);
   CHECK(!PpuAuthenticSurfaceReady(ppu));
   render_first_line(ppu);
   for (size_t i = 0; i < sizeof(guarded) / sizeof(uint32_t); i++)
     CHECK(((const uint32_t *)(const void *)&guarded)[i] == 0x5a5a5a5au);
-  CHECK(!PpuBindAuthenticSurface(
-      ppu, (uint8_t *)guarded.pixels, sizeof(guarded.pixels)));
+  CHECK(!PpuBindAuthenticSurface(ppu, (uint8_t *)guarded.pixels, sizeof(guarded.pixels)));
 
   ppu_free(ppu);
 }
@@ -3118,7 +2923,10 @@ int main(void) {
   /* ---- Real PPU: draw a solid backdrop, full brightness, force-blank off ---- */
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
-  if (!ppu) { SDL_Quit(); return 1; }
+  if (!ppu) {
+    SDL_Quit();
+    return 1;
+  }
   ppu_reset(ppu);
 
   /* Framebuffer the PPU renders into (ARGB8888, 4 bytes/px), same shape as
@@ -3131,10 +2939,11 @@ int main(void) {
    * With no BG/OBJ layers enabled, every pixel resolves to this backdrop. */
   const int R5 = 25, G5 = 10, B5 = 3;
   ppu->cgram[0] = bgr555(R5, G5, B5);
-  ppu->inidisp = 0x0f;   /* brightness 15, force-blank (bit 7) OFF */
-  ppu->bgmode = 0;       /* mode 0; no layers enabled -> pure backdrop */
+  ppu->inidisp = 0x0f; /* brightness 15, force-blank (bit 7) OFF */
+  ppu->bgmode = 0;     /* mode 0; no layers enabled -> pure backdrop */
 
-  for (int line = 0; line <= kH; line++) ppu_runLine(ppu, line);
+  for (int line = 0; line <= kH; line++)
+    ppu_runLine(ppu, line);
 
   /* Sanity: the PPU wrote RGB with alpha byte 0 (BGRA byte order in memory:
    * [0]=B [1]=G [2]=R [3]=A). Confirm a mid-screen pixel matches the backdrop
@@ -3145,18 +2954,17 @@ int main(void) {
   fprintf(stderr, "[ppu-test] backdrop pixel BGRA = %d,%d,%d,%d (expected RGB %d,%d,%d, A 0)\n",
           mid[0], mid[1], mid[2], mid[3], exp_r, exp_g, exp_b);
   CHECK(mid[2] == exp_r && mid[1] == exp_g && mid[0] == exp_b);
-  CHECK(mid[3] == 0);   /* the alpha-0 framebuffer that triggered the bug */
+  CHECK(mid[3] == 0); /* the alpha-0 framebuffer that triggered the bug */
 
   /* ---- Present through the production SDL3 presentation path ---- */
-  SDL_Window *window =
-      SDL_CreateWindow("ppu-pipeline-test", kW * 3, kH * 3, SDL_WINDOW_HIDDEN);
+  SDL_Window *window = SDL_CreateWindow("ppu-pipeline-test", kW * 3, kH * 3, SDL_WINDOW_HIDDEN);
   CHECK(window != NULL);
   SDL_Renderer *renderer = SDL_CreateRenderer(window, SDL_SOFTWARE_RENDERER);
   CHECK(renderer != NULL);
 
   if (renderer) {
-    SDL_Texture *texture = SDL_CreateTexture(
-        renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, kW, kH);
+    SDL_Texture *texture =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, kW, kH);
     CHECK(texture != NULL);
     /* The fix under test: force NONE so the alpha-0 framebuffer blits opaque.
      * (SDL3 defaults to BLEND, which would present this as a black screen.) */
@@ -3170,16 +2978,14 @@ int main(void) {
     CHECK(SDL_RenderPresent(renderer));
 
     SDL_Surface *raw = SDL_RenderReadPixels(renderer, NULL);
-    SDL_Surface *argb =
-        raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888) : NULL;
+    SDL_Surface *argb = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888) : NULL;
     if (raw) SDL_DestroySurface(raw);
     CHECK(argb != NULL);
 
     if (argb) {
       /* Center of the presented output must be the backdrop RGB, not black. */
-      const uint8_t *row = (const uint8_t *)argb->pixels +
-                           (size_t)(argb->h / 2) * argb->pitch;
-      const uint8_t *cp = row + (size_t)(argb->w / 2) * 4;  /* B,G,R,A */
+      const uint8_t *row = (const uint8_t *)argb->pixels + (size_t)(argb->h / 2) * argb->pitch;
+      const uint8_t *cp = row + (size_t)(argb->w / 2) * 4; /* B,G,R,A */
       int got_b = cp[0], got_g = cp[1], got_r = cp[2];
       long nonblack = 0;
       for (int y = 0; y < argb->h; y++) {
@@ -3187,10 +2993,10 @@ int main(void) {
         for (int x = 0; x < argb->w; x++)
           if (r[x * 4] || r[x * 4 + 1] || r[x * 4 + 2]) nonblack++;
       }
-      fprintf(stderr, "[ppu-test] presented center RGB = %d,%d,%d; nonblack=%ld/%ld\n",
-              got_r, got_g, got_b, nonblack, (long)argb->w * argb->h);
+      fprintf(stderr, "[ppu-test] presented center RGB = %d,%d,%d; nonblack=%ld/%ld\n", got_r,
+              got_g, got_b, nonblack, (long)argb->w * argb->h);
       CHECK(got_r == exp_r && got_g == exp_g && got_b == exp_b);
-      CHECK(nonblack == (long)argb->w * argb->h);  /* whole frame visible */
+      CHECK(nonblack == (long)argb->w * argb->h); /* whole frame visible */
       SDL_DestroySurface(argb);
     }
     SDL_DestroyTexture(texture);
