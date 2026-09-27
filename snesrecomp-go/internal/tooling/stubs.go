@@ -2,6 +2,7 @@ package tooling
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 var (
@@ -17,9 +19,22 @@ var (
 	stubTargetRE   = regexp.MustCompile(`cpu_trace_unresolved_stub_trap\(cpu,\s*0x([0-9A-Fa-f]+)`)
 	stubIndirectRE = regexp.MustCompile(`cpu_trace_unresolved_indirect_jump\(cpu,\s*0x([0-9A-Fa-f]+)`)
 	stubVariantRE  = regexp.MustCompile(`_M[01]X[01]$`)
+	stubFunctionRE = regexp.MustCompile(`^RecompReturn (\w+)\(CpuState \*cpu\) \{`)
+	stubBlockRE    = regexp.MustCompile(`^\s*(L_[0-9A-Fa-f]+_M[01]X[01]):`)
 )
 
+// Entries describe emitted diagnostics, not proven reachable defects. A
+// dispatch-domain guard or a missing-registry fallback can be intentional.
+// Keeping the owning function/block-entry widths makes a baseline useful without
+// mistaking unchanged totals for unchanged coverage.
+type StubCensusEntry struct {
+	Key       string   `json:"key"`
+	Emissions int      `json:"emissions"`
+	Contexts  []string `json:"contexts"`
+}
+
 type StubCensusReport struct {
+	Version           int
 	LogicalGotos      int
 	GotoEmissions     int
 	LogicalDispatches int
@@ -28,6 +43,7 @@ type StubCensusReport struct {
 	TargetEmissions   int
 	LogicalIndirects  int
 	IndirectEmissions int
+	Entries           []StubCensusEntry
 }
 
 func (report StubCensusReport) LogicalTotal() int {
@@ -52,6 +68,9 @@ func CensusStubs(genDir string, verbose bool, output io.Writer) (StubCensusRepor
 	if err != nil {
 		return StubCensusReport{}, err
 	}
+	if len(paths) == 0 {
+		return StubCensusReport{}, fmt.Errorf("stub_census: no generated bank sources in %s", genDir)
+	}
 	if path := filepath.Join(genDir, "unresolved_stubs_v2.c"); fileExists(path) {
 		paths = append(paths, path)
 	}
@@ -60,6 +79,8 @@ func CensusStubs(genDir string, verbose bool, output io.Writer) (StubCensusRepor
 	dispatches := make(map[uint32]map[string]struct{})
 	targets := make(map[uint32]map[string]struct{})
 	indirects := make(map[uint32]map[string]struct{})
+	details := make(map[string]*StubCensusEntry)
+	contexts := make(map[string]map[string]bool)
 	for _, path := range paths {
 		file, err := os.Open(path)
 		if err != nil {
@@ -67,13 +88,29 @@ func CensusStubs(genDir string, verbose bool, output io.Writer) (StubCensusRepor
 		}
 		scanner := bufio.NewScanner(file)
 		lineNumber := 0
+		function, block := "", ""
 		for scanner.Scan() {
 			lineNumber++
 			line := scanner.Text()
+			if match := stubFunctionRE.FindStringSubmatch(line); match != nil {
+				function, block = match[1], "entry"
+			}
+			if match := stubBlockRE.FindStringSubmatch(line); match != nil {
+				block = match[1]
+			}
+			addDetail := func(key string) {
+				if details[key] == nil {
+					details[key] = &StubCensusEntry{Key: key}
+					contexts[key] = make(map[string]bool)
+				}
+				details[key].Emissions++
+				contexts[key][function+"/"+block] = true
+			}
 			if match := stubGotoRE.FindStringSubmatch(line); match != nil {
 				site, _ := strconv.ParseUint(match[1], 16, 32)
 				target, _ := strconv.ParseUint(match[2], 16, 32)
 				key := gotoStubKey{Site: uint32(site), Target: uint32(target), Function: stubVariantRE.ReplaceAllString(match[3], "")}
+				addDetail(fmt.Sprintf("goto:%06X:%06X:%s", site, target, key.Function))
 				if gotos[key] == nil {
 					gotos[key] = make(map[string]struct{})
 				}
@@ -82,6 +119,7 @@ func CensusStubs(genDir string, verbose bool, output io.Writer) (StubCensusRepor
 			if match := stubDispatchRE.FindStringSubmatch(line); match != nil {
 				site, _ := strconv.ParseUint(match[1], 16, 32)
 				key := uint32(site)
+				addDetail(fmt.Sprintf("dispatch:%06X", key))
 				if dispatches[key] == nil {
 					dispatches[key] = make(map[string]struct{})
 				}
@@ -90,6 +128,7 @@ func CensusStubs(genDir string, verbose bool, output io.Writer) (StubCensusRepor
 			if match := stubTargetRE.FindStringSubmatch(line); match != nil {
 				target, _ := strconv.ParseUint(match[1], 16, 32)
 				key := uint32(target)
+				addDetail(fmt.Sprintf("target:%06X", key))
 				if targets[key] == nil {
 					targets[key] = make(map[string]struct{})
 				}
@@ -98,6 +137,7 @@ func CensusStubs(genDir string, verbose bool, output io.Writer) (StubCensusRepor
 			if match := stubIndirectRE.FindStringSubmatch(line); match != nil {
 				site, _ := strconv.ParseUint(match[1], 16, 32)
 				key := uint32(site)
+				addDetail(fmt.Sprintf("indirect:%06X", key))
 				if indirects[key] == nil {
 					indirects[key] = make(map[string]struct{})
 				}
@@ -114,9 +154,18 @@ func CensusStubs(genDir string, verbose bool, output io.Writer) (StubCensusRepor
 		}
 	}
 	report := StubCensusReport{
+		Version:      1,
 		LogicalGotos: len(gotos), LogicalDispatches: len(dispatches),
 		LogicalTargets: len(targets), LogicalIndirects: len(indirects),
 	}
+	for key, entry := range details {
+		for context := range contexts[key] {
+			entry.Contexts = append(entry.Contexts, context)
+		}
+		sort.Strings(entry.Contexts)
+		report.Entries = append(report.Entries, *entry)
+	}
+	sort.Slice(report.Entries, func(i, j int) bool { return report.Entries[i].Key < report.Entries[j].Key })
 	for _, locations := range gotos {
 		report.GotoEmissions += len(locations)
 	}
@@ -157,7 +206,7 @@ func CensusStubs(genDir string, verbose bool, output io.Writer) (StubCensusRepor
 		}
 	}
 	if len(dispatches) > 0 {
-		fmt.Fprintln(output, "\n--- unresolved indirect dispatch (needs indirect_dispatch cfg) ---")
+		fmt.Fprintln(output, "\n--- indirect-dispatch domain guards (review selector/table coverage) ---")
 		keys := make([]uint32, 0, len(dispatches))
 		for key := range dispatches {
 			keys = append(keys, key)
@@ -174,7 +223,7 @@ func CensusStubs(genDir string, verbose bool, output io.Writer) (StubCensusRepor
 		"unresolved call targets (missing cfg coverage / HLE)", "target",
 		targets, verbose)
 	writeAddressLocations(output,
-		"unresolved indirect jumps (needs dispatch cfg / HLE)", "site",
+		"indirect-jump missing-body guards (review live target / registry coverage)", "site",
 		indirects, verbose)
 	total := report.LogicalTotal()
 	if total == 0 {
@@ -183,6 +232,64 @@ func CensusStubs(genDir string, verbose bool, output io.Writer) (StubCensusRepor
 		fmt.Fprintf(output, "\n%d logical trap(s) remain. Stubs are forbidden — resolve each at the gen path (decode coverage / dispatch cfg / HLE), do NOT silence.\n", total)
 	}
 	return report, nil
+}
+
+// CompareStubBaseline is an additional regression check, not a waiver of the
+// strict census gate. Removed diagnostics are reported; new sites, contexts,
+// or more emissions require review even if the overall count decreases.
+func CompareStubBaseline(report StubCensusReport, baselinePath string, output io.Writer) error {
+	data, err := os.ReadFile(baselinePath)
+	if err != nil {
+		return err
+	}
+	var baseline StubCensusReport
+	if err := json.Unmarshal(data, &baseline); err != nil {
+		return err
+	}
+	if baseline.Version != 1 || len(baseline.Entries) != baseline.LogicalTotal() {
+		return fmt.Errorf("stub baseline has missing or inconsistent entries")
+	}
+	old := make(map[string]StubCensusEntry)
+	for _, entry := range baseline.Entries {
+		if _, duplicate := old[entry.Key]; duplicate || entry.Key == "" || entry.Emissions < 1 || len(entry.Contexts) == 0 {
+			return fmt.Errorf("invalid stub baseline entry %q", entry.Key)
+		}
+		old[entry.Key] = entry
+	}
+	var changes []string
+	for _, entry := range report.Entries {
+		previous, found := old[entry.Key]
+		if !found {
+			changes = append(changes, "new "+entry.Key)
+			continue
+		}
+		delete(old, entry.Key)
+		if entry.Emissions > previous.Emissions {
+			changes = append(changes, fmt.Sprintf("%s emissions %d -> %d", entry.Key, previous.Emissions, entry.Emissions))
+		}
+		known := make(map[string]bool)
+		for _, context := range previous.Contexts {
+			known[context] = true
+		}
+		for _, context := range entry.Contexts {
+			if !known[context] {
+				changes = append(changes, entry.Key+" new context "+context)
+			}
+		}
+	}
+	removed := make([]string, 0, len(old))
+	for key := range old {
+		removed = append(removed, key)
+	}
+	sort.Strings(removed)
+	for _, key := range removed {
+		fmt.Fprintln(output, "removed diagnostic:", key)
+	}
+	if len(changes) != 0 {
+		return fmt.Errorf("stub baseline requires review:\n%s", strings.Join(changes, "\n"))
+	}
+	fmt.Fprintln(output, "No new trap sites, emissions or CPU-width contexts; strict stub gate remains independent.")
+	return nil
 }
 
 func fileExists(path string) bool {

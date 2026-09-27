@@ -12,12 +12,25 @@
 #include "actraiser/regional/actraiser_population_conversion.h"
 #include "actraiser/regional/actraiser_regional_arrival.h"
 #include "actraiser/actraiser_stage_placements.h"
+#include "actraiser/actraiser_rtl.h"
+#include "actraiser/enhancements/actraiser_world_resume.h"
+#include "app/settings.h"
 #include "randomizer/randomizer.h"
 #include "regional/regional_randomizer.h"
 
 #include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
+
+Settings g_settings;
+uint8 g_ram[kSnesWramSize];
+void ActRaiserWorldResume_Begin(uint8_t *wram, size_t size, bool continuing,
+                                bool remember_last_town, bool permitted) {
+  assert(wram == g_ram && size == sizeof(g_ram));
+  assert(remember_last_town == g_settings.remember_last_town);
+  (void)continuing;
+  (void)permitted;
+}
 
 /* The transaction module has its own native-call harness. */
 static unsigned population_native_calls, population_commit_calls;

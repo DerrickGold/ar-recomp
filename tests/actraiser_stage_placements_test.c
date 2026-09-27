@@ -22,7 +22,7 @@ static const EntryCase kEntries[] = {
 };
 static uint8_t ram[65536], rom[32768], expected[65536];
 static unsigned target, origin, calls, expected_caller;
-static bool fail_randomizer, alter_randomizer;
+static bool fail_randomizer, alter_randomizer, check_live_flags;
 static const ActionPlacementProgram *replacement_program;
 static RecompReturn leaf_result;
 bool Randomizer_ApplyPlacementPrograms(const RandomizerPlacementMap *maps, size_t count,
@@ -69,6 +69,7 @@ static void InitRecord(uint8_t *memory, unsigned x, unsigned type, unsigned para
   ByteOrder_WriteLe16(memory + x + 0x30, 0);
 }
 RecompReturn bank_00_9557_M0X0(CpuState *cpu) {
+  if (check_live_flags) assert(cpu->_flag_C == (calls != 0) && cpu->_flag_V);
   ++calls;
   if (leaf_result != RECOMP_RETURN_NORMAL) return leaf_result;
   assert(cpu->DB == 10 && !cpu->PB && !cpu->m_flag && !cpu->x_flag && !cpu->D);
@@ -166,11 +167,14 @@ static void Run(const PlacementRoot *root, const ArRegionalPlacementPolicy *poli
       x += 64;
     }
   }
+  cpu.P ^= CPU_P_C | CPU_P_V; /* Live CMP/ADC mirrors need not match packed P. */
+  check_live_flags = true;
   assert(ActRaiser_StagePlacements(&cpu) == RECOMP_RETURN_TAILCALL && target == 0x946e &&
          origin == 0x941c);
   assert(calls == objects && cpu.X == x && cpu.Y == (gate ? root->wave : root->end));
   assert(cpu.S == before.S && cpu.DB == before.DB && cpu.PB == before.PB && !cpu.m_flag &&
          !cpu.x_flag);
+  check_live_flags = false;
   assert((cpu.P & (CPU_P_C | CPU_P_V | CPU_P_I)) == (gate ? CPU_P_I : CPU_P_I | CPU_P_C));
   assert(!memcmp(expected, ram, sizeof(ram)));
   if (!gate) return;

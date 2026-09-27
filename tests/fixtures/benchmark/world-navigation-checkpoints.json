@@ -2,7 +2,7 @@
   "schema": "actraiser-render-checkpoints-v1",
   "checkpoints": {
     "world-navigation": {
-      "description": "Town menu to the enhanced world map, Palace movement and menu handoff.",
+      "description": "Continue to the enhanced world map, hold and move through captures, then hand off to the Palace menu.",
       "replay": "tests/fixtures/benchmark/world-navigation-inputs.json",
       "sram_base64": "tests/fixtures/sim3d/sim-actions-seed.srm.b64",
       "sram_sha256": "1a6f35b3c8ba771633b86f07bc924eb1b45dceede5f6c8543442bc511ec86749",

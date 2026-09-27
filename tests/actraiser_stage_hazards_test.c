@@ -76,6 +76,7 @@ static void Adapters(void) {
           before.A = selected.count;
           before.P = (before.P & ~(CPU_P_N | CPU_P_Z)) | (before.A ? 0 : CPU_P_Z);
           cpu_p_to_mirrors(&before);
+          cpu.P ^= CPU_P_C | CPU_P_V; /* Live mirrors, stale packed status. */
           assert(ActRaiser_StageHazards(&cpu) == RECOMP_RETURN_TAILCALL);
           assert(target == 0x940e && origin == 0x940c);
           assert(!memcmp(&cpu, &before, sizeof(cpu)) && !memcmp(ram, expected, sizeof(ram)));

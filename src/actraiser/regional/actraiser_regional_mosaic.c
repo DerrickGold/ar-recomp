@@ -29,6 +29,7 @@ RecompReturn ActRaiser_RegionalMosaic(CpuState *cpu) {
   /* Final DEC sets Z/N. Preserve US ASL carry (source bit4), unrelated to
    * the displayed bit0. Native continuation retains terminator/setup/return. */
   const uint8_t carry=(cpu_read8(cpu,2,(uint16_t)(0x96d4+cpu->X))>>4)&1;
+  cpu_mirrors_to_p(cpu); /* Generated arithmetic owns the live flag mirrors. */
   cpu->P=(uint8_t)((cpu->P&~(CPU_P_N|CPU_P_Z|CPU_P_C))|CPU_P_Z|carry);
   cpu_p_to_mirrors(cpu);
   if (!cpu_hle_tailcall_request(0x0293ba, 0x02939c))

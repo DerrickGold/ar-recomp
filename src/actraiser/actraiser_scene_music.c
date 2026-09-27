@@ -25,6 +25,7 @@ RecompReturn ActRaiser_SceneMusic(CpuState *cpu) {
   /* LDX $A5 only. Native comparison suppresses redundant uploads; the native
    * continuation owns SPC handshakes, resident cache and playback command. */
   cpu->X=cpu_read16(cpu,0,0xa5);
+  cpu_mirrors_to_p(cpu); /* Generated arithmetic owns the live flag mirrors. */
   cpu->P=(uint8_t)((cpu->P&~(CPU_P_N|CPU_P_Z)) | (cpu->X?0:CPU_P_Z) |
       (cpu->X&0x8000?CPU_P_N:0));
   cpu_p_to_mirrors(cpu);

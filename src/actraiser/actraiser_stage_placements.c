@@ -116,6 +116,7 @@ static RecompReturn Object(CpuState *cpu,const ActionPlacement *row,uint16_t cal
   cpu_write16(cpu,0,x+0x36,(uint16_t)(row->y*16));
   cpu_write16(cpu,0,x+0x38,row->parameter);
   cpu->A = row->type;
+  cpu_mirrors_to_p(cpu); /* Generated arithmetic owns the live flag mirrors. */
   cpu->P = (uint8_t)((cpu->P & ~(CPU_P_N|CPU_P_Z)) | (row->type ? 0 : CPU_P_Z));
   cpu_p_to_mirrors(cpu);
   const RecompReturn result = ActRaiserNativeCall(cpu,bank_00_9557_M0X0,0,caller,false);
@@ -155,6 +156,7 @@ RecompReturn ActRaiser_StagePlacements(CpuState *cpu) {
     if (!Slot(cpu->X)) ActRaiserHleFatal("Regional placement pool overflow");
     if (row->kind == kActionPlacement_End) {
       cpu->Y = s_root->end;
+      cpu_mirrors_to_p(cpu); /* Generated arithmetic owns the live flag mirrors. */
       cpu->P = (uint8_t)((cpu->P & ~CPU_P_V) | CPU_P_C);
       cpu_p_to_mirrors(cpu);
       return Tail(0x00946e,0x00941c);
@@ -175,6 +177,7 @@ RecompReturn ActRaiser_StagePlacements(CpuState *cpu) {
       cpu_write16(cpu,0,x+0x38,s_root->wave);
       cpu->X += kSlotBytes;
       cpu->Y = s_root->wave;
+      cpu_mirrors_to_p(cpu); /* Generated arithmetic owns the live flag mirrors. */
       cpu->P &= ~(CPU_P_C | CPU_P_V);
       cpu_p_to_mirrors(cpu);
       return Tail(0x00946e,0x00941c);

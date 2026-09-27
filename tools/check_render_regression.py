@@ -46,7 +46,8 @@ def main():
                    "--checkpoint", case["checkpoint"], "--timeout", "600"]
         if "replay" in case:
             command += ["--replay", str(ROOT / case["replay"])]
-        for key in ("quit_frames", "capture_from", "capture_to", "capture_every", "require_scene"):
+        for key in ("quit_frames", "capture_from", "capture_to", "capture_every",
+                    "require_scene", "require_view"):
             if key in case:
                 command += ["--" + key.replace("_", "-"), str(case[key])]
         print(f"Checking {name}", flush=True)

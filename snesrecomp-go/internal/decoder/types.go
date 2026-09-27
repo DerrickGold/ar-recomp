@@ -53,9 +53,13 @@ type ConstantZFold struct {
 }
 
 type Graph struct {
-	Entry                     DecodeKey
-	Instructions              map[DecodeKey]*DecodedInstruction
-	Order                     []DecodeKey
+	Entry        DecodeKey
+	Instructions map[DecodeKey]*DecodedInstruction
+	Order        []DecodeKey
+	// BoundaryExits retain the exact instruction-aligned continuations cut by
+	// an authored End. Another operand width can fall past End rather than at
+	// it; that live PC/M/X still needs its own body, not a different-width alias.
+	BoundaryExits             []DecodeKey
 	SuppressedIndirectCalls   []SuppressedIndirectCall
 	ConstantZFolds            []ConstantZFold
 	DispatchTargetsSuppressed []DispatchTargetSuppressed
@@ -143,10 +147,15 @@ type Options struct {
 	IndirectCallTables   map[uint32]IndirectCallTable
 	IndirectDispatch     map[uint32]DispatchAuth
 	HLEDispatch          map[uint16]string
-	DataRegions          []DataRegion
-	CalleeExitMX         map[Variant]MX
-	CalleeExitModes      map[Variant][]MX
-	SiblingEntryPCs      map[uint16]struct{}
+	// HLEEntryPCs are native function/prefix interceptions. Every incoming
+	// edge from another root must dispatch through the generated wrapper,
+	// including fall-through, conditional branches and BRK continuations.
+	// Unlike sibling entries, a resume overlay cannot inline these bodies.
+	HLEEntryPCs     map[uint16]struct{}
+	DataRegions     []DataRegion
+	CalleeExitMX    map[Variant]MX
+	CalleeExitModes map[Variant][]MX
+	SiblingEntryPCs map[uint16]struct{}
 	// InternalResumePCs are address-taken continuation blocks that remain
 	// registered as external entries, but must be decoded into an active
 	// caller region when reached by an internal control-flow edge. This

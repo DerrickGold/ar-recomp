@@ -42,7 +42,11 @@ func DecodeFunction(image rom.Image, bank byte, start uint16, entryM, entryX uin
 			continue
 		}
 		pc := uint16(item.Key.PC)
+		if _, intercepted := options.HLEEntryPCs[pc]; intercepted && pc != start {
+			continue
+		}
 		if options.End != nil && pc >= *options.End && item.Kind == "fall" && item.HasPredecessor && uint16(item.Predecessor.PC) < *options.End {
+			graph.BoundaryExits = append(graph.BoundaryExits, item.Key)
 			continue
 		}
 		if item.Kind == "jump" {
@@ -129,7 +133,8 @@ func DecodeFunction(image rom.Image, bank byte, start uint16, entryM, entryX uin
 	for key, decoded := range graph.Instructions {
 		if decoded.Instruction.Mnemonic == "BRK" && len(decoded.Successors) > 0 {
 			successor := decoded.Successors[0]
-			if _, found := decodedPCMX[[3]uint32{successor.PC, uint32(successor.M), uint32(successor.X)}]; !found {
+			_, intercepted := options.HLEEntryPCs[uint16(successor.PC)]
+			if _, found := decodedPCMX[[3]uint32{successor.PC, uint32(successor.M), uint32(successor.X)}]; !found && !intercepted {
 				decoded.Successors = nil
 				graph.Instructions[key] = decoded
 			}

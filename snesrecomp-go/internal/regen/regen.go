@@ -566,6 +566,9 @@ func (repo *repository) discoverVariants(jobs int) (int, error) {
 		var fieldGraphs []*decoder.Graph
 		repo.parallelEntries(jobs, nil, func(bank *bankState, entry config.Entry) {
 			options := repo.decodeOptions(bank, entry)
+			// Discover the same external continuations that emission will use.
+			// Exit-M/X inference separately retains its full native graph.
+			options.End = entry.End
 			graph, err := decoder.DecodeFunction(repo.image, bank.ID, entry.Start, entry.EntryMX.M, entry.EntryMX.X, options)
 			if err != nil {
 				return
@@ -672,6 +675,14 @@ func discoverGraphDemandEvidence(graph *decoder.Graph, siblingStarts map[uint16]
 			for x := uint8(0); x < 2; x++ {
 				add(codegen.Variant{Address: address, M: m, X: x}, variantDemandEvidence{})
 			}
+		}
+	}
+	for _, exit := range graph.BoundaryExits {
+		if graph.Instructions[exit] == nil {
+			// A byte boundary need not coincide with this variant's next
+			// instruction. Register its actual continuation without treating
+			// speculative decode demand as proof of gameplay reachability.
+			add(codegen.Variant{Address: exit.PC, M: exit.M, X: exit.X}, variantDemandEvidence{})
 		}
 	}
 	for _, decoded := range graph.Instructions {

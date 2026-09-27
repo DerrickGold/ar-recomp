@@ -78,6 +78,7 @@ static void Anchors(void) {
       memcpy(expected, ram, sizeof(ram));
       assert(ActRaiser_TerrainStartEntry(&cpu) == (profile == 1));
       if (profile == 1) {
+        cpu.P ^= CPU_P_C | CPU_P_V; /* Generated arithmetic may leave P stale. */
         assert(ActRaiser_TerrainStart(&cpu) == RECOMP_RETURN_TAILCALL);
         assert(target == 0x9343 && origin == 0x933c);
         before.A = 27;
@@ -94,6 +95,7 @@ static void Anchors(void) {
       memcpy(expected, ram, sizeof(ram));
       assert(ActRaiser_TerrainCheckpointEntry(&cpu) == (profile == 1));
       if (profile == 1) {
+        cpu.P ^= CPU_P_C | CPU_P_V;
         assert(ActRaiser_TerrainCheckpoint(&cpu) == RECOMP_RETURN_TAILCALL);
         assert(target == 0x94b7 && origin == 0x94b1);
         before.A = 25;
@@ -238,6 +240,7 @@ static void RomCheck(char **paths) {
                                   ArRegionalTerrain_FillmoreCheckpointY(profile) * 16);
             assert(ActRaiser_StageTerrainEntry(&cpu));
             const unsigned count = publishes;
+            cpu.P ^= CPU_P_C | CPU_P_V;
             assert(ActRaiser_StageTerrain(&cpu) == RECOMP_RETURN_TAILCALL);
             assert(publishes == count + 1 && presented == profile && target == 0x832c &&
                    origin == 0x8329);

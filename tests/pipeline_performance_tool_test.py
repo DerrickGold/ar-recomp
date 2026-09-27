@@ -30,6 +30,20 @@ def sample(frames, cost, scene="Town 3D"):
 
 
 class PipelinePerformanceTest(unittest.TestCase):
+    def test_capture_view_must_cover_each_image_not_just_appear_in_log(self):
+        def transition(frame, view):
+            return f"[sim3d-view] gf={frame} old -> new (inactive, view={view}, integrity=$0)\n"
+        images = {f"shot_{frame}.ppm": "hash" for frame in (1200, 1300, 1800)}
+        entered = transition(353, "world_navigation")
+        module.validate_capture_view(entered + transition(1900, "sky_palace"),
+                                     images, "world_navigation")
+        for log in ("", transition(1201, "world_navigation"),
+                    entered + transition(411, "sky_palace"),
+                    entered + transition(1300, "authentic_fallback"),
+                    entered + transition(0, "world_navigation")):
+            with self.subTest(log=log), self.assertRaises(ValueError):
+                module.validate_capture_view(log, images, "world_navigation")
+
     def test_missing_or_empty_capture_pairs_are_not_evidence(self):
         empty = {"final_wram_sha256": "a", "images": {}}
         for runs in ([], [empty], [empty, empty]):

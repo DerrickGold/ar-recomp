@@ -68,11 +68,13 @@ static void Adapters(void) {
           before.P = (before.P & ~(CPU_P_N | CPU_P_Z)) | (before.X ? 0 : CPU_P_Z) |
                      (before.X & 0x8000 ? CPU_P_N : 0);
           cpu_p_to_mirrors(&before);
+          cpu.P ^= CPU_P_C | CPU_P_V; /* LDX must preserve live arithmetic flags. */
           assert(ActRaiser_SceneMusic(&cpu) == RECOMP_RETURN_TAILCALL);
           assert(captures == count + 1 && target == 0x02b655 && origin == 0x02b653);
           assert(!memcmp(&cpu, &before, sizeof(cpu)) && !memcmp(expected, ram, sizeof(ram)));
           /* No cache, selector, APU-port or handshake writes. A repeated
            * accepted source goes through the same native cache comparison. */
+          cpu.P ^= CPU_P_C | CPU_P_V; /* LDX must preserve live arithmetic flags. */
           assert(ActRaiser_SceneMusic(&cpu) == RECOMP_RETURN_TAILCALL);
           assert(!memcmp(expected, ram, sizeof(ram)));
         }

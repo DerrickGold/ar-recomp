@@ -117,7 +117,9 @@ static void Policies(void) {
     for (unsigned flags = 0; flags < 256; ++flags) {
       CpuState cpu = Setup(0, CPU_P_V | CPU_P_C, false);
       town_ram[Base(0, false) + 2] = flags;
+      cpu.P ^= CPU_P_C | CPU_P_V; /* PHP must capture the live arithmetic flags. */
       assert(ActRaiserTownCensus_Run(&cpu, &s) == RECOMP_RETURN_NORMAL);
+      assert(cpu._flag_C && cpu._flag_V && cpu.P == (CPU_P_V | CPU_P_C));
       assert(WordAt(low, 0x21c) == ExpectedPeople(flags) + 2 &&
              WordAt(town_ram, 0x6b26) == ExpectedSupport(flags, &s));
     }

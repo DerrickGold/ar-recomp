@@ -64,6 +64,7 @@ static void Adapter(void) {
         expected.P = (expected.P & ~(CPU_P_N | CPU_P_Z | CPU_P_C)) | CPU_P_Z |
                      ((rom[0x96d4 + expected.X] >> 4) & 1);
         cpu_p_to_mirrors(&expected);
+        cpu.P ^= CPU_P_C | CPU_P_V; /* ASL replaces C, but must retain live V. */
         assert(ActRaiser_RegionalMosaic(&cpu) == RECOMP_RETURN_TAILCALL && target == 0x0293ba &&
                origin == 0x02939c);
         assert(!memcmp(&expected, &cpu, sizeof(cpu)) && !memcmp(before, ram, sizeof(ram)));

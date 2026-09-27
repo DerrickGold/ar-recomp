@@ -26,6 +26,22 @@ type BankOptions struct {
 }
 
 func EmitBank(image rom.Image, bank byte, entries []config.Entry, options BankOptions) (string, error) {
+	// A bank caller can supply HLE policy directly, without a parsed Config.
+	// Keep that policy at the same decode boundary used by the regen driver.
+	hleEntries := make(map[uint16]struct{})
+	for pc := range options.Decode.HLEEntryPCs {
+		hleEntries[pc] = struct{}{}
+	}
+	for pc := range options.HLEFunctions {
+		hleEntries[pc] = struct{}{}
+	}
+	for pc := range options.HLEFunctionsIf {
+		hleEntries[pc] = struct{}{}
+	}
+	for pc := range options.HLESPCUpload {
+		hleEntries[pc] = struct{}{}
+	}
+	options.Decode.HLEEntryPCs = hleEntries
 	header := options.Header
 	if header == "" {
 		header = defaultBankHeader(bank)
@@ -169,8 +185,18 @@ func defaultBankHeader(bank byte) string {
 func DecodeOptionsFromConfig(bank byte, bankConfig *config.Config) decoder.Options {
 	options := decoder.Options{
 		HLEDispatch:      make(map[uint16]string, len(bankConfig.HLEDispatch)),
+		HLEEntryPCs:      make(map[uint16]struct{}),
 		IndirectDispatch: make(map[uint32]decoder.DispatchAuth),
 		CalleeExitMX:     make(map[decoder.Variant]decoder.MX),
+	}
+	for pc := range bankConfig.HLEFunctions {
+		options.HLEEntryPCs[pc] = struct{}{}
+	}
+	for pc := range bankConfig.HLEFunctionsIf {
+		options.HLEEntryPCs[pc] = struct{}{}
+	}
+	for _, pc := range bankConfig.HLESPCUpload {
+		options.HLEEntryPCs[pc] = struct{}{}
 	}
 	for pc, helper := range bankConfig.HLEDispatch {
 		options.HLEDispatch[pc] = helper

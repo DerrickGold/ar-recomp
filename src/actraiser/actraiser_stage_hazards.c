@@ -52,6 +52,7 @@ RecompReturn ActRaiser_StageHazards(CpuState *cpu) {
    * continuation, source cursor and return frame. Unused record tails retain
    * native semantics: count, not clearing, bounds every collision traversal. */
   cpu->A = (uint16_t)selected.count;
+  cpu_mirrors_to_p(cpu); /* Generated arithmetic owns the live flag mirrors. */
   cpu->P = (uint8_t)((cpu->P & ~(CPU_P_N|CPU_P_Z)) | (cpu->A ? 0 : CPU_P_Z));
   cpu_p_to_mirrors(cpu);
   cpu_hle_tailcall_request(0x00940e,0x00940c);

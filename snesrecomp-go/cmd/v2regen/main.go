@@ -757,13 +757,40 @@ func censusStubs(args []string) error {
 	flags := flag.NewFlagSet("stub-census", flag.ContinueOnError)
 	genDir := flags.String("gen-dir", "src/gen", "generated C directory")
 	verbose := flags.Bool("verbose", false, "list every variant occurrence")
+	jsonPath := flags.String("json", "", "write detailed census JSON (does not waive the strict gate)")
+	baseline := flags.String("baseline", "", "check only for new diagnostics against a reviewed JSON census; does not change regen's strict gate")
 	flags.BoolVar(verbose, "v", false, "list every variant occurrence")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if *baseline != "" && *jsonPath != "" {
+		baselineFile, err := filepath.Abs(*baseline)
+		if err != nil {
+			return err
+		}
+		outputFile, err := filepath.Abs(*jsonPath)
+		if err != nil {
+			return err
+		}
+		if baselineFile == outputFile {
+			return errors.New("census output must not overwrite its comparison baseline")
+		}
+	}
 	report, err := tooling.CensusStubs(*genDir, *verbose, os.Stdout)
 	if err != nil {
 		return err
+	}
+	if *jsonPath != "" {
+		data, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(*jsonPath, append(data, '\n'), 0644); err != nil {
+			return err
+		}
+	}
+	if *baseline != "" {
+		return tooling.CompareStubBaseline(report, *baseline, os.Stdout)
 	}
 	if report.LogicalTotal() > 0 {
 		return errors.New("stub census failed")

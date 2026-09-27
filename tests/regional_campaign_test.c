@@ -678,7 +678,46 @@ static void SettingsOnly(SaveFileFormat format) {
   Remove(path);
 }
 
-int main(void) {
+/* Prepare only a new, isolated copy for the optional real-game bookmark test.
+ * Legacy history is explicitly estimated from saved stocks, never fabricated
+ * as exact history. The source and its companions remain untouched. */
+static int PrepareWorldResume(const char *source, const char *destination) {
+  uint8_t image[kActRaiserSramSize], sequence = 0;
+  uint16_t stocks[kArRegionalLairCount], delays[kArRegionalLairCount];
+  SaveError error = {{0}};
+  FILE *existing = fopen(destination, "rb");
+  if (existing) {
+    fclose(existing);
+    fprintf(stderr, "fixture destination must not exist\n");
+    return 1;
+  }
+  int progress;
+  if (!Save_LoadFile(kSaveFileFormat_NativeSrm, source, image, &error) ||
+      !Save_ChecksumValid(image) || !Save_GetRegionState(image, 5, &progress) || progress < 2)
+    return 1;
+  for (unsigned i = 0; i < kArRegionalLairCount; ++i) {
+    stocks[i] = ByteOrder_ReadLe16(image + 0x1603 + 2 * i);
+    delays[i] = ByteOrder_ReadLe16(image + 0x1573 + 2 * i);
+  }
+  ArRegionalCampaign campaign;
+  ArRegionalCampaign_Init(&campaign, 0, Identity, &sequence);
+  if (!Save_WriteFile(kSaveFileFormat_NativeSrm, destination, image, &error) ||
+      !ArRegionalCampaign_Continue(&campaign, destination, image, &error) ||
+      !ArRegionalCampaign_AcknowledgeLairHistory(&campaign, kSaveFileFormat_NativeSrm,
+                                                destination, image, stocks, &error) ||
+      !ArRegionalLairReloads_Adopt(&campaign.active.reloads, kArRegionalSource_US, delays) ||
+      !ArRegionalSession_Save(&campaign.active, kSaveFileFormat_NativeSrm, destination,
+                              image, image, &error)) {
+    fprintf(stderr, "world-resume fixture preparation failed: %s\n", error.message);
+    return 1;
+  }
+  return 0;
+}
+
+int main(int argc, char **argv) {
+  if (argc == 4 && !strcmp(argv[1], "--prepare-world-resume"))
+    return PrepareWorldResume(argv[2], argv[3]);
+  if (argc != 1) return 1;
   SettingsOnly(kSaveFileFormat_NativeSrm);
   SettingsOnly(kSaveFileFormat_Ini);
   CampaignArchive(kSaveBackend_NativeSrm);

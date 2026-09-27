@@ -72,6 +72,7 @@ bool ActRaiserTownCensus_Refresh(CpuState *cpu, unsigned town,
 RecompReturn ActRaiserTownCensus_Run(CpuState *cpu,const ArRegionalSupportSnapshot *snapshot) {
   if (!cpu || !ArRegionalSupport_Valid(snapshot))
     ActRaiserHleFatal("Invalid town census support profile");
+  cpu_mirrors_to_p(cpu); /* PHP captures live flags, including generated CMP/ADC results. */
   const uint8 db = cpu->DB;
   const uint8 saved_p = cpu->P;      /* PHP */
   const uint16 saved_x = cpu->X;     /* PHX */

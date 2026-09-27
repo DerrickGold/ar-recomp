@@ -162,6 +162,23 @@ def verify_runs(results: list[dict], captures: bool = False) -> None:
         raise ValueError("Final composite pixels differ; inspect captures")
 
 
+def validate_capture_view(log: str, images: dict, required: str) -> None:
+    """A brief visit before capture is not coverage of the requested view."""
+    transitions = []
+    for line in log.splitlines():
+        match = re.search(r"\[sim3d-view\] gf=(\d+) .* -> .*\([^\n]*view=([a-z_]+),", line)
+        if match:
+            frame, view = int(match[1]), match[2]
+            if transitions and frame < transitions[-1][0]:
+                raise ValueError("View trace reset during capture run")
+            transitions.append((frame, view))
+    for name in images:
+        frame = int(re.fullmatch(r"shot_(\d+)\.ppm", name)[1])
+        view = next((view for at, view in reversed(transitions) if at <= frame), None)
+        if view != required:
+            raise ValueError(f"Capture {name} requires view={required}, observed {view}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--control", required=True, type=Path)
@@ -179,6 +196,7 @@ def main() -> None:
     parser.add_argument("--verify-only", action="store_true",
                         help="Two untimed runs comparing exact composite pixels and WRAM")
     parser.add_argument("--require-scene", help="Require this exact scene in the pipeline log")
+    parser.add_argument("--require-view", help="Require this SIM view at every composite capture")
     parser.add_argument("--capture-from", type=int, default=400)
     parser.add_argument("--capture-to", type=int, default=1700)
     parser.add_argument("--capture-every", type=int, default=100)
@@ -300,6 +318,9 @@ def main() -> None:
                 raise ValueError("Strict composite capture failed")
             result["images"] = capture_evidence(
                 Path(result["run_dir"]), args.capture_from, args.capture_to, args.capture_every)
+            if args.require_view:
+                validate_capture_view(log, result["images"], args.require_view)
+                result["capture_view"] = args.require_view
         else:
             result.update(summarize_log(log, scene, map_id=map_id))
         result.update(variant=variant, log=str(log_path))

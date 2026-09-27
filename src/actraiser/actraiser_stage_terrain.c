@@ -50,6 +50,7 @@ RecompReturn ActRaiser_StageTerrain(CpuState *cpu) {
   /* LDX #0 only; native continuation rebuilds attributes, collision, camera
    * and staged tilemaps after the complete asset VM, before any actors run. */
   cpu->X = 0;
+  cpu_mirrors_to_p(cpu); /* Generated arithmetic owns the live flag mirrors. */
   cpu->P = (uint8_t)((cpu->P & ~(CPU_P_N|CPU_P_Z)) | CPU_P_Z);
   cpu_p_to_mirrors(cpu);
   cpu_hle_tailcall_request(0x00832c,0x008329);
@@ -69,6 +70,7 @@ RecompReturn ActRaiser_TerrainStart(CpuState *cpu) {
   if (!ActRaiser_TerrainStartEntry(cpu)) ActRaiserHleFatal("Invalid regional terrain start");
   cpu->A = ArRegionalTerrain_FillmoreStartY(1);
   ++cpu->Y;
+  cpu_mirrors_to_p(cpu); /* Generated arithmetic owns the live flag mirrors. */
   cpu->P &= ~(CPU_P_N | CPU_P_Z);
   cpu_p_to_mirrors(cpu);
   cpu_hle_tailcall_request(0x009343,0x00933c);
@@ -85,6 +87,7 @@ RecompReturn ActRaiser_TerrainCheckpoint(CpuState *cpu) {
   if (!ActRaiser_TerrainCheckpointEntry(cpu))
     ActRaiserHleFatal("Invalid regional terrain checkpoint");
   cpu->A = ArRegionalTerrain_FillmoreCheckpointY(1);
+  cpu_mirrors_to_p(cpu); /* Generated arithmetic owns the live flag mirrors. */
   cpu->P &= ~(CPU_P_N | CPU_P_Z);
   cpu_p_to_mirrors(cpu);
   cpu_hle_tailcall_request(0x0094b7,0x0094b1);

@@ -1,0 +1,1277 @@
+{
+  "Version": 1,
+  "LogicalGotos": 18,
+  "GotoEmissions": 35,
+  "LogicalDispatches": 7,
+  "DispatchEmissions": 45,
+  "LogicalTargets": 50,
+  "TargetEmissions": 297,
+  "LogicalIndirects": 52,
+  "IndirectEmissions": 125,
+  "Entries": [
+    {
+      "key": "dispatch:01B8C0",
+      "emissions": 8,
+      "contexts": [
+        "bank_01_B898_M0X0/L_B8AE_M0X0",
+        "bank_01_B898_M0X1/L_B8AE_M0X1",
+        "bank_01_B898_M1X0/L_B8AE_M0X0",
+        "bank_01_B898_M1X1/L_B8AE_M0X1",
+        "bank_01_B905_M0X1/L_B8AF_M0X1",
+        "bank_01_B905_M1X1/L_B8B6_M1X1",
+        "bank_01_B92E_M0X1/L_B8AF_M0X1",
+        "bank_01_B92E_M1X1/L_B8B6_M1X1"
+      ]
+    },
+    {
+      "key": "dispatch:01CD6A",
+      "emissions": 1,
+      "contexts": [
+        "bank_01_CD35_M0X0/L_CD5E_M0X0"
+      ]
+    },
+    {
+      "key": "dispatch:01E23D",
+      "emissions": 8,
+      "contexts": [
+        "bank_01_8A75_M0X1/L_E23D_M0X0",
+        "bank_01_8A75_M0X1/L_E23D_M0X1",
+        "bank_01_8A75_M0X1/L_E23D_M1X0",
+        "bank_01_8A75_M0X1/L_E23D_M1X1",
+        "bank_01_8A75_M1X1/L_E23D_M0X0",
+        "bank_01_8A75_M1X1/L_E23D_M0X1",
+        "bank_01_8A75_M1X1/L_E23D_M1X0",
+        "bank_01_8A75_M1X1/L_E23D_M1X1"
+      ]
+    },
+    {
+      "key": "dispatch:01E24C",
+      "emissions": 8,
+      "contexts": [
+        "bank_01_8A75_M0X1/L_E240_M0X0",
+        "bank_01_8A75_M0X1/L_E240_M0X1",
+        "bank_01_8A75_M0X1/L_E240_M1X0",
+        "bank_01_8A75_M0X1/L_E240_M1X1",
+        "bank_01_8A75_M1X1/L_E240_M0X0",
+        "bank_01_8A75_M1X1/L_E240_M0X1",
+        "bank_01_8A75_M1X1/L_E240_M1X0",
+        "bank_01_8A75_M1X1/L_E240_M1X1"
+      ]
+    },
+    {
+      "key": "dispatch:01E289",
+      "emissions": 8,
+      "contexts": [
+        "bank_01_8A75_M0X1/L_E278_M0X0",
+        "bank_01_8A75_M0X1/L_E278_M0X1",
+        "bank_01_8A75_M0X1/L_E278_M1X0",
+        "bank_01_8A75_M0X1/L_E278_M1X1",
+        "bank_01_8A75_M1X1/L_E278_M0X0",
+        "bank_01_8A75_M1X1/L_E278_M0X1",
+        "bank_01_8A75_M1X1/L_E278_M1X0",
+        "bank_01_8A75_M1X1/L_E278_M1X1"
+      ]
+    },
+    {
+      "key": "dispatch:01E298",
+      "emissions": 8,
+      "contexts": [
+        "bank_01_8A75_M0X1/L_E28C_M0X0",
+        "bank_01_8A75_M0X1/L_E28C_M0X1",
+        "bank_01_8A75_M0X1/L_E28C_M1X0",
+        "bank_01_8A75_M0X1/L_E28C_M1X1",
+        "bank_01_8A75_M1X1/L_E28C_M0X0",
+        "bank_01_8A75_M1X1/L_E28C_M0X1",
+        "bank_01_8A75_M1X1/L_E28C_M1X0",
+        "bank_01_8A75_M1X1/L_E28C_M1X1"
+      ]
+    },
+    {
+      "key": "dispatch:03F5DF",
+      "emissions": 4,
+      "contexts": [
+        "bank_03_F5BE_M0X0/L_F5DA_M0X0",
+        "bank_03_F5BE_M0X1/L_F5DA_M0X1",
+        "bank_03_F5BE_M1X0/L_F5DA_M0X0",
+        "bank_03_F5BE_M1X1/L_F5DA_M0X1"
+      ]
+    },
+    {
+      "key": "goto:00889A:002643:bank_00_8892",
+      "emissions": 2,
+      "contexts": [
+        "bank_00_8892_M1X0/L_889A_M1X0",
+        "bank_00_8892_M1X1/L_889A_M1X1"
+      ]
+    },
+    {
+      "key": "goto:008BB7:0000BD:bank_00_8B67",
+      "emissions": 2,
+      "contexts": [
+        "bank_00_8B67_M1X0/L_8BB7_M1X0",
+        "bank_00_8B67_M1X1/L_8BB7_M1X1"
+      ]
+    },
+    {
+      "key": "goto:00AC3F:004A44:bank_00_AC32",
+      "emissions": 1,
+      "contexts": [
+        "bank_00_AC32_M0X0/L_AC3F_M0X0"
+      ]
+    },
+    {
+      "key": "goto:01FF2E:017243:bank_01_FF29",
+      "emissions": 4,
+      "contexts": [
+        "bank_01_FF29_M0X0/L_FF2E_M0X0",
+        "bank_01_FF29_M0X1/L_FF2E_M0X1",
+        "bank_01_FF29_M1X0/L_FF2E_M1X0",
+        "bank_01_FF29_M1X1/L_FF2E_M1X1"
+      ]
+    },
+    {
+      "key": "goto:03A237:036DA2:bank_03_9E5A",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_9E5A_M0X1/L_A237_M1X1",
+        "bank_03_9E5A_M1X1/L_A237_M1X1"
+      ]
+    },
+    {
+      "key": "goto:03A237:036DA2:bank_03_9E6B",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_9E6B_M0X1/L_A237_M1X1",
+        "bank_03_9E6B_M1X1/L_A237_M1X1"
+      ]
+    },
+    {
+      "key": "goto:03A237:036DA2:bank_03_9EF5",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_9EF5_M0X1/L_A237_M0X1",
+        "bank_03_9EF5_M1X1/L_A237_M1X1"
+      ]
+    },
+    {
+      "key": "goto:03A237:036DA2:bank_03_9F05",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_9F05_M0X1/L_A237_M0X1",
+        "bank_03_9F05_M1X1/L_A237_M1X1"
+      ]
+    },
+    {
+      "key": "goto:03A237:036DA2:bank_03_9F27",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_9F27_M0X1/L_A237_M0X1"
+      ]
+    },
+    {
+      "key": "goto:03A237:036DA2:bank_03_9F8D",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_9F8D_M0X1/L_A237_M1X1",
+        "bank_03_9F8D_M1X1/L_A237_M1X1"
+      ]
+    },
+    {
+      "key": "goto:03A237:036DA2:bank_03_9FA5",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_9FA5_M0X1/L_A237_M1X1",
+        "bank_03_9FA5_M1X1/L_A237_M1X1"
+      ]
+    },
+    {
+      "key": "goto:03A237:036DA2:bank_03_A004",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_A004_M0X1/L_A237_M0X1",
+        "bank_03_A004_M1X1/L_A237_M1X1"
+      ]
+    },
+    {
+      "key": "goto:03A237:036DA2:bank_03_A085",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_A085_M0X1/L_A237_M0X1",
+        "bank_03_A085_M1X1/L_A237_M1X1"
+      ]
+    },
+    {
+      "key": "goto:03A237:036DA2:bank_03_A144",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_A144_M0X1/L_A237_M0X1"
+      ]
+    },
+    {
+      "key": "goto:03A237:036DA2:bank_03_A15D",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_A15D_M0X1/L_A237_M0X1",
+        "bank_03_A15D_M1X1/L_A237_M1X1"
+      ]
+    },
+    {
+      "key": "goto:03A237:036DA2:bank_03_A21A",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_A21A_M0X1/L_A237_M0X1",
+        "bank_03_A21A_M1X1/L_A237_M1X1"
+      ]
+    },
+    {
+      "key": "goto:03A237:036DA2:bank_03_A27F",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_A27F_M0X1/L_A237_M0X1",
+        "bank_03_A27F_M1X1/L_A237_M1X1"
+      ]
+    },
+    {
+      "key": "goto:03A237:036DA2:bank_03_A498",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_A498_M0X1/L_A237_M0X1",
+        "bank_03_A498_M1X1/L_A237_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:0098C3",
+      "emissions": 1,
+      "contexts": [
+        "bank_00_9884_M1X1/L_98C3_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:00BA55",
+      "emissions": 1,
+      "contexts": [
+        "bank_00_BA48_M0X0/L_BA55_M0X0"
+      ]
+    },
+    {
+      "key": "indirect:00F8B7",
+      "emissions": 18,
+      "contexts": [
+        "bank_00_F81B_M0X0/L_F8B7_M1X0",
+        "bank_00_F81B_M0X0/L_F8B7_M1X1",
+        "bank_00_F82D_M0X0/L_F8B7_M1X0",
+        "bank_00_F82D_M0X0/L_F8B7_M1X1",
+        "bank_00_F86D_M0X0/L_F8B7_M1X0",
+        "bank_00_F86D_M0X0/L_F8B7_M1X1",
+        "bank_00_F873_M0X0/L_F8B7_M1X0",
+        "bank_00_F873_M0X0/L_F8B7_M1X1",
+        "bank_00_F888_M0X0/L_F8B7_M1X0",
+        "bank_00_F888_M0X0/L_F8B7_M1X1",
+        "bank_00_F893_M0X0/L_F8B7_M1X0",
+        "bank_00_F893_M0X0/L_F8B7_M1X1",
+        "bank_00_F8A2_M0X0/L_F8B7_M1X0",
+        "bank_00_F8A2_M0X0/L_F8B7_M1X1",
+        "bank_00_F8E3_M0X0/L_F8B7_M1X0",
+        "bank_00_F8E3_M0X0/L_F8B7_M1X1",
+        "bank_00_F8F2_M0X0/L_F8B7_M1X0",
+        "bank_00_F8F2_M0X0/L_F8B7_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:01879A",
+      "emissions": 3,
+      "contexts": [
+        "bank_01_861E_M1X1/L_8798_M1X1",
+        "bank_01_8646_M0X1/L_8798_M0X1",
+        "bank_01_8646_M1X1/L_8798_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:01B789",
+      "emissions": 10,
+      "contexts": [
+        "bank_01_B758_M0X1/L_B787_M0X1",
+        "bank_01_B758_M1X1/L_B787_M1X1",
+        "bank_01_B768_M0X1/L_B787_M0X1",
+        "bank_01_B768_M1X1/L_B787_M1X1",
+        "bank_01_B770_M0X1/L_B787_M0X1",
+        "bank_01_B770_M1X1/L_B787_M1X1",
+        "bank_01_B778_M0X1/L_B787_M0X1",
+        "bank_01_B778_M1X1/L_B787_M1X1",
+        "bank_01_B780_M0X1/L_B787_M0X1",
+        "bank_01_B780_M1X1/L_B787_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:01C4A6",
+      "emissions": 2,
+      "contexts": [
+        "bank_01_C493_M1X0/L_C4A0_M1X0",
+        "bank_01_C493_M1X1/L_C4A0_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:01C4B9",
+      "emissions": 2,
+      "contexts": [
+        "bank_01_C493_M1X0/L_C4B3_M1X0",
+        "bank_01_C493_M1X1/L_C4B3_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:01FCBC",
+      "emissions": 16,
+      "contexts": [
+        "bank_01_FC7E_M0X0/L_FCA0_M0X0",
+        "bank_01_FC7E_M0X0/L_FCA0_M0X1",
+        "bank_01_FC7E_M0X0/L_FCA0_M1X0",
+        "bank_01_FC7E_M0X0/L_FCA0_M1X1",
+        "bank_01_FC7E_M0X1/L_FCA0_M0X0",
+        "bank_01_FC7E_M0X1/L_FCA0_M0X1",
+        "bank_01_FC7E_M0X1/L_FCA0_M1X0",
+        "bank_01_FC7E_M0X1/L_FCA0_M1X1",
+        "bank_01_FC7E_M1X0/L_FCA0_M0X0",
+        "bank_01_FC7E_M1X0/L_FCA0_M0X1",
+        "bank_01_FC7E_M1X0/L_FCA0_M1X0",
+        "bank_01_FC7E_M1X0/L_FCA0_M1X1",
+        "bank_01_FC7E_M1X1/L_FCA0_M0X0",
+        "bank_01_FC7E_M1X1/L_FCA0_M0X1",
+        "bank_01_FC7E_M1X1/L_FCA0_M1X0",
+        "bank_01_FC7E_M1X1/L_FCA0_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:029167",
+      "emissions": 1,
+      "contexts": [
+        "bank_02_906A_M1X1/L_9167_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:02AF95",
+      "emissions": 4,
+      "contexts": [
+        "bank_02_AF3D_M0X1/L_AF95_M0X1",
+        "bank_02_AF69_M0X1/L_AF95_M0X1",
+        "bank_02_AF86_M0X1/L_AF95_M0X1",
+        "bank_02_AF86_M1X1/L_AF95_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:02B164",
+      "emissions": 1,
+      "contexts": [
+        "bank_02_B127_M1X1/L_B164_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:038845",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_884D_M1X0/L_8844_M1X0",
+        "bank_03_884D_M1X1/L_8844_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:038F88",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_8F58_M1X0/L_8F6B_M1X0",
+        "bank_03_8F58_M1X1/L_8F6B_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03910D",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_90DE_M1X0/L_90EB_M1X0",
+        "bank_03_90DE_M1X1/L_90EB_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:0391DA",
+      "emissions": 4,
+      "contexts": [
+        "bank_03_FBAF_M0X0/L_91DA_M0X0",
+        "bank_03_FBAF_M0X1/L_91DA_M0X1",
+        "bank_03_FBAF_M1X0/L_91DA_M1X0",
+        "bank_03_FBAF_M1X1/L_91DA_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:039844",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_9815_M1X0/L_983E_M1X0",
+        "bank_03_9815_M1X1/L_983E_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03AA21",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_AA1C_M0X1/L_AA1C_M0X1",
+        "bank_03_AA1C_M1X1/L_AA1C_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03B6B6",
+      "emissions": 3,
+      "contexts": [
+        "bank_03_B692_M0X1/L_B6B0_M0X1",
+        "bank_03_B692_M1X1/L_B6B0_M0X1",
+        "bank_03_B6E2_M0X1/L_B6B4_M0X1"
+      ]
+    },
+    {
+      "key": "indirect:03C404",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_C3FC_M0X1/L_C3FC_M0X1",
+        "bank_03_C3FC_M1X1/L_C3FC_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03C6D0",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_C6A8_M1X0/L_C6CA_M1X0",
+        "bank_03_C6A8_M1X1/L_C6CA_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03C713",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_C6A8_M1X0/L_C70D_M1X0",
+        "bank_03_C6A8_M1X1/L_C70D_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03C762",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_C6A8_M1X0/L_C75C_M1X0"
+      ]
+    },
+    {
+      "key": "indirect:03C93D",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_C92F_M1X0/L_C93A_M1X0",
+        "bank_03_C92F_M1X1/L_C93A_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03CA0B",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_C9FA_M1X0/L_CA08_M1X0",
+        "bank_03_C9FA_M1X1/L_CA08_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03CABA",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_CAAD_M1X0/L_CAB8_M1X0",
+        "bank_03_CAAD_M1X1/L_CAB8_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03E01A",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_DFFA_M0X1/L_E012_M1X1",
+        "bank_03_DFFA_M1X1/L_E012_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03E0A4",
+      "emissions": 4,
+      "contexts": [
+        "bank_03_E092_M0X0/L_E09F_M1X1",
+        "bank_03_E092_M0X1/L_E09D_M0X1",
+        "bank_03_E092_M1X0/L_E09F_M1X1",
+        "bank_03_E092_M1X1/L_E09D_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03E14F",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_E142_M0X1/L_E147_M0X1"
+      ]
+    },
+    {
+      "key": "indirect:03E18E",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_E15D_M0X1/L_E186_M0X1"
+      ]
+    },
+    {
+      "key": "indirect:03E1A6",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_E19C_M0X1/L_E19C_M0X1",
+        "bank_03_E19C_M1X1/L_E19C_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03F625",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F621_M1X1/L_F621_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03F642",
+      "emissions": 3,
+      "contexts": [
+        "bank_03_F621_M0X0/L_F640_M0X1",
+        "bank_03_F621_M0X0/L_F640_M1X1",
+        "bank_03_F621_M0X1/L_F63C_M0X1"
+      ]
+    },
+    {
+      "key": "indirect:03F675",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F671_M1X1/L_F671_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03F685",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F671_M0X1/L_F681_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03F695",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F68A_M1X1/L_F691_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03F6C3",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F6BF_M1X1/L_F6BF_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03F6DC",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F6BF_M0X1/L_F6D8_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03F6E4",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F6BF_M0X0/L_F6D8_M0X0"
+      ]
+    },
+    {
+      "key": "indirect:03F703",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F6FF_M1X1/L_F6FF_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03F795",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F791_M1X1/L_F791_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03F7CA",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_F7AE_M0X1/L_F7C4_M0X1",
+        "bank_03_F7AE_M1X1/L_F7C4_M0X1"
+      ]
+    },
+    {
+      "key": "indirect:03F7E9",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_F7D1_M0X1/L_F7E3_M0X1",
+        "bank_03_F7D1_M1X1/L_F7E3_M0X1"
+      ]
+    },
+    {
+      "key": "indirect:03F7FC",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F7F8_M1X1/L_F7F8_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03F81D",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F7F8_M0X1/L_F817_M0X1"
+      ]
+    },
+    {
+      "key": "indirect:03F826",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F822_M1X1/L_F822_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03F852",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F822_M0X1/L_F84C_M0X1"
+      ]
+    },
+    {
+      "key": "indirect:03F85B",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F857_M1X1/L_F857_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03F86B",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F857_M0X1/L_F867_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03F8A9",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F8A5_M1X1/L_F8A5_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03F8C1",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F8A5_M0X1/L_F8BB_M0X1"
+      ]
+    },
+    {
+      "key": "indirect:03F8D0",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F8CC_M1X1/L_F8CC_M1X1"
+      ]
+    },
+    {
+      "key": "indirect:03F907",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F8CC_M0X1/L_F901_M0X1"
+      ]
+    },
+    {
+      "key": "target:000001",
+      "emissions": 1,
+      "contexts": [
+        "bank_00_B379_M0X0/L_B37B_M0X0"
+      ]
+    },
+    {
+      "key": "target:0003D0",
+      "emissions": 8,
+      "contexts": [
+        "bank_00_8241_M0X0/L_8298_M0X0",
+        "bank_00_8241_M0X0/L_8298_M0X1",
+        "bank_00_8241_M0X1/L_8298_M0X0",
+        "bank_00_8241_M0X1/L_8298_M0X1",
+        "bank_00_8241_M1X0/L_8298_M0X0",
+        "bank_00_8241_M1X0/L_8298_M0X1",
+        "bank_00_8241_M1X1/L_8298_M0X0",
+        "bank_00_8241_M1X1/L_8298_M0X1"
+      ]
+    },
+    {
+      "key": "target:0003F0",
+      "emissions": 1,
+      "contexts": [
+        "bank_00_9DE1_M0X1/L_9DEC_M1X1"
+      ]
+    },
+    {
+      "key": "target:000BF0",
+      "emissions": 7,
+      "contexts": [
+        "bank_00_9884_M1X1/L_9D7B_M1X1",
+        "bank_00_9900_M1X0/L_9D7B_M1X0",
+        "bank_00_9900_M1X1/L_9D7B_M1X1",
+        "bank_00_9996_M1X1/L_9D7B_M1X1",
+        "bank_00_99BB_M1X1/L_9D7B_M1X1",
+        "bank_00_9B95_M1X0/L_9D7B_M1X0",
+        "bank_00_9B95_M1X1/L_9D7B_M1X1"
+      ]
+    },
+    {
+      "key": "target:001174",
+      "emissions": 2,
+      "contexts": [
+        "bank_08_FDE8_M0X0/L_FDFF_M0X0",
+        "bank_08_FDE8_M1X0/L_FDFF_M1X0"
+      ]
+    },
+    {
+      "key": "target:002000",
+      "emissions": 8,
+      "contexts": [
+        "bank_00_B2B3_M0X0/L_B2DD_M1X0",
+        "bank_00_B2B3_M0X0/L_B2DD_M1X1",
+        "bank_00_B2BF_M0X0/L_B2DD_M1X0",
+        "bank_00_B2BF_M0X0/L_B2DD_M1X1",
+        "bank_00_B2D1_M0X0/L_B2DD_M1X0",
+        "bank_00_B2D1_M0X0/L_B2DD_M1X1",
+        "bank_00_B2D1_M1X0/L_B2DD_M1X0",
+        "bank_00_B2D1_M1X1/L_B2DD_M1X1"
+      ]
+    },
+    {
+      "key": "target:002013",
+      "emissions": 1,
+      "contexts": [
+        "bank_00_C603_M0X0/L_C5EF_M0X0"
+      ]
+    },
+    {
+      "key": "target:0050A9",
+      "emissions": 1,
+      "contexts": [
+        "bank_00_87A8_M0X0/L_8843_M0X0"
+      ]
+    },
+    {
+      "key": "target:006920",
+      "emissions": 38,
+      "contexts": [
+        "bank_00_BE0B_M0X0/L_BEFF_M1X0",
+        "bank_00_BE0B_M0X0/L_BEFF_M1X1",
+        "bank_00_BE0B_M0X1/L_BEFF_M1X0",
+        "bank_00_BE0B_M0X1/L_BEFF_M1X1",
+        "bank_00_BE0E_M0X0/L_BEFF_M1X0",
+        "bank_00_BE0E_M0X0/L_BEFF_M1X1",
+        "bank_00_BE2F_M0X0/L_BEFF_M1X0",
+        "bank_00_BE2F_M0X0/L_BEFF_M1X1",
+        "bank_00_BE2F_M0X1/L_BEFF_M1X0",
+        "bank_00_BE2F_M0X1/L_BEFF_M1X1",
+        "bank_00_BE3B_M0X0/L_BEFF_M1X0",
+        "bank_00_BE3B_M0X0/L_BEFF_M1X1",
+        "bank_00_F8FE_M1X0/L_F9F9_M1X0",
+        "bank_00_F8FE_M1X0/L_F9F9_M1X1",
+        "bank_00_F92D_M0X0/L_F9F9_M1X0",
+        "bank_00_F92D_M0X0/L_F9F9_M1X1",
+        "bank_00_F933_M0X0/L_F9F9_M1X0",
+        "bank_00_F933_M0X0/L_F9F9_M1X1",
+        "bank_00_F939_M0X0/L_F9F9_M1X0",
+        "bank_00_F939_M0X0/L_F9F9_M1X1",
+        "bank_00_F9AB_M0X0/L_F9F9_M1X0",
+        "bank_00_F9AB_M0X0/L_F9F9_M1X1",
+        "bank_00_F9BD_M0X0/L_F9F9_M1X0",
+        "bank_00_F9BD_M0X0/L_F9F9_M1X1",
+        "bank_00_F9E2_M0X0/L_F9F9_M1X0",
+        "bank_00_F9E2_M0X0/L_F9F9_M1X1",
+        "bank_00_F9EA_M0X0/L_F9F9_M1X0",
+        "bank_00_F9EA_M0X0/L_F9F9_M1X1",
+        "bank_00_F9F9_M0X0/L_F9F9_M1X0",
+        "bank_00_F9F9_M0X0/L_F9F9_M1X1",
+        "bank_00_F9FF_M0X0/L_F9F9_M1X0",
+        "bank_00_F9FF_M0X0/L_F9F9_M1X1",
+        "bank_00_FA22_M0X0/L_F9F9_M1X0",
+        "bank_00_FA22_M0X0/L_F9F9_M1X1",
+        "bank_00_FA31_M0X0/L_F9F9_M1X0",
+        "bank_00_FA31_M0X0/L_F9F9_M1X1",
+        "bank_00_FA37_M0X0/L_F9F9_M1X0",
+        "bank_00_FA37_M0X0/L_F9F9_M1X1"
+      ]
+    },
+    {
+      "key": "target:010240",
+      "emissions": 16,
+      "contexts": [
+        "bank_01_EB00_M0X0/L_EC5D_M0X0",
+        "bank_01_EB00_M0X0/L_EC5D_M0X1",
+        "bank_01_EB00_M0X0/L_EC5D_M1X0",
+        "bank_01_EB00_M0X0/L_EC5D_M1X1",
+        "bank_01_EB00_M0X1/L_EC5D_M0X0",
+        "bank_01_EB00_M0X1/L_EC5D_M0X1",
+        "bank_01_EB00_M0X1/L_EC5D_M1X0",
+        "bank_01_EB00_M0X1/L_EC5D_M1X1",
+        "bank_01_EB00_M1X0/L_EC5D_M0X0",
+        "bank_01_EB00_M1X0/L_EC5D_M0X1",
+        "bank_01_EB00_M1X0/L_EC5D_M1X0",
+        "bank_01_EB00_M1X0/L_EC5D_M1X1",
+        "bank_01_EB00_M1X1/L_EC5D_M0X0",
+        "bank_01_EB00_M1X1/L_EC5D_M0X1",
+        "bank_01_EB00_M1X1/L_EC5D_M1X0",
+        "bank_01_EB00_M1X1/L_EC5D_M1X1"
+      ]
+    },
+    {
+      "key": "target:0103B9",
+      "emissions": 1,
+      "contexts": [
+        "bank_01_AF37_M0X1/L_AEF2_M0X1"
+      ]
+    },
+    {
+      "key": "target:010501",
+      "emissions": 4,
+      "contexts": [
+        "bank_01_F9AF_M0X0/L_F968_M0X0",
+        "bank_01_F9AF_M0X1/L_F968_M0X1",
+        "bank_01_F9AF_M1X0/L_F9C6_M1X0",
+        "bank_01_F9AF_M1X1/L_F9C6_M1X1"
+      ]
+    },
+    {
+      "key": "target:010902",
+      "emissions": 16,
+      "contexts": [
+        "bank_01_EB00_M0X0/L_EC6C_M0X0",
+        "bank_01_EB00_M0X0/L_EC6C_M0X1",
+        "bank_01_EB00_M0X0/L_EC6C_M1X0",
+        "bank_01_EB00_M0X0/L_EC6C_M1X1",
+        "bank_01_EB00_M0X1/L_EC6C_M0X0",
+        "bank_01_EB00_M0X1/L_EC6C_M0X1",
+        "bank_01_EB00_M0X1/L_EC6C_M1X0",
+        "bank_01_EB00_M0X1/L_EC6C_M1X1",
+        "bank_01_EB00_M1X0/L_EC6C_M0X0",
+        "bank_01_EB00_M1X0/L_EC6C_M0X1",
+        "bank_01_EB00_M1X0/L_EC6C_M1X0",
+        "bank_01_EB00_M1X0/L_EC6C_M1X1",
+        "bank_01_EB00_M1X1/L_EC6C_M0X0",
+        "bank_01_EB00_M1X1/L_EC6C_M0X1",
+        "bank_01_EB00_M1X1/L_EC6C_M1X0",
+        "bank_01_EB00_M1X1/L_EC6C_M1X1"
+      ]
+    },
+    {
+      "key": "target:010A00",
+      "emissions": 16,
+      "contexts": [
+        "bank_01_EB00_M0X0/L_EC78_M0X0",
+        "bank_01_EB00_M0X0/L_EC78_M0X1",
+        "bank_01_EB00_M0X0/L_EC78_M1X0",
+        "bank_01_EB00_M0X0/L_EC78_M1X1",
+        "bank_01_EB00_M0X1/L_EC78_M0X0",
+        "bank_01_EB00_M0X1/L_EC78_M0X1",
+        "bank_01_EB00_M0X1/L_EC78_M1X0",
+        "bank_01_EB00_M0X1/L_EC78_M1X1",
+        "bank_01_EB00_M1X0/L_EC78_M0X0",
+        "bank_01_EB00_M1X0/L_EC78_M0X1",
+        "bank_01_EB00_M1X0/L_EC78_M1X0",
+        "bank_01_EB00_M1X0/L_EC78_M1X1",
+        "bank_01_EB00_M1X1/L_EC78_M0X0",
+        "bank_01_EB00_M1X1/L_EC78_M0X1",
+        "bank_01_EB00_M1X1/L_EC78_M1X0",
+        "bank_01_EB00_M1X1/L_EC78_M1X1"
+      ]
+    },
+    {
+      "key": "target:010DBB",
+      "emissions": 1,
+      "contexts": [
+        "bank_01_F9AF_M0X0/L_F8E7_M0X0"
+      ]
+    },
+    {
+      "key": "target:012410",
+      "emissions": 16,
+      "contexts": [
+        "bank_01_EB00_M0X0/L_EC4F_M0X0",
+        "bank_01_EB00_M0X0/L_EC4F_M0X1",
+        "bank_01_EB00_M0X0/L_EC4F_M1X0",
+        "bank_01_EB00_M0X0/L_EC4F_M1X1",
+        "bank_01_EB00_M0X1/L_EC4F_M0X0",
+        "bank_01_EB00_M0X1/L_EC4F_M0X1",
+        "bank_01_EB00_M0X1/L_EC4F_M1X0",
+        "bank_01_EB00_M0X1/L_EC4F_M1X1",
+        "bank_01_EB00_M1X0/L_EC4F_M0X0",
+        "bank_01_EB00_M1X0/L_EC4F_M0X1",
+        "bank_01_EB00_M1X0/L_EC4F_M1X0",
+        "bank_01_EB00_M1X0/L_EC4F_M1X1",
+        "bank_01_EB00_M1X1/L_EC4F_M0X0",
+        "bank_01_EB00_M1X1/L_EC4F_M0X1",
+        "bank_01_EB00_M1X1/L_EC4F_M1X0",
+        "bank_01_EB00_M1X1/L_EC4F_M1X1"
+      ]
+    },
+    {
+      "key": "target:012610",
+      "emissions": 16,
+      "contexts": [
+        "bank_01_EB00_M0X0/L_EC86_M0X0",
+        "bank_01_EB00_M0X0/L_EC86_M0X1",
+        "bank_01_EB00_M0X0/L_EC86_M1X0",
+        "bank_01_EB00_M0X0/L_EC86_M1X1",
+        "bank_01_EB00_M0X1/L_EC86_M0X0",
+        "bank_01_EB00_M0X1/L_EC86_M0X1",
+        "bank_01_EB00_M0X1/L_EC86_M1X0",
+        "bank_01_EB00_M0X1/L_EC86_M1X1",
+        "bank_01_EB00_M1X0/L_EC86_M0X0",
+        "bank_01_EB00_M1X0/L_EC86_M0X1",
+        "bank_01_EB00_M1X0/L_EC86_M1X0",
+        "bank_01_EB00_M1X0/L_EC86_M1X1",
+        "bank_01_EB00_M1X1/L_EC86_M0X0",
+        "bank_01_EB00_M1X1/L_EC86_M0X1",
+        "bank_01_EB00_M1X1/L_EC86_M1X0",
+        "bank_01_EB00_M1X1/L_EC86_M1X1"
+      ]
+    },
+    {
+      "key": "target:012900",
+      "emissions": 8,
+      "contexts": [
+        "bank_01_EB00_M0X0/L_ECA5_M0X0",
+        "bank_01_EB00_M0X0/L_ECA5_M0X1",
+        "bank_01_EB00_M0X1/L_ECA5_M0X0",
+        "bank_01_EB00_M0X1/L_ECA5_M0X1",
+        "bank_01_EB00_M1X0/L_ECA5_M0X0",
+        "bank_01_EB00_M1X0/L_ECA5_M0X1",
+        "bank_01_EB00_M1X1/L_ECA5_M0X0",
+        "bank_01_EB00_M1X1/L_ECA5_M0X1"
+      ]
+    },
+    {
+      "key": "target:013908",
+      "emissions": 8,
+      "contexts": [
+        "bank_01_EB00_M0X0/L_ECC3_M1X0",
+        "bank_01_EB00_M0X0/L_ECC3_M1X1",
+        "bank_01_EB00_M0X1/L_ECC3_M1X0",
+        "bank_01_EB00_M0X1/L_ECC3_M1X1",
+        "bank_01_EB00_M1X0/L_ECC3_M1X0",
+        "bank_01_EB00_M1X0/L_ECC3_M1X1",
+        "bank_01_EB00_M1X1/L_ECC3_M1X0",
+        "bank_01_EB00_M1X1/L_ECC3_M1X1"
+      ]
+    },
+    {
+      "key": "target:013EAD",
+      "emissions": 2,
+      "contexts": [
+        "bank_01_8000_M0X0/L_8810_M0X0",
+        "bank_01_8000_M0X1/L_8810_M0X1"
+      ]
+    },
+    {
+      "key": "target:013F00",
+      "emissions": 8,
+      "contexts": [
+        "bank_01_EB00_M0X0/L_ED18_M1X0",
+        "bank_01_EB00_M0X0/L_ED18_M1X1",
+        "bank_01_EB00_M0X1/L_ED18_M1X0",
+        "bank_01_EB00_M0X1/L_ED18_M1X1",
+        "bank_01_EB00_M1X0/L_ED18_M1X0",
+        "bank_01_EB00_M1X0/L_ED18_M1X1",
+        "bank_01_EB00_M1X1/L_ED18_M1X0",
+        "bank_01_EB00_M1X1/L_ED18_M1X1"
+      ]
+    },
+    {
+      "key": "target:014420",
+      "emissions": 16,
+      "contexts": [
+        "bank_01_EB00_M0X0/L_EC54_M0X0",
+        "bank_01_EB00_M0X0/L_EC54_M0X1",
+        "bank_01_EB00_M0X0/L_EC54_M1X0",
+        "bank_01_EB00_M0X0/L_EC54_M1X1",
+        "bank_01_EB00_M0X1/L_EC54_M0X0",
+        "bank_01_EB00_M0X1/L_EC54_M0X1",
+        "bank_01_EB00_M0X1/L_EC54_M1X0",
+        "bank_01_EB00_M0X1/L_EC54_M1X1",
+        "bank_01_EB00_M1X0/L_EC54_M0X0",
+        "bank_01_EB00_M1X0/L_EC54_M0X1",
+        "bank_01_EB00_M1X0/L_EC54_M1X0",
+        "bank_01_EB00_M1X0/L_EC54_M1X1",
+        "bank_01_EB00_M1X1/L_EC54_M0X0",
+        "bank_01_EB00_M1X1/L_EC54_M0X1",
+        "bank_01_EB00_M1X1/L_EC54_M1X0",
+        "bank_01_EB00_M1X1/L_EC54_M1X1"
+      ]
+    },
+    {
+      "key": "target:01616D",
+      "emissions": 4,
+      "contexts": [
+        "bank_01_F9AF_M0X0/L_F9AF_M0X0",
+        "bank_01_F9AF_M0X1/L_F9AF_M0X1",
+        "bank_01_F9AF_M1X0/L_F9AF_M1X0",
+        "bank_01_F9AF_M1X1/L_F9AF_M1X1"
+      ]
+    },
+    {
+      "key": "target:016420",
+      "emissions": 16,
+      "contexts": [
+        "bank_01_EB00_M0X0/L_EC96_M0X0",
+        "bank_01_EB00_M0X0/L_EC96_M0X1",
+        "bank_01_EB00_M0X0/L_EC96_M1X0",
+        "bank_01_EB00_M0X0/L_EC96_M1X1",
+        "bank_01_EB00_M0X1/L_EC96_M0X0",
+        "bank_01_EB00_M0X1/L_EC96_M0X1",
+        "bank_01_EB00_M0X1/L_EC96_M1X0",
+        "bank_01_EB00_M0X1/L_EC96_M1X1",
+        "bank_01_EB00_M1X0/L_EC96_M0X0",
+        "bank_01_EB00_M1X0/L_EC96_M0X1",
+        "bank_01_EB00_M1X0/L_EC96_M1X0",
+        "bank_01_EB00_M1X0/L_EC96_M1X1",
+        "bank_01_EB00_M1X1/L_EC96_M0X0",
+        "bank_01_EB00_M1X1/L_EC96_M0X1",
+        "bank_01_EB00_M1X1/L_EC96_M1X0",
+        "bank_01_EB00_M1X1/L_EC96_M1X1"
+      ]
+    },
+    {
+      "key": "target:016572",
+      "emissions": 4,
+      "contexts": [
+        "bank_01_F9AF_M0X0/L_F9B5_M0X0",
+        "bank_01_F9AF_M0X1/L_F9B5_M0X1",
+        "bank_01_F9AF_M1X0/L_F9B5_M1X0",
+        "bank_01_F9AF_M1X1/L_F9B5_M1X1"
+      ]
+    },
+    {
+      "key": "target:016873",
+      "emissions": 2,
+      "contexts": [
+        "bank_01_F9AF_M0X0/L_F900_M0X0",
+        "bank_01_F9AF_M0X1/L_F8FA_M0X1"
+      ]
+    },
+    {
+      "key": "target:0202A5",
+      "emissions": 1,
+      "contexts": [
+        "bank_02_992D_M1X1/L_9951_M1X1"
+      ]
+    },
+    {
+      "key": "target:020A25",
+      "emissions": 4,
+      "contexts": [
+        "bank_02_8601_M0X0/L_8601_M0X0",
+        "bank_02_8601_M0X1/L_8601_M0X1",
+        "bank_02_865C_M0X1/L_8620_M1X1",
+        "bank_02_865C_M1X1/L_8620_M1X1"
+      ]
+    },
+    {
+      "key": "target:02168E",
+      "emissions": 2,
+      "contexts": [
+        "bank_02_BC9E_M0X1/L_BC9E_M0X1",
+        "bank_02_BC9E_M1X1/L_BC9E_M1X1"
+      ]
+    },
+    {
+      "key": "target:0220C2",
+      "emissions": 2,
+      "contexts": [
+        "bank_02_A820_M0X0/L_A824_M0X0",
+        "bank_02_A820_M0X1/L_A824_M0X1"
+      ]
+    },
+    {
+      "key": "target:026B28",
+      "emissions": 2,
+      "contexts": [
+        "bank_02_B6F7_M0X1/L_B718_M0X1",
+        "bank_02_B6F7_M1X1/L_B718_M1X1"
+      ]
+    },
+    {
+      "key": "target:026C8D",
+      "emissions": 4,
+      "contexts": [
+        "bank_02_A0BF_M0X0/L_A0A2_M0X0",
+        "bank_02_A0BF_M0X1/L_A0A2_M0X1",
+        "bank_02_A0BF_M1X0/L_A0A2_M1X0",
+        "bank_02_A0BF_M1X1/L_A0A2_M1X1"
+      ]
+    },
+    {
+      "key": "target:0300A2",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F8CC_M0X0/L_F8CC_M0X0"
+      ]
+    },
+    {
+      "key": "target:0300A9",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_B6E2_M0X1/L_B6B1_M0X1"
+      ]
+    },
+    {
+      "key": "target:0302A9",
+      "emissions": 4,
+      "contexts": [
+        "bank_03_F621_M0X0/L_F62F_M0X0",
+        "bank_03_F621_M0X0/L_F62F_M0X1",
+        "bank_03_F621_M0X0/L_F62F_M1X0",
+        "bank_03_F621_M0X0/L_F62F_M1X1"
+      ]
+    },
+    {
+      "key": "target:0304BF",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_F921_M0X1/L_F97B_M1X1",
+        "bank_03_F921_M1X1/L_F97B_M1X1"
+      ]
+    },
+    {
+      "key": "target:0317A0",
+      "emissions": 4,
+      "contexts": [
+        "bank_03_FBAF_M0X0/L_FBAF_M0X0",
+        "bank_03_FBAF_M0X1/L_FBAF_M0X1",
+        "bank_03_FBAF_M1X0/L_FBAF_M1X0",
+        "bank_03_FBAF_M1X1/L_FBAF_M1X1"
+      ]
+    },
+    {
+      "key": "target:0318A2",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_F7F8_M0X0/L_F7F8_M0X0"
+      ]
+    },
+    {
+      "key": "target:0330B9",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_8168_M0X1/L_8181_M0X1",
+        "bank_03_8168_M1X1/L_8181_M0X1"
+      ]
+    },
+    {
+      "key": "target:033DF0",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_BB11_M0X1/L_BBAE_M0X1",
+        "bank_03_BB11_M1X1/L_BBAE_M0X1"
+      ]
+    },
+    {
+      "key": "target:0349B9",
+      "emissions": 2,
+      "contexts": [
+        "bank_03_C32C_M0X1/L_C3B3_M0X1",
+        "bank_03_C32C_M1X1/L_C3B3_M1X1"
+      ]
+    },
+    {
+      "key": "target:0350AD",
+      "emissions": 1,
+      "contexts": [
+        "bank_03_8EC1_M1X0/L_8EC1_M1X0"
+      ]
+    },
+    {
+      "key": "target:117422",
+      "emissions": 2,
+      "contexts": [
+        "bank_08_FDE8_M0X0/L_FDF1_M0X0",
+        "bank_08_FDE8_M1X0/L_FDF1_M1X0"
+      ]
+    },
+    {
+      "key": "target:229C21",
+      "emissions": 4,
+      "contexts": [
+        "bank_02_AF3D_M0X0/L_AF5E_M0X0",
+        "bank_02_AF3D_M0X1/L_AF5E_M0X1",
+        "bank_02_AF69_M0X0/L_AF69_M0X0",
+        "bank_02_AF69_M0X1/L_AF69_M0X1"
+      ]
+    },
+    {
+      "key": "target:2A2000",
+      "emissions": 10,
+      "contexts": [
+        "bank_00_CF9E_M0X0/L_CFCE_M1X0",
+        "bank_00_CF9E_M0X0/L_CFCE_M1X1",
+        "bank_00_CFAA_M0X0/L_CFCE_M1X0",
+        "bank_00_CFAA_M0X0/L_CFCE_M1X1",
+        "bank_00_CFAD_M0X0/L_CFCE_M1X0",
+        "bank_00_CFAD_M0X0/L_CFCE_M1X1",
+        "bank_00_CFBD_M0X0/L_CFCE_M1X0",
+        "bank_00_CFBD_M0X0/L_CFCE_M1X1",
+        "bank_00_CFC3_M0X0/L_CFCE_M1X0",
+        "bank_00_CFC3_M0X0/L_CFCE_M1X1"
+      ]
+    },
+    {
+      "key": "target:644022",
+      "emissions": 2,
+      "contexts": [
+        "bank_08_FDE8_M0X0/L_FDED_M0X0",
+        "bank_08_FDE8_M1X0/L_FDED_M1X0"
+      ]
+    },
+    {
+      "key": "target:866920",
+      "emissions": 18,
+      "contexts": [
+        "bank_00_ABAB_M0X0/L_ABDF_M1X0",
+        "bank_00_ABAB_M0X0/L_ABDF_M1X1",
+        "bank_00_ABAB_M0X0/L_ABEB_M1X0",
+        "bank_00_ABAB_M0X0/L_ABEB_M1X1",
+        "bank_00_ABB7_M0X0/L_ABDF_M1X0",
+        "bank_00_ABB7_M0X0/L_ABDF_M1X1",
+        "bank_00_ABB7_M0X0/L_ABEB_M1X0",
+        "bank_00_ABB7_M0X0/L_ABEB_M1X1",
+        "bank_00_ABD9_M0X0/L_ABDF_M1X0",
+        "bank_00_ABD9_M0X0/L_ABDF_M1X1",
+        "bank_00_ABD9_M0X0/L_ABEB_M1X0",
+        "bank_00_ABD9_M0X0/L_ABEB_M1X1",
+        "bank_00_ABDF_M0X0/L_ABEB_M1X0",
+        "bank_00_ABDF_M0X0/L_ABEB_M1X1",
+        "bank_00_ABDF_M0X1/L_ABEB_M1X0",
+        "bank_00_ABDF_M0X1/L_ABEB_M1X1",
+        "bank_00_ABE5_M0X0/L_ABEB_M1X0",
+        "bank_00_ABE5_M0X0/L_ABEB_M1X1"
+      ]
+    },
+    {
+      "key": "target:E20286",
+      "emissions": 1,
+      "contexts": [
+        "bank_02_B475_M1X1/L_B490_M1X1"
+      ]
+    },
+    {
+      "key": "target:F22422",
+      "emissions": 2,
+      "contexts": [
+        "bank_08_FDE8_M0X0/L_FE0F_M0X0",
+        "bank_08_FDE8_M1X0/L_FE0F_M1X0"
+      ]
+    },
+    {
+      "key": "target:FF0029",
+      "emissions": 2,
+      "contexts": [
+        "bank_02_B1AF_M0X0/L_B1AF_M0X0",
+        "bank_02_B1AF_M0X1/L_B1AF_M0X1"
+      ]
+    }
+  ]
+}
