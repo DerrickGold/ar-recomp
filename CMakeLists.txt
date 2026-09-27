@@ -942,6 +942,18 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_credits COMMAND actraiser_credits_test)
 
+    add_executable(actraiser_action_sprites_test
+        tests/actraiser_action_sprites_test.c
+        src/actraiser/enhancements/actraiser_widescreen_sprites.c
+        src/actraiser/actraiser_sprite_ownership.c
+        src/action/action_obj_apron.c
+        src/action/action_effect_clock.c)
+    target_include_directories(actraiser_action_sprites_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_action_sprites_activation COMMAND actraiser_action_sprites_test)
+    add_test(NAME actraiser_action_sprites_priority COMMAND actraiser_action_sprites_test priority)
+    add_test(NAME actraiser_action_sprites_empty COMMAND actraiser_action_sprites_test empty)
+
     add_executable(actraiser_sprite_ownership_test
         tests/actraiser_sprite_ownership_test.c
         src/actraiser/actraiser_sprite_ownership.c

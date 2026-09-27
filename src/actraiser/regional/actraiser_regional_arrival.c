@@ -2,7 +2,6 @@
 #include "actraiser/actraiser_cpu_hle_internal.h"
 #include "actraiser/actraiser_hle_fatal.h"
 
-extern RecompReturn bank_00_A343_M0X0(CpuState *cpu);
 extern RecompReturn bank_01_861E_M1X0(CpuState *cpu);
 static bool s_departure_delegate,s_palace_delegate;
 void ActRaiserRegionalArrival_Reset(void){s_departure_delegate=s_palace_delegate=false;}
@@ -54,30 +53,36 @@ static bool JapanesePalaceGuard(CpuState *cpu,uint8_t flags) {
 }
 RecompReturn ActRaiser_RegionalArrivalDeparture(CpuState *cpu) {
   bool japanese;
-  const bool continuing=(cpu_read8(cpu,0x7f,0x9101)&1)!=0;
-  if(!ActRaiserRegional_ArrivalSnapshot(continuing || Complete(cpu,false),continuing,&japanese))
+  const bool continuing = (cpu_read8(cpu, 0x7f, 0x9101) & 1) != 0;
+  if (!ActRaiserRegional_ArrivalSnapshot(continuing || Complete(cpu, false), continuing, &japanese))
     ActRaiserHleFatal("Cannot capture final-island departure policy");
-  if(!japanese) {
-    s_departure_delegate=true;
-    const RecompReturn result=bank_00_A343_M0X0(cpu);
-    s_departure_delegate = false;
-    return result;
+  if (!japanese) {
+    /* The object dispatcher reaches this body through a pushed RTS target.
+     * Its inherited entry stack can differ from current S. A nested C call
+     * would adopt current S and return directly to the host, skipping $8966
+     * and the object loop's PLP. Retire this wrapper before the native body. */
+    s_departure_delegate = true;
+    if (!cpu_hle_tailcall_request(0x00a343, 0x00a343))
+      ActRaiserHleFatal("Departure has no native return owner");
+    return RECOMP_RETURN_TAILCALL;
   }
   /* JP $00:A335: SEP/LDA current town/STA next scene/STZ subscene/REP/RTS.
    * No unlock bit, reveal marker, music selection, score or reward writes.
-   * This replaces an RTS leaf, not a fabricated caller or stack unwind. */
-  const uint8_t town=cpu_read8(cpu,0,0x0341);
-  cpu->A=(cpu->A&0xff00)|town;
-  ActRaiserCpuHle_SetNegativeZero8(cpu,town);
+   * Reuse the adjacent native RTS so both paired callers and the object's
+   * pushed continuation retain their original return ownership. */
+  const uint8_t town = cpu_read8(cpu, 0, 0x0341);
+  cpu->A = (cpu->A & 0xff00) | town;
+  ActRaiserCpuHle_SetNegativeZero8(cpu, town);
   cpu_write8(cpu, 0, 0x001a, town);
   cpu_write8(cpu, 0, 0x001b, 0);
-  cpu->S=(uint16_t)(cpu->S+2);
-  return RECOMP_RETURN_NORMAL;
+  if (!cpu_hle_tailcall_request(0x00a314, 0x00a343))
+    ActRaiserHleFatal("Departure has no native RTS owner");
+  return RECOMP_RETURN_TAILCALL;
 }
 RecompReturn ActRaiser_RegionalArrivalPalace(CpuState *cpu) {
-  const uint8_t flags=cpu_read8(cpu,0x7f,0x9101);
+  const uint8_t flags = cpu_read8(cpu, 0x7f, 0x9101);
   bool japanese;
-  if(!ActRaiserRegional_ArrivalSnapshot((flags&1)!=0,(flags&1)!=0,&japanese))
+  if (!ActRaiserRegional_ArrivalSnapshot((flags & 1) != 0, (flags & 1) != 0, &japanese))
     ActRaiserHleFatal("Cannot resume final-island arrival policy");
   if(japanese) {
     if(!(flags&2) && Complete(cpu,true) && !ActRaiserRegional_ArrivalSnapshot(true,false,&japanese))

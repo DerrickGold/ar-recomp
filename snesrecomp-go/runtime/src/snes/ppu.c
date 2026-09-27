@@ -2849,7 +2849,6 @@ static void native_resolve_virtual_bg(Ppu *SR_RESTRICT ppu, int layer,
 static bool native_virtual_bg_span_eligible(const Ppu *ppu, int layer) {
     const PpuVirtualTilemapBinding *binding = &ppu->virtualTilemap[layer];
     return PPU_mode(ppu) == 1 && layer < 2 && binding->lookup != NULL &&
-        (binding->flags & kPpuVirtualTilemapFlag_IncludeAuthentic) != 0u &&
         !PPU_bigTiles(ppu, layer) &&
         (!PPU_mosaicEnabled(ppu, layer) || PPU_mosaicSize(ppu) == 1);
 }
@@ -3025,6 +3024,43 @@ static void native_resolve_vram_bg_span(Ppu *SR_RESTRICT ppu, int layer,
             if (show_sub) sub_pixels[destination] = packed;
         }
         x += run;
+    }
+}
+
+/* Resolve uncommon margin fetches into the same packed source buffers.
+ * Mosaic is display-anchored: all destinations in a group share one sample,
+ * but windows still test each destination. Split at the authentic boundaries
+ * because a margin-only virtual binding changes source ownership there. */
+static void native_resolve_sampled_bg_span(Ppu *SR_RESTRICT ppu, int layer,
+        int screen_y, bool want_sub, int left, int right, int origin,
+        uint16_t *SR_RESTRICT main_pixels,
+        uint16_t *SR_RESTRICT sub_pixels,
+        uint8_t *SR_RESTRICT bands) {
+    NativeLayerWindowPlan plan;
+    int size = PPU_mosaicEnabled(ppu, layer) ? PPU_mosaicSize(ppu) : 1;
+    native_layer_window_plan(ppu, layer, want_sub, &plan);
+    if (plan.main_mode == 0u && plan.sub_mode == 0u) return;
+    for (int x = left; x < right;) {
+        SrPpuPixel pixel = {0};
+        int end = x + size - ((x % size) + size) % size;
+        if (end > right) end = right;
+        if (x < 0 && end > 0) end = 0;
+        if (x < kPpuXPixels && end > kPpuXPixels) end = kPpuXPixels;
+        if (!sample_bg(ppu, layer, x, screen_y, true, &pixel)) {
+            x = end;
+            continue;
+        }
+        uint16_t packed = native_pack_pixel(
+            pixel.palette, pixel.rank, pixel.layer);
+        for (; x < end; ++x) {
+            int destination = origin + x;
+            bool inside = native_window_plan_inside(&plan, x);
+            if (plan.main_mode == 1u || (plan.main_mode == 2u && !inside))
+                main_pixels[destination] = packed;
+            if (plan.sub_mode == 1u || (plan.sub_mode == 2u && !inside))
+                sub_pixels[destination] = packed;
+            if (bands != NULL) bands[destination] = pixel.band;
+        }
     }
 }
 
@@ -4130,16 +4166,55 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
             if (bpp_for_mode(PPU_mode(ppu), layer) == 0) continue;
             bg_active[layer] = true;
             if (native_virtual_bg_span_eligible(ppu, layer)) {
+                const PpuVirtualTilemapBinding *binding =
+                    &ppu->virtualTilemap[layer];
                 /* Hardware priority needs no custom band output: the scratch
                  * row already contains its 0xff sentinel. Requesting bands
                  * without a classifier only rewrites that sentinel and keeps
                  * otherwise ordinary captures off the whole-tile path. */
-                native_resolve_virtual_bg_span(
-                    ppu, layer, screen_y, source_needs_sub[layer],
-                    left, right,
-                    kPpuExtraLeftRight, layer_main[layer], layer_sub[layer],
-                    ppu->virtualTilemap[layer].band_lookup != NULL
-                        ? bands[layer] : NULL);
+                uint8_t *layer_bands = binding->band_lookup != NULL
+                    ? bands[layer] : NULL;
+                if (!authentic_y || (binding->flags &
+                        kPpuVirtualTilemapFlag_IncludeAuthentic) != 0u) {
+                    native_resolve_virtual_bg_span(
+                        ppu, layer, screen_y, source_needs_sub[layer],
+                        left, right, kPpuExtraLeftRight,
+                        layer_main[layer], layer_sub[layer], layer_bands);
+                } else {
+                    /* A margin-only provider preserves native VRAM patches
+                     * in the authentic rectangle. It still owns every pixel
+                     * of synthetic vertical rows (above), and raw horizontal
+                     * margins. Mirror/repeat on authentic rows copy VRAM,
+                     * matching sample_bg's padding_from_authentic rule. */
+                    PpuWidescreenLayerPolicy policy =
+                        PpuResolveWidescreenLayerPolicy(
+                            ppu, (uint8_t)layer, screen_y);
+                    native_resolve_bg(
+                        ppu, layer, screen_y, source_needs_sub[layer],
+                        layer_main[layer] + kPpuExtraLeftRight,
+                        layer_sub[layer] + kPpuExtraLeftRight,
+                        bands[layer] + kPpuExtraLeftRight);
+                    if (policy.fill == kPpuWidescreenBandFill_Mirror ||
+                        policy.fill == kPpuWidescreenBandFill_Repeat) {
+                        native_resolve_vram_bg_span(
+                            ppu, layer, screen_y, source_needs_sub[layer],
+                            left, 0, kPpuExtraLeftRight,
+                            layer_main[layer], layer_sub[layer]);
+                        native_resolve_vram_bg_span(
+                            ppu, layer, screen_y, source_needs_sub[layer],
+                            kPpuXPixels, right, kPpuExtraLeftRight,
+                            layer_main[layer], layer_sub[layer]);
+                    } else {
+                        native_resolve_virtual_bg_span(
+                            ppu, layer, screen_y, source_needs_sub[layer],
+                            left, 0, kPpuExtraLeftRight,
+                            layer_main[layer], layer_sub[layer], layer_bands);
+                        native_resolve_virtual_bg_span(
+                            ppu, layer, screen_y, source_needs_sub[layer],
+                            kPpuXPixels, right, kPpuExtraLeftRight,
+                            layer_main[layer], layer_sub[layer], layer_bands);
+                    }
+                }
                 resolved_span[layer] = true;
             } else if (ppu->virtualTilemap[layer].lookup == NULL) {
                 bool mosaic = PPU_mosaicEnabled(ppu, layer) &&
@@ -4190,11 +4265,9 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                            layer_sub[kPpuOverlaySource_Obj] +
                                kPpuExtraLeftRight);
     }
-    /* The tile-oriented resolvers above own the authentic span.  Margins can
-     * have per-band clamp/repeat/virtual policies, so sample each BG source
-     * once there, then keep composition/capture in the packed scanline.  This
-     * is still one source fetch per pixel rather than repeating it for main,
-     * sub, capture, removal, and authentic views. */
+    /* Unusual source formats and mosaic margins retain the general sampler,
+     * fetching once per display group. Composition and captures still use
+     * packed sources, while OBJ margins reuse the scanline's sprite cache. */
     {
         bool bg_fallback = false;
         PpuObjSampleCache *obj_cache = NULL;
@@ -4206,29 +4279,15 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
             int span_left[2] = {left, authentic_y ? kPpuXPixels : right};
             int span_right[2] = {authentic_y ? 0 : right, right};
             int span_count = authentic_y ? 2 : 1;
-            for (int span = 0; span < span_count; ++span)
-                for (int x = span_left[span]; x < span_right[span]; ++x) {
-                    int index = x + kPpuExtraLeftRight;
-                    for (int layer = 0; layer < 4; ++layer) {
-                        SrPpuPixel pixel = {0};
-                        uint16_t packed;
-                        if (!bg_active[layer] || resolved_span[layer])
-                            continue;
-                        if (!sample_bg(
-                                ppu, layer, x, screen_y, true, &pixel))
-                            continue;
-                        packed = native_pack_pixel(
-                            pixel.palette, pixel.rank, pixel.layer);
-                        if (source_visible_on_screen(
-                                ppu, layer, false, x))
-                            layer_main[layer][index] = packed;
-                        if (source_needs_sub[layer] &&
-                            source_visible_on_screen(
-                                ppu, layer, true, x))
-                            layer_sub[layer][index] = packed;
-                        if (layer < 2) bands[layer][index] = pixel.band;
-                    }
-                }
+            for (int layer = 0; layer < 4; ++layer) {
+                if (!bg_active[layer] || resolved_span[layer]) continue;
+                for (int span = 0; span < span_count; ++span)
+                    native_resolve_sampled_bg_span(
+                        ppu, layer, screen_y, source_needs_sub[layer],
+                        span_left[span], span_right[span], kPpuExtraLeftRight,
+                        layer_main[layer], layer_sub[layer],
+                        layer < 2 ? bands[layer] : NULL);
+            }
         }
         if (obj_margin_visibility.main_mode != 0u ||
             obj_margin_visibility.sub_mode != 0u)

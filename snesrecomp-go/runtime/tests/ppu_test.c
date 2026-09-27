@@ -1458,6 +1458,7 @@ cleanup:
 
 typedef struct VirtualParityFixture {
     uint32_t salt;
+    bool authentic_fallback;
     unsigned span_lookups;
     unsigned reverse_span_lookups;
     unsigned gap_span_lookups;
@@ -1470,6 +1471,8 @@ static PpuVirtualTilemapLookupResult virtual_parity_lookup(
     const VirtualParityFixture *fixture = context;
     uint32_t value = (uint32_t)tile_x * 17u +
         (uint32_t)tile_y * 29u + fixture->salt;
+    if (fixture->authentic_fallback && value % 23u == 0u)
+        return kPpuVirtualTilemapLookup_FallbackAuthentic;
     if ((value % 19u) == 0u) return false;
     *entry = (uint16_t)((value & 0x7fu) |
         (((value >> 3) & 7u) << 10) |
@@ -1493,6 +1496,9 @@ static size_t virtual_parity_span_lookup(
             (int64_t)tile_step * (int64_t)count);
         const uint32_t value = x * 17u +
             (uint32_t)tile_y * 29u + fixture->salt;
+        /* End a batch before a tile that requires the scalar fallback
+         * contract; zero on its first tile asks the renderer to use lookup. */
+        if (fixture->authentic_fallback && value % 23u == 0u) break;
         const bool present = (value % 19u) != 0u;
         if (count == 0u) first_present = present;
         else if (present != first_present) break;
@@ -1697,16 +1703,19 @@ cleanup:
 
 static void compare_native_virtual_capture(
         PpuWidescreenBandFill fill, PpuWidescreenMotion motion,
-        uint8_t mosaic_size, bool classified, unsigned scenario) {
+        uint8_t mosaic_size, bool classified, unsigned scenario,
+        bool include_authentic) {
     enum {
         kExtraX = 16,
-        kExtraY = 8,
+        kExtraY = kPpuExtraTopBottom,
         kWidth = kPpuXPixels + kExtraX * 2,
         kHeight = kPpuYPixels + kExtraY * 2,
         kPlanes = 3
     };
     const size_t pixel_count = (size_t)kWidth * kHeight;
-    VirtualParityFixture fixture = {.salt = 0x51a7u};
+    VirtualParityFixture fixture = {
+        .salt = 0x51a7u, .authentic_fallback = scenario == 8u
+    };
     PpuVirtualTilemapBinding binding = {
         .lookup = virtual_parity_lookup,
         .lookup_span = virtual_parity_span_lookup,
@@ -1716,7 +1725,7 @@ static void compare_native_virtual_capture(
         .camera_y = 11,
         .hscroll_anchor = 5u,
         .vscroll_anchor = 9u,
-        .flags = kPpuVirtualTilemapFlag_IncludeAuthentic,
+        .flags = include_authentic ? kPpuVirtualTilemapFlag_IncludeAuthentic : 0u,
     };
     Ppu *fast = ppu_init();
     Ppu *reference = ppu_init();
@@ -1775,6 +1784,10 @@ static void compare_native_virtual_capture(
     PpuSetExtraSpace(reference, kExtraX);
     PpuSetExtraVerticalSpace(fast, kExtraY, kExtraY);
     PpuSetExtraVerticalSpace(reference, kExtraY, kExtraY);
+    if (scenario == 9u) {
+        PpuSetWidescreenLayerExtent(fast, 0u, 7u, 11u, 17u, 29u);
+        PpuSetWidescreenLayerExtent(reference, 0u, 7u, 11u, 17u, 29u);
+    }
     CHECK(PpuSetVirtualTilemap(fast, 0u, &binding));
     if (scenario == 7u) CHECK(PpuSetVirtualTilemap(fast, 1u, &binding));
     binding.lookup_span = NULL; /* Independent per-pixel provider oracle. */
@@ -1840,7 +1853,13 @@ static void compare_native_virtual_capture(
                 ppu->hScroll[0] = (uint16_t)((5 + y) & 1023);
             }
         }
+        unsigned spans_before = fixture.span_lookups;
         ppu_runMarginLine(fast, y + 1);
+        /* Every synthetic row must batch its world tiles even when the
+         * authentic rectangle keeps a native VRAM patch/streamer update. */
+        if (mosaic_size == 1u && (y < 0 || y >= kPpuYPixels) &&
+            (scenario != 9u || (y >= -17 && y < kPpuYPixels + 29)))
+            CHECK(fixture.span_lookups > spans_before);
         ppu_runMarginLine(reference, y + 1);
         CHECK(fast->overlayRenderContentMask[kPpuOverlaySource_Bg1] ==
               reference->overlayRenderContentMask[kPpuOverlaySource_Bg1]);
@@ -1857,9 +1876,9 @@ static void compare_native_virtual_capture(
                     reference_overlay[plane][index]) {
                     fprintf(stderr,
                         "virtual capture mismatch fill=%d motion=%d "
-                        "classified=%d scenario=%u "
+                        "classified=%d scenario=%u include-authentic=%d "
                         "plane=%d x=%zu y=%zu fast=%08x ref=%08x\n",
-                        (int)fill, (int)motion, classified, scenario,
+                        (int)fill, (int)motion, classified, scenario, include_authentic,
                         plane, index % kWidth,
                         index / kWidth, fast_overlay[plane][index],
                         reference_overlay[plane][index]);
@@ -1895,23 +1914,29 @@ static void test_native_virtual_capture_path_parity(void) {
         kPpuWidescreenBandFill_RawWrap, kPpuWidescreenBandFill_Mirror,
         kPpuWidescreenBandFill_Repeat, kPpuWidescreenBandFill_Clamp
     };
-    for (int classified = 0; classified < 2; ++classified) {
+    for (int variant = 0; variant < 4; ++variant) {
+        bool classified = (variant & 1) != 0;
+        bool include_authentic = (variant & 2) == 0;
         /* Full and partial tiles, both flips, transparent provider gaps and
          * texels, hardware/custom bands, live raster changes, main/sub owners
          * and the capture policies used by action dioramas. */
-        for (unsigned scenario = 0; scenario <= 7u; ++scenario) {
+        for (unsigned scenario = 0; scenario <= 9u; ++scenario) {
             for (size_t i = 0; i < sizeof(fills) / sizeof(fills[0]); ++i)
                 compare_native_virtual_capture(fills[i],
                     kPpuWidescreenMotion_FillRelative, 1u,
-                    classified != 0, scenario);
+                    classified, scenario, include_authentic);
             compare_native_virtual_capture(kPpuWidescreenBandFill_Mirror,
                 kPpuWidescreenMotion_NormalScroll, 1u,
-                classified != 0, scenario);
+                classified, scenario, include_authentic);
         }
-        compare_native_virtual_capture(kPpuWidescreenBandFill_RawWrap,
-            kPpuWidescreenMotion_FillRelative, 5u, classified != 0, 0u);
-        compare_native_virtual_capture(kPpuWidescreenBandFill_Mirror,
-            kPpuWidescreenMotion_NormalScroll, 16u, classified != 0, 0u);
+        /* Non-divisors of 256 exercise groups crossing the ownership edge;
+         * negative top/left coordinates retain the display mosaic phase. */
+        for (uint8_t size = 2u; size <= 16u; ++size) {
+            for (size_t i = 0; i < sizeof(fills) / sizeof(fills[0]); ++i)
+                compare_native_virtual_capture(fills[i],
+                    kPpuWidescreenMotion_NormalScroll, size,
+                    classified, 0u, include_authentic);
+        }
     }
 }
 

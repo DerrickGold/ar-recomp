@@ -38,6 +38,14 @@ extern RecompReturn bank_00_923A_M0X0(CpuState *cpu);
 
 RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu);
 
+typedef enum ActionSpritePass {
+  kActionSpritePass_All,
+  kActionSpritePass_NativeHeight,
+  kActionSpritePass_VerticalMargins,
+} ActionSpritePass;
+
+static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePass pass);
+
 typedef enum SimRecordField {
   kSimRecord_Behavior = 0x00,
   kSimRecord_ScriptCursor = 0x02,
@@ -591,6 +599,14 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
   }
   int draw_t = (vext_obj_draw && ws_margin_objects_enabled()) ? live_t : 0;
   int draw_b = (vext_obj_draw && ws_margin_objects_enabled()) ? live_b : 0;
+  /* Extra rows share the finite OAM table. Emit native-height components
+   * first, in their original object order, then spend only the remaining
+   * slots on vertical margins. Deferring whole objects would still let a
+   * tall object's margin components displace a later on-screen actor. */
+  const ActionSpritePass first_pass =
+      (draw_t || draw_b) ? kActionSpritePass_NativeHeight : kActionSpritePass_All;
+  uint16 margin_objects[kActRaiserActionObjectCount];
+  unsigned margin_object_count = 0;
   uint16 camera_x = ws_dp16(cpu, kActRaiserWram_Bg1CameraX);
   uint16 camera_y = ws_dp16(cpu, kActRaiserWram_Bg1CameraY);
   const int activation_wide_requested = ws_margin_activation_enabled();
@@ -686,7 +702,10 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
 
       if (vertical_draw && !vertical)
         s_vext_unlocked++;   /* object the band exposes that 224 would cull */
-      if (draw && !(status & kActRaiserObjectStatus_NoDraw)) {
+      if (!oam_full && draw && !(status & kActRaiserObjectStatus_NoDraw)) {
+        if (first_pass == kActionSpritePass_NativeHeight &&
+            margin_object_count < kActRaiserActionObjectCount)
+          margin_objects[margin_object_count++] = object_address;
         cpu->X = object_address;
         cpu->Y = oam_offset;
         uint16 call_s = cpu->S;
@@ -697,7 +716,7 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
                    (uint8)kBuildObjectSpritesReturnAddress);
         cpu->S--;
         cpu->host_return_valid = 1;
-        RecompReturn r = ActRaiser_BuildObjectSprites(cpu);
+        RecompReturn r = ws_build_action_object_sprites(cpu, first_pass);
         cpu->S = call_s;
         if (r != RECOMP_RETURN_NORMAL) {
           ws_action_commit_obj_metadata();
@@ -707,10 +726,13 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
         oam_offset = cpu->Y;
         if (cpu->_flag_C) {
           oam_full = 1;
-          break;
         }
       }
 
+      /* OAM exhaustion is a presentation limit. Every eligible record still
+       * needs its current activation flag, including the one that filled the
+       * table; stale $0400 flags can keep offscreen emitters/projectiles alive
+       * and consume the independent gameplay-object pool. */
       uint16 flags = cpu_read16(
           cpu, cpu->DB,
           (uint16)(object_address + kActRaiserActionObject_Flags));
@@ -762,6 +784,24 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
         (uint16)(object_address + kActRaiserActionObjectStride);
   }
 
+  for (unsigned i = 0; i < margin_object_count && !oam_full; ++i) {
+    cpu->X = margin_objects[i];
+    cpu->Y = oam_offset;
+    const uint16 call_s = cpu->S;
+    cpu_write8(cpu, 0x00, cpu->S--, (uint8)(kBuildObjectSpritesReturnAddress >> 8));
+    cpu_write8(cpu, 0x00, cpu->S--, (uint8)kBuildObjectSpritesReturnAddress);
+    cpu->host_return_valid = 1;
+    const RecompReturn r = ws_build_action_object_sprites(cpu, kActionSpritePass_VerticalMargins);
+    cpu->S = call_s;
+    if (r != RECOMP_RETURN_NORMAL) {
+      ws_action_commit_obj_metadata();
+      ActRaiserSpriteOwnership_Reset();
+      return r;
+    }
+    oam_offset = cpu->Y;
+    oam_full = cpu->_flag_C != 0;
+  }
+
   if (!oam_full) {
     uint8 acc = g_ram[(uint16)(cpu->D + 0x00)];
     uint16 count = ws_dp16(cpu, kSpriteDp_OamHighSlotsRemaining);
@@ -802,10 +842,14 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
  * M=0, X=0, X=object base, Y=next OAM-shadow byte offset. Return preserves
  * the object in X, advances Y, and reports OAM-full through carry. */
 RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
+  return ws_build_action_object_sprites(cpu, kActionSpritePass_All);
+}
+
+static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePass pass) {
   uint16 object_address = cpu->X;
   uint16 oam_offset = cpu->Y;
   const uint16 oam_before = oam_offset;
-  int oam_full = 0;
+  int oam_full = oam_offset >= kActRaiserOamLowTableBytes;
   const int16 native_left = (int16)cpu_read16(cpu, cpu->DB,
       object_address + kActRaiserActionObject_LeftExtent);
   const int16 native_top = (int16)cpu_read16(cpu, cpu->DB,
@@ -839,12 +883,13 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
   uint8 definition_bank = cpu_read8(
       cpu, cpu->DB,
       (uint16)(object_address + kActRaiserActionObject_AnimationBank));
-  uint16 definition_address = (uint16)(
-      cpu_read16(cpu, cpu->DB,
-                 (uint16)(object_address + kActRaiserActionObject_Composition)) +
-      kActionDefinitionHeaderBytes);
-  uint16 component_count =
-      cpu_read8(cpu, definition_bank, definition_address);
+  const uint16 composition =
+      cpu_read16(cpu, cpu->DB, (uint16)(object_address + kActRaiserActionObject_Composition));
+  uint16 definition_address = (uint16)(composition + kActionDefinitionHeaderBytes);
+  /* A newly exposed dormant object may not have selected a picture yet.
+   * Never interpret direct-page scratch as a composition, or let an empty
+   * picture wrap its count to 65535 and walk unrelated data into OAM. */
+  uint16 component_count = composition ? cpu_read8(cpu, definition_bank, definition_address) : 0;
   definition_address++;
   ActRaiserActorArtDraw regional_draw = {0};
   const bool regional =
@@ -902,7 +947,7 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
   const int resolve_left = margin_left + apron_geom.apron;
   const int resolve_right = margin_right + apron_geom.apron;
 
-  for (;;) {
+  while (component_count != 0 && !oam_full) {
     flip_attributes = ws_dp16(cpu, kSpriteDp_FlipAttributes);
     const bool flip_x = (flip_attributes & kDefinitionFlipHorizontal) != 0;
     const bool flip_y = (flip_attributes & kDefinitionFlipVertical) != 0;
@@ -928,8 +973,13 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
      * authentic window is [-kSpriteDrawBias, 224) in screen rows -- the ROM's
      * own draw bias already grants 16 rows above the screen, and the tree-head
      * report was an object 24 rows up, just past it. */
-    if (ws_biased_in_window(biased_y, margin_top, margin_bottom,
-                            kSpriteBiasedHeight)) {
+    const bool native_y = ws_biased_in_window(biased_y, 0, 0, kSpriteBiasedHeight);
+    const bool draw_y =
+        pass == kActionSpritePass_NativeHeight
+            ? native_y
+            : (pass != kActionSpritePass_VerticalMargins || !native_y) &&
+                  ws_biased_in_window(biased_y, margin_top, margin_bottom, kSpriteBiasedHeight);
+    if (draw_y) {
       /* CMP failed with carry clear, so the ROM's SBC #$0010 stores y-$11. */
       uint16 stored_y = (uint16)(biased_y - (kSpriteDrawBias + 1));
       cpu_write16(cpu, definition_bank,

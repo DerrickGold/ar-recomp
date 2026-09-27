@@ -7,6 +7,7 @@
 static uint8_t low[65536], towns[65536];
 static bool requested, effective, locked, available = true;
 static unsigned departure_calls, palace_calls, announcements;
+static uint32_t departure_target, departure_origin;
 static RecompReturn native_result;
 static uint8_t jp_code[65536];
 
@@ -124,10 +125,31 @@ bool ActRaiserRegional_ArrivalSnapshot(bool latch, bool continuing, bool *japane
   *japanese = locked ? effective : requested;
   return true;
 }
-RecompReturn bank_00_A343_M0X0(CpuState *cpu) {
-  assert(!ActRaiser_RegionalArrivalDepartureEntry(cpu));
-  ++departure_calls;
-  return native_result;
+int cpu_hle_tailcall_request(uint32_t target, uint32_t origin) {
+  departure_target = target;
+  departure_origin = origin;
+  return 1;
+}
+/* Model the requested native suffix only after the HLE has retired. The real
+ * generated suffix owns the RTS; the policy must preserve its hardware frame. */
+static RecompReturn RunDeparture(CpuState *cpu) {
+  const uint16_t stack = cpu->S;
+  uint8_t saved_stack[5];
+  for (unsigned offset = 0; offset < sizeof(saved_stack); ++offset)
+    saved_stack[offset] = low[(uint16_t)(stack + offset + 1)];
+  departure_target = departure_origin = 0;
+  assert(ActRaiser_RegionalArrivalDeparture(cpu) == RECOMP_RETURN_TAILCALL);
+  assert(cpu->S == stack && departure_origin == 0x00a343);
+  for (unsigned offset = 0; offset < sizeof(saved_stack); ++offset)
+    assert(low[(uint16_t)(stack + offset + 1)] == saved_stack[offset]);
+  if (departure_target == 0x00a343) {
+    assert(!ActRaiser_RegionalArrivalDepartureEntry(cpu));
+    ++departure_calls;
+  } else {
+    assert(departure_target == 0x00a314);
+    cpu->S += 2;
+  }
+  return RECOMP_RETURN_NORMAL;
 }
 RecompReturn bank_01_861E_M1X0(CpuState *cpu) {
   assert(!ActRaiser_RegionalArrivalPalaceEntry(cpu));
@@ -177,7 +199,7 @@ static void CheckOriginal(const char *path) {
                           .P = CPU_P_V | (carry ? CPU_P_C : 0)};
           cpu_p_to_mirrors(&cpu);
           CpuState reference = cpu;
-          assert(ActRaiser_RegionalArrivalDeparture(&cpu) == RECOMP_RETURN_NORMAL);
+          assert(RunDeparture(&cpu) == RECOMP_RETURN_NORMAL);
           uint8_t saved_low[sizeof(low)], saved_towns[sizeof(towns)];
           memcpy(saved_low, low, sizeof(low));
           memcpy(saved_towns, towns, sizeof(towns));
@@ -213,6 +235,23 @@ static void CheckOriginal(const char *path) {
 }
 int main(int argc, char **argv) {
   assert(argc == 1 || argc == 2);
+  /* Fillmore departure arrives below the enclosing host entry stack: the
+   * next RTS must visit $8966, restore saved P=$24, then return to $80B4.
+   * Both regional routes must leave those bytes for the generated suffix. */
+  for (unsigned jp = 0; jp < 2; ++jp) {
+    Setup(jp);
+    CpuState cpu = {.X = 0x08a0, .S = 0x01fa, .P = CPU_P_I, .host_return_valid = 1};
+    cpu_p_to_mirrors(&cpu);
+    cpu_write16(&cpu, 0, 0x01fb, 0x8965);
+    cpu_write8(&cpu, 0, 0x01fd, CPU_P_M | CPU_P_I);
+    cpu_write16(&cpu, 0, 0x01fe, 0x80b3);
+    assert(RunDeparture(&cpu) == RECOMP_RETURN_NORMAL);
+    assert(cpu.S == (jp ? 0x01fc : 0x01fa));
+    assert(!cpu.m_flag && cpu.X == 0x08a0);
+    assert(cpu_read16(&cpu, 0, 0x01fb) == 0x8965);
+    assert(cpu_read8(&cpu, 0, 0x01fd) == (CPU_P_M | CPU_P_I));
+    assert(cpu_read16(&cpu, 0, 0x01fe) == 0x80b3);
+  }
   unsigned cases = 0;
   for (unsigned jp = 0; jp < 2; ++jp)
     for (unsigned flags = 0; flags < 4; ++flags)
@@ -229,7 +268,7 @@ int main(int argc, char **argv) {
           uint8_t saved[sizeof(towns)];
           memcpy(saved, towns, sizeof(saved));
           assert(ActRaiser_RegionalArrivalDepartureEntry(&cpu));
-          assert(ActRaiser_RegionalArrivalDeparture(&cpu) == RECOMP_RETURN_NORMAL);
+          assert(RunDeparture(&cpu) == RECOMP_RETURN_NORMAL);
           assert(locked == ((flags & 1) != 0 || missing == 6));
           assert(!memcmp(saved, towns, sizeof(saved)) && low[0x31a] == 0x5a && low[0x334] == 0x9a);
           if (jp) {
@@ -262,7 +301,6 @@ int main(int argc, char **argv) {
     Setup(false);
     native_result = (RecompReturn)token;
     CpuState cpu = {0};
-    assert(ActRaiser_RegionalArrivalDeparture(&cpu) == native_result);
     cpu.PB = cpu.DB = 1;
     cpu.P = CPU_P_M;
     cpu_p_to_mirrors(&cpu);
@@ -282,7 +320,7 @@ int main(int argc, char **argv) {
   /* Conversely, the decided JP route survives a later US request. */
   Setup(true);
   cpu = (CpuState){0};
-  assert(ActRaiser_RegionalArrivalDeparture(&cpu) == RECOMP_RETURN_NORMAL && locked);
+  assert(RunDeparture(&cpu) == RECOMP_RETURN_NORMAL && locked);
   requested = false;
   cpu.PB = cpu.DB = 1;
   cpu.P = CPU_P_M;
