@@ -61,4 +61,10 @@ void ArTextPresentation_MarkReady(uint64_t ticket);
 void ArTextPresentation_EndFrame(void);
 bool ArTextPresentation_Failed(uint64_t ticket);
 
+/* The first prepared dialogue viewport supplies a whole-line page boundary.
+ * Publish it only after a successful draw. Start/end are UTF-8 boundaries in
+ * the composed dialogue window; stale windows/pages cannot advance input. */
+void ArTextPresentation_ReportPage(uint64_t ticket, uint32_t start, uint32_t end);
+bool ArTextPresentation_PageEnd(uint64_t ticket, uint32_t start, uint32_t *end);
+
 #endif

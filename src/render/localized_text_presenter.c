@@ -1969,6 +1969,27 @@ static bool PlanFlowingText(const ArLocalizationFrame *frame,
   return true;
 }
 
+/* Both native-backed dialogue and read-only menu help use this page plan.
+ * The controller owns acknowledgements; measuring never advances a page. */
+static int DialogueOffset(const ArLocalizationFrame *frame,
+    const ArLocalizationTextSnapshot *snapshot, const ArTextSurface *surface,
+    int viewport_height, uint32_t *revealed, ArLocalizedPreparedFrame *prepared) {
+  if (!frame->dialogue_paged || snapshot->surface_id != frame->dialogue_surface_id)
+    return ArLocalizedTextLayout_ScrollOffset(surface, snapshot->revealed_utf8_bytes,
+                                               viewport_height, revealed);
+  uint32_t end;
+  const int offset = ArLocalizedTextLayout_PageOffset(surface,
+      frame->dialogue_page_start, snapshot->utf8_bytes, viewport_height, &end);
+  const uint32_t limit = snapshot->revealed_utf8_bytes < end
+      ? snapshot->revealed_utf8_bytes : end;
+  *revealed = 0;
+  while (*revealed < surface->reveal_cluster_count &&
+         surface->reveal_clusters[*revealed].end_utf8_byte <= limit) ++*revealed;
+  prepared->dialogue_page_start = frame->dialogue_page_start;
+  prepared->dialogue_page_end = end;
+  return offset;
+}
+
 static void PrepareCellText(ArRenderDevice *device, const ArLocalizationFrame *frame,
                             const TextCellView *view, const ResolvedTextCell *cell,
                             const ReportPlan *report, ArLocalizedPreparedFrame *prepared) {
@@ -2077,9 +2098,8 @@ static void PrepareCellText(ArRenderDevice *device, const ArLocalizationFrame *f
       right_label || (!left_label && effective_direction == kArTextDirection_RightToLeft);
   uint32_t revealed_clusters = snapshot->revealed_cluster_count;
   const int scroll_y =
-      scrolling ? ArLocalizedTextLayout_ScrollOffset(&surface, snapshot->revealed_utf8_bytes,
-                                                     viewport.h, &revealed_clusters)
-                : 0;
+      scrolling ? DialogueOffset(frame, snapshot, &surface, viewport.h,
+                                  &revealed_clusters, prepared) : 0;
   const ArRenderRectI destination = {
       bounds.x + (scrolling || (fitted_label && !centered_label)
                       ? (trailing ? bounds.w - surface.width : 0)
@@ -2315,8 +2335,8 @@ bool ArLocalizedTextPresenter_PrepareScreenText(ArRenderDevice *device,
                 : trailing ? bounds.x + bounds.w - surface.width
                            : bounds.x;
   uint32_t revealed=snapshot->revealed_cluster_count;
-  const int scroll=dialogue?ArLocalizedTextLayout_ScrollOffset(
-      &surface,snapshot->revealed_utf8_bytes,viewport.h,&revealed):0;
+  const int scroll=dialogue
+      ? DialogueOffset(frame,snapshot,&surface,viewport.h,&revealed,prepared):0;
   prepared->texts[0] = (ArLocalizedPreparedText){
       .surface = surface,
       .destination = {x, dialogue?bounds.y-scroll:bounds.y+(bounds.h-surface.height)/2,
@@ -2327,6 +2347,8 @@ bool ArLocalizedTextPresenter_PrepareScreenText(ArRenderDevice *device,
       .cluster_shift_offset = -1,
   };
   prepared->text_count = 1;
+  if (dialogue && snapshot->surface_id == frame->dialogue_surface_id)
+    prepared->ready_dialogue_ticket = frame->dialogue_ticket;
   return true;
 }
 

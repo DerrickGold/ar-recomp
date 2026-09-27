@@ -390,6 +390,20 @@ static void TestLayoutContracts(void) {
     const char *script;
     const char *error;
   } cases[] = {
+      {":: title.copyright\n@layout single_line_label\nFirst\n@line\nSecond\n@end\n",
+       NULL},
+      {":: sim.town_status.construction\n@layout single_line_label\nTown notice\n@end\n",
+       NULL},
+      {":: sim.town_status.sealing_lair\n@layout single_line_label\nTown notice\n@end\n",
+       NULL},
+      {":: sim.town_status.construction\n@layout centered_block\nTown notice\n@end\n",
+       "requires layout 'centered_label'"},
+      {":: sim.town_status.construction\n@layout single_line_label\nTown notice\n@end\n"
+       ":: sim.town_status.sealing_lair\n@alias sim.town_status.construction\n",
+       NULL},
+      {":: sim.town_status.construction\n@layout single_line_label\nTown notice\n@end\n"
+       ":: action.hud.ready\n@alias sim.town_status.construction\n",
+       "action.hud.ready requires layout 'centered_label'"},
       {":: action.hud.ready\n@layout centered_label\nReady\n@end\n"
        ":: action.hud.pause\n@alias action.hud.ready\n",
        NULL},
@@ -691,9 +705,9 @@ static void TestSemanticContracts(void) {
   CHECK(stats.validated_messages == 3);
   CHECK(stats.aliases == 1);
   CHECK(stats.required_messages == 495);
-  CHECK(ArLanguageContract_RouteCount() == 600);
+  CHECK(ArLanguageContract_RouteCount() == 602);
   CHECK(strcmp(ArLanguageContract_RouteId(0), "action.hud.act_1") == 0);
-  CHECK(ArLanguageContract_RouteId(600) == NULL);
+  CHECK(ArLanguageContract_RouteId(602) == NULL);
   CHECK(ArLanguageContract_RouteAvailable("action.hud.act_1",
                                           kArLanguageSourceProfile_Us));
   CHECK(!ArLanguageContract_RouteAvailable(

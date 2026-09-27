@@ -100,11 +100,13 @@ static bool ConfirmPage(void *context) {
    * Keep its native per-frame work, but return between polls if the authored
    * page no longer exists. Never cancel a native gameplay/menu input loop. */
   bool released = false;
-  while (ActRaiserLocalizationRuntime_PageConfirmationPending()) {
+  while (ActRaiserLocalizationRuntime_PageConfirmationPending() &&
+         !ActRaiserSimMenu_DescriptionAborted()) {
     uint8_t buttons = 0;
     if (!CallPresentationRoutine(context, bank_01_8C43_M1X0, &buttons))
       return false;
-    if (!ActRaiserLocalizationRuntime_PageConfirmationPending())
+    if (!ActRaiserLocalizationRuntime_PageConfirmationPending() ||
+        ActRaiserSimMenu_DescriptionAborted())
       return true;
     if (released && (buttons & 0xc0u)) {
       ActRaiserSimMenu_DescriptionWait();
@@ -116,8 +118,20 @@ static bool ConfirmPage(void *context) {
   return true;
 }
 
+static bool Cancelled(void *context) {
+  (void)context;
+  return ActRaiserSimMenu_DescriptionAborted();
+}
+
+static bool FastReveal(void *context) {
+  (void)context;
+  return ActRaiserSimMenu_FastReveal();
+}
+
 static ActRaiserLocalizationDialogueHost Host(CpuState *cpu) {
-  return (ActRaiserLocalizationDialogueHost){cpu, WaitFrame, ConfirmPage};
+  return (ActRaiserLocalizationDialogueHost){
+      .context=cpu, .wait_frame=WaitFrame, .confirm_page=ConfirmPage,
+      .cancelled=Cancelled, .fast_reveal=FastReveal};
 }
 
 static bool EnhancedGlyphDelay(void) {
@@ -170,7 +184,8 @@ bool ActRaiser_LocalizationScheduleEntry(CpuState *cpu) {
                                                           sizeof(observation)};
   if (cpu && !ActRaiserSimMenu_SkipDialogue(cpu) &&
       ActRaiserLocalizationText_CopyObservation(&observation))
-    (void)ActRaiserLocalizationRuntime_BeginDialogue(&observation);
+    (void)ActRaiserLocalizationRuntime_BeginDialogue(
+        &observation, ActRaiserSimMenu_OwnsPresentation());
   /* The read-only return acknowledgement also matters in native mode. */
   return cpu != NULL;
 }

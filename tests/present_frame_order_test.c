@@ -232,22 +232,28 @@ int main(int argc, char **argv) {
   CHECK(!ArTextPresentation_Failed(12));
   slot.sim_menu.model.phase = kSimMenu_Describe;
   slot.sim_menu.help.active = true;
+  s_dialogue_ready = true; /* Help now publishes its own dialogue ticket. */
   RunCase(&slot);
   CHECK(!ArTextPresentation_Failed(12));
+  slot.localization.dialogue_ticket = 14;
+  s_dialogue_ready = false;
+  RunCase(&slot);
+  CHECK(ArTextPresentation_Failed(14));
+  slot.localization.dialogue_ticket = 15;
   slot.sim_menu.help.active = false;
   RunCase(&slot); /* Miracle descriptions still require native dialogue. */
-  CHECK(ArTextPresentation_Failed(12));
+  CHECK(ArTextPresentation_Failed(15));
   /* The exception belongs only to an active handoff, never ordinary text. */
-  slot.localization.dialogue_ticket = 13;
+  slot.localization.dialogue_ticket = 16;
   slot.sim_menu.model.phase = kSimMenu_Handoff;
   slot.sim_menu.valid = false;
   RunCase(&slot);
-  CHECK(ArTextPresentation_Failed(13));
-  slot.localization.dialogue_ticket = 14;
+  CHECK(ArTextPresentation_Failed(16));
+  slot.localization.dialogue_ticket = 17;
   slot.sim_menu.valid = true;
   slot.sim_menu.model.phase = kSimMenu_Dialogue;
   RunCase(&slot);
-  CHECK(ArTextPresentation_Failed(14));
+  CHECK(ArTextPresentation_Failed(17));
   slot.sim_menu.valid = false;
   slot.localization.dialogue_ticket = 0;
 
@@ -299,6 +305,30 @@ int main(int argc, char **argv) {
   (void)PresentFrame(&slot, s_expected_alpha, s_expected_presentation_fps);
   CHECK(s_stage == 0);
   CHECK(SessionFatal_Requested());
+
+  /* Layout feedback belongs to a successfully drawn window and page. Neither
+   * a failed draw nor an older re-present may advance the current dialogue. */
+  uint32_t page_end=0;
+  ArTextPresentation_BeginFrame(20);
+  ArTextPresentation_ReportPage(20,0,16);
+  CHECK(!ArTextPresentation_PageEnd(20,0,&page_end));
+  ArTextPresentation_MarkReady(20);
+  ArTextPresentation_EndFrame();
+  CHECK(ArTextPresentation_PageEnd(20,0,&page_end) && page_end==16);
+  CHECK(!ArTextPresentation_PageEnd(20,16,&page_end));
+  ArTextPresentation_BeginFrame(21);
+  ArTextPresentation_ReportPage(21,16,32);
+  ArTextPresentation_EndFrame();
+  CHECK(!ArTextPresentation_PageEnd(21,16,&page_end));
+  ArTextPresentation_BeginFrame(22);
+  ArTextPresentation_ReportPage(22,16,32);
+  ArTextPresentation_MarkReady(22);
+  ArTextPresentation_EndFrame();
+  ArTextPresentation_BeginFrame(20);
+  ArTextPresentation_ReportPage(20,0,8);
+  ArTextPresentation_MarkReady(20);
+  ArTextPresentation_EndFrame();
+  CHECK(ArTextPresentation_PageEnd(22,16,&page_end) && page_end==32);
 
   if (s_failures) {
     fprintf(stderr, "present_frame_order_test: %d failure(s)\n", s_failures);

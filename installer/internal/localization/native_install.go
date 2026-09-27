@@ -24,33 +24,15 @@ func (d *Decoder) NativeSourceMetadata() PackMetadata {
 		Direction: "auto", Target: target, SourceProfile: d.profile.ID, Fallback: "native-us", Coverage: "complete"}
 }
 
-// EnsureNativeUSSource preserves existing messages, supplementing older native
-// baselines with newly transcribed graphical labels. Community packs are never
-// upgraded here. Build/editor share this path without Python or profile guessing.
+// EnsureNativeUSSource preserves existing messages while supplementing newly
+// discovered native routes. Community packs are never upgraded here.
 func EnsureNativeUSSource(directory string, rom []byte) (*AuthorPack, error) {
-	if pack, err := OpenNativeUSSource(directory); err != nil {
+	old, err := OpenNativeUSSource(directory)
+	if err != nil {
 		return nil, err
-	} else if pack != nil {
-		var credits []AuthorMessage
-		if len(rom) != 0 {
-			d, err := NewDecoder(rom)
-			if err != nil {
-				return nil, err
-			}
-			if d.ReleaseID() != "us" {
-				return nil, fmt.Errorf("the runtime baseline requires the US ROM")
-			}
-			entries, err := d.assetScript()
-			if err != nil {
-				return nil, err
-			}
-			pages, err := d.nativeCredits(entries)
-			if err != nil {
-				return nil, err
-			}
-			credits = nativeCreditsMessages(pages)
-		}
-		return supplementNativeUSSource(directory, pack, credits...)
+	}
+	if old != nil && len(rom) == 0 {
+		return supplementNativeUSSource(directory, old)
 	}
 	d, err := NewDecoder(rom)
 	if err != nil {
@@ -99,19 +81,26 @@ func InstallNativeUSSource(directory string, pack *AuthorPack) (*AuthorPack, err
 	if old, err := OpenNativeUSSource(directory); err != nil {
 		return nil, err
 	} else if old != nil {
-		var credits []AuthorMessage
-		for page := 0; page < endingPageCount; page++ {
-			id := creditPageID("us", page)
-			if ops, err := pack.MessageOperations(id); id != "" && err == nil {
-				// Supplemental content is interpreted once by the destination
-				// version. Do not feed v2 inline styles through the v1 emitter.
-				for i := range ops {
-					ops[i].Style = texttemplate.Style{}
-				}
-				credits = append(credits, AuthorMessage{ID: id, Operations: ops})
+		var supplemental []AuthorMessage
+		for _, route := range authorContracts.ordered {
+			if view, found := old.workspace.Message(route.ID); found && view.Present {
+				continue
 			}
+			if view, found := pack.workspace.Message(route.ID); !found || !view.Present {
+				continue
+			}
+			ops, err := pack.MessageOperations(route.ID)
+			if err != nil {
+				return nil, err
+			}
+			// Apply the destination version's native appearance once; avoid
+			// passing v2 inline styles through the v1 compatibility emitter.
+			for i := range ops {
+				ops[i].Style = texttemplate.Style{}
+			}
+			supplemental = append(supplemental, AuthorMessage{ID: route.ID, Operations: ops})
 		}
-		return supplementNativeUSSource(directory, old, credits...)
+		return supplementNativeUSSource(directory, old, supplemental...)
 	}
 	p, err := NewSourceProject(pack)
 	if err != nil {

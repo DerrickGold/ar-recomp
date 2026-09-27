@@ -80,4 +80,31 @@ func TestNativeSourceOptionalHudUpgrade(t *testing.T) {
 	if err != nil || again.RuntimeRevision() != pack.RuntimeRevision() {
 		t.Fatal("non-idempotent upgrade", err)
 	}
+	// A newer extraction may discover prose, not just transcribed HUD art.
+	// Supplement it through the same installer while preserving existing edits.
+	source := pack
+	for _, id := range []string{"sim.town_status.construction", "sim.town_status.sealing_lair"} {
+		source, err = source.AddMessage(id, source.Manifest().Sources()[0], "New status words", TranslationNotStarted)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	upgraded, err := InstallNativeUSSource(root, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upgraded.Workspace().Stats().MessageCount != pack.Workspace().Stats().MessageCount+2 {
+		t.Fatal("newly discovered native messages were not installed")
+	}
+	for _, message := range messages {
+		before, _ := pack.MessageOperations(message.ID)
+		after, _ := upgraded.MessageOperations(message.ID)
+		if presentationDigest(before) != presentationDigest(after) {
+			t.Fatal("new source replaced existing wording", message.ID)
+		}
+	}
+	again, err = InstallNativeUSSource(root, source)
+	if err != nil || again.RuntimeRevision() != upgraded.RuntimeRevision() {
+		t.Fatal("new native route supplement is not idempotent", err)
+	}
 }

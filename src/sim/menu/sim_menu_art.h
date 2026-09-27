@@ -16,6 +16,9 @@ enum { kSimMenuArtDescribeAngel = 43, kSimMenuArtCount = 44, kSimMenuArtWidth = 
 typedef struct SimMenuFrame {
   SimMenuModel model;
   SimMenuHelpPage help;
+  /* Native BG3 content retained alongside the modern menu, even when
+   * enhanced text is disabled. Bounds come from the game adapter. */
+  ArTextCellRegion preserved_bg3_region;
   /* All modern labels share their own bounded frame. Six dock titles plus
    * a category and eight inventory rows fit without consuming HUD/dialogue
    * snapshots or falling back when the native inventory fills that frame. */

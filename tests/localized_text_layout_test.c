@@ -105,6 +105,23 @@ int main(void) {
   CHECK(ArLocalizedTextLayout_ScrollOffset(&surface, 8, 50, &revealed) == 25);
   CHECK(ArLocalizedTextLayout_ScrollOffset(&surface, 10, 50, &revealed) == 50);
 
+  /* Instant reveal must not scroll the opening away. Page boundaries consume
+   * complete lines and UTF-8 clusters, then move only on acknowledgement. */
+  uint32_t page_end = 0;
+  CHECK(ArLocalizedTextLayout_PageOffset(&surface, 0, 10, 50, &page_end) == 0);
+  CHECK(page_end == 4);
+  CHECK(ArLocalizedTextLayout_PageOffset(&surface, page_end, 10, 50, &page_end) == 50);
+  CHECK(page_end == 10);
+  const ArTextLineMetrics mixed[] = {{0,15,20},{20,45,35},{55,68,18},{73,88,20}};
+  surface.lines = mixed;
+  surface.line_count = 4;
+  CHECK(ArLocalizedTextLayout_PageOffset(&surface, 0, 10, 55, &page_end) == 0);
+  CHECK(page_end == 4);
+  CHECK(ArLocalizedTextLayout_PageOffset(&surface, page_end, 10, 55, &page_end) == 55);
+  CHECK(page_end == 10);
+  surface.lines = NULL;
+  surface.line_count = 0;
+
   ArRenderRectI source = {0, 0, 200, 200};
   ArRenderRectI destination = {100, 150, 200, 200};
   CHECK(ArLocalizedTextLayout_Clip(origin, &source, &destination));

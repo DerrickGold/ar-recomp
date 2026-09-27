@@ -23,6 +23,11 @@ void ArTextPresentation_MarkReady(uint64_t ticket) {
   assert(ticket==42);
   acknowledgements++;
 }
+void ArTextPresentation_ReportPage(uint64_t ticket, uint32_t start, uint32_t end) {
+  (void)ticket;
+  (void)start;
+  (void)end;
+}
 const ArLocalizationScreenTextRecord *ArLocalizationFrame_FindScreenText(
     const ArLocalizationFrame *frame, uint32_t surface) {
   (void)frame;

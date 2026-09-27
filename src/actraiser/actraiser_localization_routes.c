@@ -26,7 +26,7 @@ enum {
 
 _Static_assert(sizeof(kDialogueRoutes) / sizeof(kDialogueRoutes[0]) == 365,
                "USA scoped dialogue route census changed");
-_Static_assert(sizeof(kComposeRoutes) / sizeof(kComposeRoutes[0]) == 91,
+_Static_assert(sizeof(kComposeRoutes) / sizeof(kComposeRoutes[0]) == 93,
                "USA scoped fixed-composer route census changed");
 
 bool ActRaiserLocalizationRoute_InScope(uint8_t map_group, uint8_t map_number) {

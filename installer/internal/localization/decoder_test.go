@@ -29,6 +29,26 @@ func textOf(record Record) string {
 	return result.String()
 }
 
+func TestFixedSceneGlyphsDoNotChangeDialogueAlphabet(t *testing.T) {
+	profile := syntheticProfile("jp")
+	profile.Encoding = "direct-glyph"
+	profile.FixedGlyphOverrides = map[int]map[byte]string{0: {'A': "あ"}}
+	d, err := newDecoder([]byte{'A', 0, 'A', 0}, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		consumer Consumer
+		start    int
+		want     string
+	}{{FixedComposer, 0, "あ"}, {Interactive, 0, "A"}, {FixedComposer, 2, "A"}} {
+		record, err := d.DecodeRecord(tc.consumer, tc.start, tc.start+2, true)
+		if err != nil || textOf(record) != tc.want {
+			t.Fatal("scene glyph mapping leaked across sources or consumers", tc, err)
+		}
+	}
+}
+
 func TestDictionaryConsumerBoundaries(t *testing.T) {
 	for _, id := range []string{"us", "eu-en", "de", "fr"} {
 		for token := 0x80; token <= 0xff; token++ {

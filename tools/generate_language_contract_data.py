@@ -91,6 +91,14 @@ def generate(catalog_path):
         layout = route.get('presentation', {}).get('layout', '')
         if not re.fullmatch(r'[a-z][a-z0-9_]*', layout):
             raise ValueError(f'{route["id"]}: missing or invalid layout name')
+        legacy_layouts = route.get('legacy_layouts', [])
+        if not isinstance(legacy_layouts, list) or any(
+                not isinstance(name, str) or
+                not re.fullmatch(r'[a-z][a-z0-9_]*', name)
+                for name in legacy_layouts) or \
+                len(legacy_layouts) != len(set(legacy_layouts)) or \
+                layout in legacy_layouts:
+            raise ValueError(f'{route["id"]}: invalid legacy layouts')
         shape = route.get('presentation', {}).get('shape')
         if shape not in PRESENTATION_SHAPES:
             raise ValueError(
@@ -175,7 +183,12 @@ def generate(catalog_path):
             f'{canonical_profile}, {optional}, {shape}, '
             f'UINT8_C({maximum_pages}), '
             f'UINT8_C({required_nonempty_lines}), {c_string(layout)}}},')
-    lines.extend(['};', ''])
+    lines.extend(['};', '',
+                  'static const ArGeneratedLegacyLayout kGeneratedLegacyLayouts[] = {'])
+    for route in routes:
+        for layout in route.get('legacy_layouts', []):
+            lines.append(f'  {{{c_string(route["id"])}, {c_string(layout)}}},')
+    lines.extend(['  {NULL, NULL},', '};', ''])
     return '\n'.join(lines)
 
 
@@ -265,6 +278,8 @@ def generate_go(catalog_path, shapes_path=DEFAULT_SHAPES):
                                  else 'dormant' if route['id'] in catalog['us_runtime_coverage']['dormant']
                                  else 'contract' if 'us' in route['contracts'] else 'regional_reference'),
             **({'optional': True} if route.get('optional') else {}),
+            **({'legacy_layouts': route['legacy_layouts']}
+               if route.get('legacy_layouts') else {}),
             'presentation': presentation(route, {}),
             **({'presentation_by_profile': {
                 profile: presentation(route, overrides)

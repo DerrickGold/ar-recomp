@@ -2503,12 +2503,11 @@ if(BUILD_TESTING)
         tests/present_frame_order_test.c
         src/platform/sdl/host_clock_sdl.c
         src/present/present_frame.c
-        src/localization/text_presentation.c
         src/present/render_comparison.c
         src/app/session_fatal.c
     )
     target_link_libraries(actraiser_present_frame_order_test PRIVATE
-        actraiser_performance_test_support)
+        actraiser_performance_test_support actraiser_text_test_support)
     target_include_directories(actraiser_present_frame_order_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -3363,6 +3362,9 @@ if(BUILD_TESTING)
         tests/sim_menu_model_test.c src/sim/menu/sim_menu_model.c)
     target_include_directories(sim_menu_model_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME sim_menu_model COMMAND sim_menu_model_test)
+    add_executable(dialogue_pager_test tests/dialogue_pager_test.c)
+    target_link_libraries(dialogue_pager_test PRIVATE actraiser_text_test_support)
+    add_test(NAME dialogue_pager COMMAND dialogue_pager_test)
     add_executable(sim_menu_help_test tests/sim_menu_help_test.c
         src/sim/menu/sim_menu_help.c)
     target_link_libraries(sim_menu_help_test PRIVATE
@@ -3403,12 +3405,12 @@ if(BUILD_TESTING)
         tests/actraiser_localization_schedule_test.c
         src/sim/menu/sim_menu_model.c
         src/sim/menu/sim_menu_help.c
-        src/localization/text_presentation.c
         src/actraiser/actraiser_localization_schedule.c
         src/actraiser/actraiser_miracle_text.c
         src/actraiser/actraiser_miracle_translation.c
         src/actraiser/actraiser_hud.c
         src/actraiser/actraiser_localization_runtime.c
+        src/sim/menu/sim_menu_localization.c
         src/actraiser/actraiser_localization_world_navigation.c
         src/actraiser/actraiser_localization_credits.c
         src/actraiser/actraiser_localization_text.c

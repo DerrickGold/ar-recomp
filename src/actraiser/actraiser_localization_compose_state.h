@@ -14,12 +14,12 @@
 #include "actraiser/actraiser_localization_resolved_text.h"
 #include "actraiser/actraiser_localization_routes.h"
 
-#define ACTRAISER_LOCALIZATION_COMPOSE_STATE_ABI_VERSION UINT32_C(14)
+#define ACTRAISER_LOCALIZATION_COMPOSE_STATE_ABI_VERSION UINT32_C(15)
 
 enum {
   kActRaiserLocalizationComposeSurfaceFirst = 2,
-  kActRaiserLocalizationComposeSurfaceLast = 17,
-  kActRaiserLocalizationComposeSurfaceCapacity = 16,
+  kActRaiserLocalizationComposeSurfaceLast = 18,
+  kActRaiserLocalizationComposeSurfaceCapacity = 17,
   kActRaiserLocalizationComposeSemanticIdCapacity = 256,
 };
 
@@ -30,6 +30,7 @@ enum {
   kActRaiserLocalizationTitleSelectorSurface = 15,
   kActRaiserLocalizationSoundTestSurface = 16,
   kActRaiserLocalizationTitleCopyrightSurface = 17,
+  kActRaiserLocalizationTownStatusSurface = 18,
 };
 
 typedef struct ActRaiserLocalizationComposeSnapshot {

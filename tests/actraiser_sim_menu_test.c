@@ -1,5 +1,6 @@
 #include "actraiser/actraiser_sim_menu.h"
 #include "actraiser/actraiser_localization_runtime.h"
+#include "sim/menu/sim_menu_localization.h"
 #include "app/settings.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_miracle.h"
@@ -60,10 +61,14 @@ void cpu_write16(CpuState *c, uint8 bank, uint16 address, uint16 value) {
 }
 bool ActRaiserSimMenu_ArtworkAvailable(void) { return artwork; }
 void ActRaiserLocalizationRuntime_ReturnDialogue(void) {}
-bool ActRaiserLocalizationRuntime_BeginMenuHelp(ArDialogueSession *s,
+bool ActRaiserLocalizationRuntime_BeginReadOnlyDialogue(ArDialogueSession *s,
     const char *id, const char *fallback) { (void)s; (void)id; (void)fallback; return false; }
-bool ActRaiserLocalizationRuntime_PrepareMenuHelpStyle(
-    const ArDialoguePageSnapshot *s, const SimMenuHelpPage *p) { (void)s; (void)p; return true; }
+bool SimMenuLocalization_PrepareHelp(
+    const ArDialoguePageSnapshot *s, SimMenuHelpPage *p) { (void)s; (void)p; return true; }
+bool ArTextPresentation_Failed(uint64_t ticket) { (void)ticket; return false; }
+bool ArTextPresentation_PageEnd(uint64_t ticket, uint32_t start, uint32_t *end) {
+  (void)ticket; (void)start; (void)end; return false;
+}
 void ArDialogueSession_Init(ArDialogueSession *s) { memset(s, 0, sizeof(*s)); }
 void ArDialogueSession_Destroy(ArDialogueSession *s) { (void)s; }
 bool ArDialogueSession_GetPage(const ArDialogueSession *s, ArDialoguePageSnapshot *p) {

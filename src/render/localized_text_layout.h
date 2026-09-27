@@ -50,6 +50,12 @@ int ArLocalizedTextLayout_ScrollOffset(
     const ArTextSurface *surface, uint32_t revealed_utf8_bytes,
     int viewport_height, uint32_t *revealed_clusters);
 
+/* Hold complete lines in the viewport until its owner advances page_start.
+ * Uses shaped line metrics, including mixed font sizes and bidi clusters. */
+int ArLocalizedTextLayout_PageOffset(
+    const ArTextSurface *surface, uint32_t page_start, uint32_t text_bytes,
+    int viewport_height, uint32_t *page_end);
+
 /* Uniform key pitch. Fills `out_shifts` with the horizontal shift, in surface
  * pixels, that moves each cluster onto its key's column: the last
  * `trailing_lines` lines are read as rows of `columns` keys, and each key --

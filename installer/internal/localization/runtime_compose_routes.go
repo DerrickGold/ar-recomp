@@ -56,6 +56,8 @@ func nativeComposeKind(id string) string {
 		return "status_master"
 	case "status.report.cities_report", "status.report.score_report":
 		return "status_table"
+	case "sim.town_status.construction", "sim.town_status.sealing_lair":
+		return "town_status"
 	case "system.choice.yes_no":
 		return "flow_choice"
 	case "system.message_speed.scale_labels":

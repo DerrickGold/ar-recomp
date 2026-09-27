@@ -25,8 +25,8 @@ def main():
     catalog_path = (
         ROOT / 'tools/data/localization/semantic-catalog-v1.json')
     catalog = PACK.load_catalog(catalog_path)
-    assert catalog['route_count'] == 531
-    assert catalog['all_release_route_count'] == 472
+    assert catalog['route_count'] == 533
+    assert catalog['all_release_route_count'] == 474
     assert catalog['regional_or_release_variant_route_count'] == 59
     assert catalog['placeholder_count'] == 67
     by_id = {route['id']: route for route in catalog['routes']}

@@ -588,6 +588,40 @@ static void ExerciseScreenDialogue(ArRenderDevice *device) {
         CHECK(prepared.texts[0].surface.key.primary==text.surface.key.primary);
         CHECK(prepared.texts[0].surface.key.secondary==text.surface.key.secondary);
       }
+      /* Overflow uses one page plan for both kinds of dialogue. Even a fully
+       * revealed (instant-speed) source starts at its opening, with each byte
+       * belonging to exactly one acknowledged screenful. */
+      frame.dialogue_ticket=100+page;
+      frame.dialogue_paged=true;
+      unsigned windows=0;
+      while (frame.dialogue_page_start<bytes && windows++<20) {
+        frame.dialogue_surface_id=700;
+        CHECK(ArLocalizedTextPresenter_PrepareScreenText(device,&frame,700,bounds,&prepared));
+        CHECK(prepared.ready_dialogue_ticket==frame.dialogue_ticket);
+        const uint32_t end=prepared.dialogue_page_end;
+        CHECK(end>frame.dialogue_page_start && end<=bytes);
+        if (end<=frame.dialogue_page_start) break;
+        const ArLocalizedPreparedText screen=prepared.texts[0];
+        for (size_t i=0;i<screen.surface.reveal_cluster_count;++i) {
+          const ArTextRevealCluster *cluster=&screen.surface.reveal_clusters[i];
+          if (cluster->end_utf8_byte<=frame.dialogue_page_start ||
+              cluster->end_utf8_byte>end) continue;
+          CHECK(screen.destination.y+cluster->y>=screen.viewport.y);
+          CHECK(screen.destination.y+cluster->y+cluster->height<=
+                screen.viewport.y+screen.viewport.h);
+        }
+        frame.dialogue_surface_id=701;
+        ArLocalizedTextPresenter_Prepare(device,&frame,true,0,32,32,0,0,
+                                         256,224,&chunk,1,&prepared);
+        CHECK(prepared.dialogue_page_end==end);
+        CHECK(prepared.texts[0].destination.y-prepared.texts[0].viewport.y==
+              screen.destination.y-screen.viewport.y);
+        frame.dialogue_page_start=end;
+      }
+      CHECK(frame.dialogue_page_start==bytes);
+      if (page==2) CHECK(windows>1);
+      frame.dialogue_paged=false;
+      frame.dialogue_ticket=0;
       const unsigned uploads=((TextureSink *)device->context)->uploads;
       frame.snapshots[0].revealed_utf8_bytes=1;
       CHECK(ArLocalizedTextPresenter_PrepareScreenText(device,&frame,700,bounds,&prepared));

@@ -16,7 +16,7 @@
 #include "localization/text_cell_record.h"
 #include "localization/text_boundaries.h"
 
-#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(32)
+#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(33)
 
 enum {
   kArLocalizationFrameTextCapacity = 16 * 1024,
@@ -329,6 +329,8 @@ typedef struct ArLocalizationFrame {
    * feedback when the presentation path falls back to native pixels. */
   uint64_t dialogue_ticket;
   uint32_t dialogue_surface_id;
+  uint32_t dialogue_page_start;
+  bool dialogue_paged;
 } ArLocalizationFrame;
 
 void ArLocalizationFrame_Reset(ArLocalizationFrame *frame);

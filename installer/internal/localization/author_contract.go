@@ -68,6 +68,7 @@ type authorRoute struct {
 	Canonical             string                        `json:"canonical_profile"`
 	Anchors               map[string][]string           `json:"anchors"`
 	Presentation          AuthorPresentation            `json:"presentation"`
+	LegacyLayouts         []string                      `json:"legacy_layouts"`
 	PresentationByProfile map[string]AuthorPresentation `json:"presentation_by_profile"`
 }
 
@@ -362,11 +363,10 @@ func ValidateAuthorScripts(profile, coverage string, scripts ...*AuthorScript) (
 		}
 		anchorIndex, yielded := 0, false
 		body := resolved[id]
-		// Early v2 exports incorrectly tagged the three-line title footer as
-		// a single-line label. Keep those packs readable; the route owns layout.
+		// Accept historical declarations from the consuming route's contract;
+		// aliases do not inherit another route's compatibility exceptions.
 		layout := body.message.Appearance.Layout
-		legacyCopyright := id == "title.copyright" && layout == "single_line_label"
-		if layout != "" && layout != route.presentation(profile).Layout && !legacyCopyright {
+		if layout != "" && layout != route.presentation(profile).Layout && !slices.Contains(route.LegacyLayouts, layout) {
 			return zero, authorError(body.path, body.message.SourceLine,
 				"%s requires layout %q, not %q", id, route.presentation(profile).Layout, layout)
 		}

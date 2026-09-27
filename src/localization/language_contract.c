@@ -34,11 +34,16 @@ typedef struct ArGeneratedRoute {
   const char *layout;
 } ArGeneratedRoute;
 
+typedef struct ArGeneratedLegacyLayout {
+  const char *id;
+  const char *layout;
+} ArGeneratedLegacyLayout;
+
 #include "localization/language_contract_data.inc"
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 
-_Static_assert(ARRAY_COUNT(kGeneratedRoutes) == 600,
+_Static_assert(ARRAY_COUNT(kGeneratedRoutes) == 602,
                "v1 semantic route count changed");
 _Static_assert(ARRAY_COUNT(kGeneratedPlaceholders) == 67,
                "v1 placeholder count changed");
@@ -269,6 +274,19 @@ static bool ValidateTable(const ArLanguagePack *pack,
   return CheckTableRow(&scan, id, error);
 }
 
+/* Accept historical declarations without changing the route's placement.
+ * Aliased bodies are checked against the consuming route's contract. */
+static bool LayoutAllowed(const ArGeneratedRoute *route, const char *layout) {
+  if (!layout || !strcmp(layout, route->layout))
+    return true;
+  for (size_t i = 0; kGeneratedLegacyLayouts[i].id; ++i) {
+    const ArGeneratedLegacyLayout *legacy = &kGeneratedLegacyLayouts[i];
+    if (!strcmp(route->id, legacy->id) && !strcmp(layout, legacy->layout))
+      return true;
+  }
+  return false;
+}
+
 static bool ValidateBody(const ArLanguagePack *pack,
                          const ArGeneratedRoute *route,
                          const ArGeneratedContract *contract,
@@ -277,12 +295,7 @@ static bool ValidateBody(const ArLanguagePack *pack,
                          ArLanguagePackError *error) {
   const char *layout =
       body->layout.length ? ArLanguagePack_GetString(pack, body->layout) : NULL;
-  /* Early v2 exporters mislabeled this multiline footer. Accept the old
-   * declaration while the route's corrected presentation owns rendering. */
-  const bool legacy_copyright =
-      layout && !strcmp(route->id, "title.copyright") &&
-      !strcmp(layout, "single_line_label");
-  if (layout && strcmp(layout, route->layout) && !legacy_copyright) {
+  if (!LayoutAllowed(route, layout)) {
     SetError(error, "%s:%u: %s requires layout '%s', not '%s'",
              ArLanguagePack_GetString(pack, body->source_path),
              body->source_line, diagnostic_id, route->layout, layout);

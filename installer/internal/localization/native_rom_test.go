@@ -45,6 +45,12 @@ func TestNativeROMCoverageAndAuthorRuntime(t *testing.T) {
 			if probe != "" {
 				assertAuthorPackRuntime(t, probe, dir, pack)
 			}
+			for _, id := range []string{"sim.town_status.construction", "sim.town_status.sealing_lair"} {
+				ops, err := pack.MessageOperations(id)
+				if err != nil || len(ops) != 2 || ops[0].Op != "text" || ops[0].Value == "" || ops[1].Op != "end" {
+					t.Fatal("town notice is not a complete localized status label", id, err)
+				}
+			}
 			checkNativeROMMutations(t, d)
 			rom[0] ^= 1
 			if _, err := NewDecoder(rom); err == nil {
@@ -97,6 +103,8 @@ func checkNativeROMMutations(t *testing.T, d *Decoder) {
 	}
 	brokenOpcode("interactive-entry", sp.InteractiveEntry)
 	brokenOpcode("composer-entry", sp.ComposerEntry)
+	brokenOpcode("town-status-selector", sp.Flow.TownStatus)
+	brokenOpcode("town-status-blank-branch", sp.Flow.TownStatus+15)
 	census, err := d.DiscoverNativeSources()
 	if err != nil {
 		t.Fatal(err)

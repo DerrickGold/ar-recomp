@@ -10,7 +10,7 @@
 static bool FrameStorageValid(const ArLocalizationFrame *frame) {
   return frame &&
          frame->struct_size >=
-             AR_MEMBER_END(ArLocalizationFrame, dialogue_surface_id) &&
+             AR_MEMBER_END(ArLocalizationFrame, dialogue_paged) &&
          frame->abi_version == AR_LOCALIZATION_FRAME_ABI_VERSION &&
          frame->cells.count <= kArTextCellRecordCapacity &&
          frame->screen_text_count <= kArLocalizationFrameScreenTextCapacity &&
@@ -81,6 +81,8 @@ void ArLocalizationFrame_ReleaseText(ArLocalizationFrame *frame,
   if (frame->dialogue_surface_id == surface_id) {
     frame->dialogue_surface_id = 0;
     frame->dialogue_ticket = 0;
+    frame->dialogue_paged = false;
+    frame->dialogue_page_start = 0;
   }
 }
 
@@ -521,7 +523,8 @@ bool ArLocalizationFrame_IsValid(const ArLocalizationFrame *frame) {
   }
   return !frame->dialogue_ticket ||
       (frame->dialogue_surface_id &&
-       ArTextCellRecordSet_Find(&frame->cells, frame->dialogue_surface_id));
+       (ArTextCellRecordSet_Find(&frame->cells, frame->dialogue_surface_id) ||
+        ArLocalizationFrame_FindScreenText(frame, frame->dialogue_surface_id)));
 }
 
 const ArLocalizationTextRowRule *ArLocalizationGrid_FindRow(

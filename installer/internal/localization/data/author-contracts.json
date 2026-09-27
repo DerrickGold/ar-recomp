@@ -8951,6 +8951,52 @@
         "us": []
       },
       "canonical_profile": "us",
+      "id": "sim.town_status.construction",
+      "legacy_layouts": [
+        "single_line_label"
+      ],
+      "optional": true,
+      "presentation": {
+        "layout": "centered_label",
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
+      "id": "sim.town_status.sealing_lair",
+      "legacy_layouts": [
+        "single_line_label"
+      ],
+      "optional": true,
+      "presentation": {
+        "layout": "centered_label",
+        "maximum_lines": 1,
+        "maximum_pages": 1,
+        "shape": "fixed"
+      },
+      "us_runtime_usage": "live_optional"
+    },
+    {
+      "allowed_placeholders": [],
+      "anchors": {
+        "de": [],
+        "eu-en": [],
+        "fr": [],
+        "jp": [],
+        "us": []
+      },
+      "canonical_profile": "us",
       "id": "sim_sky.hud.angel_label",
       "optional": true,
       "presentation": {
@@ -15845,6 +15891,9 @@
       },
       "canonical_profile": "us",
       "id": "title.copyright",
+      "legacy_layouts": [
+        "single_line_label"
+      ],
       "presentation": {
         "layout": "centered_block",
         "maximum_pages": 1,

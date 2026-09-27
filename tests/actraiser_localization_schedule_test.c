@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "actraiser/actraiser_localization_runtime.h"
+#include "sim/menu/sim_menu_localization.h"
 #include "actraiser/actraiser_hud.h"
 #include "actraiser/actraiser_localization_compose_state.h"
 #include "actraiser/actraiser_localization_text_normalize.h"
@@ -29,6 +30,9 @@ static int s_credits_page = -1;
 int ActRaiserCredits_PresentedPage(void) { return s_credits_page; }
 void ActRaiserCredits_ObserveClear(void) {}
 static bool s_menu_skip, s_menu_describing, s_menu_aborted;
+static bool s_menu_paging;
+static uint32_t s_page_span;
+bool ActRaiserSimMenu_OwnsPresentation(void) { return s_menu_paging; }
 bool ActRaiserSimMenu_SkipDialogue(const CpuState *cpu) { (void)cpu; return s_menu_skip; }
 bool ActRaiserSimMenu_DescriptionAborted(void) { return s_menu_aborted; }
 bool ActRaiserSimMenu_Describing(void) { return s_menu_describing; }
@@ -122,6 +126,8 @@ static void WriteNativeFixture(bool oversized) {
       fputs("Footer first\n@line\nFooter second\n@line\nFooter third\n", file);
     else if (!strcmp(id, "city.fillmore.name"))
       fputs("Town fixture\n", file);
+    else if (!strncmp(id, "sim.town_status.", 16))
+      fprintf(file, "Native %s\n", id);
     else if (!strcmp(id, "action.hud.pause"))
       fputs("Pause fixture\n", file);
     else if (!strcmp(id, "credits.page_01"))
@@ -195,6 +201,19 @@ static void CaptureWithTransform(bool mode7_transformed) {
     s_prefix_seen = true;
   if (strstr(s_frame.text, "Après") && !strstr(s_frame.text, "Avant"))
     s_suffix_seen = true;
+  if (s_menu_paging && s_frame.dialogue_ticket && s_frame.dialogue_paged) {
+    for (unsigned i=0;i<s_frame.snapshot_count;++i) {
+      const ArLocalizationTextSnapshot *text=&s_frame.snapshots[i];
+      if (text->surface_id!=s_frame.dialogue_surface_id) continue;
+      uint32_t end=s_frame.dialogue_page_start+s_page_span;
+      if (end>text->utf8_bytes) end=text->utf8_bytes;
+      CHECK(text->revealed_utf8_bytes<=end);
+      ArTextPresentation_BeginFrame(s_frame.dialogue_ticket);
+      ArTextPresentation_ReportPage(s_frame.dialogue_ticket,s_frame.dialogue_page_start,end);
+      ArTextPresentation_MarkReady(s_frame.dialogue_ticket);
+      ArTextPresentation_EndFrame();
+    }
+  }
 }
 
 static void Capture(void) { CaptureWithTransform(false); }
@@ -553,7 +572,7 @@ static bool BeginNameDialogue(void) {
   ActRaiserLocalizationTextObservation observation = {.struct_size =
                                                           sizeof(observation)};
   CHECK(ActRaiserLocalizationText_CopyObservation(&observation));
-  return ActRaiserLocalizationRuntime_BeginDialogue(&observation);
+  return ActRaiserLocalizationRuntime_BeginDialogue(&observation, false);
 }
 
 static bool FrameHasText(const char *text) {
@@ -677,6 +696,71 @@ static void TestSimulationPause(void) {
   }
   ActRaiserLocalizationRuntime_Shutdown();
   ActRaiserLocalizationText_ResetObservation();
+}
+
+static void TestTownStatusTranslations(void) {
+  FILE *file = fopen(AR_TEST_NATIVE_FIXTURE_DIR "/town.ini", "wb");
+  CHECK(file);
+  if (!file) return;
+  fputs("[pack]\nformat = actraiser-language-pack\nversion = 2\n"
+        "id = test.town-status\nlocale = fr-CA\nname = Town status fixture\n"
+        "autonym = Fixture\nauthor = Tests\nlicense = MIT\n"
+        "direction = ltr\ntarget = us-runtime\nsource_profile = us\n"
+        "fallback = native-us\ncoverage = partial\n"
+        "[fonts]\nprimary = builtin:actraiser-sans\n"
+        "[scripts]\nsource = town.artext\n", file);
+  CHECK(fclose(file) == 0);
+  file = fopen(AR_TEST_NATIVE_FIXTURE_DIR "/town.artext", "wb");
+  CHECK(file);
+  if (!file) return;
+  fputs(":: sim.town_status.construction\n@layout single_line_label\nConstruction traduite\n"
+        ":: sim.town_status.sealing_lair\n@layout single_line_label\nFermeture traduite\n", file);
+  CHECK(fclose(file) == 0);
+  ActRaiserLocalizationRuntime_Shutdown();
+  ActRaiserLocalizationText_ResetObservation();
+  memset(g_ram, 0, sizeof(g_ram));
+  s_installed_pack_path = AR_TEST_NATIVE_FIXTURE_DIR "/town.ini";
+  const uint16_t sources[] = {0xff64, 0xff76};
+  const char *texts[] = {"Construction traduite", "Fermeture traduite"};
+  CpuState notice = {.S = 0x1e0, .DB = 1, .A = 0x0802, .ram = g_ram};
+  cpu_write16(&notice, 0, notice.S + 1, 0x8ca4);
+  cpu_write8(&notice, 0, notice.S + 3, 1);
+  for (unsigned town = 1; town <= 6; ++town) {
+    g_ram[kActRaiserWram_CurrentMap] = town;
+    for (unsigned i = 0; i < 2; ++i) {
+      g_settings.localization_content = 2;
+      g_settings.localization_presentation = 1;
+      notice.Y = sources[i];
+      CHECK(!ActRaiser_LocalizationObserveTextCompose(&notice));
+      Capture();
+      CHECK(FrameHasText(texts[i]));
+      const ArTextCellRecord *record = ArTextCellRecordSet_Find(&s_frame.cells, 18);
+      CHECK(record && 2 * record->region.column + record->region.columns == 32);
+      CHECK(record && s_frame.snapshots[record->snapshot_slot].layout ==
+                          kArLocalizationTextLayout_CenteredLabel);
+      CHECK(!ActRaiserLocalizationRuntime_DialogueScheduled());
+      g_settings.localization_presentation = 0;
+      ActRaiserLocalizationRuntime_ApplySettings();
+      Capture();
+      CHECK(!ArTextCellRecordSet_Find(&s_frame.cells, 18));
+      g_settings.localization_presentation = 1;
+      ActRaiserLocalizationRuntime_ApplySettings();
+      Capture();
+      CHECK(FrameHasText(texts[i]));
+    }
+    /* Blank redraw ends the status without introducing a dialogue or wait. */
+    notice.Y = 0xff8a;
+    CHECK(!ActRaiser_LocalizationObserveTextCompose(&notice));
+    Capture();
+    CHECK(!ArTextCellRecordSet_Find(&s_frame.cells, 18));
+    g_settings.localization_content = 0;
+    ActRaiserLocalizationRuntime_ApplySettings();
+    Capture();
+    CHECK(!ArTextCellRecordSet_Find(&s_frame.cells, 18));
+  }
+  ActRaiserLocalizationRuntime_Shutdown();
+  ActRaiserLocalizationText_ResetObservation();
+  s_installed_pack_path = NULL;
 }
 
 static void TestUnicodeNameHandoff(void) {
@@ -832,7 +916,7 @@ static void TestUnicodeNameHandoff(void) {
         .context_pc24 = 0x0185ca,
         .map_number = kActRaiserNonActionMap_SkyPalace,
     };
-    CHECK(!ActRaiserLocalizationRuntime_BeginDialogue(&accepted));
+    CHECK(!ActRaiserLocalizationRuntime_BeginDialogue(&accepted, false));
     CHECK(s_font_preflights == preflights);
     CHECK(SaveSystem_CopyLocalizedPlayerName("A", name, sizeof(name)));
     CHECK(!strcmp(name, "A"));
@@ -1161,7 +1245,7 @@ static void TestMenuLabelCapacity(void) {
     if (describe) {
       menu.phase=kSimMenu_Describe; menu.return_phase=kSimMenu_Inventory;
     }
-    ActRaiserLocalizationRuntime_CaptureMenuLabels(
+    SimMenuLocalization_CaptureLabels(
         &labels,&source,&menu,palette,4);
     CHECK(labels.snapshot_count==15);
     for (unsigned id=600;id<=615;++id) {
@@ -1177,7 +1261,7 @@ static void TestMenuLabelCapacity(void) {
     CHECK(!memcmp(&source,&before,sizeof(source)));
   }
   menu.phase=kSimMenu_Confirm; menu.category=2; menu.row[2]=2;
-  ActRaiserLocalizationRuntime_CaptureMenuLabels(&labels,&source,&menu,palette,4);
+  SimMenuLocalization_CaptureLabels(&labels,&source,&menu,palette,4);
   CHECK(ArLocalizationFrame_FindScreenText(&labels,603)); /* Sun header */
   CHECK(ArLocalizationFrame_FindScreenText(&labels,609)); /* Yes/No measurement */
   CHECK(!ArLocalizationFrame_FindScreenText(&labels,608)); /* no stale inventory */
@@ -1189,7 +1273,7 @@ static void TestMenuHelp(void) {
     ArDialogueSession session;
     ArDialogueSession_Init(&session);
     const unsigned prior_frames = s_frames, prior_confirms = s_confirms;
-    CHECK(ActRaiserLocalizationRuntime_BeginMenuHelp(&session,
+    CHECK(ActRaiserLocalizationRuntime_BeginReadOnlyDialogue(&session,
         item == 7 ? "sim.help.item.07" : "sim.help.item.08", SimMenuHelp_Item(item)));
     ArDialoguePageSnapshot page;
     CHECK(ArDialogueSession_GetPage(&session, &page));
@@ -1200,18 +1284,19 @@ static void TestMenuHelp(void) {
       do {
         SimMenuHelpPage help;
         CHECK(SimMenuHelp_Build(&help, page.utf8, page.utf8_bytes, start,
-                               page.page_index + 1 < page.page_count));
+                               page.page_index + 1 < page.page_count,true));
         CHECK(help.source_end > start);
-        CHECK(ActRaiserLocalizationRuntime_PrepareMenuHelpStyle(&page, &help));
+        CHECK(SimMenuLocalization_PrepareHelp(&page, &help));
         help.authored_page=page.page_index;
         help.revealed_glyphs=help.glyph_count;
+        help.revealed_bytes=help.bytes;
         snprintf(help.locale,sizeof(help.locale),"%s",page.locale);
         help.direction=kArTextDirection_LeftToRight;
         /* A zero-based first page must survive publication as screen text.
          * The former zero revision / Flow layout silently discarded it. */
         Capture();
         const uint16_t palette[]={0,0,0x7f33,0x7fff};
-        ActRaiserLocalizationRuntime_AppendMenuHelp(&s_frame,&help,palette,4);
+        SimMenuLocalization_AppendHelp(&s_frame,&help,palette,4);
         const ArLocalizationScreenTextRecord *record=
             ArLocalizationFrame_FindScreenText(&s_frame,700);
         CHECK(record != NULL);
@@ -1235,7 +1320,7 @@ static void TestMenuHelp(void) {
       if (!ArDialogueSession_AdvancePage(&session)) break;
       CHECK(ArDialogueSession_GetPage(&session, &page));
     }
-    CHECK(windows > 1);
+    CHECK(windows == page.page_count);
     CHECK(s_frames == prior_frames && s_confirms == prior_confirms);
     ArDialogueSession_Destroy(&session);
   }
@@ -1256,21 +1341,24 @@ static void TestMenuDialogueKinds(void) {
   ActRaiserLocalizationRuntime_Shutdown();
   g_settings.localization_presentation=1;
   g_settings.localization_content=1;
-  for (unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
+  s_menu_paging=true;
+  s_page_span=16;
+  for (unsigned i=0;i<2*sizeof(cases)/sizeof(cases[0]);++i) {
     memset(g_ram,0,sizeof(g_ram));
     g_ram[kActRaiserWram_CurrentMap]=1; /* Fillmore simulation, not title. */
+    g_ram[0x200]=(i%2)*2;
     ActRaiserLocalizationText_ResetObservation();
     s_frames=s_confirms=s_polls=s_native_entries=s_resets=0;
-    s_menu_describing=cases[i].describe;
-    const uint8_t script[]={5,'a',cases[i].selector?1:0};
-    memcpy(s_rom+cases[i].source,script,sizeof(script));
-    CpuState cpu={.Y=cases[i].source,.S=0x1e0,.PB=1,.DB=1,
+    s_menu_describing=cases[i/2].describe;
+    const uint8_t script[]={5,'a',cases[i/2].selector?1:0};
+    memcpy(s_rom+cases[i/2].source,script,sizeof(script));
+    CpuState cpu={.Y=cases[i/2].source,.S=0x1e0,.PB=1,.DB=1,
                   .P=0x20,.m_flag=1,.ram=g_ram};
-    cpu_write16(&cpu,0,cpu.S+1,cases[i].caller-1);
+    cpu_write16(&cpu,0,cpu.S+1,cases[i/2].caller-1);
     CHECK(ActRaiser_LocalizationScheduleEntry(&cpu));
     CHECK(ActRaiser_LocalizationRunDialogue(&cpu)==RECOMP_RETURN_NORMAL);
     CHECK(cpu.S==0x1e2 && s_native_entries==1 && s_resets==1);
-    CHECK(s_confirms==1); /* The added page needs its own acknowledgement. */
+    CHECK(s_confirms==3); /* Two viewport advances plus the authored boundary. */
     Capture();
     CHECK(s_frame.dialogue_ticket && s_frame.dialogue_surface_id);
     bool found=false;
@@ -1284,7 +1372,65 @@ static void TestMenuDialogueKinds(void) {
     }
     CHECK(found);
   }
-  s_menu_describing=false;
+  s_menu_paging=s_menu_describing=false;
+  ActRaiserLocalizationRuntime_Shutdown();
+}
+
+static void RunRainViewport(uint8_t speed) {
+  memset(g_ram,0,sizeof(g_ram));
+  ActRaiserLocalizationText_ResetObservation();
+  s_frames=s_confirms=s_polls=s_native_entries=s_resets=0;
+  g_ram[kActRaiserWram_CurrentMap]=1;
+  g_ram[0x200]=speed;
+  const uint8_t text[]={5,'a',0}; /* No native or authored page break. */
+  memcpy(s_rom+0xfd25,text,sizeof(text));
+  CpuState cpu={.Y=0xfd25,.S=0x1e0,.PB=1,.DB=1,.P=0x20,.m_flag=1,.ram=g_ram};
+  cpu_write16(&cpu,0,cpu.S+1,0x8300);
+  CHECK(ActRaiser_LocalizationScheduleEntry(&cpu));
+  CHECK(ActRaiser_LocalizationRunDialogue(&cpu)==RECOMP_RETURN_NORMAL);
+  CHECK(cpu.S==0x1e2 && s_native_entries==1 && s_resets==1);
+  Capture();
+}
+
+static void CancelViewportPage(void) {
+  if (!ActRaiserLocalizationRuntime_PageConfirmationPending()) return;
+  s_frame_hook=NULL;
+  s_menu_aborted=true;
+}
+
+static void TestMenuViewportPaging(void) {
+  ActRaiserLocalizationRuntime_Shutdown();
+  g_settings.localization_presentation=1;
+  g_settings.localization_content=1;
+  s_menu_paging=s_menu_describing=true;
+  s_first_poll_held=true;
+  for (unsigned speed=0;speed<=2;speed+=2) {
+    s_page_span=16;
+    RunRainViewport(speed);
+    CHECK(s_confirms==2 && s_polls==5); /* held, release/A, release/A */
+    CHECK(s_frame.dialogue_page_start==32);
+    bool found=false;
+    for (unsigned i=0;i<s_frame.snapshot_count;++i) {
+      const ArLocalizationTextSnapshot *page=&s_frame.snapshots[i];
+      if (page->surface_id!=s_frame.dialogue_surface_id) continue;
+      found=true;
+      CHECK(page->revealed_utf8_bytes==page->utf8_bytes);
+      CHECK(strstr(s_frame.text+page->utf8_offset,"First screen. Second screen. Final screen."));
+    }
+    CHECK(found);
+  }
+  s_page_span=256; /* The same controller, without an overflow acknowledgement. */
+  RunRainViewport(0);
+  CHECK(s_confirms==0 && s_polls==0 && s_frame.dialogue_page_start==0);
+  s_page_span=16;
+  s_frame_hook=CancelViewportPage;
+  RunRainViewport(0);
+  CHECK(!s_frame_hook && s_menu_aborted && s_confirms==0);
+  s_menu_aborted=false;
+  s_frame_hook=FailPresentationOnce;
+  RunRainViewport(0);
+  CHECK(!s_frame_hook && !ActRaiserLocalizationRuntime_DialogueScheduled());
+  s_menu_paging=s_menu_describing=s_first_poll_held=false;
   ActRaiserLocalizationRuntime_Shutdown();
 }
 
@@ -1550,11 +1696,13 @@ int main(void) {
   WriteNativeFixture(false);
   TestTitleTransformHandoff();
   TestSimulationPause();
+  TestTownStatusTranslations();
   TestUnicodeNameHandoff();
   TestCreditsWithoutDialogueObservation();
   TestHudSceneParity();
   TestPartialRtlSources();
   TestMenuDialogueKinds();
+  TestMenuViewportPaging();
   TestLegacySelectionGate(pack_host);
   ActRaiserLocalizationRuntime_Shutdown();
   TestNativeMenuContinuation();

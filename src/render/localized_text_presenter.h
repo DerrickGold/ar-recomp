@@ -72,6 +72,7 @@ typedef struct ArLocalizedPreparedFrame {
   int cluster_shifts[kArLocalizedPreparedClusterShiftCapacity];
   size_t cluster_shift_count;
   uint64_t ready_dialogue_ticket;
+  uint32_t dialogue_page_start, dialogue_page_end;
 } ArLocalizedPreparedFrame;
 
 /* Why a live field used the whole-page path. Counts include expected layout

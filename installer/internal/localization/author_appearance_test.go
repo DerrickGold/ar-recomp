@@ -76,6 +76,13 @@ func TestLayoutContractAndAliasCompatibility(t *testing.T) {
 	for _, tc := range []struct{ script, want string }{
 		{":: title.copyright\n@layout centered_block\nFirst\n@line\nSecond\n@end\n", ""},
 		{":: title.copyright\n@layout single_line_label\nFirst\n@line\nSecond\n@end\n", ""},
+		{":: sim.town_status.construction\n@layout single_line_label\nTown notice\n@end\n", ""},
+		{":: sim.town_status.construction\n@layout centered_label\nTown notice\n@end\n", ""},
+		{":: sim.town_status.sealing_lair\n@layout single_line_label\nTown notice\n@end\n", ""},
+		{":: sim.town_status.sealing_lair\n@layout centered_label\nTown notice\n@end\n", ""},
+		{":: sim.town_status.construction\n@layout centered_block\nTown notice\n@end\n", "requires layout \"centered_label\""},
+		{":: sim.town_status.construction\n@layout single_line_label\nTown notice\n@end\n:: sim.town_status.sealing_lair\n@alias sim.town_status.construction\n", ""},
+		{":: sim.town_status.construction\n@layout single_line_label\nTown notice\n@end\n:: action.hud.ready\n@alias sim.town_status.construction\n", "action.hud.ready requires layout \"centered_label\""},
 		{":: title.start_prompt\n@layout centered_block\nStart\n@end\n", "requires layout"},
 		{":: action.hud.ready\n@layout centered_label\nReady\n@end\n:: action.hud.pause\n@alias action.hud.ready\n", ""},
 		{":: action.hud.ready\n@layout mystery\nReady\n@end\n", "requires layout \"centered_label\""},

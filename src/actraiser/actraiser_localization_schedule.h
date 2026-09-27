@@ -10,10 +10,14 @@ typedef struct ActRaiserLocalizationDialogueHost {
   void *context;
   bool (*wait_frame)(void *context);
   bool (*confirm_page)(void *context);
+  /* Optional live input policy, rechecked after yielding to native work. */
+  bool (*cancelled)(void *context);
+  bool (*fast_reveal)(void *context);
 } ActRaiserLocalizationDialogueHost;
 
+/* The caller chooses fixed screenfuls or native retained-row scrolling. */
 bool ActRaiserLocalizationRuntime_BeginDialogue(
-    const ActRaiserLocalizationTextObservation *observation);
+    const ActRaiserLocalizationTextObservation *observation, bool paged);
 /* Game-thread gate: consumes failure feedback for the current window before
  * permitting more authored work. Called again after every yielding callback. */
 bool ActRaiserLocalizationRuntime_DialogueScheduled(void);

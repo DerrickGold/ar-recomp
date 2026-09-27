@@ -92,6 +92,8 @@ func composerRoute(kind string, occurrence int) string {
 		return "status.report." + strings.TrimPrefix(kind, "fixed_composer_dynamic_")
 	case strings.HasPrefix(kind, "fixed_composer_name_entry_"):
 		return "name_entry." + strings.TrimPrefix(kind, "fixed_composer_name_entry_")
+	case strings.HasPrefix(kind, "fixed_composer_flow_town_status_"):
+		return "sim.town_status." + strings.TrimPrefix(kind, "fixed_composer_flow_town_status_")
 	case kind == "fixed_composer_flow_choice_labels":
 		return "system.choice.yes_no"
 	case kind == "fixed_composer_flow_message_speed_scale_labels":

@@ -7,8 +7,7 @@
 #include "localization/localization_frame.h"
 #include "localization/language_pack.h"
 #include "localization/text_presentation.h"
-#include "sim/menu/sim_menu_model.h"
-#include "sim/menu/sim_menu_help.h"
+#include "actraiser/actraiser_localization_resolved_text.h"
 #include "localization/dialogue_session.h"
 
 #define ACTRAISER_LOCALIZATION_PACK_HOST_ABI_VERSION UINT32_C(2)
@@ -72,16 +71,12 @@ void ActRaiserLocalizationRuntime_AppendWorldNavigationLabel(
     bool native_label_visible,
     const uint16_t *cgram_words, size_t cgram_word_count);
 void ActRaiserLocalizationRuntime_Shutdown(void);
-void ActRaiserLocalizationRuntime_CaptureMenuLabels(
-    ArLocalizationFrame *labels, const ArLocalizationFrame *source,
-    const SimMenuModel *menu,
-    const uint16_t *cgram, size_t cgram_count);
-bool ActRaiserLocalizationRuntime_BeginMenuHelp(
+/* Feature owners resolve semantic text without borrowing pack/runtime state. */
+bool ActRaiserLocalizationRuntime_ResolveText(
+    const char *id, ActRaiserResolvedText *text, char *error, size_t capacity);
+/* Read-only dialogue has no gameplay controls or dynamic values. Optional pack
+ * text falls back to the caller's wording, through the same dialogue session. */
+bool ActRaiserLocalizationRuntime_BeginReadOnlyDialogue(
     ArDialogueSession *session, const char *id, const char *fallback);
-void ActRaiserLocalizationRuntime_AppendMenuHelp(
-    ArLocalizationFrame *frame, const SimMenuHelpPage *help,
-    const uint16_t *cgram, size_t cgram_count);
-bool ActRaiserLocalizationRuntime_PrepareMenuHelpStyle(
-    const ArDialoguePageSnapshot *source, const SimMenuHelpPage *help);
 
 #endif /* AR_ACTRAISER_LOCALIZATION_RUNTIME_H */

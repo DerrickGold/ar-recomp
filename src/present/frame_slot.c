@@ -22,6 +22,7 @@
 #include "action/action_bg_tuner.h"
 #include "actraiser_game.h"
 #include "actraiser/actraiser_localization_runtime.h"
+#include "sim/menu/sim_menu_localization.h"
 #include "constants.h"
 #include "actraiser/actraiser_rtl.h"
 #include "snesrecomp/game_runtime.h"
@@ -321,11 +322,11 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
           vram.data, vram.element_count, cgram.data, cgram.element_count,
           mode7_transformed);
       if (dst->sim_menu.valid)
-        ActRaiserLocalizationRuntime_CaptureMenuLabels(
+        SimMenuLocalization_CaptureLabels(
             &dst->sim_menu.label_frame, &dst->localization, &dst->sim_menu.model,
             cgram.data, cgram.element_count);
       if (dst->sim_menu.help.active)
-        ActRaiserLocalizationRuntime_AppendMenuHelp(
+        SimMenuLocalization_AppendHelp(
             &dst->localization,&dst->sim_menu.help,cgram.data,cgram.element_count);
       if (dst->sim.view == kSimView_WorldNavigation &&
           dst->sim.world_navigation_scene.composition.valid &&

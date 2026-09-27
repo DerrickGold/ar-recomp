@@ -3,10 +3,23 @@
 #include <string.h>
 
 bool SimMenuHelp_Build(SimMenuHelpPage *p,const char *s,size_t bytes,
-                       size_t start,bool more_authored_pages) {
+                       size_t start,bool more_authored_pages,bool enhanced) {
   if (!p || !s || start>bytes) return false;
   memset(p, 0, sizeof(*p));
   p->source_start = start;
+  p->enhanced = enhanced;
+  if (enhanced) {
+    if (bytes-start>=sizeof(p->text)) return false;
+    for (size_t at=start,next;at<bytes;at=next)
+      if (!ArUnicodeGrapheme_Next(s,bytes,at,NULL,&next)) return false;
+    p->bytes=bytes-start;
+    memcpy(p->text,s+start,p->bytes);
+    p->text[p->bytes]=0;
+    p->source_end=bytes;
+    p->more=more_authored_pages;
+    p->active=true;
+    return true;
+  }
   unsigned row=0,col=0;
   size_t at=start;
   while(at<bytes && row<6 && p->glyph_count<kSimMenuHelpGlyphs) {
@@ -50,7 +63,7 @@ bool SimMenuHelp_Build(SimMenuHelpPage *p,const char *s,size_t bytes,
   /* Only these added Help pages are automatically divided. Keep a tiny
    * sentence opening (e.g. Wheat's "An") with the rest of its sentence when
    * it overflows the native grid. Authored breaks and all ROM dialogue are
-   * untouched; both renderers still receive one identical source boundary. */
+   * untouched; this branch is only used by the native glyph renderer. */
   if (at<bytes && p->glyph_count>kSimMenuHelpGlyphs*3/4) {
     for (unsigned g=p->glyph_count;g>kSimMenuHelpGlyphs*3/4;--g) {
       const uint32_t scalar=p->scalars[g-1];
@@ -66,9 +79,7 @@ bool SimMenuHelp_Build(SimMenuHelpPage *p,const char *s,size_t bytes,
       break;
     }
   }
-  /* Native tile wrapping decides the shared page boundary, not the enhanced
-   * paragraph's line breaks. Keep the original slice, including only authored
-   * breaks, so proportional fonts can wrap it to their real dialogue width. */
+  /* Keep exact source offsets while the native tile grid wraps glyphs. */
   p->bytes=at-start;
   if(p->bytes>=sizeof(p->text)) return false;
   memcpy(p->text,s+start,p->bytes);

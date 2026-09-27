@@ -1,7 +1,7 @@
 {
   "format": "actraiser-us-runtime-compose-routes",
   "rom_sha256": "b8055844825653210d252d29a2229f9a3e7e512004e83940620173c57d8723f0",
-  "route_count": 91,
+  "route_count": 93,
   "routes": [
     {
       "destination": 2059,
@@ -1254,6 +1254,34 @@
       "source_pc24": "$01:FA9A",
       "surface_id": 9,
       "surface_kind": "flow_speed"
+    },
+    {
+      "destination": 2050,
+      "native_font_pixels": 7,
+      "region": [
+        2,
+        8,
+        28,
+        1
+      ],
+      "semantic_id": "sim.town_status.construction",
+      "source_pc24": "$01:FF64",
+      "surface_id": 18,
+      "surface_kind": "town_status"
+    },
+    {
+      "destination": 2050,
+      "native_font_pixels": 7,
+      "region": [
+        2,
+        8,
+        28,
+        1
+      ],
+      "semantic_id": "sim.town_status.sealing_lair",
+      "source_pc24": "$01:FF76",
+      "surface_id": 18,
+      "surface_kind": "town_status"
     },
     {
       "destination": 2059,

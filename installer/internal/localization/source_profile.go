@@ -45,6 +45,7 @@ type sourceGroup struct {
 	Count int    `json:"count"`
 }
 type sourceFlow struct {
+	TownStatus       int   `json:"town_status"`
 	SelectorCall     int   `json:"selector_call"`
 	SampleCall       int   `json:"sample_call"`
 	ChoiceYieldCall  *int  `json:"choice_yield_call"`

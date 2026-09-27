@@ -254,6 +254,12 @@ bool ActRaiserLocalizationComposeState_Process(
       observation->caller_pc24 == UINT32_C(0x029860) &&
       observation->destination == UINT16_C(0x080B))
     ClearSurface(state, kActRaiserLocalizationSoundTestSurface);
+  /* Timed town notices end by composing the shared blank descriptor. Retire
+   * its identity too, so toggling fonts cannot revive an expired notice. */
+  if (observation->source_pc24 == UINT32_C(0x01FF8A) &&
+      observation->caller_pc24 == UINT32_C(0x018CA5) &&
+      observation->destination == UINT16_C(0x0802))
+    ClearSurface(state, kActRaiserLocalizationTownStatusSurface);
   const ActRaiserLocalizationComposeRoute *route =
       ActRaiserLocalizationRoute_ResolveCompose(observation);
   if (!route || !resolve_text) return true;

@@ -51,23 +51,25 @@ type iconPart struct {
 }
 
 type decoderProfile struct {
-	ID                   string            `json:"id"`
-	Locale               string            `json:"locale"`
-	Label                string            `json:"label"`
-	SHA256               string            `json:"-"`
-	Encoding             string            `json:"encoding"`
-	Dictionary           int               `json:"dictionary"`
-	FullEntrySeparator   string            `json:"interactive_full_entry_separator"`
-	Glyphs               map[byte]string   `json:"glyphs"`
-	Icons                map[byte]iconPart `json:"icons"`
-	NumberSemantics      map[string]string `json:"number_semantics"`
-	IndexedTextSemantics map[string]string `json:"indexed_text_semantics"`
-	NamePrefix           *int              `json:"name_prefix"`
-	NameSeparator        string            `json:"name_separator"`
-	PopulationSource     *int              `json:"population_source"`
-	PopulationCodes      [2]byte           `json:"population_codes"`
-	SpeedCodes           [2]byte           `json:"speed_codes"`
-	SpeedSourceCall      *int              `json:"speed_source_call"`
+	ID                 string          `json:"id"`
+	Locale             string          `json:"locale"`
+	Label              string          `json:"label"`
+	SHA256             string          `json:"-"`
+	Encoding           string          `json:"encoding"`
+	Dictionary         int             `json:"dictionary"`
+	FullEntrySeparator string          `json:"interactive_full_entry_separator"`
+	Glyphs             map[byte]string `json:"glyphs"`
+	// Fixed notices can use scene-font tiles that differ from dialogue glyphs.
+	FixedGlyphOverrides  map[int]map[byte]string `json:"fixed_glyph_overrides"`
+	Icons                map[byte]iconPart       `json:"icons"`
+	NumberSemantics      map[string]string       `json:"number_semantics"`
+	IndexedTextSemantics map[string]string       `json:"indexed_text_semantics"`
+	NamePrefix           *int                    `json:"name_prefix"`
+	NameSeparator        string                  `json:"name_separator"`
+	PopulationSource     *int                    `json:"population_source"`
+	PopulationCodes      [2]byte                 `json:"population_codes"`
+	SpeedCodes           [2]byte                 `json:"speed_codes"`
+	SpeedSourceCall      *int                    `json:"speed_source_call"`
 }
 
 //go:embed data/decoder-profiles.json
@@ -227,6 +229,13 @@ func (w *recordWriter) operation(op Operation) {
 
 func (w *recordWriter) glyph(code byte) {
 	profile := w.decoder.profile
+	if w.consumer == FixedComposer {
+		if character, ok := profile.FixedGlyphOverrides[w.start][code]; ok {
+			w.flushGlyphs()
+			w.text = append(w.text, character)
+			return
+		}
+	}
 	icon, isIcon := profile.Icons[code]
 	if w.consumer == FixedComposer {
 		for i := 0; i < 2; i++ {

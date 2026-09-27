@@ -109,6 +109,31 @@ bool ArLocalizedTextLayout_NameUnderline(
   return true;
 }
 
+int ArLocalizedTextLayout_PageOffset(
+    const ArTextSurface *surface, uint32_t page_start, uint32_t text_bytes,
+    int viewport_height, uint32_t *page_end) {
+  *page_end = text_bytes;
+  if (!surface || !surface->reveal_clusters || viewport_height <= 0) return 0;
+  size_t first = 0;
+  while (first < surface->reveal_cluster_count &&
+         surface->reveal_clusters[first].end_utf8_byte <= page_start) ++first;
+  if (first == surface->reveal_cluster_count) return 0;
+  const ArTextRevealCluster *start = &surface->reveal_clusters[first];
+  const int top = (size_t)start->line_index < surface->line_count
+      ? surface->lines[start->line_index].top : start->y;
+  for (size_t i = first; i < surface->reveal_cluster_count; ++i) {
+    const ArTextRevealCluster *cluster = &surface->reveal_clusters[i];
+    const int bottom = (size_t)cluster->line_index < surface->line_count
+        ? surface->lines[cluster->line_index].top + surface->lines[cluster->line_index].height
+        : cluster->y + cluster->height;
+    if (cluster->line_index != start->line_index && bottom - top > viewport_height) {
+      *page_end = i ? surface->reveal_clusters[i - 1].end_utf8_byte : page_start;
+      break;
+    }
+  }
+  return top;
+}
+
 int ArLocalizedTextLayout_ScrollOffset(
     const ArTextSurface *surface, uint32_t revealed_utf8_bytes,
     int viewport_height, uint32_t *revealed_clusters) {

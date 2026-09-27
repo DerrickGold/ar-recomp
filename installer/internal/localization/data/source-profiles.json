@@ -51,7 +51,8 @@
       "choice_load_sites": [],
       "choice_yield_call": 101435,
       "sample_call": 101236,
-      "selector_call": 101154
+      "selector_call": 101154,
+      "town_status": 106708
     },
     "groups": [
       {
@@ -262,7 +263,8 @@
       "choice_load_sites": [],
       "choice_yield_call": 101435,
       "sample_call": 101236,
-      "selector_call": 101154
+      "selector_call": 101154,
+      "town_status": 106708
     },
     "groups": [
       {
@@ -453,7 +455,8 @@
       ],
       "choice_yield_call": null,
       "sample_call": 101131,
-      "selector_call": 101049
+      "selector_call": 101049,
+      "town_status": 106659
     },
     "groups": [
       {
@@ -683,7 +686,8 @@
       "choice_load_sites": [],
       "choice_yield_call": 101435,
       "sample_call": 101236,
-      "selector_call": 101154
+      "selector_call": 101154,
+      "town_status": 106708
     },
     "groups": [
       {
@@ -894,7 +898,8 @@
       "choice_load_sites": [],
       "choice_yield_call": 101435,
       "sample_call": 101236,
-      "selector_call": 101154
+      "selector_call": 101154,
+      "town_status": 106708
     },
     "groups": [
       {

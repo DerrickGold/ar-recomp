@@ -130,5 +130,9 @@ func (s *sourceDiscovery) composerFlows(calls []int) ([]IRObject, error) {
 	if err := s.reference(choice, "fixed_composer_flow_choice_labels", provenance, "via_call_site"); err != nil {
 		return nil, err
 	}
-	return rows, nil
+	notices, err := s.townStatusFlows(calls)
+	if err != nil {
+		return nil, err
+	}
+	return append(rows, notices...), nil
 }

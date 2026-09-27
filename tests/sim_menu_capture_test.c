@@ -53,6 +53,10 @@ static void Capture(const SnesRunnerApi *view) {
   SimMenu_CaptureFrame(&frame, view, runner);
   assert(!memcmp(&frame.help, &help, sizeof(help)));
   assert(frame.scale_percent == 125);
+  assert(frame.preserved_bg3_region.column == 2);
+  assert(frame.preserved_bg3_region.row == 8);
+  assert(frame.preserved_bg3_region.columns == 28);
+  assert(frame.preserved_bg3_region.rows == 1);
 }
 
 int main(void) {

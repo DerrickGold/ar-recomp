@@ -133,17 +133,15 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
 
 ArRenderRectI PresentFrame(const FrameSlot *slot, float alpha,
                            double presentation_fps) {
-  /* Navigation and neutral Help replace the preceding native dialogue just
-   * as a handoff hides an answered question. Native cleanup can retain its
+  /* Navigation replaces the preceding dialogue just as a handoff hides an
+   * answered question. Native cleanup can retain its
    * old ticket; only phases that actually present that dialogue must report
    * to its scheduler. Hardware blanking/fades are also intentional. */
   const bool menu_hides_dialogue = slot && slot->sim_menu.valid &&
       (slot->sim_menu.model.phase == kSimMenu_Handoff ||
        slot->sim_menu.model.phase == kSimMenu_Opening ||
        slot->sim_menu.model.phase == kSimMenu_Browse ||
-       slot->sim_menu.model.phase == kSimMenu_Inventory ||
-       (slot->sim_menu.model.phase == kSimMenu_Describe &&
-        slot->sim_menu.help.active));
+       slot->sim_menu.model.phase == kSimMenu_Inventory);
   const bool visible =
       slot && !(slot->inidisp & 0x80) && (slot->inidisp & 0x0f) &&
       !menu_hides_dialogue;

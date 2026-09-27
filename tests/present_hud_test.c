@@ -27,6 +27,11 @@ static bool menu_active;
 bool PresentSimMenu_Active(const FrameSlot *frame) { (void)frame; return menu_active; }
 void SessionFatal_Request(const char *format, ...) { assert(format); backend.fatals++; }
 void ArTextPresentation_MarkReady(uint64_t ticket) { assert(ticket == 42); backend.ready++; }
+void ArTextPresentation_ReportPage(uint64_t ticket, uint32_t start, uint32_t end) {
+  (void)ticket;
+  (void)start;
+  (void)end;
+}
 void ArLocalizedTextPresenter_Reset(ArRenderDevice *device) {
   assert(device == &s_device);
   backend.text_resets++;
@@ -297,13 +302,22 @@ int main(void) {
   slot.bg3_state_valid=true;
   slot.bg3_tilemap_width_tiles=slot.bg3_tilemap_height_tiles=32;
   slot.overlay_captures[kFrameSlotOverlay_Bg3].y1=224;
+  assert(PresentHud_BuildChunks(&slot, viewport, chunks)==6);
+  slot.sim_menu.preserved_bg3_region=(ArTextCellRegion){2,8,28,1};
   assert(PresentHud_BuildChunks(&slot, viewport, chunks)==7);
   assert(chunks[6].screen_source.x==16 && chunks[6].screen_source.y==63);
-  assert(chunks[6].screen_source.w==216 && chunks[6].screen_source.h==8);
+  assert(chunks[6].screen_source.w==224 && chunks[6].screen_source.h==8);
+  assert(chunks[6].output_destination.x + chunks[6].output_destination.w / 2 ==
+         viewport.x + viewport.w / 2);
   assert(chunks[6].texture_source.x==144); /* Texture widescreen padding. */
   slot.bg3_vscroll=252; /* Native -4 scroll still follows its own status row. */
   assert(PresentHud_BuildChunks(&slot, viewport, chunks)==7);
   assert(chunks[6].screen_source.y==67);
+  /* Projection follows captured ownership, never an embedded game region. */
+  slot.sim_menu.preserved_bg3_region=(ArTextCellRegion){4,10,24,1};
+  assert(PresentHud_BuildChunks(&slot, viewport, chunks)==7);
+  assert(chunks[6].screen_source.x==32 && chunks[6].screen_source.y==83);
+  assert(chunks[6].screen_source.w==192 && chunks[6].screen_source.h==8);
   slot.bg3_state_valid=false;
   slot.bg3_vscroll=0;
   slot.overlay_captures[kFrameSlotOverlay_Bg3].y1=64;

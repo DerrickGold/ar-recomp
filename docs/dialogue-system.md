@@ -170,6 +170,34 @@ Menus/reports contain fixed rows, blank rows, independent number fields,
 rules, and pictograms. Do not reflow them as ordinary prose. Specific native
 facts include:
 
+- Town construction and lair sealing are **timed fixed text**, not interactive
+  dialogue: `sim.town_status.construction` and `sim.town_status.sealing_lair`.
+  `$01:A0C7` selects their descriptors and calls the shared composer through
+  `$01:8C98`. USA sources `$01:FF64/$01:FF76` share surface 18 at BG3
+  column 2, row 8, width 28, height 1. The extra blank column balances the
+  side margins; `centered_label` centers each notice on the screen. `$01:FF8A`
+  composes spaces to dismiss them; the compose-state owner retires both active and dormant replacements.
+  Follow `installer/internal/localization/source_town_status.go` for regional
+  extraction proofs, the semantic contract for label fitting, and
+  `src/actraiser/actraiser_localization_compose_state.c` for lifetime. The
+  existing HUD chunk carries the same cell ownership in both menu styles.
+  Change native bounds in
+  `installer/internal/localization/data/us-compose-surfaces.json`, refresh the
+  address-only composer manifest, then run
+  `tools/generate_actraiser_localization_compose_routes.py` to generate the
+  shared region definitions used by composer routes and SIM menu capture.
+  `SimMenuFrame.preserved_bg3_region` carries those bounds to HUD projection,
+  including when enhanced text is disabled; the renderer needs no game data.
+  Japanese notice sources have scene-font glyph overrides, distinct from the
+  dialogue alphabet; regional row wrapping is flattened during source import.
+  Native-pack preparation supplements newly discovered routes without
+  replacing existing messages. Older community packs may omit these optional
+  routes and use the upgraded native fallback.
+  Historical layout declarations belong in each semantic route's
+  `legacy_layouts` in `tools/data/localization/semantic-catalog-v1.json`.
+  Run `tools/generate_language_contract_data.py` to update both runtime and
+  authoring validators; the canonical `presentation.layout` still controls
+  rendering. An alias uses the consuming route's compatibility rules.
 - The selected-town HUD label is composed at packed destination `$0106`:
   column 6, row 1. Its replacement owns **12 columns and one row**, not two.
   Row 2 is the live angel-health bar. The USA non-action path in `$02:C206`
@@ -274,3 +302,21 @@ tests A bit `$40` before proceeding. `$8CCE` clears command text.
 Native scrolling can remove early lines from BG3 while the same logical page
 is still active. The visible tile rows therefore do not always contain the
 complete page; Progress Log can scroll its salutation and first line away.
+
+## Runtime ownership
+
+Modern menu labels and help are captured by `src/sim/menu/sim_menu_localization.c`.
+It resolves semantic text through the localization runtime's owned-result API;
+it does not borrow packs or runtime state. `BeginReadOnlyDialogue` creates the
+same `ArDialogueSession` used by native-backed prose, with no gameplay controls.
+
+`src/localization/dialogue_pager.c` owns measured screenful progression for both
+paths: wait for a successfully drawn boundary, reveal to that boundary, accept a
+fresh acknowledgement, then await the next measurement. Authored pages remain
+owned by `ArDialogueSession`. Font shaping and complete-line measurement remain
+in `src/render/localized_text_layout.c` and `localized_text_presenter.c`.
+
+The native execution adapter (`actraiser_localization_schedule.c`) supplies
+paging, cancellation and fast-reveal policy. The localization runtime does not
+query SIM menu state. Original retained-row dialogue keeps its native policy;
+modern menu prose opts into measured screenfuls.

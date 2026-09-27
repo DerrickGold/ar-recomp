@@ -1,5 +1,5 @@
 {
-  "all_release_route_count": 472,
+  "all_release_route_count": 474,
   "format": "actraiser-language-semantic-catalog",
   "identity": "logical_consumer_route",
   "us_runtime_coverage": {
@@ -71,7 +71,9 @@
       "credits.page_12",
       "credits.page_13",
       "credits.page_14",
-      "world_map.location_label"
+      "world_map.location_label",
+      "sim.town_status.construction",
+      "sim.town_status.sealing_lair"
     ],
     "dormant": [
       "credits.special_mode",
@@ -249,7 +251,7 @@
     "fr",
     "jp"
   ],
-  "route_count": 531,
+  "route_count": 533,
   "optional_routes": [
     {
       "allowed_placeholders": [],
@@ -26720,6 +26722,126 @@
       }
     },
     {
+      "id": "sim.town_status.construction",
+      "legacy_layouts": ["single_line_label"],
+      "availability": "all_supported_releases",
+      "available_releases": [
+        "us",
+        "eu-en",
+        "de",
+        "fr",
+        "jp"
+      ],
+      "canonical_contract_profile": "us",
+      "allowed_placeholders": [],
+      "contracts": {
+        "us": {
+          "placeholders_used": [],
+          "required_anchors": [],
+          "native_authored_page_count": 1,
+          "native_operation_count": 2
+        },
+        "eu-en": {
+          "placeholders_used": [],
+          "required_anchors": [],
+          "native_authored_page_count": 1,
+          "native_operation_count": 2
+        },
+        "de": {
+          "placeholders_used": [],
+          "required_anchors": [],
+          "native_authored_page_count": 1,
+          "native_operation_count": 2
+        },
+        "fr": {
+          "placeholders_used": [],
+          "required_anchors": [],
+          "native_authored_page_count": 1,
+          "native_operation_count": 2
+        },
+        "jp": {
+          "placeholders_used": [],
+          "required_anchors": [],
+          "native_authored_page_count": 1,
+          "native_operation_count": 2
+        }
+      },
+      "source_categories": {
+        "us": "fixed_composer_text",
+        "eu-en": "fixed_composer_text",
+        "de": "fixed_composer_text",
+        "fr": "fixed_composer_text",
+        "jp": "fixed_composer_text"
+      },
+      "optional": true,
+      "presentation": {
+        "layout": "centered_label",
+        "shape": "fixed",
+        "maximum_pages": 1,
+        "maximum_lines": 1
+      }
+    },
+    {
+      "id": "sim.town_status.sealing_lair",
+      "legacy_layouts": ["single_line_label"],
+      "availability": "all_supported_releases",
+      "available_releases": [
+        "us",
+        "eu-en",
+        "de",
+        "fr",
+        "jp"
+      ],
+      "canonical_contract_profile": "us",
+      "allowed_placeholders": [],
+      "contracts": {
+        "us": {
+          "placeholders_used": [],
+          "required_anchors": [],
+          "native_authored_page_count": 1,
+          "native_operation_count": 2
+        },
+        "eu-en": {
+          "placeholders_used": [],
+          "required_anchors": [],
+          "native_authored_page_count": 1,
+          "native_operation_count": 2
+        },
+        "de": {
+          "placeholders_used": [],
+          "required_anchors": [],
+          "native_authored_page_count": 1,
+          "native_operation_count": 2
+        },
+        "fr": {
+          "placeholders_used": [],
+          "required_anchors": [],
+          "native_authored_page_count": 1,
+          "native_operation_count": 5
+        },
+        "jp": {
+          "placeholders_used": [],
+          "required_anchors": [],
+          "native_authored_page_count": 1,
+          "native_operation_count": 2
+        }
+      },
+      "source_categories": {
+        "us": "fixed_composer_text",
+        "eu-en": "fixed_composer_text",
+        "de": "fixed_composer_text",
+        "fr": "fixed_composer_text",
+        "jp": "fixed_composer_text"
+      },
+      "optional": true,
+      "presentation": {
+        "layout": "centered_label",
+        "shape": "fixed",
+        "maximum_pages": 1,
+        "maximum_lines": 1
+      }
+    },
+    {
       "allowed_placeholders": [],
       "availability": "all_supported_releases",
       "available_releases": [
@@ -46372,6 +46494,7 @@
         }
       },
       "id": "title.copyright",
+      "legacy_layouts": ["single_line_label"],
       "presentation": {
         "layout": "centered_block",
         "maximum_pages": 1,

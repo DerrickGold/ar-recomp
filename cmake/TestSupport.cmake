@@ -23,6 +23,8 @@ ar_test_support(actraiser_scene_math_test_support
     src/render/scene3d_math.c)
 
 ar_test_support(actraiser_text_test_support
+    src/localization/dialogue_pager.c
+    src/localization/text_presentation.c
     src/localization/unicode_grapheme.c
     src/localization/text_backend.c
     src/localization/text_rasterizer.c

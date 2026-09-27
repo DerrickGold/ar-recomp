@@ -6,6 +6,7 @@
 #include "app/settings.h"
 #include "actraiser/actraiser_localization_schedule.h"
 #include "actraiser/actraiser_localization_runtime.h"
+#include "sim/menu/sim_menu_localization.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_miracle.h"
 #include "snesrecomp/game/trace.h"
@@ -245,15 +246,26 @@ static void PaintHelp(CpuState *c) {
     cpu_write16(c,0x7f,0xb4ca+s_help.row[g]*64+s_help.column[g]*2,
                  0x2000 | (scalar>=32 && scalar<128?scalar:'?'));
   }
-  cpu_write16(c,0x7f,0xb674,
-      s_help.more && s_help.revealed_glyphs==s_help.glyph_count?0x205f:0x2020);
+  cpu_write16(c,0x7f,0xb660,
+      s_help.pager.state==kArDialoguePage_AwaitingInput ||
+          (s_help.more && s_help.revealed_bytes==s_help.bytes)
+          ?0x205f:0x2020);
   cpu_write8(c,0,0xf1,cpu_read8(c,0,0xf1)+1);
+}
+
+static void RevealHelp(const ArDialoguePageSnapshot *page) {
+  while(s_help.revealed_glyphs<s_help.glyph_count &&
+        s_help.source_ends[s_help.revealed_glyphs]<=page->revealed_utf8_bytes)
+    ++s_help.revealed_glyphs;
+  s_help.revealed_bytes=page->revealed_utf8_bytes>s_help.source_start
+      ? page->revealed_utf8_bytes-s_help.source_start : 0;
+  if (s_help.revealed_bytes>s_help.bytes) s_help.revealed_bytes=s_help.bytes;
 }
 
 static void DescribeNeutral(CpuState *c, const char *id,const char *fallback) {
   ArDialogueSession session;
   ArDialogueSession_Init(&session);
-  if(!ActRaiserLocalizationRuntime_BeginMenuHelp(&session,id,fallback)) return;
+  if(!ActRaiserLocalizationRuntime_BeginReadOnlyDialogue(&session,id,fallback)) return;
   Call(c,bank_01_8CCE_M1X0,0,0,0,0x82f8);
   size_t start = 0;
   unsigned page_index = 0, delay = 0;
@@ -262,23 +274,32 @@ static void DescribeNeutral(CpuState *c, const char *id,const char *fallback) {
   ArLanguagePackError error={{0}};
   while(s_menu.phase==kSimMenu_Describe) {
     if(!ArDialogueSession_GetPage(&session,&page)) break;
+    const bool enhanced=g_settings.localization_presentation!=0;
+    if (!build && s_help.enhanced!=enhanced) {
+      start=s_help.source_start+s_help.pager.start;
+      build=true;
+    }
     if(build) {
       if(!SimMenuHelp_Build(&s_help,page.utf8,page.utf8_bytes,start,
-                            page_index+1<page.page_count)) break;
+                            page_index+1<page.page_count,enhanced)) break;
       s_help.authored_page=page_index;
       snprintf(s_help.locale,sizeof(s_help.locale),"%s",page.locale?page.locale:"en-US");
       s_help.direction=page.direction==kArLanguageDirection_RightToLeft?
           kArTextDirection_RightToLeft:
           page.direction==kArLanguageDirection_LeftToRight?
               kArTextDirection_LeftToRight:kArTextDirection_Auto;
-      if (!ActRaiserLocalizationRuntime_PrepareMenuHelpStyle(&page, &s_help)) break;
+      if (!SimMenuLocalization_PrepareHelp(&page, &s_help)) break;
       build = false;
       complete = false;
       fast = false;
       SimMenuModel_ReleaseBarrier(&s_menu);
     }
+    RevealHelp(&page);
     const unsigned speed = cpu_read8(c, 0, 0x0200);
-    if(!complete && (!delay || fast || !speed)) {
+    const ArDialoguePageState page_state=ArDialoguePager_Update(
+        &s_help.pager,s_help.bytes,s_help.revealed_bytes);
+    if (page_state==kArDialoguePage_Failed) break;
+    if(!complete && page_state==kArDialoguePage_Revealing && (!delay || fast || !speed)) {
       do {
         ArDialogueToken token;
         if(!ArDialogueSession_Next(&session,&token,&error)) goto finished;
@@ -288,15 +309,15 @@ static void DescribeNeutral(CpuState *c, const char *id,const char *fallback) {
         }
         if(token.kind==kArDialogueToken_Control) goto finished;
         if(!ArDialogueSession_GetPage(&session,&page)) goto finished;
-        while(s_help.revealed_glyphs<s_help.glyph_count &&
-              s_help.source_ends[s_help.revealed_glyphs]<=page.revealed_utf8_bytes)
-          ++s_help.revealed_glyphs;
-        complete=s_help.revealed_glyphs==s_help.glyph_count &&
+        RevealHelp(&page);
+        complete=s_help.revealed_bytes==s_help.bytes &&
             s_help.source_end<page.utf8_bytes;
         if(token.kind==kArDialogueToken_PageComplete || token.kind==kArDialogueToken_End)
           complete=true;
+        ArDialoguePager_Update(&s_help.pager,s_help.bytes,s_help.revealed_bytes);
         if(token.kind==kArDialogueToken_Blocked) break;
-      } while((fast || !speed) && !complete);
+      } while((fast || !speed) && !complete &&
+              s_help.pager.state!=kArDialoguePage_AwaitingInput);
       delay=speed;
     }
     PaintHelp(c);
@@ -304,6 +325,11 @@ static void DescribeNeutral(CpuState *c, const char *id,const char *fallback) {
     if(delay) --delay;
     ArDialogueSession_TickWait(&session,1);
     if(event!=kSimMenuEvent_Advance) continue;
+    if(ArDialoguePager_Advance(&s_help.pager,s_help.pager.ticket)) {
+      fast=false;
+      SimMenuModel_ReleaseBarrier(&s_menu);
+      continue;
+    }
     if(!complete) {fast=true;continue;}
     if(s_help.source_end<page.utf8_bytes) start=s_help.source_end;
     else if(page_index+1<page.page_count) {

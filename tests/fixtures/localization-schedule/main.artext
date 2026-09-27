@@ -1,4 +1,8 @@
 # Original test wording; no retail text or assets.
+:: sim.miracle.rain.description
+@anchor reset_text_cursor.00
+First screen. Second screen. Final screen.
+
 :: sim.miracle.sun.description
 @anchor reset_text_cursor.00
 Menu dialogue first page.

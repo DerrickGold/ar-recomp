@@ -719,6 +719,12 @@ def fixed_table_operations(operations, semantic_id):
     Retail report rows have verified roles. Only this source-conversion step
     interprets their padding. Runtime authors can freely use spaces in cells.
     """
+    if semantic_id.startswith('sim.town_status.'):
+        if any(op['op'] not in ('text', 'line', 'end') for op in operations):
+            return operations
+        text = ''.join(op['value'] if op['op'] == 'text' else
+                       ' ' if op['op'] == 'line' else '' for op in operations)
+        return [{'op': 'text', 'value': ' '.join(text.split())}, {'op': 'end'}]
     if semantic_id == 'system.message_speed.scale_labels':
         result = [dict(operation) for operation in operations]
         if result and result[0]['op'] == 'text':

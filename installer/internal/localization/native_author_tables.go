@@ -5,6 +5,21 @@ import "strings"
 // Only verified native report roles interpret padding as columns. Authored
 // translations use explicit cell separators; runtime never splits their words.
 func nativeAuthorTable(ops []AuthorOperation, id string) []AuthorOperation {
+	if strings.HasPrefix(id, "sim.town_status.") {
+		// Regional ROMs wrap this timed notice differently. The runtime has
+		// one status row, so preserve every word and let its label fitter size it.
+		var text strings.Builder
+		for _, op := range ops {
+			if op.Op == "text" {
+				text.WriteString(op.Value)
+			} else if op.Op == "line" {
+				text.WriteByte(' ')
+			} else if op.Op != "end" {
+				return ops // Never discard an unexpected authored control.
+			}
+		}
+		return []AuthorOperation{{Op: "text", Value: strings.Join(strings.FieldsFunc(text.String(), sourceSpace), " ")}, {Op: "end"}}
+	}
 	if id == "sound_test.menu.labels" {
 		var out []AuthorOperation
 		for _, op := range ops {

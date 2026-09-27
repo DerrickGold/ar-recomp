@@ -6177,6 +6177,36 @@
     },
     {
       "us_runtime_usage": "live_optional",
+      "id": "sim.town_status.construction",
+      "placeholders": [],
+      "anchors": [],
+      "native_in_profile": true,
+      "required_for_complete": false,
+      "presentation": {
+        "layout": "centered_label",
+        "shape": "fixed",
+        "maximum_pages": 1,
+        "maximum_lines": 1,
+        "required_nonempty_lines": 0
+      }
+    },
+    {
+      "us_runtime_usage": "live_optional",
+      "id": "sim.town_status.sealing_lair",
+      "placeholders": [],
+      "anchors": [],
+      "native_in_profile": true,
+      "required_for_complete": false,
+      "presentation": {
+        "layout": "centered_label",
+        "shape": "fixed",
+        "maximum_pages": 1,
+        "maximum_lines": 1,
+        "required_nonempty_lines": 0
+      }
+    },
+    {
+      "us_runtime_usage": "live_optional",
       "id": "sim_sky.hud.angel_label",
       "placeholders": [],
       "anchors": [],

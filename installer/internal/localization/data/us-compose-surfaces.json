@@ -197,5 +197,11 @@
       1
     ],
     "surface_id": 14
+  },
+  "town_status": {
+    "destination": 2050,
+    "native_font_pixels": 7,
+    "region": [2, 8, 28, 1],
+    "surface_id": 18
   }
 }

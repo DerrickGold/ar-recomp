@@ -173,14 +173,15 @@ int PresentHud_BuildChunks(const FrameSlot *slot, ArRenderRectI viewport,
                            HudPresentationChunk chunks[kHudPresentationChunkCapacity]) {
   const HudProjectionInputs in = BuildProjectionInputs(slot);
   int count = ArHudLayout_BuildPresentationChunks(viewport, &in, chunks);
-  /* $01:A0C7 writes the construction/lair notice independently of the menu
-   * into BG3 row 8, columns 2..28. Modern menus hide the other body rows,
-   * but this live town status must survive targeting and action handoffs. */
+  /* Town notices survive modern-menu targeting and action handoffs, even
+   * without enhanced text. Project the native composer's shared bounds so
+   * the preserved BG3 strip and localized replacement always line up. */
   if (PresentSimMenu_Active(slot) && slot->bg3_state_valid &&
       slot->visible_width > 0 && slot->snes_height > 0) {
     ArRenderRectI regions[kArTextCellMaximumProjectedRegions];
     const size_t region_count = ArTextCellComposite_ProjectRegion(
-        (ArTextCellRegion){2,8,27,1}, slot->bg3_tilemap_width_tiles,
+        slot->sim_menu.preserved_bg3_region,
+        slot->bg3_tilemap_width_tiles,
         slot->bg3_tilemap_height_tiles, slot->bg3_hscroll, slot->bg3_vscroll,
         256, slot->snes_height, regions);
     const double sx=(double)viewport.w/slot->visible_width;
@@ -349,8 +350,11 @@ void PresentHud_DrawComposited(ArRenderDevice *device, const FrameSlot *slot,
   };
   if (ArRenderDevice_DrawTextureWithState(
           device, composite, NULL, &destination, &over)) {
-    if (localized_drawn)
+    if (localized_drawn) {
+      ArTextPresentation_ReportPage(localized.ready_dialogue_ticket,
+          localized.dialogue_page_start,localized.dialogue_page_end);
       ArTextPresentation_MarkReady(localized.ready_dialogue_ticket);
+    }
   } else {
     PresentHudChunksDirect(device, slot, viewport);
   }

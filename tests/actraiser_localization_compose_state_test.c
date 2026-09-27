@@ -807,7 +807,43 @@ static void TestRegionalSpeedRange(void) {
   CHECK(!ActRaiserLocalizationComposeState_SetMessageSpeedMaximum(&state,8));
 }
 
+/* The two timed town notices share one fixed surface; they never consume A. */
+static void TestTownStatusLifecycle(void) {
+  ActRaiserLocalizationComposeState state;
+  ActRaiserLocalizationComposeState_Init(&state);
+  ActRaiserLocalizationComposeState_SetScene(&state, 0, 1);
+  char error[256] = {0};
+  const uint32_t sources[] = {0x01FF64, 0x01FF76};
+  const char *ids[] = {"sim.town_status.construction", "sim.town_status.sealing_lair"};
+  for (unsigned i = 0; i < 2; ++i) {
+    ActRaiserLocalizationComposeObservation event = Compose(30 + i, sources[i], 0x0802);
+    event.map_number = 1;
+    event.caller_pc24 = 0x018CA5;
+    CHECK(ActRaiserLocalizationComposeState_Process(
+        &state, &event, ResolveSemanticId, NULL, error, sizeof(error)));
+    const ActRaiserLocalizationComposeSnapshot *notice =
+        ActRaiserLocalizationComposeState_Find(&state, 18);
+    CHECK(notice && !strcmp(notice->semantic_id, ids[i]));
+    CHECK(notice && notice->layout == kArLocalizationTextLayout_CenteredLabel);
+    CHECK(notice && notice->region.column == 2 && notice->region.row == 8 &&
+          2 * notice->region.column + notice->region.columns == 32 && notice->region.rows == 1);
+    CHECK(ActRaiserLocalizationComposeState_ActiveCount(&state) == 1);
+  }
+  /* Native redraw with spaces also retires a dormant failed translation. */
+  CHECK(!ActRaiserLocalizationComposeState_RefreshLatest(
+      &state, 18, ResolveSemanticId, ids[1], error, sizeof(error)));
+  CHECK(ActRaiserLocalizationComposeState_FindObserved(&state, 18));
+  ActRaiserLocalizationComposeObservation clear = Compose(32, 0x01FF8A, 0x0802);
+  clear.map_number = 1;
+  clear.caller_pc24 = 0x018CA5;
+  CHECK(ActRaiserLocalizationComposeState_Process(
+      &state, &clear, ResolveSemanticId, NULL, error, sizeof(error)));
+  CHECK(!ActRaiserLocalizationComposeState_FindObserved(&state, 18));
+  CHECK(ActRaiserLocalizationComposeState_ActiveCount(&state) == 0);
+}
+
 int main(void) {
+  TestTownStatusLifecycle();
   TestRegionalSpeedRange();
   TestFieldMetadataRefresh();
   TestNameEntryLiveLine();

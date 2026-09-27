@@ -10,6 +10,21 @@ import (
 	"testing"
 )
 
+func TestTownNoticePreservesRegionalWordsOnOneRow(t *testing.T) {
+	for _, id := range []string{"sim.town_status.construction", "sim.town_status.sealing_lair"} {
+		route := nativeAuthorRoute("fixed_composer_text",
+			Operation{"op": "text", "value": "  First words  "},
+			Operation{"op": "line_break"}, Operation{"op": "line_break"},
+			Operation{"op": "text", "value": " next words  "}, Operation{"op": "end"})
+		route.ID = id
+		ops, err := nativeAuthorOperations(route, nil)
+		want := []AuthorOperation{{Op: "text", Value: "First words next words"}, {Op: "end"}}
+		if err != nil || !reflect.DeepEqual(ops, want) {
+			t.Fatalf("%s lost wording or retained native row geometry: %+v %v", id, ops, err)
+		}
+	}
+}
+
 func nativeAuthorRoute(category string, ops ...Operation) *NativeSemanticRoute {
 	return &NativeSemanticRoute{ID: "action.hud.act_1", Category: category, Operations: ops}
 }

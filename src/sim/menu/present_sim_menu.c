@@ -235,8 +235,11 @@ static void DrawNativeText(const FrameSlot *slot, HudPresentationChunk chunk,
             (ArRenderRectF){b.x,b.y,b.w,b.h});
   }
   if (count!=SIZE_MAX && ArLocalizedTextPresenter_DrawWithBrightness(
-          &g_render_device,prepared,(slot->inidisp&15)/15.0f))
+          &g_render_device,prepared,(slot->inidisp&15)/15.0f)) {
+    ArTextPresentation_ReportPage(prepared->ready_dialogue_ticket,
+        prepared->dialogue_page_start,prepared->dialogue_page_end);
     ArTextPresentation_MarkReady(prepared->ready_dialogue_ticket);
+  }
 }
 
 static void NativeLabels(const FrameSlot *slot, ArRenderRectI view,
@@ -302,28 +305,6 @@ static ArRenderRectI QuestionInk(const FrameSlot *slot,
   return ink;
 }
 
-static void RestoreCompletePage(ArLocalizedPreparedFrame *prepared) {
-  /* A modern window must show its whole current page, including the salutation.
-   * The native dialogue viewport may have scrolled its first lines out while
-   * revealing larger glyphs. Both questions and follow-up dialogue fit their
-   * windows around that ink. Undo only this presentation scroll, leaving
-   * reveal, page boundaries and acknowledgement timing intact. */
-  if (prepared->text_count==1) {
-    ArLocalizedPreparedText *text=&prepared->texts[0];
-    if (text->viewport.h>0) {
-      const int dy=text->viewport.y-text->destination.y;
-      text->destination.y+=dy;
-      text->viewport=(ArRenderRectI){0};
-      for (unsigned i=0;i<prepared->indicator_count;++i)
-        prepared->indicators[i].destination.y+=dy;
-      for (unsigned i=0;i<prepared->inline_object_count;++i)
-        prepared->inline_objects[i].destination.y+=dy;
-      for (unsigned i=0;i<prepared->decoration_count;++i)
-        prepared->decorations[i].destination.y+=dy;
-    }
-  }
-}
-
 static ArRenderRectF DialogueRect(const FrameSlot *slot, ArRenderRectI view,
                                    float x,float y,float w,float h) {
   /* Same scene-coordinate projection as the ordinary HUD dialogue body. */
@@ -350,15 +331,11 @@ static HudPresentationChunk PrepareMenuDialogue(const FrameSlot *slot,
     if (ArLocalizedTextPresenter_PrepareScreenText(&g_render_device,
         &slot->localization,700,
         (ArRenderRectI){body.x,body.y,body.w,body.h},prepared)) {
-      /* The main dialogue may grow upward. Its continuation tile is drawn
-       * separately at the original bottom position, below the complete text. */
+      /* The continuation tile stays in the common dialogue footer. */
       prepared->masks[prepared->mask_count++]=(ArRenderRectI){40,154,176,62};
     }
   }
-  /* Descriptions keep the same viewport/scrolling as ordinary dialogue.
-   * Expanding to fit the full enhanced-font page made this box much taller. */
-  if (slot->sim_menu.model.phase != kSimMenu_Describe)
-    RestoreCompletePage(prepared);
+  /* All prose keeps the dialogue viewport; its controller owns paging. */
   return chunk;
 }
 
@@ -370,15 +347,7 @@ static void Dialogue(const FrameSlot *slot, ArRenderRectI view) {
   HudPresentationChunk chunk=PrepareMenuDialogue(slot,
       DialogueRect(slot,view,32,0,192,72),&prepared);
   const bool enhanced_help=slot->sim_menu.help.active && prepared.mask_count;
-  const ArRenderRectI ink=QuestionInk(slot,&chunk,&prepared);
-  const float scale=(float)view.h/slot->snes_height;
-  const float ink_bottom=ceilf(
-      (ink.y+ink.h-chunk.output_destination.y)/scale);
-  float extra=fmaxf(0,ink_bottom-(enhanced_help?56:
-      slot->sim_menu.help.active?68:63));
-  if (slot->sim_menu.model.phase==kSimMenu_Describe) extra=0;
-  /* Keep the original corners/edge thickness when a larger localized page
-   * needs extra height. Only the native middle rows are extended upward. */
+  const float extra=0;
   /* BG2's captured town box occupies y=151..214 (including the native
    * one-scanline scroll), not the wider BG3 text/claim region y=144..215.
    * Cropping the latter would also restore the command panel's bottom edge. */
@@ -396,8 +365,8 @@ static void Dialogue(const FrameSlot *slot, ArRenderRectI view) {
       DialogueRect(slot,view,32,144-extra,192,72),&prepared);
   DrawNativeText(slot,chunk,&prepared);
   if (enhanced_help)
-    Texture(PresentHud_BackgroundTexture(),(ArRenderRectF){slot->ws_extra+208,204,8,8},
-            DialogueRect(slot,view,208,204,8,8));
+    Texture(PresentHud_BackgroundTexture(),(ArRenderRectF){slot->ws_extra+128,204,8,8},
+            DialogueRect(slot,view,128,204,8,8));
 }
 
 static bool MenuLabelRightToLeft(const FrameSlot *slot, ArRenderRectI view,
