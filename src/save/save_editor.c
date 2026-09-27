@@ -2,6 +2,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
+#include "snesrecomp/support/utf8_fs.h"
 #include "app/user_data_dir.h"
 
 /* Menu zero means leave unchanged. Direct fields keep their displayed value;
@@ -98,6 +100,43 @@ bool SaveEditor_BuildRequest(const Settings *settings, SaveEditRequest *edits) {
     }
   }
   return staged;
+}
+
+const char *SaveEditor_ExportExtension(SettingAction action) {
+  switch (action) {
+  case kSettingAction_SaveExportCampaign: return "arsave";
+  case kSettingAction_SaveExportSrm: return "srm";
+  case kSettingAction_SaveExportIni: return "ini";
+  default: return NULL;
+  }
+}
+
+SaveEditorActionResult SaveEditor_HandleFileAction(SettingAction action, const char *path,
+                                                  const Settings *settings, SaveError *error) {
+  if (error) *error = (SaveError){{0}};
+  if (!settings || !path || !*path) {
+    if (error) snprintf(error->message, sizeof(error->message), "Choose a save file first.");
+    return kSaveEditorAction_Failed;
+  }
+  if (action == kSettingAction_SaveImport)
+    return SaveSystem_Import(path, settings->save_autobackup, error)
+               ? kSaveEditorAction_RestartRequired : kSaveEditorAction_Failed;
+  if (!SaveEditor_ExportExtension(action)) return kSaveEditorAction_Failed;
+  /* Export is a copy, never an alternate way to overwrite a managed slot or
+   * its companions. This also preserves existing exports chosen accidentally. */
+  FILE *existing = sr_fopen(path, "rb");
+  if (existing) fclose(existing);
+  if (existing || errno != ENOENT) {
+    if (error) snprintf(error->message, sizeof(error->message),
+                         "Choose a new export filename; existing files are preserved.");
+    return kSaveEditorAction_Failed;
+  }
+  bool success = action == kSettingAction_SaveExportCampaign
+      ? SaveSystem_ExportCampaign(path, error)
+      : SaveSystem_Export(action == kSettingAction_SaveExportIni ? kSaveFileFormat_Ini
+                                                               : kSaveFileFormat_NativeSrm,
+                          path, error);
+  return success ? kSaveEditorAction_Completed : kSaveEditorAction_Failed;
 }
 
 SaveEditorActionResult SaveEditor_HandleAction(SettingAction action,

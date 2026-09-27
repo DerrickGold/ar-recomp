@@ -264,9 +264,19 @@ Normal interactive boots use ten numbered directories, `saves/slots/01` through
 `new-game.ardraft`. Visible numbers map to internal slot IDs 0–9. `save_backend`
 selects the format for new slots; occupied slots retain their pinned format.
 Diagnostic paths, recording/replay and headless boots keep the external-save
-behavior. Import/export exchange files use `saves/imports` and `saves/exports`;
-managed backups and redevelopment recovery directories use `saves/backups/01`
+behavior. Interactive import/export uses system file pickers; diagnostic
+fallbacks use `saves/imports` and `saves/exports`. Managed backups and
+redevelopment recovery directories use `saves/backups/01`
 through `saves/backups/10`.
+
+Advanced stays inside the save manager, with the slot list on the left and the
+active target named above the controls. Browsing another slot never retargets
+these tools. Import first selects a file, then reviews replacement of the active
+campaign; cancellation changes nothing. Both file selection and confirmation
+check the reviewed slot fingerprint. A successful import resets the game in the
+same window. Exports choose a new filename, preserve existing files, and show
+the resulting path. Campaign archives preserve saved progress, rules and names;
+raw SRAM is for emulator interchange, and raw INI is for readable tool data.
 
 Native launchers resolve portable/custom/per-user storage and pass an absolute
 `AR_USER_DATA_DIR`. The game honors it before executable-relative folder-bundle
@@ -431,12 +441,13 @@ the source; missing regional metadata uses legacy defaults, and a companion from
 a different slot is rejected. Use the campaign archive to transfer between slots.
 Managed automatic backups use `backups/01/backup-YYYYMMDD-HHMMSS-NNN.arsave`,
 numbered by slot, and preserve the entire pre-edit campaign once per process
-session. Exports use `exports/slot-01-YYYYMMDD-HHMMSS-NNN.<format>`. An exclusive
+session. Diagnostic library exports use `exports/slot-01-YYYYMMDD-HHMMSS-NNN.<format>`. An exclusive
 `.pending` directory reserves each name; it is released on success or failure,
 and an interrupted reservation is never reused. Failed backups block the edit.
 External diagnostic saves retain their adjacent `<active-save>.bak-...arsave`
-backup behavior. Default imports prefer `imports/import.arsave`, `.srm`, then
-`.ini`, with the older root-level names as fallbacks. `AR_SAVE_IMPORT` wins.
+backup behavior. Diagnostic default imports prefer `imports/import.arsave`, `.srm`, then
+`.ini`, with the older root-level names as fallbacks. `AR_SAVE_IMPORT` wins for
+those diagnostic actions; the interactive picker always uses its selected path.
 
 The complete recovery-copy API is separate from ordinary Export. It reserves a
 new directory and writes `save.srm`, its matching regional companion (if present)

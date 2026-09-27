@@ -5,6 +5,7 @@ Start with the screen the player sees:
 | Screen | UI owner | Rules / host integration |
 | --- | --- | --- |
 | Save slots, new game, rename, load and delete | `save_slots/save_slot_menu.c` | `save/save_slot_host.c` |
+| Advanced save tools and import/export | `save_slots/save_slot_menu.c` keeps the slot sidebar and reviewed target | `save/save_file_dialog.c` selects paths; `save/save_editor.c` applies the chosen operation through `save_system.c` |
 | Regional settings, presets and impact confirmation | `regional/regional_panel.c` | `regional/regional_menu.c` builds rows; `regional/regional_host.c` applies campaign policy |
 | Layers, BG Extents and the palette picker | `layers/layer_menu.c`, `layers/layer_palette.c` | `diorama/diorama_layer_editor.c` and `action/action_bg_tuner.c` build/edit rows; `diorama/diorama_host.c` installs live hooks |
 | Ordinary setting rows | `settings_overlay.c` | `app/settings.c` owns the descriptor catalog and values |

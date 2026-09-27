@@ -19,4 +19,9 @@ typedef enum SaveEditorActionResult {
  * durability checks. Unrecognized actions fail without touching a save. */
 SaveEditorActionResult SaveEditor_HandleAction(SettingAction action,
                                               const Settings *settings);
+/* Interactive file actions use the reviewed picker path, never diagnostic
+ * environment variables or the import-folder fallback. Errors stay visible. */
+const char *SaveEditor_ExportExtension(SettingAction action);
+SaveEditorActionResult SaveEditor_HandleFileAction(SettingAction action, const char *path,
+                                                  const Settings *settings, SaveError *error);
 #endif

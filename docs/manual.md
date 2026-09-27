@@ -541,23 +541,27 @@ Then run one of these actions:
   enabled), atomically writes the active backend, and updates live SRAM. This
   is the practical menu-testing path: run it, choose the top-level **Restart
   Game** action, then Continue.
-- **Export campaign** creates a uniquely named `.arsave` in `saves/exports`, containing
+- **Export campaign** opens a file picker for a new `.arsave` file, containing
   saved progress, regional settings and history, randomizer recipe/seed, and the
   enhanced character name. Unsaved gameplay is not included.
-- **Export raw SRAM** and **Export raw INI** create uniquely named `.srm` and
-  `.ini` files in `saves/exports` for emulator interchange. They contain cartridge data only.
-- **Import save** looks in `saves/imports` for `import.arsave`, `import.srm`, then
-  `import.ini` (or uses `AR_SAVE_IMPORT=<path>`). The old filenames directly
-  under `saves` remain fallbacks. It replaces the confirmed
-  active slot and restarts automatically. A campaign archive preserves its
+- **Export raw SRAM** and **Export raw INI** open a picker for a new `.srm` or
+  `.ini` file. SRAM is for emulator interchange; INI is readable by tools.
+  Both contain cartridge data only. Exports preserve existing files and show
+  the destination after success.
+- **Import save** opens a file picker for a campaign archive, SRAM or INI file,
+  then asks you to confirm the chosen file and active slot. Cancelling does
+  nothing. It replaces the confirmed active slot and restarts in the same window.
+  A campaign archive preserves its
   settings and seed even when imported into a different slot or save format.
   Raw imports use matching companions when supplied; a native-only legacy
   import uses the legacy regional defaults.
 
 Automatic backups preserve the previous saved campaign in a timestamped
 `saves/backups/01/backup-...arsave` file (numbered by active slot) before the first
-destructive edit or import in a session. To restore one, copy it to `saves/imports/import.arsave` and import it into
-the intended active slot. Keep backups until the restored game is verified.
+destructive edit or import in a session. To restore one, select it with **Import
+save** while the intended slot is active. Keep backups until the restored game
+is verified. Advanced keeps the slot list visible; Back returns to your previous
+slot preview. Its tools always act on the named active slot.
 
 The storage-format row chooses native SRAM or lossless INI for new slots.
 Existing slots keep their format. INI files retain all 8192 raw bytes in

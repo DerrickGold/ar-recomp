@@ -2010,6 +2010,35 @@ static unsigned slot_draft_calls;
 static uint64_t slot_active_fingerprint = 111;
 static uint64_t slot_empty_fingerprint = 222;
 static ArRegionalSession slot_started_draft;
+static SaveFileDialogResult slot_file_choice = kSaveFileDialog_Selected;
+static int slot_file_choices, slot_file_cancels;
+static bool slot_file_success = true;
+static bool FakeSlotChooseFile(SettingAction action, SaveError *error) {
+  (void)action;
+  (void)error;
+  ++slot_file_choices;
+  return true;
+}
+static SaveFileDialogResult FakeSlotPollFile(char *path, size_t capacity, SaveError *error) {
+  if (slot_file_choice == kSaveFileDialog_Selected)
+    snprintf(path, capacity, "%s", "/chosen/日本語 campaign.arsave");
+  if (slot_file_choice == kSaveFileDialog_Failed)
+    snprintf(error->message, sizeof(error->message), "%s", "Picker fixture failed.");
+  return slot_file_choice;
+}
+static void FakeSlotCancelFile(void) { ++slot_file_cancels; }
+static bool FakeSlotFileAction(SettingAction action, const char *path, SaveError *error) {
+  CHECK(!strcmp(path, "/chosen/日本語 campaign.arsave"));
+  s_action_calls++;
+  s_action_desc =
+      Settings_Find(action == kSettingAction_SaveImport           ? "save_import"
+                    : action == kSettingAction_SaveExportCampaign ? "save_export_campaign"
+                    : action == kSettingAction_SaveExportSrm      ? "save_export_srm"
+                                                                  : "save_export_ini");
+  if (!slot_file_success)
+    snprintf(error->message, sizeof(error->message), "Export fixture failed.");
+  return slot_file_success;
+}
 static bool FakeSlotsScan(SaveSlotCollection *out) {
   *out = (SaveSlotCollection){.active = 0, .writable = true};
   out->slots[0] = (SaveSlotDetails){
@@ -2368,12 +2397,31 @@ static void TestSaveAdvancedShortcut(SDL_Renderer *renderer, SDL_Surface *surfac
   SettingsOverlay_SetSaveSlotHooks(&hooks);
   SettingsOverlay_Open();
   CHECK(SettingsOverlay_OpenSaveSlots(false));
+  (void)SlotFrameHash(renderer, surface);
+  const MenuLayout layout = BuildLayout(surface->w, surface->h);
+  const ArRenderRectI heading = LogicalRect(&layout, 20, 20, 110, kGlyphSize);
+  SDL_Surface *slot_heading = SDL_CreateSurface(heading.w, heading.h, surface->format);
+  SDL_Rect source = {heading.x, heading.y, heading.w, heading.h};
+  CHECK(slot_heading && SDL_BlitSurface(surface, &source, slot_heading, NULL));
   int actions = s_action_calls, starts = slot_start_calls;
   /* No wrap/scroll to the footer required from the initially active slot. */
   CHECK(SettingsOverlay_HandleKey(SDLK_A, true, true));
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_list"));
   CHECK(SettingsOverlay_HandleKey(SDLK_A, true, false));
   CHECK(strncmp(SettingsOverlay_SelectedKey(), "slot_", 5));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "save_backend"));
+  /* Advanced keeps the slot manager's sidebar, not the top-level sections. */
+  (void)SlotFrameHash(renderer, surface);
+  SDL_Surface *advanced_heading = SDL_CreateSurface(heading.w, heading.h, surface->format);
+  CHECK(advanced_heading && SDL_BlitSurface(surface, &source, advanced_heading, NULL));
+  if (slot_heading && advanced_heading) {
+    CHECK(slot_heading->pitch == advanced_heading->pitch);
+    CHECK(!memcmp(slot_heading->pixels, advanced_heading->pixels,
+                  slot_heading->pitch * slot_heading->h));
+  }
+  SDL_DestroySurface(slot_heading);
+  SDL_DestroySurface(advanced_heading);
+  SlotReviewFrame(renderer, surface, "slots-advanced-nested");
   g_settings.save_backend = kSaveBackend_Ini;
   CHECK(SettingsOverlay_HandleKey(SDLK_A, true,
                                   true)); /* held shortcut must not reset Advanced's row */
@@ -2447,7 +2495,11 @@ static void TestSaveAdvancedActions(SDL_Renderer *renderer, SDL_Surface *surface
   SettingsOverlay_Close();
   Settings_Init();
   g_settings.show_debug_settings = true;
-  const SettingsOverlaySaveSlotHooks hooks = {.scan = FakeSlotsScan};
+  const SettingsOverlaySaveSlotHooks hooks = {.scan = FakeSlotsScan,
+                                              .choose_file = FakeSlotChooseFile,
+                                              .poll_file = FakeSlotPollFile,
+                                              .cancel_file = FakeSlotCancelFile,
+                                              .file_action = FakeSlotFileAction};
   SettingsOverlay_SetSaveSlotHooks(&hooks);
   SettingsOverlay_Open();
   NavToSection(kSection_Save);
@@ -2478,6 +2530,7 @@ static void TestSaveAdvancedActions(SDL_Renderer *renderer, SDL_Surface *surface
   CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(s_action_calls == ++calls && s_action_desc == Settings_Find("save_import"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false)); /* Fake host stays open after import. */
   const char *edits[] = {"save_apply_session", "save_apply_persist"};
   for (unsigned i = 0; i < 2; ++i) {
     RowToKey(edits[i]);
@@ -2490,7 +2543,54 @@ static void TestSaveAdvancedActions(SDL_Renderer *renderer, SDL_Surface *surface
     CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
     CHECK(s_action_calls == ++calls && s_action_desc == Settings_Find(edits[i]));
   }
+  RowToKey("save_import");
+  slot_file_choice = kSaveFileDialog_Pending;
+  int choices = slot_file_choices;
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(slot_file_choices == choices + 1 && s_action_calls == calls);
+  slot_file_choice = kSaveFileDialog_Cancelled;
+  SettingsOverlay_Refresh();
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "save_import") && s_action_calls == calls);
+  slot_file_choice = kSaveFileDialog_Pending;
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  ++slot_active_fingerprint; /* Target changed while the native picker was open. */
+  slot_file_choice = kSaveFileDialog_Selected;
+  SettingsOverlay_Refresh();
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "save_import") && s_action_calls == calls);
+  slot_file_choice = kSaveFileDialog_Failed;
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_confirm"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(s_action_calls == calls && !strcmp(SettingsOverlay_SelectedKey(), "save_import"));
+  slot_file_choice = kSaveFileDialog_Selected;
+  const char *exports[] = {"save_export_campaign", "save_export_srm", "save_export_ini"};
+  for (unsigned i = 0; i < 3; ++i) {
+    RowToKey(exports[i]);
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    CHECK(s_action_calls == ++calls && s_action_desc == Settings_Find(exports[i]));
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_confirm")); /* Destination receipt. */
+    SlotReviewFrame(renderer, surface, "advanced-export-result");
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    CHECK(!strcmp(SettingsOverlay_SelectedKey(), exports[i]));
+  }
+  slot_file_success = false;
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(s_action_calls == ++calls && !strcmp(SettingsOverlay_SelectedKey(), "slot_confirm"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "save_export_ini"));
+  slot_file_success = true;
+  slot_file_choice = kSaveFileDialog_Pending;
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  int cancels = slot_file_cancels;
+  CHECK(SettingsOverlay_OpenSaveSlots(false)); /* A programmatic return also abandons the picker. */
+  CHECK(slot_file_cancels == ++cancels && !strcmp(SettingsOverlay_SelectedKey(), "slot_advanced"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  RowToKey("save_import");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   SettingsOverlay_Close();
+  CHECK(slot_file_cancels == cancels + 1 && s_action_calls == calls);
+  slot_file_choice = kSaveFileDialog_Selected;
   SettingsOverlay_SetSaveSlotHooks(NULL);
   slot_active_fingerprint = 111;
 }
@@ -2500,8 +2600,13 @@ static void TestSaveSlotLocales(SDL_Renderer *renderer, SDL_Surface *surface) {
     Settings_Init();
     g_settings.show_debug_settings = true;
     g_settings.interface_language = locale;
-    const SettingsOverlaySaveSlotHooks hooks = {
-        .scan = FakeSlotsScan, .draft = FakeSlotDraft, .view = FakeSlotView};
+    const SettingsOverlaySaveSlotHooks hooks = {.scan = FakeSlotsScan,
+                                                .draft = FakeSlotDraft,
+                                                .view = FakeSlotView,
+                                                .choose_file = FakeSlotChooseFile,
+                                                .poll_file = FakeSlotPollFile,
+                                                .cancel_file = FakeSlotCancelFile,
+                                                .file_action = FakeSlotFileAction};
     SettingsOverlay_SetSaveSlotHooks(&hooks);
     SettingsOverlay_Open();
     NavToSection(kSection_Save);

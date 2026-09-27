@@ -15,7 +15,7 @@
  * overlay owns navigation and shared text widgets; storage stays behind hooks. */
 typedef struct SlotDecision {
   SettingsOverlayDecisionResult result;
-  bool accept_selected, body_text;
+  bool accept_selected, body_text, notice;
   char title[96], body[2048], accept[96];
 } SlotDecision;
 
@@ -42,6 +42,7 @@ typedef enum SlotPage {
 enum { kSlotRandomPageCount = 4, kSlotDetailCapacity = 96, kSlotSeedDigits = 9 };
 static SettingsOverlaySaveSlotHooks s_slot_hooks;
 static void SlotOpenDetails(void);
+static void SlotPollFile(void);
 static struct {
   SlotScreen screen;
   SaveSlotCollection collection;
@@ -53,12 +54,20 @@ static struct {
   bool randomized_entry, randomizer_visible, full;
   SlotDecision decision;
   const SettingDesc *advanced_action;
+  bool file_pending;
+  char file_path[kHostPathCapacity];
   unsigned reviewed_active;
   uint64_t reviewed_fingerprint;
   char error[256];
 } s_slots;
 
+static void SlotCancelFile(void) {
+  if (s_slots.file_pending && s_slot_hooks.cancel_file) s_slot_hooks.cancel_file();
+  s_slots.file_pending = false;
+  s_slots.file_path[0] = 0;
+}
 void SaveSlotMenu_SetHooks(const SettingsOverlaySaveSlotHooks *hooks) {
+  SlotCancelFile();
   s_slot_hooks = hooks ? *hooks : (SettingsOverlaySaveSlotHooks){0};
 }
 bool SaveSlotMenu_Available(void) { return s_slot_hooks.scan != NULL; }
@@ -76,6 +85,7 @@ void SaveSlotMenu_TabState(int *active_tab, int *tab_count) {
   if (tab_count) *tab_count = count;
 }
 void SaveSlotMenu_Refresh(void) {
+  SlotPollFile();
   if (!SaveSlotMenu_Active() || s_slots.randomizer_visible == SlotRandomizerVisible()) return;
   s_slots.randomizer_visible = SlotRandomizerVisible();
   /* A live gate change must also dismiss already-open seed/help dialogs.
@@ -113,14 +123,12 @@ const char *SaveSlotMenu_EditorTitle(void) {
   ArUiCatalog_Format(title, sizeof(title), Ui("slots.advanced.target"), args, 2);
   return title;
 }
-bool SaveSlotMenu_ConfirmEditorAction(const SettingDesc *desc) {
-  if (!s_slots.advanced || (desc->action != kSettingAction_SaveImport &&
-                            desc->action != kSettingAction_SaveApplyPersist &&
-                            desc->action != kSettingAction_SaveApplySession))
-    return false;
-  s_slots.advanced_action = desc;
-  s_slots.reviewed_active = s_slots.collection.active;
-  s_slots.reviewed_fingerprint = s_slots.collection.slots[s_slots.reviewed_active].fingerprint;
+bool SaveSlotMenu_EditorRowVisible(const SettingDesc *desc) {
+  /* Back already returns to the visible slot list. Do not offer a second
+   * "Slots" command inside its own Advanced submenu. */
+  return !s_slots.advanced || desc->action != kSettingAction_SaveSlots;
+}
+static void SlotConfirmEditor(const SettingDesc *desc) {
   char number[16];
   snprintf(number, sizeof(number), "%u", s_slots.reviewed_active + 1);
   const SaveSlotDetails *slot = &s_slots.collection.slots[s_slots.reviewed_active];
@@ -137,9 +145,14 @@ bool SaveSlotMenu_ConfirmEditorAction(const SettingDesc *desc) {
   snprintf(s_slots.decision.accept, sizeof(s_slots.decision.accept), "%s",
            desc->action == kSettingAction_SaveImport ? "slots.advanced.replace"
                                                      : "slots.advanced.apply");
-  return true;
+  if (s_slots.file_path[0]) {
+    size_t used = strlen(s_slots.decision.body);
+    snprintf(s_slots.decision.body + used, sizeof(s_slots.decision.body) - used, "\n\n%s",
+              s_slots.file_path);
+  }
 }
 void SaveSlotMenu_Close(void) {
+  SlotCancelFile();
   s_slots.screen = kSlotScreen_Closed;
   s_slots.advanced = false;
   s_slots.advanced_action = NULL;
@@ -156,8 +169,109 @@ static bool SlotScanCollection(void) {
       s_slots.full = false;
   return true;
 }
+static bool SlotEditorTargetUnchanged(void) {
+  return SlotScanCollection() && s_slots.collection.writable &&
+         s_slots.collection.active == s_slots.reviewed_active &&
+         s_slots.collection.slots[s_slots.reviewed_active].state != kSaveSlot_Unavailable &&
+         s_slots.collection.slots[s_slots.reviewed_active].fingerprint ==
+             s_slots.reviewed_fingerprint;
+}
+static void SlotFileNotice(const SettingDesc *desc, const char *message) {
+  s_slots.decision = (SlotDecision){.result = kOverlayDecision_Pending,
+      .notice = true, .body_text = true, .accept_selected = true};
+  snprintf(s_slots.decision.title, sizeof(s_slots.decision.title), "%s",
+            SettingsOverlay_LocalizedLabel(SettingsOverlay_InterfaceLocale(), desc));
+  snprintf(s_slots.decision.body, sizeof(s_slots.decision.body), "%s", message);
+  snprintf(s_slots.decision.accept, sizeof(s_slots.decision.accept), "%s", "slots.file.dismiss");
+}
+static bool SlotIsFileAction(SettingAction action) {
+  return action == kSettingAction_SaveImport || action == kSettingAction_SaveExportCampaign ||
+         action == kSettingAction_SaveExportSrm || action == kSettingAction_SaveExportIni;
+}
+static void SlotExecuteEditor(const SettingDesc *action) {
+  s_slots.advanced_action = NULL;
+  if (!SlotEditorTargetUnchanged()) {
+    SettingsOverlay_SetStatus(Ui("slots.advanced.changed"));
+    return;
+  }
+  SaveError error = {{0}};
+  const bool file = SlotIsFileAction(action->action);
+  bool success = file ? s_slot_hooks.file_action &&
+                           s_slot_hooks.file_action(action->action, s_slots.file_path, &error)
+                      : Settings_InvokeAction(action);
+  if (!SettingsOverlay_IsOpen()) return;
+  (void)SlotScanCollection();
+  if (file) {
+    char message[2048];
+    snprintf(message, sizeof(message), "%s\n\n%s",
+              Ui(!success ? "overlay.status.action_failed"
+                  : action->action == kSettingAction_SaveImport ? "overlay.status.action_complete"
+                                                               : "slots.file.exported"),
+              success ? s_slots.file_path : error.message);
+    SlotFileNotice(action, message);
+  } else {
+    SettingsOverlay_SetStatus(
+        Ui(success ? "overlay.status.action_complete" : "overlay.status.action_failed"));
+  }
+  s_slots.file_path[0] = 0;
+}
+bool SaveSlotMenu_ConfirmEditorAction(const SettingDesc *desc) {
+  const bool file = SlotIsFileAction(desc->action);
+  if (!s_slots.advanced || (!file && desc->action != kSettingAction_SaveApplyPersist &&
+                                     desc->action != kSettingAction_SaveApplySession))
+    return false;
+  s_slots.file_path[0] = 0;
+  s_slots.advanced_action = desc;
+  s_slots.reviewed_active = s_slots.collection.active;
+  s_slots.reviewed_fingerprint = s_slots.collection.slots[s_slots.reviewed_active].fingerprint;
+  if (file) {
+    if (!SlotEditorTargetUnchanged()) {
+      SettingsOverlay_SetStatus(Ui("slots.advanced.changed"));
+      s_slots.advanced_action = NULL;
+      return true;
+    }
+    SaveError error = {{0}};
+    if (!s_slot_hooks.choose_file || !s_slot_hooks.poll_file || !s_slot_hooks.file_action ||
+        !s_slot_hooks.cancel_file || !s_slot_hooks.choose_file(desc->action, &error)) {
+      SlotFileNotice(desc, error.message[0] ? error.message : Ui("slots.file.unavailable"));
+      s_slots.advanced_action = NULL;
+    } else {
+      s_slots.file_pending = true;
+      SettingsOverlay_SetStatus(Ui("slots.file.choose"));
+      SlotPollFile();
+    }
+  } else {
+    SlotConfirmEditor(desc);
+  }
+  return true;
+}
+static void SlotPollFile(void) {
+  if (!s_slots.file_pending) return;
+  SaveError error = {{0}};
+  SaveFileDialogResult result = s_slot_hooks.poll_file(s_slots.file_path,
+                                                      sizeof(s_slots.file_path), &error);
+  if (result == kSaveFileDialog_Pending) return;
+  s_slots.file_pending = false;
+  const SettingDesc *action = s_slots.advanced_action;
+  if (result == kSaveFileDialog_Cancelled ||
+      (result == kSaveFileDialog_Selected && !s_slots.file_path[0])) {
+    s_slots.advanced_action = NULL;
+    SettingsOverlay_SetStatus(Ui("slots.file.cancelled"));
+  } else if (result == kSaveFileDialog_Failed) {
+    s_slots.advanced_action = NULL;
+    SlotFileNotice(action, error.message);
+  } else if (!SlotEditorTargetUnchanged()) {
+    s_slots.advanced_action = NULL;
+    SettingsOverlay_SetStatus(Ui("slots.advanced.changed"));
+  } else if (action->action == kSettingAction_SaveImport) {
+    SlotConfirmEditor(action);
+  } else {
+    SlotExecuteEditor(action);
+  }
+}
 bool SaveSlotMenu_Open(bool randomized) {
   if (!SaveSlotMenu_Available() || (randomized && !SlotRandomizerVisible())) return false;
+  SlotCancelFile();
   memset(&s_slots, 0, sizeof(s_slots));
   s_slots.draft_slot = -1;
   if (!SlotScanCollection()) return false;
@@ -183,6 +297,7 @@ static SaveSlotMenuNavResult SlotOpenAdvanced(void) {
 }
 bool SaveSlotMenu_ReturnFromEditor(void) {
   if (!s_slots.advanced) return false;
+  SlotCancelFile();
   s_slots.advanced = false;
   s_slots.advanced_action = NULL;
   s_slots.screen = kSlotScreen_List;
@@ -418,35 +533,27 @@ static void SlotEnterSetupPage(SlotScreen screen) {
   s_slots.row = s_slots.tab = s_slots.scroll = s_slots.digit = 0;
 }
 SaveSlotMenuNavResult SaveSlotMenu_HandleNav(MenuNav nav, bool repeat) {
+  if (s_slots.file_pending) return kSaveSlotMenuNav_Handled;
   if (!SaveSlotMenu_Active() && !SaveSlotMenu_DecisionActive()) return kSaveSlotMenuNav_Unhandled;
   if (s_slots.decision.result == kOverlayDecision_Pending) {
     if (repeat) return kSaveSlotMenuNav_Handled;
     if (nav == kMenuNav_Up || nav == kMenuNav_Down || nav == kMenuNav_Left || nav == kMenuNav_Right)
-      s_slots.decision.accept_selected = !s_slots.decision.accept_selected;
+      s_slots.decision.accept_selected = s_slots.decision.notice ||
+                                         !s_slots.decision.accept_selected;
     else if (nav == kMenuNav_Back || nav == kMenuNav_Close) {
       s_slots.decision.result = kOverlayDecision_None;
       s_slots.advanced_action = NULL;
     } else if (nav == kMenuNav_Confirm) {
       bool accept = s_slots.decision.accept_selected;
+      if (s_slots.decision.notice) {
+        s_slots.decision = (SlotDecision){0};
+        return kSaveSlotMenuNav_Handled;
+      }
       if (!accept) s_slots.advanced_action = NULL;
       s_slots.decision.result = kOverlayDecision_None;
       if (accept && s_slots.advanced_action) {
         const SettingDesc *action = s_slots.advanced_action;
-        s_slots.advanced_action = NULL;
-        if (!SlotScanCollection() || !s_slots.collection.writable ||
-            s_slots.collection.active != s_slots.reviewed_active ||
-            s_slots.collection.slots[s_slots.reviewed_active].state == kSaveSlot_Unavailable ||
-            s_slots.collection.slots[s_slots.reviewed_active].fingerprint !=
-                s_slots.reviewed_fingerprint) {
-          SettingsOverlay_SetStatus(Ui("slots.advanced.changed"));
-          return kSaveSlotMenuNav_Handled;
-        }
-        bool success = Settings_InvokeAction(action);
-        if (SettingsOverlay_IsOpen()) {
-          (void)SlotScanCollection();
-          SettingsOverlay_SetStatus(
-              Ui(success ? "overlay.status.action_complete" : "overlay.status.action_failed"));
-        }
+        SlotExecuteEditor(action);
       } else if (accept) {
         SaveError error = {{0}};
         if (!s_slot_hooks.start ||
@@ -861,7 +968,7 @@ static void SlotDrawConfirmation(const MenuLayout *layout) {
   SlotWrappedText(layout, x + 16, y + 24 + title_lines * 12, decision->body,
                   (width - 32) / kDebugGlyphWidth,
                   (height - title_lines * 12 - 80) / kSmallLineHeight, true, false);
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < (decision->notice ? 1 : 2); ++i) {
     bool selected = decision->accept_selected == (i == 0);
     SlotTextRow(layout, x + 18, y + height - 43 + i * 20, width - 36,
                 Ui(i ? "overlay.decision.cancel" : decision->accept), "", selected, false);
@@ -871,18 +978,20 @@ static void SlotDrawList(const MenuLayout *layout, int width, int height) {
   int advanced_y = height - 12;
   int visible = (advanced_y - 46) / 32;
   if (visible < 1) visible = 1;
-  if (s_slots.selected < s_slots.top) s_slots.top = s_slots.selected;
-  if (s_slots.selected >= s_slots.top + visible) s_slots.top = s_slots.selected - visible + 1;
+  const int highlighted = s_slots.advanced ? (int)s_slots.collection.active : s_slots.selected;
+  if (highlighted < s_slots.top) s_slots.top = highlighted;
+  if (highlighted >= s_slots.top + visible) s_slots.top = highlighted - visible + 1;
   DrawDialogPanel(layout, 8, 8, width, height);
   DrawTextN(layout, 20, 20, Ui("slots.title"), (width - 24) / kGlyphSize, kText_Normal);
   for (int i = s_slots.top; i < kSaveSlotCount && i < s_slots.top + visible; ++i) {
     const SaveSlotDetails *slot = &s_slots.collection.slots[i];
     int y = 42 + (i - s_slots.top) * 32;
-    bool selected = i == s_slots.selected && !s_slots.advanced_focus;
+    bool selected = i == highlighted && (s_slots.advanced || !s_slots.advanced_focus);
     if (selected) {
       FillLogicalRect(layout, 14, y - 4, width - 22, 29,
-                      s_slots.detail_focus ? kPanel : kHighlight);
-      if (!s_slots.detail_focus) FillLogicalRect(layout, 14, y - 4, 2, 29, kSelectYellow);
+                      s_slots.detail_focus || s_slots.advanced ? kPanel : kHighlight);
+      if (!s_slots.detail_focus && !s_slots.advanced)
+        FillLogicalRect(layout, 14, y - 4, 2, 29, kSelectYellow);
     }
     const char *name = Ui(slot->state == kSaveSlot_Unavailable ? "slots.unavailable"
                           : slot->prepared                     ? "slots.prepared"
@@ -908,8 +1017,14 @@ static void SlotDrawList(const MenuLayout *layout, int width, int height) {
   DrawScrollBar(layout, 8 + width - 12, 38, visible * 32, kSaveSlotCount, visible, s_slots.top,
                 kSteelBlue);
   FillLogicalRect(layout, 20, advanced_y - 9, width - 24, 1, kSteelDim);
-  SlotTextRow(layout, 22, advanced_y, width - 36, Ui("slots.advanced"), ">", s_slots.advanced_focus,
+  SlotTextRow(layout, 22, advanced_y, width - 36, Ui("slots.advanced"), ">",
+              s_slots.advanced || s_slots.advanced_focus,
               false);
+}
+bool SaveSlotMenu_DrawEditorSidebar(const MenuLayout *layout, int width, int height) {
+  if (!s_slots.advanced) return false;
+  SlotDrawList(layout, width, height);
+  return true;
 }
 void SaveSlotMenu_Draw(const MenuLayout *layout) {
   if (s_slots.decision.result == kOverlayDecision_Pending) {

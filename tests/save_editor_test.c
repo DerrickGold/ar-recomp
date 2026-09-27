@@ -12,12 +12,13 @@ static SaveFileFormat s_format;
 static SaveEditRequest s_applied;
 static char s_import_path[128];
 
-#define CHECK(expr) do { \
-  if (!(expr)) { \
-    fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr); \
-    s_failures++; \
-  } \
-} while (0)
+#define CHECK(expr)                                                                                \
+  do {                                                                                             \
+    if (!(expr)) {                                                                                 \
+      fprintf(stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #expr);                     \
+      s_failures++;                                                                                \
+    }                                                                                              \
+  } while (0)
 
 /* SaveSystem's sentinel contract; the real codec and persistence transactions
  * have their own tests. These boundaries record requests without file I/O. */
@@ -27,8 +28,8 @@ void SaveEditRequest_Clear(SaveEditRequest *edits) {
   edits->player_name[0] = 0;
 }
 
-bool SaveSystem_ApplyEdits(const SaveEditRequest *edits, bool armed,
-                          bool persist, bool auto_backup, SaveError *error) {
+bool SaveSystem_ApplyEdits(const SaveEditRequest *edits, bool armed, bool persist, bool auto_backup,
+                           SaveError *error) {
   (void)error;
   s_apply_calls++;
   s_applied = *edits;
@@ -54,13 +55,20 @@ bool SaveSystem_Import(const char *path, bool auto_backup, SaveError *error) {
 
 const char *SaveSystem_ActivePath(void) { return "active.srm"; }
 
-bool SaveSystem_ExportToLibrary(SaveFileFormat format, bool campaign,
-                               SaveError *error) {
+bool SaveSystem_ExportToLibrary(SaveFileFormat format, bool campaign, SaveError *error) {
   (void)error;
   s_export_calls++;
   s_format = format;
   s_campaign = campaign;
   return s_success;
+}
+bool SaveSystem_ExportCampaign(const char *path, SaveError *error) {
+  snprintf(s_import_path, sizeof(s_import_path), "%s", path);
+  return SaveSystem_ExportToLibrary(kSaveFileFormat_NativeSrm, true, error);
+}
+bool SaveSystem_Export(SaveFileFormat format, const char *path, SaveError *error) {
+  snprintf(s_import_path, sizeof(s_import_path), "%s", path);
+  return SaveSystem_ExportToLibrary(format, false, error);
 }
 
 static void TestStagedValues(void) {
@@ -144,8 +152,7 @@ static void TestStagedValues(void) {
 }
 
 static void TestActions(void) {
-  Settings draft = {.save_edit_armed = true, .save_autobackup = true,
-                    .save_master_level = 7};
+  Settings draft = {.save_edit_armed = true, .save_autobackup = true, .save_master_level = 7};
   CHECK(SaveEditor_HandleAction(kSettingAction_SaveApplySession, &draft) ==
         kSaveEditorAction_Completed);
   CHECK(s_apply_calls == 1 && s_armed && !s_persist && s_backup);
@@ -162,12 +169,10 @@ static void TestActions(void) {
 
   unsetenv("AR_SAVE_IMPORT");
   s_default_available = false;
-  CHECK(SaveEditor_HandleAction(kSettingAction_SaveImport, &draft) ==
-        kSaveEditorAction_Failed);
+  CHECK(SaveEditor_HandleAction(kSettingAction_SaveImport, &draft) == kSaveEditorAction_Failed);
   CHECK(s_import_calls == 0);
   s_default_available = true;
-  CHECK(SaveEditor_HandleAction(kSettingAction_SaveImport, &draft) ==
-        kSaveEditorAction_Failed);
+  CHECK(SaveEditor_HandleAction(kSettingAction_SaveImport, &draft) == kSaveEditorAction_Failed);
   CHECK(s_import_calls == 1 && !s_backup);
   s_success = true;
   draft.save_autobackup = true;
@@ -181,26 +186,59 @@ static void TestActions(void) {
   CHECK(!strcmp(s_import_path, "explicit.srm"));
   unsetenv("AR_SAVE_IMPORT");
 
-  const SettingAction exports[] = {kSettingAction_SaveExportCampaign,
-      kSettingAction_SaveExportSrm, kSettingAction_SaveExportIni};
+  const SettingAction exports[] = {kSettingAction_SaveExportCampaign, kSettingAction_SaveExportSrm,
+                                   kSettingAction_SaveExportIni};
   for (int i = 0; i < 3; i++) {
     s_success = true;
-    CHECK(SaveEditor_HandleAction(exports[i], &draft) ==
-          kSaveEditorAction_Completed);
+    CHECK(SaveEditor_HandleAction(exports[i], &draft) == kSaveEditorAction_Completed);
     CHECK(s_campaign == (i == 0));
     CHECK(s_format == (i == 2 ? kSaveFileFormat_Ini : kSaveFileFormat_NativeSrm));
     s_success = false;
     CHECK(SaveEditor_HandleAction(exports[i], &draft) == kSaveEditorAction_Failed);
   }
-  CHECK(SaveEditor_HandleAction(kSettingAction_SaveImport, NULL) ==
-        kSaveEditorAction_Failed);
-  CHECK(SaveEditor_HandleAction(kSettingAction_TogglePause, &draft) ==
-        kSaveEditorAction_Failed);
+  CHECK(SaveEditor_HandleAction(kSettingAction_SaveImport, NULL) == kSaveEditorAction_Failed);
+  CHECK(SaveEditor_HandleAction(kSettingAction_TogglePause, &draft) == kSaveEditorAction_Failed);
   CHECK(s_apply_calls == 3 && s_import_calls == 3 && s_export_calls == 6);
+}
+
+static void TestPickedFiles(void) {
+  Settings settings = {.save_autobackup = true};
+  SaveError error = {{0}};
+  s_success = true;
+  const int imports = s_import_calls, exports = s_export_calls;
+  setenv("AR_SAVE_IMPORT", "must-not-import-this.srm", 1);
+  CHECK(SaveEditor_HandleFileAction(kSettingAction_SaveImport, "chosen.srm", &settings, &error) ==
+        kSaveEditorAction_RestartRequired);
+  CHECK(s_import_calls == imports + 1 && !strcmp(s_import_path, "chosen.srm") && s_backup);
+  unsetenv("AR_SAVE_IMPORT");
+  const SettingAction actions[] = {kSettingAction_SaveExportCampaign, kSettingAction_SaveExportSrm,
+                                   kSettingAction_SaveExportIni};
+  const char *extensions[] = {"arsave", "srm", "ini"};
+  for (unsigned i = 0; i < 3; ++i) {
+    CHECK(!strcmp(SaveEditor_ExportExtension(actions[i]), extensions[i]));
+    CHECK(SaveEditor_HandleFileAction(actions[i], "unused-picked-export", &settings, &error) ==
+          kSaveEditorAction_Completed);
+    CHECK(s_export_calls == exports + (int)i + 1 && s_campaign == (i == 0));
+    CHECK(s_format == (i == 2 ? kSaveFileFormat_Ini : kSaveFileFormat_NativeSrm));
+    CHECK(!strcmp(s_import_path, "unused-picked-export"));
+    /* A chosen existing file is never overwritten, including a slot's save. */
+    CHECK(SaveEditor_HandleFileAction(actions[i], __FILE__, &settings, &error) ==
+          kSaveEditorAction_Failed);
+    CHECK(strstr(error.message, "existing files") && s_export_calls == exports + (int)i + 1);
+  }
+  CHECK(!SaveEditor_ExportExtension(kSettingAction_SaveImport));
+  CHECK(SaveEditor_HandleFileAction(kSettingAction_SaveImport, "", &settings, &error) ==
+        kSaveEditorAction_Failed);
+  CHECK(SaveEditor_HandleFileAction(kSettingAction_SaveApplyPersist, "chosen", &settings, &error) ==
+        kSaveEditorAction_Failed);
+  CHECK(SaveEditor_HandleFileAction(kSettingAction_SaveImport, "chosen", NULL, &error) ==
+        kSaveEditorAction_Failed);
+  CHECK(s_import_calls == imports + 1 && s_export_calls == exports + 3);
 }
 
 int main(void) {
   TestStagedValues();
   TestActions();
+  TestPickedFiles();
   return s_failures ? 1 : 0;
 }

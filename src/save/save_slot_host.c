@@ -29,6 +29,40 @@
 static SaveSlots s_save_slots;
 static bool s_managed_slots;
 
+static bool SlotChooseFile(SettingAction action, SaveError *error) {
+  const char *extension = SaveEditor_ExportExtension(action);
+  if (!extension && action != kSettingAction_SaveImport) return false;
+  char location[kHostPathCapacity], leaf[96];
+  if (extension)
+    snprintf(leaf, sizeof(leaf), "saves/slot-%02u.%s", s_save_slots.active + 1, extension);
+  else
+    snprintf(leaf, sizeof(leaf), "saves");
+  /* Launchers anchor the data working directory. Native pickers need an
+   * absolute starting location, unlike the save APIs' relative paths. */
+  char *directory = SDL_GetCurrentDirectory();
+  if (!directory) {
+    snprintf(error->message, sizeof(error->message), "%s", SDL_GetError());
+    return false;
+  }
+  int length = snprintf(location, sizeof(location), "%s%s", directory, leaf);
+  SDL_free(directory);
+  if (length < 0 || (size_t)length >= sizeof(location)) {
+    snprintf(error->message, sizeof(error->message), "The save file location is too long.");
+    return false;
+  }
+  return SaveFileDialog_Begin(g_window, extension, location, error);
+}
+static bool SlotFileAction(SettingAction action, const char *path, SaveError *error) {
+  if (!s_managed_slots || !InputReplay_PolicyChangesAllowed() || s_save_slots.pending ||
+      RuntimeSettings_LifecycleRequest() != kRuntimeLifecycle_None) {
+    snprintf(error->message, sizeof(error->message), "Save routing is not ready for this action.");
+    return false;
+  }
+  SaveEditorActionResult result = SaveEditor_HandleFileAction(action, path, &g_settings, error);
+  if (result == kSaveEditorAction_RestartRequired) RuntimeSettings_RequestPreparedRestart();
+  return result != kSaveEditorAction_Failed;
+}
+
 static bool SlotValidateActive(void *context,SaveError *error);
 static bool SlotBeforeCommit(void *context,SaveError *error) {
   SaveSlots *slots=context;
@@ -311,8 +345,11 @@ void SaveSlotHost_InstallHooks(void) {
     SaveSystem_SetStorageHooks(&storage);
     ActRaiserRegional_SetSettingsWriter(SlotSaveRegionalSettings,&s_save_slots);
   }
-  const SettingsOverlaySaveSlotHooks slots = { SlotScan, SlotDraft, SaveSlotManager_Edit,
-                                               SlotDraftView, SlotStart };
+  const SettingsOverlaySaveSlotHooks slots = {
+      .scan = SlotScan, .draft = SlotDraft, .edit = SaveSlotManager_Edit,
+      .view = SlotDraftView, .start = SlotStart, .choose_file = SlotChooseFile,
+      .poll_file = SaveFileDialog_Poll, .cancel_file = SaveFileDialog_Cancel,
+      .file_action = SlotFileAction};
   SettingsOverlay_SetSaveSlotHooks(&slots);
   if (s_managed_slots && SaveSlots_NeedsSetup(&s_save_slots)) {
     SettingsOverlay_Open();
@@ -323,6 +360,7 @@ void SaveSlotHost_InstallHooks(void) {
 }
 
 bool SaveSlotHost_Close(void) {
+  SaveFileDialog_Cancel();
   if (!s_managed_slots) return true;
   SaveError error = {{0}};
   const bool flushed = SaveSlots_Flush(&s_save_slots, &error);

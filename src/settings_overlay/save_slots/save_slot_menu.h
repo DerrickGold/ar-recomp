@@ -34,5 +34,8 @@ void SaveSlotMenu_TabState(int *active_tab, int *tab_count);
  * slot. Returning rescans storage; confirming rejects stale slot fingerprints. */
 bool SaveSlotMenu_ReturnFromEditor(void);
 const char *SaveSlotMenu_EditorTitle(void);
+/* Reuse the manager's slot column while the shell renders Advanced's rows. */
+bool SaveSlotMenu_DrawEditorSidebar(const struct MenuLayout *layout, int width, int height);
+bool SaveSlotMenu_EditorRowVisible(const struct SettingDesc *desc);
 bool SaveSlotMenu_ConfirmEditorAction(const struct SettingDesc *desc);
 #endif

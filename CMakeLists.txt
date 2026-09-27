@@ -2818,6 +2818,12 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_save_editor COMMAND actraiser_save_editor_test)
 
+    add_executable(actraiser_save_file_dialog_test
+        tests/save_file_dialog_test.c src/save/save_file_dialog.c)
+    target_include_directories(actraiser_save_file_dialog_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_save_file_dialog_test PRIVATE SDL3::SDL3)
+    add_test(NAME actraiser_save_file_dialog COMMAND actraiser_save_file_dialog_test)
+
     add_executable(actraiser_save_system_test
         tests/save_system_test.c
     )

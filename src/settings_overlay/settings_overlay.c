@@ -575,7 +575,7 @@ static void RebuildRegistryMenuRows(void) {
   if (ActiveTab()->category != kSettingCat_Enhancements) {
     for (int i = 0; i < g_setting_desc_count; i++) {
       const SettingDesc *desc = &g_setting_descs[i];
-      if (RowBelongsToActiveTab(desc))
+      if (RowBelongsToActiveTab(desc) && SaveSlotMenu_EditorRowVisible(desc))
         s_registry_rows[s_registry_row_count++] =
             (SettingMenuRow){.desc = desc};
     }
@@ -2316,7 +2316,8 @@ static void DrawMenu(const MenuLayout *layout) {
 
   const bool custom_rows = ActiveSectionIsCustom() || ActiveTabIsRegional();
 
-  DrawMenuNavColumn(layout, &chrome);
+  if (!SaveSlotMenu_DrawEditorSidebar(layout, chrome.left_width, chrome.top_height))
+    DrawMenuNavColumn(layout, &chrome);
   if(!s_submenu_open && section->icon==kOverlayIcon_Save && SaveSlotMenu_Available()) {
     DrawSectionIcon(layout,chrome.right_text_x,chrome.top_y+8,kIconSize,s_section,true,255);
     DrawTextN(layout,chrome.right_text_x+kIconSize+6,chrome.top_y+10,
