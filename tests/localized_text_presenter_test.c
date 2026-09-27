@@ -730,8 +730,7 @@ static int ExerciseReport(ArRenderDevice *device, ArEnhancedTextSettings setting
   return prepared.texts[1].surface.ascent;
 }
 
-static void ExercisePreflight(ArRenderDevice *device,
-                              const ArTextBackend *backend) {
+static void ExercisePreflight(ArRenderDevice *device, const ArTextBackend *backend) {
   test_case = "font preflight";
   TextureSink *sink = device->context;
   char error[kArTextRasterErrorCapacity];
@@ -742,87 +741,71 @@ static void ExercisePreflight(ArRenderDevice *device,
       .primary = s_test_font,
       .revision = 1,
   };
-  CHECK(
-      !ArLocalizedTextPresenter_PrepareFont(NULL, &font, error, sizeof(error)));
+  CHECK(!ArLocalizedTextPresenter_PrepareFont(NULL, &font, error, sizeof(error)));
   CHECK(error[0] && !sink->live);
   ArLocalizedTextPresenter_SetBackend(NULL);
-  CHECK(!ArLocalizedTextPresenter_PrepareFont(device, &font, error,
-                                              sizeof(error)));
+  CHECK(!ArLocalizedTextPresenter_PrepareFont(device, &font, error, sizeof(error)));
   CHECK(error[0] && !sink->live);
   ArLocalizedTextPresenter_SetBackend(backend);
   ++font.abi_version;
-  CHECK(!ArLocalizedTextPresenter_PrepareFont(device, &font, error,
-                                              sizeof(error)));
+  CHECK(!ArLocalizedTextPresenter_PrepareFont(device, &font, error, sizeof(error)));
   --font.abi_version;
-  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error,
-                                             sizeof(error)));
+  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error, sizeof(error)));
   CHECK(!error[0] && sink->live == 1);
   const unsigned warm_uploads = sink->uploads;
-  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error,
-                                             sizeof(error)));
+  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error, sizeof(error)));
   CHECK(sink->uploads == warm_uploads);
 
   ArTextPresentationFont candidate = font;
   candidate.revision = 2;
-  const ArFontResourceId bad_fonts[] = {UINT64_MAX,
-      ArHostFontResources_RegisterFile(&s_font_store, __FILE__, error, sizeof(error))};
+  const ArFontResourceId bad_fonts[] = {
+      UINT64_MAX, ArHostFontResources_RegisterFile(&s_font_store, __FILE__, error, sizeof(error))};
   CHECK(bad_fonts[1]); /* Valid resource, invalid font bytes. */
   for (size_t i = 0; i < sizeof(bad_fonts) / sizeof(bad_fonts[0]); ++i) {
     candidate.primary = bad_fonts[i];
-    CHECK(!ArLocalizedTextPresenter_PrepareFont(device, &candidate, error,
-                                                sizeof(error)));
+    CHECK(!ArLocalizedTextPresenter_PrepareFont(device, &candidate, error, sizeof(error)));
     CHECK(error[0] && sink->live == 1 && sink->uploads == warm_uploads);
-    CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error,
-                                               sizeof(error)));
-    CHECK(sink->uploads ==
-          warm_uploads); /* Failed selection retained the cache. */
+    CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error, sizeof(error)));
+    CHECK(sink->uploads == warm_uploads); /* Failed selection retained the cache. */
   }
-  candidate.primary = ArHostFontResources_RegisterFile(&s_font_store, AR_TEST_FONT_PATH,
-                                                       error, sizeof(error));
+  candidate.primary =
+      ArHostFontResources_RegisterFile(&s_font_store, AR_TEST_FONT_PATH, error, sizeof(error));
   CHECK(candidate.primary && candidate.primary != s_test_font);
   ArFontResourceId fallbacks[] = {UINT64_MAX};
   candidate.fallbacks = fallbacks;
   candidate.fallback_count = 1;
-  CHECK(!ArLocalizedTextPresenter_PrepareFont(device, &candidate, error,
-                                              sizeof(error)));
+  CHECK(!ArLocalizedTextPresenter_PrepareFont(device, &candidate, error, sizeof(error)));
   CHECK(error[0] && sink->live == 1 && sink->uploads == warm_uploads);
-  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error,
-                                             sizeof(error)));
+  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error, sizeof(error)));
   fallbacks[0] = s_test_font;
   for (int failure = 0; failure < 2; ++failure) {
     sink->fail_create = failure == 0;
     sink->fail_upload = failure == 1;
-    CHECK(!ArLocalizedTextPresenter_PrepareFont(device, &candidate, error,
-                                                sizeof(error)));
+    CHECK(!ArLocalizedTextPresenter_PrepareFont(device, &candidate, error, sizeof(error)));
     CHECK(error[0] && sink->live == 1);
     const unsigned uploads = sink->uploads;
-    CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error,
-                                               sizeof(error)));
+    CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error, sizeof(error)));
     CHECK(sink->uploads == uploads);
   }
   sink->fail_create = sink->fail_upload = false;
-  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &candidate, error,
-                                             sizeof(error)));
+  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &candidate, error, sizeof(error)));
   CHECK(sink->live == 1); /* Retry succeeds; previous resources retired once. */
   ArLocalizedTextPresenter_SetBackend(NULL);
-  CHECK(!ArLocalizedTextPresenter_PrepareFont(device, &candidate, error,
-                                              sizeof(error)));
+  CHECK(!ArLocalizedTextPresenter_PrepareFont(device, &candidate, error, sizeof(error)));
   ArLocalizedTextPresenter_SetBackend(backend);
   const unsigned uploads = sink->uploads;
-  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &candidate, error,
-                                             sizeof(error)));
+  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &candidate, error, sizeof(error)));
   CHECK(sink->uploads == uploads + 1 && sink->live == 1);
   /* Frames carry the same ordered stack: no second open/upload at capture. */
   ArLocalizationFrame frame;
   ArLocalizationFrame_Reset(&frame);
-  CHECK(ArLocalizationFrame_SetFont(&frame, "en", candidate.stack_id,
-                                    candidate.primary, candidate.revision,
-                                    &frame.settings));
+  CHECK(ArLocalizationFrame_SetFont(&frame, "en", candidate.stack_id, candidate.primary,
+                                    candidate.revision, &frame.settings));
   CHECK(ArLocalizationFrame_SetFallbackFonts(&frame, fallbacks, 1));
-  CHECK(ArLocalizationFrame_AddText(
-      &frame, 1, (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
-      (ArTextCellRegion){5, 19, 24, 6}, "Visible", 7, 7, 7, 1,
-      kArTextDirection_LeftToRight, 8, NULL, 0));
+  CHECK(ArLocalizationFrame_AddText(&frame, 1,
+                                    (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+                                    (ArTextCellRegion){5, 19, 24, 6}, "Visible", 7, 7, 7, 1,
+                                    kArTextDirection_LeftToRight, 8, NULL, 0));
   const HudPresentationChunk chunk = {
       .inspector_kind = kInspectorPresentation_HudBg,
       .screen_source = {0, 0, 256, 224},
@@ -831,24 +814,23 @@ static void ExercisePreflight(ArRenderDevice *device,
   };
   ArLocalizedPreparedFrame prepared;
   const unsigned pre_frame_uploads = sink->uploads;
-  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256,
-                                   224, &chunk, 1, &prepared);
+  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256, 224, &chunk, 1,
+                                   &prepared);
   CHECK(prepared.text_count == 1 && sink->uploads == pre_frame_uploads + 1);
   CHECK(ArLocalizedTextPresenter_Draw(device, &prepared));
-  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256,
-                                   224, &chunk, 1, &prepared);
+  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256, 224, &chunk, 1,
+                                   &prepared);
   CHECK(prepared.text_count == 1 && sink->uploads == pre_frame_uploads + 1);
   ++candidate.revision;
-  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &candidate, error,
-                                             sizeof(error)));
+  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &candidate, error, sizeof(error)));
   CHECK(sink->live == 3); /* Active probe/text plus one staged candidate. */
   CHECK(ArLocalizedTextPresenter_Draw(device, &prepared));
   const unsigned staged_uploads = sink->uploads;
   /* Semantic selection rejection keeps using the old frame/font. */
   ArLocalizedTextPresenter_DiscardPreparedFont(device);
   CHECK(sink->live == 2); /* Rejected candidate no longer consumes budget. */
-  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256,
-                                   224, &chunk, 1, &prepared);
+  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256, 224, &chunk, 1,
+                                   &prepared);
   CHECK(prepared.text_count == 1 && sink->uploads == staged_uploads);
   CHECK(ArLocalizedTextPresenter_Draw(device, &prepared));
   /* Immutable old frames contain borrowed IDs. While its backend is pinned,
@@ -856,14 +838,14 @@ static void ExercisePreflight(ArRenderDevice *device,
   ArHostFontResources_Retire(&s_font_store, candidate.primary);
   CHECK(!ArHostFontResources_Destroy(&s_font_store));
   ++frame.snapshots[0].source_revision;
-  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256,
-                                   224, &chunk, 1, &prepared);
+  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256, 224, &chunk, 1,
+                                   &prepared);
   CHECK(prepared.text_count == 1);
   CHECK(ArLocalizedTextPresenter_Draw(device, &prepared));
   ArLocalizedTextPresenter_Reset(device);
   CHECK(sink->live == 0);
-  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256,
-                                   224, &chunk, 1, &prepared);
+  ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256, 224, &chunk, 1,
+                                   &prepared);
   CHECK(!prepared.text_count && !prepared.mask_count && sink->live == 0);
 }
 
@@ -873,33 +855,26 @@ static void ExerciseFontRolePreflight(ArRenderDevice *device) {
   char error[kArTextRasterErrorCapacity];
   ArTextFontRole role = {.name = "hud", .primary = s_test_font};
   ArTextPresentationFont font = {.struct_size = sizeof(font),
-                                 .abi_version =
-                                     AR_TEXT_PRESENTATION_ABI_VERSION,
+                                 .abi_version = AR_TEXT_PRESENTATION_ABI_VERSION,
                                  .stack_id = "roles",
                                  .primary = s_test_font,
                                  .revision = 1,
                                  .roles = &role,
                                  .role_count = 1};
-  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error,
-                                             sizeof(error)));
-  CHECK(sink->live ==
-        2); /* Both named stacks actually rasterized and uploaded. */
+  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error, sizeof(error)));
+  CHECK(sink->live == 2); /* Both named stacks actually rasterized and uploaded. */
   const unsigned warm = sink->uploads;
-  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error,
-                                             sizeof(error)));
+  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error, sizeof(error)));
   CHECK(sink->uploads == warm);
-  const ArFontResourceId bad = ArHostFontResources_RegisterFile(
-      &s_font_store, __FILE__, error, sizeof(error));
+  const ArFontResourceId bad =
+      ArHostFontResources_RegisterFile(&s_font_store, __FILE__, error, sizeof(error));
   CHECK(bad);
   role.primary = bad;
-  CHECK(!ArLocalizedTextPresenter_PrepareFont(device, &font, error,
-                                              sizeof(error)));
-  CHECK(sink->live ==
-        2); /* The rejected role cannot replace the ready selection. */
+  CHECK(!ArLocalizedTextPresenter_PrepareFont(device, &font, error, sizeof(error)));
+  CHECK(sink->live == 2); /* The rejected role cannot replace the ready selection. */
   role.primary = s_test_font;
   const unsigned rejected = sink->uploads;
-  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error,
-                                             sizeof(error)));
+  CHECK(ArLocalizedTextPresenter_PrepareFont(device, &font, error, sizeof(error)));
   CHECK(sink->uploads == rejected);
   ArLocalizedTextPresenter_DiscardPreparedFont(device);
   CHECK(sink->live == 0);

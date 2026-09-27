@@ -167,6 +167,12 @@ if(_AR_ENHANCED_TEXT)
     target_link_libraries(actraiser_font_coverage PRIVATE
         SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_bidi_text actraiser_math actraiser_font_resources)
 
+    # Presenter resource lifetime is shared by the preview and both focused
+    # render harnesses. Keep this closure in one place when its internals move.
+    add_library(actraiser_localized_text_presenter STATIC
+        src/render/localized_text_presenter.c src/render/localized_text_resources.c)
+    target_include_directories(actraiser_localized_text_presenter PUBLIC ${CMAKE_SOURCE_DIR}/src)
+
     add_executable(actraiser_text_preview
         tools/text_preview_probe.c
         src/platform/sdl/text_preview_cli.c
@@ -191,12 +197,13 @@ if(_AR_ENHANCED_TEXT)
         src/actraiser/actraiser_localization_fixed_text.c
         src/render/render_device.c src/render/hud_layout.c
         src/render/text_surface_cache.c src/render/text_cell_composite.c
-        src/render/localized_text_layout.c src/render/localized_text_presenter.c
+        src/render/localized_text_layout.c
         src/render/localized_text_draw.c src/render/localized_text_artwork.c
         src/app/performance_metrics.c)
     target_include_directories(actraiser_text_preview PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_compile_definitions(actraiser_text_preview PRIVATE AR_HAS_SDL3_TTF=1)
     target_link_libraries(actraiser_text_preview PRIVATE
+            actraiser_localized_text_presenter
         SDL3::SDL3 SDL3_ttf::SDL3_ttf actraiser_bidi_text actraiser_math actraiser_font_resources)
 
     # A second host proves the parser/session/renderer do not need game routes,
@@ -725,7 +732,6 @@ if(BUILD_TESTING)
             src/localization/enhanced_text_settings.c
             src/render/text_surface_cache.c
             src/render/localized_text_layout.c
-            src/render/localized_text_presenter.c
             src/render/localized_text_draw.c
             src/render/localized_text_artwork.c
             src/localization/text_cell_record.c
@@ -737,6 +743,7 @@ if(BUILD_TESTING)
             src/actraiser/actraiser_localization_grid.c
             src/localization/language_row_shape.c)
         target_link_libraries(actraiser_localized_text_presenter_test PRIVATE
+            actraiser_localized_text_presenter
             actraiser_performance_test_support actraiser_render_test_support actraiser_text_test_support)
         target_include_directories(actraiser_localized_text_presenter_test PRIVATE
             ${CMAKE_SOURCE_DIR}/src)
@@ -756,13 +763,13 @@ if(BUILD_TESTING)
             src/localization/enhanced_text_settings.c
             src/render/text_surface_cache.c
             src/render/localized_text_layout.c
-            src/render/localized_text_presenter.c
             src/render/localized_text_draw.c
             src/render/localized_text_artwork.c
             src/localization/text_cell_record.c
             src/render/text_cell_composite.c
             src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c)
         target_link_libraries(actraiser_localized_text_live_line_test PRIVATE
+            actraiser_localized_text_presenter
             actraiser_performance_test_support actraiser_render_test_support actraiser_text_test_support)
         target_include_directories(actraiser_localized_text_live_line_test PRIVATE
             ${CMAKE_SOURCE_DIR}/src)

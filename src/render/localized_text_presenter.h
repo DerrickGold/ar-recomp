@@ -3,6 +3,8 @@
 /* ArLocalizedTextPresenter: turns a localization frame into prepared text,
  * indicators, inline objects and decorations to draw, and redraws a live text
  * line in place when it can instead of rebuilding the page.
+ * Font selection and cache lifetime live in localized_text_resources.c;
+ * artwork and draw submission live in their adjacent modules.
  * Phase: present.
  * Tests: tests/localized_text_presenter_test.c */
 

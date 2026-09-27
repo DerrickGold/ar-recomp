@@ -23,6 +23,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RULES = {
+    'render/localized_text_resources_internal.h': [
+        'src/render/localized_text_resources.c', 'src/render/localized_text_presenter.c'],
     'present/present_internal.h': [
         'src/present/*.c', 'tests/present_frame_order_test.c'],
     'sim/sim3d/present_sim3d_internal.h': [

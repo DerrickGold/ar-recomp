@@ -1,6 +1,7 @@
 #include "render/localized_text_presenter.h"
 
 #include "render/localized_text_artwork.h"
+#include "render/localized_text_resources_internal.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -11,19 +12,7 @@
 #include "render/text_cell_composite.h"
 #include "deterministic_hash.h"
 
-enum {
-  kSurfaceCacheCapacity = 128,
-  kFontSizeCacheCapacity = 32,
-  /* Entry count alone is not a memory budget: one tall scrolling page at
-   * HiDPI outweighs a hundred menu labels. This caps what the cache may own
-   * in texture bytes; the prepared frame's own surfaces are never evicted. */
-  kSurfaceCacheByteBudget = 96 << 20,
-  kReportPlanCapacity = 8,
-  kReportMeasureExtent = 4096,
-};
-
-_Static_assert(kSurfaceCacheCapacity >= kArLocalizedPreparedTextCapacity,
-               "a prepared frame must fit without evicting its own text surfaces");
+enum { kReportPlanCapacity = 8, kReportMeasureExtent = 4096 };
 
 typedef struct ReportPlan {
   ArTextCacheKey key;
@@ -36,33 +25,8 @@ typedef struct ReportPlan {
   bool valid, fits;
 } ReportPlan;
 
-typedef struct PendingFont {
-  ArTextBackendInstance instance;
-  ArTextSurfaceCache cache;
-  char stack[kArLocalizationFrameFontStackCapacity];
-  ArFontResourceId primary;
-  ArFontResourceId fallbacks[kArTextPresentationMaximumFallbackFonts];
-  size_t fallback_count;
-  ArTextFontRole roles[kArTextFontMaximumRoles];
-  size_t role_count;
-  uint64_t revision, backend_revision;
-} PendingFont;
-
 typedef struct LocalizedTextPresenterState {
-  ArTextBackend backend;
-  ArFontResources resources;
-  uint64_t backend_revision, active_backend_revision;
-  ArTextBackendInstance instance;
-  ArTextSurfaceCache cache;
-  bool cache_initialized;
-  char active_stack[kArLocalizationFrameFontStackCapacity];
-  ArFontResourceId active_primary;
-  ArFontResourceId active_fallbacks[kArTextPresentationMaximumFallbackFonts];
-  size_t active_fallback_count;
-  ArTextFontRole active_roles[kArTextFontMaximumRoles];
-  size_t active_role_count;
-  PendingFont pending;
-  uint64_t active_revision;
+  ArLocalizedTextResources fonts;
   uint64_t reported_errors[32];
   unsigned next_reported_error;
   ReportPlan reports[kReportPlanCapacity];
@@ -129,36 +93,15 @@ static void ReportOnce(const char *operation, const char *detail) {
 }
 
 void ArLocalizedTextPresenter_SetBackend(const ArTextBackend *backend) {
-  const ArTextBackend selected =
-      ArTextBackend_IsReady(backend) ? *backend : (ArTextBackend){0};
-  if (selected.ops != s_presenter.backend.ops ||
-      selected.context != s_presenter.backend.context)
-    ++s_presenter.backend_revision;
-  s_presenter.backend = selected;
+  ArLocalizedTextResources_SetBackend(&s_presenter.fonts, backend);
 }
 
 void ArLocalizedTextPresenter_SetFontResources(const ArFontResources *resources) {
-  const ArFontResources selected = ArFontResources_IsReady(resources)
-      ? *resources : (ArFontResources){0};
-  if (selected.ops != s_presenter.resources.ops ||
-      selected.context != s_presenter.resources.context)
-    ++s_presenter.backend_revision;
-  s_presenter.resources = selected;
+  ArLocalizedTextResources_SetFontResources(&s_presenter.fonts, resources);
 }
 
-static void DestroyResources(ArRenderDevice *device) {
+static void ResetFontLayout(ArRenderDevice *device) {
   ArLocalizedTextArtwork_Reset(device);
-  if (s_presenter.cache_initialized)
-    ArTextSurfaceCache_Destroy(&s_presenter.cache, device);
-  ArTextBackendInstance_Destroy(&s_presenter.instance);
-  s_presenter.cache_initialized = false;
-  s_presenter.active_stack[0] = 0;
-  s_presenter.active_primary = 0;
-  s_presenter.active_revision = 0;
-  s_presenter.active_fallback_count = 0;
-  memset(s_presenter.active_fallbacks, 0, sizeof(s_presenter.active_fallbacks));
-  s_presenter.active_role_count = 0;
-  memset(s_presenter.active_roles, 0, sizeof(s_presenter.active_roles));
   memset(s_presenter.reported_errors, 0, sizeof(s_presenter.reported_errors));
   s_presenter.next_reported_error = 0;
   memset(s_presenter.reports, 0, sizeof(s_presenter.reports));
@@ -169,7 +112,7 @@ static void ReportRequestFailure(const ArLocalizationTextSnapshot *snapshot,
                                   const ArTextRasterRequest *request,
                                   const char *detail) {
   const ArTextCacheKey key = ArTextSurfaceCache_MakeKey(
-      ArTextBackendInstance_Get(&s_presenter.instance), request);
+      ArTextBackendInstance_Get(&s_presenter.fonts.instance), request);
   char diagnostic[kArTextRasterErrorCapacity];
   snprintf(diagnostic, sizeof(diagnostic),
            "surface=%u layout=%u request=%016llx/%016llx: %.96s",
@@ -186,207 +129,26 @@ static void ReportRequestFailure(const ArLocalizationTextSnapshot *snapshot,
   ReportOnce("text surface acquisition failed", diagnostic);
 }
 
-static bool FontError(char *error, size_t capacity, const char *message) {
-  if (error && capacity)
-    snprintf(error, capacity, "%s", message);
-  return false;
-}
-
-static void DestroyPendingFont(ArRenderDevice *device) {
-  ArTextSurfaceCache_Destroy(&s_presenter.pending.cache, device);
-  ArTextBackendInstance_Destroy(&s_presenter.pending.instance);
-  memset(&s_presenter.pending, 0, sizeof(s_presenter.pending));
-}
-
 void ArLocalizedTextPresenter_DiscardPreparedFont(ArRenderDevice *device) {
-  DestroyPendingFont(device);
-}
-
-static bool ActiveFontMatches(ArRenderDevice *device,
-                              const ArTextPresentationFont *font) {
-  if (!s_presenter.cache_initialized || s_presenter.cache.device != device ||
-      s_presenter.active_backend_revision != s_presenter.backend_revision ||
-      s_presenter.active_revision != font->revision ||
-      s_presenter.active_fallback_count != font->fallback_count ||
-      strcmp(s_presenter.active_stack, font->stack_id) ||
-      s_presenter.active_primary != font->primary)
-    return false;
-  for (size_t i = 0; i < font->fallback_count; ++i)
-    if (font->fallbacks[i] != s_presenter.active_fallbacks[i])
-      return false;
-  return ArTextFontRoles_Equal(s_presenter.active_roles,
-                               s_presenter.active_role_count, font->roles,
-                               font->role_count);
+  ArLocalizedTextResources_DiscardPreparedFont(&s_presenter.fonts, device);
 }
 
 bool ArLocalizedTextPresenter_PrepareFont(ArRenderDevice *device,
-                                          const ArTextPresentationFont *font,
-                                          char *error, size_t error_capacity) {
-  if (error && error_capacity)
-    error[0] = 0;
-  if (!ArRenderDevice_IsReady(device) ||
-      !ArTextBackend_IsReady(&s_presenter.backend) ||
-      !ArFontResources_IsReady(&s_presenter.resources))
-    return FontError(error, error_capacity,
-                     "enhanced text backend is unavailable");
-  if (!font ||
-      font->struct_size < offsetof(ArTextPresentationFont, role_count) +
-                              sizeof(font->role_count) ||
-      font->abi_version != AR_TEXT_PRESENTATION_ABI_VERSION ||
-      !font->revision || !font->stack_id || !font->stack_id[0] ||
-      !font->primary ||
-      strlen(font->stack_id) >= sizeof(s_presenter.active_stack) ||
-      font->fallback_count > kArTextPresentationMaximumFallbackFonts ||
-      (font->fallback_count && !font->fallbacks) ||
-      !ArTextFontRoles_Valid(font->roles, font->role_count))
-    return FontError(error, error_capacity, "invalid enhanced font selection");
-  for (size_t i = 0; i < font->fallback_count; ++i) {
-    if (!font->fallbacks[i])
-      return FontError(error, error_capacity, "invalid fallback font resource");
-  }
-  if (ActiveFontMatches(device, font))
-    return true;
-  PendingFont *pending = &s_presenter.pending;
-  bool same_pending =
-      pending->cache.device == device &&
-      pending->backend_revision == s_presenter.backend_revision &&
-      pending->revision == font->revision &&
-      pending->fallback_count == font->fallback_count &&
-      !strcmp(pending->stack, font->stack_id) &&
-      pending->primary == font->primary;
-  for (size_t i = 0; same_pending && i < font->fallback_count; ++i)
-    same_pending = pending->fallbacks[i] == font->fallbacks[i];
-  same_pending =
-      same_pending && ArTextFontRoles_Equal(pending->roles, pending->role_count,
-                                            font->roles, font->role_count);
-  if (same_pending)
-    return true;
-  const ArTextBackendConfig config = {
-      .struct_size = sizeof(config),
-      .abi_version = AR_TEXT_BACKEND_CONFIG_ABI_VERSION,
-      .font_stack_id = font->stack_id,
-      .resources = s_presenter.resources,
-      .primary_font = font->primary,
-      .font_revision = font->revision,
-      .cached_size_capacity = kFontSizeCacheCapacity,
-      .fallback_fonts = font->fallbacks,
-      .fallback_font_count = font->fallback_count,
-      .roles = font->roles,
-      .role_count = font->role_count,
-  };
-  ArTextBackendInstance instance = {0};
-  if (!ArTextBackendInstance_Create(&instance, &s_presenter.backend, &config,
-                                    error, error_capacity))
-    return false;
-  ArTextSurfaceCache cache = {0};
-  if (!ArTextSurfaceCache_Init(&cache, kSurfaceCacheCapacity)) {
-    ArTextBackendInstance_Destroy(&instance);
-    return FontError(error, error_capacity, "text cache initialization failed");
-  }
-  ArTextSurfaceCache_SetByteBudget(&cache, kSurfaceCacheByteBudget);
-  /* Backend construction may be lazy, opening fonts only for requested sizes.
-   * Exercise shaping, raster allocation, texture creation and upload before
-   * advertising readiness to the game. Keep the warmed font/cache on success.
-   */
-  ArTextRasterRequest probe = {
-      .struct_size = sizeof(probe),
-      .abi_version = AR_TEXT_RASTER_REQUEST_ABI_VERSION,
-      .utf8 = "Ag",
-      .utf8_bytes = 2,
-      .font_stack_id = font->stack_id,
-      .font_stack_id_bytes = strlen(font->stack_id),
-      .source_revision = 1,
-      .font_revision = font->revision,
-      .style_id = kArTextStyle_RetailBlueWhiteBands,
-      .flags = kArTextRasterFlag_IncludeRevealClusters,
-      .font_pixels = 24,
-      .minimum_font_pixels = 24,
-      .maximum_width = 128,
-      .maximum_height = 128,
-      .filter = kArRenderFilter_Nearest,
-  };
-  ArTextSurface surface;
-  if (!ArTextSurfaceCache_Acquire(&cache, device,
-                                  ArTextBackendInstance_Get(&instance), &probe,
-                                  &surface, error, error_capacity)) {
-    ArTextSurfaceCache_Destroy(&cache, device);
-    ArTextBackendInstance_Destroy(&instance);
-    return false;
-  }
-  ArTextRunAppearance appearance = {
-      .scale_basis = 10000, .band_rgb = 0xffffff, .body_rgb = 0xffffff};
-  probe.appearance = &appearance;
-  for (size_t i = 0; i < font->role_count; ++i) {
-    snprintf(appearance.font_role, sizeof(appearance.font_role), "%s",
-             font->roles[i].name);
-    if (!ArTextSurfaceCache_Acquire(&cache, device,
-                                    ArTextBackendInstance_Get(&instance),
-                                    &probe, &surface, error, error_capacity)) {
-      ArTextSurfaceCache_Destroy(&cache, device);
-      ArTextBackendInstance_Destroy(&instance);
-      return false;
-    }
-  }
-  /* A source can still fail semantic validation after this readiness check.
-   * Keep the active font and all borrowed surfaces intact until a frame with
-   * the approved identity arrives. At most one candidate is retained. */
-  DestroyPendingFont(device);
-  pending->instance = instance;
-  pending->cache = cache;
-  snprintf(pending->stack, sizeof(pending->stack), "%s", font->stack_id);
-  pending->primary = font->primary;
-  pending->revision = font->revision;
-  pending->backend_revision = s_presenter.backend_revision;
-  pending->fallback_count = font->fallback_count;
-  for (size_t i = 0; i < font->fallback_count; ++i)
-    pending->fallbacks[i] = font->fallbacks[i];
-  pending->role_count = font->role_count;
-  if (font->role_count)
-    memcpy(pending->roles, font->roles,
-           font->role_count * sizeof(*font->roles));
-  return true;
+    const ArTextPresentationFont *font, char *error, size_t error_capacity) {
+  return ArLocalizedTextResources_PrepareFont(
+      &s_presenter.fonts, device, font, error, error_capacity);
 }
 
-static bool ActivateFont(ArRenderDevice *device,
-                         const ArLocalizationFrame *frame) {
-  if (frame->fallback_font_count > kArTextPresentationMaximumFallbackFonts)
-    return false;
-  const ArTextPresentationFont font = {
-      .struct_size = sizeof(font),
-      .abi_version = AR_TEXT_PRESENTATION_ABI_VERSION,
-      .stack_id = frame->font_stack_id,
-      .primary = frame->primary_font,
-      .revision = frame->font_revision,
-      .fallbacks = frame->fallback_fonts,
-      .fallback_count = frame->fallback_font_count,
-      .roles = frame->font_roles,
-      .role_count = frame->font_role_count,
-  };
+static bool ActivateFont(ArRenderDevice *device, const ArLocalizationFrame *frame) {
   char error[kArTextRasterErrorCapacity] = {0};
-  if (ArLocalizedTextPresenter_PrepareFont(device, &font, error,
-                                           sizeof(error))) {
-    if (!ActiveFontMatches(device, &font)) {
-      PendingFont *pending = &s_presenter.pending;
-      DestroyResources(device);
-      s_presenter.instance = pending->instance;
-      s_presenter.cache = pending->cache;
-      s_presenter.cache_initialized = true;
-      memcpy(s_presenter.active_stack, pending->stack, sizeof(pending->stack));
-      s_presenter.active_primary = pending->primary;
-      memcpy(s_presenter.active_fallbacks, pending->fallbacks,
-             sizeof(pending->fallbacks));
-      s_presenter.active_fallback_count = pending->fallback_count;
-      s_presenter.active_role_count = pending->role_count;
-      memcpy(s_presenter.active_roles, pending->roles, sizeof(pending->roles));
-      s_presenter.active_revision = pending->revision;
-      s_presenter.active_backend_revision = pending->backend_revision;
-      memset(pending, 0,
-             sizeof(*pending)); /* Ownership moved, not duplicated. */
-    }
-    return true;
+  bool changed;
+  if (!ArLocalizedTextResources_Activate(&s_presenter.fonts, device, frame,
+                                         &changed, error, sizeof(error))) {
+    ReportOnce("font initialization failed", error);
+    return false;
   }
-  ReportOnce("font initialization failed", error);
-  return false;
+  if (changed) ResetFontLayout(device);
+  return true;
 }
 
 static bool RectangleContains(ArRenderRectI outer, ArRenderRectI inner) {
@@ -741,8 +503,8 @@ static bool MeasureReport(
     request.font_pixels = request.minimum_font_pixels = font_pixels;
     ArTextSurface surface;
     char error[kArTextRasterErrorCapacity] = {0};
-    if (!ArTextSurfaceCache_Acquire(&s_presenter.cache, device,
-            ArTextBackendInstance_Get(&s_presenter.instance),
+    if (!ArTextSurfaceCache_Acquire(&s_presenter.fonts.cache, device,
+            ArTextBackendInstance_Get(&s_presenter.fonts.instance),
             &request, &surface, error, sizeof(error))) {
       ReportRequestFailure(snapshot, &request, error);
       return false;
@@ -789,7 +551,7 @@ static bool ResolveReportPlan(
                     bounds.w, bounds.h, false, &request))
     return false;
   const ArTextCacheKey key = ArTextSurfaceCache_MakeKey(
-      ArTextBackendInstance_Get(&s_presenter.instance), &request);
+      ArTextBackendInstance_Get(&s_presenter.fonts.instance), &request);
   uint64_t digest =
       GridDigest(ArLocalizationFrame_GetGrid(frame, snapshot));
   /* Identical resolved bytes can have different authored column boundaries.
@@ -928,8 +690,8 @@ static bool PrepareTable(
     ArTextSurface surface;
     char error[kArTextRasterErrorCapacity] = {0};
     if (!ArTextSurfaceCache_Acquire(
-            &s_presenter.cache, device,
-            ArTextBackendInstance_Get(&s_presenter.instance),
+            &s_presenter.fonts.cache, device,
+            ArTextBackendInstance_Get(&s_presenter.fonts.instance),
             &request, &surface, error, sizeof(error))) {
       char diagnostic[kArTextRasterErrorCapacity] = {0};
       snprintf(diagnostic, sizeof(diagnostic),
@@ -1430,8 +1192,8 @@ PrepareFieldCells(ArRenderDevice *device,
       }
       ArTextSurface surface;
       if (!ArTextSurfaceCache_Acquire(
-              &s_presenter.cache, device,
-              ArTextBackendInstance_Get(&s_presenter.instance), &cell_request,
+              &s_presenter.fonts.cache, device,
+              ArTextBackendInstance_Get(&s_presenter.fonts.instance), &cell_request,
               &surface, error, error_capacity))
         return kArLiveLine_RasterFailed;
       if (!SurfaceMatchesPage(&surface, page)) {
@@ -1529,8 +1291,8 @@ static ArLocalizedLiveLineResult PrepareLiveLineAlone(
   }
   ArTextSurface surface;
   if (!ArTextSurfaceCache_Acquire(
-          &s_presenter.cache, device,
-          ArTextBackendInstance_Get(&s_presenter.instance), &line_request,
+          &s_presenter.fonts.cache, device,
+          ArTextBackendInstance_Get(&s_presenter.fonts.instance), &line_request,
           &surface, error, error_capacity))
     return kArLiveLine_RasterFailed;
   if (!SurfaceMatchesPage(&surface, page))
@@ -1644,8 +1406,8 @@ static ArLocalizedLiveLineResult PrepareLiveLinePage(
   }
   ArTextSurface page_surface;
   if (!ArTextSurfaceCache_Acquire(
-          &s_presenter.cache, device,
-          ArTextBackendInstance_Get(&s_presenter.instance), &page_request,
+          &s_presenter.fonts.cache, device,
+          ArTextBackendInstance_Get(&s_presenter.fonts.instance), &page_request,
           &page_surface, error, error_capacity))
     return kArLiveLine_RasterFailed;
   if (!page_surface.raster_font_pixels) return kArLiveLine_IncompatibleMetrics;
@@ -2085,8 +1847,8 @@ static void PrepareCellText(ArRenderDevice *device, const ArLocalizationFrame *f
   }
   ArTextSurface surface;
   char error[kArTextRasterErrorCapacity] = {0};
-  if (!ArTextSurfaceCache_Acquire(&s_presenter.cache, device,
-                                  ArTextBackendInstance_Get(&s_presenter.instance), &request,
+  if (!ArTextSurfaceCache_Acquire(&s_presenter.fonts.cache, device,
+                                  ArTextBackendInstance_Get(&s_presenter.fonts.instance), &request,
                                   &surface, error, sizeof(error))) {
     ReportRequestFailure(snapshot, &request, error);
     return;
@@ -2205,7 +1967,7 @@ void ArLocalizedTextPresenter_Prepare(ArRenderDevice *device, const ArLocalizati
       .chunks = chunks,
       .chunk_count = chunk_count,
   };
-  ArTextSurfaceCache_EndFrame(&s_presenter.cache);
+  ArTextSurfaceCache_EndFrame(&s_presenter.fonts.cache);
   ReportPlan reports[kArTextCellRecordCapacity] = {0};
   for (uint8_t i = 0; i < frame->cells.count; ++i) {
     const ArTextCellRecord *record = &frame->cells.records[i];
@@ -2219,7 +1981,7 @@ void ArLocalizedTextPresenter_Prepare(ArRenderDevice *device, const ArLocalizati
       FitCellReport(device, frame, &cell, &reports[i]);
   }
 
-  ArTextSurfaceCache_BeginFrame(&s_presenter.cache);
+  ArTextSurfaceCache_BeginFrame(&s_presenter.fonts.cache);
   for (uint8_t i = 0; i < frame->cells.count; ++i) {
     if (prepared->text_count >= kArLocalizedPreparedTextCapacity) continue;
     ResolvedTextCell cell;
@@ -2250,7 +2012,7 @@ bool ArLocalizedTextPresenter_PrepareScreenText(ArRenderDevice *device,
   if (!utf8_bytes) {
     /* A blank still constitutes the current prepared frame: release a prior
      * label's pin even though this one needs no font or texture. */
-    if (s_presenter.cache_initialized) ArTextSurfaceCache_EndFrame(&s_presenter.cache);
+    if (s_presenter.fonts.cache_initialized) ArTextSurfaceCache_EndFrame(&s_presenter.fonts.cache);
     return !snapshot->cluster_count && !snapshot->revealed_cluster_count;
   }
   if (!ActivateFont(device, frame)) return false;
@@ -2316,12 +2078,12 @@ bool ArLocalizedTextPresenter_PrepareScreenText(ArRenderDevice *device,
 
   /* No other prepared frame is live on the mutually exclusive navigation
    * branch. Rotate retained cache references before acquiring this label. */
-  ArTextSurfaceCache_EndFrame(&s_presenter.cache);
-  ArTextSurfaceCache_BeginFrame(&s_presenter.cache);
+  ArTextSurfaceCache_EndFrame(&s_presenter.fonts.cache);
+  ArTextSurfaceCache_BeginFrame(&s_presenter.fonts.cache);
   ArTextSurface surface;
   char error[kArTextRasterErrorCapacity] = {0};
-  if (!ArTextSurfaceCache_Acquire(&s_presenter.cache, device,
-                                  ArTextBackendInstance_Get(&s_presenter.instance), &request,
+  if (!ArTextSurfaceCache_Acquire(&s_presenter.fonts.cache, device,
+                                  ArTextBackendInstance_Get(&s_presenter.fonts.instance), &request,
                                   &surface, error, sizeof(error))) {
     ReportRequestFailure(snapshot, &request, error);
     return false;
@@ -2354,20 +2116,6 @@ bool ArLocalizedTextPresenter_PrepareScreenText(ArRenderDevice *device,
 
 void ArLocalizedTextPresenter_Reset(ArRenderDevice *device) {
   s_presenter.live_line_stats = (ArLocalizedLiveLineStats){0};
-  DestroyPendingFont(device);
-  if (s_presenter.cache_initialized) {
-    const ArTextSurfaceCacheStats *stats =
-        ArTextSurfaceCache_GetStats(&s_presenter.cache);
-    if (stats && stats->lookups)
-      fprintf(stderr,
-              "[localized-text] cache lookups=%llu hits=%llu misses=%llu "
-              "rasters=%llu uploads=%llu failures=%llu\n",
-              (unsigned long long)stats->lookups,
-              (unsigned long long)stats->hits,
-              (unsigned long long)stats->misses,
-              (unsigned long long)stats->rasterize_calls,
-              (unsigned long long)stats->upload_calls,
-              (unsigned long long)stats->failures);
-  }
-  DestroyResources(device);
+  ResetFontLayout(device);
+  ArLocalizedTextResources_Reset(&s_presenter.fonts, device);
 }

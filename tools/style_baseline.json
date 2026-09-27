@@ -17,9 +17,6 @@
  "src/localization/language_keyboard.c": {
   "long-line": 3
  },
- "src/main.c": {
-  "long-line": 1
- },
  "src/save/save_paths.c": {
   "long-line": 1
  },
@@ -210,7 +207,7 @@
  },
  "tests/actraiser_sim_menu_test.c": {
   "long-line": 2,
-  "packed": 28
+  "packed": 27
  },
  "tests/actraiser_sources_test.c": {
   "long-line": 5,
