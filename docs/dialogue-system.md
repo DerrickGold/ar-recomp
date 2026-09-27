@@ -317,6 +317,18 @@ owned by `ArDialogueSession`. Font shaping and complete-line measurement remain
 in `src/render/localized_text_layout.c` and `localized_text_presenter.c`.
 
 The native execution adapter (`actraiser_localization_schedule.c`) supplies
-paging, cancellation and fast-reveal policy. The localization runtime does not
-query SIM menu state. Original retained-row dialogue keeps its native policy;
-modern menu prose opts into measured screenfuls.
+input, cancellation and fast-reveal policy. Every scheduled enhanced dialogue
+uses measured screenfuls, including cathedral events and Sky Palace prose;
+paging does not depend on modern SIM menu ownership. A fresh acknowledgement
+advances an overflowing screenful before execution reaches the native page/end
+wait. Acknowledged authored pages are retired even at nonzero message speed.
+Original presentation retains the native scrolling and continuation rules.
+
+The Northwall bow-and-arrows offering (`simulation.event.northwall.slot_31`,
+USA source `$04:9EA7`, selector `$9521`) and bridge knowledge
+(`simulation.event.northwall.slot_02`, source `$04:C260`, selector `$94E7`)
+both enter from `$01:888C` in the cathedral (`00/08`). Each source has one
+native page, but enhanced font metrics can require several screenfuls. The
+opening text is present in extraction; scrolling immediately to the final rows
+at instant text speed loses it from view. These routes are scheduler regression
+cases for both menu styles and instant/nonzero text speeds.

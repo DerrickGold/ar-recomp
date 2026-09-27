@@ -30,9 +30,7 @@ static int s_credits_page = -1;
 int ActRaiserCredits_PresentedPage(void) { return s_credits_page; }
 void ActRaiserCredits_ObserveClear(void) {}
 static bool s_menu_skip, s_menu_describing, s_menu_aborted;
-static bool s_menu_paging;
-static uint32_t s_page_span;
-bool ActRaiserSimMenu_OwnsPresentation(void) { return s_menu_paging; }
+static uint32_t s_page_span = UINT32_MAX;
 bool ActRaiserSimMenu_SkipDialogue(const CpuState *cpu) {
   (void)cpu;
   return s_menu_skip;
@@ -156,7 +154,7 @@ static void WriteNativeFixture(bool oversized) {
 
 uint8 cpu_read8(CpuState *cpu, uint8 bank, uint16 address) {
   (void)cpu;
-  return bank == 1 && address >= 0x8000 ? s_rom[address]
+  return (bank == 1 || bank == 4) && address >= 0x8000 ? s_rom[address]
                                         : g_ram[(bank == 0x7f ? 0x10000u : 0u) + address];
 }
 uint16 cpu_read16(CpuState *cpu, uint8 bank, uint16 address) {
@@ -192,7 +190,7 @@ static void CaptureWithTransform(bool mode7_transformed) {
   if (strstr(s_frame.text, "Dernière")) s_seen_pages |= 4;
   if (strstr(s_frame.text, "Avant")) s_prefix_seen = true;
   if (strstr(s_frame.text, "Après") && !strstr(s_frame.text, "Avant")) s_suffix_seen = true;
-  if (s_menu_paging && s_frame.dialogue_ticket && s_frame.dialogue_paged) {
+  if (s_frame.dialogue_ticket && s_frame.dialogue_paged) {
     for (unsigned i = 0; i < s_frame.snapshot_count; ++i) {
       const ArLocalizationTextSnapshot *text = &s_frame.snapshots[i];
       if (text->surface_id != s_frame.dialogue_surface_id) continue;
@@ -227,7 +225,8 @@ RecompReturn bank_01_9284_M1X0(CpuState *cpu) {
     exit(1);
   }
   Capture();
-  if (s_check_cadence && s_frame.snapshot_count) {
+  if (s_check_cadence && s_frame.snapshot_count &&
+      s_frame.snapshots[0].revealed_utf8_bytes) {
     const ArLocalizationTextSnapshot *snapshot = &s_frame.snapshots[0];
     static const unsigned boundaries[] = {1, 5, 10, 12};
     CHECK(s_cadence_speed && s_cadence_frames < 4 * s_cadence_speed);
@@ -439,6 +438,7 @@ static void ShortenAtPage(void) {
 }
 
 static void ExtendOnce(void) {
+  if (!s_frame.snapshot_count || !s_frame.snapshots[0].revealed_utf8_bytes) return;
   s_frame_hook = NULL;
   SelectContent(1);
 }
@@ -544,7 +544,7 @@ static bool BeginNameDialogue(void) {
   CHECK(!ActRaiser_LocalizationObserveTextEntry(&cpu));
   ActRaiserLocalizationTextObservation observation = {.struct_size = sizeof(observation)};
   CHECK(ActRaiserLocalizationText_CopyObservation(&observation));
-  return ActRaiserLocalizationRuntime_BeginDialogue(&observation, false);
+  return ActRaiserLocalizationRuntime_BeginDialogue(&observation);
 }
 
 static bool FrameHasText(const char *text) {
@@ -881,7 +881,7 @@ static void TestUnicodeNameHandoff(void) {
         .context_pc24 = 0x0185ca,
         .map_number = kActRaiserNonActionMap_SkyPalace,
     };
-    CHECK(!ActRaiserLocalizationRuntime_BeginDialogue(&accepted, false));
+    CHECK(!ActRaiserLocalizationRuntime_BeginDialogue(&accepted));
     CHECK(s_font_preflights == preflights);
     CHECK(SaveSystem_CopyLocalizedPlayerName("A", name, sizeof(name)));
     CHECK(!strcmp(name, "A"));
@@ -1191,6 +1191,31 @@ static void TestLegacySelectionGate(ActRaiserLocalizationPackHost host) {
   CHECK(s_legacy_notices == 3 && s_legacy_native);
 }
 
+static void TestMenuOpeningLabels(void) {
+  static ArLocalizationFrame opening, browsing;
+  Capture();
+  CHECK(s_frame.font_revision);
+  const uint16_t palette[] = {0, 0, 0x7f33, 0x7fff};
+  for (unsigned category = 0; category < kSimMenuCategoryCount; ++category) {
+    SimMenuModel menu = {.phase = kSimMenu_Opening,
+                         .category = category,
+                         .submenu = true};
+    SimMenuLocalization_CaptureLabels(&opening, &s_frame, &menu, palette, 4);
+    CHECK(ArLocalizationFrame_IsValid(&opening));
+    CHECK(ArLocalizationFrame_FindScreenText(&opening, 610 + category));
+    for (unsigned row = 0; row < kSimMenuCategoryActionCounts[category]; ++row) {
+      const ArLocalizationScreenTextRecord *record =
+          ArLocalizationFrame_FindScreenText(&opening, 601 + row);
+      CHECK(record && opening.snapshots[record->snapshot_slot].utf8_bytes);
+    }
+    /* Releasing the opening button must not replace ROM fallback labels
+     * with enhanced ones: text, font, appearance and layout already match. */
+    menu.phase = kSimMenu_Browse;
+    SimMenuLocalization_CaptureLabels(&browsing, &s_frame, &menu, palette, 4);
+    CHECK(!memcmp(&opening, &browsing, sizeof(opening)));
+  }
+}
+
 static void TestMenuLabelCapacity(void) {
   static ArLocalizationFrame source, before, labels;
   Capture();
@@ -1321,7 +1346,6 @@ static void TestMenuDialogueKinds(void) {
   ActRaiserLocalizationRuntime_Shutdown();
   g_settings.localization_presentation = 1;
   g_settings.localization_content = 1;
-  s_menu_paging = true;
   s_page_span = 16;
   for (unsigned i = 0; i < 2 * sizeof(cases) / sizeof(cases[0]); ++i) {
     memset(g_ram, 0, sizeof(g_ram));
@@ -1357,7 +1381,8 @@ static void TestMenuDialogueKinds(void) {
     }
     CHECK(found);
   }
-  s_menu_paging = s_menu_describing = false;
+  s_menu_describing = false;
+  s_page_span = UINT32_MAX;
   ActRaiserLocalizationRuntime_Shutdown();
 }
 
@@ -1387,7 +1412,7 @@ static void TestMenuViewportPaging(void) {
   ActRaiserLocalizationRuntime_Shutdown();
   g_settings.localization_presentation = 1;
   g_settings.localization_content = 1;
-  s_menu_paging = s_menu_describing = true;
+  s_menu_describing = true;
   s_first_poll_held = true;
   for (unsigned speed = 0; speed <= 2; speed += 2) {
     s_page_span = 16;
@@ -1415,7 +1440,44 @@ static void TestMenuViewportPaging(void) {
   s_frame_hook = FailPresentationOnce;
   RunRainViewport(0);
   CHECK(!s_frame_hook && !ActRaiserLocalizationRuntime_DialogueScheduled());
-  s_menu_paging = s_menu_describing = s_first_poll_held = false;
+  s_menu_describing = s_first_poll_held = false;
+  s_page_span = UINT32_MAX;
+  ActRaiserLocalizationRuntime_Shutdown();
+}
+
+static void TestChurchViewportPaging(void) {
+  /* Both reported Northwall messages have one native page, yet can require
+   * several enhanced screenfuls. The command menu never owns this scene. */
+  const uint16_t sources[] = {0x9ea7, 0xc260};
+  const uint16_t selectors[] = {0x9521, 0x94e7};
+  g_settings.localization_presentation = 1;
+  g_settings.localization_content = 1;
+  s_menu_describing = false;
+  s_first_poll_held = true;
+  s_page_span = 16;
+  for (unsigned pass = 0; pass < 8; ++pass) {
+    ActRaiserLocalizationRuntime_Shutdown();
+    ActRaiserLocalizationText_ResetObservation();
+    memset(g_ram, 0, sizeof(g_ram));
+    g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Temple;
+    g_ram[0x200] = (pass / 2 % 2) * 2;
+    g_settings.sim_menu_style = pass / 4;
+    s_frames = s_confirms = s_polls = s_native_entries = s_resets = 0;
+    const unsigned message = pass % 2;
+    const uint8_t script[] = {5, 'a', 0};
+    memcpy(s_rom + sources[message], script, sizeof(script));
+    CpuState cpu = {.Y = sources[message], .X = selectors[message], .S = 0x1e0,
+                    .PB = 1, .DB = 4, .P = 0x20, .m_flag = 1, .ram = g_ram};
+    cpu_write16(&cpu, 0, cpu.S + 1, 0x888b);
+    CHECK(ActRaiser_LocalizationScheduleEntry(&cpu));
+    CHECK(ActRaiser_LocalizationRunDialogue(&cpu) == RECOMP_RETURN_NORMAL);
+    CHECK(cpu.S == 0x1e2 && s_native_entries == 1 && s_resets == 1);
+    Capture();
+    CHECK(s_frame.dialogue_paged && s_frame.dialogue_page_start == 32);
+    CHECK(s_confirms == 2 && s_polls == 5); /* Held A cannot skip the first page. */
+  }
+  s_first_poll_held = false;
+  s_page_span = UINT32_MAX;
   ActRaiserLocalizationRuntime_Shutdown();
 }
 
@@ -1525,14 +1587,16 @@ int main(void) {
   g_settings.localization_content = 1;
   g_settings.localization_presentation = 1;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
-  CHECK(s_confirms == 2 && s_frames == 12 && s_seen_pages == 7);
+  /* Two initial layout measurements (before/after reset), then one per page. */
+  CHECK(s_confirms == 2 && s_frames == 16 && s_seen_pages == 7);
   CHECK(strstr(s_frame.text, "Dernière") && !strstr(s_frame.text, "Première"));
   CHECK(s_font_preflights == 2); /* No probing on glyph/reveal/frame ticks. */
   TestMenuHelp();
+  TestMenuOpeningLabels();
   TestMenuLabelCapacity();
   s_frame_hook = RejectFontSwitchOnce;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
-  CHECK(!s_frame_hook && s_confirms == 2 && s_frames == 12 && s_seen_pages == 7);
+  CHECK(!s_frame_hook && s_confirms == 2 && s_frames == 16 && s_seen_pages == 7);
   CHECK(s_font_preflights == 3);
   /* A newly selected installed pack is staged, not loaded over the active
    * working pack. Both malformed sources and font rejection retain it. */
@@ -1550,7 +1614,7 @@ int main(void) {
   ActRaiserLocalizationRuntime_ApplySettings();
   CHECK(g_settings.localization_content == 2);
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
-  CHECK(s_confirms == 2 && s_frames == 12 && s_seen_pages == 7);
+  CHECK(s_confirms == 2 && s_frames == 16 && s_seen_pages == 7);
   g_settings.localization_content = 1;
   ActRaiserLocalizationRuntime_ApplySettings();
 
@@ -1569,22 +1633,22 @@ int main(void) {
       s_check_cadence = true;
       Run(0xf854, 0x8794, cadence_sources[i], sizeof(cadence_sources[i]), speeds[j]);
       s_check_cadence = false;
-      CHECK(s_cadence_frames == 4 * speeds[j] && s_frames == 4 * speeds[j] && s_confirms == 0);
+      CHECK(s_cadence_frames == 4 * speeds[j] && s_frames == 4 * speeds[j] + 2 && s_confirms == 0);
     }
   }
 
   s_first_poll_held = true;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
-  CHECK(s_confirms == 2 && s_frames == 13 && s_seen_pages == 7);
+  CHECK(s_confirms == 2 && s_frames == 17 && s_seen_pages == 7);
   s_first_poll_held = false;
 
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 1);
   CHECK(s_confirms == 2 && s_frames > 10 && s_seen_pages == 7);
-  CHECK(strstr(s_frame.text, "Première") && strstr(s_frame.text, "Dernière"));
+  CHECK(!strstr(s_frame.text, "Première") && strstr(s_frame.text, "Dernière"));
 
   const uint8_t dictionary_pages[] = {5, 0x80, 0x81, 2, 0x82, 1};
   Run(0xfa7b, 0x8afb, dictionary_pages, sizeof(dictionary_pages), 0);
-  CHECK(s_confirms == 2 && s_frames == 12 && s_seen_pages == 7);
+  CHECK(s_confirms == 2 && s_frames == 16 && s_seen_pages == 7);
 
   s_frame_hook = FailPresentationOnce;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
@@ -1592,13 +1656,13 @@ int main(void) {
   CHECK(!s_frame.snapshot_count);
   s_frame_hook = FailPresentationAtPage;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
-  CHECK(!s_frame_hook && !s_confirms && s_frames == 4);
+  CHECK(!s_frame_hook && !s_confirms && s_frames == 6);
   s_frame_hook = FailPresentationAtPage;
   Run(0xfa7b, 0x8afb, dictionary_pages, sizeof(dictionary_pages), 0);
   CHECK(!s_frame_hook && s_native_confirms == 1 && s_confirms == 1);
   s_frame_hook = StaleFailureOnce;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
-  CHECK(!s_frame_hook && s_confirms == 2 && s_frames == 12 && s_seen_pages == 7);
+  CHECK(!s_frame_hook && s_confirms == 2 && s_frames == 16 && s_seen_pages == 7);
 
   const uint8_t three_pages[] = {5, 'a', 2, 'b', 2, 'c', 1};
   Run(0xf99b, 0x8aa0, three_pages, sizeof(three_pages), 1);
@@ -1606,14 +1670,14 @@ int main(void) {
   CHECK(s_frame.snapshot_count == 1 && s_frame.snapshots[0].utf8_bytes == 0);
 
   Run(0xf812, 0x8740, one_page, sizeof(one_page), 0);
-  CHECK(s_confirms == 0 && s_frames == 6);
+  CHECK(s_confirms == 0 && s_frames == 8);
   CHECK(s_prefix_seen && s_suffix_seen);
   CHECK(strstr(s_frame.text, "Après") && !strstr(s_frame.text, "Avant"));
 
   /* A same-pause round trip cannot replay waits or lose authored progress. */
   s_frame_hook = RoundTripOnce;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
-  CHECK(!s_frame_hook && s_confirms == 2 && s_frames == 12 && s_seen_pages == 7);
+  CHECK(!s_frame_hook && s_confirms == 2 && s_frames == 16 && s_seen_pages == 7);
 
   s_frame_hook = DisableOnce;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
@@ -1624,7 +1688,7 @@ int main(void) {
   /* Cancel an added-only confirmation without waiting for a fake button. */
   s_frame_hook = DisableAtPage;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
-  CHECK(!s_frame_hook && !s_confirms && s_frames == 4);
+  CHECK(!s_frame_hook && !s_confirms && s_frames == 6);
   CHECK(!s_frame.snapshot_count);
   SelectPresentation(1);
   CHECK(s_frame.snapshot_count == 1);
@@ -1638,7 +1702,7 @@ int main(void) {
 
   s_frame_hook = ShortenAtPage;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
-  CHECK(!s_frame_hook && !s_confirms && s_frames == 4);
+  CHECK(!s_frame_hook && !s_confirms && s_frames == 6);
   CHECK(strstr(s_frame.text, "Brief page,"));
   CHECK(s_frame.fallback_font_count == 1 && s_frame.fallback_fonts[0] < 4096 &&
         s_fallback_fonts[s_frame.fallback_fonts[0]]);
@@ -1646,11 +1710,11 @@ int main(void) {
   s_frame_hook = ExtendOnce;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
   CHECK(!s_frame_hook && s_confirms == 2 && s_seen_pages == 7);
-  CHECK(s_frames == 16); /* Keep the old 7-frame wait; do not restart at 3. */
+  CHECK(s_frames == 20); /* Old 7-frame wait plus measurement; do not restart at 3. */
 
   s_frame_hook = StyleOnce;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
-  CHECK(!s_frame_hook && s_confirms == 2 && s_frames == 12);
+  CHECK(!s_frame_hook && s_confirms == 2 && s_frames == 16);
 
   /* Activation before any rendered enhanced frame adopts current ROM state. */
   ActRaiserLocalizationRuntime_Shutdown();
@@ -1697,6 +1761,7 @@ int main(void) {
   TestPartialRtlSources();
   TestMenuDialogueKinds();
   TestMenuViewportPaging();
+  TestChurchViewportPaging();
   TestLegacySelectionGate(pack_host);
   ActRaiserLocalizationRuntime_Shutdown();
   TestNativeMenuContinuation();

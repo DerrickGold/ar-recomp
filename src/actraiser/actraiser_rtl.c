@@ -40,7 +40,12 @@ static const SnesRunnerApi *s_runner_api;
 
 bool ActRaiserSimMenu_ArtworkAvailable(void) {
   static SimMenuFrame preflight;
-  return SimMenuArt_Capture(&preflight, s_runner_api, s_runner);
+  static bool failure_reported;
+  const bool available = SimMenuArt_Capture(&preflight, s_runner_api, s_runner);
+  if (!available && !failure_reported)
+    fprintf(stderr, "[sim-menu] modern artwork preflight failed; retaining native menu control\n");
+  failure_reported = !available;
+  return available;
 }
 
 void ActRaiser_BindRunner(SrRunnerHandle *runner) {

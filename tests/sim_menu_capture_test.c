@@ -90,8 +90,14 @@ int main(void) {
   assert(hint_copies == 3 && art_captures == 3 && !failures);
 
   art_available = false;
-  Capture(&api);
-  assert(!frame.valid && failures == 1);
+  for (int phase = kSimMenu_Browse; phase <= kSimMenu_Opening; ++phase) {
+    if (phase == kSimMenu_Native) continue;
+    model.phase = phase;
+    const int before = failures;
+    Capture(&api);
+    assert(!frame.valid && failures == before + 1);
+    assert(frame.model.phase == phase); /* No silent switch to native after ownership. */
+  }
   assert(model_copies == help_copies);
   puts("SIM menu capture: gating, native confirmation, snapshot and failure reporting passed");
   return 0;

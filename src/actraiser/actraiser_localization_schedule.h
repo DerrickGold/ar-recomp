@@ -15,9 +15,10 @@ typedef struct ActRaiserLocalizationDialogueHost {
   bool (*fast_reveal)(void *context);
 } ActRaiserLocalizationDialogueHost;
 
-/* The caller chooses fixed screenfuls or native retained-row scrolling. */
+/* Every enhanced dialogue uses acknowledged screenfuls, regardless of scene
+ * or command-menu ownership. Retail text keeps its native scrolling rules. */
 bool ActRaiserLocalizationRuntime_BeginDialogue(
-    const ActRaiserLocalizationTextObservation *observation, bool paged);
+    const ActRaiserLocalizationTextObservation *observation);
 /* Game-thread gate: consumes failure feedback for the current window before
  * permitting more authored work. Called again after every yielding callback. */
 bool ActRaiserLocalizationRuntime_DialogueScheduled(void);
@@ -28,7 +29,7 @@ void ActRaiserLocalizationRuntime_ScheduleByte(
     const ActRaiserLocalizationTextObservation *observation, uint8_t code,
     uint8_t text_speed, const ActRaiserLocalizationDialogueHost *host);
 bool ActRaiserLocalizationRuntime_ContinueDialogue(
-    const ActRaiserLocalizationDialogueHost *host, bool retain_rows);
+    const ActRaiserLocalizationDialogueHost *host);
 void ActRaiserLocalizationRuntime_ReturnDialogue(void);
 void ActRaiserLocalizationRuntime_RevealGlyph(
     uint8_t text_speed, const ActRaiserLocalizationDialogueHost *host);

@@ -62,8 +62,10 @@ static void AppendMenuLabels(
   SimMenuModel origin=*menu;
   if(origin.phase==kSimMenu_Describe || origin.phase==kSimMenu_Dialogue)
     origin.phase=origin.return_phase;
-  if(origin.phase==kSimMenu_Confirm) origin.phase=kSimMenu_Browse;
-  if(origin.phase==kSimMenu_MessageSpeed) origin.phase=kSimMenu_Browse;
+  /* Opening already draws Browse while native input waits for release.
+   * Publish its complete labels before that first visible frame, too. */
+  if(origin.phase==kSimMenu_Opening || origin.phase==kSimMenu_Confirm ||
+     origin.phase==kSimMenu_MessageSpeed) origin.phase=kSimMenu_Browse;
   menu=&origin;
   static const char *const categories[6]={
     "sim.menu.choice.movement", "sim.menu.choice.direct_people",

@@ -86,7 +86,6 @@ typedef struct LocalizationRuntime {
   uint64_t observation_serial;
   uint64_t failed_observation_serial;
   ArDialoguePager pager;
-  bool paged_dialogue;
   bool scheduled_dialogue;
   uint16_t scheduled_window_first_page;
   uint16_t scheduled_window_clear_control;
@@ -979,10 +978,9 @@ bool ActRaiserLocalizationRuntime_PageConfirmationPending(void) {
  * frame: a clear/delay/yield can precede that frame. Values are snapshotted once
  * here and the renderer only reads the resulting program. */
 bool ActRaiserLocalizationRuntime_BeginDialogue(
-    const ActRaiserLocalizationTextObservation *observation, bool paged) {
+    const ActRaiserLocalizationTextObservation *observation) {
   s_runtime.scheduled_dialogue = false;
   ArDialoguePager_Begin(&s_runtime.pager, false);
-  s_runtime.paged_dialogue = paged;
   s_runtime.failed_observation_serial = 0;
   s_runtime.native_handoff_valid = false;
   s_runtime.inherited_native_page_wait = false;
@@ -1027,20 +1025,18 @@ static void ScheduleFailed(const char *reason) {
   s_runtime.route = NULL;
 }
 
-static bool AdvanceScheduledPage(bool retain_rows) {
+static bool AdvanceScheduledPage(void) {
   if (!ArDialogueSession_AdvancePage(&s_runtime.session)) return false;
-  if (!retain_rows || s_runtime.paged_dialogue) {
-    /* Paged dialogue already acknowledged the previous screenful. Retaining
-     * its rows would ask the player to read them again at non-instant speed. */
-    s_runtime.scheduled_window_first_page =
-        (uint16_t)s_runtime.session.state.authored_page_index;
-    s_runtime.scheduled_window_clear_control = 0;
-  }
+  /* The player acknowledged the previous screenful. Retaining its rows would
+   * ask them to read it again when the native text speed is nonzero. */
+  s_runtime.scheduled_window_first_page =
+      (uint16_t)s_runtime.session.state.authored_page_index;
+  s_runtime.scheduled_window_clear_control = 0;
   return true;
 }
 
 bool ActRaiserLocalizationRuntime_ContinueDialogue(
-    const ActRaiserLocalizationDialogueHost *host, bool retain_rows) {
+    const ActRaiserLocalizationDialogueHost *host) {
   if (!host || !host->confirm_page ||
       !ActRaiserLocalizationRuntime_DialogueScheduled()) return false;
   if (!s_runtime.session.state.awaiting_page_advance)
@@ -1052,7 +1048,7 @@ bool ActRaiserLocalizationRuntime_ContinueDialogue(
   /* Host UI may have switched source while the native confirmation yielded. */
   if (!ActRaiserLocalizationRuntime_DialogueScheduled()) return true;
   if (!s_runtime.session.state.awaiting_page_advance) return true;
-  return AdvanceScheduledPage(retain_rows);
+  return AdvanceScheduledPage();
 }
 
 /* The native adapter owns input and frame service; screenful progression is
@@ -1063,7 +1059,7 @@ static bool DialogueCancelled(const ActRaiserLocalizationDialogueHost *host) {
 
 static bool WaitForDisplayPage(const ActRaiserLocalizationDialogueHost *host) {
   while (ActRaiserLocalizationRuntime_DialogueScheduled() &&
-         s_runtime.paged_dialogue && !DialogueCancelled(host)) {
+         !DialogueCancelled(host)) {
     ArDialoguePageSnapshot page;
     const ActRaiserLocalizationTextObservation observation = {
         .window_start_page = s_runtime.scheduled_window_first_page,
@@ -1103,7 +1099,7 @@ static bool PumpDialogue(bool one_glyph, bool cross_pages, uint8_t text_speed,
     if (s_runtime.session.state.awaiting_page_advance) {
       if (!cross_pages)
         return true;
-      if (!ActRaiserLocalizationRuntime_ContinueDialogue(host, text_speed != 0))
+      if (!ActRaiserLocalizationRuntime_ContinueDialogue(host))
         return false;
       if (!ActRaiserLocalizationRuntime_DialogueScheduled())
         return false;
@@ -1169,7 +1165,7 @@ void ActRaiserLocalizationRuntime_ScheduleByte(
      * real confirmation pays for this transition; never ask for it twice. */
     s_runtime.inherited_native_page_wait = false;
     if (session->state.awaiting_page_advance &&
-        !AdvanceScheduledPage(text_speed != 0)) {
+        !AdvanceScheduledPage()) {
       ScheduleFailed("inherited native continuation could not advance");
       return;
     }
@@ -1541,7 +1537,7 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
   if (ActRaiserLocalizationRuntime_DialogueScheduled()) {
     frame->dialogue_ticket = s_runtime.pager.ticket;
     frame->dialogue_surface_id = route->surface_id;
-    frame->dialogue_paged = s_runtime.paged_dialogue;
+    frame->dialogue_paged = true;
     frame->dialogue_page_start = s_runtime.pager.start;
   }
   if (added && (reveal_bytes == window->bytes ||

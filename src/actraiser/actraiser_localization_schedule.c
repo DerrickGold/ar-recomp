@@ -184,8 +184,7 @@ bool ActRaiser_LocalizationScheduleEntry(CpuState *cpu) {
                                                           sizeof(observation)};
   if (cpu && !ActRaiserSimMenu_SkipDialogue(cpu) &&
       ActRaiserLocalizationText_CopyObservation(&observation))
-    (void)ActRaiserLocalizationRuntime_BeginDialogue(
-        &observation, ActRaiserSimMenu_OwnsPresentation());
+    (void)ActRaiserLocalizationRuntime_BeginDialogue(&observation);
   /* The read-only return acknowledgement also matters in native mode. */
   return cpu != NULL;
 }
@@ -301,8 +300,7 @@ RecompReturn ActRaiser_LocalizationContinueDialogue(CpuState *cpu) {
     }
     ActRaiserSimMenu_DescriptionWait();
   } else if (!s_skipping_menu_text && !ActRaiserSimMenu_DescriptionAborted()) {
-    (void)ActRaiserLocalizationRuntime_ContinueDialogue(
-        &host, cpu_read8(cpu, 0, 0x0200) != 0);
+    (void)ActRaiserLocalizationRuntime_ContinueDialogue(&host);
   }
   if (!s_skipping_menu_text && !ActRaiserSimMenu_Describing() &&
       !ActRaiserLocalizationRuntime_DialogueScheduled()) {

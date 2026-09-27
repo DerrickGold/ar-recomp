@@ -178,6 +178,21 @@ each one, and *First connected* follows hotplug. If SDL does not recognise a
 pad, drop a `gamecontrollerdb.txt` next to the executable (or in `assets/`)
 and it is loaded at startup.
 
+### Native SIM menu quick use
+
+Enable **System → Game → Quality of life → Native menu quick use** to keep the
+Original SIM menu's layout and navigation while shortening command activation.
+It is off by default and works with native or enhanced rendering.
+
+**Use** skips the optional miracle explanations and selection instructions,
+going straight to the native question or action. Town/SP checks, Yes/No
+questions, errors, item outcomes and follow-up dialogue still run normally.
+**Describe menu item** runs the full original command flow, including its
+explanation and subsequent confirmation. It defaults to **S / SNES X / Xbox Y /
+PlayStation Triangle** and is remappable under **Controls**. Native cancellation
+and return behavior is retained. The Modern menu keeps its separate read-only
+Describe behavior regardless of this toggle.
+
 ### Modern SIM menu
 
 Set **Town 3D → SIM menu → Modern** for the compact town command menu.
@@ -643,6 +658,7 @@ The menu separates repairs for original-game bugs from intentional quality-of-li
 | Original bug fix | `AR_FIX_WINDMILL_WIND_STOP=1` | keeps every Aitos windmill stopped during the no-wind event, including windmills built after the event starts. Turning it off preserves the original behavior; this affects the enhanced town view only |
 | Quality of life | `AR_FIX_BRIDGE_LIMIT=1` | bridges stop counting toward a town's 128-structure population cap: completed bridges migrate to a validated sidecar in spare battery-save space while keeping their map mark, rendered metatile, river crossing, and 32-person support. Retroactive on existing towns; persisted only by the game's normal save transaction and sticky once saved. Replaces the withdrawn v1 slot-reuse/lightning designs, which broke town redraws |
 | Quality of life | `AR_TURBO_MULT=<n>` | turbo multiplier, 2–64 (default 8) |
+| Quality of life | `AR_NATIVE_MENU_QUICK_USE=1` | enables **Native menu quick use** (default Off): Original-menu Use skips optional explanations; the Describe binding runs the full original command flow |
 | Developer diagnostic | `AR_BRIDGEFIX_DEBUG=1` | `[bridgefix]` log from the structure-system hooks: migrations/cleanup, bridge allocations, table-full events, and sidecar mark/render passes; `=2` also logs every structure allocation |
 
 ## Level warp

@@ -16,6 +16,11 @@ static uint32_t sound_site, sound_sites[64];
 static unsigned sounds;
 static bool interrupt_with_dialogue;
 static bool interrupt_changes_scene;
+static bool confirm_miracle;
+static bool regional_report, keep_report_open;
+static bool native_quick_test, native_full_flow, native_reset_during_poll;
+static bool native_category_first;
+static SimMenuPhase Phase(void);
 void cpu_trace_block(CpuState *c, uint32_t site) {
   (void)c;
   sound_site = site;
@@ -35,12 +40,15 @@ bool ActRaiserRegional_MiracleEntry(const CpuState *cpu) {
   return false;
 }
 bool ActRaiserRegional_ReportCommandEntry(const CpuState *cpu) {
-  (void)cpu;
-  return false;
+  return regional_report && cpu && (uint8_t)cpu->A >= 12 && (uint8_t)cpu->A <= 15;
 }
 RecompReturn ActRaiserRegional_RunReportCommand(CpuState *cpu) {
-  (void)cpu;
-  assert(false);
+  assert(ActRaiserRegional_ReportCommandEntry(cpu));
+  const bool native_report = (uint8_t)cpu->A <= 13;
+  assert(Phase() == (native_report ? kSimMenu_Native : kSimMenu_Handoff));
+  assert(ActRaiserSimMenu_OwnsPresentation() == !native_report);
+  cpu->_flag_C = keep_report_open;
+  cpu->S += 2;
   return RECOMP_RETURN_NORMAL;
 }
 RecompReturn ActRaiserRegional_RunMiracle(CpuState *cpu) {
@@ -137,6 +145,13 @@ static RecompReturn Leaf(CpuState *c) {
 }
 RecompReturn bank_01_8C43_M1X0(CpuState *c) {
   assert(input_at < sizeof(inputs));
+  if (native_quick_test) {
+    assert(!ActRaiser_SimMenuConfirmInputEntry(c)); /* generated re-entry */
+    if (native_reset_during_poll) {
+      native_reset_during_poll=false;
+      ActRaiserSimMenu_ObserveScene(0x0700);
+    }
+  }
   if (interrupt_with_dialogue && input_at == 1) {
     interrupt_with_dialogue = false;
     assert(Phase() == kSimMenu_Browse);
@@ -149,7 +164,7 @@ RecompReturn bank_01_8C43_M1X0(CpuState *c) {
   }
   const uint8_t buttons = inputs[input_at++];
   cpu_write8(c, 0, 0x4218, buttons & kSimMenuInput_Describe ? 0x40 : 0);
-  c->A = buttons & ~kSimMenuInput_Describe;
+  c->A = (c->A & 0xff00) | (buttons & ~kSimMenuInput_Describe);
   return Leaf(c);
 }
 RecompReturn bank_01_8C49_M1X0(CpuState *c) { return Leaf(c); }
@@ -173,12 +188,56 @@ RecompReturn bank_01_8E29_M1X0(CpuState *c) {
 }
 RecompReturn bank_01_8D92_M1X0(CpuState *c) {
   assert(!ActRaiser_SimMenuConfirmEntry(c)); /* generated re-entry guard */
-  c->_flag_C = 0;                            /* native Back/No result */
+  c->_flag_C = confirm_miracle && expected_action >= 5 && expected_action <= 9;
   return Leaf(c);
 }
 static RecompReturn Action(CpuState *c) {
   assert(!ActRaiser_SimMenuActionEntry(c));
   ++actions;
+  if (native_quick_test) {
+    assert(!ActRaiserSimMenu_OwnsInput() && !ActRaiserSimMenu_OwnsPresentation());
+    CpuState text=*c;
+    text.S-=2;
+    if (expected_action >= 5 && expected_action <= 9) {
+      text.Y=sources[expected_action-5];
+      cpu_write16(&text,0,text.S+1,callers[expected_action-5]);
+      assert(ActRaiserSimMenu_SkipDialogue(&text)==!native_full_flow);
+      ActRaiserSimMenu_BeginDialogue(&text);
+      assert(!ActRaiserSimMenu_OwnsPresentation());
+      if (!ActRaiserSimMenu_SkipDialogue(&text)) ++descriptions;
+      cpu_write16(&text,0,text.S+1,0x93b2);
+      assert(!ActRaiserSimMenu_SkipDialogue(&text));
+      text.Y=questions[expected_action-5];
+      cpu_write16(&text,0,text.S+1,question_callers[expected_action-5]);
+      assert(!ActRaiserSimMenu_SkipDialogue(&text));
+      assert(!ActRaiser_SimMenuConfirmEntry(&text));
+      if (expected_action <= 7) {
+        static const uint16_t target[]={0xfce8,0xfd8e,0xff26};
+        static const uint16_t caller[]={0x82b9,0x8324,0x838f};
+        text.Y=target[expected_action-5];
+        cpu_write16(&text,0,text.S+1,caller[expected_action-5]);
+        assert(ActRaiserSimMenu_SkipDialogue(&text)==!native_full_flow);
+      }
+    } else if (expected_action == 3) {
+      text.Y=0xfad0;
+      cpu_write16(&text,0,text.S+1,0x8249);
+      assert(ActRaiserSimMenu_SkipDialogue(&text)==!native_full_flow);
+      text.Y=0xfaee;
+      cpu_write16(&text,0,text.S+1,0x8253);
+      assert(!ActRaiserSimMenu_SkipDialogue(&text));
+    } else if (expected_action == 11) {
+      /* Native inventory still needs its own choose-item prompt. */
+      text.Y=0xf957;
+      cpu_write16(&text,0,text.S+1,0x84c7);
+      assert(!ActRaiserSimMenu_SkipDialogue(&text));
+      text.X = 0x0898;
+      text.Y = 0xf08c;
+      cpu_write16(&text,0,text.S+1,0x84ef);
+      assert(!ActRaiser_SimMenuInventoryEntry(&text));
+    }
+    c->_flag_C=keep_report_open;
+    return Leaf(c);
+  }
   if (expected_action < 5 || expected_action > 9) {
     CpuState text = *c;
     text.Y = 0xf99b;
@@ -205,6 +264,24 @@ static RecompReturn Action(CpuState *c) {
         assert(Phase() == kSimMenu_Dialogue && !DialogueHasSelector());
         assert(!ActRaiserSimMenu_OwnsInput());
         assert(!ActRaiser_SimMenuConfirmEntry(&text));
+      } else if (expected_action == 11) {
+        ActRaiserSimMenu_ClearDialogue();
+        text.Y = 0xf957;
+        cpu_write16(&text, 0, text.S + 1, 0x84c7);
+        assert(ActRaiserSimMenu_SkipDialogue(&text));
+        ActRaiserSimMenu_BeginDialogue(&text);
+        assert(Phase() == kSimMenu_Handoff && ActRaiserSimMenu_OwnsPresentation());
+        cpu_write16(&text, 0, text.S + 1, 0x93b2);
+        assert(!ActRaiserSimMenu_SkipDialogue(&text));
+        static const uint16_t sources[] = {0xf96c, 0xf98f};
+        static const uint16_t callers[] = {0x84bf, 0x84f7};
+        for (unsigned i = 0; i < 2; ++i) {
+          text.Y = sources[i];
+          cpu_write16(&text, 0, text.S + 1, callers[i]);
+          assert(!ActRaiserSimMenu_SkipDialogue(&text));
+          ActRaiserSimMenu_BeginDialogue(&text);
+          assert(Phase() == kSimMenu_Dialogue);
+        }
       } else if (expected_action == 14) {
         static const uint16_t save_sources[] = {0xf99b, 0xf9ba, 0xf9e6, 0xfa10, 0xfa6a};
         static const uint16_t save_callers[] = {0x8a9f, 0x8abd, 0x8af0, 0x8acc, 0x8af0};
@@ -265,7 +342,8 @@ static RecompReturn Action(CpuState *c) {
   assert(ActRaiser_SimMenuConfirmEntry(c));
   c->S -= 2;
   assert(ActRaiser_SimMenuConfirm(c) == RECOMP_RETURN_NORMAL);
-  assert(!c->_flag_C);
+  assert(c->_flag_C == confirm_miracle);
+  c->_flag_C = 0; /* Completed miracle, or native cancellation cleanup. */
   return Leaf(c);
 }
 #define VARIANTS(pc, body)                                                                         \
@@ -274,7 +352,120 @@ static RecompReturn Action(CpuState *c) {
   RecompReturn bank_01_##pc##_M1X0(CpuState *c) { return body(c); }                                \
   RecompReturn bank_01_##pc##_M1X1(CpuState *c) { return body(c); }
 VARIANTS(81D7, Action)
-VARIANTS(8B7D, Leaf)
+static uint8_t NativePoll(CpuState *c,uint16_t caller) {
+  c->S-=2;
+  cpu_write16(c,0,c->S+1,caller);
+  const bool adapted=ActRaiser_SimMenuConfirmInputEntry(c);
+  const uint16_t x=c->X,y=c->Y,s=c->S;
+  assert((adapted ? ActRaiser_SimMenuConfirmInput(c) : bank_01_8C43_M1X0(c))==RECOMP_RETURN_NORMAL);
+  assert(c->S==s+2 && c->X==x && c->Y==y);
+  return (uint8_t)c->A;
+}
+static RecompReturn NativeBrowse(CpuState *c) {
+  if (!native_quick_test) return Leaf(c);
+  assert(!ActRaiser_SimMenuBrowseEntry(c)); /* generated re-entry */
+  assert(ActRaiserSimMenu_OwnsInput() && !ActRaiserSimMenu_OwnsPresentation());
+  CpuState other=*c;
+  other.S-=2;
+  /* The same poll leaf also serves dialogues, Palace menus and selectors. */
+  const uint16_t other_callers[]={0x8d0d,0x8b2a,0x8b31,0x9265};
+  for (unsigned i=0;i<sizeof(other_callers)/sizeof(*other_callers);++i) {
+    cpu_write16(&other,0,other.S+1,other_callers[i]);
+    assert(!ActRaiser_SimMenuConfirmInputEntry(&other));
+  }
+  cpu_write16(&other,0,other.S+1,0x8b98);
+  other.DB=2;
+  assert(!ActRaiser_SimMenuConfirmInputEntry(&other));
+  for (;;) {
+    while (NativePoll(c,0x8b91)) {} /* Native wait for all held input. */
+    uint8_t buttons;
+    do { buttons=NativePoll(c,0x8b98); } while (!(buttons&0xc0) || (buttons&15));
+    if (buttons&0x40) { c->_flag_C=1; return Leaf(c); }
+    if (native_category_first) {
+      native_category_first=false;
+      ActRaiserSimMenu_BeginDialogue(c);
+      assert(!ActRaiserSimMenu_OwnsPresentation());
+      continue; /* Category help returns to navigation, without an action. */
+    }
+    c->A=(c->A&0xff00)|expected_action;
+    c->_flag_C=0;
+    return Leaf(c);
+  }
+}
+VARIANTS(8B7D, NativeBrowse)
+
+static void TestNativeQuickUse(void) {
+  native_quick_test=true;
+  g_settings.sim_menu_style=0;
+  g_settings.native_menu_quick_use=true;
+  artwork=false; /* This mode needs no modern art/presentation capture. */
+  const unsigned commands[]={5,6,7,8,9,3,11,14,15};
+  for (unsigned pass=0;pass<4;++pass) for (unsigned i=0;i<sizeof(commands)/sizeof(*commands);++i) {
+    ActRaiserSimMenu_Reset();
+    memset(memory,0,sizeof(memory));
+    input_at=descriptions=actions=0;
+    native_full_flow=(pass&1)!=0;
+    keep_report_open=pass>=2;
+    expected_action=commands[i];
+    /* A held Describe on entry cannot activate anything. Then a fresh
+     * Describe/Use chooses exactly one full/quick invocation. */
+    const uint8_t sequence[]={kSimMenuInput_Describe,kSimMenuInput_Describe,0,
+        native_full_flow?kSimMenuInput_Describe:kSimMenuInput_Use};
+    memcpy(inputs,sequence,sizeof(sequence));
+    CpuState c={.A=0x8100,.X=kSimMenuActions[expected_action-1].selection_pointer,
+        .Y=0xf34a,.S=0x1f9,.PB=1,.DB=1,.m_flag=1};
+    cpu_write16(&c,0,0x18,0x0600);
+    cpu_write16(&c,0,c.S+1,0x81be);
+    assert(ActRaiser_SimMenuBrowseEntry(&c));
+    const uint16_t node=c.X;
+    assert(ActRaiser_SimMenuBrowse(&c)==RECOMP_RETURN_NORMAL);
+    assert(input_at==sizeof(sequence) && c.S==0x1fb && c.A==(0x8100|expected_action));
+    assert(c.X==node && !ActRaiserSimMenu_OwnsInput() && !ActRaiserSimMenu_OwnsPresentation());
+    c.S-=2;
+    cpu_write16(&c,0,c.S+1,0x81c3);
+    assert(ActRaiser_SimMenuActionEntry(&c));
+    assert(ActRaiser_SimMenuAction(&c)==RECOMP_RETURN_NORMAL);
+    assert(actions==1 && c._flag_C==keep_report_open && c.S==0x1fb);
+    assert(descriptions==(native_full_flow && expected_action>=5 && expected_action<=9));
+    assert(!ActRaiserSimMenu_OwnsPresentation());
+    c.S-=2;
+    cpu_write16(&c,0,c.S+1,0x81c3);
+    assert(!ActRaiser_SimMenuActionEntry(&c)); /* No policy leaks to a later action. */
+  }
+  /* Describe category help must not make the next ordinary Use run full flow. */
+  ActRaiserSimMenu_Reset();
+  input_at=descriptions=actions=0;
+  expected_action=7;
+  native_full_flow=false;
+  native_category_first=true;
+  const uint8_t category[]={0,kSimMenuInput_Describe,kSimMenuInput_Describe,0,kSimMenuInput_Use};
+  memcpy(inputs,category,sizeof(category));
+  CpuState c={.X=0xf336,.Y=0xf34a,.S=0x1f9,.PB=1,.DB=1,.m_flag=1};
+  assert(ActRaiser_SimMenuBrowse(&c)==RECOMP_RETURN_NORMAL);
+  assert(input_at==sizeof(category));
+  c.S -= 2;
+  cpu_write16(&c, 0, c.S + 1, 0x81c3);
+  assert(ActRaiser_SimMenuActionEntry(&c));
+  assert(ActRaiser_SimMenuAction(&c)==RECOMP_RETURN_NORMAL && descriptions==0);
+  /* Back and a scene retirement leave no pending quick-use command. */
+  for (unsigned reset=0;reset<2;++reset) {
+    ActRaiserSimMenu_Reset();
+    input_at = 0;
+    inputs[0] = 0;
+    inputs[1] = reset ? kSimMenuInput_Use : kSimMenuInput_Back;
+    native_reset_during_poll=reset;
+    c.S=0x1f9;
+    assert(ActRaiser_SimMenuBrowse(&c)==RECOMP_RETURN_NORMAL);
+    c.S -= 2;
+    cpu_write16(&c, 0, c.S + 1, 0x81c3);
+    assert(!ActRaiser_SimMenuActionEntry(&c));
+  }
+  ActRaiserSimMenu_Reset();
+  native_quick_test=false;
+  artwork=true;
+  g_settings.native_menu_quick_use=false;
+  g_settings.sim_menu_style=1;
+}
 
 static void TestOpeningPresentation(void) {
   ActRaiserSimMenu_Reset();
@@ -407,11 +598,46 @@ static void TestTownEventDuringBrowse(void) {
   interrupt_changes_scene = false;
 }
 
+static void TestRegionalReportReturns(void) {
+  regional_report = true;
+  /* US closes the command menu; JP returns to the same selected command. */
+  for (unsigned pass = 0; pass < 8; ++pass) {
+    expected_action = 12 + pass % 4;
+    keep_report_open = pass >= 4;
+    ActRaiserSimMenu_Reset();
+    memset(memory, 0, sizeof(memory));
+    input_at = sounds = 0;
+    inputs[0] = 0;
+    inputs[1] = kSimMenuInput_Use;
+    const uint16_t node = kSimMenuActions[expected_action - 1].selection_pointer;
+    CpuState c = {.X = node, .Y = 0xf34a, .S = 0x1f9, .DB = 1, .PB = 1, .m_flag = 1};
+    cpu_write16(&c, 0, 0x18, 0x0100);
+    assert(ActRaiser_SimMenuBrowse(&c) == RECOMP_RETURN_NORMAL);
+    c.S -= 2;
+    cpu_write16(&c, 0, c.S + 1, 0x81c3);
+    assert(ActRaiser_SimMenuActionEntry(&c));
+    assert(ActRaiser_SimMenuAction(&c) == RECOMP_RETURN_NORMAL);
+    assert(c._flag_C == keep_report_open && c.S == 0x1fb);
+    SimMenuModel model;
+    ActRaiserSimMenu_CopyModel(&model);
+    assert(model.phase == (keep_report_open ? kSimMenu_Browse : kSimMenu_Closed));
+    assert(ActRaiserSimMenu_OwnsPresentation() == keep_report_open);
+    assert(!keep_report_open || SimMenuModel_Selection(&model) == node);
+  }
+  regional_report = false;
+  ActRaiserSimMenu_Reset();
+}
+
 int main(void) {
+  TestNativeQuickUse();
   TestOpeningPresentation();
   TestMenuSounds();
   TestTownEventDuringBrowse();
-  for (expected_action = 5; expected_action <= 9; ++expected_action) {
+  TestRegionalReportReturns();
+  /* Exercise each miracle with No/Back, then Yes/completion. */
+  for (unsigned pass = 0; pass < 10; ++pass) {
+    expected_action = 5 + pass % 5;
+    confirm_miracle = pass >= 5;
     ActRaiserSimMenu_Reset();
     memset(memory, 0, sizeof(memory));
     input_at = descriptions = actions = sounds = 0;
@@ -424,10 +650,16 @@ int main(void) {
                   .DB = 1,
                   .PB = 1,
                   .m_flag = 1};
+    /* Town navigation leaves the destination cleared. A completed miracle
+     * must release presentation so native gameplay notices (PAUSE) can draw. */
+    cpu_write16(&c, 0, 0x18, 0x0600);
     cpu_write16(&c, 0, c.S + 1, 0x81be);
+    g_settings.native_menu_quick_use = false;
     g_settings.sim_menu_style = 0;
     assert(!ActRaiser_SimMenuBrowseEntry(&c));
     g_settings.sim_menu_style = 1;
+    /* Enabling the native preference cannot change modern read-only help. */
+    g_settings.native_menu_quick_use = pass >= 5;
     artwork = false;
     assert(!ActRaiser_SimMenuBrowseEntry(&c));
     artwork = true;
@@ -443,11 +675,15 @@ int main(void) {
     cpu_write16(&c, 0, c.S + 1, 0x81c3);
     assert(ActRaiser_SimMenuActionEntry(&c));
     assert(ActRaiser_SimMenuAction(&c) == RECOMP_RETURN_NORMAL);
-    assert(actions == 1 && c._flag_C && c.S == 0x1fb);
+    assert(actions == 1 && c._flag_C == !confirm_miracle && c.S == 0x1fb);
     assert(sounds == 3); /* Native confirmations retain their own audio. */
     SimMenuModel model;
     ActRaiserSimMenu_CopyModel(&model);
-    assert(model.phase == kSimMenu_Browse && SimMenuModel_Selection(&model) == node);
+    if (confirm_miracle) {
+      assert(model.phase == kSimMenu_Closed && !ActRaiserSimMenu_OwnsPresentation());
+    } else {
+      assert(model.phase == kSimMenu_Browse && SimMenuModel_Selection(&model) == node);
+    }
   }
   const unsigned commands[] = {1, 3, 11, 12, 13, 14, 15};
   for (unsigned i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i) {
@@ -464,7 +700,6 @@ int main(void) {
                   .PB = 1,
                   .m_flag = 1};
     cpu_write16(&c, 0, 0x18, 0x0600);
-    cpu_write16(&c, 0, 0x1a, 0x0600);
     cpu_write16(&c, 0, c.S + 1, 0x81be);
     assert(ActRaiser_SimMenuBrowseEntry(&c));
     assert(ActRaiser_SimMenuBrowse(&c) == RECOMP_RETURN_NORMAL);

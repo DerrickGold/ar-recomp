@@ -50,6 +50,16 @@ entry with its actual M/X widths.
 
 ## Entry, selection and dispatch
 
+The optional [native quick-use setting](manual.md#native-sim-menu-quick-use)
+retains `$8B7D` navigation and all native presentation. Its town-scoped wrapper
+recognizes the `$8C43` release/press polls with saved JSR returns `$8B91/$8B98`.
+Describe is mapped to native Use at those polls, with a full-flow flag captured
+for that accepted command only. Ordinary Use shares the modern menu's audited
+optional-text skip policy; the native inventory's selection prompt is retained.
+The action wrapper preserves the native carry return and does not claim modern
+presentation or its miracle-cancel reopening behavior. Palace/shared callers,
+ordinary dialogue and world selectors keep their original input handling.
+
 | Address | Responsibility / contract |
 | --- | --- |
 | `$8000` | SIM interaction entry. Routes scene 7 to Sky Palace, 8 to temple. Town interaction requires DP `$A1 & $80`, `$7F:9750 == 0`, and boss-rush progress `$0347 != 7`. |

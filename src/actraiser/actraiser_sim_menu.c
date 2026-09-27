@@ -39,6 +39,14 @@ static uint8_t s_action;
 static uint16_t s_scene;
 static SimMenuHelpPage s_help;
 static bool s_description_aborted, s_description_fast, s_description_released;
+/* Native quick-use delegates navigation and presentation to the ROM. Only
+ * the accepted command's explanation policy crosses into its action body. */
+static bool s_native_browse, s_native_browse_guard;
+static bool s_native_command, s_native_full_flow;
+
+static bool NativeQuickUseEnabled(void) {
+  return g_settings.sim_menu_style == 0 && g_settings.native_menu_quick_use;
+}
 
 bool ActRaiserSimMenu_DescriptionAborted(void) { return s_description_aborted; }
 bool ActRaiserSimMenu_Describing(void) { return s_owner && s_menu.phase == kSimMenu_Describe; }
@@ -127,11 +135,14 @@ void ActRaiserSimMenu_Reset(void) {
   s_confirmation_cancelled = false;
   s_scene=0;
   s_description_aborted=s_description_fast=s_description_released=false;
+  s_native_browse=s_native_browse_guard=false;
+  s_native_command=s_native_full_flow=false;
 }
 
 bool ActRaiserSimMenu_OwnsInput(void) {
-  return s_owner && (s_menu.phase == kSimMenu_Browse ||
-      s_menu.phase == kSimMenu_Inventory || s_menu.phase == kSimMenu_Describe);
+  return (s_native_browse && NativeQuickUseEnabled()) ||
+      (s_owner && (s_menu.phase == kSimMenu_Browse ||
+       s_menu.phase == kSimMenu_Inventory || s_menu.phase == kSimMenu_Describe));
 }
 
 bool ActRaiserSimMenu_OwnsPresentation(void) {
@@ -157,7 +168,8 @@ void ActRaiserSimMenu_CopyHelp(SimMenuHelpPage *page) { if(page) *page=s_help; }
 void ActRaiserSimMenu_ObserveScene(uint16_t scene) {
   /* The departing town remains suppressed throughout its native fade. The
    * destination owns its own panels as soon as the game changes scenes. */
-  if (s_owner && scene != s_scene) ActRaiserSimMenu_Reset();
+  if ((s_owner || s_native_browse || s_native_command) && scene != s_scene)
+    ActRaiserSimMenu_Reset();
 }
 
 void ActRaiserSimMenu_BeginDialogue(const CpuState *c) {
@@ -191,9 +203,11 @@ void ActRaiserSimMenu_ClearDialogue(void) {
 }
 
 bool ActRaiser_SimMenuBrowseEntry(CpuState *c) {
-  return c && g_settings.sim_menu_style == 1 && !c->x_flag &&
-      c->DB == 1 && c->D == 0 && c->Y == 0xf34a &&
-      cpu_read16(c,0,c->S+1) == 0x81be &&
+  if (s_native_browse_guard) { s_native_browse_guard=false; return false; }
+  if (!c || c->x_flag || c->DB != 1 || c->D || c->Y != 0xf34a ||
+      cpu_read16(c,0,c->S+1) != 0x81be) return false;
+  if (NativeQuickUseEnabled()) return c->PB == 1 && !c->emulation;
+  return g_settings.sim_menu_style == 1 &&
       (s_owner || ActRaiserSimMenu_ArtworkAvailable());
 }
 
@@ -387,6 +401,19 @@ static void Describe(CpuState *c) {
 }
 
 RecompReturn ActRaiser_SimMenuBrowse(CpuState *c) {
+  if (NativeQuickUseEnabled()) {
+    ActRaiserSimMenu_Reset();
+    s_native_browse=true;
+    s_native_browse_guard=true;
+    s_scene=cpu_read16(c,0,0x18);
+    const RecompReturn result=kNative8B7D[Mode(c)](c);
+    s_native_browse_guard=false;
+    /* A scene change/reset during a native frame retires this invocation. */
+    s_native_command=s_native_browse && result==RECOMP_RETURN_NORMAL &&
+        !c->_flag_C && NativeQuickUseEnabled();
+    s_native_browse=false;
+    return result;
+  }
   if (!s_owner) {
     s_owner=true;
     s_scene=cpu_read16(c,0,0x18);
@@ -433,7 +460,8 @@ RecompReturn ActRaiser_SimMenuBrowse(CpuState *c) {
 bool ActRaiser_SimMenuActionEntry(CpuState *c) {
   if (s_action_guard) { s_action_guard=false; return false; }
   return c &&
-      (s_owner || ActRaiserRegional_MiracleEntry(c) || ActRaiserRegional_ReportCommandEntry(c)) &&
+      (s_owner || s_native_command || ActRaiserRegional_MiracleEntry(c) ||
+       ActRaiserRegional_ReportCommandEntry(c)) &&
       cpu_read16(c, 0, c->S + 1) == 0x81c3;
 }
 
@@ -449,14 +477,21 @@ RecompReturn ActRaiser_SimMenuAction(CpuState *c) {
     result=kNative81D7[Mode(c)](c);
     s_action_guard=false;
   }
-  if (!s_owner) { s_action=0; return result; } /* Native scene changes can retire us. */
+  if (!s_owner) {
+    s_action=0;
+    s_native_command=s_native_full_flow=false;
+    return result; /* Native quick-use keeps the original action return. */
+  }
   if (result == RECOMP_RETURN_NORMAL && s_confirmation_cancelled) {
     /* Native cancellation already performed its cleanup and release wait.
      * Ask the original owner to reopen at the same native node. */
     Carry(c,true);
     s_menu.phase=kSimMenu_Browse;
   } else if (result == RECOMP_RETURN_NORMAL && !c->_flag_C &&
-             cpu_read16(c,0,0x1a) != cpu_read16(c,0,0x18)) {
+             cpu_read8(c,0,0x1a) != 0) {
+    /* $00:8241 consumes a nonzero destination map, then clears $1A/$1B.
+     * Comparing it with the current scene kept suppression alive after Sun
+     * (idle destination 0, current town nonzero), hiding native PAUSE text. */
     s_menu.phase=kSimMenu_Handoff;
   } else if (result != RECOMP_RETURN_NORMAL || !c->_flag_C) {
     ActRaiserSimMenu_Reset();
@@ -481,8 +516,16 @@ RecompReturn ActRaiser_SimMenuConfirm(CpuState *c) {
   return result;
 }
 
+static bool NativeBrowsePoll(const CpuState *c) {
+  if (!c || !s_native_browse || !NativeQuickUseEnabled() ||
+      c->PB != 1 || c->DB != 1 || c->D || !c->m_flag || c->x_flag) return false;
+  const uint16_t caller=cpu_read16((CpuState *)c,0,c->S+1);
+  return caller==0x8b91 || caller==0x8b98; /* Release / press in $8B7D. */
+}
+
 bool ActRaiser_SimMenuConfirmInputEntry(CpuState *c) {
   if (s_input_guard) { s_input_guard=false; return false; }
+  if (NativeBrowsePoll(c)) return true;
   if (s_menu.phase == kSimMenu_Opening && g_settings.sim_menu_style != 1)
     ActRaiserSimMenu_Reset();
   /* $81AC polls until the opening face button is released, before $8B7D.
@@ -513,14 +556,28 @@ bool ActRaiser_SimMenuConfirmInputEntry(CpuState *c) {
 }
 
 RecompReturn ActRaiser_SimMenuConfirmInput(CpuState *c) {
+  const bool native_browse=NativeBrowsePoll(c);
+  const uint16_t caller=cpu_read16(c,0,c->S+1);
   s_input_guard=true;
   const RecompReturn result=bank_01_8C43_M1X0(c);
+  s_input_guard=false;
   if (result == RECOMP_RETURN_NORMAL) {
-    /* Up/Down retain native vertical selection. Keep Left/Right as aliases
-     * for existing bindings/replays without changing the native PiP state. */
     uint8_t buttons=(uint8_t)c->A;
-    if (buttons & 2) buttons=(buttons & ~3u) | 8;
-    else if (buttons & 1) buttons=(buttons & ~3u) | 4;
+    if (native_browse) {
+      if (!s_native_browse || !NativeQuickUseEnabled()) return result;
+      const bool describe=(cpu_read8(c,0,0x4218) & 0x40) != 0;
+      const bool full_flow=describe && !(buttons & 0xc0);
+      if (full_flow) buttons |= 0x80;
+      /* Also report held Describe to the release loop. The press loop keeps
+       * the ROM's direction/Back precedence, and ordinary Use wins a tie. */
+      if (caller==0x8b98 && (buttons & 0xcf)==0x80)
+        s_native_full_flow=full_flow;
+    } else {
+      /* Up/Down retain native vertical selection. Keep Left/Right as aliases
+       * for existing bindings/replays without changing the native PiP state. */
+      if (buttons & 2) buttons=(buttons & ~3u) | 8;
+      else if (buttons & 1) buttons=(buttons & ~3u) | 4;
+    }
     c->A=(c->A & 0xff00) | buttons;
     c->_flag_N=(buttons & 0x80) != 0;
     c->_flag_Z=buttons == 0;
@@ -574,13 +631,18 @@ RecompReturn ActRaiser_SimMenuInventory(CpuState *c) {
 }
 
 bool ActRaiserSimMenu_SkipDialogue(const CpuState *c) {
-  if (!c || !s_owner || s_menu.phase == kSimMenu_Describe ||
+  const bool native_quick=s_native_command && !s_native_full_flow;
+  if (!c || (!s_owner && !native_quick) || s_menu.phase == kSimMenu_Describe ||
       c->DB != 1 || c->PB != 1 || c->D || !c->m_flag || c->x_flag) return false;
   /* Exact interpreter call sites, not text contents or a global fast-forward.
-   * Optional description and pure target instruction only. The confirmation
+   * Optional descriptions and selection instructions only. The confirmation
    * question must remain in the native/localized window until Yes/No returns. */
   const uint16_t caller=cpu_read16((CpuState *)c,0,c->S+1);
   if (s_action==3) return caller==0x8249 && c->Y==0xfad0;
+  /* The modern inventory supplies the selection prompt. Its native script
+   * opens a dialogue window before yielding to $8CF0, which otherwise flashes
+   * for two frames. Empty/cancelled inventory and item outcomes still speak. */
+  if (s_action == 11) return s_owner && caller == 0x84c7 && c->Y == 0xf957;
   if (s_action<5 || s_action>9) return false;
   static const uint16_t calls[5][3]={
     {0x8295,0x82ae,0x82b9}, {0x8300,0x8319,0x8324},

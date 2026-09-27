@@ -2370,6 +2370,13 @@ const SettingDesc g_setting_descs[] = {
                "on/off effects.",
                kSettingCat_Extras, 0, false, NULL, NULL),
   GAME_CHANGE_BOOL_SETTING(
+      native_menu_quick_use, "AR_NATIVE_MENU_QUICK_USE", "Native menu quick use",
+      "In the Original SIM menu, Use skips optional explanations and goes to the "
+      "confirmation or action. Describe menu item runs the full original flow, "
+      "including its explanations. Remap Describe under Controls. Modern keeps "
+      "its own Use/Describe behavior.",
+      0, false, kSettingGameChange_QualityOfLife),
+  GAME_CHANGE_BOOL_SETTING(
       fix_bridge_limit, "AR_FIX_BRIDGE_LIMIT", "Bridge-free limit",
       "Completed bridges stop counting toward the 128-structure population "
       "cap; they migrate to spare save space and keep their tiles, crossing, "

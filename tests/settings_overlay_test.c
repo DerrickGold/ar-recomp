@@ -3421,6 +3421,12 @@ int main(int argc, char **argv) {
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "fix_aitos_event_queue"));
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.fix_aitos_event_queue);
+  RowToKey("native_menu_quick_use");
+  CHECK(!g_settings.native_menu_quick_use);
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.native_menu_quick_use);
+  CHECK(SettingsOverlay_HandleKey(SDLK_LEFT, true, false));
+  CHECK(!g_settings.native_menu_quick_use);
   RowToKey("fix_bridge_limit");
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
   CHECK(g_settings.fix_bridge_limit);

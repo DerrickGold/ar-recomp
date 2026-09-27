@@ -111,6 +111,14 @@ n o p q r s t u v w x y z
 @anchor reset_text_cursor.00
 @anchor yield.01
 
+:: simulation.event.northwall.slot_31
+@anchor reset_text_cursor.00
+First screen. Second screen. Final screen.
+
+:: simulation.event.northwall.slot_02
+@anchor reset_text_cursor.00
+First screen. Second screen. Final screen.
+
 :: sky.action_mode.confirm
 Avant.
 @wait 2

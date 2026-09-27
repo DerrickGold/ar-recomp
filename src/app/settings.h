@@ -505,6 +505,7 @@ typedef struct Settings {
    * masks.  D1 exposes the controls while the implemented-capability mask is
    * still zero, so every selection safely resolves to authentic output. */
   bool sim3d_mode;
+  bool native_menu_quick_use;  /* Native Use skips explanations; Describe keeps the full flow. */
   int sim_menu_style;          /* Original / Modern; independent of renderer. */
   int sim_menu_scale_percent;  /* 50-100% of the modern menu's full layout. */
   /* Extra host-renderable range around the authentic sim window. Raising it

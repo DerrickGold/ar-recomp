@@ -109,10 +109,13 @@ static void TestDefaultsAndMetadata(void) {
    * host interface language. Connected SIM adds one default-on underlay row.
    * The Graphics API choice adds one restart-class Display row. Modern SIM
    * adds its presentation choice, player scale, and two independent Describe bindings.
-   * Seeded regional rolls add two options; save slots add two entry actions. */
-  if (g_setting_desc_count != 301)
-    fprintf(stderr, "Setting descriptors: expected 301, got %d\n", g_setting_desc_count);
-  CHECK(g_setting_desc_count == 302);
+   * Seeded regional rolls add two options; save slots add two entry actions.
+   * Native menu quick use adds an independent QoL toggle. */
+  const int expected_descriptors = 303;
+  if (g_setting_desc_count != expected_descriptors)
+    fprintf(stderr, "Setting descriptors: expected %d, got %d\n",
+            expected_descriptors, g_setting_desc_count);
+  CHECK(g_setting_desc_count == expected_descriptors);
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *a = &g_setting_descs[i];
     CHECK(a->key && a->key[0] && a->label && a->tooltip);
@@ -1404,6 +1407,13 @@ static void TestInputBindings(void) {
   CHECK(g_settings.sim_menu_scale_percent == 50);
   CHECK(Settings_SetText(sim_scale, "75") == kSettingChange_Applied);
   CHECK(g_settings.sim_menu_scale_percent == 75);
+  const SettingDesc *quick_use = Settings_Find("native_menu_quick_use");
+  CHECK(quick_use && quick_use->category == kSettingCat_Enhancements);
+  CHECK(quick_use->game_change_kind == kSettingGameChange_QualityOfLife);
+  CHECK(Settings_IsMenuVisible(quick_use) && !Settings_IsDebugOnly(quick_use));
+  CHECK(!g_settings.native_menu_quick_use && !quick_use->sticky);
+  CHECK(Settings_SetLong(quick_use, 1) == kSettingChange_Applied);
+  CHECK(g_settings.native_menu_quick_use && g_settings.sim_menu_style == 1);
   CHECK(Settings_Find("bind_key_sim_describe"));
   CHECK(Settings_Find("bind_pad_sim_describe"));
   CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_SimDescribe] ==
@@ -1596,6 +1606,7 @@ static void TestInputBindings(void) {
   CHECK(Settings_Load(path));
   CHECK(memcmp(saved, g_settings.input_bind, sizeof(saved)) == 0);
   CHECK(g_settings.sim_menu_style == 1);
+  CHECK(g_settings.native_menu_quick_use);
   CHECK(g_settings.sim_menu_scale_percent == 75);
   remove(path);
 }

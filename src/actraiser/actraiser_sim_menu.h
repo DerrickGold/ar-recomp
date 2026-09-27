@@ -1,8 +1,8 @@
 #ifndef AR_ACTRAISER_SIM_MENU_H
 #define AR_ACTRAISER_SIM_MENU_H
-/* ActRaiserSimMenu: the game adapter for the modern SIM menu. Drives the menu
- * model from native input, copies the model and help pages for the
- * presenter, and runs description dialogue.
+/* ActRaiserSimMenu: the game adapter for modern SIM menus and native quick use.
+ * Shares command/dialogue policy while native quick use retains ROM navigation
+ * and presentation. Modern menus publish a model and help pages to the presenter.
  * Phase: game side.
  * Tests: tests/actraiser_sim_menu_test.c */
 
@@ -10,6 +10,7 @@
 #include "sim/menu/sim_menu_help.h"
 #include "snesrecomp/game/cpu.h"
 
+/* Whether menu input currently reserves the remappable Describe binding. */
 bool ActRaiserSimMenu_OwnsInput(void);
 bool ActRaiserSimMenu_OwnsPresentation(void);
 void ActRaiserSimMenu_Reset(void);
@@ -34,6 +35,7 @@ bool ActRaiser_SimMenuInventoryEntry(CpuState *cpu);
 RecompReturn ActRaiser_SimMenuInventory(CpuState *cpu);
 bool ActRaiser_SimMenuConfirmEntry(CpuState *cpu);
 RecompReturn ActRaiser_SimMenuConfirm(CpuState *cpu);
+/* Shared input leaf: caller-scoped browse and confirmation adaptations. */
 bool ActRaiser_SimMenuConfirmInputEntry(CpuState *cpu);
 RecompReturn ActRaiser_SimMenuConfirmInput(CpuState *cpu);
 
