@@ -25,6 +25,7 @@
 #include "sim/sim3d/sim3d.h"
 #include "constants.h"
 #include "host/host_display.h"
+#include "host/host_video.h"
 #include "app/user_data_dir.h"
 #include "manual/manual_reader.h"
 #include "actraiser_game.h"
@@ -38,6 +39,29 @@ static bool s_paused;
 static bool s_inspector_owns_pause;
 static bool s_paused_redraw_pending;
 static uint32_t s_input_state;
+static bool s_logged_key_down;
+static bool s_logged_mouse_down;
+static bool s_logged_suppressed_key;
+
+void HostInput_LogStatus(const char *reason) {
+  static const char *const kDeviceNames[] = {"Auto", "Keyboard", "Gamepad"};
+  const int mode = g_settings.input_device;
+  SDL_Window *keyboard = SDL_GetKeyboardFocus();
+  SDL_Window *mouse = SDL_GetMouseFocus();
+  fprintf(stderr,
+      "[input] %s: ms=%llu window=%u keyboard-focus=%u mouse-focus=%u flags=$%llx "
+      "mode=%s gamepads=%d pad-active=%d key-suppressed=%d "
+      "overlay=%d capture=%d key-seen=%d mouse-click-seen=%d\n",
+      reason, (unsigned long long)SDL_GetTicks(),
+      g_window ? (unsigned)SDL_GetWindowID(g_window) : 0,
+      keyboard ? (unsigned)SDL_GetWindowID(keyboard) : 0,
+      mouse ? (unsigned)SDL_GetWindowID(mouse) : 0,
+      (unsigned long long)(g_window ? SDL_GetWindowFlags(g_window) : 0),
+      mode >= 0 && mode < kInputDevice_Count ? kDeviceNames[mode] : "Unknown",
+      InputMap_GamepadCount(), InputMap_GamepadIsActive(),
+      HostInput_KeyboardIsSuppressed(), SettingsOverlay_IsOpen(),
+      SettingsOverlay_IsCapturing(), s_logged_key_down, s_logged_mouse_down);
+}
 
 void HostInput_HandleKeyboard(int scancode, bool pressed, bool repeated) {
   InputMap_HandleKey(scancode, pressed, repeated);
@@ -324,6 +348,8 @@ void HostInput_BeginSession(void) {
   s_paused = s_turbo = s_inspector_owns_pause = s_paused_redraw_pending = false;
   HostInput_ClearHeld();
   InputMap_SetActionHandler(OnGamepadHostAction);
+  s_logged_key_down = s_logged_mouse_down = s_logged_suppressed_key = false;
+  HostInput_LogStatus("session-start");
 }
 
 void HostInput_EndSession(void) {
@@ -338,8 +364,13 @@ void HostInput_EndSession(void) {
 static void HandleKeyDown(const SDL_Event *event) {
   if (SettingsOverlay_HandleCaptureEvent(event))
     return;
-  if (HostInput_KeyboardIsSuppressed())
+  if (HostInput_KeyboardIsSuppressed()) {
+    if (!s_logged_suppressed_key) {
+      s_logged_suppressed_key = true;
+      HostInput_LogStatus("key-down suppressed by gamepad activity");
+    }
     return;
+  }
   if (SettingsOverlay_IsOpen()) {
     if (HostInput_MenuKeyboardIsActive()) {
       bool was_open = true;
@@ -541,6 +572,10 @@ static void HandleMouse(const SDL_Event *event) {
 bool HostInput_HandleEvent(const SDL_Event *event) {
   switch (event->type) {
     case SDL_EVENT_KEY_DOWN:
+      if (!s_logged_key_down) {
+        s_logged_key_down = true;
+        HostInput_LogStatus("first-key-down");
+      }
       HandleKeyDown(event);
       break;
     case SDL_EVENT_TEXT_INPUT:
@@ -551,6 +586,10 @@ bool HostInput_HandleEvent(const SDL_Event *event) {
     case SDL_EVENT_MOUSE_MOTION:
     case SDL_EVENT_MOUSE_WHEEL:
     case SDL_EVENT_MOUSE_BUTTON_UP:
+      if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && !s_logged_mouse_down) {
+        s_logged_mouse_down = true;
+        HostInput_LogStatus("first-mouse-button-down");
+      }
       HandleMouse(event);
       break;
     case SDL_EVENT_GAMEPAD_ADDED:

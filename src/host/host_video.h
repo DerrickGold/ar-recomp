@@ -25,7 +25,8 @@ extern bool g_gpu_shaders_active;
  * A hidden_capture window (AR_HEADLESS_VIDEO) stays hidden, runs without vsync
  * and never goes exclusive fullscreen. Dies on failure. */
 void HostVideo_Create(const char *title, bool hidden_capture);
-/* Raises the window and takes keyboard focus; a refusal is only reported. */
+/* Requests keyboard focus once and logs the immediate state; the window
+ * manager may grant focus asynchronously or refuse the request. */
 void HostVideo_TakeFocus(void);
 void HostVideo_Destroy(void);
 

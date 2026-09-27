@@ -266,8 +266,15 @@ static void AppLoop_PumpEvents(const GameSessionConfig *config, bool *running) {
       break;
     case SDL_EVENT_WINDOW_EXPOSED:
     case SDL_EVENT_WINDOW_FOCUS_GAINED:
+      if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED && g_window &&
+          event.window.windowID == SDL_GetWindowID(g_window))
+        HostInput_LogStatus("focus-gained");
       HostDisplay_ResetVsyncPacing();
       HostInput_RequestPausedRedraw();
+      break;
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+      if (g_window && event.window.windowID == SDL_GetWindowID(g_window))
+        HostInput_LogStatus("focus-lost");
       break;
 
     case SDL_EVENT_RENDER_TARGETS_RESET:
@@ -291,6 +298,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
    * accumulator still owns emulated tick rate; vsync controls presentation. */
 
   bool running = true;
+  bool logged_input_ready = false;
   uint64_t last_tick = SDL_GetTicks();  /* headless-only pacing (§3.6) */
   const uint32 emulation_frame_interval_ms =
       (uint32)(kHostDisplayEmulationFrameIntervalNs /
@@ -310,6 +318,10 @@ void GameLoop_Run(const GameSessionConfig *config) {
     const PerformanceScope events = PerformanceMetrics_Begin(kPerformance_Events);
     AppLoop_PumpEvents(config, &running);
     PerformanceMetrics_End(events);
+    if (!logged_input_ready) {
+      logged_input_ready = true;
+      HostInput_LogStatus("event-loop-ready");
+    }
 
     if (HostLocalization_ExitRequested() ||
         RuntimeSettings_LifecycleRequest() != kRuntimeLifecycle_None ||

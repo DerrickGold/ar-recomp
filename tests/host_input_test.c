@@ -45,6 +45,7 @@ static const ActRaiserDisplayGeometry s_geometry;
 const ActRaiserDisplayGeometry *const g_actraiser_display_geometry = &s_geometry;
 uint8 g_ram[0x20000];
 Settings g_settings;
+SDL_Window *g_window;
 bool Sim3DTextures_Ready(void) { return false; }
 int snes_frame_counter;
 
@@ -148,6 +149,9 @@ bool ManualReader_HandleMouse(const SDL_Event * event) {
 }
 bool ManualReader_IsOpen(void) {
   return s_manual;
+}
+bool SettingsOverlay_IsCapturing(void) {
+  return s_overlay && s_capture;
 }
 uint64_t PresentAuthenticUploadedFrameSerial(void) {
   return 0;

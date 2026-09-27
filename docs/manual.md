@@ -166,6 +166,31 @@ layout change moves with the keys rather than the letters. The defaults are:
 | `Q`, `W` | SNES L, R |
 | Return, Right Shift | Start, Select |
 
+### Unresponsive input after launch
+
+If the picture still animates but even Esc/F1 does nothing, keep the log from
+that launch. Builder launches write `logs/game-*.log` in the build's working
+directory; native app launches write `logs/launch-*.log` in the game data
+directory. Development runs use `runs/<timestamp>/console.log`.
+
+The `[window] startup focus` and `[input]` lines separate window activation
+from input routing. `event-loop-ready` records focus after the first event
+pump; later `focus-gained`/`focus-lost` lines include elapsed milliseconds.
+`first-key-down` and `first-mouse-button-down` confirm events reached the game.
+These messages record state only, not typed text or key values. A zero
+`keyboard-focus` at startup can be temporary; compare it with later events.
+
+In **Auto**, an active selected controller takes precedence over the keyboard,
+including menu hotkeys. A merely connected idle controller does not.
+`key-down suppressed by gamepad activity` identifies this case. Selecting
+**Keyboard** under Controls bypasses controller arbitration; if the menu is
+inaccessible, set `input_device = Keyboard` in `settings.ini` with the game
+closed. When the log reports `gamepads=0`, this suppression cannot be the cause.
+
+Startup requests focus once; the window manager decides whether to grant it.
+A recurring failure report should include the affected launch's log, whether
+the animation continued, and whether clicking or switching away and back helped.
+
 ### Gamepad
 
 The defaults follow the standard SNES-on-Xbox layout: South/East/West/North map

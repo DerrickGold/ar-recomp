@@ -180,15 +180,20 @@ void HostVideo_Create(const char *title, bool hidden_capture) {
 }
 
 void HostVideo_TakeFocus(void) {
-  /* Take keyboard focus on launch. A window created by SDL is ordered in
-   * but the process is not necessarily activated — launched from a terminal
-   * (or as an un-bundled binary on macOS) the shell keeps focus and the
-   * game starts behind it, silently swallowing input until the user clicks
-   * on it. SDL_RaiseWindow both raises and, with the default
-   * SDL_HINT_WINDOW_ACTIVATE_WHEN_RAISED, activates the application. */
+  /* Direct launches from the builder or terminal may need to activate the
+   * application. Request this once at startup. A successful request does not
+   * prove focus was granted; the event loop logs subsequent focus changes. */
   if (!SDL_RaiseWindow(g_window))
     fprintf(stderr, "[window] could not raise to foreground: %s\n",
             SDL_GetError());
+  SDL_Window *keyboard = SDL_GetKeyboardFocus();
+  fprintf(stderr,
+      "[window] startup focus: SDL=%d window=%u keyboard-focus=%u "
+      "flags=$%llx key-events=%d/%d\n",
+      SDL_GetVersion(), (unsigned)SDL_GetWindowID(g_window),
+      keyboard ? (unsigned)SDL_GetWindowID(keyboard) : 0,
+      (unsigned long long)SDL_GetWindowFlags(g_window),
+      SDL_EventEnabled(SDL_EVENT_KEY_DOWN), SDL_EventEnabled(SDL_EVENT_KEY_UP));
 }
 
 void HostVideo_Destroy(void) {

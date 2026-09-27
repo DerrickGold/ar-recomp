@@ -16,6 +16,8 @@ bool HostInput_HandleEvent(const union SDL_Event *event);
 
 void HostInput_HandleKeyboard(int scancode, bool pressed, bool repeated);
 void HostInput_ClearHeld(void);
+/* Bounded startup/focus diagnostics; no typed text or key values are logged. */
+void HostInput_LogStatus(const char *reason);
 /* Sample frontend input and apply host-frame scripted overrides. Replay
  * resolution belongs beside each RtlRunFrame call so turbo/catch-up ticks are
  * represented individually in canonical recordings. */
