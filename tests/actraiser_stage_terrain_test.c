@@ -4,7 +4,7 @@
 #include "regional/action/regional_terrain.h"
 #include "byte_order.h"
 #include "actraiser/regional/actraiser_regional_media.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

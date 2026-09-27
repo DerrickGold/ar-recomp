@@ -19,7 +19,7 @@
 #include "sim/sim3d/sim3d_performance.h"
 #include "sim/voxels/sim_background_voxel_model_cache.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <SDL3/SDL.h> /* Test-only control of the platform helper cap. */
 #include <math.h>
 #include <stdint.h>

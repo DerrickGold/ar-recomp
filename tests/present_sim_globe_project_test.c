@@ -1,7 +1,6 @@
 #include "sim/world_nav/present_sim_globe_project.h"
 #include "sim/town/sim_town_terrain.h"
-#undef NDEBUG
-#include <assert.h>
+#include "support/test_assert.h"
 #include <float.h>
 #include <math.h>
 #include <stdio.h>

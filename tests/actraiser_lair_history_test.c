@@ -1,5 +1,5 @@
 #include "actraiser/actraiser_lair_history.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

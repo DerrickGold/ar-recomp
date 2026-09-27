@@ -1,6 +1,6 @@
 #include "regional/action/regional_timers.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

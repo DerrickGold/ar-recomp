@@ -1,7 +1,7 @@
 #include "actraiser/actraiser_action_start.h"
 #include "regional/action/regional_action_start.h"
 #include "byte_order.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

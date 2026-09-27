@@ -1,7 +1,7 @@
 #include "regional/media/regional_actor_art.h"
 #include "regional/media/regional_actor_art_residency.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

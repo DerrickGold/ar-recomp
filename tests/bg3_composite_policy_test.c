@@ -1,6 +1,6 @@
 #include "render/bg3_composite_policy.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 
 int main(void) {

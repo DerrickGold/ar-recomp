@@ -1,4 +1,4 @@
-#include <assert.h>
+#include "support/test_assert.h"
 #include <float.h>
 #include <math.h>
 #include <stdio.h>

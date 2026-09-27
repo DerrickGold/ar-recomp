@@ -2,7 +2,7 @@
 #include "actraiser/actraiser_cpu_hle_internal.h"
 #include "regional/action/regional_platform_skull.h"
 #include "byte_order.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 static uint8_t memory[65536],snapshot;

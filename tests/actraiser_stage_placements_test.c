@@ -4,7 +4,7 @@
 #include "regional/action/regional_terrain.h"
 #include "randomizer/randomizer.h"
 #include "byte_order.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <setjmp.h>
 #include <stdio.h>
 #include <string.h>

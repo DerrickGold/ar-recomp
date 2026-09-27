@@ -1,6 +1,6 @@
 #include "render/hud_layout.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 
 static void CheckRect(ArRenderRectI actual,

@@ -4,8 +4,7 @@
 #include "sim/sim3d/sim3d_depth_pass.h"
 #include "sim/sim3d/sim_cloud_effect_backend.h"
 #include "sim/sim3d/sim_shadow_effect_backend.h"
-#undef NDEBUG
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 
 /* Fault-injected portable boundary: no GPU, settings globals or game state. */

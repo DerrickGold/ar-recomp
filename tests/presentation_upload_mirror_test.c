@@ -1,7 +1,7 @@
 #include "present/presentation_upload_mirror.h"
 #include "app/performance_metrics.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>

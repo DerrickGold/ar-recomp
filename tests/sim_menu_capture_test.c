@@ -5,7 +5,7 @@
 #include "app/session_fatal.h"
 #include "app/settings.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

@@ -1,5 +1,5 @@
 #include "sim/menu/sim_menu_model.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 
 static SimMenuEvent Press(SimMenuModel *m, uint8_t key) {

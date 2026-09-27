@@ -3,7 +3,7 @@
 #include "actraiser_game.h"
 #include "app/settings.h"
 #include "app/user_data_dir.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>

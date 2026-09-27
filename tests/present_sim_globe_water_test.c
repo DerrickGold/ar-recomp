@@ -4,8 +4,7 @@
 #include "sim/world_nav/present_sim_globe_water.h"
 #include "sim/sim3d/sim3d_mesh_set.h"
 #include "sim/town/sim_town_ground_art.h"
-#undef NDEBUG
-#include <assert.h>
+#include "support/test_assert.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

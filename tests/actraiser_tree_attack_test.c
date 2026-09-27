@@ -2,7 +2,7 @@
 #include "regional/action/regional_action_motion.h"
 #include "byte_order.h"
 #include "actraiser/quintet_lzss.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

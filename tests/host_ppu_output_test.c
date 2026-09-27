@@ -1,6 +1,6 @@
 #include "host/host_ppu_output.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include "action/action_obj_apron.h"
 #include "host/host_frame_surfaces.h"

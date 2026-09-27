@@ -10,10 +10,7 @@
 #include "sim/mountains/sim_background_mountain_silhouette.h"
 
 /* These expressions execute the test operations as well as checking them. */
-#ifdef NDEBUG
-#undef NDEBUG
-#endif
-#include <assert.h>
+#include "support/test_assert.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

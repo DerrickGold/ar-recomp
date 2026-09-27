@@ -1,8 +1,5 @@
-#ifdef NDEBUG
-#undef NDEBUG
-#endif
 #include "platform/sdl/gpu_texture_upload_layout.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 
 int main(void) {

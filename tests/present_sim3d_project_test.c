@@ -4,8 +4,7 @@
 #include "sim/world_nav/sim_world_navigation_terrain.h"
 #include "sim/town/sim_town_terrain.h"
 #include "app/performance_metrics.h"
-#undef NDEBUG
-#include <assert.h>
+#include "support/test_assert.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

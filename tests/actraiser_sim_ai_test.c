@@ -1,7 +1,7 @@
 #include "actraiser/regional/actraiser_regional_sim_ai.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
 #include "regional/towns/regional_sim_actors.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

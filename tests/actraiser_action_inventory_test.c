@@ -5,7 +5,7 @@
 #include "actraiser/regional/actraiser_regional_media.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
 #include "byte_order.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

@@ -1,7 +1,7 @@
 #include "platform/sdl/render_sdl_internal.h"
 
 #include <SDL3/SDL.h>
-#include <assert.h>
+#include "support/test_assert.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

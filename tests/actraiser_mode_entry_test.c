@@ -1,7 +1,7 @@
 #include "actraiser/actraiser_mode_entry.h"
 #include "actraiser/actraiser_native_call.h"
 #include "regional/action/regional_mode_entry.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 static uint8_t ram[65536],town[65536],rules;

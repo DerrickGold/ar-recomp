@@ -1,5 +1,5 @@
 #include "actraiser/regional/actraiser_regional_town_status.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

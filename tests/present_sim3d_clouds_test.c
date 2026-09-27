@@ -3,7 +3,7 @@
 #include "sim/sim3d/sim_cloud_effect_backend.h"
 #include "sim/sim3d/sim3d_performance.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>

@@ -5,7 +5,7 @@
 #include "present/present.h"
 #include "render/effect_batch.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

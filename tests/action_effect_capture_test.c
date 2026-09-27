@@ -1,6 +1,6 @@
 #include "action/action_effect_capture.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 
 #include "action/action_effect_clock.h"

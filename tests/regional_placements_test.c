@@ -1,6 +1,6 @@
 #include "regional/action/regional_placements.h"
 #include "byte_order.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

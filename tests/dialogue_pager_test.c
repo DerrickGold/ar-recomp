@@ -1,6 +1,6 @@
 #include "localization/dialogue_pager.h"
 #include "localization/text_presentation.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 
 static void Present(const ArDialoguePager *pager, uint32_t end, bool drawn) {

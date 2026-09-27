@@ -4,7 +4,7 @@
 #include "sim/sim3d/sim3d_textures.h"
 #include "host/host_video.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

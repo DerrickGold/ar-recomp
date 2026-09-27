@@ -3,7 +3,7 @@
 #include "host/atomic_replace.h"
 #include "snesrecomp/support/utf8_fs.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #ifndef _WIN32
 #include <unistd.h>
 #endif

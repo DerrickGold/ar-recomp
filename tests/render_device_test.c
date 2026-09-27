@@ -2,7 +2,7 @@
 #include "render/render_output.h"
 #include "present/presentation_upload_mirror.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

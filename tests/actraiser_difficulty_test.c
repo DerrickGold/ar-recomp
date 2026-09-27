@@ -3,7 +3,7 @@
 #include "regional/action/regional_difficulty.h"
 #include "byte_order.h"
 #include "actraiser/quintet_lzss.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

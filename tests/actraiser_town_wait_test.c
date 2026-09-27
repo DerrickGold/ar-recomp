@@ -1,7 +1,7 @@
 #include "actraiser/actraiser_town_wait.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

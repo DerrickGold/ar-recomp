@@ -2,7 +2,7 @@
 #include "regional/action/regional_score_lives.h"
 #include "byte_order.h"
 #include "actraiser/cpu_65816_math.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

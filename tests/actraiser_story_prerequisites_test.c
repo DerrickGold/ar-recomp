@@ -1,5 +1,5 @@
 #include "actraiser/actraiser_story_prerequisites.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

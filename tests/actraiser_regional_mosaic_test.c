@@ -2,7 +2,7 @@
 #include "action/action_room_mosaic.h"
 #include "regional/presentation/regional_mosaic.h"
 #include "byte_order.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -1,6 +1,6 @@
 /* White-box lifetime/failure tests keep allocator controls and recency probes
  * out of the production cache contract. The authored compiler is unchanged. */
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>

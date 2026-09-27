@@ -1,6 +1,6 @@
 #include "diorama/diorama_capture.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 #include "actraiser/actraiser_rtl.h"

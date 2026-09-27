@@ -1,7 +1,6 @@
 #include "present/presentation_view.h"
 #include "sim/world_nav/present_sky_palace.h"
-#undef NDEBUG
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 
 static int backdrop_calls, foreground_calls;

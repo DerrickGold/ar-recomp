@@ -2,7 +2,7 @@
 #include "sim/sim_world_map.h"
 #include "sim/sim3d/sim3d_performance.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 
 static unsigned creates[2], uploads[2], downsamples, bakes, live;

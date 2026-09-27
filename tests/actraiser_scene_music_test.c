@@ -1,7 +1,7 @@
 #include "actraiser/actraiser_scene_music.h"
 #include "regional/presentation/regional_music.h"
 #include "byte_order.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -1,6 +1,6 @@
 #include "render/upload_rect_run.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>

@@ -1,5 +1,5 @@
 #include "actraiser/actraiser_lives_display.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

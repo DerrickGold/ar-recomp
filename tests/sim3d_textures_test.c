@@ -1,6 +1,6 @@
 #include "sim/sim3d/sim3d_textures.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>

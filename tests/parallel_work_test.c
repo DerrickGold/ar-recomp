@@ -1,7 +1,7 @@
 #include "host/parallel_work.h"
 
 #include <SDL3/SDL.h>
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>

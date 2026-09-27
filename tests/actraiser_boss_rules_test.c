@@ -3,7 +3,7 @@
 #include "regional/action/regional_boss_rules.h"
 #include "actraiser/quintet_lzss.h"
 #include "byte_order.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 static uint8_t memory[65536];

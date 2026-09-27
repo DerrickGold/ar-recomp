@@ -9,7 +9,7 @@
 #include "replacements/music_replacements.h"
 #include "snesrecomp/game/types.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

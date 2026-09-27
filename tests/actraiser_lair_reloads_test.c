@@ -1,7 +1,7 @@
 #include "actraiser/actraiser_lair_reloads.h"
 #include "regional/session/regional_lair_fingerprint.h"
 #include "byte_order.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

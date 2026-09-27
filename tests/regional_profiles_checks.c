@@ -2,7 +2,7 @@
 #include "regional/session/regional_session.h"
 #include "regional/session/regional_session_action.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stddef.h>
 #include <string.h>
 

@@ -536,6 +536,10 @@ endif() # NOT AR_TESTS_ONLY
 if(BUILD_TESTING)
     include(cmake/TestSupport.cmake)
 
+    add_executable(actraiser_test_assertions_test tests/test_assertions_test.c)
+    target_compile_definitions(actraiser_test_assertions_test PRIVATE NDEBUG=1)
+    add_test(NAME actraiser_test_assertions COMMAND actraiser_test_assertions_test)
+
     # Quality and generator-contract checks must never disappear silently.
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)

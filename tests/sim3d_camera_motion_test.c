@@ -1,7 +1,7 @@
 #include "sim/sim3d/sim3d_camera.h"
 #include "app/settings.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>

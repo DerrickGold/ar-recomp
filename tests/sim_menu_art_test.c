@@ -1,5 +1,5 @@
 #include "sim/menu/sim_menu_art.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

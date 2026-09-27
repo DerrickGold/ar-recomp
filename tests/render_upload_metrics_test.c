@@ -1,7 +1,4 @@
-#ifdef NDEBUG
-#undef NDEBUG
-#endif
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <SDL3/SDL.h>
 #include "platform/sdl/render_sdl_internal.h"

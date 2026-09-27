@@ -1,7 +1,7 @@
 #include "save/save_paths.h"
 #include "save/save_system.h"
 #include "snesrecomp/support/utf8_fs.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 #ifndef _WIN32

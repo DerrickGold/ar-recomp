@@ -1,7 +1,7 @@
 #include "actraiser/regional/actraiser_actor_art.h"
 #include "actraiser/actraiser_lzss.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

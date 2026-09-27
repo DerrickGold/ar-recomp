@@ -1,6 +1,6 @@
 #include "render/present_hud.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 #include "app/session_fatal.h"

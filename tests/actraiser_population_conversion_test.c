@@ -3,7 +3,7 @@
 #include "actraiser/actraiser_story_snapshot.h"
 #include "snesrecomp/support/utf8_fs.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 #ifdef _WIN32

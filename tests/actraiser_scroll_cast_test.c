@@ -2,7 +2,7 @@
 #include "actraiser/actraiser_cpu_hle_internal.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

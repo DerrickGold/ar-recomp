@@ -2,7 +2,7 @@
 #include "host/regional_media_files.h"
 #include "actraiser/regional/actraiser_regional_media.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

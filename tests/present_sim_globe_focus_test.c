@@ -1,6 +1,5 @@
 #include "sim/world_nav/present_sim_globe_focus.h"
-#undef NDEBUG
-#include <assert.h>
+#include "support/test_assert.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

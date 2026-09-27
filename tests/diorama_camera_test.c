@@ -1,6 +1,6 @@
 #include "diorama/diorama_camera.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>

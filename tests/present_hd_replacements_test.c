@@ -1,6 +1,6 @@
 #include "replacements/present_hd_replacements.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include "present/present.h"

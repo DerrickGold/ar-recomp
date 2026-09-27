@@ -1,7 +1,7 @@
 #include "randomizer/randomizer.h"
 #include "app/settings.h"
 #include "byte_order.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>

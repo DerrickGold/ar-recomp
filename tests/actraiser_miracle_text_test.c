@@ -1,5 +1,5 @@
 #include "actraiser/actraiser_miracle_text.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <string.h>
 
 static uint8_t rom[65536], ram[0x20000];

@@ -1,6 +1,6 @@
 #include "actraiser/actraiser_town_redevelopment.h"
 #include "actraiser/actraiser_cell_map.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

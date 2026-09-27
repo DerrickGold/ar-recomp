@@ -1,11 +1,8 @@
 /* Deterministic adapter protocol test. A hidden/minimized GPU window can
  * acquire successfully without a swapchain image even on a healthy device.
  * Intercept only the public SDL calls at that boundary, not driver internals. */
-#ifdef NDEBUG
-#undef NDEBUG /* Protocol checks must also execute in optimized test builds. */
-#endif
 #include <SDL3/SDL.h>
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>

@@ -1,8 +1,7 @@
 /* Navigation-only contract fixture: no live SIM canvas/model publisher.
  * The full GPU fixture links the real SIM providers. Unexpected entry here
  * must fail loudly rather than accidentally validate a partial town scene. */
-#undef NDEBUG
-#include <assert.h>
+#include "support/test_assert.h"
 #include "sim/sim3d/present_sim3d_project.h"
 #include "sim/world_nav/present_sim_globe_mountains.h"
 #include "sim/world_nav/present_sim_globe_terrain.h"

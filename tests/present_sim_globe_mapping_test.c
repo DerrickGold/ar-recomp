@@ -1,8 +1,7 @@
 #include "sim/world_nav/present_sim_globe_mapping.h"
 #include "sim/town/sim_town_terrain.h"
 /* Keep checks and fixture setup active in release-configured test builds. */
-#undef NDEBUG
-#include <assert.h>
+#include "support/test_assert.h"
 #include <float.h>
 #include <math.h>
 #include <stdio.h>

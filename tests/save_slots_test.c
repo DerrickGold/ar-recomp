@@ -1,7 +1,7 @@
 #include "save/save_slot_manager.h"
 #include "byte_order.h"
 #include "deterministic_hash.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

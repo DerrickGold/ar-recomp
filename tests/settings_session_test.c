@@ -5,7 +5,7 @@
 #include "app/user_data_dir.h"
 #include "platform/sdl/settings_persistence_sdl.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 

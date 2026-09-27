@@ -1,7 +1,7 @@
 #include "diorama/diorama_coverage.h"
 #include "diorama/diorama_planes.h"
 
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <stdlib.h>
 

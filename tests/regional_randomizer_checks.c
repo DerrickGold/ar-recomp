@@ -1,6 +1,6 @@
 #include "regional/regional_randomizer.h"
 #include "regional/session/regional_session.h"
-#include <assert.h>
+#include "support/test_assert.h"
 #include <stdio.h>
 #include <string.h>
 
