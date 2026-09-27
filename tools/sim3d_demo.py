@@ -145,7 +145,7 @@ def main() -> int:
     rom = args.rom.resolve()
     config = (args.config.resolve() if args.config is not None else
               resolve(ROOT, checkpoint.get(
-                  "default_config", "config.ini")).resolve())
+                  "default_config", "installer/packaging/templates/config.ini")).resolve())
     replay = resolve(ROOT, checkpoint["replay"]).resolve()
     sram_key = "sram_base64" if checkpoint.get("sram_base64") else "sram"
     sram = resolve(ROOT, checkpoint[sram_key]).resolve()
@@ -466,7 +466,9 @@ def main() -> int:
                                                       checkpoint.get(
                                                           "max_differing_pixels"),
                                                       bool(checkpoint.get(
-                                                          "expect_picker_unchanged")))
+                                                          "expect_picker_unchanged")),
+                                                      int(checkpoint.get(
+                                                          "scene_flash_channel_budget", 0)))
         errors.extend(d3_errors)
         summary[f"{d3_label.lower()}_visual"] = d3_artifact
     report = {

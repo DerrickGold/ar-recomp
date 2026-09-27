@@ -34,6 +34,10 @@ Usage:
     tools/build_shaders.py            # regenerate all shaders
     tools/build_shaders.py rim        # regenerate one
     tools/build_shaders.py --check    # verify committed headers are current
+
+Checks compare MSL and SPIR-V byte-for-byte. DXIL may differ only in DXC's
+build identifier and its resulting shader hash; the disassembled program,
+bindings, signatures and validation requirements must still match exactly.
 """
 
 import argparse
@@ -285,6 +289,39 @@ static const unsigned int k%sDXILSize = %du;
     )
 
 
+def dxil_program(disassembly):
+    """Ignore only DXC's build identity and the hash that includes that identity.
+
+    Resource bindings, signatures, instructions, validation requirements and
+    every other metadata record remain part of the comparison.
+    """
+    return re.sub(r'^; shader hash: [0-9a-f]+\n|^![0-9]+ = !\{!"dxc[^"\n]*"\}\n',
+                  '', disassembly, flags=re.M)
+
+
+def check_header(source, current, spirv, msl, dxil, temp_dir):
+    expected = render_header(source, spirv, msl, dxil)
+    if current == expected:
+        return "OK"
+    identifier = "k" + c_identifier(base_name(source), shader_stage(source)) + "DXIL"
+    match = re.search(r'const unsigned char ' + re.escape(identifier) +
+                      r'\[\] = \{(.*?)\};', current, re.S)
+    if not match:
+        return "STALE"
+    committed_dxil = bytes(int(value, 16) for value in re.findall(r'0x([0-9a-f]{2})', match[1]))
+    # Require exact MSL, SPIR-V, size declarations and header structure before
+    # considering a DXC identity-only difference. Never rewrite shipped blobs
+    # just because a local compiler has a different build identifier.
+    if render_header(source, spirv, msl, committed_dxil) != current:
+        return "STALE"
+    old_path, new_path = temp_dir / "committed.dxil", temp_dir / "regenerated.dxil"
+    old_path.write_bytes(committed_dxil)
+    new_path.write_bytes(dxil)
+    old = run_tool("dxc", ["-dumpbin", dxc_path(old_path)])
+    new = run_tool("dxc", ["-dumpbin", dxc_path(new_path)])
+    return "OK (DXC build identity differs)" if dxil_program(old) == dxil_program(new) else "STALE"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("shaders", nargs="*", help="shader stems (default: all)")
@@ -333,8 +370,8 @@ def main():
 
             if args.check:
                 current = header_path.read_text() if header_path.exists() else ""
-                status = "OK" if current == contents else "STALE"
-                if current != contents:
+                status = check_header(source, current, spirv, msl, dxil, temp_dir)
+                if status == "STALE":
                     stale.append(header_path.name)
                 print("%-24s %s" % (header_path.name, status))
             else:

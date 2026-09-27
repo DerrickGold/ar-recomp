@@ -19,6 +19,19 @@ SIM_EFFECT_VOLCANO_FIREBALL = 7
 HEIGHT_SLEW_STEP = 4
 
 
+def is_inactive_capture(frame: dict) -> bool:
+    """A pre-town/navigation frame has no SIM capture to invalidate.
+
+    Require the complete inactive contract so a broken active frame or one
+    carrying partial actors/effects cannot disappear from failure counts.
+    """
+    return (frame.get("view") == "none" and frame.get("separated_status") == 0
+            and frame.get("master_enabled") is False
+            and not frame.get("metadata_valid") and not frame.get("effective")
+            and not frame.get("sources") and not frame.get("objects")
+            and not frame.get("effects") and not frame.get("integrity_flags"))
+
+
 def is_volcano_fireball_source(source: dict) -> bool:
     """Audited packed identity and airborne art, not arbitrary projectiles.
 
@@ -108,7 +121,8 @@ class MetadataValidator:
         flags = int(frame.get("integrity_flags", 0))
         self.stats.frame_count += 1
         self.stats.valid_count += valid
-        self.stats.invalid_count += not valid
+        self.stats.inactive_count += is_inactive_capture(frame)
+        self.stats.invalid_count += not valid and not is_inactive_capture(frame)
         self.stats.picker_count += frame.get("view") == "authentic_picker"
         self.stats.fallback_count += frame.get("view") == "authentic_fallback"
         if self.stats.first_serial is None:
@@ -213,7 +227,8 @@ class MetadataValidator:
         if int(frame.get("effect_visible_count", -1)) != frame_visible_effects:
             self.issues.add(line_number, "effect_visible_count does not match visible flags")
         effect_metadata_valid = bool(frame.get("effect_metadata_valid", False))
-        self.stats.effect_metadata_invalid_frames += not effect_metadata_valid
+        self.stats.effect_metadata_invalid_frames += (
+            not effect_metadata_valid and not is_inactive_capture(frame))
         effect_overflow = int(frame.get("effect_overflow_count", -1))
         if effect_overflow < 0:
             self.issues.add(line_number, "effect_overflow_count is missing")

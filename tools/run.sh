@@ -8,7 +8,7 @@
 # captures everything too. This script just saves typing the default args.
 # AR_NO_RUN_DIR=1 opts out (legacy flat saves/ layout).
 set -u
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 [ -x ./build/ActRaiserRecomp ] || { echo "[run] not built"; exit 1; }
 if [ "$#" -gt 0 ]; then
   exec ./build/ActRaiserRecomp "$@"

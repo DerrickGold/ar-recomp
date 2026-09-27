@@ -1,0 +1,9 @@
+{
+  "name": "actraiser-development-checks",
+  "private": true,
+  "description": "Local JavaScript quality checks for authored tools and installer code",
+  "devDependencies": {
+    "eslint": "10.11.0",
+    "globals": "17.12.0"
+  }
+}

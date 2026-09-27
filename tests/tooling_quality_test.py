@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""ROM-free regressions for developer-tool discovery and magic table decoding."""
+"""ROM-free regressions for developer-tool gates and magic table decoding."""
 
 from contextlib import redirect_stderr
 import io
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -45,6 +46,38 @@ class ToolingQualityTest(unittest.TestCase):
                 check_tooling.main()
         self.assertEqual(failure.exception.code, 2)
         self.assertIn("required tool not found: gofmt", errors.getvalue())
+
+    def test_javascript_semantics_and_classic_editor_scope(self):
+        root = Path(__file__).resolve().parents[1]
+        eslint = root / "node_modules/eslint/bin/eslint.js"
+        def lint(text, filename):
+            return subprocess.run(["node", str(eslint), "--stdin", "--stdin-filename",
+                                   str(root / filename)], input=text, text=True,
+                                  cwd=root, capture_output=True)
+        valid = lint("const value = 1; globalThis.result = value;", "installer/probe.js")
+        self.assertEqual(valid.returncode, 0, valid.stdout + valid.stderr)
+        invalid = lint("globalThis.result = missingValue;", "installer/probe.js")
+        self.assertNotEqual(invalid.returncode, 0)
+        self.assertIn("no-undef", invalid.stdout)
+        wrong_host = lint("globalThis.result = window.location;", "tools/probe.mjs")
+        self.assertNotEqual(wrong_host.returncode, 0)
+        self.assertIn("no-undef", wrong_host.stdout)
+        filename = "tools/action_editor/native_frame.js"
+        text = (root / filename).read_text()
+        valid = lint(text, filename)
+        self.assertEqual(valid.returncode, 0, valid.stdout + valid.stderr)
+        invalid = lint(text + "\nglobalThis.result = missingEditorValue;\n", filename)
+        self.assertNotEqual(invalid.returncode, 0)
+        self.assertIn("missingEditorValue", invalid.stdout)
+
+    def test_shell_semantics_reject_unquoted_paths(self):
+        for argument, expected in (('"$1"', 0), ('$1', 1)):
+            result = subprocess.run(["shellcheck", "--shell=bash", "-"],
+                                    input="printf '%s\\n' " + argument + "\n",
+                                    text=True, capture_output=True)
+            self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+            if expected:
+                self.assertIn("SC2086", result.stdout)
 
     def test_magic_visual_pointer_decodes_geometry_and_signed_motion(self):
         data = bytearray(40)

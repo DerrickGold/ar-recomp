@@ -19,8 +19,16 @@ cd "$(dirname "$0")/.."
 A=assets
 MAXW=1600
 
-before=$(du -ck $(grep -o '](/assets/[^)]*)' README.md | tr -d '](' \
-          | sed 's/)$//;s|^|.|') | tail -1 | cut -f1)
+# Preserve paths with spaces instead of splitting command substitution output.
+images=()
+while IFS= read -r image; do
+  images+=("$image")
+done < <(grep -o '](/assets/[^)]*)' README.md | tr -d '](' | sed 's/)$//;s|^|.|')
+if [ "${#images[@]}" -eq 0 ]; then
+  echo "No README images found" >&2
+  exit 1
+fi
+before=$(du -ck "${images[@]}" | tail -1 | cut -f1)
 
 # Game frames: SNES-derived, palette-limited. 256 colours is visually identical.
 for f in title mode7 hud-scaling sim3d-detail worldnav-3d; do
@@ -62,7 +70,6 @@ done
 # every pixel changes every frame, so inter-frame compression has little to
 # work with.
 
-after=$(du -ck $(grep -o '](/assets/[^)]*)' README.md | tr -d '](' \
-         | sed 's/)$//;s|^|.|') | tail -1 | cut -f1)
+after=$(du -ck "${images[@]}" | tail -1 | cut -f1)
 echo
 echo "README image payload: $((before/1024))M -> $((after/1024))M"

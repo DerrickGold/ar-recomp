@@ -245,12 +245,25 @@ def validate_voxel_visual(
     }, errors
 
 
+def changed_pixel_counts(a: bytes, b: bytes, tolerance: int = 0) -> tuple[int, int]:
+    """Keep exact liveness and a separate budget for changes beyond a scene flash."""
+    if not 0 <= tolerance <= 255:
+        raise ValueError("pixel difference tolerance must be between 0 and 255")
+    changed = significant = 0
+    for index in range(0, min(len(a), len(b)), 3):
+        delta = max(abs(a[index + channel] - b[index + channel]) for channel in range(3))
+        changed += delta > 0
+        significant += delta > tolerance
+    return changed, significant
+
+
 def validate_d3_artifact(
     output: Path,
     label: str,
     picker_topdown: bool,
     max_differing_pixels: int | None = None,
     expect_picker_unchanged: bool = False,
+    scene_flash_channel_budget: int = 0,
 ) -> tuple[dict, list[str]]:
     """Retain and compare the two requested geometry-profile readbacks."""
     candidates = sorted(
@@ -287,10 +300,8 @@ def validate_d3_artifact(
     nonblack = sum(
         projected[index : index + 3] != b"\0\0\0" for index in range(0, len(projected), 3)
     )
-    differing_pixels = sum(
-        projected[index : index + 3] != authentic[index : index + 3]
-        for index in range(0, min(len(projected), len(authentic)), 3)
-    )
+    differing_pixels, local_differing_pixels = changed_pixel_counts(
+        projected, authentic, scene_flash_channel_budget)
     errors = []
     if authentic_dimensions != dimensions:
         errors.append(f"{label} B/A screenshot dimensions differ")
@@ -304,9 +315,10 @@ def validate_d3_artifact(
     # An upper bound is what distinguishes "this stage refined something" from
     # "this stage moved the scene". A blur that shifts geometry, or a shadow
     # pass that leaks past the ground, blows through it immediately.
-    if max_differing_pixels is not None and differing_pixels > max_differing_pixels:
+    if max_differing_pixels is not None and local_differing_pixels > max_differing_pixels:
         errors.append(
-            f"{label} B/A profiles changed {differing_pixels} output pixels, "
+            f"{label} B/A profiles changed {local_differing_pixels} output pixels beyond "
+            f"the scene-flash channel budget {scene_flash_channel_budget}, "
             f"more than the {max_differing_pixels} this stage may touch"
         )
     picker_differing_pixels = sum(
@@ -366,6 +378,8 @@ def validate_d3_artifact(
         "unique_colors": len(colors),
         "nonblack_pixels": nonblack,
         "differing_pixels": differing_pixels,
+        "local_differing_pixels": local_differing_pixels,
+        "scene_flash_channel_budget": scene_flash_channel_budget,
         "picker_differing_pixels": picker_differing_pixels,
         "projected_sha256": hashlib.sha256(candidates[0].read_bytes()).hexdigest(),
         "authentic_sha256": hashlib.sha256(candidates[1].read_bytes()).hexdigest(),

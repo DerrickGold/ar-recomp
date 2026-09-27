@@ -546,6 +546,9 @@ if(BUILD_TESTING)
                 ${CMAKE_SOURCE_DIR}/tests/fixtures/text_template.json)
     endif()
     if(Python3_Interpreter_FOUND)
+        add_test(NAME actraiser_shader_tools
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/shader_tools_test.py)
         add_test(NAME actraiser_tooling_quality
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tests/tooling_quality_test.py)

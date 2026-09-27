@@ -238,7 +238,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [
@@ -332,7 +333,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       }
     },
     "D2-flat-actions": {
@@ -361,7 +363,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [
@@ -481,7 +484,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       }
     },
     "D3a-ground-projection": {
@@ -513,7 +517,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [
@@ -588,7 +593,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       }
     },
     "D3b-object-billboards": {
@@ -620,7 +626,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [
@@ -695,7 +702,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       }
     },
     "D3b-wide-hud-handoff": {
@@ -731,7 +739,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [
@@ -788,7 +797,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       }
     },
     "D3c-virtual-height": {
@@ -820,7 +830,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [
@@ -907,7 +918,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       }
     },
     "D3c-height-variations": {
@@ -939,7 +951,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [
@@ -1004,7 +1017,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       }
     },
     "D4a-hard-shadows": {
@@ -1037,7 +1051,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [
@@ -1118,7 +1133,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "max_differing_pixels": 6000
     },
@@ -1154,7 +1170,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [
@@ -1244,7 +1261,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "d4b_visual": true,
       "max_differing_pixels": 6000
@@ -1282,7 +1300,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [
@@ -1372,7 +1391,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "max_differing_pixels": 6000,
       "d4c_visual": true
@@ -1409,7 +1429,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [
@@ -1479,7 +1500,8 @@
         "AR_SIM3D_EFFECT_LIGHTING": "off",
         "AR_SIM3D_PARTICLES": "off",
         "AR_SIM3D_CLOUD_OPACITY": "80",
-        "AR_SIM3D_CLOUD_FALLOFF": "96"
+        "AR_SIM3D_CLOUD_FALLOFF": "96",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [
@@ -1569,7 +1591,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "max_differing_pixels": 200000,
       "d5a_visual": true,
@@ -1589,7 +1612,7 @@
       "env": {
         "AR_SIM3D": "1",
         "AR_SIM3D_CAMERA_MODE": "0",
-        "AR_SIM3D_PITCH": "-350",
+        "AR_SIM3D_PITCH": "-575",
         "AR_SIM3D_YAW": "0",
         "AR_SIM3D_DISTANCE": "0",
         "AR_SIM3D_SEPARATED": "on",
@@ -1605,7 +1628,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "on",
-        "AR_SIM3D_PARTICLES": "on"
+        "AR_SIM3D_PARTICLES": "on",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [
@@ -1637,20 +1661,9 @@
           "unique_hashes_min": 2,
           "atlas_valid_frames_min": 700,
           "atlas_valid_objects_min": 1,
-          "atlas_invalid_objects_max": 2,
+          "atlas_invalid_objects_max": 0,
           "accounting_errors_max": 0,
-          "allowed_unpacked_atlas_objects": [
-            {
-              "game_frame": 642,
-              "record": 2788,
-              "composition": 42811
-            },
-            {
-              "game_frame": 642,
-              "record": 3548,
-              "composition": 53811
-            }
-          ],
+          "allowed_unpacked_atlas_objects": [],
           "effect_frames_min": 240,
           "max_effects_min": 1,
           "effect_metadata_invalid_frames_max": 0,
@@ -1682,6 +1695,14 @@
           "effective": [
             0,
             12415
+          ],
+          "inactive_frames_max": 60,
+          "projection_cameras": [
+            [
+              -575,
+              0,
+              0
+            ]
           ]
         }
       },
@@ -1699,10 +1720,12 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "max_differing_pixels": 270000,
-      "expect_picker_unchanged": true
+      "expect_picker_unchanged": true,
+      "scene_flash_channel_budget": 12
     },
     "D6b-blue-ground-fire": {
       "description": "Palette-2 blue ground fire emitted by Lightning impact children and shared enemy transitions, with continuous local light and rising particles",
@@ -1734,7 +1757,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "on",
-        "AR_SIM3D_PARTICLES": "on"
+        "AR_SIM3D_PARTICLES": "on",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [
@@ -1828,7 +1852,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "max_differing_pixels": 270000,
       "expect_picker_unchanged": true
@@ -1863,7 +1888,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "on",
-        "AR_SIM3D_PARTICLES": "on"
+        "AR_SIM3D_PARTICLES": "on",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [
@@ -1958,7 +1984,8 @@
         "AR_SIM3D_BACKDROP": "off",
         "AR_SIM3D_PICKER_EASE": "off",
         "AR_SIM3D_EFFECT_LIGHTING": "off",
-        "AR_SIM3D_PARTICLES": "off"
+        "AR_SIM3D_PARTICLES": "off",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "max_differing_pixels": 270000,
       "expect_picker_unchanged": true
@@ -2008,7 +2035,8 @@
         "AR_SIM3D_VOXEL_STYLE": "Varied",
         "AR_SIM3D_VOXEL_FACING": "Per-model lean",
         "AR_SIM3D_VOXEL_RENDER_SCALE": "Pixel-clean",
-        "AR_SIM3D_LANDSCAPE_HEIGHT": "100"
+        "AR_SIM3D_LANDSCAPE_HEIGHT": "100",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "baseline_env": {
         "AR_SIM3D_SEPARATED": "on",
@@ -2032,7 +2060,8 @@
         "AR_SIM3D_VOXEL_STYLE": "Varied",
         "AR_SIM3D_VOXEL_FACING": "Per-model lean",
         "AR_SIM3D_VOXEL_RENDER_SCALE": "Pixel-clean",
-        "AR_SIM3D_LANDSCAPE_HEIGHT": "100"
+        "AR_SIM3D_LANDSCAPE_HEIGHT": "100",
+        "AR_SIM3D_GLOBE_UNDERLAY": "off"
       },
       "expect": {
         "towns": [

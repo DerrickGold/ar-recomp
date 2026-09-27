@@ -35,7 +35,7 @@
 # instead of raw traces. A DIVERGED result means the presentation has grown a
 # write path, which is the one thing it is never allowed to do.
 set -u
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 REC="${1:-}"
 FRAMES="${2:-4000}"

@@ -22,7 +22,7 @@ class MetadataStatistics:
     """Cross-frame counters and censuses; frame checks own the acceptance rules."""
 
     def __init__(self):
-        self.frame_count = self.valid_count = self.invalid_count = 0
+        self.frame_count = self.valid_count = self.invalid_count = self.inactive_count = 0
         self.picker_count = self.fallback_count = 0
         self.atlas_valid_count = self.atlas_invalid_count = self.atlas_valid_frames = 0
         self.separated_valid_count = self.separated_ready_count = 0
@@ -90,6 +90,7 @@ def summarize_metadata(stats: MetadataStatistics, error_count: int) -> dict:
         "frame_count": stats.frame_count,
         "valid_frame_count": stats.valid_count,
         "invalid_frame_count": stats.invalid_count,
+        "inactive_frame_count": stats.inactive_count,
         "picker_frame_count": stats.picker_count,
         "fallback_frame_count": stats.fallback_count,
         "first_build_serial": stats.first_serial,
@@ -219,6 +220,7 @@ def validate_expectations(summary: dict, expected: dict) -> list[str]:
             )
     maxima = {
         "invalid_frames_max": "invalid_frame_count",
+        "inactive_frames_max": "inactive_frame_count",
         "fallback_frames_max": "fallback_frame_count",
         "atlas_invalid_objects_max": "atlas_invalid_object_count",
         "accounting_errors_max": "accounting_error_count",

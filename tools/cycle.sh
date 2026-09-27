@@ -16,7 +16,7 @@
 #      run the Go trace inspector in read-only diagnostic mode and write
 #      <run>/cycle_report.txt. Candidate cfg lines remain review-only.
 set -u
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 run_snesbuild() {
   if command -v snesbuild >/dev/null 2>&1; then
@@ -65,15 +65,17 @@ RUN_DIR=$(readlink runs/latest 2>/dev/null)
 RUN_DIR="runs/${RUN_DIR:-latest}"
 [ -d "$RUN_DIR" ] || { echo "[cycle] no runs/ to triage"; exit 1; }
 REPORT="$RUN_DIR/cycle_report.txt"
-ANOMS=$(ls "$RUN_DIR"/anom_*.jsonl 2>/dev/null | sort)
-DISPLOG=$(ls "$RUN_DIR"/dump_*dispatch_log.json 2>/dev/null | head -1)
+shopt -s nullglob
+ANOMS=("$RUN_DIR"/anom_*.jsonl)
+DISPATCH_LOGS=("$RUN_DIR"/dump_*dispatch_log.json)
+DISPLOG=${DISPATCH_LOGS[0]:-}
 
 {
   echo "=== cycle report $(date '+%F %T')  [$RUN_DIR] ==="
-  if [ -z "$ANOMS" ]; then
+  if [ "${#ANOMS[@]}" -eq 0 ]; then
     echo "no anomaly captures in this run"
   else
-    for f in $ANOMS; do
+    for f in "${ANOMS[@]}"; do
       echo; echo "--- $f ---"
       run_snesbuild trace-inspect "$f" --root . --diagnose --rom ar.sfc 2>&1
     done

@@ -1,7 +1,7 @@
 #!/bin/sh
 # One-click graphical build for macOS. Double-click this file in Finder.
 
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+ROOT="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 UTILS="$ROOT/utils"
 
 fail() {
@@ -9,7 +9,7 @@ fail() {
     echo "ERROR: $1"
     echo
     printf "Press Return to close this window."
-    read -r ignored
+    read -r _ignored
     exit 1
 }
 

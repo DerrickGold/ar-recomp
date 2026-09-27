@@ -6,7 +6,11 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from sim3d.metadata_checks import effect_anchor_valid, is_ballistic_effect, is_ballistic_object
+from sim3d.metadata_checks import (
+    MetadataValidator, effect_anchor_valid, is_ballistic_effect, is_ballistic_object,
+)
+from sim3d.artifacts import changed_pixel_counts
+from sim3d.checkpoints import check_stage_pinning, load_manifest
 from sim3d.metadata import read_metadata
 from sim3d.metadata_report import validate_expectations
 
@@ -75,6 +79,46 @@ class MetadataStreamTest(unittest.TestCase):
             # Every call owns a fresh validation session, even after a bad stream.
             path.write_text("")
             self.assertEqual(read_metadata(path)[0]["frame_count"], 0)
+
+    def test_inactive_capture_does_not_hide_broken_active_metadata(self):
+        inactive = dict(view="none", separated_status=0, master_enabled=False,
+                        metadata_valid=False, effect_metadata_valid=False,
+                        effect_visible_count=0, effect_overflow_count=0)
+        validator = MetadataValidator()
+        validator.observe(inactive, 1)
+        summary, _ = validator.finish()
+        self.assertEqual(summary["inactive_frame_count"], 1)
+        self.assertEqual(summary["invalid_frame_count"], 0)
+        self.assertEqual(summary["effect_metadata_invalid_frame_count"], 0)
+        for mutation in ({"view": "enhanced"}, {"master_enabled": True},
+                         {"separated_status": 12}, {"effective": 1},
+                         {"integrity_flags": 1}):
+            validator = MetadataValidator()
+            validator.observe(dict(inactive, **mutation), 1)
+            summary, _ = validator.finish()
+            self.assertEqual(summary["inactive_frame_count"], 0)
+            self.assertEqual(summary["invalid_frame_count"], 1)
+            self.assertEqual(summary["effect_metadata_invalid_frame_count"], 1)
+
+    def test_scene_flash_budget_keeps_exact_liveness_and_local_change_limit(self):
+        original = bytes([20, 30, 40, 90, 80, 70, 0, 0, 0])
+        flashed = bytes([23, 35, 49, 93, 85, 79, 0, 0, 0])
+        self.assertEqual(changed_pixel_counts(original, flashed, 12), (2, 0))
+        moved = bytes([23, 35, 49, 180, 20, 40, 0, 0, 0])
+        self.assertEqual(changed_pixel_counts(original, moved, 12), (2, 1))
+        self.assertEqual(changed_pixel_counts(original, flashed), (2, 2))
+        self.assertEqual(changed_pixel_counts(original, original, 12), (0, 0))
+        with self.assertRaises(ValueError):
+            changed_pixel_counts(original, flashed, 256)
+
+    def test_all_profiles_pin_the_connected_globe_stage(self):
+        manifest = load_manifest(Path(__file__).parent / "fixtures/sim3d/checkpoints.json")
+        for name, checkpoint in manifest["checkpoints"].items():
+            check_stage_pinning(name, checkpoint)
+        checkpoint = manifest["checkpoints"]["D6a-lightning-miracle"]
+        del checkpoint["env"]["AR_SIM3D_GLOBE_UNDERLAY"]
+        with self.assertRaisesRegex(ValueError, "AR_SIM3D_GLOBE_UNDERLAY"):
+            check_stage_pinning("lightning", checkpoint)
 
     def test_parse_error_names_file_and_line(self):
         with tempfile.TemporaryDirectory() as directory:

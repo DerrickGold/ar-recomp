@@ -5,7 +5,7 @@
 set -eu
 test "$#" -eq 1 || { echo "usage: $0 /absolute/path/to/smoketest.AppImage" >&2; exit 2; }
 source_image=$(realpath "$1")
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 test -f "$source_image"
 for tool in go cmake cc gcc clang; do
     if command -v "$tool" >/dev/null 2>&1; then

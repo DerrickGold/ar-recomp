@@ -139,7 +139,7 @@ tests/golden/*.png
 tests/replays/*.bin
 
 # saves/ is purely runtime output (WRAM/SRAM dumps, snapshots, replays) — the
-# runner writes here (src/main.c), nothing reads a committed file from here as
+# runtime writes here; nothing reads a committed file from here as
 # a build/test fixture. Blanket-ignore rather than chase individual extensions
 # (some prior dumps evaded the *.bin/*.srm/*.rec rules above by filename, e.g.
 # "save.srm - pre act 1" doesn't literally end in .srm).
@@ -190,3 +190,6 @@ runs/
 # Local wave patch-series handovers; preserve them on disk but never version
 # them or publish them to the remote repository.
 /ar-recomp-wave*/
+
+# Local JavaScript quality tools
+/node_modules/

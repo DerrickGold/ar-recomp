@@ -2,7 +2,8 @@
 """Check authored tools and applications with their language's own frontends.
 
 Run with the Python environment from tools/requirements-quality.txt. Missing
-Go, Node, shell interpreters or Ruff is an error, never a successful skipped gate.
+Go, Node, ESLint, ShellCheck, shell interpreters or Ruff is an error, never a
+successful skipped gate.
 Generated and vendored files are outside this gate; their generators are checked.
 """
 
@@ -48,9 +49,12 @@ def main():
     args = parser.parse_args()
     root = args.root.resolve()
     files = source_files(root)
-    for executable in ("gofmt", "node", "bash", "sh"):
+    for executable in ("gofmt", "node", "bash", "sh", "shellcheck"):
         if not shutil.which(executable):
             parser.error(f"required tool not found: {executable}")
+    eslint = root / "node_modules/eslint/bin/eslint.js"
+    if not eslint.is_file():
+        parser.error("required tool not found: ESLint; run npm ci at the repository root")
     python_files = [str(path) for path in files if language(path) == "python"]
     run([sys.executable, "-m", "ruff", "check", "--no-cache", *python_files], root)
     go_files = [str(path) for path in files if language(path) == "go"]
@@ -58,10 +62,14 @@ def main():
                             check=True, capture_output=True, text=True)
     if result.stdout:
         sys.exit("Run gofmt on these files:\n" + result.stdout)
+    javascript_files = [str(path) for path in files if language(path) == "javascript"]
+    if javascript_files:
+        run(["node", str(eslint), "--max-warnings=0", *javascript_files], root)
+    shell_files = [str(path) for path in files if language(path) == "shell"]
+    if shell_files:
+        run(["shellcheck", *shell_files], root)
     for path in files:
-        if language(path) == "javascript":
-            run(["node", "--check", str(path)], root)
-        elif language(path) == "shell":
+        if language(path) == "shell":
             run([shell_for((root / path).read_text()), "-n", str(path)], root)
     counts = Counter(language(path) for path in files)
     print("Tooling checks passed: " + ", ".join(f"{n} {kind}" for kind, n in sorted(counts.items())))

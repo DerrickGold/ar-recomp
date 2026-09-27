@@ -8,6 +8,8 @@ SDL_CFLAGS=$(pkg-config --cflags sdl2)
 SDL_LIBS=$(pkg-config --libs sdl2)
 LIBRETRO_H_DIR="."
 
+# pkg-config deliberately emits separate compiler/linker arguments.
+# shellcheck disable=SC2086
 clang++ -std=c++17 -O2 -Wall \
   $SDL_CFLAGS -I"$LIBRETRO_H_DIR" \
   snesref.cpp -o snesref \

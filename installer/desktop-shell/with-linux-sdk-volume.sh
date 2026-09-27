@@ -6,7 +6,7 @@ test "$#" -ge 2 || { echo 'usage: with-linux-sdk-volume.sh cache command [args..
 cache=$1
 shift
 mkdir -p "$cache"
-cache=$(CDPATH= cd -- "$cache" && pwd -P)
+cache=$(CDPATH='' cd -- "$cache" && pwd -P)
 image="$cache/linux-sdk.sparseimage"
 volume="$cache/linux-sdk-volume"
 lock="$cache/linux-sdk.lock"

@@ -180,3 +180,8 @@ These are ordered classic scripts with shared bindings. The builder embeds them
 verbatim so the exported editor still opens offline as one file. The Python
 bundle tests check script order, missing optional INI input and lossless data
 embedding, including text containing HTML script delimiters.
+
+`make check-quality` checks these classic scripts in their shared browser scope.
+`editor.body.html` is the load-order manifest for both the builder and ESLint;
+diagnostics point back to the individual source file and line. New script files
+must appear in that manifest.

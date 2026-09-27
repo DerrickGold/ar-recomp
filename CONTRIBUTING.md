@@ -17,21 +17,29 @@ desktop-shell tests also need the host libraries described in
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r tools/requirements-quality.txt
+npm ci
+brew install shellcheck  # Debian/Ubuntu: apt install shellcheck
 make check-quality
 ```
 
 `make check-quality` checks C/C++ layout, private-header boundaries, global
 declarations, the shipped source manifest, repeated constants, Go formatting
-and `go vet`, Python correctness with Ruff, JavaScript syntax with Node, and
-shell syntax with the declared interpreter. It includes authored tools and
-installer code. Required tools fail loudly when missing. Ruff is pinned in
-[`tools/requirements-quality.txt`](tools/requirements-quality.txt).
+and `go vet`, Python correctness with Ruff, JavaScript correctness with ESLint, and
+shell correctness with ShellCheck plus syntax with the declared interpreter.
+It includes authored tools and installer code. Required tools fail loudly when missing. Ruff is pinned in
+[`tools/requirements-quality.txt`](tools/requirements-quality.txt); ESLint and its
+browser/Node globals are pinned in `package-lock.json`.
 
 Run `make check` before committing changes that cross subsystems. It adds the
 ROM-free C/Python tests, tests for all three Go modules, and shader regeneration
 checks when the shader tools are installed. Shader checks explicitly report
-when they skip. Individual targets are `check-c`, `check-go`, and
-`check-shaders`; `CHECK_JOBS=3` limits CTest parallelism. CMake requires Python
+when they skip. To require the complete shader check, run
+`DXC=/path/to/dxc python tools/build_shaders.py --check`. This requires `glslc`,
+`spirv-cross` and DXC. MSL and SPIR-V must match byte-for-byte; DXIL may differ
+only in the compiler build identifier and its dependent hash, with matching
+instructions, bindings, signatures and validation metadata. Shipped shader
+headers are never rewritten by a check. Individual targets are `check-c`,
+`check-go`, and `check-shaders`; `CHECK_JOBS=3` limits CTest parallelism. CMake requires Python
 when tests are enabled so the ownership and generator checks cannot disappear.
 
 `make release` and `make release-<platform>` run `make check` locally before
@@ -65,8 +73,9 @@ the separate cross-platform and regional-ROM gates.
   cohesive static definitions are fine; extract distinct behavior, not lines.
 - Go uses `gofmt` and `go vet`. Python uses four spaces and the root Ruff
   correctness rules (`E9`, `F`). JavaScript uses two spaces and must pass
-  `node --check`. Shell scripts should declare POSIX `sh` or Bash accurately;
-  use the interpreter's syntax and quote paths. `.editorconfig` supplies the
+  ESLint. The file-based action editor is checked in its real shared script
+  scope, using its page template as the load-order manifest. Shell scripts
+  should declare POSIX `sh` or Bash accurately; use the interpreter's syntax and quote paths. `.editorconfig` supplies the
   shared whitespace defaults.
 - Reuse `tools/ar_lib.py` for ROM addressing, endian reads, and other existing
   debug-tool primitives. Keep tool outputs in ignored build or evidence
@@ -77,7 +86,5 @@ the separate cross-platform and regional-ROM gates.
   plus pixel/state comparisons where applicable. Add shared test dependencies
   as libraries instead of repeating implementation source lists.
 
-These checks intentionally do not claim full semantic linting of JavaScript or
-shell scripts, nor a clean historical C style baseline. Tighten checks when
-they catch real mistakes without making ordinary feature changes harder to
-follow.
+The historical C style baseline remains an incremental cleanup task. JavaScript
+and shell correctness checks are gates, not substitutes for runtime tests.

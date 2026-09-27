@@ -2,7 +2,7 @@
 # One-click graphical build for Linux. Run from a file manager or terminal:
 #   ./run-build.sh
 
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+ROOT="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 UTILS="$ROOT/utils"
 
 fail() {
@@ -10,7 +10,7 @@ fail() {
     echo "ERROR: $1"
     echo
     printf "Press Return to close."
-    read -r ignored
+    read -r _ignored
     exit 1
 }
 
