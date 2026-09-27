@@ -38,7 +38,9 @@ void RtlApuUnlock(void) {}
 int RtlGetAudioOutputRate(void) { return 44100; }
 uint64_t HostClock_Nanoseconds(void) { return 0; }
 static bool s_music_replacement_active;
+static unsigned s_music_unmutes;
 void NativeAudioMixer_SetMusicReplacementActive(bool active) {
+  if (s_music_replacement_active && !active) ++s_music_unmutes;
   s_music_replacement_active = active;
 }
 
@@ -553,6 +555,73 @@ static void TestCachedPlayback(const char *fixture) {
   MusicReplacements_Shutdown();
 }
 
+static void TestHaltedReplacement(const char *fixture) {
+  char manifest[2048];
+  snprintf(manifest, sizeof(manifest),
+           "[music:palace]\nsrc = 01:8000\nfile = %s\n"
+           "[music:town]\nsrc = 02:8000\nfile = %s\n"
+           "[music:unavailable]\nsrc = 04:8000\nfile = /nonexistent/track.ogg\n",
+           fixture, fixture);
+  CHECK(MusicReplacements_Load(WriteManifest(manifest)) == 3);
+  MusicReplacements_InstallHooks();
+  g_settings.music_replacements = true;
+  MusicReplacements_OnSpcUpload(0x018000);
+  MusicReplacements_OnApuPortWrite(0, 1);
+  CHECK(s_music_replacement_active);
+  const unsigned unmutes = s_music_unmutes;
+  MusicReplacements_OnApuPortWrite(0, 0xF0);
+  CHECK(s_music_replacement_active);
+  int16_t silence[128] = {0};
+  MusicReplacements_MixOutput(silence, 64);
+  for (unsigned i = 0; i < 128; ++i) CHECK(silence[i] == 0);
+  MusicReplacements_OnApuPortWrite(0, 0xF0); /* Repeated halt retains ownership. */
+  MusicReplacements_OnApuPortWrite(0, 0xFF);
+  MusicReplacements_OnSpcUpload(0x028000);
+  MusicReplacements_OnApuPortWrite(0, 1);
+  CHECK(s_music_replacement_active && s_music_unmutes == unmutes);
+
+  /* Authentic comparison remains authoritative even inside the upload gap. */
+  MusicReplacements_OnApuPortWrite(0, 0xF0);
+  MusicReplacements_SetSessionBypassed(true);
+  CHECK(!s_music_replacement_active);
+  MusicReplacements_SetSessionBypassed(false);
+  CHECK(s_music_replacement_active);
+  MusicReplacements_OnSpcUpload(0x038000); /* Unreplaced destination. */
+  CHECK(s_music_replacement_active);
+  MusicReplacements_OnApuPortWrite(0, 1);
+  CHECK(!s_music_replacement_active);
+
+  /* A destination that fails to open must release the retained mute too. */
+  MusicReplacements_OnSpcUpload(0x018000);
+  MusicReplacements_OnApuPortWrite(0, 1);
+  MusicReplacements_OnApuPortWrite(0, 0xF0);
+  g_music_replacements[2].has_audio = true;
+  g_music_replacements[2].file_rate = 44100;
+  g_music_replacements[2].file_frames = 44100;
+  MusicReplacements_OnSpcUpload(0x048000);
+  MusicReplacements_OnApuPortWrite(0, 1);
+  CHECK(!s_music_replacement_active);
+
+  MusicReplacements_OnSpcUpload(0x018000);
+  MusicReplacements_OnApuPortWrite(0, 1);
+  MusicReplacements_OnApuPortWrite(0, 0xF0);
+  g_settings.music_replacements = false;
+  MusicReplacements_ApplySetting();
+  CHECK(!s_music_replacement_active);
+  g_settings.music_replacements = true;
+  MusicReplacements_OnApuPortWrite(0, 1);
+  MusicReplacements_OnApuPortWrite(0, 0xF0);
+  g_settings.music_replacements = false;
+  MusicReplacements_FrameTick();
+  CHECK(!s_music_replacement_active);
+  g_settings.music_replacements = true;
+  MusicReplacements_OnApuPortWrite(0, 1);
+  MusicReplacements_OnApuPortWrite(0, 0xF0);
+  CHECK(s_music_replacement_active);
+  MusicReplacements_Shutdown();
+  CHECK(!s_music_replacement_active);
+}
+
 int main(int argc, char **argv) {
   TestMusicResamplerMath();
   TestParseEntries();
@@ -564,7 +633,10 @@ int main(int argc, char **argv) {
   TestRedundantRestartGuard();
   TestTriggerStateMachine();
   CHECK(argc == 2);
-  if (argc == 2) TestCachedPlayback(argv[1]);
+  if (argc == 2) {
+    TestCachedPlayback(argv[1]);
+    TestHaltedReplacement(argv[1]);
+  }
   if (s_failures) {
     fprintf(stderr, "music manifest tests: %d failure(s)\n", s_failures);
     return 1;

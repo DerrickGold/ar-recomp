@@ -82,6 +82,9 @@ static void CacheEncodedFile(int index) {
 
 static bool s_musiclog;
 static bool s_session_bypassed;
+/* $F0 stops the replacement before the SPC has consumed its halt. Preserve
+ * music-bus suppression until the next song resolves, including image upload. */
+static bool s_halted_replacement;
 static uint32 s_loaded_src; /* most recent SPC image upload source */
 static int s_current_song = -1;
 /* Native pause ($F2) and host pause (P/settings overlay) are independent.
@@ -380,24 +383,25 @@ int MusicLoop_NextRun(uint32 pos, int want, uint32 loop_start,
 
 /* ---- streaming ----------------------------------------------------------- */
 
-static void EndSession(const char *why) {
+static void ApplyVoiceMutePolicyLocked(void) {
+  const bool muted = (s.session || s_halted_replacement) && !s_session_bypassed;
+  NativeAudioMixer_SetMusicReplacementActive(muted);
+}
+
+static void EndSession(const char *why, bool awaiting_song) {
   RtlApuLock();
+  s_halted_replacement = awaiting_song && (s.session || s_halted_replacement);
   if (s.session) {
     fprintf(stderr, "[music] stop [music:%s] (%s)\n", s.session->name, why);
     if (s.v) stb_vorbis_close(s.v);
     memset(&s, 0, sizeof(s));
-    NativeAudioMixer_SetMusicReplacementActive(false);
   }
+  ApplyVoiceMutePolicyLocked();
   RtlApuUnlock();
 }
 
-static void ApplyVoiceMutePolicyLocked(void) {
-  const bool muted = s.session && !s_session_bypassed;
-  NativeAudioMixer_SetMusicReplacementActive(muted);
-}
-
 void MusicReplacements_Shutdown(void) {
-  EndSession("shutdown/reload");
+  EndSession("shutdown/reload", false);
   for (int i = 0; i < kMusicMaxReplacements; ++i)
     if (s_encoded[i].owned) free(s_encoded[i].data);
   memset(s_encoded, 0, sizeof(s_encoded));
@@ -419,14 +423,14 @@ static void StartSession(const MusicReplacement *entry, int song) {
     /* Decoder allocation failed, or an uncached file changed since probing. */
     fprintf(stderr, "[music] [music:%s] open failed at play time (%d) — "
             "authentic\n", entry->name, error);
-    if (s.session) {
-      NativeAudioMixer_SetMusicReplacementActive(false);
-    }
+    s_halted_replacement = false;
     memset(&s, 0, sizeof(s));
+    ApplyVoiceMutePolicyLocked();
     RtlApuUnlock();
     PerformanceMetrics_End(performance);
     return;
   }
+  s_halted_replacement = false;
   s.session = entry;
   s.v = v;
   if (++s_next_session_token == 0) ++s_next_session_token;
@@ -476,7 +480,7 @@ void MusicReplacements_OnApuPortWrite(uint8_t port, uint8_t val) {
      * identity guard before StartSession below). */
     s_current_song = -1;
     s_driver_paused = false;
-    EndSession("driver halt $F0");
+    EndSession("driver halt $F0", true);
     return;
   }
   if (val == SPC_CMD_PAUSE) {
@@ -496,7 +500,7 @@ void MusicReplacements_OnApuPortWrite(uint8_t port, uint8_t val) {
   if (!g_settings.music_replacements) {
     s_current_song = val;
     s_driver_paused = false;
-    EndSession("music_replacements off");
+    EndSession("music_replacements off", false);
     return;
   }
   const MusicReplacement *entry = MusicReplacements_Select(s_loaded_src, val);
@@ -524,7 +528,7 @@ void MusicReplacements_OnApuPortWrite(uint8_t port, uint8_t val) {
       fprintf(stderr, "[music] src=%02X:%04X song=%02x authentic "
               "(no manifest entry)\n", (unsigned)(s_loaded_src >> 16),
               (unsigned)(s_loaded_src & 0xffff), (unsigned)val);
-    EndSession("authentic song started");
+    EndSession("authentic song started", false);
     return;
   }
   if (resume_same_session) {
@@ -611,7 +615,7 @@ void MusicReplacements_MixOutput(int16_t *out, int out_frames) {
   }
   if (filled <= 0) {
     if (decoder_failed)
-      EndSession("decoder failure — authentic fallback");
+      EndSession("decoder failure — authentic fallback", false);
     return;
   }
   memset(src + (size_t)filled * 2, 0,
@@ -674,7 +678,7 @@ void MusicReplacements_MixOutput(int16_t *out, int out_frames) {
     }
   }
   if (decoder_failed)
-    EndSession("decoder failure — authentic fallback");
+    EndSession("decoder failure — authentic fallback", false);
 }
 
 void MusicReplacements_InstallHooks(void) {
@@ -683,13 +687,14 @@ void MusicReplacements_InstallHooks(void) {
   s_driver_paused = false;
   s_host_paused = false;
   s_session_bypassed = false;
+  s_halted_replacement = false;
   s_next_session_token = 0;
   NativeAudioMixer_SetMusicReplacementActive(false);
 }
 
 void MusicReplacements_ApplySetting(void) {
   if (!g_settings.music_replacements) {
-    EndSession("enhanced music disabled");
+    EndSession("enhanced music disabled", false);
     return;
   }
   if (s_current_song < 0) return;
@@ -701,7 +706,7 @@ void MusicReplacements_ApplySetting(void) {
   if (entry && !already_active)
     StartSession(entry, s_current_song);
   else if (!entry)
-    EndSession("no replacement for current song");
+    EndSession("no replacement for current song", false);
 }
 
 void MusicReplacements_SetHostPaused(bool paused) {
@@ -776,6 +781,6 @@ void MusicReplacements_FormatPlaybackStatus(char *buffer, size_t buffer_size) {
 }
 
 void MusicReplacements_FrameTick(void) {
-  if (!g_settings.music_replacements && s.session)
-    EndSession("music_replacements off");
+  if (!g_settings.music_replacements && (s.session || s_halted_replacement))
+    EndSession("music_replacements off", false);
 }
