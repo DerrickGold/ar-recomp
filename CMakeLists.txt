@@ -1387,6 +1387,12 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_performance_metrics_test PRIVATE SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_performance_metrics COMMAND actraiser_performance_metrics_test)
 
+    add_executable(actraiser_present_sim_sun_test
+        tests/present_sim_sun_test.c src/sim/sim3d/present_sim_sun.c)
+    target_include_directories(actraiser_present_sim_sun_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_present_sim_sun_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_present_sim_sun COMMAND actraiser_present_sim_sun_test)
+
     add_executable(actraiser_present_sim3d_clouds_test
         tests/present_sim3d_clouds_test.c src/sim/sim3d/present_sim3d_clouds.c
         src/sim/sim3d/present_sim3d_environment.c

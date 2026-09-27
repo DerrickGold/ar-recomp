@@ -937,6 +937,16 @@ int16_t Sim3D_MaxDrawLift(unsigned height_scale_x100);
 
 bool Sim3D_ObjectCastsShadow(const SimRenderObject *object);
 
+enum { kSimSunDuration = 140, kSimSunTargetPixels = 64 };
+
+/* Sunlight has no actor record. Its confirmed 4x4-cell square and native
+ * animation tick are captured together, independently of the moving angel. */
+typedef struct SimSunMiracle {
+  bool active;
+  uint16_t phase;
+  uint16_t target_x, target_y; /* Square origin, in town pixels. */
+} SimSunMiracle;
+
 typedef struct SimFrameData {
   SimViewKind view;
   SimViewReason view_reason;
@@ -954,13 +964,14 @@ typedef struct SimFrameData {
   uint16_t camera_x, camera_y;
   uint16_t angel_x, angel_y;
   uint16_t picker_flag;
-  /* Raw lifecycle words stay diagnostic; effects[] below is the only
-   * presentation-facing interpretation. */
+  /* Raw lifecycle words stay diagnostic; effects[] and sun_miracle carry
+   * the presentation-facing interpretations. */
   uint16_t miracle_kind;
   uint16_t miracle_user_active;
   uint16_t miracle_posted_active;
   uint16_t miracle_visual_complete;
   uint16_t miracle_actor_done;
+  SimSunMiracle sun_miracle;
   bool world_navigation_state_valid;
   SimWorldNavigationFrame world_navigation;
   /* INIDISP master brightness captured with the navigation OAM composition.

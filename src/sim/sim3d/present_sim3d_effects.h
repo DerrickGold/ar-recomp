@@ -18,6 +18,13 @@ void DrawSimEffectSceneFlash(
     const FrameSlot *slot, bool lighting, ArRenderRectI viewport);
 void DrawSimEffectParticles(
     const FrameSlot *slot, bool particles, const SimSceneProjection *scene);
+/* Native Sun tint is mandatory, independent of enhancement switches. Apply
+ * once to replacement scenery; captured BG1 already contains the PPU add. */
+bool DrawSimSunTint(const FrameSlot *slot, ArRenderRectI viewport);
+void DrawSimSunLight(
+    const FrameSlot *slot, bool lighting, const SimSceneProjection *scene);
+void DrawSimSunRays(const FrameSlot *slot, bool lighting, bool particles,
+                    const SimSceneProjection *scene);
 /* The volcanic arc's heads are drawn from the ROM's own art at the model's
  * published crater mouth, so they are a separate stage from the particles. */
 void DrawSimEffectFireballHeads(

@@ -2268,6 +2268,19 @@ void SimRenderMetadata_CaptureFrame(
       ReadMirror16(wram, kActRaiserWram_SimMiracleVisualComplete);
   dst->miracle_actor_done =
       ReadMirror16(wram, kActRaiserWram_SimMiracleActorDone);
+  if (town && dst->miracle_kind == 3 && !dst->picker_flag &&
+      !dst->miracle_actor_done &&
+      (dst->miracle_user_active || dst->miracle_posted_active)) {
+    const uint16_t phase = ReadMirror16(wram, kActRaiserWram_SimSunPhase);
+    const uint16_t x = ReadMirror16(wram, kActRaiserWram_SimAimedMapCellX);
+    const uint16_t y = ReadMirror16(wram, kActRaiserWram_SimAimedMapCellY);
+    if (phase < kSimSunDuration && x < 32 && y < 32) {
+      dst->sun_miracle = (SimSunMiracle){
+          .active = true, .phase = phase,
+          .target_x = (uint16_t)((x & ~3u) * 16),
+          .target_y = (uint16_t)((y & ~3u) * 16)};
+    }
+  }
   if (world_navigation) {
     CaptureWorldNavigationState(dst, wram);
     SimWorldNavigationTowns_CaptureCached(wram, &dst->world_navigation_towns);

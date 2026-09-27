@@ -3543,7 +3543,61 @@ static void TestEruptionScriptWalk(void) {
   CHECK(!SimEruptionScript_ResolveFlight(NULL, &fixture, 0xD330, 0xD330, 0).valid);
 }
 
+static void TestSunMiracleCapture(void) {
+  uint8 wram[kActRaiserWramSize] = {0};
+  SimFrameData frame;
+  SimRenderMetadata_Reset();
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+  wram[kActRaiserWram_CurrentMap] = 6;
+  Write16(wram, kActRaiserWram_SimMiracleKind, 3);
+  Write16(wram, kActRaiserWram_SimUserMiracleActive, 1);
+  Write16(wram, kActRaiserWram_SimSunPhase, 70);
+  Write16(wram, kActRaiserWram_SimAimedMapCellX, 15);
+  Write16(wram, kActRaiserWram_SimAimedMapCellY, 31);
+#define CAPTURE_SUN() \
+  SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All)
+  CAPTURE_SUN();
+  CHECK(frame.sun_miracle.active && frame.sun_miracle.phase == 70);
+  CHECK(frame.sun_miracle.target_x == 192 && frame.sun_miracle.target_y == 448);
+  /* A paused redraw reads the same native phase. Completed/posted markers,
+   * targeting, another miracle and leaving town must not revive old light. */
+  SimSunMiracle first = frame.sun_miracle;
+  CAPTURE_SUN();
+  CHECK(frame.sun_miracle.phase == first.phase);
+  Write16(wram, kActRaiserWram_SimUserMiracleActive, 0);
+  CAPTURE_SUN();
+  CHECK(!frame.sun_miracle.active);
+  Write16(wram, kActRaiserWram_SimPostedMiracleActive, 1);
+  CAPTURE_SUN();
+  CHECK(frame.sun_miracle.active);
+  Write16(wram, kActRaiserWram_SimMiracleActorDone, 1);
+  CAPTURE_SUN();
+  CHECK(!frame.sun_miracle.active);
+  Write16(wram, kActRaiserWram_SimMiracleActorDone, 0);
+  Write16(wram, kActRaiserWram_SimMapPickerFlag, 1);
+  CAPTURE_SUN();
+  CHECK(!frame.sun_miracle.active);
+  Write16(wram, kActRaiserWram_SimMapPickerFlag, 0);
+  Write16(wram, kActRaiserWram_SimSunPhase, kSimSunDuration);
+  CAPTURE_SUN();
+  CHECK(!frame.sun_miracle.active);
+  Write16(wram, kActRaiserWram_SimSunPhase, 70);
+  Write16(wram, kActRaiserWram_SimAimedMapCellX, 32);
+  CAPTURE_SUN();
+  CHECK(!frame.sun_miracle.active);
+  Write16(wram, kActRaiserWram_SimAimedMapCellX, 0);
+  Write16(wram, kActRaiserWram_SimMiracleKind, 2);
+  CAPTURE_SUN();
+  CHECK(!frame.sun_miracle.active);
+  Write16(wram, kActRaiserWram_SimMiracleKind, 3);
+  wram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_WorldMap;
+  CAPTURE_SUN();
+  CHECK(!frame.sun_miracle.active);
+#undef CAPTURE_SUN
+}
+
 int main(int argc, char **argv) {
+  TestSunMiracleCapture();
   TestFeatureDependencies();
   TestPresentationDecision();
   TestWorldNavigationAllTownObjects();

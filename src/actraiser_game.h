@@ -193,6 +193,7 @@ enum {
   kActRaiserWram_SimMiracleActorDone = 0x190F3,
   kActRaiserWram_SimPostedMiracleActive = 0x190F5,
   kActRaiserWram_SimMapPickerFlag = 0x19215,
+  kActRaiserWram_SimSunPhase = 0x1923E,
 };
 
 enum {

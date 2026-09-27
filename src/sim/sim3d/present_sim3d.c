@@ -1731,6 +1731,12 @@ static PresentationOutcome RenderSimProfile(
       (float)slot->sim.underlay_screen_x0 - (float)slot->sim.camera_x;
   float town_extent_y0 = -(float)slot->sim.camera_y;
   const SimSceneProjection effect_projection = {source,viewport,&camera,matrix,curved_projection};
+  /* Plain projected BG1 is already colour-mathed. Tint its backing scenery
+   * first, so opaque captured pixels replace it once. Model/globe scenes
+   * replace BG1 entirely and receive the same ramp after their world pass. */
+  if (!background_voxels && !globe_underlay &&
+      !DrawSimSunTint(slot, viewport))
+    return kPresentationOutcome_CoreFailure;
   SimCullFade ground_fade = {
     .lead = slot->sim.cull_haze_lead_px ? slot->sim.cull_haze_lead_px
                                         : kSimCullHazeLeadDefaultPx,
@@ -1765,6 +1771,7 @@ static PresentationOutcome RenderSimProfile(
       Sim3DPerformanceScope performance =
           Sim3DPerformance_Begin(kSim3DPerformance_Effects);
       DrawSimEffectLocalLighting(slot, effect_lighting, &effect_projection);
+      DrawSimSunLight(slot, effect_lighting, &effect_projection);
       Sim3DPerformance_End(performance);
     }
     if (!globe_underlay && plane == kSim3DPlane_Obj2 && background_voxels &&
@@ -1870,6 +1877,11 @@ static PresentationOutcome RenderSimProfile(
     Sim3DPerformanceScope performance =
         Sim3DPerformance_Begin(kSim3DPerformance_Effects);
     DrawSimEffectSceneFlash(slot, effect_lighting, viewport);
+    if ((background_voxels || globe_underlay) && !DrawSimSunTint(slot, viewport)) {
+      Sim3DPerformance_End(performance);
+      return kPresentationOutcome_CoreFailure;
+    }
+    DrawSimSunRays(slot, effect_lighting, particles, &effect_projection);
     DrawSimEffectParticles(slot, particles, &effect_projection);
     DrawSimEffectFireballHeads(slot, billboards, &effect_projection);
     Sim3DPerformance_End(performance);
