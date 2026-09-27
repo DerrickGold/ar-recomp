@@ -659,6 +659,7 @@ The menu separates repairs for original-game bugs from intentional quality-of-li
 | Quality of life | `AR_FIX_BRIDGE_LIMIT=1` | bridges stop counting toward a town's 128-structure population cap: completed bridges migrate to a validated sidecar in spare battery-save space while keeping their map mark, rendered metatile, river crossing, and 32-person support. Retroactive on existing towns; persisted only by the game's normal save transaction and sticky once saved. Replaces the withdrawn v1 slot-reuse/lightning designs, which broke town redraws |
 | Quality of life | `AR_TURBO_MULT=<n>` | turbo multiplier, 2–64 (default 8) |
 | Quality of life | `AR_NATIVE_MENU_QUICK_USE=1` | enables **Native menu quick use** (default Off): Original-menu Use skips optional explanations; the Describe binding runs the full original command flow |
+| Quality of life | `AR_REMEMBER_LAST_TOWN=0` | disables **Remember last town** (default On). Continue places the Sky Palace and native/enhanced world navigation over the last visited SIM town for that save. This remembers a location, not unsaved gameplay progress; recording/replay is unaffected |
 | Developer diagnostic | `AR_BRIDGEFIX_DEBUG=1` | `[bridgefix]` log from the structure-system hooks: migrations/cleanup, bridge allocations, table-full events, and sidecar mark/render passes; `=2` also logs every structure allocation |
 
 ## Level warp

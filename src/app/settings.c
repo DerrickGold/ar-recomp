@@ -2383,6 +2383,12 @@ const SettingDesc g_setting_descs[] = {
       "and support.",
       0, true, kSettingGameChange_QualityOfLife),
   GAME_CHANGE_BOOL_SETTING(
+      remember_last_town, "AR_REMEMBER_LAST_TOWN", "Remember last town",
+      "Remember the last SIM town visited for each save. Continue starts the "
+      "Sky Palace and world navigation over that town, in native and enhanced "
+      "views. Does not save gameplay progress. Ignored during recording/replay.",
+      1, false, kSettingGameChange_QualityOfLife),
+  GAME_CHANGE_BOOL_SETTING(
       fix_aitos_event_queue, "AR_FIX_AITOS_EVENT_QUEUE",
       "Correct Aitos messages",
       "Prevents the northeast-mountain discovery from repeating Aitos's "

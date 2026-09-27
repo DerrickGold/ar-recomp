@@ -405,6 +405,9 @@ typedef struct Settings {
   /* Clear the verified stale forced-event latch when Aitos's all-monsters and
    * northeast-mountain events collide. Off preserves the retail-ROM bug. */
   bool fix_aitos_event_queue;
+  /* Per-save navigation bookmark. Applies once on Continue in native and
+   * enhanced views, never during normal flight or record/replay. */
+  bool remember_last_town;
   /* Aitos's "no wind" story event stills only the windmills that exist when it
    * fires, so a mill built during it keeps turning. On, every mill in the town
    * holds until the Wind miracle. Presentation only, and only in the enhanced

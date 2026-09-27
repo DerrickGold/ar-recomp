@@ -138,6 +138,7 @@ enum {
   kActRaiserWram_WorldRotation = 0x0314,
   kActRaiserWram_WorldZoomCurrent = 0x0316,
   kActRaiserWram_WorldZoomTarget = 0x0318,
+  kActRaiserWram_WorldEmergenceState = 0x031A,
 
   kActRaiserWram_DeathHeimEndingState = 0x0334,
   /* $01:B6CA clears this, then writes the 1-based entry selected from the

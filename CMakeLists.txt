@@ -2843,6 +2843,12 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_save_system COMMAND actraiser_save_system_test)
 
+    add_executable(actraiser_world_resume_test tests/actraiser_world_resume_test.c
+        src/actraiser/enhancements/actraiser_world_resume.c)
+    target_include_directories(actraiser_world_resume_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_world_resume_test PRIVATE actraiser_save_test_support)
+    add_test(NAME actraiser_world_resume COMMAND actraiser_world_resume_test)
+
     add_executable(actraiser_save_transaction_test
         tests/actraiser_save_transaction_test.c
         src/actraiser/actraiser_save_transaction.c

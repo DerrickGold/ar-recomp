@@ -7,6 +7,8 @@
 #define _DARWIN_C_SOURCE 1
 #endif
 #include "actraiser/actraiser_rtl_internal.h"
+#include "actraiser/enhancements/actraiser_world_resume.h"
+#include "app/input_replay.h"
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -439,6 +441,9 @@ static size_t s_game_stack_map_len;
 #endif
 static bool s_game_started;
 static bool s_game_coroutine_executing;
+/* A host restart can discard the coroutine while an inline VBlank wait is
+ * suspended. Its reentrancy guard belongs to that coroutine, not the process. */
+static bool s_rdnmi_yielding;
 
 static void SuspendGameCoroutine(void *unused) {
   (void)unused;
@@ -610,7 +615,6 @@ bool ActRaiser_RecoverDispatchMiss(uint32 source_pc24, uint32 target_pc24) {
  * of basic blocks. Returning -1 delegates ordinary reads to the shared SNES
  * hardware model; a nonnegative result overrides the $4210 byte. */
 int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context) {
-  static bool yielding;
   if (!context || context->struct_size < RTL_RDNMI_READ_CONTEXT_V2_SIZE)
     return -1;
   const bool force_nmi =
@@ -636,7 +640,7 @@ int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context) {
                 block, snes_frame_counter,
                 (unsigned)kRdnmiRepeatedReadWarningThreshold,
                 force_nmi ? 1 : 0,
-                yielding ? 1 : 0, in_nmi ? 1 : 0,
+                s_rdnmi_yielding ? 1 : 0, in_nmi ? 1 : 0,
                 nmi_available ? 1 : 0);
         fflush(stderr);
       }
@@ -650,7 +654,7 @@ int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context) {
   /* These verified spin blocks can also execute from an interrupt context,
    * where yielding is impossible. Report vblank immediately in that case so
    * the emulated handler cannot deadlock inside its own wait. */
-  if (!(force_nmi && !yielding)) {
+  if (!(force_nmi && !s_rdnmi_yielding)) {
     static const uint32_t kSpinBlocksNoYield[] = {
       0x019293, 0x0192AA, 0x0287F3, 0x029AC4,
       0x02BEBF, 0x03B013, 0x03E535,
@@ -681,7 +685,7 @@ int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context) {
    * by ActRaiser_GetDeveloperEnvironment before the first emulated frame. */
   static int no_4210_yield = -1;
   if (no_4210_yield < 0) no_4210_yield = getenv("AR_NO4210YIELD") ? 1 : 0;
-  if (force_nmi && !yielding && !no_4210_yield) {
+  if (force_nmi && !s_rdnmi_yielding && !no_4210_yield) {
     static const uint32_t kSpinBlocks[] = {
       0x019293, /* intro/menu/effect wait */
       0x0192AA, /* effect-loop wait */
@@ -720,9 +724,9 @@ int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context) {
                   sr_cpu_stack_pointer(), block);
         }
       }
-      yielding = true;
+      s_rdnmi_yielding = true;
       ActRaiser_YieldToHost();
-      yielding = false;
+      s_rdnmi_yielding = false;
       return 0x82;
     }
     /* Clear/post/ack reads do not yield and report no vblank. */
@@ -1427,6 +1431,7 @@ void ActRaiser_DestroyGameCoroutine(void) {
   ActRaiserSpriteOwnership_Reset();
   ActRaiserHleFatal_RegisterHostEscape(NULL);
   s_game_coroutine_executing = false;
+  s_rdnmi_yielding = false;
 #ifdef _WIN32
   if (s_game_fiber) {
     DeleteFiber(s_game_fiber);
@@ -1461,6 +1466,8 @@ static bool ActRaiser_ControlGameTiming(
 }
 
 void RunOneFrameOfGame(void) {
+  ActRaiserWorldResume_Observe(g_ram, kSnesWramSize,
+      g_settings.remember_last_town && InputReplay_PolicyChangesAllowed());
   ActRaiserHud_ObserveScene(g_ram[kActRaiserWram_MapGroup],
                             g_ram[kActRaiserWram_CurrentMap]);
   ActRaiserCredits_ObserveScene(g_ram[kActRaiserWram_MapGroup],

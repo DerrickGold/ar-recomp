@@ -71,6 +71,30 @@ For example, `$1200=$01` means Fillmore Act 1 is cleared.
 The region order is Fillmore, Bloodpool, Kasandora, Aitos, Marahna, Northwall.
 Menu labels use **“Town State”** to leave enough room for “Act 2 cleared.”
 
+### Last-town navigation bookmark
+
+**System > Game > Quality-of-life > Remember last town** (on by default,
+`AR_REMEMBER_LAST_TOWN=0` disables it) remembers the most recently entered SIM town
+in `<active-save>.artown` (native SRM and INI backends, separately for each save
+slot). Continue restores its native world focus before Sky Palace loads, so both
+the enhanced Palace globe and native/enhanced navigation start over that town.
+It also restores the native Palace's location context; its original cloud
+background is unchanged. Flying over other towns does not change the bookmark.
+Native zoom and subsequent camera movement remain unchanged. Disabling the
+option stops recording visits and uses the original focus on the next Continue;
+it does not teleport a running session.
+
+The optional 25-byte companion contains `ARTOWN1\0` (8 bytes), the FNV-1a-64 hash
+of the durable 8192-byte save (8 little-endian bytes), a one-based town ID
+(1–6; zero clears the bookmark), and an FNV-1a-64 hash of the preceding 17 bytes.
+It never changes battery SRAM. Missing, malformed, stale or unavailable-town
+bookmarks retain the original starting location. Completed saves rebind the
+bookmark to the new durable image. Unsaved New Game visits cannot overwrite the
+previous campaign's bookmark; imports clear it. Save exports do not include this
+optional local camera preference. Record/replay runs neither restore nor record
+bookmarks. Writes occur only when dirty, use atomic replacement, and a failure is
+nonfatal with bounded retries.
+
 ### 3.2 USA player/status block ✅
 
 Subtracting two from the external template's European offsets aligns the save

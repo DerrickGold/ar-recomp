@@ -5,11 +5,10 @@
 
 #include "constants.h"
 #include "actraiser_game.h"
+#include "actraiser_world_locations.h"
 #include "sim/sim_world_map.h"
 
 enum {
-  kWorldLocationCount = 7,
-  kWorldLocationFirst = 1,
   kWorldLocationRegionPixels = kActRaiserAuthenticWidth,
   kMode7MatrixFixedPointUnit = 256,
   kHardwareMaximumBrightness = 15,
@@ -18,23 +17,6 @@ enum {
 
 static const float kCameraAltitudePerZoomUnit = 0.25f;
 static const float kCloudCrossingBandPixels = 32.0f;
-
-typedef struct WorldLocationRegion {
-  uint16_t x, y;
-} WorldLocationRegion;
-
-/* ROM $01:B73C, converted to the top-left of each 256x256 source-pixel
- * selection region. Keep this table pinned to the original label selector:
- * it is the authority for which land the game says is current. */
-static const WorldLocationRegion kWorldLocationRegions[kWorldLocationCount] = {
-  {640, 384},  /* Fillmore */
-  {384, 384},  /* Bloodpool */
-  {128, 512},  /* Kasandora */
-  {128, 256},  /* Aitos */
-  {512, 768},  /* Marahna */
-  {256,   0},  /* Northwall */
-  {640,   0},  /* Death Heim */
-};
 
 bool SimWorldNavigationScene_Build(
     SimWorldNavigationScene *out,
@@ -89,15 +71,11 @@ bool SimWorldNavigationScene_Build(
   out->ground[3] = (SimWorldNavigationGroundVertex){
       0, kSimWorldMapTiles, 0.0f, 1.0f};
   out->active_location = navigation->active_location;
-  if (navigation->active_location >= kWorldLocationFirst &&
-      navigation->active_location <
-          kWorldLocationFirst + kWorldLocationCount) {
-    const WorldLocationRegion *region =
-        &kWorldLocationRegions[
-            navigation->active_location - kWorldLocationFirst];
+  ActRaiserWorldRegion region;
+  if (ActRaiserWorldLocation_Region(navigation->active_location, &region)) {
     out->active_region_valid = true;
-    out->active_region_x = region->x;
-    out->active_region_y = region->y;
+    out->active_region_x = region.x;
+    out->active_region_y = region.y;
     out->active_region_width = kWorldLocationRegionPixels;
     out->active_region_height = kWorldLocationRegionPixels;
   }

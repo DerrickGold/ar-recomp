@@ -4,6 +4,7 @@
 #include "save/save_paths.h"
 
 #include "byte_order.h"
+#include "deterministic_hash.h"
 #include "host/atomic_replace.h"
 #include "localization/unicode_grapheme.h"
 #include "text_parse_utils.h"
@@ -98,6 +99,8 @@ typedef struct SaveRuntime {
   bool localized_name_clear_pending;
   char localized_compatibility[kActRaiserPlayerNameStorageBytes];
   char localized_name[kLocalizedNameCapacity];
+  uint8_t last_town;
+  bool town_visit_active, town_visit_dirty, town_visit_awaiting_story;
 } SaveRuntime;
 
 static SaveRuntime s_runtime;
@@ -666,6 +669,74 @@ bool Save_WriteCompanionFile(const char *path, const void *data, size_t size,
   return WriteAtomic(path, WriteCompanionBody, &context, error);
 }
 
+enum { kTownVisitBytes = 25, kTownVisitPayloadBytes = 17 };
+
+static bool TownVisitPath(char *path, size_t size) {
+  int n = snprintf(path, size, "%s.artown", ActivePath());
+  return n > 0 && (size_t)n < size;
+}
+
+static void WriteHash(uint8_t *out, const void *data, size_t size) {
+  const uint64_t hash = DeterministicHash_Fnv1a64(
+      DETERMINISTIC_HASH_FNV1A64_OFFSET, data, size);
+  ByteOrder_WriteLe32(out, (uint32_t)hash);
+  ByteOrder_WriteLe32(out + 4, (uint32_t)(hash >> 32));
+}
+
+uint8_t SaveSystem_BeginTownVisits(bool continuing) {
+  s_runtime.last_town = 0;
+  s_runtime.town_visit_active = s_runtime.live != NULL;
+  s_runtime.town_visit_dirty = false;
+  s_runtime.town_visit_awaiting_story = !continuing;
+  if (!continuing || !s_runtime.durable_valid) return 0;
+  char path[kSaveRuntimePathBytes + 16];
+  if (!TownVisitPath(path, sizeof(path))) return 0;
+  FILE *file = sr_fopen(path, "rb");
+  if (!file) return 0;
+  uint8_t bytes[kTownVisitBytes], image_hash[8], record_hash[8];
+  const bool complete = fread(bytes, 1, sizeof(bytes), file) == sizeof(bytes) &&
+      fgetc(file) == EOF && !ferror(file);
+  fclose(file);
+  if (!complete) return 0;
+  WriteHash(image_hash, s_runtime.durable, sizeof(s_runtime.durable));
+  WriteHash(record_hash, bytes, kTownVisitPayloadBytes);
+  const uint8_t town = bytes[16];
+  int progress = 0;
+  if (memcmp(bytes, "ARTOWN1\0", 8) || memcmp(bytes + 8, image_hash, 8) ||
+      memcmp(bytes + kTownVisitPayloadBytes, record_hash, 8) ||
+      town < 1 || town > kActRaiserSaveRegionCount ||
+      !Save_GetRegionState(s_runtime.durable, town - 1, &progress) || progress < 2)
+    return 0;
+  s_runtime.last_town = town;
+  return town;
+}
+
+void SaveSystem_RecordTownVisit(uint8_t town) {
+  if (!s_runtime.town_visit_active || town < 1 || town > kActRaiserSaveRegionCount ||
+      town == s_runtime.last_town) return;
+  s_runtime.last_town = town;
+  s_runtime.town_visit_dirty = true;
+  fprintf(stderr, "[world-resume] visited town=%u%s\n", town,
+          s_runtime.town_visit_awaiting_story ? " (awaiting first story save)" : "");
+}
+
+bool SaveSystem_FlushTownVisit(SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.town_visit_dirty || s_runtime.town_visit_awaiting_story ||
+      !s_runtime.durable_valid || s_runtime.native_write_active || s_runtime.native_write_aborted)
+    return true;
+  char path[kSaveRuntimePathBytes + 16];
+  if (!TownVisitPath(path, sizeof(path))) return Fail(error, "town bookmark path is too long");
+  uint8_t bytes[kTownVisitBytes] = "ARTOWN1";
+  WriteHash(bytes + 8, s_runtime.durable, sizeof(s_runtime.durable));
+  bytes[16] = s_runtime.last_town;
+  WriteHash(bytes + kTownVisitPayloadBytes, bytes, kTownVisitPayloadBytes);
+  if (!Save_WriteCompanionFile(path, bytes, sizeof(bytes), error)) return false;
+  s_runtime.town_visit_dirty = false;
+  fprintf(stderr, "[world-resume] saved town=%u to %s\n", s_runtime.last_town, path);
+  return true;
+}
+
 static SaveFileFormat ActiveFormat(void) {
   return s_runtime.backend == kSaveBackend_Ini
       ? kSaveFileFormat_Ini : kSaveFileFormat_NativeSrm;
@@ -887,6 +958,20 @@ static bool CommitImage(const uint8_t *image, SaveCommitKind kind,
   if (!ok) return false;
   memcpy(s_runtime.durable, image, kActRaiserSramSize);
   s_runtime.durable_valid = true;
+  if (kind == kSaveCommit_Import) {
+    /* An imported campaign must not inherit the destination's old focus,
+     * even if it happens to have identical SRAM. Persist an empty bookmark. */
+    s_runtime.last_town = 0;
+    s_runtime.town_visit_active = false;
+    s_runtime.town_visit_awaiting_story = false;
+    s_runtime.town_visit_dirty = true;
+  } else if (s_runtime.town_visit_active) {
+    if (kind == kSaveCommit_Story || kind == kSaveCommit_StorySnapshot)
+      s_runtime.town_visit_awaiting_story = false;
+    /* Rebind only after a successful durable commit, never to edited/live or
+     * half-written SRAM. Unsaved New Game cannot replace Continue's bookmark. */
+    if (!s_runtime.town_visit_awaiting_story) s_runtime.town_visit_dirty = true;
+  }
   if(s_runtime.storage_hooks.committed)
     s_runtime.storage_hooks.committed(s_runtime.storage_hooks.context,image);
   return true;
@@ -907,6 +992,9 @@ bool SaveSystem_FlushForSwitch(SaveError *error) {
 
 static void NotifyReload(void) {
   s_runtime.story_pending = false;
+  s_runtime.last_town = 0;
+  s_runtime.town_visit_active = s_runtime.town_visit_dirty = false;
+  s_runtime.town_visit_awaiting_story = false;
   if (s_runtime.commit_host.reloaded)
     s_runtime.commit_host.reloaded(s_runtime.commit_host.context);
 }

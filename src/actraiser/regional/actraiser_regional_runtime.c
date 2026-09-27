@@ -2,6 +2,7 @@
 #include "actraiser/actraiser_rtl.h"
 #include "actraiser/regional/actraiser_regional_editor.h"
 #include "regional/session/regional_session_action.h"
+#include "actraiser/enhancements/actraiser_world_resume.h"
 #include "actraiser/actraiser_stage_placements.h"
 #include "actraiser/regional/actraiser_regional_media.h"
 
@@ -32,6 +33,7 @@
 #include "actraiser/actraiser_localization_runtime.h"
 #include "actraiser/regional/actraiser_regional_settings.h"
 #include "app/input_replay.h"
+#include "app/settings.h"
 #include "randomizer/randomizer.h"
 #include "byte_order.h"
 #include "regional/regional_randomizer.h"
@@ -1794,5 +1796,8 @@ RecompReturn ActRaiser_RegionalTitle(CpuState *cpu) {
   s_prices_valid = false; /* a different campaign can have the same revision */
   fprintf(stderr, "[regional] %s campaign rules session ready\n",
           selection == 1 ? "continued" : "new");
+  ActRaiserWorldResume_Begin(g_ram, kSnesWramSize, selection == 1,
+                             g_settings.remember_last_town,
+                             InputReplay_PolicyChangesAllowed());
   return result;
 }

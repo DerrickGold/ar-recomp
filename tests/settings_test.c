@@ -110,8 +110,9 @@ static void TestDefaultsAndMetadata(void) {
    * The Graphics API choice adds one restart-class Display row. Modern SIM
    * adds its presentation choice, player scale, and two independent Describe bindings.
    * Seeded regional rolls add two options; save slots add two entry actions.
-   * Native menu quick use adds an independent QoL toggle. */
-  const int expected_descriptors = 303;
+   * Remember last town adds a native/enhanced QoL preference; native menu
+   * quick use adds an independent QoL toggle. */
+  const int expected_descriptors = 304;
   if (g_setting_desc_count != expected_descriptors)
     fprintf(stderr, "Setting descriptors: expected %d, got %d\n",
             expected_descriptors, g_setting_desc_count);
@@ -307,6 +308,7 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *legacy_bg_refresh = Settings_Find("ws_bgrefresh");
   const SettingDesc *bridge_limit = Settings_Find("fix_bridge_limit");
   const SettingDesc *aitos_event_queue = Settings_Find("fix_aitos_event_queue");
+  const SettingDesc *remember_town = Settings_Find("remember_last_town");
   const SettingDesc *windmill_wind_stop = Settings_Find("fix_windmill_wind_stop");
   const SettingDesc *turbo = Settings_Find("turbo_multiplier");
   const SettingDesc *save_backend = Settings_Find("save_backend");
@@ -369,6 +371,14 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(!strcmp(refresh_value, "Vsync"));
   CHECK(bridge_limit && bridge_limit->category == kSettingCat_Enhancements &&
         bridge_limit->game_change_kind == kSettingGameChange_QualityOfLife);
+  CHECK(remember_town && remember_town->category == kSettingCat_Enhancements &&
+        remember_town->game_change_kind == kSettingGameChange_QualityOfLife &&
+        remember_town->type == kSettingType_Bool && remember_town->defval == 1 &&
+        !remember_town->sticky && Settings_IsMenuVisible(remember_town));
+  CHECK(g_settings.remember_last_town);
+  CHECK(Settings_SetLong(remember_town, 0) == kSettingChange_Applied);
+  CHECK(!g_settings.remember_last_town);
+  CHECK(Settings_SetLong(remember_town, 1) == kSettingChange_Applied);
   CHECK(aitos_event_queue && aitos_event_queue->category == kSettingCat_Enhancements &&
         aitos_event_queue->type == kSettingType_Bool && aitos_event_queue->defval == 0 &&
         !aitos_event_queue->sticky &&
@@ -2063,6 +2073,31 @@ static void DumpInterfaceInventory(void) {
   puts("\n]");
 }
 
+static void TestRememberTownPreference(void) {
+  const char *path = "actraiser-settings-town-bookmark-test.ini";
+  ClearSettingsEnv();
+  Settings_Init();
+  const SettingDesc *remember = Settings_Find("remember_last_town");
+  CHECK(g_settings.remember_last_town && Settings_IsAvailable(remember));
+  CHECK(Settings_SetLong(remember, 0) == kSettingChange_Applied);
+  CHECK(Settings_Save(path));
+  CHECK(FileContains(path, "remember_last_town = Off"));
+  Settings_InitWithFile(path);
+  CHECK(!g_settings.remember_last_town);
+  setenv("AR_REMEMBER_LAST_TOWN", "1", 1);
+  Settings_InitWithFile(path);
+  CHECK(g_settings.remember_last_town);
+  ClearSettingsEnv();
+  Settings_InitWithFile(path);
+  CHECK(!g_settings.remember_last_town);
+  CHECK(Settings_Reset(remember) == kSettingChange_Applied);
+  /* No GPU or enhanced-rendering prerequisite: native Mode 7 supports it. */
+  Settings_ApplyRenderCapabilities(0);
+  CHECK(g_settings.remember_last_town && Settings_IsAvailable(remember));
+  Settings_ApplyRenderCapabilities(kRenderFeature_All);
+  remove(path);
+}
+
 static void TestHardwareCapabilities(void) {
   ClearSettingsEnv();
   Settings_Init();
@@ -2212,6 +2247,7 @@ int main(int argc, char **argv) {
   TestEffectAvailabilityFollowsRendererSupport();
   TestScalePercentToOutput();
   TestDefaultsAndMetadata();
+  TestRememberTownPreference();
   TestConnectedWorldDefaults();
   TestVideoSettingAudit();
   TestSim3DEnvironmentLabels();

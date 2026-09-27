@@ -28,6 +28,22 @@
 
 static SaveSlots s_save_slots;
 static bool s_managed_slots;
+static uint64_t s_town_visit_retry_ms;
+
+static void FlushTownVisit(bool final) {
+  const uint64_t now = SDL_GetTicks();
+  if (!final && now < s_town_visit_retry_ms) return;
+  SaveError error = {{0}};
+  if (SaveSystem_FlushTownVisit(&error)) {
+    s_town_visit_retry_ms = 0;
+  } else {
+    /* Optional presentation metadata must not make gameplay fatal. Bound
+     * failed-I/O retries so a read-only disk cannot cause a per-frame hitch. */
+    if (!s_town_visit_retry_ms || final)
+      fprintf(stderr, "[saves] town bookmark not saved: %s\n", error.message);
+    s_town_visit_retry_ms = now + 5000;
+  }
+}
 
 static bool SlotChooseFile(SettingAction action, SaveError *error) {
   const char *extension = SaveEditor_ExportExtension(action);
@@ -247,6 +263,7 @@ static void SlotValidateBoot(void) {
 }
 
 void SaveSlotHost_AttachBatterySave(bool headless) {
+  s_town_visit_retry_ms = 0;
   /* Load persisted battery save (overrides the fresh-cart fill if present).
    * Portable builds use saves/ beside the executable after the bundle anchor;
    * developer runs use saves/ under their launch directory. */
@@ -383,6 +400,7 @@ void SaveSlotHost_AfterTicks(void) {
     SaveError error = {{0}};
     const PerformanceScope save_scope = PerformanceMetrics_Begin(kPerformance_SaveWrite);
     const bool saved = SaveSystem_AutoPersistIfChanged(&error);
+    if (saved) FlushTownVisit(false);
     PerformanceMetrics_End(save_scope);
     if (!saved) {
       if (!write_error_reported)
@@ -416,6 +434,7 @@ bool SaveSlotHost_FlushBatterySave(void) {
       save_flush_failed = true;
       fprintf(stderr, "[saves] shutdown flush failed: %s\n", error.message);
     }
+    if (!save_flush_failed) FlushTownVisit(true);
   }
   return !save_flush_failed;
 }

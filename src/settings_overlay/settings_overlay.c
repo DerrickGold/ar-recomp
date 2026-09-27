@@ -36,8 +36,6 @@ enum {
   kCursorBlinkHalfPeriodMs = 250,
 };
 
-static const uint32_t kQualityOfLifeBlue = ARGB(255, 156, 205, 255);
-
 static const char *Ui(const char *key) {
   return ArUiCatalog_Text(SettingsOverlay_InterfaceLocale(), key, key);
 }
@@ -2026,10 +2024,7 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
     if (entry.heading != kSettingGameChange_None) {
       const char *heading = SettingsOverlay_LocalizedGameChangeHeading(
           SettingsOverlay_InterfaceLocale(), entry.heading);
-      uint32_t color = s_submenu_open
-          ? (entry.heading == kSettingGameChange_OriginalBugFix
-              ? kGameGold : kQualityOfLifeBlue)
-          : kMutedText;
+      const uint32_t color = s_submenu_open ? kGameGold : kMutedText;
       DrawSmallText(layout, label_x, y + 1, heading, color);
       const int rule_x = label_x + SmallTextWidth(heading) + 7;
       if (rule_x < value_right)

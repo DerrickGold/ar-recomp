@@ -145,6 +145,16 @@ bool SaveSystem_EndNativeWrite(bool completed, SaveError *error);
 /* Last loaded/successfully persisted canonical image, independent of the
  * session-only auto-persist shadow. False leaves out unchanged (empty slot). */
 bool SaveSystem_CopyDurableImage(uint8_t out[kActRaiserSramSize]);
+
+/* Optional world-camera bookmark, separate from battery SRAM. The accepted
+ * title boundary calls Begin once: Continue reads a bookmark bound to the
+ * exact durable image; New Game keeps visits private until its first story
+ * save. Zero means no usable bookmark. Callers must exclude record/replay.
+ * Record is O(1), main-thread only; it performs no I/O. Flush is host-owned,
+ * retryable and nonfatal: losing a camera bookmark never invalidates a save. */
+uint8_t SaveSystem_BeginTownVisits(bool continuing);
+void SaveSystem_RecordTownVisit(uint8_t town);
+bool SaveSystem_FlushTownVisit(SaveError *error);
 typedef enum SaveCommitKind {
   kSaveCommit_Automatic,
   kSaveCommit_Story,
