@@ -3380,6 +3380,11 @@ if(BUILD_TESTING)
     target_include_directories(sim_menu_art_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME sim_menu_art COMMAND sim_menu_art_test)
+    add_executable(present_sim_menu_test tests/present_sim_menu_test.c
+        src/sim/menu/present_sim_menu.c src/sim/menu/sim_menu_model.c
+        src/render/text_cell_composite.c src/render/localized_text_layout.c)
+    target_link_libraries(present_sim_menu_test PRIVATE actraiser_render_test_support)
+    add_test(NAME present_sim_menu COMMAND present_sim_menu_test)
     add_executable(actraiser_sim_menu_test tests/actraiser_sim_menu_test.c
         src/actraiser/actraiser_sim_menu.c src/sim/menu/sim_menu_model.c
         src/sim/menu/sim_menu_help.c)

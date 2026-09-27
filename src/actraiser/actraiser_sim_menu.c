@@ -8,6 +8,7 @@
 #include "actraiser/actraiser_localization_runtime.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_miracle.h"
+#include "snesrecomp/game/trace.h"
 
 typedef RecompReturn (*Routine)(CpuState *);
 #define NATIVE_VARIANTS(pc) \
@@ -159,7 +160,7 @@ void ActRaiserSimMenu_ObserveScene(uint16_t scene) {
 }
 
 void ActRaiserSimMenu_BeginDialogue(const CpuState *c) {
-  if (!c || !s_owner || !s_action || s_action == 12 || s_action == 13 ||
+  if (!c || !s_owner || s_action == 12 || s_action == 13 ||
       s_menu.phase == kSimMenu_Describe || ActRaiserSimMenu_SkipDialogue(c)) return;
   s_menu.phase=kSimMenu_Dialogue;
   ++s_menu.dialogue_generation;
@@ -196,11 +197,34 @@ bool ActRaiser_SimMenuBrowseEntry(CpuState *c) {
 }
 
 static uint8_t Poll(CpuState *c) {
+  const SimMenuPhase phase=s_menu.phase;
+  const uint64_t generation=s_menu.generation;
   uint8_t value=Call(c,bank_01_8C43_M1X0,0,0,0,0x8b98);
+  /* Native frame service can interrupt browsing with a town event before a
+   * command is dispatched (for example, people requesting an audience).
+   * Present its dialogue while it runs, then resume the waiting menu only if
+   * the scene/menu owner survived. The event's acknowledgement is not Use. */
+  if (!s_action && s_owner && generation==s_menu.generation &&
+      (phase==kSimMenu_Browse || phase==kSimMenu_Inventory) &&
+      s_menu.phase!=phase) {
+    s_menu.phase=phase;
+    SimMenuModel_ReleaseBarrier(&s_menu);
+  }
   /* Recorded pad X is reserved for the separately mapped Describe binding
    * only while this controller owns input. Native A1 omits that button. */
   if (cpu_read8(c,0,0x4218) & 0x40) value |= kSimMenuInput_Describe;
   return value;
+}
+
+static void MenuSound(CpuState *c, uint32_t native_site) {
+  /* The replaced browse/inventory loops post COP $07. Keep the normal audio
+   * request hook (including extensions) and identify the original menu site,
+   * so a preceding description's last glyph cannot classify this as a blip. */
+  const uint16_t a=c->A;
+  cpu_trace_block(c,native_site);
+  c->A=(c->A & 0xff00) | 7;
+  if (g_cpu_cop_hook) g_cpu_cop_hook(c);
+  c->A=a;
 }
 
 static void Redraw(CpuState *c) {
@@ -348,6 +372,7 @@ RecompReturn ActRaiser_SimMenuBrowse(CpuState *c) {
   if (s_menu.phase != kSimMenu_Browse)
     SimMenuModel_Open(&s_menu,s_menu.generation,c->X);
   SimMenuModel_ReleaseBarrier(&s_menu);
+  MenuSound(c,0x018b82);
   Redraw(c);
   for (;;) {
     if (g_settings.sim_menu_style != 1) {
@@ -355,7 +380,12 @@ RecompReturn ActRaiser_SimMenuBrowse(CpuState *c) {
       ActRaiserSimMenu_Reset();
       return kNative8B7D[Mode(c)](c);
     }
-    const SimMenuEvent event=SimMenuModel_Poll(&s_menu,Poll(c));
+    const uint8_t input=Poll(c);
+    const SimMenuEvent event=s_owner ? SimMenuModel_Poll(&s_menu,input) :
+        kSimMenuEvent_Close;
+    if (s_owner && event != kSimMenuEvent_None)
+      MenuSound(c,event == kSimMenuEvent_Changed ? 0x018b82 :
+                  event == kSimMenuEvent_Close ? 0x018c15 : 0x018c1c);
     if (event != kSimMenuEvent_None && getenv("AR_SIM_MENU_TRACE"))
       fprintf(stderr,"[sim-menu] event=%d node=%04x action=%u phase=%d\n",
               event,SimMenuModel_Selection(&s_menu),SimMenuModel_Action(&s_menu),s_menu.phase);
@@ -486,12 +516,17 @@ RecompReturn ActRaiser_SimMenuInventory(CpuState *c) {
   for (unsigned i=0;i<8;++i) items[i]=cpu_read8(c,0,0x02a2+i);
   SimMenuModel_Inventory(&s_menu,items);
   cpu_write16(c,0,8,0xf08c);
+  MenuSound(c,0x018d00);
   for (;;) {
     cpu_write16(c,0,0x0a,s_menu.item_slot);
     Call(c,bank_01_8C79_M1X0,s_menu.items[s_menu.item_slot],0x0898,0x02a2,0x8d08);
     Call(c,bank_01_B5CD_M1X0,s_menu.item_slot,0x0898,0x02a2,0x8d0d);
     SimMenuEvent event;
-    do { event=SimMenuModel_Poll(&s_menu,Poll(c)); } while(event == kSimMenuEvent_None);
+    do {
+      const uint8_t input=Poll(c);
+      event=s_owner ? SimMenuModel_Poll(&s_menu,input) : kSimMenuEvent_Close;
+    } while(event == kSimMenuEvent_None);
+    if (s_owner) MenuSound(c,0x018d00);
     if (event == kSimMenuEvent_Describe) Describe(c);
     if (event != kSimMenuEvent_Close && event != kSimMenuEvent_Use) continue;
     if (event == kSimMenuEvent_Use &&

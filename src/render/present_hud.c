@@ -172,7 +172,34 @@ static HudProjectionInputs BuildProjectionInputs(const FrameSlot *slot) {
 int PresentHud_BuildChunks(const FrameSlot *slot, ArRenderRectI viewport,
                            HudPresentationChunk chunks[kHudPresentationChunkCapacity]) {
   const HudProjectionInputs in = BuildProjectionInputs(slot);
-  return ArHudLayout_BuildPresentationChunks(viewport, &in, chunks);
+  int count = ArHudLayout_BuildPresentationChunks(viewport, &in, chunks);
+  /* $01:A0C7 writes the construction/lair notice independently of the menu
+   * into BG3 row 8, columns 2..28. Modern menus hide the other body rows,
+   * but this live town status must survive targeting and action handoffs. */
+  if (PresentSimMenu_Active(slot) && slot->bg3_state_valid &&
+      slot->visible_width > 0 && slot->snes_height > 0) {
+    ArRenderRectI regions[kArTextCellMaximumProjectedRegions];
+    const size_t region_count = ArTextCellComposite_ProjectRegion(
+        (ArTextCellRegion){2,8,27,1}, slot->bg3_tilemap_width_tiles,
+        slot->bg3_tilemap_height_tiles, slot->bg3_hscroll, slot->bg3_vscroll,
+        256, slot->snes_height, regions);
+    const double sx=(double)viewport.w/slot->visible_width;
+    const double sy=(double)viewport.h/slot->snes_height;
+    for (size_t i=0;i<region_count && count<kHudPresentationChunkCapacity;++i) {
+      const ArRenderRectI source=regions[i];
+      if (source.y < slot->hud_split_height || source.y+source.h >
+          slot->overlay_captures[kFrameSlotOverlay_Bg3].y1) continue;
+      chunks[count++]=(HudPresentationChunk){
+        .texture=s_background_texture,
+        .texture_source={source.x+(slot->snes_width-256)/2,source.y,source.w,source.h},
+        .screen_source=source,
+        .output_destination={viewport.x+(viewport.w-256*sx)/2+source.x*sx,
+            viewport.y+source.y*sy,source.w*sx,source.h*sy},
+        .inspector_kind=kInspectorPresentation_HudBg,
+      };
+    }
+  }
+  return count;
 }
 
 static void PresentHudChunksDirect(ArRenderDevice *device, const FrameSlot *slot,

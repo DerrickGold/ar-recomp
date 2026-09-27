@@ -10,11 +10,12 @@ static SimMenuEvent Press(SimMenuModel *m, uint8_t key) {
 int main(void) {
   SimMenuModel m;
   SimMenuModel_Open(&m, 1, 0xf32e);
+  assert(m.submenu && SimMenuModel_Selection(&m) == 0xf32f);
   assert(SimMenuModel_Poll(&m, kSimMenuInput_Use) == kSimMenuEvent_None);
   /* Every command is reachable, with the same ID and native node. */
   for (unsigned category = 0, action = 1; category < 6; ++category) {
     assert(m.category == category);
-    Press(&m, kSimMenuInput_Down);
+    assert(m.submenu);
     for (unsigned row = 0; row < kSimMenuCategoryActionCounts[category]; ++row) {
       assert(SimMenuModel_Action(&m) == action);
       assert(SimMenuModel_Selection(&m) == kSimMenuActions[action - 1].selection_pointer);
@@ -23,7 +24,6 @@ int main(void) {
       if (row + 1 < kSimMenuCategoryActionCounts[category])
         Press(&m, kSimMenuInput_Down);
     }
-    Press(&m, kSimMenuInput_Back);
     Press(&m, kSimMenuInput_Right);
   }
   assert(m.category == 0);
@@ -41,12 +41,27 @@ int main(void) {
   assert(SimMenuModel_Poll(&m,kSimMenuInput_Left|kSimMenuInput_Right)==kSimMenuEvent_None);
   assert(Press(&m,kSimMenuInput_Right)==kSimMenuEvent_Changed);
   assert(SimMenuModel_Poll(&m,kSimMenuInput_Right|kSimMenuInput_Down)==kSimMenuEvent_None);
-  assert(!m.submenu);
+  assert(m.submenu);
   assert(SimMenuModel_Poll(&m,kSimMenuInput_Down)==kSimMenuEvent_Changed && m.submenu);
-  Press(&m,kSimMenuInput_Back);
-  assert(Press(&m,kSimMenuInput_Use)==kSimMenuEvent_Changed && m.submenu);
+  assert(Press(&m,kSimMenuInput_Use)==kSimMenuEvent_Use && m.submenu);
   for (int i=0;i<90;++i)
     assert(SimMenuModel_Poll(&m,kSimMenuInput_Use)==kSimMenuEvent_None);
+  /* Every category opens directly on an action; vertical scrubbing wraps
+   * without collapsing the list, and returning remembers that category's row. */
+  for (unsigned category = 0; category < kSimMenuCategoryCount; ++category) {
+    SimMenuModel_Open(&m, 21, kSimMenuCategoryPointers[category]);
+    assert(m.submenu && m.row[category] == 0);
+    assert(Press(&m, kSimMenuInput_Up) == kSimMenuEvent_Changed);
+    assert(m.submenu && m.row[category] == kSimMenuCategoryActionCounts[category] - 1);
+    const uint16_t last = SimMenuModel_Selection(&m);
+    Press(&m, kSimMenuInput_Right);
+    assert(m.submenu);
+    Press(&m, kSimMenuInput_Left);
+    assert(m.submenu && SimMenuModel_Selection(&m) == last);
+    Press(&m, kSimMenuInput_Down);
+    assert(m.submenu && m.row[category] == 0);
+    assert(Press(&m, kSimMenuInput_Back | kSimMenuInput_Use) == kSimMenuEvent_Close);
+  }
   /* Help never dispatches; restore the exact Sun node after every page. */
   SimMenuModel_Open(&m, 2, 0xf339);
   assert(Press(&m, kSimMenuInput_Describe) == kSimMenuEvent_Describe);

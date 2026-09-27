@@ -33,6 +33,9 @@ void SimMenuModel_Open(SimMenuModel *m, uint64_t generation,
   memset(m, 0, sizeof(*m));
   m->generation = generation;
   m->phase = kSimMenu_Browse;
+  /* The dock always exposes the selected category's actions. Horizontal
+   * navigation changes category; vertical navigation scrubs its remembered row. */
+  m->submenu = true;
   for (unsigned i = 0; i < 6; ++i)
     if (selection == kSimMenuCategoryPointers[i]) m->category = i;
   for (unsigned i = 0; i < 15; ++i) {
@@ -40,7 +43,6 @@ void SimMenuModel_Open(SimMenuModel *m, uint64_t generation,
     if (selection != a->selection_pointer) continue;
     m->category = a->category;
     m->row[a->category] = a->row;
-    m->submenu = true;
   }
   SimMenuModel_ReleaseBarrier(m);
 }
@@ -120,10 +122,6 @@ SimMenuEvent SimMenuModel_Poll(SimMenuModel *m, uint8_t buttons) {
       m->yes = false;
       return kSimMenuEvent_Use;
     }
-    if (m->phase == kSimMenu_Browse && m->submenu) {
-      m->submenu = false;
-      return kSimMenuEvent_Changed;
-    }
     return kSimMenuEvent_Close;
   }
   if (m->phase == kSimMenu_Describe)
@@ -144,10 +142,6 @@ SimMenuEvent SimMenuModel_Poll(SimMenuModel *m, uint8_t buttons) {
     return kSimMenuEvent_Describe;
   }
   if (edge & kSimMenuInput_Use) {
-    if (m->phase == kSimMenu_Browse && !m->submenu) {
-      m->submenu = true;
-      return kSimMenuEvent_Changed;
-    }
     return kSimMenuEvent_Use;
   }
   if (m->phase == kSimMenu_Inventory) {
@@ -162,14 +156,12 @@ SimMenuEvent SimMenuModel_Poll(SimMenuModel *m, uint8_t buttons) {
   if (edge & (kSimMenuInput_Left | kSimMenuInput_Right)) {
     m->category = (m->category + (edge & kSimMenuInput_Left ? 5 : 1)) % 6;
   } else if (edge & kSimMenuInput_Down) {
-    if (m->submenu)
-      m->row[m->category] = (m->row[m->category] + 1) %
-                           kSimMenuCategoryActionCounts[m->category];
-    m->submenu = true;
+    m->row[m->category] = (m->row[m->category] + 1) %
+                         kSimMenuCategoryActionCounts[m->category];
   } else if (edge & kSimMenuInput_Up) {
-    if (!m->submenu) return kSimMenuEvent_None;
-    if (m->row[m->category]) --m->row[m->category];
-    else m->submenu = false;
+    m->row[m->category] = (m->row[m->category] +
+        kSimMenuCategoryActionCounts[m->category] - 1) %
+        kSimMenuCategoryActionCounts[m->category];
   } else return kSimMenuEvent_None;
   return kSimMenuEvent_Changed;
 }

@@ -294,6 +294,19 @@ int main(void) {
   assert(PresentHud_BuildChunks(&slot, viewport, chunks) == 7);
   menu_active = true;
   assert(PresentHud_BuildChunks(&slot, viewport, chunks) == 6);
+  slot.bg3_state_valid=true;
+  slot.bg3_tilemap_width_tiles=slot.bg3_tilemap_height_tiles=32;
+  slot.overlay_captures[kFrameSlotOverlay_Bg3].y1=224;
+  assert(PresentHud_BuildChunks(&slot, viewport, chunks)==7);
+  assert(chunks[6].screen_source.x==16 && chunks[6].screen_source.y==63);
+  assert(chunks[6].screen_source.w==216 && chunks[6].screen_source.h==8);
+  assert(chunks[6].texture_source.x==144); /* Texture widescreen padding. */
+  slot.bg3_vscroll=252; /* Native -4 scroll still follows its own status row. */
+  assert(PresentHud_BuildChunks(&slot, viewport, chunks)==7);
+  assert(chunks[6].screen_source.y==67);
+  slot.bg3_state_valid=false;
+  slot.bg3_vscroll=0;
+  slot.overlay_captures[kFrameSlotOverlay_Bg3].y1=64;
   menu_active = false;
   slot.oam_valid = true;
   slot.hud_icon_first = 8;

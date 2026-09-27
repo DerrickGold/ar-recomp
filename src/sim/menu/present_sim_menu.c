@@ -16,31 +16,6 @@
 static ArRenderTexture s_icons;
 static uint32_t s_revision;
 
-/* Presentation-only retention: a shorter page must not pull the dialogue
- * frame and title downward. No reveal/page/acknowledgement state lives here. */
-static struct {
-  uint64_t generation, font_revision;
-  uint32_t dialogue_generation;
-  ArRenderRectI view;
-  ArEnhancedTextSettings settings;
-  float dialogue_extra;
-} s_layout;
-
-static void BeginLayout(const FrameSlot *slot,ArRenderRectI view) {
-  const SimMenuModel *m=&slot->sim_menu.model;
-  if (s_layout.generation==m->generation &&
-      s_layout.dialogue_generation==m->dialogue_generation &&
-      s_layout.font_revision==slot->localization.font_revision &&
-      !memcmp(&s_layout.settings,&slot->localization.settings,sizeof(s_layout.settings)) &&
-      !memcmp(&s_layout.view,&view,sizeof(view))) return;
-  memset(&s_layout,0,sizeof(s_layout));
-  s_layout.generation=m->generation;
-  s_layout.dialogue_generation=m->dialogue_generation;
-  s_layout.font_revision=slot->localization.font_revision;
-  s_layout.settings=slot->localization.settings;
-  s_layout.view=view;
-}
-
 bool PresentSimMenu_Active(const FrameSlot *slot) {
   return slot && slot->sim_menu.valid &&
       slot->sim_menu.model.phase != kSimMenu_Closed &&
@@ -51,7 +26,6 @@ void PresentSimMenu_Reset(void) {
   ArRenderDevice_DestroyTexture(&g_render_device,s_icons);
   s_icons = ArRenderTexture_Invalid();
   s_revision = 0;
-  memset(&s_layout,0,sizeof(s_layout));
 }
 
 static ArRenderRectF Rect(ArRenderRectI view, float x,float y,float w,float h) {
@@ -381,11 +355,14 @@ static HudPresentationChunk PrepareMenuDialogue(const FrameSlot *slot,
       prepared->masks[prepared->mask_count++]=(ArRenderRectI){40,154,176,62};
     }
   }
-  RestoreCompletePage(prepared);
+  /* Descriptions keep the same viewport/scrolling as ordinary dialogue.
+   * Expanding to fit the full enhanced-font page made this box much taller. */
+  if (slot->sim_menu.model.phase != kSimMenu_Describe)
+    RestoreCompletePage(prepared);
   return chunk;
 }
 
-static float Dialogue(const FrameSlot *slot, ArRenderRectI view) {
+static void Dialogue(const FrameSlot *slot, ArRenderRectI view) {
   /* Reuse only the actual game's bottom window. Menu scale and item metadata
    * do not change its footprint. BG2 supplies the native frame/paper; BG3 and
    * localized claims supply text, effects and the continuation marker. */
@@ -399,10 +376,7 @@ static float Dialogue(const FrameSlot *slot, ArRenderRectI view) {
       (ink.y+ink.h-chunk.output_destination.y)/scale);
   float extra=fmaxf(0,ink_bottom-(enhanced_help?56:
       slot->sim_menu.help.active?68:63));
-  if (slot->sim_menu.model.phase==kSimMenu_Describe) {
-    extra=fmaxf(extra,s_layout.dialogue_extra);
-    s_layout.dialogue_extra=extra;
-  }
+  if (slot->sim_menu.model.phase==kSimMenu_Describe) extra=0;
   /* Keep the original corners/edge thickness when a larger localized page
    * needs extra height. Only the native middle rows are extended upward. */
   /* BG2's captured town box occupies y=151..214 (including the native
@@ -424,63 +398,6 @@ static float Dialogue(const FrameSlot *slot, ArRenderRectI view) {
   if (enhanced_help)
     Texture(PresentHud_BackgroundTexture(),(ArRenderRectF){slot->ws_extra+208,204,8,8},
             DialogueRect(slot,view,208,204,8,8));
-  return 151-extra;
-}
-
-static void DescriptionTitle(const FrameSlot *slot, ArRenderRectI view,
-                              float dialogue_top) {
-  const SimMenuFrame *f=&slot->sim_menu;
-  const SimMenuModel *m=&f->model;
-  const unsigned id=m->return_phase==kSimMenu_Inventory?20+m->items[m->item_slot]:
-      m->submenu?5+SimMenuModel_Action(m):m->category;
-  const unsigned label_id=m->return_phase==kSimMenu_Inventory?601+m->item_slot:
-      m->submenu?601+m->row[m->category]:600;
-  const float sx=(float)view.w/slot->visible_width;
-  const float sy=(float)view.h/slot->snes_height;
-  const float y=dialogue_top-26; /* Separate plaque, two pixels above the frame. */
-  const ArRenderRectF label=DialogueRect(slot,view,0,y+3,176,18);
-  ArLocalizedPreparedFrame prepared={0};
-  const bool localized=ArLocalizedTextPresenter_PrepareScreenText(&g_render_device,
-      &f->label_frame,label_id,
-      (ArRenderRectI){label.x,label.y,label.w,label.h},&prepared) &&
-      prepared.text_count==1;
-  bool rtl=false;
-  float text_width=fminf(176,strlen(f->labels[id])*7+1);
-  if (localized) {
-    const ArLocalizationScreenTextRecord *record=
-        ArLocalizationFrame_FindScreenText(&f->label_frame,label_id);
-    const ArTextDirection authored=
-        f->label_frame.snapshots[record->snapshot_slot].language.direction;
-    const ArTextDirection direction=authored==kArTextDirection_Auto?
-        prepared.texts[0].surface.paragraph_direction:authored;
-    rtl=direction==kArTextDirection_RightToLeft;
-    text_width=ceilf(prepared.texts[0].destination.w/sx);
-  }
-  const float width=text_width+32, x=rtl?232-width:24;
-  FrameAt(DialogueRect(slot,view,x,y,width,24),3*sx,3*sy);
-  const float icon_x=rtl?x+width-22:x+6;
-  const float text_x=rtl?x+6:x+26;
-  Texture(s_icons,(ArRenderRectF){0,id*16,16,16},
-          DialogueRect(slot,view,icon_x,y+4,16,16));
-  if (localized) {
-    /* Keep the measured surface pinned: moving the label changes neither its
-     * shaping nor its font size, including mixed-script and auto-direction text. */
-    ArLocalizedPreparedText *text=&prepared.texts[0];
-    const ArRenderRectF dest=DialogueRect(slot,view,text_x,y+3,text_width,18);
-    text->destination.x=rtl?(int)(dest.x+dest.w)-text->destination.w:(int)dest.x;
-    ArLocalizedTextPresenter_DrawWithBrightness(&g_render_device,&prepared,
-                                                (slot->inidisp&15)/15.0f);
-  } else {
-    const SettingsOverlayArtwork *art=SettingsOverlayArtwork_Get();
-    const char *text=f->labels[id];
-    for (size_t i=0;text[i];++i) {
-      const unsigned ch=(unsigned char)text[i];
-      if (art->glyph_defined[ch])
-        Texture(art->fonts[kText_Normal],
-            (ArRenderRectF){(ch&15)*8,(ch>>4)*8,8,8},
-            DialogueRect(slot,view,text_x+i*7,y+8,8,8));
-    }
-  }
 }
 
 static bool MenuLabelRightToLeft(const FrameSlot *slot, ArRenderRectI view,
@@ -567,7 +484,6 @@ static void Browse(const FrameSlot *slot,ArRenderRectI view,
 
 void PresentSimMenu_Draw(const FrameSlot *slot, ArRenderRectI view) {
   if (!PresentSimMenu_Active(slot) || (slot->inidisp & 0x80)) return;
-  BeginLayout(slot,view);
   const SimMenuFrame *f=&slot->sim_menu;
   const SimMenuModel *m=&f->model;
   if (m->phase==kSimMenu_Handoff) return;
@@ -614,8 +530,7 @@ void PresentSimMenu_Draw(const FrameSlot *slot, ArRenderRectI view) {
     SimMenuModel origin=*m;
     origin.phase=m->return_phase;
     Browse(slot,MenuViewport(view,origin.phase,f->scale_percent),&origin);
-    const float dialogue_top=Dialogue(slot,view);
-    DescriptionTitle(slot,view,dialogue_top);
+    Dialogue(slot,view);
     return;
   }
   const ArRenderRectI full_view=view;
