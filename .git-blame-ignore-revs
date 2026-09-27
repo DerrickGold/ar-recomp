@@ -1,0 +1,18 @@
+# Formatting-only and move-only commits. git blame skips them with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# (GitHub reads this file automatically.)
+
+# style(regional): expand compressed source formatting
+b5ba2e28abb069a85ac0bc0b8f8690201ee58273
+
+# refactor(src): organize root sources into feature directories
+475741b7f43cb371573fa7a575237c901e5ddf0e
+
+# refactor(sim): organize feature directories and normalize source layout
+23ef43aec1f8560d333352bbc0f40ff5ad259401
+
+# style: standardize remaining source header guards
+0678295a5fb8f3623504b0d8f10ab38ae6c3bd5e
+
+# style: expand compressed formatting across authored sources
+9572f29b2912c0414a90329626aa2c0f01789335
