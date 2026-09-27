@@ -107,8 +107,9 @@ recomp/funcs.h
 build-trace/
 tools/oracle/oracle_trace.jsonl
 
-# IDE
+# Local editor and agent settings
 .claude/
+.codex/
 .vscode/
 .idea/
 *.swp
@@ -120,6 +121,7 @@ Thumbs.db
 
 # Python
 __pycache__/
+.ruff_cache/
 *.pyc
 .venv/
 venv/
