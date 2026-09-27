@@ -1432,8 +1432,13 @@ int main(int argc, char **argv) {
     for (int x = 0; x < kSimTownCanvasPixels; x++)
       pixels[(size_t)y * kSimTownCanvasPixels + x] =
           (x % 16 == 8 && y % 16 == 8) ? 0xFFFFFFFF : 0xFFF0F2E8;
-  SetTerrainDefinition(wram, 0, 0x0101, 0x0101, 0x0101, 0x0101);
-  SetCanvasCell(wram, 0, 0, 0x0101, 0x0101, 0x0101, 0x0101);
+  /* Retail Northwall uses $FF snow, not $00. These are the four native
+   * definition words from the town snapshot; $0200 is traversal metadata. */
+  SetTerrainDefinition(wram, 0xFF, 0x07E1, 0x05E1, 0x07E1, 0x07E1);
+  wram[TownCellIndex(5, 0, 0)] = 0xFF;
+  SetCanvasCell(wram, 0, 0, 0x05E1, 0x05E1, 0x05E1, 0x05E1);
+  wram[TownCellIndex(5, 6, 6)] = 0x81;
+  FillCell(pixels, 6, 6, 0xFFB0B8C0);
   uint8_t *snow_house = wram + kRecords + 5 * kRecordsPerTown;
   snow_house[0] = 4;
   snow_house[1] = 5;
@@ -1459,6 +1464,40 @@ int main(int argc, char **argv) {
   size_t cathedral_center =
       (size_t)(14 * 16 + 8) * kSimTownCanvasPixels + 14 * 16 + 8;
   CHECK(ground[cathedral_center] == 0xFFFFFFFF);
+  CHECK(ground[mountain_corner] == 0xFFF0F2E8);
+
+  /* Sun clears one snow patch to grass. It must not switch the shared ground
+   * beneath unrelated trees, buildings and mountain edges to that new patch. */
+  wram[TownCellIndex(5, 2, 2)] = 0x08;
+  SetTerrainDefinition(wram, 0x08, 0x0DE1, 0x0DE1, 0x0DE1, 0x0DE1);
+  SetCanvasCell(wram, 2, 2, 0x0DE1, 0x0DE1, 0x0DE1, 0x0DE1);
+  FillCell(pixels, 2, 2, 0xFF708030);
+  SimBackgroundVoxels_Build(6, wram, pixels, NULL, 3, 3, true);
+  ground = SimBackgroundVoxels_GroundPixels();
+  CHECK(ground[tree_center] == 0xFFFFFFFF);
+  CHECK(ground[house_center] == 0xFFFFFFFF);
+  CHECK(ground[cathedral_center] == 0xFFFFFFFF);
+  CHECK(ground[mountain_corner] == 0xFFF0F2E8);
+  CHECK(ground[(size_t)(2 * 16 + 8) * kSimTownCanvasPixels + 2 * 16 + 8] ==
+        0xFF708030);
+
+  /* Once the last clearable snow melts, the permanent snow between peaks is
+   * still a valid source. Neither thawed patch may replace distant snow. */
+  wram[TownCellIndex(5, 0, 0)] = 0x08;
+  SetCanvasCell(wram, 0, 0, 0x0DE1, 0x0DE1, 0x0DE1, 0x0DE1);
+  FillCell(pixels, 0, 0, 0xFF708030);
+  wram[TownCellIndex(5, 3, 3)] = 0x8E;
+  SetTerrainDefinition(wram, 0x8E, 0x07E1, 0x07E1, 0x07E1, 0x07E1);
+  SetCanvasCell(wram, 3, 3, 0x05E1, 0x05E1, 0x05E1, 0x05E1);
+  SimBackgroundVoxels_Build(6, wram, pixels, NULL, 4, 4, true);
+  ground = SimBackgroundVoxels_GroundPixels();
+  CHECK(ground[tree_center] == 0xFFFFFFFF);
+  CHECK(ground[house_center] == 0xFFFFFFFF);
+  CHECK(ground[cathedral_center] == 0xFFFFFFFF);
+  CHECK(ground[mountain_corner] == 0xFFF0F2E8);
+  CHECK(ground[8 * kSimTownCanvasPixels + 8] == 0xFF708030);
+  CHECK(ground[(size_t)(2 * 16 + 8) * kSimTownCanvasPixels + 2 * 16 + 8] ==
+        0xFF708030);
 
   /* A snow-coloured Northwall mountain follows the palette-independent rock
    * silhouette. The prior RGB mask erased white rock, while source alpha alone
@@ -1472,7 +1511,7 @@ int main(int argc, char **argv) {
   FillCell(pixels, 6, 6, 0xFFFFFFFF);
   SetSolidColourOneTile(vram, 1);
   SetCanvasTile(wram, 13, 13, 1);
-  SimBackgroundVoxels_Build(6, wram, pixels, NULL, 3, 3, true);
+  SimBackgroundVoxels_Build(6, wram, pixels, NULL, 5, 5, true);
   atlas = SimBackgroundVoxels_AtlasPixels();
   size_t north_mountain_opaque =
       (size_t)(6 * 16 + 3) * kSimTownCanvasPixels + 6 * 16 + 12;

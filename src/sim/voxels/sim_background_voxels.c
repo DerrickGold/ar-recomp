@@ -895,11 +895,14 @@ static bool CellIsMasked(int cell_x, int cell_y) {
 
 static bool FindGeneralGroundCell(const SimBackgroundVoxelScene *scene,
     const uint8_t *wram, int *ground_cell_x, int *ground_cell_y) {
-  /* $08 is the cleared plain; $00 is its undeveloped terrain variant. Their
-   * native town palette supplies grass, sand or snow. Select only a displayed
-   * plain, never a tree whose logical cell was cleared before its animation
+  /* Northwall uses $FF for clearable snow and $8E for snowy mountain gaps.
+   * Never use its thawed $08 grass beneath unrelated lifted objects: a local
+   * Sun miracle must not change the ground under distant mountain edges.
+   * Other towns prefer cleared $08 plains, then undeveloped $00. Select only
+   * a displayed plain, never a tree cleared logically before its animation
    * finished, nor a landmark, river or cliff with a similar colour. */
-  const uint8_t plains[] = {0x08, 0x00};
+  const uint8_t plains[] = {scene->town == 6 ? 0xFF : 0x08,
+                           scene->town == 6 ? 0x8E : 0x00};
   for (unsigned kind = 0; kind < sizeof(plains); ++kind)
     for (int y = 0; y < kSimBackgroundTownCells; ++y)
       for (int x = 0; x < kSimBackgroundTownCells; ++x) {
