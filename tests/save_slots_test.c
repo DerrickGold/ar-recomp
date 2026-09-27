@@ -1,3 +1,4 @@
+#include "support/regional_test_values.h"
 #include "save/save_slot_manager.h"
 #include "byte_order.h"
 #include "deterministic_hash.h"
@@ -124,7 +125,7 @@ static void Run(const char *root, SaveBackend backend) {
                                     .group = kArRegionalProfile_Artwork};
   ArRegionalSession before = draft;
   assert(SaveSlotManager_Edit(&draft, &profile, kArRegionalSource_Japan));
-  assert(!memcmp(&before.randomizer, &draft.randomizer, sizeof(recipe)));
+  assert(TestRegional_EqualRecipe(&draft.randomizer, &before.randomizer));
   uint8_t encoded[kSaveSlotDraftCapacity];
   size_t size = 0;
   assert(ArRegionalSession_Encode(&draft, encoded, sizeof(encoded), &size));
@@ -457,8 +458,8 @@ static void MigrationResume(const char *root, SaveBackend backend) {
            backend == kSaveBackend_Ini ? "ini" : "srm");
   assert(Save_LoadFile((SaveFileFormat)backend, path, disk, &error) &&
          !memcmp(disk, image, sizeof(disk)));
-  assert(SaveSlotManager_ReadDraft(&slots, 1, &session, &error) &&
-         !memcmp(&session, &draft, sizeof(draft)));
+  assert(SaveSlotManager_ReadDraft(&slots, 1, &session, &error));
+  assert(TestRegional_EqualSession(&session, &draft));
   assert(SaveSlots_Acknowledge(&slots, &error) && slots.records[1].backend == next);
   SaveSlots_Close(&slots);
   assert(SaveSlots_Open(&slots, root, backend, &error) && slots.active == 1 && !slots.pending);
@@ -558,7 +559,8 @@ static void UpdateEmptyDraft(const char *root, SaveBackend backend) {
   SaveSlots_Close(&slots);
   assert(SaveSlots_Open(&slots, root, backend, &error));
   assert(SaveSlotManager_ReadDraft(&slots, 0, &loaded, &error));
-  assert(!memcmp(&loaded, &draft, sizeof(draft)) && loaded.randomizer.seed == 987);
+  assert(TestRegional_EqualSession(&loaded, &draft));
+  assert(loaded.randomizer.seed == 987);
   assert(SaveSlots_DestinationBackend(&slots) == backend);
   assert(SaveSlotManager_Inspect(&slots, 0, &details) && details.state == kSaveSlot_Empty);
   snprintf(blocked, sizeof(blocked), "%s/slots/01/new-game.ardraft.tmp", root);

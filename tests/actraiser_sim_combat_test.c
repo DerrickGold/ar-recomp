@@ -1,3 +1,4 @@
+#include "support/regional_test_values.h"
 #include "actraiser/regional/actraiser_regional_sim_combat.h"
 #include "support/test_assert.h"
 #include <stdio.h>
@@ -131,7 +132,7 @@ static void PolicyAndCache(void) {
   ArRegionalSimActors decoded = {0};
   assert(ArRegionalSimActors_Encode(&actors, bytes, sizeof(bytes)) &&
          ArRegionalSimActors_Decode(bytes, sizeof(bytes), &decoded));
-  assert(!memcmp(&actors, &decoded, sizeof(actors)));
+  assert(TestRegional_EqualActors(&actors, &decoded));
   for (unsigned at = 0; at < sizeof(bytes); ++at) {
     uint8_t bad[sizeof(bytes)];
     memcpy(bad, bytes, sizeof(bytes));

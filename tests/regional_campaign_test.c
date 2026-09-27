@@ -1,3 +1,4 @@
+#include "support/regional_test_values.h"
 #include "regional/session/regional_campaign.h"
 #include "host/campaign_identity.h"
 #include "snesrecomp/support/utf8_fs.h"
@@ -104,7 +105,7 @@ static void Run(SaveBackend backend) {
   CHECK(SaveSystem_AutoPersistIfChanged(&error));
   CHECK(!campaign.pending_valid);
   CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
-  CHECK(!memcmp(&loaded, &saving, sizeof(saving)));
+  CHECK(TestRegional_EqualSession(&loaded, &saving));
   CHECK(campaign.active.requested.costs.source[0] == kArRegionalSource_Europe);
   /* A marker outside the checksum belongs to the durable JP game, not the
    * unsaved EU one. No direct Save_WriteFile bypass of companion rotation. */
@@ -130,7 +131,7 @@ static void Run(SaveBackend backend) {
                                &error));
   CHECK(SaveSystem_Import(donor, false, &error));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
-  CHECK(!memcmp(&loaded, &campaign.active, sizeof(loaded)));
+  CHECK(TestRegional_EqualSession(&loaded, &campaign.active));
   CHECK(SaveSystem_LoadActive(&error));
   CHECK(!campaign.active_valid && !campaign.pending_valid);
   CHECK(SaveSystem_CopyDurableImage(durable));
@@ -147,7 +148,7 @@ static void Run(SaveBackend backend) {
   CHECK(SaveSystem_EndNativeWrite(true, &error));
   CHECK(SaveSystem_AutoPersistIfChanged(&error));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
-  CHECK(!memcmp(&loaded, &campaign.active, sizeof(loaded)));
+  CHECK(TestRegional_EqualSession(&loaded, &campaign.active));
   disk[0] ^= 1;
   Save_RecomputeChecksum(disk);
   CHECK(!ArRegionalCampaign_Continue(&campaign, path, disk, &error));
@@ -186,12 +187,12 @@ static void Acknowledge(SaveFileFormat format) {
   CHECK(!memcmp(campaign.active.lairs.stock[0], stocks, sizeof(stocks)));
   CHECK(Save_LoadFile(format, path, disk, &error) && !memcmp(disk, image, sizeof(image)));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
-  CHECK(!memcmp(&loaded.lairs, &campaign.active.lairs, sizeof(loaded.lairs)));
+  CHECK(TestRegional_EqualLairs(&loaded.lairs, &campaign.active.lairs));
   /* Cold Continue already has the estimate; a second acknowledgement is
    * idempotent, and exact/approximate distinctions are retained. */
   CHECK(ArRegionalCampaign_Continue(&campaign, path, image, &error));
   CHECK(ArRegionalCampaign_AcknowledgeLairHistory(&campaign, format, path, image, stocks, &error));
-  CHECK(!memcmp(&loaded.lairs, &campaign.active.lairs, sizeof(loaded.lairs)));
+  CHECK(TestRegional_EqualLairs(&loaded.lairs, &campaign.active.lairs));
   stocks[0] ^= 1;
   CHECK(!ArRegionalCampaign_AcknowledgeLairHistory(&campaign, format, path, image, stocks, &error));
   CHECK(!campaign.active_valid);
@@ -283,7 +284,7 @@ static void RecoveryCopy(SaveBackend backend) {
   CHECK(Save_LoadFile(kSaveFileFormat_NativeSrm, copy, disk, &error));
   CHECK(!memcmp(disk, image, sizeof(disk)));
   CHECK(ArRegionalSession_Load(&loaded, 0, copy, disk, &error) == kSaveCheckpoint_Ready);
-  CHECK(!memcmp(&loaded, &saved, sizeof(loaded)));       /* Not the unsaved EU campaign. */
+  CHECK(TestRegional_EqualSession(&loaded, &saved));     /* Not the unsaved EU campaign. */
   CHECK(!SaveSystem_CreateRecoveryCopy(folder, &error)); /* Never overwrite. */
   CHECK(SaveSystem_CopyDurableImage(disk) && !memcmp(disk, image, sizeof(disk)));
   CHECK(Save_LoadFile(format, path, disk, &error) && !memcmp(disk, image, sizeof(disk)));
@@ -401,7 +402,7 @@ static void StorySnapshot(SaveBackend backend) {
   CHECK(Save_LoadFile(format, path, disk, &error) && !memcmp(disk, old, sizeof(disk)));
   ArRegionalSession loaded;
   CHECK(ArRegionalSession_Load(&loaded, 0, path, disk, &error) == kSaveCheckpoint_Ready);
-  CHECK(!memcmp(&loaded, &campaign.active, sizeof(loaded)));
+  CHECK(TestRegional_EqualSession(&loaded, &campaign.active));
   CHECK(REMOVE_DIR(blocked) == 0);
   /* Name failure is explicitly post-commit. Retrying auto-persistence must
    * repair only the companion, not run conversion or revert campaign data. */
@@ -412,7 +413,7 @@ static void StorySnapshot(SaveBackend backend) {
   CHECK(SaveSystem_CopyDurableImage(disk) && !memcmp(disk, candidate, sizeof(disk)));
   CHECK(Save_LoadFile(format, path, disk, &error) && !memcmp(disk, candidate, sizeof(disk)));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, disk, &error) == kSaveCheckpoint_Ready);
-  CHECK(!memcmp(&loaded, &campaign.active, sizeof(loaded)));
+  CHECK(TestRegional_EqualSession(&loaded, &campaign.active));
   CHECK(REMOVE_DIR(blocked) == 0 && SaveSystem_AutoPersistIfChanged(&error));
   CHECK(SaveSystem_LoadActive(&error));
   char name[64];
@@ -524,7 +525,7 @@ static void CampaignArchive(SaveBackend backend) {
   ArRegionalSession loaded;
   exported.slot = 2;
   CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready);
-  CHECK(!memcmp(&loaded, &exported, sizeof(loaded)));
+  CHECK(TestRegional_EqualSession(&loaded, &exported));
   char name[64];
   CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", name, sizeof(name)) && !strcmp(name, "Élise"));
   CHECK(SaveSystem_LoadActive(&error));
@@ -534,7 +535,7 @@ static void CampaignArchive(SaveBackend backend) {
   CHECK(SaveSystem_Import(backup, false, &error));
   CHECK(!memcmp(image, saved, sizeof(image)));
   CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready &&
-        !memcmp(&loaded, &previous, sizeof(loaded)));
+        TestRegional_EqualSession(&loaded, &previous));
   CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", name, sizeof(name)) &&
         !strcmp(name, "エリーゼ"));
 
@@ -564,7 +565,7 @@ static void CampaignArchive(SaveBackend backend) {
     CHECK(Save_LoadFile((SaveFileFormat)backend, path, disk, &error) &&
           !memcmp(disk, saved, sizeof(disk)));
     CHECK(ArRegionalSession_Load(&loaded, 2, path, disk, &error) == kSaveCheckpoint_Ready &&
-          !memcmp(&loaded, &previous, sizeof(loaded)));
+          TestRegional_EqualSession(&loaded, &previous));
     CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", name, sizeof(name)) &&
           !strcmp(name, "エリーゼ"));
     if (fault) bytes[offset] ^= 0x40;
@@ -576,7 +577,7 @@ static void CampaignArchive(SaveBackend backend) {
   CHECK(Save_LoadFile((SaveFileFormat)backend, path, disk, &error) &&
         !memcmp(disk, saved, sizeof(disk)));
   CHECK(ArRegionalSession_Load(&loaded, 2, path, disk, &error) == kSaveCheckpoint_Ready &&
-        !memcmp(&loaded, &previous, sizeof(loaded)));
+        TestRegional_EqualSession(&loaded, &previous));
   /* A post-commit name failure is reported as committed and retried without
    * rerunning the import or losing the imported campaign/seed. */
   snprintf(blocked, sizeof(blocked), "%s.arname.tmp", path);
@@ -588,7 +589,7 @@ static void CampaignArchive(SaveBackend backend) {
   CHECK(SaveSystem_LoadActive(&error));
   CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", name, sizeof(name)) && !strcmp(name, "Élise"));
   CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready &&
-        !memcmp(&loaded, &exported, sizeof(loaded)));
+        TestRegional_EqualSession(&loaded, &exported));
   Remove(donor);
   Remove(native);
   Remove(ini);
@@ -634,9 +635,9 @@ static void SettingsOnly(SaveFileFormat format) {
   CHECK(loaded.requested.artwork.source[kArRegionalArtwork_TitleBackground] ==
         kArRegionalSource_Japan);
   CHECK(!memcmp(&loaded.effective, &saved.effective, sizeof(saved.effective)));
-  CHECK(!memcmp(&loaded.lairs, &saved.lairs, sizeof(saved.lairs)));
-  CHECK(!memcmp(&loaded.reloads, &saved.reloads, sizeof(saved.reloads)));
-  CHECK(!memcmp(&loaded.sim_actors, &saved.sim_actors, sizeof(saved.sim_actors)));
+  CHECK(TestRegional_EqualLairs(&loaded.lairs, &saved.lairs));
+  CHECK(TestRegional_EqualReloads(&loaded.reloads, &saved.reloads));
+  CHECK(TestRegional_EqualActors(&loaded.sim_actors, &saved.sim_actors));
   CHECK(!loaded.arrival_locked && loaded.randomizer.seed == 321);
   CHECK(!ArRegionalCampaign_SaveSettings(&live, &after, format, path, image,
                                          &error)); /* stale request */
@@ -656,7 +657,7 @@ static void SettingsOnly(SaveFileFormat format) {
   CHECK(!ArRegionalCampaign_SaveSettings(&live, &after, format, path, image, &error));
   CHECK(REMOVE_DIR(blocked) == 0);
   CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready &&
-        !memcmp(&live, &loaded, sizeof(live)));
+        TestRegional_EqualSession(&live, &loaded));
   disk[100] = 1;
   Save_RecomputeChecksum(disk);
   CHECK(Save_WriteFile(format, path, disk, &error));

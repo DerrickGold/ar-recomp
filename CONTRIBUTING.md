@@ -42,12 +42,21 @@ headers are never rewritten by a check. Individual targets are `check-c`,
 `check-go`, and `check-shaders`; `CHECK_JOBS=3` limits CTest parallelism. CMake requires Python
 when tests are enabled so the ownership and generator checks cannot disappear.
 
-`make release` and `make release-<platform>` run `make check` locally before
-packaging. A failed check stops packaging, and multiple release targets in one
-invocation share a single check run, including with `make -j`. Use the activated
-Python environment above, or pass `PYTHON=/path/to/venv/bin/python` to Make.
-The lower-level CMake packaging workflow only packages; run `make check` first
+`make check-release` runs `make check`, then the full optimized C/Python suite
+in `build-tests-release/`. `make release` and `make release-<platform>` require
+this local gate before packaging. A failed check stops packaging, and multiple
+release targets in one invocation share a single check run, including with
+`make -j`. Use the activated Python environment above, or pass
+`PYTHON=/path/to/venv/bin/python` to Make.
+The lower-level CMake packaging workflow only packages; run `make check-release` first
 when invoking it directly. No GitHub Actions setup is required.
+
+Use `make check-c-release` for optimized tests alone, or `make check-c-asan` for
+the separate ROM-free AddressSanitizer/UndefinedBehaviorSanitizer gate. The
+sanitizer preset instruments test harnesses and implementation libraries with
+GCC or Clang; undefined-behavior reports fail tests. It uses `build-tests-asan/`
+and does not change the normal development or play build. `CHECK_JOBS` limits
+both compilation and test parallelism for these test targets.
 
 These checks do not substitute for a game build, GPU acceptance, regional-ROM
 tests, or platform packaging checks. For gameplay or

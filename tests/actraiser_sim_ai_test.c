@@ -1,3 +1,4 @@
+#include "support/regional_test_values.h"
 #include "actraiser/regional/actraiser_regional_sim_ai.h"
 #include "actraiser/actraiser_cpu_hle_internal.h"
 #include "regional/towns/regional_sim_actors.h"
@@ -338,7 +339,7 @@ static void Codec(void) {
                                        (ArRegionalSimActorRules){31 - combat, 63 - ai}));
       assert(ArRegionalSimActors_Encode(&original, bytes, sizeof(bytes)));
       assert(ArRegionalSimActors_Decode(bytes, sizeof(bytes), &decoded) &&
-             !memcmp(&original, &decoded, sizeof(original)));
+             TestRegional_EqualActors(&original, &decoded));
       memset(old, 0xa5, sizeof(old));
       assert(!ArRegionalSimActors_EncodeVersion(&original, old, sizeof(old), 1));
       for (unsigned i = 0; i < sizeof(old); ++i)

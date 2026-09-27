@@ -72,6 +72,42 @@
         "AR_SANITIZE": "OFF",
         "BUILD_TESTING": "OFF"
       }
+    },
+    {
+      "name": "tests-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "AR_TESTS_ONLY": "ON",
+        "BUILD_TESTING": "ON",
+        "AR_SANITIZE": "OFF",
+        "AR_TSAN": "OFF",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "tests-debug",
+      "displayName": "ROM-free tests (Debug)",
+      "inherits": "tests-base",
+      "binaryDir": "${sourceDir}/build-check"
+    },
+    {
+      "name": "tests-release",
+      "displayName": "ROM-free tests (Release)",
+      "inherits": "tests-base",
+      "binaryDir": "${sourceDir}/build-tests-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "tests-asan",
+      "displayName": "ROM-free tests (ASan + UBSan)",
+      "inherits": "tests-base",
+      "binaryDir": "${sourceDir}/build-tests-asan",
+      "cacheVariables": {
+        "AR_SANITIZE": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -79,9 +115,15 @@
     { "name": "play", "configurePreset": "play", "jobs": 8 },
     { "name": "control", "configurePreset": "control", "jobs": 8 },
     { "name": "asan", "configurePreset": "asan", "jobs": 8 },
-    { "name": "trace", "configurePreset": "trace", "jobs": 8 }
+    { "name": "trace", "configurePreset": "trace", "jobs": 8 },
+    { "name": "tests-debug", "configurePreset": "tests-debug", "jobs": 8 },
+    { "name": "tests-release", "configurePreset": "tests-release", "jobs": 8 },
+    { "name": "tests-asan", "configurePreset": "tests-asan", "jobs": 8 }
   ],
   "testPresets": [
-    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } }
+    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } },
+    { "name": "tests-debug", "configurePreset": "tests-debug", "output": { "outputOnFailure": true } },
+    { "name": "tests-release", "configurePreset": "tests-release", "output": { "outputOnFailure": true } },
+    { "name": "tests-asan", "configurePreset": "tests-asan", "output": { "outputOnFailure": true } }
   ]
 }

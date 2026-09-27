@@ -1,3 +1,5 @@
+#include "regional_session_test.h"
+#include "support/regional_test_values.h"
 #include "regional/regional_profiles.h"
 #include "regional/session/regional_session.h"
 #include "regional/session/regional_session_action.h"
@@ -44,8 +46,8 @@ static void TestActionRoomActivation(const ArRegionalSession *baseline) {
     expected.placement_difficulty = serial.effective.difficulty.level;
     assert(ArRegionalSession_BeginActionRoom(&batch, 0, 0x0300, &actual_time, &actual));
     assert(actual_time == expected_time);
-    assert(!memcmp(&expected, &actual, sizeof(actual)));
-    assert(!memcmp(&serial, &batch, sizeof(batch))); // Includes exact revision increments.
+    assert(TestRegional_EqualRoom(&expected, &actual));
+    assert(TestRegional_EqualSession(&serial, &batch)); // Includes exact revision increments.
     if (source == kArRegionalSource_US) continue;
 
     // Allow one primitive to succeed, then exhaust revision space. No portion
@@ -63,7 +65,7 @@ static void TestActionRoomActivation(const ArRegionalSession *baseline) {
   }
 }
 
-void TestRegionalProfiles(void) {
+static void CheckProfiles(void) {
   ArRegionalRules baseline = {0}, all, changed;
   ArRegionalProfileSummary summary[kArRegionalProfile_Count];
   assert(ArRegionalProfiles_Describe(&baseline, summary));
@@ -215,4 +217,9 @@ void TestRegionalProfiles(void) {
   assert(ArRegionalProfiles_Expand(&session.requested, kArRegionalProfile_Presentation, 1, &all));
   assert(!ArRegionalSession_RequestRules(&session, UINT32_MAX, &all) &&
          session.revision == UINT32_MAX);
+}
+
+int RegionalSessionTest_RunProfiles(void) {
+  CheckProfiles();
+  return 0;
 }

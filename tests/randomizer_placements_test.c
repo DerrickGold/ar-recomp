@@ -21,6 +21,12 @@ static uint64_t Hash(uint64_t hash, const uint8_t *data, size_t size) {
     hash = (hash ^ data[i]) * UINT64_C(1099511628211);
   return hash;
 }
+static bool SameSummary(const RandomizerSummary *a, const RandomizerSummary *b) {
+  return a->applied == b->applied && a->seed == b->seed && a->enemy_records == b->enemy_records &&
+         a->statue_drops == b->statue_drops && a->statue_moves == b->statue_moves &&
+         a->enemy_type_moves == b->enemy_type_moves && a->lair_moves == b->lair_moves &&
+         a->lair_type_moves == b->lair_type_moves && a->maps_touched == b->maps_touched;
+}
 static void Fixture(uint8_t *rom) {
   const unsigned index = 0x53100;
   const uint8_t first[] = {5,  30,  0,  255, 10, 20, 255, 3,  20,  20,  0,   1,  30,  20,
@@ -158,8 +164,7 @@ static void Programs(uint8_t *rom) {
             memcpy(again, programs, sizeof(again));
             memcpy(programs, before, sizeof(programs));
             assert(Randomizer_ApplyPlacementPrograms(maps, count, &repeat));
-            assert(!memcmp(again, programs, sizeof(programs)) &&
-                   !memcmp(&summary, &repeat, sizeof(summary)));
+            assert(!memcmp(again, programs, sizeof(programs)) && SameSummary(&summary, &repeat));
             for (unsigned i = 0; i < count; ++i) {
               assert(ActionPlacements_Validate(&programs[i]) &&
                      programs[i].count == before[i].count);

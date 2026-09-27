@@ -1,3 +1,4 @@
+#include "support/regional_test_values.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_miracle.h"
 #include "actraiser/regional/actraiser_regional_settings.h"
@@ -2626,8 +2627,8 @@ int main(void) {
          view.lair_reload_ready);
   assert(memcmp(view.campaign, saved_before_new.campaign, sizeof(view.campaign)));
   assert(ArRegionalSession_Load(&loaded, 4, path, image, &error) == kSaveCheckpoint_Ready &&
-         !memcmp(&loaded, &saved_before_new,
-                 sizeof(loaded))); /* unsaved New Game cannot replace Continue */
+         TestRegional_EqualSession(
+             &loaded, &saved_before_new)); /* unsaved New Game cannot replace Continue */
   remove(path);
   remove(companion);
   memset(image, 0x60, sizeof(image));

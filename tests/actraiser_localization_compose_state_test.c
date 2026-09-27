@@ -794,7 +794,7 @@ static void TestTownStatusLifecycle(void) {
   ActRaiserLocalizationComposeState_SetScene(&state, 0, 1);
   char error[256] = {0};
   const uint32_t sources[] = {0x01FF64, 0x01FF76};
-  const char *ids[] = {"sim.town_status.construction", "sim.town_status.sealing_lair"};
+  char ids[][32] = {"sim.town_status.construction", "sim.town_status.sealing_lair"};
   for (unsigned i = 0; i < 2; ++i) {
     ActRaiserLocalizationComposeObservation event = Compose(30 + i, sources[i], 0x0802);
     event.map_number = 1;

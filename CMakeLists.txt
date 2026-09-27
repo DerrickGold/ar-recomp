@@ -12,6 +12,9 @@ endif()
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+# Set instrumentation before creating any game, test or implementation target.
+include(cmake/Sanitizers.cmake)
+
 # MSVC's C runtime provides the standard math functions without a separate
 # libm. Unix-like toolchains still require -lm. An interface target keeps that
 # distinction in one place and remains a valid link item on every platform.
@@ -490,38 +493,6 @@ endif()
 target_compile_definitions(ActRaiserRecomp PRIVATE
     AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
 
-# AddressSanitizer + UndefinedBehaviorSanitizer for memory-corruption hunts.
-# Off by default because the instrumentation has a substantial runtime cost.
-option(AR_SANITIZE "Build with ASan + UBSan (debug corruption bugs)" OFF)
-if(AR_SANITIZE AND NOT MSVC)
-    target_compile_options(actraiser_regional_rules PRIVATE
-        -fsanitize=address,undefined -fno-omit-frame-pointer -g)
-    target_link_options(actraiser_regional_rules INTERFACE
-        -fsanitize=address,undefined)
-    target_compile_options(ActRaiserRecomp PRIVATE
-        -fsanitize=address,undefined -fno-omit-frame-pointer -g)
-    target_link_options(ActRaiserRecomp PRIVATE
-        -fsanitize=address,undefined)
-    message(STATUS "ActRaiserRecomp: AR_SANITIZE on — ASan+UBSan enabled")
-endif()
-
-# ThreadSanitizer for concurrency diagnostics. It is mutually exclusive with
-# AR_SANITIZE and off by default because of its runtime cost.
-option(AR_TSAN "Build with ThreadSanitizer" OFF)
-if(AR_TSAN AND NOT MSVC)
-    if(AR_SANITIZE)
-        message(FATAL_ERROR "AR_TSAN and AR_SANITIZE cannot both be ON")
-    endif()
-    target_compile_options(actraiser_regional_rules PRIVATE
-        -fsanitize=thread -fno-omit-frame-pointer -g)
-    target_link_options(actraiser_regional_rules INTERFACE -fsanitize=thread)
-    target_compile_options(ActRaiserRecomp PRIVATE
-        -fsanitize=thread -fno-omit-frame-pointer -g)
-    target_link_options(ActRaiserRecomp PRIVATE
-        -fsanitize=thread)
-    message(STATUS "ActRaiserRecomp: AR_TSAN on — ThreadSanitizer enabled")
-endif()
-
 target_link_libraries(ActRaiserRecomp PRIVATE
     snesrecomp::runtime
     SDL3::SDL3
@@ -550,6 +521,11 @@ if(BUILD_TESTING)
                 ${CMAKE_SOURCE_DIR}/tests/fixtures/text_template.json)
     endif()
     if(Python3_Interpreter_FOUND)
+        if(UNIX)
+            add_test(NAME actraiser_local_release_gate
+                COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_SOURCE_DIR}/tests/local_release_gate_test.py)
+        endif()
         add_test(NAME actraiser_shader_tools
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tests/shader_tools_test.py)
@@ -2874,17 +2850,30 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_story_snapshot COMMAND actraiser_story_snapshot_test)
 
+    add_executable(actraiser_regional_test_values_test tests/regional_test_values_test.c)
+    target_link_libraries(actraiser_regional_test_values_test PRIVATE actraiser_regional_rules)
+    add_test(NAME actraiser_regional_test_values COMMAND actraiser_regional_test_values_test)
+
     add_executable(actraiser_regional_session_test
-        tests/regional_profiles_checks.c
-        tests/regional_randomizer_checks.c
         tests/regional_session_test.c
+        tests/regional_session/activation.c
+        tests/regional_session/persistence.c
+        tests/regional_session/codec.c
+        tests/regional_session/profiles.c
+        tests/regional_session/randomizer.c
+        tests/regional_session/fixture.c
     )
     target_link_libraries(actraiser_regional_session_test PRIVATE
         actraiser_campaign_test_support)
     target_link_libraries(actraiser_regional_session_test PRIVATE
         actraiser_regional_rules actraiser_save_test_support)
-    target_include_directories(actraiser_regional_session_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    add_test(NAME actraiser_regional_session COMMAND actraiser_regional_session_test)
+    target_include_directories(actraiser_regional_session_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests)
+    foreach(suite activation persistence codec profiles randomizer)
+        add_test(NAME actraiser_regional_session_${suite}
+            COMMAND actraiser_regional_session_test ${suite})
+        set_tests_properties(actraiser_regional_session_${suite} PROPERTIES LABELS "regional;session")
+    endforeach()
 
     add_executable(actraiser_regional_timers_test tests/regional_timers_test.c)
     target_link_libraries(actraiser_regional_timers_test PRIVATE actraiser_regional_rules)

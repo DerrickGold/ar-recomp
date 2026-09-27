@@ -1,3 +1,4 @@
+#include "support/regional_test_values.h"
 #include "actraiser/regional/actraiser_population_conversion.h"
 #include "actraiser/actraiser_cell_map.h"
 #include "actraiser/actraiser_story_snapshot.h"
@@ -280,7 +281,7 @@ static void Run(SaveBackend backend, unsigned failure, unsigned source, bool pro
     assert(Save_LoadFile(format, path, disk, &error) && !memcmp(disk, sram, sizeof(disk)));
     ArRegionalSession saved;
     assert(ArRegionalSession_Load(&saved, 0, path, disk, &error) == kSaveCheckpoint_Ready);
-    assert(!memcmp(&saved, &campaign.active, sizeof(saved)));
+    assert(TestRegional_EqualSession(&saved, &campaign.active));
     /* A loaded converted save contains no replayable demolition command. */
     assert(SaveSystem_LoadActive(&error) &&
            ArRegionalCampaign_Continue(&campaign, path, sram, &error));
@@ -291,7 +292,7 @@ static void Run(SaveBackend backend, unsigned failure, unsigned source, bool pro
            !memcmp(disk, checkpoint, sizeof(disk)));
     ArRegionalSession saved;
     assert(ArRegionalSession_Load(&saved, 0, recovered, disk, &error) == kSaveCheckpoint_Ready);
-    assert(!memcmp(&saved, &previous, sizeof(saved)));
+    assert(TestRegional_EqualSession(&saved, &previous));
   }
   Remove(native);
   Remove(ini);

@@ -99,9 +99,10 @@ brew install go cmake pkgconf xz zstd squashfs glib shared-mime-info sevenzip
 ```
 
 Set up the [local quality-check dependencies](../CONTRIBUTING.md#developer-checks),
-then run `make release` from the repository root. It runs `make check` before
-packaging and stops if a check fails. Individual platform targets such as
-`make release-macos-arm64` use the same gate. The release builds the configured
+then run `make release` from the repository root. It runs `make check-release`
+(the ordinary checks plus optimized tests) before packaging and stops if a check
+fails. Individual platform targets such as `make release-macos-arm64` use the
+same gate. The release builds the configured
 platform downloads without a VM, including native desktop packages and their portable
 companions. `make release DESKTOP=0` selects archive-only packaging. See the
 [Builder README](https://github.com/DerrickGold/ar-recomp/tree/main/installer) for building and running the CLI locally.

@@ -1,3 +1,4 @@
+#include "regional_session_test.h"
 #include "regional/regional_randomizer.h"
 #include "regional/session/regional_session.h"
 #include "support/test_assert.h"
@@ -13,7 +14,7 @@ static ArRegionalSource HashChoice(void *context, const char *key, ArRegionalPro
   *hash = (*hash ^ (uint8_t)current) * UINT64_C(1099511628211);
   return current;
 }
-void TestRegionalRandomizer(void) {
+static void CheckRandomizer(void) {
   ArRegionalSession session;
   const uint8_t id[16] = {7};
   const ArRegionalCostPolicy costs = {{0}};
@@ -76,4 +77,9 @@ void TestRegionalRandomizer(void) {
   assert(hash == UINT64_C(0x069596619736941c)); /* frozen generator-1 key/source mapping */
   printf("regional generator 1: 256 independent, compatible recipes; fingerprint=%016llx\n",
          (unsigned long long)hash);
+}
+
+int RegionalSessionTest_RunRandomizer(void) {
+  CheckRandomizer();
+  return 0;
 }

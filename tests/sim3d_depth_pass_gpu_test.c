@@ -3272,7 +3272,8 @@ static void TestSurfaceBatches(ArRenderDevice *device, SDL_Renderer *renderer) {
           if (bad == 3)
             memcpy(invalid[1].transform.shadow_basis[2], invalid[1].transform.shadow_basis[0],
                    3 * sizeof(float));
-          if (bad == 4) invalid[1].shadow_count = 65;
+          /* Reject the impossible count before reading the one-element fixture. */
+          if (bad == 4) invalid[1].shadow_count = SIZE_MAX;
           CHECK(!Sim3DDepthPass_AppendSurfaceBatches(mesh, invalid, 2));
         }
         /* Rejections cannot mark the source queued. */

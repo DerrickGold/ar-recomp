@@ -1,6 +1,6 @@
 # Root convenience targets for producing desktop and generic Linux Builders.
 #
-# `make release` runs the local `make check` gate, then cross-builds every
+# `make release` runs the local `make check-release` gate, then cross-builds every
 # platform's self-contained bundle (plus SHA-256 sidecars) into ./release/:
 # macOS .app.zip, Windows .exe, Steam Deck .AppImage, and generic Linux .tar.xz.
 # Requires Go, CMake, and the local check dependencies in CONTRIBUTING.md; the C
@@ -34,7 +34,7 @@
 #   release preset first, so newly promoted feature defaults cannot remain
 #   stale in an existing CMake cache.
 #
-#   make check        run every check that needs no ROM: check-quality, the
+#   make check        run the ordinary ROM-free gate: check-quality, the
 #                     C/Python test suite (Debug, in build-check/), the Go tests
 #                     of all three modules, and the shader header check when its
 #                     tools are installed (it prints SKIPPED otherwise). The
@@ -43,6 +43,11 @@
 #                     Without a ROM this cannot prove the game links: run
 #                     `snesbuild build --hermetic` or `make check-cross` for the
 #                     shipped build path.
+#   make check-release   run make check, then the optimized C/Python suite.
+#                     Every release target requires this gate before packaging.
+#   make check-c-release run only the optimized C/Python suite.
+#   make check-c-asan    run ROM-free tests with ASan + UBSan; failures stop the run.
+#                     This separate diagnostic gate needs GCC or Clang.
 #   make check-quality   require language tooling and enforce authored-code checks.
 #                     Setup and conventions: CONTRIBUTING.md.
 #   make check-constants  reject high-risk duplicate literals in authored code.
@@ -85,21 +90,25 @@ ROM ?= ar.sfc
 
 # Regenerable artifacts, grouped. Never lists the ROM, saves/*.srm, recordings,
 # or authored source; only the specific generated sidecars inside saves/.
-CLEAN_BUILD_DIRS := build build-release build-control build-terrain build-asan build-trace build-check $(PACKAGING)/build snesrecomp-go/build installer/build
+CLEAN_BUILD_DIRS := build build-release build-control build-terrain build-asan build-trace build-check build-tests-release build-tests-asan $(PACKAGING)/build snesrecomp-go/build installer/build
 CLEAN_GENERATED  := src/gen recomp/funcs.h saves/gen_meta.json saves/rts_webs.txt saves/rts_webs.prev.txt
 CLEAN_RELEASE    := release
 
-.PHONY: dev release $(addprefix release-,$(PLATFORMS)) check check-c check-go check-shaders check-constants check-appimage check-cross check-localization-roms check-localization-workflow clean clean-all clean-release clean-packaging-mounts
+.PHONY: dev release $(addprefix release-,$(PLATFORMS)) check check-release check-c check-c-release check-c-asan check-go check-shaders check-constants check-appimage check-cross check-localization-roms check-localization-workflow clean clean-all clean-release clean-packaging-mounts
 
-# The ROM-free gate, built as Debug in a tree of its own so it never disturbs
-# the play or dev presets.
-CHECK_BUILD := build-check
+# ROM-free presets use separate trees and never disturb the play/dev presets.
 PYTHON ?= python3
 CHECK_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 GO_MODULES := snesrecomp-go installer installer/desktop-shell
 
 check: check-quality check-c check-go check-shaders
 	@echo "make check: every check that ran passed (any SKIPPED check is named above)"
+
+# Keep the two full CTest runs sequential, even when packaging with make -j.
+# All release destinations share this prerequisite once per invocation.
+check-release: check
+	$(MAKE) check-c-release
+	@echo "make check-release: Debug and Release gates passed"
 
 .PHONY: check-quality check-go-vet
 check-quality: check-constants check-go-vet
@@ -116,9 +125,19 @@ check-go-vet:
 	done
 
 check-c:
-	cmake -S . -B $(CHECK_BUILD) -G Ninja -DAR_TESTS_ONLY=ON -DCMAKE_BUILD_TYPE=Debug
-	cmake --build $(CHECK_BUILD)
-	ctest --test-dir $(CHECK_BUILD) --output-on-failure -j $(CHECK_JOBS)
+	cmake --preset tests-debug
+	cmake --build --preset tests-debug --parallel $(CHECK_JOBS)
+	ctest --preset tests-debug -j $(CHECK_JOBS)
+
+check-c-release:
+	cmake --preset tests-release
+	cmake --build --preset tests-release --parallel $(CHECK_JOBS)
+	ctest --preset tests-release -j $(CHECK_JOBS)
+
+check-c-asan:
+	cmake --preset tests-asan
+	cmake --build --preset tests-asan --parallel $(CHECK_JOBS)
+	ctest --preset tests-asan -j $(CHECK_JOBS)
 
 check-go:
 	@for m in $(GO_MODULES); do \
@@ -166,10 +185,10 @@ dev: config.ini
 
 RELEASE_OPTIONS = -DBUILDER_LEGACY_ARCHIVES=$(if $(filter 0,$(DESKTOP)),ON,OFF) -DBUILDER_KEEP_BUILD=$(if $(KEEP_BUILD),ON,OFF)
 
-release: check
+release: check-release
 	cmake "-DBUILDER_PLATFORMS=$(PLATFORMS)" $(RELEASE_OPTIONS) -P $(PACKAGING)/release.cmake
 
-$(addprefix release-,$(PLATFORMS)): release-%: check
+$(addprefix release-,$(PLATFORMS)): release-%: check-release
 	cmake -DBUILDER_PLATFORMS=$* $(RELEASE_OPTIONS) -P $(PACKAGING)/release.cmake
 
 # Cross-target link check. `zig cc` carries libc headers and a linker for every
