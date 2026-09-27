@@ -2,10 +2,9 @@
 #define AR_ACTRAISER_GAME_H
 
 /* Semantic names for ActRaiser state that has already been established in
- * docs/ram-map.md, docs/SEAMS.md, and docs/rendering-engine.md. Keep uncertain
- * direct-page scratch and polymorphic object fields local to the routine that
- * interprets them; this header is only for meanings that are stable across the
- * handwritten game-specific code. */
+ * docs/ram-map.md. Keep uncertain direct-page scratch and polymorphic object
+ * fields local to the routine that interprets them. This header is only for
+ * meanings that are stable across handwritten game-specific code. */
 
 #include "snesrecomp/game/types.h"
 #include "constants.h"
@@ -194,6 +193,17 @@ enum {
   kActRaiserWram_SimPostedMiracleActive = 0x190F5,
   kActRaiserWram_SimMapPickerFlag = 0x19215,
   kActRaiserWram_SimSunPhase = 0x1923E,
+};
+
+/* Northwall Act 1's regional impact poses, written by NorthwallExpand in
+ * actraiser_action_motion.c and recognized by action_effects.c. These are
+ * port-owned $7E workspace slots after the native $5000..$560C boss blob,
+ * before graphics/raster RAM at $6000. Only slot starts identify a pose;
+ * fixed per-pose addresses keep simultaneous impacts independent. */
+enum {
+  kActRaiserWram_NorthwallImpactExpansion = 0x5F00,
+  kActRaiserNorthwallImpactExpansionStride = 0x40,
+  kActRaiserNorthwallImpactExpansionCount = 4,
 };
 
 enum {

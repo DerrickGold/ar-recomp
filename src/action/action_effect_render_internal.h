@@ -149,11 +149,11 @@ bool AppendLightningTrapParticles(
 bool AppendLightningTrapLighting(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
     ActionEffectProjectPointFn project_point, void *userdata);
-bool AppendBloodpoolBossLightningParticles(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    ActionEffectProjectPointFn project_point, void *userdata);
-bool AppendBloodpoolBossLightningLighting(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    ActionEffectProjectPointFn project_point, void *userdata);
+bool AppendBossLightningParticles(ActionEffectGeometryWriter *writer,
+                                  const ActionEffectInstance *effect,
+                                  ActionEffectProjectPointFn project_point, void *userdata);
+bool AppendBossLightningLighting(ActionEffectGeometryWriter *writer,
+                                 const ActionEffectInstance *effect,
+                                 ActionEffectProjectPointFn project_point, void *userdata);
 
 #endif  /* AR_ACTION_EFFECT_RENDER_INTERNAL_H */

@@ -129,12 +129,9 @@ static bool TendrilProgram(CpuState *cpu,ProgramRow *out) {
       .duration=delays[row],.replace_duration=row<6,.end=row==6};
   return true;
 }
-/* Room0406 owns a 1549-byte boss blob at5000..560C. Its remaining animation
- * page is not a general scratch allocator: only this validated US profile
- * may use the final four64-byte slots, before graphics/raster RAM at6000.
- * Fixed per-pose addresses let simultaneous impacts retain independent poses.
- * Native OAM, collision, widescreen and 3D all continue reading native +20. */
-enum { kNorthwallExpansionBase=0x5f00, kNorthwallExpansionStride=64 };
+/* Only this validated room/profile may write the impact workspace declared
+ * in actraiser_game.h. Native OAM, collision, widescreen and 3D continue
+ * reading the actor's composition pointer at +20. */
 static bool NorthwallProgram(CpuState *cpu,ProgramRow *out) {
   const unsigned x=cpu->X,state=cpu_read16(cpu,0,x+0x1a),stored=cpu_read16(cpu,0,x+0x1c);
   if((state!=1 && state!=2) || cpu_read16(cpu,0,0x18)!=0x0406 ||
@@ -152,6 +149,7 @@ static bool NorthwallProgram(CpuState *cpu,ProgramRow *out) {
   bool end;
   if (!ArRegionalBoss_NorthwallRow(policy, state, row, &native_row, &duration, &expansion, &end))
     return false;
+  if (expansion > kActRaiserNorthwallImpactExpansionCount) return false;
   if(cpu_read16(cpu,0x7e,0x5000)!=0xc6 || cpu_read16(cpu,0x7e,0x5004)!=0x1f ||
       cpu_read16(cpu,0x7e,0x5006)!=0x38)return false;
   unsigned next=0xf0;
@@ -176,7 +174,11 @@ static bool NorthwallProgram(CpuState *cpu,ProgramRow *out) {
   return true;
 }
 static void NorthwallExpand(CpuState *cpu,unsigned object,unsigned step) {
-  uint8_t composition[61];
+  /* The native seed has four parts; each expansion appends one seven-byte
+   * part to its five-byte header. Every result must fit its workspace slot. */
+  uint8_t composition[5 + 7 * (4 + kActRaiserNorthwallImpactExpansionCount)];
+  _Static_assert(sizeof(composition) <= kActRaiserNorthwallImpactExpansionStride,
+                 "Northwall impact composition exceeds its workspace slot");
   for(unsigned i=0;i<33;++i)composition[i]=cpu_read8(cpu,0x7e,0x516c+i);
   for(unsigned n=1;n<=step;++n) {
     const bool right=n==2;
@@ -191,7 +193,8 @@ static void NorthwallExpand(CpuState *cpu,unsigned object,unsigned step) {
     ++composition[4];
     composition[0] = composition[1] = (uint8_t)(width / 2);
   }
-  const unsigned pointer=kNorthwallExpansionBase+(step-1)*kNorthwallExpansionStride;
+  const unsigned pointer = kActRaiserWram_NorthwallImpactExpansion +
+                           (step - 1) * kActRaiserNorthwallImpactExpansionStride;
   for(unsigned i=0;i<5+7u*composition[4];++i)cpu_write8(cpu,0x7e,pointer+i,composition[i]);
   cpu_write16(cpu,0,object+0x20,(uint16_t)pointer);
   cpu_write16(cpu, 0, object + 0x0a, composition[0]);

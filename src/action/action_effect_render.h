@@ -110,12 +110,12 @@ enum {
       kActionSceneEffectWaterfallMistCloudSegments * 6 *
           (kActionEffectGlowRings - 1),
   kActionSceneEffectWaterfallMistParticleCount = 32,
-  /* The boss strike adds two screen-space filament layers over at most 24
-   * authored OAM-row segments: a broad amber corona and a narrow white-gold
-   * core.
-   * The mapped room has one boss and its lifecycle can publish only one active
-   * strike (the separate floor child is Impact), so keep that cardinality in
-   * the bounded contract rather than inflating every scene slot by 80 verts. */
+  /* Wizard and Centaur strikes share two screen-space filament layers: a
+   * broad corona and a narrow core, with each boss's native palette and path.
+   * Wizard needs at most 24 authored OAM-row segments; Centaur needs 13.
+   * Their rooms are mutually exclusive and each publishes only one active
+   * strike. Charge and impact use the ordinary two-glow/particle allowance,
+   * so reserve the extra ribbons once for the scene. */
   kActionSceneEffectMaxLightningFilaments = 1,
   kActionSceneEffectLightningSegments = 24,
   kActionSceneEffectLightningLayers = 2,

@@ -330,6 +330,63 @@ See [tree timing/ownership](regional-differences-technical.md#fillmore-act-1-tre
 | Player sword beam (all action maps) | `+12=$9D1C`, `+16/+18=$8000/$06`, `+30&$0001`, `+3A=$08A0`, nonzero `+32` equal to the active linked player's source, no V-flip, and state/visual/composition `$13/$30/$99E8` or `$14/$31/$9A17`. Measured velocity is `+8` or `-8`. State `$13` normal/H-flip drawable bounds are `(32,-33)..(48,-1)` / `(-48,-33)..(-32,-1)`; state `$14` bounds are `(40,-9)..(56,23)` / `(-56,-9)..(-40,23)`. Run `20260810-184935` proves the state-`$13` normal rectangle byte-for-byte against captured OAM. Raw collision words include signed byte origins and are retained only for diagnostics/gameplay fidelity. |
 | Aitos boss sword volley (`$18/$19=$04/$03`) | Source `$D646` emits two `$7E:5000` crescent children linked through an inactive state-`$00` controller. The controller is exact resume/visual/composition `$D793/$23/$56FE`, flags/local counter `$0020/$000D`, 8px extents, and `+3A` linking the active `$D646` boss root. Both children use handler/resume `$8661/$A65D`, animation index 1, flags `$0020`, and OBJ priority 2. Normal lower state/visual/composition/local-counter/velocity is `$01/$21/$56D8/$01/(-3,+1)` with L/T/R/B `8/16/16/8`; upper is `$02/$20/$56BE/$02/(-3,-1)` with `8/8/16/16`. Their exact drawable rectangles including `$8D68`'s Y bias are `(-8,-17)..(16,7)` and `(-8,-9)..(16,15)`. The reflected facing requires matching controller/child H+V flip `$C000`, reverses both velocity components, swaps L↔R and T↔B, and produces rectangles `(-16,-9)..(8,15)` / `(-16,-17)..(8,7)`. Run `20260812-000613` snapshot 5 proves the normal pair; run `20260812-224123` snapshot 1 proves reflected state 1 byte-for-byte against OAM `(202,33)..(226,57)`. |
 
+### First-act boss magic
+
+US resident animation bank `$7E:5000`; the following tuples use the action
+record offsets above. `+$32` identifies the source, `+$1A/+$22/+$20` the
+state/visual/composition, `+$12` the live handler and `+$1E` the saved return
+address (execution resumes one byte later). These identities were checked
+against native execution and the decoded animation/composition data in both
+horizontal facings. They do not identify the similarly named Act 2 bosses.
+
+| Encounter / source | Phase | State; visual → WRAM composition | Handler; saved resume |
+| --- | --- | --- | --- |
+| Fillmore `$01/$01`, `$AD45` | Staff flash in boss body | `$02` or `$08`; `$08/$09/$0A/$0B` → `$5537/$5677/$57B7/$58F7` | `$8683`; `$AE0C` (state 2) / `$AE15` (state 8) |
+| Same | Growing diagonal bolt | `$0D`; `$1D/$1E/$1F` → `$63FB/$640E/$642F` | `$8661`; `$AEC7` |
+| Same | Full diagonal bolt | `$0E`; `$20` → `$645E` | `$8661/$8683`; `$AECD/$AEEC` respectively |
+| Same | Growing near-vertical bolt | `$0B`; `$19/$1A/$1B` → `$635B/$636E/$638F` | `$8661`; `$AEF7` |
+| Same | Full near-vertical bolt | `$0C`; `$1C` → `$63BE` | `$8661/$8683`; `$AEFD/$AF1C` respectively |
+| Same | Separate floor burst | `$04`; `$21/$22/$23` → `$649B/$64A7/$64C8` | `$8661`; `$AF58` |
+| Northwall `$06/$04`, `$E7C6` | Two palm charges, then merged release | `$02`; `$0A..$0E` → `$51A7/$522A/$52AD/$5314/$53AC` | `$8661`; `$E85E` |
+| Same | Falling magic | `$00`; `$09` → `$518D` | `$8661`; `$E8AE` |
+| Same | Water impact / dissipation | `$01`; `$03..$08` → `$5114/$5120/$5133/$5146/$5159/$516C` | `$8661`; `$E8BD` |
+
+The Centaur body flash is at local `(-24,-57)`, or `(24,-57)` when H-flipped,
+including the OAM emitter's one-pixel Y bias. Body visual `$07` has no flash;
+child visual `$18/$634F` is transparent and interleaved with the bolt/burst
+art. A blank frame does not mean the actor or its attack has ended. The
+short, medium and full bolt compositions have different bends and endpoints;
+they must not be approximated by scaling one diagonal bounding rectangle.
+Native `$AE07` repeats the seven-row state-2 charge three times, then its
+child runs diagonal states `$0D/$0E` followed by near-vertical `$0B/$0C`.
+Each full bolt allocates a floor burst. This describes the native sequence,
+not three independently spawned bolt actors.
+
+Northwall's charge centres in unflipped local pixels are: visual `$0A`
+`(-32,-9)/(16,-9)`, `$0B` `(-36,-9)/(19,-9)`, `$0C`
+`(-36,-12)/(19,-12)`, `$0D` `(-16,7)/(8,7)`, and `$0E` the single merged
+`(-8,15)`. H-flip negates X. Visuals `$14` and `$0F` are body-only windup
+and recovery. The projectile's native world origin is boss X−8/+8, Y+16;
+its animation moves down eight pixels per update. At Y=448 it allocates
+an independent water-impact actor. The projectile continues falling and can retire
+before the floor animation finishes: requiring a live parent throughout the
+impact would truncate the effect. The port's optional regional throw/impact
+offsets change the captured child positions; presentation should use those
+positions rather than reconstructing them from the boss.
+
+The port's European impact expansion retains state1 / visual8 and the same
+`$8661/$E8BD` continuation while publishing four wider compositions at
+`$5F00/$5F40/$5F80/$5FC0`. Each reserves a 64-byte slot in `$7E:5F00..$5FFF`;
+only the slot starts identify compositions. These are authored by
+`NorthwallExpand` in `actraiser_action_motion.c`, not ROM addresses. Presentation accepts those
+exact aliases and follows their captured bounds through the final fade.
+
+The impact's bottom extent stays at local Y=0 (Y−1 after the native OAM draw
+bias) throughout visuals `$03..$08` and the wider regional poses. Its top and
+width change as the artwork grows and fades, but its bottom remains on the
+waterline. This provides a stable surface anchor independent of the boss or
+the falling projectile's current position.
+
 ### Town simulation render records and camera auxiliaries
 
 | Address | Size | Description |

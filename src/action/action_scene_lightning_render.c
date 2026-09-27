@@ -1,6 +1,7 @@
 /* ActionSceneLightningRender: lightning and beam effects in action scenes: the
  * projected ribbons behind boss, Marahna and trap lightning, the Bloodpool
- * boss's bolts, and sword-beam trails, each as particles plus lighting.
+ * and Centaur bosses' bolts, and sword-beam trails, each as particles plus
+ * lighting.
  * Phase: pure.
  * Tests: tests/action_effect_render_test.c */
 #include "action/action_effect_render_internal.h"
@@ -20,11 +21,44 @@ static const int8_t kBossLightningDiagonalX[] = {
   -30, -30, -32, -30, -29, -29, -33, -36, -36, -40, -44, -44,
 };
 
+/* Centaur $635B..$645E: bright-pixel centroids sampled every eight rows
+ * from the eight growing bolt compositions (CHR $13:B12F). They are not
+ * scaled copies: the short/medium ends and the full diagonal turn differ. */
+static const int8_t kCentaurLightningX[8][14] = {
+    {-1, -2, 4},
+    {-1, -2, 2, 8, 12, 7, -2},
+    {-1, -2, 2, 8, 12, 0, -13, -17, -18, -12},
+    {-1, -2, 2, 8, 12, 0, -13, -17, -18, -14, -8, -4, -9, -16},
+    {-2, -8, -14},
+    {-2, -14, -27, -34, -39, -46},
+    {-2, -14, -27, -34, -39, -46, -48, -46, -52, -60},
+    {-2, -14, -27, -34, -39, -46, -48, -46, -52, -56, -51, -44, -46, -42},
+};
+
+static ArRenderColorF BossLightningColor(const ActionEffectInstance *effect, ArRenderColorF color) {
+  if (effect->kind == kActionEffect_CentaurLightning) {
+    /* The same white-hot core/corona style as the Wizard, in the Centaur's
+     * native blue palette. Swapping red/blue preserves the alpha profile. */
+    const float red = color.r;
+    color.r = color.b;
+    color.b = red;
+  }
+  return color;
+}
+
 static bool BossLightningPathFor(const ActionEffectInstance *effect,
                                  const int8_t **path_x,
                                  unsigned *joint_count) {
-  if (!effect || !joint_count || effect->visual > 5u)
-    return false;
+  if (!effect || !joint_count) return false;
+  if (effect->kind == kActionEffect_CentaurLightning) {
+    static const uint8_t kCounts[] = {3, 7, 10, 14, 3, 6, 10, 14};
+    if (effect->visual < 0x19 || effect->visual > 0x20) return false;
+    const unsigned visual = effect->visual - 0x19;
+    if (path_x) *path_x = kCentaurLightningX[visual];
+    *joint_count = kCounts[visual];
+    return true;
+  }
+  if (effect->visual > 5u) return false;
   const unsigned family_visual = effect->visual % 3u;
   if (path_x) {
     *path_x = effect->visual < 3u ? kBossLightningVerticalX
@@ -43,11 +77,12 @@ static bool BossLightningPathPoint(const ActionEffectInstance *effect,
       joint >= joint_count || !x || !y)
     return false;
   *x = (float)path_x[joint];
+  if (effect->kind == kActionEffect_CentaurLightning) *x += .5f;
   if (effect->flags & kActionEffectFlag_FlipHorizontal) *x = -*x;
   /* `$8D68`'s action-OBJ emitter stores Y with one extra draw-bias pixel
    * after the camera-origin bias cancels. Subtract it here so the filament
    * runs through the emitted tile centres, not one row below them. */
-  *y = -80.0f + (float)joint * 8.0f;
+  *y = (effect->kind == kActionEffect_CentaurLightning ? 3.5f : -80.0f) + (float)joint * 8.0f;
   return true;
 }
 
@@ -145,10 +180,10 @@ static bool AppendBossLightningRibbon(
   const float pulse = DeterministicPulse(effect);
   ArRenderColorF corona = {1.00f, 0.54f, 0.04f, 0.17f * pulse};
   ArRenderColorF filament = {1.00f, 0.98f, 0.68f, 0.88f * pulse};
-  return AppendBossLightningRibbonLayer(
-             writer, effect, 4.8f, corona, project_point, userdata) &&
-      AppendBossLightningRibbonLayer(
-             writer, effect, 1.15f, filament, project_point, userdata);
+  return AppendBossLightningRibbonLayer(writer, effect, 4.8f, BossLightningColor(effect, corona),
+                                        project_point, userdata) &&
+         AppendBossLightningRibbonLayer(writer, effect, 1.15f, BossLightningColor(effect, filament),
+                                        project_point, userdata);
 }
 
 static bool AppendMarahnaLightningRibbonLayer(
@@ -874,13 +909,18 @@ bool AppendLightningTrapLighting(
   return true;
 }
 
-bool AppendBloodpoolBossLightningParticles(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    ActionEffectProjectPointFn project_point, void *userdata) {
+bool AppendBossLightningParticles(ActionEffectGeometryWriter *writer,
+                                  const ActionEffectInstance *effect,
+                                  ActionEffectProjectPointFn project_point, void *userdata) {
   const unsigned count = kActionSceneEffectParticlesPerInstance;
-  const ArRenderColorF hot = {1.00f, 1.00f, 0.82f, 0.98f};
-  const ArRenderColorF cool = {1.00f, 0.34f, 0.01f, 0.00f};
+  const ArRenderColorF hot =
+      BossLightningColor(effect, (ArRenderColorF){1.00f, 1.00f, 0.82f, 0.98f});
+  const ArRenderColorF cool =
+      BossLightningColor(effect, (ArRenderColorF){1.00f, 0.34f, 0.01f, 0.00f});
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
+  const float emission_y = effect->kind == kActionEffect_CentaurLightning
+                               ? (rect->y0 + rect->y1) * .5f
+                               : rect->y1 - 2.0f;
   const unsigned visual_ticks =
       EffectVisualTicks(effect, (unsigned)effect->pulse_ticks);
   for (unsigned i = 0; i < count; ++i) {
@@ -917,15 +957,15 @@ bool AppendBloodpoolBossLightningParticles(
       width = 0.55f + 0.38f * (1.0f - t);
       reach = 2.5f + 3.5f * (1.0f - t);
     } else {
-      /* The linked state-$09 child expands around its own floor artwork. */
+      /* Charges and floor bursts expand around their own captured artwork. */
       const float *direction =
           kCircle32[(i * 11u + (seed >> 13)) & kActionEffectGlowSegmentMask];
       const float distance = 2.0f + 26.0f * t;
       const float old_distance = 2.0f + 26.0f * previous_t;
       x = (rect->x0 + rect->x1) * 0.5f + direction[0] * distance;
-      y = rect->y1 - 2.0f + direction[1] * distance * 0.38f;
+      y = emission_y + direction[1] * distance * 0.38f;
       previous_x = (rect->x0 + rect->x1) * 0.5f + direction[0] * old_distance;
-      previous_y = rect->y1 - 2.0f + direction[1] * old_distance * 0.38f;
+      previous_y = emission_y + direction[1] * old_distance * 0.38f;
       width = 0.50f + 0.32f * (1.0f - t);
       reach = 2.0f + 2.8f * (1.0f - t);
     }
@@ -938,9 +978,9 @@ bool AppendBloodpoolBossLightningParticles(
   return true;
 }
 
-bool AppendBloodpoolBossLightningLighting(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    ActionEffectProjectPointFn project_point, void *userdata) {
+bool AppendBossLightningLighting(ActionEffectGeometryWriter *writer,
+                                 const ActionEffectInstance *effect,
+                                 ActionEffectProjectPointFn project_point, void *userdata) {
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const float mid_x = (rect->x0 + rect->x1) * 0.5f;
   const float mid_y = (rect->y0 + rect->y1) * 0.5f;
@@ -1019,7 +1059,17 @@ bool AppendBloodpoolBossLightningLighting(
         .lift_y = -1.0f};
     body = kBody;
     body.seed = (unsigned)effect->pulse_generation;
-    spill_y = body_y = rect->y1 - 2.0f;
+    spill_y = body_y = effect->kind == kActionEffect_CentaurLightning ? mid_y : rect->y1 - 2.0f;
+    if (effect->phase == kActionEffectPhase_CentaurStaffCharge) {
+      spill.radius_x = spill.radius_y = 26;
+      body.radius_x = body.radius_y = 10;
+    }
+  }
+  spill.centre = BossLightningColor(effect, spill.centre);
+  body.centre = BossLightningColor(effect, body.centre);
+  for (int i = 0; i < kActionEffectGlowRings; ++i) {
+    spill.ring[i] = BossLightningColor(effect, spill.ring[i]);
+    body.ring[i] = BossLightningColor(effect, body.ring[i]);
   }
   if (!AppendGlow(writer, effect, &spill, pulse, spill_x, spill_y,
                   project_point, userdata))

@@ -391,6 +391,15 @@ static ActionEffectInstance SceneEffect(uint8_t kind, int world_x) {
     effect.phase = kActionEffectPhase_BossLightningStrike;
     effect.geometry.data.rect = (ActionEffectLocalRect){-30.0f, -83.0f, 8.0f, 21.0f};
     break;
+  case kActionEffect_CentaurLightning:
+    effect.visual = 0x20;
+    effect.phase = kActionEffectPhase_BossLightningStrike;
+    effect.geometry.data.rect = (ActionEffectLocalRect){-64, -1, 8, 111};
+    break;
+  case kActionEffect_NorthwallBossMagic:
+    effect.visual = 0x0A;
+    effect.phase = kActionEffectPhase_NorthwallMagicCharge;
+    break;
   case kActionEffect_SwordBeam:
     effect.velocity_x = 8;
     effect.visual = 0x30;
@@ -1446,13 +1455,21 @@ static void TestSceneCapacityAndMalformedInput(void) {
             kActionSceneEffectLavaReservoirGlowExtraIndices -
             kActionSceneEffectMaxFlamingWheels * kActionSceneEffectFlamingWheelExtraIndices);
 
-  /* A second active boss filament cannot arise from the mapped one-boss
-   * lifecycle. Reject it as a capacity-contract violation without publishing
-   * a partial batch instead of reserving 16 impossible ribbons on the stack. */
-  frame.effects[7] = SceneEffect(kActionEffect_BloodpoolBossLightning, 140);
-  CHECK(!ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, &batch));
-  CHECK(batch.vertex_count == 0);
-  CHECK(batch.index_count == 0);
+  /* Wizard and Centaur share one ribbon allowance. Reject duplicate strikes
+   * from either family, including mixed-family malformed frames, atomically. */
+  const ActionEffectInstance original_bolt = frame.effects[0];
+  const uint8_t bolt_kinds[] = {kActionEffect_BloodpoolBossLightning,
+                              kActionEffect_CentaurLightning};
+  for (unsigned first = 0; first < 2; ++first) {
+    for (unsigned second = 0; second < 2; ++second) {
+      frame.effects[0] = SceneEffect(bolt_kinds[first], 100);
+      frame.effects[7] = SceneEffect(bolt_kinds[second], 140);
+      CHECK(!ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, &batch));
+      CHECK(batch.vertex_count == 0);
+      CHECK(batch.index_count == 0);
+    }
+  }
+  frame.effects[0] = original_bolt;
   /* The expanded comet budget admits exactly the player plus the boss's two
    * diagonal children, not an arbitrary fourth forged stream. */
   frame.effects[7] = SceneEffect(kActionEffect_SwordBeam, 140);
@@ -1483,7 +1500,179 @@ static void TestSceneCapacityAndMalformedInput(void) {
   CHECK(!ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, NULL));
 }
 
+static void TestFirstActBossMagicGeometry(void) {
+  static ActionSceneEffectRenderBatch lighting, particles, again;
+  ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
+  ActionEffectInstance *effect = &frame.effects[0];
+  *effect = SceneEffect(kActionEffect_CentaurLightning, 10);
+  static const int kSegments[] = {2, 6, 9, 13, 2, 5, 9, 13};
+  for (unsigned flip = 0; flip < 2; ++flip) {
+    effect->flags = kActionEffectFlag_Visible | (flip ? kActionEffectFlag_FlipHorizontal : 0);
+    for (unsigned visual = 0x19; visual <= 0x20; ++visual) {
+      effect->visual = visual;
+      effect->phase = kActionEffectPhase_BossLightningStrike;
+      CHECK(
+          ActionSceneEffectRender_Build(&frame, true, false, IdentityProjection, NULL, &lighting));
+      CHECK(lighting.vertex_count == 2 * kActionEffectGlowVertices + kSegments[visual - 0x19] * 8);
+      /* First native row is y=4, minus the OAM bias; mirrored pixel centres
+       * must change sides without reversing the bolt's downward direction. */
+      const int first = 2 * kActionEffectGlowVertices;
+      const float x =
+          (lighting.vertices[first].position.x + lighting.vertices[first + 1].position.x) * .5f;
+      const float y =
+          (lighting.vertices[first].position.y + lighting.vertices[first + 1].position.y) * .5f;
+      const float local_x = visual < 0x1D ? -.5f : -1.5f;
+      CHECK(fabsf(x - effect->world_x - (flip ? -local_x : local_x)) < .001f);
+      CHECK(fabsf(y - effect->world_y - 3.5f) < .001f);
+      CHECK(
+          ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &particles));
+      CHECK(particles.vertex_count > 0);
+      CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &again));
+      CHECK(SceneBatchesEqual(&particles, &again));
+    }
+  }
+  *effect = SceneEffect(kActionEffect_NorthwallBossMagic, 10);
+  const ArRenderPointF expected[][2] = {
+      {{-32, -9}, {16, -9}}, {{-36, -9}, {19, -9}}, {{-36, -12}, {19, -12}},
+      {{-16, 7}, {8, 7}},    {{-8, 15}, {-8, 15}},
+  };
+  for (unsigned flip = 0; flip < 2; ++flip) {
+    effect->flags = kActionEffectFlag_Visible | (flip ? kActionEffectFlag_FlipHorizontal : 0);
+    for (unsigned visual = 0xA; visual <= 0xE; ++visual) {
+      effect->visual = visual;
+      CHECK(
+          ActionSceneEffectRender_Build(&frame, true, false, IdentityProjection, NULL, &lighting));
+      const unsigned hands = visual == 0xE ? 1 : 2;
+      CHECK(lighting.vertex_count == (int)hands * kActionEffectGlowVertices);
+      for (unsigned hand = 0; hand < hands; ++hand) {
+        const ArRenderPointF centre = lighting.vertices[hand * kActionEffectGlowVertices].position;
+        CHECK(fabsf(centre.x - effect->world_x - (flip ? -1 : 1) * expected[visual - 0xA][hand].x) <
+              .001f);
+        CHECK(fabsf(centre.y - effect->world_y - expected[visual - 0xA][hand].y) < .001f);
+      }
+      CHECK(
+          ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &particles));
+      CHECK(particles.vertex_count > 0);
+    }
+  }
+  for (unsigned visual = 3; visual <= 9; ++visual) {
+    effect->visual = visual;
+    effect->phase = visual == 9 ? kActionEffectPhase_NorthwallMagicFall
+                                : kActionEffectPhase_NorthwallMagicImpact;
+    CHECK(ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, &lighting));
+    CHECK(lighting.vertex_count > 0);
+    CHECK(ActionSceneEffectRender_Build(&frame, false, false, IdentityProjection, NULL, &again));
+    CHECK(again.vertex_count == 0);
+  }
+  /* European impact aliases expand the native visual-8 bounds. The halo
+   * must cover the wider art without shifting its captured world centre. */
+  effect->visual = 8;
+  effect->phase = kActionEffectPhase_NorthwallMagicImpact;
+  effect->geometry.data.rect = (ActionEffectLocalRect){-16, -9, 16, 7};
+  CHECK(ActionSceneEffectRender_Build(&frame, true, false, IdentityProjection, NULL, &lighting));
+  effect->geometry.data.rect = (ActionEffectLocalRect){-32, -9, 32, 7};
+  CHECK(ActionSceneEffectRender_Build(&frame, true, false, IdentityProjection, NULL, &again));
+  CHECK(lighting.vertex_count == again.vertex_count);
+  CHECK(lighting.vertices[0].position.x == again.vertices[0].position.x);
+  CHECK(lighting.vertices[0].position.y == again.vertices[0].position.y);
+  float native_reach = 0, expanded_reach = 0;
+  for (int i = 0; i < lighting.vertex_count; ++i) {
+    native_reach = fmaxf(native_reach, fabsf(lighting.vertices[i].position.x - effect->world_x));
+    expanded_reach = fmaxf(expanded_reach, fabsf(again.vertices[i].position.x - effect->world_x));
+  }
+  CHECK(expanded_reach > native_reach + 10);
+}
+
+static void TestNorthwallWaterSplash(void) {
+  static ActionSceneEffectRenderBatch particles, again;
+  ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
+  ActionEffectInstance *effect = &frame.effects[0];
+  *effect = SceneEffect(kActionEffect_NorthwallBossMagic, 300);
+  effect->world_y = 448;
+  effect->phase = kActionEffectPhase_NorthwallMagicImpact;
+  effect->visual = 3;
+  effect->geometry.data.rect = (ActionEffectLocalRect){-8, -17, 8, -1};
+  const unsigned ages[] = {3, 9, 13};
+  ArRenderPointF droplet[3];
+  for (unsigned age = 0; age < 3; ++age) {
+    effect->phase_ticks = ages[age];
+    CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &particles));
+    CHECK(particles.vertex_count > 0 &&
+          particles.vertex_count <= kActionSceneEffectParticlesPerInstance * 4);
+    if (age == 0) CHECK(particles.vertex_count == kActionSceneEffectParticlesPerInstance * 4);
+    droplet[age] = (ArRenderPointF){
+        (particles.vertices[0].position.x + particles.vertices[2].position.x) * .5f,
+        (particles.vertices[0].position.y + particles.vertices[2].position.y) * .5f};
+  }
+  CHECK(droplet[0].x < effect->world_x);
+  CHECK(droplet[2].x < droplet[1].x && droplet[1].x < droplet[0].x);
+  CHECK(droplet[1].y < droplet[0].y); /* Rises, then falls back toward the water. */
+  CHECK(droplet[2].y > droplet[1].y && droplet[2].y < 447);
+
+  effect->phase_ticks = 6;
+  CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &particles));
+  CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &again));
+  CHECK(SceneBatchesEqual(&particles, &again)); /* Re-present / pause never advances the burst. */
+  for (int i = 0; i < particles.vertex_count; i += 4) {
+    const float x = (particles.vertices[i].position.x + particles.vertices[i + 2].position.x) * .5f;
+    const float y = (particles.vertices[i].position.y + particles.vertices[i + 2].position.y) * .5f;
+    CHECK((i / 4) & 1 ? x > effect->world_x : x < effect->world_x);
+    CHECK(y < 447 && y > 417);
+  }
+  effect->flags |= kActionEffectFlag_FlipHorizontal;
+  effect->visual = 8;
+  effect->geometry.data.rect = (ActionEffectLocalRect){-32, -9, 32, -1};
+  CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &again));
+  CHECK(SceneBatchesEqual(&particles, &again)); /* Art growth/facing cannot move the waterline. */
+  effect->world_y += 2; /* Regional placement follows the captured actor, not a fixed world Y. */
+  CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &again));
+  CHECK(again.vertex_count == particles.vertex_count);
+  for (int i = 0; i < particles.vertex_count; ++i) {
+    CHECK(again.vertices[i].position.x == particles.vertices[i].position.x);
+    CHECK(fabsf(again.vertices[i].position.y - particles.vertices[i].position.y - 2) < .001f);
+  }
+  effect->phase_ticks = 20;
+  CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &particles));
+  CHECK(particles.vertex_count == 0); /* Fits the shorter European impact as well. */
+  effect->phase_ticks = 1000;
+  CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &particles));
+  CHECK(particles.vertex_count == 0); /* No looping / respawn on later impact visuals. */
+  CHECK(ActionSceneEffectRender_Build(&frame, true, false, IdentityProjection, NULL, &again));
+  CHECK(again.vertex_count > 0); /* The native magic's light has its own lifetime. */
+}
+
+static void TestNorthwallGeometryBudget(void) {
+  static ActionSceneEffectRenderBatch batch;
+  ActionSceneEffectFrame frame = {
+      .effect_count = kActionSceneEffectMaxInstances,
+      .visible_count = kActionSceneEffectMaxInstances,
+  };
+  /* Saturate the actor list to check the ordinary per-actor allowance. The
+   * charge has two palm glows; fall/impact have one. All can emit 12 quads. */
+  const uint8_t phases[] = {kActionEffectPhase_NorthwallMagicCharge,
+                          kActionEffectPhase_NorthwallMagicFall,
+                          kActionEffectPhase_NorthwallMagicImpact};
+  const uint8_t visuals[] = {0x0A, 9, 3};
+  for (unsigned phase = 0; phase < 3; ++phase) {
+    for (unsigned i = 0; i < kActionSceneEffectMaxInstances; ++i) {
+      frame.effects[i] = SceneEffect(kActionEffect_NorthwallBossMagic, 100 + i * 20);
+      frame.effects[i].phase = phases[phase];
+      frame.effects[i].visual = visuals[phase];
+      frame.effects[i].phase_ticks = 3; /* Every impact particle is alive. */
+    }
+    CHECK(ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, &batch));
+    const int glows = phase == 0 ? 2 : 1;
+    CHECK(batch.vertex_count == kActionSceneEffectMaxInstances *
+                                    (glows * kActionEffectGlowVertices + 12 * 4));
+    CHECK(batch.index_count == kActionSceneEffectMaxInstances *
+                                   (glows * kActionEffectGlowIndices + 12 * 6));
+  }
+}
+
 int main(void) {
+  TestNorthwallGeometryBudget();
+  TestNorthwallWaterSplash();
+  TestFirstActBossMagicGeometry();
   TestFeatureSwitchesAndDeterminism();
   TestMixedStagesAreOrderIndependent();
   TestClocksAndValidation();

@@ -42,6 +42,8 @@ typedef enum ActionEffectKind {
   kActionEffect_FlamingWheelProjectile,
   kActionEffect_IceDragonIceBall,
   kActionEffect_TanzaraProjectile,
+  kActionEffect_CentaurLightning,
+  kActionEffect_NorthwallBossMagic,
   kActionEffect_KindCount,
 } ActionEffectKind;
 
@@ -100,6 +102,10 @@ typedef enum ActionEffectPhase {
   kActionEffectPhase_FlamingWheelProjectileFlight,
   kActionEffectPhase_IceDragonIceBallFlight,
   kActionEffectPhase_TanzaraProjectileFlight,
+  kActionEffectPhase_CentaurStaffCharge,
+  kActionEffectPhase_NorthwallMagicCharge,
+  kActionEffectPhase_NorthwallMagicFall,
+  kActionEffectPhase_NorthwallMagicImpact,
   kActionEffectPhase_Count,
 } ActionEffectPhase;
 

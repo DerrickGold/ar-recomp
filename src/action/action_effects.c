@@ -502,10 +502,10 @@ static void BeginOrAdvanceSceneTrack(ActionEffectObserver *observer,
     if (object->animation_bank == 0x7E &&
         object->animation_address == 0x5000)
       continuity_key ^= (uint32_t)object->local_counter * 0x9E3779B9u;
-  }
-  else if (kind == kActionEffect_BloodpoolBossLightning ||
-           kind == kActionEffect_MarahnaLightningLink ||
-           kind == kActionEffect_MarahnaBossLightning)
+  } else if (kind == kActionEffect_CentaurLightning || kind == kActionEffect_NorthwallBossMagic ||
+             kind == kActionEffect_BloodpoolBossLightning ||
+             kind == kActionEffect_MarahnaLightningLink ||
+             kind == kActionEffect_MarahnaBossLightning)
     continuity_key = (uint32_t)object->source_descriptor |
         ((uint32_t)object->spawner_backlink << 16);
   else if (kind == kActionEffect_FlamingWheel)
@@ -1458,6 +1458,80 @@ static uint8_t MatchBloodpoolBossLightning(
        (object->visual == 0x000A && object->composition == 0x5729)))
     return kActionEffectPhase_BossLightningImpact;
 
+  return kActionEffectPhase_None;
+}
+
+/* First-act magic uses the resident $5000 family, not the second-act boss
+ * signatures above. Match the authored visual AND its saved continuation;
+ * body poses, spear pieces and copied-but-not-initialized children share the
+ * source record. See docs/ram-map.md, "First-act boss magic". */
+static uint8_t MatchCentaurLightning(const ActionObjectSnapshot *object) {
+  if (object->source_descriptor != 0xAD45 || object->animation_address != kBossAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      (object->flip_attributes & kActRaiserObjectFlip_Vertical))
+    return kActionEffectPhase_None;
+  const bool delay = object->handler == kAnimationDelayHandler;
+  const bool repeat = object->handler == kAnimationRepeatHandler;
+  const unsigned state = object->animation_state, visual = object->visual;
+  const unsigned resume = object->resume_address;
+  if (repeat && (object->flags & 0x4000) &&
+      ((state == 2 && resume == 0xAE0C) || (state == 8 && resume == 0xAE15))) {
+    static const uint16_t kCharge[] = {0x5413, 0x5537, 0x5677, 0x57B7, 0x58F7};
+    if (visual >= 7 && visual <= 11 && object->composition == kCharge[visual - 7])
+      return kActionEffectPhase_CentaurStaffCharge;
+  }
+  if (!ActionObjectAddressIsValid(object->spawner_backlink)) return kActionEffectPhase_None;
+  const bool blank = visual == 0x18 && object->composition == 0x634F;
+  static const uint16_t kBolts[] = {0x635B, 0x636E, 0x638F, 0x63BE, 0x63FB, 0x640E, 0x642F, 0x645E};
+  const bool bolt =
+      visual >= 0x19 && visual <= 0x20 && object->composition == kBolts[visual - 0x19];
+  if ((blank || bolt) &&
+      ((delay && state == 0x0D && resume == 0xAEC7 &&
+        (blank || (visual >= 0x1D && visual <= 0x1F))) ||
+       (state == 0x0E && ((delay && resume == 0xAECD) || (repeat && resume == 0xAEEC)) &&
+        (blank || visual == 0x20)) ||
+       (delay && state == 0x0B && resume == 0xAEF7 &&
+        (blank || (visual >= 0x19 && visual <= 0x1B))) ||
+       (state == 0x0C && ((delay && resume == 0xAEFD) || (repeat && resume == 0xAF1C)) &&
+        (blank || visual == 0x1C))))
+    return kActionEffectPhase_BossLightningStrike;
+  static const uint16_t kImpact[] = {0x649B, 0x64A7, 0x64C8};
+  if (delay && state == 4 && resume == 0xAF58 &&
+      (blank ||
+       (visual >= 0x21 && visual <= 0x23 && object->composition == kImpact[visual - 0x21])))
+    return kActionEffectPhase_BossLightningImpact;
+  return kActionEffectPhase_None;
+}
+
+static uint8_t MatchNorthwallBossMagic(const ActionObjectSnapshot *object) {
+  if (object->source_descriptor != 0xE7C6 || object->animation_address != kBossAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank || object->handler != kAnimationDelayHandler ||
+      (object->flip_attributes & kActRaiserObjectFlip_Vertical))
+    return kActionEffectPhase_None;
+  const unsigned visual = object->visual;
+  static const uint16_t kCharge[] = {0x51A7, 0x522A, 0x52AD, 0x5314, 0x53AC};
+  if (object->animation_state == 2 && object->resume_address == 0xE85E &&
+      (object->flags & 0x4000) && visual >= 0x0A && visual <= 0x0E &&
+      object->composition == kCharge[visual - 0x0A])
+    return kActionEffectPhase_NorthwallMagicCharge;
+  if (!ActionObjectAddressIsValid(object->spawner_backlink)) return kActionEffectPhase_None;
+  if (object->animation_state == 0 && object->resume_address == 0xE8AE && visual == 9 &&
+      object->composition == 0x518D)
+    return kActionEffectPhase_NorthwallMagicFall;
+  static const uint16_t kImpact[] = {0x5114, 0x5120, 0x5133, 0x5146, 0x5159, 0x516C};
+  /* The floor child outlives the falling actor that allocated it. Its own
+   * exact signature remains valid after that parent slot retires/recycles. */
+  /* Regional European impact poses keep visual 8. Accept only starts of
+   * slots in the shared NorthwallExpand workspace, never their padding. */
+  const unsigned expansion_offset =
+      (unsigned)object->composition - kActRaiserWram_NorthwallImpactExpansion;
+  const bool expanded = visual == 8 &&
+                        expansion_offset < kActRaiserNorthwallImpactExpansionCount *
+                                               kActRaiserNorthwallImpactExpansionStride &&
+                        expansion_offset % kActRaiserNorthwallImpactExpansionStride == 0;
+  if (object->animation_state == 1 && object->resume_address == 0xE8BD &&
+      (expanded || (visual >= 3 && visual <= 8 && object->composition == kImpact[visual - 3])))
+    return kActionEffectPhase_NorthwallMagicImpact;
   return kActionEffectPhase_None;
 }
 
@@ -2441,7 +2515,13 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     uint8_t kind = kActionEffect_None;
     uint8_t phase = kActionEffectPhase_None;
     bool aitos_boss_sword_beam = false;
-    if (minotaur_map &&
+    if (map_group == kActRaiserMapGroup_Fillmore && map_number == 1 &&
+        (phase = MatchCentaurLightning(&object)) != kActionEffectPhase_None) {
+      kind = kActionEffect_CentaurLightning;
+    } else if (map_group == kActRaiserMapGroup_Northwall && map_number == 4 &&
+               (phase = MatchNorthwallBossMagic(&object)) != kActionEffectPhase_None) {
+      kind = kActionEffect_NorthwallBossMagic;
+    } else if (minotaur_map &&
         SourceMatchesOriginalOrDeathHeimRoom(
             wram, wram_size, object.source_descriptor,
             kActRaiserMapGroup_Fillmore, kFillmoreBossMap,
@@ -2543,6 +2623,22 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     seen[slot] = true;
     ActionEffectInstance effect;
     PopulateSceneObjectEffect(&effect, address, &object, kind, phase);
+    if (kind == kActionEffect_CentaurLightning || kind == kActionEffect_NorthwallBossMagic) {
+      effect.obj_priority = ScenePriorityFromSpriteAttributeBias(wram, wram_size);
+      /* Keep blink frames tracked without painting light over invisible art.
+       * Native OAM has a one-pixel Y bias relative to the world hot point. */
+      effect.geometry.data.rect.y0 -= 1;
+      effect.geometry.data.rect.y1 -= 1;
+      if (kind == kActionEffect_CentaurLightning) {
+        if (object.visual == 0x18 ||
+            (phase == kActionEffectPhase_CentaurStaffCharge && object.visual == 7))
+          effect.flags &= ~kActionEffectFlag_Visible;
+        if (phase == kActionEffectPhase_CentaurStaffCharge) {
+          const float x = (effect.flags & kActionEffectFlag_FlipHorizontal) ? 24 : -24;
+          effect.geometry.data.rect = (ActionEffectLocalRect){x - 8, -65, x + 8, -49};
+        }
+      }
+    }
     if (kind == kActionEffect_AitosStatueFire ||
         kind == kActionEffect_FlamingWheel ||
         kind == kActionEffect_FlamingWheelProjectile) {

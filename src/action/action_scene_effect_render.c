@@ -1491,6 +1491,122 @@ static bool AppendActorProjectileLighting(
   return true;
 }
 
+/* The Northwall boss embeds the charge in its body compositions. Follow
+ * both palm orbs through $0A-$0D and their merged $0E release, rather than
+ * illuminating the whole body or inventing a fixed facing-relative origin. */
+static unsigned NorthwallMagicAnchors(const ActionEffectInstance *effect,
+                                      ArRenderPointF anchors[2]) {
+  const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
+  if (effect->phase != kActionEffectPhase_NorthwallMagicCharge) {
+    anchors[0] = (ArRenderPointF){(rect->x0 + rect->x1) * .5f, (rect->y0 + rect->y1) * .5f};
+    return 1;
+  }
+  static const ArRenderPointF kHands[5][2] = {
+      {{-32, -9}, {16, -9}}, {{-36, -9}, {19, -9}}, {{-36, -12}, {19, -12}},
+      {{-16, 7}, {8, 7}},    {{-8, 15}, {-8, 15}},
+  };
+  if (effect->visual < 0x0A || effect->visual > 0x0E) return 0;
+  const unsigned count = effect->visual == 0x0E ? 1 : 2;
+  for (unsigned i = 0; i < count; ++i) {
+    anchors[i] = kHands[effect->visual - 0x0A][i];
+    if (effect->flags & kActionEffectFlag_FlipHorizontal) anchors[i].x = -anchors[i].x;
+  }
+  return count;
+}
+
+/* The native impact child is the water contact, independent of the falling
+ * projectile. Its bottom stays on the surface as the magic art grows/fades.
+ * Emit once: even the shortest regional impact lasts through this burst. */
+static bool AppendNorthwallWaterSplashParticles(ActionEffectGeometryWriter *writer,
+                                               const ActionEffectInstance *effect,
+                                               ActionEffectProjectPointFn project_point,
+                                               void *userdata) {
+  const unsigned ticks = effect->phase_ticks;
+  const float surface_y = effect->geometry.data.rect.y1;
+  for (unsigned i = 0; i < kActionSceneEffectParticlesPerInstance; ++i) {
+    const uint32_t seed = DeterministicHash_Mix32(
+        effect->generation * 0x9E3779B9u ^ (uint32_t)effect->record_address * 0x85EBCA6Bu ^
+        i * 0xC2B2AE35u);
+    const bool foam = i >= 8;
+    const unsigned delay = (seed >> 4) % 3;
+    const unsigned lifetime = (foam ? 10 : 15) + ((seed >> 8) & 3);
+    if (ticks < delay || ticks >= delay + lifetime) continue;
+    const float t = (float)(ticks - delay) / (float)(lifetime - 1);
+    const float old_t = fmaxf(0, t - 1.0f / (float)(lifetime - 1));
+    const float side = (i & 1) ? 1 : -1;
+    const float distance = 16 + 24 * HashUnit(seed ^ 0x37u);
+    const float height = foam ? 2 + 2 * HashUnit(seed ^ 0x71u)
+                              : 14 + 15 * HashUnit(seed ^ 0x71u);
+    const float x = side * (1.5f + distance * t);
+    const float y = surface_y - 4 * height * t * (1 - t);
+    const float old_x = side * (1.5f + distance * old_t);
+    const float old_y = surface_y - 4 * height * old_t * (1 - old_t);
+    ArRenderColorF color = MixColor((ArRenderColorF){.92f, 1, 1, 1},
+                                    (ArRenderColorF){.18f, .55f, .9f, 1}, t);
+    color.a = .9f * (1 - t * t);
+    if (!AppendSceneParticle(writer, effect, x, y, old_x, old_y, .55f + .25f * (1 - t),
+                             foam ? 2.4f : 1.6f, color, project_point, userdata))
+      return false;
+  }
+  return true;
+}
+
+static bool AppendNorthwallMagicParticles(ActionEffectGeometryWriter *writer,
+                                          const ActionEffectInstance *effect,
+                                          ActionEffectProjectPointFn project_point,
+                                          void *userdata) {
+  if (effect->phase == kActionEffectPhase_NorthwallMagicImpact)
+    return AppendNorthwallWaterSplashParticles(writer, effect, project_point, userdata);
+  ArRenderPointF anchors[2];
+  const unsigned count = NorthwallMagicAnchors(effect, anchors);
+  if (!count) return true;
+  const unsigned ticks = EffectVisualTicks(effect, effect->pulse_ticks);
+  const bool falling = effect->phase == kActionEffectPhase_NorthwallMagicFall;
+  for (unsigned i = 0; i < kActionSceneEffectParticlesPerInstance; ++i) {
+    const SceneParticleClock clock = SceneParticleClockAt(effect, ticks, i, kSceneEmberLifetime);
+    const float *direction = kCircle32[(i * 11 + (clock.seed >> 8)) & kActionEffectGlowSegmentMask];
+    const ArRenderPointF anchor = anchors[i % count];
+    const float travel = falling ? -30 : 0;
+    const float x = anchor.x + direction[0] * (2 + 14 * clock.t);
+    const float y = anchor.y + direction[1] * 8 * clock.t + travel * clock.t;
+    const float old_x = anchor.x + direction[0] * (2 + 14 * clock.previous_t);
+    const float old_y = anchor.y + direction[1] * 8 * clock.previous_t + travel * clock.previous_t;
+    const ArRenderColorF color = SceneParticleColor((ArRenderColorF){.9f, 1, 1, .85f},
+                                                    (ArRenderColorF){.1f, .45f, 1, 0}, clock);
+    if (!AppendSceneParticle(writer, effect, x, y, old_x, old_y, .65f, 2.5f, color, project_point,
+                             userdata))
+      return false;
+  }
+  return true;
+}
+
+static bool AppendNorthwallMagicLighting(ActionEffectGeometryWriter *writer,
+                                         const ActionEffectInstance *effect,
+                                         ActionEffectProjectPointFn project_point, void *userdata) {
+  ArRenderPointF anchors[2];
+  const unsigned count = NorthwallMagicAnchors(effect, anchors);
+  const bool charge = effect->phase == kActionEffectPhase_NorthwallMagicCharge;
+  const bool impact = effect->phase == kActionEffectPhase_NorthwallMagicImpact;
+  const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
+  for (unsigned i = 0; i < count; ++i) {
+    ActionEffectGlowStyle glow = {
+        .radius_x = charge ? 20 : (impact ? fmaxf(32, (rect->x1 - rect->x0) * .7f + 8) : 24),
+        .radius_y = charge ? 20 : (impact ? (rect->y1 - rect->y0) * .7f + 8 : 34),
+        .ring_scale = {.2f, .65f, 1},
+        .centre = {.8f, .95f, 1, .55f},
+        .ring = {{.4f, .8f, 1, .28f}, {.1f, .35f, 1, .10f}, {.08f, .1f, .8f, 0}},
+        .axis_x = 1,
+        .lift_y = -1,
+        .flare = .12f,
+        .seed = effect->pulse_generation + i,
+    };
+    if (!AppendGlow(writer, effect, &glow, DeterministicPulse(effect), anchors[i].x, anchors[i].y,
+                    project_point, userdata))
+      return false;
+  }
+  return true;
+}
+
 /* These dispatchers select complete family operations. Palettes, motion,
  * timing and phase-specific geometry stay together above. */
 static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
@@ -1541,9 +1657,11 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
   case kActionEffect_LightningTrap:
     return AppendLightningTrapParticles(writer, effect, project_point,
                                         userdata);
+  case kActionEffect_NorthwallBossMagic:
+    return AppendNorthwallMagicParticles(writer, effect, project_point, userdata);
+  case kActionEffect_CentaurLightning:
   case kActionEffect_BloodpoolBossLightning:
-    return AppendBloodpoolBossLightningParticles(writer, effect, project_point,
-                                                 userdata);
+    return AppendBossLightningParticles(writer, effect, project_point, userdata);
   default:
     return true;
   }
@@ -1596,9 +1714,11 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
     return AppendSwordBeamLighting(writer, effect, project_point, userdata);
   case kActionEffect_LightningTrap:
     return AppendLightningTrapLighting(writer, effect, project_point, userdata);
+  case kActionEffect_NorthwallBossMagic:
+    return AppendNorthwallMagicLighting(writer, effect, project_point, userdata);
+  case kActionEffect_CentaurLightning:
   case kActionEffect_BloodpoolBossLightning:
-    return AppendBloodpoolBossLightningLighting(writer, effect, project_point,
-                                                userdata);
+    return AppendBossLightningLighting(writer, effect, project_point, userdata);
   default:
     return true;
   }
@@ -1652,6 +1772,19 @@ static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
               effect->visual >= 0x12u && effect->visual <= 0x14u);
     case kActionEffect_LightningTrap:
       return effect->phase == kActionEffectPhase_LightningActive;
+    case kActionEffect_CentaurLightning:
+      return (effect->phase == kActionEffectPhase_CentaurStaffCharge && effect->visual >= 8 &&
+              effect->visual <= 11) ||
+             (effect->phase == kActionEffectPhase_BossLightningStrike && effect->visual >= 0x19 &&
+              effect->visual <= 0x20) ||
+             (effect->phase == kActionEffectPhase_BossLightningImpact && effect->visual >= 0x21 &&
+              effect->visual <= 0x23);
+    case kActionEffect_NorthwallBossMagic:
+      return (effect->phase == kActionEffectPhase_NorthwallMagicCharge && effect->visual >= 0x0A &&
+              effect->visual <= 0x0E) ||
+             (effect->phase == kActionEffectPhase_NorthwallMagicFall && effect->visual == 9) ||
+             (effect->phase == kActionEffectPhase_NorthwallMagicImpact && effect->visual >= 3 &&
+              effect->visual <= 8);
     case kActionEffect_BloodpoolBossLightning:
       return (effect->phase == kActionEffectPhase_BossLightningStrike &&
               effect->visual <= 5u) ||
@@ -1719,7 +1852,8 @@ static bool BuildSceneEffectList(
         effect->render_layer != render_layer ||
         effect->projection_plane > kActionEffectProjectionPlane_Bg1High)
       continue;
-    if (effect->kind == kActionEffect_BloodpoolBossLightning &&
+    if ((effect->kind == kActionEffect_BloodpoolBossLightning ||
+         effect->kind == kActionEffect_CentaurLightning) &&
         effect->phase == kActionEffectPhase_BossLightningStrike &&
         ++lightning_filaments > kActionSceneEffectMaxLightningFilaments)
       return false;

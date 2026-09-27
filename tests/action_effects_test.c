@@ -2578,7 +2578,147 @@ static void TestSceneCaptureCapacityFailsClosed(void) {
   CHECK(frame.visible_count == 0);
 }
 
+static void TestFirstActBossMagic(void) {
+  static const struct {
+    uint16_t source, state, visual, composition, resume, handler;
+    uint8_t group, map, kind, phase;
+  } cases[] = {
+#define CENTAUR(st, v, comp, res, h, ph)                                                           \
+  {0xAD45, st, v, comp, res, h, 1, 1, kActionEffect_CentaurLightning, ph}
+#define NORTHWALL(st, v, comp, res, ph)                                                            \
+  {0xE7C6, st, v, comp, res, 0x8661, 6, 4, kActionEffect_NorthwallBossMagic, ph}
+      CENTAUR(2, 8, 0x5537, 0xAE0C, 0x8683, kActionEffectPhase_CentaurStaffCharge),
+      CENTAUR(2, 9, 0x5677, 0xAE0C, 0x8683, kActionEffectPhase_CentaurStaffCharge),
+      CENTAUR(2, 10, 0x57B7, 0xAE0C, 0x8683, kActionEffectPhase_CentaurStaffCharge),
+      CENTAUR(8, 11, 0x58F7, 0xAE15, 0x8683, kActionEffectPhase_CentaurStaffCharge),
+      CENTAUR(0xD, 0x1D, 0x63FB, 0xAEC7, 0x8661, kActionEffectPhase_BossLightningStrike),
+      CENTAUR(0xD, 0x1E, 0x640E, 0xAEC7, 0x8661, kActionEffectPhase_BossLightningStrike),
+      CENTAUR(0xD, 0x1F, 0x642F, 0xAEC7, 0x8661, kActionEffectPhase_BossLightningStrike),
+      CENTAUR(0xE, 0x20, 0x645E, 0xAECD, 0x8661, kActionEffectPhase_BossLightningStrike),
+      CENTAUR(0xE, 0x20, 0x645E, 0xAEEC, 0x8683, kActionEffectPhase_BossLightningStrike),
+      CENTAUR(0xB, 0x19, 0x635B, 0xAEF7, 0x8661, kActionEffectPhase_BossLightningStrike),
+      CENTAUR(0xB, 0x1A, 0x636E, 0xAEF7, 0x8661, kActionEffectPhase_BossLightningStrike),
+      CENTAUR(0xB, 0x1B, 0x638F, 0xAEF7, 0x8661, kActionEffectPhase_BossLightningStrike),
+      CENTAUR(0xC, 0x1C, 0x63BE, 0xAEFD, 0x8661, kActionEffectPhase_BossLightningStrike),
+      CENTAUR(0xC, 0x1C, 0x63BE, 0xAF1C, 0x8683, kActionEffectPhase_BossLightningStrike),
+      CENTAUR(4, 0x21, 0x649B, 0xAF58, 0x8661, kActionEffectPhase_BossLightningImpact),
+      CENTAUR(4, 0x22, 0x64A7, 0xAF58, 0x8661, kActionEffectPhase_BossLightningImpact),
+      CENTAUR(4, 0x23, 0x64C8, 0xAF58, 0x8661, kActionEffectPhase_BossLightningImpact),
+      NORTHWALL(2, 0xA, 0x51A7, 0xE85E, kActionEffectPhase_NorthwallMagicCharge),
+      NORTHWALL(2, 0xB, 0x522A, 0xE85E, kActionEffectPhase_NorthwallMagicCharge),
+      NORTHWALL(2, 0xC, 0x52AD, 0xE85E, kActionEffectPhase_NorthwallMagicCharge),
+      NORTHWALL(2, 0xD, 0x5314, 0xE85E, kActionEffectPhase_NorthwallMagicCharge),
+      NORTHWALL(2, 0xE, 0x53AC, 0xE85E, kActionEffectPhase_NorthwallMagicCharge),
+      NORTHWALL(0, 9, 0x518D, 0xE8AE, kActionEffectPhase_NorthwallMagicFall),
+      NORTHWALL(1, 3, 0x5114, 0xE8BD, kActionEffectPhase_NorthwallMagicImpact),
+      NORTHWALL(1, 4, 0x5120, 0xE8BD, kActionEffectPhase_NorthwallMagicImpact),
+      NORTHWALL(1, 5, 0x5133, 0xE8BD, kActionEffectPhase_NorthwallMagicImpact),
+      NORTHWALL(1, 6, 0x5146, 0xE8BD, kActionEffectPhase_NorthwallMagicImpact),
+      NORTHWALL(1, 7, 0x5159, 0xE8BD, kActionEffectPhase_NorthwallMagicImpact),
+      NORTHWALL(1, 8, 0x516C, 0xE8BD, kActionEffectPhase_NorthwallMagicImpact),
+      NORTHWALL(1, 8, 0x5F00, 0xE8BD, kActionEffectPhase_NorthwallMagicImpact),
+      NORTHWALL(1, 8, 0x5F40, 0xE8BD, kActionEffectPhase_NorthwallMagicImpact),
+      NORTHWALL(1, 8, 0x5F80, 0xE8BD, kActionEffectPhase_NorthwallMagicImpact),
+      NORTHWALL(1, 8, 0x5FC0, 0xE8BD, kActionEffectPhase_NorthwallMagicImpact),
+#undef CENTAUR
+#undef NORTHWALL
+  };
+  uint8_t wram[kActRaiserWramSize];
+  ActionSceneEffectFrame frame;
+  for (unsigned c = 0; c < sizeof(cases) / sizeof(cases[0]); ++c) {
+    for (unsigned flip = 0; flip < 2; ++flip) {
+      memset(wram, 0, sizeof(wram));
+      ActionEffectObserver observer = {0};
+      wram[0x18] = cases[c].group;
+      wram[0x19] = cases[c].map;
+      Write16(wram, 0x8F, 0x2000);
+      const unsigned at = 0x8E0;
+      Write16(wram, at + 2, 300);
+      Write16(wram, at + 4, 200);
+      Write16(wram, at + 0x12, cases[c].handler);
+      Write16(wram, at + 0x16, 0x5000);
+      wram[at + 0x18] = 0x7E;
+      Write16(wram, at + 0x1A, cases[c].state);
+      Write16(wram, at + 0x1E, cases[c].resume);
+      Write16(wram, at + 0x20, cases[c].composition);
+      Write16(wram, at + 0x22, cases[c].visual);
+      Write16(wram, at + 0x28, flip ? 0x4000 : 0);
+      Write16(wram, at + 0x30, 0x4000);
+      Write16(wram, at + 0x32, cases[c].source);
+      Write16(wram, at + 0x3A, 0x12E0);
+      /* No parent liveness dependency: impact actors outlive their allocator. */
+      Write16(wram, 0x12E0, 0x4000);
+      ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+      CHECK(frame.effect_count == 1 && frame.visible_count == 1);
+      const ActionEffectInstance original = frame.effects[0];
+      CHECK(original.kind == cases[c].kind && original.phase == cases[c].phase);
+      CHECK(original.world_x == 300 && original.world_y == 200 && original.obj_priority == 2);
+      CHECK(!!(original.flags & kActionEffectFlag_FlipHorizontal) == !!flip);
+      if (original.phase == kActionEffectPhase_CentaurStaffCharge) {
+        CHECK((original.geometry.data.rect.x0 + original.geometry.data.rect.x1) * .5f ==
+              (flip ? 24 : -24));
+        CHECK(original.geometry.data.rect.y0 == -65);
+        Write16(wram, at + 0x20, 0x5413);
+        Write16(wram, at + 0x22, 7);
+        ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 0);
+        CHECK(frame.effect_count == 1 && frame.visible_count == 0);
+        CHECK(frame.effects[0].generation == original.generation);
+        Write16(wram, at + 0x20, cases[c].composition);
+        Write16(wram, at + 0x22, cases[c].visual);
+      }
+      ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 0);
+      CHECK(frame.effects[0].generation == original.generation &&
+            frame.effects[0].age_ticks == original.age_ticks);
+      if (original.kind == kActionEffect_CentaurLightning &&
+          original.phase != kActionEffectPhase_CentaurStaffCharge) {
+        Write16(wram, at + 0x20, 0x634F);
+        Write16(wram, at + 0x22, 0x18);
+        ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+        CHECK(frame.effect_count == 1 && frame.visible_count == 0);
+        CHECK(frame.effects[0].generation == original.generation);
+        Write16(wram, at + 0x20, cases[c].composition);
+        Write16(wram, at + 0x22, cases[c].visual);
+      }
+      /* Check the published workspace independently of its shared constants:
+       * only the four pose starts are valid, not slot interiors or adjacent
+       * aligned addresses. Both horizontal facings use the same workspace. */
+      if (cases[c].source == 0xE7C6 && cases[c].composition == 0x5F00) {
+        for (unsigned composition = 0x5EC0; composition <= 0x6040; ++composition) {
+          Write16(wram, at + 0x20, (uint16_t)composition);
+          ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+          const bool expected = composition == 0x5F00 || composition == 0x5F40 ||
+                                composition == 0x5F80 || composition == 0x5FC0;
+          CHECK(frame.effect_count == (expected ? 1 : 0));
+          if (expected) {
+            CHECK(frame.effects[0].kind == kActionEffect_NorthwallBossMagic);
+            CHECK(frame.effects[0].phase == kActionEffectPhase_NorthwallMagicImpact);
+          }
+        }
+        Write16(wram, at + 0x20, cases[c].composition);
+      }
+      /* Exact family guards reject stale/copied art and wrong rooms. */
+      const unsigned fields[] = {0x12, 0x16, 0x1E, 0x20, 0x32};
+      for (unsigned i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i) {
+        unsigned field = at + fields[i];
+        uint16_t old = (uint16_t)(wram[field] | (wram[field + 1] << 8));
+        Write16(wram, field, old ^ 1);
+        ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+        CHECK(frame.effect_count == 0);
+        Write16(wram, field, old);
+      }
+      wram[0x19] = 8;
+      ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+      CHECK(frame.effect_count == 0);
+      wram[0x19] = cases[c].map;
+      Write16(wram, at + 0x28, 0x8000);
+      ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+      CHECK(frame.effect_count == 0);
+    }
+  }
+}
+
 int main(void) {
+  TestFirstActBossMagic();
   TestControllerAndSlotIdentity();
   TestEverySpellIsIdentified();
   TestUnmatchedSlotsAreCensused();
