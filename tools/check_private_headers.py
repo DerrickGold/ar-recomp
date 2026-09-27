@@ -41,6 +41,19 @@ RULES = {
         'src/action/action_scene_lightning_render.c'],
     'platform/sdl/sim3d_depth_pass_sdl_internal.h': [
         'src/platform/sdl/sim3d_depth_pass*_sdl.c'],
+    'actraiser/actraiser_action_room_hle_internal.h': [
+        'src/actraiser/actraiser_action_room_loader.c',
+        'src/actraiser/actraiser_action_room_graphics.c',
+        'src/actraiser/actraiser_action_video_config.c'],
+    'actraiser/actraiser_cpu_hle_internal.h': [
+        'src/actraiser/*', 'tests/actraiser_*_test.c'],
+    'platform/sdl/render_sdl_internal.h': [
+        'src/platform/sdl/*', 'tests/render_*_test.c',
+        'tests/settings_overlay_test.c', 'tests/present_world_nav_gpu_test.c',
+        'tests/sim3d_depth_pass_gpu_test.c', 'tests/diorama_frame_generation_test.c',
+        'tools/sim_voxel_model_sheet.c', 'tools/benchmark_model_projection.c'],
+    'regional/session/regional_session_internal.h': [
+        'src/regional/session/*', 'tests/regional_characterization_test.c'],
 }
 INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]+"([^"]+)"', re.M)
 
@@ -71,6 +84,12 @@ def tracked_sources():
     return files
 
 
+def unregistered_headers(files, rules=RULES):
+    """A newly introduced private header must declare its family explicitly."""
+    return sorted(path for path in files if path.startswith('src/') and
+                  path.endswith('_internal.h') and path[4:] not in rules)
+
+
 def self_test():
     cases = [
         ('actraiser/enhancements/actraiser_enhancements_internal.h',
@@ -79,6 +98,12 @@ def self_test():
         ('sim/sim3d/present_sim3d_internal.h', 'src/sim/sim3d/present_sim3d.c'),
         ('settings_overlay/settings_overlay_internal.h',
          'src/settings_overlay/save_slots/save_slot_menu.c'),
+        ('actraiser/actraiser_action_room_hle_internal.h',
+         'src/actraiser/actraiser_action_room_loader.c'),
+        ('actraiser/actraiser_cpu_hle_internal.h', 'src/actraiser/actraiser_miracle.c'),
+        ('platform/sdl/render_sdl_internal.h', 'src/platform/sdl/render_sdl.c'),
+        ('regional/session/regional_session_internal.h',
+         'src/regional/session/regional_session_codec.c'),
     ]
     for header, owner in cases:
         include = f'#include "{header}"\n'
@@ -86,7 +111,11 @@ def self_test():
         if found != [('src/main.c', header)]:
             print(f'self-test failed for {header}: {found}', file=sys.stderr)
             return 1
-    print('Private header self-test: outside includes rejected; family includes accepted')
+    unknown = {'src/new/feature_internal.h': '', 'src/new/public.h': ''}
+    if unregistered_headers(unknown) != ['src/new/feature_internal.h']:
+        print('self-test failed: unregistered private header escaped the gate', file=sys.stderr)
+        return 1
+    print('Private header self-test: outside includes and unregistered families rejected')
     return 0
 
 
@@ -102,7 +131,14 @@ def main():
         for header in missing:
             print(f'  src/{header}', file=sys.stderr)
         return 1
-    found = violations(tracked_sources())
+    files = tracked_sources()
+    unregistered = unregistered_headers(files)
+    if unregistered:
+        print('Private headers need an explicit family rule:', file=sys.stderr)
+        for path in unregistered:
+            print(f'  {path}', file=sys.stderr)
+        return 1
+    found = violations(files)
     if found:
         print('Private headers included outside their family:', file=sys.stderr)
         for path, header in found:

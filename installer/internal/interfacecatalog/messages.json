@@ -3995,10 +3995,10 @@
   {
     "key": "setting.restart_game.help",
     "text": [
-      "Persist settings and battery SRAM, then restart the application.",
-      "Enregistre les réglages et la SRAM sur pile, puis redémarre l'application.",
-      "Einstellungen und Batterie-SRAM speichern, dann die Anwendung neu starten.",
-      "設定とバッテリーSRAMを保存してからアプリを再起動します。"
+      "Persist settings and battery SRAM, then reset the game in this window.",
+      "Enregistre les réglages et la SRAM sur pile, puis redémarre le jeu dans cette fenêtre.",
+      "Einstellungen und Batterie-SRAM speichern, dann das Spiel in diesem Fenster neu starten.",
+      "設定とバッテリーSRAMを保存してから、同じウィンドウでゲームをリセットします。"
     ]
   },
   {

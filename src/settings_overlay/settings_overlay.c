@@ -1596,7 +1596,7 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat) {
    * same key coming up. */
   s_input_key = key;
   s_menu_input_device = kInputClass_Keyboard;
-  /* Capture is fed raw events by main.c (SettingsOverlay_HandleCaptureEvent)
+  /* Capture is fed raw events by HostInput_HandleEvent (SettingsOverlay_HandleCaptureEvent)
    * because a scancode, not a keycode, is what gets bound. */
   if (s_capture_desc) return true;
 

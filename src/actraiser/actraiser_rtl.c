@@ -118,6 +118,9 @@ bool ActRaiser_ClearPpuObjMetadata(void) {
 
 bool ActRaiser_InitializeGame(
     const RtlGameInitializeContext *context) {
+  ActRaiserHud_Reset();
+  ActRaiserCredits_Reset();
+  ActRaiserLocalizationText_ResetObservation();
   ActRaiserSimMenu_Reset();
   ActRaiserBg3Upload_Reset();
   ActRaiserSpriteOwnership_Reset();
@@ -1433,6 +1436,8 @@ void ActRaiser_DestroyGameCoroutine(void) {
   }
 #endif
   s_game_started = false;
+  s_action_load_armed_frames = s_action_load_hold_frames = 0;
+  s_action_load_one_shot_token = 0;
 }
 
 static bool ActRaiser_ControlGameTiming(

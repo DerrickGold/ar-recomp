@@ -154,7 +154,7 @@ bool SettingsOverlay_GetNavigationState(int *selected_ordinal,
  * arrived, rather than assuming a section's tab count. */
 bool SettingsOverlay_GetTabState(int *active_tab, int *tab_count);
 
-/* Advances hold-to-accelerate value stepping. main.c calls this once per frame
+/* Advances hold-to-accelerate value stepping. game_loop.c calls this once per paused iteration
  * before rendering while the overlay is open, so the render pass sees a stable
  * navigation state. */
 void SettingsOverlay_Tick(void);
@@ -177,12 +177,12 @@ bool SettingsOverlay_HandleKey(SDL_Keycode key, bool pressed, bool repeat);
  * Returns true when the overlay owned the event. */
 bool SettingsOverlay_HandleGamepadEvent(const SDL_Event *event);
 
-/* A binding row is armed and waiting for the next physical input. main.c must
- * offer raw events here BEFORE its own hotkey chain while this is true, or a
- * key like F9 would run its hotkey instead of being bound. */
 /* True while a row's text-entry field is active. Numeric rows never enter this
  * state (they step); it is reached only by the Mask/Custom string holdouts. */
 bool SettingsOverlay_IsEditing(void);
+/* A binding row is armed and waiting for the next physical input. While true,
+ * HostInput_HandleEvent offers raw events here before its own hotkey chain,
+ * so a key like F9 is bound instead of running its hotkey. */
 bool SettingsOverlay_IsCapturing(void);
 bool SettingsOverlay_HandleCaptureEvent(const SDL_Event *event);
 /* Text events are accepted only while a descriptor is in direct-edit mode. */

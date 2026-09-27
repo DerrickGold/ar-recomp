@@ -230,6 +230,12 @@ static void OnAudioTrace(void *user_data, SrRunnerHandle *runner,
 /* ---- lifecycle ----------------------------------------------------------- */
 
 void SfxCensus_Init(void) {
+  memset(s_sfx, 0, sizeof(s_sfx));
+  memset(s_orphan_kon, 0, sizeof(s_orphan_kon));
+  s_orphan_total = 0;
+  s_pending.id = -1;
+  s_pending.deadline = 0;
+  s_pending.claimed = 0;
   SrAudioTraceSubscription subscription = {
     .struct_size = SR_AUDIO_TRACE_SUBSCRIPTION_V2_SIZE,
     .callback = &OnAudioTrace,

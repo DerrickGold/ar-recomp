@@ -16,7 +16,7 @@
 
 uint8 g_ram[0x20000];
 /* kSettingCat_Graphics's GpuShadersActive() availability gate reads this
- * (main.c's real runtime state); this harness has no renderer, so it's
+ * (host_video.c's real runtime state); this harness has no renderer, so it's
  * never actually true here. */
 bool g_gpu_shaders_active;
 /* W4-2: present.c owns the real value (latched when a renderer rejects the rim

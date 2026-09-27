@@ -172,7 +172,7 @@ int main(void) {
   }
 
   /* Advertising both formats is what lets SDL pick a backend it can actually
-   * feed — the same call shape main.c needs at renderer creation. */
+   * feed — the call shape render_preparation.c uses at renderer creation. */
   SDL_GPUDevice *device = SDL_CreateGPUDevice(
       SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL |
           SDL_GPU_SHADERFORMAT_MSL,

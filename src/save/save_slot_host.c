@@ -314,6 +314,12 @@ void SaveSlotHost_InstallHooks(void) {
   const SettingsOverlaySaveSlotHooks slots = { SlotScan, SlotDraft, SaveSlotManager_Edit,
                                                SlotDraftView, SlotStart };
   SettingsOverlay_SetSaveSlotHooks(&slots);
+  if (s_managed_slots && SaveSlots_NeedsSetup(&s_save_slots)) {
+    SettingsOverlay_Open();
+    if (!SettingsOverlay_OpenSaveSlots(false))
+      Die("The new-game save menu could not be opened.");
+    fprintf(stderr, "[saves] no campaigns: opened save setup before the first game tick\n");
+  }
 }
 
 bool SaveSlotHost_Close(void) {
@@ -321,6 +327,8 @@ bool SaveSlotHost_Close(void) {
   SaveError error = {{0}};
   const bool flushed = SaveSlots_Flush(&s_save_slots, &error);
   SaveSlots_Close(&s_save_slots);
+  s_managed_slots = false;
+  SaveSystem_SetStorageHooks(NULL);
   return flushed;
 }
 

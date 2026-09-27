@@ -36,7 +36,7 @@ static ArHostFontResources s_font_store;
 
 uint8 g_ram[0x20000];
 /* kSettingCat_Graphics's GpuShadersActive() availability gate reads this
- * (main.c's real runtime state); this harness has no renderer, so it's
+ * (host_video.c's real runtime state); this harness has no renderer, so it's
  * never actually true here. */
 bool g_gpu_shaders_active;
 /* W4-2: present.c owns the real value (latched when a renderer rejects the rim
@@ -133,7 +133,7 @@ static void NavToSection(int target) {
 }
 
 /* A build with no staged PDF must not advertise a dead Manual destination.
- * Exercise this through the same availability hook used by main.c, including
+ * Exercise this through the same availability hook installed by game_session.c, including
  * both directions around the hole so section movement cannot land on it. */
 static void CheckManualSectionAvailability(void) {
   g_settings.show_debug_settings = false;

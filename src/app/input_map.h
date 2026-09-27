@@ -18,7 +18,7 @@
  * is the layout SwapInputBits translates into the SNES auto-joypad word. The
  * host actions after them are gamepad-only (except MagicCycle and the render
  * comparison control, see below):
- * keyboard hotkeys (Esc/F1, P, T, F5, F7) stay hard-wired in main.c so a
+ * keyboard hotkeys (Esc/F1, P, T, F5, F7) stay owned by host_input.c so a
  * rebind cannot strand a desktop player without a way back into the menu. On a
  * Steam Deck there is no keyboard at all, so the pad needs its own way to
  * reach the overlay. */
@@ -58,7 +58,7 @@ typedef enum {
   kInputAction_EdgeEnd,
 
   /* Analog camera actions. Unlike everything above these are POLLED, not
-   * edge-driven: main.c asks for each one's 0..1 magnitude once per host
+   * edge-driven: HostInput_ApplyAnalogCamera asks for each one's 0..1 magnitude once per host
    * iteration and integrates it over real elapsed time, so a stick held
    * half-way orbits at half speed. Dynamic Cam accepts the same controls but
    * treats orbit as a returning transient offset. */
@@ -135,7 +135,7 @@ void InputMap_Shutdown(void);
  * this layer owns (the caller may still want to look at it for other reasons;
  * the return value is informational, not a consume flag). */
 void InputMap_HandleEvent(const SDL_Event *event);
-/* Keyboard path, kept separate because main.c's hotkey chain also wants the
+/* Keyboard path, kept separate because host_input.c's hotkey chain also wants the
  * event and ordering there matters. `scancode` is SDL_Scancode; `repeated`
  * is SDL's key-down auto-repeat flag and is false for key-up. */
 void InputMap_HandleKey(int scancode, bool pressed, bool repeated);
@@ -161,7 +161,7 @@ bool InputMap_GamepadIsActive(void);
 /* Current joypad word in runner bit order, already arbitrated under the
  * configured device mode and selected pad slot. */
 uint32 InputMap_State(void);
-/* Drops every held bit — used wherever main.c freezes the game (menu open,
+/* Drops every held bit — used wherever host input freezes the game (menu open,
  * inspector selection) so a held direction cannot leak across the freeze. */
 void InputMap_Clear(void);
 

@@ -92,7 +92,7 @@ static float s_stick_x, s_stick_y;
 
 /* Mouse drag state is session state, not page state. It is reset on both sides
  * of an open/close transition because the button-up that ended a drag can arrive
- * after the reader has closed and main.c will then correctly route it elsewhere. */
+ * after the reader has closed and HostInput_HandleEvent can route it elsewhere. */
 static bool s_dragging;
 static int s_drag_x, s_drag_y;
 

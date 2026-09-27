@@ -730,6 +730,7 @@ static void PassLairs(RandomizerMode spots, RandomizerMode types, uint32 seed) {
 /* ------------------------------------------------------------------- driver */
 
 bool Randomizer_Init(uint8 *rom, uint32 size) {
+  free(s_rom_pristine);
   s_campaign_bound=false;
   s_rom_live = NULL;
   s_rom_pristine = NULL;

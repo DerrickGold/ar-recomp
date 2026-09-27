@@ -660,7 +660,7 @@ static const char *const kInterpolationSourceLabels[] = {
  * format — do not reword them without teaching the parser the old spelling.
  * "32.04 kHz" is the SNES S-DSP's native rate, offered for completeness, but
  * SDL clamps the device rate to at least 44100: selecting it does not open a
- * 32kHz device. main.c clamps the request and logs why; the row's description
+ * 32kHz device. host_audio.c clamps the request and logs why; the row's description
  * says so too. */
 static const char *const kAudioFrequencyLabels[] = {
   "32.04 kHz",
@@ -2551,7 +2551,7 @@ const SettingDesc g_setting_descs[] = {
                  "Capture WRAM, VRAM, CGRAM, OAM, and the current game framebuffer."),
   ACTION_SETTING("restart_game", kSettingAction_Restart,
                  kSettingCat_Extras, NULL, false, "Restart game",
-                 "Persist settings and battery SRAM, then restart the application."),
+                 "Persist settings and battery SRAM, then reset the game in this window."),
   ACTION_SETTING("exit_desktop", kSettingAction_Exit,
                  kSettingCat_Extras, NULL, false, "Exit to desktop",
                  "Persist settings and battery SRAM, then close the application."),

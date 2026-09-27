@@ -65,7 +65,7 @@ int main(void) {
   g_settings.audio_samples = 512;
   g_settings.audio_master_volume = 75;
   g_settings.audio_enabled = true;
-  AudioSession_Install();
+  AudioSession_Begin();
   Expect("LMEXR");
   AudioSession_StartOutput();
   Expect("O");
@@ -95,7 +95,20 @@ int main(void) {
   AudioSession_SetPaused(true);
   Expect("HP");
   assert(s_failures == 1);
-  AudioSession_Shutdown();
+  AudioSession_End();
+  Expect("SD");
+  /* A new device must receive its initial pause even when the previous
+   * session ended in the same paused state. */
+  s_pause_ok = true;
+  AudioSession_Begin();
+  Expect("LMEXR");
+  AudioSession_StartOutput();
+  Expect("O");
+  AudioSession_SetPaused(true);
+  Expect("HP");
+  AudioSession_SetPaused(false);
+  Expect("ph");
+  AudioSession_End();
   Expect("SD");
   puts("audio session: ordered transport edges, live settings and teardown passed");
   return 0;

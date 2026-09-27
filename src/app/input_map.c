@@ -169,9 +169,8 @@ static const struct {
   int pad_kind;   /* kInputBind_* */
   int pad_code;
 } kDefaults[kInputAction_Count] = {
-  /* The keyboard column reproduces the pre-rebinding hard-coded layout in
-   * main.c exactly, so an existing player's muscle memory survives the
-   * upgrade with no settings.ini present. */
+  /* Preserve the original keyboard bindings when no settings.ini is present,
+   * so existing players keep their familiar controls. */
   [kInputAction_B]      = { "B jump/confirm", SDL_SCANCODE_Z,
                             kInputBind_PadButton, SDL_GAMEPAD_BUTTON_SOUTH },
   [kInputAction_Y]      = { "Y attack", SDL_SCANCODE_A,

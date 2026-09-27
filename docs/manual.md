@@ -307,7 +307,9 @@ camera framing so the player stays tracked independently of the extended view.
 
 Restart Game and Exit Desktop live at the end of System → Tools. Both flush
 `settings.ini` and battery SRAM through the normal shutdown path; restart then
-replaces the current process with the same executable and command line.
+reloads the game and active save in the same process and window. Switching or
+importing a save uses this same reset path. Audio and game state are rebuilt;
+the window stays open.
 
 **Show debug settings** (System → Tools) reveals the developer-only rows: the
 diorama and Town 3D numeric tuning dials, their per-layer and per-stage A/B
@@ -459,6 +461,12 @@ confirmations. Existing campaigns and prepared games still restore their saved
 recipes unchanged; fresh slots start as standard games. Left/Right or the page
 bindings change pages; Confirm enters the details, Up/Down scrolls them, and
 **F3 / SNES X** opens the full text. Back returns to the slot list.
+
+When no saved campaign or prepared new game exists, this menu opens before
+the title screen starts. Old `saves/save.srm` or `saves/save.ini` files are
+automatically adopted into Slot 1 on the first slot-system launch, with the
+original retained in `saves/legacy-layout`. The file's format takes precedence
+over the new-slot format preference.
 
 The slot list has a scrollbar, with **Advanced** at the bottom for the save
 editor, import/export and storage format. Press **SNES Y** (default keyboard

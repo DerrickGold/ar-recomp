@@ -208,7 +208,13 @@ bool SaveSlots_Open(SaveSlots *s,const char *root,SaveBackend legacy,SaveError *
     s->adopted = true;
     char native[kSaveSlotPathCapacity],ini[kSaveSlotPathCapacity];
     SaveSlots_Paths(s,0,native,ini,sizeof(native));
-    s->records[0].ever_saved=Probe(legacy==kSaveBackend_Ini?ini:native,NULL)!=0;
+    const int native_exists = Probe(native, NULL), ini_exists = Probe(ini, NULL);
+    if (native_exists < 0 || ini_exists < 0) goto invalid;
+    /* The preference controls new slots, not the format of an existing save.
+     * When both historical files exist, retain the configured selection. */
+    if (native_exists && !ini_exists) s->records[0].backend = kSaveBackend_NativeSrm;
+    if (ini_exists && !native_exists) s->records[0].backend = kSaveBackend_Ini;
+    s->records[0].ever_saved = native_exists || ini_exists;
     if(!s->records[0].ever_saved) {
       Path(s,"actraiser.srm",path,sizeof(path));
       s->legacy_native=Probe(path,NULL)!=0;
@@ -323,6 +329,16 @@ bool SaveSlots_ReadDraft(const SaveSlots *s, unsigned slot, void *out, size_t ca
       !DraftPath(s, slot, path))
     return Fail(e,"No prepared new game for this slot.");
   return Read(path,out,cap,size,e);
+}
+bool SaveSlots_NeedsSetup(const SaveSlots *s) {
+  if (!s || !s->lock || s->pending) return false;
+  for (unsigned i = 0; i < kSaveSlotCount; ++i) {
+    SaveSlotInspection slot;
+    if (s->records[i].prepared || !SaveSlots_Inspect(s, i, &slot) ||
+        slot.state != kSaveSlot_Empty)
+      return false;
+  }
+  return true;
 }
 SaveBackend SaveSlots_DestinationBackend(const SaveSlots *s) {
   const SaveSlotRecord *record=&s->records[s->destination];

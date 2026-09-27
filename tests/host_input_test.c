@@ -38,6 +38,7 @@ static int s_pads, s_keys, s_pad_events, s_menu_keys, s_menu_pads;
 static int s_clears, s_mouse, s_text, s_actions;
 static const char *s_last_setting;
 static InputMapActionFn s_action_handler;
+static bool s_input_open;
 static SettingDesc s_setting;
 
 static const ActRaiserDisplayGeometry s_geometry;
@@ -107,6 +108,14 @@ float InputMap_AnalogAction(InputAction action) {
 }
 void InputMap_Clear(void) {
   ++s_clears;
+}
+void InputMap_Init(void) {
+  assert(!s_input_open);
+  s_input_open = true;
+}
+void InputMap_Shutdown(void) {
+  assert(s_input_open && !s_action_handler);
+  s_input_open = false;
 }
 bool InputMap_GameActionHeld(InputAction action) {
   return 0;
@@ -322,10 +331,20 @@ int main(void) {
   /* Keyboard and pad save-state commands reach the same application action. */
   Key(SDL_EVENT_KEY_DOWN, SDLK_F5);
   assert(s_actions == 1 && !strcmp(s_last_setting, "save_state"));
-  HostInput_InstallActionHandler();
+  HostInput_BeginSession();
   assert(s_action_handler);
   s_action_handler(kInputAction_SaveState);
   assert(s_actions == 2 && !strcmp(s_last_setting, "save_state"));
+  if (!HostInput_IsPaused()) HostInput_TogglePause();
+  if (!HostInput_IsTurbo()) HostInput_ToggleTurbo();
+  HostInput_RequestPausedRedraw();
+  HostInput_EndSession();
+  assert(!s_input_open && !s_action_handler);
+  HostInput_BeginSession();
+  assert(!HostInput_IsPaused() && !HostInput_IsTurbo());
+  assert(!HostInput_IsPausedRedrawPending() && !HostInput_InspectorOwnsPause());
+  HostInput_EndSession();
+  assert(!s_input_open && !s_action_handler);
   puts("host input: modal routing, device arbitration and releases passed");
   return 0;
 }

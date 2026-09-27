@@ -16,8 +16,8 @@ void SaveSlotHost_AttachBatterySave(bool headless);
 /* Initializes the destination slot's regional campaign and stages a new game
  * prepared there. */
 void SaveSlotHost_InitializeRegionalCampaign(void);
-/* Confirms the slot switch, then installs the storage hooks, the regional
- * settings writer and the settings overlay's save-slot hooks. */
+/* Confirms the slot switch, installs storage/UI hooks, and opens save setup
+ * before the first tick when the collection has no campaign or draft. */
 void SaveSlotHost_InstallHooks(void);
 /* Coalesced after completed game ticks: persist game-originated battery
  * changes, report failures once, and stop after five seconds of failed writes.

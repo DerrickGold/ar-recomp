@@ -15,8 +15,11 @@ typedef enum RuntimeLifecycleRequest {
   kRuntimeLifecycle_Exit,
 } RuntimeLifecycleRequest;
 
-/* Installs the settings observers after the renderer and overlay exist. */
-void RuntimeSettings_Install(void);
+/* Starts a session's lifecycle requests and installs its settings observers
+ * after the renderer and overlay exist. */
+void RuntimeSettings_BeginSession(void);
+/* Detaches callbacks before their session-owned targets are torn down. */
+void RuntimeSettings_EndSession(void);
 bool RuntimeSettings_HandleAction(const SettingDesc *desc);
 
 RuntimeLifecycleRequest RuntimeSettings_LifecycleRequest(void);

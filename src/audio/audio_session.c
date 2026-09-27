@@ -14,7 +14,12 @@
 #include "replacements/music_replacements.h"
 #include "snesrecomp/game/types.h"
 
-void AudioSession_Install(void) {
+static bool s_pause_initialized, s_applied_pause;
+static int s_rejected_chunks;
+
+void AudioSession_Begin(void) {
+  s_pause_initialized = s_applied_pause = false;
+  s_rejected_chunks = 0;
   /* Music uses the manifest's [music:] sections and works headless too. */
   const char *music_manifest = getenv("AR_MUSIC_MANIFEST");
   if (!music_manifest || !music_manifest[0])
@@ -42,11 +47,10 @@ void AudioSession_AfterTicks(void) {
   {
     int dropped = HostAudio_TakeRejectedChunkCount();
     if (dropped) {
-      static int total;
-      total += dropped;
+      s_rejected_chunks += dropped;
       fprintf(stderr, "[audio] %d chunk(s) rejected by SDL_PutAudioStreamData "
                       "(%d total this session) — audio glitched\n",
-              dropped, total);
+              dropped, s_rejected_chunks);
     }
   }
 
@@ -65,11 +69,9 @@ void AudioSession_AfterTicks(void) {
  * decoder before resuming the device, so no callback can advance only one
  * source across the edge. */
 void AudioSession_SetPaused(bool paused) {
-  static bool initialized;
-  static bool applied_pause;
-  if (initialized && applied_pause == paused) return;
-  initialized = true;
-  applied_pause = paused;
+  if (s_pause_initialized && s_applied_pause == paused) return;
+  s_pause_initialized = true;
+  s_applied_pause = paused;
   bool success = true;
   if (paused) success = HostAudio_SetHostPaused(true);
   MusicReplacements_SetHostPaused(paused);
@@ -81,7 +83,7 @@ void AudioSession_SetPaused(bool paused) {
   }
 }
 
-void AudioSession_Shutdown(void) {
+void AudioSession_End(void) {
   HostAudio_Shutdown();
   MusicReplacements_Shutdown();
 }

@@ -321,6 +321,9 @@ endif()
 # those subsystems move behind backend operations.
 set(_resource_owner_files
     "${GAME_SOURCE_ROOT}/main.c"
+    "${GAME_SOURCE_ROOT}/app/application.c"
+    "${GAME_SOURCE_ROOT}/app/game_session.c"
+    "${GAME_SOURCE_ROOT}/app/game_loop.c"
     "${GAME_SOURCE_ROOT}/present/present.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d.c"
     "${GAME_SOURCE_ROOT}/sim/sim3d/present_sim3d_internal.h"

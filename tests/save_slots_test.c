@@ -214,6 +214,34 @@ static void ActiveEmptyFailure(const char *root,SaveBackend backend) {
   RemoveCollection(root);
 }
 static void LegacyAdoption(void) {
+  /* First adoption detects the actual file, even with the opposite new-slot
+   * preference. Reopening cannot reinterpret it or repeat the migration. */
+  for (unsigned backend = 0; backend < kSaveBackend_Count; ++backend) {
+    const char *root = "save-slots-detect-legacy";
+    assert(!MKDIR(root));
+    SaveError error = {{0}};
+    uint8_t image[kActRaiserSramSize] = {0}, preserved[kActRaiserSramSize];
+    Save_RecomputeChecksum(image);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/save.%s", root,
+             backend == kSaveBackend_Ini ? "ini" : "srm");
+    assert(Save_WriteFile((SaveFileFormat)backend, path, image, &error));
+    SaveSlots slots;
+    for (unsigned boot = 0; boot < 2; ++boot) {
+      assert(SaveSlots_Open(&slots, root, (SaveBackend)(1 - backend), &error));
+      SaveSlotInspection slot;
+      assert(slots.records[0].backend == (SaveBackend)backend);
+      assert(SaveSlots_Inspect(&slots, 0, &slot) && slot.state == kSaveSlot_Ready);
+      assert(!SaveSlots_NeedsSetup(&slots));
+      assert(!memcmp(slot.image, image, sizeof(image)));
+      SaveSlots_Close(&slots);
+    }
+    snprintf(path, sizeof(path), "%s/legacy-layout/save.%s", root,
+             backend == kSaveBackend_Ini ? "ini" : "srm");
+    assert(Save_LoadFile((SaveFileFormat)backend, path, preserved, &error));
+    assert(!memcmp(preserved, image, sizeof(image)));
+    RemoveCollection(root);
+  }
   for(unsigned managed=0;managed<2;++managed) {
     const char *root=managed?"save-slots-v1-managed":"save-slots-v1-legacy";assert(!MKDIR(root));
     char path[512];SaveError error={{0}};uint8_t image[kActRaiserSramSize]={0};Save_RecomputeChecksum(image);
@@ -319,6 +347,10 @@ static int BootFixture(const char *mode,const char *root) {
     assert(SaveSlotManager_Inspect(&slots,1,&target) && target.state==kSaveSlot_Empty);
     ArRegionalSession draft;assert(SaveSlotManager_ReadDraft(&slots,1,&draft,&error));
     assert(draft.randomizer.enabled && draft.randomizer.seed==424242);
+  } else if(!strcmp(mode,"--verify-import-boot")) {
+    assert(slots.active == 1 && !slots.pending);
+    assert(SaveSlotManager_Inspect(&slots, 1, &target) && target.state == kSaveSlot_Ready);
+    assert(!strcmp(target.summary.name, "ASTRA"));
   } else if(!strcmp(mode,"--verify-legacy-boot")) {
     assert(slots.active==0 && !slots.pending && slots.records[0].ever_saved);
     assert(!slots.records[0].checkpoint_required);
@@ -335,6 +367,7 @@ static void UpdateEmptyDraft(const char *root,SaveBackend backend) {
   assert(!MKDIR(root));
   SaveSlots slots;SaveError error={{0}};
   assert(SaveSlots_Open(&slots,root,backend,&error));
+  assert(SaveSlots_NeedsSetup(&slots));
   ArRegionalSession draft,loaded;const uint8_t id[16]={11};ArRegionalRules rules={0};
   rules.artwork.source[kArRegionalArtwork_TitleBackground]=kArRegionalSource_Japan;
   RandomizerConfig recipe=RandomizerConfig_Default();recipe.seed=987;
@@ -349,6 +382,7 @@ static void UpdateEmptyDraft(const char *root,SaveBackend backend) {
   assert(!RMDIR(blocked));
   assert(SaveSlots_UpdateDraft(&slots,bytes,size,&error));
   assert(!slots.pending && !slots.records[0].ever_saved && slots.records[0].prepared);
+  assert(!SaveSlots_NeedsSetup(&slots));
   SaveSlots_Close(&slots);assert(SaveSlots_Open(&slots,root,backend,&error));
   assert(SaveSlotManager_ReadDraft(&slots,0,&loaded,&error));
   assert(!memcmp(&loaded,&draft,sizeof(draft)) && loaded.randomizer.seed==987);

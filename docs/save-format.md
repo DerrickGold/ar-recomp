@@ -301,6 +301,12 @@ conflicts stop migration without replacing either version. Pending slot-switch
 fingerprints survive because they bind contents rather than absolute paths.
 Historical `actraiser.srm` adoption converts to the selected backend and carries
 matching companions; a genuine metadata-free save remains legacy.
+On first adoption, a lone root `save.srm` or `save.ini` selects its own backend,
+regardless of the preference for new slots. If both exist, that preference
+resolves the selection. Both originals and companions remain preserved.
+An entirely empty collection with no prepared draft opens the save browser
+before the first emulated tick; occupied or unavailable slots prevent this
+fresh-install classification.
 
 An observed checkpoint, a prior managed
 commit, or a prepared campaign establishes the checkpoint requirement. A genuine
@@ -327,6 +333,11 @@ editor overrides. The source stays active until the next boot has validated and
 loaded the destination, initialized its regional/randomizer state, and
 acknowledged the request. It then removes the intent before allowing gameplay
 writes. Failed requests preserve the source; failed boots offer recovery.
+This boot runs inside the existing process: audio production stops before the
+old runner is destroyed, session resources and inputs are reset, and the new
+runner reloads the destination through the normal save validation path. SDL,
+the render device and the application window remain alive. A failed persistence
+flush prevents reset, retaining the request for recovery on the next launch.
 
 An empty destination stores its copied recipe and starting rules in
 `slots/02/new-game.ardraft` (numbered by visible slot) using the canonical regional

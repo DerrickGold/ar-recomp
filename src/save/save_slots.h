@@ -49,6 +49,9 @@ void SaveSlots_Close(SaveSlots *slots);
 bool SaveSlots_Paths(const SaveSlots *slots, unsigned slot, char *native, char *ini,
                      size_t capacity);
 bool SaveSlots_Inspect(const SaveSlots *slots, unsigned slot, SaveSlotInspection *out);
+/* No saved campaign or prepared new game anywhere in the collection.
+ * Missing/corrupt data requiring recovery never counts as a fresh install. */
+bool SaveSlots_NeedsSetup(const SaveSlots *slots);
 bool SaveSlots_ReadDraft(const SaveSlots *slots, unsigned slot, void *out, size_t capacity,
                          size_t *size, SaveError *error);
 /* Update the active empty slot's setup without scheduling a restart. */

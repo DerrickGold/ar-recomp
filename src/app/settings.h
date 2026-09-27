@@ -214,7 +214,7 @@ typedef enum {
 } SettingGameChangeKind;
 
 /* True for every Town 3D tab. Callers that react to "the 3D town presentation
- * changed" (main.c's paused-redraw kick) want the whole group, not one tab. */
+ * changed" (HostInput's paused-redraw request) want the whole group, not one tab. */
 bool Settings_CategoryIsSim3D(SettingCategory category);
 
 

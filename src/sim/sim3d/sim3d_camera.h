@@ -10,7 +10,7 @@
 
 /* Host-side camera controls for enhanced towns and globe navigation. Render
  * textures remain host-owned, so availability accepts their current readiness
- * rather than reaching into main.c. In Dynamic mode, zoom edits the persisted
+ * through an explicit feature-owned input API. In Dynamic mode, zoom edits the persisted
  * baseline while orbit is a transient offset that decays after release.
  * Globe inspection uses a separate visit-local orbit/zoom, never town settings;
  * orbit returns on release in either town-camera mode. Reset restores travel. */

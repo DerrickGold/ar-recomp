@@ -1,7 +1,7 @@
 /* render_pipeline_test.c — SDL3 render-pipeline regression guard.
  *
  * The prior SDL3 attempt produced a black screen while the game logic ran, so
- * this test exercises exactly the pixel path main.c uses to present the
+ * this test exercises exactly the pixel path presentation_textures.c uses to present the
  * emulated SNES framebuffer — but headless, without a ROM:
  *
  *   ARGB8888 pixel buffer
@@ -55,7 +55,7 @@ int main(void) {
   SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
   CHECK(SDL_Init(SDL_INIT_VIDEO));
 
-  /* A hidden real window + software renderer mirrors main.c's headless_video
+  /* A hidden real window + software renderer mirrors application.c's headless_video
    * path (SDL_SOFTWARE_RENDERER) while keeping SDL_RenderReadPixels honest.
    * The window is deliberately WIDER than the 256:224 content aspect (a 16:9
    * shape) so an active LETTERBOX presentation produces pillarbars — which is
@@ -108,7 +108,7 @@ int main(void) {
   }
 
   /* Streaming texture at the full widescreen budget, like g_texture — created
-   * the SAME way main.c creates it, including the blend mode. This is the
+   * the same way presentation_textures.c creates it, including the blend mode. This is the
    * regression guard for the black-screen bug: SDL3 defaults new textures to
    * BLENDMODE_BLEND (SDL2 used NONE), and the PPU framebuffer carries alpha=0,
    * so without an explicit NONE the base framebuffer blends to transparent and
@@ -172,7 +172,7 @@ int main(void) {
    * presentation is active, SDL_GetRenderOutputSize must still report the
    * TRUE physical output (the 1:1 replacement for SDL2's
    * SDL_GetRendererOutputSize), whereas SDL_GetCurrentRenderOutputSize is
-   * shrunk to the logical content region. main.c/settings_overlay.c compute
+   * shrunk to the logical content region. Presentation and settings overlay code compute
    * viewports and map mouse clicks in physical-pixel space, so they must use
    * the former — using the latter double-letterboxes overlays and mis-maps
    * clicks in widescreen mode. */

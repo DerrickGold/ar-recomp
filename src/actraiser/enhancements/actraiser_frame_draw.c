@@ -243,7 +243,7 @@ static void ActRaiser_PublishFrameCapture(SrResult scanout_status,
                                           const SrPpuScanoutResult *result) {
   /* Latch the margin state the frame was ACTUALLY
    * rendered with, here, rather than letting FrameSlot_Capture read live g_ppu.
-   * Between this function and the frame slot capture, main.c may call
+   * Between this function and the frame slot capture, the application loop may call
    * HostPpuOutput_Rebind(), whose public margin configuration
    * zeroes both live margins — reading g_ppu later would silently describe a
    * different frame than the pixels came from. The non-diorama rebind gate

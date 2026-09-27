@@ -319,8 +319,17 @@ static void OnGamepadHostAction(InputAction action) {
   }
 }
 
-void HostInput_InstallActionHandler(void) {
+void HostInput_BeginSession(void) {
+  InputMap_Init();
+  s_paused = s_turbo = s_inspector_owns_pause = s_paused_redraw_pending = false;
+  HostInput_ClearHeld();
   InputMap_SetActionHandler(OnGamepadHostAction);
+}
+
+void HostInput_EndSession(void) {
+  InputMap_SetActionHandler(NULL);
+  HostInput_ClearHeld();
+  InputMap_Shutdown();
 }
 
 /* Capture wins over hotkeys; then the active menu device gets first use.

@@ -21,6 +21,8 @@
  * Everything here is observation only — disabled unless AR_SFXCENSUS is set,
  * and it never influences audio output. */
 
+/* Per-session counters and observer. Call after runner creation, before audio
+ * starts; Report detaches the observer before the runner is destroyed. */
 void SfxCensus_Init(void);
 
 /* CPU thread, from the BRK hook, before the id reaches the mailbox. */

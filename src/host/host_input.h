@@ -56,8 +56,10 @@ void HostInput_UpdateRenderComparison(void);
 bool HostInput_RenderComparisonOwnsPause(void);
 bool HostInput_RenderComparisonCaptureRequired(void);
 
-/* Installs the gamepad edge-action bridge after InputMap_Init. */
-void HostInput_InstallActionHandler(void);
+/* Owns InputMap's lifetime, clears pause/turbo/held controls on each begin,
+ * and installs the gamepad edge-action bridge. Pair once per game session. */
+void HostInput_BeginSession(void);
+void HostInput_EndSession(void);
 
 /* Apply live settings here, beside the subsystem they configure. */
 struct SettingDesc;

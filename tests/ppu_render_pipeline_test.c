@@ -2,7 +2,7 @@
  *
  * Stronger companion to render_pipeline_test.c: instead of a synthetic pixel
  * buffer, this instantiates the actual SNES PPU, points it at a framebuffer via
- * the same PpuBeginDrawing/ppu_runLine path main.c uses, sets a known backdrop
+ * the same PpuBeginDrawing/ppu_runLine path host_ppu_output.c uses, sets a known backdrop
  * color, renders real scanlines, then pushes that framebuffer through the exact
  * SDL3 present + read-back pipeline. It proves the pixels the emulator actually
  * produces (RGB with alpha byte = 0) are VISIBLE after presenting — i.e. the
@@ -27,8 +27,6 @@
 #include "sim/world_nav/sim_world_navigation_capture.h"
 #include "runner_internal.h"
 #include "snes/snes.h"
-
-/* main.c owns this global; the PPU line renderer reads it to pick new/old path. */
 
 /* Trace/debug hooks the PPU references but that only fire under instrumentation
  * (SNESRECOMP_TRACE / debug server). Stub them so this standalone harness links
@@ -3124,7 +3122,7 @@ int main(void) {
   ppu_reset(ppu);
 
   /* Framebuffer the PPU renders into (ARGB8888, 4 bytes/px), same shape as
-   * main.c's g_pixels. The PPU writes RGB and leaves the alpha byte 0. */
+   * host frame surfaces. The PPU writes RGB and leaves the alpha byte 0. */
   static uint8_t fb[kW * kH * 4];
   memset(fb, 0, sizeof(fb));
   PpuBeginDrawing(ppu, fb, kW * 4, 0);
@@ -3149,7 +3147,7 @@ int main(void) {
   CHECK(mid[2] == exp_r && mid[1] == exp_g && mid[0] == exp_b);
   CHECK(mid[3] == 0);   /* the alpha-0 framebuffer that triggered the bug */
 
-  /* ---- Present through the exact SDL3 path main.c uses ---- */
+  /* ---- Present through the production SDL3 presentation path ---- */
   SDL_Window *window =
       SDL_CreateWindow("ppu-pipeline-test", kW * 3, kH * 3, SDL_WINDOW_HIDDEN);
   CHECK(window != NULL);

@@ -145,9 +145,15 @@ static void OnRuntimeSettingChanged(const SettingDesc *desc,
   HostDisplay_ApplySetting(desc);
 }
 
-void RuntimeSettings_Install(void) {
+void RuntimeSettings_BeginSession(void) {
+  s_lifecycle_request = kRuntimeLifecycle_None;
   Settings_SetChangeObserver(OnRuntimeSettingChanged);
   Settings_SetActionObserver(RuntimeSettings_HandleAction);
+}
+
+void RuntimeSettings_EndSession(void) {
+  Settings_SetChangeObserver(NULL);
+  Settings_SetActionObserver(NULL);
 }
 
 RuntimeLifecycleRequest RuntimeSettings_LifecycleRequest(void) {
