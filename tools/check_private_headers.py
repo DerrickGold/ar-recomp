@@ -40,6 +40,7 @@ RULES = {
         'src/sim/world_nav/present_world_nav*.c', 'src/sim/world_nav/present_sim_globe.c'],
     'action/action_effect_render_internal.h': [
         'src/action/action_effect_render.c', 'src/action/action_scene_effect_render.c',
+        'src/action/action_cave_effect_render.c',
         'src/action/action_scene_lightning_render.c'],
     'platform/sdl/sim3d_depth_pass_sdl_internal.h': [
         'src/platform/sdl/sim3d_depth_pass*_sdl.c'],

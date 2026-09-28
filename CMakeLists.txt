@@ -1853,6 +1853,7 @@ if(BUILD_TESTING)
         tests/action_effects_test.c
         src/action/action_effect_clock.c
         src/action/action_effects.c
+        src/action/action_landing_dust.c
         src/action/action_bg_world.c
     )
     target_include_directories(actraiser_action_effects_test PRIVATE
@@ -2044,6 +2045,7 @@ if(BUILD_TESTING)
 
     set(AR_ACTION_EFFECT_TEST_SOURCES
         src/action/action_effect_render.c
+        src/action/action_cave_effect_render.c
         src/action/action_scene_effect_render.c
         src/action/action_scene_lightning_render.c
         src/action/action_effect_projection.c

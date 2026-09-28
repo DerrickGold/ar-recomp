@@ -24,8 +24,9 @@ re-enabling them uses current state. The waterfall room's authored layer section
 is selected independently of the toggle. Off removes decorations from the
 published effect frame and skips their flat masks, geometry and heat pass.
 
-The first new visual is the **Fillmore forest prototype** described below.
-The other additions remain planned. They must all honor this same switch,
+The **Fillmore forest** is implemented and visually approved. The first
+**Fillmore Act 2 cave/temple/tower pass** is described in
+[fillmore-cave-effects.md](fillmore-cave-effects.md). Other additions remain planned. They must all honor this same switch,
 including any future refraction or atmosphere passes. Existing lava heat
 currently applies only in flat mode.
 
@@ -87,8 +88,8 @@ projected footprint and explicit room bounds, so foreground trees occlude them
 and the room's empty border stays unlit. Flat mode uses the existing BG2 winner
 mask. In forest frames its black pixels are converted to zero alpha in bounded
 scratch storage, allowing the same upload to mask both illumination and foliage.
-The leaf pass masks RGB and alpha before premultiplied composition; it reuses the
-existing effect target.
+Both passes sample the alpha mask directly as geometry texture coordinates;
+no intermediate render target or full-screen mask/composition pass is needed.
 
 Capture validates room dimensions and a fixed metatile readiness signature,
 then publishes three records in the existing 16-record decoration list. At most
@@ -361,8 +362,8 @@ Initial prototype validation, 2026-09-27:
   `video-baseline-on`, `video-headless-{on,off}-probe` and
   `video-no-consumer-{on,off}` under the same local evidence directory.
 
-Art approval is pending the gameplay video review. The next implementation is
-shared water-region metadata and the Fillmore cave glints/ripples/drips.
+The forest revisions and final implementation audit are approved. Fillmore Act 2
+now has a first water, drip, dust and tower-light pass awaiting visual review.
 
 ## Art direction
 
@@ -374,7 +375,7 @@ particles. Prefer local effects with believable sources; keep the HUD clear.
 | Environment | Candidate treatment |
 | --- | --- |
 | Fillmore forest | World-anchored godrays scroll through uneven canopy openings behind trees; a foreground pass illuminates actors/terrain. Bright drifting motes, fine dust pockets inside rays, and falling leaf silhouettes with lit edges. |
-| Fillmore caves | Slow drips from selected stalactites/damp ledges, gentle pool ripples, cool surface glints and mild water refraction. |
+| Fillmore caves | Slow drips from selected stalactites/damp ledges, gentle pool ripples, cool surface glints; scene refraction remains a future experiment. |
 | Stone interiors | Local window light and slowly drifting dust where openings justify it. |
 | Bloodpool exterior | Thin blue-violet mist over water, restrained moonlit surface glints, behind bridges and actors. |
 | Bloodpool castle | Cool light through windows, balanced against the existing warm torch accents. |
@@ -395,8 +396,10 @@ and falling Aitos water distinct parameters.
 
 - Glints follow surface motion and local illumination; cave reflections stay
   sparse and cool rather than resembling glitter or pickups.
-- Refraction is clipped to water and distorts only scenery visible through it.
-  Shorelines and above-water actors stay crisp. Caustics are a later optional
+- Future refraction must be clipped to water and distort scenery visible through
+  it. The water-artwork-only CPU prototype was removed after its On/Off review
+  showed negligible benefit; stronger displacement of the same flat fill is not
+  sufficient. Shorelines and above-water actors stay crisp. Caustics are a later optional
   addition for plausibly illuminated submerged rock or nearby surfaces.
 - Drips gather briefly at chosen ceiling/ledge anchors, detach and fall, then
   make a small ripple on water or a brief splash on rock. Pre-authored landing
@@ -425,6 +428,14 @@ Batch geometry by layer/material. Gate new capture/generation work early when
 the setting is off, while retaining any metadata needed for room layout. Scope
 refraction/haze passes to relevant layers or regions and measure their GPU cost;
 do not assume that a small particle count makes a large translucent pass cheap.
+
+Carry forward the [Deck/D3D12 constraints](fillmore-effects-audit.md#steam-deck-and-sdld3d12-constraints)
+for every new environment. Bound texture-update calls as well as bytes; avoid
+per-row/per-emitter updates, new optional device requirements, upload-memory
+reads and extra full-screen resolves. Keep supported resource/blend fallbacks.
+Mac compilation or CPU timing does not establish performance on Deck/Vulkan or
+Windows/D3D12: retain explicit native On/Off acceptance, including frame-time
+spikes, the packaged SDL version, and fixed power/pacing settings.
 
 ## Suggested implementation order
 

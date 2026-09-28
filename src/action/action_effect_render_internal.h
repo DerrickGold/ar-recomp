@@ -102,6 +102,10 @@ bool AppendGlow(ActionEffectGeometryWriter *writer,
                        void *userdata);
 
 /* ---- defined in action_scene_effect_render.c ---- */
+bool AppendSceneSoftCloud(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    float local_x, float local_y, float radius_x, float radius_y,
+    ArRenderColorF tint, float opacity, unsigned seed,
+    ActionEffectProjectPointFn project_point, void *userdata);
 bool SceneActorHeading(const ActionEffectInstance *effect,
                               float *x, float *y);
 bool AppendSceneParticle(ActionEffectGeometryWriter *writer,
@@ -118,9 +122,19 @@ bool AppendSceneStarParticle(
 SceneParticleClock
 SceneParticleClockAt(const ActionEffectInstance *effect, unsigned visual_ticks,
                      unsigned index, SceneParticleLifetime timing);
+bool AppendSceneClippedTriangle(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *mesh,
+    const ArRenderVertex2D *source, int *mapped, const int *triangle,
+    const ActionEffectLocalRect *clip, ActionEffectProjectPointFn project_point, void *userdata);
+
 ArRenderColorF SceneParticleColor(ArRenderColorF hot,
                                          ArRenderColorF cool,
                                          SceneParticleClock clock);
+
+/* ---- defined in action_cave_effect_render.c ---- */
+bool AppendCaveEnvironment(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectProjectPointFn project_point, ActionEffectClipBoundsFn clip_bounds, void *userdata);
 
 /* ---- defined in action_scene_lightning_render.c ---- */
 bool AppendSwordBeamParticles(ActionEffectGeometryWriter *writer,

@@ -25,7 +25,7 @@ kMistCircle12[kActionSceneEffectWaterfallMistCloudSegments][2] = {
  * BG2/skybox seam, while two soft rings feather it into neighbouring puffs.
  * Per-puff radius, tint and opacity let four overlapping tiers imply volume
  * without a backend-specific 3D-noise shader. */
-static bool AppendWaterfallMistCloud(
+bool AppendSceneSoftCloud(
     ActionEffectGeometryWriter *writer,
     const ActionEffectInstance *effect,
     float local_x, float local_y, float local_radius_x, float local_radius_y,
@@ -170,7 +170,7 @@ static bool AppendWaterfallMistCloudVolume(
     const float opacity = kTierOpacity[tier] *
         (0.90f + 0.10f * pulse) *
         (0.92f + 0.08f * HashUnit(seed ^ 0xA7u));
-    if (!AppendWaterfallMistCloud(
+    if (!AppendSceneSoftCloud(
             writer, effect, x, y,
             kTierRadiusX[tier] * size_jitter * breathe,
             kTierRadiusY[tier] * size_jitter / breathe,
@@ -1082,8 +1082,10 @@ static bool AppendFireballParticles(ActionEffectGeometryWriter *writer,
                                     const ActionEffectInstance *effect,
                                     ActionEffectProjectPointFn project_point,
                                     void *userdata) {
-  const unsigned count = kActionSceneEffectParticlesPerInstance;
-  const ArRenderColorF hot = {1.00f, 0.97f, 0.78f, 0.96f};
+  const bool cave_orb = effect->kind == kActionEffect_FillmoreStatueOrb;
+  const unsigned count = kActionSceneEffectParticlesPerInstance / (cave_orb ? 2 : 1);
+  const ArRenderColorF hot = cave_orb ? (ArRenderColorF){1,.44f,.08f,.8f} :
+      (ArRenderColorF){1.00f, 0.97f, 0.78f, 0.96f};
   const ArRenderColorF cool = {1.00f, 0.10f, 0.00f, 0.00f};
   const unsigned visual_ticks =
       EffectVisualTicks(effect, (unsigned)effect->pulse_ticks);
@@ -1100,14 +1102,15 @@ static bool AppendFireballParticles(ActionEffectGeometryWriter *writer,
     /* Start beyond the 16px source art instead of hiding the youngest
      * sparks inside its painted red tail. The longer cone makes the host
      * enhancement legible without bleaching the authentic projectile. */
-    const float distance = 10.0f + 44.0f * t;
-    const float previous_distance = 10.0f + 44.0f * previous_t;
+    const float wake = cave_orb ? 20 : 44;
+    const float distance = 10.0f + wake*t;
+    const float previous_distance = 10.0f + wake*previous_t;
     x = -heading_x * distance - heading_y * side;
     y = -heading_y * distance + heading_x * side;
     previous_x = -heading_x * previous_distance - heading_y * side;
     previous_y = -heading_y * previous_distance + heading_x * side;
     width = 0.80f + 0.60f * (1.0f - t);
-    reach = 3.0f + 5.0f * t;
+    reach = cave_orb ? 1.5f+2*t : 3+5*t;
 
     const ArRenderColorF color = SceneParticleColor(hot, cool, clock);
     if (!AppendSceneParticle(writer, effect, x, y, previous_x, previous_y,
@@ -1157,6 +1160,22 @@ static bool AppendFireballLighting(ActionEffectGeometryWriter *writer,
       .flare = 0.27f,
       .rise = 0.34f};
   body = kBody;
+  if (effect->kind == kActionEffect_FillmoreStatueOrb) {
+    /* Broad, red-orange spill with a dim core: keep the original red orb
+     * readable and avoid whitening the player against the dark stone. */
+    spill.radius_x = 58;
+    spill.radius_y = 48;
+    spill.centre = (ArRenderColorF){1,.26f,.04f,.22f};
+    spill.ring[0] = (ArRenderColorF){1,.20f,.025f,.16f};
+    spill.ring[1] = (ArRenderColorF){.85f,.09f,.01f,.055f};
+    body.radius_x = 13;
+    body.radius_y = 11;
+    body.centre = (ArRenderColorF){1,.24f,.02f,.24f};
+    body.ring[0] = (ArRenderColorF){1,.15f,.01f,.18f};
+    body.ring[1] = (ArRenderColorF){.85f,.07f,0,.08f};
+    body.flare = .12f;
+    body.rise = .12f;
+  }
   body.axis_x = hx;
   body.axis_y = hy;
   body.lift_x = -hx;
@@ -1726,17 +1745,17 @@ static bool ForestRayIntersectsField(
   return right > rect->x0 && left < rect->x1;
 }
 
-typedef struct ForestClipVertex {
+typedef struct SceneClipVertex {
   ArRenderVertex2D vertex; /* Position is still effect-local, before projection. */
   int source_index;
-} ForestClipVertex;
+} SceneClipVertex;
 
-static unsigned ForestClipCode(ArRenderPointF point, const ActionEffectLocalRect *clip) {
+static unsigned SceneClipCode(ArRenderPointF point, const ActionEffectLocalRect *clip) {
   return (point.x < clip->x0 ? 1u : 0) | (point.x > clip->x1 ? 2u : 0) |
       (point.y < clip->y0 ? 4u : 0) | (point.y > clip->y1 ? 8u : 0);
 }
 
-static float ForestClipDistance(
+static float SceneClipDistance(
     ArRenderPointF point, const ActionEffectLocalRect *clip, int edge) {
   switch (edge) {
     case 0: return point.x - clip->x0;
@@ -1746,20 +1765,20 @@ static float ForestClipDistance(
   }
 }
 
-static ForestClipVertex ForestClipIntersection(
-    ForestClipVertex a, ForestClipVertex b, const ActionEffectLocalRect *clip, int edge) {
+static SceneClipVertex SceneClipIntersection(
+    SceneClipVertex a, SceneClipVertex b, const ActionEffectLocalRect *clip, int edge) {
   /* Use the same endpoint order on shared edges, preventing cracks from
    * opposite-direction floating-point interpolation in adjacent triangles. */
   if (a.vertex.position.x > b.vertex.position.x ||
       (a.vertex.position.x == b.vertex.position.x && a.vertex.position.y > b.vertex.position.y)) {
-    const ForestClipVertex swap = a;
+    const SceneClipVertex swap = a;
     a = b;
     b = swap;
   }
-  const float da = ForestClipDistance(a.vertex.position, clip, edge);
-  const float db = ForestClipDistance(b.vertex.position, clip, edge);
+  const float da = SceneClipDistance(a.vertex.position, clip, edge);
+  const float db = SceneClipDistance(b.vertex.position, clip, edge);
   const float t = da / (da - db);
-  ForestClipVertex result = {
+  SceneClipVertex result = {
     .vertex = {
       .position = {a.vertex.position.x + (b.vertex.position.x - a.vertex.position.x) * t,
                    a.vertex.position.y + (b.vertex.position.y - a.vertex.position.y) * t},
@@ -1776,7 +1795,7 @@ static ForestClipVertex ForestClipIntersection(
   return result;
 }
 
-static bool ForestClipPush(ForestClipVertex *vertices, int *count, ForestClipVertex vertex) {
+static bool SceneClipPush(SceneClipVertex *vertices, int *count, SceneClipVertex vertex) {
   if (*count && vertices[*count - 1].vertex.position.x == vertex.vertex.position.x &&
       vertices[*count - 1].vertex.position.y == vertex.vertex.position.y)
     return true;
@@ -1785,16 +1804,16 @@ static bool ForestClipPush(ForestClipVertex *vertices, int *count, ForestClipVer
   return true;
 }
 
-static bool AppendForestClippedTriangle(
+bool AppendSceneClippedTriangle(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *mesh,
     const ArRenderVertex2D *source, int *mapped, const int *triangle,
     const ActionEffectLocalRect *clip, ActionEffectProjectPointFn project_point, void *userdata) {
-  ForestClipVertex polygon[8], scratch[8];
+  SceneClipVertex polygon[8], scratch[8];
   unsigned common = 15u, any = 0;
   int count = 3;
   for (int i = 0; i < 3; i++) {
-    polygon[i] = (ForestClipVertex){source[triangle[i]], triangle[i]};
-    const unsigned code = ForestClipCode(polygon[i].vertex.position, clip);
+    polygon[i] = (SceneClipVertex){source[triangle[i]], triangle[i]};
+    const unsigned code = SceneClipCode(polygon[i].vertex.position, clip);
     common &= code;
     any |= code;
   }
@@ -1804,13 +1823,13 @@ static bool AppendForestClippedTriangle(
   for (int edge = 0; any && edge < 4 && count; edge++) {
     int next_count = 0;
     for (int i = 0; i < count; i++) {
-      const ForestClipVertex a = polygon[i], b = polygon[(i + 1) % count];
-      const bool a_inside = ForestClipDistance(a.vertex.position, clip, edge) >= 0;
-      const bool b_inside = ForestClipDistance(b.vertex.position, clip, edge) >= 0;
-      if (a_inside != b_inside && !ForestClipPush(scratch, &next_count,
-              ForestClipIntersection(a, b, clip, edge)))
+      const SceneClipVertex a = polygon[i], b = polygon[(i + 1) % count];
+      const bool a_inside = SceneClipDistance(a.vertex.position, clip, edge) >= 0;
+      const bool b_inside = SceneClipDistance(b.vertex.position, clip, edge) >= 0;
+      if (a_inside != b_inside && !SceneClipPush(scratch, &next_count,
+              SceneClipIntersection(a, b, clip, edge)))
         return false;
-      if (b_inside && !ForestClipPush(scratch, &next_count, b)) return false;
+      if (b_inside && !SceneClipPush(scratch, &next_count, b)) return false;
     }
     if (next_count > 1 &&
         scratch[0].vertex.position.x == scratch[next_count - 1].vertex.position.x &&
@@ -1914,7 +1933,7 @@ static bool AppendForestRays(
         const int a = row * kForestRayColumns + column, b = a + kForestRayColumns;
         const int cell[] = {a,a+1,b, a+1,b+1,b};
         for (int j = 0; j < 6; j += 3)
-          if (!AppendForestClippedTriangle(writer, &mesh, source, mapped, &cell[j],
+          if (!AppendSceneClippedTriangle(writer, &mesh, source, mapped, &cell[j],
                   &clip, project_point, userdata))
             return false;
       }
@@ -2074,8 +2093,16 @@ static bool AppendForestLeaves(
 static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
                                  const ActionEffectInstance *effect,
                                  ActionEffectProjectPointFn project_point,
-                                 void *userdata) {
+                                 ActionEffectClipBoundsFn clip_bounds, void *userdata) {
   switch (effect->kind) {
+  case kActionEffect_CaveMist:
+  case kActionEffect_TempleGrit:
+  case kActionEffect_TempleGroundMist:
+  case kActionEffect_CaveWater:
+  case kActionEffect_CaveDrips:
+  case kActionEffect_TempleDust:
+  case kActionEffect_LandingDust:
+    return AppendCaveEnvironment(writer, effect, project_point, clip_bounds, userdata);
   case kActionEffect_ForestLeaves:
     return AppendForestLeaves(writer, effect, project_point, userdata);
   case kActionEffect_ForestCanopyLight:
@@ -2099,6 +2126,7 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
   case kActionEffect_AitosStatueFire:
     return AppendStatueFireParticles(writer, effect, project_point, userdata);
   case kActionEffect_EnemyFireball:
+  case kActionEffect_FillmoreStatueOrb:
   case kActionEffect_MarahnaFireball:
   case kActionEffect_AitosLavaFireball:
     return AppendFireballParticles(writer, effect, project_point, userdata);
@@ -2138,6 +2166,10 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
                                 ActionEffectProjectPointFn project_point,
                                 ActionEffectClipBoundsFn clip_bounds, void *userdata) {
   switch (effect->kind) {
+  case kActionEffect_CaveSheen:
+  case kActionEffect_CaveAmbientLight:
+  case kActionEffect_TowerWindowLight:
+    return AppendCaveEnvironment(writer, effect, project_point, clip_bounds, userdata);
   case kActionEffect_ForestForwardLight:
     return AppendForestRays(writer, effect, true, project_point, clip_bounds, userdata);
   case kActionEffect_ForestCanopyLight:
@@ -2161,6 +2193,7 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
     return AppendWaterfallMistCloudVolume(
         writer, effect, DeterministicPulse(effect), project_point, userdata);
   case kActionEffect_EnemyFireball:
+  case kActionEffect_FillmoreStatueOrb:
   case kActionEffect_MarahnaFireball:
   case kActionEffect_AitosLavaFireball:
     return AppendFireballLighting(writer, effect, project_point, userdata);
@@ -2197,6 +2230,51 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
 static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
   if (!effect) return false;
   switch (effect->kind) {
+    case kActionEffect_LandingDust:
+      return effect->phase == kActionEffectPhase_CaveEnvironment &&
+          effect->visual >= 1 && effect->visual <= 3 &&
+          effect->phase_ticks < kActionLandingDustLifetime &&
+          effect->render_layer == kActionEffectRenderLayer_WorldDust &&
+          effect->projection_plane == kActionEffectProjectionPlane_Bg1;
+    case kActionEffect_CaveMist:
+      return effect->phase == kActionEffectPhase_CaveEnvironment && effect->visual == 2 &&
+          effect->render_layer == kActionEffectRenderLayer_WorldDust &&
+          effect->projection_plane == kActionEffectProjectionPlane_Bg2High;
+    case kActionEffect_CaveSheen:
+      return effect->phase == kActionEffectPhase_CaveEnvironment && effect->visual == 2 &&
+          effect->render_layer == kActionEffectRenderLayer_Bg1Plane &&
+          effect->projection_plane == kActionEffectProjectionPlane_Bg1;
+    case kActionEffect_TempleGroundMist:
+      return effect->phase == kActionEffectPhase_CaveEnvironment && effect->visual == 3 &&
+          effect->render_layer == kActionEffectRenderLayer_Bg1Mist &&
+          effect->projection_plane == kActionEffectProjectionPlane_Bg1 &&
+          effect->geometry.data.rect.x0 == 0 && effect->geometry.data.rect.x1 >= 16 &&
+          effect->geometry.data.rect.x1 <= 448 &&
+          effect->geometry.data.rect.y0 == -26 && effect->geometry.data.rect.y1 == 0;
+    case kActionEffect_CaveAmbientLight:
+    case kActionEffect_TempleGrit:
+      return effect->phase == kActionEffectPhase_CaveEnvironment &&
+          effect->visual >= 2 && effect->visual <= 3 &&
+          effect->render_layer == (effect->kind == kActionEffect_CaveAmbientLight ?
+              kActionEffectRenderLayer_ForegroundLight : kActionEffectRenderLayer_WorldDust) &&
+          effect->projection_plane == kActionEffectProjectionPlane_Bg1;
+    case kActionEffect_CaveWater:
+      return effect->phase == kActionEffectPhase_CaveEnvironment && effect->visual == 2 &&
+          effect->render_layer == kActionEffectRenderLayer_Bg2HighPlane &&
+          effect->projection_plane == kActionEffectProjectionPlane_Bg2High;
+    case kActionEffect_CaveDrips:
+      return effect->phase == kActionEffectPhase_CaveEnvironment && effect->visual == 2 &&
+          effect->render_layer == kActionEffectRenderLayer_WorldOverlay &&
+          effect->projection_plane == kActionEffectProjectionPlane_Bg1;
+    case kActionEffect_TempleDust:
+      return effect->phase == kActionEffectPhase_CaveEnvironment &&
+          effect->visual >= 2 && effect->visual <= 4 &&
+          effect->render_layer == kActionEffectRenderLayer_WorldOverlay &&
+          effect->projection_plane == kActionEffectProjectionPlane_Bg1;
+    case kActionEffect_TowerWindowLight:
+      return effect->phase == kActionEffectPhase_CaveEnvironment && effect->visual == 4 &&
+          effect->render_layer == kActionEffectRenderLayer_ForegroundLight &&
+          effect->projection_plane == kActionEffectProjectionPlane_Bg1;
     case kActionEffect_ForestForwardLight:
       return effect->phase == kActionEffectPhase_ForestCanopyLight &&
           effect->render_layer == kActionEffectRenderLayer_ForegroundLight &&
@@ -2215,6 +2293,9 @@ static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
       return effect->phase == kActionEffectPhase_WallTorch;
     case kActionEffect_EnemyFireball:
       return effect->phase == kActionEffectPhase_EnemyFireballFlight;
+    case kActionEffect_FillmoreStatueOrb:
+      return effect->phase == kActionEffectPhase_EnemyFireballFlight &&
+          effect->visual >= 0x1B && effect->visual <= 0x1E;
     case kActionEffect_MarahnaFireball:
       return (effect->phase == kActionEffectPhase_MarahnaFireballOrb &&
               effect->visual >= 0x05u && effect->visual <= 0x08u) ||
@@ -2327,6 +2408,9 @@ static bool BuildSceneEffectList(
   unsigned lava_glow_segments = 0;
   unsigned flaming_wheels = 0;
   unsigned forest_rays = 0;
+  unsigned cave_fields = 0;
+  unsigned landing_puffs = 0;
+  unsigned temple_mist_spans = 0;
 
   for (uint8_t i = 0; i < effect_count; i++) {
     const ActionEffectInstance *effect = &effects[i];
@@ -2378,12 +2462,28 @@ static bool BuildSceneEffectList(
     if ((effect->kind == kActionEffect_ForestCanopyLight ||
          effect->kind == kActionEffect_ForestForwardLight) && ++forest_rays > 1)
       return false;
+    if (effect->kind >= kActionEffect_CaveWater && effect->kind <= kActionEffect_TempleGroundMist &&
+        effect->kind != kActionEffect_LandingDust &&
+        effect->kind != kActionEffect_TempleGroundMist) {
+      const unsigned bit = 1u << (effect->kind - kActionEffect_CaveWater);
+      if (cave_fields & bit) return false;
+      cave_fields |= bit;
+    }
+    if (effect->kind == kActionEffect_LandingDust &&
+        ++landing_puffs > kActionLandingDustMaxPuffs)
+      return false;
+    if (effect->kind == kActionEffect_TempleGroundMist) {
+      if (++temple_mist_spans > kActionTempleMistMaxSpans) return false;
+      for (unsigned j = 0; j < i; j++)
+        if (effects[j].kind == effect->kind && effects[j].generation == effect->generation)
+          return false;
+    }
     if (lighting_enabled &&
         !AppendSceneLighting(&writer, effect, project_point, clip_bounds,
                              project_userdata))
       return false;
     if (particles_enabled &&
-        !AppendSceneParticles(&writer, effect, project_point,
+        !AppendSceneParticles(&writer, effect, project_point, clip_bounds,
                               project_userdata))
       return false;
   }

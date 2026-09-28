@@ -1,4 +1,5 @@
 #include "action/present_action_effects.h"
+#include "action/action_effect_projection.h"
 #include "action/action_effect_render.h"
 #include "actraiser_game.h"
 #include "app/session_fatal.h"
@@ -24,6 +25,7 @@ typedef struct Backend {
   char draws[64];
   int draw_count;
   ArRenderBlendMode geometry_blends[64];
+  ArRenderColorF geometry_colors[64];
   ArRenderBlendMode composite_blend;
   uint32_t first_uploaded_pixel;
 } Backend;
@@ -141,6 +143,7 @@ static bool Geometry(void *ctx, ArRenderTexture texture,
   }
   assert(b->geometries < 64);
   b->geometry_blends[b->geometries] = state ? state->blend : kArRenderBlendMode_Opaque;
+  b->geometry_colors[b->geometries] = vertices[0].color;
   b->geometries++;
   Record(b, texture.value ? 'H' : 'G');
   return !b->fail_geometry && !(b->fail_surface_light && state &&
@@ -500,6 +503,81 @@ static void ForestFoliageComposition(void) {
   assert(b.created == b.destroyed && !fatal_count);
 }
 
+static void CaveWaterComposition(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b, &device);
+  LavaFrame();
+  frame.action_effect_lighting = frame.action_effect_particles = false;
+  frame.bg1_camera_x = frame.bg2_camera_x = 608;
+  frame.bg1_camera_y = frame.bg2_camera_y = 752;
+  frame.action_scene_effects.decorations[0] = (ActionEffectInstance){
+    .world_x = 736, .world_y = 592, .phase_ticks = 32,
+    .kind = kActionEffect_CaveWater, .phase = kActionEffectPhase_CaveEnvironment,
+    .visual = 2, .flags = kActionEffectFlag_Visible,
+    .render_layer = kActionEffectRenderLayer_Bg2HighPlane,
+    .projection_plane = kActionEffectProjectionPlane_Bg2High,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,544}},
+  };
+  memset(pixels, 0xff, sizeof(pixels));
+  pixels[0] = 0xff000000u;
+  assert(PresentActionEffects_UploadMask(&device, SR_PPU_OVERLAY_BG2, &frame,
+      (const uint8_t *)pixels, 256 * 4) == sizeof(pixels));
+  assert(b.first_uploaded_pixel == 0);
+  frame.action_bg2_mask_valid = true;
+  device.capabilities.flags &= ~(kArRenderCapability_RenderTargets |
+                                kArRenderCapability_ScopedRenderTargets);
+  assert(PresentActionEffects_DrawFlatPlanes(&device, &frame, viewport));
+  assert(b.geometries == 1 && b.geometry_blends[0] == kArRenderBlendMode_Add);
+  assert(b.created == 1 && b.resolves == 0 && b.restores == 0);
+  DioramaProjection projection = {
+    .valid = true, .matrix = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1},
+    .aspect_x = 1, .height_scale = 1, .texture_x_origin = 384,
+    .texture_width = 1024, .texture_height = 768,
+    .output_width = 640, .output_height = 448,
+    .bg2_plane = {.valid = true, .u1 = 1, .v1 = 1},
+    .bg2_high_plane = {.valid = true, .u1 = 1, .v1 = 1, .z_world = .2f},
+  };
+  PresentActionPlaneEffectContext context = {&device, &frame, viewport};
+  PresentActionEffects_DrawDioramaPlane(&context, SR_PPU_OVERLAY_BG2, &projection);
+  assert(b.geometries == 1); /* The low plane must not consume priority-1 water. */
+  PresentActionEffects_DrawDioramaPlane(&context, kDioramaPlane_Bg2Hi, &projection);
+  assert(b.geometries == 2 && b.geometry_blends[1] == kArRenderBlendMode_Add);
+  assert(ActionEffectProjection_RequiredBgPlaneMask(NULL, &frame.action_scene_effects) ==
+         (1u << kDioramaPlane_Bg2Hi));
+  frame.action_environmental_effects = false;
+  assert(PresentActionEffects_DrawFlatPlanes(&device, &frame, viewport));
+  PresentActionEffects_DrawDioramaPlane(&context, kDioramaPlane_Bg2Hi, &projection);
+  assert(b.geometries == 2);
+  PresentActionEffects_Reset(&device);
+  assert(b.created == b.destroyed && !fatal_count);
+}
+
+static void LandingDustComposition(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b, &device);
+  LavaFrame();
+  frame.action_effect_lighting = frame.action_effect_particles = false;
+  frame.action_scene_effects.decorations[0] = (ActionEffectInstance){
+    .world_x = 128, .world_y = 192, .phase_ticks = 12,
+    .kind = kActionEffect_LandingDust, .phase = kActionEffectPhase_CaveEnvironment,
+    .visual = 2, .flags = kActionEffectFlag_Visible,
+    .render_layer = kActionEffectRenderLayer_WorldDust,
+    .projection_plane = kActionEffectProjectionPlane_Bg1,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-64,-40,64,2}},
+  };
+  device.capabilities.flags &= ~(kArRenderCapability_RenderTargets |
+                                kArRenderCapability_ScopedRenderTargets);
+  PresentActionEffects_Draw(&device, &frame, viewport, NULL);
+  assert(b.geometries == 1 && b.geometry_blends[0] == kArRenderBlendMode_Alpha);
+  assert(!b.created && !b.resolves);
+  frame.action_environmental_effects = false;
+  PresentActionEffects_Draw(&device, &frame, viewport, NULL);
+  assert(b.geometries == 1);
+  PresentActionEffects_Reset(&device);
+}
+
 static void SharedEffectSupport(void) {
   Backend b;
   ArRenderDevice device;
@@ -522,13 +600,222 @@ static void SharedEffectSupport(void) {
   assert(EffectRenderer_Available()); /* Local capacity failure isn't a device failure. */
 }
 
+static void CaveSheenComposition(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b, &device);
+  LavaFrame();
+  frame.action_effect_lighting = frame.action_effect_particles = false;
+  frame.bg1_camera_x = 128;
+  frame.bg1_camera_y = 320;
+  frame.action_bg1_mask_valid = true;
+  frame.action_scene_effects.decorations[0] = (ActionEffectInstance){
+    .world_x = 256, .world_y = 160, .phase_ticks = 80,
+    .kind = kActionEffect_CaveSheen, .phase = kActionEffectPhase_CaveEnvironment,
+    .source_mask = 0xFF,
+    .visual = 2, .flags = kActionEffectFlag_Visible,
+    .render_layer = kActionEffectRenderLayer_Bg1Plane,
+    .projection_plane = kActionEffectProjectionPlane_Bg1,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,544}},
+  };
+  memset(pixels,0xff,sizeof(pixels));
+  pixels[0] = 0xff000000u;
+  assert(PresentActionEffects_UploadMask(&device,SR_PPU_OVERLAY_BG1,&frame,
+      (const uint8_t *)pixels,256*4) == sizeof(pixels));
+  assert(b.first_uploaded_pixel == 0);
+  device.capabilities.flags &= ~(kArRenderCapability_RenderTargets |
+                                kArRenderCapability_ScopedRenderTargets);
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  assert(b.geometries == 1 && b.geometry_blends[0] == kArRenderBlendMode_Add);
+  assert(b.created == 1 && !b.resolves && !b.restores);
+  b.fail_update = true;
+  pixels[1] = 0xff000000u;
+  assert(!PresentActionEffects_UploadMask(&device,SR_PPU_OVERLAY_BG1,&frame,
+      (const uint8_t *)pixels,256*4));
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  assert(b.geometries == 1); /* Failed upload cannot reuse the previous occlusion. */
+  PresentActionEffects_Reset(&device);
+  assert(b.created == b.destroyed);
+}
+
+static void TempleSceneryDimming(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b,&device);
+  LavaFrame();
+  frame.diorama_map_group = kActRaiserMapGroup_Fillmore;
+  frame.diorama_map_number = 3;
+  frame.action_effect_lighting = frame.action_effect_particles = false;
+  frame.visible_x0 = 16;
+  frame.visible_width = 224;
+  frame.bg1_camera_y = 400; /* Above the floor mist, but still inside the temple. */
+  frame.action_bg1_mask_valid = true;
+  ActionEffectInstance *e = &frame.action_scene_effects.decorations[0];
+  *e = (ActionEffectInstance){
+    .kind = kActionEffect_CaveAmbientLight, .visual = 3,
+    .phase = kActionEffectPhase_CaveEnvironment, .flags = kActionEffectFlag_Visible,
+    .render_layer = kActionEffectRenderLayer_ForegroundLight,
+    .projection_plane = kActionEffectProjectionPlane_Bg1,
+  };
+  assert(PresentActionEffects_Bg1Dimming(&frame) > .4f);
+  frame.action_environmental_effects = false;
+  assert(PresentActionEffects_Bg1Dimming(&frame) == 0);
+  frame.action_environmental_effects = true;
+  frame.diorama_map_number = 2;
+  assert(PresentActionEffects_Bg1Dimming(&frame) == 0);
+  frame.diorama_map_number = 3;
+  e->visual = 2; /* An inherited previous-room field must not dim the new scene. */
+  assert(PresentActionEffects_Bg1Dimming(&frame) == 0);
+  e->visual = 3;
+  frame.action_scene_effects.decoration_overflow = true;
+  assert(PresentActionEffects_Bg1Dimming(&frame) == 0);
+  frame.action_scene_effects.decoration_overflow = false;
+  memset(pixels,0xff,sizeof(pixels));
+  pixels[0] = 0xff000000u; /* Non-BG1 winners, including actors, become transparent. */
+  assert(PresentActionEffects_UploadMask(&device,SR_PPU_OVERLAY_BG1,&frame,
+      (const uint8_t *)pixels,256*4) == sizeof(pixels));
+  assert(b.first_uploaded_pixel == 0);
+  device.capabilities.flags &= ~(kArRenderCapability_RenderTargets |
+                                kArRenderCapability_ScopedRenderTargets);
+  b.check_mask_uv = true;
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  b.check_mask_uv = false;
+  assert(b.geometries == 1 && b.geometry_blends[0] == kArRenderBlendMode_Alpha);
+  const ArRenderColorF color = b.geometry_colors[0];
+  assert(color.r == 0 && color.g == 0 && color.b == 0 && color.a > .4f && color.a < .5f);
+  assert(b.created == 1 && !b.resolves && !b.restores);
+  b.fail_update = true;
+  pixels[1] = 0xff000000u;
+  assert(!PresentActionEffects_UploadMask(&device,SR_PPU_OVERLAY_BG1,&frame,
+      (const uint8_t *)pixels,256*4));
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  assert(b.geometries == 1); /* A failed mask upload cannot darken actors with old pixels. */
+  b.fail_update = false;
+  assert(PresentActionEffects_UploadMask(&device,SR_PPU_OVERLAY_BG1,&frame,
+      (const uint8_t *)pixels,256*4));
+  frame.action_environmental_effects = false;
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  assert(b.geometries == 1);
+  PresentActionEffects_Reset(&device);
+  assert(b.created == b.destroyed && !fatal_count);
+}
+
+static void TempleMistComposition(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b, &device);
+  LavaFrame();
+  frame.action_effect_lighting = frame.action_effect_particles = false;
+  frame.bg1_camera_x = 500;
+  frame.bg1_camera_y = 1500;
+  frame.visible_x0 = 16;
+  frame.visible_width = 224;
+  frame.ws_extra_top = 64;
+  frame.action_bg1_mask_valid = true;
+  frame.action_scene_effects.decorations[0] = (ActionEffectInstance){
+    .world_x = 592, .world_y = 1680, .phase_ticks = 80,
+    .kind = kActionEffect_TempleGroundMist, .phase = kActionEffectPhase_CaveEnvironment,
+    .visual = 3, .flags = kActionEffectFlag_Visible,
+    .render_layer = kActionEffectRenderLayer_Bg1Mist,
+    .projection_plane = kActionEffectProjectionPlane_Bg1,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {0,-26,64,0}},
+  };
+  memset(pixels,0xff,sizeof(pixels));
+  pixels[0] = 0xff000000u; /* A winning actor excludes the BG1 mist. */
+  assert(PresentActionEffects_UploadMask(&device,SR_PPU_OVERLAY_BG1,&frame,
+      (const uint8_t *)pixels,256*4) == sizeof(pixels));
+  assert(b.first_uploaded_pixel == 0);
+  device.capabilities.flags &= ~(kArRenderCapability_RenderTargets |
+                                kArRenderCapability_ScopedRenderTargets);
+  b.check_mask_uv = true;
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  b.check_mask_uv = false;
+  assert(b.geometries == 1 && b.geometry_blends[0] == kArRenderBlendMode_Alpha);
+  assert(!strcmp(b.draws,"H") && b.created == 1 && !b.resolves && !b.restores);
+  PresentActionEffects_Draw(&device,&frame,viewport,NULL);
+  assert(b.geometries == 1); /* No late world overlay over the actors. */
+  b.fail_update = true;
+  pixels[1] = 0xff000000u;
+  assert(!PresentActionEffects_UploadMask(&device,SR_PPU_OVERLAY_BG1,&frame,
+      (const uint8_t *)pixels,256*4));
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  assert(b.geometries == 1); /* Stale occlusion must never be reused. */
+  const DioramaProjection projection = {
+    .valid = true, .matrix = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1},
+    .aspect_x = 1, .height_scale = 1, .texture_x_origin = 384,
+    .texture_width = 1024, .texture_height = 768,
+    .output_width = 640, .output_height = 448,
+    .bg1_plane = {.valid = true, .u1 = 1, .v1 = 1},
+    .bg2_plane = {.valid = true, .u1 = 1, .v1 = 1},
+  };
+  PresentActionPlaneEffectContext context = {&device,&frame,viewport};
+  PresentActionEffects_DrawDioramaPlane(&context,SR_PPU_OVERLAY_BG2,&projection);
+  assert(b.geometries == 1);
+  PresentActionEffects_DrawDioramaPlane(&context,SR_PPU_OVERLAY_BG1,&projection);
+  assert(b.geometries == 2 && b.geometry_blends[1] == kArRenderBlendMode_Alpha);
+  frame.action_environmental_effects = false;
+  PresentActionEffects_DrawDioramaPlane(&context,SR_PPU_OVERLAY_BG1,&projection);
+  assert(b.geometries == 2);
+  PresentActionEffects_Reset(&device);
+  assert(b.created == b.destroyed);
+}
+
+static void CaveMaskUploadBudget(void) {
+  enum { width = kFrameSlotLayerTextureWidth, height = kFrameSlotAuthenticHeight,
+         stride = width*4 + 13 };
+  static uint8_t source[stride*height+2], before[sizeof(source)];
+  Backend b;
+  ArRenderDevice device;
+  Init(&b,&device);
+  memset(&frame,0,sizeof(frame));
+  frame.action_environmental_effects = true;
+  frame.snes_width = width;
+  frame.action_scene_effects.decoration_count = 2;
+  frame.action_scene_effects.decorations[0].kind = kActionEffect_CaveWater;
+  frame.action_scene_effects.decorations[1].kind = kActionEffect_CaveSheen;
+  const int planes[] = {SR_PPU_OVERLAY_BG1,SR_PPU_OVERLAY_BG2};
+  const int heights[] = {height,height,height,height,height-64,height};
+  for (unsigned plane = 0; plane < 2; plane++) {
+    /* Exercise byte-aligned source pixels and a non-word-aligned row pitch. */
+    memset(source,0xFF,sizeof(source));
+    for (unsigned pass = 0; pass < 6; pass++) {
+      if (pass == 2) {
+        /* Scattered changes must not become many expensive SDL updates. */
+        const uint32_t non_winner = 0xFF000000u;
+        for (int y = 0; y < height; y += 5)
+          for (int x = 0; x < width; x += 17)
+            memcpy(source+1+y*stride+x*4,&non_winner,sizeof(non_winner));
+      }
+      memcpy(before,source,sizeof(source));
+      frame.snes_height = heights[pass];
+      const int updates_before = b.updated;
+      const uint64_t uploaded = PresentActionEffects_UploadMask(
+          &device,planes[plane],&frame,source+1,stride);
+      const bool changed = pass != 1 && pass != 3;
+      assert(b.updated-updates_before == (int)changed);
+      assert((uploaded != 0) == changed);
+      assert(!memcmp(source,before,sizeof(source))); /* Includes row padding/guards. */
+      assert(b.created == (int)plane+1); /* Resizing reuses the existing texture. */
+    }
+  }
+  assert(!b.resolves && !b.restores);
+  PresentActionEffects_Reset(&device);
+  assert(b.created == b.destroyed);
+}
+
 int main(void) {
+  TempleSceneryDimming();
+  CaveMaskUploadBudget();
+  CaveSheenComposition();
+  TempleMistComposition();
   HeatLifecycle();
   HeatFailures();
   MasksAndPlaneComposition();
   PlaneTargetFailures();
   EnvironmentalEffectsIndependence();
   ForestFoliageComposition();
+  CaveWaterComposition();
+  LandingDustComposition();
   SharedEffectSupport();
   puts("action presentation: resource lifetime, masks, fallback and target restoration passed");
   return 0;

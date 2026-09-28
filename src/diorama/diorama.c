@@ -2298,6 +2298,9 @@ static void PublishDioramaPlanes(const DioramaCapture *capture,
       if (resolved[i].plane == kDioramaPlane_Bg1Hi) {
         out_projection->bg1_high_plane = plane;
       }
+      if (resolved[i].plane == kDioramaPlane_Bg2Hi) {
+        out_projection->bg2_high_plane = plane;
+      }
       const int priority = DioramaPlaneObjectPriority(resolved[i].plane);
       if (priority < 0) continue;
       out_projection->object_planes[priority] = plane;
@@ -2839,6 +2842,10 @@ static PresentationOutcome DrawResolvedDioramaLayer(
 
   const float shade_mix =
       (float)g_settings.diorama_depth_shade / (float)kPercentScale;
+  float scenery_light = 1;
+  if (description->plane == SR_PPU_OVERLAY_BG1 ||
+      description->plane == kDioramaPlane_Bg1Hi || description->plane == kDioramaPlane_Bg1Far)
+    scenery_light -= fminf(1, fmaxf(0, scene->bg1_dimming));
   const bool additive =
       (scene->additive_plane_mask & (1u << (unsigned)description->plane)) != 0;
   const DioramaLayerDraw layer = {
@@ -2847,9 +2854,9 @@ static PresentationOutcome DrawResolvedDioramaLayer(
       .texture = textures[description->plane],
       .shade =
           {
-              1.0f + (description->shade.r - 1.0f) * shade_mix,
-              1.0f + (description->shade.g - 1.0f) * shade_mix,
-              1.0f + (description->shade.b - 1.0f) * shade_mix,
+              (1.0f + (description->shade.r - 1.0f) * shade_mix) * scenery_light,
+              (1.0f + (description->shade.g - 1.0f) * shade_mix) * scenery_light,
+              (1.0f + (description->shade.b - 1.0f) * shade_mix) * scenery_light,
               description->shade.a * ((float)resolved->alpha / 255.0f),
           },
       .blend = description->plane == kDioramaPlane_Backdrop

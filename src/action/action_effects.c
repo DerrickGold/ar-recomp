@@ -10,6 +10,8 @@
 #include "actraiser_game.h"
 #include "action_bg_plan.h"
 #include "action_bg_world.h"
+#include "action_landing_dust.h"
+#include "action_cave_surface.h"
 
 /* ── Spell rule table ──────────────────────────────────────────────────────
  *
@@ -258,6 +260,7 @@ static void RetireAll(ActionEffectObserver *observer) {
 static void RetireSceneAll(ActionEffectObserver *observer) {
   if (!observer) return;
   memset(observer->scene_tracks, 0, sizeof(observer->scene_tracks));
+  memset(&observer->landing_dust, 0, sizeof(observer->landing_dust));
   observer->scene_clock_valid = 0;
   observer->scene_map_valid = 0;
 }
@@ -502,7 +505,8 @@ static void BeginOrAdvanceSceneTrack(ActionEffectObserver *observer,
     if (object->animation_bank == 0x7E &&
         object->animation_address == 0x5000)
       continuity_key ^= (uint32_t)object->local_counter * 0x9E3779B9u;
-  } else if (kind == kActionEffect_CentaurLightning || kind == kActionEffect_NorthwallBossMagic ||
+  } else if (kind == kActionEffect_FillmoreStatueOrb ||
+             kind == kActionEffect_CentaurLightning || kind == kActionEffect_NorthwallBossMagic ||
              kind == kActionEffect_BloodpoolBossLightning ||
              kind == kActionEffect_MarahnaLightningLink ||
              kind == kActionEffect_MarahnaBossLightning)
@@ -847,6 +851,32 @@ static bool IsEnemyFireball(const ActionObjectSnapshot *object) {
     return false;
   return (object->visual == 0x0017 && object->composition == 0x45EF) ||
       (object->visual == 0x0018 && object->composition == 0x4610);
+}
+
+static bool IsFillmoreStatueOrb(const ActionObjectSnapshot *object,
+    const uint8_t *wram, size_t size) {
+  /* $B3EA clones the statue; $B406/$B42F run its rolling/falling ball.
+   * Parent and child share a source, so neither that nor a red palette is
+   * sufficient identity. Verify the flight animation AND live statue backlink. */
+  if (object->source_descriptor != 0xB3BF ||
+      object->animation_address != kSceneAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      object->resume_address != 0xB3E9 ||
+      !((object->handler == 0xB406 && object->animation_state == 0x0A) ||
+        (object->handler == 0xB42F && object->animation_state == 0x0B)) ||
+      object->visual < 0x1B || object->visual > 0x1E ||
+      object->composition != 0x48F0 + (object->visual-0x1B)*12 ||
+      object->spawner_backlink < kActRaiserWram_ActionObjectTable ||
+      object->spawner_backlink >= kActRaiserWram_ActionObjectTable +
+          kActionSceneEffectObserverTrackCount*kActRaiserActionObjectStride ||
+      (object->spawner_backlink-kActRaiserWram_ActionObjectTable) % kActRaiserActionObjectStride)
+    return false;
+  ActionObjectSnapshot parent;
+  return ReadActionObject(wram, size, object->spawner_backlink, &parent) &&
+      !(parent.status & kActRaiserObjectStatus_InactiveMask) &&
+      parent.source_descriptor == 0xB3BF && !parent.spawner_backlink &&
+      parent.animation_address == kSceneAnimationAddress &&
+      parent.animation_bank == kSceneAnimationBank && parent.animation_state == 0x24;
 }
 
 static bool IsLightningTrap(const ActionObjectSnapshot *object) {
@@ -1799,12 +1829,6 @@ static bool WallTorchRuleFor(const uint8_t *wram, size_t wram_size,
   return false;
 }
 
-bool ActionSceneEffects_RoomUsesBg1Decorations(
-    const uint8_t *wram, size_t wram_size) {
-  WallTorchMapRule rule;
-  return WallTorchRuleFor(wram, wram_size, &rule);
-}
-
 static bool IsFillmoreForest(const uint8_t *wram, size_t wram_size) {
   return wram && wram_size > kActRaiserWram_Bg2Height + 1 &&
       Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
@@ -1816,9 +1840,202 @@ static bool IsFillmoreForest(const uint8_t *wram, size_t wram_size) {
       Read16(wram, wram_size, kActRaiserWram_Bg2Height) == 512;
 }
 
+static unsigned FillmoreCaveRoom(const uint8_t *wram, size_t size) {
+  if (!wram || size <= kActRaiserWram_Bg2Height + 1 ||
+      Read8(wram, size, kActRaiserWram_MapGroup) != kActRaiserMapGroup_Fillmore)
+    return 0;
+  const unsigned room = Read8(wram, size, kActRaiserWram_CurrentMap);
+  if (room < 2 || room > 4) return 0;
+  static const unsigned dimensions[][4] = {
+    {2048,1280,2048,1280}, {1024,1792,256,512}, {512,256,256,256},
+  };
+  const unsigned *d = dimensions[room - 2];
+  return Read16(wram, size, kActRaiserWram_Bg1Width) == d[0] &&
+      Read16(wram, size, kActRaiserWram_Bg1Height) == d[1] &&
+      Read16(wram, size, kActRaiserWram_Bg2Width) == d[2] &&
+      Read16(wram, size, kActRaiserWram_Bg2Height) == d[3] ? room : 0;
+}
+
+bool ActionSceneEffects_RoomUsesBg1Decorations(
+    const uint8_t *wram, size_t wram_size) {
+  WallTorchMapRule rule;
+  const unsigned cave_room = FillmoreCaveRoom(wram, wram_size);
+  /* Room 3 uses the winner mask for scenery dimming throughout the climb,
+   * as well as the floor mist. Room 2 uses it for damp-stone highlights. */
+  return cave_room == 2 || cave_room == 3 || WallTorchRuleFor(wram, wram_size, &rule);
+}
+
+static bool CaveMapReady(const ActionBgMapView *map, unsigned room) {
+  /* Distinct stone/ceiling pairs in the decoded maps, not ROM addresses or
+   * palette guesses. Reject a transition's inherited or incomplete map. */
+  static const unsigned signatures[][6] = {
+    {326,352,0xB8, 420,432,0xB9},
+    {896,128,0x39, 448,1664,0x26},
+    {80,80,0x08, 96,192,0x26},
+  };
+  const unsigned *s = signatures[room - 2];
+  uint8_t a, b;
+  return ActionBgMapView_LookupMetatile(map, (int)s[0], (int)s[1], &a) && a == s[2] &&
+      ActionBgMapView_LookupMetatile(map, (int)s[3], (int)s[4], &b) && b == s[5];
+}
+
+_Static_assert(kActionLandingDustMaxPuffs + 3 + kActionTempleMistMaxSpans <=
+                   kActionSceneDecorationMaxInstances,
+               "temple floor mist must leave room for landing dust and ambient fields");
+
+static int TempleMistFloor(const uint8_t *wram, const ActionBgMapView *map, int x) {
+  /* Search only the lower hall. The native collision LUT, rather than the
+   * decorative ledge pixels, determines the supporting surface in each column. */
+  for (int y = 1664; y <= 1712; y += 16) {
+    uint8_t below, above;
+    if (!ActionBgMapView_LookupMetatile(map, x, y, &below) ||
+        !ActionBgMapView_LookupMetatile(map, x, y-1, &above)) return 0;
+    if (above == 0x18 || above == 0x20) return 0; /* Never cover spike pits. */
+    const unsigned collision = wram[0x05A0 + below];
+    const bool capital = below >= 0x54 && below <= 0x57 && collision == 3;
+    if ((collision == 15 || capital) && wram[0x05A0 + above] == 0) return y;
+  }
+  return 0;
+}
+
+static void CaptureTempleMist(ActionSceneEffectFrame *dst, const uint8_t *wram,
+    const ActionBgMapView *map, uint16_t clock) {
+  const uint8_t count_before = dst->decoration_count;
+  const uint8_t visible_before = dst->decoration_visible_count;
+  int left = 512, floor = 0;
+  unsigned spans = 0;
+  for (int x = 512; x <= 960; x += 16) {
+    const int next_floor = x < 960 ? TempleMistFloor(wram, map, x) : 0;
+    if (next_floor == floor) continue;
+    if (floor) {
+      /* A changed/fragmented map may exceed the cosmetic budget. Omit only
+       * this family instead of consuming actor or landing-cloud records. */
+      if (++spans > kActionTempleMistMaxSpans ||
+          dst->decoration_count >= kActionSceneDecorationMaxInstances) {
+        dst->decoration_count = count_before;
+        dst->decoration_visible_count = visible_before;
+        return;
+      }
+      const ActionEffectInstance effect = {
+        .generation = 0xC3000000u | (unsigned)left,
+        .pulse_generation = 0xD3000000u | (unsigned)left,
+        .world_x = (int16_t)left, .world_y = (int16_t)floor, .visual = 3,
+        .age_ticks = clock, .phase_ticks = clock, .pulse_ticks = clock,
+        .kind = kActionEffect_TempleGroundMist, .phase = kActionEffectPhase_CaveEnvironment,
+        .flags = kActionEffectFlag_Visible | kActionEffectFlag_ClipToRect,
+        .render_layer = kActionEffectRenderLayer_Bg1Mist,
+        .projection_plane = kActionEffectProjectionPlane_Bg1,
+        .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {0,-26,x-left,0}},
+        .clip_rect = {0,-26,x-left,0},
+      };
+      (void)SceneDecorationAppend(dst, &effect);
+    }
+    left = x;
+    floor = next_floor;
+  }
+}
+
+_Static_assert(kActionCaveWetSourceCount <= 16, "cave sources must fit the captured mask");
+
+static uint16_t CaveWetSourceMask(const ActionBgMapView *map) {
+  uint16_t mask = 0;
+  for (unsigned i = 0; i < kActionCaveWetSourceCount; i++) {
+    const ActionCaveWetSource *s = &kActionCaveWetSources[i];
+    uint8_t tip, landing;
+    if (ActionBgMapView_LookupMetatile(map, s->x, s->ceiling_y-1, &tip) &&
+        ActionBgMapView_LookupMetatile(map, s->x, s->landing_y, &landing) &&
+        tip == s->ceiling_tile && landing == s->landing_tile)
+      mask |= (uint16_t)(1u << i);
+  }
+  return mask;
+}
+
+static void CaptureFillmoreCave(ActionEffectObserver *observer,
+    ActionSceneEffectFrame *dst, const uint8_t *wram, size_t size) {
+  const unsigned room = FillmoreCaveRoom(wram, size);
+  if (!room || observer->scene_map_number != room) {
+    memset(&observer->landing_dust, 0, sizeof(observer->landing_dust));
+    return;
+  }
+  const unsigned width = Read16(wram, size, kActRaiserWram_Bg1Width);
+  const unsigned height = Read16(wram, size, kActRaiserWram_Bg1Height);
+  ActionBgMapView map;
+  if (!ActionBgMapView_Init(&map, wram, size, width, height,
+          Read16(wram, size, kActRaiserWram_BgMapPage)) || !CaveMapReady(&map, room)) {
+    memset(&observer->landing_dust, 0, sizeof(observer->landing_dust));
+    return;
+  }
+  const ActionBgMapView playfield = map;
+  if (room == 2) {
+    uint8_t pool, fall;
+    if (!ActionBgMapView_Init(&map, wram, size, 2048, 1280,
+            Read16(wram, size, kActRaiserWram_BgMapPage + kActRaiserBgLayerStateStride)) ||
+        !ActionBgMapView_LookupMetatile(&map, 0, 896, &pool) || pool != 1 ||
+        !ActionBgMapView_LookupMetatile(&map, 720, 0, &fall) || fall != 2) {
+      memset(&observer->landing_dust, 0, sizeof(observer->landing_dust));
+      return;
+    }
+  }
+  ActionLandingDust_Capture(&observer->landing_dust, dst, wram, size,
+      &playfield, room, observer->scene_clock);
+  const uint16_t wet_sources = room == 2 ? CaveWetSourceMask(&playfield) : 0;
+  /* Aggregate fields cap this family at seven records, independent of how
+   * many water tiles/emitters exist. Actor slots and their budget are untouched. */
+  enum { cave = 1u << 2, temple = 1u << 3, tower = 1u << 4 };
+  static const struct {
+    uint8_t kind, rooms, layer, plane;
+  } fields[] = {
+    {kActionEffect_CaveWater, cave,
+     kActionEffectRenderLayer_Bg2HighPlane, kActionEffectProjectionPlane_Bg2High},
+    {kActionEffect_CaveDrips, cave,
+     kActionEffectRenderLayer_WorldOverlay, kActionEffectProjectionPlane_Bg1},
+    {kActionEffect_TempleDust, cave | temple | tower,
+     kActionEffectRenderLayer_WorldOverlay, kActionEffectProjectionPlane_Bg1},
+    {kActionEffect_TowerWindowLight, tower,
+     kActionEffectRenderLayer_ForegroundLight, kActionEffectProjectionPlane_Bg1},
+    {kActionEffect_CaveMist, cave,
+     kActionEffectRenderLayer_WorldDust, kActionEffectProjectionPlane_Bg2High},
+    {kActionEffect_CaveSheen, cave,
+     kActionEffectRenderLayer_Bg1Plane, kActionEffectProjectionPlane_Bg1},
+    {kActionEffect_CaveAmbientLight, cave | temple,
+     kActionEffectRenderLayer_ForegroundLight, kActionEffectProjectionPlane_Bg1},
+    {kActionEffect_TempleGrit, cave | temple,
+     kActionEffectRenderLayer_WorldDust, kActionEffectProjectionPlane_Bg1},
+  };
+  for (unsigned i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
+    if (!(fields[i].rooms & (1u << room))) continue;
+    const uint8_t kind = fields[i].kind;
+    const bool water = fields[i].plane == kActionEffectProjectionPlane_Bg2High;
+    const int x = (int16_t)Read16(wram, size, water ? kActRaiserWram_Bg2CameraX :
+                                                           kActRaiserWram_Bg1CameraX) + 128;
+    const int y = (int16_t)Read16(wram, size, water ? kActRaiserWram_Bg2CameraY :
+                                                           kActRaiserWram_Bg1CameraY) - 160;
+    const ActionEffectInstance effect = {
+      .generation = 0xC2000000u | (room << 8) | kind,
+      .pulse_generation = 0xD2000000u | (room << 8) | kind,
+      .world_x = (int16_t)x, .world_y = (int16_t)y, .visual = (uint16_t)room,
+      .age_ticks = observer->scene_clock, .phase_ticks = observer->scene_clock,
+      .pulse_ticks = observer->scene_clock,
+      .kind = kind, .phase = kActionEffectPhase_CaveEnvironment,
+      .source_mask = (kind == kActionEffect_CaveDrips || kind == kActionEffect_CaveSheen) ?
+          wet_sources : 0,
+      .flags = kActionEffectFlag_Visible | kActionEffectFlag_ClipToRect,
+      .render_layer = fields[i].layer,
+      .projection_plane = fields[i].plane,
+      .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,544}},
+      .clip_rect = {-(float)x, -(float)y, (float)width - x, (float)height - y},
+    };
+    if (!SceneDecorationAppend(dst, &effect)) {
+      dst->decoration_count = dst->decoration_visible_count = 0;
+      return;
+    }
+  }
+  if (room == 3) CaptureTempleMist(dst, wram, &playfield, observer->scene_clock);
+}
+
 bool ActionSceneEffects_RoomUsesBg2Decorations(
     const uint8_t *wram, size_t wram_size) {
-  return IsFillmoreForest(wram, wram_size) ||
+  return IsFillmoreForest(wram, wram_size) || FillmoreCaveRoom(wram, wram_size) == 2 ||
       (wram && Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
            kActRaiserMapGroup_Aitos &&
        Read8(wram, wram_size, kActRaiserWram_CurrentMap) >= 2 &&
@@ -1826,17 +2043,21 @@ bool ActionSceneEffects_RoomUsesBg2Decorations(
 }
 
 void ActionEnvironmentalEffects_CaptureFrame(
-    const ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
+    ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
     const uint8_t *wram, size_t wram_size) {
-  /* Capture a bounded window of a separate light layer. Authored ray sources
-   * and particles stay in world space; this origin only selects visible work.
-   * The mean BG1/BG2 camera gives the layer independent parallax. */
+  /* Environmental fields are optional, bounded records. Their observers
+   * continue keeping scene time while this capture is gated off. */
   if (!observer || !dst || !observer->scene_clock_valid ||
       !observer->scene_map_valid ||
-      observer->scene_map_group != kActRaiserMapGroup_Fillmore ||
-      observer->scene_map_number != 1 || dst->decoration_overflow ||
-      !IsFillmoreForest(wram, wram_size))
+      observer->scene_map_group != kActRaiserMapGroup_Fillmore || dst->decoration_overflow)
     return;
+  if (observer->scene_map_number != 1) {
+    CaptureFillmoreCave(observer, dst, wram, wram_size);
+    return;
+  }
+  if (!IsFillmoreForest(wram, wram_size)) return;
+  /* Forest light uses the mean BG1/BG2 camera for independent parallax;
+   * authored sources stay in world space and the origin only culls work. */
   ActionBgMapView map;
   if (!ActionBgMapView_Init(&map, wram, wram_size, 2304, 512,
           Read16(wram, wram_size, kActRaiserWram_BgMapPage +
@@ -2642,6 +2863,11 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     } else if (bloodpool_act2_map && IsEnemyFireball(&object)) {
       kind = kActionEffect_EnemyFireball;
       phase = kActionEffectPhase_EnemyFireballFlight;
+    } else if (map_group == kActRaiserMapGroup_Fillmore &&
+        (map_number == 2 || map_number == 3) &&
+        IsFillmoreStatueOrb(&object, wram, wram_size)) {
+      kind = kActionEffect_FillmoreStatueOrb;
+      phase = kActionEffectPhase_EnemyFireballFlight;
     } else if (marahna_effect_map &&
                (phase = MatchMarahnaFireball(
                     wram, wram_size, &object)) !=
@@ -2717,6 +2943,7 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
       }
     }
     if (kind == kActionEffect_AitosStatueFire ||
+        kind == kActionEffect_FillmoreStatueOrb ||
         kind == kActionEffect_FlamingWheel ||
         kind == kActionEffect_FlamingWheelProjectile) {
       /* These measured compositions carry raw priority zero in their part

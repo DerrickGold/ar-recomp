@@ -141,6 +141,9 @@ enum {
 #define SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN UINT32_C(0x00000010)
 #define SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER UINT32_C(0x00000020)
 #define SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER UINT32_C(0x00000040)
+/* Main-screen winner after captured HUD/OBJ extraction. Existing winner
+ * flags remain observational and include those extracted sources. */
+#define SR_PPU_OVERLAY_MARK_VISIBLE_MAIN_WINNER UINT32_C(0x00000080)
 #define SR_PPU_OVERLAY_FLAGS_SUPPORTED                                  \
     (SR_PPU_OVERLAY_REMOVE_FROM_GAME |                                   \
      SR_PPU_OVERLAY_MARK_OBJ_COLOR_MATH |                                \
@@ -148,7 +151,8 @@ enum {
      SR_PPU_OVERLAY_APPLY_BG_FIXED_COLOR_SUBTRACT |                      \
      SR_PPU_OVERLAY_MARK_FULL_ADD_SUBSCREEN |                            \
      SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER |                            \
-     SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER)
+     SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER |                          \
+     SR_PPU_OVERLAY_MARK_VISIBLE_MAIN_WINNER)
 
 /** Opaque identities for the runner and its independently implemented
  * components. ABI consumers must never cast or dereference them. */

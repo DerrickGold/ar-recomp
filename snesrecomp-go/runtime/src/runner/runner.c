@@ -58,7 +58,9 @@ _Static_assert(SR_PPU_OVERLAY_REMOVE_FROM_GAME ==
                    SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER ==
                        kPpuOverlayFlag_MarkMainScreenWinner &&
                    SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER ==
-                       kPpuOverlayFlag_MarkOwningScreenWinner,
+                       kPpuOverlayFlag_MarkOwningScreenWinner &&
+                   SR_PPU_OVERLAY_MARK_VISIBLE_MAIN_WINNER ==
+                       kPpuOverlayFlag_MarkVisibleMainWinner,
                "public ABI overlay flags must match the PPU");
 _Static_assert(SR_PPU_BACKGROUND_FILL_INHERIT ==
                        kPpuWidescreenBandFill_Inherit &&

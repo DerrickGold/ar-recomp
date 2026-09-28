@@ -4,6 +4,7 @@
  * skybox views.
  * Phase: game (frame transaction). */
 #include "actraiser/enhancements/actraiser_enhancements_internal.h"
+#include "actraiser/actraiser_room_profiles.h"
 #include "dev/host_dev_tools.h"
 #include "diorama/diorama.h"
 #include "sim/sim3d/sim3d_textures.h"
@@ -385,7 +386,11 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
         ActRaiser_SetPpuOverlayCapture(
             SR_PPU_OVERLAY_BG1, -g_ws_extra, 0, width,
             kActRaiserAuthenticHeight,
-            SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER);
+            /* Temple grading must see the stone behind extracted HUD glyphs.
+             * Other rooms retain owning-screen masks for subscreen BG1. */
+            map_group == kActRaiserMapGroup_Fillmore && map_number == 3
+                ? SR_PPU_OVERLAY_MARK_VISIBLE_MAIN_WINNER
+                : SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER);
       }
     }
   }

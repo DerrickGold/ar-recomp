@@ -95,6 +95,7 @@ typedef struct DioramaProjection {
   DioramaPlaneProjection bg1_plane;
   DioramaPlaneProjection bg2_plane;
   DioramaPlaneProjection bg1_high_plane;
+  DioramaPlaneProjection bg2_high_plane;
   DioramaPlaneProjection object_planes[kDioramaObjectPriorityCount];
 } DioramaProjection;
 
@@ -151,6 +152,12 @@ bool Diorama_ProjectCapturedBg1HighPoint(
     float capture_x, float capture_y, ArRenderPointF *point,
     float *scale_x, float *scale_y);
 
+/* Same mapping for BG2's priority-1 water/foreground band. */
+bool Diorama_ProjectCapturedBg2HighPoint(
+    const DioramaProjection *projection,
+    float capture_x, float capture_y, ArRenderPointF *point,
+    float *scale_x, float *scale_y);
+
 /* Same mapping, using the resolved BG2-low backdrop plane. Waterfall accents
  * follow the independently-authored backdrop rake/depth instead of borrowing
  * BG1's playfield shape. */
@@ -200,6 +207,9 @@ typedef struct DioramaView {
 typedef struct DioramaScene {
   uint8_t map_group, map_number, layer_section;
   uint32_t additive_plane_mask;
+  /* 0 leaves authored color intact; 1 darkens BG1 low/high/far to black.
+   * Applied to existing face/depth geometry, without changing layer alpha. */
+  float bg1_dimming;
   /* Current effects retain projection on an intentionally empty plane. */
   uint8_t effect_obj_priority_mask;
   uint32_t effect_bg_plane_mask;

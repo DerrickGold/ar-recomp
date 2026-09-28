@@ -518,7 +518,8 @@ bool PpuSetOverlayCapture(Ppu *ppu, PpuOverlaySource source, int x, int y,
         kPpuOverlayFlag_ApplyBgFixedColorSubtract |
         kPpuOverlayFlag_MarkFullAddSubscreen |
         kPpuOverlayFlag_MarkMainScreenWinner |
-        kPpuOverlayFlag_MarkOwningScreenWinner;
+        kPpuOverlayFlag_MarkOwningScreenWinner |
+        kPpuOverlayFlag_MarkVisibleMainWinner;
     if (ppu == NULL || (unsigned)source >= kPpuOverlaySource_Count ||
         width <= 0 || height <= 0) return false;
     x0 = clamp_int(x, -kPpuExtraLeftRight, kPpuXPixels + kPpuExtraLeftRight);
@@ -1928,7 +1929,8 @@ static void clear_overlay_row(Ppu *ppu, int source, int screen_y) {
                ppu->overlayRenderPitch[source]);
     if (screen_y < capture->y0 || screen_y >= capture->y1) return;
     fill = (capture->flags & (kPpuOverlayFlag_MarkMainScreenWinner |
-                              kPpuOverlayFlag_MarkOwningScreenWinner)) != 0u
+                              kPpuOverlayFlag_MarkOwningScreenWinner |
+                              kPpuOverlayFlag_MarkVisibleMainWinner)) != 0u
         ? 0xff000000u
         : PpuOverlayTransparentFillColor(ppu, (PpuOverlaySource)source);
     if (fill != 0u) {
@@ -1991,18 +1993,22 @@ static bool source_visible_on_screen(const Ppu *ppu, int source, bool sub,
  * full-add export in render_native_capture_line), so such a line no longer has
  * to be handed to the per-pixel reference sampler. Pure main-winner masks
  * use pre-removal packed sources even alongside ordinary extraction. Owning-
- * screen masks and combined policies retain the reference resolves. */
+ * screen masks and combined policies retain the reference resolves. Visible
+ * main masks reuse the final packed winners after extraction. */
 static bool capture_needs_reference_sampler(
         const PpuOverlayCapture *capture) {
     return (capture->flags & kPpuOverlayFlag_MarkOwningScreenWinner) != 0u ||
         ((capture->flags & kPpuOverlayFlag_MarkMainScreenWinner) != 0u &&
-         capture->flags != kPpuOverlayFlag_MarkMainScreenWinner);
+         capture->flags != kPpuOverlayFlag_MarkMainScreenWinner) ||
+        ((capture->flags & kPpuOverlayFlag_MarkVisibleMainWinner) != 0u &&
+         capture->flags != kPpuOverlayFlag_MarkVisibleMainWinner);
 }
 
 static bool capture_is_deferred(const PpuOverlayCapture *capture) {
     return (capture->flags & (kPpuOverlayFlag_MarkFullAddSubscreen |
                               kPpuOverlayFlag_MarkMainScreenWinner |
-                              kPpuOverlayFlag_MarkOwningScreenWinner)) != 0u;
+                              kPpuOverlayFlag_MarkOwningScreenWinner |
+                              kPpuOverlayFlag_MarkVisibleMainWinner)) != 0u;
 }
 
 static void capture_obj_sources(Ppu *ppu, int x, int y, int obj_offset) {
@@ -3858,7 +3864,8 @@ static void native_overlay_line_plan(Ppu *ppu, int source, int screen_y,
      * the reference sampler remains independent. No frame cache or ABI state. */
     for (unsigned palette = 0; palette < kPpuCgramEntries; ++palette) {
         uint32_t argb;
-        if (capture->flags == kPpuOverlayFlag_MarkMainScreenWinner) {
+        if (capture->flags == kPpuOverlayFlag_MarkMainScreenWinner ||
+            capture->flags == kPpuOverlayFlag_MarkVisibleMainWinner) {
             argb = 0xffffffffu;
         } else if ((capture->flags & kPpuOverlayFlag_ApplyBgFixedColorSubtract) != 0u &&
                    source < kPpuOverlaySource_Obj) {
@@ -4082,7 +4089,7 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
     bool output_needs_sub = PPU_addSubscreen(ppu) || PPU_pseudoHires(ppu) ||
         PPU_mode(ppu) == 5 || PPU_mode(ppu) == 6;
     bool source_needs_sub[kPpuOverlaySource_Count];
-    uint8_t full_add_mask = 0u, main_winner_mask = 0u;
+    uint8_t full_add_mask = 0u, main_winner_mask = 0u, visible_winner_mask = 0u;
     bool removes_source = false;
     int obj_offset = authentic ? ppu->authenticObjOffsetX : 0;
     int left = authentic ? 0 : -ppu->extraLeftCur;
@@ -4124,9 +4131,12 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
         if (capture_surface_bound(ppu, source) &&
                 source_capture->x1 > source_capture->x0 &&
                 screen_y >= source_capture->y0 && screen_y < source_capture->y1 &&
-                source_capture->flags ==
-                kPpuOverlayFlag_MarkMainScreenWinner)
-            main_winner_mask |= (uint8_t)(1u << source);
+                (source_capture->flags == kPpuOverlayFlag_MarkMainScreenWinner ||
+                 source_capture->flags == kPpuOverlayFlag_MarkVisibleMainWinner)) {
+            if (source_capture->flags == kPpuOverlayFlag_MarkVisibleMainWinner)
+                visible_winner_mask |= (uint8_t)(1u << source);
+            else main_winner_mask |= (uint8_t)(1u << source);
+        }
     }
     /* The full-add export compares the complete pre-removal subscreen winner
      * against the main-screen winner, so every source on such a line needs its
@@ -4383,7 +4393,7 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
             uint16_t source_main = layer_main[layer][index];
             uint16_t source_sub = source_needs_sub[layer]
                 ? layer_sub[layer][index] : 0u;
-            if (((full_add_mask | main_winner_mask) & (1u << layer)) == 0u) {
+            if (((full_add_mask | main_winner_mask | visible_winner_mask) & (1u << layer)) == 0u) {
                 uint16_t captured = owner_sub ? source_sub : source_main;
                 if (captured != 0u)
                     native_write_overlay_packed(
@@ -4438,7 +4448,7 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                     uint16_t captured = (owner_sub ? show_sub : show_main)
                         ? native_obj_cache_pixel(obj_capture_cache, x) : 0u;
                     if (captured != 0u &&
-                        ((full_add_mask | main_winner_mask) & (1u << layer)) == 0u)
+                        ((full_add_mask | main_winner_mask | visible_winner_mask) & (1u << layer)) == 0u)
                         native_write_overlay_packed(
                             ppu, layer, x, captured, 0xffu,
                             &overlay_plans[layer]);
@@ -4485,6 +4495,22 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
             unsigned source = native_pixel_layer(winner);
             if (source >= kPpuOverlaySource_Count ||
                 (main_winner_mask & (1u << source)) == 0u ||
+                !capture_active(&ppu->overlayCaptures[source], x, screen_y))
+                continue;
+            native_write_overlay_packed(ppu, (int)source, x, winner,
+                source < 2u ? bands[source][index] : 0xffu,
+                &overlay_plans[source]);
+        }
+    }
+    /* Effects composited onto the extracted scene need its remaining winners,
+     * not HUD glyphs at their former native positions. No extra source fetches. */
+    if (visible_winner_mask != 0u) {
+        for (int x = left; x < right; ++x) {
+            int index = x + kPpuExtraLeftRight;
+            uint16_t winner = main_pixels[index];
+            unsigned source = native_pixel_layer(winner);
+            if (source >= kPpuOverlaySource_Count ||
+                (visible_winner_mask & (1u << source)) == 0u ||
                 !capture_active(&ppu->overlayCaptures[source], x, screen_y))
                 continue;
             native_write_overlay_packed(ppu, (int)source, x, winner,
@@ -4780,12 +4806,16 @@ static bool render_native_fast_line(Ppu *ppu, int screen_y,
 
 static void post_capture_masks(Ppu *ppu, int x, int y,
         const SrPpuPixel *main, const SrPpuPixel *sub,
-        const SrPpuPixel *full_main, const SrPpuPixel *full_sub) {
+        const SrPpuPixel *full_main, const SrPpuPixel *full_sub,
+        const SrPpuPixel *visible_main) {
     for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
         PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
         if (!capture_surface_bound(ppu, source) ||
             !capture_active(capture, x, y)) continue;
-        if ((capture->flags & kPpuOverlayFlag_MarkMainScreenWinner) != 0u) {
+        if ((capture->flags & kPpuOverlayFlag_MarkVisibleMainWinner) != 0u) {
+            if (visible_main->layer == source)
+                write_overlay(ppu, source, x, y, visible_main, 0xffffffffu);
+        } else if ((capture->flags & kPpuOverlayFlag_MarkMainScreenWinner) != 0u) {
             if (main->layer == source) write_overlay(ppu, source, x, y, main,
                                                      0xffffffffu);
         } else if ((capture->flags & kPpuOverlayFlag_MarkOwningScreenWinner) != 0u) {
@@ -4913,7 +4943,7 @@ static bool render_line_to(Ppu *ppu, int screen_y, uint8_t *buffer,
             }
             post_capture_masks(ppu, x, screen_y,
                                &original_main, &original_sub,
-                               &full_main, &full_sub);
+                               &full_main, &full_sub, &main);
         }
     }
     return dual_authentic;

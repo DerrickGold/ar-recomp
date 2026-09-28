@@ -4,6 +4,8 @@
 
 #include "action_effect_clock.h"
 #include "action_effects.h"
+#include "action_landing_dust.h"
+#include "action_cave_surface.h"
 #include "action_bg_plan.h"
 #include "action_bg_world.h"
 #include "actraiser_game.h"
@@ -2788,7 +2790,458 @@ static void TestForestEnvironmentalCapture(void) {
   CHECK(!ActionSceneEffects_RoomUsesBg2Decorations(NULL, 0));
 }
 
+static unsigned CaveTestTileAddress(unsigned base, unsigned width, unsigned x, unsigned y) {
+  return base + ((y >> 8) * (width >> 8) + (x >> 8)) * 256 +
+      (y & 240) + ((x & 240) >> 4);
+}
+
+static void TestCaveEnvironmentalCapture(void) {
+  static uint8_t wram[kActRaiserWramSize], before[kActRaiserWramSize];
+  static const unsigned dimensions[][4] = {
+    {2048,1280,2048,1280}, {1024,1792,256,512}, {512,256,256,256},
+  };
+  static const unsigned signatures[][6] = {
+    {326,352,0xB8,420,432,0xB9}, {896,128,0x39,448,1664,0x26},
+    {80,80,0x08,96,192,0x26},
+  };
+  ActionEffectObserver observer = {0};
+  ActionSceneEffectFrame frame;
+  for (unsigned room = 2; room <= 4; room++) {
+    memset(wram, 0, sizeof(wram));
+    wram[0x18] = 1;
+    wram[0x19] = (uint8_t)room;
+    const unsigned *d = dimensions[room-2], *sig = signatures[room-2];
+    for (unsigned i = 0; i < 4; i++) Write16(wram, 0x2E + i*2, (uint16_t)d[i]);
+    Write16(wram, 0x46, 0x8000);
+    Write16(wram, 0x4A, 0xC000);
+    const unsigned signature_at = CaveTestTileAddress(0x8000, d[0], sig[0], sig[1]);
+    wram[signature_at] = (uint8_t)sig[2];
+    wram[CaveTestTileAddress(0x8000, d[0], sig[3], sig[4])] = (uint8_t)sig[5];
+    if (room == 2) {
+      wram[CaveTestTileAddress(0xC000, 2048, 0, 896)] = 1;
+      wram[CaveTestTileAddress(0xC000, 2048, 720, 0)] = 2;
+    }
+    CHECK(ActionSceneEffects_RoomUsesBg1Decorations(wram, sizeof(wram)) == (room <= 3));
+    if (room == 3) {
+      Write16(wram, 0x24, 1512);
+      CHECK(ActionSceneEffects_RoomUsesBg1Decorations(wram, sizeof(wram)));
+      Write16(wram, 0x24, 1415);
+      CHECK(ActionSceneEffects_RoomUsesBg1Decorations(wram, sizeof(wram)));
+      Write16(wram, 0x24, 1414);
+      CHECK(ActionSceneEffects_RoomUsesBg1Decorations(wram, sizeof(wram)));
+      Write16(wram, 0x24, 1664);
+      CHECK(ActionSceneEffects_RoomUsesBg1Decorations(wram, sizeof(wram)));
+      Write16(wram, 0x24, 1712);
+      CHECK(ActionSceneEffects_RoomUsesBg1Decorations(wram, sizeof(wram)));
+    }
+    CHECK(ActionSceneEffects_RoomUsesBg2Decorations(wram, sizeof(wram)) == (room == 2));
+    observer.landing_dust = (ActionLandingDustState){.valid = 1};
+    observer.landing_dust.puffs[0] = (ActionLandingDustPuff){.active = 1, .strength = 1};
+    /* The room handoff below must discard a retained previous-room cloud. */
+    for (unsigned camera = 0; camera < d[0]; camera += 32) {
+      Write16(wram, 0x22, (uint16_t)camera);
+      Write16(wram, 0x24, 320);
+      Write16(wram, 0x26, (uint16_t)(camera / 2));
+      Write16(wram, 0x28, 192);
+      memcpy(before, wram, sizeof(wram));
+      ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
+      ActionEnvironmentalEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram));
+      CHECK(!memcmp(before, wram, sizeof(wram)));
+      CHECK(frame.decoration_count == (room == 2 ? 7 : room == 3 ? 3 : 2));
+      CHECK(!frame.decoration_overflow && !frame.effect_count);
+      for (unsigned i = 0; i < frame.decoration_count; i++) {
+        const ActionEffectInstance *e = &frame.decorations[i];
+        const bool water = e->kind == kActionEffect_CaveWater || e->kind == kActionEffect_CaveMist;
+        CHECK(e->world_x == (water ? camera / 2 : camera) + 128);
+        CHECK(e->world_y == (water ? 32 : 160));
+        CHECK(e->clip_rect.x0 + e->world_x == 0);
+        CHECK(e->clip_rect.y0 + e->world_y == 0);
+        CHECK(e->clip_rect.x1 + e->world_x == d[0]);
+        CHECK(e->clip_rect.y1 + e->world_y == d[1]);
+        CHECK(e->visual == room && e->phase == kActionEffectPhase_CaveEnvironment);
+        if (e->kind == kActionEffect_CaveAmbientLight)
+          CHECK(e->render_layer == kActionEffectRenderLayer_ForegroundLight);
+        CHECK(e->projection_plane == (water ? kActionEffectProjectionPlane_Bg2High :
+                                              kActionEffectProjectionPlane_Bg1));
+      }
+    }
+    const ActionEffectInstance first = frame.decorations[0];
+    ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 0);
+    ActionEnvironmentalEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram));
+    CHECK(!memcmp(&first, &frame.decorations[0], sizeof(first)));
+    wram[signature_at] = 0;
+    ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 0);
+    ActionEnvironmentalEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram));
+    CHECK(frame.decoration_count == 0);
+    wram[signature_at] = (uint8_t)sig[2];
+    Write16(wram, 0x2E, 4096); /* Old dimensions during a room transition. */
+    ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 0);
+    ActionEnvironmentalEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram));
+    CHECK(frame.decoration_count == 0);
+  }
+}
+
+static void TestTempleMistCollisionCapture(void) {
+  static uint8_t ram[kActRaiserWramSize], before[kActRaiserWramSize];
+  ActionEffectObserver observer = {0};
+  ActionSceneEffectFrame frame;
+  memset(ram, 0, sizeof(ram));
+  ram[0x18] = 1;
+  ram[0x19] = 3;
+  Write16(ram, 0x2E, 1024);
+  Write16(ram, 0x30, 1792);
+  Write16(ram, 0x32, 256);
+  Write16(ram, 0x34, 512);
+  Write16(ram, 0x46, 0x8000);
+  ram[CaveTestTileAddress(0x8000,1024,896,128)] = 0x39;
+  ram[CaveTestTileAddress(0x8000,1024,448,1664)] = 0x26;
+  ram[0x05A0+0x25] = ram[0x05A0+0x26] = 15;
+  ram[0x05A0+0x56] = 3;
+  /* Measured native lower-hall surfaces, not the decorative ledge at 1664. */
+  const int surfaces[][3] = {
+    {528,592,1664}, {592,656,1680}, {688,736,1680}, {768,832,1680}, {864,928,1664},
+  };
+  for (unsigned i = 0; i < 5; i++)
+    for (int x = surfaces[i][0]; x < surfaces[i][1]; x += 16) {
+      ram[CaveTestTileAddress(0x8000,1024,x,surfaces[i][2])] = i == 4 ? 0x56 : 0x25;
+      ram[CaveTestTileAddress(0x8000,1024,x,surfaces[i][2]-16)] = i == 4 ? 0x39 : 0x37;
+    }
+  for (int x = 656; x < 960; x += 16) {
+    const bool pit = x < 688 || (x >= 736 && x < 768) ||
+        (x >= 832 && x < 864) || x >= 928;
+    if (!pit) continue;
+    ram[CaveTestTileAddress(0x8000,1024,x,1712)] = 0x25;
+    ram[CaveTestTileAddress(0x8000,1024,x,1696)] = 0x20;
+  }
+  /* An obstructed top at the left must not become a mist surface. */
+  ram[CaveTestTileAddress(0x8000,1024,512,1664)] = 0x25;
+  ram[CaveTestTileAddress(0x8000,1024,512,1648)] = 0x25;
+  for (unsigned view = 0; view < 2; view++) {
+    Write16(ram, 0x22, (uint16_t)(400 + view*200));
+    Write16(ram, 0x24, (uint16_t)(1512 - view*800));
+    memcpy(before,ram,sizeof(ram));
+    ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+    ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+    CHECK(!memcmp(before,ram,sizeof(ram)));
+    CHECK(frame.decoration_count == 8 && !frame.decoration_overflow);
+    for (unsigned i = 0; i < 5; i++) {
+      const ActionEffectInstance *e = &frame.decorations[3+i];
+      CHECK(e->kind == kActionEffect_TempleGroundMist);
+      CHECK(e->world_x == surfaces[i][0] && e->world_y == surfaces[i][2]);
+      CHECK(e->geometry.data.rect.x0 == 0);
+      CHECK(e->geometry.data.rect.x1 == surfaces[i][1]-surfaces[i][0]);
+      CHECK(e->geometry.data.rect.y0 == -26 && e->geometry.data.rect.y1 == 0);
+      CHECK(e->render_layer == kActionEffectRenderLayer_Bg1Mist);
+      CHECK(e->projection_plane == kActionEffectProjectionPlane_Bg1);
+    }
+  }
+  /* Change the collision shape within one old pocket: capture must split it. */
+  ram[CaveTestTileAddress(0x8000,1024,592,1680)] = 0;
+  ram[CaveTestTileAddress(0x8000,1024,592,1696)] = 0x25;
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decoration_count == 9);
+  CHECK(frame.decorations[4].world_x == 592 && frame.decorations[4].world_y == 1696);
+  CHECK(frame.decorations[4].geometry.data.rect.x1 == 16);
+  CHECK(frame.decorations[5].world_x == 608 && frame.decorations[5].world_y == 1680);
+  /* A fragmented/changed map exceeds the cosmetic budget: keep other effects. */
+  memset(ram+0x8000,0,1024/256*1792/256*256);
+  ram[CaveTestTileAddress(0x8000,1024,896,128)] = 0x39;
+  ram[CaveTestTileAddress(0x8000,1024,448,1664)] = 0x26;
+  for (int x = 512; x < 960; x += 32)
+    ram[CaveTestTileAddress(0x8000,1024,x,1664)] = 0x25;
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decoration_count == 3 && frame.decoration_visible_count == 3);
+  CHECK(!frame.decoration_overflow);
+}
+
+static void TestLandingDustContacts(void) {
+  static uint8_t ram[kActRaiserWramSize], before[kActRaiserWramSize];
+  ActionLandingDustState state = {0};
+  ActionSceneEffectFrame frame = {0};
+  ActionBgMapView map;
+  memset(ram, 0, sizeof(ram));
+  CHECK(ActionBgMapView_Init(&map, ram, sizeof(ram), 512, 256, 0x8000));
+  for (int x = 0; x < 512; x += 16)
+    ram[CaveTestTileAddress(0x8000, 512, x, 192)] = 0x25;
+  ram[0x5C5] = 15; /* Loaded native collision LUT: a solid stone floor. */
+  const unsigned actors[] = {0x8A0,0xAE0,0xB20,0xB60,0xBA0,0xBE0,0xC20,0xC60};
+  for (unsigned i = 0; i < 8; i++) {
+    const unsigned at = actors[i];
+    Write16(ram, at + 2, (uint16_t)(128 + i*32));
+    Write16(ram, at + 4, 128);
+    Write16(ram, at + 0x10, 24);
+    Write16(ram, at + 0x12, i ? 0x8661 : 0x9996);
+    Write16(ram, at + 0x16, i ? 0x5000 : 0x8000);
+    ram[at + 0x18] = i ? 0x7E : 6;
+    Write16(ram, at + 0x2C, i ? 24 : 0);
+    Write16(ram, at + 0x32, i ? 0xAF5D : 0x9810);
+  }
+  ActionLandingDust_Capture(&state, &frame, ram, sizeof(ram), &map, 4, 65530);
+  CHECK(!frame.decoration_count); /* First observation cannot invent an impact. */
+  for (unsigned t = 1; t <= 10; t++) {
+    frame = (ActionSceneEffectFrame){0};
+    for (unsigned i = 0; i < 8; i++) Write16(ram, actors[i] + 4, (uint16_t)(128 + 4*t));
+    memcpy(before, ram, sizeof(ram));
+    ActionLandingDust_Capture(&state, &frame, ram, sizeof(ram), &map, 4,
+        (uint16_t)(65530+t));
+    CHECK(!memcmp(before, ram, sizeof(ram)));
+    CHECK(frame.decoration_count == (t == 10 ? kActionLandingDustMaxPuffs : 0));
+  }
+  CHECK(!frame.decoration_overflow && !frame.effect_count);
+  CHECK(frame.decorations[0].record_address == 0x8A0 && frame.decorations[0].visual == 1);
+  CHECK(frame.decorations[1].record_address == 0xAE0 && frame.decorations[1].visual == 3);
+  const ActionSceneEffectFrame retained = frame;
+  frame = (ActionSceneEffectFrame){0};
+  ActionLandingDust_Capture(&state, &frame, ram, sizeof(ram), &map, 4, 4);
+  CHECK(!memcmp(&frame, &retained, sizeof(frame))); /* Pause and clock wrap. */
+  for (unsigned t = 5; t <= 53; t++) {
+    Write16(ram, 0x8A2, (uint16_t)(128+t)); /* Walking leaves each puff at its impact. */
+    frame = (ActionSceneEffectFrame){0};
+    ActionLandingDust_Capture(&state, &frame, ram, sizeof(ram), &map, 4, (uint16_t)t);
+    if (t < 52) CHECK(frame.decorations[0].world_x == 128);
+  }
+  CHECK(!frame.decoration_count);
+  for (unsigned rejected = 0; rejected < 6; rejected++) {
+    memset(&state, 0, sizeof(state));
+    for (unsigned i = 1; i < 8; i++) Write16(ram, actors[i], 0x8000);
+    Write16(ram, 0x8A2, 128);
+    Write16(ram, 0x8A4, 148);
+    Write16(ram, 0x8D2, 0x9810);
+    ram[0x5C5] = rejected == 0 ? 3 : 15; /* Unknown one-way artwork is not an identified capital. */
+    frame = (ActionSceneEffectFrame){0};
+    ActionLandingDust_Capture(&state, &frame, ram, sizeof(ram), &map, 4, 60);
+    Write16(ram, 0x8A4, 156);
+    ActionLandingDust_Capture(&state, &frame, ram, sizeof(ram), &map, 4, 61);
+    if (rejected == 1) Write16(ram, 0x8D2, 0x979A); /* Slot reuse. */
+    if (rejected == 2) Write16(ram, 0x8A2, 400); /* Teleport. */
+    if (rejected == 5) Write16(ram, 0x8B0, 32); /* Changed pose extent. */
+    if (rejected == 3) Write16(ram, 0x8B2, 0x9C64); /* Hit reaction. */
+    Write16(ram, 0x8A4, rejected == 5 ? 160 : 168);
+    ActionLandingDust_Capture(&state, &frame, ram, sizeof(ram), &map, 4,
+        rejected == 4 ? 70 : 62); /* Missing gameplay interval. */
+    CHECK(!frame.decoration_count);
+    Write16(ram, 0x8B2, 0x9996);
+    Write16(ram, 0x8B0, 24);
+  }
+  const unsigned sources[] = {0xB041,0xB0B4,0xB28D,0xB2FD};
+  for (unsigned family = 0; family < 4; family++) {
+    memset(&state, 0, sizeof(state));
+    Write16(ram, 0x8A0, 0x8000);
+    Write16(ram, 0xAE0, 0);
+    Write16(ram, 0xAF6, 0x4000);
+    Write16(ram, 0xB12, (uint16_t)sources[family]);
+    for (unsigned t = 0; t < 11; t++) {
+      Write16(ram, 0xAE4, (uint16_t)(128+t*4));
+      frame = (ActionSceneEffectFrame){0};
+      ActionLandingDust_Capture(&state, &frame, ram, sizeof(ram), &map, 3, (uint16_t)t);
+      CHECK(frame.decoration_count == (t == 10 ? 1 : 0));
+    }
+    CHECK(frame.decorations[0].visual == 1 && frame.decorations[0].world_y == 192);
+  }
+  /* A child with a live boss source is still a projectile, never a jumper. */
+  memset(&state, 0, sizeof(state));
+  Write16(ram, 0x8A0, 0x8000);
+  Write16(ram, 0xAE0, 0);
+  Write16(ram, 0xAF6, 0x5000);
+  Write16(ram, 0xB12, 0xAF5D);
+  Write16(ram, 0xB1A, 0x1320);
+  for (unsigned t = 0; t < 11; t++) {
+    Write16(ram, 0xAE4, (uint16_t)(128+t*4));
+    frame = (ActionSceneEffectFrame){0};
+    ActionLandingDust_Capture(&state, &frame, ram, sizeof(ram), &map, 4, (uint16_t)t);
+    CHECK(!frame.decoration_count);
+  }
+}
+
+static void TestTempleCapitalContacts(void) {
+  static uint8_t ram[kActRaiserWramSize], before[kActRaiserWramSize];
+  const struct { uint8_t tile, above, collision; int x; bool emits; } cases[] = {
+    /* Actual 01/03 column-cap metatiles, including the non-solid column behind. */
+    {0x54,0x2F,3,136,true}, {0x55,0x38,3,136,true},
+    {0x56,0x39,3,136,true}, {0x57,0x2F,3,136,true},
+    {0x54,0x2F,3,121,true}, {0x57,0x2F,3,151,true}, /* Native edge probes. */
+    {0x54,0x18,3,136,false}, {0x55,0x20,3,136,false}, /* Spikes on a capital. */
+    {0x54,0x25,3,136,false}, /* Stone above: not an exposed top. */
+    {0x53,0x2F,3,136,false}, {0x54,0x2F,0,136,false}, /* Unproved surface. */
+    {0x25,0x20,15,136,false}, /* Spikes on ordinary stone also fail closed. */
+  };
+  for (unsigned c = 0; c < sizeof(cases)/sizeof(cases[0]); c++) {
+    memset(ram, 0, sizeof(ram));
+    ActionLandingDustState state = {0};
+    ActionSceneEffectFrame frame = {0};
+    ActionBgMapView map;
+    CHECK(ActionBgMapView_Init(&map, ram, sizeof(ram), 512, 256, 0x8000));
+    ram[CaveTestTileAddress(0x8000, 512, 128, 192)] = cases[c].tile;
+    ram[CaveTestTileAddress(0x8000, 512, 128, 176)] = cases[c].above;
+    ram[0x5C5] = 15;
+    ram[0x5A0 + cases[c].tile] = cases[c].collision;
+    Write16(ram, 0x8A2, (uint16_t)cases[c].x);
+    Write16(ram, 0x8B0, 24);
+    Write16(ram, 0x8B2, 0x9996);
+    Write16(ram, 0x8B6, 0x8000);
+    ram[0x8B8] = 6;
+    for (unsigned t = 0; t < 3; t++) {
+      Write16(ram, 0x8A4, (uint16_t)(152 + t*8));
+      frame = (ActionSceneEffectFrame){0};
+      memcpy(before, ram, sizeof(ram));
+      ActionLandingDust_Capture(&state, &frame, ram, sizeof(ram), &map, 3, (uint16_t)t);
+      CHECK(!memcmp(before, ram, sizeof(ram)));
+      CHECK(frame.decoration_count == (t == 2 && cases[c].emits ? 1 : 0));
+    }
+    if (cases[c].emits) {
+      CHECK(frame.decorations[0].world_x == cases[c].x);
+      CHECK(frame.decorations[0].world_y == 192);
+    }
+  }
+}
+
+static uint16_t CapturedWetSourceMask(uint8_t *ram) {
+  ActionEffectObserver observer = {0};
+  ActionSceneEffectFrame frame;
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,kActRaiserWramSize,1);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,kActRaiserWramSize);
+  for (unsigned i = 0; i < frame.decoration_count; i++)
+    if (frame.decorations[i].kind == kActionEffect_CaveDrips)
+      return frame.decorations[i].source_mask;
+  return 0;
+}
+
+static void TestCaveWetMaterials(void) {
+  static uint8_t ram[kActRaiserWramSize];
+  memset(ram, 0, sizeof(ram));
+  ram[0x18] = 1;
+  ram[0x19] = 2;
+  Write16(ram,0x2E,2048);
+  Write16(ram,0x30,1280);
+  Write16(ram,0x32,2048);
+  Write16(ram,0x34,1280);
+  Write16(ram,0x46,0x8000);
+  Write16(ram,0x4A,0xC000);
+  ram[CaveTestTileAddress(0x8000,2048,326,352)] = 0xB8;
+  ram[CaveTestTileAddress(0x8000,2048,420,432)] = 0xB9;
+  ram[CaveTestTileAddress(0xC000,2048,0,896)] = 1;
+  ram[CaveTestTileAddress(0xC000,2048,720,0)] = 2;
+  for (unsigned i = 0; i < kActionCaveWetSourceCount; i++) {
+    const ActionCaveWetSource *s = &kActionCaveWetSources[i];
+    ram[CaveTestTileAddress(0x8000,2048,s->x,s->ceiling_y-1)] = s->ceiling_tile;
+    ram[CaveTestTileAddress(0x8000,2048,s->x,s->landing_y)] = s->landing_tile;
+  }
+  CHECK(CapturedWetSourceMask(ram) == 0xFF);
+  /* Real foreground and decorative boulders can both be BG1-low. Replacing
+   * either physical endpoint with background art must disable that emitter. */
+  const unsigned tip = CaveTestTileAddress(0x8000,2048,326,370);
+  ram[tip] = 0x69;
+  CHECK(CapturedWetSourceMask(ram) == 0xFD);
+  ram[tip] = 0xC0;
+  ram[CaveTestTileAddress(0x8000,2048,326,451)] = 0x58;
+  CHECK(CapturedWetSourceMask(ram) == 0xFD);
+  ram[0x19] = 3;
+  CHECK(!CapturedWetSourceMask(ram));
+}
+
+static void TestDustSettling(void) {
+  static uint8_t ram[kActRaiserWramSize];
+  memset(ram, 0, sizeof(ram));
+  ActionLandingDustState state = {0};
+  ActionSceneEffectFrame frame = {0};
+  ActionBgMapView map;
+  CHECK(ActionBgMapView_Init(&map, ram, sizeof(ram), 512, 256, 0x8000));
+  for (unsigned x = 0; x < 512; x += 16)
+    ram[CaveTestTileAddress(0x8000,512,x,192)] = 0x25;
+  ram[0x5C5] = 15;
+  Write16(ram,0x8A2,128);
+  Write16(ram,0x8B0,24);
+  Write16(ram,0x8B2,0x9996);
+  Write16(ram,0x8B6,0x8000);
+  ram[0x8B8] = 6;
+  for (unsigned t = 0; t <= 203; t++) {
+    /* Identical repeated jumps at one spot; another landing 64px away is
+     * independent. The third actor landing tests shared patch depletion. */
+    const unsigned jump = t % 50;
+    Write16(ram,0x8A4,(uint16_t)(jump < 3 ? 152+jump*8 : 168));
+    Write16(ram,0x8A2,(uint16_t)(t >= 100 && t < 150 ? 192 : 128));
+    if (t == 50) {
+      Write16(ram,0x8A0,0x8000);
+      memcpy(ram+0xAE0,ram+0x8A0,64);
+      Write16(ram,0xAE0,0);
+      Write16(ram,0xAF6,0x5000);
+      ram[0xAF8] = 0x7E;
+      Write16(ram,0xB0C,24);
+      Write16(ram,0xB12,0xAF5D);
+    }
+    if (t >= 50 && t < 100) Write16(ram,0xAE4,(uint16_t)(jump < 3 ? 152+jump*8 : 168));
+    if (t == 100) { Write16(ram,0xAE0,0x8000); Write16(ram,0x8A0,0); }
+    frame = (ActionSceneEffectFrame){0};
+    ActionLandingDust_Capture(&state,&frame,ram,sizeof(ram),&map,4,(uint16_t)(65500+t));
+    if (t == 2) CHECK(state.next_generation == 1);
+    if (t == 52) CHECK(state.next_generation == 1 && !frame.decoration_count);
+    if (t == 102) CHECK(state.next_generation == 2);
+    if (t == 202) CHECK(state.next_generation >= 3);
+    if (t == 20) {
+      const ActionLandingDustState paused = state;
+      frame = (ActionSceneEffectFrame){0};
+      ActionLandingDust_Capture(&state,&frame,ram,sizeof(ram),&map,4,(uint16_t)(65500+t));
+      CHECK(!memcmp(&state,&paused,sizeof(state)));
+    }
+  }
+}
+
+static void TestFillmoreStatueOrbs(void) {
+  static uint8_t ram[kActRaiserWramSize], before[kActRaiserWramSize];
+  memset(ram,0,sizeof(ram));
+  ram[0x18] = 1;
+  ram[0x19] = 3;
+  const unsigned child = 0x8E0, parent = 0xDE0;
+  for (unsigned at = child; at <= parent; at += parent-child) {
+    Write16(ram,at+2,944);
+    Write16(ram,at+4,1496);
+    Write16(ram,at+0x16,0x4000);
+    ram[at+0x18] = 0x7E;
+    Write16(ram,at+0x32,0xB3BF);
+  }
+  Write16(ram,parent+0x12,0x8683);
+  Write16(ram,parent+0x1A,0x24);
+  Write16(ram,parent+0x20,0x4A33);
+  Write16(ram,parent+0x22,0x25);
+  Write16(ram,child+0x1E,0xB3E9);
+  Write16(ram,child+0x3A,parent);
+  ActionEffectObserver observer = {0};
+  ActionSceneEffectFrame frame;
+  for (unsigned mode = 0; mode < 2; mode++) {
+    Write16(ram,child+0x12,mode ? 0xB42F : 0xB406);
+    Write16(ram,child+0x1A,(uint16_t)(0xA+mode));
+    for (unsigned visual = 0x1B; visual <= 0x1E; visual++) {
+      Write16(ram,child+0x22,(uint16_t)visual);
+      Write16(ram,child+0x20,(uint16_t)(0x48F0+(visual-0x1B)*12));
+      memcpy(before,ram,sizeof(ram));
+      ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+      CHECK(frame.effect_count == 1 && frame.effects[0].kind == kActionEffect_FillmoreStatueOrb);
+      CHECK(!memcmp(before,ram,sizeof(ram)));
+    }
+  }
+  /* Reused parent, unaligned backlink, other room, or a different projectile
+   * using the generic animation address must never acquire this light. */
+  const unsigned addresses[] = {parent+0x32,child+0x3A,0x18,child+0x20,child+0x1A};
+  const uint16_t values[] = {0xB2FD,0xDE1,0x0302,0x48EF,0x24};
+  for (unsigned i = 0; i < 5; i++) {
+    const uint16_t saved = (uint16_t)(ram[addresses[i]] | ram[addresses[i]+1]<<8);
+    Write16(ram,addresses[i],values[i]);
+    ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+    CHECK(!frame.effect_count);
+    Write16(ram,addresses[i],saved);
+  }
+}
+
 int main(void) {
+  TestCaveWetMaterials();
+  TestDustSettling();
+  TestFillmoreStatueOrbs();
+  TestTempleMistCollisionCapture();
+  TestTempleCapitalContacts();
+  TestLandingDustContacts();
+  TestCaveEnvironmentalCapture();
   TestForestEnvironmentalCapture();
   TestFirstActBossMagic();
   TestControllerAndSlotIdentity();

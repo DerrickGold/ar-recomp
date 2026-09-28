@@ -1319,11 +1319,9 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
         kPpuOverlayFlag_RemoveFromGame | kPpuOverlayFlag_MarkObjColorMath |
         kPpuOverlayFlag_MarkBgHalfAdd | kPpuOverlayFlag_ApplyBgFixedColorSubtract |
         kPpuOverlayFlag_MarkFullAddSubscreen | kPpuOverlayFlag_MarkMainScreenWinner |
-        kPpuOverlayFlag_MarkOwningScreenWinner;
+        kPpuOverlayFlag_MarkOwningScreenWinner | kPpuOverlayFlag_MarkVisibleMainWinner;
     CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, 0, kActRaiserAuthenticWidth,
-                               kActRaiserAuthenticHeight, (uint8_t)(kAllFlags | 0x80u)));
-    /* Fill is structured capture state now; its former high bit is once again
-     * unknown and must be rejected by the flag whitelist. */
+                               kActRaiserAuthenticHeight, kAllFlags));
     CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg2].flags == kAllFlags);
     PpuClearOverlayCaptures(ppu);
   }
@@ -1787,6 +1785,66 @@ static void TestSkyPalaceWinnerCapture(void) {
   CHECK(!SimWorldNavigationCapture_Capture(&frame, sr_runner_handle(&snes)));
   CHECK(frame.view == kSimView_AuthenticFallback);
   sr_runner_bind_ppu_services(&snes, false);
+  ppu_free(ppu);
+}
+
+/* Temple grading consumes the extracted scene, so relocated HUD glyphs and
+ * icons must reveal BG1 while ordinary actors still occlude it. Both packed
+ * scanout and the independent reference renderer must export that same mask. */
+static void TestVisibleMainWinnerMask(void) {
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  static uint32_t fb[kW], mask[kW], hud[kW], icons[kW];
+  static uint32_t reference_fb[kW], reference_mask[kW];
+  ppu_reset(ppu);
+  ppu->inidisp = 15;
+  ppu->bgmode = 9;
+  ppu->screenEnabled[0] = 0x15; /* BG1, BG3 and OBJ. */
+  ppu->bgTileAdr = 0x0400;
+  ppu->bgXsc[0] = 0x20;
+  ppu->bgXsc[2] = 0x28;
+  ppu->cgram[0x11] = bgr555(0, 0, 31);
+  ppu->cgram[5] = bgr555(31, 31, 31);
+  ppu->cgram[0x81] = bgr555(31, 0, 0);
+  set_solid_4bpp_tile(ppu, 1, 1);
+  set_solid_4bpp_tile(ppu, 2, 1);
+  set_solid_2bpp_tile(ppu, 0x4000, 0, 1);
+  for (int x = 0; x < 32; x++) {
+    ppu->vram[0x2000+x] = 1 | (1 << 10);
+    ppu->vram[0x2800+x] = (x < 2 ? 0 : 1) | (1 << 10) | (1 << 13);
+  }
+  for (int i = 0; i < 128; i++) ppu->oam[i*2] = 0xe000;
+  ppu->oam[0] = 80;
+  ppu->oam[1] = 2 | (3 << 12);
+  ppu->oam[2] = 112;
+  ppu->oam[3] = 2 | (3 << 12);
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, (uint8_t *)mask, sizeof(mask)));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3, (uint8_t *)hud, sizeof(hud)));
+  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, (uint8_t *)icons, sizeof(icons)));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg3, 0, 0, 64, 1,
+                             kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Obj, 0, 0, kW, 1,
+                             kPpuOverlayFlag_RemoveFromGame));
+  CHECK(PpuSetOverlayOamRange(ppu, 0, 1));
+  for (int renderer = 0; renderer < 2; renderer++) {
+    const uint32_t flags = renderer ? kPpuRenderFlags_ReferencePixelRenderer : 0;
+    PpuBeginDrawing(ppu, (uint8_t *)fb, sizeof(fb), flags);
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+                               kPpuOverlayFlag_MarkMainScreenWinner));
+    render_first_line(ppu);
+    CHECK(mask[0] == 0xff000000u && mask[80] == 0xff000000u);
+    memcpy(reference_fb, fb, sizeof(fb));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+                               kPpuOverlayFlag_MarkVisibleMainWinner));
+    render_first_line(ppu);
+    CHECK(mask[0] == 0xffffffffu && mask[80] == 0xffffffffu);
+    CHECK(mask[112] == 0xff000000u && mask[120] == 0xffffffffu);
+    CHECK(hud[0] != 0 && icons[80] != 0);
+    CHECK(!memcmp(reference_fb, fb, sizeof(fb))); /* Capture never changes scanout. */
+    if (!renderer) memcpy(reference_mask, mask, sizeof(mask));
+    else CHECK(!memcmp(reference_mask, mask, sizeof(mask)));
+  }
   ppu_free(ppu);
 }
 
@@ -2902,6 +2960,7 @@ int main(void) {
   TestSubscreenOnlyOverlayCapture();
   TestFullAddSubscreenWinnerCapture();
   TestMainScreenWinnerMask();
+  TestVisibleMainWinnerMask();
   TestSkyPalaceWinnerCapture();
   TestBg3NativeParityComposite();
   TestVerticalMarginLayerClip();

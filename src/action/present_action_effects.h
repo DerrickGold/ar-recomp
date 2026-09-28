@@ -8,6 +8,10 @@
 typedef struct FrameSlot FrameSlot;
 typedef struct DioramaProjection DioramaProjection;
 
+/* Optional BG1 scenery dimming, 0..1. Shared by flat masks and Diorama's
+ * existing layer colors; requires this frame's validated environmental field. */
+float PresentActionEffects_Bg1Dimming(const FrameSlot *slot);
+
 /* Borrow validated winner-mask pixels only during FrameSlot upload. Return
  * bytes uploaded for the caller's traffic accounting; retained draws use the
  * owned GPU textures and never read these borrowed pixels again. */

@@ -221,7 +221,8 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
     dst->action_bg1_mask_valid =
         !dst->diorama_active &&
         (ppu_frame->overlays[SR_PPU_OVERLAY_BG1].flags &
-         SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER) != 0u &&
+         (SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER |
+          SR_PPU_OVERLAY_MARK_VISIBLE_MAIN_WINNER)) != 0u &&
         (ppu_frame->overlays[SR_PPU_OVERLAY_BG1].content_band_mask & 1u) != 0u;
     dst->action_bg2_mask_valid =
         !dst->diorama_active &&

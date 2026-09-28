@@ -375,6 +375,7 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
       .map_group = slot->diorama_map_group,
       .map_number = slot->diorama_map_number,
       .layer_section = slot->diorama_layer_section,
+      .bg1_dimming = PresentActionEffects_Bg1Dimming(slot),
       .additive_plane_mask =
           slot->diorama_plane_additive_mask & s_diorama_uploaded_plane_mask,
       .effect_obj_priority_mask = effect_obj_priority_mask,

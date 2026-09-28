@@ -321,7 +321,8 @@ static void TestPlaneEligibilityMatchesDrawableInputs(void) {
   CHECK(Diorama_PlaneProjectable(SR_PPU_OVERLAY_BG1, true, false, false, true, false, false));
   CHECK(Diorama_PlaneProjectable(kDioramaPlane_Bg1Hi, true, false, false, true, false, false));
   CHECK(Diorama_PlaneProjectable(SR_PPU_OVERLAY_BG2, true, true, true, true, false, false));
-  CHECK(!Diorama_PlaneProjectable(kDioramaPlane_Bg2Hi, true, true, false, true, false, false));
+  CHECK(Diorama_PlaneProjectable(kDioramaPlane_Bg2Hi, true, true, false, true, false, false));
+  CHECK(!Diorama_PlaneProjectable(kDioramaPlane_Bg2Hi, true, true, false, true, false, true));
   CHECK(!Diorama_PlaneProjectable(SR_PPU_OVERLAY_BG2, true, true, false, true, false, true));
   CHECK(!Diorama_PlaneProjectable(SR_PPU_OVERLAY_OBJ, true, true, false, false, false, false));
 }
@@ -350,10 +351,12 @@ static void TestBgEffectMaskDistinguishesEmptyFromFailedUpload(void) {
   const uint32_t required = bg1 | bg2 | bg1hi | bg2hi;
 
   CHECK(Diorama_FilterBgEffectProjectionMask(required, bg1 | bg2 | bg1hi | bg2hi, bg2, bg2) ==
-        (bg1 | bg2 | bg1hi));
+        (bg1 | bg2 | bg1hi | bg2hi));
   CHECK(Diorama_FilterBgEffectProjectionMask(required, bg1 | bg2, bg1 | bg2, bg2) == bg2);
   CHECK(Diorama_FilterBgEffectProjectionMask(required, bg2, 0, 0) == bg2);
   CHECK(Diorama_FilterBgEffectProjectionMask(required, 0, 0, 0) == 0);
+  CHECK(Diorama_FilterBgEffectProjectionMask(bg2hi, bg2hi, bg2hi, 0) == 0);
+  CHECK(Diorama_FilterBgEffectProjectionMask(bg2hi, bg2hi, bg2hi, bg2hi) == bg2hi);
 }
 
 int main(void) {

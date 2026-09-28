@@ -38,7 +38,7 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer, ActionScene
   assert(spell_calls == scene_calls);
   *dst = scene;
 }
-void ActionEnvironmentalEffects_CaptureFrame(const ActionEffectObserver *observer,
+void ActionEnvironmentalEffects_CaptureFrame(ActionEffectObserver *observer,
     ActionSceneEffectFrame *dst, const uint8_t *wram, size_t size) {
   assert(observer == seen_observer && dst == &frame.action_scene_effects);
   assert(wram == g_ram && size == sizeof(g_ram));
@@ -103,8 +103,11 @@ int main(void) {
    * the waterfall's authored layout. Re-enabling restores the current list. */
   scene.effect_count = scene.visible_count = 1;
   scene.decoration_visible_count = 2;
+  seen_observer->landing_dust.valid = 1;
+  seen_observer->landing_dust.puffs[0].active = 1;
   g_settings.action_environmental_effects = false;
   Capture(0, kDioramaLayerSection_AitosWaterfall);
+  assert(!seen_observer->landing_dust.valid && !seen_observer->landing_dust.puffs[0].active);
   g_settings.action_environmental_effects = true;
   Capture(0, kDioramaLayerSection_AitosWaterfall);
   scene.decoration_overflow = true;

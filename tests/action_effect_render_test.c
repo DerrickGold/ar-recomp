@@ -2146,7 +2146,393 @@ static void TestBetweenBackgroundsProjection(void) {
   CHECK(!ActionEffectProjection_IntersectsFlatViewport(&context, &light));
 }
 
+static void TestCaveWaterUsesHighPlane(void) {
+  DioramaProjection projection = RakedApronProjection();
+  projection.texture_width = 1024;
+  projection.texture_height = 768;
+  projection.texture_x_origin = 384;
+  projection.bg2_high_plane = (DioramaPlaneProjection){
+    .valid = true, .u1 = 1, .v1 = 1, .z_world = .4f, .rake = .17f, .bow = .11f,
+  };
+  ActionEffectProjectionContext context = {
+    .bg1_camera_x = 1000, .bg1_camera_y = 300,
+    .bg2_camera_x = 608, .bg2_camera_y = 752,
+    .ws_extra = 52, .ws_extra_top = 64, .diorama_projection = &projection,
+  };
+  ActionEffectInstance effect = {
+    .world_x = 736, .world_y = 896,
+    .projection_plane = kActionEffectProjectionPlane_Bg2High,
+    .render_layer = kActionEffectRenderLayer_Bg2HighPlane,
+  };
+  ArRenderPointF actual, expected, wrong;
+  CHECK(ActionEffectProjection_ProjectPoint(&context, &effect, 0, 0, &actual));
+  CHECK(Diorama_ProjectCapturedBg2HighPoint(&projection, 180, 208, &expected, NULL, NULL));
+  CHECK(fabsf(actual.x - expected.x) < .001f && fabsf(actual.y - expected.y) < .001f);
+  projection.bg2_plane.u0 = projection.bg2_plane.v0 = 0;
+  projection.bg2_plane.u1 = projection.bg2_plane.v1 = 1;
+  CHECK(Diorama_ProjectCapturedBg2Point(&projection, 180, 208, &wrong, NULL, NULL));
+  CHECK(fabsf(actual.x - wrong.x) > 1); /* Exact high-band depth, not low BG2. */
+  projection.bg2_high_plane.valid = false;
+  CHECK(!ActionEffectProjection_ProjectPoint(&context, &effect, 0, 0, &actual));
+}
+
+static void TestCaveEnvironmentGeometry(void) {
+  ActionSceneEffectFrame frame = {.decoration_count = 1, .decoration_visible_count = 1};
+  static ActionSceneEffectRenderBatch first, again;
+  const uint8_t kinds[] = {kActionEffect_CaveWater, kActionEffect_CaveDrips,
+                          kActionEffect_TempleDust, kActionEffect_TowerWindowLight,
+                          kActionEffect_CaveMist, kActionEffect_CaveSheen,
+                          kActionEffect_CaveAmbientLight, kActionEffect_TempleGrit,
+                          kActionEffect_TempleGroundMist};
+  const int vertices[] = {1100,960,1300,672,592,260,4032,512,3360};
+  const int indices[] = {3000,1440,1950,1440,2880,390,8640,1536,7200};
+  for (unsigned family = 0; family < 9; family++) {
+    ActionEffectInstance *e = &frame.decorations[0];
+    *e = (ActionEffectInstance){
+      .kind = kinds[family], .phase = kActionEffectPhase_CaveEnvironment, .source_mask = 0xFF,
+      .flags = kActionEffectFlag_Visible, .visual = family == 3 ? 4 : family >= 6 ? 3 : 2,
+      .render_layer = family == 0 ? kActionEffectRenderLayer_Bg2HighPlane :
+          family == 3 || family == 6 ? kActionEffectRenderLayer_ForegroundLight :
+          family == 4 || family == 7 ? kActionEffectRenderLayer_WorldDust :
+          family == 5 ? kActionEffectRenderLayer_Bg1Plane :
+          family == 8 ? kActionEffectRenderLayer_Bg1Mist : kActionEffectRenderLayer_WorldOverlay,
+      .projection_plane = family == 0 || family == 4 ? kActionEffectProjectionPlane_Bg2High :
+                                                     kActionEffectProjectionPlane_Bg1,
+      .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,544}},
+    };
+    if (family == 8) e->geometry.data.rect = (ActionEffectLocalRect){0,-26,64,0};
+    int total = 0;
+    for (int x = 128; x < 2048; x += 173) {
+      for (int y = -160; y < 1792; y += 157) {
+        e->world_x = (int16_t)x;
+        e->world_y = (int16_t)y;
+        e->phase_ticks = (uint16_t)(x + y);
+        CHECK(ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+            IdentityProjection, NULL, NULL, &first));
+        total += first.vertex_count;
+        CHECK(first.vertex_count <= vertices[family] && first.index_count <= indices[family]);
+        for (int i = 0; i < first.vertex_count; i++) {
+          CHECK(isfinite(first.vertices[i].position.x) && isfinite(first.vertices[i].position.y));
+          CHECK(first.vertices[i].color.a >= 0 && first.vertices[i].color.a <= 1);
+        }
+        e->phase_ticks = (uint16_t)(e->phase_ticks + 1024);
+        CHECK(ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+            IdentityProjection, NULL, NULL, &again));
+        CHECK(SceneBatchesEqual(&first, &again)); /* Also covers the 16-bit clock seam. */
+      }
+    }
+    CHECK(total > 0);
+    frame.decorations[1] = *e;
+    frame.decoration_count = 2;
+    CHECK(!ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+        IdentityProjection, NULL, NULL, &first));
+    CHECK(!first.vertex_count && !first.index_count);
+    frame.decoration_count = 1;
+  }
+  ActionSceneEffectFrame water = {.decoration_count = 1, .decoration_visible_count = 1};
+  water.decorations[0] = (ActionEffectInstance){
+    .world_x = 736, .world_y = 592, .kind = kActionEffect_CaveWater,
+    .phase = kActionEffectPhase_CaveEnvironment, .visual = 2,
+    .flags = kActionEffectFlag_Visible, .phase_ticks = 32,
+    .render_layer = kActionEffectRenderLayer_Bg2HighPlane,
+    .projection_plane = kActionEffectProjectionPlane_Bg2High,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,544}},
+  };
+  CHECK(ActionSceneDecorationRender_Build(&water, kActionEffectRenderLayer_Bg2HighPlane,
+      true, true, IdentityProjection, NULL, NULL, &first));
+  /* A soft, finite splash around the fall's foot, not a collapsed glow mesh. */
+  CHECK(SampleForestLight(&first, 736, 906, false) > .02f);
+  CHECK(SampleForestLight(&first, 745, 914, false) == 0);
+  ActionEffectInstance *e = &frame.decorations[0]; /* Tower surface light. */
+  e->kind = kActionEffect_TowerWindowLight;
+  e->visual = 4;
+  e->phase_ticks = 0;
+  e->render_layer = kActionEffectRenderLayer_ForegroundLight;
+  e->world_x = 128;
+  e->world_y = 0;
+  e->geometry.data.rect = (ActionEffectLocalRect){-384,0,384,544};
+  CHECK(ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+      IdentityProjection, NULL, NULL, &first));
+  CHECK(SampleForestLight(&first, 112, 90, true) < .02f);
+  CHECK(SampleForestLight(&first, 130, 180, true) > .20f);
+  CHECK(SampleForestLight(&first, 130, 240, true) == 0);
+  e->flags |= kActionEffectFlag_ClipToRect;
+  e->clip_rect = (ActionEffectLocalRect){-10,120,100,201};
+  CHECK(ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+      IdentityProjection, NULL, NULL, &again));
+  CHECK(again.vertex_count > 0);
+  for (float y = 120.1f; y < 201; y += 7.1f)
+    for (float x = 118.1f; x < 228; x += 6.1f)
+      CHECK(fabsf(SampleForestLight(&first, x, y, true) -
+                  SampleForestLight(&again, x, y, true)) < .0005f);
+  /* Broad surface light has no cone tip or hard edge. Cropping preserves
+   * its interior RGB field rather than stretching it to fit the viewport. */
+  e->kind = kActionEffect_CaveAmbientLight;
+  e->visual = 3;
+  e->world_x = 896;
+  e->world_y = 1440;
+  e->flags = kActionEffectFlag_Visible;
+  e->render_layer = kActionEffectRenderLayer_ForegroundLight;
+  CHECK(ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+      IdentityProjection, NULL, NULL, &first));
+  CHECK(SampleForestLight(&first, 856,1590,true) > .12f);
+  CHECK(SampleForestLight(&first, 856,1590,true) < .26f);
+  CHECK(fabsf(SampleForestLight(&first, 856,1590,true) -
+              SampleForestLight(&first, 906,1590,true)) < .056f);
+  e->flags |= kActionEffectFlag_ClipToRect;
+  e->clip_rect = (ActionEffectLocalRect){-48,110,20,210};
+  CHECK(ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+      IdentityProjection, NULL, NULL, &again));
+  CHECK(again.vertex_count > 0);
+  for (float y = 1551.1f; y < 1649; y += 6.1f)
+    for (float x = 849.1f; x < 915; x += 4.1f)
+      CHECK(fabsf(SampleForestLight(&first,x,y,true) -
+                  SampleForestLight(&again,x,y,true)) < .0005f);
+}
+
+static void TestCaveAmbientScroll(void) {
+  ActionSceneEffectFrame frame = {.decoration_count = 1, .decoration_visible_count = 1};
+  frame.decorations[0] = (ActionEffectInstance){
+    .kind = kActionEffect_CaveAmbientLight, .phase = kActionEffectPhase_CaveEnvironment,
+    .flags = kActionEffectFlag_Visible, .visual = 3, .phase_ticks = 512,
+    .world_x = 828, .world_y = 1270,
+    .render_layer = kActionEffectRenderLayer_ForegroundLight,
+    .projection_plane = kActionEffectProjectionPlane_Bg1,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,544}},
+  };
+  ActionEffectProjectionContext context = {
+    .bg1_camera_x = 700, .bg1_camera_y = 1430,
+    .visible_width = 384, .snes_height = 224, .viewport = {0,0,384,224},
+  };
+  static ActionSceneEffectRenderBatch first, moved;
+  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_ForegroundLight,
+      true, false, ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
+      &context, &first));
+  /* The aggregate follows the camera, but its illumination must stay fixed
+   * to the room on both axes, including partially clipped patches. */
+  context.bg1_camera_x += 23;
+  context.bg1_camera_y += 37;
+  frame.decorations[0].world_x += 23;
+  frame.decorations[0].world_y += 37;
+  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_ForegroundLight,
+      true, false, ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
+      &context, &moved));
+  float peak = 0;
+  for (float y = 1.3f; y < 187; y += 7.1f)
+    for (float x = 1.2f; x < 361; x += 9.3f) {
+      const float expected = SampleForestLight(&first, x+23, y+37, true);
+      peak = fmaxf(peak, expected);
+      CHECK(fabsf(expected-SampleForestLight(&moved, x, y, true)) < .0005f);
+    }
+  CHECK(peak > .1f);
+}
+
+static void TestTempleGroundMist(void) {
+  ActionSceneEffectFrame frame = {.decoration_count = 5, .decoration_visible_count = 5};
+  const int surfaces[][3] = {
+    {528,592,1664}, {592,656,1680}, {688,736,1680}, {768,832,1680}, {864,928,1664},
+  };
+  for (unsigned i = 0; i < 5; i++) {
+    frame.decorations[i] = (ActionEffectInstance){
+      .kind = kActionEffect_TempleGroundMist, .phase = kActionEffectPhase_CaveEnvironment,
+      .flags = kActionEffectFlag_Visible, .visual = 3, .generation = i+1,
+      .world_x = (int16_t)surfaces[i][0], .world_y = (int16_t)surfaces[i][2],
+      .render_layer = kActionEffectRenderLayer_Bg1Mist,
+      .projection_plane = kActionEffectProjectionPlane_Bg1,
+      .geometry = {.kind = kActionEffectGeometry_Rect,
+                   .data.rect = {0,-26,surfaces[i][1]-surfaces[i][0],0}},
+    };
+  }
+  const uint8_t layer = kActionEffectRenderLayer_Bg1Mist;
+  static ActionSceneEffectRenderBatch first, moved;
+  for (unsigned t = 0; t < 1024; t += 31) {
+    for (unsigned i = 0; i < 5; i++) frame.decorations[i].phase_ticks = (uint16_t)t;
+    CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+        IdentityProjection, NULL, NULL, &first));
+    CHECK(first.vertex_count > 0 && first.vertex_count <= 350);
+    for (int i = 0; i < first.vertex_count; i++) {
+      const ArRenderVertex2D *v = &first.vertices[i];
+      bool supported = false;
+      for (unsigned j = 0; j < 5; j++)
+        if (v->position.x > surfaces[j][0] && v->position.x < surfaces[j][1]) {
+          supported = true;
+          CHECK(v->position.y >= surfaces[j][2]-26 && v->position.y <= surfaces[j][2]);
+        }
+      CHECK(supported);
+      CHECK(v->color.a >= 0 && v->color.a < .42f);
+    }
+    for (unsigned i = 0; i < 5; i++) {
+      const float x = (surfaces[i][0]+surfaces[i][1])*.5f, y = surfaces[i][2];
+      CHECK(SampleForestLight(&first,x,y-.1f,false) > .09f); /* Base touches ground. */
+      CHECK(SampleForestLight(&first,x,y+1,false) == 0); /* Never inside solid floor. */
+      CHECK(SampleForestLight(&first,x,y-27,false) == 0);
+    }
+    /* A low floor is 16 pixels below the adjacent step. Pit centers stay clear. */
+    CHECK(SampleForestLight(&first,624,1679.9f,false) > .09f);
+    CHECK(SampleForestLight(&first,560,1679.9f,false) == 0);
+    for (float y = 1638.3f; y < 1712; y += 2.1f) {
+      const float gaps[] = {672,752,848,944};
+      for (unsigned i = 0; i < sizeof(gaps)/sizeof(gaps[0]); i++)
+        CHECK(SampleForestLight(&first, gaps[i], y, false) == 0);
+    }
+  }
+  for (unsigned i = 0; i < 5; i++) {
+    ActionEffectInstance *e = &frame.decorations[i];
+    e->flags |= kActionEffectFlag_ClipToRect;
+    e->clip_rect = (ActionEffectLocalRect){580-e->world_x,1655-e->world_y,
+                                         810-e->world_x,1679-e->world_y};
+  }
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &moved));
+  CHECK(moved.vertex_count > 0);
+  for (float y = 1655.1f; y < 1679; y += .9f)
+    for (float x = 580.1f; x < 810; x += 3.3f)
+      CHECK(fabsf(SampleForestLight(&first,x,y,false) -
+                  SampleForestLight(&moved,x,y,false)) < .0005f);
+  for (unsigned i = 0; i < 5; i++) frame.decorations[i].flags = kActionEffectFlag_Visible;
+  ActionEffectProjectionContext context = {
+    .bg1_camera_x = 500, .bg1_camera_y = 1440,
+    .visible_width = 256, .snes_height = 224, .viewport = {0,0,256,224},
+  };
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds, &context, &first));
+  context.bg1_camera_x += 13;
+  context.bg1_camera_y += 19;
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds, &context, &moved));
+  float peak = 0;
+  for (float y = 180.3f; y < 205; y += .9f)
+    for (float x = 1.3f; x < 243; x += 3.1f) {
+      const float expected = SampleForestLight(&first,x+13,y+19,false);
+      peak = fmaxf(peak,expected);
+      CHECK(fabsf(expected-SampleForestLight(&moved,x,y,false)) < .0005f);
+    }
+  CHECK(peak > .06f);
+  context.bg1_camera_y = 600;
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds, &context, &moved));
+  CHECK(moved.vertex_count == 0); /* Never follow the viewport up the shaft. */
+  for (unsigned i = 5; i <= kActionTempleMistMaxSpans; i++) {
+    frame.decorations[i] = frame.decorations[0];
+    frame.decorations[i].generation = i+1;
+  }
+  frame.decoration_count = kActionTempleMistMaxSpans;
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &first));
+  CHECK(first.vertex_count <= kActionTempleMistMaxSpans*70);
+  frame.decoration_count++;
+  CHECK(!ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &first));
+  CHECK(!first.vertex_count && !first.index_count);
+}
+
+static void TestLandingCloudGeometry(void) {
+  ActionSceneEffectFrame frame = {.decoration_count = kActionLandingDustMaxPuffs};
+  static ActionSceneEffectRenderBatch batch, paused;
+  for (unsigned i = 0; i < kActionLandingDustMaxPuffs; i++)
+    frame.decorations[i] = (ActionEffectInstance){
+      .kind = kActionEffect_LandingDust, .phase = kActionEffectPhase_CaveEnvironment,
+      .flags = kActionEffectFlag_Visible, .visual = 3, .generation = i + 1,
+      .world_x = 128, .world_y = 192, .projection_plane = kActionEffectProjectionPlane_Bg1,
+      .render_layer = kActionEffectRenderLayer_WorldDust,
+      .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-104,-72,104,2}},
+    };
+  for (unsigned t = 0; t <= kActionLandingDustLifetime; t++) {
+    for (unsigned i = 0; i < frame.decoration_count; i++) frame.decorations[i].phase_ticks = t;
+    CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_WorldDust,
+        false, true, IdentityProjection, NULL, NULL, &batch));
+    CHECK(batch.vertex_count <= 1254 && batch.index_count <= 5616);
+    for (int i = 0; i < batch.vertex_count; i++) {
+      CHECK(batch.vertices[i].position.y <= 192.5f); /* Clouds rise off the surface. */
+      CHECK(batch.vertices[i].color.a >= 0 && batch.vertices[i].color.a <= 1);
+      CHECK(isfinite(batch.vertices[i].position.x));
+      CHECK(batch.vertices[i].position.x >= 24 && batch.vertices[i].position.x <= 232);
+      CHECK(batch.vertices[i].position.y >= 120);
+    }
+    if (t == 12) {
+      CHECK(batch.vertex_count > 0);
+      CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_WorldDust,
+          false, true, IdentityProjection, NULL, NULL, &paused));
+      CHECK(SceneBatchesEqual(&batch, &paused));
+    }
+    if (t == kActionLandingDustLifetime) CHECK(!batch.vertex_count);
+  }
+  for (unsigned i = 0; i < frame.decoration_count; i++) frame.decorations[i].phase_ticks = 12;
+  frame.decorations[frame.decoration_count++] = frame.decorations[0];
+  CHECK(!ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_WorldDust,
+      false, true, IdentityProjection, NULL, NULL, &batch));
+  CHECK(!batch.vertex_count && !batch.index_count);
+}
+
+static void TestCavePolishGeometry(void) {
+  static ActionSceneEffectRenderBatch first, next;
+  ActionSceneEffectFrame frame = {.decoration_count = 1};
+  ActionEffectInstance *e = &frame.decorations[0];
+  *e = (ActionEffectInstance){
+    .kind = kActionEffect_CaveSheen, .phase = kActionEffectPhase_CaveEnvironment,
+    .flags = kActionEffectFlag_Visible, .visual = 2, .source_mask = 2,
+    .world_x = 326, .world_y = 440, .phase_ticks = 80,
+    .render_layer = kActionEffectRenderLayer_Bg1Plane,
+    .projection_plane = kActionEffectProjectionPlane_Bg1,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,544}},
+  };
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+      IdentityProjection,NULL,NULL,&first));
+  CHECK(first.vertex_count > 0);
+  float low = 10000, high = -10000;
+  for (int i = 0; i < first.vertex_count; i++) {
+    const ArRenderPointF p = first.vertices[i].position;
+    CHECK(p.x >= 320 && p.x < 333 && p.y >= 448 && p.y < 459);
+    low = fminf(low,p.y);
+    high = fmaxf(high,p.y);
+  }
+  CHECK(high-low > 8); /* The glint climbs the actual slope instead of floating flat. */
+  e->source_mask = 0;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+      IdentityProjection,NULL,NULL,&next));
+  CHECK(!next.vertex_count);
+  *e = (ActionEffectInstance){
+    .kind = kActionEffect_LandingDust, .phase = kActionEffectPhase_CaveEnvironment,
+    .flags = kActionEffectFlag_Visible, .visual = 2, .generation = 1,
+    .world_x = 128, .world_y = 192, .phase_ticks = 14,
+    .render_layer = kActionEffectRenderLayer_WorldDust,
+    .projection_plane = kActionEffectProjectionPlane_Bg1,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-104,-72,104,2}},
+  };
+  unsigned changed_counts = 0;
+  for (unsigned generation = 1; generation <= 32; generation++) {
+    e->generation = generation;
+    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+        IdentityProjection,NULL,NULL,&next));
+    CHECK(next.vertex_count > 0);
+    if (generation > 1) {
+      CHECK(!SceneBatchesEqual(&first,&next));
+      if (first.vertex_count != next.vertex_count) ++changed_counts;
+    }
+    for (int i = 0; i < next.vertex_count; i++)
+      CHECK(next.vertices[i].color.r > next.vertices[i].color.b);
+    first = next;
+  }
+  CHECK(changed_counts > 8); /* Vary lobe count as well as a seed on the same shape. */
+  frame = (ActionSceneEffectFrame){.effect_count = 1, .visible_count = 1};
+  frame.effects[0] = SceneEffect(kActionEffect_EnemyFireball,128);
+  frame.effects[0].kind = kActionEffect_FillmoreStatueOrb;
+  frame.effects[0].visual = 0x1B;
+  CHECK(ActionSceneEffectRender_Build(&frame,true,false,IdentityProjection,NULL,&first));
+  CHECK(first.vertex_count == 2*kActionEffectGlowVertices);
+  CHECK(ActionSceneEffectRender_Build(&frame,false,true,IdentityProjection,NULL,&next));
+  CHECK(next.vertex_count > 0);
+  CHECK(ActionSceneEffectRender_Build(&frame,false,false,IdentityProjection,NULL,&next));
+  CHECK(!next.vertex_count);
+}
+
 int main(void) {
+  TestCavePolishGeometry();
+  TestLandingCloudGeometry();
+  TestCaveEnvironmentGeometry();
+  TestCaveWaterUsesHighPlane();
+  TestCaveAmbientScroll();
+  TestTempleGroundMist();
   TestForestClippingPreservesField(928, 80);
   TestForestClippingPreservesField(2918, 202);
   TestForestCanopyGeometry();

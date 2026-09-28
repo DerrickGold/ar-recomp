@@ -1,6 +1,7 @@
 #include "action/action_effect_capture.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "action/action_effect_clock.h"
 #include "action/action_effects.h"
@@ -133,6 +134,9 @@ void ActionEffectCapture_CaptureFrame(FrameSlot *dst) {
     ActionEnvironmentalEffects_CaptureFrame(
         &s_action_effect_observer, &dst->action_scene_effects,
         g_ram, kActRaiserWramSize);
+  else
+    memset(&s_action_effect_observer.landing_dust, 0,
+        sizeof(s_action_effect_observer.landing_dust));
   dst->diorama_map_group = g_ram[kActRaiserWram_MapGroup];
   dst->diorama_map_number = g_ram[kActRaiserWram_CurrentMap];
   dst->diorama_layer_section = kDioramaLayerSection_Room;

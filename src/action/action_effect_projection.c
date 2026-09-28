@@ -19,6 +19,8 @@ static const DioramaPlaneProjection *ProjectionPlaneForEffect(
     return &projection->bg2_plane;
   if (effect->projection_plane == kActionEffectProjectionPlane_Bg1High)
     return &projection->bg1_high_plane;
+  if (effect->projection_plane == kActionEffectProjectionPlane_Bg2High)
+    return &projection->bg2_high_plane;
   if (effect->projection_plane == kActionEffectProjectionPlane_Obj &&
       effect->obj_priority < kDioramaObjectPriorityCount)
     return &projection->object_planes[effect->obj_priority];
@@ -85,6 +87,8 @@ static void AddRequiredBgPlanes(
     else if (effect->projection_plane ==
              kActionEffectProjectionPlane_Bg1High)
       *mask |= 1u << kDioramaPlane_Bg1Hi;
+    else if (effect->projection_plane == kActionEffectProjectionPlane_Bg2High)
+      *mask |= 1u << kDioramaPlane_Bg2Hi;
   }
 }
 
@@ -128,7 +132,8 @@ static int16_t EffectCameraCoordinate(
     const ActionEffectInstance *effect, int16_t bg1, int16_t bg2) {
   if (effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds)
     return (int16_t)(((int)bg1 + bg2) / 2);
-  return effect->projection_plane == kActionEffectProjectionPlane_Bg2 ? bg2 : bg1;
+  return effect->projection_plane == kActionEffectProjectionPlane_Bg2 ||
+      effect->projection_plane == kActionEffectProjectionPlane_Bg2High ? bg2 : bg1;
 }
 
 static bool ClipRectIsValid(const ActionEffectLocalRect *rect) {
@@ -243,6 +248,10 @@ bool ActionEffectProjection_ProjectPoint(
     else if (effect->projection_plane ==
              kActionEffectProjectionPlane_Bg1High)
       valid = Diorama_ProjectCapturedBg1HighPoint(
+          context->diorama_projection, capture_x, texture_y,
+          &projected, NULL, NULL);
+    else if (effect->projection_plane == kActionEffectProjectionPlane_Bg2High)
+      valid = Diorama_ProjectCapturedBg2HighPoint(
           context->diorama_projection, capture_x, texture_y,
           &projected, NULL, NULL);
     else

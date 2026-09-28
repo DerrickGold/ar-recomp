@@ -161,7 +161,8 @@ enum {
     kPpuOverlayFlag_ApplyBgFixedColorSubtract = 8,
     kPpuOverlayFlag_MarkFullAddSubscreen = 16,
     kPpuOverlayFlag_MarkMainScreenWinner = 32,
-    kPpuOverlayFlag_MarkOwningScreenWinner = 64
+    kPpuOverlayFlag_MarkOwningScreenWinner = 64,
+    kPpuOverlayFlag_MarkVisibleMainWinner = 128
 };
 
 typedef enum PpuOverlayTransparentFill {

@@ -47,6 +47,17 @@ typedef enum ActionEffectKind {
   kActionEffect_ForestCanopyLight,
   kActionEffect_ForestLeaves,
   kActionEffect_ForestForwardLight,
+  kActionEffect_CaveWater,
+  kActionEffect_CaveDrips,
+  kActionEffect_TempleDust,
+  kActionEffect_TowerWindowLight,
+  kActionEffect_LandingDust,
+  kActionEffect_CaveMist,
+  kActionEffect_CaveSheen,
+  kActionEffect_CaveAmbientLight,
+  kActionEffect_TempleGrit,
+  kActionEffect_TempleGroundMist,
+  kActionEffect_FillmoreStatueOrb,
   kActionEffect_KindCount,
 } ActionEffectKind;
 
@@ -110,6 +121,7 @@ typedef enum ActionEffectPhase {
   kActionEffectPhase_NorthwallMagicFall,
   kActionEffectPhase_NorthwallMagicImpact,
   kActionEffectPhase_ForestCanopyLight,
+  kActionEffectPhase_CaveEnvironment,
   kActionEffectPhase_Count,
 } ActionEffectPhase;
 
@@ -152,6 +164,12 @@ typedef enum ActionEffectRenderLayer {
   kActionEffectRenderLayer_Bg2Foliage,
   /* Surface illumination after the scene, beneath the flat HUD. */
   kActionEffectRenderLayer_ForegroundLight,
+  /* Fillmore cave water belongs to BG2 priority-1, including its authored depth. */
+  kActionEffectRenderLayer_Bg2HighPlane,
+  /* Short-lived alpha-blended clouds at scenery contact points. */
+  kActionEffectRenderLayer_WorldDust,
+  /* Low temple mist behind actors: after BG1 in Diorama, winner-masked in flat. */
+  kActionEffectRenderLayer_Bg1Mist,
   kActionEffectRenderLayer_Count,
 } ActionEffectRenderLayer;
 
@@ -165,6 +183,7 @@ typedef enum ActionEffectProjectionPlane {
   kActionEffectProjectionPlane_Bg1,
   kActionEffectProjectionPlane_Bg2,
   kActionEffectProjectionPlane_Bg1High,
+  kActionEffectProjectionPlane_Bg2High,
   /* Directional atmosphere inserted between the scenery layers. It uses
    * their mean camera and BG2's finite projected footprint. */
   kActionEffectProjectionPlane_BetweenBackgrounds,
@@ -210,6 +229,11 @@ enum {
   kActionSceneDecorationMaxInstances = 16,
   kActionSceneEffectObserverTrackCount = 80,
   kActionEffectObjPriorityCount = 4,
+  kActionLandingDustMaxPuffs = 6,
+  kActionLandingDustLifetime = 48,
+  kActionLandingDustPatchCount = 2*kActionLandingDustMaxPuffs,
+  /* Collision-derived safe floor runs share one mist draw, with bounded capture. */
+  kActionTempleMistMaxSpans = 7,
   kActionEffectFlag_Visible = 1 << 0,
   kActionEffectFlag_FlipHorizontal = 1 << 1,
   kActionEffectFlag_FlipVertical = 1 << 2,
@@ -237,6 +261,8 @@ typedef struct ActionEffectInstance {
   uint16_t age_ticks;
   uint16_t phase_ticks;
   uint16_t pulse_ticks;
+  /* Validated authored cave anchors; one bit per ActionCaveWetSource. */
+  uint16_t source_mask;
   uint8_t kind;
   uint8_t phase;
   uint8_t role;
@@ -317,6 +343,31 @@ typedef struct ActionEffectObserverTrack {
   uint8_t continuity_valid;
 } ActionEffectObserverTrack;
 
+/* Producer-owned contact history and detached, bounded landing events. */
+typedef struct ActionLandingDustTrack {
+  uint16_t source, animation;
+  int16_t x, y, feet_y;
+  uint8_t descent, impact, valid;
+} ActionLandingDustTrack;
+
+typedef struct ActionLandingDustPuff {
+  uint32_t generation;
+  uint16_t born, record_address;
+  int16_t x, y;
+  uint8_t strength, active;
+} ActionLandingDustPuff;
+
+typedef struct ActionLandingDustState {
+  uint32_t next_generation;
+  uint16_t clock;
+  uint8_t valid;
+  ActionLandingDustTrack tracks[kActionSceneEffectObserverTrackCount];
+  ActionLandingDustPuff puffs[kActionLandingDustMaxPuffs];
+  /* A patch stays depleted after its visible cloud has settled. Shared by
+   * actors so an enemy and the player cannot repeatedly stir the same patch. */
+  struct { int16_t x, y; uint16_t remaining; } patches[kActionLandingDustPatchCount];
+} ActionLandingDustState;
+
 typedef struct ActionEffectObserver {
   uint32_t next_generation;
   uint32_t next_pulse_generation;
@@ -331,6 +382,7 @@ typedef struct ActionEffectObserver {
   uint8_t scene_map_group;
   uint8_t scene_map_number;
   uint8_t scene_map_valid;
+  ActionLandingDustState landing_dust;
   ActionEffectObserverTrack tracks[kActionEffectObserverTrackCount];
   ActionEffectObserverTrack
       scene_tracks[kActionSceneEffectObserverTrackCount];
@@ -363,7 +415,7 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
  * gameplay clock. The caller skips this work when Environmental effects is
  * off; it reads only WRAM and appends to the bounded decoration list. */
 void ActionEnvironmentalEffects_CaptureFrame(
-    const ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
+    ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
     const uint8_t *wram, size_t wram_size);
 
 bool ActionSceneEffects_RoomUsesBg2Decorations(

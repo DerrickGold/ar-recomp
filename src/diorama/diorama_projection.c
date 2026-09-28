@@ -109,7 +109,7 @@ bool Diorama_PlaneProjectable(int plane, bool visible, bool has_texture,
       DioramaPlaneIsObjectPriority(plane) ||
       plane == SR_PPU_OVERLAY_BG1 ||
       plane == SR_PPU_OVERLAY_BG2 ||
-      plane == kDioramaPlane_Bg1Hi;
+      plane == kDioramaPlane_Bg1Hi || plane == kDioramaPlane_Bg2Hi;
   const bool has_effect_content =
       has_attached_effect && accepts_attached_effect;
   return Diorama_PlaneEligible(
@@ -143,7 +143,7 @@ uint32_t Diorama_FilterBgEffectProjectionMask(
   const uint32_t valid_planes =
       (1u << SR_PPU_OVERLAY_BG1) |
       (1u << SR_PPU_OVERLAY_BG2) |
-      (1u << kDioramaPlane_Bg1Hi);
+      (1u << kDioramaPlane_Bg1Hi) | (1u << kDioramaPlane_Bg2Hi);
   const uint32_t failed_content = content_planes & ~uploaded_planes;
   return required_planes & valid_planes & requested_planes & ~failed_content;
 }
@@ -240,6 +240,16 @@ bool Diorama_ProjectCapturedBg1HighPoint(
   return ProjectCapturedPlanePoint(
       projection, capture_x, capture_y,
       &projection->bg1_high_plane, point, scale_x, scale_y);
+}
+
+bool Diorama_ProjectCapturedBg2HighPoint(
+    const DioramaProjection *projection,
+    float capture_x, float capture_y, ArRenderPointF *point,
+    float *scale_x, float *scale_y) {
+  if (!projection || !point) return false;
+  return ProjectCapturedPlanePoint(
+      projection, capture_x, capture_y,
+      &projection->bg2_high_plane, point, scale_x, scale_y);
 }
 
 bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
