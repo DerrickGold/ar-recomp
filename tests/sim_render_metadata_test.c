@@ -183,36 +183,61 @@ static void TestWorldNavigationAllTownObjects(void) {
   CHECK(FindNavigationTownObject(&towns, 3, kSimBackgroundVoxel_House, 1, 1) != NULL);
 }
 
+static void TestWorldNavigationRocks(void) {
+  static uint8 wram[kActRaiserWramSize];
+  static SimWorldNavigationTowns towns;
+  static const uint8 tiles[] = {0x61, 0x62, 0x63, 0x69, 0x6A, 0x6B};
+  memset(wram, 0, sizeof(wram));
+  Write16(wram, 0x16B18 + 3 * 2, 1);
+  for (int at = 0; at < 6; at++) SetTownCell(wram, 4, at + 2, 3, tiles[at]);
+  SimWorldNavigationTowns_Capture(wram, &towns);
+  CHECK(towns.object_count == 6 && !towns.overflow);
+  for (int at = 0; at < 6; at++) {
+    CHECK(towns.objects[at].visual_metatile == tiles[at]);
+    CHECK(towns.ground.object_rows[3][3] & (1u << (at + 2)));
+  }
+  SetTownCell(wram, 4, 2, 3, 0x08);
+  SimWorldNavigationTowns_CaptureCached(wram, &towns);
+  CHECK(towns.object_count == 5 && !(towns.ground.object_rows[3][3] & (1u << 2)));
+}
+
 static void TestWorldNavigationSanctuaryVariants(void) {
   uint8 wram[kActRaiserWramSize] = {0};
   SimWorldNavigationTowns towns;
-  for (uint8 base = 0xC0; base <= 0xC2; base += 2) {
-    for (uint8 town = 1; town <= 6; town++) {
-      Write16(wram, 0x16B18 + (town - 1) * 2, 1);
-      /* Cross all four retained-map pages, including Marahna's C2 case. */
-      SetTownCell(wram, town, 15, 15, base);
-      SetTownCell(wram, town, 16, 15, base + 1);
-      SetTownCell(wram, town, 15, 16, base + 8);
-      SetTownCell(wram, town, 16, 16, base + 9);
-    }
-    SimWorldNavigationTowns_Capture(wram, &towns);
-    CHECK(towns.object_count == 6 && !towns.overflow);
-    for (uint8 town = 1; town <= 6; town++) {
-      const SimWorldNavigationTownObject *object = FindNavigationTownObject(
-          &towns, town,
-          base == 0xC0 ? kSimBackgroundVoxel_MarahnaTemple : kSimBackgroundVoxel_Cathedral, 15, 15);
-      CHECK(object && object->source_cells_w == 2 && object->source_cells_h == 2);
-      CHECK(towns.ground.object_rows[town - 1][15] == (3u << 15));
-      CHECK(towns.ground.object_rows[town - 1][16] == (3u << 15));
-    }
-    SetTownCell(wram, 5, 16, 16, 0); /* A partial signature must not be guessed. */
-    SimWorldNavigationTowns_Capture(wram, &towns);
-    CHECK(towns.object_count == 5 && !towns.ground.object_rows[4][15]);
-    SetTownCell(wram, 5, 16, 16, base + 9);
-    Write16(wram, 0x16B18 + 4 * 2, 0);
-    SimWorldNavigationTowns_Capture(wram, &towns);
-    CHECK(towns.object_count == 5 && !(towns.enabled_town_mask & (1u << 4)));
+  for (uint8 town = 1; town <= 6; town++) {
+    Write16(wram, 0x16B18 + (town - 1) * 2, 1);
+    /* Cross all four retained-map pages, including Marahna's C2 case. */
+    SetTownCell(wram, town, 15, 15, 0xC2);
+    SetTownCell(wram, town, 16, 15, 0xC3);
+    SetTownCell(wram, town, 15, 16, 0xCA);
+    SetTownCell(wram, town, 16, 16, 0xCB);
   }
+  for (int y = 20; y < 22; y++)
+    for (int x = 6; x < 8; x++) SetTownCell(wram, 5, x, y, 0xEF);
+  SimWorldNavigationTowns_Capture(wram, &towns);
+  CHECK(towns.object_count == 7 && !towns.overflow);
+  CHECK(FindNavigationTownObject(&towns, 5, kSimBackgroundVoxel_MarahnaTemple, 6, 20));
+  for (uint8 town = 1; town <= 6; town++) {
+    const SimWorldNavigationTownObject *object = FindNavigationTownObject(
+        &towns, town, kSimBackgroundVoxel_Cathedral, 15, 15);
+    CHECK(object && object->source_cells_w == 2 && object->source_cells_h == 2);
+    CHECK(towns.ground.object_rows[town - 1][15] == (3u << 15));
+    CHECK(towns.ground.object_rows[town - 1][16] == (3u << 15));
+  }
+  SetTownCell(wram, 5, 16, 16, 0); /* Do not guess a partial signature. */
+  SimWorldNavigationTowns_Capture(wram, &towns);
+  CHECK(towns.object_count == 6 && !towns.ground.object_rows[4][15]);
+  SetTownCell(wram, 5, 16, 16, 0xCB);
+  Write16(wram, 0x16B18 + 4 * 2, 0);
+  SimWorldNavigationTowns_Capture(wram, &towns);
+  CHECK(towns.object_count == 5 && !(towns.enabled_town_mask & (1u << 4)));
+  /* The former C0 signature must not invent a landmark in another town. */
+  SetTownCell(wram, 1, 15, 15, 0xC0);
+  SetTownCell(wram, 1, 16, 15, 0xC1);
+  SetTownCell(wram, 1, 15, 16, 0xC8);
+  SetTownCell(wram, 1, 16, 16, 0xC9);
+  SimWorldNavigationTowns_Capture(wram, &towns);
+  CHECK(towns.object_count == 4 && !towns.ground.object_rows[0][15]);
 }
 
 static void CheckCachedNavigationScene(const uint8 *wram) {
@@ -3602,6 +3627,7 @@ int main(int argc, char **argv) {
   TestPresentationDecision();
   TestWorldNavigationAllTownObjects();
   TestWorldNavigationSanctuaryVariants();
+  TestWorldNavigationRocks();
   TestWorldNavigationCaptureCache();
   TestLightningMiracleEffectCapture();
   TestTownCreationLightningEffectCapture();

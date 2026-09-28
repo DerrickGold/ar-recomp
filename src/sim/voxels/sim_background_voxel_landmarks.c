@@ -16,14 +16,13 @@ typedef struct SimBackgroundLandmarkDefinition {
 } SimBackgroundLandmarkDefinition;
 
 /* Measured from the six resident $7F:2000 cell maps: Bloodpool's castle at
- * (6,16), Kasandora's pyramid at (20,4) and Northwall's ancient tree at
- * (26,14). Every one is a 2x2 block whose art fills its 32x32 pixels exactly,
- * so source and footprint are the same rectangle. Fillmore, Aitos and Marahna
- * carry no landmark of this class; Marahna's distinct temple is its cathedral
- * variant and is classified with the other cathedrals. */
+ * (6,16), Kasandora's pyramid at (20,4), Marahna's temple at (6,20), and
+ * Northwall's ancient tree at (26,14). Each owns a complete 2x2 source plot.
+ * Marahna also has the ordinary $C2 cathedral, separately classified. */
 static const SimBackgroundLandmarkDefinition kLandmarks[] = {
   {2, 0xEC, kSimBackgroundVoxel_BloodpoolCastle},
   {3, 0xEE, kSimBackgroundVoxel_Pyramid},
+  {5, 0xEF, kSimBackgroundVoxel_MarahnaTemple},
   {6, 0xEB, kSimBackgroundVoxel_StoryTree},
 };
 

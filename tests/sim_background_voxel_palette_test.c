@@ -65,6 +65,14 @@ int main(void) {
             &palette_a, kSimVoxelMaterial_Leaves) !=
         SimBackgroundVoxelPalette_Base(
             &palette_b, kSimVoxelMaterial_Leaves));
+  /* Foliage has real facet lighting and AO: its albedo must not bake the
+   * sprite's near-black shadow in a second time. Preserve three clear bands. */
+  uint32_t needles = SimBackgroundVoxelPalette_Base(&palette_a, kSimVoxelMaterial_Leaves);
+  uint32_t tips = SimBackgroundVoxelPalette_Base(&palette_a, kSimVoxelMaterial_LeavesLight);
+  uint32_t underside = SimBackgroundVoxelPalette_Base(&palette_a, kSimVoxelMaterial_LeavesDark);
+  CHECK(((needles >> 8) & 255u) >= 90u);
+  CHECK(((tips >> 8) & 255u) > ((needles >> 8) & 255u) + 20u);
+  CHECK(((underside >> 8) & 255u) + 30u < ((needles >> 8) & 255u));
 
   SimBackgroundVoxelPalette desert, northwall;
   SimBackgroundVoxelPalette_Build(
@@ -113,13 +121,13 @@ int main(void) {
   CHECK(SimBackgroundVoxelPalette_Base(
             &bloodpool, kSimVoxelMaterial_Roof) == 0xFF4A205Au);
   CHECK(SimBackgroundVoxelPalette_Base(
-            &kasandora, kSimVoxelMaterial_Wall) == 0xFFCDAC73u);
+            &kasandora, kSimVoxelMaterial_Wall) == 0xFFD5D5B4u);
   CHECK(SimBackgroundVoxelPalette_Base(
-            &aitos, kSimVoxelMaterial_Roof) == 0xFFB45A10u);
+            &aitos, kSimVoxelMaterial_Roof) == 0xFFA48B5Au);
   CHECK(SimBackgroundVoxelPalette_Base(
             &marahna, kSimVoxelMaterial_Roof) == 0xFF836A31u);
   CHECK(SimBackgroundVoxelPalette_Base(
-            &yurt_palette, kSimVoxelMaterial_Roof) == 0xFF8B4A10u);
+            &yurt_palette, kSimVoxelMaterial_Roof) == 0xFFD6AC5Au);
   CHECK(SimBackgroundVoxelPalette_Base(
             &white_canvas, kSimVoxelMaterial_Roof) == 0xFFCDCDBDu);
   CHECK(SimBackgroundVoxelPalette_Base(
@@ -176,7 +184,7 @@ int main(void) {
   CHECK(SimBackgroundVoxelPalette_Base(
             &castle_palette, kSimVoxelMaterial_Roof) == 0xFFA49452u);
   CHECK(SimBackgroundVoxelPalette_Base(
-            &temple_palette, kSimVoxelMaterial_Paving) == 0xFF83945Au);
+            &temple_palette, kSimVoxelMaterial_Paving) == 0xFFCDB46Au);
 
   SimBackgroundVoxelObject pyramid = {
     .kind = kSimBackgroundVoxel_Pyramid,
@@ -198,8 +206,8 @@ int main(void) {
             &pyramid_palette, kSimVoxelMaterial_WallLight) == 0xFFBDA462u);
   /* Three permanent/clearable foliage families share one CGRAM ramp and are
    * told apart by which part of it they occupy: the bush is brightest, the
-   * broad canopy sits in the middle and the evergreen is darkest. Any two of
-   * them landing on the same base colour would undo the classification. */
+   * broad canopy sits in the middle and the evergreen is darkest. Their
+   * midtones may overlap, but the bush must retain brighter leaf highlights. */
   SimBackgroundVoxelObject broad = shrub;
   broad.kind = kSimBackgroundVoxel_BroadTree;
   broad.town = 5;
@@ -212,9 +220,29 @@ int main(void) {
       &broad_palette, kSimVoxelMaterial_Leaves);
   uint32_t fir_leaves = SimBackgroundVoxelPalette_Base(
       &palette_a, kSimVoxelMaterial_Leaves);
-  CHECK(shrub_leaves != broad_leaves);
+  CHECK(SimBackgroundVoxelPalette_Base(&shrub_palette, kSimVoxelMaterial_LeavesLight) !=
+        SimBackgroundVoxelPalette_Base(&broad_palette, kSimVoxelMaterial_LeavesLight));
   CHECK(broad_leaves != fir_leaves);
   CHECK(shrub_leaves != fir_leaves);
+
+  SimBackgroundVoxelObject palm = broad;
+  palm.kind = kSimBackgroundVoxel_Palm;
+  SimBackgroundVoxelPalette palm_palette;
+  SimBackgroundVoxelPalette_Build(
+      &palm, kSimBackgroundVoxelBiome_Tropical, &palm_palette);
+  uint32_t palm_highlight = SimBackgroundVoxelPalette_Ramp(
+      &palm_palette, kSimVoxelMaterial_LeavesLight, 245);
+  uint32_t palm_under = SimBackgroundVoxelPalette_Ramp(
+      &palm_palette, kSimVoxelMaterial_LeavesDark, 195);
+  uint32_t palm_trunk = SimBackgroundVoxelPalette_Base(
+      &palm_palette, kSimVoxelMaterial_Trunk);
+  /* A sunlit palm keeps bright fronds, dark undersides and a muted tan stem;
+   * it must not fall back to the evergreen's dark green/orange-brown ramps. */
+  CHECK(((palm_highlight >> 8) & 255u) > ((fir_leaves >> 8) & 255u) + 40u);
+  CHECK(((palm_highlight >> 8) & 255u) > ((palm_under >> 8) & 255u) + 40u);
+  CHECK((palm_trunk & 255u) >= 60u);
+  CHECK(SimBackgroundVoxelPalette_Base(&palm_palette, kSimVoxelMaterial_Wood) !=
+        SimBackgroundVoxelPalette_Base(&palette_a, kSimVoxelMaterial_Wood));
 
   SimBackgroundVoxelObject bridge = {
     .kind = kSimBackgroundVoxel_Bridge,

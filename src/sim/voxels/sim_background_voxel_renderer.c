@@ -612,12 +612,6 @@ static float ObjectModelLiftPixels(
       ObjectFootprintDepth(object) * 0.5f);
 }
 
-typedef struct SimBackgroundContactBounds {
-  float x0, y0, x1, y1;
-} SimBackgroundContactBounds;
-
-enum { kSimBackgroundMaxContactQuads = 3 };
-
 #if AR_SIM3D_TERRAIN_ELEVATION
 enum {
   kFoundationGapSamplesPerEdge = 5,
@@ -634,56 +628,13 @@ static const float kFoundationFaceVisibleGapPixels = 0.12f;
 static const uint8_t kFoundationEdgeBrightness[4] = {178, 194, 210, 186};
 #endif
 
-static int ContactBounds(const SimBackgroundVoxelObject *object,
-                         SimBackgroundContactBounds *out) {
-  switch ((SimBackgroundVoxelKind)object->kind) {
-    case kSimBackgroundVoxel_House:
-      out[0] = (SimBackgroundContactBounds){1.8f, 2.5f, 14.2f, 15.2f};
-      return 1;
-    case kSimBackgroundVoxel_Cathedral:
-      out[0] = (SimBackgroundContactBounds){0.8f, 8.8f, 31.2f, 31.4f};
-      return 1;
-    case kSimBackgroundVoxel_Windmill:
-      out[0] = (SimBackgroundContactBounds){6.2f, 2.3f, 25.8f, 15.2f};
-      return 1;
-    case kSimBackgroundVoxel_Factory:
-      out[0] = (SimBackgroundContactBounds){0.8f, 0.8f, 21.8f, 10.8f};
-      out[1] = (SimBackgroundContactBounds){0.8f, 22.2f, 21.8f, 31.2f};
-      out[2] = (SimBackgroundContactBounds){21.2f, 0.8f, 31.2f, 31.2f};
-      return 3;
-    case kSimBackgroundVoxel_Tree:
-    case kSimBackgroundVoxel_Palm:
-    case kSimBackgroundVoxel_BroadTree:
-      /* Contact belongs to the trunk, not the foliage footprint. This avoids
-       * turning dense forests into one continuous dark carpet. */
-      out[0] = (SimBackgroundContactBounds){5.4f, 5.4f, 10.6f, 10.6f};
-      return 1;
-    case kSimBackgroundVoxel_Shrub:
-      out[0] = (SimBackgroundContactBounds){5.8f, 5.8f, 10.2f, 10.2f};
-      return 1;
-    case kSimBackgroundVoxel_StoryTree:
-      out[0] = (SimBackgroundContactBounds){10.0f, 11.0f, 22.0f, 23.0f};
-      return 1;
-    case kSimBackgroundVoxel_BloodpoolCastle:
-    case kSimBackgroundVoxel_MarahnaTemple:
-      out[0] = (SimBackgroundContactBounds){1.0f, 3.0f, 31.0f, 31.5f};
-      return 1;
-    case kSimBackgroundVoxel_Pyramid:
-      out[0] = (SimBackgroundContactBounds){0.5f, 1.5f, 31.5f, 31.5f};
-      return 1;
-    case kSimBackgroundVoxel_Bridge:
-      return 0;
-  }
-  return 0;
-}
-
-static SimBackgroundContactBounds ScaledContactBounds(
-    SimBackgroundContactBounds bounds,
+static SimBackgroundVoxelModelContact ScaledContactBounds(
+    SimBackgroundVoxelModelContact bounds,
     const SimBackgroundVoxelObject *object,
     const SimBackgroundVoxelProportions *proportions) {
   float center_x = ObjectFootprintWidth(object) * 0.5f;
   float center_y = ObjectFootprintDepth(object) * 0.5f;
-  return (SimBackgroundContactBounds){
+  return (SimBackgroundVoxelModelContact){
     center_x + (bounds.x0 - center_x) * proportions->footprint_scale,
     center_y + (bounds.y0 - center_y) * proportions->footprint_scale,
     center_x + (bounds.x1 - center_x) * proportions->footprint_scale,
@@ -700,10 +651,10 @@ static void AppendGroundContact(
     SimBackgroundSolidProjectionBuilder *builder) {
   if (params->shading < kSimBackgroundVoxelShading_AmbientOcclusion)
     return;
-  SimBackgroundContactBounds bounds[kSimBackgroundMaxContactQuads];
-  int count = ContactBounds(object, bounds);
+  SimBackgroundVoxelModelContact bounds[kSimBackgroundVoxelModelMaxContacts];
+  int count = SimBackgroundVoxelModel_Contacts(object, bounds);
   for (int at = 0; at < count; at++) {
-    SimBackgroundContactBounds scaled = ScaledContactBounds(
+    SimBackgroundVoxelModelContact scaled = ScaledContactBounds(
         bounds[at], object, proportions);
     float x0 = scaled.x0, x1 = scaled.x1;
     float y0 = scaled.y0, y1 = scaled.y1;
@@ -747,6 +698,8 @@ static bool ObjectUsesBuriedFoundation(
     case kSimBackgroundVoxel_Tree:
     case kSimBackgroundVoxel_BroadTree:
     case kSimBackgroundVoxel_Palm:
+    case kSimBackgroundVoxel_Boulder:
+    case kSimBackgroundVoxel_Rocks:
     case kSimBackgroundVoxel_Shrub:
     case kSimBackgroundVoxel_StoryTree:
     case kSimBackgroundVoxel_Bridge:
@@ -781,7 +734,7 @@ static void AppendFoundationFace(
 static bool FoundationHasExposedGap(
     const SimBackgroundVoxelObject *object,
     const SimBackgroundVoxelRenderParams *params,
-    SimBackgroundContactBounds bounds, float foundation_top) {
+    SimBackgroundVoxelModelContact bounds, float foundation_top) {
   for (int edge = 0; edge < 4; edge++)
     for (int sample = 0; sample < kFoundationGapSamplesPerEdge; sample++) {
       float t = sample / (float)(kFoundationGapSamplesPerEdge - 1);
@@ -814,10 +767,10 @@ static void AppendBuildingFoundation(
   /* The top sits fractionally inside the model base. The depth-tested terrain
    * buries its uphill portion; only exposed downhill infill survives. */
   const float foundation_top = anchor_lift - kFoundationTopInsetPixels;
-  SimBackgroundContactBounds authored[kSimBackgroundMaxContactQuads];
-  int count = ContactBounds(object, authored);
+  SimBackgroundVoxelModelContact authored[kSimBackgroundVoxelModelMaxContacts];
+  int count = SimBackgroundVoxelModel_Contacts(object, authored);
   for (int part = 0; part < count; part++) {
-    SimBackgroundContactBounds bounds = ScaledContactBounds(
+    SimBackgroundVoxelModelContact bounds = ScaledContactBounds(
         authored[part], object, proportions);
     float apron = kFoundationApronPixels * proportions->footprint_scale;
     bounds.x0 = fmaxf(0.0f, bounds.x0 - apron);
@@ -1462,6 +1415,7 @@ _Static_assert(kSimBackgroundBatchMaxQuads >= kMaxShadowQuadsPerObject,
 
 static int ShadowBounds(const SimBackgroundVoxelObject *object,
                         SimBackgroundShadowBounds *out) {
+  if (!SimBackgroundVoxelModel_CastsShadow(object)) return 0;
   bool construction =
       (object->flags & kSimBackgroundVoxel_UnderConstruction) != 0;
   switch ((SimBackgroundVoxelKind)object->kind) {
@@ -1494,6 +1448,9 @@ static int ShadowBounds(const SimBackgroundVoxelObject *object,
         21.5f, 0.5f, 31.5f, 31.5f, 17.0f};
       return 3;
     case kSimBackgroundVoxel_Tree:
+    case kSimBackgroundVoxel_Boulder:
+    case kSimBackgroundVoxel_Rocks:
+      return 0;
     case kSimBackgroundVoxel_Palm:
     case kSimBackgroundVoxel_BroadTree:
     case kSimBackgroundVoxel_Shrub:
@@ -1593,23 +1550,82 @@ static void AppendShadowVolume(
   }
 }
 
+typedef struct SimBackgroundTreeShadowCacheEntry {
+  uint16_t variant;
+  int count;
+  SimBackgroundVoxelModelPoint points[kSimBackgroundVoxelTreeShadowMaxPoints];
+} SimBackgroundTreeShadowCacheEntry;
+
+static void AppendTreeShadow(
+    ArRenderDevice *device, SimBackgroundGeometryBatch *batch,
+    const SimBackgroundVoxelRenderParams *params,
+    const SimBackgroundVoxelObject *object, const SimBackgroundProjectionAxis *axis,
+    float light_x, float light_y, SimBackgroundTreeShadowCacheEntry cache[16]) {
+  const SimBackgroundVoxelProportions *proportions =
+      SimBackgroundVoxelProportions_Get(kSimBackgroundVoxel_Tree);
+  float aspect = (float)params->viewport.w / params->viewport.h;
+  float height_ratio = proportions->height_scale / proportions->footprint_scale;
+  /* Cast from where the tree is drawn, including its camera-facing lean.
+   * World +Y is texture -Y; X also carries the source/viewport aspect ratio. */
+  float cast_x = height_ratio * (axis->x_per_height + axis->height_scale * light_x *
+      params->source.w / (params->source.h * aspect));
+  float cast_y = height_ratio * (axis->y_per_height - axis->height_scale * light_y);
+  uint16_t variant = SimBackgroundVoxelModel_TreeShadowVariant(object);
+  SimBackgroundTreeShadowCacheEntry *entry = &cache[variant & 15u];
+  if (!entry->count || entry->variant != variant) {
+    entry->count = SimBackgroundVoxelModel_TreeShadowHull(object, cast_x, cast_y, entry->points);
+    entry->variant = variant;
+  }
+  const SimBackgroundVoxelModelPoint *hull = entry->points;
+  int count = entry->count;
+  if (count < 3) return;
+  float origin_x = (float)params->town_screen_x0 - params->camera_x + ObjectOriginX(object);
+  float origin_y = -(float)params->camera_y + ObjectOriginY(object);
+  Scene3DPoint projected[kSimBackgroundVoxelTreeShadowMaxPoints];
+  for (int i = 0; i < count; i++) {
+    float x = 8 + (hull[i].x - 8) * proportions->footprint_scale;
+    float y = 8 + (hull[i].y - 8) * proportions->footprint_scale;
+    float ground = ObjectTerrainLiftPixels(object, params, x, y);
+    if (!SimBackgroundVoxelProject_GroundedPoint(params, &kSimBackgroundUprightProjectionAxis,
+            origin_x + x, origin_y + y, 0, ground, &projected[i], NULL)) return;
+  }
+  /* Pack two fan triangles per quad; only an odd tail needs a collapsed edge. */
+  int quads = (count - 1) / 2;
+  if (batch->vertex_count + quads * 4 > kSimBackgroundBatchMaxVertices ||
+      batch->index_count + quads * 6 > kSimBackgroundBatchMaxIndices)
+    SimBackgroundVoxelProject_FlushBatch(device, batch);
+  for (int i = 1; i + 1 < count; i += 2) {
+    int last = i + 2 < count ? i + 2 : i + 1;
+    Scene3DPoint quad[4] = {projected[0], projected[i], projected[i + 1], projected[last]};
+    AppendSolidQuad(batch, quad);
+  }
+}
+
 static void DrawShadowMaskResolved(
     ArRenderDevice *device, const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount],
     bool cull, float light_x, float light_y) {
   const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
+  /* A forest repeats sixteen seeded profiles. The light and per-kind axis
+   * are constant during this pass, so build each local outline only once.
+   * Per-pass storage avoids shared mutable state or camera invalidation. */
+  SimBackgroundTreeShadowCacheEntry tree_cache[16] = {0};
   SimBackgroundGeometryBatch *batch = &g_renderer_state.batch;
   batch->vertex_count = 0;
   batch->index_count = 0;
   for (uint16_t i = 0; i < scene->object_count; i++) {
     const SimBackgroundVoxelObject *object = &scene->objects[i];
-    if (object->kind >= kSimBackgroundVoxelKindCount) continue;
+    if (!SimBackgroundVoxelModel_CastsShadow(object)) continue;
     const SimBackgroundProjectionAxis *axis = &axes[object->kind];
     const float center_x = ObjectFootprintWidth(object) * 0.5f;
     const float center_y = ObjectFootprintDepth(object) * 0.5f;
     const float model_lift = ObjectModelLiftPixels(
         object, params, center_x, center_y);
     if (cull && !ObjectMayBeVisible(object, params, axis, model_lift)) continue;
+    if (object->kind == kSimBackgroundVoxel_Tree) {
+      AppendTreeShadow(device, batch, params, object, axis, light_x, light_y, tree_cache);
+      continue;
+    }
     SimBackgroundShadowBounds bounds[kSimBackgroundMaxShadowVolumes];
     int volume_count = ShadowBounds(object, bounds);
     /* Flush ahead of the caster that would not fit. AppendSolidQuad drops

@@ -102,9 +102,13 @@ bank is identical across regions and is not replaced. The Japanese pyramid
 has the eye decoration in both banks. These choices change character pixels,
 not follower behavior, lair reserves, town progress, palettes or events.
 
-The replacements feed native VRAM, so the enhanced rendering paths that use
-the original town canvas and sprites see the same images. Custom 3D models
-are separate: this does not add an eye to the enhanced pyramid model.
+The replacements feed native VRAM, so enhanced paths using the town canvas
+and sprites see the same images. The custom 3D pyramid also carries the eye
+when Japanese pyramid decoration is active for the town visit and the donor
+is available. It remains plain when that donor is missing. The decoration is
+preserved at every model detail level and is independent of gameplay region.
+The world view uses the most recent accepted town-art selection, so pending
+changes still wait for a town entry before changing retained town models.
 Older development-era Japanese `.armedia` files must be re-extracted when
 the builder reports that their reviewed resource set is incomplete.
 

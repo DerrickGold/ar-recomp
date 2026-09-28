@@ -31,8 +31,7 @@ typedef enum SimBackgroundVoxelKind {
    * stands. A separate metatile family from the pointed evergreen, and in
    * Marahna the permanent forest while the palms are the clearable brush. */
   kSimBackgroundVoxel_BroadTree,
-  /* The two clearable brush entries. They share the evergreen's cube crown so
-   * the town's vegetation is one style, and differ by shape and palette. */
+  /* Clearable brush, distinct from the permanent forest families. */
   kSimBackgroundVoxel_Palm,
   kSimBackgroundVoxel_Shrub,
   kSimBackgroundVoxel_StoryTree,
@@ -42,10 +41,13 @@ typedef enum SimBackgroundVoxelKind {
   /* A live $E1/$E2 cell-map bridge. Geometry spans to the first solid bank in
    * each direction and uses stone from the native structure graphic. */
   kSimBackgroundVoxel_Bridge,
+  /* Native terrain $61 and scattered-stone $62/$63/$69-$6B. */
+  kSimBackgroundVoxel_Boulder,
+  kSimBackgroundVoxel_Rocks,
 } SimBackgroundVoxelKind;
 
 enum {
-  kSimBackgroundVoxelKindCount = kSimBackgroundVoxel_Bridge + 1,
+  kSimBackgroundVoxelKindCount = kSimBackgroundVoxel_Rocks + 1,
 };
 
 typedef enum SimBackgroundBridgeAxis {
@@ -66,6 +68,9 @@ typedef enum SimBackgroundVoxelFlags {
    * second, side-facing silhouette. Keep that presentation choice separate
    * from the construction-frame flag used by the larger structures. */
   kSimBackgroundVoxel_AlternateFacing = 1u << 2,
+  /* Resolved town artwork, independent of language/gameplay region. Set only
+   * when the selected Japanese decoration is available to the original BG. */
+  kSimBackgroundVoxel_PyramidEye = 1u << 3,
 } SimBackgroundVoxelFlags;
 
 typedef enum SimBackgroundTreeEdges {
@@ -104,8 +109,10 @@ typedef struct SimBackgroundVoxelObject {
    * metatile. `Unknown` objects are never published: enhanced replacement
    * stands down so the authentic flat art remains visible. */
   uint8_t visual_state;
-  /* Top-left structure-atlas metatile that produced `visual_state`. Diagnostic
-   * identity only; model geometry is keyed by the resolved state and phase. */
+  /* Top-left structure-atlas metatile that produced `visual_state`. Finished
+   * houses also use its family for geometry/palette identity; town and tier
+   * alone cannot distinguish Japan's developed Marahna stilt house. Rocks
+   * carry their terrain-atlas metatile here to retain the native layout. */
   uint8_t visual_metatile;
 } SimBackgroundVoxelObject;
 

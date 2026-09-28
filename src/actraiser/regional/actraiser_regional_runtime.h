@@ -53,6 +53,9 @@ bool ActRaiserRegional_ActorArtwork(unsigned area,bool activate,bool *enabled);
  * The subsequent OBJ upload uses the same town generation. */
 bool ActRaiserRegional_BeginTownArtwork(uint16_t scene,uint8_t *mask);
 uint8_t ActRaiserRegional_TownArtworkSnapshot(uint16_t scene);
+/* Most recent accepted town upload, for retained towns in the world view.
+ * Does not activate pending choices or depend on the navigation scene ID. */
+uint8_t ActRaiserRegional_LastTownArtworkSnapshot(void);
 /* Title-only activation, before its palette/CHR/map uploads. Does not bind
  * Continue or a new campaign; later title edits remain pending until reload. */
 bool ActRaiserRegional_BeginTitleArtwork(uint8_t *mask);

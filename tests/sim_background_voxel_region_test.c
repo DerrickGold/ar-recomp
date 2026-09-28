@@ -15,19 +15,19 @@ int main(void) {
   static const SimBackgroundVoxelHouseStyle
       expected[kSimBackgroundTownCount]
               [kSimBackgroundDevelopmentLevelCount] = {
-    {kSimBackgroundHouseStyle_Tent, kSimBackgroundHouseStyle_Timber,
+    {kSimBackgroundHouseStyle_Yurt, kSimBackgroundHouseStyle_Timber,
      kSimBackgroundHouseStyle_Fillmore},
-    {kSimBackgroundHouseStyle_Tent, kSimBackgroundHouseStyle_Timber,
+    {kSimBackgroundHouseStyle_Yurt, kSimBackgroundHouseStyle_Timber,
      kSimBackgroundHouseStyle_Bloodpool},
     {kSimBackgroundHouseStyle_Yurt,
      kSimBackgroundHouseStyle_WhiteTent,
      kSimBackgroundHouseStyle_Adobe},
-    {kSimBackgroundHouseStyle_Tent, kSimBackgroundHouseStyle_Timber,
+    {kSimBackgroundHouseStyle_Yurt, kSimBackgroundHouseStyle_Timber,
      kSimBackgroundHouseStyle_Aitos},
     {kSimBackgroundHouseStyle_Yurt,
      kSimBackgroundHouseStyle_MarahnaStilt,
      kSimBackgroundHouseStyle_MarahnaLogCabin},
-    {kSimBackgroundHouseStyle_Tent, kSimBackgroundHouseStyle_Timber,
+    {kSimBackgroundHouseStyle_Yurt, kSimBackgroundHouseStyle_Timber,
      kSimBackgroundHouseStyle_Stone},
   };
   for (uint8_t town = 1; town <= kSimBackgroundTownCount; town++)
@@ -60,8 +60,10 @@ int main(void) {
   };
   SimBackgroundVoxelObject stone = tent;
   stone.development_level = 2;
-  CHECK(SimBackgroundVoxelRegion_AuthoredHeight(&tent) <
-        SimBackgroundVoxelRegion_AuthoredHeight(&stone));
+  CHECK(SimBackgroundVoxelRegion_AuthoredHeight(&tent) == 14.6f);
+  tent.development_level = 1;
+  CHECK(SimBackgroundVoxelRegion_AuthoredHeight(&tent) == 11.5f);
+  CHECK(SimBackgroundVoxelRegion_AuthoredHeight(&stone) == 11.0f);
 
   SimBackgroundVoxelObject story_tree = {
     .kind = kSimBackgroundVoxel_StoryTree,

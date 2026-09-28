@@ -2,7 +2,7 @@
 #define AR_SIM_BACKGROUND_VOXEL_BIOME_H
 /* SimBackgroundVoxelBiome: each town's biome (temperate, wetland, desert,
  * volcanic, tropical, snow) and the material substitutions it applies, such
- * as snow on Northwall's upward faces at High detail and above.
+ * as snow on Northwall's roofs and broad upward foliage faces.
  * Phase: pure.
  * Tests: tests/sim_background_voxel_biome_test.c */
 
@@ -22,9 +22,9 @@ typedef enum SimBackgroundVoxelBiome {
 
 SimBackgroundVoxelBiome SimBackgroundVoxelBiome_ForTown(uint8_t town);
 
-/* Quality-aware surface substitution. Northwall receives snow only on broad
- * upward roof/foliage planes at High+, keeping Performance's material and
- * submission path identical to other towns. */
+/* Snow covers pitched roofs at every detail level, including steep entrance
+ * hoods. Foliage retains the High+ broad-upward-face rule. Vertical gables
+ * and downward-facing surfaces are not snow-covered. */
 SimBackgroundVoxelMaterial SimBackgroundVoxelBiome_SurfaceMaterial(
     SimBackgroundVoxelBiome biome,
     SimBackgroundVoxelDetail detail,

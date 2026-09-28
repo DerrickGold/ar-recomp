@@ -2,6 +2,7 @@
 #include "sim/voxels/sim_background_bridge.h"
 #include "sim/voxels/sim_background_voxel_region.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -47,6 +48,88 @@ static float TopWidthAt(const SimBackgroundVoxelModel *model, float z) {
       if (at->x > max_x) max_x = at->x;
     }
   return max_x > min_x ? max_x - min_x : 0.0f;
+}
+
+static bool SamePoint(SimBackgroundVoxelModelPoint a, SimBackgroundVoxelModelPoint b) {
+  return fabsf(a.x - b.x) < 0.00001f && fabsf(a.y - b.y) < 0.00001f &&
+         fabsf(a.z - b.z) < 0.00001f;
+}
+
+/* Shared edges close every frond bend and the stem/crown junction. Only the
+ * ground ring and narrow frond roots buried inside the crown may be open. */
+static void CheckPalmConnections(const SimBackgroundVoxelModel *model) {
+  struct Edge {
+    SimBackgroundVoxelModelPoint a, b;
+    int uses;
+  } edges[kSimBackgroundVoxelModelMaxFaces * 4];
+  int count = 0;
+  for (int face = 0; face < model->face_count; face++) {
+    const SimBackgroundVoxelModelFace *f = &model->faces[face];
+    for (int at = 0; at < 4; at++) {
+      SimBackgroundVoxelModelPoint a = f->points[at], b = f->points[(at + 1) % 4];
+      if (SamePoint(a, b)) continue;  /* Collapsed edge of an authored triangle. */
+      int found = -1;
+      for (int edge = 0; edge < count; edge++)
+        if ((SamePoint(a, edges[edge].a) && SamePoint(b, edges[edge].b)) ||
+            (SamePoint(a, edges[edge].b) && SamePoint(b, edges[edge].a))) {
+          found = edge;
+          break;
+        }
+      if (found >= 0) edges[found].uses++;
+      else edges[count++] = (struct Edge){a, b, 1};
+    }
+  }
+  for (int edge = 0; edge < count; edge++) {
+    CHECK(edges[edge].uses == 1 || edges[edge].uses == 2);
+    if (edges[edge].uses == 2) continue;
+    SimBackgroundVoxelModelPoint a = edges[edge].a, b = edges[edge].b;
+    bool ground = fabsf(a.z) < 0.00001f && fabsf(b.z) < 0.00001f;
+    bool crown_root = a.z > 11.9f && a.z < 12.1f && b.z > 11.9f && b.z < 12.1f &&
+        a.x > 6.8f && a.x < 9.2f && b.x > 6.8f && b.x < 9.2f &&
+        a.y > 6.8f && a.y < 9.2f && b.y > 6.8f && b.y < 9.2f;
+    CHECK(ground || crown_root);
+  }
+}
+
+static int PalmTips(const SimBackgroundVoxelModel *model,
+                    SimBackgroundVoxelModelPoint out[8]) {
+  int count = 0;
+  for (int face = 0; face < model->face_count; face++) {
+    const SimBackgroundVoxelModelFace *f = &model->faces[face];
+    if (f->material != kSimVoxelMaterial_LeavesDark ||
+        !SamePoint(f->points[1], f->points[2])) continue;
+    if (count < 8) out[count] = f->points[1];
+    count++;
+  }
+  return count;
+}
+
+static void CheckPalmDetailContinuity(void) {
+  for (int seed = 0; seed < 8; seed++) {
+    SimBackgroundVoxelObject object = {
+      .kind = kSimBackgroundVoxel_Palm, .town = 5,
+      .cell_x = seed, .cell_y = seed * 7, .group = seed,
+    };
+    SimBackgroundVoxelModelPoint low_tips[8] = {{0}};
+    for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+      SimBackgroundVoxelModel model;
+      SimBackgroundVoxelModel_BuildStyled(
+          &object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+      CHECK(!model.overflow);
+      CHECK(model.authored_face_count <= SimBackgroundVoxelModel_FaceBudget(detail));
+      CHECK(model.min_x >= 0 && model.max_x <= 16);
+      CHECK(model.min_y >= 0 && model.max_y <= 16);
+      CHECK(model.max_z <= 15.5f);
+      CHECK(TopWidthAt(&model, 0) < 3.0f);
+      CheckPalmConnections(&model);
+      SimBackgroundVoxelModelPoint tips[8] = {{0}};
+      CHECK(PalmTips(&model, tips) == 8);
+      if (detail == kSimBackgroundVoxelDetail_Low)
+        memcpy(low_tips, tips, sizeof(tips));
+      else
+        for (int tip = 0; tip < 8; tip++) CHECK(SamePoint(low_tips[tip], tips[tip]));
+    }
+  }
 }
 
 static bool MaterialHasSlopedFace(const SimBackgroundVoxelModel *model,
@@ -146,7 +229,7 @@ static int UniqueVariedModels(SimBackgroundVoxelKind kind, SimBackgroundVoxelDet
     SimBackgroundVoxelModel model;
     SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
     CHECK(!model.overflow);
-    CHECK(model.face_count <= SimBackgroundVoxelModel_FaceBudget(detail));
+    CHECK(model.face_count <= SimBackgroundVoxelModel_ObjectFaceBudget(&object, detail));
     uint64_t hash = ModelHash(&model);
     bool known = false;
     for (int i = 0; i < unique; i++)
@@ -170,7 +253,7 @@ static SimBackgroundVoxelModel Build(SimBackgroundVoxelKind kind, SimBackgroundV
   SimBackgroundVoxelModel_Build(&object, detail, &model);
   CHECK(!model.overflow);
   CHECK(model.face_count > 0);
-  CHECK(model.face_count <= SimBackgroundVoxelModel_FaceBudget(detail));
+  CHECK(model.face_count <= SimBackgroundVoxelModel_ObjectFaceBudget(&object, detail));
   return model;
 }
 
@@ -188,7 +271,629 @@ static SimBackgroundVoxelModel BuildRegionalHouse(uint8_t town, uint8_t level) {
   return model;
 }
 
+/* Bounds on an axis-aligned face in the two remaining coordinates. */
+static bool FaceRectangle(const SimBackgroundVoxelModelFace *face, int axis,
+                           float plane, float bounds[4]) {
+  bounds[0] = bounds[2] = 1000000.0f;
+  bounds[1] = bounds[3] = -1000000.0f;
+  for (int i = 0; i < 4; i++) {
+    const SimBackgroundVoxelModelPoint p = face->points[i];
+    const float v[] = {p.x, p.y, p.z};
+    if (v[axis] != plane) return false;
+    for (int k = 0; k < 2; k++) {
+      float value = v[(axis + k + 1) % 3];
+      if (value < bounds[k * 2]) bounds[k * 2] = value;
+      if (value > bounds[k * 2 + 1]) bounds[k * 2 + 1] = value;
+    }
+  }
+  return true;
+}
+
+static bool MaterialOverlap(const SimBackgroundVoxelModel *model,
+                             int material_a, int material_b, int axis, float plane) {
+  for (int a = 0; a < model->face_count; a++) {
+    float ra[4];
+    if (model->faces[a].material != material_a ||
+        !FaceRectangle(&model->faces[a], axis, plane, ra)) continue;
+    for (int b = 0; b < model->face_count; b++) {
+      if (a == b) continue;
+      float rb[4];
+      if (model->faces[b].material != material_b ||
+          !FaceRectangle(&model->faces[b], axis, plane, rb)) continue;
+      if (ra[0] < rb[1] && rb[0] < ra[1] &&
+          ra[2] < rb[3] && rb[2] < ra[3]) return true;
+    }
+  }
+  return false;
+}
+
+static bool GroundedFacadeAt(const SimBackgroundVoxelModel *model,
+                             float x, float y, float height) {
+  for (int face = 0; face < model->face_count; face++) {
+    float bounds[4];
+    if (model->faces[face].material == kSimVoxelMaterial_WallLight &&
+        FaceRectangle(&model->faces[face], 1, y, bounds) &&
+        bounds[0] == 0.0f && bounds[1] >= height &&
+        bounds[2] < x && bounds[3] > x) return true;
+  }
+  return false;
+}
+
+static bool ContactAt(const SimBackgroundVoxelModelContact *contacts,
+                       int count, float x, float y, float apron) {
+  for (int part = 0; part < count; part++) {
+    SimBackgroundVoxelModelContact c = contacts[part];
+    if (c.x0 - apron <= x && c.x1 + apron >= x &&
+        c.y0 - apron <= y && c.y1 + apron >= y) return true;
+  }
+  return false;
+}
+
+/* Vertical ray through triangulated quads: catches an open roof and verifies
+ * that a courtyard really exposes the ground instead of a hidden foundation. */
+static float ProjectedSurfaceAt(const SimBackgroundVoxelModel *model,
+                                 float x, float y, bool from_front) {
+  float highest = -1.0f;
+  for (int f = 0; f < model->face_count; f++) {
+    const SimBackgroundVoxelModelPoint *p = model->faces[f].points;
+    for (int t = 0; t < 2; t++) {
+      SimBackgroundVoxelModelPoint a = p[0], b = p[t + 1], c = p[t + 2];
+      if (from_front) {
+        float ay = a.y, by = b.y, cy = c.y;
+        a.y = a.z;
+        a.z = ay;
+        b.y = b.z;
+        b.z = by;
+        c.y = c.z;
+        c.z = cy;
+      }
+      float determinant = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+      if (fabsf(determinant) < 0.0001f) continue;
+      float u = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / determinant;
+      float v = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / determinant;
+      if (u < -0.0001f || v < -0.0001f || u + v > 1.0001f) continue;
+      float z = u * a.z + v * b.z + (1.0f - u - v) * c.z;
+      if (z > highest) highest = z;
+    }
+  }
+  return highest;
+}
+
+static float SurfaceHeightAt(const SimBackgroundVoxelModel *model, float x, float y) {
+  return ProjectedSurfaceAt(model, x, y, false);
+}
+
+static float SurfaceFrontAt(const SimBackgroundVoxelModel *model, float x, float z) {
+  return ProjectedSurfaceAt(model, x, z, true);
+}
+
+static void CheckAuditRegressions(void) {
+  /* Cover every shape profile in every climate and style, including the two
+   * real audit inputs that overflowed only after root trim was appended. */
+  for (int town = 1; town <= 6; town++)
+    for (int seed = 0; seed < 8; seed++)
+      for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++)
+        for (int style = 0; style < kSimBackgroundVoxelStyle_Count; style++) {
+          SimBackgroundVoxelObject tree = {
+            .kind = kSimBackgroundVoxel_Tree, .town = (uint8_t)town,
+            .cell_x = (uint8_t)seed, .cell_y = (uint8_t)((seed * 7) % 32),
+            .group = (uint16_t)seed, .record_slot = (uint8_t)seed,
+          };
+          SimBackgroundVoxelModel model;
+          SimBackgroundVoxelModel_BuildStyled(&tree, detail, style, &model);
+          CHECK(!model.overflow && model.face_count > 0);
+          CHECK(model.authored_face_count <= SimBackgroundVoxelModel_FaceBudget(detail));
+        }
+
+  SimBackgroundVoxelModel model;
+  SimBackgroundVoxelObject object = {.kind = kSimBackgroundVoxel_BloodpoolCastle, .town = 2};
+  CHECK(SimBackgroundVoxelModel_FaceBudget(kSimBackgroundVoxelDetail_Low) == 64);
+  CHECK(SimBackgroundVoxelModel_FaceBudget(kSimBackgroundVoxelDetail_Balanced) == 160);
+  CHECK(SimBackgroundVoxelModel_ObjectFaceBudget(&object, kSimBackgroundVoxelDetail_Low) == 128);
+  CHECK(SimBackgroundVoxelModel_ObjectFaceBudget(
+      &object, kSimBackgroundVoxelDetail_Balanced) == 160);
+  SimBackgroundVoxelModelContact contacts[kSimBackgroundVoxelModelMaxContacts];
+  int count = SimBackgroundVoxelModel_Contacts(&object, contacts);
+  CHECK(count == 11);
+  for (int part = 0; part < count; part++) {
+    const SimBackgroundVoxelModelContact c = contacts[part];
+    /* Include the renderer's 0.4-unit foundation apron in the ground check. */
+    CHECK(!(c.x0 - 0.4f < 8.0f && c.x1 + 0.4f > 8.0f &&
+            c.y0 - 0.4f < 18.0f && c.y1 + 0.4f > 18.0f));
+    CHECK(!(c.x0 - 0.4f < 24.0f && c.x1 + 0.4f > 24.0f &&
+            c.y0 - 0.4f < 18.0f && c.y1 + 0.4f > 18.0f));
+  }
+  for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+    SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+    CHECK(!model.overflow);
+    SimBackgroundVoxelModel detailed_castle;
+    SimBackgroundVoxelModel_BuildStyled(&object, kSimBackgroundVoxelDetail_Ultra,
+                                       kSimBackgroundVoxelStyle_Varied, &detailed_castle);
+    CHECK(SameBounds(&model, &detailed_castle));
+    CHECK(SurfaceHeightAt(&model, 12.0f, 12.0f) > 20.0f);
+    CHECK(SurfaceHeightAt(&model, 14.5f, 13.0f) == 26.0f);
+    CHECK(SurfaceHeightAt(&model, 17.5f, 13.0f) == 26.0f);
+    CHECK(GroundedFacadeAt(&model, 16.0f, 22.0f, 20.0f));
+    CHECK(SurfaceHeightAt(&model, 11.0f, 9.0f) == 32.0f);
+    CHECK(SurfaceHeightAt(&model, 21.0f, 9.0f) == 32.0f);
+    for (int side = 0; side < 2; side++) {
+      float x = side ? 27.5f : 4.5f;
+      CHECK(SurfaceHeightAt(&model, x, 6.5f) == 28.0f);
+      CHECK(SurfaceHeightAt(&model, x, 29.5f) == 20.0f);
+      CHECK(GroundedFacadeAt(&model, x, 32.0f, 13.0f));
+      CHECK(ContactAt(contacts, count, x, 31.9f, 0.0f));
+    }
+    CHECK(SurfaceHeightAt(&model, 8.0f, 18.0f) < 0.0f);
+    CHECK(SurfaceHeightAt(&model, 24.0f, 18.0f) < 0.0f);
+    CHECK(fabsf(SurfaceHeightAt(&model, 16.0f, 30.5f) - 15.2f) < 0.001f);
+    /* The gate and corner piers stand in front of recessed curtain panels.
+     * A ray through the arch reaches the keep, not a painted solid wall. */
+    CHECK(fabsf(SurfaceFrontAt(&model, 12.0f, 6.0f) - 32.0f) < 0.001f);
+    CHECK(fabsf(SurfaceFrontAt(&model, 20.0f, 6.0f) - 32.0f) < 0.001f);
+    CHECK(fabsf(SurfaceFrontAt(&model, 9.0f, 6.0f) - 29.5f) < 0.001f);
+    CHECK(fabsf(SurfaceFrontAt(&model, 23.0f, 6.0f) - 29.5f) < 0.001f);
+    CHECK(SurfaceFrontAt(&model, 16.0f, 3.0f) < 26.5f);
+    CHECK(SurfaceFrontAt(&model, 16.0f, 7.0f) < 26.5f);
+    CHECK(fabsf(SurfaceFrontAt(&model, 16.0f, 8.0f) - 32.0f) < 0.001f);
+    CHECK(fabsf(SurfaceFrontAt(&model, 13.6f, 6.0f) - 32.0f) < 0.001f);
+    for (int side = 0; side < 2; side++) {
+      float bay_x = side ? 23.0f : 9.0f;
+      CHECK(SurfaceHeightAt(&model, bay_x, 31.0f) < 0.0f);
+      CHECK(!ContactAt(contacts, count, bay_x, 31.0f, 0.4f));
+    }
+    CHECK(MaterialFaces(&model, kSimVoxelMaterial_Glass) == 0);
+    CHECK(!MaterialOverlap(&model, kSimVoxelMaterial_Dark, kSimVoxelMaterial_Glass, 1, 31.05f));
+  }
+  object = (SimBackgroundVoxelObject){.kind = kSimBackgroundVoxel_Windmill, .town = 1};
+  CHECK(SimBackgroundVoxelModel_ObjectFaceBudget(&object, kSimBackgroundVoxelDetail_Low) == 64);
+  for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+    SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+    int round_walls = 0;
+    for (int face = 0; face < model.face_count; face++) {
+      const SimBackgroundVoxelModelFace *f = &model.faces[face];
+      if (f->material == kSimVoxelMaterial_Wall &&
+          f->points[0].z == (detail == kSimBackgroundVoxelDetail_Low ? 0.0f : 2.0f) && f->points[2].z == 22.0f &&
+          f->points[0].x != f->points[1].x &&
+          f->points[0].y != f->points[1].y) round_walls++;
+    }
+    CHECK(round_walls == 8);
+    CHECK(SurfaceHeightAt(&model, 16.0f, 15.5f) > 5.8f);
+  }
+  object.flags = kSimBackgroundVoxel_UnderConstruction;
+  CHECK(SimBackgroundVoxelModel_Contacts(&object, contacts) >= 2);
+  for (int phase = 0; phase < 3; phase++)
+    for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+      object.animation_phase = (uint8_t)phase;
+      SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+      CHECK(!model.overflow);
+      CHECK(SurfaceHeightAt(&model, 16.0f, 7.0f) > 6.0f);
+    }
+  object = (SimBackgroundVoxelObject){.kind = kSimBackgroundVoxel_Factory, .town = 1};
+  SimBackgroundVoxelModel_BuildStyled(&object, kSimBackgroundVoxelDetail_Ultra,
+                                     kSimBackgroundVoxelStyle_Varied, &model);
+  CHECK(!MaterialOverlap(&model, kSimVoxelMaterial_Wall, kSimVoxelMaterial_WallLight, 1, 30.5f));
+  CHECK(!MaterialOverlap(&model, kSimVoxelMaterial_Wall, kSimVoxelMaterial_WallLight, 1, 1.5f));
+  CHECK(!MaterialOverlap(&model, kSimVoxelMaterial_Roof, kSimVoxelMaterial_Trim, 0, 20.8f));
+
+  object = (SimBackgroundVoxelObject){.kind = kSimBackgroundVoxel_MarahnaTemple, .town = 5};
+  CHECK(SimBackgroundVoxelModel_ObjectFaceBudget(&object, kSimBackgroundVoxelDetail_Low) == 144);
+  CHECK(SimBackgroundVoxelModel_ObjectFaceBudget(
+      &object, kSimBackgroundVoxelDetail_Balanced) == 256);
+  count = SimBackgroundVoxelModel_Contacts(&object, contacts);
+  CHECK(count == 12 && count <= kSimBackgroundVoxelModelMaxContacts);
+  for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+    SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+    CHECK(!model.overflow);
+    CHECK(RegionMaxZ(&model, 0, 0, 10, 21) >= 18.0f);
+    CHECK(RegionMaxZ(&model, 22, 0, 32, 21) >= 18.0f);
+    CHECK(RegionMaxZ(&model, 11, 0, 21, 24) == 24.0f);
+    CHECK(GroundedFacadeAt(&model, 11.4f, 22.5f, 10.0f));
+    CHECK(GroundedFacadeAt(&model, 20.5f, 22.5f, 10.0f));
+    for (int side = 0; side < 2; side++) {
+      float center = side ? 26.5f : 5.5f;
+      CHECK(SurfaceHeightAt(&model, center + 2.5f, 12.0f) >
+            SurfaceHeightAt(&model, center + 3.5f, 12.0f));
+      /* The belly projects beyond the ground radius before tapering inward. */
+      CHECK(SurfaceHeightAt(&model, center + 4.7f, 12.0f) > 3.0f);
+      CHECK(SurfaceHeightAt(&model, center + 4.7f, 12.0f) < 7.0f);
+      float garden = side ? 26.0f : 6.0f;
+      CHECK(SurfaceHeightAt(&model, garden, 20.0f) < 0.0f);
+      CHECK(!ContactAt(contacts, count, garden, 20.0f, 0.4f));
+      CHECK(SurfaceHeightAt(&model, garden, 25.5f) == 9.5f);
+      CHECK(ContactAt(contacts, count, garden, 25.5f, 0.0f));
+      /* Continuous outside/front wall runs, including the old gap
+       * between the mound and garden border; keep their foundations narrow. */
+      const float support[][2] = {
+        {side ? 30.5f : 1.5f, 18.0f},
+        {side ? 30.5f : 1.5f, 30.5f},
+        {garden, 30.5f},
+      };
+      for (int part = 0; part < 3; part++) {
+        CHECK(fabsf(SurfaceHeightAt(&model, support[part][0], support[part][1]) - 2.8f) < 0.001f);
+        CHECK(ContactAt(contacts, count, support[part][0], support[part][1], 0.0f));
+      }
+      float gate_x = side ? 21.0f : 11.0f;
+      CHECK(fabsf(SurfaceHeightAt(&model, gate_x, 30.5f) - 5.2f) < 0.001f);
+      CHECK(ContactAt(contacts, count, gate_x, 30.5f, 0.0f));
+      CHECK(SurfaceHeightAt(&model, gate_x, 25.5f) < 0.0f);
+      CHECK(!ContactAt(contacts, count, gate_x, 25.5f, 0.4f));
+    }
+    int ground_slopes = 0;
+    for (int face = 0; face < model.face_count; face++) {
+      const SimBackgroundVoxelModelFace *f = &model.faces[face];
+      if (f->material == kSimVoxelMaterial_Gold && f->points[0].z == 0.0f &&
+          f->points[1].z == 0.0f && f->points[2].z > 0.0f &&
+          f->points[2].z < 6.0f) ground_slopes++;
+      if (f->material == kSimVoxelMaterial_Dark || f->material == kSimVoxelMaterial_Glass)
+        for (int vertex = 0; vertex < 4; vertex++)
+          CHECK(f->points[vertex].x >= 10.5f && f->points[vertex].x <= 21.5f);
+    }
+    CHECK(ground_slopes == 16);
+  }
+
+  object = (SimBackgroundVoxelObject){.kind = kSimBackgroundVoxel_Pyramid, .town = 3};
+  for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+    SimBackgroundVoxelModel plain;
+    object.flags = 0;
+    SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &plain);
+    object.flags = kSimBackgroundVoxel_PyramidEye;
+    SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+    CHECK(!model.overflow && !plain.overflow);
+    CHECK(SameBounds(&model, &plain));
+    CHECK(MaterialFaces(&plain, kSimVoxelMaterial_Glass) == 0);
+    CHECK(MaterialFaces(&model, kSimVoxelMaterial_Glass) > 0);
+    CHECK(ModelHash(&model) != ModelHash(&plain));
+    /* Every stone vertex lies on one of four continuous casing slopes. No
+     * brick course introduces a horizontal ledge or a stepped silhouette. */
+    for (int face = 0; face < plain.face_count; face++)
+      for (int vertex = 0; vertex < 4; vertex++) {
+        SimBackgroundVoxelModelPoint p = plain.faces[face].points[vertex];
+        float edge = fmaxf(fabsf(p.x - 16.0f), fabsf(p.y - 16.0f));
+        CHECK(fabsf(edge - 15.5f * (1.0f - p.z / 28.0f)) < 0.19f);
+      }
+
+  }
+
+  object = (SimBackgroundVoxelObject){.kind = kSimBackgroundVoxel_House, .town = 6,
+                                     .development_level = 2};
+  for (int alternate = 0; alternate < 2; alternate++)
+    for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++)
+      for (int style = 0; style < kSimBackgroundVoxelStyle_Count; style++) {
+        object.flags = alternate ? kSimBackgroundVoxel_AlternateFacing : 0;
+        SimBackgroundVoxelModel_BuildStyled(&object, detail, style, &model);
+        CHECK(!model.overflow);
+        CHECK(!MaterialHasSlopedFace(&model, kSimVoxelMaterial_Roof));
+        CHECK(!MaterialHasSlopedFace(&model, kSimVoxelMaterial_RoofLight));
+      }
+
+  object = (SimBackgroundVoxelObject){.kind = kSimBackgroundVoxel_House, .town = 5,
+    .development_level = 2, .visual_state = kSimStructureVisualState_Finished,
+    .visual_metatile = 0x3A};
+  CHECK(SimBackgroundVoxelRegion_ObjectHouseStyle(&object) ==
+        kSimBackgroundHouseStyle_MarahnaStilt);
+  SimBackgroundVoxelModel_BuildStyled(&object, kSimBackgroundVoxelDetail_High,
+                                     kSimBackgroundVoxelStyle_Basic, &model);
+  CHECK(model.max_z == 12.5f);
+  object.visual_metatile = 0x0A;
+  CHECK(SimBackgroundVoxelRegion_ObjectHouseStyle(&object) ==
+        kSimBackgroundHouseStyle_MarahnaLogCabin);
+  SimBackgroundVoxelModel_BuildStyled(&object, kSimBackgroundVoxelDetail_High,
+                                     kSimBackgroundVoxelStyle_Basic, &model);
+  CHECK(model.max_z == 12.0f);
+}
+
+static void CheckEnvironmentModels(void) {
+  static const uint8_t tiles[] = {0x61, 0x62, 0x63, 0x69, 0x6A, 0x6B};
+  for (int at = 0; at < 6; at++) {
+    SimBackgroundVoxelObject object = {
+      .kind = (uint8_t)SimBackgroundVoxelRegion_RockKind(tiles[at]),
+      .town = 4, .visual_metatile = tiles[at],
+    };
+    for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+      SimBackgroundVoxelModel model;
+      SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+      CHECK(!model.overflow && model.face_count <= 64);
+      CHECK(model.min_z == 0.0f && model.max_z > 1.0f);
+      CHECK(model.min_x >= 0.0f && model.max_x <= 16.0f);
+      CHECK(model.min_y >= 0.0f && model.max_y <= 16.0f);
+      CHECK(model.max_z <= SimBackgroundVoxelRegion_AuthoredHeight(&object));
+      SimBackgroundVoxelModelContact contacts[kSimBackgroundVoxelModelMaxContacts];
+      CHECK(SimBackgroundVoxelModel_Contacts(&object, contacts) == 0);
+      CHECK(!SimBackgroundVoxelModel_CastsShadow(&object));
+      if (tiles[at] == 0x62) CHECK(SurfaceHeightAt(&model, 3.0f, 3.0f) < 0.0f);
+    }
+  }
+  for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+    SimBackgroundVoxelObject object = {.kind = kSimBackgroundVoxel_Shrub, .town = 1};
+    SimBackgroundVoxelModel model;
+    SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+    CHECK(MaterialHasSlopedFace(&model, kSimVoxelMaterial_Leaves));
+    CHECK(SurfaceHeightAt(&model, 8.0f, 8.0f) > SurfaceHeightAt(&model, 12.0f, 8.0f));
+    float low, high;
+    MaterialZBounds(&model, kSimVoxelMaterial_Trunk, &low, &high);
+    CHECK(low == 0.0f && high <= 3.0f);
+  }
+}
+
+/* Continuous crowns must be closed at every LOD, including the collapsed
+ * pole triangles. Open branch ends are deliberately buried and excluded. */
+static void CheckClosedCrown(const SimBackgroundVoxelModel *model) {
+  for (int f = 0; f < model->face_count; f++) {
+    const SimBackgroundVoxelModelFace *face = &model->faces[f];
+    if (face->material == kSimVoxelMaterial_Trunk) continue;
+    for (int e = 0; e < 4; e++) {
+      SimBackgroundVoxelModelPoint a = face->points[e], b = face->points[(e + 1) & 3];
+      if (SamePoint(a, b)) continue;
+      int uses = 0;
+      for (int other = 0; other < model->face_count; other++) {
+        const SimBackgroundVoxelModelFace *candidate = &model->faces[other];
+        if (candidate->material == kSimVoxelMaterial_Trunk) continue;
+        for (int edge = 0; edge < 4; edge++) {
+          SimBackgroundVoxelModelPoint c = candidate->points[edge];
+          SimBackgroundVoxelModelPoint d = candidate->points[(edge + 1) & 3];
+          if ((SamePoint(a, c) && SamePoint(b, d)) ||
+              (SamePoint(a, d) && SamePoint(b, c))) uses++;
+        }
+      }
+      CHECK(uses == 2);
+    }
+  }
+}
+
+static void CheckRecognitionPolish(void) {
+  const int foliage[] = {kSimBackgroundVoxel_Tree, kSimBackgroundVoxel_BroadTree,
+                         kSimBackgroundVoxel_StoryTree, kSimBackgroundVoxel_Shrub};
+  for (int at = 0; at < 4; at++)
+    for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+      SimBackgroundVoxelObject object = {.kind = foliage[at], .town = 6};
+      SimBackgroundVoxelModel model;
+      SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+      CHECK(!model.overflow && model.min_z == 0);
+      CHECK(model.authored_face_count <= SimBackgroundVoxelModel_ObjectFaceBudget(&object, detail));
+      CheckClosedCrown(&model);
+      if (object.kind == kSimBackgroundVoxel_StoryTree) {
+        CHECK(model.max_z > 28 && model.max_z < 32);
+        CHECK(model.max_x - model.min_x > 25);
+        CHECK(model.max_x <= 32 && model.min_x >= 0);
+        CHECK(model.max_y <= 32 && model.min_y >= 0);
+        CHECK(SimBackgroundVoxelModel_ObjectFaceBudget(&object, detail) >= 128);
+      }
+    }
+  for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+    SimBackgroundVoxelModel model;
+    SimBackgroundVoxelObject object = {.kind = kSimBackgroundVoxel_Factory, .town = 1};
+    SimBackgroundVoxelModel_Build(&object, detail, &model);
+    CHECK(SurfaceHeightAt(&model, 25, 11) >= 16.7f);
+    CHECK(SurfaceHeightAt(&model, 25, 19) >= 16.7f);
+    object.flags = kSimBackgroundVoxel_UnderConstruction;
+    SimBackgroundVoxelModel_Build(&object, detail, &model);
+    CHECK(!model.overflow && SurfaceHeightAt(&model, 10, 16) < 0);
+    CHECK(MaterialHasSlopedFace(&model, kSimVoxelMaterial_Wood));
+    object.kind = kSimBackgroundVoxel_House;
+    for (int phase = 0; phase < 2; phase++) {
+      object.animation_phase = phase;
+      SimBackgroundVoxelModel_Build(&object, detail, &model);
+      CHECK(!model.overflow && MaterialHasSlopedFace(&model, kSimVoxelMaterial_Wood));
+    }
+    object.kind = kSimBackgroundVoxel_Windmill;
+    float previous_height = 0;
+    for (int phase = 0; phase < 3; phase++) {
+      object.animation_phase = phase;
+      SimBackgroundVoxelModel_Build(&object, detail, &model);
+      CHECK(!model.overflow && model.max_z > previous_height);
+      previous_height = model.max_z;
+      if (phase == 2) {
+        CHECK(MaterialHasSlopedFace(&model, kSimVoxelMaterial_Roof));
+        CHECK(SurfaceHeightAt(&model, 16, 15.5f) > 5.8f);
+      }
+    }
+    object = (SimBackgroundVoxelObject){.kind = kSimBackgroundVoxel_House,
+        .town = 1, .development_level = 2};
+    SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+    /* Window lintels and jambs meet; overlapping caps used to tie in D32. */
+    CHECK(!MaterialOverlap(&model, kSimVoxelMaterial_Trim, kSimVoxelMaterial_Trim, 2, 8.4f));
+    object = (SimBackgroundVoxelObject){.kind = kSimBackgroundVoxel_House,
+        .town = 5, .development_level = 1};
+    for (int alternate = 0; alternate < 2; alternate++) {
+      object.flags = alternate ? kSimBackgroundVoxel_AlternateFacing : 0;
+      SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+      CHECK(!model.overflow);
+      float min, max;
+      MaterialZBounds(&model, kSimVoxelMaterial_Dark, &min, &max);
+      CHECK(min >= 5.3f); /* No invented opening below the raised floor. */
+      SimBackgroundVoxelModelContact contacts[kSimBackgroundVoxelModelMaxContacts];
+      int count = SimBackgroundVoxelModel_Contacts(&object, contacts);
+      CHECK(count == 4);
+      CHECK(!ContactAt(contacts, count, 8, 12, .4f));
+    }
+    object.development_level = 2;
+    object.flags = 0;
+    SimBackgroundVoxelModel_Build(&object, detail, &model);
+    CHECK(MaterialFaces(&model, kSimVoxelMaterial_Wood) >= 6);
+  }
+}
+
+static void CheckTreeShadows(void) {
+  SimBackgroundVoxelModelPoint hull[kSimBackgroundVoxelTreeShadowMaxPoints];
+  SimBackgroundVoxelObject tree = {.kind = kSimBackgroundVoxel_Tree, .town = 1};
+  CHECK(!SimBackgroundVoxelModel_CastsShadow(NULL));
+  CHECK(SimBackgroundVoxelModel_CastsShadow(&tree));
+  CHECK(SimBackgroundVoxelModel_TreeShadowHull(NULL, 0, 0, hull) == 0);
+  CHECK(SimBackgroundVoxelModel_TreeShadowHull(&tree, NAN, 0, hull) == 0);
+  CHECK(SimBackgroundVoxelModel_TreeShadowHull(&tree, 0, 0, NULL) == 0);
+  SimBackgroundVoxelObject repeat = tree;
+  repeat.cell_x += 16;
+  repeat.cell_y += 16;
+  repeat.group += 16;
+  SimBackgroundVoxelModelPoint same[kSimBackgroundVoxelTreeShadowMaxPoints];
+  CHECK(SimBackgroundVoxelModel_TreeShadowVariant(&tree) ==
+        SimBackgroundVoxelModel_TreeShadowVariant(&repeat));
+  int n = SimBackgroundVoxelModel_TreeShadowHull(&tree, .7f, -.3f, hull);
+  CHECK(SimBackgroundVoxelModel_TreeShadowHull(&repeat, .7f, -.3f, same) == n);
+  CHECK(!memcmp(hull, same, n * sizeof(*hull)));
+  static const float casts[][2] = {{0, 0}, {.6f, -.4f}, {-.6f, .4f}, {2, 1}, {-2, -1}};
+  for (int town = 1; town <= 6; town++)
+    for (int seed = 0; seed < 4; seed++)
+      for (size_t cast = 0; cast < sizeof(casts) / sizeof(casts[0]); cast++) {
+        tree.town = town;
+        tree.cell_x = seed;
+        tree.cell_y = seed * 3;
+        float dx = casts[cast][0], dy = casts[cast][1];
+        int count = SimBackgroundVoxelModel_TreeShadowHull(&tree, dx, dy, hull);
+        CHECK(count >= 8 && count <= kSimBackgroundVoxelTreeShadowMaxPoints);
+        float twice_area = 0;
+        for (int i = 0; i < count; i++) {
+          SimBackgroundVoxelModelPoint a = hull[i], b = hull[(i + 1) % count];
+          CHECK(isfinite(a.x) && isfinite(a.y) && a.z == 0);
+          twice_area += a.x * b.y - b.x * a.y;
+          if (!cast) CHECK(a.x > .5f && a.x < 15.5f && a.y > .5f && a.y < 15.5f);
+        }
+        CHECK(twice_area > 120);
+        if (!cast) CHECK(twice_area < 290); /* Round canopy, not a 256px tile. */
+        /* The inexpensive outline must enclose the light-projected model at
+         * every LOD, to within the subpixel error of its twenty-four-sided rings. */
+        for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+          SimBackgroundVoxelModel model;
+          SimBackgroundVoxelModel_BuildStyled(&tree, detail, kSimBackgroundVoxelStyle_Varied, &model);
+          for (int face = 0; face < model.face_count; face++)
+            for (int vertex = 0; vertex < 4; vertex++) {
+              SimBackgroundVoxelModelPoint p = model.faces[face].points[vertex];
+              p.x += p.z * dx;
+              p.y += p.z * dy;
+              for (int edge = 0; edge < count; edge++) {
+                SimBackgroundVoxelModelPoint a = hull[edge], b = hull[(edge + 1) % count];
+                float ex = b.x - a.x, ey = b.y - a.y;
+                float distance = (ex * (p.y - a.y) - ey * (p.x - a.x)) / hypotf(ex, ey);
+                CHECK(distance > -.4f);
+              }
+            }
+        }
+      }
+}
+
+static void CheckReviewFollowup(void) {
+  for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+    SimBackgroundVoxelModel model;
+    SimBackgroundVoxelObject object = {.kind = kSimBackgroundVoxel_House, .town = 2,
+        .development_level = 2};
+    SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+    CHECK(SurfaceFrontAt(&model, 1.3f, 6) < 0); /* No unsupported left extension. */
+    object = (SimBackgroundVoxelObject){.kind = kSimBackgroundVoxel_House, .town = 4,
+        .flags = kSimBackgroundVoxel_AlternateFacing};
+    SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+    CHECK(MaterialFaces(&model, kSimVoxelMaterial_Wood) == 0);
+    CHECK(model.max_z > 12 && model.max_z <= 12.81f);
+    float crown_left = 100, crown_right = -100;
+    int crown_bands = 0;
+    for (int f = 0; f < model.face_count; f++) {
+      const SimBackgroundVoxelModelFace *face = &model.faces[f];
+      if (face->material == kSimVoxelMaterial_Trim && face->points[0].z > 9)
+        crown_bands++;
+      for (int v = 0; v < 4; v++)
+        if (face->points[v].z > 11) {
+          crown_left = fminf(crown_left, face->points[v].x);
+          crown_right = fmaxf(crown_right, face->points[v].x);
+        }
+    }
+    CHECK(crown_right - crown_left > 10); /* Broad crest survives even Low detail. */
+    CHECK(crown_bands == 5);
+    CHECK(SurfaceHeightAt(&model, 8, 8) > 11); /* Closed crest through the center. */
+    for (int alternate = 0; alternate < 2; alternate++) {
+      object.flags = alternate ? kSimBackgroundVoxel_AlternateFacing : 0;
+      SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+      CHECK(MaterialFaces(&model, kSimVoxelMaterial_Wood) == 0);
+      CHECK(MaterialHasSlopedFace(&model, kSimVoxelMaterial_Roof));
+      CHECK(SurfaceFrontAt(&model, 8, 5.6f) > SurfaceFrontAt(&model, 8, 2) + .3f);
+      SimBackgroundVoxelModelContact contacts[kSimBackgroundVoxelModelMaxContacts];
+      int count = SimBackgroundVoxelModel_Contacts(&object, contacts);
+      CHECK(count == 8);
+      for (int part = 0; part < count; part++) {
+        float x = (contacts[part].x0 + contacts[part].x1) * .5f - 8;
+        float y = (contacts[part].y0 + contacts[part].y1) * .5f - 8;
+        CHECK(x*x + y*y < 5.7f*5.7f); /* Contacts follow the wall, not the eave. */
+      }
+    }
+    object.town = 3;
+    object.development_level = 1;
+    for (int alternate = 0; alternate < 2; alternate++) {
+      object.flags = alternate ? kSimBackgroundVoxel_AlternateFacing : 0;
+      SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+      int standing_walls = 0;
+      for (int f = 0; f < model.face_count; f++) {
+        const SimBackgroundVoxelModelFace *face = &model.faces[f];
+        if (face->material != kSimVoxelMaterial_Wall && face->material != kSimVoxelMaterial_WallLight)
+          continue;
+        if (face->points[0].z == 0 && face->points[2].z == 5.7f &&
+            face->points[0].x == face->points[2].x) standing_walls++;
+      }
+      CHECK(standing_walls == 4); /* Two cloth panels on each upright side. */
+    }
+    object = (SimBackgroundVoxelObject){.kind = kSimBackgroundVoxel_House, .town = 4,
+        .development_level = 2, .flags = kSimBackgroundVoxel_AlternateFacing};
+    SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+    int chimney_openings = 0;
+    for (int f = 0; f < model.face_count; f++)
+      if (model.faces[f].material == kSimVoxelMaterial_Dark && model.faces[f].points[0].z > 12) {
+        for (int v = 1; v < 4; v++)
+          CHECK(model.faces[f].points[v].z == model.faces[f].points[0].z);
+        chimney_openings++;
+      }
+    CHECK(chimney_openings == 1); /* The flue survives solid-face cleanup. */
+    object.town = 5;
+    object.development_level = 1;
+    for (int alternate = 0; alternate < 2; alternate++) {
+      object.flags = alternate ? kSimBackgroundVoxel_AlternateFacing : 0;
+      SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+      CHECK(SurfaceHeightAt(&model, 3, 16.1f) < SurfaceHeightAt(&model, 5, 16.1f));
+      CHECK(SurfaceHeightAt(&model, 5, 16.1f) < SurfaceHeightAt(&model, 7, 16.1f));
+      CHECK(fabsf(SurfaceHeightAt(&model, 8.5f, 16.1f) - 5.3f) < .001f);
+    }
+    object = (SimBackgroundVoxelObject){.kind = kSimBackgroundVoxel_Windmill, .town = 1};
+    SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+    float inner_min = 100, inner_max = -100, tip_min = 100, tip_max = -100;
+    CHECK(MaterialFaces(&model, kSimVoxelMaterial_BladeStripe) >= 8);
+    for (int f = 0; f < model.face_count; f++)
+      if (model.faces[f].material == kSimVoxelMaterial_Blade)
+        for (int v = 0; v < 4; v++) {
+          SimBackgroundVoxelModelPoint p = model.faces[f].points[v];
+          if (fabsf(p.x - 18.2f) < .001f) {inner_min = fminf(inner_min,p.z); inner_max = fmaxf(inner_max,p.z);}
+          if (fabsf(p.x - 26) < .001f) {tip_min = fminf(tip_min,p.z); tip_max = fmaxf(tip_max,p.z);}
+        }
+    CHECK(tip_max - tip_min > 3 * (inner_max - inner_min));
+    CHECK((tip_max + tip_min) * .5f > 21.5f); /* Swept rather than straight tips. */
+    object = (SimBackgroundVoxelObject){.kind = kSimBackgroundVoxel_Factory, .town = 1};
+    SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+    int stacks = 0, dormers = 0;
+    for (int f = 0; f < model.face_count; f++) {
+      const SimBackgroundVoxelModelFace *face = &model.faces[f];
+      if (face->material == kSimVoxelMaterial_Roof)
+        CHECK(face->points[0].z != face->points[2].z || face->points[1].z != face->points[3].z);
+      if (face->material != kSimVoxelMaterial_Dark) continue;
+      if (face->points[0].z > 16) {
+        for (int v = 0; v < 4; v++) CHECK(face->points[v].x > 24 && face->points[v].x < 28);
+        stacks++;
+      } else if (face->points[0].z >= 10) dormers++;
+    }
+    CHECK(stacks == 2 && dormers == 3);
+    CHECK(fabsf(SurfaceFrontAt(&model, 20, 6.5f) - 31) < .001f);
+    int walls = 0;
+    for (int f = 0; f < model.face_count; f++) {
+      const SimBackgroundVoxelModelFace *face = &model.faces[f];
+      if (face->points[0].z == 0 && face->points[2].z == 9 && face->outward_winding) walls++;
+    }
+    CHECK(walls == 8); /* Exterior walls must survive occupancy-based culling. */
+    object = (SimBackgroundVoxelObject){.kind = kSimBackgroundVoxel_StoryTree, .town = 6};
+    SimBackgroundVoxelModel_BuildStyled(&object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+    CHECK(SurfaceHeightAt(&model, 16, 23) > 24); /* Central snow bulb fills the old fork gap. */
+  }
+}
+
 int main(void) {
+  CheckAuditRegressions();
+  CheckRecognitionPolish();
+  CheckEnvironmentModels();
+  CheckTreeShadows();
+  CheckReviewFollowup();
   CHECK(SimBackgroundVoxelModel_HeightBound(NULL, kSimBackgroundVoxelDetail_Ultra,
                                             kSimBackgroundVoxelStyle_Varied) == 0.0f);
   const SimBackgroundVoxelObject unknown = {.kind = UINT8_MAX};
@@ -205,7 +910,7 @@ int main(void) {
       Build(kSimBackgroundVoxel_House, kSimBackgroundVoxelDetail_Balanced);
   CHECK(house.min_x >= 0.0f && house.max_x <= 16.0f);
   CHECK(house.min_y >= 0.0f && house.max_y <= 16.0f);
-  CHECK(house.max_z == 14.0f);
+  CHECK(house.max_z == 15.6f); /* Native chimney rises above the gable. */
   CHECK(MaterialFaces(&house, kSimVoxelMaterial_Roof) > 0);
   CHECK(MaterialFaces(&house, kSimVoxelMaterial_Dark) > 0);
 
@@ -223,22 +928,103 @@ int main(void) {
     CHECK(progression_hash[town][1] != progression_hash[town][2]);
     CHECK(progression_hash[town][0] != progression_hash[town][2]);
   }
-  /* Tent and timber reuse in the source game is intentional, not a missing
+  /* Yurt and timber reuse in the source game is intentional, not a missing
    * regional override. */
-  CHECK(progression_hash[0][0] == progression_hash[5][0]);
+  for (int town = 1; town < kSimBackgroundTownCount; town++)
+    CHECK(progression_hash[0][0] == progression_hash[town][0]);
   CHECK(progression_hash[0][1] == progression_hash[1][1]);
   CHECK(progression_hash[0][1] == progression_hash[3][1]);
   CHECK(progression_hash[0][1] == progression_hash[5][1]);
-  /* Kasandora's canonical progression remains readable by silhouette: a low
-   * round yurt, a taller white tent, then a flat-roofed adobe dwelling. */
+  /* Straw huts have rounded reed walls and a thatched roof, while the canvas
+   * family retains its standing pavilion walls and fabric roof. */
   SimBackgroundVoxelModel kasandora_yurt = BuildRegionalHouse(3, 0);
   SimBackgroundVoxelModel kasandora_tent = BuildRegionalHouse(3, 1);
-  SimBackgroundVoxelModel kasandora_adobe = BuildRegionalHouse(3, 2);
-  CHECK(kasandora_yurt.max_z < kasandora_tent.max_z);
-  CHECK(kasandora_tent.max_z < kasandora_adobe.max_z);
-  CHECK(kasandora_tent.max_z == 10.0f);
-  CHECK(TopWidthAt(&kasandora_tent, 3.2f) >= 14.0f);
+  CHECK(kasandora_yurt.box_count == 0);
+  CHECK(kasandora_tent.box_count == 0);
+  CHECK(kasandora_yurt.min_z == 0 && kasandora_tent.min_z == 0);
+  CHECK(MaterialHasSlopedFace(&kasandora_yurt, kSimVoxelMaterial_Wall));
+  CHECK(MaterialHasSlopedFace(&kasandora_tent, kSimVoxelMaterial_Roof));
+  CHECK(MaterialFaces(&kasandora_yurt, kSimVoxelMaterial_Dark) == 1);
+  CHECK(MaterialFaces(&kasandora_tent, kSimVoxelMaterial_Dark) == 1);
+  CHECK(kasandora_yurt.max_z > 14 && kasandora_yurt.max_z <= 14.61f);
+  CHECK(kasandora_tent.max_z >= 11.4f && kasandora_tent.max_z <= 11.5f);
   CHECK(progression_hash[2][1] != progression_hash[0][0]);
+
+  for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++)
+    for (int style = 0; style < kSimBackgroundVoxelStyle_Count; style++)
+      for (int alternate = 0; alternate < 2; alternate++) {
+        uint64_t stage_hash[3][2];
+        for (int family = 0; family < 3; family++)
+          for (int phase = 0; phase < 2; phase++) {
+            SimBackgroundVoxelObject shelter = {
+                .kind = kSimBackgroundVoxel_House, .town = family == 1 ? 3 : 4,
+                .development_level = family, .animation_phase = phase,
+                .flags = kSimBackgroundVoxel_UnderConstruction |
+                    (alternate ? kSimBackgroundVoxel_AlternateFacing : 0),
+            };
+            SimBackgroundVoxelModel stage;
+            SimBackgroundVoxelModel_BuildStyled(&shelter, detail, style, &stage);
+            CHECK(!stage.overflow);
+            CHECK(stage.face_count <= stage.face_budget);
+            CHECK(stage.max_z <= SimBackgroundVoxelRegion_AuthoredHeight(&shelter));
+            CHECK(MaterialHasSlopedFace(&stage, kSimVoxelMaterial_Wood));
+            if (family < 2) {
+              CHECK(stage.box_count == 0);
+              CHECK(MaterialFaces(&stage, kSimVoxelMaterial_Dark) == 0);
+              CHECK((MaterialFaces(&stage, kSimVoxelMaterial_Wall) +
+                     MaterialFaces(&stage, kSimVoxelMaterial_WallLight) +
+                     MaterialFaces(&stage, kSimVoxelMaterial_RoofLight) > 0) == (phase == 1));
+            }
+            stage_hash[family][phase] = ModelHash(&stage);
+          }
+        for (int family = 0; family < 3; family++)
+          CHECK(stage_hash[family][0] != stage_hash[family][1]);
+        for (int phase = 0; phase < 2; phase++) {
+          CHECK(stage_hash[0][phase] != stage_hash[1][phase]);
+          CHECK(stage_hash[1][phase] != stage_hash[2][phase]);
+        }
+        /* Window inlays stay on the actual facade, including the side wing;
+         * there must be no volumetric dark window boxes sticking through it. */
+        for (int town = 3; town <= 6; town++)
+          for (int level = 1; level < 3; level++) {
+            if (town == 5 || (town == 3 && level == 1)) continue;
+            SimBackgroundVoxelObject object = {.kind = kSimBackgroundVoxel_House,
+                .town = town, .development_level = level,
+                .flags = alternate ? kSimBackgroundVoxel_AlternateFacing : 0};
+            SimBackgroundVoxelModel clean;
+            SimBackgroundVoxelModel_BuildStyled(&object, detail, style, &clean);
+            CHECK(!clean.overflow);
+            for (int f = 0; f < clean.face_count; f++) {
+              if (clean.faces[f].material != kSimVoxelMaterial_Dark) continue;
+              if (town == 4 && level == 2 && alternate && clean.faces[f].points[0].z > 12) continue;
+              for (int v = 1; v < 4; v++)
+                CHECK(fabsf(clean.faces[f].points[v].y - clean.faces[f].points[0].y) < .001f);
+            }
+          }
+      }
+
+  /* Alternate-facing sprites are authored variants, not duplicates. Their
+   * crown, canopy or roof-access details remain present at every LOD. */
+  for (int town = 1; town <= 6; town++)
+    for (int level = 0; level < 3; level++)
+      for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+        SimBackgroundVoxelObject object = {.kind = kSimBackgroundVoxel_House,
+            .town = town, .development_level = level};
+        SimBackgroundVoxelModel front, alternate;
+        SimBackgroundVoxelModel_Build(&object, detail, &front);
+        object.flags = kSimBackgroundVoxel_AlternateFacing;
+        SimBackgroundVoxelModel_Build(&object, detail, &alternate);
+        CHECK(!front.overflow && !alternate.overflow);
+        CHECK(ModelHash(&front) != ModelHash(&alternate));
+        if ((town == 3 || town == 6) && level == 2) {
+          CHECK(alternate.max_z > front.max_z);
+          CHECK(alternate.max_z <= SimBackgroundVoxelRegion_AuthoredHeight(&object));
+        }
+        if (town == 3 && level == 1) {
+          SimBackgroundVoxelModelContact contacts[kSimBackgroundVoxelModelMaxContacts];
+          CHECK(SimBackgroundVoxelModel_Contacts(&object, contacts) == 4);
+        }
+      }
 
   /* Aitos' developed stone house is a flat-roofed masonry terrace. Its roof
    * must cover the centre at one level and remain far below a gable peak. */
@@ -320,7 +1106,16 @@ int main(void) {
                                       kSimBackgroundVoxelStyle_Trim, &decorated_cathedral);
   CHECK(!decorated_cathedral.overflow);
   CHECK(MaterialFaces(&decorated_cathedral, kSimVoxelMaterial_Gold) > 0);
-  CHECK(MaterialFaces(&decorated_cathedral, kSimVoxelMaterial_Glass) > 0);
+  /* Relief must be mounted on, and contained by, the main triangular gable. */
+  for (int f = 0; f < decorated_cathedral.face_count; f++) {
+    const SimBackgroundVoxelModelFace *face = &decorated_cathedral.faces[f];
+    if (face->material != kSimVoxelMaterial_Gold) continue;
+    for (int p = 0; p < 4; p++) {
+      SimBackgroundVoxelModelPoint at = face->points[p];
+      CHECK(at.y >= 30.5f && at.y <= 30.55f);
+      CHECK(at.z >= 16.0f && fabsf(at.x - 16.0f) <= (24.0f - at.z) * 1.75f);
+    }
+  }
   CHECK(RegionMaxZ(&decorated_cathedral, 2.0f, 24.0f, 9.0f, 31.5f) <= 16.4f);
   CHECK(RegionMaxZ(&decorated_cathedral, 23.0f, 24.0f, 30.0f, 31.5f) <= 16.4f);
 
@@ -329,20 +1124,12 @@ int main(void) {
   CHECK(windmill.min_x >= 0.0f && windmill.max_x <= 32.0f);
   CHECK(windmill.min_y >= 0.0f && windmill.max_y <= 16.8f);
   CHECK(windmill.max_z <= 32.0f);
-  CHECK(MaterialFaces(&windmill, kSimVoxelMaterial_Blade) == 20);
+  CHECK(MaterialFaces(&windmill, kSimVoxelMaterial_Blade) >= 20 &&
+        MaterialFaces(&windmill, kSimVoxelMaterial_BladeStripe) == 16);
 
-  /* Out where the blades sweep, nothing but the rotor may stand in the rotor's
-   * front face. The hub cap is the one surface meant to cover the blades and
-   * it stays within 3.0 of the hub; between there and the tips, any face at
-   * the blade front can only take pixels away from a blade.
-   *
-   * That is the invariant two earlier rounds of moving the mill's frame back
-   * never tested, because the surface eating the blades was the rotor's OWN
-   * spar, drawn in Wood. At 0.56 model units it measures under one screen
-   * pixel everywhere it is drawn, and a sub-pixel quad claims whole pixels
-   * rather than thinning out -- in the mill's brown it read as the frame
-   * showing through a severed blade. The spar is in the blade's own ramp now,
-   * so it is exempt here by material, exactly as the blade faces are. */
+  /* Only the sails and their attached purple seams occupy the swept rotor
+   * volume. The tower and its trim stay behind it; the central hub may cover
+   * the blade roots. */
   const float rotor_x = 16.0f, rotor_z = 21.0f;
   const float rotor_back = 15.8f; /* kWindmillBladePlane */
   const float hub_cap_radius = 3.0f;
@@ -366,7 +1153,8 @@ int main(void) {
           SimBackgroundVoxelModel_BuildStyled(&spinning, (SimBackgroundVoxelDetail)detail,
                                               (SimBackgroundVoxelStyle)style, &turning);
           for (uint16_t face = 0; face < turning.face_count; face++) {
-            if (turning.faces[face].material == kSimVoxelMaterial_Blade) continue;
+            if (turning.faces[face].material == kSimVoxelMaterial_Blade ||
+                turning.faces[face].material == kSimVoxelMaterial_BladeStripe) continue;
             for (int point = 0; point < 4; point++) {
               const SimBackgroundVoxelModelPoint *at = &turning.faces[face].points[point];
               float dx = at->x - rotor_x, dz = at->z - rotor_z;
@@ -387,10 +1175,10 @@ int main(void) {
   CHECK(factory.min_y >= 0.0f && factory.max_y <= 32.0f);
   CHECK(factory.max_z == 17.0f); /* low body plus sparse chimneys */
   CHECK(MaterialFaces(&factory, kSimVoxelMaterial_Roof) > 0);
-  CHECK(MaterialFaces(&factory, kSimVoxelMaterial_Metal) > 0);
-  CHECK(HorizontalFaceCovers(&factory, 10.0f, 6.0f));   /* upper U arm */
-  CHECK(HorizontalFaceCovers(&factory, 26.0f, 16.0f));  /* right spine */
-  CHECK(HorizontalFaceCovers(&factory, 10.0f, 26.0f));  /* lower U arm */
+  CHECK(MaterialFaces(&factory, kSimVoxelMaterial_WallLight) > 0);
+  CHECK(SurfaceHeightAt(&factory, 10.0f, 6.0f) >= 12.0f);   /* upper U arm */
+  CHECK(SurfaceHeightAt(&factory, 26.0f, 16.0f) >= 12.0f);  /* right spine */
+  CHECK(SurfaceHeightAt(&factory, 10.0f, 26.0f) >= 12.0f);  /* lower U arm */
   CHECK(!HorizontalFaceCovers(&factory, 10.0f, 16.0f)); /* open courtyard */
   CHECK(RegionMaxZ(&factory, 1.0f, 1.0f, 20.0f, 8.5f) ==
         RegionMaxZ(&factory, 1.0f, 23.5f, 20.0f, 31.0f));
@@ -424,7 +1212,8 @@ int main(void) {
   CHECK(MaterialFaces(&trimmed_factory, kSimVoxelMaterial_Paving) == 0);
   CHECK(MaterialFaces(&architectural_factory, kSimVoxelMaterial_Paving) == 0);
   CHECK(architectural_factory.face_count > trimmed_factory.face_count);
-  CHECK(varied_factory.face_count > architectural_factory.face_count);
+  CHECK(varied_factory.face_count == architectural_factory.face_count);
+  CHECK(ModelHash(&varied_factory) != ModelHash(&architectural_factory));
   CHECK(varied_factory.face_count == repeated_varied_factory.face_count);
   CHECK(memcmp(varied_factory.faces, repeated_varied_factory.faces,
                varied_factory.face_count * sizeof(varied_factory.faces[0])) == 0);
@@ -448,7 +1237,7 @@ int main(void) {
   };
   SimBackgroundVoxelModel isolated;
   SimBackgroundVoxelModel_Build(&isolated_object, kSimBackgroundVoxelDetail_Balanced, &isolated);
-  CHECK(!isolated.overflow && isolated.max_z == 15.0f);
+  CHECK(!isolated.overflow && isolated.max_z == 18.0f);
   CHECK(isolated.min_x >= 0.0f && isolated.max_x <= 16.0f);
   CHECK(isolated.min_y >= 0.0f && isolated.max_y <= 16.0f);
 
@@ -460,7 +1249,7 @@ int main(void) {
   };
   SimBackgroundVoxelModel interior;
   SimBackgroundVoxelModel_Build(&interior_object, kSimBackgroundVoxelDetail_Balanced, &interior);
-  CHECK(!interior.overflow && interior.max_z == 15.0f);
+  CHECK(!interior.overflow && interior.max_z == 18.0f);
   /* Adjacency affects extraction/grouping, never the authored crown. Forest
    * interiors must not acquire rectangular connector bars on their sides. */
   CHECK(interior.face_count == isolated.face_count);
@@ -475,8 +1264,10 @@ int main(void) {
   snow_tree_object.town = 6;
   SimBackgroundVoxelModel snow_tree;
   SimBackgroundVoxelModel_Build(&snow_tree_object, kSimBackgroundVoxelDetail_Balanced, &snow_tree);
-  CHECK(!snow_tree.overflow && snow_tree.max_z == 16.0f);
+  CHECK(!snow_tree.overflow && snow_tree.max_z == 19.0f);
   CHECK(ModelHash(&snow_tree) != ModelHash(&isolated));
+
+  CheckPalmDetailContinuity();
 
   SimBackgroundVoxelObject palm_object = {
       .kind = kSimBackgroundVoxel_Palm,
@@ -514,7 +1305,7 @@ int main(void) {
   CHECK(ModelHash(&shrub) != ModelHash(&isolated));
   CHECK(MaterialFaces(&shrub, kSimVoxelMaterial_Leaves) > 0);
 
-  /* Every landmark lives inside its own 2x2 plot: 32x32 town pixels. */
+  /* Landmark bodies occupy a 2x2 plot; measured bounds include roof overhangs. */
   SimBackgroundVoxelModel story_tree =
       Build(kSimBackgroundVoxel_StoryTree, kSimBackgroundVoxelDetail_Balanced);
   CHECK(story_tree.min_x >= 0.0f && story_tree.max_x <= 32.0f);
@@ -526,7 +1317,9 @@ int main(void) {
   SimBackgroundVoxelModel bloodpool_castle =
       Build(kSimBackgroundVoxel_BloodpoolCastle, kSimBackgroundVoxelDetail_Balanced);
   CHECK(bloodpool_castle.min_x >= 0.0f && bloodpool_castle.max_x <= 32.0f);
-  CHECK(bloodpool_castle.min_y >= 0.0f && bloodpool_castle.max_y <= 32.0f);
+  /* Grounded front shafts reach the plot edge; their closed caps overhang it.
+   * MeasureBounds coverage above includes these roof tips in retained scenes. */
+  CHECK(bloodpool_castle.min_y >= 0.0f && bloodpool_castle.max_y <= 33.2f);
   CHECK(bloodpool_castle.max_z <= 32.0f);
   CHECK(MaterialFaces(&bloodpool_castle, kSimVoxelMaterial_Gold) > 0);
 
@@ -643,8 +1436,12 @@ int main(void) {
     CHECK(low.face_count <= balanced.face_count);
     CHECK(balanced.face_count <= high.face_count);
     CHECK(high.face_count <= ultra.face_count);
-    /* Every step of the quality setting must buy something, or the level is a
-     * label the player can select for no effect. */
+    /* The sparse native rocks already fit Low in full. Higher settings need
+     * not invent extra stones or subdivide flat faces for a larger count. */
+    if (kind == kSimBackgroundVoxel_Boulder || kind == kSimBackgroundVoxel_Rocks) {
+      CHECK(SameBounds(&low, &ultra));
+      continue;
+    }
     CHECK(low.face_count < balanced.face_count);
     CHECK(balanced.face_count < high.face_count);
     CHECK(high.face_count < ultra.face_count);
@@ -670,8 +1467,10 @@ int main(void) {
           SimBackgroundVoxelModel_BuildStyled(&object, (SimBackgroundVoxelDetail)detail,
                                               (SimBackgroundVoxelStyle)style, &model);
           CHECK(!model.overflow);
-          CHECK(model.face_count <=
-                SimBackgroundVoxelModel_FaceBudget((SimBackgroundVoxelDetail)detail));
+          CHECK(model.face_budget ==
+                SimBackgroundVoxelModel_ObjectFaceBudget(
+                    &object, (SimBackgroundVoxelDetail)detail));
+          CHECK(model.authored_face_count <= model.face_budget);
           CHECK(SimBackgroundVoxelModel_HeightBound(&object, (SimBackgroundVoxelDetail)detail,
                                                     (SimBackgroundVoxelStyle)style) >= model.max_z);
           CheckMeasuredBounds(&object, (SimBackgroundVoxelDetail)detail,

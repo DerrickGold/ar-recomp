@@ -57,6 +57,8 @@ typedef struct SimBackgroundVoxelScene {
 void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
                                   bool wind_stops_all,
                                   SimBackgroundVoxelScene *out);
+void SimBackgroundVoxels_ClassifyWithArtwork(uint8_t town, const uint8_t *wram,
+    bool wind_stops_all, uint8_t artwork_flags, SimBackgroundVoxelScene *out);
 
 void SimBackgroundVoxels_Reset(void);
 /* Publishes scene topology and pixels independently. `canvas_layout_serial`
@@ -86,7 +88,7 @@ typedef void (*SimBackgroundRowDispatch)(void *context, size_t count,
 void SimBackgroundVoxels_BuildWithRows(uint8_t town, const uint8_t *wram,
     const uint32_t *canvas_pixels, const uint8_t *canvas_source_opacity,
     uint32_t canvas_serial, uint32_t canvas_layout_serial, bool wind_stops_all,
-    SimBackgroundRowDispatch dispatch, void *context);
+    uint8_t artwork_flags, SimBackgroundRowDispatch dispatch, void *context);
 
 uint32_t SimBackgroundVoxels_Serial(void);
 uint32_t SimBackgroundVoxels_SceneSerial(void);

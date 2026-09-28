@@ -20,7 +20,7 @@ typedef enum SimBackgroundVoxelHouseStyle {
   kSimBackgroundHouseStyle_Timber,
   kSimBackgroundHouseStyle_Fillmore,
   kSimBackgroundHouseStyle_Bloodpool,
-  kSimBackgroundHouseStyle_Yurt,
+  kSimBackgroundHouseStyle_Yurt, /* Legacy identifier for the native straw hut. */
   kSimBackgroundHouseStyle_WhiteTent,
   kSimBackgroundHouseStyle_Adobe,
   kSimBackgroundHouseStyle_Stone,
@@ -56,7 +56,14 @@ typedef enum SimBackgroundVoxelPaletteStyle {
 
 SimBackgroundVoxelHouseStyle SimBackgroundVoxelRegion_HouseStyle(
     uint8_t town, uint8_t development_level);
+/* Prefer the displayed native family; the town/tier table is a fallback for
+ * synthetic model previews that do not supply a resolved structure frame. */
+SimBackgroundVoxelHouseStyle SimBackgroundVoxelRegion_ObjectHouseStyle(
+    const SimBackgroundVoxelObject *object);
 SimBackgroundVoxelTreeStyle SimBackgroundVoxelRegion_TreeStyle(uint8_t town);
+/* Shared native rock identities for live towns and retained world towns.
+ * Returns KindCount for terrain that has no rock model. */
+int SimBackgroundVoxelRegion_RockKind(uint8_t terrain_metatile);
 SimBackgroundVoxelPaletteStyle SimBackgroundVoxelRegion_PaletteStyle(
     const SimBackgroundVoxelObject *object);
 

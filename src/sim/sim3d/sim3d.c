@@ -1495,6 +1495,7 @@ void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
                               SimTownCanvas_Serial(),
                               SimTownCanvas_TilemapSerial(),
                               frame->background_voxel_wind_hold != 0,
+                              frame->background_voxel_artwork_flags,
                               dispatch, context);
   } else if (SimBackgroundVoxels_Serial()) {
     SimBackgroundVoxels_Reset();

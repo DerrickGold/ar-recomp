@@ -39,8 +39,71 @@ int main(void) {
   CHECK(SimBackgroundVoxelSurface_OutwardNormal(&top, &normal));
   CHECK(normal.x == 0.0f && normal.y == 0.0f && normal.z == 1.0f);
 
+  /* Steep casing uses roof winding, not the inward vertical-wall convention.
+   * Its upward normal must still receive overhead light (nz is below 0.5). */
+  SimBackgroundVoxelModelFace slope = {
+    .points = {{1, 1, 0}, {-1, 1, 0}, {0, 0, 2}, {0, 0, 2}},
+    .material = kSimVoxelMaterial_WallLight, .brightness = 255,
+    .occlusion = {255, 255, 255, 255},
+  };
+  CHECK(SimBackgroundVoxelSurface_OutwardNormal(&slope, &normal));
+  CHECK(normal.y > 0.0f && normal.z > 0.0f && normal.z < 0.5f);
+  CHECK(SimBackgroundVoxelLighting_FaceBrightness(
+      &slope, kSimBackgroundVoxelShading_MaterialAware, 0, 90) >
+        SimBackgroundVoxelLighting_FaceBrightness(
+      &wall, kSimBackgroundVoxelShading_MaterialAware, 0, 90));
+
   SimBackgroundVoxelModelFace degenerate = {0};
   CHECK(!SimBackgroundVoxelSurface_OutwardNormal(&degenerate, &normal));
+
+  /* Real palm surfaces retain downward normals at every LOD. Previously the
+   * roof convention flipped every underside up and lit both sides from above.
+   * Keep the steep legacy roof regression above alongside this opt-in path. */
+  SimBackgroundVoxelObject palm_object = {
+    .kind = kSimBackgroundVoxel_Palm, .town = 5, .cell_x = 4, .cell_y = 7,
+  };
+  for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+    SimBackgroundVoxelModel palm;
+    SimBackgroundVoxelModel_Build(&palm_object, detail, &palm);
+    int undersides = 0;
+    for (int i = 0; i < palm.face_count; i++) {
+      const SimBackgroundVoxelModelFace *face = &palm.faces[i];
+      if (face->material != kSimVoxelMaterial_LeavesDark) continue;
+      undersides++;
+      CHECK(face->outward_winding);
+      CHECK(SimBackgroundVoxelSurface_OutwardNormal(face, &normal));
+      CHECK(normal.z < 0.0f);
+      CHECK(SimBackgroundVoxelLighting_FaceBrightness(
+          face, kSimBackgroundVoxelShading_MaterialAware, 0, 90) < 200);
+      /* Reversing the light vertically must now brighten that underside. */
+      SimBackgroundVoxelLightDirection below = {0, 0, -1};
+      CHECK(SimBackgroundVoxelLighting_FaceBrightnessWithDirection(
+          face, kSimBackgroundVoxelShading_MaterialAware, &below) >
+          SimBackgroundVoxelLighting_FaceBrightness(
+          face, kSimBackgroundVoxelShading_MaterialAware, 0, 90));
+    }
+    CHECK(undersides >= 8);
+  }
+
+  /* A closed bush has a downward lower hemisphere, not an upward roof.
+   * Test geometric orientation as well as its overhead lighting response. */
+  for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+    SimBackgroundVoxelObject object = {.kind = kSimBackgroundVoxel_Shrub, .town = 1};
+    SimBackgroundVoxelModel shrub;
+    SimBackgroundVoxelModel_Build(&object, detail, &shrub);
+    int lower = 0;
+    for (int i = 0; i < shrub.face_count; i++) {
+      const SimBackgroundVoxelModelFace *face = &shrub.faces[i];
+      if (face->material == kSimVoxelMaterial_Trunk) continue;
+      CHECK(face->outward_winding);
+      CHECK(SimBackgroundVoxelSurface_OutwardNormal(face, &normal));
+      if (normal.z >= -.05f) continue;
+      lower++;
+      CHECK(SimBackgroundVoxelLighting_FaceBrightness(
+          face, kSimBackgroundVoxelShading_MaterialAware, 0, 90) < 200);
+    }
+    CHECK(lower >= 8);
+  }
 
   uint8_t basic = SimBackgroundVoxelLighting_FaceBrightness(
       &wall, kSimBackgroundVoxelShading_Basic, 0, 45);

@@ -21,8 +21,10 @@ bool SimBackgroundVoxelSurface_OutwardNormal(
   nz /= length;
 
   /* AddBox authors side faces from the inside winding and top faces from the
-   * outside winding. Sloped roofs follow the top-face convention. */
-  if (fabsf(nz) < 0.5f || nz < 0.0f) {
+   * outside winding. Sloped roofs follow the top-face convention, even
+   * when steep: treating every nz < 0.5 slope as a wall inverted the
+   * pyramid casing and erased its mortar contrast under overhead light. */
+  if (!face->outward_winding && (fabsf(nz) < 0.0001f || nz < 0.0f)) {
     nx = -nx;
     ny = -ny;
     nz = -nz;

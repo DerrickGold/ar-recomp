@@ -63,7 +63,15 @@ int main(void) {
   CHECK(object.kind == kSimBackgroundVoxel_Pyramid);
   CHECK(object.cell_x == 20 && object.cell_y == 4);
 
-  /* Towns with no reserved plot classify nothing at all. */
+  memset(wram, 0, sizeof(wram));
+  InstallPlot(wram, 5, 0xEF, 6, 20);
+  CHECK(SimBackgroundVoxelLandmarks_Classify(5, wram, &object, 1) == 1);
+  CHECK(object.kind == kSimBackgroundVoxel_MarahnaTemple);
+  CHECK(object.cell_x == 6 && object.cell_y == 20);
+  CHECK(object.source_cells_w == 2 && object.source_cells_h == 2);
+  CHECK(object.record_slot == kSimBackgroundVoxelNoRecordSlot);
+
+  /* Empty towns classify nothing. */
   memset(wram, 0, sizeof(wram));
   CHECK(SimBackgroundVoxelLandmarks_Classify(1, wram, &object, 1) == 0);
   CHECK(SimBackgroundVoxelLandmarks_Classify(4, wram, &object, 1) == 0);

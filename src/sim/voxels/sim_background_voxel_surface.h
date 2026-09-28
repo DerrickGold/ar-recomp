@@ -16,7 +16,8 @@ typedef struct SimBackgroundVoxelSurfaceNormal {
 
 /* Returns the authored outward unit normal for an opaque model face.
  *
- * The model builders deliberately use the original AddBox convention: side
+ * Faces marked outward_winding use their winding directly, including negative
+ * Z normals on foliage undersides. Older builders use the AddBox convention: side
  * faces are wound inward while top and sloped roof faces are wound outward.
  * Keeping that correction here gives lighting and future surface analysis
  * one authoritative interpretation of the geometry. */

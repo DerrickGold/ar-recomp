@@ -54,10 +54,16 @@ sections=(
   "Vegetation"
   "Bridges"
   "Construction"
+  "Town environment"
+  "Regional variants"
 )
 
 for section in "${sections[@]}"; do
   section_cards=()
+  section_manifest="$render_dir/manifest.tsv"
+  if [[ "$section" == "Regional variants" ]]; then
+    section_manifest="$render_dir/regional-manifest.tsv"
+  fi
   while IFS=$'\t' read -r row_section label file; do
     if [[ "$row_section" != "$section" ]]; then
       continue
@@ -78,7 +84,7 @@ for section in "${sections[@]}"; do
     "$magick_bin" "$panel_path" "$label_path" -append \
       -bordercolor '#30383f' -border 2 "$card_path"
     section_cards+=("$card_path")
-  done < <(tail -n +2 "$render_dir/manifest.tsv")
+  done < <(tail -n +2 "$section_manifest")
 
   section_index=$((section_index + 1))
   grid_path="$section_dir/grid-$(printf '%02d' "$section_index").png"

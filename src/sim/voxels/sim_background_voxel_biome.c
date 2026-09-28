@@ -29,6 +29,7 @@ static bool MaterialCollectsSnow(SimBackgroundVoxelMaterial material) {
     case kSimVoxelMaterial_Wood:
     case kSimVoxelMaterial_Metal:
     case kSimVoxelMaterial_Blade:
+    case kSimVoxelMaterial_BladeStripe:
     case kSimVoxelMaterial_Trunk:
     case kSimVoxelMaterial_Paving:
     case kSimVoxelMaterial_Foundation:
@@ -47,8 +48,9 @@ SimBackgroundVoxelMaterial SimBackgroundVoxelBiome_SurfaceMaterial(
     SimBackgroundVoxelDetail detail,
     SimBackgroundVoxelMaterial material,
     const SimBackgroundVoxelModelFace *face) {
+  bool roof = material == kSimVoxelMaterial_Roof || material == kSimVoxelMaterial_RoofLight;
   if (biome != kSimBackgroundVoxelBiome_Snow ||
-      detail < kSimBackgroundVoxelDetail_High || !face ||
+      (!roof && detail < kSimBackgroundVoxelDetail_High) || !face ||
       !MaterialCollectsSnow(material))
     return material;
   const SimBackgroundVoxelModelPoint *a = &face->points[0];
@@ -59,7 +61,13 @@ SimBackgroundVoxelMaterial SimBackgroundVoxelBiome_SurfaceMaterial(
   float nx = uy * vz - uz * vy;
   float ny = uz * vx - ux * vz;
   float nz = ux * vy - uy * vx;
+  /* Closed foliage uses actual outward winding: snow settles above it,
+   * never on its downward-facing underside. Dark needle pockets stay clear. */
+  if (face->outward_winding && (nz <= 0.0f || material == kSimVoxelMaterial_LeavesDark))
+    return material;
+  /* Roof pitch is architectural, not a quality option. The former .52
+   * cutoff left the mill's steep front roof bare while its sides had snow. */
   float length = sqrtf(nx * nx + ny * ny + nz * nz);
-  if (length < 0.0001f || fabsf(nz) / length < 0.52f) return material;
+  if (length < 0.0001f || fabsf(nz) / length < (roof ? 0.01f : 0.52f)) return material;
   return kSimVoxelMaterial_Snow;
 }

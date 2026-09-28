@@ -128,9 +128,8 @@ static SimBackgroundBridgeAxis ReplacementBridgeAxis(
   return kSimBackgroundBridgeAxis_None;
 }
 
-/* The 2x2 sanctuary block is a contiguous metatile run in every town. Five
- * towns share the $C2 family; Marahna's $C0 family is the same plot drawn as
- * a tropical temple, so it is a distinct model rather than a missing one. */
+/* All six native sanctuaries use $C2/$C3/$CA/$CB. Marahna's separate $EF
+ * temple plot belongs to the landmark classifier, not this terrain family. */
 typedef struct SanctuarySignature {
   uint8_t top_left;
   uint8_t kind;
@@ -138,7 +137,6 @@ typedef struct SanctuarySignature {
 
 static const SanctuarySignature kSanctuaries[] = {
   {0xC2, kSimBackgroundVoxel_Cathedral},
-  {0xC0, kSimBackgroundVoxel_MarahnaTemple},
 };
 
 static struct {
@@ -149,6 +147,7 @@ static struct {
   uint32_t canvas_serial;
   uint32_t canvas_layout_serial;
   bool wind_stops_all;
+  uint8_t artwork_flags;
   bool have_scene_inputs;
   SimBackgroundVoxelScene scene;
   uint32_t atlas[kCanvasPixelCount];
@@ -526,6 +525,11 @@ static bool FindBridgeWaterSource(
 void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
                                   bool wind_stops_all,
                                   SimBackgroundVoxelScene *out) {
+  SimBackgroundVoxels_ClassifyWithArtwork(town, wram, wind_stops_all, 0, out);
+}
+
+void SimBackgroundVoxels_ClassifyWithArtwork(uint8_t town, const uint8_t *wram,
+    bool wind_stops_all, uint8_t artwork_flags, SimBackgroundVoxelScene *out) {
   if (!out) return;
   memset(out, 0, sizeof(*out));
   if (!town || town > kSimBackgroundTownCount || !wram) return;
@@ -656,6 +660,8 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
       sizeof(landmarks) / sizeof(landmarks[0]));
   for (size_t at = 0; at < landmark_count; at++) {
     SimBackgroundVoxelObject *landmark = &landmarks[at];
+    if (landmark->kind == kSimBackgroundVoxel_Pyramid)
+      landmark->flags |= artwork_flags & kSimBackgroundVoxel_PyramidEye;
     MarkOccupied(occupied, landmark->cell_x, landmark->cell_y,
                  landmark->source_cells_w, landmark->source_cells_h);
     if (!AppendObject(out, *landmark)) return;
@@ -755,8 +761,20 @@ void SimBackgroundVoxels_Classify(uint8_t town, const uint8_t *wram,
     for (int x = 0; x < kSimBackgroundTownCells; x++) {
       size_t cell = CellIndex(x, y);
       if (occupied[cell]) continue;
-      FoliageClass foliage =
-          FoliageClassForTile(DisplayedCellMetatile(town, wram, x, y));
+      uint8_t tile = DisplayedCellMetatile(town, wram, x, y);
+      int rock_kind = SimBackgroundVoxelRegion_RockKind(tile);
+      if (rock_kind != kSimBackgroundVoxelKindCount) {
+        if (!AppendObject(out, (SimBackgroundVoxelObject){
+              .town = town, .kind = (uint8_t)rock_kind,
+              .cell_x = (uint8_t)x, .cell_y = (uint8_t)y,
+              .source_cells_w = 1, .source_cells_h = 1,
+              .footprint_cells_w = 1, .footprint_cells_d = 1,
+              .record_slot = kSimBackgroundVoxelNoRecordSlot,
+              .visual_metatile = tile,
+            })) return;
+        continue;
+      }
+      FoliageClass foliage = FoliageClassForTile(tile);
       if (foliage == kFoliage_Bush || foliage == kFoliage_Palm) {
         /* Clearable brush entries are their own single-cell objects. Keeping
          * them out of the forest flood fill stops one bush beside a wood from
@@ -1507,11 +1525,12 @@ static void SaveStructureSceneInputs(uint8_t town, const uint8_t *wram) {
 
 static bool SceneInputsChanged(uint8_t town, const uint8_t *wram,
                                uint32_t canvas_layout_serial,
-                               bool wind_stops_all) {
+                               bool wind_stops_all, uint8_t artwork_flags) {
   return !g_background.have_scene_inputs ||
       g_background.scene.town != town ||
       g_background.canvas_layout_serial != canvas_layout_serial ||
       g_background.wind_stops_all != wind_stops_all ||
+      g_background.artwork_flags != artwork_flags ||
       memcmp(g_background.cell_map, TownCellMapSource(town, wram),
              sizeof(g_background.cell_map)) != 0 ||
       StructureSceneInputsChanged(town, wram) ||
@@ -1525,7 +1544,7 @@ static bool SceneInputsChanged(uint8_t town, const uint8_t *wram,
 
 static void SaveSceneInputs(uint8_t town, const uint8_t *wram,
                             uint32_t canvas_layout_serial,
-                            bool wind_stops_all) {
+                            bool wind_stops_all, uint8_t artwork_flags) {
   memcpy(g_background.cell_map, TownCellMapSource(town, wram),
          sizeof(g_background.cell_map));
   SaveStructureSceneInputs(town, wram);
@@ -1537,6 +1556,7 @@ static void SaveSceneInputs(uint8_t town, const uint8_t *wram,
          sizeof(g_background.structure_definitions));
   g_background.canvas_layout_serial = canvas_layout_serial;
   g_background.wind_stops_all = wind_stops_all;
+  g_background.artwork_flags = artwork_flags;
   g_background.have_scene_inputs = true;
 }
 
@@ -1555,19 +1575,19 @@ void SimBackgroundVoxels_Build(uint8_t town, const uint8_t *wram,
                                bool wind_stops_all) {
   SimBackgroundVoxels_BuildWithRows(town, wram, canvas_pixels,
       canvas_source_opacity, canvas_serial, canvas_layout_serial,
-      wind_stops_all, NULL, NULL);
+      wind_stops_all, 0, NULL, NULL);
 }
 
 void SimBackgroundVoxels_BuildWithRows(uint8_t town, const uint8_t *wram,
     const uint32_t *canvas_pixels, const uint8_t *canvas_source_opacity,
     uint32_t canvas_serial, uint32_t canvas_layout_serial, bool wind_stops_all,
-    SimBackgroundRowDispatch dispatch, void *context) {
+    uint8_t artwork_flags, SimBackgroundRowDispatch dispatch, void *context) {
   if (!town || town > kSimBackgroundTownCount || !wram || !canvas_pixels ||
       !canvas_serial || !canvas_layout_serial)
     return;
   s_build_stats.build_calls++;
   bool scene_changed = SceneInputsChanged(
-      town, wram, canvas_layout_serial, wind_stops_all);
+      town, wram, canvas_layout_serial, wind_stops_all, artwork_flags);
   bool pixels_changed = g_background.canvas_serial != canvas_serial;
   if (!scene_changed && !pixels_changed) {
     LogStructures(town, wram, &g_background.scene);
@@ -1575,12 +1595,12 @@ void SimBackgroundVoxels_BuildWithRows(uint8_t town, const uint8_t *wram,
   }
 
   if (scene_changed) {
-    SimBackgroundVoxels_Classify(town, wram, wind_stops_all,
-                                 &g_background.scene);
+    SimBackgroundVoxels_ClassifyWithArtwork(town, wram, wind_stops_all,
+                                           artwork_flags, &g_background.scene);
     BuildEnhancedReplacementPlan(wram, &g_background.scene);
     BuildMountainBaselines(&g_background.scene);
     BuildStructureHeights(&g_background.scene);
-    SaveSceneInputs(town, wram, canvas_layout_serial, wind_stops_all);
+    SaveSceneInputs(town, wram, canvas_layout_serial, wind_stops_all, artwork_flags);
     g_background.scene_serial = NextSerial();
     s_build_stats.scene_rebuilds++;
   }

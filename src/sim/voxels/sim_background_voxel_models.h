@@ -14,12 +14,12 @@
 
 enum {
   /* Ultra's absolute ceiling. Each lower quality level has a smaller enforced
-   * budget returned by SimBackgroundVoxelModel_FaceBudget. */
+   * budget returned by SimBackgroundVoxelModel_ObjectFaceBudget. */
   kSimBackgroundVoxelModelMaxFaces = 384,
-  /* Ultra trees use a 9x9x9 occupancy volume. Most cells are empty, but the
-   * compiler keeps enough solid records to make the limit an invariant rather
-   * than a shape-dependent failure. Boxes are build metadata, not GPU faces. */
-  kSimBackgroundVoxelModelMaxBoxes = 320,
+  /* Surface-authored crowns no longer need hundreds of occupancy boxes.
+   * The complete regional/style sweep peaks below 50; retain ample headroom
+   * for new architecture. These are temporary build metadata, not GPU data. */
+  kSimBackgroundVoxelModelMaxBoxes = 96,
 };
 
 typedef enum SimBackgroundVoxelMaterial {
@@ -42,6 +42,7 @@ typedef enum SimBackgroundVoxelMaterial {
   kSimVoxelMaterial_Glass,
   kSimVoxelMaterial_Snow,
   kSimVoxelMaterial_Contact,
+  kSimVoxelMaterial_BladeStripe,
   kSimVoxelMaterial_Count,
 } SimBackgroundVoxelMaterial;
 
@@ -58,7 +59,25 @@ typedef struct SimBackgroundVoxelModelFace {
   /* Geometry-derived concave-corner visibility. 255 means fully exposed;
    * lighting may combine this with its inexpensive height/contact gradient. */
   uint8_t occlusion[4];
+  /* New continuous surfaces use outward winding, including undersides.
+   * False preserves the older box/roof winding convention. Fits existing
+   * struct padding, so cached faces do not grow. */
+  bool outward_winding;
 } SimBackgroundVoxelModelFace;
+
+/* The conifer's light-projected canopy outline, in authored model XY.
+ * Cast slopes include the presentation lean and light shear per unit of
+ * authored height. The caller scales/translates the returned ground polygon.
+ * Twenty-four samples per crown ring keep this independent of render LOD. */
+enum { kSimBackgroundVoxelTreeShadowMaxPoints = 64 };
+/* Equal keys share a crown profile; callers can reuse hulls at the same shear. */
+uint16_t SimBackgroundVoxelModel_TreeShadowVariant(const SimBackgroundVoxelObject *object);
+int SimBackgroundVoxelModel_TreeShadowHull(
+    const SimBackgroundVoxelObject *object, float cast_x, float cast_y,
+    SimBackgroundVoxelModelPoint out[kSimBackgroundVoxelTreeShadowMaxPoints]);
+
+/* Grounded rocks and bridges retain surface shading but cast no ground mask. */
+bool SimBackgroundVoxelModel_CastsShadow(const SimBackgroundVoxelObject *object);
 
 typedef struct SimBackgroundVoxelModelBox {
   float x0, y0, z0;
@@ -84,8 +103,24 @@ typedef struct SimBackgroundVoxelModelBounds {
   float max_x, max_y, max_z;
 } SimBackgroundVoxelModelBounds;
 
+/* Shared ground support for model rendering and the audit sheet. Separate
+ * masses keep courtyard ground exposed, including on sloping terrain.
+ * The caller supplies room for kSimBackgroundVoxelModelMaxContacts records. */
+enum { kSimBackgroundVoxelModelMaxContacts = 12 };
+typedef struct SimBackgroundVoxelModelContact {
+  float x0, y0, x1, y1;
+} SimBackgroundVoxelModelContact;
+
+int SimBackgroundVoxelModel_Contacts(const SimBackgroundVoxelObject *object,
+                                     SimBackgroundVoxelModelContact *out);
+
 uint16_t SimBackgroundVoxelModel_FaceBudget(
     SimBackgroundVoxelDetail detail);
+
+/* The two multi-part town landmarks get an object-specific detail allowance;
+ * repeated buildings keep FaceBudget's limits. Ultra's ceiling is unchanged. */
+uint16_t SimBackgroundVoxelModel_ObjectFaceBudget(
+    const SimBackgroundVoxelObject *object, SimBackgroundVoxelDetail detail);
 
 /* Builds an object-local model in authentic town pixels. X and Y cover the
  * ground footprint; Z is height. This module deliberately knows nothing about

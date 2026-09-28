@@ -147,9 +147,10 @@ SimBackgroundModelLean SimBackgroundVoxelProject_CameraFacingLean(
 static SimBackgroundModelLean CameraFacingModelLean(
     const SimBackgroundVoxelRenderParams *params,
     SimBackgroundVoxelKind kind) {
-  /* The approved bridge is an actual horizontal span, not facade art. Any
-   * billboard correction would curl its deck as the camera moved. */
-  if (kind == kSimBackgroundVoxel_Bridge)
+  /* Bridges and grounded rocks retain their world-space footprint. Camera
+   * facing corrections would shear their surfaces as the view moves. */
+  if (kind == kSimBackgroundVoxel_Bridge || kind == kSimBackgroundVoxel_Boulder ||
+      kind == kSimBackgroundVoxel_Rocks)
     return (SimBackgroundModelLean){0.0f, 0.0f};
   float billboard_blend = 0.35f;
   if (params->facing == kSimBackgroundVoxelFacing_PerModel) {

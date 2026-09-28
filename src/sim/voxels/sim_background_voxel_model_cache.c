@@ -6,11 +6,13 @@
 
 #include "deterministic_hash.h"
 #include "sim/voxels/sim_background_voxel_lighting.h"
+#include "sim/voxels/sim_background_voxel_region.h"
 
 typedef struct SimBackgroundVoxelModelCacheKey {
   uint16_t group;
   uint8_t kind, flags;
   uint8_t town, development_level;
+  uint8_t house_style, rock_metatile;
   uint8_t cell_x, cell_y;
   uint8_t tree_edges, record_slot;
   uint8_t source_cells_w, source_cells_h;
@@ -66,16 +68,24 @@ static SimBackgroundVoxelModelCacheKey MakeKey(
     const SimBackgroundVoxelObject *object,
     SimBackgroundVoxelDetail detail,
     SimBackgroundVoxelStyle style) {
+  /* Basic house meshes are independent of placement. Keep palette/shading
+   * inputs and native family in the key while sharing identical geometry. */
+  bool shared_house = object->kind == kSimBackgroundVoxel_House &&
+      style == kSimBackgroundVoxelStyle_Basic;
   return (SimBackgroundVoxelModelCacheKey){
-    .group = object->group,
+    .group = shared_house ? 0 : object->group,
     .kind = object->kind,
     .flags = object->flags,
     .town = object->town,
     .development_level = object->development_level,
-    .cell_x = object->cell_x,
-    .cell_y = object->cell_y,
+    .rock_metatile = object->kind == kSimBackgroundVoxel_Rocks
+        ? object->visual_metatile : 0,
+    .house_style = object->kind == kSimBackgroundVoxel_House
+        ? (uint8_t)SimBackgroundVoxelRegion_ObjectHouseStyle(object) : 0,
+    .cell_x = shared_house ? 0 : object->cell_x,
+    .cell_y = shared_house ? 0 : object->cell_y,
     .tree_edges = object->tree_edges,
-    .record_slot = object->record_slot,
+    .record_slot = shared_house ? 0 : object->record_slot,
     .source_cells_w = object->source_cells_w,
     .source_cells_h = object->source_cells_h,
     .bridge_axis = object->bridge_axis,
@@ -96,6 +106,8 @@ static bool KeyEquals(const SimBackgroundVoxelModelCacheKey *left,
       left->flags == right->flags && left->cell_x == right->cell_x &&
       left->town == right->town &&
       left->development_level == right->development_level &&
+      left->house_style == right->house_style &&
+      left->rock_metatile == right->rock_metatile &&
       left->cell_y == right->cell_y && left->tree_edges == right->tree_edges &&
       left->record_slot == right->record_slot && left->detail == right->detail &&
       left->source_cells_w == right->source_cells_w &&
@@ -164,6 +176,8 @@ static uint32_t HashKey(const SimBackgroundVoxelModelCacheKey *key) {
   hash = DeterministicHash_Fnv1a32Byte(hash, key->flags);
   hash = DeterministicHash_Fnv1a32Byte(hash, key->town);
   hash = DeterministicHash_Fnv1a32Byte(hash, key->development_level);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->house_style);
+  hash = DeterministicHash_Fnv1a32Byte(hash, key->rock_metatile);
   hash = DeterministicHash_Fnv1a32Byte(hash, key->cell_x);
   hash = DeterministicHash_Fnv1a32Byte(hash, key->cell_y);
   hash = DeterministicHash_Fnv1a32Byte(hash, key->tree_edges);

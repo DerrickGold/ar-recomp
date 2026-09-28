@@ -2373,6 +2373,156 @@ static void TestFacingTownScene(SDL_Renderer *renderer) {
        "geometry");
 }
 
+/* Exercise the public shadow pass, including its batch flush, in a decoded
+ * town. A model-only thumbnail never visits this path. */
+static void BuildVoxelShadowScene(bool rocks, bool dense) {
+  static uint8_t wram[kWramBytes];
+  static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
+  memset(wram, 0, sizeof(wram));
+  for (size_t i = 0; i < sizeof(pixels) / sizeof(pixels[0]); i++) pixels[i] = 0xff708020;
+  static const uint8_t rock_tiles[] = {0x61, 0x62, 0x63, 0x69, 0x6a, 0x6b};
+  for (int y = 0; y < 32; y++)
+    for (int x = 0; x < 32; x++) {
+      int quadrant = (y >= 16 ? 2 : 0) + (x >= 16 ? 1 : 0);
+      size_t cell = 0x12000 + quadrant * 0x100 + (y & 15) * 16 + (x & 15);
+      if (rocks && y == 4 && x >= 2 && x < 8) wram[cell] = rock_tiles[x - 2];
+      else if (!rocks && (dense || (x == 4 && y == 4))) wram[cell] = 0x0b;
+    }
+  SimBackgroundVoxelRenderer_Reset(&g_render_device);
+  SimBackgroundVoxels_Reset();
+  SimBackgroundVoxels_Build(1, wram, pixels, NULL, 1, 1, true);
+  CHECK(SimBackgroundVoxels_Scene()->object_count == (rocks ? 6 : dense ? 1024 : 1));
+  SimBackgroundVoxelRenderer_Upload(&g_render_device);
+  CHECK(SimBackgroundVoxelRenderer_Ready(SimBackgroundVoxels_Serial()));
+}
+
+static SDL_Surface *RenderVoxelShadowProbe(SDL_Renderer *renderer,
+    const SimBackgroundVoxelRenderParams *params, float light_x, float light_y,
+    bool town_mask, const char *name) {
+  CHECK(ArRenderDevice_Clear(&g_render_device, (ArRenderColorF){1, 1, 1, 1}));
+  if (town_mask)
+    SimBackgroundVoxelRenderer_DrawTownShadowMask(&g_render_device, params, params, light_x, light_y);
+  else
+    SimBackgroundVoxelRenderer_DrawShadowMask(&g_render_device, params, light_x, light_y);
+  SDL_Surface *readback = SDL_RenderReadPixels(renderer, NULL);
+  CHECK(readback);
+  SDL_Surface *surface = SDL_ConvertSurface(readback, SDL_PIXELFORMAT_ARGB8888);
+  SDL_DestroySurface(readback);
+  CHECK(surface);
+  CHECK(SDL_RenderPresent(renderer));
+  SaveImage(surface, name);
+  return surface;
+}
+
+static void RenderVoxelShadowPreview(SDL_Renderer *renderer,
+    SimBackgroundVoxelRenderParams params, bool rocks, float light_x, float light_y,
+    const char *name) {
+  if (!output_directory) return;
+  const Scene3DCamera camera = {.tilt_x = -.45f, .tilt_y = .15f,
+      .distance = Scene3D_AutoFitDistance(.4f), .fov_y = .4f};
+  float matrix[16];
+  Scene3D_BuildViewProjection(&camera, kWidth, kHeight, matrix);
+  params.matrix = matrix;
+  params.viewport = (ArRenderRectI){0, 0, kWidth, kHeight};
+  params.source = rocks ? (ArRenderRectI){24, 48, 112, 48} : (ArRenderRectI){48, 48, 48, 48};
+  params.detail = kSimBackgroundVoxelDetail_Ultra;
+  params.light_elevation_deg = (uint8_t)lroundf(atan2f(1, hypotf(light_x, light_y)) * 180 / 3.14159265f);
+  params.light_azimuth_deg = (uint16_t)((int)lroundf(atan2f(light_y, light_x) * 180 / 3.14159265f) + 360) % 360;
+  ArRenderTexture mask;
+  const ArRenderTextureDesc desc = {.width = kWidth, .height = kHeight,
+      .format = kArRenderPixelFormat_Argb8888, .usage = kArRenderTextureUsage_Target,
+      .filter = kArRenderFilter_Linear, .blend = kArRenderBlendMode_Alpha};
+  CHECK(ArRenderDevice_CreateTexture(&g_render_device, &desc, &mask));
+  ArRenderTargetState previous;
+  CHECK(ArRenderDevice_BeginTarget(&g_render_device, mask, &previous) == kArRenderTargetBegin_Ready);
+  CHECK(ArRenderDevice_Clear(&g_render_device, (ArRenderColorF){0, 0, 0, 0}));
+  SimBackgroundVoxelRenderer_DrawShadowMask(&g_render_device, &params, light_x, light_y);
+  CHECK(ArRenderDevice_EndTarget(&g_render_device, &previous));
+  CHECK(ArRenderDevice_Clear(&g_render_device, (ArRenderColorF){112.f/255, 128.f/255, 32.f/255, 1}));
+  const ArRenderDrawState tint = {.flags = kArRenderDrawState_Tint,
+      .tint = {1, 1, 1, .35f}};
+  CHECK(ArRenderDevice_DrawTextureWithState(&g_render_device, mask, NULL, NULL, &tint));
+  SimBackgroundVoxelRenderer_Draw(&g_render_device, &params);
+  SDL_Surface *readback = SDL_RenderReadPixels(renderer, NULL);
+  CHECK(readback);
+  SDL_Surface *surface = SDL_ConvertSurface(readback, SDL_PIXELFORMAT_ARGB8888);
+  SDL_DestroySurface(readback);
+  CHECK(surface);
+  CHECK(SDL_RenderPresent(renderer));
+  SaveImage(surface, name);
+  SDL_DestroySurface(surface);
+  ArRenderDevice_DestroyTexture(&g_render_device, mask);
+}
+
+static void TestVoxelShadows(SDL_Renderer *renderer) {
+  /* The nonzero viewport origin catches a mask translated relative to the
+   * models. This orthographic view maps town pixels one-to-one to the mask. */
+  const float matrix[16] = {2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+  SimBackgroundVoxelRenderParams params = {
+    .town = 1, .detail = kSimBackgroundVoxelDetail_Ultra,
+    .shading = kSimBackgroundVoxelShading_MaterialAware,
+    .style = kSimBackgroundVoxelStyle_Varied,
+    .facing = kSimBackgroundVoxelFacing_PerModel,
+    .source = {0, 0, 512, 512}, .viewport = {32, 32, 512, 512}, .matrix = matrix,
+  };
+  BuildVoxelShadowScene(true, false);
+  params.serial = SimBackgroundVoxels_Serial();
+  for (int town_mask = 0; town_mask < 2; town_mask++) {
+    SDL_Surface *rocks = RenderVoxelShadowProbe(renderer, &params, .8f, -.4f, town_mask,
+        town_mask ? "rocks-town-shadow-mask" : "rocks-shadow-mask");
+    CHECK(ColorCount(rocks, 0xff000000) == 0);
+    CHECK(ColorCount(rocks, 0xffffffff) == rocks->w * rocks->h);
+    SDL_DestroySurface(rocks);
+  }
+  RenderVoxelShadowPreview(renderer, params, true, .8f, -.4f, "rocks-without-shadows");
+  BuildVoxelShadowScene(false, false);
+  params.serial = SimBackgroundVoxels_Serial();
+  SDL_Surface *overhead = RenderVoxelShadowProbe(renderer, &params, 0, 0, false, "tree-overhead-mask");
+  int area = ColorCount(overhead, 0xff000000);
+  CHECK(area > 65 && area < 145);
+  CHECK(Pixel(overhead, 104, 104) == 0xff000000);
+  CHECK(Pixel(overhead, 97, 97) == 0xffffffff);
+  CHECK(Pixel(overhead, 110, 110) == 0xffffffff);
+  SDL_Surface *town = RenderVoxelShadowProbe(renderer, &params, 0, 0, true, NULL);
+  CHECK(Differences(overhead, town) == 0);
+  SDL_DestroySurface(town);
+  for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+    params.detail = detail;
+    SDL_Surface *lod = RenderVoxelShadowProbe(renderer, &params, 0, 0, false, NULL);
+    CHECK(Differences(overhead, lod) == 0);
+    SDL_DestroySurface(lod);
+  }
+  SDL_Surface *right = RenderVoxelShadowProbe(renderer, &params, .8f, -.4f, false,
+      "tree-angled-mask");
+  SDL_Surface *left = RenderVoxelShadowProbe(renderer, &params, -.8f, .4f, true,
+      "tree-reverse-mask");
+  CHECK(ColorCount(right, 0xff000000) > area);
+  CHECK(Differences(right, overhead) > 50);
+  CHECK(FirstColorX(left, 0xff000000) < FirstColorX(right, 0xff000000));
+  CHECK(FirstColorY(left, 0xff000000) < FirstColorY(right, 0xff000000));
+  SDL_DestroySurface(overhead);
+  SDL_DestroySurface(right);
+  SDL_DestroySurface(left);
+  RenderVoxelShadowPreview(renderer, params, false, 0, .0875f, "tree-with-near-overhead-shadow");
+  RenderVoxelShadowPreview(renderer, params, false, .8f, -.4f, "tree-with-angled-shadow");
+  BuildVoxelShadowScene(false, true);
+  params.serial = SimBackgroundVoxels_Serial();
+  uint64_t start = SDL_GetTicksNS();
+  SDL_Surface *forest = RenderVoxelShadowProbe(renderer, &params, 0, 0, true, "forest-shadow-mask");
+  for (int y = 0; y < 32; y++)
+    for (int x = 0; x < 32; x++) {
+      CHECK(Pixel(forest, 32 + x * 16 + 8, 32 + y * 16 + 8) == 0xff000000);
+      CHECK(Pixel(forest, 32 + x * 16 + 1, 32 + y * 16 + 1) == 0xffffffff);
+    }
+  SDL_DestroySurface(forest);
+  printf("voxel shadows: 1024 canopy silhouettes, clear tile corners, LOD parity, "
+         "both mask paths, six rock variants shadow-free (forest draw/readback %.2f ms)\n",
+         (SDL_GetTicksNS() - start) / 1000000.0);
+  RenderVoxelShadowPreview(renderer, params, false, 0, .0875f, "forest-with-shaped-shadows");
+  SimBackgroundVoxelRenderer_Reset(&g_render_device);
+  SimBackgroundVoxels_Reset();
+}
+
 static void TestSynthetic(SDL_Renderer *renderer) {
   /* Legacy projected-geometry/cache oracles intentionally use compatibility.
    * TestGpuGridRevisions below explicitly clears this to verify the default. */
@@ -3902,15 +4052,17 @@ static void TestTerrainSource(void) {
 #endif
 
 int main(int argc, char **argv) {
-  if (argc != 1 && (argc < 4 || argc > 10)) {
+  bool voxel_shadows_only = argc == 3 && !strcmp(argv[1], "--voxel-shadows");
+  if (!voxel_shadows_only && argc != 1 && (argc < 4 || argc > 10)) {
     fprintf(stderr,
-            "usage: %s [ROM WRAM existing-output-directory [--weather-sequence] [--town-matrix] "
+            "usage: %s [--voxel-shadows existing-output-directory] | [ROM WRAM existing-output-directory [--weather-sequence] [--town-matrix] "
             "[--sim-globe-prototype] | --sim-town SIM-snapshot-prefix [--sim-height-sweep | "
             "--sim-landscape-height 0..150] [--sim-radius-scale 1..4]]\n",
             argv[0]);
     return 1;
   }
-  if (argc >= 4) output_directory = argv[3];
+  if (voxel_shadows_only) output_directory = argv[2];
+  else if (argc >= 4) output_directory = argv[3];
   bool radius_requested = false;
   bool landscape_requested = false;
   for (int arg = 4; arg < argc; arg++) {
@@ -4001,7 +4153,8 @@ int main(int argc, char **argv) {
          SDL_GetGPUDeviceDriver(SDL_GetGPURendererDevice(renderer)));
   /* The ROM-free suite remains the default CTest entry. A frozen SIM capture
    * is independent and can be iterated without re-running orbital weather. */
-  if (!sim_town_snapshot) TestSynthetic(renderer);
+  if (!sim_town_snapshot && !voxel_shadows_only) TestSynthetic(renderer);
+  if (!sim_town_snapshot) TestVoxelShadows(renderer);
   if (argc >= 4) TestCaptured(renderer, argv[1], argv[2]);
   if (sim_town_snapshot)
     ArSdlRenderBackend_Destroy(&g_render_device);

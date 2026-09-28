@@ -47,7 +47,9 @@ static const SimBackgroundVoxelProportions kStoryTree = {
 
 static const SimBackgroundVoxelProportions kBloodpoolCastle = {
   .footprint_scale = 0.92f,
-  .height_scale = 0.86f,
+  /* Six spires must read as one compact fortress, not an elongated row of
+   * towers. Preserve the courtyard plan while matching the native massing. */
+  .height_scale = 0.74f,
 };
 
 static const SimBackgroundVoxelProportions kMarahnaTemple = {
@@ -82,7 +84,10 @@ const SimBackgroundVoxelProportions *SimBackgroundVoxelProportions_Get(
     case kSimBackgroundVoxel_BloodpoolCastle: return &kBloodpoolCastle;
     case kSimBackgroundVoxel_MarahnaTemple: return &kMarahnaTemple;
     case kSimBackgroundVoxel_Pyramid: return &kPyramid;
-    case kSimBackgroundVoxel_Bridge: return &kBridge;
+    case kSimBackgroundVoxel_Bridge:
+    case kSimBackgroundVoxel_Boulder:
+    case kSimBackgroundVoxel_Rocks:
+      return &kBridge;
   }
   return &kHouse;
 }

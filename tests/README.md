@@ -105,3 +105,17 @@ Do not obtain one executable's `SOURCES` to assemble another executable.
 The menu harness supplies `host_clock_stub.c` instead of the platform clock.
 All input timing, expiry and screenshot rendering therefore use the same
 controlled time; production continues to use the real host clock.
+
+## Focused town foliage shadows
+
+`actraiser_present_world_nav_gpu_test --voxel-shadows EXISTING_OUTPUT_DIRECTORY`
+runs the ROM-free Metal/SDL shadow regression without the world-navigation
+weather/cache suite. It tests both mask entry points, canopy outlines, opposite
+light directions, stable silhouettes across detail levels, a 1,024-tree batch
+flush, and six rock variants with no shadow pixels. It also captures isolated
+tree, forest and rock previews through the production depth renderer.
+
+The model tests check the canopy proxy against projected vertices at every
+detail level and verify that rocks omit contact decals. See the
+[tree-shadow review](../docs/sim-tree-shadow-fix-2026-09-27.md) for captures and
+validation limits.

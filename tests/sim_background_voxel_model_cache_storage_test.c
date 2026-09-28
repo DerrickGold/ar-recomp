@@ -42,7 +42,7 @@ static void CacheFree(void *p) {
 
 static bool Contains(const SimBackgroundVoxelObject *object) {
   const SimBackgroundVoxelModelCacheKey key =
-      MakeKey(object, kSimBackgroundVoxelDetail_Low, kSimBackgroundVoxelStyle_Basic);
+      MakeKey(object, kSimBackgroundVoxelDetail_Low, kSimBackgroundVoxelStyle_Varied);
   const uint32_t set = HashKey(&key) & (s_set_count - 1);
   for (int i = 0; i < kSimBackgroundVoxelModelCacheWays; i++)
     if (CacheSet(set)[i].valid && KeyEquals(&key, &CacheSet(set)[i].key)) return true;
@@ -62,7 +62,7 @@ static void TestRecencyAndFailures(void) {
                                              .source_cells_w = 1,
                                              .source_cells_h = 1};
     const SimBackgroundVoxelModelCacheKey key =
-        MakeKey(&object, kSimBackgroundVoxelDetail_Low, kSimBackgroundVoxelStyle_Basic);
+        MakeKey(&object, kSimBackgroundVoxelDetail_Low, kSimBackgroundVoxelStyle_Varied);
     if (!(HashKey(&key) & (s_set_count - 1))) objects[count++] = object;
   }
   assert(count == kSimBackgroundVoxelModelCacheWays + 1);
@@ -71,20 +71,20 @@ static void TestRecencyAndFailures(void) {
     if (wrap) g_model_cache.clock = UINT64_MAX - 8;
     for (int i = 0; i < kSimBackgroundVoxelModelCacheWays; i++)
       assert(SimBackgroundVoxelModelCache_Get(&objects[i], kSimBackgroundVoxelDetail_Low,
-                                              kSimBackgroundVoxelStyle_Basic, NULL, NULL));
+                                              kSimBackgroundVoxelStyle_Varied, NULL, NULL));
     /* Interleaved consumers cannot supply independent clocks any more. */
     assert(SimBackgroundVoxelModelCache_Get(&objects[0], kSimBackgroundVoxelDetail_Low,
-                                            kSimBackgroundVoxelStyle_Basic, NULL, NULL));
+                                            kSimBackgroundVoxelStyle_Varied, NULL, NULL));
     const size_t before = SimBackgroundVoxelModelCache_Stats().storage_bytes;
     const SimBackgroundVoxelModelShading *shading = (void *)1;
     fail_allocation = true;
     assert(!SimBackgroundVoxelModelCache_Get(&objects[count - 1], kSimBackgroundVoxelDetail_Low,
-                                             kSimBackgroundVoxelStyle_Basic, NULL, &shading));
+                                             kSimBackgroundVoxelStyle_Varied, NULL, &shading));
     assert(!shading && Contains(&objects[0]) && Contains(&objects[1]));
     assert(SimBackgroundVoxelModelCache_Stats().storage_bytes == before);
     assert(SimBackgroundVoxelModelCache_Stats().evictions == 0);
     assert(SimBackgroundVoxelModelCache_Get(&objects[count - 1], kSimBackgroundVoxelDetail_Low,
-                                            kSimBackgroundVoxelStyle_Basic, NULL, NULL));
+                                            kSimBackgroundVoxelStyle_Varied, NULL, NULL));
     assert(Contains(&objects[0]) && !Contains(&objects[1]));
     fail_allocation = true;
     assert(!SimBackgroundVoxelModelCache_Reserve(4096));

@@ -1030,6 +1030,8 @@ typedef struct SimFrameData {
   /* Holds every windmill in the town for the "no wind" event rather than only
    * the ones the event stamped. Extras enhancement; see ledger §61. */
   uint8_t background_voxel_wind_hold;
+  /* Resolved artwork available to this town visit, copied on the game thread. */
+  uint8_t background_voxel_artwork_flags;
   /* Player-selected procedural background-model performance target. */
   uint8_t background_voxel_detail;
   /* Fixed keeps that detail for every model. Adaptive treats it as a ceiling

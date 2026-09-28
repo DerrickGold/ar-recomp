@@ -105,21 +105,22 @@ static void SetCanvasHouse(SimBackgroundVoxelPalette *palette) {
 }
 
 static void SetYurtHouse(SimBackgroundVoxelPalette *palette) {
+  /* Ochre reed walls and golden thatch, kept distinct from pale canvas. */
   SetRamp(palette, kSimVoxelMaterial_Wall,
-          Argb(82, 49, 16), Argb(123, 74, 24),
-          Argb(164, 106, 49), Argb(205, 148, 82));
+          Argb(90, 66, 28), Argb(139, 106, 49),
+          Argb(180, 139, 74), Argb(214, 178, 104));
   SetRamp(palette, kSimVoxelMaterial_WallLight,
-          Argb(123, 74, 24), Argb(164, 106, 49),
-          Argb(205, 148, 82), Argb(230, 180, 106));
+          Argb(123, 90, 41), Argb(172, 131, 65),
+          Argb(205, 164, 82), Argb(230, 193, 123));
   SetRamp(palette, kSimVoxelMaterial_Roof,
-          Argb(65, 32, 8), Argb(98, 49, 8),
-          Argb(139, 74, 16), Argb(180, 106, 32));
+          Argb(115, 82, 32), Argb(172, 131, 65),
+          Argb(214, 172, 90), Argb(238, 206, 131));
   SetRamp(palette, kSimVoxelMaterial_RoofLight,
-          Argb(98, 49, 8), Argb(139, 74, 16),
-          Argb(180, 106, 32), Argb(213, 148, 65));
+          Argb(148, 106, 49), Argb(189, 148, 74),
+          Argb(230, 189, 106), Argb(246, 218, 156));
   SetRamp(palette, kSimVoxelMaterial_Trim,
-          Argb(49, 32, 8), Argb(82, 49, 8),
-          Argb(115, 65, 16), Argb(164, 98, 32));
+          Argb(65, 41, 8), Argb(98, 65, 16),
+          Argb(148, 106, 32), Argb(197, 156, 65));
 }
 
 static void SetWhiteCanvasHouse(SimBackgroundVoxelPalette *palette) {
@@ -141,26 +142,33 @@ static void SetWhiteCanvasHouse(SimBackgroundVoxelPalette *palette) {
 }
 
 static void SetAdobeHouse(SimBackgroundVoxelPalette *palette) {
+  /* Native $0A is pale desert masonry, not orange terracotta. */
   SetRamp(palette, kSimVoxelMaterial_Wall,
-          Argb(106, 82, 49), Argb(156, 123, 74),
-          Argb(205, 172, 115), Argb(238, 213, 164));
+          Argb(106, 106, 90), Argb(156, 156, 131),
+          Argb(213, 213, 180), Argb(246, 246, 213));
   SetRamp(palette, kSimVoxelMaterial_WallLight,
-          Argb(148, 115, 65), Argb(197, 156, 98),
-          Argb(230, 197, 139), Argb(255, 230, 180));
+          Argb(148, 148, 123), Argb(197, 197, 164),
+          Argb(238, 238, 205), Argb(255, 255, 230));
   SetRamp(palette, kSimVoxelMaterial_Roof,
-          Argb(98, 57, 16), Argb(139, 82, 24),
-          Argb(180, 115, 49), Argb(222, 164, 82));
+          Argb(98, 106, 90), Argb(148, 156, 131),
+          Argb(205, 213, 180), Argb(246, 246, 213));
   SetRamp(palette, kSimVoxelMaterial_RoofLight,
-          Argb(139, 82, 24), Argb(180, 115, 49),
-          Argb(222, 164, 82), Argb(246, 197, 115));
+          Argb(139, 148, 123), Argb(189, 197, 164),
+          Argb(230, 238, 205), Argb(255, 255, 230));
   SetRamp(palette, kSimVoxelMaterial_Trim,
-          Argb(74, 57, 32), Argb(115, 90, 49),
-          Argb(164, 131, 82), Argb(213, 180, 123));
+          Argb(74, 74, 57), Argb(115, 115, 90),
+          Argb(172, 172, 139), Argb(222, 222, 189));
 }
 
 static void SetTimberHouse(SimBackgroundVoxelPalette *palette) {
   SetEarthenWalls(palette);
-  SetBrownRoofs(palette);
+  /* The native cabin roof is bundled straw, distinct from the dark logs. */
+  SetRamp(palette, kSimVoxelMaterial_Roof,
+          Argb(90, 74, 32), Argb(131, 106, 49),
+          Argb(180, 139, 74), Argb(205, 164, 90));
+  SetRamp(palette, kSimVoxelMaterial_RoofLight,
+          Argb(131, 106, 49), Argb(180, 139, 74),
+          Argb(222, 180, 90), Argb(246, 213, 148));
   SetRamp(palette, kSimVoxelMaterial_Trim,
           Argb(74, 41, 8), Argb(115, 65, 8),
           Argb(148, 90, 16), Argb(180, 123, 49));
@@ -195,11 +203,11 @@ static void SetBloodpoolHouse(SimBackgroundVoxelPalette *palette) {
 static void SetAitosHouse(SimBackgroundVoxelPalette *palette) {
   SetStoneHouse(palette);
   SetRamp(palette, kSimVoxelMaterial_Roof,
-          Argb(90, 41, 0), Argb(131, 65, 0),
-          Argb(180, 90, 16), Argb(222, 139, 49));
+          Argb(74, 57, 32), Argb(115, 90, 49),
+          Argb(164, 139, 90), Argb(205, 189, 139));
   SetRamp(palette, kSimVoxelMaterial_RoofLight,
-          Argb(131, 65, 0), Argb(180, 90, 16),
-          Argb(222, 139, 49), Argb(246, 180, 82));
+          Argb(106, 82, 41), Argb(156, 131, 74),
+          Argb(197, 180, 123), Argb(238, 222, 172));
 }
 
 static void SetMarahnaStiltHouse(SimBackgroundVoxelPalette *palette) {
@@ -305,6 +313,8 @@ static void SetCommonPalette(SimBackgroundVoxelPalette *palette) {
   SetRamp(palette, kSimVoxelMaterial_Blade,
           Argb(131, 148, 164), Argb(180, 205, 222),
           Argb(230, 230, 230), Argb(230, 230, 230));
+  SetRamp(palette, kSimVoxelMaterial_BladeStripe,
+          Argb(49, 16, 65), Argb(74, 32, 90), Argb(115, 57, 148), Argb(148, 82, 180));
   SetRamp(palette, kSimVoxelMaterial_Trunk,
           Argb(74, 57, 24), Argb(90, 49, 8),
           Argb(115, 74, 16), Argb(148, 90, 16));
@@ -445,18 +455,47 @@ void SimBackgroundVoxelPalette_Build(
        * it they occupy is what separates them on screen. Measured from the
        * source art: the evergreen ($0B) is 64% near-black, the broad canopy
        * ($0E) centres on mid green, and the bush ($01) centres on bright
-       * green. Sharing one ramp would make a lone bush read as one more dark
-       * evergreen. */
+       * green. These are lit albedos, so the evergreen preserves its darker
+       * family without reproducing the sprite's already-baked shadow mass. */
       if (object->kind == kSimBackgroundVoxel_Shrub) {
         SetRamp(palette, kSimVoxelMaterial_Leaves,
-                Argb(0, 57, 0), Argb(16, 106, 0),
-                Argb(32, 148, 0), Argb(57, 189, 0));
+                Argb(0, 57, 0), Argb(0, 82, 0),
+                Argb(16, 106, 0), Argb(32, 148, 0));
         SetRamp(palette, kSimVoxelMaterial_LeavesLight,
                 Argb(16, 106, 0), Argb(32, 148, 0),
-                Argb(57, 189, 0), Argb(57, 189, 0));
+                Argb(41, 164, 0), Argb(57, 189, 0));
+        SetRamp(palette, kSimVoxelMaterial_LeavesDark,
+                Argb(0, 16, 0), Argb(0, 32, 0),
+                Argb(0, 57, 0), Argb(0, 82, 0));
+      } else if (object->kind == kSimBackgroundVoxel_Palm) {
+        /* Sunlit fronds use the brighter tropical greens, with a distinct
+         * underside and muted tan stem. Keep bark scars close to the trunk
+         * ramp so they read as texture rather than orange projecting bands. */
+        SetRamp(palette, kSimVoxelMaterial_Leaves,
+                Argb(0, 57, 0), Argb(16, 106, 0),
+                Argb(32, 148, 0), Argb(41, 164, 0));
+        SetRamp(palette, kSimVoxelMaterial_LeavesLight,
+                Argb(16, 106, 0), Argb(32, 148, 0),
+                Argb(57, 172, 8), Argb(74, 189, 16));
         SetRamp(palette, kSimVoxelMaterial_LeavesDark,
                 Argb(0, 32, 0), Argb(0, 57, 0),
-                Argb(16, 106, 0), Argb(32, 148, 0));
+                Argb(16, 90, 0), Argb(24, 115, 0));
+        SetRamp(palette, kSimVoxelMaterial_Trunk,
+                Argb(74, 57, 24), Argb(106, 90, 49),
+                Argb(148, 123, 74), Argb(172, 148, 98));
+        SetRamp(palette, kSimVoxelMaterial_Wood,
+                Argb(65, 49, 24), Argb(90, 74, 41),
+                Argb(123, 106, 65), Argb(148, 131, 82));
+      } else if (object->kind == kSimBackgroundVoxel_Tree) {
+        /* The mesh already supplies shaded facets and recessed needle tiers.
+         * Do not bake the flat sprite's near-black mass into those surfaces a
+         * second time: preserve green midtones under directional light/AO. */
+        SetRamp(palette, kSimVoxelMaterial_Leaves,
+                Argb(0, 41, 0), Argb(0, 65, 0), Argb(8, 98, 0), Argb(16, 123, 0));
+        SetRamp(palette, kSimVoxelMaterial_LeavesLight,
+                Argb(0, 65, 0), Argb(8, 98, 0), Argb(24, 131, 0), Argb(41, 156, 0));
+        SetRamp(palette, kSimVoxelMaterial_LeavesDark,
+                Argb(0, 24, 0), Argb(0, 41, 0), Argb(0, 57, 0), Argb(0, 74, 0));
       } else if (object->kind == kSimBackgroundVoxel_BroadTree) {
         SetRamp(palette, kSimVoxelMaterial_Leaves,
                 Argb(0, 32, 0), Argb(0, 57, 0),
@@ -484,6 +523,17 @@ void SimBackgroundVoxelPalette_Build(
         VaryMaterial(palette, leaves[material], variation);
       break;
     }
+    case kSimBackgroundVoxel_Boulder:
+    case kSimBackgroundVoxel_Rocks:
+      /* Native $61-$6B stone shares the grey-green terrain ramp, not the
+       * brown mountain rock or the constructed buildings' white masonry. */
+      SetRamp(palette, kSimVoxelMaterial_Wall,
+              Argb(65, 74, 65), Argb(106, 123, 106),
+              Argb(131, 148, 131), Argb(164, 180, 164));
+      SetRamp(palette, kSimVoxelMaterial_WallLight,
+              Argb(106, 123, 106), Argb(131, 148, 131),
+              Argb(164, 180, 164), Argb(180, 197, 180));
+      break;
     case kSimBackgroundVoxel_StoryTree:
       /* Sampled from the $EB plot: pale blue-white snow over a small olive
        * trunk, with the shaded underside a deeper slate blue. */
@@ -510,7 +560,7 @@ void SimBackgroundVoxelPalette_Build(
       break;
     case kSimBackgroundVoxel_BloodpoolCastle:
       /* Sampled from the $EC plot: the castle is pale stone with tan-gold
-       * spire caps and dome. The earlier purple keep matched the town's house
+       * spire caps and steep keep roof. The earlier purple keep matched the town's house
        * roofs, not its own art. */
       SetRamp(palette, kSimVoxelMaterial_Wall,
               Argb(32, 32, 24), Argb(65, 74, 57),
@@ -528,11 +578,15 @@ void SimBackgroundVoxelPalette_Build(
               Argb(32, 32, 24), Argb(65, 74, 57),
               Argb(139, 148, 131), Argb(180, 180, 172));
       SetRamp(palette, kSimVoxelMaterial_Gold,
-              Argb(115, 106, 57), Argb(131, 82, 0),
-              Argb(164, 98, 0), Argb(205, 180, 106));
+              Argb(115, 106, 57), Argb(164, 148, 82),
+              Argb(189, 172, 98), Argb(205, 180, 106));
       break;
     case kSimBackgroundVoxel_Pyramid:
-      /* Sampled from the $EE plot: four sandstone steps from the shaded east
+      /* Ivory eye inlay; the surrounding sandstone retains its own ramps. */
+      SetRamp(palette, kSimVoxelMaterial_Glass,
+              Argb(164, 156, 115), Argb(205, 197, 156),
+              Argb(238, 230, 189), Argb(255, 246, 205));
+      /* Sampled from the $EE plot: sandstone shades from the shaded east
        * face to the sunlit casing. */
       SetRamp(palette, kSimVoxelMaterial_Wall,
               Argb(74, 57, 24), Argb(106, 90, 32),
@@ -540,32 +594,38 @@ void SimBackgroundVoxelPalette_Build(
       SetRamp(palette, kSimVoxelMaterial_WallLight,
               Argb(106, 90, 32), Argb(148, 115, 41),
               Argb(189, 164, 98), Argb(205, 180, 106));
+      /* Mortar stays distinct from both lit casing and shaded flanks. */
       SetRamp(palette, kSimVoxelMaterial_Trim,
-              Argb(74, 57, 24), Argb(106, 90, 32),
-              Argb(148, 115, 41), Argb(189, 164, 98));
+              Argb(57, 41, 16), Argb(90, 74, 24),
+              Argb(131, 98, 32), Argb(164, 131, 57));
       SetRamp(palette, kSimVoxelMaterial_Dark,
               Argb(41, 32, 16), Argb(57, 41, 16),
               Argb(74, 57, 24), Argb(106, 90, 32));
       break;
     case kSimBackgroundVoxel_MarahnaTemple:
+      /* The $EF sprite is sandstone/gold throughout, including the entrance
+       * pillars and enclosure; its green pixels are exposed town ground. */
       SetRamp(palette, kSimVoxelMaterial_Wall,
-              Argb(65, 65, 49), Argb(98, 106, 74),
-              Argb(148, 156, 106), Argb(205, 205, 156));
+              Argb(106, 90, 32), Argb(148, 115, 41),
+              Argb(180, 148, 90), Argb(205, 180, 106));
       SetRamp(palette, kSimVoxelMaterial_WallLight,
-              Argb(98, 106, 74), Argb(148, 156, 106),
-              Argb(197, 205, 156), Argb(238, 238, 197));
+              Argb(148, 115, 41), Argb(189, 164, 98),
+              Argb(205, 180, 106), Argb(222, 205, 148));
       SetRamp(palette, kSimVoxelMaterial_Roof,
               Argb(49, 49, 24), Argb(82, 82, 32),
               Argb(123, 115, 49), Argb(172, 156, 74));
       SetRamp(palette, kSimVoxelMaterial_RoofLight,
-              Argb(74, 74, 32), Argb(115, 106, 49),
-              Argb(164, 148, 74), Argb(213, 197, 115));
+              Argb(106, 90, 32), Argb(148, 115, 41),
+              Argb(189, 164, 98), Argb(205, 180, 106));
+      SetRamp(palette, kSimVoxelMaterial_Trim,
+              Argb(106, 90, 32), Argb(180, 148, 90),
+              Argb(205, 180, 106), Argb(222, 205, 148));
       SetRamp(palette, kSimVoxelMaterial_Paving,
-              Argb(57, 65, 49), Argb(90, 98, 65),
-              Argb(131, 148, 90), Argb(189, 197, 139));
+              Argb(148, 115, 41), Argb(180, 148, 90),
+              Argb(205, 180, 106), Argb(222, 205, 148));
       SetRamp(palette, kSimVoxelMaterial_Gold,
-              Argb(106, 74, 8), Argb(164, 115, 16),
-              Argb(222, 172, 49), Argb(255, 230, 115));
+              Argb(148, 115, 41), Argb(189, 164, 98),
+              Argb(205, 180, 106), Argb(222, 205, 148));
       break;
     case kSimBackgroundVoxel_Bridge:
       /* Sampled toward the native bridge's cool grey-green masonry. Pale edge

@@ -2047,7 +2047,9 @@ int main(void) {
     assert(ActRaiserRegional_CopyRulesView(&view));
     assert(ActRaiserRegional_RequestRules(&view, group, 0) == kActRaiserRegionalEdit_Applied);
     assert(ActRaiserRegional_TownArtworkSnapshot(0x100) == town_art);
+    assert(ActRaiserRegional_LastTownArtworkSnapshot() == town_art);
     assert(ActRaiserRegional_BeginTownArtwork(0x200, &town_art) && !town_art);
+    assert(!ActRaiserRegional_LastTownArtworkSnapshot());
     assert(ActRaiserRegional_CopyRulesView(&view));
   }
   assert(ActRaiserRegional_RequestRules(&view, kActRaiserRegionalSetting_Mosaic, 1) ==

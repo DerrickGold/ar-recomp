@@ -1788,7 +1788,7 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_sim_background_voxel_lighting_test PRIVATE
-        actraiser_math)
+        actraiser_math actraiser_town_model_test_support)
     add_test(NAME actraiser_sim_background_voxel_lighting
         COMMAND actraiser_sim_background_voxel_lighting_test)
 

@@ -31,6 +31,7 @@ static SimBackgroundMaterialLightResponse MaterialResponse(
       return (SimBackgroundMaterialLightResponse){0.68f, 0.32f};
     case kSimVoxelMaterial_Metal:
     case kSimVoxelMaterial_Blade:
+    case kSimVoxelMaterial_BladeStripe:
     case kSimVoxelMaterial_Gold:
     case kSimVoxelMaterial_Glass:
       return (SimBackgroundMaterialLightResponse){0.62f, 0.38f};

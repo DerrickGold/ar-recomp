@@ -6,6 +6,8 @@
 
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
+#include "regional/presentation/regional_artwork.h"
+#include "sim/voxels/sim_background_voxel_types.h"
 #include "app/performance_metrics.h"
 #include "app/settings.h"
 #include "dev/scene_inspector.h"
@@ -26,6 +28,12 @@ int g_snes_width = 320, g_snes_height = 224;
 int snes_frame_counter = 17;
 static SimFrameData frame;
 static uint32_t canvas_serial = 7, voxel_serial = 11;
+static uint8_t active_artwork, available_artwork;
+uint8_t ActRaiserRegional_TownArtworkSnapshot(uint16_t scene) {
+  return scene == 0x300 ? active_artwork : 0;
+}
+uint8_t ActRaiserRegional_LastTownArtworkSnapshot(void) { return active_artwork; }
+uint8_t ActRaiserRegionalMedia_AvailableArtwork(void) { return available_artwork; }
 static bool needs_ppu;
 static int api_queries, worker_creates, worker_destroys;
 static char events[64];
@@ -77,6 +85,12 @@ void SimRenderMetadata_CaptureFrame(SimFrameData *dst, const uint8 *wram,
   assert(requested == kSimFeature_All && implemented == kSimFeature_GroundProjection);
   assert(diagnostic == g_settings.sim3d_diagnostic_layers);
   *dst = (SimFrameData){0};
+  dst->town = 3;
+  if (world) {
+    dst->world_navigation_towns.object_count = 2;
+    dst->world_navigation_towns.objects[0].kind = kSimBackgroundVoxel_Pyramid;
+    dst->world_navigation_towns.objects[1].kind = kSimBackgroundVoxel_BloodpoolCastle;
+  }
   Event('C');
 }
 void SimRenderMetadata_CaptureSkyPalaceFrame(SimFrameData *dst, const uint8 *wram, bool enabled) {
@@ -177,6 +191,24 @@ int main(void) {
   ExpectEvents("CSAN");
   ExpectCompletedFrame(&frame);
   assert(!worker_creates && !api_queries && canvas_serial == 7);
+
+  /* Pending/missing donor art must not appear only in the enhanced model. */
+  active_artwork = 1u << kArRegionalArtwork_PyramidDetail;
+  SimFrameCapture_RefreshMetadata(&frame);
+  ExpectEvents("CSAN");
+  assert(frame.background_voxel_artwork_flags == 0);
+  assert(!(frame.world_navigation_towns.objects[0].flags & kSimBackgroundVoxel_PyramidEye));
+  available_artwork = active_artwork;
+  SimFrameCapture_RefreshMetadata(&frame);
+  ExpectEvents("CSAN");
+  assert(frame.background_voxel_artwork_flags == kSimBackgroundVoxel_PyramidEye);
+  assert(frame.world_navigation_towns.objects[0].flags & kSimBackgroundVoxel_PyramidEye);
+  assert(!frame.world_navigation_towns.objects[1].flags);
+  active_artwork = 0;
+  SimFrameCapture_RefreshMetadata(&frame);
+  ExpectEvents("CSAN");
+  assert(frame.background_voxel_artwork_flags == 0);
+  assert(!(frame.world_navigation_towns.objects[0].flags & kSimBackgroundVoxel_PyramidEye));
 
   /* Headless production still completes canvas work and stamps its new
    * serials before inspector/trace consumers, without frame submission. */

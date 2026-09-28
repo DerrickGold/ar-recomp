@@ -5,6 +5,9 @@
 
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
+#include "actraiser/regional/actraiser_regional_runtime.h"
+#include "actraiser/regional/actraiser_regional_media.h"
+#include "regional/presentation/regional_artwork.h"
 #include "app/performance_metrics.h"
 #include "app/settings.h"
 #include "dev/scene_inspector.h"
@@ -95,6 +98,25 @@ static void CaptureMetadata(SimFrameData *sim) {
       g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
   Sim3DTuning tuning = CaptureTuning();
   Sim3D_AnnotateFrame(sim, &tuning);
+  /* Match the visit's active selection AND donor availability. Requested
+   * settings may be pending, and a missing donor leaves the native BG plain. */
+  uint8_t artwork = ActRaiserRegional_TownArtworkSnapshot((uint16_t)sim->town << 8) &
+      ActRaiserRegionalMedia_AvailableArtwork();
+  sim->background_voxel_artwork_flags =
+      artwork & (1u << kArRegionalArtwork_PyramidDetail)
+          ? kSimBackgroundVoxel_PyramidEye : 0;
+  /* Retained globe towns have no live tilemap or town scene ID. Publish the
+   * last accepted town-art generation into their value-only model identities;
+   * the presenter then invalidates its geometry through the ordinary flags. */
+  uint8_t world_artwork = ActRaiserRegional_LastTownArtworkSnapshot() &
+      ActRaiserRegionalMedia_AvailableArtwork();
+  for (uint16_t at = 0; at < sim->world_navigation_towns.object_count; at++) {
+    SimBackgroundVoxelObject *object = &sim->world_navigation_towns.objects[at];
+    if (object->kind != kSimBackgroundVoxel_Pyramid) continue;
+    object->flags &= (uint8_t)~kSimBackgroundVoxel_PyramidEye;
+    if (world_artwork & (1u << kArRegionalArtwork_PyramidDetail))
+      object->flags |= kSimBackgroundVoxel_PyramidEye;
+  }
   SimWorldNavigationCapture_Capture(sim, RtlGameRunner());
 }
 

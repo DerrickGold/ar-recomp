@@ -6,6 +6,9 @@
  * depth pass as the in-game renderer.  The only omitted scene input is terrain
  * elevation: every audit model stands on a common flat datum so silhouettes
  * and proportions can be compared directly.
+ * Optional AR_AUDIT_DETAIL (0..3), AR_AUDIT_TILT_X/Y,
+ * AR_AUDIT_LIGHT_ELEVATION and AR_AUDIT_REVERSE controls support repeatable
+ * LOD, lighting and draw-order checks. Defaults retain the canonical sheet.
  */
 
 #include <SDL3/SDL.h>
@@ -35,12 +38,11 @@ enum {
 };
 
 static ArRenderDevice s_render_device;
+/* Optional audit controls leave the default Ultra sheet unchanged. */
+static int audit_detail = kSimBackgroundVoxelDetail_Ultra;
+static int audit_reverse;
 
 static const float kContactLiftPixels = 0.06f;
-
-typedef struct ContactBounds {
-  float x0, y0, x1, y1;
-} ContactBounds;
 
 typedef struct AuditEntry {
   const char *section;
@@ -70,53 +72,12 @@ static float FootprintDepth(const SimBackgroundVoxelObject *object) {
   return object->footprint_cells_d * (float)kSimBackgroundCellPixels;
 }
 
-static int ResolveContactBounds(const SimBackgroundVoxelObject *object,
-                                ContactBounds out[3]) {
-  switch ((SimBackgroundVoxelKind)object->kind) {
-    case kSimBackgroundVoxel_House:
-      out[0] = (ContactBounds){1.8f, 2.5f, 14.2f, 15.2f};
-      return 1;
-    case kSimBackgroundVoxel_Cathedral:
-      out[0] = (ContactBounds){0.8f, 8.8f, 31.2f, 31.4f};
-      return 1;
-    case kSimBackgroundVoxel_Windmill:
-      out[0] = (ContactBounds){6.2f, 2.3f, 25.8f, 15.2f};
-      return 1;
-    case kSimBackgroundVoxel_Factory:
-      out[0] = (ContactBounds){0.8f, 0.8f, 21.8f, 10.8f};
-      out[1] = (ContactBounds){0.8f, 22.2f, 21.8f, 31.2f};
-      out[2] = (ContactBounds){21.2f, 0.8f, 31.2f, 31.2f};
-      return 3;
-    case kSimBackgroundVoxel_Tree:
-    case kSimBackgroundVoxel_BroadTree:
-    case kSimBackgroundVoxel_Palm:
-      out[0] = (ContactBounds){5.4f, 5.4f, 10.6f, 10.6f};
-      return 1;
-    case kSimBackgroundVoxel_Shrub:
-      out[0] = (ContactBounds){5.8f, 5.8f, 10.2f, 10.2f};
-      return 1;
-    case kSimBackgroundVoxel_StoryTree:
-      out[0] = (ContactBounds){10.0f, 11.0f, 22.0f, 23.0f};
-      return 1;
-    case kSimBackgroundVoxel_BloodpoolCastle:
-    case kSimBackgroundVoxel_MarahnaTemple:
-      out[0] = (ContactBounds){1.0f, 3.0f, 31.0f, 31.5f};
-      return 1;
-    case kSimBackgroundVoxel_Pyramid:
-      out[0] = (ContactBounds){0.5f, 1.5f, 31.5f, 31.5f};
-      return 1;
-    case kSimBackgroundVoxel_Bridge:
-      return 0;
-  }
-  return 0;
-}
-
-static ContactBounds ScaleContactBounds(
-    ContactBounds bounds, const SimBackgroundVoxelObject *object,
+static SimBackgroundVoxelModelContact ScaleContactBounds(
+    SimBackgroundVoxelModelContact bounds, const SimBackgroundVoxelObject *object,
     const SimBackgroundVoxelProportions *proportions) {
   const float center_x = FootprintWidth(object) * 0.5f;
   const float center_y = FootprintDepth(object) * 0.5f;
-  return (ContactBounds){
+  return (SimBackgroundVoxelModelContact){
     center_x + (bounds.x0 - center_x) * proportions->footprint_scale,
     center_y + (bounds.y0 - center_y) * proportions->footprint_scale,
     center_x + (bounds.x1 - center_x) * proportions->footprint_scale,
@@ -130,10 +91,10 @@ static void AppendContact(
     const SimBackgroundVoxelRenderParams *params,
     float origin_x, float origin_y,
     const SimBackgroundVoxelProportions *proportions) {
-  ContactBounds authored[3];
-  const int count = ResolveContactBounds(object, authored);
+  SimBackgroundVoxelModelContact authored[kSimBackgroundVoxelModelMaxContacts];
+  const int count = SimBackgroundVoxelModel_Contacts(object, authored);
   for (int at = 0; at < count; at++) {
-    const ContactBounds bounds = ScaleContactBounds(
+    const SimBackgroundVoxelModelContact bounds = ScaleContactBounds(
         authored[at], object, proportions);
     const float local_x[4] = {
       bounds.x0, bounds.x1, bounds.x1, bounds.x0,
@@ -174,7 +135,7 @@ static bool AppendModel(const SimBackgroundVoxelObject *object,
   };
   const SimBackgroundVoxelModelShading *shading = NULL;
   const SimBackgroundVoxelModelView *model = SimBackgroundVoxelModelCache_Get(
-      object, kSimBackgroundVoxelDetail_Ultra,
+      object, audit_detail,
       kSimBackgroundVoxelStyle_Varied,
       &shading_key, &shading);
   if (!model || !model->face_count || model->overflow || !shading)
@@ -199,11 +160,12 @@ static bool AppendModel(const SimBackgroundVoxelObject *object,
 
   for (uint16_t face_index = 0;
        face_index < model->face_count; face_index++) {
-    const SimBackgroundVoxelModelFace *source = &model->faces[face_index];
+    int idx = audit_reverse ? model->face_count - 1 - face_index : face_index;
+    const SimBackgroundVoxelModelFace *source = &model->faces[idx];
     SimBackgroundProjectedFace face = {
-      .material = shading->material[face_index],
+      .material = shading->material[idx],
     };
-    memcpy(face.brightness, shading->brightness[face_index],
+    memcpy(face.brightness, shading->brightness[idx],
            sizeof(face.brightness));
     bool valid = true;
     for (int point = 0; point < 4; point++) {
@@ -288,6 +250,8 @@ static SimBackgroundVoxelObject BaseObject(
     case kSimBackgroundVoxel_Tree:
     case kSimBackgroundVoxel_BroadTree:
     case kSimBackgroundVoxel_Palm:
+    case kSimBackgroundVoxel_Boulder:
+    case kSimBackgroundVoxel_Rocks:
     case kSimBackgroundVoxel_Shrub:
       break;
   }
@@ -337,8 +301,8 @@ static bool EmitEntry(SDL_Renderer *renderer,
 static bool RenderAll(SDL_Renderer *renderer, const char *output_dir,
                       FILE *manifest) {
   const Scene3DCamera camera = {
-    .tilt_x = -0.35f,
-    .tilt_y = 0.0f,
+    .tilt_x = getenv("AR_AUDIT_TILT_X") ? atof(getenv("AR_AUDIT_TILT_X")) : -0.35f,
+    .tilt_y = getenv("AR_AUDIT_TILT_Y") ? atof(getenv("AR_AUDIT_TILT_Y")) : 0.0f,
     .distance = Scene3D_AutoFitDistance(0.4f),
     .fov_y = 0.4f,
   };
@@ -354,7 +318,7 @@ static bool RenderAll(SDL_Renderer *renderer, const char *output_dir,
     .render_scale = kSimBackgroundVoxelRenderScale_PixelClean,
     .landscape_height_pct = 0,
     .light_azimuth_deg = 0,
-    .light_elevation_deg = 85,
+    .light_elevation_deg = getenv("AR_AUDIT_LIGHT_ELEVATION") ? atoi(getenv("AR_AUDIT_LIGHT_ELEVATION")) : 85,
     .source = {0, 0, kSourcePixels, kSourcePixels},
     .viewport = {0, 0, kRenderWidth, kRenderHeight},
     .matrix = matrix,
@@ -522,11 +486,102 @@ static bool RenderAll(SDL_Renderer *renderer, const char *output_dir,
   EMIT("Construction", "construction-factory",
        "Factory construction frame", object);
 
+  /* Append new families so the historical 67 model numbers remain stable. */
+  object = BaseObject(kSimBackgroundVoxel_Boulder, 1);
+  object.visual_metatile = 0x61;
+  EMIT("Town environment", "fillmore-boulder", "Fillmore lightning boulder", object);
+  static const uint8_t rock_tiles[] = {0x62, 0x63, 0x69, 0x6A, 0x6B};
+  for (unsigned at = 0; at < sizeof(rock_tiles); at++) {
+    char filename[64], label[96];
+    object = BaseObject(kSimBackgroundVoxel_Rocks, 4);
+    object.visual_metatile = rock_tiles[at];
+    snprintf(filename, sizeof(filename), "rocky-ground-%02x", rock_tiles[at]);
+    snprintf(label, sizeof(label), "Aitos scattered rocks - $%02X", rock_tiles[at]);
+    EMIT("Town environment", filename, label, object);
+  }
+
 #undef EMIT
-  return true;
+  /* Keep the historical 67 baseline numbers stable. Regional geometry gets
+   * an auxiliary manifest and is selected by the ROM-aware art index. */
+  char regional_path[1024];
+  snprintf(regional_path, sizeof(regional_path), "%s/regional-manifest.tsv", output_dir);
+  FILE *regional = fopen(regional_path, "w");
+  if (!regional) { perror(regional_path); return false; }
+  fprintf(regional, "section\tlabel\tfile\n");
+  object = BaseObject(kSimBackgroundVoxel_Pyramid, 3);
+  object.flags = kSimBackgroundVoxel_PyramidEye;
+  bool rendered = EmitEntry(renderer, &params, output_dir, regional,
+      "Regional variants", "kasandora-pyramid-jp", "Kasandora pyramid - Japanese eye", object);
+  for (int alternate = 0; rendered && alternate < 2; alternate++) {
+    object = BaseObject(kSimBackgroundVoxel_House, 5);
+    object.development_level = 2;
+    object.visual_state = kSimStructureVisualState_Finished;
+    object.visual_metatile = alternate ? 0x3B : 0x3A;
+    object.flags = alternate ? kSimBackgroundVoxel_AlternateFacing : 0;
+    rendered = EmitEntry(renderer, &params, output_dir, regional, "Regional variants",
+        alternate ? "house-5-2-jp-alternate" : "house-5-2-jp-front",
+        alternate ? "Marahna developed - Japanese stilt alternate"
+                  : "Marahna developed - Japanese stilt front", object);
+  }
+  fclose(regional);
+  if (!rendered) return false;
+  /* Supplementary states stay outside the numbered/regional manifests. */
+  char states_path[1024];
+  snprintf(states_path, sizeof(states_path), "%s/state-manifest.tsv", output_dir);
+  FILE *states = fopen(states_path, "w");
+  if (!states) { perror(states_path); return false; }
+  fprintf(states, "section\tlabel\tfile\n");
+  object = BaseObject(kSimBackgroundVoxel_House, 1);
+  object.flags = kSimBackgroundVoxel_UnderConstruction;
+  object.animation_phase = 1;
+  object.development_level = 2;
+  rendered = EmitEntry(renderer, &params, output_dir, states, "Supplementary states",
+      "construction-house-1", "House construction - second stage", object);
+  for (int family = 0; rendered && family < 2; family++)
+    for (int phase = 0; rendered && phase < 2; phase++) {
+      char filename[64], label[96];
+      object = BaseObject(kSimBackgroundVoxel_House, family ? 3 : 4);
+      object.development_level = family ? 1 : 0;
+      object.flags = kSimBackgroundVoxel_UnderConstruction;
+      object.animation_phase = (uint8_t)phase;
+      snprintf(filename, sizeof(filename), "construction-%s-%d", family ? "canvas" : "straw", phase);
+      snprintf(label, sizeof(label), "%s shelter - %s", family ? "Canvas" : "Straw",
+          phase ? "partial covering" : "lashed pole frame");
+      rendered = EmitEntry(renderer, &params, output_dir, states, "Supplementary states",
+          filename, label, object);
+    }
+  for (int phase = 0; rendered && phase < 2; phase++) {
+    object = BaseObject(kSimBackgroundVoxel_House, 4);
+    object.development_level = 0;
+    object.flags = kSimBackgroundVoxel_UnderConstruction | kSimBackgroundVoxel_AlternateFacing;
+    object.animation_phase = (uint8_t)phase;
+    rendered = EmitEntry(renderer, &params, output_dir, states, "Supplementary states",
+        phase ? "construction-straw-alternate-1" : "construction-straw-alternate-0",
+        phase ? "Straw hut alternate - partial crest covering" : "Straw hut alternate - crest frame",
+        object);
+  }
+  for (int axis = 0; rendered && axis < 2; axis++) {
+    object = BaseObject(kSimBackgroundVoxel_Bridge, 1);
+    object.flags = kSimBackgroundVoxel_UnderConstruction;
+    object.bridge_axis = axis ? kSimBackgroundBridgeAxis_NorthSouth : kSimBackgroundBridgeAxis_EastWest;
+    object.cell_x = axis ? 2 : 1; object.cell_y = axis ? 1 : 2;
+    object.bridge_bank_a_x = axis ? 2 : 0; object.bridge_bank_a_y = axis ? 0 : 2;
+    object.bridge_bank_b_x = axis ? 2 : 3; object.bridge_bank_b_y = axis ? 3 : 2;
+    rendered = EmitEntry(renderer, &params, output_dir, states, "Supplementary states",
+        axis ? "construction-bridge-ns" : "construction-bridge-ew",
+        axis ? "Bridge construction - north/south" : "Bridge construction - east/west", object);
+  }
+  fclose(states);
+  return rendered;
 }
 
 int main(int argc, char **argv) {
+  if (getenv("AR_AUDIT_DETAIL")) audit_detail = atoi(getenv("AR_AUDIT_DETAIL"));
+  audit_reverse = getenv("AR_AUDIT_REVERSE") != NULL;
+  if (audit_detail < 0 || audit_detail >= kSimBackgroundVoxelDetail_Count) {
+    fprintf(stderr, "AR_AUDIT_DETAIL must be 0..3\n");
+    return 2;
+  }
   if (argc != 2) {
     fprintf(stderr, "usage: %s OUTPUT_DIRECTORY\n", argv[0]);
     return 2;

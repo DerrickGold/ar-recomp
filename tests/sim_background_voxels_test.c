@@ -62,7 +62,7 @@ static void BuildForTest(uint8_t town, const uint8_t *wram, const uint32_t *pixe
                          bool wind_stops_all) {
   if (s_reverse_rows)
     SimBackgroundVoxels_BuildWithRows(town, wram, pixels, opacity, serial, layout_serial,
-                                      wind_stops_all, DispatchTestRows, NULL);
+                                      wind_stops_all, 0, DispatchTestRows, NULL);
   else
     SimBackgroundVoxels_Build(town, wram, pixels, opacity, serial, layout_serial, wind_stops_all);
 }
@@ -613,7 +613,9 @@ static void CheckHouseFramesEndToEnd(void) {
   size_t frame_count = 0;
   const SimStructureVisualFrame *frames =
       SimStructureVisuals_Frames(kSimStructureVisual_House, &frame_count);
-  uint64_t construction_hash[2] = {0, 0};
+  /* Ordinary buildings, straw huts and canvas pavilions have distinct
+   * construction sequences; native frame aliases must preserve each one. */
+  uint64_t construction_hash[3][2][2] = {{{0}}};
   const int cell_x = 6, cell_y = 6;
   for (int town = 1; town <= kSimBackgroundTownCount; town++)
     for (int level = 0; level < kSimBackgroundDevelopmentLevelCount; level++)
@@ -644,15 +646,31 @@ static void CheckHouseFramesEndToEnd(void) {
           CHECK(!model.overflow && model.face_count > 0);
           if (under_construction) {
             CHECK(MaterialFaces(&model, kSimVoxelMaterial_Wood) > 0);
-            CHECK(MaterialFaces(&model, kSimVoxelMaterial_Roof) == 0);
+            SimBackgroundVoxelHouseStyle family = SimBackgroundVoxelRegion_ObjectHouseStyle(house);
+            int group = family == kSimBackgroundHouseStyle_Yurt ? 1 :
+                family == kSimBackgroundHouseStyle_WhiteTent || family == kSimBackgroundHouseStyle_Tent ? 2 : 0;
             uint8_t phase = frames[frame].animation_phase ? 1 : 0;
+            int roof_faces = MaterialFaces(&model, kSimVoxelMaterial_Roof) +
+                MaterialFaces(&model, kSimVoxelMaterial_RoofLight);
+            if (phase && group)
+              CHECK(roof_faces > 0);
+            else
+              CHECK(roof_faces == 0);
             uint64_t hash = ModelHash(&model);
-            if (!construction_hash[phase]) construction_hash[phase] = hash;
-            CHECK(construction_hash[phase] == hash);
+            uint64_t *expected = &construction_hash[group][facing][phase];
+            if (!*expected) *expected = hash;
+            CHECK(*expected == hash);
           }
         }
-  CHECK(construction_hash[0] != 0 && construction_hash[1] != 0);
-  CHECK(construction_hash[0] != construction_hash[1]);
+  for (int group = 0; group < 3; group++)
+    for (int facing = 0; facing < 2; facing++) {
+      CHECK(construction_hash[group][facing][0] != 0);
+      CHECK(construction_hash[group][facing][1] != 0);
+      CHECK(construction_hash[group][facing][0] != construction_hash[group][facing][1]);
+      for (int other = group + 1; other < 3; other++)
+        for (int phase = 0; phase < 2; phase++)
+          CHECK(construction_hash[group][facing][phase] != construction_hash[other][facing][phase]);
+    }
 }
 
 static void CheckAitosSnapshotHouseFrame(void) {
@@ -689,7 +707,7 @@ static void CheckAitosSnapshotHouseFrame(void) {
   CHECK(!model.overflow && model.face_count > 0);
   CHECK(MaterialFaces(&model, kSimVoxelMaterial_Wood) > 0);
   CHECK(MaterialFaces(&model, kSimVoxelMaterial_Roof) == 0);
-  CHECK(model.max_z == 8.0f);
+  CHECK(model.max_z == 8.45f); /* Includes the ridge beam's thickness. */
 
   /* Replay the ROM's exact $30 -> $31 -> $32 sequence from the resident Aitos
    * atlas. The enhanced models must progress scaffold -> taller scaffold ->
@@ -1033,7 +1051,112 @@ static void CheckStoneBridgeClassificationAndInpaint(void) {
   CHECK((atlas[water] >> 24) == 0xFF);
 }
 
+static void CheckRegionalArtworkIdentity(void) {
+  static uint8_t wram[kWramBytes];
+  static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
+  SimBackgroundVoxelScene scene;
+  for (int y = 4; y < 6; y++)
+    for (int x = 20; x < 22; x++) wram[TownCellIndex(2, x, y)] = 0xEE;
+  SimBackgroundVoxels_ClassifyWithArtwork(3, wram, false,
+                                         kSimBackgroundVoxel_PyramidEye, &scene);
+  const SimBackgroundVoxelObject *object = FindKind(&scene, kSimBackgroundVoxel_Pyramid);
+  CHECK(object && (object->flags & kSimBackgroundVoxel_PyramidEye));
+
+  /* Art identity changes invalidate scene geometry even without tilemap or
+   * record changes. A repeated presentation stays quiet. */
+  SimBackgroundVoxels_Reset();
+  SimBackgroundVoxels_BuildWithRows(3, wram, pixels, NULL, 1, 1, false, 0, NULL, NULL);
+  uint32_t serial = SimBackgroundVoxels_SceneSerial();
+  SimBackgroundVoxels_BuildWithRows(3, wram, pixels, NULL, 1, 1, false,
+                                   kSimBackgroundVoxel_PyramidEye, NULL, NULL);
+  CHECK(SimBackgroundVoxels_SceneSerial() != serial);
+  object = FindKind(SimBackgroundVoxels_Scene(), kSimBackgroundVoxel_Pyramid);
+  CHECK(object && (object->flags & kSimBackgroundVoxel_PyramidEye));
+  serial = SimBackgroundVoxels_SceneSerial();
+  SimBackgroundVoxels_BuildWithRows(3, wram, pixels, NULL, 1, 1, false,
+                                   kSimBackgroundVoxel_PyramidEye, NULL, NULL);
+  CHECK(SimBackgroundVoxels_SceneSerial() == serial);
+  SimBackgroundVoxels_BuildWithRows(3, wram, pixels, NULL, 1, 1, false, 0, NULL, NULL);
+  object = FindKind(SimBackgroundVoxels_Scene(), kSimBackgroundVoxel_Pyramid);
+  CHECK(object && !(object->flags & kSimBackgroundVoxel_PyramidEye));
+  SimBackgroundVoxels_Reset();
+
+  /* The native family wins over the Western town/tier fallback. */
+  memset(wram, 0, sizeof(wram));
+  SeedStructureVisualCatalog(wram);
+  uint8_t *house = wram + kRecords + 4 * kRecordsPerTown;
+  house[0] = 4;
+  house[1] = 5;
+  house[2] = 0xA0;
+  SetCatalogFrame(wram, kSimStructureVisual_House, 0x3A, 4, 5);
+  SimBackgroundVoxels_Classify(5, wram, false, &scene);
+  object = FindKind(&scene, kSimBackgroundVoxel_House);
+  CHECK(object && object->development_level == 2 && object->visual_metatile == 0x3A);
+  CHECK(object && SimBackgroundVoxelRegion_ObjectHouseStyle(object) ==
+        kSimBackgroundHouseStyle_MarahnaStilt);
+  SetCatalogFrame(wram, kSimStructureVisual_House, 0x0A, 4, 5);
+  SimBackgroundVoxels_Classify(5, wram, false, &scene);
+  object = FindKind(&scene, kSimBackgroundVoxel_House);
+  CHECK(object && SimBackgroundVoxelRegion_ObjectHouseStyle(object) ==
+        kSimBackgroundHouseStyle_MarahnaLogCabin);
+}
+
+static void CheckRockClassificationAndClearing(void) {
+  static uint8_t wram[kWramBytes];
+  static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
+  static const uint8_t tiles[] = {0x61, 0x62, 0x63, 0x69, 0x6A, 0x6B};
+  for (int town = 1; town <= 6; town++) {
+    memset(wram, 0, sizeof(wram));
+    for (int at = 0; at < 6; at++) {
+      wram[TownCellIndex(town - 1, at + 2, 3)] = tiles[at];
+      uint16_t first = 0x100 + at * 4;
+      SetTerrainDefinition(wram, tiles[at], first, first + 1, first + 2, first + 3);
+      SetCanvasCell(wram, at + 2, 3, first, first + 1, first + 2, first + 3);
+    }
+    /* Adjacent cliff and sand cells must keep their terrain identities. */
+    wram[TownCellIndex(town - 1, 8, 3)] = 0x60;
+    wram[TownCellIndex(town - 1, 9, 3)] = 0x64;
+    SimBackgroundVoxelScene scene;
+    SimBackgroundVoxels_Classify(town, wram, true, &scene);
+    CHECK(scene.object_count == 6 && !scene.overflow);
+    for (int at = 0; at < 6; at++) {
+      CHECK(scene.objects[at].visual_metatile == tiles[at]);
+      CHECK(scene.objects[at].kind == (at ? kSimBackgroundVoxel_Rocks
+                                        : kSimBackgroundVoxel_Boulder));
+    }
+    SetTerrainDefinition(wram, kTileGrass, 0x180, 0x180, 0x180, 0x180);
+    /* The miracle commits semantic grass before the final artwork redraw. */
+    for (int at = 0; at < 6; at++)
+      wram[TownCellIndex(town - 1, at + 2, 3)] = kTileGrass;
+    SimBackgroundVoxels_Classify(town, wram, true, &scene);
+    CHECK(scene.object_count == 6);
+    for (int at = 0; at < 6; at++)
+      SetCanvasCell(wram, at + 2, 3, 0x180, 0x180, 0x180, 0x180);
+    SimBackgroundVoxels_Classify(town, wram, true, &scene);
+    CHECK(scene.object_count == 0);
+  }
+  memset(wram, 0, sizeof(wram));
+  for (size_t at = 0; at < sizeof(pixels) / sizeof(pixels[0]); at++)
+    pixels[at] = 0xFF708020;
+  wram[CellIndex(4, 4)] = 0x61;
+  wram[CellIndex(8, 8)] = kTileGrass;
+  SetTerrainDefinition(wram, kTileGrass, 0x180, 0x180, 0x180, 0x180);
+  SetCanvasCell(wram, 8, 8, 0x180, 0x180, 0x180, 0x180);
+  FillCell(pixels, 4, 4, 0xFFAAAAAA);
+  SimBackgroundVoxels_Reset();
+  SimBackgroundVoxels_Build(1, wram, pixels, NULL, 1, 1, true);
+  CHECK(FindKind(SimBackgroundVoxels_Scene(), kSimBackgroundVoxel_Boulder));
+  size_t pixel = (size_t)(4 * 16 + 8) * kSimTownCanvasPixels + 4 * 16 + 8;
+  CHECK(SimBackgroundVoxels_GroundPixels()[pixel] != 0xFFAAAAAA);
+  wram[CellIndex(4, 4)] = kTileGrass;
+  FillCell(pixels, 4, 4, 0xFF708020);
+  SimBackgroundVoxels_Build(1, wram, pixels, NULL, 2, 2, true);
+  CHECK(!FindKind(SimBackgroundVoxels_Scene(), kSimBackgroundVoxel_Boulder));
+  CHECK(SimBackgroundVoxels_GroundPixels()[pixel] == 0xFF708020);
+}
+
 int main(int argc, char **argv) {
+  CheckRegionalArtworkIdentity();
   s_reverse_rows = argc == 2 && !strcmp(argv[1], "--dispatch-rows");
 #ifdef AR_TEST_THREADED_ROWS
   s_test_work = HostParallelWork_Create(3);
@@ -1279,19 +1402,29 @@ int main(int argc, char **argv) {
   for (uint16_t i = 0; i < scene.object_count; i++)
     CHECK(scene.objects[i].kind == kSimBackgroundVoxel_BroadTree);
 
-  /* Marahna's sanctuary is the $C0 variant of the same 2x2 plot every other
-   * town draws as a cathedral. Recognising only the $C2 family left Marahna
-   * with no sanctuary object at all. */
+  /* Native Marahna contains BOTH an ordinary cathedral and the separate
+   * temple landmark. These coordinates/marks come from the verified WRAM. */
+  memset(wram, 0, sizeof(wram));
+  wram[TownCellIndex(4, 17, 17)] = 0xC2;
+  wram[TownCellIndex(4, 18, 17)] = 0xC3;
+  wram[TownCellIndex(4, 17, 18)] = 0xCA;
+  wram[TownCellIndex(4, 18, 18)] = 0xCB;
+  for (int y = 20; y < 22; y++)
+    for (int x = 6; x < 8; x++) wram[TownCellIndex(4, x, y)] = 0xEF;
+  SimBackgroundVoxels_Classify(5, wram, true, &scene);
+  object = FindKind(&scene, kSimBackgroundVoxel_MarahnaTemple);
+  CHECK(object && object->cell_x == 6 && object->cell_y == 20);
+  CHECK(object && object->footprint_cells_w == 2 && object->footprint_cells_d == 2);
+  object = FindKind(&scene, kSimBackgroundVoxel_Cathedral);
+  CHECK(object && object->cell_x == 17 && object->cell_y == 17);
+  /* The old synthetic signature must not create a phantom temple. */
   memset(wram, 0, sizeof(wram));
   wram[TownCellIndex(4, 17, 17)] = 0xC0;
   wram[TownCellIndex(4, 18, 17)] = 0xC1;
   wram[TownCellIndex(4, 17, 18)] = 0xC8;
   wram[TownCellIndex(4, 18, 18)] = 0xC9;
   SimBackgroundVoxels_Classify(5, wram, true, &scene);
-  object = FindKind(&scene, kSimBackgroundVoxel_MarahnaTemple);
-  CHECK(object && object->cell_x == 17 && object->cell_y == 17);
-  CHECK(object && object->footprint_cells_w == 2 && object->footprint_cells_d == 2);
-  CHECK(FindKind(&scene, kSimBackgroundVoxel_Cathedral) == NULL);
+  CHECK(FindKind(&scene, kSimBackgroundVoxel_MarahnaTemple) == NULL);
 
   /* The eraser is selected from the current town rather than hardcoded to
    * grass: a snowy town must repeat its complete snow tile under replacements. */
@@ -1395,6 +1528,7 @@ int main(int argc, char **argv) {
   CheckIndependentSceneAndPixelPublications();
   CheckStoneBridgeClassificationAndInpaint();
   CheckCleanMountainAtlasPublication();
+  CheckRockClassificationAndClearing();
 
   if (s_reverse_rows) CHECK(s_dispatched_refreshes > 0);
 #ifdef AR_TEST_THREADED_ROWS

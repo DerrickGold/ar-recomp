@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "sim/voxels/sim_background_voxel_landmarks.h"
+#include "sim/voxels/sim_background_voxel_region.h"
 #include "sim/town/sim_town_layout.h"
 
 enum {
@@ -183,17 +184,14 @@ static void CaptureSanctuary(
     SimWorldNavigationTowns *out, bool occupied[kTownCellCount]) {
   for (int y = 0; y < 31; y++) {
     for (int x = 0; x < 31; x++) {
-      /* Match the retained sanctuary art, not a town-name assumption.
-       * Marahna can contain the ordinary cathedral as well as the temple
-       * variant, just as the full town classifier already recognizes. */
+      /* The ordinary $C2 sanctuary is shared by every town. Marahna
+       * also has a separate $EF plot, handled by CaptureLandmarks. */
       const uint8_t base = wram[SimTownLayout_CellMapIndex(town, x, y)];
-      if (base != 0xC0 && base != 0xC2) continue;
+      if (base != 0xC2) continue;
       if (!SanctuaryAt(wram, town, x, y, base)) continue;
       (void)Append(out, (SimWorldNavigationTownObject){
         .town = town,
-        .kind = base == 0xC0
-            ? kSimBackgroundVoxel_MarahnaTemple
-            : kSimBackgroundVoxel_Cathedral,
+        .kind = kSimBackgroundVoxel_Cathedral,
         .record_slot = kSimBackgroundVoxelNoRecordSlot,
         .cell_x = (uint8_t)x,
         .cell_y = (uint8_t)y,
@@ -392,6 +390,25 @@ static void CaptureFoliage(
   }
 }
 
+static void CaptureRocks(const uint8_t *wram, uint8_t town,
+                         SimWorldNavigationTowns *out, const bool *occupied) {
+  for (int y = 0; y < kTownCells; y++)
+    for (int x = 0; x < kTownCells; x++) {
+      if (occupied[TownCellIndex(x, y)]) continue;
+      uint8_t tile = wram[SimTownLayout_CellMapIndex(town, x, y)];
+      int kind = SimBackgroundVoxelRegion_RockKind(tile);
+      if (kind == kSimBackgroundVoxelKindCount) continue;
+      if (!Append(out, (SimWorldNavigationTownObject){
+            .town = town, .kind = (uint8_t)kind,
+            .cell_x = (uint8_t)x, .cell_y = (uint8_t)y,
+            .source_cells_w = 1, .source_cells_h = 1,
+            .footprint_cells_w = 1, .footprint_cells_d = 1,
+            .record_slot = kSimBackgroundVoxelNoRecordSlot,
+            .visual_metatile = tile,
+          })) return;
+    }
+}
+
 void SimWorldNavigationTowns_Capture(
     const uint8_t *wram, SimWorldNavigationTowns *out) {
   if (!out) return;
@@ -416,6 +433,7 @@ void SimWorldNavigationTowns_Capture(
     CaptureLandmarks(wram, town, out, occupied);
     CaptureBridges(wram, town, out, occupied);
     CaptureFoliage(wram, town, out, occupied);
+    CaptureRocks(wram, town, out, occupied);
     if (out->overflow) return;
   }
 }

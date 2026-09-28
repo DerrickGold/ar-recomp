@@ -599,6 +599,9 @@ uint8_t ActRaiserRegional_TitleArtworkSnapshot(void) { return s_title_open?s_tit
 uint8_t ActRaiserRegional_TownArtworkSnapshot(uint16_t scene) {
   return s_campaign.active_valid && scene==s_town_art_scene?s_town_artwork:0;
 }
+uint8_t ActRaiserRegional_LastTownArtworkSnapshot(void) {
+  return s_campaign.active_valid ? s_town_artwork : 0;
+}
 bool ActRaiserRegional_BeginTownArtwork(uint16_t scene,uint8_t *mask) {
   if(!mask || (scene&255) || scene<0x0100 || scene>0x0600)return false;
   uint8_t next=0;

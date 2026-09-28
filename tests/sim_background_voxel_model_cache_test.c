@@ -143,7 +143,8 @@ int main(void) {
         &objects[i], kSimBackgroundVoxelDetail_Low,
         kSimBackgroundVoxelStyle_Basic, NULL, NULL) != NULL);
   stats = SimBackgroundVoxelModelCache_Stats();
-  CHECK(first_pass_misses == kDevelopedTownObjects);
+  /* Basic houses share geometry; every tree still retains its seed. */
+  CHECK(first_pass_misses == kDevelopedTownObjects / 2 + 1);
   if (stats.hits < kDevelopedTownObjects * 9 / 10)
     fprintf(stderr, "cache retention: hits=%u misses=%u evictions=%u\n",
             stats.hits, stats.misses, stats.evictions);
@@ -255,6 +256,49 @@ int main(void) {
       stats.capacity, stats.storage_bytes, kGlobeObjects);
   SimBackgroundVoxelModelCache_Reset();
   CHECK(SimBackgroundVoxelModelCache_Stats().hits == 0);
+
+  /* Eight placements of a Basic house share one compiled mesh. Varied above
+   * still keeps its placement-dependent identity. */
+  house = (SimBackgroundVoxelObject){.kind = kSimBackgroundVoxel_House,
+      .town = 5, .development_level = 2,
+      .visual_state = kSimStructureVisualState_Finished, .visual_metatile = 0x0A};
+  first = SimBackgroundVoxelModelCache_Get(&house, kSimBackgroundVoxelDetail_High,
+      kSimBackgroundVoxelStyle_Basic, NULL, NULL);
+  for (int i = 1; i < 8; i++) {
+    house.cell_x = i;
+    house.cell_y = i * 3;
+    house.group = i;
+    house.record_slot = i;
+    CHECK(SimBackgroundVoxelModelCache_Get(&house, kSimBackgroundVoxelDetail_High,
+        kSimBackgroundVoxelStyle_Basic, NULL, NULL) == first);
+  }
+  stats = SimBackgroundVoxelModelCache_Stats();
+  CHECK(stats.misses == 1 && stats.hits == 7);
+  house.visual_metatile = 0x3A;
+  second = SimBackgroundVoxelModelCache_Get(&house, kSimBackgroundVoxelDetail_High,
+      kSimBackgroundVoxelStyle_Basic, NULL, NULL);
+  CHECK(first && second && first != second);
+  CHECK(first->max_z == 12.0f && second->max_z == 12.5f);
+  house = (SimBackgroundVoxelObject){.kind = kSimBackgroundVoxel_Pyramid, .town = 3};
+  first = SimBackgroundVoxelModelCache_Get(&house, kSimBackgroundVoxelDetail_Low,
+      kSimBackgroundVoxelStyle_Basic, NULL, NULL);
+  house.flags = kSimBackgroundVoxel_PyramidEye;
+  second = SimBackgroundVoxelModelCache_Get(&house, kSimBackgroundVoxelDetail_Low,
+      kSimBackgroundVoxelStyle_Basic, NULL, NULL);
+  CHECK(first && second && first != second && first->face_count < second->face_count);
+  SimBackgroundVoxelModelCache_Reset();
+
+  /* A redraw at the same cell can change the native scattered-rock layout. */
+  SimBackgroundVoxelObject rocks = {
+    .kind = kSimBackgroundVoxel_Rocks, .town = 4, .visual_metatile = 0x62,
+  };
+  first = SimBackgroundVoxelModelCache_Get(&rocks, kSimBackgroundVoxelDetail_Low,
+      kSimBackgroundVoxelStyle_Varied, NULL, NULL);
+  rocks.visual_metatile = 0x6B;
+  second = SimBackgroundVoxelModelCache_Get(&rocks, kSimBackgroundVoxelDetail_Low,
+      kSimBackgroundVoxelStyle_Varied, NULL, NULL);
+  CHECK(first && second && first != second && first->face_count < second->face_count);
+  SimBackgroundVoxelModelCache_Reset();
 
   if (failures) {
     fprintf(stderr, "%d sim background voxel cache checks failed\n", failures);
