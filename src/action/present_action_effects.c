@@ -21,6 +21,7 @@ static ArRenderTexture s_action_bg2_mask_texture;
 static ArRenderTexture s_action_plane_effect_target;
 static int s_action_plane_effect_w, s_action_plane_effect_h;
 static bool s_action_plane_blend_supported = true;
+static bool s_action_surface_light_supported = true;
 static ArRenderTexture s_action_heat_target;
 static int s_action_heat_w, s_action_heat_h;
 static bool s_action_heat_supported = true;
@@ -56,10 +57,26 @@ static ActionEffectRenderScratch s_action_effect_render_scratch;
 
 static PresentationUploadMirror s_action_bg1_mask_mirror;
 static PresentationUploadMirror s_action_bg2_mask_mirror;
+static bool s_action_bg2_mask_has_alpha;
+static bool s_action_bg2_mask_ready;
+static uint32_t s_action_foliage_mask[kFrameSlotLayerTextureWidth * kFrameSlotAuthenticHeight];
+
+static bool FrameUsesFoliage(const FrameSlot *slot) {
+  if (!slot || !slot->action_environmental_effects ||
+      slot->action_scene_effects.decoration_overflow ||
+      slot->action_scene_effects.decoration_count > kActionSceneDecorationMaxInstances)
+    return false;
+  for (unsigned i = 0; i < slot->action_scene_effects.decoration_count; i++)
+    if (slot->action_scene_effects.decorations[i].render_layer ==
+        kActionEffectRenderLayer_Bg2Foliage)
+      return true;
+  return false;
+}
 
 uint64_t PresentActionEffects_UploadMask(
     ArRenderDevice *device, int plane, const FrameSlot *slot,
     const uint8_t *pixels, int pitch_bytes) {
+  if (plane == SR_PPU_OVERLAY_BG2) s_action_bg2_mask_ready = false;
   if (!pixels || !slot || pitch_bytes <= 0 ||
       (plane != SR_PPU_OVERLAY_BG1 && plane != SR_PPU_OVERLAY_BG2))
     return 0;
@@ -83,11 +100,34 @@ uint64_t PresentActionEffects_UploadMask(
     const ArRenderRectI mask = {
       0, 0, slot->snes_width, slot->snes_height,
     };
+    const bool alpha_mask = plane == SR_PPU_OVERLAY_BG2 && FrameUsesFoliage(slot);
+    if (alpha_mask) {
+      if (mask.w <= 0 || mask.w > kFrameSlotLayerTextureWidth || mask.h <= 0 ||
+          mask.h > kFrameSlotAuthenticHeight || pitch_bytes < mask.w * 4)
+        return 0;
+      /* Native winner masks use opaque black outside BG2. Foliage also needs
+       * zero alpha there. Reuse this same upload for light and leaf passes. */
+      for (int y = 0; y < mask.h; y++) {
+        for (int x = 0; x < mask.w; x++) {
+          uint32_t pixel;
+          memcpy(&pixel, pixels + (size_t)y * pitch_bytes + x * 4, sizeof(pixel));
+          s_action_foliage_mask[y * mask.w + x] =
+              (pixel & 0x00ffffffu) ? 0xffffffffu : 0;
+        }
+      }
+      pixels = (const uint8_t *)s_action_foliage_mask;
+      pitch_bytes = mask.w * 4;
+    }
     PresentationUploadResult result;
     if (PresentationUploadMirror_UploadArgb8888(
             mirror, device, *texture, pixels, mask.w, mask.h,
-            pitch_bytes, mask.x, mask.y, &result))
+            pitch_bytes, mask.x, mask.y, &result)) {
+      if (plane == SR_PPU_OVERLAY_BG2) {
+        s_action_bg2_mask_has_alpha = alpha_mask;
+        s_action_bg2_mask_ready = true;
+      }
       return result.uploaded_bytes;
+    }
   }
   return 0;
 }
@@ -129,12 +169,12 @@ static void FailActionHeatTargetState(ArRenderDevice *device, const char *operat
   SessionFatal_Request(
       "The action heat-refraction pass could not restore the active render "
       "target (%s). Restart the game; if this repeats, update your graphics "
-      "driver or disable action particles.",
+      "driver or disable Environmental effects.",
       ArRenderDevice_LastError(device));
 }
 
 static bool FrameUsesActionHeat(const FrameSlot *slot) {
-  if (!slot || !slot->action_effect_particles || slot->diorama_active ||
+  if (!slot || !slot->action_environmental_effects || slot->diorama_active ||
       ActRaiserRoom_ProfileFor(
           slot->diorama_map_group, slot->diorama_map_number) !=
               kActRaiserRoomProfile_AitosAct2Lava ||
@@ -326,13 +366,28 @@ void PresentActionHeat_End(
     SessionFatal_Request(
         "The action heat-refraction pass could not restore the output "
         "viewport and clip state (%s). Restart the game; if this repeats, "
-        "update your graphics driver or disable action particles.",
+        "update your graphics driver or disable Environmental effects.",
         ArRenderDevice_LastError(device));
   } else if (!warped)
     DisableActionHeat(device, fallback ? "refraction mesh" : "fallback resolve");
 }
 
 /* ── Action-stage presentation effects ────────────────────────────────── */
+
+static void SubmitSurfaceLight(ArRenderDevice *device, const EffectBatch *batch) {
+  const ArRenderDrawState state = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = kArRenderBlendMode_Light,
+  };
+  /* Custom blending is optional (notably on software renderers). A rejection
+   * must not trip the shared capability latch for ordinary spell/actor effects. */
+  if (ArRenderDevice_DrawGeometryWithState(device, ArRenderTexture_Invalid(),
+          batch->vertices, batch->vertex_count, batch->indices, batch->index_count, &state))
+    return;
+  s_action_surface_light_supported = false;
+  fprintf(stderr, "[action-fx] surface lighting unavailable (%s); disabled\n",
+          ArRenderDevice_LastError(device));
+}
 
 _Static_assert(kActionEffectObjPriorityCount ==
                    kDioramaObjectPriorityCount,
@@ -344,7 +399,8 @@ void PresentActionEffects_Draw(
   if (!slot || (!slot->action_effects.visible_count &&
                 !slot->action_scene_effects.visible_count &&
                 !slot->action_scene_effects.decoration_visible_count) ||
-      (!slot->action_effect_lighting && !slot->action_effect_particles) ||
+      (!slot->action_effect_lighting && !slot->action_effect_particles &&
+       !slot->action_environmental_effects) ||
       !EffectRenderer_Available())
     return;
 
@@ -411,17 +467,29 @@ void PresentActionEffects_Draw(
    * budget without allocating another workspace. BG2 decorations and bottom
    * atmosphere are submitted by their dedicated depth-ordered passes. */
   bool decoration_submitted = false;
-  if (slot->action_scene_effects.decoration_visible_count &&
+  if (slot->action_environmental_effects &&
+      slot->action_scene_effects.decoration_visible_count &&
       ActionSceneDecorationRender_Build(
           &slot->action_scene_effects,
           kActionEffectRenderLayer_WorldOverlay,
-          slot->action_effect_lighting, slot->action_effect_particles,
-          ActionEffectProjection_ProjectPoint, &projection,
+          true, true,
+          ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds, &projection,
           scene_geometry) && scene_geometry->index_count) {
     scene_batch.vertex_count = scene_geometry->vertex_count;
     scene_batch.index_count = scene_geometry->index_count;
     decoration_submitted = EffectRenderer_Submit(
         device, &scene_batch, kArRenderBlendMode_Add);
+  }
+  if (slot->action_environmental_effects && s_action_surface_light_supported &&
+      slot->action_scene_effects.decoration_visible_count &&
+      ActionSceneDecorationRender_Build(
+          &slot->action_scene_effects, kActionEffectRenderLayer_ForegroundLight,
+          true, false, ActionEffectProjection_ProjectPoint,
+          ActionEffectProjection_ClipBounds, &projection, scene_geometry) &&
+      scene_geometry->index_count) {
+    scene_batch.vertex_count = scene_geometry->vertex_count;
+    scene_batch.index_count = scene_geometry->index_count;
+    SubmitSurfaceLight(device, &scene_batch);
   }
   /* One line, once per process: the whole path (WRAM identity -> capture ->
    * projection -> geometry submit) either produced pixels or it did not, and
@@ -460,6 +528,7 @@ void PresentActionEffects_DrawDioramaPlane(
   PresentActionPlaneEffectContext *context =
       (PresentActionPlaneEffectContext *)userdata;
   if (!context || !context->slot ||
+      !context->slot->action_environmental_effects ||
       !context->slot->action_scene_effects.decoration_visible_count ||
       !diorama_projection || !EffectRenderer_Available())
     return;
@@ -498,8 +567,9 @@ void PresentActionEffects_DrawDioramaPlane(
       &s_action_effect_render_scratch.scene;
   if (!ActionSceneDecorationRender_Build(
           &slot->action_scene_effects, render_layer,
-          slot->action_effect_lighting, slot->action_effect_particles,
-          ActionEffectProjection_ProjectPoint, &projection, geometry))
+          true, true,
+          ActionEffectProjection_ProjectPoint,
+          ActionEffectProjection_ClipBounds, &projection, geometry))
     return;
   EffectBatch batch = {
     .vertices = geometry->vertices,
@@ -524,7 +594,7 @@ void PresentActionEffects_DrawDioramaPlane(
       render_layer == kActionEffectRenderLayer_Bg2Plane) {
     announced_bg2 = true;
     fprintf(stderr,
-            "[action-fx] first BG2-local waterfall geometry submitted "
+            "[action-fx] first BG2-local decoration geometry submitted "
             "(Diorama)\n");
   }
   static bool announced_bg1_high;
@@ -536,15 +606,25 @@ void PresentActionEffects_DrawDioramaPlane(
             "(Diorama, depth-ordered)\n");
   }
 
-  /* The finite-backdrop gap exists only in Diorama's vertical extension.
-   * Submit its unmasked atmosphere from the same after-BG2 callback, before
-   * later BG1 and OBJ planes, so source sprites remain in front. */
+  /* Dark foliage follows the light, using the same foreground occlusion. */
   if (render_layer != kActionEffectRenderLayer_Bg2Plane) return;
+  if (FrameUsesFoliage(slot) && ActionSceneDecorationRender_Build(
+          &slot->action_scene_effects, kActionEffectRenderLayer_Bg2Foliage,
+          true, true, ActionEffectProjection_ProjectPoint,
+          ActionEffectProjection_ClipBounds, &projection, geometry) &&
+      geometry->index_count) {
+    batch.vertex_count = geometry->vertex_count;
+    batch.index_count = geometry->index_count;
+    (void)EffectRenderer_Submit(device, &batch, kArRenderBlendMode_Alpha);
+  }
+  /* The finite-backdrop gap exists only in Diorama's vertical extension.
+   * Submit its unmasked atmosphere here, before later BG1 and OBJ planes. */
   if (!ActionSceneDecorationRender_Build(
           &slot->action_scene_effects,
           kActionEffectRenderLayer_Atmosphere,
-          slot->action_effect_lighting, slot->action_effect_particles,
-          ActionEffectProjection_ProjectPoint, &projection, geometry) ||
+          true, true,
+          ActionEffectProjection_ProjectPoint,
+          ActionEffectProjection_ClipBounds, &projection, geometry) ||
       !geometry->index_count)
     return;
   batch.vertex_count = geometry->vertex_count;
@@ -591,10 +671,39 @@ static ArRenderTexture EnsureActionPlaneEffectTarget(ArRenderDevice *device, int
   return s_action_plane_effect_target;
 }
 
+static bool DrawAlphaMaskedGeometry(
+    ArRenderDevice *device, const FrameSlot *slot, ArRenderRectI viewport,
+    ArRenderTexture mask, bool foliage, ActionSceneEffectRenderBatch *geometry) {
+  /* The binary winner mask has white/opaque winning pixels and transparent
+   * black elsewhere. Sample it in native screen coordinates: geometry color
+   * and alpha are masked together, with no intermediate target or resolves.
+   * The caller's scene viewport clips particles at the output edges. */
+  for (int i = 0; i < geometry->vertex_count; i++) {
+    ArRenderVertex2D *v = &geometry->vertices[i];
+    v->tex_coord.x = (slot->visible_x0 + v->position.x * slot->visible_width / viewport.w) /
+        kFrameSlotLayerTextureWidth;
+    v->tex_coord.y = (v->position.y * slot->snes_height / viewport.h) /
+        kFrameSlotAuthenticHeight;
+    v->position.x += viewport.x;
+    v->position.y += viewport.y;
+  }
+  const ArRenderDrawState state = {
+    .flags = kArRenderDrawState_Blend,
+    .blend = foliage ? kArRenderBlendMode_Alpha : kArRenderBlendMode_Add,
+  };
+  return ArRenderDevice_DrawGeometryWithState(device, mask, geometry->vertices,
+      geometry->vertex_count, geometry->indices, geometry->index_count, &state);
+}
+
 static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
     const FrameSlot *slot, ArRenderRectI viewport, uint8_t render_layer,
     bool mask_valid, ArRenderTexture mask_texture, const char *label) {
-  if (!slot || !mask_valid ||
+  const bool foliage = render_layer == kActionEffectRenderLayer_Bg2Foliage;
+  if ((foliage || render_layer == kActionEffectRenderLayer_Bg2Plane) &&
+      !s_action_bg2_mask_ready)
+    return true; /* Never reuse stale occlusion after an upload failure. */
+  if (foliage && (!FrameUsesFoliage(slot) || !s_action_bg2_mask_has_alpha)) return true;
+  if (!slot || !slot->action_environmental_effects || !mask_valid ||
       !slot->action_scene_effects.decoration_visible_count ||
       !ArRenderTexture_IsValid(mask_texture) ||
       !s_action_plane_blend_supported ||
@@ -618,10 +727,17 @@ static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
       &s_action_effect_render_scratch.scene;
   if (!ActionSceneDecorationRender_Build(
           &slot->action_scene_effects, render_layer,
-          slot->action_effect_lighting, slot->action_effect_particles,
-          ActionEffectProjection_ProjectPoint, &projection, geometry) ||
+          true, true,
+          ActionEffectProjection_ProjectPoint,
+          ActionEffectProjection_ClipBounds, &projection, geometry) ||
       !geometry->index_count)
     return true;
+  if (s_action_bg2_mask_has_alpha &&
+      (foliage || render_layer == kActionEffectRenderLayer_Bg2Plane)) {
+    if (!DrawAlphaMaskedGeometry(device, slot, viewport, mask_texture, foliage, geometry))
+      DisableActionPlaneEffect(device, "masked geometry submit");
+    return true;
+  }
   const ArRenderTexture target =
       EnsureActionPlaneEffectTarget(device, viewport.w, viewport.h);
   if (!ArRenderTexture_IsValid(target)) return true;
@@ -709,7 +825,11 @@ bool PresentActionEffects_DrawFlatPlanes(
     DrawActionPlaneEffectFlat(
       device, slot, viewport, kActionEffectRenderLayer_Bg2Plane,
       slot->action_bg2_mask_valid, s_action_bg2_mask_texture,
-      "BG2-local waterfall");
+      "BG2-local decoration") &&
+    DrawActionPlaneEffectFlat(
+      device, slot, viewport, kActionEffectRenderLayer_Bg2Foliage,
+      slot->action_bg2_mask_valid, s_action_bg2_mask_texture,
+      "BG2 foliage");
 }
 
 void PresentActionEffects_Reset(ArRenderDevice *device) {
@@ -723,6 +843,7 @@ void PresentActionEffects_Reset(ArRenderDevice *device) {
   s_action_plane_effect_target = ArRenderTexture_Invalid();
   s_action_plane_effect_w = s_action_plane_effect_h = 0;
   s_action_plane_blend_supported = true;
+  s_action_surface_light_supported = true;
   s_action_heat_target = ArRenderTexture_Invalid();
   ClearActionHeatSavedState();
   s_action_heat_mesh_cache = (ActionHeatMeshCache){0};
@@ -731,4 +852,6 @@ void PresentActionEffects_Reset(ArRenderDevice *device) {
   s_action_heat_engaged = false;
   PresentationUploadMirror_Reset(&s_action_bg1_mask_mirror);
   PresentationUploadMirror_Reset(&s_action_bg2_mask_mirror);
+  s_action_bg2_mask_has_alpha = false;
+  s_action_bg2_mask_ready = false;
 }

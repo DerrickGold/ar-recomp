@@ -111,6 +111,9 @@ typedef enum ArRenderBlendMode {
   /* Preserve destination RGB and multiply destination alpha by source alpha.
    * This intersects an accumulated silhouette with a sampled mask. */
   kArRenderBlendMode_DestinationAlphaMask,
+  /* Add source RGB times destination RGB. Source RGB contains the light
+   * strength already: dst * (1 + src). Black scenery stays black. */
+  kArRenderBlendMode_Light,
   kArRenderBlendMode_Modulate,
   kArRenderBlendMode_Multiply,
 } ArRenderBlendMode;

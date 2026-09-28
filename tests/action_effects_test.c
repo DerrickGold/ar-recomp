@@ -2717,7 +2717,79 @@ static void TestFirstActBossMagic(void) {
   }
 }
 
+static void TestForestEnvironmentalCapture(void) {
+  static uint8_t wram[kActRaiserWramSize], before[kActRaiserWramSize];
+  ActionEffectObserver observer = {0};
+  ActionSceneEffectFrame frame;
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
+  wram[kActRaiserWram_CurrentMap] = 1;
+  Write16(wram, kActRaiserWram_GameFrame, 120);
+  Write16(wram, kActRaiserWram_Bg1Width, 4096);
+  Write16(wram, kActRaiserWram_Bg1Height, 768);
+  Write16(wram, kActRaiserWram_Bg2Width, 2304);
+  Write16(wram, kActRaiserWram_Bg2Height, 512);
+  Write16(wram, 0x4A, 0xC000);
+  /* Room readiness signature: page 0, cells (9,7) and (9,8). */
+  wram[0xC000 + 7 * 16 + 9] = 0x0F;
+  wram[0xC000 + 8 * 16 + 9] = 0x01;
+  memcpy(before, wram, sizeof(wram));
+  CHECK(ActionSceneEffects_RoomUsesBg2Decorations(wram, sizeof(wram)));
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 0);
+  CHECK(frame.decoration_count == 0); /* Optional capture is a separate gate. */
+  ActionEnvironmentalEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram));
+  CHECK(frame.decoration_count == 3 && !frame.decoration_overflow);
+  CHECK(frame.effects[0].kind == kActionEffect_None && frame.effect_count == 0);
+  const ActionEffectInstance first = frame.decorations[0];
+  CHECK(first.world_x == 128 && first.world_y == -160);
+  CHECK(first.projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds);
+  CHECK(first.render_layer == kActionEffectRenderLayer_Bg2Plane);
+  CHECK(!memcmp(wram, before, sizeof(wram)));
+
+  /* Vblank/frame changes while paused do not age host atmosphere. */
+  Write16(wram, kActRaiserWram_GameFrame, 160);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram));
+  CHECK(!memcmp(&first, &frame.decorations[0], sizeof(first)));
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 3);
+  ActionEnvironmentalEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram));
+  CHECK(frame.decorations[0].phase_ticks == first.phase_ticks + 3);
+  CHECK(frame.decorations[0].generation == first.generation);
+  /* Traverse the full camera range: wash, foliage and foreground light, stable
+   * identities, offscreen origin, and exact finite world clipping bounds. */
+  for (int cx = 0; cx <= 3840; cx += 64) {
+    Write16(wram, kActRaiserWram_Bg1CameraX, (uint16_t)cx);
+    Write16(wram, kActRaiserWram_Bg2CameraX, (uint16_t)(cx / 2));
+    Write16(wram, kActRaiserWram_Bg1CameraY, 320);
+    Write16(wram, kActRaiserWram_Bg2CameraY, 192);
+    ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 0);
+    ActionEnvironmentalEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram));
+    CHECK(frame.decoration_count == 3);
+    CHECK(!frame.decoration_overflow && frame.effect_count == 0);
+    for (unsigned i = 0; i < frame.decoration_count; i++) {
+      const ActionEffectInstance *light = &frame.decorations[i];
+      CHECK(light->world_y == 96); /* mean camera 256 minus offscreen 160 */
+      CHECK(light->world_x == cx * 3 / 4 + 128);
+      CHECK(light->generation == first.generation);
+      CHECK(light->phase_ticks == first.phase_ticks + 3);
+      CHECK(light->flags & kActionEffectFlag_ClipToRect);
+      CHECK(light->clip_rect.x0 + light->world_x - cx * 3 / 4 + cx / 2 == 0);
+      CHECK(light->clip_rect.x1 - light->clip_rect.x0 == 2304);
+      CHECK(light->clip_rect.y0 + light->world_y - 256 + 192 == 0);
+      CHECK(light->clip_rect.y1 - light->clip_rect.y0 == 512);
+    }
+  }
+  wram[0xC000 + 8 * 16 + 9] = 0;
+  ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram));
+  CHECK(frame.decoration_count == 0); /* Incomplete/replaced source fails closed. */
+  wram[kActRaiserWram_CurrentMap] = 2;
+  CHECK(!ActionSceneEffects_RoomUsesBg2Decorations(wram, sizeof(wram)));
+  CHECK(!ActionSceneEffects_RoomUsesBg2Decorations(wram, 20));
+  CHECK(!ActionSceneEffects_RoomUsesBg2Decorations(NULL, 0));
+}
+
 int main(void) {
+  TestForestEnvironmentalCapture();
   TestFirstActBossMagic();
   TestControllerAndSlotIdentity();
   TestEverySpellIsIdentified();

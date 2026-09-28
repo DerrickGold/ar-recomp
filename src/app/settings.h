@@ -597,6 +597,7 @@ typedef struct Settings {
    * the same captured lifecycle is projected through either action renderer. */
   bool action_effect_lighting;
   bool action_effect_particles;
+  bool action_environmental_effects; /* Scenery accents, independent of actors. */
 
   /* Diorama 3D presentation. Camera angles are scaled ints (no float setting
    * type); the live DioramaCamera is seeded from these and writes back on

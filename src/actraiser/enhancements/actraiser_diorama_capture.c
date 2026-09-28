@@ -370,9 +370,9 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
    * Diorama owns isolated planes and inserts effects directly after BG1/BG2;
    * a one-shot dump likewise owns these capture slots. HD replacements get
    * first refusal above—never overwrite another source policy. */
-  const bool action_effects_enabled =
-      g_settings.action_effect_lighting || g_settings.action_effect_particles;
-  if (action_effects_enabled && !g_diorama_frame_active &&
+  const bool environmental_effects_enabled =
+      g_settings.action_environmental_effects;
+  if (environmental_effects_enabled && !g_diorama_frame_active &&
       !HostDevTools_DioramaDumpArmed() &&
       ActionSceneEffects_RoomUsesBg1Decorations(g_ram, kActRaiserWramSize)) {
     const SrPpuOverlayCaptureState *bg1 =
@@ -389,9 +389,9 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
       }
     }
   }
-  if (action_effects_enabled && !g_diorama_frame_active &&
-      !HostDevTools_DioramaDumpArmed() && map_group == kActRaiserMapGroup_Aitos &&
-      map_number >= 2 && map_number <= 3) {
+  if (environmental_effects_enabled && !g_diorama_frame_active &&
+      !HostDevTools_DioramaDumpArmed() &&
+      ActionSceneEffects_RoomUsesBg2Decorations(g_ram, kActRaiserWramSize)) {
     const SrPpuOverlayCaptureState *bg2 =
         ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG2);
     if (bg2->x1 <= bg2->x0 || bg2->y1 <= bg2->y0) {

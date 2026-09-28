@@ -308,7 +308,8 @@ static void DioramaPerformanceReport(const DioramaPerformanceData *data,
       data->fragment_pixels[kArRenderBlendMode_AlphaPremultiplied];
   const uint64_t add_fragments =
       data->fragment_pixels[kArRenderBlendMode_Add] +
-      data->fragment_pixels[kArRenderBlendMode_AddPremultiplied];
+      data->fragment_pixels[kArRenderBlendMode_AddPremultiplied] +
+      data->fragment_pixels[kArRenderBlendMode_Light];
   fprintf(stderr,
           "[diorama-work] sync/present=%.1f uploads/present=%.1f "
           "upload-KiB/present=%.1f draws/present=%.1f "

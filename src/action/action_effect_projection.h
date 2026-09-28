@@ -53,6 +53,11 @@ bool ActionEffectProjection_ProjectPoint(
     void *userdata, const ActionEffectInstance *effect,
     float local_x, float local_y, ArRenderPointF *point);
 
+/* Finite room, capture-plane and viewport intersection in effect-local space.
+ * ActionEffectClipBoundsFn-compatible; does not alter geometry or its colors. */
+bool ActionEffectProjection_ClipBounds(
+    void *userdata, const ActionEffectInstance *effect, ActionEffectLocalRect *bounds);
+
 /* Reports whether a visible rect-backed effect overlaps the source rectangle
  * shown by flat action presentation. This is useful for optional full-scene
  * passes whose cost and appearance should be tied to semantic source content,

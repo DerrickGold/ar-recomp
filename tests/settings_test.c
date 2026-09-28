@@ -112,7 +112,7 @@ static void TestDefaultsAndMetadata(void) {
    * Seeded regional rolls add two options; save slots add two entry actions.
    * Remember last town adds a native/enhanced QoL preference; native menu
    * quick use adds an independent QoL toggle. */
-  const int expected_descriptors = 304;
+  const int expected_descriptors = 305;
   if (g_setting_desc_count != expected_descriptors)
     fprintf(stderr, "Setting descriptors: expected %d, got %d\n",
             expected_descriptors, g_setting_desc_count);
@@ -227,6 +227,7 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.sim3d_particles);
   CHECK(g_settings.action_effect_lighting);
   CHECK(g_settings.action_effect_particles);
+  CHECK(g_settings.action_environmental_effects);
   CHECK(!g_settings.sim3d_picker_exit_ease);
   CHECK(g_settings.sim3d_diagnostic_layers == 0);
   /* Camera baseline captured from a tuned session (2026-07-22), not derived:
@@ -1715,9 +1716,10 @@ static void TestEffectAvailabilityFollowsRendererSupport(void) {
   const SettingDesc *particles = Settings_Find("sim3d_particles");
   const SettingDesc *action_lighting = Settings_Find("action_effect_lighting");
   const SettingDesc *action_particles = Settings_Find("action_effect_particles");
+  const SettingDesc *environment = Settings_Find("action_environmental_effects");
   CHECK(lighting != NULL && particles != NULL && action_lighting != NULL &&
-        action_particles != NULL);
-  if (!lighting || !particles || !action_lighting || !action_particles) return;
+        action_particles != NULL && environment != NULL);
+  if (!lighting || !particles || !action_lighting || !action_particles || !environment) return;
   const bool restore_support = s_effect_renderer_supported;
   const int restore_mode = g_settings.sim3d_mode;
   const bool restore_separated = g_settings.sim3d_separated_composite;
@@ -1730,15 +1732,50 @@ static void TestEffectAvailabilityFollowsRendererSupport(void) {
   CHECK(Settings_IsAvailable(particles));
   CHECK(Settings_IsAvailable(action_lighting));
   CHECK(Settings_IsAvailable(action_particles));
+  CHECK(Settings_IsAvailable(environment));
   s_effect_renderer_supported = false;
   CHECK(!Settings_IsAvailable(lighting));
   CHECK(!Settings_IsAvailable(particles));
   CHECK(!Settings_IsAvailable(action_lighting));
   CHECK(!Settings_IsAvailable(action_particles));
+  CHECK(!Settings_IsAvailable(environment));
   s_effect_renderer_supported = restore_support;
   g_settings.sim3d_mode = restore_mode;
   g_settings.sim3d_separated_composite = restore_separated;
   g_settings.sim3d_ground_projection = restore_ground;
+}
+
+static void TestEnvironmentalEffectsSetting(void) {
+  const char *path = "actraiser-environmental-effects-test.ini";
+  ClearSettingsEnv();
+  Settings_Init();
+  const SettingDesc *environment = Settings_Find("action_environmental_effects");
+  CHECK(environment && environment->type == kSettingType_Bool &&
+        environment->apply == kApply_Passive &&
+        environment->category == kSettingCat_Graphics);
+  if (!environment) return;
+  CHECK(!Settings_IsDebugOnly(environment));
+  CHECK(Settings_IsMenuVisible(environment));
+  CHECK(Settings_SetText(environment, "Off") == kSettingChange_Applied);
+  CHECK(!g_settings.action_environmental_effects);
+  CHECK(g_settings.action_effect_lighting && g_settings.action_effect_particles);
+  CHECK(Settings_Save(path));
+  CHECK(FileContains(path, "action_environmental_effects = Off"));
+  Settings_InitWithFile(path);
+  CHECK(!g_settings.action_environmental_effects);
+  CHECK(Settings_Reset(environment) == kSettingChange_Applied);
+  CHECK(g_settings.action_environmental_effects);
+  Settings_ApplyRenderCapabilities(kRenderFeature_All & ~kRenderFeature_Effects);
+  CHECK(!g_settings.action_environmental_effects);
+  CHECK(!Settings_IsAvailable(environment));
+  Settings_ApplyRenderCapabilities(kRenderFeature_All);
+  CHECK(g_settings.action_environmental_effects);
+  setenv("AR_ACTION_ENVIRONMENTAL_EFFECTS", "0", 1);
+  Settings_Init();
+  CHECK(!g_settings.action_environmental_effects);
+  ClearSettingsEnv();
+  Settings_Init();
+  remove(path);
 }
 
 static void TestVideoSettingAudit(void) {
@@ -2245,6 +2282,7 @@ int main(int argc, char **argv) {
   TestUserDataFile();
   TestRimLightAvailabilityFollowsBlendSupport();
   TestEffectAvailabilityFollowsRendererSupport();
+  TestEnvironmentalEffectsSetting();
   TestScalePercentToOutput();
   TestDefaultsAndMetadata();
   TestRememberTownPreference();

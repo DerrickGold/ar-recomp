@@ -1,4 +1,6 @@
 [
+  {"key":"setting.action_environmental_effects.label","text":["Environmental effects","Effets d’environnement","Umgebungseffekte","環境エフェクト"]},
+  {"key":"setting.action_environmental_effects.help","text":["Enhance action-stage scenery with environmental lighting and particles. Spell and combat effects are controlled separately.","Ajoute des éclairages et des particules aux décors des niveaux d’action. Les effets de magie et de combat se règlent séparément.","Ergänzt die Umgebung der Action-Level um Beleuchtung und Partikel. Zauber- und Kampfeffekte werden separat eingestellt.","アクションステージの背景に環境照明とパーティクルを追加します。魔法と戦闘のエフェクトは個別に設定できます。"]},
   {"key":"slots.file.choose","text":["Choose a file in the system dialog.","Choisissez un fichier dans la fenêtre système.","Datei im Systemdialog wählen.","システムのダイアログでファイルを選んでください。"]},
   {"key":"slots.file.cancelled","text":["File selection cancelled.","Sélection du fichier annulée.","Dateiauswahl abgebrochen.","ファイル選択をキャンセルしました。"]},
   {"key":"slots.file.unavailable","text":["The system file picker is unavailable.","Le sélecteur de fichiers système est indisponible.","Der Systemdateidialog ist nicht verfügbar.","システムのファイル選択を利用できません。"]},

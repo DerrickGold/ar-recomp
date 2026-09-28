@@ -188,6 +188,23 @@ int main(void) {
   assert(SDL_GetRenderDrawBlendMode(renderer, &renderer_blend));
   assert(renderer_blend == SDL_BLENDMODE_BLEND);
 
+  const SDL_BlendMode light_blend = SDL_ComposeCustomBlendMode(
+      SDL_BLENDFACTOR_DST_COLOR, SDL_BLENDFACTOR_ONE, SDL_BLENDOPERATION_ADD,
+      SDL_BLENDFACTOR_ZERO, SDL_BLENDFACTOR_ONE, SDL_BLENDOPERATION_ADD);
+  const bool light_supported = SDL_SetRenderDrawBlendMode(renderer, light_blend);
+  assert(SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND));
+  const ArRenderDrawState light_state = {
+    .flags = kArRenderDrawState_Blend, .blend = kArRenderBlendMode_Light,
+  };
+  assert(ArRenderDevice_DrawGeometryWithState(&device, ArRenderTexture_Invalid(),
+      vertices, 3, indices, 3, &light_state) == light_supported);
+  assert(SDL_GetRenderDrawBlendMode(renderer, &renderer_blend));
+  assert(renderer_blend == SDL_BLENDMODE_BLEND);
+  /* Rejected optional blending must leave ordinary geometry usable. */
+  assert(ArRenderDevice_DrawGeometryWithState(&device, ArRenderTexture_Invalid(),
+      vertices, 3, indices, 3, &geometry_state));
+  SDL_ClearError();
+
   const ArRenderTextureDesc target_desc = {
     .width = 8,
     .height = 8,

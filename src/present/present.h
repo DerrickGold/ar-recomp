@@ -197,6 +197,7 @@ typedef struct FrameSlot {
   ActionSceneEffectFrame action_scene_effects;
   bool action_effect_lighting;
   bool action_effect_particles;
+  bool action_environmental_effects;
 
   /* "Cycle magic spell" cheat state, snapshotted rather than read live so
    * present-time code never touches g_settings or WRAM (D6). While armed the composite

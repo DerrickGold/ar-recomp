@@ -1,11 +1,18 @@
 #include "action_effect_projection.h"
 
+#include <math.h>
+
 #include "diorama/diorama.h"
 
 static const DioramaPlaneProjection *ProjectionPlaneForEffect(
     const DioramaProjection *projection,
     const ActionEffectInstance *effect) {
   if (!projection || !effect) return NULL;
+  /* The atmosphere has independent parallax and is inserted between layers,
+   * but shares BG2's finite projected footprint. Moving its geometric plane
+   * toward the viewer would expose light outside the backdrop's side edges. */
+  if (effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds)
+    return &projection->bg2_plane;
   if (effect->projection_plane == kActionEffectProjectionPlane_Bg1)
     return &projection->bg1_plane;
   if (effect->projection_plane == kActionEffectProjectionPlane_Bg2)
@@ -72,7 +79,8 @@ static void AddRequiredBgPlanes(
     if (!(effect->flags & kActionEffectFlag_Visible)) continue;
     if (effect->projection_plane == kActionEffectProjectionPlane_Bg1)
       *mask |= 1u << SR_PPU_OVERLAY_BG1;
-    else if (effect->projection_plane == kActionEffectProjectionPlane_Bg2)
+    else if (effect->projection_plane == kActionEffectProjectionPlane_Bg2 ||
+             effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds)
       *mask |= 1u << SR_PPU_OVERLAY_BG2;
     else if (effect->projection_plane ==
              kActionEffectProjectionPlane_Bg1High)
@@ -116,18 +124,93 @@ uint32_t ActionEffectProjection_RequiredBgPlaneMask(
   return mask;
 }
 
+static int16_t EffectCameraCoordinate(
+    const ActionEffectInstance *effect, int16_t bg1, int16_t bg2) {
+  if (effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds)
+    return (int16_t)(((int)bg1 + bg2) / 2);
+  return effect->projection_plane == kActionEffectProjectionPlane_Bg2 ? bg2 : bg1;
+}
+
+static bool ClipRectIsValid(const ActionEffectLocalRect *rect) {
+  return isfinite(rect->x0) && isfinite(rect->y0) &&
+      isfinite(rect->x1) && isfinite(rect->y1) &&
+      rect->x0 < rect->x1 && rect->y0 < rect->y1;
+}
+
+static void IntersectClipRect(ActionEffectLocalRect *a, const ActionEffectLocalRect *b) {
+  a->x0 = fmaxf(a->x0, b->x0);
+  a->y0 = fmaxf(a->y0, b->y0);
+  a->x1 = fminf(a->x1, b->x1);
+  a->y1 = fminf(a->y1, b->y1);
+}
+
+bool ActionEffectProjection_ClipBounds(
+    void *userdata, const ActionEffectInstance *effect, ActionEffectLocalRect *bounds) {
+  const ActionEffectProjectionContext *context = userdata;
+  if (!context || !effect || !bounds || effect->geometry.kind != kActionEffectGeometry_Rect)
+    return false;
+  *bounds = effect->geometry.data.rect;
+  if (!ClipRectIsValid(bounds)) return false;
+  if (effect->flags & kActionEffectFlag_ClipToRect) {
+    if (!ClipRectIsValid(&effect->clip_rect)) return false;
+    IntersectClipRect(bounds, &effect->clip_rect);
+  }
+  const int camera_x = EffectCameraCoordinate(
+      effect, context->bg1_camera_x, context->bg2_camera_x);
+  const int camera_y = EffectCameraCoordinate(
+      effect, context->bg1_camera_y, context->bg2_camera_y);
+  const int screen_x = (int16_t)(uint16_t)(effect->world_x - camera_x);
+  const int screen_y = (int16_t)(uint16_t)(effect->world_y - camera_y);
+  ActionEffectLocalRect visible;
+  if (context->diorama_projection) {
+    const DioramaProjection *projection = context->diorama_projection;
+    const DioramaPlaneProjection *plane = ProjectionPlaneForEffect(projection, effect);
+    if (!projection->valid || !plane || !plane->valid ||
+        projection->texture_width <= 0 || projection->texture_height <= 0)
+      return false;
+    visible = (ActionEffectLocalRect){
+      plane->u0 * projection->texture_width - projection->texture_x_origin -
+          context->ws_extra - screen_x,
+      plane->v0 * projection->texture_height - context->ws_extra_top - screen_y,
+      plane->u1 * projection->texture_width - projection->texture_x_origin -
+          context->ws_extra - screen_x,
+      plane->v1 * projection->texture_height - context->ws_extra_top - screen_y,
+    };
+  } else {
+    if (context->visible_width <= 0 || context->snes_height <= 0 ||
+        context->viewport.w <= 0 || context->viewport.h <= 0)
+      return false;
+    visible = (ActionEffectLocalRect){
+      context->visible_x0 - context->ws_extra - screen_x, -screen_y,
+      context->visible_x0 + context->visible_width - context->ws_extra - screen_x,
+      context->snes_height - screen_y,
+    };
+  }
+  if (!ClipRectIsValid(&visible)) return false;
+  IntersectClipRect(bounds, &visible);
+  return ClipRectIsValid(bounds);
+}
+
 bool ActionEffectProjection_ProjectPoint(
     void *userdata, const ActionEffectInstance *effect,
     float local_x, float local_y, ArRenderPointF *point) {
   const ActionEffectProjectionContext *context = userdata;
   if (!context || !effect || !point) return false;
 
-  const int16_t camera_x = effect->projection_plane ==
-          kActionEffectProjectionPlane_Bg2
-      ? context->bg2_camera_x : context->bg1_camera_x;
-  const int16_t camera_y = effect->projection_plane ==
-          kActionEffectProjectionPlane_Bg2
-      ? context->bg2_camera_y : context->bg1_camera_y;
+  if (effect->flags & kActionEffectFlag_ClipToRect) {
+    const ActionEffectLocalRect *clip = &effect->clip_rect;
+    if (!ClipRectIsValid(clip)) return false;
+    if (!(effect->flags & kActionEffectFlag_ClippedMesh) &&
+        (local_x < clip->x0 || local_x > clip->x1 ||
+         local_y < clip->y0 || local_y > clip->y1)) {
+      return false;
+    }
+  }
+
+  const int16_t camera_x = EffectCameraCoordinate(
+      effect, context->bg1_camera_x, context->bg2_camera_x);
+  const int16_t camera_y = EffectCameraCoordinate(
+      effect, context->bg1_camera_y, context->bg2_camera_y);
   const int screen_x = (int16_t)(uint16_t)(
       (uint16_t)effect->world_x - (uint16_t)camera_x);
   const int screen_y = (int16_t)(uint16_t)(
@@ -139,7 +222,11 @@ bool ActionEffectProjection_ProjectPoint(
     /* Texture row zero represents screen y=-ws_extra_top. Flat mode keeps
      * authentic screen Y and therefore intentionally ignores this margin. */
     const float texture_y = capture_y + (float)context->ws_extra_top;
-    if (!PointIsOnPublishedDioramaPlane(
+    /* Clipped triangles already intersect the source plane. Re-testing their
+     * interpolated boundary points in normalized UVs introduces roundoff
+     * holes; never move those points or change their interpolated brightness. */
+    if (!(effect->flags & kActionEffectFlag_ClippedMesh) &&
+        !PointIsOnPublishedDioramaPlane(
             context->diorama_projection, effect, capture_x, texture_y))
       return false;
     ArRenderPointF projected;
@@ -148,7 +235,8 @@ bool ActionEffectProjection_ProjectPoint(
       valid = Diorama_ProjectCapturedBg1Point(
           context->diorama_projection, capture_x, texture_y,
           &projected, NULL, NULL);
-    else if (effect->projection_plane == kActionEffectProjectionPlane_Bg2)
+    else if (effect->projection_plane == kActionEffectProjectionPlane_Bg2 ||
+             effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds)
       valid = Diorama_ProjectCapturedBg2Point(
           context->diorama_projection, capture_x, texture_y,
           &projected, NULL, NULL);
@@ -187,12 +275,10 @@ bool ActionEffectProjection_IntersectsFlatViewport(
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   if (rect->x0 > rect->x1 || rect->y0 > rect->y1)
     return false;
-  const int16_t camera_x = effect->projection_plane ==
-          kActionEffectProjectionPlane_Bg2
-      ? context->bg2_camera_x : context->bg1_camera_x;
-  const int16_t camera_y = effect->projection_plane ==
-          kActionEffectProjectionPlane_Bg2
-      ? context->bg2_camera_y : context->bg1_camera_y;
+  const int16_t camera_x = EffectCameraCoordinate(
+      effect, context->bg1_camera_x, context->bg2_camera_x);
+  const int16_t camera_y = EffectCameraCoordinate(
+      effect, context->bg1_camera_y, context->bg2_camera_y);
   const int screen_x = (int16_t)(uint16_t)(
       (uint16_t)effect->world_x - (uint16_t)camera_x);
   const int screen_y = (int16_t)(uint16_t)(

@@ -2,10 +2,12 @@
 #include "action/action_effect_render.h"
 #include "actraiser_game.h"
 #include "app/session_fatal.h"
+#include "diorama/diorama.h"
 #include "present/present.h"
 #include "render/effect_batch.h"
 
 #include "support/test_assert.h"
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -16,11 +18,14 @@ typedef struct Backend {
   ArRenderTextureDesc textures[64];
   int created, destroyed, updated, geometries, resolves, restores;
   bool fail_create, fail_geometry, fail_restore, fail_bind, fail_update;
-  bool fail_viewport;
+  bool fail_viewport, fail_surface_light, check_mask_uv;
   ArRenderRectI update;
   ArRenderRectF mask_source;
   char draws[64];
   int draw_count;
+  ArRenderBlendMode geometry_blends[64];
+  ArRenderBlendMode composite_blend;
+  uint32_t first_uploaded_pixel;
 } Backend;
 
 static int fatal_count;
@@ -46,6 +51,7 @@ static bool Update(void *ctx, ArRenderTexture texture, const ArRenderRectI *rect
                    const void *pixels, int pitch) {
   Backend *b = ctx;
   assert(texture.value && pixels && rect && pitch > 0);
+  memcpy(&b->first_uploaded_pixel, pixels, sizeof(uint32_t));
   b->updated++;
   b->update = *rect;
   return !b->fail_update;
@@ -103,11 +109,15 @@ static bool Texture(void *ctx, ArRenderTexture texture,
                     const ArRenderDrawState *state) {
   Backend *b = ctx;
   assert(texture.value && dst);
-  if (state && state->blend == kArRenderBlendMode_Multiply) {
+  if (state && (state->blend == kArRenderBlendMode_Multiply ||
+                state->blend == kArRenderBlendMode_Modulate)) {
     assert(src);
     b->mask_source = *src;
     Record(b, 'M');
+  } else if (state && state->blend == kArRenderBlendMode_DestinationAlphaMask) {
+    Record(b, 'A');
   } else {
+    if (state) b->composite_blend = state->blend;
     b->resolves++;
     Record(b, 'T');
   }
@@ -119,10 +129,22 @@ static bool Geometry(void *ctx, ArRenderTexture texture,
                      const ArRenderDrawState *state) {
   Backend *b = ctx;
   assert(vertices && vertex_count > 0 && indices && index_count > 0);
-  (void)state;
+  if (b->check_mask_uv) {
+    assert(texture.value && b->textures[texture.value].usage == kArRenderTextureUsage_Streaming);
+    for (int i = 0; i < vertex_count; i++) {
+      /* The visible 224x224 crop starts at native X=16, at output (20,30). */
+      assert(fabsf(vertices[i].tex_coord.x * kFrameSlotLayerTextureWidth -
+          (16 + (vertices[i].position.x - 20) * .35f)) < .001f);
+      assert(fabsf(vertices[i].tex_coord.y * kFrameSlotAuthenticHeight -
+          (vertices[i].position.y - 30) / 2) < .001f);
+    }
+  }
+  assert(b->geometries < 64);
+  b->geometry_blends[b->geometries] = state ? state->blend : kArRenderBlendMode_Opaque;
   b->geometries++;
   Record(b, texture.value ? 'H' : 'G');
-  return !b->fail_geometry;
+  return !b->fail_geometry && !(b->fail_surface_light && state &&
+      state->blend == kArRenderBlendMode_Light);
 }
 static bool Present(void *ctx) { (void)ctx; return true; }
 static const char *Error(void *ctx) { (void)ctx; return "injected backend failure"; }
@@ -163,6 +185,7 @@ static void LavaFrame(void) {
   frame.diorama_map_group = kActRaiserMapGroup_Aitos;
   frame.diorama_map_number = 4;
   frame.action_effect_lighting = frame.action_effect_particles = true;
+  frame.action_environmental_effects = true;
   frame.action_scene_effects.decoration_count = 1;
   frame.action_scene_effects.decoration_visible_count = 1;
   frame.action_scene_effects.game_frame = 400;
@@ -183,7 +206,11 @@ static void HeatLifecycle(void) {
   ArRenderDevice device;
   Init(&b, &device);
   LavaFrame();
+  frame.action_effect_lighting = frame.action_effect_particles = false;
   const ArRenderTargetState before = b.state;
+  frame.action_environmental_effects = false;
+  assert(!PresentActionHeat_Begin(&device, &frame, viewport));
+  frame.action_environmental_effects = true;
   frame.diorama_active = true;
   assert(!PresentActionHeat_Begin(&device, &frame, viewport));
   frame.diorama_active = false;
@@ -286,6 +313,11 @@ static void MasksAndPlaneComposition(void) {
   frame.visible_x0 = 8;
   frame.visible_width = 240;
   const ArRenderTargetState before = b.state;
+  frame.action_environmental_effects = false;
+  assert(PresentActionEffects_DrawFlatPlanes(&device, &frame, viewport));
+  assert(b.geometries == 0 && b.created == 1);
+  frame.action_environmental_effects = true;
+  frame.action_effect_lighting = frame.action_effect_particles = false;
   assert(PresentActionEffects_DrawFlatPlanes(&device, &frame, viewport));
   assert(!strcmp(b.draws, "GMT")); /* Build geometry, mask it, then resolve. */
   assert(b.mask_source.x == 8 && b.mask_source.w == 240 && b.mask_source.h == 224);
@@ -332,6 +364,142 @@ static void PlaneTargetFailures(void) {
   }
 }
 
+static void EnvironmentalEffectsIndependence(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b, &device);
+  LavaFrame();
+  frame.action_effect_lighting = frame.action_effect_particles = false;
+  DioramaProjection projection = {
+    .valid = true, .matrix = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1},
+    .aspect_x = 256.0f / 224.0f, .height_scale = 1,
+    .texture_width = 256, .texture_height = 224,
+    .output_width = 640, .output_height = 448,
+    .bg1_high_plane = {.valid = true, .u1 = 1, .v1 = 1},
+  };
+  PresentActionPlaneEffectContext context = {&device, &frame, viewport};
+  PresentActionEffects_DrawDioramaPlane(&context, kDioramaPlane_Bg1Hi, &projection);
+  assert(b.geometries == 1);
+  frame.action_environmental_effects = false;
+  PresentActionEffects_DrawDioramaPlane(&context, kDioramaPlane_Bg1Hi, &projection);
+  assert(b.geometries == 1);
+
+  /* A world-overlay decoration also honors the environment switch, whereas
+   * a captured enemy projectile continues to use the action-effect controls. */
+  frame.action_scene_effects.decorations[0].render_layer = kActionEffectRenderLayer_WorldOverlay;
+  frame.action_environmental_effects = true;
+  PresentActionEffects_Draw(&device, &frame, viewport, NULL);
+  assert(b.geometries == 2);
+  frame.action_environmental_effects = false;
+  frame.action_effect_lighting = true;
+  PresentActionEffects_Draw(&device, &frame, viewport, NULL);
+  assert(b.geometries == 2);
+  frame.action_scene_effects.effect_count = frame.action_scene_effects.visible_count = 1;
+  frame.action_scene_effects.effects[0] = (ActionEffectInstance){
+    .world_x = 128, .world_y = 100,
+    .kind = kActionEffect_EnemyFireball, .phase = kActionEffectPhase_EnemyFireballFlight,
+    .flags = kActionEffectFlag_Visible, .render_layer = kActionEffectRenderLayer_WorldOverlay,
+    .projection_plane = kActionEffectProjectionPlane_Obj,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-4, -4, 4, 4}},
+  };
+  PresentActionEffects_Draw(&device, &frame, viewport, NULL);
+  assert(b.geometries == 3);
+  PresentActionEffects_Reset(&device);
+}
+
+static void ForestFoliageComposition(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b, &device);
+  LavaFrame();
+  frame.action_scene_effects.decoration_count = 2;
+  frame.action_scene_effects.decoration_visible_count = 2;
+  frame.visible_x0 = 16;
+  frame.visible_width = 224;
+  frame.bg1_camera_x = frame.bg2_camera_x = 800;
+  frame.bg1_camera_y = frame.bg2_camera_y = 240;
+  frame.ws_extra_top = 160;
+  frame.action_scene_effects.decorations[0] = (ActionEffectInstance){
+    .world_x = 928, .world_y = 80,
+    .generation = 0x46000000u, .pulse_generation = 0x66000000u, .phase_ticks = 512,
+    .kind = kActionEffect_ForestCanopyLight, .phase = kActionEffectPhase_ForestCanopyLight,
+    .flags = kActionEffectFlag_Visible,
+    .render_layer = kActionEffectRenderLayer_Bg2Plane,
+    .projection_plane = kActionEffectProjectionPlane_BetweenBackgrounds,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,544}},
+  };
+  frame.action_scene_effects.decorations[1] = frame.action_scene_effects.decorations[0];
+  frame.action_scene_effects.decorations[1].kind = kActionEffect_ForestLeaves;
+  frame.action_scene_effects.decorations[1].render_layer = kActionEffectRenderLayer_Bg2Foliage;
+  memset(pixels, 0xff, sizeof(pixels));
+  pixels[0] = 0xff000000u; /* Native non-winning pixel has opaque alpha. */
+  assert(PresentActionEffects_UploadMask(&device, SR_PPU_OVERLAY_BG2, &frame,
+      (const uint8_t *)pixels, 256 * 4) == sizeof(pixels));
+  assert(b.first_uploaded_pixel == 0); /* Must not darken foreground terrain. */
+  frame.action_bg2_mask_valid = true;
+  const ArRenderTargetState before = b.state;
+  device.capabilities.flags &= ~(kArRenderCapability_RenderTargets |
+                                kArRenderCapability_ScopedRenderTargets);
+  b.check_mask_uv = true;
+  assert(PresentActionEffects_DrawFlatPlanes(&device, &frame, viewport));
+  b.check_mask_uv = false;
+  assert(!strcmp(b.draws, "HH"));
+  assert(b.geometry_blends[0] == kArRenderBlendMode_Add);
+  assert(b.geometry_blends[1] == kArRenderBlendMode_Alpha);
+  assert(b.created == 1 && b.resolves == 0 && b.restores == 0); /* Mask only; no target. */
+  assert(!memcmp(&b.state, &before, sizeof(before)));
+  pixels[0] = 0xffffffffu;
+  b.fail_update = true;
+  assert(!PresentActionEffects_UploadMask(&device, SR_PPU_OVERLAY_BG2, &frame,
+      (const uint8_t *)pixels, 256 * 4));
+  assert(PresentActionEffects_DrawFlatPlanes(&device, &frame, viewport));
+  assert(b.geometries == 2); /* Old foreground occlusion must not leak through. */
+  b.fail_update = false;
+  assert(PresentActionEffects_UploadMask(&device, SR_PPU_OVERLAY_BG2, &frame,
+      (const uint8_t *)pixels, 256 * 4));
+  assert(!PresentActionEffects_UploadMask(&device, SR_PPU_OVERLAY_BG2, &frame,
+      (const uint8_t *)pixels, 256 * 4)); /* Successful unchanged upload. */
+  assert(PresentActionEffects_DrawFlatPlanes(&device, &frame, viewport));
+  assert(b.geometries == 4); /* Recovery and retained-mask readiness. */
+  DioramaProjection projection = {
+    .valid = true, .matrix = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1},
+    .aspect_x = 1, .height_scale = 1, .texture_x_origin = 384,
+    .texture_width = 1024, .texture_height = 768,
+    .output_width = 640, .output_height = 448,
+    .bg2_plane = {.valid = true, .u1 = 1, .v1 = 1},
+  };
+  const PresentActionPlaneEffectContext context = {&device, &frame, viewport};
+  PresentActionEffects_DrawDioramaPlane((void *)&context, SR_PPU_OVERLAY_BG2, &projection);
+  assert(b.geometries == 6);
+  assert(b.geometry_blends[4] == kArRenderBlendMode_Add);
+  assert(b.geometry_blends[5] == kArRenderBlendMode_Alpha);
+  frame.action_scene_effects.decorations[2] = frame.action_scene_effects.decorations[0];
+  frame.action_scene_effects.decorations[2].kind = kActionEffect_ForestForwardLight;
+  frame.action_scene_effects.decorations[2].render_layer = kActionEffectRenderLayer_ForegroundLight;
+  frame.action_scene_effects.decoration_count = 3;
+  frame.action_scene_effects.decoration_visible_count = 3;
+  PresentActionEffects_Draw(&device, &frame, viewport, &projection);
+  assert(b.geometries == 7 && b.geometry_blends[6] == kArRenderBlendMode_Light);
+  b.fail_surface_light = true;
+  PresentActionEffects_Draw(&device, &frame, viewport, &projection);
+  assert(b.geometries == 8 && EffectRenderer_Available());
+  PresentActionEffects_Draw(&device, &frame, viewport, &projection);
+  assert(b.geometries == 8); /* Unsupported custom blend is tried only once. */
+  PresentActionEffects_DrawDioramaPlane((void *)&context, SR_PPU_OVERLAY_BG2, &projection);
+  assert(b.geometries == 10); /* Ordinary alpha/additive effects still work. */
+  PresentActionEffects_Reset(&device);
+  b.fail_surface_light = false;
+  PresentActionEffects_Draw(&device, &frame, viewport, &projection);
+  assert(b.geometries == 11); /* A new device may support the blend. */
+  frame.action_environmental_effects = false;
+  PresentActionEffects_Draw(&device, &frame, viewport, &projection);
+  PresentActionEffects_DrawDioramaPlane((void *)&context, SR_PPU_OVERLAY_BG2, &projection);
+  assert(PresentActionEffects_DrawFlatPlanes(&device, &frame, viewport));
+  assert(b.geometries == 11);
+  PresentActionEffects_Reset(&device);
+  assert(b.created == b.destroyed && !fatal_count);
+}
+
 static void SharedEffectSupport(void) {
   Backend b;
   ArRenderDevice device;
@@ -359,6 +527,8 @@ int main(void) {
   HeatFailures();
   MasksAndPlaneComposition();
   PlaneTargetFailures();
+  EnvironmentalEffectsIndependence();
+  ForestFoliageComposition();
   SharedEffectSupport();
   puts("action presentation: resource lifetime, masks, fallback and target restoration passed");
   return 0;

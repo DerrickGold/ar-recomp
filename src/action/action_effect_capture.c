@@ -129,6 +129,10 @@ void ActionEffectCapture_CaptureFrame(FrameSlot *dst) {
   ActionSceneEffects_CaptureFrame(&s_action_effect_observer,
                                   &dst->action_scene_effects, g_ram,
                                   kActRaiserWramSize, action_effect_ticks);
+  if (g_settings.action_environmental_effects)
+    ActionEnvironmentalEffects_CaptureFrame(
+        &s_action_effect_observer, &dst->action_scene_effects,
+        g_ram, kActRaiserWramSize);
   dst->diorama_map_group = g_ram[kActRaiserWram_MapGroup];
   dst->diorama_map_number = g_ram[kActRaiserWram_CurrentMap];
   dst->diorama_layer_section = kDioramaLayerSection_Room;
@@ -148,5 +152,13 @@ void ActionEffectCapture_CaptureFrame(FrameSlot *dst) {
       dst->diorama_layer_section);
   dst->action_effect_lighting = g_settings.action_effect_lighting;
   dst->action_effect_particles = g_settings.action_effect_particles;
+  dst->action_environmental_effects = g_settings.action_environmental_effects;
+  /* Source observation and waterfall section selection remain live while
+   * accents are disabled. Presentation must not change the room's geometry,
+   * rewind its effect clock, or retain decorations from an earlier capture. */
+  if (!dst->action_environmental_effects) {
+    dst->action_scene_effects.decoration_count = 0;
+    dst->action_scene_effects.decoration_visible_count = 0;
+  }
   ReportCapturedActionEffects(dst);
 }

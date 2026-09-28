@@ -16,6 +16,7 @@ static FrameSlot frame;
 static ActionSceneEffectFrame scene;
 static ActionEffectObserver *seen_observer;
 static unsigned expected_ticks, spell_calls, scene_calls, publications;
+static unsigned environment_calls;
 static uint8_t published_group, published_map, published_section;
 
 void ActionEffects_CaptureFrame(ActionEffectObserver *observer, ActionEffectFrame *dst,
@@ -37,6 +38,13 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer, ActionScene
   assert(spell_calls == scene_calls);
   *dst = scene;
 }
+void ActionEnvironmentalEffects_CaptureFrame(const ActionEffectObserver *observer,
+    ActionSceneEffectFrame *dst, const uint8_t *wram, size_t size) {
+  assert(observer == seen_observer && dst == &frame.action_scene_effects);
+  assert(wram == g_ram && size == sizeof(g_ram));
+  assert(g_settings.action_environmental_effects);
+  environment_calls++;
+}
 void Diorama_PublishLiveLayerSection(uint8_t group, uint8_t map, uint8_t section) {
   assert(scene_calls == spell_calls);
   assert(frame.diorama_map_group == group && frame.diorama_map_number == map);
@@ -50,12 +58,20 @@ void Diorama_PublishLiveLayerSection(uint8_t group, uint8_t map, uint8_t section
 static void Capture(unsigned ticks, uint8_t section) {
   expected_ticks = ticks;
   const unsigned previous_calls = spell_calls;
+  const unsigned previous_environment_calls = environment_calls;
   ActionEffectCapture_CaptureFrame(&frame);
   assert(spell_calls == previous_calls + 1 && publications == spell_calls);
   assert(frame.action_effects.game_frame == g_ram[kActRaiserWram_GameFrame]);
-  assert(frame.action_scene_effects.decoration_count == scene.decoration_count);
+  assert(frame.action_scene_effects.decoration_count ==
+      (g_settings.action_environmental_effects ? scene.decoration_count : 0));
+  assert(frame.action_scene_effects.decoration_visible_count ==
+      (g_settings.action_environmental_effects ? scene.decoration_visible_count : 0));
+  assert(frame.action_scene_effects.effect_count == scene.effect_count);
   assert(frame.action_effect_lighting == g_settings.action_effect_lighting);
   assert(frame.action_effect_particles == g_settings.action_effect_particles);
+  assert(frame.action_environmental_effects == g_settings.action_environmental_effects);
+  assert(environment_calls == previous_environment_calls +
+      (g_settings.action_environmental_effects ? 1 : 0));
   assert(published_group == g_ram[kActRaiserWram_MapGroup]);
   assert(published_map == g_ram[kActRaiserWram_CurrentMap]);
   assert(published_section == section);
@@ -70,6 +86,7 @@ int main(void) {
   g_ram[kActRaiserWram_CurrentMap] = 2;
   g_settings.action_effect_lighting = true;
   g_settings.action_effect_particles = false;
+  g_settings.action_environmental_effects = true;
   for (int i = 0; i < 5; i++) ActionEffectGameplayClock_CompletePass();
   Capture(0, kDioramaLayerSection_Room); /* First capture seeds the clock. */
   /* Native pause advances emulated vblanks without completing gameplay/OAM.
@@ -82,6 +99,14 @@ int main(void) {
   scene.decorations[0].kind = kActionEffect_WallTorch;
   scene.decorations[1].kind = kActionEffect_AitosWaterfall;
   Capture(3, kDioramaLayerSection_AitosWaterfall);
+  /* Off removes only ambient accents, keeps actor effects and still selects
+   * the waterfall's authored layout. Re-enabling restores the current list. */
+  scene.effect_count = scene.visible_count = 1;
+  scene.decoration_visible_count = 2;
+  g_settings.action_environmental_effects = false;
+  Capture(0, kDioramaLayerSection_AitosWaterfall);
+  g_settings.action_environmental_effects = true;
+  Capture(0, kDioramaLayerSection_AitosWaterfall);
   scene.decoration_overflow = true;
   Capture(0, kDioramaLayerSection_Room); /* Partial capture cannot select an override. */
   scene.decoration_overflow = false;

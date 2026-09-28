@@ -2113,6 +2113,12 @@ const SettingDesc g_setting_descs[] = {
                "action-stage spell actors.",
                kSettingCat_Graphics, 1, false,
                ActionEffectRendererAvailable, NULL),
+  BOOL_SETTING(action_environmental_effects, "AR_ACTION_ENVIRONMENTAL_EFFECTS",
+               "Environmental effects",
+               "Enhance action-stage scenery with environmental lighting and "
+               "particles. Spell and combat effects are controlled separately.",
+               kSettingCat_Graphics, 1, false,
+               ActionEffectRendererAvailable, NULL),
   /* Load/save compatibility for configurations that exposed the old optional
    * backend switch. host_video.c forces this value on because SIM3D depth is a
    * baseline renderer capability; the effect rows remain independently live. */
@@ -2875,6 +2881,7 @@ static struct HardwareSetting {
   {&g_settings.sim3d_soft_shadows, kRenderFeature_SimSoftShadows},
   {&g_settings.action_effect_lighting, kRenderFeature_Effects},
   {&g_settings.action_effect_particles, kRenderFeature_Effects},
+  {&g_settings.action_environmental_effects, kRenderFeature_Effects},
 };
 static bool s_hardware_known;
 static RenderFeatureMask s_hardware_supported;

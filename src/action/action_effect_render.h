@@ -246,6 +246,11 @@ typedef bool (*ActionEffectProjectPointFn)(
     void *userdata, const ActionEffectInstance *effect,
     float local_x, float local_y, ArRenderPointF *point);
 
+/* Returns the finite visible rectangle in effect-local source coordinates.
+ * Meshes clip triangles here before projection; false means no visible area. */
+typedef bool (*ActionEffectClipBoundsFn)(
+    void *userdata, const ActionEffectInstance *effect, ActionEffectLocalRect *bounds);
+
 /* Renderer-independent output. The game-specific module owns spell styles,
  * clocks and geometry while present.c owns only the backend submission. */
 typedef struct ActionEffectRenderBatch {
@@ -293,7 +298,8 @@ bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
 bool ActionSceneDecorationRender_Build(
     const ActionSceneEffectFrame *frame, uint8_t render_layer,
     bool lighting_enabled, bool particles_enabled,
-    ActionEffectProjectPointFn project_point, void *project_userdata,
+    ActionEffectProjectPointFn project_point, ActionEffectClipBoundsFn clip_bounds,
+    void *project_userdata,
     ActionSceneEffectRenderBatch *batch);
 
 /* Builds output-space positions and normalized UVs into a viewport-sized

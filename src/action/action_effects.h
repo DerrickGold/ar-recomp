@@ -44,6 +44,9 @@ typedef enum ActionEffectKind {
   kActionEffect_TanzaraProjectile,
   kActionEffect_CentaurLightning,
   kActionEffect_NorthwallBossMagic,
+  kActionEffect_ForestCanopyLight,
+  kActionEffect_ForestLeaves,
+  kActionEffect_ForestForwardLight,
   kActionEffect_KindCount,
 } ActionEffectKind;
 
@@ -106,6 +109,7 @@ typedef enum ActionEffectPhase {
   kActionEffectPhase_NorthwallMagicCharge,
   kActionEffectPhase_NorthwallMagicFall,
   kActionEffectPhase_NorthwallMagicImpact,
+  kActionEffectPhase_ForestCanopyLight,
   kActionEffectPhase_Count,
 } ActionEffectPhase;
 
@@ -144,6 +148,10 @@ typedef enum ActionEffectRenderLayer {
    * lighting immediately after that exact band instead of projecting through
    * BG1-low and submitting it as a late world overlay. */
   kActionEffectRenderLayer_Bg1HighPlane,
+  /* Alpha-blended foliage behind foreground terrain, after BG2 lighting. */
+  kActionEffectRenderLayer_Bg2Foliage,
+  /* Surface illumination after the scene, beneath the flat HUD. */
+  kActionEffectRenderLayer_ForegroundLight,
   kActionEffectRenderLayer_Count,
 } ActionEffectRenderLayer;
 
@@ -157,6 +165,9 @@ typedef enum ActionEffectProjectionPlane {
   kActionEffectProjectionPlane_Bg1,
   kActionEffectProjectionPlane_Bg2,
   kActionEffectProjectionPlane_Bg1High,
+  /* Directional atmosphere inserted between the scenery layers. It uses
+   * their mean camera and BG2's finite projected footprint. */
+  kActionEffectProjectionPlane_BetweenBackgrounds,
 } ActionEffectProjectionPlane;
 
 typedef enum ActionEffectGeometryKind {
@@ -202,6 +213,10 @@ enum {
   kActionEffectFlag_Visible = 1 << 0,
   kActionEffectFlag_FlipHorizontal = 1 << 1,
   kActionEffectFlag_FlipVertical = 1 << 2,
+  /* Internal projection flag: the renderer has already clipped each mesh
+   * triangle to finite source bounds, including interpolated vertex colors. */
+  kActionEffectFlag_ClippedMesh = 1 << 3,
+  kActionEffectFlag_ClipToRect = 1 << 4,
 };
 
 typedef struct ActionEffectInstance {
@@ -230,6 +245,9 @@ typedef struct ActionEffectInstance {
   uint8_t render_layer;
   uint8_t projection_plane;
   ActionEffectGeometry geometry;
+  /* Optional finite scenery bounds in effect-local coordinates. Independent
+   * parallax can otherwise move atmosphere over outside-world padding. */
+  ActionEffectLocalRect clip_rect;
 } ActionEffectInstance;
 
 /* Diagnostic payload: the raw identity of a cohort slot that was ACTIVE while
@@ -340,6 +358,16 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
                                      ActionSceneEffectFrame *dst,
                                      const uint8_t *wram, size_t wram_size,
                                      unsigned elapsed_ticks);
+
+/* Optional ambient additions, called after scene observation advances its
+ * gameplay clock. The caller skips this work when Environmental effects is
+ * off; it reads only WRAM and appends to the bounded decoration list. */
+void ActionEnvironmentalEffects_CaptureFrame(
+    const ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
+    const uint8_t *wram, size_t wram_size);
+
+bool ActionSceneEffects_RoomUsesBg2Decorations(
+    const uint8_t *wram, size_t wram_size);
 
 /* Capture-policy predicate for flat presentation. A positive result reserves
  * BG1's overlay slot for an owning-screen winner mask before PPU scanout; the

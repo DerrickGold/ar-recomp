@@ -327,7 +327,8 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
           slot->diorama_plane_content_mask,
           s_diorama_uploaded_plane_mask);
   const uint32_t required_effect_bg_planes =
-      (slot->action_effect_lighting || slot->action_effect_particles)
+      (slot->action_effect_lighting || slot->action_effect_particles ||
+       slot->action_environmental_effects)
           ? ActionEffectProjection_RequiredBgPlaneMask(
                 &slot->action_effects, &slot->action_scene_effects)
           : 0;

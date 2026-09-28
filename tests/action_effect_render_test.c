@@ -615,7 +615,7 @@ static void TestAitosSideLavaLightingAndHeatMesh(void) {
   frame.decorations[0] = SceneEffect(kActionEffect_AitosLavaReservoir, 400);
   static ActionSceneEffectRenderBatch lighting, particles;
   CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg1HighPlane, true,
-                                          false, IdentityProjection, NULL, &lighting));
+                                          false, IdentityProjection, NULL, NULL, &lighting));
   CHECK(lighting.vertex_count == 6 * kActionEffectGlowVertices);
   CHECK(lighting.index_count == 6 * kActionEffectGlowIndices);
   /* A 288px lip becomes three overlapping 96px sections. The first vertex
@@ -626,12 +626,12 @@ static void TestAitosSideLavaLightingAndHeatMesh(void) {
   CHECK(fabsf(lighting.vertices[4 * kActionEffectGlowVertices].position.x - 496.0f) < 0.001f);
   frame.decorations[0].geometry.data.rect = (ActionEffectLocalRect){-320.0f, -4.0f, 320.0f, 4.0f};
   CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg1HighPlane, true,
-                                          false, IdentityProjection, NULL, &lighting));
+                                          false, IdentityProjection, NULL, NULL, &lighting));
   CHECK(lighting.vertex_count == 14 * kActionEffectGlowVertices);
   CHECK(lighting.index_count == 14 * kActionEffectGlowIndices);
   frame.decorations[0].geometry.data.rect = (ActionEffectLocalRect){-144.0f, -4.0f, 144.0f, 4.0f};
   CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg1HighPlane, false,
-                                          true, IdentityProjection, NULL, &particles));
+                                          true, IdentityProjection, NULL, NULL, &particles));
   CHECK(particles.vertex_count == kActionSceneEffectLavaReservoirParticleCount * 4);
   CHECK(particles.index_count == kActionSceneEffectLavaReservoirParticleCount * 6);
   float min_x = 10000.0f, max_x = -10000.0f;
@@ -643,11 +643,11 @@ static void TestAitosSideLavaLightingAndHeatMesh(void) {
 
   frame.decorations[0].geometry.data.rect = (ActionEffectLocalRect){-624.0f, -4.0f, 624.0f, 4.0f};
   CHECK(!ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg1HighPlane, true,
-                                           false, IdentityProjection, NULL, &lighting));
+                                           false, IdentityProjection, NULL, NULL, &lighting));
   CHECK(lighting.vertex_count == 0 && lighting.index_count == 0);
   frame.decorations[0].geometry.data.rect = (ActionEffectLocalRect){-1.0e30f, -4.0f, 1.0e30f, 4.0f};
   CHECK(!ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg1HighPlane, true,
-                                           false, IdentityProjection, NULL, &lighting));
+                                           false, IdentityProjection, NULL, NULL, &lighting));
   CHECK(lighting.vertex_count == 0 && lighting.index_count == 0);
 
   const ArRenderRectI viewport = {120, 40, 960, 840};
@@ -841,7 +841,8 @@ static void TestAitosUsesRakedDioramaSourcePlanes(void) {
   decorations.decorations[0] = SceneEffect(kActionEffect_AitosWaterfallMist, 970);
   decorations.decorations[0].world_y = 493;
   CHECK(ActionSceneDecorationRender_Build(&decorations, kActionEffectRenderLayer_Atmosphere, true,
-                                          false, ActionEffectProjection_ProjectPoint, &context,
+                                          false, ActionEffectProjection_ProjectPoint,
+                                          ActionEffectProjection_ClipBounds, &context,
                                           &pit));
   /* The first cloud anchor is deliberately stable; the remaining puffs drift
    * independently. screen X is -40, plus 60 capture margin, plus the first
@@ -860,7 +861,8 @@ static void TestAitosUsesRakedDioramaSourcePlanes(void) {
   decorations.decorations[0] = SceneEffect(kActionEffect_AitosLavaReservoir, 400);
   decorations.decorations[0].world_y = 500;
   CHECK(ActionSceneDecorationRender_Build(&decorations, kActionEffectRenderLayer_Bg1HighPlane, true,
-                                          true, ActionEffectProjection_ProjectPoint, &context,
+                                          true, ActionEffectProjection_ProjectPoint,
+                                          ActionEffectProjection_ClipBounds, &context,
                                           &pit));
   CHECK(pit.vertex_count == 0);
   CHECK(pit.index_count == 0);
@@ -868,7 +870,8 @@ static void TestAitosUsesRakedDioramaSourcePlanes(void) {
 
   decorations.decorations[0].world_x = 970;
   CHECK(ActionSceneDecorationRender_Build(&decorations, kActionEffectRenderLayer_Bg1HighPlane, true,
-                                          true, ActionEffectProjection_ProjectPoint, &context,
+                                          true, ActionEffectProjection_ProjectPoint,
+                                          ActionEffectProjection_ClipBounds, &context,
                                           &pit));
   CHECK(pit.vertex_count > 0);
   CHECK(pit.index_count > 0);
@@ -951,13 +954,13 @@ static void TestDecorationLayerBuildsAreIndependent(void) {
   frame.decorations[3].projection_plane = kActionEffectProjectionPlane_Bg1;
   static ActionSceneEffectRenderBatch world, bg1, bg2, atmosphere;
   CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_WorldOverlay, true, true,
-                                          IdentityProjection, NULL, &world));
+                                          IdentityProjection, NULL, NULL, &world));
   CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg1Plane, true, true,
-                                          IdentityProjection, NULL, &bg1));
+                                          IdentityProjection, NULL, NULL, &bg1));
   CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Plane, true, true,
-                                          IdentityProjection, NULL, &bg2));
+                                          IdentityProjection, NULL, NULL, &bg2));
   CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Atmosphere, true, true,
-                                          IdentityProjection, NULL, &atmosphere));
+                                          IdentityProjection, NULL, NULL, &atmosphere));
   CHECK(world.index_count > 0);
   CHECK(bg1.index_count > 0);
   CHECK(bg2.index_count > 0);
@@ -1047,10 +1050,10 @@ static void TestDecorationLayerBuildsAreIndependent(void) {
         kActRaiserAuthenticHeight + kActionBgAitosWaterfallBottomExtensionPixels + 100.0f);
   frame.decoration_overflow = 1;
   CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_WorldOverlay, true, true,
-                                          IdentityProjection, NULL, &world));
+                                          IdentityProjection, NULL, NULL, &world));
   CHECK(world.index_count == 0);
   CHECK(!ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Count, true, true,
-                                           IdentityProjection, NULL, &world));
+                                           IdentityProjection, NULL, NULL, &world));
 }
 
 static void TestLightningVisibleLightCoversCapturedArc(void) {
@@ -1669,7 +1672,489 @@ static void TestNorthwallGeometryBudget(void) {
   }
 }
 
+/* Sample the actual triangle/color field, independent of vertex numbering.
+ * Clipping can split triangles but must preserve every interior sample. */
+static float SampleForestLight(
+    const ActionSceneEffectRenderBatch *batch, float x, float y, bool foreground) {
+  for (int i = 0; i < batch->index_count; i += 3) {
+    const ArRenderVertex2D *a = &batch->vertices[batch->indices[i]];
+    const ArRenderVertex2D *b = &batch->vertices[batch->indices[i + 1]];
+    const ArRenderVertex2D *c = &batch->vertices[batch->indices[i + 2]];
+    const float denominator = (b->position.y - c->position.y) *
+        (a->position.x - c->position.x) + (c->position.x - b->position.x) *
+        (a->position.y - c->position.y);
+    if (fabsf(denominator) < .0001f) continue;
+    const float u = ((b->position.y - c->position.y) * (x - c->position.x) +
+        (c->position.x - b->position.x) * (y - c->position.y)) / denominator;
+    const float v = ((c->position.y - a->position.y) * (x - c->position.x) +
+        (a->position.x - c->position.x) * (y - c->position.y)) / denominator;
+    const float w = 1 - u - v;
+    if (u < -.00001f || v < -.00001f || w < -.00001f) continue;
+    return foreground ? u * a->color.r + v * b->color.r + w * c->color.r :
+                        u * a->color.a + v * b->color.a + w * c->color.a;
+  }
+  return 0;
+}
+
+static void TestForestClippingPreservesField(int16_t world_x, int16_t world_y) {
+  ActionSceneEffectFrame frame = {.decoration_count = 1, .decoration_visible_count = 1};
+  ActionEffectInstance *effect = &frame.decorations[0];
+  *effect = (ActionEffectInstance){
+    .phase = kActionEffectPhase_ForestCanopyLight, .flags = kActionEffectFlag_Visible,
+    .world_x = world_x, .world_y = world_y, .phase_ticks = 512,
+    .projection_plane = kActionEffectProjectionPlane_BetweenBackgrounds,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,544}},
+  };
+  static ActionSceneEffectRenderBatch reference, clipped;
+  for (int foreground = 0; foreground < 2; foreground++) {
+    effect->kind = foreground ? kActionEffect_ForestForwardLight : kActionEffect_ForestCanopyLight;
+    effect->render_layer = foreground ? kActionEffectRenderLayer_ForegroundLight :
+                                       kActionEffectRenderLayer_Bg2Plane;
+    effect->flags = kActionEffectFlag_Visible;
+    CHECK(ActionSceneDecorationRender_Build(&frame, effect->render_layer, true, false,
+        IdentityProjection, NULL, NULL, &reference));
+    for (int crop = 0; crop < 8; crop++) {
+      effect->flags |= kActionEffectFlag_ClipToRect;
+      effect->clip_rect = (ActionEffectLocalRect){-320 + crop * 41.3f, 37.2f + crop * 19,
+                                                 345.7f - crop * 22, 530.1f - crop * 13};
+      CHECK(ActionSceneDecorationRender_Build(&frame, effect->render_layer, true, false,
+          IdentityProjection, NULL, NULL, &clipped));
+      CHECK(clipped.vertex_count > 0 && clipped.vertex_count <= 1680);
+      const ActionEffectLocalRect r = {effect->world_x + effect->clip_rect.x0,
+          effect->world_y + effect->clip_rect.y0, effect->world_x + effect->clip_rect.x1,
+          effect->world_y + effect->clip_rect.y1};
+      for (int i = 0; i < clipped.vertex_count; i++) {
+        const ArRenderPointF p = clipped.vertices[i].position;
+        CHECK(p.x >= r.x0 - .001f && p.x <= r.x1 + .001f);
+        CHECK(p.y >= r.y0 - .001f && p.y <= r.y1 + .001f);
+      }
+      float peak = 0, difference = 0;
+      for (float y = r.y0 + .1f; y < r.y1; y += 7.1f) {
+        for (float x = r.x0 + .1f; x < r.x1; x += 7.3f) {
+          const float expected = SampleForestLight(&reference, x, y, foreground);
+          const float actual = SampleForestLight(&clipped, x, y, foreground);
+          peak = fmaxf(peak, expected);
+          difference = fmaxf(difference, fabsf(actual - expected));
+        }
+      }
+      CHECK(peak > .1f && difference < .0005f);
+    }
+    /* Fully hidden rays vanish instead of collapsing onto a border. */
+    effect->clip_rect = (ActionEffectLocalRect){500,0,600,544};
+    CHECK(ActionSceneDecorationRender_Build(&frame, effect->render_layer, true, false,
+        IdentityProjection, NULL, NULL, &clipped));
+    CHECK(clipped.vertex_count == 0 && clipped.index_count == 0);
+    effect->flags = kActionEffectFlag_Visible;
+    frame.decorations[1] = *effect;
+    frame.decoration_count = 2;
+    CHECK(!ActionSceneDecorationRender_Build(&frame, effect->render_layer, true, false,
+        IdentityProjection, NULL, NULL, &clipped));
+    CHECK(clipped.vertex_count == 0 && clipped.index_count == 0);
+    frame.decoration_count = 1;
+  }
+}
+
+static void TestForestCanopyGeometry(void) {
+  ActionSceneEffectFrame frame = {.decoration_count = 1, .decoration_visible_count = 1};
+  frame.decorations[0] = (ActionEffectInstance){
+    .kind = kActionEffect_ForestCanopyLight,
+    .phase = kActionEffectPhase_ForestCanopyLight,
+    .flags = kActionEffectFlag_Visible,
+    .generation = 1, .pulse_generation = 2, .phase_ticks = 123,
+    .render_layer = kActionEffectRenderLayer_Bg2Plane,
+    .projection_plane = kActionEffectProjectionPlane_BetweenBackgrounds,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384, 0, 384, 544}},
+  };
+  static ActionSceneEffectRenderBatch first, repeat, clipped;
+  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Plane,
+      true, true, IdentityProjection, NULL, NULL, &first));
+  CHECK(first.vertex_count >= 30 && first.vertex_count <= 878);
+  CHECK(first.index_count >= 120 && first.index_count <= 1692);
+  /* Individual shafts have transparent edges, a bright core, and slope down
+   * toward the left; they must not regress to a uniform screen-space wash. */
+  CHECK(SampleForestLight(&first, -320, 20, false) == 0);
+  CHECK(SampleForestLight(&first, 230, 20, false) > .18f);
+  CHECK(SampleForestLight(&first, 122, 200, false) > .18f);
+  CHECK(SampleForestLight(&first, 230, 200, false) < .01f);
+  CHECK(ActionEffectProjection_RequiredBgPlaneMask(NULL, &frame) ==
+      (1u << SR_PPU_OVERLAY_BG2));
+  for (int i = 0; i < first.vertex_count; i++)
+    CHECK(first.vertices[i].color.a >= 0 && first.vertices[i].color.a <= 0.941f);
+  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Plane,
+      true, true, IdentityProjection, NULL, NULL, &repeat));
+  CHECK(SceneBatchesEqual(&first, &repeat));
+  frame.decorations[0].phase_ticks++;
+  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Plane,
+      true, true, IdentityProjection, NULL, NULL, &repeat));
+  CHECK(!SceneBatchesEqual(&first, &repeat));
+  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg1Plane,
+      true, true, IdentityProjection, NULL, NULL, &repeat));
+  CHECK(repeat.vertex_count == 0);
+  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Plane,
+      false, false, IdentityProjection, NULL, NULL, &repeat));
+  CHECK(repeat.vertex_count == 0);
+
+  DioramaProjection projection = {
+    .valid = true, .matrix = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1},
+    .aspect_x = 1, .height_scale = 1, .texture_width = 256, .texture_height = 224,
+    .output_width = 256, .output_height = 224,
+    .bg2_plane = {.valid = true, .u1 = 1, .v1 = 1},
+    .bg1_plane = {.valid = true, .u1 = 1, .v1 = 1},
+  };
+  ActionEffectProjectionContext context = {.diorama_projection = &projection};
+  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Plane,
+      true, false, ActionEffectProjection_ProjectPoint,
+      ActionEffectProjection_ClipBounds, &context, &clipped));
+  CHECK(clipped.vertex_count > 0 && clipped.vertex_count <= 1400);
+  for (int i = 0; i < clipped.vertex_count; i++) {
+    const ArRenderPointF p = clipped.vertices[i].position;
+    CHECK(p.x >= 64 && p.x <= 192 && p.y >= 56 && p.y <= 168);
+  }
+  /* Point particles still reject off-plane samples. Only mesh triangles are
+   * clipped, so motes cannot accumulate along the frame edge. */
+  ArRenderPointF point;
+  CHECK(!ActionEffectProjection_ProjectPoint(&context, &frame.decorations[0],
+      -1, 20, &point));
+  CHECK(!ActionEffectProjection_ProjectPoint(&context, &frame.decorations[0],
+      1, 225, &point));
+
+  /* Cropped extended-row planes use fractional UV bounds and a nonzero
+   * texture origin. Clipping must not lose the rays to roundoff at
+   * the boundary when a UV is converted back to capture coordinates. */
+  projection.texture_width = 1024;
+  projection.texture_height = 352;
+  projection.texture_x_origin = 83;
+  projection.bg2_plane.u0 = 0.1f;
+  projection.bg2_plane.u1 = 0.77f;
+  projection.bg2_plane.v0 = 0.127f;
+  projection.bg2_plane.v1 = 0.937f;
+  context.ws_extra_top = 64;
+  context.bg2_camera_y = 220;
+  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Plane,
+      true, false, ActionEffectProjection_ProjectPoint,
+      ActionEffectProjection_ClipBounds, &context, &clipped));
+  CHECK(clipped.vertex_count > 0 && clipped.vertex_count <= 1400);
+  CHECK(clipped.index_count <= 600);
+  for (int i = 0; i < clipped.vertex_count; i++) {
+    CHECK(isfinite(clipped.vertices[i].position.x));
+    CHECK(isfinite(clipped.vertices[i].position.y));
+  }
+}
+
+static void TestForestFanOut(void) {
+  ActionSceneEffectFrame frame = {.decoration_count = 1, .decoration_visible_count = 1};
+  frame.decorations[0] = (ActionEffectInstance){
+    .kind = kActionEffect_ForestCanopyLight,
+    .phase = kActionEffectPhase_ForestCanopyLight, .flags = kActionEffectFlag_Visible,
+    .render_layer = kActionEffectRenderLayer_Bg2Plane,
+    .projection_plane = kActionEffectProjectionPlane_BetweenBackgrounds,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,544}},
+  };
+  static ActionSceneEffectRenderBatch batch;
+  const float heights[] = {32, 200};
+  for (int tick = 123; tick < 2048; tick += 701) {
+    frame.decorations[0].phase_ticks = (uint16_t)tick;
+    CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Plane,
+        true, false, IdentityProjection, NULL, NULL, &batch));
+    float left[2][2] = {{0}}, right[2][2] = {{0}}, centre[2][2] = {{0}};
+    for (int row = 0; row < 2; row++) {
+      int ray = -1;
+      bool inside = false;
+      float peak = 0;
+      for (float x = -300; x < 384; x += .25f) {
+        const float light = SampleForestLight(&batch, x, heights[row], false);
+        if (light > .0001f) {
+          if (!inside) {
+            ray++;
+            peak = 0;
+            CHECK(ray < 2);
+            if (ray >= 2) return;
+            left[row][ray] = x;
+          }
+          right[row][ray] = x;
+          if (light > peak) centre[row][ray] = x;
+          peak = fmaxf(peak, light);
+        }
+        inside = light > .0001f;
+      }
+      CHECK(ray == 1);
+    }
+    /* Sample the rendered light: two distinct rays spread apart downward,
+     * and each widens in the same proportion as their separation. Extrapolating
+     * their cores and edges therefore reaches one source above the view. */
+    const float top_gap = centre[0][1] - centre[0][0];
+    const float bottom_gap = centre[1][1] - centre[1][0];
+    CHECK(bottom_gap > top_gap + 10);
+    const float origin_y = heights[0] - top_gap * (heights[1] - heights[0]) /
+        (bottom_gap - top_gap);
+    CHECK(origin_y < -224);
+    for (int ray = 0; ray < 2; ray++) {
+      const float width_ratio = (right[1][ray] - left[1][ray]) /
+          (right[0][ray] - left[0][ray]);
+      CHECK(fabsf(width_ratio - bottom_gap / top_gap) < .04f);
+    }
+  }
+}
+
+static void TestForestParticles(void) {
+  ActionSceneEffectFrame frame = {.decoration_count = 1, .decoration_visible_count = 1};
+  frame.decorations[0] = (ActionEffectInstance){
+    .kind = kActionEffect_ForestCanopyLight,
+    .phase = kActionEffectPhase_ForestCanopyLight,
+    .flags = kActionEffectFlag_Visible,
+    .generation = 0x46000000u, .pulse_generation = 0x66000000u,
+    .world_x = 928, .world_y = 80,
+    .render_layer = kActionEffectRenderLayer_Bg2Plane,
+    .projection_plane = kActionEffectProjectionPlane_BetweenBackgrounds,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,544}},
+  };
+  static ActionSceneEffectRenderBatch particles, repeat, light;
+  float brightest = 0;
+  for (int ticks = 0; ticks < 2048; ticks += 128) {
+    frame.decorations[0].phase_ticks = (uint16_t)ticks;
+    CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Plane,
+        false, true, IdentityProjection, NULL, NULL, &particles));
+    CHECK(particles.vertex_count <= 856 && particles.index_count <= 1284);
+    CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Plane,
+        true, false, IdentityProjection, NULL, NULL, &light));
+    int fine_motes = 0;
+    for (int i = 0; i < particles.vertex_count; i += 4) {
+      const ArRenderVertex2D *v = &particles.vertices[i];
+      const float radius = hypotf(v[1].position.x - v[3].position.x,
+          v[1].position.y - v[3].position.y) * .5f;
+      if (radius >= 1) { /* The original large drifting motes. */
+        brightest = fmaxf(brightest, v[0].color.a);
+        continue;
+      }
+      fine_motes++;
+      CHECK(radius >= .449f && radius <= .751f);
+      const float x = (v[0].position.x + v[2].position.x) * .5f;
+      const float y = (v[0].position.y + v[2].position.y) * .5f;
+      CHECK(SampleForestLight(&light, x, y, false) > .0001f);
+    }
+    CHECK(fine_motes >= 8); /* Small dust pockets remain present in the shafts. */
+    CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Plane,
+        false, true, IdentityProjection, NULL, NULL, &repeat));
+    CHECK(SceneBatchesEqual(&particles, &repeat));
+    frame.decorations[0].phase_ticks = (uint16_t)(ticks + 65536 - 2048);
+    CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Plane,
+        false, true, IdentityProjection, NULL, NULL, &repeat));
+    CHECK(SceneBatchesEqual(&particles, &repeat)); /* Continuous across clock wrap. */
+  }
+  CHECK(brightest > .65f); /* Motes must be readable, not subpixel faint sparks. */
+  frame.decorations[0].kind = kActionEffect_ForestLeaves;
+  frame.decorations[0].render_layer = kActionEffectRenderLayer_Bg2Foliage;
+  int visible_frames = 0;
+  for (int ticks = 0; ticks < 2048; ticks += 128) {
+    frame.decorations[0].phase_ticks = (uint16_t)ticks;
+    CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Foliage,
+        true, true, IdentityProjection, NULL, NULL, &particles));
+    CHECK(particles.vertex_count <= 144 && particles.index_count <= 240);
+    if (particles.vertex_count) visible_frames++;
+    for (int i = 0; i < particles.vertex_count; i++) {
+      /* Dark body and a distinct lit rim share the same alpha pass. */
+      CHECK(i % 9 < 6 ? particles.vertices[i].color.r < .15f :
+                       particles.vertices[i].color.r > .60f);
+      CHECK(particles.vertices[i].color.a >= 0 && particles.vertices[i].color.a <= .901f);
+    }
+    CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Foliage,
+        true, true, IdentityProjection, NULL, NULL, &repeat));
+    CHECK(SceneBatchesEqual(&particles, &repeat));
+    /* The last particle cycle before the 16-bit scene clock wraps must match
+     * the first, avoiding a synchronized position jump during a long stay. */
+    frame.decorations[0].phase_ticks = (uint16_t)(ticks + 65536 - 2048);
+    CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Foliage,
+        true, true, IdentityProjection, NULL, NULL, &repeat));
+    CHECK(SceneBatchesEqual(&particles, &repeat));
+  }
+  CHECK(visible_frames == 16);
+  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg2Plane,
+      true, true, IdentityProjection, NULL, NULL, &repeat));
+  CHECK(repeat.vertex_count == 0); /* Silhouettes cannot enter the additive batch. */
+  frame.decorations[0].kind = kActionEffect_ForestForwardLight;
+  frame.decorations[0].render_layer = kActionEffectRenderLayer_ForegroundLight;
+  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_ForegroundLight,
+      true, false, IdentityProjection, NULL, NULL, &repeat));
+  CHECK(repeat.vertex_count >= 30 && repeat.vertex_count <= 150);
+  CHECK(repeat.index_count <= 600);
+  float peak = 0;
+  for (int i = 0; i < repeat.vertex_count; i++) {
+    const ArRenderVertex2D *v = &repeat.vertices[i];
+    CHECK(v->color.a == 1 && v->color.r <= .601f);
+    if (v->position.y <= frame.decorations[0].world_y + 224) CHECK(v->color.r == 0);
+    peak = fmaxf(peak, v->color.r);
+  }
+  CHECK(peak > .54f);
+}
+
+static void TestForestBossClearingLight(void) {
+  ActionSceneEffectFrame frame = {.decoration_count = 1, .decoration_visible_count = 1};
+  frame.decorations[0] = (ActionEffectInstance){
+    .kind = kActionEffect_ForestForwardLight,
+    .phase = kActionEffectPhase_ForestCanopyLight, .flags = kActionEffectFlag_Visible,
+    /* Observed arena cameras: BG1 (3720,543), BG2 (1860,181). */
+    .world_x = 2918, .world_y = 202,
+    .render_layer = kActionEffectRenderLayer_ForegroundLight,
+    .projection_plane = kActionEffectProjectionPlane_BetweenBackgrounds,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,544}},
+  };
+  static ActionSceneEffectRenderBatch batch;
+  for (int ticks = 0; ticks < 2048; ticks += 512) {
+    frame.decorations[0].phase_ticks = (uint16_t)ticks;
+    CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_ForegroundLight,
+        true, false, IdentityProjection, NULL, NULL, &batch));
+    for (int i = 0; i < batch.vertex_count; i++) {
+      const ArRenderVertex2D *v = &batch.vertices[i];
+      CHECK(v->color.r <= .881f && v->color.a == 1);
+      if (v->position.y <= 394) CHECK(v->color.r == 0); /* Clear the HUD rows. */
+    }
+    /* Sample rider, horse and ground heights across the battle lane. A moving
+     * boss must encounter both strong highlights and distinct shaded gaps. */
+    const float heights[] = {426, 475, 530};
+    for (int row = 0; row < 3; row++) {
+      float peak = 0, minimum = 1, total = 0;
+      int lit = 0, samples = 0;
+      for (float x = 2770; x <= 3170; x += 4) {
+        const float value = SampleForestLight(&batch, x, heights[row], true);
+        peak = fmaxf(peak, value);
+        minimum = fminf(minimum, value);
+        total += value;
+        samples++;
+        if (value > .12f) lit++;
+      }
+      CHECK(peak > .75f && minimum < .10f);
+      CHECK(total / samples > .25f && lit * 2 > samples);
+    }
+  }
+}
+
+static void TestForestLayerScroll(void) {
+  ActionSceneEffectFrame frame = {.decoration_count = 1, .decoration_visible_count = 1};
+  frame.decorations[0] = (ActionEffectInstance){
+    .kind = kActionEffect_ForestForwardLight,
+    .phase = kActionEffectPhase_ForestCanopyLight,
+    .flags = kActionEffectFlag_Visible,
+    .world_x = 928, .world_y = 80, .phase_ticks = 512,
+    .render_layer = kActionEffectRenderLayer_ForegroundLight,
+    .projection_plane = kActionEffectProjectionPlane_BetweenBackgrounds,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,544}},
+  };
+  ActionEffectProjectionContext context = {
+    .bg1_camera_x = 1000, .bg2_camera_x = 600,
+    .bg1_camera_y = 320, .bg2_camera_y = 160,
+    .visible_width = 512, .snes_height = 224, .viewport = {0,0,512,224},
+  };
+  static ActionSceneEffectRenderBatch first, moved;
+  for (int foreground = 0; foreground < 2; foreground++) {
+    const uint8_t layer = foreground ? kActionEffectRenderLayer_ForegroundLight :
+                                      kActionEffectRenderLayer_Bg2Plane;
+    frame.decorations[0].kind = foreground ? kActionEffect_ForestForwardLight :
+                                            kActionEffect_ForestCanopyLight;
+    frame.decorations[0].render_layer = layer;
+    CHECK(ActionSceneDecorationRender_Build(&frame, layer, true, false,
+        ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds, &context, &first));
+    /* A mean-camera movement of 16 must move each light left by 16. The old
+     * camera-anchored front shaft stayed in exactly the same screen position. */
+    frame.decorations[0].world_x += 16;
+    context.bg1_camera_x += 24;
+    context.bg2_camera_x += 8;
+    CHECK(ActionSceneDecorationRender_Build(&frame, layer, true, false,
+        ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds, &context, &moved));
+    CHECK(first.vertex_count > 0 && moved.vertex_count > 0);
+    float difference = 0, peak = 0;
+    for (float y = 8.3f; y < 216; y += 9.1f) {
+      for (float x = 1.2f; x < 496; x += 7.3f) {
+        const float expected = SampleForestLight(&first, x + 16, y, foreground);
+        const float actual = SampleForestLight(&moved, x, y, foreground);
+        peak = fmaxf(peak, expected);
+        difference = fmaxf(difference, fabsf(actual - expected));
+      }
+    }
+    CHECK(peak > .1f && difference < .0005f);
+    /* Sweep the complete room, including camera boundaries and sway phases.
+     * Culling may never exceed the fixed geometry allocation. */
+    for (int x = 128; x < 3456; x += 31) {
+      frame.decorations[0].world_x = (int16_t)x;
+      for (int y = -160; y <= 352; y += 128) {
+        frame.decorations[0].world_y = (int16_t)y;
+        frame.decorations[0].phase_ticks = (uint16_t)(x + y);
+        CHECK(ActionSceneDecorationRender_Build(&frame, layer, true, true,
+            IdentityProjection, NULL, NULL, &moved));
+        CHECK(moved.vertex_count <= 2536 && moved.index_count <= 4884);
+      }
+    }
+    frame.decorations[0].world_x = 928;
+    frame.decorations[0].world_y = 80;
+    frame.decorations[0].phase_ticks = 512;
+    context.bg1_camera_x = 1000;
+    context.bg2_camera_x = 600;
+  }
+}
+
+static void TestBetweenBackgroundsProjection(void) {
+  DioramaProjection projection = {
+    .valid = true, .matrix = {1,0,0,0, 0,1,0,0, 0,0,1,.25f, 0,0,0,1},
+    .aspect_x = 1, .height_scale = 1, .texture_width = 512, .texture_height = 352,
+    .output_width = 720, .output_height = 448,
+    .bg2_plane = {.valid = true, .u1 = 1, .v1 = 1, .z_world = -.4f,
+                  .rake = .1f, .bow = .2f},
+    .bg1_plane = {.valid = true, .u1 = 1, .v1 = 1, .z_world = .2f,
+                  .rake = -.3f, .bow = .1f},
+  };
+  ActionEffectProjectionContext context = {
+    .diorama_projection = &projection, .ws_extra = 128, .ws_extra_top = 64,
+    .bg1_camera_x = 1000, .bg1_camera_y = 300,
+    .bg2_camera_x = 500, .bg2_camera_y = 200,
+  };
+  ActionEffectInstance light = {
+    .world_x = 800, .world_y = 200, .flags = kActionEffectFlag_Visible,
+    .projection_plane = kActionEffectProjectionPlane_BetweenBackgrounds,
+    .render_layer = kActionEffectRenderLayer_Bg2Plane,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-448,0,64,544}},
+  };
+  ArRenderPointF actual, expected;
+  CHECK(ActionEffectProjection_ProjectPoint(&context, &light, 20, 100, &actual));
+  /* Independent midpoint camera, but the same finite backdrop footprint.
+   * This keeps light out of the diorama void even at perspective side edges. */
+  CHECK(Diorama_ProjectCapturedBg2Point(&projection, 198, 114,
+      &expected, NULL, NULL));
+  CHECK(fabsf(actual.x - expected.x) < .0001f);
+  CHECK(fabsf(actual.y - expected.y) < .0001f);
+  projection.bg2_plane.valid = false;
+  CHECK(!ActionEffectProjection_ProjectPoint(&context, &light, 20, 100, &actual));
+  context.diorama_projection = NULL;
+  context.viewport = (ArRenderRectI){0,0,512,224};
+  context.visible_width = 512;
+  context.snes_height = 224;
+  CHECK(ActionEffectProjection_ProjectPoint(&context, &light, 20, 100, &actual));
+  CHECK(actual.x == 198 && actual.y == 50);
+  CHECK(ActionEffectProjection_IntersectsFlatViewport(&context, &light));
+  /* Room padding is outside the illuminated volume even when it lies inside
+   * the capture plane. Clip meshes there and reject individual motes. */
+  light.flags |= kActionEffectFlag_ClipToRect;
+  light.clip_rect = (ActionEffectLocalRect){10,20,80,120};
+  CHECK(!ActionEffectProjection_ProjectPoint(&context, &light, 9, 100, &actual));
+  CHECK(ActionEffectProjection_ProjectPoint(&context, &light, 10, 100, &expected));
+  ActionEffectLocalRect bounds;
+  CHECK(ActionEffectProjection_ClipBounds(&context, &light, &bounds));
+  CHECK(bounds.x0 == 10 && bounds.x1 == 64 && bounds.y0 == 50 && bounds.y1 == 120);
+  CHECK(!ActionEffectProjection_ProjectPoint(&context, &light, -100, 100, &actual));
+  light.clip_rect.x1 = light.clip_rect.x0;
+  CHECK(!ActionEffectProjection_ProjectPoint(&context, &light, 20, 100, &actual));
+  CHECK(!ActionEffectProjection_ClipBounds(&context, &light, &bounds));
+  light.world_x = 2000;
+  CHECK(!ActionEffectProjection_IntersectsFlatViewport(&context, &light));
+}
+
 int main(void) {
+  TestForestClippingPreservesField(928, 80);
+  TestForestClippingPreservesField(2918, 202);
+  TestForestCanopyGeometry();
+  TestForestFanOut();
+  TestForestParticles();
+  TestForestBossClearingLight();
+  TestForestLayerScroll();
+  TestBetweenBackgroundsProjection();
   TestNorthwallGeometryBudget();
   TestNorthwallWaterSplash();
   TestFirstActBossMagicGeometry();
