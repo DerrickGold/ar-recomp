@@ -1,5 +1,7 @@
+#include "support/regional_save_fixture.h"
 #include "support/regional_test_values.h"
 #include "save/save_slot_manager.h"
+#include "regional/session/regional_campaign.h"
 #include "byte_order.h"
 #include "deterministic_hash.h"
 #include "support/test_assert.h"
@@ -66,6 +68,12 @@ static void IndexHash(uint8_t bytes[264]) {
   ByteOrder_WriteLe32(bytes + 256, (uint32_t)hash);
   ByteOrder_WriteLe32(bytes + 260, (uint32_t)(hash >> 32));
 }
+static bool EditorBeforeCommit(void *context, SaveError *error) {
+  return SaveSlots_BeforeCommit(context, error);
+}
+static void EditorDidCommit(void *context, const uint8_t *image) {
+  SaveSlots_DidCommit(context, image);
+}
 static void Run(const char *root, SaveBackend backend) {
   assert(!MKDIR(root));
   char native[512], ini[512], other[512], companion[550];
@@ -87,7 +95,7 @@ static void Run(const char *root, SaveBackend backend) {
   campaign.randomizer = RandomizerConfig_Default();
   campaign.randomizer.enabled = true;
   campaign.randomizer.seed = 123456;
-  assert(ArRegionalSession_Save(&campaign, (SaveFileFormat)backend, original, NULL, image, &error));
+  assert(TestRegional_Save(&campaign, (SaveFileFormat)backend, original, NULL, image, &error));
   SaveSlots s;
   assert(SaveSlots_Open(&s, root, backend, &error) && s.adopted && s.active == 0);
   assert(s.layout == 3 && SaveSlots_Paths(&s, 0, native, ini, sizeof(native)));
@@ -168,7 +176,7 @@ static void Run(const char *root, SaveBackend backend) {
   memcpy(new_image, image, sizeof(new_image));
   new_image[100] = 9;
   Save_RecomputeChecksum(new_image);
-  assert(ArRegionalSession_Save(&restored, (SaveFileFormat)destination_backend, destination, NULL,
+  assert(TestRegional_Save(&restored, (SaveFileFormat)destination_backend, destination, NULL,
                                 new_image, &error));
   SaveSlots_DidCommit(&s, new_image);
   assert(SaveSlotManager_Inspect(&s, 1, &b) && b.randomizer.seed == 0 && b.saved_at &&
@@ -176,6 +184,47 @@ static void Run(const char *root, SaveBackend backend) {
   assert(!SaveSlots_Request(&s, 1, b.fingerprint, NULL, 0, backend, &error));
   assert(SaveSystem_Attach(new_image, sizeof(new_image), destination_backend, native, ini, &error));
   assert(SaveSystem_LoadActive(&error));
+  /* Confirmed edits target active slot 2, even with the boot safety switch
+   * disarmed and slot 1 using a different backend. Keep its campaign bound. */
+  ArRegionalCampaign editor_campaign;
+  ArRegionalCampaign_Init(&editor_campaign, s.active, NULL, NULL);
+  SaveCommitHost editor_host = ArRegionalCampaign_SaveHost(&editor_campaign);
+  assert(SaveSystem_SetCommitHost(&editor_host));
+  const SaveStorageHooks editor_storage = {&s, EditorBeforeCommit, EditorDidCommit, NULL};
+  SaveSystem_SetStorageHooks(&editor_storage);
+  Settings editor = {.save_master_level = 17};
+  assert(SaveEditor_HandleAction(kSettingAction_SaveApplyPersist, &editor) ==
+         kSaveEditorAction_Failed);
+  assert(SaveEditor_ApplyConfirmedEdits(kSettingAction_SaveApplySession, &editor, &error) ==
+         kSaveEditorAction_Completed);
+  assert(!editor.save_edit_armed && ByteOrder_ReadLe16(new_image + 0x1442) == 17);
+  assert(SaveSystem_AutoPersistIfChanged(&error));
+  assert(Save_LoadFile((SaveFileFormat)destination_backend, destination, disk, &error));
+  assert(ByteOrder_ReadLe16(disk + 0x1442) == 5);
+  char blocked[550];
+  snprintf(blocked, sizeof(blocked), "%s.tmp", destination);
+  assert(!MKDIR(blocked));
+  assert(SaveEditor_ApplyConfirmedEdits(kSettingAction_SaveApplyRestart, &editor, &error) ==
+         kSaveEditorAction_Failed && error.message[0]);
+  assert(ByteOrder_ReadLe16(new_image + 0x1442) == 17);
+  assert(SaveSystem_CopyDurableImage(disk) && ByteOrder_ReadLe16(disk + 0x1442) == 5);
+  assert(!RMDIR(blocked));
+  assert(SaveEditor_ApplyConfirmedEdits(kSettingAction_SaveApplyPersist, &editor, &error) ==
+         kSaveEditorAction_Completed);
+  assert(Save_LoadFile((SaveFileFormat)destination_backend, destination, disk, &error));
+  assert(!memcmp(disk, new_image, sizeof(disk)) && Save_ChecksumValid(disk));
+  ArRegionalSession edited_campaign;
+  assert(ArRegionalSession_Load(&edited_campaign, 1, destination, disk, &error) ==
+         kSaveCheckpoint_Ready);
+  assert(TestRegional_EqualSession(&edited_campaign, &restored));
+  assert(SaveSlotManager_Inspect(&s, 1, &b) && b.summary.level == 17);
+  assert(Save_LoadFile((SaveFileFormat)backend, original, disk, &error));
+  assert(!memcmp(disk, image, sizeof(disk))); /* Inactive slot remains untouched. */
+  /* Restart also works when the same draft has already been saved. */
+  assert(SaveEditor_ApplyConfirmedEdits(kSettingAction_SaveApplyRestart, &editor, &error) ==
+         kSaveEditorAction_RestartRequired);
+  assert(SaveSystem_LoadActive(&error) && ByteOrder_ReadLe16(new_image + 0x1442) == 17);
+  SaveSystem_SetStorageHooks(NULL);
   assert(SaveSystem_SetLocalizedPlayerName("アストラ", "ASTRA"));
   assert(SaveSystem_AutoPersistIfChanged(&error));
   assert(SaveSlotManager_Inspect(&s, 1, &b) && !strcmp(b.summary.name, "アストラ"));
@@ -217,7 +266,7 @@ static void Run(const char *root, SaveBackend backend) {
   assert(!SaveSlotManager_Inspect(&s, 1, &b));
   assert(Save_WriteFile((SaveFileFormat)destination_backend, destination, new_image, &error));
   restored.slot = 7;
-  assert(ArRegionalSession_Save(&restored, (SaveFileFormat)destination_backend, destination,
+  assert(TestRegional_Save(&restored, (SaveFileFormat)destination_backend, destination,
                                 new_image, new_image, &error) == false);
   /* A request write failure keeps A active and leaves B unchanged. */
   snprintf(other, sizeof(other), "%s/slot-switch.arrequest.tmp", root);
@@ -295,7 +344,7 @@ static void ActiveEmptyFailure(const char *root, SaveBackend backend) {
   const char *active = backend == kSaveBackend_Ini ? ini : native;
   uint8_t image[kActRaiserSramSize] = {0};
   Save_RecomputeChecksum(image);
-  assert(ArRegionalSession_Save(&draft, (SaveFileFormat)backend, active, NULL, image, &error));
+  assert(TestRegional_Save(&draft, (SaveFileFormat)backend, active, NULL, image, &error));
   SaveSlots_DidCommit(&slots, image);
   SaveSlots_Close(&slots);
   assert(SaveSlots_Open(&slots, root, next, &error));
@@ -386,9 +435,13 @@ static void MigrationResume(const char *root, SaveBackend backend) {
   session.randomizer = RandomizerConfig_Default();
   session.randomizer.enabled = true;
   session.randomizer.seed = 98765;
-  assert(ArRegionalSession_Save(&session, (SaveFileFormat)backend, source, NULL, image, &error));
+  assert(TestRegional_Save(&session, (SaveFileFormat)backend, source, NULL, image, &error));
   assert(SaveSystem_Attach(image, sizeof(image), backend, native, ini, &error) &&
          SaveSystem_LoadActive(&error));
+  ArRegionalCampaign campaign;
+  ArRegionalCampaign_Init(&campaign, 0, NULL, NULL);
+  SaveCommitHost host = ArRegionalCampaign_SaveHost(&campaign);
+  assert(SaveSystem_SetCommitHost(&host));
   assert(SaveSystem_SetLocalizedPlayerName("Élise", "ELISE") &&
          SaveSystem_AutoPersistIfChanged(&error));
   assert(SaveSlotManager_Draft(&draft, 1, id, &session.requested, &session.randomizer));
@@ -579,11 +632,61 @@ static void UpdateEmptyDraft(const char *root, SaveBackend backend) {
   uint8_t image[kActRaiserSramSize] = {0};
   Save_RecomputeChecksum(image);
   assert(SaveSlots_BeforeCommit(&slots, &error));
-  assert(ArRegionalSession_Save(&draft, (SaveFileFormat)backend,
+  assert(TestRegional_Save(&draft, (SaveFileFormat)backend,
                                 backend == kSaveBackend_Ini ? ini : native, NULL, image, &error));
   SaveSlots_DidCommit(&slots, image);
   assert(!SaveSlots_UpdateDraft(&slots, bytes, size,
                                 &error)); /* occupied slots use their checkpoint */
+  SaveSlots_Close(&slots);
+  RemoveCollection(root);
+}
+
+static void NamedLegacy(const char *root, SaveBackend backend) {
+  assert(!MKDIR(root));
+  char native[512], ini[512], path[512], journal[550], held[550];
+  snprintf(native, sizeof(native), "%s/save.srm", root);
+  snprintf(ini, sizeof(ini), "%s/save.ini", root);
+  snprintf(path, sizeof(path), "%s", backend == kSaveBackend_Ini ? ini : native);
+  uint8_t image[kActRaiserSramSize] = {0};
+  memcpy(image + 0x1439, "ELISE", 5);
+  Save_RecomputeChecksum(image);
+  SaveError error = {{0}};
+  assert(Save_WriteFile((SaveFileFormat)backend, path, image, &error));
+  assert(SaveSystem_Attach(image, sizeof(image), backend, native, ini, &error));
+  assert(SaveSystem_LoadActive(&error));
+  assert(SaveSystem_SetLocalizedPlayerName("Élise", "ELISE"));
+  assert(SaveSystem_AutoPersistIfChanged(&error));
+  assert(SaveCheckpoint_IsLegacySnapshot(path, image));
+
+  SaveSlots slots;
+  SaveSlotDetails details;
+  assert(SaveSlots_Open(&slots, root, backend, &error));
+  assert(slots.records[0].checkpoint_required);
+  assert(SaveSlotManager_Inspect(&slots, 0, &details) && details.legacy &&
+         !strcmp(details.summary.name, "Élise"));
+  assert(SaveSlots_Paths(&slots, 0, native, ini, sizeof(native)));
+  snprintf(path, sizeof(path), "%s", backend == kSaveBackend_Ini ? ini : native);
+  snprintf(journal, sizeof(journal), "%s.archeckpoint", path);
+  snprintf(held, sizeof(held), "%s/checkpoint-held", root);
+  assert(!rename(journal, held));
+  assert(!SaveSlotManager_Inspect(&slots, 0, &details));
+  SaveSlots_Close(&slots);
+  assert(SaveSlots_Open(&slots, root, backend, &error));
+  assert(!SaveSlotManager_Inspect(&slots, 0, &details));
+  assert(!rename(held, journal));
+  assert(SaveSlotManager_Inspect(&slots, 0, &details) && details.legacy);
+  /* A subsequent editor commit still treats this as one complete snapshot. */
+  assert(SaveSystem_Attach(image, sizeof(image), backend, native, ini, &error));
+  assert(SaveSystem_LoadActive(&error));
+  const SaveStorageHooks hooks = {&slots, EditorBeforeCommit, EditorDidCommit, NULL};
+  SaveSystem_SetStorageHooks(&hooks);
+  SaveEditRequest edits;
+  SaveEditRequest_Clear(&edits);
+  edits.master_level = 17;
+  assert(SaveSystem_ApplyEdits(&edits, true, true, false, &error));
+  assert(SaveSlotManager_Inspect(&slots, 0, &details) && details.summary.level == 17 &&
+         !strcmp(details.summary.name, "Élise"));
+  SaveSystem_SetStorageHooks(NULL);
   SaveSlots_Close(&slots);
   RemoveCollection(root);
 }
@@ -593,6 +696,8 @@ int main(int argc, char **argv) {
   UpdateEmptyDraft("save-slots-draft-native", kSaveBackend_NativeSrm);
   UpdateEmptyDraft("save-slots-draft-ini", kSaveBackend_Ini);
   LegacyAdoption();
+  NamedLegacy("save-slots-named-legacy-native", kSaveBackend_NativeSrm);
+  NamedLegacy("save-slots-named-legacy-ini", kSaveBackend_Ini);
   MigrationResume("save-layout-native-resume", kSaveBackend_NativeSrm);
   MigrationResume("save-layout-ini-resume", kSaveBackend_Ini);
   ActiveEmptyFailure("save-slots-empty-native", kSaveBackend_NativeSrm);

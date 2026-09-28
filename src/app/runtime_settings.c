@@ -96,6 +96,7 @@ bool RuntimeSettings_HandleAction(const SettingDesc *desc) {
   }
   case kSettingAction_SaveApplySession:
   case kSettingAction_SaveApplyPersist:
+  case kSettingAction_SaveApplyRestart:
   case kSettingAction_SaveImport:
   case kSettingAction_SaveExportCampaign:
   case kSettingAction_SaveExportSrm:

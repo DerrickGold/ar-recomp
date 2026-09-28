@@ -139,26 +139,50 @@ SaveEditorActionResult SaveEditor_HandleFileAction(SettingAction action, const c
   return success ? kSaveEditorAction_Completed : kSaveEditorAction_Failed;
 }
 
+static SaveEditorActionResult ApplyEdits(SettingAction action, const Settings *settings,
+                                         bool armed, SaveError *error) {
+  if (error) *error = (SaveError){{0}};
+  if (!settings || (action != kSettingAction_SaveApplySession &&
+                    action != kSettingAction_SaveApplyPersist &&
+                    action != kSettingAction_SaveApplyRestart)) {
+    if (error) snprintf(error->message, sizeof(error->message), "Invalid save edit action.");
+    return kSaveEditorAction_Failed;
+  }
+  SaveEditRequest edits;
+  if (!SaveEditor_BuildRequest(settings, &edits)) {
+    if (error)
+      snprintf(error->message, sizeof(error->message), "Choose at least one save field to edit.");
+    return kSaveEditorAction_Failed;
+  }
+  const bool persist = action != kSettingAction_SaveApplySession;
+  if (!SaveSystem_ApplyEdits(&edits, armed, persist, settings->save_autobackup, error))
+    return kSaveEditorAction_Failed;
+  fprintf(stderr, "[save-editor] staged save edits applied%s\n",
+          persist ? " and saved" : " for this session");
+  return action == kSettingAction_SaveApplyRestart ? kSaveEditorAction_RestartRequired
+                                                   : kSaveEditorAction_Completed;
+}
+
+SaveEditorActionResult SaveEditor_ApplyConfirmedEdits(SettingAction action,
+                                                     const Settings *settings,
+                                                     SaveError *error) {
+  return ApplyEdits(action, settings, true, error);
+}
+
 SaveEditorActionResult SaveEditor_HandleAction(SettingAction action,
                                               const Settings *settings) {
   if (!settings) return kSaveEditorAction_Failed;
   switch (action) {
   case kSettingAction_SaveApplySession:
-  case kSettingAction_SaveApplyPersist: {
-    SaveEditRequest edits;
-    SaveEditor_BuildRequest(settings, &edits);
+  case kSettingAction_SaveApplyPersist:
+  case kSettingAction_SaveApplyRestart: {
     SaveError error = {{0}};
-    const bool persist = action == kSettingAction_SaveApplyPersist;
-    if (!SaveSystem_ApplyEdits(
-            &edits, settings->save_edit_armed, persist,
-            settings->save_autobackup, &error)) {
+    SaveEditorActionResult result = ApplyEdits(action, settings, settings->save_edit_armed, &error);
+    if (result == kSaveEditorAction_Failed)
       fprintf(stderr, "[save-editor] %s failed: %s\n",
-              persist ? "apply and save" : "session apply", error.message);
-      return kSaveEditorAction_Failed;
-    }
-    fprintf(stderr, "[save-editor] staged save edits applied%s\n",
-            persist ? " and saved" : " for this session");
-    return kSaveEditorAction_Completed;
+              action == kSettingAction_SaveApplySession ? "session apply" : "apply and save",
+              error.message);
+    return result;
   }
   case kSettingAction_SaveImport: {
     const char *path = getenv("AR_SAVE_IMPORT");

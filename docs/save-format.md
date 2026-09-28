@@ -4,6 +4,8 @@ ActRaiser's native battery save is an 8 KiB SRAM image. This reference documents
 the US layout and the Recomp's lossless INI alternative. For the in-game editor,
 see the [manual](manual.md#save-editor); for corresponding memory locations,
 see the [RAM map](ram-map.md).
+Complete campaign transactions, checkpoint versions, and ownership are described
+in [Save persistence ownership](save-persistence.md).
 
 The starting field map came from
 [RyudoSynbios/game-tools-collection](https://github.com/RyudoSynbios/game-tools-collection/tree/master/src/lib/templates/actraiser/saveEditor).
@@ -390,32 +392,34 @@ keyboard's compatibility bytes in WRAM; the game copies those bytes into SRAM
 when saving. These bytes are a fallback spelling, not a general transliteration
 of every supported script.
 
-The full UTF-8 name is stored in a separate companion file by appending
-`.arname` to the active save path: `save.srm.arname` or `save.ini.arname`.
-Copy both files together to retain the enhanced spelling on another Recomp
-installation. A SNES emulator needs only the ordinary `.srm`; it displays the
-native fallback name. Campaign archives include the enhanced name; raw SRAM/INI
-exports contain only the game image. Raw import accepts a matching valid name
-companion when one is supplied beside the source.
+The full UTF-8 name is stored with campaign metadata in the version 2
+`.archeckpoint` journal. Copy the native file and its journal together to
+retain the complete campaign, or use a portable `.arsave` archive. A SNES
+emulator needs only the ordinary `.srm`; it displays the native fallback name.
+Raw SRAM/INI exports contain only the game image.
 
-Companions contain `ARNAME1\0`, the native 32-bit checksum (little-endian),
-nine compatibility-name bytes, a 16-bit UTF-8 byte length (little-endian), and
-that many UTF-8 bytes. Names allow up to eight grapheme clusters and 256 UTF-8
-bytes. On load, both checksum and compatibility spelling must match; malformed,
-missing, or stale companions fall back to the native name without rejecting the
-game save. Playing and saving in an emulator can change the checksum and thus
-invalidate the old companion when returning to Recomp.
+Older saves may have an `ARNAME1\0` companion (`save.srm.arname` or
+`save.ini.arname`) containing the native 32-bit checksum, nine compatibility-name
+bytes, a 16-bit UTF-8 byte length, and that many UTF-8 bytes. Names allow up to
+eight grapheme clusters and 256 UTF-8 bytes. Legacy imports validate both the
+checksum and compatibility spelling. Stale or damaged metadata is preserved
+and blocks a complete campaign operation until repaired.
+
+The first write adopts a valid legacy name into the journal together with its
+matching SRAM and features. Existing `.arname` files are preserved, but the
+journal becomes authoritative. Subsequent native saves and editor changes
+publish the name as part of the complete snapshot. An interrupted replacement
+loads the previous complete snapshot, including its old name.
 
 The accepted name can precede the first battery save. It remains host-owned
-session metadata until SRAM contains its compatibility spelling. Subsequent
-native saves update the companion's checksum association, even with enhanced
-rendering disabled. Each file is replaced atomically, but the two files are
-not one filesystem transaction: a companion write failure is retried, and an
-interruption between writes can lose the enhanced spelling, not corrupt SRAM.
+session metadata until SRAM contains its compatibility spelling. Name-only
+updates use the same journal transaction and cannot persist session-only SRAM
+edits. See [Save persistence ownership](save-persistence.md) for the commit and
+migration contracts.
 
 ### Regional campaign checkpoints
 
-Regional rules use a second companion, `.archeckpoint`,
+Regional rules and enhanced names share the `.archeckpoint` companion,
 appended to the active path (`save.srm.archeckpoint` or `save.ini.archeckpoint`).
 It leaves the native image unchanged. Keep it with the save when moving between
 Recomp installations; an emulator still needs only the `.srm`.
@@ -474,8 +478,8 @@ backup behavior. Diagnostic default imports prefer `imports/import.arsave`, `.sr
 those diagnostic actions; the interactive picker always uses its selected path.
 
 The complete recovery-copy API is separate from ordinary Export. It reserves a
-new directory and writes `save.srm`, its matching regional companion (if present)
-and its Unicode-name companion (if present). It never replaces an existing
+new directory and writes `save.srm` and its complete snapshot journal, including
+regional metadata and the enhanced name when present. It never replaces an existing
 directory. The native file is written last, so a failed copy cannot look complete
 while missing a required companion. Partial directories are retained on failure.
 It accepts only a completed, persisted save whose disk image still matches;
@@ -490,11 +494,10 @@ not substitute for a complete recovery copy.
 with the current campaign's metadata, then replaces live SRAM and its shadow.
 It rejects pending/aborted native saves. Failed commits leave live SRAM and
 the durable image unchanged; the checkpoint journal can retain a retry
-candidate without selecting it on reload. The result distinguishes an
-uncommitted image from a committed image whose Unicode-name companion needs
-retrying. A caller must never roll back committed gameplay or repeat a
-destructive conversion because that companion write failed. Neither API
-alone makes redevelopment safe. The game-owned conversion runs at the Palace
+candidate without selecting it on reload. Success means the complete image,
+feature payload, and enhanced name are durable; there is no post-commit name
+failure or name-only retry state. Neither API alone makes redevelopment safe.
+The game-owned conversion runs at the Palace
 selector boundary `$01:85A2`, after native active-town cache retirement. It
 revalidates the confirmed campaign/revision and town footprint, saves a complete
 pre-change image, and reserves `backups/<slot>/redevelopment-<random-id>/`

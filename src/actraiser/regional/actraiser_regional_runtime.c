@@ -382,8 +382,7 @@ RecompReturn ActRaiser_RegionalPopulation(CpuState *cpu) {
             result,directory,error.message[0]?" error=":"",error.message);
       } else result=kActRaiserPopulation_RecoveryFailed;
       const ActRaiserRegionalPopulationNotice notice=result==kActRaiserPopulation_Committed?
-          kActRaiserRegionalPopulation_Complete:result==kActRaiserPopulation_NamePending?
-          kActRaiserRegionalPopulation_NamePending:kActRaiserRegionalPopulation_Failed;
+          kActRaiserRegionalPopulation_Complete:kActRaiserRegionalPopulation_Failed;
       (void)s_population.prompt(s_population.context, notice, source, gameplay_profile,
                                 preview.town.removed);
     }
@@ -1607,12 +1606,8 @@ static bool PrepareContinue(void) {
       if (s_campaign.active.reloads.initialized_towns) return true;
       /* Stock-history acknowledgement also covers old, unknowable delay
        * history. Upgrade the bound companion once; never modify SRAM. */
-      const SaveFileFormat format = SaveSystem_ActiveBackend() == kSaveBackend_Ini
-          ? kSaveFileFormat_Ini
-          : kSaveFileFormat_NativeSrm;
       if (ActRaiserLairReloads_AdoptSaved(&s_campaign.active.reloads, image) &&
-          ArRegionalSession_Save(&s_campaign.active, format, SaveSystem_ActivePath(), image, image,
-                                 &error) &&
+          ArRegionalSession_SaveActiveMetadata(&s_campaign.active, image, &error) &&
           SaveSystem_ValidateActive(&error))
         return true;
       s_campaign.active_valid=false;

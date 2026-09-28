@@ -560,16 +560,19 @@ The **Save editor** stages changes without discarding unknown town-map data.
 can edit town states, unlocks, player name, Master and Angel stats, message
 speed, magic, items, and act scores.
 
-**Allow save edits** is an explicit safety switch, not an edit by itself. Leave
-it Off while browsing; turn it On only when you are ready to apply changes.
-With it Off, both Apply actions and next-boot staged overrides are refused and
-cannot change live or stored SRAM. With it On, an explicit Apply works now;
-staged values also become session-only boot overrides on the next launch when
-using an external diagnostic save. Managed slots disarm boot overrides because
-those global values have no destination-slot identity; use an explicit Apply
-action while the intended slot is active.
+For managed slots, each Apply action asks you to confirm the active slot shown
+in the editor. Accepting authorizes that edit; no separate safety switch is
+needed. Managed slots keep global boot overrides disarmed because those values
+have no destination-slot identity.
+
+When using an external diagnostic save, **Allow save edits** must be On for
+Apply actions or session-only overrides at the next launch. Leave it Off while
+browsing diagnostic saves.
 Rows default to **Leave as-is**, so only values deliberately selected on any
 page are written.
+
+Save edits do not update the working values used by current gameplay. Choose
+Continue at the title screen to load them into the game.
 
 Then run one of these actions:
 
@@ -580,7 +583,11 @@ Then run one of these actions:
 - **Apply and save** first creates a timestamped backup (when Auto-backup is
   enabled), atomically writes the active backend, and updates live SRAM. This
   is the practical menu-testing path: run it, choose the top-level **Restart
-  Game** action, then Continue.
+  Game** action, then Continue. It also saves edits previously applied for the
+  session. If an edit fails, the confirmation dialog shows the reason.
+- **Apply and restart** saves the edits with the same backup protection, then
+  restarts the game in this window. Choose Continue at the title screen to load
+  the changes. If saving fails, the game stays open and shows the error.
 - **Export campaign** opens a file picker for a new `.arsave` file, containing
   saved progress, regional settings and history, randomizer recipe/seed, and the
   enhanced character name. Unsaved gameplay is not included.

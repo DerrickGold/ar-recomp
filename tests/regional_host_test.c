@@ -182,9 +182,8 @@ int main(void) {
   assert(!Population(kActRaiserRegionalPopulation_Confirm, false) && !yielded);
   const char *population_keys[] = {
     "overlay.region.population_failed", "overlay.region.population_complete",
-    "overlay.region.population_name_pending",
   };
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 2; i++) {
     Reset();
     assert(Population((ActRaiserRegionalPopulationNotice)(i + 1), false));
     assert(!strcmp(body_key, population_keys[i]));

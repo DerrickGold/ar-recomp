@@ -263,6 +263,7 @@ typedef enum SettingAction {
   kSettingAction_SaveSlots,
   kSettingAction_NewRandomizedGame,
   kSettingAction_SaveExportCampaign,
+  kSettingAction_SaveApplyRestart,
   kSettingAction_Count,
 } SettingAction;
 

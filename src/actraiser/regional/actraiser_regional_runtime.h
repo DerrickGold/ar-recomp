@@ -18,7 +18,6 @@ typedef enum ActRaiserRegionalPopulationNotice {
   kActRaiserRegionalPopulation_Confirm,
   kActRaiserRegionalPopulation_Failed,
   kActRaiserRegionalPopulation_Complete,
-  kActRaiserRegionalPopulation_NamePending,
 } ActRaiserRegionalPopulationNotice;
 /* Value-only host decision. Counts identify buildings to remove in each of
  * six towns. The host does not receive a CPU, session or transaction pointer.

@@ -266,13 +266,10 @@ bool ArRegionalSession_BeginLairAccounting(ArRegionalSession *session,
 SaveCheckpointStatus ArRegionalSession_Load(ArRegionalSession *session,
     uint32_t slot, const char *native_path,
     const uint8_t image[kActRaiserSramSize], SaveError *error);
-/* Explicit completed-save boundary, not NewGame/teardown/first SRAM change.
- * expected is the last loaded/successfully saved native image (NULL for a new
- * slot). Same-image commits support rule changes without editing SRAM.
- * Unknown/corrupt companions must be resolved by Load/recovery beforehand. */
-bool ArRegionalSession_Save(const ArRegionalSession *session, SaveFileFormat format,
-    const char *native_path, const uint8_t *expected,
-    const uint8_t image[kActRaiserSramSize], SaveError *error);
+/* Encode a metadata-only update for the active save owner. SRAM and the saved
+ * name remain unchanged; callers publish feature state only after success. */
+bool ArRegionalSession_SaveActiveMetadata(const ArRegionalSession *session,
+                                           const uint8_t *expected, SaveError *error);
 
 /* Same canonical codec for a host-owned prepared new game. This does not
  * create a checkpoint or claim that a native story save exists. */

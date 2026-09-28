@@ -2,11 +2,11 @@
 
 #include "save/save_system.h"
 #include "save/save_paths.h"
+#include "save/save_checkpoint.h"
 
 #include "byte_order.h"
 #include "deterministic_hash.h"
 #include "host/atomic_replace.h"
-#include "localization/unicode_grapheme.h"
 #include "text_parse_utils.h"
 
 #include <ctype.h>
@@ -70,10 +70,7 @@ enum {
   kSaveBackupSuffixCapacity = 128,
   kSaveBackupPathBytes =
       kSaveRuntimePathBytes + kSaveBackupSuffixCapacity,
-  kSaveCopyBufferBytes = 4096,
-  kLocalizedNameCapacity = 257,
-  kLocalizedNamePathBytes = kSaveRuntimePathBytes + 16,
-  kLocalizedNameMagicBytes = 8,
+  kLocalizedNameCapacity = kSaveNameCapacity,
 };
 
 typedef struct SaveRuntime {
@@ -89,6 +86,10 @@ typedef struct SaveRuntime {
   bool native_write_active;
   bool native_write_aborted;
   bool story_pending;
+  /* Freeze native data/name at the same boundary as prepare_story's payload. */
+  uint8_t story_image[kActRaiserSramSize];
+  char story_name[kSaveNameCapacity];
+  bool story_name_valid;
   SaveCommitHost commit_host;
   SaveStorageHooks storage_hooks;
   SavePaths paths;
@@ -96,7 +97,6 @@ typedef struct SaveRuntime {
   bool backup_taken;
   bool localized_name_valid;
   bool localized_name_dirty;
-  bool localized_name_clear_pending;
   char localized_compatibility[kActRaiserPlayerNameStorageBytes];
   char localized_name[kLocalizedNameCapacity];
   uint8_t last_town;
@@ -106,21 +106,7 @@ typedef struct SaveRuntime {
 static SaveRuntime s_runtime;
 
 static bool CopyNativePlayerName(char *destination, size_t capacity) {
-  if (!destination || !capacity) return false;
-  destination[0] = 0;
-  if (!s_runtime.live || s_runtime.size < kActRaiserSramSize) return false;
-  size_t length = 0;
-  while (length < kActRaiserPlayerNameCharacterLimit) {
-    const uint8_t byte = s_runtime.live[kSavePlayerName + length];
-    if (!byte || byte == 0xffu) break;
-    if (byte < 0x20u || byte > 0x7eu || length + 1u >= capacity) {
-      destination[0] = 0;
-      return false;
-    }
-    destination[length++] = (char)byte;
-  }
-  destination[length] = 0;
-  return length != 0;
+  return SaveName_CopyNative(s_runtime.live, destination, capacity);
 }
 
 bool SaveSystem_CopyPlayerName(char *destination, size_t capacity) {
@@ -140,45 +126,6 @@ bool SaveSystem_CopyLocalizedPlayerName(const char *compatibility_name,
   return true;
 }
 
-static bool ValidLocalizedName(const char *name, uint8_t *grapheme_count) {
-  if (grapheme_count) *grapheme_count = 0;
-  if (!name || !name[0]) return false;
-  const size_t bytes = strlen(name);
-  if (bytes >= kLocalizedNameCapacity) return false;
-  size_t offset = 0;
-  uint8_t count = 0;
-  while (offset < bytes) {
-    size_t next = 0;
-    if (!ArUnicodeGrapheme_Next(name, bytes, offset, NULL, &next) ||
-        next <= offset || count >= kActRaiserPlayerNameCharacterLimit)
-      return false;
-    offset = next;
-    ++count;
-  }
-  if (grapheme_count) *grapheme_count = count;
-  return count != 0;
-}
-
-/* Both the slot browser and live loader use the same companion validation.
- * A stale, truncated or foreign-name sidecar never replaces the native name. */
-static bool ReadLocalizedName(FILE *file, const uint8_t *image,
-                              const char *native_name, char *out, size_t capacity) {
-  uint8_t header[kLocalizedNameMagicBytes + 4 + kActRaiserPlayerNameStorageBytes + 2];
-  if (fread(header, 1, sizeof(header), file) != sizeof(header) ||
-      memcmp(header, "ARNAME1\0", kLocalizedNameMagicBytes)) return false;
-  char compatibility[kActRaiserPlayerNameStorageBytes];
-  memcpy(compatibility, header + kLocalizedNameMagicBytes + 4, sizeof(compatibility));
-  compatibility[sizeof(compatibility) - 1] = 0;
-  const uint16_t length = ByteOrder_ReadLe16(header + sizeof(header) - 2);
-  char name[kLocalizedNameCapacity] = {0};
-  if (!length || length >= sizeof(name) || length >= capacity ||
-      fread(name, 1, length, file) != length || fgetc(file) != EOF || ferror(file) ||
-      ByteOrder_ReadLe32(header + kLocalizedNameMagicBytes) != Save_ComputeChecksum(image) ||
-      strcmp(compatibility, native_name) || strlen(name) != length ||
-      !ValidLocalizedName(name, NULL)) return false;
-  memcpy(out, name, length + 1);
-  return true;
-}
 
 bool Save_ReadSummary(const char *path,const uint8_t *image,SaveSummary *out) {
   if(!path || !image || !out || !Save_ChecksumValid(image))return false;
@@ -203,21 +150,19 @@ bool Save_ReadSummary(const char *path,const uint8_t *image,SaveSummary *out) {
   }
   if(image[kSaveDeathHeimState]==3)next.death_heim=4;
   else if(!image[kSaveDeathHeimState])next.death_heim=(image[kSaveDeathHeimUnlocked]&1)?1:0;
-  char companion[kLocalizedNamePathBytes];
-  int n=snprintf(companion,sizeof(companion),"%s.arname",path);
-  FILE *f=n>0 && (size_t)n<sizeof(companion)?sr_fopen(companion,"rb"):NULL;
-  if(f) {
-    char name[kLocalizedNameCapacity];
-    if(ReadLocalizedName(f,image,next.name,name,sizeof(name)))
-      snprintf(next.name,sizeof(next.name),"%s",name);
-    fclose(f);
+  SaveSnapshot *snapshot = malloc(sizeof(*snapshot));
+  if (snapshot) {
+    SaveError ignored = {{0}};
+    if (SaveCheckpoint_ReadSnapshot(path, image, snapshot, &ignored) && snapshot->name[0])
+      snprintf(next.name, sizeof(next.name), "%s", snapshot->name);
+    free(snapshot);
   }
   *out=next;return true;
 }
 
 bool SaveSystem_SetLocalizedPlayerName(const char *utf8_name,
                                        const char *compatibility_name) {
-  if (!s_runtime.live || !ValidLocalizedName(utf8_name, NULL) ||
+  if (!s_runtime.live || !SaveName_Valid(utf8_name) ||
       !compatibility_name || !compatibility_name[0] ||
       strlen(compatibility_name) > kActRaiserPlayerNameCharacterLimit)
     return false;
@@ -235,7 +180,6 @@ bool SaveSystem_SetLocalizedPlayerName(const char *utf8_name,
            sizeof(s_runtime.localized_compatibility), "%s",
            compatibility_name);
   s_runtime.localized_name_valid = true;
-  s_runtime.localized_name_clear_pending = false;
   s_runtime.localized_name_dirty = true;
   return true;
 }
@@ -742,102 +686,12 @@ static SaveFileFormat ActiveFormat(void) {
       ? kSaveFileFormat_Ini : kSaveFileFormat_NativeSrm;
 }
 
-typedef struct LocalizedNameWriteContext {
-  uint32_t save_checksum;
-  const char *compatibility_name;
-  const char *utf8_name;
-} LocalizedNameWriteContext;
-
-static bool LocalizedNamePath(char *path, size_t capacity) {
-  if (!path || !capacity || !s_runtime.live) return false;
-  const int written = snprintf(path, capacity, "%s.arname", ActivePath());
-  return written > 0 && (size_t)written < capacity;
-}
-
-static bool WriteLocalizedNameBody(FILE *file, const void *context,
-                                   SaveError *error) {
-  static const uint8_t kMagic[kLocalizedNameMagicBytes] = {
-      'A', 'R', 'N', 'A', 'M', 'E', '1', 0};
-  const LocalizedNameWriteContext *name =
-      (const LocalizedNameWriteContext *)context;
-  uint8_t header[kLocalizedNameMagicBytes + 4 +
-                 kActRaiserPlayerNameStorageBytes + 2] = {0};
-  memcpy(header, kMagic, sizeof(kMagic));
-  ByteOrder_WriteLe32(header + kLocalizedNameMagicBytes,
-                      name->save_checksum);
-  const size_t compatibility_bytes = strlen(name->compatibility_name);
-  memcpy(header + kLocalizedNameMagicBytes + 4,
-         name->compatibility_name, compatibility_bytes);
-  const size_t utf8_bytes = strlen(name->utf8_name);
-  ByteOrder_WriteLe16(
-      header + kLocalizedNameMagicBytes + 4 +
-          kActRaiserPlayerNameStorageBytes,
-      (uint16_t)utf8_bytes);
-  if (fwrite(header, 1, sizeof(header), file) != sizeof(header) ||
-      fwrite(name->utf8_name, 1, utf8_bytes, file) != utf8_bytes)
-    return Fail(error, "error writing localized player name");
-  return true;
-}
-
-static bool WriteLocalizedNameExtension(SaveError *error) {
-  if (!s_runtime.localized_name_valid) {
-    if(s_runtime.localized_name_clear_pending) {
-      char path[kLocalizedNamePathBytes];
-      if(!LocalizedNamePath(path,sizeof(path)) || (sr_remove(path) && errno!=ENOENT))
-        return Fail(error,"cannot retire the previous campaign name");
-      s_runtime.localized_name_clear_pending=false;
-    }
-    s_runtime.localized_name_dirty = false;
-    return true;
-  }
-  char native_name[kActRaiserPlayerNameStorageBytes];
-  if (!CopyNativePlayerName(native_name, sizeof(native_name)) ||
-      strcmp(native_name, s_runtime.localized_compatibility)) {
-    /* The accepted live name can precede the game's first battery save.
-     * Keep it in host memory without changing the older save or its sidecar. */
-    return true;
-  }
-  char path[kLocalizedNamePathBytes];
-  if (!LocalizedNamePath(path, sizeof(path)))
-    return Fail(error, "localized-name path exceeds runtime limit");
-  const LocalizedNameWriteContext context = {
-      .save_checksum = Save_ComputeChecksum(s_runtime.live),
-      .compatibility_name = s_runtime.localized_compatibility,
-      .utf8_name = s_runtime.localized_name,
-  };
-  /* A loaded name may not already be dirty when a later native save changes
-   * its checksum. Retain a retry if the companion write fails after SRAM. */
-  s_runtime.localized_name_dirty = true;
-  if (!WriteAtomic(path, WriteLocalizedNameBody, &context, error))
-    return false;
+static void LoadSnapshotName(const SaveSnapshot *snapshot) {
+  s_runtime.localized_name_valid = snapshot->name[0] != 0;
   s_runtime.localized_name_dirty = false;
-  return true;
-}
-
-static void LoadLocalizedNameExtension(void) {
-  s_runtime.localized_name_valid = false;
-  s_runtime.localized_name_dirty = false;
-  s_runtime.localized_name_clear_pending = false;
-  char path[kLocalizedNamePathBytes];
-  if (!LocalizedNamePath(path, sizeof(path))) return;
-  FILE *file = sr_fopen(path, "rb");
-  if (!file) return;
-  char native_name[kActRaiserPlayerNameStorageBytes], name[kLocalizedNameCapacity];
-  const bool valid = CopyNativePlayerName(native_name, sizeof(native_name)) &&
-      ReadLocalizedName(file, s_runtime.live, native_name, name, sizeof(name));
-  fclose(file);
-  if (!valid) {
-    fprintf(stderr,
-            "[saves] ignored stale or invalid localized-name extension %s\n",
-            path);
-    return;
-  }
-  snprintf(s_runtime.localized_compatibility,
-           sizeof(s_runtime.localized_compatibility), "%s", native_name);
-  snprintf(s_runtime.localized_name, sizeof(s_runtime.localized_name), "%s",
-           name);
-  s_runtime.localized_name_valid = true;
-  s_runtime.localized_name_clear_pending = false;
+  snprintf(s_runtime.localized_name, sizeof(s_runtime.localized_name), "%s", snapshot->name);
+  SaveName_CopyNative(snapshot->image, s_runtime.localized_compatibility,
+                     sizeof(s_runtime.localized_compatibility));
 }
 
 bool SaveSystem_Attach(uint8_t *live_sram, size_t size,
@@ -860,41 +714,6 @@ bool SaveSystem_Attach(uint8_t *live_sram, size_t size,
   snprintf(s_runtime.native_path, sizeof(s_runtime.native_path), "%s",
            native_path);
   snprintf(s_runtime.ini_path, sizeof(s_runtime.ini_path), "%s", ini_path);
-  return true;
-}
-
-bool SaveSystem_MigrateLegacyNative(const char *legacy_path,
-                                    SaveError *error) {
-  ClearError(error);
-  if (!s_runtime.live) return Fail(error, "save system is not attached");
-  if (!legacy_path || !legacy_path[0])
-    return Fail(error, "legacy save path is empty");
-
-  const char *active_path = ActivePath();
-  FILE *probe = sr_fopen(active_path, "rb");
-  if (probe) {
-    fclose(probe);
-    return true;
-  }
-  if (errno != ENOENT)
-    return Fail(error, "cannot inspect %s: %s",
-                active_path, strerror(errno));
-
-  probe = sr_fopen(legacy_path, "rb");
-  if (!probe) {
-    if (errno == ENOENT) return true;
-    return Fail(error, "cannot inspect %s: %s",
-                legacy_path, strerror(errno));
-  }
-  fclose(probe);
-
-  uint8_t legacy[kActRaiserSramSize];
-  if (!LoadNative(legacy_path, legacy, error)) return false;
-  if (!Save_WriteFile(ActiveFormat(), active_path, legacy, error))
-    return false;
-  fprintf(stderr, "[saves] migrated legacy %s -> %s (%s backend)\n",
-          legacy_path, active_path,
-          s_runtime.backend == kSaveBackend_Ini ? "ini" : "native-srm");
   return true;
 }
 
@@ -937,44 +756,181 @@ bool SaveSystem_RecoveryPath(const uint8_t id[16],char *out,size_t capacity,Save
 bool SaveSystem_SetCommitHost(const SaveCommitHost *host) {
   if (!s_runtime.live || s_runtime.native_write_active ||
       s_runtime.native_write_aborted || s_runtime.story_pending ||
-      (host && (!host->commit || !host->prepare_story || !host->reloaded)))
+      (host && (!host->build || !host->validate || !host->prepare_story || !host->reloaded)))
     return false;
   s_runtime.commit_host = host ? *host : (SaveCommitHost){0};
   return true;
 }
 
-static bool CommitImage(const uint8_t *image, SaveCommitKind kind,
-                         const SaveImportSource *import_source, SaveError *error) {
+typedef enum SaveNameIntent {
+  kSaveName_Preserve,
+  kSaveName_Live,
+  kSaveName_Replace,
+} SaveNameIntent;
+
+typedef struct SaveCommitRequest {
+  const uint8_t *image;
+  SaveCommitKind kind;
+  SaveNameIntent name_intent;
+  const char *name;
+  const SaveImportSource *import_source;
+  const void *payload;
+  size_t payload_size;
+} SaveCommitRequest;
+
+static SaveCheckpointStatus ValidatePayload(const uint8_t *payload, size_t size, void *context) {
+  const SaveCommitHost *host = context;
+  SaveError ignored = {{0}};
+  return host->validate && host->validate(host->context, payload, size, &ignored)
+      ? kSaveCheckpoint_Ready : kSaveCheckpoint_Unsupported;
+}
+
+static bool ValidateSnapshot(const SaveSnapshot *snapshot, SaveError *error) {
   const SaveCommitHost *host = &s_runtime.commit_host;
-  if(kind==kSaveCommit_Import && import_source && import_source->payload_size && !host->commit)
-    return Fail(error,"campaign metadata requires its game feature owner");
-  if(s_runtime.storage_hooks.before_commit &&
-      !s_runtime.storage_hooks.before_commit(s_runtime.storage_hooks.context,error))return false;
-  bool ok = host->commit
-      ? host->commit(host->context, ActiveFormat(), ActivePath(),
+  if (snapshot->payload_size > sizeof(snapshot->payload))
+    return Fail(error, "campaign payload exceeds storage capacity");
+  if (!snapshot->payload_size) return true;
+  return (host->validate && host->validate(host->context, snapshot->payload,
+                                         snapshot->payload_size, error)) ||
+      Fail(error, "campaign metadata requires a compatible feature codec");
+}
+
+static bool ReadDurableSnapshot(SaveSnapshot *snapshot, SaveError *error) {
+  if (!s_runtime.durable_valid) return Fail(error, "no durable campaign snapshot");
+  uint8_t disk[kActRaiserSramSize];
+  if (!Save_LoadFile(ActiveFormat(), ActivePath(), disk, error)) return false;
+  if (memcmp(disk, s_runtime.durable, sizeof(disk)))
+    return Fail(error, "save changed since load; reload before saving");
+  return SaveCheckpoint_ReadSnapshot(ActivePath(), disk, snapshot, error) &&
+      ValidateSnapshot(snapshot, error);
+}
+
+bool SaveSystem_MigrateLegacyNative(const char *legacy_path,
+                                    SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.live) return Fail(error, "save system is not attached");
+  if (!legacy_path || !legacy_path[0])
+    return Fail(error, "legacy save path is empty");
+
+  const char *active_path = ActivePath();
+  FILE *probe = sr_fopen(active_path, "rb");
+  if (probe) {
+    fclose(probe);
+    return true;
+  }
+  if (errno != ENOENT)
+    return Fail(error, "cannot inspect %s: %s",
+                active_path, strerror(errno));
+
+  probe = sr_fopen(legacy_path, "rb");
+  if (!probe) {
+    if (errno == ENOENT) return true;
+    return Fail(error, "cannot inspect %s: %s",
+                legacy_path, strerror(errno));
+  }
+  fclose(probe);
+
+  SaveSnapshot *legacy = malloc(sizeof(*legacy));
+  if (!legacy) return Fail(error, "out of memory migrating legacy save");
+  bool migrated = LoadNative(legacy_path, legacy->image, error) &&
+      SaveCheckpoint_ReadSnapshot(legacy_path, legacy->image, legacy, error) &&
+      ValidateSnapshot(legacy, error) &&
+      SaveCheckpoint_CommitSnapshot(ActiveFormat(), active_path, NULL, legacy,
+                                     ValidatePayload, &s_runtime.commit_host, error);
+  free(legacy);
+  if (!migrated) return false;
+  fprintf(stderr, "[saves] migrated legacy %s -> %s (%s backend)\n",
+          legacy_path, active_path,
+          s_runtime.backend == kSaveBackend_Ini ? "ini" : "native-srm");
+  return true;
+}
+
+/* The only active-campaign commit boundary. Build and validate everything
+ * before journaling; publish live/slot notifications only after native commit. */
+static bool CommitImage(const SaveCommitRequest *request, SaveError *error) {
+  const SaveCommitHost *host = &s_runtime.commit_host;
+  SaveSnapshot *next = calloc(1, sizeof(*next));
+  if (!next) return Fail(error, "out of memory preparing campaign snapshot");
+  bool ok = !s_runtime.durable_valid || ReadDurableSnapshot(next, error);
+  if (!ok) goto done;
+  char before[kActRaiserPlayerNameStorageBytes], after[kActRaiserPlayerNameStorageBytes];
+  if (!s_runtime.durable_valid ||
+      !SaveName_CopyNative(s_runtime.durable, before, sizeof(before)) ||
+      !SaveName_CopyNative(request->image, after, sizeof(after)) || strcmp(before, after))
+    next->name[0] = 0;
+  bool accepted_name = request->name_intent == kSaveName_Live && s_runtime.localized_name_valid &&
+      SaveName_CopyNative(request->image, after, sizeof(after)) &&
+      !strcmp(after, s_runtime.localized_compatibility);
+  if (request->name_intent == kSaveName_Replace || accepted_name)
+    snprintf(next->name, sizeof(next->name), "%s",
+             accepted_name ? s_runtime.localized_name : request->name);
+  memcpy(next->image, request->image, sizeof(next->image));
+  if (request->payload) {
+    if (request->payload_size > sizeof(next->payload)) {
+      ok = Fail(error, "campaign payload exceeds storage capacity");
+      goto done;
+    }
+    memcpy(next->payload, request->payload, request->payload_size);
+    next->payload_size = request->payload_size;
+  } else if (request->kind != kSaveCommit_Metadata && host->build) {
+    ok = host->build(host->context, ActivePath(),
                      s_runtime.durable_valid ? s_runtime.durable : NULL,
-                     image, kind, import_source, error)
-      : Save_WriteFile(ActiveFormat(), ActivePath(), image, error);
-  if (!ok) return false;
-  memcpy(s_runtime.durable, image, kActRaiserSramSize);
+                     request->image, request->kind, request->import_source,
+                     next->payload, sizeof(next->payload), &next->payload_size, error);
+    if (!ok) goto done;
+  } else if (request->kind == kSaveCommit_Import) {
+    const SaveImportSource *source = request->import_source;
+    if (source && source->payload_size) {
+      ok = Fail(error, "campaign metadata requires its feature codec");
+      goto done;
+    }
+    next->payload_size = 0;
+  }
+  if (!ValidateSnapshot(next, error)) { ok = false; goto done; }
+  if (s_runtime.storage_hooks.before_commit &&
+      !s_runtime.storage_hooks.before_commit(s_runtime.storage_hooks.context, error)) {
+    ok = false;
+    goto done;
+  }
+  ok = SaveCheckpoint_CommitSnapshot(ActiveFormat(), ActivePath(),
+      s_runtime.durable_valid ? s_runtime.durable : NULL, next, ValidatePayload,
+      &s_runtime.commit_host, error);
+  if (!ok) goto done;
+  memcpy(s_runtime.durable, next->image, sizeof(s_runtime.durable));
   s_runtime.durable_valid = true;
-  if (kind == kSaveCommit_Import) {
-    /* An imported campaign must not inherit the destination's old focus,
-     * even if it happens to have identical SRAM. Persist an empty bookmark. */
+  if (accepted_name || (request->kind == kSaveCommit_Story &&
+      s_runtime.localized_name_valid && !strcmp(next->name, s_runtime.localized_name) &&
+      SaveName_CopyNative(next->image, after, sizeof(after)) &&
+      !strcmp(after, s_runtime.localized_compatibility))) s_runtime.localized_name_dirty = false;
+  if (request->kind == kSaveCommit_Import) {
+    LoadSnapshotName(next);
     s_runtime.last_town = 0;
     s_runtime.town_visit_active = false;
     s_runtime.town_visit_awaiting_story = false;
     s_runtime.town_visit_dirty = true;
   } else if (s_runtime.town_visit_active) {
-    if (kind == kSaveCommit_Story || kind == kSaveCommit_StorySnapshot)
+    if (request->kind == kSaveCommit_Story || request->kind == kSaveCommit_StorySnapshot)
       s_runtime.town_visit_awaiting_story = false;
-    /* Rebind only after a successful durable commit, never to edited/live or
-     * half-written SRAM. Unsaved New Game cannot replace Continue's bookmark. */
     if (!s_runtime.town_visit_awaiting_story) s_runtime.town_visit_dirty = true;
   }
-  if(s_runtime.storage_hooks.committed)
-    s_runtime.storage_hooks.committed(s_runtime.storage_hooks.context,image);
-  return true;
+  if (host->committed) host->committed(host->context, request->kind);
+  if (s_runtime.storage_hooks.committed)
+    s_runtime.storage_hooks.committed(s_runtime.storage_hooks.context, next->image);
+done:
+  free(next);
+  return ok;
+}
+
+bool SaveSystem_UpdateMetadata(const uint8_t *expected, const void *payload,
+                                size_t size, SaveError *error) {
+  ClearError(error);
+  if (!s_runtime.live || !s_runtime.durable_valid || !expected || !payload || !size ||
+      memcmp(expected, s_runtime.durable, kActRaiserSramSize) ||
+      s_runtime.native_write_active || s_runtime.native_write_aborted || s_runtime.story_pending)
+    return Fail(error, "metadata update requires an unchanged, completed save");
+  const SaveCommitRequest request = {.image = s_runtime.durable, .kind = kSaveCommit_Metadata,
+      .payload = payload, .payload_size = size};
+  return CommitImage(&request, error);
 }
 
 void SaveSystem_SetStorageHooks(const SaveStorageHooks *hooks) {
@@ -1024,14 +980,21 @@ bool SaveSystem_LoadActive(SaveError *error) {
     return Fail(error, "cannot inspect %s: %s", path, strerror(errno));
   }
   fclose(probe);
-  if (!Save_LoadFile(ActiveFormat(), path, s_runtime.live, error)) return false;
-  memcpy(s_runtime.durable, s_runtime.live, kActRaiserSramSize);
+  uint8_t image[kActRaiserSramSize];
+  if (!Save_LoadFile(ActiveFormat(), path, image, error)) return false;
+  SaveSnapshot *snapshot = malloc(sizeof(*snapshot));
+  if (!snapshot) return Fail(error, "out of memory loading campaign snapshot");
+  bool loaded = SaveCheckpoint_ReadSnapshot(path, image, snapshot, error);
+  if (loaded) LoadSnapshotName(snapshot);
+  free(snapshot);
+  if (!loaded) return false;
+  memcpy(s_runtime.live, image, sizeof(image));
+  memcpy(s_runtime.durable, image, sizeof(image));
   s_runtime.durable_valid = true;
   s_runtime.native_write_active = false;
   s_runtime.native_write_aborted = false;
   NotifyReload();
   SaveSystem_ResyncShadow();
-  LoadLocalizedNameExtension();
   fprintf(stderr, "[saves] loaded %s backend from %s\n",
           s_runtime.backend == kSaveBackend_Ini ? "ini" : "native-srm", path);
   return true;
@@ -1042,12 +1005,18 @@ bool SaveSystem_WriteActive(SaveError *error) {
   if (!s_runtime.live) return Fail(error, "save system is not attached");
   if (s_runtime.native_write_active || s_runtime.native_write_aborted)
     return Fail(error, "native save transaction is incomplete; existing save preserved");
-  if (!CommitImage(s_runtime.live, s_runtime.story_pending
-                     ? kSaveCommit_Story : kSaveCommit_Automatic, NULL, error))
+  const SaveCommitRequest request = {
+      .image = s_runtime.story_pending ? s_runtime.story_image : s_runtime.live,
+      .kind = s_runtime.story_pending ? kSaveCommit_Story : kSaveCommit_Automatic,
+      .name_intent = !s_runtime.story_pending ? kSaveName_Live :
+          s_runtime.story_name_valid ? kSaveName_Replace : kSaveName_Preserve,
+      .name = s_runtime.story_name};
+  if (!CommitImage(&request, error))
     return false;
   s_runtime.story_pending = false;
-  SaveSystem_ResyncShadow();
-  return WriteLocalizedNameExtension(error);
+  memcpy(s_runtime.shadow, request.image, sizeof(s_runtime.shadow));
+  s_runtime.shadow_valid = true;
+  return true;
 }
 
 SaveStorySnapshotResult SaveSystem_CommitStorySnapshot(const uint8_t *image, SaveError *error) {
@@ -1060,12 +1029,13 @@ SaveStorySnapshotResult SaveSystem_CommitStorySnapshot(const uint8_t *image, Sav
     Fail(error, "complete the pending native save before a story snapshot");
     return kSaveStorySnapshot_NotCommitted;
   }
-  if (!CommitImage(image, kSaveCommit_StorySnapshot, NULL, error))
+  const SaveCommitRequest request = {.image = image, .kind = kSaveCommit_StorySnapshot,
+                                     .name_intent = kSaveName_Live};
+  if (!CommitImage(&request, error))
     return kSaveStorySnapshot_NotCommitted;
   memcpy(s_runtime.live, image, kActRaiserSramSize);
   SaveSystem_ResyncShadow();
-  return WriteLocalizedNameExtension(error)
-      ? kSaveStorySnapshot_Committed : kSaveStorySnapshot_NamePending;
+  return kSaveStorySnapshot_Committed;
 }
 
 bool SaveSystem_AutoPersistIfChanged(SaveError *error) {
@@ -1078,9 +1048,15 @@ bool SaveSystem_AutoPersistIfChanged(SaveError *error) {
     SaveSystem_ResyncShadow();
     return true;
   }
-  if (!s_runtime.story_pending && !memcmp(s_runtime.shadow, s_runtime.live, kActRaiserSramSize))
-    return !s_runtime.localized_name_dirty ||
-        WriteLocalizedNameExtension(error);
+  if (!s_runtime.story_pending && !memcmp(s_runtime.shadow, s_runtime.live, kActRaiserSramSize)) {
+    char native[kActRaiserPlayerNameStorageBytes];
+    if (!s_runtime.localized_name_dirty || !s_runtime.durable_valid ||
+        !SaveName_CopyNative(s_runtime.durable, native, sizeof(native)) ||
+        strcmp(native, s_runtime.localized_compatibility)) return true;
+    const SaveCommitRequest request = {.image = s_runtime.durable, .kind = kSaveCommit_Metadata,
+                                       .name_intent = kSaveName_Live};
+    return CommitImage(&request, error);
+  }
   if (!SaveSystem_WriteActive(error)) return false;
   fprintf(stderr, "[saves] battery SRAM changed -> wrote %s\n", ActivePath());
   return true;
@@ -1108,6 +1084,13 @@ bool SaveSystem_EndNativeWrite(bool completed, SaveError *error) {
     s_runtime.native_write_aborted = true;
     return false;
   }
+  memcpy(s_runtime.story_image, s_runtime.live, sizeof(s_runtime.story_image));
+  char native[kActRaiserPlayerNameStorageBytes];
+  s_runtime.story_name_valid = s_runtime.localized_name_valid &&
+      CopyNativePlayerName(native, sizeof(native)) &&
+      !strcmp(native, s_runtime.localized_compatibility);
+  snprintf(s_runtime.story_name, sizeof(s_runtime.story_name), "%s",
+           s_runtime.story_name_valid ? s_runtime.localized_name : "");
   s_runtime.story_pending = true;
   fprintf(stderr, "[saves] native story transaction completed\n");
   return true;
@@ -1361,18 +1344,19 @@ bool SaveSystem_ApplyEdits(const SaveEditRequest *edits,
                 bcd);
     }
   }
-  if (!memcmp(scratch, s_runtime.live, sizeof(scratch)))
-    return Fail(error, "no staged save edits change the image");
+  /* Persistent Apply must commit even when the staged values match live SRAM:
+   * they may be session-only, or the caller may want to restart after an earlier
+   * Apply and save. Keep backup and storage validation for persistent Apply. */
+  if (!persist && !memcmp(scratch, s_runtime.live, sizeof(scratch)))
+    return true;
   Save_RecomputeChecksum(scratch);
   if (persist) {
     if (!BackupActiveOnce(auto_backup, error)) return false;
-    if (!CommitImage(scratch, kSaveCommit_Editor, NULL, error))
-      return false;
+    const SaveCommitRequest request = {.image = scratch, .kind = kSaveCommit_Editor};
+    if (!CommitImage(&request, error)) return false;
   }
   memcpy(s_runtime.live, scratch, sizeof(scratch));
   SaveSystem_ResyncShadow();
-  if (persist && s_runtime.localized_name_valid)
-    s_runtime.localized_name_dirty = true;
   return true;
 }
 
@@ -1407,28 +1391,17 @@ bool SaveSystem_Import(const char *path, bool auto_backup, SaveError *error) {
   if(!archive)return Fail(error,"out of memory reading campaign archive");
   bool is_archive=false;
   if(!ReadCampaignImport(path,archive,&is_archive,error)){free(archive);return false;}
-  SaveImportSource source={.path=path,.payload=is_archive?archive->payload:NULL,
-    .payload_size=archive->payload_size,.archive=is_archive};
-  if(!BackupActiveOnce(auto_backup,error) ||
-      !CommitImage(archive->image,kSaveCommit_Import,&source,error)){free(archive);return false;}
-  memcpy(s_runtime.live,archive->image,sizeof(archive->image));
-  SaveSystem_ResyncShadow();
-  s_runtime.localized_name_valid=false;
-  s_runtime.localized_name_dirty=true;
-  s_runtime.localized_name_clear_pending=!archive->name[0];
-  if(archive->name[0]) {
-    snprintf(s_runtime.localized_name,sizeof(s_runtime.localized_name),"%s",archive->name);
-    CopyNativePlayerName(s_runtime.localized_compatibility,
-                         sizeof(s_runtime.localized_compatibility));
-    s_runtime.localized_name_valid=true;
+  SaveImportSource source = {.path = path, .payload = archive->payload,
+      .payload_size = archive->payload_size, .archive = is_archive};
+  const SaveCommitRequest request = {.image = archive->image, .kind = kSaveCommit_Import,
+      .name_intent = kSaveName_Replace, .name = archive->name, .import_source = &source};
+  if (!BackupActiveOnce(auto_backup, error) || !CommitImage(&request, error)) {
+    free(archive);
+    return false;
   }
+  memcpy(s_runtime.live, archive->image, sizeof(archive->image));
+  SaveSystem_ResyncShadow();
   free(archive);
-  /* Gameplay and its feature checkpoint are already committed. Name writes
-   * are retryable, just like a completed native story save; do not report a
-   * failed import that invites replacing the campaign a second time. */
-  if(!WriteLocalizedNameExtension(error))
-    fprintf(stderr, "[saves] campaign imported; enhanced-name write will retry: %s\n",
-            error ? error->message : "");
   return true;
 }
 
@@ -1451,39 +1424,21 @@ bool SaveSystem_CreateRecoveryCopy(const char *directory, SaveError *error) {
       s_runtime.story_pending || s_runtime.localized_name_dirty ||
       memcmp(s_runtime.live, s_runtime.durable, kActRaiserSramSize))
     return Fail(error, "complete and persist the current story save before recovery copy");
-  const SaveCommitHost *host = &s_runtime.commit_host;
-  if (host->commit && !host->copy_recovery)
-    return Fail(error, "save feature owner cannot preserve recovery companions");
-  char path[kSaveRuntimePathBytes], name_path[kLocalizedNamePathBytes];
+  char path[kSaveRuntimePathBytes];
   if (!directory || !directory[0]) return Fail(error, "recovery directory is empty");
   const int written = snprintf(path, sizeof(path), "%s/save.srm", directory);
   if (written <= 0 || (size_t)written >= sizeof(path))
     return Fail(error, "recovery path exceeds runtime limit");
-  snprintf(name_path, sizeof(name_path), "%s.arname", path);
-  uint8_t disk[kActRaiserSramSize];
-  if (!Save_LoadFile(ActiveFormat(), ActivePath(), disk, error)) return false;
-  if (memcmp(disk, s_runtime.durable, sizeof(disk)))
-    return Fail(error, "save changed since load; reload before recovery copy");
-  char native_name[kActRaiserPlayerNameStorageBytes];
-  if (s_runtime.localized_name_valid &&
-      (!CopyNativePlayerName(native_name, sizeof(native_name)) ||
-       strcmp(native_name, s_runtime.localized_compatibility)))
-    return Fail(error, "localized name belongs to an unsaved campaign");
-
-  /* mkdir is the exclusive reservation, including against existing symlinks.
-   * Do not remove partial artifacts or overwrite a prior recovery on failure. */
-  if (sr_mkdir(directory) != 0)
-    return Fail(error, "cannot reserve recovery directory %s: %s", directory, strerror(errno));
-  SyncContainingDirectory(directory);
-  if (s_runtime.localized_name_valid) {
-    const LocalizedNameWriteContext name = {
-        .save_checksum = Save_ComputeChecksum(disk),
-        .compatibility_name = s_runtime.localized_compatibility,
-        .utf8_name = s_runtime.localized_name,
-    };
-    if (!WriteAtomic(name_path, WriteLocalizedNameBody, &name, error)) return false;
+  SaveSnapshot *snapshot = malloc(sizeof(*snapshot));
+  if (!snapshot) return Fail(error, "out of memory creating recovery snapshot");
+  bool ok = ReadDurableSnapshot(snapshot, error);
+  if (ok && sr_mkdir(directory) != 0)
+    ok = Fail(error, "cannot reserve recovery directory %s: %s", directory, strerror(errno));
+  if (ok) {
+    SyncContainingDirectory(directory);
+    ok = SaveCheckpoint_CommitSnapshot(kSaveFileFormat_NativeSrm, path, NULL, snapshot,
+                                       ValidatePayload, &s_runtime.commit_host, error);
   }
-  return host->commit
-      ? host->copy_recovery(host->context, ActivePath(), path, disk, error)
-      : Save_WriteFile(kSaveFileFormat_NativeSrm, path, disk, error);
+  free(snapshot);
+  return ok;
 }

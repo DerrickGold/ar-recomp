@@ -110,33 +110,36 @@ static bool Identity(void *context, uint8_t id[16]) {
 typedef struct Faults {
   SaveCommitHost inner;
   unsigned calls, fail_at;
-  bool recovery_fail, name_fail;
-  const char *name_block;
+  bool recovery_fail, journal_fail;
+  const char *journal_block, *recovery_dir;
 } Faults;
 static bool Prepare(void *context, SaveError *error) {
   Faults *f = context;
   return f->inner.prepare_story(f->inner.context, error);
 }
-static bool Commit(void *context, SaveFileFormat format, const char *path, const uint8_t *expected,
-                   const uint8_t *image, SaveCommitKind kind, const SaveImportSource *import,
-                   SaveError *error) {
+static bool Build(void *context, const char *path, const uint8_t *expected,
+                  const uint8_t *image, SaveCommitKind kind, const SaveImportSource *import,
+                  void *payload, size_t capacity, size_t *size, SaveError *error) {
   Faults *f = context;
   ++f->calls;
   if (f->calls == f->fail_at) return false;
-  const bool ok =
-      f->inner.commit(f->inner.context, format, path, expected, image, kind, import, error);
-  if (ok && f->calls == 2 && f->name_fail) assert(sr_mkdir(f->name_block) == 0);
+  const bool ok = f->inner.build(f->inner.context, path, expected, image, kind, import,
+                                 payload, capacity, size, error);
+  if (ok && f->calls == 2 && f->journal_fail) assert(sr_mkdir(f->journal_block) == 0);
   return ok;
+}
+static bool Validate(void *context, const void *payload, size_t size, SaveError *error) {
+  Faults *f = context;
+  return f->inner.validate(f->inner.context, payload, size, error);
+}
+static void Committed(void *context, SaveCommitKind kind) {
+  Faults *f = context;
+  f->inner.committed(f->inner.context, kind);
+  if (f->calls == 1 && f->recovery_fail) assert(sr_mkdir(f->recovery_dir) == 0);
 }
 static void Reload(void *context) {
   Faults *f = context;
   f->inner.reloaded(f->inner.context);
-}
-static bool Recovery(void *context, const char *source, const char *destination,
-                     const uint8_t *image, SaveError *error) {
-  Faults *f = context;
-  return !f->recovery_fail &&
-         f->inner.copy_recovery(f->inner.context, source, destination, image, error);
 }
 static void Remove(const char *path) {
   char extra[256];
@@ -179,20 +182,22 @@ static void Run(SaveBackend backend, unsigned failure, unsigned source, bool pro
   if (source == 0)
     assert(ArRegionalSession_SetPopulationProfile(&campaign.active, campaign.active.revision, 1));
   const ArRegionalSession previous = campaign.active;
-  char name_block[256];
-  snprintf(name_block, sizeof(name_block), "%s.arname.tmp", path);
+  char journal_block[256];
+  snprintf(journal_block, sizeof(journal_block), "%s.archeckpoint.tmp", path);
   Faults faults = {.inner = ArRegionalCampaign_SaveHost(&campaign),
                    .fail_at = failure == 1   ? 1
                               : failure == 3 ? 2
                                              : 0,
                    .recovery_fail = failure == 2,
-                   .name_fail = failure == 4,
-                   .name_block = name_block};
+                   .journal_fail = failure == 4,
+                   .journal_block = journal_block,
+                   .recovery_dir = folder};
   SaveCommitHost host = {.context = &faults,
                          .prepare_story = Prepare,
-                         .commit = Commit,
-                         .reloaded = Reload,
-                         .copy_recovery = Recovery};
+                         .build = Build,
+                         .validate = Validate,
+                         .committed = Committed,
+                         .reloaded = Reload};
   assert(SaveSystem_SetCommitHost(&host) && SaveSystem_SetLocalizedPlayerName("Élise", "ELISE"));
   uint8_t before[sizeof(wram)], checkpoint[kActRaiserSramSize], disk[kActRaiserSramSize];
   memcpy(before, wram, sizeof(wram));
@@ -231,12 +236,13 @@ static void Run(SaveBackend backend, unsigned failure, unsigned source, bool pro
   const ActRaiserPopulationResult expected = failure == 1   ? kActRaiserPopulation_CheckpointFailed
                                              : failure == 2 ? kActRaiserPopulation_RecoveryFailed
                                              : failure == 3 ? kActRaiserPopulation_RolledBack
-                                             : failure == 4 ? kActRaiserPopulation_NamePending
+                                             : failure == 4 ? kActRaiserPopulation_RolledBack
                                                             : kActRaiserPopulation_Committed;
   if (result != expected)
     fprintf(stderr, "conversion result %d != %d: %s\n", result, expected, error.message);
   assert(result == expected && !memcmp(&cpu, &original_cpu, sizeof(cpu)));
-  if (failure >= 1 && failure <= 3) {
+  if (failure == 4) assert(REMOVE_DIR(journal_block) == 0);
+  if (failure >= 1) {
     assert(!memcmp(wram, before, sizeof(wram)) &&
            !memcmp(&campaign.active, &previous, sizeof(previous)));
     if (failure > 1)
@@ -276,8 +282,6 @@ static void Run(SaveBackend backend, unsigned failure, unsigned source, bool pro
            kActRaiserPopulation_Stale);
     assert(Preview(&cpu, &campaign, source, profile, &preview) == kActRaiserPopulation_Unchanged);
     assert(faults.calls == 2);
-    if (failure == 4)
-      assert(REMOVE_DIR(name_block) == 0 && SaveSystem_AutoPersistIfChanged(&error));
     assert(Save_LoadFile(format, path, disk, &error) && !memcmp(disk, sram, sizeof(disk)));
     ArRegionalSession saved;
     assert(ArRegionalSession_Load(&saved, 0, path, disk, &error) == kSaveCheckpoint_Ready);

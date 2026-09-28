@@ -1,4 +1,5 @@
 /* Revision-checked choices and the gameplay boundaries that activate them. */
+#include "support/regional_save_fixture.h"
 #include "regional_session_test.h"
 #include "support/test_check.h"
 
@@ -455,7 +456,7 @@ static void CheckPopulation(void) {
     before = session;
     CHECK(ArRegionalSession_SetPopulationProfile(&session, session.revision, source) &&
           RegionalSessionTest_Equal(&session, &before));
-    CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, n ? image : NULL, image,
+    CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, n ? image : NULL, image,
                                  &error));
     CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready &&
           RegionalSessionTest_Equal(&loaded, &session));
@@ -485,7 +486,7 @@ static void CheckPopulation(void) {
       !ArRegionalSession_SetPopulationProfile(&session, session.revision, kArRegionalSource_Count));
   session.revision = 1;
   session.requested.support.source[0] = 1;
-  CHECK(!ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+  CHECK(!TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   remove(path);
   remove("regional-population.srm.archeckpoint");
 }
@@ -510,7 +511,7 @@ static void CheckConstruction(void) {
           session.revision == revision);
     CHECK(!ArRegionalSession_RequestConstruction(&session, revision - 1, source));
     CHECK(session.effective.construction == old);
-    CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, n ? image : NULL, image,
+    CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, n ? image : NULL, image,
                                  &error));
     CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready &&
           RegionalSessionTest_Equal(&loaded, &session));
@@ -518,7 +519,7 @@ static void CheckConstruction(void) {
     CHECK(ArRegionalSession_BeginConstruction(&session, &jp) && jp == (source == 1));
     CHECK(session.revision == revision + 1 && session.effective.construction == source);
     CHECK(ArRegionalSession_BeginConstruction(&session, &jp) && session.revision == revision + 1);
-    CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+    CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
     CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready &&
           RegionalSessionTest_Equal(&loaded, &session));
   }
@@ -570,7 +571,7 @@ static void CheckSimCombat(void) {
   CHECK(ArRegionalSession_BeginSimActor(&session, 0, 1) && !session.sim_actors.active[1].combat &&
         session.sim_actors.active[0].combat == 31);
   CHECK(session.sim_actors.active[0].ai == 63 && session.sim_actors.active[1].ai == 55);
-  CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, NULL, image, &error));
+  CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, NULL, image, &error));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready &&
         RegionalSessionTest_Equal(&loaded, &session));
   CHECK(ArRegionalSimActors_LoadTown(&loaded.sim_actors, 1));
@@ -580,7 +581,7 @@ static void CheckSimCombat(void) {
         loaded.sim_actors.active[0].combat == 31);
   CHECK(loaded.sim_actors.active[0].ai == 63);
   CHECK(ArRegionalSession_BeginSimActor(&loaded, 0, 0) && !loaded.sim_actors.active[0].combat);
-  CHECK(ArRegionalSession_Save(&loaded, kSaveFileFormat_NativeSrm, path, image, image, &error));
+  CHECK(TestRegional_Save(&loaded, kSaveFileFormat_NativeSrm, path, image, image, &error));
   CHECK(ArRegionalSession_Load(&session, 0, path, image, &error) == kSaveCheckpoint_Ready &&
         RegionalSessionTest_Equal(&loaded, &session));
   CHECK(session.sim_actors.cached[0].combat == 31 &&
@@ -617,13 +618,13 @@ static void CheckLevelGoals(void) {
     CHECK(ArRegionalSession_RequestLevelGoals(&session, revision, (ArRegionalSource)source) &&
           session.revision == revision);
     CHECK(!ArRegionalSession_RequestLevelGoals(&session, revision - 1, (ArRegionalSource)source));
-    CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, source ? image : NULL,
+    CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, source ? image : NULL,
                                  image, &error));
     CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready &&
           RegionalSessionTest_Equal(&loaded, &session));
     bool jp;
     CHECK(ArRegionalSession_BeginLevelGoals(&session, &jp) && jp == (source == 1));
-    CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+    CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
     CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready &&
           RegionalSessionTest_Equal(&loaded, &session));
   }
@@ -663,7 +664,7 @@ static void CheckTownStatus(void) {
     CHECK(ArRegionalSession_RequestTownStatus(&session, revision, &policy) &&
           session.revision == revision);
     CHECK(!ArRegionalSession_RequestTownStatus(&session, revision - 1, &policy));
-    CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path,
+    CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path,
                                  combination ? image : NULL, image, &error));
     CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready &&
           RegionalSessionTest_Equal(&session, &loaded));
@@ -671,7 +672,7 @@ static void CheckTownStatus(void) {
     CHECK(ArRegionalSession_BeginTownStatus(&session, &snapshot));
     for (unsigned i = 0; i < kArRegionalTownStatus_Count; ++i)
       CHECK(snapshot.japanese[i] == (policy.source[i] == 1));
-    CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+    CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
     CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready &&
           RegionalSessionTest_Equal(&session, &loaded));
   }
@@ -713,7 +714,7 @@ static void CheckLairReloads(void) {
     CHECK(ArRegionalSession_RequestLairReloads(&session, revision, source) &&
           session.revision == revision);
     CHECK(!ArRegionalSession_RequestLairReloads(&session, revision - 1, source));
-    CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, i ? image : NULL, image,
+    CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, i ? image : NULL, image,
                                  &error));
     CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready &&
           RegionalSessionTest_Equal(&loaded, &session));
@@ -732,7 +733,7 @@ static void CheckLairReloads(void) {
   session = before;
   session.reloads.diverged_towns = 4;
   CHECK(!ArRegionalSession_RequestLairReloads(&session, session.revision, kArRegionalSource_Japan));
-  CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+  CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready &&
         RegionalSessionTest_Equal(&loaded, &session));
   remove(path);
@@ -769,7 +770,7 @@ static void CheckScoreFeedback(void) {
     CHECK(ArRegionalSession_RequestScoreFeedback(&session, revision, &policy) &&
           session.revision == revision);
     CHECK(!ArRegionalSession_RequestScoreFeedback(&session, revision - 1, &policy));
-    CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path,
+    CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path,
                                  combination ? image : NULL, image, &error));
     CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready &&
           RegionalSessionTest_Equal(&loaded, &session));
@@ -783,7 +784,7 @@ static void CheckScoreFeedback(void) {
     CHECK(completion.japanese[kArRegionalScore_Phase] ==
           (policy.source[kArRegionalScore_Phase] == kArRegionalSource_Japan));
     CHECK(!memcmp(&session.lairs, &history, sizeof(history)));
-    CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+    CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
     CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready &&
           RegionalSessionTest_Equal(&loaded, &session));
   }
@@ -828,7 +829,7 @@ static void CheckLairSeeds(void) {
   RegionalSessionTest_MakeImage(image, 7);
   SaveError error;
   ArRegionalSession loaded;
-  CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, NULL, image, &error));
+  CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, NULL, image, &error));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
   CHECK(RegionalSessionTest_Equal(&session, &loaded));
   CHECK(
@@ -836,7 +837,7 @@ static void CheckLairSeeds(void) {
   CHECK(ArRegionalSession_BeginLairAccounting(&session, &snapshot) &&
         snapshot.house_credit == kArRegionalSource_Japan);
   CHECK(ArRegionalSession_RequestLairSeeds(&session, session.revision, kArRegionalSource_Europe));
-  CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+  CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
   CHECK(RegionalSessionTest_Equal(&session, &loaded) &&
         loaded.effective.lair_seeds == kArRegionalSource_Japan);
@@ -844,7 +845,7 @@ static void CheckLairSeeds(void) {
   CHECK(!ArRegionalSession_BeginLairAccounting(&session, &snapshot));
   CHECK(!ArRegionalSession_RequestHouseCredit(&session, session.revision, kArRegionalSource_US));
   CHECK(!ArRegionalSession_RequestLairSeeds(&session, session.revision, kArRegionalSource_US));
-  CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+  CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
   CHECK(RegionalSessionTest_Equal(
       &session, &loaded)); /* Quarantine retains both requested/effective choices. */

@@ -1,5 +1,6 @@
 /* Native/INI checkpoint rotation, interrupted writes and cold-load recovery. */
 #define _POSIX_C_SOURCE 200809L
+#include "support/regional_save_fixture.h"
 #include "regional_session_test.h"
 #include "support/test_check.h"
 
@@ -105,7 +106,7 @@ static void CheckPersistence(SaveFileFormat format, const char *path) {
   CHECK(RegionalSessionTest_Equal(&loaded, &session));
   /* Companion failure cannot create or replace the native file. */
   CHECK(!MAKE_DIR(companion_tmp));
-  CHECK(!ArRegionalSession_Save(&session, format, path, NULL, a, &error));
+  CHECK(!TestRegional_Save(&session, format, path, NULL, a, &error));
   FILE *probe = fopen(path, "rb");
   CHECK(!probe);
   if (probe) fclose(probe);
@@ -113,9 +114,9 @@ static void CheckPersistence(SaveFileFormat format, const char *path) {
   /* Crash window for the very first save: journal exists but native replace
    * failed. The exact retry is allowed without losing either payload. */
   CHECK(!MAKE_DIR(native_tmp));
-  CHECK(!ArRegionalSession_Save(&session, format, path, NULL, a, &error));
+  CHECK(!TestRegional_Save(&session, format, path, NULL, a, &error));
   CHECK(!REMOVE_DIR(native_tmp));
-  CHECK(ArRegionalSession_Save(&session, format, path, NULL, a, &error));
+  CHECK(TestRegional_Save(&session, format, path, NULL, a, &error));
   CheckDisk(format, path, a);
   CHECK(ArRegionalSession_Load(&loaded, 0, path, a, &error) == kSaveCheckpoint_Ready);
   CHECK(RegionalSessionTest_Equal(&loaded, &session));
@@ -127,7 +128,7 @@ static void CheckPersistence(SaveFileFormat format, const char *path) {
   CHECK(ArRegionalSession_RequestCosts(&session, session.revision, kArRegionalCostGroup_Miracles,
                                        kArRegionalSource_Japan));
   CHECK(!MAKE_DIR(native_tmp));
-  CHECK(ArRegionalSession_Save(&session, format, path, a, a, &error));
+  CHECK(TestRegional_Save(&session, format, path, a, a, &error));
   CHECK(!REMOVE_DIR(native_tmp));
   CheckDisk(format, path, a);
   ArRegionalSession saved_a = session;
@@ -142,12 +143,12 @@ static void CheckPersistence(SaveFileFormat format, const char *path) {
   ArRegionalSession saved_b = session;
   /* Failure AFTER journaling must cold-load the OLD image's metadata. */
   CHECK(!MAKE_DIR(native_tmp));
-  CHECK(!ArRegionalSession_Save(&session, format, path, a, b, &error));
+  CHECK(!TestRegional_Save(&session, format, path, a, b, &error));
   CheckDisk(format, path, a);
   CHECK(ArRegionalSession_Load(&loaded, 0, path, a, &error) == kSaveCheckpoint_Ready);
   CHECK(RegionalSessionTest_Equal(&loaded, &saved_a));
   CHECK(!REMOVE_DIR(native_tmp));
-  CHECK(ArRegionalSession_Save(&session, format, path, a, b, &error));
+  CHECK(TestRegional_Save(&session, format, path, a, b, &error));
   CheckDisk(format, path, b);
   CHECK(ArRegionalSession_Load(&loaded, 0, path, b, &error) == kSaveCheckpoint_Ready);
   CHECK(RegionalSessionTest_Equal(&loaded, &saved_b));
@@ -156,14 +157,14 @@ static void CheckPersistence(SaveFileFormat format, const char *path) {
   CheckDisk(format, path, b);
   CHECK(ArRegionalSession_Load(&loaded, 0, path, b, &error) == kSaveCheckpoint_Ready);
   CHECK(RegionalSessionTest_Equal(&loaded, &saved_b));
-  CHECK(ArRegionalSession_Save(&session, format, path, b, c, &error));
+  CHECK(TestRegional_Save(&session, format, path, b, c, &error));
   CheckDisk(format, path, c);
   CHECK(ArRegionalSession_Load(&loaded, 0, path, c, &error) == kSaveCheckpoint_Ready);
   CHECK(RegionalSessionTest_Equal(&loaded, &session));
   CHECK(ArRegionalSession_RequestCosts(&session, session.revision, kArRegionalCostGroup_Scrolls,
                                        kArRegionalSource_Japan));
   CHECK(ArRegionalSession_RequestTimers(&session, session.revision, kArRegionalSource_Japan));
-  CHECK(ArRegionalSession_Save(&session, format, path, c, c, &error));
+  CHECK(TestRegional_Save(&session, format, path, c, c, &error));
   /* A metadata-only edit must not discard the preceding native checkpoint. */
   CHECK(ArRegionalSession_Load(&loaded, 0, path, b, &error) == kSaveCheckpoint_Ready);
   CHECK(RegionalSessionTest_Equal(&loaded, &saved_b));
@@ -178,13 +179,14 @@ static void CheckPersistence(SaveFileFormat format, const char *path) {
 
   /* Two retained native images/payloads plus the small journal envelope.
    * Do not size this fixture around today's regional payload length. */
-  enum { journal_capacity = 64 + 2 * (kActRaiserSramSize + kSaveCheckpointPayloadMax) };
+  enum { journal_capacity =
+      64 + 2 * (kActRaiserSramSize + kSaveCheckpointPayloadMax + kSaveNameCapacity) };
   uint8_t journal[journal_capacity], after[journal_capacity];
   size_t journal_size = ReadBytes(companion, journal, sizeof(journal));
   CHECK(journal_size > 8192);
   /* External save replacement cannot be overwritten using stale session data. */
   CHECK(Save_WriteFile(format, path, a, &error));
-  CHECK(!ArRegionalSession_Save(&session, format, path, c, b, &error));
+  CHECK(!TestRegional_Save(&session, format, path, c, b, &error));
   CheckDisk(format, path, a);
   CHECK(ReadBytes(companion, after, sizeof(after)) == journal_size);
   CHECK(!memcmp(journal, after, journal_size));
@@ -192,12 +194,12 @@ static void CheckPersistence(SaveFileFormat format, const char *path) {
 
   /* Future outer schema, corruption and truncation are NOT legacy Missing. */
   memcpy(after, journal, journal_size);
-  after[8] = 2;
+  after[8] = 3;
   CHECK(Save_WriteCompanionFile(companion, after, journal_size, &error));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, c, &error) == kSaveCheckpoint_Unsupported);
-  CHECK(!ArRegionalSession_Save(&session, format, path, c, c, &error));
+  CHECK(!TestRegional_Save(&session, format, path, c, c, &error));
   CheckDisk(format, path, c);
-  CHECK(ReadBytes(companion, after, sizeof(after)) == journal_size && after[8] == 2);
+  CHECK(ReadBytes(companion, after, sizeof(after)) == journal_size && after[8] == 3);
   memcpy(after, journal, journal_size);
   after[100] ^= 1;
   CHECK(Save_WriteCompanionFile(companion, after, journal_size, &error));
@@ -206,7 +208,7 @@ static void CheckPersistence(SaveFileFormat format, const char *path) {
   for (unsigned i = 0; i < sizeof(cuts) / sizeof(cuts[0]); ++i) {
     CHECK(Save_WriteCompanionFile(companion, journal, cuts[i], &error));
     CHECK(ArRegionalSession_Load(&loaded, 0, path, c, &error) == kSaveCheckpoint_Invalid);
-    CHECK(!ArRegionalSession_Save(&session, format, path, c, c, &error));
+    CHECK(!TestRegional_Save(&session, format, path, c, c, &error));
   }
   CHECK(Save_WriteCompanionFile(companion, journal, journal_size, &error));
 
@@ -220,13 +222,13 @@ static void CheckPersistence(SaveFileFormat format, const char *path) {
   CHECK(SaveCheckpoint_Commit(format, path, c, c, future, payload_size,
                               RegionalSessionTest_AcceptOpaque, NULL, &error));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, c, &error) == kSaveCheckpoint_Unsupported);
-  CHECK(!ArRegionalSession_Save(&session, format, path, c, c, &error));
+  CHECK(!TestRegional_Save(&session, format, path, c, c, &error));
   /* Even a nonmatching retained payload cannot be silently erased on rotation. */
   CHECK(SaveCheckpoint_Commit(format, path, c, a, payload, payload_size,
                               RegionalSessionTest_AcceptOpaque, NULL, &error));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, a, &error) == kSaveCheckpoint_Ready);
   journal_size = ReadBytes(companion, journal, sizeof(journal));
-  CHECK(!ArRegionalSession_Save(&session, format, path, a, b, &error));
+  CHECK(!TestRegional_Save(&session, format, path, a, b, &error));
   CHECK(ReadBytes(companion, after, sizeof(after)) == journal_size);
   CHECK(!memcmp(journal, after, journal_size));
   CheckDisk(format, path, a);
@@ -239,11 +241,11 @@ static void CheckPersistence(SaveFileFormat format, const char *path) {
    * replacement must keep the old image recognizably legacy, not corrupt. */
   CHECK(Save_WriteFile(format, path, a, &error));
   CHECK(!MAKE_DIR(native_tmp));
-  CHECK(!ArRegionalSession_Save(&session, format, path, a, b, &error));
+  CHECK(!TestRegional_Save(&session, format, path, a, b, &error));
   CheckDisk(format, path, a);
   CHECK(ArRegionalSession_Load(&loaded, 0, path, a, &error) == kSaveCheckpoint_Missing);
   CHECK(!REMOVE_DIR(native_tmp));
-  CHECK(ArRegionalSession_Save(&session, format, path, a, b, &error));
+  CHECK(TestRegional_Save(&session, format, path, a, b, &error));
   CheckDisk(format, path, b);
   CHECK(ArRegionalSession_Load(&loaded, 0, path, b, &error) == kSaveCheckpoint_Ready);
   CHECK(RegionalSessionTest_Equal(&loaded, &session));

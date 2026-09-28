@@ -30,7 +30,6 @@ typedef enum ActRaiserPopulationResult {
   kActRaiserPopulation_RecoveryFailed,
   kActRaiserPopulation_RolledBack,
   kActRaiserPopulation_Committed,
-  kActRaiserPopulation_NamePending,
 } ActRaiserPopulationResult;
 
 /* Called ONLY by the audited $01:85A2 Palace selector boundary after native

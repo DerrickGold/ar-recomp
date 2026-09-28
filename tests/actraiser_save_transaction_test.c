@@ -49,6 +49,8 @@ int main(void) {
   SaveError error = {{0}};
   for (int width = 0; width < 2; ++width) {
     for (int aborted = 0; aborted < 2; ++aborted) {
+      remove(path);
+      remove("actraiser-save-seam-test.srm.archeckpoint");
       memset(image, 0, sizeof(image));
       Save_RecomputeChecksum(image);
       memcpy(old, image, sizeof(old));
@@ -77,5 +79,6 @@ int main(void) {
     }
   }
   remove(path);
+  remove("actraiser-save-seam-test.srm.archeckpoint");
   return failures ? 1 : 0;
 }

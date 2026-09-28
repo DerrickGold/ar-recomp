@@ -19,6 +19,12 @@ typedef enum SaveEditorActionResult {
  * durability checks. Unrecognized actions fail without touching a save. */
 SaveEditorActionResult SaveEditor_HandleAction(SettingAction action,
                                               const Settings *settings);
+/* The managed-slot menu has already confirmed the active destination. This
+ * authorizes only this Apply action, without arming global boot overrides.
+ * Return validation/storage errors to the menu instead of hiding them in logs. */
+SaveEditorActionResult SaveEditor_ApplyConfirmedEdits(SettingAction action,
+                                                     const Settings *settings,
+                                                     SaveError *error);
 /* Interactive file actions use the reviewed picker path, never diagnostic
  * environment variables or the import-folder fallback. Errors stay visible. */
 const char *SaveEditor_ExportExtension(SettingAction action);

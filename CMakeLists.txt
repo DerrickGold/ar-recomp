@@ -575,6 +575,9 @@ if(BUILD_TESTING)
                 ${CMAKE_SOURCE_DIR}/tools/check_global_owners.py --self-test)
         set_tests_properties(actraiser_global_owners actraiser_global_owners_negative
             PROPERTIES ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+        add_test(NAME actraiser_save_ownership
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/check_save_ownership.py)
         # Layout ratchet: no authored file may gain style violations.
         add_test(NAME actraiser_style
             COMMAND ${Python3_EXECUTABLE}
@@ -2855,6 +2858,10 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_save_system COMMAND actraiser_save_system_test)
 
+    add_executable(actraiser_save_snapshot_test tests/save_snapshot_test.c)
+    target_link_libraries(actraiser_save_snapshot_test PRIVATE actraiser_save_test_support)
+    add_test(NAME actraiser_save_snapshot COMMAND actraiser_save_snapshot_test)
+
     add_executable(actraiser_world_resume_test tests/actraiser_world_resume_test.c
         src/actraiser/enhancements/actraiser_world_resume.c)
     target_include_directories(actraiser_world_resume_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -2927,7 +2934,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_save_paths COMMAND actraiser_save_paths_test)
 
     add_executable(actraiser_save_slots_test tests/save_slots_test.c
-        src/save/save_slots.c src/save/save_slot_manager.c
+        src/save/save_slots.c src/save/save_slot_manager.c src/save/save_editor.c
         src/actraiser/regional/actraiser_regional_editor.c
         src/actraiser/regional/actraiser_regional_choices.c)
     target_link_libraries(actraiser_save_slots_test PRIVATE

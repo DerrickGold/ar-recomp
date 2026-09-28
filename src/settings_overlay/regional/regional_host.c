@@ -53,8 +53,6 @@ static bool PopulationPrompt(void *context, ActRaiserRegionalPopulationNotice no
   } else {
     const char *key = notice == kActRaiserRegionalPopulation_Complete
         ? "overlay.region.population_complete"
-        : notice == kActRaiserRegionalPopulation_NamePending
-        ? "overlay.region.population_name_pending"
         : "overlay.region.population_failed";
     opened = SettingsOverlay_BeginNotice("overlay.region.population_label", key,
                                          "overlay.region.acknowledge");

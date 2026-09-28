@@ -2013,6 +2013,20 @@ static ArRegionalSession slot_started_draft;
 static SaveFileDialogResult slot_file_choice = kSaveFileDialog_Selected;
 static int slot_file_choices, slot_file_cancels;
 static bool slot_file_success = true;
+static bool slot_edit_success = true;
+static bool FakeSlotApplyEdits(SettingAction action, SaveError *error) {
+  CHECK(!g_settings.save_edit_armed); /* Confirmation authorizes this edit alone. */
+  CHECK(action == kSettingAction_SaveApplySession || action == kSettingAction_SaveApplyPersist ||
+        action == kSettingAction_SaveApplyRestart);
+  ++s_action_calls;
+  s_action_desc = Settings_Find(action == kSettingAction_SaveApplyPersist ? "save_apply_persist"
+                          : action == kSettingAction_SaveApplyRestart ? "save_apply_restart"
+                                                                       : "save_apply_session");
+  if (!slot_edit_success)
+    snprintf(error->message, sizeof(error->message), "Save fixture rejected the edit.");
+  if (slot_edit_success && action == kSettingAction_SaveApplyRestart) SettingsOverlay_Close();
+  return slot_edit_success;
+}
 static bool FakeSlotChooseFile(SettingAction action, SaveError *error) {
   (void)action;
   (void)error;
@@ -2499,7 +2513,8 @@ static void TestSaveAdvancedActions(SDL_Renderer *renderer, SDL_Surface *surface
                                               .choose_file = FakeSlotChooseFile,
                                               .poll_file = FakeSlotPollFile,
                                               .cancel_file = FakeSlotCancelFile,
-                                              .file_action = FakeSlotFileAction};
+                                              .file_action = FakeSlotFileAction,
+                                              .apply_edits = FakeSlotApplyEdits};
   SettingsOverlay_SetSaveSlotHooks(&hooks);
   SettingsOverlay_Open();
   NavToSection(kSection_Save);
@@ -2510,6 +2525,9 @@ static void TestSaveAdvancedActions(SDL_Renderer *renderer, SDL_Surface *surface
     CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
   CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_advanced"));
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  RowToKey("save_backend");
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "save_autobackup"));
   RowToKey("save_import");
   SlotReviewFrame(renderer, surface, "advanced-active-target");
   int calls = s_action_calls;
@@ -2539,10 +2557,25 @@ static void TestSaveAdvancedActions(SDL_Renderer *renderer, SDL_Surface *surface
     CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
     CHECK(s_action_calls == calls);
     CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    ++slot_active_fingerprint;
+    CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    CHECK(s_action_calls == calls); /* Changed slots must not receive the edit. */
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
     CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
     CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
     CHECK(s_action_calls == ++calls && s_action_desc == Settings_Find(edits[i]));
+    CHECK(!g_settings.save_edit_armed);
   }
+  slot_edit_success = false;
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(s_action_calls == ++calls && !strcmp(SettingsOverlay_SelectedKey(), "slot_confirm"));
+  SlotReviewFrame(renderer, surface, "advanced-edit-failure");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "save_apply_persist"));
+  slot_edit_success = true;
   RowToKey("save_import");
   slot_file_choice = kSaveFileDialog_Pending;
   int choices = slot_file_choices;
@@ -2591,6 +2624,37 @@ static void TestSaveAdvancedActions(SDL_Renderer *renderer, SDL_Surface *surface
   SettingsOverlay_Close();
   CHECK(slot_file_cancels == cancels + 1 && s_action_calls == calls);
   slot_file_choice = kSaveFileDialog_Selected;
+  /* Save failure must keep the editor open; only a successful, confirmed
+   * Apply and restart closes the overlay for the host's prepared restart. */
+  SettingsOverlay_Open();
+  CHECK(SettingsOverlay_OpenSaveSlots(false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_advanced"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  RowToKey("save_apply_restart");
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  SlotReviewFrame(renderer, surface, "advanced-restart-confirm");
+  CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
+  CHECK(s_action_calls == calls && SettingsOverlay_IsOpen());
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  ++slot_active_fingerprint;
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(s_action_calls == calls && SettingsOverlay_IsOpen());
+  slot_edit_success = false;
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(s_action_calls == ++calls && SettingsOverlay_IsOpen());
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_confirm"));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "save_apply_restart"));
+  slot_edit_success = true;
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_UP, true, false));
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(s_action_calls == ++calls && !SettingsOverlay_IsOpen());
+  CHECK(s_action_desc == Settings_Find("save_apply_restart"));
   SettingsOverlay_SetSaveSlotHooks(NULL);
   slot_active_fingerprint = 111;
 }

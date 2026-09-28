@@ -1,3 +1,4 @@
+#include "support/regional_save_fixture.h"
 #include "support/regional_test_values.h"
 #include "regional/session/regional_campaign.h"
 #include "host/campaign_identity.h"
@@ -42,6 +43,14 @@ static void Remove(const char *path) {
   REMOVE_DIR(sidecar);
   remove(sidecar);
 }
+static void AttachOwner(uint8_t *image, SaveFileFormat format, const char *path,
+                         ArRegionalCampaign *campaign) {
+  SaveError error = {{0}};
+  CHECK(SaveSystem_Attach(image, kActRaiserSramSize, (SaveBackend)format, path, path, &error));
+  CHECK(SaveSystem_LoadActive(&error));
+  SaveCommitHost host = ArRegionalCampaign_SaveHost(campaign);
+  CHECK(SaveSystem_SetCommitHost(&host));
+}
 static void Run(SaveBackend backend) {
   const char *native = "regional-campaign-test.srm", *ini = "regional-campaign-test.ini";
   const char *path = backend == kSaveBackend_Ini ? ini : native;
@@ -84,11 +93,14 @@ static void Run(SaveBackend backend) {
   CHECK(ArRegionalSession_Load(&loaded, 0, path, durable, &error) == kSaveCheckpoint_Missing);
   CHECK(SaveSystem_BeginNativeWrite(&error));
   image[100] = 1;
+  memcpy(image + 0x1439, "ELISE\0\0\0\0", 9);
+  CHECK(SaveSystem_SetLocalizedPlayerName("Élise", "ELISE"));
   CHECK(SaveSystem_AutoPersistIfChanged(&error));
   Save_RecomputeChecksum(image);
   CHECK(SaveSystem_EndNativeWrite(true, &error));
   CHECK(campaign.pending_valid);
   CHECK(ArRegionalCampaign_NewGame(&campaign, &eu, &error));
+  CHECK(SaveSystem_SetLocalizedPlayerName("Renée", "RENEE"));
   campaign.active.randomizer = RandomizerConfig_Default();
   campaign.active.randomizer.enabled = true;
   campaign.active.randomizer.seed = 654321;
@@ -106,6 +118,12 @@ static void Run(SaveBackend backend) {
   CHECK(!campaign.pending_valid);
   CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
   CHECK(TestRegional_EqualSession(&loaded, &saving));
+  SaveSnapshot completed;
+  CHECK(SaveCheckpoint_ReadSnapshot(path, image, &completed, &error));
+  CHECK(!strcmp(completed.name, "Élise"));
+  char pending_name[64];
+  CHECK(SaveSystem_CopyLocalizedPlayerName("RENEE", pending_name, sizeof(pending_name)));
+  CHECK(!strcmp(pending_name, "Renée"));
   CHECK(campaign.active.requested.costs.source[0] == kArRegionalSource_Europe);
   /* A marker outside the checksum belongs to the durable JP game, not the
    * unsaved EU one. No direct Save_WriteFile bypass of companion rotation. */
@@ -127,7 +145,7 @@ static void Run(SaveBackend backend) {
   /* Foreign import gets its own identity/provenance, never the running game's. */
   memset(disk, 0, sizeof(disk));
   Save_RecomputeChecksum(disk);
-  CHECK(ArRegionalSession_Save(&campaign.active, kSaveFileFormat_NativeSrm, donor, NULL, disk,
+  CHECK(TestRegional_Save(&campaign.active, kSaveFileFormat_NativeSrm, donor, NULL, disk,
                                &error));
   CHECK(SaveSystem_Import(donor, false, &error));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
@@ -170,6 +188,7 @@ static void Acknowledge(SaveFileFormat format) {
   ArRegionalCampaign campaign;
   ArRegionalCampaign_Init(&campaign, 0, Identity, &sequence);
   CHECK(Save_WriteFile(format, path, image, &error));
+  AttachOwner(image, format, path, &campaign);
   CHECK(ArRegionalCampaign_Continue(&campaign, path, image, &error));
   CHECK(campaign.active.lairs.initialized_towns == 0);
   ArRegionalSession loaded;
@@ -198,24 +217,26 @@ static void Acknowledge(SaveFileFormat format) {
   CHECK(!campaign.active_valid);
   stocks[0] ^= 1;
   CHECK(ArRegionalLairHistory_MarkDiverged(&loaded.lairs, 0));
-  CHECK(ArRegionalSession_Save(&loaded, format, path, image, image, &error));
+  CHECK(TestRegional_Save(&loaded, format, path, image, image, &error));
   CHECK(!ArRegionalCampaign_AcknowledgeLairHistory(&campaign, format, path, image, stocks, &error));
   CHECK(ArRegionalSession_Load(&loaded, 0, path, image, &error) == kSaveCheckpoint_Ready);
   CHECK(loaded.lairs.diverged_towns == 1);
   Remove(path);
   /* Partial histories retain their exact towns; only absent towns are adopted. */
   CHECK(Save_WriteFile(format, path, image, &error));
+  AttachOwner(image, format, path, &campaign);
   CHECK(ArRegionalCampaign_Continue(&campaign, path, image, &error));
   CHECK(ArRegionalLairHistory_InitTown(&campaign.active.lairs, 0));
   for (unsigned i = 0; i < 4; ++i)
     stocks[i] = campaign.active.lairs.stock[0][i];
-  CHECK(ArRegionalSession_Save(&campaign.active, format, path, image, image, &error));
+  CHECK(TestRegional_Save(&campaign.active, format, path, image, image, &error));
   CHECK(ArRegionalCampaign_AcknowledgeLairHistory(&campaign, format, path, image, stocks, &error));
   CHECK(campaign.active.lairs.initialized_towns == 0x3f &&
         campaign.active.lairs.approximate_towns == 0x3e);
   Remove(path);
   /* External save replacement while the prompt is open cannot be overwritten. */
   CHECK(Save_WriteFile(format, path, image, &error));
+  AttachOwner(image, format, path, &campaign);
   image[10] = 1;
   Save_RecomputeChecksum(image);
   CHECK(!ArRegionalCampaign_AcknowledgeLairHistory(&campaign, format, path, image, stocks, &error));
@@ -320,14 +341,15 @@ static void RecoveryCopy(SaveBackend backend) {
   CHECK(!sr_path_exists(folder));
   CHECK(Save_WriteFile(format, path, image, &error));
   SaveCommitHost unsupported = host;
-  unsupported.copy_recovery = NULL;
-  CHECK(SaveSystem_SetCommitHost(&unsupported));
+  unsupported.validate = NULL;
+  CHECK(!SaveSystem_SetCommitHost(&unsupported));
+  CHECK(SaveSystem_SetCommitHost(NULL));
   CHECK(!SaveSystem_CreateRecoveryCopy(folder, &error));
   CHECK(!sr_path_exists(folder));
   CHECK(SaveSystem_SetCommitHost(&host));
 
   /* A damaged source companion must not produce an apparently complete SRAM
-   * recovery or change the source/live session. Partial directory is retained. */
+   * recovery or change the source/live session. Validate before reserving a copy. */
   FILE *bad = fopen(journal_path, "wb");
   CHECK(bad != NULL);
   if (bad) {
@@ -336,13 +358,10 @@ static void RecoveryCopy(SaveBackend backend) {
   }
   before = campaign;
   CHECK(!SaveSystem_CreateRecoveryCopy(folder, &error));
-  CHECK(sr_path_is_directory(folder) && !sr_path_exists(copy));
-  CHECK(sr_path_exists(copy_name)); /* Name is durable before native image. */
+  CHECK(!sr_path_exists(folder));
   CHECK(!memcmp(&campaign, &before, sizeof(campaign)));
   CHECK(Save_LoadFile(format, path, disk, &error) && !memcmp(disk, image, sizeof(disk)));
   CHECK(!SaveSystem_CreateRecoveryCopy(folder, &error));
-  remove(copy_name);
-  CHECK(REMOVE_DIR(folder) == 0);
   Remove(native);
   Remove(ini);
   remove(name_path);
@@ -404,17 +423,18 @@ static void StorySnapshot(SaveBackend backend) {
   CHECK(ArRegionalSession_Load(&loaded, 0, path, disk, &error) == kSaveCheckpoint_Ready);
   CHECK(TestRegional_EqualSession(&loaded, &campaign.active));
   CHECK(REMOVE_DIR(blocked) == 0);
-  /* Name failure is explicitly post-commit. Retrying auto-persistence must
-   * repair only the companion, not run conversion or revert campaign data. */
-  snprintf(blocked, sizeof(blocked), "%s.arname.tmp", path);
+  /* Name and payload preparation fail together before any native replacement. */
+  snprintf(blocked, sizeof(blocked), "%s.archeckpoint.tmp", path);
   CHECK(MAKE_DIR(blocked) == 0);
-  CHECK(SaveSystem_CommitStorySnapshot(candidate, &error) == kSaveStorySnapshot_NamePending);
-  CHECK(!memcmp(live, candidate, sizeof(live)) && !memcmp(&campaign, &before, sizeof(campaign)));
-  CHECK(SaveSystem_CopyDurableImage(disk) && !memcmp(disk, candidate, sizeof(disk)));
-  CHECK(Save_LoadFile(format, path, disk, &error) && !memcmp(disk, candidate, sizeof(disk)));
-  CHECK(ArRegionalSession_Load(&loaded, 0, path, disk, &error) == kSaveCheckpoint_Ready);
+  CHECK(SaveSystem_CommitStorySnapshot(candidate, &error) == kSaveStorySnapshot_NotCommitted);
+  CHECK(!memcmp(live, old, sizeof(live)) && !memcmp(&campaign, &before, sizeof(campaign)));
+  CHECK(SaveSystem_CopyDurableImage(disk) && !memcmp(disk, old, sizeof(disk)));
+  CHECK(Save_LoadFile(format, path, disk, &error) && !memcmp(disk, old, sizeof(disk)));
+  CHECK(REMOVE_DIR(blocked) == 0);
+  CHECK(SaveSystem_CommitStorySnapshot(candidate, &error) == kSaveStorySnapshot_Committed);
+  CHECK(!memcmp(live, candidate, sizeof(live)));
+  CHECK(ArRegionalSession_Load(&loaded, 0, path, live, &error) == kSaveCheckpoint_Ready);
   CHECK(TestRegional_EqualSession(&loaded, &campaign.active));
-  CHECK(REMOVE_DIR(blocked) == 0 && SaveSystem_AutoPersistIfChanged(&error));
   CHECK(SaveSystem_LoadActive(&error));
   char name[64];
   CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", name, sizeof(name)) && !strcmp(name, "Élise"));
@@ -480,7 +500,7 @@ static void CampaignArchive(SaveBackend backend) {
   CHECK(ArRegionalSession_RequestTimers(&campaign.active, campaign.active.revision,
                                         kArRegionalSource_Europe));
   CHECK(ArRegionalLairHistory_InitTown(&campaign.active.lairs, 0));
-  CHECK(ArRegionalSession_Save(&campaign.active, kSaveFileFormat_NativeSrm, donor, NULL, image,
+  CHECK(TestRegional_Save(&campaign.active, kSaveFileFormat_NativeSrm, donor, NULL, image,
                                &error));
   ArRegionalSession exported = campaign.active;
   CHECK(SaveSystem_Attach(image, sizeof(image), kSaveBackend_NativeSrm, donor, "unused-archive.ini",
@@ -498,9 +518,7 @@ static void CampaignArchive(SaveBackend backend) {
   CHECK(MAKE_DIR(blocked) == 0);
   CHECK(!SaveSystem_ExportCampaign(archive, &error));
   CHECK(REMOVE_DIR(blocked) == 0); /* Prior archive survives. */
-  SaveCommitHost unsupported = host;
-  unsupported.read_campaign = NULL;
-  CHECK(SaveSystem_SetCommitHost(&unsupported));
+  CHECK(SaveSystem_SetCommitHost(NULL));
   CHECK(!SaveSystem_ExportCampaign(bad, &error));
   CHECK(!sr_path_exists(bad));
 
@@ -513,7 +531,7 @@ static void CampaignArchive(SaveBackend backend) {
   Save_RecomputeChecksum(image);
   memcpy(saved, image, sizeof(saved));
   CHECK(
-      ArRegionalSession_Save(&campaign.active, (SaveFileFormat)backend, path, NULL, image, &error));
+      TestRegional_Save(&campaign.active, (SaveFileFormat)backend, path, NULL, image, &error));
   CHECK(SaveSystem_Attach(image, sizeof(image), backend, native, ini, &error) &&
         SaveSystem_LoadActive(&error));
   host = ArRegionalCampaign_SaveHost(&campaign);
@@ -578,24 +596,48 @@ static void CampaignArchive(SaveBackend backend) {
         !memcmp(disk, saved, sizeof(disk)));
   CHECK(ArRegionalSession_Load(&loaded, 2, path, disk, &error) == kSaveCheckpoint_Ready &&
         TestRegional_EqualSession(&loaded, &previous));
-  /* A post-commit name failure is reported as committed and retried without
-   * rerunning the import or losing the imported campaign/seed. */
-  snprintf(blocked, sizeof(blocked), "%s.arname.tmp", path);
+  /* Import cannot succeed until its name and feature payload are journaled. */
+  snprintf(blocked, sizeof(blocked), "%s.archeckpoint.tmp", path);
   CHECK(MAKE_DIR(blocked) == 0);
-  CHECK(SaveSystem_Import(archive, false, &error));
-  CHECK(!SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(!SaveSystem_Import(archive, false, &error));
+  CHECK(Save_LoadFile((SaveFileFormat)backend, path, disk, &error));
+  CHECK(!memcmp(disk, saved, sizeof(disk)));
   CHECK(REMOVE_DIR(blocked) == 0);
-  CHECK(SaveSystem_AutoPersistIfChanged(&error));
+  CHECK(SaveSystem_Import(archive, false, &error));
   CHECK(SaveSystem_LoadActive(&error));
   CHECK(SaveSystem_CopyLocalizedPlayerName("ELISE", name, sizeof(name)) && !strcmp(name, "Élise"));
   CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready &&
+        TestRegional_EqualSession(&loaded, &exported));
+
+  /* Renaming and immediately restarting must leave a complete campaign that
+   * can be backed up by the very next persistent edit. */
+  SaveEditRequest edits;
+  SaveEditRequest_Clear(&edits);
+  edits.player_name_set = true;
+  snprintf(edits.player_name, sizeof(edits.player_name), "DERRICK");
+  CHECK(SaveSystem_ApplyEdits(&edits, true, true, true, &error));
+  CHECK(SaveSystem_ExportCampaign(bad, &error));
+  CHECK(SaveSystem_Attach(image, sizeof(image), backend, native, ini, &error));
+  CHECK(SaveSystem_LoadActive(&error));
+  CHECK(SaveSystem_SetCommitHost(&host));
+  CHECK(SaveSystem_SetStorageRoot(root, 2, &error));
+  CHECK(!memcmp(image + 0x1439, "DERRICK\0\0", 9));
+  CHECK(!SaveSystem_CopyLocalizedPlayerName("DERRICK", name, sizeof(name)));
+  SaveEditRequest_Clear(&edits);
+  edits.master_level = 17;
+  CHECK(SaveSystem_ApplyEdits(&edits, true, true, true, &error));
+  CHECK(Save_LoadFile((SaveFileFormat)backend, path, disk, &error));
+  CHECK(disk[0x1442] == 17 && !memcmp(disk + 0x1439, "DERRICK\0\0", 9));
+  CHECK(ArRegionalSession_Load(&loaded, 2, path, disk, &error) == kSaveCheckpoint_Ready &&
         TestRegional_EqualSession(&loaded, &exported));
   Remove(donor);
   Remove(native);
   Remove(ini);
   remove(archive);
   remove(bad);
-  remove(backup);
+  while (FindArchiveBackup(backup, sizeof(backup))) {
+    if (remove(backup)) { CHECK(false); break; }
+  }
   snprintf(blocked, sizeof(blocked), "%s.arname", donor);
   remove(blocked);
   snprintf(blocked, sizeof(blocked), "%s.arname", path);
@@ -621,7 +663,10 @@ static void SettingsOnly(SaveFileFormat format) {
   saved.randomizer = RandomizerConfig_Default();
   saved.randomizer.enabled = true;
   saved.randomizer.seed = 321;
-  CHECK(ArRegionalSession_Save(&saved, format, path, NULL, image, &error));
+  CHECK(TestRegional_Save(&saved, format, path, NULL, image, &error));
+  ArRegionalCampaign campaign;
+  ArRegionalCampaign_Init(&campaign, 2, NULL, NULL);
+  AttachOwner(image, format, path, &campaign);
   live = saved;
   live.arrival_locked = true;
   live.effective.terrain = kArRegionalSource_Japan;
@@ -702,11 +747,12 @@ static int PrepareWorldResume(const char *source, const char *destination) {
   ArRegionalCampaign campaign;
   ArRegionalCampaign_Init(&campaign, 0, Identity, &sequence);
   if (!Save_WriteFile(kSaveFileFormat_NativeSrm, destination, image, &error) ||
-      !ArRegionalCampaign_Continue(&campaign, destination, image, &error) ||
-      !ArRegionalCampaign_AcknowledgeLairHistory(&campaign, kSaveFileFormat_NativeSrm,
+      !ArRegionalCampaign_Continue(&campaign, destination, image, &error)) return 1;
+  AttachOwner(image, kSaveFileFormat_NativeSrm, destination, &campaign);
+  if (!ArRegionalCampaign_AcknowledgeLairHistory(&campaign, kSaveFileFormat_NativeSrm,
                                                 destination, image, stocks, &error) ||
       !ArRegionalLairReloads_Adopt(&campaign.active.reloads, kArRegionalSource_US, delays) ||
-      !ArRegionalSession_Save(&campaign.active, kSaveFileFormat_NativeSrm, destination,
+      !TestRegional_Save(&campaign.active, kSaveFileFormat_NativeSrm, destination,
                               image, image, &error)) {
     fprintf(stderr, "world-resume fixture preparation failed: %s\n", error.message);
     return 1;

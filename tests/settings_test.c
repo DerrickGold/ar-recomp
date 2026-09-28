@@ -111,8 +111,8 @@ static void TestDefaultsAndMetadata(void) {
    * adds its presentation choice, player scale, and two independent Describe bindings.
    * Seeded regional rolls add two options; save slots add two entry actions.
    * Remember last town adds a native/enhanced QoL preference; native menu
-   * quick use adds an independent QoL toggle. */
-  const int expected_descriptors = 305;
+   * quick use adds an independent QoL toggle. Save editing adds Apply and restart. */
+  const int expected_descriptors = 306;
   if (g_setting_desc_count != expected_descriptors)
     fprintf(stderr, "Setting descriptors: expected %d, got %d\n",
             expected_descriptors, g_setting_desc_count);

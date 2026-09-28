@@ -68,12 +68,22 @@ static bool SlotChooseFile(SettingAction action, SaveError *error) {
   }
   return SaveFileDialog_Begin(g_window, extension, location, error);
 }
-static bool SlotFileAction(SettingAction action, const char *path, SaveError *error) {
+static bool SlotEditorReady(SaveError *error) {
   if (!s_managed_slots || !InputReplay_PolicyChangesAllowed() || s_save_slots.pending ||
       RuntimeSettings_LifecycleRequest() != kRuntimeLifecycle_None) {
     snprintf(error->message, sizeof(error->message), "Save routing is not ready for this action.");
     return false;
   }
+  return true;
+}
+static bool SlotApplyEdits(SettingAction action, SaveError *error) {
+  if (!SlotEditorReady(error)) return false;
+  SaveEditorActionResult result = SaveEditor_ApplyConfirmedEdits(action, &g_settings, error);
+  if (result == kSaveEditorAction_RestartRequired) RuntimeSettings_RequestPreparedRestart();
+  return result != kSaveEditorAction_Failed;
+}
+static bool SlotFileAction(SettingAction action, const char *path, SaveError *error) {
+  if (!SlotEditorReady(error)) return false;
   SaveEditorActionResult result = SaveEditor_HandleFileAction(action, path, &g_settings, error);
   if (result == kSaveEditorAction_RestartRequired) RuntimeSettings_RequestPreparedRestart();
   return result != kSaveEditorAction_Failed;
@@ -167,15 +177,8 @@ static bool SlotSaveRegionalSettings(void *context,const ArRegionalSession *befo
     SaveFileFormat format = SaveSystem_ActiveBackend() == kSaveBackend_Ini
         ? kSaveFileFormat_Ini
         : kSaveFileFormat_NativeSrm;
-    if (!ArRegionalCampaign_SaveSettings(before, after, format, SaveSystem_ActivePath(), image,
-                                         error))
-      return false;
-    /* The companion is already durable. A failed index refresh is retryable
-     * by normal validation; don't report the committed edit as rolled back. */
-    SaveError index_error={{0}};
-    if(!SaveSlots_ObserveCheckpoints(slots,&index_error))
-      fprintf(stderr,"[regional] checkpoint index refresh pending: %s\n",index_error.message);
-    return true;
+    return ArRegionalCampaign_SaveSettings(before, after, format, SaveSystem_ActivePath(), image,
+                                           error);
   }
   ArRegionalSession draft;
   const RandomizerConfig recipe=Randomizer_CurrentConfig();
@@ -366,7 +369,7 @@ void SaveSlotHost_InstallHooks(void) {
       .scan = SlotScan, .draft = SlotDraft, .edit = SaveSlotManager_Edit,
       .view = SlotDraftView, .start = SlotStart, .choose_file = SlotChooseFile,
       .poll_file = SaveFileDialog_Poll, .cancel_file = SaveFileDialog_Cancel,
-      .file_action = SlotFileAction};
+      .file_action = SlotFileAction, .apply_edits = SlotApplyEdits};
   SettingsOverlay_SetSaveSlotHooks(&slots);
   if (s_managed_slots && SaveSlots_NeedsSetup(&s_save_slots)) {
     SettingsOverlay_Open();

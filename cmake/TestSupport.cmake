@@ -35,8 +35,7 @@ ar_test_support(actraiser_rom_decode_test_support
 
 ar_test_support(actraiser_campaign_test_support
     src/randomizer/randomizer_config.c
-    src/host/campaign_identity.c
-    src/save/save_checkpoint.c)
+    src/host/campaign_identity.c)
 
 ar_test_support(actraiser_town_model_test_support
     src/sim/town/sim_town_layout.c
@@ -81,6 +80,7 @@ target_link_libraries(actraiser_cpu_hle_test_support PUBLIC
 # target, as save_editor_test does. Production uses the shipping manifest.
 add_library(actraiser_save_test_support STATIC
     src/save/save_system.c src/save/save_paths.c
+    src/save/save_checkpoint.c src/save/save_name.c
     src/host/atomic_replace.c)
 target_include_directories(actraiser_save_test_support PUBLIC
     ${CMAKE_SOURCE_DIR}/src)

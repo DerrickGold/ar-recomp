@@ -1,3 +1,4 @@
+#include "support/regional_save_fixture.h"
 #include "support/regional_test_values.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/actraiser_miracle.h"
@@ -719,7 +720,7 @@ static void Install(const char *path, uint8_t *image, ArRegionalSource source) {
   SaveError error = {{0}};
   assert(ArRegionalCosts_Init(&policy, source));
   assert(ArRegionalSession_NewGame(&session, 0, id, &policy));
-  assert(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+  assert(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   assert(SaveSystem_LoadActive(&error));
 }
 static void CheckProfilePreview(void) {

@@ -1,3 +1,4 @@
+#include "support/regional_save_fixture.h"
 #include "support/regional_test_values.h"
 /* Frozen payloads, schema compatibility and malformed-payload rejection. */
 #include "regional_session_test.h"
@@ -48,7 +49,7 @@ static void CheckFeatureCodec(void) {
   initial_motion.source[0] = 0;
   initial_motion.source[8] = 1;
   CHECK(ArRegionalSession_RequestActionMotion(&session, session.revision, &initial_motion));
-  CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, NULL, image, &error));
+  CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, NULL, image, &error));
   uint8_t original[kSaveCheckpointPayloadMax], mutated[kSaveCheckpointPayloadMax];
   size_t size = 0;
   CHECK(SaveCheckpoint_Read(path, image, original, sizeof(original), &size, &error) ==
@@ -101,7 +102,7 @@ static void CheckFeatureCodec(void) {
     loaded = session;
     CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == expected);
     CHECK(RegionalSessionTest_Equal(&loaded, &session));
-    CHECK(!ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+    CHECK(!TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   }
   /* Reordering valid named fields is supported; they are not enum ordinals. */
   enum {
@@ -361,7 +362,7 @@ static void CheckFeatureCodec(void) {
     CHECK(loaded.effective.score_feedback.source[i] == session.effective.score_feedback.source[i]);
   }
   CHECK(!memcmp(loaded.lairs.stock, session.lairs.stock, sizeof(session.lairs.stock)));
-  CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+  CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   const size_t v17_bytes = offsets[62];
   memcpy(mutated, original, v17_bytes);
   ByteOrder_WriteLe16(mutated + 8, 17);
@@ -942,14 +943,14 @@ static void CheckFeatureCodec(void) {
       policy.source[area] = source;
       CHECK(ArRegionalSession_RequestActorArtwork(&session, session.revision, &policy));
       CHECK(
-          ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+          TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
       CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready &&
             RegionalSessionTest_Equal(&loaded, &session));
       bool enabled;
       CHECK(ArRegionalSession_BeginActorArtwork(&session, area, &enabled) &&
             enabled == (source == 1));
       CHECK(
-          ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+          TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
       CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready &&
             RegionalSessionTest_Equal(&loaded, &session));
     }
@@ -971,7 +972,7 @@ static void CheckFeatureCodec(void) {
       CHECK(!ArRegionalSession_RequestSequences(&session, session.revision - 1, &policy));
       CHECK(ArRegionalSession_RequestSequences(&session, session.revision, &policy));
       CHECK(
-          ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+          TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
       CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready &&
             RegionalSessionTest_Equal(&loaded, &session));
       const ArRegionalSource previous = session.effective.sequences.source[1];
@@ -1013,7 +1014,7 @@ static void CheckFeatureCodec(void) {
       CHECK(!ArRegionalSession_RequestPoses(&session, session.revision - 1, &policy));
       CHECK(ArRegionalSession_RequestPoses(&session, session.revision, &policy));
       CHECK(
-          ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+          TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
       CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready &&
             RegionalSessionTest_Equal(&loaded, &session));
       CHECK(ArRegionalSession_BeginPoses(&session, &poses) &&
@@ -1064,7 +1065,7 @@ static void CheckFeatureCodec(void) {
   CHECK(!session.effective.artwork.source[0] && !ArRegionalSession_BeginArtwork(&session, NULL));
   CHECK(ArRegionalSession_BeginArtwork(&session, &art) && art == 1);
   CHECK(ArRegionalSession_RequestArtwork(&session, session.revision, 0, 2));
-  CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+  CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready);
   CHECK(loaded.requested.artwork.source[0] == 2 && loaded.effective.artwork.source[0] == 1);
   ArRegionalSession art_exhausted = session;
@@ -1074,7 +1075,7 @@ static void CheckFeatureCodec(void) {
   CHECK(ArRegionalSession_RequestArtwork(&session, session.revision, 1, 2));
   CHECK(ArRegionalSession_BeginArtwork(&session, &art) && art == 2);
   CHECK(ArRegionalSession_RequestArtwork(&session, session.revision, 1, 0));
-  CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+  CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready);
   CHECK(!loaded.requested.artwork.source[1] && loaded.effective.artwork.source[1] == 2);
   for (unsigned rule = 2; rule < 5; ++rule) {
@@ -1084,7 +1085,7 @@ static void CheckFeatureCodec(void) {
     CHECK(ArRegionalSession_BeginTownArtwork(&session, &art) && art == (1u << rule));
     CHECK(session.effective.artwork.source[rule] == 1);
     CHECK(ArRegionalSession_RequestArtwork(&session, session.revision, rule, 2));
-    CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+    CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
     CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready);
     CHECK(loaded.requested.artwork.source[rule] == 2 && loaded.effective.artwork.source[rule] == 1);
     ArRegionalSession exhausted = session;
@@ -1102,7 +1103,7 @@ static void CheckFeatureCodec(void) {
   CHECK(ArRegionalSession_BeginMosaic(&session, &mosaic) && mosaic == 1);
   CHECK(ArRegionalSession_RequestMosaic(&session, session.revision, 2));
   CHECK(session.effective.mosaic == 1);
-  CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+  CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready);
   CHECK(loaded.requested.mosaic == 2 && loaded.effective.mosaic == 1);
   ArRegionalSession mosaic_exhausted = session;
@@ -1132,7 +1133,7 @@ static void CheckFeatureCodec(void) {
   CHECK(placement_snapshot.enemies == 2 && placement_snapshot.pickups == 1);
   placements = (ArRegionalPlacementPolicy){1, 2};
   CHECK(ArRegionalSession_RequestPlacements(&session, session.revision, &placements));
-  CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+  CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready);
   CHECK(loaded.requested.placements.enemies == 1 && loaded.requested.placements.pickups == 2);
   CHECK(loaded.effective.placements.enemies == 2 && loaded.effective.placements.pickups == 1);
@@ -1319,7 +1320,7 @@ static void CheckFeatureCodec(void) {
   CHECK(ArRegionalSession_BeginSources(&session, &sources_snapshot));
   sources.source[1] = kArRegionalSource_Japan;
   CHECK(ArRegionalSession_RequestSources(&session, session.revision, &sources));
-  CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+  CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   CHECK(ArRegionalSession_Load(&loaded, 2, path, image, &error) == kSaveCheckpoint_Ready);
   CHECK(RegionalSessionTest_Equal(&loaded, &session));
   remove(path);
@@ -1342,7 +1343,7 @@ static void CheckRandomizerRecipe(void) {
   session.randomizer.enabled = true;
   session.randomizer.seed = 987654321;
   session.randomizer.regional_action = true;
-  CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, NULL, image, &error));
+  CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, NULL, image, &error));
   uint8_t payload[kSaveCheckpointPayloadMax], mutated[kSaveCheckpointPayloadMax];
   size_t size = 0;
   CHECK(SaveCheckpoint_Read(path, image, payload, sizeof(payload), &size, &error) ==
@@ -1364,7 +1365,7 @@ static void CheckRandomizerRecipe(void) {
     CHECK(status == (bad == 0 ? kSaveCheckpoint_Unsupported : kSaveCheckpoint_Invalid));
     CHECK(!memcmp(&loaded, &before, sizeof(loaded)));
     /* A newer/corrupt bound recipe must not be rotated away by a normal save. */
-    CHECK(!ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
+    CHECK(!TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, image, image, &error));
   }
   remove(path);
   remove(companion);
@@ -1408,7 +1409,7 @@ static void CheckCodecGolden(void) {
     session.requested.difficulty.level = fixture / 3;
     session.effective.difficulty.level = fixture % 3;
     SaveError error;
-    CHECK(ArRegionalSession_Save(&session, kSaveFileFormat_NativeSrm, path, fixture ? image : NULL,
+    CHECK(TestRegional_Save(&session, kSaveFileFormat_NativeSrm, path, fixture ? image : NULL,
                                  image, &error));
     uint8_t payload[kSaveCheckpointPayloadMax];
     size_t size = 0;

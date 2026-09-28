@@ -384,25 +384,13 @@ SaveCheckpointStatus ArRegionalSession_Load(ArRegionalSession *session, uint32_t
   return kSaveCheckpoint_Ready;
 }
 
-static SaveCheckpointStatus ValidatePayload(const uint8_t *payload, size_t size, void *context) {
-  ArRegionalSession decoded;
-  SaveCheckpointStatus status = Decode(payload, size, &decoded);
-  if (status == kSaveCheckpoint_Ready && decoded.slot != *(const uint32_t *)context)
-    return kSaveCheckpoint_Mismatch;
-  return status;
-}
-
-bool ArRegionalSession_Save(const ArRegionalSession *session, SaveFileFormat format,
-                            const char *path, const uint8_t *expected, const uint8_t *image,
-                            SaveError *error) {
+bool ArRegionalSession_SaveActiveMetadata(const ArRegionalSession *session,
+                                           const uint8_t *expected, SaveError *error) {
   uint8_t payload[kPayloadCapacity];
   size_t size;
-  if (error) error->message[0] = 0;
   if (!Encode(session, payload, &size)) {
     if (error) snprintf(error->message, sizeof(error->message), "invalid regional rules session");
     return false;
   }
-  uint32_t slot = session->slot;
-  return SaveCheckpoint_Commit(format, path, expected, image, payload, size, ValidatePayload, &slot,
-                               error);
+  return SaveSystem_UpdateMetadata(expected, payload, size, error);
 }

@@ -64,6 +64,9 @@ bool ArRegionalCampaign_AcknowledgeLairHistory(ArRegionalCampaign *campaign,
   if (error) error->message[0] = 0;
   if (!campaign) return Fail(error, "no campaign owner for history acknowledgement");
   campaign->active_valid = false;
+  if (format != (SaveFileFormat)SaveSystem_ActiveBackend() ||
+      !path || strcmp(path, SaveSystem_ActivePath()))
+    return Fail(error, "history acknowledgement must use the active save owner");
   if (!path || !image || !remaining || !Save_ChecksumValid(image) || campaign->pending_valid)
     return Fail(error, "no unchanged durable save for history acknowledgement");
   ArRegionalSession next;
@@ -87,7 +90,7 @@ bool ArRegionalCampaign_AcknowledgeLairHistory(ArRegionalCampaign *campaign,
       }
     }
   }
-  if (changed && !ArRegionalSession_Save(&next, format, path, image, image, error)) return false;
+  if (changed && !ArRegionalSession_SaveActiveMetadata(&next, image, error)) return false;
   campaign->active = next;
   campaign->active_valid = true;
   return true;
@@ -105,6 +108,9 @@ static bool Prepare(void *context, SaveError *error) {
 bool ArRegionalCampaign_SaveSettings(const ArRegionalSession *before,
     const ArRegionalSession *after, SaveFileFormat format, const char *path,
     const uint8_t *image, SaveError *error) {
+  if (format != (SaveFileFormat)SaveSystem_ActiveBackend() ||
+      !path || strcmp(path, SaveSystem_ActivePath()))
+    return Fail(error, "regional settings must use the active save owner");
   if (!before || !after || before->slot != after->slot ||
       memcmp(before->campaign, after->campaign, sizeof(before->campaign)))
     return Fail(error, "regional settings belong to a different campaign");
@@ -120,12 +126,12 @@ bool ArRegionalCampaign_SaveSettings(const ArRegionalSession *before,
     return Fail(error, "saved campaign changed; reload it before editing regional settings");
   if (!ArRegionalSession_RequestRules(&saved, saved.revision, &after->requested))
     return Fail(error, "these rules require saved history or a confirmed town redevelopment");
-  return ArRegionalSession_Save(&saved, format, path, image, image, error);
+  return ArRegionalSession_SaveActiveMetadata(&saved, image, error);
 }
 
-static bool Commit(void *context, SaveFileFormat format, const char *path,
-    const uint8_t *expected, const uint8_t *image, SaveCommitKind kind,
-    const SaveImportSource *import_source, SaveError *error) {
+static bool Build(void *context, const char *path, const uint8_t *expected,
+    const uint8_t *image, SaveCommitKind kind, const SaveImportSource *import_source,
+    void *payload, size_t capacity, size_t *size, SaveError *error) {
   ArRegionalCampaign *campaign = context;
   if (!campaign) return Fail(error, "missing regional campaign owner");
   ArRegionalSession session;
@@ -161,9 +167,8 @@ static bool Commit(void *context, SaveFileFormat format, const char *path,
       if (!Create(campaign, &baseline, &session, error)) return false;
     }
   }
-  if (!ArRegionalSession_Save(&session, format, path, expected, image, error)) return false;
-  if (kind == kSaveCommit_Story) campaign->pending_valid = false;
-  return true;
+  return ArRegionalSession_Encode(&session, payload, capacity, size) ||
+      Fail(error, "cannot encode campaign snapshot");
 }
 
 static void Reloaded(void *context) {
@@ -171,40 +176,24 @@ static void Reloaded(void *context) {
   campaign->active_valid = campaign->pending_valid = false;
 }
 
-static bool CopyRecovery(void *context, const char *source_path,
-    const char *destination_path, const uint8_t *image, SaveError *error) {
+static bool Validate(void *context, const void *payload, size_t size, SaveError *error) {
   const ArRegionalCampaign *campaign = context;
-  if (!campaign) return Fail(error, "missing regional recovery owner");
-  ArRegionalSession saved;
-  const SaveCheckpointStatus status =
-      ArRegionalSession_Load(&saved, campaign->slot, source_path, image, error);
-  /* Preserve a genuinely legacy save as legacy. Never manufacture a new
-   * campaign identity or copy settings from an unsaved active campaign. */
-  if (status == kSaveCheckpoint_Missing)
-    return Save_WriteFile(kSaveFileFormat_NativeSrm, destination_path, image, error);
-  if (status != kSaveCheckpoint_Ready) return false;
-  return ArRegionalSession_Save(&saved, kSaveFileFormat_NativeSrm,
-                                destination_path, NULL, image, error);
+  ArRegionalSession decoded;
+  return (campaign && ArRegionalSession_Decode(payload, size, &decoded) == kSaveCheckpoint_Ready &&
+          decoded.slot == campaign->slot) || Fail(error, "invalid campaign snapshot payload");
 }
 
-static bool ReadCampaign(void *context,const char *path,const uint8_t *image,
-    void *payload,size_t capacity,size_t *size,SaveError *error) {
-  const ArRegionalCampaign *campaign=context;
-  ArRegionalSession session;
-  SaveCheckpointStatus status=ArRegionalSession_Load(&session,campaign->slot,path,image,error);
-  if(status==kSaveCheckpoint_Missing){*size=0;return true;}
-  if(status!=kSaveCheckpoint_Ready)return false;
-  if (!ArRegionalSession_Encode(&session, payload, capacity, size))
-    return Fail(error, "cannot archive campaign metadata");
-  return true;
+static void Committed(void *context, SaveCommitKind kind) {
+  ArRegionalCampaign *campaign = context;
+  if (kind == kSaveCommit_Story) campaign->pending_valid = false;
 }
 
 SaveCommitHost ArRegionalCampaign_SaveHost(ArRegionalCampaign *campaign) {
   if (!campaign) return (SaveCommitHost){0};
   return (SaveCommitHost){ .context = campaign,
                            .prepare_story = Prepare,
-                           .commit = Commit,
-                           .reloaded = Reloaded,
-                           .read_campaign = ReadCampaign,
-                           .copy_recovery = CopyRecovery };
+                           .build = Build,
+                           .validate = Validate,
+                           .committed = Committed,
+                           .reloaded = Reloaded };
 }

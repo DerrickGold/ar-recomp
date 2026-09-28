@@ -30,7 +30,8 @@ void SaveEditRequest_Clear(SaveEditRequest *edits) {
 
 bool SaveSystem_ApplyEdits(const SaveEditRequest *edits, bool armed, bool persist, bool auto_backup,
                            SaveError *error) {
-  (void)error;
+  if (!s_success && error)
+    snprintf(error->message, sizeof(error->message), "Save fixture rejected the edit.");
   s_apply_calls++;
   s_applied = *edits;
   s_armed = armed;
@@ -236,9 +237,54 @@ static void TestPickedFiles(void) {
   CHECK(s_import_calls == imports + 1 && s_export_calls == exports + 3);
 }
 
+static void TestConfirmedEdits(void) {
+  Settings draft = {.save_master_level = 17, .save_autobackup = true};
+  SaveError error = {{0}};
+  int calls = s_apply_calls;
+  s_success = true;
+  const SettingAction actions[] = {kSettingAction_SaveApplySession,
+                                   kSettingAction_SaveApplyPersist,
+                                   kSettingAction_SaveApplyRestart};
+  for (unsigned i = 0; i < 3; ++i) {
+    const SaveEditorActionResult expected = i == 2 ? kSaveEditorAction_RestartRequired
+                                                   : kSaveEditorAction_Completed;
+    CHECK(SaveEditor_ApplyConfirmedEdits(actions[i], &draft, &error) == expected);
+    CHECK(s_apply_calls == ++calls && s_armed && s_persist == (i != 0) && s_backup);
+    CHECK(s_applied.master_level == 17 && !draft.save_edit_armed && !error.message[0]);
+  }
+  s_success = false;
+  CHECK(SaveEditor_ApplyConfirmedEdits(kSettingAction_SaveApplyPersist, &draft, &error) ==
+        kSaveEditorAction_Failed);
+  CHECK(s_apply_calls == ++calls && !strcmp(error.message, "Save fixture rejected the edit."));
+  CHECK(SaveEditor_ApplyConfirmedEdits(kSettingAction_SaveApplyRestart, &draft, &error) ==
+        kSaveEditorAction_Failed);
+  CHECK(s_apply_calls == ++calls && !strcmp(error.message, "Save fixture rejected the edit."));
+  CHECK(SaveEditor_HandleAction(kSettingAction_SaveApplyRestart, &draft) ==
+        kSaveEditorAction_Failed);
+  CHECK(s_apply_calls == ++calls && !s_armed && s_persist);
+  s_success = true;
+  draft.save_edit_armed = true;
+  CHECK(SaveEditor_HandleAction(kSettingAction_SaveApplyRestart, &draft) ==
+        kSaveEditorAction_RestartRequired);
+  CHECK(s_apply_calls == ++calls && s_armed && s_persist);
+  CHECK(SaveEditor_ApplyConfirmedEdits(kSettingAction_SaveImport, &draft, &error) ==
+        kSaveEditorAction_Failed);
+  CHECK(error.message[0] && s_apply_calls == calls);
+  CHECK(SaveEditor_ApplyConfirmedEdits(kSettingAction_SaveApplyPersist, NULL, &error) ==
+        kSaveEditorAction_Failed);
+  draft = (Settings){0};
+  CHECK(SaveEditor_ApplyConfirmedEdits(kSettingAction_SaveApplyPersist, &draft, &error) ==
+        kSaveEditorAction_Failed);
+  CHECK(strstr(error.message, "Choose at least one") && s_apply_calls == calls);
+  CHECK(SaveEditor_ApplyConfirmedEdits(kSettingAction_SaveApplyRestart, &draft, &error) ==
+        kSaveEditorAction_Failed);
+  CHECK(s_apply_calls == calls);
+}
+
 int main(void) {
   TestStagedValues();
   TestActions();
   TestPickedFiles();
+  TestConfirmedEdits();
   return s_failures ? 1 : 0;
 }

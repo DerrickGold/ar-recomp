@@ -47,5 +47,7 @@ typedef struct SettingsOverlaySaveSlotHooks {
   SaveFileDialogResult (*poll_file)(char *path, size_t capacity, SaveError *error);
   void (*cancel_file)(void);
   bool (*file_action)(SettingAction action, const char *path, SaveError *error);
+  /* Called only after the active slot and its fingerprint were confirmed. */
+  bool (*apply_edits)(SettingAction action, SaveError *error);
 } SettingsOverlaySaveSlotHooks;
 #endif

@@ -124,9 +124,10 @@ const char *SaveSlotMenu_EditorTitle(void) {
   return title;
 }
 bool SaveSlotMenu_EditorRowVisible(const SettingDesc *desc) {
-  /* Back already returns to the visible slot list. Do not offer a second
-   * "Slots" command inside its own Advanced submenu. */
-  return !s_slots.advanced || desc->action != kSettingAction_SaveSlots;
+  /* Back returns to the slot list. The reviewed Apply confirmation authorizes
+   * managed-slot edits; the global safety switch belongs to diagnostic saves. */
+  return !s_slots.advanced || (desc->action != kSettingAction_SaveSlots &&
+                               desc->field != &g_settings.save_edit_armed);
 }
 static void SlotConfirmEditor(const SettingDesc *desc) {
   char number[16];
@@ -139,12 +140,14 @@ static void SlotConfirmEditor(const SettingDesc *desc) {
   s_slots.decision = (SlotDecision){.result = kOverlayDecision_Pending, .body_text = true};
   ArUiCatalog_Format(s_slots.decision.title, sizeof(s_slots.decision.title),
                      Ui("slots.advanced.confirm"), args, 3);
+  const bool importing = desc->action == kSettingAction_SaveImport;
+  const bool restarting = desc->action == kSettingAction_SaveApplyRestart;
   snprintf(s_slots.decision.body, sizeof(s_slots.decision.body), "%s",
-           Ui(desc->action == kSettingAction_SaveImport ? "slots.advanced.import"
-                                                        : "slots.advanced.edit"));
+           Ui(importing ? "slots.advanced.import"
+              : restarting ? "slots.advanced.edit_restart" : "slots.advanced.edit"));
   snprintf(s_slots.decision.accept, sizeof(s_slots.decision.accept), "%s",
-           desc->action == kSettingAction_SaveImport ? "slots.advanced.replace"
-                                                     : "slots.advanced.apply");
+           importing ? "slots.advanced.replace"
+           : restarting ? "setting.save_apply_restart.label" : "slots.advanced.apply");
   if (s_slots.file_path[0]) {
     size_t used = strlen(s_slots.decision.body);
     snprintf(s_slots.decision.body + used, sizeof(s_slots.decision.body) - used, "\n\n%s",
@@ -198,10 +201,11 @@ static void SlotExecuteEditor(const SettingDesc *action) {
   const bool file = SlotIsFileAction(action->action);
   bool success = file ? s_slot_hooks.file_action &&
                            s_slot_hooks.file_action(action->action, s_slots.file_path, &error)
-                      : Settings_InvokeAction(action);
+                      : s_slot_hooks.apply_edits &&
+                            s_slot_hooks.apply_edits(action->action, &error);
   if (!SettingsOverlay_IsOpen()) return;
   (void)SlotScanCollection();
-  if (file) {
+  if (file || !success) {
     char message[2048];
     snprintf(message, sizeof(message), "%s\n\n%s",
               Ui(!success ? "overlay.status.action_failed"
@@ -218,6 +222,7 @@ static void SlotExecuteEditor(const SettingDesc *action) {
 bool SaveSlotMenu_ConfirmEditorAction(const SettingDesc *desc) {
   const bool file = SlotIsFileAction(desc->action);
   if (!s_slots.advanced || (!file && desc->action != kSettingAction_SaveApplyPersist &&
+                                     desc->action != kSettingAction_SaveApplyRestart &&
                                      desc->action != kSettingAction_SaveApplySession))
     return false;
   s_slots.file_path[0] = 0;

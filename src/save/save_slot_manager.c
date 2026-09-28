@@ -51,7 +51,8 @@ bool SaveSlotManager_Inspect(const SaveSlots *s,unsigned slot,SaveSlotDetails *o
   SaveCheckpointStatus status =
       ArRegionalSession_Load(&session, slot, inspection.path, inspection.image, &out->error);
   if(status==kSaveCheckpoint_Missing) {
-    if(s->records[slot].checkpoint_required) {
+    if(s->records[slot].checkpoint_required &&
+        !SaveCheckpoint_IsLegacySnapshot(inspection.path, inspection.image)) {
       snprintf(out->error.message, sizeof(out->error.message),
                "The required campaign checkpoint is missing. Restore it before loading.");
       return false;

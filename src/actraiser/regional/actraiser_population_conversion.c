@@ -169,6 +169,5 @@ ActRaiserPopulationResult ActRaiserPopulation_Commit(CpuState *cpu,
     Backup(cpu, &undo, true);
     return kActRaiserPopulation_RolledBack;
   }
-  return result == kSaveStorySnapshot_NamePending ? kActRaiserPopulation_NamePending
-                                                  : kActRaiserPopulation_Committed;
+  return kActRaiserPopulation_Committed;
 }
