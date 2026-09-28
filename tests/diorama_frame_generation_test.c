@@ -1,3 +1,4 @@
+#include <math.h>
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -205,6 +206,10 @@ int main(void) {
       &render_device, &slot, 0.5f, raw,
       1u << kDioramaPlane_Backdrop, resolved);
   CHECK(generated == (1u << kDioramaPlane_Backdrop));
+  ArRenderPointF offset = DioramaFrameGeneration_PlaneOffset(kDioramaPlane_Backdrop);
+  CHECK(fabsf(offset.x+1) < .001f && fabsf(offset.y) < .001f);
+  CHECK(DioramaFrameGeneration_PlaneOffset(SR_PPU_OVERLAY_BG1).x == 0);
+  CHECK(DioramaFrameGeneration_PlaneOffset(-1).x == 0);
   CHECK(!ArRenderTexture_Equals(
       resolved[kDioramaPlane_Backdrop], raw[kDioramaPlane_Backdrop]));
 
@@ -274,10 +279,26 @@ int main(void) {
     SDL_DestroySurface(readback);
   }
 
+  /* Both endpoint owners publish the same current-capture-to-image motion.
+   * A multi-tick pair uses the same phase mapping as texture generation. */
+  const float phases[] = {.25f,.75f};
+  for (unsigned i = 0; i < 2; i++) {
+    CHECK(DioramaFrameGeneration_Prepare(&render_device,&slot,phases[i],raw,
+        1u << kDioramaPlane_Backdrop,resolved) == (1u << kDioramaPlane_Backdrop));
+    offset = DioramaFrameGeneration_PlaneOffset(kDioramaPlane_Backdrop);
+    CHECK(fabsf(offset.x+2*(1-phases[i])) < .001f && fabsf(offset.y) < .001f);
+  }
+  slot.capture_ticks = 2;
+  CHECK(DioramaFrameGeneration_Prepare(&render_device,&slot,.5f,raw,
+      1u << kDioramaPlane_Backdrop,resolved) == (1u << kDioramaPlane_Backdrop));
+  CHECK(fabsf(DioramaFrameGeneration_PlaneOffset(kDioramaPlane_Backdrop).x+.5f) < .001f);
+  slot.capture_ticks = 1;
+
   memset(resolved, 0, sizeof(resolved));
   CHECK(DioramaFrameGeneration_Prepare(
       &render_device, &slot, kPresentationFrameGenerationPhaseNone, raw,
       1u << kDioramaPlane_Backdrop, resolved) == 0);
+  CHECK(DioramaFrameGeneration_PlaneOffset(kDioramaPlane_Backdrop).x == 0);
   CHECK(ArRenderTexture_Equals(
       resolved[kDioramaPlane_Backdrop], raw[kDioramaPlane_Backdrop]));
 

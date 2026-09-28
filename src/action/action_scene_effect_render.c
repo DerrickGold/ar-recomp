@@ -2095,6 +2095,10 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
                                  ActionEffectProjectPointFn project_point,
                                  ActionEffectClipBoundsFn clip_bounds, void *userdata) {
   switch (effect->kind) {
+  case kActionEffect_BloodpoolWater:
+  case kActionEffect_BloodpoolMist:
+  case kActionEffect_BloodpoolMoonReflection:
+    return AppendBloodpoolEnvironment(writer, effect, project_point, clip_bounds, userdata);
   case kActionEffect_CaveMist:
   case kActionEffect_TempleGrit:
   case kActionEffect_TempleGroundMist:
@@ -2230,6 +2234,42 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
 static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
   if (!effect) return false;
   switch (effect->kind) {
+    case kActionEffect_CastleWater:
+      return effect->phase == kActionEffectPhase_CastleEnvironment && effect->visual == 5 &&
+          effect->render_layer == kActionEffectRenderLayer_Bg1Plane &&
+          effect->projection_plane == kActionEffectProjectionPlane_Bg1;
+    case kActionEffect_CastleLight:
+    case kActionEffect_CastleSky:
+    case kActionEffect_CastleMist:
+      return effect->phase == kActionEffectPhase_CastleEnvironment &&
+          effect->visual >= 2 && effect->visual <= 8 &&
+          effect->render_layer == (effect->kind == kActionEffect_CastleLight ?
+              kActionEffectRenderLayer_Bg1Plane : effect->kind == kActionEffect_CastleSky ?
+              kActionEffectRenderLayer_Bg2Plane : kActionEffectRenderLayer_Bg1Mist) &&
+          effect->projection_plane == (effect->kind == kActionEffect_CastleSky ?
+              kActionEffectProjectionPlane_Bg2 : kActionEffectProjectionPlane_Bg1);
+    case kActionEffect_BloodpoolTimber:
+    case kActionEffect_BloodpoolAir:
+    case kActionEffect_BloodpoolCloud:
+      return effect->phase == kActionEffectPhase_BloodpoolEnvironment && effect->visual == 1 &&
+          effect->render_layer == (effect->kind == kActionEffect_BloodpoolTimber ?
+              kActionEffectRenderLayer_Bg1Plane : effect->kind == kActionEffect_BloodpoolAir ?
+              kActionEffectRenderLayer_Bg2HighAlpha : kActionEffectRenderLayer_Bg2Alpha) &&
+          effect->projection_plane == (effect->kind == kActionEffect_BloodpoolCloud ?
+              kActionEffectProjectionPlane_Bg2 : kActionEffectProjectionPlane_Bg1);
+    case kActionEffect_BloodpoolMoonlight:
+    case kActionEffect_BloodpoolMoonReflection:
+      return effect->phase == kActionEffectPhase_BloodpoolEnvironment && effect->visual == 1 &&
+          effect->render_layer == kActionEffectRenderLayer_Bg2Plane &&
+          effect->projection_plane == kActionEffectProjectionPlane_Bg2;
+    case kActionEffect_BloodpoolWater:
+    case kActionEffect_BloodpoolMist:
+      return effect->phase == kActionEffectPhase_BloodpoolEnvironment && effect->visual == 1 &&
+          effect->render_layer == (effect->kind == kActionEffect_BloodpoolWater ?
+              kActionEffectRenderLayer_Bg1HighPlane :
+              kActionEffectRenderLayer_Bg2HighAlpha) &&
+          effect->projection_plane == (effect->kind == kActionEffect_BloodpoolWater ?
+              kActionEffectProjectionPlane_Bg1High : kActionEffectProjectionPlane_Bg1);
     case kActionEffect_LandingDust:
       return effect->phase == kActionEffectPhase_CaveEnvironment &&
           effect->visual >= 1 && effect->visual <= 3 &&
@@ -2281,7 +2321,7 @@ static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
           effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds;
     case kActionEffect_ForestLeaves:
       return effect->phase == kActionEffectPhase_ForestCanopyLight &&
-          effect->render_layer == kActionEffectRenderLayer_Bg2Foliage &&
+          effect->render_layer == kActionEffectRenderLayer_Bg2Alpha &&
           effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds;
     case kActionEffect_ForestCanopyLight:
       return effect->phase == kActionEffectPhase_ForestCanopyLight &&
@@ -2380,6 +2420,8 @@ static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
 
 static bool BuildSceneEffectList(
     const ActionEffectInstance *effects, uint8_t effect_count,
+    const ActionMoonlightOcclusion *moonlight,
+    const ActionBloodpoolDetails *bloodpool,
     uint8_t capacity, bool overflow, uint8_t render_layer,
     bool lighting_enabled, bool particles_enabled,
     ActionEffectProjectPointFn project_point, ActionEffectClipBoundsFn clip_bounds,
@@ -2409,6 +2451,8 @@ static bool BuildSceneEffectList(
   unsigned flaming_wheels = 0;
   unsigned forest_rays = 0;
   unsigned cave_fields = 0;
+  unsigned bloodpool_fields = 0;
+  unsigned castle_fields = 0;
   unsigned landing_puffs = 0;
   unsigned temple_mist_spans = 0;
 
@@ -2469,6 +2513,19 @@ static bool BuildSceneEffectList(
       if (cave_fields & bit) return false;
       cave_fields |= bit;
     }
+    if (effect->kind >= kActionEffect_CastleLight && effect->kind <= kActionEffect_CastleWater) {
+      const unsigned bit = 1u << (effect->kind-kActionEffect_CastleLight);
+      if (castle_fields&bit) return false;
+      castle_fields |= bit;
+      if (!AppendCastleEnvironment(&writer,effect,lighting_enabled,particles_enabled,
+              project_point,clip_bounds,project_userdata)) return false;
+    }
+    if (effect->kind >= kActionEffect_BloodpoolWater &&
+        effect->kind <= kActionEffect_BloodpoolCloud) {
+      const unsigned bit = 1u << (effect->kind - kActionEffect_BloodpoolWater);
+      if (bloodpool_fields & bit) return false;
+      bloodpool_fields |= bit;
+    }
     if (effect->kind == kActionEffect_LandingDust &&
         ++landing_puffs > kActionLandingDustMaxPuffs)
       return false;
@@ -2477,6 +2534,36 @@ static bool BuildSceneEffectList(
       for (unsigned j = 0; j < i; j++)
         if (effects[j].kind == effect->kind && effects[j].generation == effect->generation)
           return false;
+    }
+    if (lighting_enabled &&
+        effect->kind == kActionEffect_BloodpoolMoonlight &&
+        !AppendBloodpoolMoonlight(&writer,effect,moonlight,&batch->moonlight,project_point,
+            clip_bounds,project_userdata))
+      return false;
+    if (effect->kind >= kActionEffect_BloodpoolWater &&
+        effect->kind <= kActionEffect_BloodpoolCloud) {
+      const ActionEffectInstance *moon = NULL;
+      for (unsigned j = 0; j < effect_count; j++) {
+        if (effects[j].kind != kActionEffect_BloodpoolMoonlight ||
+            !(effects[j].flags & kActionEffectFlag_Visible) ||
+            effects[j].geometry.kind != kActionEffectGeometry_Rect ||
+            !RectIsSane(&effects[j].geometry.data.rect) ||
+            !SceneEffectStyleKnown(&effects[j])) continue;
+        if (moon) return false;
+        moon = &effects[j];
+      }
+      if (lighting_enabled && effect->kind == kActionEffect_BloodpoolWater &&
+          !AppendBloodpoolWaterMoonlight(&writer,effect,moon,moonlight,&batch->moonlight,
+              project_point,clip_bounds,project_userdata)) return false;
+      if (lighting_enabled && effect->kind == kActionEffect_BloodpoolTimber &&
+          !AppendBloodpoolTimberMoonlight(&writer,effect,moon,bloodpool,moonlight,&batch->moonlight,
+              project_point,clip_bounds,project_userdata)) return false;
+      if (lighting_enabled && effect->kind == kActionEffect_BloodpoolCloud &&
+          !AppendBloodpoolCloud(&writer,effect,project_point,clip_bounds,project_userdata))
+        return false;
+      if (particles_enabled &&
+          !AppendBloodpoolDetailParticles(&writer,effect,moon,bloodpool,
+              project_point,clip_bounds,project_userdata)) return false;
     }
     if (lighting_enabled &&
         !AppendSceneLighting(&writer, effect, project_point, clip_bounds,
@@ -2506,7 +2593,7 @@ bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
     return false;
   }
   return BuildSceneEffectList(
-      frame->effects, frame->effect_count, kActionSceneEffectMaxInstances,
+      frame->effects, frame->effect_count, NULL, NULL, kActionSceneEffectMaxInstances,
       frame->overflow, kActionEffectRenderLayer_WorldOverlay,
       lighting_enabled, particles_enabled, project_point, NULL, project_userdata,
       batch);
@@ -2526,7 +2613,7 @@ bool ActionSceneDecorationRender_Build(
     return false;
   }
   return BuildSceneEffectList(
-      frame->decorations, frame->decoration_count,
+      frame->decorations, frame->decoration_count, &frame->moonlight, &frame->bloodpool,
       kActionSceneDecorationMaxInstances, frame->decoration_overflow,
       render_layer, lighting_enabled, particles_enabled, project_point, clip_bounds,
       project_userdata, batch);

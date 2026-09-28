@@ -386,9 +386,10 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
         ActRaiser_SetPpuOverlayCapture(
             SR_PPU_OVERLAY_BG1, -g_ws_extra, 0, width,
             kActRaiserAuthenticHeight,
-            /* Temple grading must see the stone behind extracted HUD glyphs.
-             * Other rooms retain owning-screen masks for subscreen BG1. */
-            map_group == kActRaiserMapGroup_Fillmore && map_number == 3
+            /* These rooms use main-screen BG1. Reuse packed winners after
+             * HUD extraction; subscreen rooms retain their owning-screen policy. */
+            ((map_group == kActRaiserMapGroup_Fillmore && map_number == 3) ||
+             (map_group == kActRaiserMapGroup_Bloodpool && map_number == 1))
                 ? SR_PPU_OVERLAY_MARK_VISIBLE_MAIN_WINNER
                 : SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER);
       }

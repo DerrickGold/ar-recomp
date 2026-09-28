@@ -64,43 +64,57 @@ static bool s_action_bg2_mask_has_alpha;
 static bool s_action_bg2_mask_ready;
 static uint32_t s_action_alpha_mask[kFrameSlotLayerTextureWidth * kFrameSlotAuthenticHeight];
 
-static bool FrameUsesFoliage(const FrameSlot *slot) {
+static bool FrameUsesBg2Alpha(const FrameSlot *slot) {
   if (!slot || !slot->action_environmental_effects ||
       slot->action_scene_effects.decoration_overflow ||
       slot->action_scene_effects.decoration_count > kActionSceneDecorationMaxInstances)
     return false;
-  for (unsigned i = 0; i < slot->action_scene_effects.decoration_count; i++)
-    if (slot->action_scene_effects.decorations[i].render_layer ==
-        kActionEffectRenderLayer_Bg2Foliage)
+  for (unsigned i = 0; i < slot->action_scene_effects.decoration_count; i++) {
+    const unsigned layer = slot->action_scene_effects.decorations[i].render_layer;
+    if (layer == kActionEffectRenderLayer_Bg2Alpha ||
+        layer == kActionEffectRenderLayer_Bg2HighAlpha)
       return true;
+  }
   return false;
 }
 
 static bool FrameUsesAlphaBg2Mask(const FrameSlot *slot) {
-  if (FrameUsesFoliage(slot)) return true;
+  if (FrameUsesBg2Alpha(slot)) return true;
   if (!slot || !slot->action_environmental_effects ||
       slot->action_scene_effects.decoration_overflow ||
       slot->action_scene_effects.decoration_count > kActionSceneDecorationMaxInstances)
     return false;
   for (unsigned i = 0; i < slot->action_scene_effects.decoration_count; i++)
-    if (slot->action_scene_effects.decorations[i].kind == kActionEffect_CaveWater)
+    if (slot->action_scene_effects.decorations[i].kind == kActionEffect_CaveWater ||
+        slot->action_scene_effects.decorations[i].kind == kActionEffect_CastleSky)
       return true;
   return false;
 }
 
 float PresentActionEffects_Bg1Dimming(const FrameSlot *slot) {
   if (!slot || !slot->action_environmental_effects ||
-      slot->diorama_map_group != kActRaiserMapGroup_Fillmore || slot->diorama_map_number != 3 ||
       slot->action_scene_effects.decoration_overflow ||
       slot->action_scene_effects.decoration_count > kActionSceneDecorationMaxInstances)
     return 0;
   for (unsigned i = 0; i < slot->action_scene_effects.decoration_count; i++) {
     const ActionEffectInstance *effect = &slot->action_scene_effects.decorations[i];
-    if (effect->kind == kActionEffect_CaveAmbientLight && effect->visual == 3 &&
+    if (slot->diorama_map_group == kActRaiserMapGroup_Fillmore &&
+        slot->diorama_map_number == 3 &&
+        effect->kind == kActionEffect_CaveAmbientLight && effect->visual == 3 &&
         effect->phase == kActionEffectPhase_CaveEnvironment &&
         effect->render_layer == kActionEffectRenderLayer_ForegroundLight &&
         effect->projection_plane == kActionEffectProjectionPlane_Bg1 &&
         (effect->flags & kActionEffectFlag_Visible)) return .45f;
+    if (slot->diorama_map_group == kActRaiserMapGroup_Bloodpool &&
+        effect->visual == slot->diorama_map_number &&
+        (effect->visual == 3 || effect->visual == 4 || effect->visual == 5 ||
+         effect->visual == 7 || effect->visual == 8) &&
+        effect->kind == kActionEffect_CastleLight &&
+        effect->phase == kActionEffectPhase_CastleEnvironment &&
+        effect->render_layer == kActionEffectRenderLayer_Bg1Plane &&
+        effect->projection_plane == kActionEffectProjectionPlane_Bg1 &&
+        effect->source_mask && (effect->flags & kActionEffectFlag_Visible))
+      return effect->visual == 5 ? .42f : effect->visual == 8 ? .30f : .36f;
   }
   return 0;
 }
@@ -112,7 +126,12 @@ static bool FrameUsesAlphaBg1Mask(const FrameSlot *slot) {
       slot->action_scene_effects.decoration_count > kActionSceneDecorationMaxInstances)
     return false;
   for (unsigned i = 0; i < slot->action_scene_effects.decoration_count; i++)
-    if (slot->action_scene_effects.decorations[i].kind == kActionEffect_CaveSheen ||
+    if (slot->action_scene_effects.decorations[i].kind == kActionEffect_CastleLight ||
+        slot->action_scene_effects.decorations[i].kind == kActionEffect_CastleWater ||
+        slot->action_scene_effects.decorations[i].kind == kActionEffect_CastleMist ||
+        slot->action_scene_effects.decorations[i].kind == kActionEffect_CaveSheen ||
+        slot->action_scene_effects.decorations[i].kind == kActionEffect_BloodpoolWater ||
+        slot->action_scene_effects.decorations[i].kind == kActionEffect_BloodpoolTimber ||
         slot->action_scene_effects.decorations[i].kind == kActionEffect_TempleGroundMist)
       return true;
   return false;
@@ -684,10 +703,21 @@ void PresentActionEffects_DrawDioramaPlane(
     batch.index_count = geometry->index_count;
     (void)EffectRenderer_Submit(device, &batch, kArRenderBlendMode_Alpha);
   }
-  /* Dark foliage follows the light, using the same foreground occlusion. */
+  /* Bloodpool shoreline mist follows the low-priority bank geometry, in
+   * the slot before high-priority water/scenery and subsequent actors. */
+  if (render_layer == kActionEffectRenderLayer_Bg2HighPlane &&
+      ActionSceneDecorationRender_Build(
+          &slot->action_scene_effects, kActionEffectRenderLayer_Bg2HighAlpha, false, true,
+          ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
+          &projection, geometry) && geometry->index_count) {
+    batch.vertex_count = geometry->vertex_count;
+    batch.index_count = geometry->index_count;
+    (void)EffectRenderer_Submit(device, &batch, kArRenderBlendMode_Alpha);
+  }
+  /* Alpha atmosphere follows the light, using the same foreground occlusion. */
   if (render_layer != kActionEffectRenderLayer_Bg2Plane) return;
-  if (FrameUsesFoliage(slot) && ActionSceneDecorationRender_Build(
-          &slot->action_scene_effects, kActionEffectRenderLayer_Bg2Foliage,
+  if (FrameUsesBg2Alpha(slot) && ActionSceneDecorationRender_Build(
+          &slot->action_scene_effects, kActionEffectRenderLayer_Bg2Alpha,
           true, true, ActionEffectProjection_ProjectPoint,
           ActionEffectProjection_ClipBounds, &projection, geometry) &&
       geometry->index_count) {
@@ -776,14 +806,15 @@ static bool DrawAlphaMaskedGeometry(
 static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
     const FrameSlot *slot, ArRenderRectI viewport, uint8_t render_layer,
     bool mask_valid, ArRenderTexture mask_texture, const char *label) {
-  const bool foliage = render_layer == kActionEffectRenderLayer_Bg2Foliage;
+  const bool bg2_alpha = render_layer == kActionEffectRenderLayer_Bg2Alpha ||
+      render_layer == kActionEffectRenderLayer_Bg2HighAlpha;
   const bool mist = render_layer == kActionEffectRenderLayer_Bg1Mist;
   if (mist && (!s_action_bg1_mask_ready || !s_action_bg1_mask_has_alpha)) return true;
-  if ((foliage || render_layer == kActionEffectRenderLayer_Bg2Plane ||
+  if ((bg2_alpha || render_layer == kActionEffectRenderLayer_Bg2Plane ||
        render_layer == kActionEffectRenderLayer_Bg2HighPlane) &&
       !s_action_bg2_mask_ready)
     return true; /* Never reuse stale occlusion after an upload failure. */
-  if (foliage && (!FrameUsesFoliage(slot) || !s_action_bg2_mask_has_alpha)) return true;
+  if (bg2_alpha && (!FrameUsesBg2Alpha(slot) || !s_action_bg2_mask_has_alpha)) return true;
   if (!slot || !slot->action_environmental_effects || !mask_valid ||
       !slot->action_scene_effects.decoration_visible_count ||
       !ArRenderTexture_IsValid(mask_texture) ||
@@ -818,9 +849,9 @@ static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
        render_layer == kActionEffectRenderLayer_Bg1HighPlane);
   if (bg1_alpha && !s_action_bg1_mask_ready) return true;
   if (bg1_alpha || (s_action_bg2_mask_has_alpha &&
-      (foliage || render_layer == kActionEffectRenderLayer_Bg2Plane ||
+      (bg2_alpha || render_layer == kActionEffectRenderLayer_Bg2Plane ||
        render_layer == kActionEffectRenderLayer_Bg2HighPlane))) {
-    if (!DrawAlphaMaskedGeometry(device, slot, viewport, mask_texture, foliage || mist, geometry))
+    if (!DrawAlphaMaskedGeometry(device, slot, viewport, mask_texture, bg2_alpha || mist, geometry))
       DisableActionPlaneEffect(device, "masked geometry submit");
     return true;
   }
@@ -935,9 +966,13 @@ bool PresentActionEffects_DrawFlatPlanes(
       slot->action_bg2_mask_valid, s_action_bg2_mask_texture,
       "BG2-high water decoration") &&
     DrawActionPlaneEffectFlat(
-      device, slot, viewport, kActionEffectRenderLayer_Bg2Foliage,
+      device, slot, viewport, kActionEffectRenderLayer_Bg2Alpha,
       slot->action_bg2_mask_valid, s_action_bg2_mask_texture,
-      "BG2 foliage") &&
+      "BG2 alpha atmosphere") &&
+    DrawActionPlaneEffectFlat(
+      device, slot, viewport, kActionEffectRenderLayer_Bg2HighAlpha,
+      slot->action_bg2_mask_valid, s_action_bg2_mask_texture,
+      "BG2-high lake mist") &&
     DrawActionPlaneEffectFlat(
       device, slot, viewport, kActionEffectRenderLayer_Bg1Mist,
       slot->action_bg1_mask_valid, s_action_bg1_mask_texture,

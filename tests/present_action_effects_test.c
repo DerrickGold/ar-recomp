@@ -433,7 +433,7 @@ static void ForestFoliageComposition(void) {
   };
   frame.action_scene_effects.decorations[1] = frame.action_scene_effects.decorations[0];
   frame.action_scene_effects.decorations[1].kind = kActionEffect_ForestLeaves;
-  frame.action_scene_effects.decorations[1].render_layer = kActionEffectRenderLayer_Bg2Foliage;
+  frame.action_scene_effects.decorations[1].render_layer = kActionEffectRenderLayer_Bg2Alpha;
   memset(pixels, 0xff, sizeof(pixels));
   pixels[0] = 0xff000000u; /* Native non-winning pixel has opaque alpha. */
   assert(PresentActionEffects_UploadMask(&device, SR_PPU_OVERLAY_BG2, &frame,
@@ -803,7 +803,201 @@ static void CaveMaskUploadBudget(void) {
   assert(b.created == b.destroyed);
 }
 
+static void BloodpoolComposition(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b,&device);
+  memset(&frame,0,sizeof(frame));
+  frame.snes_width = frame.snes_height = frame.visible_width = 224;
+  frame.action_environmental_effects = true;
+  frame.action_bg1_mask_valid = frame.action_bg2_mask_valid = true;
+  frame.bg1_camera_x = 384;
+  frame.bg1_camera_y = 287;
+  frame.action_scene_effects.decoration_count = 4;
+  frame.action_scene_effects.decoration_visible_count = 4;
+  for (unsigned i = 0; i < 2; i++)
+    frame.action_scene_effects.decorations[i] = (ActionEffectInstance){
+      .kind = i ? kActionEffect_BloodpoolMist : kActionEffect_BloodpoolWater,
+      .phase = kActionEffectPhase_BloodpoolEnvironment, .visual = 1, .source_mask = 0xFF,
+      .world_x = 512, .world_y = 480, .phase_ticks = 149, .flags = kActionEffectFlag_Visible,
+      .render_layer = i ? kActionEffectRenderLayer_Bg2HighAlpha :
+                               kActionEffectRenderLayer_Bg1HighPlane,
+      .projection_plane = i ? kActionEffectProjectionPlane_Bg1 :
+                                   kActionEffectProjectionPlane_Bg1High,
+      .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,-48,384,32}},
+    };
+  frame.action_scene_effects.moonlight.valid = true;
+  for (unsigned i = 0; i < 2; i++)
+    frame.action_scene_effects.decorations[2+i] = (ActionEffectInstance){
+      .kind = i ? kActionEffect_BloodpoolMoonReflection : kActionEffect_BloodpoolMoonlight,
+      .phase = kActionEffectPhase_BloodpoolEnvironment, .visual = 1,
+      .world_x = 112, .world_y = 62, .flags = kActionEffectFlag_Visible,
+      .render_layer = kActionEffectRenderLayer_Bg2Plane,
+      .projection_plane = kActionEffectProjectionPlane_Bg2,
+      .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,194}},
+    };
+  memset(pixels,0xFF,sizeof(pixels));
+  pixels[0] = 0xFF000000u;
+  for (int plane = SR_PPU_OVERLAY_BG1; plane <= SR_PPU_OVERLAY_BG2; plane++) {
+    assert(PresentActionEffects_UploadMask(&device,plane,&frame,(const uint8_t *)pixels,256*4));
+    assert(b.first_uploaded_pixel == 0);
+    assert(!PresentActionEffects_UploadMask(&device,plane,&frame,(const uint8_t *)pixels,256*4));
+  }
+  device.capabilities.flags &= ~(kArRenderCapability_RenderTargets |
+                                kArRenderCapability_ScopedRenderTargets);
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  assert(b.geometries == 3 && b.geometry_blends[0] == kArRenderBlendMode_Add &&
+      b.geometry_blends[2] == kArRenderBlendMode_Alpha);
+  assert(b.created == 2 && b.updated == 2 && !b.resolves && !b.restores);
+  const DioramaProjection projection = {
+    .valid = true, .matrix = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1},
+    .aspect_x = 1, .height_scale = 1, .texture_x_origin = 384,
+    .texture_width = 1024, .texture_height = 768, .output_width = 640, .output_height = 448,
+    .bg1_plane = {.valid = true, .u1 = 1, .v1 = 1},
+    .bg1_high_plane = {.valid = true, .u1 = 1, .v1 = 1},
+    .bg2_plane = {.valid = true, .u1 = 1, .v1 = 1},
+    .bg2_high_plane = {.valid = true, .u1 = 1, .v1 = 1},
+  };
+  PresentActionPlaneEffectContext context = {&device,&frame,viewport};
+  PresentActionEffects_DrawDioramaPlane(&context,SR_PPU_OVERLAY_BG2,&projection);
+  assert(b.geometries == 4); /* Rays/reflection share BG2-low; subsequent timber occludes both. */
+  PresentActionEffects_DrawDioramaPlane(&context,kDioramaPlane_Bg2Hi,&projection);
+  assert(b.geometries == 5 && b.geometry_blends[4] == kArRenderBlendMode_Alpha);
+  PresentActionEffects_DrawDioramaPlane(&context,kDioramaPlane_Bg1Hi,&projection);
+  assert(b.geometries == 6 && b.geometry_blends[5] == kArRenderBlendMode_Add);
+  frame.action_scene_effects.decoration_count = 7;
+  frame.action_scene_effects.bloodpool = (ActionBloodpoolDetails){
+    .valid = true, .timber_count = 1,
+    .timber = {{.x0=520,.x1=536,.y=416,.drip_x=528,.drip_y=424,.landing_y=488,
+                .water_landing=1}},
+  };
+  for (unsigned i = 0; i < 3; i++) {
+    ActionEffectInstance *e = &frame.action_scene_effects.decorations[4+i];
+    *e = frame.action_scene_effects.decorations[2];
+    e->kind = (uint8_t)(kActionEffect_BloodpoolTimber+i);
+    e->render_layer = i == 0 ? kActionEffectRenderLayer_Bg1Plane :
+        i == 1 ? kActionEffectRenderLayer_Bg2HighAlpha : kActionEffectRenderLayer_Bg2Alpha;
+    if (i == 2) e->geometry.data.rect = (ActionEffectLocalRect){-100,-40,100,44};
+    else {
+      e->world_x = 512;
+      e->world_y = 0;
+      e->source_mask = 0xFF;
+      e->projection_plane = kActionEffectProjectionPlane_Bg1;
+      e->geometry.data.rect = (ActionEffectLocalRect){-384,0,384,512};
+    }
+  }
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  assert(b.geometries == 11); /* Five submissions; details share existing water/mist batches. */
+  assert(b.created == 2 && b.updated == 2 && !b.resolves && !b.restores);
+  frame.action_environmental_effects = false;
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  PresentActionEffects_DrawDioramaPlane(&context,SR_PPU_OVERLAY_BG2,&projection);
+  assert(b.geometries == 11);
+  PresentActionEffects_Reset(&device);
+  assert(b.created == b.destroyed);
+}
+
+static void CastleComposition(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b,&device);
+  memset(&frame,0,sizeof(frame));
+  frame.snes_width = frame.snes_height = frame.visible_width = 224;
+  frame.action_environmental_effects = true;
+  frame.action_bg1_mask_valid = frame.action_bg2_mask_valid = true;
+  frame.diorama_map_group = kActRaiserMapGroup_Bloodpool;
+  frame.diorama_map_number = 8;
+  frame.action_scene_effects.decoration_count = 3;
+  frame.action_scene_effects.decoration_visible_count = 3;
+  for (unsigned i = 0; i < 3; i++) {
+    ActionEffectInstance *e = &frame.action_scene_effects.decorations[i];
+    *e = (ActionEffectInstance){
+      .kind = (uint8_t)(kActionEffect_CastleLight+i),
+      .phase = kActionEffectPhase_CastleEnvironment, .visual = 8, .source_mask = 1,
+      .phase_ticks = 499, .flags = kActionEffectFlag_Visible,
+      .render_layer = i == 0 ? kActionEffectRenderLayer_Bg1Plane :
+          i == 1 ? kActionEffectRenderLayer_Bg2Plane : kActionEffectRenderLayer_Bg1Mist,
+      .projection_plane = i == 1 ? kActionEffectProjectionPlane_Bg2 :
+          kActionEffectProjectionPlane_Bg1,
+      .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {0,0,256,256}},
+    };
+    if (i == 1) {
+      e->world_x = 128;
+      e->world_y = 48;
+      e->geometry.data.rect = (ActionEffectLocalRect){-128,-48,128,208};
+    } else if (i == 2) {
+      e->world_x = 32;
+      e->world_y = 224;
+      e->geometry.data.rect = (ActionEffectLocalRect){0,-18,192,0};
+    }
+  }
+  memset(pixels,0xFF,sizeof(pixels));
+  pixels[0] = 0xFF000000u; /* Actor/other-layer winners must remain excluded. */
+  for (int plane = SR_PPU_OVERLAY_BG1; plane <= SR_PPU_OVERLAY_BG2; plane++) {
+    assert(PresentActionEffects_UploadMask(&device,plane,&frame,(const uint8_t *)pixels,256*4));
+    assert(b.first_uploaded_pixel == 0);
+    assert(!PresentActionEffects_UploadMask(&device,plane,&frame,(const uint8_t *)pixels,256*4));
+  }
+  device.capabilities.flags &= ~(kArRenderCapability_RenderTargets |
+                                kArRenderCapability_ScopedRenderTargets);
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  assert(b.geometries == 4 && b.created == 2 && b.updated == 2);
+  assert(!b.resolves && !b.restores);
+  frame.action_environmental_effects = false;
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  assert(b.geometries == 4);
+  /* The blue moat shares BG1's direct winner-masked path, including devices
+   * without render targets. Camera scroll must keep its surface in view. */
+  frame.action_environmental_effects = true;
+  frame.diorama_map_number = 5;
+  frame.bg1_camera_x = 592;
+  frame.bg1_camera_y = 832;
+  frame.action_scene_effects.decoration_count = 1;
+  frame.action_scene_effects.decoration_visible_count = 1;
+  frame.action_scene_effects.decorations[0] = (ActionEffectInstance){
+    .kind = kActionEffect_CastleWater, .phase = kActionEffectPhase_CastleEnvironment,
+    .visual = 5, .source_mask = 1, .world_x = 592, .world_y = 944, .phase_ticks = 321,
+    .flags = kActionEffectFlag_Visible, .render_layer = kActionEffectRenderLayer_Bg1Plane,
+    .projection_plane = kActionEffectProjectionPlane_Bg1,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {0,0,144,16}},
+  };
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  assert(b.geometries == 5 && b.created == 2 && !b.resolves && !b.restores);
+  PresentActionEffects_Reset(&device);
+  assert(b.created == b.destroyed);
+}
+
+static void TestCastleDimming(void) {
+  memset(&frame,0,sizeof(frame));
+  frame.action_environmental_effects = true;
+  frame.diorama_map_group = kActRaiserMapGroup_Bloodpool;
+  frame.action_scene_effects.decoration_count = 1;
+  ActionEffectInstance *e = &frame.action_scene_effects.decorations[0];
+  *e = (ActionEffectInstance){.kind = kActionEffect_CastleLight,
+    .phase = kActionEffectPhase_CastleEnvironment, .source_mask = 1,
+    .render_layer = kActionEffectRenderLayer_Bg1Plane,
+    .projection_plane = kActionEffectProjectionPlane_Bg1,
+    .flags = kActionEffectFlag_Visible};
+  for (unsigned room = 2; room <= 8; room++) {
+    frame.diorama_map_number = (uint8_t)room;
+    e->visual = (uint16_t)room;
+    const float dim = PresentActionEffects_Bg1Dimming(&frame);
+    assert((room == 2 || room == 6) ? dim == 0 : dim >= .30f && dim <= .42f);
+  }
+  frame.action_environmental_effects = false;
+  assert(PresentActionEffects_Bg1Dimming(&frame) == 0);
+  frame.action_environmental_effects = true;
+  e->source_mask = 0;
+  assert(PresentActionEffects_Bg1Dimming(&frame) == 0);
+  e->source_mask = 1;
+  e->visual = 3;
+  assert(PresentActionEffects_Bg1Dimming(&frame) == 0);
+}
+
 int main(void) {
+  TestCastleDimming();
+  CastleComposition();
+  BloodpoolComposition();
   TempleSceneryDimming();
   CaveMaskUploadBudget();
   CaveSheenComposition();

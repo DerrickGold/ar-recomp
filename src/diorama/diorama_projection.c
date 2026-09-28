@@ -163,8 +163,8 @@ static bool ProjectCapturedPlanePoint(
   ArRenderPointF projected[3];
   int sample_count = (scale_x || scale_y) ? 3 : 1;
   for (int sample = 0; sample < sample_count; sample++) {
-    float x = capture_x + (sample == 1 ? 1.0f : 0.0f);
-    float y = capture_y + (sample == 2 ? 1.0f : 0.0f);
+    float x = capture_x + plane->capture_offset.x + (sample == 1 ? 1.0f : 0.0f);
+    float y = capture_y + plane->capture_offset.y + (sample == 2 ? 1.0f : 0.0f);
     float u = (x + (float)projection->texture_x_origin) /
         (float)projection->texture_width;
     float v = y / (float)projection->texture_height;

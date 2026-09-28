@@ -359,7 +359,20 @@ static void TestBgEffectMaskDistinguishesEmptyFromFailedUpload(void) {
   CHECK(Diorama_FilterBgEffectProjectionMask(bg2hi, bg2hi, bg2hi, bg2hi) == bg2hi);
 }
 
+static void TestGeneratedPlaneOffset(void) {
+  DioramaProjection p = Projection();
+  ArRenderPointF expected, actual, other;
+  CHECK(Diorama_ProjectCapturedBg1Point(&p,40.25f,20.5f,&expected,NULL,NULL));
+  CHECK(Diorama_ProjectCapturedBg2Point(&p,40,20,&other,NULL,NULL));
+  p.bg1_plane.capture_offset = (ArRenderPointF){.25f,.5f};
+  CHECK(Diorama_ProjectCapturedBg1Point(&p,40,20,&actual,NULL,NULL));
+  CHECK(Near(expected.x,actual.x) && Near(expected.y,actual.y));
+  CHECK(Diorama_ProjectCapturedBg2Point(&p,40,20,&actual,NULL,NULL));
+  CHECK(Near(other.x,actual.x) && Near(other.y,actual.y));
+}
+
 int main(void) {
+  TestGeneratedPlaneOffset();
   TestTiltedCameraFraming();
   TestCameraFramingProtectsNativeBand();
   TestCameraFramingRejectsUnprojectableMesh();

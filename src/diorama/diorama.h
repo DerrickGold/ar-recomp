@@ -60,6 +60,8 @@ enum { kDioramaObjectPriorityCount = 4 };
 
 typedef struct DioramaPlaneProjection {
   bool valid;
+  /* Translation of current-capture pixels in a generated background texture. */
+  ArRenderPointF capture_offset;
   float u0, v0, u1, v1;
   float z_world;
   float rake;
@@ -182,6 +184,7 @@ typedef struct DioramaCapture {
   int width, height, authentic_y0, obj_apron;
   const ArRenderTexture *textures;
   const uint8_t *const *pixels;
+  const ArRenderPointF *plane_capture_offsets;
   const bool *bg_transparent_fill_configured;
   const uint32_t *bg_transparent_fill_argb;
   const DioramaCoverageMask *coverage_masks;

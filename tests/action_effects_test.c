@@ -2795,6 +2795,269 @@ static unsigned CaveTestTileAddress(unsigned base, unsigned width, unsigned x, u
       (y & 240) + ((x & 240) >> 4);
 }
 
+static void TestCastleEnvironmentCapture(void) {
+  static uint8_t ram[kActRaiserWramSize], before[kActRaiserWramSize];
+  ActionEffectObserver observer = {0};
+  ActionSceneEffectFrame frame;
+  memset(ram,0,sizeof(ram));
+  ram[0x18] = 2;
+  ram[0x19] = 8;
+  Write16(ram,0x2E,256);
+  Write16(ram,0x30,256);
+  Write16(ram,0x32,256);
+  Write16(ram,0x34,256);
+  Write16(ram,0x46,0x8000);
+  Write16(ram,0x4A,0xC000);
+  Write16(ram,0x52,0x2100);
+  Write16(ram,0x88,1234);
+  const uint16_t words[] = {0x04EE,0x44EE,0x04FE,0x44FE};
+  for (unsigned i = 0; i < 4; i++) Write16(ram,0x2100+0x44*8+i*2,words[i]);
+  ram[0x80F0] = 0x77;
+  ram[0x800F] = 0x09;
+  ram[0x8027] = 0x51;
+  ram[0x8037] = 0x61;
+  ram[0x80A8] = 0x89; /* Visible bottom frame beneath the boss window. */
+  ram[0xC037] = 0x10;
+  ram[0xC048] = 0x05;
+  for (unsigned x = 2; x < 14; x++) ram[0x80E0+x] = 0x5F;
+  ram[0x05A0+0x5F] = 15;
+  memcpy(before,ram,sizeof(ram));
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+  CHECK(frame.decoration_count == 0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decoration_count == 3 && !frame.decoration_overflow);
+  CHECK(frame.decorations[0].kind == kActionEffect_CastleLight);
+  CHECK(frame.decorations[0].source_mask == 1);
+  CHECK(frame.decorations[1].kind == kActionEffect_CastleMist);
+  CHECK(frame.decorations[1].world_y == 224);
+  CHECK(frame.decorations[2].kind == kActionEffect_CastleSky);
+  CHECK(!memcmp(before,ram,sizeof(ram)));
+  const unsigned phase = frame.decorations[0].phase_ticks;
+  Write16(ram,0x88,1400);
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decorations[0].phase_ticks == phase);
+  ram[0x80E8] = 0; /* One missing support tile removes the whole floor span. */
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decoration_count == 2);
+  CHECK(frame.decorations[1].kind == kActionEffect_CastleSky);
+  ram[0x80A8] = 0; /* A missing sill must not leave detached rays. */
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decoration_count == 1 && frame.decorations[0].kind == kActionEffect_CastleSky);
+  ram[0x80A8] = 0x89;
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decoration_count == 2 && frame.decorations[0].source_mask == 1);
+  ram[0x8027] = 0; /* Changed source removes only its window light. */
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decoration_count == 1 && frame.decorations[0].kind == kActionEffect_CastleSky);
+  Write16(ram,0x2100+0x44*8,0);
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decoration_count == 0);
+  CHECK(!ActionSceneEffects_RoomUsesBg2Decorations(ram,30));
+}
+
+static void TestCastleGalleryAndWaterCapture(void) {
+  static uint8_t ram[kActRaiserWramSize], before[kActRaiserWramSize];
+  ActionEffectObserver observer = {0};
+  ActionSceneEffectFrame frame;
+  memset(ram,0,sizeof(ram));
+  ram[0x18] = 2;
+  ram[0x19] = 7;
+  Write16(ram,0x2E,1024); Write16(ram,0x30,1024);
+  Write16(ram,0x32,256); Write16(ram,0x34,256);
+  Write16(ram,0x46,0x8000); Write16(ram,0x4A,0xC000);
+  Write16(ram,0x52,0x2100); Write16(ram,0x56,0x2900);
+  const uint16_t window[] = {0x04EE,0x44EE,0x04FE,0x44FE};
+  for (unsigned i = 0; i < 4; i++) Write16(ram,0x2100+0x44*8+i*2,window[i]);
+  ram[CaveTestTileAddress(0x8000,1024,0,1008)] = 0x09;
+  ram[CaveTestTileAddress(0x8000,1024,1008,0)] = 0x09;
+  /* Native alternating arch blocks. Each of the eleven openings needs light. */
+  const unsigned windows[][5] = {
+    {368,384,0x51,0x59,0x8C},{400,424,0x70,0x78,0x89},
+    {448,464,0x73,0x7B,0x8C},{480,504,0x70,0x78,0x89},
+    {528,544,0x73,0x7B,0x8C},{560,584,0x70,0x78,0x89},
+    {608,624,0x73,0x7B,0x8C},{640,664,0x70,0x78,0x89},
+    {688,704,0x73,0x7B,0x8C},{720,744,0x70,0x78,0x89},
+    {768,784,0x73,0x7B,0x6A},
+  };
+  for (unsigned i = 0; i < 11; i++) {
+    ram[CaveTestTileAddress(0x8000,1024,windows[i][0],112)] = (uint8_t)windows[i][2];
+    ram[CaveTestTileAddress(0x8000,1024,windows[i][0],128)] = (uint8_t)windows[i][3];
+    ram[CaveTestTileAddress(0x8000,1024,windows[i][1],203)] = (uint8_t)windows[i][4];
+  }
+  ram[0xC037] = 0x10; ram[0xC048] = 0x05;
+  memcpy(before,ram,sizeof(ram));
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decoration_count == 2);
+  CHECK(frame.decorations[0].source_mask == 0x7FF);
+  CHECK(frame.decorations[1].kind == kActionEffect_CastleSky);
+  CHECK(!memcmp(before,ram,sizeof(ram)));
+  ram[CaveTestTileAddress(0x8000,1024,528,112)] = 0;
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decorations[0].source_mask == (0x7FF & ~(1u<<6)));
+
+  /* BG2 water is blended into BG1 scenery, with an empty row above it. */
+  memset(ram+0x8000,0,0x5000);
+  ram[0x19] = 5;
+  Write16(ram,0x2E,1792); Write16(ram,0x32,1792); Write16(ram,0x34,1024);
+  ram[CaveTestTileAddress(0x8000,1792,0,1008)] = 0x09;
+  ram[CaveTestTileAddress(0x8000,1792,1776,0)] = 0xA3;
+  const uint16_t surface[] = {0x0470,0x0471,0x0402,0x0403};
+  for (unsigned i = 0; i < 4; i++) Write16(ram,0x2900+0x15*8+i*2,surface[i]);
+  for (unsigned x = 592; x < 1744; x += 16)
+    ram[CaveTestTileAddress(0xC000,1792,x,944)] = 0x15;
+  CHECK(!ActionSceneEffects_RoomUsesBg2Decorations(ram,sizeof(ram)));
+  memcpy(before,ram,sizeof(ram));
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decoration_count == 1);
+  CHECK(frame.decorations[0].kind == kActionEffect_CastleWater);
+  CHECK(frame.decorations[0].source_mask == 255);
+  CHECK(frame.decorations[0].render_layer == kActionEffectRenderLayer_Bg1Plane);
+  CHECK(frame.decorations[0].world_y == 944);
+  CHECK(!memcmp(before,ram,sizeof(ram)));
+  ram[CaveTestTileAddress(0xC000,1792,608,944)] = 0;
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decorations[0].source_mask == 254);
+  Write16(ram,0x2900+0x15*8,0);
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decoration_count == 0);
+}
+
+static void TestBloodpoolEnvironmentCapture(void) {
+  static uint8_t ram[kActRaiserWramSize], before[kActRaiserWramSize];
+  memset(ram,0,sizeof(ram));
+  ram[0x18] = 2;
+  ram[0x19] = 1;
+  Write16(ram,0x2E,4096);
+  Write16(ram,0x30,512);
+  Write16(ram,0x32,256);
+  Write16(ram,0x34,256);
+  Write16(ram,0x46,0x8000);
+  ram[CaveTestTileAddress(0x8000,4096,0,432)] = 0x8A;
+  ram[CaveTestTileAddress(0x8000,4096,736,320)] = 0xB9;
+  const int spans[][2] = {{176,880},{960,1184},{1248,1360},{1440,2144},
+                         {2240,2368},{2464,2560},{2688,2864},{2912,4096}};
+  for (unsigned i = 0; i < 8; i++)
+    for (int x = spans[i][0]; x < spans[i][1]; x += 16)
+      ram[CaveTestTileAddress(0x8000,4096,x,480)] = 0x20;
+  ActionEffectObserver observer = {0};
+  ActionSceneEffectFrame frame;
+  CHECK(ActionSceneEffects_RoomUsesBg1Decorations(ram,sizeof(ram)));
+  CHECK(ActionSceneEffects_RoomUsesBg2Decorations(ram,sizeof(ram)));
+  for (unsigned x = 0; x <= 3840; x += 128) {
+    Write16(ram,0x22,(uint16_t)x);
+    memcpy(before,ram,sizeof(ram));
+    ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+    CHECK(frame.decoration_count == 0); /* Toggle Off: capture has no ambient fields. */
+    ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+    CHECK(frame.decoration_count == 2 && frame.decoration_visible_count == 2);
+    CHECK(frame.effect_count == 0 && !frame.decoration_overflow);
+    CHECK(!memcmp(ram,before,sizeof(ram)));
+    for (unsigned i = 0; i < 2; i++) {
+      CHECK(frame.decorations[i].world_x == x+128 && frame.decorations[i].world_y == 480);
+      CHECK(frame.decorations[i].source_mask == 0xFF && frame.decorations[i].phase_ticks == 0);
+    }
+    CHECK(frame.decorations[0].projection_plane == kActionEffectProjectionPlane_Bg1High);
+    CHECK(frame.decorations[1].projection_plane == kActionEffectProjectionPlane_Bg1);
+    CHECK(frame.decorations[1].render_layer == kActionEffectRenderLayer_Bg2HighAlpha);
+  }
+  /* Visible moon signature plus native material words enable the light field. */
+  Write16(ram,0x22,0);
+  Write16(ram,0x52,0x2100);
+  Write16(ram,0x54,0xECFF);
+  Write16(ram,0x4A,0xC000);
+  ram[0x6B] = 0x10;
+  ram[CaveTestTileAddress(0xC000,256,112,48)] = 0x3C;
+  ram[CaveTestTileAddress(0xC000,256,112,64)] = 0x44;
+  for (unsigned i = 0; i < 1024; i++) Write16(ram,0x2100+i*2,0xFF);
+  const unsigned blocker = CaveTestTileAddress(0x8000,4096,112,128);
+  ram[blocker] = 1;
+  const uint16_t words[] = {0x1074,0x3074,0x10FF,0x1088,0x5088,0x9088};
+  /* Independent CHR cutout fixture: transparency and both native flips must
+   * survive run merging, including the single-pixel ends of the silhouette. */
+  static const char *cutout[] = {"00001100","00011110","00011111","00111111",
+                                "01111111","11111111","11111111","11111111"};
+  for (unsigned i = 0; i < sizeof(words)/sizeof(words[0]); i++) {
+    Write16(ram,0x2108,words[i]);
+    memcpy(before,ram,sizeof(ram));
+    ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+    ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+    CHECK(frame.decoration_count == 7 && frame.moonlight.valid);
+    for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++) {
+      bool opaque = false;
+      for (unsigned j = 0; j < frame.moonlight.count; j++) {
+        const ActionMoonlightOccluder *r = &frame.moonlight.rectangles[j];
+        opaque |= x+112 >= r->x0 && x+112 < r->x1 && y+128 >= r->y0 && y+128 < r->y1;
+      }
+      const bool expected = i == 0 || (i >= 3 && cutout[i == 5 ? 7-y : y][i == 4 ? 7-x : x] == '1');
+      CHECK(opaque == expected);
+    }
+    CHECK(frame.decorations[2].world_x == 112 && frame.decorations[2].world_y == 62);
+    CHECK(!memcmp(before,ram,sizeof(ram)));
+  }
+  ActionMoonlightOcclusion previous = frame.moonlight;
+  Write16(ram,0x22,16); /* Capture remains world anchored as the camera scrolls. */
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.moonlight.count == previous.count && frame.decorations[2].world_x == 112);
+  CHECK(!memcmp(frame.moonlight.rectangles,previous.rectangles,
+      previous.count*sizeof(previous.rectangles[0])));
+  /* A verified timber underside emits a drop; actual lower solids stop it.
+   * Post contacts are derived from low-priority pixels at the waterline. */
+  const unsigned timber = CaveTestTileAddress(0x8000,4096,208,352);
+  ram[timber] = 0x77;
+  const uint16_t timber_words[] = {0x0A77,0x0A77,0x00FF,0x00FF};
+  for (unsigned q = 0; q < 4; q++) Write16(ram,0x2100+0x77*8+q*2,timber_words[q]);
+  const unsigned lower = CaveTestTileAddress(0x8000,4096,208,400);
+  ram[lower] = 2;
+  ram[CaveTestTileAddress(0x8000,4096,272,464)] = 2;
+  ram[CaveTestTileAddress(0x8000,4096,272,480)] = 0x21;
+  for (unsigned q = 0; q < 4; q++) Write16(ram,0x2110+q*2,0x1074);
+  memcpy(before,ram,sizeof(ram));
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(!memcmp(before,ram,sizeof(ram)));
+  CHECK(frame.bloodpool.valid && frame.bloodpool.timber_count == 1);
+  CHECK(frame.bloodpool.post_count == 1 && frame.bloodpool.posts[0] == 280);
+  CHECK(frame.bloodpool.timber[0].y == 352 && frame.bloodpool.timber[0].drip_y == 360);
+  CHECK(frame.bloodpool.timber[0].landing_y == 400 && !frame.bloodpool.timber[0].water_landing);
+  ram[lower] = 0;
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.bloodpool.timber[0].landing_y == 488 && frame.bloodpool.timber[0].water_landing);
+  Write16(ram,0x2100+0x77*8,0x0A78); /* Changed art must not inherit the material rule. */
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.bloodpool.timber_count == 0);
+  ram[CaveTestTileAddress(0xC000,256,112,48)] = 0;
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decoration_count == 2 && !frame.moonlight.valid); /* No inherited moon/shadows. */
+  ram[CaveTestTileAddress(0x8000,4096,256,480)] = 0; /* Invalid interior omits its pool. */
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decoration_count == 2 && frame.decorations[0].source_mask == 0xFE);
+  ram[CaveTestTileAddress(0x8000,4096,736,320)] = 0;
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decoration_count == 0); /* Inherited/incomplete room fails closed. */
+  ram[0x19] = 2;
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.decoration_count == 0 && !ActionSceneEffects_RoomUsesBg2Decorations(ram,sizeof(ram)));
+  CHECK(!ActionSceneEffects_RoomUsesBg2Decorations(ram,20));
+}
+
 static void TestCaveEnvironmentalCapture(void) {
   static uint8_t wram[kActRaiserWramSize], before[kActRaiserWramSize];
   static const unsigned dimensions[][4] = {
@@ -3235,6 +3498,9 @@ static void TestFillmoreStatueOrbs(void) {
 }
 
 int main(void) {
+  TestBloodpoolEnvironmentCapture();
+  TestCastleEnvironmentCapture();
+  TestCastleGalleryAndWaterCapture();
   TestCaveWetMaterials();
   TestDustSettling();
   TestFillmoreStatueOrbs();

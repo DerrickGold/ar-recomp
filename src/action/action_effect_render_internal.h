@@ -131,6 +131,55 @@ ArRenderColorF SceneParticleColor(ArRenderColorF hot,
                                          ArRenderColorF cool,
                                          SceneParticleClock clock);
 
+/* ---- defined in action_castle_effect_render.c ---- */
+bool AppendCastleEnvironment(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    bool lighting, bool particles, ActionEffectProjectPointFn project_point,
+    ActionEffectClipBoundsFn clip_bounds, void *userdata);
+
+/* ---- defined in action_bloodpool_effect_render.c ---- */
+typedef struct BloodpoolMoonProjection {
+  ArRenderPointF origin, axis, vertical;
+  float orientation;
+} BloodpoolMoonProjection;
+bool BloodpoolMoonProjection_Init(BloodpoolMoonProjection *projection,
+    const ActionEffectInstance *moon, ActionEffectProjectPointFn project_point, void *userdata);
+float BloodpoolMoonProjection_Light(
+    const BloodpoolMoonProjection *projection, ArRenderPointF point);
+bool AppendBloodpoolSoftPatch(ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect,
+    const ActionEffectLocalRect *clip, float x, float y, float rx, float ry,
+    ArRenderColorF color, float lean, ActionEffectProjectPointFn project_point, void *userdata);
+bool AppendBloodpoolTimberMoonlight(ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect, const ActionEffectInstance *moon,
+    const ActionBloodpoolDetails *details, const ActionMoonlightOcclusion *occlusion,
+    ActionMoonlightRenderScratch *scratch, ActionEffectProjectPointFn project_point,
+    ActionEffectClipBoundsFn clip_bounds, void *userdata);
+bool AppendBloodpoolEnvironment(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectProjectPointFn project_point, ActionEffectClipBoundsFn clip_bounds, void *userdata);
+bool AppendBloodpoolSkyRays(ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect, ActionEffectProjectPointFn project_point,
+    ActionEffectClipBoundsFn clip_bounds, void *userdata);
+bool AppendBloodpoolMoonlight(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    const ActionMoonlightOcclusion *occlusion, ActionMoonlightRenderScratch *scratch,
+    ActionEffectProjectPointFn project_point,
+    ActionEffectClipBoundsFn clip_bounds, void *userdata);
+bool AppendBloodpoolWaterMoonlight(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *water,
+    const ActionEffectInstance *moon, const ActionMoonlightOcclusion *occlusion,
+    ActionMoonlightRenderScratch *scratch, ActionEffectProjectPointFn project_point,
+    ActionEffectClipBoundsFn clip_bounds, void *userdata);
+
+/* ---- defined in action_bloodpool_detail_render.c ---- */
+float BloodpoolCloudTransmission(uint16_t ticks);
+bool AppendBloodpoolCloud(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectProjectPointFn project_point, ActionEffectClipBoundsFn clip_bounds, void *userdata);
+bool AppendBloodpoolDetailParticles(ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect, const ActionEffectInstance *moon,
+    const ActionBloodpoolDetails *details, ActionEffectProjectPointFn project_point,
+    ActionEffectClipBoundsFn clip_bounds, void *userdata);
+
 /* ---- defined in action_cave_effect_render.c ---- */
 bool AppendCaveEnvironment(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,

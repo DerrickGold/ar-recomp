@@ -872,11 +872,11 @@ bool AppendLightningTrapLighting(
   float spill_x = mid_x, spill_y = mid_y;
   float body_x = mid_x, body_y = mid_y;
   spill = (ActionEffectGlowStyle){
-      .radius_x = 31.0f,
-      .radius_y = fmaxf(46.0f, (rect->y1 - rect->y0) * 0.59f),
-      /* Ring 2 is transparent. Keep the last COLOURED ring at the captured
-       * electrode endpoints; the old 0.62 scale made the visible aura die
-       * near the middle even though its transparent geometry was full-size. */
+      .radius_x = 76.0f,
+      .radius_y = fmaxf(64.0f, (rect->y1 - rect->y0) * 0.70f),
+      /* Broad spill lights the damp corridor around the captured arc; the
+       * narrow body below preserves the electrode/beam definition. Same two
+       * meshes and peak intensity, with no extra lights or draw calls. */
       .ring_scale = {0.24f, 0.86f, 1.0f},
       .centre = {0.68f, 0.90f, 1.00f, 0.13f},
       .ring = {{0.48f, 0.76f, 1.00f, 0.09f},

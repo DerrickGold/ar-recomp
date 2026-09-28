@@ -343,7 +343,11 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
   PresentActionPlaneEffectContext plane_effect = {
     device, slot, viewport,
   };
+  ArRenderPointF plane_offsets[kDioramaPlane_Count];
+  for (int plane = 0; plane < kDioramaPlane_Count; plane++)
+    plane_offsets[plane] = DioramaFrameGeneration_PlaneOffset(plane);
   const DioramaCapture capture = {
+      .plane_capture_offsets = plane_offsets,
       .width = slot->snes_width,
       .height =
           slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,

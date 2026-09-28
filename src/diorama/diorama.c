@@ -2289,6 +2289,8 @@ static void PublishDioramaPlanes(const DioramaCapture *capture,
           .rake = resolved[i].rake,
           .bow = resolved[i].bow,
       };
+      if (capture->plane_capture_offsets)
+        plane.capture_offset = capture->plane_capture_offsets[resolved[i].plane];
       if (resolved[i].plane == SR_PPU_OVERLAY_BG1) {
         out_projection->bg1_plane = plane;
       }

@@ -26,7 +26,12 @@ published effect frame and skips their flat masks, geometry and heat pass.
 
 The **Fillmore forest** is implemented and visually approved. The first
 **Fillmore Act 2 cave/temple/tower pass** is described in
-[fillmore-cave-effects.md](fillmore-cave-effects.md). Other additions remain planned. They must all honor this same switch,
+[fillmore-cave-effects.md](fillmore-cave-effects.md). Bloodpool Act 1 now has a
+[marsh treatment](bloodpool-marsh-effects.md) with layered moonlight, rose-silver
+reflections on the red lake, timber drips, post ripples, bank insects, low mist,
+wet timber edges and a slow cloud veil. The [Bloodpool castle pass](bloodpool-castle-effects.md)
+adds darker interiors, window light, warm torch bounce, dust and supported floor haze.
+Other additions remain planned. They must all honor this same switch,
 including any future refraction or atmosphere passes. Existing lava heat
 currently applies only in flat mode.
 
@@ -377,7 +382,7 @@ particles. Prefer local effects with believable sources; keep the HUD clear.
 | Fillmore forest | World-anchored godrays scroll through uneven canopy openings behind trees; a foreground pass illuminates actors/terrain. Bright drifting motes, fine dust pockets inside rays, and falling leaf silhouettes with lit edges. |
 | Fillmore caves | Slow drips from selected stalactites/damp ledges, gentle pool ripples, cool surface glints; scene refraction remains a future experiment. |
 | Stone interiors | Local window light and slowly drifting dust where openings justify it. |
-| Bloodpool exterior | Thin blue-violet mist over water, restrained moonlit surface glints, behind bridges and actors. |
+| Bloodpool exterior | Layered moonlight, rose-silver glints and ripples on red water, thin violet mist, timber drips and bank insects, behind foreground scenery and actors. |
 | Bloodpool castle | Cool light through windows, balanced against the existing warm torch accents. |
 | Kasandora desert | Mild distant-background heat shimmer and occasional low sand wisps. |
 | Kasandora interiors | Isolated warm shafts and dust near visible openings. |

@@ -260,7 +260,22 @@ typedef struct ActionEffectRenderBatch {
   int index_count;
 } ActionEffectRenderBatch;
 
+enum {
+  kActionMoonlightColumns = 129,
+  kActionMoonlightRows = 17,
+  kActionMoonlightMaskWidth = 800,
+  kActionMoonlightMaskHeight = 224,
+};
+/* Retained render workspace, not a per-call stack allocation. The small CPU
+ * coverage field describes platform silhouettes; it is never uploaded. */
+typedef struct ActionMoonlightRenderScratch {
+  ArRenderPointF points[kActionMoonlightColumns*kActionMoonlightRows];
+  float visibility[kActionMoonlightColumns*kActionMoonlightRows];
+  uint8_t coverage[kActionMoonlightMaskWidth*kActionMoonlightMaskHeight];
+} ActionMoonlightRenderScratch;
+
 typedef struct ActionSceneEffectRenderBatch {
+  ActionMoonlightRenderScratch moonlight;
   ArRenderVertex2D vertices[kActionSceneEffectRenderMaxVertices];
   int32_t indices[kActionSceneEffectRenderMaxIndices];
   int vertex_count;

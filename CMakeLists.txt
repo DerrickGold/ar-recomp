@@ -2046,6 +2046,9 @@ if(BUILD_TESTING)
     set(AR_ACTION_EFFECT_TEST_SOURCES
         src/action/action_effect_render.c
         src/action/action_cave_effect_render.c
+        src/action/action_bloodpool_effect_render.c
+        src/action/action_bloodpool_detail_render.c
+        src/action/action_castle_effect_render.c
         src/action/action_scene_effect_render.c
         src/action/action_scene_lightning_render.c
         src/action/action_effect_projection.c

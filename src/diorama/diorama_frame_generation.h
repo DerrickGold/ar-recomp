@@ -57,6 +57,11 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
     ArRenderTexture resolved_textures[kDioramaPlane_Count],
     ArRenderTexture skybox_texture, ArRenderTexture *resolved_skybox);
 
+/* Current-capture coordinates to the last successfully prepared texture.
+ * Only uniform background motion has one offset; ungenerated/OBJ planes and
+ * reset state return zero. Query immediately after Prepare on the presenter. */
+ArRenderPointF DioramaFrameGeneration_PlaneOffset(int plane);
+
 /* Drop endpoint history and backend resources. Reset is safe after a render
  * reset event; Shutdown is also used during orderly teardown. */
 void DioramaFrameGeneration_Reset(void);

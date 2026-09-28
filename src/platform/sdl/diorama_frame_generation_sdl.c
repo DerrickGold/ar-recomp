@@ -52,6 +52,7 @@ typedef struct DioramaFrameGenerationKey {
 enum { kFrameGenerationPlaneCount = kDioramaPlane_Count + 1 };
 static DioramaFrameGenerationPlane s_planes[kFrameGenerationPlaneCount];
 static DioramaFrameGenerationKey s_last_key;
+static ArRenderPointF s_present_offsets[kDioramaPlane_Count];
 static uint64_t s_pair_timestamp_ns;
 static uint32_t s_pair_mask;
 static SDL_Vertex s_vertices[kFrameGenerationMaximumVertices];
@@ -82,6 +83,7 @@ static void DestroyPlaneTextures(DioramaFrameGenerationPlane *plane) {
 }
 
 void DioramaFrameGeneration_Reset(void) {
+  memset(s_present_offsets,0,sizeof(s_present_offsets));
   for (int plane = 0; plane < kFrameGenerationPlaneCount; plane++) {
     DestroyPlaneTextures(&s_planes[plane]);
     s_planes[plane].current_valid = false;
@@ -533,12 +535,18 @@ static bool GeneratePlane(
   return SDL_SetRenderTarget(renderer, old_target) && generated;
 }
 
+ArRenderPointF DioramaFrameGeneration_PlaneOffset(int plane) {
+  if (plane < 0 || plane >= kDioramaPlane_Count) return (ArRenderPointF){0,0};
+  return s_present_offsets[plane];
+}
+
 uint32_t DioramaFrameGeneration_PrepareWithSkybox(
     ArRenderDevice *device, const FrameSlot *slot, float alpha,
     const ArRenderTexture current_textures[kDioramaPlane_Count],
     uint32_t current_plane_mask,
     ArRenderTexture resolved_textures[kDioramaPlane_Count],
     ArRenderTexture skybox_texture, ArRenderTexture *resolved_skybox) {
+  memset(s_present_offsets,0,sizeof(s_present_offsets));
   if (resolved_skybox) *resolved_skybox = skybox_texture;
   if (!resolved_textures || !current_textures) return 0;
   memcpy(resolved_textures, current_textures,
@@ -588,6 +596,19 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
       else
         resolved_textures[plane] = generated_texture;
       generated_mask |= 1u << plane;
+      if (plane < kDioramaPlane_Count && !DioramaPlaneIsObjectPriority(plane) &&
+          s_planes[plane].motion.uniform) {
+        float dx, dy;
+        PresentationFrameGeneration_MotionAt(&s_planes[plane].motion,false,0,0,&dx,&dy);
+        ArRenderPointF offset = {dx*(1-phase),dy*(1-phase)};
+        if (phase < .5f) {
+          float forward_x, forward_y;
+          PresentationFrameGeneration_MotionAt(
+              &s_planes[plane].motion,true,0,0,&forward_x,&forward_y);
+          offset = (ArRenderPointF){dx+forward_x*phase,dy+forward_y*phase};
+        }
+        s_present_offsets[plane] = offset;
+      }
     }
   }
   SDL_SetRenderDrawColor(renderer, old_r, old_g, old_b, old_a);

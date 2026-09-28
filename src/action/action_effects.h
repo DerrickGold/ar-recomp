@@ -58,6 +58,17 @@ typedef enum ActionEffectKind {
   kActionEffect_TempleGrit,
   kActionEffect_TempleGroundMist,
   kActionEffect_FillmoreStatueOrb,
+  kActionEffect_BloodpoolWater,
+  kActionEffect_BloodpoolMist,
+  kActionEffect_BloodpoolMoonlight,
+  kActionEffect_BloodpoolMoonReflection,
+  kActionEffect_BloodpoolTimber,
+  kActionEffect_BloodpoolAir,
+  kActionEffect_BloodpoolCloud,
+  kActionEffect_CastleLight,
+  kActionEffect_CastleSky,
+  kActionEffect_CastleMist,
+  kActionEffect_CastleWater,
   kActionEffect_KindCount,
 } ActionEffectKind;
 
@@ -122,6 +133,8 @@ typedef enum ActionEffectPhase {
   kActionEffectPhase_NorthwallMagicImpact,
   kActionEffectPhase_ForestCanopyLight,
   kActionEffectPhase_CaveEnvironment,
+  kActionEffectPhase_BloodpoolEnvironment,
+  kActionEffectPhase_CastleEnvironment,
   kActionEffectPhase_Count,
 } ActionEffectPhase;
 
@@ -160,8 +173,8 @@ typedef enum ActionEffectRenderLayer {
    * lighting immediately after that exact band instead of projecting through
    * BG1-low and submitting it as a late world overlay. */
   kActionEffectRenderLayer_Bg1HighPlane,
-  /* Alpha-blended foliage behind foreground terrain, after BG2 lighting. */
-  kActionEffectRenderLayer_Bg2Foliage,
+  /* Alpha-blended foliage/mist behind foreground terrain, after BG2 lighting. */
+  kActionEffectRenderLayer_Bg2Alpha,
   /* Surface illumination after the scene, beneath the flat HUD. */
   kActionEffectRenderLayer_ForegroundLight,
   /* Fillmore cave water belongs to BG2 priority-1, including its authored depth. */
@@ -170,6 +183,8 @@ typedef enum ActionEffectRenderLayer {
   kActionEffectRenderLayer_WorldDust,
   /* Low temple mist behind actors: after BG1 in Diorama, winner-masked in flat. */
   kActionEffectRenderLayer_Bg1Mist,
+  /* Low shoreline mist between low scenery and high-priority water/terrain. */
+  kActionEffectRenderLayer_Bg2HighAlpha,
   kActionEffectRenderLayer_Count,
 } ActionEffectRenderLayer;
 
@@ -307,6 +322,30 @@ typedef struct ActionEffectFrame {
  * independent bounded lists: a dense camera window must never evict actor
  * effects. Each list fails closed independently if its own capture would be
  * partial. */
+enum { kActionMoonlightMaxOccluders = 2048 };
+/* Exact opaque BG1-low pixel runs merged into world-space rectangles. Keep
+ * silhouettes, not camera-space ray hits: presentation has the actual BG1/BG2
+ * transforms, including their different Diorama depths. */
+typedef struct ActionMoonlightOccluder {
+  int16_t x0, y0, x1, y1;
+} ActionMoonlightOccluder;
+typedef struct ActionMoonlightOcclusion {
+  ActionMoonlightOccluder rectangles[kActionMoonlightMaxOccluders];
+  uint16_t count;
+  uint8_t valid;
+} ActionMoonlightOcclusion;
+
+enum { kActionBloodpoolMaxTimber = 64, kActionBloodpoolMaxPosts = 32 };
+typedef struct ActionBloodpoolTimber {
+  int16_t x0, x1, y, drip_x, drip_y, landing_y;
+  uint8_t water_landing;
+} ActionBloodpoolTimber;
+typedef struct ActionBloodpoolDetails {
+  ActionBloodpoolTimber timber[kActionBloodpoolMaxTimber];
+  int16_t posts[kActionBloodpoolMaxPosts];
+  uint8_t timber_count, post_count, valid;
+} ActionBloodpoolDetails;
+
 typedef struct ActionSceneEffectFrame {
   uint16_t game_frame;
   uint8_t effect_count;
@@ -317,6 +356,8 @@ typedef struct ActionSceneEffectFrame {
   uint8_t decoration_visible_count;
   uint8_t decoration_overflow;
   ActionEffectInstance decorations[kActionSceneDecorationMaxInstances];
+  ActionMoonlightOcclusion moonlight;
+  ActionBloodpoolDetails bloodpool;
 } ActionSceneEffectFrame;
 
 /* Observer state is explicit so savestate/restart boundaries can reset it and

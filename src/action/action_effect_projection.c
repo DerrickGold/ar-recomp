@@ -46,9 +46,9 @@ static bool PointIsOnPublishedDioramaPlane(
     return false;
 
   const float u =
-      (capture_x + (float)projection->texture_x_origin) /
+      (capture_x + plane->capture_offset.x + (float)projection->texture_x_origin) /
       (float)projection->texture_width;
-  const float v = texture_y / (float)projection->texture_height;
+  const float v = (texture_y+plane->capture_offset.y) / (float)projection->texture_height;
   const float u_min = plane->u0 < plane->u1 ? plane->u0 : plane->u1;
   const float u_max = plane->u0 > plane->u1 ? plane->u0 : plane->u1;
   const float v_min = plane->v0 < plane->v1 ? plane->v0 : plane->v1;
@@ -79,6 +79,10 @@ static void AddRequiredBgPlanes(
   for (uint8_t i = 0; i < count; i++) {
     const ActionEffectInstance *effect = &effects[i];
     if (!(effect->flags & kActionEffectFlag_Visible)) continue;
+    if (effect->kind == kActionEffect_BloodpoolMoonlight)
+      *mask |= 1u << SR_PPU_OVERLAY_BG1;
+    if (effect->render_layer == kActionEffectRenderLayer_Bg2HighAlpha)
+      *mask |= 1u << kDioramaPlane_Bg2Hi;
     if (effect->projection_plane == kActionEffectProjectionPlane_Bg1)
       *mask |= 1u << SR_PPU_OVERLAY_BG1;
     else if (effect->projection_plane == kActionEffectProjectionPlane_Bg2 ||
@@ -175,11 +179,13 @@ bool ActionEffectProjection_ClipBounds(
       return false;
     visible = (ActionEffectLocalRect){
       plane->u0 * projection->texture_width - projection->texture_x_origin -
-          context->ws_extra - screen_x,
-      plane->v0 * projection->texture_height - context->ws_extra_top - screen_y,
+          context->ws_extra - screen_x - plane->capture_offset.x,
+      plane->v0 * projection->texture_height - context->ws_extra_top -
+          screen_y - plane->capture_offset.y,
       plane->u1 * projection->texture_width - projection->texture_x_origin -
-          context->ws_extra - screen_x,
-      plane->v1 * projection->texture_height - context->ws_extra_top - screen_y,
+          context->ws_extra - screen_x - plane->capture_offset.x,
+      plane->v1 * projection->texture_height - context->ws_extra_top -
+          screen_y - plane->capture_offset.y,
     };
   } else {
     if (context->visible_width <= 0 || context->snes_height <= 0 ||
