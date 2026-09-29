@@ -65,13 +65,15 @@ typedef struct SimBackgroundVoxelModelFace {
   bool outward_winding;
 } SimBackgroundVoxelModelFace;
 
-/* Conifer and burnable-shrub light-projected canopy outlines, in authored model XY.
+/* Light-projected canopy outlines for every tree family - conifer, broad
+ * canopy, palm, burnable shrub and the ancient tree - in authored model XY.
  * Cast slopes include the presentation lean and light shear per unit of
  * authored height. The caller scales/translates the returned ground polygon.
  * Twenty-four samples per crown ring keep this independent of render LOD. */
 enum { kSimBackgroundVoxelFoliageShadowMaxPoints = 64 };
+bool SimBackgroundVoxelModel_UsesFoliageShadow(const SimBackgroundVoxelObject *object);
 /* Equal keys share a crown profile; callers can reuse hulls at the same shear.
- * Shrubs share one profile, distinct from every seeded conifer profile. */
+ * Keys never collide across families. */
 uint16_t SimBackgroundVoxelModel_FoliageShadowVariant(const SimBackgroundVoxelObject *object);
 int SimBackgroundVoxelModel_FoliageShadowHull(
     const SimBackgroundVoxelObject *object, float cast_x, float cast_y,

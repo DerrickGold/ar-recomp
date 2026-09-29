@@ -1771,33 +1771,56 @@ static uint32_t FoliageSeed(const SimBackgroundVoxelObject *object) {
       (uint32_t)object->group * 0x3449u;
 }
 
-/* Tapered branch with open ends embedded in the adjoining trunk/crown. The
- * section is perpendicular to the branch, so diagonal forks are real volumes. */
-static void AddBranch(SimBackgroundVoxelModel *model,
-                       SimBackgroundVoxelModelPoint start,
-                       SimBackgroundVoxelModelPoint end,
-                       float radius0, float radius1, int sides) {
+/* A branch's section plane. It is perpendicular to the branch, so diagonal
+ * forks are real volumes; a section starting on the ground is flattened
+ * into it. Shared by the branch surfaces and the foliage shadow outline. */
+typedef struct BranchFrame {
+  SimBackgroundVoxelModelPoint start, end;
+  float ux, uy, uz, vx, vy, vz;
+} BranchFrame;
+
+static bool ResolveBranchFrame(SimBackgroundVoxelModelPoint start,
+                               SimBackgroundVoxelModelPoint end,
+                               BranchFrame *frame) {
   float dx = end.x - start.x, dy = end.y - start.y, dz = end.z - start.z;
   float length = sqrtf(dx * dx + dy * dy + dz * dz);
-  if (length < 0.01f) return;
+  if (length < 0.01f) return false;
   dx /= length; dy /= length; dz /= length;
   float ux = dz, uy = 0.0f, uz = -dx;
   float ul = sqrtf(ux * ux + uz * uz);
   if (ul < 0.01f) { ux = 1; uz = 0; ul = 1; }
   ux /= ul; uz /= ul;
-  float vx = dy * uz, vy = dz * ux - dx * uz, vz = -dy * ux;
+  *frame = (BranchFrame){start, end, ux, uy, uz,
+                         dy * uz, dz * ux - dx * uz, -dy * ux};
+  return true;
+}
+
+static SimBackgroundVoxelModelPoint BranchRingPoint(
+    const BranchFrame *frame, bool top, float radius, float angle) {
+  float c = cosf(angle), s = sinf(angle);
+  SimBackgroundVoxelModelPoint center = top ? frame->end : frame->start;
+  SimBackgroundVoxelModelPoint p = Point(
+      center.x + radius * (c * frame->ux + s * frame->vx),
+      center.y + radius * (c * frame->uy + s * frame->vy),
+      center.z + radius * (c * frame->uz + s * frame->vz));
+  if (!top && frame->start.z == 0.0f) p.z = 0.0f;
+  return p;
+}
+
+/* Tapered branch with open ends embedded in the adjoining trunk/crown. */
+static void AddBranch(SimBackgroundVoxelModel *model,
+                       SimBackgroundVoxelModelPoint start,
+                       SimBackgroundVoxelModelPoint end,
+                       float radius0, float radius1, int sides) {
+  BranchFrame frame;
+  if (!ResolveBranchFrame(start, end, &frame)) return;
   for (int side = 0; side < sides; side++) {
     SimBackgroundVoxelModelPoint p[4];
     for (int corner = 0; corner < 4; corner++) {
       int after = corner == 1 || corner == 2;
       bool top = corner >= 2;
       float angle = (side + after) * 6.2831853f / sides;
-      float c = cosf(angle), s = sinf(angle), radius = top ? radius1 : radius0;
-      SimBackgroundVoxelModelPoint center = top ? end : start;
-      p[corner] = Point(center.x + radius * (c * ux + s * vx),
-                        center.y + radius * (c * uy + s * vy),
-                        center.z + radius * (c * uz + s * vz));
-      if (!top && start.z == 0.0f) p[corner].z = 0.0f;
+      p[corner] = BranchRingPoint(&frame, top, top ? radius1 : radius0, angle);
     }
     AddOutwardFace(model, kSimVoxelMaterial_Trunk, 230, p[0], p[1], p[2], p[3]);
   }
@@ -1854,84 +1877,6 @@ static SimBackgroundVoxelModelPoint ShrubPoint(float angle, float t) {
   return Point(8.0f + cosf(angle) * 6.3f * radius * clump,
                8.0f + sinf(angle) * 5.4f * radius * clump,
                1.8f + 11.8f * t);
-}
-
-uint16_t SimBackgroundVoxelModel_FoliageShadowVariant(const SimBackgroundVoxelObject *object) {
-  if (object && object->kind == kSimBackgroundVoxel_Shrub) return UINT16_MAX;
-  /* Conifer crown geometry uses the seed's low four bits; higher bits only identify
-   * the object. Keep this identity beside the shared profile definition. */
-  return object ? (uint16_t)((object->town << 4) | (FoliageSeed(object) & 15u)) : 0;
-}
-
-bool SimBackgroundVoxelModel_CastsShadow(const SimBackgroundVoxelObject *object) {
-  return object && object->kind < kSimBackgroundVoxelKindCount &&
-      object->kind != kSimBackgroundVoxel_Boulder && object->kind != kSimBackgroundVoxel_Rocks &&
-      object->kind != kSimBackgroundVoxel_Bridge;
-}
-
-static int CompareShadowPoint(const void *left, const void *right) {
-  const SimBackgroundVoxelModelPoint *a = left, *b = right;
-  if (a->x != b->x) return a->x < b->x ? -1 : 1;
-  return a->y == b->y ? 0 : a->y < b->y ? -1 : 1;
-}
-
-static float ShadowCross(SimBackgroundVoxelModelPoint a,
-                         SimBackgroundVoxelModelPoint b,
-                         SimBackgroundVoxelModelPoint c) {
-  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-}
-
-int SimBackgroundVoxelModel_FoliageShadowHull(
-    const SimBackgroundVoxelObject *object, float cast_x, float cast_y,
-    SimBackgroundVoxelModelPoint out[kSimBackgroundVoxelFoliageShadowMaxPoints]) {
-  if (!object || !out ||
-      (object->kind != kSimBackgroundVoxel_Tree && object->kind != kSimBackgroundVoxel_Shrub) ||
-      !isfinite(cast_x) || !isfinite(cast_y)) return 0;
-  /* Sample the same crown surfaces as the models at a fixed density, so
-   * shadows follow the foliage without changing shape when render LOD changes.
-   * The rounded shrub needs intermediate rings; a conifer needs only its outer
-   * branch rings, tip and trunk foot. Each outline is cached for the pass. */
-  enum { kRingSides = 24, kShrubRings = 16, kSamples = (kShrubRings + 1) * kRingSides + 4 };
-  SimBackgroundVoxelModelPoint points[kSamples], hull[kSamples * 2];
-  int count = 0;
-  if (object->kind == kSimBackgroundVoxel_Shrub) {
-    for (int ring = 0; ring <= kShrubRings; ring++) {
-      float t = (1.0f - cosf(3.14159265f * ring / kShrubRings)) * .5f;
-      for (int side = 0; side < kRingSides; side++)
-        points[count++] = ShrubPoint(side * 6.2831853f / kRingSides, t);
-    }
-    for (int corner = 0; corner < 4; corner++)
-      points[count++] = Point(corner & 1 ? 9 : 7, corner & 2 ? 9 : 7, 0);
-  } else {
-    TreeProfile profile = ResolveTreeProfile(object);
-    for (int ring = 1; ring < 8; ring += 2)
-      for (int side = 0; side < kRingSides; side++)
-        points[count++] = TreeCrownPoint(&profile, kTreeCrownZ[ring], kTreeCrownRadius[ring],
-            side * 6.2831853f / kRingSides);
-    points[count++] = TreeCrownPoint(&profile, 1, 0, 0);
-    for (int corner = 0; corner < 4; corner++)
-      points[count++] = Point(corner & 1 ? 8.95f : 7.05f, corner & 2 ? 8.95f : 7.05f, 0);
-  }
-  for (int i = 0; i < count; i++) {
-    points[i].x += points[i].z * cast_x;
-    points[i].y += points[i].z * cast_y;
-    points[i].z = 0;
-  }
-  qsort(points, count, sizeof(points[0]), CompareShadowPoint);
-  int n = 0;
-  for (int i = 0; i < count; i++) {
-    while (n >= 2 && ShadowCross(hull[n - 2], hull[n - 1], points[i]) <= 0) n--;
-    hull[n++] = points[i];
-  }
-  int upper = n + 1;
-  for (int i = count - 2; i >= 0; i--) {
-    while (n >= upper && ShadowCross(hull[n - 2], hull[n - 1], points[i]) <= 0) n--;
-    hull[n++] = points[i];
-  }
-  n--; /* The first vertex is repeated at the end. */
-  if (n < 3 || n > kSimBackgroundVoxelFoliageShadowMaxPoints) return 0;
-  memcpy(out, hull, n * sizeof(*out));
-  return n;
 }
 
 static void BuildTree(const SimBackgroundVoxelObject *object,
@@ -2008,30 +1953,63 @@ static void AddBroadCrown(SimBackgroundVoxelModel *model,
     }
 }
 
+/* One AddBroadCrown lobe of a branching crown. */
+typedef struct BroadLobe {
+  uint32_t seed;
+  float x, y, radius_x, radius_y, base_z, height;
+} BroadLobe;
+
+/* A forked trunk under two side lobes and a top lobe; snow adds a fourth
+ * behind them. Shared by the model and its shadow outline. */
+typedef struct BranchingCrownShape {
+  SimBackgroundVoxelModelPoint trunk_start, trunk_end, fork_start, fork_end[2];
+  float trunk_radius0, trunk_radius1, fork_radius0, fork_radius1;
+  BroadLobe lobes[4];
+  int lobe_count;
+} BranchingCrownShape;
+
+static BranchingCrownShape ResolveBranchingCrown(uint32_t seed, float scale,
+                                                 bool snow) {
+  float cx = 8.0f * scale, cy = 7.4f * scale;
+  float sway = ((int)(seed & 3u) - 1.5f) * .12f;
+  BranchingCrownShape shape = {
+    .trunk_start = Point(cx, 10.0f * scale, 0),
+    .trunk_end = Point(cx + sway, cy, 9.0f * scale),
+    .fork_start = Point(cx, 9.0f * scale, 3.8f * scale),
+    .trunk_radius0 = 1.25f * scale, .trunk_radius1 = .55f * scale,
+    .fork_radius0 = .72f * scale, .fork_radius1 = .35f * scale,
+    .lobe_count = snow ? 4 : 3,
+  };
+  for (int side = 0; side < 2; side++) {
+    float x = cx + (side ? 3.0f : -3.0f) * scale + sway;
+    shape.fork_end[side] = Point(x, 7.8f * scale, 8.2f * scale);
+    shape.lobes[side] = (BroadLobe){seed + side, x, 7.5f * scale,
+        3.8f * scale, 3.9f * scale, (5.8f + side * .6f) * scale, 6.3f * scale};
+  }
+  shape.lobes[2] = (BroadLobe){seed + 3u, cx + sway, 4.7f * scale,
+      4.0f * scale, 3.5f * scale, 8.0f * scale, 6.0f * scale};
+  shape.lobes[3] = (BroadLobe){seed + 5u, cx + sway, 8.2f * scale,
+      4.7f * scale, 4.4f * scale, 6.7f * scale, 6.8f * scale};
+  return shape;
+}
+
 /* Three overlapping leaf clusters share a forked trunk. Large lobes are
  * silhouette features at Low too; fine subdivisions only soften their edges. */
 static void BuildBranchingCrown(SimBackgroundVoxelModel *model,
                                  SimBackgroundVoxelDetail detail,
                                  uint32_t seed, float scale, bool snow) {
-  float cx = 8.0f * scale, cy = 7.4f * scale;
-  float sway = ((int)(seed & 3u) - 1.5f) * .12f;
-  AddBranch(model, Point(cx, 10.0f * scale, 0),
-            Point(cx + sway, cy, 9.0f * scale),
-            1.25f * scale, .55f * scale, DetailChoice(detail, 4, 6, 8, 8));
-  for (int side = 0; side < 2; side++) {
-    float x = cx + (side ? 3.0f : -3.0f) * scale + sway;
-    AddBranch(model, Point(cx, 9.0f * scale, 3.8f * scale),
-              Point(x, 7.8f * scale, 8.2f * scale),
-              .72f * scale, .35f * scale, detail == kSimBackgroundVoxelDetail_Low ? 3 : 4);
-    AddBroadCrown(model, detail, seed + side, x, 7.5f * scale,
-                  3.8f * scale, 3.9f * scale,
-                  (5.8f + side * .6f) * scale, 6.3f * scale, snow);
+  const BranchingCrownShape shape = ResolveBranchingCrown(seed, scale, snow);
+  AddBranch(model, shape.trunk_start, shape.trunk_end,
+            shape.trunk_radius0, shape.trunk_radius1, DetailChoice(detail, 4, 6, 8, 8));
+  for (int lobe = 0; lobe < shape.lobe_count; lobe++) {
+    if (lobe < 2)
+      AddBranch(model, shape.fork_start, shape.fork_end[lobe],
+                shape.fork_radius0, shape.fork_radius1,
+                detail == kSimBackgroundVoxelDetail_Low ? 3 : 4);
+    const BroadLobe *crown = &shape.lobes[lobe];
+    AddBroadCrown(model, detail, crown->seed, crown->x, crown->y, crown->radius_x,
+                  crown->radius_y, crown->base_z, crown->height, snow);
   }
-  AddBroadCrown(model, detail, seed + 3u, cx + sway, 4.7f * scale,
-                4.0f * scale, 3.5f * scale, 8.0f * scale, 6.0f * scale, snow);
-  if (snow)
-    AddBroadCrown(model, detail, seed + 5u, cx + sway, 8.2f * scale,
-        4.7f * scale, 4.4f * scale, 6.7f * scale, 6.8f * scale, true);
 }
 
 static void BuildBroadTree(const SimBackgroundVoxelObject *object,
@@ -2170,17 +2148,58 @@ static void AddPalmFrond(
   }
 }
 
+enum { kPalmFronds = 8 };
+static const float kPalmTrunkTop = 11.8f;
+static const float kPalmShootZ = 13.05f;
+
+/* One palm's seeded lean, rotation and fronds, shared by the model and its
+ * shadow outline. */
+typedef struct PalmShape {
+  float lean_x, lean_y, center_x, center_y, rotation;
+  float angle[kPalmFronds], length[kPalmFronds], arch[kPalmFronds];
+  float droop[kPalmFronds], sweep[kPalmFronds];
+} PalmShape;
+
+static PalmShape ResolvePalmShape(const SimBackgroundVoxelObject *object) {
+  const float pi = 3.14159265f;
+  uint32_t seed = FoliageSeed(object);
+  PalmShape shape;
+  shape.lean_x = (seed & 1u) ? 0.60f : -0.60f;
+  shape.lean_y = (seed & 2u) ? 0.38f : -0.38f;
+  shape.center_x = 8.0f + shape.lean_x;
+  shape.center_y = 8.0f + shape.lean_y;
+  shape.rotation = 0.15f + ((seed >> 2) & 3u) * 0.055f;
+  for (int frond = 0; frond < kPalmFronds; frond++) {
+    shape.angle[frond] = shape.rotation + frond * pi * 0.25f;
+    shape.length[frond] = 6.1f + ((frond + (seed >> 4)) % 3u) * 0.20f;
+    shape.arch[frond] = 1.8f + ((frond * 3 + (seed >> 6)) % 4u) * 0.20f;
+    shape.droop[frond] = 2.5f + ((frond + (seed >> 8)) % 3u) * 0.40f;
+    shape.sweep[frond] = (frond & 1) ? 0.30f : -0.30f;
+  }
+  return shape;
+}
+
+/* Exactly the seed digits ResolvePalmShape reads: equal keys, equal palms. */
+static uint16_t PalmShapeKey(const SimBackgroundVoxelObject *object) {
+  uint32_t seed = FoliageSeed(object);
+  return (uint16_t)((seed & 15u) | ((seed >> 4) % 3u) << 4 |
+                    ((seed >> 6) % 4u) << 6 | ((seed >> 8) % 3u) << 8);
+}
+
+/* The stem tapers and eases into its lean toward the crown. */
+static SimBackgroundVoxelModelPoint PalmTrunkPoint(const PalmShape *shape,
+                                                   float z, float angle) {
+  float t = z / kPalmTrunkTop;
+  float radius = 0.60f + 0.43f * (1.0f - t) * (1.0f - t);
+  float x = 8.0f + shape->lean_x * t * t, y = 8.0f + shape->lean_y * t * t;
+  return Point(x + radius * cosf(angle), y + radius * sinf(angle), z);
+}
+
 static void BuildPalm(const SimBackgroundVoxelObject *object,
                       SimBackgroundVoxelDetail detail,
                       SimBackgroundVoxelModel *model) {
   const float pi = 3.14159265f;
-  uint32_t seed = (uint32_t)object->cell_x * 0x45D9F3Bu ^
-      (uint32_t)object->cell_y * 0x119DE1F3u ^
-      (uint32_t)object->group * 0x3449u;
-  float lean_x = (seed & 1u) ? 0.60f : -0.60f;
-  float lean_y = (seed & 2u) ? 0.38f : -0.38f;
-  float center_x = 8.0f + lean_x, center_y = 8.0f + lean_y;
-  float rotation = 0.15f + ((seed >> 2) & 3u) * 0.055f;
+  const PalmShape shape = ResolvePalmShape(object);
   static const int frond_segments[] = {2, 4, 8, 12};
   static const int trunk_sides[] = {5, 6, 6, 8};
   static const float low_heights[] = {0.0f, 5.7f, 11.8f};
@@ -2199,14 +2218,9 @@ static void BuildPalm(const SimBackgroundVoxelObject *object,
   SimBackgroundVoxelModelPoint previous[8];
   for (int ring = 0; ring <= sections[detail]; ring++) {
     float z = heights[ring];
-    float t = z / 11.8f;
-    float radius = 0.60f + 0.43f * (1.0f - t) * (1.0f - t);
-    float x = 8.0f + lean_x * t * t, y = 8.0f + lean_y * t * t;
     SimBackgroundVoxelModelPoint next[8];
-    for (int side = 0; side < sides; side++) {
-      float angle = rotation + side * 2.0f * pi / sides;
-      next[side] = Point(x + radius * cosf(angle), y + radius * sinf(angle), z);
-    }
+    for (int side = 0; side < sides; side++)
+      next[side] = PalmTrunkPoint(&shape, z, shape.rotation + side * 2.0f * pi / sides);
     if (ring > 0) {
       bool scar = z - heights[ring - 1] < 0.3f;
       for (int side = 0; side < sides; side++) {
@@ -2219,40 +2233,301 @@ static void BuildPalm(const SimBackgroundVoxelObject *object,
   }
   /* The stem and small green growing point share a ring. There is no buried
    * cap, cubic hub, root cross or separate collar to widen the silhouette. */
-  SimBackgroundVoxelModelPoint shoot = Point(center_x, center_y, 13.05f);
+  SimBackgroundVoxelModelPoint shoot = Point(shape.center_x, shape.center_y, kPalmShootZ);
   for (int side = 0; side < sides; side++) {
     int after = (side + 1) % sides;
     AddOutwardFace(model, kSimVoxelMaterial_Leaves, 235,
         previous[side], previous[after], shoot, shoot);
   }
-  for (int frond = 0; frond < 8; frond++) {
-    float angle = rotation + frond * pi * 0.25f;
-    float length = 6.1f + ((frond + (seed >> 4)) % 3u) * 0.20f;
-    float arch = 1.8f + ((frond * 3 + (seed >> 6)) % 4u) * 0.20f;
-    float droop = 2.5f + ((frond + (seed >> 8)) % 3u) * 0.40f;
-    float sweep = (frond & 1) ? 0.30f : -0.30f;
-    AddPalmFrond(model, center_x, center_y, angle, length, arch, droop, sweep,
+  for (int frond = 0; frond < kPalmFronds; frond++)
+    AddPalmFrond(model, shape.center_x, shape.center_y, shape.angle[frond],
+        shape.length[frond], shape.arch[frond], shape.droop[frond], shape.sweep[frond],
         frond_segments[detail], detail >= kSimBackgroundVoxelDetail_High, frond);
-  }
+}
+
+enum { kStoryTreeSeed = 2, kStoryTreeRoots = 4 };
+static const float kStoryTreeScale = 2.05f;
+
+/* Centre the wider ancient tree within its two-cell plot. */
+static SimBackgroundVoxelModelPoint StoryTreeCrownPlacement(
+    SimBackgroundVoxelModelPoint point) {
+  point.x -= .4f;
+  point.y += 1.5f;
+  point.z *= 1.035f;
+  return point;
+}
+
+/* Four broad roots anchor the landmark. Their open lower rings terminate
+ * in the terrain, and upper ends join the trunk rather than floating. */
+static void StoryTreeRoot(int root, SimBackgroundVoxelModelPoint *foot,
+                          SimBackgroundVoxelModelPoint *joint) {
+  float angle = root * 1.57079633f + .35f;
+  *foot = Point(16 + cosf(angle) * 3.8f, 22 + sinf(angle) * 3.8f, 0);
+  *joint = Point(16, 21.5f, 5.0f);
 }
 
 static void BuildStoryTree(SimBackgroundVoxelDetail detail,
                            SimBackgroundVoxelModel *model) {
-  BuildBranchingCrown(model, detail, 2u, 2.05f, true);
-  /* Centre the wider ancient tree within its two-cell plot. */
+  BuildBranchingCrown(model, detail, kStoryTreeSeed, kStoryTreeScale, true);
   for (uint16_t f = 0; f < model->face_count; f++)
-    for (int v = 0; v < 4; v++) {
-      model->faces[f].points[v].x -= .4f;
-      model->faces[f].points[v].y += 1.5f;
-      model->faces[f].points[v].z *= 1.035f;
-    }
-  /* Four broad roots anchor the landmark. Their open lower rings terminate
-   * in the terrain, and upper ends join the trunk rather than floating. */
-  for (int root = 0; root < 4; root++) {
-    float angle = root * 1.57079633f + .35f;
-    AddBranch(model, Point(16 + cosf(angle) * 3.8f, 22 + sinf(angle) * 3.8f, 0),
-              Point(16, 21.5f, 5.0f), 1.1f, .8f, 4);
+    for (int v = 0; v < 4; v++)
+      model->faces[f].points[v] = StoryTreeCrownPlacement(model->faces[f].points[v]);
+  for (int root = 0; root < kStoryTreeRoots; root++) {
+    SimBackgroundVoxelModelPoint foot, joint;
+    StoryTreeRoot(root, &foot, &joint);
+    AddBranch(model, foot, joint, 1.1f, .8f, 4);
   }
+}
+
+/* Foliage shadows are light-projected canopy outlines, not boxes. Each
+ * sampler walks the same crown surfaces as its model at a fixed density, so
+ * the outline follows the foliage without changing shape with render LOD:
+ * every tier's vertices lie on these surfaces, within a small chord error. */
+enum {
+  kShadowRingSides = 24,
+  kShadowBranchSides = 12,
+  kShadowShrubRings = 16,
+  kShadowLobeRings = 8,
+  kShadowFrondSegments = 12,
+  kShadowMaxSamples = 1024,
+};
+
+/* Only the rims can be silhouette extrema; a ground-level rim is flat. */
+static int AppendBranchShadow(SimBackgroundVoxelModelPoint *points, int count,
+                              SimBackgroundVoxelModelPoint start,
+                              SimBackgroundVoxelModelPoint end,
+                              float radius0, float radius1) {
+  BranchFrame frame;
+  if (!ResolveBranchFrame(start, end, &frame)) return count;
+  for (int side = 0; side < kShadowBranchSides; side++) {
+    float angle = side * 6.2831853f / kShadowBranchSides;
+    points[count++] = BranchRingPoint(&frame, false, radius0, angle);
+    points[count++] = BranchRingPoint(&frame, true, radius1, angle);
+  }
+  return count;
+}
+
+static int AppendLobeShadow(SimBackgroundVoxelModelPoint *points, int count,
+                            const BroadLobe *lobe) {
+  for (int ring = 0; ring <= kShadowLobeRings; ring++) {
+    float t = .5f - .5f * cosf(3.14159265f * ring / kShadowLobeRings);
+    /* Each pole is a single point. */
+    int sides = ring == 0 || ring == kShadowLobeRings ? 1 : kShadowRingSides;
+    for (int side = 0; side < sides; side++)
+      points[count++] = BroadCrownPoint(lobe->x, lobe->y, lobe->radius_x, lobe->radius_y,
+          lobe->base_z, lobe->height, side * 6.2831853f / kShadowRingSides, t, lobe->seed);
+  }
+  return count;
+}
+
+static int AppendBranchingCrownShadow(SimBackgroundVoxelModelPoint *points, int count,
+                                      const BranchingCrownShape *shape) {
+  count = AppendBranchShadow(points, count, shape->trunk_start, shape->trunk_end,
+                             shape->trunk_radius0, shape->trunk_radius1);
+  for (int lobe = 0; lobe < shape->lobe_count; lobe++) {
+    if (lobe < 2)
+      count = AppendBranchShadow(points, count, shape->fork_start, shape->fork_end[lobe],
+                                 shape->fork_radius0, shape->fork_radius1);
+    count = AppendLobeShadow(points, count, &shape->lobes[lobe]);
+  }
+  return count;
+}
+
+static int FoliageShadowSamples(const SimBackgroundVoxelObject *object,
+                                SimBackgroundVoxelModelPoint points[kShadowMaxSamples]) {
+  int count = 0;
+  switch ((SimBackgroundVoxelKind)object->kind) {
+    case kSimBackgroundVoxel_Shrub:
+      /* The rounded shrub needs intermediate rings. */
+      for (int ring = 0; ring <= kShadowShrubRings; ring++) {
+        float t = (1.0f - cosf(3.14159265f * ring / kShadowShrubRings)) * .5f;
+        for (int side = 0; side < kShadowRingSides; side++)
+          points[count++] = ShrubPoint(side * 6.2831853f / kShadowRingSides, t);
+      }
+      for (int corner = 0; corner < 4; corner++)
+        points[count++] = Point(corner & 1 ? 9 : 7, corner & 2 ? 9 : 7, 0);
+      return count;
+    case kSimBackgroundVoxel_Tree: {
+      /* A conifer needs only its outer branch rings, tip and trunk foot. */
+      TreeProfile profile = ResolveTreeProfile(object);
+      for (int ring = 1; ring < 8; ring += 2)
+        for (int side = 0; side < kShadowRingSides; side++)
+          points[count++] = TreeCrownPoint(&profile, kTreeCrownZ[ring], kTreeCrownRadius[ring],
+              side * 6.2831853f / kShadowRingSides);
+      points[count++] = TreeCrownPoint(&profile, 1, 0, 0);
+      for (int corner = 0; corner < 4; corner++)
+        points[count++] = Point(corner & 1 ? 8.95f : 7.05f, corner & 2 ? 8.95f : 7.05f, 0);
+      return count;
+    }
+    case kSimBackgroundVoxel_BroadTree: {
+      const BranchingCrownShape shape = ResolveBranchingCrown(FoliageSeed(object), 1.0f, false);
+      return AppendBranchingCrownShadow(points, 0, &shape);
+    }
+    case kSimBackgroundVoxel_StoryTree: {
+      const BranchingCrownShape shape =
+          ResolveBranchingCrown(kStoryTreeSeed, kStoryTreeScale, true);
+      count = AppendBranchingCrownShadow(points, 0, &shape);
+      for (int i = 0; i < count; i++) points[i] = StoryTreeCrownPlacement(points[i]);
+      for (int root = 0; root < kStoryTreeRoots; root++) {
+        SimBackgroundVoxelModelPoint foot, joint;
+        StoryTreeRoot(root, &foot, &joint);
+        count = AppendBranchShadow(points, count, foot, joint, 1.1f, .8f);
+      }
+      return count;
+    }
+    case kSimBackgroundVoxel_Palm: {
+      /* The stem's foot, the growing point, and all three edges of every
+       * frond. The tapering stem above its foot stays inside the fronds'
+       * outline, and feathered tiers only narrow a frond. */
+      const PalmShape shape = ResolvePalmShape(object);
+      for (int side = 0; side < kShadowBranchSides; side++)
+        points[count++] = PalmTrunkPoint(&shape, 0, side * 6.2831853f / kShadowBranchSides);
+      points[count++] = Point(shape.center_x, shape.center_y, kPalmShootZ);
+      for (int frond = 0; frond < kPalmFronds; frond++)
+        for (int segment = 0; segment <= kShadowFrondSegments; segment++) {
+          PalmFrondSection section = PalmFrondAt(shape.center_x, shape.center_y,
+              shape.angle[frond], shape.length[frond], shape.arch[frond],
+              shape.droop[frond], shape.sweep[frond], segment, kShadowFrondSegments, false);
+          points[count++] = section.left;
+          points[count++] = section.ridge;
+          points[count++] = section.right;
+        }
+      return count;
+    }
+    default:
+      return 0;
+  }
+}
+
+bool SimBackgroundVoxelModel_UsesFoliageShadow(const SimBackgroundVoxelObject *object) {
+  if (!object) return false;
+  switch ((SimBackgroundVoxelKind)object->kind) {
+    case kSimBackgroundVoxel_Tree:
+    case kSimBackgroundVoxel_BroadTree:
+    case kSimBackgroundVoxel_Palm:
+    case kSimBackgroundVoxel_Shrub:
+    case kSimBackgroundVoxel_StoryTree:
+      return true;
+    default:
+      return false;
+  }
+}
+
+uint16_t SimBackgroundVoxelModel_FoliageShadowVariant(const SimBackgroundVoxelObject *object) {
+  if (!object) return 0;
+  switch ((SimBackgroundVoxelKind)object->kind) {
+    case kSimBackgroundVoxel_Shrub:
+      return UINT16_MAX;
+    case kSimBackgroundVoxel_BroadTree:
+      /* The sway and every lobe outline read only the seed's low two bits. */
+      return (uint16_t)(0x0100u | (FoliageSeed(object) & 3u));
+    case kSimBackgroundVoxel_Palm:
+      return (uint16_t)(0x1000u | PalmShapeKey(object));
+    case kSimBackgroundVoxel_StoryTree:
+      return 0x2000u;
+    default:
+      /* Conifer crown geometry uses the seed's low four bits; higher bits only
+       * identify the object. Keep this identity beside the shared profile. */
+      return (uint16_t)((object->town << 4) | (FoliageSeed(object) & 15u));
+  }
+}
+
+bool SimBackgroundVoxelModel_CastsShadow(const SimBackgroundVoxelObject *object) {
+  return object && object->kind < kSimBackgroundVoxelKindCount &&
+      object->kind != kSimBackgroundVoxel_Boulder && object->kind != kSimBackgroundVoxel_Rocks &&
+      object->kind != kSimBackgroundVoxel_Bridge;
+}
+
+static int CompareShadowPoint(const void *left, const void *right) {
+  const SimBackgroundVoxelModelPoint *a = left, *b = right;
+  if (a->x != b->x) return a->x < b->x ? -1 : 1;
+  return a->y == b->y ? 0 : a->y < b->y ? -1 : 1;
+}
+
+static float ShadowCross(SimBackgroundVoxelModelPoint a,
+                         SimBackgroundVoxelModelPoint b,
+                         SimBackgroundVoxelModelPoint c) {
+  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+/* The extreme points in eight compass directions, taken counter-clockwise,
+ * bound a convex polygon inside the hull. Anything strictly inside it can
+ * never be a hull vertex, so dropping it before the sort leaves the outline
+ * unchanged and makes the per-pass cost scale with the rim, not the crown. */
+static int DiscardInteriorShadowPoints(SimBackgroundVoxelModelPoint *points, int count) {
+  static const float direction[8][2] = {
+    {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}, {0, -1}, {1, -1},
+  };
+  int extreme[8] = {0};
+  float reach[8];
+  for (int d = 0; d < 8; d++) reach[d] = -FLT_MAX;
+  for (int i = 0; i < count; i++)
+    for (int d = 0; d < 8; d++) {
+      float along = direction[d][0] * points[i].x + direction[d][1] * points[i].y;
+      if (along > reach[d]) {
+        reach[d] = along;
+        extreme[d] = i;
+      }
+    }
+  SimBackgroundVoxelModelPoint polygon[8];
+  int corners = 0;
+  for (int d = 0; d < 8; d++) {
+    SimBackgroundVoxelModelPoint p = points[extreme[d]];
+    if (!corners || p.x != polygon[corners - 1].x || p.y != polygon[corners - 1].y)
+      polygon[corners++] = p;
+  }
+  if (corners > 1 && polygon[corners - 1].x == polygon[0].x &&
+      polygon[corners - 1].y == polygon[0].y)
+    corners--;
+  if (corners < 3) return count;
+  int kept = 0;
+  for (int i = 0; i < count; i++) {
+    bool interior = true;
+    for (int edge = 0; edge < corners && interior; edge++)
+      interior = ShadowCross(polygon[edge], polygon[(edge + 1) % corners], points[i]) > 0;
+    if (!interior) points[kept++] = points[i];
+  }
+  return kept;
+}
+
+int SimBackgroundVoxelModel_FoliageShadowHull(
+    const SimBackgroundVoxelObject *object, float cast_x, float cast_y,
+    SimBackgroundVoxelModelPoint out[kSimBackgroundVoxelFoliageShadowMaxPoints]) {
+  if (!out || !SimBackgroundVoxelModel_UsesFoliageShadow(object) ||
+      !isfinite(cast_x) || !isfinite(cast_y)) return 0;
+  SimBackgroundVoxelModelPoint points[kShadowMaxSamples], hull[kShadowMaxSamples * 2];
+  int count = FoliageShadowSamples(object, points);
+  for (int i = 0; i < count; i++) {
+    points[i].x += points[i].z * cast_x;
+    points[i].y += points[i].z * cast_y;
+    points[i].z = 0;
+  }
+  count = DiscardInteriorShadowPoints(points, count);
+  qsort(points, count, sizeof(points[0]), CompareShadowPoint);
+  /* Coincident samples, such as the three edges meeting at a frond tip, must
+   * not reach the chain: under fused multiply-add the cross product of a
+   * repeated point is a rounding residual, not zero, and survives as a
+   * zero-length outline edge. */
+  int unique = 0;
+  for (int i = 0; i < count; i++)
+    if (!unique || points[i].x != points[unique - 1].x ||
+        points[i].y != points[unique - 1].y)
+      points[unique++] = points[i];
+  count = unique;
+  int n = 0;
+  for (int i = 0; i < count; i++) {
+    while (n >= 2 && ShadowCross(hull[n - 2], hull[n - 1], points[i]) <= 0) n--;
+    hull[n++] = points[i];
+  }
+  int upper = n + 1;
+  for (int i = count - 2; i >= 0; i--) {
+    while (n >= upper && ShadowCross(hull[n - 2], hull[n - 1], points[i]) <= 0) n--;
+    hull[n++] = points[i];
+  }
+  n--; /* The first vertex is repeated at the end. */
+  if (n < 3 || n > kSimBackgroundVoxelFoliageShadowMaxPoints) return 0;
+  memcpy(out, hull, n * sizeof(*out));
+  return n;
 }
 
 static void AddCastleGatehouse(SimBackgroundVoxelModel *model) {

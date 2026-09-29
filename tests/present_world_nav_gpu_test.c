@@ -2380,10 +2380,21 @@ typedef enum VoxelShadowScene {
   kVoxelShadowScene_Tree,
   kVoxelShadowScene_Shrub,
   kVoxelShadowScene_MixedFoliage,
+  kVoxelShadowScene_Palm,
+  kVoxelShadowScene_BroadTree,
+  kVoxelShadowScene_StoryTree,
 } VoxelShadowScene;
+
+/* Marahna's palms and mangroves, and the Northwall landmark, classify only in
+ * their own towns' cell maps. */
+static uint8_t VoxelShadowSceneTown(VoxelShadowScene scene) {
+  return scene == kVoxelShadowScene_StoryTree ? 6
+      : scene == kVoxelShadowScene_Palm || scene == kVoxelShadowScene_BroadTree ? 5 : 1;
+}
 
 static void BuildVoxelShadowScene(VoxelShadowScene scene, bool dense) {
   bool rocks = scene == kVoxelShadowScene_Rocks;
+  const uint8_t town = VoxelShadowSceneTown(scene);
   static uint8_t wram[kWramBytes];
   static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
   memset(wram, 0, sizeof(wram));
@@ -2392,15 +2403,20 @@ static void BuildVoxelShadowScene(VoxelShadowScene scene, bool dense) {
   for (int y = 0; y < 32; y++)
     for (int x = 0; x < 32; x++) {
       int quadrant = (y >= 16 ? 2 : 0) + (x >= 16 ? 1 : 0);
-      size_t cell = 0x12000 + quadrant * 0x100 + (y & 15) * 16 + (x & 15);
+      size_t cell = 0x12000 + (size_t)(town - 1) * 0x400 + quadrant * 0x100 +
+          (y & 15) * 16 + (x & 15);
       if (rocks && y == 4 && x >= 2 && x < 8) wram[cell] = rock_tiles[x - 2];
-      else if (!rocks && (dense || (x == 4 && y == 4)))
+      else if (scene == kVoxelShadowScene_StoryTree) {
+        if (x >= 4 && x < 6 && y >= 4 && y < 6) wram[cell] = 0xeb;
+      } else if (!rocks && (dense || (x == 4 && y == 4)))
         wram[cell] = scene == kVoxelShadowScene_Shrub ||
-            (scene == kVoxelShadowScene_MixedFoliage && ((x + y) & 1)) ? 0x01 : 0x0b;
+            (scene == kVoxelShadowScene_MixedFoliage && ((x + y) & 1)) ? 0x01
+            : scene == kVoxelShadowScene_Palm ? 0x09
+            : scene == kVoxelShadowScene_BroadTree ? 0x0e : 0x0b;
     }
   SimBackgroundVoxelRenderer_Reset(&g_render_device);
   SimBackgroundVoxels_Reset();
-  SimBackgroundVoxels_Build(1, wram, pixels, NULL, 1, 1, true);
+  SimBackgroundVoxels_Build(town, wram, pixels, NULL, 1, 1, true);
   CHECK(SimBackgroundVoxels_Scene()->object_count == (rocks ? 6 : dense ? 1024 : 1));
   SimBackgroundVoxelRenderer_Upload(&g_render_device);
   CHECK(SimBackgroundVoxelRenderer_Ready(SimBackgroundVoxels_Serial()));
@@ -2462,6 +2478,54 @@ static void RenderVoxelShadowPreview(SDL_Renderer *renderer,
   SaveImage(surface, name);
   SDL_DestroySurface(surface);
   ArRenderDevice_DestroyTexture(&g_render_device, mask);
+}
+
+/* Palms, broad canopies and the ancient tree used to extrude a box over their
+ * plot, which read as a dark square tile under every one of them. Each now
+ * casts its canopy outline: a rounded shadow that leaves the plot's corners
+ * lit, identical at every LOD and through both mask paths. `plot` is the
+ * footprint in town pixels; every scene places its plot at cell (4,4). */
+static void CheckCanopyOutlineShadow(SDL_Renderer *renderer,
+    SimBackgroundVoxelRenderParams params, VoxelShadowScene scene,
+    const char *name, int plot) {
+  BuildVoxelShadowScene(scene, false);
+  params.town = VoxelShadowSceneTown(scene);
+  params.serial = SimBackgroundVoxels_Serial();
+  char label[96];
+  snprintf(label, sizeof(label), "%s-overhead-mask", name);
+  SDL_Surface *overhead = RenderVoxelShadowProbe(renderer, &params, 0, 0, false, label);
+  const int area = ColorCount(overhead, 0xff000000);
+  const int x0 = 96, y0 = 96, last = plot - 2;
+  printf("%s overhead shadow: %d px of a %d px plot\n", name, area, plot * plot);
+  CHECK(area > plot * plot / 5 && area < plot * plot * 3 / 4);
+  CHECK(Pixel(overhead, x0 + plot / 2, y0 + plot / 2) == 0xff000000);
+  for (int corner = 0; corner < 4; corner++)
+    CHECK(Pixel(overhead, x0 + (corner & 1 ? last : 1), y0 + (corner & 2 ? last : 1)) ==
+          0xffffffff);
+  for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+    params.detail = detail;
+    for (int town_mask = 0; town_mask < 2; town_mask++) {
+      SDL_Surface *lod = RenderVoxelShadowProbe(renderer, &params, 0, 0, town_mask, NULL);
+      CHECK(Differences(overhead, lod) == 0);
+      SDL_DestroySurface(lod);
+    }
+  }
+  snprintf(label, sizeof(label), "%s-angled-mask", name);
+  SDL_Surface *right = RenderVoxelShadowProbe(renderer, &params, .8f, -.4f, false, label);
+  SDL_Surface *town = RenderVoxelShadowProbe(renderer, &params, .8f, -.4f, true, NULL);
+  CHECK(Differences(right, town) == 0);
+  SDL_DestroySurface(town);
+  SDL_Surface *left = RenderVoxelShadowProbe(renderer, &params, -.8f, .4f, true, NULL);
+  CHECK(ColorCount(right, 0xff000000) > area);
+  CHECK(FirstColorX(left, 0xff000000) < FirstColorX(right, 0xff000000));
+  CHECK(FirstColorY(left, 0xff000000) < FirstColorY(right, 0xff000000));
+  SDL_DestroySurface(overhead);
+  SDL_DestroySurface(right);
+  SDL_DestroySurface(left);
+  snprintf(label, sizeof(label), "%s-with-near-overhead-shadow", name);
+  RenderVoxelShadowPreview(renderer, params, false, 0, .0875f, label);
+  snprintf(label, sizeof(label), "%s-with-angled-shadow", name);
+  RenderVoxelShadowPreview(renderer, params, false, .8f, -.4f, label);
 }
 
 static void TestVoxelShadows(SDL_Renderer *renderer) {
@@ -2584,6 +2648,12 @@ static void TestVoxelShadows(SDL_Renderer *renderer) {
   RenderVoxelShadowPreview(renderer, params, false, .8f, -.4f, "mixed-foliage-with-shaped-shadows");
   puts("shrub shadows: rounded crowns, opposing lights, all LODs and both mask paths; "
        "1024 bushes and mixed tree/bush batches retain their individual profiles");
+  params.detail = kSimBackgroundVoxelDetail_Ultra;
+  CheckCanopyOutlineShadow(renderer, params, kVoxelShadowScene_Palm, "palm", 16);
+  CheckCanopyOutlineShadow(renderer, params, kVoxelShadowScene_BroadTree, "broad-canopy", 16);
+  CheckCanopyOutlineShadow(renderer, params, kVoxelShadowScene_StoryTree, "ancient-tree", 32);
+  puts("canopy outline shadows: palms, broad canopies and the ancient tree leave their "
+       "plot corners lit at every LOD, through both mask paths and opposing lights");
   SimBackgroundVoxelRenderer_Reset(&g_render_device);
   SimBackgroundVoxels_Reset();
 }

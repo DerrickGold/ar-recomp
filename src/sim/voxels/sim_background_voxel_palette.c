@@ -451,12 +451,15 @@ void SimBackgroundVoxelPalette_Build(
     case kSimBackgroundVoxel_Palm:
     case kSimBackgroundVoxel_BroadTree:
     case kSimBackgroundVoxel_Shrub: {
-      /* All four families are drawn from one CGRAM foliage ramp; which part of
-       * it they occupy is what separates them on screen. Measured from the
-       * source art: the evergreen ($0B) is 64% near-black, the broad canopy
-       * ($0E) centres on mid green, and the bush ($01) centres on bright
-       * green. These are lit albedos, so the evergreen preserves its darker
-       * family without reproducing the sprite's already-baked shadow mass. */
+      /* All four families are drawn from one CGRAM foliage ramp, the five
+       * greens (0,32,0) (0,57,0) (16,106,0) (32,148,0) (57,189,0) shared by
+       * the five green towns; which part of it they occupy is what separates
+       * them on screen. Material-aware shading lands nearly every lit face on
+       * a ramp's top step and side faces one below, so those two steps decide
+       * what a family looks like. Measured over every cell of each family in
+       * all five towns: the bush centres on bright green, the palm brighter
+       * still, the broad canopy on (16,106,0) and the evergreen is the
+       * darkest foliage in the town. */
       if (object->kind == kSimBackgroundVoxel_Shrub) {
         SetRamp(palette, kSimVoxelMaterial_Leaves,
                 Argb(0, 57, 0), Argb(0, 82, 0),
@@ -487,25 +490,31 @@ void SimBackgroundVoxelPalette_Build(
                 Argb(65, 49, 24), Argb(90, 74, 41),
                 Argb(123, 106, 65), Argb(148, 131, 82));
       } else if (object->kind == kSimBackgroundVoxel_Tree) {
-        /* The mesh already supplies shaded facets and recessed needle tiers.
-         * Do not bake the flat sprite's near-black mass into those surfaces a
-         * second time: preserve green midtones under directional light/AO. */
+        /* The native evergreen is (0,32,0) 53%, (0,57,0) 31% and (16,106,0)
+         * 15%. Lit needles top out at the sprite's mid step and only the
+         * highlight patches reach (16,106,0). An earlier ramp lifted these
+         * to invented midtones up to (41,156,0) so the facets would not bake
+         * the sprite's dark mass in twice; measured in Fillmore it rendered
+         * 2.7x the native brightness, brighter than the bushes beside it. */
         SetRamp(palette, kSimVoxelMaterial_Leaves,
-                Argb(0, 41, 0), Argb(0, 65, 0), Argb(8, 98, 0), Argb(16, 123, 0));
+                Argb(0, 32, 0), Argb(0, 32, 0), Argb(0, 32, 0), Argb(0, 57, 0));
         SetRamp(palette, kSimVoxelMaterial_LeavesLight,
-                Argb(0, 65, 0), Argb(8, 98, 0), Argb(24, 131, 0), Argb(41, 156, 0));
+                Argb(0, 32, 0), Argb(0, 57, 0), Argb(0, 57, 0), Argb(16, 106, 0));
         SetRamp(palette, kSimVoxelMaterial_LeavesDark,
-                Argb(0, 24, 0), Argb(0, 41, 0), Argb(0, 57, 0), Argb(0, 74, 0));
+                Argb(0, 32, 0), Argb(0, 32, 0), Argb(0, 32, 0), Argb(0, 57, 0));
       } else if (object->kind == kSimBackgroundVoxel_BroadTree) {
+        /* Native mangrove/oasis canopy: (16,106,0) 44%, (0,57,0) 31%,
+         * (32,148,0) 14% and (0,32,0) 12%, so (16,106,0) is the lit body and
+         * (32,148,0) only its highlight patches. */
         SetRamp(palette, kSimVoxelMaterial_Leaves,
                 Argb(0, 32, 0), Argb(0, 57, 0),
-                Argb(16, 106, 0), Argb(32, 148, 0));
+                Argb(0, 57, 0), Argb(16, 106, 0));
         SetRamp(palette, kSimVoxelMaterial_LeavesLight,
                 Argb(0, 57, 0), Argb(16, 106, 0),
-                Argb(32, 148, 0), Argb(32, 148, 0));
+                Argb(16, 106, 0), Argb(32, 148, 0));
         SetRamp(palette, kSimVoxelMaterial_LeavesDark,
                 Argb(0, 32, 0), Argb(0, 32, 0),
-                Argb(0, 57, 0), Argb(16, 106, 0));
+                Argb(0, 32, 0), Argb(0, 57, 0));
         /* The mangrove's exposed trunk and roots are a warm grey-brown, not
          * the evergreen's red-brown. */
         SetRamp(palette, kSimVoxelMaterial_Trunk,
@@ -544,19 +553,23 @@ void SimBackgroundVoxelPalette_Build(
               Argb(57, 41, 16), Argb(90, 74, 24),
               Argb(115, 98, 32), Argb(148, 131, 65));
       /* The crown's three bands have to stay apart after the face-brightness
-       * ramp, which lands most faces at the light end. Snow reads white, the
+       * ramp, which lands most faces at the light end. Snow reads pale, the
        * shaded middle stays a clear blue-grey and the underside is the deep
        * blue the source art uses; giving the middle band near-white steps
-       * flattened the whole canopy into one pale blob. */
+       * flattened the whole canopy into one pale blob. Every step is a
+       * colour of the $EB plot's own CGRAM row, whose snow is led by
+       * (205,213,222) at 34%: the former (238,246,255) top step appears
+       * nowhere in it and rendered the crown near-white. Adjacent snow steps
+       * stay about 15 luma apart so lit and side faces still separate. */
       SetRamp(palette, kSimVoxelMaterial_Snow,
-              Argb(164, 180, 205), Argb(197, 213, 230),
-              Argb(213, 222, 230), Argb(238, 246, 255));
+              Argb(139, 172, 197), Argb(164, 180, 205),
+              Argb(180, 197, 213), Argb(205, 213, 222));
       SetRamp(palette, kSimVoxelMaterial_LeavesLight,
-              Argb(90, 131, 172), Argb(115, 156, 189),
+              Argb(74, 115, 180), Argb(115, 156, 189),
               Argb(139, 172, 197), Argb(164, 180, 205));
       SetRamp(palette, kSimVoxelMaterial_LeavesDark,
-              Argb(49, 82, 148), Argb(74, 115, 180),
-              Argb(90, 131, 172), Argb(115, 156, 189));
+              Argb(74, 115, 180), Argb(74, 115, 180),
+              Argb(74, 115, 180), Argb(115, 156, 189));
       break;
     case kSimBackgroundVoxel_BloodpoolCastle:
       /* Sampled from the $EC plot: the castle is pale stone with tan-gold

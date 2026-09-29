@@ -65,14 +65,25 @@ int main(void) {
             &palette_a, kSimVoxelMaterial_Leaves) !=
         SimBackgroundVoxelPalette_Base(
             &palette_b, kSimVoxelMaterial_Leaves));
-  /* Foliage has real facet lighting and AO: its albedo must not bake the
-   * sprite's near-black shadow in a second time. Preserve three clear bands. */
-  uint32_t needles = SimBackgroundVoxelPalette_Base(&palette_a, kSimVoxelMaterial_Leaves);
-  uint32_t tips = SimBackgroundVoxelPalette_Base(&palette_a, kSimVoxelMaterial_LeavesLight);
-  uint32_t underside = SimBackgroundVoxelPalette_Base(&palette_a, kSimVoxelMaterial_LeavesDark);
-  CHECK(((needles >> 8) & 255u) >= 90u);
-  CHECK(((tips >> 8) & 255u) > ((needles >> 8) & 255u) + 20u);
-  CHECK(((underside >> 8) & 255u) + 30u < ((needles >> 8) & 255u));
+  /* The evergreen is the darkest foliage in the town and draws only on the
+   * shared CGRAM greens, like its sprite: lit needles are the sprite's
+   * (0,57,0) mid step, only highlight patches reach (16,106,0), and faces
+   * turned from the light are (0,32,0). This cell has no per-tree variation. */
+  SimBackgroundVoxelObject fir = tree_a;
+  fir.cell_x = 1;
+  fir.cell_y = 0;
+  SimBackgroundVoxelPalette fir_palette;
+  SimBackgroundVoxelPalette_Build(&fir, kSimBackgroundVoxelBiome_Temperate, &fir_palette);
+  uint32_t needles = SimBackgroundVoxelPalette_Ramp(
+      &fir_palette, kSimVoxelMaterial_Leaves, 255);
+  uint32_t tips = SimBackgroundVoxelPalette_Ramp(
+      &fir_palette, kSimVoxelMaterial_LeavesLight, 255);
+  uint32_t underside = SimBackgroundVoxelPalette_Ramp(
+      &fir_palette, kSimVoxelMaterial_LeavesDark, 200);
+  CHECK(needles == 0xFF003900u);
+  CHECK(tips == 0xFF106A00u);
+  CHECK(underside == 0xFF002000u);
+  CHECK(SimBackgroundVoxelPalette_Base(&fir_palette, kSimVoxelMaterial_Leaves) == 0xFF002000u);
 
   SimBackgroundVoxelPalette desert, northwall;
   SimBackgroundVoxelPalette_Build(
@@ -164,9 +175,12 @@ int main(void) {
       &temple, kSimBackgroundVoxelBiome_Tropical, &temple_palette);
   /* Landmark ramps are sampled from the landmark's own art. The story tree's
    * snow must survive the snow-biome foliage override that follows it, and the
-   * castle is pale stone rather than the town's purple house roofs. */
+   * castle is pale stone rather than the town's purple house roofs. The lit
+   * snow is the $EB plot's dominant (205,213,222), not an invented white. */
   CHECK(SimBackgroundVoxelPalette_Base(
-            &story_palette, kSimVoxelMaterial_Snow) == 0xFFD5DEE6u);
+            &story_palette, kSimVoxelMaterial_Snow) == 0xFFB4C5D5u);
+  CHECK(SimBackgroundVoxelPalette_Ramp(
+            &story_palette, kSimVoxelMaterial_Snow, 255) == 0xFFCDD5DEu);
   /* The canopy's three bands must stay apart after the face-brightness ramp,
    * or the whole crown flattens into one pale blob. */
   CHECK(SimBackgroundVoxelPalette_Base(
@@ -224,6 +238,16 @@ int main(void) {
         SimBackgroundVoxelPalette_Base(&broad_palette, kSimVoxelMaterial_LeavesLight));
   CHECK(broad_leaves != fir_leaves);
   CHECK(shrub_leaves != fir_leaves);
+  /* Lit leaves keep the sprites' own brightness order - bush, then broad
+   * canopy, then evergreen - which the former lifted evergreen reversed. */
+  uint32_t shrub_lit = SimBackgroundVoxelPalette_Ramp(
+      &shrub_palette, kSimVoxelMaterial_Leaves, 255);
+  uint32_t broad_lit = SimBackgroundVoxelPalette_Ramp(
+      &broad_palette, kSimVoxelMaterial_Leaves, 255);
+  uint32_t fir_lit = SimBackgroundVoxelPalette_Ramp(
+      &palette_a, kSimVoxelMaterial_Leaves, 255);
+  CHECK(((shrub_lit >> 8) & 255u) > ((broad_lit >> 8) & 255u) + 20u);
+  CHECK(((broad_lit >> 8) & 255u) > ((fir_lit >> 8) & 255u) + 20u);
 
   SimBackgroundVoxelObject palm = broad;
   palm.kind = kSimBackgroundVoxel_Palm;

@@ -748,7 +748,43 @@ static void CheckFoliageShadows(void) {
   CHECK(!memcmp(hull, same, n * sizeof(*hull)));
   CHECK(SimBackgroundVoxelModel_FoliageShadowHull(&shrub, 0, INFINITY, hull) == 0);
   repeat.kind = kSimBackgroundVoxel_House;
+  CHECK(!SimBackgroundVoxelModel_UsesFoliageShadow(&repeat));
   CHECK(SimBackgroundVoxelModel_FoliageShadowHull(&repeat, 0, 0, hull) == 0);
+  /* The renderer reuses one outline for every object with the same key: equal
+   * keys must build identical outlines, and no two families may share one. */
+  {
+    enum { kObjects = 96 };
+    static const SimBackgroundVoxelKind families[] = {
+      kSimBackgroundVoxel_Tree, kSimBackgroundVoxel_Shrub, kSimBackgroundVoxel_Palm,
+      kSimBackgroundVoxel_BroadTree, kSimBackgroundVoxel_StoryTree,
+    };
+    enum { kFamilies = sizeof(families) / sizeof(families[0]) };
+    static uint16_t keys[kFamilies][kObjects];
+    static int counts[kFamilies][kObjects];
+    static SimBackgroundVoxelModelPoint outlines[kFamilies][kObjects]
+        [kSimBackgroundVoxelFoliageShadowMaxPoints];
+    int shared = 0;
+    for (int family = 0; family < kFamilies; family++)
+      for (int at = 0; at < kObjects; at++) {
+        SimBackgroundVoxelObject object = {.kind = families[family], .town = 5,
+            .cell_x = at % 32, .cell_y = (at * 7) % 32, .group = at / 3};
+        keys[family][at] = SimBackgroundVoxelModel_FoliageShadowVariant(&object);
+        counts[family][at] = SimBackgroundVoxelModel_FoliageShadowHull(
+            &object, .3f, -.5f, outlines[family][at]);
+        CHECK(counts[family][at] >= 8);
+        for (int other = 0; other < family; other++)
+          for (int before = 0; before < kObjects; before++)
+            CHECK(keys[other][before] != keys[family][at]);
+        for (int before = 0; before < at; before++) {
+          if (keys[family][before] != keys[family][at]) continue;
+          shared++;
+          CHECK(counts[family][before] == counts[family][at]);
+          CHECK(!memcmp(outlines[family][before], outlines[family][at],
+                        counts[family][at] * sizeof(hull[0])));
+        }
+      }
+    CHECK(shared > kObjects); /* The property was exercised, not vacuous. */
+  }
   /* Curved crowns must still fit the outline budget at grazing light angles. */
   for (int slope = 0; slope <= 32; slope++)
     for (int direction = 0; direction < 24; direction++) {
@@ -758,7 +794,8 @@ static void CheckFoliageShadows(void) {
     }
   static const float casts[][2] = {{0, 0}, {.6f, -.4f}, {-.6f, .4f}, {2, 1}, {-2, -1}};
   static const SimBackgroundVoxelKind kinds[] = {
-    kSimBackgroundVoxel_Tree, kSimBackgroundVoxel_Shrub,
+    kSimBackgroundVoxel_Tree, kSimBackgroundVoxel_Shrub, kSimBackgroundVoxel_Palm,
+    kSimBackgroundVoxel_BroadTree, kSimBackgroundVoxel_StoryTree,
   };
   for (size_t kind = 0; kind < sizeof(kinds) / sizeof(kinds[0]); kind++)
     for (int town = 1; town <= 6; town++)
@@ -766,18 +803,32 @@ static void CheckFoliageShadows(void) {
         for (size_t cast = 0; cast < sizeof(casts) / sizeof(casts[0]); cast++) {
           SimBackgroundVoxelObject object = {.kind = kinds[kind], .town = town,
               .cell_x = seed, .cell_y = seed * 3};
+          CHECK(SimBackgroundVoxelModel_UsesFoliageShadow(&object));
+          /* The ancient tree owns a two-cell plot; the rest one cell. */
+          const float plot = kinds[kind] == kSimBackgroundVoxel_StoryTree ? 32 : 16;
           float dx = casts[cast][0], dy = casts[cast][1];
           int count = SimBackgroundVoxelModel_FoliageShadowHull(&object, dx, dy, hull);
           CHECK(count >= 8 && count <= kSimBackgroundVoxelFoliageShadowMaxPoints);
           float twice_area = 0;
+          float min_x = plot, min_y = plot, max_x = 0, max_y = 0;
           for (int i = 0; i < count; i++) {
             SimBackgroundVoxelModelPoint a = hull[i], b = hull[(i + 1) % count];
             CHECK(isfinite(a.x) && isfinite(a.y) && a.z == 0);
             twice_area += a.x * b.y - b.x * a.y;
-            if (!cast) CHECK(a.x > .5f && a.x < 15.5f && a.y > .5f && a.y < 15.5f);
+            min_x = fminf(min_x, a.x);
+            max_x = fmaxf(max_x, a.x);
+            min_y = fminf(min_y, a.y);
+            max_y = fmaxf(max_y, a.y);
+            if (!cast)
+              CHECK(a.x > .5f && a.x < plot - .5f && a.y > .5f && a.y < plot - .5f);
           }
           CHECK(twice_area > 120);
-          if (!cast) CHECK(twice_area < 290); /* Round canopy, not a 256px tile. */
+          if (!cast) {
+            /* A round canopy, never the plot's square: well under the plot,
+             * and cutting clearly into its own bounding box's corners. */
+            CHECK(twice_area < 1.13f * plot * plot);
+            CHECK(twice_area < 2 * .9f * (max_x - min_x) * (max_y - min_y));
+          }
           /* The inexpensive outline must enclose the light-projected model at
            * every LOD, to within the subpixel error of its twenty-four-sided rings. */
           for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
