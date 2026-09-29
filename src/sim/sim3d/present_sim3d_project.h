@@ -91,6 +91,10 @@ float SimObjectAltitudeBaseWorld(
 float SimObjectAltitudeBaseUnits(const FrameSlot *slot,
     const SimRenderObject *object, float map_x, float map_y);
 
+/* Building overlays float above their own roof; a mountain behind the bubble
+ * art must not shear or lift it as though it were a grounded actor. */
+bool SimObjectUsesMountainSurface(const SimRenderObject *object);
+
 SimBackgroundVoxelRenderParams SimVoxelRenderParams(
     const FrameSlot *slot, ArRenderRectI source, ArRenderRectI viewport,
     const float matrix[16]);

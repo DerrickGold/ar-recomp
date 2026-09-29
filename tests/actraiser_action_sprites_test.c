@@ -19,10 +19,15 @@ static SrPpuStateSnapshot s_ppu;
 static SrPpuObjPositionUpdate s_positions[128];
 static unsigned s_position_count, s_composition_reads;
 static int s_runner;
+static bool s_sim_test;
+static SrPpuObjPart s_sim_parts[4];
+static unsigned s_sim_part_count, s_sim_native_count, s_sim_clipped_count;
 static ActRaiserDisplayGeometry s_geometry;
 const ActRaiserDisplayGeometry *const g_actraiser_display_geometry = &s_geometry;
 extern RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu);
 extern RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu);
+extern RecompReturn ActRaiser_BuildSimSprites(CpuState *cpu);
+extern RecompReturn ActRaiser_BuildSimSpritesAlt(CpuState *cpu);
 
 static uint16_t Read(unsigned at) { return ByteOrder_ReadLe16(g_ram + at); }
 static void Write(unsigned at, uint16_t v) { ByteOrder_WriteLe16(g_ram + at, v); }
@@ -96,8 +101,7 @@ void ActRaiserActorArt_ResolvePart(const ActRaiserActorArtDraw *draw, unsigned i
   (void)part;
   assert(false);
 }
-/* The shared translation unit also contains SIM emitters, which these action
- * tests must never invoke. */
+/* Metadata sink for SIM edge fixtures. Action fixtures must never invoke it. */
 bool SimRenderMetadata_BeginRecord(uint16_t record, bool world, bool alternate,
                                    uint16_t composition, uint16_t x, uint16_t y, uint16_t type,
                                    uint16_t state, uint16_t status, uint16_t oam) {
@@ -111,39 +115,48 @@ bool SimRenderMetadata_BeginRecord(uint16_t record, bool world, bool alternate,
   (void)state;
   (void)status;
   (void)oam;
-  assert(false);
-  return false;
+  assert(s_sim_test);
+  return true;
+}
+SimObjectClassification Sim3D_ClassifyObject(uint8_t tier, uint16_t type, uint16_t state,
+                                            uint16_t record, uint16_t composition) {
+  (void)type;
+  (void)state;
+  assert(s_sim_test && tier == kSimRecordTier_World);
+  assert(record == kActRaiserWram_SimWorldRecords);
+  assert(composition == 0xD32B || composition == 0xD4FA);
+  return (SimObjectClassification){.traits = composition == 0xD32B
+      ? kSimObjectTrait_StructureOverlay : 0};
 }
 void SimRenderMetadata_RecordWord06(uint16_t v) {
   (void)v;
-  assert(false);
+  assert(s_sim_test);
 }
 void SimRenderMetadata_RecordAnchor(int16_t x, int16_t y) {
   (void)x;
   (void)y;
-  assert(false);
+  assert(s_sim_test);
 }
 void SimRenderMetadata_RecordPart(uint16_t oam, uint16_t attr) {
-  (void)oam;
   (void)attr;
-  assert(false);
+  assert(s_sim_test && oam == s_sim_native_count * 4);
+  ++s_sim_native_count;
 }
 void SimRenderMetadata_RecordExactOamPart(const SrPpuObjPart *p) {
-  (void)p;
-  assert(false);
+  assert(s_sim_test && s_sim_part_count < 4);
+  s_sim_parts[s_sim_part_count++] = *p;
 }
 void SimRenderMetadata_RecordSyntheticPart(uint16_t oam, const SrPpuObjPart *p) {
-  (void)oam;
-  (void)p;
-  assert(false);
+  assert(s_sim_test && oam == s_sim_native_count * 4 && s_sim_part_count < 4);
+  s_sim_parts[s_sim_part_count++] = *p;
 }
 void SimRenderMetadata_RecordClippedPart(uint8_t reason) {
   (void)reason;
-  assert(false);
+  assert(s_sim_test);
+  ++s_sim_clipped_count;
 }
 void SimRenderMetadata_EndRecord(uint16_t oam) {
-  (void)oam;
-  assert(false);
+  assert(s_sim_test && oam == s_sim_native_count * 4);
 }
 void SimRenderMetadata_RecordFlightPlan(SimEruptionFlightPlan plan) {
   (void)plan;
@@ -161,6 +174,8 @@ SimEruptionFlightPlan SimEruptionScript_ResolveFlight(SimEruptionScriptFetch fet
 }
 
 static void Reset(unsigned extend) {
+  s_sim_test = false;
+  s_sim_part_count = s_sim_native_count = s_sim_clipped_count = 0;
   memset(g_ram, 0, sizeof(g_ram));
   s_composition_reads = 0;
   s_ppu = (SrPpuStateSnapshot){
@@ -281,7 +296,63 @@ static void TestEmptyCompositionIsEmpty(void) {
   for (unsigned i = 0; i < 32; ++i)
     assert(g_ram[kActRaiserOamHighTable + i] == 0xa5);
 }
+static void TestCompleteBubblesAtWindowEdges(void) {
+  /* The bottom part crosses the flat emitter's edge while the projected
+   * bubble can still be visible above its roof. Check both emitters, every
+   * edge, and the two-pixel bounce through each boundary. */
+  const int edges[][2] = {{128,15}, {128,239}, {-8,128}, {264,128}};
+  for (unsigned alternate = 0; alternate < 2; ++alternate)
+    for (unsigned bubble = 0; bubble < 2; ++bubble)
+      for (unsigned edge = 0; edge < 4; ++edge)
+        for (int bounce = -3; bounce <= 3; ++bounce) {
+          Reset(0);
+          s_sim_test = true;
+          const unsigned record = kActRaiserWram_SimWorldRecords;
+          const unsigned composition = bubble ? 0xD32B : 0xD4FA;
+          const int x = edges[edge][0] + (edge >= 2 ? bounce : 0);
+          const int y = edges[edge][1] + (edge < 2 ? bounce : 0);
+          Write(record + 8, composition);
+          Write(record + 0x0a, (uint16_t)x);
+          Write(record + 0x0c, (uint16_t)y);
+          Write(0x9a, kActRaiserOamHighTable);
+          Write(0x9c, 1);
+          g_ram[composition] = 2;
+          unsigned expected_native = 0;
+          for (unsigned part = 0; part < 2; ++part) {
+            const unsigned at = composition + 1 + part * 5;
+            g_ram[at] = 1;  /* 16px part */
+            g_ram[at + 1] = 8;
+            g_ram[at + 2] = part ? 1 : 0xf1;
+            Write(at + 3, 0x2001 + part);
+            const int biased_y = y + (part ? 1 : -15);
+            expected_native += (uint16_t)(x + 8) < kSimSpriteWindowBiasedWidth &&
+                (uint16_t)biased_y < kSimSpriteWindowBiasedHeight;
+          }
+          CpuState cpu = {.X = record, .S = 0x1ff};
+          assert((alternate ? ActRaiser_BuildSimSpritesAlt(&cpu)
+                            : ActRaiser_BuildSimSprites(&cpu)) == RECOMP_RETURN_NORMAL);
+          assert(s_sim_native_count == expected_native);
+          assert(Read(0x98) == expected_native * 4);
+          assert(s_position_count == expected_native);
+          assert(s_sim_part_count == (bubble ? 2 : expected_native));
+          assert(s_sim_clipped_count == (bubble ? 0 : 2 - expected_native));
+          if (bubble)
+            for (unsigned part = 0; part < 2; ++part) {
+              assert(s_sim_parts[part].x == x - 8);
+              assert(s_sim_parts[part].y == y - 32 + (int)part * 16);
+              assert(s_sim_parts[part].size == 16);
+              assert(s_sim_parts[part].tile_attr ==
+                     (alternate ? 0x2601 + part : 0x2001 + part));
+            }
+        }
+}
+
 int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "sim-bubbles")) {
+    TestCompleteBubblesAtWindowEdges();
+    puts("SIM bubble edge regression passed");
+    return 0;
+  }
   if (argc == 2 && !strcmp(argv[1], "priority"))
     TestVerticalPartsCannotDisplaceNativeParts();
   else if (argc == 2 && !strcmp(argv[1], "empty"))

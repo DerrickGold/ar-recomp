@@ -967,6 +967,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_action_sprites_activation COMMAND actraiser_action_sprites_test)
     add_test(NAME actraiser_action_sprites_priority COMMAND actraiser_action_sprites_test priority)
     add_test(NAME actraiser_action_sprites_empty COMMAND actraiser_action_sprites_test empty)
+    add_test(NAME actraiser_sim_bubble_sprites COMMAND actraiser_action_sprites_test sim-bubbles)
 
     add_executable(actraiser_sprite_ownership_test
         tests/actraiser_sprite_ownership_test.c

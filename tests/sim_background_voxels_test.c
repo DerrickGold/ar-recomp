@@ -1426,8 +1426,8 @@ int main(int argc, char **argv) {
   SimBackgroundVoxels_Classify(5, wram, true, &scene);
   CHECK(FindKind(&scene, kSimBackgroundVoxel_MarahnaTemple) == NULL);
 
-  /* The eraser is selected from the current town rather than hardcoded to
-   * grass: a snowy town must repeat its complete snow tile under replacements. */
+  /* Snowy terrain keeps snow under lifted mountains and forests. Built plots
+   * use cleared grass even when no unoccupied grass cell is visible. */
   memset(wram, 0, sizeof(wram));
   for (int y = 0; y < kSimTownCanvasPixels; y++)
     for (int x = 0; x < kSimTownCanvasPixels; x++)
@@ -1446,6 +1446,28 @@ int main(int argc, char **argv) {
   snow_house[2] = 0x80;
   SetStructureDefinition(wram, 0x02, 0x0500, 0x0501, 0x0502, 0x0503);
   SetCanvasCell(wram, 4, 5, 0x0500, 0x0501, 0x0502, 0x0503);
+  uint8_t *snow_windmill = snow_house + 4;
+  snow_windmill[0] = 10;
+  snow_windmill[1] = 11;
+  snow_windmill[2] = 0x83;
+  uint8_t *snow_factory = snow_windmill + 4;
+  snow_factory[0] = 20;
+  snow_factory[1] = 20;
+  snow_factory[2] = 0x84;
+  SetStructureDefinition(wram, 0x24, 0x0404, 0x0405, 0x0406, 0x0407);
+  SetStructureDefinition(wram, 0x36, 0x0408, 0x0409, 0x040A, 0x040B);
+  SetCanvasCell(wram, 10, 11, 0x0404, 0x0405, 0x0406, 0x0407);
+  SetCanvasCell(wram, 20, 20, 0x0408, 0x0409, 0x040A, 0x040B);
+  SetTerrainDefinition(wram, 0x08, 0x0DE1, 0x0DE1, 0x0DE1, 0x0DE1);
+  for (int row = 0; row < 8; row++) vram[0x1E1 * 16 + row] = 0x55AA;
+  uint16_t plot_cgram[256] = {0};
+  plot_cgram[49] = 0x03E0;
+  plot_cgram[50] = 0x001F;
+  SimTownCanvas_Reset();
+  SimTownCanvas_Render(6, wram, vram, plot_cgram, 15, 0xFF000000);
+  uint32_t native_plot[16 * 16];
+  CHECK(SimTownCanvas_RenderTerrainMetatile(wram, 0x08, native_plot));
+  CHECK(native_plot[0] == 0xFF00FF00 && native_plot[1] == 0xFFFF0000);
   wram[TownCellIndex(5, 1, 1)] = kTileForest;
   FillCell(pixels, 1, 1, 0xFF087020);
   /* Northwall's green cathedral plot surrounds the masked source closely
@@ -1461,13 +1483,22 @@ int main(int argc, char **argv) {
   SimBackgroundVoxels_Build(6, wram, pixels, NULL, 2, 2, true);
   ground = SimBackgroundVoxels_GroundPixels();
   CHECK(ground[tree_center] == 0xFFFFFFFF);
-  CHECK(ground[house_center] == 0xFFFFFFFF);
+  CHECK(ground[house_center] == 0xFF00FF00);
+  CHECK(FindKind(SimBackgroundVoxels_Scene(), kSimBackgroundVoxel_Windmill));
+  CHECK(FindKind(SimBackgroundVoxels_Scene(), kSimBackgroundVoxel_Factory));
+  CHECK(ground[CellCentre(10, 11)] == 0xFF00FF00);
+  CHECK(ground[CellCentre(20, 20)] == 0xFF00FF00);
+  for (int y = 0; y < 16; y++)
+    for (int x = 0; x < 16; x++)
+      CHECK(ground[(size_t)(5 * 16 + y) * kSimTownCanvasPixels + 4 * 16 + x] ==
+            native_plot[y * 16 + x]);
   size_t cathedral_center = (size_t)(14 * 16 + 8) * kSimTownCanvasPixels + 14 * 16 + 8;
-  CHECK(ground[cathedral_center] == 0xFFFFFFFF);
+  CHECK(ground[cathedral_center] == 0xFF00FF00);
   CHECK(ground[mountain_corner] == 0xFFF0F2E8);
 
   /* Sun clears one snow patch to grass. It must not switch the shared ground
-   * beneath unrelated trees, buildings and mountain edges to that new patch. */
+   * beneath unrelated trees and mountain edges to that new patch. Built plots
+   * keep the raw cleared-grass source, independent of the nearby sample. */
   wram[TownCellIndex(5, 2, 2)] = 0x08;
   SetTerrainDefinition(wram, 0x08, 0x0DE1, 0x0DE1, 0x0DE1, 0x0DE1);
   SetCanvasCell(wram, 2, 2, 0x0DE1, 0x0DE1, 0x0DE1, 0x0DE1);
@@ -1475,8 +1506,8 @@ int main(int argc, char **argv) {
   SimBackgroundVoxels_Build(6, wram, pixels, NULL, 3, 3, true);
   ground = SimBackgroundVoxels_GroundPixels();
   CHECK(ground[tree_center] == 0xFFFFFFFF);
-  CHECK(ground[house_center] == 0xFFFFFFFF);
-  CHECK(ground[cathedral_center] == 0xFFFFFFFF);
+  CHECK(ground[house_center] == 0xFF00FF00);
+  CHECK(ground[cathedral_center] == 0xFF00FF00);
   CHECK(ground[mountain_corner] == 0xFFF0F2E8);
   CHECK(ground[(size_t)(2 * 16 + 8) * kSimTownCanvasPixels + 2 * 16 + 8] == 0xFF708030);
 
@@ -1491,11 +1522,28 @@ int main(int argc, char **argv) {
   SimBackgroundVoxels_Build(6, wram, pixels, NULL, 4, 4, true);
   ground = SimBackgroundVoxels_GroundPixels();
   CHECK(ground[tree_center] == 0xFFFFFFFF);
-  CHECK(ground[house_center] == 0xFFFFFFFF);
-  CHECK(ground[cathedral_center] == 0xFFFFFFFF);
+  CHECK(ground[house_center] == 0xFF00FF00);
+  CHECK(ground[cathedral_center] == 0xFF00FF00);
   CHECK(ground[mountain_corner] == 0xFFF0F2E8);
   CHECK(ground[8 * kSimTownCanvasPixels + 8] == 0xFF708030);
   CHECK(ground[(size_t)(2 * 16 + 8) * kSimTownCanvasPixels + 2 * 16 + 8] == 0xFF708030);
+
+  /* A palette-only publication recolours the hidden plot tile too, with no
+   * scene rebuild and no dependence on a live grass-cell sample. */
+  const uint32_t plot_scene_serial = SimBackgroundVoxels_SceneSerial();
+  SimTownCanvas_Render(6, wram, vram, plot_cgram, 7, 0xFF000000);
+  uint32_t faded_plot[16 * 16];
+  CHECK(SimTownCanvas_RenderTerrainMetatile(wram, 0x08, faded_plot));
+  CHECK(faded_plot[0] != 0xFF00FF00);
+  SimBackgroundVoxels_Build(6, wram, pixels, NULL, 5, 4, true);
+  ground = SimBackgroundVoxels_GroundPixels();
+  CHECK(SimBackgroundVoxels_SceneSerial() == plot_scene_serial);
+  CHECK(ground[house_center] == faded_plot[8 * 16 + 8]);
+  CHECK(ground[cathedral_center] == faded_plot[8 * 16 + 8]);
+  CHECK(ground[CellCentre(10, 11)] == faded_plot[8 * 16 + 8]);
+  CHECK(ground[CellCentre(20, 20)] == faded_plot[8 * 16 + 8]);
+  CHECK(ground[tree_center] == 0xFFFFFFFF);
+  CHECK(ground[mountain_corner] == 0xFFF0F2E8);
 
   /* A snow-coloured Northwall mountain follows the palette-independent rock
    * silhouette. The prior RGB mask erased white rock, while source alpha alone
@@ -1509,7 +1557,7 @@ int main(int argc, char **argv) {
   FillCell(pixels, 6, 6, 0xFFFFFFFF);
   SetSolidColourOneTile(vram, 1);
   SetCanvasTile(wram, 13, 13, 1);
-  SimBackgroundVoxels_Build(6, wram, pixels, NULL, 5, 5, true);
+  SimBackgroundVoxels_Build(6, wram, pixels, NULL, 6, 5, true);
   atlas = SimBackgroundVoxels_AtlasPixels();
   size_t north_mountain_opaque = (size_t)(6 * 16 + 3) * kSimTownCanvasPixels + 6 * 16 + 12;
   CHECK((atlas[mountain_corner] >> 24) == 0);

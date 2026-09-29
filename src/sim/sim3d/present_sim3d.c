@@ -115,8 +115,7 @@ static float SimObjectGroundDepth(
   SimObjectDrawnWorld(object, &world_x, &world_y);
   float depth_map_y = (float)world_y;
   float mountain_height = 0.0f;
-  if (Sim3D_HeightClassStandsOnTerrain(
-          (SimHeightClass)object->height_class)) {
+  if (SimObjectUsesMountainSurface(object)) {
     float surface_map_y;
     if (SimBackgroundVoxels_MountainSurface(
             world_x, world_y, &surface_map_y, &mountain_height))
@@ -397,8 +396,7 @@ static bool DrawSimObjectPriorityFiltered(
        * mountain geometry, which converts its own pixels straight through
        * `height / source.h`. */
       float surface_map_y = 0.0f, surface_height = 0.0f;
-      bool mountain_surface = Sim3D_HeightClassStandsOnTerrain(
-              (SimHeightClass)object->height_class) &&
+      bool mountain_surface = SimObjectUsesMountainSurface(object) &&
           SimBackgroundVoxels_MountainSurface(
               foot_anchor ? object->foot_x : (int)object->world_x,
               foot_anchor ? object->foot_y : (int)object->world_y,

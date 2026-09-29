@@ -1674,6 +1674,15 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
 
   uint16 part = cpu_read16(
       cpu, cpu->DB, (uint16)(record + kSimRecord_Composition));
+  /* Flat-window part culling must not change a roof-mounted bubble's atlas
+   * bounds or discard art still visible after its 3D lift. Retain its whole
+   * composition in the host channel; the projected viewport clips the final
+   * billboard. Real OAM continues through the authentic window below. */
+  const bool structure_overlay = world_record &&
+      (Sim3D_ClassifyObject(kSimRecordTier_World,
+          cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_Type)),
+          cpu_read16(cpu, cpu->DB, (uint16)(record + kSimRecord_State)) & 0x7FFF,
+          record, part).traits & kSimObjectTrait_StructureOverlay);
   const uint16 oam_before = ws_dp16(cpu, 0x98);
   bool began_build = SimRenderMetadata_BeginRecord(
       record, world_record != 0, alternate_attr != 0, part,
@@ -1833,7 +1842,7 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
          * the unallocated low-table slot without advancing either cursor. */
         cpu_write16(cpu, cpu->DB, (uint16)(0x0380 + oam), 0xE000);
         if (world_record && s_sim_ppu_state_valid &&
-            (eruption_record ||
+            (structure_overlay || eruption_record ||
              ws_biased_in_window(y_biased, extended_top, extended_bottom,
                                  kSimOamBiasedHeight))) {
           const uint16 raw_attr =
@@ -1857,9 +1866,10 @@ static RecompReturn ws_sim_build_sprites(CpuState *cpu, int alternate_attr) {
     } else {
       cpu_write16(cpu, cpu->DB, (uint16)(0x0380 + oam), 0xE000);
       if (world_record && s_sim_ppu_state_valid &&
-          ws_biased_in_window(x_biased, extended_left, extended_right,
-                              kSimOamBiasedWidth)) {
-        if (eruption_record ||
+          (structure_overlay ||
+           ws_biased_in_window(x_biased, extended_left, extended_right,
+                               kSimOamBiasedWidth))) {
+        if (structure_overlay || eruption_record ||
             ws_biased_in_window(y_biased, extended_top, extended_bottom,
                                 kSimOamBiasedHeight)) {
           const uint16 raw_attr =

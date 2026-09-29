@@ -968,7 +968,51 @@ static void CheckReviewFollowup(void) {
   }
 }
 
+static void CheckHousesMeetGroundWithoutSlabs(void) {
+  for (int town = 1; town <= kSimBackgroundTownCount; town++)
+    for (int level = 0; level < kSimBackgroundDevelopmentLevelCount; level++)
+      for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++)
+        for (int style = 0; style < kSimBackgroundVoxelStyle_Count; style++)
+          for (int alternate = 0; alternate < 2; alternate++)
+            for (int stage = 0; stage < 3; stage++) {
+              SimBackgroundVoxelObject object = {
+                .kind = kSimBackgroundVoxel_House, .town = town,
+                .development_level = level, .animation_phase = stage ? stage - 1 : 0,
+                .flags = (alternate ? kSimBackgroundVoxel_AlternateFacing : 0) |
+                    (stage ? kSimBackgroundVoxel_UnderConstruction : 0),
+              };
+              SimBackgroundVoxelModel model;
+              SimBackgroundVoxelModel_BuildStyled(&object, detail, style, &model);
+              CHECK(!model.overflow);
+              /* A broad, low box is a pedestal. Narrow steps and the raised
+               * floor of a stilt house are structural, and remain intact. */
+              bool slab = false;
+              for (int box = 0; box < model.box_count; box++) {
+                const SimBackgroundVoxelModelBox *b = &model.boxes[box];
+                slab |= b->z0 == 0 && b->z1 <= 2.1f &&
+                    b->x1 - b->x0 > 4 && b->y1 - b->y0 > 4;
+              }
+              CHECK(!slab);
+              CHECK(model.min_z == 0);
+              const bool stilts = !stage &&
+                  SimBackgroundVoxelRegion_ObjectHouseStyle(&object) ==
+                      kSimBackgroundHouseStyle_MarahnaStilt;
+              if (level > 0) {
+                float wall_min, wall_max;
+                MaterialZBounds(&model, kSimVoxelMaterial_Wall, &wall_min, &wall_max);
+                if (stage != 1 || level != 1 || town != 3)
+                  CHECK(wall_min == (stilts ? 5.3f : 0));
+              }
+              if (stilts) {
+                SimBackgroundVoxelModelContact contacts[kSimBackgroundVoxelModelMaxContacts];
+                CHECK(SimBackgroundVoxelModel_Contacts(&object, contacts) == 4);
+                CHECK(SurfaceHeightAt(&model, 8, 12) >= 5.3f);
+              }
+            }
+}
+
 int main(void) {
+  CheckHousesMeetGroundWithoutSlabs();
   CheckAuditRegressions();
   CheckRecognitionPolish();
   CheckEnvironmentModels();

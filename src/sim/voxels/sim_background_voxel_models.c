@@ -731,9 +731,7 @@ static void AddOpenChimney(SimBackgroundVoxelModel *model,
 
 static void BuildFillmoreHouse(SimBackgroundVoxelDetail detail,
                                SimBackgroundVoxelModel *model) {
-  AddStandardBox(model, 1.5f, 2.0f, 0.0f, 14.5f, 15.0f, 2.0f,
-                 kSimVoxelMaterial_Trim);
-  AddRoofedBox(model, 2.5f, 3.0f, 2.0f, 13.5f, 14.5f, 10.0f,
+  AddRoofedBox(model, 2.5f, 3.0f, 0.0f, 13.5f, 14.5f, 10.0f,
                kSimVoxelMaterial_Wall);
   /* A four-pixel rise keeps the gable recognizable without letting the roof
    * dominate the finished house. The older six-pixel rise was the remaining
@@ -747,7 +745,7 @@ static void BuildFillmoreHouse(SimBackgroundVoxelDetail detail,
   AddFace(model, kSimVoxelMaterial_Dark, 170,
       Point(10.7f, 4.7f, 15.6f), Point(12.1f, 4.7f, 15.6f),
       Point(12.1f, 6.3f, 15.6f), Point(10.7f, 6.3f, 15.6f));
-  AddStandardBox(model, 7.0f, 14.1f, 2.0f, 10.0f, 15.3f, 7.5f,
+  AddStandardBox(model, 7.0f, 14.1f, 0.0f, 10.0f, 15.3f, 7.5f,
                  kSimVoxelMaterial_Dark);
   if (detail == kSimBackgroundVoxelDetail_Low) return;
 
@@ -773,9 +771,9 @@ static void BuildFillmoreHouse(SimBackgroundVoxelDetail detail,
       AddStandardBox(model, x0 - 0.4f, 14.0f, 4.6f,
                      x1 + 0.4f, 15.4f, 5.0f, kSimVoxelMaterial_Trim);
     }
-    AddStandardBox(model, 6.5f, 14.0f, 2.0f, 7.0f, 15.5f, 7.5f,
+    AddStandardBox(model, 6.5f, 14.0f, 0.0f, 7.0f, 15.5f, 7.5f,
                    kSimVoxelMaterial_Trim);
-    AddStandardBox(model, 10.0f, 14.0f, 2.0f, 10.5f, 15.5f, 7.5f,
+    AddStandardBox(model, 10.0f, 14.0f, 0.0f, 10.5f, 15.5f, 7.5f,
                    kSimVoxelMaterial_Trim);
     AddStandardBox(model, 6.5f, 14.0f, 7.5f, 10.5f, 15.5f, 8.0f,
                    kSimVoxelMaterial_Trim);
@@ -784,12 +782,6 @@ static void BuildFillmoreHouse(SimBackgroundVoxelDetail detail,
   }
 
   if (detail == kSimBackgroundVoxelDetail_Ultra) {
-    for (int block = 0; block < 4; block++) {
-      float x0 = 2.0f + block * 3.0f;
-      AddStandardBox(model, x0, 14.4f, 0.5f, x0 + 2.2f, 15.4f, 2.1f,
-                     block & 1 ? kSimVoxelMaterial_WallLight
-                               : kSimVoxelMaterial_Trim);
-    }
     for (int rib = 0; rib < 4; rib++) {
       float y = 3.5f + rib * 2.5f;
       AddStandardBox(model, 6.8f, y, 14.7f, 9.2f, y + 0.45f, 15.2f,
@@ -1103,17 +1095,15 @@ static void BuildCanvasShelter(SimBackgroundVoxelDetail detail, bool alternate,
 
 static void BuildTimberHouse(SimBackgroundVoxelDetail detail,
                              SimBackgroundVoxelModel *model) {
-  AddStandardBox(model, 1.7f, 2.5f, 0.0f, 14.3f, 15.0f, 1.4f,
-                 kSimVoxelMaterial_Trim);
-  AddRoofedBox(model, 2.8f, 3.5f, 1.4f, 13.2f, 14.5f, 7.5f,
+  AddRoofedBox(model, 2.8f, 3.5f, 0.0f, 13.2f, 14.5f, 7.5f,
                kSimVoxelMaterial_Wall);
   AddGableRoofX(model, 1.5f, 14.5f, 2.5f, 15.0f, 7.5f, 11.5f,
                 kSimVoxelMaterial_Roof, kSimVoxelMaterial_WallLight);
-  AddFrontBand(model, 6.5f, 9.5f, 14.60f, 1.4f, 6.2f, kSimVoxelMaterial_Dark);
+  AddFrontBand(model, 6.5f, 9.5f, 14.60f, 0.0f, 6.2f, kSimVoxelMaterial_Dark);
   AddFrontBand(model, 2.8f, 6.4f, 14.54f, 3.0f, 3.65f, kSimVoxelMaterial_Wood);
   AddFrontBand(model, 9.6f, 13.2f, 14.54f, 3.0f, 3.65f, kSimVoxelMaterial_Wood);
-  AddFrontBand(model, 2.8f, 3.5f, 14.56f, 1.4f, 7.5f, kSimVoxelMaterial_Wood);
-  AddFrontBand(model, 12.5f, 13.2f, 14.56f, 1.4f, 7.5f, kSimVoxelMaterial_Wood);
+  AddFrontBand(model, 2.8f, 3.5f, 14.56f, 0.0f, 7.5f, kSimVoxelMaterial_Wood);
+  AddFrontBand(model, 12.5f, 13.2f, 14.56f, 0.0f, 7.5f, kSimVoxelMaterial_Wood);
   if (detail == kSimBackgroundVoxelDetail_Low) return;
   AddFrontBand(model, 3.5f, 5.8f, 14.60f, 3.4f, 5.9f, kSimVoxelMaterial_Dark);
   AddFrontBand(model, 10.2f, 12.5f, 14.60f, 3.4f, 5.9f, kSimVoxelMaterial_Dark);
@@ -1126,13 +1116,11 @@ static void BuildTimberHouse(SimBackgroundVoxelDetail detail,
 
 static void BuildBloodpoolHouse(SimBackgroundVoxelDetail detail,
                                 SimBackgroundVoxelModel *model) {
-  AddStandardBox(model, 1.2f, 2.0f, 0.0f, 14.8f, 15.0f, 1.5f,
-                 kSimVoxelMaterial_Trim);
-  AddRoofedBox(model, 2.0f, 3.0f, 1.5f, 14.0f, 14.5f, 9.0f,
+  AddRoofedBox(model, 2.0f, 3.0f, 0.0f, 14.0f, 14.5f, 9.0f,
                kSimVoxelMaterial_Wall);
   AddGableRoofX(model, 0.8f, 15.2f, 2.0f, 15.0f, 9.0f, 14.5f,
                 kSimVoxelMaterial_Roof, kSimVoxelMaterial_WallLight);
-  AddStandardBox(model, 6.5f, 14.1f, 1.5f, 10.0f, 15.4f, 7.4f,
+  AddStandardBox(model, 6.5f, 14.1f, 0.0f, 10.0f, 15.4f, 7.4f,
                  kSimVoxelMaterial_Dark);
   if (detail == kSimBackgroundVoxelDetail_Low) return;
   AddStandardBox(model, 10.8f, 14.0f, 4.0f, 13.0f, 15.2f, 7.0f,
@@ -1144,9 +1132,7 @@ static void BuildBloodpoolHouse(SimBackgroundVoxelDetail detail,
 
 static void BuildAdobeHouse(SimBackgroundVoxelDetail detail,
                             SimBackgroundVoxelModel *model) {
-  AddStandardBox(model, 1.0f, 2.0f, 0.0f, 15.0f, 15.0f, 1.3f,
-                 kSimVoxelMaterial_Trim);
-  AddStandardBox(model, 2.0f, 3.0f, 1.3f, 14.0f, 14.5f, 9.3f,
+  AddStandardBox(model, 2.0f, 3.0f, 0.0f, 14.0f, 14.5f, 9.3f,
                  kSimVoxelMaterial_Wall);
   AddStandardBox(model, 1.5f, 2.5f, 9.3f, 14.5f, 15.0f, 10.2f,
                  kSimVoxelMaterial_Roof);
@@ -1158,7 +1144,7 @@ static void BuildAdobeHouse(SimBackgroundVoxelDetail detail,
                  kSimVoxelMaterial_Trim);
   AddStandardBox(model, 13.0f, 4.0f, 10.2f, 14.0f, 13.5f, 11.0f,
                  kSimVoxelMaterial_Trim);
-  AddFrontBand(model, 6.2f, 9.8f, 14.60f, 1.3f, 7.2f, kSimVoxelMaterial_Dark);
+  AddFrontBand(model, 6.2f, 9.8f, 14.60f, 0.0f, 7.2f, kSimVoxelMaterial_Dark);
   if (detail == kSimBackgroundVoxelDetail_Low) return;
   AddFrontBand(model, 3.2f, 5.2f, 14.60f, 4.0f, 6.4f, kSimVoxelMaterial_Dark);
   AddFrontBand(model, 10.8f, 12.8f, 14.60f, 4.0f, 6.4f, kSimVoxelMaterial_Dark);
@@ -1180,9 +1166,7 @@ static void BuildAitosHouse(SimBackgroundVoxelDetail detail,
    * earlier model borrowed a pair of Fillmore-style gables, changing the
    * source silhouette into a peaked chalet. Keep the roof slab broad and the
    * parapet low so it reads as the original masonry terrace at town scale. */
-  AddStandardBox(model, 1.0f, 2.0f, 0.0f, 15.0f, 15.0f, 1.5f,
-                 kSimVoxelMaterial_Trim);
-  AddRoofedBox(model, 1.8f, 3.0f, 1.5f, 14.2f, 14.5f, 8.7f,
+  AddRoofedBox(model, 1.8f, 3.0f, 0.0f, 14.2f, 14.5f, 8.7f,
                kSimVoxelMaterial_Wall);
   AddStandardBox(model, 0.8f, 2.0f, 8.7f, 15.2f, 15.0f, 9.5f,
                  kSimVoxelMaterial_Roof);
@@ -1196,7 +1180,7 @@ static void BuildAitosHouse(SimBackgroundVoxelDetail detail,
                  kSimVoxelMaterial_Roof);
   AddStandardBox(model, 14.0f, 3.2f, 9.5f, 15.2f, 13.8f, 10.5f,
                  kSimVoxelMaterial_RoofLight);
-  AddFrontBand(model, 5.8f, 9.2f, 14.60f, 1.5f, 6.7f, kSimVoxelMaterial_Dark);
+  AddFrontBand(model, 5.8f, 9.2f, 14.60f, 0.0f, 6.7f, kSimVoxelMaterial_Dark);
   for (int beam = 0; beam < 4; beam++) {
     float x = 3.0f + beam * 3.0f;
     AddFace(model, kSimVoxelMaterial_Wood, 225,
@@ -1271,13 +1255,11 @@ static void BuildMarahnaStiltHouse(SimBackgroundVoxelDetail detail,
 
 static void BuildMarahnaLogCabin(SimBackgroundVoxelDetail detail,
                                  SimBackgroundVoxelModel *model) {
-  AddStandardBox(model, 1.4f, 2.5f, 0.0f, 14.6f, 15.0f, 1.2f,
-                 kSimVoxelMaterial_Trim);
-  AddRoofedBox(model, 2.2f, 3.5f, 1.2f, 13.8f, 14.5f, 8.0f,
+  AddRoofedBox(model, 2.2f, 3.5f, 0.0f, 13.8f, 14.5f, 8.0f,
                kSimVoxelMaterial_Wall);
   AddGableRoofX(model, 0.8f, 15.2f, 2.2f, 15.0f, 8.0f, 12.0f,
                 kSimVoxelMaterial_Roof, kSimVoxelMaterial_WallLight);
-  AddStandardBox(model, 6.3f, 14.0f, 1.2f, 9.7f, 15.3f, 6.8f,
+  AddStandardBox(model, 6.3f, 14.0f, 0.0f, 9.7f, 15.3f, 6.8f,
                  kSimVoxelMaterial_Dark);
   for (int course = 0; course < 3; course++) {
     float z = 2.1f + course * 1.9f;
@@ -1392,10 +1374,9 @@ static void BuildHouse(const SimBackgroundVoxelObject *object,
     float wall_height = phase ? 5.5f : 2.5f;
     float eave = phase ? 8.0f : 5.0f;
     float ridge = phase ? 12.0f : 8.0f;
-    AddStandardBox(model, 1.5f, 2.5f, 0, 14.5f, 15.0f, .8f, kSimVoxelMaterial_Trim);
-    AddStandardBox(model, 2, 3, .8f, 14, 4, wall_height, kSimVoxelMaterial_Wall);
-    AddStandardBox(model, 2, 13.5f, .8f, 6, 14.5f, wall_height, kSimVoxelMaterial_Wall);
-    AddStandardBox(model, 10, 13.5f, .8f, 14, 14.5f, wall_height, kSimVoxelMaterial_Wall);
+    AddStandardBox(model, 2, 3, 0, 14, 4, wall_height, kSimVoxelMaterial_Wall);
+    AddStandardBox(model, 2, 13.5f, 0, 6, 14.5f, wall_height, kSimVoxelMaterial_Wall);
+    AddStandardBox(model, 10, 13.5f, 0, 14, 14.5f, wall_height, kSimVoxelMaterial_Wall);
     AddGableFrame(model, 2.5f, 13.5f, 3.5f, eave, ridge, false);
     AddGableFrame(model, 2.5f, 13.5f, 14.0f, eave, ridge, false);
     AddStandardBox(model, 7.55f, 3.0f, ridge - .45f, 8.45f, 14.5f,
@@ -3174,9 +3155,7 @@ static void BuildAlternateFacingHouse(
   RecomputeModelBounds(model);
 
   uint16_t wing_first = model->face_count;
-  AddStandardBox(model, 0.7f, 4.0f, 0.0f, 6.4f, 15.0f, 1.5f,
-                 kSimVoxelMaterial_Trim);
-  AddStandardBox(model, 1.1f, 5.0f, 1.5f, 6.0f, 14.3f, 6.5f,
+  AddStandardBox(model, 1.1f, 5.0f, 0.0f, 6.0f, 14.3f, 6.5f,
                  kSimVoxelMaterial_WallLight);
   AddShedRoofX(model, 0.6f, 6.6f, 4.2f, 14.8f, 6.5f, 8.5f,
                kSimVoxelMaterial_RoofLight, kSimVoxelMaterial_WallLight);

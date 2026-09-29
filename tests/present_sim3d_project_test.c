@@ -143,7 +143,22 @@ static void TestEffects(void) {
   free(slot);
 }
 
+static void TestBubbleMountainPlacement(void) {
+  SimRenderObject object = {.height_class = kSimHeightClass_Grounded};
+  assert(SimObjectUsesMountainSurface(&object));
+  object.traits = kSimObjectTrait_StructureOverlay | kSimObjectTrait_Overhead;
+  assert(!SimObjectUsesMountainSurface(&object));
+  /* Overhead alone does not remove terrain support from ground effects. */
+  object.height_class = kSimHeightClass_GroundEffect;
+  object.traits = kSimObjectTrait_Overhead;
+  assert(SimObjectUsesMountainSurface(&object));
+  object.height_class = kSimHeightClass_Flying;
+  assert(!SimObjectUsesMountainSurface(&object));
+  assert(!SimObjectUsesMountainSurface(NULL));
+}
+
 int main(void) {
+  TestBubbleMountainPlacement();
   TestEffects();
   puts("present_sim3d_project_test: PASS");
 }

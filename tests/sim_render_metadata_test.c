@@ -1034,6 +1034,16 @@ static void TestMapPlaneSelectorTrait(void) {
   SimRenderMetadata_CaptureFrame(&frame, wram, true, false, kSimFeature_All, 0, kSimFeature_All);
   CHECK(!(frame.objects[0].traits & kSimObjectTrait_MapPlane));
   CHECK(!(frame.objects[0].traits & kSimObjectTrait_SelectionOverlay));
+  CHECK(frame.objects[0].traits & kSimObjectTrait_StructureOverlay);
+  CHECK(frame.objects[0].traits & kSimObjectTrait_Overhead);
+  /* Large map-selector squares share this range but must keep ordinary
+   * culling and ground placement. The emitter consumes this classification. */
+  const uint16_t selectors[] = {0xD4E5, 0xD4FA, 0xD538, 0xD576};
+  for (unsigned i = 0; i < sizeof(selectors) / sizeof(selectors[0]); i++) {
+    const SimObjectClassification selector = Sim3D_ClassifyObject(
+        kSimRecordTier_World, 0x09, 1, kActRaiserWram_SimWorldRecords, selectors[i]);
+    CHECK(!(selector.traits & kSimObjectTrait_StructureOverlay));
+  }
 }
 
 /* D3c: the locked height policy is a data table, so each documented identity

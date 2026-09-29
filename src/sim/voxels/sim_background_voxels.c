@@ -77,6 +77,7 @@ enum {
 typedef enum EnhancedReplacementKind {
   kEnhancedReplacement_None,
   kEnhancedReplacement_Ground,
+  kEnhancedReplacement_ClearedPlot,
   kEnhancedReplacement_BridgeEastWest,
   kEnhancedReplacement_BridgeNorthSouth,
 } EnhancedReplacementKind;
@@ -123,6 +124,7 @@ static SimBackgroundBridgeAxis ReplacementBridgeAxis(
       return kSimBackgroundBridgeAxis_NorthSouth;
     case kEnhancedReplacement_None:
     case kEnhancedReplacement_Ground:
+    case kEnhancedReplacement_ClearedPlot:
       return kSimBackgroundBridgeAxis_None;
   }
   return kSimBackgroundBridgeAxis_None;
@@ -1188,17 +1190,25 @@ static void BuildEnhancedReplacementPlan(
     int y0 = object->cell_y * kSimBackgroundCellPixels;
     int width = object->source_cells_w * kSimBackgroundCellPixels;
     int height = object->source_cells_h * kSimBackgroundCellPixels;
+    EnhancedReplacementKind replacement_kind = kEnhancedReplacement_Ground;
+    /* Northwall's buildings occupy thawed grass plots. Reusing the snow
+     * eraser needed by forests and mountain edges leaves a white square
+     * beneath the house after its authentic art is lifted away. */
+    if (scene->town == 6 &&
+        (object->kind == kSimBackgroundVoxel_House ||
+         object->kind == kSimBackgroundVoxel_Cathedral ||
+         object->kind == kSimBackgroundVoxel_Windmill ||
+         object->kind == kSimBackgroundVoxel_Factory))
+      replacement_kind = kEnhancedReplacement_ClearedPlot;
+    if (object->kind == kSimBackgroundVoxel_Bridge) {
+      /* Mask the entire authored metatile, not only its nominal roadway.
+       * Pale rail pixels live outside that band and otherwise survive as
+       * a second, detached bridge in the projected ground texture. */
+      replacement_kind = BridgeReplacementKind(
+          (SimBackgroundBridgeAxis)object->bridge_axis);
+    }
     for (int y = 0; y < height; y++)
       for (int x = 0; x < width; x++) {
-        EnhancedReplacementKind replacement_kind =
-            kEnhancedReplacement_Ground;
-        if (object->kind == kSimBackgroundVoxel_Bridge) {
-          /* Mask the entire authored metatile, not only its nominal roadway.
-           * Pale rail pixels live outside that band and otherwise survive as
-           * a second, detached bridge in the projected ground texture. */
-          replacement_kind = BridgeReplacementKind(
-              (SimBackgroundBridgeAxis)object->bridge_axis);
-        }
         size_t at = (size_t)(y0 + y) * kSimTownCanvasPixels +
             (size_t)(x0 + x);
         s_object_mask[at] = (uint8_t)replacement_kind;
@@ -1228,6 +1238,8 @@ typedef struct RefreshRowsWork {
   int *ground_first, *ground_end, *atlas_first, *atlas_end;
   bool have_general_ground, scene_changed;
   int ground_x0, ground_y0;
+  bool have_cleared_plot;
+  uint32_t cleared_plot[kSimBackgroundCellPixels * kSimBackgroundCellPixels];
   uint32_t bridge_river[kSimBackgroundBridgeAxis_Count]
       [kSimBackgroundCellPixels * kSimBackgroundCellPixels];
   bool have_bridge_river[kSimBackgroundBridgeAxis_Count];
@@ -1244,9 +1256,9 @@ static void RefreshEnhancedRows(void *context, size_t first, size_t end) {
   const uint8_t *source_opaque = work->source_opaque;
   static const uint32_t zeroes[kRefreshChunkPixels];
 
-  /* The same complete biome tile erases every source cell. Grass towns keep
-   * their grass texture, Northwall keeps snow, and no nearest-pixel flood can
-   * create streaks around a large forest, cathedral, or lifted mountain. */
+  /* Complete native ground tiles replace upright artwork. Northwall's built
+   * plots use cleared grass while forests and mountain edges keep snow. No
+   * neighbouring building or local miracle can become an eraser sample. */
   for (size_t row = first; row < end; row++) {
     const int y = (int)row;
     uint32_t ground_changed = 0, atlas_changed = 0;
@@ -1276,9 +1288,14 @@ static void RefreshEnhancedRows(void *context, size_t first, size_t end) {
             ? pixels + (size_t)(work->ground_y0 + y % kSimBackgroundCellPixels) *
                 kSimTownCanvasPixels + work->ground_x0
             : pixels + row_at,
+        [kEnhancedReplacement_ClearedPlot] = NULL,
         [kEnhancedReplacement_BridgeEastWest] = NULL,
         [kEnhancedReplacement_BridgeNorthSouth] = NULL,
       };
+      source_rows[kEnhancedReplacement_ClearedPlot] = work->have_cleared_plot
+          ? work->cleared_plot +
+              (y % kSimBackgroundCellPixels) * kSimBackgroundCellPixels
+          : source_rows[kEnhancedReplacement_Ground];
       for (int kind = kEnhancedReplacement_BridgeEastWest;
            kind <= kEnhancedReplacement_BridgeNorthSouth; kind++) {
         if (!plan.mixed_replacement && plan.replacement != kind) continue;
@@ -1357,6 +1374,11 @@ static void RefreshEnhancedPixels(
     .ground_x0 = g_background.general_ground_cell_x * kSimBackgroundCellPixels,
     .ground_y0 = g_background.general_ground_cell_y * kSimBackgroundCellPixels,
   };
+  /* Render from current CHR/CGRAM rather than searching for a visible grass
+   * cell: the cleared plots may all be occupied. Pixel refreshes also carry
+   * palette animation and fades into this hidden source without a rebuild. */
+  work.have_cleared_plot = scene->town == 6 &&
+      SimTownCanvas_RenderTerrainMetatile(wram, 0x08, work.cleared_plot);
   for (int axis = kSimBackgroundBridgeAxis_EastWest;
        axis <= kSimBackgroundBridgeAxis_NorthSouth; axis++) {
     work.have_bridge_river[axis] = SimTownCanvas_RenderTerrainMetatile(

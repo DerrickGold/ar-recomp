@@ -32,6 +32,12 @@ bool ProjectSimCurvedAnchor(const FrameSlot *slot,
       PresentSimGlobeProject_Point(globe,native_x,native_y,support,
           altitude_pixels,point);
 }
+
+bool SimObjectUsesMountainSurface(const SimRenderObject *object) {
+  return object && !(object->traits & kSimObjectTrait_StructureOverlay) &&
+      Sim3D_HeightClassStandsOnTerrain((SimHeightClass)object->height_class);
+}
+
 /* Grounded art follows the audited surface beneath its feet. Flyers instead
  * share one world-space datum above the town's highest relief, so crossing a
  * ridge changes their clearance and shadow but never physically shoves the
