@@ -188,6 +188,15 @@ inaccessible, set `input_device = Keyboard` in `settings.ini` with the game
 closed. When the log reports `gamepads=0`, this suppression cannot be the cause.
 
 Startup requests focus once; the window manager decides whether to grant it.
+On macOS, fullscreen startup first waits for the pending window transition
+using SDL's bounded synchronization so activation does not race the animation.
+The status also records `paused`, `inspector`, `inspector-selection`, and
+`inspector-owns-pause`. A saved scene-inspector toggle leaves click-to-inspect
+armed at startup, even with debug settings hidden. Selecting a point pauses
+gameplay and logs `inspector-selected`; right-click clears it and logs
+`inspector-cleared`. Esc/F1 remain available while inspecting. F3 turns the
+inspector off and saves that choice; with the game closed, set
+`scene_inspector = Off` in `settings.ini` for the same effect.
 A recurring failure report should include the affected launch's log, whether
 the animation continued, and whether clicking or switching away and back helped.
 
@@ -627,6 +636,7 @@ and then checked against this project's WRAM map and save fixtures.
 A developer tool: enable it with `F3`, its Inspector-submenu toggle, or
 `AR_SCENE_INSPECTOR=1` (the Inspector tab itself is hidden unless *Show debug
 settings* is on).
+The toggle is saved across launches; hiding debug settings does not disable it.
 
 Left-click the game viewport to freeze and inspect a frame. The panel reports
 game mode, camera and PPU state, BG tiles and OAM sprites under the pointer,

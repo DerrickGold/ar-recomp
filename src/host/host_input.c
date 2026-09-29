@@ -51,7 +51,8 @@ void HostInput_LogStatus(const char *reason) {
   fprintf(stderr,
       "[input] %s: ms=%llu window=%u keyboard-focus=%u mouse-focus=%u flags=$%llx "
       "mode=%s gamepads=%d pad-active=%d key-suppressed=%d "
-      "overlay=%d capture=%d key-seen=%d mouse-click-seen=%d\n",
+      "overlay=%d capture=%d paused=%d inspector=%d inspector-selection=%d "
+      "inspector-owns-pause=%d key-seen=%d mouse-click-seen=%d\n",
       reason, (unsigned long long)SDL_GetTicks(),
       g_window ? (unsigned)SDL_GetWindowID(g_window) : 0,
       keyboard ? (unsigned)SDL_GetWindowID(keyboard) : 0,
@@ -60,7 +61,9 @@ void HostInput_LogStatus(const char *reason) {
       mode >= 0 && mode < kInputDevice_Count ? kDeviceNames[mode] : "Unknown",
       InputMap_GamepadCount(), InputMap_GamepadIsActive(),
       HostInput_KeyboardIsSuppressed(), SettingsOverlay_IsOpen(),
-      SettingsOverlay_IsCapturing(), s_logged_key_down, s_logged_mouse_down);
+      SettingsOverlay_IsCapturing(), s_paused, g_settings.scene_inspector,
+      SceneInspector_HasSelection(), s_inspector_owns_pause,
+      s_logged_key_down, s_logged_mouse_down);
 }
 
 void HostInput_HandleKeyboard(int scancode, bool pressed, bool repeated) {
@@ -166,15 +169,18 @@ void HostInput_OnInspectorSelection(bool had_selection) {
   if (!had_selection) s_inspector_owns_pause = !s_paused;
   HostInput_ClearHeld();
   s_paused = true;
+  if (!had_selection) HostInput_LogStatus("inspector-selected");
 }
 
 void HostInput_CloseInspectorSelection(void) {
+  const bool had_selection = SceneInspector_HasSelection();
   SceneInspector_Clear();
   SettingsOverlay_HideDebugPanel();
   HostDevTools_ClearInspectorPresentation();
   if (s_inspector_owns_pause) s_paused = false;
   s_inspector_owns_pause = false;
   HostInput_ClearHeld();
+  if (had_selection) HostInput_LogStatus("inspector-cleared");
 }
 
 void HostInput_AdjustSim3DCamera(float yaw_delta, float pitch_delta,

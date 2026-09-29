@@ -25,8 +25,9 @@ extern bool g_gpu_shaders_active;
  * A hidden_capture window (AR_HEADLESS_VIDEO) stays hidden, runs without vsync
  * and never goes exclusive fullscreen. Dies on failure. */
 void HostVideo_Create(const char *title, bool hidden_capture);
-/* Requests keyboard focus once and logs the immediate state; the window
- * manager may grant focus asynchronously or refuse the request. */
+/* Settles macOS startup fullscreen, then requests keyboard focus once and logs
+ * the immediate state. The window manager may still grant focus asynchronously
+ * or refuse the request. Call only for the visible startup window. */
 void HostVideo_TakeFocus(void);
 void HostVideo_Destroy(void);
 

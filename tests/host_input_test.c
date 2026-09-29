@@ -34,6 +34,7 @@
 
 static bool s_overlay, s_capture, s_pad_active, s_manual, s_diorama;
 static bool s_close_menu, s_diorama_drag, s_sim_drag;
+static bool s_inspector_selection;
 static int s_pads, s_keys, s_pad_events, s_menu_keys, s_menu_pads;
 static int s_clears, s_mouse, s_text, s_actions;
 static const char *s_last_setting;
@@ -94,7 +95,10 @@ void HostDevTools_ArmDioramaDump(void) {
 void HostDevTools_ClearInspectorPresentation(void) {
 }
 bool HostDevTools_InspectWindowPoint(int window_x, int window_y) {
-  return 0;
+  const bool had_selection = s_inspector_selection;
+  s_inspector_selection = true;
+  HostInput_OnInspectorSelection(had_selection);
+  return true;
 }
 void HostDevTools_TakeFullSnapshot(void) {
 }
@@ -180,9 +184,10 @@ bool RuntimeSettings_HandleAction(const SettingDesc * desc) {
   return true;
 }
 void SceneInspector_Clear(void) {
+  s_inspector_selection = false;
 }
 bool SceneInspector_HasSelection(void) {
-  return 0;
+  return s_inspector_selection;
 }
 void SessionFatal_Request(const char * format, ...) {
 }
@@ -349,6 +354,46 @@ int main(void) {
   assert(!HostInput_IsPausedRedrawPending() && !HostInput_InspectorOwnsPause());
   HostInput_EndSession();
   assert(!s_input_open && !s_action_handler);
+
+  /* A saved inspector toggle does not capture keyboard input. Selecting a
+   * point pauses gameplay, but settings remain reachable; clearing the point
+   * releases only a pause introduced by the inspector. */
+  s_pads = 0;
+  s_diorama = false;
+  g_settings.scene_inspector = true;
+  HostInput_BeginSession();
+  const int keys_before_inspector = s_keys;
+  Key(SDL_EVENT_KEY_DOWN, SDLK_A);
+  assert(s_keys == keys_before_inspector + 1 && !HostInput_IsPaused());
+  event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+  event.button.button = SDL_BUTTON_LEFT;
+  assert(HostInput_HandleEvent(&event));
+  assert(s_inspector_selection && HostInput_IsPaused());
+  assert(HostInput_InspectorOwnsPause());
+  assert(HostInput_HandleEvent(&event));
+  assert(HostInput_InspectorOwnsPause());
+  Key(SDL_EVENT_KEY_DOWN, SDLK_A);
+  assert(s_keys == keys_before_inspector + 2);
+  Key(SDL_EVENT_KEY_DOWN, SDLK_ESCAPE);
+  assert(s_overlay && HostInput_IsPaused());
+  s_close_menu = true;
+  Key(SDL_EVENT_KEY_DOWN, SDLK_ESCAPE);
+  assert(!s_overlay);
+  s_close_menu = false;
+  event.button.button = SDL_BUTTON_RIGHT;
+  assert(HostInput_HandleEvent(&event));
+  assert(!s_inspector_selection && !HostInput_IsPaused());
+  assert(!HostInput_InspectorOwnsPause());
+
+  HostInput_TogglePause();
+  event.button.button = SDL_BUTTON_LEFT;
+  assert(HostInput_HandleEvent(&event));
+  assert(s_inspector_selection && !HostInput_InspectorOwnsPause());
+  event.button.button = SDL_BUTTON_RIGHT;
+  assert(HostInput_HandleEvent(&event));
+  assert(!s_inspector_selection && HostInput_IsPaused());
+  HostInput_TogglePause();
+  HostInput_EndSession();
   puts("host input: modal routing, device arbitration and releases passed");
   return 0;
 }

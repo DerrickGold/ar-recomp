@@ -180,6 +180,16 @@ void HostVideo_Create(const char *title, bool hidden_capture) {
 }
 
 void HostVideo_TakeFocus(void) {
+#if defined(__APPLE__)
+  /* Cocoa enters fullscreen asynchronously. Raising the window during that
+   * transition can leave it accepting mouse clicks with no keyboard focus.
+   * Finish the startup transition before the single activation request.
+   * SDL bounds this wait; a timeout is diagnostic, not a startup failure. */
+  if (g_settings.window_mode != kWindowMode_Windowed &&
+      !SDL_SyncWindow(g_window))
+    fprintf(stderr, "[window] startup fullscreen did not settle: %s\n",
+            SDL_GetError());
+#endif
   /* Direct launches from the builder or terminal may need to activate the
    * application. Request this once at startup. A successful request does not
    * prove focus was granted; the event loop logs subsequent focus changes. */
