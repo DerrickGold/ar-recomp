@@ -38,11 +38,14 @@ RULES = {
         'src/actraiser/enhancements/*'],
     'sim/world_nav/present_world_nav_internal.h': [
         'src/sim/world_nav/present_world_nav*.c', 'src/sim/world_nav/present_sim_globe.c'],
+    'action/action_environment_capture_internal.h': [
+        'src/action/action_effects.c', 'src/action/action_*_effect_capture.c'],
     'action/action_effect_render_internal.h': [
         'src/action/action_effect_render.c', 'src/action/action_scene_effect_render.c',
         'src/action/action_cave_effect_render.c', 'src/action/action_bloodpool_effect_render.c',
         'src/action/action_bloodpool_detail_render.c',
         'src/action/action_castle_effect_render.c',
+        'src/action/action_forest_effect_render.c', 'src/action/action_environment_geometry.c',
         'src/action/action_scene_lightning_render.c'],
     'platform/sdl/sim3d_depth_pass_sdl_internal.h': [
         'src/platform/sdl/sim3d_depth_pass*_sdl.c'],

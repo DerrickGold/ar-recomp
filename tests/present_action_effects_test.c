@@ -476,6 +476,16 @@ static void ForestFoliageComposition(void) {
   assert(b.geometries == 6);
   assert(b.geometry_blends[4] == kArRenderBlendMode_Add);
   assert(b.geometry_blends[5] == kArRenderBlendMode_Alpha);
+  DioramaProjection sky = projection;
+  sky.bg2_plane.valid = false;
+  sky.bg2_skybox = (DioramaSkyboxProjection){.count = 1, .active_band = 0,
+      .bands = {{0,0,256,544,0,1}}};
+  PresentActionEffects_DrawDioramaPlane((void *)&context, SR_PPU_OVERLAY_BG2, &sky);
+  assert(b.geometries == 8);
+  assert(b.geometry_blends[6] == kArRenderBlendMode_Add &&
+         b.geometry_blends[7] == kArRenderBlendMode_Alpha);
+  assert(b.created == 1 && !b.resolves && !b.restores);
+  b.geometries = 6;
   frame.action_scene_effects.decorations[2] = frame.action_scene_effects.decorations[0];
   frame.action_scene_effects.decorations[2].kind = kActionEffect_ForestForwardLight;
   frame.action_scene_effects.decorations[2].render_layer = kActionEffectRenderLayer_ForegroundLight;
@@ -865,6 +875,22 @@ static void BloodpoolComposition(void) {
   assert(b.geometries == 5 && b.geometry_blends[4] == kArRenderBlendMode_Alpha);
   PresentActionEffects_DrawDioramaPlane(&context,kDioramaPlane_Bg1Hi,&projection);
   assert(b.geometries == 6 && b.geometry_blends[5] == kArRenderBlendMode_Add);
+  DioramaProjection sky = projection;
+  sky.bg2_plane.valid = false;
+  sky.bg2_skybox = (DioramaSkyboxProjection){
+    .count = 1, .active_band = 0, .bands = {{2,2,222,222,0,1}},
+  };
+  const int old_geometries = b.geometries;
+  PresentActionEffects_DrawDioramaPlane(&context,SR_PPU_OVERLAY_BG2,&sky);
+  assert(b.geometries == old_geometries+1);
+  /* Moon-dependent foreground receivers retain the sky source mapping. */
+  sky.bg2_skybox.active_band = -1;
+  PresentActionEffects_DrawDioramaPlane(&context,kDioramaPlane_Bg1Hi,&sky);
+  assert(b.geometries == old_geometries+2);
+  PresentActionEffects_DrawDioramaPlane(&context,kDioramaPlane_Bg2Hi,&sky);
+  assert(b.geometries == old_geometries+3 &&
+         b.geometry_blends[old_geometries+2] == kArRenderBlendMode_Alpha);
+  b.geometries = old_geometries;
   frame.action_scene_effects.decoration_count = 7;
   frame.action_scene_effects.bloodpool = (ActionBloodpoolDetails){
     .valid = true, .timber_count = 1,
@@ -994,7 +1020,44 @@ static void TestCastleDimming(void) {
   assert(PresentActionEffects_Bg1Dimming(&frame) == 0);
 }
 
+static void SkyboxWaterfallComposition(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b, &device);
+  memset(&frame, 0, sizeof(frame));
+  frame.action_environmental_effects = true;
+  frame.ws_extra = 128;
+  frame.ws_extra_top = 64;
+  frame.action_scene_effects.decoration_count = 2;
+  frame.action_scene_effects.decoration_visible_count = 2;
+  frame.action_scene_effects.decorations[0] = (ActionEffectInstance){
+    .world_x = 128, .world_y = 112,
+    .kind = kActionEffect_AitosWaterfall,
+    .phase = kActionEffectPhase_AitosWaterfallFlow,
+    .phase_ticks = 96, .flags = kActionEffectFlag_Visible,
+    .render_layer = kActionEffectRenderLayer_Bg2Plane,
+    .projection_plane = kActionEffectProjectionPlane_Bg2,
+    .geometry = {.kind = kActionEffectGeometry_Rect,
+                 .data.rect = {-256,-176,256,312}},
+  };
+  frame.action_scene_effects.decorations[1] = frame.action_scene_effects.decorations[0];
+  frame.action_scene_effects.decorations[1].kind = kActionEffect_AitosWaterfallMist;
+  frame.action_scene_effects.decorations[1].render_layer = kActionEffectRenderLayer_Atmosphere;
+  const DioramaProjection projection = {
+    .valid = true, .output_width = 640, .output_height = 448,
+    .bg2_skybox = {.count = 1, .active_band = 0,
+                  .bands = {{0,0,512,352,0,1}}},
+  };
+  PresentActionPlaneEffectContext context = {&device, &frame, viewport};
+  PresentActionEffects_DrawDioramaPlane(&context, SR_PPU_OVERLAY_BG2, &projection);
+  assert(b.geometries == 1 && b.geometry_blends[0] == kArRenderBlendMode_Add);
+  /* No finite-plane seam to hide, and no new textures or intermediate target. */
+  assert(!b.created && !b.resolves && !b.restores);
+  PresentActionEffects_Reset(&device);
+}
+
 int main(void) {
+  SkyboxWaterfallComposition();
   TestCastleDimming();
   CastleComposition();
   BloodpoolComposition();

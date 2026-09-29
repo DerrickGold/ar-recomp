@@ -322,7 +322,9 @@ static void TestPlaneEligibilityMatchesDrawableInputs(void) {
   CHECK(Diorama_PlaneProjectable(kDioramaPlane_Bg1Hi, true, false, false, true, false, false));
   CHECK(Diorama_PlaneProjectable(SR_PPU_OVERLAY_BG2, true, true, true, true, false, false));
   CHECK(Diorama_PlaneProjectable(kDioramaPlane_Bg2Hi, true, true, false, true, false, false));
-  CHECK(!Diorama_PlaneProjectable(kDioramaPlane_Bg2Hi, true, true, false, true, false, true));
+  CHECK(Diorama_PlaneProjectable(kDioramaPlane_Bg2Hi, true, true, false, true, false, true));
+  CHECK(Diorama_PlaneEligible(kDioramaPlane_Bg2Hi, true, true, true, false, true));
+  CHECK(!Diorama_PlaneProjectable(kDioramaPlane_Bg2Hi, false, true, true, true, false, true));
   CHECK(!Diorama_PlaneProjectable(SR_PPU_OVERLAY_BG2, true, true, false, true, false, true));
   CHECK(!Diorama_PlaneProjectable(SR_PPU_OVERLAY_OBJ, true, true, false, false, false, false));
 }
@@ -371,7 +373,49 @@ static void TestGeneratedPlaneOffset(void) {
   CHECK(Near(other.x,actual.x) && Near(other.y,actual.y));
 }
 
+static void TestSkyboxProjection(void) {
+  DioramaProjection p = Projection();
+  p.bg2_plane.valid = false;
+  p.output_x = 17; p.output_y = 29;
+  p.output_width = 800; p.output_height = 400;
+  p.bg2_skybox = (DioramaSkyboxProjection){
+    .count = 2, .active_band = -1,
+    .bands = {{102,64,354,192,0,.5f}, {2,192,454,320,.5f,1}},
+  };
+  ArRenderPointF point;
+  float sx,sy,x0,y0,x1,y1;
+  CHECK(Diorama_ProjectCapturedBg2Point(&p,228,128,&point,&sx,&sy));
+  CHECK(Near(point.x,417) && Near(point.y,129));
+  CHECK(Near(sx,800.0f/252) && Near(sy,200.0f/128));
+  CHECK(Diorama_ProjectCapturedBg2Point(&p,2,192.01f,&point,NULL,NULL));
+  CHECK(Near(point.x,17) && Near(point.y,229.015625f));
+  /* A tilted gameplay camera does not move this viewport-filling sky. */
+  p.matrix[0] = .3f; p.matrix[12] = .2f;
+  CHECK(Diorama_ProjectCapturedBg2Point(&p,228,128,&point,NULL,NULL));
+  CHECK(Near(point.x,417) && Near(point.y,129));
+  CHECK(Diorama_SkyboxCaptureBounds(&p,&x0,&y0,&x1,&y1));
+  CHECK(x0 == 2 && y0 == 64 && x1 == 454 && y1 == 320);
+  p.bg2_skybox.active_band = 0;
+  CHECK(Diorama_SkyboxCaptureBounds(&p,&x0,&y0,&x1,&y1));
+  CHECK(x0 == 102 && y0 == 64 && x1 == 354 && y1 == 192);
+  /* Boundary vertices stay in the selected band's mapping. */
+  CHECK(Diorama_ProjectCapturedBg2Point(&p,102,192,&point,NULL,NULL));
+  CHECK(Near(point.x,17) && Near(point.y,229));
+  p.bg2_skybox.active_band = 1;
+  CHECK(Diorama_ProjectCapturedBg2Point(&p,2,192,&point,NULL,NULL));
+  CHECK(Near(point.x,17) && Near(point.y,229));
+  p.bg2_skybox.active_band = 2;
+  CHECK(!Diorama_ProjectCapturedBg2Point(&p,228,128,&point,NULL,NULL));
+  CHECK(!Diorama_SkyboxCaptureBounds(&p,&x0,&y0,&x1,&y1));
+  p.bg2_skybox.active_band = -1;
+  p.bg2_skybox.bands[0].x1 = NAN;
+  CHECK(!Diorama_ProjectCapturedBg2Point(&p,228,128,&point,NULL,NULL));
+  p.bg2_skybox.count = 0;
+  CHECK(!Diorama_ProjectCapturedBg2Point(&p,228,128,&point,NULL,NULL));
+}
+
 int main(void) {
+  TestSkyboxProjection();
   TestGeneratedPlaneOffset();
   TestTiltedCameraFraming();
   TestCameraFramingProtectsNativeBand();

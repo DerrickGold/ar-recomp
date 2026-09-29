@@ -4,6 +4,13 @@
 
 #include "diorama/diorama.h"
 
+static bool EffectUsesSkybox(const DioramaProjection *projection,
+                             const ActionEffectInstance *effect) {
+  return projection && projection->bg2_skybox.count &&
+      (effect->projection_plane == kActionEffectProjectionPlane_Bg2 ||
+       effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds);
+}
+
 static const DioramaPlaneProjection *ProjectionPlaneForEffect(
     const DioramaProjection *projection,
     const ActionEffectInstance *effect) {
@@ -39,6 +46,11 @@ static bool PointIsOnPublishedDioramaPlane(
   if (!projection || !effect) return false;
   if (effect->render_layer == kActionEffectRenderLayer_Atmosphere)
     return true;
+  if (EffectUsesSkybox(projection, effect)) {
+    float x0, y0, x1, y1;
+    return Diorama_SkyboxCaptureBounds(projection, &x0, &y0, &x1, &y1) &&
+        capture_x >= x0 && capture_x <= x1 && texture_y >= y0 && texture_y <= y1;
+  }
   const DioramaPlaneProjection *plane =
       ProjectionPlaneForEffect(projection, effect);
   if (!plane || !plane->valid || projection->texture_width <= 0 ||
@@ -173,20 +185,29 @@ bool ActionEffectProjection_ClipBounds(
   ActionEffectLocalRect visible;
   if (context->diorama_projection) {
     const DioramaProjection *projection = context->diorama_projection;
-    const DioramaPlaneProjection *plane = ProjectionPlaneForEffect(projection, effect);
-    if (!projection->valid || !plane || !plane->valid ||
-        projection->texture_width <= 0 || projection->texture_height <= 0)
-      return false;
-    visible = (ActionEffectLocalRect){
-      plane->u0 * projection->texture_width - projection->texture_x_origin -
-          context->ws_extra - screen_x - plane->capture_offset.x,
-      plane->v0 * projection->texture_height - context->ws_extra_top -
-          screen_y - plane->capture_offset.y,
-      plane->u1 * projection->texture_width - projection->texture_x_origin -
-          context->ws_extra - screen_x - plane->capture_offset.x,
-      plane->v1 * projection->texture_height - context->ws_extra_top -
-          screen_y - plane->capture_offset.y,
-    };
+    if (EffectUsesSkybox(projection, effect)) {
+      if (!Diorama_SkyboxCaptureBounds(projection,
+              &visible.x0, &visible.y0, &visible.x1, &visible.y1)) return false;
+      visible.x0 -= context->ws_extra + screen_x;
+      visible.x1 -= context->ws_extra + screen_x;
+      visible.y0 -= context->ws_extra_top + screen_y;
+      visible.y1 -= context->ws_extra_top + screen_y;
+    } else {
+      const DioramaPlaneProjection *plane = ProjectionPlaneForEffect(projection, effect);
+      if (!projection->valid || !plane || !plane->valid ||
+          projection->texture_width <= 0 || projection->texture_height <= 0)
+        return false;
+      visible = (ActionEffectLocalRect){
+        plane->u0 * projection->texture_width - projection->texture_x_origin -
+            context->ws_extra - screen_x - plane->capture_offset.x,
+        plane->v0 * projection->texture_height - context->ws_extra_top -
+            screen_y - plane->capture_offset.y,
+        plane->u1 * projection->texture_width - projection->texture_x_origin -
+            context->ws_extra - screen_x - plane->capture_offset.x,
+        plane->v1 * projection->texture_height - context->ws_extra_top -
+            screen_y - plane->capture_offset.y,
+      };
+    }
   } else {
     if (context->visible_width <= 0 || context->snes_height <= 0 ||
         context->viewport.w <= 0 || context->viewport.h <= 0)

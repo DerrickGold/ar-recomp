@@ -52,7 +52,7 @@ typedef struct DioramaFrameGenerationKey {
 enum { kFrameGenerationPlaneCount = kDioramaPlane_Count + 1 };
 static DioramaFrameGenerationPlane s_planes[kFrameGenerationPlaneCount];
 static DioramaFrameGenerationKey s_last_key;
-static ArRenderPointF s_present_offsets[kDioramaPlane_Count];
+static ArRenderPointF s_present_offsets[kFrameGenerationPlaneCount];
 static uint64_t s_pair_timestamp_ns;
 static uint32_t s_pair_mask;
 static SDL_Vertex s_vertices[kFrameGenerationMaximumVertices];
@@ -536,7 +536,7 @@ static bool GeneratePlane(
 }
 
 ArRenderPointF DioramaFrameGeneration_PlaneOffset(int plane) {
-  if (plane < 0 || plane >= kDioramaPlane_Count) return (ArRenderPointF){0,0};
+  if (plane < 0 || plane >= kFrameGenerationPlaneCount) return (ArRenderPointF){0,0};
   return s_present_offsets[plane];
 }
 
@@ -596,7 +596,7 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
       else
         resolved_textures[plane] = generated_texture;
       generated_mask |= 1u << plane;
-      if (plane < kDioramaPlane_Count && !DioramaPlaneIsObjectPriority(plane) &&
+      if (!DioramaPlaneIsObjectPriority(plane) &&
           s_planes[plane].motion.uniform) {
         float dx, dy;
         PresentationFrameGeneration_MotionAt(&s_planes[plane].motion,false,0,0,&dx,&dy);

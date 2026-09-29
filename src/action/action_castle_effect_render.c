@@ -198,7 +198,7 @@ static const ActionCastleSource *CastleStackNeighbor(const ActionEffectInstance 
     if (other->room != s->room) continue;
     if (index >= 16) return NULL;
     const bool active = (effect->source_mask&(1u<<index++)) != 0;
-    if (other->diffuse || other->x != s->x || other == s ||
+    if (other->kind != kActionCastleSource_Window || other->x != s->x || other == s ||
         (below ? other->y <= s->y : other->y >= s->y)) continue;
     if (!nearest || (below ? other->y < nearest->y : other->y > nearest->y)) {
       nearest = other;
@@ -238,11 +238,6 @@ static ArRenderPointF CastleRayPoint(const CastleScatter *s, float t, float acro
       root_y+s->length*t};
 }
 
-static float CastleSoftFalloff(float x) {
-  const float edge = fmaxf(0,1-x*x);
-  return edge*edge;
-}
-
 static bool CastleGrid(ActionEffectGeometryWriter *writer, const ActionEffectInstance *mesh,
     const ActionEffectLocalRect *clip, ArRenderVertex2D *vertices, int *mapped, int cols, int rows,
     ActionEffectProjectPointFn project_point, void *userdata) {
@@ -278,7 +273,7 @@ static bool CastleOpening(ActionEffectGeometryWriter *writer, const ActionEffect
     const float vertical = row == 0 || row == rows-1 ? 0 : 1;
     const int at = row*cols+col;
     vertices[at] = (ArRenderVertex2D){{s->x+width*across-mesh->world_x,y-mesh->world_y},
-      {.61f,.74f,.96f,gain*CastleSoftFalloff(across)*vertical},{0,0}};
+      {.61f,.74f,.96f,gain*SceneSoftFalloff(across)*vertical},{0,0}};
     mapped[at] = -1;
   }
   if (!CastleGrid(writer,mesh,clip,vertices,mapped,cols,rows,project_point,userdata)) return false;
@@ -291,7 +286,7 @@ static bool CastleOpening(ActionEffectGeometryWriter *writer, const ActionEffect
     const int at = row*ledge_cols+col;
     ledge[at] = (ArRenderVertex2D){{s->x+across*(s->width+5)-mesh->world_x,
       s->sill-1+down*3-mesh->world_y},
-      {.67f,.78f,.98f,row == 1 ? .16f*CastleSoftFalloff(across) : 0},{0,0}};
+      {.67f,.78f,.98f,row == 1 ? .16f*SceneSoftFalloff(across) : 0},{0,0}};
     indices[at] = -1;
   }
   return CastleGrid(writer,mesh,clip,ledge,indices,ledge_cols,ledge_rows,project_point,userdata);
@@ -308,7 +303,7 @@ static bool CastleWindowFan(ActionEffectGeometryWriter *writer, const ActionEffe
     const ActionEffectLocalRect *clip, const CastleScatter *source,
     float strength, unsigned identity, bool upper,
     ActionEffectProjectPointFn project_point, void *userdata) {
-  const bool boss = mesh->visual == 8;
+  const bool boss = mesh->environment_room == 8;
   const CastleScatter scatter = CastleLitScatter(source,boss,upper);
   const float breath = .98f+.02f*sinf((mesh->phase_ticks&4095u)*.0015339808f+identity);
   strength *= breath*(upper ? (boss ? .10f : .16f) : (boss ? .66f : .42f));
@@ -331,13 +326,13 @@ static bool CastleWindowFan(ActionEffectGeometryWriter *writer, const ActionEffe
      * accepted soft wash; their lower-frequency envelope needs fewer columns. */
     float pattern = 1;
     if (boss && !upper) pattern = .12f+.88f*fminf(1,
-        .75f*CastleSoftFalloff((across+.59f-offset)/.29f)+
-        CastleSoftFalloff((across-offset)/.26f)+
-        .66f*CastleSoftFalloff((across-.60f-offset)/.31f));
+        .75f*SceneSoftFalloff((across+.59f-offset)/.29f)+
+        SceneSoftFalloff((across-offset)/.26f)+
+        .66f*SceneSoftFalloff((across-.60f-offset)/.31f));
     const float envelope = boss ? boss_fade[row] : soft_fade[row];
     const int at = row*cols+col;
     vertices[at] = (ArRenderVertex2D){point,{upper ? .70f : .65f,.78f,.98f,
-        strength*envelope*CastleSoftFalloff(across)*pattern},{0,0}};
+        strength*envelope*SceneSoftFalloff(across)*pattern},{0,0}};
     mapped[at] = -1;
   }
   return CastleGrid(writer,mesh,clip,vertices,mapped,cols,rows,project_point,userdata);
@@ -358,7 +353,7 @@ static bool CastleGalleryStone(ActionEffectGeometryWriter *writer, const ActionE
     const float across = col*.5f-1;
     const int at = row*5+col;
     floor[at] = (ArRenderVertex2D){{s->x+across*radius[row]-mesh->world_x,y[row]-mesh->world_y},
-        {.54f,.72f,.98f,row == 1 ? intensity*CastleSoftFalloff(across) : 0},{0,0}};
+        {.54f,.72f,.98f,row == 1 ? intensity*SceneSoftFalloff(across) : 0},{0,0}};
     mapped[at] = -1;
   }
   if (!CastleGrid(writer,mesh,clip,floor,mapped,5,3,project_point,userdata)) return false;
@@ -386,15 +381,15 @@ static bool CastleDust(ActionEffectGeometryWriter *writer, const ActionEffectIns
     ActionEffectProjectPointFn project_point, void *userdata) {
   const CastleScatter up = above ? CastleMakeJoin(above,s).up : CastleWindowScatter(s,true);
   const CastleScatter down = join ? join->down : CastleWindowScatter(s,false);
-  const unsigned count = s->room == 8 ? 32 : s->room == 7 ? 8 : s->diffuse ? 24 : 14;
+  const unsigned count = s->room == 8 ? 32 : s->room == 7 ? 8 : s->kind != kActionCastleSource_Window ? 24 : 14;
   for (unsigned i = 0; i < count; i++) {
     const uint32_t seed = DeterministicHash_Mix32(identity*131u+i*71u+0xCA571Eu);
     const float t = ((mesh->phase_ticks+seed)&2047u)/2048.0f;
-    const float depth = .12f+(s->diffuse ? .82f : .48f)*HashUnit(seed^0xB1u);
+    const float depth = .12f+(s->kind != kActionCastleSource_Window ? .82f : .48f)*HashUnit(seed^0xB1u);
     const float across = HashUnit(seed^0x72u)*1.5f-.75f;
     ArRenderPointF point;
     float drift = 2;
-    if (s->diffuse) {
+    if (s->kind != kActionCastleSource_Window) {
       const float radius = s->width+(s->spread-s->width)*depth;
       point = (ArRenderPointF){s->x+s->lean*depth+radius*across,s->y+s->length*depth};
     } else {
@@ -428,12 +423,12 @@ bool AppendCastleEnvironment(ActionEffectGeometryWriter *writer, const ActionEff
     if (!lighting) return true;
     /* Sky receives light behind the native castle silhouette, so windows and
      * transparent stone cutouts remain open. No foreground-wide brightness. */
-    if (!AppendBloodpoolSoftPatch(writer,&mesh,&clip,0,0,34,28,
+    if (!AppendSceneSoftPatch(writer,&mesh,&clip,0,0,34,28,
             (ArRenderColorF){.34f,.48f,.82f,.18f},0,project_point,userdata)) return false;
     /* In the boss chamber the same fan stays on BG2, behind the opaque BG1
      * back wall. Its actual window pixels reveal only the surviving portions;
      * the arch/sill scatter is still a separate BG1 contribution. */
-    return (effect->visual != 2 && effect->visual != 6 && effect->visual != 7 && effect->visual != 8) ||
+    return (effect->environment_room != 2 && effect->environment_room != 6 && effect->environment_room != 7 && effect->environment_room != 8) ||
         AppendBloodpoolSkyRays(writer,&mesh,project_point,clip_bounds,userdata);
   }
   if (effect->kind == kActionEffect_CastleMist) {
@@ -443,11 +438,11 @@ bool AppendCastleEnvironment(ActionEffectGeometryWriter *writer, const ActionEff
     const int left = ((int)floorf((clip.x0+effect->world_x)/48)-1)*48;
     const int right = (int)ceilf(clip.x1+effect->world_x);
     for (int x = left; x < right; x += 48) {
-      const uint32_t seed = DeterministicHash_Mix32((unsigned)x+effect->visual*127u);
+      const uint32_t seed = DeterministicHash_Mix32((unsigned)x+effect->environment_room*127u);
       const float t = ((effect->phase_ticks+seed)&4095u)*.0015339808f;
       const float ry = 5+3*HashUnit(seed);
-      const float opacity = effect->visual == 5 ? .23f : .14f;
-      if (!AppendBloodpoolSoftPatch(writer,&mesh,&clip,x-effect->world_x+5*sinf(t),-ry,
+      const float opacity = effect->environment_room == 5 ? .23f : .14f;
+      if (!AppendSceneSoftPatch(writer,&mesh,&clip,x-effect->world_x+5*sinf(t),-ry,
               31+9*HashUnit(seed^7u),ry,(ArRenderColorF){.31f,.35f,.48f,opacity},
               4*cosf(t),project_point,userdata)) return false;
     }
@@ -457,32 +452,32 @@ bool AppendCastleEnvironment(ActionEffectGeometryWriter *writer, const ActionEff
   unsigned index = 0;
   for (unsigned i = 0; i < kActionCastleSourceCount; i++) {
     const ActionCastleSource *s = &kActionCastleSources[i];
-    if (s->room != effect->visual) continue;
+    if (s->room != effect->environment_room) continue;
     if (index >= 16) return false;
     const bool enabled = (effect->source_mask&(1u<<index++)) != 0;
     if (!enabled) continue;
-    const ActionCastleSource *above = s->diffuse ? NULL : CastleStackNeighbor(effect,s,false);
-    const ActionCastleSource *below = s->diffuse ? NULL : CastleStackNeighbor(effect,s,true);
+    const ActionCastleSource *above = s->kind != kActionCastleSource_Window ? NULL : CastleStackNeighbor(effect,s,false);
+    const ActionCastleSource *below = s->kind != kActionCastleSource_Window ? NULL : CastleStackNeighbor(effect,s,true);
     CastleWindowJoin join = {0};
     if (below) join = CastleMakeJoin(s,below);
     ActionEffectLocalRect region = clip;
     region.x0 = fmaxf(region.x0,s->left-effect->world_x);
     region.x1 = fminf(region.x1,s->right-effect->world_x);
-    region.y0 = fmaxf(region.y0,s->y-(s->diffuse == 2 ? 92 : s->diffuse ? 8 :
+    region.y0 = fmaxf(region.y0,s->y-(s->kind == kActionCastleSource_Torch ? 92 : s->kind != kActionCastleSource_Window ? 8 :
         kCastleArchRayMaxReach+kCastleArchTopPadding)-effect->world_y);
     region.y1 = fminf(region.y1,(below ? below->y+join.up.arch->max_row : s->bottom)-effect->world_y);
     if (region.x0 >= region.x1 || region.y0 >= region.y1) continue;
     const float x = s->x-effect->world_x, y = s->y-effect->world_y;
     if (lighting) {
-      if (s->diffuse == 2) {
+      if (s->kind == kActionCastleSource_Torch) {
         const float t = (effect->phase_ticks&255u)*.024543693f+i;
         const float pulse = .86f+.09f*sinf(t)+.05f*sinf(t*3+.7f);
-        if (!AppendBloodpoolSoftPatch(writer,&mesh,&region,x,y+6,s->spread,86,
+        if (!AppendSceneSoftPatch(writer,&mesh,&region,x,y+6,s->spread,86,
                 (ArRenderColorF){1,.49f,.15f,.28f*pulse},
                 6*sinf((effect->phase_ticks&511u)*.012271846f+i),
                 project_point,userdata)) return false;
-      } else if (s->diffuse) {
-        if (!AppendBloodpoolSoftPatch(writer,&mesh,&region,x,y+s->length*.5f,
+      } else if (s->kind != kActionCastleSource_Window) {
+        if (!AppendSceneSoftPatch(writer,&mesh,&region,x,y+s->length*.5f,
                 s->spread,s->length*.54f,(ArRenderColorF){.30f,.40f,.65f,.13f},
                 s->lean,project_point,userdata)) return false;
       } else {
@@ -503,7 +498,7 @@ bool AppendCastleEnvironment(ActionEffectGeometryWriter *writer, const ActionEff
                 project_point,userdata)) return false;
       }
     }
-    if (particles && s->diffuse != 2 &&
+    if (particles && s->kind != kActionCastleSource_Torch &&
         !CastleDust(writer,&mesh,s,&region,i,below ? &join : NULL,above,
             project_point,userdata)) return false;
   }

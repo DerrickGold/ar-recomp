@@ -5066,10 +5066,7 @@ bool PpuRenderBackgroundViewLine(Ppu *ppu,
     int world_y = (int)world_row;
     int64_t camera_x = (int64_t)binding->camera_x +
         wrapped_delta10(ppu->hScroll[layer], binding->hscroll_anchor);
-    int64_t left = camera_x + view->screen_x0;
-    int maximum = (int)(view->world_width - view->width);
-    if (left < 0) left = 0;
-    if (left > maximum) left = maximum;
+    int64_t left = SrPpuBackgroundView_WorldLeft(view, camera_x);
     int64_t source_x0 = left - camera_x;
 
     /* Preserve the ordinary primary capture exactly wherever it already

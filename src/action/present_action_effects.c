@@ -100,21 +100,21 @@ float PresentActionEffects_Bg1Dimming(const FrameSlot *slot) {
     const ActionEffectInstance *effect = &slot->action_scene_effects.decorations[i];
     if (slot->diorama_map_group == kActRaiserMapGroup_Fillmore &&
         slot->diorama_map_number == 3 &&
-        effect->kind == kActionEffect_CaveAmbientLight && effect->visual == 3 &&
+        effect->kind == kActionEffect_CaveAmbientLight && effect->environment_room == 3 &&
         effect->phase == kActionEffectPhase_CaveEnvironment &&
         effect->render_layer == kActionEffectRenderLayer_ForegroundLight &&
         effect->projection_plane == kActionEffectProjectionPlane_Bg1 &&
         (effect->flags & kActionEffectFlag_Visible)) return .45f;
     if (slot->diorama_map_group == kActRaiserMapGroup_Bloodpool &&
-        effect->visual == slot->diorama_map_number &&
-        (effect->visual == 3 || effect->visual == 4 || effect->visual == 5 ||
-         effect->visual == 7 || effect->visual == 8) &&
+        effect->environment_room == slot->diorama_map_number &&
+        (effect->environment_room == 3 || effect->environment_room == 4 || effect->environment_room == 5 ||
+         effect->environment_room == 7 || effect->environment_room == 8) &&
         effect->kind == kActionEffect_CastleLight &&
         effect->phase == kActionEffectPhase_CastleEnvironment &&
         effect->render_layer == kActionEffectRenderLayer_Bg1Plane &&
         effect->projection_plane == kActionEffectProjectionPlane_Bg1 &&
         effect->source_mask && (effect->flags & kActionEffectFlag_Visible))
-      return effect->visual == 5 ? .42f : effect->visual == 8 ? .30f : .36f;
+      return effect->environment_room == 5 ? .42f : effect->environment_room == 8 ? .30f : .36f;
   }
   return 0;
 }
@@ -606,149 +606,105 @@ void PresentActionEffects_Draw(
   }
 }
 
-void PresentActionEffects_DrawDioramaPlane(
-    void *userdata, int plane, const DioramaProjection *diorama_projection) {
-  PresentActionPlaneEffectContext *context =
-      (PresentActionPlaneEffectContext *)userdata;
-  if (!context || !context->slot ||
-      !context->slot->action_environmental_effects ||
-      !context->slot->action_scene_effects.decoration_visible_count ||
-      !diorama_projection || !EffectRenderer_Available())
-    return;
-  ArRenderDevice *device = context->device;
-  uint8_t render_layer;
-  if (plane == SR_PPU_OVERLAY_BG1 &&
-      diorama_projection->bg1_plane.valid) {
-    render_layer = kActionEffectRenderLayer_Bg1Plane;
-  } else if (plane == SR_PPU_OVERLAY_BG2 &&
-             diorama_projection->bg2_plane.valid) {
-    render_layer = kActionEffectRenderLayer_Bg2Plane;
-  } else if (plane == kDioramaPlane_Bg2Hi &&
-             diorama_projection->bg2_high_plane.valid) {
-    render_layer = kActionEffectRenderLayer_Bg2HighPlane;
-  } else if (plane == kDioramaPlane_Bg1Hi &&
-             diorama_projection->bg1_high_plane.valid) {
-    render_layer = kActionEffectRenderLayer_Bg1HighPlane;
-  } else {
-    return;
-  }
-  const FrameSlot *slot = context->slot;
-  ActionEffectProjectionContext projection = {
-    .bg1_camera_x = slot->bg1_camera_x,
-    .bg1_camera_y = slot->bg1_camera_y,
-    .bg2_camera_x = slot->bg2_camera_x,
-    .bg2_camera_y = slot->bg2_camera_y,
-    .ws_extra = slot->ws_extra,
-    .ws_extra_top = slot->ws_extra_top,
-    .visible_x0 = slot->visible_x0,
-    .visible_width = slot->visible_width,
-    .snes_height = slot->snes_height,
-    .diorama_projection = diorama_projection,
-    .viewport = {
-      context->viewport.x, context->viewport.y,
-      context->viewport.w, context->viewport.h,
-    },
+/* Attachment is draw order, not the source camera. For example, shoreline
+ * mist uses BG1 coordinates but belongs after BG2-high. Flat composition uses
+ * winner masks; Diorama instead relies on later foreground/actor planes. */
+typedef struct ActionDecorationPass {
+  uint8_t layer;
+  int attachment;
+  int mask_plane; /* -1: Diorama-only atmosphere, no flat winner mask. */
+  ArRenderBlendMode blend;
+  bool diorama_lighting;
+  bool finite_plane_only;
+  const char *label;
+} ActionDecorationPass;
+
+/* Order is also the established flat composition order. */
+static const ActionDecorationPass kDecorationPasses[] = {
+  {kActionEffectRenderLayer_Bg1Plane, SR_PPU_OVERLAY_BG1, SR_PPU_OVERLAY_BG1,
+   kArRenderBlendMode_Add, true, false, "BG1-local decoration"},
+  {kActionEffectRenderLayer_Bg1HighPlane, kDioramaPlane_Bg1Hi, SR_PPU_OVERLAY_BG1,
+   kArRenderBlendMode_Add, true, false, "BG1-high lava decoration"},
+  {kActionEffectRenderLayer_Bg2Plane, SR_PPU_OVERLAY_BG2, SR_PPU_OVERLAY_BG2,
+   kArRenderBlendMode_Add, true, false, "BG2-local decoration"},
+  {kActionEffectRenderLayer_Bg2HighPlane, kDioramaPlane_Bg2Hi, SR_PPU_OVERLAY_BG2,
+   kArRenderBlendMode_Add, true, false, "BG2-high water decoration"},
+  {kActionEffectRenderLayer_Bg2Alpha, SR_PPU_OVERLAY_BG2, SR_PPU_OVERLAY_BG2,
+   kArRenderBlendMode_Alpha, true, false, "BG2 alpha atmosphere"},
+  {kActionEffectRenderLayer_Bg2HighAlpha, kDioramaPlane_Bg2Hi, SR_PPU_OVERLAY_BG2,
+   kArRenderBlendMode_Alpha, false, false, "BG2-high lake mist"},
+  {kActionEffectRenderLayer_Bg1Mist, SR_PPU_OVERLAY_BG1, SR_PPU_OVERLAY_BG1,
+   kArRenderBlendMode_Alpha, false, false, "temple ground mist"},
+  {kActionEffectRenderLayer_Atmosphere, SR_PPU_OVERLAY_BG2, -1,
+   kArRenderBlendMode_Alpha, true, true, "waterfall bottom atmosphere"},
+};
+
+static ActionEffectProjectionContext DecorationProjection(
+    const FrameSlot *slot, ArRenderRectI viewport, const DioramaProjection *diorama) {
+  return (ActionEffectProjectionContext){
+    .bg1_camera_x = slot->bg1_camera_x, .bg1_camera_y = slot->bg1_camera_y,
+    .bg2_camera_x = slot->bg2_camera_x, .bg2_camera_y = slot->bg2_camera_y,
+    .ws_extra = slot->ws_extra, .ws_extra_top = diorama ? slot->ws_extra_top : 0,
+    .visible_x0 = slot->visible_x0, .visible_width = slot->visible_width,
+    .snes_height = slot->snes_height, .diorama_projection = diorama,
+    /* Flat geometry is target-local; its submission restores viewport offset. */
+    .viewport = {diorama ? viewport.x : 0, diorama ? viewport.y : 0,
+                 viewport.w, viewport.h},
   };
-  ActionSceneEffectRenderBatch *geometry =
-      &s_action_effect_render_scratch.scene;
-  if (!ActionSceneDecorationRender_Build(
-          &slot->action_scene_effects, render_layer,
-          true, true,
-          ActionEffectProjection_ProjectPoint,
-          ActionEffectProjection_ClipBounds, &projection, geometry))
-    return;
-  EffectBatch batch = {
-    .vertices = geometry->vertices,
-    .indices = geometry->indices,
-    .vertex_count = geometry->vertex_count,
-    .index_count = geometry->index_count,
+}
+
+static EffectBatch SceneBatchView(ActionSceneEffectRenderBatch *geometry) {
+  return (EffectBatch){
+    .vertices = geometry->vertices, .indices = geometry->indices,
+    .vertex_count = geometry->vertex_count, .index_count = geometry->index_count,
     .vertex_capacity = kActionSceneEffectRenderMaxVertices,
     .index_capacity = kActionSceneEffectRenderMaxIndices,
   };
-  const bool submitted = geometry->index_count && EffectRenderer_Submit(
-        device, &batch, kArRenderBlendMode_Add);
-  static bool announced_bg1;
-  if (!announced_bg1 && submitted &&
-      render_layer == kActionEffectRenderLayer_Bg1Plane) {
-    announced_bg1 = true;
-    fprintf(stderr,
-            "[action-fx] first BG1-local decoration geometry submitted "
-            "(Diorama, depth-ordered)\n");
-  }
-  static bool announced_bg2;
-  if (!announced_bg2 && submitted &&
-      render_layer == kActionEffectRenderLayer_Bg2Plane) {
-    announced_bg2 = true;
-    fprintf(stderr,
-            "[action-fx] first BG2-local decoration geometry submitted "
-            "(Diorama)\n");
-  }
-  static bool announced_bg1_high;
-  if (!announced_bg1_high && submitted &&
-      render_layer == kActionEffectRenderLayer_Bg1HighPlane) {
-    announced_bg1_high = true;
-    fprintf(stderr,
-            "[action-fx] first BG1-high lava geometry submitted "
-            "(Diorama, depth-ordered)\n");
-  }
+}
 
-  /* The temple's low mist belongs to the scenery. Insert its alpha pass
-   * after BG1-low so later objects/high-priority terrain stay in front. */
-  if (render_layer == kActionEffectRenderLayer_Bg1Plane &&
-      ActionSceneDecorationRender_Build(
-          &slot->action_scene_effects, kActionEffectRenderLayer_Bg1Mist, false, true,
-          ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
-          &projection, geometry) && geometry->index_count) {
-    batch.vertex_count = geometry->vertex_count;
-    batch.index_count = geometry->index_count;
-    (void)EffectRenderer_Submit(device, &batch, kArRenderBlendMode_Alpha);
+static bool DecorationAttachmentVisible(int plane, const DioramaProjection *projection) {
+  switch (plane) {
+    case SR_PPU_OVERLAY_BG1: return projection->bg1_plane.valid;
+    case SR_PPU_OVERLAY_BG2:
+      return projection->bg2_plane.valid || projection->bg2_skybox.count;
+    case kDioramaPlane_Bg1Hi: return projection->bg1_high_plane.valid;
+    case kDioramaPlane_Bg2Hi: return projection->bg2_high_plane.valid;
+    default: return false;
   }
-  /* Bloodpool shoreline mist follows the low-priority bank geometry, in
-   * the slot before high-priority water/scenery and subsequent actors. */
-  if (render_layer == kActionEffectRenderLayer_Bg2HighPlane &&
-      ActionSceneDecorationRender_Build(
-          &slot->action_scene_effects, kActionEffectRenderLayer_Bg2HighAlpha, false, true,
-          ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
-          &projection, geometry) && geometry->index_count) {
-    batch.vertex_count = geometry->vertex_count;
-    batch.index_count = geometry->index_count;
-    (void)EffectRenderer_Submit(device, &batch, kArRenderBlendMode_Alpha);
-  }
-  /* Alpha atmosphere follows the light, using the same foreground occlusion. */
-  if (render_layer != kActionEffectRenderLayer_Bg2Plane) return;
-  if (FrameUsesBg2Alpha(slot) && ActionSceneDecorationRender_Build(
-          &slot->action_scene_effects, kActionEffectRenderLayer_Bg2Alpha,
-          true, true, ActionEffectProjection_ProjectPoint,
-          ActionEffectProjection_ClipBounds, &projection, geometry) &&
-      geometry->index_count) {
-    batch.vertex_count = geometry->vertex_count;
-    batch.index_count = geometry->index_count;
-    (void)EffectRenderer_Submit(device, &batch, kArRenderBlendMode_Alpha);
-  }
-  /* The finite-backdrop gap exists only in Diorama's vertical extension.
-   * Submit its unmasked atmosphere here, before later BG1 and OBJ planes. */
-  if (!ActionSceneDecorationRender_Build(
-          &slot->action_scene_effects,
-          kActionEffectRenderLayer_Atmosphere,
-          true, true,
-          ActionEffectProjection_ProjectPoint,
-          ActionEffectProjection_ClipBounds, &projection, geometry) ||
-      !geometry->index_count)
-    return;
-  batch.vertex_count = geometry->vertex_count;
-  batch.index_count = geometry->index_count;
-  /* Mist needs to obscure the finite BG2/skybox discontinuity, not merely
-   * brighten both sides of it. Standard source-alpha blending lets the
-   * staggered zero-alpha rims feather that boundary; the ordinary waterfall
-   * veil and all luminous effects remain additive. */
-  const bool atmosphere_submitted = EffectRenderer_Submit(
-        device, &batch, kArRenderBlendMode_Alpha);
-  static bool announced_atmosphere;
-  if (!announced_atmosphere && atmosphere_submitted) {
-    announced_atmosphere = true;
-    fprintf(stderr,
-            "[action-fx] first waterfall bottom atmosphere submitted "
-            "(Diorama)\n");
+}
+
+void PresentActionEffects_DrawDioramaPlane(
+    void *userdata, int plane, const DioramaProjection *diorama_projection) {
+  PresentActionPlaneEffectContext *context = userdata;
+  if (!context || !context->slot || !context->slot->action_environmental_effects ||
+      !context->slot->action_scene_effects.decoration_visible_count ||
+      !diorama_projection || !EffectRenderer_Available() ||
+      !DecorationAttachmentVisible(plane, diorama_projection)) return;
+  const FrameSlot *slot = context->slot;
+  ActionEffectProjectionContext projection =
+      DecorationProjection(slot, context->viewport, diorama_projection);
+  ActionSceneEffectRenderBatch *geometry = &s_action_effect_render_scratch.scene;
+  static bool announced[kActionEffectRenderLayer_Count];
+  for (unsigned i = 0; i < sizeof(kDecorationPasses)/sizeof(kDecorationPasses[0]); i++) {
+    const ActionDecorationPass *pass = &kDecorationPasses[i];
+    if (pass->attachment != plane ||
+        (pass->finite_plane_only && diorama_projection->bg2_skybox.count)) continue;
+    if (pass->layer == kActionEffectRenderLayer_Bg2Alpha && !FrameUsesBg2Alpha(slot))
+      continue;
+    if (!ActionSceneDecorationRender_Build(&slot->action_scene_effects, pass->layer,
+            pass->diorama_lighting, true, ActionEffectProjection_ProjectPoint,
+            ActionEffectProjection_ClipBounds, &projection, geometry)) {
+      /* A malformed primary batch suppresses its attached atmosphere too. */
+      if (pass->blend == kArRenderBlendMode_Add) return;
+      continue;
+    }
+    if (!geometry->index_count) continue;
+    EffectBatch batch = SceneBatchView(geometry);
+    if (EffectRenderer_Submit(context->device, &batch, pass->blend) &&
+        !announced[pass->layer]) {
+      announced[pass->layer] = true;
+      fprintf(stderr, "[action-fx] first %s geometry submitted (Diorama)\n", pass->label);
+    }
   }
 }
 
@@ -804,37 +760,25 @@ static bool DrawAlphaMaskedGeometry(
 }
 
 static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
-    const FrameSlot *slot, ArRenderRectI viewport, uint8_t render_layer,
-    bool mask_valid, ArRenderTexture mask_texture, const char *label) {
-  const bool bg2_alpha = render_layer == kActionEffectRenderLayer_Bg2Alpha ||
-      render_layer == kActionEffectRenderLayer_Bg2HighAlpha;
-  const bool mist = render_layer == kActionEffectRenderLayer_Bg1Mist;
-  if (mist && (!s_action_bg1_mask_ready || !s_action_bg1_mask_has_alpha)) return true;
-  if ((bg2_alpha || render_layer == kActionEffectRenderLayer_Bg2Plane ||
-       render_layer == kActionEffectRenderLayer_Bg2HighPlane) &&
-      !s_action_bg2_mask_ready)
-    return true; /* Never reuse stale occlusion after an upload failure. */
-  if (bg2_alpha && (!FrameUsesBg2Alpha(slot) || !s_action_bg2_mask_has_alpha)) return true;
-  if (!slot || !slot->action_environmental_effects || !mask_valid ||
+    const FrameSlot *slot, ArRenderRectI viewport, const ActionDecorationPass *pass) {
+  const uint8_t render_layer = pass->layer;
+  const bool bg1 = pass->mask_plane == SR_PPU_OVERLAY_BG1;
+  const bool alpha = pass->blend == kArRenderBlendMode_Alpha;
+  const bool mask_ready = bg1 ? s_action_bg1_mask_ready : s_action_bg2_mask_ready;
+  const bool mask_has_alpha = bg1 ? s_action_bg1_mask_has_alpha : s_action_bg2_mask_has_alpha;
+  const bool mask_valid = bg1 ? slot->action_bg1_mask_valid : slot->action_bg2_mask_valid;
+  const ArRenderTexture mask_texture = bg1 ? s_action_bg1_mask_texture : s_action_bg2_mask_texture;
+  /* Never reuse stale occlusion after an upload failure. Alpha passes require
+   * an alpha mask; opaque legacy masks retain their intermediate-target path. */
+  if ((!bg1 || alpha || mask_has_alpha) && !mask_ready) return true;
+  if (alpha && !mask_has_alpha) return true;
+  if (!slot->action_environmental_effects || !mask_valid ||
       !slot->action_scene_effects.decoration_visible_count ||
       !ArRenderTexture_IsValid(mask_texture) ||
       !s_action_plane_blend_supported ||
       !EffectRenderer_Available())
     return true;
-  ActionEffectProjectionContext projection = {
-    .bg1_camera_x = slot->bg1_camera_x,
-    .bg1_camera_y = slot->bg1_camera_y,
-    .bg2_camera_x = slot->bg2_camera_x,
-    .bg2_camera_y = slot->bg2_camera_y,
-    .ws_extra = slot->ws_extra,
-    .visible_x0 = slot->visible_x0,
-    .visible_width = slot->visible_width,
-    .snes_height = slot->snes_height,
-    /* Geometry is rendered into a viewport-sized intermediate target. Keep its
-     * coordinates target-local; the final composite restores the output-space
-     * viewport offset below. */
-    .viewport = {0, 0, viewport.w, viewport.h},
-  };
+  ActionEffectProjectionContext projection = DecorationProjection(slot, viewport, NULL);
   ActionSceneEffectRenderBatch *geometry =
       &s_action_effect_render_scratch.scene;
   if (!ActionSceneDecorationRender_Build(
@@ -844,14 +788,8 @@ static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
           ActionEffectProjection_ClipBounds, &projection, geometry) ||
       !geometry->index_count)
     return true;
-  const bool bg1_alpha = s_action_bg1_mask_has_alpha &&
-      (mist || render_layer == kActionEffectRenderLayer_Bg1Plane ||
-       render_layer == kActionEffectRenderLayer_Bg1HighPlane);
-  if (bg1_alpha && !s_action_bg1_mask_ready) return true;
-  if (bg1_alpha || (s_action_bg2_mask_has_alpha &&
-      (bg2_alpha || render_layer == kActionEffectRenderLayer_Bg2Plane ||
-       render_layer == kActionEffectRenderLayer_Bg2HighPlane))) {
-    if (!DrawAlphaMaskedGeometry(device, slot, viewport, mask_texture, bg2_alpha || mist, geometry))
+  if (mask_has_alpha) {
+    if (!DrawAlphaMaskedGeometry(device, slot, viewport, mask_texture, alpha, geometry))
       DisableActionPlaneEffect(device, "masked geometry submit");
     return true;
   }
@@ -874,14 +812,7 @@ static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
       device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
   if (!target_ready)
     DisableActionPlaneEffect(device, "effect-target clear");
-  EffectBatch batch = {
-    .vertices = geometry->vertices,
-    .indices = geometry->indices,
-    .vertex_count = geometry->vertex_count,
-    .index_count = geometry->index_count,
-    .vertex_capacity = kActionSceneEffectRenderMaxVertices,
-    .index_capacity = kActionSceneEffectRenderMaxIndices,
-  };
+  EffectBatch batch = SceneBatchView(geometry);
   bool submitted = false;
   bool masked = false;
   if (target_ready)
@@ -923,7 +854,7 @@ static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
     fprintf(stderr,
             "[action-fx] first %s geometry submitted "
             "(flat, winner-masked)\n",
-            label ? label : "BG-local decoration");
+            pass->label);
   }
   return true;
 }
@@ -949,34 +880,12 @@ bool PresentActionEffects_DrawFlatPlanes(
     if (!DrawAlphaMaskedGeometry(device,slot,viewport,s_action_bg1_mask_texture,true,geometry))
       DisableActionPlaneEffect(device,"temple scenery dimming");
   }
-  return DrawActionPlaneEffectFlat(
-      device, slot, viewport, kActionEffectRenderLayer_Bg1Plane,
-      slot->action_bg1_mask_valid, s_action_bg1_mask_texture,
-      "BG1-local decoration") &&
-    DrawActionPlaneEffectFlat(
-      device, slot, viewport, kActionEffectRenderLayer_Bg1HighPlane,
-      slot->action_bg1_mask_valid, s_action_bg1_mask_texture,
-      "BG1-high lava decoration") &&
-    DrawActionPlaneEffectFlat(
-      device, slot, viewport, kActionEffectRenderLayer_Bg2Plane,
-      slot->action_bg2_mask_valid, s_action_bg2_mask_texture,
-      "BG2-local decoration") &&
-    DrawActionPlaneEffectFlat(
-      device, slot, viewport, kActionEffectRenderLayer_Bg2HighPlane,
-      slot->action_bg2_mask_valid, s_action_bg2_mask_texture,
-      "BG2-high water decoration") &&
-    DrawActionPlaneEffectFlat(
-      device, slot, viewport, kActionEffectRenderLayer_Bg2Alpha,
-      slot->action_bg2_mask_valid, s_action_bg2_mask_texture,
-      "BG2 alpha atmosphere") &&
-    DrawActionPlaneEffectFlat(
-      device, slot, viewport, kActionEffectRenderLayer_Bg2HighAlpha,
-      slot->action_bg2_mask_valid, s_action_bg2_mask_texture,
-      "BG2-high lake mist") &&
-    DrawActionPlaneEffectFlat(
-      device, slot, viewport, kActionEffectRenderLayer_Bg1Mist,
-      slot->action_bg1_mask_valid, s_action_bg1_mask_texture,
-      "temple ground mist");
+  for (unsigned i = 0; i < sizeof(kDecorationPasses)/sizeof(kDecorationPasses[0]); i++) {
+    const ActionDecorationPass *pass = &kDecorationPasses[i];
+    if (pass->mask_plane < 0) continue;
+    if (!DrawActionPlaneEffectFlat(device, slot, viewport, pass)) return false;
+  }
+  return true;
 }
 
 void PresentActionEffects_Reset(ArRenderDevice *device) {

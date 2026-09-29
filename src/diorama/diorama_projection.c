@@ -93,9 +93,11 @@ bool Diorama_PlaneEligible(int plane, bool visible, bool has_texture,
                            bool has_pixels, bool hud_flat, bool skybox_only) {
   if (!visible || !has_texture || !has_pixels) return false;
   if (plane == SR_PPU_OVERLAY_BG3 && hud_flat) return false;
+  /* Skybox-only replaces the distant backdrop, not BG2's foreground water
+   * and other high-priority scenery. Those retain their native depth, alpha
+   * and attached effects (including when their low-priority band is empty). */
   if (skybox_only &&
       (plane == SR_PPU_OVERLAY_BG2 ||
-       plane == kDioramaPlane_Bg2Hi ||
        plane == kDioramaPlane_Bg2Far ||
        plane == kDioramaPlane_Backdrop))
     return false;
@@ -252,11 +254,82 @@ bool Diorama_ProjectCapturedBg2HighPoint(
       &projection->bg2_high_plane, point, scale_x, scale_y);
 }
 
+static bool ValidSkyboxBand(const DioramaSkyboxBandProjection *band) {
+  return isfinite(band->x0) && isfinite(band->x1) &&
+      isfinite(band->y0) && isfinite(band->y1) &&
+      isfinite(band->output_y0) && isfinite(band->output_y1) &&
+      band->x1 > band->x0 && band->y1 > band->y0 &&
+      band->output_y0 >= 0 && band->output_y1 <= 1 &&
+      band->output_y1 > band->output_y0;
+}
+
+bool Diorama_SkyboxCaptureBounds(const DioramaProjection *projection,
+                                 float *x0, float *y0, float *x1, float *y1) {
+  if (!projection || !projection->valid || !x0 || !y0 || !x1 || !y1)
+    return false;
+  const DioramaSkyboxProjection *sky = &projection->bg2_skybox;
+  if (!sky->count || sky->count > kDioramaBgMaxValidSpans ||
+      sky->active_band < -1 || sky->active_band >= (int)sky->count)
+    return false;
+  const unsigned first = sky->active_band < 0 ? 0 : (unsigned)sky->active_band;
+  const unsigned end = sky->active_band < 0 ? sky->count : first + 1;
+  float left = INFINITY, top = INFINITY, right = -INFINITY, bottom = -INFINITY;
+  for (unsigned i = first; i < end; i++) {
+    const DioramaSkyboxBandProjection *band = &sky->bands[i];
+    if (!ValidSkyboxBand(band)) return false;
+    left = fminf(left, band->x0);
+    right = fmaxf(right, band->x1);
+    top = fminf(top, band->y0);
+    bottom = fmaxf(bottom, band->y1);
+  }
+  *x0 = left; *y0 = top; *x1 = right; *y1 = bottom;
+  return true;
+}
+
+static bool ProjectSkyboxPoint(const DioramaProjection *projection,
+    float x, float y, ArRenderPointF *point, float *scale_x, float *scale_y) {
+  const DioramaSkyboxProjection *sky = &projection->bg2_skybox;
+  if (!projection->valid || !sky->count || sky->count > kDioramaBgMaxValidSpans ||
+      sky->active_band < -1 || sky->active_band >= (int)sky->count ||
+      projection->output_width <= 0 || projection->output_height <= 0 ||
+      !isfinite(x) || !isfinite(y)) return false;
+  unsigned selected = sky->active_band < 0 ? 0 : (unsigned)sky->active_band;
+  if (sky->active_band < 0) {
+    /* Direction probes may extrapolate beyond the visible rectangle. Extend
+     * the nearest band; geometry itself is clipped before projection. */
+    float distance = INFINITY;
+    for (unsigned i = 0; i < sky->count; i++) {
+      const DioramaSkyboxBandProjection *band = &sky->bands[i];
+      if (!ValidSkyboxBand(band)) return false;
+      const float d = fmaxf(0, fmaxf(band->y0 - y, y - band->y1));
+      if (d < distance) {
+        distance = d;
+        selected = i;
+      }
+    }
+  }
+  const DioramaSkyboxBandProjection *band = &sky->bands[selected];
+  if (!ValidSkyboxBand(band)) return false;
+  const float sx = projection->output_width / (band->x1 - band->x0);
+  const float sy = projection->output_height *
+      (band->output_y1 - band->output_y0) / (band->y1 - band->y0);
+  *point = (ArRenderPointF){
+      projection->output_x + (x - band->x0) * sx,
+      projection->output_y + band->output_y0 * projection->output_height +
+          (y - band->y0) * sy};
+  if (scale_x) *scale_x = sx;
+  if (scale_y) *scale_y = sy;
+  return true;
+}
+
 bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
                                      float capture_x, float capture_y,
                                      ArRenderPointF *point,
                                      float *scale_x, float *scale_y) {
   if (!projection || !point) return false;
+  if (projection->bg2_skybox.count)
+    return ProjectSkyboxPoint(projection, capture_x, capture_y,
+                               point, scale_x, scale_y);
   return ProjectCapturedPlanePoint(
       projection, capture_x, capture_y,
       &projection->bg2_plane, point, scale_x, scale_y);

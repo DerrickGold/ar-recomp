@@ -47,7 +47,7 @@ bool AppendBloodpoolCloud(ActionEffectGeometryWriter *writer, const ActionEffect
   mesh.flags |= kActionEffectFlag_ClippedMesh;
   float x,y,alpha;
   CloudStyle(effect->phase_ticks,&x,&y,&alpha);
-  return AppendBloodpoolSoftPatch(writer,&mesh,&clip,x,y,85,18,
+  return AppendSceneSoftPatch(writer,&mesh,&clip,x,y,85,18,
       (ArRenderColorF){.055f,.055f,.09f,alpha},8,project_point,userdata);
 }
 
@@ -239,7 +239,7 @@ bool AppendBloodpoolDetailParticles(ActionEffectGeometryWriter *writer,
         break;
       }
       if (!found || region.x0 >= region.x1) continue;
-      if (!AppendBloodpoolSoftPatch(writer,&mesh,&region,x,472-effect->world_y,
+      if (!AppendSceneSoftPatch(writer,&mesh,&region,x,472-effect->world_y,
               23+6*sinf(t),8,(ArRenderColorF){.40f,.37f,.50f,.22f},4*cosf(t),
               project_point,userdata)) return false;
     }

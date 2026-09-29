@@ -160,7 +160,7 @@ void ActionLandingDust_Capture(ActionLandingDustState *state, ActionSceneEffectF
     frame->decorations[frame->decoration_count++] = (ActionEffectInstance){
       .generation = p->generation, .pulse_generation = p->generation,
       .record_address = p->record_address, .world_x = p->x, .world_y = p->y,
-      .visual = p->strength, .age_ticks = age, .phase_ticks = age, .pulse_ticks = age,
+      .dust_strength = p->strength, .age_ticks = age, .phase_ticks = age, .pulse_ticks = age,
       .kind = kActionEffect_LandingDust, .phase = kActionEffectPhase_CaveEnvironment,
       .flags = kActionEffectFlag_Visible,
       .render_layer = kActionEffectRenderLayer_WorldDust,

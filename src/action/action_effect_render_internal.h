@@ -122,14 +122,35 @@ bool AppendSceneStarParticle(
 SceneParticleClock
 SceneParticleClockAt(const ActionEffectInstance *effect, unsigned visual_ticks,
                      unsigned index, SceneParticleLifetime timing);
-bool AppendSceneClippedTriangle(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *mesh,
-    const ArRenderVertex2D *source, int *mapped, const int *triangle,
-    const ActionEffectLocalRect *clip, ActionEffectProjectPointFn project_point, void *userdata);
 
 ArRenderColorF SceneParticleColor(ArRenderColorF hot,
                                          ArRenderColorF cool,
                                          SceneParticleClock clock);
+
+/* Small shared per-vertex operation stays inline across stage modules. */
+static inline float SceneSoftFalloff(float distance) {
+  const float t = fmaxf(0, 1-distance*distance);
+  return t*t;
+}
+
+/* ---- defined in action_environment_geometry.c ---- */
+bool AppendSceneClippedTriangle(
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *mesh,
+    const ArRenderVertex2D *source, int *mapped, const int *triangle,
+    const ActionEffectLocalRect *clip, ActionEffectProjectPointFn project_point, void *userdata);
+bool AppendSceneSoftPatch(ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect,
+    const ActionEffectLocalRect *clip, float x, float y, float rx, float ry,
+    ArRenderColorF color, float lean, ActionEffectProjectPointFn project_point, void *userdata);
+
+/* ---- defined in action_forest_effect_render.c ---- */
+bool AppendForestRays(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    bool foreground, ActionEffectProjectPointFn project_point,
+    ActionEffectClipBoundsFn clip_bounds, void *userdata);
+bool AppendForestMotes(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectProjectPointFn project_point, void *userdata);
+bool AppendForestLeaves(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectProjectPointFn project_point, void *userdata);
 
 /* ---- defined in action_castle_effect_render.c ---- */
 bool AppendCastleEnvironment(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
@@ -145,10 +166,6 @@ bool BloodpoolMoonProjection_Init(BloodpoolMoonProjection *projection,
     const ActionEffectInstance *moon, ActionEffectProjectPointFn project_point, void *userdata);
 float BloodpoolMoonProjection_Light(
     const BloodpoolMoonProjection *projection, ArRenderPointF point);
-bool AppendBloodpoolSoftPatch(ActionEffectGeometryWriter *writer,
-    const ActionEffectInstance *effect,
-    const ActionEffectLocalRect *clip, float x, float y, float rx, float ry,
-    ArRenderColorF color, float lean, ActionEffectProjectPointFn project_point, void *userdata);
 bool AppendBloodpoolTimberMoonlight(ActionEffectGeometryWriter *writer,
     const ActionEffectInstance *effect, const ActionEffectInstance *moon,
     const ActionBloodpoolDetails *details, const ActionMoonlightOcclusion *occlusion,

@@ -1533,7 +1533,8 @@ static PresentationOutcome DrawDioramaSkybox(
     int out_w, int out_h, bool dim,
     float blur_radius, bool rom_source,
     uint64_t source_revision, bool source_dynamic,
-    const DioramaBgValidSpanPlan *valid_spans) {
+    const DioramaBgValidSpanPlan *valid_spans,
+    ArRenderPointF capture_offset, DioramaSkyboxProjection *projection) {
   if (!ArRenderTexture_IsValid(skybox_texture) || snes_height <= 0)
     return kPresentationOutcome_CoreFailure;
   PresentationOutcome outcome = kPresentationOutcome_Complete;
@@ -1691,8 +1692,25 @@ static PresentationOutcome DrawDioramaSkybox(
       { { 0.0f, draw_y1 },         tint, { u0, v1 } },
     };
     if (!SubmitDioramaGeometry(
-            device, skybox_texture, verts, 4, indices, 6, &draw_state))
+            device, skybox_texture, verts, 4, indices, 6, &draw_state)) {
       outcome = kPresentationOutcome_CoreFailure;
+    } else if (projection && u1 > u0 && v1 > v0 &&
+               projection->count < kDioramaBgMaxValidSpans) {
+      /* Named ROM pages replace the captured art entirely. Their ambient
+       * fields span the displayed capture, without inheriting the texture's
+       * wrap count or a scrolling capture's interpolation offset. Captured
+       * sources instead publish exact sampled pixels for art-bound lights. */
+      projection->bands[projection->count++] = rom_source
+          ? (DioramaSkyboxBandProjection){
+              0.0f, 0.0f, (float)snes_width, (float)snes_height, 0.0f, 1.0f}
+          : (DioramaSkyboxBandProjection){
+              u0 * source_width - capture_offset.x,
+              v0 * source_height - capture_offset.y,
+              u1 * source_width - capture_offset.x,
+              v1 * source_height - capture_offset.y,
+              vertical_t0, vertical_t1};
+      projection->active_band = -1;
+    }
   }
   const bool shader_restored =
       !blur_bound || DioramaEffectBackend_Unbind(device);
@@ -2049,7 +2067,8 @@ ResolveDioramaLayers(const DioramaScene *scene,
 static PresentationOutcome DrawResolvedDioramaSkybox(
     ArRenderDevice *device, const DioramaCapture *capture,
     const DioramaViewGeometry *geometry, const ArRenderTexture *textures,
-    const DioramaResolvedLayer *resolved, int resolved_count) {
+    const DioramaResolvedLayer *resolved, int resolved_count,
+    DioramaProjection *projection) {
   PresentationOutcome outcome = kPresentationOutcome_Complete;
   static const float kSkyboxBlurRadiusOnly = 1.0f;
   static const float kSkyboxBlurRadiusBoth = 3.0f;
@@ -2062,6 +2081,11 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
     bool skybox_dynamic = capture->bg2_dynamic;
     int skybox_apron = capture->obj_apron;
     int skybox_width = capture->width;
+    ArRenderPointF capture_offset = {capture->obj_apron,0};
+    if (capture->plane_capture_offsets) {
+      capture_offset.x += capture->plane_capture_offsets[SR_PPU_OVERLAY_BG2].x;
+      capture_offset.y += capture->plane_capture_offsets[SR_PPU_OVERLAY_BG2].y;
+    }
     DioramaBgValidSpanPlan skybox_spans;
     const DioramaBgValidSpanPlan *skybox_valid_spans = capture->bg2_valid_spans;
     const int skybox_source =
@@ -2074,6 +2098,7 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
       skybox_dynamic = capture->skybox->dynamic;
       skybox_apron = 0;
       skybox_width = capture->skybox->width;
+      capture_offset = capture->skybox->capture_offset;
       skybox_spans = *capture->bg2_valid_spans;
       for (unsigned i = 0; i < skybox_spans.count; ++i) {
         if (skybox_spans.spans[i].x1 <= skybox_spans.spans[i].x0) continue;
@@ -2121,7 +2146,9 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
           device, skybox_texture, skybox_apron, skybox_width, capture->height,
           geometry->width, geometry->height, both,
           both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly, rom_skybox,
-          skybox_revision, skybox_dynamic, skybox_valid_spans);
+          skybox_revision, skybox_dynamic, skybox_valid_spans, capture_offset,
+          projection && !projection->bg2_plane.valid
+              ? &projection->bg2_skybox : NULL);
       outcome = PresentationOutcome_Combine(outcome, skybox);
       if (!PresentationOutcome_IsUsable(skybox)) {
         return kPresentationOutcome_CoreFailure;
@@ -2914,13 +2941,30 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
   DioramaPerformance_SetViewport(geometry.width, geometry.height);
   DioramaResolvedLayer resolved[kDioramaLayerCount];
   const int resolved_count = ResolveDioramaLayers(scene, resolved);
+  PrepareDioramaView(capture, view, resolved, resolved_count, &geometry);
+  PublishDioramaView(capture, view, &geometry, out_projection);
+  PublishDioramaPlanes(capture, scene, &geometry, textures, resolved,
+                       resolved_count, out_projection);
   PresentationOutcome outcome = DrawResolvedDioramaSkybox(
-      device, capture, &geometry, textures, resolved, resolved_count);
+      device, capture, &geometry, textures, resolved, resolved_count, out_projection);
   if (!PresentationOutcome_IsUsable(outcome))
     goto failed;
 
-  PrepareDioramaView(capture, view, resolved, resolved_count, &geometry);
-  PublishDioramaView(capture, view, &geometry, out_projection);
+  if (out_projection && out_projection->bg2_skybox.count &&
+      (scene->effect_bg_plane_mask & (1u << SR_PPU_OVERLAY_BG2))) {
+    /* The skybox replaces BG2-low. Draw its attached enhancements here once
+     * per UV band, before enclosure, foreground scenery and actors. Keep the
+     * mapping published for later moon-lit water and timber receivers. */
+    for (unsigned i = 0; i < out_projection->bg2_skybox.count; i++) {
+      out_projection->bg2_skybox.active_band = (int)i;
+      const PresentationOutcome effect = DioramaSubmitPlaneEffect(
+          &output_frame, scene->plane_effect, scene->plane_effect_userdata,
+          SR_PPU_OVERLAY_BG2, out_projection);
+      outcome = PresentationOutcome_Combine(outcome,effect);
+      if (!PresentationOutcome_IsUsable(effect)) goto failed;
+    }
+    out_projection->bg2_skybox.active_band = -1;
+  }
   if (g_settings.diorama_shoebox) {
     DioramaPerformance_SetPlane(-1);
     const PresentationOutcome shoebox = DrawDioramaShoebox(
@@ -2934,8 +2978,6 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
   DioramaFocalAperture aperture;
   PrepareDioramaAperture(capture, &geometry, textures, resolved, resolved_count,
                          &aperture);
-  PublishDioramaPlanes(capture, scene, &geometry, textures, resolved,
-                       resolved_count, out_projection);
   int draw_order[kDioramaLayerCount];
   const int draw_count =
       ResolveDioramaDrawOrder(scene, resolved, resolved_count, draw_order);

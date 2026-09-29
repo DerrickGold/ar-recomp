@@ -269,14 +269,21 @@ typedef struct ActionEffectInstance {
    * signed header offsets here; presentation must use geometry instead. */
   uint16_t left_extent, top_extent, right_extent, bottom_extent;
   uint16_t composition;
-  uint16_t visual;
+  /* Tagged by kind: native actor identity, environmental room/style, or the
+   * landing cloud's strength. Same storage; never interpret across kinds. */
+  union {
+    uint16_t visual;
+    uint16_t environment_room;
+    uint16_t dust_strength;
+  };
   uint16_t animation_state;
   uint16_t animation_index;
   uint16_t flip_attributes;
   uint16_t age_ticks;
   uint16_t phase_ticks;
   uint16_t pulse_ticks;
-  /* Validated authored cave anchors; one bit per ActionCaveWetSource. */
+  /* Validated source bits, interpreted by kind: cave wet anchors, castle
+   * sources within the room, or water strips. Zero means no active sources. */
   uint16_t source_mask;
   uint8_t kind;
   uint8_t phase;

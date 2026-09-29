@@ -113,6 +113,7 @@ typedef struct FrameSlot {
   /* Fixed-width, world-clamped BG view, captured alongside the PPU without
    * rebinding the gameplay plane. Same synchronous-upload lifetime above. */
   SrPpuSurfaceView diorama_skybox_surface;
+  int32_t diorama_skybox_world_x;
 
   /* Geometry, resolved (D3 — never call Settings_Visible*()/live globals from
    * present-time code; these are the already-resolved results). */

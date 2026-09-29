@@ -336,7 +336,7 @@ static bool TempleGrit(ActionEffectGeometryWriter *writer, const ActionEffectIns
     ActionEffectProjectPointFn project_point, void *userdata) {
   for (unsigned i = 0; i < sizeof(kTempleGrit)/sizeof(kTempleGrit[0]); i++) {
     const TempleGritSource *s = &kTempleGrit[i];
-    if (s->room != effect->visual) continue;
+    if (s->room != effect->environment_room) continue;
     const uint32_t seed = DeterministicHash_Mix32((i+1)*0x85EBCA6Bu);
     const unsigned age = (effect->phase_ticks + seed) & 511u;
     for (unsigned grain = 0; grain < 3; grain++) {
@@ -376,16 +376,16 @@ static bool CaveAmbientLight(ActionEffectGeometryWriter *writer, const ActionEff
   /* The temple's dark stone needs contrast, but its authored sprite palettes
    * are already bright. Keep surface gain restrained; mist exposure uses the
    * original field separately so its visibility does not require blown highlights. */
-  const float surface_response = effect->visual == 3 ? .40f : 1;
+  const float surface_response = effect->environment_room == 3 ? .40f : 1;
   for (unsigned i = 0; i < sizeof(kCaveAmbientSources)/sizeof(kCaveAmbientSources[0]); i++) {
     const CaveAmbientSource *s = &kCaveAmbientSources[i];
     const float cx = s->x-effect->world_x, cy = s->y-effect->world_y;
     const float reach_x = s->radius_x + fabsf(s->lean)*s->radius_y;
-    if (s->room != effect->visual || cx+reach_x <= clip.x0 || cx-reach_x >= clip.x1 ||
+    if (s->room != effect->environment_room || cx+reach_x <= clip.x0 || cx-reach_x >= clip.x1 ||
         cy+s->radius_y <= clip.y0 || cy-s->radius_y >= clip.y1) continue;
     /* Nearly steady light; only a very slow, small intensity variation. */
-    const float drift = effect->visual == 3 ? 1 : .98f + .02f*sinf(phase+i*1.7f);
-    const ArRenderColorF tint = effect->visual == 3 ?
+    const float drift = effect->environment_room == 3 ? 1 : .98f + .02f*sinf(phase+i*1.7f);
+    const ArRenderColorF tint = effect->environment_room == 3 ?
         (ArRenderColorF){.72f,.75f,.79f,1} : (ArRenderColorF){.62f,.74f,.88f,1};
     ArRenderVertex2D vertices[49];
     int mapped[49];
@@ -432,13 +432,13 @@ static bool TempleDust(ActionEffectGeometryWriter *writer, const ActionEffectIns
       const float t = ((effect->phase_ticks + seed) & 1023u) / 1024.0f;
       const float x = cx * 32 + 8 + 16 * HashUnit(seed) + 4 * sinf(t * 6.2831853f);
       const float y = cy * 48 + 12 + 28 * HashUnit(seed ^ 0x17u) - 8*t;
-      if (!TempleAir(effect->visual, x, y)) continue;
+      if (!TempleAir(effect->environment_room, x, y)) continue;
       const float fade = sinf(t * 3.14159265f);
       const float radius = .75f + .55f * HashUnit(seed ^ 0x59u);
-      const float exposure = TempleExposure(effect->visual, x, y);
+      const float exposure = TempleExposure(effect->environment_room, x, y);
       const float alpha = fminf(1, .50f + .28f*HashUnit(seed ^ 0xA3u) + .30f*exposure) *
           fade * fade;
-      if (effect->visual == 3) {
+      if (effect->environment_room == 3) {
         if (!InCaveField(effect, x, y, 4)) continue;
         const ArRenderPointF points[] = {
           {x-radius,y}, {x,y-radius*.8f}, {x+radius,y}, {x,y+radius*.8f},
@@ -467,7 +467,7 @@ static bool LandingDust(ActionEffectGeometryWriter *writer, const ActionEffectIn
   const float lifetime = kActionLandingDustLifetime - (burst & 15u);
   const float t = effect->phase_ticks / lifetime;
   if (t >= 1) return true;
-  const float scale = .75f + effect->visual * .35f;
+  const float scale = .75f + effect->dust_strength * .35f;
   const float breeze = (HashUnit(burst ^ 0xC7u)-.5f)*18;
   const unsigned count = 3 + (burst % 3u);
   for (unsigned i = 0; i < count; i++) {

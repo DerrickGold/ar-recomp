@@ -78,6 +78,24 @@ typedef struct DioramaPlaneProjection {
   float overflow_front_drop;
 } DioramaPlaneProjection;
 
+/* Exact source rectangles and output row intervals of the skybox draw. Source
+ * coordinates use the same display-capture space as the plane projectors;
+ * blur insets, finite-view camera clamping and generated motion are already
+ * included. Different horizontal row policies retain separate mappings. A
+ * named ROM replacement uses the full display capture for ambient fields. */
+typedef struct DioramaSkyboxBandProjection {
+  float x0, y0, x1, y1;
+  float output_y0, output_y1;
+} DioramaSkyboxBandProjection;
+
+typedef struct DioramaSkyboxProjection {
+  unsigned count;
+  /* -1 selects the band containing a point. A drawing callback selects one
+   * band so clipping and interpolation never bridge a row-policy boundary. */
+  int active_band;
+  DioramaSkyboxBandProjection bands[kDioramaBgMaxValidSpans];
+} DioramaSkyboxProjection;
+
 /* Resolved action-world projection for presentation-only overlays. The
  * compositor publishes the same camera, mesh dimensions, independent
  * source UV windows and per-room BG1/BG2/OBJ plane shapes used
@@ -98,8 +116,12 @@ typedef struct DioramaProjection {
   DioramaPlaneProjection bg2_plane;
   DioramaPlaneProjection bg1_high_plane;
   DioramaPlaneProjection bg2_high_plane;
+  DioramaSkyboxProjection bg2_skybox;
   DioramaPlaneProjection object_planes[kDioramaObjectPriorityCount];
 } DioramaProjection;
+
+bool Diorama_SkyboxCaptureBounds(const DioramaProjection *projection,
+                                 float *x0, float *y0, float *x1, float *y1);
 
 /* Optional presentation hook inserted immediately after a drawable plane's
  * main mesh. It receives the same resolved projection the plane uses, making
@@ -160,7 +182,8 @@ bool Diorama_ProjectCapturedBg2HighPoint(
     float capture_x, float capture_y, ArRenderPointF *point,
     float *scale_x, float *scale_y);
 
-/* Same mapping, using the resolved BG2-low backdrop plane. Waterfall accents
+/* Same mapping, using the resolved BG2-low backdrop plane or its replacement
+ * skybox. Waterfall accents
  * follow the independently-authored backdrop rake/depth instead of borrowing
  * BG1's playfield shape. */
 bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
@@ -173,6 +196,7 @@ typedef struct DioramaSkyboxView {
   uint64_t revision;
   int width;
   bool dynamic;
+  ArRenderPointF capture_offset;
 } DioramaSkyboxView;
 
 /* Borrowed for this draw. Width excludes the hidden apron; authentic_y0 is

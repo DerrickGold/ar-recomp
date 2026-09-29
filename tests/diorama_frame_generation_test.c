@@ -354,6 +354,8 @@ int main(void) {
       &render_device, &slot, 0.5f, raw, 0, resolved, sky_raw, &sky_resolved) ==
       (1u << kDioramaFrameGenerationSkybox));
   CHECK(!ArRenderTexture_Equals(sky_resolved, sky_raw));
+  const ArRenderPointF sky_offset = DioramaFrameGeneration_PlaneOffset(kDioramaFrameGenerationSkybox);
+  CHECK(fabsf(sky_offset.x+1) < .001f && fabsf(sky_offset.y) < .001f);
   CHECK(SDL_GetRenderTarget(renderer) == scene);
   /* An old caller must not accidentally address the private extra slot. */
   CHECK(DioramaFrameGeneration_Prepare(

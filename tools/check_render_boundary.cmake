@@ -160,6 +160,8 @@ list(APPEND _portable_render_files
     # projection adapter still calls the native compositor implementation.
     "${GAME_SOURCE_ROOT}/action/action_effect_render.c"
     "${GAME_SOURCE_ROOT}/action/action_scene_effect_render.c"
+    "${GAME_SOURCE_ROOT}/action/action_forest_effect_render.c"
+    "${GAME_SOURCE_ROOT}/action/action_environment_geometry.c"
     "${GAME_SOURCE_ROOT}/action/action_cave_effect_render.c"
     "${GAME_SOURCE_ROOT}/action/action_bloodpool_effect_render.c"
     "${GAME_SOURCE_ROOT}/action/action_bloodpool_detail_render.c"

@@ -2098,6 +2098,26 @@ static PpuVirtualTilemapLookupResult background_view_lookup(
 }
 
 static void test_clamped_background_view(void) {
+    /* Capture and presentation share this origin even at asymmetric margins,
+     * finite edges and extreme camera values. Expected values are independent. */
+    SrPpuBackgroundViewRequest mapping = {
+        .world_width = 1024, .width = 496, .screen_x0 = -80,
+    };
+    CHECK(SrPpuBackgroundView_WorldLeft(&mapping, 0) == 0);
+    CHECK(SrPpuBackgroundView_WorldLeft(&mapping, 79) == 0);
+    CHECK(SrPpuBackgroundView_WorldLeft(&mapping, 300) == 220);
+    CHECK(SrPpuBackgroundView_WorldLeft(&mapping, 608) == 528);
+    CHECK(SrPpuBackgroundView_WorldLeft(&mapping, INT64_MAX) == 528);
+    CHECK(SrPpuBackgroundView_WorldLeft(&mapping, INT64_MIN) == 0);
+    mapping.screen_x0 = 24;
+    CHECK(SrPpuBackgroundView_WorldLeft(&mapping, 0) == 24);
+    mapping.width = mapping.world_width;
+    CHECK(SrPpuBackgroundView_WorldLeft(&mapping, 500) == 0);
+    mapping.width++;
+    CHECK(SrPpuBackgroundView_WorldLeft(&mapping, 500) == 0);
+    mapping.width = 0;
+    CHECK(SrPpuBackgroundView_WorldLeft(&mapping, 500) == 0);
+    CHECK(SrPpuBackgroundView_WorldLeft(NULL, 500) == 0);
     enum { kExtra = 120, kWidth = 496, kRows = 16 };
     static const int cameras[] = {0, 60, 120, 200, 650, 768};
     static uint32_t main_pixels[2][kWidth * kRows];

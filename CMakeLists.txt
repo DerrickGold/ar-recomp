@@ -1853,6 +1853,9 @@ if(BUILD_TESTING)
         tests/action_effects_test.c
         src/action/action_effect_clock.c
         src/action/action_effects.c
+        src/action/action_forest_effect_capture.c
+        src/action/action_cave_effect_capture.c
+        src/action/action_bloodpool_effect_capture.c
         src/action/action_landing_dust.c
         src/action/action_bg_world.c
     )
@@ -2050,6 +2053,8 @@ if(BUILD_TESTING)
         src/action/action_bloodpool_detail_render.c
         src/action/action_castle_effect_render.c
         src/action/action_scene_effect_render.c
+        src/action/action_forest_effect_render.c
+        src/action/action_environment_geometry.c
         src/action/action_scene_lightning_render.c
         src/action/action_effect_projection.c
         src/diorama/diorama_projection.c

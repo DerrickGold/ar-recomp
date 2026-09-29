@@ -2177,6 +2177,12 @@ static void TestCaveWaterUsesHighPlane(void) {
   projection.bg2_plane.u1 = projection.bg2_plane.v1 = 1;
   CHECK(Diorama_ProjectCapturedBg2Point(&projection, 180, 208, &wrong, NULL, NULL));
   CHECK(fabsf(actual.x - wrong.x) > 1); /* Exact high-band depth, not low BG2. */
+  /* Replacing the distant backdrop cannot retarget foreground water/mist. */
+  projection.bg2_plane.valid = false;
+  projection.bg2_skybox = (DioramaSkyboxProjection){.count = 1, .active_band = -1,
+      .bands = {{0,0,512,352,0,1}}};
+  CHECK(ActionEffectProjection_ProjectPoint(&context, &effect, 0, 0, &actual));
+  CHECK(fabsf(actual.x - expected.x) < .001f && fabsf(actual.y - expected.y) < .001f);
   projection.bg2_high_plane.valid = false;
   CHECK(!ActionEffectProjection_ProjectPoint(&context, &effect, 0, 0, &actual));
 }
@@ -2710,6 +2716,40 @@ static void TestBloodpoolMoonlight(void) {
   frame.decoration_count = 2;
   CHECK(!ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
       IdentityProjection,NULL,NULL,&lit));
+}
+
+static void TestMoonDependencyScope(void) {
+  ActionSceneEffectFrame frame = {.decoration_count = 3, .decoration_visible_count = 3};
+  frame.decorations[0] = (ActionEffectInstance){
+    .kind = kActionEffect_CastleLight, .phase = kActionEffectPhase_CastleEnvironment,
+    .environment_room = 8, .flags = kActionEffectFlag_Visible,
+    .render_layer = kActionEffectRenderLayer_Bg1Plane,
+    .projection_plane = kActionEffectProjectionPlane_Bg1,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {0,0,256,256}},
+  };
+  frame.decorations[1] = (ActionEffectInstance){
+    .kind = kActionEffect_BloodpoolMoonlight, .phase = kActionEffectPhase_BloodpoolEnvironment,
+    .environment_room = 1, .flags = kActionEffectFlag_Visible,
+    .render_layer = kActionEffectRenderLayer_Bg2Plane,
+    .projection_plane = kActionEffectProjectionPlane_Bg2,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,194}},
+  };
+  frame.decorations[2] = frame.decorations[1];
+  static ActionSceneEffectRenderBatch batch;
+  /* An unrelated stage pass does not consume or reject this duplicated moon. */
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1Plane,
+      true,true,IdentityProjection,NULL,NULL,&batch));
+  frame.decorations[0].kind = kActionEffect_BloodpoolWater;
+  frame.decorations[0].phase = kActionEffectPhase_BloodpoolEnvironment;
+  frame.decorations[0].environment_room = 1;
+  frame.decorations[0].render_layer = kActionEffectRenderLayer_Bg1HighPlane;
+  frame.decorations[0].projection_plane = kActionEffectProjectionPlane_Bg1High;
+  CHECK(!ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1HighPlane,
+      true,true,IdentityProjection,NULL,NULL,&batch));
+  CHECK(!batch.vertex_count && !batch.index_count);
+  frame.decorations[2].flags = 0;
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1HighPlane,
+      true,true,IdentityProjection,NULL,NULL,&batch));
 }
 
 static void TestBloodpoolGeometry(void) {
@@ -3401,12 +3441,46 @@ static void TestCastleGeometry(void) {
   CHECK(batch.index_count == 0); /* Duplicated aggregate cannot exhaust a batch. */
 }
 
+static void TestSkyboxEffectProjection(void) {
+  DioramaProjection p = {.valid = true, .output_width = 800, .output_height = 400,
+      .output_x = 10, .output_y = 20,
+      .bg2_skybox = {.count = 1, .active_band = 0,
+                    .bands = {{130,66,382,290,0,1}}}};
+  ActionEffectProjectionContext context = {.diorama_projection = &p,
+      .ws_extra = 128, .ws_extra_top = 64};
+  ActionEffectInstance moon = {.world_x = 112, .world_y = 62,
+      .projection_plane = kActionEffectProjectionPlane_Bg2,
+      .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,-100,384,300}}};
+  ActionEffectLocalRect bounds;
+  ArRenderPointF point;
+  CHECK(ActionEffectProjection_ClipBounds(&context,&moon,&bounds));
+  CHECK(bounds.x0 == -110 && bounds.x1 == 142 && bounds.y0 == -60 && bounds.y1 == 164);
+  CHECK(ActionEffectProjection_ProjectPoint(&context,&moon,0,0,&point));
+  CHECK(fabsf(point.x-(10+110*800.0f/252)) < .001f);
+  CHECK(fabsf(point.y-(20+60*400.0f/224)) < .001f);
+  CHECK(!ActionEffectProjection_ProjectPoint(&context,&moon,-111,0,&point));
+  /* Forest light and leaves use the midpoint camera, then the same skybox
+   * footprint; they must not fall back to the absent BG2 depth plane. */
+  moon.projection_plane = kActionEffectProjectionPlane_BetweenBackgrounds;
+  context.bg1_camera_x = 80;
+  context.bg2_camera_x = 40;
+  CHECK(ActionEffectProjection_ProjectPoint(&context,&moon,0,0,&point));
+  CHECK(fabsf(point.x-(10+50*800.0f/252)) < .001f);
+  CHECK(ActionEffectProjection_ClipBounds(&context,&moon,&bounds));
+  CHECK(bounds.x0 == -50 && bounds.x1 == 202);
+  p.bg2_skybox.count = 0;
+  CHECK(!ActionEffectProjection_ClipBounds(&context,&moon,&bounds));
+  CHECK(!ActionEffectProjection_ProjectPoint(&context,&moon,0,0,&point));
+}
+
 int main(void) {
+  TestSkyboxEffectProjection();
   TestCastleStackedRays();
   TestBloodpoolMarshDetails();
   TestCastleGeometry();
   TestCastleWaterGeometry();
   TestBloodpoolWaterMoonlight();
+  TestMoonDependencyScope();
   TestBloodpoolGeometry();
   TestBloodpoolMoonlight();
   TestCavePolishGeometry();

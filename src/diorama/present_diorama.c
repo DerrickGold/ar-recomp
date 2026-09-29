@@ -277,6 +277,13 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
       skybox_view.texture, &skybox_view.texture);
   skybox_view.dynamic =
       (generated_plane_mask & (1u << kDioramaFrameGenerationSkybox)) != 0;
+  skybox_view.capture_offset =
+      DioramaFrameGeneration_PlaneOffset(kDioramaFrameGenerationSkybox);
+  /* Canonical source mapping belongs to the captured pixels; frame generation
+   * contributes only its presentation translation. */
+  if (ArRenderTexture_IsValid(skybox_view.texture))
+    skybox_view.capture_offset.x += slot->bg2_camera_x - slot->ws_extra -
+        slot->diorama_skybox_world_x;
   DioramaPerformance_End(frame_synthesis);
   /* The existing graphics setting now selects frame-space generation.
    * Prepare fails individual planes closed when either endpoint or pair

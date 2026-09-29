@@ -1000,6 +1000,20 @@ typedef struct SrPpuBackgroundViewRequest {
     uint64_t pixel_byte_size;
 } SrPpuBackgroundViewRequest;
 
+/** Shared finite-view mapping for scanout and capture metadata. The scanout
+ * supplies its live raster-adjusted camera; hosts may publish the canonical
+ * camera origin alongside the completed surface. Invalid/overwide views map to
+ * zero. Comparisons precede addition so extreme signed inputs cannot overflow.
+ * Header-only policy helper: no ABI records or function-table entries change. */
+static inline int64_t SrPpuBackgroundView_WorldLeft(
+        const SrPpuBackgroundViewRequest *view, int64_t camera_x) {
+    if (!view || !view->width || view->width >= view->world_width) return 0;
+    const int64_t maximum = (int64_t)view->world_width - view->width;
+    if (camera_x <= -(int64_t)view->screen_x0) return 0;
+    if (camera_x >= maximum - view->screen_x0) return maximum;
+    return camera_x + view->screen_x0;
+}
+
 #define SR_PPU_BACKGROUND_VIEW_REQUEST_SIZE                              \
     ((uint32_t)(offsetof(SrPpuBackgroundViewRequest, pixel_byte_size) +   \
                 sizeof(((SrPpuBackgroundViewRequest *)0)->pixel_byte_size)))

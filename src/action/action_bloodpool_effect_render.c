@@ -10,11 +10,6 @@ _Static_assert(16 * 48 * 7 <= kActionSceneEffectRenderMaxVertices &&
                16 * 48 * 15 <= kActionSceneEffectRenderMaxIndices,
                "Bloodpool mist must fit the bounded geometry workspace");
 
-static float SoftFalloff(float distance) {
-  const float t = fmaxf(0, 1-distance*distance);
-  return t*t;
-}
-
 /* Shared by the rear rays and their footprint on foreground water. */
 static float MoonLowRayStrength(float slope) {
   static const struct { float slope, width, strength; } rays[] = {
@@ -23,38 +18,8 @@ static float MoonLowRayStrength(float slope) {
   };
   float light = 0;
   for (unsigned i = 0; i < sizeof(rays)/sizeof(rays[0]); i++)
-    light += rays[i].strength*SoftFalloff((slope-rays[i].slope)/rays[i].width);
+    light += rays[i].strength*SceneSoftFalloff((slope-rays[i].slope)/rays[i].width);
   return light;
-}
-
-bool AppendBloodpoolSoftPatch(ActionEffectGeometryWriter *writer,
-    const ActionEffectInstance *effect,
-    const ActionEffectLocalRect *clip, float x, float y, float rx, float ry,
-    ArRenderColorF color, float lean, ActionEffectProjectPointFn project_point, void *userdata) {
-  ArRenderVertex2D vertices[35];
-  int mapped[35];
-  for (int row = 0; row < 5; row++) {
-    const float v = (row-2)*.5f;
-    for (int col = 0; col < 7; col++) {
-      const float u = (col-3)/3.0f;
-      const int at = row*7+col;
-      vertices[at] = (ArRenderVertex2D){
-        {x + u*rx + v*lean, y + v*ry},
-        {color.r,color.g,color.b,color.a*SoftFalloff(u)*SoftFalloff(v)}, {0,0},
-      };
-      mapped[at] = -1;
-    }
-  }
-  for (int row = 0; row < 4; row++) {
-    for (int col = 0; col < 6; col++) {
-      const int a = row*7+col, b = a+7;
-      const int triangles[] = {a,a+1,b,a+1,b+1,b};
-      for (int t = 0; t < 6; t += 3)
-        if (!AppendSceneClippedTriangle(writer,effect,vertices,mapped,&triangles[t],
-                clip,project_point,userdata)) return false;
-    }
-  }
-  return true;
 }
 
 static bool WaterReflection(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
@@ -101,7 +66,7 @@ static bool MoonReflection(ActionEffectGeometryWriter *writer, const ActionEffec
   ActionEffectInstance mesh = *effect;
   mesh.flags |= kActionEffectFlag_ClippedMesh;
   const float cloud = BloodpoolCloudTransmission(effect->phase_ticks);
-  if (!AppendBloodpoolSoftPatch(writer,&mesh,&clip,0,145,66,61,
+  if (!AppendSceneSoftPatch(writer,&mesh,&clip,0,145,66,61,
           (ArRenderColorF){.58f,.30f,.40f,.10f*cloud},0,project_point,userdata)) return false;
   for (unsigned row = 0; row < 23; row++) {
     const uint32_t seed = DeterministicHash_Mix32(row*0x9E3779B9u+0xB101u);
@@ -345,7 +310,7 @@ static bool AppendMoonRayMesh(ActionEffectGeometryWriter *writer,
       BloodpoolCloudTransmission(mesh->phase_ticks);
   /* The enclosed gallery catches more scattered moonlight than the open
    * sky. Preserve the same source and angular profile behind its pillars. */
-  const float gain = mesh->kind == kActionEffect_CastleSky && mesh->visual == 7 ? 1.6f : 1;
+  const float gain = mesh->kind == kActionEffect_CastleSky && mesh->environment_room == 7 ? 1.6f : 1;
   /* Unshadowed exterior haze needs fewer samples than Act 1's fine platform
    * penumbras. Both densities sample the same fixed angular/radial profile. */
   const unsigned step = visibility ? 1 : 2;
@@ -360,7 +325,7 @@ static bool AppendMoonRayMesh(ActionEffectGeometryWriter *writer,
       const unsigned sample = strip+column;
       const float slope = MoonSlope(sample*step);
       const float far_light = .045f+MoonLowRayStrength(slope);
-      const float angular_fade = SoftFalloff(slope/2.05f);
+      const float angular_fade = SceneSoftFalloff(slope/2.05f);
       for (unsigned row = 0; row < rows; row++) {
         const float y = MoonRow(row*step);
         const float start = fmaxf(0,fminf(1,(y-12)/22));
@@ -370,7 +335,7 @@ static bool AppendMoonRayMesh(ActionEffectGeometryWriter *writer,
           const float remaining = fmaxf(0,fminf(1,(middle[fan].reach-y)/52));
           const float fade = remaining*remaining*(3-2*remaining);
           near_light += middle[fan].strength*fade *
-              SoftFalloff((slope-middle[fan].slope)/middle[fan].width);
+              SceneSoftFalloff((slope-middle[fan].slope)/middle[fan].width);
         }
         const float exposure = visibility ? visibility[(sample*kActionMoonlightRows+row)*step] : 1;
         const float alpha = fminf(.95f,(.24f*far_light*far_fade+.40f*near_light*exposure) *
@@ -447,7 +412,7 @@ float BloodpoolMoonProjection_Light(
   const float down = Cross(projection->axis,direction);
   if (!isfinite(down) || fabsf(down) <= .0001f || down*projection->orientation <= 0) return 0;
   const float slope = Cross(direction,projection->vertical)/down;
-  return MoonLowRayStrength(slope)*SoftFalloff(slope/2.05f);
+  return MoonLowRayStrength(slope)*SceneSoftFalloff(slope/2.05f);
 }
 
 bool AppendBloodpoolWaterMoonlight(ActionEffectGeometryWriter *writer,
@@ -664,7 +629,7 @@ bool AppendBloodpoolEnvironment(
         const float x = anchor + 10*drift-effect->world_x;
         const float y = -5-6*HashUnit(seed ^ 0x71u)+2*cosf(t);
         const float opacity = edge*(.24f+.13f*HashUnit(seed ^ 0xA3u))*(.9f+.1f*drift);
-        if (!AppendBloodpoolSoftPatch(writer,&mesh,&region,x,y,rx,ry,
+        if (!AppendSceneSoftPatch(writer,&mesh,&region,x,y,rx,ry,
                 (ArRenderColorF){.43f,.43f,.59f,opacity},6*drift,project_point,userdata))
           return false;
       } else {
