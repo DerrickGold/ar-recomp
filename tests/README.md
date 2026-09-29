@@ -87,6 +87,24 @@ To also build the initial mountain geometry from a local US ROM, run
 `build-check/actraiser_sim_world_navigation_materials_test ar.sfc`.
 This optional check uses empty WRAM and does not read or modify a save.
 
+## Generated action damage regression (local ROM)
+
+After building the `play` preset with the US ROM, run:
+
+```sh
+python3 tests/action_damage_generated_test.py --output build-check/action-damage-audit
+```
+
+This optional integration test relinks the production game objects with a test
+entry point. It exercises the generated enemy-hit resolver, original sword and
+beam compositions, beam creation/movement/retirement, and the native object-loop
+hit timer. It checks same-pass sword/beam exclusion, repeated passes, immunity,
+deflection, lethal hits, score, and later hits by a surviving projectile. No ROM,
+save, generated source or game executable is changed. Keep the game build current;
+this is separate from the ROM-free CTest tier. See
+[the damage audit](../docs/action-damage-audit.md) for the original-ROM comparison
+and the limits of these controlled fixtures.
+
 ## Shared implementation dependencies
 
 `cmake/TestSupport.cmake` owns shared ROM-free implementation libraries for

@@ -187,7 +187,10 @@ void ActRaiser_ApplyCheats(void) {
     }
   }
 
-  /* AR_RANGED_SWORD=1: sword fires a projectile ($E4 = $80, PAR 7E00E480). */
+  /* AR_RANGED_SWORD=1: retain the native sword power-up ($E4 = $80,
+   * PAR 7E00E480). This also makes the melee sword deal 2 instead of 1
+   * through $9DC8. The native beam deals 2 per accepted hit; it survives
+   * contact and can hit again after the victim's hit timer expires. */
   if (g_settings.cheat_ranged_sword)
     g_ram[kActRaiserWram_RangedSwordFlag] = 0x80;
 
