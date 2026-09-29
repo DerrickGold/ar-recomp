@@ -64,6 +64,25 @@ static bool s_action_bg2_mask_has_alpha;
 static bool s_action_bg2_mask_ready;
 static uint32_t s_action_alpha_mask[kFrameSlotLayerTextureWidth * kFrameSlotAuthenticHeight];
 
+static float ActionEffectBrightness(const FrameSlot *slot) {
+  return slot && !(slot->inidisp & 0x80)
+      ? (float)(slot->inidisp & 0x0f) / 15.0f : 0.0f;
+}
+
+/* Tile captures already contain master brightness. Apply it once to the
+ * host-built effect colours, retaining opacity for alpha and premultiplied
+ * target passes as well as additive and surface-light draws. */
+static void FadeEffectVertices(const FrameSlot *slot,
+                               ArRenderVertex2D *vertices, int count) {
+  const float brightness = ActionEffectBrightness(slot);
+  if (brightness == 1.0f) return;
+  for (int i = 0; i < count; i++) {
+    vertices[i].color.r *= brightness;
+    vertices[i].color.g *= brightness;
+    vertices[i].color.b *= brightness;
+  }
+}
+
 static bool FrameUsesBg2Alpha(const FrameSlot *slot) {
   if (!slot || !slot->action_environmental_effects ||
       slot->action_scene_effects.decoration_overflow ||
@@ -244,7 +263,8 @@ static void FailActionHeatTargetState(ArRenderDevice *device, const char *operat
 }
 
 static bool FrameUsesActionHeat(const FrameSlot *slot) {
-  if (!slot || !slot->action_environmental_effects || slot->diorama_active ||
+  if (ActionEffectBrightness(slot) == 0 ||
+      !slot->action_environmental_effects || slot->diorama_active ||
       ActRaiserRoom_ProfileFor(
           slot->diorama_map_group, slot->diorama_map_number) !=
               kActRaiserRoomProfile_AitosAct2Lava ||
@@ -466,7 +486,7 @@ _Static_assert(kActionEffectObjPriorityCount ==
 void PresentActionEffects_Draw(
     ArRenderDevice *device, const FrameSlot *slot, ArRenderRectI viewport,
     const DioramaProjection *diorama_projection) {
-  if (!slot || (!slot->action_effects.visible_count &&
+  if (ActionEffectBrightness(slot) == 0 || (!slot->action_effects.visible_count &&
                 !slot->action_scene_effects.visible_count &&
                 !slot->action_scene_effects.decoration_visible_count) ||
       (!slot->action_effect_lighting && !slot->action_effect_particles &&
@@ -506,6 +526,8 @@ void PresentActionEffects_Draw(
     return;
   const int actor_vertex_count = scene_geometry->vertex_count;
   const int actor_index_count = scene_geometry->index_count;
+  FadeEffectVertices(slot, geometry->vertices, geometry->vertex_count);
+  FadeEffectVertices(slot, scene_geometry->vertices, scene_geometry->vertex_count);
 
   EffectBatch spell_batch = {
     .vertices = geometry->vertices,
@@ -547,6 +569,7 @@ void PresentActionEffects_Draw(
           scene_geometry) && scene_geometry->index_count) {
     scene_batch.vertex_count = scene_geometry->vertex_count;
     scene_batch.index_count = scene_geometry->index_count;
+    FadeEffectVertices(slot, scene_geometry->vertices, scene_geometry->vertex_count);
     decoration_submitted = EffectRenderer_Submit(
         device, &scene_batch, kArRenderBlendMode_Add);
   }
@@ -560,6 +583,7 @@ void PresentActionEffects_Draw(
           scene_geometry) && scene_geometry->index_count) {
     scene_batch.vertex_count = scene_geometry->vertex_count;
     scene_batch.index_count = scene_geometry->index_count;
+    FadeEffectVertices(slot, scene_geometry->vertices, scene_geometry->vertex_count);
     decoration_submitted |= EffectRenderer_Submit(
         device, &scene_batch, kArRenderBlendMode_Alpha);
   }
@@ -572,6 +596,7 @@ void PresentActionEffects_Draw(
       scene_geometry->index_count) {
     scene_batch.vertex_count = scene_geometry->vertex_count;
     scene_batch.index_count = scene_geometry->index_count;
+    FadeEffectVertices(slot, scene_geometry->vertices, scene_geometry->vertex_count);
     SubmitSurfaceLight(device, &scene_batch);
   }
   /* One line, once per process: the whole path (WRAM identity -> capture ->
@@ -676,7 +701,8 @@ static bool DecorationAttachmentVisible(int plane, const DioramaProjection *proj
 void PresentActionEffects_DrawDioramaPlane(
     void *userdata, int plane, const DioramaProjection *diorama_projection) {
   PresentActionPlaneEffectContext *context = userdata;
-  if (!context || !context->slot || !context->slot->action_environmental_effects ||
+  if (!context || ActionEffectBrightness(context->slot) == 0 ||
+      !context->slot->action_environmental_effects ||
       !context->slot->action_scene_effects.decoration_visible_count ||
       !diorama_projection || !EffectRenderer_Available() ||
       !DecorationAttachmentVisible(plane, diorama_projection)) return;
@@ -699,6 +725,7 @@ void PresentActionEffects_DrawDioramaPlane(
       continue;
     }
     if (!geometry->index_count) continue;
+    FadeEffectVertices(slot, geometry->vertices, geometry->vertex_count);
     EffectBatch batch = SceneBatchView(geometry);
     if (EffectRenderer_Submit(context->device, &batch, pass->blend) &&
         !announced[pass->layer]) {
@@ -788,6 +815,7 @@ static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
           ActionEffectProjection_ClipBounds, &projection, geometry) ||
       !geometry->index_count)
     return true;
+  FadeEffectVertices(slot, geometry->vertices, geometry->vertex_count);
   if (mask_has_alpha) {
     if (!DrawAlphaMaskedGeometry(device, slot, viewport, mask_texture, alpha, geometry))
       DisableActionPlaneEffect(device, "masked geometry submit");
@@ -861,7 +889,7 @@ static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
 
 bool PresentActionEffects_DrawFlatPlanes(
     ArRenderDevice *device, const FrameSlot *slot, ArRenderRectI viewport) {
-  if (!slot) return true;
+  if (ActionEffectBrightness(slot) == 0) return true;
   const float dimming = PresentActionEffects_Bg1Dimming(slot);
   if (dimming > 0 && viewport.w > 0 && viewport.h > 0 && slot->action_bg1_mask_valid &&
       s_action_plane_blend_supported && s_action_bg1_mask_ready && s_action_bg1_mask_has_alpha &&

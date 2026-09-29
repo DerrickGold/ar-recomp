@@ -10,6 +10,7 @@
 #include "render/render_types.h"
 
 void PresentCompositeScene(const FrameSlot *slot, float alpha);
+bool PresentBlankScene(void);
 bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport);
 bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
                                       ArRenderRectI priority_viewport);

@@ -427,32 +427,31 @@ void PresentRendererResources_Reset(void) {
   PresentSimMenu_Reset();
 }
 
+bool PresentBlankScene(void) {
+  const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
+  if (!ArRenderDevice_SetRenderTarget(
+          &g_render_device, CrtPost_BaseTarget()) ||
+      !ArRenderDevice_UseOutputCoordinates(&g_render_device) ||
+      !ArRenderDevice_SetViewport(&g_render_device, NULL) ||
+      !ArRenderDevice_SetClipRect(&g_render_device, NULL) ||
+      !ArRenderDevice_Clear(&g_render_device, black)) {
+    SessionFatal_Request(
+        "The renderer could not clear its scene target for a blank display "
+        "(%s). Restart the game; if this repeats, update your graphics "
+        "driver.", ArRenderDevice_LastError(&g_render_device));
+    return false;
+  }
+  return true;
+}
+
 void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   if (!ArRenderDevice_IsReady(&g_render_device) ||
       !ArRenderTexture_IsValid(g_texture)) return;
 
-  /* The action map group becomes live while the world-to-action transition
-   * is still holding the SNES in hardware forced blank. That makes Diorama's
-   * host-side gate true before the first action frame is actually visible.
-   * Unlike the ordinary PPU scanout, Diorama does not pass through INIDISP:
-   * its navy clear, shoebox, skybox, HUD, and host overlays would therefore
-   * leak through an otherwise fully blank transition (the gf=976 snapshot is
-   * the captured example). Treat forced blank as the master output gate it is
-   * on hardware and return before drawing any host-owned layer or overlay. */
-  if (slot->diorama_active && (slot->inidisp & 0x80)) {
-    const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
-    if (!ArRenderDevice_SetRenderTarget(
-            &g_render_device, CrtPost_BaseTarget()) ||
-        !ArRenderDevice_UseOutputCoordinates(&g_render_device) ||
-        !ArRenderDevice_SetViewport(&g_render_device, NULL) ||
-        !ArRenderDevice_SetClipRect(&g_render_device, NULL) ||
-        !ArRenderDevice_Clear(&g_render_device, black)) {
-      SessionFatal_Request(
-          "The renderer could not clear its scene target for forced blank "
-          "(%s). Restart the game; if this repeats, update your graphics "
-          "driver.", ArRenderDevice_LastError(&g_render_device));
-      return;
-    }
+  /* Forced blank and zero brightness gate every host-owned game layer,
+   * including effects and room shells that bypass native PPU scanout. */
+  if ((slot->inidisp & 0x80) || !(slot->inidisp & 0x0f)) {
+    (void)PresentBlankScene();
     return;
   }
 

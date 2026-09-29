@@ -108,6 +108,13 @@ bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport) {
   return true;
 }
 
+bool PresentBlankScene(void) {
+  CHECK(s_stage++ == 2);
+  CHECK(s_expected_view == kRenderComparison_Authentic);
+  CHECK((s_expected_slot->inidisp & 0x80) || !(s_expected_slot->inidisp & 15));
+  return true;
+}
+
 bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
                                       ArRenderRectI priority_viewport) {
   CHECK(s_stage++ == 3);
@@ -135,7 +142,8 @@ ArRenderRectI CrtPost_End(ArRenderDevice *device,
                           int scan_columns, int scan_lines,
                           ArRenderRectI image) {
   const int expected_stage =
-      s_expected_view == kRenderComparison_SideBySide ? 4 : 3;
+      s_expected_view == kRenderComparison_SideBySide &&
+      !(s_expected_slot->inidisp & 0x80) && (s_expected_slot->inidisp & 15) ? 4 : 3;
   CHECK(s_stage++ == expected_stage);
   CHECK(device == &g_render_device);
   CHECK(scan_columns == 256);
@@ -269,6 +277,20 @@ int main(int argc, char **argv) {
   s_expected_stages = 5;
   RunCase(&slot);
 
+  /* A loading screen has no current camera capture. Native black must not
+   * read the old room's texture or require its serial. */
+  slot.authentic_frame_serial = 0;
+  const uint8_t blank_controls[] = {0, 0x80, 0x8f};
+  for (unsigned i = 0; i < sizeof(blank_controls); i++) {
+    const int menus_before = s_menu_draws;
+    slot.inidisp = blank_controls[i];
+    RunCase(&slot);
+    CHECK(!SessionFatal_Requested() && s_menu_draws == menus_before);
+  }
+  slot.inidisp = 15;
+  slot.authentic_frame_serial = s_authentic_uploaded_serial = 8;
+  RunCase(&slot);
+
   /* A hold makes enhanced rendering the priority path and adds authentic PiP
    * inside the game composite before CRT resolve and all host UI. */
   RenderComparison_OnPress(2200);
@@ -276,6 +298,22 @@ int main(int argc, char **argv) {
   RenderComparison_Tick(3520, true, true);
   s_expected_view = kRenderComparison_SideBySide;
   s_expected_host_viewport = kResolved;
+  s_expected_stages = 6;
+  RunCase(&slot);
+
+  /* PiP stays latched across blank room loading, omits its stale inset, and
+   * resumes on the destination's first synchronized visible capture. */
+  slot.authentic_frame_serial = 0;
+  s_expected_stages = 5;
+  for (unsigned i = 0; i < sizeof(blank_controls); i++) {
+    const int menus_before = s_menu_draws;
+    slot.inidisp = blank_controls[i];
+    RunCase(&slot);
+    CHECK(!SessionFatal_Requested() && s_menu_draws == menus_before);
+    CHECK(RenderComparison_PresentView() == kRenderComparison_SideBySide);
+  }
+  slot.inidisp = 15;
+  slot.authentic_frame_serial = s_authentic_uploaded_serial = 9;
   s_expected_stages = 6;
   RunCase(&slot);
 
@@ -300,7 +338,7 @@ int main(int argc, char **argv) {
   RenderComparison_OnPress(5000);
   RenderComparison_Tick(5050, false, true);
   RenderComparison_Tick(5950, false, true);
-  slot.authentic_frame_serial = 8;
+  slot.authentic_frame_serial = 10;
   s_stage = 0;
   (void)PresentFrame(&slot, s_expected_alpha, s_expected_presentation_fps);
   CHECK(s_stage == 0);

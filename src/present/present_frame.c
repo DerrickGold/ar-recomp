@@ -67,7 +67,10 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
 
   ArRenderExtentI output_size = {0};
   const RenderComparisonView view = RenderComparison_PresentView();
-  if (view != kRenderComparison_Enhanced &&
+  const bool blank = (slot->inidisp & 0x80) || !(slot->inidisp & 0x0f);
+  /* Room loading can retire the exact camera while INIDISP holds black.
+   * Black needs no native texture; never sample the preceding room's capture. */
+  if (!blank && view != kRenderComparison_Enhanced &&
       !AuthenticFrameSynchronized(slot)) {
     SessionFatal_Request(
         "Authentic comparison tried to present a frame that was not current "
@@ -84,13 +87,13 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
         kFrameSlotAuthenticWidth, kFrameSlotAuthenticHeight, &output_size);
     (void)BeginCrtPost();
     if (SessionFatal_Requested()) return image;
-    if (!PresentAuthenticScene(slot, image)) {
+    if (!(blank ? PresentBlankScene() : PresentAuthenticScene(slot, image))) {
       RequestComparisonDrawFailure("native view");
       (void)EndCrtPost(
           kFrameSlotAuthenticWidth, kFrameSlotAuthenticHeight, image);
       return image;
     }
-    PresentSimMenu_Draw(slot, image);
+    if (!blank) PresentSimMenu_Draw(slot, image);
     image = EndCrtPost(
         kFrameSlotAuthenticWidth, kFrameSlotAuthenticHeight, image);
   } else {
@@ -101,13 +104,13 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
     (void)BeginCrtPost();
     if (SessionFatal_Requested()) return image;
     PresentCompositeScene(slot, alpha);
-    if (!SessionFatal_Requested()) PresentSimMenu_Draw(slot, image);
+    if (!blank && !SessionFatal_Requested()) PresentSimMenu_Draw(slot, image);
     if (SessionFatal_Requested()) {
       (void)EndCrtPost(
           slot->visible_width, slot->snes_height, image);
       return image;
     }
-    if (view == kRenderComparison_SideBySide &&
+    if (!blank && view == kRenderComparison_SideBySide &&
         !PresentAuthenticPictureInPicture(slot, image)) {
       RequestComparisonDrawFailure("picture-in-picture view");
       (void)EndCrtPost(

@@ -26,6 +26,7 @@ typedef struct Backend {
   int draw_count;
   ArRenderBlendMode geometry_blends[64];
   ArRenderColorF geometry_colors[64];
+  float geometry_peak_rgb[64];
   ArRenderBlendMode composite_blend;
   uint32_t first_uploaded_pixel;
 } Backend;
@@ -144,6 +145,13 @@ static bool Geometry(void *ctx, ArRenderTexture texture,
   assert(b->geometries < 64);
   b->geometry_blends[b->geometries] = state ? state->blend : kArRenderBlendMode_Opaque;
   b->geometry_colors[b->geometries] = vertices[0].color;
+  float peak = 0;
+  for (int i = 0; i < vertex_count; i++) {
+    peak = fmaxf(peak, vertices[i].color.r);
+    peak = fmaxf(peak, vertices[i].color.g);
+    peak = fmaxf(peak, vertices[i].color.b);
+  }
+  b->geometry_peak_rgb[b->geometries] = peak;
   b->geometries++;
   Record(b, texture.value ? 'H' : 'G');
   return !b->fail_geometry && !(b->fail_surface_light && state &&
@@ -183,6 +191,7 @@ static const ArRenderRectI viewport = {20, 30, 640, 448};
 
 static void LavaFrame(void) {
   frame = (FrameSlot){0};
+  frame.inidisp = 15;
   frame.snes_width = frame.visible_width = 256;
   frame.snes_height = 224;
   frame.diorama_map_group = kActRaiserMapGroup_Aitos;
@@ -778,6 +787,7 @@ static void CaveMaskUploadBudget(void) {
   ArRenderDevice device;
   Init(&b,&device);
   memset(&frame,0,sizeof(frame));
+  frame.inidisp = 15;
   frame.action_environmental_effects = true;
   frame.snes_width = width;
   frame.action_scene_effects.decoration_count = 2;
@@ -818,6 +828,7 @@ static void BloodpoolComposition(void) {
   ArRenderDevice device;
   Init(&b,&device);
   memset(&frame,0,sizeof(frame));
+  frame.inidisp = 15;
   frame.snes_width = frame.snes_height = frame.visible_width = 224;
   frame.action_environmental_effects = true;
   frame.action_bg1_mask_valid = frame.action_bg2_mask_valid = true;
@@ -928,6 +939,7 @@ static void CastleComposition(void) {
   ArRenderDevice device;
   Init(&b,&device);
   memset(&frame,0,sizeof(frame));
+  frame.inidisp = 15;
   frame.snes_width = frame.snes_height = frame.visible_width = 224;
   frame.action_environmental_effects = true;
   frame.action_bg1_mask_valid = frame.action_bg2_mask_valid = true;
@@ -995,6 +1007,7 @@ static void CastleComposition(void) {
 
 static void TestCastleDimming(void) {
   memset(&frame,0,sizeof(frame));
+  frame.inidisp = 15;
   frame.action_environmental_effects = true;
   frame.diorama_map_group = kActRaiserMapGroup_Bloodpool;
   frame.action_scene_effects.decoration_count = 1;
@@ -1020,11 +1033,87 @@ static void TestCastleDimming(void) {
   assert(PresentActionEffects_Bg1Dimming(&frame) == 0);
 }
 
+static void TestEffectMasterBrightness(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b, &device);
+  LavaFrame();
+  frame.action_bg1_mask_valid = true;
+  memset(pixels, 0xff, sizeof(pixels));
+  assert(PresentActionEffects_UploadMask(&device, SR_PPU_OVERLAY_BG1, &frame,
+      (const uint8_t *)pixels, 256 * 4));
+  const DioramaProjection projection = {
+    .valid = true, .matrix = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1},
+    .aspect_x = 256.0f / 224.0f, .height_scale = 1,
+    .texture_width = 256, .texture_height = 224,
+    .output_width = 640, .output_height = 448,
+    .bg1_high_plane = {.valid = true, .u1 = 1, .v1 = 1},
+  };
+  PresentActionPlaneEffectContext context = {&device, &frame, viewport};
+  const uint8_t controls[] = {15, 7, 15, 0, 0x80, 0x8f};
+  for (int path = 0; path < 5; path++) {
+    LavaFrame();
+    frame.action_bg1_mask_valid = true;
+    float full_peak = 0;
+    ArRenderColorF full_color = {0};
+    frame.action_scene_effects.decorations[0].render_layer = path >= 2
+        ? kActionEffectRenderLayer_WorldOverlay : kActionEffectRenderLayer_Bg1HighPlane;
+    if (path == 3) {
+      frame.action_scene_effects.decoration_count = 0;
+      frame.action_scene_effects.decoration_visible_count = 0;
+      frame.action_scene_effects.effect_count = frame.action_scene_effects.visible_count = 1;
+      frame.action_scene_effects.effects[0] = (ActionEffectInstance){
+        .world_x = 128, .world_y = 100,
+        .kind = kActionEffect_EnemyFireball, .phase = kActionEffectPhase_EnemyFireballFlight,
+        .flags = kActionEffectFlag_Visible, .render_layer = kActionEffectRenderLayer_WorldOverlay,
+        .projection_plane = kActionEffectProjectionPlane_Obj,
+        .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-4,-4,4,4}},
+      };
+    } else if (path == 4) {
+      frame.action_scene_effects.decorations[0] = (ActionEffectInstance){
+        .world_x = 128, .world_y = 192, .phase_ticks = 12,
+        .kind = kActionEffect_LandingDust, .phase = kActionEffectPhase_CaveEnvironment,
+        .visual = 2, .flags = kActionEffectFlag_Visible,
+        .render_layer = kActionEffectRenderLayer_WorldDust,
+        .projection_plane = kActionEffectProjectionPlane_Bg1,
+        .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-64,-40,64,2}},
+      };
+    }
+    for (unsigned i = 0; i < sizeof(controls); i++) {
+      frame.inidisp = controls[i];
+      const int before = b.geometries;
+      if (path == 0)
+        PresentActionEffects_DrawDioramaPlane(&context, kDioramaPlane_Bg1Hi, &projection);
+      else if (path == 1)
+        assert(PresentActionEffects_DrawFlatPlanes(&device, &frame, viewport));
+      else
+        PresentActionEffects_Draw(&device, &frame, viewport, NULL);
+      if (i >= 3) {
+        assert(b.geometries == before);
+        assert(!PresentActionHeat_Begin(&device, &frame, viewport));
+        continue;
+      }
+      assert(b.geometries == before + 1);
+      if (!i) {
+        full_peak = b.geometry_peak_rgb[before];
+        full_color = b.geometry_colors[before];
+        assert(full_peak > 0);
+      }
+      const float brightness = controls[i] / 15.0f;
+      assert(fabsf(b.geometry_peak_rgb[before] - full_peak * brightness) < .00001f);
+      assert(b.geometry_colors[before].a == full_color.a);
+    }
+  }
+  PresentActionEffects_Reset(&device);
+  assert(b.created == b.destroyed);
+}
+
 static void SkyboxWaterfallComposition(void) {
   Backend b;
   ArRenderDevice device;
   Init(&b, &device);
   memset(&frame, 0, sizeof(frame));
+  frame.inidisp = 15;
   frame.action_environmental_effects = true;
   frame.ws_extra = 128;
   frame.ws_extra_top = 64;
@@ -1057,6 +1146,7 @@ static void SkyboxWaterfallComposition(void) {
 }
 
 int main(void) {
+  TestEffectMasterBrightness();
   SkyboxWaterfallComposition();
   TestCastleDimming();
   CastleComposition();
