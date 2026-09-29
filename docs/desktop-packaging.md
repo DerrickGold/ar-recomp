@@ -37,6 +37,14 @@ The Builder's portable download uses a `BuilderData` directory. Builder data
 and the generated game's saves/settings are separate. The default game output
 is an `ActRaiserRecomp` folder beside the Builder.
 
+On Windows, the Builder automatically stages `zig.exe` at a short path when
+the bundled compiler's path exceeds the Windows process-launch limit. It uses
+the current build's scratch directory when possible, otherwise a private
+temporary directory under `TEMP` or `LOCALAPPDATA`. The bundled SDK, portable
+data, and game output stay in their chosen locations. The temporary compiler
+is removed after success, failure, or cancellation; no registry change or
+administrator access is required.
+
 To move a portable installation, copy the entire folder, including its sidecar
 and data. Copying only the app switches it to per-user storage. Switching modes
 does not automatically transfer saves or settings; back up and copy the data

@@ -17,6 +17,7 @@ import (
 	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
 	"github.com/DerrickGold/ar-recomp/installer/internal/builder"
 	"github.com/DerrickGold/ar-recomp/installer/internal/buildworkspace"
+	"github.com/DerrickGold/ar-recomp/installer/internal/compilerlaunch"
 	"github.com/DerrickGold/ar-recomp/installer/internal/desktop"
 	"github.com/DerrickGold/ar-recomp/installer/internal/localization"
 )
@@ -78,10 +79,18 @@ func buildGameFromGUI(ctx context.Context, values guiFlags, root, outputDir, rom
 			fmt.Fprintf(output, "Warning: could not remove temporary build files at %s: %v\nThey will not be reused by later builds.\n", scratch, err)
 		}
 	}()
-	environment := cleanBuildEnvironment(scratch)
 	fmt.Fprintf(output, "Clean build: using new scratch directory %s\nNo previous generated code, object files or compiler caches will be reused.\n", scratch)
+	launch, err := compilerlaunch.New(scratch, cleanBuildEnvironment(scratch))
+	if err != nil {
+		return builder.Result{}, err
+	}
+	defer func() {
+		if err := launch.Close(); err != nil {
+			fmt.Fprintf(output, "Warning: could not remove temporary compiler files: %v\n", err)
+		}
+	}()
 	run := func(executable string, output io.Writer, args ...string) (commandResult, error) {
-		return runSnesbuildAt(ctx, executable, scratch, environment, output, args...)
+		return runSnesbuildAt(ctx, executable, launch.Directory, launch.Environment, output, args...)
 	}
 	fmt.Fprintf(output, "Build inputs: %s\nGame output: %s\nRuntime data: %s\n", root, outputDir, dataRoot)
 	if err := prepareNativeUS(dataRoot, romPath, output); err != nil {
@@ -110,13 +119,34 @@ func buildGameFromGUI(ctx context.Context, values guiFlags, root, outputDir, rom
 	if _, err := run(snesbuild, output, regenArgs...); err != nil {
 		return builder.Result{}, err
 	}
+	var toolchainResult commandResult
 	if values.buildWorkspace != "" {
-		if _, err := run(snesbuild, output, "toolchain", "status", "--root", root, "--cache-dir", filepath.Join(scratch, "toolchain")); err != nil {
+		toolchainResult, err = run(snesbuild, output, "toolchain", "status", "--root", root, "--cache-dir", filepath.Join(scratch, "toolchain"))
+		if err != nil {
 			return builder.Result{}, fmt.Errorf("bundled compiler unavailable (no download attempted): %w", err)
 		}
 	} else {
 		if err := prepareBuildToolchain(ctx, snesbuild, root, output); err != nil {
 			return builder.Result{}, err
+		}
+		if runtime.GOOS == "windows" {
+			toolchainResult, err = run(snesbuild, output, "toolchain", "status", "--root", root)
+			if err != nil {
+				return builder.Result{}, err
+			}
+		}
+	}
+	if runtime.GOOS == "windows" {
+		zig, err := oneArtifact(toolchainResult, "toolchain")
+		if err != nil {
+			return builder.Result{}, err
+		}
+		staged, err := launch.UseToolchain(ctx, zig)
+		if err != nil {
+			return builder.Result{}, err
+		}
+		if staged {
+			fmt.Fprintf(output, "Windows long-path support: using a temporary compiler in %s with the original bundled libraries.\n", launch.Directory)
 		}
 	}
 	buildArgs := []string{
@@ -198,7 +228,8 @@ func buildGameFromGUI(ctx context.Context, values guiFlags, root, outputDir, rom
 
 // Remove inherited cache overrides before setting our own. Environment keys
 // are case-insensitive on Windows; no caller-provided cache may inject objects
-// into a clean build. The compiler itself remains bundled/shared, not copied.
+// into a clean build. Compiler launch preparation may stage the executable;
+// SDK inputs and these fresh object caches retain their original locations.
 func cleanBuildEnvironment(scratch string) []string {
 	var environment []string
 	for _, entry := range os.Environ() {
