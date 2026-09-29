@@ -40,6 +40,26 @@ HOW TO PLAY
 
    The generated app is private: it contains your ROM. Do not distribute it.
    The Mac app is automatically signed locally; no Apple account is needed.
+   This local signature is not Developer ID signing or Apple notarization.
+
+
+WINDOWS APPLICATION CONTROL / MACOS GATEKEEPER
+--------------------------------------------
+Windows tools are unsigned. A build error saying "An Application Control policy
+has blocked this file" means Windows refused to start a tool such as snesbuild.exe.
+Open Windows Security > App & browser control > Smart App Control settings.
+Smart App Control has no per-app exception. On your own device, if you trust
+this download and accept disabling this protection for all apps, choose Off,
+read Windows' confirmation, and retry Build game. On a managed device, or if
+the setting is unavailable or the block remains, ask your administrator to
+approve the blocked tool. Copy the Builder's error details for diagnosis.
+
+Mac downloads are not Developer ID signed or notarized. For an unidentified
+developer or unverified-app warning on a download you trust, try opening it,
+then use System Settings > Privacy & Security > Open Anyway. Helpers can also
+be checked. A damaged-app or malware warning needs separate investigation.
+
+See utils/docs/desktop-packaging.md for details and official platform guidance.
 
 
 CHOOSE YOUR INSTALLATION TYPE

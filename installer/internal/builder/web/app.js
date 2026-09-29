@@ -120,7 +120,8 @@ function showKey(kind,key,args={},error,operation="Check Builder status") {
   ui.set(state,key,args); ui.set(workspaceStatus,key,args);
   const feedback=window.workshopFeedback;
   if(kind==="failed"){
-    feedback?.show(state,error||new Error(args.detail||ui.text(key,args)),{operation:key==="builder.build.failed"?"Build game":operation,log:key==="builder.build.failed"?log.textContent:"",retry:refresh});
+    const buildFailure=key==="builder.build.failed"||operation==="Build game";
+    feedback?.show(state,error||new Error(args.detail||ui.text(key,args)),{operation:buildFailure?"Build game":operation,log:buildFailure?log.textContent:"",retry:refresh});
     if(feedback) ui.set(workspaceStatus,"builder.feedback.failed");
   }else feedback?.clear(state);
   const details=document.getElementById("dock-error");if(details)details.hidden=kind!=="failed";
@@ -1083,7 +1084,9 @@ async function refresh(){
       announce("succeeded");
     }
     if(data.state==="failed"){
-      showKey("failed","builder.build.failed",{detail:data.error||""}); build.disabled=false; launch.disabled=true; polling=false;
+      const error=data.errorCode&&window.workshopFeedback?.responseError(data);
+      showKey("failed",error?.uiKey||"builder.build.failed",error?.uiArgs||{detail:data.error||""},error,"Build game");
+      build.disabled=false; launch.disabled=true; polling=false;
       logBox.open=true;  /* a failure is the one time the log matters unprompted */
       announce("failed");
     }

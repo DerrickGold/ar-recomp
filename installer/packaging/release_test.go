@@ -204,6 +204,11 @@ func TestPortableReleaseBundlesWrapExistingArtifacts(t *testing.T) {
 				t.Fatalf("portable archive should extract as one folder: %v, %v", entries, err)
 			}
 			bundle := filepath.Join(extracted, "ActRaiserRecompBuilder-"+test.platform+"-portable")
+			readme, err := os.ReadFile(filepath.Join(bundle, "README.txt"))
+			guidance := strings.Join(strings.Fields(string(readme)), " ")
+			if err != nil || !strings.Contains(guidance, "Smart App Control") || !strings.Contains(guidance, "Open Anyway") {
+				t.Fatalf("portable download lacks startup security guidance: %v", err)
+			}
 			bundledArtifact := filepath.Join(bundle, test.artifact)
 			bundledPayload := bundledArtifact
 			if test.kind == "macos" {

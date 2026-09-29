@@ -221,12 +221,14 @@ func openBrowser(url string) error {
 }
 
 type status struct {
-	State      string   `json:"state"`
-	Log        string   `json:"log"`
-	Error      string   `json:"error,omitempty"`
-	Message    string   `json:"message,omitempty"`
-	OutputPath string   `json:"outputPath,omitempty"`
-	Progress   progress `json:"progress"`
+	State       string   `json:"state"`
+	Log         string   `json:"log"`
+	Error       string   `json:"error,omitempty"`
+	ErrorCode   string   `json:"errorCode,omitempty"`
+	RecoveryKey string   `json:"recoveryKey,omitempty"`
+	Message     string   `json:"message,omitempty"`
+	OutputPath  string   `json:"outputPath,omitempty"`
+	Progress    progress `json:"progress"`
 	// Install is what this copy can do, and Mode is the page shape derived from
 	// it. Both are sent on every poll so the page never has to infer capability
 	// from state transitions it may have missed.
@@ -271,6 +273,8 @@ type application struct {
 	state        string
 	log          bytes.Buffer
 	errorMessage string
+	errorCode    string
+	recoveryKey  string
 	result       Result
 	progress     progress
 	closeOnce    sync.Once
@@ -513,6 +517,7 @@ func (app *application) writeStatus(response http.ResponseWriter) {
 	app.mu.Lock()
 	current := status{
 		State: app.state, Log: app.log.String(), Error: app.errorMessage,
+		ErrorCode: app.errorCode, RecoveryKey: app.recoveryKey,
 		Message: app.result.Message, OutputPath: app.result.OutputPath,
 		Install: app.install, SlimDone: app.slimDone,
 	}
@@ -570,6 +575,7 @@ func (app *application) startBuild(response http.ResponseWriter, request *http.R
 	app.log.Reset()
 	app.progress = initialProgress()
 	app.errorMessage = ""
+	app.errorCode, app.recoveryKey = "", ""
 	app.result = Result{}
 	app.mu.Unlock()
 
@@ -626,6 +632,7 @@ func (app *application) startBuild(response http.ResponseWriter, request *http.R
 		if buildErr != nil {
 			app.state = "failed"
 			app.errorMessage = firstLine(buildErr.Error())
+			app.errorCode, app.recoveryKey = buildErrorGuidance(buildErr, runtime.GOOS)
 			app.mu.Unlock()
 			return
 		}

@@ -114,6 +114,20 @@ are prepared or checked. The first launch can take a few minutes on slower
 machines. You can cancel safely; opening the Builder again for the same workspace
 brings the existing window forward instead of starting another copy.
 
+The Windows Builder and its build tools are unsigned. If a build fails with
+**“An Application Control policy has blocked this file”**, check
+**Windows Security → App & browser control → Smart App Control settings**.
+Smart App Control has no per-app exception; turning it off affects all apps on
+that device. See [Windows Application Control](docs/desktop-packaging.md#windows-application-control)
+for recovery steps and managed-device guidance.
+
+On macOS, the Builder is locally signed but is not Developer ID signed or
+notarized. If Gatekeeper reports an unidentified developer or cannot verify the
+app, and you trust the download, try opening it once, then use
+**System Settings → Privacy & Security → Open Anyway**.
+See [macOS Gatekeeper](docs/desktop-packaging.md#macos-gatekeeper) for helper-tool
+and other startup errors.
+
 On Linux, mark an AppImage executable if necessary. AppImages need FUSE;
 `APPIMAGE_EXTRACT_AND_RUN=1 ./ActRaiserRecompBuilder-steam-deck.AppImage`
 provides a fallback. Minimal Linux installations may also need the desktop,

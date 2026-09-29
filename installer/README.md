@@ -5,6 +5,14 @@ music, and text. It also includes command-line tools for language-pack
 authoring, ROM extraction, and packaging. For the desktop download, start with
 the [Quick Start](../README.md#quick-start).
 
+Windows downloads and their bundled build tools are unsigned. If Windows reports
+**“An Application Control policy has blocked this file”**, follow the
+[Windows Application Control instructions](../docs/desktop-packaging.md#windows-application-control).
+The Workshop shows the same recovery guidance when a build tool is blocked.
+For Mac downloads, see [macOS Gatekeeper](../docs/desktop-packaging.md#macos-gatekeeper);
+the local signatures used by packaging do not provide Developer ID trust or
+Apple notarization.
+
 ## Develop from a checkout
 
 Build and test both modules independently from the repository root:

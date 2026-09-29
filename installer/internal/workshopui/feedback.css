@@ -1,5 +1,5 @@
 .workshop-feedback{padding:16px 18px;margin:12px 0 20px;border:1px solid #915951;border-radius:8px;background:#271e29;color:#f0ede5;min-width:0;overflow-wrap:anywhere}
-.workshop-feedback p{margin:0 0 12px;line-height:1.6}
+.workshop-feedback p{margin:0 0 12px;line-height:1.6;white-space:pre-line}
 .workshop-feedback details{margin:8px 0 12px}
 .workshop-feedback summary{cursor:pointer;color:#edcc8c;font-size:14px}
 .workshop-feedback textarea{display:block;width:100%;box-sizing:border-box;resize:vertical;max-height:320px;min-height:130px;margin-top:10px;padding:12px;border:1px solid #64758c;border-radius:6px;background:#101925;color:#f0ede5;font:12px/1.6 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}

@@ -158,9 +158,56 @@ function setupAssetApp(){
   // Production keeps its IIFE; no test hooks or duplicated UI logic ship.
   const source=readFileSync(new URL("../web/app.js",import.meta.url),"utf8");
   assert.match(source,/\}\)\(\);\s*$/);
-  runInNewContext(source.replace(/\}\)\(\);\s*$/,"window.testApplyMode=applyMode;\n})();"),s.context);
-  return {...s,node,rows,list,requests,urls,applyMode:s.context.window.testApplyMode};
+  runInNewContext(source.replace(/\}\)\(\);\s*$/,"window.testApplyMode=applyMode;\nwindow.testRefresh=refresh;\n})();"),s.context);
+  return {...s,node,rows,list,requests,urls,applyMode:s.context.window.testApplyMode,refresh:s.context.window.testRefresh};
 }
+
+test("blocked build shows localized policy recovery while preserving the raw report",async()=>{
+  const s=setupAssetApp();
+  const queryAll=s.doc.querySelectorAll.bind(s.doc);
+  s.doc.querySelectorAll=selector=>["[data-language-status]",'[data-nav="localization"]'].includes(selector)?[]:queryAll(selector);
+  s.node("home-projects").replaceChildren=()=>{};
+  const query=s.doc.querySelector.bind(s.doc);
+  s.doc.querySelector=selector=>selector==='meta[name="workshop-version"]'?{content:"test-version"}:query(selector);
+  s.doc.createElement=tag=>{
+    const node=new Node(tag);
+    node.append=(...children)=>node.children.push(...children);
+    node.remove=()=>{s.doc.children=s.doc.children.filter(child=>child!==node);};
+    return node;
+  };
+  let card;
+  s.node("state").after=node=>{card=node;s.doc.children.push(node);};
+  s.context.navigator={userAgent:"Test webview"};
+  runInNewContext(readFileSync(new URL("../../workshopui/feedback.js",import.meta.url),"utf8"),s.context);
+  const detail="start snesbuild regen: fork/exec C:\\Users\\Alice\\Builder\\snesbuild.exe: An Application Control policy has blocked this file.";
+  let data={state:"failed",mode:"builder",install:{canRebuild:true},error:detail,
+    errorCode:"builder.errors.windows_app_control",recoveryKey:"builder.recovery.windows_app_control",log:"=== Build failed ===\n"+detail};
+  s.context.fetch=async(path,options)=>({ok:true,json:async()=>path==="interface/preferences"?JSON.parse(options.body):data});
+  await s.refresh();
+  const report=card.children[1].children[1].value;
+  assert.match(report,/Code: builder.errors.windows_app_control/);
+  assert.match(report,/Operation: Build game/);
+  assert.match(report,/Details: start snesbuild regen/);
+  assert.match(report,/Recent build log \(tail\):\n=== Build failed ===/);
+  assert.doesNotMatch(report,/Alice|HTTP status:/);
+  assert.equal(s.node("log").textContent,data.log);
+  assert.equal(s.node("log-box").open,true);
+  assert.equal(s.node("build").disabled,false);
+  assert.equal(s.node("launch").disabled,true);
+  for(const locale of ["en","fr","de","ja"]){
+    s.picker.value=locale;await s.picker.fire("change");
+    assert.equal(s.node("state").textContent,s.ui.text(data.errorCode));
+    assert.equal(card.children[0].textContent,s.ui.text(data.recoveryKey));
+    assert.equal(card.children[1].children[1].value,report);
+  }
+  // A status recheck must retain recovery without starting another build.
+  await card.children[3].children[1].fire("click");
+  assert.equal(card.children[1].children[1].value,report);
+  data={state:"failed",mode:"builder",install:{canRebuild:true},error:"compiler failed",log:"compiler log"};
+  await s.refresh();
+  assert.equal(card.children[0].textContent,s.ui.text("builder.feedback.help"));
+  assert.match(card.children[1].children[1].value,/Code: AR_OPERATION/);
+});
 
 test("launch errors name the action and offer only a read-only status recheck",async()=>{
   const s=setupAssetApp(), reports=[],requests=[];

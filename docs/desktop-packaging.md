@@ -67,6 +67,63 @@ If an AppImage cannot mount because FUSE is unavailable, try:
 APPIMAGE_EXTRACT_AND_RUN=1 ./ActRaiserRecomp.AppImage
 ```
 
+### Windows Application Control
+
+Windows releases include unsigned executables. Windows can allow the outer
+Builder to open and still block an internal tool such as `snesbuild.exe` when
+you press **Build game**:
+
+```text
+start snesbuild regen: fork/exec ...\snesbuild.exe: An Application Control policy has blocked this file.
+```
+
+This is Windows refusing to start the tool, before compilation begins. The
+Workshop displays recovery guidance and keeps the original error under
+**Error details** and in the build log.
+
+1. Open **Windows Security → App & browser control → Smart App Control settings**.
+2. If Smart App Control is **On**, it has no exception for an individual app.
+   On your own device, you may choose **Off** if you trust the download and
+   accept disabling that protection for **all apps**. Read the Windows
+   confirmation first; the ability to re-enable it depends on your Windows
+   version and updates. Then return to the Builder and retry **Build game**.
+3. If this is a managed device, the setting is unavailable, or the error
+   persists, give your administrator the copied error report. An administrator
+   must approve the blocked tool under the applicable policy.
+
+Smart App Control is separate from antivirus and SmartScreen's **Run anyway**
+prompt. Antivirus exclusions, **Run as administrator**, or unblocking the ZIP
+do not grant an Application Control exception. Other bundled tools and the
+locally generated game can also be assessed separately.
+
+For diagnosis, check **Event Viewer → Applications and Services Logs → Microsoft
+→ Windows → CodeIntegrity → Operational**. Policy ID
+`{0283ac0f-fff1-49ae-ada1-8a933130cad6}` identifies Smart App Control's enforcement
+policy; the generic error alone does not distinguish it from an administrator's
+policy. See Microsoft's [Smart App Control FAQ](https://support.microsoft.com/en-us/windows/security/threat-malware-protection/smart-app-control-frequently-asked-questions)
+and [built-in Application Control policies](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/app-control-for-business/operations/inbox-appcontrol-policies).
+
+### macOS Gatekeeper
+
+The macOS packager uses ad-hoc (local) signatures for the Builder app and
+generated game. These provide no verified publisher identity; our releases
+are not Developer ID signed or notarized. Downloaded copies can therefore be
+blocked even when a local source build runs normally. Bundled helper executables
+can also be subject to Gatekeeper; opening the outer Builder is not proof that
+every helper will be allowed.
+
+For an unidentified-developer or unverified-app warning on a download you trust,
+try opening the app, then go to **System Settings → Privacy & Security → Open
+Anyway** and confirm **Open**. This creates an exception for that app. If a
+helper is named in a later warning, check the named component and the same
+settings panel before retrying the build. If no exception is offered, retain
+the exact warning and build log for diagnosis (or contact the administrator
+of a managed Mac).
+
+A damaged-app or malware warning needs separate investigation; do not assume
+it is just missing notarization. See Apple's [instructions for opening Mac apps](https://support.apple.com/en-us/102445)
+and [Gatekeeper's checks on helper code](https://developer.apple.com/videos/play/wwdc2019/701/).
+
 ## Packaging a source build
 
 The Builder handles packaging automatically. If you build from source, first
