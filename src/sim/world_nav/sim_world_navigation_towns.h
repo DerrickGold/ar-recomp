@@ -1,13 +1,13 @@
 #ifndef AR_SIM_WORLD_NAVIGATION_TOWNS_H
 #define AR_SIM_WORLD_NAVIGATION_TOWNS_H
-/* SimWorldNavigationTowns: captures every developed town's ground and model
- * objects from the all-town cell maps and structure records, so the world
- * view can show all six towns in one frame. The cached form skips
- * reclassifying unchanged towns.
+/* SimWorldNavigationTowns: captures all six towns' terrain and model objects.
+ * Developed towns use retained cell maps and structure records; locked towns
+ * use immutable initial terrain. The cached form skips unchanged inputs.
  * Phase: capture (reads WRAM).
  * Tests: tests/sim_render_metadata_test.c */
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "sim/voxels/sim_background_voxel_types.h"
@@ -33,6 +33,7 @@ enum {
 typedef SimBackgroundVoxelObject SimWorldNavigationTownObject;
 
 typedef struct SimWorldNavigationTownGround {
+  /* Terrain availability, independent of campaign development/unlock state. */
   uint8_t enabled_town_mask;
   uint8_t development_tier[kSimTownCount];
   /* Row-major semantic cells, not a WRAM alias or a projected screenshot. */
@@ -44,6 +45,8 @@ typedef struct SimWorldNavigationTownGround {
 
 typedef struct SimWorldNavigationTowns {
   uint16_t object_count;
+  /* Towns with live development. Natural objects may also belong to locked
+   * towns included in ground.enabled_town_mask. */
   uint8_t enabled_town_mask;
   bool overflow;
   SimWorldNavigationTownGround ground;
@@ -51,9 +54,14 @@ typedef struct SimWorldNavigationTowns {
       objects[kSimWorldNavigationTownObjectCapacity];
 } SimWorldNavigationTowns;
 
-/* Captures a low/medium-distance semantic scene for every developed town from
- * the same all-town cell maps and structure records used to compose the Mode-7
- * world. It deliberately does not inspect the active town's tile graphics:
+/* Copy the ROM's initial terrain for locked towns. Init/shutdown invalidate
+ * the capture cache; missing data leaves the ordinary world-map fallback.
+ * Call on the producer owner before capture starts/after capture stops. */
+bool SimWorldNavigationTowns_Init(const uint8_t *rom, size_t rom_size);
+void SimWorldNavigationTowns_Shutdown(void);
+
+/* Captures a low/medium-distance semantic scene using live development or
+ * initial terrain. It does not inspect the active town's tile graphics:
  * those are resident for only one town, whereas navigation must publish all
  * six in one immutable frame. */
 void SimWorldNavigationTowns_Capture(

@@ -25,7 +25,40 @@ enum {
   kStructureClassFactory = 4,
   kTownCells = 32,
   kTownCellCount = kTownCells * kTownCells,
+  /* $02:BD70 copies $0A:8000..AFFF to $7F:D000..FFFF. $03:AB7E
+   * seeds a town from D000, then overlays nonzero E800 obstacle cells.
+   * Both layers contain six quadrant-paged $400-byte maps. */
+  kInitialTerrainRom = 0x050000,
+  kInitialObstaclesRom = kInitialTerrainRom + kSimTownCount * kSimTownCellMapBytes,
 };
+
+static uint8_t s_initial_terrain[kSimTownCount][kTownCellCount];
+static bool s_initial_terrain_available;
+
+void SimWorldNavigationTowns_Shutdown(void) {
+  s_initial_terrain_available = false;
+  SimWorldNavigationTowns_ResetCache();
+}
+
+bool SimWorldNavigationTowns_Init(const uint8_t *rom, size_t rom_size) {
+  SimWorldNavigationTowns_Shutdown();
+  if (!rom || rom_size < kInitialObstaclesRom + sizeof(s_initial_terrain))
+    return false;
+  for (uint8_t town = 1; town <= kSimTownCount; town++)
+    for (int y = 0; y < kTownCells; y++)
+      for (int x = 0; x < kTownCells; x++) {
+        const size_t at = SimTownLayout_CellMapIndex(town, x, y) - kSimTownCellMapsWram;
+        const uint8_t obstacle = rom[kInitialObstaclesRom + at];
+        uint8_t tile = obstacle ? obstacle : rom[kInitialTerrainRom + at];
+        /* The initial obstacle layer already reserves the sanctuary plot.
+         * Locked towns must not show either its flat artwork or its model. */
+        if ((tile >= 0xC0 && tile <= 0xC3) || (tile >= 0xC8 && tile <= 0xCB))
+          tile = 0x08;
+        s_initial_terrain[town - 1][y * kTownCells + x] = tile;
+      }
+  s_initial_terrain_available = true;
+  return true;
+}
 
 typedef enum NavigationFoliageClass {
   kNavigationFoliage_None,
@@ -82,10 +115,9 @@ static void MarkOccupied(
 
 static bool TownHasRetainedData(const uint8_t *wram, uint8_t town) {
   const size_t at = kDevelopmentTiersWram + (size_t)(town - 1) * 2;
-  /* Match the ground compositor's native development gate. Structure records
-   * can survive a progress reset while the loader clears the corresponding
-   * cell map. Those stale records must not build a ghost city on pristine
-   * desert (or interpret stray pre-unlock markers as a populated town). */
+  /* Match the native development gate for LIVE maps and buildings only.
+   * Records can survive a progress reset: never use them for locked towns,
+   * whose natural landscape comes from the immutable initial maps. */
   return (wram[at] | wram[at + 1]) != 0;
 }
 
@@ -297,7 +329,7 @@ static void CaptureBridges(const uint8_t *wram, uint8_t town,
 }
 
 static void CaptureFoliage(
-    const uint8_t *wram, uint8_t town,
+    const uint8_t *cells, uint8_t town,
     SimWorldNavigationTowns *out, const bool occupied[kTownCellCount]) {
   uint8_t foliage[kTownCellCount] = {0};
   bool visited[kTownCellCount] = {false};
@@ -309,8 +341,7 @@ static void CaptureFoliage(
     for (int x = 0; x < kTownCells; x++) {
       const size_t cell = TownCellIndex(x, y);
       if (occupied[cell]) continue;
-      foliage[cell] = (uint8_t)FoliageClassForCell(
-          wram[SimTownLayout_CellMapIndex(town, x, y)]);
+      foliage[cell] = (uint8_t)FoliageClassForCell(cells[cell]);
       if (foliage[cell] == kNavigationFoliage_Evergreen ||
           foliage[cell] == kNavigationFoliage_Broadleaf)
         queue[count++] = (uint16_t)cell;
@@ -390,12 +421,12 @@ static void CaptureFoliage(
   }
 }
 
-static void CaptureRocks(const uint8_t *wram, uint8_t town,
+static void CaptureRocks(const uint8_t *cells, uint8_t town,
                          SimWorldNavigationTowns *out, const bool *occupied) {
   for (int y = 0; y < kTownCells; y++)
     for (int x = 0; x < kTownCells; x++) {
       if (occupied[TownCellIndex(x, y)]) continue;
-      uint8_t tile = wram[SimTownLayout_CellMapIndex(town, x, y)];
+      uint8_t tile = cells[TownCellIndex(x, y)];
       int kind = SimBackgroundVoxelRegion_RockKind(tile);
       if (kind == kSimBackgroundVoxelKindCount) continue;
       if (!Append(out, (SimWorldNavigationTownObject){
@@ -414,10 +445,17 @@ void SimWorldNavigationTowns_Capture(
   if (!out) return;
   memset(out, 0, sizeof(*out));
   if (!wram) return;
-  for (uint8_t town = 1; town <= 6; town++) {
-    if (!TownHasRetainedData(wram, town)) continue;
+  for (uint8_t town = 1; town <= kSimTownCount; town++) {
+    if (!TownHasRetainedData(wram, town)) {
+      if (s_initial_terrain_available) {
+        out->ground.enabled_town_mask |= (uint8_t)(1u << (town - 1));
+        memcpy(out->ground.terrain[town - 1], s_initial_terrain[town - 1],
+            sizeof(out->ground.terrain[town - 1]));
+      }
+      continue;
+    }
     out->enabled_town_mask |= (uint8_t)(1u << (town - 1));
-    out->ground.enabled_town_mask = out->enabled_town_mask;
+    out->ground.enabled_town_mask |= (uint8_t)(1u << (town - 1));
     out->ground.development_tier[town - 1] =
         wram[kDevelopmentTiersWram + (size_t)(town - 1) * 2];
     for (int y = 0; y < kTownCells; y++)
@@ -426,14 +464,17 @@ void SimWorldNavigationTowns_Capture(
             wram[SimTownLayout_CellMapIndex(town, x, y)];
   }
   for (uint8_t town = 1; town <= kSimTownCount; town++) {
-    if (!(out->enabled_town_mask & (1u << (town - 1)))) continue;
+    if (!(out->ground.enabled_town_mask & (1u << (town - 1)))) continue;
     bool occupied[kTownCellCount] = {false};
-    CaptureStructures(wram, town, out, occupied);
-    CaptureSanctuary(wram, town, out, occupied);
-    CaptureLandmarks(wram, town, out, occupied);
-    CaptureBridges(wram, town, out, occupied);
-    CaptureFoliage(wram, town, out, occupied);
-    CaptureRocks(wram, town, out, occupied);
+    if (out->enabled_town_mask & (1u << (town - 1))) {
+      CaptureStructures(wram, town, out, occupied);
+      CaptureSanctuary(wram, town, out, occupied);
+      CaptureLandmarks(wram, town, out, occupied);
+      CaptureBridges(wram, town, out, occupied);
+    }
+    const uint8_t *cells = out->ground.terrain[town - 1];
+    CaptureFoliage(cells, town, out, occupied);
+    CaptureRocks(cells, town, out, occupied);
     if (out->overflow) return;
   }
 }

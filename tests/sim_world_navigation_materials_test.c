@@ -1273,6 +1273,41 @@ static void CheckCompactVolcanoGroundAndSeal(const SimWorldNavigationTownGround 
          sealed);
 }
 
+static void TestInitialMountainScene(const char *rom_path) {
+  uint8_t *rom = malloc(0x100000), *wram = calloc(0x20000, 1);
+  SimWorldNavigationTowns *towns = malloc(sizeof(*towns));
+  assert(rom && wram && towns);
+  FILE *file = fopen(rom_path, "rb");
+  assert(file && fread(rom, 1, 0x100000, file) == 0x100000);
+  fclose(file);
+  assert(SimWorldMap_Init(rom, 0x100000));
+  assert(SimTownGroundArt_Init(rom, 0x100000));
+  assert(SimWorldNavigationTowns_Init(rom, 0x100000));
+  SimWorldNavigationTowns_CaptureCached(wram, towns);
+  assert(!towns->enabled_town_mask && towns->ground.enabled_town_mask == 63);
+  assert(!towns->overflow && towns->object_count);
+  for (unsigned i = 0; i < towns->object_count; i++)
+    assert(towns->objects[i].kind != kSimBackgroundVoxel_Cathedral);
+  for (unsigned town = 0; town < kSimTownCount; town++)
+    for (unsigned i = 0; i < kSimTownCells * kSimTownCells; i++) {
+      const uint8_t tile = towns->ground.terrain[town][i];
+      assert(!(tile >= 0xC0 && tile <= 0xC3) && !(tile >= 0xC8 && tile <= 0xCB));
+    }
+  SimWorldNavigationMountainScene scene = {0};
+  assert(SimWorldNavigationMountains_Build(&towns->ground, &scene));
+  /* All mainland regions have native mountains; Marahna uses island cliffs. */
+  assert(scene.town_mask == 0x2F && scene.face_count > 0 && scene.maximum_rise > 1);
+  printf("locked town terrain: %u natural objects, %zu mountain faces, mask=%02x, no cathedral\n",
+      towns->object_count, scene.face_count, scene.town_mask);
+  SimWorldNavigationMountains_Destroy(&scene);
+  SimWorldNavigationTowns_Shutdown();
+  SimTownGroundArt_Shutdown();
+  SimWorldMap_Shutdown();
+  free(towns);
+  free(wram);
+  free(rom);
+}
+
 static void TestCapturedMountainScene(const char *rom_path, const char *wram_path) {
   uint8_t *rom = malloc(0x100000), *wram = malloc(0x20000);
   assert(rom && wram);
@@ -1583,6 +1618,7 @@ int main(int argc, char **argv) {
   TestMountainGeometryJoin();
   TestExteriorContinuations();
   TestLavaPalette();
+  if (argc >= 2) TestInitialMountainScene(argv[1]);
   if (argc == 3) TestCapturedMountainScene(argv[1], argv[2]);
   return 0;
 }

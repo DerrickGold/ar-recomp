@@ -201,6 +201,94 @@ static void TestWorldNavigationRocks(void) {
   CHECK(towns.object_count == 5 && !(towns.ground.object_rows[3][3] & (1u << 2)));
 }
 
+static void CheckCachedNavigationScene(const uint8 *wram);
+
+static void TestWorldNavigationLockedTerrain(void) {
+  enum { kInitialBase = 0x50000, kInitialObstacles = 0x51800, kRomBytes = 0x53000 };
+  uint8_t *rom = calloc(kRomBytes, 1);
+  CHECK(rom != NULL);
+  if (!rom) return;
+  static uint8_t wram[kActRaiserWramSize], before[kActRaiserWramSize];
+  static SimWorldNavigationTowns towns;
+  memset(wram, 0, sizeof(wram));
+  memset(rom + kInitialBase, 0x08, kSimTownCount * kSimTownCellMapBytes);
+  for (unsigned town = 0; town < kSimTownCount; town++) {
+    const size_t base = kInitialBase + town * kSimTownCellMapBytes;
+    const size_t obstacles = kInitialObstacles + town * kSimTownCellMapBytes;
+    /* Explicit page offsets exercise TL/TR/BL/BR conversion. */
+    rom[base] = 0x88; /* mountain */
+    rom[base + 0x100] = 0x02; /* forest at (16, 0) */
+    rom[base + 0x200] = 0x25; /* water at (0, 16) */
+    rom[obstacles + 0x300] = 0x61; /* rock at (16, 16) */
+    rom[obstacles + 1] = 0x09; /* palm overrides grass */
+    /* Even a complete cathedral in initial data is not a developed town. */
+    rom[obstacles + 0x22] = 0xC2;
+    rom[obstacles + 0x23] = 0xC3;
+    rom[obstacles + 0x32] = 0xCA;
+    rom[obstacles + 0x33] = 0xCB;
+    rom[obstacles + 0x24] = 0xC0;
+    rom[obstacles + 0x25] = 0xC1;
+    rom[obstacles + 0x34] = 0xC8;
+    rom[obstacles + 0x35] = 0xC9;
+    const uint8_t id = (uint8_t)(town + 1);
+    SetTownCell(wram, id, 2, 2, 0xC2);
+    SetTownCell(wram, id, 3, 2, 0xC3);
+    SetTownCell(wram, id, 2, 3, 0xCA);
+    SetTownCell(wram, id, 3, 3, 0xCB);
+    wram[0x16BE7 + town * 0x200 + 2] = 0x80; /* stale house */
+  }
+  memcpy(before, wram, sizeof(before));
+  SimWorldNavigationTowns_Shutdown();
+  SimWorldNavigationTowns_CaptureCached(wram, &towns);
+  CHECK(!towns.ground.enabled_town_mask && !towns.object_count);
+  CHECK(SimWorldNavigationTowns_Init(rom, kRomBytes));
+  SimWorldNavigationTowns_CaptureCached(wram, &towns);
+  CHECK(!towns.enabled_town_mask && towns.ground.enabled_town_mask == 63);
+  CHECK(!towns.overflow && towns.object_count == 18);
+  for (uint8_t town = 1; town <= kSimTownCount; town++) {
+    const uint8_t *cells = towns.ground.terrain[town - 1];
+    CHECK(cells[0] == 0x88 && cells[16] == 0x02);
+    CHECK(cells[16 * 32] == 0x25 && cells[16 * 32 + 16] == 0x61);
+    CHECK(cells[1] == 0x09 && cells[4] == 0x08);
+    for (int y = 2; y <= 3; y++)
+      for (int x = 2; x <= 5; x++) CHECK(cells[y * 32 + x] == 0x08);
+    CHECK(towns.ground.development_tier[town - 1] == 0);
+    CHECK(FindNavigationTownObject(&towns, town, kSimBackgroundVoxel_Tree, 16, 0));
+    CHECK(FindNavigationTownObject(&towns, town, kSimBackgroundVoxel_Palm, 1, 0));
+    CHECK(!FindNavigationTownObject(&towns, town, kSimBackgroundVoxel_Cathedral, 2, 2));
+    CHECK(!FindNavigationTownObject(&towns, town, kSimBackgroundVoxel_House, 0, 0));
+    CHECK(towns.ground.object_rows[town - 1][16] & (1u << 16));
+  }
+  CHECK(!memcmp(wram, before, sizeof(wram)));
+  CheckCachedNavigationScene(wram);
+
+  /* Unlocking switches to live terrain and enables the actual cathedral. */
+  Write16(wram, 0x16B18, 1);
+  SetTownCell(wram, 1, 16, 0, 0x08);
+  SimWorldNavigationTowns_CaptureCached(wram, &towns);
+  CHECK(towns.enabled_town_mask == 1 && towns.ground.enabled_town_mask == 63);
+  CHECK(towns.ground.terrain[0][16] == 0x08);
+  CHECK(FindNavigationTownObject(&towns, 1, kSimBackgroundVoxel_Cathedral, 2, 2));
+  Write16(wram, 0x16B18, 0);
+  SimWorldNavigationTowns_CaptureCached(wram, &towns);
+  CHECK(towns.ground.terrain[0][16] == 0x02);
+  CHECK(!FindNavigationTownObject(&towns, 1, kSimBackgroundVoxel_Cathedral, 2, 2));
+
+  /* ROM lifetime changes must invalidate even with byte-identical WRAM. */
+  rom[kInitialBase + 0x100] = 0x08;
+  SimWorldNavigationTowns_CaptureCached(wram, &towns);
+  CHECK(towns.ground.terrain[0][16] == 0x02); /* owned copy */
+  CHECK(SimWorldNavigationTowns_Init(rom, kRomBytes));
+  SimWorldNavigationTowns_CaptureCached(wram, &towns);
+  CHECK(towns.ground.terrain[0][16] == 0x08);
+  CHECK(!SimWorldNavigationTowns_Init(rom, kRomBytes - 1));
+  SimWorldNavigationTowns_CaptureCached(wram, &towns);
+  CHECK(!towns.ground.enabled_town_mask && !towns.object_count);
+  CHECK(!SimWorldNavigationTowns_Init(NULL, kRomBytes));
+  SimWorldNavigationTowns_Shutdown();
+  free(rom);
+}
+
 static void TestWorldNavigationSanctuaryVariants(void) {
   uint8 wram[kActRaiserWramSize] = {0};
   SimWorldNavigationTowns towns;
@@ -3629,6 +3717,7 @@ int main(int argc, char **argv) {
   TestWorldNavigationSanctuaryVariants();
   TestWorldNavigationRocks();
   TestWorldNavigationCaptureCache();
+  TestWorldNavigationLockedTerrain();
   TestLightningMiracleEffectCapture();
   TestTownCreationLightningEffectCapture();
   TestEnemyLightningAndFireEffectCapture();

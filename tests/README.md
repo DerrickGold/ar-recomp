@@ -81,6 +81,12 @@ UBSan preset instruments the harness and its implementation dependencies; it
 requires GCC or Clang and stays separate from the release gate. To focus a
 configured sanitizer build, use `ctest --preset tests-asan -R save_slots`.
 
+The navigation capture regression checks locked-town terrain, cathedral
+suppression (models and ground tiles), and switching to live maps after unlock.
+To also build the initial mountain geometry from a local US ROM, run
+`build-check/actraiser_sim_world_navigation_materials_test ar.sfc`.
+This optional check uses empty WRAM and does not read or modify a save.
+
 ## Shared implementation dependencies
 
 `cmake/TestSupport.cmake` owns shared ROM-free implementation libraries for

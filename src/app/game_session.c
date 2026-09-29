@@ -49,6 +49,7 @@
 #include "sim/sim_world_map.h"
 #include "sim/sim_world_map_build.h"
 #include "sim/town/sim_town_ground_art.h"
+#include "sim/world_nav/sim_world_navigation_towns.h"
 #include "snesrecomp/game/bootstrap.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/runtime.h"
@@ -77,6 +78,8 @@ static void PrepareSubsystems(const GameSessionConfig *config) {
     SimWorldMapBuild_Init(config->rom_data, config->rom_size);
   if (!SimTownGroundArt_Init(config->rom_data, config->rom_size))
     fprintf(stderr, "[world-navigation] native town ground unavailable\n");
+  if (!SimWorldNavigationTowns_Init(config->rom_data, config->rom_size))
+    fprintf(stderr, "[world-navigation] initial town terrain unavailable\n");
   if (!Diorama_InitRomBackdrops(config->rom_data, config->rom_size))
     fprintf(stderr, "[diorama] named ROM backdrops unavailable\n");
   HostLocalization_LoadRegionalMedia();
@@ -257,6 +260,7 @@ static GameSessionResult StopSession(void) {
   HostPpuOutput_Reset();
   PresentRendererResources_Reset();
   SimTownGroundArt_Shutdown();
+  SimWorldNavigationTowns_Shutdown();
   DioramaFrameGeneration_Shutdown();
   Diorama_Shutdown(&g_render_device);
   ManualReader_DestroyTextures();

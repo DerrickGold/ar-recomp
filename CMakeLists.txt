@@ -1682,6 +1682,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_sim_world_navigation_materials_test
         tests/sim_world_navigation_materials_test.c
+        src/sim/world_nav/sim_world_navigation_towns.c
         src/sim/world_nav/sim_world_navigation_terrain.c
         src/sim/world_nav/sim_world_navigation_clouds.c
         src/sim/world_nav/sim_world_navigation_sky_clouds.c
