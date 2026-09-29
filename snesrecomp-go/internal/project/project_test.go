@@ -163,7 +163,7 @@ func TestRegenerateConsumesAnalysisDatabaseAfterCanonicalEntryPruned(t *testing.
 	}
 }
 
-func TestRegenerateZeroFactDatabaseStillEnablesExactStaticDiscovery(t *testing.T) {
+func TestRegenerateDatabaseDoesNotSelectDirectCallWidths(t *testing.T) {
 	root := t.TempDir()
 	image := make([]byte, 0x8000)
 	copy(image[0x0000:], []byte{0x20, 0x00, 0x81, 0x60}) // JSR $8100; RTS.
@@ -228,16 +228,42 @@ func TestRegenerateZeroFactDatabaseStillEnablesExactStaticDiscovery(t *testing.T
 	if err != nil {
 		t.Fatalf("database regeneration: %v\n%s", err, databaseOutput.String())
 	}
-	if candidate.Generation.FinalEntries >= control.Generation.FinalEntries {
-		t.Fatalf("zero-fact database variants = %d, control = %d; exact static mode was not enabled",
+	if candidate.Generation.FinalEntries != control.Generation.FinalEntries {
+		t.Fatalf("zero-fact database variants = %d, control = %d; database changed width selection",
 			candidate.Generation.FinalEntries, control.Generation.FinalEntries)
 	}
-	if candidate.Generation.SemanticSourceSHA256 ==
+	if candidate.Generation.SemanticSourceSHA256 !=
 		control.Generation.SemanticSourceSHA256 {
-		t.Fatal("zero-fact database unexpectedly preserved the conservative semantic source hash")
+		t.Fatal("zero-fact database changed the conservative semantic source hash")
 	}
 	if !strings.Contains(databaseOutput.String(),
 		"analysis-db: loaded 0 dispatch and 0 entry fact(s)") {
 		t.Fatalf("zero-fact mode was not explicit in output:\n%s", databaseOutput.String())
+	}
+	if !strings.Contains(databaseOutput.String(), "direct-call M/X: live-state dispatch") {
+		t.Fatal("width selection was not reported")
+	}
+	// The former database behavior is still available, but only via explicit
+	// opt-in; importing an evidence database is not that authorization.
+	databaseOutput.Reset()
+	exact, err := Regenerate(RegenOptions{
+		Paths: databasePaths, AnalysisDBPath: "saves/static-analysis.json",
+		ExperimentalExactDirectCallMX: true,
+		Jobs:                          1, AllowStubs: true, Stdout: &databaseOutput, Stderr: &databaseOutput,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exact.Generation.FinalEntries >= control.Generation.FinalEntries ||
+		exact.Generation.SemanticSourceSHA256 == control.Generation.SemanticSourceSHA256 ||
+		!strings.Contains(databaseOutput.String(), "experimental global inference (not per-site proof)") {
+		t.Fatalf("explicit compatibility mode was not selected: %+v\n%s", exact.Generation, databaseOutput.String())
+	}
+}
+
+func TestRegenerateExactCallWidthsRequireIsolatedOutput(t *testing.T) {
+	_, err := Regenerate(RegenOptions{Paths: DefaultPaths(t.TempDir()), ExperimentalExactDirectCallMX: true})
+	if err == nil || !strings.Contains(err.Error(), "refusing to replace src/gen") {
+		t.Fatalf("experimental mode accepted production output: %v", err)
 	}
 }

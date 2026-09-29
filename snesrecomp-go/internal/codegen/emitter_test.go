@@ -131,11 +131,9 @@ func TestForcedDirectCallPreservesHardwareCallEnvelope(t *testing.T) {
 	}
 	generated := strings.Join(lines, "\n")
 	for _, wanted := range []string{
-		"uint16 _call_s = cpu->S;",
-		"JSR return frame -> cpu->S",
-		"sr_call_mx_check(cpu, 1, 0",
+		`uint16 _call_s = sr_call_enter(cpu, &_call_owner, 0xb545u, 0xb546u, _entry_s, 1, 0, "Caller_M0X0", 0x00b543u);`,
 		"bank_00_86EF_M1X0(cpu);  /* cfg force_variant_at $00B543",
-		"cpu->S = _call_s;  /* stack-neutrality restore",
+		"int _k = sr_call_leave(cpu, &_call_owner, _r, _call_s);",
 	} {
 		if !strings.Contains(generated, wanted) {
 			t.Fatalf("forced call missing %q from:\n%s", wanted, generated)
@@ -143,17 +141,23 @@ func TestForcedDirectCallPreservesHardwareCallEnvelope(t *testing.T) {
 	}
 }
 
+// A direct call with a known source runs its hardware frame, ownership scope
+// and result handling in the runtime (call_boundary.c, whose ordering the
+// runtime's call_boundary test checks against the inline envelope). The site
+// must pass that envelope the exact frame, continuation and bank, keep the
+// compiled callee selection between enter and leave, and pop its activation
+// only on the path that returns.
 func TestDirectCallReturnOwnership(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		pc   uint32
-		long bool
-		want string
+		name  string
+		pc    uint32
+		long  bool
+		enter string
 	}{
-		{"JSR live bank", 0x808123, false, "(((uint32)cpu->PB << 16) | 0x8126u), _entry_s, 2u"},
-		{"JSR PC wrap", 0x80fffd, false, "(((uint32)cpu->PB << 16) | 0x0000u), _entry_s, 2u"},
-		{"JSL live mirrored bank", 0x808123, true, "(((uint32)cpu->PB << 16) | 0x8127u), _entry_s, 3u"},
-		{"JSL PC wrap without bank carry", 0x80fffc, true, "(((uint32)cpu->PB << 16) | 0x0000u), _entry_s, 3u"},
+		{"JSR live bank", 0x808123, false, `sr_call_enter(cpu, &_call_owner, 0x8125u, 0x8126u, _entry_s, 0, 0, "Caller", 0x000000u);`},
+		{"JSR PC wrap", 0x80fffd, false, `sr_call_enter(cpu, &_call_owner, 0xffffu, 0x0000u, _entry_s, 0, 0, "Caller", 0x000000u);`},
+		{"JSL live mirrored bank", 0x808123, true, `sr_call_enter_long(cpu, &_call_owner, &_saved_pb, 0x00, 0x8126u, 0x8127u, _entry_s, 0, 0, "Caller", 0x000000u);`},
+		{"JSL PC wrap without bank carry", 0x80fffc, true, `sr_call_enter_long(cpu, &_call_owner, &_saved_pb, 0x00, 0xffffu, 0x0000u, _entry_s, 0, 0, "Caller", 0x000000u);`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := NewContext()
@@ -164,25 +168,37 @@ func TestDirectCallReturnOwnership(t *testing.T) {
 				t.Fatal(err)
 			}
 			s := strings.Join(lines, "\n")
-			for _, want := range []string{tc.want, "CpuReturnScope _call_owner;", "cpu_return_scope_end(&_call_owner);", "if (!_call_owner.adjusted_return)", "if (_r == RECOMP_RETURN_OWNED_UNWIND)", "if (!cpu_finish_owned_unwind(&_call_owner, cpu))", "return _r; /* discard this activation without restoring native S/PB */"} {
-				if !strings.Contains(s, want) {
+			leave := "int _k = sr_call_leave(cpu, &_call_owner, _r, _call_s);"
+			if tc.long {
+				leave = "int _k = sr_call_leave_long(cpu, &_call_owner, _r, _call_s, _saved_pb);"
+			}
+			pop := "if (_k >= 0) { RecompStackPop(); return (RecompReturn)_k; }"
+			order := []string{"CpuReturnScope _call_owner;", tc.enter, "case 3: _r = bank_00_8200_M1X1(cpu); break;", leave, pop}
+			at := -1
+			for _, want := range order {
+				next := strings.Index(s, want)
+				if next < 0 {
 					t.Fatalf("missing %q:\n%s", want, s)
 				}
+				if next < at {
+					t.Fatalf("%q is out of order:\n%s", want, s)
+				}
+				at = next
 			}
-			if strings.Index(s, "cpu_return_scope_end") > strings.Index(s, "if (_r != RECOMP_RETURN_NORMAL)") {
-				t.Fatal("non-local exit bypasses scope teardown")
+			for _, inline := range []string{"cpu_return_scope_begin", "cpu_write8", "cpu_finish_owned_unwind", "cpu->S = _call_s", "cpu->PB ="} {
+				if strings.Contains(s, inline) {
+					t.Fatalf("outlined call still carries %q inline:\n%s", inline, s)
+				}
 			}
-			if strings.Index(s, "cpu_return_scope_begin") < strings.Index(s, "cpu->host_return_valid = 1") {
-				t.Fatal("scope captured S before hardware frame push")
-			}
-			if tc.long && strings.Index(s, "if (_r == RECOMP_RETURN_OWNED_UNWIND)") > strings.Index(s, "cpu->PB = _saved_pb;") {
-				t.Fatal("outer unwind corrupted the native destination bank")
+			if strings.Count(s, "RecompStackPop") != 1 || strings.Count(s, "return ") != 1 {
+				t.Fatalf("the site must pop and return on exactly one path:\n%s", s)
 			}
 			lines, err = EmitOperation(ctx, ir.Call{Target: &target, Long: tc.long})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(strings.Join(lines, "\n"), "_call_owner") {
+			synthetic := strings.Join(lines, "\n")
+			if strings.Contains(synthetic, "_call_owner") || strings.Contains(synthetic, "sr_call_enter") {
 				t.Fatal("unknown source PC manufactured an owned continuation")
 			}
 		})

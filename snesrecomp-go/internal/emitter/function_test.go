@@ -49,12 +49,39 @@ func TestLinearFunction(t *testing.T) {
 		"L_8000_M1X1:",
 		"uint8 _v1 = 0x5;",
 		"cpu_write8",
-		"cpu_trace_resolved_dispatch(cpu, _rpc24, 0x008004u);",
-		"/* RTS host return */",
+		"{ return sr_return_native(cpu, _entry_s, _hrv, 0x008004u,",
+		"SNESRECOMP_SEMANTIC_DISPATCH_TRACE ? SR_RETURN_TRACE_EDGE : 0u",
+		"/* helper owns activation pop */",
 	} {
 		if !strings.Contains(source, fragment) {
 			t.Errorf("source is missing %q:\n%s", fragment, source)
 		}
+	}
+}
+
+func TestNativeReturnHelperOwnsPop(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		opcode byte
+		flags  string
+	}{
+		{"short", 0x60, "NULL, 0u |"},
+		{"long", 0x6b, "NULL, SR_RETURN_LONG |"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			source := emitTestFunction(t, []byte{tt.opcode}, FunctionOptions{Name: "Returner", ExitMX: &decoder.MX{M: 1, X: 0}})
+			if !strings.Contains(source, `sr_return_native(cpu, _entry_s, _hrv, 0x008000u, "Returner_M1X1", 2, `+tt.flags) {
+				t.Fatal(source)
+			}
+			// The helper must read the active generated stack, then pop it once.
+			if strings.Contains(source, "RecompStackPop();\n    { return sr_return_native") {
+				t.Fatal("ordinary RTS/RTL activation was popped outside its helper")
+			}
+		})
+	}
+	source := emitTestFunction(t, []byte{0x40}, FunctionOptions{Name: "Interrupt"})
+	if strings.Contains(source, "sr_return_native") || !strings.Contains(source, "RTI: popped interrupt frame") {
+		t.Fatal("RTI must retain its separate interrupt-frame contract")
 	}
 }
 

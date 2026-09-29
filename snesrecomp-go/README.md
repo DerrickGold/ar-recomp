@@ -198,9 +198,9 @@ Capture close to the failure when a game replaces sample banks dynamically.
 
 To build an isolated runtime candidate from only closed, statically proven
 automatic facts, use the explicit experimental overlay. It refuses the normal
-`src/gen` path and never edits cfg. The same validation mode propagates exact
-live M/X state across direct calls, avoiding speculative callee variants. It
-also validates metadata-free continuation blocks as exact resumable-region
+`src/gen` path and never edits cfg. Direct calls retain live-M/X selection;
+loading facts does not globally select inferred widths. The overlay
+validates metadata-free continuation blocks as exact resumable-region
 edges. Single-owner trees share one local region; isolated multi-owner targets
 use one no-activation continuation body. Every public registry entry remains:
 
@@ -210,6 +210,11 @@ snesrecomp-go/build/v2regen regen \
   --out-dir build/proven-analysis-candidate \
   --experimental-proven-analysis
 ```
+
+Older releases also enabled globally inferred direct-call widths implicitly.
+The separate `--experimental-exact-direct-call-mx` flag reproduces that
+experimental policy; it is not a per-site proof or a compile-time shortcut.
+See [call-width policy and migration](docs/ANALYSIS_USAGE.md#applying-facts-without-changing-call-width-policy).
 
 `regen` fails when hard stubs remain. `--allow-stubs` is available during an
 initial port so the complete output can be inspected, but release/CI pipelines

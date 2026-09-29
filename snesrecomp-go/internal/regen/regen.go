@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"sort"
@@ -33,13 +34,15 @@ type Options struct {
 	// an indivisible function or region stays whole and is listed in
 	// Report.OversizedUnits. Zero selects the default; a negative value
 	// disables the limit.
-	MaxUnitBytes                  int
-	OnlyBanks                     map[byte]struct{}
-	AllowStubs                    bool
-	ProvenDispatchFacts           []analysis.DispatchFact
-	ProvenEntryFacts              []analysis.EntryFact
-	ProvenEntryTemplates          []analysis.EntryTemplatePlacement
-	AllowMatchingAuthoredFacts    bool
+	MaxUnitBytes               int
+	OnlyBanks                  map[byte]struct{}
+	AllowStubs                 bool
+	ProvenDispatchFacts        []analysis.DispatchFact
+	ProvenEntryFacts           []analysis.EntryFact
+	ProvenEntryTemplates       []analysis.EntryTemplatePlacement
+	AllowMatchingAuthoredFacts bool
+	// Explicit global inference experiment, not implied by proven entry or
+	// dispatch facts. False retains live-M/X direct-call selection.
 	ExperimentalExactDirectCallMX bool
 	ExperimentalStoredTargets     bool
 	ExperimentalParkedWaits       bool
@@ -1327,6 +1330,7 @@ func (repo *repository) sharedRegionEmissionPlans(only map[byte]struct{}) (map[d
 		}
 		unionEdges := repo.resumeEdgesForOwners(nodes)
 		ownerOptions := repo.decodeOptions(bank, ownerEntry)
+		ownerOptions.End = ownerEntry.End
 		for edge := range unionEdges {
 			ownerOptions.InternalResumeEdges[edge] = struct{}{}
 		}
@@ -1347,6 +1351,7 @@ func (repo *repository) sharedRegionEmissionPlans(only map[byte]struct{}) (map[d
 				continue
 			}
 			targetOptions := repo.decodeOptions(bank, targetEntry)
+			targetOptions.End = targetEntry.End
 			targetNodes, _, targetTreeOK := repo.singleOwnerRegionTree(target, targetOwners)
 			if !targetTreeOK {
 				continue
@@ -1659,13 +1664,39 @@ func (repo *repository) activeEntryForVariant(variant decoder.Variant) (*bankSta
 }
 
 func sameDecodeClosure(owner, standalone *decoder.Graph, start decoder.DecodeKey) bool {
+	if owner == nil || standalone == nil || owner.Instructions[start] == nil || standalone.Instructions[start] == nil {
+		return false
+	}
 	ownerClosure := graphInstructionClosure(owner, start)
 	if len(ownerClosure) != len(standalone.Instructions) {
 		return false
 	}
-	for key := range standalone.Instructions {
+	boundarySet := func(graph *decoder.Graph) map[decoder.DecodeKey]bool {
+		result := make(map[decoder.DecodeKey]bool, len(graph.BoundaryExits))
+		for _, key := range graph.BoundaryExits {
+			result[key] = true
+		}
+		return result
+	}
+	ownerBoundaries, targetBoundaries := boundarySet(owner), boundarySet(standalone)
+	for key, target := range standalone.Instructions {
 		if _, found := ownerClosure[key]; !found {
 			return false
+		}
+		// Equal PC/M/X sets alone do not prove equal behavior: configured
+		// dispatch metadata, folded branches, and successor edges can differ
+		// even when both decodes contain exactly the same instructions. Compare
+		// all decoded fields (including future additions), conservatively.
+		if target == nil || target.Instruction == nil || !reflect.DeepEqual(owner.Instructions[key], target) {
+			return false
+		}
+		if ownerBoundaries[key] != targetBoundaries[key] {
+			return false
+		}
+		for _, next := range target.Successors {
+			if ownerBoundaries[next] != targetBoundaries[next] {
+				return false
+			}
 		}
 	}
 	return true

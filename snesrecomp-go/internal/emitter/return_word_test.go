@@ -37,12 +37,12 @@ func TestReturnWordShuttleContracts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(r.Source, "cpu_capture_return_word") != tt.want || strings.Contains(r.Source, "cpu_accept_return_word_relocation") != tt.want {
+			if strings.Contains(r.Source, "cpu_capture_return_word") != tt.want || strings.Contains(r.Source, "SR_RETURN_OWN_FRAME_WORD") != tt.want {
 				t.Fatalf("contract=%t\n%s", tt.want, r.Source)
 			}
 			if tt.want {
-				if !strings.Contains(r.Source, "cpu_accept_adjusted_return") || !strings.Contains(r.Source, "cpu_accept_stacked_result_return") || !strings.Contains(r.Source, "cpu_resolve_ancestor_skip") {
-					t.Fatal("legacy guards lost")
+				if !strings.Contains(r.Source, "_return_origin, 0u | SR_RETURN_OWN_FRAME_WORD") {
+					t.Fatal("return helper lost the witnessed origin")
 				}
 				if strings.Contains(tt.name, "guarded") && !strings.Contains(r.Source, "cpu_return_word_store_disjoint") {
 					t.Fatal("store assumed nonaliasing")
@@ -86,8 +86,7 @@ func TestReturnWordShuttleRetainsExitMXDiagnostic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := strings.Index(r.Source, "cpu_accept_return_word_relocation")
-	if start < 0 || strings.Index(r.Source[start:], "sr_exit_mx_check") < 0 || strings.Index(r.Source[start:], "sr_exit_mx_check") > strings.Index(r.Source[start:], "return RECOMP_RETURN_NORMAL") {
+	if !strings.Contains(r.Source, ", 0, _return_origin, 0u | SR_RETURN_OWN_FRAME_WORD") {
 		t.Fatal("witnessed return bypassed the configured exit-M/X check")
 	}
 }

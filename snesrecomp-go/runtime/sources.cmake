@@ -26,6 +26,9 @@ set(SNESRECOMP_RUNNER_SOURCES
     ${SNESRECOMP_RUNNER_ROOT}/src/core/native_leaf.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/common_cpu_infra.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/paired_tail.c
+    ${SNESRECOMP_RUNNER_ROOT}/src/core/call_boundary.c
+    ${SNESRECOMP_RUNNER_ROOT}/src/core/return_boundary.c
+    ${SNESRECOMP_RUNNER_ROOT}/src/core/dispatch_diagnostics.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/diagnostic.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/cpu_trace.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/common_rtl.c

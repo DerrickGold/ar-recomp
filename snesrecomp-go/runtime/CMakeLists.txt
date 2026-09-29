@@ -357,6 +357,56 @@ if(BUILD_TESTING)
     target_link_libraries(snesrecomp_runtime_cpu_boot_protocol_test PRIVATE snesrecomp_runtime)
     add_test(NAME snesrecomp_runtime_cpu_boot_protocol COMMAND snesrecomp_runtime_cpu_boot_protocol_test)
 
+    # Compare outlined call setup/cleanup against the former inline envelope,
+    # both with probes compiled out and with deep/recorder probes enabled.
+    foreach(call_trace IN ITEMS 0 1)
+        set(call_target snesrecomp_runtime_call_boundary_${call_trace}_test)
+        add_executable(${call_target}
+            tests/call_boundary_test.c src/core/call_boundary.c)
+        target_include_directories(${call_target} PRIVATE
+            ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+        target_compile_definitions(${call_target} PRIVATE
+            SNESRECOMP_TRACE=${call_trace} SNESRECOMP_TRACE_RECORDER=${call_trace})
+        if(MSVC)
+            target_compile_options(${call_target} PRIVATE /W4)
+        else()
+            target_compile_options(${call_target} PRIVATE
+                -Wall -Wextra -Wpedantic -Werror -Wmissing-prototypes -Wstrict-prototypes)
+        endif()
+        add_test(NAME snesrecomp_runtime_call_boundary_${call_trace}
+            COMMAND ${call_target})
+    endforeach()
+
+    foreach(return_trace IN ITEMS 0 1)
+        set(return_target snesrecomp_runtime_return_boundary_${return_trace}_test)
+        add_executable(${return_target}
+            tests/return_boundary_test.c src/core/return_boundary.c)
+        target_include_directories(${return_target} PRIVATE
+            ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+        target_compile_definitions(${return_target} PRIVATE SNESRECOMP_TRACE=${return_trace})
+        if(MSVC)
+            target_compile_options(${return_target} PRIVATE /W4)
+        else()
+            target_compile_options(${return_target} PRIVATE
+                -Wall -Wextra -Wpedantic -Werror -Wmissing-prototypes -Wstrict-prototypes)
+        endif()
+        add_test(NAME snesrecomp_runtime_return_boundary_${return_trace}
+            COMMAND ${return_target})
+    endforeach()
+
+    add_executable(snesrecomp_runtime_dispatch_diagnostics_test
+        tests/dispatch_diagnostics_test.c)
+    target_include_directories(snesrecomp_runtime_dispatch_diagnostics_test PRIVATE
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    if(MSVC)
+        target_compile_options(snesrecomp_runtime_dispatch_diagnostics_test PRIVATE /W4)
+    else()
+        target_compile_options(snesrecomp_runtime_dispatch_diagnostics_test PRIVATE
+            -Wall -Wextra -Wpedantic -Werror -Wmissing-prototypes -Wstrict-prototypes)
+    endif()
+    add_test(NAME snesrecomp_runtime_dispatch_diagnostics
+        COMMAND snesrecomp_runtime_dispatch_diagnostics_test)
+
     add_executable(snesrecomp_runtime_cpu_infra_test
         tests/cpu_infra_test.c src/core/common_cpu_infra.c src/core/paired_tail.c
         src/runner/runner_game_module.c src/snes/saveload.c)

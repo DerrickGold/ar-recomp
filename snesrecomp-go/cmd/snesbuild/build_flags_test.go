@@ -28,3 +28,21 @@ func TestBuildFlagsCarryTheMemoryBudget(t *testing.T) {
 		t.Fatalf("an invalid budget was accepted: %v", err)
 	}
 }
+
+func TestRegenFlagsSeparateAnalysisAndCallWidths(t *testing.T) {
+	for _, exact := range []bool{false, true} {
+		flags := flag.NewFlagSet("regen", flag.ContinueOnError)
+		values := addRegenFlags(flags)
+		args := []string{"--analysis-db", "facts.json"}
+		if exact {
+			args = append(args, "--experimental-exact-direct-call-mx")
+		}
+		if err := flags.Parse(args); err != nil {
+			t.Fatal(err)
+		}
+		opts := values.options()
+		if opts.AnalysisDBPath != "facts.json" || opts.ExperimentalExactDirectCallMX != exact {
+			t.Fatalf("flag coupling: %+v", opts)
+		}
+	}
+}

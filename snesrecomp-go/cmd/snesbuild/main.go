@@ -153,6 +153,7 @@ type regenFlags struct {
 	toolchainDir, goCommand                                            string
 	jobs, maxUnitKiB                                                   int
 	allowStubs, runTests, noTests                                      bool
+	exactDirectCallMX                                                  bool
 }
 
 func addRegenFlags(flags *flag.FlagSet) *regenFlags {
@@ -166,6 +167,7 @@ func addRegenFlags(flags *flag.FlagSet) *regenFlags {
 	flags.StringVar(&values.rtsReport, "rts-report", "saves/rts_webs.txt", "current RTS-web census")
 	flags.StringVar(&values.rtsPrevious, "rts-previous", "saves/rts_webs.prev.txt", "previous RTS-web census")
 	flags.StringVar(&values.analysisDB, "analysis-db", "", "ROM-hashed static-analysis database, relative to project root")
+	flags.BoolVar(&values.exactDirectCallMX, "experimental-exact-direct-call-mx", false, "globally inferred direct-call widths, independent of --analysis-db; not per-site proofs (isolated output required)")
 	flags.StringVar(&values.toolchainDir, "toolchain-dir", "snesrecomp-go", "snesrecomp-go module directory")
 	flags.StringVar(&values.goCommand, "go-command", "go", "Go executable used only with --run-tests")
 	flags.IntVar(&values.jobs, "jobs", runtime.NumCPU(), "parallel generation workers")
@@ -185,8 +187,8 @@ func (values *regenFlags) options() project.RegenOptions {
 	paths.ToolchainDir = values.toolchainDir
 	return project.RegenOptions{
 		Paths: paths, Jobs: values.jobs, AllowStubs: values.allowStubs,
-		AnalysisDBPath: values.analysisDB,
-		RunTests:       values.runTests && !values.noTests, GoCommand: values.goCommand,
+		AnalysisDBPath: values.analysisDB, ExperimentalExactDirectCallMX: values.exactDirectCallMX,
+		RunTests: values.runTests && !values.noTests, GoCommand: values.goCommand,
 		Stdout: os.Stdout, Stderr: os.Stderr,
 		MaxUnitBytes: maxUnitBytes(values.maxUnitKiB),
 	}

@@ -166,6 +166,49 @@ int cpu_accept_return_word_relocation(CpuState *cpu, uint16 entry_stack,
                                      uint16 return_stack, uint32 target,
                                      const CpuReturnScope *origin);
 
+/* Out-of-line envelope of a generated direct JSR/JSL. The emitted site keeps
+ * its compiled callee selection (the live M/X switch and its direct calls)
+ * and the activation pop; enter and leave run everything else the envelope
+ * does, in the same order. Enter captures and returns the pre-call S, pushes
+ * the hardware return frame, marks the paired host caller, opens `scope` for
+ * the continuation in the caller's PB, switches PB for a long call, and runs
+ * the call M/X probe. Leave returns -1 when the call completed and execution
+ * continues after it, having closed the scope and restored S (and PB) as
+ * applicable. Otherwise it returns the code the caller must return after its
+ * own activation pop: a parked wait or failed owned unwind unchanged, a
+ * tail call unchanged, or a non-local return one level closer. */
+uint16 sr_call_enter(CpuState *cpu, CpuReturnScope *scope,
+                     uint16 return_address, uint16 continuation,
+                     uint16 entry_stack, int expected_m, int expected_x,
+                     const char *function_name, uint32 site_pc24);
+uint16 sr_call_enter_long(CpuState *cpu, CpuReturnScope *scope,
+                          uint8 *saved_pb, uint8 target_bank,
+                          uint16 return_address, uint16 continuation,
+                          uint16 entry_stack, int expected_m,
+                          int expected_x, const char *function_name,
+                          uint32 site_pc24);
+int sr_call_leave(CpuState *cpu, CpuReturnScope *scope, RecompReturn result,
+                  uint16 call_stack);
+int sr_call_leave_long(CpuState *cpu, CpuReturnScope *scope,
+                       RecompReturn result, uint16 call_stack,
+                       uint8 saved_pb);
+
+enum {
+    SR_RETURN_LONG = 1u,
+    SR_RETURN_OWN_FRAME_WORD = 2u,
+    SR_RETURN_TRACE_EDGE = 4u
+};
+/* Complete a generated RTS/RTL, including exactly one activation pop. The
+ * helper resolves ancestors before popping, but dispatches only after popping.
+ * exit_mx is -1 for no exit-width assertion, otherwise (M << 1) | X.
+ * return_origin is used only for an explicitly witnessed short-frame shuttle.
+ * Semantic-edge tracing is a caller option so mixed library/game builds do
+ * not silently lose the generated caller's instrumentation. RTI is separate. */
+RecompReturn sr_return_native(CpuState *cpu, uint16 entry_stack, uint8 hrv,
+                              uint32 source, const char *name, int exit_mx,
+                              const CpuReturnScope *return_origin,
+                              unsigned flags);
+
 static inline uint8 cpu_read_b(const CpuState *cpu) {
     return (uint8)(cpu->A >> 8);
 }
@@ -458,6 +501,11 @@ void cpu_trace_missing_pushed_target(CpuState *cpu, uint32 pc24,
                                      uint32 source_pc24);
 void dbg_rts_trace(CpuState *cpu, uint32 source_pc, uint16 entry_stack,
                    uint16 return_stack, uint32 popped_pc, uint8 hrv);
+/* Cold RTS guard formatting only. Generated callers check AR_RTSDISP_MISS
+ * presence (including an empty value) on each miss; disabled logging and
+ * successful gotos bypass these. Never mutate CPU, pop, or execute a target. */
+void sr_rts_dispatch_width(const CpuState *cpu, uint32 site, uint16 target);
+void sr_rts_dispatch_miss(const CpuState *cpu, uint32 site, uint16 target);
 void dbg_oam_block_trace(CpuState *cpu, uint32 pc24);
 
 #ifdef __cplusplus

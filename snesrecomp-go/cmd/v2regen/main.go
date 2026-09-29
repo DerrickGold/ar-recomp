@@ -810,7 +810,8 @@ func regenerate(args []string) error {
 	maxUnit := flags.Int("max-unit-kib", 4096, "divide generated units whose function source exceeds this, between whole functions; 0 disables")
 	allowStubs := flags.Bool("allow-stubs", false, "write complete output and report stubs without failing this command")
 	funcsOut := flags.String("funcs-out", "", "optional generated funcs.h path; omit to keep regen output-only")
-	provenAnalysis := flags.Bool("experimental-proven-analysis", false, "apply closed static dispatch facts, exact direct-call M/X, and exact continuation regions in memory (requires an isolated --out-dir)")
+	provenAnalysis := flags.Bool("experimental-proven-analysis", false, "apply closed static dispatch facts and exact continuation regions in memory, retaining live direct-call M/X (requires an isolated --out-dir)")
+	exactDirectCallMX := flags.Bool("experimental-exact-direct-call-mx", false, "globally inferred direct-call widths, independent of analysis facts; not per-site proofs (isolated output required)")
 	storedTargets := flags.Bool("experimental-stored-targets", false, "emit open literal handler-slot address references as cold AOT roots; not a closed target proof (use isolated output)")
 	parkedWaits := flags.Bool("experimental-parked-waits", false, "park closed WAI loops; requires a host adapter handling RECOMP_RETURN_PARKED_WAIT and isolated output")
 	internalTails := flags.Bool("experimental-internal-tails", false, "expose existing decoded jump destinations as cold resumable-region entries; no new code discovery (isolated output required)")
@@ -845,7 +846,7 @@ func regenerate(args []string) error {
 		return errors.New("--experimental-proven-analysis and --analysis-db are mutually exclusive")
 	}
 	useProvenAnalysis := *provenAnalysis || strings.TrimSpace(*analysisDB) != ""
-	if useProvenAnalysis || *storedTargets || *parkedWaits || *internalTails || len(observedCensus) > 0 {
+	if useProvenAnalysis || *exactDirectCallMX || *storedTargets || *parkedWaits || *internalTails || len(observedCensus) > 0 {
 		requestedOutput, pathErr := filepath.Abs(*outDir)
 		if pathErr != nil {
 			return fmt.Errorf("resolve --out-dir: %w", pathErr)
@@ -886,6 +887,11 @@ func regenerate(args []string) error {
 	if *maxUnit > 0 {
 		maxUnitBytes = *maxUnit * 1024
 	}
+	if *exactDirectCallMX {
+		fmt.Println("v2regen: direct-call M/X: experimental global inference (not per-site proof)")
+	} else {
+		fmt.Println("v2regen: direct-call M/X: live-state dispatch (authored force_variant_at overrides retained)")
+	}
 	report, err := regen.Run(regen.Options{
 		ROMPath: *romPath, ConfigDir: *cfgDir, OutputDir: *outDir, Jobs: *jobs,
 		ChunkThresholdBytes: max(0, *chunkThreshold) * 1024, ChunkPCSpan: max(0, *chunkSpan), OnlyBanks: only,
@@ -895,7 +901,7 @@ func regenerate(args []string) error {
 		ProvenEntryFacts:              provenEntryFacts,
 		ProvenEntryTemplates:          provenEntryTemplates,
 		AllowMatchingAuthoredFacts:    strings.TrimSpace(*analysisDB) != "",
-		ExperimentalExactDirectCallMX: useProvenAnalysis,
+		ExperimentalExactDirectCallMX: *exactDirectCallMX,
 		ExperimentalStoredTargets:     *storedTargets,
 		ExperimentalParkedWaits:       *parkedWaits,
 		ExperimentalInternalTails:     *internalTails,

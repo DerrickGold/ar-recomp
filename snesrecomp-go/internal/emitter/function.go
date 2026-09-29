@@ -942,14 +942,12 @@ func emitRTSDispatchGuard(instruction *cpu65816.Instruction, local map[decoder.D
 				"      }")
 		}
 		lines = append(lines,
-			"      if (getenv(\"AR_RTSDISP_MISS\"))",
-			fmt.Sprintf("        fprintf(stderr, \"[rts_dispatch_width] site=$%06X popped target=$%04X: runtime m=%%d x=%%d has no decoded body -> generic return (refused wrong-width goto)\\n\", (int)cpu->m_flag, (int)cpu->x_flag);", site, uint16(entry)),
+			fmt.Sprintf("      if (getenv(\"AR_RTSDISP_MISS\")) sr_rts_dispatch_width(cpu, 0x%06xu, 0x%04xu);", site, uint16(entry)),
 			"      break;  /* wrong-width -> normal return */")
 	}
 	return append(lines,
 		"    default:",
-		"      if (getenv(\"AR_RTSDISP_MISS\"))",
-		fmt.Sprintf("        fprintf(stderr, \"[rts_dispatch_miss] site=$%06X popped target=$%%04X (UNREGISTERED -> generic return; add to rts_dispatch) S=$%%04X m=%%d x=%%d\\n\", (unsigned)_rts_t, (unsigned)cpu->S, (int)cpu->m_flag, (int)cpu->x_flag);", site),
+		fmt.Sprintf("      if (getenv(\"AR_RTSDISP_MISS\")) sr_rts_dispatch_miss(cpu, 0x%06xu, _rts_t);", site),
 		"      break;  /* unknown -> normal return */",
 		"  } }",
 	)

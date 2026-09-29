@@ -61,7 +61,7 @@ func TestRTSGuardRefusesWrongWidth(t *testing.T) {
 	if strings.Contains(src, "_rts_mx == 2") {
 		t.Errorf("guard must not offer an M1X0 goto when only M0X0 was decoded:\n%s", src)
 	}
-	if !strings.Contains(src, "rts_dispatch_width") {
+	if !strings.Contains(src, "sr_rts_dispatch_width(cpu, 0x03a119u, 0x9ef4u);") {
 		t.Errorf("guard should emit the width-refusal diagnostic:\n%s", src)
 	}
 	if strings.Contains(src, "case 0x9EF4: cpu->S") {
@@ -80,7 +80,33 @@ func TestRTSGuardNoVariantDecoded(t *testing.T) {
 	if !strings.Contains(src, "no variant decoded in this function") {
 		t.Errorf("guard should note the undecoded target:\n%s", src)
 	}
-	if !strings.Contains(src, "rts_dispatch_miss") {
+	if !strings.Contains(src, "sr_rts_dispatch_miss(cpu, 0x03a119u, _rts_t);") {
 		t.Errorf("guard should retain the unregistered-target default:\n%s", src)
+	}
+}
+
+func TestRTSGuardKeepsDiagnosticsCold(t *testing.T) {
+	src := strings.Join(buildGuard([][2]uint8{{0, 0}, {1, 0}}), "\n")
+	for _, forbidden := range []string{"fprintf(", "stderr", "[rts_dispatch_"} {
+		if strings.Contains(src, forbidden) {
+			t.Fatalf("cold logging leaked into generated body: %s", src)
+		}
+	}
+	// Missing local targets can be a normal return path. Keep the presence
+	// test here so disabled logging does not make an out-of-line call.
+	for _, want := range []string{
+		`if (getenv("AR_RTSDISP_MISS")) sr_rts_dispatch_width(cpu, 0x03a119u, 0x9ef4u);`,
+		`if (getenv("AR_RTSDISP_MISS")) sr_rts_dispatch_miss(cpu, 0x03a119u, _rts_t);`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("disabled diagnostic is not bypassed: %s", src)
+		}
+	}
+	if strings.Count(src, "getenv(") != 2 {
+		t.Fatal("presence must be queried once per diagnostic branch")
+	}
+	if strings.Index(src, "sr_rts_dispatch_width") < strings.LastIndex(src, "goto L_") ||
+		strings.Index(src, "sr_rts_dispatch_miss") < strings.Index(src, "default:") {
+		t.Fatal("successful goto does not bypass diagnostics")
 	}
 }

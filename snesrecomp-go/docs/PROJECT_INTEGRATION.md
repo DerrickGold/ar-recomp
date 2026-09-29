@@ -537,6 +537,33 @@ The generated ABI is `RecompReturn Function_MxXx(CpuState *cpu)`. Do not invent
 per-function return structs or pass CPU registers as C parameters; mutate the
 shared `CpuState` exactly as generated code does.
 
+Direct JSR/JSL sites with a known source PC use the runner's `sr_call_enter*`
+and `sr_call_leave*` helpers for hardware-frame and continuation ownership.
+Callee selection remains a live-M/X switch with direct compiled calls (or an
+explicitly forced/proven call); the generated caller retains its activation
+pop. The scope stays on that caller's C stack. Parked waits, owned unwinds and
+callee-cleaned stacks must not be treated as ordinary returns. Indirect and
+synthetic calls retain their inline envelopes.
+
+RTS/RTL use `sr_return_native`. Unlike call-boundary helpers, this helper owns
+exactly one generated activation pop: ownership/ancestor checks inspect the
+still-active frame, whereas fallback dispatch runs after it is popped. Internal
+RTS-dispatch gotos still bypass this return path. RTI retains its separate
+interrupt-frame lowering. Exit-M/X and exit-stack checks, return-word witnesses,
+and tracing are preserved; the caller explicitly requests semantic edge tracing
+so a normal runtime archive can serve a semantic-trace generated build.
+
+Cold RTS guard miss/width messages use `sr_rts_dispatch_miss` and
+`sr_rts_dispatch_width`. The small legacy `AR_RTSDISP_MISS` presence check
+stays in the caller, so disabled logging incurs no helper call. Message text,
+target selection and return behavior are unchanged.
+
+Rebuild or obtain the matching runner archive when updating generated code;
+older archives do not provide these helpers. Diagnostic builds must use
+consistent `SNESRECOMP_TRACE` and `SNESRECOMP_TRACE_RECORDER` settings for the
+runner and generated code because the outlined probes now compile in the
+runner. Release builds retain the runtime-selectable M/X mismatch check.
+
 Current generated output includes `snesrecomp/game/cpu.h`,
 `snesrecomp/game/trace.h`, and `snesrecomp/game/generated_support.h`, and
 nothing project-owned: every generated unit declares the generated functions it

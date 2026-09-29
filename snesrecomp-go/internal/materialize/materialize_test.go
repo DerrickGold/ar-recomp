@@ -78,6 +78,31 @@ rts_dispatch 9020 9010
 	return options
 }
 
+func TestMaterializeExplicitCallWidthPolicy(t *testing.T) {
+	for _, exact := range []bool{false, true} {
+		options := fixture(t)
+		options.ExperimentalExactDirectCallMX = exact
+		calls := 0
+		report, err := run(options, func(opts regen.Options) (regen.Report, error) {
+			calls++
+			if opts.ExperimentalExactDirectCallMX != exact {
+				t.Fatal("materialization changed call-width policy")
+			}
+			return regen.Run(opts)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "live"
+		if exact {
+			want = "experimental-inferred"
+		}
+		if calls != 2 || report.DirectCallMX != want {
+			t.Fatalf("policy not retained in control/candidate/manifest: %d %+v", calls, report)
+		}
+	}
+}
+
 func TestMaterializeWritesVerifiedInputsAndPreservesPolicy(t *testing.T) {
 	options := fixture(t)
 	before, err := artifact.FromDir(options.ConfigDir)
@@ -120,7 +145,7 @@ func TestMaterializeWritesVerifiedInputsAndPreservesPolicy(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("authored input changed: %v", err)
 	}
-	if report.Verified != "full-vs-reduced-byte-identical" || report.GenerationMode != "proven-analysis" {
+	if report.Verified != "full-vs-reduced-byte-identical" || report.GenerationMode != "proven-analysis" || report.DirectCallMX != "live" {
 		t.Fatalf("incorrect verification claim: %+v", report)
 	}
 	// The written inputs must also work after staging has been deleted.
@@ -132,7 +157,7 @@ func TestMaterializeWritesVerifiedInputsAndPreservesPolicy(t *testing.T) {
 	rebuilt, err := regen.Run(regen.Options{
 		ROMPath: options.ROMPath, ConfigDir: filepath.Join(options.OutputDir, "recomp"), OutputDir: fresh, Jobs: 2, AllowStubs: true,
 		ProvenDispatchFacts: db.DispatchFacts, ProvenEntryFacts: db.EntryFacts, ProvenEntryTemplates: db.EntryTemplates,
-		AllowMatchingAuthoredFacts: true, ExperimentalExactDirectCallMX: true,
+		AllowMatchingAuthoredFacts: true,
 	})
 	if err != nil || rebuilt.SemanticSourceSHA256 != report.SemanticSourceSHA256 {
 		t.Fatalf("rebuild failed: %v", err)

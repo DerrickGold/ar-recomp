@@ -30,7 +30,7 @@ func TestSplitTailKeepsPairedReturnContext(t *testing.T) {
 		for _, want := range []string{
 			"cpu_dispatch_paired_tail_from(cpu, (((uint32)cpu->PB << 16) | 0x8006u), _entry_s, _hrv, 0x008006u)",
 			"cpu_tailcall_inherit_return_context(_entry_s, _hrv)",
-			"return RECOMP_RETURN_TAILCALL", "/* RTL host return */",
+			"return RECOMP_RETURN_TAILCALL", "NULL, SR_RETURN_LONG |",
 		} {
 			if !strings.Contains(source, want) {
 				t.Fatalf("M%dX%d missing %q:\n%s", mx.M, mx.X, want, source)

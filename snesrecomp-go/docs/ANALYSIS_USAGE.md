@@ -19,6 +19,38 @@ the full machine-readable report, `--verbose` for all text records, and
 `--out-analysis PATH` to export a proven-fact database. `--strict` returns
 nonzero when independent evidence proves a semantic conflict.
 
+## Applying facts without changing call-width policy
+
+`regen --analysis-db PATH` applies proven dispatch/entry facts and continuation
+sharing, but does **not** globally select inferred direct-call M/X widths. Calls
+retain their live-M/X switches and direct compiled targets; authored
+`force_variant_at` overrides remain in force. An otherwise valid zero-fact
+database produces the same generated source as no database.
+
+This also applies to `v2regen regen --experimental-proven-analysis` and to both
+tools' `materialize` command. Materialization records `direct_call_mx` in its
+manifest, and compares full/reduced configurations under the same policy.
+
+Migration: older releases implicitly enabled globally inferred widths with
+either analysis mode (even for an empty database). To reproduce that experimental
+behavior, explicitly add `--experimental-exact-direct-call-mx`. Regeneration
+requires isolated output for this flag. It is **not** a per-call-site proof and
+may change variant discovery and generated behavior; do not enable it solely to
+reduce compile time. Older materialization manifests without `direct_call_mx`
+used this inferred policy. New manifests say `live` or `experimental-inferred`.
+
+Continuation sharing checks the complete decoded instructions, successors, and
+boundary exits, not just equal PC/M/X sets. Both analysis and emission stop at
+HLE entry wrappers; an owner's explicit `end:` also limits its shared region.
+When those checks fail, retain the standalone body rather than bypassing a
+hook or extending ownership. Importing a database is still a behavior-affecting
+opt-in: validate replays and semantic edges in isolated output before adoption.
+Fewer variants or more shared helpers do not by themselves establish smaller
+generated source, faster compilation, or runtime equivalence.
+If an older database claims continuation ownership across an HLE or explicit
+end boundary, regenerate that database with `analyze --out-analysis`; do not
+remove the hook or widen its authored boundary to make the import succeed.
+
 ## Interpreting comparisons
 
 | Result | Meaning |

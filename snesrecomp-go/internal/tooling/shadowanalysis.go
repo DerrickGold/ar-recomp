@@ -703,6 +703,7 @@ func runShadowDecodePass(image romimage.Image, banks []shadowBank, entries map[b
 				options := decoder.Options{
 					End: item.entry.End, DataRegions: regions,
 					HLEDispatch:     item.bank.Config.HLEDispatch,
+					HLEEntryPCs:     config.HLEEntryPoints(item.bank.Config),
 					CalleeExitMX:    calleeExitMX,
 					SiblingEntryPCs: item.siblings,
 				}

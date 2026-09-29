@@ -318,6 +318,7 @@ func (repo *repository) applyProvenContinuationEntryFact(bankID byte, bank *bank
 
 func (repo *repository) validateProvenResumeEdge(bank *bankState, owner config.Entry, edge decoder.ResumeEdge) error {
 	options := repo.decodeOptions(bank, owner)
+	options.End = owner.End
 	graph, err := decoder.DecodeFunction(repo.image, bank.ID, owner.Start, owner.EntryMX.M, owner.EntryMX.X, options)
 	if err != nil {
 		return fmt.Errorf("decode owning region: %w", err)

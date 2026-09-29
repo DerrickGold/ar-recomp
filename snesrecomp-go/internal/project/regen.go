@@ -20,12 +20,16 @@ import (
 type RegenOptions struct {
 	Paths
 	AnalysisDBPath string
-	Jobs           int
-	AllowStubs     bool
-	RunTests       bool
-	GoCommand      string
-	Stdout         io.Writer
-	Stderr         io.Writer
+	// Independent of loading proven entry/dispatch facts. The historical
+	// database path also enabled globally inferred direct-call widths; retain
+	// that experimental behavior only when explicitly requested.
+	ExperimentalExactDirectCallMX bool
+	Jobs                          int
+	AllowStubs                    bool
+	RunTests                      bool
+	GoCommand                     string
+	Stdout                        io.Writer
+	Stderr                        io.Writer
 	// MaxUnitBytes is regen.Options.MaxUnitBytes: zero is the default soft
 	// limit on a generated unit's function source, negative disables it.
 	MaxUnitBytes int
@@ -52,6 +56,9 @@ func Regenerate(options RegenOptions) (RegenReport, error) {
 		return RegenReport{}, err
 	}
 	options.Paths = paths
+	if options.ExperimentalExactDirectCallMX && filepath.Base(paths.GeneratedDir) == "gen" && filepath.Base(filepath.Dir(paths.GeneratedDir)) == "src" {
+		return RegenReport{}, errors.New("experimental exact direct-call M/X requires an isolated --out-dir; refusing to replace src/gen")
+	}
 	if options.Jobs <= 0 {
 		options.Jobs = runtime.NumCPU()
 	}
@@ -83,6 +90,11 @@ func Regenerate(options RegenOptions) (RegenReport, error) {
 			len(database.DispatchFacts), len(database.EntryFacts), displayPath(paths.Root, analysisPath))
 	}
 
+	if options.ExperimentalExactDirectCallMX {
+		fmt.Fprintln(stdout, "direct-call M/X: experimental global inference (not per-site proof)")
+	} else {
+		fmt.Fprintln(stdout, "direct-call M/X: live-state dispatch (authored force_variant_at overrides retained)")
+	}
 	step(stdout, fmt.Sprintf("Regenerating banks (%d workers)", options.Jobs))
 	generation, err := regen.Run(regen.Options{
 		ROMPath: paths.ROM, ConfigDir: paths.ConfigDir, OutputDir: paths.GeneratedDir,
@@ -90,7 +102,7 @@ func Regenerate(options RegenOptions) (RegenReport, error) {
 		ProvenDispatchFacts: database.DispatchFacts, ProvenEntryFacts: database.EntryFacts,
 		ProvenEntryTemplates:          database.EntryTemplates,
 		AllowMatchingAuthoredFacts:    strings.TrimSpace(options.AnalysisDBPath) != "",
-		ExperimentalExactDirectCallMX: strings.TrimSpace(options.AnalysisDBPath) != "",
+		ExperimentalExactDirectCallMX: options.ExperimentalExactDirectCallMX,
 		Progress: func(format string, values ...any) {
 			fmt.Fprintf(stdout, "v2regen: "+format+"\n", values...)
 		},

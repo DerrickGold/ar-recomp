@@ -24,6 +24,7 @@ type Options struct {
 	ROMPath, ConfigDir, OutputDir string
 	Jobs                          int
 	AllowStubs                    bool
+	ExperimentalExactDirectCallMX bool
 	Progress                      func(string, ...any)
 }
 
@@ -45,6 +46,7 @@ type Manifest struct {
 	Provenance             string            `json:"provenance"`
 	ROM                    tooling.ShadowROM `json:"rom"`
 	GenerationMode         string            `json:"generation_mode"`
+	DirectCallMX           string            `json:"direct_call_mx"`
 	Verified               string            `json:"verified"`
 	InputFiles             []artifact.File   `json:"input_files"`
 	ReducedFiles           []artifact.File   `json:"reduced_files"`
@@ -127,7 +129,7 @@ func run(options Options, generate func(regen.Options) (regen.Report, error)) (M
 			ROMPath: romPath, ConfigDir: cfg, OutputDir: out, Jobs: options.Jobs,
 			AllowStubs: options.AllowStubs, ProvenDispatchFacts: database.DispatchFacts,
 			ProvenEntryFacts: database.EntryFacts, ProvenEntryTemplates: database.EntryTemplates,
-			AllowMatchingAuthoredFacts: true, ExperimentalExactDirectCallMX: true,
+			AllowMatchingAuthoredFacts: true, ExperimentalExactDirectCallMX: options.ExperimentalExactDirectCallMX,
 		})
 		if err != nil {
 			return report, err
@@ -177,11 +179,14 @@ func run(options Options, generate func(regen.Options) (regen.Report, error)) (M
 	}
 	result = Manifest{
 		Version: 1, Provenance: "snesrecomp-verified-materialization-v1", ROM: database.ROM,
-		GenerationMode: "proven-analysis", Verified: "full-vs-reduced-byte-identical",
+		GenerationMode: "proven-analysis", DirectCallMX: "live", Verified: "full-vs-reduced-byte-identical",
 		InputFiles: inputFiles.Files, ReducedFiles: reduced.Files, GeneratedFiles: generated,
 		DatabaseFile: dbManifest.Files[0], Removals: removals, PreservedHLEDirectives: hleCount,
 		FinalVariants: candidate.FinalEntries, UnresolvedIndirects: candidate.UnresolvedIndirects,
 		StubMarkers: candidate.StubHits, SemanticSourceSHA256: candidate.SemanticSourceSHA256,
+	}
+	if options.ExperimentalExactDirectCallMX {
+		result.DirectCallMX = "experimental-inferred"
 	}
 	manifestBytes, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {

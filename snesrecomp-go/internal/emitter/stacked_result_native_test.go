@@ -56,7 +56,7 @@ func TestStackedResultsNativeExecution(t *testing.T) {
 		}
 		source.WriteString(s)
 	}
-	if !strings.Contains(source.String(), "cpu_accept_stacked_result_return") {
+	if !strings.Contains(source.String(), "sr_return_native(cpu, _entry_s, _hrv,") {
 		t.Fatal("no stacked-result return contract")
 	}
 	for i, b := range image {

@@ -188,26 +188,21 @@ func emitCall(context *Context, op ir.Call) ([]string, error) {
 			context.Demands[Variant{address, pair[0], pair[1]}] = struct{}{}
 		}
 	}
-	lines := []string{"{", "  uint16 _call_s = cpu->S;"}
-	lines = append(lines, emitReturnFramePush(op)...)
-	if op.SourcePC != nil {
-		frameBytes := 2
-		continuation := fmt.Sprintf("(((uint32)cpu->PB << 16) | 0x%04xu)", uint16(*op.SourcePC+3))
-		if op.Long {
-			frameBytes = 3
-			continuation = fmt.Sprintf("(((uint32)cpu->PB << 16) | 0x%04xu)", uint16(*op.SourcePC+4))
-		}
-		lines = append(lines, "  CpuReturnScope _call_owner;",
-			fmt.Sprintf("  cpu_return_scope_begin(&_call_owner, cpu, %s, _entry_s, %du);", continuation, frameBytes))
-	}
-	if op.Long {
-		lines = append(lines, "  uint8 _saved_pb = cpu->PB;", fmt.Sprintf("  cpu_trace_pb_change(cpu, 0, _saved_pb, 0x%02x, CPU_TR_JSL);", byte(address>>16)), fmt.Sprintf("  cpu->PB = 0x%02x;", byte(address>>16)))
-	}
 	expectedM, expectedX := op.EntryM&1, op.EntryX&1
 	if forcePinned {
 		expectedM, expectedX = pinned[0]&1, pinned[1]&1
 	}
-	lines = append(lines, fmt.Sprintf("  sr_call_mx_check(cpu, %d, %d, \"%s\", 0x%06xu);", expectedM, expectedX, context.CurrentName, context.CurrentSite&0xffffff))
+	var lines []string
+	if op.SourcePC != nil {
+		lines = emitCallEnter(context, op, address, expectedM, expectedX)
+	} else {
+		lines = []string{"{", "  uint16 _call_s = cpu->S;"}
+		lines = append(lines, emitReturnFramePush(op)...)
+		if op.Long {
+			lines = append(lines, "  uint8 _saved_pb = cpu->PB;", fmt.Sprintf("  cpu_trace_pb_change(cpu, 0, _saved_pb, 0x%02x, CPU_TR_JSL);", byte(address>>16)), fmt.Sprintf("  cpu->PB = 0x%02x;", byte(address>>16)))
+		}
+		lines = append(lines, fmt.Sprintf("  sr_call_mx_check(cpu, %d, %d, \"%s\", 0x%06xu);", expectedM, expectedX, context.CurrentName, context.CurrentSite&0xffffff))
+	}
 	if forcePinned {
 		name := fmt.Sprintf("%s_M%dX%d", baseName, pinned[0]&1, pinned[1]&1)
 		lines = append(lines, fmt.Sprintf("  RecompReturn _r = %s(cpu);  /* cfg force_variant_at $%06X -> M%dX%d */", name, context.CurrentSite&0xffffff, pinned[0]&1, pinned[1]&1))
@@ -236,7 +231,39 @@ func emitCall(context *Context, op ir.Call) ([]string, error) {
 		lines = append(lines, VariantDispatchCases(context, address, baseName, "    ", "")...)
 		lines = append(lines, "  }")
 	}
+	if op.SourcePC != nil {
+		return append(lines, emitCallLeave(op)...), nil
+	}
 	return finishCall(lines, op), nil
+}
+
+// emitCallEnter opens a direct call that owns its continuation. The hardware
+// return frame, ownership scope, bank switch and call M/X probe run out of
+// line in the runtime (sr_call_enter in runtime/src/core/call_boundary.c), in
+// the order of the inline envelope still emitted for a synthetic source; only
+// the compiled callee selection stays at the site.
+func emitCallEnter(context *Context, op ir.Call, address uint32, expectedM, expectedX uint8) []string {
+	site := *op.SourcePC & 0xffffff
+	name, probe := context.CurrentName, context.CurrentSite&0xffffff
+	if op.Long {
+		return []string{"{", "  CpuReturnScope _call_owner;", "  uint8 _saved_pb;",
+			fmt.Sprintf("  uint16 _call_s = sr_call_enter_long(cpu, &_call_owner, &_saved_pb, 0x%02x, 0x%04xu, 0x%04xu, _entry_s, %d, %d, \"%s\", 0x%06xu);",
+				byte(address>>16), uint16(site+3), uint16(*op.SourcePC+4), expectedM, expectedX, name, probe)}
+	}
+	return []string{"{", "  CpuReturnScope _call_owner;",
+		fmt.Sprintf("  uint16 _call_s = sr_call_enter(cpu, &_call_owner, 0x%04xu, 0x%04xu, _entry_s, %d, %d, \"%s\", 0x%06xu);",
+			uint16(site+2), uint16(*op.SourcePC+3), expectedM, expectedX, name, probe)}
+}
+
+// emitCallLeave closes a call opened by emitCallEnter. The runtime handles the
+// result exactly as finishCall does inline and returns -1 to continue, or the
+// code to return; the activation pop stays here, before that return.
+func emitCallLeave(op ir.Call) []string {
+	leave := "  int _k = sr_call_leave(cpu, &_call_owner, _r, _call_s);"
+	if op.Long {
+		leave = "  int _k = sr_call_leave_long(cpu, &_call_owner, _r, _call_s, _saved_pb);"
+	}
+	return []string{leave, "  if (_k >= 0) { RecompStackPop(); return (RecompReturn)_k; }", "}"}
 }
 
 func emitIndirectCall(op ir.Call) ([]string, error) {
@@ -264,6 +291,8 @@ func emitIndirectCall(op ir.Call) ([]string, error) {
 
 // Both static and dynamic calls own one native call boundary. The callee
 // cannot make a parked/non-local return into an ordinary successful call.
+// Direct calls with a known source run this envelope out of line (see
+// emitCallEnter); indirect calls and synthetic sources keep it inline.
 func finishCall(lines []string, op ir.Call) []string {
 	lines = append(lines, "  if (_r == RECOMP_RETURN_PARKED_WAIT) {")
 	if op.SourcePC != nil {
@@ -336,87 +365,29 @@ func emitReturn(context *Context, op ir.Return) []string {
 	if op.Interrupt {
 		return []string{"cpu_trace_event(cpu, 0, CPU_TR_RTI, 0, 0);", "{ cpu->S = (uint16)(cpu->S + 1); cpu->P = cpu_read8(cpu, 0x00, cpu->S); cpu_p_to_mirrors(cpu);", "  cpu->S = (uint16)(cpu->S + 2);  /* pull + discard PC */", "  if (!cpu->emulation) cpu->S = (uint16)(cpu->S + 1);  /* native: pull + discard PB */", "  cpu_trace_px_record(cpu, 0, 3 /*RTI*/, cpu->P, cpu->P);", "  return RECOMP_RETURN_NORMAL; /* RTI: popped interrupt frame */ }"}
 	}
-	label, frameSize := "RTS", 2
-	if op.Long {
-		label, frameSize = "RTL", 3
-	}
 	source := uint32(0)
 	if op.SourcePC != nil {
 		source = *op.SourcePC & 0xffffff
 	}
-	lines := []string{fmt.Sprintf("{ uint16 _ret_s = cpu->S;  /* %s pop hardware return frame */", label), "  cpu->S = (uint16)(cpu->S + 1);", "  uint16 _rpcl = (uint16)cpu_read8(cpu, 0x00, cpu->S);", "  cpu->S = (uint16)(cpu->S + 1);", "  uint16 _rpch = (uint16)cpu_read8(cpu, 0x00, cpu->S);"}
+	flags := "0u"
 	if op.Long {
-		lines = append(lines, "  cpu->S = (uint16)(cpu->S + 1);", "  uint8 _rpb = cpu_read8(cpu, 0x00, cpu->S);")
-	} else {
-		lines = append(lines, "  uint8 _rpb = cpu->PB;")
+		flags = "SR_RETURN_LONG"
 	}
-	lines = append(lines,
-		"  uint32 _rpc = (uint32)((((_rpch << 8) | _rpcl) + 1) & 0xFFFFu);",
-		"  uint32 _rpc24 = ((uint32)_rpb << 16) | _rpc;",
-		"#if SNESRECOMP_SEMANTIC_DISPATCH_TRACE",
-		fmt.Sprintf("  cpu_trace_resolved_dispatch(cpu, _rpc24, 0x%06xu);", source),
-		"#endif",
-		"#if SNESRECOMP_TRACE",
-		fmt.Sprintf("  dbg_rts_trace(cpu, 0x%06xu, _entry_s, _ret_s, _rpc24, (uint8)_hrv);", source),
-		"#endif",
-		fmt.Sprintf("  if (g_cpu_return_scope && _ret_s > g_cpu_return_scope->entry_stack && cpu_begin_owned_unwind(cpu, _ret_s, _rpc24, %du)) {", frameSize),
-		"    return RECOMP_RETURN_OWNED_UNWIND;",
-		"  }",
-		"  if (_hrv && _ret_s == _entry_s) {",
-	)
-	if context.CurrentExitM != nil && context.CurrentExitX != nil {
-		lines = append(lines, fmt.Sprintf("    sr_exit_mx_check(cpu, %d, %d, \"%s\", 0x%06xu);", *context.CurrentExitM&1, *context.CurrentExitX&1, context.CurrentName, source))
-	}
-	lines = append(lines,
-		fmt.Sprintf("    return RECOMP_RETURN_NORMAL;  /* %s host return */ }", label),
-		fmt.Sprintf("  if (_hrv && cpu_accept_adjusted_return(cpu, _entry_s, _ret_s, _rpc24, %du)) {", frameSize),
-	)
-	if context.CurrentExitM != nil && context.CurrentExitX != nil {
-		lines = append(lines, fmt.Sprintf("    sr_exit_mx_check(cpu, %d, %d, \"%s\", 0x%06xu);", *context.CurrentExitM&1, *context.CurrentExitX&1, context.CurrentName, source))
-	}
-	lines = append(lines,
-		fmt.Sprintf("    return RECOMP_RETURN_NORMAL;  /* %s owned callee-clean return; retain native S */ }", label),
-	)
-	lines = append(lines, fmt.Sprintf("  if (_hrv && cpu_accept_stacked_result_return(cpu, _entry_s, _ret_s, _rpc24, %du)) {", frameSize))
-	if context.CurrentExitM != nil && context.CurrentExitX != nil {
-		lines = append(lines, fmt.Sprintf("    sr_exit_mx_check(cpu, %d, %d, \"%s\", 0x%06xu);", *context.CurrentExitM&1, *context.CurrentExitX&1, context.CurrentName, source))
-	}
-	lines = append(lines, fmt.Sprintf("    return RECOMP_RETURN_NORMAL;  /* %s owned return with stacked callee results; retain native S */ }", label))
+	origin := "NULL"
 	if op.OwnFrameWord && !op.Long {
-		lines = append(lines,
-			"  if (_hrv && cpu_accept_return_word_relocation(cpu, _entry_s, _ret_s, _rpc24, _return_origin)) {",
-		)
-		if context.CurrentExitM != nil && context.CurrentExitX != nil {
-			lines = append(lines, fmt.Sprintf("    sr_exit_mx_check(cpu, %d, %d, \"%s\", 0x%06xu);", *context.CurrentExitM&1, *context.CurrentExitX&1, context.CurrentName, source))
-		}
-		lines = append(lines, "    return RECOMP_RETURN_NORMAL; /* witnessed own-frame word relocation; retain native S */ }")
+		flags += " | SR_RETURN_OWN_FRAME_WORD"
+		origin = "_return_origin"
 	}
-	lines = append(lines,
-		"  if (_hrv && !cpu->emulation && _ret_s < _entry_s && cpu->S <= _entry_s) {",
-		"#if SNESRECOMP_TRACE",
-		fmt.Sprintf("    cpu_trace_missing_pushed_target(cpu, _rpc24, 0x%06xu);", source),
-		"#endif",
-		"    cpu->PB = _rpb;",
-		fmt.Sprintf("    return cpu_dispatch_paired_tail_from(cpu, _rpc24, _entry_s, _hrv, 0x%06xu); /* pushed target preserves active call ownership */", source),
-		"  }",
-		"  if (_ret_s != _entry_s && cpu_resolve_ancestor_skip(_ret_s) >= 0) {",
-		"    cpu_trace_mark_nlr_exit(BD_EXIT_KIND_TRAMPOLINE);",
-		"    if (cpu_dispatch_has_entry(cpu, _rpc24)) {",
-		fmt.Sprintf("      cpu_tailcall_request(_rpc24, (uint16)(_ret_s + %du), 0x%06xu);", frameSize, source),
-		fmt.Sprintf("      return RECOMP_RETURN_TAILCALL;  /* %s yield: flat tail-dispatch to grandparent continuation */ }", label),
-		"    {",
-		"      int _anc_skip = cpu_resolve_ancestor_skip(_ret_s);",
-		fmt.Sprintf("      return (RecompReturn)_anc_skip;  /* %s return-to-ancestor */ }", label),
-		"  }",
-		"  cpu_trace_mark_nlr_exit(BD_EXIT_KIND_TRAMPOLINE);",
-		fmt.Sprintf("  uint16 _miss_s = (uint16)(((_ret_s > _entry_s) ? _ret_s : _entry_s) + %du);", frameSize),
-		fmt.Sprintf("  sr_exit_s_check(cpu, _entry_s, _ret_s, \"%s\", 0x%06xu);", context.CurrentName, source),
-		"  if (!_hrv) {",
-		fmt.Sprintf("    cpu_tailcall_request(_rpc24, _miss_s, 0x%06xu);", source),
-		fmt.Sprintf("    return RECOMP_RETURN_TAILCALL;  /* %s tail-dispatch (trampolined) */ }", label),
-		fmt.Sprintf("  return cpu_dispatch_pc_from(cpu, _rpc24, _miss_s, 0x%06xu);  /* %s dispatch (drive) */ }", source, label),
-	)
-	return lines
+	exitMX := -1
+	if context.CurrentExitM != nil && context.CurrentExitX != nil {
+		exitMX = int((*context.CurrentExitM&1)<<1 | (*context.CurrentExitX & 1))
+	}
+	// A compound statement owns its exit, like the explicit call-boundary
+	// return. emitDecodedBody must not insert a pop before this helper:
+	// ancestor queries need the current activation, dispatch needs it retired.
+	// Semantic tracing is selected by the generated caller, not library flags.
+	return []string{fmt.Sprintf("{ return sr_return_native(cpu, _entry_s, _hrv, 0x%06xu, %q, %d, %s, %s | (SNESRECOMP_SEMANTIC_DISPATCH_TRACE ? SR_RETURN_TRACE_EDGE : 0u)); } /* helper owns activation pop */",
+		source, context.CurrentName, exitMX, origin, flags)}
 }
 
 func emitPushEffective(op ir.PushEffectiveAddress) []string {
