@@ -47,33 +47,49 @@ func TestPrepareCreatesOnlyMarkerAndPreservesLegacy(t *testing.T) {
 	}
 }
 
-func TestScratchKeysPayloadAndROMAndRejectsRedirects(t *testing.T) {
+func TestScratchStartsEmptyEveryAttemptAndPreservesOldCaches(t *testing.T) {
 	work := filepath.Join(t.TempDir(), "workspace")
-	rom := filepath.Join(t.TempDir(), "input.sfc")
-	put(t, rom, "first ROM")
-	a := strings.Repeat("a", 64)
-	first, err := Scratch(work, a, rom)
+	first, err := Scratch(work)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := Scratch(work, a, rom)
-	if err != nil || first != again {
-		t.Fatalf("unstable scratch: %s, %v", again, err)
+	put(t, filepath.Join(first, "objects", "stale.o"), "old object")
+	put(t, filepath.Join(first, "generated", "stale.c"), "old source")
+	again, err := Scratch(work)
+	if err != nil || first == again {
+		t.Fatalf("reused scratch: %s, %v", again, err)
 	}
-	other, err := Scratch(work, strings.Repeat("b", 64), rom)
-	if err != nil || first == other {
-		t.Fatalf("payload cache collision: %s %v", other, err)
+	entries, err := os.ReadDir(again)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("new attempt is not empty: %v %v", entries, err)
 	}
-	put(t, rom, "second ROM")
-	otherROM, err := Scratch(work, a, rom)
-	if err != nil || first == otherROM {
-		t.Fatalf("ROM cache collision: %s %v", otherROM, err)
+	if data, err := os.ReadFile(filepath.Join(first, "objects", "stale.o")); err != nil || string(data) != "old object" {
+		t.Fatal("touched a different/possibly active attempt", err)
 	}
-	if err := os.Symlink(t.TempDir(), filepath.Join(otherROM, "generated")); err != nil {
+	generic, err := Scratch("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(generic) })
+	if entries, err := os.ReadDir(generic); err != nil || len(entries) != 0 {
+		t.Fatal("generic scratch not empty", entries, err)
+	}
+}
+
+func TestScratchRejectsRedirectedBuildDirectory(t *testing.T) {
+	work := filepath.Join(t.TempDir(), "workspace")
+	if err := Prepare(work); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(work, "build")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	if _, err := Scratch(work, a, rom); err == nil {
-		t.Fatal("followed generated-source redirect")
+	if _, err := Scratch(work); err == nil {
+		t.Fatal("accepted a redirected build directory")
+	}
+	if entries, err := os.ReadDir(outside); err != nil || len(entries) != 0 {
+		t.Fatal("wrote through redirect", entries, err)
 	}
 }
 

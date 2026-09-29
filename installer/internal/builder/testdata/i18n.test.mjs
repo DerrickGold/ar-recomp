@@ -101,7 +101,7 @@ test("asset numeric arguments reformat but filenames, IDs and media resources st
 function setupAssetApp(){
   const s=setup(), ids=new Map(),rows=[];
   const node=id=>{
-    if(!ids.has(id)){const n=new Node("div");n.id=id;n.files=[];ids.set(id,n);s.doc.children.push(n);}
+    if(!ids.has(id)){const n=new Node("div");n.id=id;n.files=[];n.focus=()=>{s.doc.activeElement=n;};ids.set(id,n);s.doc.children.push(n);}
     return ids.get(id);
   };
   const names=["Track 09","Sky Palace"];
@@ -126,10 +126,13 @@ function setupAssetApp(){
   }
   const list=node("asset-track-list");list.append=child=>list.children.push(child);
   const pickerHost=new Node("div"),tabsHost=new Node("div"),header=new Node("header");header.offsetHeight=70;
+  const tabs=[node("tab-home"),node("tab-build")];
+  tabs.forEach(tab=>tab.setAttribute("aria-controls",tab.id.replace("tab-","panel-")));
   const originalQuery=s.doc.querySelectorAll.bind(s.doc);
   s.doc.querySelectorAll=selector=>{
     if(selector===".asset-row")return rows;
-    if([".tab",".step","[data-nav]","[data-asset-category]"].includes(selector))return [];
+    if(selector===".tab")return tabs;
+    if([".step","[data-nav]","[data-asset-category]"].includes(selector))return [];
     return originalQuery(selector);
   };
   s.doc.querySelector=selector=>{
@@ -137,8 +140,11 @@ function setupAssetApp(){
     return {".tabs":tabsHost,".workspace-bar":header,".asset-track-picker":pickerHost}[selector]??assert.fail(`unexpected document selector ${selector}`);
   };
   s.doc.createElement=tag=>new Node(tag);
+  s.doc.body=new Node("body");
   s.doc.documentElement.style={setProperty(){}};
   s.context.window.addEventListener=()=>{};
+  s.context.window.scrollTo=()=>{};
+  s.context.window.history={pushState:(_,__,hash)=>{s.context.location.hash=hash;}};
   const requests=[], urls=[];
   Object.assign(s.context,{location:{hash:"#unknown"},matchMedia:()=>({matches:false,addEventListener(){}}),
     URL:{createObjectURL(file){urls.push(file);return "blob:pending-track";},revokeObjectURL(){throw Error("unexpected file release");}},
@@ -148,15 +154,23 @@ function setupAssetApp(){
       requests.push(path);
       return path==="interface/preferences"?Promise.resolve({ok:true,json:async()=>JSON.parse(options.body)}):new Promise(()=>{});
     }});
-  runInNewContext(readFileSync(new URL("../web/app.js",import.meta.url),"utf8"),s.context);
-  return {...s,node,rows,list,requests,urls};
+  // Expose the actual private renderer only inside this isolated test context.
+  // Production keeps its IIFE; no test hooks or duplicated UI logic ship.
+  const source=readFileSync(new URL("../web/app.js",import.meta.url),"utf8");
+  assert.match(source,/\}\)\(\);\s*$/);
+  runInNewContext(source.replace(/\}\)\(\);\s*$/,"window.testApplyMode=applyMode;\n})();"),s.context);
+  return {...s,node,rows,list,requests,urls,applyMode:s.context.window.testApplyMode};
 }
 
 test("launch errors name the action and offer only a read-only status recheck",async()=>{
   const s=setupAssetApp(), reports=[],requests=[];
   const failure=new Error("SDL_Init failed: No available video device");
   failure.code="AR_HTTP_500";failure.status=500;
-  s.context.window.workshopFeedback={clear(){},show:(target,error,options)=>reports.push({target,error,options}),readJSON:async()=>{throw failure;}};
+  let preflight=true;
+  s.context.window.workshopFeedback={clear(){},show:(target,error,options)=>reports.push({target,error,options}),readJSON:async()=>{
+    if(preflight){preflight=false;return {state:"idle",mode:"ready",install:{canLaunch:true,canRebuild:true,build:{state:"current"}}};}
+    throw failure;
+  }};
   s.context.fetch=async(path,options)=>{requests.push({path,method:options?.method||"GET"});return {};};
   await s.node("launch").fire("click");
   assert.equal(reports[0].options.operation,"Launch game");
@@ -165,8 +179,187 @@ test("launch errors name the action and offer only a read-only status recheck",a
   assert.equal(s.node("workspace-status").textContent,s.ui.text("builder.feedback.failed"));
   assert.equal(s.node("launch").disabled,false);
   await reports[0].options.retry();
-  assert.deepEqual(requests,[{path:"launch",method:"POST"},{path:"status",method:"GET"}]);
+  assert.deepEqual(requests,[{path:"status",method:"GET"},{path:"launch",method:"POST"},{path:"status",method:"GET"}]);
   assert.equal(reports[1].options.operation,"Check Builder status");
+});
+
+test("release freshness distinguishes current, changed and legacy builds in every interface language",async()=>{
+  const s=setupAssetApp();
+  const install={canLaunch:true,canRebuild:true,build:{state:"rebuild",builderVersion:"same-version",builtVersion:"same-version"}};
+  for(const locale of ["en","fr","de","ja"]){
+    s.picker.value=locale;await s.picker.fire("change");
+    for(const state of ["current","rebuild","unknown","unavailable"]){
+      install.build.state=state;
+      s.applyMode({state:"idle",mode:"ready",install});
+      assert.equal(s.node("game-version-notice").hidden,state==="current");
+      assert.equal(s.node("game-version-rebuild").hidden,state==="current"||state==="unavailable");
+      if(state!=="current")assert.equal(s.node("game-version-title").textContent,s.ui.text(state==="unavailable"?"builder.version.unavailable":"builder.version.recommended"));
+      assert.equal(s.node("home-primary").disabled,false);
+      assert.equal(s.node("play").disabled,false);
+      assert.equal(s.node("home-game-note").textContent,s.ui.text(state==="current"?"builder.version.current":"builder.home.ready"));
+    }
+  }
+  s.applyMode({state:"idle",install:{canLaunch:false,canRebuild:true}});
+  assert.equal(s.node("game-version-notice").hidden,true);
+  s.applyMode({state:"building",install});
+  assert.equal(s.node("game-version-notice").hidden,true);
+});
+
+function stalePlayFixture(state){
+  const s=setupAssetApp(),requests=[];
+  const status={state:"idle",mode:"ready",install:{canLaunch:true,canRebuild:true,build:{state}}};
+  s.applyMode(status);
+  s.context.fetch=async(path,options)=>{requests.push([path,options?.method||"GET"]);return {ok:true,json:async()=>status};};
+  const dialog=s.node("stale-build-dialog");let shown;
+  const opened=new Promise(resolve=>{shown=resolve;});
+  dialog.showModal=()=>{dialog.open=true;shown();};
+  dialog.close=()=>{dialog.open=false;dialog.fire("close");};
+  return {...s,requests,status,dialog,opened};
+}
+
+test("all Play buttons warn on stale or legacy builds; cancel never launches",async()=>{
+  for(const state of ["rebuild","unknown"]){
+    for(const id of ["home-primary","play","launch","dock-launch"]){
+      const s=stalePlayFixture(state);
+      const clicking=s.node(id).fire("click");await s.opened;
+      assert.deepEqual(s.requests,[["status","GET"]]);
+      assert.equal(s.dialog.open,true);
+      await s.node("stale-build-cancel").fire("click");await clicking;
+      assert.deepEqual(s.requests,[["status","GET"]]);
+      assert.equal(s.dialog.open,false);
+      assert.equal(s.node(id).disabled,false);
+    }
+  }
+});
+
+test("Play existing build launches once; up-to-date games skip the prompt",async()=>{
+  for(const state of ["rebuild","unknown","current"]){
+    const s=stalePlayFixture(state);
+    const clicking=s.node("play").fire("click");
+    if(state!=="current"){
+      await s.opened;
+      await s.node("play").fire("click");
+      await s.node("stale-build-play").fire("click");
+    }
+    await clicking;
+    assert.deepEqual(s.requests,[["status","GET"],["launch","POST"]]);
+    assert.notEqual(s.dialog.open,true);
+  }
+});
+
+test("Review rebuild and Escape dismiss stale Play without launching",async()=>{
+  for(const action of ["rebuild","escape"]){
+    const s=stalePlayFixture("rebuild");
+    const clicking=s.node("play").fire("click");await s.opened;
+    if(action==="rebuild")await s.node("stale-build-review").fire("click");
+    else await s.dialog.fire("cancel",{preventDefault(){}});
+    await clicking;
+    assert.deepEqual(s.requests,[["status","GET"]]);
+    if(action==="rebuild")assert.equal(s.context.location.hash,"#build");
+  }
+});
+
+test("Play rechecks freshness and launcher-only installs can still play",async()=>{
+  const s=stalePlayFixture("current");
+  // The page last saw a current build. A replacement/receipt change is caught
+  // at the click, not only when reopening the page or finishing another build.
+  s.status.install.build.state="unknown";
+  s.status.install.canRebuild=false;
+  s.status.mode="launcher";
+  const clicking=s.node("home-primary").fire("click");await s.opened;
+  assert.equal(s.node("stale-build-review").hidden,true);
+  await s.node("stale-build-play").fire("click");await clicking;
+  assert.deepEqual(s.requests,[["status","GET"],["launch","POST"]]);
+});
+
+test("a failed Play preflight never starts the game",async()=>{
+  const s=stalePlayFixture("rebuild"),reports=[];
+  s.context.window.workshopFeedback={clear(){},show:(_,error,options)=>reports.push({error,options}),readJSON:async()=>{throw Error("Status unavailable");}};
+  await s.node("play").fire("click");
+  assert.deepEqual(s.requests,[["status","GET"]]);
+  assert.equal(reports[0].options.operation,"Launch game");
+  assert.equal(s.node("play").disabled,false);
+  assert.notEqual(s.dialog.open,true);
+});
+
+function readyRebuildFixture({preflight=false,fail=false}={}){
+  const s=stalePlayFixture("rebuild");
+  s.status.rebuildROM="/Games/日本語 {path}/user-rom.sfc";
+  s.applyMode(s.status);
+  s.context.FormData=class extends Map {
+    constructor(form){super();assert.equal(form,s.node("build-form"));if(s.node("rom").files.length)this.set("rom",s.node("rom").files[0]);}
+  };
+  s.context.fetch=async(path,options)=>{
+    s.requests.push([path,options?.method||"GET",options?.body]);
+    if(path==="status"){
+      if(preflight){preflight=false;return {ok:true,json:async()=>s.status};}
+      return new Promise(()=>{}); // Leave build polling in flight.
+    }
+    assert.equal(path,"build");
+    return fail?{ok:false,json:async()=>({error:"Saved ROM moved",errorCode:"builder.build.saved_rom_missing"})}:{ok:true,json:async()=>({state:"building"})};
+  };
+  return s;
+}
+
+test("saved ROM path translates literally and removes file-picker requirement",async()=>{
+  const s=setupAssetApp(), path="C:\\Games\\日本語 {path}\\user-rom.sfc";
+  s.applyMode({state:"idle",install:{canLaunch:true,canRebuild:true,build:{state:"rebuild"}},rebuildROM:path});
+  for(const locale of ["en","fr","de","ja"]){
+    s.picker.value=locale;await s.picker.fire("change");
+    assert.equal(s.node("rom").required,false);
+    assert.equal(s.node("saved-rom-note").textContent,s.ui.text("builder.build.saved_rom",{path}));
+    assert.equal(s.node("game-version-rebuild").textContent,s.ui.text("builder.version.rebuild_now"));
+    assert.equal(s.node("build").textContent,s.ui.text("builder.build.rebuild_game"));
+  }
+  s.applyMode({state:"idle",install:{canLaunch:true,canRebuild:true,build:{state:"rebuild"}}});
+  assert.equal(s.node("rom").required,true);
+  assert.equal(s.node("saved-rom-note").hidden,true);
+  assert.equal(s.node("game-version-rebuild").textContent,s.ui.text("builder.version.review"));
+});
+
+test("Rebuild now and the build form reuse the saved ROM with one request",async()=>{
+  for(const id of ["game-version-rebuild","build-form"]){
+    const s=readyRebuildFixture();
+    const first=s.node(id).fire(id==="build-form"?"submit":"click",{preventDefault(){}});
+    const duplicate=s.node(id).fire(id==="build-form"?"submit":"click",{preventDefault(){}});
+    await Promise.all([first,duplicate]);
+    const builds=s.requests.filter(([path])=>path==="build");
+    assert.equal(builds.length,1);
+    assert.equal(builds[0][2].get("reuseROM"),"true");
+    assert.equal(builds[0][2].has("rom"),false);
+    assert.equal(s.context.location.hash,"#build");
+    assert.equal(s.node("game-version-notice").hidden,true);
+    assert.equal(s.node("play").disabled,true);
+  }
+});
+
+test("stale Play dialog can rebuild immediately without launching the old game",async()=>{
+  const s=readyRebuildFixture({preflight:true});
+  const clicking=s.node("play").fire("click");await s.opened;
+  assert.equal(s.node("stale-build-review").textContent,s.ui.text("builder.version.rebuild_now"));
+  await s.node("stale-build-review").fire("click");await clicking;
+  assert.deepEqual(s.requests.map(([path,method])=>[path,method]),[["status","GET"],["build","POST"],["status","GET"]]);
+  assert.equal(s.requests[1][2].get("reuseROM"),"true");
+  assert.equal(s.node("play").disabled,true);
+});
+
+test("an explicit replacement file wins over the saved copy",async()=>{
+  const s=readyRebuildFixture(), replacement={name:"new.SMC"};
+  s.node("rom").files=[replacement];
+  await s.node("build-form").fire("submit",{preventDefault(){}});
+  const payload=s.requests.find(([path])=>path==="build")[2];
+  assert.equal(payload.get("rom"),replacement);
+  assert.equal(payload.has("reuseROM"),false);
+});
+
+test("a vanished saved ROM restores the picker and keeps the actionable error",async()=>{
+  const s=readyRebuildFixture({fail:true});
+  await s.node("game-version-rebuild").fire("click");
+  assert.equal(s.node("rom").required,true);
+  assert.equal(s.node("saved-rom-note").hidden,true);
+  assert.equal(s.node("game-version-rebuild").textContent,s.ui.text("builder.version.review"));
+  assert.match(s.node("state").textContent,/Saved ROM moved/);
+  assert.equal(s.requests.length,1); // No hidden retries or error-clearing poll.
 });
 
 test("real asset controller keeps unsaved files, playback, search and form state during language changes",async()=>{

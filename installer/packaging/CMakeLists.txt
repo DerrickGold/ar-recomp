@@ -463,6 +463,8 @@ install(FILES
 # acceptance records and plans are local development material, not payload.
 install(FILES ${GAME_ROOT}/LICENSE
     DESTINATION utils/docs RENAME GAME-LICENSE.txt)
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/licenses/appicons/
+    DESTINATION utils/licenses/appicons)
 install(FILES
     ${GAME_ROOT}/docs/README.md
     ${GAME_ROOT}/docs/manual.md
@@ -594,6 +596,9 @@ foreach(_leak_path IN LISTS _leak_paths)
 endforeach()
 configure_file(check_package.cmake.in ${CMAKE_BINARY_DIR}/check_package.cmake @ONLY)
 set(CPACK_POST_BUILD_SCRIPTS ${CMAKE_BINARY_DIR}/check_package.cmake)
+
+# Must follow every payload install rule; also runs for generic Linux archives.
+install(SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/write_build_identity.cmake")
 
 # ── Archive naming + output location ─────────────────────────────────────────
 set(CPACK_PACKAGE_NAME "actraiser-recomp")

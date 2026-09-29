@@ -333,6 +333,16 @@ add_executable(ActRaiserRecomp
 )
 target_link_libraries(ActRaiserRecomp PRIVATE actraiser_regional_rules)
 
+# Use the same original sword artwork as Builder-produced game executables.
+# Raw development builds remain regular binaries, with no app-bundle staging.
+if(WIN32)
+    enable_language(RC)
+    target_sources(ActRaiserRecomp PRIVATE installer/internal/appicons/game.rc)
+    target_include_directories(ActRaiserRecomp PRIVATE installer/internal/appicons)
+    set_property(SOURCE installer/internal/appicons/game.rc APPEND PROPERTY OBJECT_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/installer/internal/appicons/assets/game/icon.ico")
+endif()
+
 # Source builds stage the ActRaiser language/archive helper beside the game.
 # Released bundles retain it under utils/tools after build-only cleanup.
 find_program(ACTRAISER_GO_EXECUTABLE NAMES go)
@@ -350,6 +360,7 @@ if(ACTRAISER_GO_EXECUTABLE AND NOT CMAKE_CROSSCOMPILING)
                 -o "${ACTRAISER_BUILDER_HELPER}" ./cmd/actraiser-builder
         WORKING_DIRECTORY "${ACTRAISER_INSTALLER_ROOT}"
         DEPENDS ${ACTRAISER_BUILDER_INPUTS} "${ACTRAISER_INSTALLER_ROOT}/go.mod"
+            "${ACTRAISER_INSTALLER_ROOT}/go.sum"
         COMMENT "Building ActRaiser Builder language/archive helper"
         VERBATIM)
     add_custom_target(actraiser_builder_helper DEPENDS "${ACTRAISER_BUILDER_HELPER}")

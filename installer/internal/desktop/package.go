@@ -227,7 +227,7 @@ func stageSeed(root, resources string, embedded ...fs.FS) error {
 
 func stageNotices(root, resources string) error {
 	// Notices survive removal of build machinery and travel with the app.
-	for _, leaf := range []string{"licenses", "docs/GAME-LICENSE.txt", "LICENSE", "LICENSE_SCOPE.md", "ATTRIBUTION.md", "THIRD_PARTY_NOTICES.md", "ACTRAISER-THIRD-PARTY-NOTICES.md", "snesrecomp-go/runtime/LICENSE", "snesrecomp-go/runtime/NOTICE.md", "snesrecomp-go/runtime/PROVENANCE.md", "snesrecomp-go/runtime/licenses", "third_party/sheenbidi/LICENSE", "third_party/unicode/NOTICE", "third_party/unicode/utf8proc-LICENSE.md", "installer/THIRD_PARTY_NOTICES.md", "installer/packaging/licenses/sdl-ttf", "installer/packaging/licenses/appimage"} {
+	for _, leaf := range []string{"licenses", "docs/GAME-LICENSE.txt", "LICENSE", "LICENSE_SCOPE.md", "ATTRIBUTION.md", "THIRD_PARTY_NOTICES.md", "ACTRAISER-THIRD-PARTY-NOTICES.md", "snesrecomp-go/runtime/LICENSE", "snesrecomp-go/runtime/NOTICE.md", "snesrecomp-go/runtime/PROVENANCE.md", "snesrecomp-go/runtime/licenses", "third_party/sheenbidi/LICENSE", "third_party/unicode/NOTICE", "third_party/unicode/utf8proc-LICENSE.md", "installer/THIRD_PARTY_NOTICES.md", "installer/packaging/licenses/sdl-ttf", "installer/packaging/licenses/appimage", "installer/packaging/licenses/appicons"} {
 		from := filepath.Join(root, leaf)
 		info, err := os.Stat(from)
 		if errors.Is(err, os.ErrNotExist) {

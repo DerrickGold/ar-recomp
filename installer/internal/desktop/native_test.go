@@ -1,6 +1,7 @@
 package desktop
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -8,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
 )
 
 // Compile a tiny executable and a transitive shared-library dependency, move
@@ -75,6 +78,16 @@ func TestNativeApplicationSurvivesRelocationAndMissingBuildLibraries(t *testing.
 	bin, resources, libs := filepath.Join(moved, "usr/bin"), filepath.Join(moved, "usr/share", Name), filepath.Join(moved, "usr/lib")
 	if runtime.GOOS == "darwin" {
 		bin, resources = filepath.Join(moved, "Contents/MacOS"), filepath.Join(moved, "Contents/Resources")
+		icon, err := os.ReadFile(filepath.Join(resources, Name+".icns"))
+		if err != nil || !bytes.Equal(icon, appicons.Game.ICNS()) {
+			t.Fatal("missing macOS game icon", err)
+		}
+		plist, err := os.ReadFile(filepath.Join(moved, "Contents/Info.plist"))
+		if err != nil || !bytes.Contains(plist, []byte("<key>CFBundleIconFile</key><string>"+Name+".icns</string>")) {
+			t.Fatal("missing icon plist entry", err)
+		}
+	} else if err := appicons.Game.ValidateAppDir(moved); err != nil {
+		t.Fatal(err)
 	}
 	for _, excluded := range []string{"seed/saves/save.srm", "seed/game-assets/languages/sources/private", "seed/game-assets/languages/packs/.arlang-cache/private"} {
 		if _, err := os.Stat(filepath.Join(resources, excluded)); !os.IsNotExist(err) {

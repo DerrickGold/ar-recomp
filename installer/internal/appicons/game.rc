@@ -1,0 +1,2 @@
+// ID 1 is the default game application icon; use the checked-in multi-size ICO.
+1 ICON "assets/game/icon.ico"

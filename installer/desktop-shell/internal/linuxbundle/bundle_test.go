@@ -6,7 +6,19 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
 )
+
+func TestLauncherIncludesOriginalIcon(t *testing.T) {
+	root := t.TempDir()
+	if err := writeLauncher(root, "lib/x86_64-linux-gnu/webkit2gtk-4.1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := appicons.Builder.ValidateAppDir(root); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestRelocationIsNarrowAndPreservesELFOffsets(t *testing.T) {
 	path := "/usr/lib/aarch64-linux-gnu/webkit2gtk-4.1"

@@ -22,6 +22,7 @@ func TestLocalizationPackageGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := []string{
+		"utils/build-inputs.sha256",
 		"utils/docs/README.md", "utils/docs/manual.md", "utils/docs/builder-workshop.md",
 		"utils/docs/desktop-packaging.md", "utils/docs/ram-map.md", "utils/docs/rom-map.md",
 		"utils/docs/research-symbol-map.md", "utils/docs/save-format.md", "utils/docs/randomizer.md", "utils/docs/sim-object-catalog.md",
@@ -60,9 +61,14 @@ func TestLocalizationPackageGate(t *testing.T) {
 		"@SNESBUILD_REQUIRED_TTF_LINK@", "utils/tools/sdl3/lib/SDL3_ttf.lib",
 		"@_exe_suffix@", "",
 	).Replace(string(template))
-	for _, tc := range []struct{ name, omit, add, goos string }{
+	for _, tc := range []struct {
+		name, omit, add, goos string
+		corruptIdentity       bool
+	}{
 		{name: "valid"},
 		{name: "valid Linux", goos: "linux"},
+		{name: "missing build identity", omit: "utils/build-inputs.sha256"},
+		{name: "invalid build identity", corruptIdentity: true},
 		{name: "missing SDL lock", omit: "utils/licenses/sdl-sdk.lock.json"},
 		{name: "missing SDL notice", omit: "utils/licenses/SDL3/LICENSE.txt"},
 		{name: "missing Linux SDL headers", goos: "linux", omit: "utils/tools/sdl3/include/SDL3/SDL.h"},
@@ -113,7 +119,11 @@ func TestLocalizationPackageGate(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := entry.Write([]byte("invented fixture")); err != nil {
+				content := "invented fixture"
+				if name == "utils/build-inputs.sha256" && !tc.corruptIdentity {
+					content = strings.Repeat("a", 64) + "\n"
+				}
+				if _, err := entry.Write([]byte(content)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -129,12 +139,16 @@ func TestLocalizationPackageGate(t *testing.T) {
 				t.Fatal(err)
 			}
 			output, err := exec.Command(cmake, "-DCPACK_PACKAGE_FILES="+archive, "-P", script).CombinedOutput()
-			if tc.omit == "" && tc.add == "" {
+			if tc.omit == "" && tc.add == "" && !tc.corruptIdentity {
 				if err != nil {
 					t.Fatalf("valid rejected: %s", output)
 				}
 			} else if err == nil {
 				t.Fatal("invalid package accepted")
+			} else if tc.omit == "utils/build-inputs.sha256" || tc.corruptIdentity {
+				if !strings.Contains(string(output), "builder identity check") {
+					t.Fatalf("wrong identity rejection: %s", output)
+				}
 			} else if !strings.Contains(string(output), "bundled SDL check") && !strings.Contains(string(output), "SDL3_ttf package check") && !strings.Contains(string(output), "localization distribution check") && !strings.Contains(string(output), "documentation distribution check") && !strings.Contains(string(output), "interface font check") && !strings.Contains(string(output), "license check") && !strings.Contains(string(output), "AppImage package check") {
 				t.Fatalf("wrong rejection: %s", output)
 			}

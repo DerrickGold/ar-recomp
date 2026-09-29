@@ -109,6 +109,42 @@ func TestLaunchWorksOnDetectedBuildWithoutBuilding(t *testing.T) {
 	}
 }
 
+// Freshness is advisory, not capability: a release update or an unrecorded
+// legacy game must remain playable. Reprobing must also carry a changed
+// freshness result through the status API without reopening the Builder.
+func TestBuildFreshnessRefreshesWithoutBlockingLaunch(t *testing.T) {
+	freshness := BuildFreshness{State: "unknown", Reason: "missing_record", BuilderVersion: "new"}
+	launches := 0
+	app := newApplication(context.Background(), Options{
+		ProjectRoot: t.TempDir(),
+		Launch:      func(Result) error { launches++; return nil },
+		Detect: func() InstallState {
+			return InstallState{CanLaunch: true, CanRebuild: true, Build: freshness,
+				Result: Result{OutputPath: "game", BinaryPath: "game"}}
+		},
+	}, "token")
+	for _, state := range []string{"unknown", "rebuild", "current", "unavailable"} {
+		freshness.State = state
+		recorder := httptest.NewRecorder()
+		app.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/token/status", nil))
+		var got status
+		if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusOK || got.Install.Build != freshness || !got.Install.CanLaunch || got.Mode != "ready" {
+			t.Fatalf("%s status: %+v", state, got)
+		}
+		recorder = httptest.NewRecorder()
+		app.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/token/launch", nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s blocked launch: %s", state, recorder.Body.String())
+		}
+	}
+	if launches != 4 {
+		t.Fatalf("launched %d times, want 4", launches)
+	}
+}
+
 // Without a detected build there is nothing to launch, and the old refusal must
 // still apply -- otherwise the Play path would call the host with an empty path.
 func TestLaunchStillRefusedWithNothingBuilt(t *testing.T) {

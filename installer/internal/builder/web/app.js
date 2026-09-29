@@ -31,6 +31,8 @@ let assetsLoaded=false;
 let previewPolling=false, previewTimer=0;
 const homePrimary=document.querySelector("#home-primary"), workspaceStatus=document.querySelector("#workspace-status");
 let canLaunch=false, closed=false, launching=false;
+let savedROM="", buildSubmitting=false, latestModeData=null;
+const romInput=document.querySelector("#rom"), savedROMNote=document.querySelector("#saved-rom-note");
 let lastPaint=null;
 let activeTab=document.querySelector("#tab-home");
 const scrollPositions=new Map();
@@ -855,7 +857,25 @@ const slimCopy=document.querySelector("#slim-copy"), slimDone=document.querySele
 const slimDismiss=document.querySelector("#slim-dismiss");
 let slimDismissed=false, lastMode="", lastSceneBuildState="";
 
+const versionNotice=document.querySelector("#game-version-notice"), versionReview=document.querySelector("#game-version-rebuild");
+function applyBuildFreshness(install,building){
+  const info=install.build||{}, state=info.state||"unknown";
+  const recommended=state==="rebuild"||state==="unknown";
+  versionNotice.hidden=!install.canLaunch||building||state==="current";
+  versionNotice.dataset.state=state;
+  ui.set(document.querySelector("#game-version-title"),recommended?"builder.version.recommended":"builder.version.unavailable");
+  ui.set(document.querySelector("#game-version-help"),state==="rebuild"?"builder.version.different":state==="unknown"?"builder.version.legacy":"builder.version.unavailable_help");
+  const labels=document.querySelector("#game-version-labels");
+  labels.hidden=!info.builderVersion;
+  ui.set(labels,info.builtVersion?"builder.version.both_labels":"builder.version.builder_label",{built:info.builtVersion||"",builder:info.builderVersion||""});
+  versionReview.hidden=!recommended||!install.canRebuild;
+  versionReview.disabled=closed||building;
+  ui.set(versionReview,savedROM?"builder.version.rebuild_now":"builder.version.review");
+}
+versionReview.addEventListener("click",()=>savedROM?startGameBuild(true):selectTab(buildTab));
+
 function applyMode(data){
+  latestModeData=data;
   if(data.state!==lastSceneBuildState) {
     lastSceneBuildState=data.state;
     document.dispatchEvent(new Event("workshop:build-state"));
@@ -866,6 +886,13 @@ function applyMode(data){
      overwritten. The server refuses it too (launch() checks state first) -- this
      is only so the button does not sit there inviting the click. */
   const building=(data.state==="building");
+  savedROM=typeof data.rebuildROM==="string"?data.rebuildROM:"";
+  romInput.required=!savedROM;
+  romInput.disabled=closed||building;
+  savedROMNote.hidden=!savedROM;
+  ui.set(savedROMNote,"builder.build.saved_rom",{path:savedROM});
+  ui.set(build,install.canLaunch?"builder.build.rebuild_game":"builder.nav.build_game");
+  applyBuildFreshness(install,building);
   playBox.hidden=!install.canLaunch||building;
   playButton.disabled=building||launching;
   dockLaunch.hidden=!install.canLaunch||building;
@@ -893,7 +920,7 @@ function applyMode(data){
   canLaunch=!!install.canLaunch&&!building;
   homePrimary.disabled=closed||building||launching||(!canLaunch&&!install.canRebuild);
   ui.set(homePrimary,building?"builder.home.building":canLaunch?"builder.home.play":"builder.home.build");
-  ui.set(document.querySelector("#home-game-note"),building?"builder.home.while_building":canLaunch?"builder.home.ready":install.canRebuild?"builder.home.rom":"builder.home.unusable");
+  ui.set(document.querySelector("#home-game-note"),building?"builder.home.while_building":canLaunch?(install.build?.state==="current"?"builder.version.current":"builder.home.ready"):install.canRebuild?"builder.home.rom":"builder.home.unusable");
   ui.set(document.querySelector("#build-nav-label"),canLaunch?"builder.nav.build":"builder.nav.build_game");
   lastMode=mode;
 }
@@ -1073,9 +1100,15 @@ async function refresh(){
   if(polling) setTimeout(refresh,500);
 }
 
-form.addEventListener("submit",async event=>{
-  event.preventDefault();
-  if(!document.querySelector("#rom").files.length) return;
+async function startGameBuild(reuseSaved=false){
+  if(closed||buildSubmitting||lastSceneBuildState==="building")return false;
+  if(!savedROM&&(reuseSaved||!romInput.files.length)){
+    selectTab(buildTab);romInput.focus();return false;
+  }
+  const payload=new FormData(form);
+  if(reuseSaved||!romInput.files.length){payload.delete("rom");payload.set("reuseROM","true");}
+  buildSubmitting=true;
+  selectTab(buildTab);
   build.disabled=true; launch.disabled=true; ui.unbind(log); log.textContent=ui.text("builder.build.preparing");
   showKey("building","builder.build.starting");
   steps.forEach(step=>step.removeAttribute("data-state"));
@@ -1084,9 +1117,38 @@ form.addEventListener("submit",async event=>{
   dock.dataset.kind="building"; dock.dataset.open="true";
   ui.set(dockPhase,"builder.build.preparing_rom"); dockPct.textContent="…"; track.hidden=false; dockLaunch.hidden=true;
   track.removeAttribute("aria-valuenow");
-  try { await responseJSON(await fetchResponse("build",{method:"POST",body:new FormData(form)})); polling=true; refresh(); }
-  catch(error){ showKey("failed","builder.request_failed",{detail:error.message},error,"Start game build"); build.disabled=false; announce("failed"); }
+  try {
+    await responseJSON(await fetchResponse("build",{method:"POST",body:payload}));
+    applyMode({...latestModeData,state:"building"});
+    polling=true;refresh();return true;
+  }
+  catch(error){
+    showKey("failed","builder.request_failed",{detail:error.message},error,"Start game build");
+    build.disabled=false;announce("failed");
+    if(error.code==="builder.build.saved_rom_missing")applyMode({...latestModeData,rebuildROM:""});
+    return false; // Never silently retry a build after a network failure.
+  }
+  finally {buildSubmitting=false;}
+}
+form.addEventListener("submit",async event=>{
+  event.preventDefault();
+  await startGameBuild();
 });
+
+const staleBuildDialog=document.querySelector("#stale-build-dialog");
+let pendingStalePlay=null;
+function finishStalePlay(action){
+  const resolve=pendingStalePlay;
+  pendingStalePlay=null;
+  staleBuildDialog.close();
+  resolve?.(action);
+}
+document.querySelector("#stale-build-cancel").addEventListener("click",()=>finishStalePlay("cancel"));
+document.querySelector("#stale-build-play").addEventListener("click",()=>finishStalePlay("play"));
+document.querySelector("#stale-build-review").addEventListener("click",()=>finishStalePlay("rebuild"));
+staleBuildDialog.addEventListener("cancel",event=>{event.preventDefault();finishStalePlay("cancel");});
+staleBuildDialog.addEventListener("close",()=>{const resolve=pendingStalePlay;pendingStalePlay=null;resolve?.("cancel");});
+document.addEventListener("workshop:closed",()=>{if(pendingStalePlay)finishStalePlay("cancel");});
 
 async function doLaunch(){
   if(closed||launching) return;
@@ -1094,10 +1156,41 @@ async function doLaunch(){
   const buttons=[homePrimary,playButton,launch,dockLaunch];
   const previous=buttons.map(button=>button.disabled);
   buttons.forEach(button=>button.disabled=true);
-  showKey("idle","builder.build.launching");
-  try { await responseJSON(await fetchResponse("launch",{method:"POST"})); showKey("succeeded","builder.build.launched"); }
+  let launchStatus=null;
+  try {
+    // Recheck on the click: the game or Builder may have changed since the
+    // initial page load. All Play buttons share this path, including the dock.
+    const data=await responseJSON(await fetchResponse("status",{cache:"no-store"}));
+    if(closed)return;
+    launchStatus=data;
+    applyMode(data);
+    const info=data.install||{}, state=info.build?.state||"unknown";
+    if(info.canLaunch&&state!=="current"&&state!=="unavailable"){
+      document.querySelector("#stale-build-review").hidden=!info.canRebuild;
+      ui.set(document.querySelector("#stale-build-review"),savedROM?"builder.version.rebuild_now":"builder.version.review");
+      const action=await new Promise(resolve=>{pendingStalePlay=resolve;staleBuildDialog.showModal();});
+      if(action==="rebuild"){
+        if(savedROM){
+          await startGameBuild(true);
+        }else selectTab(buildTab);
+        return;
+      }
+      if(action!=="play"||closed)return;
+    }
+    if(closed)return;
+    showKey("idle","builder.build.launching");
+    await responseJSON(await fetchResponse("launch",{method:"POST"}));
+    showKey("succeeded","builder.build.launched");
+  }
   catch(error){ showKey("failed","builder.request_failed",{detail:error.message},error,"Launch game"); }
-  finally { launching=false; if(!closed) buttons.forEach((button,i)=>button.disabled=previous[i]); }
+  finally {
+    pendingStalePlay=null;
+    launching=false;
+    if(!closed){
+      if(launchStatus){const current=latestModeData||launchStatus;applyMode(current);launch.disabled=!current.install?.canLaunch||current.state==="building";}
+      else buttons.forEach((button,i)=>button.disabled=previous[i]);
+    }
+  }
 }
 launch.addEventListener("click",doLaunch);
 dockLaunch.addEventListener("click",doLaunch);

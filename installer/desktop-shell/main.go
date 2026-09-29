@@ -13,6 +13,7 @@ import (
 
 	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/host"
 	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/winbundle"
+	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -74,7 +75,7 @@ func runDesktop() error {
 		AssetServer:      &assetserver.Options{Handler: bridge}, Menu: appMenu,
 		// WebKit uses GLib's program name for its default on-disk profile.
 		// It must not create the global build workspace before PrepareSession owns it.
-		Linux:   &linux.Options{ProgramName: host.Name + "WebView", WebviewGpuPolicy: linux.WebviewGpuPolicyOnDemand},
+		Linux:   &linux.Options{ProgramName: host.Name + "WebView", WebviewGpuPolicy: linux.WebviewGpuPolicyOnDemand, Icon: appicons.Builder.PNG(256)},
 		Windows: winOptions,
 		OnDomReady: func(appctx context.Context) {
 			splash.Handoff()

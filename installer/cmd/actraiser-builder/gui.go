@@ -104,6 +104,7 @@ func runGUI(args []string) error {
 		}
 	}
 	fmt.Fprintf(os.Stdout, "Build inputs: %s\nBuild workspace: %s\nGame output: %s\n", root, values.buildWorkspace, outputDir)
+	buildChecker := &gameBuildChecker{outputDir: outputDir, inputID: bundledBuildID(root, values.inputID), version: version}
 	return builder.Run(context.Background(), builder.Options{
 		Title:           "ActRaiser Recomp Builder",
 		Version:         version,
@@ -126,6 +127,9 @@ func runGUI(args []string) error {
 		// the two file sets and why they differ.
 		Detect: func() builder.InstallState {
 			state := detectInstallState(root, outputDir)
+			if state.CanLaunch {
+				state.Build = buildChecker.Check(state.Result.BinaryPath)
+			}
 			if values.buildWorkspace != "" {
 				state.CanSlim = false
 			}

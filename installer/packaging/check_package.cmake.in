@@ -61,6 +61,18 @@ foreach(_package IN LISTS CPACK_PACKAGE_FILES)
     endif()
     list(GET _roots 0 _root)
 
+    # Generic Linux archives do not have the desktop payload manifest. Their
+    # staged input identity is required for installed-game freshness checks.
+    if(NOT EXISTS "${_root}/utils/build-inputs.sha256")
+        message(FATAL_ERROR "builder identity check: ${_package} has no build-inputs.sha256")
+    endif()
+    file(READ "${_root}/utils/build-inputs.sha256" _build_identity LIMIT 128)
+    string(STRIP "${_build_identity}" _build_identity)
+    string(LENGTH "${_build_identity}" _build_identity_length)
+    if(NOT _build_identity_length EQUAL 64 OR NOT _build_identity MATCHES "^[0-9a-f]+$")
+        message(FATAL_ERROR "builder identity check: ${_package} has an invalid build-inputs.sha256")
+    endif()
+
     # Distribution bundles consume the runner as a target-keyed binary SDK.
     # Shipping implementation sources would silently restore the slower,
     # host-dependent source fallback and make cross-target releases differ.

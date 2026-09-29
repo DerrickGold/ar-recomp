@@ -12,6 +12,7 @@ import (
 	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/host"
 	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/linuxbundle"
 	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/linuxsdk"
+	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
 )
 
 func packageLinux(source, shell, output, sdkRoot, glibcMax string) error {
@@ -89,6 +90,9 @@ func packageLinux(source, shell, output, sdkRoot, glibcMax string) error {
 	}
 	fmt.Printf("Linux ABI audit: %d ELF programs/libraries; maximum required GLIBC_%s\n", len(audit.Files), audit.MaximumGLIBC)
 	result := app
+	if err := appicons.Builder.ValidateAppDir(app); err != nil {
+		return err
+	}
 	if filepath.Ext(output) == ".AppImage" {
 		tools := filepath.Join(source, "utils/tools")
 		result = filepath.Join(stage, host.Name+".AppImage")

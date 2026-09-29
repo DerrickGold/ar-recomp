@@ -1,0 +1,5 @@
+# Original application artwork and generated exports are release inputs,
+# unlike the ROM-derived screenshots excluded by the repository-wide rule.
+!originals/*.png
+!assets/builder/*.png
+!assets/game/*.png

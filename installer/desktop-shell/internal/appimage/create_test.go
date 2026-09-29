@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
 )
 
 func fixtureRuntime(t *testing.T, path string, machine elf.Machine) []byte {
@@ -35,6 +37,12 @@ func TestNativeSquashFSRoundTrip(t *testing.T) {
 	if err := os.Mkdir(app, 0755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(app, "ActRaiserRecompBuilder.desktop"), []byte("[Desktop Entry]\nIcon=ActRaiserRecompBuilder\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := appicons.Builder.WriteAppDir(app); err != nil {
+		t.Fatal(err)
+	}
 	payload := []byte("offline payload\n")
 	if err := os.WriteFile(filepath.Join(app, "data"), payload, 0644); err != nil {
 		t.Fatal(err)
@@ -55,6 +63,12 @@ func TestNativeSquashFSRoundTrip(t *testing.T) {
 	contents, err := exec.Command("unsquashfs", "-o", "64", "-cat", out, "data").Output()
 	if err != nil || !bytes.Equal(contents, payload) {
 		t.Fatalf("native extraction: %q, %v", contents, err)
+	}
+	for _, name := range []string{".DirIcon", "ActRaiserRecompBuilder.png", "usr/share/icons/hicolor/256x256/apps/ActRaiserRecompBuilder.png"} {
+		contents, err := exec.Command("unsquashfs", "-o", "64", "-cat", out, name).Output()
+		if err != nil || !bytes.Equal(contents, appicons.Builder.PNG(256)) {
+			t.Fatalf("packaged icon %s: %v", name, err)
+		}
 	}
 	unchanged, _ := os.ReadFile(runtime)
 	if !bytes.Equal(unchanged, original) {

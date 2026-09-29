@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
 )
 
 // Explicit acceptance must fail, not silently skip, when the Linux host or
@@ -229,7 +231,7 @@ func TestAppImageAcceptance(t *testing.T) {
 			absent(t, filepath.Join(resources, leaf))
 		}
 		run(t, caller, "desktop-file-validate", nil, filepath.Join(appDir, Name+".desktop"))
-		if _, err := os.Stat(filepath.Join(appDir, ".DirIcon")); err != nil {
+		if err := appicons.Game.ValidateAppDir(appDir); err != nil {
 			t.Fatalf("finished AppImage has no usable .DirIcon: %v", err)
 		}
 		before := appImageTreeHashes(t, appDir)

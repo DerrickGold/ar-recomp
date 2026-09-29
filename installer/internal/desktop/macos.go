@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
 )
 
 type machoInfo struct{ imports, rpaths []string }
@@ -166,6 +168,9 @@ func packageMacOS(ctx context.Context, options PackageOptions, app, bin, librari
 	if err := atomicWrite(filepath.Join(app, "Contents", "Info.plist"), []byte(macOSPlist(options.Version)), 0644); err != nil {
 		return err
 	}
+	if err := atomicWrite(filepath.Join(app, "Contents", "Resources", Name+".icns"), appicons.Game.ICNS(), 0644); err != nil {
+		return err
+	}
 	var code []string
 	for leaf := range installed {
 		code = append(code, filepath.Join(libraries, leaf))
@@ -226,6 +231,7 @@ func macOSPlist(version string) string {
 <key>CFBundleExecutable</key><string>actraiser-builder</string>
 <key>CFBundleIdentifier</key><string>org.actraiser-recomp.ActRaiserRecomp</string>
 <key>CFBundleName</key><string>ActRaiserRecomp</string>
+<key>CFBundleIconFile</key><string>ActRaiserRecomp.icns</string>
 <key>CFBundleDisplayName</key><string>ActRaiser Recomp</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>1.0.0</string>

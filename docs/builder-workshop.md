@@ -25,6 +25,46 @@ changes it for the next launch only: finish or save your work, then close and
 reopen the Builder. Changing folders does not move or copy the previous game.
 The generic Linux browser launcher keeps its existing output/command-line flow.
 
+After opening a game folder, the Builder checks whether the game matches the
+release **bundled with this Builder**. This is an offline comparison, not an
+online check for newer releases. Home confirms a matching build. **Rebuild
+recommended** appears when the release inputs differ, or when an older install
+has no verifiable build record. When the previously saved ROM is readable,
+**Rebuild now** applies the bundled changes in one click. Otherwise **Review
+rebuild** opens Build & play so you can select your ROM again. Saves, settings,
+language packs and custom assets are preserved.
+
+You can still play the existing game. Pressing any Play button on a stale or
+unverifiable build explains that this Builder's changes will not apply until
+you rebuild; choose **Play existing build**, **Rebuild now** (or **Review rebuild**
+if the ROM is missing), or **Cancel**. Matching builds launch without that prompt.
+
+The Builder keeps the ROM selected for a build as `user-rom.sfc` in the game
+data folder. Build & play shows this saved path, and **Rebuild game** reuses it
+without opening a file picker. Selecting another ROM replaces that copy. The
+original file-picker location is not needed, and moving the entire game folder
+keeps one-click rebuild working. Existing `game.sfc` installs are also recognized,
+including the older generic bundle layout. Missing, unreadable or invalid ROMs
+produce an error; missing copies require selecting the ROM again.
+
+Every Builder build starts with empty temporary directories for generated code,
+object files and Zig compiler caches, even when rebuilding the same release.
+Those per-attempt files are removed after success or failure. The compiler SDK,
+bundled runtime libraries, installed game and player data are not cache-cleanup
+targets. Older caches and interrupted attempts are not reused or automatically
+deleted; if cleanup fails, the build log identifies the leftover directory.
+This applies to desktop Builders and the generic Linux Builder, not ordinary
+developer CMake builds. Clean rebuilds may take longer than incremental builds.
+
+Successful builds write `.actraiser-build.json` in the game output folder. Keep
+it with the game when moving the folder. It records the bundled input identity,
+Builder version and executable checksum, not personal data or absolute paths.
+Failed/cancelled builds do not update it. Missing, invalid or mismatched records
+conservatively recommend rebuilding rather than claiming the game is current.
+Version labels alone are not trusted: two builds labelled `dev` or `dirty` can
+contain different code. Developer/older generic Builders without a release
+identity report that comparison is unavailable; use a current release Builder.
+
 **Interface language** in the sidebar selects English, French, German or
 Japanese independently of game text and of the locale you are translating.
 European English uses English. The preference is saved in
@@ -253,3 +293,15 @@ still, including when Animated is selected. Switching menus continues the same
 scene; hiding the browser tab pauses it until you return. **Scene off** hides
 both the background and Home preview. Scenery and motion choices are remembered
 for this browser session only; they do not alter game settings.
+
+## Application icons
+
+The Builder uses an original 16-bit-style floating-temple icon; the game uses
+an original sword. Neither contains ROM-derived graphics. The same artwork is
+embedded in Windows executable resources, macOS app bundles, and Linux
+AppImages/desktop icons. AppImage packaging explicitly includes and validates
+the required `.DirIcon`, including when packaging on macOS.
+
+Masters, platform exports, generation prompts, and the maintainer-only export
+command are documented in [Application icons](../installer/internal/appicons/README.md).
+Player builds use the embedded exports and need no extra image tools.

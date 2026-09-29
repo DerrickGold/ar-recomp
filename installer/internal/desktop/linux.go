@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
 )
 
 func linuxArchitecture() string {
@@ -72,8 +74,7 @@ func packageLinux(ctx context.Context, options PackageOptions, app, bin, librari
 	if err := atomicWrite(filepath.Join(app, Name+".desktop"), []byte("[Desktop Entry]\nType=Application\nName=ActRaiser Recomp\nExec=actraiser-builder app-launch\nIcon=ActRaiserRecomp\nCategories=Game;\nTerminal=false\n"), 0644); err != nil {
 		return err
 	}
-	// A source-native icon avoids adding a new raster asset or copied retail art.
-	return atomicWrite(filepath.Join(app, Name+".svg"), []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect width="256" height="256" rx="48" fill="#172940"/><path d="M128 32 44 210h38l16-38h60l16 38h38L128 32zm0 78 18 42h-36z" fill="#e2c077"/></svg>`), 0644)
+	return appicons.Game.WriteAppDir(app)
 }
 
 func inspectLinuxBinary(path string) ([]string, error) {

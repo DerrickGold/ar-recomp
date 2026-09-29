@@ -621,6 +621,21 @@ input[type=checkbox] {
   border-radius:6px;
   margin:20px 0
 }
+.game-version-notice { display:flex; align-items:center; gap:20px; width:calc(100% - 80px); max-width:1360px; margin:20px auto; background:var(--panel); }
+.game-version-notice > div { flex:1; min-width:0; }
+.game-version-notice p { margin:6px 0; }
+.game-version-notice small { overflow-wrap:anywhere; }
+.game-version-notice > button { flex-shrink:0; }
+#saved-rom-note { overflow-wrap:anywhere; }
+#stale-build-dialog { width:min(560px,calc(100vw - 40px)); max-height:85vh; overflow:auto; border:1px solid var(--line); border-radius:12px; padding:24px; background:var(--panel); color:var(--ink); box-shadow:0 24px 80px #0009; }
+#stale-build-dialog::backdrop { background:#0009; }
+#stale-build-dialog .dialog-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; }
+@media (max-width:700px) {
+  .game-version-notice { align-items:flex-start; flex-direction:column; gap:12px; }
+}
+@media (max-width:1100px) { .game-version-notice { width:calc(100% - 56px); } }
+@media (max-width:800px) { .game-version-notice { width:calc(100% - 48px); } }
+@media (max-width:600px) { .game-version-notice { width:calc(100% - 36px); } }
 .notice strong {
   display:block;
   color:var(--ink)

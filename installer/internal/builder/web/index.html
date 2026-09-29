@@ -41,6 +41,10 @@
 
 <main id="workspace" tabindex="-1">
   <header class="workspace-bar"><div id="dock" data-open="false" data-kind="idle"><span id="workspace-status" class="status-badge" role="status" data-i18n="builder.checking">Checking installation…</span><span id="track" role="progressbar" aria-label="Build progress" data-i18n-aria="builder.progress" aria-valuemin="0" aria-valuemax="100" hidden><span id="dock-pct" aria-hidden="true">0%</span></span><button id="dock-error" class="secondary" type="button" hidden data-i18n="builder.feedback.view">View error details</button><button id="dock-launch" type="button" hidden disabled data-i18n="builder.run">▶ Run game</button></div></header>
+  <section id="game-version-notice" class="notice game-version-notice" aria-labelledby="game-version-title" role="status" hidden>
+    <div><strong id="game-version-title"></strong><p id="game-version-help"></p><small id="game-version-labels"></small></div>
+    <button id="game-version-rebuild" class="secondary" type="button" data-i18n="builder.version.review">Review rebuild</button>
+  </section>
   <section class="panel" id="panel-home" role="tabpanel" aria-labelledby="tab-home">
     <div class="home-hero">
       <div class="hero-copy"><h1 data-i18n="builder.home.title">Shape the land.&#10;Make it yours.</h1><p class="lede" data-i18n="builder.home.intro">Build ActRaiser, give its people a new voice, and tune the adventure to your liking.</p><div class="actions"><button id="home-primary" type="button" disabled data-i18n="builder.home.checking">Checking your game…</button></div><p id="home-game-note" class="muted" data-i18n="builder.home.rom">Choose your US ActRaiser ROM to build the game.</p></div>
@@ -98,6 +102,7 @@
       <form id="build-form">
         <label for="rom" id="rom-label" data-i18n="builder.build.rom_label">ActRaiser ROM (.sfc or .smc)</label>
         <input id="rom" name="rom" type="file" accept=".sfc,.smc" required>
+        <p id="saved-rom-note" class="muted" role="status" hidden></p>
         <div class="actions">
           <button id="build" type="submit" data-i18n="builder.nav.build_game">Build game</button>
           <button id="launch" class="secondary" type="button" disabled data-i18n="builder.build.launch">Launch game</button>
@@ -235,6 +240,16 @@
 </main>
 
 <script src="builder/scene.js" type="module"></script>
+<dialog id="stale-build-dialog" aria-labelledby="stale-build-title" aria-describedby="stale-build-help">
+  <h2 id="stale-build-title" data-i18n="builder.version.play_title">Play without rebuilding?</h2>
+  <p id="stale-build-help" data-i18n="builder.version.play_help">Playing now uses your existing game build. Changes bundled with this Builder will not be applied until you rebuild. Your saves and settings are kept when rebuilding.</p>
+  <div class="dialog-actions">
+    <button id="stale-build-cancel" class="quiet" type="button" autofocus data-i18n="common.cancel">Cancel</button>
+    <button id="stale-build-play" class="secondary" type="button" data-i18n="builder.version.play_existing">Play existing build</button>
+    <button id="stale-build-review" type="button" data-i18n="builder.version.review">Review rebuild</button>
+  </div>
+</dialog>
+
 <dialog id="import-install" aria-labelledby="import-install-title">
   <h2 id="import-install-title" data-i18n="builder.import.title">Import from another installation</h2>
   <p data-i18n="builder.import.help">Import saves, settings, Workshop preferences, and custom assets. Originals stay untouched. Existing user files win; untouched shipped assets may be replaced. ROMs and build tools are not copied.</p>

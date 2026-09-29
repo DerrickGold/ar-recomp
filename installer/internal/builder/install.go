@@ -29,6 +29,9 @@ package builder
 
 // InstallState is the GUI's view of what this copy of the bundle can do.
 type InstallState struct {
+	// Build identifies whether the playable game matches this Builder's bundled
+	// inputs. It is advisory and never changes launch/rebuild capabilities.
+	Build BuildFreshness `json:"build"`
 	// CanLaunch is true when a previously built game is present and runnable.
 	CanLaunch bool `json:"canLaunch"`
 	// CanRebuild is true when every input a rebuild needs is present.
@@ -45,6 +48,13 @@ type InstallState struct {
 	// needs an OutputPath, and without a build in this process there is no
 	// other way to obtain one.
 	Result Result `json:"result"`
+}
+
+type BuildFreshness struct {
+	State          string `json:"state"` // current, rebuild, unknown, or unavailable
+	Reason         string `json:"reason,omitempty"`
+	BuiltVersion   string `json:"builtVersion,omitempty"`
+	BuilderVersion string `json:"builderVersion,omitempty"`
 }
 
 // mode names the shape the page should take. Derived rather than stored so the

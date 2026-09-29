@@ -11,9 +11,13 @@ import (
 	"strings"
 
 	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/linuxsdk"
+	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
 )
 
 func Create(appdir, runtimeFile, output, arch string) error {
+	if err := appicons.Builder.ValidateAppDir(appdir); err != nil {
+		return err
+	}
 	actual, err := linuxsdk.ELFArchitecture(runtimeFile)
 	if err != nil {
 		return err

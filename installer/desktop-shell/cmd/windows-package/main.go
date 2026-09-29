@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/winbundle"
+	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
 )
 
 func main() {
@@ -48,7 +49,18 @@ func run() error {
 		if !ok {
 			return fmt.Errorf("no WebView2 pin for %s", *arch)
 		}
-		if err = winbundle.Create(winbundle.Options{Shell: *shell, Payload: *payload, WebView: *runtimeDir, Output: *output, Arch: *arch, Runtime: pin}); err != nil {
+		// Add the Explorer/window icon before the self-contained ZIP is appended.
+		// Keep the input shell untouched, and sign only the finished package.
+		stage, err := os.MkdirTemp("", "builder-icon-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(stage)
+		iconShell := filepath.Join(stage, "Builder.exe")
+		if err = writeIconShell(*shell, iconShell); err != nil {
+			return err
+		}
+		if err = winbundle.Create(winbundle.Options{Shell: iconShell, Payload: *payload, WebView: *runtimeDir, Output: *output, Arch: *arch, Runtime: pin}); err != nil {
 			return err
 		}
 		fmt.Println(*output)
@@ -78,4 +90,38 @@ func run() error {
 		}
 	}
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{"schema": a.Manifest.Schema, "arch": a.Manifest.Arch, "archiveSha256": a.ID, "webview": a.Manifest.WebView, "files": len(a.Manifest.Files)})
+}
+
+func writeIconShell(source, destination string) error {
+	if bundle, err := winbundle.Open(source); err == nil {
+		bundle.Close()
+		return fmt.Errorf("icon input is already packaged")
+	} else if err != winbundle.ErrNoBundle {
+		return err
+	}
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	_, _, end, err := winbundle.PEInfo(in, info.Size())
+	if err != nil {
+		return err
+	}
+	if end != info.Size() {
+		return fmt.Errorf("icon input must be an unsigned, unpackaged shell")
+	}
+	out, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0755)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if err = appicons.Builder.WriteEXE(out, in); err != nil {
+		return err
+	}
+	return out.Close()
 }

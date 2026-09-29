@@ -13,6 +13,7 @@ import (
 	"runtime"
 
 	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/host"
+	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
 )
 
 func main() {
@@ -134,6 +135,7 @@ func run() error {
 <key>CFBundleExecutable</key><string>ActRaiserRecompBuilder</string>
 <key>CFBundleIdentifier</key><string>org.actraiserrecomp.builder</string>
 <key>CFBundleName</key><string>ActRaiser Recomp Builder</string>
+<key>CFBundleIconFile</key><string>ActRaiserRecompBuilder.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.1.0</string>
 <key>CFBundleVersion</key><string>1</string>
@@ -142,6 +144,9 @@ func run() error {
 </dict></plist>
 `
 	if err = os.WriteFile(filepath.Join(app, "Contents", "Info.plist"), []byte(plist), 0644); err != nil {
+		return err
+	}
+	if err = os.WriteFile(filepath.Join(app, "Contents", "Resources", host.Name+".icns"), appicons.Builder.ICNS(), 0644); err != nil {
 		return err
 	}
 	cmd := exec.Command("/usr/bin/codesign", "--force", "--sign", "-", "--timestamp=none", app)

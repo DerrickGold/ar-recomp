@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,48 +107,28 @@ func readMarker(root, name string) ([]byte, error) {
 	return os.ReadFile(filepath.Join(root, name))
 }
 
-// Scratch keys derived files on BOTH the verified payload contents and ROM.
-// A release upgrade never reuses an older release's objects or generated code.
-func Scratch(workspace, inputID, rom string) (string, error) {
-	if !ValidID(inputID) {
-		return "", errors.New("invalid bundled input identity")
+// Scratch creates an empty, per-attempt directory. Even a rebuild using the
+// same release/ROM cannot reuse generated code, objects or compiler caches.
+// Only the returned directory is disposable; legacy workspaces and older
+// caches are never traversed or deleted. An empty workspace uses the OS temp
+// directory for the generic Builder, keeping source checkouts untouched.
+func Scratch(workspace string) (string, error) {
+	if workspace == "" {
+		return os.MkdirTemp("", "actraiser-build-")
 	}
 	if err := Prepare(workspace); err != nil {
 		return "", err
 	}
-	f, err := os.Open(rom)
+	parent := filepath.Join(workspace, "build")
+	if err := os.Mkdir(parent, 0700); err != nil && !os.IsExist(err) {
+		return "", err
+	}
+	info, err := os.Lstat(parent)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("build scratch must not contain symlinks or non-directories")
 	}
-	path := workspace
-	for _, leaf := range []string{"build", inputID, hex.EncodeToString(h.Sum(nil))} {
-		path = filepath.Join(path, leaf)
-		if err := os.Mkdir(path, 0700); err != nil && !os.IsExist(err) {
-			return "", err
-		}
-		info, err := os.Lstat(path)
-		if err != nil {
-			return "", err
-		}
-		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return "", errors.New("build scratch must not contain symlinks or non-directories")
-		}
-	}
-	// These are the only top-level outputs passed to the native tools. Refuse
-	// pre-existing redirects before regeneration (not just before compiling).
-	for _, leaf := range []string{"generated", "include", "objects", "toolchain", "zig-global", "zig-local", "metadata.json", "rts.txt", "rts.previous.txt", "include/funcs.h"} {
-		info, err := os.Lstat(filepath.Join(path, filepath.FromSlash(leaf)))
-		if err != nil && !os.IsNotExist(err) {
-			return "", err
-		}
-		if err == nil && info.Mode()&os.ModeSymlink != 0 {
-			return "", fmt.Errorf("build scratch output must not be a symlink: %s", leaf)
-		}
-	}
-	return path, nil
+	return os.MkdirTemp(parent, "run-")
 }

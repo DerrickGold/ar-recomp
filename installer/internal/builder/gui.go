@@ -241,6 +241,9 @@ type status struct {
 	// Independent of compilation: extraction publishes the source first.
 	LocalizationReady bool   `json:"localizationReady"`
 	LocalizationError string `json:"localizationError,omitempty"`
+	// RebuildROM names the existing local copy; no browser-supplied filesystem
+	// path is trusted and the original file-picker location is not needed.
+	RebuildROM string `json:"rebuildROM,omitempty"`
 }
 
 type application struct {
@@ -520,6 +523,7 @@ func (app *application) writeStatus(response http.ResponseWriter) {
 	app.mu.Unlock()
 	current.Mode = app.pageMode(current.Install)
 	current.LocalizationReady, current.LocalizationError = app.localizationAvailability()
+	current.RebuildROM, _ = reusableBuildROM(app.options.ProjectRoot)
 	// Only offered while a cleanup is actually possible: no Slim hook means no
 	// offer, and an already-lean install has nothing left to remove.
 	if app.options.Slim != nil && current.Install.CanSlim {
@@ -574,20 +578,35 @@ func (app *application) startBuild(response http.ResponseWriter, request *http.R
 		app.rejectBuild(response, "could not read the selected ROM")
 		return
 	}
+	defer request.MultipartForm.RemoveAll()
 	input, header, err := request.FormFile("rom")
-	if err != nil {
-		app.rejectBuild(response, "select a .sfc or .smc ROM")
-		return
-	}
-	defer input.Close()
-	if !validROMName(header.Filename) {
-		app.rejectBuild(response, "the selected file must end in .sfc or .smc")
-		return
-	}
-	romPath, err := storeROM(app.options.ProjectRoot, input)
-	if err != nil {
-		app.rejectBuild(response, err.Error())
-		return
+	var romPath string
+	if errors.Is(err, http.ErrMissingFile) && request.FormValue("reuseROM") == "true" {
+		romPath, err = reusableBuildROM(app.options.ProjectRoot)
+		if err != nil {
+			app.mu.Lock()
+			app.state = "idle"
+			app.mu.Unlock()
+			writeJSON(response, http.StatusBadRequest, map[string]string{
+				"error": err.Error(), "errorCode": "builder.build.saved_rom_missing",
+			})
+			return
+		}
+	} else {
+		if err != nil {
+			app.rejectBuild(response, "select a .sfc or .smc ROM")
+			return
+		}
+		defer input.Close()
+		if !validROMName(header.Filename) {
+			app.rejectBuild(response, "the selected file must end in .sfc or .smc")
+			return
+		}
+		romPath, err = storeROM(app.options.ProjectRoot, input)
+		if err != nil {
+			app.rejectBuild(response, err.Error())
+			return
+		}
 	}
 
 	writeJSON(response, http.StatusAccepted, map[string]string{"state": "building"})

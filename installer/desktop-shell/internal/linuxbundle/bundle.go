@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/DerrickGold/ar-recomp/installer/desktop-shell/internal/linuxsdk"
+	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
 )
 
 const name = "ActRaiserRecompBuilder"
@@ -565,8 +566,7 @@ cd "$APPDIR/usr"
 	if err := os.WriteFile(filepath.Join(root, name+".desktop"), []byte(desktop), 0644); err != nil {
 		return err
 	}
-	icon := `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect width="256" height="256" rx="48" fill="#181b24"/><path d="M48 184 108 56h40l60 128h-40l-12-28H100l-12 28zm64-60h32l-16-40z" fill="#edcd83"/></svg>`
-	return os.WriteFile(filepath.Join(root, name+".svg"), []byte(icon), 0644)
+	return appicons.Builder.WriteAppDir(root)
 }
 
 // CopyPayload copies only a prevalidated clean staged payload, rejecting links.

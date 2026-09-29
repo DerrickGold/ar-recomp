@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/DerrickGold/ar-recomp/installer/internal/appicons"
 	"github.com/DerrickGold/ar-recomp/installer/internal/builder"
 	"github.com/DerrickGold/ar-recomp/installer/internal/buildworkspace"
 	"github.com/DerrickGold/ar-recomp/installer/internal/desktop"
@@ -43,6 +44,11 @@ type commandResult struct {
 }
 
 func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath string, output io.Writer) (builder.Result, error) {
+	result, err := buildGameFromGUI(ctx, values, root, outputDir, romPath, output)
+	return completeGameBuild(ctx, root, outputDir, values.inputID, result, err)
+}
+
+func buildGameFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath string, output io.Writer) (builder.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return builder.Result{}, err
 	}
@@ -50,8 +56,6 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 	if values.standaloneOutput {
 		dataRoot = outputDir
 	}
-	var scratch string
-	var environment []string
 	if values.buildWorkspace != "" {
 		if !values.standaloneOutput {
 			return builder.Result{}, errors.New("bundled builds require a standalone game output")
@@ -59,14 +63,23 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 		if err := buildworkspace.Separate(root, values.buildWorkspace, outputDir); err != nil {
 			return builder.Result{}, err
 		}
-		var err error
-		scratch, err = buildworkspace.Scratch(values.buildWorkspace, values.inputID, romPath)
-		if err != nil {
-			return builder.Result{}, err
+		if !buildworkspace.ValidID(values.inputID) {
+			return builder.Result{}, errors.New("invalid bundled input identity")
 		}
-		environment = append(os.Environ(), "ZIG_GLOBAL_CACHE_DIR="+filepath.Join(scratch, "zig-global"), "ZIG_LOCAL_CACHE_DIR="+filepath.Join(scratch, "zig-local"))
-		fmt.Fprintf(output, "Bundled inputs: %s\nPrivate build scratch: %s\n", root, scratch)
 	}
+	scratch, err := buildworkspace.Scratch(values.buildWorkspace)
+	if err != nil {
+		return builder.Result{}, fmt.Errorf("prepare clean build directory: %w", err)
+	}
+	// scratch is a newly created directory owned by THIS attempt, never a
+	// source checkout, old workspace, shared compiler SDK or game directory.
+	defer func() {
+		if err := os.RemoveAll(scratch); err != nil {
+			fmt.Fprintf(output, "Warning: could not remove temporary build files at %s: %v\nThey will not be reused by later builds.\n", scratch, err)
+		}
+	}()
+	environment := cleanBuildEnvironment(scratch)
+	fmt.Fprintf(output, "Clean build: using new scratch directory %s\nNo previous generated code, object files or compiler caches will be reused.\n", scratch)
 	run := func(executable string, output io.Writer, args ...string) (commandResult, error) {
 		return runSnesbuildAt(ctx, executable, scratch, environment, output, args...)
 	}
@@ -87,11 +100,9 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 
 	regenArgs := []string{"regen", "--root", root, "--rom", romPath,
 		"--toolchain-dir", values.toolchainDir, "--jobs", fmt.Sprint(values.jobs)}
-	if scratch != "" {
-		regenArgs = append(regenArgs, "--out-dir", filepath.Join(scratch, "generated"), "--funcs-out", filepath.Join(scratch, "include", "funcs.h"), "--metadata-out", filepath.Join(scratch, "metadata.json"), "--rts-report", filepath.Join(scratch, "rts.txt"), "--rts-previous", filepath.Join(scratch, "rts.previous.txt"))
-		if err := os.MkdirAll(filepath.Join(scratch, "include"), 0700); err != nil {
-			return builder.Result{}, err
-		}
+	regenArgs = append(regenArgs, "--out-dir", filepath.Join(scratch, "generated"), "--funcs-out", filepath.Join(scratch, "include", "funcs.h"), "--metadata-out", filepath.Join(scratch, "metadata.json"), "--rts-report", filepath.Join(scratch, "rts.txt"), "--rts-previous", filepath.Join(scratch, "rts.previous.txt"))
+	if err := os.MkdirAll(filepath.Join(scratch, "include"), 0700); err != nil {
+		return builder.Result{}, err
 	}
 	if values.allowStubs {
 		regenArgs = append(regenArgs, "--allow-stubs")
@@ -99,7 +110,7 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 	if _, err := run(snesbuild, output, regenArgs...); err != nil {
 		return builder.Result{}, err
 	}
-	if scratch != "" {
+	if values.buildWorkspace != "" {
 		if _, err := run(snesbuild, output, "toolchain", "status", "--root", root, "--cache-dir", filepath.Join(scratch, "toolchain")); err != nil {
 			return builder.Result{}, fmt.Errorf("bundled compiler unavailable (no download attempted): %w", err)
 		}
@@ -112,8 +123,9 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 		"build", "--root", root, "--rom", romPath,
 		"--toolchain-dir", values.toolchainDir, "--jobs", fmt.Sprint(values.jobs),
 		"--optimize", values.optimize, "--hermetic", "--verbose"}
-	if scratch != "" {
-		buildArgs = append(buildArgs, "--generated-dir", filepath.Join(scratch, "generated"), "--funcs-header", filepath.Join(scratch, "include", "funcs.h"), "--build-dir", filepath.Join(scratch, "objects"), "--input-id", values.inputID)
+	buildArgs = append(buildArgs, "--generated-dir", filepath.Join(scratch, "generated"), "--funcs-header", filepath.Join(scratch, "include", "funcs.h"), "--build-dir", filepath.Join(scratch, "objects"))
+	if values.buildWorkspace != "" {
+		buildArgs = append(buildArgs, "--input-id", values.inputID)
 	}
 	buildResult, err := run(snesbuild, output, buildArgs...)
 	if err != nil {
@@ -123,7 +135,12 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 	if err != nil {
 		return builder.Result{}, err
 	}
-	if scratch != "" {
+	if runtime.GOOS == "windows" {
+		if err := appicons.Game.ApplyEXE(binary); err != nil {
+			return builder.Result{}, err
+		}
+	}
+	if values.buildWorkspace != "" {
 		return publishBundledGame(ctx, values, root, outputDir, romPath, binary, output)
 	}
 	installResult, err := runSnesbuild(ctx, snesbuild, output,
@@ -171,11 +188,27 @@ func buildFromGUI(ctx context.Context, values guiFlags, root, outputDir, romPath
 			fmt.Fprintf(output, "Previous application retained at %s\n", artifact.Backup)
 		}
 		launcher = artifact.Path
+		installedBinary = gameArtifactBinary(artifact.Path)
 	}
 	return builder.Result{
 		Message:    "Build complete — your playable game is ready.",
 		OutputPath: launcher, BinaryPath: installedBinary, WorkingDir: dataRoot,
 	}, nil
+}
+
+// Remove inherited cache overrides before setting our own. Environment keys
+// are case-insensitive on Windows; no caller-provided cache may inject objects
+// into a clean build. The compiler itself remains bundled/shared, not copied.
+func cleanBuildEnvironment(scratch string) []string {
+	var environment []string
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(key, "ZIG_GLOBAL_CACHE_DIR") || strings.EqualFold(key, "ZIG_LOCAL_CACHE_DIR") {
+			continue
+		}
+		environment = append(environment, entry)
+	}
+	return append(environment, "ZIG_GLOBAL_CACHE_DIR="+filepath.Join(scratch, "zig-global"), "ZIG_LOCAL_CACHE_DIR="+filepath.Join(scratch, "zig-local"))
 }
 
 // Publish a single player artifact. Legacy generic archives retain their
@@ -208,14 +241,17 @@ func publishBundledGame(ctx context.Context, values guiFlags, root, outputDir, r
 	if artifact.Backup != "" {
 		fmt.Fprintf(output, "Previous application retained at %s\n", artifact.Backup)
 	}
-	probe := artifact.Path
-	if strings.HasSuffix(probe, ".app") {
-		probe = filepath.Join(probe, "Contents", "MacOS", desktop.Name)
+	return builder.Result{Message: "Build complete — your playable game is ready.", OutputPath: artifact.Path, BinaryPath: gameArtifactBinary(artifact.Path), WorkingDir: outputDir}, nil
+}
+
+func gameArtifactBinary(artifact string) string {
+	if strings.HasSuffix(artifact, ".app") {
+		return filepath.Join(artifact, "Contents", "MacOS", desktop.Name)
 	}
-	if strings.HasSuffix(probe, ".AppDir") {
-		probe = filepath.Join(probe, "usr", "bin", desktop.Name)
+	if strings.HasSuffix(artifact, ".AppDir") {
+		return filepath.Join(artifact, "usr", "bin", desktop.Name)
 	}
-	return builder.Result{Message: "Build complete — your playable game is ready.", OutputPath: artifact.Path, BinaryPath: probe, WorkingDir: outputDir}, nil
+	return artifact
 }
 
 // Fetch fills a cache; it does not discover the compiler carried beside the
