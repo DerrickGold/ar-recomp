@@ -648,6 +648,12 @@ only for `SNESRECOMP_APU_AUDIT_PREFIX`; it is not a host API. The large SPC
 PC/write histograms are likewise pay-for-play through
 `SNESRECOMP_SPC_DIAGNOSTICS=1`.
 
+`SNESRECOMP_EDGE_DIGEST=<path>` subscribes an execution-sequence digest to the
+published runner's block, dispatch, interrupt, error and frame events and
+writes a per-host-frame SHA-256 checkpoint file for A/B comparison of two
+builds (record layout in `src/core/edge_digest.c`). Unset, it installs no
+subscription, so the event mask and the generated hot paths are unchanged.
+
 For bring-up, `SNESRECOMP_APU_AUDIT_PREFIX=<path>` enables the recorder and
 byte-level ARAM write provenance from APU reset onward. On ordinary runner
 teardown it writes `<path>.aram`, `.dsp`, `.written`, and `.audio.jsonl`.

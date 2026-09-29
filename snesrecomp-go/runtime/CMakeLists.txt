@@ -315,6 +315,15 @@ if(BUILD_TESTING)
     add_test(NAME snesrecomp_runtime_runtime_trace
         COMMAND snesrecomp_runtime_runtime_trace_test)
 
+    add_executable(snesrecomp_runtime_edge_digest_test
+        tests/edge_digest_test.c tests/apu_sync_stub.c)
+    target_compile_definitions(snesrecomp_runtime_edge_digest_test PRIVATE
+        EDGE_DIGEST_TEST_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(snesrecomp_runtime_edge_digest_test PRIVATE
+        snesrecomp_runtime)
+    add_test(NAME snesrecomp_runtime_edge_digest
+        COMMAND snesrecomp_runtime_edge_digest_test)
+
     add_executable(snesrecomp_runtime_util_test tests/util_test.c)
     target_link_libraries(snesrecomp_runtime_util_test PRIVATE
         snesrecomp_runtime)
@@ -482,6 +491,7 @@ if(BUILD_TESTING)
         snesrecomp_runtime_color_lut_test
         snesrecomp_runtime_audio_trace_test
         snesrecomp_runtime_runtime_trace_test
+        snesrecomp_runtime_edge_digest_test
         snesrecomp_runtime_util_test
         snesrecomp_runtime_launcher_test
         snesrecomp_runtime_keybinds_test

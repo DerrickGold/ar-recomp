@@ -84,6 +84,8 @@ static int ppu_service_unbind_count;
 static int ppu_frame_policy_count;
 static int trace_bind_count;
 static int trace_unbind_count;
+static int edge_digest_bind_count;
+static int edge_digest_unbind_count;
 static int draw_frame_count;
 static int initialization_context_valid = 1;
 static bool initialize_success = true;
@@ -151,6 +153,12 @@ void sr_trace_bind_runner(Snes *snes, int enabled) {
     (void)snes;
     if (enabled) ++trace_bind_count;
     else ++trace_unbind_count;
+}
+
+void sr_edge_digest_bind_runner(Snes *snes, int enabled) {
+    (void)snes;
+    if (enabled) ++edge_digest_bind_count;
+    else ++edge_digest_unbind_count;
 }
 
 static void check(int condition, const char *message) {
@@ -536,7 +544,8 @@ static void test_registration_and_initialization(void) {
           "runner ABI initial bind");
     check(cpu_provider_bind_count == 1 &&
               execution_provider_bind_count == 1 &&
-              ppu_service_bind_count == 1 && trace_bind_count == 1,
+              ppu_service_bind_count == 1 && trace_bind_count == 1 &&
+              edge_digest_bind_count == 1,
           "runner-owned service publication");
     check(reset_count == 1, "hard reset after ROM load");
     check(g_snes_cpu == &test_cpu && g_ppu == &test_ppu && g_dma == &test_dma,
@@ -692,7 +701,8 @@ static void test_registration_and_initialization(void) {
               execution_provider_unbind_count == 5 &&
               ppu_service_bind_count == 5 &&
               ppu_service_unbind_count == 5 &&
-              trace_bind_count == 5 && trace_unbind_count == 5,
+              trace_bind_count == 5 && trace_unbind_count == 5 &&
+              edge_digest_bind_count == 5 && edge_digest_unbind_count == 5,
           "runner-owned services are symmetrically revoked");
     SnesShutdown();
     check(free_count == 5, "repeated shutdown is harmless");

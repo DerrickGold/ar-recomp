@@ -150,6 +150,28 @@ classification. Build census runs without
 `SNESRECOMP_SEMANTIC_DISPATCH_TRACE`, which is reserved for lowering-neutral
 A/B edge hashes.
 
+To show that two builds of the same game execute the same control flow, set
+`SNESRECOMP_EDGE_DIGEST=<path>` on both and replay the same input. Every build
+carries the recorder; while the variable is unset it subscribes to nothing. It
+folds each executed block (PC, M/X/E flags, X, S, and the generated function's
+name), dynamic dispatch, interrupt, runtime error and frame boundary into a
+running SHA-256, and writes one checkpoint line per host frame with running
+counts, then `unbind` and `final` lines at shutdown:
+
+```text
+snesrecomp-edge-digest v1
+frame=0 blocks=65455 dispatches=0 interrupts=0 errors=0 boundaries=4 sha256=9bf3...
+```
+
+Identical files mean identical edge sequences; the first differing line names
+the first frame that diverged. Add the path to a `replay-bench` suite's
+`environment` and `artifacts` to make the candidate/reference comparison
+require it. The digest records execution order, not state, so keep the state
+artifacts beside it. It is deliberately strict: because it names the generated
+function behind every block, it fits changes that must not alter lowering,
+such as translation-unit partitioning or build scheduling. A change that
+lowers edges differently changes it by design.
+
 Audio bring-up has an equivalent no-Python capture/audit path. Set the prefix
 before initializing the runner and shut the game down normally after reaching
 a scene where sound is active:

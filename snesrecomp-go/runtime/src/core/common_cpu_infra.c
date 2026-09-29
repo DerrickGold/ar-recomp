@@ -4,6 +4,7 @@
 
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game/apu_sync.h"
+#include "edge_digest.h"
 #include "runtime_trace.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/trace.h"
@@ -1019,6 +1020,7 @@ static void clear_published_runner(void) {
         sr_runner_set_execution_state_provider(snes, NULL, NULL);
         sr_runner_bind_ppu_services(snes, false);
         sr_trace_bind_runner(snes, 0);
+        sr_edge_digest_bind_runner(snes, 0);
     }
     sr_runner_clear_event_subscriptions(snes);
     sr_runner_clear_audio_trace_subscriptions(snes);
@@ -1039,6 +1041,7 @@ static void publish_runner(Snes *snes) {
         audio_trace_reset();
     sr_runner_bind_ppu_services(snes, true);
     sr_trace_bind_runner(snes, 1);
+    sr_edge_digest_bind_runner(snes, 1);
     if (providers != NULL) {
         sr_runner_set_cpu_state_provider(
             snes, providers->query_cpu_state, providers->user_data,

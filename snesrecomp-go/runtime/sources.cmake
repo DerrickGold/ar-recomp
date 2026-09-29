@@ -16,6 +16,7 @@ set(SNESRECOMP_RUNNER_SOURCES
     ${SNESRECOMP_RUNNER_ROOT}/src/core/recomp_hw.c
     ${SNESRECOMP_RUNNER_ROOT}/src/support/audio_trace.c
     ${SNESRECOMP_RUNNER_ROOT}/src/core/runtime_trace.c
+    ${SNESRECOMP_RUNNER_ROOT}/src/core/edge_digest.c
     ${SNESRECOMP_RUNNER_ROOT}/src/support/util.c
     ${SNESRECOMP_RUNNER_ROOT}/src/support/packed_data.c
     ${SNESRECOMP_RUNNER_ROOT}/src/support/bps.c
