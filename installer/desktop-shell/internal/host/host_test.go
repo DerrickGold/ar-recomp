@@ -14,7 +14,7 @@ import (
 	"testing"
 )
 
-func fixture(t *testing.T) string {
+func fixture(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for _, p := range requiredFiles(runtime.GOOS) {

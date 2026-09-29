@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -43,10 +42,14 @@ type Manifest struct {
 	Files   []host.File `json:"files"`
 }
 type Archive struct {
-	Manifest Manifest
-	ID       string
-	file     *os.File
-	zip      *zip.Reader
+	Manifest       Manifest
+	ID             string
+	file           *os.File
+	zip            *zip.Reader
+	receiptPath    string
+	receipt        *verificationReceipt
+	packageStamp   fileStamp
+	manifestSHA256 string
 }
 
 func (a *Archive) Close() error { return a.file.Close() }
@@ -88,6 +91,17 @@ func Open(filename string) (_ *Archive, err error) {
 }
 
 func OpenContext(ctx context.Context, filename string, progress ProgressFunc) (_ *Archive, err error) {
+	return openContext(ctx, filename, "", true, progress)
+}
+
+// OpenForLaunch can reuse a successful package check when its metadata and
+// manifest still match. Inspection/packaging callers use OpenContext for a full
+// checksum check. force also bypasses the extracted-file verification cache.
+func OpenForLaunch(ctx context.Context, filename, cache string, force bool, progress ProgressFunc) (*Archive, error) {
+	return openContext(ctx, filename, cache, force, progress)
+}
+
+func openContext(ctx context.Context, filename, cache string, force bool, progress ProgressFunc) (_ *Archive, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -155,14 +169,31 @@ func OpenContext(ctx context.Context, filename string, progress ProgressFunc) (_
 	}
 	p.Close()
 	section := io.NewSectionReader(f, int64(offset), int64(length))
-	h := sha256.New()
-	packageMeter := newMeter(ctx, progress, "Checking bundled package", int64(length))
-	if _, err = packageMeter.copy(h, section); err != nil {
-		return nil, err
+	id := hex.EncodeToString(footer[32:])
+	var receipt *verificationReceipt
+	var receiptPath string
+	if cache != "" {
+		receiptPath = filepath.Join(cache, id+".verification.json")
+		if !force {
+			receipt = readVerificationReceipt(receiptPath, id, stampFile(info))
+		}
 	}
-	packageMeter.report(true)
-	if !bytes.Equal(h.Sum(nil), footer[32:]) {
-		return nil, errors.New("embedded archive checksum mismatch")
+	checkPackage := func() error {
+		h := sha256.New()
+		m := newMeter(ctx, progress, "Checking bundled package", int64(length))
+		if _, err := m.copy(h, io.NewSectionReader(f, int64(offset), int64(length))); err != nil {
+			return err
+		}
+		m.report(true)
+		if !bytes.Equal(h.Sum(nil), footer[32:]) {
+			return errors.New("embedded archive checksum mismatch")
+		}
+		return nil
+	}
+	if receipt == nil {
+		if err := checkPackage(); err != nil {
+			return nil, err
+		}
 	}
 	z, err := zip.NewReader(section, int64(length))
 	if err != nil {
@@ -198,6 +229,14 @@ func OpenContext(ctx context.Context, filename string, progress ProgressFunc) (_
 	r.Close()
 	if err != nil {
 		return nil, err
+	}
+	manifestDigest := fmt.Sprintf("%x", sha256.Sum256(data))
+	if receipt != nil && receipt.ManifestSHA256 != manifestDigest {
+		// Metadata alone is never enough to accept a changed manifest.
+		if err := checkPackage(); err != nil {
+			return nil, err
+		}
+		receipt = nil
 	}
 	if err = json.Unmarshal(data, &m); err != nil {
 		return nil, err
@@ -238,7 +277,8 @@ func OpenContext(ctx context.Context, filename string, progress ProgressFunc) (_
 			return nil, fmt.Errorf("missing bundled component %s", name)
 		}
 	}
-	return &Archive{Manifest: m, ID: hex.EncodeToString(footer[32:]), file: f, zip: z}, nil
+	return &Archive{Manifest: m, ID: id, file: f, zip: z,
+		receiptPath: receiptPath, receipt: receipt, packageStamp: stampFile(info), manifestSHA256: manifestDigest}, nil
 }
 
 func validateRuntime(r Runtime) error {
@@ -347,71 +387,13 @@ func (a *Archive) ExtractContext(ctx context.Context, destination string, prepar
 	return os.Rename(stage, destination)
 }
 
-// VerifyDirectory checks cached bytes on every launch; a stamp alone is not
-// sufficient for executable runtime files. It never repairs or deletes edits.
+// VerifyDirectory performs an explicit full integrity check, regardless of any
+// saved metadata. It never repairs or deletes edits.
 func (a *Archive) VerifyDirectory(directory string) error {
 	return a.VerifyDirectoryContext(context.Background(), directory, nil)
 }
 
 func (a *Archive) VerifyDirectoryContext(ctx context.Context, directory string, progress ProgressFunc) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	m := newMeter(ctx, progress, "Verifying prepared files", a.expandedSize())
-	info, err := os.Lstat(directory)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return errors.New("runtime cache must be a real directory")
-	}
-	root, err := os.OpenRoot(directory)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	id, err := root.ReadFile(".bundle-id")
-	if err != nil || string(id) != a.ID+"\n" {
-		return errors.New("unmanaged or mismatched runtime cache")
-	}
-	expected := map[string]bool{".bundle-id": true}
-	for _, entry := range a.Manifest.Files {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		expected[entry.Path] = true
-		info, err := root.Lstat(filepath.FromSlash(entry.Path))
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() || info.Size() != entry.Size {
-			return fmt.Errorf("invalid cached file %s", entry.Path)
-		}
-		f, err := root.Open(filepath.FromSlash(entry.Path))
-		if err != nil {
-			return err
-		}
-		h := sha256.New()
-		n, err := m.copy(h, io.LimitReader(f, entry.Size+1))
-		f.Close()
-		if err != nil {
-			return err
-		}
-		if n != entry.Size || hex.EncodeToString(h.Sum(nil)) != entry.SHA256 {
-			return fmt.Errorf("modified runtime cache file: %s", entry.Path)
-		}
-	}
-	m.report(true)
-	return fs.WalkDir(root.FS(), ".", func(name string, d fs.DirEntry, err error) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err != nil {
-			return err
-		}
-		if d.Type()&os.ModeSymlink != 0 || (!d.IsDir() && !expected[name]) {
-			return fmt.Errorf("unexpected cache entry %s", name)
-		}
-		return nil
-	})
+	_, err := a.checkDirectory(ctx, directory, nil, false, progress)
+	return err
 }

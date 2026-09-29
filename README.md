@@ -114,6 +114,11 @@ are prepared or checked. The first launch can take a few minutes on slower
 machines. You can cancel safely; opening the Builder again for the same workspace
 brings the existing window forward instead of starting another copy.
 
+Desktop Builders on all platforms cache successful verification so later launches
+check metadata and changed files instead of rereading every bundled tool.
+See [startup verification](docs/desktop-packaging.md#faster-startup-and-full-verification)
+for the `--verify-bundle` option to request a complete check.
+
 The Windows Builder and its build tools are unsigned. If a build fails with
 **“An Application Control policy has blocked this file”**, check
 **Windows Security → App & browser control → Smart App Control settings**.

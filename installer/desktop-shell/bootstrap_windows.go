@@ -15,68 +15,62 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func prepareEmbedded(ctx context.Context, payload, workspace, browser *string, progress winbundle.ProgressFunc) error {
+func prepareEmbedded(ctx context.Context, payload, workspace, browser *string, forceVerify bool, progress winbundle.ProgressFunc) (*host.VerifiedPayload, error) {
 	if *payload != "" {
-		return nil
+		return nil, nil
 	} // Explicit developer mode retains the existing path.
 	executable, err := os.Executable()
 	if err != nil {
-		return err
-	}
-	a, err := winbundle.OpenContext(ctx, executable, progress)
-	if errors.Is(err, winbundle.ErrNoBundle) {
-		return errors.New("This development shell has no embedded payload. Use --payload or build the packaged Windows executable.")
-	}
-	if err != nil {
-		return err
-	}
-	defer a.Close()
-	if a.Manifest.Arch != runtime.GOARCH {
-		return errors.New("embedded Windows architecture does not match this shell")
+		return nil, err
 	}
 	work, err := host.DefaultWorkspace(executable, *workspace)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	cache := host.AuxiliaryDirectory(work, "runtime")
+	a, err := winbundle.OpenForLaunch(ctx, executable, cache, forceVerify, progress)
+	if errors.Is(err, winbundle.ErrNoBundle) {
+		return nil, errors.New("This development shell has no embedded payload. Use --payload or build the packaged Windows executable.")
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer a.Close()
+	if a.Manifest.Arch != runtime.GOARCH {
+		return nil, errors.New("embedded Windows architecture does not match this shell")
 	}
 	volume := filepath.VolumeName(work)
 	if volume == "" || strings.HasPrefix(volume, `\\`) {
-		return errors.New("the Windows Builder workspace must be on a local drive, not a UNC/network location")
+		return nil, errors.New("the Windows Builder workspace must be on a local drive, not a UNC/network location")
 	}
 	drive, err := windows.UTF16PtrFromString(volume + `\`)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if windows.GetDriveType(drive) == windows.DRIVE_REMOTE {
-		return errors.New("Fixed WebView2 cannot run from a mapped network drive; choose a local workspace")
+		return nil, errors.New("Fixed WebView2 cannot run from a mapped network drive; choose a local workspace")
 	}
-	cache := host.AuxiliaryDirectory(work, "runtime")
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	if progress != nil {
 		progress(winbundle.Progress{Stage: "Preparing the runtime cache"})
 	}
 	if err = host.ValidateWorkspace(cache, executable); err != nil {
-		return err
+		return nil, err
 	}
 	if err = ensureRuntimeCache(cache); err != nil {
-		return err
+		return nil, err
 	}
 	release, err := host.Lock(cache)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer release()
 	dir := filepath.Join(cache, a.ID)
-	if _, err = os.Lstat(dir); os.IsNotExist(err) {
-		if err = a.ExtractContext(ctx, dir, grantWebviewReadAccess, progress); err != nil {
-			return fmt.Errorf("prepare bundled tools/WebView2: %w", err)
-		}
-	} else if err != nil {
-		return err
-	}
-	if err = a.VerifyDirectoryContext(ctx, dir, progress); err != nil {
-		return fmt.Errorf("runtime cache is incomplete or modified; choose a new workspace (existing files were not changed): %w", err)
+	verified, err := a.PrepareDirectoryContext(ctx, dir, grantWebviewReadAccess, progress)
+	if err != nil {
+		return nil, err
 	}
 	*payload = filepath.Join(dir, "payload")
 	*workspace = work
@@ -87,14 +81,17 @@ func prepareEmbedded(ctx context.Context, payload, workspace, browser *string, p
 		key, _, _ := strings.Cut(entry, "=")
 		if strings.HasPrefix(strings.ToUpper(key), "WEBVIEW2_") {
 			if err = os.Unsetenv(key); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
 	if err = os.Setenv("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", *browser); err != nil {
-		return err
+		return nil, err
 	}
-	return os.Setenv("WEBVIEW2_USER_DATA_FOLDER", host.AuxiliaryDirectory(work, "webview"))
+	if err = os.Setenv("WEBVIEW2_USER_DATA_FOLDER", host.AuxiliaryDirectory(work, "webview")); err != nil {
+		return nil, err
+	}
+	return verified, nil
 }
 
 const cacheMarker = "ActRaiserRecompBuilder runtime cache v1\n"

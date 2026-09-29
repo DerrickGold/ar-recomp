@@ -75,6 +75,40 @@ If an AppImage cannot mount because FUSE is unavailable, try:
 APPIMAGE_EXTRACT_AND_RUN=1 ./ActRaiserRecomp.AppImage
 ```
 
+### Faster startup and full verification
+
+Packaged Builders on Windows, macOS, and Linux save a successful verification
+result. Later launches check the manifest and file metadata, then hash only
+files whose size, modification time, or mode changed. Unchanged tools and SDK
+files are not reread, including when opening the Workshop just to launch a game.
+Windows also reuses its embedded-archive checksum when the package metadata and
+manifest match. First launches, new bundles, and missing or unreadable cache
+records receive a full check. Explicit development payloads always get a full
+check.
+
+To force a complete integrity check, close the Builder and start it with
+`--verify-bundle`:
+
+```powershell
+.\ActRaiserRecompBuilder-windows-arm64.exe --verify-bundle
+```
+
+```sh
+./ActRaiserRecompBuilder.app/Contents/MacOS/ActRaiserRecompBuilder --verify-bundle
+./ActRaiserRecompBuilder-steam-deck.AppImage --verify-bundle
+```
+
+Use your download's actual filename. Successful checks refresh the cache;
+failed or cancelled checks do not. Corrupt files are reported without silently
+replacing them. macOS/Linux cache records live in the Builder workspace;
+Windows records live beside its extracted runtime directories. Verification
+records contain file metadata, not ROM contents or saves.
+
+This cache detects ordinary changes; it does not protect against deliberate
+tampering that also restores file timestamps, or corruption that leaves
+metadata unchanged. Use `--verify-bundle` to check file contents in those cases.
+Platform security checks such as Gatekeeper and Application Control still apply.
+
 ### Windows Application Control
 
 Windows releases include unsigned executables. Windows can allow the outer

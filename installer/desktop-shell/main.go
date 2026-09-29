@@ -35,7 +35,9 @@ func runDesktop() error {
 	outputDir := flag.String("output-dir", "", "playable game folder (default: ActRaiserRecomp beside this Builder)")
 	webview := flag.String("webview-runtime", "", "Windows development: fixed WebView2 runtime directory")
 	jobs := flag.Int("jobs", 0, "build workers (0 uses builder default; use 1 on low-memory machines)")
+	verifyBundle := flag.Bool("verify-bundle", false, "fully verify bundled files instead of reusing unchanged-file checks")
 	flag.Parse()
+	developmentPayload := *payload != ""
 	if *jobs < 0 {
 		return fmt.Errorf("--jobs must not be negative")
 	}
@@ -46,7 +48,8 @@ func runDesktop() error {
 		return err
 	}
 	defer splash.Close()
-	if err := prepareEmbedded(ctx, payload, workspace, webview, splash.Update); err != nil {
+	verifiedPayload, err := prepareEmbedded(ctx, payload, workspace, webview, *verifyBundle, splash.Update)
+	if err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -121,7 +124,14 @@ func runDesktop() error {
 						return
 					}
 				}
-				inputID, err := host.PrepareSession(ctx, *payload, work, bridge.Progress)
+				var inputID string
+				if verifiedPayload != nil {
+					inputID, err = verifiedPayload.PrepareSession(ctx, *payload, work)
+				} else if !developmentPayload {
+					inputID, err = host.PrepareCachedSession(ctx, *payload, work, *verifyBundle, bridge.Progress)
+				} else {
+					inputID, err = host.PrepareSession(ctx, *payload, work, bridge.Progress)
+				}
 				if err != nil {
 					bridge.Fail(err)
 					return

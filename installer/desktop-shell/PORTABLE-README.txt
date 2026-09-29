@@ -5,6 +5,11 @@ Extract this entire folder somewhere writable. Keep the Builder app and its
 Workshop to build the game. BuilderData holds the build workspace; the default
 game output is the adjacent ActRaiserRecomp folder.
 
+The first launch verifies the bundled files. Later launches reuse checks for
+unchanged files to open faster. To force a complete check, close the Builder
+and launch its executable with --verify-bundle. See the full guide linked below
+for platform-specific commands.
+
 Windows: Application Control
 The Builder and its tools are unsigned. Windows may let the Builder open but
 block an internal tool such as snesbuild.exe with "An Application Control policy
