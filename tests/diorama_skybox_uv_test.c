@@ -427,12 +427,38 @@ static void TestRomUvRepeatsAcrossDisplayedWidth(void) {
   ExpectFloat("ROM invalid u1", u1, 0.0f);
 }
 
+static void TestSkyboxFollowsNativeWindow(void) {
+  /* In the reported 03/01 descent, the texture's top margin grows even
+   * though the BG2 camera has only 1/3-rate motion. Once the virtual camera
+   * stops, a fixed statue must stay put through both kinds of row changes. */
+  for (int y = 504; y <= 543; y++) {
+    const int top = y - 415;
+    const int bg_camera = y / 3;
+    DioramaSkyboxVerticalMapping mapping = {0, 352, 0, 1};
+    DioramaSkyboxVerticalMapping_FollowCamera(
+        &mapping, 352, top, 170.0f - bg_camera);
+    ExpectFloat("skybox window retains native scale",
+                mapping.capture_y1 - mapping.capture_y0, 224);
+    ExpectFloat("skybox statue stops with virtual camera",
+                DioramaSkyboxVerticalMapping_Fraction(
+                    &mapping, 299 - bg_camera + top), 129.0f / 224);
+  }
+  DioramaSkyboxVerticalMapping mapping = {4, 348, 4.0f / 352, 348.0f / 352};
+  DioramaSkyboxVerticalMapping_FollowCamera(&mapping, 352, 0, -20);
+  ExpectFloat("skybox respects its own top", mapping.capture_y0, 4);
+  mapping = (DioramaSkyboxVerticalMapping){4, 348, 4.0f / 352, 348.0f / 352};
+  DioramaSkyboxVerticalMapping_FollowCamera(&mapping, 352, 128, 20);
+  ExpectFloat("skybox floor keeps a full window", mapping.capture_y0, 124);
+  ExpectFloat("skybox floor never samples outside", mapping.capture_y1, 348);
+}
+
 int main(void) {
   TestValidSpan();
   TestBandedValidSpans();
   TestExtentValidSpans();
   TestUvRangeMatchesLegacyOnFullSpan();
   TestLiveVerticalWorldMapping();
+  TestSkyboxFollowsNativeWindow();
   TestUvRangeCropsNarrowedSpan();
   TestUvRangeNeverInverts();
   TestRomUvRepeatsAcrossDisplayedWidth();

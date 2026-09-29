@@ -176,12 +176,30 @@ bool DioramaSkyboxVerticalMapping_Build(
 }
 
 float DioramaSkyboxVerticalMapping_Fraction(
-    const DioramaSkyboxVerticalMapping *mapping, int capture_y) {
+    const DioramaSkyboxVerticalMapping *mapping, float capture_y) {
   if (!mapping || mapping->capture_y1 <= mapping->capture_y0) return 0.0f;
-  capture_y = ClampInt(
-      capture_y, mapping->capture_y0, mapping->capture_y1);
+  if (capture_y < mapping->capture_y0) capture_y = mapping->capture_y0;
+  if (capture_y > mapping->capture_y1) capture_y = mapping->capture_y1;
   return (float)(capture_y - mapping->capture_y0) /
       (float)(mapping->capture_y1 - mapping->capture_y0);
+}
+
+void DioramaSkyboxVerticalMapping_FollowCamera(
+    DioramaSkyboxVerticalMapping *mapping, int texture_height,
+    int authentic_y0, float camera_delta) {
+  if (!mapping || texture_height <= 0) return;
+  const float low = mapping->texture_v0 * texture_height;
+  const float high = mapping->texture_v1 * texture_height;
+  float height = (float)kActRaiserAuthenticHeight;
+  if (height > high - low) height = high - low;
+  if (height <= 0.0f) return;
+  float top = (float)authentic_y0 + camera_delta;
+  if (top < low) top = low;
+  if (top > high - height) top = high - height;
+  mapping->capture_y0 = top;
+  mapping->capture_y1 = top + height;
+  mapping->texture_v0 = top / (float)texture_height;
+  mapping->texture_v1 = (top + height) / (float)texture_height;
 }
 
 void DioramaSkyboxUvRange(int tex_width, int valid_x0, int valid_x1,

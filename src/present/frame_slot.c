@@ -172,6 +172,9 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   dst->bg1_camera_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY);
   dst->bg2_camera_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg2CameraX);
   dst->bg2_camera_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg2CameraY);
+  const uint16_t bg2_ratio =
+      ActRaiser_ReadWram16(kActRaiserWram_Bg2VerticalNumerator);
+  dst->bg2_vertical_ratio = ((bg2_ratio & 15u) << 4) | ((bg2_ratio >> 8) & 15u);
 
   if (have_ppu_view) {
     const SrPpuFrameSnapshot *ppu_frame = &ppu_view.state;

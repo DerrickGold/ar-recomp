@@ -1535,7 +1535,9 @@ static PresentationOutcome DrawDioramaSkybox(
     float blur_radius, bool rom_source,
     uint64_t source_revision, bool source_dynamic,
     const DioramaBgValidSpanPlan *valid_spans,
-    ArRenderPointF capture_offset, DioramaSkyboxProjection *projection) {
+    ArRenderPointF capture_offset, bool follow_camera,
+    int authentic_y0, float camera_delta,
+    DioramaSkyboxProjection *projection) {
   if (!ArRenderTexture_IsValid(skybox_texture) || snes_height <= 0)
     return kPresentationOutcome_CoreFailure;
   PresentationOutcome outcome = kPresentationOutcome_Complete;
@@ -1650,15 +1652,18 @@ static PresentationOutcome DrawDioramaSkybox(
       DioramaSkyboxVerticalMapping_Build(
           valid_spans, snes_height, source_height,
           blur_radius, &vertical);
+  if (!rom_source && follow_camera && vertical_valid)
+    DioramaSkyboxVerticalMapping_FollowCamera(
+        &vertical, source_height, authentic_y0, camera_delta + capture_offset.y);
   for (unsigned i = 0; i < span_count; i++) {
     /* The layer capture may contain unavailable top/bottom rows when another
      * primary plane owns a taller world. A skybox is an enveloping backdrop:
      * discard those rows, then normalize the remaining BG over the complete
      * output rather than preserving a black band in world space. */
     if (!vertical_valid || spans[i].x1 <= spans[i].x0) continue;
-    int y0 = spans[i].y0 < vertical.capture_y0
+    float y0 = spans[i].y0 < vertical.capture_y0
         ? vertical.capture_y0 : spans[i].y0;
-    int y1 = spans[i].y1 > vertical.capture_y1
+    float y1 = spans[i].y1 > vertical.capture_y1
         ? vertical.capture_y1 : spans[i].y1;
     if (y1 <= y0) continue;
     float u0, u1;
@@ -1898,6 +1903,7 @@ static PresentationOutcome DioramaCompositeCoreFailure(
 
 typedef struct DioramaViewGeometry {
   float matrix[16];
+  float world_y_offset, bg2_world_y_offset;
   DioramaCamera camera;
   float aspect_x, height_scale;
   float u0, v0, u1, v1;
@@ -2020,6 +2026,9 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
           geometry->width, geometry->height, both,
           both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly, rom_skybox,
           skybox_revision, skybox_dynamic, skybox_valid_spans, capture_offset,
+          capture->bg2_scroll_valid, capture->authentic_y0,
+          (geometry->world_y_offset + geometry->bg2_world_y_offset) *
+              kActRaiserAuthenticHeight,
           projection && !projection->bg2_plane.valid
               ? &projection->bg2_skybox : NULL);
       outcome = PresentationOutcome_Combine(outcome, skybox);
@@ -2041,6 +2050,8 @@ static void PrepareDioramaView(const DioramaCapture *capture,
                                int resolved_count,
                                DioramaViewGeometry *geometry) {
   float tex_h = (float)capture->height;
+  geometry->world_y_offset = 0.0f;
+  geometry->bg2_world_y_offset = 0.0f;
 
   geometry->u0 = (float)capture->obj_apron / (float)SR_PPU_SURFACE_MAX_WIDTH;
   geometry->u1 = (float)(capture->obj_apron + capture->width) /
@@ -2083,6 +2094,8 @@ static void PrepareDioramaView(const DioramaCapture *capture,
 
   BuildViewProjection(&geometry->camera, geometry->width, geometry->height,
                       geometry->matrix);
+  Diorama_AlignCaptureToNativeCamera(
+      geometry->matrix, capture->height, capture->authentic_y0);
 
   float framing_weight = Clampf(view->camera_framing_weight, 0.0f, 1.0f);
   if (framing_weight == 0.0f) return;
@@ -2127,10 +2140,16 @@ static void PrepareDioramaView(const DioramaCapture *capture,
           geometry->matrix, geometry->aspect_x, geometry->height_scale,
           focal->z - 0.5f, focal->rake, focal->bow,
           capture->vertical_bounds.top_reached,
-          capture->vertical_bounds.bottom_reached);
+          capture->vertical_bounds.bottom_reached, &geometry->world_y_offset);
   }
 
-  /* Restore the shared screen-space correction alongside the manual pose.
+  if (capture->bg2_scroll_valid)
+    geometry->bg2_world_y_offset = framing_weight * Diorama_BackgroundClampOffset(
+        capture->camera_y, capture->bg2_camera_y, capture->bg2_vertical_ratio,
+        capture->bg2_world_height, geometry->world_y_offset);
+  geometry->world_y_offset *= framing_weight;
+
+  /* Restore automatic framing and the camera stop alongside the manual pose.
    * Free Cam and active manual input use the untouched camera matrix. */
   if (framing_weight < 1.0f) {
     for (int i = 0; i < 16; i++)
@@ -2219,6 +2238,9 @@ static void PublishDioramaPlanes(const DioramaCapture *capture,
           .rake = resolved[i].rake,
           .bow = resolved[i].bow,
       };
+      if (resolved[i].plane == SR_PPU_OVERLAY_BG2 ||
+          resolved[i].plane == kDioramaPlane_Bg2Hi)
+        plane.world_y_offset = geometry->bg2_world_y_offset;
       if (capture->plane_capture_offsets)
         plane.capture_offset = capture->plane_capture_offsets[resolved[i].plane];
       if (resolved[i].plane == SR_PPU_OVERLAY_BG1) {
@@ -2797,6 +2819,15 @@ static PresentationOutcome DrawResolvedDioramaLayer(
                           : kArRenderBlendMode_Alpha,
   };
   DioramaLayerMesh mesh;
+  DioramaViewGeometry layer_geometry;
+  if (description->plane == SR_PPU_OVERLAY_BG2 ||
+      description->plane == kDioramaPlane_Bg2Hi ||
+      description->plane == kDioramaPlane_Bg2Far) {
+    layer_geometry = *geometry;
+    Diorama_TranslateCameraWorldY(
+        layer_geometry.matrix, geometry->bg2_world_y_offset);
+    geometry = &layer_geometry;
+  }
   PrepareDioramaLayerMesh(capture, geometry, aperture, &layer, &mesh);
   DioramaAttachedMesh attached;
   PrepareDioramaWaterfall(capture, scene, geometry, &layer, &attached,

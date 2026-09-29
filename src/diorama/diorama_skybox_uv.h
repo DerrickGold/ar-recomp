@@ -50,8 +50,8 @@ typedef struct DioramaBgValidSpanPlan {
  * separate from capture Y because the PPU surface has fixed allocation
  * headroom above and below the active capture. */
 typedef struct DioramaSkyboxVerticalMapping {
-  int capture_y0;
-  int capture_y1;
+  float capture_y0;
+  float capture_y1;
   float texture_v0;
   float texture_v1;
 } DioramaSkyboxVerticalMapping;
@@ -79,7 +79,14 @@ bool DioramaSkyboxVerticalMapping_Build(
 
 /* Normalize one capture-row boundary into the skybox's full-output axis. */
 float DioramaSkyboxVerticalMapping_Fraction(
-    const DioramaSkyboxVerticalMapping *mapping, int capture_y);
+    const DioramaSkyboxVerticalMapping *mapping, float capture_y);
+
+/* Keep the visible native window independent of extension-row redistribution.
+ * The parallax displacement follows the same virtual camera as the playfield;
+ * an independent BG edge may stop it sooner, without sampling unavailable art. */
+void DioramaSkyboxVerticalMapping_FollowCamera(
+    DioramaSkyboxVerticalMapping *mapping, int texture_height,
+    int authentic_y0, float camera_delta);
 
 /* Map a texture-column span to the skybox quad's U range.
  *

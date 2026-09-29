@@ -84,6 +84,8 @@ enum {
   kActRaiserWram_Bg1Height = 0x0030,
   kActRaiserWram_Bg2Width = 0x0032,
   kActRaiserWram_Bg2Height = 0x0034,
+  kActRaiserWram_Bg2VerticalNumerator = 0x0040,
+  kActRaiserWram_Bg2VerticalDenominator = 0x0041,
   /* Action background decoder state, indexed by
    * layer*kActRaiserBgLayerStateStride (BG1=0, BG2=4). */
   kActRaiserWram_BgMapPage = 0x0046,

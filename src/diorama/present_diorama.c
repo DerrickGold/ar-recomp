@@ -370,6 +370,13 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
       .height = capture_height,
       .authentic_y0 = slot->ws_extra_top,
       .vertical_bounds = vertical_bounds,
+      .camera_y = slot->bg1_camera_y,
+      .bg2_camera_y = slot->bg2_camera_y,
+      .bg2_world_height = slot->action_bg_plan.layer[1].world_height,
+      .bg2_vertical_ratio = primary_layer == 0
+          ? slot->bg2_vertical_ratio : 0,
+      .bg2_scroll_valid = primary_layer == 0 &&
+          slot->action_bg_plan.layer[1].valid,
       .obj_apron = slot->obj_apron,
       .textures = scene_textures,
       .pixels = pixels,

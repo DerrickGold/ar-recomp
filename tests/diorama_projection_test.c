@@ -131,7 +131,7 @@ static void TestTiltedCameraFraming(void) {
           }
 }
 
-static void TestCameraFramingProtectsNativeBand(void) {
+static void TestCameraFramingCentersNativeBand(void) {
   for (int bottom_heavy = 0; bottom_heavy < 2; bottom_heavy++) {
     DioramaProjection projection = Projection();
     projection.height_scale = 288.0f / 224.0f;
@@ -144,14 +144,155 @@ static void TestCameraFramingProtectsNativeBand(void) {
                                            projection.height_scale, 0, 0, 0, t0, t1));
       float top, bottom;
       FocalBounds(&projection, t0, t1, &top, &bottom);
-      if (tight) {
-        CHECK(Near((top + bottom) * 0.5f, 50.0f));
-      } else {
-        CHECK(top >= -0.001f && bottom <= 100.001f);
-        CHECK(bottom_heavy ? Near(top, 0.0f) : Near(bottom, 100.0f));
-      }
+      CHECK(Near((top + bottom) * 0.5f, 50.0f));
+      if (!tight) CHECK(top >= -0.001f && bottom <= 100.001f);
     }
   }
+}
+
+static DioramaProjection CaptureProjection(
+    const Scene3DCamera *camera, int height, int top) {
+  DioramaProjection projection = Projection();
+  projection.aspect_x = 496.0f / 224.0f;
+  projection.height_scale = height / 224.0f;
+  projection.texture_height = height;
+  projection.output_width = 1600;
+  projection.output_height = 900;
+  projection.bg2_plane.z_world = -.3f;
+  projection.object_planes[0].z_world = .01f;
+  Scene3D_BuildViewProjection(camera, 1600, 900, projection.matrix);
+  CHECK(Diorama_AlignCaptureToNativeCamera(projection.matrix, height, top));
+  return projection;
+}
+
+static void CenterCapture(DioramaProjection *projection, int top) {
+  CHECK(Diorama_CenterCameraVertically(
+      projection->matrix, projection->aspect_x, projection->height_scale,
+      0, 0, 0, top / (float)projection->texture_height,
+      (top + 224) / (float)projection->texture_height));
+}
+
+static void TestCaptureOriginKeepsEveryDepthRegistered(void) {
+  const int heights[] = {224, 288, 288, 352, 352, 352, 352};
+  const int tops[] = {0, 0, 64, 0, 32, 64, 128};
+  const float tilts[] = {-.6f, 0, .6f};
+  const float distances[] = {3.25f, 6};
+  for (unsigned p = 0; p < sizeof(tilts) / sizeof(*tilts); p++)
+    for (unsigned y = 0; y < sizeof(tilts) / sizeof(*tilts); y++)
+      for (unsigned d = 0; d < sizeof(distances) / sizeof(*distances); d++)
+        for (unsigned i = 0; i < sizeof(heights) / sizeof(*heights); i++)
+          for (int framed = 0; framed < 2; framed++) {
+            const Scene3DCamera camera = {tilts[p], tilts[y], distances[d], .4f};
+            DioramaProjection reference = CaptureProjection(&camera, 224, 0);
+            DioramaProjection expanded = CaptureProjection(&camera, heights[i], tops[i]);
+            if (framed) {
+              CenterCapture(&reference, 0);
+              CenterCapture(&expanded, tops[i]);
+            }
+            for (int band = 0; band < 3; band++) {
+              const float z = band == 0 ? 0 : band == 1 ? -.3f : .01f;
+              reference.object_planes[0].z_world = z;
+              expanded.object_planes[0].z_world = z;
+              for (int row = 0; row <= 224; row += 16) {
+                ArRenderPointF expected, actual;
+                float expected_x, expected_y, actual_x, actual_y;
+                CHECK(Diorama_ProjectCapturedPoint(
+                    &reference, 35, row, 0, &expected, &expected_x, &expected_y));
+                CHECK(Diorama_ProjectCapturedPoint(
+                    &expanded, 35, row + tops[i], 0, &actual, &actual_x, &actual_y));
+                CHECK(Near(actual.x, expected.x) && Near(actual.y, expected.y));
+                CHECK(Near(actual_x, expected_x) && Near(actual_y, expected_y));
+              }
+            }
+          }
+}
+
+static void TestScrollContinuesAcrossRedistributedMargins(void) {
+  /* At 3.25 distance the old capture-centred camera paused through Y=28..64
+   * and Y=223..258, then resumed. These spans still have sufficient world
+   * above/below the displayed view, so reaching a buffer edge must not pin it. */
+  const Scene3DCamera camera = {0, 0, 3.25f, .4f};
+  const int starts[] = {48, 232};
+  const int ends[] = {72, 240};
+  for (int span = 0; span < 2; span++) {
+    ArRenderPointF previous = {0};
+    for (int y = starts[span]; y <= ends[span]; y++) {
+      const int top = y < 64 ? y : y > 223 ? y - 159 : 64;
+      DioramaProjection projection = CaptureProjection(&camera, 352, top);
+      CenterCapture(&projection, top);
+      DioramaVerticalBounds bounds = DioramaVerticalBounds_Resolve(
+          SR_PPU_OVERLAY_BG1, y, 512, top, 352);
+      CHECK(bounds.valid);
+      CHECK(Diorama_ClampCameraVertically(
+          projection.matrix, projection.aspect_x, projection.height_scale,
+          0, 0, 0, bounds.top_reached, bounds.bottom_reached, NULL));
+      DioramaProjection reference = CaptureProjection(&camera, 224, 0);
+      CenterCapture(&reference, 0);
+      ArRenderPointF actual, expected;
+      CHECK(Diorama_ProjectCapturedBg1Point(&projection, 50, 255 - y + top,
+                                            &actual, NULL, NULL));
+      CHECK(Diorama_ProjectCapturedBg1Point(&reference, 50, 255 - y,
+                                            &expected, NULL, NULL));
+      CHECK(Near(actual.y, expected.y));
+      if (y > starts[span]) CHECK(actual.y < previous.y - 3.0f);
+      previous = actual;
+      /* BG2 has half-rate native parallax; buffer changes must not make it
+       * reverse direction while BG1 appears stalled. */
+      CHECK(Diorama_ProjectCapturedBg2Point(&projection, 50, 199 - y / 2 + top,
+                                            &actual, NULL, NULL));
+      CHECK(Diorama_ProjectCapturedBg2Point(&reference, 50, 199 - y / 2,
+                                            &expected, NULL, NULL));
+      CHECK(Near(actual.y, expected.y));
+    }
+  }
+}
+
+static void TestCameraEasesIntoWorldEdge(void) {
+  /* The user's 03/01 snapshots move from camera Y=504 to 520. Both retain
+   * the same 352 world rows through top margins 89 and 105. Sweep that floor
+   * handoff in both directions and mirror it at the ceiling. */
+  const Scene3DCamera camera = {0, 0, 3.25f, .4f};
+  for (int at_bottom = 0; at_bottom < 2; at_bottom++)
+    for (int direction = -1; direction <= 1; direction += 2) {
+      float previous = 0, previous_delta = 0;
+      for (int step = 0; step <= 63; step++) {
+        const int top = direction > 0 ? step : 63 - step;
+        const int margin = at_bottom ? top + 65 : top;
+        DioramaProjection projection = CaptureProjection(&camera, 352, margin);
+        CenterCapture(&projection, margin);
+        CHECK(Diorama_ClampCameraVertically(
+            projection.matrix, projection.aspect_x, projection.height_scale,
+            0, 0, 0, !at_bottom, at_bottom, NULL));
+        ArRenderPointF point, edge;
+        CHECK(Diorama_ProjectCapturedBg1Point(
+            &projection, 50, 176, &point, NULL, NULL));
+        CHECK(Diorama_ProjectCapturedBg1Point(
+            &projection, 50, at_bottom ? 352 : 0, &edge, NULL, NULL));
+        CHECK(at_bottom ? edge.y >= 899.999f : edge.y <= .001f);
+        if (step > 0) {
+          const float delta = point.y - previous;
+          CHECK(direction * delta <= .001f && fabsf(delta) < 3.05f);
+          if (step > 1) CHECK(fabsf(delta - previous_delta) < .25f);
+          previous_delta = delta;
+        }
+        previous = point.y;
+      }
+    }
+}
+
+static void TestCaptureAlignmentRejectsInvalidInputs(void) {
+  DioramaProjection projection = Projection();
+  const DioramaProjection before = projection;
+  CHECK(Diorama_AlignCaptureToNativeCamera(projection.matrix, 352, 64));
+  CHECK(!memcmp(projection.matrix, before.matrix, sizeof(before.matrix)));
+  CHECK(!Diorama_AlignCaptureToNativeCamera(NULL, 352, 64));
+  CHECK(!Diorama_AlignCaptureToNativeCamera(projection.matrix, 223, 0));
+  CHECK(!Diorama_AlignCaptureToNativeCamera(projection.matrix, 352, -1));
+  CHECK(!Diorama_AlignCaptureToNativeCamera(projection.matrix, 352, 129));
+  CHECK(!memcmp(projection.matrix, before.matrix, sizeof(before.matrix)));
+  projection.matrix[0] = NAN;
+  CHECK(!Diorama_AlignCaptureToNativeCamera(projection.matrix, 352, 128));
+  CHECK(!memcmp(projection.matrix + 1, before.matrix + 1, 15 * sizeof(float)));
 }
 
 static void TestCameraFramingRejectsUnprojectableMesh(void) {
@@ -203,12 +344,13 @@ static void TestFloorCaptureCoversUpperViewport(void) {
     projection.height_scale = 352.0f / 224.0f;
     const Scene3DCamera camera = {0, 0, 3.25f, .4f};
     Scene3D_BuildViewProjection(&camera, 100, 100, projection.matrix);
+    CHECK(Diorama_AlignCaptureToNativeCamera(projection.matrix, 352, top_margins[i]));
     CHECK(Diorama_CenterCameraVertically(
         projection.matrix, projection.aspect_x, projection.height_scale,
         0, 0, 0, top_margins[i] / 352.0f, (top_margins[i] + 224) / 352.0f));
     CHECK(Diorama_ClampCameraVertically(
         projection.matrix, projection.aspect_x, projection.height_scale,
-        0, 0, 0, false, true));
+        0, 0, 0, false, true, NULL));
     float top, bottom;
     FocalBounds(&projection, 0, 1, &top, &bottom);
     CHECK(top <= .001f);
@@ -236,10 +378,11 @@ static void TestCameraClampsReachedWorldEdge(void) {
               at_bottom ? 64.0f / 288.0f : 0,
               at_bottom ? 1 : 224.0f / 288.0f));
           const DioramaProjection before = projection;
+          float world_offset = 0;
           CHECK(Diorama_ClampCameraVertically(
               projection.matrix, projection.aspect_x, projection.height_scale,
               0, projection.bg1_plane.rake, projection.bg1_plane.bow,
-              !at_bottom, at_bottom));
+              !at_bottom, at_bottom, &world_offset));
           /* Clamp the whole tilted edge, not only its midpoint. */
           for (int side = 0; side <= 8; side++) {
             ArRenderPointF point;
@@ -248,25 +391,68 @@ static void TestCameraClampsReachedWorldEdge(void) {
                 &point, NULL, NULL));
             CHECK(at_bottom ? point.y >= 99.999f : point.y <= .001f);
           }
-          float delta = 0;
           for (int depth = 0; depth < 3; depth++) {
             DioramaProjection old_actor = before;
             old_actor.object_planes[0].z_world = depth * .2f;
             projection.object_planes[0] = old_actor.object_planes[0];
             ArRenderPointF old_point, new_point;
             float old_sx, old_sy, new_sx, new_sy;
+            /* A clamped camera must agree with a native camera at its virtual
+             * world position, including the perspective at every OBJ depth. */
             CHECK(Diorama_ProjectCapturedPoint(
-                &old_actor, 35, 23, 0, &old_point, &old_sx, &old_sy));
+                &old_actor, 35, 23 - world_offset * 50 / projection.height_scale,
+                0, &old_point, &old_sx, &old_sy));
             CHECK(Diorama_ProjectCapturedPoint(
                 &projection, 35, 23, 0, &new_point, &new_sx, &new_sy));
-            if (!depth) delta = new_point.y - old_point.y;
-            CHECK(Near(new_point.y - old_point.y, delta));
+            CHECK(Near(new_point.y, old_point.y));
             CHECK(Near(new_point.x, old_point.x));
             CHECK(Near(new_sx, old_sx) && Near(new_sy, old_sy));
           }
-          for (int i = 0; i < 16; i++)
-            if (i % 4 != 1) CHECK(projection.matrix[i] == before.matrix[i]);
+          for (int i = 0; i < 12; i++)
+            CHECK(projection.matrix[i] == before.matrix[i]);
         }
+}
+
+static void TestParallaxSharesTheCameraStop(void) {
+  const float pitches[] = {-.15f, 0, .15f};
+  for (unsigned pose = 0; pose < sizeof(pitches) / sizeof(*pitches); pose++) {
+    const Scene3DCamera camera = {pitches[pose], .1f, 3.25f, .4f};
+    ArRenderPointF previous_bg = {0}, previous_actor = {0};
+    for (int y = 480; y <= 543; y++) {
+      const int top = y - 415;
+      DioramaProjection projection = CaptureProjection(&camera, 352, top);
+      CenterCapture(&projection, top);
+      float shift;
+      CHECK(Diorama_ClampCameraVertically(
+          projection.matrix, projection.aspect_x, projection.height_scale,
+          0, 0, 0, false, true, &shift));
+      projection.bg2_plane.world_y_offset =
+          Diorama_BackgroundClampOffset(y, y / 3, 0x13, 512, shift);
+      ArRenderPointF background, actor;
+      CHECK(Diorama_ProjectCapturedBg2Point(
+          &projection, 50, 299 - y / 3 + top, &background, NULL, NULL));
+      CHECK(Diorama_ProjectCapturedPoint(
+          &projection, 50, 650 - y + top, 0, &actor, NULL, NULL));
+      if (y > 480) CHECK(background.y <= previous_bg.y + .001f);
+      /* Past the eased stop, static scenery and objects at all depths stop
+       * together. The old screen-space clamp reversed BG2's 1/3-rate scroll. */
+      if (y > 530) {
+        CHECK(Near(background.x, previous_bg.x));
+        CHECK(Near(background.y, previous_bg.y));
+        CHECK(Near(actor.x, previous_actor.x));
+        CHECK(Near(actor.y, previous_actor.y));
+      }
+      previous_bg = background;
+      previous_actor = actor;
+    }
+  }
+  /* A stationary backdrop and a background that reached its own native
+   * floor must remain stationary while the foreground camera moves. */
+  CHECK(Near(Diorama_BackgroundClampOffset(100, 0, 0, 512, -.1f), .1f));
+  CHECK(Near(Diorama_BackgroundClampOffset(100, 10, 0, 512, -.1f), .1f));
+  CHECK(Near(Diorama_BackgroundClampOffset(600, 544, 0x11, 768, -10.0f / 224),
+             10.0f / 224));
+  CHECK(Near(Diorama_BackgroundClampOffset(1017, 1017, 0x11, 512, 16.0f / 224), 0));
 }
 
 static void TestCameraClampPreservesInteriorAndSmallRoom(void) {
@@ -274,18 +460,18 @@ static void TestCameraClampPreservesInteriorAndSmallRoom(void) {
   const Scene3DCamera camera = {0, 0, 6, .4f};
   Scene3D_BuildViewProjection(&camera, 100, 100, projection.matrix);
   const DioramaProjection before = projection;
-  CHECK(Diorama_ClampCameraVertically(projection.matrix, 2, 1, 0, 0, 0, false, false));
+  CHECK(Diorama_ClampCameraVertically(projection.matrix, 2, 1, 0, 0, 0, false, false, NULL));
   CHECK(!memcmp(projection.matrix, before.matrix, sizeof(before.matrix)));
-  CHECK(Diorama_ClampCameraVertically(projection.matrix, 2, 1, 0, 0, 0, true, true));
+  CHECK(Diorama_ClampCameraVertically(projection.matrix, 2, 1, 0, 0, 0, true, true, NULL));
   CHECK(!memcmp(projection.matrix, before.matrix, sizeof(before.matrix)));
-  CHECK(!Diorama_ClampCameraVertically(NULL, 2, 1, 0, 0, 0, false, true));
-  CHECK(!Diorama_ClampCameraVertically(projection.matrix, 2, 1, NAN, 0, 0, false, true));
+  CHECK(!Diorama_ClampCameraVertically(NULL, 2, 1, 0, 0, 0, false, true, NULL));
+  CHECK(!Diorama_ClampCameraVertically(projection.matrix, 2, 1, NAN, 0, 0, false, true, NULL));
   CHECK(!memcmp(projection.matrix, before.matrix, sizeof(before.matrix)));
   const Scene3DCamera unprojectable = {.7f, .7f, .2f, .4f};
   Scene3D_BuildViewProjection(&unprojectable, 100, 100, projection.matrix);
   float matrix[16];
   memcpy(matrix, projection.matrix, sizeof(matrix));
-  CHECK(!Diorama_ClampCameraVertically(projection.matrix, 2, 1, 0, 0, 0, true, true));
+  CHECK(!Diorama_ClampCameraVertically(projection.matrix, 2, 1, 0, 0, 0, true, true, NULL));
   CHECK(!memcmp(projection.matrix, matrix, sizeof(matrix)));
 }
 
@@ -543,11 +729,16 @@ int main(void) {
   TestSkyboxProjection();
   TestGeneratedPlaneOffset();
   TestTiltedCameraFraming();
-  TestCameraFramingProtectsNativeBand();
+  TestCameraFramingCentersNativeBand();
+  TestCaptureOriginKeepsEveryDepthRegistered();
+  TestScrollContinuesAcrossRedistributedMargins();
+  TestCameraEasesIntoWorldEdge();
+  TestCaptureAlignmentRejectsInvalidInputs();
   TestCameraFramingRejectsUnprojectableMesh();
   TestCapturedWorldVerticalBounds();
   TestFloorCaptureCoversUpperViewport();
   TestCameraClampsReachedWorldEdge();
+  TestParallaxSharesTheCameraStop();
   TestCameraClampPreservesInteriorAndSmallRoom();
   TestRegisteredProjectionAndScale();
   TestPriorityPlaneShapeIsApplied();

@@ -79,26 +79,33 @@ bool Diorama_CenterCameraVertically(
   float top, bottom;
   if (!CameraVerticalBounds(matrix, aspect_x, height_scale,
                            z_world, rake, bow,
-                           0.0f, 1.0f, &top, &bottom))
+                           authentic_t0, authentic_t1, &top, &bottom))
     return false;
-  float shift = 0.5f - 0.5f * (top + bottom);
-  if (bottom - top > 1.0f) {
-    float native_top, native_bottom;
-    if (!CameraVerticalBounds(matrix, aspect_x, height_scale,
-                             z_world, rake, bow,
-                             authentic_t0, authentic_t1,
-                             &native_top, &native_bottom))
-      return false;
-    if (native_bottom - native_top <= 1.0f)
-      shift = fmaxf(-native_top, fminf(shift, 1.0f - native_bottom));
-    else
-      shift = 0.5f - 0.5f * (native_top + native_bottom);
-  }
+  const float shift = 0.5f - 0.5f * (top + bottom);
 
   /* Clip Y += offset * clip W is a uniform screen translation after the
    * perspective divide. Apply it to the shared matrix so every depth plane,
    * skirt, aperture and attached effect receives exactly the same shift. */
   CameraShiftVertically(matrix, shift);
+  return true;
+}
+
+bool Diorama_AlignCaptureToNativeCamera(
+    float matrix[16], int capture_height, int authentic_y0) {
+  if (!matrix || capture_height < kActRaiserAuthenticHeight ||
+      authentic_y0 < 0 ||
+      authentic_y0 > capture_height - kActRaiserAuthenticHeight)
+    return false;
+  for (int i = 0; i < 16; i++)
+    if (!isfinite(matrix[i])) return false;
+  const float offset = ((float)authentic_y0 +
+      0.5f * (float)kActRaiserAuthenticHeight - 0.5f * (float)capture_height) /
+      (float)kActRaiserAuthenticHeight;
+  /* Translate the shared world origin before projection. A screen-space
+   * correction at BG1 depth alone would still let BG2 and OBJ drift as rows
+   * transfer between margins, especially while the camera is tilted. */
+  for (int row = 0; row < 4; row++)
+    matrix[12 + row] += offset * matrix[4 + row];
   return true;
 }
 
@@ -125,33 +132,88 @@ DioramaVerticalBounds DioramaVerticalBounds_Resolve(
   return bounds;
 }
 
+static float CameraEdgeCorrection(float distance) {
+  /* Start easing while the finite edge still lies outside the viewport.
+   * This smooth positive part stays above the required hard correction, so
+   * slowing into the stop never exposes beyond the level. It joins both
+   * ordinary following and the pinned edge with continuous velocity. */
+  const float ease = 8.0f / (float)kActRaiserAuthenticHeight;
+  if (distance <= -ease) return 0.0f;
+  if (distance >= ease) return distance;
+  const float blend = distance + ease;
+  return blend * blend / (4.0f * ease);
+}
+
 bool Diorama_ClampCameraVertically(
     float matrix[16], float aspect_x, float height_scale,
     float z_world, float rake, float bow,
-    bool clamp_top, bool clamp_bottom) {
+    bool clamp_top, bool clamp_bottom, float *world_y_offset) {
+  if (world_y_offset) *world_y_offset = 0.0f;
   if (!CameraProjectionValid(matrix, aspect_x, height_scale, z_world, rake, bow))
     return false;
   if (!clamp_top && !clamp_bottom) return true;
   float lower = -INFINITY, upper = INFINITY;
-  float top, bottom;
-  if (clamp_top) {
-    if (!CameraVerticalBounds(matrix, aspect_x, height_scale, z_world, rake, bow,
-                              0.0f, 0.0f, &top, &bottom))
-      return false;
-    upper = -bottom;
-  }
-  if (clamp_bottom) {
-    if (!CameraVerticalBounds(matrix, aspect_x, height_scale, z_world, rake, bow,
-                              1.0f, 1.0f, &top, &bottom))
-      return false;
-    lower = 1.0f - top;
+  for (int edge = 0; edge < 2; edge++) {
+    if (edge ? !clamp_bottom : !clamp_top) continue;
+    const float t = (float)edge;
+    const float target = edge ? -1.0f : 1.0f;
+    const float slope = matrix[5] - target * matrix[7];
+    if (slope <= 0.0f) return false;
+    for (int side = 0; side < 2; side++) {
+      Scene3DClipPoint point;
+      if (!Scene3D_TransformToClip(
+              matrix, ((float)side - 0.5f) * aspect_x,
+              (0.5f - t) * height_scale,
+              DioramaTiltedRowDepth(z_world, rake, bow, t), &point) ||
+          point.w <= kScene3DMinimumProjectionDepth)
+        return false;
+      const float shift = (target * point.w - point.y) / slope;
+      if (edge) upper = fminf(upper, shift);
+      else lower = fmaxf(lower, shift);
+    }
   }
   /* A small room or deliberate zoom-out cannot satisfy both edges by moving
    * the camera alone. Keep its existing fit rather than stretching the art. */
   if (lower > upper) return true;
-  const float shift = fmaxf(lower, fminf(0.0f, upper));
-  if (shift != 0.0f) CameraShiftVertically(matrix, shift);
+  float shift = clamp_top ? CameraEdgeCorrection(lower) : 0.0f;
+  if (clamp_bottom) shift -= CameraEdgeCorrection(-upper);
+  shift = fmaxf(lower, fminf(shift, upper));
+  Diorama_TranslateCameraWorldY(matrix, shift);
+  if (world_y_offset) *world_y_offset = shift;
   return true;
+}
+
+void Diorama_TranslateCameraWorldY(float matrix[16], float shift) {
+  for (int row = 0; row < 4; row++)
+    matrix[12 + row] += shift * matrix[4 + row];
+}
+
+static float BackgroundCameraAt(float camera_y, uint8_t ratio, int world_height) {
+  const unsigned denominator = ratio & 15u;
+  float camera = denominator ? camera_y *
+      (float)(ratio >> 4) / (float)denominator : 0.0f;
+  /* Match the native command-3 parallax policy. Small maps may wrap; only
+   * maps of at least 0x300 pixels have a native finite-camera stop. */
+  if (world_height >= 0x300)
+    camera = fminf(camera, (float)(world_height - kActRaiserAuthenticHeight));
+  return camera;
+}
+
+float Diorama_BackgroundClampOffset(
+    int camera_y, int bg_camera_y, uint8_t ratio, int world_height,
+    float world_y_offset) {
+  if (!isfinite(world_y_offset)) return 0.0f;
+  const float native = BackgroundCameraAt((float)camera_y, ratio, world_height);
+  const float framed = BackgroundCameraAt(
+      (float)camera_y + world_y_offset * kActRaiserAuthenticHeight,
+      ratio, world_height);
+  float delta = framed - native;
+  /* Remove the native ratio's integer staircase when it describes this
+   * captured camera. Preserve any separately authored BG camera offset. */
+  const int native_integer = (int)floorf(native);
+  if ((native_integer & 0x3ff) == bg_camera_y)
+    delta += native - (float)native_integer;
+  return delta / (float)kActRaiserAuthenticHeight - world_y_offset;
 }
 
 bool Diorama_PlaneEligible(int plane, bool visible, bool has_texture,
@@ -259,7 +321,7 @@ static bool ProjectCapturedPlanePoint(
     }
     Scene3DPoint projected_point;
     if (!Scene3D_ProjectWorldPoint(
-            projection->matrix, wx, wy, wz,
+            projection->matrix, wx, wy + plane->world_y_offset, wz,
             projection->output_width, projection->output_height,
             &projected_point))
       return false;

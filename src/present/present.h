@@ -222,6 +222,8 @@ typedef struct FrameSlot {
   uint8_t capture_ticks;
   int16_t bg1_camera_x, bg1_camera_y;
   int16_t bg2_camera_x, bg2_camera_y;
+  /* Native command-3 numerator/denominator, packed into high/low nibbles. */
+  uint8_t bg2_vertical_ratio;
   /* Turbo compresses many emulated ticks into one image submission, so the
    * pair no longer describes a normally paced visual interval. */
   bool turbo_active;

@@ -46,9 +46,15 @@ void Diorama_SetDragging(bool dragging);
 /* Shared by focal framing and the rendered layer mesh. */
 enum { kDioramaPlaneSubdivY = 6 };
 
-/* Center the projected bounds of the focal mesh vertically. authentic_t0/t1
- * delimit the native playfield within a capture: when the whole mesh cannot fit,
- * keep that band visible (or center it if even the native band cannot fit).
+/* Register the capture's native viewport with the camera's world origin.
+ * Redistributing extension rows changes the buffer origin, not the camera.
+ * Apply before framing, including in Free Cam, so every depth retains its
+ * native scroll and parallax. Invalid inputs leave the matrix untouched. */
+bool Diorama_AlignCaptureToNativeCamera(
+    float matrix[16], int capture_height, int authentic_y0);
+
+/* Center the projected native playfield vertically. authentic_t0/t1 delimit
+ * that band within the capture; extension rows do not control camera framing.
  * Changes only screen Y, preserving perspective, depth and horizontal framing.
  * Invalid/unprojectable geometry leaves the matrix untouched. */
 bool Diorama_CenterCameraVertically(
@@ -69,14 +75,23 @@ DioramaVerticalBounds DioramaVerticalBounds_Resolve(
     int plane, int camera_y, int world_height,
     int authentic_y0, int capture_height);
 
-/* Pin a reached world edge to the viewport when framing exposes beyond it.
- * Uses both ends of each tilted edge and a shared screen-Y translation, so
- * perspective, tile scale and attached actor/effect registration are retained.
+/* Ease into a reached world edge before framing would expose beyond it.
+ * Uses both ends of each tilted edge and one world-space camera translation.
+ * The optional offset lets backgrounds follow that same stop at their native
+ * parallax rate, with perspective and attached effects kept registered.
  * If both world edges cannot cover the viewport, retain the fitted view. */
 bool Diorama_ClampCameraVertically(
     float matrix[16], float aspect_x, float height_scale,
     float z_world, float rake, float bow,
-    bool clamp_top, bool clamp_bottom);
+    bool clamp_top, bool clamp_bottom, float *world_y_offset);
+
+void Diorama_TranslateCameraWorldY(float matrix[16], float shift);
+
+/* Additional background translation relative to the clamped playfield.
+ * Ratio packs the native numerator/denominator nibbles from command 3. */
+float Diorama_BackgroundClampOffset(
+    int camera_y, int bg_camera_y, uint8_t ratio, int world_height,
+    float world_y_offset);
 
 enum { kDioramaObjectPriorityCount = 4 };
 
@@ -84,6 +99,8 @@ typedef struct DioramaPlaneProjection {
   bool valid;
   /* Translation of current-capture pixels in a generated background texture. */
   ArRenderPointF capture_offset;
+  /* Camera-space parallax correction; distinct from texture/clip coordinates. */
+  float world_y_offset;
   float u0, v0, u1, v1;
   float z_world;
   float rake;
@@ -229,6 +246,10 @@ typedef struct DioramaSkyboxView {
 typedef struct DioramaCapture {
   int width, height, authentic_y0, obj_apron;
   DioramaVerticalBounds vertical_bounds;
+  /* Native camera and command-3 ratio, captured with these exact pixels. */
+  int camera_y, bg2_camera_y, bg2_world_height;
+  uint8_t bg2_vertical_ratio;
+  bool bg2_scroll_valid;
   const ArRenderTexture *textures;
   const uint8_t *const *pixels;
   const ArRenderPointF *plane_capture_offsets;
