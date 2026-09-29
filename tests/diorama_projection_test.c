@@ -715,12 +715,25 @@ static void TestSkyboxProjection(void) {
   p.bg2_skybox.active_band = 1;
   CHECK(Diorama_ProjectCapturedBg2Point(&p,2,192,&point,NULL,NULL));
   CHECK(Near(point.x,17) && Near(point.y,229));
+  CHECK(Diorama_ProjectSkyboxAnchorPoint(&p,128,102,256,&point));
+  CHECK(Near(point.x,17) && Near(point.y,329));
+  CHECK(Diorama_SkyboxAnchorBounds(&p,128,&x0,&y0,&x1,&y1));
+  CHECK(x0 == 102 && y0 == 192 && x1 == 354 && y1 == 320);
+  p.bg2_skybox.active_band = -1;
+  CHECK(Diorama_SkyboxAnchorBounds(&p,128,&x0,&y0,&x1,&y1));
+  CHECK(x0 == 102 && y0 == 64 && x1 == 354 && y1 == 320);
+  CHECK(!Diorama_ProjectSkyboxAnchorPoint(&p,NAN,102,256,&point));
+  CHECK(!Diorama_SkyboxAnchorBounds(&p,NAN,&x0,&y0,&x1,&y1));
   p.bg2_skybox.active_band = 2;
   CHECK(!Diorama_ProjectCapturedBg2Point(&p,228,128,&point,NULL,NULL));
   CHECK(!Diorama_SkyboxCaptureBounds(&p,&x0,&y0,&x1,&y1));
+  CHECK(!Diorama_ProjectSkyboxAnchorPoint(&p,128,102,256,&point));
+  CHECK(!Diorama_SkyboxAnchorBounds(&p,128,&x0,&y0,&x1,&y1));
   p.bg2_skybox.active_band = -1;
   p.bg2_skybox.bands[0].x1 = NAN;
   CHECK(!Diorama_ProjectCapturedBg2Point(&p,228,128,&point,NULL,NULL));
+  CHECK(!Diorama_ProjectSkyboxAnchorPoint(&p,128,102,256,&point));
+  CHECK(!Diorama_SkyboxAnchorBounds(&p,128,&x0,&y0,&x1,&y1));
   p.bg2_skybox.count = 0;
   CHECK(!Diorama_ProjectCapturedBg2Point(&p,228,128,&point,NULL,NULL));
 }

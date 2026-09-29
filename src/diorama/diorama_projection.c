@@ -413,30 +413,53 @@ bool Diorama_SkyboxCaptureBounds(const DioramaProjection *projection,
   return true;
 }
 
-static bool ProjectSkyboxPoint(const DioramaProjection *projection,
-    float x, float y, ArRenderPointF *point, float *scale_x, float *scale_y) {
-  const DioramaSkyboxProjection *sky = &projection->bg2_skybox;
-  if (!projection->valid || !sky->count || sky->count > kDioramaBgMaxValidSpans ||
-      sky->active_band < -1 || sky->active_band >= (int)sky->count ||
-      projection->output_width <= 0 || projection->output_height <= 0 ||
-      !isfinite(x) || !isfinite(y)) return false;
-  unsigned selected = sky->active_band < 0 ? 0 : (unsigned)sky->active_band;
-  if (sky->active_band < 0) {
-    /* Direction probes may extrapolate beyond the visible rectangle. Extend
-     * the nearest band; geometry itself is clipped before projection. */
-    float distance = INFINITY;
-    for (unsigned i = 0; i < sky->count; i++) {
-      const DioramaSkyboxBandProjection *band = &sky->bands[i];
-      if (!ValidSkyboxBand(band)) return false;
-      const float d = fmaxf(0, fmaxf(band->y0 - y, y - band->y1));
-      if (d < distance) {
-        distance = d;
-        selected = i;
-      }
+static int SkyboxBandAt(const DioramaSkyboxProjection *sky, float y) {
+  if (!sky->count || sky->count > kDioramaBgMaxValidSpans ||
+      sky->active_band < -1 || sky->active_band >= (int)sky->count || !isfinite(y))
+    return -1;
+  int selected = 0;
+  float distance = INFINITY;
+  for (unsigned i = 0; i < sky->count; i++) {
+    const DioramaSkyboxBandProjection *band = &sky->bands[i];
+    if (!ValidSkyboxBand(band)) return -1;
+    const float d = fmaxf(0, fmaxf(band->y0 - y, y - band->y1));
+    if (d < distance) {
+      distance = d;
+      selected = (int)i;
     }
   }
-  const DioramaSkyboxBandProjection *band = &sky->bands[selected];
-  if (!ValidSkyboxBand(band)) return false;
+  return selected;
+}
+
+bool Diorama_SkyboxAnchorBounds(const DioramaProjection *projection, float anchor_y,
+                                float *x0, float *y0, float *x1, float *y1) {
+  if (!projection || !projection->valid || !x0 || !y0 || !x1 || !y1) return false;
+  const DioramaSkyboxProjection *sky = &projection->bg2_skybox;
+  const int selected = SkyboxBandAt(sky, anchor_y);
+  if (selected < 0) return false;
+  const DioramaSkyboxBandProjection *source = &sky->bands[selected];
+  const unsigned first = sky->active_band < 0 ? 0 : (unsigned)sky->active_band;
+  const unsigned end = sky->active_band < 0 ? sky->count : first + 1;
+  float top = INFINITY, bottom = -INFINITY;
+  for (unsigned i = first; i < end; i++) {
+    top = fminf(top, sky->bands[i].output_y0);
+    bottom = fmaxf(bottom, sky->bands[i].output_y1);
+  }
+  const float height = (source->y1 - source->y0) /
+      (source->output_y1 - source->output_y0);
+  *x0 = source->x0;
+  *x1 = source->x1;
+  *y0 = source->y0 + (top - source->output_y0) * height;
+  *y1 = source->y0 + (bottom - source->output_y0) * height;
+  return true;
+}
+
+static bool ProjectSkyboxBandPoint(const DioramaProjection *projection,
+    const DioramaSkyboxBandProjection *band, float x, float y,
+    ArRenderPointF *point, float *scale_x, float *scale_y) {
+  if (!projection->valid || !ValidSkyboxBand(band) || !point ||
+      projection->output_width <= 0 || projection->output_height <= 0 ||
+      !isfinite(x) || !isfinite(y)) return false;
   const float sx = projection->output_width / (band->x1 - band->x0);
   const float sy = projection->output_height *
       (band->output_y1 - band->output_y0) / (band->y1 - band->y0);
@@ -447,6 +470,26 @@ static bool ProjectSkyboxPoint(const DioramaProjection *projection,
   if (scale_x) *scale_x = sx;
   if (scale_y) *scale_y = sy;
   return true;
+}
+
+bool Diorama_ProjectSkyboxAnchorPoint(const DioramaProjection *projection, float anchor_y,
+                                      float x, float y, ArRenderPointF *point) {
+  if (!projection) return false;
+  const int selected = SkyboxBandAt(&projection->bg2_skybox, anchor_y);
+  return selected >= 0 && ProjectSkyboxBandPoint(
+      projection, &projection->bg2_skybox.bands[selected], x, y, point, NULL, NULL);
+}
+
+static bool ProjectSkyboxPoint(const DioramaProjection *projection,
+    float x, float y, ArRenderPointF *point, float *scale_x, float *scale_y) {
+  const DioramaSkyboxProjection *sky = &projection->bg2_skybox;
+  const int nearest = SkyboxBandAt(sky, y);
+  if (nearest < 0) return false;
+  /* Direction probes may extrapolate beyond the visible rectangle. Extend
+   * the nearest band; geometry itself is clipped before projection. */
+  const int selected = sky->active_band < 0 ? nearest : sky->active_band;
+  return ProjectSkyboxBandPoint(
+      projection, &sky->bands[selected], x, y, point, scale_x, scale_y);
 }
 
 bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,

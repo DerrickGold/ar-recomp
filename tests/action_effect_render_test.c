@@ -3473,7 +3473,79 @@ static void TestSkyboxEffectProjection(void) {
   CHECK(!ActionEffectProjection_ProjectPoint(&context,&moon,0,0,&point));
 }
 
+static void TestMoonRaysStayContinuousAcrossSkyboxBands(void) {
+  DioramaProjection projection = {
+    .valid = true, .output_width = 800, .output_height = 400,
+    .bg2_skybox = {.count = 2, .active_band = 0,
+      .bands = {{44,64,476,200,0,136.0f/224},
+                {0,200,496,288,136.0f/224,1}}},
+  };
+  ActionEffectProjectionContext context = {
+    .ws_extra = 120, .ws_extra_top = 64, .diorama_projection = &projection,
+  };
+  ActionEffectInstance moon = {
+    .kind = kActionEffect_BloodpoolMoonlight, .world_x = 112, .world_y = 62,
+    .phase = kActionEffectPhase_BloodpoolEnvironment, .visual = 1,
+    .flags = kActionEffectFlag_Visible | kActionEffectFlag_ClippedMesh,
+    .render_layer = kActionEffectRenderLayer_Bg2Plane,
+    .projection_plane = kActionEffectProjectionPlane_Bg2,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,194}},
+  };
+  ArRenderPointF upper, lower;
+  CHECK(ActionEffectProjection_ProjectPoint(&context,&moon,32,74,&upper));
+  ActionEffectLocalRect upper_clip, lower_clip;
+  CHECK(ActionEffectProjection_ClipBounds(&context,&moon,&upper_clip));
+  projection.bg2_skybox.active_band = 1;
+  CHECK(ActionEffectProjection_ProjectPoint(&context,&moon,32,74,&lower));
+  CHECK(ActionEffectProjection_ClipBounds(&context,&moon,&lower_clip));
+  CHECK(fabsf(upper.x-lower.x) < .001f);
+  CHECK(fabsf(upper.y-lower.y) < .001f);
+  CHECK(fabsf(upper_clip.x0-lower_clip.x0) < .001f);
+  CHECK(fabsf(upper_clip.x1-lower_clip.x1) < .001f);
+  CHECK(fabsf(upper_clip.y1-lower_clip.y0) < .001f);
+  ActionSceneEffectFrame frame = {
+    .decoration_count = 1, .decoration_visible_count = 1,
+    .moonlight = {.valid = true},
+  };
+  frame.decorations[0] = moon;
+  static ActionSceneEffectRenderBatch bands[2], continuous;
+  const DioramaSkyboxProjection source_bands = projection.bg2_skybox;
+  for (int band = 0; band < 2; band++) {
+    projection.bg2_skybox.active_band = band;
+    CHECK(ActionSceneDecorationRender_Build(&frame,moon.render_layer,true,false,
+        ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,
+        &context,&bands[band]));
+    CHECK(bands[band].index_count > 0);
+    for (int i = 0; i < bands[band].vertex_count; i++) {
+      const float y = bands[band].vertices[i].position.y;
+      CHECK(y >= 400*source_bands.bands[band].output_y0-.001f);
+      CHECK(y <= 400*source_bands.bands[band].output_y1+.001f);
+    }
+  }
+  projection.bg2_skybox = (DioramaSkyboxProjection){
+    .count = 1, .active_band = 0, .bands = {{44,64,476,288,0,1}},
+  };
+  CHECK(ActionSceneDecorationRender_Build(&frame,moon.render_layer,true,false,
+      ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,
+      &context,&continuous));
+  for (int band = 0; band < 2; band++) {
+    const float y = upper.y + (band ? 2 : -2);
+    const float expected = MoonAlphaAt(&continuous,upper.x,y);
+    CHECK(expected > 0);
+    CHECK(fabsf(MoonAlphaAt(&bands[band],upper.x,y)-expected) < .001f);
+  }
+  projection.bg2_skybox = source_bands;
+  /* Water reflections retain the native row-band projection. Only the
+   * airborne light field uses one transform through the water horizon. */
+  moon.kind = kActionEffect_BloodpoolMoonReflection;
+  CHECK(ActionEffectProjection_ProjectPoint(&context,&moon,32,74,&lower));
+  projection.bg2_skybox.active_band = 0;
+  CHECK(ActionEffectProjection_ProjectPoint(&context,&moon,32,74,&upper));
+  CHECK(fabsf(upper.x-lower.x) > 10);
+}
+
 int main(void) {
+  TestMoonRaysStayContinuousAcrossSkyboxBands();
   TestSkyboxEffectProjection();
   TestCastleStackedRays();
   TestBloodpoolMarshDetails();

@@ -11,6 +11,14 @@ static bool EffectUsesSkybox(const DioramaProjection *projection,
        effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds);
 }
 
+static bool SkyboxEffectBounds(const DioramaProjection *projection,
+    const ActionEffectInstance *effect, float anchor_y,
+    float *x0, float *y0, float *x1, float *y1) {
+  if (effect->kind == kActionEffect_BloodpoolMoonlight)
+    return Diorama_SkyboxAnchorBounds(projection, anchor_y, x0, y0, x1, y1);
+  return Diorama_SkyboxCaptureBounds(projection, x0, y0, x1, y1);
+}
+
 static const DioramaPlaneProjection *ProjectionPlaneForEffect(
     const DioramaProjection *projection,
     const ActionEffectInstance *effect) {
@@ -42,13 +50,13 @@ static const DioramaPlaneProjection *ProjectionPlaneForEffect(
 static bool PointIsOnPublishedDioramaPlane(
     const DioramaProjection *projection,
     const ActionEffectInstance *effect,
-    float capture_x, float texture_y) {
+    float capture_x, float texture_y, float anchor_y) {
   if (!projection || !effect) return false;
   if (effect->render_layer == kActionEffectRenderLayer_Atmosphere)
     return true;
   if (EffectUsesSkybox(projection, effect)) {
     float x0, y0, x1, y1;
-    return Diorama_SkyboxCaptureBounds(projection, &x0, &y0, &x1, &y1) &&
+    return SkyboxEffectBounds(projection, effect, anchor_y, &x0, &y0, &x1, &y1) &&
         capture_x >= x0 && capture_x <= x1 && texture_y >= y0 && texture_y <= y1;
   }
   const DioramaPlaneProjection *plane =
@@ -186,7 +194,7 @@ bool ActionEffectProjection_ClipBounds(
   if (context->diorama_projection) {
     const DioramaProjection *projection = context->diorama_projection;
     if (EffectUsesSkybox(projection, effect)) {
-      if (!Diorama_SkyboxCaptureBounds(projection,
+      if (!SkyboxEffectBounds(projection, effect, context->ws_extra_top + screen_y,
               &visible.x0, &visible.y0, &visible.x1, &visible.y1)) return false;
       visible.x0 -= context->ws_extra + screen_x;
       visible.x1 -= context->ws_extra + screen_x;
@@ -259,7 +267,8 @@ bool ActionEffectProjection_ProjectPoint(
      * holes; never move those points or change their interpolated brightness. */
     if (!(effect->flags & kActionEffectFlag_ClippedMesh) &&
         !PointIsOnPublishedDioramaPlane(
-            context->diorama_projection, effect, capture_x, texture_y))
+            context->diorama_projection, effect, capture_x, texture_y,
+            screen_y + context->ws_extra_top))
       return false;
     ArRenderPointF projected;
     bool valid;
@@ -268,10 +277,16 @@ bool ActionEffectProjection_ProjectPoint(
           context->diorama_projection, capture_x, texture_y,
           &projected, NULL, NULL);
     else if (effect->projection_plane == kActionEffectProjectionPlane_Bg2 ||
-             effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds)
-      valid = Diorama_ProjectCapturedBg2Point(
+             effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds) {
+      if (EffectUsesSkybox(context->diorama_projection, effect) &&
+          effect->kind == kActionEffect_BloodpoolMoonlight)
+        valid = Diorama_ProjectSkyboxAnchorPoint(
+            context->diorama_projection, screen_y + context->ws_extra_top,
+            capture_x, texture_y, &projected);
+      else valid = Diorama_ProjectCapturedBg2Point(
           context->diorama_projection, capture_x, texture_y,
           &projected, NULL, NULL);
+    }
     else if (effect->projection_plane ==
              kActionEffectProjectionPlane_Bg1High)
       valid = Diorama_ProjectCapturedBg1HighPoint(

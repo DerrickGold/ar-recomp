@@ -162,6 +162,14 @@ typedef struct DioramaProjection {
 bool Diorama_SkyboxCaptureBounds(const DioramaProjection *projection,
                                  float *x0, float *y0, float *x1, float *y1);
 
+/* Airborne light inherits the mapping at its source, rather than bending with
+ * each row band's independent texture stretch. Bounds still clip its drawing
+ * to the active band's output rows, expressed through that source mapping. */
+bool Diorama_SkyboxAnchorBounds(const DioramaProjection *projection, float anchor_y,
+                                float *x0, float *y0, float *x1, float *y1);
+bool Diorama_ProjectSkyboxAnchorPoint(const DioramaProjection *projection, float anchor_y,
+                                      float x, float y, ArRenderPointF *point);
+
 /* Optional presentation hook inserted immediately after a drawable plane's
  * main mesh. It receives the same resolved projection the plane uses, making
  * BG-local enhancements part of painter order instead of a late world overlay. */
