@@ -1448,12 +1448,12 @@ static int ShadowBounds(const SimBackgroundVoxelObject *object,
         21.5f, 0.5f, 31.5f, 31.5f, 17.0f};
       return 3;
     case kSimBackgroundVoxel_Tree:
+    case kSimBackgroundVoxel_Shrub:
     case kSimBackgroundVoxel_Boulder:
     case kSimBackgroundVoxel_Rocks:
       return 0;
     case kSimBackgroundVoxel_Palm:
     case kSimBackgroundVoxel_BroadTree:
-    case kSimBackgroundVoxel_Shrub:
       out[0] = (SimBackgroundShadowBounds){
         0.0f, 0.0f, 16.0f, 16.0f,
         SimBackgroundVoxelRegion_AuthoredHeight(object)};
@@ -1550,30 +1550,31 @@ static void AppendShadowVolume(
   }
 }
 
-typedef struct SimBackgroundTreeShadowCacheEntry {
+typedef struct SimBackgroundFoliageShadowCacheEntry {
   uint16_t variant;
   int count;
-  SimBackgroundVoxelModelPoint points[kSimBackgroundVoxelTreeShadowMaxPoints];
-} SimBackgroundTreeShadowCacheEntry;
+  SimBackgroundVoxelModelPoint points[kSimBackgroundVoxelFoliageShadowMaxPoints];
+} SimBackgroundFoliageShadowCacheEntry;
 
-static void AppendTreeShadow(
+static void AppendFoliageShadow(
     ArRenderDevice *device, SimBackgroundGeometryBatch *batch,
     const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundVoxelObject *object, const SimBackgroundProjectionAxis *axis,
-    float light_x, float light_y, SimBackgroundTreeShadowCacheEntry cache[16]) {
+    float light_x, float light_y, SimBackgroundFoliageShadowCacheEntry cache[17]) {
   const SimBackgroundVoxelProportions *proportions =
-      SimBackgroundVoxelProportions_Get(kSimBackgroundVoxel_Tree);
+      SimBackgroundVoxelProportions_Get((SimBackgroundVoxelKind)object->kind);
   float aspect = (float)params->viewport.w / params->viewport.h;
   float height_ratio = proportions->height_scale / proportions->footprint_scale;
-  /* Cast from where the tree is drawn, including its camera-facing lean.
+  /* Cast from where the foliage is drawn, including its camera-facing lean.
    * World +Y is texture -Y; X also carries the source/viewport aspect ratio. */
   float cast_x = height_ratio * (axis->x_per_height + axis->height_scale * light_x *
       params->source.w / (params->source.h * aspect));
   float cast_y = height_ratio * (axis->y_per_height - axis->height_scale * light_y);
-  uint16_t variant = SimBackgroundVoxelModel_TreeShadowVariant(object);
-  SimBackgroundTreeShadowCacheEntry *entry = &cache[variant & 15u];
+  uint16_t variant = SimBackgroundVoxelModel_FoliageShadowVariant(object);
+  SimBackgroundFoliageShadowCacheEntry *entry =
+      &cache[object->kind == kSimBackgroundVoxel_Shrub ? 16 : variant & 15u];
   if (!entry->count || entry->variant != variant) {
-    entry->count = SimBackgroundVoxelModel_TreeShadowHull(object, cast_x, cast_y, entry->points);
+    entry->count = SimBackgroundVoxelModel_FoliageShadowHull(object, cast_x, cast_y, entry->points);
     entry->variant = variant;
   }
   const SimBackgroundVoxelModelPoint *hull = entry->points;
@@ -1581,7 +1582,7 @@ static void AppendTreeShadow(
   if (count < 3) return;
   float origin_x = (float)params->town_screen_x0 - params->camera_x + ObjectOriginX(object);
   float origin_y = -(float)params->camera_y + ObjectOriginY(object);
-  Scene3DPoint projected[kSimBackgroundVoxelTreeShadowMaxPoints];
+  Scene3DPoint projected[kSimBackgroundVoxelFoliageShadowMaxPoints];
   for (int i = 0; i < count; i++) {
     float x = 8 + (hull[i].x - 8) * proportions->footprint_scale;
     float y = 8 + (hull[i].y - 8) * proportions->footprint_scale;
@@ -1606,10 +1607,10 @@ static void DrawShadowMaskResolved(
     const SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount],
     bool cull, float light_x, float light_y) {
   const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
-  /* A forest repeats sixteen seeded profiles. The light and per-kind axis
-   * are constant during this pass, so build each local outline only once.
+  /* Conifers repeat sixteen seeded profiles; shrubs share one more. The light
+   * and per-kind axis are constant during this pass, so build each outline once.
    * Per-pass storage avoids shared mutable state or camera invalidation. */
-  SimBackgroundTreeShadowCacheEntry tree_cache[16] = {0};
+  SimBackgroundFoliageShadowCacheEntry foliage_cache[17] = {0};
   SimBackgroundGeometryBatch *batch = &g_renderer_state.batch;
   batch->vertex_count = 0;
   batch->index_count = 0;
@@ -1622,8 +1623,8 @@ static void DrawShadowMaskResolved(
     const float model_lift = ObjectModelLiftPixels(
         object, params, center_x, center_y);
     if (cull && !ObjectMayBeVisible(object, params, axis, model_lift)) continue;
-    if (object->kind == kSimBackgroundVoxel_Tree) {
-      AppendTreeShadow(device, batch, params, object, axis, light_x, light_y, tree_cache);
+    if (object->kind == kSimBackgroundVoxel_Tree || object->kind == kSimBackgroundVoxel_Shrub) {
+      AppendFoliageShadow(device, batch, params, object, axis, light_x, light_y, foliage_cache);
       continue;
     }
     SimBackgroundShadowBounds bounds[kSimBackgroundMaxShadowVolumes];

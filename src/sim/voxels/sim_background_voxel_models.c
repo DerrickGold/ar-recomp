@@ -1846,8 +1846,19 @@ static SimBackgroundVoxelModelPoint TreeCrownPoint(
                3.5f + (profile->height - 3.5f) * h - .35f * radial * cosf(angle * 6 + (profile->seed % 4u)));
 }
 
-uint16_t SimBackgroundVoxelModel_TreeShadowVariant(const SimBackgroundVoxelObject *object) {
-  /* Crown geometry uses the seed's low four bits; higher bits only identify
+static SimBackgroundVoxelModelPoint ShrubPoint(float angle, float t) {
+  /* One closed, gently scalloped crown. Its widest section sits low, with a
+   * rounded shoulder and a tiny exposed stem, as in the native $01 art. */
+  float radius = RoundCrownRadius(t, 0.40f, 1.0f);
+  float clump = 1.0f + 0.06f * sinf(angle * 5.0f + t * 4.0f);
+  return Point(8.0f + cosf(angle) * 6.3f * radius * clump,
+               8.0f + sinf(angle) * 5.4f * radius * clump,
+               1.8f + 11.8f * t);
+}
+
+uint16_t SimBackgroundVoxelModel_FoliageShadowVariant(const SimBackgroundVoxelObject *object) {
+  if (object && object->kind == kSimBackgroundVoxel_Shrub) return UINT16_MAX;
+  /* Conifer crown geometry uses the seed's low four bits; higher bits only identify
    * the object. Keep this identity beside the shared profile definition. */
   return object ? (uint16_t)((object->town << 4) | (FoliageSeed(object) & 15u)) : 0;
 }
@@ -1870,26 +1881,37 @@ static float ShadowCross(SimBackgroundVoxelModelPoint a,
   return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 }
 
-int SimBackgroundVoxelModel_TreeShadowHull(
+int SimBackgroundVoxelModel_FoliageShadowHull(
     const SimBackgroundVoxelObject *object, float cast_x, float cast_y,
-    SimBackgroundVoxelModelPoint out[kSimBackgroundVoxelTreeShadowMaxPoints]) {
-  if (!object || !out || object->kind != kSimBackgroundVoxel_Tree ||
+    SimBackgroundVoxelModelPoint out[kSimBackgroundVoxelFoliageShadowMaxPoints]) {
+  if (!object || !out ||
+      (object->kind != kSimBackgroundVoxel_Tree && object->kind != kSimBackgroundVoxel_Shrub) ||
       !isfinite(cast_x) || !isfinite(cast_y)) return 0;
-  TreeProfile profile = ResolveTreeProfile(object);
-  /* Only the outer crown rings, tip and trunk foot can be silhouette extrema.
-   * Reusing the model profile avoids a second hand-tuned shadow radius/height.
-   * This is 101 points and a small hull, rather than reprojecting hundreds of
-   * detail faces per tree into the shadow mask every frame. */
-  enum { kRingSides = 24, kSamples = 4 * kRingSides + 5 };
+  /* Sample the same crown surfaces as the models at a fixed density, so
+   * shadows follow the foliage without changing shape when render LOD changes.
+   * The rounded shrub needs intermediate rings; a conifer needs only its outer
+   * branch rings, tip and trunk foot. Each outline is cached for the pass. */
+  enum { kRingSides = 24, kShrubRings = 16, kSamples = (kShrubRings + 1) * kRingSides + 4 };
   SimBackgroundVoxelModelPoint points[kSamples], hull[kSamples * 2];
   int count = 0;
-  for (int ring = 1; ring < 8; ring += 2)
-    for (int side = 0; side < kRingSides; side++)
-      points[count++] = TreeCrownPoint(&profile, kTreeCrownZ[ring], kTreeCrownRadius[ring],
-          side * 6.2831853f / kRingSides);
-  points[count++] = TreeCrownPoint(&profile, 1, 0, 0);
-  for (int corner = 0; corner < 4; corner++)
-    points[count++] = Point(corner & 1 ? 8.95f : 7.05f, corner & 2 ? 8.95f : 7.05f, 0);
+  if (object->kind == kSimBackgroundVoxel_Shrub) {
+    for (int ring = 0; ring <= kShrubRings; ring++) {
+      float t = (1.0f - cosf(3.14159265f * ring / kShrubRings)) * .5f;
+      for (int side = 0; side < kRingSides; side++)
+        points[count++] = ShrubPoint(side * 6.2831853f / kRingSides, t);
+    }
+    for (int corner = 0; corner < 4; corner++)
+      points[count++] = Point(corner & 1 ? 9 : 7, corner & 2 ? 9 : 7, 0);
+  } else {
+    TreeProfile profile = ResolveTreeProfile(object);
+    for (int ring = 1; ring < 8; ring += 2)
+      for (int side = 0; side < kRingSides; side++)
+        points[count++] = TreeCrownPoint(&profile, kTreeCrownZ[ring], kTreeCrownRadius[ring],
+            side * 6.2831853f / kRingSides);
+    points[count++] = TreeCrownPoint(&profile, 1, 0, 0);
+    for (int corner = 0; corner < 4; corner++)
+      points[count++] = Point(corner & 1 ? 8.95f : 7.05f, corner & 2 ? 8.95f : 7.05f, 0);
+  }
   for (int i = 0; i < count; i++) {
     points[i].x += points[i].z * cast_x;
     points[i].y += points[i].z * cast_y;
@@ -1907,7 +1929,7 @@ int SimBackgroundVoxelModel_TreeShadowHull(
     hull[n++] = points[i];
   }
   n--; /* The first vertex is repeated at the end. */
-  if (n < 3 || n > kSimBackgroundVoxelTreeShadowMaxPoints) return 0;
+  if (n < 3 || n > kSimBackgroundVoxelFoliageShadowMaxPoints) return 0;
   memcpy(out, hull, n * sizeof(*out));
   return n;
 }
@@ -2016,16 +2038,6 @@ static void BuildBroadTree(const SimBackgroundVoxelObject *object,
                            SimBackgroundVoxelDetail detail,
                            SimBackgroundVoxelModel *model) {
   BuildBranchingCrown(model, detail, FoliageSeed(object), 1.0f, false);
-}
-
-static SimBackgroundVoxelModelPoint ShrubPoint(float angle, float t) {
-  /* One closed, gently scalloped crown. Its widest section sits low, with a
-   * rounded shoulder and a tiny exposed stem, as in the native $01 art. */
-  float radius = RoundCrownRadius(t, 0.40f, 1.0f);
-  float clump = 1.0f + 0.06f * sinf(angle * 5.0f + t * 4.0f);
-  return Point(8.0f + cosf(angle) * 6.3f * radius * clump,
-               8.0f + sinf(angle) * 5.4f * radius * clump,
-               1.8f + 11.8f * t);
 }
 
 static void BuildShrub(const SimBackgroundVoxelObject *object,

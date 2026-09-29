@@ -713,62 +713,91 @@ static void CheckRecognitionPolish(void) {
   }
 }
 
-static void CheckTreeShadows(void) {
-  SimBackgroundVoxelModelPoint hull[kSimBackgroundVoxelTreeShadowMaxPoints];
+static void CheckFoliageShadows(void) {
+  SimBackgroundVoxelModelPoint hull[kSimBackgroundVoxelFoliageShadowMaxPoints];
   SimBackgroundVoxelObject tree = {.kind = kSimBackgroundVoxel_Tree, .town = 1};
   CHECK(!SimBackgroundVoxelModel_CastsShadow(NULL));
   CHECK(SimBackgroundVoxelModel_CastsShadow(&tree));
-  CHECK(SimBackgroundVoxelModel_TreeShadowHull(NULL, 0, 0, hull) == 0);
-  CHECK(SimBackgroundVoxelModel_TreeShadowHull(&tree, NAN, 0, hull) == 0);
-  CHECK(SimBackgroundVoxelModel_TreeShadowHull(&tree, 0, 0, NULL) == 0);
+  CHECK(SimBackgroundVoxelModel_FoliageShadowHull(NULL, 0, 0, hull) == 0);
+  CHECK(SimBackgroundVoxelModel_FoliageShadowHull(&tree, NAN, 0, hull) == 0);
+  CHECK(SimBackgroundVoxelModel_FoliageShadowHull(&tree, 0, 0, NULL) == 0);
   SimBackgroundVoxelObject repeat = tree;
   repeat.cell_x += 16;
   repeat.cell_y += 16;
   repeat.group += 16;
-  SimBackgroundVoxelModelPoint same[kSimBackgroundVoxelTreeShadowMaxPoints];
-  CHECK(SimBackgroundVoxelModel_TreeShadowVariant(&tree) ==
-        SimBackgroundVoxelModel_TreeShadowVariant(&repeat));
-  int n = SimBackgroundVoxelModel_TreeShadowHull(&tree, .7f, -.3f, hull);
-  CHECK(SimBackgroundVoxelModel_TreeShadowHull(&repeat, .7f, -.3f, same) == n);
+  SimBackgroundVoxelModelPoint same[kSimBackgroundVoxelFoliageShadowMaxPoints];
+  CHECK(SimBackgroundVoxelModel_FoliageShadowVariant(&tree) ==
+        SimBackgroundVoxelModel_FoliageShadowVariant(&repeat));
+  int n = SimBackgroundVoxelModel_FoliageShadowHull(&tree, .7f, -.3f, hull);
+  CHECK(SimBackgroundVoxelModel_FoliageShadowHull(&repeat, .7f, -.3f, same) == n);
   CHECK(!memcmp(hull, same, n * sizeof(*hull)));
+  SimBackgroundVoxelObject shrub = {.kind = kSimBackgroundVoxel_Shrub, .town = 1};
+  CHECK(SimBackgroundVoxelModel_CastsShadow(&shrub));
+  CHECK(SimBackgroundVoxelModel_FoliageShadowVariant(&shrub) !=
+        SimBackgroundVoxelModel_FoliageShadowVariant(&tree));
+  repeat = shrub;
+  repeat.town = 6;
+  repeat.cell_x = 7;
+  repeat.cell_y = 13;
+  repeat.group = 9;
+  CHECK(SimBackgroundVoxelModel_FoliageShadowVariant(&shrub) ==
+        SimBackgroundVoxelModel_FoliageShadowVariant(&repeat));
+  n = SimBackgroundVoxelModel_FoliageShadowHull(&shrub, .7f, -.3f, hull);
+  CHECK(n >= 8);
+  CHECK(SimBackgroundVoxelModel_FoliageShadowHull(&repeat, .7f, -.3f, same) == n);
+  CHECK(!memcmp(hull, same, n * sizeof(*hull)));
+  CHECK(SimBackgroundVoxelModel_FoliageShadowHull(&shrub, 0, INFINITY, hull) == 0);
+  repeat.kind = kSimBackgroundVoxel_House;
+  CHECK(SimBackgroundVoxelModel_FoliageShadowHull(&repeat, 0, 0, hull) == 0);
+  /* Curved crowns must still fit the outline budget at grazing light angles. */
+  for (int slope = 0; slope <= 32; slope++)
+    for (int direction = 0; direction < 24; direction++) {
+      float angle = direction * 6.2831853f / 24;
+      CHECK(SimBackgroundVoxelModel_FoliageShadowHull(
+          &shrub, slope * .25f * cosf(angle), slope * .25f * sinf(angle), hull) >= 8);
+    }
   static const float casts[][2] = {{0, 0}, {.6f, -.4f}, {-.6f, .4f}, {2, 1}, {-2, -1}};
-  for (int town = 1; town <= 6; town++)
-    for (int seed = 0; seed < 4; seed++)
-      for (size_t cast = 0; cast < sizeof(casts) / sizeof(casts[0]); cast++) {
-        tree.town = town;
-        tree.cell_x = seed;
-        tree.cell_y = seed * 3;
-        float dx = casts[cast][0], dy = casts[cast][1];
-        int count = SimBackgroundVoxelModel_TreeShadowHull(&tree, dx, dy, hull);
-        CHECK(count >= 8 && count <= kSimBackgroundVoxelTreeShadowMaxPoints);
-        float twice_area = 0;
-        for (int i = 0; i < count; i++) {
-          SimBackgroundVoxelModelPoint a = hull[i], b = hull[(i + 1) % count];
-          CHECK(isfinite(a.x) && isfinite(a.y) && a.z == 0);
-          twice_area += a.x * b.y - b.x * a.y;
-          if (!cast) CHECK(a.x > .5f && a.x < 15.5f && a.y > .5f && a.y < 15.5f);
-        }
-        CHECK(twice_area > 120);
-        if (!cast) CHECK(twice_area < 290); /* Round canopy, not a 256px tile. */
-        /* The inexpensive outline must enclose the light-projected model at
-         * every LOD, to within the subpixel error of its twenty-four-sided rings. */
-        for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
-          SimBackgroundVoxelModel model;
-          SimBackgroundVoxelModel_BuildStyled(&tree, detail, kSimBackgroundVoxelStyle_Varied, &model);
-          for (int face = 0; face < model.face_count; face++)
-            for (int vertex = 0; vertex < 4; vertex++) {
-              SimBackgroundVoxelModelPoint p = model.faces[face].points[vertex];
-              p.x += p.z * dx;
-              p.y += p.z * dy;
-              for (int edge = 0; edge < count; edge++) {
-                SimBackgroundVoxelModelPoint a = hull[edge], b = hull[(edge + 1) % count];
-                float ex = b.x - a.x, ey = b.y - a.y;
-                float distance = (ex * (p.y - a.y) - ey * (p.x - a.x)) / hypotf(ex, ey);
-                CHECK(distance > -.4f);
+  static const SimBackgroundVoxelKind kinds[] = {
+    kSimBackgroundVoxel_Tree, kSimBackgroundVoxel_Shrub,
+  };
+  for (size_t kind = 0; kind < sizeof(kinds) / sizeof(kinds[0]); kind++)
+    for (int town = 1; town <= 6; town++)
+      for (int seed = 0; seed < 4; seed++)
+        for (size_t cast = 0; cast < sizeof(casts) / sizeof(casts[0]); cast++) {
+          SimBackgroundVoxelObject object = {.kind = kinds[kind], .town = town,
+              .cell_x = seed, .cell_y = seed * 3};
+          float dx = casts[cast][0], dy = casts[cast][1];
+          int count = SimBackgroundVoxelModel_FoliageShadowHull(&object, dx, dy, hull);
+          CHECK(count >= 8 && count <= kSimBackgroundVoxelFoliageShadowMaxPoints);
+          float twice_area = 0;
+          for (int i = 0; i < count; i++) {
+            SimBackgroundVoxelModelPoint a = hull[i], b = hull[(i + 1) % count];
+            CHECK(isfinite(a.x) && isfinite(a.y) && a.z == 0);
+            twice_area += a.x * b.y - b.x * a.y;
+            if (!cast) CHECK(a.x > .5f && a.x < 15.5f && a.y > .5f && a.y < 15.5f);
+          }
+          CHECK(twice_area > 120);
+          if (!cast) CHECK(twice_area < 290); /* Round canopy, not a 256px tile. */
+          /* The inexpensive outline must enclose the light-projected model at
+           * every LOD, to within the subpixel error of its twenty-four-sided rings. */
+          for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+            SimBackgroundVoxelModel model;
+            SimBackgroundVoxelModel_BuildStyled(
+                &object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+            for (int face = 0; face < model.face_count; face++)
+              for (int vertex = 0; vertex < 4; vertex++) {
+                SimBackgroundVoxelModelPoint p = model.faces[face].points[vertex];
+                p.x += p.z * dx;
+                p.y += p.z * dy;
+                for (int edge = 0; edge < count; edge++) {
+                  SimBackgroundVoxelModelPoint a = hull[edge], b = hull[(edge + 1) % count];
+                  float ex = b.x - a.x, ey = b.y - a.y;
+                  float distance = (ex * (p.y - a.y) - ey * (p.x - a.x)) / hypotf(ex, ey);
+                  CHECK(distance > -.4f);
+                }
               }
-            }
+          }
         }
-      }
 }
 
 static void CheckReviewFollowup(void) {
@@ -892,7 +921,7 @@ int main(void) {
   CheckAuditRegressions();
   CheckRecognitionPolish();
   CheckEnvironmentModels();
-  CheckTreeShadows();
+  CheckFoliageShadows();
   CheckReviewFollowup();
   CHECK(SimBackgroundVoxelModel_HeightBound(NULL, kSimBackgroundVoxelDetail_Ultra,
                                             kSimBackgroundVoxelStyle_Varied) == 0.0f);

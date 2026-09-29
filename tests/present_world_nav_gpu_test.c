@@ -2375,7 +2375,15 @@ static void TestFacingTownScene(SDL_Renderer *renderer) {
 
 /* Exercise the public shadow pass, including its batch flush, in a decoded
  * town. A model-only thumbnail never visits this path. */
-static void BuildVoxelShadowScene(bool rocks, bool dense) {
+typedef enum VoxelShadowScene {
+  kVoxelShadowScene_Rocks,
+  kVoxelShadowScene_Tree,
+  kVoxelShadowScene_Shrub,
+  kVoxelShadowScene_MixedFoliage,
+} VoxelShadowScene;
+
+static void BuildVoxelShadowScene(VoxelShadowScene scene, bool dense) {
+  bool rocks = scene == kVoxelShadowScene_Rocks;
   static uint8_t wram[kWramBytes];
   static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
   memset(wram, 0, sizeof(wram));
@@ -2386,7 +2394,9 @@ static void BuildVoxelShadowScene(bool rocks, bool dense) {
       int quadrant = (y >= 16 ? 2 : 0) + (x >= 16 ? 1 : 0);
       size_t cell = 0x12000 + quadrant * 0x100 + (y & 15) * 16 + (x & 15);
       if (rocks && y == 4 && x >= 2 && x < 8) wram[cell] = rock_tiles[x - 2];
-      else if (!rocks && (dense || (x == 4 && y == 4))) wram[cell] = 0x0b;
+      else if (!rocks && (dense || (x == 4 && y == 4)))
+        wram[cell] = scene == kVoxelShadowScene_Shrub ||
+            (scene == kVoxelShadowScene_MixedFoliage && ((x + y) & 1)) ? 0x01 : 0x0b;
     }
   SimBackgroundVoxelRenderer_Reset(&g_render_device);
   SimBackgroundVoxels_Reset();
@@ -2465,7 +2475,7 @@ static void TestVoxelShadows(SDL_Renderer *renderer) {
     .facing = kSimBackgroundVoxelFacing_PerModel,
     .source = {0, 0, 512, 512}, .viewport = {32, 32, 512, 512}, .matrix = matrix,
   };
-  BuildVoxelShadowScene(true, false);
+  BuildVoxelShadowScene(kVoxelShadowScene_Rocks, false);
   params.serial = SimBackgroundVoxels_Serial();
   for (int town_mask = 0; town_mask < 2; town_mask++) {
     SDL_Surface *rocks = RenderVoxelShadowProbe(renderer, &params, .8f, -.4f, town_mask,
@@ -2475,7 +2485,7 @@ static void TestVoxelShadows(SDL_Renderer *renderer) {
     SDL_DestroySurface(rocks);
   }
   RenderVoxelShadowPreview(renderer, params, true, .8f, -.4f, "rocks-without-shadows");
-  BuildVoxelShadowScene(false, false);
+  BuildVoxelShadowScene(kVoxelShadowScene_Tree, false);
   params.serial = SimBackgroundVoxels_Serial();
   SDL_Surface *overhead = RenderVoxelShadowProbe(renderer, &params, 0, 0, false, "tree-overhead-mask");
   int area = ColorCount(overhead, 0xff000000);
@@ -2505,7 +2515,7 @@ static void TestVoxelShadows(SDL_Renderer *renderer) {
   SDL_DestroySurface(left);
   RenderVoxelShadowPreview(renderer, params, false, 0, .0875f, "tree-with-near-overhead-shadow");
   RenderVoxelShadowPreview(renderer, params, false, .8f, -.4f, "tree-with-angled-shadow");
-  BuildVoxelShadowScene(false, true);
+  BuildVoxelShadowScene(kVoxelShadowScene_Tree, true);
   params.serial = SimBackgroundVoxels_Serial();
   uint64_t start = SDL_GetTicksNS();
   SDL_Surface *forest = RenderVoxelShadowProbe(renderer, &params, 0, 0, true, "forest-shadow-mask");
@@ -2519,6 +2529,61 @@ static void TestVoxelShadows(SDL_Renderer *renderer) {
          "both mask paths, six rock variants shadow-free (forest draw/readback %.2f ms)\n",
          (SDL_GetTicksNS() - start) / 1000000.0);
   RenderVoxelShadowPreview(renderer, params, false, 0, .0875f, "forest-with-shaped-shadows");
+  BuildVoxelShadowScene(kVoxelShadowScene_Shrub, false);
+  params.serial = SimBackgroundVoxels_Serial();
+  overhead = RenderVoxelShadowProbe(renderer, &params, 0, 0, false, "shrub-overhead-mask");
+  area = ColorCount(overhead, 0xff000000);
+  CHECK(area > 65 && area < 125); /* Rounded crown, well inside a full 16x16 tile. */
+  CHECK(Pixel(overhead, 104, 104) == 0xff000000);
+  for (int y = 0; y < 2; y++)
+    for (int x = 0; x < 2; x++)
+      CHECK(Pixel(overhead, x ? 110 : 97, y ? 110 : 97) == 0xffffffff);
+  for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+    params.detail = detail;
+    for (int town_mask = 0; town_mask < 2; town_mask++) {
+      SDL_Surface *lod = RenderVoxelShadowProbe(renderer, &params, 0, 0, town_mask, NULL);
+      CHECK(Differences(overhead, lod) == 0);
+      SDL_DestroySurface(lod);
+    }
+  }
+  right = RenderVoxelShadowProbe(renderer, &params, .8f, -.4f, false, "shrub-angled-mask");
+  town = RenderVoxelShadowProbe(renderer, &params, .8f, -.4f, true, NULL);
+  CHECK(Differences(right, town) == 0);
+  SDL_DestroySurface(town);
+  left = RenderVoxelShadowProbe(renderer, &params, -.8f, .4f, true, "shrub-reverse-mask");
+  CHECK(ColorCount(right, 0xff000000) > area);
+  CHECK(Differences(right, overhead) > 50);
+  CHECK(FirstColorX(left, 0xff000000) < FirstColorX(right, 0xff000000));
+  CHECK(FirstColorY(left, 0xff000000) < FirstColorY(right, 0xff000000));
+  SDL_DestroySurface(right);
+  SDL_DestroySurface(left);
+  RenderVoxelShadowPreview(renderer, params, false, 0, .0875f, "shrub-with-near-overhead-shadow");
+  RenderVoxelShadowPreview(renderer, params, false, .8f, -.4f, "shrub-with-angled-shadow");
+  for (int mixed = 0; mixed < 2; mixed++) {
+    BuildVoxelShadowScene(mixed ? kVoxelShadowScene_MixedFoliage : kVoxelShadowScene_Shrub, true);
+    params.serial = SimBackgroundVoxels_Serial();
+    SDL_Surface *dense = RenderVoxelShadowProbe(renderer, &params, 0, 0, false,
+        mixed ? "mixed-foliage-shadow-mask" : "shrubs-shadow-mask");
+    town = RenderVoxelShadowProbe(renderer, &params, 0, 0, true, NULL);
+    CHECK(Differences(dense, town) == 0);
+    SDL_DestroySurface(town);
+    for (int y = 0; y < 32; y++)
+      for (int x = 0; x < 32; x++) {
+        CHECK(Pixel(dense, 32 + x * 16 + 8, 32 + y * 16 + 8) == 0xff000000);
+        CHECK(Pixel(dense, 32 + x * 16 + 1, 32 + y * 16 + 1) == 0xffffffff);
+        if (mixed && !((x + y) & 1)) continue;
+        /* A bush keeps its own profile when sharing a batch/cache with trees. */
+        for (int py = 0; py < 16; py++)
+          for (int px = 0; px < 16; px++)
+            CHECK(Pixel(dense, 32 + x * 16 + px, 32 + y * 16 + py) ==
+                  Pixel(overhead, 96 + px, 96 + py));
+      }
+    SDL_DestroySurface(dense);
+  }
+  SDL_DestroySurface(overhead);
+  RenderVoxelShadowPreview(renderer, params, false, .8f, -.4f, "mixed-foliage-with-shaped-shadows");
+  puts("shrub shadows: rounded crowns, opposing lights, all LODs and both mask paths; "
+       "1024 bushes and mixed tree/bush batches retain their individual profiles");
   SimBackgroundVoxelRenderer_Reset(&g_render_device);
   SimBackgroundVoxels_Reset();
 }
