@@ -1,6 +1,6 @@
 module github.com/DerrickGold/ar-recomp/installer
 
-go 1.24
+go 1.25.0
 
 require github.com/tc-hib/winres v0.3.1
 

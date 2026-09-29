@@ -136,8 +136,7 @@ func WriteCache(root *os.Root, a *Assets) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	// os.Root.Rename requires Go 1.25; the builder supports Go 1.24. As with
-	// the author-store publisher, use an atomic same-directory path rename.
+	// As with the author-store publisher, use an atomic same-directory path rename.
 	// Refuse publication if the opened directory was replaced meanwhile.
 	opened, err := root.Stat(".")
 	if err != nil {

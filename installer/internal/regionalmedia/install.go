@@ -145,8 +145,8 @@ func publishDonor(dir *os.Root, name string, data []byte, replace bool) error {
 	if err = file.Close(); err != nil {
 		return err
 	}
-	// Go 1.24 lacks Root.Rename/Link. Verify the pinned directory before the
-	// same-directory atomic publication; never truncate a previous donor.
+	// Verify the pinned directory before the same-directory atomic publication;
+	// never truncate a previous donor.
 	opened, err := dir.Stat(".")
 	if err != nil {
 		return err

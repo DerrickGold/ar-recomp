@@ -503,7 +503,7 @@ reference.
 
 ### Build from source
 
-For a local build without the packaged Builder, install Go 1.24 or newer,
+For a local build without the packaged Builder, install Go 1.25 or newer,
 CMake 3.25 or newer, GNU Make, a C/C++ toolchain, and the development libraries
 for SDL3 3.4+ and SDL3_ttf 3.2+. On macOS, the compiler comes with Xcode Command
 Line Tools; on Windows, use a compatible native compiler and a shell with Make.
