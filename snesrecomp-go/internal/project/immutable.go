@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 func immutableCacheKey(options HermeticOptions, value string) string {
@@ -85,27 +84,4 @@ func physicalOutputPath(path string) (string, error) {
 	}
 	resolved, err := physicalOutputPath(parent)
 	return filepath.Join(resolved, filepath.Base(path)), err
-}
-
-func mutableIncludeDirs(options HermeticOptions, dirs []string) []string {
-	if options.InputID == "" {
-		return dirs
-	}
-	var result []string
-	for _, dir := range dirs {
-		if !underImmutableRoot(options.Root, dir) {
-			result = append(result, dir)
-		}
-	}
-	return result
-}
-
-func immutableObjectFresh(options HermeticOptions, source, object string, newestHeader time.Time) bool {
-	if options.InputID == "" || !underImmutableRoot(options.Root, source) {
-		return objectFresh(source, object, newestHeader)
-	}
-	// The verified input digest covers bundled source/headers, independent of
-	// extraction timestamps. Mutable generated headers are still tracked.
-	info, err := os.Stat(object)
-	return err == nil && info.Size() > 0 && info.ModTime().After(newestHeader)
 }

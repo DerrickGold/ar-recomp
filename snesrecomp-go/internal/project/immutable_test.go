@@ -166,11 +166,16 @@ set(SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS
 	setReadOnly()
 	build("3 cached, 0 to compile", "42")
 	writeTestFile(t, paths.FuncsHeader, "#define GENERATED_VALUE 43\n")
-	future := time.Now().Add(time.Hour)
-	if err := os.Chtimes(paths.FuncsHeader, future, future); err != nil {
+	// A distinct, past mtime: records compare stamps exactly, and a date
+	// after the compile started would read as an edit during that compile.
+	edited := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(paths.FuncsHeader, edited, edited); err != nil {
 		t.Fatal(err)
 	}
-	build("1 cached, 2 to compile", "43")
+	// Only main.c includes funcs.h. The generated unit and the runner are
+	// reused; a whole-include-directory scan used to rebuild the generated
+	// unit as well.
+	build("2 cached, 1 to compile", "43")
 	id = strings.Repeat("b", 64)
 	build("0 cached, 3 to compile", "43")
 }

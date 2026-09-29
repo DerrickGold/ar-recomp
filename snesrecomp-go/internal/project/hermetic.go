@@ -132,9 +132,10 @@ func CrossSDL3Dir(buildDir, target string) string {
 // the game and generated sources with `zig cc` and links them against it.
 // Returns the binary path.
 //
-// Incrementality is deliberately simple and safe: an object is reused only if
-// it is newer than its source, newer than every header in every include
-// directory, and the compile flags are unchanged. Anything else recompiles.
+// Incrementality uses per-object compiler dependency records. Reuse requires
+// matching compile flags and object/dependency metadata (size and mtime), or
+// the verified bundle input identity for immutable dependencies. A missing or
+// stale record recompiles that object. See depfile.go for metadata limitations.
 func HermeticBuild(options HermeticOptions) (string, error) {
 	paths, err := options.Paths.Resolve()
 	if err != nil {
@@ -307,52 +308,41 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		runnerFlagsChanged = strings.TrimSpace(string(previousRunnerFlags)) != runnerFlagsHash
 	}
 
-	newestGameHeader := newestHeaderTime(mutableIncludeDirs(options, includeDirs), paths.BuildDir)
-	newestRunnerHeader := time.Time{}
-	var runnerHeaderDirs []string
-	if runnerSourceCount > 0 {
-		runnerHeaderDirs = append([]string(nil), runner.SourceManifest.PublicIncludes...)
-		runnerHeaderDirs = append(runnerHeaderDirs,
-			runner.SourceManifest.PrivateIncludes...)
-		newestRunnerHeader = newestHeaderTime(mutableIncludeDirs(options, runnerHeaderDirs), paths.BuildDir)
+	// Each object is reused only while the dependency record written from its
+	// compiler's own depfile still matches: the flags it was built under and
+	// every file that compile read, implementation includes and system headers
+	// among them (see depfile.go). A missing or damaged record rebuilds that one
+	// object; a changed flags digest still rebuilds its whole class.
+	workDir, err := os.Getwd()
+	if err != nil {
+		return "", err
 	}
-	// Runner and manifest sources come first; generated sources follow and
-	// include only headers.
-	authoredSourceCount := runnerSourceCount + len(manifest.Sources)
-
+	tools := &toolLog{writer: options.Stdout}
 	type job struct {
-		source, object string
-		runner         bool
+		source, object, flags string
+		runner                bool
 	}
 	var jobs []job
 	cached := 0
 	for sourceIndex, source := range sources {
 		object := filepath.Join(objectDir, objectName(paths.Root, source))
 		isRunner := sourceIndex < runnerSourceCount
-		flagsChanged := gameFlagsChanged
-		newestHeader := newestGameHeader
-		searchDirs := includeDirs
+		flagsChanged, flags := gameFlagsChanged, gameFlagsHash
 		if isRunner {
-			flagsChanged = runnerFlagsChanged
-			newestHeader = newestRunnerHeader
-			searchDirs = runnerHeaderDirs
+			flagsChanged, flags = runnerFlagsChanged, runnerFlagsHash
 		}
-		// An authored source can also include implementation files (a unity
-		// component, a vendored .c) that no header scan sees; the runtime
-		// archive follows them the same way. Immutable inputs are already
-		// covered by their verified digest.
-		if sourceIndex < authoredSourceCount &&
-			(options.InputID == "" || !underImmutableRoot(options.Root, source)) {
-			if included := newestImplementationIncludeTime(source, searchDirs...); included.After(newestHeader) {
-				newestHeader = included
+		if !flagsChanged {
+			current, reason := objectDependenciesCurrent(options, object, flags)
+			if current {
+				cached++
+				continue
+			}
+			if options.Verbose && reason != noDependencyRecord {
+				tools.printf("  stale %s: %s\n", source, reason)
 			}
 		}
-		if !flagsChanged && immutableObjectFresh(options, source, object, newestHeader) {
-			cached++
-			continue
-		}
 		jobs = append(jobs, job{
-			source: source, object: object,
+			source: source, object: object, flags: flags,
 			runner: isRunner,
 		})
 	}
@@ -363,8 +353,12 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	}
 
 	started := time.Now()
-	tools := &toolLog{writer: options.Stdout}
 	var failed atomic.Bool
+	// A compiled object whose record could not be written is still linked; it
+	// is simply rebuilt next time. Reported once, not once per object.
+	var unrecorded atomic.Int64
+	var unrecordedOnce sync.Once
+	var firstUnrecorded string
 	var completed atomic.Int64
 	completed.Store(int64(cached))
 	var active atomic.Int64
@@ -397,12 +391,24 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 			if item.runner {
 				args = runtimeSourceCompileArgs(runnerCompileArgs, item.source)
 			}
-			command := subprocess.Command(options.ZigPath, append(append([]string(nil), args...), "-c", item.source, "-o", item.object)...)
+			// Nothing an earlier compile of this unit left behind may outlive
+			// this one failing or being interrupted.
+			if removeErr := removeObjectOutputs(item.object); removeErr != nil {
+				failed.Store(true)
+				errorOnce.Do(func() {
+					firstError = fmt.Errorf("compile %s: %w", item.source, removeErr)
+				})
+				return
+			}
+			args = append(append([]string(nil), args...), depfileArgs(item.object)...)
+			compileStarted := time.Now()
+			command := subprocess.Command(options.ZigPath, append(args, "-c", item.source, "-o", item.object)...)
 			output, err := command.CombinedOutput()
 			// Emitted whether or not the unit failed -- -w keeps a healthy
 			// compile silent, so anything a tool does say here is worth reading.
 			tools.block("cc "+item.source, output)
 			if err != nil {
+				_ = removeObjectOutputs(item.object)
 				failed.Store(true)
 				errorOnce.Do(func() {
 					firstError = fmt.Errorf("compile %s: %w (its output is in the build log above)",
@@ -410,6 +416,14 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 				})
 				return
 			}
+			if recordErr := recordObjectDependencies(options, item.object, item.source, item.flags, compileStarted, workDir); recordErr != nil {
+				_ = os.Remove(dependencyRecordPath(item.object))
+				unrecorded.Add(1)
+				unrecordedOnce.Do(func() {
+					firstUnrecorded = fmt.Sprintf("%s: %v", item.source, recordErr)
+				})
+			}
+			_ = os.Remove(compilerDepfilePath(item.object))
 			count := int(completed.Add(1))
 			if options.Verbose {
 				tools.printf("  compiled [%d/%d] %s (%.1fs)\n", count, len(sources), item.source, time.Since(unitStarted).Seconds())
@@ -421,6 +435,10 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	}
 	waitGroup.Wait()
 	stopCompileActivity()
+	if count := unrecorded.Load(); count > 0 {
+		tools.printf("  note: %d compiled object(s) have no dependency record and will be rebuilt next time (first: %s)\n",
+			count, firstUnrecorded)
+	}
 	if firstError != nil {
 		return "", firstError
 	}
@@ -585,7 +603,9 @@ func objectFresh(source, object string, newestHeader time.Time) bool {
 }
 
 // newestHeaderTime scans each include directory recursively for the newest
-// *.h or *.inc mtime. Nested layouts like <include>/SDL3/SDL_render.h must
+// *.h or *.inc mtime. Only the runtime-archive build still uses this coarse
+// check; the hermetic game build keeps exact per-object dependency records
+// (depfile.go). Nested layouts like <include>/SDL3/SDL_render.h must
 // count, so a staleness check that only listed the top level would miss a
 // header updated one directory down. An unreadable subtree is skipped rather
 // than fatal.
