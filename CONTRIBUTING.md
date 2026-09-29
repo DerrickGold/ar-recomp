@@ -43,13 +43,20 @@ headers are never rewritten by a check. Individual targets are `check-c`,
 when tests are enabled so the ownership and generator checks cannot disappear.
 
 `make check-release` runs `make check`, then the full optimized C/Python suite
-in `build-tests-release/`. `make release` and `make release-<platform>` require
-this local gate before packaging. A failed check stops packaging, and multiple
-release targets in one invocation share a single check run, including with
-`make -j`. Use the activated Python environment above, or pass
+in `build-tests-release/`. Use the activated Python environment above, or pass
 `PYTHON=/path/to/venv/bin/python` to Make.
-The lower-level CMake packaging workflow only packages; run `make check-release` first
-when invoking it directly. No GitHub Actions setup is required.
+
+`make release` and `make release-<platform>` build the distribution packages
+without running repository lint or tests. They need only the
+[packaging prerequisites](docs/desktop-packaging.md#building-builder-distributions);
+Ruff, ESLint, ShellCheck, and the game test dependencies belong to the explicit
+developer checks.
+
+Use `make release-checked` or `make release-checked-<platform>` to run the full
+`check-release` gate before packaging. A failed check stops packaging, and
+multiple checked release targets share a single check run, including with
+`make -j`. The direct CMake packaging workflow also only packages. No GitHub
+Actions setup is required.
 
 Use `make check-c-release` for optimized tests alone, or `make check-c-asan` for
 the separate ROM-free AddressSanitizer/UndefinedBehaviorSanitizer gate. The

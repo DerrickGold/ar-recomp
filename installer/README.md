@@ -59,6 +59,11 @@ options. Public language-pack workflows are documented in
 ## Release packaging
 
 From the repository root, `make release` builds the configured Builder downloads.
+Use `make release-windows-arm64` (or another `release-<platform>` target) for one
+platform. Packaging runs independently of repository lint and tests; no Python
+lint modules or Node.js lint tools are needed. To validate before packaging,
+use `make release-checked` or `make release-checked-<platform>` after setting up
+the [developer-check dependencies](../CONTRIBUTING.md#developer-checks).
 See [Building Builder distributions](../docs/desktop-packaging.md#building-builder-distributions)
 for prerequisites. The equivalent direct command is:
 

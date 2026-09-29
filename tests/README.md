@@ -1,7 +1,8 @@
 # Tests
 
 Run the ordinary local gate with `make check`. `make check-release` adds the
-optimized suite and is required by `make release` before packaging.
+optimized suite. `make release-checked` runs that gate before packaging;
+`make release` and `make release-<platform>` only build the packages.
 The full C/Python suite is available through CTest in a testing build.
 No GitHub CI is required.
 

@@ -1,9 +1,9 @@
 # Root convenience targets for producing desktop and generic Linux Builders.
 #
-# `make release` runs the local `make check-release` gate, then cross-builds every
-# platform's self-contained bundle (plus SHA-256 sidecars) into ./release/:
+# `make release` cross-builds every platform's self-contained bundle
+# (plus SHA-256 sidecars) into ./release/:
 # macOS .app.zip, Windows .exe, Steam Deck .AppImage, and generic Linux .tar.xz.
-# Requires Go, CMake, and the local check dependencies in CONTRIBUTING.md; the C
+# Requires Go and CMake; the C
 # toolchain and supported SDL3 redistributables are downloaded and bundled by
 # the packaging project. Desktop releases also need native host packaging tools;
 # macOS can cross-build all release targets without a VM.
@@ -14,8 +14,10 @@
 # The lower-level packaging-only CMake command (run from the packaging directory) is:
 #   cd installer/packaging && cmake --workflow --preset release
 # Individual platforms: `make release-macos-arm64`, `make release-steam-deck`,
-# etc. These use the same local gate, once per make invocation even when
-# several release targets are requested. Check dependencies: CONTRIBUTING.md.
+# etc. Packaging does not run repository lint or tests. Use `make release-checked`
+# or `make release-checked-<platform>` to run `check-release` before packaging.
+# Checked targets share one gate per make invocation, including parallel builds.
+# Check dependencies: CONTRIBUTING.md.
 #
 # Each platform's CMake build tree (which holds a freshly extracted ~180 MB Zig
 # toolchain) is removed as soon as that bundle is staged into release/, so the
@@ -44,7 +46,8 @@
 #                     `snesbuild build --hermetic` or `make check-cross` for the
 #                     shipped build path.
 #   make check-release   run make check, then the optimized C/Python suite.
-#                     Every release target requires this gate before packaging.
+#   make release-checked   run check-release, then package every platform.
+#                     Use release-checked-<platform> for one destination.
 #   make check-c-release run only the optimized C/Python suite.
 #   make check-c-asan    run ROM-free tests with ASan + UBSan; failures stop the run.
 #                     This separate diagnostic gate needs GCC or Clang.
@@ -94,7 +97,7 @@ CLEAN_BUILD_DIRS := build build-release build-control build-terrain build-asan b
 CLEAN_GENERATED  := src/gen recomp/funcs.h saves/gen_meta.json saves/rts_webs.txt saves/rts_webs.prev.txt
 CLEAN_RELEASE    := release
 
-.PHONY: dev release $(addprefix release-,$(PLATFORMS)) check check-release check-c check-c-release check-c-asan check-go check-shaders check-constants check-appimage check-cross check-localization-roms check-localization-workflow clean clean-all clean-release clean-packaging-mounts
+.PHONY: dev release $(addprefix release-,$(PLATFORMS)) release-checked $(addprefix release-checked-,$(PLATFORMS)) check check-release check-c check-c-release check-c-asan check-go check-shaders check-constants check-appimage check-cross check-localization-roms check-localization-workflow clean clean-all clean-release clean-packaging-mounts
 
 # ROM-free presets use separate trees and never disturb the play/dev presets.
 PYTHON ?= python3
@@ -105,7 +108,7 @@ check: check-quality check-c check-go check-shaders
 	@echo "make check: every check that ran passed (any SKIPPED check is named above)"
 
 # Keep the two full CTest runs sequential, even when packaging with make -j.
-# All release destinations share this prerequisite once per invocation.
+# All checked release destinations share this prerequisite once per invocation.
 check-release: check
 	$(MAKE) check-c-release
 	@echo "make check-release: Debug and Release gates passed"
@@ -185,11 +188,20 @@ dev: config.ini
 
 RELEASE_OPTIONS = -DBUILDER_LEGACY_ARCHIVES=$(if $(filter 0,$(DESKTOP)),ON,OFF) -DBUILDER_KEEP_BUILD=$(if $(KEEP_BUILD),ON,OFF)
 
-release: check-release
+release:
 	cmake "-DBUILDER_PLATFORMS=$(PLATFORMS)" $(RELEASE_OPTIONS) -P $(PACKAGING)/release.cmake
 
-$(addprefix release-,$(PLATFORMS)): release-%: check-release
+$(addprefix release-,$(PLATFORMS)): release-%:
 	cmake -DBUILDER_PLATFORMS=$* $(RELEASE_OPTIONS) -P $(PACKAGING)/release.cmake
+
+# Recursive make starts packaging only after the shared validation succeeds,
+# even under make -j. Command-line options such as DESKTOP and KEEP_BUILD carry
+# through to the packaging targets.
+release-checked: check-release
+	$(MAKE) release
+
+$(addprefix release-checked-,$(PLATFORMS)): release-checked-%: check-release
+	$(MAKE) release-$*
 
 # Cross-target link check. `zig cc` carries libc headers and a linker for every
 # target it supports, so the compile and the link are the real ones for that
