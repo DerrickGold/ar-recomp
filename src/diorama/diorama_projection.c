@@ -2,8 +2,28 @@
 
 #include <math.h>
 
+#include "constants.h"
 #include "diorama_depth_shapes.h"
 #include "render/scene3d_math.h"
+
+static bool CameraProjectionValid(
+    const float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow) {
+  if (!matrix || !isfinite(aspect_x) || aspect_x <= 0.0f ||
+      !isfinite(height_scale) || height_scale <= 0.0f ||
+      !isfinite(z_world) || !isfinite(rake) || !isfinite(bow))
+    return false;
+  for (int i = 0; i < 16; i++)
+    if (!isfinite(matrix[i])) return false;
+  return true;
+}
+
+static void CameraShiftVertically(float matrix[16], float shift) {
+  /* A clip-space translation gives every depth the same screen displacement. */
+  const float clip_shift = -2.0f * shift;
+  for (int c = 0; c < 4; c++)
+    matrix[c * 4 + 1] += clip_shift * matrix[c * 4 + 3];
+}
 
 /* A projected triangle reaches its Y extrema at its vertices while entirely
  * in front of the camera. Across each mesh row only the two side vertices are
@@ -51,16 +71,11 @@ bool Diorama_CenterCameraVertically(
     float matrix[16], float aspect_x, float height_scale,
     float z_world, float rake, float bow,
     float authentic_t0, float authentic_t1) {
-  if (!matrix || !isfinite(aspect_x) || aspect_x <= 0.0f ||
-      !isfinite(height_scale) || height_scale <= 0.0f ||
-      !isfinite(z_world) || !isfinite(rake) || !isfinite(bow) ||
+  if (!CameraProjectionValid(matrix, aspect_x, height_scale, z_world, rake, bow) ||
       !isfinite(authentic_t0) || !isfinite(authentic_t1) ||
       authentic_t0 < 0.0f || authentic_t1 > 1.0f ||
       authentic_t0 >= authentic_t1)
     return false;
-  for (int i = 0; i < 16; i++)
-    if (!isfinite(matrix[i])) return false;
-
   float top, bottom;
   if (!CameraVerticalBounds(matrix, aspect_x, height_scale,
                            z_world, rake, bow,
@@ -83,9 +98,59 @@ bool Diorama_CenterCameraVertically(
   /* Clip Y += offset * clip W is a uniform screen translation after the
    * perspective divide. Apply it to the shared matrix so every depth plane,
    * skirt, aperture and attached effect receives exactly the same shift. */
-  const float clip_shift = -2.0f * shift;
-  for (int c = 0; c < 4; c++)
-    matrix[c * 4 + 1] += clip_shift * matrix[c * 4 + 3];
+  CameraShiftVertically(matrix, shift);
+  return true;
+}
+
+DioramaVerticalBounds DioramaVerticalBounds_Resolve(
+    int plane, int camera_y, int world_height,
+    int authentic_y0, int capture_height) {
+  DioramaVerticalBounds bounds = {0};
+  if ((plane != SR_PPU_OVERLAY_BG1 && plane != SR_PPU_OVERLAY_BG2) ||
+      world_height < kActRaiserActionCameraViewportHeight ||
+      camera_y < 0 || camera_y > world_height - kActRaiserActionCameraViewportHeight ||
+      authentic_y0 < 0 || authentic_y0 > camera_y ||
+      capture_height < kActRaiserAuthenticHeight ||
+      authentic_y0 > capture_height - kActRaiserAuthenticHeight)
+    return bounds;
+  const int bottom_rows =
+      capture_height - authentic_y0 - kActRaiserAuthenticHeight;
+  const int available_bottom =
+      world_height - kActRaiserActionCameraViewportHeight - camera_y;
+  if (bottom_rows > available_bottom) return bounds;
+  bounds.valid = true;
+  bounds.plane = plane;
+  bounds.top_reached = authentic_y0 == camera_y;
+  bounds.bottom_reached = bottom_rows == available_bottom;
+  return bounds;
+}
+
+bool Diorama_ClampCameraVertically(
+    float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow,
+    bool clamp_top, bool clamp_bottom) {
+  if (!CameraProjectionValid(matrix, aspect_x, height_scale, z_world, rake, bow))
+    return false;
+  if (!clamp_top && !clamp_bottom) return true;
+  float lower = -INFINITY, upper = INFINITY;
+  float top, bottom;
+  if (clamp_top) {
+    if (!CameraVerticalBounds(matrix, aspect_x, height_scale, z_world, rake, bow,
+                              0.0f, 0.0f, &top, &bottom))
+      return false;
+    upper = -bottom;
+  }
+  if (clamp_bottom) {
+    if (!CameraVerticalBounds(matrix, aspect_x, height_scale, z_world, rake, bow,
+                              1.0f, 1.0f, &top, &bottom))
+      return false;
+    lower = 1.0f - top;
+  }
+  /* A small room or deliberate zoom-out cannot satisfy both edges by moving
+   * the camera alone. Keep its existing fit rather than stretching the art. */
+  if (lower > upper) return true;
+  const float shift = fmaxf(lower, fminf(0.0f, upper));
+  if (shift != 0.0f) CameraShiftVertically(matrix, shift);
   return true;
 }
 

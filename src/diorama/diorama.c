@@ -12,7 +12,6 @@
 #include "diorama_rom_skybox_resource.h"
 #include "diorama_skybox_uv.h"
 #include "diorama_stack_group.h"
-#include "render/camera_orbit.h"
 #include "diorama_depth_shapes.h" /* rake/bow/thick/stack/voxel arithmetic */
 #include "diorama_performance.h"
 #include "render/scene3d_math.h"
@@ -598,8 +597,7 @@ static float s_diorama_auto_distance = 5.0f;
 static bool s_diorama_settings_dirty;
 static uint64_t s_diorama_settings_dirty_at;
 static bool s_diorama_dragging;
-static CameraOrbit s_diorama_dynamic_orbit;
-static const float kDioramaOrbitReturnTimeSeconds = 0.35f;
+static DioramaCameraManualState s_diorama_manual;
 
 bool Diorama_IsDragging(void)          { return s_diorama_dragging; }
 void Diorama_SetDragging(bool dragging) { s_diorama_dragging = dragging; }
@@ -611,6 +609,7 @@ static float Clampf(float v, float lo, float hi) {
 /* ── Camera operations ───────────────────────────────────────────────── */
 
 void Diorama_SeedCameraFromSettings(void) {
+  s_diorama_manual = (DioramaCameraManualState){0};
   s_diorama_cam.tilt_x =
       (float)g_settings.diorama_tilt_x_mrad / (float)kPermilleScale;
   s_diorama_cam.tilt_y =
@@ -644,35 +643,40 @@ void Diorama_CaptureCameraPresentationState(
           (float)g_settings.diorama_dyncam_baseline_distance_x100 /
               (float)kPercentScale,
     },
-    .orbit_yaw = s_diorama_dynamic_orbit.yaw,
-    .orbit_pitch = s_diorama_dynamic_orbit.pitch,
+    .orbit_yaw = s_diorama_manual.offset.tilt_y,
+    .orbit_pitch = s_diorama_manual.offset.tilt_x,
+    .zoom_offset = s_diorama_manual.offset.distance,
+    .framing_override = s_diorama_manual.framing_override,
   };
 }
 
 void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
   if (g_settings.diorama_camera_mode == kDioramaCam_Dynamic) {
+    if (d_yaw == 0.0f && d_pitch == 0.0f && d_zoom == 0.0f) return;
     const float baseline_yaw =
         (float)g_settings.diorama_dyncam_baseline_tilt_y_mrad /
         (float)kPermilleScale;
     const float baseline_pitch =
         (float)g_settings.diorama_dyncam_baseline_tilt_x_mrad /
         (float)kPermilleScale;
-    CameraOrbit_Adjust(&s_diorama_dynamic_orbit, d_yaw, d_pitch,
-                       baseline_yaw, baseline_pitch,
-                       kDioramaTiltMin, kDioramaTiltMax,
-                       kDioramaTiltMin, kDioramaTiltMax);
+    s_diorama_manual.offset.tilt_y = Clampf(
+        baseline_yaw + s_diorama_manual.offset.tilt_y + d_yaw,
+        kDioramaTiltMin, kDioramaTiltMax) - baseline_yaw;
+    s_diorama_manual.offset.tilt_x = Clampf(
+        baseline_pitch + s_diorama_manual.offset.tilt_x + d_pitch,
+        kDioramaTiltMin, kDioramaTiltMax) - baseline_pitch;
 
-    if (d_zoom == 0.0f) return;
-    float distance = g_settings.diorama_dyncam_baseline_distance_x100 > 0
-        ? (float)g_settings.diorama_dyncam_baseline_distance_x100 /
-              (float)kPercentScale
-        : s_diorama_auto_distance;
-    distance = Clampf(distance + d_zoom,
-                      kDioramaDistMin, kDioramaDistMax);
-    g_settings.diorama_dyncam_baseline_distance_x100 =
-        (int)(distance * (float)kPercentScale);
-    s_diorama_settings_dirty = true;
-    s_diorama_settings_dirty_at = HostClock_Milliseconds();
+    if (d_zoom != 0.0f) {
+      float baseline_distance =
+          g_settings.diorama_dyncam_baseline_distance_x100 > 0
+              ? (float)g_settings.diorama_dyncam_baseline_distance_x100 /
+                    (float)kPercentScale
+              : s_diorama_auto_distance;
+      s_diorama_manual.offset.distance = Clampf(
+          baseline_distance + s_diorama_manual.offset.distance + d_zoom,
+          kDioramaDistMin, kDioramaDistMax) - baseline_distance;
+    }
+    DioramaCameraManual_Input(&s_diorama_manual);
     return;
   }
 
@@ -696,16 +700,14 @@ void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
   s_diorama_settings_dirty_at = HostClock_Milliseconds();
 }
 
-bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool orbit_held) {
+bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool input_active) {
   if (g_settings.diorama_camera_mode != kDioramaCam_Dynamic) {
-    bool changed = s_diorama_dynamic_orbit.yaw != 0.0f ||
-                   s_diorama_dynamic_orbit.pitch != 0.0f;
-    CameraOrbit_Reset(&s_diorama_dynamic_orbit);
+    bool changed = s_diorama_manual.framing_override != 0.0f;
+    s_diorama_manual = (DioramaCameraManualState){0};
     return changed;
   }
-  return CameraOrbit_Update(
-      &s_diorama_dynamic_orbit, elapsed_seconds, orbit_held,
-      kDioramaOrbitReturnTimeSeconds);
+  return DioramaCameraManual_Update(
+      &s_diorama_manual, elapsed_seconds, input_active);
 }
 
 void Diorama_ResetCamera(void) {
@@ -734,7 +736,6 @@ void Diorama_ResetCamera(void) {
     const SettingDesc *row = Settings_Find(kResetKeys[i]);
     if (row) Settings_Reset(row);
   }
-  CameraOrbit_Reset(&s_diorama_dynamic_orbit);
   Diorama_SeedCameraFromSettings();
   s_diorama_settings_dirty = true;
   s_diorama_settings_dirty_at = HostClock_Milliseconds();
@@ -1863,140 +1864,12 @@ static PresentationOutcome DrawDioramaShoebox(
   return outcome;
 }
 
-/* The BG1 gameplay plane's depth, matching kDioramaLayers' entry for it. The
- * vertical-shift solve needs a reference depth and this is the layer the eye
- * reads as "the picture". */
-/* Depth the vertical-shift solve measures against: the BG1 gameplay plane, the
- * layer the eye reads as "the picture". Looked up from kDioramaLayers rather
- * than restated as a constant -- a second copy of 0.50f would silently stop
- * tracking the table the moment a room override or a table edit moved BG1. */
+/* Dynamic framing follows the playfield depth from the layer table. */
 static float DioramaBg1ReferenceZ(void) {
   for (int i = 0; i < kDioramaLayerCount; i++)
     if (kDioramaLayers[i].plane == SR_PPU_OVERLAY_BG1)
       return kDioramaLayers[i].z;
   return 0.50f;
-}
-
-/* How far to lift the world so the vertical band reads correctly.
- *
- * `pin` is half the added height -- the shift that keeps the AUTHENTIC band
- * exactly where it was and lets every new row bleed off the top. That is the
- * right answer only while the composition has empty space up there to spend.
- * It is a fixed WORLD-space offset, but its SCREEN effect depends on pitch:
- * pitching down tilts the plane so its projected centre sits low, leaving slack
- * above, and `pin` happens to consume exactly that. At a flat camera there is
- * no such slack -- the content already sat centred -- so `pin` pushes the whole
- * box against the top edge and opens a large gap along the bottom. Reported
- * from a flat free-cam run and measured there at 144px of top bias.
- *
- * So: lift by `pin`, but never past the point where the drawn content is
- * vertically centred in the viewport. Increasing d moves content up, so the
- * projected centre falls monotonically and a bisection is exact enough.
- *
- *   flat camera   -> centring shift is 0            -> d = 0, content centred
- *   pitched down  -> centring shift exceeds `pin`   -> d = pin, band pinned
- *
- * Both endpoints are what those cases already wanted, there is no jump between
- * them, and `pin == 0` (no band) short-circuits to the untouched matrix. */
-/* Projected top and bottom of the drawn content for a candidate lift, or false
- * if either endpoint is unprojectable. One helper instead of two near-identical
- * bodies, and a plain function instead of macros -- the previous macro pair hid
- * a `return` from the caller's control flow, which is exactly the kind of thing
- * that made the "always apply the bottom floor" branch easy to get wrong. */
-static bool DioramaContentExtent(const float mvp[16], float half, float lift,
-                                 float z_ref, int out_w, int out_h,
-                                 float *out_top, float *out_bottom) {
-  float m[16];
-  memcpy(m, mvp, sizeof(m));
-  for (int r = 0; r < 4; r++) m[12 + r] += lift * mvp[4 + r];
-  Scene3DPoint top, bottom;
-  if (!Scene3D_ProjectWorldPoint(m, 0.0f, half, z_ref,
-                                 out_w, out_h, &top) ||
-      !Scene3D_ProjectWorldPoint(m, 0.0f, -half, z_ref,
-                                 out_w, out_h, &bottom))
-    return false;
-  if (out_top) *out_top = top.y;
-  if (out_bottom) *out_bottom = bottom.y;
-  return true;
-}
-
-/* Bisect `lift` in [lo,hi] for the largest value still satisfying `too_low`.
- * Both solves below are the same monotone search: a bigger lift moves content
- * up, so each measured quantity falls as the lift grows. */
-static float DioramaBisectLift(const float mvp[16], float half, float z_ref,
-                               int out_w, int out_h, float lo, float hi,
-                               float target, bool use_centre) {
-  for (int i = 0; i < 24; i++) {
-    float mid = 0.5f * (lo + hi), top, bottom;
-    if (!DioramaContentExtent(mvp, half, mid, z_ref, out_w, out_h, &top, &bottom))
-      return hi;
-    float value = use_centre ? 0.5f * (top + bottom) : bottom;
-    if (value > target) lo = mid;
-    else hi = mid;
-  }
-  return 0.5f * (lo + hi);
-}
-
-static float DioramaPositiveVerticalShift(const float mvp[16],
-                                          float height_scale,
-                                          float pin, int out_w, int out_h) {
-  if (pin <= 0.0f)
-    return 0.0f;
-  const float half = 0.5f * height_scale;
-  const float target = 0.5f * (float)out_h;
-  const float z_ref = DioramaBg1ReferenceZ();
-  float top, bottom, centre_0, centre_pin;
-
-  if (!DioramaContentExtent(mvp, half, 0.0f, z_ref, out_w, out_h, &top, &bottom))
-    return pin;               /* unprojectable: keep the pinned default */
-  centre_0 = 0.5f * (top + bottom);
-
-  float d;
-  if (centre_0 <= target) {
-    d = 0.0f;                 /* already at or above centre; lifting worsens it */
-  } else {
-    if (!DioramaContentExtent(mvp, half, pin, z_ref, out_w, out_h, &top, &bottom))
-      return pin;
-    centre_pin = 0.5f * (top + bottom);
-    d = (centre_pin >= target)
-        ? pin                 /* even a full pin does not reach centre */
-        : DioramaBisectLift(mvp, half, z_ref, out_w, out_h, 0.0f, pin,
-                            target, true);
-  }
-
-  /* Floor the lift so centring never drops the content's BOTTOM further past
-   * the viewport than a full pin would. Centring spends slack; when the content
-   * is already taller than the window there is none, and a smaller lift only
-   * buys losing rows off the bottom of the PLAYFIELD -- strictly worse than
-   * losing band rows off the top, which is what the pin gives up.
-   *
-   * Applies in EVERY branch above, including d = 0: that is precisely the flat
-   * camera at a tight fit, where centring would otherwise crop the playfield. */
-  float bottom_now, bottom_pin;
-  if (!DioramaContentExtent(mvp, half, d, z_ref, out_w, out_h, NULL, &bottom_now) ||
-      !DioramaContentExtent(mvp, half, pin, z_ref, out_w, out_h, NULL, &bottom_pin))
-    return pin;
-  if (bottom_now > (float)out_h && bottom_pin < bottom_now)
-    d = DioramaBisectLift(mvp, half, z_ref, out_w, out_h, d, pin,
-                          (float)out_h, false);
-  return d > pin ? pin : d;
-}
-
-/* The established solver is expressed as an upward lift. Mirror both world Y
- * and projected screen Y to reuse it exactly when a bottom-heavy capture asks
- * for a downward shift; mirroring twice preserves the source orientation while
- * turning original lift -d into mirrored lift +d. */
-static float DioramaVerticalShift(const float mvp[16], float height_scale,
-                                  float pin, int out_w, int out_h) {
-  if (pin >= 0.0f)
-    return DioramaPositiveVerticalShift(
-        mvp, height_scale, pin, out_w, out_h);
-  float mirrored[16];
-  memcpy(mirrored, mvp, sizeof(mirrored));
-  for (int r = 0; r < 4; r++) mirrored[4 + r] = -mirrored[4 + r];
-  for (int c = 0; c < 4; c++) mirrored[c * 4 + 1] = -mirrored[c * 4 + 1];
-  return -DioramaPositiveVerticalShift(
-      mirrored, height_scale, -pin, out_w, out_h);
 }
 
 static PresentationOutcome DioramaSubmitPlaneEffect(
@@ -2163,6 +2036,7 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
  * than shrinking the playfield. Resolve auto-fit before applying zoom. */
 static void PrepareDioramaView(const DioramaCapture *capture,
                                const DioramaView *view,
+                               const ArRenderTexture *textures,
                                const DioramaResolvedLayer *resolved,
                                int resolved_count,
                                DioramaViewGeometry *geometry) {
@@ -2202,6 +2076,7 @@ static void PrepareDioramaView(const DioramaCapture *capture,
   else if (geometry->camera.distance < kDioramaDistMin)
     geometry->camera.distance = kDioramaDistMin;
 
+  geometry->camera.distance += view->distance_offset;
   geometry->camera.distance *= view->distance_scale;
   if (geometry->camera.distance < kDioramaDistMin)
     geometry->camera.distance = kDioramaDistMin;
@@ -2209,7 +2084,12 @@ static void PrepareDioramaView(const DioramaCapture *capture,
   BuildViewProjection(&geometry->camera, geometry->width, geometry->height,
                       geometry->matrix);
 
-  if (view->center_camera_vertically) {
+  float framing_weight = Clampf(view->camera_framing_weight, 0.0f, 1.0f);
+  if (framing_weight == 0.0f) return;
+  float free_matrix[16];
+  memcpy(free_matrix, geometry->matrix, sizeof(free_matrix));
+
+  {
     float focal_z = DioramaBg1ReferenceZ() - 0.5f;
     float focal_rake = 0.0f, focal_bow = 0.0f;
     for (int i = 0; i < resolved_count; i++) {
@@ -2223,16 +2103,39 @@ static void PrepareDioramaView(const DioramaCapture *capture,
         geometry->matrix, geometry->aspect_x, geometry->height_scale, focal_z,
         focal_rake, focal_bow, (float)capture->authentic_y0 / tex_h,
         (float)(capture->authentic_y0 + kActRaiserAuthenticHeight) / tex_h);
-  } else {
-    float bottom_rows =
-        tex_h - (float)capture->authentic_y0 - (float)kActRaiserAuthenticHeight;
-    float pin = 0.5f * ((float)capture->authentic_y0 - bottom_rows) /
-                (float)kActRaiserAuthenticHeight;
-    float d = DioramaVerticalShift(geometry->matrix, geometry->height_scale,
-                                   pin, geometry->width, geometry->height);
-    if (d != 0.0f)
-      for (int r = 0; r < 4; r++)
-        geometry->matrix[12 + r] += d * geometry->matrix[4 + r];
+  }
+
+  /* Dynamic framing follows the level, but must stop at captured world edges.
+   * Free-camera orbit/zoom remains an explicit view chosen by the player. */
+  if (capture->vertical_bounds.valid) {
+    const int primary = capture->vertical_bounds.plane;
+    const int high = primary == SR_PPU_OVERLAY_BG1
+        ? kDioramaPlane_Bg1Hi : kDioramaPlane_Bg2Hi;
+    const DioramaResolvedLayer *focal = NULL;
+    for (int i = 0; i < resolved_count; i++) {
+      if ((resolved[i].plane != primary && resolved[i].plane != high) ||
+          !resolved[i].alpha)
+        continue;
+      const DioramaLayerDesc *layer = DioramaDescForPlane(resolved[i].plane);
+      if (!DioramaLayerIsDrawable(layer, textures, capture->pixels))
+        continue;
+      /* Priority splitting can leave the ordinary band entirely empty. */
+      if (!focal || resolved[i].plane == primary) focal = &resolved[i];
+    }
+    if (focal)
+      Diorama_ClampCameraVertically(
+          geometry->matrix, geometry->aspect_x, geometry->height_scale,
+          focal->z - 0.5f, focal->rake, focal->bow,
+          capture->vertical_bounds.top_reached,
+          capture->vertical_bounds.bottom_reached);
+  }
+
+  /* Restore the shared screen-space correction alongside the manual pose.
+   * Free Cam and active manual input use the untouched camera matrix. */
+  if (framing_weight < 1.0f) {
+    for (int i = 0; i < 16; i++)
+      geometry->matrix[i] = free_matrix[i] + framing_weight *
+          (geometry->matrix[i] - free_matrix[i]);
   }
 }
 
@@ -2941,7 +2844,7 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
   DioramaPerformance_SetViewport(geometry.width, geometry.height);
   DioramaResolvedLayer resolved[kDioramaLayerCount];
   const int resolved_count = ResolveDioramaLayers(scene, resolved);
-  PrepareDioramaView(capture, view, resolved, resolved_count, &geometry);
+  PrepareDioramaView(capture, view, textures, resolved, resolved_count, &geometry);
   PublishDioramaView(capture, view, &geometry, out_projection);
   PublishDioramaPlanes(capture, scene, &geometry, textures, resolved,
                        resolved_count, out_projection);

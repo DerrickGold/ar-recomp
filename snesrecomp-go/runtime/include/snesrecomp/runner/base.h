@@ -105,7 +105,9 @@ enum {
 #define SR_PPU_NATIVE_WIDTH 256u
 #define SR_PPU_NATIVE_HEIGHT 224u
 #define SR_PPU_HORIZONTAL_MARGIN_MAX 128u
-#define SR_PPU_VERTICAL_MARGIN_MAX 64u
+/* Either side may use the shared row budget; surface allocations stay fixed. */
+#define SR_PPU_VERTICAL_MARGIN_MAX 128u
+#define SR_PPU_VERTICAL_MARGIN_TOTAL_MAX 128u
 #define SR_PPU_SURFACE_MAX_WIDTH 640u
 #define SR_PPU_SURFACE_MAX_HEIGHT 352u
 #define SR_PPU_OBJ_APRON 64u

@@ -39,7 +39,8 @@ enum {
   kFrameSlotOverlaySourceCount = 5,  /* SR_PPU_OVERLAY_SOURCE_COUNT */
   /* Mirrors the public runner ABI surface dimensions. Width is the
    * full surface (PPU buffer plus resolve aprons); height is the authentic 224
-   * rows plus both 64-row vertical-margin budgets. Captures occupy subregions,
+   * rows plus a shared 128-row vertical budget (normally 64 on each side).
+   * Either side can use unused rows from the other. Captures occupy subregions,
    * but normalized UV movement must always divide by these allocation sizes.
    * Cross-checked by FrameSlot_Capture's _Static_asserts against the real
    * constants in frame_slot.c. */

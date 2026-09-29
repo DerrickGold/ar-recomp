@@ -1954,7 +1954,8 @@ const SettingDesc g_setting_descs[] = {
    * selected mode's own camera instead of carrying the other pose across. */
   { "diorama_camera_mode", NULL, "Camera mode",
     "Free Cam: manual orbit and zoom, with a persistent pose. Dynamic Cam: "
-    "leans with gameplay motion and reacts to impacts around its own baseline.",
+    "leans with gameplay motion and reacts to impacts around its own baseline. "
+    "Manual orbit and zoom return to this baseline after input stops.",
     kSettingType_Enum, kApply_Passive, kSettingCat_DioramaCamera,
     &g_settings.diorama_camera_mode, kDioramaCam_Free,
     kDioramaCam_Free, kDioramaCam_Dynamic, 1, false,

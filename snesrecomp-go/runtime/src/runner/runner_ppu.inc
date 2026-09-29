@@ -1361,6 +1361,8 @@ SrResult sr_runner_apply_ppu_frame_policy(
         policy->margin_right_pixels > policy->margin_budget_pixels ||
         policy->margin_top_pixels > SR_PPU_VERTICAL_MARGIN_MAX ||
         policy->margin_bottom_pixels > SR_PPU_VERTICAL_MARGIN_MAX ||
+        policy->margin_top_pixels + policy->margin_bottom_pixels >
+            SR_PPU_VERTICAL_MARGIN_TOTAL_MAX ||
         (policy->layer_clamp_mask & ~SR_PPU_FRAME_POLICY_LAYER_MASK) != 0u ||
         (policy->layer_mirror_mask & ~SR_PPU_FRAME_POLICY_LAYER_MASK) != 0u ||
         (policy->layer_repeat_mask & ~SR_PPU_FRAME_POLICY_LAYER_MASK) != 0u ||

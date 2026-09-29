@@ -175,6 +175,13 @@ void ActRaiserActionBg_ResolveVerticalMargins(
     int camera_y, int world_height, int budget,
     int *top, int *bottom);
 
+/* Keep the requested two-sided capture height at finite world edges by
+ * spending unavailable rows on the opposite side, within the shared surface
+ * capacity. Small worlds still stop at their actual top and bottom. */
+void ActRaiserActionBg_ResolveVerticalCaptureMargins(
+    int camera_y, int world_height, int budget,
+    int *top, int *bottom);
+
 /* Capture the complete action-background decision record and build its pure
  * plan plus the mechanical generic-PPU projection. No renderer state changes. */
 bool ActRaiserActionBg_BuildPlan(

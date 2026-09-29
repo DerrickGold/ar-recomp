@@ -19,6 +19,10 @@ _Static_assert(SR_PPU_NATIVE_HEIGHT == kPpuYPixels,
 _Static_assert(SR_PPU_HORIZONTAL_MARGIN_MAX == kPpuExtraLeftRight &&
                    SR_PPU_VERTICAL_MARGIN_MAX == kPpuExtraTopBottom,
                "public ABI margin limits must match the PPU");
+_Static_assert(SR_PPU_VERTICAL_MARGIN_TOTAL_MAX == kPpuVerticalMarginTotal &&
+                   SR_PPU_NATIVE_HEIGHT + SR_PPU_VERTICAL_MARGIN_TOTAL_MAX ==
+                       SR_PPU_SURFACE_MAX_HEIGHT,
+               "vertical margins share the fixed surface row budget");
 _Static_assert(SR_PPU_SURFACE_MAX_WIDTH == kPpuSurfaceWidth &&
                    SR_PPU_SURFACE_MAX_HEIGHT == kPpuBufHeight,
                "public ABI surface limits must match the PPU");

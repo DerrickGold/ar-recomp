@@ -28,7 +28,7 @@ void Diorama_PublishLiveLayerSection(uint8_t map_group, uint8_t map_number,
 
 void Diorama_SeedCameraFromSettings(void);
 void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom);
-bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool orbit_held);
+bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool input_active);
 void Diorama_ResetCamera(void);
 bool Diorama_IsActiveThisFrame(void);
 /* Whether the frame being drawn is a diorama frame: the frame draw latches
@@ -55,6 +55,28 @@ bool Diorama_CenterCameraVertically(
     float matrix[16], float aspect_x, float height_scale,
     float z_world, float rake, float bow,
     float authentic_t0, float authentic_t1);
+
+typedef struct DioramaVerticalBounds {
+  bool valid;
+  int plane;
+  bool top_reached;
+  bool bottom_reached;
+} DioramaVerticalBounds;
+
+/* Only captured finite world edges can constrain the presentation camera.
+ * The native camera's bottom bound includes its one-row scroll guard. */
+DioramaVerticalBounds DioramaVerticalBounds_Resolve(
+    int plane, int camera_y, int world_height,
+    int authentic_y0, int capture_height);
+
+/* Pin a reached world edge to the viewport when framing exposes beyond it.
+ * Uses both ends of each tilted edge and a shared screen-Y translation, so
+ * perspective, tile scale and attached actor/effect registration are retained.
+ * If both world edges cannot cover the viewport, retain the fitted view. */
+bool Diorama_ClampCameraVertically(
+    float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow,
+    bool clamp_top, bool clamp_bottom);
 
 enum { kDioramaObjectPriorityCount = 4 };
 
@@ -206,6 +228,7 @@ typedef struct DioramaSkyboxView {
  * ordinary world-registered layer UVs. */
 typedef struct DioramaCapture {
   int width, height, authentic_y0, obj_apron;
+  DioramaVerticalBounds vertical_bounds;
   const ArRenderTexture *textures;
   const uint8_t *const *pixels;
   const ArRenderPointF *plane_capture_offsets;
@@ -224,7 +247,8 @@ typedef struct DioramaView {
   DioramaCameraPose camera;
   /* Applied after auto-fit resolves camera.distance's zero sentinel. */
   float distance_scale;
-  bool center_camera_vertically;
+  float distance_offset;
+  float camera_framing_weight;
   int pixel_aspect;
   bool ignore_aspect_ratio;
   int visible_width;

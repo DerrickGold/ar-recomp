@@ -15,6 +15,46 @@ static const float kDioramaLeanPitch = 0.12f;
 static const float kDioramaKickPitch = 0.05f;
 static const float kDioramaKickZoom = -0.15f;
 static const float kDioramaKickTau = 0.20f;
+static const float kDioramaManualIdleSeconds = 0.40f;
+static const float kDioramaManualReturnSeconds = 0.35f;
+
+void DioramaCameraManual_Input(DioramaCameraManualState *manual) {
+  if (!manual) return;
+  manual->framing_override = 1.0f;
+  manual->idle_remaining = kDioramaManualIdleSeconds;
+  manual->input_pending = true;
+}
+
+bool DioramaCameraManual_Update(DioramaCameraManualState *manual,
+                                float elapsed_seconds, bool input_active) {
+  if (!manual || !isfinite(elapsed_seconds) || elapsed_seconds <= 0.0f)
+    return false;
+  if (input_active || manual->input_pending) {
+    DioramaCameraManual_Input(manual);
+    manual->input_pending = false;
+    return true;
+  }
+  if (manual->framing_override == 0.0f) return false;
+
+  /* Spend only time after the idle grace period on the return animation. */
+  if (manual->idle_remaining > 0.0f) {
+    float idle_time = fminf(elapsed_seconds, manual->idle_remaining);
+    manual->idle_remaining -= idle_time;
+    elapsed_seconds -= idle_time;
+    if (elapsed_seconds <= 0.0f) return false;
+  }
+  float decay = expf(-elapsed_seconds / kDioramaManualReturnSeconds);
+  manual->offset.tilt_x *= decay;
+  manual->offset.tilt_y *= decay;
+  manual->offset.distance *= decay;
+  manual->framing_override *= decay;
+  if (fabsf(manual->offset.tilt_x) < 0.0001f) manual->offset.tilt_x = 0.0f;
+  if (fabsf(manual->offset.tilt_y) < 0.0001f) manual->offset.tilt_y = 0.0f;
+  if (fabsf(manual->offset.distance) < 0.001f) manual->offset.distance = 0.0f;
+  if (manual->framing_override < 0.0001f)
+    *manual = (DioramaCameraManualState){0};
+  return true;
+}
 
 DioramaCameraMotion DioramaCamera_Observe(
     DioramaCameraObserver *observer, const DioramaCameraObservation *input,
@@ -138,6 +178,7 @@ DioramaCameraView DioramaCamera_Present(
   return (DioramaCameraView){
     .pose = final_cam,
     .distance_scale = distance_scale,
-    .center_vertically = dynamic,
+    .distance_offset = dynamic ? frame->controls.zoom_offset : 0.0f,
+    .framing_weight = dynamic ? 1.0f - frame->controls.framing_override : 0.0f,
   };
 }

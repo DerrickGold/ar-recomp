@@ -461,6 +461,32 @@ static void TestVerticalMargins(void) {
   CHECK(top == 0 && bottom == 0);
   ActRaiserActionBg_ResolveVerticalMargins(8, 512, 4, NULL, &bottom);
   CHECK(bottom == 4);
+
+  /* Kassandora's ledge/floor snapshots must retain the same world window:
+   * the seven unavailable lower rows move above, rather than losing the top. */
+  const int cameras[] = {264, 280, 287, 280};
+  for (size_t i = 0; i < sizeof(cameras) / sizeof(cameras[0]); i++) {
+    ActRaiserActionBg_ResolveVerticalCaptureMargins(
+        cameras[i], 512, 64, &top, &bottom);
+    CHECK(top + bottom == 128);
+    CHECK(cameras[i] + 1 - top == 160);
+    CHECK(cameras[i] + 225 + bottom == 512);
+    CHECK(217 >= cameras[i] + 1 - top); /* The brick row above the timer. */
+  }
+  CHECK(top == 121 && bottom == 7);
+  ActRaiserActionBg_ResolveVerticalCaptureMargins(287, 512, 64, &top, &bottom);
+  CHECK(top == 128 && bottom == 0);
+  ActRaiserActionBg_ResolveVerticalCaptureMargins(0, 512, 64, &top, &bottom);
+  CHECK(top == 0 && bottom == 128);
+  ActRaiserActionBg_ResolveVerticalCaptureMargins(128, 512, 64, &top, &bottom);
+  CHECK(top == 64 && bottom == 64);
+  /* A short room cannot manufacture more world, even with a large setting. */
+  ActRaiserActionBg_ResolveVerticalCaptureMargins(16, 256, 64, &top, &bottom);
+  CHECK(top == 16 && bottom == 15);
+  ActRaiserActionBg_ResolveVerticalCaptureMargins(287, 512, 999, &top, &bottom);
+  CHECK(top == 128 && bottom == 0);
+  ActRaiserActionBg_ResolveVerticalCaptureMargins(287, 512, 0, &top, &bottom);
+  CHECK(top == 0 && bottom == 0);
 }
 
 static void PopulateNativeRing(const ActionBgWorld *world,

@@ -74,13 +74,17 @@ static void CheckFreeControlAndModeChanges(void) {
       .event_hit = true, .event_land = true, .event_boost = true};
   frame.controls.orbit_pitch = .1f;
   frame.controls.orbit_yaw = -.2f;
+  frame.controls.zoom_offset = 2.0f;
+  frame.controls.framing_override = 1.0f;
   const DioramaCameraFrame original = frame;
   DioramaCameraView view = DioramaCamera_Present(&presenter, &frame, 10, 1000000000);
   Near(view.pose.tilt_x, -.3f);
   Near(view.pose.tilt_y, .4f);
   Near(view.pose.distance, 5.0f);
   Near(view.distance_scale, 1.0f);
-  assert(!view.center_vertically && !memcmp(&original, &frame, sizeof(frame)));
+  Near(view.distance_offset, 0.0f);
+  Near(view.framing_weight, 0.0f);
+  assert(!memcmp(&original, &frame, sizeof(frame)));
   frame.controls.free_pose.tilt_y = -.4f;
   view = DioramaCamera_Present(&presenter, &frame, 10, 1000000000);
   Near(view.pose.tilt_y, -.4f); /* A retained frame follows manual controls immediately. */
@@ -91,11 +95,103 @@ static void CheckFreeControlAndModeChanges(void) {
   Near(view.pose.tilt_y, .1f - .2f);
   Near(view.pose.distance, 0);
   Near(view.distance_scale, 1); /* A mode switch cannot replay this capture's hit. */
-  assert(view.center_vertically);
+  Near(view.distance_offset, 2.0f);
+  Near(view.framing_weight, 0.0f);
   frame.controls.mode = kDioramaCam_Free;
   view = DioramaCamera_Present(&presenter, &frame, 11, 1000000000);
   Near(view.pose.tilt_x, -.3f);
   Near(view.pose.tilt_y, -.4f);
+  Near(view.distance_offset, 0.0f);
+  Near(view.framing_weight, 0.0f);
+}
+
+static DioramaCameraManualState ManualReturnAtRate(int rate) {
+  DioramaCameraManualState manual = {
+    .offset = {.tilt_x = .2f, .tilt_y = -.3f, .distance = 2.0f},
+  };
+  DioramaCameraManual_Input(&manual);
+  (void)DioramaCameraManual_Update(&manual, .01f, false);
+  for (int i = 0; i < rate; i++)
+    (void)DioramaCameraManual_Update(&manual, 1.1f / (float)rate, false);
+  return manual;
+}
+
+static void CheckManualReturn(void) {
+  /* Zoom alone releases framing, and sustained zoom cannot decay mid-input. */
+  DioramaCameraManualState manual = {.offset = {.distance = 2.0f}};
+  DioramaCameraManual_Input(&manual);
+  assert(DioramaCameraManual_Update(&manual, .01f, false));
+  for (int i = 0; i < 10; i++)
+    assert(DioramaCameraManual_Update(&manual, .1f, true));
+  Near(manual.offset.distance, 2.0f);
+  Near(manual.framing_override, 1.0f);
+  assert(!DioramaCameraManual_Update(&manual, .3f, false));
+  Near(manual.offset.distance, 2.0f);
+  assert(DioramaCameraManual_Update(&manual, .275f, false));
+  Near(manual.offset.distance, 2.0f * expf(-.5f));
+  Near(manual.framing_override, expf(-.5f));
+
+  /* A new wheel/drag event also restarts the grace period without a held key. */
+  const float zoom = manual.offset.distance;
+  DioramaCameraManual_Input(&manual);
+  assert(DioramaCameraManual_Update(&manual, .1f, false));
+  Near(manual.offset.distance, zoom);
+  Near(manual.framing_override, 1.0f);
+  assert(!DioramaCameraManual_Update(&manual, .3f, false));
+  Near(manual.offset.distance, zoom);
+
+  const DioramaCameraManualState sixty = ManualReturnAtRate(60);
+  const DioramaCameraManualState twice = ManualReturnAtRate(120);
+  Near(sixty.offset.tilt_x, twice.offset.tilt_x);
+  Near(sixty.offset.tilt_y, twice.offset.tilt_y);
+  Near(sixty.offset.distance, twice.offset.distance);
+  Near(sixty.framing_override, twice.framing_override);
+  Near(sixty.framing_override, expf(-2.0f));
+  for (int i = 0; i < 50; i++)
+    (void)DioramaCameraManual_Update(&manual, .1f, false);
+  Near(manual.offset.tilt_x, 0.0f);
+  Near(manual.offset.tilt_y, 0.0f);
+  Near(manual.offset.distance, 0.0f);
+  Near(manual.framing_override, 0.0f);
+  assert(!DioramaCameraManual_Update(&manual, .1f, false));
+}
+
+static void CheckManualPresentation(void) {
+  DioramaCameraPresenter presenter = DIORAMA_CAMERA_PRESENTER_INIT;
+  DioramaCameraFrame frame = Frame(kDioramaCam_Dynamic);
+  frame.controls.orbit_pitch = -.1f;
+  frame.controls.orbit_yaw = .3f;
+  frame.controls.zoom_offset = -1.0f;
+  frame.controls.framing_override = 1.0f;
+  const DioramaCameraFrame original = frame;
+  DioramaCameraView view = DioramaCamera_Present(&presenter, &frame, 1, 1000000000);
+  Near(view.pose.tilt_x, .1f);
+  Near(view.pose.tilt_y, .3f);
+  Near(view.pose.distance, 0.0f); /* Manual zoom preserves the auto-fit default. */
+  Near(view.distance_offset, -1.0f);
+  Near(view.framing_weight, 0.0f);
+  assert(!memcmp(&original, &frame, sizeof(frame)));
+
+  /* Retained frames restore pose and framing together without a mode switch. */
+  frame.controls.orbit_pitch *= .5f;
+  frame.controls.orbit_yaw *= .5f;
+  frame.controls.zoom_offset *= .5f;
+  frame.controls.framing_override = .5f;
+  view = DioramaCamera_Present(&presenter, &frame, 1, 1000000000);
+  Near(view.pose.tilt_x, .15f);
+  Near(view.pose.tilt_y, .15f);
+  Near(view.distance_offset, -.5f);
+  Near(view.framing_weight, .5f);
+  frame.controls.orbit_pitch = 0.0f;
+  frame.controls.orbit_yaw = 0.0f;
+  frame.controls.zoom_offset = 0.0f;
+  frame.controls.framing_override = 0.0f;
+  view = DioramaCamera_Present(&presenter, &frame, 1, 1000000000);
+  Near(view.pose.tilt_x, .2f);
+  Near(view.pose.tilt_y, 0.0f);
+  Near(view.pose.distance, 0.0f);
+  Near(view.distance_offset, 0.0f);
+  Near(view.framing_weight, 1.0f);
 }
 
 static DioramaCameraView EaseAtRate(int rate) {
@@ -190,6 +286,8 @@ int main(void) {
   CheckCaptureTimingAndIsolation();
   CheckCapturedEdges();
   CheckFreeControlAndModeChanges();
+  CheckManualReturn();
+  CheckManualPresentation();
   CheckTimeBasedEasing();
   CheckImpulseLifetime();
   CheckLandingBoostAndStrength();

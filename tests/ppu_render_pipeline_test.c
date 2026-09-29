@@ -2062,12 +2062,96 @@ static void TestOverlayContentMetadata(void) {
   ppu_free(ppu);
 }
 
+/* A shared 128-row budget can occupy either side of the native viewport.
+ * Exercise source capture, exact sprites, and policy rejection at both limits. */
+static void TestAsymmetricVerticalCapture(void) {
+  enum { kRows = 352, kPixels = kW * kRows };
+  static uint32_t framebuffer[kPixels + 1];
+  static uint32_t bg_capture[kPixels + 1];
+  static uint32_t obj_capture[kPixels + 1];
+  const int margins[][2] = {{128, 0}, {121, 7}, {0, 128}};
+  const uint32_t guard = 0xdecafbad;
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  SrRunnerHandle *runner = TestRunnerForPpu(ppu);
+  for (int reference = 0; reference < 2; reference++) {
+    for (size_t i = 0; i < sizeof(margins) / sizeof(margins[0]); i++) {
+      ppu_reset(ppu);
+      memset(framebuffer, 0, sizeof(framebuffer));
+      memset(bg_capture, 0, sizeof(bg_capture));
+      memset(obj_capture, 0, sizeof(obj_capture));
+      framebuffer[kPixels] = bg_capture[kPixels] = obj_capture[kPixels] = guard;
+      const int top = margins[i][0], bottom = margins[i][1];
+      ppu->inidisp = 0x0f;
+      ppu->bgmode = 1;
+      ppu->screenEnabled[0] = 0x11;
+      ppu->cgram[0x11] = bgr555(0, 31, 0);
+      ppu->cgram[0x82] = bgr555(0, 0, 31);
+      set_solid_4bpp_tile(ppu, 1, 1);
+      set_solid_4bpp_tile(ppu, 2, 2);
+      ppu->bgXsc[0] = 0x30 | 2;
+      for (int word = 0; word < 0x800; word++)
+        ppu->vram[0x3000 + word] = (uint16_t)(1 | (1 << 10));
+      CHECK(PpuBeginDrawingSized(
+          ppu, (uint8_t *)framebuffer, kW * 4, kRows,
+          reference ? kPpuRenderFlags_ReferencePixelRenderer : 0));
+
+      SrPpuFramePolicyRequest request = {
+        .struct_size = sizeof(request),
+        .lifetime_generation = 1u,
+        .policy = {
+          .struct_size = sizeof(SrPpuFramePolicy),
+          .margin_top_pixels = (uint32_t)top,
+          .margin_bottom_pixels = (uint32_t)bottom,
+        },
+      };
+      CHECK(api->apply_ppu_frame_policy(runner, &request) == SR_RESULT_OK);
+      CHECK(ppu->extraTopCur == top && ppu->extraBottomCur == bottom);
+      /* Per-side capacity does not permit a larger total surface or mutation
+       * after an invalid policy request. */
+      request.policy.margin_top_pixels = 128;
+      request.policy.margin_bottom_pixels = 1;
+      CHECK(api->apply_ppu_frame_policy(runner, &request) == SR_RESULT_INVALID_ARGUMENT);
+      CHECK(ppu->extraTopCur == top && ppu->extraBottomCur == bottom);
+      CHECK(PpuBindOverlaySurfaceSized(
+          ppu, kPpuOverlaySource_Bg1, (uint8_t *)bg_capture, kW * 4, kRows));
+      CHECK(PpuBindOverlaySurfaceSized(
+          ppu, kPpuOverlaySource_Obj, (uint8_t *)obj_capture, kW * 4, kRows));
+      CHECK(PpuSetOverlayCapture(
+          ppu, kPpuOverlaySource_Bg1, 0, -top, kW, kRows, kPpuOverlayFlag_RemoveFromGame));
+      CHECK(PpuSetOverlayCapture(
+          ppu, kPpuOverlaySource_Obj, 0, -top, kW, kRows, kPpuOverlayFlag_RemoveFromGame));
+      CHECK(PpuSetOverlayOamRange(ppu, 0, 128));
+      PpuSetVerticalMarginLayerClip(ppu, 0, top, bottom);
+      /* Exact OBJ positions exercise mask indices above -64 and below 288. */
+      const int sprite_y = top ? -top + 8 : kH + bottom - 16;
+      ppu->oam[0] = 24;
+      ppu->oam[1] = (uint16_t)(2 | (3 << 12));
+      PpuSetObjExactPosition(ppu, 0, 24, sprite_y);
+      ppu_runLine(ppu, 0);
+      for (int line = 1 - top; line <= 0; line++)
+        ppu_runMarginLine(ppu, line);
+      for (int line = 1; line <= kH; line++)
+        ppu_runLine(ppu, line);
+      for (int line = kH + 1; line <= kH + bottom; line++)
+        ppu_runMarginLine(ppu, line);
+      CHECK(bg_capture[0] != 0);
+      CHECK(bg_capture[(kRows - 1) * kW] == bg_capture[0]);
+      CHECK(bg_capture[top * kW] == bg_capture[0]);
+      CHECK(obj_capture[(sprite_y + top) * kW + 24] != 0);
+      CHECK(framebuffer[kPixels] == guard);
+      CHECK(bg_capture[kPixels] == guard);
+      CHECK(obj_capture[kPixels] == guard);
+    }
+  }
+  ppu_free(ppu);
+}
+
 /* A vertical margin is shared by every captured plane, but the planes do not
  * necessarily share a camera. Fillmore act 2 has BG1 deep in a tall castle
- * while BG2 remains at Y=0; blindly wrapping BG2's negative margin rows reads
- * red high-priority geometry from the bottom of its 512px tilemap. Prove the
- * layer-local clip removes only that wrapped BG2 contribution, preserves BG1,
- * and cannot affect the first authentic scanline. */
+ * while BG2 remains at Y=0; layer-local clipping must preserve native rows. */
 static void TestVerticalMarginLayerClip(void) {
   enum { kTop = 32, kRows = kTop + 1, kPitch = kW * 4 };
   const int bg1 = kActRaiserPpuLayer_Bg1;
@@ -2964,6 +3048,7 @@ int main(void) {
   TestSkyPalaceWinnerCapture();
   TestBg3NativeParityComposite();
   TestVerticalMarginLayerClip();
+  TestAsymmetricVerticalCapture();
   TestVerticalMarginBottomLayerClip();
   TestVerticalMarginExactObj();
   TestLayerPresentationExtents();

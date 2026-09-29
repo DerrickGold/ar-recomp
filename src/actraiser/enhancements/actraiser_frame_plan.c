@@ -240,6 +240,8 @@ void ActRaiser_ClearWidescreenMarginGaps(
  * margin clamp in ActRaiser_ApplyWidescreenPolicy, and deliberately built the
  * same way: ask the game's own camera and layer-dimension state how much world
  * actually exists past the viewport edge, and never request more than that.
+ * Unavailable lower rows are spent above (and vice versa), keeping the capture
+ * window stable near an edge instead of discarding world context on landing.
  *
  * The camera routine at $02:B091 clamps V to [0, $30 - $E1] with $E1 = 225 --
  * the hardcoded viewport height, exactly as the H clamp's $100 is the
@@ -268,11 +270,11 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
       ActRaiser_IsActionMapGroup(map_group) &&
       !ActRaiser_IsSimulationTown(map_group, map_number) &&
       primary_layer >= 0) {
-    if (budget > (int)SR_PPU_VERTICAL_MARGIN_MAX)
-      budget = (int)SR_PPU_VERTICAL_MARGIN_MAX;
+    if (budget > (int)SR_PPU_VERTICAL_MARGIN_TOTAL_MAX / 2)
+      budget = (int)SR_PPU_VERTICAL_MARGIN_TOTAL_MAX / 2;
     const int layer_offset =
         primary_layer * kActRaiserBgLayerStateStride;
-    ActRaiserActionBg_ResolveVerticalMargins(
+    ActRaiserActionBg_ResolveVerticalCaptureMargins(
         ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY + layer_offset),
         ActRaiser_ReadWram16(kActRaiserWram_Bg1Height + layer_offset),
         budget, &extra_top, &extra_bottom);
@@ -293,7 +295,8 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
       ActRaiserActionBg_ResolveVerticalMargins(
           ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY + offset),
           ActRaiser_ReadWram16(kActRaiserWram_Bg1Height + offset),
-          budget, &top_rows, &bottom_rows);
+          g_ws_extra_top > g_ws_extra_bottom ? g_ws_extra_top : g_ws_extra_bottom,
+          &top_rows, &bottom_rows);
       frame_policy->vertical_clip_layer_mask |= 1u << layer;
       frame_policy->vertical_clip_top_rows[layer] = (uint32_t)top_rows;
       frame_policy->vertical_clip_bottom_rows[layer] =

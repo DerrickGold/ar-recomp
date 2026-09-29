@@ -279,6 +279,34 @@ void ActRaiserActionBg_ResolveVerticalMargins(
   if (bottom) *bottom = available_bottom;
 }
 
+void ActRaiserActionBg_ResolveVerticalCaptureMargins(
+    int camera_y, int world_height, int budget,
+    int *top, int *bottom) {
+  const int maximum_budget = (int)SR_PPU_VERTICAL_MARGIN_TOTAL_MAX / 2;
+  if (budget < 0) budget = 0;
+  if (budget > maximum_budget) budget = maximum_budget;
+  int top_rows = 0, bottom_rows = 0;
+  ActRaiserActionBg_ResolveVerticalMargins(
+      camera_y, world_height, budget, &top_rows, &bottom_rows);
+  const int remaining = budget * 2 - top_rows - bottom_rows;
+  if (remaining > 0) {
+    int available_top = 0, available_bottom = 0;
+    ActRaiserActionBg_ResolveVerticalMargins(
+        camera_y, world_height, budget * 2, &available_top, &available_bottom);
+    if (bottom_rows < budget) {
+      int added = available_top - top_rows;
+      if (added > remaining) added = remaining;
+      top_rows += added;
+    } else if (top_rows < budget) {
+      int added = available_bottom - bottom_rows;
+      if (added > remaining) added = remaining;
+      bottom_rows += added;
+    }
+  }
+  if (top) *top = top_rows;
+  if (bottom) *bottom = bottom_rows;
+}
+
 bool ActRaiserActionBg_CaptureLayer(
     const uint8_t *wram, size_t wram_size, unsigned layer, uint8_t bgsc,
     ActRaiserActionBgLayerSnapshot *out) {

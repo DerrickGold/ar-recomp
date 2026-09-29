@@ -17,6 +17,19 @@ typedef struct DioramaCameraPose {
   float distance;
 } DioramaCameraPose;
 
+/* Transient host input, independent of the saved camera defaults. Distance is
+ * an additive offset applied after auto-fit; framing returns with the pose. */
+typedef struct DioramaCameraManualState {
+  DioramaCameraPose offset;
+  float framing_override;
+  float idle_remaining;
+  bool input_pending;
+} DioramaCameraManualState;
+
+void DioramaCameraManual_Input(DioramaCameraManualState *manual);
+bool DioramaCameraManual_Update(DioramaCameraManualState *manual,
+                                float elapsed_seconds, bool input_active);
+
 /* Host controls can be refreshed on retained frames without changing motion,
  * event flags or captured strength. Mode is DioramaCameraMode in settings.h. */
 typedef struct DioramaCameraPresentationState {
@@ -25,6 +38,8 @@ typedef struct DioramaCameraPresentationState {
   DioramaCameraPose dynamic_baseline;
   float orbit_yaw;
   float orbit_pitch;
+  float zoom_offset;
+  float framing_override;
 } DioramaCameraPresentationState;
 
 typedef struct DioramaCameraMotion {
@@ -77,7 +92,9 @@ typedef struct DioramaCameraPresenter {
 typedef struct DioramaCameraView {
   DioramaCameraPose pose;
   float distance_scale;
-  bool center_vertically;
+  float distance_offset;
+  /* 0 permits free framing; 1 fully centers and clamps the dynamic view. */
+  float framing_weight;
 } DioramaCameraView;
 
 /* Sample once per capture, using elapsed emulation ticks (zero on a host-

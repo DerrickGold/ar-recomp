@@ -41,6 +41,9 @@ static const char *s_last_setting;
 static InputMapActionFn s_action_handler;
 static bool s_input_open;
 static SettingDesc s_setting;
+static InputAction s_analog_action;
+static float s_analog_value, s_camera_zoom;
+static bool s_dynamic_input_active;
 
 static const ActRaiserDisplayGeometry s_geometry;
 const ActRaiserDisplayGeometry *const g_actraiser_display_geometry = &s_geometry;
@@ -62,6 +65,7 @@ uint64_t HostPpuOutput_AuthenticFrameSerial(void) {
 void ActRaiser_RequestMagicCycle(void) {
 }
 void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
+  s_camera_zoom = d_zoom;
 }
 float Diorama_DragRadPerPx(void) {
   return 0;
@@ -70,14 +74,15 @@ bool Diorama_IsActiveThisFrame(void) {
   return s_diorama;
 }
 bool Diorama_IsDragging(void) {
-  return 0;
+  return s_diorama_drag;
 }
 void Diorama_ResetCamera(void) {
 }
 void Diorama_SetDragging(bool dragging) {
   s_diorama_drag = dragging;
 }
-bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool orbit_held) {
+bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool input_active) {
+  s_dynamic_input_active = input_active;
   return 0;
 }
 float Diorama_ZoomStep(void) {
@@ -109,7 +114,7 @@ bool InputMap_ActionHeld(InputAction action) {
   return 0;
 }
 float InputMap_AnalogAction(InputAction action) {
-  return 0;
+  return action == s_analog_action ? s_analog_value : 0.0f;
 }
 void InputMap_Clear(void) {
   ++s_clears;
@@ -336,6 +341,30 @@ int main(void) {
   event.type = SDL_EVENT_MOUSE_BUTTON_UP;
   assert(HostInput_HandleEvent(&event) && !s_diorama_drag && !s_sim_drag);
   s_overlay = false;
+
+  /* Held zoom postpones Dynamic Cam's return, while a stationary mouse drag
+   * lets it return once the camera's idle grace period expires. */
+  g_settings.diorama_camera_mode = kDioramaCam_Dynamic;
+  g_settings.input_cam_sensitivity = 100;
+  s_analog_action = kInputAction_CamZoomOut;
+  s_analog_value = 1.0f;
+  HostInput_ApplyAnalogCamera();
+  SDL_Delay(1);
+  HostInput_ApplyAnalogCamera();
+  assert(s_camera_zoom > 0.0f && s_dynamic_input_active);
+  s_analog_value = 0.0f;
+  s_diorama_drag = true;
+  SDL_Delay(1);
+  HostInput_ApplyAnalogCamera();
+  assert(!s_dynamic_input_active);
+  s_diorama_drag = false;
+  g_settings.diorama_camera_mode = kDioramaCam_Free;
+  s_analog_value = 1.0f;
+  s_camera_zoom = 0.0f;
+  SDL_Delay(1);
+  HostInput_ApplyAnalogCamera();
+  assert(s_camera_zoom > 0.0f && !s_dynamic_input_active);
+  s_analog_value = 0.0f;
 
   /* Keyboard and pad save-state commands reach the same application action. */
   Key(SDL_EVENT_KEY_DOWN, SDLK_F5);

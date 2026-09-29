@@ -353,12 +353,23 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
   ArRenderPointF plane_offsets[kDioramaPlane_Count];
   for (int plane = 0; plane < kDioramaPlane_Count; plane++)
     plane_offsets[plane] = DioramaFrameGeneration_PlaneOffset(plane);
+  const int capture_height =
+      slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom;
+  DioramaVerticalBounds vertical_bounds = {0};
+  const int primary_layer = ActionBgPlan_PlayfieldLayer(&slot->action_bg_plan);
+  if (primary_layer >= 0) {
+    const ActionBgLayerPlan *primary = &slot->action_bg_plan.layer[primary_layer];
+    const int plane = primary_layer == 0 ? SR_PPU_OVERLAY_BG1 : SR_PPU_OVERLAY_BG2;
+    vertical_bounds = DioramaVerticalBounds_Resolve(
+        plane, primary->camera_y, primary->world_height,
+        slot->ws_extra_top, capture_height);
+  }
   const DioramaCapture capture = {
       .plane_capture_offsets = plane_offsets,
       .width = slot->snes_width,
-      .height =
-          slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
+      .height = capture_height,
       .authentic_y0 = slot->ws_extra_top,
+      .vertical_bounds = vertical_bounds,
       .obj_apron = slot->obj_apron,
       .textures = scene_textures,
       .pixels = pixels,
@@ -376,7 +387,8 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
   const DioramaView view = {
       .camera = camera.pose,
       .distance_scale = camera.distance_scale,
-      .center_camera_vertically = camera.center_vertically,
+      .distance_offset = camera.distance_offset,
+      .camera_framing_weight = camera.framing_weight,
       .pixel_aspect = slot->pixel_aspect,
       .ignore_aspect_ratio = slot->ignore_aspect_ratio,
       .visible_width = slot->visible_width,

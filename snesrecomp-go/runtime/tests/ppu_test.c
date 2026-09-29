@@ -1707,7 +1707,7 @@ static void compare_native_virtual_capture(
         bool include_authentic) {
     enum {
         kExtraX = 16,
-        kExtraY = kPpuExtraTopBottom,
+        kExtraY = kPpuVerticalMarginTotal / 2,
         kWidth = kPpuXPixels + kExtraX * 2,
         kHeight = kPpuYPixels + kExtraY * 2,
         kPlanes = 3

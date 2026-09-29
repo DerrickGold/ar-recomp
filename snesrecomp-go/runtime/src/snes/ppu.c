@@ -343,7 +343,8 @@ bool PpuOutputSurfacesFitGeometry(
         const Ppu *ppu, uint32_t horizontal_budget,
         uint32_t top, uint32_t bottom) {
     if (ppu == NULL || horizontal_budget > kPpuExtraLeftRight ||
-        top > kPpuExtraTopBottom || bottom > kPpuExtraTopBottom)
+        top > kPpuExtraTopBottom || bottom > kPpuExtraTopBottom ||
+        top + bottom > kPpuVerticalMarginTotal)
         return false;
     return output_surface_fits_geometry(
                ppu->renderBuffer, ppu->renderPitch, ppu->renderHeight,
@@ -689,7 +690,8 @@ void PpuSetExtraSideSpace(Ppu *ppu, int left, int right, int bottom) {
 void PpuSetExtraVerticalSpace(Ppu *ppu, int top, int bottom) {
     if (ppu == NULL) return;
     ppu->extraTopCur = (uint8_t)clamp_int(top, 0, kPpuExtraTopBottom);
-    ppu->extraBottomCur = (uint8_t)clamp_int(bottom, 0, kPpuExtraTopBottom);
+    ppu->extraBottomCur = (uint8_t)clamp_int(
+        bottom, 0, kPpuVerticalMarginTotal - ppu->extraTopCur);
     ppu->verticalMarginLayerClip = 0u;
     memset(ppu->verticalMarginTopRows, 0, sizeof(ppu->verticalMarginTopRows));
     memset(ppu->verticalMarginBottomRows, 0,
@@ -851,7 +853,7 @@ static void rebuild_obj_scanline_masks(Ppu *ppu) {
 
 static const PpuBitWord *obj_scanline_masks(Ppu *ppu, int screen_y) {
     int row = screen_y + kPpuExtraTopBottom;
-    if (row < 0 || row >= kPpuBufHeight) return NULL;
+    if (row < 0 || row >= kPpuObjScanlineMaskRows) return NULL;
     if (!ppu->objScanlineMasksValid) rebuild_obj_scanline_masks(ppu);
     return ppu->objScanlineMasks[row];
 }

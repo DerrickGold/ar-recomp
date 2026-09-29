@@ -57,8 +57,11 @@ enum {
     kPpuSurfaceWidth = 640,
     kPpuYPixels = 224,
     kPpuWidescreenExtentAvailable = UINT16_MAX,
-    kPpuExtraTopBottom = 64,
+    kPpuExtraTopBottom = 128,
+    kPpuVerticalMarginTotal = 128,
     kPpuBufHeight = 352,
+    /* Screen-space OBJ masks cover both possible asymmetric row ranges. */
+    kPpuObjScanlineMaskRows = kPpuYPixels + kPpuExtraTopBottom * 2,
     kPpuObjXWrap = 512,
     kPpuObjYWrap = 256,
     kPpuObjYNegativeFrom = 224,
@@ -313,7 +316,7 @@ struct Ppu {
     /* Dense hardware-shaped 128-bit eligibility for every signed scanline the
      * renderer can expose. Rebuilt lazily after OAM geometry changes, then
      * consumed in hardware rotation order. */
-    PpuBitWord objScanlineMasks[kPpuBufHeight][kPpuObjMaskWords];
+    PpuBitWord objScanlineMasks[kPpuObjScanlineMaskRows][kPpuObjMaskWords];
     bool objScanlineMasksValid;
     PpuObjSampleCache objSampleCache[kPpuObjSampleCacheCount];
     PpuVirtualSampleCache virtualSampleCache[2];
