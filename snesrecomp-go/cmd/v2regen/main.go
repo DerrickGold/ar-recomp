@@ -807,6 +807,7 @@ func regenerate(args []string) error {
 	banksValue := flags.String("banks", "", "optional comma-separated hexadecimal banks")
 	chunkThreshold := flags.Int("bank-chunk-threshold-kib", 4096, "split banks at or above this generated size")
 	chunkSpan := flags.Int("bank-chunk-pc-span", 0x800, "stable PC span per split translation unit")
+	maxUnit := flags.Int("max-unit-kib", 4096, "divide generated units whose function source exceeds this, between whole functions; 0 disables")
 	allowStubs := flags.Bool("allow-stubs", false, "write complete output and report stubs without failing this command")
 	funcsOut := flags.String("funcs-out", "", "optional generated funcs.h path; omit to keep regen output-only")
 	provenAnalysis := flags.Bool("experimental-proven-analysis", false, "apply closed static dispatch facts, exact direct-call M/X, and exact continuation regions in memory (requires an isolated --out-dir)")
@@ -881,9 +882,14 @@ func regenerate(args []string) error {
 		fmt.Printf("v2regen: analysis database loaded %d proven dispatch fact(s) and %d proven entry fact(s)\n",
 			len(provenFacts), len(provenEntryFacts))
 	}
+	maxUnitBytes := -1 // regen treats zero as the default, so 0 KiB disables here
+	if *maxUnit > 0 {
+		maxUnitBytes = *maxUnit * 1024
+	}
 	report, err := regen.Run(regen.Options{
 		ROMPath: *romPath, ConfigDir: *cfgDir, OutputDir: *outDir, Jobs: *jobs,
 		ChunkThresholdBytes: max(0, *chunkThreshold) * 1024, ChunkPCSpan: max(0, *chunkSpan), OnlyBanks: only,
+		MaxUnitBytes:                  maxUnitBytes,
 		AllowStubs:                    *allowStubs,
 		ProvenDispatchFacts:           provenFacts,
 		ProvenEntryFacts:              provenEntryFacts,

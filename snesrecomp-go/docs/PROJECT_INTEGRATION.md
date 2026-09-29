@@ -94,7 +94,18 @@ paths or progress from diagnostics. Cancellation should terminate the
 `regen` writes bank translation units, `dispatch_v2.c`, and
 `unresolved_stubs_v2.c`. It converges cross-bank discovery and variant routing
 before replacing output, preserves deterministic source order across workers,
-and removes stale bank parts when the translation-unit split changes. Direct
+and removes stale bank parts when the translation-unit split changes.
+
+A bank of 4 MiB or more of generated source is split into stable $800-byte PC
+chunks (`bankXX_partNN_v2.c`). A chunk whose function source exceeds the unit
+limit (`--max-unit-kib`, default 4096, `0` to disable) is divided further. Its
+PC range is halved at fixed, aligned points until each piece fits, giving
+`bankXX_partNN_PPPP_v2.c` units named by their first PC. Aligned boundaries
+mean an edit rarely moves one. Division moves whole definitions and nothing
+else: every member of a resumable region stays with its private body, and
+bodies, aliases, dispatch registration, M/X routing and continuations are
+unchanged. A single function or region larger than the limit stays whole, and
+regen names it in its output. Direct
 `v2regen regen` keeps header output opt-in; pass `--funcs-out` as above to emit
 the matching declaration header in the same command. When omitted, it prints
 the exact `sync-funcs` next step rather than leaving the later missing-header
@@ -527,7 +538,11 @@ per-function return structs or pass CPU registers as C parameters; mutate the
 shared `CpuState` exactly as generated code does.
 
 Current generated output includes `snesrecomp/game/cpu.h`,
-`snesrecomp/game/trace.h`, and `snesrecomp/game/generated_support.h`.
+`snesrecomp/game/trace.h`, and `snesrecomp/game/generated_support.h`, and
+nothing project-owned: every generated unit declares the generated functions it
+uses with their definitions' exact signatures (void aliases, `RecompReturn`
+variants, shared-region helpers). `recomp/funcs.h` remains the declaration
+surface for authored code; changing it does not invalidate generated objects.
 `snesrecomp/game/bootstrap.h` is the frontend lifecycle and game-registration
 surface. Legacy short-header forwarders are not shipped: generated and
 authored project code must use the namespaced public headers and must not
@@ -564,7 +579,21 @@ Toolchain resolution order: `$SNESBUILD_ZIG`, the project's
 `build/toolchain/` cache (populated by `snesbuild toolchain fetch`, which
 verifies the release archive against a checksum embedded in the binary),
 then `PATH`. Objects and the executable land in `build/hermetic/`. Rebuilds are
-incremental by source/header mtime plus a compile-flags hash.
+incremental: an object is reused while its compile flags and every file its
+compiler's depfile named are unchanged.
+
+Compiles start with the largest translation unit, so the longest units overlap
+the rest of the build; objects are still archived and linked in source order.
+`--jobs` caps how many compiles run at once. `--memory-budget` (default
+`auto`: half of physical memory, or of a smaller container limit) also holds a
+compile back until its estimated peak memory fits beside the estimates of the
+compiles already running; `off` disables it, and a size such as `6GiB` sets
+it. The estimate grows linearly with source size and was calibrated against
+the pinned Zig at `-O2 -g`. It bounds the scheduler's accounting, not the
+compilers' actual memory. A unit whose estimate alone exceeds the budget
+compiles by itself. The build log reports the budget, every unit that must
+compile alone, the peak concurrency and estimate, and the archive-and-link
+time.
 
 ## Per-game conventions
 

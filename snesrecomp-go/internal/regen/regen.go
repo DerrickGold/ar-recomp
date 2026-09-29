@@ -28,6 +28,12 @@ type Options struct {
 	Jobs                          int
 	ChunkThresholdBytes           int
 	ChunkPCSpan                   int
+	// MaxUnitBytes is the soft limit on one generated translation unit's
+	// function source. Chunks over it are divided between whole functions;
+	// an indivisible function or region stays whole and is listed in
+	// Report.OversizedUnits. Zero selects the default; a negative value
+	// disables the limit.
+	MaxUnitBytes                  int
 	OnlyBanks                     map[byte]struct{}
 	AllowStubs                    bool
 	ProvenDispatchFacts           []analysis.DispatchFact
@@ -66,6 +72,7 @@ type Report struct {
 	StaticCanonicalPromotions           int
 	NativeReturnTables                  []NativeReturnTableSite
 	SemanticSourceSHA256                string
+	OversizedUnits                      []string
 	Elapsed                             time.Duration
 }
 
@@ -121,6 +128,7 @@ var bankConfigRE = regexp.MustCompile(`(?i)^bank([0-9a-f]+)\.cfg$`)
 const (
 	defaultChunkThresholdBytes    = 4 * 1024 * 1024
 	defaultChunkPCSpan            = 0x800
+	defaultMaxUnitBytes           = 4 * 1024 * 1024
 	variantFixpointPassLimit      = 24
 	variantPrunePassLimit         = 8
 	variantDiscoveryRoundLimit    = 32
@@ -141,6 +149,9 @@ func Run(options Options) (Report, error) {
 	}
 	if options.ChunkPCSpan == 0 {
 		options.ChunkPCSpan = defaultChunkPCSpan
+	}
+	if options.MaxUnitBytes == 0 {
+		options.MaxUnitBytes = defaultMaxUnitBytes
 	}
 	logf := options.Progress
 	if logf == nil {
@@ -310,11 +321,15 @@ func Run(options Options) (Report, error) {
 	}
 	logf("generated semantic source sha256 %s", report.SemanticSourceSHA256)
 
-	files, changed, unresolved, err := repo.writeOutputs(options, results)
+	files, changed, unresolved, oversized, err := repo.writeOutputs(options, results)
 	if err != nil {
 		return report, err
 	}
 	report.Files, report.ChangedFiles = files, changed
+	report.OversizedUnits = oversized
+	for _, unit := range oversized {
+		logf("unit over the size limit: %s", unit)
+	}
 	report.UnresolvedIndirects = unresolved
 	report.StubHits, err = lintStubs(options.OutputDir)
 	report.Elapsed = time.Since(started)

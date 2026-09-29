@@ -26,6 +26,9 @@ type RegenOptions struct {
 	GoCommand      string
 	Stdout         io.Writer
 	Stderr         io.Writer
+	// MaxUnitBytes is regen.Options.MaxUnitBytes: zero is the default soft
+	// limit on a generated unit's function source, negative disables it.
+	MaxUnitBytes int
 }
 
 type RegenReport struct {
@@ -83,7 +86,7 @@ func Regenerate(options RegenOptions) (RegenReport, error) {
 	step(stdout, fmt.Sprintf("Regenerating banks (%d workers)", options.Jobs))
 	generation, err := regen.Run(regen.Options{
 		ROMPath: paths.ROM, ConfigDir: paths.ConfigDir, OutputDir: paths.GeneratedDir,
-		Jobs: options.Jobs, AllowStubs: true,
+		Jobs: options.Jobs, AllowStubs: true, MaxUnitBytes: options.MaxUnitBytes,
 		ProvenDispatchFacts: database.DispatchFacts, ProvenEntryFacts: database.EntryFacts,
 		ProvenEntryTemplates:          database.EntryTemplates,
 		AllowMatchingAuthoredFacts:    strings.TrimSpace(options.AnalysisDBPath) != "",

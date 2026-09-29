@@ -60,7 +60,7 @@ func TestSplitTailNativeExecution(t *testing.T) {
 		}
 	}
 	files := map[string]string{
-		"generated.c": source, "funcs.h": "/* synthetic fixture forward declarations are in generated.c */\n",
+		"generated.c": source,
 		"CMakeLists.txt": `cmake_minimum_required(VERSION 3.20)
 project(SplitTailConformance LANGUAGES C CXX)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)

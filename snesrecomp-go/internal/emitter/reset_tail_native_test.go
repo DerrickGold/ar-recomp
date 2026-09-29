@@ -66,8 +66,8 @@ set_property(TARGET reset_tail PROPERTY LINKER_LANGUAGE CXX)
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/generated_support.h"
-#include "funcs.h"
 #include "generated.c"
+#include "funcs.h"
 void RtlApuLock(void) {} void RtlApuUnlock(void) {}
 static unsigned requests;
 RecompReturn transfer(CpuState *cpu) {

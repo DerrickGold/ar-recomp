@@ -88,6 +88,7 @@ set_property(TARGET return_contract PROPERTY LINKER_LANGUAGE CXX)
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game/generated_support.h"
 #include "generated.c"
+#include "funcs.h"
 extern bool g_fail;
 void RtlApuLock(void) {}
 void RtlApuUnlock(void) {}

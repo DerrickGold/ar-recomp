@@ -81,8 +81,8 @@ set_property(TARGET stacked_results PROPERTY LINKER_LANGUAGE CXX)
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game/trace.h"
 #include "snesrecomp/game/generated_support.h"
-#include "funcs.h"
 #include "generated.c"
+#include "funcs.h"
 extern bool g_fail;
 void RtlApuLock(void) {} void RtlApuUnlock(void) {}
 static const uint8 fixture_rom[0x10000]={` + bytes.String() + `};

@@ -104,7 +104,6 @@ func TestHLEBoundariesAndPushedReturnNative(t *testing.T) {
 	}
 	runNativeContract(t, cmake, map[string]string{
 		"generated.c": source,
-		"funcs.h":     "",
 		"CMakeLists.txt": `cmake_minimum_required(VERSION 3.20)
 project(HLEBoundaries LANGUAGES C CXX)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)

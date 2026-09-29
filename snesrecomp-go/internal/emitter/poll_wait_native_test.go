@@ -44,7 +44,7 @@ func TestPollWaitNativeExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	runNativeContract(t, cmake, map[string]string{
-		"generated.c": source, "funcs.h": "/* declarations in generated.c */\n",
+		"generated.c": source,
 		"CMakeLists.txt": `cmake_minimum_required(VERSION 3.20)
 project(PollWaitConformance LANGUAGES C CXX)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)

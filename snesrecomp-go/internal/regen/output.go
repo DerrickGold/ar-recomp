@@ -14,20 +14,22 @@ import (
 )
 
 var (
-	topLevelFunctionRE       = regexp.MustCompile(`(?m)^(?:RecompReturn|void)\s+([A-Za-z_]\w*)\(CpuState \*cpu\) \{`)
-	variantCallRE            = regexp.MustCompile(`\b([A-Za-z_]\w*_M[01]X[01])\(cpu\)`)
-	variantSuffixRE          = regexp.MustCompile(`_M[01]X[01]$`)
-	syntheticNameRE          = regexp.MustCompile(`^bank_([0-9A-Fa-f]{2})_([0-9A-Fa-f]{4})$`)
-	regionHelperCallRE       = regexp.MustCompile(`\b(sr_region_[A-Za-z0-9_]+)\(cpu,\s*_entry_s,\s*_hrv,`)
-	continuationHelperCallRE = regexp.MustCompile(`\b(sr_continuation_[A-Za-z0-9_]+)\(cpu,\s*_entry_s,\s*_hrv,`)
-	regionOwnerPCRE          = regexp.MustCompile(`/\*\s*resumable-region owner_pc:\$([0-9A-Fa-f]{4})\s*\*/`)
+	topLevelFunctionRE = regexp.MustCompile(`(?m)^(?:RecompReturn|void)\s+([A-Za-z_]\w*)\(CpuState \*cpu\) \{`)
+	variantSuffixRE    = regexp.MustCompile(`_M[01]X[01]$`)
+	syntheticNameRE    = regexp.MustCompile(`^bank_([0-9A-Fa-f]{2})_([0-9A-Fa-f]{4})$`)
+	regionOwnerPCRE    = regexp.MustCompile(`/\*\s*resumable-region owner_pc:\$([0-9A-Fa-f]{4})\s*\*/`)
 )
 
 const forwardMarker = "/* Forward declarations for in-bank entries. */"
 
-func (repo *repository) writeOutputs(options Options, results map[byte][]*emitter.FunctionResult) (files, changed, unresolvedIndirects int, err error) {
+func (repo *repository) writeOutputs(options Options, results map[byte][]*emitter.FunctionResult) (files, changed, unresolvedIndirects int, oversized []string, err error) {
 	if mkdirErr := os.MkdirAll(options.OutputDir, 0o755); mkdirErr != nil {
 		err = mkdirErr
+		return
+	}
+	symbols, symbolsErr := repo.generatedSymbols(results)
+	if symbolsErr != nil {
+		err = symbolsErr
 		return
 	}
 	for _, bank := range repo.banks {
@@ -43,11 +45,13 @@ func (repo *repository) writeOutputs(options Options, results map[byte][]*emitte
 		for _, result := range bankResults {
 			unresolvedIndirects += len(result.UnresolvedIndirects)
 		}
-		outputs, splitErr := splitBank(source, bank.ID, bank.Config.Entries, options.ChunkThresholdBytes, options.ChunkPCSpan)
+		outputs, bankOversized, splitErr := splitBank(source, bank.ID, bank.Config.Entries,
+			options.ChunkThresholdBytes, options.ChunkPCSpan, options.MaxUnitBytes, symbols)
 		if splitErr != nil {
 			err = splitErr
 			return
 		}
+		oversized = append(oversized, bankOversized...)
 		wanted := make(map[string]struct{}, len(outputs))
 		for name, content := range outputs {
 			wanted[name] = struct{}{}
@@ -97,19 +101,58 @@ func (repo *repository) writeOutputs(options Options, results map[byte][]*emitte
 	return
 }
 
-func splitBank(source string, bank byte, entries []config.Entry, thresholdBytes, pcSpan int) (map[string]string, error) {
+// generatedSymbols is the declaration table for every generated symbol a unit
+// may use: each bank's entry variants and void aliases (every bank, so a
+// partial regeneration still declares the entries of banks it did not
+// re-emit), the unresolved trap stubs, and every definition this run emitted,
+// whose own declarators fix the shared-region helpers' linkage and parameters.
+func (repo *repository) generatedSymbols(results map[byte][]*emitter.FunctionResult) (*emitter.SymbolTable, error) {
+	symbols := emitter.NewSymbolTable()
+	for _, bank := range repo.banks {
+		if err := symbols.DeclareBankEntries(bank.ID, bank.Config.Entries); err != nil {
+			return nil, err
+		}
+	}
+	for variant := range repo.unresolved {
+		if err := symbols.DeclareVariant(fmt.Sprintf("bank_%02X_%04X_M%dX%d",
+			byte(variant.Address>>16), uint16(variant.Address), variant.M&1, variant.X&1)); err != nil {
+			return nil, err
+		}
+	}
+	for _, bank := range repo.banks {
+		for _, result := range results[bank.ID] {
+			if result == nil {
+				continue
+			}
+			if err := symbols.DeclareDefinitions(result.Source); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return symbols, nil
+}
+
+// splitBank partitions one composed bank into translation units. A bank below
+// thresholdBytes (and within unitLimit) stays one unit. Otherwise its
+// functions go to stable pcSpan-wide PC chunks, and a chunk whose function
+// source exceeds unitLimit is divided further (see divideUnit). Functions
+// move between units whole: every member of a resumable region carries its
+// owner's PC, so a region's private helper always shares a unit with its
+// wrappers. It returns the units by file name and a description of every unit
+// that stays over the limit because it cannot be divided.
+func splitBank(source string, bank byte, entries []config.Entry, thresholdBytes, pcSpan, unitLimit int, symbols *emitter.SymbolTable) (map[string]string, []string, error) {
 	monoName := fmt.Sprintf("bank%02x_v2.c", bank)
-	if pcSpan <= 0 || len([]byte(source)) < thresholdBytes {
-		return map[string]string{monoName: declareReferencedVariants(source)}, nil
+	if pcSpan <= 0 || (len(source) < thresholdBytes && (unitLimit <= 0 || len(source) <= unitLimit)) {
+		return map[string]string{monoName: declareReferencedVariants(source, symbols)}, nil, nil
 	}
 	matches := topLevelFunctionRE.FindAllStringSubmatchIndex(source, -1)
 	if len(matches) == 0 {
-		return map[string]string{monoName: source}, nil
+		return map[string]string{monoName: source}, nil, nil
 	}
 	preamble := source[:matches[0][0]]
 	marker := strings.Index(preamble, forwardMarker)
 	if marker < 0 {
-		return nil, fmt.Errorf("bank $%02X: emitted source lacks forward-declaration marker", bank)
+		return nil, nil, fmt.Errorf("bank $%02X: emitted source lacks forward-declaration marker", bank)
 	}
 	includePreamble := strings.TrimRight(preamble[:marker], " \t\r\n") + "\n\n"
 	nameToPC := make(map[string]uint16)
@@ -120,7 +163,7 @@ func splitBank(source string, bank byte, entries []config.Entry, thresholdBytes,
 		}
 		nameToPC[name] = entry.Start
 	}
-	chunks := make(map[int][]string)
+	chunks := make(map[int][]unitBody)
 	for index, match := range matches {
 		end := len(source)
 		if index+1 < len(matches) {
@@ -142,118 +185,196 @@ func splitBank(source string, bank byte, entries []config.Entry, thresholdBytes,
 			}
 		}
 		if !found {
-			return nil, fmt.Errorf("bank $%02X: cannot assign emitted function %q to stable PC chunk", bank, symbol)
+			return nil, nil, fmt.Errorf("bank $%02X: cannot assign emitted function %q to stable PC chunk", bank, symbol)
 		}
 		// Every wrapper for one resumable region must remain in its owner's
 		// translation unit because the shared body has private static-inline
 		// linkage. The marker is emitted only from proven region wrappers.
+		region := false
 		if owner := regionOwnerPCRE.FindStringSubmatch(body); owner != nil {
 			var parsed uint64
 			if _, scanErr := fmt.Sscanf(owner[1], "%X", &parsed); scanErr != nil {
-				return nil, fmt.Errorf("bank $%02X: parse resumable-region owner PC for %q: %w", bank, symbol, scanErr)
+				return nil, nil, fmt.Errorf("bank $%02X: parse resumable-region owner PC for %q: %w", bank, symbol, scanErr)
 			}
-			pc = uint16(parsed)
+			pc, region = uint16(parsed), true
 		}
 		part := 0
 		if pc >= 0x8000 {
 			part = int(pc-0x8000) / pcSpan
 		}
-		chunks[part] = append(chunks[part], body)
+		chunks[part] = append(chunks[part], unitBody{pc: int(pc), symbol: symbol, region: region, text: body})
 	}
+	parts := make([]int, 0, len(chunks))
+	for part := range chunks {
+		parts = append(parts, part)
+	}
+	sort.Ints(parts)
 	outputs := make(map[string]string, len(chunks))
-	for part, bodies := range chunks {
-		joined := strings.Join(bodies, "\n")
-		declarations := referencedDeclarations(joined)
-		start := 0x8000 + part*pcSpan
-		end := start + pcSpan - 1
-		if end > 0xffff {
-			end = 0xffff
+	var oversized []string
+	unit := func(name, header string, bodies []unitBody) {
+		texts := make([]string, len(bodies))
+		for index, body := range bodies {
+			texts[index] = body.text
 		}
-		header := fmt.Sprintf("/* Split translation unit: bank $%02X, part %02X; entry PCs $%04X-$%04X. */\n", bank, part, start, end)
-		outputs[fmt.Sprintf("bank%02x_part%02x_v2.c", bank, part)] = includePreamble + header + "\n" + declarations + "\n" + strings.TrimRight(joined, " \t\r\n") + "\n"
+		joined := strings.Join(texts, "\n")
+		outputs[name] = includePreamble + header + "\n" + symbols.Declarations(joined) + "\n" + strings.TrimRight(joined, " \t\r\n") + "\n"
+		// Only a lone function or region can remain over the limit.
+		if size := unitBytes(bodies); unitLimit > 0 && size > unitLimit {
+			what := fmt.Sprintf("the single function %s", bodies[0].symbol)
+			if bodies[0].region {
+				what = fmt.Sprintf("the resumable region owned by $%04X (%d functions and its shared body)", bodies[0].pc, len(bodies))
+			}
+			oversized = append(oversized, fmt.Sprintf(
+				"%s holds %d KiB of function source, over the %d KiB unit limit: it is %s, which cannot be divided",
+				name, size/1024, unitLimit/1024, what))
+		}
 	}
-	return outputs, nil
+	for _, part := range parts {
+		bodies := chunks[part]
+		start := 0x8000 + part*pcSpan
+		end := min(start+pcSpan-1, 0xffff)
+		// Part 0 also holds any code below $8000; division always sends it
+		// to the lowest piece, so the range stays aligned.
+		pieces := divideUnit(bodies, start, end, unitLimit)
+		if len(pieces) == 1 {
+			unit(fmt.Sprintf("bank%02x_part%02x_v2.c", bank, part),
+				fmt.Sprintf("/* Split translation unit: bank $%02X, part %02X; entry PCs $%04X-$%04X. */\n", bank, part, start, end),
+				bodies)
+			continue
+		}
+		for _, piece := range pieces {
+			name := fmt.Sprintf("bank%02x_part%02x_%04x", bank, part, piece.low)
+			header := fmt.Sprintf("/* Split translation unit: bank $%02X, part %02X; entry PCs $%04X-$%04X. */\n",
+				bank, part, piece.low, piece.high)
+			if piece.count > 1 {
+				name += fmt.Sprintf("_%02d", piece.ordinal)
+				header = fmt.Sprintf("/* Split translation unit: bank $%02X, part %02X; entry PC $%04X, piece %d of %d. */\n",
+					bank, part, piece.low, piece.ordinal+1, piece.count)
+			}
+			unit(name+"_v2.c", header, piece.bodies)
+		}
+	}
+	return outputs, oversized, nil
 }
 
-// declareReferencedVariants forward-declares every M/X variant an unsplit bank
-// calls. ComposeBank declares only one variant per configured entry in this
-// bank, so without this a mono translation unit calls undeclared functions in
-// two ordinary cases: a cross-bank JSL target, and an in-bank variant whose
-// definition follows the call site. The split path already derives the same
-// set per chunk; this keeps the two output shapes equivalent.
+// unitBody is one emitted top-level function with any shared-region helper
+// that follows it, at its effective PC: its entry's PC, or its resumable
+// region owner's.
+type unitBody struct {
+	pc     int
+	symbol string
+	region bool
+	text   string
+}
+
+type unitPiece struct {
+	low, high int
+	// ordinal and count number the pieces of one PC whose functions alone
+	// exceed the limit; count is 1 otherwise.
+	ordinal, count int
+	bodies         []unitBody
+}
+
+func unitBytes(bodies []unitBody) int {
+	size := 0
+	for _, body := range bodies {
+		size += len(body.text)
+	}
+	return size
+}
+
+// divideUnit splits bodies, whose effective PCs lie in [low, high] (a PC
+// below low counts as low), into pieces of at most limit bytes of function
+// source. It halves the PC range at fixed, aligned points rather than packing
+// to the limit, so a local edit moves no boundary unless it changes whether a
+// range fits. A range narrowed to one PC holding more than limit bytes is
+// packed greedily, keeping each resumable region whole. A single function or
+// region larger than limit is left as a piece of its own. Bodies keep their
+// emitted order in every piece, except that one PC's region members are
+// gathered when that PC is packed.
+func divideUnit(bodies []unitBody, low, high, limit int) []unitPiece {
+	if limit <= 0 || unitBytes(bodies) <= limit {
+		return []unitPiece{{low: low, high: high, count: 1, bodies: bodies}}
+	}
+	if low == high {
+		return packUnitAtoms(bodies, low, limit)
+	}
+	middle := low + (high-low+1)/2
+	var lower, upper []unitBody
+	for _, body := range bodies {
+		if body.pc < middle {
+			lower = append(lower, body)
+		} else {
+			upper = append(upper, body)
+		}
+	}
+	var pieces []unitPiece
+	if len(lower) > 0 {
+		pieces = append(pieces, divideUnit(lower, low, middle-1, limit)...)
+	}
+	if len(upper) > 0 {
+		pieces = append(pieces, divideUnit(upper, middle, high, limit)...)
+	}
+	return pieces
+}
+
+// packUnitAtoms splits the functions of one effective PC. Its resumable
+// region, if any, is one atom; every other function is an atom of its own.
+func packUnitAtoms(bodies []unitBody, pc, limit int) []unitPiece {
+	var atoms [][]unitBody
+	regionAtom := -1
+	for _, body := range bodies {
+		if body.region {
+			if regionAtom < 0 {
+				regionAtom = len(atoms)
+				atoms = append(atoms, nil)
+			}
+			atoms[regionAtom] = append(atoms[regionAtom], body)
+			continue
+		}
+		atoms = append(atoms, []unitBody{body})
+	}
+	var pieces []unitPiece
+	var current []unitBody
+	for _, atom := range atoms {
+		if len(current) > 0 && unitBytes(current)+unitBytes(atom) > limit {
+			pieces = append(pieces, unitPiece{low: pc, high: pc, bodies: current})
+			current = nil
+		}
+		current = append(current, atom...)
+	}
+	pieces = append(pieces, unitPiece{low: pc, high: pc, bodies: current})
+	for index := range pieces {
+		pieces[index].ordinal, pieces[index].count = index, len(pieces)
+	}
+	return pieces
+}
+
+// declareReferencedVariants forward-declares every generated symbol an
+// unsplit bank uses. ComposeBank declares only one variant per configured
+// entry in this bank, so without this a mono translation unit would use
+// undeclared functions in ordinary cases: a cross-bank JSL target, an in-bank
+// variant whose definition follows the call site, a shared-region helper. The
+// split path derives the same set per chunk; this keeps both shapes
+// equivalent.
 //
-// Declarations are emitted for every referenced variant without checking
-// whether this file also defines it. A redundant declaration ahead of a
-// definition is valid C, and filtering on "defined somewhere in this file"
-// would drop exactly the forward references that need declaring.
-func declareReferencedVariants(source string) string {
+// Declarations are emitted for every used symbol without checking whether this
+// file also defines it. A redundant declaration ahead of a definition is valid
+// C, and filtering on "defined somewhere in this file" would drop exactly the
+// forward references that need declaring.
+func declareReferencedVariants(source string, symbols *emitter.SymbolTable) string {
 	matches := topLevelFunctionRE.FindAllStringSubmatchIndex(source, -1)
 	if len(matches) == 0 {
 		return source
 	}
 	insert := matches[0][0]
-	declarations := referencedDeclarations(source[insert:])
+	declarations := symbols.Declarations(source[insert:])
 	if declarations == "" {
 		return source
 	}
 	return source[:insert] +
 		"/* Forward declarations for referenced entries. */\n" +
 		declarations + "\n" + source[insert:]
-}
-
-func referencedDeclarations(source string) string {
-	return referencedVariantDeclarations(source) + referencedRegionHelperDeclarations(source) + referencedContinuationHelperDeclarations(source)
-}
-
-func referencedVariantDeclarations(source string) string {
-	refsSet := make(map[string]struct{})
-	for _, match := range variantCallRE.FindAllStringSubmatch(source, -1) {
-		refsSet[match[1]] = struct{}{}
-	}
-	refs := make([]string, 0, len(refsSet))
-	for ref := range refsSet {
-		refs = append(refs, ref)
-	}
-	sort.Strings(refs)
-	var declarations strings.Builder
-	for _, ref := range refs {
-		fmt.Fprintf(&declarations, "RecompReturn %s(CpuState *cpu);\n", ref)
-	}
-	return declarations.String()
-}
-
-func referencedRegionHelperDeclarations(source string) string {
-	refsSet := make(map[string]struct{})
-	for _, match := range regionHelperCallRE.FindAllStringSubmatch(source, -1) {
-		refsSet[match[1]] = struct{}{}
-	}
-	refs := make([]string, 0, len(refsSet))
-	for ref := range refsSet {
-		refs = append(refs, ref)
-	}
-	sort.Strings(refs)
-	var declarations strings.Builder
-	for _, ref := range refs {
-		fmt.Fprintf(&declarations, "static inline RecompReturn %s(CpuState *cpu, uint16 _entry_s, uint8 _hrv, uint16 _region_entry);\n", ref)
-	}
-	return declarations.String()
-}
-
-func referencedContinuationHelperDeclarations(source string) string {
-	refsSet := make(map[string]struct{})
-	for _, match := range continuationHelperCallRE.FindAllStringSubmatch(source, -1) {
-		refsSet[match[1]] = struct{}{}
-	}
-	refs := make([]string, 0, len(refsSet))
-	for ref := range refsSet {
-		refs = append(refs, ref)
-	}
-	sort.Strings(refs)
-	var declarations strings.Builder
-	for _, ref := range refs {
-		fmt.Fprintf(&declarations, "RecompReturn %s(CpuState *cpu, uint16 _entry_s, uint8 _hrv, uint16 _region_entry);\n", ref)
-	}
-	return declarations.String()
 }
 
 func writeIfChanged(path, content string) (bool, error) {

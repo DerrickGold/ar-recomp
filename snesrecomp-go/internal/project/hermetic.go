@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"crypto/sha256"
 	"debug/elf"
 	"debug/macho"
@@ -53,6 +54,15 @@ type HermeticOptions struct {
 	Progress func(completed, total int)
 	Stdout   io.Writer
 	Stderr   io.Writer
+	// MemoryBudget bounds the summed ESTIMATED peak memory of concurrent
+	// compiles, in bytes (see schedule.go). Zero selects the default, half of
+	// detected physical memory, or no budget where that is unknown; a negative
+	// value disables it. It is admission control on estimates, not a limit on
+	// resident memory. Jobs remains the concurrency ceiling either way.
+	MemoryBudget int64
+	// Context, when set, cancels the build: no further unit starts, running
+	// compiles are terminated, and HermeticBuild returns the context's error.
+	Context context.Context
 }
 
 // toolLog forwards a subprocess's own output to the build log. Zig's
@@ -158,6 +168,10 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	}
 	if options.Optimize == "" {
 		options.Optimize = "-O2"
+	}
+	ctx := options.Context
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	manifestPath := options.ManifestPath
 	if manifestPath == "" {
@@ -318,11 +332,7 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		return "", err
 	}
 	tools := &toolLog{writer: options.Stdout}
-	type job struct {
-		source, object, flags string
-		runner                bool
-	}
-	var jobs []job
+	var jobs []compileJob
 	cached := 0
 	for sourceIndex, source := range sources {
 		object := filepath.Join(objectDir, objectName(paths.Root, source))
@@ -341,19 +351,27 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 				tools.printf("  stale %s: %s\n", source, reason)
 			}
 		}
-		jobs = append(jobs, job{
+		info, statErr := os.Stat(source)
+		if statErr != nil {
+			return "", statErr
+		}
+		jobs = append(jobs, compileJob{
 			source: source, object: object, flags: flags,
-			runner: isRunner,
+			runner: isRunner, estimate: estimatedCompileMemory(info.Size()),
 		})
 	}
+	orderCompileJobs(jobs)
 	fmt.Fprintf(options.Stdout, "hermetic: %d translation units (%d cached, %d to compile, %d jobs)\n",
 		len(sources), cached, len(jobs), options.Jobs)
+	admission := compileAdmission{Jobs: options.Jobs}
+	if len(jobs) > 0 {
+		admission.Budget = reportCompileMemoryBudget(options, jobs)
+	}
 	if options.Progress != nil {
 		options.Progress(cached, len(sources))
 	}
 
 	started := time.Now()
-	var failed atomic.Bool
 	// A compiled object whose record could not be written is still linked; it
 	// is simply rebuilt next time. Reported once, not once per object.
 	var unrecorded atomic.Int64
@@ -365,82 +383,67 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	stopCompileActivity := buildActivity(tools, options.Verbose, 10*time.Second, func() string {
 		return fmt.Sprintf("compiling: %d/%d complete, %d active, elapsed %.0fs", completed.Load(), len(sources), active.Load(), time.Since(started).Seconds())
 	})
-	var firstError error
-	var errorOnce sync.Once
-	semaphore := make(chan struct{}, options.Jobs)
-	var waitGroup sync.WaitGroup
-	for _, item := range jobs {
-		if failed.Load() {
-			break
-		}
-		waitGroup.Add(1)
-		semaphore <- struct{}{}
-		go func(item job) {
-			defer waitGroup.Done()
-			defer func() { <-semaphore }()
-			if failed.Load() {
-				return
-			}
-			if options.Verbose {
-				tools.printf("  cc %s\n", item.source)
-			}
-			unitStarted := time.Now()
-			active.Add(1)
-			defer active.Add(-1)
-			args := compileArgs
-			if item.runner {
-				args = runtimeSourceCompileArgs(runnerCompileArgs, item.source)
-			}
-			// Nothing an earlier compile of this unit left behind may outlive
-			// this one failing or being interrupted.
-			if removeErr := removeObjectOutputs(item.object); removeErr != nil {
-				failed.Store(true)
-				errorOnce.Do(func() {
-					firstError = fmt.Errorf("compile %s: %w", item.source, removeErr)
-				})
-				return
-			}
-			args = append(append([]string(nil), args...), depfileArgs(item.object)...)
-			compileStarted := time.Now()
-			command := subprocess.Command(options.ZigPath, append(args, "-c", item.source, "-o", item.object)...)
-			output, err := command.CombinedOutput()
-			// Emitted whether or not the unit failed -- -w keeps a healthy
-			// compile silent, so anything a tool does say here is worth reading.
-			tools.block("cc "+item.source, output)
-			if err != nil {
-				_ = removeObjectOutputs(item.object)
-				failed.Store(true)
-				errorOnce.Do(func() {
-					firstError = fmt.Errorf("compile %s: %w (its output is in the build log above)",
-						item.source, err)
-				})
-				return
-			}
-			if recordErr := recordObjectDependencies(options, item.object, item.source, item.flags, compileStarted, workDir); recordErr != nil {
-				_ = os.Remove(dependencyRecordPath(item.object))
-				unrecorded.Add(1)
-				unrecordedOnce.Do(func() {
-					firstUnrecorded = fmt.Sprintf("%s: %v", item.source, recordErr)
-				})
-			}
-			_ = os.Remove(compilerDepfilePath(item.object))
-			count := int(completed.Add(1))
-			if options.Verbose {
-				tools.printf("  compiled [%d/%d] %s (%.1fs)\n", count, len(sources), item.source, time.Since(unitStarted).Seconds())
-			}
-			if options.Progress != nil {
-				options.Progress(count, len(sources))
-			}
-		}(item)
+	estimates := make([]int64, len(jobs))
+	for index, item := range jobs {
+		estimates[index] = item.estimate
 	}
-	waitGroup.Wait()
+	compileStats, compileErr := runAdmitted(ctx, estimates, admission, func(ctx context.Context, index int) error {
+		item := jobs[index]
+		if options.Verbose {
+			tools.printf("  cc %s\n", item.source)
+		}
+		unitStarted := time.Now()
+		active.Add(1)
+		defer active.Add(-1)
+		args := compileArgs
+		if item.runner {
+			args = runtimeSourceCompileArgs(runnerCompileArgs, item.source)
+		}
+		// Nothing an earlier compile of this unit left behind may outlive
+		// this one failing or being interrupted.
+		if removeErr := removeObjectOutputs(item.object); removeErr != nil {
+			return fmt.Errorf("compile %s: %w", item.source, removeErr)
+		}
+		args = append(append([]string(nil), args...), depfileArgs(item.object)...)
+		compileStarted := time.Now()
+		command := subprocess.CommandContext(ctx, options.ZigPath, append(args, "-c", item.source, "-o", item.object)...)
+		output, err := command.CombinedOutput()
+		// Emitted whether or not the unit failed -- -w keeps a healthy
+		// compile silent, so anything a tool does say here is worth reading.
+		tools.block("cc "+item.source, output)
+		if err != nil {
+			_ = removeObjectOutputs(item.object)
+			return fmt.Errorf("compile %s: %w (its output is in the build log above)",
+				item.source, err)
+		}
+		if recordErr := recordObjectDependencies(options, item.object, item.source, item.flags, compileStarted, workDir); recordErr != nil {
+			_ = os.Remove(dependencyRecordPath(item.object))
+			unrecorded.Add(1)
+			unrecordedOnce.Do(func() {
+				firstUnrecorded = fmt.Sprintf("%s: %v", item.source, recordErr)
+			})
+		}
+		_ = os.Remove(compilerDepfilePath(item.object))
+		count := int(completed.Add(1))
+		if options.Verbose {
+			tools.printf("  compiled [%d/%d] %s (%.1fs)\n", count, len(sources), item.source, time.Since(unitStarted).Seconds())
+		}
+		if options.Progress != nil {
+			options.Progress(count, len(sources))
+		}
+		return nil
+	})
 	stopCompileActivity()
 	if count := unrecorded.Load(); count > 0 {
 		tools.printf("  note: %d compiled object(s) have no dependency record and will be rebuilt next time (first: %s)\n",
 			count, firstUnrecorded)
 	}
-	if firstError != nil {
-		return "", firstError
+	if compileErr != nil {
+		return "", compileErr
+	}
+	if compileStats.Started > 0 {
+		fmt.Fprintf(options.Stdout, "hermetic: at most %d compiles at once, %s estimated in flight at the peak\n",
+			compileStats.PeakRunning, humanBytes(compileStats.PeakEstimated))
 	}
 	if err := os.WriteFile(gameFlagsPath, []byte(gameFlagsHash+"\n"), 0o644); err != nil {
 		return "", err
@@ -523,12 +526,16 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	}
 	linkArgs = append(linkArgs, manifest.Link...)
 	tools.printf("hermetic: linking %s\n", binary)
-	command := subprocess.Command(options.ZigPath, linkArgs...)
+	command := subprocess.CommandContext(ctx, options.ZigPath, linkArgs...)
 	output, err := command.CombinedOutput()
 	tools.block("link "+filepath.Base(binary), output)
 	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		return "", fmt.Errorf("link %s: %w (its output is in the build log above)", binary, err)
 	}
+	tools.printf("hermetic: archived and linked in %.1fs\n", time.Since(linkStarted).Seconds())
 	if sdlBundled {
 		copied, copyErr := copySDLRuntime(targetOS, options.SDLLibDir, filepath.Dir(binary))
 		if copyErr != nil {

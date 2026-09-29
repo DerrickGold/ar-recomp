@@ -246,11 +246,14 @@ release containing the LLVM fix becomes available.
 It is driven by a `snesbuild.ini` manifest at the project root; see
 [`docs/PROJECT_INTEGRATION.md`](docs/PROJECT_INTEGRATION.md).
 
-Generated C includes the public `snesrecomp/game/cpu.h`,
-`snesrecomp/game/trace.h`, `snesrecomp/game/generated_support.h`, and project-owned
-`funcs.h`. The game target must therefore use the include directories exported
-by `runtime/runner.cmake` plus its own `recomp` directory. A minimal CMake
-pattern is:
+Generated C includes only the public `snesrecomp/game/cpu.h`,
+`snesrecomp/game/trace.h`, and `snesrecomp/game/generated_support.h`; each
+generated unit declares the generated functions it uses itself. The
+project-owned `funcs.h` (from `sync-funcs`) is the declaration surface for
+authored game code, so editing it rebuilds that code but no generated unit.
+The game target uses the include directories exported by `runtime/runner.cmake`
+plus its own `recomp` directory for authored sources. A minimal CMake pattern
+is:
 
 ```cmake
 set(SNESRECOMP_GO_ROOT "${CMAKE_SOURCE_DIR}/snesrecomp-go")

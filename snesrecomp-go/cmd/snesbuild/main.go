@@ -151,7 +151,7 @@ type regenFlags struct {
 	root, rom, cfgDir, genDir, funcs, metadata, rtsReport, rtsPrevious string
 	analysisDB                                                         string
 	toolchainDir, goCommand                                            string
-	jobs                                                               int
+	jobs, maxUnitKiB                                                   int
 	allowStubs, runTests, noTests                                      bool
 }
 
@@ -169,6 +169,8 @@ func addRegenFlags(flags *flag.FlagSet) *regenFlags {
 	flags.StringVar(&values.toolchainDir, "toolchain-dir", "snesrecomp-go", "snesrecomp-go module directory")
 	flags.StringVar(&values.goCommand, "go-command", "go", "Go executable used only with --run-tests")
 	flags.IntVar(&values.jobs, "jobs", runtime.NumCPU(), "parallel generation workers")
+	flags.IntVar(&values.maxUnitKiB, "max-unit-kib", 4096,
+		"divide generated units whose function source exceeds this, between whole functions; 0 disables")
 	flags.BoolVar(&values.allowStubs, "allow-stubs", false, "complete successfully despite the hard-stub gate")
 	flags.BoolVar(&values.runTests, "run-tests", false, "run the Go toolchain tests after regeneration")
 	flags.BoolVar(&values.noTests, "no-tests", false, "compatibility override for wrappers that default to --run-tests")
@@ -186,7 +188,18 @@ func (values *regenFlags) options() project.RegenOptions {
 		AnalysisDBPath: values.analysisDB,
 		RunTests:       values.runTests && !values.noTests, GoCommand: values.goCommand,
 		Stdout: os.Stdout, Stderr: os.Stderr,
+		MaxUnitBytes: maxUnitBytes(values.maxUnitKiB),
 	}
+}
+
+// maxUnitBytes converts --max-unit-kib, where 0 disables the limit, into
+// regen.Options.MaxUnitBytes, where 0 selects the default and a negative
+// value disables it.
+func maxUnitBytes(kib int) int {
+	if kib <= 0 {
+		return -1
+	}
+	return kib * 1024
 }
 
 type stringList []string
@@ -207,6 +220,7 @@ type buildFlags struct {
 	hermetic                                                           bool
 	zig, sdlInclude, sdlLib, optimize, target                          string
 	verbose                                                            bool
+	memoryBudget                                                       string
 }
 
 func addHermeticFlags(flags *flag.FlagSet, values *buildFlags) {
@@ -221,6 +235,9 @@ func addHermeticFlags(flags *flag.FlagSet, values *buildFlags) {
 	flags.StringVar(&values.target, "target", "",
 		"cross-compile to a Zig target triple, e.g. x86_64-windows-gnu (default: host)")
 	flags.BoolVar(&values.verbose, "verbose", false, "print each hermetic compile command")
+	flags.StringVar(&values.memoryBudget, "memory-budget", "auto",
+		"hermetic compiles start only while their summed ESTIMATED peak memory fits this budget: "+
+			"auto (half of physical memory), off, or a size such as 6GiB; --jobs stays the concurrency ceiling")
 }
 
 func toolchainCacheDir(root string) string {
@@ -243,6 +260,10 @@ func (values *buildFlags) hermeticOptionsWithWriters(stdout, stderr io.Writer) (
 	if values.rom != "" {
 		paths.ROM = values.rom
 	}
+	memoryBudget, err := project.ParseMemoryBudget(values.memoryBudget)
+	if err != nil {
+		return project.HermeticOptions{}, err
+	}
 	zigPath := values.zig
 	if zigPath == "" {
 		located, err := toolchain.Locate(toolchainCacheDir(values.root))
@@ -256,8 +277,8 @@ func (values *buildFlags) hermeticOptionsWithWriters(stdout, stderr io.Writer) (
 		InputID: values.inputID,
 		Paths:   paths, ZigPath: zigPath, Jobs: values.jobs, Optimize: values.optimize,
 		SDLIncludeDir: values.sdlInclude, SDLLibDir: values.sdlLib, Target: values.target,
-		Verbose: values.verbose,
-		Stdout:  stdout, Stderr: stderr,
+		Verbose: values.verbose, MemoryBudget: memoryBudget,
+		Stdout: stdout, Stderr: stderr,
 	}, nil
 }
 
