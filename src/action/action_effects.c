@@ -2348,6 +2348,13 @@ static void CaptureAitosWater(ActionSceneEffectFrame *dst,
           .data.rect = {-half_width, -16.0f, half_width, 16.0f},
         },
       };
+      /* This stage's geometry budget remains fourteen splash structures even
+       * when another environment needs more host decoration records. */
+      if (splash_count >= 14) {
+        dst->decoration_overflow = 1;
+        dst->decoration_count = dst->decoration_visible_count = 0;
+        return;
+      }
       if (SceneDecorationAppend(dst, &effect)) splash_count++;
     }
   }

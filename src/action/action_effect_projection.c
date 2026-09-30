@@ -11,10 +11,17 @@ static bool EffectUsesSkybox(const DioramaProjection *projection,
        effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds);
 }
 
+static bool EffectUsesMoonAnchor(const ActionEffectInstance *effect) {
+  /* The cloud shades this same moon and its rays. Native raster bands may
+   * scroll the lake independently; they must not split the airborne veil. */
+  return effect->kind == kActionEffect_BloodpoolMoonlight ||
+      effect->kind == kActionEffect_BloodpoolCloud;
+}
+
 static bool SkyboxEffectBounds(const DioramaProjection *projection,
     const ActionEffectInstance *effect, float anchor_y,
     float *x0, float *y0, float *x1, float *y1) {
-  if (effect->kind == kActionEffect_BloodpoolMoonlight)
+  if (EffectUsesMoonAnchor(effect))
     return Diorama_SkyboxAnchorBounds(projection, anchor_y, x0, y0, x1, y1);
   return Diorama_SkyboxCaptureBounds(projection, x0, y0, x1, y1);
 }
@@ -279,7 +286,7 @@ bool ActionEffectProjection_ProjectPoint(
     else if (effect->projection_plane == kActionEffectProjectionPlane_Bg2 ||
              effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds) {
       if (EffectUsesSkybox(context->diorama_projection, effect) &&
-          effect->kind == kActionEffect_BloodpoolMoonlight)
+          EffectUsesMoonAnchor(effect))
         valid = Diorama_ProjectSkyboxAnchorPoint(
             context->diorama_projection, screen_y + context->ws_extra_top,
             capture_x, texture_y, &projected);

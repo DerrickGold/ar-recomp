@@ -22,6 +22,24 @@ static bool BloodpoolWaterTile(uint8_t tile) {
   }
 }
 
+static void CaptureBloodpoolWaterScroll(ActionBloodpoolDetails *dst,
+    const uint8_t *ram, size_t size) {
+  dst->water_scroll_valid = false;
+  /* The native lower-perspective table holds 127 sky rows, then 96 single
+   * water rows. Read the actual retained table: reconstructing it from the
+   * scene clock would drift during pause/hit-stop and use the wrong camera.
+   * Mode 2 retains two inherited high bits in each second data byte. */
+  const unsigned end = 0x6003+3*kActionBloodpoolWaterScrollRows;
+  if (size <= end || ram[0x6000] != 127 || Read16(ram,size,0x6001) != 0 || ram[end])
+    return;
+  for (unsigned row = 0; row < kActionBloodpoolWaterScrollRows; row++) {
+    const unsigned at = 0x6003+row*3;
+    if (ram[at] != 1) return;
+    dst->water_scroll[row] = Read16(ram,size,at+1)&0x03FF;
+  }
+  dst->water_scroll_valid = true;
+}
+
 /* Merge scanline runs, then identical runs in adjacent rows. The 768x352
  * window includes the largest extended capture plus its horizontal apron.
  * Reads are bounded by the validated native map/definition table. */
@@ -287,6 +305,7 @@ void CaptureBloodpoolMarsh(ActionEffectObserver *observer,
   if (!dst->moonlight.valid || dst->decoration_count > kActionSceneDecorationMaxInstances-3)
     return;
   CaptureBloodpoolDetails(&dst->bloodpool,&map,wram,size,sources);
+  CaptureBloodpoolWaterScroll(&dst->bloodpool,wram,size);
   const ActionEffectInstance moon = dst->decorations[dst->decoration_count-2];
   for (unsigned family = 0; family < 3; family++) {
     ActionEffectInstance detail = moon;

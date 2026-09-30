@@ -408,11 +408,21 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
       .visible_width = slot->visible_width,
       .viewport = viewport,
   };
+  ArRenderRectF dimming_ramp = PresentActionEffects_Bg1DimmingRamp(slot);
+  if (dimming_ramp.w > 0 && dimming_ramp.h > 0) {
+    dimming_ramp.x = (dimming_ramp.x-slot->bg1_camera_x+slot->ws_extra+slot->obj_apron) /
+        kFrameSlotLayerTextureWidth;
+    dimming_ramp.y = (dimming_ramp.y-slot->bg1_camera_y+slot->ws_extra_top) /
+        kFrameSlotLayerTextureHeight;
+    dimming_ramp.w /= kFrameSlotLayerTextureWidth;
+    dimming_ramp.h /= kFrameSlotLayerTextureHeight;
+  }
   const DioramaScene scene = {
       .map_group = slot->diorama_map_group,
       .map_number = slot->diorama_map_number,
       .layer_section = slot->diorama_layer_section,
       .bg1_dimming = PresentActionEffects_Bg1Dimming(slot),
+      .bg1_dimming_ramp = dimming_ramp,
       .additive_plane_mask =
           slot->diorama_plane_additive_mask & s_diorama_uploaded_plane_mask,
       .effect_obj_priority_mask = effect_obj_priority_mask,

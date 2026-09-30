@@ -384,11 +384,13 @@ static bool CastleDust(ActionEffectGeometryWriter *writer, const ActionEffectIns
   const unsigned count = s->room == 8 ? 32 : s->room == 7 ? 8 : s->kind != kActionCastleSource_Window ? 24 : 14;
   for (unsigned i = 0; i < count; i++) {
     const uint32_t seed = DeterministicHash_Mix32(identity*131u+i*71u+0xCA571Eu);
-    const float t = ((mesh->phase_ticks+seed)&2047u)/2048.0f;
-    const float depth = .12f+(s->kind != kActionCastleSource_Window ? .82f : .48f)*HashUnit(seed^0xB1u);
-    const float across = HashUnit(seed^0x72u)*1.5f-.75f;
+    const unsigned period = (seed&1u) ? 512u : 1024u;
+    const float t = ((mesh->phase_ticks+seed)&(period-1))/(float)period;
+    const float angle = t*6.2831853f;
+    const float depth = .16f+(s->kind != kActionCastleSource_Window ? .70f : .42f)*
+        HashUnit(seed^0xB1u)+.10f*sinf(angle);
+    const float across = HashUnit(seed^0x72u)*1.2f-.6f+.20f*sinf(angle*2+i);
     ArRenderPointF point;
-    float drift = 2;
     if (s->kind != kActionCastleSource_Window) {
       const float radius = s->width+(s->spread-s->width)*depth;
       point = (ArRenderPointF){s->x+s->lean*depth+radius*across,s->y+s->length*depth};
@@ -397,10 +399,12 @@ static bool CastleDust(ActionEffectGeometryWriter *writer, const ActionEffectIns
       const CastleScatter scatter = CastleLitScatter(upper ? &up : &down,s->room == 8,upper);
       /* Place motes in the same shortened volumes as the chosen light style. */
       point = CastleRayPoint(&scatter,depth,across);
-      drift = .12f;
     }
-    const float x = point.x+drift*sinf(t*6.2831853f+i)-mesh->world_x;
-    const float y = point.y+drift*cosf(t*6.2831853f+i*.7f)-mesh->world_y;
+    /* Advect inside the light volume rather than orbiting a fixed point by
+     * a fraction of a pixel. Each seed has an independent phase and lifetime;
+     * the unchanged captured clock freezes both motion and fade on pause. */
+    const float x = point.x-mesh->world_x;
+    const float y = point.y-mesh->world_y;
     const float fade = sinf(t*3.14159265f);
     if (x < clip->x0-1 || x > clip->x1+1 || y < clip->y0-1 || y > clip->y1+1) continue;
     const float alpha = (.36f+.24f*HashUnit(seed^0x33u))*fade*fade;

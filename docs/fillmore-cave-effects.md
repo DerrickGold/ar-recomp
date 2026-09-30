@@ -1,8 +1,16 @@
 # Fillmore Act 2 environmental effects
 
-Environmental treatment, updated 2026-09-28. Environmental fields use **Effects → Environmental effects**
+Environmental treatment, updated 2026-09-30. Environmental fields use **Effects → Environmental effects**
 and are independent of Action spell lighting/particles. The moving statue-orb accents
 use the existing Action lighting/particles switches. Forest visuals are unchanged.
+
+The [September 30 polish pass](action-environmental-effects-plan.md#fillmore-and-bloodpool-polish--september-30)
+supersedes the earlier cloud-dust and spike-excluding mist revisions recorded
+below. Wet patches now span 33 measured rock columns; landing dust uses fixed-size
+brown grains; waterfall and floor mist use three shaded, independently drifting
+density layers. Both temple rooms have grounded fog, including at spike-pit
+bottoms. Room `01/02` also dims its lower/right temple masonry with a world-space
+ramp. Actor and HUD base colours remain unchanged.
 
 ## Room treatment
 
@@ -52,9 +60,10 @@ occlusion and profiling on Steam Deck/Vulkan and Windows/D3D12.
 Capture checks the current room, exact dimensions and two distinct BG1 metatiles;
 the cave also checks its BG2 pool/fall signatures. Inherited or incomplete maps
 fail closed during transitions. Room `01/02` publishes seven aggregate records,
-`01/03` three plus five collision-derived mist runs and `01/04` two, using the
-existing separate decoration list. Mist is capped at seven runs; together with
-six landing clouds and three ambient records this fits the 16-record budget.
+`01/03` three and `01/04` two. Both temple rooms also publish collision-derived
+mist runs, including stone beneath non-solid spike artwork. Mist is capped at
+fourteen runs; together with six landing bursts and seven ambient records this
+fits the 27-record host decoration budget. The actor-effect budget remains 16.
 If a changed map exceeds that cap, only the mist family is omitted. Native
 WRAM and the enemy allocation pool are never written by these effects.
 
@@ -68,9 +77,9 @@ at wraparound. No mutable particle pool or per-frame heap allocation is added.
 | All cave water sources | 1,100 / 2,988 |
 | Drips and temple dust | 2,260 / 3,390 |
 | Ambient surface light after triangle clipping | 4,032 / 8,640 |
-| Contact clouds, waterfall mist and grit, combined | 2,140 / 9,684 |
-| Damp-stone highlights | 260 / 390 |
-| Clipped lower-temple mist, seven-run cap | 4,704 / 10,080 |
+| Contact particles, waterfall mist and grit, combined | 3,552 / 7,056 |
+| Damp-stone highlights | 1,320 / 1,980 |
+| Clipped lower-temple mist, fourteen-run cap | 9,408 / 20,160 |
 | Tower light after triangle clipping | 672 / 1,440 |
 
 Compile-time bounds and per-family record limits protect the existing shared
@@ -85,6 +94,11 @@ blend disables only surface light. Pure C geometry and the portable render-devic
 API are used; there are no new platform APIs or backend-specific shaders.
 
 ## Validation and review
+
+The chronological reviews below describe their respective revisions. Current
+validation and compact before/after clips are recorded in the linked September
+30 pass. Native Steam Deck/Vulkan and Windows/D3D12 performance acceptance is
+still required; local Metal capture and CPU geometry checks do not establish it.
 
 Release build and seven focused capture, observer, geometry, presenter, render-device,
 SDL-state and diorama-projection tests pass. Coverage includes read-only capture, map readiness,

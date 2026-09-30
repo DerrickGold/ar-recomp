@@ -21,6 +21,13 @@ that have not received an environment pass yet.
   insets and the finite source bounds remain in force.
 - Each UV band clips its own geometry, so different row policies cannot stretch
   a beam across a boundary. The number of bands has the existing fixed bound.
+  Bloodpool's airborne moon rays and cloud veil use the moon's source transform
+  continuously across those bands. Water reflections retain the lake's native
+  band mapping. The cloud was added to this anchor policy on September 30 after
+  a regression fixture showed the veil shifting at a scrolling-band boundary;
+  the alpha pass itself was already present in Skybox only. Its original slow
+  cycle and opacity are unchanged. Presenter tests now explicitly check that
+  Skybox only submits both moonlight and its alpha cloud without new uploads.
 - Named ROM skyboxes use the full displayed capture for ambient fields. These
   replacement pages have no live capture transform; this is suitable for the
   stock ROM-backed Aitos waterfall atmosphere. Selecting unrelated custom art

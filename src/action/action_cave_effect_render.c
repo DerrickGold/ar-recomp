@@ -17,15 +17,14 @@ _Static_assert(15 * 64 + 25 * 13 * 4 <= kActionSceneEffectRenderMaxVertices &&
                96 * 7 <= kActionSceneEffectRenderMaxVertices &&
                96 * 15 <= kActionSceneEffectRenderMaxIndices,
                "cave atmosphere and clipped tower light must fit their layers");
-_Static_assert(kActionLandingDustMaxPuffs *
-                   (5 * kActionSceneEffectWaterfallMistCloudVertices + 6 * 4) +
-                   22 * kActionSceneEffectWaterfallMistCloudVertices + 18 * 4 <=
+enum { kCaveDustMaxGrains = 28 };
+_Static_assert(kActionLandingDustMaxPuffs * kCaveDustMaxGrains * 4 +
+                   4*3*32*7 + 4*12*4 <=
                    kActionSceneEffectRenderMaxVertices &&
-               kActionLandingDustMaxPuffs *
-                   (5 * kActionSceneEffectWaterfallMistCloudIndices + 6 * 6) +
-                   22 * kActionSceneEffectWaterfallMistCloudIndices + 18 * 6 <=
+               kActionLandingDustMaxPuffs * kCaveDustMaxGrains * 6 +
+                   4*3*32*15 + 4*12*6 <=
                    kActionSceneEffectRenderMaxIndices,
-               "combined contact clouds, cave mist and grit must fit the geometry scratch");
+               "contact particles, cave mist and grit must fit the shared batch");
 
 static bool InCaveField(const ActionEffectInstance *effect, float x, float y, float margin) {
   const ActionEffectLocalRect *r = &effect->geometry.data.rect;
@@ -222,76 +221,80 @@ static float TempleExposure(unsigned room, float x, float y) {
   return light;
 }
 
-_Static_assert(kActionTempleMistMaxSpans*2*48*7 <= kActionSceneEffectRenderMaxVertices &&
-               kActionTempleMistMaxSpans*2*48*15 <= kActionSceneEffectRenderMaxIndices,
-               "clipped temple ground mist must fit the shared alpha batch");
+_Static_assert(kActionTempleMistMaxSpans*3*32*7 <= kActionSceneEffectRenderMaxVertices &&
+               kActionTempleMistMaxSpans*3*32*15 <= kActionSceneEffectRenderMaxIndices,
+               "layered temple mist must fit the shared alpha batch");
 
-static bool TempleGroundMist(ActionEffectGeometryWriter *writer,
-    const ActionEffectInstance *effect, ActionEffectProjectPointFn project_point,
-    ActionEffectClipBoundsFn clip_bounds, void *userdata) {
-  ActionEffectLocalRect clip;
-  if (!CaveClip(effect, clip_bounds, userdata, &clip)) return true;
-  /* Capture publishes one flat, safe collision run per record. Split at
-   * steps and pits before rendering, so no triangle bridges a height change.
-   * Animate the upper edge while keeping the dense base on the actual floor. */
-  const float half_width = effect->geometry.data.rect.x1*.5f;
+/* Three translucent density slices suggest depth and internal scattering.
+ * Continuous, independent drift replaces the old four-tick silhouette wobble.
+ * Every vertex is projected in world space; no screen-sized cloud minimum or
+ * perspective-dependent expansion. Shared by grounded fog and splash spray. */
+static bool CaveMistVolume(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    const ActionEffectLocalRect *clip, float left, float right, float floor, float height,
+    unsigned seed, float illumination, ActionEffectProjectPointFn project_point, void *userdata) {
+  if (right <= clip->x0 || left >= clip->x1 || floor < clip->y0 || floor-height > clip->y1)
+    return true;
   ActionEffectInstance mesh = *effect;
   mesh.flags |= kActionEffectFlag_ClippedMesh;
-  for (unsigned puff = 0; puff < 2; puff++) {
-    const uint32_t seed = DeterministicHash_Mix32(
-        ((uint32_t)(uint16_t)effect->world_x*2+puff+1)*0x9E3779B9u);
-    const float phase = ((effect->phase_ticks + seed) & 1023u)*.006135923f;
-    const float cx = half_width*(1 + (puff ? .08f : -.08f) + .08f*sinf(phase));
-    const float width = half_width*(.72f+.10f*sinf(phase-.6f));
-    const float height = 9 + 3*sinf(phase+.8f);
-    if (cx+width <= clip.x0 || cx-width >= clip.x1 ||
-        clip.y0 >= 0 || clip.y1 <= -2*height) continue;
-    const float opacity = (.34f+.08f*HashUnit(seed))*(.90f+.10f*sinf(phase));
-    const float light = .20f*TempleExposure(3, effect->world_x+cx, effect->world_y-height);
-    ArRenderVertex2D vertices[35];
-    int mapped[35];
-    for (int row = 0; row < 5; row++) {
-      const float rise = 1-row*.25f;
-      for (int col = 0; col < 7; col++) {
-        const float u = (col-3)/3.0f;
-        const int at = row*7+col;
+  const float half = (right-left)*.5f;
+  for (unsigned slice = 0; slice < 3; slice++) {
+    const unsigned mask = (512u<<slice)-1;
+    const float phase = ((effect->phase_ticks+seed)&mask)*(6.2831853f/(mask+1));
+    const float center = (left+right)*.5f + half*.05f*sinf(phase+slice);
+    const float width = half*(.90f-.09f*slice);
+    ArRenderVertex2D vertices[25];
+    int mapped[25];
+    for (int col = 0; col < 5; col++) {
+      const float u = (col-2)*.5f;
+      const float billow = .70f+.19f*sinf(u*4+phase+slice)+.11f*cosf(u*7-phase*2);
+      const float top = height*(.62f+.30f*billow-.09f*slice);
+      for (int row = 0; row < 5; row++) {
+        const float rise = 1-row*.25f;
+        const float across = 1-u*u*u*u;
+        const float density = (.24f+.10f*billow)*across*across*AmbientFalloff(rise);
+        const float light = .20f+illumination+.32f*rise+.15f*billow;
+        const int at = row*5+col;
         vertices[at] = (ArRenderVertex2D){
-          {cx+u*width, -2*height*rise},
-          {.47f+light,.65f+light,.82f+light,
-           opacity*AmbientFalloff(u)*AmbientFalloff(rise)}, {0,0},
+          {center+u*width,floor-top*rise},
+          {.24f+.38f*light,.38f+.40f*light,.54f+.40f*light,density},{0,0},
         };
         mapped[at] = -1;
       }
     }
-    for (int row = 0; row < 4; row++) {
-      for (int col = 0; col < 6; col++) {
-        const int a = row*7+col, b = a+7;
-        const int triangles[] = {a,a+1,b,a+1,b+1,b};
-        for (int t = 0; t < 6; t += 3)
-          if (!AppendSceneClippedTriangle(writer, &mesh, vertices, mapped, &triangles[t],
-                  &clip, project_point, userdata)) return false;
-      }
+    for (int row = 0; row < 4; row++) for (int col = 0; col < 4; col++) {
+      const int a = row*5+col, b = a+5;
+      const int triangles[] = {a,a+1,b,a+1,b+1,b};
+      for (int t = 0; t < 6; t += 3)
+        if (!AppendSceneClippedTriangle(writer,&mesh,vertices,mapped,&triangles[t],clip,
+                project_point,userdata)) return false;
     }
   }
   return true;
 }
 
+static bool TempleGroundMist(ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect, ActionEffectProjectPointFn project_point,
+    ActionEffectClipBoundsFn clip_bounds, void *userdata) {
+  ActionEffectLocalRect clip;
+  if (!CaveClip(effect,clip_bounds,userdata,&clip)) return true;
+  const float width = effect->geometry.data.rect.x1;
+  const unsigned seed = DeterministicHash_Mix32((uint16_t)effect->world_x*0x9E3779B9u);
+  const float light = .20f*TempleExposure(effect->environment_room,
+      effect->world_x+width*.5f,effect->world_y-12);
+  return CaveMistVolume(writer,effect,&clip,0,width,0,26,seed,light,project_point,userdata);
+}
+
 static bool CaveMist(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    ActionEffectProjectPointFn project_point, void *userdata) {
+    ActionEffectProjectPointFn project_point, ActionEffectClipBoundsFn clip_bounds,
+    void *userdata) {
+  ActionEffectLocalRect clip;
+  if (!CaveClip(effect,clip_bounds,userdata,&clip)) return true;
   for (unsigned i = 0; i < kActionCaveFallCount; i++) {
     const ActionCaveWaterfall p = kActionCaveFalls[i];
-    if (!InCaveField(effect, p.x, p.y, 72)) continue;
-    for (unsigned puff = 0; puff < 4; puff++) {
-      const uint32_t seed = DeterministicHash_Mix32((i*4+puff+1)*0x9E3779B9u);
-      const float t = ((effect->phase_ticks + puff*64 + (seed & 31u)) & 255u)/256.0f;
-      const float drift = (puff & 1u ? 1 : -1) * (4 + 25*t) * (.7f+.5f*HashUnit(seed));
-      const float height = 3 + 5*t;
-      const float fade = sinf(t*3.14159265f);
-      if (!AppendSceneSoftCloud(writer, effect, p.x+drift-effect->world_x,
-              p.y+3-2*t-height*.25f-effect->world_y, 8+15*t, height,
-              (ArRenderColorF){.44f,.66f,.84f,1}, (.52f+.16f*HashUnit(seed))*fade*fade,
-              seed, project_point, userdata)) return false;
-    }
+    const float x = p.x-effect->world_x, y = p.y+2-effect->world_y;
+    const unsigned seed = DeterministicHash_Mix32((i+1)*0x9E3779B9u);
+    if (!CaveMistVolume(writer,effect,&clip,x-42,x+42,y,34,seed,.24f,
+            project_point,userdata)) return false;
   }
   return true;
 }
@@ -303,18 +306,24 @@ static bool CaveSheen(ActionEffectGeometryWriter *writer, const ActionEffectInst
     if (!(effect->source_mask & (1u << i)) || s->water ||
         !InCaveField(effect, s->x, s->landing_y, 16)) continue;
     const uint32_t seed = DeterministicHash_Mix32((i+1)*0xC2B2AE35u);
-    const float phase = ((effect->phase_ticks + seed) & 511u)/512.0f;
-    const float shimmer = sinf(phase*3.14159265f);
-    for (unsigned column = 0; column < 13; column++) {
+    const float phase = ((effect->phase_ticks + seed) & 511u)*.0122718463f;
+    /* A continuous wet patch inside the measured rock silhouette, with a
+     * narrow bright lip and a deeper blue body. Never bridge an open column
+     * or stretch a horizontal streak across a sloping edge. */
+    for (unsigned column = 0; column < 33; column++) {
       if (s->contour[column] == 127) continue;
-      const float x = s->x + (int)column - 6;
-      const float y = s->landing_y + s->contour[column] + .6f;
-      const float grain = HashUnit(seed ^ (column+1)*0x85EBCA6Bu);
-      /* Subpixel highlights sit INSIDE each opaque edge column. Never bridge
-       * a stair step or open column with a horizontal diamond/line segment. */
-      if (!CaveDiamond(writer, effect, x+.5f, y, .45f, .35f,
-              (.20f+.40f*shimmer*shimmer)*(.35f+.65f*grain),
-              project_point, userdata)) return false;
+      const float edge = 1-fabsf(((float)column-16)/17);
+      const float x = s->x+(int)column-16;
+      const float y = s->landing_y+s->contour[column]+.25f;
+      const float shimmer = .5f+.5f*sinf(phase+column*.34f+i*1.7f);
+      const float depth = 1.2f+3.8f*edge;
+      const ArRenderPointF body[] = {{x,y},{x+1,y},{x+1,y+depth},{x,y+depth}};
+      if (!CaveQuad(writer,effect,body,(ArRenderColorF){.20f,.48f,.70f,edge*.48f},
+              project_point,userdata)) return false;
+      const ArRenderPointF lip[] = {{x,y},{x+1,y},{x+1,y+.85f},{x,y+.85f}};
+      if (!CaveQuad(writer,effect,lip,
+              (ArRenderColorF){.62f,.85f,1,edge*(.38f+.42f*shimmer*shimmer)},
+              project_point,userdata)) return false;
     }
   }
   return true;
@@ -331,6 +340,33 @@ static const TempleGritSource kTempleGrit[] = {
   {2,1710,655,768},
   {3,921,1598,1664}, {3,921,1344,1440}, {3,919,1040,1216}, {3,919,384,480},
 };
+
+/* Fixed-size grains, each with its own lifetime and ballistic arc. The burst
+ * spreads through motion, not by scaling a translucent cloud mesh. */
+static bool CaveDustGrains(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    float origin_x, float origin_y, uint32_t burst, float ticks, float strength, unsigned count,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  for (unsigned i = 0; i < count; i++) {
+    const uint32_t seed = DeterministicHash_Mix32(burst ^ (i+1)*0x9E3779B9u);
+    const float delay = 4*HashUnit(seed ^ 0xD3u);
+    const float lifetime = 22+20*HashUnit(seed ^ 0xB5u);
+    const float age = (ticks-delay)/lifetime;
+    if (age <= 0 || age >= 1) continue;
+    const float direction = 2*HashUnit(seed ^ 0x93u)-1;
+    const float spread = direction*(1+(12+12*HashUnit(seed))*age)*strength;
+    const float lift = (4+12*HashUnit(seed ^ 0xAFu))*sinf(age*3.14159265f)*strength;
+    const float x = origin_x+spread+2*sinf(age*5+i);
+    const float radius = .45f+.65f*HashUnit(seed ^ 0x61u);
+    const float y = origin_y-radius-.2f-lift;
+    const float fade = fminf(1,age*12)*(1-age)*(1-age);
+    const ArRenderPointF points[] = {{x-radius,y},{x,y-radius*.7f},
+                                    {x+radius,y},{x,y+radius*.7f}};
+    if (!CaveQuad(writer,effect,points,
+            (ArRenderColorF){.78f,.55f,.32f,(.60f+.28f*HashUnit(seed))*fade},
+            project_point,userdata)) return false;
+  }
+  return true;
+}
 
 static bool TempleGrit(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
     ActionEffectProjectPointFn project_point, void *userdata) {
@@ -350,13 +386,9 @@ static bool TempleGrit(ActionEffectGeometryWriter *writer, const ActionEffectIns
       if (!CaveQuad(writer, effect, points, (ArRenderColorF){.72f,.52f,.32f,.78f},
               project_point, userdata)) return false;
     }
-    if (age < 48 || age >= 78 || !InCaveField(effect, s->x, s->landing_y, 12)) continue;
-    const float t = (age-48)/30.0f;
-    const float h = 3+2*t;
-    if (!AppendSceneSoftCloud(writer, effect, s->x-effect->world_x,
-            s->landing_y-h*1.15f-t-effect->world_y, 3+7*t, h,
-            (ArRenderColorF){.62f,.43f,.26f,1}, .6f*sinf(t*3.14159265f),
-            seed, project_point, userdata)) return false;
+    if (age >= 48 && age < 94 && InCaveField(effect,s->x,s->landing_y,32) &&
+        !CaveDustGrains(writer,effect,s->x,s->landing_y,seed,age-48,.6f,9,
+            project_point,userdata)) return false;
   }
   return true;
 }
@@ -391,7 +423,8 @@ static bool CaveAmbientLight(ActionEffectGeometryWriter *writer, const ActionEff
     int mapped[49];
     for (int row = 0; row < 7; row++) {
       const float v = (row-3)/3.0f, dy = v*s->radius_y;
-      const float along = AmbientFalloff(v)*s->strength*drift*surface_response;
+      const float response = s->room == 2 && s->y > 900 ? .45f : surface_response;
+      const float along = AmbientFalloff(v)*s->strength*drift*response;
       for (int col = 0; col < 7; col++) {
         const float u = (col-3)/3.0f;
         const float amount = along*AmbientFalloff(u);
@@ -464,48 +497,10 @@ static bool LandingDust(ActionEffectGeometryWriter *writer, const ActionEffectIn
     ActionEffectProjectPointFn project_point, void *userdata) {
   const uint32_t burst = DeterministicHash_Mix32(effect->generation ^
       ((uint32_t)(uint16_t)effect->world_x << 16) ^ (uint16_t)effect->world_y);
-  const float lifetime = kActionLandingDustLifetime - (burst & 15u);
-  const float t = effect->phase_ticks / lifetime;
-  if (t >= 1) return true;
-  const float scale = .75f + effect->dust_strength * .35f;
-  const float breeze = (HashUnit(burst ^ 0xC7u)-.5f)*18;
-  const unsigned count = 3 + (burst % 3u);
-  for (unsigned i = 0; i < count; i++) {
-    const uint32_t seed = DeterministicHash_Mix32(burst ^ (i+1)*0x9E3779B9u);
-    const float delay = i ? .16f*HashUnit(seed ^ 0xD3u) : 0;
-    const float age = (t-delay)/(1-delay);
-    if (age <= 0) continue;
-    const float expand = age*(2-age);
-    const float fade = fminf(1, age*(12+18*HashUnit(seed))) * (1-age*age);
-    const float direction = 2*HashUnit(seed ^ 0x93u)-1;
-    const float shape = .70f+.55f*HashUnit(seed ^ 0x51u);
-    const float spread = (direction*(2+23*expand) + breeze*age*age)*scale;
-    const float height = fmaxf(2.5f, (1.2f+(4+5*HashUnit(seed ^ 0xB7u))*age)*scale*shape);
-    const float lift = (1+4*HashUnit(seed ^ 0xAFu))*age*age;
-    if (!AppendSceneSoftCloud(writer, effect, spread, -height*1.15f-lift,
-            (5+(8+7*HashUnit(seed ^ 0x29u))*expand)*scale*shape, height,
-            (ArRenderColorF){.62f,.43f,.26f,1},
-            (.70f+.20f*HashUnit(seed))*fade, seed, project_point, userdata)) return false;
-  }
-  for (unsigned i = 0; i < 6; i++) {
-    const uint32_t seed = DeterministicHash_Mix32(burst ^ (i+9)*0x85EBCA6Bu);
-    const float life = .45f+.45f*HashUnit(seed ^ 0xB5u);
-    const float age = t/life;
-    if (age >= 1) continue;
-    const float x = (2*HashUnit(seed)-1)*(3+24*age)*scale;
-    const float y = -(1+(8+12*HashUnit(seed ^ 0x31u))*age*(1-age))*scale;
-    const float r = .4f+.4f*HashUnit(seed ^ 0x61u);
-    const ArRenderPointF points[] = {
-      {effect->world_x+x-r,effect->world_y+y},
-      {effect->world_x+x,effect->world_y+y-r},
-      {effect->world_x+x+r,effect->world_y+y},
-      {effect->world_x+x,effect->world_y+y+r},
-    };
-    if (!CaveQuad(writer, effect, points,
-            (ArRenderColorF){.76f,.55f,.32f,.6f*(1-age)*fminf(1,age*24)},
-            project_point, userdata)) return false;
-  }
-  return true;
+  const float strength = .85f+effect->dust_strength*.25f;
+  const unsigned count = 20+(burst % (kCaveDustMaxGrains-19));
+  return CaveDustGrains(writer,effect,effect->world_x,effect->world_y,burst,
+      effect->phase_ticks,strength,count,project_point,userdata);
 }
 
 static bool TowerLight(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
@@ -560,7 +555,8 @@ bool AppendCaveEnvironment(ActionEffectGeometryWriter *writer, const ActionEffec
   switch (effect->kind) {
     case kActionEffect_TempleGroundMist:
       return TempleGroundMist(writer, effect, project_point, clip_bounds, userdata);
-    case kActionEffect_CaveMist: return CaveMist(writer, effect, project_point, userdata);
+    case kActionEffect_CaveMist:
+      return CaveMist(writer, effect, project_point, clip_bounds, userdata);
     case kActionEffect_CaveSheen: return CaveSheen(writer, effect, project_point, userdata);
     case kActionEffect_TempleGrit: return TempleGrit(writer, effect, project_point, userdata);
     case kActionEffect_CaveAmbientLight:

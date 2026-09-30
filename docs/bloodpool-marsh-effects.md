@@ -146,8 +146,8 @@ the existing packed visible-main-winner path, avoiding the owning-screen
 reference sampler for this main-screen-only room.
 
 Capture publishes seven bounded aggregate records, separate from actor slots.
-An additional immutable payload of less than 1 KiB holds at most 64 timber edges
-and 32 posts. Timber classification verifies all four native tile-definition
+An additional immutable payload of about 1.3 KiB holds at most 64 timber edges,
+32 posts and 96 native water-row offsets. Timber classification verifies all four native tile-definition
 words; exact opacity and tile flips determine exposed tops and drop undersides.
 The camera window rounds out to whole metatiles, at most 784 pixels wide.
 Rendering uses the existing geometry workspace and alpha/additive submissions;
@@ -233,3 +233,37 @@ same 64-row Diorama and 32-row flat routes. Native replay reports no capture or
 session errors. `validation.json` records the comparisons and media metadata.
 The repository style check reports existing violations in unrelated SIM voxel
 files; the changed Bloodpool sources introduce none.
+
+### Distant water wave caps — September 30
+
+Twelve sparse rows of tapered rose-silver caps now catch moonlight on the BG2
+lake, with small intermittent glints along the crests. Width increases toward
+the viewer and exposure is strongest beneath the moon. Native red-purple water
+remains visible between the highlights; no white foam or detached airborne
+sparkles are added. Environmental effects controls the treatment.
+
+Each cap moves with its native water row. Capture validates the retained
+`$6000` HDMA table (127 fixed sky rows followed by 96 single-row offsets), then
+copies its 10-bit offsets into the immutable frame. The 256-pixel artwork repeat
+also repeats the caps. Rows below the table retain the last offset, as native
+scanout does. The scene clock changes brightness only, so pausing, hit-stop and
+camera movement cannot introduce a separate lateral drift. Invalid raster data
+omits the caps while preserving the existing marsh effects.
+
+Caps stay within individual source scanlines and below the distant horizon.
+They use BG2's existing projection and winner mask, including skybox-only mode,
+and share the moon/reflection additive submission. The addition needs 192 bytes
+of scroll values and a validity flag per captured frame, bounded geometry, and
+no extra GPU submission, texture, shader, native object or per-frame allocation.
+
+Release and ASan/UBSan capture, geometry and presenter tests pass. New tests cover
+exact per-row translation, seamless 256-pixel wrapping, retained-frame stability,
+independent shimmer, malformed tables and combined ray/reflection geometry limits.
+The changed sources pass arm64/x86_64 macOS syntax checks and the style ratchet.
+Native Metal captures cover skybox-only and backdrop-plane modes; all four
+before/after native WRAM snapshots match. Deck/Vulkan and D3D12 execution remain
+part of the broader hardware validation, not established by these checks.
+
+`runs/bloodpool-wavecaps/bloodpool-wave-caps-small.mp4` is the 480×300, 20 fps
+before/after preview (238 KB), including a backdrop-plane segment. It uses an
+isolated save/settings directory and labeled assisted traversal.

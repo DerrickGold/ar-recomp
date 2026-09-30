@@ -2564,7 +2564,7 @@ static void TestSceneCaptureCapacityFailsClosed(void) {
   CHECK(frame.effect_count == 2);
   CHECK(frame.overflow == 0);
 
-  /* A forged fifteenth splash leaves no room for the required paired mist.
+  /* A forged fifteenth splash exceeds this stage's measured splash budget.
    * The decoration list fails closed rather than publishing a partial
    * waterfall treatment, while the independent actors remain intact. */
   SeedAitosSplashPlatform(wram, 1792, 1200, 400, 2);
@@ -2870,7 +2870,8 @@ static void TestCastleGalleryAndWaterCapture(void) {
   ram[0x19] = 7;
   Write16(ram,0x2E,1024); Write16(ram,0x30,1024);
   Write16(ram,0x32,256); Write16(ram,0x34,256);
-  Write16(ram,0x46,0x8000); Write16(ram,0x4A,0xC000);
+  Write16(ram,0x46,0x8000);
+  Write16(ram,0x4A,0xC000);
   Write16(ram,0x52,0x2100); Write16(ram,0x56,0x2900);
   const uint16_t window[] = {0x04EE,0x44EE,0x04FE,0x44FE};
   for (unsigned i = 0; i < 4; i++) Write16(ram,0x2100+0x44*8+i*2,window[i]);
@@ -3005,6 +3006,29 @@ static void TestBloodpoolEnvironmentCapture(void) {
     CHECK(frame.decorations[2].world_x == 112 && frame.decorations[2].world_y == 62);
     CHECK(!memcmp(before,ram,sizeof(ram)));
   }
+  /* Capture the retained native HDMA table, not a reconstruction from clock
+   * or camera. The inherited upper bytes can contain arbitrary CHR data. */
+  ram[0x6000] = 127;
+  for (unsigned row = 0; row < kActionBloodpoolWaterScrollRows; row++) {
+    ram[0x6003+row*3] = 1;
+    Write16(ram,0x6004+row*3,(uint16_t)(0x7C00+row*17));
+  }
+  memcpy(before,ram,sizeof(ram));
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(frame.bloodpool.water_scroll_valid && !memcmp(before,ram,sizeof(ram)));
+  for (unsigned row = 0; row < kActionBloodpoolWaterScrollRows; row++)
+    CHECK(frame.bloodpool.water_scroll[row] == ((row*17)&1023));
+  const ActionBloodpoolDetails held_water = frame.bloodpool;
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(!memcmp(held_water.water_scroll,frame.bloodpool.water_scroll,
+                sizeof(held_water.water_scroll)));
+  ram[0x6030] = 2; /* Unknown row counts must omit only the wave caps. */
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(!frame.bloodpool.water_scroll_valid && frame.decoration_count == 7);
+  ram[0x6030] = 1;
   ActionMoonlightOcclusion previous = frame.moonlight;
   Write16(ram,0x22,16); /* Capture remains world anchored as the camera scrolls. */
   ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
@@ -3207,13 +3231,17 @@ static void TestTempleMistCollisionCapture(void) {
     ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
     ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
     CHECK(!memcmp(before,ram,sizeof(ram)));
-    CHECK(frame.decoration_count == 8 && !frame.decoration_overflow);
-    for (unsigned i = 0; i < 5; i++) {
+    CHECK(frame.decoration_count == 12 && !frame.decoration_overflow);
+    const int settled[][3] = {
+      {528,592,1664}, {592,656,1680}, {656,688,1712}, {688,736,1680},
+      {736,768,1712}, {768,832,1680}, {832,864,1712}, {864,928,1664}, {928,960,1712},
+    };
+    for (unsigned i = 0; i < 9; i++) {
       const ActionEffectInstance *e = &frame.decorations[3+i];
       CHECK(e->kind == kActionEffect_TempleGroundMist);
-      CHECK(e->world_x == surfaces[i][0] && e->world_y == surfaces[i][2]);
+      CHECK(e->world_x == settled[i][0] && e->world_y == settled[i][2]);
       CHECK(e->geometry.data.rect.x0 == 0);
-      CHECK(e->geometry.data.rect.x1 == surfaces[i][1]-surfaces[i][0]);
+      CHECK(e->geometry.data.rect.x1 == settled[i][1]-settled[i][0]);
       CHECK(e->geometry.data.rect.y0 == -26 && e->geometry.data.rect.y1 == 0);
       CHECK(e->render_layer == kActionEffectRenderLayer_Bg1Mist);
       CHECK(e->projection_plane == kActionEffectProjectionPlane_Bg1);
@@ -3224,7 +3252,7 @@ static void TestTempleMistCollisionCapture(void) {
   ram[CaveTestTileAddress(0x8000,1024,592,1696)] = 0x25;
   ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
   ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
-  CHECK(frame.decoration_count == 9);
+  CHECK(frame.decoration_count == 13);
   CHECK(frame.decorations[4].world_x == 592 && frame.decorations[4].world_y == 1696);
   CHECK(frame.decorations[4].geometry.data.rect.x1 == 16);
   CHECK(frame.decorations[5].world_x == 608 && frame.decorations[5].world_y == 1680);
@@ -3232,12 +3260,57 @@ static void TestTempleMistCollisionCapture(void) {
   memset(ram+0x8000,0,1024/256*1792/256*256);
   ram[CaveTestTileAddress(0x8000,1024,896,128)] = 0x39;
   ram[CaveTestTileAddress(0x8000,1024,448,1664)] = 0x26;
-  for (int x = 512; x < 960; x += 32)
-    ram[CaveTestTileAddress(0x8000,1024,x,1664)] = 0x25;
+  for (int x = 512; x < 960; x += 16)
+    ram[CaveTestTileAddress(0x8000,1024,x,1664+(x&16))] = 0x25;
   ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
   ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
   CHECK(frame.decoration_count == 3 && frame.decoration_visible_count == 3);
   CHECK(!frame.decoration_overflow);
+}
+
+static void TestLowerCaveMistCollisionCapture(void) {
+  static uint8_t ram[kActRaiserWramSize], before[kActRaiserWramSize];
+  ActionEffectObserver observer = {0};
+  ActionSceneEffectFrame frame;
+  ram[0x18] = 1;
+  ram[0x19] = 2;
+  Write16(ram,0x2E,2048);
+  Write16(ram,0x30,1280);
+  Write16(ram,0x32,2048);
+  Write16(ram,0x34,1280);
+  Write16(ram,0x46,0x8000);
+  Write16(ram,0x4A,0xC000);
+  ram[CaveTestTileAddress(0x8000,2048,326,352)] = 0xB8;
+  ram[CaveTestTileAddress(0x8000,2048,420,432)] = 0xB9;
+  ram[CaveTestTileAddress(0xC000,2048,0,896)] = 1;
+  ram[CaveTestTileAddress(0xC000,2048,720,0)] = 2;
+  ram[0x05A0+0x25] = 15;
+  /* Measured first-room lower temple. The side steps and intervening spike
+   * pits must not be flattened into one floating band. */
+  const int surfaces[][3] = {
+    {912,1072,1216}, {1152,1312,1216}, {1344,1392,1184}, {1424,1456,1152},
+    {1504,1536,1152}, {1600,1728,1152},
+  };
+  for (unsigned i = 0; i < 6; i++)
+    for (int x = surfaces[i][0]; x < surfaces[i][1]; x += 16)
+      ram[CaveTestTileAddress(0x8000,2048,x,surfaces[i][2])] = 0x25;
+  ram[CaveTestTileAddress(0x8000,2048,1456,1216)] = 0x25;
+  ram[CaveTestTileAddress(0x8000,2048,1456,1200)] = 0x20;
+  memcpy(before,ram,sizeof(ram));
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+  CHECK(!memcmp(before,ram,sizeof(ram)));
+  CHECK(frame.decoration_count == 14 && !frame.decoration_overflow);
+  const int settled[][3] = {
+    {912,1072,1216}, {1152,1312,1216}, {1344,1392,1184}, {1424,1456,1152},
+    {1456,1472,1216}, {1504,1536,1152}, {1600,1728,1152},
+  };
+  for (unsigned i = 0; i < 7; i++) {
+    const ActionEffectInstance *e = &frame.decorations[7+i];
+    CHECK(e->kind == kActionEffect_TempleGroundMist && e->environment_room == 2);
+    CHECK(e->world_x == settled[i][0] && e->world_y == settled[i][2]);
+    CHECK(e->geometry.data.rect.x1 == settled[i][1]-settled[i][0]);
+  }
 }
 
 static void TestLandingDustContacts(void) {
@@ -3526,6 +3599,7 @@ int main(void) {
   TestDustSettling();
   TestFillmoreStatueOrbs();
   TestTempleMistCollisionCapture();
+  TestLowerCaveMistCollisionCapture();
   TestTempleCapitalContacts();
   TestLandingDustContacts();
   TestCaveEnvironmentalCapture();

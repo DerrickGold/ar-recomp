@@ -1823,11 +1823,12 @@ static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
           effect->render_layer == kActionEffectRenderLayer_Bg1Plane &&
           effect->projection_plane == kActionEffectProjectionPlane_Bg1;
     case kActionEffect_TempleGroundMist:
-      return effect->phase == kActionEffectPhase_CaveEnvironment && effect->environment_room == 3 &&
+      return effect->phase == kActionEffectPhase_CaveEnvironment &&
+          (effect->environment_room == 2 || effect->environment_room == 3) &&
           effect->render_layer == kActionEffectRenderLayer_Bg1Mist &&
           effect->projection_plane == kActionEffectProjectionPlane_Bg1 &&
           effect->geometry.data.rect.x0 == 0 && effect->geometry.data.rect.x1 >= 16 &&
-          effect->geometry.data.rect.x1 <= 448 &&
+          effect->geometry.data.rect.x1 <= (effect->environment_room == 2 ? 880 : 448) &&
           effect->geometry.data.rect.y0 == -26 && effect->geometry.data.rect.y1 == 0;
     case kActionEffect_CaveAmbientLight:
     case kActionEffect_TempleGrit:
@@ -2117,6 +2118,9 @@ static bool BuildSceneEffectList(
       if (lighting_enabled && effect->kind == kActionEffect_BloodpoolCloud &&
           !AppendBloodpoolCloud(&writer,effect,project_point,clip_bounds,project_userdata))
         return false;
+      if (particles_enabled && effect->kind == kActionEffect_BloodpoolMoonReflection &&
+          !AppendBloodpoolWaveCaps(&writer,effect,bloodpool,project_point,clip_bounds,
+              project_userdata)) return false;
       if (particles_enabled &&
           !AppendBloodpoolDetailParticles(&writer,effect,moon,bloodpool,
               project_point,clip_bounds,project_userdata)) return false;

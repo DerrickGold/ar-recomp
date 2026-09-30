@@ -187,6 +187,9 @@ bool AppendBloodpoolWaterMoonlight(
     const ActionEffectInstance *moon, const ActionMoonlightOcclusion *occlusion,
     ActionMoonlightRenderScratch *scratch, ActionEffectProjectPointFn project_point,
     ActionEffectClipBoundsFn clip_bounds, void *userdata);
+bool AppendBloodpoolWaveCaps(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    const ActionBloodpoolDetails *details, ActionEffectProjectPointFn project_point,
+    ActionEffectClipBoundsFn clip_bounds, void *userdata);
 
 /* ---- defined in action_bloodpool_detail_render.c ---- */
 float BloodpoolCloudTransmission(uint16_t ticks);

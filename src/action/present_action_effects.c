@@ -3,6 +3,7 @@
  * effects, brackets heat refraction and releases all its cached resources.
  * Only captured FrameSlot values may affect the scene. */
 #include "action/present_action_effects.h"
+#include "render/scenery_dimming.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -118,8 +119,9 @@ float PresentActionEffects_Bg1Dimming(const FrameSlot *slot) {
   for (unsigned i = 0; i < slot->action_scene_effects.decoration_count; i++) {
     const ActionEffectInstance *effect = &slot->action_scene_effects.decorations[i];
     if (slot->diorama_map_group == kActRaiserMapGroup_Fillmore &&
-        slot->diorama_map_number == 3 &&
-        effect->kind == kActionEffect_CaveAmbientLight && effect->environment_room == 3 &&
+        (slot->diorama_map_number == 2 || slot->diorama_map_number == 3) &&
+        effect->kind == kActionEffect_CaveAmbientLight &&
+        effect->environment_room == slot->diorama_map_number &&
         effect->phase == kActionEffectPhase_CaveEnvironment &&
         effect->render_layer == kActionEffectRenderLayer_ForegroundLight &&
         effect->projection_plane == kActionEffectProjectionPlane_Bg1 &&
@@ -136,6 +138,13 @@ float PresentActionEffects_Bg1Dimming(const FrameSlot *slot) {
       return effect->environment_room == 5 ? .42f : effect->environment_room == 8 ? .30f : .36f;
   }
   return 0;
+}
+
+ArRenderRectF PresentActionEffects_Bg1DimmingRamp(const FrameSlot *slot) {
+  if (slot && slot->diorama_map_group == kActRaiserMapGroup_Fillmore &&
+      slot->diorama_map_number == 2)
+    return (ArRenderRectF){800,640,320,448};
+  return (ArRenderRectF){0};
 }
 
 static bool FrameUsesAlphaBg1Mask(const FrameSlot *slot) {
@@ -897,14 +906,25 @@ bool PresentActionEffects_DrawFlatPlanes(
     /* Darken winning BG1 pixels before mist/light. The zero-alpha holes in
      * this mask preserve actors, HUD and other backgrounds. No scene resolve. */
     ActionSceneEffectRenderBatch *geometry = &s_action_effect_render_scratch.scene;
-    const ArRenderPointF corners[] = {{0,0},{viewport.w,0},
-                                      {viewport.w,viewport.h},{0,viewport.h}};
-    for (unsigned i = 0; i < 4; i++)
-      geometry->vertices[i] = (ArRenderVertex2D){corners[i],{0,0,0,dimming},{0,0}};
-    const int32_t indices[] = {0,1,2,0,2,3};
-    memcpy(geometry->indices,indices,sizeof(indices));
-    geometry->vertex_count = 4;
-    geometry->index_count = 6;
+    const ArRenderRectF ramp = PresentActionEffects_Bg1DimmingRamp(slot);
+    /* One masked submission; a small grid follows the world-space ramp.
+     * Sprite/HUD holes still come from the existing winner mask. */
+    const int steps = ramp.w > 0 ? 8 : 1;
+    geometry->vertex_count = geometry->index_count = 0;
+    for (int row = 0; row <= steps; row++) for (int col = 0; col <= steps; col++) {
+      const float u = (float)col/steps, v = (float)row/steps;
+      const float x = slot->bg1_camera_x + slot->visible_x0 - slot->ws_extra +
+          u*slot->visible_width;
+      const float y = slot->bg1_camera_y + v*slot->snes_height;
+      const float alpha = SceneryDimming_Amount(dimming,ramp,x,y);
+      geometry->vertices[geometry->vertex_count++] =
+          (ArRenderVertex2D){{u*viewport.w,v*viewport.h},{0,0,0,alpha},{0,0}};
+      if (row == steps || col == steps) continue;
+      const int a = row*(steps+1)+col, b = a+steps+1;
+      const int32_t indices[] = {a,a+1,b,a+1,b+1,b};
+      memcpy(geometry->indices+geometry->index_count,indices,sizeof(indices));
+      geometry->index_count += 6;
+    }
     if (!DrawAlphaMaskedGeometry(device,slot,viewport,s_action_bg1_mask_texture,true,geometry))
       DisableActionPlaneEffect(device,"temple scenery dimming");
   }

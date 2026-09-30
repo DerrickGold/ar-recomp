@@ -1,4 +1,5 @@
 #include "action/present_action_effects.h"
+#include "render/scenery_dimming.h"
 #include "action/action_effect_projection.h"
 #include "action/action_effect_render.h"
 #include "actraiser_game.h"
@@ -682,6 +683,14 @@ static void TempleSceneryDimming(void) {
   frame.action_environmental_effects = true;
   frame.diorama_map_number = 2;
   assert(PresentActionEffects_Bg1Dimming(&frame) == 0);
+  e->visual = 2;
+  const float cave_dim = PresentActionEffects_Bg1Dimming(&frame);
+  const ArRenderRectF ramp = PresentActionEffects_Bg1DimmingRamp(&frame);
+  assert(cave_dim == .45f);
+  assert(SceneryDimming_Amount(cave_dim,ramp,800,1200) == 0); /* Rock half. */
+  assert(SceneryDimming_Amount(cave_dim,ramp,1500,400) == 0); /* Upper openings. */
+  assert(SceneryDimming_Amount(cave_dim,ramp,1500,1200) == cave_dim);
+  assert(SceneryDimming_Amount(cave_dim,ramp,1500,864) == cave_dim*.5f);
   frame.diorama_map_number = 3;
   e->visual = 2; /* An inherited previous-room field must not dim the new scene. */
   assert(PresentActionEffects_Bg1Dimming(&frame) == 0);
@@ -923,6 +932,13 @@ static void BloodpoolComposition(void) {
       e->geometry.data.rect = (ActionEffectLocalRect){-384,0,384,512};
     }
   }
+  sky.bg2_skybox.active_band = 0;
+  PresentActionEffects_DrawDioramaPlane(&context,SR_PPU_OVERLAY_BG2,&sky);
+  assert(b.geometries == old_geometries+2);
+  assert(b.geometry_blends[old_geometries] == kArRenderBlendMode_Add);
+  assert(b.geometry_blends[old_geometries+1] == kArRenderBlendMode_Alpha);
+  assert(b.created == 2 && b.updated == 2 && !b.resolves && !b.restores);
+  b.geometries = old_geometries;
   assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
   assert(b.geometries == 11); /* Five submissions; details share existing water/mist batches. */
   assert(b.created == 2 && b.updated == 2 && !b.resolves && !b.restores);

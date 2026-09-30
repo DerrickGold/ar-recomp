@@ -2195,8 +2195,8 @@ static void TestCaveEnvironmentGeometry(void) {
                           kActionEffect_CaveMist, kActionEffect_CaveSheen,
                           kActionEffect_CaveAmbientLight, kActionEffect_TempleGrit,
                           kActionEffect_TempleGroundMist};
-  const int vertices[] = {1100,960,1300,672,592,260,4032,512,3360};
-  const int indices[] = {3000,1440,1950,1440,2880,390,8640,1536,7200};
+  const int vertices[] = {1100,960,1300,672,4032,1320,4032,512,3360};
+  const int indices[] = {3000,1440,1950,1440,8640,1980,8640,1536,7200};
   for (unsigned family = 0; family < 9; family++) {
     ActionEffectInstance *e = &frame.decorations[0];
     *e = (ActionEffectInstance){
@@ -2226,7 +2226,7 @@ static void TestCaveEnvironmentGeometry(void) {
           CHECK(isfinite(first.vertices[i].position.x) && isfinite(first.vertices[i].position.y));
           CHECK(first.vertices[i].color.a >= 0 && first.vertices[i].color.a <= 1);
         }
-        e->phase_ticks = (uint16_t)(e->phase_ticks + 1024);
+        e->phase_ticks = (uint16_t)(e->phase_ticks + 4096);
         CHECK(ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
             IdentityProjection, NULL, NULL, &again));
         CHECK(SceneBatchesEqual(&first, &again)); /* Also covers the 16-bit clock seam. */
@@ -2360,7 +2360,7 @@ static void TestTempleGroundMist(void) {
     for (unsigned i = 0; i < 5; i++) frame.decorations[i].phase_ticks = (uint16_t)t;
     CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
         IdentityProjection, NULL, NULL, &first));
-    CHECK(first.vertex_count > 0 && first.vertex_count <= 350);
+    CHECK(first.vertex_count > 0 && first.vertex_count <= 525);
     for (int i = 0; i < first.vertex_count; i++) {
       const ArRenderVertex2D *v = &first.vertices[i];
       bool supported = false;
@@ -2430,14 +2430,43 @@ static void TestTempleGroundMist(void) {
   frame.decoration_count = kActionTempleMistMaxSpans;
   CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
       IdentityProjection, NULL, NULL, &first));
-  CHECK(first.vertex_count <= kActionTempleMistMaxSpans*70);
+  CHECK(first.vertex_count <= kActionTempleMistMaxSpans*105);
   frame.decoration_count++;
   CHECK(!ActionSceneDecorationRender_Build(&frame, layer, false, true,
       IdentityProjection, NULL, NULL, &first));
   CHECK(!first.vertex_count && !first.index_count);
+  /* Spike pockets settle on their own floor, 32px beneath the tips. */
+  frame.decoration_count = 1;
+  frame.decorations[0].world_x = 656;
+  frame.decorations[0].world_y = 1712;
+  frame.decorations[0].geometry.data.rect = (ActionEffectLocalRect){0,-26,32,0};
+  frame.decorations[0].phase_ticks = 400;
+  CHECK(ActionSceneDecorationRender_Build(&frame,layer,false,true,
+      IdentityProjection,NULL,NULL,&first));
+  CHECK(SampleForestLight(&first,672,1711,false) > .09f);
+  CHECK(SampleForestLight(&first,672,1680,false) == 0);
+  frame.decorations[0].phase_ticks++;
+  CHECK(ActionSceneDecorationRender_Build(&frame,layer,false,true,
+      IdentityProjection,NULL,NULL,&moved));
+  CHECK(first.vertex_count == moved.vertex_count);
+  for (int i = 0; i < first.vertex_count && i < moved.vertex_count; i++) {
+    CHECK(fabsf(first.vertices[i].position.y-moved.vertices[i].position.y) < .2f);
+    CHECK(fabsf(first.vertices[i].color.a-moved.vertices[i].color.a) < .02f);
+    CHECK(first.vertices[i].color.b > first.vertices[i].color.r);
+  }
+  /* The first room's authored lower hall is wider than the climbing room. */
+  frame.decorations[0].environment_room = 2;
+  frame.decorations[0].geometry.data.rect.x1 = 880;
+  CHECK(ActionSceneDecorationRender_Build(&frame,layer,false,true,
+      IdentityProjection,NULL,NULL,&first));
+  CHECK(first.vertex_count > 0);
+  frame.decorations[0].geometry.data.rect.x1 = 896;
+  CHECK(ActionSceneDecorationRender_Build(&frame,layer,false,true,
+      IdentityProjection,NULL,NULL,&first));
+  CHECK(!first.vertex_count && !first.index_count); /* Unproved spans are omitted. */
 }
 
-static void TestLandingCloudGeometry(void) {
+static void TestLandingParticleGeometry(void) {
   ActionSceneEffectFrame frame = {.decoration_count = kActionLandingDustMaxPuffs};
   static ActionSceneEffectRenderBatch batch, paused;
   for (unsigned i = 0; i < kActionLandingDustMaxPuffs; i++)
@@ -2452,9 +2481,9 @@ static void TestLandingCloudGeometry(void) {
     for (unsigned i = 0; i < frame.decoration_count; i++) frame.decorations[i].phase_ticks = t;
     CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_WorldDust,
         false, true, IdentityProjection, NULL, NULL, &batch));
-    CHECK(batch.vertex_count <= 1254 && batch.index_count <= 5616);
+    CHECK(batch.vertex_count <= 6*28*4 && batch.index_count <= 6*28*6);
     for (int i = 0; i < batch.vertex_count; i++) {
-      CHECK(batch.vertices[i].position.y <= 192.5f); /* Clouds rise off the surface. */
+      CHECK(batch.vertices[i].position.y <= 192.5f); /* Grains rise off the surface. */
       CHECK(batch.vertices[i].color.a >= 0 && batch.vertices[i].color.a <= 1);
       CHECK(isfinite(batch.vertices[i].position.x));
       CHECK(batch.vertices[i].position.x >= 24 && batch.vertices[i].position.x <= 232);
@@ -2468,7 +2497,18 @@ static void TestLandingCloudGeometry(void) {
     }
     if (t == kActionLandingDustLifetime) CHECK(!batch.vertex_count);
   }
+  for (unsigned i = 0; i < frame.decoration_count; i++) frame.decorations[i].phase_ticks = 8;
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldDust,
+      false,true,IdentityProjection,NULL,NULL,&batch));
   for (unsigned i = 0; i < frame.decoration_count; i++) frame.decorations[i].phase_ticks = 12;
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldDust,
+      false,true,IdentityProjection,NULL,NULL,&paused));
+  CHECK(batch.vertex_count == paused.vertex_count);
+  for (int i = 0; i+3 < batch.vertex_count && i+3 < paused.vertex_count; i += 4) {
+    const float width = batch.vertices[i+2].position.x-batch.vertices[i].position.x;
+    const float later = paused.vertices[i+2].position.x-paused.vertices[i].position.x;
+    CHECK(width > .8f && width <= 2.21f && fabsf(width-later) < .0001f);
+  }
   frame.decorations[frame.decoration_count++] = frame.decorations[0];
   CHECK(!ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_WorldDust,
       false, true, IdentityProjection, NULL, NULL, &batch));
@@ -2493,7 +2533,7 @@ static void TestCavePolishGeometry(void) {
   float low = 10000, high = -10000;
   for (int i = 0; i < first.vertex_count; i++) {
     const ArRenderPointF p = first.vertices[i].position;
-    CHECK(p.x >= 320 && p.x < 333 && p.y >= 448 && p.y < 459);
+    CHECK(p.x >= 310 && p.x <= 343 && p.y >= 435 && p.y < 473);
     low = fminf(low,p.y);
     high = fmaxf(high,p.y);
   }
@@ -2524,7 +2564,7 @@ static void TestCavePolishGeometry(void) {
       CHECK(next.vertices[i].color.r > next.vertices[i].color.b);
     first = next;
   }
-  CHECK(changed_counts > 8); /* Vary lobe count as well as a seed on the same shape. */
+  CHECK(changed_counts > 8); /* Independent grains and lifetimes vary the burst density. */
   frame = (ActionSceneEffectFrame){.effect_count = 1, .visible_count = 1};
   frame.effects[0] = SceneEffect(kActionEffect_EnemyFireball,128);
   frame.effects[0].kind = kActionEffect_FillmoreStatueOrb;
@@ -2716,6 +2756,67 @@ static void TestBloodpoolMoonlight(void) {
   frame.decoration_count = 2;
   CHECK(!ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
       IdentityProjection,NULL,NULL,&lit));
+}
+
+static void TestDistantWaveCapsFollowRaster(void) {
+  ActionSceneEffectFrame frame = {.decoration_count = 1, .decoration_visible_count = 1};
+  ActionEffectInstance *e = &frame.decorations[0];
+  *e = (ActionEffectInstance){
+    .kind = kActionEffect_BloodpoolMoonReflection, .phase = kActionEffectPhase_BloodpoolEnvironment,
+    .environment_room = 1, .world_x = 112, .world_y = 62, .phase_ticks = 400,
+    .flags = kActionEffectFlag_Visible, .render_layer = kActionEffectRenderLayer_Bg2Plane,
+    .projection_plane = kActionEffectProjectionPlane_Bg2,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,194}},
+  };
+  static ActionSceneEffectRenderBatch baseline, waves, changed;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      IdentityProjection,NULL,NULL,&baseline));
+  frame.bloodpool.water_scroll_valid = true;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      IdentityProjection,NULL,NULL,&waves));
+  const int wave_vertices = waves.vertex_count-baseline.vertex_count;
+  CHECK(wave_vertices > 0 && wave_vertices <= 12*4*4*7);
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      IdentityProjection,NULL,NULL,&changed) && SceneBatchesEqual(&waves,&changed));
+  /* Only the first water row advances; its caps move left by exactly seven
+   * native pixels. Other rows stay put, independent of the effect clock. */
+  frame.bloodpool.water_scroll[147-kActionBloodpoolWaterScrollFirstRow] = 7;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      IdentityProjection,NULL,NULL,&changed));
+  const int changed_vertices = changed.vertex_count-baseline.vertex_count;
+  unsigned checked = 0;
+  for (int i = 0; i < wave_vertices; i++) {
+    const ArRenderPointF p = waves.vertices[i].position;
+    CHECK(p.y >= 147 && p.y <= 236); /* No glints in sky, hills or near water. */
+    if (p.x < -150 || p.x > 350) continue;
+    const float expected_x = p.x-(p.y <= 148 ? 7 : 0);
+    bool found = false;
+    for (int j = 0; j < changed_vertices; j++)
+      if (fabsf(changed.vertices[j].position.x-expected_x) < .001f &&
+          fabsf(changed.vertices[j].position.y-p.y) < .001f) found = true;
+    CHECK(found);
+    checked++;
+  }
+  CHECK(checked > 60);
+  /* A native 256px wrap repeats the same CHR and cap positions exactly. */
+  frame.bloodpool.water_scroll[147-kActionBloodpoolWaterScrollFirstRow] = 256;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      IdentityProjection,NULL,NULL,&changed) && SceneBatchesEqual(&waves,&changed));
+  e->phase_ticks++;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      IdentityProjection,NULL,NULL,&changed));
+  CHECK(!SceneBatchesEqual(&waves,&changed));
+  for (int i = 0; i < wave_vertices; i++)
+    CHECK(!memcmp(&waves.vertices[i].position,&changed.vertices[i].position,
+                  sizeof(ArRenderPointF))); /* Shimmer cannot slide over the artwork. */
+  /* Rays, the old reflection and the new caps share the existing batch. */
+  frame.decorations[1] = *e;
+  frame.decorations[1].kind = kActionEffect_BloodpoolMoonlight;
+  frame.decoration_count = 2;
+  frame.moonlight.valid = true;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+      IdentityProjection,NULL,NULL,&changed));
+  CHECK(changed.vertex_count < kActionSceneEffectRenderMaxVertices);
 }
 
 static void TestMoonDependencyScope(void) {
@@ -3246,6 +3347,19 @@ static void TestCastleGeometry(void) {
   CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
       IdentityProjection,NULL,NULL,&batch));
   CHECK(batch.index_count > 0); /* Dust remains independently renderable. */
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      IdentityProjection,NULL,NULL,&again) && SceneBatchesEqual(&batch,&again));
+  e->phase_ticks += 30;
+  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      IdentityProjection,NULL,NULL,&again));
+  CHECK(batch.vertex_count == again.vertex_count);
+  float travel = 0;
+  for (int i = 0; i < batch.vertex_count && i < again.vertex_count; i++)
+    travel = fmaxf(travel,hypotf(batch.vertices[i].position.x-again.vertices[i].position.x,
+                               batch.vertices[i].position.y-again.vertices[i].position.y));
+  CHECK(travel > 1); /* Clearly moves over half a second, rather than 0.12px orbits. */
+  e->phase_ticks -= 30;
+
   e->source_mask = 0;
   CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
       IdentityProjection,NULL,NULL,&batch));
@@ -3604,7 +3718,52 @@ static void TestMoonRaysStayContinuousAcrossSkyboxBands(void) {
   CHECK(fabsf(upper.x-lower.x) > 10);
 }
 
+static void TestMoonCloudStaysContinuousAcrossSkyboxBands(void) {
+  DioramaProjection projection = {
+    .valid = true, .output_width = 800, .output_height = 400,
+    .bg2_skybox = {.count = 2, .active_band = 0,
+      .bands = {{44,64,476,128,0,64.0f/224},
+                {0,128,496,288,64.0f/224,1}}},
+  };
+  ActionEffectProjectionContext context = {
+    .ws_extra = 120, .ws_extra_top = 64, .diorama_projection = &projection,
+  };
+  ActionSceneEffectFrame frame = {.decoration_count = 1, .decoration_visible_count = 1};
+  frame.decorations[0] = (ActionEffectInstance){
+    .kind = kActionEffect_BloodpoolCloud, .world_x = 112, .world_y = 62,
+    .phase = kActionEffectPhase_BloodpoolEnvironment, .environment_room = 1,
+    .flags = kActionEffectFlag_Visible, .phase_ticks = 600,
+    .render_layer = kActionEffectRenderLayer_Bg2Alpha,
+    .projection_plane = kActionEffectProjectionPlane_Bg2,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-100,-40,100,44}},
+  };
+  static ActionSceneEffectRenderBatch bands[2], continuous;
+  for (int band = 0; band < 2; band++) {
+    projection.bg2_skybox.active_band = band;
+    CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg2Alpha,true,false,
+        ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,
+        &context,&bands[band]));
+    CHECK(bands[band].index_count > 0);
+  }
+  projection.bg2_skybox = (DioramaSkyboxProjection){
+    .count = 1, .active_band = 0, .bands = {{44,64,476,288,0,1}},
+  };
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg2Alpha,true,false,
+      ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,
+      &context,&continuous));
+  for (int band = 0; band < 2; band++) {
+    const float y = 400*64.0f/224 + (band ? 2 : -2);
+    for (float x = 250; x < 430; x += 17) {
+      const float expected = MoonAlphaAt(&continuous,x,y);
+      CHECK(expected > .005f);
+      CHECK(fabsf(MoonAlphaAt(&bands[band],x,y)-expected) < .001f);
+    }
+  }
+}
+
 int main(void) {
+  TestDistantWaveCapsFollowRaster();
+  TestMoonCloudStaysContinuousAcrossSkyboxBands();
   TestMoonRaysStayContinuousAcrossSkyboxBands();
   TestSkyboxEffectProjection();
   TestCastleStackedRays();
@@ -3616,7 +3775,7 @@ int main(void) {
   TestBloodpoolGeometry();
   TestBloodpoolMoonlight();
   TestCavePolishGeometry();
-  TestLandingCloudGeometry();
+  TestLandingParticleGeometry();
   TestCaveEnvironmentGeometry();
   TestCaveWaterUsesHighPlane();
   TestCaveAmbientScroll();

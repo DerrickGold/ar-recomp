@@ -400,9 +400,9 @@ not prerequisites for finishing the baseline stage pass.
 | Level | Current baseline | Remaining pass |
 | --- | --- | --- |
 | Fillmore Act 1 | Approved canopy rays, leaves, clustered motes, surface lighting and boss-clearing fan. | Verify the bottom seam in motion (B04) and preserve the approved look. |
-| Fillmore Act 2 | Cave pools, falls, contour glints, drips, splash mist, varied landing dust, temple atmosphere and tower light. | Retain the current treatment. Actual submerged-scene refraction remains an optional shared experiment, not a return of the removed water-artwork sampler. |
-| Bloodpool Act 1 | Layered moonlight, red-water reflections, contact ripples, timber drips, insects, mist and cloud modulation; skybox-only confirmed by the user. | Verify post contacts (B08) before increasing ripple visibility; verify the bottom seam (B05); preserve skybox pixel aspect so the moon is not stretched. Prefer the compatible skybox-only presentation to drawing a second moon. |
-| Bloodpool Act 2 | Dark interiors, window/gallery/boss light, torch bounce, dust, floor haze, moat effects and electric-trap illumination; skybox-only confirmed by the user. | Investigate apparently stationary moonlit motes, then tune their motion; verify corrected skybox aspect and light attachment across the exterior, gallery and boss. |
+| Fillmore Act 2 | Cave pools, wider contour-following wet patches, drips, layered splash/floor mist, landing particles, darker lower temple and tower light. Floor mist covers both temple rooms and settles beneath spikes. | Review the new wet patches, particle dust and mist in motion. Actual submerged-scene refraction remains an optional shared experiment, not a return of the removed water-artwork sampler. |
+| Bloodpool Act 1 | Layered moonlight, red-water reflections, stronger contact ripples, timber drips, insects, mist and cloud modulation; skybox-only confirmed by the user. | Accept the native-contact ripple comparison (B08); verify the bottom seam (B05); preserve skybox pixel aspect so the moon is not stretched. Prefer the compatible skybox-only presentation to drawing a second moon. |
+| Bloodpool Act 2 | Dark interiors, window/gallery/boss light, torch bounce, independently drifting moonlit dust, floor haze, moat effects and electric-trap illumination; skybox-only confirmed by the user. | Review the revised mote motion throughout the gallery and boss; verify corrected skybox aspect and light attachment across the exterior, gallery and boss. |
 | Kasandora Act 1 | Backdrop tuning reconciled (B07); priority-boundary/boss-occlusion review remains (B03). No dedicated desert atmosphere pass yet. | Dry sunlight and a desert sky gradient, mild distant heat shimmer, low sand wisps and boss-pit dust; optional moving wispy clouds. Audit fire-enemy/attack lighting and particles. |
 | Kasandora Act 2 | Black backing and extended-row fixes landed (B01/B02); atmosphere remains planned. | Dimmed interiors with local torch/statue light, selected warm shafts and drifting dust, floor scarab accents, and boss overhead light with moving motes. Audit blue-ball enemy lighting/particles and torch coverage. |
 | Aitos Act 1 | Existing lava-pit, waterfall and splash accents. | Subdued bamboo-canopy light and occasional leaves; refine local waterfall/lava light spill before adding more activity. |
@@ -412,18 +412,51 @@ not prerequisites for finishing the baseline stage pass.
 | Northwall Acts 1–2 | Existing combat accents; dedicated environmental pass remains planned. | Sparse drifting snow and spindrift in exposed areas; restrained cool highlights in icy rooms. Author coverage by room instead of applying snow to every interior. |
 | Death Heim | Existing rematch/boss accents. | Subtle halos tied to visible portals/eclipses and slow distant wisps; preserve deep blacks. Review reused arenas and the ending separately. |
 
-### Bloodpool polish
+### Fillmore and Bloodpool polish — September 30
 
-- **Act 1:** The native post-contact correction is committed in `f572d89f`,
-  but scrolling/raster/zoom verification remains. Once B08 is visually accepted,
-  increase ripple readability through controlled width, lifetime and contrast
-  comparisons. Retain the red lake and rose-silver reflections; brightness must
-  not obscure timber contacts or turn the water into a white glitter field.
-- **Act 2:** Capture a normal-speed window/gallery sequence before changing
-  motes. If authored motion is unintentionally frozen, track and fix that as a
-  bug. If it runs but is imperceptible, compare slow independent drift, varied
-  lifetimes and brighter illumination within the window fields. Keep positions
-  world-anchored and preserve pause/retained-frame behavior.
+- **Fillmore Act 2:** Wet-rock patches cover 33 native pixel columns instead
+  of 13, following measured opaque contours with a blue body and bright rim.
+  Brown landing grains replace expanding cloud meshes: fixed particle sizes,
+  independent arcs/lifetimes and the existing per-surface settling cooldown.
+  Waterfall spray and low temple fog share three translucent density layers,
+  with independent continuous drift and shaded interiors to suggest volume.
+  Fog splits at collision-height changes and settles on stone beneath spike
+  artwork, leaving the tips above its densest layer. The first room's lower
+  temple now receives the same floor treatment, with a world-position dimming
+  ramp on masonry and reduced local bounce light. Actors and HUD retain their
+  own brightness. This is layered geometry, not ray-marched volumetric fog.
+- **Bloodpool Act 1:** Preserve `f572d89f`'s native post-contact positions.
+  Contact ripples now grow wider, use a thicker rose-coloured rim and fade over
+  112 ticks instead of 80. Native before/after captures and projection tests
+  check attachment; user acceptance of B08 and broader raster/zoom coverage
+  remain open. Sparse distant-water caps and glints now follow the captured
+  native raster-row offsets in both skybox-only and backdrop-plane modes;
+  shimmer changes exposure without inventing a second drift speed. They share
+  the existing reflection batch. The lake stays red. The small comparison is
+  `runs/bloodpool-wavecaps/bloodpool-wave-caps-small.mp4`.
+- **Bloodpool Act 2:** The old window orbit was only 0.12 source pixels; its
+  clock was running, but the motion was imperceptible. Motes now drift independently
+  across and along the captured light fields, with separate periodic clocks
+  and soft fades. Counts and draw budgets are unchanged. A normal-entry castle
+  window capture exercises the motion; the full gallery/boss still needs review.
+
+Validation for this pass: optimized native build; capture, geometry and
+presentation tests in release and ASan/UBSan configurations; arm64 and x86_64
+syntax checks. Tests cover spike-base fog, floor splits/overflow, continuous
+mist motion, fixed dust size, pause/retained frames and existing mask-upload
+limits. Native Metal comparison routes use isolated saves/settings and leave
+matching gameplay-memory snapshots unchanged. Small 480×300, 20 fps before/after
+clips are under `runs/cave-polish/`: `fillmore-act2-review.mp4`,
+`bloodpool-ripples-review.mp4` and `bloodpool-motes-review.mp4`.
+
+The mist stays in existing alpha batches; dimming reuses BG1 mesh colours in
+Diorama and one existing winner-mask submission in flat mode. No new shader,
+scene resolve or per-effect texture upload is introduced. Host-only decoration
+capacity is 27 records for fourteen floor runs, seven fields and six contact
+bursts; native objects and the separate actor-effect pool are unchanged. The
+Aitos splash cap remains fourteen. Native Steam Deck/Vulkan and Windows/D3D12
+frame-time acceptance remains open. Direct debug warps into inherited-asset
+castle rooms fail in both old and new builds; enter through `02/02` for review.
 
 ### Kasandora outdoor and interior direction
 

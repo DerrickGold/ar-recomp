@@ -100,13 +100,13 @@ static bool WaterClip(const ActionEffectInstance *effect, const ActionEffectLoca
 static bool Ripple(ActionEffectGeometryWriter *writer, const ActionEffectInstance *mesh,
     const ActionEffectLocalRect *clip, float world_x, float world_y, float water_top, float age,
     float strength, ActionEffectProjectPointFn project_point, void *userdata) {
-  if (age < 0 || age >= 80) return true;
+  if (age < 0 || age >= 112) return true;
   ActionEffectLocalRect region;
   if (!WaterClip(mesh,clip,world_x,water_top,&region)) return true;
-  const float t = age/80, radius = 1+14*t;
+  const float t = age/112, radius = 1+19*t;
   const float alpha = strength*sinf(t*3.14159265f)*(1-t);
   const float x = world_x-mesh->world_x, y = world_y-mesh->world_y;
-  if (x+radius < region.x0 || x-radius > region.x1 || y+4 < region.y0 || y-4 > region.y1)
+  if (x+radius < region.x0 || x-radius > region.x1 || y+5 < region.y0 || y-5 > region.y1)
     return true;
   /* Fixed unit circle: no per-vertex trigonometry or evolving particle state. */
   static const ArRenderPointF circle[] = {
@@ -118,7 +118,7 @@ static bool Ripple(ActionEffectGeometryWriter *writer, const ActionEffectInstanc
   ArRenderVertex2D vertices[48];
   int mapped[48];
   for (unsigned i = 0; i < 16; i++) for (unsigned band = 0; band < 3; band++) {
-    const float r = radius+((int)band-1)*.65f;
+    const float r = radius+((int)band-1)*.95f;
     const unsigned at = i*3+band;
     vertices[at] = (ArRenderVertex2D){
       {x+circle[i].x*r,y+circle[i].y*r*.22f},
@@ -215,8 +215,8 @@ bool AppendBloodpoolDetailParticles(ActionEffectGeometryWriter *writer,
       const float x = (post->x0+post->x1)*.5f;
       const uint32_t seed = DeterministicHash_Mix32((unsigned)(post->x0+post->x1)+0xBB21u);
       const float age = (float)((effect->phase_ticks+seed)&255u);
-      if (!Ripple(writer,&mesh,&clip,x,post->y,480,age,.6f,project_point,userdata) ||
-          !Ripple(writer,&mesh,&clip,x,post->y,480,age-23,.28f,project_point,userdata))
+      if (!Ripple(writer,&mesh,&clip,x,post->y,480,age,.82f,project_point,userdata) ||
+          !Ripple(writer,&mesh,&clip,x,post->y,480,age-23,.40f,project_point,userdata))
         return false;
     }
   } else if (effect->kind == kActionEffect_BloodpoolMist) {

@@ -33,18 +33,21 @@ static bool CaveMapReady(const ActionBgMapView *map, unsigned room) {
       ActionBgMapView_LookupMetatile(map, (int)s[3], (int)s[4], &b) && b == s[5];
 }
 
-_Static_assert(kActionLandingDustMaxPuffs + 3 + kActionTempleMistMaxSpans <=
+_Static_assert(kActionLandingDustMaxPuffs + 7 + kActionTempleMistMaxSpans <=
                    kActionSceneDecorationMaxInstances,
                "temple floor mist must leave room for landing dust and ambient fields");
 
-static int TempleMistFloor(const uint8_t *wram, const ActionBgMapView *map, int x) {
+static int TempleMistFloor(const uint8_t *wram, const ActionBgMapView *map, int x,
+    unsigned room) {
   /* Search only the lower hall. The native collision LUT, rather than the
-   * decorative ledge pixels, determines the supporting surface in each column. */
-  for (int y = 1664; y <= 1712; y += 16) {
+   * decorative ledge pixels, determines the supporting surface in each column.
+   * Spike artwork is non-solid: continue through it to the stone pit bottom. */
+  const int top = room == 2 ? 1120 : 1664;
+  const int bottom = room == 2 ? 1248 : 1712;
+  for (int y = top; y <= bottom; y += 16) {
     uint8_t below, above;
     if (!ActionBgMapView_LookupMetatile(map, x, y, &below) ||
         !ActionBgMapView_LookupMetatile(map, x, y-1, &above)) return 0;
-    if (above == 0x18 || above == 0x20) return 0; /* Never cover spike pits. */
     const unsigned collision = wram[0x05A0 + below];
     const bool capital = below >= 0x54 && below <= 0x57 && collision == 3;
     if ((collision == 15 || capital) && wram[0x05A0 + above] == 0) return y;
@@ -53,17 +56,19 @@ static int TempleMistFloor(const uint8_t *wram, const ActionBgMapView *map, int 
 }
 
 static void CaptureTempleMist(ActionSceneEffectFrame *dst, const uint8_t *wram,
-    const ActionBgMapView *map, uint16_t clock) {
+    const ActionBgMapView *map, unsigned room, uint16_t clock) {
   const uint8_t count_before = dst->decoration_count;
   const uint8_t visible_before = dst->decoration_visible_count;
-  int left = 512, floor = 0;
+  const int start = room == 2 ? 880 : 512;
+  const int end = room == 2 ? 1760 : 960;
+  int left = start, floor = 0;
   unsigned spans = 0;
-  for (int x = 512; x <= 960; x += 16) {
-    const int next_floor = x < 960 ? TempleMistFloor(wram, map, x) : 0;
+  for (int x = start; x <= end; x += 16) {
+    const int next_floor = x < end ? TempleMistFloor(wram, map, x, room) : 0;
     if (next_floor == floor) continue;
     if (floor) {
       /* A changed/fragmented map may exceed the cosmetic budget. Omit only
-       * this family instead of consuming actor or landing-cloud records. */
+       * this family instead of consuming actor or landing-particle records. */
       if (++spans > kActionTempleMistMaxSpans ||
           dst->decoration_count >= kActionSceneDecorationMaxInstances) {
         dst->decoration_count = count_before;
@@ -71,9 +76,9 @@ static void CaptureTempleMist(ActionSceneEffectFrame *dst, const uint8_t *wram,
         return;
       }
       const ActionEffectInstance effect = {
-        .generation = 0xC3000000u | (unsigned)left,
-        .pulse_generation = 0xD3000000u | (unsigned)left,
-        .world_x = (int16_t)left, .world_y = (int16_t)floor, .environment_room = 3,
+        .generation = 0xC3000000u | (room << 16) | (unsigned)left,
+        .pulse_generation = 0xD3000000u | (room << 16) | (unsigned)left,
+        .world_x = (int16_t)left, .world_y = (int16_t)floor, .environment_room = (uint16_t)room,
         .age_ticks = clock, .phase_ticks = clock, .pulse_ticks = clock,
         .kind = kActionEffect_TempleGroundMist, .phase = kActionEffectPhase_CaveEnvironment,
         .flags = kActionEffectFlag_Visible | kActionEffectFlag_ClipToRect,
@@ -184,5 +189,5 @@ void CaptureFillmoreCave(ActionEffectObserver *observer,
       return;
     }
   }
-  if (room == 3) CaptureTempleMist(dst, wram, &playfield, observer->scene_clock);
+  if (room <= 3) CaptureTempleMist(dst, wram, &playfield, room, observer->scene_clock);
 }

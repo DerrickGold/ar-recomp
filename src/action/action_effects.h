@@ -240,15 +240,17 @@ enum {
   kActionSceneEffectMaxInstances = 16,
   /* Map-derived accents have their own capture/render budget. The measured
    * Aitos waterfall window holds 14 platform splashes plus one BG2 veil and
-   * one bottom-mist record; none may consume the 16-record actor budget. */
-  kActionSceneDecorationMaxInstances = 16,
+   * one bottom-mist record. Fillmore's lower temple needs up to fourteen floor runs,
+   * seven ambient fields and six contact bursts. These host records never
+   * consume native objects or the separate 16-record actor-effect budget. */
+  kActionSceneDecorationMaxInstances = 27,
   kActionSceneEffectObserverTrackCount = 80,
   kActionEffectObjPriorityCount = 4,
   kActionLandingDustMaxPuffs = 6,
   kActionLandingDustLifetime = 48,
   kActionLandingDustPatchCount = 2*kActionLandingDustMaxPuffs,
-  /* Collision-derived safe floor runs share one mist draw, with bounded capture. */
-  kActionTempleMistMaxSpans = 7,
+  /* Collision-derived floor runs, including spike bases, share one bounded mist draw. */
+  kActionTempleMistMaxSpans = 14,
   kActionEffectFlag_Visible = 1 << 0,
   kActionEffectFlag_FlipHorizontal = 1 << 1,
   kActionEffectFlag_FlipVertical = 1 << 2,
@@ -342,7 +344,10 @@ typedef struct ActionMoonlightOcclusion {
   uint8_t valid;
 } ActionMoonlightOcclusion;
 
-enum { kActionBloodpoolMaxTimber = 64, kActionBloodpoolMaxPosts = 32 };
+enum {
+  kActionBloodpoolMaxTimber = 64, kActionBloodpoolMaxPosts = 32,
+  kActionBloodpoolWaterScrollFirstRow = 127, kActionBloodpoolWaterScrollRows = 96,
+};
 typedef struct ActionBloodpoolTimber {
   int16_t x0, x1, y, drip_x, drip_y, landing_y;
   uint8_t water_landing;
@@ -355,6 +360,10 @@ typedef struct ActionBloodpoolPost {
 typedef struct ActionBloodpoolDetails {
   ActionBloodpoolTimber timber[kActionBloodpoolMaxTimber];
   ActionBloodpoolPost posts[kActionBloodpoolMaxPosts];
+  /* Completed frame's native BG2 HDMA offsets. Rows after the table retain
+   * its final entry, just like extended background scanout. */
+  uint16_t water_scroll[kActionBloodpoolWaterScrollRows];
+  uint8_t water_scroll_valid;
   uint8_t timber_count, post_count, valid;
 } ActionBloodpoolDetails;
 

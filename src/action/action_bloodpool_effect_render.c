@@ -87,6 +87,60 @@ static bool MoonReflection(ActionEffectGeometryWriter *writer, const ActionEffec
   return true;
 }
 
+enum { kDistantWaveRows = 12, kDistantWaveCopies = 4 };
+_Static_assert(kDistantWaveRows*kDistantWaveCopies*4*7 + 7400 <=
+                   kActionSceneEffectRenderMaxVertices &&
+               kDistantWaveRows*kDistantWaveCopies*4*15 + 19000 <=
+                   kActionSceneEffectRenderMaxIndices,
+               "distant wave caps must leave room for moon rays and reflections");
+
+bool AppendBloodpoolWaveCaps(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    const ActionBloodpoolDetails *details, ActionEffectProjectPointFn project_point,
+    ActionEffectClipBoundsFn clip_bounds, void *userdata) {
+  if (!details || !details->water_scroll_valid) return true;
+  ActionEffectLocalRect clip;
+  if (!MoonClip(effect,clip_bounds,userdata,&clip)) return true;
+  clip.y0 = fmaxf(clip.y0,82);
+  if (clip.y0 >= clip.y1) return true;
+  ActionEffectInstance mesh = *effect;
+  mesh.flags |= kActionEffectFlag_ClippedMesh;
+  const float cloud = BloodpoolCloudTransmission(effect->phase_ticks);
+  for (unsigned row = 0; row < kDistantWaveRows; row++) {
+    const unsigned source_y = 147+row*8;
+    const float y = source_y+.5f-effect->world_y;
+    if (y+.55f < clip.y0 || y-.55f > clip.y1) continue;
+    unsigned scroll_row = source_y-kActionBloodpoolWaterScrollFirstRow;
+    if (scroll_row >= kActionBloodpoolWaterScrollRows)
+      scroll_row = kActionBloodpoolWaterScrollRows-1;
+    if (details->water_scroll[scroll_row] > 1023) return true;
+    const uint32_t seed = DeterministicHash_Mix32(row*0x9E3779B9u+0xB1CAu);
+    const float width = 3+row*.30f+2*HashUnit(seed^0x31u);
+    /* Source CHR repeats every 256 pixels. Translate the crest with its actual
+     * raster row; animate only exposure, never a second invented drift speed.
+     * Each thin cap stays inside one native row rather than bridging shear. */
+    const float origin = (float)(seed&255u)-
+        (details->water_scroll[scroll_row]&255u)-effect->world_x;
+    const int first = (int)ceilf((clip.x0-width-origin)/256);
+    const int last = (int)floorf((clip.x1+width-origin)/256);
+    const float phase = ((effect->phase_ticks+(seed>>8))&255u)*.024543693f;
+    const float shimmer = .5f+.5f*sinf(phase);
+    float flash = fmaxf(0,sinf(phase*2+row));
+    flash *= flash;
+    flash *= flash;
+    flash *= flash;
+    for (int copy = first; copy <= last; copy++) {
+      const float x = origin+copy*256;
+      const float exposure = .10f+.60f*SceneSoftFalloff(x/(44+row*5));
+      const float alpha = cloud*exposure*(.28f+.32f*shimmer);
+      if (!WaterReflection(writer,&mesh,&clip,x,y,width,.28f,alpha,project_point,userdata))
+        return false;
+      if (!WaterReflection(writer,&mesh,&clip,x+width*.2f,y,.65f,.50f,
+              cloud*exposure*.80f*flash,project_point,userdata)) return false;
+    }
+  }
+  return true;
+}
+
 /* Light reaching distant haze has not crossed the foreground platforms.
  * Its visibility is handled by normal BG1 painter order. Only the nearer
  * scattering volume receives platform shadows. Sample that finite volume,

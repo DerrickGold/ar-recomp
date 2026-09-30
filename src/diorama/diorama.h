@@ -298,6 +298,8 @@ typedef struct DioramaScene {
   /* 0 leaves authored color intact; 1 darkens BG1 low/high/far to black.
    * Applied to existing face/depth geometry, without changing layer alpha. */
   float bg1_dimming;
+  /* Optional source-UV ramp for depth-dependent scenery exposure. */
+  ArRenderRectF bg1_dimming_ramp;
   /* Current effects retain projection on an intentionally empty plane. */
   uint8_t effect_obj_priority_mask;
   uint32_t effect_bg_plane_mask;

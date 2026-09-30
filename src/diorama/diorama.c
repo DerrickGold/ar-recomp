@@ -15,6 +15,7 @@
 #include "diorama_depth_shapes.h" /* rake/bow/thick/stack/voxel arithmetic */
 #include "diorama_performance.h"
 #include "render/scene3d_math.h"
+#include "render/scenery_dimming.h"
 #include "host/host_clock.h"
 #include "render/render_output.h"
 #include "diorama_upload.h"
@@ -2301,8 +2302,22 @@ typedef struct DioramaLayerDraw {
   ArRenderTexture texture;
   ArRenderTexture priority_surface;
   ArRenderColorF shade;
+  float dimming;
+  ArRenderRectF dimming_ramp;
   ArRenderBlendMode blend;
 } DioramaLayerDraw;
+
+static void ShadeDioramaVertices(const DioramaLayerDraw *layer,
+    ArRenderVertex2D *vertices, int count) {
+  if (layer->dimming <= 0) return;
+  for (int i = 0; i < count; i++) {
+    const float light = 1-SceneryDimming_Amount(layer->dimming,layer->dimming_ramp,
+        vertices[i].tex_coord.x,vertices[i].tex_coord.y);
+    vertices[i].color.r *= light;
+    vertices[i].color.g *= light;
+    vertices[i].color.b *= light;
+  }
+}
 
 /* Joined BG1 faces need complementary filter coverage, not two independently
  * softened alpha silhouettes. Keep their draw slots (and intervening sprites)
@@ -2440,6 +2455,7 @@ static void PrepareDioramaLayerMesh(const DioramaCapture *capture,
                  geometry->width, geometry->height, layer->shade,
                  mesh->vertices, mesh->indices, &mesh->vertex_count,
                  &mesh->index_count);
+  ShadeDioramaVertices(layer,mesh->vertices,mesh->vertex_count);
   mesh->constrained = false;
   if (aperture->valid && layer->description->plane != SR_PPU_OVERLAY_BG1 &&
       LayerUsesFocalAperture(layer->description->plane) &&
@@ -2604,6 +2620,7 @@ DrawDioramaLayerDepth(ArRenderDevice *device, const DioramaCapture *capture,
                      geometry->height_scale, geometry->width, geometry->height,
                      copy_color, copy_vertices, copy_indices, &copy_nv,
                      &copy_ni);
+      ShadeDioramaVertices(layer,copy_vertices,copy_nv);
       if (aperture->valid &&
           LayerUsesFocalAperture(layer->description->plane) &&
           copy_z + 0.5f > aperture->z + 0.0001f) {
@@ -2656,6 +2673,7 @@ DrawDioramaLayerDepth(ArRenderDevice *device, const DioramaCapture *capture,
         geometry->aspect_x, geometry->height_scale, geometry->width,
         geometry->height, layer->shade, skirt_verts, skirt_indices, &skirt_nv,
         &skirt_ni);
+    ShadeDioramaVertices(layer,skirt_verts,skirt_nv);
     if (skirt_nv > 0) {
       RecordOptionalDioramaDraw(
           &outcome,
@@ -2953,10 +2971,9 @@ static PresentationOutcome DrawResolvedDioramaLayer(
 
   const float shade_mix =
       (float)g_settings.diorama_depth_shade / (float)kPercentScale;
-  float scenery_light = 1;
-  if (description->plane == SR_PPU_OVERLAY_BG1 ||
-      description->plane == kDioramaPlane_Bg1Hi || description->plane == kDioramaPlane_Bg1Far)
-    scenery_light -= fminf(1, fmaxf(0, scene->bg1_dimming));
+  const bool scenery = description->plane == SR_PPU_OVERLAY_BG1 ||
+      description->plane == kDioramaPlane_Bg1Hi || description->plane == kDioramaPlane_Bg1Far;
+  const float dimming = scenery ? fminf(1, fmaxf(0, scene->bg1_dimming)) : 0;
   const bool additive =
       (scene->additive_plane_mask & (1u << (unsigned)description->plane)) != 0;
   const DioramaLayerDraw layer = {
@@ -2968,11 +2985,13 @@ static PresentationOutcome DrawResolvedDioramaLayer(
           ? priority_surface : ArRenderTexture_Invalid(),
       .shade =
           {
-              (1.0f + (description->shade.r - 1.0f) * shade_mix) * scenery_light,
-              (1.0f + (description->shade.g - 1.0f) * shade_mix) * scenery_light,
-              (1.0f + (description->shade.b - 1.0f) * shade_mix) * scenery_light,
+              1.0f + (description->shade.r - 1.0f) * shade_mix,
+              1.0f + (description->shade.g - 1.0f) * shade_mix,
+              1.0f + (description->shade.b - 1.0f) * shade_mix,
               description->shade.a * ((float)resolved->alpha / 255.0f),
           },
+      .dimming = dimming,
+      .dimming_ramp = scene->bg1_dimming_ramp,
       .blend = description->plane == kDioramaPlane_Backdrop
                    ? kArRenderBlendMode_Opaque
                : additive ? kArRenderBlendMode_Add
