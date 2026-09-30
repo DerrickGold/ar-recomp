@@ -1286,12 +1286,24 @@ static void TestInitialMountainScene(const char *rom_path) {
   SimWorldNavigationTowns_CaptureCached(wram, towns);
   assert(!towns->enabled_town_mask && towns->ground.enabled_town_mask == 63);
   assert(!towns->overflow && towns->object_count);
-  for (unsigned i = 0; i < towns->object_count; i++)
+  unsigned castle = 0, ancient_tree = 0;
+  for (unsigned i = 0; i < towns->object_count; i++) {
     assert(towns->objects[i].kind != kSimBackgroundVoxel_Cathedral);
+    const SimBackgroundVoxelObject *object = &towns->objects[i];
+    if (object->kind == kSimBackgroundVoxel_BloodpoolCastle) {
+      assert(object->town == 2 && object->cell_x == 6 && object->cell_y == 16);
+      castle++;
+    }
+    if (object->kind == kSimBackgroundVoxel_StoryTree) {
+      assert(object->town == 6 && object->cell_x == 26 && object->cell_y == 14);
+      ancient_tree++;
+    }
+  }
+  assert(castle == 1 && ancient_tree == 1);
   for (unsigned town = 0; town < kSimTownCount; town++)
     for (unsigned i = 0; i < kSimTownCells * kSimTownCells; i++) {
       const uint8_t tile = towns->ground.terrain[town][i];
-      assert(!(tile >= 0xC0 && tile <= 0xC3) && !(tile >= 0xC8 && tile <= 0xCB));
+      assert(tile != 0xC2 && tile != 0xC3 && tile != 0xCA && tile != 0xCB);
     }
   SimWorldNavigationMountainScene scene = {0};
   assert(SimWorldNavigationMountains_Build(&towns->ground, &scene));

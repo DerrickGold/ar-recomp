@@ -4097,10 +4097,86 @@ cleanup:
   SimTownCanvas_Reset();
 }
 
+static void TestLockedLandmarks(SDL_Renderer *renderer, const uint8_t *rom) {
+  FrameSlot *slot = malloc(sizeof(*slot));
+  uint8_t *wram = calloc(kWramBytes, 1);
+  CHECK(slot && wram);
+  CHECK(SimWorldMap_Init(rom, kRomBytes) && SimTownGroundArt_Init(rom, kRomBytes));
+  CHECK(SimWorldNavigationTowns_Init(rom, kRomBytes));
+  InitSlot(slot);
+  SimWorldNavigationTowns_CaptureCached(wram, &slot->sim.world_navigation_towns);
+  SimWorldNavigationTowns *towns = &slot->sim.world_navigation_towns;
+  CHECK(!towns->enabled_town_mask && towns->ground.enabled_town_mask == 63);
+  slot->sim.projection_pitch_mrad = -575;
+  slot->sim.world_navigation_models = slot->sim.world_navigation_mountains = true;
+  slot->sim.world_navigation_ground_detail = true;
+  slot->sim.world_navigation_clouds = slot->sim.world_navigation_cloud_shadows = false;
+  slot->sim.world_navigation_atmosphere = slot->sim.world_navigation_backdrop = false;
+  slot->sim.world_navigation_haze = false;
+  slot->sim.landscape_height_pct = 40;
+  const char *previous = SDL_getenv("AR_SIM3D_WORLD_GPU_MODELS");
+  char *saved = previous ? SDL_strdup(previous) : NULL;
+  CHECK(!previous || saved);
+  const uint8_t kinds[] = {kSimBackgroundVoxel_BloodpoolCastle, kSimBackgroundVoxel_StoryTree};
+  for (int gpu = 0; gpu < 2; gpu++) {
+    CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", gpu ? "1" : "0", 1));
+    PresentWorldNav_ResetResources();
+    for (unsigned target = 0; target < 2; target++) {
+      SimWorldNavigationTowns_CaptureCached(wram, towns);
+      unsigned index = towns->object_count;
+      for (unsigned i = 0; i < towns->object_count; i++)
+        if (towns->objects[i].kind == kinds[target]) index = i;
+      CHECK(index < towns->object_count);
+      const SimBackgroundVoxelObject object = towns->objects[index];
+      int ox, oy;
+      CHECK(SimWorldMap_OriginForTown(object.town, &ox, &oy));
+      slot->sim.world_navigation.focus_x = (ox + object.cell_x + 1) * 8;
+      slot->sim.world_navigation.focus_y = (oy + object.cell_y + 1) * 8;
+      slot->sim.world_navigation.active_location = object.town;
+      slot->sim.world_navigation.zoom_current = slot->sim.world_navigation.zoom_target = 130;
+      slot->sim.world_navigation.matrix[0] = slot->sim.world_navigation.matrix[3] = 130;
+      BuildScene(slot);
+      UploadWorldNavigationComposition(slot);
+      char name[80];
+      snprintf(name, sizeof(name), "locked-%s-%s", target ? "ancient-tree" : "castle",
+               gpu ? "gpu" : "compatibility");
+      SDL_Surface *visible = Render(renderer, slot, name);
+      SDL_Surface *held = Render(renderer, slot, NULL);
+      CHECK(Differences(visible, held) == 0);
+      SDL_DestroySurface(held);
+      /* Leave cleaned ground ownership fixed; only remove the model, proving
+       * the real presenter submitted landmark geometry in a locked town. */
+      memmove(towns->objects + index, towns->objects + index + 1,
+          (towns->object_count - index - 1) * sizeof(towns->objects[0]));
+      towns->object_count--;
+      SDL_Surface *missing = Render(renderer, slot, NULL);
+      CHECK(Differences(visible, missing) > 20);
+      SDL_DestroySurface(missing);
+      SimWorldNavigationTowns_CaptureCached(wram, towns);
+      held = Render(renderer, slot, NULL);
+      CHECK(Differences(visible, held) == 0);
+      SDL_DestroySurface(held);
+      SDL_DestroySurface(visible);
+    }
+  }
+  if (saved) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+  SDL_free(saved);
+  SimWorldNavigationTowns_Shutdown();
+  PresentWorldNav_ResetResources();
+  Sim3DDepthPass_Reset(&g_render_device);
+  free(wram);
+  free(slot);
+  puts("locked landmarks: native castle/tree positions, submitted models, "
+       "held/restored parity PASS");
+}
+
 static void TestCaptured(SDL_Renderer *renderer, const char *rom_path, const char *wram_path) {
   uint8_t *rom = ReadFile(rom_path, kRomBytes), *wram = ReadFile(wram_path, kWramBytes);
   CHECK(wram[0x18] == 0 && (sim_town_snapshot || wram[0x19] == 9));
+  TestLockedLandmarks(renderer, rom);
   CHECK(SimWorldMap_Init(rom, kRomBytes) && SimTownGroundArt_Init(rom, kRomBytes));
+  CHECK(SimWorldNavigationTowns_Init(rom, kRomBytes));
   if (!sim_town_snapshot) SimWorldMap_PublishBuiltTilemap(wram + 0xC000);
   else {
     SimWorldMapRomTables tables;
@@ -4185,6 +4261,7 @@ cleanup:
   Sim3DDepthPass_Reset(&g_render_device);
   SimBackgroundVoxelModelCache_Reset();
   SimTownGroundArt_Shutdown();
+  SimWorldNavigationTowns_Shutdown();
   SimWorldMap_Shutdown();
 }
 

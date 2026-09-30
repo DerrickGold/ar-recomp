@@ -78,7 +78,9 @@ static bool GroundTile(const SimWorldNavigationTownGround *ground, uint8_t town,
   if (SimBackgroundMountains_TileFlags(town, *tile)) return false;
   if (ground->object_rows[town - 1][y] & (UINT32_C(1) << x)) {
     if (!models) return false;
-    *tile = *tile == 0xE1 ? 0x41 : *tile == 0xE2 ? 0x3A : 0x08;
+    /* The locked ancient tree stands on snow, not a developed grass plot. */
+    if (*tile != 0xFF)
+      *tile = *tile == 0xE1 ? 0x41 : *tile == 0xE2 ? 0x3A : 0x08;
   } else if (!detailed || (!cliffs && SimTownTerrain_IsFaceCell(town, x, y)) ||
              (*tile >= 0xE0 && *tile <= 0xEF)) {
     return false;

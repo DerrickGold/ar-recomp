@@ -283,6 +283,26 @@ static void CaptureLandmarks(
   }
 }
 
+static bool CaptureInitialLandmark(
+    uint8_t town, SimWorldNavigationTowns *out, bool occupied[kTownCellCount]) {
+  /* These two landmarks already exist in the native overview before a town
+   * is initialized. Initial town templates leave their plots as grass/snow;
+   * the live $EC/$EB marks are installed only during town initialization. */
+  if (town != 2 && town != 6) return true;
+  const SimBackgroundVoxelObject landmark = {
+    .town = town,
+    .kind = town == 2 ? kSimBackgroundVoxel_BloodpoolCastle : kSimBackgroundVoxel_StoryTree,
+    .cell_x = town == 2 ? 6 : 26,
+    .cell_y = town == 2 ? 16 : 14,
+    .source_cells_w = 2, .source_cells_h = 2,
+    .footprint_cells_w = 2, .footprint_cells_d = 2,
+    .record_slot = kSimBackgroundVoxelNoRecordSlot,
+  };
+  if (!Append(out, landmark)) return false;
+  MarkOccupied(occupied, landmark.cell_x, landmark.cell_y, 2, 2);
+  return true;
+}
+
 static bool BridgeWater(uint8_t tile) {
   switch (tile) {
     case 0x10: case 0x11: case 0x18: case 0x19:
@@ -503,7 +523,7 @@ void SimWorldNavigationTowns_Capture(
       CaptureSanctuary(wram, town, out, occupied);
       CaptureLandmarks(wram, town, out, occupied);
       CaptureBridges(wram, town, out, occupied);
-    }
+    } else if (!CaptureInitialLandmark(town, out, occupied)) return;
     const uint8_t *cells = out->ground.terrain[town - 1];
     CaptureFoliage(cells, town, out, occupied);
     CaptureRocks(cells, town, out, occupied);

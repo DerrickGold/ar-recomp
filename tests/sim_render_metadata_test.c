@@ -239,6 +239,15 @@ static void TestWorldNavigationLockedTerrain(void) {
     SetTownCell(wram, id, 3, 3, 0xCB);
     wram[0x16BE7 + town * 0x200 + 2] = 0x80; /* stale house */
   }
+  /* Only these two native overview landmarks bypass development. Stale
+   * live marks at another position must still be ignored in locked towns. */
+  const uint8_t landmarks[][5] = {
+    {2, 6, 16, 0xEC, kSimBackgroundVoxel_BloodpoolCastle},
+    {6, 26, 14, 0xEB, kSimBackgroundVoxel_StoryTree},
+  };
+  for (unsigned i = 0; i < 2; i++)
+    for (int q = 0; q < 4; q++)
+      SetTownCell(wram, landmarks[i][0], 10 + q % 2, 10 + q / 2, landmarks[i][3]);
   memcpy(before, wram, sizeof(before));
   SimWorldNavigationTowns_Shutdown();
   SimWorldNavigationTowns_CaptureCached(wram, &towns);
@@ -246,7 +255,16 @@ static void TestWorldNavigationLockedTerrain(void) {
   CHECK(SimWorldNavigationTowns_Init(rom, kRomBytes));
   SimWorldNavigationTowns_CaptureCached(wram, &towns);
   CHECK(!towns.enabled_town_mask && towns.ground.enabled_town_mask == 63);
-  CHECK(!towns.overflow && towns.object_count == 18);
+  CHECK(!towns.overflow && towns.object_count == 20);
+  for (unsigned i = 0; i < 2; i++) {
+    const uint8_t *plot = landmarks[i];
+    CHECK(FindNavigationTownObject(&towns, plot[0], plot[4], plot[1], plot[2]));
+    CHECK(!FindNavigationTownObject(&towns, plot[0], plot[4], 10, 10));
+    for (int y = plot[2]; y < plot[2] + 2; y++) {
+      CHECK((towns.ground.object_rows[plot[0] - 1][y] & (3u << plot[1])) == (3u << plot[1]));
+      CHECK(!(towns.ground.object_rows[plot[0] - 1][y] & (1u << (plot[1] - 1))));
+    }
+  }
   for (uint8_t town = 1; town <= kSimTownCount; town++) {
     const uint8_t *cells = towns.ground.terrain[town - 1];
     CHECK(cells[0] == 0x88 && cells[16] == 0x02);
@@ -283,6 +301,24 @@ static void TestWorldNavigationLockedTerrain(void) {
   CHECK(towns.ground.terrain[5][2 * 32 + 4] == 0xC0);
   CHECK(towns.ground.native_rows[0][2] & (UINT32_C(1) << 2));
   CHECK(!FindNavigationTownObject(&towns, 1, kSimBackgroundVoxel_Cathedral, 2, 2));
+
+  /* Once initialized, live plot presence and position take over completely.
+   * Clearing a live landmark must not revive its pristine overview model. */
+  for (unsigned i = 0; i < 2; i++) {
+    const uint8_t *plot = landmarks[i];
+    Write16(wram, 0x16B18 + (plot[0] - 1) * 2, 1);
+    SimWorldNavigationTowns_CaptureCached(wram, &towns);
+    CHECK(!FindNavigationTownObject(&towns, plot[0], plot[4], plot[1], plot[2]));
+    CHECK(FindNavigationTownObject(&towns, plot[0], plot[4], 10, 10));
+    for (int q = 0; q < 4; q++) SetTownCell(wram, plot[0], 10 + q % 2, 10 + q / 2, 0x08);
+    SimWorldNavigationTowns_CaptureCached(wram, &towns);
+    CHECK(!FindNavigationTownObject(&towns, plot[0], plot[4], 10, 10));
+    CHECK(!FindNavigationTownObject(&towns, plot[0], plot[4], plot[1], plot[2]));
+    Write16(wram, 0x16B18 + (plot[0] - 1) * 2, 0);
+    SimWorldNavigationTowns_CaptureCached(wram, &towns);
+    CHECK(FindNavigationTownObject(&towns, plot[0], plot[4], plot[1], plot[2]));
+    CheckCachedNavigationScene(wram);
+  }
 
   /* ROM lifetime changes must invalidate even with byte-identical WRAM. */
   rom[kInitialBase + 0x100] = 0x08;

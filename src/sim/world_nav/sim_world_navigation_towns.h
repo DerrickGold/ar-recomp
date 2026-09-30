@@ -48,8 +48,8 @@ typedef struct SimWorldNavigationTownGround {
 
 typedef struct SimWorldNavigationTowns {
   uint16_t object_count;
-  /* Towns with live development. Natural objects may also belong to locked
-   * towns included in ground.enabled_town_mask. */
+  /* Towns with live development. Natural objects and existing landmarks may
+   * also belong to locked towns included in ground.enabled_town_mask. */
   uint8_t enabled_town_mask;
   bool overflow;
   SimWorldNavigationTownGround ground;

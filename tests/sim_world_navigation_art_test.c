@@ -289,8 +289,14 @@ static void TestLockedNorthwallSanctuaryGround(void) {
         rom[0x70000 + ring[q] * 64 + p] = 0x29;
     rom[0x33341 + (oy + 21 + (q >> 1)) * kSimWorldMapTiles + ox + 9 + (q & 1)] = ring[q];
   }
+  for (int q = 0; q < 4; q++) {
+    const uint8_t tile = (uint8_t)(0xCE + q);
+    rom[0x33341 + (oy + 14 + q / 2) * kSimWorldMapTiles + ox + 26 + q % 2] = tile;
+    memset(rom + 0x70000 + tile * 64, 0x29, 64); /* visible native tree ink */
+  }
   CHECK(SimWorldMap_Init(rom, kRomBytes));
   CHECK(SimWorldMap_BakeBaseline(source, kSimWorldMapPixels));
+  const uint32_t native_tree = source[(size_t)(oy + 14) * 8 * kSimWorldMapPixels + (ox + 26) * 8];
   uint32_t expected[64 * 64];
   CHECK(SimWorldNavigationArt_Build(output, pitch, source, kSimWorldMapPixels));
   const size_t plot_at = (size_t)(oy + 20) * 16 * pitch + (ox + 8) * 16;
@@ -321,12 +327,17 @@ static void TestLockedNorthwallSanctuaryGround(void) {
         output, pitch, &towns.ground, true, true, true, 0));
     CHECK(output[(size_t)(oy + 20) * 16 * pitch + (ox + 17) * 16] == 0xFF00FF00);
     if (state == 1) {
-      CHECK(towns.enabled_town_mask == 32 && towns.object_count == 1);
+      CHECK(towns.enabled_town_mask == 32 && towns.object_count == 2);
       CHECK(output[plot_at] == 0xFF00FF00);
       CHECK(output[plot_at + 16 * pitch + 16] == 0xFF00FF00);
       CHECK(!towns.ground.native_rows[5][20]);
     } else {
-      CHECK(!towns.enabled_town_mask && !towns.object_count);
+      CHECK(!towns.enabled_town_mask && towns.object_count == 2);
+      CHECK(towns.objects[1].kind == kSimBackgroundVoxel_StoryTree);
+      const size_t tree_at = (size_t)(oy + 14) * 16 * pitch + (ox + 26) * 16;
+      for (int y = 0; y < 32; y++)
+        for (int x = 0; x < 32; x++)
+          CHECK(output[tree_at + y * pitch + x] == snow[(y % 16) * 16 + x % 16]);
       CHECK(!towns.ground.native_rows[5][20]); /* ordinary snow keeps its town artwork */
       CHECK(towns.ground.native_rows[5][21] == (3u << 9));
       CHECK(output[snow_at] == expected_snow);
@@ -344,6 +355,17 @@ static void TestLockedNorthwallSanctuaryGround(void) {
         for (int x = 0; x < 64; x++)
           changed += output[plot_at + y * pitch + x] != expected[y * 64 + x];
       CHECK(changed == 0);
+      /* With models disabled, the native landmark remains instead of being
+       * scrubbed by detailed ground. Sparse source refresh also retains it. */
+      CHECK(SimWorldNavigationArt_Build(output, pitch, source, kSimWorldMapPixels));
+      CHECK(SimWorldNavigationArt_OverlayTownGround(
+          output, pitch, &towns.ground, true, false, true, 0));
+      CHECK(output[tree_at] == native_tree && native_tree != expected_snow);
+      for (int y = 14; y < 16; y++)
+        memset(dirty + (oy + y) * kSimWorldMapTiles + ox + 26, 1, 2);
+      CHECK(SimWorldNavigationArt_UpdateAnimation(output, pitch, source, kSimWorldMapPixels,
+          dirty, &towns.ground, true, false, true, 0, 1, &changes));
+      CHECK(output[tree_at] == native_tree);
     }
   }
 done:
