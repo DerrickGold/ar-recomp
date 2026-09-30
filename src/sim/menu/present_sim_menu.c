@@ -15,6 +15,13 @@
 
 static ArRenderTexture s_icons;
 static uint32_t s_revision;
+enum {
+  kProgressLogFrameWidth = 312,
+  /* Full native capture: six text rows, continuation and scroll margins. */
+  kProgressLogDialogueHeight = 72,
+  kProgressLogHeaderHeight = 24,
+  kProgressLogFrameHeight = kProgressLogHeaderHeight + kProgressLogDialogueHeight + 8,
+};
 
 bool PresentSimMenu_Active(const FrameSlot *slot) {
   return slot && slot->sim_menu.valid &&
@@ -44,6 +51,20 @@ static ArRenderRectI MenuViewport(ArRenderRectI view,SimMenuPhase phase,
       phase==kSimMenu_Opening;
   const int top=dock?(int)roundf((view.h-height)*27.0f/224):(view.h-height)/2;
   return (ArRenderRectI){view.x+(view.w-width)/2,view.y+top,width,height};
+}
+
+static ArRenderRectI ProgressLogViewport(ArRenderRectI view,SimMenuPhase phase,
+                                         unsigned percent) {
+  ArRenderRectI menu=MenuViewport(view,phase,percent);
+  /* The wider dialogue and choice columns fit together, including an 8px
+   * outer margin on each side, with one uniform scale on narrow displays. */
+  const int max_height=(int)floorf(view.w*224.0f/(kProgressLogFrameWidth+16));
+  if (max_height>0 && menu.h>max_height) {
+    const int width=(int)roundf(menu.w*max_height/(float)menu.h);
+    menu=(ArRenderRectI){view.x+(view.w-width)/2,
+                         view.y+(view.h-max_height)/2,width,max_height};
+  }
+  return menu;
 }
 
 static void Texture(ArRenderTexture t, ArRenderRectF source, ArRenderRectF dest) {
@@ -320,8 +341,14 @@ static ArRenderRectF DialogueRect(const FrameSlot *slot, ArRenderRectI view,
  * scheduler or read-only Help session owns text, reveal, waits and pages. */
 static HudPresentationChunk PrepareMenuDialogue(const FrameSlot *slot,
     ArRenderRectF destination,ArLocalizedPreparedFrame *prepared) {
-  const HudPresentationChunk chunk=PrepareTextInRect(slot,
-      (ArRenderRectI){32,144,192,72},destination,prepared);
+  /* Prepare the complete native claim, including its suppression-only right
+   * gutter. Keep the visible crop and text scale at their original bounds. */
+  ArRenderRectF capture=destination;
+  capture.w*=200.0f/192;
+  HudPresentationChunk chunk=PrepareTextInRect(slot,
+      (ArRenderRectI){32,144,200,72},capture,prepared);
+  chunk.screen_source.w=chunk.texture_source.w=192;
+  chunk.output_destination.w=destination.w;
   if (slot->sim_menu.help.active) {
     /* Account for captured BG3 scroll and the font's shade above its body.
      * The dialogue claim includes six text rows and the continuation footer. */
@@ -451,12 +478,59 @@ static void Browse(const FrameSlot *slot,ArRenderRectI view,
   }
 }
 
+static void ProgressLogDialogue(const FrameSlot *slot, ArRenderRectI view) {
+  const SimMenuFrame *f=&slot->sim_menu;
+  const SimMenuModel *m=&f->model;
+  /* Reserve the dialogue viewport and choice column throughout both questions
+   * and every outcome. Revealed ink and page changes never resize this box. */
+  const float left=(256-kProgressLogFrameWidth)*0.5f;
+  const float top=(224-kProgressLogFrameHeight)*0.5f;
+  const float body_y=top+kProgressLogHeaderHeight;
+  Frame(view,left,top,kProgressLogFrameWidth,kProgressLogFrameHeight);
+  Icon(view,19,true,left+8,top+8);
+  Label(slot,view,601+m->row[m->category],f->labels[19],left+30,top+12,176);
+  ArLocalizedPreparedFrame prepared={0};
+  const ArRenderRectF body=Rect(view,left+16,body_y,192,kProgressLogDialogueHeight);
+  const HudPresentationChunk chunk=PrepareMenuDialogue(slot,body,&prepared);
+  const ArRenderRectI body_clip={body.x,body.y,body.w,body.h};
+  ArRenderDevice_SetClipRect(&g_render_device,&body_clip);
+  DrawNativeText(slot,chunk,&prepared);
+  ArRenderDevice_SetClipRect(&g_render_device,NULL);
+  /* The captured paper includes a blank top gutter. Draw the native bevel
+   * over that gutter so the separator survives both text presentation paths. */
+  Texture(SettingsOverlayArtwork_Get()->dialog_frame,(ArRenderRectF){8,0,8,8},
+          Rect(view,left+8,top+26,kProgressLogFrameWidth-16,2));
+  if (m->phase!=kSimMenu_Confirm) return;
+
+  /* Keep the native selector labels and input controller. Measure only their
+   * offset within the captured paper; their destination has a fixed budget. */
+  const ArRenderRectI source={144,72,112,72};
+  const HudPresentationChunk choices=PrepareNativeLabels(slot,view,
+      source,144,72,&prepared);
+  const ArRenderRectI ink=QuestionInk(slot,&choices,&prepared);
+  const float scale=view.h/224.0f;
+  const float dx=ink.w>0?(ink.x-choices.output_destination.x)/scale:40;
+  const float dy=ink.h>0?(ink.y-choices.output_destination.y)/scale:19;
+  /* Center the complete 40px choice stack beside the 72px dialogue viewport. */
+  const float choice_x=left+16+192+16;
+  const float choice_y=body_y+(kProgressLogDialogueHeight-40)*0.5f;
+  const ArRenderRectF bounds=Rect(view,choice_x+18,choice_y,52,40);
+  const ArRenderRectI choice_clip={bounds.x,bounds.y,bounds.w,bounds.h};
+  ArRenderDevice_SetClipRect(&g_render_device,&choice_clip);
+  NativeLabels(slot,view,source,choice_x+20-dx,choice_y+4-dy);
+  ArRenderDevice_SetClipRect(&g_render_device,NULL);
+  Icon(view,41,m->yes,choice_x,choice_y);
+  Icon(view,42,!m->yes,choice_x,choice_y+24);
+}
+
 void PresentSimMenu_Draw(const FrameSlot *slot, ArRenderRectI view) {
   if (!PresentSimMenu_Active(slot) || (slot->inidisp & 0x80)) return;
   const SimMenuFrame *f=&slot->sim_menu;
   const SimMenuModel *m=&f->model;
   if (m->phase==kSimMenu_Handoff) return;
-  if ((m->phase==kSimMenu_Dialogue &&
+  const bool progress_log=SimMenuModel_Action(m)==14 &&
+      (m->phase==kSimMenu_Dialogue || m->phase==kSimMenu_Confirm);
+  if ((m->phase==kSimMenu_Dialogue && !progress_log &&
        (!m->dialogue_has_selector || SimMenuModel_Action(m)==15)) ||
       m->phase==kSimMenu_MessageSpeed) {
     ArRenderDevice_SetClipRect(&g_render_device,NULL);
@@ -495,6 +569,10 @@ void PresentSimMenu_Draw(const FrameSlot *slot, ArRenderRectI view) {
     s_revision=f->art_revision;
   }
   ArRenderDevice_SetClipRect(&g_render_device,NULL);
+  if (progress_log) {
+    ProgressLogDialogue(slot,ProgressLogViewport(view,m->phase,f->scale_percent));
+    return;
+  }
   if (m->phase==kSimMenu_Describe) {
     SimMenuModel origin=*m;
     origin.phase=m->return_phase;

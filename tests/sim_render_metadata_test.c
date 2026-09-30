@@ -212,6 +212,7 @@ static void TestWorldNavigationLockedTerrain(void) {
   static SimWorldNavigationTowns towns;
   memset(wram, 0, sizeof(wram));
   memset(rom + kInitialBase, 0x08, kSimTownCount * kSimTownCellMapBytes);
+  memset(rom + kInitialBase + 5 * kSimTownCellMapBytes, 0xFF, kSimTownCellMapBytes);
   for (unsigned town = 0; town < kSimTownCount; town++) {
     const size_t base = kInitialBase + town * kSimTownCellMapBytes;
     const size_t obstacles = kInitialObstacles + town * kSimTownCellMapBytes;
@@ -221,7 +222,8 @@ static void TestWorldNavigationLockedTerrain(void) {
     rom[base + 0x200] = 0x25; /* water at (0, 16) */
     rom[obstacles + 0x300] = 0x61; /* rock at (16, 16) */
     rom[obstacles + 1] = 0x09; /* palm overrides grass */
-    /* Even a complete cathedral in initial data is not a developed town. */
+    /* A reserved cathedral becomes an action ring, never a developed model.
+     * Already-authored ring cells must retain their native biome artwork. */
     rom[obstacles + 0x22] = 0xC2;
     rom[obstacles + 0x23] = 0xC3;
     rom[obstacles + 0x32] = 0xCA;
@@ -249,9 +251,13 @@ static void TestWorldNavigationLockedTerrain(void) {
     const uint8_t *cells = towns.ground.terrain[town - 1];
     CHECK(cells[0] == 0x88 && cells[16] == 0x02);
     CHECK(cells[16 * 32] == 0x25 && cells[16 * 32 + 16] == 0x61);
-    CHECK(cells[1] == 0x09 && cells[4] == 0x08);
+    CHECK(cells[1] == 0x09 && cells[4] == (town == 6 ? 0xFF : 0x08));
     for (int y = 2; y <= 3; y++)
-      for (int x = 2; x <= 5; x++) CHECK(cells[y * 32 + x] == 0x08);
+      for (int x = 2; x <= 5; x++) {
+        CHECK(cells[y * 32 + x] == 0xC0 + (y - 2) * 8 + (x & 1));
+        CHECK(towns.ground.native_rows[town - 1][y] & (UINT32_C(1) << x));
+      }
+    CHECK(!(towns.ground.native_rows[town - 1][0] & (UINT32_C(1) << 16)));
     CHECK(towns.ground.development_tier[town - 1] == 0);
     CHECK(FindNavigationTownObject(&towns, town, kSimBackgroundVoxel_Tree, 16, 0));
     CHECK(FindNavigationTownObject(&towns, town, kSimBackgroundVoxel_Palm, 1, 0));
@@ -268,10 +274,14 @@ static void TestWorldNavigationLockedTerrain(void) {
   SimWorldNavigationTowns_CaptureCached(wram, &towns);
   CHECK(towns.enabled_town_mask == 1 && towns.ground.enabled_town_mask == 63);
   CHECK(towns.ground.terrain[0][16] == 0x08);
+  CHECK(!towns.ground.native_rows[0][2]);
   CHECK(FindNavigationTownObject(&towns, 1, kSimBackgroundVoxel_Cathedral, 2, 2));
   Write16(wram, 0x16B18, 0);
   SimWorldNavigationTowns_CaptureCached(wram, &towns);
   CHECK(towns.ground.terrain[0][16] == 0x02);
+  CHECK(towns.ground.terrain[0][2 * 32 + 2] == 0xC0);
+  CHECK(towns.ground.terrain[5][2 * 32 + 4] == 0xC0);
+  CHECK(towns.ground.native_rows[0][2] & (UINT32_C(1) << 2));
   CHECK(!FindNavigationTownObject(&towns, 1, kSimBackgroundVoxel_Cathedral, 2, 2));
 
   /* ROM lifetime changes must invalidate even with byte-identical WRAM. */

@@ -8,6 +8,7 @@
 #include "platform/sdl/text_rasterizer_sdl.h"
 #include "host/font_resources.h"
 #include "actraiser/actraiser_localization_grid.h"
+#include "actraiser/actraiser_localization_routes.h"
 #include "actraiser/actraiser_localization_world_navigation.h"
 #include "render/localized_text_presenter.h"
 #include "render/text_cell_composite.h"
@@ -946,6 +947,109 @@ static void ExerciseDialogueFailure(ArRenderDevice *device) {
   CHECK(!sink->live);
 }
 
+static void ExerciseChurchDialogueEdge(ArRenderDevice *device) {
+  test_case = "church dialogue last native column";
+  const ActRaiserLocalizationTextObservation observation = {
+      .abi_version = ACTRAISER_LOCALIZATION_TEXT_OBSERVATION_ABI_VERSION,
+      .source_pc24 = 0x04D7AF, .caller_pc24 = 0x0193B2,
+      .context_pc24 = 0x01884F, .map_number = 8};
+  const ActRaiserLocalizationRoute *route =
+      ActRaiserLocalizationRoute_ResolveDialogue(&observation);
+  CHECK(route);
+  if (!route) return;
+  ArTextCellRegion prose;
+  uint8_t font_pixels;
+  CHECK(ActRaiserLocalizationRoute_TextBounds(route->semantic_id, &prose, &font_pixels));
+  const char *text = "The town remembers its old trees. Their branches offer shade to every "
+                     "traveller who stops to rest beside the church.";
+  const uint32_t bytes = (uint32_t)strlen(text);
+  for (int rtl = 0; rtl < 2; ++rtl) {
+    for (int scale = 2; scale <= 4; scale += 2) {
+      const HudPresentationChunk chunk = {
+          .inspector_kind = kInspectorPresentation_HudBg,
+          .screen_source = {0, 0, 256, 224},
+          .texture_source = {0, 0, 256, 224},
+          .output_destination = {0, 0, 256 * scale, 224 * scale}};
+      ArLocalizedPreparedFrame baseline;
+      for (int full_claim = 0; full_claim < 2; ++full_claim) {
+        ArLocalizationFrame frame;
+        ArLocalizationFrame_Reset(&frame);
+        CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", s_test_font, 1,
+                                          &frame.settings));
+        CHECK(ArLocalizationFrame_AddDialogueWindow(
+            &frame, route->surface_id,
+            (ArTextCellDestination){3, kArTextCellScreen_Composited, 0x5800},
+            full_claim ? route->region : prose, text, bytes, bytes, bytes, 1,
+            rtl ? kArTextDirection_RightToLeft : kArTextDirection_LeftToRight, font_pixels));
+        if (full_claim)
+          frame.snapshots[0].right_inset_pixels =
+              kActRaiserLocalizationDialogueRightGutterColumns * 8u;
+        frame.dialogue_ticket = 1;
+        frame.dialogue_surface_id = route->surface_id;
+        frame.dialogue_paged = true;
+        SetArt(&frame.artwork[kArLocalizationArtwork_Continue], 8);
+        CHECK(ArLocalizationFrame_AddIndicator(
+            &frame, route->surface_id, kArLocalizationIndicator_DialogueContinue,
+            (ArTextCellRegion){prose.column + prose.columns / 2u,
+                               prose.row + prose.rows - 1u, 1, 1}));
+        ArLocalizedPreparedFrame prepared;
+        /* snap_00_gf3239 has BG3 vscroll 1020. Its period is at native
+         * column 28, row 20, with a visible pixel at screen (225,169). */
+        ArLocalizedTextPresenter_Prepare(device, &frame, true, 0x5800, 32, 32, 0, 1020,
+                                         256, 224, &chunk, 1, &prepared);
+        CHECK(prepared.mask_count == 1 && prepared.text_count == 1 &&
+              prepared.indicator_count == 1 && prepared.ready_dialogue_ticket == 1);
+        HudPresentationChunk pieces[kArTextCellMaximumChunkPieces];
+        const size_t count = ArTextCellComposite_SubtractMasks(
+            &chunk, prepared.masks, prepared.mask_count, pieces, kArTextCellMaximumChunkPieces);
+        CHECK(count != SIZE_MAX);
+        bool period_visible = false, border_visible = false;
+        for (size_t i = 0; i < count && count != SIZE_MAX; ++i) {
+          const ArRenderRectI r = pieces[i].screen_source;
+          if (169 >= r.y && 169 < r.y + r.h) {
+            period_visible |= 225 >= r.x && 225 < r.x + r.w;
+            border_visible |= 232 >= r.x && 232 < r.x + r.w;
+          }
+        }
+        CHECK(period_visible == !full_claim && border_visible);
+        if (!full_claim) {
+          baseline = prepared;
+        } else {
+          CHECK(prepared.texts[0].surface.texture.value == baseline.texts[0].surface.texture.value);
+          CHECK(!memcmp(&prepared.texts[0].viewport, &baseline.texts[0].viewport,
+                        sizeof(ArRenderRectI)));
+          CHECK(!memcmp(&prepared.texts[0].destination, &baseline.texts[0].destination,
+                        sizeof(ArRenderRectI)));
+          CHECK(!memcmp(&prepared.indicators[0].destination, &baseline.indicators[0].destination,
+                        sizeof(ArRenderRectI)));
+          CHECK(prepared.dialogue_page_end == baseline.dialogue_page_end);
+          /* Modern menus retain a 192px visible crop. Preparation needs the
+           * extra suppression column or the whole dialogue falls back. */
+          HudPresentationChunk menu = chunk;
+          menu.screen_source = menu.texture_source = (ArRenderRectI){32, 144, 192, 72};
+          menu.output_destination = (ArRenderRectI){0, 0, 192 * scale, 72 * scale};
+          ArLocalizedPreparedFrame menu_page;
+          ArLocalizedTextPresenter_Prepare(device, &frame, true, 0x5800, 32, 32, 0, 1020,
+                                           256, 224, &menu, 1, &menu_page);
+          CHECK(!menu_page.mask_count && !menu_page.ready_dialogue_ticket);
+          menu.screen_source.w = menu.texture_source.w = 200;
+          menu.output_destination.w = 200 * scale;
+          ArLocalizedTextPresenter_Prepare(device, &frame, true, 0x5800, 32, 32, 0, 1020,
+                                           256, 224, &menu, 1, &menu_page);
+          CHECK(menu_page.mask_count == 1 && menu_page.text_count == 1 &&
+                menu_page.ready_dialogue_ticket == 1);
+          CHECK(menu_page.texts[0].viewport.x == 8 * scale &&
+                menu_page.texts[0].viewport.w == 184 * scale);
+          CHECK(menu_page.texts[0].surface.texture.value ==
+                prepared.texts[0].surface.texture.value);
+          CHECK(menu_page.dialogue_page_end == prepared.dialogue_page_end);
+        }
+      }
+    }
+  }
+  ArLocalizedTextPresenter_Reset(device);
+}
+
 static void ExerciseEmpty(ArRenderDevice *device, const ArTextBackend *backend) {
   test_case = "empty replacement";
   ArLocalizedTextPresenter_Reset(device);
@@ -1868,6 +1972,7 @@ int main(void) {
   ExerciseFontRolePreflight(&device);
   ExercisePreflight(&device, &backend);
   ExerciseDialogueFailure(&device);
+  ExerciseChurchDialogueEdge(&device);
   ExerciseEmpty(&device, &backend);
   ExerciseHudScaling(&device);
   ExerciseActionHudBands(&device);

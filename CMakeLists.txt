@@ -738,6 +738,7 @@ if(BUILD_TESTING)
             # own menu geometry so its layout results stay comparable, and
             # separately checks a hand-built grid the game never publishes.
             src/actraiser/actraiser_localization_grid.c
+            src/actraiser/actraiser_localization_routes.c
             src/localization/language_row_shape.c)
         target_link_libraries(actraiser_localized_text_presenter_test PRIVATE
             actraiser_localized_text_presenter
@@ -1465,6 +1466,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_sim_world_navigation_art_test
         tests/sim_world_navigation_art_test.c
         src/sim/world_nav/sim_world_navigation_art.c
+        src/sim/world_nav/sim_world_navigation_towns.c
         src/sim/sim_world_map.c
         src/sim/town/sim_town_ground_art.c
     )

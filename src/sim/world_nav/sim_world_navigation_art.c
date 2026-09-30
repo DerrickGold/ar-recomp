@@ -144,6 +144,7 @@ static uint32_t BlendGround(uint32_t a, uint32_t b, unsigned weight) {
 
 static bool GroundTile(const SimWorldNavigationTownGround *ground, uint8_t town,
                        int x, int y, bool models, bool cliffs, uint8_t *tile) {
+  if (ground->native_rows[town - 1][y] & (UINT32_C(1) << x)) return false;
   *tile = ground->terrain[town - 1][y * kSimTownCells + x];
   if (SimBackgroundMountains_TileFlags(town, *tile) ||
       (!cliffs && SimTownTerrain_IsFaceCell(town, x, y))) return false;
@@ -153,6 +154,61 @@ static bool GroundTile(const SimWorldNavigationTownGround *ground, uint8_t town,
   } else if (*tile >= 0xE0 && *tile <= 0xEF) {
     return false;
   }
+  return true;
+}
+
+static int NorthwallRingIndex(const SimWorldNavigationTownGround *ground,
+                             uint8_t town, int x, int y) {
+  if (town != 6 || !(ground->native_rows[5][y] & (UINT32_C(1) << x))) return -1;
+  const uint8_t tile = ground->terrain[5][y * kSimTownCells + x];
+  if (tile != 0xC0 && tile != 0xC1 && tile != 0xC8 && tile != 0xC9) return -1;
+  return (tile & 1) | ((tile & 8) >> 2);
+}
+
+static size_t RingSourcePixel(int x, int y) {
+  /* One native snow tile supplies the halo around the complete 2x2 ring. */
+  const unsigned tile = x < 0 || y < 0 || x >= 16 || y >= 16 ? 0 :
+      1 + (y / 8) * 2 + x / 8;
+  return tile * 64 + ((y + 8) & 7) * 8 + ((x + 8) & 7);
+}
+
+static bool PrepareNorthwallRing(const SimWorldNavigationTownGround *ground,
+                                uint32_t out[4][kSimTownCellPixels * kSimTownCellPixels]) {
+  bool needed = false;
+  if (ground && (ground->enabled_town_mask & 32))
+    for (int y = 0; y < kSimTownCells; y++)
+      needed |= ground->native_rows[5][y] != 0;
+  if (!needed) return true;
+  uint32_t pixels[5 * 64], snow[2];
+  uint8_t indices[5 * 64];
+  static const uint8_t tiles[] = {0x02, 0xA4, 0xA5, 0xB4, 0xB5};
+  if (!SimTownGroundArt_PaletteColor(6, 0x1E, &snow[0]) ||
+      !SimTownGroundArt_PaletteColor(6, 0x1F, &snow[1])) return false;
+  for (unsigned tile = 0; tile < 5; tile++)
+    if (!SimWorldMap_CopyTileArt(tiles[tile], pixels + tile * 64, indices + tile * 64))
+      return false;
+  for (int y = 0; y < 16; y++)
+    for (int x = 0; x < 16; x++) {
+      const size_t centre = RingSourcePixel(x, y), above = RingSourcePixel(x, y - 1);
+      const size_t left = RingSourcePixel(x - 1, y), right = RingSourcePixel(x + 1, y);
+      const size_t below = RingSourcePixel(x, y + 1);
+      const uint32_t a = pixels[above], l = pixels[left], r = pixels[right], b = pixels[below];
+      /* Select exactly the native Scale2x samples before remapping colours.
+       * Only authored snow identities change; ring ink and texture stay intact. */
+      const size_t samples[] = {
+        l == a && l != b && a != r ? left : centre,
+        a == r && a != l && r != b ? right : centre,
+        l == b && l != a && b != r ? left : centre,
+        b == r && l != b && a != r ? right : centre,
+      };
+      const unsigned tile = (y / 8) * 2 + x / 8;
+      for (unsigned p = 0; p < 4; p++) {
+        const size_t sample = samples[p];
+        const unsigned at = (y % 8 * 2 + (p >> 1)) * 16 + x % 8 * 2 + (p & 1);
+        out[tile][at] = indices[sample] == 0x0E ? snow[0] :
+            indices[sample] == 0x0F ? snow[1] : pixels[sample];
+      }
+    }
   return true;
 }
 
@@ -191,6 +247,8 @@ bool SimWorldNavigationArt_OverlayTownGround(
         !SimTownGroundArt_AnimatedMetatile(town, ground->development_tier[town - 1], 8,
                                          animation_phase))
       return false;
+  uint32_t ring[4][kSimTownCellPixels * kSimTownCellPixels];
+  if (!PrepareNorthwallRing(ground, ring)) return false;
   enum { kTownPixels = kSimTownCells * kSimTownCellPixels };
   unsigned feather[kTownPixels];
   GroundFeather(feather);
@@ -203,9 +261,14 @@ bool SimWorldNavigationArt_OverlayTownGround(
         uint8_t tile;
         /* Do not flatten perspective-authored slopes onto the relief mesh.
          * Marahna's reused $8D marsh is intentionally not a mountain. */
-        if (!GroundTile(ground, town, cx, cy, models_enabled, cliff_geometry, &tile)) continue;
-        const uint32_t *pixels = SimTownGroundArt_AnimatedMetatile(
-            town, ground->development_tier[town - 1], tile, animation_phase);
+        const int ring_index = NorthwallRingIndex(ground, town, cx, cy);
+        const uint32_t *pixels;
+        if (ring_index >= 0) pixels = ring[ring_index];
+        else {
+          if (!GroundTile(ground, town, cx, cy, models_enabled, cliff_geometry, &tile)) continue;
+          pixels = SimTownGroundArt_AnimatedMetatile(
+              town, ground->development_tier[town - 1], tile, animation_phase);
+        }
         uint32_t *out = out_pixels + (size_t)(origin_y + cy) * kSimTownCellPixels *
             out_pitch_pixels + (origin_x + cx) * kSimTownCellPixels;
         OverlayGroundCell(out, out_pitch_pixels, pixels, cx, cy, feather);
@@ -239,6 +302,7 @@ bool SimWorldNavigationArt_PrepareAnimation(
          !SimTownGroundArt_AnimatedMetatile(town, ground->development_tier[town - 1], 8,
                                             animation_phase)))
       return false;
+  if (!PrepareNorthwallRing(ground, work->northwall_ring)) return false;
   work->output = out_pixels;
   work->output_pitch = out_pitch_pixels;
   work->developed = developed_pixels;
@@ -257,11 +321,16 @@ bool SimWorldNavigationArt_PrepareAnimation(
     for (int y = 0; y < kSimTownCells; y++)
       for (int x = 0; x < kSimTownCells; x++) {
         uint8_t tile;
-        if (!GroundTile(ground, town, x, y, models_enabled, cliff_geometry, &tile)) continue;
-        const uint32_t *before = SimTownGroundArt_AnimatedMetatile(
-            town, ground->development_tier[town - 1], tile, previous_phase);
-        const uint32_t *after = SimTownGroundArt_AnimatedMetatile(
-            town, ground->development_tier[town - 1], tile, animation_phase);
+        const int ring_index = NorthwallRingIndex(ground, town, x, y);
+        const uint32_t *before, *after;
+        if (ring_index >= 0) before = after = work->northwall_ring[ring_index];
+        else {
+          if (!GroundTile(ground, town, x, y, models_enabled, cliff_geometry, &tile)) continue;
+          before = SimTownGroundArt_AnimatedMetatile(
+              town, ground->development_tier[town - 1], tile, previous_phase);
+          after = SimTownGroundArt_AnimatedMetatile(
+              town, ground->development_tier[town - 1], tile, animation_phase);
+        }
         const int at = (oy + y) * kSimWorldMapTiles + ox + x;
         work->overlay[at].pixels = after;
         work->overlay[at].x = (uint8_t)x;

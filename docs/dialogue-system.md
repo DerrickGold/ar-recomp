@@ -94,6 +94,13 @@ column 4, row 19, 25 columns. Japanese begins at `$04CA`, with 22 columns;
 its clear routine is `$01:8F72`. The extractor checks the initialization and
 clear-loop instruction shapes before relying on those dimensions.
 
+Enhanced dialogue suppresses all 24 native columns, including punctuation in
+column 28, plus the continuation row. A one-cell right gutter keeps its prose
+viewport at the established 23-column width. Authoring previews and the
+continuation position use that same prose width.
+Relocated menu capture includes the suppression-only right gutter during
+preparation, then retains its original visible crop when drawing.
+
 ## Partial and whole-menu erasure
 
 The shared YES/NO interaction is `$01:8D92`. Accept/reject/cancel join at
@@ -274,6 +281,16 @@ miracle and offering descriptions, Yes/No questions, Message Speed instructions
 and samples, Progress Log acknowledgements, errors and action follow-ups.
 Titles, item names, SP costs, choice labels and selector digits remain fixed
 labels. Master/city reports retain their separate structured native layouts.
+Progress Log uses one fixed modern window throughout its save/continue flow,
+including acknowledgements and errors. Its dialogue viewport retains the
+existing scheduler's reveal, scrolling, pages and continuation marker. Space
+for the native-backed Yes/No labels and selector stays reserved in a separate
+column to the right, vertically centered against the dialogue viewport.
+The frame height comes from the full native six-row dialogue capture,
+including its continuation footer, plus the compact header and padding. A
+thin native-frame divider separates the title from the dialogue. The wider
+frame fits narrow displays by scaling uniformly. Neither visible ink nor
+page transitions change the frame size.
 The [SIM menu reference](sim-menu-reference.md) maps each action and offering's
 execution order; [RAM state](ram-map.md#town-command-state) is consumer-scoped.
 

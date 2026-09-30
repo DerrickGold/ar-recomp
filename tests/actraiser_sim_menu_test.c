@@ -289,6 +289,8 @@ static RecompReturn Action(CpuState *c) {
           text.Y = save_sources[i];
           cpu_write16(&text, 0, text.S + 1, save_callers[i]);
           ActRaiserSimMenu_BeginDialogue(&text);
+          assert(Phase() == kSimMenu_Dialogue && ActRaiserSimMenu_OwnsPresentation());
+          assert(!ActRaiserSimMenu_OwnsInput());
           assert(DialogueHasSelector() == (i < 2));
         }
         assert(ActRaiser_SimMenuConfirmEntry(c));

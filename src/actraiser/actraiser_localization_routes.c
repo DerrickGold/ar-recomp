@@ -166,6 +166,7 @@ bool ActRaiserLocalizationRoute_TextBounds(const char *id,
     if (strcmp(kDialogueRoutes[i].semantic_id, id))
       continue;
     *region = kDialogueRoutes[i].region;
+    region->columns -= kActRaiserLocalizationDialogueRightGutterColumns;
     *font_pixels = kDialogueRoutes[i].native_font_pixels;
     return true;
   }

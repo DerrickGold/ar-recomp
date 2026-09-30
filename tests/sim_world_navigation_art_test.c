@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "sim/town/sim_town_ground_art.h"
+#include "sim/town/sim_town_layout.h"
 #include "sim/town/sim_town_terrain.h"
 
 static int failures;
@@ -168,6 +169,144 @@ static void TestNativeGroundComposition(void) {
   CHECK(out[at] == baseline);
   CHECK(!SimWorldNavigationArt_OverlayTownGround(out, 1, &ground, true, false, 0));
   free(out);
+  free(rom);
+}
+
+static void TestLockedNorthwallSanctuaryGround(void) {
+  enum { kRomBytes = 0x100000, kInitialBase = 0x50000, kInitialObstacles = 0x51800 };
+  const int pitch = kSimWorldNavigationArtPixels;
+  uint8_t *rom = calloc(kRomBytes, 1);
+  uint8_t *wram = calloc(0x20000, 1);
+  uint32_t *source = malloc(kSimWorldMapPixels * kSimWorldMapPixels * sizeof(*source));
+  uint32_t *output = malloc((size_t)pitch * pitch * sizeof(*output));
+  CHECK(rom && wram && source && output);
+  if (!rom || !wram || !source || !output) goto done;
+  memset(rom + kInitialBase, 0x08, kSimTownCount * kSimTownCellMapBytes);
+  memset(rom + kInitialBase + 5 * kSimTownCellMapBytes, 0xFF, kSimTownCellMapBytes);
+  /* Retail Northwall reserves a 4x4 cleared plot around the future church.
+   * Its obstacle layer replaces only the central 2x2 cells with a ring. */
+  for (int y = 20; y < 24; y++)
+    for (int x = 8; x < 12; x++) {
+      const size_t at = SimTownLayout_CellMapIndex(6, x, y) - kSimTownCellMapsWram;
+      rom[kInitialBase + at] = 0x08;
+      if (x >= 9 && x <= 10 && y >= 21 && y <= 22) {
+        rom[kInitialObstacles + at] = (uint8_t)(0xC0 + (y - 21) * 8 + x - 9);
+        rom[kInitialBase + at] = rom[kInitialObstacles + at] + 2;
+      }
+    }
+  /* A separate authentic grass cell must survive the plot-specific fix. */
+  const size_t grass_at = SimTownLayout_CellMapIndex(6, 17, 20) - kSimTownCellMapsWram;
+  rom[kInitialBase + grass_at] = 0x08;
+  memcpy(wram + kSimTownCellMapsWram, rom + kInitialBase,
+         kSimTownCount * kSimTownCellMapBytes);
+  for (int q = 0; q < 4; q++) {
+    rom[0xC881B + 0x08 * 8 + q * 2] = 32;
+    rom[0xC881A + 0xFF * 8 + q * 2] = 4;
+    rom[0xC881B + 0xFF * 8 + q * 2] = 33;
+  }
+  rom[0xE3D95] = 0xE0;
+  rom[0xE3D96] = 0x03; /* cleared grass: green */
+  rom[0xE3D93 + 0x1E * 2] = 0x58;
+  rom[0xE3D94 + 0x1E * 2] = 0x73;
+  rom[0xE3D93 + 0x1F * 2] = 0x7A;
+  rom[0xE3D94 + 0x1F * 2] = 0x73; /* darker town snow, with two texture shades */
+  for (int y = 0; y < 8; y++) {
+    rom[0x60000 + 32 * 32 + y * 2] = 255;
+    rom[0x60000 + 33 * 32 + y * 2] = y & 1 ? 0x92 : 0x24;
+    rom[0x60001 + 33 * 32 + y * 2] = 255;
+    rom[0x60010 + 33 * 32 + y * 2] = 255;
+    rom[0x60011 + 33 * 32 + y * 2] = 255;
+  }
+  CHECK(SimTownGroundArt_Init(rom, kRomBytes));
+  CHECK(SimWorldNavigationTowns_Init(rom, kRomBytes));
+  int ox, oy;
+  CHECK(SimWorldMap_OriginForTown(6, &ox, &oy));
+  /* The native ring supplies shape and texture. Only its snow identities
+   * adopt the surrounding town's shades; the ring's other colours stay native. */
+  memset(rom + 0x33341, 0x02, kSimWorldMapBytes);
+  rom[0xE3F93 + 0x0E * 2] = 0xBB;
+  rom[0xE3F94 + 0x0E * 2] = 0x7F;
+  rom[0xE3F93 + 0x0F * 2] = 0xDD;
+  rom[0xE3F94 + 0x0F * 2] = 0x7F;
+  rom[0xE3F93 + 0x29 * 2] = 0x51;
+  rom[0xE3F94 + 0x29 * 2] = 0x46;
+  for (int p = 0; p < 64; p++)
+    rom[0x70000 + 0x02 * 64 + p] = (p + p / 8) % 3 ? 0x0E : 0x0F;
+  static const uint8_t ring[] = {0xA4, 0xA5, 0xB4, 0xB5};
+  for (int q = 0; q < 4; q++) {
+    const int x = (q & 1) * 8, y = (q >> 1) * 8;
+    memcpy(rom + 0x70000 + ring[q] * 64, rom + 0x70000 + 0x02 * 64, 64);
+    for (int p = 0; p < 64; p++)
+      if (x + p % 8 == 3 || x + p % 8 == 12 ||
+          y + p / 8 == 3 || y + p / 8 == 12)
+        rom[0x70000 + ring[q] * 64 + p] = 0x29;
+    rom[0x33341 + (oy + 21 + (q >> 1)) * kSimWorldMapTiles + ox + 9 + (q & 1)] = ring[q];
+  }
+  CHECK(SimWorldMap_Init(rom, kRomBytes));
+  CHECK(SimWorldMap_BakeBaseline(source, kSimWorldMapPixels));
+  uint32_t expected[64 * 64];
+  CHECK(SimWorldNavigationArt_Build(output, pitch, source, kSimWorldMapPixels,
+                                  source, kSimWorldMapPixels));
+  const size_t plot_at = (size_t)(oy + 20) * 16 * pitch + (ox + 8) * 16;
+  const size_t snow_at = (size_t)(oy + 20) * 16 * pitch + (ox + 12) * 16;
+  const uint32_t *snow = SimTownGroundArt_Metatile(6, 0, 0xFF);
+  CHECK(snow != NULL);
+  if (!snow) goto done;
+  const uint32_t expected_snow = snow[0];
+  for (int y = 0; y < 64; y++)
+    for (int x = 0; x < 64; x++) {
+      uint32_t color = output[plot_at + y * pitch + x];
+      if (x < 16 || x >= 48 || y < 16 || y >= 48)
+        color = snow[(y % 16) * 16 + x % 16];
+      else if (color == 0xFFDEEFFFu)
+        color = 0xFFC6D6E7u; /* native $0E snow -> town $1E */
+      else if (color == 0xFFEFF7FFu)
+        color = 0xFFD6DEE7u; /* native $0F snow -> town $1F */
+      expected[y * 64 + x] = color;
+    }
+  static SimWorldNavigationTowns towns;
+  for (unsigned state = 0; state < 3; state++) {
+    /* Lock -> develop -> reset. Only development may expose the grass plot. */
+    wram[0x16B18 + 10] = state == 1;
+    SimWorldNavigationTowns_CaptureCached(wram, &towns);
+    CHECK(towns.ground.terrain[5][20 * 32 + 8] == (state == 1 ? 0x08 : 0xFF));
+    CHECK(SimWorldNavigationArt_Build(output, pitch, source, kSimWorldMapPixels,
+                                    source, kSimWorldMapPixels));
+    CHECK(SimWorldNavigationArt_OverlayTownGround(output, pitch, &towns.ground, true, true, 0));
+    CHECK(output[(size_t)(oy + 20) * 16 * pitch + (ox + 17) * 16] == 0xFF00FF00);
+    if (state == 1) {
+      CHECK(towns.enabled_town_mask == 32 && towns.object_count == 1);
+      CHECK(output[plot_at] == 0xFF00FF00);
+      CHECK(output[plot_at + 16 * pitch + 16] == 0xFF00FF00);
+      CHECK(!towns.ground.native_rows[5][20]);
+    } else {
+      CHECK(!towns.enabled_town_mask && !towns.object_count);
+      CHECK(!towns.ground.native_rows[5][20]); /* ordinary snow keeps its town artwork */
+      CHECK(towns.ground.native_rows[5][21] == (3u << 9));
+      CHECK(output[snow_at] == expected_snow);
+      for (int y = 0; y < 64; y++)
+        CHECK(!memcmp(output + plot_at + y * pitch, expected + y * 64,
+                      64 * sizeof(*expected)));
+      uint8_t dirty[kSimWorldMapBytes] = {0};
+      SimWorldNavigationArtChanges changes;
+      for (int y = 20; y < 24; y++)
+        memset(dirty + (oy + y) * kSimWorldMapTiles + ox + 8, 1, 4);
+      CHECK(SimWorldNavigationArt_UpdateAnimation(output, pitch, source, kSimWorldMapPixels,
+          source, kSimWorldMapPixels, dirty, &towns.ground, true, true, 0, 1, &changes));
+      unsigned changed = 0;
+      for (int y = 0; y < 64; y++)
+        for (int x = 0; x < 64; x++)
+          changed += output[plot_at + y * pitch + x] != expected[y * 64 + x];
+      CHECK(changed == 0);
+    }
+  }
+done:
+  SimWorldMap_Shutdown();
+  SimWorldNavigationTowns_Shutdown();
+  SimTownGroundArt_Shutdown();
+  free(output);
+  free(source);
+  free(wram);
   free(rom);
 }
 
@@ -436,6 +575,7 @@ done:
 
 int main(void) {
   TestNativeGroundComposition();
+  TestLockedNorthwallSanctuaryGround();
   TestAnimatedGroundComposition();
   TestTownFeatherAndScale();
   TestScale2xNeighboursAndEdges();

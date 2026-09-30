@@ -33,6 +33,7 @@ enum {
 };
 
 static uint8_t s_initial_terrain[kSimTownCount][kTownCellCount];
+static uint32_t s_initial_native_rows[kSimTownCount][kTownCells];
 static bool s_initial_terrain_available;
 
 void SimWorldNavigationTowns_Shutdown(void) {
@@ -40,22 +41,51 @@ void SimWorldNavigationTowns_Shutdown(void) {
   SimWorldNavigationTowns_ResetCache();
 }
 
+static void PrepareInitialSanctuaryArt(uint8_t town, uint8_t *cells, uint32_t *rows) {
+  for (int y = 0; y < kTownCells - 1; y++)
+    for (int x = 0; x < kTownCells - 1; x++) {
+      const size_t at = (size_t)y * kTownCells + x;
+      if (cells[at] != 0xC0 || cells[at + 1] != 0xC1 ||
+          cells[at + kTownCells] != 0xC8 || cells[at + kTownCells + 1] != 0xC9)
+        continue;
+      rows[y] |= UINT32_C(3) << x;
+      rows[y + 1] |= UINT32_C(3) << x;
+      if (town != 6) continue;
+      /* The initial town template pre-clears a 4x4 sanctuary plot. The
+       * locked overview has snow here; that grass belongs to development.
+       * Restore the surrounding town snow. The ring alone keeps its native
+       * shape, with its snow palette matched to this darker terrain. */
+      for (int cy = y - 1; cy <= y + 2; cy++)
+        for (int cx = x - 1; cx <= x + 2; cx++) {
+          if (cx < 0 || cy < 0 || cx >= kTownCells || cy >= kTownCells) continue;
+          if (cells[cy * kTownCells + cx] == 0x08)
+            cells[cy * kTownCells + cx] = 0xFF;
+        }
+    }
+}
+
 bool SimWorldNavigationTowns_Init(const uint8_t *rom, size_t rom_size) {
   SimWorldNavigationTowns_Shutdown();
   if (!rom || rom_size < kInitialObstaclesRom + sizeof(s_initial_terrain))
     return false;
+  memset(s_initial_native_rows, 0, sizeof(s_initial_native_rows));
   for (uint8_t town = 1; town <= kSimTownCount; town++)
     for (int y = 0; y < kTownCells; y++)
       for (int x = 0; x < kTownCells; x++) {
         const size_t at = SimTownLayout_CellMapIndex(town, x, y) - kSimTownCellMapsWram;
         const uint8_t obstacle = rom[kInitialObstaclesRom + at];
         uint8_t tile = obstacle ? obstacle : rom[kInitialTerrainRom + at];
-        /* The initial obstacle layer already reserves the sanctuary plot.
-         * Locked towns must not show either its flat artwork or its model. */
-        if ((tile >= 0xC0 && tile <= 0xC3) || (tile >= 0xC8 && tile <= 0xCB))
-          tile = 0x08;
+        /* The base reserves a cathedral ($C2/$C3/$CA/$CB); the obstacle
+         * layer replaces it with the action-location ring two tiles earlier.
+         * Keep that ring and its native ground (snow in Northwall). A reserved
+         * cathedral without an obstacle also uses the ring until development;
+         * live building capture is separately gated by TownHasRetainedData. */
+        if (tile == 0xC2 || tile == 0xC3 || tile == 0xCA || tile == 0xCB)
+          tile -= 2;
         s_initial_terrain[town - 1][y * kTownCells + x] = tile;
       }
+  for (uint8_t town = 1; town <= kSimTownCount; town++)
+    PrepareInitialSanctuaryArt(town, s_initial_terrain[town - 1], s_initial_native_rows[town - 1]);
   s_initial_terrain_available = true;
   return true;
 }
@@ -451,6 +481,8 @@ void SimWorldNavigationTowns_Capture(
         out->ground.enabled_town_mask |= (uint8_t)(1u << (town - 1));
         memcpy(out->ground.terrain[town - 1], s_initial_terrain[town - 1],
             sizeof(out->ground.terrain[town - 1]));
+        memcpy(out->ground.native_rows[town - 1], s_initial_native_rows[town - 1],
+            sizeof(out->ground.native_rows[town - 1]));
       }
       continue;
     }

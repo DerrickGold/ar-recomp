@@ -131,6 +131,13 @@ static void DecodeTile(unsigned variant, unsigned tile, unsigned phase, uint32_t
     out[p] = indices[p] ? palette[indices[p]] : 0;
 }
 
+bool SimTownGroundArt_PaletteColor(uint8_t town, uint8_t color_index, uint32_t *out) {
+  if (!s_art.available || !out || town < 1 || town > kSimTownCount ||
+      color_index >= kPaletteColors) return false;
+  *out = s_art.palette[town == 6][color_index];
+  return true;
+}
+
 bool SimTownGroundArt_ColorIndexMask(
     uint8_t town, uint8_t development_tier, uint8_t tile,
     uint8_t color_index, uint8_t *mask) {

@@ -121,7 +121,7 @@ def generate_c(manifest_path):
             f'    .selector_x = UINT16_C(0x{row.get("selector_x", 0):04X}),',
             f'    .semantic_id = {json.dumps(row["semantic_id"])},',
             '    .surface_id = kDialogueSurface,',
-            '    .region = {5, 19, 23, 7},',
+            '    .region = {5, 19, 24, 7},',
             f'    .native_page_count = {len(row["native_page_units"])},',
             f'    .native_page_units = {{{units}}},',
             '    .native_font_pixels = 7,',

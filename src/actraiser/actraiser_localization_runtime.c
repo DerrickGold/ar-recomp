@@ -1532,8 +1532,11 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
     ScheduleFailed("dialogue cannot fit in the current frame");
     return;
   }
-  ActRaiserLocalizationStyle_Ordinary(
-      &frame->snapshots[frame->snapshot_count - 1u], cgram_words);
+  ArLocalizationTextSnapshot *snapshot =
+      &frame->snapshots[frame->snapshot_count - 1u];
+  snapshot->right_inset_pixels =
+      kActRaiserLocalizationDialogueRightGutterColumns * 8u;
+  ActRaiserLocalizationStyle_Ordinary(snapshot, cgram_words);
   if (ActRaiserLocalizationRuntime_DialogueScheduled()) {
     frame->dialogue_ticket = s_runtime.pager.ticket;
     frame->dialogue_surface_id = route->surface_id;
@@ -1548,7 +1551,9 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
         frame, route->surface_id,
         kArLocalizationIndicator_DialogueContinue,
         (ArTextCellRegion){
-            route->region.column + route->region.columns / 2u,
+            route->region.column +
+                (route->region.columns -
+                 kActRaiserLocalizationDialogueRightGutterColumns) / 2u,
             route->region.row + route->region.rows - 1u, 1, 1});
   }
 }

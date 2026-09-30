@@ -31,6 +31,10 @@ uint8_t SimTownGroundArt_AnimationPhase(uint16_t game_frame);
 const uint32_t *SimTownGroundArt_Metatile(
     uint8_t town, uint8_t development_tier, uint8_t tile);
 
+/* Resolve an authored palette identity without guessing from rendered RGB.
+ * Invalid inputs leave the output unchanged. Palette is independent of tier. */
+bool SimTownGroundArt_PaletteColor(uint8_t town, uint8_t color_index, uint32_t *out);
+
 /* Static source-palette identity, not a comparison of expanded RGB colours.
  * Writes a tightly packed 16x16 byte mask (0 or 1). Transparent pixels never
  * match. Invalid inputs leave the destination unchanged. */

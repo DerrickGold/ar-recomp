@@ -38,6 +38,7 @@ bool SimWorldNavigationArt_Build(
     const uint32_t *baseline_pixels, int baseline_pitch_pixels);
 
 /* Replaces ground-facing town artwork at its native 16px/cell resolution.
+ * Locked rings retain native shapes; Northwall's ring snow uses town colours.
  * Mountain art is excluded: its drawn silhouette is not a top-down material.
  * Cliff art is included only when the caller supplies owned-corner geometry
  * with closed skirts (`cliff_geometry`). Model cells receive clean ground,
@@ -69,6 +70,9 @@ typedef struct SimWorldNavigationArtAnimation {
     const uint32_t *pixels;
     uint8_t x, y;
   } overlay[kSimWorldMapBytes];
+  /* Owned native ring art with the town snow palette; pointers in overlay
+   * remain valid throughout every worker row range in this prepared plan. */
+  uint32_t northwall_ring[4][kSimTownCellPixels * kSimTownCellPixels];
   unsigned feather[kSimTownCells * kSimTownCellPixels];
   bool ready;
 } SimWorldNavigationArtAnimation;

@@ -20,6 +20,10 @@ typedef enum ActRaiserLocalizationRouteMatch {
   kActRaiserLocalizationRouteMatch_MapNumber = 1u << 3,
 } ActRaiserLocalizationRouteMatch;
 
+/* Suppress all 24 native dialogue columns, while retaining the established
+ * 23-column prose viewport and its continuation position. */
+enum { kActRaiserLocalizationDialogueRightGutterColumns = 1 };
+
 /* USA-ROM addresses are deliberately confined to this game adapter. Language
  * packs and renderer-facing snapshots receive only stable semantic IDs. */
 typedef struct ActRaiserLocalizationRoute {
@@ -76,8 +80,8 @@ ActRaiserLocalizationRoute_ResolveCompose(
 uint16_t ActRaiserLocalizationRoute_PageUnitCount(
     const ActRaiserLocalizationRoute *route, uint32_t native_page_index);
 
-/* Authoring playback uses the same native bounds as the live adapter. IDs
- * with several call sites return their shared presentation geometry. */
+/* Authoring playback uses the live prose bounds, excluding the dialogue's
+ * suppression-only gutter. IDs with several call sites share geometry. */
 bool ActRaiserLocalizationRoute_TextBounds(const char *semantic_id,
                                            ArTextCellRegion *region,
                                            uint8_t *font_pixels);

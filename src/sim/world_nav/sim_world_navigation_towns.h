@@ -38,6 +38,9 @@ typedef struct SimWorldNavigationTownGround {
   uint8_t development_tier[kSimTownCount];
   /* Row-major semantic cells, not a WRAM alias or a projected screenshot. */
   uint8_t terrain[kSimTownCount][kSimTownCells * kSimTownCells];
+  /* Locked action rings retain their native world artwork. Northwall's ring
+   * snow adopts the town palette; surrounding cells use ordinary town art. */
+  uint32_t native_rows[kSimTownCount][kSimTownCells];
   /* Source cells replaced by actual models. Bits name x within each row.
    * Animated model poses do not invalidate this stable ground ownership. */
   uint32_t object_rows[kSimTownCount][kSimTownCells];

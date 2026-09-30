@@ -92,7 +92,20 @@ int main(void) {
   ActRaiserLocalizationTextObservation temple = Observation(0x04D7AF, 0x0193B2);
   temple.context_pc24 = 0x01884F;
   temple.map_number = kActRaiserNonActionMap_Temple;
-  CHECK(ActRaiserLocalizationRoute_ResolveDialogue(&temple));
+  const ActRaiserLocalizationRoute *temple_route =
+      ActRaiserLocalizationRoute_ResolveDialogue(&temple);
+  CHECK(temple_route);
+  if (temple_route) {
+    /* Church text can end at column 28, as in snap_00_gf3239. The mask
+     * must own that last native column without widening enhanced prose. */
+    CHECK(temple_route->region.column == 5 && temple_route->region.columns == 24);
+    ArTextCellRegion prose;
+    uint8_t font_pixels = 0;
+    CHECK(ActRaiserLocalizationRoute_TextBounds(
+        temple_route->semantic_id, &prose, &font_pixels));
+    CHECK(prose.column == 5 && prose.columns == 23 &&
+          prose.row == 19 && prose.rows == 7 && font_pixels == 7);
+  }
 
   ActRaiserLocalizationTextObservation observation =
       Observation(0x049048, 0x0193B2);
