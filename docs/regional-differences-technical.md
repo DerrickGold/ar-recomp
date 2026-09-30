@@ -2333,6 +2333,16 @@ through `$8A` into root `+$38`. After ascent, `$AFB2/$B046` moves the boss to
 that stored X even if the player has since moved. Facing is chosen before the
 throw; no RNG call occurs in the examined boss/axe program.
 
+The original room-entry wait is native behavior in both US and JP. Native
+room 2 → 3 → 4 loads place the player at X112 and the boss at X272: the
+160-pixel gap fails the gate while the stage countdown continues. A fresh
+600-frame stationary check in each ROM leaves the boss in state0 and consumes
+10 timer seconds; 17 right-input frames reach X146 and start state5. X144
+(exactly128 pixels away) still fails. `$85BE/$85AD` compares cached player
+world X at `$80` with actor `+$02`; it reads no Y, camera offset, room bounds,
+or viewport width. Extending presentation boundaries does not enlarge this
+activation threshold.
+
 Axe allocation at `$AFD2/$B066` copies the parent's source, facing and attack,
 clears child HP/score, and links `+$3A` to the root. The child starts at
 facing-relative X−72/+72 US or X−48/+48 JP, and Y+24. **The regional offset
