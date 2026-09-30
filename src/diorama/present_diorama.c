@@ -225,7 +225,7 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
       device, s_plane_textures, pixels, pitch_bytes,
       slot->snes_width + slot->obj_apron * 2,
       slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
-      slot->obj_apron, upload_mask);
+      slot->obj_apron, slot->diorama_bg_apron_mask, upload_mask);
   s_diorama_uploaded_plane_mask = upload.synchronized_plane_mask;
   if (upload.changed_plane_mask &
       (UINT32_C(1) << SR_PPU_OVERLAY_BG2))
@@ -360,8 +360,12 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
   if (primary_layer >= 0) {
     const ActionBgLayerPlan *primary = &slot->action_bg_plan.layer[primary_layer];
     const int plane = primary_layer == 0 ? SR_PPU_OVERLAY_BG1 : SR_PPU_OVERLAY_BG2;
+    const int world_y0 = slot->diorama_world_height > 0
+        ? slot->diorama_world_y0 : 0;
+    const int world_height = slot->diorama_world_height > 0
+        ? slot->diorama_world_height : primary->world_height;
     vertical_bounds = DioramaVerticalBounds_Resolve(
-        plane, primary->camera_y, primary->world_height,
+        plane, primary->camera_y - world_y0, world_height,
         slot->ws_extra_top, capture_height);
   }
   const DioramaCapture capture = {
@@ -370,6 +374,9 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
       .height = capture_height,
       .authentic_y0 = slot->ws_extra_top,
       .vertical_bounds = vertical_bounds,
+      .framing_x = slot->diorama_framing_x,
+      .framing_y = slot->diorama_framing_y,
+      .bg_apron_mask = slot->diorama_bg_apron_mask,
       .camera_y = slot->bg1_camera_y,
       .bg2_camera_y = slot->bg2_camera_y,
       .bg2_world_height = slot->action_bg_plan.layer[1].world_height,

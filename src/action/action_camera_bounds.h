@@ -15,6 +15,13 @@ typedef struct ActionCameraAxisBounds {
   bool includes_requested_margins;
 } ActionCameraAxisBounds;
 
+/* Authored scenery outside the native world supplies part of each requested
+ * presentation margin. Reduce the remaining budget without extending the
+ * gameplay camera beyond its native interval. */
+void ActionCameraAxisBounds_ApplySceneryPadding(
+    int native_extent, int scenery_start, int scenery_extent,
+    int *requested_before, int *requested_after);
+
 /* Resolve the camera-origin interval that keeps an authentic viewport plus
  * both requested margins inside one finite action-layer axis. If the finite
  * world cannot contain that complete view, preserve the native camera range;

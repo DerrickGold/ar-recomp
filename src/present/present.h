@@ -272,6 +272,12 @@ typedef struct FrameSlot {
    * edge decision. */
   ActionBgPlan action_bg_plan;
   bool bg_capture_pad_to_budget;
+  /* Presentation-only primary bounds, including authored tiles outside the
+   * native map. Zero height falls back to action_bg_plan's native extent. */
+  int diorama_world_y0;
+  int diorama_world_height;
+  int diorama_framing_x, diorama_framing_y;
+  uint8_t diorama_bg_apron_mask;
   /* Developer-only authoring guide gate, captured beside the exact plan so
    * present code never reads the live tuner singleton. */
   bool action_bg_extent_guides;

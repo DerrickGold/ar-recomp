@@ -285,6 +285,39 @@ void ActRaiserActionBg_ResolveVerticalMargins(
   if (bottom) *bottom = available_bottom;
 }
 
+static void ResolveDioramaAxisExtent(
+    const DioramaRoomOverride *room, unsigned layer, int native_extent,
+    bool vertical, int *world_start, int *world_extent) {
+  int start = 0, end = native_extent;
+  if (room && layer < kActionBgLayerCount) {
+    const DioramaStampLayerOverride *stamps = &room->stamp_layers[layer];
+    /* Map bounds describe editor workspace, which can outlive deleted tiles.
+     * Only actual cells extend the finite scenery: empty workspace must not
+     * consume capture rows or keep the Diorama camera away from an edge. */
+    for (unsigned i = 0; i < stamps->count; i++) {
+      const int cell_start = (vertical ? stamps->cells[i].y : stamps->cells[i].x) *
+          kActionBgMetatilePixels;
+      const int cell_end = cell_start + kActionBgMetatilePixels;
+      if (cell_start < start) start = cell_start;
+      if (cell_end > end) end = cell_end;
+    }
+  }
+  if (world_start) *world_start = start;
+  if (world_extent) *world_extent = end - start;
+}
+
+void ActRaiserActionBg_ResolveDioramaVerticalExtent(
+    const DioramaRoomOverride *room, unsigned layer, int native_height,
+    int *world_y0, int *world_height) {
+  ResolveDioramaAxisExtent(room, layer, native_height, true, world_y0, world_height);
+}
+
+void ActRaiserActionBg_ResolveDioramaHorizontalExtent(
+    const DioramaRoomOverride *room, unsigned layer, int native_width,
+    int *world_x0, int *world_width) {
+  ResolveDioramaAxisExtent(room, layer, native_width, false, world_x0, world_width);
+}
+
 void ActRaiserActionBg_ResolveVerticalCaptureMargins(
     int camera_y, int world_height, int budget,
     int *top, int *bottom) {
@@ -1646,9 +1679,10 @@ static void CompileStamps(ActRaiserActionBgProvider *provider) {
 bool ActRaiserActionBg_StampAt(unsigned bg, int source_x, int sample_y,
                               uint16_t hscroll, uint16_t vscroll,
                               uint16_t *entry, uint8_t *band,
-                              uint8_t *local_x, uint8_t *local_y, bool *black) {
+                              uint8_t *local_x, uint8_t *local_y,
+                              bool *black, bool *blank) {
   if (bg >= kActionBgLayerCount || !entry || !band ||
-      !local_x || !local_y || !black) return false;
+      !local_x || !local_y || !black || !blank) return false;
   const ActRaiserActionBgProvider *provider = &s_provider[bg];
   if (!provider->pixel_edits_active || !provider->virtual_room ||
       !provider->virtual_room->stamp_layers[bg].count) return false;
@@ -1671,8 +1705,9 @@ bool ActRaiserActionBg_StampAt(unsigned bg, int source_x, int sample_y,
   const unsigned quadrant = (*local_y / 8) * 2 + *local_x / 8;
   *entry = cell->words[quadrant];
   *band = (cell->bands >> (quadrant * 2)) & 3u;
+  *blank = cell->blank;
   const uint16_t *mask = DioramaLayerOrder_PixelMask(
-      provider->virtual_room, bg, cx, cy, cell->metatile);
+      provider->virtual_room, bg, cx, cy, cell->blank ? -1 : cell->metatile);
   *black = mask && (mask[*local_y] & (1u << (15 - *local_x)));
   return *band < kDioramaVirtualBandCount;
 }
@@ -1712,6 +1747,35 @@ bool ActRaiserActionBg_PixelBlackAt(unsigned bg, int source_x, int sample_y,
   *band = (entry & 0x2000u) ? 2 : 1;
   if (provider->pixel_band_cache_active)
     (void)ProviderBandLookup(provider, tx, ty, entry, band);
+  return true;
+}
+
+bool ActRaiserActionBg_NativeSceneryAt(unsigned bg, int source_x, int sample_y,
+                                      uint16_t hscroll, uint16_t vscroll,
+                                      uint16_t *entry, uint8_t *band,
+                                      uint8_t *local_x, uint8_t *local_y,
+                                      bool *black) {
+  if (bg >= kActionBgLayerCount || !entry || !band || !local_x || !local_y || !black)
+    return false;
+  const ActRaiserActionBgProvider *provider = &s_provider[bg];
+  if (!provider->pixel_edits_active) return false;
+  const int dh = ((hscroll - provider->hscroll_anchor + 512) & 1023) - 512;
+  const int dv = ((vscroll - provider->vscroll_anchor + 512) & 1023) - 512;
+  int x = provider->camera_x + source_x + dh;
+  const int y = provider->camera_y + sample_y + dv;
+  if (provider->wrap_world_x) {
+    const int width = (int)ActionBgWorld_TileWidth(provider->world) * 8;
+    x = ((x % width) + width) % width;
+  }
+  if (x < 0 || y < 0 ||
+      ActionBgWorld_Lookup(provider->world, x / 8, y / 8, entry) != kActionBgLookup_Tile)
+    return false;
+  *local_x = (uint8_t)(x & 7);
+  *local_y = (uint8_t)(y & 7);
+  *band = (*entry & 0x2000u) ? 2 : 1;
+  if (provider->pixel_band_cache_active)
+    (void)ProviderBandLookup((void *)provider, x / 8, y / 8, *entry, band);
+  *black = ActRaiserActionBg_PixelBlackAt(bg, source_x, sample_y, hscroll, vscroll, band);
   return true;
 }
 
@@ -1931,7 +1995,8 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
     s_provider[layer].pixel_cell_x = s_provider[layer].pixel_cell_y = -1;
     s_provider[layer].pixel_edits_active = include_authentic && virtual_room &&
         (virtual_room->pixel_layers[layer].count != 0 ||
-         virtual_room->stamp_layers[layer].count != 0);
+         virtual_room->stamp_layers[layer].count != 0 ||
+         virtual_room->framing[0].x != 0);
     CompileStamps(&s_provider[layer]);
     const SrPpuVirtualTilemapBinding binding = {
       .lookup = ProviderLookup,

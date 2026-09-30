@@ -287,7 +287,8 @@ void DioramaFrameGeneration_CaptureWithSkybox(
         (int)slot->diorama_skybox_surface.height_pixels,
       };
     } else if (!DioramaPlaneCaptureRegion_Resolve(
-            plane_index, width, height, slot->obj_apron, &region)) {
+            plane_index, width, height, slot->obj_apron,
+            slot->diorama_bg_apron_mask, &region)) {
       plane->current_valid = false;
       continue;
     }

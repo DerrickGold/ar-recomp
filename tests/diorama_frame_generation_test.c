@@ -101,13 +101,26 @@ int main(void) {
   ArSdlRenderBackend render_backend = {0};
   DioramaPlaneCaptureRegion region;
   CHECK(DioramaPlaneCaptureRegion_Resolve(
-      kDioramaPlane_Backdrop, kSurfaceWidth, kHeight, kApron, &region));
+      kDioramaPlane_Backdrop, kSurfaceWidth, kHeight, kApron, 3, &region));
   CHECK(region.x == kApron && region.width == kDisplayWidth &&
         region.height == kHeight);
   CHECK(DioramaPlaneCaptureRegion_Resolve(
-      SR_PPU_OVERLAY_OBJ, kSurfaceWidth, kHeight, kApron, &region));
+      SR_PPU_OVERLAY_OBJ, kSurfaceWidth, kHeight, kApron, 0, &region));
   CHECK(region.x == 0 && region.width == kSurfaceWidth &&
         region.height == kHeight);
+  const int backgrounds[] = {SR_PPU_OVERLAY_BG1, kDioramaPlane_Bg1Hi,
+      kDioramaPlane_Bg1Far, SR_PPU_OVERLAY_BG2, kDioramaPlane_Bg2Hi, kDioramaPlane_Bg2Far};
+  for (unsigned i = 0; i < sizeof(backgrounds) / sizeof(backgrounds[0]); i++) {
+    CHECK(DioramaPlaneCaptureRegion_Resolve(
+        backgrounds[i], kSurfaceWidth, kHeight, kApron, 0, &region));
+    CHECK(region.x == kApron && region.width == kDisplayWidth);
+    CHECK(DioramaPlaneCaptureRegion_Resolve(
+        backgrounds[i], kSurfaceWidth, kHeight, kApron, i < 3 ? 1 : 2, &region));
+    CHECK(region.x == 0 && region.width == kSurfaceWidth);
+    CHECK(DioramaPlaneCaptureRegion_Resolve(
+        backgrounds[i], kSurfaceWidth, kHeight, kApron, i < 3 ? 2 : 1, &region));
+    CHECK(region.x == kApron && region.width == kDisplayWidth);
+  }
   if (!SDL_Init(SDL_INIT_VIDEO) && RequireProductionGpuRenderer()) {
     fprintf(stderr, "GPU frame-generation test skipped: %s\n", SDL_GetError());
     return kSkipNoGpuRenderer;

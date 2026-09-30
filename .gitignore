@@ -9,6 +9,9 @@
 # Anchored: an unanchored "config.ini" matches at ANY depth and would swallow
 # the template itself.
 /config.ini
+# Runtime history for release-managed Diorama content.
+/diorama-layers.ini.installed*
+/diorama-layers.ini.pre-update-*
 
 game-assets/*
 # manifest.ini is LIVE and user-edited: the builder writes to it, players

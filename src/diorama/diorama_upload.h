@@ -15,7 +15,7 @@
  * is omitted from synchronized_plane_mask so no stale texture can resurface;
  * changed_plane_mask identifies its subset that required a backend upload.
  * `snes_width` includes both resolve aprons, while `obj_apron` identifies the
- * per-side columns that non-OBJ planes can omit as known-zero padding. */
+ * per-side padding. `bg_apron_mask` identifies BGs with captured guard columns. */
 typedef struct DioramaUploadResult {
   uint32_t synchronized_plane_mask;
   uint32_t changed_plane_mask;
@@ -27,7 +27,8 @@ DioramaUploadResult Diorama_Upload(
     ArRenderTexture textures[kDioramaPlane_Count],
     const uint8_t *const pixels[kDioramaPlane_Count],
     const size_t pitch_bytes[kDioramaPlane_Count],
-    int snes_width, int snes_height, int obj_apron, uint32_t plane_mask);
+    int snes_width, int snes_height, int obj_apron, unsigned bg_apron_mask,
+    uint32_t plane_mask);
 
 /* Forget retained upload hashes after a render-device reset or shutdown. */
 void DioramaUpload_Reset(void);

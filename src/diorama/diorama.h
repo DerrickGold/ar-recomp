@@ -86,6 +86,8 @@ bool Diorama_ClampCameraVertically(
     bool clamp_top, bool clamp_bottom, float *world_y_offset);
 
 void Diorama_TranslateCameraWorldY(float matrix[16], float shift);
+/* Authored view offset relative to native scroll, in native pixels. */
+bool Diorama_OffsetCamera(float matrix[16], int x, int y, float pixel_aspect);
 
 /* Additional background translation relative to the clamped playfield.
  * Ratio packs the native numerator/denominator nibbles from command 3. */
@@ -258,6 +260,8 @@ typedef struct DioramaSkyboxView {
 typedef struct DioramaCapture {
   int width, height, authentic_y0, obj_apron;
   DioramaVerticalBounds vertical_bounds;
+  int framing_x, framing_y;
+  uint8_t bg_apron_mask;
   /* Native camera and command-3 ratio, captured with these exact pixels. */
   int camera_y, bg2_camera_y, bg2_world_height;
   uint8_t bg2_vertical_ratio;

@@ -91,25 +91,23 @@ static inline bool DioramaPlaneUsesSparseCoverage(int plane) {
   }
 }
 
-/* Can this plane ever hold pixels in the resolve apron?
- *
- * ONLY the OBJ planes. Everything else is filled exclusively by the scanline
- * path, which is bounded by the display margins and by kPpuExtraLeftRight and
- * therefore cannot reach an apron column; the apron pass
- * (ActRaiser_DioramaApronFinish) writes OBJ planes and nothing else. The
- * backdrop is the residual main framebuffer, whose apron the compositor never
- * touches either.
- *
- * Consequence, and the reason this predicate exists rather than being folded
- * into a comment: uploading the apron columns of a plane that can never fill
- * them is uploading known zeros. Measured at 0.79 MB per frame, ~47 MB/s at
- * 60fps, which was most of what the apron cost in steady state. */
+/* OBJ always owns its resolve apron. BG1/BG2 additionally use guard columns
+ * when a saved horizontal framing offset is active and their provider has
+ * verified the current terrain. All other padding stays outside the upload. */
 static inline bool DioramaPlaneCanCarryApron(int plane) {
   return DioramaPlaneIsObjectPriority(plane);
 }
 
+static inline bool DioramaPlaneUsesBgApron(int plane, unsigned bg_apron_mask) {
+  const int bg = plane == SR_PPU_OVERLAY_BG1 || plane == kDioramaPlane_Bg1Hi ||
+      plane == kDioramaPlane_Bg1Far ? 0 :
+      plane == SR_PPU_OVERLAY_BG2 || plane == kDioramaPlane_Bg2Hi ||
+      plane == kDioramaPlane_Bg2Far ? 1 : -1;
+  return bg >= 0 && (bg_apron_mask & (1u << bg));
+}
+
 /* The meaningful rectangle within an apron-wide capture surface. OBJ planes
- * own the apron; every other plane owns only the displayed middle columns.
+ * and explicitly captured BG guards own the apron; others own the middle.
  * `x` is both the first source column and the destination column in the fixed
  * compositor texture. Keeping this shared prevents upload and frame generation
  * from acquiring different definitions of known-zero padding. */
@@ -120,14 +118,15 @@ typedef struct DioramaPlaneCaptureRegion {
 } DioramaPlaneCaptureRegion;
 
 static inline bool DioramaPlaneCaptureRegion_Resolve(
-    int plane, int surface_width, int surface_height, int obj_apron,
+    int plane, int surface_width, int surface_height, int obj_apron, unsigned bg_apron_mask,
     DioramaPlaneCaptureRegion *region) {
   if (region) *region = (DioramaPlaneCaptureRegion){0};
   if (!region || plane < 0 || plane >= kDioramaPlane_Count ||
       surface_width <= 0 || surface_height <= 0 || obj_apron < 0 ||
       obj_apron > surface_width / 2)
     return false;
-  const bool wide = obj_apron > 0 && DioramaPlaneCanCarryApron(plane);
+  const bool wide = obj_apron > 0 && (DioramaPlaneCanCarryApron(plane) ||
+      DioramaPlaneUsesBgApron(plane, bg_apron_mask));
   region->x = wide ? 0 : obj_apron;
   region->width = wide ? surface_width : surface_width - obj_apron * 2;
   region->height = surface_height;

@@ -16,12 +16,17 @@
  * mosaic/margin policy. Apply the mask after scanout so subsequent native
  * writes cannot erase it; normal/authentic frame buffers are never touched. */
 static uint8_t s_pixel_black[2][kHostDisplayFramebufferHeight]
-    [SR_PPU_NATIVE_WIDTH + 2 * SR_PPU_HORIZONTAL_MARGIN_MAX];
+    [SR_PPU_SURFACE_MAX_WIDTH];
 static uint32_t s_stamp_color[2][kHostDisplayFramebufferHeight]
-    [SR_PPU_NATIVE_WIDTH + 2 * SR_PPU_HORIZONTAL_MARGIN_MAX];
+    [SR_PPU_SURFACE_MAX_WIDTH];
 static uint32_t s_stamp_backing[2][kHostDisplayFramebufferHeight];
 static bool s_pixel_edits_active;
 static uint32_t s_pixel_content_mask;
+static uint8_t s_bg_apron_mask;
+
+uint8_t ActRaiser_DioramaBgApronMask(void) {
+  return s_bg_apron_mask;
+}
 
 bool ActRaiser_DioramaPixelEditsActive(void) {
   return s_pixel_edits_active;
@@ -44,7 +49,9 @@ void ActRaiser_DioramaPixelSampleLine(const SrPpuStateSnapshot *ppu,
   bool tried_memory = false, have_memory = false;
   for (unsigned bg = 0; bg < 2; bg++) {
     if (!ActRaiserActionBg_PixelLayerHasEdits(bg)) continue;
-    for (int x = -g_ws_extra; x < (int)SR_PPU_NATIVE_WIDTH + g_ws_extra; x++) {
+    const int apron = (s_bg_apron_mask & (1u << bg)) ? SR_PPU_OBJ_APRON : 0;
+    for (int x = -g_ws_extra - apron;
+         x < (int)SR_PPU_NATIVE_WIDTH + g_ws_extra + apron; x++) {
       if (!DioramaCapture_PixelLayerVisible(ppu, bg, x)) continue;
       const unsigned size = (ppu->mosaic_control >> 4) + 1u;
       int source_x = x, sample_y = screen_y + 1;
@@ -54,10 +61,17 @@ void ActRaiser_DioramaPixelSampleLine(const SrPpuStateSnapshot *ppu,
       }
       uint16_t entry;
       uint8_t band, local_x, local_y;
-      bool black;
-      if (ActRaiserActionBg_StampAt(bg, source_x, sample_y,
+      bool black, blank = false;
+      bool sampled = ActRaiserActionBg_StampAt(bg, source_x, sample_y,
           ppu->backgrounds[bg].h_scroll, ppu->backgrounds[bg].v_scroll,
-          &entry, &band, &local_x, &local_y, &black)) {
+          &entry, &band, &local_x, &local_y, &black, &blank);
+      const bool outside = x < -g_ws_extra || x >= (int)SR_PPU_NATIVE_WIDTH + g_ws_extra;
+      if (!sampled && outside)
+        sampled = ActRaiserActionBg_NativeSceneryAt(bg, source_x, sample_y,
+            ppu->backgrounds[bg].h_scroll, ppu->backgrounds[bg].v_scroll,
+            &entry, &band, &local_x, &local_y, &black);
+      const int column = x + g_ws_extra + SR_PPU_OBJ_APRON;
+      if (sampled) {
         if (!tried_memory) {
           tried_memory = true;
           have_memory = api->borrow_u16_memory &&
@@ -82,12 +96,13 @@ void ActRaiser_DioramaPixelSampleLine(const SrPpuStateSnapshot *ppu,
               ExpandColor5(color >> 10, ppu->brightness);
         }
         s_stamp_backing[bg][row] = backing;
-        s_pixel_black[bg][row][x + g_ws_extra] = (uint8_t)(band + 4);
-        s_stamp_color[bg][row][x + g_ws_extra] = black ? 0xff000000u :
+        s_pixel_black[bg][row][column] = (uint8_t)(band + 4);
+        s_stamp_color[bg][row][column] = black ? 0xff000000u : blank ? 0 :
             DioramaCapture_StampColor(ppu, bg, vram.data, cgram.data,
                 entry, local_x, local_y, capture ? capture->flags : 0);
         continue;
       }
+      if (outside) continue;
       const SrPpuBackgroundCoordinateRequest request = {
         .struct_size = sizeof(request),
         .lifetime_generation = ppu->lifetime_generation,
@@ -100,7 +115,7 @@ void ActRaiser_DioramaPixelSampleLine(const SrPpuStateSnapshot *ppu,
           ActRaiserActionBg_PixelBlackAt(bg, result.source_x, result.sample_y,
               ppu->backgrounds[bg].h_scroll, ppu->backgrounds[bg].v_scroll,
               &band))
-        s_pixel_black[bg][row][x + g_ws_extra] = (uint8_t)(band + 1);
+        s_pixel_black[bg][row][column] = (uint8_t)(band + 1);
     }
   }
 }
@@ -117,12 +132,11 @@ void ActRaiser_DioramaPixelFinish(void) {
       uint32_t *rows[3] = {NULL};
       for (unsigned band = 0; band < 3; band++) {
         uint8_t *pixels = g_diorama_layer_pixels[planes[band]];
-        if (pixels) rows[band] = (uint32_t *)(pixels + (size_t)y * pitch)
-            + SR_PPU_OBJ_APRON;
+        if (pixels) rows[band] = (uint32_t *)(pixels + (size_t)y * pitch);
       }
       s_pixel_content_mask |= DioramaCapture_PaintEditedRow(bg,
           s_pixel_black[bg][y], s_stamp_color[bg][y], s_stamp_backing[bg][y],
-          rows, (size_t)width);
+          rows, (size_t)width + 2 * SR_PPU_OBJ_APRON);
     }
   }
 }
@@ -339,8 +353,16 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
       active || (HostDevTools_DioramaDumpArmed() &&
                  ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]));
   s_pixel_content_mask = 0;
+  s_bg_apron_mask = 0;
   s_pixel_edits_active = want_capture &&
       ActRaiserActionBg_PixelEditsActive();
+  const DioramaRoomOverride *room = ActRaiser_CurrentVirtualLayerRoom();
+  /* Added scenery needs the same guard columns even at zero framing. A
+   * perspective camera can see beyond the ordinary widescreen capture. */
+  if (s_pixel_edits_active && room)
+    for (unsigned bg = 0; bg < 2; bg++)
+      if ((room->framing[0].x || room->stamp_layers[bg].count) &&
+          ActRaiserActionBg_PixelLayerHasEdits(bg)) s_bg_apron_mask |= (uint8_t)(1u << bg);
   if (s_pixel_edits_active) memset(s_pixel_black, 0, sizeof(s_pixel_black));
   g_diorama_frame_active = active;
   if (want_capture) {

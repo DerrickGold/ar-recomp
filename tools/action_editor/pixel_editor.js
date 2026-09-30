@@ -43,7 +43,7 @@ function pixelRecords(r,bg,stamps=stampBucket(r,bg).cells,target=pixelBucket(r,b
   Object.assign(coords,target.byCoord);
   for(const [cell,c] of Object.entries(stamps)) {
     /* A zero override can be necessary to suppress an inherited black mask. */
-    if(c.black!==ZERO_PIXEL_MASK||target.byId[c.id]!==undefined||coords[cell]!==undefined)
+    if(c.black!==ZERO_PIXEL_MASK||!c.blank&&target.byId[c.id]!==undefined||coords[cell]!==undefined)
       coords[cell]=c.black;
   }
   return [...Object.entries(target.byId).sort((a,b)=>Number(a[0])-Number(b[0]))
@@ -62,7 +62,9 @@ function pixelIniLines(r) {
   }
   return lines;
 }
-function focusedStamp() {return pixelStamp?stampBucket(room,bgIndex).cells[pixelStamp]:null;}
+function focusedStamp() {
+  return pixelStamp?displayedCell(room,bgIndex,L,...pixelStamp.split(',').map(Number)):null;
+}
 function focusedMask() {
   const stamp=focusedStamp();if(stamp)return stamp.black;
   const target=pixelBucket(room,bgIndex);
@@ -88,7 +90,8 @@ function refreshPixelEditor() {
   const cell=pixelCell,[cx,cy]=pasted?pixelStamp.split(',').map(Number)
     :[cell%L.cellsW,Math.floor(cell/L.cellsW)];
   $('#pixelScope').disabled=!!pasted;
-  $('#pixelInfo').textContent=`BG${bgIndex+1} cell ${cx},${cy} · metatile ${(pasted?pasted.id:L.cellId[cell]).toString(16).padStart(2,'0').toUpperCase()}`;
+  $('#pixelInfo').textContent=`BG${bgIndex+1} cell ${cx},${cy} · `+(pasted?.blank?'blank tile'
+    :`metatile ${(pasted?pasted.id:L.cellId[cell]).toString(16).padStart(2,'0').toUpperCase()}`);
   $('#pixelReset').textContent=!pasted&&$('#pixelScope').value==='id'
     ?'Reset pixel edits for this metatile':'Reset pixel edits for this cell';
   const mask=pasted?pasted.black:pixelMaskAt(room,bgIndex,L,cell),image=new ImageData(224,224);
@@ -112,6 +115,9 @@ function writePixelMask(mask,reset=false) {
     const key=keyOf(room,bgIndex),next={...pasted,black:reset?ZERO_PIXEL_MASK:mask};
     if(next.black===pasted.black)return;
     const cells={...stampBucket(room,bgIndex).cells,[pixelStamp]:next};
+    if(regionalStampCount(room,bgIndex,cells)>kStampMax) {
+      $('#pixelInfo').textContent='Maximum 512 added tiles per background';return;
+    }
     if(regionalPixelCount(room,bgIndex,cells)>256) {
       $('#pixelInfo').textContent='Maximum 256 pixel edits per background';return;
     }
@@ -174,7 +180,8 @@ function fillSelectedTransparency() {
   const proposedPixels={...pixels,byCell:{...pixels.byCell}};
   const proposedStamps={...stamps.cells},changes=[];
   for(const position of positions) {
-    const [x,y]=position.split(',').map(Number),pasted=stamps.cells[position];
+    const [x,y]=position.split(',').map(Number);
+    const pasted=stamps.cells[position]||(!nativeCell(L,x,y)?displayedCell(room,bgIndex,L,x,y):null);
     if(pasted) {
       const mask=fillTransparentMask(pasted.black,(px,py)=>stampOriginal(L,pasted,px,py));
       if(mask===pasted.black)continue;
@@ -189,6 +196,9 @@ function fillSelectedTransparency() {
     }
   }
   if(!changes.length){info.textContent='Selected transparency is already filled.';return false;}
+  if(regionalStampCount(room,bgIndex,proposedStamps)>kStampMax) {
+    info.textContent='Maximum 512 added tiles per BG. No tiles were changed.';return false;
+  }
   const records=regionalPixelCount(room,bgIndex,proposedStamps,proposedPixels);
   if(records>256) {
     info.textContent=`This selection needs ${records} pixel edits; the limit is 256 per BG. `

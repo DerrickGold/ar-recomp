@@ -2102,7 +2102,10 @@ static void PrepareDioramaView(const DioramaCapture *capture,
       geometry->matrix, capture->height, capture->authentic_y0);
 
   float framing_weight = Clampf(view->camera_framing_weight, 0.0f, 1.0f);
-  if (framing_weight == 0.0f) return;
+  if (framing_weight == 0.0f) {
+    Diorama_OffsetCamera(geometry->matrix, capture->framing_x, capture->framing_y, par);
+    return;
+  }
   float free_matrix[16];
   memcpy(free_matrix, geometry->matrix, sizeof(free_matrix));
 
@@ -2160,6 +2163,9 @@ static void PrepareDioramaView(const DioramaCapture *capture,
       geometry->matrix[i] = free_matrix[i] + framing_weight *
           (geometry->matrix[i] - free_matrix[i]);
   }
+  /* Designer framing is the baseline even during manual orbit. It does not
+   * change when extra tiles alter the scenery bounds or capture margins. */
+  Diorama_OffsetCamera(geometry->matrix, capture->framing_x, capture->framing_y, par);
 }
 
 static void PublishDioramaView(const DioramaCapture *capture,
@@ -2905,6 +2911,25 @@ static PresentationOutcome DrawDioramaLayerFace(
   return outcome;
 }
 
+/* The guard columns occupy the existing apron allocation. Expand only BG
+ * geometry and its texture crop; native/OBJ coordinates retain their anchor. */
+static bool DioramaUsesBgApron(const DioramaCapture *capture, int plane) {
+  return capture->obj_apron > 0 && DioramaPlaneUsesBgApron(plane, capture->bg_apron_mask);
+}
+
+static void DioramaExpandBgApron(DioramaCapture *capture, DioramaViewGeometry *geometry) {
+  const int width = capture->width + 2 * capture->obj_apron;
+  if (geometry) {
+    geometry->aspect_x *= (float)width / capture->width;
+    geometry->u0 = 0.0f;
+    geometry->u1 = (float)width / SR_PPU_SURFACE_MAX_WIDTH;
+  }
+  capture->width = width;
+  capture->obj_apron = 0;
+  /* Coverage cells describe the ordinary window, not these wider meshes. */
+  capture->coverage_masks = NULL;
+}
+
 static PresentationOutcome DrawResolvedDioramaLayer(
     ArRenderDevice *device, const DioramaCapture *capture,
     const DioramaScene *scene, const DioramaViewGeometry *geometry,
@@ -2954,7 +2979,14 @@ static PresentationOutcome DrawResolvedDioramaLayer(
                           : kArRenderBlendMode_Alpha,
   };
   DioramaLayerMesh mesh;
-  DioramaViewGeometry layer_geometry;
+  DioramaViewGeometry layer_geometry = *geometry;
+  DioramaCapture layer_capture;
+  if (DioramaUsesBgApron(capture, description->plane)) {
+    layer_capture = *capture;
+    DioramaExpandBgApron(&layer_capture, &layer_geometry);
+    capture = &layer_capture;
+    geometry = &layer_geometry;
+  }
   if (description->plane == SR_PPU_OVERLAY_BG2 ||
       description->plane == kDioramaPlane_Bg2Hi ||
       description->plane == kDioramaPlane_Bg2Far) {
@@ -3046,14 +3078,18 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
   }
 
   DioramaFocalAperture aperture;
-  PrepareDioramaAperture(capture, scene, &geometry, textures, resolved, resolved_count,
+  DioramaCapture focal_capture = *capture;
+  DioramaViewGeometry focal_geometry = geometry;
+  if (DioramaUsesBgApron(capture, SR_PPU_OVERLAY_BG1))
+    DioramaExpandBgApron(&focal_capture, &focal_geometry);
+  PrepareDioramaAperture(&focal_capture, scene, &focal_geometry, textures, resolved, resolved_count,
                          &aperture);
   int draw_order[kDioramaLayerCount];
   const int draw_count =
       ResolveDioramaDrawOrder(scene, resolved, resolved_count, draw_order);
   PresentationOutcome priority_outcome;
   const ArRenderTexture priority_surface = BuildDioramaPrioritySurface(
-      device, capture, scene, textures, resolved, resolved_count, &priority_outcome);
+      device, &focal_capture, scene, textures, resolved, resolved_count, &priority_outcome);
   outcome = PresentationOutcome_Combine(outcome, priority_outcome);
   if (!PresentationOutcome_IsUsable(priority_outcome)) goto failed;
   for (int draw = 0; draw < draw_count; ++draw) {

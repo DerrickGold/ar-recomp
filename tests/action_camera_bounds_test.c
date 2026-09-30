@@ -43,6 +43,50 @@ static void CheckNarrowRoomFallsBackToNative(void) {
   CHECK(ActionCameraAxisBounds_Clamp(&bounds, 120) == 0);
 }
 
+static void CheckAuthoredSceneryRelaxesCameraStop(void) {
+  int before = 120, after = 120;
+  ActionCameraAxisBounds bounds;
+  /* Fillmore 0104: six added columns on the left of a 512px arena. The
+   * old 120..136 interval blocked all leftward travel from the snapshot. */
+  ActionCameraAxisBounds_ApplySceneryPadding(512, -96, 608, &before, &after);
+  CHECK(before == 24 && after == 120);
+  CHECK(ActionCameraAxisBounds_UpdateCamera(
+      120, 0, 512, 256, before, after, &bounds) == 120);
+  CHECK(bounds.minimum == 24 && bounds.maximum == 136);
+  CHECK(ActionCameraAxisBounds_UpdateCamera(
+      120, -16, 512, 256, before, after, &bounds) == 104);
+  CHECK(ActionCameraAxisBounds_UpdateCamera(
+      30, -16, 512, 256, before, after, &bounds) == 24);
+  CHECK(ActionCameraAxisBounds_EffectiveDelta(&bounds, 30, 24, -16) == -6);
+
+  before = after = 120;
+  ActionCameraAxisBounds_ApplySceneryPadding(512, 0, 576, &before, &after);
+  CHECK(before == 120 && after == 56);
+  CHECK(ActionCameraAxisBounds_UpdateCamera(
+      136, 32, 512, 256, before, after, &bounds) == 168);
+  CHECK(bounds.minimum == 120 && bounds.maximum == 200);
+
+  /* Large extensions can restore the whole native interval, never create
+   * gameplay camera positions outside it (including a one-screen arena). */
+  before = after = 120;
+  ActionCameraAxisBounds_ApplySceneryPadding(512, -256, 1024, &before, &after);
+  CHECK(before == 0 && after == 0);
+  CHECK(ActionCameraAxisBounds_UpdateCamera(
+      0, -16, 512, 256, before, after, &bounds) == 0);
+  CHECK(ActionCameraAxisBounds_UpdateCamera(
+      250, 16, 512, 256, before, after, &bounds) == 256);
+  CHECK(ActionCameraAxisBounds_UpdateCamera(
+      0, 16, 256, 256, before, after, &bounds) == 0);
+
+  before = after = 120;
+  ActionCameraAxisBounds_ApplySceneryPadding(512, 0, 512, &before, &after);
+  CHECK(before == 120 && after == 120);
+  ActionCameraAxisBounds_ApplySceneryPadding(512, -96, 0, &before, &after);
+  CHECK(before == 120 && after == 120);
+  ActionCameraAxisBounds_ApplySceneryPadding(512, -96, 512, &before, &after);
+  CHECK(before == 120 && after == 120);
+}
+
 static void CheckVerticalBoundsAndFallback(void) {
   ActionCameraAxisBounds bounds = Resolve(512, 225, 32, 32);
   CHECK(bounds.includes_requested_margins);
@@ -174,6 +218,7 @@ static void CheckPresentationDeltaReconciliation(void) {
 int main(void) {
   CheckBloodpoolRightEdge();
   CheckSmallestWideRoom();
+  CheckAuthoredSceneryRelaxesCameraStop();
   CheckNarrowRoomFallsBackToNative();
   CheckVerticalBoundsAndFallback();
   CheckAsymmetricAndAuthenticBounds();

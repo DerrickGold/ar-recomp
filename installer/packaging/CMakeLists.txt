@@ -410,11 +410,11 @@ install(FILES ${INSTALLER_MODULE_DIR}/THIRD_PARTY_NOTICES.md
 # three. settings.ini and saves/ survived only because nothing ships them.
 #
 # Shipping to utils/defaults/ instead means extraction can only ever overwrite the
-# DEFAULTS. The game merges them forward at startup
-# (IniUpgrade_ApplyShippedDefaults): a value the user changed is kept, a key that
-# is new in this version is added. The live files are created from these on first
-# run and are never in the archive, so the clobber is structurally impossible
-# rather than merely warned about.
+# DEFAULTS. The game applies them at startup (IniUpgrade_ApplyShippedDefaults).
+# Personal settings and asset entries merge conservatively. Diorama layers are
+# authored release content: changed bundled bytes replace the live copy after a
+# backup, including existing rooms and removed tile patches. Live files are
+# never in the archive, so extraction itself cannot clobber them.
 #
 # The paths matter: utils/ is the game's working directory (the launcher cd's into
 # it), so the LIVE files must resolve there -- config.ini is passed as a bare

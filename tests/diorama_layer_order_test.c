@@ -1752,6 +1752,39 @@ static void TestTileStampsRoundTrip(void) {
   CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
 }
 
+static void TestBlankTilesAndFraming(void) {
+  DioramaRoomOverride room = {.used = true, .map_group = 1, .map_number = 4};
+  DioramaRoomOverride resolved;
+  const char *error = NULL;
+  CHECK(DioramaLayerOrder_ParseLine(&room, "framing:us+eu = x:-40 y:0", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room, "framing:jp = x:16 y:-8", &error));
+  CHECK(DioramaLayerOrder_RoomIsActive(&room));
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "framing = x:65 y:0", &error));
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "framing = x:0 y:-65", &error));
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "framing = x:0 y:0 garbage", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room, "bg1-stamp:us+eu = cell:-2,-1 "
+      "metatile:00 words:blank bands:1,1,1,1", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room, "bg1-pixels:us+eu = metatile:00 black:"
+      "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF", &error));
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 0, &resolved));
+  CHECK(resolved.framing[0].x == -40 && resolved.framing[0].y == 0);
+  CHECK(resolved.stamp_layers[0].cells[0].blank);
+  CHECK(!DioramaLayerOrder_PixelMask(&resolved, 0, -2, -1, -1));
+  CHECK(DioramaLayerOrder_PixelMask(&resolved, 0, -2, -1, 0));
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 1, &resolved));
+  CHECK(resolved.framing[0].x == 16 && resolved.framing[0].y == -8);
+  CHECK(resolved.stamp_layers[0].count == 0);
+  char text[2048];
+  CHECK(DioramaLayerOrder_FormatRoom(&room, text, sizeof(text)) < sizeof(text));
+  CHECK(strstr(text, "framing:us+eu = x:-40 y:0"));
+  CHECK(strstr(text, "words:blank"));
+  DioramaRoomOverride reparsed = {.used = true};
+  for (char *line = strtok(text, "\n"); line; line = strtok(NULL, "\n"))
+    if (line[0] != '[') CHECK(DioramaLayerOrder_ParseLine(&reparsed, line, &error));
+  CHECK(!memcmp(room.framing, reparsed.framing, sizeof(room.framing)));
+  CHECK(!memcmp(room.stamp_layers, reparsed.stamp_layers, sizeof(room.stamp_layers)));
+}
+
 static void TestRegionalTileKeys(void) {
   DioramaRoomOverride room = {.used = true, .map_group = 3, .map_number = 4};
   DioramaRoomOverride resolved;
@@ -1834,6 +1867,7 @@ static void TestRegionalTileKeys(void) {
 }
 
 int main(void) {
+  TestBlankTilesAndFraming();
   TestRegionalTileKeys();
   TestTileStampsRoundTrip();
   TestPixelMasksRoundTrip();

@@ -309,6 +309,8 @@ bool DioramaLayerOrder_ForTerrain(const DioramaRoomOverride *room,
   if (!room || !out || profile >= kDioramaTerrainProfileCount || room == out)
     return false;
   *out = *room;
+  out->framing[0] = room->framing[profile];
+  memset(&out->framing[1], 0, sizeof(out->framing) - sizeof(out->framing[0]));
   const unsigned bit = 1u << profile;
   for (unsigned bg = 0; bg < 2; bg++) {
     const DioramaVirtualLayerOverride *source = &room->virtual_layers[bg];
@@ -387,6 +389,8 @@ int DioramaLayerOrder_VirtualBand(const DioramaRoomOverride *room, int bg,
 
 bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
   if (!room || !room->used) return false;
+  for (unsigned profile = 0; profile < kDioramaTerrainProfileCount; profile++)
+    if (room->framing[profile].set) return true;
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
     if (PlaneOverrideIsAuthored(&room->planes[plane]))
       return true;
@@ -838,7 +842,7 @@ static bool ParseVirtualLine(DioramaRoomOverride *room, int bg,
 
 const uint16_t *DioramaLayerOrder_PixelMask(
     const DioramaRoomOverride *room, unsigned bg, int cell_x,
-    int cell_y, uint8_t metatile) {
+    int cell_y, int metatile) {
   if (!room || bg >= 2) return NULL;
   const DioramaPixelLayerOverride *layer = &room->pixel_layers[bg];
   const uint16_t *fallback = NULL;
@@ -936,6 +940,12 @@ static bool ParseStampLine(DioramaRoomOverride *room, unsigned bg,
       fields |= 1;
     } else if (!strcmp(word, "words")) {
       unsigned words[4];
+      if (!strcmp(colon, "blank")) {
+        if (fields & 2) goto invalid;
+        edit.blank = true;
+        fields |= 2;
+        continue;
+      }
       if ((fields & 2) ||
           sscanf(colon, "%x,%x,%x,%x%c", &words[0], &words[1],
                  &words[2], &words[3], &tail) != 4) goto invalid;
@@ -1070,6 +1080,22 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
   if (!ParseTerrainSuffix(token, &terrain)) {
     if (out_error) *out_error = "bad terrain suffix (us, jp, eu or ge)";
     return false;
+  }
+  if (!strcmp(token, "framing")) {
+    int x, y;
+    char tail;
+    if (sscanf(equals + 1, " x:%d y:%d %c", &x, &y, &tail) != 2 ||
+        x < -64 || x > 64 || y < -64 || y > 64) {
+      if (out_error) *out_error = "expected framing = x:-64..64 y:-64..64";
+      return false;
+    }
+    for (unsigned profile = 0; profile < kDioramaTerrainProfileCount; profile++) {
+      if (!(TerrainMask(terrain) & (1u << profile))) continue;
+      room->framing[profile].set = true;
+      room->framing[profile].x = (int16_t)x;
+      room->framing[profile].y = (int16_t)y;
+    }
+    return true;
   }
   int stamp_bg = !strcmp(token, "bg1-stamp") ? 0 :
                  !strcmp(token, "bg2-stamp") ? 1 : -1;
@@ -1339,6 +1365,17 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
            section);
   else
     APPEND("[layers:%02X:%02X]\n", room->map_group, room->map_number);
+  unsigned written_framing = 0;
+  for (unsigned profile = 0; profile < kDioramaTerrainProfileCount; profile++) {
+    if (!room->framing[profile].set || (written_framing & (1u << profile))) continue;
+    unsigned mask = 0;
+    for (unsigned other = profile; other < kDioramaTerrainProfileCount; other++)
+      if (room->framing[other].set && room->framing[other].x == room->framing[profile].x &&
+          room->framing[other].y == room->framing[profile].y) mask |= 1u << other;
+    written_framing |= mask;
+    APPEND("framing%s = x:%d y:%d\n", TerrainSuffix(mask),
+           room->framing[profile].x, room->framing[profile].y);
+  }
   /* Emit in table-token order, not plane-index order, so a diff between two
    * exports is stable and readable. */
   for (int i = 0; i < kPlaneTokenCount; i++) {
@@ -1447,9 +1484,11 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
     }
     for (unsigned i = 0; i < layer->count; i++) {
       const DioramaTileStamp *cell = &layer->cells[i];
-      APPEND("bg%u-stamp%s = cell:%d,%d metatile:%02X words:%04X,%04X,%04X,%04X",
+      APPEND("bg%u-stamp%s = cell:%d,%d metatile:%02X words:",
              bg + 1, TerrainSuffix(cell->terrain_mask), cell->x, cell->y,
-             cell->metatile, cell->words[0],
+             cell->metatile);
+      if (cell->blank) APPEND("blank");
+      else APPEND("%04X,%04X,%04X,%04X", cell->words[0],
              cell->words[1], cell->words[2], cell->words[3]);
       APPEND(" bands:%u,%u,%u,%u\n", cell->bands & 3u,
              (cell->bands >> 2) & 3u, (cell->bands >> 4) & 3u,

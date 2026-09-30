@@ -345,7 +345,7 @@ function nativeCharacterPixel(layer,entry,x,y) {
 function nativeLayerPixel(r,state,layers,bg,x,y) {
   const mosaic=state.mosaic[y],size=(mosaic>>>4)+1;
   let sx=x,line=y+1;
-  if(size>1&&(mosaic&(1<<bg))){sx-=sx%size;line-=line%size;}
+  if(size>1&&(mosaic&(1<<bg))){sx-=((sx%size)+size)%size;line-=line%size;}
   const tile=nativeTileAt(r,state,layers,bg,u10(state.h[bg][y]+sx),
     u10(state.v[bg][y]+line));
   const pixel=nativeCharacterPixel(layers[bg],tile.entry,tile.x,tile.y);
@@ -412,21 +412,22 @@ function nativeFrameCanvas() {
  * pixel is routed to exactly one of its three destination planes. */
 function nativeBandSurfaces() {
   const decoded=nativeDecodedLayers();
+  const guard=roomFraming(room).x?64:0,width=DATA.frameWidth+2*guard;
   const key=`${decoded.decodedKey}:${nativeFrame}:${nativeCamera.x}`
-    +`:${nativeCamera.y}:${tint}`;
+    +`:${nativeCamera.y}:${tint}:${guard}`;
   if(nativeBandCache&&nativeBandCache.key===key)return nativeBandCache;
   const state=nativeFrameState(room);
   const images=[0,1].map(()=>[0,1,2].map(
-    ()=>new ImageData(DATA.frameWidth,DATA.frameHeight)));
+    ()=>new ImageData(width,DATA.frameHeight)));
   const tintRgb=BANDS.map((_,b)=>tint?bandRGB(b):null);
-  for(let y=0;y<DATA.frameHeight;y++)for(let x=0;x<DATA.frameWidth;x++){
-    const o=(y*DATA.frameWidth+x)*4;
+  for(let y=0;y<DATA.frameHeight;y++)for(let x=-guard;x<DATA.frameWidth+guard;x++){
+    const o=(y*width+x+guard)*4;
     for(let bg=0;bg<2;bg++){
       if(!((state.tm|state.ts)&(1<<bg)))continue;
       const layer=decoded.layers[bg];
       const mosaic=state.mosaic[y],size=(mosaic>>>4)+1;
       let sx=x,line=y+1;
-      if(size>1&&(mosaic&(1<<bg))){sx-=sx%size;line-=line%size;}
+      if(size>1&&(mosaic&(1<<bg))){sx-=((sx%size)+size)%size;line-=line%size;}
       const baseX=bg===0?nativeCamera.x:resolveParallax(nativeCamera.x,room.video[9],
         layer.w,DATA.frameWidth,false);
       const baseY=bg===0?nativeCamera.y:resolveParallax(nativeCamera.y,room.video[10],
@@ -447,6 +448,7 @@ function nativeBandSurfaces() {
         }
         continue;
       }
+      if(guard&&bg===0&&(xWorld<0||xWorld>=layer.w||yWorld<0||yWorld>=layer.h))continue;
       const tile=nativeTileAt(room,state,decoded.layers,bg,u10(state.h[bg][y]+sx),
         u10(state.v[bg][y]+line));
       const cell=(tile.ty>>1)*layer.cellsW+(tile.tx>>1);
@@ -464,7 +466,7 @@ function nativeBandSurfaces() {
       data[o]=red;data[o+1]=green;data[o+2]=blue;data[o+3]=255;
     }
   }
-  nativeBandCache={key,state,images};return nativeBandCache;
+  nativeBandCache={key,state,images,width};return nativeBandCache;
 }
 
 /* Every exported room carries one C-rendered golden frame. Verify it through

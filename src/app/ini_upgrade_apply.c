@@ -18,9 +18,8 @@
  * THE UPGRADE PATH. A user extracts a new bundle over their existing install.
  * The bundle ships its copies to `defaults/`, never to the live names, so
  * extraction cannot touch anything the user has edited. This then merges each
- * default forward: values the user changed are kept, keys that are new in this
- * version are appended. See ini_upgrade.h for why the separation is what makes a
- * merge possible at all.
+ * settings default forward. Diorama's authored content instead replaces the
+ * live manifest when its shipped bytes change, after preserving a backup.
  *
  * Runs in the GAME rather than only in the builder GUI, because `run-game`
  * starts the game directly and is the documented way to play -- a GUI-only
@@ -33,7 +32,7 @@
  */
 
 /* Files carried as shipped defaults. Each lives at `defaults/<leaf>` in the
- * bundle and merges into `<leaf>` beside it.
+ * bundle and is applied to `<leaf>` beside it.
  *
  * These are exactly the three the old packaging shipped as LIVE files, which is
  * why they were the three an upgrade destroyed. settings.ini and saves/ are
@@ -46,24 +45,25 @@ typedef struct {
    * user deleted and fabricates broken stub entries, so it is stated per file
    * rather than inferred. */
   IniUpgradeSectionKind kind;
+  bool release_content;
 } IniUpgradeLeaf;
 
 static const IniUpgradeLeaf kUpgradeLeaves[] = {
   /* [Graphics]/[KeyMap]/[Sound]/... : a fixed set of namespaces holding
      settings, so a key the user lacks is genuinely new in this version. */
-  { "config.ini", kIniUpgrade_Namespaces },
-  /* [layers:GG:MM] : one section per authored room. A missing plane line means
-     the user CLEARED that plane in the editor, not that it is new. */
-  { "diorama-layers.ini", kIniUpgrade_Records },
+  { "config.ini", kIniUpgrade_Namespaces, false },
+  /* Corrected tiles, framing and removed patches must reach existing rooms.
+   * Local authoring survives launches until different release content arrives. */
+  { "diorama-layers.ini", kIniUpgrade_Records, true },
   /* [replace:*] / [music:*] : one section per replacement. Both parsers start a
      fresh entry at every '[', so a per-key append would fabricate a one-key stub
      that fails validation on every launch. */
-  { "game-assets/manifest.ini", kIniUpgrade_Records },
+  { "game-assets/manifest.ini", kIniUpgrade_Records, false },
 };
 
 enum {
-  /* Refuse to slurp anything absurd: these are hand-sized config files (the
-   * largest shipped is a few KB), so a multi-megabyte one means the path is
+  /* Refuse to slurp anything absurd: authored tile records can fill tens of
+   * kilobytes, but a multi-megabyte file means the path is
    * wrong or the file is not what we think. Hitting this cap reports
    * NOT-absent, so the caller skips the leaf and leaves the file alone --
    * which is only true because of that distinction. Reporting it as absent
@@ -105,11 +105,19 @@ static char *ReadWholeFile(const char *path, bool *out_absent) {
       data = (char *)malloc((size_t)length + 1);
       if (data) {
         size_t got = fread(data, 1, (size_t)length, file);
-        data[got] = '\0';
+        if (got != (size_t)length || ferror(file) || memchr(data, '\0', got)) {
+          free(data);
+          data = NULL;
+        } else {
+          data[got] = '\0';
+        }
       }
     }
   }
-  fclose(file);
+  if (fclose(file) != 0) {
+    free(data);
+    data = NULL;
+  }
   return data;
 }
 
@@ -126,7 +134,10 @@ static bool WriteWholeFile(const char *path, const char *text, size_t length) {
     sr_remove(temporary);
     return false;
   }
-  fclose(file);
+  if (fclose(file) != 0) {
+    sr_remove(temporary);
+    return false;
+  }
   /* One atomic replace on both platforms -- see atomic_replace.h for why a bare
    * rename() is not portable here and why remove-then-rename is worse than the
    * bug it fixes. On failure the live file is untouched, which is what makes the
@@ -136,6 +147,55 @@ static bool WriteWholeFile(const char *path, const char *text, size_t length) {
     return false;
   }
   return true;
+}
+
+/* Keep every distinct pre-update copy, including the legacy install on its
+ * first managed update. Reuse an identical backup after an interrupted update. */
+static bool BackupReleaseContent(const char *path, const char *live) {
+  for (unsigned n = 1; n <= 1000; n++) {
+    char backup[kIniUpgradePathMax];
+    snprintf(backup, sizeof backup, "%s.pre-update-%u", path, n);
+    bool absent = false;
+    char *existing = ReadWholeFile(backup, &absent);
+    const bool matches = existing && !strcmp(existing, live);
+    free(existing);
+    if (matches) return true;
+    if (!absent) continue;
+    if (!WriteWholeFile(backup, live, strlen(live))) return false;
+    fprintf(stderr, "[upgrade] backed up %s to %s\n", path, backup);
+    return true;
+  }
+  return false;
+}
+
+static void ApplyReleaseContent(const char *path, const char *live, const char *shipped) {
+  char baseline_path[kIniUpgradePathMax];
+  snprintf(baseline_path, sizeof baseline_path, "%s.installed", path);
+  bool baseline_absent = false;
+  char *baseline = ReadWholeFile(baseline_path, &baseline_absent);
+  if (!baseline && !baseline_absent) {
+    fprintf(stderr, "[upgrade] cannot read %s -- content update skipped\n", baseline_path);
+    return;
+  }
+  const bool same_release = baseline && !strcmp(baseline, shipped);
+  free(baseline);
+  /* An intentionally edited live file stays edited between releases. A
+   * missing live file can always be restored from the bundled copy. */
+  if (live && same_release) return;
+  if (!live || strcmp(live, shipped)) {
+    if (live && !BackupReleaseContent(path, live)) {
+      fprintf(stderr, "[upgrade] cannot back up %s -- original kept\n", path);
+      return;
+    }
+    if (!WriteWholeFile(path, shipped, strlen(shipped))) {
+      fprintf(stderr, "[upgrade] cannot replace %s -- original kept\n", path);
+      return;
+    }
+    fprintf(stderr, "[upgrade] installed release content: %s\n", path);
+  }
+  /* Publish only after the live file succeeds, so failures remain retryable. */
+  if (!same_release && !WriteWholeFile(baseline_path, shipped, strlen(shipped)))
+    fprintf(stderr, "[upgrade] cannot record %s -- will retry next launch\n", baseline_path);
 }
 
 void IniUpgrade_ApplyShippedDefaults(void) {
@@ -165,6 +225,13 @@ void IniUpgrade_ApplyShippedDefaults(void) {
               "[upgrade] %s exists but could not be read -- skipped, and your "
               "file is left exactly as it is\n",
               leaf);
+      free(shipped);
+      continue;
+    }
+
+    if (kUpgradeLeaves[i].release_content) {
+      ApplyReleaseContent(live_path, live, shipped);
+      free(live);
       free(shipped);
       continue;
     }

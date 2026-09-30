@@ -188,6 +188,19 @@ void Diorama_TranslateCameraWorldY(float matrix[16], float shift) {
     matrix[12 + row] += shift * matrix[4 + row];
 }
 
+bool Diorama_OffsetCamera(float matrix[16], int x, int y, float pixel_aspect) {
+  if (!matrix || !isfinite(pixel_aspect) || pixel_aspect <= 0.0f ||
+      x < -64 || x > 64 || y < -64 || y > 64)
+    return false;
+  for (int i = 0; i < 16; i++)
+    if (!isfinite(matrix[i])) return false;
+  const float dx = -(float)x * pixel_aspect / kActRaiserAuthenticHeight;
+  const float dy = (float)y / kActRaiserAuthenticHeight;
+  for (int row = 0; row < 4; row++)
+    matrix[12 + row] += dx * matrix[row] + dy * matrix[4 + row];
+  return true;
+}
+
 static float BackgroundCameraAt(float camera_y, uint8_t ratio, int world_height) {
   const unsigned denominator = ratio & 15u;
   float camera = denominator ? camera_y *

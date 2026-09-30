@@ -223,6 +223,7 @@ typedef struct DioramaPixelLayerOverride {
 typedef struct DioramaTileStamp {
   int16_t x, y;
   uint16_t words[4];
+  bool blank; /* transparent source art, independent of ROM characters */
   uint8_t bands; /* two bits per quadrant, top-left first */
   uint8_t metatile;
   uint8_t terrain_mask;
@@ -250,6 +251,10 @@ typedef struct DioramaRoomOverride {
   DioramaVirtualLayerOverride virtual_layers[2]; /* BG1, BG2 */
   DioramaPixelLayerOverride pixel_layers[2];
   DioramaStampLayerOverride stamp_layers[2];
+  struct {
+    bool set;
+    int16_t x, y; /* view offset in native pixels, relative to native scroll */
+  } framing[kDioramaTerrainProfileCount];
 } DioramaRoomOverride;
 
 /* Resolve tile authoring for the active terrain snapshot, keeping plane and
@@ -259,7 +264,7 @@ bool DioramaLayerOrder_ForTerrain(const DioramaRoomOverride *room,
 
 const uint16_t *DioramaLayerOrder_PixelMask(
     const DioramaRoomOverride *room, unsigned bg, int cell_x,
-    int cell_y, uint8_t metatile);
+    int cell_y, int metatile); /* -1 suppresses metatile inheritance */
 
 typedef struct DioramaLayerOrderTable {
   DioramaRoomOverride rooms[kDioramaRoomOverrideMax];

@@ -182,6 +182,17 @@ void ActRaiserActionBg_ResolveVerticalCaptureMargins(
     int camera_y, int world_height, int budget,
     int *top, int *bottom);
 
+/* Union a native axis with the active terrain's pasted cells, ignoring empty
+ * editor workspace. Extents remain in native world coordinates. Use these
+ * for capture margins and presentation camera padding; native gameplay world
+ * dimensions remain unchanged. */
+void ActRaiserActionBg_ResolveDioramaVerticalExtent(
+    const struct DioramaRoomOverride *room, unsigned layer, int native_height,
+    int *world_y0, int *world_height);
+void ActRaiserActionBg_ResolveDioramaHorizontalExtent(
+    const struct DioramaRoomOverride *room, unsigned layer, int native_width,
+    int *world_x0, int *world_width);
+
 /* Capture the complete action-background decision record and build its pure
  * plan plus the mechanical generic-PPU projection. No renderer state changes. */
 bool ActRaiserActionBg_BuildPlan(
@@ -305,9 +316,17 @@ bool ActRaiserActionBg_PixelLayerHasEdits(unsigned bg);
 bool ActRaiserActionBg_StampAt(unsigned bg, int source_x, int sample_y,
                               uint16_t hscroll, uint16_t vscroll,
                               uint16_t *entry, uint8_t *band,
-                              uint8_t *local_x, uint8_t *local_y, bool *black);
+                              uint8_t *local_x, uint8_t *local_y,
+                              bool *black, bool *blank);
 bool ActRaiserActionBg_PixelBlackAt(unsigned bg, int source_x, int sample_y,
                                     uint16_t hscroll, uint16_t vscroll,
                                     uint8_t *band);
+/* Finite native scenery for the extra horizontal capture around authored
+ * scenery or framing. Requires the same verified world binding as tile edits. */
+bool ActRaiserActionBg_NativeSceneryAt(unsigned bg, int source_x, int sample_y,
+                                      uint16_t hscroll, uint16_t vscroll,
+                                      uint16_t *entry, uint8_t *band,
+                                      uint8_t *local_x, uint8_t *local_y,
+                                      bool *black);
 
 #endif  /* AR_ACTRAISER_ACTION_BG_H */

@@ -331,6 +331,14 @@ static void TestCapturedWorldVerticalBounds(void) {
   CHECK(!DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 0, 512, 64, 288).valid);
   CHECK(!DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 0, 0, 0, 224).valid);
   CHECK(!DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_OBJ, 0, 512, 0, 224).valid);
+  /* Fillmore 0104's pasted rows move the scenery origin to -112. Use the
+   * translated camera and expanded height while the gameplay camera stays 31. */
+  bounds = DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 31 + 112, 432, 64, 352);
+  CHECK(bounds.valid && !bounds.top_reached && bounds.bottom_reached);
+  /* With the lower stamps deleted, the native floor is once again the edge.
+   * All 128 extra capture rows belong above it, despite stale editor bounds. */
+  bounds = DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 31 + 144, 400, 128, 352);
+  CHECK(bounds.valid && !bounds.top_reached && bounds.bottom_reached);
 }
 
 static void TestFloorCaptureCoversUpperViewport(void) {
@@ -770,7 +778,28 @@ static void TestSkyboxProjection(void) {
   CHECK(!Diorama_ProjectCapturedBg2Point(&p,228,128,&point,NULL,NULL));
 }
 
+static void TestDesignerFramingOffset(void) {
+  const Scene3DCamera camera = {.tilt_x = -.1f, .tilt_y = .08f, .distance = 3.25f, .fov_y = .4f};
+  float native[16], framed[16];
+  Scene3D_BuildViewProjection(&camera, 1600, 900, native);
+  memcpy(framed, native, sizeof(native));
+  CHECK(Diorama_OffsetCamera(framed, -40, -16, 1.0f));
+  for (int depth = -2; depth <= 2; depth++) {
+    Scene3DPoint expected, actual;
+    CHECK(Scene3D_ProjectWorldPoint(native, 40.0f / 224, -16.0f / 224,
+                                    depth * .2f, 1600, 900, &expected));
+    CHECK(Scene3D_ProjectWorldPoint(framed, 0, 0, depth * .2f, 1600, 900, &actual));
+    CHECK(Near(expected.x, actual.x) && Near(expected.y, actual.y));
+  }
+  memcpy(framed, native, sizeof(native));
+  CHECK(!Diorama_OffsetCamera(framed, 65, 0, 1.0f));
+  CHECK(!memcmp(framed, native, sizeof(native)));
+  CHECK(Diorama_OffsetCamera(framed, 0, 0, 1.0f));
+  CHECK(!memcmp(framed, native, sizeof(native)));
+}
+
 int main(void) {
+  TestDesignerFramingOffset();
   TestSkyboxProjection();
   TestGeneratedPlaneOffset();
   TestTiltedCameraFraming();

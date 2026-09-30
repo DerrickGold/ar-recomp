@@ -86,7 +86,7 @@ func TestStorageSelectionPreservesPortableDataAndIgnoresWritability(t *testing.T
 
 func TestSeedUpgradePreservesEditedDeletedAndExistingUserFiles(t *testing.T) {
 	resources, root := t.TempDir(), t.TempDir()
-	for _, leaf := range []string{"game-assets/fonts/font.ttf", "game-assets/edited.ogg", "game-assets/deleted.ogg", "game-assets/existing.ogg", "defaults/config.ini"} {
+	for _, leaf := range []string{"game-assets/fonts/font.ttf", "game-assets/edited.ogg", "game-assets/deleted.ogg", "game-assets/existing.ogg", "defaults/config.ini", "defaults/diorama-layers.ini"} {
 		put(t, filepath.Join(resources, "seed", leaf), "v1")
 	}
 	put(t, filepath.Join(root, "game-assets/existing.ogg"), "player-original")
@@ -99,13 +99,13 @@ func TestSeedUpgradePreservesEditedDeletedAndExistingUserFiles(t *testing.T) {
 	if err := os.Remove(filepath.Join(root, "game-assets/deleted.ogg")); err != nil {
 		t.Fatal(err)
 	}
-	for _, leaf := range []string{"game-assets/fonts/font.ttf", "game-assets/edited.ogg", "game-assets/deleted.ogg", "game-assets/existing.ogg", "defaults/config.ini"} {
+	for _, leaf := range []string{"game-assets/fonts/font.ttf", "game-assets/edited.ogg", "game-assets/deleted.ogg", "game-assets/existing.ogg", "defaults/config.ini", "defaults/diorama-layers.ini"} {
 		put(t, filepath.Join(resources, "seed", leaf), "v2")
 	}
 	if err := InitializeData(resources, root); err != nil {
 		t.Fatal(err)
 	}
-	for leaf, want := range map[string]string{"game-assets/fonts/font.ttf": "v2", "game-assets/edited.ogg": "player-edit", "game-assets/existing.ogg": "player-original", "defaults/config.ini": "v2", "settings.ini": "player-settings", "saves/save.srm": "player-save"} {
+	for leaf, want := range map[string]string{"game-assets/fonts/font.ttf": "v2", "game-assets/edited.ogg": "player-edit", "game-assets/existing.ogg": "player-original", "defaults/config.ini": "v2", "defaults/diorama-layers.ini": "v2", "settings.ini": "player-settings", "saves/save.srm": "player-save"} {
 		if got := read(t, filepath.Join(root, leaf)); got != want {
 			t.Fatalf("%s = %q; want %q", leaf, got, want)
 		}

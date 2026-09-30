@@ -489,6 +489,124 @@ static void TestVerticalMargins(void) {
   CHECK(top == 0 && bottom == 0);
 }
 
+static void TestAuthoredVerticalCapture(void) {
+  DioramaRoomOverride room = {.used = true, .map_group = 1, .map_number = 4};
+  DioramaRoomOverride resolved;
+  const char *error = NULL;
+  int y0, height, top, bottom;
+
+  /* The reported Fillmore 0104 edit extends a 512x256 room. At camera Y=31
+   * the native capture ended at row 255, discarding every new bottom row. */
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg1-map:us+jp+eu = bounds:-6,-7,32,20", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg1-stamp:us+jp+eu = cell:0,-7 metatile:42 "
+      "words:10C0,10C1,10C0,10C1 bands:1,1,1,1", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg1-stamp:us+jp+eu = cell:0,19 metatile:42 "
+      "words:10C0,10C1,10C0,10C1 bands:1,1,1,1", &error));
+  for (unsigned profile = 0; profile < 3; profile++) {
+    CHECK(DioramaLayerOrder_ForTerrain(&room, profile, &resolved));
+    ActRaiserActionBg_ResolveDioramaVerticalExtent(
+        &resolved, 0, 256, &y0, &height);
+    CHECK(y0 == -112 && height == 432);
+    ActRaiserActionBg_ResolveVerticalCaptureMargins(
+        31 - y0, height, 64, &top, &bottom);
+    CHECK(top == 64 && bottom == 64);
+    CHECK(31 + 1 - top == -32);
+    CHECK(31 + 225 + bottom == 320);
+    /* BG2 and the native scanout still stop at the native edges. */
+    ActRaiserActionBg_ResolveDioramaVerticalExtent(
+        &resolved, 1, 256, &y0, &height);
+    CHECK(y0 == 0 && height == 256);
+    ActRaiserActionBg_ResolveVerticalMargins(31, 256, 64, &top, &bottom);
+    CHECK(top == 31 && bottom == 0);
+  }
+
+  /* Removing the bottom extension must restore bottom anchoring even if the
+   * saved workspace still reaches row 20. Spend those capture rows on the
+   * remaining upper extension instead. Undoing the deletion restores both. */
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 0, &resolved));
+  resolved.stamp_layers[0].count = 1;
+  resolved.stamp_layers[0].cells[0].y = -9;
+  ActRaiserActionBg_ResolveDioramaVerticalExtent(
+      &resolved, 0, 256, &y0, &height);
+  CHECK(y0 == -144 && height == 400);
+  ActRaiserActionBg_ResolveVerticalCaptureMargins(
+      31 - y0, height, 64, &top, &bottom);
+  CHECK(top == 128 && bottom == 0);
+  CHECK(31 + 225 + bottom == 256);
+  resolved.stamp_layers[0].count = 2;
+  ActRaiserActionBg_ResolveDioramaVerticalExtent(
+      &resolved, 0, 256, &y0, &height);
+  CHECK(y0 == -144 && height == 464);
+  ActRaiserActionBg_ResolveVerticalCaptureMargins(
+      31 - y0, height, 64, &top, &bottom);
+  CHECK(top == 64 && bottom == 64);
+  resolved.stamp_layers[0].count = 0;
+  ActRaiserActionBg_ResolveDioramaVerticalExtent(
+      &resolved, 0, 256, &y0, &height);
+  CHECK(y0 == 0 && height == 256);
+
+  /* Bounds are optional and cannot crop away native or pasted cells. The
+   * regional resolver must run first, so JP's extension cannot leak to US. */
+  memset(&room, 0, sizeof(room));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg1-stamp:jp = cell:0,-2 metatile:42 "
+      "words:10C0,10C1,10C0,10C1 bands:1,1,1,1", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg1-stamp:jp = cell:0,20 metatile:42 "
+      "words:10C0,10C1,10C0,10C1 bands:1,1,1,1", &error));
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 1, &resolved));
+  ActRaiserActionBg_ResolveDioramaVerticalExtent(
+      &resolved, 0, 256, &y0, &height);
+  CHECK(y0 == -32 && height == 368);
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg1-map:jp = bounds:1,1,4,4", &error));
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 1, &resolved));
+  ActRaiserActionBg_ResolveDioramaVerticalExtent(
+      &resolved, 0, 256, &y0, &height);
+  CHECK(y0 == -32 && height == 368);
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 0, &resolved));
+  ActRaiserActionBg_ResolveDioramaVerticalExtent(
+      &resolved, 0, 256, &y0, &height);
+  CHECK(y0 == 0 && height == 256);
+  ActRaiserActionBg_ResolveDioramaVerticalExtent(NULL, 0, 256, &y0, &height);
+  CHECK(y0 == 0 && height == 256);
+}
+
+static void TestAuthoredHorizontalExtent(void) {
+  DioramaRoomOverride room = {.used = true, .map_group = 1, .map_number = 4};
+  DioramaRoomOverride resolved;
+  const char *error = NULL;
+  int x0, width;
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg1-map:jp = bounds:-10,-9,50,16", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg1-stamp:jp = cell:-6,0 metatile:00 words:blank bands:1,1,1,1", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg1-stamp:jp = cell:35,0 metatile:00 words:blank bands:1,1,1,1", &error));
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 1, &resolved));
+  ActRaiserActionBg_ResolveDioramaHorizontalExtent(
+      &resolved, 0, 512, &x0, &width);
+  CHECK(x0 == -96 && width == 672);
+  /* Deleting cells shrinks the scenery despite the saved workspace. */
+  resolved.stamp_layers[0].count = 1;
+  ActRaiserActionBg_ResolveDioramaHorizontalExtent(
+      &resolved, 0, 512, &x0, &width);
+  CHECK(x0 == -96 && width == 608);
+  resolved.stamp_layers[0].count = 0;
+  ActRaiserActionBg_ResolveDioramaHorizontalExtent(
+      &resolved, 0, 512, &x0, &width);
+  CHECK(x0 == 0 && width == 512);
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 0, &resolved));
+  ActRaiserActionBg_ResolveDioramaHorizontalExtent(
+      &resolved, 0, 512, &x0, &width);
+  CHECK(x0 == 0 && width == 512);
+  ActRaiserActionBg_ResolveDioramaHorizontalExtent(NULL, 0, 512, &x0, &width);
+  CHECK(x0 == 0 && width == 512);
+}
+
 static void PopulateNativeRing(const ActionBgWorld *world,
                                const ActRaiserActionBgLayerSnapshot *snapshot,
                                uint16_t *vram) {
@@ -1397,20 +1515,34 @@ static void TestVirtualLayerClassificationBinding(void) {
   CHECK(ActRaiserActionBg_BindPlanWithVirtualLayers(
       wram, kActRaiserWramSize, &plan, &room, ppu) == kActRaiserBgLayerMask_Bg1);
   uint8_t local_x, local_y;
-  bool black;
+  bool black, blank;
   CHECK(ActRaiserActionBg_StampAt(0, -1 - snapshot.camera_x,
-      -1 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black));
+      -1 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black, &blank));
   CHECK(entry == 0xe013 && band == 1 && local_x == 15 && local_y == 15 && black);
   CHECK(ActRaiserActionBg_StampAt(0, -16 - snapshot.camera_x,
-      -16 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black));
+      -16 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black, &blank));
   CHECK(entry == 0x10 && band == 0 && !local_x && !local_y && !black);
   CHECK(ActRaiserActionBg_StampAt(0, 70 * 16 - snapshot.camera_x - 1,
-      -16 - snapshot.camera_y, 14, 7, &entry, &band, &local_x, &local_y, &black));
+      -16 - snapshot.camera_y, 14, 7, &entry, &band, &local_x, &local_y, &black, &blank));
   CHECK(entry == 0x10 && band == 0 && !local_x); /* unwrapped camera + live HDMA */
   CHECK(!ActRaiserActionBg_StampAt(1, -1, -1, 13, 7,
-      &entry, &band, &local_x, &local_y, &black));
+      &entry, &band, &local_x, &local_y, &black, &blank));
   CHECK(!ActRaiserActionBg_StampAt(0, -17 - snapshot.camera_x,
-      -16 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black));
+      -16 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black, &blank));
+  CHECK(!blank);
+  room.stamp_layers[0].cells[0].blank = true;
+  CHECK(ActRaiserActionBg_StampAt(0, -1 - snapshot.camera_x,
+      -1 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black, &blank));
+  CHECK(blank && black); /* Painted black pixel on transparent source art. */
+  CHECK(ActRaiserActionBg_StampAt(0, -16 - snapshot.camera_x,
+      -16 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black, &blank));
+  CHECK(blank && !black);
+  CHECK(ActRaiserActionBg_NativeSceneryAt(0, 35 - snapshot.camera_x,
+      5 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black));
+  CHECK(local_x == 3 && local_y == 5 && band == 2 && black);
+  CHECK(!ActRaiserActionBg_NativeSceneryAt(0, -1 - snapshot.camera_x,
+      5 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black));
+  room.stamp_layers[0].cells[0].blank = false;
 
   const ActRaiserActionBgDiagnostics *diagnostics =
       ActRaiserActionBg_GetDiagnostics();
@@ -1533,6 +1665,8 @@ static void TestMarahnaCyclicBackdropBinding(void) {
 int main(void) {
   TestCapture();
   TestVerticalMargins();
+  TestAuthoredVerticalCapture();
+  TestAuthoredHorizontalExtent();
   TestRingAndComparison();
   TestImmutableRoomSceneComparison();
   TestImmutableRoomSceneFrameComparison();

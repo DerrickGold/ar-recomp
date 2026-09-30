@@ -34,11 +34,12 @@ edits and keeps the selection. <b>Compare original tiles</b> temporarily hides b
 masks, pasted scenery and band tint; your edits stay intact. Editing returns
 to the edited view. <b>Original game frame</b> shows the native presentation.</p>
 <p>Actions apply immediately to the preview; <b>Undo</b> reverses them.
-<b>Unexported changes</b> means the current INI differs from the loaded file or
-last export. <b>Export changes</b> downloads a complete INI and the badge becomes
-<b>Matches last export</b>. Undo/Redo also updates that badge.
-To use the changes in the game, replace its <code>diorama-layers.ini</code> with
-the downloaded file and restart. The editor does not replace it automatically.
+<b>Unexported changes</b> means some room edits have not been copied or downloaded.
+<b>Export level INI</b> opens a modal for the current room. Choose <b>Copy section</b>,
+replace that room’s section in <code>diorama-layers.ini</code>, save, and restart.
+Copying updates only this room’s savepoint; other rooms stay flagged.
+Opening or closing the modal does not mark anything exported. Undo/Redo also
+updates the badge. <b>Download full INI…</b> saves every room in one file.
 Export before refreshing this page, then use <b>Load INI</b> to resume.</p>
 
 <h4>Regional terrain</h4>
@@ -109,7 +110,7 @@ mask, inheriting the remaining metatile edit when applicable.</p>
 black</b> in the sidebar. It fills only the highlighted placed tiles, including
 pasted scenery, and preserves their artwork and existing black edits.
 The single-tile scope dropdown does not expand this operation to unselected
-metatile instances. One Undo restores the whole fill. Export INI saves it.
+metatile instances. One Undo restores the whole fill. Export level INI saves it.
 If it would exceed 256 pixel records per BG, no pixels change and the status
 asks you to select a smaller range.</p>
 
@@ -127,9 +128,51 @@ asks you to select a smaller range.</p>
 <p>Select pasted cells to change bands or paint black pixels. <b>Remove selected
  pasted tiles</b> restores their original scenery. <b>Reset this BG's pasted
  scenery</b> also removes added edge space. These actions are undoable.
- <b>Export INI</b> saves them; replace the game's INI and restart the rebuilt game.
+ Saved bounds shrink to the native map plus remaining pasted tiles. Empty edge
+ space is only a workspace; deleting the bottom extension lets the game anchor
+ to the native bottom again.
+ <b>Export level INI → Copy section</b> saves them; replace this room’s INI
+ section, save the file, and restart the game.
  The additions affect Diorama only. There are 512 pasted tiles per BG; black
  masks share the 256 pixel-record budget. An oversized paste changes nothing.</p>
+<p>New edge space can be selected like existing tiles. <b>Fill transparency
+ black</b> creates black tiles there; <b>Pixels…</b> paints part of a blank tile.
+ Selection alone makes no edits. Restoring pixels on a blank reveals transparency.</p>
+<p><b>Trim unused edge space</b> under Scenery &amp; edge space fits the workspace
+ to the original map plus remaining added tiles. With no added edge tiles,
+ this restores the original bounds. It keeps all tile edits and supports Undo.</p>
+<h4>Saved Diorama framing</h4>
+<p>Click <b>Frame</b> above the map, or <b>Adjust frame on map</b> in the sidebar.
+ The dashed white rectangle shows the native 256×224 view at the current
+ preview scroll; the gold rectangle shows your saved offset. Drag the gold
+ frame to adjust it, or use arrows for 1px steps and Shift + arrows for 16px.
+ A drag is one Undo step. Esc cancels a drag and returns to Select.
+ The guide uses BG1 coordinates; the saved offset applies to the whole scene.
+ <b>Show viewport guides on BG1</b> toggles the guides, and <b>Diorama 3D</b> previews
+ the result with depth and perspective.</p>
+<p>Enable <b>16:9</b> (cyan) and <b>16:10</b> (purple) to compare wider viewports.
+ All frames share the same center and move together; you can drag inside any
+ visible frame. Match <b>Pixel aspect</b> to the game: CRT (4:3) shows 342×224
+ and 308×224 map pixels, while Square pixels shows 400×224 and 360×224.
+ <b>Flat viewport</b> keeps native height and uses the game's whole-column rounding.
+ Select <b>Guide coverage → Diorama estimate</b> and match <b>Camera distance</b>
+ to the game for the projected BG1 footprint. This uses the game's field of
+ view and BG1 depth at zero tilt; dynamic floor alignment can shift it vertically.
+ Resolution alone does not change coverage at the same aspect ratio.
+ Guide options affect only this preview and do not add separate INI offsets.</p>
+<p><b>View X / View Y</b> save a view offset relative to the existing scroll
+ anchor. Negative X looks left; negative Y looks up. Leave Y at zero to keep
+ normal floor anchoring. Adding or removing scenery never changes these offsets.
+ The controls allow −64 to +64 pixels, support Undo/Redo and regional terrain
+ sharing, and are included in <b>Export level INI</b>. <b>Reset framing</b>
+ restores the default. Gameplay camera and collision are unchanged. Vertical
+ offsets use the available capture, so large shifts can expose an edge.</p>
+<p>Added scenery supplies horizontal edge padding in Diorama, allowing the
+ camera to move farther toward the extended side within its native gameplay
+ range. Empty workspace does not change the camera stop. Saved framing still
+ applies at that stop.</p>
+<p>The <b>Native frame controls</b> camera sliders are preview-only and do not save
+ a room's framing.</p>
 <h4>Resetting</h4>
 <p>Classification resets have three scopes &mdash; BG, room, and every room &mdash;
 and are all undoable.
@@ -237,8 +280,16 @@ what reads as a monolithic room. Nothing here assumes the two layers share a
 grid.</p>
 
 <h4>Export</h4>
-<p><b>Export INI</b> downloads a complete merged configuration, not a sidecar.
-The four ordinary BG and two virtual records in action-room base sections are
-regenerated. Cell edits are coalesced into horizontal inclusive rectangles,
-metatile records are sorted, and untouched rooms stay untouched. Load the
-exported file again to continue authoring without any conversion step.</p>`;
+<p><b>Export level INI</b> shows a complete replacement <code>[layers:GG:MM]</code>
+block for this room, including both BGs, every terrain variant, and existing
+settings and comments from the loaded base section. <b>Copy section</b>, then
+replace the old block in your INI, stopping at the next section header. Replace
+all duplicates with this single block; append it if missing. Keep camera-specific
+sections. Replacing the block also removes any edits you reset in the editor.</p>
+<p>If clipboard access is blocked, use <b>Select all</b> and <kbd>Ctrl/Cmd-C</kbd>.
+<b>Download full INI…</b> keeps the full-file workflow available. Save your INI
+and restart the game to test; load that file again to resume editing.</p>
+<p>Overlapping pastes retain only the latest tile at each destination. Identical
+regional records share a line, and band edits coalesce into horizontal runs.
+Pasted art still needs one record per cell: the runtime has no rectangle/repeat
+stamp format. Export preserves local scope and frozen tile art.</p>`;

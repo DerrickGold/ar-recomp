@@ -21,6 +21,40 @@
   <p class="hint">Double-click a selected tile or use Pixels above the map.
     The pixel editor opens beside your map.</p>
 
+  <details class="side-section" open><summary>Saved Diorama framing</summary>
+  <button id="framingAdjust" style="width:100%">Adjust frame on map</button>
+  <p class="hint"><label><input id="showFraming" type="checkbox" checked> Show viewport guides on BG1</label></p>
+  <div class="framing-guides">
+    <label style="color:#65dce9"><input id="framing169" type="checkbox" checked> 16:9</label>
+    <label style="color:#c49aff"><input id="framing1610" type="checkbox" checked> 16:10</label>
+  </div>
+  <div class="ctl"><label for="framingPixelAspect">Pixel aspect</label>
+    <select id="framingPixelAspect"><option value="crt">CRT (4:3)</option>
+      <option value="square">Square pixels</option></select></div>
+  <div class="ctl"><label for="framingProjection">Guide coverage</label>
+    <select id="framingProjection"><option value="native">Flat viewport</option>
+      <option value="diorama">Diorama estimate</option></select></div>
+  <div class="ctl"><label for="framingDistance">Camera distance</label>
+    <input id="framingDistance" type="number" min="2" max="20" step="0.25" value="3.25" disabled></div>
+  <p class="hint" id="framingViewportInfo"></p>
+  <p class="hint">Dashed white = native view. Gold = adjusted native view.
+    All colored frames move together. Drag with the Frame tool;
+    arrows nudge 1 px, Shift + arrows 16 px.</p>
+  <p class="hint">Flat viewport uses native height. Diorama estimate uses BG1 depth
+    and the game's field of view: match your camera distance and pixel aspect.
+    It assumes zero tilt; dynamic floor alignment can shift the view vertically.
+    Resolution at the same aspect does not change coverage. Guide options are preview-only.</p>
+  <p class="hint" id="framingGuideInfo"></p>
+  <div class="ctl"><label for="framingX">View X</label>
+    <input id="framingX" type="number" min="-64" max="64" step="1" value="0"></div>
+  <div class="ctl"><label for="framingY">View Y</label>
+    <input id="framingY" type="number" min="-64" max="64" step="1" value="0"></div>
+  <button id="framingReset">Reset framing</button>
+  <p class="hint" id="framingInfo"></p>
+  <p class="hint">Offsets in pixels from the existing scroll anchor. Negative X looks left;
+    negative Y looks up. Zero preserves normal framing. Expansion does not move
+    this anchor. Export saves these settings for the game.</p>
+  </details>
   <details class="side-section"><summary>Native frame controls</summary>
   <h2>Native preview frame</h2>
   <div class="ctl"><label>Frame</label>
@@ -158,11 +192,14 @@
   </div>
   <p class="hint" id="stampInfo"></p>
   <div class="stack">
+    <button id="trimEdgeSpace" disabled>Trim unused edge space</button>
     <button id="removeStamps" disabled>Remove selected pasted tiles</button>
     <button id="resetStamps">Reset this BG's pasted scenery</button>
   </div>
+  <p class="hint">Trim fits the original map plus any added tiles. With no added
+    edge tiles, it restores the original bounds. All tile edits are kept.</p>
   <p class="hint">Copies keep their depth bands and pixel edits. Paste within the
-    same room and BG. Export INI saves your work. Gameplay and collision stay unchanged.</p>
+    same room and BG. Export level INI provides a copyable section. Gameplay and collision stay unchanged.</p>
   </details>
   <details class="side-section"><summary>Reset classifications</summary>
   <h2>Reset edits</h2>
@@ -206,6 +243,7 @@
     <button id="mode2d" class="on">Map editor</button>
     <button id="modeNative">Original game frame</button>
     <button id="mode3d">Diorama 3D</button>
+    <button id="frameTool" aria-pressed="false" title="Adjust the saved native viewport on the map">Frame</button>
     <button id="undoBtn" disabled>Undo</button>
     <button id="redoBtn" disabled>Redo</button>
     <button id="navFit" title="Fit the whole layer (f)">Fit</button>
@@ -221,7 +259,7 @@
     <label for="importIni" class="file-btn">Load INI</label>
     <input id="importIni" type="file" accept=".ini,text/plain" hidden>
     <span id="saveState" class="save-state" role="status">Loaded INI</span>
-    <button id="export">Export INI</button>
+    <button id="export">Export level INI</button>
     <button id="docs">Docs</button>
   </div>
   <div class="selection-tools" id="selectionTools">
@@ -285,7 +323,7 @@
   </div>
   <p class="hint">Changes apply immediately to the Diorama preview. Checkerboard means transparency. Paint only the pixels you
     want opaque. Cell edits take precedence over metatile edits. Undo works for
-    pixel strokes. Export INI to keep your changes in a file.</p>
+    pixel strokes. Export level INI, then paste the section into your game INI to keep it.</p>
 
     </section>
     <div class="tile-action-status" id="tileActionStatus" role="status" aria-live="polite"></div>
@@ -313,6 +351,21 @@
   <div class="tile-menu-note" id="tileMenuDestination"></div>
 </div>
 
+<dialog id="exportDlg" aria-labelledby="exportTitle" aria-describedby="exportInstructions">
+  <div class="dlg-h"><h3 id="exportTitle">Export level INI</h3>
+    <span class="spacer"></span><button id="exportClose">Close</button></div>
+  <div class="dlg-b">
+    <p id="exportInstructions"></p>
+    <p id="exportScope">Includes both backgrounds, every terrain variant, and this section’s existing settings.</p>
+    <label class="export-label" for="exportText">Level INI section</label>
+    <textarea id="exportText" readonly spellcheck="false" wrap="off"></textarea>
+    <div class="export-actions"><button id="exportCopy">Copy section</button>
+      <button id="exportSelect">Select all</button><span class="spacer"></span>
+      <button id="exportDownload">Download full INI…</button></div>
+    <p id="exportStatus" role="status" aria-live="polite"></p>
+  </div>
+</dialog>
+
 <dialog id="docsDlg"><div class="dlg-h"><h3>Using the action map editor</h3>
   <span class="spacer" style="flex:1"></span><button id="docsX">Close</button></div>
   <div class="dlg-b" id="docsBody"></div></dialog>
@@ -325,6 +378,8 @@
 <script src="stamp_editor.js"></script>
 <script src="editor_feedback.js"></script>
 <script src="tile_menu.js"></script>
+<script src="export_editor.js"></script>
+<script src="framing_editor.js"></script>
 <script src="diorama_view.js"></script>
 <script src="editor.js"></script>
 <script src="help.js"></script>

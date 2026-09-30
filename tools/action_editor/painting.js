@@ -57,6 +57,10 @@ function commitOp() {
       part.after.bounds=pasted.bounds;
       if(part.after.bounds!==part.before.bounds)changed=true;
     }
+    if('framing' in part.before) {
+      part.after.framing=pasted.framing;
+      if(part.after.framing!==part.before.framing)changed=true;
+    }
     const pixels = pixelStore[key] || {byCell:{},byId:{}};
     for (const [kind,target] of [['pixelCell',pixels.byCell],['pixelId',pixels.byId]])
       for (const k in part.before[kind]) {
@@ -100,7 +104,8 @@ function applySide(op, which) {
     const side = op.parts[key][which];
     const pasted=stampStore[key]??={cells:{},bounds:undefined};
     for(const k in side.stamp)setKey(pasted.cells,k,side.stamp[k]);
-    if('bounds' in side){pasted.bounds=side.bounds;if(key===keyOf(room,bgIndex))refreshNativeCameraControls();}
+    if('bounds' in side)pasted.bounds=side.bounds;
+    if('framing' in side)pasted.framing=side.framing;
     if(Object.keys(side.stamp).length||'bounds' in side)surfacesDirty=compositeDirty=true;
     if (!store[key]) store[key] = { byId:{}, byCell:{} };
     const bucket = store[key];
@@ -116,11 +121,14 @@ function applySide(op, which) {
     for (const k in side.cell) markCellDirty(Number(k));
     for (const k in side.id)   markIdDirty(Number(k));
   }
+  refreshNativeCameraControls();
+  refreshFramingControls();
   glDirty = true; invalidateOther(); invalidateGameComposite();
   markEditorChanged(); refreshPixelEditor(); tally(); draw();
   return true;
 }
 function undo() {
+  finishFramingDrag();
   if (pendingOp) commitOp();
   const op = undoStack.pop();
   if (!op) return;
@@ -129,6 +137,7 @@ function undo() {
   refreshHistoryButtons();
 }
 function redo() {
+  finishFramingDrag();
   const op = redoStack.pop();
   if (!op) return;
   undoStack.push(op);
@@ -151,7 +160,7 @@ function paintCell(cx, cy, value) {
   const pasted=stampBucket(room,bgIndex).cells[`${cx},${cy}`];
   if(pasted) {
     paintStampBands(cx,cy,value,brush==='class');selectCell(cx,cy);
-    if(brush==='class') {
+    if(brush==='class'&&!pasted.blank) {
       recordId(pasted.id);
       if(value===null)delete st.byId[pasted.id];else st.byId[pasted.id]=value;
       markIdDirty(pasted.id);
@@ -164,7 +173,7 @@ function paintCell(cx, cy, value) {
   const cell = cy*L.cellsW + cx, id = L.cellId[cell];
   if(brush==='class') {
     for(const [pos,c] of Object.entries(stampBucket(room,bgIndex).cells))
-      if(c.id===id){const [x,y]=pos.split(',').map(Number);paintStampBands(x,y,value);}
+      if(!c.blank&&c.id===id){const [x,y]=pos.split(',').map(Number);paintStampBands(x,y,value);}
   }
   if (value === null) {                       /* Alt: back to authentic */
     recordCell(cell); delete st.byCell[cell];
@@ -213,6 +222,7 @@ cvs.addEventListener('mousedown', ev => {
     drag = { pan:true, x:ev.clientX, y:ev.clientY }; return;
   }
   if(ev.button!==0)return;
+  if(brush==='framing'){beginFramingDrag(ev);return;}
   const [cx, cy] = toCell(ev);
   /* Defer Shift-click until release. A deliberate drag still pans, while a
    * click selects an inclusive rectangle without painting or stamping. */
@@ -251,6 +261,7 @@ window.addEventListener('mousemove', ev => {
   hud(cx, cy);
   if(brush==='stamp'){stampHover=[cx,cy];draw();}
   if (!drag) return;
+  if(drag.framing){moveFramingDrag(ev);return;}
   if(drag.shiftSelect) {
     const dx=ev.clientX-drag.x,dy=ev.clientY-drag.y;
     if(dx*dx+dy*dy<16)return;
@@ -275,6 +286,7 @@ window.addEventListener('mousemove', ev => {
   else if (drag.rect||drag.selectRect) { drag.x1=cx; drag.y1=cy; draw(); }
 });
 window.addEventListener('mouseup', () => {
+  if(finishFramingDrag())return;
   if(drag?.shiftSelect) {
     const [x,y]=drag.anchor||[drag.cx,drag.cy];
     selectRectangle(x,y,drag.cx,drag.cy);
@@ -299,6 +311,7 @@ window.addEventListener('mouseup', () => {
 cvs.addEventListener('wheel', ev => {
   ev.preventDefault();
   if (mode !== '2d') return;
+  if(drag?.framing)return;
   const r = cvs.getBoundingClientRect();
   const mx = ev.clientX-r.left, my = ev.clientY-r.top;
   const k = Math.exp(-ev.deltaY * 0.0015);
@@ -338,13 +351,20 @@ $('#deselect').onclick = deselect;
 function applySelectionBand(value) {
   if (!selectedCells.size && !selectedStampKeys.size) return false;
   beginOp(value===null?'reset selected tile bands':`apply ${BANDS[value].name.toLowerCase()} to selection`);
-  let changed=false;
+  const target=stampBucket(room,bgIndex),proposed={...target.cells};
   for(const cell of selectedStampKeys) {
-    const target=stampBucket(room,bgIndex),tile=target.cells[cell];
+    const tile=displayedCell(room,bgIndex,L,...cell.split(',').map(Number));
     if(!tile)continue;
     const bands=tile.words.map(word=>value===null?authenticBand(word):value);
-    if(bands.every((b,i)=>b===tile.bands[i]))continue;
-    recordStamp(keyOf(room,bgIndex),cell);target.cells[cell]={...tile,bands};changed=true;
+    if(bands.some((b,i)=>b!==tile.bands[i]))proposed[cell]={...tile,bands};
+  }
+  if(regionalStampCount(room,bgIndex,proposed)>kStampMax) {
+    commitOp();sceneryNotice('Maximum 512 added tiles per BG. No tiles were changed.');return false;
+  }
+  let changed=false;
+  for(const cell of selectedStampKeys) {
+    if(proposed[cell]===target.cells[cell])continue;
+    recordStamp(keyOf(room,bgIndex),cell);target.cells[cell]=proposed[cell];changed=true;
   }
   for (const cell of selectedCells) {
     const next=value===null?undefined:value;
@@ -352,7 +372,7 @@ function applySelectionBand(value) {
     recordCell(cell);setKey(st.byCell,cell,next);changed=true;
   }
   commitOp();
-  if(changed){markEditorChanged(); invalidate();refreshSelectionControls();}
+  if(changed){invalidate();sceneryChanged();}
   return changed;
 }
 $('#applyBand').onclick = () => applySelectionBand(band);

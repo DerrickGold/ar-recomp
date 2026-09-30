@@ -118,6 +118,7 @@ code{font-family:var(--mono);font-size:10.5px;color:#bcd4f5}
 .tally .v{font-family:var(--mono);font-size:12px;font-weight:600;display:block}
 .tally .l{font-size:9px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em}
 .ctl{display:flex;align-items:center;gap:7px;margin:0 0 5px}
+.framing-guides{display:flex;gap:16px;margin:0 0 8px;font-size:12px}
 .ctl label{font-family:var(--mono);font-size:10px;color:var(--faint);min-width:12px}
 .ctl input[type=range]{flex:1;min-width:0}
 .ctl .v{font-family:var(--mono);font-size:10px;color:var(--dim);
@@ -138,6 +139,17 @@ dialog{background:var(--panel);color:var(--ink);border:1px solid var(--line);
   border-radius:10px;padding:0;max-width:660px;width:calc(100vw - 48px);
   max-height:82vh;box-shadow:0 24px 64px -20px #000}
 dialog::backdrop{background:rgba(8,9,12,.72)}
+#exportDlg{max-width:920px}
+#exportDlg .dlg-b{max-height:none;overflow:visible}
+#exportDlg .spacer{flex:1}
+.export-label{display:block;font-size:11px;color:var(--dim);margin-bottom:5px}
+#exportText{box-sizing:border-box;display:block;width:100%;height:42vh;min-height:120px;
+  resize:vertical;background:var(--sunk);color:var(--ink);border:1px solid var(--line);
+  border-radius:5px;padding:12px;font:12px/1.6 var(--mono);tab-size:2}
+.export-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
+#exportCopy:not(:disabled){background:var(--accent-dim);border-color:var(--accent);color:#cfe4ff}
+#exportText:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+#exportStatus{margin:10px 0 0;min-height:1.65em}
 .dlg-h{display:flex;align-items:center;gap:10px;padding:14px 18px;
   border-bottom:1px solid var(--line)}
 .dlg-h h3{margin:0;font-size:14px;font-weight:600}

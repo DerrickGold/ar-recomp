@@ -3,6 +3,22 @@
 #include <limits.h>
 #include <stddef.h>
 
+void ActionCameraAxisBounds_ApplySceneryPadding(
+    int native_extent, int scenery_start, int scenery_extent,
+    int *requested_before, int *requested_after) {
+  if (native_extent <= 0 || scenery_extent <= 0) return;
+  const int64_t end = (int64_t)scenery_start + scenery_extent;
+  if (scenery_start > 0 || end < native_extent) return;
+  const int64_t before = -(int64_t)scenery_start;
+  const int64_t after = end - native_extent;
+  if (requested_before && *requested_before > 0)
+    *requested_before = before >= *requested_before
+        ? 0 : *requested_before - (int)before;
+  if (requested_after && *requested_after > 0)
+    *requested_after = after >= *requested_after
+        ? 0 : *requested_after - (int)after;
+}
+
 bool ActionCameraAxisBounds_Resolve(
     uint16_t world_extent, uint16_t viewport_extent,
     int requested_before, int requested_after,

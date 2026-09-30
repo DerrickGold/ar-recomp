@@ -154,6 +154,13 @@ function loadIniText(text, name) {
     const values = iniWords(line.slice(eq+1));
     if(region!==undefined)values.terrain=region;
     if(!terrainMask(values.terrain))continue;
+    if(token==='framing') {
+      if(/^-?\d+$/.test(values.x||'')&&/^-?\d+$/.test(values.y||'')&&
+          Math.abs(Number(values.x))<=64&&Math.abs(Number(values.y))<=64)
+        for(const variant of regionalRooms(active,0,region))
+          stampBucket(variant,0).framing={x:Number(values.x),y:Number(values.y)};
+      continue;
+    }
     const sm=token.match(/^bg([12])-(stamp|map)$/);
     if(sm){
       const bg=Number(sm[1])-1;
@@ -312,7 +319,7 @@ function virtualIniLines(r) {
   }
   return lines;
 }
-const roomIniLines = r => [...planeIniLines(r),...virtualIniLines(r),...pixelIniLines(r),...stampIniLines(r)];
+const roomIniLines = r => [...framingIniLines(r),...planeIniLines(r),...virtualIniLines(r),...pixelIniLines(r),...stampIniLines(r)];
 function ownedIniLine(line) {
   const match=stripIniComment(line).match(/^([^=\s]+)\s*=/);
   if(!match)return false;
@@ -320,7 +327,32 @@ function ownedIniLine(line) {
   if(!key)return false;
   const [token,region]=key;
   return EDITABLE_PLANE_TOKENS.has(token)&&region===undefined||
+    token==='framing'&&!!terrainMask(region)||
     /^bg[12]-(virtual|pixels|stamp|map)$/.test(token)&&!!terrainMask(region);
+}
+const roomSectionHeader = r => `[layers:${r.group.toString(16).toUpperCase().padStart(2,'0')}:${r.map.toString(16).toUpperCase().padStart(2,'0')}]`;
+function mergeRoomIniBody(body,canonical) {
+  const first=body.findIndex(ownedIniLine),kept=body.filter(line=>!ownedIniLine(line));
+  let at=first>=0?body.slice(0,first).filter(line=>!ownedIniLine(line)).length:kept.length;
+  if(first<0)while(at>0&&!kept[at-1].trim())at--;
+  return [...kept.slice(0,at),...canonical,...kept.slice(at)];
+}
+/* A complete replacement for this base section, including settings the editor
+ * does not own. Resolve duplicate source sections once; never emit other rooms
+ * or camera-local sections into a block intended for a single paste. */
+function roomSectionIni(r) {
+  const body=[];
+  let active=false;
+  for(const raw of sourceIniText.split(/\r?\n/)) {
+    if(/^\s*\[/.test(raw)) {
+      const match=stripIniComment(raw).match(/^\[layers:([0-9a-fA-F]{1,2}):([0-9a-fA-F]{1,2})\]$/);
+      active=!!match&&parseInt(match[1],16)===r.group&&parseInt(match[2],16)===r.map;
+      const comment=active?raw.slice(raw.indexOf(']')+1).trim():'';
+      if(/^[#;]/.test(comment))body.push(comment);
+    } else if(active)body.push(raw);
+  }
+  return [roomSectionHeader(r),...mergeRoomIniBody(body,roomIniLines(r))]
+    .join('\n').trimEnd()+'\n';
 }
 function mergeDioramaIni() {
   const hadFinalNewline = /\r?\n$/.test(sourceIniText);
@@ -338,25 +370,12 @@ function mergeDioramaIni() {
     const r = match && DATA.rooms.find(x => x.group===parseInt(match[1],16) && x.map===parseInt(match[2],16));
     if (!r) { out.push(...block); continue; }
     written.add(roomKey(r));
-    const canonical = roomIniLines(r);
-    const body = block.slice(1);
-    const first = body.findIndex(ownedIniLine);
-    const kept = body.filter(line => !ownedIniLine(line));
-    out.push(block[0]);
-    if (first >= 0) {
-      const beforeCount = body.slice(0,first)
-        .filter(line => !ownedIniLine(line)).length;
-      out.push(...kept.slice(0,beforeCount), ...canonical, ...kept.slice(beforeCount));
-    } else {
-      let at = kept.length;
-      while (at > 0 && !kept[at-1].trim()) at--;
-      out.push(...kept.slice(0,at), ...canonical, ...kept.slice(at));
-    }
+    out.push(block[0],...mergeRoomIniBody(block.slice(1),roomIniLines(r)));
   }
   for (const r of DATA.rooms) {
     if (written.has(roomKey(r)) || !roomIniLines(r).length) continue;
     if (out.length && out[out.length-1].trim()) out.push('');
-    out.push(`[layers:${r.group.toString(16).toUpperCase().padStart(2,'0')}:${r.map.toString(16).toUpperCase().padStart(2,'0')}]`);
+    out.push(roomSectionHeader(r));
     out.push(...roomIniLines(r));
   }
   return out.join('\n') + (hadFinalNewline || out.length ? '\n' : '');
@@ -415,7 +434,7 @@ function setSelectionAnchor(cx,cy) {
 }
 function focusTileAt(cx,cy) {
   const tile=displayedCell(room,bgIndex,L,cx,cy);
-  pixelStamp=tile&&stampBucket(room,bgIndex).cells[`${cx},${cy}`]?`${cx},${cy}`:null;
+  pixelStamp=tile&&(stampBucket(room,bgIndex).cells[`${cx},${cy}`]||!nativeCell(L,cx,cy))?`${cx},${cy}`:null;
   pixelCell=tile&&!pixelStamp?cy*L.cellsW+cx:null;
   lastEntry=tile?tile.words[0]:null;
 }
@@ -426,11 +445,12 @@ function refreshSelectionControls() {
   $('#applyBand').disabled = selectedCells.size === 0 && selectedStampKeys.size === 0;
   $('#pixelSelectionBlack').disabled=$('#pixelSelectionBlackQuick').disabled=$('#applyBand').disabled;
   refreshPixelEditor();refreshStampControls();refreshEditorFeedback();
+  refreshFramingControls();
 }
 function selectCell(cx,cy,allInstances = false) {
   selectionRect=null;
   const pasted=stampBucket(room,bgIndex).cells[`${cx},${cy}`];
-  if(pasted) {
+  if(pasted||!nativeCell(L,cx,cy)&&displayedCell(room,bgIndex,L,cx,cy)) {
     pixelCell=null;pixelStamp=`${cx},${cy}`;selectedStampKeys.add(pixelStamp);
     refreshSelectionControls();return;
   }
@@ -610,7 +630,7 @@ function gameLayerSurfaces(r, bg, original=false) {
   if (game2dCache.has(key)) return game2dCache.get(key);
   const layer = decodeLayer(r,bg), state = bucket(r,bg);
   if (!layer) return null;
-  const bounds=original?{x0:0,y0:0,x1:layer.cellsW,y1:layer.cellsH}:mapBounds(r,bg,layer),w=(bounds.x1-bounds.x0)*16,h=(bounds.y1-bounds.y0)*16;
+  const bounds=original?{x0:0,y0:0,x1:layer.cellsW,y1:layer.cellsH}:sceneryBounds(r,bg),w=(bounds.x1-bounds.x0)*16,h=(bounds.y1-bounds.y0)*16;
   const ox=-bounds.x0*16,oy=-bounds.y0*16;
   const images = [new ImageData(w,h), new ImageData(w,h)];
   for (let ty=0; ty<layer.tilesH; ty++) for (let tx=0; tx<layer.tilesW; tx++) {
@@ -633,7 +653,7 @@ function gameLayerSurfaces(r, bg, original=false) {
     return canvas;
   });
   let built = { L:{...layer,w,h,originX:bounds.x0*16,originY:bounds.y0*16}, low:canvases[0], high:canvases[1] };
-  if (bg === 1 && r.bg2PageCycle && (original||!Object.keys(stampBucket(r,bg).cells).length && !stampBucket(r,bg).bounds)) {
+  if (bg === 1 && r.bg2PageCycle && (original||!Object.keys(stampBucket(r,bg).cells).length)) {
     const page = bg2PageIndex(r), sx = (page & 1) * 256;
     const sy = (page >> 1) * 256;
     const cropped = canvases.map(source => {
@@ -744,4 +764,5 @@ function draw2d() {
       ctx.fillRect(x,y,size,size);ctx.strokeRect(x+(size-shown)/2,y+(size-shown)/2,shown,shown);
     }
   }
+  drawFramingGuide();
 }

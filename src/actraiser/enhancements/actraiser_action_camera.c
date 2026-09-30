@@ -17,6 +17,7 @@
 
 #include "action/action_camera_bounds.h"
 #include "actraiser/actraiser_action_bg.h"
+#include "actraiser/enhancements/actraiser_enhancements_internal.h"
 #include "actraiser_game.h"
 #include "present/display_geometry.h"
 #include "snesrecomp/game/cpu.h"
@@ -68,8 +69,8 @@ static bool ActionCamera_ResolvePlayfield(ActionBgLayerPlan *playfield) {
    * treating every action group as a streamed playfield would shift those
    * cameras even though their presentation intentionally wraps/clamps. The
    * tuner cannot alter roles, sources, or canvas ownership. The camera uses
-   * the baked canonical extent; a session draft remains presentation-only
-   * until its exported values are transcribed into that catalogue. */
+   * the baked canonical policy; Diorama's authored scenery can supply its
+   * horizontal padding without enlarging the native gameplay world. */
   ActionBgPlan plan;
   ActionBgPresentationPolicy presentation;
   if (!ActRaiserActionBg_BuildCurrentPlan(
@@ -146,16 +147,27 @@ RecompReturn ActRaiser_UpdateActionCamera(CpuState *cpu) {
 
   ActionBgLayerPlan playfield;
   const bool wide = ActionCamera_ResolvePlayfield(&playfield);
-  const int horizontal_before = wide
+  int horizontal_before = wide
       ? ActionCamera_LimitMargin(
             g_ws_extra, playfield.horizontal_extent.mode,
             playfield.horizontal_extent.left)
       : 0;
-  const int horizontal_after = wide
+  int horizontal_after = wide
       ? ActionCamera_LimitMargin(
             g_ws_extra, playfield.horizontal_extent.mode,
             playfield.horizontal_extent.right)
       : 0;
+  const uint16_t native_width = ActionCamera_Read16(
+      cpu, kActRaiserWram_Bg1Width);
+  if (wide && g_settings.diorama_mode) {
+    int scenery_start, scenery_width;
+    ActRaiserActionBg_ResolveDioramaHorizontalExtent(
+        ActRaiser_CurrentVirtualLayerRoom(), 0, native_width,
+        &scenery_start, &scenery_width);
+    ActionCameraAxisBounds_ApplySceneryPadding(
+        native_width, scenery_start, scenery_width,
+        &horizontal_before, &horizontal_after);
+  }
   const uint16_t old_x = ActionCamera_Read16(
       cpu, kActRaiserWram_Bg1CameraX);
   const uint16_t old_y = ActionCamera_Read16(
@@ -168,7 +180,7 @@ RecompReturn ActRaiser_UpdateActionCamera(CpuState *cpu) {
   ActionCameraAxisBounds vertical_bounds = { 0 };
   const uint16_t camera_x = ActionCameraAxisBounds_UpdateCamera(
       old_x, requested_delta_x,
-      ActionCamera_Read16(cpu, kActRaiserWram_Bg1Width),
+      native_width,
       kActRaiserAuthenticWidth, horizontal_before, horizontal_after,
       &horizontal_bounds);
   /* Do not fit the gameplay camera to Diorama's vertical capture budget.

@@ -26,10 +26,7 @@ function openTileMenu(cx,cy,clientX,clientY) {
     selectedCells.clear();selectedStampKeys.clear();selectionRect=null;
     selectCell(cx,cy);setSelectionAnchor(cx,cy);
   }
-  if(tile) {
-    pixelStamp=stampBucket(room,bgIndex).cells[position]?position:null;
-    pixelCell=pixelStamp?null:cy*L.cellsW+cx;lastEntry=tile.words[0];
-  }
+  if(tile)focusTileAt(cx,cy);
   refreshSelectionControls();draw();
   const positions=tileSelectionPositions(),bands=positions.flatMap(([x,y])=>
     displayedCell(room,bgIndex,L,x,y)?.bands||[]);
@@ -44,7 +41,7 @@ function openTileMenu(cx,cy,clientX,clientY) {
   for(const name of ['Priority','Far','ResetBand','Fill','Copy','Deselect'])
     $(`#tileAction${name}`).disabled=!hasSelection;
   $('#tileActionPixels').disabled=!tile;
-  $('#tileActionRemove').disabled=!selectedStampKeys.size;
+  $('#tileActionRemove').disabled=$('#removeStamps').disabled;
   $('#tileActionStamp').disabled=!sameClipboard;
   $('#tileActionPaste').disabled=!sameClipboard||cx < -512||cy < -512||
     cx+tileClipboard.w>512||cy+tileClipboard.h>512;

@@ -117,8 +117,16 @@ alongside yours, and you will see a line like
 the next time you play. If you changed a setting, your value always wins; only
 settings that are genuinely new in that version get added.
 
-The same is true of "diorama-layers.ini" and "game-assets/manifest.ini": your
-authored rooms and your own asset entries survive an upgrade.
+Your own entries in "game-assets/manifest.ini" also survive an upgrade.
+
+"diorama-layers.ini" contains shipped scenery corrections, tile additions and
+room framing. When that bundled content changes, the next launch replaces the
+installed file, including existing rooms and deleted patches. Your previous
+copy is preserved as "diorama-layers.ini.pre-update-1" (then -2, -3, etc.).
+The "diorama-layers.ini.installed" file tracks the last bundled content applied.
+Local authoring survives ordinary launches and reinstalling identical content;
+a changed bundled version wins on the next update. Source checkouts without
+defaults/ continue to use their manually edited INI directly.
 
 You will need your ROM again only if you want to REBUILD. If you just want to
 keep playing, the game is already built and nothing else is needed.

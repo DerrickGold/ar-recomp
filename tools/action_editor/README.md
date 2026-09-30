@@ -15,7 +15,16 @@ file that can open from `file://`. The default output is
 `build/action-editor/ar-action-layer-editor.html`, keeping the generated editor
 out of the source tree and Git. By default it embeds the repository ROM and
 `diorama-layers.ini`; **Load INI** can replace the configuration at runtime and
-**Export INI** downloads a complete merged file.
+**Export level INI** opens a copyable replacement section for the current room.
+The dialog also offers **Download full INI…** for a complete merged file.
+
+The repository INI is also the release's authored scenery source. Packaging
+ships it as `defaults/diorama-layers.ini`; the first game launch after those
+bundled bytes change backs up and replaces the installed live copy, including
+corrections to existing rooms and removed tile patches. Backups are named
+`diorama-layers.ini.pre-update-N`, and `diorama-layers.ini.installed` tracks the
+last applied release. Local edits survive ordinary launches and identical
+reinstalls. A source checkout without `defaults/` uses the edited INI directly.
 
 ## Regional terrain
 
@@ -107,12 +116,22 @@ tiles**/**Select highlighted tiles** selects all matches for a bulk action.
 **Compare original tiles** hides authored pixel masks, pasted scenery
 and band tint temporarily. Editing returns to the edited preview.
 
-Actions apply immediately in the preview. The **Unexported changes** badge
-compares the complete INI against the loaded file or last export, including
-Undo/Redo. **Export changes** downloads that INI and changes the badge to
-**Matches last export**. Replace the game's `diorama-layers.ini` with the
-download and restart to use it. Export before refreshing the editor; use
-**Load INI** afterward to resume your work.
+Actions apply immediately in the preview. **Export level INI** opens a modal
+with the current room's complete `[layers:GG:MM]` section: both BGs, all terrain
+variants, and existing settings and comments from the loaded section. Choose
+**Copy section**, replace that section in the game's `diorama-layers.ini`, save,
+and restart. Replace old tile lines too; appending a patch cannot remove old
+edits. Leave camera-specific sections in place. If the base section does not
+exist, append the copied block. Repeated base sections are consolidated in the
+copied output and should be replaced with that single block.
+
+Opening or closing the modal does not mark edits exported. Successful copying
+updates only that room's savepoint; other rooms keep **Unexported changes**.
+When every room matches its loaded, copied or downloaded state, the badge shows
+**Matches last copy** or **Matches last export**. Undo/Redo updates the badge.
+**Select all** and Ctrl/Cmd-C work when browser clipboard access is blocked.
+**Download full INI…** saves all rooms. Export before refreshing the editor;
+use **Load INI** with the updated file afterward to resume your work.
 
 Advanced paint/depth, native-frame and edge-space controls live in expandable
 sidebar sections. The sidebar's **Paintbrush band** sets the advanced brushes;
@@ -157,8 +176,8 @@ For a partial transparency fix in **Kassandora · Act 2 · Room 4 (3:4)**:
 2. Keep **This map cell only** selected in the pixel inspector beside the map.
 3. Paint the desired subsection black on the magnified 16×16 grid. Unpainted
    checkerboard pixels retain transparency. **Restore pixel** restores ROM art.
-4. Check **Diorama 3D**, then **Export INI** and replace the game's
-   `diorama-layers.ini` with the downloaded file. Restart the game to load it.
+4. Check **Diorama 3D**, then **Export level INI → Copy section** and replace
+   this room's section in `diorama-layers.ini`. Save and restart the game.
 
 **Fill transparent pixels black** fills only colour-zero pixels of the selected
 cell. **Make whole tile black** also covers its original art. Both can instead
@@ -173,7 +192,7 @@ their transparent pixels become opaque black; original artwork, existing
 black pixel edits, depth bands, and unselected tiles stay as they were. The
 operation includes pasted tiles and always targets the selected placed cells,
 regardless of the single-tile metatile scope. It creates one Undo step and is
-saved by Export INI. If the whole operation would exceed the 256 pixel-record
+saved by Export level INI. If the whole operation would exceed the 256 pixel-record
 limit per BG, the editor reports it and changes no pixels.
 
 Pixel edits are opaque-black presentation masks, not changes to ROM CHR or
@@ -200,8 +219,8 @@ the editor checks that limit before exporting. Existing whole-plane
 3. Choose **Stamp copied tiles** (Ctrl/Cmd-V). Its translucent preview follows
    the pointer; click the destination's top-left cell. Click again to repeat,
    then press Esc to finish. The X/Y fields and **Paste** provide exact placement.
-4. Check **Diorama 3D** and **Export INI**. Replace the game's
-   `diorama-layers.ini` with the export and restart the rebuilt game.
+4. Check **Diorama 3D**, then **Export level INI → Copy section**. Replace this
+   room's section in `diorama-layers.ini`, save, and restart the game.
 
 Copies stay attached to their original room, BG and terrain family so their
 graphics bank, scroll, palette and layout remain valid. An overlapping paste
@@ -216,6 +235,74 @@ transparent pixels. It does not alter gameplay maps or collision.
 removal, edge expansion, bands, and pixel painting share Undo/Redo. Pasted cells
 can be selected and painted black individually in the pixel editor.
 
+Saved bounds automatically fit the native map plus the remaining pasted tiles.
+Deleting a bottom extension restores the native bottom edge and lets Diorama
+anchor there again. Empty **Add edge space** remains available while editing,
+but is omitted from export and does not reserve space in the game. The game
+also ignores stale empty bounds in older INI files when calculating its edges.
+
+Empty edge cells are selectable, including Shift-click ranges and right-click
+actions. **Fill transparency black** creates solid black tiles in those cells;
+**Pixels…** lets you paint only part of a blank cell. Copy/paste can also include
+blank cells. Selecting empty space does not save tiles until you edit or paste
+them. Newly painted blanks use transparent source art (`words:blank`), so
+restoring a pixel reveals transparency instead of an unrelated ROM character.
+The same tile and pixel-edit limits apply, with an atomic capacity check.
+
+### Saved framing for small rooms
+
+Click **Frame** above the map (or **Adjust frame on map** in the sidebar) to
+focus a draggable native 256×224 viewport. Dashed white marks the unshifted
+view at the current preview scroll; gold marks the adjusted view. Drag the
+gold rectangle to set the saved offsets, or use arrow keys for 1px nudges and
+Shift + arrows for 16px. Each drag is one Undo step; Esc cancels the current
+drag and returns to Select. The guide uses BG1 coordinates; the offset moves
+the whole scene. **Show viewport guides on BG1** toggles the overlay. Switch to
+**Diorama 3D** to check the result with depth and perspective.
+
+The **16:9** (cyan) and **16:10** (purple) guides show wider coverage around
+the same center and move with the native frame. Toggle either independently;
+you can drag inside any visible viewport with the Frame tool. **Pixel aspect**
+should match the game's setting: CRT (4:3) covers 342×224 and 308×224 map pixels,
+while Square pixels covers 400×224 and 360×224, respectively. These widths use
+the game's rounding to equal whole-pixel margins. **Guide coverage → Diorama
+estimate** uses the game's 0.4-radian field of view, the BG1 plane depth, and
+**Camera distance** to show the wider projected footprint. Match the distance
+and pixel aspect from your game settings. At distance 3.25 with square pixels
+and BG1 depth 0.50, 16:10 covers roughly 473×296 map pixels. This estimate assumes
+zero tilt; dynamic floor alignment can shift its vertical position. Resolution
+alone does not change coverage at the same aspect ratio.
+Guide visibility, coverage, distance and pixel aspect are preview options; export still saves one
+shared framing offset for the room's terrain family.
+
+Use **Saved Diorama framing → View X / View Y** to adjust the view relative to
+the existing scroll anchor. Negative X looks left; negative Y looks up. These
+offsets default to zero and do not change when you extend or trim the map. New
+graphics grow outward around the original room. In Diorama, added horizontal
+scenery supplies widescreen edge padding so the camera can travel farther
+toward that side within its original gameplay range. Empty workspace does not
+change the stop. The native world dimensions and vertical gameplay camera stay
+unchanged; saved framing is applied after automatic presentation alignment.
+
+Keep Y at zero to retain the normal floor anchoring, and adjust X to balance a
+small boss arena. Each control allows −64 to +64 native pixels; a tile is 16px.
+The game captures nearby native and added artwork in extra horizontal columns
+when an X offset is set or that BG has pasted scenery. Vertical offsets pan within the available capture;
+large adjustments can expose an edge. **Reset framing** restores the default.
+Framing changes use Undo/Redo and appear in **Export level INI**. Matching BG1
+terrain shares the setting; different regional layouts can be tuned separately.
+The existing **Native frame controls → Camera X / Y** only move the preview and
+are not exported.
+
+**Scenery & edge space → Trim unused edge space** removes unused authoring
+margins while preserving the original map and all added tiles. If no tiles
+remain outside the native map, the workspace returns to its original bounds.
+It supports Undo/Redo and leaves saved framing and tile edits intact.
+
+```ini
+framing:us+jp+eu = x:-40 y:0
+```
+
 There are at most 512 pasted cells per BG. Bounds can span 512 tiles on either
 axis, within signed coordinates −512 through 511. Rectangles are limited to
 512 cells. Copies carrying black masks also use the shared 256 pixel-record
@@ -225,7 +312,7 @@ The export uses frozen displayed SNES character words and one band per 8px
 quadrant (top-left, top-right, bottom-left, bottom-right):
 
 ```ini
-bg1-map = bounds:-4,0,32,16
+bg1-map = bounds:-1,0,32,16
 bg1-stamp = cell:-1,0 metatile:23 words:0010,4011,8012,E013 bands:0,1,2,1
 ```
 
@@ -234,6 +321,15 @@ negative cell coordinates. Pixel masks use the existing `bgN-pixels` records.
 The game samples the copied characters from live VRAM/CGRAM during capture,
 following flips, animation, brightness, mosaic, windows, and raster scroll.
 Only Diorama background surfaces receive these presentation additions.
+
+Export already consolidates overlapping pastes by destination (the latest
+paste wins), sorts their coordinates, and merges identical records across
+terrain variants into combined regional keys. Band edits are emitted as
+non-overlapping horizontal runs. Pasted artwork still uses one stamp record per
+unique destination cell: the game has no rectangle/repeat stamp syntax, and
+the 512-cell limit counts these cells. Export does not turn a local paste into
+a metatile-wide replacement or drop frozen art that happens to match the
+current source; those changes could affect other instances or later edits.
 
 ## INI format
 
@@ -252,10 +348,10 @@ cells and rectangle endpoints are inclusive. Later cell records win when they
 overlap; export writes non-overlapping canonical runs.
 
 The merger owns `bg1`, `bg1hi`, `bg2`, `bg2hi`, `bg1-virtual`, and
-`bg2-virtual`, `bgN-pixels`, `bgN-stamp`, and `bgN-map` lines in base action-room sections. Other planes, camera-local
-sections, comments, unknown settings, and unrelated rooms are preserved. This
-means the downloaded file is the normal game configuration, not a sidecar or
-intermediate JSON document.
+`bg2-virtual`, `bgN-pixels`, `bgN-stamp`, and `bgN-map` lines in base action-room
+sections. Room export preserves the current base section's other planes,
+comments and unknown settings. Full INI download also preserves camera-local
+sections and unrelated rooms. Both outputs use the game's normal INI format.
 
 ## Rendering views
 
@@ -375,6 +471,8 @@ The browser code is authored in ordinary JavaScript files, checked by the local
 - `stamp_editor.js`: rectangular clipboard, signed scenery placement, and edge bounds.
 - `editor_feedback.js`: selection actions, applied-state inspection, edit review and export savepoints.
 - `tile_menu.js`: context actions, paste destination, and keyboard menu navigation.
+- `export_editor.js`: room-section modal, clipboard fallback and full INI download.
+- `framing_editor.js`: saved offsets relative to the room's scroll anchor.
 - `diorama_view.js`: WebGL preview and orbit interaction.
 - `editor.js`: reference actor, UI controls and startup.
 - `help.js`: the embedded help content.

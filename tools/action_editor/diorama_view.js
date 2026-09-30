@@ -153,7 +153,7 @@ function draw3d() {
   /* World units: one authentic screen-height = 1.0, matching the capture
    * geometry the runtime gives its presentation renderer. */
   const unit = 1 / DATA.frameHeight;
-  const W = DATA.frameWidth*unit, H = 1.0;
+  const W = captured.width*unit, H = 1.0;
   const cx = Math.cos(orbit.yaw), sx = Math.sin(orbit.yaw);
   const cp = Math.cos(orbit.pitch), sp = Math.sin(orbit.pitch);
   /* Orbit focus is local to the visible capture. The native camera sliders
@@ -162,6 +162,9 @@ function draw3d() {
   const eye = [fx + sx*cp*orbit.dist, fy - sp*orbit.dist, cx*cp*orbit.dist];
   const mvp = mul(perspective(0.9, glc.width/glc.height, 0.01, 60),
                   lookAt(eye[0],eye[1],eye[2], fx,fy,0));
+  const framing=roomFraming(room);
+  for(let row=0;row<4;row++)
+    mvp[12+row]+=(-framing.x*mvp[row]+framing.y*mvp[4+row])*unit;
   gl.uniformMatrix4fv(gl.getUniformLocation(prog,'uMVP'), false, new Float32Array(mvp));
   lastMVP = mvp; lastVW = glc.clientWidth; lastVH = glc.clientHeight;
 
@@ -239,7 +242,7 @@ function draw3d() {
     ? resolvedPlane('obj2').order : bandPaintOrder(item.bg,item.b);
   items.sort((a,b) => a.order-b.order || a.sequence-b.sequence);
   for (const item of items) {
-    if (item.actor) { drawActor3d(unit,W,H); continue; }
+    if (item.actor) { drawActor3d(unit,DATA.frameWidth*unit,H); continue; }
     const source = bgState(item.bg);
     const alpha = bandAlpha(item.bg,item.b) / 255;
     drawSurface(item,source.texes[item.b],alpha);

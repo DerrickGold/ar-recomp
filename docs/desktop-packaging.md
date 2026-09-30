@@ -49,7 +49,14 @@ To move a portable installation, copy the entire folder, including its sidecar
 and data. Copying only the app switches it to per-user storage. Switching modes
 does not automatically transfer saves or settings; back up and copy the data
 you want to keep. Updates preserve existing saves, settings, and edited seed
-files. Use the Workshop's explicit import workflow to bring in another project's
+files. Diorama scenery is release-managed: changed bundled
+`defaults/diorama-layers.ini` content replaces the live `diorama-layers.ini` on
+the next game launch, so corrections to existing rooms and removed tile patches
+reach upgraded installations. Numbered `diorama-layers.ini.pre-update-N` backups
+preserve previous copies. `diorama-layers.ini.installed` records the last applied
+bundle; local authoring survives normal launches until bundled content changes.
+Settings, saves and custom asset entries retain their existing preservation rules.
+Use the Workshop's explicit import workflow to bring in another project's
 content while retaining the original.
 
 ## Inspecting paths and troubleshooting

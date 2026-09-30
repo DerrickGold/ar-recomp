@@ -15,7 +15,8 @@ DioramaUploadResult Diorama_Upload(
     ArRenderTexture textures[kDioramaPlane_Count],
     const uint8_t *const pixels[kDioramaPlane_Count],
     const size_t pitch_bytes[kDioramaPlane_Count],
-    int snes_width, int snes_height, int obj_apron, uint32_t plane_mask) {
+    int snes_width, int snes_height, int obj_apron, unsigned bg_apron_mask,
+    uint32_t plane_mask) {
   DioramaUploadResult upload = {0};
   DioramaPerformanceScope performance =
       DioramaPerformance_Begin(kDioramaPerformance_Upload);
@@ -39,7 +40,7 @@ DioramaUploadResult Diorama_Upload(
       continue;
     DioramaPlaneCaptureRegion region;
     if (!DioramaPlaneCaptureRegion_Resolve(
-            plane, snes_width, snes_height, obj_apron, &region))
+            plane, snes_width, snes_height, obj_apron, bg_apron_mask, &region))
       continue;
     const uint8_t *source = pixels[plane] +
         (size_t)region.x * sizeof(uint32_t);
@@ -66,8 +67,8 @@ DioramaUploadResult Diorama_Upload(
         /* A content-bearing plane whose winners all lie in the resolve apron
          * is invisible to the ordinary layer mesh. Keep the established full
          * draw as a fail-safe instead of turning its required submission into
-         * an empty-index failure. BG split planes cannot carry apron pixels,
-         * but share the same conservative zero-mask policy. */
+         * an empty-index failure. BG guard meshes bypass this ordinary-window
+         * mask, but share the same conservative zero-mask policy. */
         s_coverage_masks[plane] = coverage
             ? coverage : DioramaCoverage_FullMask();
         s_coverage_valid_mask |= plane_bit;

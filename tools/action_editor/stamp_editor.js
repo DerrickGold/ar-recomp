@@ -2,6 +2,8 @@
  * rectangle. Coordinates are signed 16px cells; the original map is immutable. */
 const stampStore = {}, selectedStampKeys = new Set();
 const kStampMax = 512;
+const blankTile=()=>({blank:true,id:0,words:[0,0,0,0],bands:[1,1,1,1],black:ZERO_PIXEL_MASK});
+const nativeCell=(layer,x,y)=>x>=0&&y>=0&&x<layer.cellsW&&y<layer.cellsH;
 let selectionRect = null, tileClipboard = null, stampHover = null, pixelStamp = null;
 function sceneryNotice(message) {
   $('#stampInfo').textContent=message;tileActionStatus(message);
@@ -9,15 +11,24 @@ function sceneryNotice(message) {
 function stampBucket(r,bg) {
   return stampStore[keyOf(r,bg)] ??= {cells:{},bounds:undefined};
 }
-function mapBounds(r,bg,layer) {
-  const b=stampBucket(r,bg),base={x0:0,y0:0,x1:layer.cellsW,y1:layer.cellsH};
-  const result={...(b.bounds||base)};
-  result.x0=Math.min(0,result.x0);result.y0=Math.min(0,result.y0);
-  result.x1=Math.max(base.x1,result.x1);result.y1=Math.max(base.y1,result.y1);
-  for(const key of Object.keys(b.cells)) {
+/* Empty edge space is temporary authoring room. Saved scenery follows the
+ * native map plus remaining pasted cells, so deleting an edge restores it. */
+function sceneryBounds(r,bg) {
+  const layer=r.bg[bg];
+  if(!layer)return null;
+  const result={x0:0,y0:0,x1:layer.pagesWide*16,y1:layer.pagesHigh*16};
+  for(const key of Object.keys(stampBucket(r,bg).cells)) {
     const [x,y]=key.split(',').map(Number);
     result.x0=Math.min(result.x0,x);result.y0=Math.min(result.y0,y);
     result.x1=Math.max(result.x1,x+1);result.y1=Math.max(result.y1,y+1);
+  }
+  return result;
+}
+function mapBounds(r,bg) {
+  const result=sceneryBounds(r,bg),space=stampBucket(r,bg).bounds;
+  if(space) {
+    result.x0=Math.min(result.x0,space.x0);result.y0=Math.min(result.y0,space.y0);
+    result.x1=Math.max(result.x1,space.x1);result.y1=Math.max(result.y1,space.y1);
   }
   return result;
 }
@@ -32,12 +43,16 @@ function recordBounds(key) {
 }
 function sceneryChanged() {
   markEditorChanged();surfacesDirty=compositeDirty=glDirty=true;
-  invalidateOther();invalidateGameComposite();refreshSelectionControls();draw();
+  invalidateOther();invalidateGameComposite();refreshNativeCameraControls();
+  refreshSelectionControls();draw();
 }
 function displayedCell(r,bg,layer,x,y) {
   const pasted=stampBucket(r,bg).cells[`${x},${y}`];
   if(pasted)return pasted;
-  if(x<0||y<0||x>=layer.cellsW||y>=layer.cellsH)return null;
+  if(!nativeCell(layer,x,y)) {
+    const b=mapBounds(r,bg);
+    return x>=b.x0&&y>=b.y0&&x<b.x1&&y<b.y1?blankTile():null;
+  }
   const cell=y*layer.cellsW+x,words=[],bands=[];
   for(let q=0;q<4;q++) {
     const tx=x*2+(q&1),ty=y*2+(q>>1);
@@ -47,6 +62,7 @@ function displayedCell(r,bg,layer,x,y) {
   return {words,bands,id:layer.cellId[cell],black:pixelMaskAt(r,bg,layer,cell)};
 }
 function stampOriginal(layer,stamp,x,y) {
+  if(stamp.blank)return null;
   const entry=stamp.words[(y>>3)*2+(x>>3)];
   const value=nativeCharacterPixel(layer,entry,x&7,y&7);
   return value?layer.pal[((entry>>10)&7)*16+value]:null;
@@ -69,7 +85,7 @@ function selectRectangle(x0,y0,x1,y1) {
   setSelectionAnchor(Math.max(bounds.x0,Math.min(bounds.x1-1,x0)),
     Math.max(bounds.y0,Math.min(bounds.y1-1,y0)));
   for(let y=b.y0;y<b.y1;y++)for(let x=b.x0;x<b.x1;x++) {
-    if(stampBucket(room,bgIndex).cells[`${x},${y}`])selectedStampKeys.add(`${x},${y}`);
+    if(stampBucket(room,bgIndex).cells[`${x},${y}`]||!nativeCell(L,x,y))selectedStampKeys.add(`${x},${y}`);
     else if(x>=0&&y>=0&&x<L.cellsW&&y<L.cellsH)selectedCells.add(y*L.cellsW+x);
   }
   focusTileAt(Math.max(b.x0,Math.min(b.x1-1,x1)),Math.max(b.y0,Math.min(b.y1-1,y1)));
@@ -164,12 +180,30 @@ function removeStamps(all=false) {
   if(all){recordBounds(key);target.bounds=undefined;}
   commitOp();deselect();sceneryChanged();if(all)fitView();draw();
 }
+function trimEdgeSpace() {
+  const key=keyOf(room,bgIndex),target=stampBucket(room,bgIndex);
+  if(!target.bounds)return false;
+  const b=sceneryBounds(room,bgIndex),space=mapBounds(room,bgIndex);
+  if(['x0','y0','x1','y1'].every(k=>space[k]===b[k]))return false;
+  beginOp('trim unused edge space');recordBounds(key);target.bounds=undefined;commitOp();
+  for(const cell of selectedStampKeys) {
+    const [x,y]=cell.split(',').map(Number);
+    if(x<b.x0||y<b.y0||x>=b.x1||y>=b.y1)selectedStampKeys.delete(cell);
+  }
+  selectionRect=null;
+  if(selectionAnchor&&(selectionAnchor[0]<b.x0||selectionAnchor[1]<b.y0||
+      selectionAnchor[0]>=b.x1||selectionAnchor[1]>=b.y1))selectionAnchor=null;
+  if(pixelStamp&&!displayedCell(room,bgIndex,L,...pixelStamp.split(',').map(Number)))pixelStamp=null;
+  sceneryChanged();fitView();draw();
+  sceneryNotice('Trimmed unused edge space. Original map and all added tiles kept. Undo restores the workspace.');
+  return true;
+}
 function paintStampBands(cx,cy,value,all=false) {
   const key=keyOf(room,bgIndex),target=stampBucket(room,bgIndex);
   const source=target.cells[`${cx},${cy}`];
   if(!source)return false;
   for(const [cell,c] of Object.entries(target.cells)) {
-    if(all?c.id!==source.id:cell!==`${cx},${cy}`)continue;
+    if(all?c.id!==source.id||!!c.blank!==!!source.blank:cell!==`${cx},${cy}`)continue;
     recordStamp(key,cell);target.cells[cell]={...c,
       bands:c.words.map(word=>value===null?authenticBand(word):value)};
   }
@@ -185,13 +219,14 @@ function loadStampIni(r,bg,values) {
     return;
   }
   if(!/^-?\d+,-?\d+$/.test(values.cell||'')||
-      !/^[0-9a-fA-F]{1,4}(,[0-9a-fA-F]{1,4}){3}$/.test(values.words||'')||
+      !(values.words==='blank'||/^[0-9a-fA-F]{1,4}(,[0-9a-fA-F]{1,4}){3}$/.test(values.words||''))||
       !/^[012](,[012]){3}$/.test(values.bands||'')||
       !/^[0-9a-fA-F]{1,2}$/.test(values.metatile||''))return;
   const [x,y]=values.cell.split(',').map(Number),cell=`${x},${y}`;
   if(x<-512||y<-512||x>=512||y>=512||
       (!target.cells[cell]&&Object.keys(target.cells).length>=kStampMax))return;
-  target.cells[cell]={words:values.words.split(',').map(v=>parseInt(v,16)),
+  target.cells[cell]={...(values.words==='blank'?blankTile():{}),
+    words:values.words==='blank'?[0,0,0,0]:values.words.split(',').map(v=>parseInt(v,16)),
     bands:values.bands.split(',').map(Number),id:parseInt(values.metatile,16),
     black:ZERO_PIXEL_MASK};
 }
@@ -204,7 +239,7 @@ function hydrateStampMasks() {
       const [x,y]=cell.split(',').map(Number);
       c.black=pixels.byCoord?.[cell]??
         (x>=0&&y>=0&&x<w&&y<h?pixels.byCell[y*w+x]:undefined)??
-        pixels.byId[c.id]??ZERO_PIXEL_MASK;
+        (c.blank?undefined:pixels.byId[c.id])??ZERO_PIXEL_MASK;
       if(pixels.byCoord)delete pixels.byCoord[cell];
       if(x>=0&&y>=0&&x<w&&y<h)delete pixels.byCell[y*w+x];
     }
@@ -216,13 +251,14 @@ function stampRecords(r,bg,cells=stampBucket(r,bg).cells) {
     const [ax,ay]=a[0].split(',').map(Number),[bx,by]=b[0].split(',').map(Number);
     return ay-by||ax-bx;
   }).map(([cell,c])=>`bg${bg+1}-stamp = cell:${cell} metatile:${hex(c.id).slice(-2)} `
-    +`words:${c.words.map(hex).join(',')} bands:${c.bands.join(',')}`);
+    +`words:${c.blank?'blank':c.words.map(hex).join(',')} bands:${c.bands.join(',')}`);
 }
 function stampIniLines(r) {
   const lines=[];
   for(let bg=0;bg<2;bg++) {
     const records=regionalRecords(r,bg,variant=>{
-      const b=stampBucket(variant,bg).bounds;
+      const b=Object.keys(stampBucket(variant,bg).cells).length
+        ?sceneryBounds(variant,bg):null;
       return [...(b?[`bg${bg+1}-map = bounds:${b.x0},${b.y0},${b.x1},${b.y1}`]:[]),
         ...stampRecords(variant,bg)];
     });
@@ -238,10 +274,12 @@ function refreshStampControls() {
   $('#copyTilesQuick').disabled=$('#copyTiles').disabled;
   $('#stampTool').disabled=$('#pasteTiles').disabled=!same;
   $('#stampQuick').disabled=!same;
-  $('#removeStamps').disabled=!selectedStampKeys.size;
-  const b=mapBounds(room,bgIndex,L),n=Object.keys(stampBucket(room,bgIndex).cells).length;
+  $('#removeStamps').disabled=![...selectedStampKeys].some(key=>stampBucket(room,bgIndex).cells[key]);
+  const b=sceneryBounds(room,bgIndex),n=Object.keys(stampBucket(room,bgIndex).cells).length;
+  const space=mapBounds(room,bgIndex);
+  $('#trimEdgeSpace').disabled=['x0','y0','x1','y1'].every(k=>space[k]===b[k]);
   $('#stampInfo').textContent=(tileClipboard?`Copied ${tileClipboard.w}×${tileClipboard.h}. `:'')
-    +`${n}/512 pasted tiles · bounds ${b.x0},${b.y0} to ${b.x1-1},${b.y1-1}.`
+    +`${n}/512 pasted tiles · saved bounds ${b.x0},${b.y0} to ${b.x1-1},${b.y1-1}.`
     +(tileClipboard&&!same?' Switch back to the source room/BG to paste.':'');
 }
 function startStamp() {
@@ -302,3 +340,4 @@ $('#pasteTiles').onclick=()=>stampTiles(Number($('#pasteX').value),Number($('#pa
 $('#edgeLeft').onclick=()=>expandEdge('x0');$('#edgeRight').onclick=()=>expandEdge('x1');
 $('#edgeTop').onclick=()=>expandEdge('y0');$('#edgeBottom').onclick=()=>expandEdge('y1');
 $('#removeStamps').onclick=()=>removeStamps();$('#resetStamps').onclick=()=>removeStamps(true);
+$('#trimEdgeSpace').onclick=trimEdgeSpace;

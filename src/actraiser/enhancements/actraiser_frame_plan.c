@@ -24,6 +24,10 @@ enum {
  * scanout and FrameSlot_Capture from describing the next policy state. */
 static ActionBgPlan s_pending_action_bg_plan;
 static bool s_pending_bg_capture_pad_to_budget;
+static int s_pending_diorama_world_y0;
+static int s_pending_diorama_world_height;
+static int s_pending_diorama_framing_x;
+static int s_pending_diorama_framing_y;
 
 static ActionBgPlan ActRaiser_NativeBgPresentationPlan(void) {
   ActionBgPlan plan;
@@ -161,12 +165,17 @@ static bool ActRaiser_CalculateCanvasMargins(
   const int layer_offset = canvas_layer * kActRaiserBgLayerStateStride;
   const int camera_x = ActRaiser_ReadWram16(
       kActRaiserWram_Bg1CameraX + layer_offset);
-  const int world_width = ActRaiser_IsSimulationTown(map_group, map_number)
+  int world_width = ActRaiser_IsSimulationTown(map_group, map_number)
       ? kActRaiserTownWorldWidth
       : ActRaiser_ReadWram16(kActRaiserWram_Bg1Width + layer_offset);
-  int available_left = camera_x;
+  int world_x0 = 0;
+  if (Diorama_IsActiveThisFrame())
+    ActRaiserActionBg_ResolveDioramaHorizontalExtent(
+        ActRaiser_CurrentVirtualLayerRoom(), (unsigned)canvas_layer,
+        world_width, &world_x0, &world_width);
+  int available_left = camera_x - world_x0;
   int available_right =
-      world_width - kActRaiserAuthenticWidth - camera_x;
+      world_x0 + world_width - kActRaiserAuthenticWidth - camera_x;
   if (available_left < 0) available_left = 0;
   if (available_right < 0) available_right = 0;
   *margin_left = available_left < budget ? available_left : budget;
@@ -260,6 +269,15 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
 
   int extra_top = 0;
   int extra_bottom = 0;
+  s_pending_diorama_world_y0 = 0;
+  s_pending_diorama_world_height = 0;
+  s_pending_diorama_framing_x = 0;
+  s_pending_diorama_framing_y = 0;
+  const DioramaRoomOverride *room = ActRaiser_CurrentVirtualLayerRoom();
+  if (Diorama_IsActiveThisFrame() && room && room->framing[0].set) {
+    s_pending_diorama_framing_x = room->framing[0].x;
+    s_pending_diorama_framing_y = room->framing[0].y;
+  }
   DisplayGeometry_SetVertical(0, 0);
   if (!frame_policy) return;
 
@@ -274,9 +292,14 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
       budget = (int)SR_PPU_VERTICAL_MARGIN_TOTAL_MAX / 2;
     const int layer_offset =
         primary_layer * kActRaiserBgLayerStateStride;
-    ActRaiserActionBg_ResolveVerticalCaptureMargins(
-        ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY + layer_offset),
+    ActRaiserActionBg_ResolveDioramaVerticalExtent(
+        ActRaiser_CurrentVirtualLayerRoom(), (unsigned)primary_layer,
         ActRaiser_ReadWram16(kActRaiserWram_Bg1Height + layer_offset),
+        &s_pending_diorama_world_y0, &s_pending_diorama_world_height);
+    ActRaiserActionBg_ResolveVerticalCaptureMargins(
+        ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY + layer_offset) -
+            s_pending_diorama_world_y0,
+        s_pending_diorama_world_height,
         budget, &extra_top, &extra_bottom);
   }
   DisplayGeometry_SetVertical(extra_top, extra_bottom);
@@ -287,7 +310,9 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
    * before its camera reaches row 0: otherwise a BG2 at Y=0 wraps negative
    * synthetic lines to the bottom of its tilemap while the playfield
    * legitimately extends above the viewport. Fillmore act 2 exposed that as
-   * red BG2 geometry half-added over its grey BG1 castle wall. */
+   * red BG2 geometry half-added over its grey BG1 castle wall. Keep these
+   * clips native even when authored bounds expand the capture: pasted tiles
+   * fill the extra rows after scanout, without wrapping the native map. */
   if (g_ws_extra_top > 0 || g_ws_extra_bottom > 0) {
     for (int layer = 0; layer < kActionBgPlanLayerCount; layer++) {
       const int offset = layer * kActRaiserBgLayerStateStride;
@@ -859,6 +884,10 @@ static int s_live_margin_top;
 static int s_live_margin_bottom;
 static ActionBgPlan s_live_action_bg_plan;
 static bool s_live_bg_capture_pad_to_budget;
+static int s_live_diorama_world_y0;
+static int s_live_diorama_world_height;
+static int s_live_diorama_framing_x;
+static int s_live_diorama_framing_y;
 
 /* The draw tail publishes the frame's exact margins, and with them the plan
  * ApplyWidescreenPolicy resolved before scanout, once the pixels exist. */
@@ -869,6 +898,10 @@ void ActRaiser_CommitFramePlan(int left, int right, int top, int bottom) {
   s_live_margin_bottom = bottom;
   s_live_action_bg_plan = s_pending_action_bg_plan;
   s_live_bg_capture_pad_to_budget = s_pending_bg_capture_pad_to_budget;
+  s_live_diorama_world_y0 = s_pending_diorama_world_y0;
+  s_live_diorama_world_height = s_pending_diorama_world_height;
+  s_live_diorama_framing_x = s_pending_diorama_framing_x;
+  s_live_diorama_framing_y = s_pending_diorama_framing_y;
 }
 
 /* The plan ApplyWidescreenPolicy resolved for the frame now being drawn. */
@@ -882,6 +915,16 @@ const ActionBgPlan *ActRaiser_PendingActionBgPlan(void) {
 void ActRaiser_LiveVerticalMargins(int *top, int *bottom) {
   if (top) *top = s_live_margin_top;
   if (bottom) *bottom = s_live_margin_bottom;
+}
+
+void ActRaiser_LiveDioramaVerticalExtent(int *world_y0, int *world_height) {
+  if (world_y0) *world_y0 = s_live_diorama_world_y0;
+  if (world_height) *world_height = s_live_diorama_world_height;
+}
+
+void ActRaiser_LiveDioramaFraming(int *x, int *y) {
+  if (x) *x = s_live_diorama_framing_x;
+  if (y) *y = s_live_diorama_framing_y;
 }
 
 /* See the latch above. Reports the margin geometry of the most recently rendered

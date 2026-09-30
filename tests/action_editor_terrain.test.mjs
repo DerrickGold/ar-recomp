@@ -35,6 +35,8 @@ function editor(data) {
     }
     getContext() { return this.context ??= {putImageData(image) {this.image=image;},
       drawImage() {},clearRect() {},setTransform() {},fillRect() {},
+      setLineDash(value) {this.dash=value;},measureText(text) {return {width:text.length*7};},
+      fillText(text,x,y) {(this.labels??=[]).push({text,x,y});},
       strokeRect(x,y,w,h) {(this.strokes??=[]).push({x,y,w,h,color:this.strokeStyle});},
       save() {},restore() {}}; }
     getBoundingClientRect() { return this.selector==='#pixelCanvas'
@@ -44,6 +46,9 @@ function editor(data) {
     setAttribute(name,value) {this.attributes[name]=value;}
     contains(other) {return other===this||this.children.some(child=>child.contains(other));}
     focus() {documentHost.activeElement=this;}
+    select() {this.selectionStart=0;this.selectionEnd=this.value.length;}
+    showModal() {this.open=true;}
+    close() {this.open=false;}
     click() {this.onclick?.({target:this});}
     remove() {}
     scrollIntoView() {}
@@ -57,12 +62,21 @@ function editor(data) {
     return elements.get(selector);
   };
   const documentHost={querySelector:element, querySelectorAll:() => [],
-    createElement:() => new Element(),body:new Element()};
+    createElement:() => new Element(),body:new Element(),
+    execCommand(command) {
+      if(command!=='copy')return false;
+      if(!this.copyFallbackSuccess) {
+        this.activeElement.listeners.copy?.({defaultPrevented:false});return false;
+      }
+      this.clipboardText=this.activeElement.value;
+      this.activeElement.listeners.copy?.({defaultPrevented:false});return true;
+    }};
   const context = vm.createContext({
     window:{__ACTION_BG__:data, innerWidth:960,innerHeight:640,listeners:{}, addEventListener(name,callback) {
       (this.listeners[name]??=[]).push(callback);
     }},
     document:documentHost,
+    navigator:{clipboard:{async writeText(text) {documentHost.clipboardText=text;}}},
     atob:s => Buffer.from(s, 'base64').toString('binary'),
     requestAnimationFrame() {},
     ResizeObserver:class { observe() {} },
@@ -433,7 +447,7 @@ assert.equal(range.run('selectedCells.size'),4);
 range.run(`selectRectangle(0,0,1,0);copyTiles();stampTiles(-2,-1);deselect();fitView();`);
 rangeClick(-2,-1);rangeClick(1,1,{shiftKey:true});
 assert.equal(range.run('selectedCells.size'),4);
-assert.equal(range.run('selectedStampKeys.size'),2);
+assert.equal(range.run('selectedStampKeys.size'),8); // two pasted cells plus six blank edge cells
 assert.equal(range.run('copyTiles()'),true);
 assert.equal(range.run('tileClipboard.w'),4);assert.equal(range.run('tileClipboard.h'),3);
 range.run('setLayer(1)');rangeClick(3,3,{shiftKey:true});
@@ -604,6 +618,258 @@ assert.equal(run('stampTiles(-1,0)'),false);
 assert.equal(run('mergeDioramaIni()'),beforePixelCapacity);
 console.log('Rectangle copy/stamp, overlap, signed edges, masks, atomic limits and undo passed');
 
+/* Deleting an extension tightens saved scenery without taking away the empty
+ * workspace needed for more painting. Old, oversized INI bounds also tighten. */
+const elasticEditor=editor(fixture()),elastic=elasticEditor.run;
+elastic(`loadIniText('','elastic.ini');setLayer(0);selectRectangle(0,0,0,0);
+  copyTiles();stampTiles(-6,-9);stampTiles(0,19);`);
+const extendedIni=elastic('roomSectionIni(room)');
+assert.match(extendedIni,/bg1-map = bounds:-6,-9,32,20/);
+elastic('selectRectangle(0,19,0,19);removeStamps();');
+const trimmedIni=elastic('roomSectionIni(room)');
+assert.match(trimmedIni,/bg1-map = bounds:-6,-9,32,16/);
+assert.equal(elastic('mapBounds(room,0,L).y1'),20);
+assert.equal(elastic('sceneryBounds(room,0).y1'),16);
+assert.equal(elastic('gameLayerSurfaces(room,0).L.h'),400);
+assert.match(elasticEditor.elements.get('#stampInfo').textContent,/saved bounds -6,-9 to 31,15/);
+elastic("setMode('3d');setNativeCamera('y',95);");
+assert.equal(elastic('nativeCamera.y'),31);
+elastic('undo()');assert.equal(elastic('roomSectionIni(room)'),extendedIni);
+assert.equal(elasticEditor.elements.get('#nativeCameraY').max,'95');
+elastic("setNativeCamera('y',95);");
+elastic('redo()');assert.equal(elastic('roomSectionIni(room)'),trimmedIni);
+assert.equal(elastic('nativeCamera.y'),31);
+assert.equal(elasticEditor.elements.get('#nativeCameraY').max,'31');
+elastic("setMode('2d');");
+const staleIni=trimmedIni.replace('bounds:-6,-9,32,16','bounds:-6,-9,32,20');
+elastic(`loadIniText(${JSON.stringify(staleIni)},'stale.ini');setLayer(0);`);
+assert.equal(elastic('roomSectionIni(room)'),trimmedIni);
+assert.equal(elastic('gameLayerSurfaces(room,0).L.h'),400);
+elastic(`$('#terrain').value='1';$('#terrain').onchange();`);
+assert.equal(elastic('sceneryBounds(room,0).y0'),0); // different JP terrain
+elastic(`$('#terrain').value='0';$('#terrain').onchange();
+  selectRectangle(-6,-9,-6,-9);removeStamps();`);
+assert.doesNotMatch(elastic('roomSectionIni(room)'),/bg1-(map|stamp)/);
+assert.equal(elastic('gameLayerSurfaces(room,0).L.h'),256);
+elastic(`$('#edgeCount').value='4';expandEdge('y1');`);
+assert.doesNotMatch(elastic('roomSectionIni(room)'),/bg1-map/);
+console.log('Elastic saved bounds, stale workspace, regional isolation and deletion undo passed');
+
+/* Empty edge cells are selectable without authoring records. A fill or pixel
+ * stroke materializes transparent source art, never an arbitrary ROM tile. */
+const blanksEditor=editor(fixture()),blanks=blanksEditor.run;
+blanks(`loadIniText('','blank.ini');setLayer(0);actor.show=false;
+  $('#edgeCount').value='2';expandEdge('x0');selectOnlyTile(-2,0);`);
+const beforeBlank=blanks('roomSectionIni(room)');
+assert.equal(blanks('selectedStampKeys.size'),1);
+assert.equal(blanks('Object.keys(stampBucket(room,0).cells).length'),0);
+assert.equal(blanks('focusedOriginal(0,0)'),null);
+assert.equal(blanksEditor.elements.get('#pixelSelectionBlackQuick').disabled,false);
+blanks(`openTileMenu(-2,0,40,40);`);
+assert.equal(blanksEditor.elements.get('#tileActionFill').disabled,false);
+blanks("$('#tileActionFill').onclick();");
+assert.equal(blanks("stampBucket(room,0).cells['-2,0'].blank"),true);
+assert.equal(blanks("stampBucket(room,0).cells['-2,0'].black"),'F'.repeat(64));
+const filledBlank=blanks('roomSectionIni(room)');
+assert.match(filledBlank,/cell:-2,0 metatile:00 words:blank bands:1,1,1,1/);
+blanks('undo()');assert.equal(blanks('roomSectionIni(room)'),beforeBlank);
+blanks('redo()');assert.equal(blanks('roomSectionIni(room)'),filledBlank);
+blanks(`selectOnlyTile(-1,1);beginOp('partial blank');editPixel(3,5);commitOp();`);
+assert.equal(blanks('focusedOriginal(3,5)'),null);
+assert.equal(blanks('pixelIsBlack(focusedMask(),3,5)'),true);
+assert.equal(blanks('pixelIsBlack(focusedMask(),4,5)'),false);
+blanks('selectRectangle(-2,0,-1,1);copyTiles();stampTiles(-2,2);');
+assert.equal(blanks("stampBucket(room,0).cells['-1,2'].blank"),true);
+assert.equal(blanks("stampOriginal(L,stampBucket(room,0).cells['-1,2'],0,0)"),null);
+const blankRoundTrip=blanks('roomSectionIni(room)');
+blanks(`loadIniText(${JSON.stringify(blankRoundTrip)},'blank.ini');setLayer(0);`);
+assert.equal(blanks('roomSectionIni(room)'),blankRoundTrip);
+assert.equal(blanks("stampBucket(room,0).cells['-1,1'].blank"),true);
+blanks(`selectOnlyTile(-1,1);pixelBulk('reset');`);
+assert.equal(blanks('focusedOriginal(3,5)'),null);
+assert.equal(blanks('focusedMask()'),'0'.repeat(64));
+blanks(`selectRectangle(-2,4,-1,5);fillSelectedTransparency();`);
+assert.equal(blanks('selectedStampKeys.size'),4);
+assert.equal(blanks("stampBucket(room,0).cells['-2,4'].black"),'F'.repeat(64));
+blanks(`loadIniText('','blank-limit.ini');setLayer(0);$('#edgeCount').value='1';expandEdge('x0');
+  for(let i=0;i<512;i++)stampBucket(room,0).cells['0,'+i]=blankTile();selectOnlyTile(-1,0);`);
+const blankLimitBefore=blanks('roomSectionIni(room)'),blankLimitHistory=blanks('undoStack.length');
+assert.equal(blanks('fillSelectedTransparency()'),false);
+assert.equal(blanks('roomSectionIni(room)'),blankLimitBefore);
+assert.equal(blanks('undoStack.length'),blankLimitHistory);
+console.log('Blank edge selection, context fill, partial pixels, copy, round trip and atomic limits passed');
+
+/* Designer offsets are saved per BG1 terrain family and do not move as the
+ * authoring workspace grows, or alter the native preview camera. */
+const framingEditor=editor(fixture()),framing=framingEditor.run;
+framing(`loadIniText('','framing.ini');setLayer(0);nativeCamera.x=120;nativeCamera.y=31;
+  $('#framingX').value='-40';$('#framingY').value='0';$('#framingX').onchange();`);
+const savedFraming=framing('roomSectionIni(room)');
+assert.match(savedFraming,/framing = x:-40 y:0/);
+assert.equal(framing('nativeCamera.x'),120);
+assert.equal(framing('nativeCamera.y'),31);
+framing(`$('#edgeCount').value='4';expandEdge('x0');expandEdge('y0');`);
+assert.equal(framing('roomFraming(room).x'),-40);
+assert.equal(framing('roomSectionIni(room)'),savedFraming);
+framing(`$('#framingReset').onclick();`);
+assert.doesNotMatch(framing('roomSectionIni(room)'),/framing =/);
+framing('undo()');assert.equal(framing('roomSectionIni(room)'),savedFraming);
+assert.equal(framingEditor.elements.get('#framingX').value,'-40');
+framing(`$('#terrain').value='1';$('#terrain').onchange();`);
+assert.equal(framing('roomFraming(room).x'),0);
+framing(`loadIniText(${JSON.stringify(savedFraming)},'framing.ini');setLayer(0);
+  $('#terrain').value='0';$('#terrain').onchange();`);
+assert.equal(framing('roomFraming(room).x'),-40);
+framing("$('#framingX').value='65';$('#framingX').onchange();");
+assert.equal(framing('roomFraming(room).x'),-40);
+assert.equal(framing('roomSectionIni(room)'),savedFraming);
+console.log('Saved relative framing, regional isolation, elastic bounds, reset and undo passed');
+
+/* The actual map gesture edits offsets, not the preview camera or tiles. */
+const guideEditor=editor(fixture()),guide=guideEditor.run;
+guide(`loadIniText('','guide.ini');setLayer(0);nativeCamera.x=120;nativeCamera.y=31;
+  selectCell(0,0);startFramingTool();`);
+const guideCanvas=guideEditor.elements.get('#map2d');
+const guideEvent=(dx=0,dy=0)=>({button:0,preventDefault(){},
+  clientX:guide('view.x+(nativeCamera.x+128)*view.scale')+dx*guide('view.scale'),
+  clientY:guide('view.y+(nativeCamera.y+113)*view.scale')+dy*guide('view.scale')});
+const guideMove=event=>{for(const fn of guide('window.listeners.mousemove'))fn(event);};
+const guideUp=()=>{for(const fn of guide('window.listeners.mouseup'))fn({});};
+const guideKey=(key,shiftKey=false)=>{for(const fn of guide('window.listeners.keydown'))
+  fn({key,shiftKey,target:{tagName:'CANVAS'},preventDefault(){}});};
+assert.equal(guide('brush'),'framing');
+const guideInitial=guide('roomSectionIni(room)'),guideHistory=guide('undoStack.length');
+guideCanvas.listeners.mousedown(guideEvent());
+guideMove(guideEvent(40,-16));guideMove(guideEvent(32,-8));guideUp();
+assert.match(guide('roomSectionIni(room)'),/framing = x:32 y:-8/);
+assert.equal(guide('undoStack.length'),guideHistory+1);
+assert.equal(guide('nativeCamera.x'),120);assert.equal(guide('nativeCamera.y'),31);
+assert.equal(guide('selectedCells.size'),1);
+assert.equal(guide('Object.keys(stampBucket(room,0).cells).length'),0);
+guide('ctx.strokes=[];drawFramingGuide();');
+const guideStrokes=guideCanvas.context.strokes.filter(s=>['#e6eaf2','#ffdc74'].includes(s.color));
+assert.deepEqual({...guideStrokes[0]}, {
+  x:guide('view.x+120*view.scale'),y:guide('view.y+32*view.scale'),
+  w:guide('256*view.scale'),h:guide('224*view.scale'),color:'#e6eaf2'});
+assert.equal(guideStrokes[1].x,guide('view.x+152*view.scale'));
+assert.equal(guideStrokes[1].y,guide('view.y+24*view.scale'));
+guide('undo()');assert.equal(guide('roomSectionIni(room)'),guideInitial);
+guide('redo()');assert.equal(guide('roomFraming(room).x'),32);
+guideKey('ArrowRight',true);assert.equal(guide('roomFraming(room).x'),48);
+guideKey('ArrowDown');assert.equal(guide('roomFraming(room).y'),-7);
+const beforeCancel=guide('roomSectionIni(room)'),beforeCancelHistory=guide('undoStack.length');
+guideCanvas.listeners.mousedown(guideEvent());guideMove(guideEvent(200,-200));
+assert.equal(guide('roomFraming(room).x'),64);assert.equal(guide('roomFraming(room).y'),-64);
+guideKey('Escape');guideUp();
+assert.equal(guide('roomSectionIni(room)'),beforeCancel);
+assert.equal(guide('undoStack.length'),beforeCancelHistory);
+assert.equal(guide('brush'),'select');
+guide(`$('#framingReset').onclick();startFramingTool();`);
+const noOpHistory=guide('undoStack.length');
+guideCanvas.listeners.mousedown(guideEvent());guideMove(guideEvent(3,4));
+guideMove(guideEvent());guideUp();
+assert.equal(guide('undoStack.length'),noOpHistory);
+assert.equal(guide('stampBucket(room,0).framing'),undefined);
+guide(`$('#framingX').value='-12';$('#framingY').value='0';$('#framingX').onchange();`);
+assert.equal(guide('mode'),'2d'); // numeric tweaks keep the guide visible
+guide(`$('#terrain').value='1';$('#terrain').onchange();`);
+assert.equal(guide('roomFraming(room).x'),0);
+guide('setLayer(1);');assert.equal(guide('brush'),'select');
+guide('ctx.strokes=[];drawFramingGuide();');assert.equal(guideCanvas.context.strokes.length,0);
+guide('startFramingTool();');assert.equal(guide('bgIndex'),0);
+guide(`$('#showFraming').checked=false;$('#showFraming').onchange();ctx.strokes=[];drawFramingGuide();`);
+assert.equal(guide('brush'),'select');assert.equal(guideCanvas.context.strokes.length,0);
+console.log('Native frame overlay, drag/nudge, limits, cancel, single-step undo and regional isolation passed');
+
+/* Widescreen coverage uses the game's PAR and equal whole-column margins.
+ * Guide preferences never author offsets, and every frame shares one anchor. */
+const wideEditor=editor(fixture()),wide=wideEditor.run;
+wide(`loadIniText('','wide.ini');setLayer(0);nativeCamera.x=120;nativeCamera.y=31;startFramingTool();`);
+const wideIni=wide('roomSectionIni(room)'),wideHistory=wide('undoStack.length');
+assert.equal(wide('framingRect(true,16/9).w'),342);
+assert.equal(wide('framingRect(true,16/10).w'),308);
+assert.equal(wide('framingRect(true,16/9).x'),77);
+assert.equal(wide('framingRect(true,16/10).x'),94);
+assert.equal(wide('framingRect(true,16/9).y'),32);
+wide('ctx.strokes=[];ctx.labels=[];drawFramingGuide();');
+const wideCanvas=wideEditor.elements.get('#map2d');
+assert.ok(wideCanvas.context.labels.some(l=>l.text==='16:9'));
+assert.ok(wideCanvas.context.labels.some(l=>l.text==='16:10'));
+const cyan=wideCanvas.context.strokes.find(s=>s.color==='#65dce9');
+const purple=wideCanvas.context.strokes.find(s=>s.color==='#c49aff');
+assert.equal(cyan.w,wide('342*view.scale'));assert.equal(purple.w,wide('308*view.scale'));
+assert.equal(cyan.x+cyan.w/2,purple.x+purple.w/2);
+wide(`$('#framingPixelAspect').value='square';$('#framingPixelAspect').onchange();`);
+assert.equal(wide('framingRect(true,16/9).w'),400);
+assert.equal(wide('framingRect(true,16/10).w'),360);
+assert.match(wideEditor.elements.get('#framingViewportInfo').textContent,/16:9: 400×224.*16:10: 360×224/);
+wide(`$('#framing169').checked=false;$('#framing169').onchange();ctx.strokes=[];drawFramingGuide();`);
+assert.equal(wide('framingCoverageRect().w'),360);
+assert.ok(!wideCanvas.context.strokes.some(s=>s.color==='#65dce9'));
+assert.ok(wideCanvas.context.strokes.some(s=>s.color==='#c49aff'));
+wide(`$('#framing1610').checked=false;$('#framing1610').onchange();`);
+assert.equal(wide('framingCoverageRect().w'),256);
+assert.equal(wide('roomSectionIni(room)'),wideIni);assert.equal(wide('undoStack.length'),wideHistory);
+wide(`$('#framing169').checked=true;$('#framing169').onchange();`);
+// Drag the widescreen-only area to the left of the gold native rectangle.
+const wideStart={button:0,preventDefault(){},clientX:wide('view.x+60*view.scale'),
+  clientY:wide('view.y+140*view.scale')};
+wideCanvas.listeners.mousedown(wideStart);
+assert.equal(wide('drag.framing'),true);
+for(const fn of wide('window.listeners.mousemove'))fn({...wideStart,
+  clientX:wideStart.clientX+20*wide('view.scale'),clientY:wideStart.clientY-8*wide('view.scale')});
+for(const fn of wide('window.listeners.mouseup'))fn({});
+assert.match(wide('roomSectionIni(room)'),/framing = x:20 y:-8/);
+assert.equal(wide('framingRect().x+framingRect().w/2'),
+  wide('framingRect(true,16/9).x+framingRect(true,16/9).w/2'));
+assert.equal(wide('framingRect().y'),wide('framingRect(true,16/10).y'));
+assert.equal(wide('nativeCamera.x'),120);assert.equal(wide('nativeCamera.y'),31);
+wide('undo()');assert.equal(wide('roomSectionIni(room)'),wideIni);
+console.log('16:9/16:10 guide coverage, pixel aspect, toggles, shared drag and preview-only preferences passed');
+
+wide(`$('#framingProjection').value='diorama';$('#framingProjection').onchange();`);
+assert.equal(wide('framingRect(true,16/10).w'),473);
+assert.equal(wide('framingRect(true,16/10).h'),296);
+assert.equal(wide('framingRect(true,16/9).w'),525);
+assert.equal(wide('framingRect().h'),224);
+assert.equal(wide('framingRect().y+framingRect().h/2'),
+  wide('framingRect(true,16/10).y+framingRect(true,16/10).h/2'));
+wide(`$('#framingDistance').value='4';$('#framingDistance').onchange();`);
+assert.equal(wide('framingRect(true,16/10).w'),582);
+wide(`$('#framingPixelAspect').value='crt';$('#framingPixelAspect').onchange();`);
+assert.equal(wide('framingRect(true,16/10).w'),499);
+wide(`$('#framingDistance').value='NaN';$('#framingDistance').onchange();`);
+assert.equal(wide('framingDistance'),4);
+wide(`$('#framingDistance').value='0';$('#framingDistance').onchange();`);
+assert.equal(wide('framingDistance'),4);
+assert.equal(wide('roomSectionIni(room)'),wideIni);
+assert.equal(wide('undoStack.length'),wideHistory);
+console.log('Diorama coverage estimate follows runtime FOV, distance and pixel aspect without exporting preferences');
+
+/* Trim only empty authoring margins; artwork, pixel edits and framing survive. */
+const trimEditor=editor(fixture()),trim=trimEditor.run;
+trim(`loadIniText('','trim.ini');setLayer(0);selectRectangle(0,0,0,0);copyTiles();
+  stampTiles(-2,-1);fillSelectedTransparency();
+  $('#framingX').value='-20';$('#framingY').value='0';setRoomFraming();
+  $('#edgeCount').value='4';expandEdge('x0');expandEdge('y1');
+  selectRectangle(-6,19,-6,19);`);
+const trimIni=trim('roomSectionIni(room)'),trimWorkspace=trim('JSON.stringify(mapBounds(room,0))');
+assert.equal(trimEditor.elements.get('#trimEdgeSpace').disabled,false);
+assert.equal(trim('trimEdgeSpace()'),true);
+assert.equal(trim('roomSectionIni(room)'),trimIni);
+assert.equal(trim('JSON.stringify(mapBounds(room,0))'),trim('JSON.stringify(sceneryBounds(room,0))'));
+assert.equal(trim('selectedStampKeys.size'),0);assert.equal(trim('selectionAnchor'),null);
+assert.equal(trim('pixelStamp'),null);assert.equal(trim('roomFraming(room).x'),-20);
+assert.equal(trimEditor.elements.get('#trimEdgeSpace').disabled,true);
+trim('undo()');assert.equal(trim('JSON.stringify(mapBounds(room,0))'),trimWorkspace);
+trim('redo()');assert.equal(trim('roomSectionIni(room)'),trimIni);
+trim(`$('#terrain').value='1';$('#terrain').onchange();expandEdge('x1');trimEdgeSpace();`);
+assert.equal(trim('JSON.stringify(mapBounds(room,0))'),JSON.stringify({x0:0,y0:0,x1:32,y1:16}));
+assert.equal(trim('trimEdgeSpace()'),false);
+trim(`$('#terrain').value='0';$('#terrain').onchange();`);
+assert.equal(trim('roomSectionIni(room)'),trimIni);
+console.log('Trim unused workspace, preserved artwork/framing, original bounds, undo and regional isolation passed');
+
 /* Applied state must describe the selection, independently of the paintbrush.
  * Export badges follow serialized data, including undo to/from a savepoint. */
 const feedbackEditor=editor(fixture()),fb=feedbackEditor.run,fbElements=feedbackEditor.elements;
@@ -627,12 +893,17 @@ fb('undo()');
 assert.equal(fb('editorHasUnexportedChanges()'),false);
 assert.equal(fb('currentTileChanges().cells.length'),0);
 fb("redo();$('#export').onclick();");
-assert.equal(fb('document.exportedText'),fb('mergeDioramaIni()'));
-assert.equal(fbElements.get('#saveState').textContent,'Matches last export');
+assert.equal(fb('document.exportedText'),undefined); // opening is not a download or savepoint
+assert.equal(fbElements.get('#saveState').textContent,'Unexported changes');
+assert.equal(fbElements.get('#exportText').value,fb('roomSectionIni(room)'));
+await fb("$('#exportCopy').onclick();");
+assert.equal(fb('document.clipboardText'),fb('roomSectionIni(room)'));
+assert.equal(fbElements.get('#saveState').textContent,'Matches last copy');
+fb("$('#exportClose').onclick();");
 fb('undo()');
 assert.equal(fbElements.get('#saveState').textContent,'Unexported changes');
 fb('redo()');
-assert.equal(fbElements.get('#saveState').textContent,'Matches last export');
+assert.equal(fbElements.get('#saveState').textContent,'Matches last copy');
 fb(`selectOnlyTile(0,0);$('#pixelScope').value='cell';beginOp('one pixel');editPixel(3,5);commitOp();
   selectRectangle(0,0,1,0);`);
 assert.match(fbElements.get('#selectionApplied').textContent,/Normal/);
@@ -690,6 +961,90 @@ fb("setMode('2d');selectRectangle(8,2,9,2);$('#selectionPaste').onclick();");
 assert.ok(fb('stampBucket(room,0).cells["8,2"]'));
 assert.equal(fb('stampBucket(room,0).cells["9,2"]'),undefined);
 console.log('Selection actions, applied state, pixel inspector, original comparison, change navigation and export savepoints passed');
+
+/* A copied room is a complete replacement, not an append-only patch. Other
+ * rooms stay dirty; clipboard failures and partial selections never save them. */
+const exportEditor=editor(fixture()),ex=exportEditor.run,exElements=exportEditor.elements;
+const exportSource=['# file preamble','[layers:1:1] # room comment',
+  '# keep this comment','obj2 = z:0.7','unknown-setting = keep',
+  'bg1-map:us+jp+eu = bounds:-1,-1,32,16',
+  'bg1-stamp:us+jp+eu = cell:-1,-1 metatile:00 words:0010,0010,0010,0010 bands:1,1,1,1',
+  'bg1-virtual = cells:0,0-2,0 band:0',
+  'bg2-virtual:us+jp+eu = cells:1,1-2,1 band:0',
+  '[layers:01:02]','obj2 = z:0.9','[layers:01:01:camera:0]','bg1 = z:0.8',
+  '[layers:01:01]','bg1-virtual = cells:1,0-1,0 band:2',
+  'bg1-virtual:jp = cells:2,1-2,1 band:2',
+  'bg1-stamp:us+jp+eu = cell:-1,-1 metatile:00 words:0020,0020,0020,0020 bands:1,1,1,1',
+  ''].join('\r\n');
+ex(`loadIniText(${JSON.stringify(exportSource)},'levels.ini');setLayer(0);
+  beginOp('room one');paintCell(10,0,2);commitOp();
+  $('#room').value='1';$('#room').onchange();
+  beginOp('room two');paintCell(11,0,2);commitOp();
+  $('#room').value='0';$('#room').onchange();$('#export').onclick();`);
+const section=exElements.get('#exportText').value;
+assert.equal((section.match(/^\[/gm)||[]).length,1);
+assert.ok(section.startsWith('[layers:01:01]\n'));
+assert.match(section,/# room comment\n# keep this comment\nobj2 = z:0.7/);
+assert.match(section,/unknown-setting = keep/);
+assert.doesNotMatch(section,/01:02|camera:0|z:0.8|file preamble/);
+assert.match(section,/bg1-virtual:jp = cells:2,1-2,1 band:2/);
+assert.match(section,/bg2-virtual:us\+jp\+eu = cells:1,1-2,1 band:0/);
+assert.equal((section.match(/-stamp/g)||[]).length,1); // last overlapping paste wins, regions share one line
+assert.match(section,/words:0020,0020,0020,0020/);
+assert.equal(exElements.get('#exportDlg').open,true);
+assert.equal(ex('document.exportedText'),undefined);
+ex("$('#exportClose').onclick();");
+assert.equal(ex('editorHasUnexportedChanges()'),true);
+ex("$('#export').onclick();");
+await ex("$('#exportCopy').onclick();");
+assert.equal(ex('document.clipboardText'),section);
+assert.equal(ex('editorHasUnexportedChanges()'),true); // room 2 still needs export
+assert.equal(exElements.get('#saveState').textContent,'Unexported changes');
+ex(`$('#exportClose').onclick();$('#room').value='1';$('#room').onchange();$('#export').onclick();`);
+await ex("$('#exportCopy').onclick();");
+assert.equal(ex('editorHasUnexportedChanges()'),false);
+ex("$('#exportClose').onclick();undo();");
+assert.equal(ex('editorHasUnexportedChanges()'),true);
+ex('redo()');
+assert.equal(ex('editorHasUnexportedChanges()'),false);
+
+/* A new edit with blocked clipboard access keeps its dirty state. Keyboard
+ * copy is available, and editor shortcuts cannot intercept text selection. */
+ex(`beginOp('another edit');paintCell(12,0,2);commitOp();$('#export').onclick();
+  navigator.clipboard.writeText=async()=>{throw new Error('blocked');};`);
+await ex("$('#exportCopy').onclick();");
+assert.match(exElements.get('#exportStatus').textContent,/Ctrl\/Cmd-C/);
+assert.equal(ex('editorHasUnexportedChanges()'),true);
+assert.equal(exElements.get('#exportText').selectionEnd,exElements.get('#exportText').value.length);
+ex(`$('#exportText').selectionEnd=5;$('#exportText').listeners.copy({defaultPrevented:false});`);
+assert.equal(ex('editorHasUnexportedChanges()'),true);
+ex(`$('#exportSelect').onclick();$('#exportText').listeners.copy({defaultPrevented:true});`);
+assert.equal(ex('editorHasUnexportedChanges()'),true);
+ex(`for(const callback of window.listeners.keydown)callback({key:'c',ctrlKey:true,
+  target:$('#exportText'),preventDefault(){throw new Error('Editor intercepted text copy');}});
+  $('#exportText').listeners.copy({defaultPrevented:false});`);
+assert.equal(ex('editorHasUnexportedChanges()'),false);
+ex(`$('#exportClose').onclick();beginOp('fallback copy');paintCell(13,0,2);commitOp();
+  $('#export').onclick();document.copyFallbackSuccess=true;`);
+await ex("$('#exportCopy').onclick();");
+assert.equal(ex('document.clipboardText'),exElements.get('#exportText').value);
+assert.equal(ex('editorHasUnexportedChanges()'),false);
+ex("$('#exportDownload').onclick();");
+assert.equal(ex('document.exportedText'),ex('mergeDioramaIni()'));
+assert.equal(exElements.get('#saveState').textContent,'Matches last export');
+
+/* Round trip the copied block alone: region bands, overlapping stamps and
+ * non-owned settings survive. Resetting the last edit still emits a header. */
+const exportReload=editor(fixture());
+exportReload.run(`loadIniText(${JSON.stringify(section)},'one-room.ini');setLayer(0);`);
+assert.equal(exportReload.run('roomSectionIni(room)'),section);
+assert.equal(exportReload.run('bandAt(st,L,2,0)'),2);
+assert.equal(exportReload.run('bandAt(st,L,0,0)'),0);
+assert.equal(exportReload.run('bandAt(st,L,4,0)'),0);
+exportReload.run("loadIniText('','empty.ini');$('#export').onclick();");
+assert.equal(exportReload.elements.get('#exportText').value,'[layers:01:01]\n');
+assert.equal(exportReload.run('editorHasUnexportedChanges()'),false);
+console.log('Room-only export, preserved settings, overlap deduplication, clipboard fallbacks and per-room savepoints passed');
 
 /* Highlight filters inspect resolved bands, never the brush or just ROM flags.
  * Filtering is read-only; explicit Select highlighted enables a bulk action. */

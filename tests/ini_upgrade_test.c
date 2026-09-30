@@ -6,7 +6,7 @@
  * lost its display settings, its authored diorama rooms, and its asset mappings.
  * The bundle now ships to utils/defaults/ and this merges forward.
  *
- * The load-bearing property is ONE-WAY: the merge only ever APPENDS. Nothing the
+ * The pure settings/asset merge is ONE-WAY: it only ever APPENDS. Nothing the
  * user wrote is rewritten or removed, so the worst a bug here can do is fail to
  * add a setting -- never lose one. Most of these tests assert exactly that.
  */
@@ -544,13 +544,8 @@ static void TestApplierSkipsALiveFileItCannotRead(void) {
   CHECK(chdir(original) == 0);
 }
 
-/* The applier's per-file section KIND, pinned through real files.
- *
- * The table in ini_upgrade_apply.c is the whole fix for the resurrection bug,
- * and a probe that flipped diorama-layers.ini back to Namespaces passed every
- * other test here -- the pure-merge tests call IniUpgrade_Merge directly and
- * never see the table. This drives the real applier and asserts the OUTCOME per
- * file: a record file keeps a deletion, config.ini still gains new keys. */
+/* The real applier keeps settings and asset edits while delivering release
+ * corrections to existing Diorama rooms, including legacy installations. */
 static void TestApplierUsesTheRightSectionKindPerFile(void) {
   char template_dir[] = "/tmp/ar-iniupg-kinds-XXXXXX";
   if (!mkdtemp(template_dir)) {
@@ -582,8 +577,10 @@ static void TestApplierUsesTheRightSectionKindPerFile(void) {
 
   const char *layers = ReadFileText("diorama-layers.ini");
   CHECK(layers != NULL);
-  CHECK(layers != NULL && strstr(layers, "bg2hi") == NULL);
-  CHECK(layers != NULL && strstr(layers, "z:0.77") != NULL);
+  CHECK(layers != NULL && strstr(layers, "bg2hi = z:0.9") != NULL);
+  CHECK(layers != NULL && strstr(layers, "z:0.77") == NULL);
+  const char *backup = ReadFileText("diorama-layers.ini.pre-update-1");
+  CHECK(backup != NULL && !strcmp(backup, "[layers:01:02]\nbg1 = z:0.77\n"));
 
   const char *manifest = ReadFileText("game-assets/manifest.ini");
   CHECK(manifest != NULL);
@@ -595,6 +592,84 @@ static void TestApplierUsesTheRightSectionKindPerFile(void) {
   CHECK(config != NULL && strstr(config, "BrandNewKey = 7") != NULL);
   CHECK(config != NULL && strstr(config, "WindowScale = 9") != NULL);
 
+  CHECK(chdir(original) == 0);
+}
+
+static bool FileTextEquals(const char *path, const char *expected) {
+  const char *actual = ReadFileText(path);
+  return actual && !strcmp(actual, expected);
+}
+
+static void TestReleaseContentUpdatesAndRetries(void) {
+  char template_dir[] = "/tmp/ar-iniupg-content-XXXXXX", original[1024];
+  CHECK(getcwd(original, sizeof original) != NULL);
+  CHECK(mkdtemp(template_dir) != NULL);
+  CHECK(chdir(template_dir) == 0);
+  CHECK(mkdir("defaults", 0755) == 0);
+  const char *live_path = "diorama-layers.ini";
+  const char *default_path = "defaults/diorama-layers.ini";
+  const char *baseline_path = "diorama-layers.ini.installed";
+  const char *first = "[layers:01:04]\nframing:us+jp+eu = x:-40 y:0\n"
+      "bg1-stamp:us+jp+eu = cell:-1,0 metatile:00 words:blank bands:1,1,1,1\n";
+  const char *local = "# local authoring, removed the stamp\n[layers:01:04]\n"
+      "framing:us+jp+eu = x:-20 y:0\n";
+  const char *second = "# corrected release, old stamp removed\n[layers:01:04]\n"
+      "framing:us+jp+eu = x:11 y:-17\n";
+  const char *third = "# later release\n[layers:01:04]\nbg1 = z:0.51\n";
+
+  CHECK(WriteFileText(default_path, first));
+  IniUpgrade_ApplyShippedDefaults();
+  CHECK(FileTextEquals(live_path, first));
+  CHECK(FileTextEquals(baseline_path, first));
+  CHECK(FileSize("diorama-layers.ini.pre-update-1") == -1);
+
+  CHECK(WriteFileText(live_path, local));
+  IniUpgrade_ApplyShippedDefaults();
+  CHECK(FileTextEquals(live_path, local));
+  CHECK(FileSize("diorama-layers.ini.pre-update-1") == -1);
+
+  /* A changed shipped room replaces repeated tile records wholesale; deleted
+   * patches cannot accumulate or win merely because they were installed first. */
+  CHECK(WriteFileText(default_path, second));
+  IniUpgrade_ApplyShippedDefaults();
+  CHECK(FileTextEquals(live_path, second));
+  CHECK(FileTextEquals(baseline_path, second));
+  CHECK(FileTextEquals("diorama-layers.ini.pre-update-1", local));
+  IniUpgrade_ApplyShippedDefaults();
+  CHECK(FileSize("diorama-layers.ini.pre-update-2") == -1);
+
+  CHECK(unlink(live_path) == 0);
+  IniUpgrade_ApplyShippedDefaults();
+  CHECK(FileTextEquals(live_path, second));
+
+  /* A failed atomic replacement must not advance the installed baseline.
+   * Its successful retry reuses the backup rather than making duplicates. */
+  CHECK(WriteFileText(default_path, third));
+  CHECK(mkdir("diorama-layers.ini.tmp", 0755) == 0);
+  IniUpgrade_ApplyShippedDefaults();
+  CHECK(FileTextEquals(live_path, second));
+  CHECK(FileTextEquals(baseline_path, second));
+  CHECK(FileTextEquals("diorama-layers.ini.pre-update-2", second));
+  CHECK(rmdir("diorama-layers.ini.tmp") == 0);
+  IniUpgrade_ApplyShippedDefaults();
+  CHECK(FileTextEquals(live_path, third));
+  CHECK(FileTextEquals(baseline_path, third));
+  CHECK(FileSize("diorama-layers.ini.pre-update-3") == -1);
+  CHECK(FileTextEquals("diorama-layers.ini.pre-update-1", local));
+
+  /* Never replace a file when its pre-update copy cannot be preserved. */
+  CHECK(WriteFileText(default_path, first));
+  CHECK(mkdir("diorama-layers.ini.pre-update-3.tmp", 0755) == 0);
+  IniUpgrade_ApplyShippedDefaults();
+  CHECK(FileTextEquals(live_path, third));
+  CHECK(FileTextEquals(baseline_path, third));
+  CHECK(rmdir("diorama-layers.ini.pre-update-3.tmp") == 0);
+
+  /* An unreadable baseline is not a first installation. */
+  CHECK(unlink(baseline_path) == 0);
+  CHECK(mkdir(baseline_path, 0755) == 0);
+  IniUpgrade_ApplyShippedDefaults();
+  CHECK(FileTextEquals(live_path, third));
   CHECK(chdir(original) == 0);
 }
 
@@ -756,6 +831,7 @@ int main(void) {
   TestApplierKeepsUserValuesAndAddsNewOnes();
   TestApplierSkipsALiveFileItCannotRead();
   TestApplierUsesTheRightSectionKindPerFile();
+  TestReleaseContentUpdatesAndRetries();
   TestUserValuesAlwaysWin();
   TestNewKeyIsAppended();
   TestSameKeyInTwoSectionsIsNotConflated();

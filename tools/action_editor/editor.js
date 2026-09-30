@@ -52,23 +52,6 @@ function unprojectToPlane(mvp, sx, sy, planeZ, vw, vh) {
   return [n[0] + (f[0]-n[0])*t, n[1] + (f[1]-n[1])*t];
 }
 
-/* Export the complete INI, not a sidecar dialect. The four ordinary BG plane
- * records and both virtual records are regenerated; every other record stays
- * byte-for-byte in the surrounding document. */
-$('#export').onclick = () => {
-  try {
-    const text = mergeDioramaIni();
-    const url = URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));
-    const a = document.createElement('a');
-    a.href=url; a.download=sourceIniName || 'diorama-layers.ini';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),1000);
-    captureEditorSavepoint('exported');
-    tileActionStatus('INI download started. Use the exported file as the game’s diorama-layers.ini.');
-  } catch (error) {
-    alert(`Cannot export INI:\n\n${error.message}`);
-  }
-};
 $('#importIni').onchange = async event => {
   const file = event.target.files && event.target.files[0];
   event.target.value = '';
@@ -243,8 +226,7 @@ function refreshNativeCameraControls() {
   let previewMaxX=maxX;
   if(mode==='3d') {
     for(let bg=0;bg<2;bg++) {
-      const layer=decodeLayer(room,bg);if(!layer)continue;
-      const b=mapBounds(room,bg,layer);
+      const b=sceneryBounds(room,bg);if(!b)continue;
       minX=Math.min(minX,b.x0*16);minY=Math.min(minY,b.y0*16);
       if(bg===0){previewMaxX=Math.max(maxX,b.x1*16-DATA.frameWidth);
         maxY=Math.max(maxY,b.y1*16-DATA.frameHeight-1);}
@@ -257,6 +239,7 @@ function refreshNativeCameraControls() {
   $('#nativeCameraY').max=String(maxY);$('#nativeCameraY').value=String(nativeCamera.y);
   $('#nativeCameraXv').textContent=String(nativeCamera.x);
   $('#nativeCameraYv').textContent=String(nativeCamera.y);
+  refreshFramingControls();
 }
 function setNativeCamera(axis,value) {
   nativeCamera[axis]=Number(value)||0;refreshNativeCameraControls();
@@ -294,6 +277,7 @@ document.querySelectorAll('.state').forEach(b =>
 const brushBtns = { class:$('#bClass'), cell:$('#bCell'), rect:$('#bRect'),
                     select:$('#bSelect'), selectRect:$('#bSelectRect'), stamp:$('#stampTool'), pan:$('#bPan') };
 Object.entries(brushBtns).forEach(([k, el]) => el.onclick = () => {
+  finishFramingDrag();
   if(k==='stamp'){startStamp();return;}
   if(k==='selectRect')setMode('2d');
   stampHover=null;brush = k; Object.values(brushBtns).forEach(b => b.classList.remove('on'));
@@ -408,7 +392,7 @@ function refreshPlaneControls() {
   syncingPlaneControls=false;
 }
 function planeChanged() {
-  markEditorChanged();glDirty=true;refreshPlaneControls();draw();
+  markEditorChanged();glDirty=true;refreshPlaneControls();refreshFramingControls();draw();
 }
 $('#planeSelect').onchange=event=>{
   planeToken=event.target.value;
@@ -504,9 +488,12 @@ const resetCamera = () => {
   draw();
 };
 window.addEventListener('keydown', e => {
-  if(!tileMenu.hidden)return;
-  if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+  if(!tileMenu.hidden||exportDialog.open||$('#docsDlg').open)return;
+  if (['SELECT','INPUT','TEXTAREA'].includes(e.target.tagName)||e.target.isContentEditable) return;
   const accel = e.metaKey || e.ctrlKey;
+  if(e.key==='Escape'&&brush==='framing') {
+    e.preventDefault();finishFramingDrag(true);$('#bSelect').onclick();return;
+  }
   if (e.key === 'Escape' || (accel && e.key.toLowerCase() === 'd')) {
     e.preventDefault(); deselect(); return;
   }
@@ -528,6 +515,9 @@ window.addEventListener('keydown', e => {
   const a = arrows[e.key];
   if (!a) return;
   e.preventDefault();
+  if(mode==='2d'&&brush==='framing') {
+    const pixels=e.shiftKey?16:1;nudgeFraming(a[0]*pixels,a[1]*pixels);return;
+  }
   if (mode === '2d') { view.x -= a[0]*48*step; view.y -= a[1]*48*step; }
   else if (mode === 'native' || mode === '3d') {
     setNativeCamera('x',nativeCamera.x+a[0]*8*step);
@@ -536,6 +526,7 @@ window.addEventListener('keydown', e => {
   draw();
 });
 function setMode(m) {
+  finishFramingDrag();
   closeTileMenu();
   tileActionStatus('');
   if(m!=='2d'){compareOriginal=false;pixelInspector.hidden=true;}
@@ -549,6 +540,8 @@ function setMode(m) {
   refreshEditorFeedback();glDirty = true; draw();
 }
 function setLayer(i) {
+  finishFramingDrag();
+  if(i!==0&&brush==='framing')$('#bSelect').onclick();
   closeTileMenu();
   tileActionStatus('');
   if (!room.bg[i]) return;

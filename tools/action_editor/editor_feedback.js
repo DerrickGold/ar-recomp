@@ -1,6 +1,6 @@
 /* Selection, authored data and export state are separate. These controls
  * inspect the same buckets as rendering; choosing a tile never authors a rule. */
-let editorRevision=0,feedbackRevision=-1,feedbackText='',exportBaseline='',savepointKind='loaded';
+let editorRevision=0,feedbackRevision=-1,feedbackRooms=new Map(),exportBaseline=new Map(),savepointKind='loaded';
 let compareOriginal=false,changeCache=null,highlightMode='modified',highlightCache=null;
 const pixelInspector=$('#pixelInspector');
 pixelInspector.hidden=true;
@@ -12,19 +12,23 @@ function returnToEditedTiles() {
 function markEditorChanged() {
   editorRevision++;configDirty=true;changeCache=null;returnToEditedTiles();
 }
-function currentEditorText() {
+function currentEditorRooms() {
   if(feedbackRevision!==editorRevision) {
-    feedbackText=mergeDioramaIni();feedbackRevision=editorRevision;
+    feedbackRooms=new Map(DATA.rooms.map(r=>[roomKey(r),roomIniLines(r).join('\n')]));
+    feedbackRevision=editorRevision;
   }
-  return feedbackText;
+  return feedbackRooms;
 }
 function captureEditorSavepoint(kind='loaded') {
   editorRevision++;feedbackRevision=-1;changeCache=null;
-  exportBaseline=currentEditorText();savepointKind=kind;configDirty=false;
+  exportBaseline=new Map(currentEditorRooms());savepointKind=kind;configDirty=false;
   if(kind==='exported')refreshEditorFeedback();
 }
+function captureRoomSavepoint(key,canonical) {
+  exportBaseline.set(key,canonical);savepointKind='copied';refreshEditorFeedback();
+}
 function editorHasUnexportedChanges() {
-  try {configDirty=currentEditorText()!==exportBaseline;}
+  try {configDirty=[...currentEditorRooms()].some(([key,text])=>text!==exportBaseline.get(key));}
   catch {configDirty=true;}
   return configDirty;
 }
@@ -151,7 +155,7 @@ function refreshEditorFeedback() {
   $('#selectionTools').hidden=mode!=='2d';
   $('#pixelSelectionBlackQuick').disabled=!selected||mode!=='2d';
   $('#copyTilesQuick').disabled=!selected||mode!=='2d';
-  const toolNames={select:'Select tiles',selectRect:'Select a rectangle',pan:'Pan',
+  const toolNames={select:'Select tiles',selectRect:'Select a rectangle',pan:'Pan',framing:'Adjust framing',
     cell:'Paint one tile',class:'Paint matching tile types',rect:'Paint a rectangle',stamp:'Stamp copied tiles'};
   $('#selectQuick').classList.toggle('on',brush==='select');
   $('#selectRectQuick').classList.toggle('on',brush==='selectRect');
@@ -161,6 +165,7 @@ function refreshEditorFeedback() {
   else if(brush==='select'||brush==='selectRect')hint='Selection makes no edits. Click or drag; Shift-click selects a range. Actions apply immediately.';
   else if(brush==='stamp')hint='Click places the copied rectangle. Keep clicking to repeat; Esc finishes.';
   else if(brush==='pan')hint='Drag to move the map; wheel zooms. Choose Select to pick tiles.';
+  else if(brush==='framing')hint='Drag any viewport frame; all move together. Arrows: 1 px; Shift + arrows: 16 px. Dashed outline = native view. Esc returns to Select.';
   else hint=`Click/drag immediately paints ${BAND_LABELS[band]}`
     +(brush==='class'?' on every matching tile in this terrain family.':'.')+' Alt restores inherited bands.';
   $('#activeTool').textContent=`Tool: ${toolNames[brush]||brush}`;
@@ -182,11 +187,12 @@ function refreshEditorFeedback() {
   $('#editOutlines').setAttribute('aria-pressed',String(showEditOutlines));
   $('#editOutlines').title=`Show ${highlightLabel().toLowerCase()} on the map. Blue selection remains separate.`;
   const dirty=editorHasUnexportedChanges();
-  $('#saveState').textContent=dirty?'Unexported changes':savepointKind==='exported'?'Matches last export':'Loaded INI';
+  $('#saveState').textContent=dirty?'Unexported changes':savepointKind==='exported'?'Matches last export'
+    :savepointKind==='copied'?'Matches last copy':'Loaded INI';
   $('#saveState').classList.toggle('dirty',dirty);
-  $('#saveState').title=dirty?'Edits are applied in this preview. Export INI to keep them.'
-    :'The game uses its own INI file. Downloading an export does not replace that file automatically.';
-  $('#export').textContent=dirty?'Export changes':'Export INI';
+  $('#saveState').title=dirty?'Some room edits have not been copied or downloaded. Export level INI to keep them.'
+    :'The game uses its own INI file. Paste the copied section into that file and restart the game.';
+  $('#export').textContent='Export level INI';
 }
 for(let value=0;value<3;value++)$(`#selectionBand${value}`).onclick=()=>{
   const count=tileSelectionPositions().length;

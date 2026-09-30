@@ -60,6 +60,10 @@ void ActRaiser_LiveDioramaSkybox(SrPpuSurfaceView *out, int32_t *world_x);
 /* Vertical geometry latched with the last rendered frame. Either pointer may
  * be NULL. */
 void ActRaiser_LiveVerticalMargins(int *top, int *bottom);
+/* Primary scenery extent used to resolve those margins, including pasted
+ * Diorama tiles. A zero height means the native plan supplies the extent. */
+void ActRaiser_LiveDioramaVerticalExtent(int *world_y0, int *world_height);
+void ActRaiser_LiveDioramaFraming(int *x, int *y);
 unsigned ActRaiser_TakeVextUnlockedObjects(void);
 
 /* The OAM slots the widescreen HUD-icon promote validated for the frame being
@@ -81,6 +85,7 @@ bool ActRaiser_HudObjSurfaceView(SrPpuSurfaceView *surface);
  * publish that plane. */
 bool ActRaiser_DioramaDeathHeimHubFacesPromoted(void);
 uint32_t ActRaiser_DioramaPixelContentMask(void);
+uint8_t ActRaiser_DioramaBgApronMask(void);
 void ActRaiser_FullSnapshot(const char *prefix);
 void RunOneFrameOfGame(void);
 void ActRaiser_OnInidispWrite(uint8 value);
