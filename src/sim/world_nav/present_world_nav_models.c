@@ -85,6 +85,7 @@ typedef struct WorldNavigationModelJob {
   SimBackgroundVoxelBiome biome;
   SimBackgroundVoxelDetail detail;
   float source_x, source_y, centre_x, centre_y, footprint_scale, base, height_scale;
+  float focus_gain;
   size_t first;
   uint16_t object_index;
   bool animated;
@@ -165,8 +166,9 @@ static void ProjectWorldNavigationModelRange(void *context, size_t first, size_t
         vertex->x = projected.x;
         vertex->y = projected.y;
         vertex->uv = (ArRenderPointF){-1, -1};
-        const float shade = work->lighting
-            ? 0.74f + 0.18f * job->shading.brightness[face][point] / 255.0f : 0.88f;
+        const float shade = (work->lighting
+            ? 0.74f + 0.18f * job->shading.brightness[face][point] / 255.0f : 0.88f) *
+            job->focus_gain;
         vertex->color = (ArRenderColorF){
           ((argb >> 16) & 255) / 255.0f * shade,
           ((argb >> 8) & 255) / 255.0f * shade,
@@ -294,11 +296,16 @@ static bool WorldNavigationAppendAuthoredModel(
   const bool occluded = SimWorldNavigationGlobe_CapOccluded(camera, transformed_anchor,
       angular_radius, maximum_radius, occluder_radius);
   if (occluded && object.kind != kSimBackgroundVoxel_Windmill) return true;
+  const Sim3DDepthSurfaceFocus focus = PresentWorldNavigationFocus_Resolve(&slot->sim);
+  const float focus_weight = PresentSimGlobeFocus_Weight(&focus,
+      (source_x + centre_x * pixel_to_world_source) / kSimWorldMapPixels,
+      (source_y + centre_y * pixel_to_world_source) / kSimWorldMapPixels);
   WorldNavigationModelJob job = {
     .model = *model, .shading = shading ? *shading : (SimBackgroundVoxelModelShading){0},
     .palette = palette, .biome = biome, .detail = visible->detail,
     .source_x = source_x, .source_y = source_y, .centre_x = centre_x, .centre_y = centre_y,
     .footprint_scale = proportions->footprint_scale, .base = base, .height_scale = height_scale,
+    .focus_gain = 1 - focus.dim * focus_weight,
     .animated = object.kind == kSimBackgroundVoxel_Windmill,
     .object_index = (uint16_t)(visible->object - slot->sim.world_navigation_towns.objects),
   };
@@ -409,7 +416,7 @@ static bool PrepareWorldNavigationMountainSamples(const WorldNavigationProjectio
 
 static bool ProjectWorldNavigationMountainFace(
     const SimWorldNavigationMountainFace *face, const WorldNavigationMountainProjection *sample,
-    bool lighting, ArRenderRectI viewport,
+    bool lighting, const Sim3DDepthSurfaceFocus *focus, ArRenderRectI viewport,
     const WorldNavigationProjection *projection, Sim3DDepthVertex vertices[4],
     Scene3DClipPoint clip[4]) {
   for (int p = 0; p < 4; p++) {
@@ -431,7 +438,9 @@ static bool ProjectWorldNavigationMountainFace(
     vertices[p].x = screen.x;
     vertices[p].y = screen.y;
     vertices[p].uv = (ArRenderPointF){face->uv[p].x, face->uv[p].y};
-    vertices[p].color = (ArRenderColorF){shade, shade, shade, 1};
+    vertices[p].color = PresentSimGlobeFocus_Color(focus,
+        PresentSimGlobeFocus_Weight(focus, face->x[p] / kSimWorldMapTiles,
+            face->y[p] / kSimWorldMapTiles), (ArRenderColorF){shade, shade, shade, 1});
   }
   return true;
 }
@@ -440,6 +449,7 @@ typedef struct WorldNavigationMountainWork {
   WorldNavigationProjection projection;
   ArRenderRectI viewport;
   bool lighting;
+  Sim3DDepthSurfaceFocus focus;
   const SimWorldNavigationMountainFace *faces;
   WorldNavigationMountainProjection *samples;
 } WorldNavigationMountainWork;
@@ -449,7 +459,8 @@ static void ProjectWorldNavigationMountainRange(void *context, size_t first, siz
   for (size_t i = first; i < end; ++i) {
     WorldNavigationMountainProjection *sample = &work->samples[i];
     sample->visible = ProjectWorldNavigationMountainFace(&work->faces[i], sample,
-        work->lighting, work->viewport, &work->projection, sample->points, sample->clip);
+        work->lighting, &work->focus, work->viewport, &work->projection, sample->points,
+        sample->clip);
   }
 }
 
@@ -464,11 +475,13 @@ bool DrawWorldNavigationMountains(
   key.width = viewport.w;
   key.height = viewport.h;
   key.lighting = slot->sim.world_navigation_lighting;
+  key.focus = PresentWorldNavigationFocus_Resolve(&slot->sim);
   const bool project = !cached || !g_world_nav_mountains.projection_ready ||
       memcmp(&key, &g_world_nav_mountains.projection_key, sizeof(key));
   if (cached && project) {
     WorldNavigationMountainWork work = {.projection = *projection, .viewport = viewport,
-      .lighting = slot->sim.world_navigation_lighting, .faces = g_world_nav_mountains.scene.faces,
+      .lighting = slot->sim.world_navigation_lighting, .focus = key.focus,
+      .faces = g_world_nav_mountains.scene.faces,
       .samples = g_world_nav_mountains.projection};
     HostParallelWork_Run(WorldNavigationWorkers(), g_world_nav_mountains.scene.face_count, 512,
         ProjectWorldNavigationMountainRange, &work);
@@ -490,7 +503,7 @@ bool DrawWorldNavigationMountains(
       WorldNavigationMountainProjection sample;
       valid = SampleWorldNavigationMountainFace(face, projection, &sample) &&
           ProjectWorldNavigationMountainFace(face, &sample, slot->sim.world_navigation_lighting,
-              viewport, projection, vertices, clip + count * 4);
+              &key.focus, viewport, projection, vertices, clip + count * 4);
     }
     if (valid && ++count == 64) {
       if (!WorldNavigationAppendProjectedQuads(kSim3DDepthPass_WorldMountain, batch,
@@ -646,6 +659,7 @@ static bool DrawWorldNavigationGpuModels(const FrameSlot *slot,
   style.light_elevation = slot->sim.light_elevation_deg;
   style.style = (SimBackgroundVoxelStyle)slot->sim.background_voxel_style;
   style.lighting = slot->sim.world_navigation_lighting;
+  style.focus = PresentWorldNavigationFocus_Resolve(&slot->sim);
   const Sim3DDepthRadialTransform transform = WorldNavigationRadialTransform(slot, projection);
   g_world_nav_models.gpu_current_ready =
       WorldNavigationModelMesh_Draw(sources, source_count, &style, &transform);
@@ -670,6 +684,7 @@ bool DrawWorldNavigationTowns(
   key.light_azimuth = slot->sim.light_azimuth_deg;
   key.light_elevation = slot->sim.light_elevation_deg;
   key.lighting = slot->sim.world_navigation_lighting;
+  key.focus = PresentWorldNavigationFocus_Resolve(&slot->sim);
   const bool same_projection = g_world_nav_models.projection_key_ready &&
       !memcmp(&key, &g_world_nav_models.projection_key, sizeof(key));
   if (!same_projection) {

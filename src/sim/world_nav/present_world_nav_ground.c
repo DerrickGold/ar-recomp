@@ -12,6 +12,7 @@ typedef struct WorldNavigationGroundWork {
   ArRenderRectI viewport;
   float light[3];
   bool lighting;
+  Sim3DDepthSurfaceFocus focus;
   ArRenderVertex2D *vertices;
   Sim3DDepthVertex *depth;
   Scene3DClipPoint *clip;
@@ -159,7 +160,8 @@ static bool DrawWorldNavigationGpuGrid(const FrameSlot *slot,
                 .reference_height = projection->reference_height_units,
                 .height_scale = projection->height_world_per_unit },
     .ambient = slot->sim.world_navigation_lighting ? kWorldNavigationTerrainAmbient : 1,
-    .diffuse = slot->sim.world_navigation_lighting ? 1 - kWorldNavigationTerrainAmbient : 0
+    .diffuse = slot->sim.world_navigation_lighting ? 1 - kWorldNavigationTerrainAmbient : 0,
+    .focus = PresentWorldNavigationFocus_Resolve(&slot->sim)
   };
   memcpy(t.radial.matrix, projection->matrix, sizeof(t.radial.matrix));
   memcpy(t.radial.basis[0], projection->globe_frame.right, sizeof(t.radial.basis[0]));
@@ -261,10 +263,14 @@ static bool DrawWorldNavigationGpuGrid(const FrameSlot *slot,
       .range = { mountain_first, g_world_nav_gpu_grid.mountain_quads },
       .transform = { .radial = t.radial,
                      .extra_scale = projection->tile_world,
-                     .ambient = slot->sim.world_navigation_lighting ? .90f : 1 } }
+                     .ambient = slot->sim.world_navigation_lighting ? .90f : 1,
+                     .focus = t.focus } }
   };
-  if (!WorldNavigationOceanTransform(projection,&batches[0].transform) ||
-      !Sim3DMeshSet_AppendSurface(&g_world_nav_gpu_grid.meshes,batches,3))
+  if (!WorldNavigationOceanTransform(projection,&batches[0].transform)) goto unavailable;
+  /* The uncharted ocean shares the distant ground's dimming. Otherwise the
+   * chart's water darkens while the surrounding sphere stays full-bright. */
+  batches[0].transform.ambient *= 1 - t.focus.dim;
+  if (!Sim3DMeshSet_AppendSurface(&g_world_nav_gpu_grid.meshes,batches,3))
     goto unavailable;
   Sim3DPerformance_AddPath(kSim3DPath_GpuReuse);
   return true;
@@ -316,6 +322,9 @@ static void ProjectWorldNavigationGroundRange(void *context, size_t first, size_
       {(at % kWorldNavigationTerrainAxis) / (float)kWorldNavigationTerrainCells,
        (at / kWorldNavigationTerrainAxis) / (float)kWorldNavigationTerrainCells},
     };
+    const ArRenderPointF uv = work->vertices[at].tex_coord;
+    work->vertices[at].color = PresentSimGlobeFocus_Color(&work->focus,
+        PresentSimGlobeFocus_Weight(&work->focus, uv.x, uv.y), work->vertices[at].color);
   }
 }
 
@@ -509,7 +518,7 @@ unavailable:
  * or the atmospheric backdrop. Wind UVs and effect opacity remain dynamic. */
 bool DrawWorldNavigationSphereShell(
     ArRenderRectI viewport,
-    const WorldNavigationProjection *projection, WorldNavigationShell kind) {
+    const WorldNavigationProjection *projection, WorldNavigationShell kind, float ocean_gain) {
   const bool atmosphere = kind == kWorldNavigationShell_Atmosphere;
   const bool cloud = kind == kWorldNavigationShell_Cloud;
   WorldNavigationShellGeometry *geometry = atmosphere ? &g_world_nav_shells.atmosphere
@@ -602,6 +611,10 @@ bool DrawWorldNavigationSphereShell(
         };
         for (int p = 0; p < 4; p++) {
           batch[batch_count * 4 + p] = depth_vertices[at[p]];
+          ArRenderColorF *color = &batch[batch_count * 4 + p].color;
+          color->r *= ocean_gain;
+          color->g *= ocean_gain;
+          color->b *= ocean_gain;
           clip_batch[batch_count * 4 + p] = clip_vertices[at[p]];
         }
         if (++batch_count == kOceanBatchQuads) {
@@ -618,6 +631,9 @@ bool DrawWorldNavigationSphereShell(
     Sim3DDepthVertex *triangle = batch + batch_count * 4;
     for (int corner = 0; corner < 3; corner++) {
       triangle[corner] = depth_vertices[g_world_nav_shells.indices[i + corner]];
+      triangle[corner].color.r *= ocean_gain;
+      triangle[corner].color.g *= ocean_gain;
+      triangle[corner].color.b *= ocean_gain;
     }
     triangle[3] = triangle[2];
     if (++batch_count == kOceanBatchQuads) {
@@ -773,6 +789,7 @@ static WorldNavigationGroundKey WorldNavigationGroundKeyFor(
   key.light_azimuth = slot->sim.light_azimuth_deg;
   key.light_elevation = slot->sim.light_elevation_deg;
   key.lighting = slot->sim.world_navigation_lighting;
+  key.focus = PresentWorldNavigationFocus_Resolve(&slot->sim);
   return key;
 }
 
@@ -806,6 +823,7 @@ static bool DrawWorldNavigationCompatibilityGround(
       WorldNavigationGroundWork work = {
         .samples = g_world_nav_terrain.samples, .projection = *projection, .viewport = viewport,
         .light = {light[0], light[1], light[2]}, .lighting = slot->sim.world_navigation_lighting,
+        .focus = key.focus,
         .vertices = g_world_nav_terrain.vertices, .depth = g_world_nav_terrain.depth,
         .clip = g_world_nav_terrain.clip, .outside = g_world_nav_terrain.outside, .valid = valid,
       };
@@ -836,7 +854,9 @@ static bool DrawWorldNavigationCompatibilityGround(
             WorldNavigationSurfaceShade(slot->sim.world_navigation_lighting, projection, light,
                                         face->x[p] * kSimWorldMapTilePixels,
                                         face->y[p] * kSimWorldMapTilePixels);
-        projected->colour[p] = (ArRenderColorF){shade, shade, shade, 1};
+        projected->colour[p] = PresentSimGlobeFocus_Color(&key.focus,
+            PresentSimGlobeFocus_Weight(&key.focus, face->x[p] / kSimWorldMapTiles,
+                face->y[p] / kSimWorldMapTiles), (ArRenderColorF){shade, shade, shade, 1});
       }
     }
     g_world_nav_terrain.projection_key = key;
@@ -893,7 +913,8 @@ bool DrawWorldNavigationSurfaceLayers(const FrameSlot *slot, ArRenderRectI viewp
       Sim3DPerformance_AddPath(g_world_nav_surfaces.opt_out ? kSim3DPath_OptOut
                                                             : kSim3DPath_Rejected);
     g_world_nav_surfaces.published = false;
-    ok = ok && DrawWorldNavigationSphereShell(viewport, projection, kWorldNavigationShell_Ocean);
+    ok = ok && DrawWorldNavigationSphereShell(viewport, projection, kWorldNavigationShell_Ocean,
+        1 - PresentWorldNavigationFocus_Resolve(&slot->sim).dim);
   }
   Sim3DPerformance_End(ocean);
   if (!ok) return false;

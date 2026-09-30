@@ -4,6 +4,53 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+static void TestNavigationFocus(SimFrameData *sim) {
+  const int origins[][2] = {{80,48}, {48,48}, {16,64}, {16,32}, {64,96}, {32,0}};
+  sim->view = kSimView_WorldNavigation;
+  sim->world_navigation_haze = true;
+  sim->cull_dim_pct = kSimCullDimDefaultPct;
+  sim->cull_haze_lead_px = kSimCullHazeLeadDefaultPx;
+  SimWorldNavigationScene *scene = &sim->world_navigation_scene;
+  scene->active_region_valid = true;
+  scene->active_region_width = scene->active_region_height = 256;
+  for (unsigned selected = 0; selected < 6; ++selected) {
+    scene->active_region_x = origins[selected][0] * 8;
+    scene->active_region_y = origins[selected][1] * 8;
+    const Sim3DDepthSurfaceFocus focus = PresentWorldNavigationFocus_Resolve(sim);
+    for (unsigned town = 0; town < 6; ++town) {
+      const float x = (origins[town][0] + 16.0f) / 128;
+      const float y = (origins[town][1] + 16.0f) / 128;
+      const float weight = PresentSimGlobeFocus_Weight(&focus, x, y);
+      assert(weight == (town == selected ? 0 : 1));
+      const ArRenderColorF color =
+          PresentSimGlobeFocus_Color(&focus, weight, (ArRenderColorF){.4f,.6f,.8f,.5f});
+      const float gain = town == selected ? 1 : .7f;
+      assert(fabsf(color.r - .4f * gain) < .000001f);
+      assert(fabsf(color.g - .6f * gain) < .000001f);
+      assert(fabsf(color.b - .8f * gain) < .000001f && color.a == .5f);
+    }
+    const ArRenderRectF r = focus.clear_rect;
+    const float edge = PresentSimGlobeFocus_Weight(&focus,
+        r.x - focus.feather * .5f, r.y + r.h * .5f);
+    assert(edge > 0 && edge < 1);
+  }
+  scene->active_region_valid = false;
+  Sim3DDepthSurfaceFocus focus = PresentWorldNavigationFocus_Resolve(sim);
+  assert(PresentSimGlobeFocus_Weight(&focus, .5f, .5f) == 1);
+  scene->active_region_valid = true;
+  sim->cull_dim_pct = 0;
+  focus = PresentWorldNavigationFocus_Resolve(sim);
+  assert(PresentSimGlobeFocus_Weight(&focus, -1, -1) == 0);
+  sim->cull_dim_pct = 30;
+  sim->world_navigation_haze = false;
+  assert(PresentWorldNavigationFocus_Resolve(sim).dim == 0);
+  sim->world_navigation_haze = true;
+  sim->view = kSimView_SkyPalace;
+  assert(PresentWorldNavigationFocus_Resolve(sim).dim == 0);
+  sim->view = kSimView_Enhanced;
+  assert(PresentWorldNavigationFocus_Resolve(sim).dim == 0);
+}
+
 int main(void) {
   SimFrameData *sim = calloc(1, sizeof(*sim));
   assert(sim);
@@ -74,6 +121,7 @@ int main(void) {
       PresentSimGlobeFocus_Color(&defaults, 1, (ArRenderColorF){.4f, .6f, .8f, .5f});
   assert(fabsf(dimmed.r - .28f) < .000001f && fabsf(dimmed.g - .42f) < .000001f);
   assert(fabsf(dimmed.b - .56f) < .000001f && dimmed.a == .5f);
+  TestNavigationFocus(sim);
   free(sim);
   printf("globe visibility: %u native cull-mask samples; pan, margins, rounded corners, lift and "
          "off parity PASS\n",

@@ -619,6 +619,79 @@ static void InitSlot(FrameSlot *slot) {
   BuildScene(slot);
 }
 
+static void TestSelectedTownFocus(SDL_Renderer *renderer, const FrameSlot *slot) {
+  const char *previous = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
+  char *saved = previous ? SDL_strdup(previous) : NULL;
+  CHECK(!previous || saved);
+  FrameSlot *probe = malloc(sizeof(*probe));
+  CHECK(probe);
+  *probe = *slot;
+  probe->sim.world_navigation_models = probe->sim.world_navigation_mountains = true;
+  probe->sim.world_navigation_ground_detail = true;
+  probe->sim.world_navigation_clouds = probe->sim.world_navigation_cloud_shadows = false;
+  probe->sim.world_navigation_atmosphere = probe->sim.world_navigation_backdrop = false;
+  probe->sim.underlay_haze_pct = probe->sim.underlay_defocus_pct = 0;
+  probe->sim.cull_dim_pct = kSimCullDimDefaultPct;
+  for (int gpu = 0; gpu < 2; ++gpu) {
+    CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID", gpu ? "1" : "0", 1));
+    PresentWorldNav_ResetResources();
+    probe->sim.world_navigation_haze = false;
+    probe->sim.world_navigation.active_location = 1;
+    BuildScene(probe);
+    SDL_Surface *clear = Render(renderer, probe, NULL);
+    probe->sim.world_navigation_haze = true;
+    char name[64];
+    snprintf(name, sizeof(name), "selected-town-1-%s", gpu ? "gpu" : "compatibility");
+    SDL_Surface *selected = Render(renderer, probe, name);
+    CHECK(Differences(clear, selected) > 1000);
+    const unsigned ocean = Pixel(clear, clear->w * 7 / 8, clear->h / 2) & 255;
+    const unsigned dim_ocean = Pixel(selected, selected->w * 7 / 8, selected->h / 2) & 255;
+    CHECK(ocean > 100 && dim_ocean < ocean * .8f);
+    SDL_Surface *held = Render(renderer, probe, NULL);
+    CHECK(Differences(selected, held) == 0);
+    SDL_DestroySurface(held);
+    probe->sim.world_navigation.active_location = 2;
+    BuildScene(probe); /* Selection changes while the camera stays fixed. */
+    snprintf(name, sizeof(name), "selected-town-2-%s", gpu ? "gpu" : "compatibility");
+    SDL_Surface *other = Render(renderer, probe, name);
+    CHECK(Differences(selected, other) > 1000);
+    SDL_DestroySurface(other);
+    probe->sim.world_navigation.active_location = 1;
+    BuildScene(probe);
+    held = Render(renderer, probe, NULL);
+    CHECK(Differences(selected, held) == 0);
+    SDL_DestroySurface(held);
+    PresentWorldNav_ResetResources();
+    Sim3DDepthPass_Reset(&g_render_device);
+    UploadWorldNavigationComposition(probe);
+    held = Render(renderer, probe, NULL);
+    CHECK(Differences(selected, held) == 0);
+    SDL_DestroySurface(held);
+    probe->sim.world_navigation_haze = false;
+    held = Render(renderer, probe, NULL);
+    CHECK(Differences(clear, held) == 0);
+    SDL_DestroySurface(held);
+    SDL_DestroySurface(selected);
+    SDL_DestroySurface(clear);
+  }
+  if (sim_town_snapshot) {
+    *probe = *slot;
+    probe->sim.world_navigation_haze = true;
+    probe->sim.cull_dim_pct = kSimCullDimDefaultPct;
+    probe->sim.underlay_haze_pct = kSimUnderlayHazeDefaultPct;
+    BuildScene(probe);
+    SDL_Surface *styled = Render(renderer, probe, "selected-town-1-with-weather");
+    SDL_DestroySurface(styled);
+  }
+  if (saved) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID", saved, 1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+  SDL_free(saved);
+  PresentWorldNav_ResetResources();
+  UploadWorldNavigationComposition(slot);
+  free(probe);
+  puts("selected town focus: all-town detail, dimming, selection and warm/cold parity PASS");
+}
+
 static void TestGroundLightDirections(SDL_Renderer *renderer, const FrameSlot *slot,
                                       const char *prefix) {
   FrameSlot *probe = malloc(sizeof(*probe));
@@ -4029,6 +4102,18 @@ static void TestCaptured(SDL_Renderer *renderer, const char *rom_path, const cha
   CHECK(wram[0x18] == 0 && (sim_town_snapshot || wram[0x19] == 9));
   CHECK(SimWorldMap_Init(rom, kRomBytes) && SimTownGroundArt_Init(rom, kRomBytes));
   if (!sim_town_snapshot) SimWorldMap_PublishBuiltTilemap(wram + 0xC000);
+  else {
+    SimWorldMapRomTables tables;
+    uint8_t developed[kSimWorldMapBytes];
+    uint16_t enabled[kSimTownCount];
+    CHECK(SimWorldMap_LoadRomTables(&tables, rom, kRomBytes));
+    for (int i = 0; i < kSimTownCount; ++i)
+      enabled[i] = wram[0x16b18 + i * 2] | (uint16_t)wram[0x16b19 + i * 2] << 8;
+    CHECK(SimWorldMap_ComposeDeveloped(developed, SimWorldMap_Baseline(),
+        (const uint8_t (*)[kSimWorldMapTownCells])(wram + 0x12000),
+        enabled, wram[0x19101], &tables));
+    SimWorldMap_PublishBuiltTilemap(developed);
+  }
   SimWorldMap_SetWaterAnimationSource((uint16_t)(wram[0xD7] | wram[0xD8] << 8));
   FrameSlot *slot = malloc(sizeof(*slot));
   CHECK(slot);
@@ -4048,6 +4133,7 @@ static void TestCaptured(SDL_Renderer *renderer, const char *rom_path, const cha
   slot->sim.world_navigation_clouds = slot->sim.world_navigation_cloud_shadows = true;
   slot->sim.world_navigation_atmosphere = slot->sim.world_navigation_backdrop = true;
   BuildScene(slot);
+  TestSelectedTownFocus(renderer, slot);
   if (sim_town_snapshot) {
     CaptureTownPresentation(renderer, slot, rom, wram);
     goto cleanup;

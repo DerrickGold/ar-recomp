@@ -1,9 +1,8 @@
 #ifndef AR_SIM_WORLD_NAVIGATION_ART_H
 #define AR_SIM_WORLD_NAVIGATION_ART_H
 /* SimWorldNavigationArt: builds the 2048-pixel world navigation texture from
- * the current developed world map (Scale2x, without town-border blending),
- * overlays each town's ground art at native resolution, and redraws only the
- * rows whose animated cells changed.
+ * the current developed world map (Scale2x), blends each town's native ground
+ * into that live map at its boundary, and redraws only animated dirty rows.
  * Phase: pure.
  * Tests: tests/sim_world_navigation_art_test.c */
 
@@ -18,11 +17,13 @@ enum {
   kSimWorldNavigationArtScale = 2,
   kSimWorldNavigationArtPixels =
       kSimWorldMapPixels * kSimWorldNavigationArtScale,
+  /* Keep the central 24x24 town cells fully detailed. */
+  kSimWorldNavigationTownFeatherPixels = 4 * kSimWorldMapTilePixels,
 };
 
-/* Apply deterministic Scale2x to current developed art. The continuous 3D
- * world uses complete town materials; the flat SIM undermap owns its separate
- * presentation feather. Produces a real 2048-square navigation texture
+/* Apply deterministic Scale2x to current developed art. The overlay below
+ * blends native materials into this live base, preserving current development
+ * and cleansed water. Produces a real 2048-square navigation texture
  * using a bounded three-row working set, with no scratch heap allocation. */
 bool SimWorldNavigationArt_Build(
     uint32_t *out_pixels, int out_pitch_pixels,
@@ -34,8 +35,9 @@ bool SimWorldNavigationArt_Build(
  * Cliff art is included only when the caller supplies owned-corner geometry
  * with closed skirts (`cliff_geometry`). Model cells receive clean ground,
  * or retain the overview glyph when models are disabled. Each owned cell
- * receives complete clean ground even at the town border. Unreplaced cells
- * retain their native artwork; no tile-type-wide suppression is performed.
+ * receives complete clean ground even at the town border. Other cells blend
+ * into the live overview over four boundary cells; interiors stay native.
+ * Unreplaced tree bundles remain present; suppression follows model ownership.
  * With detailed_ground disabled, only model-owned cells are overlaid.
  * Allocation/source failure leaves the caller's existing atlas unchanged. */
 bool SimWorldNavigationArt_OverlayTownGround(
@@ -54,7 +56,7 @@ typedef struct SimWorldNavigationArtChanges {
  * do not retain the plan across source updates/reset. Output must not alias
  * inputs. Disjoint world-cell row ranges write disjoint output pixel rows,
  * without atlas lookups, allocation, global mutation or thread dependencies.
- * Caller owns this fixed ~148 KiB value and may reuse its storage. */
+ * Caller owns this fixed ~280 KiB value and may reuse its storage. */
 typedef struct SimWorldNavigationArtAnimation {
   uint32_t *output;
   const uint32_t *developed;
@@ -62,10 +64,13 @@ typedef struct SimWorldNavigationArtAnimation {
   SimWorldNavigationArtChanges changes;
   struct {
     const uint32_t *pixels;
+    uint8_t x, y;
+    bool model_owned;
   } overlay[kSimWorldMapBytes];
   /* Owned native ring art with the town snow palette; pointers in overlay
    * remain valid throughout every worker row range in this prepared plan. */
   uint32_t northwall_ring[4][kSimTownCellPixels * kSimTownCellPixels];
+  unsigned feather[kSimTownCells * kSimTownCellPixels];
   bool ready;
 } SimWorldNavigationArtAnimation;
 
@@ -88,7 +93,7 @@ void SimWorldNavigationArt_RenderAnimationRows(
  * native town animation changed. Ground may be NULL when both detailed ground
  * and models are disabled; model cleanup remains active without ground detail.
  * Rebuilds the original Scale2x under each changed tile before reapplying town
- * art, so transparent phases cannot leave pixels from a previous frame.
+ * art, so blending and transparent phases cannot accumulate stale pixels.
  * Reports affected world cells without renderer types. Caller must reapply
  * mountain cleanup/material patches to these cells only, then upload them.
  * Invalid/source failure leaves both atlas and change mask untouched. */

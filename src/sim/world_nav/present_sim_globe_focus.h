@@ -21,6 +21,23 @@ static inline Sim3DDepthSurfaceFocus PresentSimGlobeFocus_Resolve(
     .dim=fminf(1,dim/100.0f), .haze={.24f,.37f,.56f,fminf(1,haze/100.0f)}};
 }
 
+/* Navigation keeps detailed art in every town. Selection changes only the
+ * scene's colour treatment, using the same dim setting as the SIM globe. */
+static inline Sim3DDepthSurfaceFocus PresentWorldNavigationFocus_Resolve(
+    const SimFrameData *sim) {
+  if (!sim || sim->view != kSimView_WorldNavigation || !sim->world_navigation_haze)
+    return (Sim3DDepthSurfaceFocus){0};
+  const SimWorldNavigationScene *scene = &sim->world_navigation_scene;
+  return (Sim3DDepthSurfaceFocus){
+    .clear_rect = {scene->active_region_x / (float)kSimWorldMapPixels,
+      scene->active_region_y / (float)kSimWorldMapPixels,
+      scene->active_region_width / (float)kSimWorldMapPixels,
+      scene->active_region_height / (float)kSimWorldMapPixels},
+    .feather = scene->active_region_valid
+        ? fmaxf(4, sim->cull_haze_lead_px / 16.0f) / kSimWorldMapTiles : 0,
+    .dim = fminf(1, sim->cull_dim_pct / 100.0f)};
+}
+
 /* Restore the ground cue at the captured emitter window, not at the full
  * town boundary. Native town XY -> biased sprite anchors is the same mapping
  * used by SimCullProximityAt. Camera pitch/zoom and framebuffer size do not

@@ -442,7 +442,10 @@ void BuildWorldNavigationMountainSourceRange(void *context, size_t first, size_t
       v->elevation[0] = WorldNavigationTerrainHeightAtPrepared(
           face->x[p]*kSimWorldMapTilePixels,face->y[p]*kSimWorldMapTilePixels,NULL,true);
       v->elevation[1] = face->z[p]*metric;
-      work->mask_uv[i*4+p] = v->uv; /* Cutout batches never use ground overlays. */
+      /* Native atlas UVs pack mountain artwork, independently of geography.
+       * Focus must follow world position, including on cutout silhouettes. */
+      work->mask_uv[i*4+p] = (ArRenderPointF){face->x[p]/kWorldNavigationTerrainCells,
+        face->y[p]/kWorldNavigationTerrainCells};
     }
   }
 }

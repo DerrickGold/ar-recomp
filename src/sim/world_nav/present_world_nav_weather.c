@@ -840,7 +840,7 @@ PresentationOutcome DrawWorldNavigationWeather(
     if (DrawWorldNavigationGpuCloudBodies(projection,elapsed_ms,drift,opacity*body_visibility))
       return kPresentationOutcome_Complete;
     if (!DrawWorldNavigationSphereShell(
-            viewport, projection, kWorldNavigationShell_Cloud))
+            viewport, projection, kWorldNavigationShell_Cloud, 1))
       return OmitWorldNavigationWeather("cloud shell projection");
     for (unsigned layer_index = 0;
          layer_index < (size_t)kSimCloudLayerCount;

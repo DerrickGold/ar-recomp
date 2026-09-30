@@ -140,6 +140,7 @@ typedef struct WorldNavigationGroundKey {
   uint32_t geography_serial;
   int snes_width, snes_height, visible_width, visible_x0;
   int light_azimuth, light_elevation, lighting;
+  Sim3DDepthSurfaceFocus focus;
 } WorldNavigationGroundKey;
 
 typedef struct WorldNavigationGroundSample {
@@ -161,6 +162,7 @@ typedef struct WorldNavigationMountainProjection {
 typedef struct WorldNavigationMountainProjectionKey {
   WorldNavigationProjection projection;
   int width, height, lighting;
+  Sim3DDepthSurfaceFocus focus;
 } WorldNavigationMountainProjectionKey;
 
 typedef struct WorldNavigationModelProjectionKey {
@@ -168,6 +170,7 @@ typedef struct WorldNavigationModelProjectionKey {
   ArRenderRectI viewport;
   uint32_t model_revision, surface_revision;
   int height_scale, light_azimuth, light_elevation, lighting;
+  Sim3DDepthSurfaceFocus focus;
 } WorldNavigationModelProjectionKey;
 
 /* Static spans retain their original position around animated objects.
@@ -488,7 +491,7 @@ bool WorldNavigationGpuGridEnabled(void);
 void PrepareWorldNavigationOceanIndices(void);
 bool DrawWorldNavigationSphereShell(
     ArRenderRectI viewport,
-    const WorldNavigationProjection *projection, WorldNavigationShell kind);
+    const WorldNavigationProjection *projection, WorldNavigationShell kind, float ocean_gain);
 bool DrawWorldNavigationSpaceBackdrop(ArRenderRectI viewport);
 bool DrawWorldNavigationSurfaceLayers(const FrameSlot *slot, ArRenderRectI viewport,
     const WorldNavigationProjection *projection, uint64_t elapsed_ms);

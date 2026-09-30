@@ -141,11 +141,38 @@ static bool PrepareNorthwallRing(const SimWorldNavigationTownGround *ground,
   return true;
 }
 
-static void OverlayGroundCell(uint32_t *out, int pitch, const uint32_t *pixels) {
+static void GroundFeather(unsigned feather[kSimTownCells * kSimTownCellPixels]) {
+  const int pixels = kSimTownCells * kSimTownCellPixels;
+  const float width = kSimWorldNavigationTownFeatherPixels * kSimWorldNavigationArtScale;
+  for (int i = 0; i < pixels; i++) {
+    const int edge = i < pixels - 1 - i ? i : pixels - 1 - i;
+    const float t = edge < width ? edge / width : 1;
+    feather[i] = (unsigned)(256 * t * t * (3 - 2 * t) + .5f);
+  }
+}
+
+static uint32_t BlendGround(uint32_t world, uint32_t town, unsigned weight) {
+  if (weight >= 256) return town;
+  if (!weight || world == town) return world;
+  uint32_t out = UINT32_C(0xFF000000);
+  for (int shift = 0; shift < 24; shift += 8)
+    out |= (((((world >> shift) & 255u) * (256u - weight) +
+              ((town >> shift) & 255u) * weight + 128u) >> 8) << shift);
+  return out;
+}
+
+static void OverlayGroundCell(uint32_t *out, int pitch, const uint32_t *pixels,
+                             int cx, int cy, const unsigned *feather, bool model_owned) {
   for (int y = 0; y < kSimTownCellPixels; y++)
     for (int x = 0; x < kSimTownCellPixels; x++) {
       const uint32_t color = pixels[y * kSimTownCellPixels + x];
-      if (color >> 24) out[y * pitch + x] = color;
+      if (!(color >> 24)) continue;
+      const unsigned fx = feather[cx * kSimTownCellPixels + x];
+      const unsigned fy = feather[cy * kSimTownCellPixels + y];
+      /* Replacement geometry owns the entire source footprint. Blending
+       * its old overview glyph back in would resurrect native tree bundles. */
+      out[y * pitch + x] = BlendGround(out[y * pitch + x], color,
+          model_owned ? 256 : fx < fy ? fx : fy);
     }
 }
 
@@ -165,6 +192,8 @@ bool SimWorldNavigationArt_OverlayTownGround(
       return false;
   uint32_t ring[4][kSimTownCellPixels * kSimTownCellPixels];
   if (detailed_ground && !PrepareNorthwallRing(ground, ring)) return false;
+  unsigned feather[kSimTownCells * kSimTownCellPixels];
+  GroundFeather(feather);
   for (uint8_t town = 1; town <= kSimTownCount; town++) {
     if (!(ground->enabled_town_mask & (1u << (town - 1)))) continue;
     int origin_x, origin_y;
@@ -185,7 +214,9 @@ bool SimWorldNavigationArt_OverlayTownGround(
         }
         uint32_t *out = out_pixels + (size_t)(origin_y + cy) * kSimTownCellPixels *
             out_pitch_pixels + (origin_x + cx) * kSimTownCellPixels;
-        OverlayGroundCell(out, out_pitch_pixels, pixels);
+        const bool model_owned = models_enabled &&
+            (ground->object_rows[town - 1][cy] & (UINT32_C(1) << cx));
+        OverlayGroundCell(out, out_pitch_pixels, pixels, cx, cy, feather, model_owned);
       }
   }
   return true;
@@ -220,6 +251,7 @@ bool SimWorldNavigationArt_PrepareAnimation(
   work->output_pitch = out_pitch_pixels;
   work->developed = developed_pixels;
   work->developed_pitch = developed_pitch_pixels;
+  GroundFeather(work->feather);
   SimWorldNavigationArtChanges *changes = &work->changes;
   memset(changes, 0, sizeof(*changes));
   memset(work->overlay, 0, sizeof(work->overlay));
@@ -244,6 +276,10 @@ bool SimWorldNavigationArt_PrepareAnimation(
         }
         const int at = (oy + y) * kSimWorldMapTiles + ox + x;
         work->overlay[at].pixels = after;
+        work->overlay[at].x = (uint8_t)x;
+        work->overlay[at].y = (uint8_t)y;
+        work->overlay[at].model_owned = models_enabled &&
+            (ground->object_rows[town - 1][y] & (UINT32_C(1) << x));
         if (before == after || !memcmp(before, after,
             kSimTownCellPixels * kSimTownCellPixels * sizeof(*after))) continue;
         changes->cells[(oy + y) * kSimWorldMapTiles + ox + x] = 1;
@@ -272,7 +308,8 @@ void SimWorldNavigationArt_RenderAnimationRows(
       if (!work->changes.cells[at] || !work->overlay[at].pixels) continue;
       uint32_t *out =
           work->output + y * kSimTownCellPixels * work->output_pitch + x * kSimTownCellPixels;
-      OverlayGroundCell(out, work->output_pitch, work->overlay[at].pixels);
+      OverlayGroundCell(out, work->output_pitch, work->overlay[at].pixels,
+          work->overlay[at].x, work->overlay[at].y, work->feather, work->overlay[at].model_owned);
     }
   }
 }

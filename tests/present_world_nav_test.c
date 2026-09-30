@@ -59,6 +59,7 @@ typedef struct FakeBackend {
   bool check_map_edge_opacity;
   bool hash_ground;
   uint64_t ground_hash;
+  float ocean_blue;
   bool hash_geometry;
   uint64_t geometry_hash;
   unsigned opaque_edge_land, faded_edge_water;
@@ -240,6 +241,7 @@ bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height, ArRende
   volume_previous_depth = 1;
   depth_world_mountain_hash = UINT64_C(14695981039346656037);
   s_backend->ground_hash = UINT64_C(14695981039346656037);
+  s_backend->ocean_blue = 0;
   memset(depth_surface, 0, sizeof(depth_surface));
   depth_collecting = !depth_begin_failure;
   return depth_collecting;
@@ -313,6 +315,9 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer, const Sim3DDepthVertex
             (depth_world_mountain_hash ^ bytes[i]) * UINT64_C(1099511628211);
     }
   }
+  if (layer == kSim3DDepthPass_Ground && vertices[0].uv.x < 0.0f)
+    for (int p = 0; p < 4; ++p)
+      s_backend->ocean_blue = fmaxf(s_backend->ocean_blue, vertices[p].color.b);
   if (layer == kSim3DDepthPass_Ground && vertices[0].uv.x >= 0.0f) {
     if (s_backend->hash_ground)
       for (int p = 0; p < 4; ++p) {
@@ -1373,6 +1378,62 @@ static void TestGroundCacheInvalidation(void) {
   assert(backend.ground_vertices[1].position.y == old_y); /* Town pose never tilts navigation. */
 }
 
+static void TestSelectedTownDimming(void) {
+  PresentWorldNav_ResetResources();
+  FakeBackend backend = {.output_width = 1280, .output_height = 720, .hash_ground = true};
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
+  uint8_t *rom = calloc(0x100000, 1);
+  assert(rom && SimTownGroundArt_Init(rom, 0x100000));
+  free(rom);
+  FrameSlot slot = WorldNavigationSlot();
+  slot.sim.world_navigation_ground_detail = true;
+  slot.sim.world_navigation_cloud_shadows = false;
+  slot.sim.world_navigation_towns.ground.enabled_town_mask = 63;
+  slot.sim.world_navigation_towns.object_count = 1;
+  slot.sim.world_navigation_towns.objects[0] = (SimBackgroundVoxelObject){
+      .town = 2, .kind = kSimBackgroundVoxel_House, .cell_x = 16, .cell_y = 16,
+      .source_cells_w = 2, .source_cells_h = 2, .footprint_cells_w = 2, .footprint_cells_d = 2,
+      .visual_state = kSimStructureVisualState_Finished};
+  SimWorldNavigationScene *scene = &slot.sim.world_navigation_scene;
+  scene->active_region_valid = true;
+  scene->active_region_width = scene->active_region_height = 256;
+  slot.sim.cull_dim_pct = 30;
+  hash_models = true;
+  uint64_t ground[5], models[5];
+  float ocean[5];
+  int uploads = 0, faces = 0;
+  for (int step = 0; step < 5; ++step) {
+    slot.sim.world_navigation_haze = step > 0 && step < 4;
+    scene->active_region_x = (step == 2 ? 48 : 80) * 8;
+    scene->active_region_y = 48 * 8;
+    model_hash = UINT64_C(14695981039346656037);
+    UploadWorldNavigationComposition(&slot);
+    assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+    ground[step] = backend.ground_hash;
+    models[step] = model_hash;
+    ocean[step] = backend.ocean_blue;
+    if (!step) {
+      uploads = backend.ground_uploads;
+      faces = depth_solid_faces;
+      assert(uploads > 0 && faces > 0);
+    }
+    assert(backend.ground_uploads == uploads && depth_solid_faces == faces);
+    model_hash = UINT64_C(14695981039346656037);
+    assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+    assert(backend.ground_hash == ground[step] && model_hash == models[step]);
+  }
+  assert(ground[0] != ground[1] && ground[1] != ground[2] && ground[1] == ground[3]);
+  assert(models[0] != models[1] && models[1] != models[2] && models[1] == models[3]);
+  assert(ground[0] == ground[4] && models[0] == models[4]);
+  assert(ocean[0] > 0 && ocean[0] == ocean[4]);
+  for (int step = 1; step < 4; ++step)
+    assert(fabsf(ocean[step] - ocean[0] * .7f) < .000001f);
+  assert(slot.sim.world_navigation_towns.ground.enabled_town_mask == 63);
+  hash_models = false;
+  PresentWorldNav_ResetResources();
+  SimTownGroundArt_Shutdown();
+}
+
 static void TestGroundWorkerParity(void) {
   SDL_Environment *environment = SDL_GetEnvironment();
   const char *previous = SDL_GetEnvironmentVariable(environment, "AR_RENDER_WORKERS");
@@ -1699,11 +1760,12 @@ static void TestSelectiveGroundReplacement(void) {
   slot.sim.world_navigation_ground_detail = true;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(backend.ground_upload_mirror[owned] == 0xFFFF0000u);
-  assert(backend.ground_upload_mirror[unowned] == 0xFF0000FFu);
+  const uint32_t blended_unowned = backend.ground_upload_mirror[unowned];
+  assert(blended_unowned != native_unowned && blended_unowned != 0xFF0000FFu);
   slot.sim.world_navigation_models = false;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(backend.ground_upload_mirror[owned] == native_owned);
-  assert(backend.ground_upload_mirror[unowned] == 0xFF0000FFu);
+  assert(backend.ground_upload_mirror[unowned] == blended_unowned);
   PresentWorldNav_ResetResources();
   SimTownGroundArt_Shutdown();
   free(backend.ground_upload_mirror);
@@ -2961,6 +3023,7 @@ int main(void) {
   }
   setenv("AR_SIM3D_WORLD_GPU_GRID", "0", 1);
   TestGroundCacheInvalidation();
+  TestSelectedTownDimming();
   TestGroundWorkerParity();
   TestModelWorkerParity();
   TestOptionalStagesSkipWorkAndRestore();

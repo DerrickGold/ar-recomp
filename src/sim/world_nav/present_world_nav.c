@@ -855,7 +855,7 @@ static PresentationOutcome DrawWorldNavigationScene(
     const Sim3DPerformanceScope atmosphere_performance =
         Sim3DPerformance_Begin(kSim3DPerformance_WorldAtmosphere);
     const bool atmosphere_ok = DrawWorldNavigationSphereShell(
-        viewport, projection, kWorldNavigationShell_Atmosphere);
+        viewport, projection, kWorldNavigationShell_Atmosphere, 1);
     Sim3DPerformance_End(atmosphere_performance);
     if (!atmosphere_ok) {
       return kPresentationOutcome_CoreFailure;

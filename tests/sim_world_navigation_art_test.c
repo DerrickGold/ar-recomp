@@ -100,10 +100,10 @@ static void CheckModelFootprintBorders(uint32_t *out, int pitch, uint32_t overvi
         }
       CHECK(clean);
     }
-    /* A neighbouring instance of the same tile has no replacement. Keep
-     * its native ink, including the complete art at the town border. */
+    /* A neighbouring instance has no replacement. The outer pixel uses
+     * its live overview glyph; its interior retains complete native ink. */
     CHECK(out[(size_t)((oy + 9) * 16 + 8) * pitch + ox * 16] ==
-        (detailed ? 0xFF00FF00u : overview));
+        overview);
     CHECK(out[(size_t)((oy + 9) * 16 + 8) * pitch + ox * 16 + 8] != 0xFFFF0000u);
     CHECK(out[(size_t)((oy + 16) * 16 + 8) * pitch + (ox + 16) * 16 + 8] ==
         (detailed ? 0xFF00FF00u : overview));
@@ -169,7 +169,7 @@ static void TestNativeGroundComposition(void) {
   CHECK(out[at + 32] == 0xFF0000FFu); /* original river under a real bridge */
   CHECK(out[at + 48] == baseline);    /* no flattened mountain silhouette */
   CHECK(out[at + 64] == baseline);    /* unresolved structure retains live art */
-  CHECK(out[(size_t)(oy * 16) * pitch + ox * 16] == 0xFFFF0000u);
+  CHECK(out[(size_t)(oy * 16) * pitch + ox * 16] == baseline);
   CHECK(out[0] == baseline); /* outside town */
   for (int row = 0; row < kSimWorldNavigationArtPixels; row++)
     CHECK(out[(size_t)row * pitch + pitch - 1] == baseline);
@@ -186,6 +186,20 @@ static void TestNativeGroundComposition(void) {
         cliffs++;
       }
   CHECK(cliffs > 0);
+  /* A blue water field joins the current world material continuously over
+   * four cells. Interior waves keep their native palette and resolution. */
+  SimWorldNavigationTownGround water = {.enabled_town_mask = 1};
+  water.development_tier[0] = 1;
+  memset(water.terrain[0], 0x41, sizeof(water.terrain[0]));
+  for (size_t i = 0; i < count; i++) out[i] = baseline;
+  CHECK(SimWorldNavigationArt_OverlayTownGround(out, pitch, &water, true, true, true, 0));
+  const size_t shore = (size_t)((oy + 8) * 16) * pitch + ox * 16;
+  CHECK(out[shore] == baseline);
+  CHECK(out[shore + 32] == 0xFF081098u); /* Halfway between live world and town blue. */
+  CHECK(out[shore + 64] == 0xFF0000FFu);
+  CHECK(out[shore + 511] == baseline);
+  for (int x = 1; x <= 64; x++)
+    CHECK((out[shore + x] & 255) >= (out[shore + x - 1] & 255));
   for (size_t i = 0; i < count; i++)
     out[i] = baseline;
   CHECK(SimWorldNavigationArt_OverlayTownGround(out, pitch, &ground, true, false, false, 0));
