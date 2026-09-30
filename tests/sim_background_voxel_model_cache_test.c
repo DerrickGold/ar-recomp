@@ -90,6 +90,28 @@ int main(void) {
   stats = SimBackgroundVoxelModelCache_Stats();
   CHECK(stats.misses == 2 && stats.hits == 0);
 
+  /* Clearing forest neighbors changes a stand into one isolated tree. A live
+   * cell at the same coordinates must select the matching cached geometry. */
+  for (int family = 0; family < 2; family++) {
+    SimBackgroundVoxelModelCache_Reset();
+    SimBackgroundVoxelObject tree = {
+      .kind = family ? kSimBackgroundVoxel_BroadTree : kSimBackgroundVoxel_Tree,
+      .town = 1, .cell_x = 4, .cell_y = 7,
+    };
+    const SimBackgroundVoxelModelView *single = SimBackgroundVoxelModelCache_Get(
+        &tree, kSimBackgroundVoxelDetail_Balanced, kSimBackgroundVoxelStyle_Basic, NULL, NULL);
+    tree.tree_edges = kSimBackgroundTreeEdge_East;
+    const SimBackgroundVoxelModelView *forest = SimBackgroundVoxelModelCache_Get(
+        &tree, kSimBackgroundVoxelDetail_Balanced, kSimBackgroundVoxelStyle_Basic, NULL, NULL);
+    CHECK(single && forest && single != forest);
+    CHECK(single->face_count != forest->face_count);
+    tree.tree_edges = 0;
+    CHECK(SimBackgroundVoxelModelCache_Get(&tree, kSimBackgroundVoxelDetail_Balanced,
+        kSimBackgroundVoxelStyle_Basic, NULL, NULL) == single);
+    stats = SimBackgroundVoxelModelCache_Stats();
+    CHECK(stats.misses == 2 && stats.hits == 1);
+  }
+
   /* The shared visual state is explicit cache identity. Today construction
    * also changes flags, but keeping the state itself in the key prevents a
    * future phase-specific model from aliasing before its geometry is rebuilt. */

@@ -1653,6 +1653,62 @@ static void TestOptionalStagesSkipWorkAndRestore(void) {
   assert(backend.cloud_body_draws == body_draws && depth_cloud_faces == 0);
 }
 
+static void TestSelectiveGroundReplacement(void) {
+  FakeBackend backend = {.output_width = 1280, .output_height = 720};
+  backend.ground_upload_mirror = calloc(2048u * 2048, sizeof(uint32_t));
+  assert(backend.ground_upload_mirror);
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
+  PresentWorldNav_ResetResources();
+  uint8_t *rom = calloc(0x100000, 1);
+  assert(rom);
+  rom[0xE3B95] = 31;
+  rom[0xE3B98] = 0x7C;
+  for (int tile = 0; tile < 256; tile++) {
+    for (int q = 0; q < 4; q++)
+      rom[0xC881B + tile * 8 + q * 2] = (uint8_t)tile;
+    for (int y = 0; y < 8; y++)
+      rom[0x60000 + tile * 32 + y * 2 + (tile == 0x0B)] = 255;
+  }
+  assert(SimTownGroundArt_Init(rom, 0x100000));
+  free(rom);
+  FrameSlot slot = WorldNavigationSlot();
+  SimWorldNavigationTowns *towns = &slot.sim.world_navigation_towns;
+  towns->ground.enabled_town_mask = 1;
+  towns->ground.development_tier[0] = 1;
+  memset(towns->ground.terrain[0], 8, sizeof(towns->ground.terrain[0]));
+  towns->ground.terrain[0][8 * 32 + 31] = towns->ground.terrain[0][9 * 32 + 31] = 0x0B;
+  towns->ground.object_rows[0][8] = UINT32_C(1) << 31;
+  towns->object_count = 1;
+  towns->objects[0] = (SimBackgroundVoxelObject){.town = 1, .kind = kSimBackgroundVoxel_Tree,
+      .flags = kSimBackgroundVoxel_IsolatedTree, .cell_x = 31, .cell_y = 8,
+      .source_cells_w = 1, .source_cells_h = 1, .footprint_cells_w = 1, .footprint_cells_d = 1,
+      .record_slot = kSimBackgroundVoxelNoRecordSlot};
+  int ox, oy;
+  assert(SimWorldMap_OriginForTown(1, &ox, &oy));
+  const size_t owned = (size_t)(oy + 8) * 16 * 2048 + (ox + 31) * 16;
+  const size_t unowned = owned + 16 * 2048;
+  UploadWorldNavigationComposition(&slot);
+  slot.sim.world_navigation_models = false;
+  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  const uint32_t native_owned = backend.ground_upload_mirror[owned];
+  const uint32_t native_unowned = backend.ground_upload_mirror[unowned];
+  slot.sim.world_navigation_models = true;
+  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  assert(backend.ground_upload_mirror[owned] == 0xFFFF0000u);
+  assert(backend.ground_upload_mirror[unowned] == native_unowned);
+  slot.sim.world_navigation_ground_detail = true;
+  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  assert(backend.ground_upload_mirror[owned] == 0xFFFF0000u);
+  assert(backend.ground_upload_mirror[unowned] == 0xFF0000FFu);
+  slot.sim.world_navigation_models = false;
+  assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+  assert(backend.ground_upload_mirror[owned] == native_owned);
+  assert(backend.ground_upload_mirror[unowned] == 0xFF0000FFu);
+  PresentWorldNav_ResetResources();
+  SimTownGroundArt_Shutdown();
+  free(backend.ground_upload_mirror);
+}
+
 static void TestDetailedGroundLiveInvalidation(void) {
   FakeBackend backend = {.output_width = 1280, .output_height = 720};
   assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
@@ -2908,6 +2964,7 @@ int main(void) {
   TestGroundWorkerParity();
   TestModelWorkerParity();
   TestOptionalStagesSkipWorkAndRestore();
+  TestSelectiveGroundReplacement();
   TestDetailedGroundLiveInvalidation();
   TestNativeMountainRestoration();
   TestLavaUploadRecovery();

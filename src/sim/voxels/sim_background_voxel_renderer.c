@@ -1551,27 +1551,39 @@ typedef struct SimBackgroundFoliageShadowCacheEntry {
 } SimBackgroundFoliageShadowCacheEntry;
 
 enum {
-  /* A town's conifers repeat sixteen seeded profiles and its broad canopies
-   * four; shrubs and the ancient tree have one each. Those keep dedicated
-   * slots. Palms vary nearly per tree, so they share a small rotating pool. */
+  /* Singles and forest interiors have dedicated seeded slots. Boundary
+   * overhangs and palms use small pools; a boundary must not evict the much
+   * more frequent interior crowns or neighboring isolated trees. */
+  kFoliageShadowForestSlots = 16 + 32,
   kFoliageShadowConiferSlots = 16,
-  kFoliageShadowShrubSlot = kFoliageShadowConiferSlots,
+  kFoliageShadowConiferForestSlots = kFoliageShadowConiferSlots,
+  kFoliageShadowShrubSlot = kFoliageShadowConiferForestSlots + kFoliageShadowForestSlots,
   kFoliageShadowStoryTreeSlot,
   kFoliageShadowBroadSlots,
-  kFoliageShadowPalmSlots = kFoliageShadowBroadSlots + 4,
+  kFoliageShadowBroadForestSlots = kFoliageShadowBroadSlots + 4,
+  kFoliageShadowPalmSlots = kFoliageShadowBroadForestSlots + kFoliageShadowForestSlots,
   kFoliageShadowPalmSlotCount = 8,
   kFoliageShadowCacheSlots = kFoliageShadowPalmSlots + kFoliageShadowPalmSlotCount,
 };
+
+static int ForestShadowCacheSlot(uint16_t variant) {
+  if (((variant >> 8) & 15u) == 15) return variant & 15u;
+  return 16 + ((variant * 13u ^ (variant >> 8)) & 31u);
+}
 
 static int FoliageShadowCacheSlot(const SimBackgroundVoxelObject *object,
                                   uint16_t variant) {
   switch ((SimBackgroundVoxelKind)object->kind) {
     case kSimBackgroundVoxel_Shrub: return kFoliageShadowShrubSlot;
     case kSimBackgroundVoxel_StoryTree: return kFoliageShadowStoryTreeSlot;
-    case kSimBackgroundVoxel_BroadTree: return kFoliageShadowBroadSlots + (variant & 3u);
+    case kSimBackgroundVoxel_BroadTree:
+      return object->tree_edges ? kFoliageShadowBroadForestSlots + ForestShadowCacheSlot(variant)
+          : kFoliageShadowBroadSlots + (variant & 3u);
     case kSimBackgroundVoxel_Palm:
       return kFoliageShadowPalmSlots + variant % kFoliageShadowPalmSlotCount;
-    default: return variant % kFoliageShadowConiferSlots;
+    default: return object->tree_edges
+        ? kFoliageShadowConiferForestSlots + ForestShadowCacheSlot(variant)
+        : variant % kFoliageShadowConiferSlots;
   }
 }
 

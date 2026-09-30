@@ -377,6 +377,25 @@ int SettingsOverlay_GameTextWidth(const char *text, int scale) {
   return OverlayCellCount(text, INT32_MAX) * kGlyphSize * scale;
 }
 
+bool SettingsOverlay_DrawEnhancedLabel(ArRenderRectI bounds, uint8_t alpha,
+                                        const char *text) {
+  if (!text || !text[0] || !alpha) return true;
+  const ArUiTextRun run = {
+      .struct_size = sizeof(run),
+      .abi_version = AR_UI_TEXT_RUN_ABI_VERSION,
+      .utf8 = text, .utf8_bytes = strlen(text),
+      .bounds = bounds, .alignment = kArUiTextAlignment_Center,
+      .tint = RenderColor(ARGB(alpha, 255, 255, 255)),
+      .style_id = kArTextStyle_RetailPaletteBands,
+      .band_rgb = kTextPalettes[kText_Normal][2] & UINT32_C(0xffffff),
+      .body_rgb = kTextPalettes[kText_Normal][3] & UINT32_C(0xffffff),
+      .shadow_rgb = kTextPalettes[kText_Normal][1] & UINT32_C(0xffffff),
+      .shadow_enabled = true,
+      .language_bcp47 = ArUiCatalog_LocaleTag(InterfaceLocale()),
+  };
+  return ArUiTextRenderer_Draw(&s_ui_text, &run);
+}
+
 void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha, const char *text) {
   enum {
     kFontAtlasCellsPerAxis = 16,

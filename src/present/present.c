@@ -700,6 +700,12 @@ bool PresentComparisonTransitionOverlay(uint8_t alpha, const char *label) {
   if (rendered && label && alpha >= 240 && width > 0 && height > 0) {
     int scale = height >= 1080 ? 6 : height >= 720 ? 5
         : height >= 480 ? 4 : height >= 240 ? 3 : 2;
+    const int label_height = kSettingsOverlayGlyphSize * scale;
+    const int label_width = width * 3 / 4;
+    if (SettingsOverlay_DrawEnhancedLabel((ArRenderRectI){
+            (width - label_width) / 2, (height - label_height) / 2,
+            label_width, label_height}, 255, label))
+      return rendered;
     int text_width = SettingsOverlay_GameTextWidth(label, scale);
     while (scale > 1 && text_width > width * 3 / 4) {
       scale--;

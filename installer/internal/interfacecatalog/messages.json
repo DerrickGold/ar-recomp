@@ -2841,10 +2841,10 @@
   {
     "key": "setting.diorama_camera_mode.help",
     "text": [
-      "Free Cam: manual orbit and zoom, with a persistent pose. Dynamic Cam: leans with gameplay motion and reacts to impacts around its own baseline.",
-      "Libre : orbite et zoom manuels, position conservée. Dynamique : suit les mouvements et réagit aux impacts autour de sa propre position de base.",
-      "Frei: manuelle Bewegung und Zoom mit gespeicherter Pose. Dynamisch: folgt Bewegungen und reagiert auf Treffer um die eigene Grundpose.",
-      "自由は手動の回転・ズームと姿勢保存、動的は独自の基準姿勢から動きに合わせて傾き、衝撃に反応します。"
+      "Free Cam: manual orbit and zoom, with a persistent pose. Dynamic Cam: leans with gameplay motion and reacts to impacts around its own baseline. Manual orbit and zoom return to this baseline after input stops.",
+      "Libre : orbite et zoom manuels, position conservée. Dynamique : suit les mouvements et réagit aux impacts autour de sa propre position de base. La rotation et le zoom manuels reviennent à cette position de base quand vous cessez d’agir.",
+      "Frei: manuelle Bewegung und Zoom mit gespeicherter Pose. Dynamisch: folgt Bewegungen und reagiert auf Treffer um die eigene Grundpose. Nach manuellen Dreh- und Zoomeingaben kehrt die Kamera zu dieser Grundpose zurück.",
+      "自由は手動の回転・ズームと姿勢保存、動的は独自の基準姿勢から動きに合わせて傾き、衝撃に反応します。手動の回転・ズーム操作を止めると、この基準姿勢に戻ります。"
     ]
   },
   {

@@ -49,6 +49,7 @@ typedef struct AuditEntry {
   const char *filename;
   const char *label;
   SimBackgroundVoxelObject object;
+  int grid_size;
 } AuditEntry;
 
 /* The depth pass reports production work to this profiler hook. */
@@ -124,7 +125,8 @@ static void AppendContact(
 }
 
 static bool AppendModel(const SimBackgroundVoxelObject *object,
-                        const SimBackgroundVoxelRenderParams *params) {
+                        const SimBackgroundVoxelRenderParams *params,
+                        float offset_x, float offset_y) {
   const SimBackgroundVoxelBiome biome =
       SimBackgroundVoxelBiome_ForTown(object->town);
   const SimBackgroundVoxelModelShadingKey shading_key = {
@@ -150,8 +152,8 @@ static bool AppendModel(const SimBackgroundVoxelObject *object,
   const float center_y = FootprintDepth(object) * 0.5f;
   /* All models share one world scale and datum.  Larger plots therefore look
    * larger on the sheet, preserving the in-game family proportions. */
-  const float origin_x = 26.0f - center_x;
-  const float origin_y = 35.0f - center_y;
+  const float origin_x = 26.0f - center_x + offset_x;
+  const float origin_y = 35.0f - center_y + offset_y;
 
   SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount];
   SimBackgroundVoxelProject_ResolveAxes(params, axes);
@@ -273,10 +275,23 @@ static bool RenderEntry(SDL_Renderer *renderer,
             Sim3DDepthPass_LastError());
     return false;
   }
-  if (!AppendModel(&entry->object, &params)) {
-    fprintf(stderr, "model build failed: %s\n", entry->label);
-    return false;
-  }
+  int grid = entry->grid_size ? entry->grid_size : 1;
+  for (int y = 0; y < grid; y++)
+    for (int x = 0; x < grid; x++) {
+      SimBackgroundVoxelObject object = entry->object;
+      object.cell_x += x;
+      object.cell_y += y;
+      if (grid > 1)
+        object.tree_edges = (y > 0 ? kSimBackgroundTreeEdge_North : 0) |
+            (x + 1 < grid ? kSimBackgroundTreeEdge_East : 0) |
+            (y + 1 < grid ? kSimBackgroundTreeEdge_South : 0) |
+            (x > 0 ? kSimBackgroundTreeEdge_West : 0);
+      if (!AppendModel(&object, &params, (x - (grid - 1) * .5f) * 16,
+                       (y - (grid - 1) * .5f) * 16)) {
+        fprintf(stderr, "model build failed: %s\n", entry->label);
+        return false;
+      }
+    }
   char path[1024];
   snprintf(path, sizeof(path), "%s/%s.bmp", output_dir, entry->filename);
   if (!SaveCurrentPass(renderer, path)) {
@@ -572,6 +587,48 @@ static bool RenderAll(SDL_Renderer *renderer, const char *output_dir,
         axis ? "Bridge construction - north/south" : "Bridge construction - east/west", object);
   }
   fclose(states);
+  if (!rendered) return false;
+  /* Forest previews have a separate manifest to preserve historical audit
+   * numbering. Include joined patches at production spacing, not just a cell. */
+  char forest_path[1024];
+  snprintf(forest_path, sizeof(forest_path), "%s/forest-manifest.tsv", output_dir);
+  FILE *forest = fopen(forest_path, "w");
+  if (!forest) { perror(forest_path); return false; }
+  fprintf(forest, "section\tlabel\tfile\n");
+  for (int town = 1; rendered && town <= 6; town++) {
+    char filename[64], label[96];
+    object = BaseObject(kSimBackgroundVoxel_Tree, (uint8_t)town);
+    object.tree_edges = 15;
+    object.record_slot = kSimBackgroundVoxelNoRecordSlot;
+    snprintf(filename, sizeof(filename), "forest-town-%d", town);
+    snprintf(label, sizeof(label), "%s conifer forest cell", town_names[town - 1]);
+    rendered = EmitEntry(renderer, &params, output_dir, forest,
+        "Forest clusters", filename, label, object);
+  }
+  for (int town = 3; rendered && town <= 5; town += 2) {
+    char filename[64], label[96];
+    object = BaseObject(kSimBackgroundVoxel_BroadTree, (uint8_t)town);
+    object.tree_edges = 15;
+    object.record_slot = kSimBackgroundVoxelNoRecordSlot;
+    snprintf(filename, sizeof(filename), "broad-forest-town-%d", town);
+    snprintf(label, sizeof(label), "%s broadleaf forest cell", town_names[town - 1]);
+    rendered = EmitEntry(renderer, &params, output_dir, forest,
+        "Forest clusters", filename, label, object);
+  }
+  static const int patch_towns[] = {1, 5, 6};
+  for (int patch = 0; rendered && patch < 3; patch++) {
+    int town = patch_towns[patch];
+    char filename[64], label[96];
+    object = BaseObject(town == 5 ? kSimBackgroundVoxel_BroadTree : kSimBackgroundVoxel_Tree,
+                        (uint8_t)town);
+    object.tree_edges = 15;
+    object.record_slot = kSimBackgroundVoxelNoRecordSlot;
+    snprintf(filename, sizeof(filename), "forest-patch-town-%d", town);
+    snprintf(label, sizeof(label), "%s joined forest patch", town_names[town - 1]);
+    const AuditEntry entry = {"Forest clusters", filename, label, object, 2};
+    rendered = RenderEntry(renderer, &params, output_dir, &entry, forest);
+  }
+  fclose(forest);
   return rendered;
 }
 

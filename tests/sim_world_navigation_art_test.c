@@ -18,25 +18,22 @@ static int failures;
     }                                                                                              \
   } while (0)
 
-static void TestTownFeatherAndScale(void) {
+static void TestTownBordersAndScale(void) {
   const size_t source_count = (size_t)kSimWorldMapPixels * kSimWorldMapPixels;
   const size_t output_count = (size_t)kSimWorldNavigationArtPixels * kSimWorldNavigationArtPixels;
   uint32_t *developed = malloc(source_count * sizeof(*developed));
-  uint32_t *baseline = malloc(source_count * sizeof(*baseline));
   uint32_t *output = malloc(output_count * sizeof(*output));
-  CHECK(developed != NULL && baseline != NULL && output != NULL);
-  if (!developed || !baseline || !output) {
+  CHECK(developed != NULL && output != NULL);
+  if (!developed || !output) {
     free(output);
-    free(baseline);
     free(developed);
     return;
   }
   for (size_t i = 0; i < source_count; i++) {
     developed[i] = UINT32_C(0xff607c20);
-    baseline[i] = UINT32_C(0xff587418);
   }
   CHECK(SimWorldNavigationArt_Build(output, kSimWorldNavigationArtPixels, developed,
-                                    kSimWorldMapPixels, baseline, kSimWorldMapPixels));
+                                    kSimWorldMapPixels));
 
   int origin_x = 0, origin_y = 0;
   CHECK(SimWorldMap_OriginForTown(1, &origin_x, &origin_y));
@@ -48,27 +45,22 @@ static void TestTownFeatherAndScale(void) {
   const size_t edge = (size_t)(edge_y * 2) * kSimWorldNavigationArtPixels + (size_t)(edge_x * 2);
   const size_t centre =
       (size_t)(centre_y * 2) * kSimWorldNavigationArtPixels + (size_t)(centre_x * 2);
-  CHECK(SimWorldNavigationArt_TownWeight(edge_x, edge_y) == 0.0f);
-  CHECK(SimWorldNavigationArt_TownWeight(centre_x, centre_y) == 1.0f);
-  CHECK(SimWorldNavigationArt_TownWeight(0, 0) == 1.0f);
-  CHECK(output[edge] == baseline[0]);
+  /* A continuous globe uses current art even at a town border. */
+  CHECK(output[edge] == developed[0]);
   CHECK(output[centre] == developed[0]);
-  /* A cleansed lake remains blue even at the very first pixel of the town;
-   * semantic state changes must not be feathered with the pristine red lake. */
+  /* Cleansed water remains blue throughout the complete town. */
   for (size_t i = 0; i < source_count; i++) {
     developed[i] = UINT32_C(0xff183cc0);
-    baseline[i] = UINT32_C(0xff982010);
   }
   CHECK(SimWorldNavigationArt_Build(output, kSimWorldNavigationArtPixels, developed,
-                                    kSimWorldMapPixels, baseline, kSimWorldMapPixels));
+                                    kSimWorldMapPixels));
   CHECK(output[edge] == developed[0]);
   CHECK(output[centre] == developed[0]);
   CHECK(!SimWorldNavigationArt_Build(NULL, kSimWorldNavigationArtPixels, developed,
-                                     kSimWorldMapPixels, baseline, kSimWorldMapPixels));
+                                     kSimWorldMapPixels));
   CHECK(!SimWorldNavigationArt_Build(output, kSimWorldNavigationArtPixels - 1, developed,
-                                     kSimWorldMapPixels, baseline, kSimWorldMapPixels));
+                                     kSimWorldMapPixels));
   free(output);
-  free(baseline);
   free(developed);
 }
 
@@ -78,6 +70,45 @@ static uint32_t ReferencePixel(const uint32_t *pixels, int x, int y) {
   if (x >= kSimWorldMapPixels) x = kSimWorldMapPixels - 1;
   if (y >= kSimWorldMapPixels) y = kSimWorldMapPixels - 1;
   return pixels[y * kSimWorldMapPixels + x];
+}
+
+static void CheckModelFootprintBorders(uint32_t *out, int pitch, uint32_t overview) {
+  SimWorldNavigationTownGround ground = {.enabled_town_mask = 1};
+  ground.development_tier[0] = 1;
+  /* Identical forest bundles, but only these eight source cells have models.
+   * Corners and all four town borders must erase the entire owned cell. */
+  memset(ground.terrain[0], 0x0B, sizeof(ground.terrain[0]));
+  const uint8_t cells[][2] = {
+    {0, 0}, {31, 0}, {0, 31}, {31, 31}, {0, 8}, {31, 8}, {8, 0}, {8, 31},
+  };
+  for (size_t i = 0; i < sizeof(cells) / sizeof(cells[0]); i++)
+    ground.object_rows[0][cells[i][1]] |= UINT32_C(1) << cells[i][0];
+  int ox, oy;
+  CHECK(SimWorldMap_OriginForTown(1, &ox, &oy));
+  for (int gates = 0; gates < 4; gates++) {
+    const bool enabled = (gates & 1) != 0, detailed = (gates & 2) != 0;
+    for (size_t i = 0; i < (size_t)pitch * kSimWorldNavigationArtPixels; i++)
+      out[i] = overview;
+    CHECK(SimWorldNavigationArt_OverlayTownGround(out, pitch, &ground, detailed, enabled, true, 0));
+    for (size_t i = 0; i < sizeof(cells) / sizeof(cells[0]); i++) {
+      bool clean = true;
+      for (int y = 0; y < 16; y++)
+        for (int x = 0; x < 16; x++) {
+          const size_t at = (size_t)((oy + cells[i][1]) * 16 + y) * pitch +
+              (ox + cells[i][0]) * 16 + x;
+          clean &= out[at] == (enabled ? 0xFFFF0000u : overview);
+        }
+      CHECK(clean);
+    }
+    /* A neighbouring instance of the same tile has no replacement. Keep
+     * its native ink, including the complete art at the town border. */
+    CHECK(out[(size_t)((oy + 9) * 16 + 8) * pitch + ox * 16] ==
+        (detailed ? 0xFF00FF00u : overview));
+    CHECK(out[(size_t)((oy + 9) * 16 + 8) * pitch + ox * 16 + 8] != 0xFFFF0000u);
+    CHECK(out[(size_t)((oy + 16) * 16 + 8) * pitch + (ox + 16) * 16 + 8] ==
+        (detailed ? 0xFF00FF00u : overview));
+    CHECK(out[(size_t)(oy * 16 - 1) * pitch + ox * 16] == overview);
+  }
 }
 
 static void TestNativeGroundComposition(void) {
@@ -104,7 +135,8 @@ static void TestNativeGroundComposition(void) {
     for (int q = 0; q < 4; q++)
       rom[0xC881B + tile * 8 + q * 2] = (uint8_t)tile;
     for (int y = 0; y < 8; y++) {
-      const int index = tile == 0x41 || tile == 0x3A ? 2 : tile == 0x78 || tile == 1 ? 3 : 1;
+      const int index = tile == 0x41 || tile == 0x3A ? 2 :
+          tile == 0x78 || tile == 1 || tile == 0x0B ? 3 : 1;
       rom[0x60000 + tile * 32 + y * 2] = index & 1 ? 255 : 0;
       rom[0x60001 + tile * 32 + y * 2] = index & 2 ? 255 : 0;
     }
@@ -131,13 +163,13 @@ static void TestNativeGroundComposition(void) {
   int ox, oy;
   CHECK(SimWorldMap_OriginForTown(1, &ox, &oy));
   const size_t at = (size_t)((oy + y) * 16 + 8) * pitch + (ox + x) * 16 + 8;
-  CHECK(SimWorldNavigationArt_OverlayTownGround(out, pitch, &ground, true, false, 0));
+  CHECK(SimWorldNavigationArt_OverlayTownGround(out, pitch, &ground, true, true, false, 0));
   CHECK(out[at] == 0xFFFF0000u);
   CHECK(out[at + 16] == 0xFFFF0000u); /* forest footprint, not its angled art */
   CHECK(out[at + 32] == 0xFF0000FFu); /* original river under a real bridge */
   CHECK(out[at + 48] == baseline);    /* no flattened mountain silhouette */
   CHECK(out[at + 64] == baseline);    /* unresolved structure retains live art */
-  CHECK(out[(size_t)(oy * 16) * pitch + ox * 16] == baseline);
+  CHECK(out[(size_t)(oy * 16) * pitch + ox * 16] == 0xFFFF0000u);
   CHECK(out[0] == baseline); /* outside town */
   for (int row = 0; row < kSimWorldNavigationArtPixels; row++)
     CHECK(out[(size_t)row * pitch + pitch - 1] == baseline);
@@ -145,7 +177,7 @@ static void TestNativeGroundComposition(void) {
     for (int cx = 4; cx < 28; cx++)
       if (SimTownTerrain_IsFaceCell(1, cx, cy))
         CHECK(out[(size_t)((oy + cy) * 16 + 8) * pitch + (ox + cx) * 16 + 8] == baseline);
-  CHECK(SimWorldNavigationArt_OverlayTownGround(out, pitch, &ground, true, true, 0));
+  CHECK(SimWorldNavigationArt_OverlayTownGround(out, pitch, &ground, true, true, true, 0));
   unsigned cliffs = 0;
   for (int cy = 4; cy < 28; cy++)
     for (int cx = 4; cx < 28; cx++)
@@ -156,18 +188,19 @@ static void TestNativeGroundComposition(void) {
   CHECK(cliffs > 0);
   for (size_t i = 0; i < count; i++)
     out[i] = baseline;
-  CHECK(SimWorldNavigationArt_OverlayTownGround(out, pitch, &ground, false, false, 0));
+  CHECK(SimWorldNavigationArt_OverlayTownGround(out, pitch, &ground, true, false, false, 0));
   CHECK(out[at] == 0xFFFF0000u);
   CHECK(out[at + 16] == baseline && out[at + 32] == baseline);
+  CheckModelFootprintBorders(out, pitch, baseline);
   ground.enabled_town_mask = 0;
   for (size_t i = 0; i < count; i++)
     out[i] = baseline;
-  CHECK(SimWorldNavigationArt_OverlayTownGround(out, pitch, &ground, true, false, 0));
+  CHECK(SimWorldNavigationArt_OverlayTownGround(out, pitch, &ground, true, true, false, 0));
   CHECK(out[at] == baseline);
   SimTownGroundArt_Shutdown();
-  CHECK(!SimWorldNavigationArt_OverlayTownGround(out, pitch, &ground, true, false, 0));
+  CHECK(!SimWorldNavigationArt_OverlayTownGround(out, pitch, &ground, true, true, false, 0));
   CHECK(out[at] == baseline);
-  CHECK(!SimWorldNavigationArt_OverlayTownGround(out, 1, &ground, true, false, 0));
+  CHECK(!SimWorldNavigationArt_OverlayTownGround(out, 1, &ground, true, true, false, 0));
   free(out);
   free(rom);
 }
@@ -245,8 +278,7 @@ static void TestLockedNorthwallSanctuaryGround(void) {
   CHECK(SimWorldMap_Init(rom, kRomBytes));
   CHECK(SimWorldMap_BakeBaseline(source, kSimWorldMapPixels));
   uint32_t expected[64 * 64];
-  CHECK(SimWorldNavigationArt_Build(output, pitch, source, kSimWorldMapPixels,
-                                  source, kSimWorldMapPixels));
+  CHECK(SimWorldNavigationArt_Build(output, pitch, source, kSimWorldMapPixels));
   const size_t plot_at = (size_t)(oy + 20) * 16 * pitch + (ox + 8) * 16;
   const size_t snow_at = (size_t)(oy + 20) * 16 * pitch + (ox + 12) * 16;
   const uint32_t *snow = SimTownGroundArt_Metatile(6, 0, 0xFF);
@@ -270,9 +302,9 @@ static void TestLockedNorthwallSanctuaryGround(void) {
     wram[0x16B18 + 10] = state == 1;
     SimWorldNavigationTowns_CaptureCached(wram, &towns);
     CHECK(towns.ground.terrain[5][20 * 32 + 8] == (state == 1 ? 0x08 : 0xFF));
-    CHECK(SimWorldNavigationArt_Build(output, pitch, source, kSimWorldMapPixels,
-                                    source, kSimWorldMapPixels));
-    CHECK(SimWorldNavigationArt_OverlayTownGround(output, pitch, &towns.ground, true, true, 0));
+    CHECK(SimWorldNavigationArt_Build(output, pitch, source, kSimWorldMapPixels));
+    CHECK(SimWorldNavigationArt_OverlayTownGround(
+        output, pitch, &towns.ground, true, true, true, 0));
     CHECK(output[(size_t)(oy + 20) * 16 * pitch + (ox + 17) * 16] == 0xFF00FF00);
     if (state == 1) {
       CHECK(towns.enabled_town_mask == 32 && towns.object_count == 1);
@@ -292,7 +324,7 @@ static void TestLockedNorthwallSanctuaryGround(void) {
       for (int y = 20; y < 24; y++)
         memset(dirty + (oy + y) * kSimWorldMapTiles + ox + 8, 1, 4);
       CHECK(SimWorldNavigationArt_UpdateAnimation(output, pitch, source, kSimWorldMapPixels,
-          source, kSimWorldMapPixels, dirty, &towns.ground, true, true, 0, 1, &changes));
+          dirty, &towns.ground, true, true, true, 0, 1, &changes));
       unsigned changed = 0;
       for (int y = 0; y < 64; y++)
         for (int x = 0; x < 64; x++)
@@ -352,8 +384,8 @@ static void TestAnimatedGroundComposition(void) {
   }
   for (size_t i = 0; i < count; i++)
     first[i] = second[i] = 0xFF102030u;
-  CHECK(SimWorldNavigationArt_OverlayTownGround(first, pitch, &ground, true, true, 0));
-  CHECK(SimWorldNavigationArt_OverlayTownGround(second, pitch, &ground, true, true, 1));
+  CHECK(SimWorldNavigationArt_OverlayTownGround(first, pitch, &ground, true, true, true, 0));
+  CHECK(SimWorldNavigationArt_OverlayTownGround(second, pitch, &ground, true, true, true, 1));
   size_t changed = 0;
   for (size_t i = 0; i < count; i++) {
     if (first[i] == second[i]) continue;
@@ -371,20 +403,18 @@ static void TestAnimatedGroundComposition(void) {
       }
   }
   memcpy(first, second, count * sizeof(*first));
-  CHECK(!SimWorldNavigationArt_OverlayTownGround(second, pitch, &ground, true, true, 4));
+  CHECK(!SimWorldNavigationArt_OverlayTownGround(second, pitch, &ground, true, true, true, 4));
   CHECK(!memcmp(first, second, count * sizeof(*first)));
   /* Differential oracle: sparse phase updates must equal a fresh full bake
-   * at every pixel, including feather strips, transparent phases, source
+   * at every pixel, including town borders, transparent phases, source
    * Scale2x neighbours, padded pitches, all town variants and rewinds. */
   const int source_pitch = kSimWorldMapPixels + 5;
   const size_t source_count = (size_t)source_pitch * kSimWorldMapPixels;
   uint32_t *developed = malloc(source_count * sizeof(*developed));
-  uint32_t *baseline_pixels = malloc(source_count * sizeof(*baseline_pixels));
-  CHECK(developed && baseline_pixels);
-  if (developed && baseline_pixels) {
+  CHECK(developed != NULL);
+  if (developed) {
     for (size_t i = 0; i < source_count; i++) {
       developed[i] = i % 3 ? 0xFF102030u : 0xFF607080u;
-      baseline_pixels[i] = i % 5 ? 0xFF182838u : 0xFF803010u;
     }
     for (int town = 0; town < kSimTownCount; town++) {
       for (int y = 0; y < 32; y++) {
@@ -396,23 +426,26 @@ static void TestAnimatedGroundComposition(void) {
       ground.object_rows[town][9] = (1u << 8);
       ground.terrain[town][10 * 32 + 8] = 0x25;
       ground.object_rows[town][10] = (1u << 8);
+      /* Static model erasers at the town boundary must also survive an
+       * overview animation patch that rebuilds the underlying native ink. */
+      ground.object_rows[town][0] = ground.object_rows[town][31] = 1u | (1u << 31);
+      ground.object_rows[town][8] = 1u | (1u << 31);
     }
     const uint8_t phases[] = {1, 2, 3, 0, 3, 1, 1, 0};
-    for (int gates = 0; gates < 6; gates++) {
+    for (int gates = 0; gates < 8; gates++) {
       const bool models = (gates & 1) != 0, cliffs = (gates & 2) != 0;
-      const bool detailed = gates < 4;
+      const bool detailed = (gates & 4) != 0;
       for (size_t i = 0; i < count; i++)
         first[i] = second[i] = 0xDEADBEEFu;
-      CHECK(SimWorldNavigationArt_Build(first, pitch, developed, source_pitch, baseline_pixels,
-                                        source_pitch));
-      if (detailed)
-        CHECK(SimWorldNavigationArt_OverlayTownGround(first, pitch, &ground, models, cliffs, 0));
+      CHECK(SimWorldNavigationArt_Build(first, pitch, developed, source_pitch));
+      CHECK(SimWorldNavigationArt_OverlayTownGround(
+          first, pitch, &ground, detailed, models, cliffs, 0));
       uint8_t previous = 0;
       for (size_t p = 0; p < sizeof(phases); p++) {
         SimWorldNavigationArtChanges changes;
         uint8_t world_cells[kSimWorldMapBytes] = {0};
         if (p % 2 == 0) {
-          /* Change developed and baseline texels independently, including
+          /* Change live overview texels, including
            * exact cell boundaries whose Scale2x stencil crosses cells. */
           const int cx = p ? 48 : 0, cy = p ? 56 : 0;
           for (int dy = -1; dy <= 1; dy++)
@@ -422,13 +455,12 @@ static void TestAnimatedGroundComposition(void) {
           const size_t at = (size_t)cy * 8 * source_pitch + cx * 8;
           developed[at] ^= 0x00385868u;
           developed[at + 7] ^= 0x00603018u;
-          baseline_pixels[at + source_pitch] ^= 0x00100808u;
         }
         if (p % 2) {
           SimWorldNavigationArtAnimation work;
           CHECK(SimWorldNavigationArt_PrepareAnimation(
-              &work, first, pitch, developed, source_pitch, baseline_pixels, source_pitch, NULL,
-              detailed ? &ground : NULL, models, cliffs, previous, phases[p]));
+              &work, first, pitch, developed, source_pitch, NULL,
+              &ground, detailed, models, cliffs, previous, phases[p]));
           /* Uneven, reordered ranges reproduce the full-bake oracle below.
            * Neighbouring source rows are immutable, not another job's output. */
           SimWorldNavigationArt_RenderAnimationRows(&work, 64, 128);
@@ -440,13 +472,11 @@ static void TestAnimatedGroundComposition(void) {
           changes = work.changes;
         } else
           CHECK(SimWorldNavigationArt_UpdateAnimation(
-              first, pitch, developed, source_pitch, baseline_pixels, source_pitch, world_cells,
-              detailed ? &ground : NULL, models, cliffs, previous, phases[p], &changes));
-        CHECK(SimWorldNavigationArt_Build(second, pitch, developed, source_pitch, baseline_pixels,
-                                          source_pitch));
-        if (detailed)
-          CHECK(SimWorldNavigationArt_OverlayTownGround(second, pitch, &ground, models, cliffs,
-                                                        phases[p]));
+              first, pitch, developed, source_pitch, world_cells,
+              &ground, detailed, models, cliffs, previous, phases[p], &changes));
+        CHECK(SimWorldNavigationArt_Build(second, pitch, developed, source_pitch));
+        CHECK(SimWorldNavigationArt_OverlayTownGround(
+            second, pitch, &ground, detailed, models, cliffs, phases[p]));
         CHECK(!memcmp(first, second, count * sizeof(*first)));
         if (previous == phases[p] && p % 2) {
           const SimWorldNavigationArtChanges empty = {0};
@@ -459,25 +489,24 @@ static void TestAnimatedGroundComposition(void) {
     memset(&unchanged, 0x5A, sizeof(unchanged));
     changes = unchanged;
     CHECK(!SimWorldNavigationArt_UpdateAnimation(first, pitch, developed, source_pitch,
-                                                 baseline_pixels, source_pitch, NULL, &ground, true,
+                                                 NULL, &ground, true, true,
                                                  true, 0, 4, &changes));
     CHECK(!memcmp(&changes, &unchanged, sizeof(changes)));
     CHECK(!memcmp(first, second, count * sizeof(*first)));
     SimWorldNavigationArtAnimation work;
     CHECK(SimWorldNavigationArt_PrepareAnimation(&work, first, pitch, developed, source_pitch,
-                                                 baseline_pixels, source_pitch, NULL, &ground, true,
+                                                 NULL, &ground, true, true,
                                                  true, 0, 1));
     CHECK(!SimWorldNavigationArt_PrepareAnimation(&work, first, pitch, developed, source_pitch,
-                                                  baseline_pixels, source_pitch, NULL, &ground,
+                                                  NULL, &ground, true,
                                                   true, true, 0, 4));
     CHECK(!work.ready);
     SimWorldNavigationArt_RenderAnimationRows(&work, 0, kSimWorldMapTiles);
     CHECK(!memcmp(first, second, count * sizeof(*first)));
   }
   free(developed);
-  free(baseline_pixels);
   ground.enabled_town_mask = 0;
-  CHECK(SimWorldNavigationArt_OverlayTownGround(second, pitch, &ground, true, true, 2));
+  CHECK(SimWorldNavigationArt_OverlayTownGround(second, pitch, &ground, true, true, true, 2));
   CHECK(!memcmp(first, second, count * sizeof(*first)));
   SimTownGroundArt_Shutdown();
   free(rom);
@@ -500,7 +529,7 @@ static void TestScale2xNeighboursAndEdges(void) {
   for (int y = 0; y < width; y++)
     for (int x = 0; x < width; x++)
       source[y * width + x] = colours[(x / 3 + y / 2) % 3];
-  CHECK(SimWorldNavigationArt_Build(output, pitch, source, width, source, width));
+  CHECK(SimWorldNavigationArt_Build(output, pitch, source, width));
   /* Compare every output texel with the previous scalar Scale2x rule,
    * including clamped world edges and a non-tight destination pitch. */
   for (int y = 0; y < width; y++) {
@@ -527,18 +556,16 @@ static void TestOverviewAnimationRuns(void) {
   const size_t source_count = (size_t)source_pitch * width;
   const size_t count = (size_t)pitch * kSimWorldNavigationArtPixels;
   uint32_t *source = malloc(source_count * sizeof(*source));
-  uint32_t *baseline = malloc(source_count * sizeof(*baseline));
   uint32_t *updated = malloc(count * sizeof(*updated));
   uint32_t *reference = malloc(count * sizeof(*reference));
-  CHECK(source && baseline && updated && reference);
-  if (!source || !baseline || !updated || !reference) goto done;
+  CHECK(source && updated && reference);
+  if (!source || !updated || !reference) goto done;
   for (size_t i = 0; i < source_count; i++) {
     source[i] = i % 3 ? 0xff607c20u : 0xff183cc0u;
-    baseline[i] = i % 5 ? source[i] : 0xff587418u;
   }
   for (size_t i = 0; i < count; i++)
     updated[i] = reference[i] = 0xDEADBEEFu;
-  CHECK(SimWorldNavigationArt_Build(updated, pitch, source, source_pitch, baseline, source_pitch));
+  CHECK(SimWorldNavigationArt_Build(updated, pitch, source, source_pitch));
   for (int pattern = 0; pattern < 4; pattern++) {
     uint8_t cells[kSimWorldMapBytes] = {0};
     for (int y = 0; y < kSimWorldMapTiles; y++)
@@ -552,15 +579,12 @@ static void TestOverviewAnimationRuns(void) {
          * Keep holes between runs genuinely clean, including row padding. */
         const size_t at = (size_t)(y * 8 + 3) * source_pitch + x * 8 + 4;
         source[at] ^= 0x00201008u;
-        baseline[at + source_pitch] ^= 0x00081010u;
       }
     SimWorldNavigationArtChanges changes;
-    CHECK(SimWorldNavigationArt_UpdateAnimation(updated, pitch, source, source_pitch, baseline,
-                                                source_pitch, cells, NULL, false, false, 0, 0,
-                                                &changes));
+    CHECK(SimWorldNavigationArt_UpdateAnimation(
+        updated, pitch, source, source_pitch, cells, NULL, true, false, false, 0, 0, &changes));
     CHECK(!memcmp(cells, changes.cells, sizeof(cells)));
-    CHECK(SimWorldNavigationArt_Build(reference, pitch, source, source_pitch, baseline,
-                                      source_pitch));
+    CHECK(SimWorldNavigationArt_Build(reference, pitch, source, source_pitch));
     CHECK(!memcmp(updated, reference, count * sizeof(*updated)));
     for (int y = 0; y < kSimWorldNavigationArtPixels; y++)
       for (int x = kSimWorldNavigationArtPixels; x < pitch; x++)
@@ -568,7 +592,6 @@ static void TestOverviewAnimationRuns(void) {
   }
 done:
   free(source);
-  free(baseline);
   free(updated);
   free(reference);
 }
@@ -577,7 +600,7 @@ int main(void) {
   TestNativeGroundComposition();
   TestLockedNorthwallSanctuaryGround();
   TestAnimatedGroundComposition();
-  TestTownFeatherAndScale();
+  TestTownBordersAndScale();
   TestScale2xNeighboursAndEdges();
   TestOverviewAnimationRuns();
   printf("sim world navigation art tests: %s\n", failures ? "FAIL" : "pass");

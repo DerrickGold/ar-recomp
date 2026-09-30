@@ -56,6 +56,7 @@ sections=(
   "Construction"
   "Town environment"
   "Regional variants"
+  "Forest clusters"
 )
 
 for section in "${sections[@]}"; do
@@ -63,6 +64,8 @@ for section in "${sections[@]}"; do
   section_manifest="$render_dir/manifest.tsv"
   if [[ "$section" == "Regional variants" ]]; then
     section_manifest="$render_dir/regional-manifest.tsv"
+  elif [[ "$section" == "Forest clusters" ]]; then
+    section_manifest="$render_dir/forest-manifest.tsv"
   fi
   while IFS=$'\t' read -r row_section label file; do
     if [[ "$row_section" != "$section" ]]; then

@@ -91,8 +91,8 @@ typedef struct SimBackgroundVoxelObject {
   uint8_t cell_x, cell_y;
   uint8_t source_cells_w, source_cells_h;
   uint8_t footprint_cells_w, footprint_cells_d;
-  /* Tree-only adjacency. Joined cells retain one source cell apiece so their
-   * height does not grow with a component's bounding box. */
+  /* Tree-only adjacency selects a dense stand for joined forest cells.
+   * Each retains one source cell so its height does not grow with the patch. */
   uint8_t tree_edges;
   uint8_t record_slot;
   /* Bridge-only semantic anchors. A is west/north and B is east/south. They

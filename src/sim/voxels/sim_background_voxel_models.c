@@ -118,6 +118,25 @@ static float HouseDepth(float y, float scale) {
   return 15.5f + (y - 15.5f) * scale;
 }
 
+static SimBackgroundVoxelModelPoint ForestPoint(
+    const SimBackgroundVoxelObject *object, SimBackgroundVoxelModelPoint point) {
+  /* Allow neighboring canopies to overlap after their normal footprint scale.
+   * An unjoined edge stays on its own source plot; only actual forest neighbors
+   * receive this overhang. Height remains independent of the component. */
+  float x0 = object->tree_edges & kSimBackgroundTreeEdge_West ? -3.2f : 0;
+  float x1 = object->tree_edges & kSimBackgroundTreeEdge_East ? 19.2f : 16;
+  float y0 = object->tree_edges & kSimBackgroundTreeEdge_North ? -3.2f : 0;
+  float y1 = object->tree_edges & kSimBackgroundTreeEdge_South ? 19.2f : 16;
+  point.x = x0 + point.x * ((x1 - x0) / 16);
+  point.y = y0 + point.y * ((y1 - y0) / 16);
+  return point;
+}
+
+static int ForestContacts(const SimBackgroundVoxelObject *object,
+                           SimBackgroundVoxelModelContact *out);
+static int MarahnaForestContacts(const SimBackgroundVoxelObject *object,
+                                  SimBackgroundVoxelModelContact *out);
+
 int SimBackgroundVoxelModel_Contacts(const SimBackgroundVoxelObject *object,
                          SimBackgroundVoxelModelContact *out) {
   if (!object || !out) return 0;
@@ -183,9 +202,11 @@ int SimBackgroundVoxelModel_Contacts(const SimBackgroundVoxelObject *object,
       out[2] = (SimBackgroundVoxelModelContact){21.2f, 0.8f, 31.2f, 31.2f};
       return 3;
     case kSimBackgroundVoxel_Tree:
+      if (object->tree_edges) return ForestContacts(object, out);
       out[0] = (SimBackgroundVoxelModelContact){7.0f, 7.0f, 9.0f, 9.0f};
       return 1;
     case kSimBackgroundVoxel_BroadTree:
+      if (object->tree_edges) return ForestContacts(object, out);
       out[0] = (SimBackgroundVoxelModelContact){6.7f, 8.7f, 9.3f, 11.3f};
       return 1;
     case kSimBackgroundVoxel_Palm:
@@ -1842,6 +1863,39 @@ static TreeProfile ResolveTreeProfile(const SimBackgroundVoxelObject *object) {
       radius - (seed % 4u) * .10f};
 }
 
+enum { kForestTrees = 4 };
+
+/* A joined forest cell owns a compact stand rather than one garden tree.
+ * Keep its four trunks and overlapping crowns local to that source cell.
+ * Shared edges extend through ForestPoint; outer forest edges stay bounded.
+ * Only the low four seed bits affect geometry, including the shadow key. */
+static TreeProfile ResolveForestTree(const SimBackgroundVoxelObject *object, int tree) {
+  uint32_t seed = (FoliageSeed(object) + tree * 5u) & 15u;
+  TreeProfile profile = ResolveTreeProfile(object);
+  static const float height_offset[kForestTrees] = {0, 1.4f, 2.6f, .7f};
+  profile.seed = seed;
+  profile.cx = (tree & 1 ? 11.2f : 4.8f) + ((int)(seed & 3u) - 1.5f) * .06f;
+  profile.cy = (tree & 2 ? 11.2f : 4.8f) + ((int)(seed >> 2) - 1.5f) * .06f;
+  profile.height -= height_offset[seed & 3u];
+  profile.radius = 4.2f - (seed & 3u) * .04f;
+  return profile;
+}
+
+static int ForestContacts(const SimBackgroundVoxelObject *object,
+                           SimBackgroundVoxelModelContact *out) {
+  if (object->kind == kSimBackgroundVoxel_BroadTree && object->town == 5)
+    return MarahnaForestContacts(object, out);
+  for (int tree = 0; tree < kForestTrees; tree++) {
+    TreeProfile profile = ResolveForestTree(object, tree);
+    SimBackgroundVoxelModelPoint a = ForestPoint(
+        object, Point(profile.cx - .7f, profile.cy - .7f, 0));
+    SimBackgroundVoxelModelPoint b = ForestPoint(
+        object, Point(profile.cx + .7f, profile.cy + .7f, 0));
+    out[tree] = (SimBackgroundVoxelModelContact){a.x, a.y, b.x, b.y};
+  }
+  return kForestTrees;
+}
+
 static SimBackgroundVoxelModelPoint TreeCrownPoint(
     const TreeProfile *profile, float h, float radial, float angle) {
   float ripple = 1.0f + .11f * cosf(angle * 6 + (profile->seed % 4u));
@@ -1860,44 +1914,63 @@ static SimBackgroundVoxelModelPoint ShrubPoint(float angle, float t) {
                1.8f + 11.8f * t);
 }
 
-static void BuildTree(const SimBackgroundVoxelObject *object,
-                      SimBackgroundVoxelDetail detail,
-                      SimBackgroundVoxelModel *model) {
-  TreeProfile profile = ResolveTreeProfile(object);
-  uint32_t seed = profile.seed;
-  SimBackgroundVoxelTreeStyle style = profile.style;
-  AddBranch(model, Point(8, 8, 0), Point(profile.cx, profile.cy, 5.0f), 0.95f, 0.60f,
-            DetailChoice(detail, 5, 6, 8, 8));
-  int sides = DetailChoice(detail, 7, 10, 14, 20);
-  int subdivisions = detail >= kSimBackgroundVoxelDetail_High ? 2 : 1;
-  for (int tier = 0; tier < 8; tier++)
+static void AddTreeCrown(SimBackgroundVoxelModel *model, const TreeProfile *profile,
+                         const uint8_t *rings, int segments, int sides, int subdivisions) {
+  for (int segment = 0; segment < segments; segment++)
     for (int sub = 0; sub < subdivisions; sub++)
       for (int side = 0; side < sides; side++) {
+        int tier = rings[segment], next = rings[segment + 1];
         SimBackgroundVoxelModelPoint p[4];
         for (int corner = 0; corner < 4; corner++) {
           bool top = corner >= 2;
           int after = corner == 1 || corner == 2;
           float t = (float)(sub + top) / subdivisions;
-          float h = kTreeCrownZ[tier] + (kTreeCrownZ[tier + 1] - kTreeCrownZ[tier]) * t;
-          float rad = kTreeCrownRadius[tier] + (kTreeCrownRadius[tier + 1] - kTreeCrownRadius[tier]) * t;
+          float h = kTreeCrownZ[tier] + (kTreeCrownZ[next] - kTreeCrownZ[tier]) * t;
+          float rad = kTreeCrownRadius[tier] +
+              (kTreeCrownRadius[next] - kTreeCrownRadius[tier]) * t;
           float angle = (side + after) * 6.2831853f / sides;
-          p[corner] = TreeCrownPoint(&profile, h, rad, angle);
+          p[corner] = TreeCrownPoint(profile, h, rad, angle);
         }
         float angle = (side + .5f) * 6.2831853f / sides;
-        float patch = cosf(angle * 3 + (seed % 4u) * .5f);
+        float patch = cosf(angle * 3 + (profile->seed % 4u) * .5f);
         SimBackgroundVoxelMaterial material = (tier & 1) == 0
             ? kSimVoxelMaterial_LeavesDark
             : sub == 0 && patch > .1f ? kSimVoxelMaterial_LeavesLight : kSimVoxelMaterial_Leaves;
-        if (style == kSimBackgroundTreeStyle_SnowFir && (tier & 1) && patch > -.5f)
+        if (profile->style == kSimBackgroundTreeStyle_SnowFir && (tier & 1) && patch > -.5f)
           material = kSimVoxelMaterial_Snow;
         AddFoliagePatch(model, p[0], p[1], p[2], p[3], material);
       }
 }
 
+static void BuildTree(const SimBackgroundVoxelObject *object,
+                      SimBackgroundVoxelDetail detail,
+                      SimBackgroundVoxelModel *model) {
+  static const uint8_t full[] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
+  static const uint8_t balanced[] = {0, 1, 2, 3, 4, 5, 8};
+  static const uint8_t low[] = {0, 1, 5, 8};
+  if (object->tree_edges) {
+    const uint8_t *rings = detail == kSimBackgroundVoxelDetail_Low ? low
+        : detail == kSimBackgroundVoxelDetail_Balanced ? balanced : full;
+    int segments = DetailChoice(detail, 3, 6, 8, 8);
+    for (int tree = 0; tree < kForestTrees; tree++) {
+      TreeProfile profile = ResolveForestTree(object, tree);
+      AddBranch(model, Point(profile.cx, profile.cy, 0), Point(profile.cx, profile.cy, 5),
+                .65f, .4f, DetailChoice(detail, 4, 4, 6, 6));
+      AddTreeCrown(model, &profile, rings, segments, DetailChoice(detail, 4, 6, 7, 10), 1);
+    }
+    return;
+  }
+  TreeProfile profile = ResolveTreeProfile(object);
+  AddBranch(model, Point(8, 8, 0), Point(profile.cx, profile.cy, 5.0f), .95f, .60f,
+            DetailChoice(detail, 5, 6, 8, 8));
+  AddTreeCrown(model, &profile, full, 8, DetailChoice(detail, 7, 10, 14, 20),
+               detail >= kSimBackgroundVoxelDetail_High ? 2 : 1);
+}
+
 static SimBackgroundVoxelModelPoint BroadCrownPoint(
     float cx, float cy, float radius_x, float radius_y,
-    float base_z, float height, float angle, float t, uint32_t seed) {
-  float radius = RoundCrownRadius(t, .38f, 1.0f);
+    float base_z, float height, float angle, float t, uint32_t seed, float waist) {
+  float radius = RoundCrownRadius(t, waist, 1.0f);
   /* Broad, gently irregular foliage clusters keep a chunky contour. */
   float lobes = 1.0f + .10f * cosf(angle * 3.0f + (seed & 3u)) * sinf(t * 3.14159265f);
   return Point(cx + cosf(angle) * radius_x * radius * lobes,
@@ -1905,14 +1978,10 @@ static SimBackgroundVoxelModelPoint BroadCrownPoint(
                 base_z + height * t);
 }
 
-static void AddBroadCrown(SimBackgroundVoxelModel *model,
-                          SimBackgroundVoxelDetail detail, uint32_t seed,
+static void AddBroadCrownSurface(SimBackgroundVoxelModel *model,
+                          int sides, int rings, uint32_t seed,
                           float cx, float cy, float radius_x, float radius_y,
-                          float base_z, float height, bool snow) {
-  int sides = snow ? DetailChoice(detail, 6, 8, 10, 12)
-                   : DetailChoice(detail, 6, 8, 12, 14);
-  int rings = snow ? DetailChoice(detail, 4, 5, 6, 7)
-                   : DetailChoice(detail, 3, 5, 6, 8);
+                          float base_z, float height, bool snow, float waist) {
   for (int ring = 0; ring < rings; ring++)
     for (int side = 0; side < sides; side++) {
       float t0 = .5f - .5f * cosf(3.14159265f * ring / rings);
@@ -1927,18 +1996,95 @@ static void AddBroadCrown(SimBackgroundVoxelModel *model,
           ? kSimVoxelMaterial_Snow : t < .19f
           ? kSimVoxelMaterial_LeavesDark : kSimVoxelMaterial_LeavesLight;
       AddFoliagePatch(model,
-          BroadCrownPoint(cx, cy, radius_x, radius_y, base_z, height, a0, t0, seed),
-          BroadCrownPoint(cx, cy, radius_x, radius_y, base_z, height, a1, t0, seed),
-          BroadCrownPoint(cx, cy, radius_x, radius_y, base_z, height, a1, t1, seed),
-          BroadCrownPoint(cx, cy, radius_x, radius_y, base_z, height, a0, t1, seed), mat);
+          BroadCrownPoint(cx, cy, radius_x, radius_y, base_z, height, a0, t0, seed, waist),
+          BroadCrownPoint(cx, cy, radius_x, radius_y, base_z, height, a1, t0, seed, waist),
+          BroadCrownPoint(cx, cy, radius_x, radius_y, base_z, height, a1, t1, seed, waist),
+          BroadCrownPoint(cx, cy, radius_x, radius_y, base_z, height, a0, t1, seed, waist), mat);
     }
+}
+
+static void AddBroadCrown(SimBackgroundVoxelModel *model,
+                          SimBackgroundVoxelDetail detail, uint32_t seed,
+                          float cx, float cy, float radius_x, float radius_y,
+                          float base_z, float height, bool snow) {
+  AddBroadCrownSurface(model, snow ? DetailChoice(detail, 6, 8, 10, 12)
+                                  : DetailChoice(detail, 6, 8, 12, 14),
+      snow ? DetailChoice(detail, 4, 5, 6, 7) : DetailChoice(detail, 3, 5, 6, 8),
+      seed, cx, cy, radius_x, radius_y, base_z, height, snow, .38f);
 }
 
 /* One AddBroadCrown lobe of a branching crown. */
 typedef struct BroadLobe {
   uint32_t seed;
   float x, y, radius_x, radius_y, base_z, height;
+  float waist; /* Zero selects the ordinary broadleaf profile. */
 } BroadLobe;
+
+enum { kMarahnaForestTrees = 2 };
+
+/* Marahna's native stand is made of fewer, heavier trees. Each wide canopy
+ * is carried by one thick, forked trunk. Share the shape with contacts and
+ * shadows, including its low-four-bit seed. */
+typedef struct MarahnaForestTree {
+  SimBackgroundVoxelModelPoint foot, joint, branch_end[2];
+  BroadLobe crown;
+} MarahnaForestTree;
+
+static MarahnaForestTree ResolveMarahnaForestTree(
+    const SimBackgroundVoxelObject *object, int tree) {
+  uint32_t seed = (FoliageSeed(object) + tree * 5u) & 15u;
+  float sway = ((int)(seed & 3u) - 1.5f) * .10f;
+  float y = tree ? 11.4f : 4.6f;
+  float top = tree ? 13.2f : 14.0f;
+  MarahnaForestTree shape = {
+    .foot = Point(8 + sway, y, 0),
+    .joint = Point(8 + sway, y, 5),
+    /* A consistent scallop keeps both sides full without crossing an outer
+     * cell edge. The other seed digits retain the sway and leaf colour patches. */
+    .crown = {(seed & 12u) | 1u, 8 + sway, y, 7.35f, 4.05f, 6.2f, top - 6.2f, .30f},
+  };
+  /* Plant the stem directly under its crown; only the secondary branch leans. */
+  shape.branch_end[1] = Point(shape.foot.x, y, 8.5f);
+  shape.branch_end[0] = Point(shape.foot.x + (tree ? 2.9f : -2.9f), y, 8.5f);
+  return shape;
+}
+
+static int MarahnaForestContacts(const SimBackgroundVoxelObject *object,
+                                  SimBackgroundVoxelModelContact *out) {
+  for (int tree = 0; tree < kMarahnaForestTrees; tree++) {
+    const MarahnaForestTree shape = ResolveMarahnaForestTree(object, tree);
+    SimBackgroundVoxelModelPoint a = ForestPoint(
+        object, Point(shape.foot.x - 1.6f, shape.foot.y - 1.6f, 0));
+    SimBackgroundVoxelModelPoint b = ForestPoint(
+        object, Point(shape.foot.x + 1.6f, shape.foot.y + 1.6f, 0));
+    out[tree] = (SimBackgroundVoxelModelContact){a.x, a.y, b.x, b.y};
+  }
+  return kMarahnaForestTrees;
+}
+
+static void BuildMarahnaForest(const SimBackgroundVoxelObject *object,
+                               SimBackgroundVoxelDetail detail,
+                               SimBackgroundVoxelModel *model) {
+  for (int tree = 0; tree < kMarahnaForestTrees; tree++) {
+    const MarahnaForestTree shape = ResolveMarahnaForestTree(object, tree);
+    AddBranch(model, shape.foot, shape.branch_end[1], 1.55f, .65f,
+              DetailChoice(detail, 4, 6, 8, 8));
+    AddBranch(model, shape.joint, shape.branch_end[0], .85f, .45f,
+              DetailChoice(detail, 4, 4, 5, 6));
+    const BroadLobe *crown = &shape.crown;
+    AddBroadCrownSurface(model, DetailChoice(detail, 8, 12, 16, 20),
+        DetailChoice(detail, 3, 5, 6, 8), crown->seed, crown->x, crown->y,
+        crown->radius_x, crown->radius_y, crown->base_z, crown->height, false, crown->waist);
+  }
+}
+
+static BroadLobe ResolveForestLobe(const SimBackgroundVoxelObject *object, int tree) {
+  TreeProfile profile = ResolveForestTree(object, tree);
+  /* Broad forest crowns sit lower than conifers, with a fuller lower canopy. */
+  float top = 14.0f - (ResolveTreeProfile(object).height - profile.height);
+  return (BroadLobe){profile.seed, profile.cx, profile.cy,
+                    profile.radius, profile.radius, 3.5f, top - 3.5f, 0};
+}
 
 /* A forked trunk under two side lobes and a top lobe; snow adds a fourth
  * behind them. Shared by the model and its shadow outline. */
@@ -1965,12 +2111,12 @@ static BranchingCrownShape ResolveBranchingCrown(uint32_t seed, float scale,
     float x = cx + (side ? 3.0f : -3.0f) * scale + sway;
     shape.fork_end[side] = Point(x, 7.8f * scale, 8.2f * scale);
     shape.lobes[side] = (BroadLobe){seed + side, x, 7.5f * scale,
-        3.8f * scale, 3.9f * scale, (5.8f + side * .6f) * scale, 6.3f * scale};
+        3.8f * scale, 3.9f * scale, (5.8f + side * .6f) * scale, 6.3f * scale, 0};
   }
   shape.lobes[2] = (BroadLobe){seed + 3u, cx + sway, 4.7f * scale,
-      4.0f * scale, 3.5f * scale, 8.0f * scale, 6.0f * scale};
+      4.0f * scale, 3.5f * scale, 8.0f * scale, 6.0f * scale, 0};
   shape.lobes[3] = (BroadLobe){seed + 5u, cx + sway, 8.2f * scale,
-      4.7f * scale, 4.4f * scale, 6.7f * scale, 6.8f * scale};
+      4.7f * scale, 4.4f * scale, 6.7f * scale, 6.8f * scale, 0};
   return shape;
 }
 
@@ -1996,7 +2142,22 @@ static void BuildBranchingCrown(SimBackgroundVoxelModel *model,
 static void BuildBroadTree(const SimBackgroundVoxelObject *object,
                            SimBackgroundVoxelDetail detail,
                            SimBackgroundVoxelModel *model) {
-  BuildBranchingCrown(model, detail, FoliageSeed(object), 1.0f, false);
+  if (!object->tree_edges) {
+    BuildBranchingCrown(model, detail, FoliageSeed(object), 1.0f, false);
+    return;
+  }
+  if (object->town == 5) {
+    BuildMarahnaForest(object, detail, model);
+    return;
+  }
+  for (int tree = 0; tree < kForestTrees; tree++) {
+    const BroadLobe crown = ResolveForestLobe(object, tree);
+    AddBranch(model, Point(crown.x, crown.y, 0), Point(crown.x, crown.y, 6),
+              .65f, .4f, DetailChoice(detail, 4, 4, 5, 6));
+    AddBroadCrownSurface(model, DetailChoice(detail, 4, 6, 8, 10),
+        DetailChoice(detail, 3, 5, 6, 8), crown.seed, crown.x, crown.y,
+        crown.radius_x, crown.radius_y, crown.base_z, crown.height, false, .38f);
+  }
 }
 
 static void BuildShrub(const SimBackgroundVoxelObject *object,
@@ -2296,7 +2457,8 @@ static int AppendLobeShadow(SimBackgroundVoxelModelPoint *points, int count,
     int sides = ring == 0 || ring == kShadowLobeRings ? 1 : kShadowRingSides;
     for (int side = 0; side < sides; side++)
       points[count++] = BroadCrownPoint(lobe->x, lobe->y, lobe->radius_x, lobe->radius_y,
-          lobe->base_z, lobe->height, side * 6.2831853f / kShadowRingSides, t, lobe->seed);
+          lobe->base_z, lobe->height, side * 6.2831853f / kShadowRingSides, t, lobe->seed,
+          lobe->waist ? lobe->waist : .38f);
   }
   return count;
 }
@@ -2311,6 +2473,20 @@ static int AppendBranchingCrownShadow(SimBackgroundVoxelModelPoint *points, int 
                                  shape->fork_radius0, shape->fork_radius1);
     count = AppendLobeShadow(points, count, &shape->lobes[lobe]);
   }
+  return count;
+}
+
+static int AppendTreeShadow(SimBackgroundVoxelModelPoint *points, int count,
+                            const TreeProfile *profile, float foot_x, float foot_y,
+                            float foot_radius) {
+  for (int ring = 1; ring < 8; ring += 2)
+    for (int side = 0; side < kShadowRingSides; side++)
+      points[count++] = TreeCrownPoint(profile, kTreeCrownZ[ring], kTreeCrownRadius[ring],
+          side * 6.2831853f / kShadowRingSides);
+  points[count++] = TreeCrownPoint(profile, 1, 0, 0);
+  for (int corner = 0; corner < 4; corner++)
+    points[count++] = Point(foot_x + (corner & 1 ? foot_radius : -foot_radius),
+                            foot_y + (corner & 2 ? foot_radius : -foot_radius), 0);
   return count;
 }
 
@@ -2330,17 +2506,37 @@ static int FoliageShadowSamples(const SimBackgroundVoxelObject *object,
       return count;
     case kSimBackgroundVoxel_Tree: {
       /* A conifer needs only its outer branch rings, tip and trunk foot. */
+      if (object->tree_edges) {
+        for (int tree = 0; tree < kForestTrees; tree++) {
+          TreeProfile profile = ResolveForestTree(object, tree);
+          count = AppendTreeShadow(points, count, &profile, profile.cx, profile.cy, .65f);
+        }
+        return count;
+      }
       TreeProfile profile = ResolveTreeProfile(object);
-      for (int ring = 1; ring < 8; ring += 2)
-        for (int side = 0; side < kShadowRingSides; side++)
-          points[count++] = TreeCrownPoint(&profile, kTreeCrownZ[ring], kTreeCrownRadius[ring],
-              side * 6.2831853f / kShadowRingSides);
-      points[count++] = TreeCrownPoint(&profile, 1, 0, 0);
-      for (int corner = 0; corner < 4; corner++)
-        points[count++] = Point(corner & 1 ? 8.95f : 7.05f, corner & 2 ? 8.95f : 7.05f, 0);
-      return count;
+      return AppendTreeShadow(points, 0, &profile, 8, 8, .95f);
     }
     case kSimBackgroundVoxel_BroadTree: {
+      if (object->tree_edges) {
+        if (object->town == 5) {
+          for (int tree = 0; tree < kMarahnaForestTrees; tree++) {
+            const MarahnaForestTree shape = ResolveMarahnaForestTree(object, tree);
+            count = AppendBranchShadow(points, count, shape.foot, shape.branch_end[1],
+                                       1.55f, .65f);
+            count = AppendBranchShadow(points, count, shape.joint, shape.branch_end[0],
+                                       .85f, .45f);
+            count = AppendLobeShadow(points, count, &shape.crown);
+          }
+          return count;
+        }
+        for (int tree = 0; tree < kForestTrees; tree++) {
+          const BroadLobe crown = ResolveForestLobe(object, tree);
+          count = AppendLobeShadow(points, count, &crown);
+          count = AppendBranchShadow(points, count, Point(crown.x, crown.y, 0),
+              Point(crown.x, crown.y, 6), .65f, .4f);
+        }
+        return count;
+      }
       const BranchingCrownShape shape = ResolveBranchingCrown(FoliageSeed(object), 1.0f, false);
       return AppendBranchingCrownShadow(points, 0, &shape);
     }
@@ -2400,6 +2596,9 @@ uint16_t SimBackgroundVoxelModel_FoliageShadowVariant(const SimBackgroundVoxelOb
     case kSimBackgroundVoxel_Shrub:
       return UINT16_MAX;
     case kSimBackgroundVoxel_BroadTree:
+      if (object->tree_edges) return (uint16_t)(0x8000u |
+          (object->town == 5 ? 0x1000u : 0) |
+          ((object->tree_edges & 15u) << 8) | (FoliageSeed(object) & 15u));
       /* The sway and every lobe outline read only the seed's low two bits. */
       return (uint16_t)(0x0100u | (FoliageSeed(object) & 3u));
     case kSimBackgroundVoxel_Palm:
@@ -2409,7 +2608,9 @@ uint16_t SimBackgroundVoxelModel_FoliageShadowVariant(const SimBackgroundVoxelOb
     default:
       /* Conifer crown geometry uses the seed's low four bits; higher bits only
        * identify the object. Keep this identity beside the shared profile. */
-      return (uint16_t)((object->town << 4) | (FoliageSeed(object) & 15u));
+      return (uint16_t)((object->tree_edges ? 0x4000u : 0) |
+                        ((object->tree_edges & 15u) << 8) |
+                        (object->town << 4) | (FoliageSeed(object) & 15u));
   }
 }
 
@@ -2479,6 +2680,9 @@ int SimBackgroundVoxelModel_FoliageShadowHull(
   SimBackgroundVoxelModelPoint points[kShadowMaxSamples], hull[kShadowMaxSamples * 2];
   int count = FoliageShadowSamples(object, points);
   for (int i = 0; i < count; i++) {
+    if (object->tree_edges && (object->kind == kSimBackgroundVoxel_Tree ||
+        object->kind == kSimBackgroundVoxel_BroadTree))
+      points[i] = ForestPoint(object, points[i]);
     points[i].x += points[i].z * cast_x;
     points[i].y += points[i].z * cast_y;
     points[i].z = 0;
@@ -3467,6 +3671,11 @@ static void BuildAuthoredModel(
       out->boxes[b].y1 = HouseDepth(out->boxes[b].y1, scale);
     }
   }
+  if (object->tree_edges && (object->kind == kSimBackgroundVoxel_Tree ||
+      object->kind == kSimBackgroundVoxel_BroadTree))
+    for (uint16_t face = 0; face < out->face_count; face++)
+      for (int point = 0; point < 4; point++)
+        out->faces[face].points[point] = ForestPoint(object, out->faces[face].points[point]);
 
   RecomputeModelBounds(out);
 

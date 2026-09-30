@@ -268,7 +268,6 @@ typedef struct WorldNavigationArtState {
   uint32_t blur_serial;
   bool unavailable;
   uint32_t *pixels;
-  uint32_t *baseline;
   SimWorldNavigationArtAnimation *animation;
   bool animation_unavailable;
   bool cliffs;

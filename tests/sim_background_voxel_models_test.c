@@ -640,6 +640,104 @@ static void CheckClosedCrown(const SimBackgroundVoxelModel *model) {
   }
 }
 
+static int CanopyCoverage(const SimBackgroundVoxelModel *model) {
+  int covered = 0;
+  for (int y = 0; y < 16; y++)
+    for (int x = 0; x < 16; x++)
+      if (SurfaceHeightAt(model, x + .5f, y + .5f) > 3) covered++;
+  return covered;
+}
+
+static int CanopyBorderCoverage(const SimBackgroundVoxelModel *model,
+                                bool vertical, float border) {
+  int covered = 0;
+  for (int sample = 0; sample < 32; sample++) {
+    float along = 8 + ((sample + .5f) * .5f - 8) / .90f;
+    if (SurfaceHeightAt(model, vertical ? border : along,
+                        vertical ? along : border) > 3) covered++;
+  }
+  return covered;
+}
+
+static void CheckForestClusters(void) {
+  const int families[] = {kSimBackgroundVoxel_Tree, kSimBackgroundVoxel_BroadTree};
+  for (int family = 0; family < 2; family++)
+    for (int town = 1; town <= 6; town++)
+      for (int seed = 0; seed < 16; seed++)
+        for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++) {
+          SimBackgroundVoxelObject object = {.kind = families[family], .town = town,
+              .cell_x = seed, .tree_edges = seed % 15 + 1};
+          SimBackgroundVoxelModel model, repeat;
+          SimBackgroundVoxelModel_BuildStyled(
+              &object, detail, kSimBackgroundVoxelStyle_Varied, &model);
+          CHECK(!model.overflow && model.min_z == 0);
+          CHECK(model.authored_face_count <= SimBackgroundVoxelModel_FaceBudget(detail));
+          CHECK(model.max_z == SimBackgroundVoxelRegion_AuthoredHeight(&object));
+          uint8_t edges = object.tree_edges;
+          CHECK(model.min_x >= (edges & kSimBackgroundTreeEdge_West ? -3.2f : 0));
+          CHECK(model.max_x <= (edges & kSimBackgroundTreeEdge_East ? 19.2f : 16));
+          CHECK(model.min_y >= (edges & kSimBackgroundTreeEdge_North ? -3.2f : 0));
+          CHECK(model.max_y <= (edges & kSimBackgroundTreeEdge_South ? 19.2f : 16));
+          /* Joined crowns reach their neighbor after the presentation's .90
+           * footprint scale. Unjoined edges still fit on their own source plot. */
+          if (edges & kSimBackgroundTreeEdge_East)
+            CHECK(CanopyBorderCoverage(&model, true, 8 + 8 / .90f) >= 4);
+          if (edges & kSimBackgroundTreeEdge_West)
+            CHECK(CanopyBorderCoverage(&model, true, 8 - 8 / .90f) >= 4);
+          if (edges & kSimBackgroundTreeEdge_North)
+            CHECK(CanopyBorderCoverage(&model, false, 8 - 8 / .90f) >= 4);
+          if (edges & kSimBackgroundTreeEdge_South)
+            CHECK(CanopyBorderCoverage(&model, false, 8 + 8 / .90f) >= 4);
+          SimBackgroundVoxelModel_BuildStyled(
+              &object, detail, kSimBackgroundVoxelStyle_Varied, &repeat);
+          CHECK(ModelHash(&model) == ModelHash(&repeat));
+          SimBackgroundVoxelModelContact contacts[kSimBackgroundVoxelModelMaxContacts];
+          int count = SimBackgroundVoxelModel_Contacts(&object, contacts);
+          bool marahna = object.kind == kSimBackgroundVoxel_BroadTree && town == 5;
+          CHECK(count == (marahna ? 2 : 4));
+          if (marahna) CHECK(!ContactAt(contacts, count, 0, 0, 0));
+          else CHECK(!ContactAt(contacts, count, 8, 8, 0));
+          for (int contact = 0; contact < count; contact++) {
+            SimBackgroundVoxelModelContact c = contacts[contact];
+            if (marahna) {
+              CHECK(c.x1 - c.x0 >= 3.2f - .001f);
+              CHECK(c.y1 - c.y0 >= 3.2f - .001f);
+              float min_x = c.x1, min_y = c.y1, max_x = c.x0, max_y = c.y0;
+              for (int face = 0; face < model.face_count; face++) {
+                if (model.faces[face].material != kSimVoxelMaterial_Trunk) continue;
+                for (int vertex = 0; vertex < 4; vertex++) {
+                  SimBackgroundVoxelModelPoint p = model.faces[face].points[vertex];
+                  if (p.z != 0 || p.x < c.x0 || p.x > c.x1 ||
+                      p.y < c.y0 || p.y > c.y1) continue;
+                  min_x = fminf(min_x, p.x);
+                  min_y = fminf(min_y, p.y);
+                  max_x = fmaxf(max_x, p.x);
+                  max_y = fmaxf(max_y, p.y);
+                }
+              }
+              /* Both actual trunk feet stay thick, even at Low detail. */
+              CHECK(max_x - min_x > 2.4f && max_y - min_y > 2.6f);
+            }
+            CHECK(SurfaceHeightAt(&model, (c.x0 + c.x1) * .5f,
+                                  (c.y0 + c.y1) * .5f) > (marahna ? 13.1f : 9));
+          }
+          if (!seed) {
+            CheckClosedCrown(&model);
+            SimBackgroundVoxelModelBounds bounds;
+            CHECK(SimBackgroundVoxelModel_MeasureBounds(
+                &object, detail, kSimBackgroundVoxelStyle_Varied, &bounds));
+            CHECK(bounds.min_x <= model.min_x && bounds.max_x >= model.max_x);
+            CHECK(bounds.min_y <= model.min_y && bounds.max_y >= model.max_y);
+            object.tree_edges = 0;
+            object.flags = kSimBackgroundVoxel_IsolatedTree;
+            SimBackgroundVoxelModel_BuildStyled(
+                &object, detail, kSimBackgroundVoxelStyle_Varied, &repeat);
+            CHECK(CanopyCoverage(&model) > CanopyCoverage(&repeat) + 15);
+            CHECK(ModelHash(&model) != ModelHash(&repeat));
+          }
+        }
+}
+
 static void CheckRecognitionPolish(void) {
   const int foliage[] = {kSimBackgroundVoxel_Tree, kSimBackgroundVoxel_BroadTree,
                          kSimBackgroundVoxel_StoryTree, kSimBackgroundVoxel_Shrub};
@@ -757,6 +855,8 @@ static void CheckFoliageShadows(void) {
     static const SimBackgroundVoxelKind families[] = {
       kSimBackgroundVoxel_Tree, kSimBackgroundVoxel_Shrub, kSimBackgroundVoxel_Palm,
       kSimBackgroundVoxel_BroadTree, kSimBackgroundVoxel_StoryTree,
+      kSimBackgroundVoxel_Tree, kSimBackgroundVoxel_BroadTree,
+      kSimBackgroundVoxel_BroadTree,
     };
     enum { kFamilies = sizeof(families) / sizeof(families[0]) };
     static uint16_t keys[kFamilies][kObjects];
@@ -768,6 +868,8 @@ static void CheckFoliageShadows(void) {
       for (int at = 0; at < kObjects; at++) {
         SimBackgroundVoxelObject object = {.kind = families[family], .town = 5,
             .cell_x = at % 32, .cell_y = (at * 7) % 32, .group = at / 3};
+        if (family == 7) object.town = 3;
+        if (family >= 5) object.tree_edges = at & 1 ? 15 : kSimBackgroundTreeEdge_East;
         keys[family][at] = SimBackgroundVoxelModel_FoliageShadowVariant(&object);
         counts[family][at] = SimBackgroundVoxelModel_FoliageShadowHull(
             &object, .3f, -.5f, outlines[family][at]);
@@ -796,6 +898,7 @@ static void CheckFoliageShadows(void) {
   static const SimBackgroundVoxelKind kinds[] = {
     kSimBackgroundVoxel_Tree, kSimBackgroundVoxel_Shrub, kSimBackgroundVoxel_Palm,
     kSimBackgroundVoxel_BroadTree, kSimBackgroundVoxel_StoryTree,
+    kSimBackgroundVoxel_Tree, kSimBackgroundVoxel_BroadTree,
   };
   for (size_t kind = 0; kind < sizeof(kinds) / sizeof(kinds[0]); kind++)
     for (int town = 1; town <= 6; town++)
@@ -803,6 +906,11 @@ static void CheckFoliageShadows(void) {
         for (size_t cast = 0; cast < sizeof(casts) / sizeof(casts[0]); cast++) {
           SimBackgroundVoxelObject object = {.kind = kinds[kind], .town = town,
               .cell_x = seed, .cell_y = seed * 3};
+          bool forest = kind >= 5;
+          if (forest) {
+            static const uint8_t edges[] = {1, 2, 6, 15};
+            object.tree_edges = edges[seed];
+          }
           CHECK(SimBackgroundVoxelModel_UsesFoliageShadow(&object));
           /* The ancient tree owns a two-cell plot; the rest one cell. */
           const float plot = kinds[kind] == kSimBackgroundVoxel_StoryTree ? 32 : 16;
@@ -819,11 +927,20 @@ static void CheckFoliageShadows(void) {
             max_x = fmaxf(max_x, a.x);
             min_y = fminf(min_y, a.y);
             max_y = fmaxf(max_y, a.y);
-            if (!cast)
-              CHECK(a.x > .5f && a.x < plot - .5f && a.y > .5f && a.y < plot - .5f);
+            if (!cast) {
+              float x0 = forest
+                  ? (object.tree_edges & kSimBackgroundTreeEdge_West ? -3.2f : 0) : .5f;
+              float x1 = forest
+                  ? (object.tree_edges & kSimBackgroundTreeEdge_East ? 19.2f : 16) : plot - .5f;
+              float y0 = forest
+                  ? (object.tree_edges & kSimBackgroundTreeEdge_North ? -3.2f : 0) : .5f;
+              float y1 = forest
+                  ? (object.tree_edges & kSimBackgroundTreeEdge_South ? 19.2f : 16) : plot - .5f;
+              CHECK(a.x > x0 && a.x < x1 && a.y > y0 && a.y < y1);
+            }
           }
           CHECK(twice_area > 120);
-          if (!cast) {
+          if (!cast && !forest) {
             /* A round canopy, never the plot's square: well under the plot,
              * and cutting clearly into its own bounding box's corners. */
             CHECK(twice_area < 1.13f * plot * plot);
@@ -1017,6 +1134,7 @@ int main(void) {
   CheckRecognitionPolish();
   CheckEnvironmentModels();
   CheckFoliageShadows();
+  CheckForestClusters();
   CheckReviewFollowup();
   CHECK(SimBackgroundVoxelModel_HeightBound(NULL, kSimBackgroundVoxelDetail_Ultra,
                                             kSimBackgroundVoxelStyle_Varied) == 0.0f);
@@ -1374,15 +1492,10 @@ int main(void) {
   SimBackgroundVoxelModel interior;
   SimBackgroundVoxelModel_Build(&interior_object, kSimBackgroundVoxelDetail_Balanced, &interior);
   CHECK(!interior.overflow && interior.max_z == 18.0f);
-  /* Adjacency affects extraction/grouping, never the authored crown. Forest
-   * interiors must not acquire rectangular connector bars on their sides. */
-  CHECK(interior.face_count == isolated.face_count);
-  CHECK(memcmp(interior.faces, isolated.faces, interior.face_count * sizeof(interior.faces[0])) ==
-        0);
-  /* A balanced dense-forest cell keeps at least one quarter of its per-object
-   * face budget in reserve. */
+  CHECK(ModelHash(&interior) != ModelHash(&isolated));
+  CHECK(CanopyCoverage(&interior) > CanopyCoverage(&isolated) + 15);
   CHECK(interior.face_count <=
-        SimBackgroundVoxelModel_FaceBudget(kSimBackgroundVoxelDetail_Balanced) * 3 / 4);
+        SimBackgroundVoxelModel_FaceBudget(kSimBackgroundVoxelDetail_Balanced));
 
   SimBackgroundVoxelObject snow_tree_object = isolated_object;
   snow_tree_object.town = 6;

@@ -295,7 +295,7 @@ static void RebuildWorldNavigationAnimationRange(void *context, size_t first, si
 
 static bool UpdateWorldNavigationAnimation(const uint32_t *developed,
     const uint8_t *world_cells, const SimWorldNavigationTownGround *ground,
-    bool models, uint8_t phase, SimWorldNavigationArtChanges *changes) {
+    bool detailed, bool models, uint8_t phase, SimWorldNavigationArtChanges *changes) {
   if (!g_world_nav_art.animation && !g_world_nav_art.animation_unavailable) {
     g_world_nav_art.animation = malloc(sizeof(*g_world_nav_art.animation));
     g_world_nav_art.animation_unavailable = !g_world_nav_art.animation;
@@ -303,13 +303,13 @@ static bool UpdateWorldNavigationAnimation(const uint32_t *developed,
   if (!g_world_nav_art.animation)
     return SimWorldNavigationArt_UpdateAnimation(
         g_world_nav_art.pixels, kSimWorldNavigationArtPixels, developed, kSimWorldMapPixels,
-        g_world_nav_art.baseline, kSimWorldMapPixels, world_cells, ground, models,
+        world_cells, ground, detailed, models,
         g_world_nav_terrain.cliffs.town_mask != 0, g_world_nav_art.phase, phase, changes);
   SimWorldNavigationArtAnimation *work = g_world_nav_art.animation;
   if (!SimWorldNavigationArt_PrepareAnimation(work,
           g_world_nav_art.pixels, kSimWorldNavigationArtPixels,
-          developed, kSimWorldMapPixels, g_world_nav_art.baseline, kSimWorldMapPixels,
-          world_cells, ground, models, g_world_nav_terrain.cliffs.town_mask != 0,
+          developed, kSimWorldMapPixels,
+          world_cells, ground, detailed, models, g_world_nav_terrain.cliffs.town_mask != 0,
           g_world_nav_art.phase, phase)) return false;
   HostParallelWork_Run(WorldNavigationWorkers(), kSimWorldMapTiles, 16,
       RebuildWorldNavigationAnimationRange, work);
@@ -353,13 +353,14 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
       slot->sim.background_voxel_enabled;
   const SimWorldNavigationTownGround *ground =
       &slot->sim.world_navigation_towns.ground;
-  const uint8_t phase = detailed && ground->enabled_town_mask && !g_world_nav_art.unavailable
-      ? SimTownGroundArt_AnimationPhase(slot->sim.game_frame) : 0;
+  const uint8_t phase =
+      (detailed || models) && ground->enabled_town_mask && !g_world_nav_art.unavailable
+          ? SimTownGroundArt_AnimationPhase(slot->sim.game_frame) : 0;
   const bool same_style =
       g_world_nav_art.cliffs == (g_world_nav_terrain.cliffs.town_mask != 0) &&
       g_world_nav_art.detailed == detailed &&
       g_world_nav_art.models == models &&
-      (!(detailed || g_world_nav_mountains.active) ||
+      (!(detailed || models || g_world_nav_mountains.active) ||
        !memcmp(&g_world_nav_art.sources,
                             ground, sizeof(*ground)));
   const bool same_image = g_world_nav_art.serial == slot->sim.underlay_serial;
@@ -383,16 +384,15 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
   if (same_style && g_world_nav_art.serial &&
       g_world_nav_art.geography == SimWorldMap_GeographySerial() &&
       slot->sim.underlay_serial == SimWorldMap_Serial() && !g_world_nav_art.unavailable &&
-      g_world_nav_art.pixels && g_world_nav_art.baseline) {
+      g_world_nav_art.pixels) {
     SimWorldNavigationArtChanges changes;
     uint8_t world_cells[kSimWorldMapBytes];
     const Sim3DPerformanceScope animation =
         Sim3DPerformance_Begin(kSim3DPerformance_WorldAnimation);
-    const bool world_ready = same_image ||
-        (SimWorldMap_WaterAnimationCells(world_cells) &&
-         SimWorldMap_BakeBaseline(g_world_nav_art.baseline, kSimWorldMapPixels));
+    const bool world_ready = same_image || SimWorldMap_WaterAnimationCells(world_cells);
     const bool updated = world_ready && UpdateWorldNavigationAnimation(developed,
-            same_image ? NULL : world_cells, detailed ? ground : NULL, models, phase, &changes) &&
+            same_image ? NULL : world_cells, detailed || models ? ground : NULL,
+            detailed, models, phase, &changes) &&
         (!g_world_nav_mountains.active || SimWorldNavigationMountains_ClearGround(
             g_world_nav_art.pixels, kSimWorldNavigationArtPixels, ground,
             g_world_nav_mountains.scene.town_mask, changes.cells)) &&
@@ -425,20 +425,15 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
       g_world_nav_art.pixels = malloc(
           (size_t)kSimWorldNavigationArtPixels * kSimWorldNavigationArtPixels *
           sizeof(uint32_t));
-    if (!g_world_nav_art.baseline)
-      g_world_nav_art.baseline = malloc(
-          (size_t)kSimWorldMapPixels * kSimWorldMapPixels * sizeof(uint32_t));
-    if (g_world_nav_art.pixels && g_world_nav_art.baseline &&
-        SimWorldMap_BakeBaseline(g_world_nav_art.baseline, kSimWorldMapPixels) &&
+    if (g_world_nav_art.pixels &&
         SimWorldNavigationArt_Build(
             g_world_nav_art.pixels, kSimWorldNavigationArtPixels,
-            developed, kSimWorldMapPixels,
-            g_world_nav_art.baseline, kSimWorldMapPixels)) {
+            developed, kSimWorldMapPixels)) {
       pixels = g_world_nav_art.pixels;
       width = kSimWorldNavigationArtPixels;
-      if (detailed)
+      if (detailed || models)
         SimWorldNavigationArt_OverlayTownGround(
-            g_world_nav_art.pixels, width, ground, models,
+            g_world_nav_art.pixels, width, ground, detailed, models,
             g_world_nav_terrain.cliffs.town_mask != 0, phase);
       if (g_world_nav_mountains.active &&
           !SimWorldNavigationMountains_ClearGround(
@@ -469,7 +464,7 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
   g_world_nav_art.models = models;
   g_world_nav_art.phase = phase;
   g_world_nav_art.cliffs = g_world_nav_terrain.cliffs.town_mask != 0;
-  if (detailed || g_world_nav_mountains.active)
+  if (detailed || models || g_world_nav_mountains.active)
     g_world_nav_art.sources = *ground;
   CaptureWorldNavigationArtVersion(slot, phase);
   return true;
@@ -505,8 +500,6 @@ static void ResetWorldNavigationArt(void) {
   g_world_nav_art.atlas_cache_unavailable = false;
   free(g_world_nav_art.pixels);
   g_world_nav_art.pixels = NULL;
-  free(g_world_nav_art.baseline);
-  g_world_nav_art.baseline = NULL;
 }
 
 static bool WorldNavigationFlatOutputPoint(

@@ -2728,6 +2728,52 @@ static void TestSaveSlotLocales(SDL_Renderer *renderer, SDL_Surface *surface) {
 
 #include "save_slots_release_capture.inc"
 
+#ifdef AR_OVERLAY_UI_FONT
+static void CheckEnhancedComparisonLabels(SDL_Renderer *renderer, SDL_Surface *surface) {
+  const char *labels[] = {"AUTHENTIC", "ENHANCED", "COMPARE"};
+  const ArRenderRectI bounds[] = {
+      {17, 29, surface->w * 3 / 4, 24},
+      {19, 77, 96, 32}, /* Fit a narrow output without switching font routes. */
+  };
+  const size_t bytes = (size_t)surface->pitch * surface->h;
+  void *native = malloc(bytes);
+  CHECK(native != NULL);
+  for (size_t b = 0; b < sizeof(bounds) / sizeof(bounds[0]); ++b)
+    for (size_t l = 0; l < sizeof(labels) / sizeof(labels[0]); ++l) {
+      const ArRenderRectI box = bounds[b];
+      CHECK(SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255));
+      CHECK(SDL_RenderClear(renderer));
+      const int scale = box.h / kSettingsOverlayGlyphSize;
+      const int width = SettingsOverlay_GameTextWidth(labels[l], scale);
+      SettingsOverlay_DrawGameText(box.x + (box.w - width) / 2, box.y,
+                                    scale, 255, labels[l]);
+      CHECK(SDL_RenderPresent(renderer));
+      if (native) memcpy(native, surface->pixels, bytes);
+      CHECK(SDL_RenderClear(renderer));
+      CHECK(SettingsOverlay_DrawEnhancedLabel(box, 255, labels[l]));
+      CHECK(SDL_RenderPresent(renderer));
+      if (native) CHECK(memcmp(native, surface->pixels, bytes) != 0);
+      int x0 = surface->w, x1 = -1, y0 = surface->h, y1 = -1;
+      for (int y = 0; y < surface->h; ++y) {
+        const uint32_t *pixels =
+            (const uint32_t *)((const uint8_t *)surface->pixels + y * surface->pitch);
+        for (int x = 0; x < surface->w; ++x) {
+          if (pixels[x] == UINT32_C(0xff201810)) continue;
+          CHECK(x >= box.x && x < box.x + box.w && y >= box.y && y < box.y + box.h);
+          if (x < x0) x0 = x;
+          if (x > x1) x1 = x;
+          if (y < y0) y0 = y;
+          if (y > y1) y1 = y;
+        }
+      }
+      CHECK(x1 > x0 && y1 > y0);
+      CHECK(abs(x0 + x1 + 1 - (2 * box.x + box.w)) <= 2);
+      CHECK(abs(y0 + y1 + 1 - (2 * box.y + box.h)) <= 2);
+    }
+  free(native);
+}
+#endif
+
 int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--dump-layer-help")) {
     s_dump_catalog = true;
@@ -2850,6 +2896,7 @@ int main(int argc, char **argv) {
         SettingsOverlay_SetTextBackend(&ui_backend, &ui_fonts, ui_error, sizeof(ui_error));
     if (!ui_ready) fprintf(stderr, "interface font: %s\n", ui_error);
     CHECK(ui_ready);
+    CheckEnhancedComparisonLabels(renderer, surface);
     /* Metadata must be readable before any game pack is activated. Exercise
      * the same trusted host stack, with no selected-pack font resources. */
     ArTextBackendInstance metadata_font = {0};

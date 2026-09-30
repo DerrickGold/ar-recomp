@@ -27,6 +27,11 @@ int SettingsOverlay_GameTextWidth(const char *text, int scale);
  * envelope and `alpha` fades the complete run. */
 void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
                                   const char *text);
+/* Fitted and centered in both axes using the host's enhanced interface font,
+ * including English ASCII. Returns false when that font cannot draw, so the
+ * caller can use its native fallback. Measurement and drawing share a run. */
+bool SettingsOverlay_DrawEnhancedLabel(ArRenderRectI bounds, uint8_t alpha,
+                                        const char *text);
 /* Draw the ROM dialog frame. Dimensions must be divisible by 8*scale. */
 bool SettingsOverlay_DrawGameFrame(ArRenderRectI rect, int scale);
 
