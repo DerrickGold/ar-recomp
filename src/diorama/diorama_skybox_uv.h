@@ -15,8 +15,8 @@
  * Fix A repairs this at the source wherever BG2's margins are SYNTHESIZED
  * (mirror/repeat padding). Where they are not — a genuinely wide BG2 whose
  * margins come from tilemap, or a clamped BG2 with no margin content at all —
- * nothing can fill those columns, so the quad must instead sample only the span
- * that is actually valid and let the sky stretch slightly.
+ * nothing can fill those columns, so the quad samples only the valid span.
+ * The final aspect fit crops that span without changing the source pixel shape.
  *
  * Pure functions, no SDL and no globals, so the arithmetic is unit-testable
  * without a ROM or a renderer.
@@ -46,7 +46,7 @@ typedef struct DioramaBgValidSpanPlan {
 /* A captured skybox is an enveloping presentation surface, not a literal
  * continuation of every source layer. When the layer has fewer live vertical
  * margin rows than the primary playfield, crop the unavailable capture rows
- * and stretch the remaining BG across the complete output. Texture V remains
+ * before fitting the remaining BG to the output aspect. Texture V remains
  * separate from capture Y because the PPU surface has fixed allocation
  * headroom above and below the active capture. */
 typedef struct DioramaSkyboxVerticalMapping {
@@ -87,6 +87,15 @@ float DioramaSkyboxVerticalMapping_Fraction(
 void DioramaSkyboxVerticalMapping_FollowCamera(
     DioramaSkyboxVerticalMapping *mapping, int texture_height,
     int authentic_y0, float camera_delta);
+
+/* Fit the skybox to the output with the requested source pixel shape. Crop
+ * around the current view centre, never stretch one axis independently. The
+ * returned source width is centred within each band's blur-safe U interval;
+ * available_width is the narrowest visible interval, so all bands share one
+ * vertical scale. Invalid inputs return zero without changing the mapping. */
+float DioramaSkyboxVerticalMapping_FitAspect(
+    DioramaSkyboxVerticalMapping *mapping, int texture_height,
+    float available_width, float output_aspect, float pixel_aspect);
 
 /* Map a texture-column span to the skybox quad's U range.
  *

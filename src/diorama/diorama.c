@@ -1545,33 +1545,14 @@ static PresentationOutcome DrawDioramaSkybox(
     uint64_t source_revision, bool source_dynamic,
     const DioramaBgValidSpanPlan *valid_spans,
     ArRenderPointF capture_offset, bool follow_camera,
-    int authentic_y0, float camera_delta,
+    int authentic_y0, float camera_delta, float pixel_aspect,
     DioramaSkyboxProjection *projection) {
   if (!ArRenderTexture_IsValid(skybox_texture) || snes_height <= 0)
     return kPresentationOutcome_CoreFailure;
   PresentationOutcome outcome = kPresentationOutcome_Complete;
-  /* [obj_apron, obj_apron+snes_width) -- the DISPLAYED span, which sits in the
-   * middle of an apron-wide surface. The valid spans arrive already in the same
-   * surface-column space, so the margin-fix branch needs no apron term. */
-  float uv_u0_base = (float)obj_apron / (float)SR_PPU_SURFACE_MAX_WIDTH;
-  float uv_u1 =
-      (float)(obj_apron + snes_width) / (float)SR_PPU_SURFACE_MAX_WIDTH;
-  /* Same live report: a visible lighter/garbage-colored strip appeared at
-   * the screen's right edge. Root cause: the blur shader samples texels up
-   * to `radius` away from each fragment (src/shaders/blur.frag.glsl) —
-   * for fragments right at u=uv_u1 (this quad's edge, since
-   * uv_u1 < 1.0 is the true boundary of what Diorama_Upload ever wrote,
-   * allocated width vs the widescreen capture's max width — the same class of
-   * bug B1b's former UV-window clamp exposed for the tilted layers), the rightward
-   * samples reach past uv_u1 into that same uninitialized texture memory.
-   * Unlike B1b's interpolation shift (which the tilted layers' own address
-   * mode could clamp), the blur shader has no knowledge of uv_u1 to clamp
-   * against, so the fix here is simpler: never SAMPLE that close to either
-   * edge in the first place — inset the mapped UV range by a texel margin
-   * comfortably larger than the blur's reach (this also keeps the LEFT
-   * edge's leftward samples at u>0, so no explicit CLAMP addressing is
-   * needed here). Costs an imperceptible crop of the sky content, not a
-   * rendering defect. */
+  /* Valid spans use surface columns, including the OBJ apron. Blur-safe UV
+   * insets keep the kernel out of uncaptured texels; the aspect crop stays
+   * inside those intervals. */
   /* Live report (2026-07-21): {0.30,0.30,0.40} read as jarringly dark for
    * Plane+skybox — the intent is a subtle cue that this is background, not
    * a heavy tint. Lightened substantially; still a touch cool/blue like the
@@ -1633,9 +1614,9 @@ static PresentationOutcome DrawDioramaSkybox(
    * is the distinction the former scalar lost in Death Heim: the clamped upper
    * image stretches from the authentic 256, while the repeating fog below it
    * uses the fully padded capture. Equivalent adjacent spans are coalesced by
-   * DioramaBgValidSpanPlan_Build, so ordinary rooms still issue one draw with
-   * the exact legacy coordinates. The disabled A/B gate likewise forces one
-   * legacy full-capture draw. */
+   * DioramaBgValidSpanPlan_Build, so ordinary rooms still issue one draw. The
+   * margin-fix gate selects valid spans or the legacy full capture; both then
+   * receive the same aspect-preserving crop. */
   DioramaBgValidSpan legacy = {
     .y0 = 0, .y1 = snes_height,
     .x0 = obj_apron, .x1 = obj_apron + snes_width,
@@ -1664,32 +1645,44 @@ static PresentationOutcome DrawDioramaSkybox(
   if (!rom_source && follow_camera && vertical_valid)
     DioramaSkyboxVerticalMapping_FollowCamera(
         &vertical, source_height, authentic_y0, camera_delta + capture_offset.y);
+  float band_u0[kDioramaBgMaxValidSpans] = {0};
+  float band_u1[kDioramaBgMaxValidSpans] = {0};
+  float available_width = INFINITY;
+  for (unsigned i = 0; i < span_count; i++) {
+    if (!vertical_valid || spans[i].x1 <= spans[i].x0 ||
+        spans[i].y1 <= vertical.capture_y0 || spans[i].y0 >= vertical.capture_y1)
+      continue;
+    if (rom_source)
+      DioramaRomSkyboxUvRange(
+          snes_width, source_width, &band_u0[i], &band_u1[i]);
+    else
+      DioramaSkyboxUvRange(source_width, spans[i].x0, spans[i].x1,
+                            blur_radius, &band_u0[i], &band_u1[i]);
+    available_width = fminf(available_width,
+        (band_u1[i] - band_u0[i]) * source_width);
+  }
+  /* Preserve pixel shape with one vertical window across raster bands. A wide
+   * capture usually needs a horizontal crop; a narrow finite source crops the
+   * vertical window instead. Published effect bounds use these same UVs. */
+  const float fitted_width = DioramaSkyboxVerticalMapping_FitAspect(
+      &vertical, source_height, available_width,
+      out_h > 0 ? (float)out_w / out_h : 0.0f, pixel_aspect);
   for (unsigned i = 0; i < span_count; i++) {
     /* The layer capture may contain unavailable top/bottom rows when another
      * primary plane owns a taller world. A skybox is an enveloping backdrop:
      * discard those rows, then normalize the remaining BG over the complete
      * output rather than preserving a black band in world space. */
-    if (!vertical_valid || spans[i].x1 <= spans[i].x0) continue;
+    if (!vertical_valid || fitted_width <= 0.0f ||
+        spans[i].x1 <= spans[i].x0) continue;
     float y0 = spans[i].y0 < vertical.capture_y0
         ? vertical.capture_y0 : spans[i].y0;
     float y1 = spans[i].y1 > vertical.capture_y1
         ? vertical.capture_y1 : spans[i].y1;
     if (y1 <= y0) continue;
-    float u0, u1;
-    if (rom_source) {
-      DioramaRomSkyboxUvRange(
-          snes_width, kDioramaRomBackdropPixels, &u0, &u1);
-    } else if (g_settings.diorama_margin_fix) {
-      DioramaSkyboxUvRange(SR_PPU_SURFACE_MAX_WIDTH,
-                           spans[i].x0, spans[i].x1,
-                           blur_radius, &u0, &u1);
-    } else {
-      float margin_u =
-          (blur_radius + 1.0f) / (float)SR_PPU_SURFACE_MAX_WIDTH;
-      u0 = uv_u0_base + margin_u;
-      u1 = uv_u1 - margin_u;
-      if (u1 < u0) u1 = u0;
-    }
+    const float centre_u = 0.5f * (band_u0[i] + band_u1[i]);
+    const float half_width_u = 0.5f * fitted_width / source_width;
+    const float u0 = centre_u - half_width_u;
+    const float u1 = centre_u + half_width_u;
     const float vertical_t0 = DioramaSkyboxVerticalMapping_Fraction(
         &vertical, y0);
     const float vertical_t1 = DioramaSkyboxVerticalMapping_Fraction(
@@ -2038,6 +2031,7 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
           capture->bg2_scroll_valid, capture->authentic_y0,
           (geometry->world_y_offset + geometry->bg2_world_y_offset) *
               kActRaiserAuthenticHeight,
+          geometry->aspect_x * kActRaiserAuthenticHeight / capture->width,
           projection && !projection->bg2_plane.valid
               ? &projection->bg2_skybox : NULL);
       outcome = PresentationOutcome_Combine(outcome, skybox);

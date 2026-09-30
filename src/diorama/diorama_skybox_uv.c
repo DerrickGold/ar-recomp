@@ -1,5 +1,7 @@
 #include "diorama_skybox_uv.h"
 
+#include <math.h>
+
 #include "constants.h"
 
 static int ClampInt(int value, int low, int high) {
@@ -200,6 +202,38 @@ void DioramaSkyboxVerticalMapping_FollowCamera(
   mapping->capture_y1 = top + height;
   mapping->texture_v0 = top / (float)texture_height;
   mapping->texture_v1 = (top + height) / (float)texture_height;
+}
+
+float DioramaSkyboxVerticalMapping_FitAspect(
+    DioramaSkyboxVerticalMapping *mapping, int texture_height,
+    float available_width, float output_aspect, float pixel_aspect) {
+  if (!mapping || texture_height <= 0 ||
+      !isfinite(available_width) || available_width <= 0.0f ||
+      !isfinite(output_aspect) || output_aspect <= 0.0f ||
+      !isfinite(pixel_aspect) || pixel_aspect <= 0.0f ||
+      !isfinite(mapping->capture_y0) || !isfinite(mapping->capture_y1) ||
+      mapping->capture_y1 <= mapping->capture_y0 ||
+      !isfinite(mapping->texture_v0) || !isfinite(mapping->texture_v1) ||
+      mapping->texture_v0 < 0.0f || mapping->texture_v1 > 1.0f ||
+      mapping->texture_v1 <= mapping->texture_v0)
+    return 0.0f;
+  const float height =
+      (mapping->texture_v1 - mapping->texture_v0) * texture_height;
+  const float source_aspect = output_aspect / pixel_aspect;
+  const float width = height * source_aspect;
+  if (!isfinite(width) || width <= 0.0f) return 0.0f;
+  if (width <= available_width) return width;
+
+  const float inset = 0.5f * (1.0f - available_width / width);
+  const float capture_inset =
+      (mapping->capture_y1 - mapping->capture_y0) * inset;
+  const float texture_inset =
+      (mapping->texture_v1 - mapping->texture_v0) * inset;
+  mapping->capture_y0 += capture_inset;
+  mapping->capture_y1 -= capture_inset;
+  mapping->texture_v0 += texture_inset;
+  mapping->texture_v1 -= texture_inset;
+  return available_width;
 }
 
 void DioramaSkyboxUvRange(int tex_width, int valid_x0, int valid_x1,

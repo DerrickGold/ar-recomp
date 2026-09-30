@@ -12,6 +12,13 @@ that have not received an environment pass yet.
 - The completed capture publishes its canonical world X origin with the surface.
   Scanout and capture metadata share the finite-view mapping helper; presentation
   adds frame-generation translation without reconstructing the margin policy.
+- The skybox covers the output while preserving the selected pixel aspect
+  (square or 7:6 CRT). It centre-crops excess source width; a narrower source
+  instead crops the camera's vertical window. All visible raster bands share
+  one vertical scale and fitted source width, retaining their horizontal source
+  offsets. The published effect projection includes that exact crop, so attached
+  moonlight does not use a separate stretch or centre correction. Blur-safe
+  insets and the finite source bounds remain in force.
 - Each UV band clips its own geometry, so different row policies cannot stretch
   a beam across a boundary. The number of bands has the existing fixed bound.
 - Named ROM skyboxes use the full displayed capture for ambient fields. These
@@ -64,8 +71,41 @@ or per-frame heap allocations are introduced. Geometry uses the existing bounded
 batches; multi-band backdrops rebuild those batches for each distinct UV band.
 Steam Deck/Vulkan and Windows/D3D12 were not exercised on hardware in this pass.
 
-The separate duplicate-moon treatment for Plane + skybox remains follow-up work.
-Its selection must depend on a visible BG2 plane, preserving the original moon
-in Skybox only or when the plane is hidden/alpha-zero.
+## Room defaults and duplicate moons
+
+Direction updated 2026-09-30: establish which rooms can use Skybox only and prefer
+that compatible presentation to duplicating backdrop artwork. The user confirms
+Bloodpool works in this mode. The room audit in the local release polish backlog
+still covers subsections, bosses, transitions, Marahna's additive colour base,
+Death Heim and the ending before promoting defaults. Disabling BG2 entirely is
+different from removing only its distant plane; foreground water must survive.
+
+Moon-free replacement art is deferred to any proven case that must retain both
+representations. No new room defaults or replacement artwork are introduced by
+the aspect correction. The source moon keeps its authored proportions under the
+selected pixel aspect; choosing square pixels need not make art designed for CRT
+pixels geometrically circular.
+
+### Aspect correction validation, 2026-09-30
+
+The former mapping independently fitted the captured width and camera's vertical
+window to the output, stretching the Bloodpool moon. The shared crop now keeps
+their scales in the selected pixel-aspect ratio. It adds no texture, upload,
+shader or draw pass, and does not change the native camera or game state.
+
+The game rebuild and seven focused skybox, projection, effect, camera, layer-order
+and frame-generation tests pass. Aspect tests cover square/CRT pixels, wide and
+narrow valid spans, landscape/portrait output, invalid inputs and capture-row
+redistribution at a camera stop. The pure C mapping compiles for arm64 and x86_64;
+the edited C/header files gain no style violations. The repository style gate
+still reports pre-existing failures in other files.
+
+Paired native Metal Bloodpool Act 1 captures match all eight WRAM snapshots
+across square and CRT pixels. The CRT comparison contains 99 frames per version,
+at normal speed with scripted movement and health/jump assists. Additional
+four-frame smoke captures cover the castle entrance and Fillmore forest. These
+are representative checks, not a completed all-room/default compatibility audit
+or a Deck/D3D12 performance result. Evidence is in `runs/skybox-aspect/`, with a
+480x300, 20 fps, 9.9-second before/after clip of about 294 KB.
 
 Local evidence and small review video: `runs/bloodpool-skybox/` (ignored).

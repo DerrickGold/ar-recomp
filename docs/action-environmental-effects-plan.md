@@ -1,5 +1,13 @@
 # Action environmental effects
 
+Roadmap reconciled 2026-09-30 with the supplied release polish backlog and the
+current implementation. The per-level roadmap and implementation order below
+supersede the older prototype next steps in the revision history. This update
+records planned work; it does not mark new effects or visual checks complete.
+The local `development/docs/release-polish-backlog.md` owns bug reproduction and
+release verification records; this document owns the environmental art direction
+and stage sequence. Its Bxx references use that backlog's identifiers.
+
 The Fillmore Act 1 implementation audit and its performance/portability
 validation are recorded in [fillmore-forest-effects-audit.md](fillmore-forest-effects-audit.md).
 
@@ -11,7 +19,7 @@ On (`action_environmental_effects`, environment override
 and diorama presentation independently of Action spell lighting/particles.
 It is unavailable when the renderer cannot draw effects.
 
-The first implementation gives the control immediate behavior: it owns the
+The control owns the
 existing map-derived torch accents, Aitos lava lighting/particles and flat-mode
 heat refraction, waterfall splash/veil, and diorama waterfall mist. Spell,
 projectile, enemy and boss enhancements keep their existing controls. Native
@@ -24,18 +32,21 @@ re-enabling them uses current state. The waterfall room's authored layer section
 is selected independently of the toggle. Off removes decorations from the
 published effect frame and skips their flat masks, geometry and heat pass.
 
-The **Fillmore forest** is implemented and visually approved. The first
-**Fillmore Act 2 cave/temple/tower pass** is described in
+The **Fillmore forest** is implemented and visually approved. The implemented
+**Fillmore Act 2 cave/temple/tower treatment** is described in
 [fillmore-cave-effects.md](fillmore-cave-effects.md). Bloodpool Act 1 now has a
 [marsh treatment](bloodpool-marsh-effects.md) with layered moonlight, rose-silver
 reflections on the red lake, timber drips, post ripples, bank insects, low mist,
 wet timber edges and a slow cloud veil. The [Bloodpool castle pass](bloodpool-castle-effects.md)
 adds darker interiors, window light, warm torch bounce, dust and supported floor haze.
-Other additions remain planned. They must all honor this same switch,
-including any future refraction or atmosphere passes. Existing lava heat
-currently applies only in flat mode.
+Other stage atmosphere additions remain planned. They must all honor this same
+switch, including future refraction, haze and environmental surface dimming.
+Enemy, projectile and boss accents listed in the roadmap retain the existing
+Action lighting/particles controls. Audit their current coverage before adding
+new families; an existing generic effect is not proof that every requested actor
+is recognized. Existing lava heat currently applies only in flat mode.
 
-## Fillmore forest prototype
+## Fillmore forest implementation and revision history
 
 Room `01/01` uses **diagonal godrays from offscreen upper right**, distributed
 across a separate scrolling light layer. Twelve authored canopy openings alternate
@@ -367,30 +378,111 @@ Initial prototype validation, 2026-09-27:
   `video-baseline-on`, `video-headless-{on,off}-probe` and
   `video-no-consumer-{on,off}` under the same local evidence directory.
 
-The forest revisions and final implementation audit are approved. Fillmore Act 2
-now has a first water, drip, dust and tower-light pass awaiting visual review.
+The forest revisions and final implementation audit are approved. Subsequent
+Fillmore Act 2 and Bloodpool implementation and review history live in their
+linked stage documents; they are no longer initial prototype tasks.
 
 ## Art direction
 
-Use one principal environmental effect and at most one quiet supporting accent
-per room. Preserve the native palette, deep shadows and readable silhouettes.
+Establish one principal atmospheric treatment per room, then add localized
+supporting accents where the review shows a benefit. Preserve the native art's
+palette identity, deep shadows and readable silhouettes. Proposed darkening or
+colour accents belong to presentation, with actor brightness controlled separately.
 Attacks, hazards and pickups should remain more visually distinct than ambient
 particles. Prefer local effects with believable sources; keep the HUD clear.
 
-| Environment | Candidate treatment |
-| --- | --- |
-| Fillmore forest | World-anchored godrays scroll through uneven canopy openings behind trees; a foreground pass illuminates actors/terrain. Bright drifting motes, fine dust pockets inside rays, and falling leaf silhouettes with lit edges. |
-| Fillmore caves | Slow drips from selected stalactites/damp ledges, gentle pool ripples, cool surface glints; scene refraction remains a future experiment. |
-| Stone interiors | Local window light and slowly drifting dust where openings justify it. |
-| Bloodpool exterior | Layered moonlight, rose-silver glints and ripples on red water, thin violet mist, timber drips and bank insects, behind foreground scenery and actors. |
-| Bloodpool castle | Cool light through windows, balanced against the existing warm torch accents. |
-| Kasandora desert | Mild distant-background heat shimmer and occasional low sand wisps. |
-| Kasandora interiors | Isolated warm shafts and dust near visible openings. |
-| Aitos bamboo | Subdued moving canopy light and occasional leaves. |
-| Aitos lava/waterfall | Preserve the existing signature effects; refine local environmental light spill before adding more activity. |
-| Marahna jungle/temple | Warm green-gold canopy light and faint haze in distant vegetation/ruins. |
-| Northwall | Sparse drifting snow/spindrifts outdoors; restrained cool highlights in icy rooms. |
-| Death Heim | Subtle halos tied to existing portals/eclipses and very slow distant wisps; preserve the deep blacks. |
+## Per-level roadmap
+
+Baseline means implemented, not that every release/platform check has passed.
+New visual directions below are planned for review; optional experiments are
+not prerequisites for finishing the baseline stage pass.
+
+| Level | Current baseline | Remaining pass |
+| --- | --- | --- |
+| Fillmore Act 1 | Approved canopy rays, leaves, clustered motes, surface lighting and boss-clearing fan. | Verify the bottom seam in motion (B04) and preserve the approved look. |
+| Fillmore Act 2 | Cave pools, falls, contour glints, drips, splash mist, varied landing dust, temple atmosphere and tower light. | Retain the current treatment. Actual submerged-scene refraction remains an optional shared experiment, not a return of the removed water-artwork sampler. |
+| Bloodpool Act 1 | Layered moonlight, red-water reflections, contact ripples, timber drips, insects, mist and cloud modulation; skybox-only confirmed by the user. | Verify post contacts (B08) before increasing ripple visibility; verify the bottom seam (B05); preserve skybox pixel aspect so the moon is not stretched. Prefer the compatible skybox-only presentation to drawing a second moon. |
+| Bloodpool Act 2 | Dark interiors, window/gallery/boss light, torch bounce, dust, floor haze, moat effects and electric-trap illumination; skybox-only confirmed by the user. | Investigate apparently stationary moonlit motes, then tune their motion; verify corrected skybox aspect and light attachment across the exterior, gallery and boss. |
+| Kasandora Act 1 | Backdrop tuning reconciled (B07); priority-boundary/boss-occlusion review remains (B03). No dedicated desert atmosphere pass yet. | Dry sunlight and a desert sky gradient, mild distant heat shimmer, low sand wisps and boss-pit dust; optional moving wispy clouds. Audit fire-enemy/attack lighting and particles. |
+| Kasandora Act 2 | Black backing and extended-row fixes landed (B01/B02); atmosphere remains planned. | Dimmed interiors with local torch/statue light, selected warm shafts and drifting dust, floor scarab accents, and boss overhead light with moving motes. Audit blue-ball enemy lighting/particles and torch coverage. |
+| Aitos Act 1 | Existing lava-pit, waterfall and splash accents. | Subdued bamboo-canopy light and occasional leaves; refine local waterfall/lava light spill before adding more activity. |
+| Aitos Act 2 | Existing lava-reservoir, fire/rock accents and flat-mode heat distortion. | Improve nearby surface illumination. Diorama heat distortion is an optional measured experiment. |
+| Marahna Act 1 | Existing combat accents; dedicated jungle atmosphere remains planned. | Darker jungle presentation, varied green-gold canopy light, enhanced mist and distant haze; optional foreground tree silhouettes. Review full-arena boss fog, projectile accents and richer green lighting together. |
+| Marahna Act 2 | Existing temple torch, projectile and boss accents. | Local temple illumination, dust and faint distant haze, reusing the approved jungle palette where appropriate. |
+| Northwall Acts 1–2 | Existing combat accents; dedicated environmental pass remains planned. | Sparse drifting snow and spindrift in exposed areas; restrained cool highlights in icy rooms. Author coverage by room instead of applying snow to every interior. |
+| Death Heim | Existing rematch/boss accents. | Subtle halos tied to visible portals/eclipses and slow distant wisps; preserve deep blacks. Review reused arenas and the ending separately. |
+
+### Bloodpool polish
+
+- **Act 1:** The native post-contact correction is committed in `f572d89f`,
+  but scrolling/raster/zoom verification remains. Once B08 is visually accepted,
+  increase ripple readability through controlled width, lifetime and contrast
+  comparisons. Retain the red lake and rose-silver reflections; brightness must
+  not obscure timber contacts or turn the water into a white glitter field.
+- **Act 2:** Capture a normal-speed window/gallery sequence before changing
+  motes. If authored motion is unintentionally frozen, track and fix that as a
+  bug. If it runs but is imperceptible, compare slow independent drift, varied
+  lifetimes and brighter illumination within the window fields. Keep positions
+  world-anchored and preserve pause/retained-frame behavior.
+
+### Kasandora outdoor and interior direction
+
+- **Act 1:** Establish dry, warm light and the sky gradient first. Preserve the
+  verified cloud/dune band transforms from B07. Heat shimmer belongs on distant
+  scenery; sand wisps follow exposed ground. Optional cloud motion should not
+  disturb raster attachment. Boss-pit dust should arise around the pit or actual
+  movement, with irregular timing and settling intervals, while retaining the
+  native sand's boss occlusion and the user's editor-authored priority rules.
+  Audit fire-enemy and attack identities before extending their lighting/trails.
+- **Act 2:** Establish a darker masonry baseline, then balance warm torch light
+  with the blue-ball enemies' cool moving light. Give background statues localized
+  illumination appropriate to their depth; do not treat decorative stone as a
+  collision surface or move it in front of the player. Use visible openings for
+  shafts where possible and soft offscreen/bounced light elsewhere. Test floor
+  scarab accents after the lighting is settled: they need valid floor attachment,
+  sparse motion and a clear distinction from enemies or pickups. The boss room
+  gets a stable overhead light field with independently drifting dust; its exact
+  source, spread and intensity require a room review.
+
+### Marahna jungle and boss direction
+
+Establish a darker, humid green jungle with selected warm green-gold openings.
+Adapt Fillmore's varied, world-anchored canopy layout rather than repeating an
+identical beam at each tree. Mist should occupy plausible low or distant spaces,
+with foreground silhouettes optional and sparse enough to preserve the playfield.
+Compare the optional silhouettes before expanding them through the level.
+
+For the Act 1 boss, test a thin fog field spanning the arena with depth and
+opacity variation rather than a uniform opaque overlay. Pair it with richer
+green surface light and visible projectile accents, retaining boss contours,
+attack tells and safe-ground readability. Audit existing boss/projectile effects
+first and keep combat controls independent. Establish this look before adding
+extra particle families; adapt the approved palette to Act 2's temple separately.
+
+## Shared correctness and release follow-ups
+
+- Preserve the verified fade/blanking and transition fixes (B11/B12) and the
+  Bloodpool moon-ray raster fix (B06). They are regression requirements, not new
+  implementation tasks. B03, B04/B05, B08 and residual Dynamic Cam feel (B13)
+  retain their recorded visual checks; stronger atmosphere must not mask defects.
+- [Skybox-only effect attachment](action-skybox-effects.md) is implemented across
+  stages and has a 49-room debug-warp smoke audit. That does not establish complete
+  room-transition, boss or default-setting compatibility. Record BG2 disabled,
+  backdrop plane disabled and skybox selection distinctly. Recheck Marahna Act 1
+  blending with `f572d89f`'s additive colour-base handling; retain required planes
+  until verified. Cover Aitos, Northwall, Death Heim/rematches and the ending.
+  A room-aware release default is a later decision, not an assumed universal
+  plane-off setting.
+- Prefer compatible skybox-only rooms to avoid duplicate backdrop artwork at
+  the source. Bloodpool is user-confirmed; correct the skybox's aspect mapping
+  so its moon retains the selected pixel shape, with rays and receivers using
+  that same mapping. Audit the other rooms before selecting room-aware defaults.
+  Moon-free replacement art is deferred, needed only if a room must retain both
+  representations and still duplicates the moon. It is no longer a prerequisite
+  for the Bloodpool pass. Preserve original art in skybox-only mode.
+- Native Steam Deck/Vulkan and Windows/D3D12 performance acceptance remains open.
+  Keep optional large-area fog, shimmer and refraction contingent on measured
+  frame time, upload/submission cost and visible benefit on those targets.
 
 ## Water and drips
 
@@ -420,6 +512,10 @@ layer, with explicit occlusion and water masks. Background light is occluded by
 foreground terrain; intentional foreground light should brighten surface colors
 without filling black gaps. Effect bounds follow actual captured rows and per-layer
 world limits, including short rooms and Aitos's existing waterfall cap.
+Preserve asymmetric row redistribution at finite edges, Dynamic Cam alignment,
+native raster bands and the captured master brightness/blanking contract. Terrain
+priority is not a reliable collision/material classifier; use validated source
+art, room data and authored contacts appropriate to each effect.
 
 Use separate bounded host-side storage; never allocate ambient effects in the
 native enemy/object pool or displace combat-effect records. The existing
@@ -442,23 +538,42 @@ Mac compilation or CPU timing does not establish performance on Deck/Vulkan or
 Windows/D3D12: retain explicit native On/Off acceptance, including frame-time
 spikes, the packaged SDL version, and fixed power/pacing settings.
 
-## Suggested implementation order
+## Implementation order and acceptance
 
-1. Review the implemented Fillmore canopy-shaft prototype and tune its strength
-   using matching original/enhanced gameplay videos.
-2. Add a shared water-region description, cave glints/ripples and sparse drips.
-3. Add Bloodpool water mist and masked Kasandora background heat shimmer.
-4. Assess localized water refraction, then adapt the approved primitives to the
-   other environments.
+1. Address relevant open rendering/attachment defects and verify their fixes in
+   motion before amplifying effects. Complete room-compatibility checks before
+   promoting a new plane/skybox default; retain untested combinations explicitly.
+2. Polish Bloodpool: correct skybox aspect in its confirmed skybox-only mode,
+   verify post contacts, increase ripple visibility and investigate castle mote
+   motion. Preserve the accepted window shapes, gallery depth and continuous
+   moon-ray mapping. Defer moon-removal art while auditing room compatibility.
+3. Establish Kasandora Act 1's sunlight/sky and Act 2's darker local-light balance.
+   Then add ground dust, motes, enemy accents and optional clouds/scarabs in small
+   reviewed passes, including both boss environments.
+4. Establish Marahna Act 1's jungle and boss atmosphere, including fog/readability
+   comparisons. This follows the supplied release backlog's regional priority.
+5. Refine Aitos Acts 1–2 and develop Marahna Act 2, then Northwall and Death Heim.
+   Reuse approved primitives while authoring each room's sources and limits.
+6. Assess submerged-scene refraction and other optional experiments separately.
+   Keep them only with a clear visual payoff and acceptable target-platform cost.
 
 Acceptance for each effect includes On/Off behavior with spell settings in both
-states; flat and diorama views; 32/64 extension and world edges; camera movement;
-pause/re-present/load boundaries; visible sprite/platform readability; and CPU,
-GPU and allocation measurements. These checks apply as each visual is added,
-not as a claim that the planned effects already exist.
+states; authentic and enhanced comparison; flat and Diorama views; skybox-only
+and plane-plus-skybox configurations; 32/64 extension, redistributed rows and
+world edges; default zoom and camera/raster movement; pause/re-present/load,
+fades and room transitions; relevant regional artwork; sprite/platform readability;
+and CPU, GPU and allocation measurements. Distinguish implemented, automated
+checks passed, native visual acceptance and target-platform performance evidence.
+These checks apply as each visual is added, not as a claim that planned effects
+already exist or untested platforms passed.
 
 For every level as its effects are implemented, generate a short gameplay video
 traversing representative affected scenery for the user's visual review. Include
 normal-speed motion and a matching effects-Off comparison; identify any cuts or
-developer movement assists used in the capture. Save the video and reproducible
-replay/capture details with the local validation evidence.
+developer movement assists used in the capture. Deliver a small download-friendly
+clip by default: roughly 480px wide, 20–30 seconds at 20–30 fps, compressed to a
+few MB where practical. Do not make a large side-by-side export the only review
+copy; supply small separate clips or a sequential comparison. Save reproducible
+replay/capture details with the local validation evidence. Record new bugs and
+verification in the release backlog; promote only completed player-facing work
+into release notes.

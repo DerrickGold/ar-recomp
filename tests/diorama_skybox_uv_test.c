@@ -452,6 +452,56 @@ static void TestSkyboxFollowsNativeWindow(void) {
   ExpectFloat("skybox floor never samples outside", mapping.capture_y1, 348);
 }
 
+static void TestSkyboxAspectFit(void) {
+  /* A wide capture includes more scenery than the displayed native window.
+   * Fitting that whole width independently to 224 rows made the moon tall. */
+  const float widths[] = {252, 356, 492, 620};
+  const float aspects[] = {4.0f / 3, 16.0f / 10, 16.0f / 9, 9.0f / 16};
+  const float pixel_aspects[] = {1, 7.0f / 6};
+  for (unsigned w = 0; w < sizeof(widths) / sizeof(widths[0]); w++) {
+    for (unsigned a = 0; a < sizeof(aspects) / sizeof(aspects[0]); a++) {
+      for (unsigned p = 0; p < sizeof(pixel_aspects) / sizeof(pixel_aspects[0]); p++) {
+        DioramaSkyboxVerticalMapping mapping = {64, 288, 64.0f / 352, 288.0f / 352};
+        const float width = DioramaSkyboxVerticalMapping_FitAspect(
+            &mapping, 352, widths[w], aspects[a], pixel_aspects[p]);
+        const float height = (mapping.texture_v1 - mapping.texture_v0) * 352;
+        const float shape = aspects[a] * height / width;
+        if (fabsf(shape - pixel_aspects[p]) > 0.00001f || width <= 0 ||
+            width > widths[w] || mapping.capture_y0 < 64 || mapping.capture_y1 > 288 ||
+            fabsf(mapping.capture_y0 + mapping.capture_y1 - 352) > 0.0001f) {
+          printf("FAIL skybox aspect/coverage: available=%g output=%g par=%g got=%g\n",
+                 widths[w], aspects[a], pixel_aspects[p], shape);
+          s_failures++;
+        }
+      }
+    }
+  }
+  /* Capture-row redistribution must not move a fixed source after fitting.
+   * The wider capture crops horizontally, retaining the camera's V window. */
+  for (int y = 504; y <= 543; y++) {
+    const int top = y - 415, bg_camera = y / 3;
+    DioramaSkyboxVerticalMapping mapping = {0, 352, 0, 1};
+    DioramaSkyboxVerticalMapping_FollowCamera(&mapping, 352, top, 170.0f - bg_camera);
+    const float width = DioramaSkyboxVerticalMapping_FitAspect(
+        &mapping, 352, 620, 1.6f, 1);
+    ExpectFloat("aspect fit width", width, 224 * 1.6f);
+    ExpectFloat("aspect fit preserves camera stop",
+                DioramaSkyboxVerticalMapping_Fraction(
+                    &mapping, 299 - bg_camera + top), 129.0f / 224);
+  }
+  const float invalid[] = {0, -1, INFINITY, NAN};
+  for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+    DioramaSkyboxVerticalMapping mapping = {64, 288, 64.0f / 352, 288.0f / 352};
+    ExpectFloat("invalid aspect fails closed",
+                DioramaSkyboxVerticalMapping_FitAspect(&mapping, 352, 620, invalid[i], 1), 0);
+    ExpectFloat("invalid width fails closed",
+                DioramaSkyboxVerticalMapping_FitAspect(&mapping, 352, invalid[i], 1.6f, 1), 0);
+    ExpectFloat("invalid PAR fails closed",
+                DioramaSkyboxVerticalMapping_FitAspect(&mapping, 352, 620, 1.6f, invalid[i]), 0);
+    ExpectFloat("invalid mapping preserved", mapping.capture_y0, 64);
+  }
+}
+
 int main(void) {
   TestValidSpan();
   TestBandedValidSpans();
@@ -459,6 +509,7 @@ int main(void) {
   TestUvRangeMatchesLegacyOnFullSpan();
   TestLiveVerticalWorldMapping();
   TestSkyboxFollowsNativeWindow();
+  TestSkyboxAspectFit();
   TestUvRangeCropsNarrowedSpan();
   TestUvRangeNeverInverts();
   TestRomUvRepeatsAcrossDisplayedWidth();
