@@ -255,6 +255,7 @@ function setNativeFrame(value) {
   invalidateOther();
   invalidateGameComposite();
   refreshNativePhaseControls(); refreshPixelEditor();
+  refreshTilePalette();
   draw();
 }
 $('#nativeFrame').oninput = event => setNativeFrame(event.target.value);
@@ -529,7 +530,7 @@ function setMode(m) {
   finishFramingDrag();
   closeTileMenu();
   tileActionStatus('');
-  if(m!=='2d'){compareOriginal=false;pixelInspector.hidden=true;}
+  if(m!=='2d'){compareOriginal=false;pixelInspector.hidden=true;closeTilePalette(false);}
   drag = null;                          /* a drag never crosses a mode change */
   mode = m; $('#mode2d').classList.toggle('on', m==='2d');
   $('#modeNative').classList.toggle('on', m==='native');
@@ -558,6 +559,7 @@ function setLayer(i) {
   refreshTerrainControls();
   refreshVirtualControls(); refreshPlaneControls(); refreshNativePhaseControls();
   refreshNativeCameraControls();
+  refreshTilePalette();
   fitView(); tally(); draw();
 }
 const sel = $('#room');

@@ -198,7 +198,7 @@
   </div>
   <p class="hint">Trim fits the original map plus any added tiles. With no added
     edge tiles, it restores the original bounds. All tile edits are kept.</p>
-  <p class="hint">Copies keep their depth bands and pixel edits. Paste within the
+  <p class="hint">Copies keep their flip flags, depth bands and pixel edits. Paste within the
     same room and BG. Export level INI provides a copyable section. Gameplay and collision stay unchanged.</p>
   </details>
   <details class="side-section"><summary>Reset classifications</summary>
@@ -267,6 +267,7 @@
       <span id="selectionApplied"></span><span id="selectionScope"></span></div>
     <div class="selection-actions">
       <button id="selectQuick" class="on" title="Select without painting">Select</button>
+      <button id="tilePaletteOpen" aria-pressed="false" title="Browse all loaded tiles, including unused artwork">Tiles…</button>
       <button id="selectionBand0" disabled aria-pressed="false">Far</button>
       <button id="selectionBand1" disabled aria-pressed="false">Normal</button>
       <button id="selectionBand2" disabled aria-pressed="false">Priority</button>
@@ -277,6 +278,10 @@
     <button id="pixelSelectionBlackQuick" disabled title="Fill transparent pixels black on all selected tiles (Diorama only)">Fill transparency black</button>
       <button id="selectionPaste" disabled title="Paste with its top-left corner at the selection">Paste over</button>
       <button id="selectionPixels" disabled title="Edit the focused tile in this selection; use Fill transparency black for the whole range">Pixels…</button>
+      <button id="flipSelectedH" disabled title="Flip each selected tile horizontally, keeping tile positions">Flip H</button>
+      <button id="flipSelectedV" disabled title="Flip each selected tile vertically, keeping tile positions">Flip V</button>
+      <button id="mirrorSelectedH" disabled title="Reverse left/right tile order AND flip each tile horizontally: A B C → flipped C B A. Requires a complete rectangle.">Mirror range H</button>
+      <button id="mirrorSelectedV" disabled title="Reverse top/bottom tile order AND flip each tile vertically. Requires a complete rectangle.">Mirror range V</button>
       <button id="selectionPreview" disabled>View selection in 3D</button>
     </div>
     <div class="selection-detail"><span id="selectionSource"></span>
@@ -301,6 +306,37 @@
     <canvas id="gl"></canvas>
     <div class="hud" id="hud"></div>
     <div class="legend" id="legend"></div>
+    <section id="tilePalette" class="pixel-inspector tile-palette" aria-label="Loaded tile palette" hidden>
+      <div class="inspector-header"><b>Tile palette</b><button id="tilePaletteClose">Close</button></div>
+      <label class="palette-label" for="paletteSource">Artwork source</label>
+      <select id="paletteSource"></select>
+      <p class="hint" id="paletteSourceInfo"></p>
+      <div class="palette-filters">
+        <select id="paletteKind" aria-label="Tile size"><option value="metatile">16×16 tiles</option><option value="character">8×8 pieces</option></select>
+        <select id="paletteUsage" aria-label="Source map usage"><option value="all">All tiles</option><option value="unused">Unused in source</option><option value="used">Used in source</option></select>
+      </div>
+      <div id="paletteComposer" hidden>
+        <label class="palette-label" for="paletteRow">Color palette for pieces</label>
+        <select id="paletteRow" aria-label="Character color palette"></select>
+        <p class="hint">Choose a quarter, then an 8×8 piece. Advances left to right, then to the next row.</p>
+        <div id="paletteQuarters" class="palette-quarters">
+          <button id="paletteQuarter0" aria-label="Top left quarter" aria-pressed="true"><canvas id="paletteQuarterCanvas0" width="8" height="8"></canvas></button>
+          <button id="paletteQuarter1" aria-label="Top right quarter" aria-pressed="false"><canvas id="paletteQuarterCanvas1" width="8" height="8"></canvas></button>
+          <button id="paletteQuarter2" aria-label="Bottom left quarter" aria-pressed="false"><canvas id="paletteQuarterCanvas2" width="8" height="8"></canvas></button>
+          <button id="paletteQuarter3" aria-label="Bottom right quarter" aria-pressed="false"><canvas id="paletteQuarterCanvas3" width="8" height="8"></canvas></button>
+        </div>
+        <button id="paletteUseComposite">Use assembled tile</button>
+      </div>
+      <p class="hint" id="paletteCount"></p>
+      <div id="paletteGrid" class="palette-grid" aria-label="Available tile artwork"></div>
+      <div class="palette-stamp">
+        <canvas id="paletteStampPreview" width="64" height="64" aria-label="Current stamp preview"></canvas>
+        <div><b id="paletteStampInfo">Choose a tile</b>
+          <div class="palette-filters"><button id="flipClipboardH" disabled aria-pressed="false" title="Reverse the copied tile columns and flip each tile horizontally">Mirror stamp H</button><button id="flipClipboardV" disabled aria-pressed="false" title="Reverse the copied tile rows and flip each tile vertically">Mirror stamp V</button></div>
+        </div>
+      </div>
+      <p class="hint">Click a tile, then click the map to place it. Keep clicking to repeat; Esc finishes. Palette choices and stamp mirroring are previews until placed. Undo reverses placements.</p>
+    </section>
     <section id="pixelInspector" class="pixel-inspector" aria-label="Tile pixel editor" hidden>
     <div class="inspector-header"><b>Tile pixels</b>
       <button id="pixelInspectorClose" aria-label="Close pixel editor">Close</button></div>
@@ -341,6 +377,10 @@
   <div class="tile-menu-separator" role="separator"></div>
   <button id="tileActionPixels" role="menuitem" tabindex="-1">Edit this tile's pixels…</button>
   <button id="tileActionFill" role="menuitem" tabindex="-1">Fill transparency black</button>
+  <button id="tileActionFlipH" role="menuitem" tabindex="-1" title="Flip artwork in place; tile order stays the same">Flip tiles horizontally</button>
+  <button id="tileActionFlipV" role="menuitem" tabindex="-1" title="Flip artwork in place; tile order stays the same">Flip tiles vertically</button>
+  <button id="tileActionMirrorH" role="menuitem" tabindex="-1" title="Reverse columns and flip artwork: A B C → flipped C B A">Mirror range horizontally</button>
+  <button id="tileActionMirrorV" role="menuitem" tabindex="-1" title="Reverse rows and flip artwork vertically">Mirror range vertically</button>
   <div class="tile-menu-separator" role="separator"></div>
   <button id="tileActionCopy" role="menuitem" tabindex="-1">Copy selected tiles</button>
   <button id="tileActionPaste" role="menuitem" tabindex="-1">Paste over here</button>
@@ -376,6 +416,8 @@
 <script src="painting.js"></script>
 <script src="pixel_editor.js"></script>
 <script src="stamp_editor.js"></script>
+<script src="tile_transform.js"></script>
+<script src="tile_palette.js"></script>
 <script src="editor_feedback.js"></script>
 <script src="tile_menu.js"></script>
 <script src="export_editor.js"></script>

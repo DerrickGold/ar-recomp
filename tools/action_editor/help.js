@@ -115,9 +115,37 @@ If it would exceed 256 pixel records per BG, no pixels change and the status
 asks you to select a smaller range.</p>
 
 <h4>Copy and extend backgrounds</h4>
+<p><b>Tiles…</b> opens the loaded artwork palette beside the map. The
+<b>16×16 tiles</b> view includes every metatile definition, including ones
+absent from the original scene. Gold dots mark unused definitions; filter by
+<b>Unused in source</b> to find them. Click a tile, then click the map to stamp
+it. Choices make no edits until placed. Thumbnails keep their original colors
+and show transparency as checkerboard.</p>
+<p><b>Artwork source</b> also offers other maps with identical graphics, color
+palette and animation. Their tile arrangements can be borrowed safely.
+Maps with different graphics banks require importing artwork into the game;
+they do not appear here. The selected terrain variant supplies definitions.
+The usage filter refers to the original source map, before your edits.</p>
+<p>Choose <b>8×8 pieces</b> to assemble a 16×16 tile from four loaded characters.
+Choose a color palette, click a quarter, and select a piece; the next quarter
+becomes active automatically. <b>Use assembled tile</b> makes it a stamp.
+Selecting a 16×16 tile seeds the four quarters, so you can replace just one
+piece. <b>Mirror stamp H/V</b> reflects the current stamp before placement,
+including a copied range. The preview shows the result.</p>
+<p><b>Flip H</b>/<b>Flip V</b> immediately flip every selected tile in place.
+<b>Mirror range H</b>/<b>Mirror range V</b> reverse tile order and flip the
+artwork together: a horizontal row A, B, C becomes horizontally flipped C, B, A.
+Vertical mirroring reverses rows and flips each tile vertically.
+The right-click menu offers the same operations. Whole-range
+mirroring requires a complete rectangle; individual flips work on scattered
+selections. Existing horizontal/vertical flags are toggled, and quadrant
+positions, depth bands and black pixel edits move with the artwork.
+Copies and exports preserve those flags. One Undo reverses the whole operation.
+Flipped tiles use the same 512-tile and 256-pixel-record budgets as pasted tiles;
+an operation that exceeds a budget changes nothing.</p>
 <p>Choose <b>Select rectangle</b> and drag over the source tiles. <b>Copy selected
  tiles</b> (<kbd>Ctrl/Cmd-C</kbd>) copies the whole rectangle, including art,
- depth bands and black masks. <b>Add edge space</b> exposes empty cells on any
+ depth bands, flip flags and black masks. <b>Add edge space</b> exposes empty cells on any
  side; its count uses 16px tiles. Pasting outside the original edge also grows
  the authoring bounds.</p>
 <p>Choose <b>Stamp copied tiles</b> (<kbd>Ctrl/Cmd-V</kbd>), then click each new

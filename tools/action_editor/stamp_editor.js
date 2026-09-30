@@ -278,9 +278,10 @@ function refreshStampControls() {
   const b=sceneryBounds(room,bgIndex),n=Object.keys(stampBucket(room,bgIndex).cells).length;
   const space=mapBounds(room,bgIndex);
   $('#trimEdgeSpace').disabled=['x0','y0','x1','y1'].every(k=>space[k]===b[k]);
-  $('#stampInfo').textContent=(tileClipboard?`Copied ${tileClipboard.w}×${tileClipboard.h}. `:'')
+  $('#stampInfo').textContent=(tileClipboard?`Stamp ${tileClipboard.w}×${tileClipboard.h}. `:'')
     +`${n}/512 pasted tiles · saved bounds ${b.x0},${b.y0} to ${b.x1-1},${b.y1-1}.`
     +(tileClipboard&&!same?' Switch back to the source room/BG to paste.':'');
+  refreshTileTransformControls();refreshPaletteStamp();
 }
 function startStamp() {
   if(tileClipboard?.key!==keyOf(room,bgIndex))return;

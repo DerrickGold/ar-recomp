@@ -59,6 +59,28 @@ select{background:var(--panel-2);border:1px solid var(--line);border-radius:5px;
   max-width:calc(100% - 20px);max-height:calc(100% - 20px);overflow-y:auto;
   padding:12px;background:var(--panel);border:1px solid #3a4156;border-radius:8px;box-shadow:0 12px 30px #0009}
 .inspector-header{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px}
+.tile-palette{width:330px;padding:10px}
+.palette-label{display:block;font-size:10px;color:var(--dim);margin:10px 0 4px}
+#paletteSource,#paletteRow{width:100%}
+.palette-filters{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.palette-filters select{flex:1;min-width:0;font-size:11px}
+.palette-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(42px,1fr));gap:4px;
+  margin-top:8px;max-height:300px;overflow-y:auto;padding:3px}
+.palette-grid button{padding:3px;display:flex;flex-direction:column;align-items:center;gap:3px;
+  font:9px var(--mono);position:relative}
+.palette-grid button.unused{border-color:#766038}
+.palette-grid button.unused::after{content:'';position:absolute;right:2px;top:2px;
+  width:4px;height:4px;border-radius:50%;background:#f0c55a}
+.tile-palette canvas{image-rendering:pixelated}
+.palette-grid canvas{width:32px;height:32px}
+.palette-quarters{display:grid;grid-template-columns:repeat(2,40px);gap:2px;margin:7px auto;width:82px}
+.palette-quarters button{padding:3px;line-height:0}
+.palette-quarters canvas{width:32px;height:32px}
+#paletteUseComposite{width:100%}
+.palette-stamp{display:flex;align-items:center;gap:8px;border-top:1px solid var(--line);
+  margin-top:10px;padding-top:8px;font-size:10px;color:var(--dim)}
+#paletteStampPreview{width:64px;height:64px;flex:none;object-fit:contain}
+.palette-stamp button{font-size:10px;padding:4px}
 .spacer{flex:1}
 h1{font-size:13px;font-weight:600;margin:0 0 2px;letter-spacing:-.01em}
 .sub{font-size:11px;color:var(--faint);margin:0 0 14px;line-height:1.5}

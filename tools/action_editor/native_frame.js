@@ -189,21 +189,22 @@ function decodeLayer(room, bg) {
    * classification the artist already made -- the game uses it to put a tile
    * in front of sprites -- so it is surfaced as a selector, not overwritten. */
   const words = new Uint16Array(tilesW*tilesH);
+  const metatileWords = new Uint16Array(mt.length/2);
+  for(let i=0;i<metatileWords.length;i++)
+    metatileWords[i]=((mt[i*2+1]|(mt[i*2]<<8))&DATA.tileWordMask)|attrs;
   const cellId = new Uint8Array(cellsW*cellsH);
   for (let cy=0; cy<cellsH; cy++) for (let cx=0; cx<cellsW; cx++) {
     const page = (cy>>4)*pw + (cx>>4);
     const id = mp[page*256 + (cy&15)*16 + (cx&15)];
     cellId[cy*cellsW+cx] = id;
     for (let q=0;q<4;q++){
-      const src = id*8 + q*2;
-      const definition = mt[src+1] | (mt[src]<<8);   /* byte-swapped in ROM */
-      const entry = (definition & DATA.tileWordMask) | attrs;
+      const entry = metatileWords[id*4+q];
       const tx = cx*2 + (q&1), ty = cy*2 + (q>>1);
       words[ty*tilesW+tx] = entry;
     }
   }
   return { pw, ph, cellsW, cellsH, tilesW, tilesH, w:tilesW*8, h:tilesH*8,
-           words, cellId, pal, chars, extra, room, bg };
+           words, metatileWords, cellId, pal, chars, extra, room, bg };
 }
 
 /* One 8x8 character's pixels, 4bpp planar, honouring both flips. */

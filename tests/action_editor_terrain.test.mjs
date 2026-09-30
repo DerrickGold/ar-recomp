@@ -33,6 +33,7 @@ function editor(data) {
       this.children.push(child);
       if (this.children.length === 1) this.value = String(child.value);
     }
+    replaceChildren(...children) {this.children=[...children];}
     getContext() { return this.context ??= {putImageData(image) {this.image=image;},
       drawImage() {},clearRect() {},setTransform() {},fillRect() {},
       setLineDash(value) {this.dash=value;},measureText(text) {return {width:text.length*7};},
@@ -57,6 +58,8 @@ function editor(data) {
   const element = selector => {
     if (!elements.has(selector)) {
       const e=new Element();e.selector=selector;elements.set(selector,e);
+      if(/^#paletteQuarterCanvas/.test(selector))e.width=e.height=8;
+      if(selector==='#paletteStampPreview')e.width=e.height=64;
       if(/^#tileAction(?!Status)/.test(selector))element('#tileMenu').children.push(e);
     }
     return elements.get(selector);
@@ -1103,6 +1106,206 @@ fb("selectedStampKeys.add('-1,0');refreshSelectionControls();$('#copyTilesQuick'
 assert.match(fbElements.get('#tileActionStatus').textContent,/rectangle of up to 512/);
 console.log('Modified/band highlighting, mixed quadrants, pasted overrides, regional isolation and bulk selection passed');
 
+/* Asymmetric 4bpp artwork exercises actual pixels, quadrant flags, masks and
+ * export, rather than just asserting the implementation's word permutations. */
+const paletteData=fixture();
+const paletteChars=Buffer.from(paletteData.blobs[0],'base64');
+for(let tile=1;tile<=4;tile++)for(let y=0;y<8;y++)for(let x=0;x<8;x++) {
+  const value=(tile+x*3+y*5)%16;
+  for(let bit=0;bit<4;bit++)if(value&(1<<bit))
+    paletteChars[tile*32+(bit>>1)*16+y*2+(bit&1)]|=1<<(7-x);
+}
+paletteData.blobs[0]=paletteChars.toString('base64');
+const paletteColors=Buffer.alloc(0x100);
+for(let row=0;row<8;row++)for(let c=1;c<16;c++)
+  paletteColors.writeUInt16LE(c|((c+row)%32<<5)|((31-c)%32<<10),(row*16+c)*2);
+paletteData.blobs[1]=paletteColors.toString('base64');
+const paletteDefs=Buffer.from(paletteData.blobs[3],'base64');
+[1,0x6002,0x8003,0xc004].forEach((word,q)=>paletteDefs.writeUInt16BE(word,q*2));
+[4,3,2,1].forEach((word,q)=>paletteDefs.writeUInt16BE(word,5*8+q*2));
+paletteData.blobs[3]=paletteDefs.toString('base64');
+const extraIndex=paletteData.blobs.push(Buffer.alloc(64*32).toString('base64'))-1;
+paletteData.rooms.forEach(r=>r.extraChars=extraIndex);
+const borrowed=Buffer.from(paletteDefs);
+[1,4,3,2].forEach((word,q)=>borrowed.writeUInt16BE(word,9*8+q*2));
+const borrowedIndex=paletteData.blobs.push(borrowed.toString('base64'))-1;
+paletteData.rooms[1]={...paletteData.rooms[1],terrainVariants:undefined,
+  bg:paletteData.rooms[1].bg.map(bg=>({...bg,metatiles:borrowedIndex}))};
+const incompatibleIndex=paletteData.blobs.push(Buffer.alloc(0x4000,17).toString('base64'))-1;
+paletteData.rooms.push({...paletteData.rooms[1],map:3,chars:incompatibleIndex});
+paletteData.rooms.push({...paletteData.rooms[1],map:4,
+  animation:{target:16,stride:32,phases:2,cadence:1}});
+const pal=editor(paletteData),pr=pal.run,pe=pal.elements;
+pr('const untouchedPalette=mergeDioramaIni();openTilePalette();');
+assert.equal(pe.get('#paletteSource').children.length,2);
+assert.equal(pe.get('#paletteGrid').children.length,256);
+assert.equal(pr("paletteEntries(L,'metatile').filter(e=>!e.used).length"),255);
+assert.equal(pr('loadedCharacterIds(L).length'),576);
+pr("$('#paletteUsage').value='unused';$('#paletteUsage').onchange();");
+assert.equal(pe.get('#paletteGrid').children.length,255);
+assert.equal(pr('choosePaletteTile(5)'),true);
+assert.equal(pr('brush'),'stamp');
+assert.equal(pr('mergeDioramaIni()'),pr('untouchedPalette'));
+assert.equal(pr('configDirty'),false);
+assert.equal(pr('stampTiles(-1,0)'),true);
+assert.equal(pr("stampBucket(room,0).cells['-1,0'].id"),5);
+pr('undo()');
+assert.equal(pr('mergeDioramaIni()'),pr('untouchedPalette'));
+pr("$('#paletteSource').value='1';$('#paletteSource').onchange();choosePaletteTile(9);");
+assert.equal(pr('JSON.stringify(tileClipboard.cells[0].words)'),JSON.stringify([0x1001,0x1004,0x1003,0x1002]));
+pr("$('#paletteSource').value='2';$('#paletteSource').onchange();");
+assert.equal(pr('paletteSourceIndex'),1); // incompatible banks cannot become a source
+assert.equal(pr('choosePaletteTile(-1)'),false);
+pr(`$('#paletteSource').value='0';$('#paletteSource').onchange();choosePaletteTile(5);
+  $('#paletteKind').value='character';$('#paletteUsage').value='all';$('#paletteKind').onchange();`);
+assert.equal(pe.get('#paletteGrid').children.length,576);
+pr("$('#paletteRow').value='3';$('#paletteQuarter2').onclick();choosePaletteCharacter(0x200);");
+assert.equal(pr('paletteWords[2]'),0x0e00);
+assert.equal(pr('paletteQuarter'),3);
+assert.equal(pr('usePaletteComposite()'),true);
+assert.equal(pr('tileClipboard.cells[0].words[2]'),0x0e00);
+assert.equal(pr('mergeDioramaIni()'),pr('untouchedPalette'));
+pr('stampTiles(-1,0);const composedIni=mergeDioramaIni();');
+const composedReload=editor(paletteData);
+composedReload.run(`loadIniText(${JSON.stringify(pr('composedIni'))},'composed.ini');setLayer(0);`);
+assert.equal(composedReload.run("stampBucket(room,0).cells['-1,0'].words[2]"),0x0e00);
+pr(`undo();selectOnlyTile(0,0);beginOp("asymmetric mask");editPixel(2,5);commitOp();applySelectionBand(0);
+  const originalTile=displayedCell(room,0,L,0,0);
+  const originalPixels=Array.from({length:256},(_,i)=>stampColor(L,originalTile,i%16,i>>4));`);
+for(const axis of ['h','v']) {
+  assert.equal(pr(`flipSelectedTiles('${axis}')`),true);
+  assert.equal(pr(`(()=>{
+    const tile=displayedCell(room,0,L,0,0);
+    return originalPixels.every((color,i)=>stampColor(L,tile,
+      ${axis==='h'?'15-i%16':'i%16'},${axis==='v'?'15-(i>>4)':'i>>4'})===color);
+  })()`),true);
+  assert.equal(pr(`pixelIsBlack(displayedCell(room,0,L,0,0).black,${axis==='h'?13:2},${axis==='v'?10:5})`),true);
+  const transformed=pr("JSON.stringify(displayedCell(room,0,L,0,0))");
+  pr('undo()');
+  assert.equal(pr('JSON.stringify(displayedCell(room,0,L,0,0))'),pr('JSON.stringify(originalTile)'));
+  pr('redo()');
+  assert.equal(pr('JSON.stringify(displayedCell(room,0,L,0,0))'),transformed);
+  pr('undo()');
+}
+pr(`choosePaletteTile(5);stampTiles(1,0);selectRectangle(0,0,1,0);
+  const rangeSource=tileSelectionPositions().map(([x,y])=>cloneSceneryTile(displayedCell(room,0,L,x,y)));
+  const beforeRangeMirror=mergeDioramaIni();`);
+assert.equal(pr("flipSelectedTiles('h',true)"),true);
+assert.equal(pr(`(()=>{
+  for(let x=0;x<2;x++)for(let y=0;y<16;y++)for(let px=0;px<16;px++)
+    if(stampColor(L,displayedCell(room,0,L,x,0),px,y)!==stampColor(L,rangeSource[1-x],15-px,y))return false;
+  return true;
+})()`),true);
+assert.equal(pr('displayedCell(room,0,L,0,0).bands.every(b=>b===1)'),true);
+assert.equal(pr('displayedCell(room,0,L,1,0).bands.every(b=>b===0)'),true);
+pr('copyTiles();const frozenClip=JSON.stringify(tileClipboard.cells);');
+assert.equal(pr("flipClipboard('h')"),true);
+assert.equal(pr('brush'),'stamp');
+assert.equal(pr('JSON.stringify(tileClipboard.cells)'),pr('JSON.stringify(rangeSource)'));
+assert.equal(pr("flipClipboard('h')"),true);
+assert.equal(pr('JSON.stringify(tileClipboard.cells)'),pr('frozenClip'));
+pr('stampTiles(2,0);const mirroredIni=mergeDioramaIni();');
+const mirroredReload=editor(paletteData);
+mirroredReload.run(`loadIniText(${JSON.stringify(pr('mirroredIni'))},'mirror.ini');setLayer(0);`);
+for(let x=0;x<4;x++)assert.deepEqual(
+  JSON.parse(mirroredReload.run(`JSON.stringify(displayedCell(room,0,L,${x},0))`)),
+  JSON.parse(pr(`JSON.stringify(displayedCell(room,0,L,${x},0))`)));
+pr("$('#terrain').value='1';$('#terrain').onchange();");
+assert.equal(pr('Object.keys(stampBucket(room,0).cells).length'),0);
+assert.equal(pr("flipClipboard('h')"),false);
+assert.equal(pr('paletteSourceIndex'),0);
+pr("$('#terrain').value='0';$('#terrain').onchange();undo();undo();");
+assert.equal(pr('mergeDioramaIni()'),pr('beforeRangeMirror'));
+pr('deselect();selectCell(0,0);selectCell(2,0);const beforeSparseMirror=mergeDioramaIni();');
+assert.equal(pr("flipSelectedTiles('h',true)"),false);
+assert.equal(pr('mergeDioramaIni()'),pr('beforeSparseMirror'));
+assert.equal(pr("flipSelectedTiles('v')"),true); // scattered flips are supported
+pr("openTileMenu(0,0,10,10);$('#tileActionFlipH').onclick();");
+assert.equal(pr('tileMenu.hidden'),true);
+pr('openPixelInspector();');
+assert.equal(pr('tilePalette.hidden'),true);
+pr('openTilePalette();');
+assert.equal(pr('pixelInspector.hidden'),true);
+pr("setMode('3d');");
+assert.equal(pr('tilePalette.hidden'),true);
+const cap=editor(paletteData),cr=cap.run;
+cr(`for(let cell=0;cell<512;cell++)stampBucket(room,0).cells[
+  (cell%32)+','+(cell>>5)]=blankTile();
+  $('#edgeCount').value='1';expandEdge('x0');selectOnlyTile(-1,0);
+  const beforeFlipCapacity=mergeDioramaIni(),undoCapacity=undoStack.length;`);
+assert.equal(cr("flipSelectedTiles('h')"),false);
+assert.equal(cr('mergeDioramaIni()'),cr('beforeFlipCapacity'));
+assert.equal(cr('undoStack.length'),cr('undoCapacity'));
+const pixelCap=editor(paletteData),pcr=pixelCap.run;
+pcr(`pixelBucket(room,0).byCoord={};
+  for(let x=0;x<255;x++)pixelBucket(room,0).byCoord[x+',-1']='F'.repeat(64);
+  selectOnlyTile(0,0);beginOp('last mask');editPixel(2,5);commitOp();
+  selectRectangle(0,0,1,0);
+  const beforeFlipPixels=JSON.stringify(stampBucket(room,0).cells);`);
+assert.equal(pcr('regionalPixelCount(room,0)'),256);
+assert.equal(pcr("flipSelectedTiles('h',true)"),false);
+assert.equal(pcr('JSON.stringify(stampBucket(room,0).cells)'),pcr('beforeFlipPixels'));
+const animatedData=structuredClone(paletteData);
+animatedData.rooms[0].animation={target:16,stride:32,phases:2,cadence:1};
+const animated=editor(animatedData),ar=animated.run;
+ar('openTilePalette();const phaseThumb=paletteButtons[0].button.children[0].getContext("2d").image.data.slice();');
+ar('setNativeFrame(1);');
+assert.notDeepEqual(Buffer.from(ar('paletteButtons[0].button.children[0].getContext("2d").image.data')),
+  Buffer.from(ar('phaseThumb')));
+assert.equal(ar('paletteCache.endsWith(":1")'),true);
+console.log('Loaded/unused palette, compatible sources, character composition, animated thumbnails, pixel-correct flips, range/clipboard mirroring, INI round trips and atomic limits passed');
+
+/* Explicit Mirror buttons/menu reverse tile order AND artwork, while Flip
+ * stays in-place. A signed 3x3 selection also catches row/column confusion. */
+const orderEditor=editor(paletteData),orr=orderEditor.run,oe=orderEditor.elements;
+orr(`for(let row=0;row<3;row++)for(let col=0;col<3;col++) {
+  const id=row*3+col+1,words=Array.from({length:4},(_,q)=>
+    ((id+q)%4+1)|((id%8)<<10)|((q&1)?0x4000:0));
+  stampBucket(room,0).cells[(col-2)+','+(row-1)]={id,words,
+    bands:[0,1,2,1],black:pixelMaskSet(ZERO_PIXEL_MASK,id,id+1,true)};
+}
+selectRectangle(-2,-1,0,1);
+const orderSource=tileSelectionPositions().map(([x,y])=>cloneSceneryTile(displayedCell(room,0,L,x,y)));
+const orderIni=mergeDioramaIni(),orderUndo=undoStack.length;`);
+assert.equal(oe.get('#mirrorSelectedH').disabled,false);
+assert.equal(oe.get('#mirrorSelectedV').disabled,false);
+for(const axis of ['h','v']) {
+  if(axis==='h')oe.get('#mirrorSelectedH').onclick();
+  else orr("openTileMenu(-2,-1,10,10);$('#tileActionMirrorV').onclick();");
+  const expected=axis==='h'?[3,2,1,6,5,4,9,8,7]:[7,8,9,4,5,6,1,2,3];
+  assert.equal(orr('JSON.stringify(tileSelectionPositions().map(([x,y])=>displayedCell(room,0,L,x,y).id))'),
+    JSON.stringify(expected));
+  assert.equal(orr(`(()=>{
+    for(let row=0;row<3;row++)for(let col=0;col<3;col++) {
+      const from=orderSource[(${axis==='v'?'2-row':'row'})*3+(${axis==='h'?'2-col':'col'})];
+      const to=displayedCell(room,0,L,col-2,row-1);
+      for(let y=0;y<16;y++)for(let x=0;x<16;x++)
+        if(stampColor(L,to,x,y)!==stampColor(L,from,
+          ${axis==='h'?'15-x':'x'},${axis==='v'?'15-y':'y'}))return false;
+    }
+    return true;
+  })()`),true);
+  assert.equal(orr('undoStack.length'),orr('orderUndo')+1);
+  const mirrorOrderIni=orr('mergeDioramaIni()');
+  orr('undo()');assert.equal(orr('mergeDioramaIni()'),orr('orderIni'));
+  orr('redo()');assert.equal(orr('mergeDioramaIni()'),mirrorOrderIni);
+  orr('undo()');
+}
+orr("$('#flipSelectedH').onclick();");
+assert.equal(orr('JSON.stringify(tileSelectionPositions().map(([x,y])=>displayedCell(room,0,L,x,y).id))'),
+  JSON.stringify([1,2,3,4,5,6,7,8,9]));
+orr("undo();selectRectangle(-2,-1,0,-1);copyTiles();$('#flipClipboardH').onclick();");
+assert.equal(orr('JSON.stringify(tileClipboard.cells.map(c=>c.id))'),'[3,2,1]');
+orr('deselect();selectCell(-2,-1);selectCell(0,-1);refreshSelectionControls();');
+assert.equal(oe.get('#mirrorSelectedH').disabled,true);
+assert.equal(oe.get('#mirrorSelectedV').disabled,true);
+assert.equal(oe.get('#flipSelectedH').disabled,false);
+orr('openTileMenu(-2,-1,10,10);');
+assert.equal(oe.get('#tileActionMirrorH').disabled,true);
+assert.equal(oe.get('#tileActionMirrorV').disabled,true);
+assert.equal(oe.get('#tileActionFlipH').disabled,false);
+console.log('Explicit horizontal/vertical range mirroring reverses ABC to flipped CBA, keeps Flip in-place, and preserves signed coordinates, clipboard order and undo');
+
 if (process.argv[2]) {
   const html = fs.readFileSync(process.argv[2], 'utf8');
   const match = html.match(/window\.__ACTION_BG__=(.*);<\/script>/);
@@ -1128,6 +1331,24 @@ if (process.argv[2]) {
     }
   }
   assert.equal(actual.run('nativeGoldenStatus.size'), 147);
+  const bloodpool=data.rooms.findIndex(r=>r.group===2&&r.map===8);
+  assert.ok(bloodpool>=0);
+  actual.run(`$('#room').value='${bloodpool}';$('#room').onchange();openTilePalette();
+    const bloodpoolEntries=paletteEntries(L,'metatile');
+    const unusedArtwork=bloodpoolEntries.find(({id,used})=>!used&&
+      Array.from({length:256},(_,i)=>stampOriginal(L,paletteTile(L,id),i%16,i>>4)).some(c=>c!==null));`);
+  assert.equal(actual.run('bloodpoolEntries.length'),256);
+  assert.ok(actual.run('unusedArtwork'), 'Bloodpool 2:8 must expose unused artwork');
+  actual.run('choosePaletteTile(unusedArtwork.id);const bpSource=cloneSceneryTile(tileClipboard.cells[0]);flipClipboard("h");');
+  assert.equal(actual.run(`Array.from({length:256},(_,i)=>i).every(i=>
+    stampColor(L,bpSource,i%16,i>>4)===stampColor(L,tileClipboard.cells[0],15-i%16,i>>4))`),true);
+  actual.run('stampTiles(-1,0);const bpTileIni=mergeDioramaIni();');
+  const bloodpoolReload=editor(data);
+  bloodpoolReload.run(`loadIniText(${JSON.stringify(actual.run('bpTileIni'))},'bloodpool-tiles.ini');
+    $('#room').value='${bloodpool}';$('#room').onchange();`);
+  assert.deepEqual(JSON.parse(bloodpoolReload.run("JSON.stringify(stampBucket(room,0).cells['-1,0'])")),
+    JSON.parse(actual.run("JSON.stringify(stampBucket(room,0).cells['-1,0'])")));
+  console.log('Bloodpool 2:8: unused artwork, pixel-correct stamp mirroring and exported reload passed');
   const kassandora=data.rooms.findIndex(r=>r.group===3&&r.map===4);
   assert.ok(kassandora>=0);
   actual.run(`$('#room').value='${kassandora}'; $('#room').onchange(); actor.show=false;

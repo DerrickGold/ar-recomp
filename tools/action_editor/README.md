@@ -5,6 +5,11 @@ depth bands and authors those changes directly in `diorama-layers.ini`. The
 editor is the source of truth; the game only loads and renders the exported
 configuration.
 
+The planned [Effects workspace and shared WASM preview](../../docs/action-effects-editor-plan.md)
+will use the game's compositor and expose existing and future level-effect
+presets. This is an implementation roadmap; the current browser preview remains
+the independent JavaScript renderer, and effect authoring is not yet available.
+
 ```sh
 sh tools/action_editor/build.sh
 sh tools/action_editor/build.sh ar.sfc out.html path/to/diorama-layers.ini
@@ -94,6 +99,42 @@ placing each far plane 0.15 behind its anchor and immediately before it in
 paint order.
 
 ## Selection and tile pixels
+
+**Tiles…** opens a palette of all 256 loaded 16×16 metatile definitions,
+including artwork absent from the original scene. Gold dots mark unused
+definitions; **Unused in source** and **Used in source** filter by the original
+source map. Click a tile, then click the map to stamp it. Selection and stamp
+preparation make no edits until placement. Thumbnails retain original colors
+even with band tint enabled, and checkerboard identifies transparency.
+
+**Artwork source** includes other maps when their CHR banks, extra graphics,
+color palette and animation descriptor match the destination. Their metatile
+arrangements can then be borrowed without changing the game's loaded assets.
+Maps with different graphics require an asset-import feature and are excluded.
+The current terrain variant supplies the palette's definitions. Placed tiles
+follow the destination background's existing regional sharing rules.
+
+Switch to **8×8 pieces** to assemble a 16×16 tile from four loaded characters.
+Choose a palette row, click the desired quarter, and choose a piece. The next
+quarter becomes active automatically. **Use assembled tile** starts stamping.
+Choosing a 16×16 tile seeds the composer so individual quarters can be replaced.
+The current stamp preview also shows copied rectangles. **Mirror stamp H/V**
+reflects that stamp before placement, without modifying existing scenery.
+
+**Flip H/V** flip each selected tile in place, keeping its position.
+**Mirror range H/V** reverse tile order within a complete selected rectangle
+and flip each tile's artwork on the same axis. For example, **Mirror range H**
+turns `A, B, C` into horizontally flipped `C, B, A`; **Mirror range V** reverses
+rows and flips each tile vertically. Both actions are also in the right-click
+menu. Mirroring requires a complete rectangle; scattered selections support
+individual flips. **Mirror stamp H/V** perform the same order-and-artwork
+reflection on a copied rectangle before you place it.
+Mirroring swaps 8×8 quadrants, toggles native horizontal/vertical flags, and
+moves black pixel edits and depth bands with the artwork. Copy, paste, export
+and reload preserve these flags. One Undo reverses an entire selection flip.
+The resulting edits use ordinary stamps and retain the existing shared limits
+of 512 saved tile records and 256 pixel records per BG. Capacity checks happen
+before mutation, so a rejected operation leaves the scene unchanged.
 
 Start with **Select** above the map. Click a tile or Shift-click another tile
 to select a range. The selection bar reports its applied band (or mixed bands),

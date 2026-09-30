@@ -114,6 +114,7 @@ function reviewChange(direction) {
 }
 function openPixelInspector() {
   setMode('2d');returnToEditedTiles();$('#bSelect').onclick();
+  closeTilePalette(false);
   const point=activeSelectionPosition();if(point)focusTileAt(...point);
   pixelInspector.hidden=false;refreshPixelEditor();$('#pixelBlack').focus({preventScroll:true});
   tileActionStatus('Pixel edits apply immediately to the preview. Undo reverses a stroke.');
@@ -156,14 +157,14 @@ function refreshEditorFeedback() {
   $('#pixelSelectionBlackQuick').disabled=!selected||mode!=='2d';
   $('#copyTilesQuick').disabled=!selected||mode!=='2d';
   const toolNames={select:'Select tiles',selectRect:'Select a rectangle',pan:'Pan',framing:'Adjust framing',
-    cell:'Paint one tile',class:'Paint matching tile types',rect:'Paint a rectangle',stamp:'Stamp copied tiles'};
+    cell:'Paint one tile',class:'Paint matching tile types',rect:'Paint a rectangle',stamp:'Stamp tiles'};
   $('#selectQuick').classList.toggle('on',brush==='select');
   $('#selectRectQuick').classList.toggle('on',brush==='selectRect');
   $('#stampQuick').classList.toggle('on',brush==='stamp');
   let hint;
   if(compareOriginal)hint='Showing original tiles. Editing returns to your edited preview.';
   else if(brush==='select'||brush==='selectRect')hint='Selection makes no edits. Click or drag; Shift-click selects a range. Actions apply immediately.';
-  else if(brush==='stamp')hint='Click places the copied rectangle. Keep clicking to repeat; Esc finishes.';
+  else if(brush==='stamp')hint='Click places the stamp shown in Tiles. Keep clicking to repeat; Esc finishes.';
   else if(brush==='pan')hint='Drag to move the map; wheel zooms. Choose Select to pick tiles.';
   else if(brush==='framing')hint='Drag any viewport frame; all move together. Arrows: 1 px; Shift + arrows: 16 px. Dashed outline = native view. Esc returns to Select.';
   else hint=`Click/drag immediately paints ${BAND_LABELS[band]}`

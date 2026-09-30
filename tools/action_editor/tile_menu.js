@@ -2,7 +2,7 @@
  * deltas as the toolbar. A paste destination is independent of the selection. */
 const tileMenu=$('#tileMenu');
 tileMenu.hidden=true;
-const tileMenuButtons=['Priority','Far','ResetBand','Pixels','Fill','Copy','Paste','Stamp','Remove','Deselect']
+const tileMenuButtons=['Priority','Far','ResetBand','Pixels','Fill','FlipH','FlipV','MirrorH','MirrorV','Copy','Paste','Stamp','Remove','Deselect']
   .map(name=>$(`#tileAction${name}`));
 let tileMenuTarget=null;
 const macControlClick=ev=>ev.button===0&&ev.ctrlKey&&/Mac/.test(window.navigator?.platform||'');
@@ -38,8 +38,9 @@ function openTileMenu(cx,cy,clientX,clientY) {
   $('#tileMenuDestination').textContent=`Paste destination: ${cx}, ${cy} · Diorama only`;
   $('#tileActionPriority').textContent=allHigh?'Turn priority off':'Turn priority on';
   $('#tileActionPriority').setAttribute('aria-checked',allHigh?'true':anyHigh?'mixed':'false');
-  for(const name of ['Priority','Far','ResetBand','Fill','Copy','Deselect'])
+  for(const name of ['Priority','Far','ResetBand','Fill','FlipH','FlipV','Copy','Deselect'])
     $(`#tileAction${name}`).disabled=!hasSelection;
+  for(const axis of ['H','V'])$(`#tileActionMirror${axis}`).disabled=!selectedTileRectangle(positions);
   $('#tileActionPixels').disabled=!tile;
   $('#tileActionRemove').disabled=$('#removeStamps').disabled;
   $('#tileActionStamp').disabled=!sameClipboard;
@@ -76,6 +77,10 @@ $('#tileActionPixels').onclick=()=>runTileAction(()=>{
 $('#tileActionFill').onclick=()=>runTileAction(()=>{
   fillSelectedTransparency();tileActionStatus($('#selectionPixelInfo').textContent);
 });
+for(const axis of ['h','v']) {
+  $(`#tileActionFlip${axis.toUpperCase()}`).onclick=()=>runTileAction(()=>flipSelectedTiles(axis));
+  $(`#tileActionMirror${axis.toUpperCase()}`).onclick=()=>runTileAction(()=>flipSelectedTiles(axis,true));
+}
 $('#tileActionCopy').onclick=()=>runTileAction(()=>{
   const copied=copyTiles();tileActionStatus(copied?`Copied ${tileClipboard.w}×${tileClipboard.h} tiles.`
     :$('#stampInfo').textContent);
