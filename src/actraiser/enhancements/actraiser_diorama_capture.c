@@ -23,13 +23,21 @@ static uint32_t s_stamp_backing[2][kHostDisplayFramebufferHeight];
 static bool s_pixel_edits_active;
 static uint32_t s_pixel_content_mask;
 static uint8_t s_bg_apron_mask;
+static DioramaBgSourceBounds s_bg2_source_bounds;
+static bool s_track_bg2_source_bounds;
 
 uint8_t ActRaiser_DioramaBgApronMask(void) {
   return s_bg_apron_mask;
 }
 
-bool ActRaiser_DioramaPixelEditsActive(void) {
-  return s_pixel_edits_active;
+bool ActRaiser_DioramaPixelPassActive(void) {
+  return s_pixel_edits_active || s_track_bg2_source_bounds;
+}
+
+bool ActRaiser_DioramaBg2SourceBounds(int *x0, int *x1) {
+  if (x0) *x0 = s_bg2_source_bounds.x0;
+  if (x1) *x1 = s_bg2_source_bounds.x1;
+  return s_bg2_source_bounds.valid;
 }
 
 uint32_t ActRaiser_DioramaPixelContentMask(void) {
@@ -38,8 +46,22 @@ uint32_t ActRaiser_DioramaPixelContentMask(void) {
 
 void ActRaiser_DioramaPixelSampleLine(const SrPpuStateSnapshot *ppu,
                                       int screen_y) {
-  if (!s_pixel_edits_active || !ppu ||
+  if (!ActRaiser_DioramaPixelPassActive() || !ppu ||
       (ppu->flags & SR_PPU_STATE_FORCED_BLANK)) return;
+  if (s_track_bg2_source_bounds) {
+    const ActionBgLayerPlan *layer = &ActRaiser_PendingActionBgPlan()->layer[1];
+    int x0, x1;
+    if (ActRaiserActionBg_HorizontalSourceBounds(
+            1, ppu->backgrounds[1].h_scroll, &x0, &x1)) {
+      /* A skybox must have usable texels across every captured live-world row.
+       * Intersect raster-shifted bounds; synthetic bands keep their own span. */
+      const unsigned mosaic_size = (ppu->mosaic_control & 2u)
+          ? (ppu->mosaic_control >> 4) + 1u : 1u;
+      DioramaBgSourceBounds_AddRow(
+          &s_bg2_source_bounds, layer, screen_y, x0, x1, mosaic_size);
+    }
+  }
+  if (!s_pixel_edits_active) return;
   const int row = screen_y + g_ws_extra_top;
   if ((unsigned)row >= kHostDisplayFramebufferHeight) return;
   const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
@@ -48,10 +70,15 @@ void ActRaiser_DioramaPixelSampleLine(const SrPpuStateSnapshot *ppu,
   SrBorrowedU16Span cgram = {.struct_size = sizeof(cgram)};
   bool tried_memory = false, have_memory = false;
   for (unsigned bg = 0; bg < 2; bg++) {
-    if (!ActRaiserActionBg_PixelLayerHasEdits(bg)) continue;
+    const bool edits = ActRaiserActionBg_PixelLayerHasEdits(bg);
     const int apron = (s_bg_apron_mask & (1u << bg)) ? SR_PPU_OBJ_APRON : 0;
+    if (!edits && !apron) continue;
     for (int x = -g_ws_extra - apron;
          x < (int)SR_PPU_NATIVE_WIDTH + g_ws_extra + apron; x++) {
+      /* Ordinary terrain needs only the two guard strips. Its main capture
+       * already came from the tiled PPU path. */
+      if (!edits && x == -g_ws_extra)
+        x = (int)SR_PPU_NATIVE_WIDTH + g_ws_extra;
       if (!DioramaCapture_PixelLayerVisible(ppu, bg, x)) continue;
       const unsigned size = (ppu->mosaic_control >> 4) + 1u;
       int source_x = x, sample_y = screen_y + 1;
@@ -354,6 +381,13 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
                  ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]));
   s_pixel_content_mask = 0;
   s_bg_apron_mask = 0;
+  s_bg2_source_bounds = (DioramaBgSourceBounds){0};
+  int source_x0, source_x1;
+  s_track_bg2_source_bounds = want_capture && ppu &&
+      g_settings.diorama_margin_fix &&
+      g_settings.diorama_skybox != kDioramaSky_Off &&
+      ActRaiserActionBg_HorizontalSourceBounds(
+          1, ppu->backgrounds[1].h_scroll, &source_x0, &source_x1);
   s_pixel_edits_active = want_capture &&
       ActRaiserActionBg_PixelEditsActive();
   const DioramaRoomOverride *room = ActRaiser_CurrentVirtualLayerRoom();
@@ -363,6 +397,15 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
     for (unsigned bg = 0; bg < 2; bg++)
       if ((room->framing[0].x || room->stamp_layers[bg].count) &&
           ActRaiserActionBg_PixelLayerHasEdits(bg)) s_bg_apron_mask |= (uint8_t)(1u << bg);
+  /* At 16:9 the perspective view can expose a column beyond each end of the
+   * 496px capture. Stream real terrain into the existing guard allocation;
+   * keep the gameplay camera, flat view and working 16:10 capture unchanged. */
+  if (active && g_ws_active &&
+      Settings_ExtendedAspectX() * 10 > Settings_ExtendedAspectY() * 16)
+    for (unsigned bg = 0; bg < 2; bg++)
+      if (ActRaiserActionBg_WorldApronAvailable(bg))
+        s_bg_apron_mask |= (uint8_t)(1u << bg);
+  s_pixel_edits_active |= s_bg_apron_mask != 0;
   if (s_pixel_edits_active) memset(s_pixel_black, 0, sizeof(s_pixel_black));
   g_diorama_frame_active = active;
   if (want_capture) {

@@ -336,33 +336,13 @@ void HostDisplay_ResolveVideoGeometry(bool apply_runtime_changes) {
   s_active_aspect_y = Settings_ExtendedAspectY();
   g_active_pixel_aspect = g_settings.pixel_aspect;
 
-  int extra_columns = 0;
-  if (s_widescreen_runtime_allowed &&
-      s_active_aspect_x &&
-      s_active_aspect_y) {
-    const bool crt_pixel_aspect =
-        g_active_pixel_aspect == kPixelAspect_Crt43;
-    const long numerator =
-        (long)g_snes_height * s_active_aspect_x *
-        (crt_pixel_aspect ? 6 : 7);
-    const long denominator = 7L * s_active_aspect_y;
-    const int internal_width =
-        (int)((numerator + denominator - 1) / denominator);
-    extra_columns =
-        internal_width > kActRaiserAuthenticWidth
-            ? (internal_width - kActRaiserAuthenticWidth + 1) / 2
-            : 0;
-    if (extra_columns > kActRaiserWidescreenExtraMax)
-      extra_columns = kActRaiserWidescreenExtraMax;
-  }
-
-  const int display_extra = extra_columns;
-  if (g_settings.diorama_mode && extra_columns > 0)
-    extra_columns = kActRaiserWidescreenExtraMax;
-
-  DisplayGeometry_SetHorizontal(extra_columns, display_extra);
+  const ActRaiserDisplayGeometry geometry = DisplayGeometry_CalculateHorizontal(
+      g_snes_height, s_widescreen_runtime_allowed ? s_active_aspect_x : 0,
+      s_active_aspect_y, g_active_pixel_aspect == kPixelAspect_Crt43,
+      g_settings.diorama_mode);
+  DisplayGeometry_SetHorizontal(geometry.render_extra, geometry.display_extra);
   g_snes_width =
-      kActRaiserAuthenticWidth + 2 * extra_columns;
+      kActRaiserAuthenticWidth + 2 * geometry.render_extra;
 
   if (apply_runtime_changes) {
     /* Aspect/PAR changes alter the framebuffer budget, not the selected HLE

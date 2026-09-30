@@ -311,6 +311,14 @@ const ActRaiserActionBgDiagnostics *ActRaiserActionBg_GetDiagnostics(void);
  * and scroll state. No character/palette memory or normal output is changed. */
 bool ActRaiserActionBg_PixelEditsActive(void);
 bool ActRaiserActionBg_PixelLayerHasEdits(unsigned bg);
+/* A current world binding with ordinary live-world edges and no tuned caps
+ * can supply diorama guard columns without requiring authored tile edits. */
+bool ActRaiserActionBg_WorldApronAvailable(unsigned bg);
+/* The bound finite source, including active pasted terrain, in screen X.
+ * Uses the same raster-scroll delta as native/scenery lookup. False for
+ * unbound or cyclic worlds; outputs are cleared on failure. */
+bool ActRaiserActionBg_HorizontalSourceBounds(
+    unsigned bg, uint16_t hscroll, int *x0, int *x1);
 /* Authored scenery may address signed cells beyond the immutable map edges.
  * Local x/y are displayed 16px cell coordinates, before character flips. */
 bool ActRaiserActionBg_StampAt(unsigned bg, int source_x, int sample_y,
@@ -321,8 +329,8 @@ bool ActRaiserActionBg_StampAt(unsigned bg, int source_x, int sample_y,
 bool ActRaiserActionBg_PixelBlackAt(unsigned bg, int source_x, int sample_y,
                                     uint16_t hscroll, uint16_t vscroll,
                                     uint8_t *band);
-/* Finite native scenery for the extra horizontal capture around authored
- * scenery or framing. Requires the same verified world binding as tile edits. */
+/* Native scenery for extra horizontal capture. Requires a current verified
+ * world binding eligible for guard columns or authored scenery/framing. */
 bool ActRaiserActionBg_NativeSceneryAt(unsigned bg, int source_x, int sample_y,
                                       uint16_t hscroll, uint16_t vscroll,
                                       uint16_t *entry, uint8_t *band,

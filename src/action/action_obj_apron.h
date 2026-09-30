@@ -30,11 +30,10 @@
  *   - It is the machinery the sim synthetic part channel needs (plan Phases
  *     5-6), built where a byte-identity gate can prove it.
  *
- * The apron can only ever hold OBJ pixels. The widened background line buffer
- * ends at kPpuExtraLeftRight=128 and the live view ends at the
- * ActRaiser-specific 120-pixel cap;
- * neither extends into these additional 64 columns. That is why the apron is
- * not displayed -- showing it would show sprites over empty background.
+ * Ordinary background scanout ends at the ActRaiser-specific 120-pixel cap.
+ * The separate scenery capture pass can fill BG guard columns from verified
+ * world terrain or authored tiles and marks those planes for wider drawing.
+ * This OBJ channel keeps its own capture and display bounds independently.
  *
  * INVARIANT, and the reason this is a separate channel rather than a wider
  * emit window: real OAM is NEVER widened. A part outside the display window

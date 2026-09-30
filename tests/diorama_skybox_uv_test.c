@@ -55,8 +55,8 @@ static void Span(int ws_extra, int budget, int live_l, int live_r, ActionBgEdgeM
                  bool pad_captured_to_budget, int *x0, int *x1) {
   ActionBgLayerPlan layer = Layer(edge);
   DioramaBgValidSpanPlan spans;
-  DioramaBgValidSpanPlan_Build(ws_extra, budget, live_l, live_r, pad_captured_to_budget, &layer, 0,
-                               1, kTexWidth, &spans);
+  DioramaBgValidSpanPlan_Build(ws_extra, budget, live_l, live_r,
+      pad_captured_to_budget, &layer, NULL, 0, 1, kTexWidth, &spans);
   *x0 = spans.count ? spans.spans[0].x0 : 0;
   *x1 = spans.count ? spans.spans[0].x1 : 0;
 }
@@ -126,17 +126,17 @@ static void ExpectSpan(const char *label, const DioramaBgValidSpan *span, int y0
 static void TestBandedValidSpans(void) {
   DioramaBgValidSpanPlan spans;
   ActionBgLayerPlan layer = Layer(kActionBgEdge_RawWrap);
-  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true, &layer, 0, 224, kTexWidth,
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true, &layer, NULL, 0, 224, kTexWidth,
                                &spans);
   ExpectInt("raw span count", spans.count, 1);
   ExpectSpan("raw", &spans.spans[0], 0, 224, 120, 496);
 
   layer = Layer(kActionBgEdge_Mirror);
-  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true, &layer, 0, 224, kTexWidth,
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true, &layer, NULL, 0, 224, kTexWidth,
                                &spans);
   ExpectInt("padded mirror span count", spans.count, 1);
   ExpectSpan("padded mirror", &spans.spans[0], 0, 224, 0, 496);
-  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, false, &layer, 0, 224, kTexWidth,
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, false, &layer, NULL, 0, 224, kTexWidth,
                                &spans);
   ExpectSpan("unpadded mirror", &spans.spans[0], 0, 224, 120, 496);
 
@@ -154,7 +154,7 @@ static void TestBandedValidSpans(void) {
       .horizontal_extent = {.mode = kActionBgExtent_Available},
   };
   layer.band_count = 1;
-  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true, &layer, 16, 256, kTexWidth,
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true, &layer, NULL, 16, 256, kTexWidth,
                                &spans);
   ExpectInt("Bloodpool span count", spans.count, 2);
   ExpectSpan("Bloodpool sky", &spans.spans[0], 0, 152, 44, 476);
@@ -172,7 +172,7 @@ static void TestBandedValidSpans(void) {
   layer.bands[0].horizontal_extent = (ActionBgHorizontalExtent){
       .mode = kActionBgExtent_Inherit,
   };
-  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true, &layer, 16, 256, kTexWidth,
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true, &layer, NULL, 16, 256, kTexWidth,
                                &spans);
   ExpectInt("Bloodpool act 2 span count", spans.count, 1);
   ExpectSpan("Bloodpool act 2", &spans.spans[0], 0, 256, 52, 444);
@@ -191,7 +191,7 @@ static void TestBandedValidSpans(void) {
       .horizontal_extent = {.mode = kActionBgExtent_Available},
   };
   layer.band_count = 1;
-  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true, &layer, 16, 256, kTexWidth,
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true, &layer, NULL, 16, 256, kTexWidth,
                                &spans);
   ExpectInt("Death Heim span count", spans.count, 2);
   ExpectSpan("Death Heim upper", &spans.spans[0], 0, 160, 120, 376);
@@ -199,7 +199,8 @@ static void TestBandedValidSpans(void) {
 
   /* A zeroed/invalid frame slot stays safely bounded by its live margins. */
   layer = (ActionBgLayerPlan){0};
-  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, 0, true, &layer, 0, 224, kTexWidth, &spans);
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, 0, true,
+      &layer, NULL, 0, 224, kTexWidth, &spans);
   ExpectInt("invalid span count", spans.count, 1);
   ExpectSpan("invalid", &spans.spans[0], 0, 224, 120, 376);
 }
@@ -219,7 +220,7 @@ static void TestExtentValidSpans(void) {
       .horizontal_extent = {.mode = kActionBgExtent_Available},
   };
   layer.band_count = 1;
-  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true, &layer, 16, 240, kTexWidth,
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, true, &layer, NULL, 16, 240, kTexWidth,
                                &spans);
   ExpectInt("fixed/band span count", spans.count, 2);
   ExpectSpan("fixed upper", &spans.spans[0], 0, 152, 72, 440);
@@ -232,7 +233,7 @@ static void TestExtentValidSpans(void) {
       .left = 100,
       .right = 64,
   };
-  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, false, &layer, 0, 1, kTexWidth,
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, 0, kBudget, false, &layer, NULL, 0, 1, kTexWidth,
                                &spans);
   ExpectInt("source-limited span count", spans.count, 1);
   ExpectSpan("source-limited", &spans.spans[0], 0, 1, 120, 440);
@@ -245,7 +246,7 @@ static void TestExtentValidSpans(void) {
       .top = 12,
       .bottom = 2,
   };
-  DioramaBgValidSpanPlan_Build(kBudget, kBudget, kBudget, kBudget, false, &layer, 16, 244,
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, kBudget, kBudget, false, &layer, NULL, 16, 244,
                                kTexWidth, &spans);
   ExpectInt("vertical span count", spans.count, 3);
   ExpectSpan("vertical top clipped", &spans.spans[0], 0, 4, 0, 0);
@@ -259,7 +260,7 @@ static void TestExtentValidSpans(void) {
       .top = 24,
       .bottom = 24,
   };
-  DioramaBgValidSpanPlan_Build(kBudget, kBudget, kBudget, kBudget, false, &layer, 32, 288,
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, kBudget, kBudget, false, &layer, NULL, 32, 288,
                                kTexWidth, &spans);
   ExpectInt("Aitos vertical span count", spans.count, 3);
   ExpectSpan("Aitos top clipped", &spans.spans[0], 0, 8, 0, 0);
@@ -301,7 +302,8 @@ static void TestExtentValidSpans(void) {
     };
   }
   layer.band_count = kActionBgMaxBands;
-  DioramaBgValidSpanPlan_Build(kBudget, kBudget, kBudget, kBudget, true, &layer, 1, 226, kTexWidth,
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, kBudget, kBudget, true,
+                               &layer, NULL, 1, 226, kTexWidth,
                                &spans);
   ExpectInt("maximum span count", spans.count, kDioramaBgMaxValidSpans);
   ExpectSpan("maximum top", &spans.spans[0], 0, 1, 0, 0);
@@ -336,7 +338,7 @@ static void TestLiveVerticalWorldMapping(void) {
    * is therefore [32,287): 224 native rows plus 31 real lower rows. */
   layer.camera_y = 0;
   layer.world_height = 256;
-  DioramaBgValidSpanPlan_Build(kBudget, kBudget, kBudget, kBudget, false, &layer, 32,
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, kBudget, kBudget, false, &layer, NULL, 32,
                                kVerticalCapture, kTexWidth, &spans);
   ExpectInt("Northwall vertical span count", spans.count, 3);
   ExpectSpan("Northwall unavailable top", &spans.spans[0], 0, 32, 0, 0);
@@ -360,7 +362,7 @@ static void TestLiveVerticalWorldMapping(void) {
    * no blur inset and capture midpoint remains output midpoint. */
   layer.camera_y = 64;
   layer.world_height = 512;
-  DioramaBgValidSpanPlan_Build(kBudget, kBudget, kBudget, kBudget, false, &layer, 32,
+  DioramaBgValidSpanPlan_Build(kBudget, kBudget, kBudget, kBudget, false, &layer, NULL, 32,
                                kVerticalCapture, kTexWidth, &spans);
   ExpectInt("full vertical span count", spans.count, 1);
   ExpectInt(
@@ -502,7 +504,157 @@ static void TestSkyboxAspectFit(void) {
   }
 }
 
+static void TestSupportedCaptureBudgets(void) {
+  const int budgets[] = {0, 26, 43, 52, 72, 120};
+  for (unsigned i = 0; i < sizeof(budgets) / sizeof(budgets[0]); i++) {
+    const int budget = budgets[i];
+    /* Surface origin includes the OBJ guard; the BG validity budget does not. */
+    const int origin = 64 + budget;
+    DioramaBgValidSpanPlan spans;
+    ActionBgLayerPlan layer = Layer(kActionBgEdge_LiveWorld);
+    DioramaBgValidSpanPlan_Build(origin, budget, 0, budget, false,
+                               &layer, NULL, 0, 224, 640, &spans);
+    ExpectInt("budget start count", spans.count, 1);
+    ExpectSpan("budget start", &spans.spans[0], 0, 224,
+               origin, origin + 256 + budget);
+    DioramaBgValidSpanPlan_Build(origin, budget, budget, 0, false,
+                               &layer, NULL, 0, 224, 640, &spans);
+    ExpectSpan("budget end", &spans.spans[0], 0, 224, 64, origin + 256);
+    /* A room transition to clamped art cannot reuse the previous wide span. */
+    layer = Layer(kActionBgEdge_Clamp);
+    DioramaBgValidSpanPlan_Build(origin, budget, budget, budget, true,
+                               &layer, NULL, 0, 224, 640, &spans);
+    ExpectSpan("budget clamped", &spans.spans[0], 0, 224, origin, origin + 256);
+    layer = Layer(kActionBgEdge_Repeat);
+    DioramaBgValidSpanPlan_Build(origin, budget, 0, 0, true,
+                               &layer, NULL, 0, 224, 640, &spans);
+    ExpectSpan("budget repeat", &spans.spans[0], 0, 224, 64, 64 + 256 + 2 * budget);
+    layer.horizontal_extent = (ActionBgHorizontalExtent){
+        .mode = kActionBgExtent_Fixed, .left = 16, .right = 32,
+    };
+    DioramaBgValidSpanPlan_Build(origin, budget, budget, budget, true,
+                               &layer, NULL, 0, 224, 640, &spans);
+    ExpectSpan("budget fixed cap", &spans.spans[0], 0, 224,
+               origin - (budget < 16 ? budget : 16),
+               origin + 256 + (budget < 32 ? budget : 32));
+  }
+}
+
+static void TestFiniteParallaxBounds(void) {
+  /* All supported source margins (square/CRT, flat/diorama, and native).
+   * The playfield can reach its fitted stop before a half-speed BG2. */
+  const int budgets[] = {0, 26, 43, 52, 72, 120};
+  for (unsigned i = 0; i < sizeof(budgets) / sizeof(budgets[0]); i++) {
+    const int budget = budgets[i], origin = 64 + budget;
+    const int available = budget / 2;
+    ActionBgLayerPlan layer = Layer(kActionBgEdge_LiveWorld);
+    layer.source = kActionBgSource_WorldMap;
+    layer.world_width = 1024;
+    DioramaBgSourceBounds source = {
+        .x0 = -available, .x1 = 1024 - available, .valid = true,
+    };
+    DioramaBgValidSpanPlan spans;
+    DioramaBgValidSpanPlan_Build(origin, budget, budget, budget, true,
+        &layer, &source, 0, 224, 640, &spans);
+    ExpectInt("parallax left count", spans.count, 1);
+    ExpectSpan("parallax left", &spans.spans[0], 0, 224,
+               origin - available, origin + 256 + budget);
+    source.x0 = -(1024 - 256 - available);
+    source.x1 = 256 + available;
+    DioramaBgValidSpanPlan_Build(origin, budget, budget, budget, true,
+        &layer, &source, 0, 224, 640, &spans);
+    ExpectSpan("parallax right", &spans.spans[0], 0, 224,
+               origin - budget, origin + 256 + available);
+
+    /* Authored terrain can extend the source, but never invent uncaptured
+     * pixels beyond the shared capture or a tuned policy's fixed cap. */
+    source = (DioramaBgSourceBounds){-160, 1024, true};
+    DioramaBgValidSpanPlan_Build(origin, budget, 0, budget, true,
+        &layer, &source, 0, 224, 640, &spans);
+    ExpectSpan("capture still bounds source", &spans.spans[0], 0, 224,
+               origin, origin + 256 + budget);
+    layer.horizontal_extent = (ActionBgHorizontalExtent){
+        .mode = kActionBgExtent_Fixed, .left = 16, .right = 32,
+    };
+    DioramaBgValidSpanPlan_Build(origin, budget, budget, budget, true,
+        &layer, &source, 0, 224, 640, &spans);
+    ExpectSpan("authored fixed caps", &spans.spans[0], 0, 224,
+        origin - (budget < 16 ? budget : 16),
+        origin + 256 + (budget < 32 ? budget : 32));
+
+    /* Entering a narrow room replaces the previous source interval. */
+    layer.horizontal_extent = (ActionBgHorizontalExtent){.mode = kActionBgExtent_Available};
+    layer.world_width = 256;
+    source = (DioramaBgSourceBounds){0, 256, true};
+    DioramaBgValidSpanPlan_Build(origin, budget, budget, budget, true,
+        &layer, &source, 0, 224, 640, &spans);
+    ExpectSpan("narrow finite room", &spans.spans[0], 0, 224, origin, origin + 256);
+    layer.wrap_world_x = true;
+    DioramaBgValidSpanPlan_Build(origin, budget, budget, budget, true,
+        &layer, &source, 0, 224, 640, &spans);
+    ExpectSpan("cyclic world", &spans.spans[0], 0, 224, 64, 64 + 256 + 2 * budget);
+  }
+}
+
+static void TestRasterSourceBounds(void) {
+  ActionBgLayerPlan layer = Layer(kActionBgEdge_LiveWorld);
+  layer.source = kActionBgSource_WorldMap;
+  layer.world_width = 1024;
+  layer.bands[0] = (ActionBgBand){
+      .y0 = 136, .y1 = 224, .edge = kActionBgEdge_Repeat,
+      .horizontal_extent = {.mode = kActionBgExtent_Available},
+  };
+  layer.band_count = 1;
+  DioramaBgSourceBounds source = {0};
+  DioramaBgSourceBounds_AddRow(&source, &layer, 0, -60, 964, 1);
+  DioramaBgSourceBounds_AddRow(&source, &layer, 1, -52, 972, 1);
+  DioramaBgSourceBounds_AddRow(&source, &layer, 2, -68, 956, 1);
+  /* Synthetic and vertically unavailable rows do not narrow the live sky. */
+  DioramaBgSourceBounds_AddRow(&source, &layer, 150, 100, 200, 1);
+  DioramaBgSourceBounds_AddRow(&source, &layer, -65, 100, 200, 1);
+  ExpectInt("raster interval valid", source.valid, true);
+  ExpectInt("raster left intersection", source.x0, -52);
+  ExpectInt("raster right intersection", source.x1, 956);
+  DioramaBgValidSpanPlan spans;
+  DioramaBgValidSpanPlan_Build(184, 120, 120, 120, true,
+      &layer, &source, 0, 224, 640, &spans);
+  ExpectInt("raster band count", spans.count, 2);
+  ExpectSpan("raster finite sky", &spans.spans[0], 0, 136, 132, 560);
+  ExpectSpan("raster repeating water", &spans.spans[1], 136, 224, 64, 560);
+
+  source = (DioramaBgSourceBounds){0};
+  layer.wrap_world_x = true;
+  DioramaBgSourceBounds_AddRow(&source, &layer, 0, 0, 256, 1);
+  ExpectInt("cyclic rows do not create finite bounds", source.valid, false);
+  layer.wrap_world_x = false;
+  layer.source = kActionBgSource_AuthenticViewport;
+  DioramaBgSourceBounds_AddRow(&source, &layer, 0, 0, 256, 1);
+  ExpectInt("viewport rows do not create finite bounds", source.valid, false);
+  layer.source = kActionBgSource_WorldMap;
+  DioramaBgSourceBounds_AddRow(&source, &layer, 0, -60, 964, 1);
+  DioramaBgSourceBounds_AddRow(&source, &layer, 1, 1000, 1100, 1);
+  DioramaBgValidSpanPlan_Build(184, 120, 120, 120, true,
+      &layer, &source, 0, 136, 640, &spans);
+  ExpectSpan("empty source intersection", &spans.spans[0], 0, 136, 0, 0);
+
+  source = (DioramaBgSourceBounds){0};
+  DioramaBgSourceBounds_AddRow(&source, &layer, 0, -60, 956, 16);
+  ExpectInt("mosaic negative left", source.x0, -48);
+  ExpectInt("mosaic right includes final group", source.x1, 960);
+  source = (DioramaBgSourceBounds){0};
+  DioramaBgSourceBounds_AddRow(&source, &layer, 0, 1, 257, 16);
+  ExpectInt("mosaic positive left", source.x0, 16);
+  ExpectInt("mosaic positive right", source.x1, 272);
+  source = (DioramaBgSourceBounds){0};
+  DioramaBgSourceBounds_AddRow(&source, &layer, 0, -64, 960, 16);
+  ExpectInt("aligned mosaic left", source.x0, -64);
+  ExpectInt("aligned mosaic right", source.x1, 960);
+}
+
 int main(void) {
+  TestFiniteParallaxBounds();
+  TestRasterSourceBounds();
+  TestSupportedCaptureBudgets();
   TestValidSpan();
   TestBandedValidSpans();
   TestExtentValidSpans();

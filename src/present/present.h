@@ -278,6 +278,7 @@ typedef struct FrameSlot {
   int diorama_world_height;
   int diorama_framing_x, diorama_framing_y;
   uint8_t diorama_bg_apron_mask;
+  DioramaBgSourceBounds diorama_bg2_source_bounds;
   /* Developer-only authoring guide gate, captured beside the exact plan so
    * present code never reads the live tuner singleton. */
   bool action_bg_extent_guides;

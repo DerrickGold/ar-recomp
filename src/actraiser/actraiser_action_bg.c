@@ -90,6 +90,9 @@ typedef struct ActRaiserActionBgProvider {
   bool reported_tile_band_cache_failure;
   uint8_t layer;
   bool pixel_edits_active, pixel_band_cache_active;
+  bool world_apron_available;
+  bool horizontal_bounds_available;
+  int scenery_x0, scenery_width;
   int camera_x, camera_y;
   uint16_t hscroll_anchor, vscroll_anchor;
   int pixel_cell_x, pixel_cell_y;
@@ -745,6 +748,8 @@ static void ResetWorlds(void) {
     s_observer.room_scene_compared_serial[layer] = 0;
     s_observer.room_scene_stage_compared[layer] = false;
     s_provider[layer].pixel_edits_active = false;
+    s_provider[layer].world_apron_available = false;
+    s_provider[layer].horizontal_bounds_available = false;
     s_provider[layer].tile_band_count = 0;
     s_provider[layer].tile_band_world = NULL;
     s_provider[layer].tile_band_rules_hash = 0;
@@ -1659,6 +1664,23 @@ bool ActRaiserActionBg_PixelEditsActive(void) {
   return s_provider[0].pixel_edits_active || s_provider[1].pixel_edits_active;
 }
 
+bool ActRaiserActionBg_WorldApronAvailable(unsigned bg) {
+  return bg < kActionBgLayerCount && s_provider[bg].world_apron_available;
+}
+
+bool ActRaiserActionBg_HorizontalSourceBounds(
+    unsigned bg, uint16_t hscroll, int *x0, int *x1) {
+  if (x0) *x0 = 0;
+  if (x1) *x1 = 0;
+  if (bg >= kActionBgLayerCount || !x0 || !x1 ||
+      !s_provider[bg].horizontal_bounds_available) return false;
+  const ActRaiserActionBgProvider *provider = &s_provider[bg];
+  const int dh = ((hscroll - provider->hscroll_anchor + 512) & 1023) - 512;
+  *x0 = provider->scenery_x0 - provider->camera_x - dh;
+  *x1 = *x0 + provider->scenery_width;
+  return true;
+}
+
 static unsigned StampHash(int x, int y) {
   return ((uint32_t)x * 73856093u ^ (uint32_t)y * 19349663u) & 1023u;
 }
@@ -1758,7 +1780,8 @@ bool ActRaiserActionBg_NativeSceneryAt(unsigned bg, int source_x, int sample_y,
   if (bg >= kActionBgLayerCount || !entry || !band || !local_x || !local_y || !black)
     return false;
   const ActRaiserActionBgProvider *provider = &s_provider[bg];
-  if (!provider->pixel_edits_active) return false;
+  if (!provider->pixel_edits_active && !provider->world_apron_available)
+    return false;
   const int dh = ((hscroll - provider->hscroll_anchor + 512) & 1023) - 512;
   const int dv = ((vscroll - provider->vscroll_anchor + 512) & 1023) - 512;
   int x = provider->camera_x + source_x + dh;
@@ -1824,8 +1847,11 @@ uint8_t ActRaiserActionBg_BindPlan(
 uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
     const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
     const struct DioramaRoomOverride *virtual_room) {
-  for (unsigned bg = 0; bg < kActionBgLayerCount; bg++)
+  for (unsigned bg = 0; bg < kActionBgLayerCount; bg++) {
     s_provider[bg].pixel_edits_active = false;
+    s_provider[bg].world_apron_available = false;
+    s_provider[bg].horizontal_bounds_available = false;
+  }
   SrPpuStateSnapshot ppu;
   SrBorrowedU16Span vram;
   SrPpuVirtualTilemapRequest binding_request;
@@ -1997,6 +2023,20 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
         (virtual_room->pixel_layers[layer].count != 0 ||
          virtual_room->stamp_layers[layer].count != 0 ||
          virtual_room->framing[0].x != 0);
+    s_provider[layer].horizontal_bounds_available = !layer_plan->wrap_world_x;
+    ActRaiserActionBg_ResolveDioramaHorizontalExtent(
+        s_provider[layer].pixel_edits_active ? virtual_room : NULL, layer,
+        snapshot.decode.world_width, &s_provider[layer].scenery_x0,
+        &s_provider[layer].scenery_width);
+    /* The extra diorama capture can sample verified world terrain even when
+     * the room has no editor overrides. Preserve every synthetic edge/band
+     * and explicit extent; only ordinary live-world layers can continue.
+     * A lagging authentic ring does not invalidate its world-backed margins. */
+    s_provider[layer].world_apron_available =
+        layer_plan->default_edge == kActionBgEdge_LiveWorld &&
+        layer_plan->horizontal_extent.mode == kActionBgExtent_Available &&
+        layer_plan->vertical_extent.mode == kActionBgExtent_Available &&
+        layer_plan->band_count == 0;
     CompileStamps(&s_provider[layer]);
     const SrPpuVirtualTilemapBinding binding = {
       .lookup = ProviderLookup,
@@ -2017,8 +2057,11 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
   }
   if (bound != 0u && s_runner_api->replace_ppu_virtual_tilemaps(
           s_runner, &binding_request) != SR_RESULT_OK) {
-    for (unsigned bg = 0; bg < kActionBgLayerCount; bg++)
+    for (unsigned bg = 0; bg < kActionBgLayerCount; bg++) {
       s_provider[bg].pixel_edits_active = false;
+      s_provider[bg].world_apron_available = false;
+      s_provider[bg].horizontal_bounds_available = false;
+    }
     binding_request.layer_mask = 0u;
     (void)s_runner_api->replace_ppu_virtual_tilemaps(
         s_runner, &binding_request);

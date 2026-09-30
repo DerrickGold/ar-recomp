@@ -1892,6 +1892,15 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_action_camera_bounds
         COMMAND actraiser_action_camera_bounds_test)
 
+    add_executable(actraiser_aspect_ratio_test
+        tests/aspect_ratio_test.c
+        src/present/display_geometry.c
+        src/render/presentation_layout.c
+        src/action/action_camera_bounds.c
+    )
+    target_include_directories(actraiser_aspect_ratio_test PRIVATE src)
+    add_test(NAME actraiser_aspect_ratio COMMAND actraiser_aspect_ratio_test)
+
     # SPEC-bg-hle BH2: the action-stage WRAM world decoder is a pure source
     # provider. This target pins page addressing, metatile expansion, finite
     # bounds, atomic publication, and exact-byte cache invalidation without a

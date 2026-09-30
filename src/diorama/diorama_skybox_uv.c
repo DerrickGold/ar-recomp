@@ -80,9 +80,34 @@ static bool RowWithinVerticalExtent(const ActionBgLayerPlan *layer,
   return true;
 }
 
+void DioramaBgSourceBounds_AddRow(
+    DioramaBgSourceBounds *bounds, const ActionBgLayerPlan *layer,
+    int authentic_y, int x0, int x1, unsigned mosaic_size) {
+  ActionBgRowPolicy policy;
+  if (!bounds || !layer || layer->source != kActionBgSource_WorldMap ||
+      layer->wrap_world_x || !RowWithinVerticalExtent(layer, authentic_y) ||
+      !ActionBgLayerPlan_ResolveRow(layer, authentic_y, &policy) ||
+      policy.edge != kActionBgEdge_LiveWorld) return;
+  if (mosaic_size > 1 && mosaic_size <= 16) {
+    /* The PPU fetches the leftmost pixel of each display-anchored group.
+     * Round both ends up: a group before x0 is unavailable, while the last
+     * valid group's colour remains available through its entire width. */
+    const int size = (int)mosaic_size;
+    x0 += (size - (x0 % size + size) % size) % size;
+    x1 += (size - (x1 % size + size) % size) % size;
+  }
+  if (!bounds->valid) {
+    *bounds = (DioramaBgSourceBounds){.x0 = x0, .x1 = x1, .valid = true};
+  } else {
+    if (bounds->x0 < x0) bounds->x0 = x0;
+    if (bounds->x1 > x1) bounds->x1 = x1;
+  }
+}
+
 void DioramaBgValidSpanPlan_Build(
     int ws_extra, int budget, int live_left, int live_right,
     bool pad_captured_to_budget, const ActionBgLayerPlan *layer,
+    const DioramaBgSourceBounds *source_bounds,
     int authentic_y0, int capture_height, int tex_width,
     DioramaBgValidSpanPlan *out) {
   if (!out) return;
@@ -103,6 +128,17 @@ void DioramaBgValidSpanPlan_Build(
       ValidSpanForPolicy(ws_extra, budget, live_left, live_right,
                          pad_captured_to_budget, &policy,
                          tex_width, &x0, &x1);
+      /* Shared canvas margins do not certify another layer's finite pixels.
+       * Synthetic row families still own their mirror/repeat/viewport spans. */
+      if (layer_valid && layer->source == kActionBgSource_WorldMap &&
+          !layer->wrap_world_x && policy.edge == kActionBgEdge_LiveWorld &&
+          source_bounds && source_bounds->valid) {
+        const int source_x0 = ClampInt(ws_extra + source_bounds->x0, 0, tex_width);
+        const int source_x1 = ClampInt(ws_extra + source_bounds->x1, 0, tex_width);
+        if (x0 < source_x0) x0 = source_x0;
+        if (x1 > source_x1) x1 = source_x1;
+        if (x1 <= x0) x0 = x1 = 0;
+      }
     }
     if (out->count) {
       DioramaBgValidSpan *previous = &out->spans[out->count - 1];

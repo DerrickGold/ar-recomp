@@ -64,6 +64,9 @@ void ActRaiser_LiveVerticalMargins(int *top, int *bottom);
  * Diorama tiles. A zero height means the native plan supplies the extent. */
 void ActRaiser_LiveDioramaVerticalExtent(int *world_y0, int *world_height);
 void ActRaiser_LiveDioramaFraming(int *x, int *y);
+/* Finite BG2 source interval observed during the completed diorama scanout,
+ * in authentic screen coordinates. False when no finite rows were observed. */
+bool ActRaiser_DioramaBg2SourceBounds(int *x0, int *x1);
 unsigned ActRaiser_TakeVextUnlockedObjects(void);
 
 /* The OAM slots the widescreen HUD-icon promote validated for the frame being

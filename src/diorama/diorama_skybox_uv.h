@@ -43,6 +43,21 @@ typedef struct DioramaBgValidSpanPlan {
   DioramaBgValidSpan spans[kDioramaBgMaxValidSpans];
 } DioramaBgValidSpanPlan;
 
+/* Half-open authentic-screen X bounds shared by the finite source's captured
+ * live-world rows. Includes authored terrain and captured raster shifts.
+ * Unavailable/cyclic sources leave valid false; padding policy is independent. */
+typedef struct DioramaBgSourceBounds {
+  int x0, x1;
+  bool valid;
+} DioramaBgSourceBounds;
+
+/* Accumulate one actually captured live-world row, accounting for its PPU
+ * mosaic group (1 when disabled). Unavailable vertical rows and synthetic
+ * edge families do not constrain the finite source interval. */
+void DioramaBgSourceBounds_AddRow(
+    DioramaBgSourceBounds *bounds, const ActionBgLayerPlan *layer,
+    int authentic_y, int x0, int x1, unsigned mosaic_size);
+
 /* A captured skybox is an enveloping presentation surface, not a literal
  * continuation of every source layer. When the layer has fewer live vertical
  * margin rows than the primary playfield, crop the unavailable capture rows
@@ -59,6 +74,7 @@ typedef struct DioramaSkyboxVerticalMapping {
 void DioramaBgValidSpanPlan_Build(
     int ws_extra, int budget, int live_left, int live_right,
     bool pad_captured_to_budget, const ActionBgLayerPlan *layer,
+    const DioramaBgSourceBounds *source_bounds,
     int authentic_y0, int capture_height, int tex_width,
     DioramaBgValidSpanPlan *out);
 

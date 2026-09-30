@@ -308,6 +308,7 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
       slot->extra_left_cur, slot->extra_right_cur,
       slot->bg_capture_pad_to_budget,
       &slot->action_bg_plan.layer[kActionBgPlanLayerCount - 1],
+      &slot->diorama_bg2_source_bounds,
       slot->ws_extra_top,
       slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
       kFrameSlotLayerTextureWidth, &bg2_valid_spans);

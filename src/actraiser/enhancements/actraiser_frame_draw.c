@@ -59,7 +59,7 @@ static void ActRaiser_PpuScanoutLineCallback(
     if (context->line > 0u)
       ActRaiserActionBg_ObserveRoomSceneFrameLine(
           &context->state, context->line - 1u);
-    if (ActRaiser_DioramaPixelEditsActive()) {
+    if (ActRaiser_DioramaPixelPassActive()) {
       if (context->line > 0u)
         ActRaiser_DioramaPixelSampleLine(&context->state, (int)context->line - 1);
       else for (int y = -g_ws_extra_top; y < 0; y++)
@@ -70,7 +70,7 @@ static void ActRaiser_PpuScanoutLineCallback(
           &context->state, &scanout->shape_before);
   } else if ((context->flags & SR_PPU_SCANOUT_LINE_AFTER_HDMA) != 0u) {
     if (context->line == SR_PPU_NATIVE_HEIGHT &&
-        ActRaiser_DioramaPixelEditsActive())
+        ActRaiser_DioramaPixelPassActive())
       for (int y = SR_PPU_NATIVE_HEIGHT;
            y < (int)SR_PPU_NATIVE_HEIGHT + g_ws_extra_bottom; y++)
         ActRaiser_DioramaPixelSampleLine(&context->state, y);
@@ -428,7 +428,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   scanout_context.shape_trace =
       ActRaiser_PpuShapeTraceActive(scanout_context.shape_game_frame);
   const bool observe_lines =
-      ActRaiser_DioramaPixelEditsActive() || scanout_context.shape_trace ||
+      ActRaiser_DioramaPixelPassActive() || scanout_context.shape_trace ||
       ActRaiserActionBg_RoomSceneFrameObserverActive();
   const SrPpuScanoutRequest scanout_request = {
       .struct_size = sizeof(scanout_request),

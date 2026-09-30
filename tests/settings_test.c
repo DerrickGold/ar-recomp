@@ -1778,6 +1778,46 @@ static void TestEnvironmentalEffectsSetting(void) {
   remove(path);
 }
 
+static void TestSupportedAspectTransitions(void) {
+  ClearSettingsEnv();
+  Settings_Init();
+  const char *ratios[] = {"4:3", "16:9", "16:10", "16:9", "4:3"};
+  const char *pixels[] = {"Square pixels", "4:3 CRT"};
+  for (unsigned p = 0; p < sizeof(pixels) / sizeof(pixels[0]); p++) {
+    CHECK(Settings_SetText(Settings_Find("pixel_aspect"), pixels[p]) !=
+          kSettingChange_Rejected);
+    for (int diorama = 0; diorama <= 1; diorama++) {
+      for (unsigned r = 0; r < sizeof(ratios) / sizeof(ratios[0]); r++) {
+        CHECK(Settings_SetText(Settings_Find("extended_aspect"), ratios[r]) !=
+              kSettingChange_Rejected);
+        CHECK(!Settings_IgnoreAspectRatio());
+        const int previous_mode = g_settings.display_mode;
+        const ActRaiserDisplayGeometry geometry = DisplayGeometry_CalculateHorizontal(
+            224, Settings_ExtendedAspectX(), Settings_ExtendedAspectY(),
+            g_settings.pixel_aspect == kPixelAspect_Crt43, diorama);
+        DisplayGeometry_SetHorizontal(geometry.render_extra, geometry.display_extra);
+        Settings_ReconcileDisplayModeAfterGeometryChange(previous_mode);
+        CHECK(Settings_VisibleWidth() == 256 + 2 * geometry.display_extra);
+        CHECK(Settings_VisibleX0() == geometry.render_extra - geometry.display_extra);
+        CHECK(Settings_VisibleX0() * 2 + Settings_VisibleWidth() ==
+              256 + 2 * geometry.render_extra);
+        if (!geometry.widescreen_active) {
+          CHECK(g_settings.display_mode == kDisplayMode_43);
+          continue;
+        }
+        Settings_SetDisplayMode(kDisplayMode_WideRaw);
+        Settings_ReconcileDisplayModeAfterGeometryChange(kDisplayMode_WideRaw);
+        CHECK(g_settings.display_mode == kDisplayMode_WideRaw);
+        CHECK(Settings_VisibleWidth() == 256 + 2 * geometry.display_extra);
+        Settings_SetDisplayMode(kDisplayMode_43);
+        CHECK(Settings_VisibleWidth() == 256);
+        CHECK(Settings_VisibleX0() == geometry.render_extra);
+        Settings_SetDisplayMode(kDisplayMode_WideFull);
+      }
+    }
+  }
+}
+
 static void TestVideoSettingAudit(void) {
   const char *legacy_path = "settings-video-legacy-test.ini";
   const char *saved_path = "settings-video-saved-test.ini";
@@ -2288,6 +2328,7 @@ int main(int argc, char **argv) {
   TestRememberTownPreference();
   TestConnectedWorldDefaults();
   TestVideoSettingAudit();
+  TestSupportedAspectTransitions();
   TestSim3DEnvironmentLabels();
   TestLandscapeHeightDefaultAndPersistence();
   TestFogDefaultsAndPersistence();

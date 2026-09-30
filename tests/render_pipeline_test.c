@@ -51,6 +51,54 @@ static uint32_t SurfacePixel(SDL_Surface *s, int x, int y) {
          (uint32_t)p[1] << 8 | p[0];
 }
 
+static void CheckResizeAspectMatrix(SDL_Window *window, SDL_Renderer *renderer) {
+  const struct { int width; bool crt; } content[] = {
+      {256, false}, {256, true}, {400, false}, {342, true}, {360, false}, {308, true},
+  };
+  const int sizes[][2] = {{640, 480}, {1280, 720}, {1280, 800}, {997, 613}};
+  for (unsigned c = 0; c < sizeof(content) / sizeof(content[0]); c++) {
+    for (unsigned s = 0; s < sizeof(sizes) / sizeof(sizes[0]); s++) {
+      CHECK(SDL_SetWindowSize(window, sizes[s][0], sizes[s][1]));
+      SDL_PumpEvents();
+      CHECK(ArSdlPresentation_ApplyLogical(
+          renderer, false, content[c].crt, content[c].width, kSnesH));
+      CHECK(SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255));
+      CHECK(SDL_RenderClear(renderer));
+      CHECK(SDL_SetRenderDrawColor(renderer, 32, 192, 96, 255));
+      CHECK(SDL_RenderFillRect(renderer, NULL));
+      CHECK(SDL_RenderPresent(renderer));
+      int w, h;
+      CHECK(SDL_GetRenderOutputSize(renderer, &w, &h));
+      CHECK(w == sizes[s][0] && h == sizes[s][1]);
+      const ArRenderRectI expected = ArPresentationLayout_ResolveViewport(
+          w, h, false, content[c].crt, content[c].width, kSnesH);
+      SDL_FRect actual;
+      CHECK(SDL_GetRenderLogicalPresentationRect(renderer, &actual));
+      CHECK(SDL_fabsf(actual.x - expected.x) <= 1.0f);
+      CHECK(SDL_fabsf(actual.y - expected.y) <= 1.0f);
+      CHECK(SDL_fabsf(actual.w - expected.w) <= 1.0f);
+      CHECK(SDL_fabsf(actual.h - expected.h) <= 1.0f);
+      /* Read in physical output coordinates, like the host's overlays and
+       * pointer mapping, after logical presentation has drawn the content. */
+      CHECK(SDL_SetRenderLogicalPresentation(renderer, 0, 0,
+                                             SDL_LOGICAL_PRESENTATION_DISABLED));
+      SDL_Surface *raw = SDL_RenderReadPixels(renderer, NULL);
+      CHECK(raw != NULL);
+      SDL_Surface *pixels = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888) : NULL;
+      CHECK(pixels != NULL);
+      if (pixels) {
+        CHECK((SurfacePixel(pixels, w / 2, h / 2) & 0xffffffu) == 0x20c060u);
+        if (expected.x > 1)
+          CHECK((SurfacePixel(pixels, 0, h / 2) & 0xffffffu) == 0);
+        if (expected.y > 1)
+          CHECK((SurfacePixel(pixels, w / 2, 0) & 0xffffffu) == 0);
+        SDL_DestroySurface(pixels);
+      }
+      if (raw) SDL_DestroySurface(raw);
+    }
+  }
+}
+
 int main(void) {
   SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
   CHECK(SDL_Init(SDL_INIT_VIDEO));
@@ -253,6 +301,7 @@ int main(void) {
     SDL_DestroySurface(argb);
   }
 
+  CheckResizeAspectMatrix(window, renderer);
   SDL_DestroyTexture(texture);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);

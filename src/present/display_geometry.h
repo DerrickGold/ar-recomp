@@ -20,6 +20,11 @@ typedef struct ActRaiserDisplayGeometry {
  * owned by the host display policy; vertical mutation is owned by the
  * ActRaiser frame-policy adapter. */
 extern const ActRaiserDisplayGeometry *const g_actraiser_display_geometry;
+/* Pure host sizing policy. A zero aspect axis selects the native viewport;
+ * vertical capture is resolved separately by the frame-policy adapter. */
+ActRaiserDisplayGeometry DisplayGeometry_CalculateHorizontal(
+    int height, int aspect_x, int aspect_y,
+    bool crt_pixel_aspect, bool diorama_mode);
 void DisplayGeometry_SetHorizontal(int render_extra, int display_extra);
 void DisplayGeometry_SetVertical(int extra_top, int extra_bottom);
 

@@ -145,6 +145,8 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
       &dst->diorama_world_y0, &dst->diorama_world_height);
   ActRaiser_LiveDioramaFraming(&dst->diorama_framing_x, &dst->diorama_framing_y);
   dst->diorama_bg_apron_mask = ActRaiser_DioramaBgApronMask();
+  dst->diorama_bg2_source_bounds.valid = ActRaiser_DioramaBg2SourceBounds(
+      &dst->diorama_bg2_source_bounds.x0, &dst->diorama_bg2_source_bounds.x1);
   /* The PPU authors the native camera as its own centred 256-pixel pass; this
    * crop no longer translates a completed enhanced scanout. */
   dst->authentic_x0 = g_ws_extra;

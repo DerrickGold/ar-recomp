@@ -1567,6 +1567,89 @@ static void TestVirtualLayerClassificationBinding(void) {
   CHECK(ActRaiserActionBg_BindPlan(wram, kActRaiserWramSize, &plan, ppu));
   CHECK(!ActRaiserActionBg_PixelEditsActive());
 
+  /* Ordinary, unedited terrain must also supply the 16:9 guard columns.
+   * Compare against the decoded world, including live raster-scroll deltas. */
+  CHECK(ActRaiserActionBg_WorldApronAvailable(0));
+  CHECK(!ActRaiserActionBg_WorldApronAvailable(1));
+  CHECK(!ActRaiserActionBg_WorldApronAvailable(2));
+  int source_x0 = -1, source_x1 = -1;
+  CHECK(ActRaiserActionBg_HorizontalSourceBounds(0, 13, &source_x0, &source_x1));
+  CHECK(source_x0 == -snapshot.camera_x && source_x1 == 512 - snapshot.camera_x);
+  CHECK(ActRaiserActionBg_HorizontalSourceBounds(0, 14, &source_x0, &source_x1));
+  CHECK(source_x0 == -snapshot.camera_x - 1 && source_x1 == 511 - snapshot.camera_x);
+  CHECK(ActRaiserActionBg_HorizontalSourceBounds(0, 12 + 1024, &source_x0, &source_x1));
+  CHECK(source_x0 == 1 - snapshot.camera_x && source_x1 == 513 - snapshot.camera_x);
+  CHECK(!ActRaiserActionBg_HorizontalSourceBounds(1, 13, &source_x0, &source_x1));
+  CHECK(source_x0 == 0 && source_x1 == 0);
+  for (int x = 256 + 120; x < 256 + 120 + 64; x++) {
+    uint16_t expected;
+    const int world_x = snapshot.camera_x + x + 1;
+    const int world_y = snapshot.camera_y + 9;
+    CHECK(ActionBgWorld_Lookup(reference, world_x / 8, world_y / 8,
+                              &expected) == kActionBgLookup_Tile);
+    CHECK(ActRaiserActionBg_NativeSceneryAt(0, x, 8, 14, 8,
+        &entry, &band, &local_x, &local_y, &black));
+    CHECK(entry == expected && local_x == (world_x & 7) &&
+          local_y == (world_y & 7) && !black);
+    CHECK(band == ((entry & 0x2000u) ? 2 : 1));
+  }
+  for (int x = -120 - 64; x < -120; x++) {
+    uint16_t expected;
+    const int world_x = snapshot.camera_x + x + 200;
+    CHECK(ActionBgWorld_Lookup(reference, world_x / 8, 2, &expected) ==
+          kActionBgLookup_Tile);
+    CHECK(ActRaiserActionBg_NativeSceneryAt(0, x, 9, 213 + 1024, 7,
+        &entry, &band, &local_x, &local_y, &black));
+    CHECK(entry == expected && local_x == (world_x & 7) && !local_y);
+  }
+  CHECK(!ActRaiserActionBg_NativeSceneryAt(0, -snapshot.camera_x - 1,
+      8, 13, 7, &entry, &band, &local_x, &local_y, &black));
+  CHECK(!ActRaiserActionBg_NativeSceneryAt(0, 512 - snapshot.camera_x,
+      8, 13, 7, &entry, &band, &local_x, &local_y, &black));
+
+  /* A streaming update may leave the authentic ring one column behind. The
+   * world-backed guard must remain live through that margins-only binding. */
+  memset(ppu->vram, 0, sizeof(ppu->vram));
+  CHECK(ActRaiserActionBg_BindPlan(wram, kActRaiserWramSize, &plan, ppu));
+  CHECK(!(ppu->virtualTilemap[0].flags & kPpuVirtualTilemapFlag_IncludeAuthentic));
+  CHECK(ActRaiserActionBg_WorldApronAvailable(0));
+  PopulateNativeRing(reference, &snapshot, ppu->vram);
+
+  /* Explicit room caps and synthetic edges are not permission to read
+   * farther into the world, even if the decoder has tiles there. */
+  const ActionBgLayerPlan original_layer = plan.layer[0];
+  room.stamp_layers[0].count = 2;
+  room.stamp_layers[0].cells[0] = (DioramaTileStamp){.x = -2, .y = 0};
+  room.stamp_layers[0].cells[1] = (DioramaTileStamp){.x = 33, .y = 0};
+  CHECK(ActRaiserActionBg_BindPlanWithVirtualLayers(
+      wram, kActRaiserWramSize, &plan, &room, ppu));
+  CHECK(ActRaiserActionBg_HorizontalSourceBounds(0, 13, &source_x0, &source_x1));
+  CHECK(source_x0 == -32 - snapshot.camera_x && source_x1 == 544 - snapshot.camera_x);
+  plan.layer[0].wrap_world_x = true;
+  CHECK(ActRaiserActionBg_BindPlan(wram, kActRaiserWramSize, &plan, ppu));
+  CHECK(!ActRaiserActionBg_HorizontalSourceBounds(0, 13, &source_x0, &source_x1));
+  plan.layer[0] = original_layer;
+  plan.layer[0].horizontal_extent = (ActionBgHorizontalExtent){
+      .mode = kActionBgExtent_Fixed, .left = 120, .right = 120};
+  CHECK(ActRaiserActionBg_BindPlan(wram, kActRaiserWramSize, &plan, ppu));
+  CHECK(!ActRaiserActionBg_WorldApronAvailable(0));
+  CHECK(!ActRaiserActionBg_NativeSceneryAt(0, 376, 8, 13, 7,
+      &entry, &band, &local_x, &local_y, &black));
+  plan.layer[0] = original_layer;
+  plan.layer[0].default_edge = kActionBgEdge_Mirror;
+  CHECK(ActRaiserActionBg_BindPlan(wram, kActRaiserWramSize, &plan, ppu));
+  CHECK(!ActRaiserActionBg_WorldApronAvailable(0));
+  plan.layer[0] = original_layer;
+  CHECK(ActRaiserActionBg_BindPlan(wram, kActRaiserWramSize, &plan, ppu));
+  CHECK(ActRaiserActionBg_WorldApronAvailable(0));
+  /* A rejected next frame must not expose the previous room's cached map. */
+  CHECK(!ActRaiserActionBg_BindPlan(NULL, 0, &plan, ppu));
+  CHECK(!ActRaiserActionBg_HorizontalSourceBounds(0, 13, &source_x0, &source_x1));
+  CHECK(source_x0 == 0 && source_x1 == 0);
+  CHECK(!ActRaiserActionBg_WorldApronAvailable(0));
+  CHECK(!ActRaiserActionBg_NativeSceneryAt(0, 376, 8, 13, 7,
+      &entry, &band, &local_x, &local_y, &black));
+
   ActionBgWorld_Destroy(reference);
   ActRaiserActionBg_Shutdown();
   CHECK(unsetenv("AR_ACTION_ROOM_SCENE_HLE") == 0);
