@@ -347,9 +347,14 @@ typedef struct ActionBloodpoolTimber {
   int16_t x0, x1, y, drip_x, drip_y, landing_y;
   uint8_t water_landing;
 } ActionBloodpoolTimber;
+/* Native timber footprint and its bottom edge, in world pixels. Separate
+ * neighboring posts remain separate even when their centers are only 8px apart. */
+typedef struct ActionBloodpoolPost {
+  int16_t x0, x1, y;
+} ActionBloodpoolPost;
 typedef struct ActionBloodpoolDetails {
   ActionBloodpoolTimber timber[kActionBloodpoolMaxTimber];
-  int16_t posts[kActionBloodpoolMaxPosts];
+  ActionBloodpoolPost posts[kActionBloodpoolMaxPosts];
   uint8_t timber_count, post_count, valid;
 } ActionBloodpoolDetails;
 

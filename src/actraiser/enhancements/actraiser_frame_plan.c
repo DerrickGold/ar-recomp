@@ -385,7 +385,10 @@ const DioramaRoomOverride *ActRaiser_CurrentVirtualLayerRoom(void) {
       (!ActRaiser_QueryPpuState(&ppu) ||
        ppu.backgrounds[1].tilemap_base_word != 0x7000))
     return NULL;
-  return room;
+  static DioramaRoomOverride terrain_room;
+  if (!room || !DioramaLayerOrder_ForTerrain(
+          room, ActRaiserRegional_TerrainSnapshot(), &terrain_room)) return NULL;
+  return &terrain_room;
 }
 
 static bool ActRaiser_CommitPpuFramePolicy(

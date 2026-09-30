@@ -1347,6 +1347,10 @@ static void TestVirtualLayerClassificationBinding(void) {
   };
   virtual_bg->cell_span_count = 2;
 
+  room.pixel_layers[0].count = 1;
+  room.pixel_layers[0].edits[0] = (DioramaPixelEdit){.by_cell=true,.x=2,.y=0};
+  room.pixel_layers[0].edits[0].black[5] = 1u << 12;
+
   CHECK(ActRaiserActionBg_BindPlanWithVirtualLayers(
       wram, kActRaiserWramSize, &plan, &room, ppu) ==
       kActRaiserBgLayerMask_Bg1);
@@ -1369,13 +1373,52 @@ static void TestVirtualLayerClassificationBinding(void) {
       binding->context, 6, 0, entry, &band) &&
       band == ((entry & 0x2000) ? 2 : 1));
 
+  CHECK(ActRaiserActionBg_PixelEditsActive());
+  const int source_x = 35 - snapshot.camera_x;
+  const int sample_y = 5 - snapshot.camera_y;
+  CHECK(ActRaiserActionBg_PixelBlackAt(0, source_x, sample_y, 13, 7, &band));
+  CHECK(band == 2); /* explicit virtual band wins even on a transparent pixel */
+  CHECK(!ActRaiserActionBg_PixelBlackAt(0, source_x + 1, sample_y, 13, 7, &band));
+  CHECK(!ActRaiserActionBg_PixelBlackAt(0, source_x, sample_y + 1, 13, 7, &band));
+  CHECK(ActRaiserActionBg_PixelBlackAt(0, source_x - 1, sample_y, 14, 7, &band));
+  CHECK(ActRaiserActionBg_PixelBlackAt(0, source_x, sample_y, 1037, 1031, &band));
+  CHECK(!ActRaiserActionBg_PixelBlackAt(1, source_x, sample_y, 13, 7, &band));
+  CHECK(!ActRaiserActionBg_PixelBlackAt(0, -1 - snapshot.camera_x, sample_y, 13, 7, &band));
+
+  room.stamp_layers[0].count = 2;
+  room.stamp_layers[0].cells[0] = (DioramaTileStamp){
+      .x = -1, .y = -1, .words = {0x10, 0x4011, 0x8012, 0xe013},
+      .bands = (0 | (1 << 2) | (2 << 4) | (1 << 6)), .metatile = metatile};
+  room.stamp_layers[0].cells[1] = room.stamp_layers[0].cells[0];
+  room.stamp_layers[0].cells[1].x = 70;
+  room.pixel_layers[0].edits[1] = (DioramaPixelEdit){.by_cell = true, .x = -1, .y = -1};
+  room.pixel_layers[0].edits[1].black[15] = 1;
+  room.pixel_layers[0].count = 2;
+  CHECK(ActRaiserActionBg_BindPlanWithVirtualLayers(
+      wram, kActRaiserWramSize, &plan, &room, ppu) == kActRaiserBgLayerMask_Bg1);
+  uint8_t local_x, local_y;
+  bool black;
+  CHECK(ActRaiserActionBg_StampAt(0, -1 - snapshot.camera_x,
+      -1 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black));
+  CHECK(entry == 0xe013 && band == 1 && local_x == 15 && local_y == 15 && black);
+  CHECK(ActRaiserActionBg_StampAt(0, -16 - snapshot.camera_x,
+      -16 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black));
+  CHECK(entry == 0x10 && band == 0 && !local_x && !local_y && !black);
+  CHECK(ActRaiserActionBg_StampAt(0, 70 * 16 - snapshot.camera_x - 1,
+      -16 - snapshot.camera_y, 14, 7, &entry, &band, &local_x, &local_y, &black));
+  CHECK(entry == 0x10 && band == 0 && !local_x); /* unwrapped camera + live HDMA */
+  CHECK(!ActRaiserActionBg_StampAt(1, -1, -1, 13, 7,
+      &entry, &band, &local_x, &local_y, &black));
+  CHECK(!ActRaiserActionBg_StampAt(0, -17 - snapshot.camera_x,
+      -16 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black));
+
   const ActRaiserActionBgDiagnostics *diagnostics =
       ActRaiserActionBg_GetDiagnostics();
   CHECK(diagnostics->provider_tile_band_cache_builds == 1);
   CHECK(ActRaiserActionBg_BindPlanWithVirtualLayers(
       wram, kActRaiserWramSize, &plan, &room, ppu) ==
       kActRaiserBgLayerMask_Bg1);
-  CHECK(diagnostics->provider_tile_band_cache_hits == 1);
+  CHECK(diagnostics->provider_tile_band_cache_hits == 2);
 
   /* Live editor changes can reuse the same room address. The classification
    * hash must rebuild the cache even when the finite world serial is stable. */
@@ -1388,6 +1431,9 @@ static void TestVirtualLayerClassificationBinding(void) {
   CHECK(binding->band_lookup(
       binding->context, 0, 0, entry, &band) && band == 2);
   CHECK(diagnostics->provider_tile_band_cache_builds == 2);
+
+  CHECK(ActRaiserActionBg_BindPlan(wram, kActRaiserWramSize, &plan, ppu));
+  CHECK(!ActRaiserActionBg_PixelEditsActive());
 
   ActionBgWorld_Destroy(reference);
   ActRaiserActionBg_Shutdown();

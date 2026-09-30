@@ -37,6 +37,19 @@
  * ======================================================================== */
 
 const DATA = window.__ACTION_BG__;
+const TERRAIN_PROFILES = DATA.terrainProfiles || [{profile:0,label:'US'}];
+let terrainProfile = TERRAIN_PROFILES[0].profile;
+/* Rendering caches follow the selected terrain; authoring follows the
+ * equivalent placed-terrain family for each background. */
+function terrainRoom(base, profile = terrainProfile) {
+  const variant = (base.terrainVariants || []).find(v => v.profile === profile);
+  return variant ? {...base, terrainProfile:profile,
+    bg:[variant.bg1,base.bg[1]], nativeGolden:variant.nativeGolden,
+    changedCells:variant.changedCells, changedMetatiles:variant.changedMetatiles} : base;
+}
+const sceneKey = r => `${r.group}:${r.map}:${r.terrainProfile || 0}`;
+const terrainLabel = r => (TERRAIN_PROFILES.find(
+  p => p.profile === (r.terrainProfile || 0)) || TERRAIN_PROFILES[0]).label;
 /* These are diorama.c's real defaults, including its paint slots. INI values
  * refine them per room. `order` and `z` remain independent because the runtime
  * is a painter: z changes projection/focus while order decides overlap. */
@@ -190,34 +203,23 @@ function decodeLayer(room, bg) {
     }
   }
   return { pw, ph, cellsW, cellsH, tilesW, tilesH, w:tilesW*8, h:tilesH*8,
-           words, cellId, pal, chars, extra };
+           words, cellId, pal, chars, extra, room, bg };
 }
 
 /* One 8x8 character's pixels, 4bpp planar, honouring both flips. */
-function blitTile(L, entry, dst, dw, ox, oy, tintRGB) {
-  const tile = entry & 0x3ff;
-  const pbase = ((entry>>10)&7)*16;
-  const fx = (entry & 0x4000) !== 0, fy = (entry & 0x8000) !== 0;
-  let cd = L.chars, idx = tile;
-  if (tile*32 + 32 > L.chars.length) {
-    if (!L.extra || tile < 0x200 || tile >= 0x300) return;
-    cd = L.extra; idx = tile - 0x200;
-  }
-  const a = idx*32;
-  for (let py=0; py<8; py++) {
-    const sy = fy ? 7-py : py;
-    const p0=cd[a+sy*2], p1=cd[a+sy*2+1], p2=cd[a+16+sy*2], p3=cd[a+16+sy*2+1];
-    let o = ((oy+py)*dw + ox)*4;
-    for (let px=0; px<8; px++, o+=4) {
-      const sx = fx ? 7-px : px, b = 7-sx;
-      const v = ((p0>>b)&1) | (((p1>>b)&1)<<1) | (((p2>>b)&1)<<2) | (((p3>>b)&1)<<3);
-      if (!v) continue;                       /* colour 0 is transparent */
-      const c = L.pal[pbase+v];
-      let r = c & 0xff, g = (c>>8)&0xff, bl = (c>>16)&0xff;
-      if (tintRGB) { r = (r*3 + tintRGB[0])>>2; g = (g*3 + tintRGB[1])>>2;
-                     bl = (bl*3 + tintRGB[2])>>2; }
-      dst[o]=r; dst[o+1]=g; dst[o+2]=bl; dst[o+3]=255;
-    }
+function blitTile(L, entry, dst, dw, ox, oy, tintRGB, sourceX=ox, sourceY=oy, maskOverride=undefined) {
+  const cell=Math.floor(sourceY/16)*L.cellsW+Math.floor(sourceX/16);
+  const mask=maskOverride??pixelMaskAt(L.room,L.bg,L,cell);
+  for(let py=0;py<8;py++)for(let px=0;px<8;px++) {
+    const black=pixelIsBlack(mask,(sourceX&15)+px,(sourceY&15)+py);
+    const value=nativeCharacterPixel(L,entry,px,py);
+    if(!black&&!value)continue;
+    const color=black?0xff000000:L.pal[((entry>>10)&7)*16+value];
+    let red=color&255,green=(color>>>8)&255,blue=(color>>>16)&255;
+    if(tintRGB&&!black){red=(red*3+tintRGB[0])>>2;
+      green=(green*3+tintRGB[1])>>2;blue=(blue*3+tintRGB[2])>>2;}
+    const o=((oy+py)*dw+ox+px)*4;
+    dst[o]=red;dst[o+1]=green;dst[o+2]=blue;dst[o+3]=255;
   }
 }
 
@@ -231,12 +233,12 @@ const u16 = value => value & 0xffff;
 const u10 = value => value & 0x3ff;
 const swap16 = value => u16((value << 8) | (value >>> 8));
 const mode2Bytes = (first,second) => u10(u8(first) | (u8(second)<<8));
-function resolveParallax(camera, ratio, extent, viewport) {
+function resolveParallax(camera, ratio, extent, viewport,wrap=true) {
   const numerator = ratio >>> 4, denominator = ratio & 15;
   let result = denominator ? Math.floor(camera * numerator / denominator) : 0;
   if (extent >= 0x300 && result + viewport >= extent)
     result = extent - viewport;
-  return u10(result);
+  return wrap?u10(result):result;
 }
 function rasterWriter(values) {
   return {
@@ -382,7 +384,7 @@ function nativeCompositePixel(r,state,main,sub) {
 let native2dCache=null,nativeBandCache=null;
 let nativeDecodedKey='',nativeDecoded=null;
 function nativeDecodedLayers() {
-  const decodedKey=`${room.group}:${room.map}:${animationPhase(room)}`;
+  const decodedKey=`${sceneKey(room)}:${animationPhase(room)}`;
   if(nativeDecodedKey!==decodedKey){nativeDecodedKey=decodedKey;
     nativeDecoded=[decodeLayer(room,0),decodeLayer(room,1)];}
   return {decodedKey,layers:nativeDecoded};
@@ -420,12 +422,43 @@ function nativeBandSurfaces() {
   for(let y=0;y<DATA.frameHeight;y++)for(let x=0;x<DATA.frameWidth;x++){
     const o=(y*DATA.frameWidth+x)*4;
     for(let bg=0;bg<2;bg++){
+      if(!((state.tm|state.ts)&(1<<bg)))continue;
+      const layer=decoded.layers[bg];
+      const mosaic=state.mosaic[y],size=(mosaic>>>4)+1;
+      let sx=x,line=y+1;
+      if(size>1&&(mosaic&(1<<bg))){sx-=sx%size;line-=line%size;}
+      const baseX=bg===0?nativeCamera.x:resolveParallax(nativeCamera.x,room.video[9],
+        layer.w,DATA.frameWidth,false);
+      const baseY=bg===0?nativeCamera.y:resolveParallax(nativeCamera.y,room.video[10],
+        layer.h,DATA.frameHeight,false);
+      const xWorld=baseX+sx+((state.h[bg][y]-u10(baseX)+512)&1023)-512;
+      const yWorld=baseY+line+((state.v[bg][y]-u10(baseY)+512)&1023)-512;
+      const pasted=stampBucket(room,bg).cells[`${Math.floor(xWorld/16)},${Math.floor(yWorld/16)}`];
+      if(pasted) {
+        const px=xWorld&15,py=yWorld&15,band=pasted.bands[(py>>3)*2+(px>>3)];
+        const color=stampColor(layer,pasted,px,py);
+        if(color!==null) {
+          const data=images[bg][band].data,c=tintRgb[band];
+          let red=color&255,green=(color>>>8)&255,blue=(color>>>16)&255;
+          if(c&&!pixelIsBlack(pasted.black,px,py)) {
+            red=(red*3+c[0])>>2;green=(green*3+c[1])>>2;blue=(blue*3+c[2])>>2;
+          }
+          data[o]=red;data[o+1]=green;data[o+2]=blue;data[o+3]=255;
+        }
+        continue;
+      }
+      const tile=nativeTileAt(room,state,decoded.layers,bg,u10(state.h[bg][y]+sx),
+        u10(state.v[bg][y]+line));
+      const cell=(tile.ty>>1)*layer.cellsW+(tile.tx>>1);
+      const black=pixelIsBlack(pixelMaskAt(room,bg,layer,cell),
+        (tile.tx&1)*8+tile.x,(tile.ty&1)*8+tile.y);
       const pixel=nativeLayerPixel(room,state,decoded.layers,bg,x,y);
-      if(((pixel>>>8)&15)!==bg)continue;
-      const band=(pixel>>>16)&3,color=decoded.layers[bg].pal[pixel&255];
+      if(!black&&((pixel>>>8)&15)!==bg)continue;
+      const band=bandAt(bucket(room,bg),layer,tile.tx,tile.ty);
+      const color=black?0xff000000:layer.pal[pixel&255];
       let red=color&255,green=(color>>>8)&255,blue=(color>>>16)&255;
       const c=tintRgb[band];
-      if(c){red=(red*3+c[0])>>2;green=(green*3+c[1])>>2;
+      if(c&&!black){red=(red*3+c[0])>>2;green=(green*3+c[1])>>2;
         blue=(blue*3+c[2])>>2;}
       const data=images[bg][band].data;
       data[o]=red;data[o+1]=green;data[o+2]=blue;data[o+3]=255;
@@ -439,7 +472,7 @@ function nativeBandSurfaces() {
  * transcription drift without requiring the game or a save state. */
 const nativeGoldenStatus=new Map();
 function verifyRoomNativeGolden(r) {
-  const key=`${r.group}:${r.map}`;
+  const key=sceneKey(r);
   if(nativeGoldenStatus.has(key))return nativeGoldenStatus.get(key);
   const golden=r.nativeGolden;
   if(!golden){nativeGoldenStatus.set(key,false);return false;}

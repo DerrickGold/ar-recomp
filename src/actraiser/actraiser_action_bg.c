@@ -89,6 +89,12 @@ typedef struct ActRaiserActionBgProvider {
   bool tile_band_cache_valid;
   bool reported_tile_band_cache_failure;
   uint8_t layer;
+  bool pixel_edits_active, pixel_band_cache_active;
+  int camera_x, camera_y;
+  uint16_t hscroll_anchor, vscroll_anchor;
+  int pixel_cell_x, pixel_cell_y;
+  const uint16_t *pixel_mask;
+  const DioramaTileStamp *stamps[1024];
 } ActRaiserActionBgProvider;
 
 static ActRaiserActionBgObserver s_observer = {
@@ -705,6 +711,7 @@ static void ResetWorlds(void) {
     s_observer.comparison_reported_outside_serial[layer] = 0;
     s_observer.room_scene_compared_serial[layer] = 0;
     s_observer.room_scene_stage_compared[layer] = false;
+    s_provider[layer].pixel_edits_active = false;
     s_provider[layer].tile_band_count = 0;
     s_provider[layer].tile_band_world = NULL;
     s_provider[layer].tile_band_rules_hash = 0;
@@ -1611,6 +1618,103 @@ static uint32_t ProviderBandLookup(void *context, int32_t tile_x,
   return *band < kDioramaVirtualBandCount;
 }
 
+bool ActRaiserActionBg_PixelLayerHasEdits(unsigned bg) {
+  return bg < kActionBgLayerCount && s_provider[bg].pixel_edits_active;
+}
+
+bool ActRaiserActionBg_PixelEditsActive(void) {
+  return s_provider[0].pixel_edits_active || s_provider[1].pixel_edits_active;
+}
+
+static unsigned StampHash(int x, int y) {
+  return ((uint32_t)x * 73856093u ^ (uint32_t)y * 19349663u) & 1023u;
+}
+
+static void CompileStamps(ActRaiserActionBgProvider *provider) {
+  memset(provider->stamps, 0, sizeof(provider->stamps));
+  if (!provider->virtual_room) return;
+  const DioramaStampLayerOverride *layer =
+      &provider->virtual_room->stamp_layers[provider->layer];
+  for (unsigned i = 0; i < layer->count && i < kDioramaTileStampMax; i++) {
+    const DioramaTileStamp *cell = &layer->cells[i];
+    unsigned index = StampHash(cell->x, cell->y);
+    while (provider->stamps[index]) index = (index + 1) & 1023u;
+    provider->stamps[index] = cell;
+  }
+}
+
+bool ActRaiserActionBg_StampAt(unsigned bg, int source_x, int sample_y,
+                              uint16_t hscroll, uint16_t vscroll,
+                              uint16_t *entry, uint8_t *band,
+                              uint8_t *local_x, uint8_t *local_y, bool *black) {
+  if (bg >= kActionBgLayerCount || !entry || !band ||
+      !local_x || !local_y || !black) return false;
+  const ActRaiserActionBgProvider *provider = &s_provider[bg];
+  if (!provider->pixel_edits_active || !provider->virtual_room ||
+      !provider->virtual_room->stamp_layers[bg].count) return false;
+  const int dh = ((hscroll - provider->hscroll_anchor + 512) & 1023) - 512;
+  const int dv = ((vscroll - provider->vscroll_anchor + 512) & 1023) - 512;
+  const int x = provider->camera_x + source_x + dh;
+  const int y = provider->camera_y + sample_y + dv;
+  /* Floor division is required for scenery extending left or above zero. */
+  const int cx = x >= 0 ? x / 16 : (x - 15) / 16;
+  const int cy = y >= 0 ? y / 16 : (y - 15) / 16;
+  unsigned index = StampHash(cx, cy);
+  const DioramaTileStamp *cell;
+  while ((cell = provider->stamps[index]) != NULL) {
+    if (cell->x == cx && cell->y == cy) break;
+    index = (index + 1) & 1023u;
+  }
+  if (!cell) return false;
+  *local_x = (uint8_t)(x & 15);
+  *local_y = (uint8_t)(y & 15);
+  const unsigned quadrant = (*local_y / 8) * 2 + *local_x / 8;
+  *entry = cell->words[quadrant];
+  *band = (cell->bands >> (quadrant * 2)) & 3u;
+  const uint16_t *mask = DioramaLayerOrder_PixelMask(
+      provider->virtual_room, bg, cx, cy, cell->metatile);
+  *black = mask && (mask[*local_y] & (1u << (15 - *local_x)));
+  return *band < kDioramaVirtualBandCount;
+}
+
+/* Coordinates already include the PPU's margin/mosaic policy. Reconstruct the
+ * same finite world address used by the virtual tile provider; masks address
+ * displayed metatile pixels, so character flips do not flip the authored mask. */
+bool ActRaiserActionBg_PixelBlackAt(unsigned bg, int source_x, int sample_y,
+                                    uint16_t hscroll, uint16_t vscroll,
+                                    uint8_t *band) {
+  if (bg >= kActionBgLayerCount || !band) return false;
+  ActRaiserActionBgProvider *provider = &s_provider[bg];
+  if (!provider->pixel_edits_active) return false;
+  const int dh = ((hscroll - provider->hscroll_anchor + 512) & 1023) - 512;
+  const int dv = ((vscroll - provider->vscroll_anchor + 512) & 1023) - 512;
+  int x = provider->camera_x + source_x + dh;
+  const int y = provider->camera_y + sample_y + dv;
+  const int width = (int)ActionBgWorld_TileWidth(provider->world) * 8;
+  if (provider->wrap_world_x) x = ((x % width) + width) % width;
+  if (x < 0 || y < 0) return false;
+  const int tx = x / 8, ty = y / 8;
+  uint16_t entry;
+  uint8_t id;
+  if (ActionBgWorld_Lookup(provider->world, tx, ty, &entry) !=
+          kActionBgLookup_Tile ||
+      !ActionBgWorld_LookupMetatile(provider->world, tx, ty, &id))
+    return false;
+  if (provider->pixel_cell_x != x / 16 || provider->pixel_cell_y != y / 16) {
+    provider->pixel_cell_x = x / 16;
+    provider->pixel_cell_y = y / 16;
+    provider->pixel_mask = DioramaLayerOrder_PixelMask(
+        provider->virtual_room, bg, (unsigned)x / 16, (unsigned)y / 16, id);
+  }
+  if (!provider->pixel_mask ||
+      !(provider->pixel_mask[y & 15] & (1u << (15 - (x & 15)))))
+    return false;
+  *band = (entry & 0x2000u) ? 2 : 1;
+  if (provider->pixel_band_cache_active)
+    (void)ProviderBandLookup(provider, tx, ty, entry, band);
+  return true;
+}
+
 static void ReportComparison(
     const uint8_t *wram, unsigned layer, uint8_t map_group,
     uint8_t map_number, const ActRaiserActionBgLayerSnapshot *snapshot,
@@ -1656,6 +1760,8 @@ uint8_t ActRaiserActionBg_BindPlan(
 uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
     const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
     const struct DioramaRoomOverride *virtual_room) {
+  for (unsigned bg = 0; bg < kActionBgLayerCount; bg++)
+    s_provider[bg].pixel_edits_active = false;
   SrPpuStateSnapshot ppu;
   SrBorrowedU16Span vram;
   SrPpuVirtualTilemapRequest binding_request;
@@ -1817,6 +1923,16 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
               map_group, map_number, layer + 1u);
       s_provider[layer].reported_tile_band_cache_failure = true;
     }
+    s_provider[layer].pixel_band_cache_active = tile_band_cache_ready;
+    s_provider[layer].camera_x = snapshot.camera_x;
+    s_provider[layer].camera_y = snapshot.camera_y;
+    s_provider[layer].hscroll_anchor = ppu.backgrounds[layer].h_scroll & 0x3ffu;
+    s_provider[layer].vscroll_anchor = ppu.backgrounds[layer].v_scroll & 0x3ffu;
+    s_provider[layer].pixel_cell_x = s_provider[layer].pixel_cell_y = -1;
+    s_provider[layer].pixel_edits_active = include_authentic && virtual_room &&
+        (virtual_room->pixel_layers[layer].count != 0 ||
+         virtual_room->stamp_layers[layer].count != 0);
+    CompileStamps(&s_provider[layer]);
     const SrPpuVirtualTilemapBinding binding = {
       .lookup = ProviderLookup,
       .lookup_span = ProviderLookupSpan,
@@ -1836,6 +1952,8 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
   }
   if (bound != 0u && s_runner_api->replace_ppu_virtual_tilemaps(
           s_runner, &binding_request) != SR_RESULT_OK) {
+    for (unsigned bg = 0; bg < kActionBgLayerCount; bg++)
+      s_provider[bg].pixel_edits_active = false;
     binding_request.layer_mask = 0u;
     (void)s_runner_api->replace_ppu_virtual_tilemaps(
         s_runner, &binding_request);

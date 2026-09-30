@@ -85,6 +85,226 @@ static void TestDioramaEffects(ArRenderDevice *device) {
   DioramaEffectBackend_Reset(device);
 }
 
+/* Compare filtered priority bands with a native per-pixel priority resolve.
+ * The low and high submissions surround a solid sprite, just like OBJ2 in
+ * Kassandora. In particular, identical opaque terrain on opposite sides of a
+ * priority boundary must stay opaque; two independently filtered .5 alphas
+ * leave .25 background showing through. */
+static void TestPrioritySurface(ArRenderDevice *device, SDL_Renderer *renderer) {
+  CHECK(DioramaEffectBackend_IsAvailable(device, kDioramaEffect_PrioritySurface));
+  ArRenderTexture atlas = ArRenderTexture_Invalid();
+  const ArRenderTextureDesc desc = {
+    .width = 2, .height = 4, .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Streaming,
+    .filter = kArRenderFilter_Nearest, .blend = kArRenderBlendMode_Alpha,
+  };
+  CHECK(ArRenderDevice_CreateTexture(device, &desc, &atlas));
+  const uint32_t patterns[][8] = {
+    // Red terrain split vertically; the reported dark seam.
+    {0xffff0000, 0, 0xffff0000, 0, 0, 0xffff0000, 0, 0xffff0000},
+    // Different colors and a diagonal priority junction.
+    {0xffff0000, 0, 0, 0xffff0000, 0, 0xff00ff00, 0xff00ff00, 0},
+    // A real transparent corner must continue to expose the blue backdrop.
+    {0xffff0000, 0, 0, 0, 0, 0xff00ff00, 0xff00ff00, 0},
+    // An authored opaque backing underneath high-band pixels.
+    {0xffff0000, 0xff000000, 0xff000000, 0xffff0000,
+      0, 0xff00ff00, 0xff00ff00, 0},
+    // Capture color math can carry partial alpha despite opaque layer knobs.
+    {0xffff0000, 0, 0, 0xffff0000, 0, 0x8000ff00, 0x8000ff00, 0},
+    // Bloodpool: low-priority water tops above high-priority lower water.
+    {0xff702850, 0xff702850, 0, 0, 0, 0, 0xff702850, 0xff702850},
+    // The priority boundary can also join different shades of the water art.
+    {0xffa84870, 0xffa84870, 0, 0, 0, 0, 0xff702850, 0xff702850},
+  };
+  const int32_t indices[] = {0, 1, 2, 0, 2, 3};
+  const ArRenderDrawState blend = {
+    .flags = kArRenderDrawState_Blend, .blend = kArRenderBlendMode_Alpha,
+  };
+  int maximum_error = 0;
+  for (unsigned pattern = 0; pattern < sizeof(patterns)/sizeof(patterns[0]); pattern++) {
+    CHECK(ArRenderDevice_UpdateTexture(device, atlas, NULL, patterns[pattern], 8));
+    for (int sprite = 0; sprite < 6; sprite++) {
+      const float sa = sprite == 3 ? 0 : sprite >= 4 ? 0.5f : (float)sprite / 2;
+      const float coverage = sprite == 3 ? 0.375f : 1;
+      const bool mist = sprite >= 4, reflection = sprite == 5;
+      for (int phase = 0; phase <= 4; phase++) {
+        const bool water = pattern >= 5;
+        const float fx = water ? 0.375f : phase * 0.25f;
+        const float fy = water ? phase * 0.25f : 0.375f;
+        const float u = (3.5f + fx) / 8, v = (3.5f + fy) / 8;
+        ArRenderVertex2D verts[4] = {
+          {{0, 0}, {1, 1, 1, 1}, {u, v}},
+          {{32, 0}, {1, 1, 1, 1}, {u, v}},
+          {{32, 32}, {1, 1, 1, 1}, {u, v}},
+          {{0, 32}, {1, 1, 1, 1}, {u, v}},
+        };
+        for (int i = 0; i < 4; i++) verts[i].color.a = coverage;
+        CHECK(ArRenderDevice_Clear(device, (ArRenderColorF){0, 0, 1, 1}));
+        for (int band = 0; band < 2; band++) {
+          const DioramaPrioritySurfaceEffectParams params = {2, 2, band != 0};
+          CHECK(DioramaEffectBackend_BindPrioritySurface(device, &params));
+          CHECK(ArRenderDevice_DrawGeometryWithState(
+              device, atlas, verts, 4, indices, 6, &blend));
+          CHECK(DioramaEffectBackend_Unbind(device));
+          if (!band && sa > 0) {
+            ArRenderVertex2D actor[4];
+            memcpy(actor, verts, sizeof(actor));
+            for (int i = 0; i < 4; i++) actor[i].color = (ArRenderColorF){1, 1, 1, sa};
+            CHECK(ArRenderDevice_DrawGeometryWithState(device,
+                ArRenderTexture_Invalid(), actor, 4, indices, 6, &blend));
+          }
+          if ((!band && mist) || (band && reflection)) {
+            // Ordinary callbacks after Unbind: mist before high water,
+            // additive reflections after it. Neither is shaded as terrain.
+            const ArRenderRectF rect = {0, 0, 32, 32};
+            CHECK(ArRenderDevice_DrawSolidRect(device, &rect,
+                band ? (ArRenderColorF){0.04f, 0.06f, 0.08f, 1}
+                     : (ArRenderColorF){0.12f, 0.20f, 0.28f, 0.25f},
+                band ? kArRenderBlendMode_Add : kArRenderBlendMode_Alpha));
+          }
+        }
+        SDL_Surface *surface = SDL_RenderReadPixels(renderer, NULL);
+        CHECK(surface != NULL);
+        Uint8 r = 0, g = 0, b = 0, a = 0;
+        if (surface) CHECK(SDL_ReadSurfacePixel(surface, 16, 16, &r, &g, &b, &a));
+        float expected[3] = {0};
+        for (int y = 0; y < 2; y++) for (int x = 0; x < 2; x++) {
+          const int p = y * 2 + x;
+          const uint32_t l = patterns[pattern][p], h = patterns[pattern][p+4];
+          const float la = (float)(l >> 24) / 255, ha = (float)(h >> 24) / 255;
+          const float weight = (x ? fx : 1-fx) * (y ? fy : 1-fy);
+          for (int channel = 0; channel < 3; channel++) {
+            const int shift = 16 - channel * 8;
+            float c = channel == 2 ? 1 : 0;
+            c = ((l >> shift) & 255) / 255.0f * la + c * (1-la);
+            c = sa + c * (1-sa); // white sprite between the two priorities
+            if (mist) c = (0.12f + channel * 0.08f) * 0.25f + c * 0.75f;
+            c = ((h >> shift) & 255) / 255.0f * ha + c * (1-ha);
+            // The outer geometry AA fringe fades the joined surface once.
+            c = c * coverage + (channel == 2 ? 1-coverage : 0);
+            expected[channel] += c * weight;
+          }
+        }
+        const int actual[] = {r, g, b};
+        for (int channel = 0; channel < 3; channel++) {
+          if (reflection)
+            expected[channel] = fminf(1, expected[channel] + 0.04f + channel * 0.02f);
+          const int delta = abs(actual[channel] - (int)lroundf(expected[channel] * 255));
+          if (delta > maximum_error) maximum_error = delta;
+          CHECK(delta <= 2);
+        }
+        CHECK(a == 255);
+        SDL_DestroySurface(surface);
+      }
+    }
+  }
+  printf("priority surface max-channel-delta=%d\n", maximum_error);
+  ArRenderDevice_DestroyTexture(device, atlas);
+  DioramaEffectBackend_Reset(device);
+}
+
+/* Full-add scenes resolve the subscreen winner before splitting its captures.
+ * Compare their filtered sum over a main-screen color with that native resolve,
+ * including a sprite behind high-priority water and in front of low terrain. */
+static void TestPrioritySurfaceAdditive(ArRenderDevice *device, SDL_Renderer *renderer) {
+  ArRenderTexture atlas = ArRenderTexture_Invalid();
+  const ArRenderTextureDesc desc = {
+    .width = 2, .height = 4, .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Streaming,
+    .filter = kArRenderFilter_Nearest, .blend = kArRenderBlendMode_Add,
+  };
+  CHECK(ArRenderDevice_CreateTexture(device, &desc, &atlas));
+  const uint32_t patterns[][8] = {
+    // Continuous Marahna water, crossing a horizontal priority boundary.
+    {0xff607030, 0xff607030, 0, 0, 0, 0, 0xff607030, 0xff607030},
+    // Different colors, including a low-plane backing below high pixels.
+    {0xff607030, 0xff607030, 0xff204060, 0xff204060,
+      0, 0, 0xff304080, 0xff304080},
+    // Real transparent space and captured partial coverage remain intact.
+    {0xff607030, 0xff607030, 0, 0, 0, 0, 0, 0x80304080},
+  };
+  const float tint[3] = {0.9f, 0.8f, 0.7f};
+  const float actor_color[3] = {0.25f, 0.4f, 0.6f};
+  const int32_t indices[] = {0, 1, 2, 0, 2, 3};
+  const ArRenderDrawState blend = {
+    .flags = kArRenderDrawState_Blend, .blend = kArRenderBlendMode_Add,
+  };
+  int maximum_error = 0;
+  for (unsigned pattern = 0; pattern < sizeof(patterns)/sizeof(patterns[0]); pattern++)
+  for (int actor = 0; actor < 2; actor++)
+  for (int fringe = 0; fringe < 2; fringe++)
+  for (int bright = 0; bright < 2; bright++)
+  for (int phase = 0; phase <= 4; phase++) {
+    uint32_t captures[8];
+    memcpy(captures, patterns[pattern], sizeof(captures));
+    // The actor occupies the right column. The high band hides its lower
+    // portion; low scenery behind the actor is absent from the capture.
+    if (actor) captures[1] = captures[3] = 0;
+    CHECK(ArRenderDevice_UpdateTexture(device, atlas, NULL, captures, 8));
+    const float coverage = fringe ? 0.375f : 1;
+    const float fx = 0.375f, fy = phase * 0.25f;
+    const float u = (3.5f + fx) / 8, v = (3.5f + fy) / 8;
+    const float main_color[3] = {bright ? 0.8f : 0.08f,
+                               bright ? 0.65f : 0.12f,
+                               bright ? 0.7f : 0.16f};
+    float expected[3] = {main_color[0], main_color[1], main_color[2]};
+    float actor_coverage = 0;
+    for (int y = 0; y < 2; y++) for (int x = 0; x < 2; x++) {
+      const int p = y * 2 + x;
+      const uint32_t l = captures[p], h = captures[p+4];
+      const float la = (l >> 24) / 255.0f, ha = (h >> 24) / 255.0f;
+      const float weight = (x ? fx : 1-fx) * (y ? fy : 1-fy);
+      const float visible_actor = actor && x ? 1-ha : 0;
+      actor_coverage += visible_actor * weight * coverage;
+      for (int channel = 0; channel < 3; channel++) {
+        const int shift = 16-channel*8;
+        const float sub = tint[channel] *
+            (((l >> shift) & 255) / 255.0f * la * (1-ha) +
+             ((h >> shift) & 255) / 255.0f * ha) +
+            actor_color[channel] * visible_actor;
+        expected[channel] += sub * weight * coverage;
+      }
+    }
+    ArRenderVertex2D verts[4] = {
+      {{0, 0}, {tint[0], tint[1], tint[2], coverage}, {u, v}},
+      {{32, 0}, {tint[0], tint[1], tint[2], coverage}, {u, v}},
+      {{32, 32}, {tint[0], tint[1], tint[2], coverage}, {u, v}},
+      {{0, 32}, {tint[0], tint[1], tint[2], coverage}, {u, v}},
+    };
+    CHECK(ArRenderDevice_Clear(device,
+        (ArRenderColorF){main_color[0], main_color[1], main_color[2], 1}));
+    for (int band = 0; band < 2; band++) {
+      const DioramaPrioritySurfaceEffectParams params = {2, 2, band != 0, true};
+      CHECK(DioramaEffectBackend_BindPrioritySurface(device, &params));
+      CHECK(ArRenderDevice_DrawGeometryWithState(
+          device, atlas, verts, 4, indices, 6, &blend));
+      CHECK(DioramaEffectBackend_Unbind(device));
+      if (!band && actor) {
+        const ArRenderRectF rect = {0, 0, 32, 32};
+        CHECK(ArRenderDevice_DrawSolidRect(device, &rect,
+            (ArRenderColorF){actor_color[0], actor_color[1], actor_color[2],
+                             actor_coverage}, kArRenderBlendMode_Add));
+      }
+    }
+    SDL_Surface *surface = SDL_RenderReadPixels(renderer, NULL);
+    CHECK(surface != NULL);
+    Uint8 r = 0, g = 0, b = 0, a = 0;
+    if (surface) CHECK(SDL_ReadSurfacePixel(surface, 16, 16, &r, &g, &b, &a));
+    const int actual[] = {r, g, b};
+    for (int channel = 0; channel < 3; channel++) {
+      const int delta = abs(actual[channel] -
+          (int)lroundf(fminf(1, expected[channel])*255));
+      if (delta > maximum_error) maximum_error = delta;
+      CHECK(delta <= 2);
+    }
+    CHECK(a == 255);
+    SDL_DestroySurface(surface);
+  }
+  printf("additive priority surface max-channel-delta=%d\n", maximum_error);
+  ArRenderDevice_DestroyTexture(device, atlas);
+  DioramaEffectBackend_Reset(device);
+}
+
 static void TestSimShadowEffect(ArRenderDevice *device) {
   const SimShadowBlurEffectParams horizontal = {
     .texel_x = 1.0f / 320.0f,
@@ -275,6 +495,8 @@ int main(void) {
   ArSdlRenderBackend backend = {0};
   CHECK(ArSdlRenderBackend_Bind(&device, &backend, renderer));
   TestDioramaEffects(&device);
+  TestPrioritySurface(&device, renderer);
+  TestPrioritySurfaceAdditive(&device, renderer);
   TestSimShadowEffect(&device);
   TestSimCloudEffect(&device, renderer);
   TestCrtPost(&device);
@@ -291,6 +513,8 @@ int main(void) {
   if (ArRenderDevice_IsReady(&device)) {
     renderer = ArSdlRenderBackend_Renderer(&device);
     TestDioramaEffects(&device);
+    TestPrioritySurface(&device, renderer);
+    TestPrioritySurfaceAdditive(&device, renderer);
     TestSimShadowEffect(&device);
     TestSimCloudEffect(&device, renderer);
     TestCrtPost(&device);

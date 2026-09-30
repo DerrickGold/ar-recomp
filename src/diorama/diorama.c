@@ -182,6 +182,8 @@ enum { kDioramaSupersample = 4 };
 static ArRenderTexture s_diorama_ss_texture;
 static int s_diorama_ss_w, s_diorama_ss_h;
 static bool s_diorama_ss_unavailable;
+static ArRenderTexture s_diorama_priority_texture;
+static int s_diorama_priority_w, s_diorama_priority_h;
 static ArRenderTexture s_diorama_dof_source_texture;
 static int s_diorama_dof_source_w, s_diorama_dof_source_h;
 static bool s_diorama_dof_source_unavailable;
@@ -204,6 +206,12 @@ static void ResetDioramaSupersample(ArRenderDevice *device) {
   s_diorama_ss_w = 0;
   s_diorama_ss_h = 0;
   s_diorama_ss_unavailable = false;
+}
+
+static void ResetDioramaPrioritySurface(ArRenderDevice *device) {
+  ArRenderDevice_DestroyTexture(device, s_diorama_priority_texture);
+  s_diorama_priority_texture = ArRenderTexture_Invalid();
+  s_diorama_priority_w = s_diorama_priority_h = 0;
 }
 
 static void DisableDioramaSupersample(ArRenderDevice *device) {
@@ -832,13 +840,14 @@ static const DioramaLayerDesc *DioramaDescForPlane(int plane) {
  * from remaining projectable to presentation effects. */
 static bool DioramaLayerIsDrawable(
     const DioramaLayerDesc *layer, const ArRenderTexture textures[],
-    const uint8_t *const pixels[]) {
+    const uint8_t *const pixels[], const DioramaScene *scene) {
   return layer && Diorama_PlaneEligible(
       layer->plane, !layer->visible || *layer->visible,
       ArRenderTexture_IsValid(textures[layer->plane]),
       pixels[layer->plane] != NULL,
       g_settings.diorama_hud_flat,
-      g_settings.diorama_skybox == kDioramaSky_Only);
+      g_settings.diorama_skybox == kDioramaSky_Only,
+      scene->additive_plane_mask);
 }
 
 /* A BG or OBJ plane may additionally be requested by a current captured
@@ -847,20 +856,20 @@ static bool DioramaLayerIsDrawable(
  * by present.c before it reaches this predicate. */
 static bool DioramaLayerIsProjectable(
     const DioramaLayerDesc *layer, const ArRenderTexture textures[],
-    const uint8_t *const pixels[],
-    uint8_t effect_obj_priority_mask, uint32_t effect_bg_plane_mask) {
+    const uint8_t *const pixels[], const DioramaScene *scene) {
   if (!layer) return false;
   const int priority = DioramaPlaneObjectPriority(layer->plane);
   const bool has_obj_effect = priority >= 0 &&
-      (effect_obj_priority_mask & (1u << (unsigned)priority)) != 0;
+      (scene->effect_obj_priority_mask & (1u << (unsigned)priority)) != 0;
   const bool has_bg_effect = layer->plane >= 0 && layer->plane < 32 &&
-      (effect_bg_plane_mask & (1u << (unsigned)layer->plane)) != 0;
+      (scene->effect_bg_plane_mask & (1u << (unsigned)layer->plane)) != 0;
   return Diorama_PlaneProjectable(
       layer->plane, !layer->visible || *layer->visible,
       ArRenderTexture_IsValid(textures[layer->plane]),
       pixels[layer->plane] != NULL,
       has_obj_effect || has_bg_effect, g_settings.diorama_hud_flat,
-      g_settings.diorama_skybox == kDioramaSky_Only);
+      g_settings.diorama_skybox == kDioramaSky_Only,
+      scene->additive_plane_mask);
 }
 
 /* ── 3D projection ───────────────────────────────────────────────────── */
@@ -2045,6 +2054,7 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
  * than shrinking the playfield. Resolve auto-fit before applying zoom. */
 static void PrepareDioramaView(const DioramaCapture *capture,
                                const DioramaView *view,
+                               const DioramaScene *scene,
                                const ArRenderTexture *textures,
                                const DioramaResolvedLayer *resolved,
                                int resolved_count,
@@ -2130,7 +2140,7 @@ static void PrepareDioramaView(const DioramaCapture *capture,
           !resolved[i].alpha)
         continue;
       const DioramaLayerDesc *layer = DioramaDescForPlane(resolved[i].plane);
-      if (!DioramaLayerIsDrawable(layer, textures, capture->pixels))
+      if (!DioramaLayerIsDrawable(layer, textures, capture->pixels, scene))
         continue;
       /* Priority splitting can leave the ordinary band entirely empty. */
       if (!focal || resolved[i].plane == primary) focal = &resolved[i];
@@ -2181,6 +2191,7 @@ static void PublishDioramaView(const DioramaCapture *capture,
 /* Forward BG planes converge to BG1 only at their outer rings. Empty
  * captures cannot move the camera; only drawable BG1 defines an aperture. */
 static void PrepareDioramaAperture(const DioramaCapture *capture,
+                                   const DioramaScene *scene,
                                    const DioramaViewGeometry *geometry,
                                    const ArRenderTexture *textures,
                                    const DioramaResolvedLayer *resolved,
@@ -2195,7 +2206,7 @@ static void PrepareDioramaAperture(const DioramaCapture *capture,
       continue;
     const DioramaLayerDesc *aperture_layer =
         DioramaDescForPlane(SR_PPU_OVERLAY_BG1);
-    if (!DioramaLayerIsDrawable(aperture_layer, textures, capture->pixels))
+    if (!DioramaLayerIsDrawable(aperture_layer, textures, capture->pixels, scene))
       break;
     aperture->z = resolved[i].z;
     BuildLayerMesh(geometry->matrix, aperture->z - 0.5f, resolved[i].rake,
@@ -2224,9 +2235,7 @@ static void PublishDioramaPlanes(const DioramaCapture *capture,
     for (int i = 0; i < resolved_count; i++) {
       if (resolved[i].alpha == 0) continue;
       const DioramaLayerDesc *layer = DioramaDescForPlane(resolved[i].plane);
-      if (!DioramaLayerIsProjectable(layer, textures, capture->pixels,
-                                     scene->effect_obj_priority_mask,
-                                     scene->effect_bg_plane_mask))
+      if (!DioramaLayerIsProjectable(layer, textures, capture->pixels, scene))
         continue;
       DioramaPlaneProjection plane = {
           .valid = true,
@@ -2290,9 +2299,119 @@ typedef struct DioramaLayerDraw {
   const DioramaResolvedLayer *authored;
   const DioramaLayerDesc *description;
   ArRenderTexture texture;
+  ArRenderTexture priority_surface;
   ArRenderColorF shade;
   ArRenderBlendMode blend;
 } DioramaLayerDraw;
+
+/* Joined BG1 faces need complementary filter coverage, not two independently
+ * softened alpha silhouettes. Keep their draw slots (and intervening sprites)
+ * intact. Only pair opaque, coplanar, in-focus faces with matching projection;
+ * an intentionally separated/deformed/translucent high plane keeps its own
+ * treatment. Depth copies still use the authored source and shape. Attached
+ * effects do not disqualify the pair: the shader is unbound before each
+ * callback, and callbacks retain their original textures, projection and draw
+ * slots. Bloodpool's mist precedes high water; reflections follow it. Disjoint
+ * full-add captures (Marahna) use the same premultiplied sampling, but sum
+ * coverage without the source-over correction. Never pair mixed blend modes. */
+static ArRenderTexture BuildDioramaPrioritySurface(
+    ArRenderDevice *device, const DioramaCapture *capture,
+    const DioramaScene *scene, const ArRenderTexture *textures,
+    const DioramaResolvedLayer *resolved, int count,
+    PresentationOutcome *outcome) {
+  *outcome = kPresentationOutcome_Complete;
+  /* Private A/B gate for deterministic visual regression captures. */
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *value = getenv("AR_DIORAMA_PRIORITY_SURFACE");
+    enabled = !value || !value[0] || value[0] != '0';
+  }
+  if (!enabled) return ArRenderTexture_Invalid();
+  const DioramaResolvedLayer *low = NULL, *high = NULL;
+  for (int i = 0; i < count; i++) {
+    if (resolved[i].plane == SR_PPU_OVERLAY_BG1) low = &resolved[i];
+    if (resolved[i].plane == kDioramaPlane_Bg1Hi) high = &resolved[i];
+  }
+  const uint32_t pair_mask = (1u << SR_PPU_OVERLAY_BG1) |
+                             (1u << kDioramaPlane_Bg1Hi);
+  const uint32_t additive_pair = scene->additive_plane_mask & pair_mask;
+  if (!low || !high || low >= high || low->alpha != 255 || high->alpha != 255 ||
+      low->z != high->z || low->rake != high->rake || low->bow != high->bow ||
+      low->z != kDofFocalZ || high->stack > 0 || high->thickness > 0 ||
+      (additive_pair && additive_pair != pair_mask) ||
+      !DioramaLayerIsDrawable(DioramaDescForPlane(low->plane), textures,
+                               capture->pixels, scene) ||
+      !DioramaLayerIsDrawable(DioramaDescForPlane(high->plane), textures,
+                               capture->pixels, scene))
+    return ArRenderTexture_Invalid();
+  if (!DioramaEffectBackend_IsAvailable(device, kDioramaEffect_PrioritySurface))
+    return ArRenderTexture_Invalid();
+
+  if (s_diorama_priority_w != capture->width ||
+      s_diorama_priority_h != capture->height) {
+    ResetDioramaPrioritySurface(device);
+    const ArRenderTextureDesc desc = {
+      .width = capture->width, .height = capture->height * 2,
+      .format = kArRenderPixelFormat_Argb8888,
+      .usage = kArRenderTextureUsage_Target,
+      .filter = kArRenderFilter_Nearest, .blend = kArRenderBlendMode_Alpha,
+    };
+    if (!ArRenderDevice_CreateTexture(device, &desc, &s_diorama_priority_texture)) {
+      *outcome = kPresentationOutcome_OptionalOmitted;
+      return ArRenderTexture_Invalid();
+    }
+    s_diorama_priority_w = capture->width;
+    s_diorama_priority_h = capture->height;
+  }
+  ArRenderTargetState saved;
+  const ArRenderTargetBeginResult begin = ArRenderDevice_BeginTarget(
+      device, s_diorama_priority_texture, &saved);
+  if (begin != kArRenderTargetBegin_Ready) {
+    *outcome = begin == kArRenderTargetBegin_StateLost
+        ? kPresentationOutcome_CoreFailure : kPresentationOutcome_OptionalOmitted;
+    return ArRenderTexture_Invalid();
+  }
+  const ArRenderRectF src = {
+    (float)capture->obj_apron, 0, (float)capture->width, (float)capture->height,
+  };
+  const ArRenderDrawState state = {
+    .flags = kArRenderDrawState_Blend, .blend = kArRenderBlendMode_Opaque,
+  };
+  bool success = true;
+  for (int band = 0; band < 2; band++) {
+    const ArRenderRectF dst = {
+      0, (float)(band * capture->height), (float)capture->width, (float)capture->height,
+    };
+    success = ArRenderDevice_DrawTextureWithState(device,
+        textures[band ? high->plane : low->plane], &src, &dst, &state) && success;
+  }
+  if (!ArRenderDevice_EndTarget(device, &saved)) {
+    *outcome = kPresentationOutcome_CoreFailure;
+    return ArRenderTexture_Invalid();
+  }
+  if (!success) {
+    *outcome = kPresentationOutcome_OptionalOmitted;
+    return ArRenderTexture_Invalid();
+  }
+  // Check both bindings before either face reaches the scene. A backend may
+  // decline the optional effect without leaving a half-corrected pair.
+  for (int band = 0; band < 2; band++) {
+    const DioramaPrioritySurfaceEffectParams params = {
+      (float)capture->width, (float)capture->height, band != 0,
+      additive_pair != 0,
+    };
+    const bool bound = DioramaEffectBackend_BindPrioritySurface(device, &params);
+    if (!DioramaEffectBackend_Unbind(device)) {
+      *outcome = kPresentationOutcome_CoreFailure;
+      return ArRenderTexture_Invalid();
+    }
+    if (!bound) {
+      *outcome = kPresentationOutcome_OptionalOmitted;
+      return ArRenderTexture_Invalid();
+    }
+  }
+  return s_diorama_priority_texture;
+}
 
 typedef struct DioramaLayerMesh {
   ArRenderVertex2D vertices[DIORAMA_VERTS_PER_LAYER];
@@ -2557,6 +2676,7 @@ static PresentationOutcome DrawDioramaLayerFace(
     const DioramaViewGeometry *geometry, const DioramaLayerDraw *layer,
     const DioramaLayerMesh *mesh, DioramaAttachedMesh *attached) {
   PresentationOutcome outcome = kPresentationOutcome_Complete;
+  const bool priority_surface = ArRenderTexture_IsValid(layer->priority_surface);
   bool rim_light = layer->description->is_figure && RimLightEnabled(device);
   bool want_dof = !rim_light &&
                   layer->description->plane != SR_PPU_OVERLAY_BG3 &&
@@ -2568,10 +2688,11 @@ static PresentationOutcome DrawDioramaLayerFace(
                    LayerGetsEdgeAA(layer->description->plane) &&
                    EdgeAAEnabled();
   bool use_dof_shader = !rim_light && dof_radius > 0.0f;
-  bool use_shader = rim_light || use_dof_shader;
+  bool use_shader = rim_light || use_dof_shader || priority_surface;
 
-  ArRenderTexture draw_texture = layer->texture;
-  int compact_scale = 0;
+  ArRenderTexture draw_texture = priority_surface
+      ? layer->priority_surface : layer->texture;
+  int compact_scale = priority_surface ? 1 : 0;
   if (use_dof_shader) {
     PresentationOutcome dof_source_outcome = kPresentationOutcome_Complete;
     DioramaPerformanceScope dof_source_performance =
@@ -2641,6 +2762,11 @@ static PresentationOutcome DrawDioramaLayerFace(
     }
     draw_texel_width = 1.0f / (float)(capture->width * compact_scale);
     draw_texel_height = 1.0f / (float)(capture->height * compact_scale);
+    if (priority_surface) {
+      // Manual crisp sampling has the same footprint as the x4 intermediate.
+      draw_texel_width /= kDioramaSupersample;
+      draw_texel_height /= kDioramaSupersample;
+    }
   }
 
   if (!(layer->description->plane == kDioramaPlane_Backdrop) &&
@@ -2681,7 +2807,20 @@ static PresentationOutcome DrawDioramaLayerFace(
   }
 
   bool layer_shader_bound = false;
-  if (rim_light) {
+  if (priority_surface) {
+    const DioramaPrioritySurfaceEffectParams params = {
+      (float)capture->width, (float)capture->height,
+      layer->description->plane == kDioramaPlane_Bg1Hi,
+      layer->blend == kArRenderBlendMode_Add,
+    };
+    layer_shader_bound = DioramaEffectBackend_BindPrioritySurface(device, &params);
+    // A corrected low face cannot be followed by an uncorrected high face.
+    // After the pair's successful preflight, losing state mid-scene is fatal.
+    if (!layer_shader_bound) {
+      (void)DioramaEffectBackend_Unbind(device);
+      return kPresentationOutcome_CoreFailure;
+    }
+  } else if (rim_light) {
     const DioramaRimLightEffectParams params = {
         .texel_width = 1.0f / (float)SR_PPU_SURFACE_MAX_WIDTH,
         .texel_height = 1.0f / (float)SR_PPU_SURFACE_MAX_HEIGHT,
@@ -2776,7 +2915,8 @@ static PresentationOutcome DrawResolvedDioramaLayer(
     ArRenderDevice *device, const DioramaCapture *capture,
     const DioramaScene *scene, const DioramaViewGeometry *geometry,
     const DioramaFocalAperture *aperture, const ArRenderTexture *textures,
-    const DioramaResolvedLayer *resolved, ArRenderOutputFrame *output_frame,
+    ArRenderTexture priority_surface, const DioramaResolvedLayer *resolved,
+    ArRenderOutputFrame *output_frame,
     DioramaProjection *out_projection) {
   if (!resolved->alpha)
     return kPresentationOutcome_Complete;
@@ -2784,10 +2924,8 @@ static PresentationOutcome DrawResolvedDioramaLayer(
   if (!description)
     return kPresentationOutcome_Complete;
   DioramaPerformance_SetPlane(description->plane);
-  if (!DioramaLayerIsDrawable(description, textures, capture->pixels)) {
-    if (!DioramaLayerIsProjectable(description, textures, capture->pixels,
-                                   scene->effect_obj_priority_mask,
-                                   scene->effect_bg_plane_mask))
+  if (!DioramaLayerIsDrawable(description, textures, capture->pixels, scene)) {
+    if (!DioramaLayerIsProjectable(description, textures, capture->pixels, scene))
       return kPresentationOutcome_Complete;
     return DioramaSubmitPlaneEffect(output_frame, scene->plane_effect,
                                     scene->plane_effect_userdata,
@@ -2806,6 +2944,9 @@ static PresentationOutcome DrawResolvedDioramaLayer(
       .authored = resolved,
       .description = description,
       .texture = textures[description->plane],
+      .priority_surface = (description->plane == SR_PPU_OVERLAY_BG1 ||
+                           description->plane == kDioramaPlane_Bg1Hi)
+          ? priority_surface : ArRenderTexture_Invalid(),
       .shade =
           {
               (1.0f + (description->shade.r - 1.0f) * shade_mix) * scenery_light,
@@ -2875,7 +3016,8 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
   DioramaPerformance_SetViewport(geometry.width, geometry.height);
   DioramaResolvedLayer resolved[kDioramaLayerCount];
   const int resolved_count = ResolveDioramaLayers(scene, resolved);
-  PrepareDioramaView(capture, view, textures, resolved, resolved_count, &geometry);
+  PrepareDioramaView(capture, view, scene, textures, resolved, resolved_count,
+                     &geometry);
   PublishDioramaView(capture, view, &geometry, out_projection);
   PublishDioramaPlanes(capture, scene, &geometry, textures, resolved,
                        resolved_count, out_projection);
@@ -2910,15 +3052,20 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
   }
 
   DioramaFocalAperture aperture;
-  PrepareDioramaAperture(capture, &geometry, textures, resolved, resolved_count,
+  PrepareDioramaAperture(capture, scene, &geometry, textures, resolved, resolved_count,
                          &aperture);
   int draw_order[kDioramaLayerCount];
   const int draw_count =
       ResolveDioramaDrawOrder(scene, resolved, resolved_count, draw_order);
+  PresentationOutcome priority_outcome;
+  const ArRenderTexture priority_surface = BuildDioramaPrioritySurface(
+      device, capture, scene, textures, resolved, resolved_count, &priority_outcome);
+  outcome = PresentationOutcome_Combine(outcome, priority_outcome);
+  if (!PresentationOutcome_IsUsable(priority_outcome)) goto failed;
   for (int draw = 0; draw < draw_count; ++draw) {
     const PresentationOutcome layer = DrawResolvedDioramaLayer(
         device, capture, scene, &geometry, &aperture, textures,
-        &resolved[draw_order[draw]], &output_frame, out_projection);
+        priority_surface, &resolved[draw_order[draw]], &output_frame, out_projection);
     outcome = PresentationOutcome_Combine(outcome, layer);
     if (!PresentationOutcome_IsUsable(layer))
       goto failed;
@@ -2935,6 +3082,7 @@ failed:
 void Diorama_ResetRendererResources(ArRenderDevice *device) {
   DioramaRomSkyboxResource_Reset(device);
   ResetDioramaSupersample(device);
+  ResetDioramaPrioritySurface(device);
   ResetDioramaDofSource(device);
   ResetDioramaStackGroup(device);
   ResetDioramaSkyboxPrefilter(device);
@@ -2945,6 +3093,7 @@ void Diorama_ResetRendererResources(ArRenderDevice *device) {
 void Diorama_Shutdown(ArRenderDevice *device) {
   DioramaRomSkyboxResource_Reset(device);
   ResetDioramaSupersample(device);
+  ResetDioramaPrioritySurface(device);
   ResetDioramaDofSource(device);
   ResetDioramaStackGroup(device);
   ResetDioramaSkyboxPrefilter(device);

@@ -37,6 +37,9 @@ enum {
    * fixed-value object that existing reset/save code can memset safely. */
   kDioramaVirtualCellSpanMax = 512,
   kDioramaVirtualBandCount = 3,
+  kDioramaPixelEditMax = 256,
+  kDioramaTileStampMax = 512,
+  kDioramaTerrainProfileCount = 3, /* US, Japan, Europe (including German) */
 };
 
 /* Optional authored subsection of a room. The base room always resolves first;
@@ -180,6 +183,7 @@ typedef struct DioramaVirtualCellSpan {
   uint16_t x0, y0;
   uint16_t x1, y1;  /* inclusive */
   uint8_t band;
+  uint8_t terrain_mask; /* zero means US; otherwise bits US=1, JP=2, EU/GE=4 */
 } DioramaVirtualCellSpan;
 
 typedef struct DioramaVirtualLayerOverride {
@@ -193,9 +197,49 @@ typedef struct DioramaVirtualLayerOverride {
    * rooms mean "no rules" even though band 0 is a valid authored value. */
   uint8_t metatile_set[32];
   uint8_t metatile_bands[256];
+  uint8_t regional_metatile_set[2][32]; /* JP, EU; base arrays are US */
+  uint8_t regional_metatile_bands[2][256];
   uint16_t cell_span_count;
   DioramaVirtualCellSpan cell_spans[kDioramaVirtualCellSpanMax];
 } DioramaVirtualLayerOverride;
+
+/* Displayed 16x16 pixels; bit 15 is the leftmost pixel. Cell masks override
+ * metatile masks, including explicit all-zero masks. Diorama captures only. */
+typedef struct DioramaPixelEdit {
+  bool by_cell;
+  uint8_t metatile;
+  uint8_t terrain_mask;
+  int32_t x, y;
+  uint16_t black[16];
+} DioramaPixelEdit;
+
+typedef struct DioramaPixelLayerOverride {
+  uint16_t count;
+  DioramaPixelEdit edits[kDioramaPixelEditMax];
+} DioramaPixelLayerOverride;
+
+/* Frozen displayed tile words and depth bands. Coordinates may extend beyond
+ * the native map; these records are applied only to Diorama captures. */
+typedef struct DioramaTileStamp {
+  int16_t x, y;
+  uint16_t words[4];
+  uint8_t bands; /* two bits per quadrant, top-left first */
+  uint8_t metatile;
+  uint8_t terrain_mask;
+} DioramaTileStamp;
+
+typedef struct DioramaMapBounds {
+  bool set;
+  int16_t x0, y0, x1, y1;
+} DioramaMapBounds;
+
+typedef struct DioramaStampLayerOverride {
+  bool set_bounds;
+  int16_t x0, y0, x1, y1; /* editor bounds, exclusive upper edges */
+  DioramaMapBounds regional_bounds[2]; /* JP, EU; base bounds are US */
+  uint16_t count;
+  DioramaTileStamp cells[kDioramaTileStampMax];
+} DioramaStampLayerOverride;
 
 typedef struct DioramaRoomOverride {
   bool used;
@@ -204,7 +248,18 @@ typedef struct DioramaRoomOverride {
   uint8_t section;     /* DioramaLayerSection; Room is the base override */
   DioramaPlaneOverride planes[kDioramaPlane_Count];
   DioramaVirtualLayerOverride virtual_layers[2]; /* BG1, BG2 */
+  DioramaPixelLayerOverride pixel_layers[2];
+  DioramaStampLayerOverride stamp_layers[2];
 } DioramaRoomOverride;
+
+/* Resolve tile authoring for the active terrain snapshot, keeping plane and
+ * depth geometry shared. The source manifest is never modified. */
+bool DioramaLayerOrder_ForTerrain(const DioramaRoomOverride *room,
+                                  unsigned profile, DioramaRoomOverride *out);
+
+const uint16_t *DioramaLayerOrder_PixelMask(
+    const DioramaRoomOverride *room, unsigned bg, int cell_x,
+    int cell_y, uint8_t metatile);
 
 typedef struct DioramaLayerOrderTable {
   DioramaRoomOverride rooms[kDioramaRoomOverrideMax];

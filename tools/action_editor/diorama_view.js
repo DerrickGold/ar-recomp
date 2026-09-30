@@ -41,7 +41,7 @@ let otherTex = [null,null,null], otherKey = null, otherL = null;
 function otherLayerTextures() {
   const bg = bgIndex ^ 1;
   if (!room.bg[bg]) return null;
-  const key = keyOf(room, bg);
+  const key = `${sceneKey(room)}:${bg}`;
   if (otherKey === key && otherTex[0]) return { texes:otherTex, L:otherL };
   const L2 = decodeLayer(room, bg);
   const st2 = bucket(room, bg);

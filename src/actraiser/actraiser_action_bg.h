@@ -296,4 +296,18 @@ void ActRaiserActionBg_BeginRoomVariants(uint8_t terrain, uint8_t mosaic,
 void ActRaiserActionBg_Shutdown(void);
 const ActRaiserActionBgDiagnostics *ActRaiserActionBg_GetDiagnostics(void);
 
+/* Presentation-only black pixels; callers pass the live PPU coordinate policy
+ * and scroll state. No character/palette memory or normal output is changed. */
+bool ActRaiserActionBg_PixelEditsActive(void);
+bool ActRaiserActionBg_PixelLayerHasEdits(unsigned bg);
+/* Authored scenery may address signed cells beyond the immutable map edges.
+ * Local x/y are displayed 16px cell coordinates, before character flips. */
+bool ActRaiserActionBg_StampAt(unsigned bg, int source_x, int sample_y,
+                              uint16_t hscroll, uint16_t vscroll,
+                              uint16_t *entry, uint8_t *band,
+                              uint8_t *local_x, uint8_t *local_y, bool *black);
+bool ActRaiserActionBg_PixelBlackAt(unsigned bg, int source_x, int sample_y,
+                                    uint16_t hscroll, uint16_t vscroll,
+                                    uint8_t *band);
+
 #endif  /* AR_ACTRAISER_ACTION_BG_H */

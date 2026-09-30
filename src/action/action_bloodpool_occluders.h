@@ -2,6 +2,23 @@
 #define AR_ACTION_BLOODPOOL_OCCLUDERS_H
 #include <stdint.h>
 
+/* Native post ink (palette indices 1..7) in the marsh's water-contact CHR
+ * family. Indices 8..13 are lake pixels, so opacity alone cannot locate the
+ * submerged timber edge. Bit order matches kBloodpoolTileOpacity below. */
+static const uint64_t kBloodpoolPostTimber[256] = {
+  [0x56] = UINT64_C(0xfefefefefefefefe),
+  [0x57] = UINT64_C(0x00000044547c7c7c),
+  [0x5a] = UINT64_C(0x00000000000010d5),
+  [0x5b] = UINT64_C(0x00000000000c018f),
+  [0x62] = UINT64_C(0xfefefefefefefefe),
+  [0x63] = UINT64_C(0x7c7c7c7c7c7c7c7c),
+  [0x66] = UINT64_C(0x000000000c86b6fe),
+  [0x74] = UINT64_C(0xffffffffffffffff),
+  [0x75] = UINT64_C(0xffffffffffffffff),
+  [0x7a] = UINT64_C(0x7878787878787878),
+  [0xf4] = UINT64_C(0x0000000000307878),
+};
+
 /* Bloodpool 02/01 BG1 CHR silhouettes (palette index != 0), decoded from
  * native 4bpp tiles 00..FF. Bit y*8+x is opaque before native flips.
  * This 2 KiB material catalogue retains gaps in ropes, timber and banks;

@@ -32,9 +32,33 @@ select{background:var(--panel-2);border:1px solid var(--line);border-radius:5px;
 .app{display:grid;grid-template-columns:250px 1fr;height:100vh}
 .side{background:var(--panel);border-right:1px solid var(--line);
   overflow-y:auto;padding:12px}
-.main{display:grid;grid-template-rows:auto 1fr;min-width:0}
+.side-section{margin-top:14px;padding-top:9px;border-top:1px solid var(--line)}
+.side-section summary{cursor:pointer;color:var(--dim);font-size:11px;font-weight:600}
+.side-section summary:hover{color:var(--ink)}
+.side-section summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .bar{display:flex;gap:8px;align-items:center;padding:8px 12px;
   background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+[hidden]{display:none!important}
+.selection-tools{padding:9px 12px;background:#171d29;border-bottom:1px solid var(--line)}
+.selection-summary,.selection-actions,.selection-detail,.change-review{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.selection-summary{font-size:11px;color:var(--dim);margin-bottom:7px}
+.selection-summary b{color:var(--ink)}
+#selectionScope{margin-left:auto;color:var(--accent);font-family:var(--mono);font-size:10px}
+.selection-actions{gap:5px}
+.selection-detail{font-size:10px;color:var(--faint);margin-top:7px;line-height:1.5}
+#activeTool{color:var(--dim);font-weight:500}
+.change-review{padding:6px 12px;border-bottom:1px solid var(--line);background:var(--panel);font-size:11px}
+#changeSummary{color:#f0c55a;margin-right:auto}
+.change-review button{font-size:10px;padding:4px 8px}
+.change-review select{font-size:10px;padding:4px 6px}
+#highlightSummary{color:var(--dim);font-size:10px}
+.save-state{font-size:10px;color:var(--dim);border:1px solid var(--line);border-radius:4px;padding:4px 7px}
+.save-state.dirty{color:#f0c55a;border-color:#69552b;background:#302916}
+.pixel-inspector{position:absolute;z-index:10;right:10px;top:10px;width:248px;
+  max-width:calc(100% - 20px);max-height:calc(100% - 20px);overflow-y:auto;
+  padding:12px;background:var(--panel);border:1px solid #3a4156;border-radius:8px;box-shadow:0 12px 30px #0009}
+.inspector-header{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px}
 .spacer{flex:1}
 h1{font-size:13px;font-weight:600;margin:0 0 2px;letter-spacing:-.01em}
 .sub{font-size:11px;color:var(--faint);margin:0 0 14px;line-height:1.5}
@@ -54,9 +78,29 @@ h2:first-of-type{margin-top:0}
 kbd{font-family:var(--mono);font-size:10px;background:var(--sunk);
   border:1px solid var(--line);border-radius:3px;padding:1px 4px;color:var(--dim)}
 code{font-family:var(--mono);font-size:10.5px;color:#bcd4f5}
-.view{position:relative;overflow:hidden;background:var(--sunk);min-height:0}
+.view{position:relative;flex:1;overflow:hidden;background:var(--sunk);min-height:0}
 #map2d,#gl{position:absolute;top:0;left:0;width:100%;height:100%}
+#pixelCanvas{display:block;width:100%;height:auto;margin:7px 0;image-rendering:pixelated;
+  border:1px solid var(--line);cursor:crosshair;touch-action:none}
 #map2d{cursor:crosshair;image-rendering:pixelated}
+#map2d:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.tile-menu{position:fixed;z-index:20;width:260px;max-width:calc(100vw - 16px);
+  max-height:calc(100vh - 16px);overflow-y:auto;background:var(--panel);
+  border:1px solid #3a4156;border-radius:8px;padding:5px;
+  box-shadow:0 12px 36px #0009}
+.tile-menu[hidden]{display:none}
+.tile-menu-title{font-size:11px;font-weight:600;padding:7px 8px;color:var(--dim)}
+.tile-menu button{display:block;width:100%;text-align:left;background:transparent;
+  border:1px solid transparent;padding:7px 8px;border-radius:4px}
+.tile-menu button:hover,.tile-menu button:focus-visible{background:var(--accent-dim);
+  border-color:var(--accent);outline:none}
+.tile-menu button:disabled{background:transparent;border-color:transparent}
+.tile-menu-separator{height:1px;background:var(--line);margin:4px 3px}
+.tile-menu-note{font-size:10px;color:var(--faint);padding:7px 8px;line-height:1.4}
+.tile-action-status{position:absolute;top:10px;left:10px;pointer-events:none;
+  max-width:calc(100% - 20px);padding:6px 9px;border-radius:5px;
+  background:rgba(13,15,20,.9);border:1px solid var(--line);color:var(--dim);font-size:11px}
+.tile-action-status:empty{display:none}
 #gl{display:none}
 .legend{position:absolute;right:10px;bottom:10px;font-family:var(--mono);
   font-size:10px;color:var(--faint);background:rgba(13,15,20,.86);

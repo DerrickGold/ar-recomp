@@ -36,6 +36,9 @@ class Scripts(HTMLParser):
 
 
 class ActionEditorBuildTest(unittest.TestCase):
+    def test_regional_terrain_switching_and_scoped_ini(self):
+        subprocess.run(["node", str(ROOT / "tests/action_editor_terrain.test.mjs")], check=True)
+
     def test_bundle_has_no_external_scripts_and_preserves_source_order(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -57,7 +60,8 @@ class ActionEditorBuildTest(unittest.TestCase):
             rooms.write_text(json.dumps(data))
             layers.write_text(text)
             scripts = Scripts(build_document(rooms, layers))
-            self.assertEqual(len(scripts.bodies), 8)
+            self.assertEqual(len(scripts.bodies),
+                             len(SCRIPT_SOURCE.findall((SOURCES / "editor.body.html").read_text())) + 2)
             program = ('const vm=require("node:vm");const context={window:{}};'
                        'vm.runInNewContext(JSON.parse(process.argv[1]),context);'
                        'process.stdout.write(JSON.stringify(context.window));')

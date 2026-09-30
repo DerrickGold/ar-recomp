@@ -17,6 +17,7 @@ const kMaxUndo = 200;
 let pendingOp = null;
 
 function beginOp(label) {
+  returnToEditedTiles();
   if (pendingOp) commitOp();
   pendingOp = { label, parts: {} };
 }
@@ -25,7 +26,7 @@ function beginOp(label) {
  * undo as one. Ordinary painting simply has one part. */
 function partFor(key) {
   if (!pendingOp) return null;
-  if (!pendingOp.parts[key]) pendingOp.parts[key] = { before:{ cell:{}, id:{} } };
+  if (!pendingOp.parts[key]) pendingOp.parts[key] = { before:{ cell:{}, id:{}, pixelCell:{}, pixelId:{}, stamp:{} } };
   return pendingOp.parts[key];
 }
 function recordCellIn(key, cell) {
@@ -46,7 +47,22 @@ function commitOp() {
   let changed = false;
   for (const key in op.parts) {
     const part = op.parts[key], bucket = store[key] || { byCell:{}, byId:{} };
-    part.after = { cell:{}, id:{} };
+    part.after = { cell:{}, id:{}, pixelCell:{}, pixelId:{}, stamp:{} };
+    const pasted=stampStore[key]||{cells:{},bounds:undefined};
+    for(const k in part.before.stamp) {
+      part.after.stamp[k]=pasted.cells[k];
+      if(part.after.stamp[k]!==part.before.stamp[k])changed=true;
+    }
+    if('bounds' in part.before) {
+      part.after.bounds=pasted.bounds;
+      if(part.after.bounds!==part.before.bounds)changed=true;
+    }
+    const pixels = pixelStore[key] || {byCell:{},byId:{}};
+    for (const [kind,target] of [['pixelCell',pixels.byCell],['pixelId',pixels.byId]])
+      for (const k in part.before[kind]) {
+        part.after[kind][k] = target[k];
+        if (part.after[kind][k] !== part.before[kind][k]) changed = true;
+      }
     for (const k in part.before.cell) {
       part.after.cell[k] = bucket.byCell[k];
       if (part.after.cell[k] !== part.before.cell[k]) changed = true;
@@ -57,6 +73,7 @@ function commitOp() {
     }
   }
   if (!changed) return;                 /* a gesture that altered nothing */
+  markEditorChanged();
   undoStack.push(op);
   if (undoStack.length > kMaxUndo) undoStack.shift();
   redoStack.length = 0;
@@ -72,14 +89,27 @@ function applySide(op, which) {
    * into a layer you cannot see would look like nothing happened. A
    * multi-layer op stays put and just refreshes what is on screen. */
   if (keys.length === 1 && keys[0] !== current) {
-    const [g, m, bg] = keys[0].split(':').map(Number);
+    const [g, m, bg, profile] = keys[0].split(':').map(Number);
     const idx = DATA.rooms.findIndex(r => r.group===g && r.map===m);
-    if (idx >= 0) { room = DATA.rooms[idx]; $('#room').value = String(idx); setLayer(bg); }
+    if (idx >= 0) {
+      terrainProfile=profile;room = terrainRoom(DATA.rooms[idx],profile);
+      $('#room').value = String(idx);setLayer(bg);
+    }
   }
   for (const key of keys) {
     const side = op.parts[key][which];
+    const pasted=stampStore[key]??={cells:{},bounds:undefined};
+    for(const k in side.stamp)setKey(pasted.cells,k,side.stamp[k]);
+    if('bounds' in side){pasted.bounds=side.bounds;if(key===keyOf(room,bgIndex))refreshNativeCameraControls();}
+    if(Object.keys(side.stamp).length||'bounds' in side)surfacesDirty=compositeDirty=true;
     if (!store[key]) store[key] = { byId:{}, byCell:{} };
     const bucket = store[key];
+    if (!pixelStore[key]) pixelStore[key] = {byCell:{},byId:{}};
+    for (const k in side.pixelCell) setKey(pixelStore[key].byCell,k,side.pixelCell[k]);
+    for (const k in side.pixelId) setKey(pixelStore[key].byId,k,side.pixelId[k]);
+    if (key === keyOf(room,bgIndex) &&
+        (Object.keys(side.pixelCell).length || Object.keys(side.pixelId).length))
+      surfacesDirty = compositeDirty = true;
     for (const k in side.cell) setKey(bucket.byCell, k, side.cell[k]);
     for (const k in side.id)   setKey(bucket.byId,   k, side.id[k]);
     if (key !== keyOf(room, bgIndex)) continue;
@@ -87,7 +117,7 @@ function applySide(op, which) {
     for (const k in side.id)   markIdDirty(Number(k));
   }
   glDirty = true; invalidateOther(); invalidateGameComposite();
-  configDirty = true; tally(); draw();
+  markEditorChanged(); refreshPixelEditor(); tally(); draw();
   return true;
 }
 function undo() {
@@ -106,6 +136,7 @@ function redo() {
   refreshHistoryButtons();
 }
 function refreshHistoryButtons() {
+  refreshEditorFeedback();
   const u = $('#undoBtn'), r = $('#redoBtn');
   if (!u || !r) return;
   u.disabled = !undoStack.length; r.disabled = !redoStack.length;
@@ -117,9 +148,24 @@ function refreshHistoryButtons() {
 
 /* ---- painting ---------------------------------------------------------- */
 function paintCell(cx, cy, value) {
+  const pasted=stampBucket(room,bgIndex).cells[`${cx},${cy}`];
+  if(pasted) {
+    paintStampBands(cx,cy,value,brush==='class');selectCell(cx,cy);
+    if(brush==='class') {
+      recordId(pasted.id);
+      if(value===null)delete st.byId[pasted.id];else st.byId[pasted.id]=value;
+      markIdDirty(pasted.id);
+    }
+    return;
+  }
   if (cx<0 || cy<0 || cx>=L.cellsW || cy>=L.cellsH) return;
-  invalidateGameComposite(); configDirty = true;
+  selectCell(cx,cy,brush === 'class');
+  invalidateGameComposite(); markEditorChanged();
   const cell = cy*L.cellsW + cx, id = L.cellId[cell];
+  if(brush==='class') {
+    for(const [pos,c] of Object.entries(stampBucket(room,bgIndex).cells))
+      if(c.id===id){const [x,y]=pos.split(',').map(Number);paintStampBands(x,y,value);}
+  }
   if (value === null) {                       /* Alt: back to authentic */
     recordCell(cell); delete st.byCell[cell];
     if (brush === 'class') { recordId(id); delete st.byId[id]; markIdDirty(id); }
@@ -140,14 +186,18 @@ function markIdDirty(id) {
   }
 }
 function paintRect(x0, y0, x1, y1, value) {
-  invalidateGameComposite(); configDirty = true;
-  for (let cy=Math.min(y0,y1); cy<=Math.max(y0,y1); cy++)
-    for (let cx=Math.min(x0,x1); cx<=Math.max(x0,x1); cx++) {
-      const cell = cy*L.cellsW + cx;
-      recordCell(cell);
-      if (value === null) delete st.byCell[cell]; else st.byCell[cell] = value;
+  invalidateGameComposite(); markEditorChanged();
+  const bounds=mapBounds(room,bgIndex,L);
+  for(let cy=Math.max(bounds.y0,Math.min(y0,y1));cy<Math.min(bounds.y1,Math.max(y0,y1)+1);cy++)
+    for(let cx=Math.max(bounds.x0,Math.min(x0,x1));cx<Math.min(bounds.x1,Math.max(x0,x1)+1);cx++) {
+      if(paintStampBands(cx,cy,value)){selectedStampKeys.add(`${cx},${cy}`);continue;}
+      if(cx<0||cy<0||cx>=L.cellsW||cy>=L.cellsH)continue;
+      const cell=cy*L.cellsW+cx;
+      selectedCells.add(cell);recordCell(cell);
+      if(value===null)delete st.byCell[cell];else st.byCell[cell]=value;
       markCellDirty(cell);
     }
+  refreshSelectionControls();
 }
 const toCell = ev => {
   const r = cvs.getBoundingClientRect();
@@ -158,13 +208,21 @@ const toCell = ev => {
 let drag = null;
 cvs.addEventListener('mousedown', ev => {
   if (mode !== '2d') return;
-  /* Middle button, shift, or the explicit Pan tool. Requiring a modifier was
-   * the only way to move around and nothing on screen said so. */
-  if (ev.button === 1 || ev.shiftKey || brush === 'pan') {
+  if(ev.button===2||macControlClick(ev))return;
+  if (ev.button === 1 || brush === 'pan') {
     drag = { pan:true, x:ev.clientX, y:ev.clientY }; return;
   }
+  if(ev.button!==0)return;
   const [cx, cy] = toCell(ev);
-  if (actor.show && !ev.altKey) {
+  /* Defer Shift-click until release. A deliberate drag still pans, while a
+   * click selects an inclusive rectangle without painting or stamping. */
+  if(ev.shiftKey) {
+    drag={shiftSelect:true,x:ev.clientX,y:ev.clientY,cx,cy,anchor:selectionAnchor};
+    return;
+  }
+  if(brush==='stamp'){stampTiles(cx,cy);return;}
+  if(brush==='selectRect'){drag={selectRect:true,x0:cx,y0:cy,x1:cx,y1:cy};draw();return;}
+  if (actor.show && !ev.altKey && brush !== 'select') {
     const px = (ev.clientX - cvs.getBoundingClientRect().left - view.x)/view.scale;
     const py = (ev.clientY - cvs.getBoundingClientRect().top  - view.y)/view.scale;
     if (px >= actor.x && px <= actor.x+actor.w && py >= actor.y && py <= actor.y+actor.h) {
@@ -172,20 +230,33 @@ cvs.addEventListener('mousedown', ev => {
     }
   }
   const value = ev.altKey ? null : band;
-  if (brush === 'rect') { drag = { rect:true, x0:cx, y0:cy, x1:cx, y1:cy, value }; }
+  if (brush === 'select') {
+    if (!ev.ctrlKey && !ev.metaKey) {selectedCells.clear();selectedStampKeys.clear();}
+    selectionRect=null;
+    drag = { select:true }; selectCell(cx,cy); draw();
+  } else if (brush === 'rect') { drag = { rect:true, x0:cx, y0:cy, x1:cx, y1:cy, value }; }
   else {
     beginOp(ev.altKey ? 'revert' : `paint ${BANDS[band].name.toLowerCase()}`);
     drag = { paint:true, value }; paintCell(cx, cy, value);
     glDirty = true; tally(); draw();
   }
-  if (cx>=0 && cy>=0 && cx<L.cellsW && cy<L.cellsH)
-    lastEntry = L.words[(cy*2)*L.tilesW + cx*2];
+  const picked=displayedCell(room,bgIndex,L,cx,cy);
+  if(picked)lastEntry=picked.words[0];
+  setSelectionAnchor(cx,cy);
+  refreshSelectionControls();
 });
 window.addEventListener('mousemove', ev => {
   if (mode !== '2d') return;            /* the orbit handler owns 3D */
   const [cx, cy] = toCell(ev);
   hud(cx, cy);
+  if(brush==='stamp'){stampHover=[cx,cy];draw();}
   if (!drag) return;
+  if(drag.shiftSelect) {
+    const dx=ev.clientX-drag.x,dy=ev.clientY-drag.y;
+    if(dx*dx+dy*dy<16)return;
+    view.x+=dx;view.y+=dy;
+    drag={pan:true,x:ev.clientX,y:ev.clientY};draw();return;
+  }
   if (drag.actor2d) {
     const r = cvs.getBoundingClientRect();
     actor.x = Math.round((ev.clientX-r.left-view.x)/view.scale - drag.ox);
@@ -194,15 +265,29 @@ window.addEventListener('mousemove', ev => {
   }
   if (drag.pan) { view.x += ev.clientX-drag.x; view.y += ev.clientY-drag.y;
                   drag.x=ev.clientX; drag.y=ev.clientY; draw(); }
+  else if (drag.select) { selectCell(cx,cy); draw(); }
   else if (drag.paint) {
     /* Paint on every event so a fast drag cannot skip a cell, but let the
      * redraw collapse onto the next frame like everything else. */
     paintCell(cx, cy, drag.value);
     glDirty = true; tally(); draw();
   }
-  else if (drag.rect) { drag.x1=cx; drag.y1=cy; draw(); }
+  else if (drag.rect||drag.selectRect) { drag.x1=cx; drag.y1=cy; draw(); }
 });
 window.addEventListener('mouseup', () => {
+  if(drag?.shiftSelect) {
+    const [x,y]=drag.anchor||[drag.cx,drag.cy];
+    selectRectangle(x,y,drag.cx,drag.cy);
+    const picked=displayedCell(room,bgIndex,L,drag.cx,drag.cy);
+    if(picked) {
+      lastEntry=picked.words[0];
+      pixelStamp=stampBucket(room,bgIndex).cells[`${drag.cx},${drag.cy}`]
+        ?`${drag.cx},${drag.cy}`:null;
+      pixelCell=pixelStamp?null:drag.cy*L.cellsW+drag.cx;
+    } else {pixelStamp=null;pixelCell=null;}
+    refreshSelectionControls();
+  }
+  if(drag?.selectRect)selectRectangle(drag.x0,drag.y0,drag.x1,drag.y1);
   if (drag && drag.rect) {
     beginOp('rectangle');
     paintRect(drag.x0, drag.y0, drag.x1, drag.y1, drag.value);
@@ -224,31 +309,53 @@ cvs.addEventListener('wheel', ev => {
 }, { passive:false });
 
 /* ---- select-by --------------------------------------------------------- */
-$('#selPrio').onclick = () => {
-  configDirty = true;
-  beginOp('select by priority');
-  /* Every tile the artist already marked priority-1. In a room that uses the
-   * bit meaningfully this is the split they intended, and it is usually the
-   * best first pass before any hand work. */
-  for (let cy=0; cy<L.cellsH; cy++) for (let cx=0; cx<L.cellsW; cx++) {
-    let any = false;
-    for (let q=0;q<4;q++)
-      if (L.words[(cy*2+(q>>1))*L.tilesW + cx*2+(q&1)] & 0x2000) any = true;
-    if (any) { recordCell(cy*L.cellsW+cx); st.byCell[cy*L.cellsW+cx] = band; }
+function selectMatchingCells(predicate) {
+  selectedCells.clear();selectedStampKeys.clear();selectionRect=null;selectionAnchor=null;
+  const pasted=stampBucket(room,bgIndex).cells;
+  for(let cy=0;cy<L.cellsH;cy++)for(let cx=0;cx<L.cellsW;cx++) {
+    const key=`${cx},${cy}`;
+    if(pasted[key])continue;
+    if(predicate(displayedCell(room,bgIndex,L,cx,cy)))selectedCells.add(cy*L.cellsW+cx);
   }
-  commitOp(); invalidate();
+  for(const [key,c] of Object.entries(pasted))if(predicate(c))selectedStampKeys.add(key);
+  refreshSelectionControls();draw();
+}
+$('#selPrio').onclick=()=>selectMatchingCells(c=>c.words.some(word=>word&0x2000));
+$('#selPal').onclick=()=>{
+  if(lastEntry===null)return;
+  const palette=(lastEntry>>10)&7;
+  selectMatchingCells(c=>((c.words[0]>>10)&7)===palette);
 };
-$('#selPal').onclick = () => {
-  if (lastEntry === null) return;
-  configDirty = true;
-  beginOp('select by palette');
-  const want = (lastEntry>>10) & 7;
-  for (let cy=0; cy<L.cellsH; cy++) for (let cx=0; cx<L.cellsW; cx++)
-    if ((L.words[(cy*2)*L.tilesW + cx*2] >> 10 & 7) === want) {
-      recordCell(cy*L.cellsW+cx); st.byCell[cy*L.cellsW+cx] = band;
-    }
-  commitOp(); invalidate();
-};
+function deselect() {
+  commitOp(); drag = null;
+  selectedCells.clear();selectedStampKeys.clear();selectionRect=null;stampHover=null;
+  selectionAnchor=null;
+  if(brush==='stamp'){$('#bSelect').onclick();}
+  lastEntry = null; pixelCell = null;pixelStamp=null;
+  refreshSelectionControls(); draw();
+}
+$('#deselect').onclick = deselect;
+function applySelectionBand(value) {
+  if (!selectedCells.size && !selectedStampKeys.size) return false;
+  beginOp(value===null?'reset selected tile bands':`apply ${BANDS[value].name.toLowerCase()} to selection`);
+  let changed=false;
+  for(const cell of selectedStampKeys) {
+    const target=stampBucket(room,bgIndex),tile=target.cells[cell];
+    if(!tile)continue;
+    const bands=tile.words.map(word=>value===null?authenticBand(word):value);
+    if(bands.every((b,i)=>b===tile.bands[i]))continue;
+    recordStamp(keyOf(room,bgIndex),cell);target.cells[cell]={...tile,bands};changed=true;
+  }
+  for (const cell of selectedCells) {
+    const next=value===null?undefined:value;
+    if(st.byCell[cell]===next)continue;
+    recordCell(cell);setKey(st.byCell,cell,next);changed=true;
+  }
+  commitOp();
+  if(changed){markEditorChanged(); invalidate();refreshSelectionControls();}
+  return changed;
+}
+$('#applyBand').onclick = () => applySelectionBand(band);
 /* Clearing every edit in a bucket returns those tiles to the band their own
  * priority bit selects -- which is what "ROM default" means here. The baseline
  * is never stored, so reverting is deletion, not a rewrite. */
@@ -256,7 +363,7 @@ function clearKeys(keys, label) {
   const live = keys.filter(k => store[k] &&
     (Object.keys(store[k].byCell).length || Object.keys(store[k].byId).length));
   if (!live.length) return 0;
-  configDirty = true;
+  markEditorChanged();
   beginOp(label);
   let n = 0;
   for (const key of live) {

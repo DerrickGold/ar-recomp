@@ -4,6 +4,9 @@ Guides for playing ActRaiser Recompiled, creating replacement content, and
 working with the original game's data. For downloads and build instructions,
 start with the [project README](https://github.com/DerrickGold/ar-recomp#quick-start).
 
+The [next release notes](release-notes.md) are a draft of changes since v0494,
+including upgrade guidance and remaining validation.
+
 ## Playing and customizing
 
 - [Manual](manual.md) — controls, settings, saves, and troubleshooting.

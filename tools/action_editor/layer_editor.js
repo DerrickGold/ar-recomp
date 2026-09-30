@@ -8,8 +8,9 @@
  * array of metatile ids, so reclassifying an id lifts every instance of that
  * art across the whole room in one click. The cell brush exists because the
  * same art is often reused both near and far in one room. */
-const store = {};   /* store[`${g}:${m}:${bg}`] = { byId:{}, byCell:{} } */
-const keyOf = (r, bg) => `${r.group}:${r.map}:${bg}`;
+const pixelStore = {};
+const store = {};   /* store[`${g}:${m}:${bg}:${family}`] = { byId:{}, byCell:{} } */
+const keyOf = (r, bg) => `${r.group}:${r.map}:${bg}:${editFamily(r,bg).profile}`;
 function bucket(r, bg) {
   const k = keyOf(r, bg);
   if (!store[k]) store[k] = { byId:{}, byCell:{} };
@@ -31,7 +32,8 @@ const roomKey = r => `${r.group}:${r.map}`;
 function emptyPlane() {
   return {
     setOrder:false,order:0,setZ:false,z:0,setAlpha:false,alpha:255,
-    setSource:false,source:'captured',setRake:false,rake:0,
+    setSource:false,source:'captured',setTransparent:false,transparent:'off',
+    setRake:false,rake:0,
     setBow:false,bow:0,setThickness:false,thickness:0,
     setStack:false,stack:0,setStackCopies:false,stackCopies:0,
     setStackDensity:false,stackDensity:0,
@@ -121,7 +123,10 @@ function iniWords(rhs) {
   return values;
 }
 function resetLoadedConfig() {
+  selectionAnchor=null;
   for (const key of Object.keys(store)) delete store[key];
+  for (const key of Object.keys(pixelStore)) delete pixelStore[key];
+  for (const key of Object.keys(stampStore)) delete stampStore[key];
   for (const key of Object.keys(configRooms)) delete configRooms[key];
 }
 function loadIniText(text, name) {
@@ -143,7 +148,24 @@ function loadIniText(text, name) {
     if (!active) continue;
     const eq = line.indexOf('=');
     if (eq < 0) continue;
-    const token = line.slice(0,eq).trim(), values = iniWords(line.slice(eq+1));
+    const key=regionalKey(line.slice(0,eq).trim());
+    if(!key)continue;
+    const [token,region]=key;
+    const values = iniWords(line.slice(eq+1));
+    if(region!==undefined)values.terrain=region;
+    if(!terrainMask(values.terrain))continue;
+    const sm=token.match(/^bg([12])-(stamp|map)$/);
+    if(sm){
+      const bg=Number(sm[1])-1;
+      for(const variant of regionalRooms(active,bg,values.terrain))loadStampIni(variant,bg,values);
+      continue;
+    }
+    const pm = token.match(/^bg([12])-pixels$/);
+    if (pm) {
+      const bg=Number(pm[1])-1;
+      for(const variant of regionalRooms(active,bg,values.terrain))loadPixelIni(variant,bg,values);
+      continue;
+    }
     if (planeTokens.has(token)) {
       const p = roomConfig(active).planes[token] || emptyPlane();
       if (values.z !== undefined && Number.isFinite(Number(values.z)))
@@ -154,6 +176,8 @@ function loadIniText(text, name) {
         { p.setAlpha = true; p.alpha = Number(values.alpha); }
       if (values.source !== undefined)
         { p.setSource = true; p.source = values.source; }
+      if (values.transparent !== undefined && /^(off|black|cgram-[0-9a-fA-F]{2})$/.test(values.transparent))
+        { p.setTransparent = true; p.transparent = values.transparent; }
       if (values.rake !== undefined && Number.isFinite(Number(values.rake)))
         { p.setRake = true; p.rake = Number(values.rake); }
       if (values.bow !== undefined && Number.isFinite(Number(values.bow)))
@@ -178,6 +202,7 @@ function loadIniText(text, name) {
     const vm = token.match(/^bg([12])-virtual$/);
     if (!vm) continue;
     const bg = Number(vm[1]) - 1, v = roomConfig(active).virtual[bg];
+    if(region!==undefined&&values.metatile===undefined&&values.cells===undefined)continue;
     if (values.z !== undefined && Number.isFinite(Number(values.z)))
       { v.setZ = true; v.z = Number(values.z); }
     if (values.order !== undefined && /^\d+$/.test(values.order))
@@ -186,24 +211,27 @@ function loadIniText(text, name) {
       { v.setAlpha = true; v.alpha = Number(values.alpha); }
     const parsedBand = /^\d+$/.test(values.band || '') ? Number(values.band) : -1;
     if (parsedBand < 0 || parsedBand >= BANDS.length) continue;
-    const target = bucket(active, bg);
-    if (values.metatile !== undefined && /^[0-9a-fA-F]{1,2}$/.test(values.metatile)) {
-      target.byId[parseInt(values.metatile, 16)] = parsedBand;
-    } else if (values.cells !== undefined) {
-      const cm = values.cells.match(/^(\d+),(\d+)-(\d+),(\d+)$/);
-      const layer = active.bg[bg];
-      if (!cm || !layer) continue;
-      const [x0,y0,x1,y1] = cm.slice(1).map(Number);
-      const cellsW = layer.pagesWide * 16, cellsH = layer.pagesHigh * 16;
-      if (x0 > x1 || y0 > y1 || x1 >= cellsW || y1 >= cellsH) {
-        warnings.push(`${active.group}:${active.map} BG${bg+1} cells:${values.cells}`);
-        continue;
+    for(const variant of regionalRooms(active,bg,values.terrain)) {
+      const target = bucket(variant, bg);
+      if (values.metatile !== undefined && /^[0-9a-fA-F]{1,2}$/.test(values.metatile)) {
+        target.byId[parseInt(values.metatile, 16)] = parsedBand;
+      } else if (values.cells !== undefined) {
+        const cm = values.cells.match(/^(\d+),(\d+)-(\d+),(\d+)$/);
+        const layer = variant.bg[bg];
+        if (!cm || !layer) continue;
+        const [x0,y0,x1,y1] = cm.slice(1).map(Number);
+        const cellsW = layer.pagesWide * 16, cellsH = layer.pagesHigh * 16;
+        if (x0 > x1 || y0 > y1 || x1 >= cellsW || y1 >= cellsH) {
+          warnings.push(`${active.group}:${active.map} BG${bg+1} cells:${values.cells}`);
+          continue;
+        }
+        for (let y=y0; y<=y1; y++) for (let x=x0; x<=x1; x++)
+          target.byCell[y*cellsW+x] = parsedBand;
       }
-      for (let y=y0; y<=y1; y++) for (let x=x0; x<=x1; x++)
-        target.byCell[y*cellsW+x] = parsedBand;
     }
   }
-  configDirty = false;
+  hydrateStampMasks();
+  configDirty = false;captureEditorSavepoint();
   $('#iniName').textContent = sourceIniName;
   $('#iniName').title = warnings.length
     ? `${warnings.length} out-of-bounds virtual cell record(s) skipped` : 'Loaded INI';
@@ -231,7 +259,7 @@ function cellRuns(r, bg) {
 const fmtIniNumber = value => Number(value).toFixed(4)
   .replace(/0+$/,'').replace(/\.$/,'').replace(/^-0$/,'0');
 function planeIsAuthored(p) {
-  return !!p && (p.setOrder||p.setZ||p.setAlpha||p.setSource||p.setRake||
+  return !!p && (p.setOrder||p.setZ||p.setAlpha||p.setSource||p.setTransparent||p.setRake||
     p.setBow||p.setThickness||p.setStack||p.setStackCopies||
     p.setStackDensity||p.setStackDirection||p.setVoxel||p.setVoxelCopies);
 }
@@ -246,6 +274,7 @@ function planeIniLines(r) {
     if(p.setZ)fields.push(`z:${fmtIniNumber(p.z)}`);
     if(p.setAlpha)fields.push(`alpha:${p.alpha}`);
     if(p.setSource)fields.push(`source:${p.source}`);
+    if(p.setTransparent)fields.push(`transparent:${p.transparent}`);
     if(p.setRake)fields.push(`rake:${fmtIniNumber(p.rake)}`);
     if(p.setBow)fields.push(`bow:${fmtIniNumber(p.bow)}`);
     if(p.setThickness)fields.push(`thick:${fmtIniNumber(p.thickness)}`);
@@ -269,19 +298,29 @@ function virtualIniLines(r) {
     if (v.setOrder) geometry.push(`order:${v.order}`);
     if (v.setAlpha) geometry.push(`alpha:${v.alpha}`);
     if (geometry.length) lines.push(`${token} = ${geometry.join(' ')}`);
-    const target = bucket(r,bg);
-    for (const [id,b] of Object.entries(target.byId).sort((a,b)=>Number(a[0])-Number(b[0])))
-      lines.push(`${token} = metatile:${Number(id).toString(16).toUpperCase().padStart(2,'0')} band:${b}`);
-    for (const s of cellRuns(r,bg))
-      lines.push(`${token} = cells:${s.x0},${s.y0}-${s.x1},${s.y1} band:${s.band}`);
+    const records=regionalRecords(r,bg,variant=>{
+      const result=[],target = bucket(variant,bg);
+      for (const [id,b] of Object.entries(target.byId).sort((a,b)=>Number(a[0])-Number(b[0])))
+        result.push(`${token} = metatile:${Number(id).toString(16).toUpperCase().padStart(2,'0')} band:${b}`);
+      for (const s of cellRuns(variant,bg))
+        result.push(`${token} = cells:${s.x0},${s.y0}-${s.x1},${s.y1} band:${s.band}`);
+      return result;
+    });
+    if(records.filter(line=>line.includes(" cells:")).length>kVirtualCellSpanMax)
+      throw new Error(`Maximum ${kVirtualCellSpanMax} saved cell spans per BG across terrain versions`);
+    lines.push(...records);
   }
   return lines;
 }
-const roomIniLines = r => [...planeIniLines(r),...virtualIniLines(r)];
+const roomIniLines = r => [...planeIniLines(r),...virtualIniLines(r),...pixelIniLines(r),...stampIniLines(r)];
 function ownedIniLine(line) {
   const match=stripIniComment(line).match(/^([^=\s]+)\s*=/);
   if(!match)return false;
-  return EDITABLE_PLANE_TOKENS.has(match[1])||/^bg[12]-virtual$/.test(match[1]);
+  const key=regionalKey(match[1]);
+  if(!key)return false;
+  const [token,region]=key;
+  return EDITABLE_PLANE_TOKENS.has(token)&&region===undefined||
+    /^bg[12]-(virtual|pixels|stamp|map)$/.test(token)&&!!terrainMask(region);
 }
 function mergeDioramaIni() {
   const hadFinalNewline = /\r?\n$/.test(sourceIniText);
@@ -352,10 +391,60 @@ function cellEdited(st, L, cx, cy) {
 }
 
 /* ---- state ------------------------------------------------------------ */
-let room = DATA.rooms[0], bgIndex = 0, L = null, st = null;
-let band = 2, brush = 'class', mode = '2d', tint = false;
+let room = terrainRoom(DATA.rooms[0]), bgIndex = 0, L = null, st = null;
+let band = 2, brush = 'select', mode = '2d', tint = false;
 let planeToken = 'bg1';
 let lastEntry = null;
+const selectedCells = new Set();
+let selectionAnchor = null;
+let selectionLayer = '', showEditOutlines = true;
+function syncSelectionLayer() {
+  const key = keyOf(room,bgIndex);
+  if (selectionLayer !== key) {
+    selectedCells.clear(); selectedStampKeys.clear(); selectionRect=null;selectionAnchor=null;
+    lastEntry = null; pixelCell = null; pixelStamp=null;
+    if(brush==='stamp'&&tileClipboard?.key!==key)$('#bSelect').onclick();
+    selectionLayer = key;
+  }
+  refreshSelectionControls();
+}
+function setSelectionAnchor(cx,cy) {
+  const bounds=mapBounds(room,bgIndex,L);
+  selectionAnchor=cx>=bounds.x0&&cy>=bounds.y0&&cx<bounds.x1&&cy<bounds.y1
+    ?[cx,cy]:null;
+}
+function focusTileAt(cx,cy) {
+  const tile=displayedCell(room,bgIndex,L,cx,cy);
+  pixelStamp=tile&&stampBucket(room,bgIndex).cells[`${cx},${cy}`]?`${cx},${cy}`:null;
+  pixelCell=tile&&!pixelStamp?cy*L.cellsW+cx:null;
+  lastEntry=tile?tile.words[0]:null;
+}
+function refreshSelectionControls() {
+  $('#selectionInfo').textContent = `${selectedCells.size+selectedStampKeys.size} cells selected`
+    +(selectionAnchor?` · start ${selectionAnchor[0]},${selectionAnchor[1]}`:'');
+  $('#deselect').disabled = selectedCells.size === 0 && selectedStampKeys.size === 0 && !selectionRect && brush!=='stamp' && lastEntry === null;
+  $('#applyBand').disabled = selectedCells.size === 0 && selectedStampKeys.size === 0;
+  $('#pixelSelectionBlack').disabled=$('#pixelSelectionBlackQuick').disabled=$('#applyBand').disabled;
+  refreshPixelEditor();refreshStampControls();refreshEditorFeedback();
+}
+function selectCell(cx,cy,allInstances = false) {
+  selectionRect=null;
+  const pasted=stampBucket(room,bgIndex).cells[`${cx},${cy}`];
+  if(pasted) {
+    pixelCell=null;pixelStamp=`${cx},${cy}`;selectedStampKeys.add(pixelStamp);
+    refreshSelectionControls();return;
+  }
+  pixelStamp=null;
+  if (cx<0 || cy<0 || cx>=L.cellsW || cy>=L.cellsH) return;
+  const cell = cy*L.cellsW+cx;
+  pixelCell = cell;
+  if (allInstances) {
+    const id = L.cellId[cell];
+    for (let i=0; i<L.cellId.length; i++)
+      if (L.cellId[i] === id) selectedCells.add(i);
+  } else selectedCells.add(cell);
+  refreshSelectionControls();
+}
 let view = { x:0, y:0, scale:1 };           /* 2D pan/zoom */
 /* The camera frames a WINDOW of the level, not the whole thing. A room is up
  * to 4096px long and the game only ever shows 256 of them, so orbiting a
@@ -471,9 +560,10 @@ let fitted = false;
 function fitView() {
   const r = cvs.getBoundingClientRect();
   if (r.width < 8 || r.height < 8) return false;
-  view.scale = Math.min(r.width / L.w, r.height / L.h);
-  view.x = (r.width  - L.w*view.scale) / 2;
-  view.y = (r.height - L.h*view.scale) / 2;
+  const b=mapBounds(room,bgIndex,L),w=(b.x1-b.x0)*16,h=(b.y1-b.y0)*16;
+  view.scale = Math.min(r.width / w, r.height / h);
+  view.x = (r.width - w*view.scale)/2 - b.x0*16*view.scale;
+  view.y = (r.height - h*view.scale)/2 - b.y0*16*view.scale;
   fitted = true;
   return true;
 }
@@ -514,28 +604,36 @@ let game2dCache = new Map();
 function invalidateGameComposite() {
   game2dCache.clear(); native2dCache=null; nativeBandCache=null;
 }
-function gameLayerSurfaces(r, bg) {
-  const key = `${keyOf(r,bg)}:${tint ? 1 : 0}:${animationPhase(r)}`
-    + `:${bg === 1 ? bg2PagePhase(r) : 0}`;
+function gameLayerSurfaces(r, bg, original=false) {
+  const key = `${sceneKey(r)}:${bg}:${tint ? 1 : 0}:${animationPhase(r)}`
+    + `:${bg === 1 ? bg2PagePhase(r) : 0}:${original?1:0}`;
   if (game2dCache.has(key)) return game2dCache.get(key);
   const layer = decodeLayer(r,bg), state = bucket(r,bg);
   if (!layer) return null;
-  const images = [new ImageData(layer.w,layer.h), new ImageData(layer.w,layer.h)];
+  const bounds=original?{x0:0,y0:0,x1:layer.cellsW,y1:layer.cellsH}:mapBounds(r,bg,layer),w=(bounds.x1-bounds.x0)*16,h=(bounds.y1-bounds.y0)*16;
+  const ox=-bounds.x0*16,oy=-bounds.y0*16;
+  const images = [new ImageData(w,h), new ImageData(w,h)];
   for (let ty=0; ty<layer.tilesH; ty++) for (let tx=0; tx<layer.tilesW; tx++) {
     const entry = layer.words[ty*layer.tilesW+tx];
     const nativeHigh = (entry & 0x2000) ? 1 : 0;
     const virtualBand = bandAt(state,layer,tx,ty);
-    blitTile(layer,entry,images[nativeHigh].data,layer.w,tx*8,ty*8,
-             tint ? bandRGB(virtualBand) : null);
+    blitTile(layer,entry,images[nativeHigh].data,w,ox+tx*8,oy+ty*8,
+             tint&&!original ? bandRGB(virtualBand) : null,tx*8,ty*8,original?ZERO_PIXEL_MASK:undefined);
+  }
+  for(const [key,c] of Object.entries(original?{}:stampBucket(r,bg).cells)) {
+    const [x,y]=key.split(',').map(Number),px=ox+x*16,py=oy+y*16;
+    for(const image of images)for(let row=0;row<16;row++)
+      image.data.fill(0,((py+row)*w+px)*4,((py+row)*w+px+16)*4);
+    images.forEach((image,high)=>blitStamp(layer,c,image,w,px,py,high));
   }
   const canvases = images.map(image => {
     const canvas = document.createElement('canvas');
-    canvas.width=layer.w; canvas.height=layer.h;
+    canvas.width=w; canvas.height=h;
     canvas.getContext('2d').putImageData(image,0,0);
     return canvas;
   });
-  let built = { L:layer, low:canvases[0], high:canvases[1] };
-  if (bg === 1 && r.bg2PageCycle) {
+  let built = { L:{...layer,w,h,originX:bounds.x0*16,originY:bounds.y0*16}, low:canvases[0], high:canvases[1] };
+  if (bg === 1 && r.bg2PageCycle && (original||!Object.keys(stampBucket(r,bg).cells).length && !stampBucket(r,bg).bounds)) {
     const page = bg2PageIndex(r), sx = (page & 1) * 256;
     const sy = (page >> 1) * 256;
     const cropped = canvases.map(source => {
@@ -551,7 +649,7 @@ function gameLayerSurfaces(r, bg) {
   return built;
 }
 function layerCopies2d(bg, surface) {
-  if (bg === bgIndex) return [{x:0,y:0}];
+  if (bg === bgIndex) return [{x:surface.L.originX||0,y:surface.L.originY||0}];
   if (!showBoth) return [];
   const span = otherOffset.repeat
     ? Math.ceil((L.w + surface.L.w) / surface.L.w) + 1 : 1;
@@ -566,7 +664,7 @@ function layerCopies2d(bg, surface) {
 }
 function drawGameLayer(bg, high) {
   if (!room.bg[bg] || (bg !== bgIndex && !showBoth)) return;
-  const surface = gameLayerSurfaces(room,bg);
+  const surface = gameLayerSurfaces(room,bg,compareOriginal);
   const image = high ? surface.high : surface.low;
   for (const copy of layerCopies2d(bg,surface))
     ctx.drawImage(image, view.x+copy.x*view.scale, view.y+copy.y*view.scale,
@@ -594,6 +692,7 @@ function drawNative2d() {
   ctx.drawImage(nativeFrameCanvas(),x,y,DATA.frameWidth*scale,DATA.frameHeight*scale);
   const state=nativeFrameState(room);
   $('#hud').innerHTML=`<b>${room.group}:${room.map}</b> native 256×224 stable frame`
+    +` &nbsp; ${terrainLabel(room)} terrain`
     +` &nbsp; camera ${nativeCamera.x},${nativeCamera.y}`
     +` &nbsp; profile $${Number(room.videoProfile).toString(16).padStart(2,'0')}`
     +(room.raster?` &nbsp; raster R${room.raster}`:'')
@@ -621,30 +720,28 @@ function draw2d() {
   drawGameLayer(1,true);   /* BG2 priority 1, hardware rank 11 */
   drawGameLayer(0,true);   /* BG1 priority 1, hardware rank 12 */
 
-  /* Cell outlines for anything moved off the default band. */
-  if (view.scale > 0.28) {
-    ctx.lineWidth = 1;
-    /* Iterate the edits rather than the level. A cell-keyed edit is one entry;
-     * a metatile-keyed one has to find its instances, but only for ids that
-     * were actually touched. */
-    const seen = new Set();
-    const outline = (cx, cy) => {
-      const c = bandRGB(bandAt(st, L, cx*2, cy*2));
-      ctx.strokeStyle = `rgba(${c[0]},${c[1]},${c[2]},.9)`;
-      ctx.strokeRect(view.x + cx*16*view.scale + .5,
-                     view.y + cy*16*view.scale + .5,
-                     16*view.scale - 1, 16*view.scale - 1);
-    };
-    for (const k of Object.keys(st.byCell)) {
-      const cell = Number(k); seen.add(cell);
-      outline(cell % L.cellsW, (cell / L.cellsW) | 0);
+  drawStampGuides();
+  /* Authored edits and the current selection have separate overlays. */
+  if (showEditOutlines && !compareOriginal) {
+    const color=highlightColor();
+    ctx.lineWidth=1.5;ctx.strokeStyle=color.startsWith('--')
+      ?getComputedStyle(document.documentElement).getPropertyValue(color).trim():color;
+    for(const {x:cx,y:cy} of currentHighlightedTiles()) {
+      const size=16*view.scale,x=view.x+cx*size,y=view.y+cy*size;
+      if(x+size<0||y+size<0||x>r.width||y>r.height)continue;
+      const shown=Math.max(3,size-4);
+      ctx.strokeRect(x+(size-shown)/2,y+(size-shown)/2,shown,shown);
     }
-    const ids = Object.keys(st.byId);
-    if (ids.length) {
-      const want = new Set(ids.map(Number));
-      for (let cell = 0; cell < L.cellId.length; cell++)
-        if (!seen.has(cell) && want.has(L.cellId[cell]))
-          outline(cell % L.cellsW, (cell / L.cellsW) | 0);
+  }
+  {
+    ctx.strokeStyle = '#5aa9ff';
+    ctx.fillStyle = 'rgba(90,169,255,0.12)';
+    ctx.lineWidth = 1.5;
+    for (const cell of selectedCells) {
+      const cx=cell%L.cellsW,cy=Math.floor(cell/L.cellsW);
+      const x=view.x+cx*16*view.scale,y=view.y+cy*16*view.scale,size=16*view.scale;
+      const shown=Math.max(4,size-1);
+      ctx.fillRect(x,y,size,size);ctx.strokeRect(x+(size-shown)/2,y+(size-shown)/2,shown,shown);
     }
   }
 }

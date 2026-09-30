@@ -152,6 +152,17 @@ static bool BloodpoolExposedWater(int x, uint16_t sources) {
   return false;
 }
 
+static bool BloodpoolPostPixel(const ActionBgMapView *map, const uint8_t *ram,
+    size_t size, unsigned table, int x, int y) {
+  uint8_t tile;
+  if (!ActionBgMapView_LookupMetatile(map,x,y,&tile)) return false;
+  const unsigned quadrant = ((unsigned)y&8u)/4+((unsigned)x&8u)/8;
+  const uint16_t word = Read16(ram,size,table+tile*8+quadrant*2);
+  const unsigned px = (word&0x4000u) ? 7-((unsigned)x&7u) : (unsigned)x&7u;
+  const unsigned py = (word&0x8000u) ? 7-((unsigned)y&7u) : (unsigned)y&7u;
+  return (kBloodpoolPostTimber[word&255u] >> (py*8+px))&1u;
+}
+
 static bool BloodpoolTimberMaterial(uint8_t tile, const uint8_t *ram, size_t size,
     unsigned table) {
   /* Authored horizontal timber, including moss and support variants. Verify
@@ -212,18 +223,18 @@ static void CaptureBloodpoolDetails(ActionBloodpoolDetails *dst, const ActionBgM
     const bool post_tile = ActionBgMapView_LookupMetatile(map,x,480,&water_tile) &&
         (water_tile == 0x21 || water_tile == 0x22 || water_tile == 0x5E || water_tile == 0xA0);
     if (x < x1 && BloodpoolExposedWater(x,sources) &&
-        post_tile && BloodpoolPixel(map,ram,size,table,x,479,true)) {
+        post_tile && BloodpoolPostPixel(map,ram,size,table,x,479)) {
       if (start < 0) start = x;
       continue;
     }
     if (start < 0) continue;
     if (x-start <= 20 && start > x0 && x < x1) {
       if (dst->post_count == kActionBloodpoolMaxPosts) return;
-      const int center = (start+x)/2;
-      if (dst->post_count && center-dst->posts[dst->post_count-1] < 10)
-        dst->posts[dst->post_count-1] = (int16_t)((center+dst->posts[dst->post_count-1])/2);
-      else
-        dst->posts[dst->post_count++] = (int16_t)center;
+      int bottom = 480;
+      for (int y = 480; y < 512; y++) for (int post_x = start; post_x < x; post_x++)
+        if (BloodpoolPostPixel(map,ram,size,table,post_x,y)) bottom = y+1;
+      dst->posts[dst->post_count++] = (ActionBloodpoolPost){
+        .x0 = (int16_t)start, .x1 = (int16_t)x, .y = (int16_t)bottom};
     }
     start = -1;
   }

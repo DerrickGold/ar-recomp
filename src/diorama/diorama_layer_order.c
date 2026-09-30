@@ -296,7 +296,75 @@ bool DioramaLayerOrder_VirtualLayerHasClassification(
   if (layer->cell_span_count) return true;
   for (size_t i = 0; i < sizeof(layer->metatile_set); i++)
     if (layer->metatile_set[i]) return true;
+  for (unsigned region = 0; region < 2; region++)
+    for (size_t i = 0; i < sizeof(layer->metatile_set); i++)
+      if (layer->regional_metatile_set[region][i]) return true;
   return false;
+}
+
+static unsigned TerrainMask(unsigned mask) { return mask ? mask : 1u; }
+
+bool DioramaLayerOrder_ForTerrain(const DioramaRoomOverride *room,
+                                  unsigned profile, DioramaRoomOverride *out) {
+  if (!room || !out || profile >= kDioramaTerrainProfileCount || room == out)
+    return false;
+  *out = *room;
+  const unsigned bit = 1u << profile;
+  for (unsigned bg = 0; bg < 2; bg++) {
+    const DioramaVirtualLayerOverride *source = &room->virtual_layers[bg];
+    DioramaVirtualLayerOverride *v = &out->virtual_layers[bg];
+    if (profile) {
+      memcpy(v->metatile_set, source->regional_metatile_set[profile - 1],
+             sizeof(v->metatile_set));
+      memcpy(v->metatile_bands, source->regional_metatile_bands[profile - 1],
+             sizeof(v->metatile_bands));
+    }
+    memset(v->regional_metatile_set, 0, sizeof(v->regional_metatile_set));
+    memset(v->regional_metatile_bands, 0, sizeof(v->regional_metatile_bands));
+    v->cell_span_count = 0;
+    for (unsigned i = 0; i < source->cell_span_count; i++)
+      if (TerrainMask(source->cell_spans[i].terrain_mask) & bit)
+        v->cell_spans[v->cell_span_count++] = source->cell_spans[i];
+    DioramaPixelLayerOverride *pixels = &out->pixel_layers[bg];
+    pixels->count = 0;
+    for (unsigned i = 0; i < room->pixel_layers[bg].count; i++) {
+      const DioramaPixelEdit *edit = &room->pixel_layers[bg].edits[i];
+      if (!(TerrainMask(edit->terrain_mask) & bit)) continue;
+      unsigned index = pixels->count;
+      for (unsigned j = 0; j < pixels->count; j++) {
+        const DioramaPixelEdit *old = &pixels->edits[j];
+        if (old->by_cell == edit->by_cell && (edit->by_cell
+            ? old->x == edit->x && old->y == edit->y
+            : old->metatile == edit->metatile)) { index = j; break; }
+      }
+      pixels->edits[index] = *edit;
+      if (index == pixels->count) pixels->count++;
+    }
+    DioramaStampLayerOverride *stamps = &out->stamp_layers[bg];
+    stamps->count = 0;
+    if (profile) {
+      const DioramaMapBounds *b = &room->stamp_layers[bg].regional_bounds[profile - 1];
+      stamps->set_bounds = b->set;
+      stamps->x0 = b->x0;
+      stamps->y0 = b->y0;
+      stamps->x1 = b->x1;
+      stamps->y1 = b->y1;
+    }
+    memset(stamps->regional_bounds, 0, sizeof(stamps->regional_bounds));
+    for (unsigned i = 0; i < room->stamp_layers[bg].count; i++) {
+      const DioramaTileStamp *cell = &room->stamp_layers[bg].cells[i];
+      if (!(TerrainMask(cell->terrain_mask) & bit)) continue;
+      unsigned index = stamps->count;
+      for (unsigned j = 0; j < stamps->count; j++)
+        if (stamps->cells[j].x == cell->x && stamps->cells[j].y == cell->y) {
+          index = j;
+          break;
+        }
+      stamps->cells[index] = *cell;
+      if (index == stamps->count) stamps->count++;
+    }
+  }
+  return true;
 }
 
 int DioramaLayerOrder_VirtualBand(const DioramaRoomOverride *room, int bg,
@@ -324,7 +392,11 @@ bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
       return true;
   }
   for (int bg = 0; bg < 2; bg++)
-    if (DioramaLayerOrder_VirtualLayerIsAuthored(
+    if (room->pixel_layers[bg].count || room->stamp_layers[bg].count ||
+        room->stamp_layers[bg].set_bounds ||
+        room->stamp_layers[bg].regional_bounds[0].set ||
+        room->stamp_layers[bg].regional_bounds[1].set ||
+        DioramaLayerOrder_VirtualLayerIsAuthored(
             &room->virtual_layers[bg]))
       return true;
   return false;
@@ -642,7 +714,8 @@ static bool ParseVirtualCells(const char *value,
  * rectangle and pair it with a band. Keeping every record below 512 bytes is
  * part of the file-wrapper contract in diorama.c. */
 static bool ParseVirtualLine(DioramaRoomOverride *room, int bg,
-                             const char *values, const char **out_error) {
+                             unsigned terrain, bool scoped, const char *values,
+                             const char **out_error) {
   DioramaVirtualLayerOverride edit = room->virtual_layers[bg];
   bool touched_geometry = false;
   int selector = 0;  /* 0 none, 1 metatile, 2 cells */
@@ -732,19 +805,27 @@ static bool ParseVirtualLine(DioramaRoomOverride *room, int bg,
       return false;
     }
     if (selector == 1) {
-      edit.metatile_set[metatile >> 3] |=
-          (uint8_t)(1u << (metatile & 7));
-      edit.metatile_bands[metatile] = (uint8_t)band;
+      for (unsigned profile = 0; profile < kDioramaTerrainProfileCount; profile++) {
+        if (!(TerrainMask(terrain) & (1u << profile))) continue;
+        uint8_t *set = profile ? edit.regional_metatile_set[profile - 1] : edit.metatile_set;
+        uint8_t *bands = profile ? edit.regional_metatile_bands[profile - 1] : edit.metatile_bands;
+        set[metatile >> 3] |= (uint8_t)(1u << (metatile & 7));
+        bands[metatile] = (uint8_t)band;
+      }
     } else {
       if (edit.cell_span_count >= kDioramaVirtualCellSpanMax) {
         if (out_error) *out_error = "too many virtual cell spans";
         return false;
       }
       cells.band = (uint8_t)band;
+      cells.terrain_mask = (uint8_t)terrain;
       edit.cell_spans[edit.cell_span_count++] = cells;
     }
   } else if (band >= 0) {
     if (out_error) *out_error = "virtual band needs metatile or cells";
+    return false;
+  } else if (scoped) {
+    if (out_error) *out_error = "regional virtual keys need a tile selector";
     return false;
   } else if (!touched_geometry) {
     if (out_error) *out_error = "no virtual values";
@@ -753,6 +834,214 @@ static bool ParseVirtualLine(DioramaRoomOverride *room, int bg,
 
   room->virtual_layers[bg] = edit;
   return true;
+}
+
+const uint16_t *DioramaLayerOrder_PixelMask(
+    const DioramaRoomOverride *room, unsigned bg, int cell_x,
+    int cell_y, uint8_t metatile) {
+  if (!room || bg >= 2) return NULL;
+  const DioramaPixelLayerOverride *layer = &room->pixel_layers[bg];
+  const uint16_t *fallback = NULL;
+  for (unsigned i = 0; i < layer->count; i++) {
+    const DioramaPixelEdit *edit = &layer->edits[i];
+    if (edit->by_cell && edit->x == cell_x && edit->y == cell_y)
+      return edit->black;
+    if (!edit->by_cell && edit->metatile == metatile) fallback = edit->black;
+  }
+  return fallback;
+}
+
+static bool ParsePixelLine(DioramaRoomOverride *room, unsigned bg,
+                           unsigned terrain, const char *values, const char **out_error) {
+  DioramaPixelEdit edit = {.terrain_mask = (uint8_t)terrain};
+  bool selector = false, mask = false;
+  char word[96];
+  const char *p = values;
+  while ((p = NextWord(p, word, sizeof(word))) != NULL && word[0]) {
+    char *colon = strchr(word, ':');
+    if (!colon) goto invalid;
+    *colon++ = '\0';
+    if (!strcmp(word, "metatile")) {
+      char *end;
+      long id = strtol(colon, &end, 16);
+      if (selector || end == colon || *end || id < 0 || id > 255)
+        goto invalid;
+      edit.metatile = (uint8_t)id;
+      selector = true;
+    } else if (!strcmp(word, "cell")) {
+      int x, y;
+      int consumed = 0;
+      if (selector || sscanf(colon, "%d,%d%n", &x, &y, &consumed) != 2 ||
+          colon[consumed] || x < -512 || y < -512 || x > 65535 || y > 65535)
+        goto invalid;
+      edit.by_cell = true;
+      edit.x = x;
+      edit.y = y;
+      selector = true;
+    } else if (!strcmp(word, "black")) {
+      if (mask || strlen(colon) != 64) goto invalid;
+      for (int row = 0; row < 16; row++) {
+        unsigned value = 0;
+        for (int x = 0; x < 4; x++) {
+          const char c = colon[row * 4 + x];
+          const int digit = c >= '0' && c <= '9' ? c - '0' :
+              c >= 'a' && c <= 'f' ? c - 'a' + 10 :
+              c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+          if (digit < 0) goto invalid;
+          value = (value << 4) | (unsigned)digit;
+        }
+        edit.black[row] = (uint16_t)value;
+      }
+      mask = true;
+    } else goto invalid;
+  }
+  if (!selector || !mask) goto invalid;
+  DioramaPixelLayerOverride *layer = &room->pixel_layers[bg];
+  unsigned index = layer->count;
+  for (unsigned i = 0; i < layer->count; i++) {
+    const DioramaPixelEdit *old = &layer->edits[i];
+    if (old->terrain_mask == edit.terrain_mask &&
+        old->by_cell == edit.by_cell && (edit.by_cell
+        ? old->x == edit.x && old->y == edit.y
+        : old->metatile == edit.metatile)) { index = i; break; }
+  }
+  if (index >= kDioramaPixelEditMax) {
+    if (out_error) *out_error = "too many pixel edits";
+    return false;
+  }
+  layer->edits[index] = edit;
+  if (index == layer->count) layer->count++;
+  return true;
+invalid:
+  if (out_error) *out_error = "expected cell:x,y or metatile:HH and black:64hex";
+  return false;
+}
+
+static bool ParseStampLine(DioramaRoomOverride *room, unsigned bg,
+                           unsigned terrain, const char *values, const char **out_error) {
+  DioramaTileStamp edit = {.terrain_mask = (uint8_t)terrain};
+  unsigned fields = 0;
+  char word[96], tail;
+  const char *p = values;
+  while ((p = NextWord(p, word, sizeof(word))) != NULL && word[0]) {
+    char *colon = strchr(word, ':');
+    if (!colon) goto invalid;
+    *colon++ = '\0';
+    if (!strcmp(word, "cell")) {
+      int x, y;
+      if ((fields & 1) || sscanf(colon, "%d,%d%c", &x, &y, &tail) != 2 ||
+          x < -512 || y < -512 || x > 511 || y > 511) goto invalid;
+      edit.x = (int16_t)x;
+      edit.y = (int16_t)y;
+      fields |= 1;
+    } else if (!strcmp(word, "words")) {
+      unsigned words[4];
+      if ((fields & 2) ||
+          sscanf(colon, "%x,%x,%x,%x%c", &words[0], &words[1],
+                 &words[2], &words[3], &tail) != 4) goto invalid;
+      for (unsigned i = 0; i < 4; i++) {
+        if (words[i] > 65535) goto invalid;
+        edit.words[i] = (uint16_t)words[i];
+      }
+      fields |= 2;
+    } else if (!strcmp(word, "bands")) {
+      unsigned bands[4];
+      if ((fields & 4) ||
+          sscanf(colon, "%u,%u,%u,%u%c", &bands[0], &bands[1],
+                 &bands[2], &bands[3], &tail) != 4) goto invalid;
+      for (unsigned i = 0; i < 4; i++) {
+        if (bands[i] >= 3) goto invalid;
+        edit.bands |= (uint8_t)(bands[i] << (i * 2));
+      }
+      fields |= 4;
+    } else if (!strcmp(word, "metatile")) {
+      unsigned id;
+      if ((fields & 8) || sscanf(colon, "%x%c", &id, &tail) != 1 || id > 255)
+        goto invalid;
+      edit.metatile = (uint8_t)id;
+      fields |= 8;
+    } else goto invalid;
+  }
+  if (fields != 15) goto invalid;
+  DioramaStampLayerOverride *layer = &room->stamp_layers[bg];
+  unsigned index = layer->count;
+  for (unsigned i = 0; i < layer->count; i++)
+    if (layer->cells[i].terrain_mask == edit.terrain_mask &&
+        layer->cells[i].x == edit.x && layer->cells[i].y == edit.y) {
+      index = i;
+      break;
+    }
+  if (index >= kDioramaTileStampMax) {
+    if (out_error) *out_error = "too many pasted tiles";
+    return false;
+  }
+  layer->cells[index] = edit;
+  if (index == layer->count) layer->count++;
+  return true;
+invalid:
+  if (out_error) *out_error = "expected cell, words, bands and metatile for stamp";
+  return false;
+}
+
+static bool ParseMapBounds(DioramaRoomOverride *room, unsigned bg,
+                           unsigned terrain, const char *values, const char **out_error) {
+  int x0, y0, x1, y1;
+  char word[96], tail;
+  const char *after = NextWord(values, word, sizeof(word));
+  if (!after || strncmp(word, "bounds:", 7) ||
+      sscanf(word + 7, "%d,%d,%d,%d%c", &x0, &y0, &x1, &y1, &tail) != 4 ||
+      x0 < -512 || y0 < -512 || x1 > 512 || y1 > 512 ||
+      x0 >= x1 || y0 >= y1 || x1 - x0 > 512 || y1 - y0 > 512) goto invalid;
+  after = NextWord(after, word, sizeof(word));
+  if (after && word[0]) goto invalid;
+  DioramaStampLayerOverride *layer = &room->stamp_layers[bg];
+  if (TerrainMask(terrain) & 1u) {
+    layer->set_bounds = true;
+    layer->x0 = (int16_t)x0;
+    layer->y0 = (int16_t)y0;
+    layer->x1 = (int16_t)x1;
+    layer->y1 = (int16_t)y1;
+  }
+  for (unsigned profile = 1; profile < kDioramaTerrainProfileCount; profile++)
+    if (TerrainMask(terrain) & (1u << profile))
+      layer->regional_bounds[profile - 1] = (DioramaMapBounds){
+          true, (int16_t)x0, (int16_t)y0, (int16_t)x1, (int16_t)y1};
+  return true;
+invalid:
+  if (out_error) *out_error = "bad map bounds (x0,y0,x1,y1, exclusive upper edges)";
+  return false;
+}
+
+/* Key suffixes use stable region codes. German shares the European terrain
+ * profile; a combined suffix shares one record across matching layouts. */
+static bool ParseTerrainSuffix(char *token, unsigned *mask) {
+  *mask = 0;
+  char *region = strchr(token, ':');
+  if (!region) return true;
+  *region++ = '\0';
+  if (!*region) return false;
+  unsigned result = 0;
+  while (*region) {
+    char *end = strchr(region, '+');
+    const size_t length = end ? (size_t)(end - region) : strlen(region);
+    if (length != 2) return false;
+    if (!strncmp(region, "us", 2)) result |= 1;
+    else if (!strncmp(region, "jp", 2)) result |= 2;
+    else if (!strncmp(region, "eu", 2) || !strncmp(region, "ge", 2)) result |= 4;
+    else return false;
+    if (!end) break;
+    region = end + 1;
+    if (!*region) return false;
+  }
+  *mask = result == 1 ? 0 : result;
+  return true;
+}
+
+static const char *TerrainSuffix(unsigned mask) {
+  static const char *const suffixes[] = {
+    "", "", ":jp", ":us+jp", ":eu", ":us+eu", ":jp+eu", ":us+jp+eu"
+  };
+  return mask < 8 ? suffixes[mask] : "";
 }
 
 bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
@@ -776,10 +1065,31 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
     if (out_error) *out_error = "missing plane name";
     return false;
   }
+  unsigned terrain;
+  const bool scoped = strchr(token, ':') != NULL;
+  if (!ParseTerrainSuffix(token, &terrain)) {
+    if (out_error) *out_error = "bad terrain suffix (us, jp, eu or ge)";
+    return false;
+  }
+  int stamp_bg = !strcmp(token, "bg1-stamp") ? 0 :
+                 !strcmp(token, "bg2-stamp") ? 1 : -1;
+  if (stamp_bg >= 0)
+    return ParseStampLine(room, (unsigned)stamp_bg, terrain, equals + 1, out_error);
+  int map_bg = !strcmp(token, "bg1-map") ? 0 : !strcmp(token, "bg2-map") ? 1 : -1;
+  if (map_bg >= 0)
+    return ParseMapBounds(room, (unsigned)map_bg, terrain, equals + 1, out_error);
+  int pixel_bg = !strcmp(token, "bg1-pixels") ? 0 :
+                 !strcmp(token, "bg2-pixels") ? 1 : -1;
+  if (pixel_bg >= 0)
+    return ParsePixelLine(room, (unsigned)pixel_bg, terrain, equals + 1, out_error);
   int virtual_bg = !strcmp(token, "bg1-virtual") ? 0 :
                    !strcmp(token, "bg2-virtual") ? 1 : -1;
   if (virtual_bg >= 0)
-    return ParseVirtualLine(room, virtual_bg, equals + 1, out_error);
+    return ParseVirtualLine(room, virtual_bg, terrain, scoped, equals + 1, out_error);
+  if (scoped) {
+    if (out_error) *out_error = "terrain suffix only applies to tile edit keys";
+    return false;
+  }
   int plane = DioramaLayerOrder_PlaneFromToken(token);
   if (plane < 0 || plane >= kDioramaPlane_Count) {
     if (out_error) *out_error = "unknown plane";
@@ -1081,16 +1391,69 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
       APPEND("\n");
     }
     for (int id = 0; id < 256; id++) {
-      if (!(v->metatile_set[id >> 3] & (1u << (id & 7)))) continue;
-      APPEND("%s = metatile:%02X band:%u\n", token, id,
-             (unsigned)v->metatile_bands[id]);
+      for (unsigned band = 0; band < kDioramaVirtualBandCount; band++) {
+        unsigned mask = 0;
+        for (unsigned profile = 0; profile < kDioramaTerrainProfileCount; profile++) {
+          const uint8_t *set = profile ? v->regional_metatile_set[profile - 1] : v->metatile_set;
+          const uint8_t *bands = profile
+              ? v->regional_metatile_bands[profile - 1] : v->metatile_bands;
+          if ((set[id >> 3] & (1u << (id & 7))) && bands[id] == band)
+            mask |= 1u << profile;
+        }
+        if (mask) APPEND("%s%s = metatile:%02X band:%u\n", token, TerrainSuffix(mask), id, band);
+      }
     }
     for (unsigned i = 0; i < v->cell_span_count; i++) {
       const DioramaVirtualCellSpan *span = &v->cell_spans[i];
-      APPEND("%s = cells:%u,%u-%u,%u band:%u\n", token,
+      APPEND("%s%s = cells:%u,%u-%u,%u band:%u\n", token, TerrainSuffix(span->terrain_mask),
              (unsigned)span->x0, (unsigned)span->y0,
              (unsigned)span->x1, (unsigned)span->y1,
              (unsigned)span->band);
+    }
+  }
+  for (unsigned bg = 0; bg < 2; bg++) {
+    const DioramaPixelLayerOverride *layer = &room->pixel_layers[bg];
+    for (unsigned i = 0; i < layer->count; i++) {
+      const DioramaPixelEdit *edit = &layer->edits[i];
+      APPEND("bg%u-pixels%s =", bg + 1, TerrainSuffix(edit->terrain_mask));
+      if (edit->by_cell)
+        APPEND(" cell:%d,%d", (int)edit->x, (int)edit->y);
+      else APPEND(" metatile:%02X", (unsigned)edit->metatile);
+      APPEND(" black:");
+      for (unsigned row = 0; row < 16; row++)
+        APPEND("%04X", (unsigned)edit->black[row]);
+      APPEND("\n");
+    }
+  }
+  for (unsigned bg = 0; bg < 2; bg++) {
+    const DioramaStampLayerOverride *layer = &room->stamp_layers[bg];
+    const DioramaMapBounds bounds[3] = {
+      {layer->set_bounds, layer->x0, layer->y0, layer->x1, layer->y1},
+      layer->regional_bounds[0], layer->regional_bounds[1]
+    };
+    unsigned written_bounds = 0;
+    for (unsigned profile = 0; profile < kDioramaTerrainProfileCount; profile++) {
+      const DioramaMapBounds *b = &bounds[profile];
+      if (!b->set || (written_bounds & (1u << profile))) continue;
+      unsigned mask = 0;
+      for (unsigned other = profile; other < kDioramaTerrainProfileCount; other++) {
+        const DioramaMapBounds *c = &bounds[other];
+        if (c->set && b->x0 == c->x0 && b->y0 == c->y0 && b->x1 == c->x1 && b->y1 == c->y1)
+          mask |= 1u << other;
+      }
+      written_bounds |= mask;
+      APPEND("bg%u-map%s = bounds:%d,%d,%d,%d\n", bg + 1,
+             TerrainSuffix(mask), b->x0, b->y0, b->x1, b->y1);
+    }
+    for (unsigned i = 0; i < layer->count; i++) {
+      const DioramaTileStamp *cell = &layer->cells[i];
+      APPEND("bg%u-stamp%s = cell:%d,%d metatile:%02X words:%04X,%04X,%04X,%04X",
+             bg + 1, TerrainSuffix(cell->terrain_mask), cell->x, cell->y,
+             cell->metatile, cell->words[0],
+             cell->words[1], cell->words[2], cell->words[3]);
+      APPEND(" bands:%u,%u,%u,%u\n", cell->bands & 3u,
+             (cell->bands >> 2) & 3u, (cell->bands >> 4) & 3u,
+             (cell->bands >> 6) & 3u);
     }
   }
 #undef APPEND

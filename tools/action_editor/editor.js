@@ -63,6 +63,8 @@ $('#export').onclick = () => {
     a.href=url; a.download=sourceIniName || 'diorama-layers.ini';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
+    captureEditorSavepoint('exported');
+    tileActionStatus('INI download started. Use the exported file as the game’s diorama-layers.ini.');
   } catch (error) {
     alert(`Cannot export INI:\n\n${error.message}`);
   }
@@ -71,7 +73,7 @@ $('#importIni').onchange = async event => {
   const file = event.target.files && event.target.files[0];
   event.target.value = '';
   if (!file) return;
-  if (configDirty && !confirm('Loading another INI replaces the unsaved action-layer edits in this editor. Continue?'))
+  if (editorHasUnexportedChanges() && !confirm('Loading another INI replaces the unexported edits in this editor. Continue?'))
     return;
   loadIniText(await file.text(),file.name);
   undoStack.length=0; redoStack.length=0; pendingOp=null;
@@ -86,6 +88,7 @@ function hud(cx, cy) {
   const inb = cx>=0 && cy>=0 && cx<L.cellsW && cy<L.cellsH;
   const parts = [
     `<b>${room.group}:${room.map}</b> BG${bgIndex+1} &nbsp; ${L.w}\u00d7${L.h}px`
+      + ` &nbsp; ${terrainLabel(room)} terrain`+(compareOriginal?' &nbsp; <b>Original tiles</b>':'')
       + ` &nbsp; ${L.pw}\u00d7${L.ph} pages`
       + ` &nbsp; profile $${Number(room.videoProfile).toString(16).padStart(2,'0')}`
       + (room.raster ? ` &nbsp; raster R${room.raster}` : '')
@@ -96,23 +99,28 @@ function hud(cx, cy) {
           ? ` &nbsp; BG2 page ${bg2PageIndex(room)+1}/4`
           : ''),
   ];
-  if (inb) {
+  const pasted=compareOriginal?null:stampBucket(room,bgIndex).cells[`${cx},${cy}`];
+  if(pasted) {
+    parts.push(`cell ${cx},${cy} &nbsp; pasted metatile $${pasted.id.toString(16).padStart(2,'0')}`
+      +` &nbsp; bands ${pasted.bands.join('/')}`);
+  } else if (inb) {
     const cell = cy*L.cellsW+cx, id = L.cellId[cell];
     const e = L.words[(cy*2)*L.tilesW + cx*2];
-    const b = bandAt(st, L, cx*2, cy*2);
+    const b = compareOriginal?authenticBand(e):bandAt(st, L, cx*2, cy*2);
     parts.push(`cell ${cx},${cy} &nbsp; metatile <b>$${id.toString(16)
       .padStart(2,'0')}</b> &nbsp; char $${(e&0x3ff).toString(16).padStart(3,'0')}`
-      + ` &nbsp; pal ${(e>>10)&7} &nbsp; prio ${(e&0x2000)?1:0}`);
+      + ` &nbsp; pal ${(e>>10)&7} &nbsp; ROM priority ${(e&0x2000)?1:0}`);
     parts.push(`band <b style="color:var(${BANDS[b].css})">${BANDS[b].name}</b>`
-      + (cellEdited(st,L,cx,cy) ? ' (edited)' : ' (authentic)'));
+      + (!compareOriginal&&cellEdited(st,L,cx,cy) ? ' (band override)' : ' (original band)'));
   } else if (mode === '3d') {
     parts.push(`drag to orbit &nbsp; shift-drag to move native camera &nbsp; wheel to zoom`
       + ` &nbsp; <kbd>r</kbd> resets`
       + ` &nbsp; camera ${nativeCamera.x},${nativeCamera.y}`);
   } else {
-    parts.push('drag to paint &nbsp; shift-drag to pan &nbsp; wheel to zoom'
+    parts.push('Shift-click to select a range &nbsp; shift-drag to pan &nbsp; wheel to zoom'
       + ' &nbsp; <kbd>f</kbd> fits');
   }
+  if(!inb&&!pasted)parts.push(`cell ${cx},${cy} &nbsp; empty edge space`);
   $('#hud').innerHTML = parts.join('<br>');
 }
 /* Counting every tile is O(level) -- 49,152 of them in Fillmore 1:1 -- so it
@@ -145,9 +153,14 @@ function tally() {
 let framePending = false;
 function updateLegend() {
   $('#legend').innerHTML = mode === '2d'
-    ? '<b>drag</b> paint &nbsp; <b>shift-drag / middle</b> pan &nbsp; '
-      + '<b>arrows</b> move<br><b>wheel</b> zoom &nbsp; <b>f</b> fit &nbsp; '
-      + '<b>alt-drag</b> revert &nbsp; <b>ctrl/cmd-Z</b> undo'
+    ? (brush==='stamp'?'<b>click</b> stamp copied tiles &nbsp; <b>Esc</b> finish &nbsp; ':
+      brush==='selectRect'?'<b>drag</b> select rectangle &nbsp; <b>Ctrl/Cmd-C</b> copy &nbsp; ':
+      '<b>drag</b> select / paint &nbsp; ')+'<b>shift-drag / middle</b> pan &nbsp; '
+      + '<b>arrows</b> move<br><b>Shift-click</b> select range &nbsp; <b>wheel</b> zoom &nbsp; <b>f</b> fit &nbsp; '
+      + '<b>right-click</b> actions &nbsp; <b>ctrl/cmd-Z</b> undo'
+      + (compareOriginal?'<br>Original tile comparison · highlights hidden':
+        '<br><span style="color:#5aa9ff">Blue: selected</span> &nbsp; '
+        + `<span style="color:${highlightMode==='modified'?'#f0c55a':`var(${highlightColor()})`}">${highlightLabel()}: highlighted</span>`)
     : mode === 'native'
       ? '<b>native stable frame</b> &nbsp; camera sliders or arrows move the view'
         + '<br>frame slider drives CHR, page-cycle, and persistent raster phases'
@@ -196,6 +209,7 @@ function draw() {
   requestAnimationFrame(() => { framePending = false; drawNow(); });
 }
 function drawNow() {
+  refreshEditorFeedback();
   if (mode === '2d') draw2d();
   else if (mode === 'native') drawNative2d();
   else draw3d();
@@ -217,7 +231,7 @@ function refreshNativePhaseControls() {
     parts.push(`BG2 page ${bg2PageIndex(room)+1}/4 at 5f cadence`);
   if (room.raster)
     parts.push(`raster preset R${room.raster} uses this frame clock`);
-  const parity=nativeGoldenStatus.get(roomKey(room));
+  const parity=nativeGoldenStatus.get(sceneKey(room));
   if(parity===true)parts.push('C/JS native parity verified');
   else if(parity===false)parts.push('C/JS PARITY MISMATCH — check console');
   $('#nativePhaseInfo').textContent = parts.length
@@ -225,10 +239,21 @@ function refreshNativePhaseControls() {
 }
 function refreshNativeCameraControls() {
   const bg1=room.bg[0],maxX=Math.max(0,bg1.pagesWide*256-DATA.frameWidth);
-  const maxY=Math.max(0,bg1.pagesHigh*256-(DATA.frameHeight+1));
-  nativeCamera.x=Math.max(0,Math.min(maxX,nativeCamera.x));
-  nativeCamera.y=Math.max(0,Math.min(maxY,nativeCamera.y));
-  $('#nativeCameraX').max=String(maxX);$('#nativeCameraX').value=String(nativeCamera.x);
+  let maxY=Math.max(0,bg1.pagesHigh*256-(DATA.frameHeight+1)),minX=0,minY=0;
+  let previewMaxX=maxX;
+  if(mode==='3d') {
+    for(let bg=0;bg<2;bg++) {
+      const layer=decodeLayer(room,bg);if(!layer)continue;
+      const b=mapBounds(room,bg,layer);
+      minX=Math.min(minX,b.x0*16);minY=Math.min(minY,b.y0*16);
+      if(bg===0){previewMaxX=Math.max(maxX,b.x1*16-DATA.frameWidth);
+        maxY=Math.max(maxY,b.y1*16-DATA.frameHeight-1);}
+    }
+  }
+  nativeCamera.x=Math.max(minX,Math.min(previewMaxX,nativeCamera.x));
+  nativeCamera.y=Math.max(minY,Math.min(maxY,nativeCamera.y));
+  $('#nativeCameraX').min=String(minX);$('#nativeCameraY').min=String(minY);
+  $('#nativeCameraX').max=String(previewMaxX);$('#nativeCameraX').value=String(nativeCamera.x);
   $('#nativeCameraY').max=String(maxY);$('#nativeCameraY').value=String(nativeCamera.y);
   $('#nativeCameraXv').textContent=String(nativeCamera.x);
   $('#nativeCameraYv').textContent=String(nativeCamera.y);
@@ -246,7 +271,7 @@ function setNativeFrame(value) {
   composite = null;
   invalidateOther();
   invalidateGameComposite();
-  refreshNativePhaseControls();
+  refreshNativePhaseControls(); refreshPixelEditor();
   draw();
 }
 $('#nativeFrame').oninput = event => setNativeFrame(event.target.value);
@@ -262,15 +287,19 @@ $('#nativePlay').onclick = () => {
   $('#nativePlay').classList.add('on');
   $('#nativePlay').textContent = 'Pause native phases';
 };
-const setBand = i => { band = i;
+const setBand = i => { band = i;refreshEditorFeedback();
   document.querySelectorAll('.state').forEach((b,j) => b.classList.toggle('on', j===i)); };
 document.querySelectorAll('.state').forEach(b =>
   b.onclick = () => setBand(Number(b.dataset.state)));
 const brushBtns = { class:$('#bClass'), cell:$('#bCell'), rect:$('#bRect'),
-                    pan:$('#bPan') };
+                    select:$('#bSelect'), selectRect:$('#bSelectRect'), stamp:$('#stampTool'), pan:$('#bPan') };
 Object.entries(brushBtns).forEach(([k, el]) => el.onclick = () => {
-  brush = k; Object.values(brushBtns).forEach(b => b.classList.remove('on'));
-  el.classList.add('on'); });
+  if(k==='stamp'){startStamp();return;}
+  if(k==='selectRect')setMode('2d');
+  stampHover=null;brush = k; Object.values(brushBtns).forEach(b => b.classList.remove('on'));
+  $('#stampQuick').classList.remove('on');$('#selectRectQuick').classList.toggle('on',k==='selectRect');
+  cvs.style.cursor=k==='pan'?'grab':k==='selectRect'?'crosshair':'default';
+  el.classList.add('on');$('#selectQuick').classList.toggle('on',k==='select');refreshSelectionControls();draw(); });
 $('#bg1').onclick = () => setLayer(0);
 $('#bg2').onclick = () => setLayer(1);
 $('#mode2d').onclick = () => setMode('2d');
@@ -279,6 +308,12 @@ $('#mode3d').onclick = () => setMode('3d');
 $('#tint').onclick = () => { tint = !tint; $('#tint').classList.toggle('on', tint);
   invalidate(); };
 $('#tint').addEventListener('click', invalidateOther);
+$('#editOutlines').onclick = () => {
+  setMode('2d');
+  showEditOutlines = !showEditOutlines;
+  if(showEditOutlines)returnToEditedTiles();
+  $('#editOutlines').classList.toggle('on',showEditOutlines);refreshEditorFeedback();draw();
+};
 let syncingVirtualControls = false;
 function refreshVirtualControls() {
   if (!room) return;
@@ -296,22 +331,22 @@ function refreshVirtualControls() {
 $('#virtualZ').oninput = event => {
   if (syncingVirtualControls) return;
   const v=roomConfig(room).virtual[bgIndex]; v.setZ=true; v.z=Number(event.target.value)/100;
-  configDirty=true; glDirty=true; refreshVirtualControls(); draw();
+  markEditorChanged(); glDirty=true; refreshVirtualControls(); draw();
 };
 $('#virtualOrder').oninput = event => {
   if (syncingVirtualControls) return;
   const v=roomConfig(room).virtual[bgIndex]; v.setOrder=true; v.order=Number(event.target.value);
-  configDirty=true; glDirty=true; refreshVirtualControls(); draw();
+  markEditorChanged(); glDirty=true; refreshVirtualControls(); draw();
 };
 $('#virtualAlpha').oninput = event => {
   if (syncingVirtualControls) return;
   const v=roomConfig(room).virtual[bgIndex]; v.setAlpha=true; v.alpha=Number(event.target.value);
-  configDirty=true; glDirty=true; refreshVirtualControls(); draw();
+  markEditorChanged(); glDirty=true; refreshVirtualControls(); draw();
 };
 $('#virtualReset').onclick = () => {
   const v=roomConfig(room).virtual[bgIndex];
   v.setZ=v.setOrder=v.setAlpha=false;
-  configDirty=true; glDirty=true; refreshVirtualControls(); draw();
+  markEditorChanged(); glDirty=true; refreshVirtualControls(); draw();
 };
 let syncingPlaneControls=false;
 function selectedPlaneEdit() {
@@ -373,7 +408,7 @@ function refreshPlaneControls() {
   syncingPlaneControls=false;
 }
 function planeChanged() {
-  configDirty=true;glDirty=true;refreshPlaneControls();draw();
+  markEditorChanged();glDirty=true;refreshPlaneControls();draw();
 }
 $('#planeSelect').onchange=event=>{
   planeToken=event.target.value;
@@ -469,8 +504,14 @@ const resetCamera = () => {
   draw();
 };
 window.addEventListener('keydown', e => {
+  if(!tileMenu.hidden)return;
   if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
   const accel = e.metaKey || e.ctrlKey;
+  if (e.key === 'Escape' || (accel && e.key.toLowerCase() === 'd')) {
+    e.preventDefault(); deselect(); return;
+  }
+  if(accel&&e.key.toLowerCase()==='c'&&mode==='2d'){e.preventDefault();copyTiles();return;}
+  if(accel&&e.key.toLowerCase()==='v'){e.preventDefault();startStamp();return;}
   if (accel && (e.key === 'z' || e.key === 'Z')) {
     e.preventDefault(); e.shiftKey ? redo() : undo(); return;
   }
@@ -495,25 +536,33 @@ window.addEventListener('keydown', e => {
   draw();
 });
 function setMode(m) {
+  closeTileMenu();
+  tileActionStatus('');
+  if(m!=='2d'){compareOriginal=false;pixelInspector.hidden=true;}
   drag = null;                          /* a drag never crosses a mode change */
   mode = m; $('#mode2d').classList.toggle('on', m==='2d');
   $('#modeNative').classList.toggle('on', m==='native');
   $('#mode3d').classList.toggle('on', m==='3d');
   cvs.style.display = m!=='3d' ? 'block' : 'none';
   glc.style.display = m==='3d' ? 'block' : 'none';
-  glDirty = true; draw();
+  refreshNativeCameraControls();invalidateGameComposite();
+  refreshEditorFeedback();glDirty = true; draw();
 }
 function setLayer(i) {
+  closeTileMenu();
+  tileActionStatus('');
   if (!room.bg[i]) return;
-  bgIndex = i;
+  bgIndex = i;changeCache=null;
   if(!planeToken.startsWith(`bg${i+1}`))planeToken=`bg${i+1}`;
   $('#bg1').classList.toggle('on', i===0); $('#bg2').classList.toggle('on', i===1);
   L = decodeLayer(room, i); st = bucket(room, i);
+  syncSelectionLayer();
   surfacesDirty = compositeDirty = glDirty = true; invalidateOther();
   invalidateGameComposite();
   composite = null;
   resetActor();
   verifyRoomNativeGolden(room);
+  refreshTerrainControls();
   refreshVirtualControls(); refreshPlaneControls(); refreshNativePhaseControls();
   refreshNativeCameraControls();
   fitView(); tally(); draw();
@@ -523,14 +572,43 @@ DATA.rooms.forEach((r, i) => {
   const o = document.createElement('option');
   const a = r.bg[0], b = r.bg[1];
   o.value = i;
-  o.textContent = `${r.group}:${r.map}  \u2014  BG1 ${a?a.pagesWide*256+'\u00d7'+a.pagesHigh*256:'\u2013'}`
+  const names=['','Fillmore','Bloodpool','Kassandora','Aitos','Marahna','Northwall','Death Heim'];
+  const act2=[0,2,2,3,4,4,5];
+  const act=r.group<7?`Act ${r.map>=act2[r.group]?2:1} · `:'';
+  o.textContent = `${names[r.group]||r.group} · ${act}Room ${r.map} (${r.group}:${r.map})`
+    + `  \u2014  BG1 ${a?a.pagesWide*256+'\u00d7'+a.pagesHigh*256:'\u2013'}`
     + `, BG2 ${b?b.pagesWide*256+'\u00d7'+b.pagesHigh*256:'\u2013'}`
     + `  [P${Number(r.videoProfile).toString(16).padStart(2,'0')}`
     + `${r.raster ? `/R${r.raster}` : ''}]`;
   sel.appendChild(o);
 });
-sel.onchange = () => { room = DATA.rooms[Number(sel.value)];
+sel.onchange = () => { room = terrainRoom(DATA.rooms[Number(sel.value)]);
   nativeCamera.x=nativeCamera.y=0;nativeDecodedKey='';native2dCache=null;setLayer(0); };
+const terrainSelect = $('#terrain');
+TERRAIN_PROFILES.forEach(profile => {
+  const option = document.createElement('option');
+  option.value = profile.profile;
+  option.textContent = profile.label;
+  terrainSelect.appendChild(option);
+});
+function refreshTerrainControls() {
+  terrainSelect.value = String(terrainProfile);
+  const cells = room.changedCells || 0, definitions = room.changedMetatiles || 0;
+  const family=editFamily(room,bgIndex),labels=TERRAIN_PROFILES
+    .filter(p=>family.mask&(1<<p.profile)).map(p=>p.profile===2?`${p.label} (German too)`:p.label).join(' / ');
+  $('#terrainInfo').textContent = `BG${bgIndex+1} tile edits: ${labels}`
+    +(editFamilies(room,bgIndex).length===1?' (shared). ':' (matching terrain shares edits). ')
+    +(cells || definitions
+    ? `${cells} map cells and ${definitions} metatile definitions differ from US.`
+    : 'This layout and its metatile definitions match US.');
+}
+terrainSelect.onchange = () => {
+  commitOp();
+  terrainProfile = Number(terrainSelect.value);
+  room = terrainRoom(DATA.rooms[Number(sel.value)]);
+  nativeDecodedKey = '';
+  setLayer(bgIndex);
+};
 new ResizeObserver(() => {
   if (!L) return;
   /* First real layout: if the initial fit happened against a zero-size

@@ -3013,7 +3013,7 @@ static void TestBloodpoolEnvironmentCapture(void) {
   CHECK(!memcmp(frame.moonlight.rectangles,previous.rectangles,
       previous.count*sizeof(previous.rectangles[0])));
   /* A verified timber underside emits a drop; actual lower solids stop it.
-   * Post contacts are derived from low-priority pixels at the waterline. */
+   * Post contacts use native timber ink, independent of priority. */
   const unsigned timber = CaveTestTileAddress(0x8000,4096,208,352);
   ram[timber] = 0x77;
   const uint16_t timber_words[] = {0x0A77,0x0A77,0x00FF,0x00FF};
@@ -3028,7 +3028,9 @@ static void TestBloodpoolEnvironmentCapture(void) {
   ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
   CHECK(!memcmp(before,ram,sizeof(ram)));
   CHECK(frame.bloodpool.valid && frame.bloodpool.timber_count == 1);
-  CHECK(frame.bloodpool.post_count == 1 && frame.bloodpool.posts[0] == 280);
+  CHECK(frame.bloodpool.post_count == 1);
+  CHECK(frame.bloodpool.posts[0].x0 == 272 && frame.bloodpool.posts[0].x1 == 288 &&
+        frame.bloodpool.posts[0].y == 480);
   CHECK(frame.bloodpool.timber[0].y == 352 && frame.bloodpool.timber[0].drip_y == 360);
   CHECK(frame.bloodpool.timber[0].landing_y == 400 && !frame.bloodpool.timber[0].water_landing);
   ram[lower] = 0;
@@ -3039,6 +3041,25 @@ static void TestBloodpoolEnvironmentCapture(void) {
   ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
   ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
   CHECK(frame.bloodpool.timber_count == 0);
+  /* Native $21 joins a high-priority broad post and an ordinary thin one.
+   * Their centers are only 8px apart, but their submerged ends differ by 7px.
+   * Red lake ink below the timber must not extend either contact to row 512. */
+  Write16(ram,0x2110+4,0x2862);
+  Write16(ram,0x2110+6,0x0863);
+  const uint16_t post_words[] = {0x2856,0x0857,0x2866,0x2867};
+  for (unsigned q = 0; q < 4; q++) Write16(ram,0x2100+0x21*8+q*2,post_words[q]);
+  for (unsigned x = 0; x <= 384; x += 16) {
+    Write16(ram,0x22,(uint16_t)x);
+    memcpy(before,ram,sizeof(ram));
+    ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
+    ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));
+    CHECK(!memcmp(before,ram,sizeof(ram)));
+    CHECK(frame.bloodpool.valid && frame.bloodpool.post_count == 2);
+    CHECK(frame.bloodpool.posts[0].x0 == 273 && frame.bloodpool.posts[0].x1 == 280 &&
+          frame.bloodpool.posts[0].y == 492);
+    CHECK(frame.bloodpool.posts[1].x0 == 282 && frame.bloodpool.posts[1].x1 == 287 &&
+          frame.bloodpool.posts[1].y == 485);
+  }
   ram[CaveTestTileAddress(0xC000,256,112,48)] = 0;
   ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);
   ActionEnvironmentalEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram));

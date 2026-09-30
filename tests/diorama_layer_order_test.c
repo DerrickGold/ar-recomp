@@ -1674,7 +1674,169 @@ static void TestTransparentFillInheritsAndRefines(void) {
                                                   kDioramaPlane_Bg2Hi, &kind, &cgram));
 }
 
+static void TestPixelMasksRoundTrip(void) {
+  DioramaRoomOverride room = {.used = true, .map_group = 3, .map_number = 8};
+  const char *error = NULL;
+  const char *mask = "8000000000000000000000010000000000000000000000000000000000000001";
+  char line[128];
+  snprintf(line, sizeof(line), "bg1-pixels = metatile:23 black:%s", mask);
+  CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
+  CHECK(DioramaLayerOrder_RoomIsActive(&room));
+  const uint16_t *bits = DioramaLayerOrder_PixelMask(&room, 0, 2, 3, 0x23);
+  CHECK(bits && bits[0] == 0x8000 && bits[5] == 1 && bits[15] == 1);
+  CHECK(!DioramaLayerOrder_PixelMask(&room, 0, 2, 3, 0x24));
+  CHECK(!DioramaLayerOrder_PixelMask(&room, 2, 2, 3, 0x23));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg1-pixels = cell:2,3 black:"
+      "0000000000000000000000000000000000000000000000000000000000000000",
+      &error));
+  CHECK(DioramaLayerOrder_PixelMask(&room, 0, 2, 3, 0x23)[0] == 0);
+  CHECK(DioramaLayerOrder_PixelMask(&room, 0, 3, 3, 0x23)[0] == 0x8000);
+  DioramaPixelLayerOverride saved = room.pixel_layers[0];
+  CHECK(!DioramaLayerOrder_ParseLine(&room,
+      "bg1-pixels = cell:2,3 black:ZZZZ", &error));
+  CHECK(!memcmp(&saved, &room.pixel_layers[0], sizeof(saved)));
+  CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
+  CHECK(room.pixel_layers[0].count == 2); /* replaces duplicate selector */
+  char text[1024];
+  CHECK(DioramaLayerOrder_FormatRoom(&room, text, sizeof(text)) < sizeof(text));
+  CHECK(strstr(text, "[layers:03:08]") && strstr(text, line));
+  DioramaRoomOverride reparsed = {.used = true};
+  for (char *record = strtok(text, "\n"); record; record = strtok(NULL, "\n"))
+    if (record[0] != '[')
+      CHECK(DioramaLayerOrder_ParseLine(&reparsed, record, &error));
+  CHECK(!memcmp(&saved, &reparsed.pixel_layers[0], sizeof(saved)));
+}
+
+static void TestTileStampsRoundTrip(void) {
+  DioramaRoomOverride room = {.used = true, .map_group = 3, .map_number = 4};
+  const char *error = NULL;
+  CHECK(DioramaLayerOrder_ParseLine(&room, "bg2-map = bounds:-4,-2,32,16", &error));
+  const char *line = "bg2-stamp = cell:-1,0 metatile:23 "
+      "words:0010,4011,8012,E013 bands:0,1,2,1";
+  CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
+  CHECK(DioramaLayerOrder_RoomIsActive(&room));
+  CHECK(room.stamp_layers[1].count == 1 && room.stamp_layers[1].cells[0].x == -1);
+  CHECK(room.stamp_layers[1].cells[0].words[3] == 0xe013);
+  CHECK(room.stamp_layers[1].cells[0].bands == (0 | (1 << 2) | (2 << 4) | (1 << 6)));
+  CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
+  CHECK(room.stamp_layers[1].count == 1); /* same destination replaces */
+  CHECK(DioramaLayerOrder_ParseLine(&room, "bg2-pixels = cell:-1,0 black:"
+      "8000000000000000000000000000000000000000000000000000000000000000", &error));
+  CHECK(DioramaLayerOrder_PixelMask(&room, 1, -1, 0, 0x23)[0] == 0x8000);
+  const DioramaStampLayerOverride saved = room.stamp_layers[1];
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg2-stamp = cell:-1,0 metatile:23 "
+      "words:0010,4011,8012,E013 bands:0,1,3,1", &error));
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg2-stamp = cell:512,0 metatile:23 "
+      "words:0010,4011,8012,E013 bands:0,1,2,1", &error));
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg2-map = bounds:0,0,513,16", &error));
+  CHECK(!memcmp(&saved, &room.stamp_layers[1], sizeof(saved)));
+  char text[1024];
+  CHECK(DioramaLayerOrder_FormatRoom(&room, text, sizeof(text)) < sizeof(text));
+  CHECK(strstr(text, line) && strstr(text, "bg2-map = bounds:-4,-2,32,16"));
+  DioramaRoomOverride reparsed = {.used = true};
+  for (char *record = strtok(text, "\n"); record; record = strtok(NULL, "\n"))
+    if (record[0] != '[')
+      CHECK(DioramaLayerOrder_ParseLine(&reparsed, record, &error));
+  CHECK(!memcmp(&saved, &reparsed.stamp_layers[1], sizeof(saved)));
+  CHECK(!memcmp(&room.pixel_layers[1], &reparsed.pixel_layers[1], sizeof(room.pixel_layers[1])));
+  for (int x = 0; x < kDioramaTileStampMax - 1; x++) {
+    snprintf(text, sizeof(text), "bg2-stamp = cell:%d,1 metatile:23 "
+        "words:0010,4011,8012,E013 bands:0,1,2,1", x);
+    CHECK(DioramaLayerOrder_ParseLine(&room, text, &error));
+  }
+  CHECK(room.stamp_layers[1].count == kDioramaTileStampMax);
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg2-stamp = cell:511,1 metatile:23 "
+      "words:0010,4011,8012,E013 bands:0,1,2,1", &error));
+  CHECK(room.stamp_layers[1].count == kDioramaTileStampMax);
+  CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
+}
+
+static void TestRegionalTileKeys(void) {
+  DioramaRoomOverride room = {.used = true, .map_group = 3, .map_number = 4};
+  DioramaRoomOverride resolved;
+  const char *error = NULL;
+  const char *const suffixes[] = {"", ":jp", ":ge"};
+  char line[256];
+  for (unsigned profile = 0; profile < 3; profile++) {
+    const char *suffix = suffixes[profile];
+    snprintf(line, sizeof(line), "bg1-pixels%s = cell:0,0 black:%04X%060X",
+             suffix, 0x8000u >> profile, 0);
+    CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
+    snprintf(line, sizeof(line), "bg1-virtual%s = metatile:23 band:%u", suffix, profile);
+    CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
+    snprintf(line, sizeof(line), "bg1-map%s = bounds:-%u,0,32,16", suffix, profile + 1);
+    CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
+    snprintf(line, sizeof(line), "bg1-stamp%s = cell:-1,0 metatile:23 "
+             "words:%04X,0010,0010,0010 bands:0,1,2,1", suffix, 0x10 + profile);
+    CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
+  }
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg1-virtual:us+jp+eu = cells:1,0-1,0 band:0", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room, "bg1 = z:0.6", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg2-virtual:us+jp+eu = metatile:23 band:0", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg2-map:us+jp+eu = bounds:-1,0,32,16", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg2-pixels = cell:0,0 black:80000000000000000000000000000000"
+      "00000000000000000000000000000000", &error));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg2-stamp = cell:0,0 metatile:23 words:0010,0010,0010,0010 bands:0,1,2,1", &error));
+  CHECK(DioramaLayerOrder_RoomIsActive(&room));
+  const DioramaRoomOverride saved = room;
+  CHECK(!DioramaLayerOrder_ParseLine(&room,
+      "bg1-pixels:xx = cell:0,0 black:00000000000000000000000000000000"
+      "00000000000000000000000000000000", &error));
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg1-map:jp+ = bounds:0,0,32,16", &error));
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg1:eu = z:0.5", &error));
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg1-virtual:jp = z:0.5", &error));
+  CHECK(!memcmp(&room, &saved, sizeof(room)));
+  CHECK(!DioramaLayerOrder_ForTerrain(&room, 3, &resolved));
+  CHECK(!DioramaLayerOrder_ForTerrain(&room, 0, &room));
+  char text[4096];
+  CHECK(DioramaLayerOrder_FormatRoom(&room, text, sizeof(text)) < sizeof(text));
+  CHECK(strstr(text, "bg1-pixels = cell:0,0"));
+  CHECK(strstr(text, "bg1-pixels:jp = cell:0,0"));
+  CHECK(strstr(text, "bg1-pixels:eu = cell:0,0"));
+  CHECK(strstr(text, "bg2-map:us+jp+eu = bounds:"));
+  CHECK(strstr(text, "bg2-virtual:us+jp+eu = metatile:23 band:0"));
+  DioramaRoomOverride reparsed = {.used = true};
+  for (char *record = strtok(text, "\n"); record; record = strtok(NULL, "\n"))
+    if (record[0] != '[')
+      CHECK(DioramaLayerOrder_ParseLine(&reparsed, record, &error));
+  for (unsigned profile = 0; profile < 3; profile++) {
+    CHECK(DioramaLayerOrder_ForTerrain(&reparsed, profile, &resolved));
+    CHECK(resolved.pixel_layers[0].count == 1);
+    const uint16_t *mask = DioramaLayerOrder_PixelMask(&resolved, 0, 0, 0, 0x23);
+    CHECK(mask && mask[0] == (0x8000u >> profile));
+    CHECK(DioramaLayerOrder_VirtualBand(&resolved, 0, 0, 0, 0x23, 0) == (int)profile);
+    CHECK(DioramaLayerOrder_VirtualBand(&resolved, 0, 1, 0, 0x23, 0) == 0);
+    CHECK(resolved.stamp_layers[0].count == 1);
+    CHECK(resolved.stamp_layers[0].cells[0].words[0] == 0x10 + profile);
+    CHECK(resolved.stamp_layers[0].x0 == -(int)(profile + 1));
+    CHECK(resolved.planes[SR_PPU_OVERLAY_BG1].set_z);
+    CHECK(resolved.stamp_layers[1].set_bounds);
+    CHECK(DioramaLayerOrder_VirtualBand(&resolved, 1, 0, 0, 0x23, 0) == 0);
+    CHECK(resolved.pixel_layers[1].count == (profile == 0 ? 1 : 0));
+    CHECK(resolved.stamp_layers[1].count == (profile == 0 ? 1 : 0));
+  }
+  DioramaLayerOrderTable *table = calloc(1, sizeof(*table));
+  CHECK(table != NULL);
+  if (!table) return;
+  table->rooms[0] = room;
+  table->count = 1;
+  CHECK(DioramaLayerOrder_MergeManifest(table, "# keep\n[layers:03:04]\n"
+      "bg1-pixels:jp = obsolete\n", NULL, text, sizeof(text)) < sizeof(text));
+  CHECK(strstr(text, "# keep") && !strstr(text, "obsolete"));
+  CHECK(strstr(text, "bg1-stamp:eu") && strstr(text, "bg1-map:jp"));
+  free(table);
+}
+
 int main(void) {
+  TestRegionalTileKeys();
+  TestTileStampsRoundTrip();
+  TestPixelMasksRoundTrip();
   TestNoOverrideIsIdentity();
   TestOverrideIsScopedToItsRoom();
   TestOrderEditReordersPaint();

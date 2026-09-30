@@ -177,16 +177,20 @@ typedef void (*DioramaPlaneEffectFn)(void *userdata, int plane,
                                     const DioramaProjection *projection);
 
 /* Pure eligibility contract shared by projection publication and drawing.
- * Resource booleans describe this frame's upload/content intersection. */
+ * Resource booleans describe this frame's upload/content intersection.
+ * Full-add subscreen inputs still need their main-screen BG2 color base,
+ * including in skybox-only mode. */
 bool Diorama_PlaneEligible(int plane, bool visible, bool has_texture,
-                           bool has_pixels, bool hud_flat, bool skybox_only);
+                           bool has_pixels, bool hud_flat, bool skybox_only,
+                           uint32_t additive_plane_mask);
 
 /* Projection normally has the same current-pixel contract as drawing. A
  * current host effect is also current content for its authentic BG or OBJ
  * plane, even when that isolated hardware band has no winning pixels. */
 bool Diorama_PlaneProjectable(int plane, bool visible, bool has_texture,
                               bool has_pixels, bool has_attached_effect,
-                              bool hud_flat, bool skybox_only);
+                              bool hud_flat, bool skybox_only,
+                              uint32_t additive_plane_mask);
 
 /* Keeps required OBJ priorities whose plane was requested and either had no
  * source pixels or uploaded those pixels successfully. This distinguishes an

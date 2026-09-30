@@ -68,6 +68,9 @@ void ActRaiser_DioramaDeathHeimEyesPrepare(void);
 void ActRaiser_DioramaDeathHeimHubStatuesFinish(int width);
 
 /* ---- defined in actraiser_diorama_capture.c ---- */
+bool ActRaiser_DioramaPixelEditsActive(void);
+void ActRaiser_DioramaPixelSampleLine(const SrPpuStateSnapshot *ppu, int screen_y);
+void ActRaiser_DioramaPixelFinish(void);
 void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom);
 void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu);
 void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number);

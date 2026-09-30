@@ -17,7 +17,8 @@ trap 'rm -rf "$TMP"' EXIT
 "${CC:-cc}" -O2 -std=c11 -Wall -Wextra -Wpedantic -I src -I recomp \
    -I snesrecomp-go/runtime/include \
    tools/action_editor/action_bg_export.c \
-   src/action/action_room_scene.c src/actraiser/quintet_lzss.c \
+   src/action/action_room_scene.c src/action/action_room_terrain.c \
+   src/regional/action/regional_terrain.c src/actraiser/quintet_lzss.c \
    -o "$TMP/export"
 "$TMP/export" "$ROM" "$TMP/rooms.json"
 

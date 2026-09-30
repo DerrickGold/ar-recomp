@@ -13,6 +13,7 @@ typedef enum DioramaEffectKind {
   kDioramaEffect_Blur,
   kDioramaEffect_RimLight,
   kDioramaEffect_DofEdge,
+  kDioramaEffect_PrioritySurface,
   kDioramaEffect_Count,
 } DioramaEffectKind;
 
@@ -42,6 +43,18 @@ typedef struct DioramaDofEdgeEffectParams {
   float lower_content_v_max;
 } DioramaDofEdgeEffectParams;
 
+/* Coplanar opaque BG priority bands retain separate draw slots while sharing
+ * filtering coverage. The texture holds low above high at native resolution;
+ * mesh UVs address one band. Both draws must use this effect as a pair.
+ * Additive pairs sum coverage directly instead of conditioning source-over
+ * alpha; they require the capture's disjoint subscreen winner masks. */
+typedef struct DioramaPrioritySurfaceEffectParams {
+  float width;
+  float height;
+  bool high_band;
+  bool additive;
+} DioramaPrioritySurfaceEffectParams;
+
 /* Availability may lazily create backend resources. Successful Bind calls
  * affect subsequent submissions until Unbind and must be paired with it.
  * Failed binds do not promise a clean native state, so callers also Unbind
@@ -54,6 +67,8 @@ bool DioramaEffectBackend_BindRimLight(
     ArRenderDevice *device, const DioramaRimLightEffectParams *params);
 bool DioramaEffectBackend_BindDofEdge(
     ArRenderDevice *device, const DioramaDofEdgeEffectParams *params);
+bool DioramaEffectBackend_BindPrioritySurface(
+    ArRenderDevice *device, const DioramaPrioritySurfaceEffectParams *params);
 bool DioramaEffectBackend_Unbind(ArRenderDevice *device);
 
 /* Release native resources before their render device is destroyed or

@@ -2890,6 +2890,20 @@ static void TestBloodpoolWaterMoonlight(void) {
       IdentityProjection,NULL,NULL,&shadow) && !shadow.vertex_count);
 }
 
+static unsigned BloodpoolRipplePoints(const ActionSceneEffectRenderBatch *batch,
+    ArRenderPointF *points, unsigned capacity) {
+  unsigned count = 0;
+  for (int i = 0; i < batch->vertex_count; i++) {
+    const ArRenderVertex2D *v = &batch->vertices[i];
+    if (fabsf(v->color.r-.85f) > .0001f || fabsf(v->color.g-.34f) > .0001f ||
+        fabsf(v->color.b-.43f) > .0001f) continue;
+    CHECK(count < capacity);
+    if (count < capacity) points[count] = v->position;
+    count++;
+  }
+  return count;
+}
+
 static void TestBloodpoolMarshDetails(void) {
   ActionSceneEffectFrame frame = {.decoration_count = 2, .decoration_visible_count = 2};
   ActionEffectInstance *detail = &frame.decorations[0], *moon = &frame.decorations[1];
@@ -2909,7 +2923,7 @@ static void TestBloodpoolMarshDetails(void) {
   frame.moonlight.valid = true;
   frame.bloodpool = (ActionBloodpoolDetails){.valid = true, .timber_count = 1, .post_count = 1,
     .timber = {{.x0=208,.x1=224,.y=352,.drip_x=222,.drip_y=360,.landing_y=400}},
-    .posts = {280},
+    .posts = {{.x0=278,.x1=283,.y=485}},
   };
   static ActionSceneEffectRenderBatch first, repeat;
   detail->kind = kActionEffect_BloodpoolTimber;
@@ -2960,11 +2974,57 @@ static void TestBloodpoolMarshDetails(void) {
     for (int i = 0; i < repeat.vertex_count; i++) {
       const ArRenderVertex2D *v = &repeat.vertices[i];
       CHECK(v->position.x >= 182 && v->position.x <= 874);
-      CHECK(v->position.y >= 488 && v->position.y <= 511);
+      CHECK(v->position.y >= 480 && v->position.y <= 511);
       CHECK(v->color.r > v->color.b); /* Red lake, including reflected light. */
     }
   }
   CHECK(saw_ripple);
+  /* Both native post depths must be used, including shallow contacts above
+   * the full-water row. Moving the capture anchor preserves world placement. */
+  frame.bloodpool.timber_count = 0;
+  ArRenderPointF anchored[96], moved[96];
+  unsigned ripple_count = 0;
+  for (unsigned tick = 0; tick < 256; tick++) {
+    detail->phase_ticks = (uint16_t)tick;
+    CHECK(ActionSceneDecorationRender_Build(&frame,detail->render_layer,false,true,
+        IdentityProjection,NULL,NULL,&repeat));
+    ripple_count = BloodpoolRipplePoints(&repeat,anchored,96);
+    if (ripple_count > 0) break;
+  }
+  CHECK(ripple_count > 0);
+  for (unsigned contact = 0; contact < 2; contact++) {
+    frame.bloodpool.posts[0].y = contact ? 492 : 485;
+    detail->world_x = 560;
+    CHECK(ActionSceneDecorationRender_Build(&frame,detail->render_layer,false,true,
+        IdentityProjection,NULL,NULL,&repeat));
+    CHECK(BloodpoolRipplePoints(&repeat,moved,96) == ripple_count);
+    float left = 4096, right = 0, top = 512, bottom = 0;
+    for (unsigned i = 0; i < ripple_count && i < 96; i++) {
+      const ArRenderPointF p = moved[i], original = anchored[i];
+      CHECK(fabsf(p.x-original.x) < .0001f);
+      CHECK(fabsf(p.y-original.y-(contact ? 7 : 0)) < .0001f);
+      left = fminf(left,p.x);
+      right = fmaxf(right,p.x);
+      top = fminf(top,p.y);
+      bottom = fmaxf(bottom,p.y);
+    }
+    CHECK(fabsf((left+right)*.5f-280.5f) < .0001f);
+    CHECK(fabsf((top+bottom)*.5f-frame.bloodpool.posts[0].y) < .0001f);
+  }
+  /* Ripple vertices follow the same perspective/parallax transform as their
+   * BG1-high post; BG2's independently moving moon cannot move the contact. */
+  frame.bloodpool.posts[0].y = 485;
+  const float foreground_offset = 40;
+  CHECK(ActionSceneDecorationRender_Build(&frame,detail->render_layer,false,true,
+      MoonWaterPerspective,NULL,(void *)&foreground_offset,&repeat));
+  CHECK(BloodpoolRipplePoints(&repeat,moved,96) == ripple_count);
+  for (unsigned i = 0; i < ripple_count && i < 96; i++) {
+    const ArRenderPointF original = anchored[i], actual = moved[i];
+    ArRenderPointF expected;
+    CHECK(MoonWaterPerspective((void *)&foreground_offset,detail,
+        original.x-detail->world_x,original.y-detail->world_y,&expected));
+    CHECK(fabsf(actual.x-expected.x) < .0001f && fabsf(actual.y-expected.y) < .0001f);
+  }
   detail->kind = kActionEffect_BloodpoolCloud;
   detail->render_layer = kActionEffectRenderLayer_Bg2Alpha;
   detail->projection_plane = kActionEffectProjectionPlane_Bg2;

@@ -81,7 +81,7 @@ static float DripAge(const ActionBloodpoolTimber *edge, uint16_t ticks, float *f
 }
 
 static bool WaterClip(const ActionEffectInstance *effect, const ActionEffectLocalRect *clip,
-    float world_x, ActionEffectLocalRect *region) {
+    float world_x, float water_top, ActionEffectLocalRect *region) {
   for (unsigned pool = 0; pool < kBloodpoolWaterSpanCount; pool++) {
     if (!(effect->source_mask&(1u<<pool))) continue;
     const float left = kBloodpoolWaterSpans[pool].left+6.0f;
@@ -90,7 +90,7 @@ static bool WaterClip(const ActionEffectInstance *effect, const ActionEffectLoca
     *region = *clip;
     region->x0 = fmaxf(region->x0,left-effect->world_x);
     region->x1 = fminf(region->x1,right-effect->world_x);
-    region->y0 = fmaxf(region->y0,488-effect->world_y);
+    region->y0 = fmaxf(region->y0,water_top-effect->world_y);
     region->y1 = fminf(region->y1,511-effect->world_y);
     return region->x0 < region->x1 && region->y0 < region->y1;
   }
@@ -98,11 +98,11 @@ static bool WaterClip(const ActionEffectInstance *effect, const ActionEffectLoca
 }
 
 static bool Ripple(ActionEffectGeometryWriter *writer, const ActionEffectInstance *mesh,
-    const ActionEffectLocalRect *clip, float world_x, float world_y, float age,
+    const ActionEffectLocalRect *clip, float world_x, float world_y, float water_top, float age,
     float strength, ActionEffectProjectPointFn project_point, void *userdata) {
   if (age < 0 || age >= 80) return true;
   ActionEffectLocalRect region;
-  if (!WaterClip(mesh,clip,world_x,&region)) return true;
+  if (!WaterClip(mesh,clip,world_x,water_top,&region)) return true;
   const float t = age/80, radius = 1+14*t;
   const float alpha = strength*sinf(t*3.14159265f)*(1-t);
   const float x = world_x-mesh->world_x, y = world_y-mesh->world_y;
@@ -145,9 +145,9 @@ static bool TimberDrops(ActionEffectGeometryWriter *writer, const ActionEffectIn
     if (age < 0) continue;
     if (water) {
       if (!edge->water_landing) continue;
-      if (!Ripple(writer,mesh,clip,edge->drip_x,edge->landing_y+1,age-fall_time,.75f,
+      if (!Ripple(writer,mesh,clip,edge->drip_x,edge->landing_y+1,488,age-fall_time,.75f,
               project_point,userdata) ||
-          !Ripple(writer,mesh,clip,edge->drip_x,edge->landing_y+1,age-fall_time-17,.35f,
+          !Ripple(writer,mesh,clip,edge->drip_x,edge->landing_y+1,488,age-fall_time-17,.35f,
               project_point,userdata)) return false;
     } else if (age < fall_time) {
       const float t = age/fall_time;
@@ -211,10 +211,12 @@ bool AppendBloodpoolDetailParticles(ActionEffectGeometryWriter *writer,
   if (effect->kind == kActionEffect_BloodpoolWater) {
     if (!TimberDrops(writer,&mesh,details,&clip,true,project_point,userdata)) return false;
     for (unsigned i = 0; i < details->post_count; i++) {
-      const uint32_t seed = DeterministicHash_Mix32((unsigned)details->posts[i]+0xBB21u);
+      const ActionBloodpoolPost *post = &details->posts[i];
+      const float x = (post->x0+post->x1)*.5f;
+      const uint32_t seed = DeterministicHash_Mix32((unsigned)(post->x0+post->x1)+0xBB21u);
       const float age = (float)((effect->phase_ticks+seed)&255u);
-      if (!Ripple(writer,&mesh,&clip,details->posts[i],491,age,.6f,project_point,userdata) ||
-          !Ripple(writer,&mesh,&clip,details->posts[i],491,age-23,.28f,project_point,userdata))
+      if (!Ripple(writer,&mesh,&clip,x,post->y,480,age,.6f,project_point,userdata) ||
+          !Ripple(writer,&mesh,&clip,x,post->y,480,age-23,.28f,project_point,userdata))
         return false;
     }
   } else if (effect->kind == kActionEffect_BloodpoolMist) {

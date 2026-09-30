@@ -6,11 +6,22 @@
 
   <h2>Room</h2>
   <select id="room" style="width:100%"></select>
+  <h2>Terrain variant</h2>
+  <select id="terrain" style="width:100%"></select>
+  <p class="hint" id="terrainInfo"></p>
+  <p class="hint">Matching terrain shares tile edits. Different layouts have
+    their own edits; the hint above shows which regions share this BG.</p>
   <div style="display:flex;gap:5px;margin-top:6px">
     <button id="bg1" class="on" style="flex:1">BG1</button>
     <button id="bg2" style="flex:1">BG2</button>
   </div>
 
+  <h2>Pixel editing</h2>
+  <button id="pixelPick" style="width:100%">Open pixel editor…</button>
+  <p class="hint">Double-click a selected tile or use Pixels above the map.
+    The pixel editor opens beside your map.</p>
+
+  <details class="side-section"><summary>Native frame controls</summary>
   <h2>Native preview frame</h2>
   <div class="ctl"><label>Frame</label>
     <input id="nativeFrame" type="range" min="0" max="255" step="1" value="0">
@@ -24,7 +35,9 @@
     <input id="nativeCameraY" type="range" min="0" max="0" step="1" value="0">
     <span class="v" id="nativeCameraYv">0</span></div>
 
-  <h2>Band</h2>
+  </details>
+  <details class="side-section"><summary>Paint &amp; depth settings</summary>
+  <h2>Paintbrush band</h2>
   <div class="stack">
     <button class="state s-behind" data-state="0">
       <span class="swatch"></span><span class="n" data-band="0">Far virtual plane</span><span class="k">1</span></button>
@@ -93,23 +106,72 @@
     <code>bg1</code>/<code>bg1hi</code>/<code>bg2</code>/<code>bg2hi</code>
     records consumed by the game.</p>
 
-  <h2>Brush</h2>
+  <h2>Paint tools (advanced)</h2>
   <div class="stack">
-    <button id="bClass" class="on">All instances of a metatile</button>
-    <button id="bCell">This map cell only</button>
-    <button id="bRect">Rectangle</button>
+    <button id="bClass">Paint all matching tile types</button>
+    <button id="bCell">Paint one tile</button>
+    <button id="bRect">Paint rectangle</button>
+    <button id="bSelect" class="on">Select cells (no edits)</button>
     <button id="bPan">Pan / navigate</button>
   </div>
   <p class="hint">Hold <kbd>Alt</kbd> to paint the default band back.</p>
+  </details>
 
+  <details class="side-section"><summary>Advanced selection</summary>
   <h2>Select by</h2>
   <div class="stack">
     <button id="selPrio">Tiles with priority set</button>
     <button id="selPal">Same palette as last click</button>
+    <button id="applyBand" disabled>Apply band to selection</button>
+    <button id="pixelSelectionBlack" disabled>Fill selected transparency black</button>
+  </div>
+  <p class="hint" id="selectionInfo">0 cells selected</p>
+  <p class="hint" id="selectionPixelInfo" role="status" aria-live="polite">Fill affects only the selected tiles' transparent pixels in Diorama.</p>
+  <p class="hint">Click a start tile, then <kbd>Shift-click</kbd> the opposite
+    corner to select the entire range. Apply band saves a layer edit;
+    Deselect clears the selection and start point, keeping saved edits.</p>
+  <p class="hint">Right-click a tile or selected range for priority, copy,
+    paste, and transparency actions.</p>
+  </details>
+  <details class="side-section"><summary>Scenery &amp; edge space</summary>
+  <h2>Copy / paste scenery (Diorama only)</h2>
+  <div class="stack">
+    <button id="bSelectRect">Select rectangle</button>
+    <button id="copyTiles" disabled>Copy selected tiles (Ctrl/Cmd-C)</button>
+    <button id="stampTool" disabled>Stamp copied tiles (Ctrl/Cmd-V)</button>
+  </div>
+  <p class="hint">Drag a rectangle or click then Shift-click, Copy, then Stamp and click its new top-left
+    corner. Keep clicking to repeat. Esc ends stamping.</p>
+  <div style="display:flex;gap:5px;align-items:center">
+    <label for="pasteX">X</label><input id="pasteX" type="number" value="0" min="-512" max="511" style="width:65px">
+    <label for="pasteY">Y</label><input id="pasteY" type="number" value="0" min="-512" max="511" style="width:65px">
+    <button id="pasteTiles" disabled>Paste</button>
+  </div>
+  <p class="hint">Coordinates use 16px tiles; negative coordinates extend left or up.</p>
+  <div style="display:flex;gap:5px;align-items:center">
+    <label for="edgeCount">Add edge space:</label>
+    <input id="edgeCount" type="number" min="1" max="64" value="4" style="width:60px"> tiles
+  </div>
+  <div style="display:flex;gap:5px;margin-top:5px">
+    <button id="edgeLeft">Left</button><button id="edgeRight">Right</button>
+    <button id="edgeTop">Top</button><button id="edgeBottom">Bottom</button>
+  </div>
+  <p class="hint" id="stampInfo"></p>
+  <div class="stack">
+    <button id="removeStamps" disabled>Remove selected pasted tiles</button>
+    <button id="resetStamps">Reset this BG's pasted scenery</button>
+  </div>
+  <p class="hint">Copies keep their depth bands and pixel edits. Paste within the
+    same room and BG. Export INI saves your work. Gameplay and collision stay unchanged.</p>
+  </details>
+  <details class="side-section"><summary>Reset classifications</summary>
+  <h2>Reset edits</h2>
+  <div class="stack">
     <button id="clearAll">Reset this BG's classifications</button>
     <button id="clearRoom">Reset room classifications</button>
     <button id="clearEverything">Reset ALL classifications to ROM</button>
   </div>
+  </details>
 
   <h2>Tally</h2>
   <div class="tally">
@@ -142,7 +204,7 @@
 <div class="main">
   <div class="bar">
     <button id="mode2d" class="on">Map editor</button>
-    <button id="modeNative">Native frame</button>
+    <button id="modeNative">Original game frame</button>
     <button id="mode3d">Diorama 3D</button>
     <button id="undoBtn" disabled>Undo</button>
     <button id="redoBtn" disabled>Redo</button>
@@ -155,27 +217,114 @@
     <span id="iniName" style="color:var(--faint);font-family:var(--mono);font-size:10px"></span>
     <span class="spacer"></span>
     <button id="tint">Band tint</button>
+    <button id="compareOriginal">Compare original tiles</button>
     <label for="importIni" class="file-btn">Load INI</label>
     <input id="importIni" type="file" accept=".ini,text/plain" hidden>
+    <span id="saveState" class="save-state" role="status">Loaded INI</span>
     <button id="export">Export INI</button>
     <button id="docs">Docs</button>
   </div>
+  <div class="selection-tools" id="selectionTools">
+    <div class="selection-summary"><b id="selectionSummary">No tiles selected</b>
+      <span id="selectionApplied"></span><span id="selectionScope"></span></div>
+    <div class="selection-actions">
+      <button id="selectQuick" class="on" title="Select without painting">Select</button>
+      <button id="selectionBand0" disabled aria-pressed="false">Far</button>
+      <button id="selectionBand1" disabled aria-pressed="false">Normal</button>
+      <button id="selectionBand2" disabled aria-pressed="false">Priority</button>
+    <button id="deselect" disabled title="Clear highlights, keep edits (Esc or Ctrl/Cmd-D)">Deselect</button>
+    <button id="selectRectQuick" title="Drag a rectangle, or click a start tile then Shift-click its opposite corner">Select rectangle</button>
+    <button id="copyTilesQuick" disabled title="Copy the selected rectangle (Ctrl/Cmd-C)">Copy</button>
+    <button id="stampQuick" disabled title="Click to paste repeatedly (Ctrl/Cmd-V; Esc to finish)">Stamp</button>
+    <button id="pixelSelectionBlackQuick" disabled title="Fill transparent pixels black on all selected tiles (Diorama only)">Fill transparency black</button>
+      <button id="selectionPaste" disabled title="Paste with its top-left corner at the selection">Paste over</button>
+      <button id="selectionPixels" disabled title="Edit the focused tile in this selection; use Fill transparency black for the whole range">Pixels…</button>
+      <button id="selectionPreview" disabled>View selection in 3D</button>
+    </div>
+    <div class="selection-detail"><span id="selectionSource"></span>
+      <b id="activeTool"></b><span id="toolFeedback"></span></div>
+  </div>
+  <div class="change-review"><span id="changeSummary"></span>
+    <label for="highlightBy">Highlight</label>
+    <select id="highlightBy" title="Bands use the currently applied state. Mixed tiles match any of their four 8px quadrants.">
+      <option value="modified">Modified tiles</option>
+      <option value="0">Far band</option>
+      <option value="1">Normal band</option>
+      <option value="2">Priority band</option>
+    </select>
+    <button id="editOutlines" class="on" aria-pressed="true">Show highlights</button>
+    <span id="highlightSummary"></span>
+    <button id="previousChange" disabled>Previous edit</button>
+    <button id="nextChange" disabled>Next edit</button>
+    <button id="selectChanges" disabled>Select edited tiles</button>
+  </div>
   <div class="view">
-    <canvas id="map2d"></canvas>
+    <canvas id="map2d" tabindex="0" aria-label="Tile map. Right-click or Shift-F10 for tile actions."></canvas>
     <canvas id="gl"></canvas>
     <div class="hud" id="hud"></div>
     <div class="legend" id="legend"></div>
+    <section id="pixelInspector" class="pixel-inspector" aria-label="Tile pixel editor" hidden>
+    <div class="inspector-header"><b>Tile pixels</b>
+      <button id="pixelInspectorClose" aria-label="Close pixel editor">Close</button></div>
+  <p class="hint" id="pixelInfo">Click a map cell with Select cells.</p>
+  <canvas id="pixelCanvas" width="224" height="224" aria-label="Magnified tile pixel editor"></canvas>
+  <div id="pixelControls">
+    <select id="pixelScope" style="width:100%">
+      <option value="cell">This map cell only</option>
+      <option value="id">All instances of this metatile</option>
+    </select>
+    <div style="display:flex;gap:5px;margin-top:5px">
+      <button id="pixelBlack" class="on" style="flex:1">Paint black</button>
+      <button id="pixelRestore" style="flex:1">Restore pixel</button>
+    </div>
+    <div class="stack" style="margin-top:5px">
+      <button id="pixelTransparent">Fill transparent pixels black</button>
+      <button id="pixelFill">Make whole tile black</button>
+      <button id="pixelReset">Reset pixel edits for this cell</button>
+    </div>
+  </div>
+  <p class="hint">Changes apply immediately to the Diorama preview. Checkerboard means transparency. Paint only the pixels you
+    want opaque. Cell edits take precedence over metatile edits. Undo works for
+    pixel strokes. Export INI to keep your changes in a file.</p>
+
+    </section>
+    <div class="tile-action-status" id="tileActionStatus" role="status" aria-live="polite"></div>
   </div>
 </div>
 </div>
 
-<dialog id="docsDlg"><div class="dlg-h"><h3>How this tool maps onto the engine</h3>
+<div id="tileMenu" class="tile-menu" role="menu" tabindex="-1" aria-label="Tile actions" hidden>
+  <div class="tile-menu-title" id="tileMenuTitle"></div>
+  <button id="tileActionPriority" role="menuitemcheckbox" aria-checked="false" tabindex="-1"
+    title="Route the selected tiles through the Diorama priority band.">Turn priority on</button>
+  <button id="tileActionFar" role="menuitem" tabindex="-1">Move to far plane</button>
+  <button id="tileActionResetBand" role="menuitem" tabindex="-1"
+    title="Remove local band overrides. Metatile rules still apply.">Reset tile band</button>
+  <div class="tile-menu-separator" role="separator"></div>
+  <button id="tileActionPixels" role="menuitem" tabindex="-1">Edit this tile's pixels…</button>
+  <button id="tileActionFill" role="menuitem" tabindex="-1">Fill transparency black</button>
+  <div class="tile-menu-separator" role="separator"></div>
+  <button id="tileActionCopy" role="menuitem" tabindex="-1">Copy selected tiles</button>
+  <button id="tileActionPaste" role="menuitem" tabindex="-1">Paste over here</button>
+  <button id="tileActionStamp" role="menuitem" tabindex="-1">Stamp copied tiles…</button>
+  <button id="tileActionRemove" role="menuitem" tabindex="-1">Remove selected pasted tiles</button>
+  <div class="tile-menu-separator" role="separator"></div>
+  <button id="tileActionDeselect" role="menuitem" tabindex="-1">Deselect</button>
+  <div class="tile-menu-note" id="tileMenuDestination"></div>
+</div>
+
+<dialog id="docsDlg"><div class="dlg-h"><h3>Using the action map editor</h3>
   <span class="spacer" style="flex:1"></span><button id="docsX">Close</button></div>
   <div class="dlg-b" id="docsBody"></div></dialog>
 
 <script src="native_frame.js"></script>
+<script src="regional_editor.js"></script>
 <script src="layer_editor.js"></script>
 <script src="painting.js"></script>
+<script src="pixel_editor.js"></script>
+<script src="stamp_editor.js"></script>
+<script src="editor_feedback.js"></script>
+<script src="tile_menu.js"></script>
 <script src="diorama_view.js"></script>
 <script src="editor.js"></script>
 <script src="help.js"></script>

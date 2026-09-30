@@ -217,23 +217,33 @@ float Diorama_BackgroundClampOffset(
 }
 
 bool Diorama_PlaneEligible(int plane, bool visible, bool has_texture,
-                           bool has_pixels, bool hud_flat, bool skybox_only) {
+                           bool has_pixels, bool hud_flat, bool skybox_only,
+                           uint32_t additive_plane_mask) {
   if (!visible || !has_texture || !has_pixels) return false;
   if (plane == SR_PPU_OVERLAY_BG3 && hud_flat) return false;
   /* Skybox-only replaces the distant backdrop, not BG2's foreground water
    * and other high-priority scenery. Those retain their native depth, alpha
-   * and attached effects (including when their low-priority band is empty). */
+   * and attached effects (including when their low-priority band is empty).
+   * In disjoint full-add scenes such as Marahna, main-screen BG2 is instead
+   * the color base for the subscreen scenery/actors. Replacing it with ROM
+   * skybox art drops the water tint and adds the scenery to itself. Keep that
+   * base at its authored transform; an additive BG2 is not a main input. */
+  const uint32_t bg2_planes = (1u << SR_PPU_OVERLAY_BG2) |
+      (1u << kDioramaPlane_Bg2Hi) | (1u << kDioramaPlane_Bg2Far);
+  const bool bg2_color_base = additive_plane_mask &&
+      !(additive_plane_mask & bg2_planes);
   if (skybox_only &&
-      (plane == SR_PPU_OVERLAY_BG2 ||
-       plane == kDioramaPlane_Bg2Far ||
-       plane == kDioramaPlane_Backdrop))
+      (plane == kDioramaPlane_Backdrop ||
+       (!bg2_color_base && (plane == SR_PPU_OVERLAY_BG2 ||
+                           plane == kDioramaPlane_Bg2Far))))
     return false;
   return true;
 }
 
 bool Diorama_PlaneProjectable(int plane, bool visible, bool has_texture,
                               bool has_pixels, bool has_attached_effect,
-                              bool hud_flat, bool skybox_only) {
+                              bool hud_flat, bool skybox_only,
+                              uint32_t additive_plane_mask) {
   const bool accepts_attached_effect =
       DioramaPlaneIsObjectPriority(plane) ||
       plane == SR_PPU_OVERLAY_BG1 ||
@@ -244,7 +254,7 @@ bool Diorama_PlaneProjectable(int plane, bool visible, bool has_texture,
   return Diorama_PlaneEligible(
       plane, visible, has_texture || has_effect_content,
       has_pixels || has_effect_content,
-      hud_flat, skybox_only);
+      hud_flat, skybox_only, additive_plane_mask);
 }
 
 uint8_t Diorama_FilterObjEffectProjectionMask(

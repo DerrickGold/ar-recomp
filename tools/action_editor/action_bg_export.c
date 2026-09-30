@@ -3,8 +3,8 @@
  * Feeds tools/action_editor/build.sh, which bakes the result into the
  * standalone tile-classification editor. Read-only: it opens the ROM, walks
  * each room's asset script through the shared ActionRoomScene decoder, and
- * writes what that decoder already reconstructed. This is the same immutable
- * room authority linked into the game; the exporter owns no ROM interpretation.
+ * projects the three terrain profiles through the game's shared room authority.
+ * The exporter owns no ROM interpretation or regional patch logic.
  *
  *   cc -I src -I recomp -I snesrecomp-go/runtime/include \
  *      tools/action_editor/action_bg_export.c -o /tmp/action_bg_export
@@ -15,8 +15,10 @@
 #include <string.h>
 
 #include "action/action_room_scene.h"
+#include "action/action_room_terrain.h"
 #include "actraiser_game.h"
 #include "deterministic_hash.h"
+#include "regional/action/regional_terrain.h"
 
 /* Assets repeat heavily: rooms in one act inherit the act's character and
  * palette uploads, so the same 16 KiB CHR blob backs many rooms. Emitting one
@@ -56,6 +58,39 @@ static void WriteBase64(FILE *out, const unsigned char *bytes, size_t size) {
   }
 }
 
+static void WriteBackground(FILE *out, const ActionRoomSceneBg *layer) {
+  if (!layer->have_map || !layer->have_metatiles) {
+    fprintf(out, "null");
+    return;
+  }
+  fprintf(out,
+          "{\"metatiles\":%d,\"map\":%d,\"pagesWide\":%u,\"pagesHigh\":%u}",
+          InternBlob(layer->metatiles, kActionRoomSceneMetatileBytes),
+          InternBlob(layer->map, layer->map_size), layer->pages_wide, layer->pages_high);
+}
+
+static bool NativeGoldenHash(const ActionRoomScene *scene, uint32_t *pixels, uint32_t *hash) {
+  const ActionRoomSceneFrameRequest request = {
+      .camera_x = 0,
+      .camera_y = 0,
+      .game_frame = 37,
+      .animation_phase = -1,
+      .page_phase = -1,
+  };
+  ActionRoomSceneFrameState state;
+  if (!ActionRoomScene_BuildFrameState(scene, &request, &state) ||
+      !ActionRoomScene_RenderNativeFrame(scene, &state, pixels, kActionRoomSceneFramePixels))
+    return false;
+  *hash = DETERMINISTIC_HASH_FNV1A32_OFFSET;
+  for (size_t i = 0; i < kActionRoomSceneFramePixels; i++)
+    *hash = DeterministicHash_Fnv1a32Word(*hash, pixels[i]);
+  return true;
+}
+
+static void WriteNativeGolden(FILE *out, uint32_t hash) {
+  fprintf(out, "{\"frame\":37,\"cameraX\":0,\"cameraY\":0,\"hash\":%u}", hash);
+}
+
 int main(int argc, char **argv) {
   if (argc != 3) {
     fprintf(stderr, "usage: %s <rom> <out.json>\n", argv[0]);
@@ -86,7 +121,11 @@ int main(int argc, char **argv) {
     fprintf(stderr, "could not allocate native-frame oracle\n");
     return 1;
   }
-  fprintf(out, "{\n\"schema\":\"actraiser-action-bg-v4\",\n\"rooms\":[\n");
+  fprintf(out,
+          "{\n\"schema\":\"actraiser-action-bg-v5\",\n\"terrainProfiles\":["
+          "{\"profile\":0,\"label\":\"US\"},"
+          "{\"profile\":1,\"label\":\"Japanese\"},"
+          "{\"profile\":2,\"label\":\"European\"}],\n\"rooms\":[\n");
 
   int rooms = 0, failures = 0, raster_waveform_blob = -1;
   int raster_mosaic_wave_window_blob = -1;
@@ -99,24 +138,24 @@ int main(int argc, char **argv) {
         failures++;
         continue;
       }
-      const ActionRoomSceneFrameRequest golden_request = {
-          .camera_x = 0,
-          .camera_y = 0,
-          .game_frame = 37,
-          .animation_phase = -1,
-          .page_phase = -1,
-      };
-      ActionRoomSceneFrameState golden_state;
-      if (!ActionRoomScene_BuildFrameState(&scene, &golden_request, &golden_state) ||
-          !ActionRoomScene_RenderNativeFrame(&scene, &golden_state, native_pixels,
-                                             kActionRoomSceneFramePixels)) {
-        fprintf(stderr, "[export] %u:%u native oracle failed\n", group, map);
+      static ActionRoomScene variants[kArRegionalSource_Count];
+      uint32_t native_hash[kArRegionalSource_Count];
+      uint8_t terrain_profiles[kArRegionalSource_Count];
+      bool valid = true;
+      for (unsigned source = 0; source < kArRegionalSource_Count; source++) {
+        variants[source] = scene;
+        if (!ArRegionalTerrain_Resolve((ArRegionalSource)source, &terrain_profiles[source]) ||
+            !ActionRoomTerrain_Project(&variants[source], terrain_profiles[source]) ||
+            !NativeGoldenHash(&variants[source], native_pixels, &native_hash[source])) {
+          fprintf(stderr, "[export] %u:%u terrain profile %u failed\n", group, map, source);
+          valid = false;
+          break;
+        }
+      }
+      if (!valid) {
         failures++;
         continue;
       }
-      uint32_t native_hash = DETERMINISTIC_HASH_FNV1A32_OFFSET;
-      for (size_t i = 0; i < kActionRoomSceneFramePixels; i++)
-        native_hash = DeterministicHash_Fnv1a32Word(native_hash, native_pixels[i]);
       if (rooms) fprintf(out, ",\n");
       if (scene.have_raster_waveform)
         raster_waveform_blob =
@@ -140,16 +179,7 @@ int main(int argc, char **argv) {
                   : -1);
       for (unsigned bg = 0; bg < 2; bg++) {
         if (bg) fputc(',', out);
-        const ActionRoomSceneBg *layer = &scene.bg[bg];
-        if (!layer->have_map || !layer->have_metatiles) {
-          fprintf(out, "null");
-          continue;
-        }
-        fprintf(out,
-                "{\"metatiles\":%d,\"map\":%d,\"pagesWide\":%u,"
-                "\"pagesHigh\":%u}",
-                InternBlob(layer->metatiles, kActionRoomSceneMetatileBytes),
-                InternBlob(layer->map, layer->map_size), layer->pages_wide, layer->pages_high);
+        WriteBackground(out, &scene.bg[bg]);
       }
       fprintf(out, "],\"videoProfile\":%d,\"video\":[",
               scene.have_video_profile ? scene.video_profile_index : -1);
@@ -177,16 +207,30 @@ int main(int argc, char **argv) {
         fprintf(out, "{\"phases\":4,\"cadence\":5,\"order\":[1,2,3,0]}");
       else
         fprintf(out, "null");
-      fprintf(out,
-              ",\"raster\":%u,\"nativeGolden\":{"
-              "\"frame\":37,\"cameraX\":0,\"cameraY\":0,"
-              "\"hash\":%u},\"rasterEntryCameraX\":",
-              (unsigned)scene.raster_effect, native_hash);
+      fprintf(out, ",\"raster\":%u,\"nativeGolden\":", (unsigned)scene.raster_effect);
+      WriteNativeGolden(out, native_hash[0]);
+      fprintf(out, ",\"rasterEntryCameraX\":");
       if (scene.have_raster_entry_camera_x)
         fprintf(out, "%u", scene.raster_entry_camera_x);
       else
         fprintf(out, "null");
-      fputc('}', out);
+      fprintf(out, ",\"terrainVariants\":[");
+      for (unsigned source = 0; source < kArRegionalSource_Count; source++) {
+        if (source) fputc(',', out);
+        const ActionRoomSceneBg *base = &scene.bg[0], *layer = &variants[source].bg[0];
+        unsigned changed_cells = 0, changed_metatiles = 0;
+        for (size_t i = 0; i < base->map_size; i++)
+          changed_cells += base->map[i] != layer->map[i];
+        for (unsigned i = 0; i < kActionRoomSceneMetatileBytes; i += 8)
+          changed_metatiles += memcmp(base->metatiles + i, layer->metatiles + i, 8) != 0;
+        fprintf(out, "{\"profile\":%u,\"bg1\":", terrain_profiles[source]);
+        WriteBackground(out, layer);
+        fprintf(out, ",\"changedCells\":%u,\"changedMetatiles\":%u,\"nativeGolden\":",
+                changed_cells, changed_metatiles);
+        WriteNativeGolden(out, native_hash[source]);
+        fputc('}', out);
+      }
+      fprintf(out, "]}");
       rooms++;
     }
   }
@@ -210,7 +254,8 @@ int main(int argc, char **argv) {
   fprintf(out, "\n]\n}\n");
   fclose(out);
   free(native_pixels);
-  fprintf(stderr, "[export] %d rooms, %d failures, %d pooled blobs, %zu KiB raw\n", rooms, failures,
-          s_blob_count, blob_bytes / 1024);
+  fprintf(stderr, "[export] %d rooms x 3 terrain profiles, %d failures, "
+                  "%d pooled blobs, %zu KiB raw\n",
+          rooms, failures, s_blob_count, blob_bytes / 1024);
   return failures ? 1 : 0;
 }

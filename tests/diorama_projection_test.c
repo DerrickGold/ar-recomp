@@ -614,30 +614,62 @@ static void TestInvalidInputsFailClosed(void) {
 }
 
 static void TestPlaneEligibilityMatchesDrawableInputs(void) {
-  CHECK(Diorama_PlaneEligible(SR_PPU_OVERLAY_BG2, true, true, true, false, false));
-  CHECK(!Diorama_PlaneEligible(SR_PPU_OVERLAY_BG2, false, true, true, false, false));
-  CHECK(!Diorama_PlaneEligible(SR_PPU_OVERLAY_BG2, true, false, true, false, false));
-  CHECK(!Diorama_PlaneEligible(SR_PPU_OVERLAY_BG2, true, true, false, false, false));
-  CHECK(!Diorama_PlaneEligible(SR_PPU_OVERLAY_BG2, true, true, true, false, true));
-  CHECK(!Diorama_PlaneEligible(kDioramaPlane_Bg2Far, true, true, true, false, true));
-  CHECK(!Diorama_PlaneEligible(SR_PPU_OVERLAY_BG3, true, true, true, true, false));
+  CHECK(Diorama_PlaneEligible(SR_PPU_OVERLAY_BG2, true, true, true, false, false, 0));
+  CHECK(!Diorama_PlaneEligible(SR_PPU_OVERLAY_BG2, false, true, true, false, false, 0));
+  CHECK(!Diorama_PlaneEligible(SR_PPU_OVERLAY_BG2, true, false, true, false, false, 0));
+  CHECK(!Diorama_PlaneEligible(SR_PPU_OVERLAY_BG2, true, true, false, false, false, 0));
+  CHECK(!Diorama_PlaneEligible(SR_PPU_OVERLAY_BG2, true, true, true, false, true, 0));
+  CHECK(!Diorama_PlaneEligible(kDioramaPlane_Bg2Far, true, true, true, false, true, 0));
+  CHECK(!Diorama_PlaneEligible(SR_PPU_OVERLAY_BG3, true, true, true, true, false, 0));
 
   /* A current attached effect supplies current projection content for its
    * exact BG or OBJ plane. It needs no source texture when that isolated
    * hardware band is empty, but cannot bypass visibility or skybox policy. */
-  CHECK(Diorama_PlaneProjectable(SR_PPU_OVERLAY_OBJ, true, true, false, true, false, false));
-  CHECK(!Diorama_PlaneProjectable(SR_PPU_OVERLAY_OBJ, false, true, false, true, false, false));
-  CHECK(Diorama_PlaneProjectable(SR_PPU_OVERLAY_OBJ, true, false, false, true, false, false));
-  CHECK(Diorama_PlaneProjectable(SR_PPU_OVERLAY_BG2, true, true, false, true, false, false));
-  CHECK(Diorama_PlaneProjectable(SR_PPU_OVERLAY_BG1, true, false, false, true, false, false));
-  CHECK(Diorama_PlaneProjectable(kDioramaPlane_Bg1Hi, true, false, false, true, false, false));
-  CHECK(Diorama_PlaneProjectable(SR_PPU_OVERLAY_BG2, true, true, true, true, false, false));
-  CHECK(Diorama_PlaneProjectable(kDioramaPlane_Bg2Hi, true, true, false, true, false, false));
-  CHECK(Diorama_PlaneProjectable(kDioramaPlane_Bg2Hi, true, true, false, true, false, true));
-  CHECK(Diorama_PlaneEligible(kDioramaPlane_Bg2Hi, true, true, true, false, true));
-  CHECK(!Diorama_PlaneProjectable(kDioramaPlane_Bg2Hi, false, true, true, true, false, true));
-  CHECK(!Diorama_PlaneProjectable(SR_PPU_OVERLAY_BG2, true, true, false, true, false, true));
-  CHECK(!Diorama_PlaneProjectable(SR_PPU_OVERLAY_OBJ, true, true, false, false, false, false));
+  CHECK(Diorama_PlaneProjectable(SR_PPU_OVERLAY_OBJ, true, true, false, true, false, false, 0));
+  CHECK(!Diorama_PlaneProjectable(SR_PPU_OVERLAY_OBJ, false, true, false, true, false, false, 0));
+  CHECK(Diorama_PlaneProjectable(SR_PPU_OVERLAY_OBJ, true, false, false, true, false, false, 0));
+  CHECK(Diorama_PlaneProjectable(SR_PPU_OVERLAY_BG2, true, true, false, true, false, false, 0));
+  CHECK(Diorama_PlaneProjectable(SR_PPU_OVERLAY_BG1, true, false, false, true, false, false, 0));
+  CHECK(Diorama_PlaneProjectable(kDioramaPlane_Bg1Hi, true, false, false, true, false, false, 0));
+  CHECK(Diorama_PlaneProjectable(SR_PPU_OVERLAY_BG2, true, true, true, true, false, false, 0));
+  CHECK(Diorama_PlaneProjectable(kDioramaPlane_Bg2Hi, true, true, false, true, false, false, 0));
+  CHECK(Diorama_PlaneProjectable(kDioramaPlane_Bg2Hi, true, true, false, true, false, true, 0));
+  CHECK(Diorama_PlaneEligible(kDioramaPlane_Bg2Hi, true, true, true, false, true, 0));
+  CHECK(!Diorama_PlaneProjectable(kDioramaPlane_Bg2Hi, false, true, true, true, false, true, 0));
+  CHECK(!Diorama_PlaneProjectable(SR_PPU_OVERLAY_BG2, true, true, false, true, false, true, 0));
+  CHECK(!Diorama_PlaneProjectable(SR_PPU_OVERLAY_OBJ, true, true, false, false, false, false, 0));
+}
+
+static void TestSkyboxKeepsAdditiveSceneColorBase(void) {
+  /* Marahna captures BG1 and OBJ as subscreen winners. BG2 is the main
+   * color input, including animated water, rather than replacement sky art. */
+  const uint32_t subscreen = (1u << SR_PPU_OVERLAY_BG1) |
+      (1u << kDioramaPlane_Bg1Hi) | (1u << SR_PPU_OVERLAY_OBJ);
+  const int bases[] = {SR_PPU_OVERLAY_BG2, kDioramaPlane_Bg2Far};
+  for (unsigned i = 0; i < sizeof(bases) / sizeof(*bases); i++) {
+    const int plane = bases[i];
+    CHECK(Diorama_PlaneEligible(plane, true, true, true, false, true, subscreen));
+    CHECK(Diorama_PlaneProjectable(plane, true, true, true, false, false, true, subscreen));
+    CHECK(!Diorama_PlaneEligible(plane, false, true, true, false, true, subscreen));
+    CHECK(!Diorama_PlaneEligible(plane, true, false, true, false, true, subscreen));
+    CHECK(!Diorama_PlaneEligible(plane, true, true, false, false, true, subscreen));
+    /* Normal and BG2-on-subscreen scenes keep their existing skybox policy. */
+    CHECK(!Diorama_PlaneEligible(plane, true, true, true, false, true, 0));
+    CHECK(!Diorama_PlaneEligible(plane, true, true, true, false, true,
+                                 1u << SR_PPU_OVERLAY_BG2));
+    /* Upload masks may contain only a split band when the base is empty. */
+    CHECK(!Diorama_PlaneEligible(plane, true, true, true, false, true,
+                                 1u << kDioramaPlane_Bg2Hi));
+    CHECK(!Diorama_PlaneEligible(plane, true, true, true, false, true,
+                                 1u << kDioramaPlane_Bg2Far));
+  }
+  /* Effects retain the color plane's own projection, not the stretched sky. */
+  CHECK(Diorama_PlaneProjectable(SR_PPU_OVERLAY_BG2, true, false, false,
+                                  true, false, true, subscreen));
+  CHECK(!Diorama_PlaneEligible(kDioramaPlane_Backdrop, true, true, true,
+                                false, true, subscreen));
+  CHECK(!Diorama_PlaneEligible(SR_PPU_OVERLAY_BG3, true, true, true,
+                                true, true, subscreen));
 }
 
 static void TestObjEffectMaskDistinguishesEmptyFromFailedUpload(void) {
@@ -762,6 +794,7 @@ int main(void) {
   TestBg2FoldedOverflowProjection();
   TestInvalidInputsFailClosed();
   TestPlaneEligibilityMatchesDrawableInputs();
+  TestSkyboxKeepsAdditiveSceneColorBase();
   TestObjEffectMaskDistinguishesEmptyFromFailedUpload();
   TestBgEffectMaskDistinguishesEmptyFromFailedUpload();
   if (s_failures) {
