@@ -881,7 +881,7 @@ static void TestKasandoraHybridBackdrop(void) {
     CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
     CHECK(plan.layer[0].default_edge == kActionBgEdge_LiveWorld);
     CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
-    CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+    CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
     CHECK(plan.layer[1].default_motion == kActionBgMotion_FillRelative);
     CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
     CHECK(plan.layer[1].horizontal_extent.left == 128 &&
@@ -897,12 +897,12 @@ static void TestKasandoraHybridBackdrop(void) {
     ActionBgRowPolicy row;
     CHECK(ActionBgLayerPlan_ResolveRow(
         &plan.layer[1], cases[i].dune_y - 1, &row));
-    CHECK(row.edge == kActionBgEdge_Mirror);
+    CHECK(row.edge == kActionBgEdge_LiveWorld);
     CHECK(ActionBgLayerPlan_ResolveRow(
         &plan.layer[1], cases[i].dune_y, &row));
     CHECK(row.edge == kActionBgEdge_Repeat);
     ActionBgPresentationPolicy policy = Compile(&plan);
-    CHECK(policy.mirror_layers == 2 && policy.band_count == 1);
+    CHECK(policy.mirror_layers == 0 && policy.band_count == 1);
     CHECK(PresentationBandIs(&policy, 0, 1, cases[i].dune_y, 224,
                              kActionBgEdge_Repeat));
   }
@@ -911,16 +911,16 @@ static void TestKasandoraHybridBackdrop(void) {
   state.layer[1].world_height = 512;
   state.layer[1].camera_y = 0;
   ActionBgPlan plan = Build(&state);
-  CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
   CHECK(plan.layer[1].band_count == 1);
   CHECK(Compile(&plan).band_count == 0);
 
   state.layer[1].camera_y = 255;
   plan = Build(&state);
-  CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
   CHECK(plan.layer[1].band_count == 1);
   ActionBgPresentationPolicy full_dunes = Compile(&plan);
-  CHECK(full_dunes.mirror_layers == 2 && full_dunes.band_count == 1);
+  CHECK(full_dunes.mirror_layers == 0 && full_dunes.band_count == 1);
   CHECK(PresentationBandIs(
       &full_dunes, 0, 1, 0, 224, kActionBgEdge_Repeat));
 

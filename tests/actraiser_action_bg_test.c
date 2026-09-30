@@ -885,7 +885,7 @@ static void TestFramePlanCapture(void) {
         wram, kActRaiserWramSize, ppu, true, &plan, &policy));
     CHECK(plan.layer[0].source == kActionBgSource_WorldMap);
     CHECK(plan.layer[1].source == kActionBgSource_AuthenticViewport);
-    CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
+    CHECK(plan.layer[1].default_edge == kActionBgEdge_LiveWorld);
     CHECK(plan.layer[1].default_motion == kActionBgMotion_FillRelative);
     CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
     CHECK(plan.layer[1].horizontal_extent.left == 128 &&
@@ -896,7 +896,7 @@ static void TestFramePlanCapture(void) {
           plan.layer[1].bands[0].y1 == 512 &&
           plan.layer[1].bands[0].anchor == kActionBgBandAnchor_World &&
           plan.layer[1].bands[0].edge == kActionBgEdge_Repeat);
-    CHECK(policy.mirror_layers == kActRaiserBgLayerMask_Bg2);
+    CHECK(policy.mirror_layers == 0);
     CHECK(policy.band_count == 1);
     CHECK(policy.bands[0].layer == kActRaiserPpuLayer_Bg2 &&
           policy.bands[0].y0 == kasandora_cases[i].dune_y &&
