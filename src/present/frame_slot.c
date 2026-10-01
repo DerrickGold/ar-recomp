@@ -143,6 +143,8 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
       &dst->ws_extra_top, &dst->ws_extra_bottom);
   ActRaiser_LiveDioramaVerticalExtent(
       &dst->diorama_world_y0, &dst->diorama_world_height);
+  ActRaiser_LiveDioramaHorizontalExtent(
+      &dst->diorama_world_x0, &dst->diorama_world_width);
   ActRaiser_LiveDioramaFraming(&dst->diorama_framing_x, &dst->diorama_framing_y);
   dst->diorama_bg_apron_mask = ActRaiser_DioramaBgApronMask();
   dst->diorama_bg2_source_bounds.valid = ActRaiser_DioramaBg2SourceBounds(

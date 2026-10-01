@@ -63,6 +63,9 @@ void ActRaiser_LiveVerticalMargins(int *top, int *bottom);
 /* Primary scenery extent used to resolve those margins, including pasted
  * Diorama tiles. A zero height means the native plan supplies the extent. */
 void ActRaiser_LiveDioramaVerticalExtent(int *world_y0, int *world_height);
+/* Finite playfield scenery for horizontal presentation framing. A zero width
+ * leaves native, repeating, fixed-extent and non-widescreen views unchanged. */
+void ActRaiser_LiveDioramaHorizontalExtent(int *world_x0, int *world_width);
 void ActRaiser_LiveDioramaFraming(int *x, int *y);
 /* Finite BG2 source interval observed during the completed diorama scanout,
  * in authentic screen coordinates. False when no finite rows were observed. */

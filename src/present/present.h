@@ -276,6 +276,8 @@ typedef struct FrameSlot {
    * native map. Zero height falls back to action_bg_plan's native extent. */
   int diorama_world_y0;
   int diorama_world_height;
+  /* Zero width disables the horizontal presentation stop. */
+  int diorama_world_x0, diorama_world_width;
   int diorama_framing_x, diorama_framing_y;
   uint8_t diorama_bg_apron_mask;
   DioramaBgSourceBounds diorama_bg2_source_bounds;

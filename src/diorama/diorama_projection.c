@@ -144,6 +144,60 @@ static float CameraEdgeCorrection(float distance) {
   return blend * blend / (4.0f * ease);
 }
 
+DioramaHorizontalBounds DioramaHorizontalBounds_Resolve(
+    int plane, int camera_x, int world_x0, int world_width,
+    int capture_width, int apron) {
+  DioramaHorizontalBounds bounds = {0};
+  const int64_t camera = (int64_t)camera_x - world_x0;
+  if ((plane != SR_PPU_OVERLAY_BG1 && plane != SR_PPU_OVERLAY_BG2) ||
+      world_width < kActRaiserAuthenticWidth || camera < 0 ||
+      camera > world_width - kActRaiserAuthenticWidth ||
+      capture_width < kActRaiserAuthenticWidth || apron < 0)
+    return bounds;
+  const float margin = 0.5f * (capture_width - kActRaiserAuthenticWidth);
+  const float left = margin - (float)camera;
+  const float right = left + world_width;
+  bounds.valid = true;
+  bounds.plane = plane;
+  bounds.left = left / capture_width;
+  bounds.right = right / capture_width;
+  bounds.left_reached = left >= -apron;
+  bounds.right_reached = right <= (float)capture_width + apron;
+  return bounds;
+}
+
+bool Diorama_ClampCameraHorizontally(
+    float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow,
+    const DioramaHorizontalBounds *bounds) {
+  if (!bounds || !bounds->valid || !isfinite(bounds->left) ||
+      !isfinite(bounds->right) || bounds->left >= bounds->right ||
+      !CameraProjectionValid(matrix, aspect_x, height_scale, z_world, rake, bow))
+    return false;
+  float lower = -INFINITY, upper = INFINITY;
+  for (int edge = 0; edge < 2; ++edge) {
+    if (edge ? !bounds->right_reached : !bounds->left_reached) continue;
+    const float x = ((edge ? bounds->right : bounds->left) - 0.5f) * aspect_x;
+    /* Each side is a piecewise-linear mesh edge. Its projected X extrema
+     * occur at row vertices, including the rake/bow extrema between ends. */
+    for (int row = 0; row <= kDioramaPlaneSubdivY; ++row) {
+      const float t = (float)row / kDioramaPlaneSubdivY;
+      Scene3DPoint p;
+      if (!Scene3D_ProjectWorldPoint(matrix, x, (0.5f - t) * height_scale,
+              DioramaTiltedRowDepth(z_world, rake, bow, t), 1, 1, &p))
+        return false;
+      if (edge) lower = fmaxf(lower, 1.0f - p.x);
+      else upper = fminf(upper, -p.x);
+    }
+  }
+  if (lower > upper) return true;
+  const float shift = fmaxf(lower, fminf(0.0f, upper));
+  if (shift == 0.0f) return true;
+  for (int c = 0; c < 4; ++c)
+    matrix[c * 4] += 2.0f * shift * matrix[c * 4 + 3];
+  return true;
+}
+
 bool Diorama_ClampCameraVertically(
     float matrix[16], float aspect_x, float height_scale,
     float z_world, float rake, float bow,

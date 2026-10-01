@@ -2167,6 +2167,33 @@ static void PrepareDioramaView(const DioramaCapture *capture,
   /* Designer framing is the baseline even during manual orbit. It does not
    * change when extra tiles alter the scenery bounds or capture margins. */
   Diorama_OffsetCamera(geometry->matrix, capture->framing_x, capture->framing_y, par);
+
+  /* Capture width is a storage budget, not the perspective viewport. In
+   * particular 16:9 can see past a native edge that still covers 16:10. Clamp
+   * after vertical and authored framing so neither can undo the side stop. */
+  if (capture->horizontal_bounds.valid) {
+    const int primary = capture->horizontal_bounds.plane;
+    const int high = primary == SR_PPU_OVERLAY_BG1
+        ? kDioramaPlane_Bg1Hi : kDioramaPlane_Bg2Hi;
+    const DioramaResolvedLayer *focal = NULL;
+    for (int i = 0; i < resolved_count; ++i) {
+      if ((resolved[i].plane != primary && resolved[i].plane != high) ||
+          !resolved[i].alpha) continue;
+      const DioramaLayerDesc *layer = DioramaDescForPlane(resolved[i].plane);
+      if (!DioramaLayerIsDrawable(layer, textures, capture->pixels, scene)) continue;
+      if (!focal || resolved[i].plane == primary) focal = &resolved[i];
+    }
+    if (focal) {
+      float clamped[16];
+      memcpy(clamped, geometry->matrix, sizeof(clamped));
+      if (Diorama_ClampCameraHorizontally(
+              clamped, geometry->aspect_x, geometry->height_scale,
+              focal->z - 0.5f, focal->rake, focal->bow,
+              &capture->horizontal_bounds))
+        for (int c = 0; c < 16; ++c)
+          geometry->matrix[c] += framing_weight * (clamped[c] - geometry->matrix[c]);
+    }
+  }
 }
 
 static void PublishDioramaView(const DioramaCapture *capture,

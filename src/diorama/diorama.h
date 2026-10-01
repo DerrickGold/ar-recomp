@@ -69,6 +69,28 @@ typedef struct DioramaVerticalBounds {
   bool bottom_reached;
 } DioramaVerticalBounds;
 
+typedef struct DioramaHorizontalBounds {
+  bool valid;
+  int plane;
+  /* Finite edges in normalized capture coordinates; guard columns may put
+   * these just outside [0,1]. Unreached edges do not constrain framing. */
+  float left, right;
+  bool left_reached, right_reached;
+} DioramaHorizontalBounds;
+
+DioramaHorizontalBounds DioramaHorizontalBounds_Resolve(
+    int plane, int camera_x, int world_x0, int world_width,
+    int capture_width, int apron);
+
+/* Keep finite scenery edges at or outside the projected viewport, including
+ * perspective and shaped planes. Translate shared screen X only, preserving the vertical
+ * stop, depth, and registration of every layer and attached effect. Rooms
+ * narrower than the view keep their existing fit. */
+bool Diorama_ClampCameraHorizontally(
+    float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow,
+    const DioramaHorizontalBounds *bounds);
+
 /* Only captured finite world edges can constrain the presentation camera.
  * The native camera's bottom bound includes its one-row scroll guard. */
 DioramaVerticalBounds DioramaVerticalBounds_Resolve(
@@ -260,6 +282,7 @@ typedef struct DioramaSkyboxView {
 typedef struct DioramaCapture {
   int width, height, authentic_y0, obj_apron;
   DioramaVerticalBounds vertical_bounds;
+  DioramaHorizontalBounds horizontal_bounds;
   int framing_x, framing_y;
   uint8_t bg_apron_mask;
   /* Native camera and command-3 ratio, captured with these exact pixels. */

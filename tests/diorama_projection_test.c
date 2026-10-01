@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "diorama.h"
+#include "diorama_depth_shapes.h"
 #include "render/scene3d_math.h"
 
 static int s_failures;
@@ -798,7 +799,84 @@ static void TestDesignerFramingOffset(void) {
   CHECK(!memcmp(framed, native, sizeof(native)));
 }
 
+static void TestHorizontalCameraStopsFollowProjectedViewport(void) {
+  const int widths[][2] = {{400, 342}, {360, 308}, {256, 256}};
+  for (int ratio = 0; ratio < 3; ++ratio)
+    for (int crt = 0; crt < 2; ++crt)
+      for (int right = 0; right < 2; ++right)
+        for (int tilted = 0; tilted < 2; ++tilted) {
+          const float par = crt ? 7.0f / 6.0f : 1.0f;
+          const float aspect = 496.0f / 224.0f * par;
+          const float height = 288.0f / 224.0f;
+          const Scene3DCamera camera = {
+            tilted ? .12f : 0, tilted ? -.10f : 0, 3.25f, .4f,
+          };
+          const float rake = tilted ? .15f : 0, bow = tilted ? -.25f : 0;
+          float matrix[16], before[16];
+          Scene3D_BuildViewProjection(&camera, widths[ratio][crt] * (crt ? 7 : 1),
+              224 * (crt ? 6 : 1), matrix);
+          memcpy(before, matrix, sizeof(before));
+          const DioramaHorizontalBounds bounds = DioramaHorizontalBounds_Resolve(
+              SR_PPU_OVERLAY_BG1, right ? 904 : 120, 0, 1280, 496, 64);
+          CHECK(bounds.valid && bounds.left_reached == !right &&
+                bounds.right_reached == (bool)right);
+          if (!ratio && !crt && !tilted) {
+            Scene3DPoint edge;
+            CHECK(Scene3D_ProjectWorldPoint(matrix, (right ? .5f : -.5f) * aspect,
+                0, 0, 1, 1, &edge));
+            /* Reproduces the missing stop: the fixed 120px margin leaves
+             * roughly 15 native pixels of empty space at either 16:9 edge. */
+            CHECK(right ? edge.x < .98f : edge.x > .02f);
+          }
+          CHECK(Diorama_ClampCameraHorizontally(matrix, aspect, height,
+              0, rake, bow, &bounds));
+          for (int row = 0; row <= kDioramaPlaneSubdivY; ++row) {
+            const float t = (float)row / kDioramaPlaneSubdivY;
+            const float z = DioramaTiltedRowDepth(0, rake, bow, t);
+            const float x = ((right ? bounds.right : bounds.left) - .5f) * aspect;
+            Scene3DPoint old_edge, edge;
+            CHECK(Scene3D_ProjectWorldPoint(before, x, (.5f-t)*height, z, 1, 1, &old_edge));
+            CHECK(Scene3D_ProjectWorldPoint(matrix, x, (.5f-t)*height, z, 1, 1, &edge));
+            CHECK(right ? edge.x >= .99999f : edge.x <= .00001f);
+            CHECK(edge.y == old_edge.y);
+          }
+          /* A flat 16:10 view already fits: preserve its exact projection. */
+          if (ratio && !tilted) CHECK(memcmp(matrix, before, sizeof(matrix)) == 0);
+          for (int c = 0; c < 16; ++c)
+            if (c % 4) CHECK(matrix[c] == before[c]);
+        }
+}
+
+static void TestHorizontalBoundsRespectSceneryAndSmallRooms(void) {
+  DioramaHorizontalBounds bounds = DioramaHorizontalBounds_Resolve(
+      SR_PPU_OVERLAY_BG1, 0, -160, 1600, 496, 64);
+  CHECK(bounds.valid && bounds.left_reached && !bounds.right_reached);
+  CHECK(Near(bounds.left, -40.0f / 496.0f));
+  const Scene3DCamera camera = {0, 0, 3.25f, .4f};
+  float matrix[16], before[16];
+  Scene3D_BuildViewProjection(&camera, 400, 224, matrix);
+  memcpy(before, matrix, sizeof(before));
+  CHECK(Diorama_ClampCameraHorizontally(matrix, 496.0f / 224, 1, 0, 0, 0, &bounds));
+  CHECK(memcmp(matrix, before, sizeof(matrix)) == 0);
+  bounds = DioramaHorizontalBounds_Resolve(SR_PPU_OVERLAY_BG1, 500, 0, 1280, 496, 64);
+  CHECK(!bounds.left_reached && !bounds.right_reached);
+  CHECK(Diorama_ClampCameraHorizontally(matrix, 496.0f / 224, 1, 0, 0, 0, &bounds));
+  CHECK(memcmp(matrix, before, sizeof(matrix)) == 0);
+  bounds = DioramaHorizontalBounds_Resolve(SR_PPU_OVERLAY_BG1, 0, 0, 256, 496, 64);
+  CHECK(bounds.left_reached && bounds.right_reached);
+  CHECK(Diorama_ClampCameraHorizontally(matrix, 496.0f / 224, 1, 0, 0, 0, &bounds));
+  CHECK(memcmp(matrix, before, sizeof(matrix)) == 0);
+  CHECK(!DioramaHorizontalBounds_Resolve(SR_PPU_OVERLAY_OBJ, 0, 0, 256, 496, 64).valid);
+  CHECK(!DioramaHorizontalBounds_Resolve(SR_PPU_OVERLAY_BG1, 0, 0, 0, 496, 64).valid);
+  CHECK(!DioramaHorizontalBounds_Resolve(SR_PPU_OVERLAY_BG1, -1, 0, 1280, 496, 64).valid);
+  bounds.left = NAN;
+  CHECK(!Diorama_ClampCameraHorizontally(matrix, 496.0f / 224, 1, 0, 0, 0, &bounds));
+  CHECK(memcmp(matrix, before, sizeof(matrix)) == 0);
+}
+
 int main(void) {
+  TestHorizontalCameraStopsFollowProjectedViewport();
+  TestHorizontalBoundsRespectSceneryAndSmallRooms();
   TestDesignerFramingOffset();
   TestSkyboxProjection();
   TestGeneratedPlaneOffset();

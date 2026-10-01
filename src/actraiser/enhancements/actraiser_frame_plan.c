@@ -26,6 +26,8 @@ static ActionBgPlan s_pending_action_bg_plan;
 static bool s_pending_bg_capture_pad_to_budget;
 static int s_pending_diorama_world_y0;
 static int s_pending_diorama_world_height;
+static int s_pending_diorama_world_x0;
+static int s_pending_diorama_world_width;
 static int s_pending_diorama_framing_x;
 static int s_pending_diorama_framing_y;
 
@@ -271,6 +273,8 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
   int extra_bottom = 0;
   s_pending_diorama_world_y0 = 0;
   s_pending_diorama_world_height = 0;
+  s_pending_diorama_world_x0 = 0;
+  s_pending_diorama_world_width = 0;
   s_pending_diorama_framing_x = 0;
   s_pending_diorama_framing_y = 0;
   const DioramaRoomOverride *room = ActRaiser_CurrentVirtualLayerRoom();
@@ -284,6 +288,16 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
   int budget = g_settings.diorama_vertical_extend;
   const int primary_layer =
       ActionBgPlan_PrimaryLayer(&s_pending_action_bg_plan);
+  const int playfield = ActionBgPlan_PlayfieldLayer(&s_pending_action_bg_plan);
+  if (Diorama_IsActiveThisFrame() && g_ws_active && playfield >= 0) {
+    const ActionBgLayerPlan *layer = &s_pending_action_bg_plan.layer[playfield];
+    if (layer->source == kActionBgSource_WorldMap && !layer->wrap_world_x &&
+        layer->default_edge == kActionBgEdge_LiveWorld && !layer->band_count &&
+        layer->horizontal_extent.mode == kActionBgExtent_Available)
+      ActRaiserActionBg_ResolveDioramaHorizontalExtent(
+          room, (unsigned)playfield, layer->world_width,
+          &s_pending_diorama_world_x0, &s_pending_diorama_world_width);
+  }
   if (budget > 0 && Diorama_IsActiveThisFrame() &&
       ActRaiser_IsActionMapGroup(map_group) &&
       !ActRaiser_IsSimulationTown(map_group, map_number) &&
@@ -883,6 +897,8 @@ static ActionBgPlan s_live_action_bg_plan;
 static bool s_live_bg_capture_pad_to_budget;
 static int s_live_diorama_world_y0;
 static int s_live_diorama_world_height;
+static int s_live_diorama_world_x0;
+static int s_live_diorama_world_width;
 static int s_live_diorama_framing_x;
 static int s_live_diorama_framing_y;
 
@@ -897,6 +913,8 @@ void ActRaiser_CommitFramePlan(int left, int right, int top, int bottom) {
   s_live_bg_capture_pad_to_budget = s_pending_bg_capture_pad_to_budget;
   s_live_diorama_world_y0 = s_pending_diorama_world_y0;
   s_live_diorama_world_height = s_pending_diorama_world_height;
+  s_live_diorama_world_x0 = s_pending_diorama_world_x0;
+  s_live_diorama_world_width = s_pending_diorama_world_width;
   s_live_diorama_framing_x = s_pending_diorama_framing_x;
   s_live_diorama_framing_y = s_pending_diorama_framing_y;
 }
@@ -917,6 +935,11 @@ void ActRaiser_LiveVerticalMargins(int *top, int *bottom) {
 void ActRaiser_LiveDioramaVerticalExtent(int *world_y0, int *world_height) {
   if (world_y0) *world_y0 = s_live_diorama_world_y0;
   if (world_height) *world_height = s_live_diorama_world_height;
+}
+
+void ActRaiser_LiveDioramaHorizontalExtent(int *world_x0, int *world_width) {
+  if (world_x0) *world_x0 = s_live_diorama_world_x0;
+  if (world_width) *world_width = s_live_diorama_world_width;
 }
 
 void ActRaiser_LiveDioramaFraming(int *x, int *y) {

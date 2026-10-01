@@ -357,6 +357,7 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
   const int capture_height =
       slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom;
   DioramaVerticalBounds vertical_bounds = {0};
+  DioramaHorizontalBounds horizontal_bounds = {0};
   const int primary_layer = ActionBgPlan_PlayfieldLayer(&slot->action_bg_plan);
   if (primary_layer >= 0) {
     const ActionBgLayerPlan *primary = &slot->action_bg_plan.layer[primary_layer];
@@ -368,6 +369,13 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
     vertical_bounds = DioramaVerticalBounds_Resolve(
         plane, primary->camera_y - world_y0, world_height,
         slot->ws_extra_top, capture_height);
+    if (slot->diorama_world_width > 0)
+      horizontal_bounds = DioramaHorizontalBounds_Resolve(
+          plane, primary_layer == 0 ? slot->bg1_camera_x : slot->bg2_camera_x,
+          slot->diorama_world_x0,
+          slot->diorama_world_width, slot->snes_width,
+          (slot->diorama_bg_apron_mask & (1u << primary_layer))
+              ? slot->obj_apron : 0);
   }
   const DioramaCapture capture = {
       .plane_capture_offsets = plane_offsets,
@@ -375,6 +383,7 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
       .height = capture_height,
       .authentic_y0 = slot->ws_extra_top,
       .vertical_bounds = vertical_bounds,
+      .horizontal_bounds = horizontal_bounds,
       .framing_x = slot->diorama_framing_x,
       .framing_y = slot->diorama_framing_y,
       .bg_apron_mask = slot->diorama_bg_apron_mask,
