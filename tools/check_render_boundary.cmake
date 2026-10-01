@@ -350,6 +350,12 @@ endforeach()
 # the focused checks below as explicit diagnostics for common regressions.
 file(READ "${GAME_SOURCE_ROOT}/diorama/diorama.c" _diorama_contents)
 if(_diorama_contents MATCHES
+   "(^|[^A-Za-z0-9_])(g_settings|g_ram)([^A-Za-z0-9_]|$)|DioramaLayerManifest_|DioramaRomSkyboxResource_|HostClock_|UserDataFile|getenv\\(")
+    message(FATAL_ERROR
+        "Diorama compositor has an implicit desktop scene input: "
+        "${GAME_SOURCE_ROOT}/diorama/diorama.c. Pass captured options/resources instead.")
+endif()
+if(_diorama_contents MATCHES
    "SDL_GPU(Shader|RenderState|Device)|SDL_SetGPURenderState")
     list(APPEND _native_resource_violations
         "${GAME_SOURCE_ROOT}/diorama/diorama.c (native effect state)")

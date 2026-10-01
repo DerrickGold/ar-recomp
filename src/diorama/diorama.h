@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include "diorama_coverage.h"
 #include "diorama_camera.h"
+#include "diorama_render_options.h"
 #include "diorama_planes.h"
 #include "diorama_skybox_uv.h"
 #include "present/presentation_outcome.h"
@@ -168,6 +169,7 @@ typedef struct DioramaSkyboxProjection {
  * guess a parallel depth. */
 typedef struct DioramaProjection {
   bool valid;
+  float auto_distance; /* Resolved fit before manual zoom; controls may observe it. */
   float matrix[16];
   float aspect_x, height_scale;
   /* Texture column containing captured display x=0. Action-effect callers
@@ -319,6 +321,7 @@ typedef struct DioramaView {
 } DioramaView;
 
 typedef struct DioramaScene {
+  const DioramaRenderOptions *render; /* Required immutable policy for this draw. */
   uint8_t map_group, map_number, layer_section;
   uint32_t additive_plane_mask;
   /* 0 leaves authored color intact; 1 darkens BG1 low/high/far to black.
@@ -333,10 +336,16 @@ typedef struct DioramaScene {
   void *plane_effect_userdata;
 } DioramaScene;
 
-/* Draws in viewport-local coordinates and restores full output on every exit.
+/* Resolve the same painter order/shapes used by Composite. The output holds
+ * at least kDioramaPlane_Count entries. No game state or GPU work is read. */
+int Diorama_ResolveSceneLayers(const DioramaScene *scene,
+                               DioramaResolvedLayer *resolved);
+
+/* Draws in viewport-local coordinates, restoring the full output viewport.
  * Enter without a custom GPU state bound; the compositor owns all effects it
- * binds. Complete/OptionalOmitted produce a usable scene; CoreFailure means
- * the caller must stop rather than publish a partial frame. */
+ * binds. Complete/OptionalOmitted produce a usable scene. CoreFailure clears
+ * the published projection; a failed backend restore may also lose target
+ * ownership, so the caller must stop rather than publish a partial frame. */
 PresentationOutcome Diorama_Composite(ArRenderDevice *device,
                                       const DioramaCapture *capture,
                                       const DioramaView *view,
@@ -346,6 +355,10 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
 /* Drops backend-owned targets/effects after a render-device reset so they are
  * lazily recreated against the current device. */
 void Diorama_ResetRendererResources(ArRenderDevice *device);
+/* Core-only resources. One render device per module, sequenced on its render
+ * thread. Reset against the OLD device before replacing or destroying it. */
+void Diorama_ResetCompositorResources(ArRenderDevice *device);
+void Diorama_SetAutoCameraDistance(float distance);
 
 /* Releases backend-owned supersample and optional GPU-effect resources.
  * Call before destroying the render device. */

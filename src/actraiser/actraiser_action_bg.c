@@ -1,4 +1,5 @@
 #include "actraiser_action_bg.h"
+#include "diorama/diorama_scene_extent.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -287,43 +288,16 @@ void ActRaiserActionBg_ResolveVerticalMargins(
   if (bottom) *bottom = available_bottom;
 }
 
-static void ResolveDioramaAxisExtent(
-    const DioramaRoomOverride *room, unsigned layer, int native_extent,
-    bool vertical, int *world_start, int *world_extent) {
-  int start = 0, end = native_extent;
-  if (room && layer < kActionBgLayerCount) {
-    const DioramaStampLayerOverride *stamps = &room->stamp_layers[layer];
-    /* Map bounds describe editor workspace, which can outlive deleted tiles.
-     * Only actual cells extend the finite scenery: empty workspace must not
-     * consume capture rows or keep the Diorama camera away from an edge. */
-    const DioramaMapBounds *bounds = &stamps->occupied_bounds;
-    if (bounds->set) {
-      const int first = (vertical ? bounds->y0 : bounds->x0) * kActionBgMetatilePixels;
-      const int last = (vertical ? bounds->y1 : bounds->x1) * kActionBgMetatilePixels;
-      if (first < start) start = first;
-      if (last > end) end = last;
-    } else for (size_t i = 0; i < stamps->count; i++) {
-      const int cell_start = (vertical ? stamps->cells[i].y : stamps->cells[i].x) *
-          kActionBgMetatilePixels;
-      const int cell_end = cell_start + kActionBgMetatilePixels;
-      if (cell_start < start) start = cell_start;
-      if (cell_end > end) end = cell_end;
-    }
-  }
-  if (world_start) *world_start = start;
-  if (world_extent) *world_extent = end - start;
-}
-
 void ActRaiserActionBg_ResolveDioramaVerticalExtent(
     const DioramaRoomOverride *room, unsigned layer, int native_height,
     int *world_y0, int *world_height) {
-  ResolveDioramaAxisExtent(room, layer, native_height, true, world_y0, world_height);
+  DioramaScenery_AxisExtent(room, layer, native_height, true, world_y0, world_height);
 }
 
 void ActRaiserActionBg_ResolveDioramaHorizontalExtent(
     const DioramaRoomOverride *room, unsigned layer, int native_width,
     int *world_x0, int *world_width) {
-  ResolveDioramaAxisExtent(room, layer, native_width, false, world_x0, world_width);
+  DioramaScenery_AxisExtent(room, layer, native_width, false, world_x0, world_width);
 }
 
 void ActRaiserActionBg_ResolveVerticalCaptureMargins(

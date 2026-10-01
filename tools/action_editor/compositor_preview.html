@@ -1,0 +1,135 @@
+<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Captured scene · Shared renderer</title>
+<style>
+:root{color-scheme:dark;font:15px system-ui;background:#111723;color:#e0e8f3}
+body{max-width:1100px;margin:24px auto;padding:0 20px}h1{font-size:22px}
+p{line-height:1.5;max-width:85ch}label{display:inline-flex;gap:8px;align-items:center;margin:8px 16px 8px 0}
+select,button,input{font:inherit}canvas{display:block;width:100%;height:auto;background:#000;border:1px solid #33425a;margin-top:18px}
+#status{min-height:2em;color:#b8d2fa}a{color:#a8cdfa}summary{cursor:pointer}
+</style>
+<h1>Captured scene · Shared renderer</h1>
+<p>Open a game capture to inspect its layers through the production C compositor.
+This preview includes camera framing, priority planes, skybox and compositor shading.
+It does not yet include environmental effects, the flat HUD, CRT processing or live map edits.</p>
+<label>Game capture <input id="capture" type="file" disabled accept=".ardi"></label>
+<div>
+<label>Output <select id="size"><option id="captured-size" value="960,600">Captured size</option><option value="960,600">16:10 · 960 × 600</option><option value="960,540">16:9 · 960 × 540</option><option value="800,600">4:3 · 800 × 600</option></select></label>
+<label>Distance <input id="zoom" type="range" min="0.5" max="2" step="0.01" value="1"></label>
+<label>Yaw <input id="yaw" type="range" min="-0.6" max="0.6" step="0.01" value="0"></label>
+<label>Pitch <input id="pitch" type="range" min="-0.6" max="0.6" step="0.01" value="0"></label>
+<label>Skybox <select id="sky"><option value="-1">Captured setting</option><option value="0">Off</option><option value="1">Skybox only</option><option value="2">Skybox and plane</option></select></label>
+<button id="reset">Reset camera</button>
+<button id="export" disabled>Export frame</button><a id="image-download" hidden download="shared-renderer.png">Download PNG</a>
+</div>
+<p id="status" role="status">Starting the shared compositor…</p>
+<canvas id="preview" width="960" height="600" aria-label="Captured game scene"></canvas>
+<details><summary>Capture a comparison scene</summary><p>Launch the game with
+<code>AR_DIORAMA_SNAPSHOT=/absolute/path/scene.ardi</code> and optionally
+<code>AR_DIORAMA_SNAPSHOT_AFTER=120</code> (Diorama uploads).
+Disable frame generation. Named replacement skyboxes are not supported by this capture version.
+Use the editor for map editing; captures remain frozen at the recorded moment.</p></details>
+<script>
+/*__BACKEND__*/
+const shaderSources = /*__SHADERS__*/;
+const wasmBase64 = '__WASM__';
+const exampleBase64 = '__SCENE__';
+const status = document.getElementById('status');
+const canvas = document.getElementById('preview');
+let backend, api, loaded = false, scheduled = false;
+function render() {
+  scheduled = false;
+  if (!loaded) return;
+  const [w,h] = document.getElementById('size').value.split(',').map(Number);
+  if (canvas.width !== w) canvas.width = w;
+  if (canvas.height !== h) canvas.height = h;
+  backend.stats.draws = 0;
+  backend.stats.creates = 0;
+  document.getElementById('image-download').hidden=true;
+  const start = performance.now();
+  const ok = api.DioramaPreview_Render(w,h,Number(document.getElementById('zoom').value),
+    Number(document.getElementById('yaw').value),Number(document.getElementById('pitch').value),
+    Number(document.getElementById('sky').value));
+  const error = backend.gl.getError();
+  if (!ok || error) {
+    status.textContent = `Rendering failed (${error}). Reload the preview to reset the graphics device.`;
+    loaded = false;
+    document.getElementById('export').disabled=true;
+    return;
+  }
+  status.textContent = `Shared C compositor · ${w} × ${h} · ${backend.stats.draws} draws · ${backend.stats.creates} target allocations · ` +
+    `${(performance.now()-start).toFixed(1)} ms CPU submission` +
+    (backend.warnings.length ? ` · ${backend.warnings.length} optional shaders unavailable` : ' · all 4 compositor shaders available');
+}
+function schedule() { if (!scheduled) { scheduled=true; requestAnimationFrame(render); } }
+async function loadPacket(buffer) {
+  if (!api) throw new Error('Renderer is not ready.');
+  if (buffer.byteLength > api.DioramaPreview_Capacity()) throw new Error('Capture exceeds the size limit.');
+  new Uint8Array(api.memory.buffer,api.DioramaPreview_Input(),buffer.byteLength).set(new Uint8Array(buffer));
+  if (!api.DioramaPreview_Load(buffer.byteLength)) throw new Error('Invalid, unsupported or incomplete capture.');
+  const captured = document.getElementById('captured-size');
+  const originalWidth=api.DioramaPreview_Width(), originalHeight=api.DioramaPreview_Height();
+  const scale=Math.min(1,2048/Math.max(originalWidth,originalHeight));
+  const width=Math.max(1,Math.round(originalWidth*scale));
+  const height=Math.max(1,Math.round(originalHeight*scale));
+  captured.value = `${width},${height}`;
+  captured.textContent = `Captured${scale < 1 ? ' aspect' : ''} · ${width} × ${height}`;
+  loaded = true;
+  document.getElementById('export').disabled=false;
+  render();
+}
+for (const id of ['size','zoom','yaw','pitch','sky']) document.getElementById(id).addEventListener('input',schedule);
+document.getElementById('export').addEventListener('click',()=>{
+  const link=document.getElementById('image-download');
+  link.href=canvas.toDataURL('image/png');
+  link.hidden=false;
+});
+document.getElementById('reset').addEventListener('click',()=>{
+  document.getElementById('zoom').value=1;
+  document.getElementById('yaw').value=0;
+  document.getElementById('pitch').value=0;
+  document.getElementById('sky').value=-1;
+  schedule();
+});
+document.getElementById('capture').addEventListener('change',async(event)=>{
+  try {
+    const file=event.target.files[0];
+    if (!file) return;
+    if (file.size > api.DioramaPreview_Capacity()) throw new Error('Capture exceeds the size limit.');
+    await loadPacket(await file.arrayBuffer());
+  } catch(error) { status.textContent=error.message; }
+});
+canvas.addEventListener('webglcontextlost',(event)=>{
+  event.preventDefault(); loaded=false;
+  document.getElementById('export').disabled=true;
+  document.getElementById('capture').disabled=true;
+  status.textContent='Graphics context lost. Reload the preview and reopen your capture.';
+});
+(async()=>{
+  try {
+    backend=new ActionWebGL2Backend(canvas,shaderSources);
+    const bytes=Uint8Array.from(atob(wasmBase64),c=>c.charCodeAt(0));
+    const module=await WebAssembly.compile(bytes);
+    const wasi={fd_close:()=>0,fd_seek:()=>0,fd_write:()=>0,
+      proc_exit:(code)=>{throw new Error(`Compositor terminated (${code}).`);}};
+    for (const item of WebAssembly.Module.imports(module)) {
+      if (!(item.module === 'ar' && Object.hasOwn(backend.imports,item.name)) &&
+          !(item.module === 'wasi_snapshot_preview1' && Object.hasOwn(wasi,item.name)))
+        throw new Error(`Unexpected WASM import: ${item.module}.${item.name}`);
+    }
+    const instance=await WebAssembly.instantiate(module,{ar:backend.imports,wasi_snapshot_preview1:wasi});
+    api=instance.exports; backend.memory=api.memory;
+    api._initialize?.();
+    if (api.DioramaPreview_Version() !== 1 ||
+        !api.DioramaPreview_Init(backend.gl.getParameter(backend.gl.MAX_TEXTURE_SIZE)))
+      throw new Error('Unsupported compositor version or backend.');
+    document.getElementById('capture').disabled=false;
+    status.textContent='Ready. Open a .ardi game capture.';
+    if (exampleBase64) {
+      const compressed=Uint8Array.from(atob(exampleBase64),c=>c.charCodeAt(0));
+      const stream=new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip'));
+      await loadPacket(await new Response(stream).arrayBuffer());
+    }
+  } catch(error) { status.textContent=error.message; backend?.dispose(); }
+})();
+</script></html>

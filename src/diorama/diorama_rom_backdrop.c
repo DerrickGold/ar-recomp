@@ -49,9 +49,19 @@ static bool LoadActionBg(const uint8_t *rom, size_t rom_size,
       !ActionRoomScene_HasBackground(&scene, bg_layer))
     return false;
 
+  return DioramaRomBackdrop_RenderScenePage(&scene, bg_layer, transparent_fill_argb,
+      sparse, out_default_fill_argb, out_argb, out_pixel_count);
+}
+
+bool DioramaRomBackdrop_RenderScenePage(const ActionRoomScene *scene,
+    uint8_t bg_layer, uint32_t transparent_fill_argb, bool sparse,
+    uint32_t *out_default_fill_argb, uint32_t *out_argb, size_t out_pixel_count) {
+  if (!scene || !out_argb || out_pixel_count < 256 * 256 ||
+      !scene->have_character_bank[0] || !scene->have_character_bank[1] ||
+      !scene->have_palette || !ActionRoomScene_HasBackground(scene, bg_layer)) return false;
   uint32_t palette[128];
   for (unsigned i = 0; i < 128; i++) {
-    const uint16_t colour = ByteOrder_ReadLe16(scene.palette + i * 2);
+    const uint16_t colour = ByteOrder_ReadLe16(scene->palette + i * 2);
     palette[i] = 0xFF000000u |
         (uint32_t)ExpandColor5(colour, 15) << 16 |
         (uint32_t)ExpandColor5(colour >> 5, 15) << 8 |
@@ -73,19 +83,19 @@ static bool LoadActionBg(const uint8_t *rom, size_t rom_size,
     for (unsigned tile_x = 0; tile_x < 32; tile_x++) {
       uint16_t entry = 0;
       if (!ActionRoomScene_LookupTile(
-              &scene, bg_layer, tile_x, tile_y, &entry, NULL))
+              scene, bg_layer, tile_x, tile_y, &entry, NULL))
         return false;
       const unsigned tile = entry & 0x3FFu;
       const unsigned palette_base = ((entry >> 10) & 7u) * 16u;
       const bool flip_x = (entry & 0x4000u) != 0;
       const bool flip_y = (entry & 0x8000u) != 0;
-      const uint8_t *tile_characters = scene.characters;
+      const uint8_t *tile_characters = scene->characters;
       unsigned tile_index = tile;
       if (tile >=
           kActionRoomSceneCharacterBytes / kTileBytes4Bpp) {
-        if (!scene.have_extra_characters || tile < 0x200 || tile >= 0x300)
+        if (!scene->have_extra_characters || tile < 0x200 || tile >= 0x300)
           return false;
-        tile_characters = scene.extra_characters;
+        tile_characters = scene->extra_characters;
         tile_index = tile - 0x200;
       }
       for (unsigned py = 0; py < 8; py++) {

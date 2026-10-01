@@ -1,5 +1,6 @@
 #ifndef AR_SETTINGS_H
 #define AR_SETTINGS_H
+#include "render/presentation_options.h"
 #include "constants.h"
 #include "snesrecomp/game/types.h"
 #include "sim/voxels/sim_background_voxel_quality.h"
@@ -25,12 +26,6 @@ typedef enum {
 } DisplayMode;
 
 enum { kDisplayMode_PresetCount = kDisplayMode_Custom };
-
-typedef enum {
-  kPixelAspect_Square = 0,
-  kPixelAspect_Crt43,
-  kPixelAspect_Count,
-} PixelAspect;
 
 typedef enum {
   kScreenAspect_43 = 0,
@@ -122,23 +117,6 @@ typedef enum {
   kSimCam_Dynamic = 1,
   kSimCam_Count,
 } SimCameraMode;
-
-/* B5 (followup doc): promotes BG2 (the farthest/sky background layer in
- * ActRaiser Mode 1 action stages) from an ordinary in-box parallax plane to
- * an enveloping, dimmed, DoF'd skybox that fills the viewport — fixes the
- * dark void that rotates into view past the finite backdrop quad's edges
- * once the camera tilts/yaws/zooms. Enum, not a bool: the three looks are
- * mutually exclusive views of the same layer (matches display_mode's/
- * extended_aspect's mutually-exclusive-preset modeling). Default Off: BG2 is
- * a heuristic pick for "sky" (no programmatic flag says so — see
- * AR_WS_ONLYBG, actraiser_rtl.c), so this stays opt-in and preserves the
- * default presentation. */
-typedef enum {
-  kDioramaSky_Off = 0,
-  kDioramaSky_Only = 1,
-  kDioramaSky_Both = 2,
-  kDioramaSky_Count,
-} DioramaSkyMode;
 
 /* Dimensions of Settings::input_bind. input_map.h static-asserts that these
  * still match its own InputClass/InputAction counts. */

@@ -6,6 +6,7 @@
  * Phase: pure.
  * Tests: tests/diorama_rom_backdrop_test.c */
 
+#include "action/action_room_scene.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -21,6 +22,12 @@ bool DioramaRomBackdrop_DecompressAsset(const uint8_t *packed,
                                         size_t packed_size,
                                         uint8_t *out,
                                         size_t expected_size);
+
+/* Identical rasterization from already decoded assets (e.g. offline editor).
+ * Does not borrow scene storage after return. */
+bool DioramaRomBackdrop_RenderScenePage(const ActionRoomScene *scene,
+    uint8_t bg_layer, uint32_t transparent_fill_argb, bool sparse,
+    uint32_t *out_default_fill_argb, uint32_t *out_argb, size_t out_pixel_count);
 
 /* Compatibility rasterizer over the shared ActionRoomScene loader. The first
  * 256x256 map page is rendered as opaque ARGB8888 for a residual backdrop

@@ -1,5 +1,6 @@
 """The action editor remains a single, offline artifact with lossless input data."""
 from html.parser import HTMLParser
+import base64
 import json
 from pathlib import Path
 import subprocess
@@ -101,7 +102,21 @@ int main(void) {
             self.assertEqual(json.loads(result), {
                 "__ACTION_BG__": data, "__DIORAMA_LAYERS__": text,
                 "__DIORAMA_LAYERS_NAME__": layers.name,
-                "__ACTION_VIEW__": preview_settings(root / "settings.ini")})
+                "__ACTION_VIEW__": preview_settings(root / "settings.ini"),
+                "__ACTION_PREVIEW_WASM__": None, "__ROOM_PREVIEW_WASM__": None,
+                "__ROOM_PREVIEW_SHADERS__": []})
+
+    def test_wasm_is_embedded_without_network_or_external_loader(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rooms, wasm = root / "rooms.json", root / "preview.wasm"
+            rooms.write_text('{"rooms":[],"blobs":[]}')
+            payload = b'\0asm\x01\0\0\0</script>'
+            wasm.write_bytes(payload)
+            scripts = Scripts(build_document(rooms, root / "absent.ini", wasm_path=wasm))
+            encoded = base64.b64encode(payload).decode("ascii")
+            self.assertIn('window.__ACTION_PREVIEW_WASM__=' + json.dumps(encoded), scripts.bodies[1])
+            self.assertTrue(all(source is None for source in scripts.sources))
 
     def test_preview_preferences_use_selected_camera_baseline(self):
         with tempfile.TemporaryDirectory() as directory:

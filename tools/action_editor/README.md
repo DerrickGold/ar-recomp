@@ -6,9 +6,40 @@ editor is the source of truth; the game only loads and renders the exported
 configuration.
 
 The planned [Effects workspace and shared WASM preview](../../docs/action-effects-editor-plan.md)
-will use the game's compositor and expose existing and future level-effect
-presets. This is an implementation roadmap; the current browser preview remains
-the independent JavaScript renderer, and effect authoring is not yet available.
+will expose existing and future level-effect presets. **Shared renderer** now
+loads complete rooms directly into the production C PPU and Diorama compositor
+via WASM/WebGL2. No game capture or gameplay session is required. The original
+JavaScript **Diorama 3D** remains available while the shared view is validated.
+**Original game frame** remains a separate original-background comparison.
+
+Select **Shared renderer**, choose a room/terrain, then use **Camera & animation**
+to navigate and seek frames (0–65535) in either direction. Drag the preview or use
+arrows to pan. Its view bar controls 4:3/16:9/16:10 output, square/CRT pixel aspect,
+zoom/tilt, horizontal coverage, 0/32/64 vertical budget, and all three backdrop
+modes. Camera/clock/coverage changes regenerate visible art from the complete
+room; orbit-only changes reuse rasterized surfaces. Existing tile, pixel, depth,
+alpha, scenery and framing edits feed the production INI resolver.
+
+This increment covers **scenery**, including animated tiles/raster phases, priority
+bands, copied edge tiles, independent vertical clips, bounded and named skyboxes,
+and Aitos's periodic waterfall page. Actors/HUD, environmental effects and their
+editable recipes, event-driven room changes, camera-local effect sections, final
+CRT/heat and frame generation remain pending. The preview camera uses auto-fit
+plus its own controls; it does not replay the game's reactive camera. Captures
+remain developer comparison fixtures, not an authoring requirement.
+
+The dedicated whole-room gate uses a built editor containing local assets:
+
+```sh
+python3 tools/action_editor/check_room.py --sanitize
+```
+
+It compares 882 full-room scanouts across all 49 rooms × 3 regional terrains
+between native C and WASM, including backwards seeking, varying camera/coverage,
+authored configuration, finite skybox views and animated periodic pages. It also
+checks pixel-mask and band edits, per-layer top clipping, atomic rejection,
+resource reuse and complete teardown. The browser GPU view still needs matched
+live-scene image review across the remaining room families and target platforms.
 
 ```sh
 sh tools/action_editor/build.sh
@@ -26,6 +57,136 @@ The build also reads `settings.ini` for the Diorama coverage guide's aspect,
 pixel aspect, distance and camera tilt. An optional fourth build argument selects
 another settings file. These preferences are embedded for offline use; the editor
 does not write game settings.
+
+### Shared original-background comparison
+
+If Emscripten **5.0.7** is installed, the build embeds the WASM module directly in
+the HTML. Opening the editor requires no compiler, server, adjacent files, or
+network access. `ACTION_EDITOR_WASM=on` requires this module;
+`ACTION_EDITOR_WASM=off` builds the existing JavaScript-only editor. The default
+`auto` builds it when `emcc` is available; a different compiler version reports
+an error instead of silently changing the comparison toolchain. `EMCC` selects
+the compiler and `EM_CACHE` can override the workspace-local build cache.
+
+**Original game frame** uses shared C for original BG1/BG2 decoding, regional
+terrain, animation, raster scrolling, mosaic and color math. Room, camera and
+frame controls drive it. **Band tint** intentionally selects the JavaScript
+diagnostic view. A status line identifies the active path or a module failure;
+ordinary map tools continue to work without WASM.
+
+**Download comparison scene** saves the current original-background assets,
+terrain, camera and clock as a versioned `.arscene` fixture. It excludes tile
+edits, actors, effects, Diorama settings and final post-processing. It is a
+renderer comparison fixture, not a level project or game save. Exporting one
+does not clear unsaved tile edits. The native replay tool needs no ROM:
+
+```sh
+cmake --build build --target actraiser_action_scene_replay
+build/actraiser_action_scene_replay scene.arscene
+build/actraiser_action_scene_replay --ppm frame.ppm scene.arscene
+```
+
+Run the shared-renderer gate separately from ordinary editor tests (requires
+the pinned Emscripten compiler, C compiler, Python and Node):
+
+```sh
+python3 tools/action_editor/check_preview.py          # synthetic, no ROM required
+python3 tools/action_editor/check_preview.py ar.sfc   # 49 rooms x 3 terrain variants
+```
+
+The larger gate checks 1,176 frames, native export goldens, RGBA upload conversion,
+clock boundaries, phase overrides, invalid input, reset/reload and fixed memory
+across repeated room changes. See [the snapshot contract](scene-snapshot.md) for
+format and comparison scope. Passing this gate does not establish enhanced
+Diorama, browser GPU, Steam Deck or D3D12 parity.
+
+### Shared Diorama compositor validation
+
+The production compositor now receives explicit `DioramaRenderOptions`, captured
+planes, camera/view and scene callbacks. Desktop controls/settings are isolated
+in `diorama_controls.c`; the compositor has no live settings, manifest, WRAM,
+environment or host-clock reads. The desktop build uses this same entry point.
+
+Run its separate **command/projection** gate without a ROM:
+
+```sh
+python3 tools/action_editor/check_compositor.py
+python3 tools/action_editor/check_compositor.py --sanitize
+cmake --build build --target actraiser_diorama_compositor_test
+ctest --test-dir build -R '^actraiser_diorama_compositor$' --output-on-failure
+```
+
+`EMCC` selects pinned Emscripten 5.0.7; `CC` selects the native C compiler. The
+native and WASM harnesses share `compositor_sources.txt`. Their recording backend
+validates draw/resource ownership, geometry, shader parameters and projection
+across 108 aspect/zoom/extension/skybox configurations. It also checks bounded
+scratch-target reuse/eviction, repeated reset, invalid input and failed draw/target
+restoration. WASM runs in fixed 32 MiB memory. Only failure diagnostics use WASI;
+unexpected host imports fail the test. Native/WASM float agreement allows 0.001
+output pixels for math-library rounding (observed maximum below 0.000184).
+
+This command-recording harness does **not** draw pixels. The UI still
+uses the rendering modes described above, and `.arscene` remains the original
+background-only snapshot format. The separate captured-scene viewer below now
+covers base-compositor pixels; matched live-scene image review and environmental
+effects remain gates before replacing Diorama 3D.
+
+### Captured scenes through WebGL2
+
+WASM-enabled `build.sh` also builds `ar-renderer-preview.html` and adds a link near
+the top of the editor. Both HTML documents embed their modules and need no runtime
+network dependencies. The captured viewer runs the real C compositor through a
+WebGL2 `ArRenderDevice` adapter, with generated production blur/rim/DOF/priority
+shaders. It supports output aspect/size, camera distance/tilt, skybox off/only/both,
+and PNG export. A capture keeps its original extension rows and horizontal art;
+resizing does not regenerate world pixels beyond that capture.
+
+The viewer is deliberately separate from live editing. It includes native
+captured actors/priority art but does not yet render environmental effects,
+a flat HUD or CRT processing. It cannot apply unsaved map edits. See the
+[compositor snapshot contract](compositor-snapshot.md) for supported inputs.
+
+```sh
+# Build the browser compositor alone (pinned Emscripten 5.0.7).
+python3 tools/action_editor/build_compositor.py build/action-editor/ar-renderer-preview.html
+
+# Capture a real scene with isolated copies of the seed/settings/input replay.
+python3 tools/action_editor/capture_compositor.py --room 0101 --output runs/compositor-fillmore
+
+# Optionally embed a small compressed example into the offline HTML.
+python3 tools/action_editor/build_compositor.py build/action-editor/ar-renderer-preview.html \
+  --scene runs/compositor-fillmore/scene.ardi
+
+# Replay precisely those pixels/settings using the native GPU backend.
+cmake --build build --target actraiser_diorama_replay actraiser_diorama_snapshot_test
+build/actraiser_diorama_replay runs/compositor-fillmore/scene.ardi runs/compositor-fillmore/native.bmp
+
+# Export the browser frame using its Export frame / Download PNG controls.
+# Requires Pillow; allows tiny edge-rasterization differences across backends.
+python3 tools/action_editor/compare_compositor.py runs/compositor-fillmore/native.bmp browser.png
+
+# ABI, resource reuse, shader fallback and malformed-load checks with actual captures.
+node tests/diorama_captured_wasm.test.mjs build/action-editor/ar-renderer-preview.wasm \
+  runs/compositor-fillmore/scene.ardi
+python3 tests/action_editor_compositor_build_test.py
+```
+
+The native capture environment controls are `AR_DIORAMA_SNAPSHOT=/path/scene.ardi`
+and optional `AR_DIORAMA_SNAPSHOT_AFTER=120` (uploaded Diorama frames). Disable
+frame generation. The diagnostic copies only once and frees its temporary pixels
+after writing. Some interior rooms require a natural-entry seed/replay; the helper
+accepts `--seed`, `--replay`, `--warp-at`, `--diorama-at` and `--quit-frames`.
+For the existing Aitos waterfall route use `saves/legacy/aitos-save.srm`,
+`saves/legacy/aitos-waterfall.rec`, warp 1320, Diorama 1700 and quit 3000.
+
+Verified locally: native Metal/WebGL2 pixels in Fillmore, Bloodpool and Aitos,
+changed Bloodpool aspect/camera/skybox policy, all four shader programs, and no
+new texture allocations on repeated frames. These are base-composition fixtures,
+not a claim of complete environmental parity or native Deck/D3D12 validation.
+The compositor's scratch cache belongs to one render device per module; call
+`Diorama_ResetCompositorResources` against that device before destroying it or
+binding a replacement. Native `Diorama_ResetRendererResources` also resets its
+desktop upload and named-skybox caches.
 
 The repository INI is also the release's authored scenery source. Packaging
 ships it as `defaults/diorama-layers.ini`; the first game launch after those

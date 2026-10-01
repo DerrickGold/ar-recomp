@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sources = path.join(root, 'tools/action_editor');
 const manifest = fs.readFileSync(path.join(sources, 'editor.body.html'), 'utf8');
-const scripts = [...manifest.matchAll(/<script src="([a-z_]+\.js)"><\/script>/g)]
+const scripts = [...manifest.matchAll(/<script src="([a-z0-9_]+\.js)"><\/script>/g)]
   .map(match => match[1]);
 
 /* Only host services used during startup are stubbed. Drawing is queued;
@@ -66,7 +66,7 @@ function editor(data,options={}) {
     }
     return elements.get(selector);
   };
-  const documentHost={querySelector:element, querySelectorAll:() => [],
+  const documentHost={addEventListener() {},querySelector:element, querySelectorAll:() => [],
     createElement:() => new Element(),body:new Element(),
     execCommand(command) {
       if(command!=='copy')return false;
@@ -88,14 +88,15 @@ function editor(data,options={}) {
     ResizeObserver:class { observe() {} },
     ImageData:class {
       constructor(width, height) {
-        this.data = new Uint8ClampedArray(width * height * 4);
+        this.data = typeof width==='number'?new Uint8ClampedArray(width * height * 4):width;
       }
     },
     getComputedStyle:() => ({getPropertyValue:property =>
       ({'--behind':'#7c5cff','--plane':'#3d8f6b','--ahead':'#e0913a'})[property]??'#aabbcc'}),
     console,
-    Blob:class {constructor(parts) {this.text=parts.join('');}},
-    URL:{createObjectURL(blob) {documentHost.exportedText=blob.text;return 'blob:test';},
+    Blob:class {constructor(parts) {this.parts=parts;this.text=parts.join('');}},
+    URL:{createObjectURL(blob) {
+      documentHost.exportedText=blob.text;documentHost.exportedParts=blob.parts;return 'blob:test';},
       revokeObjectURL() {}},
     setTimeout(callback) {callback();},
     devicePixelRatio:1,
@@ -1725,7 +1726,7 @@ if (process.argv[2]) {
   const match = html.match(/window\.__ACTION_BG__=(.*);<\/script>/);
   assert.ok(match, 'Built HTML must embed its room data');
   const data = JSON.parse(match[1]);
-  const view=JSON.parse(html.match(/window\.__ACTION_VIEW__=(.*?);<\/script>/)[1]);
+  const view=JSON.parse(html.match(/window\.__ACTION_VIEW__=(.*?);(?:window\.__ACTION_PREVIEW_WASM__|<\/script>)/)[1]);
   const ini=JSON.parse(html.match(/window\.__DIORAMA_LAYERS__=(.*?);window\.__DIORAMA_LAYERS_NAME__/)[1]);
   assert.equal(data.rooms.length, 49);
   assert.equal(data.terrainProfiles.length, 3);
@@ -1831,4 +1832,33 @@ if (process.argv[2]) {
     Buffer.from(actual.run('originalNative')));
   console.log('Kassandora 3:4: range transparency fill preserves opaque artwork and native frame');
   console.log(`${verified} exported room/terrain C/JavaScript golden frames passed`);
+  const embeddedWasm=html.match(/window\.__ACTION_PREVIEW_WASM__=(.*?);<\/script>/);
+  const wasm=embeddedWasm&&JSON.parse(embeddedWasm[1]);
+  if(wasm){
+    await actual.run(`SharedActionPreview.initialize(B64(${JSON.stringify(wasm)}))`);
+    assert.equal(actual.run('SharedActionPreview.ready'),true);
+    actual.run(`tint=false;const sharedCanvas=SharedActionPreview.canvas();drawNative2d();`);
+    assert.match(actual.elements.get('#sharedPreviewStatus').textContent,/WASM baseline ready/);
+    assert.deepEqual(Buffer.from(actual.run('sharedCanvas.getContext("2d").image.data')),
+      Buffer.from(actual.run('nativeFrameCanvas().getContext("2d").image.data')));
+    assert.equal(actual.run('sharedCanvas===SharedActionPreview.canvas()'),true,'retained frame cache');
+    actual.run('nativeFrame=83;');
+    assert.equal(actual.run('sharedCanvas===SharedActionPreview.canvas()'),true,'reuse resident canvas');
+    assert.deepEqual(Buffer.from(actual.run('sharedCanvas.getContext("2d").image.data')),
+      Buffer.from(actual.run('nativeFrameCanvas().getContext("2d").image.data')));
+    actual.run(`tint=true;drawNative2d();`);
+    assert.match(actual.elements.get('#sharedPreviewStatus').textContent,/JavaScript diagnostic/);
+    assert.equal(actual.run('SharedActionPreview.canvas()'),null);
+    actual.run(`tint=false;const pendingBeforeSnapshot=editorHasUnexportedChanges();
+      $('#downloadBaseline').onclick();`);
+    assert.equal(actual.run('editorHasUnexportedChanges()'),actual.run('pendingBeforeSnapshot'));
+    const packet=Buffer.from(actual.run('document.exportedParts[0]'));
+    assert.equal(packet.toString('ascii',0,4),'ARSC');
+    assert.equal(packet.readUInt32LE(12),actual.run('room.terrainProfile'));
+    assert.equal(packet.readUInt32LE(52),83);
+    await assert.rejects(actual.run('SharedActionPreview.initialize(new Uint8Array(8))'));
+    actual.run('drawNative2d()');
+    assert.match(actual.elements.get('#sharedPreviewStatus').textContent,/unavailable/);
+    console.log('Shared WASM editor wiring: pixels, retained canvas, band tint, snapshot export and failure fallback passed');
+  }
 }

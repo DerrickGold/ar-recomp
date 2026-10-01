@@ -6,6 +6,7 @@
 #include "action/action_effect_projection.h"
 #include "action/present_action_effects.h"
 #include "app/session_fatal.h"
+#include "dev/diorama_snapshot_capture.h"
 #include "diorama/diorama.h"
 #include "diorama/diorama_frame_generation.h"
 #include "diorama/diorama_performance.h"
@@ -252,6 +253,9 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   for (int plane = 0; plane < kDioramaPlane_Count; plane++)
     if (!(s_diorama_uploaded_plane_mask & (1u << plane)))
       pixels[plane] = NULL;
+  DioramaSnapshotCapture_Retain(slot, pixels, pitch_bytes,
+      s_diorama_uploaded_plane_mask,
+      skybox_pixels && ArRenderTexture_IsValid(s_diorama_skybox_view.texture) ? skybox : NULL);
   DioramaPerformanceScope frame_analysis =
       DioramaPerformance_Begin(kDioramaPerformance_FrameAnalysis);
   DioramaFrameGeneration_CaptureWithSkybox(
@@ -437,7 +441,10 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
     dimming_ramp.w /= kFrameSlotLayerTextureWidth;
     dimming_ramp.h /= kFrameSlotLayerTextureHeight;
   }
+  DioramaRenderOptions render;
+  Diorama_CaptureRenderOptions(&render);
   const DioramaScene scene = {
+      .render = &render,
       .map_group = slot->diorama_map_group,
       .map_number = slot->diorama_map_number,
       .layer_section = slot->diorama_layer_section,
@@ -450,8 +457,11 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
       .plane_effect = PresentActionEffects_DrawDioramaPlane,
       .plane_effect_userdata = &plane_effect,
   };
+  DioramaSnapshotCapture_Write(slot, &capture, &view, &scene);
   const PresentationOutcome diorama = Diorama_Composite(
       device, &capture, &view, &scene, &action_projection);
+  if (PresentationOutcome_IsUsable(diorama))
+    Diorama_SetAutoCameraDistance(action_projection.auto_distance);
   if (!PresentationOutcome_IsUsable(diorama)) {
     PresentActionHeat_Cancel(device);
     DioramaPerformance_End(presentation_performance);
@@ -489,6 +499,7 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
 }
 
 void PresentDiorama_Reset(ArRenderDevice *device) {
+  DioramaSnapshotCapture_Reset();
   ArRenderDevice_DestroyTexture(device, s_diorama_skybox_texture);
   s_diorama_skybox_texture = ArRenderTexture_Invalid();
   s_diorama_skybox_view = (DioramaSkyboxView){0};

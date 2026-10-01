@@ -181,6 +181,22 @@ foreach(_probe IN ITEMS "g_settings.diorama_mode" "g_ram[0]" "g_render_device")
 endforeach()
 file(WRITE "${_diorama_path}" "${_original}")
 
+set(_compositor_path "${_scratch}/diorama/diorama.c")
+file(READ "${_compositor_path}" _original)
+foreach(_probe IN ITEMS "g_settings.diorama_skybox" "g_ram[0]"
+        "DioramaLayerManifest_Table()" "DioramaRomSkyboxResource_Resolve()"
+        "HostClock_Nanoseconds()" "getenv(\"AR_DIORAMA_STACK_GROUP\")")
+    file(WRITE "${_compositor_path}" "${_original}\nvoid probe(void) { (void)${_probe}; }\n")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" "-DGAME_SOURCE_ROOT=${_scratch}" -P "${BOUNDARY_CHECK}"
+        RESULT_VARIABLE _result OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
+    if(_result STREQUAL "0" OR NOT _stderr MATCHES "implicit desktop scene input")
+        file(REMOVE_RECURSE "${_scratch}")
+        message(FATAL_ERROR "Compositor boundary accepted ${_probe}: ${_stdout}${_stderr}")
+    endif()
+endforeach()
+file(WRITE "${_compositor_path}" "${_original}")
+
 set(_font_cases
     "localization/text_backend.h"
     "localization/font_resource.c"

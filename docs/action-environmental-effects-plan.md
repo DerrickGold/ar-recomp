@@ -8,6 +8,12 @@ The local `development/docs/release-polish-backlog.md` owns bug reproduction and
 release verification records; this document owns the environmental art direction
 and stage sequence. Its Bxx references use that backlog's identifiers.
 
+The [effects editor and shared browser renderer plan](action-effects-editor-plan.md)
+owns the authoring-tool work. Its end goal is to make all established effects and
+later-stage treatments editable with a preview driven by the game's renderer.
+Build shared preview parity and effect-data authoring before expanding the editor
+controls; this roadmap continues to own the visual direction and stage sequence.
+
 The Fillmore Act 1 implementation audit and its performance/portability
 validation are recorded in [fillmore-forest-effects-audit.md](fillmore-forest-effects-audit.md).
 
@@ -551,9 +557,10 @@ priority is not a reliable collision/material classifier; use validated source
 art, room data and authored contacts appropriate to each effect.
 
 Use separate bounded host-side storage; never allocate ambient effects in the
-native enemy/object pool or displace combat-effect records. The existing
-16-record decoration list can already be full in the waterfall scene, so new
-ambient families require an explicit capacity plan, not unconditional appends.
+native enemy/object pool or displace combat-effect records. The current host
+decoration limit is 27 records, with the Aitos splash family still capped at
+fourteen and actor accents separate at sixteen. New authored ambient families
+require an explicit visible-window capacity plan, not unconditional appends.
 Use stable seeds and gameplay time, freeze on native/host pause, and reset or
 reconstruct correctly at room/load boundaries. Re-presenting a retained frame
 must not advance the simulation.

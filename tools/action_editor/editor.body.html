@@ -4,6 +4,8 @@
   <p class="sub">Classify background tiles into depth bands for the Diorama 3D
     presentation.</p>
 
+  <!-- SHARED_COMPOSITOR -->
+
   <h2>Room</h2>
   <select id="room" style="width:100%"></select>
   <h2>Terrain variant</h2>
@@ -68,13 +70,21 @@
     negative Y looks up. Zero preserves normal framing. Expansion does not move
     this anchor. Export saves these settings for the game.</p>
   </details>
-  <details class="side-section"><summary>Native frame controls</summary>
-  <h2>Native preview frame</h2>
+  <details class="side-section"><summary>Camera &amp; animation</summary>
+  <h2>Preview frame</h2>
   <div class="ctl"><label>Frame</label>
-    <input id="nativeFrame" type="range" min="0" max="255" step="1" value="0">
+    <input id="nativeFrame" type="range" min="0" max="65535" step="1" value="0">
     <span class="v" id="nativeFramev">0</span></div>
   <button id="nativePlay" style="width:100%">Play native phases</button>
+  <button id="nativeStep" type="button">Step one frame</button>
+  <div class="ctl"><label for="nativeFrameNumber">Go to frame</label><input id="nativeFrameNumber" type="number" min="0" max="65535" value="0"></div>
   <p class="hint" id="nativePhaseInfo">Static background</p>
+  <div id="baselineControls">
+  <p class="hint" id="sharedPreviewStatus" role="status">Shared C baseline not bundled.</p>
+  <button id="downloadBaseline" type="button">Download comparison scene</button>
+  <p class="hint">Original backgrounds, terrain, camera and animation time only.
+    Environmental effects, actors, tile edits and Diorama polish are not included in this baseline.</p>
+  </div>
   <div class="ctl"><label>Camera X</label>
     <input id="nativeCameraX" type="range" min="0" max="0" step="1" value="0">
     <span class="v" id="nativeCameraXv">0</span></div>
@@ -256,6 +266,7 @@
     <button id="mode2d" class="on">Map editor</button>
     <button id="modeNative">Original game frame</button>
     <button id="mode3d">Diorama 3D</button>
+    <button id="modeShared" disabled>Shared renderer</button>
     <button id="frameTool" aria-pressed="false" title="Adjust the saved native viewport on the map">Frame</button>
     <button id="coverageQuick" class="on" aria-pressed="true" title="Show the required Diorama tile area and missing rows/columns">Coverage</button>
     <button id="undoBtn" disabled>Undo</button>
@@ -315,9 +326,21 @@
     <button id="nextChange" disabled>Next edit</button>
     <button id="selectChanges" disabled>Select edited tiles</button>
   </div>
+  <div id="sharedControls" class="bar" hidden>
+    <label>Output <select id="sharedAspect"><option value="1.6">16:10</option><option value="1.7777777778">16:9</option><option value="1.3333333333">4:3</option></select></label>
+    <label>Pixels <select id="sharedPixels"><option value="0">Square</option><option value="1">CRT 4:3</option></select></label>
+    <label>Extra width <input id="sharedExtra" type="number" min="0" max="128" step="8" value="120" style="width:55px"></label>
+    <label>Extra height <select id="sharedVertical"><option value="0">0</option><option value="32">32</option><option value="64" selected>64</option></select></label>
+    <label>Backdrop <select id="sharedSky"><option value="0">Plane only</option><option value="1" selected>Skybox only</option><option value="2">Both</option></select></label>
+    <label>Distance <input id="sharedDistance" type="range" min="0.5" max="2.5" step="0.01" value="1" style="width:80px"></label>
+    <label>Yaw <input id="sharedYaw" type="range" min="-0.7" max="0.7" step="0.01" value="0" style="width:65px"></label>
+    <label>Pitch <input id="sharedPitch" type="range" min="-0.7" max="0.7" step="0.01" value="0" style="width:65px"></label>
+    <span id="sharedRoomStatus" role="status">Starting renderer…</span>
+  </div>
   <div class="view">
     <canvas id="map2d" tabindex="0" aria-label="Tile map. Right-click or Shift-F10 for tile actions."></canvas>
     <canvas id="gl"></canvas>
+    <canvas id="sharedGl" tabindex="0" style="display:none" aria-label="Shared level renderer. Drag to pan; arrows move the camera."></canvas>
     <div class="hud" id="hud"></div>
     <div class="legend" id="legend"></div>
     <section id="tilePalette" class="pixel-inspector tile-palette" aria-label="Loaded tile palette" hidden>
@@ -436,6 +459,7 @@
   <div class="dlg-b" id="docsBody"></div></dialog>
 
 <script src="native_frame.js"></script>
+<script src="shared_preview.js"></script>
 <script src="regional_editor.js"></script>
 <script src="layer_editor.js"></script>
 <script src="painting.js"></script>
@@ -449,5 +473,7 @@
 <script src="framing_editor.js"></script>
 <script src="coverage_editor.js"></script>
 <script src="diorama_view.js"></script>
+<script src="webgl2_backend.js"></script>
+<script src="shared_room_preview.js"></script>
 <script src="editor.js"></script>
 <script src="help.js"></script>

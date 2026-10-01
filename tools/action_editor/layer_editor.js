@@ -709,7 +709,10 @@ function drawNative2d() {
   ctx.imageSmoothingEnabled=false;
   const scale=Math.min(r.width/DATA.frameWidth,r.height/DATA.frameHeight);
   const x=(r.width-DATA.frameWidth*scale)/2,y=(r.height-DATA.frameHeight*scale)/2;
-  ctx.drawImage(nativeFrameCanvas(),x,y,DATA.frameWidth*scale,DATA.frameHeight*scale);
+  const shared=SharedActionPreview.canvas();
+  ctx.drawImage(shared||nativeFrameCanvas(),x,y,DATA.frameWidth*scale,DATA.frameHeight*scale);
+  $('#sharedPreviewStatus').textContent=SharedActionPreview.status
+    +(tint?' · band tint uses the JavaScript diagnostic view':'');
   const state=nativeFrameState(room);
   $('#hud').innerHTML=`<b>${room.group}:${room.map}</b> native 256×224 stable frame`
     +` &nbsp; ${terrainLabel(room)} terrain`

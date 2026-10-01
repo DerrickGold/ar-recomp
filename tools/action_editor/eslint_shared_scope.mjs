@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const sources = [...fs.readFileSync(path.join(directory, "editor.body.html"), "utf8")
-  .matchAll(/<script src="([a-z_]+\.js)"><\/script>/g)].map(match => match[1]);
+  .matchAll(/<script src="([a-z0-9_]+\.js)"><\/script>/g)].map(match => match[1]);
 if (!sources.length || new Set(sources).size !== sources.length) {
   throw new Error("Action editor script manifest is empty or repeats a script");
 }

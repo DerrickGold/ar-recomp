@@ -398,7 +398,7 @@ static uint16_t ResolveParallax(uint32_t camera, uint8_t ratio,
   uint32_t result = denominator ? camera * numerator / denominator : 0;
   if (extent >= 0x300 && result + viewport >= extent)
     result = extent - viewport;
-  return (uint16_t)result & 0x03ff;
+  return (uint16_t)result;
 }
 
 typedef struct RasterWriter16 {
@@ -693,10 +693,14 @@ bool ActionRoomScene_BuildFrameState(
     ResolveParallax((uint32_t)request->camera_y, scene->video_profile[10],
                     ActionRoomScene_TileHeight(scene, 2) * 8u, 0x0e0),
   };
+  state->layer_camera_x[0] = request->camera_x;
+  state->layer_camera_y[0] = request->camera_y;
+  state->layer_camera_x[1] = base_h[1];
+  state->layer_camera_y[1] = base_v[1];
   for (unsigned bg = 0; bg < kActionRoomSceneBgCount; bg++)
     for (unsigned line = 0; line < kActionRoomSceneFrameHeight; line++) {
-      state->bg_hscroll[bg][line] = base_h[bg];
-      state->bg_vscroll[bg][line] = base_v[bg];
+      state->bg_hscroll[bg][line] = base_h[bg] & 0x03ff;
+      state->bg_vscroll[bg][line] = base_v[bg] & 0x03ff;
     }
   BuildRasterScroll(scene, request, state);
   return true;

@@ -1,0 +1,13 @@
+src/diorama/diorama.c
+src/diorama/diorama_projection.c
+src/diorama/diorama_layer_order.c
+src/diorama/diorama_depth_shapes.c
+src/diorama/diorama_aperture.c
+src/diorama/diorama_edge_aa.c
+src/diorama/diorama_stack_group.c
+src/diorama/diorama_skybox_uv.c
+src/render/render_device.c
+src/render/render_output.c
+src/render/scene3d_math.c
+src/render/presentation_layout.c
+src/action/action_bg_plan.c

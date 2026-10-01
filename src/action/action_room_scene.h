@@ -119,6 +119,9 @@ typedef struct ActionRoomSceneFrameRequest {
  * the room's persistent HDMA preset has advanced. Transient gameplay-object
  * windows are deliberately outside this record. */
 typedef struct ActionRoomSceneFrameState {
+  /* Full canonical cameras before raster offsets and the PPU's 10-bit wrap. */
+  int32_t layer_camera_x[kActionRoomSceneBgCount];
+  int32_t layer_camera_y[kActionRoomSceneBgCount];
   uint16_t bg_hscroll[kActionRoomSceneBgCount]
                      [kActionRoomSceneFrameHeight];
   uint16_t bg_vscroll[kActionRoomSceneBgCount]

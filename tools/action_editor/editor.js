@@ -147,6 +147,9 @@ function updateLegend() {
     : mode === 'native'
       ? '<b>native stable frame</b> &nbsp; camera sliders or arrows move the view'
         + '<br>frame slider drives CHR, page-cycle, and persistent raster phases'
+    : mode === 'shared'
+      ? '<b>drag / arrows</b> pan the room &nbsp; use view controls for zoom and orbit'
+        + '<br>Frame controls scrub animation in either direction; map edits apply live.'
     : '<b>drag</b> orbit &nbsp; <b>shift-drag / arrows</b> move native camera'
       + '<br><b>wheel</b> zoom &nbsp; <b>r</b> reset orbit';
 }
@@ -195,6 +198,7 @@ function drawNow() {
   refreshEditorFeedback();
   if (mode === '2d') draw2d();
   else if (mode === 'native') drawNative2d();
+  else if (mode === 'shared') SharedRoomPreview.draw();
   else draw3d();
   updateLegend(); renderLadder(); renderBandHint();
   const bg = bgIndex ^ 1, lay = room.bg[bg], e = otherExtent();
@@ -203,7 +207,9 @@ function drawNow() {
     : '(none)';
 }
 function refreshNativePhaseControls() {
+  $('#sharedPreviewStatus').textContent=SharedActionPreview.status;
   $('#nativeFrame').value = String(nativeFrame);
+  $('#nativeFrameNumber').value = String(nativeFrame);
   $('#nativeFramev').textContent = String(nativeFrame);
   const parts = [];
   if (room.animation)
@@ -248,17 +254,19 @@ function setNativeCamera(axis,value) {
 $('#nativeCameraX').oninput=event=>setNativeCamera('x',event.target.value);
 $('#nativeCameraY').oninput=event=>setNativeCamera('y',event.target.value);
 function setNativeFrame(value) {
-  nativeFrame = Math.max(0, Math.min(255, Number(value) || 0));
-  L = decodeLayer(room,bgIndex);
+  nativeFrame = Math.max(0, Math.min(65535, Math.floor(Number(value) || 0)));
+  if(mode !== 'shared') L = decodeLayer(room,bgIndex);
   surfacesDirty = compositeDirty = glDirty = true;
   composite = null;
   invalidateOther();
   invalidateGameComposite();
-  refreshNativePhaseControls(); refreshPixelEditor();
-  refreshTilePalette();
+  refreshNativePhaseControls();
+  if(mode !== 'shared') {refreshPixelEditor(); refreshTilePalette();}
   draw();
 }
 $('#nativeFrame').oninput = event => setNativeFrame(event.target.value);
+$('#nativeFrameNumber').oninput = event => setNativeFrame(event.target.value);
+$('#nativeStep').onclick = () => setNativeFrame((nativeFrame + 1) & 65535);
 $('#nativePlay').onclick = () => {
   if (nativePlayTimer) {
     clearInterval(nativePlayTimer); nativePlayTimer = null;
@@ -267,7 +275,7 @@ $('#nativePlay').onclick = () => {
     return;
   }
   nativePlayTimer = setInterval(
-    () => setNativeFrame((nativeFrame + 1) & 255), 1000/60);
+    () => setNativeFrame((nativeFrame + 1) & 65535), 1000/60);
   $('#nativePlay').classList.add('on');
   $('#nativePlay').textContent = 'Pause native phases';
 };
@@ -289,7 +297,18 @@ $('#bg1').onclick = () => setLayer(0);
 $('#bg2').onclick = () => setLayer(1);
 $('#mode2d').onclick = () => setMode('2d');
 $('#modeNative').onclick = () => setMode('native');
+$('#downloadBaseline').onclick = () => {
+  try {
+    const bytes=SharedActionPreview.encode(DATA,BLOBS,room,
+      {cameraX:nativeCamera.x,cameraY:nativeCamera.y,frame:nativeFrame});
+    const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));
+    const link=document.createElement('a');link.href=url;
+    link.download=`room-${room.group}-${room.map}-terrain-${room.terrainProfile||0}-frame-${nativeFrame}.arscene`;
+    link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  } catch(error) { $('#sharedPreviewStatus').textContent=`Scene export failed: ${error.message}`; }
+};
 $('#mode3d').onclick = () => setMode('3d');
+$('#modeShared').onclick = () => setMode('shared');
 $('#tint').onclick = () => { tint = !tint; $('#tint').classList.toggle('on', tint);
   invalidate(); };
 $('#tint').addEventListener('click', invalidateOther);
@@ -520,7 +539,7 @@ window.addEventListener('keydown', e => {
     const pixels=e.shiftKey?16:1;nudgeFraming(a[0]*pixels,a[1]*pixels);return;
   }
   if (mode === '2d') { view.x -= a[0]*48*step; view.y -= a[1]*48*step; }
-  else if (mode === 'native' || mode === '3d') {
+  else if (mode === 'native' || mode === '3d' || mode === 'shared') {
     setNativeCamera('x',nativeCamera.x+a[0]*8*step);
     setNativeCamera('y',nativeCamera.y+a[1]*8*step);
   }
@@ -532,10 +551,22 @@ function setMode(m) {
   tileActionStatus('');
   if(m!=='2d'){compareOriginal=false;pixelInspector.hidden=true;closeTilePalette(false);}
   drag = null;                          /* a drag never crosses a mode change */
+  if(mode==='shared' && m!=='shared') {L=decodeLayer(room,bgIndex);surfacesDirty=true;refreshTilePalette();}
   mode = m; $('#mode2d').classList.toggle('on', m==='2d');
   $('#modeNative').classList.toggle('on', m==='native');
   $('#mode3d').classList.toggle('on', m==='3d');
-  cvs.style.display = m!=='3d' ? 'block' : 'none';
+  $('#modeShared').classList.toggle('on', m==='shared');
+  $('#sharedGl').style.display = m==='shared' ? 'block' : 'none';
+  $('#sharedControls').hidden = m!=='shared';
+  $('#hud').classList.toggle('shared', m==='shared');
+  $('#baselineControls').hidden = m==='shared';
+  for(const id of ['actorBtn','bothBtn','tint','navFit','navOut','navIn','navReset'])
+    $('#'+id).hidden=m==='shared';
+  if(m==='shared') {
+    SharedRoomPreview.invalidate();
+    $('#nativeFrame').closest('details').open=true;
+  }
+  cvs.style.display = m!=='3d' && m!=='shared' ? 'block' : 'none';
   glc.style.display = m==='3d' ? 'block' : 'none';
   refreshNativeCameraControls();invalidateGameComposite();
   refreshEditorFeedback();glDirty = true; draw();

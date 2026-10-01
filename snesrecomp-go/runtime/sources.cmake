@@ -5,6 +5,7 @@
 # build description rather than duplicating the core list.
 
 set(SNESRECOMP_RUNNER_SOURCES
+    ${SNESRECOMP_RUNNER_ROOT}/src/scene_renderer.c
     ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner.c
     ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner_determinism.c
     ${SNESRECOMP_RUNNER_ROOT}/src/runner/runner_game_module.c

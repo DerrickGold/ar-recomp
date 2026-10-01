@@ -555,6 +555,11 @@ if(BUILD_TESTING)
                 ${CMAKE_SOURCE_DIR}/tests/action_editor_build_test.py)
         set_tests_properties(actraiser_action_editor_build PROPERTIES
             ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+        add_test(NAME actraiser_action_editor_compositor_build
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/action_editor_compositor_build_test.py)
+        set_tests_properties(actraiser_action_editor_compositor_build PROPERTIES
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
         add_test(NAME actraiser_sim3d_metadata_tool
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tests/sim3d_metadata_tool_test.py)
@@ -2152,6 +2157,32 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_diorama_camera_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_diorama_camera_test PRIVATE actraiser_math)
     add_test(NAME actraiser_diorama_camera COMMAND actraiser_diorama_camera_test)
+
+    file(STRINGS "${CMAKE_SOURCE_DIR}/tools/action_editor/compositor_sources.txt"
+        _diorama_compositor_sources)
+    add_executable(actraiser_diorama_compositor_test
+        tests/diorama_compositor_test.c ${_diorama_compositor_sources})
+    target_include_directories(actraiser_diorama_compositor_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_diorama_compositor_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_diorama_compositor COMMAND actraiser_diorama_compositor_test)
+
+    add_executable(actraiser_diorama_snapshot_test
+        tests/diorama_snapshot_test.c src/diorama/diorama_snapshot.c)
+    target_include_directories(actraiser_diorama_snapshot_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_diorama_snapshot_test PRIVATE actraiser_render_test_support)
+    add_test(NAME actraiser_diorama_snapshot COMMAND actraiser_diorama_snapshot_test)
+
+    add_executable(actraiser_diorama_replay
+        tools/action_editor/replay_compositor.c tools/action_editor/compositor_profile_stub.c
+        src/diorama/diorama_snapshot.c ${_diorama_compositor_sources}
+        src/platform/sdl/diorama_effect_backend_sdl.c src/app/session_fatal.c)
+    target_include_directories(actraiser_diorama_replay PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_diorama_replay PRIVATE actraiser_render_sdl_test_support)
+
 
     add_executable(actraiser_diorama_projection_test
         tests/diorama_projection_test.c
@@ -3819,6 +3850,20 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_diorama_layer_manifest_test PRIVATE snesrecomp::sdk)
     add_test(NAME actraiser_diorama_layer_manifest COMMAND actraiser_diorama_layer_manifest_test)
+
+    add_executable(actraiser_action_scene_snapshot_test
+        tests/action_scene_snapshot_test.c src/action/action_scene_snapshot.c)
+    target_include_directories(actraiser_action_scene_snapshot_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_action_scene_snapshot COMMAND actraiser_action_scene_snapshot_test)
+
+    # Native half of the editor's WASM comparison gate; accepts portable scenes,
+    # never reads the ROM or starts gameplay.
+    add_executable(actraiser_action_scene_replay
+        tools/action_editor/replay_scene.c src/action/action_scene_snapshot.c
+        src/action/action_room_scene.c)
+    target_link_libraries(actraiser_action_scene_replay PRIVATE actraiser_rom_decode_test_support)
+    target_include_directories(actraiser_action_scene_replay PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
 
     # ROM backdrop HLE uses the stock asset script and compressed-asset format.
     # This exercises command inheritance plus literal/back-reference decoding
