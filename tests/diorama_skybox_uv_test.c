@@ -651,7 +651,45 @@ static void TestRasterSourceBounds(void) {
   ExpectInt("aligned mosaic right", source.x1, 960);
 }
 
+static void TestWorldLockedSkybox(void) {
+  /* Project a fixed waterfall rock through the foreground camera, then
+   * recover the source sampled under it. Camera travel, extra rows, aspect
+   * and perspective must not change that source coordinate. */
+  for (int rows = 0; rows <= 64; rows += 32) {
+    for (int crt = 0; crt < 2; ++crt) {
+      const float par = crt ? 7.0f / 6.0f : 1.0f;
+      const float width = 496, height = 224 + 2 * rows;
+      const float aspect = width / 224 * par, scale = height / 224;
+      const float m[16] = {2,0,0,.15f, 0,3,0,.1f, 0,0,1,0, -.2f,.1f,0,4};
+      for (int camera = 0; camera < 3; ++camera) {
+        const float cx = 80 + camera * 175, cy = 64 + camera * 103;
+        const float capture_x = 570 - cx + 120;
+        const float capture_y = 630 - cy - 1 + rows;
+        const float wx = (capture_x / width - .5f) * aspect;
+        const float wy = (.5f - capture_y / height) * scale;
+        const float w = m[3] * wx + m[7] * wy + m[15];
+        const float sx = .5f + .5f * (m[0] * wx + m[12]) / w;
+        const float sy = .5f - .5f * (m[5] * wy + m[13]) / w;
+        float x = 0, y = 0;
+        ExpectInt("world mapping valid", DioramaSkyboxWorldPoint(
+            m, 0, aspect, scale, sx, sy, &x, &y), 1);
+        const float world_x = x * width - 120 + cx;
+        const float world_y = y * height - rows + cy + 1;
+        ExpectInt("waterfall X stays registered", fabsf(world_x - 570) < .001f, 1);
+        ExpectInt("waterfall Y stays registered", fabsf(world_y - 630) < .001f, 1);
+      }
+    }
+  }
+  float x = 0, y = 0;
+  float degenerate[16] = {0};
+  ExpectInt("horizon fails closed", DioramaSkyboxWorldPoint(
+      degenerate, 0, 1, 1, .5f, .5f, &x, &y), 0);
+  ExpectInt("invalid scale fails closed", DioramaSkyboxWorldPoint(
+      degenerate, 0, NAN, 1, .5f, .5f, &x, &y), 0);
+}
+
 int main(void) {
+  TestWorldLockedSkybox();
   TestFiniteParallaxBounds();
   TestRasterSourceBounds();
   TestSupportedCaptureBudgets();

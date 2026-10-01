@@ -5291,6 +5291,52 @@ bool PpuRenderBackgroundViewLine(Ppu *ppu,
     return true;
 }
 
+bool PpuRenderNativeBackgroundView(Ppu *ppu,
+        const SrPpuBackgroundViewRequest *view) {
+    if (!ppu || !view || view->layer >= 2 || view->width != 256 ||
+        view->height != 256 || !view->pixels || view->pitch_bytes < 256 * 4 ||
+        view->pixel_byte_size < view->pitch_bytes * 256) return false;
+    const unsigned layer = view->layer;
+    const PpuOverlayCapture *capture = &ppu->overlayCaptures[layer];
+    const unsigned supported_flags = kPpuOverlayFlag_RemoveFromGame |
+        kPpuOverlayFlag_MarkBgHalfAdd | kPpuOverlayFlag_ApplyBgFixedColorSubtract;
+    const bool owner_sub = (ppu->screenEnabled[0] & (1u << layer)) == 0;
+    const int window = (ppu->screenWindowed[owner_sub ? 1 : 0] & (1u << layer))
+        ? native_window_uniform(ppu, layer) : 0;
+    if (PPU_mode(ppu) != 1 || PPU_bigTiles(ppu, layer) ||
+        PPU_bgTilemapWider(ppu, layer) || PPU_bgTilemapHigher(ppu, layer) ||
+        (PPU_mosaicEnabled(ppu, layer) && PPU_mosaicSize(ppu) > 1) ||
+        ppu->virtualTilemap[layer].lookup || ppu->captureTiles[layer].lookup ||
+        (capture->flags & ~supported_flags) || window < 0) return false;
+    const uint32_t fill = PpuOverlayTransparentFillColor(ppu, layer);
+    const bool blank = PPU_forcedBlank(ppu) || window ||
+        !(ppu->screenEnabled[owner_sub ? 1 : 0] & (1u << layer));
+    NativeOverlayLinePlan colors;
+    if (!ppu->cgramRgbValid) rebuild_cgram_rgb(ppu);
+    native_overlay_line_plan(ppu, layer, 0, &colors);
+    /* Reuse native decoded 4bpp rows and capture colour policy. This is a
+     * fixed-size source snapshot, never another scanout or register write. */
+    for (unsigned y = 0; y < 256; ++y) {
+        uint32_t *out = (uint32_t *)((uint8_t *)view->pixels + y * view->pitch_bytes);
+        for (unsigned x = 0; x < 256; x += 8) {
+            const uint16_t entry = ppu->vram[(PPU_bgTilemapAdr(ppu, layer) +
+                (y / 8) * 32 + x / 8) & 0x7fff];
+            const unsigned ty = (entry & 0x8000u) ? 7 - (y & 7) : y & 7;
+            const uint32_t decoded = blank ||
+                ((entry & 0x2000u) && ppu->overlayRenderBands[layer][0]) ? 0 :
+                decoded_4bpp_row(ppu, PPU_bgTileAdr(ppu, layer) +
+                    (entry & 0x3ffu) * 16 + ty);
+            for (unsigned px = 0; px < 8; ++px) {
+                const unsigned shift = (entry & 0x4000u) ? 7 - px : px;
+                const unsigned pixel = (decoded >> (shift * 4)) & 15u;
+                out[x + px] = blank ? 0 : pixel
+                    ? colors.colors[((entry >> 10) & 7u) * 16u + pixel] : fill;
+            }
+        }
+    }
+    return true;
+}
+
 void ppu_runLine(Ppu *ppu, int line) {
     if (ppu == NULL) return;
     if (line == 0) {

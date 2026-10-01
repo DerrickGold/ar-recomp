@@ -1944,6 +1944,66 @@ ResolveDioramaLayers(const DioramaScene *scene,
   }
 }
 
+/* A periodic native backdrop occupies the same world plane as the playfield,
+ * but still paints behind every layer. Inverse projection covers the viewport
+ * at every camera pose without scaling camera motion or exposing texture
+ * allocation edges. One bounded mesh, one ordinary wrapped texture draw. */
+static PresentationOutcome DrawPeriodicDioramaSkybox(
+    ArRenderDevice *device, const DioramaCapture *capture,
+    const DioramaViewGeometry *geometry, float reference_z,
+    DioramaProjection *projection) {
+  ArRenderVertex2D vertices[DIORAMA_VERTS_PER_LAYER];
+  int32_t indices[DIORAMA_INDICES_PER_LAYER];
+  ArRenderPointF motion = {0};
+  if (capture->plane_capture_offsets)
+    motion = capture->plane_capture_offsets[SR_PPU_OVERLAY_BG1];
+  float x0 = INFINITY, y0 = INFINITY, x1 = -INFINITY, y1 = -INFINITY;
+  int count = 0;
+  for (int row = 0; row <= DIORAMA_SUBDIV_Y; ++row) {
+    for (int col = 0; col <= DIORAMA_SUBDIV_X; ++col) {
+      const float sx = (float)col / DIORAMA_SUBDIV_X;
+      const float sy = (float)row / DIORAMA_SUBDIV_Y;
+      float x, y;
+      if (!DioramaSkyboxWorldPoint(geometry->matrix, reference_z,
+              geometry->aspect_x, geometry->height_scale, sx, sy, &x, &y))
+        return kPresentationOutcome_OptionalOmitted;
+      x *= capture->width;
+      y *= capture->height;
+      x0 = fminf(x0, x - motion.x); x1 = fmaxf(x1, x - motion.x);
+      y0 = fminf(y0, y - motion.y); y1 = fmaxf(y1, y - motion.y);
+      vertices[count++] = (ArRenderVertex2D){
+        .position = {sx * geometry->width, sy * geometry->height},
+        .color = {1,1,1,1},
+        .tex_coord = {
+          (x - 0.5f * (capture->width - kActRaiserAuthenticWidth) +
+              capture->bg2_camera_x - motion.x) / 256.0f,
+          (y - capture->authentic_y0 + capture->bg2_camera_y + 1 - motion.y) / 256.0f},
+      };
+    }
+  }
+  int index_count;
+  TriangulateGrid(DIORAMA_SUBDIV_X, DIORAMA_SUBDIV_Y, indices, &index_count);
+  const ArRenderDrawState state = {
+    .flags = kArRenderDrawState_Blend | kArRenderDrawState_Address,
+    .blend = kArRenderBlendMode_Opaque,
+    .address_u = kArRenderTextureAddressMode_Wrap,
+    .address_v = kArRenderTextureAddressMode_Wrap,
+  };
+  if (!SubmitDioramaGeometry(device, capture->skybox->texture,
+          vertices, count, indices, index_count, &state))
+    return kPresentationOutcome_CoreFailure;
+  if (projection) {
+    projection->bg2_skybox = (DioramaSkyboxProjection){
+      .world_plane = {.valid = true, .capture_offset = motion,
+        .u0 = geometry->u0, .v0 = geometry->v0,
+        .u1 = geometry->u1, .v1 = geometry->v1, .z_world = reference_z},
+      .count = 1, .active_band = -1,
+      .bands = {{x0,y0,x1,y1,0,1}},
+    };
+  }
+  return kPresentationOutcome_Complete;
+}
+
 /* The skybox draws first. Missing ROM art falls back to current captured
  * BG2; failed renderer restoration is a core failure, never a fallback. */
 static PresentationOutcome DrawResolvedDioramaSkybox(
@@ -1973,6 +2033,19 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
     const int skybox_source =
         DioramaLayerOrder_SkyboxSource(resolved, resolved_count);
     if (skybox_source == kDioramaLayerSource_Captured && capture->skybox &&
+        capture->skybox->periodic && ArRenderTexture_IsValid(capture->skybox->texture)) {
+      float reference_z = DioramaBg1ReferenceZ() - 0.5f;
+      for (int i = 0; i < resolved_count; ++i)
+        if (resolved[i].plane == SR_PPU_OVERLAY_BG1)
+          reference_z = resolved[i].z - 0.5f;
+      const PresentationOutcome periodic = DrawPeriodicDioramaSkybox(
+          device, capture, geometry, reference_z, projection);
+      if (periodic != kPresentationOutcome_OptionalOmitted) return periodic;
+      /* A camera looking past the plane's horizon uses the ordinary captured
+       * skybox. Never submit partially initialized inverse-projection data. */
+    }
+    if (skybox_source == kDioramaLayerSource_Captured && capture->skybox &&
+        !capture->skybox->periodic &&
         ArRenderTexture_IsValid(capture->skybox->texture) &&
         capture->bg2_valid_spans) {
       skybox_texture = capture->skybox->texture;

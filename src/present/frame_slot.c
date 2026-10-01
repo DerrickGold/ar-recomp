@@ -202,7 +202,8 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
       ActRaiser_LiveActionBgPlan(&dst->action_bg_plan,
                                  &dst->bg_capture_pad_to_budget);
       ActRaiser_LiveDioramaSkybox(&dst->diorama_skybox_surface,
-                                &dst->diorama_skybox_world_x);
+                                &dst->diorama_skybox_world_x,
+                                &dst->diorama_skybox_periodic);
       dst->action_bg_extent_guides = ActionBgTuner_GuidesEnabled();
     }
     dst->inidisp = ppu_frame->display_control;

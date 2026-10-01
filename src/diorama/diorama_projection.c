@@ -551,7 +551,10 @@ static bool ProjectSkyboxBandPoint(const DioramaProjection *projection,
 
 bool Diorama_ProjectSkyboxAnchorPoint(const DioramaProjection *projection, float anchor_y,
                                       float x, float y, ArRenderPointF *point) {
-  if (!projection) return false;
+  if (!projection || !isfinite(anchor_y)) return false;
+  if (projection->bg2_skybox.world_plane.valid)
+    return ProjectCapturedPlanePoint(projection, x, y,
+        &projection->bg2_skybox.world_plane, point, NULL, NULL);
   const int selected = SkyboxBandAt(&projection->bg2_skybox, anchor_y);
   return selected >= 0 && ProjectSkyboxBandPoint(
       projection, &projection->bg2_skybox.bands[selected], x, y, point, NULL, NULL);
@@ -574,6 +577,9 @@ bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
                                      ArRenderPointF *point,
                                      float *scale_x, float *scale_y) {
   if (!projection || !point) return false;
+  if (projection->bg2_skybox.world_plane.valid)
+    return ProjectCapturedPlanePoint(projection, capture_x, capture_y,
+        &projection->bg2_skybox.world_plane, point, scale_x, scale_y);
   if (projection->bg2_skybox.count)
     return ProjectSkyboxPoint(projection, capture_x, capture_y,
                                point, scale_x, scale_y);

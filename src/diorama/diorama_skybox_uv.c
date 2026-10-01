@@ -301,3 +301,29 @@ void DioramaRomSkyboxUvRange(int display_width, int source_width,
   *out_u0 = 0.0f;
   *out_u1 = (float)display_width / (float)source_width;
 }
+
+bool DioramaSkyboxWorldPoint(const float m[16], float z,
+                             float aspect_x, float height_scale,
+                             float output_x, float output_y,
+                             float *capture_x, float *capture_y) {
+  if (!m || !capture_x || !capture_y || !isfinite(z) ||
+      !isfinite(aspect_x) || aspect_x <= 0 ||
+      !isfinite(height_scale) || height_scale <= 0 ||
+      !isfinite(output_x) || !isfinite(output_y)) return false;
+  for (int i = 0; i < 16; ++i)
+    if (!isfinite(m[i])) return false;
+  const float nx = 2 * output_x - 1, ny = 1 - 2 * output_y;
+  const float a = m[0] - nx * m[3], b = m[4] - nx * m[7];
+  const float c = m[1] - ny * m[3], d = m[5] - ny * m[7];
+  const float ex = nx * (m[11] * z + m[15]) - (m[8] * z + m[12]);
+  const float ey = ny * (m[11] * z + m[15]) - (m[9] * z + m[13]);
+  const float det = a * d - b * c;
+  if (!isfinite(det) || fabsf(det) < 1e-6f) return false;
+  const float x = (ex * d - b * ey) / det;
+  const float y = (a * ey - ex * c) / det;
+  const float w = m[3] * x + m[7] * y + m[11] * z + m[15];
+  if (!isfinite(x) || !isfinite(y) || !isfinite(w) || w <= 0) return false;
+  *capture_x = x / aspect_x + 0.5f;
+  *capture_y = 0.5f - y / height_scale;
+  return isfinite(*capture_x) && isfinite(*capture_y);
+}

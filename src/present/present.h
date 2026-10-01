@@ -115,6 +115,7 @@ typedef struct FrameSlot {
    * rebinding the gameplay plane. Same synchronous-upload lifetime above. */
   SrPpuSurfaceView diorama_skybox_surface;
   int32_t diorama_skybox_world_x;
+  bool diorama_skybox_periodic;
 
   /* Geometry, resolved (D3 — never call Settings_Visible*()/live globals from
    * present-time code; these are the already-resolved results). */

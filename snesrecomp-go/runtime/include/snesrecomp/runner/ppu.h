@@ -1007,15 +1007,18 @@ typedef struct SrPpuScanoutRequest {
 #define SR_PPU_SCANOUT_PRESENTATION_DIGEST_VALID UINT32_C(0x00000008)
 #define SR_PPU_SCANOUT_BACKGROUND_VIEW_READY UINT32_C(0x00000010)
 
-/** Optional independent, horizontally bounded view of a virtual Mode-1 BG.
- * The fixed-width window follows the provider camera plus live raster scroll,
+/** Optional independent Mode-1 background view. By default this is a
+ * horizontally bounded virtual BG view; the NATIVE_PAGE flag instead requests
+ * the unscrolled native snapshot described below.
+ * The default fixed-width window follows the provider camera plus live raster
+ * scroll,
  * clamped to [0, world_width - width]. This does not move the hardware camera,
  * alter gameplay output, or apply the gameplay canvas's horizontal clipping.
  * Output matches the source's primary overlay (including priority separation
  * and transparent fill), not the final main/subscreen composition.
  *
- * Only non-mosaic, unclassified virtual BGs with ordinary capture policies
- * and horizontally uniform windows are supported. Unsupported rows omit READY;
+ * The default view supports only non-mosaic, unclassified virtual BGs with
+ * ordinary capture policies and horizontally uniform windows. Unsupported rows omit READY;
  * normal scanout still completes. Each row observes the same live palette,
  * characters and HDMA state as normal scanout. Caller-owned storage is borrowed
  * only during the call, must not alias any bound PPU output, and is publishable
@@ -1032,7 +1035,21 @@ typedef struct SrPpuBackgroundViewRequest {
     void *pixels;
     uint64_t pitch_bytes;
     uint64_t pixel_byte_size;
+    /* Optional extension, gated by struct_size and NATIVE_BACKGROUND_VIEW.
+     * A native page is a canonical 256x256, unscrolled Mode-1 4bpp tilemap
+     * snapshot. It uses the completed frame's palette/characters, not raster
+     * effects. Only 32x32 native maps without virtual replacements qualify. */
+    uint32_t flags;
+    uint32_t reserved;
 } SrPpuBackgroundViewRequest;
+
+#define SR_PPU_BACKGROUND_VIEW_NATIVE_PAGE UINT32_C(1)
+#define SR_PPU_BACKGROUND_VIEW_NATIVE_REQUEST_SIZE ((uint32_t)sizeof(SrPpuBackgroundViewRequest))
+
+static inline uint32_t SrPpuBackgroundView_Flags(const SrPpuBackgroundViewRequest *view) {
+    return view && view->struct_size >= SR_PPU_BACKGROUND_VIEW_NATIVE_REQUEST_SIZE
+        ? view->flags : 0u;
+}
 
 /** Shared finite-view mapping for scanout and capture metadata. The scanout
  * supplies its live raster-adjusted camera; hosts may publish the canonical

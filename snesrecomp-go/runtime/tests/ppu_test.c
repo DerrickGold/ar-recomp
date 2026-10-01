@@ -2245,6 +2245,63 @@ cleanup:
     for (int i = 0; i < 3; ++i) ppu_free(sources[i]);
 }
 
+static void test_native_background_view(void) {
+    static uint32_t main_pixels[256 * 224], overlay[256 * 224];
+    static uint32_t saved[256 * 224], page[256 * 256 + 2];
+    Ppu *ppu = ppu_init();
+    CHECK(ppu != NULL);
+    if (!ppu) return;
+    ppu_reset(ppu);
+    ppu->inidisp = 15;
+    ppu->bgmode = 1;
+    ppu->screenEnabled[0] = 2;
+    for (unsigned c = 0; c < 128; ++c) ppu->cgram[c] = (c * 257) & 0x7fff;
+    for (unsigned tile = 1; tile <= 4; ++tile)
+        for (unsigned y = 0; y < 16; ++y)
+            ppu->vram[tile * 16 + y] = (uint16_t)(0x1357 * (tile + y));
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2,
+        (uint8_t *)overlay, 256 * 4));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2,
+        0, 0, 256, 224, kPpuOverlayFlag_RemoveFromGame));
+    SrPpuBackgroundViewRequest view = {
+        .struct_size = sizeof(view), .layer = 1,
+        .world_width = 256, .world_height = 256, .width = 256, .height = 256,
+        .pixels = page + 1, .pitch_bytes = 256 * 4,
+        .pixel_byte_size = 256 * 256 * 4, .flags = SR_PPU_BACKGROUND_VIEW_NATIVE_PAGE,
+    };
+    for (unsigned phase = 0; phase < 4; ++phase) {
+        ppu->bgXsc[1] = (uint8_t)(0x40 + 4 * phase);
+        for (unsigned y = 0; y < 32; ++y)
+            for (unsigned x = 0; x < 32; ++x)
+                ppu->vram[0x4000 + phase * 1024 + y * 32 + x] =
+                    1 + (x + y + phase) % 4 + ((x % 8) << 10) +
+                    ((x & 1) ? 0x4000 : 0) + ((y & 1) ? 0x8000 : 0);
+        ppu->hScroll[1] = 37 + phase * 71;
+        ppu->vScroll[1] = 83 + phase * 59;
+        ppu_write(ppu, 0, (uint8_t)(15 - phase * 2));
+        PpuBeginDrawing(ppu, (uint8_t *)main_pixels, 256 * 4, 0);
+        ppu_runLine(ppu, 0);
+        for (int y = 1; y <= 224; ++y) ppu_runLine(ppu, y);
+        memcpy(saved, overlay, sizeof(saved));
+        memset(page, 0xa5, sizeof(page));
+        CHECK(PpuRenderNativeBackgroundView(ppu, &view));
+        CHECK(memcmp(saved, overlay, sizeof(saved)) == 0);
+        for (unsigned y = 0; y < 224; ++y)
+            for (unsigned x = 0; x < 256; ++x)
+                CHECK(overlay[y * 256 + x] == page[1 +
+                    ((y + ppu->vScroll[1] + 1) & 255) * 256 +
+                    ((x + ppu->hScroll[1]) & 255)]);
+        CHECK(page[0] == 0xa5a5a5a5 && page[256 * 256 + 1] == 0xa5a5a5a5);
+    }
+    ppu->bgXsc[1] |= 1;
+    CHECK(!PpuRenderNativeBackgroundView(ppu, &view));
+    ppu->bgXsc[1] &= ~1;
+    ppu->inidisp = 0x80;
+    CHECK(PpuRenderNativeBackgroundView(ppu, &view));
+    for (unsigned i = 0; i < 256 * 256; ++i) CHECK(page[i + 1] == 0);
+    ppu_free(ppu);
+}
+
 static void test_clamped_background_view(void) {
     /* Capture and presentation share this origin even at asymmetric margins,
      * finite edges and extreme camera values. Expected values are independent. */
@@ -2447,6 +2504,7 @@ int main(int argc, char **argv) {
         test_native_virtual_capture_path_parity();
         test_native_vram_margin_path_parity();
         test_clamped_background_view();
+        test_native_background_view();
         ppu_free(ppu);
     }
     if (failures != 0) {

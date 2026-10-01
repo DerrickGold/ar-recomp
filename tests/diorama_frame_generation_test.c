@@ -373,6 +373,23 @@ int main(void) {
   /* An old caller must not accidentally address the private extra slot. */
   CHECK(DioramaFrameGeneration_Prepare(
       &render_device, &slot, 0.5f, raw, UINT32_MAX, resolved) == 0);
+  /* A periodic source animates in world space; falling water is not camera
+   * motion. Switching from a finite source must discard its private pair. */
+  slot.diorama_skybox_periodic = true;
+  for (int endpoint = 0; endpoint < 2; ++endpoint) {
+    for (int y = 0; y < kHeight; ++y)
+      for (int x = 0; x < kDisplayWidth; ++x)
+        sky_pixels[y * kDisplayWidth + x] = PatternPixel(x, y - endpoint * 2);
+    CHECK(SDL_UpdateTexture(current, &sky_rect, sky_pixels, kDisplayWidth * 4));
+    slot.timestamp_ns += 16666667;
+    DioramaFrameGeneration_CaptureWithSkybox(
+        &render_device, &slot, sources, planes, plane_pitches, 0, sky_raw, true);
+    CHECK(DioramaFrameGeneration_PrepareWithSkybox(
+        &render_device, &slot, 0.5f, raw, 0, resolved, sky_raw, &sky_resolved) == 0);
+    CHECK(ArRenderTexture_Equals(sky_resolved, sky_raw));
+    CHECK(DioramaFrameGeneration_PlaneOffset(kDioramaFrameGenerationSkybox).x == 0);
+    CHECK(DioramaFrameGeneration_PlaneOffset(kDioramaFrameGenerationSkybox).y == 0);
+  }
   DioramaFrameGeneration_Reset();
   CHECK(DioramaFrameGeneration_PrepareWithSkybox(
       &render_device, &slot, 0.5f, raw, 0, resolved, sky_raw, &sky_resolved) == 0);

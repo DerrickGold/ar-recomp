@@ -567,6 +567,26 @@ ActRaiser_PrepareSkyboxView(const SrPpuFrameTransactionContext *context,
       scanout_api->struct_size >= SNES_RUNNER_API_PPU_BACKGROUND_VIEW_SIZE &&
       (scanout_api->capabilities & SR_RUNNER_CAP_PPU_BACKGROUND_VIEW) != 0u &&
       scanout_api->run_ppu_scanout_with_background_view;
+  /* Both Aitos Act 1 waterfall rooms use repeating native pages. Keep
+   * a complete animated period so presentation can follow the playfield's
+   * scale without stretching or sampling beyond the captured viewport. */
+  if (skybox_capable && profile_diorama &&
+      g_settings.diorama_skybox == kDioramaSky_Only &&
+      (scanout_api->capabilities & SR_RUNNER_CAP_PPU_NATIVE_BACKGROUND_VIEW) &&
+      ActRaiserRoom_ProfileFor(g_ram[kActRaiserWram_MapGroup],
+          g_ram[kActRaiserWram_CurrentMap]) == kActRaiserRoomProfile_AitosWaterfall &&
+      sky_layer->valid &&
+      sky_layer->source == kActionBgSource_NativeTilemap &&
+      (!backdrop_override || !backdrop_override->set_source ||
+       backdrop_override->source == kDioramaLayerSource_Captured)) {
+    return (SrPpuBackgroundViewRequest){
+      .struct_size = sizeof(skybox_view), .layer = SR_PPU_OVERLAY_BG2,
+      .world_width = 256, .world_height = 256, .width = 256, .height = 256,
+      .pixels = s_diorama_skybox_pixels, .pitch_bytes = 256 * sizeof(uint32_t),
+      .pixel_byte_size = sizeof(s_diorama_skybox_pixels),
+      .flags = SR_PPU_BACKGROUND_VIEW_NATIVE_PAGE,
+    };
+  }
   if (skybox_capable && profile_diorama && g_settings.diorama_margin_fix &&
       g_settings.diorama_skybox != kDioramaSky_Off && sky_layer->valid &&
       sky_layer->source == kActionBgSource_WorldMap &&

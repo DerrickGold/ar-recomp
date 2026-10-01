@@ -328,7 +328,9 @@ static SrResult run_ppu_scanout(
     int trigger;
     int line;
     unsigned channel;
-    bool view_ready = view != NULL;
+    const bool native_view =
+        (SrPpuBackgroundView_Flags(view) & SR_PPU_BACKGROUND_VIEW_NATIVE_PAGE) != 0u;
+    bool view_ready = view != NULL && !native_view;
     if (ppu == NULL || dma == NULL || api == NULL)
         return SR_RESULT_UNAVAILABLE;
     if (!PpuOutputSurfacesFitGeometry(
@@ -407,6 +409,8 @@ static SrResult run_ppu_scanout(
             view_ready = PpuRenderBackgroundViewLine(
                 ppu, view, (int)SR_PPU_NATIVE_HEIGHT + line - 1);
     }
+    if (native_view)
+        view_ready = PpuRenderNativeBackgroundView(ppu, view);
     snes_beginVblank(snes);
 
     out_result->final_state.struct_size = sizeof(out_result->final_state);

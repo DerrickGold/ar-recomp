@@ -22,6 +22,7 @@ static DioramaCoverageMask s_diorama_coverage_masks[kDioramaPlane_Count];
 static uint64_t s_diorama_bg2_content_revision;
 static DioramaSkyboxView s_diorama_skybox_view;
 static ArRenderTexture s_diorama_skybox_texture;
+static bool s_diorama_skybox_texture_periodic;
 static PresentationUploadMirror s_diorama_skybox_mirror;
 
 /* Session history survives retained frames, room changes and GPU resets. */
@@ -172,10 +173,17 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
       skybox ? (int)skybox->width_pixels : 0,
       skybox ? (int)skybox->height_pixels : 0);
   if (skybox_pixels) {
+    const bool periodic = slot->diorama_skybox_periodic;
+    if (periodic != s_diorama_skybox_texture_periodic) {
+      ArRenderDevice_DestroyTexture(device, s_diorama_skybox_texture);
+      s_diorama_skybox_texture = ArRenderTexture_Invalid();
+      PresentationUploadMirror_Reset(&s_diorama_skybox_mirror);
+      s_diorama_skybox_texture_periodic = periodic;
+    }
     if (!ArRenderTexture_IsValid(s_diorama_skybox_texture)) {
       const ArRenderTextureDesc desc = {
-        .width = kFrameSlotLayerTextureWidth,
-        .height = kFrameSlotLayerTextureHeight,
+        .width = periodic ? 256 : kFrameSlotLayerTextureWidth,
+        .height = periodic ? 256 : kFrameSlotLayerTextureHeight,
         .format = kArRenderPixelFormat_Argb8888,
         .usage = kArRenderTextureUsage_Streaming,
         .filter = kArRenderFilter_Linear, .blend = kArRenderBlendMode_Opaque,
@@ -185,7 +193,7 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
     }
     /* The blur prefilter visits the fixed allocation, not just the view.
      * Initialize its padding, including after a capture extent shrinks. */
-    if (ArRenderTexture_IsValid(s_diorama_skybox_texture) &&
+    if (!periodic && ArRenderTexture_IsValid(s_diorama_skybox_texture) &&
         (!s_diorama_skybox_mirror.valid ||
          s_diorama_skybox_mirror.width != (int)skybox->width_pixels ||
          s_diorama_skybox_mirror.height != (int)skybox->height_pixels)) {
@@ -212,6 +220,7 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
       if (result.changed) s_diorama_skybox_view.revision++;
       s_diorama_skybox_view.texture = s_diorama_skybox_texture;
       s_diorama_skybox_view.width = (int)skybox->width_pixels;
+      s_diorama_skybox_view.periodic = periodic;
     }
   }
   const uint8_t *pixels[kDioramaPlane_Count];
@@ -281,7 +290,7 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
       DioramaFrameGeneration_PlaneOffset(kDioramaFrameGenerationSkybox);
   /* Canonical source mapping belongs to the captured pixels; frame generation
    * contributes only its presentation translation. */
-  if (ArRenderTexture_IsValid(skybox_view.texture))
+  if (!skybox_view.periodic && ArRenderTexture_IsValid(skybox_view.texture))
     skybox_view.capture_offset.x += slot->bg2_camera_x - slot->ws_extra -
         slot->diorama_skybox_world_x;
   DioramaPerformance_End(frame_synthesis);
@@ -388,6 +397,7 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
       .framing_y = slot->diorama_framing_y,
       .bg_apron_mask = slot->diorama_bg_apron_mask,
       .camera_y = slot->bg1_camera_y,
+      .bg2_camera_x = slot->bg2_camera_x,
       .bg2_camera_y = slot->bg2_camera_y,
       .bg2_world_height = slot->action_bg_plan.layer[1].world_height,
       .bg2_vertical_ratio = primary_layer == 0

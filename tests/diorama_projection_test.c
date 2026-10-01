@@ -777,6 +777,23 @@ static void TestSkyboxProjection(void) {
   CHECK(!Diorama_SkyboxAnchorBounds(&p,128,&x0,&y0,&x1,&y1));
   p.bg2_skybox.count = 0;
   CHECK(!Diorama_ProjectCapturedBg2Point(&p,228,128,&point,NULL,NULL));
+
+  /* Aitos's periodic waterfall uses the actual foreground projection for
+   * effects, too. It must not fall back to the bounding box's screen fit. */
+  p = Projection();
+  p.bg2_plane.valid = false;
+  p.bg2_skybox.world_plane = p.bg1_plane;
+  p.bg2_skybox.world_plane.capture_offset = (ArRenderPointF){2,-3};
+  p.bg1_plane.capture_offset = p.bg2_skybox.world_plane.capture_offset;
+  p.bg2_skybox.count = 1;
+  p.bg2_skybox.active_band = -1;
+  p.bg2_skybox.bands[0] = (DioramaSkyboxBandProjection){-200,-100,900,600,0,1};
+  ArRenderPointF foreground;
+  CHECK(Diorama_ProjectCapturedBg1Point(&p,228,128,&foreground,NULL,NULL));
+  CHECK(Diorama_ProjectCapturedBg2Point(&p,228,128,&point,NULL,NULL));
+  CHECK(Near(point.x,foreground.x) && Near(point.y,foreground.y));
+  CHECK(Diorama_ProjectSkyboxAnchorPoint(&p,128,228,128,&point));
+  CHECK(Near(point.x,foreground.x) && Near(point.y,foreground.y));
 }
 
 static void TestDesignerFramingOffset(void) {

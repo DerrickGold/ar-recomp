@@ -152,6 +152,8 @@ typedef struct DioramaSkyboxBandProjection {
 } DioramaSkyboxBandProjection;
 
 typedef struct DioramaSkyboxProjection {
+  /* A periodic native page may share the foreground's world projection. */
+  DioramaPlaneProjection world_plane;
   unsigned count;
   /* -1 selects the band containing a point. A drawing callback selects one
    * band so clipping and interpolation never bridge a row-policy boundary. */
@@ -271,6 +273,7 @@ typedef struct DioramaSkyboxView {
   uint64_t revision;
   int width;
   bool dynamic;
+  bool periodic;
   ArRenderPointF capture_offset;
 } DioramaSkyboxView;
 
@@ -286,7 +289,7 @@ typedef struct DioramaCapture {
   int framing_x, framing_y;
   uint8_t bg_apron_mask;
   /* Native camera and command-3 ratio, captured with these exact pixels. */
-  int camera_y, bg2_camera_y, bg2_world_height;
+  int camera_y, bg2_camera_x, bg2_camera_y, bg2_world_height;
   uint8_t bg2_vertical_ratio;
   bool bg2_scroll_valid;
   const ArRenderTexture *textures;

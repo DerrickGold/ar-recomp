@@ -628,7 +628,7 @@ static int test_public_vertical_margin_scanout(
         (api->capabilities & SR_RUNNER_CAP_PPU_BACKGROUND_VIEW) != 0u &&
         api->run_ppu_scanout_with_background_view != NULL,
         "background-view capability/table tail missing");
-    for (int invalid = 0; invalid < 7; ++invalid) {
+    for (int invalid = 0; invalid < 10; ++invalid) {
         SrPpuBackgroundViewRequest bad = view;
         if (invalid == 0) bad.struct_size = sizeof(uint32_t);
         if (invalid == 1) bad.layer = 2;
@@ -637,6 +637,9 @@ static int test_public_vertical_margin_scanout(
         if (invalid == 4) bad.pixel_byte_size--;
         if (invalid == 5) bad.screen_y0--;
         if (invalid == 6) bad.pixels = s_main_surface;
+        if (invalid == 7) bad.flags = 2;
+        if (invalid == 8) bad.reserved = 1;
+        if (invalid == 9) bad.flags = SR_PPU_BACKGROUND_VIEW_NATIVE_PAGE;
         bool even_frame = snes->ppu->evenFrame;
         failed |= check(api->run_ppu_scanout_with_background_view(
             runner, &scanout, &bad, &result) == SR_RESULT_INVALID_ARGUMENT &&
@@ -663,6 +666,28 @@ static int test_public_vertical_margin_scanout(
         !(result.flags & SR_PPU_SCANOUT_BACKGROUND_VIEW_READY) &&
         view_pixels[0] == 0xa5a5a5a5,
         "ordinary scanout retained an earlier background-view buffer");
+    /* Old callers do not expose extension fields. New native-page callers
+     * can request a full period even when the visible frame has fewer rows. */
+    view.struct_size = SR_PPU_BACKGROUND_VIEW_REQUEST_SIZE;
+    view.flags = view.reserved = UINT32_MAX;
+    failed |= check(api->run_ppu_scanout_with_background_view(
+        runner, &scanout, &view, &result) == SR_RESULT_OK,
+        "legacy background-view layout read extension bytes");
+    static uint32_t native_page[256 * 256];
+    view = (SrPpuBackgroundViewRequest){
+        .struct_size = sizeof(view), .layer = 1,
+        .world_width = 256, .world_height = 256, .width = 256, .height = 256,
+        .pixels = native_page, .pitch_bytes = 256 * 4,
+        .pixel_byte_size = sizeof(native_page), .flags = SR_PPU_BACKGROUND_VIEW_NATIVE_PAGE,
+    };
+    snes->ppu->bgmode = 1;
+    snes->ppu->bgXsc[1] = 0;
+    snes->ppu->mosaic = 0;
+    snes->ppu->screenWindowed[0] = snes->ppu->screenWindowed[1] = 0;
+    failed |= check((api->capabilities & SR_RUNNER_CAP_PPU_NATIVE_BACKGROUND_VIEW) &&
+        api->run_ppu_scanout_with_background_view(runner, &scanout, &view, &result) ==
+        SR_RESULT_OK && (result.flags & SR_PPU_SCANOUT_BACKGROUND_VIEW_READY),
+        "native background view was not published independently of viewport height");
     return failed;
 }
 

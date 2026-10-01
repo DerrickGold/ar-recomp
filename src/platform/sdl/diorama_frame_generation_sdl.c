@@ -230,7 +230,7 @@ void DioramaFrameGeneration_CaptureWithSkybox(
   memcpy(pixels, layer_pixels, sizeof(*layer_pixels) * kDioramaPlane_Count);
   memcpy(pitch_bytes, layer_pitches, sizeof(*layer_pitches) * kDioramaPlane_Count);
   const bool have_skybox = ArRenderTexture_IsValid(skybox_texture) &&
-      slot->diorama_skybox_surface.data;
+      slot->diorama_skybox_surface.data && !slot->diorama_skybox_periodic;
   source_textures[kDioramaFrameGenerationSkybox] = skybox_texture;
   pixels[kDioramaFrameGenerationSkybox] = have_skybox
       ? slot->diorama_skybox_surface.data : NULL;
@@ -560,7 +560,8 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
   native_current_textures[kDioramaFrameGenerationSkybox] =
       ArSdlRenderBackend_UnwrapTexture(skybox_texture);
   current_plane_mask &= (1u << kDioramaPlane_Count) - 1u;
-  if (resolved_skybox && ArRenderTexture_IsValid(skybox_texture))
+  if (resolved_skybox && ArRenderTexture_IsValid(skybox_texture) &&
+      slot && !slot->diorama_skybox_periodic)
     current_plane_mask |= 1u << kDioramaFrameGenerationSkybox;
   if (!renderer || !slot || !slot->diorama_active ||
       !slot->interp_setting_enabled ||

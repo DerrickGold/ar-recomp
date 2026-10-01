@@ -1130,6 +1130,14 @@ static bool background_view_overlaps(const SrPpuBackgroundViewRequest *view,
 
 static bool valid_background_view(const Ppu *ppu,
         const SrPpuBackgroundViewRequest *view) {
+    const uint32_t flags = SrPpuBackgroundView_Flags(view);
+    const bool native = (flags & SR_PPU_BACKGROUND_VIEW_NATIVE_PAGE) != 0u;
+    if ((flags & ~SR_PPU_BACKGROUND_VIEW_NATIVE_PAGE) != 0u ||
+        (view && view->struct_size >= SR_PPU_BACKGROUND_VIEW_NATIVE_REQUEST_SIZE &&
+         view->reserved != 0u) ||
+        (native && (view->width != 256 || view->height != 256 ||
+                    view->world_width != 256 || view->world_height != 256 ||
+                    view->screen_x0 != 0 || view->screen_y0 != 0))) return false;
     if (ppu == NULL || view == NULL ||
         view->struct_size < SR_PPU_BACKGROUND_VIEW_REQUEST_SIZE ||
         view->layer >= 2u || view->world_width == 0u ||
@@ -1139,9 +1147,9 @@ static bool valid_background_view(const Ppu *ppu,
         view->height == 0u || view->height > kPpuBufHeight ||
         view->screen_x0 < -kPpuExtraLeftRight ||
         view->screen_x0 > kPpuXPixels ||
-        view->screen_y0 < -(int)ppu->extraTopCur ||
-        (int64_t)view->screen_y0 + view->height >
-            kPpuYPixels + ppu->extraBottomCur ||
+        (!native && (view->screen_y0 < -(int)ppu->extraTopCur ||
+         (int64_t)view->screen_y0 + view->height >
+            kPpuYPixels + ppu->extraBottomCur)) ||
         view->pixels == NULL ||
         (uintptr_t)view->pixels % _Alignof(uint32_t) != 0u ||
         view->pitch_bytes < (uint64_t)view->width * sizeof(uint32_t) ||

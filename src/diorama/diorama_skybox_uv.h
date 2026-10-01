@@ -127,4 +127,12 @@ void DioramaSkyboxUvRange(int tex_width, int valid_x0, int valid_x1,
 void DioramaRomSkyboxUvRange(int display_width, int source_width,
                              float *out_u0, float *out_u1);
 
+/* Invert a flat world plane at one normalized output point. The result is
+ * normalized capture space, so periodic skyboxes can share the foreground's
+ * exact camera/scale instead of magnifying camera motion by fitting a crop. */
+bool DioramaSkyboxWorldPoint(const float matrix[16], float z,
+                             float aspect_x, float height_scale,
+                             float output_x, float output_y,
+                             float *capture_x, float *capture_y);
+
 #endif /* AR_DIORAMA_SKYBOX_UV_H */

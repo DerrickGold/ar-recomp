@@ -582,5 +582,6 @@ int PpuGetCurrentRenderScale(Ppu *, uint32_t);
  * The public boundary validates storage/geometry; false invalidates this
  * optional view, never the normal scanout. */
 bool PpuRenderBackgroundViewLine(Ppu *, const SrPpuBackgroundViewRequest *, int);
+bool PpuRenderNativeBackgroundView(Ppu *, const SrPpuBackgroundViewRequest *);
 
 #endif

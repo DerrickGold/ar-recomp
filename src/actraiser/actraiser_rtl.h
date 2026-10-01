@@ -56,7 +56,8 @@ bool ActRaiser_LiveActionBgPlan(ActionBgPlan *out,
 /* Optional host-owned skybox pixels from the same completed scanout. Borrowed
  * until the next tick/reset, like the other FrameSlot surface products.
  * world_x is the canonical left edge resolved from that scanout request. */
-void ActRaiser_LiveDioramaSkybox(SrPpuSurfaceView *out, int32_t *world_x);
+void ActRaiser_LiveDioramaSkybox(SrPpuSurfaceView *out, int32_t *world_x,
+                               bool *periodic);
 /* Vertical geometry latched with the last rendered frame. Either pointer may
  * be NULL. */
 void ActRaiser_LiveVerticalMargins(int *top, int *bottom);

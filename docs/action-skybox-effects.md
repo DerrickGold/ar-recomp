@@ -29,8 +29,9 @@ that have not received an environment pass yet.
   cycle and opacity are unchanged. Presenter tests now explicitly check that
   Skybox only submits both moonlight and its alpha cloud without new uploads.
 - Named ROM skyboxes use the full displayed capture for ambient fields. These
-  replacement pages have no live capture transform; this is suitable for the
-  stock ROM-backed Aitos waterfall atmosphere. Selecting unrelated custom art
+  replacement pages are static and have no live capture transform. The Aitos
+  waterfall flow accent can use that normalized field, but animating the actual
+  waterfall artwork requires `source:captured`. Selecting unrelated custom art
   does not semantically relocate a stage's authored light sources onto that art.
 - Skybox effects draw immediately after the skybox and before foreground scenery
   and actors. Later moonlit receivers can still query the published source.
@@ -55,6 +56,39 @@ that have not received an environment pass yet.
 | Bloodpool castle windows, gallery, moat and surface lighting | Existing foreground geometry; skybox moon available to receivers |
 | Aitos waterfall flow | Captured skybox mapping or normalized ROM backdrop field |
 | Aitos lava, torches, enemy and boss accents in every region | Existing BG1-high/OBJ attachment; independent of the backdrop plane |
+
+### Aitos Act 1 waterfall source
+
+Room `04/02` selects `backdrop = source:captured` throughout the room, including
+the cave: foreground map edits now cover its gaps. Named `rom-04-02-bg2` art is a
+static decoded page and cannot reproduce the live BG2 waterfall animation.
+
+In Skybox only, both room `04/02` and boss room `04/03` use the shared waterfall
+room profile to snapshot the current native 256×256 BG2 tilemap page, including
+its animated page selection, palette and characters. A wrapped
+texture draw maps this period through the foreground plane's projection and
+both camera axes. Fitting a captured 224-row window to the viewport magnified
+the camera movement; this world mapping preserves the intended 1:1 scroll even
+with extended rows or pixel-aspect correction. It uses one bounded mesh/draw,
+a tightly sized texture and the existing upload cache, without skybox blur.
+
+The optional, capability-gated native-page API preserves the previous request
+layout. It supports non-raster Mode-1 4bpp 32×32 maps; unsupported sources fall
+back to ordinary captured rendering. Its host use is restricted to these two
+rooms. Plane + skybox retains its existing path. Environmental
+effects are independent of source selection. Periodic artwork bypasses skybox
+motion estimation and shares the foreground's presentation offset instead, so
+falling water cannot be mistaken for camera travel during interpolation.
+
+Validation on 2026-09-30 includes native Metal captures of horizontal movement
+and jumps, matching gameplay WRAM snapshots before/after, a native-page pixel
+comparison against ordinary PPU scanout (four animation pages, flips, palettes
+and brightness), and projection tests across extend 0/32/64 and both pixel
+aspects. These are controlled room captures, not a full natural playthrough.
+The boss-room capture loads room `04/02` before warping to `04/03`, matching
+the shared-art dependency; warping directly from room `04/01` leaves its sunset
+characters in BG2 and is not a valid waterfall preview. All six boss capture
+checkpoints remain in `04/03`, with native page animation active.
 
 ## Validation (2026-09-28)
 

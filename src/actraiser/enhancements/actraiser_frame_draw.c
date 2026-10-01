@@ -10,10 +10,13 @@
  * hands out a copy. */
 static SrPpuSurfaceView s_live_diorama_skybox;
 static int32_t s_live_diorama_skybox_world_x;
+static bool s_live_diorama_skybox_periodic;
 
-void ActRaiser_LiveDioramaSkybox(SrPpuSurfaceView *out, int32_t *world_x) {
+void ActRaiser_LiveDioramaSkybox(SrPpuSurfaceView *out, int32_t *world_x,
+                               bool *periodic) {
   if (out) *out = s_live_diorama_skybox;
   if (world_x) *world_x = s_live_diorama_skybox_world_x;
+  if (periodic) *periodic = s_live_diorama_skybox_periodic;
 }
 
 /* Sim3D reports renderer-local contract state; this host seam owns the policy
@@ -202,6 +205,8 @@ static void ActRaiser_PublishScanout(SrResult scanout_status,
                                      bool action) {
   if (skybox->pixels && scanout_status == SR_RESULT_OK &&
       (result->flags & SR_PPU_SCANOUT_BACKGROUND_VIEW_READY)) {
+    s_live_diorama_skybox_periodic =
+        (skybox->flags & SR_PPU_BACKGROUND_VIEW_NATIVE_PAGE) != 0;
     /* Publish the actual request's mapping with its pixels. Presentation must
      * not reconstruct margins or finite-world policy from another snapshot. */
     s_live_diorama_skybox_world_x = (int32_t)SrPpuBackgroundView_WorldLeft(
@@ -376,6 +381,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   if (!context) return SR_RESULT_INVALID_ARGUMENT;
   s_live_diorama_skybox = (SrPpuSurfaceView){0};
   s_live_diorama_skybox_world_x = 0;
+  s_live_diorama_skybox_periodic = false;
   PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_PpuSetup);
   ppu = &context->state;
   for (uint32_t source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; source++)
