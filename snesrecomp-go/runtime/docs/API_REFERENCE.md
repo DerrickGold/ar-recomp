@@ -483,7 +483,12 @@ mixed-coverage boundary to defer that coordinate to scalar lookup.
 virtual tilemaps and overlay destinations have been bound. Check
 `SR_RUNNER_CAP_PPU_CAPTURE_TILES` and `SNES_RUNNER_API_PPU_CAPTURE_TILES_SIZE`.
 Tile callbacks return replacements, intentional blank tiles, and optional black
-masks in displayed tile coordinates. Capture bands are far (0), ordinary (1),
+masks in displayed tile coordinates. Check `SR_RUNNER_CAP_PPU_CAPTURE_TRANSPARENCY`
+before writing the appended `transparent_rows` callback field. Its bits cut
+holes in all captured bands, taking precedence over black and replacement art.
+They also suppress opaque transparent-fill backing at those pixels. Older
+callbacks remain compatible and retain their black-only edits.
+Capture bands are far (0), ordinary (1),
 and high (2). A zero result preserves the ordinary capture. The native capture
 export uses its cached character decoder, live scanline palette, scroll,
 mosaic, windows, and capture color policy; edits never modify gameplay source

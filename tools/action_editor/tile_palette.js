@@ -3,6 +3,9 @@
  * stamps freeze tile words, not graphics from an unrelated room's memory. */
 const tilePalette=$('#tilePalette');
 tilePalette.hidden=true;
+const paletteZoom=$('#paletteZoom');
+paletteZoom.hidden=true;
+let paletteZoomEntry=null;
 let paletteContext='',paletteSourceIndex=0,paletteCache='',paletteQuarter=0;
 let paletteWords=[0,0,0,0],paletteChoice=null,paletteButtons=[];
 const paletteAssetMatch=(a,b)=>a.chars===b.chars&&a.extraChars===b.extraChars&&
@@ -12,7 +15,7 @@ const paletteHex=(id,width=2)=>id.toString(16).toUpperCase().padStart(width,'0')
 function paletteTile(layer,id) {
   if(!Number.isInteger(id)||id<0||id*4+4>layer.metatileWords.length)return null;
   const words=Array.from(layer.metatileWords.slice(id*4,id*4+4));
-  return {id,words,bands:words.map(authenticBand),black:ZERO_PIXEL_MASK};
+  return {id,words,bands:words.map(authenticBand),black:ZERO_PIXEL_MASK,transparent:ZERO_PIXEL_MASK};
 }
 function loadedCharacterIds(layer) {
   const ids=[];
@@ -44,6 +47,31 @@ function paintPalettePreview(canvas,layer,tile,size=16,word=0) {
     data[o+2]=color===null?checker:(color>>>16)&255;data[o+3]=255;
   }
   canvas.getContext('2d').putImageData(image,0,0);
+}
+function hidePaletteZoom(entry=null) {
+  if(entry&&paletteZoomEntry?.button!==entry.button)return;
+  paletteZoom.hidden=true;paletteZoomEntry=null;
+}
+function showPaletteZoom(entry,layer=null) {
+  if(tilePalette.hidden)return;
+  layer??=decodeLayer(paletteRoom(),bgIndex);
+  const {id,kind,used,button}=entry,size=kind==='character'?8:16;
+  const canvas=$('#paletteZoomCanvas');canvas.width=canvas.height=size;
+  // Scale the source pixels in CSS so artwork and checkerboard stay crisp.
+  paintPalettePreview(canvas,layer,kind==='metatile'?paletteTile(layer,id):null,
+    size,id|(Number($('#paletteRow').value)<<10));
+  $('#paletteZoomTitle').textContent=`${kind==='character'?'Piece':'Tile'} ${paletteHex(id,size===8?3:2)} · ${size}×${size}`;
+  $('#paletteZoomInfo').textContent=`${used?'Used':'Unused'} in source map`;
+  paletteZoomEntry={...entry,context:paletteCache.slice(0,paletteCache.lastIndexOf(':'))};
+  paletteZoom.hidden=false;
+  const box=paletteZoom.getBoundingClientRect(),panel=tilePalette.getBoundingClientRect();
+  const tile=button.getBoundingClientRect(),margin=8,gap=12;
+  // Keep the preview beside the palette, outside its scrolling/clipped grid.
+  let left=panel.left-box.width-gap;
+  if(left<margin)left=panel.left+panel.width+gap;
+  paletteZoom.style.left=Math.max(margin,Math.min(window.innerWidth-box.width-margin,left))+'px';
+  paletteZoom.style.top=Math.max(margin,Math.min(window.innerHeight-box.height-margin,
+    tile.top+(tile.height-box.height)/2))+'px';
 }
 function refreshPaletteComposer(layer) {
   for(let q=0;q<4;q++) {
@@ -102,12 +130,12 @@ function choosePaletteCharacter(id) {
 }
 function usePaletteComposite() {
   if(!paletteAssetMatch(room,paletteRoom()))return false;
-  const tile={id:paletteChoice??0,words:[...paletteWords],bands:paletteWords.map(authenticBand),black:ZERO_PIXEL_MASK};
+  const tile={id:paletteChoice??0,words:[...paletteWords],bands:paletteWords.map(authenticBand),black:ZERO_PIXEL_MASK,transparent:ZERO_PIXEL_MASK};
   tileClipboard={key:keyOf(room,bgIndex),w:1,h:1,cells:[tile],label:'Assembled tile'};
   startStamp();tileActionStatus('Assembled tile ready. Click the map to place it; Esc finishes.');return true;
 }
 function refreshTilePalette(force=false) {
-  if(!L)return;
+  if(!L){hidePaletteZoom();return;}
   const context=`${room.group}:${room.map}:${room.terrainProfile||0}:${bgIndex}`;
   if(context!==paletteContext) {
     paletteContext=context;paletteCache='';paletteChoice=null;paletteQuarter=0;
@@ -128,11 +156,12 @@ function refreshTilePalette(force=false) {
       +'Other maps appear when graphics, colors and animation match this room.';
     $('#paletteRow').value=String((L.words[0]>>10)&7);
   }
-  if(tilePalette.hidden)return;
+  if(tilePalette.hidden){hidePaletteZoom();return;}
   const kind=$('#paletteKind').value||'metatile',usage=$('#paletteUsage').value||'all';
   const row=Number($('#paletteRow').value),phase=animationPhase(paletteRoom());
   const cache=`${context}:${paletteSourceIndex}:${kind}:${usage}:${row}:${phase}`;
   if(!force&&cache===paletteCache){refreshPaletteStamp();return;}
+  const zoomEntry=paletteZoomEntry;hidePaletteZoom();
   paletteCache=cache;
   const layer=decodeLayer(paletteRoom(),bgIndex),entries=paletteEntries(layer,kind);
   const filtered=entries.filter(e=>usage==='all'||e.used===(usage==='used'));
@@ -144,18 +173,26 @@ function refreshTilePalette(force=false) {
     const button=document.createElement('button'),canvas=document.createElement('canvas');
     const size=kind==='character'?8:16;canvas.width=canvas.height=size;
     const label=paletteHex(id,kind==='character'?3:2);
-    button.title=`${size}×${size} ${label} · ${used?'Used':'Unused'} in original source map`;
-    button.setAttribute('aria-label',button.title);button.setAttribute('aria-pressed',String(kind==='metatile'&&id===paletteChoice));
+    button.setAttribute('aria-label',`${size}×${size} ${label} · ${used?'Used':'Unused'} in original source map`);
+    button.setAttribute('aria-pressed',String(kind==='metatile'&&id===paletteChoice));
     button.classList.toggle('unused',!used);button.classList.toggle('on',kind==='metatile'&&id===paletteChoice);
     paintPalettePreview(canvas,layer,kind==='metatile'?paletteTile(layer,id):null,size,id|(row<<10));
     button.appendChild(canvas);
     const caption=document.createElement('span');caption.textContent=label;button.appendChild(caption);
     button.onclick=()=>kind==='character'?choosePaletteCharacter(id):choosePaletteTile(id);
     grid.appendChild(button);paletteButtons.push({button,id});
+    const entry={button,id,kind,used};
+    button.onpointerenter=()=>showPaletteZoom(entry);
+    button.onfocus=()=>showPaletteZoom(entry);
+    button.onpointerleave=button.onblur=()=>hidePaletteZoom(entry);
+    // Animated thumbnails rebuild the grid; keep the hovered preview current.
+    if(zoomEntry?.id===id&&zoomEntry.kind===kind&&
+      zoomEntry.context===cache.slice(0,cache.lastIndexOf(':')))showPaletteZoom(entry,layer);
   }
   refreshPaletteComposer(layer);refreshPaletteStamp();
 }
 function closeTilePalette(focus=true) {
+  hidePaletteZoom();
   tilePalette.hidden=true;$('#tilePaletteOpen').classList.remove('on');
   $('#tilePaletteOpen').setAttribute('aria-pressed','false');
   if(focus)cvs.focus({preventScroll:true});
@@ -167,6 +204,12 @@ function openTilePalette() {
 }
 $('#tilePaletteOpen').onclick=()=>tilePalette.hidden?openTilePalette():closeTilePalette();
 $('#tilePaletteClose').onclick=()=>closeTilePalette();
+$('#paletteGrid').addEventListener('pointerleave',()=>hidePaletteZoom());
+$('#paletteGrid').addEventListener('scroll',()=>hidePaletteZoom());
+tilePalette.addEventListener('scroll',()=>hidePaletteZoom());
+window.addEventListener('resize',()=>hidePaletteZoom());
+window.addEventListener('blur',()=>hidePaletteZoom());
+window.addEventListener('keydown',event=>{if(event.key==='Escape')hidePaletteZoom();});
 $('#paletteSource').onchange=()=>{
   const index=Number($('#paletteSource').value),source=DATA.rooms[index];
   if(!source||!source.bg[bgIndex]||!paletteAssetMatch(room,source))return;

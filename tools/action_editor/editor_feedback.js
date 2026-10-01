@@ -34,7 +34,8 @@ function editorHasUnexportedChanges() {
 }
 function tileChangeKinds(x,y) {
   const stamp=stampBucket(room,bgIndex).cells[`${x},${y}`];
-  if(stamp)return {pasted:true,pixels:stamp.black!==ZERO_PIXEL_MASK,
+  if(stamp)return {pasted:true,pixels:stamp.black!==ZERO_PIXEL_MASK||
+    (stamp.transparent??ZERO_PIXEL_MASK)!==ZERO_PIXEL_MASK,
     band:stamp.bands.some((b,q)=>b!==authenticBand(stamp.words[q]))};
   if(x<0||y<0||x>=L.cellsW||y>=L.cellsH)return {};
   const cell=y*L.cellsW+x,id=L.cellId[cell],pixels=pixelBucket(room,bgIndex);

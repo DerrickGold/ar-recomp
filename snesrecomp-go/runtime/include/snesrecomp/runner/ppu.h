@@ -874,7 +874,8 @@ typedef struct SrPpuVirtualTilemapRequest {
 /* Presentation-only 8x8 edits. Coordinates use the corresponding virtual
  * tilemap's camera and live raster scroll. A zero lookup result keeps the
  * ordinary tile. REPLACE supplies a tile (or BLANK); otherwise only black
- * mask bits change. Masks are in displayed tile coordinates, MSB at left,
+ * mask bits change. Transparent bits suppress artwork in all captured bands,
+ * including replacement/black pixels. Masks are in displayed tile coordinates, MSB at left,
  * before character flips. Bands are 0=far, 1=ordinary, 2=high.
  * Callbacks and context are borrowed until replacement or frame reset. */
 #define SR_PPU_CAPTURE_TILE_REPLACE UINT32_C(1)
@@ -884,6 +885,9 @@ typedef struct SrPpuCaptureTile {
     uint8_t band;
     uint8_t flags;
     uint8_t black_rows[8];
+    /* Requires SR_RUNNER_CAP_PPU_CAPTURE_TRANSPARENCY before a callback may
+     * write this extension. Older callbacks retain the original black edits. */
+    uint8_t transparent_rows[8];
 } SrPpuCaptureTile;
 typedef uint32_t (*SrPpuCaptureTileLookup)(
     void *user_data, int32_t tile_x, int32_t tile_y, SrPpuCaptureTile *tile);

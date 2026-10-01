@@ -8,26 +8,30 @@ function flipSceneryTile(tile,axis) {
     next.words[q]=tile.blank?0:tile.words[q^bit]^flag;
     next.bands[q]=tile.bands[q^bit];
   }
-  let mask=ZERO_PIXEL_MASK;
+  let mask=ZERO_PIXEL_MASK,clear=ZERO_PIXEL_MASK;
   for(let y=0;y<16;y++)for(let x=0;x<16;x++)
     if(pixelIsBlack(tile.black,axis==='h'?15-x:x,axis==='v'?15-y:y))
       mask=pixelMaskSet(mask,x,y,true);
+  for(let y=0;y<16;y++)for(let x=0;x<16;x++)
+    if(pixelIsBlack(tile.transparent,axis==='h'?15-x:x,axis==='v'?15-y:y))
+      clear=pixelMaskSet(clear,x,y,true);
   next.black=mask;
+  if(tile.transparent!==undefined||clear!==ZERO_PIXEL_MASK)next.transparent=clear;
   return next;
 }
 function applyTileUpdates(updates,label) {
   if(!updates.length)return false;
   const key=keyOf(room,bgIndex),target=stampBucket(room,bgIndex),proposed={...target.cells};
-  for(const [cell,tile] of updates)proposed[cell]=tile;
-  if(regionalStampCount(room,bgIndex,proposed)>kStampMax) {
-    sceneryNotice('Maximum 512 saved added tiles per BG. No tiles were changed.');return false;
+  for(const [cell,tile] of updates) {
+    if(tile)proposed[cell]=tile;else delete proposed[cell];
   }
   if(regionalPixelCount(room,bgIndex,proposed)>256) {
     sceneryNotice('This operation would exceed 256 pixel edits. No tiles were changed.');return false;
   }
   beginOp(label);
   for(const [cell,tile] of updates) {
-    recordStamp(key,cell);target.cells[cell]=cloneSceneryTile(tile);
+    recordStamp(key,cell);
+    if(tile)target.cells[cell]=cloneSceneryTile(tile);else delete target.cells[cell];
     const [x,y]=cell.split(',').map(Number);
     if(nativeCell(L,x,y))selectedCells.delete(y*L.cellsW+x);
     selectedStampKeys.add(cell);

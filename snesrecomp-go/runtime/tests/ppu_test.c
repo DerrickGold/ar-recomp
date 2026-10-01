@@ -2116,7 +2116,10 @@ static uint32_t capture_tile_lookup(void *context, int32_t x, int32_t y,
     };
     if ((x & 3) == 2) tile->flags |= SR_PPU_CAPTURE_TILE_BLANK;
     if (fixture->masks) {
-        for (int row = 0; row < 8; ++row) tile->black_rows[row] = 0x81;
+        for (int row = 0; row < 8; ++row) {
+            tile->black_rows[row] = 0x81;
+            tile->transparent_rows[row] = (uint8_t)(0x40u >> (row & 3));
+        }
         if ((x & 3) == 0) { tile->flags = 0; tile->band = 1; }
     }
     return 1;
@@ -2216,6 +2219,10 @@ static void test_native_capture_tiles(void) {
                         int tx = wx >= 0 ? wx / 8 : (wx - 7) / 8;
                         SrPpuCaptureTile tile;
                         CHECK(capture_tile_lookup(&fixtures[i], tx, wy / 8, &tile));
+                        if (tile.transparent_rows[wy & 7] & (0x80u >> (wx & 7))) {
+                            for (int band = 0; band < 3; ++band)
+                                planes[i][band][row * kWidth + kOrigin + x] = 0u;
+                        }
                         if (tile.black_rows[wy & 7] & (0x80u >> (wx & 7))) {
                             int band = tile.band == 1 ? 0 : tile.band == 2 ? 1 : 2;
                             planes[i][band][row * kWidth + kOrigin + x] = 0xff000000u;

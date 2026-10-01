@@ -22,6 +22,10 @@ out of the source tree and Git. By default it embeds the repository ROM and
 `diorama-layers.ini`; **Load INI** can replace the configuration at runtime and
 **Export level INI** opens a copyable replacement section for the current room.
 The dialog also offers **Download full INI…** for a complete merged file.
+The build also reads `settings.ini` for the Diorama coverage guide's aspect,
+pixel aspect, distance and camera tilt. An optional fourth build argument selects
+another settings file. These preferences are embedded for offline use; the editor
+does not write game settings.
 
 The repository INI is also the release's authored scenery source. Packaging
 ships it as `defaults/diorama-layers.ini`; the first game launch after those
@@ -71,9 +75,10 @@ bg1-pixels:jp = cell:4,5 black:4000000000000000000000000000000000000000000000000
 
 The game resolves tile edits against the terrain snapshot active for the room,
 independently of language, artwork, difficulty, or pending settings changes.
-The saved limits (256 pixel records, 512 pasted cells, 512 cell spans per BG)
+The saved limits (256 pixel records and 512 classification spans per BG)
 count distinct records across all terrain families, with shared records counted
-once. Copy/stamp stays within the same room, background and terrain family.
+once. Pasted tile storage grows as needed, without a fixed count budget.
+Copy/stamp stays within the same room, background and terrain family.
 
 ## Authoring model
 
@@ -106,6 +111,8 @@ definitions; **Unused in source** and **Used in source** filter by the original
 source map. Click a tile, then click the map to stamp it. Selection and stamp
 preparation make no edits until placement. Thumbnails retain original colors
 even with band tint enabled, and checkerboard identifies transparency.
+Hover a tile or focus it with the keyboard for a crisp 128×128 preview beside
+the palette, including its ID and source usage. This also works for 8×8 pieces.
 
 **Artwork source** includes other maps when their CHR banks, extra graphics,
 color palette and animation descriptor match the destination. Their metatile
@@ -132,9 +139,9 @@ reflection on a copied rectangle before you place it.
 Mirroring swaps 8×8 quadrants, toggles native horizontal/vertical flags, and
 moves black pixel edits and depth bands with the artwork. Copy, paste, export
 and reload preserve these flags. One Undo reverses an entire selection flip.
-The resulting edits use ordinary stamps and retain the existing shared limits
-of 512 saved tile records and 256 pixel records per BG. Capacity checks happen
-before mutation, so a rejected operation leaves the scene unchanged.
+The resulting edits use ordinary stamps without a fixed tile-count limit.
+Black masks retain the shared limit of 256 pixel records per BG. Capacity checks
+happen before mutation, so a rejected operation leaves the scene unchanged.
 
 Start with **Select** above the map. Click a tile or Shift-click another tile
 to select a range. The selection bar reports its applied band (or mixed bands),
@@ -220,7 +227,13 @@ For a partial transparency fix in **Kassandora · Act 2 · Room 4 (3:4)**:
 4. Check **Diorama 3D**, then **Export level INI → Copy section** and replace
    this room's section in `diorama-layers.ini`. Save and restart the game.
 
-**Fill transparent pixels black** fills only colour-zero pixels of the selected
+**Paint transparent** cuts holes in opaque artwork or black pixel edits. Drag
+across the grid for a continuous stroke; checkerboard shows the transparent
+result. **Paint black** makes a pixel opaque again. **Restore pixel** clears
+either edit and reveals the source artwork. Copies, flips and range mirroring
+preserve the transparent mask.
+
+**Fill transparent pixels black** fills colour-zero pixels and painted holes of the selected
 cell. **Make whole tile black** also covers its original art. Both can instead
 apply to all instances of the selected metatile. Pixel strokes and bulk edits
 are undoable. Cell masks take precedence over metatile masks; reset removes the
@@ -236,14 +249,18 @@ regardless of the single-tile metatile scope. It creates one Undo step and is
 saved by Export level INI. If the whole operation would exceed the 256 pixel-record
 limit per BG, the editor reports it and changes no pixels.
 
-Pixel edits are opaque-black presentation masks, not changes to ROM CHR or
+Pixel edits are black/transparent presentation masks, not changes to ROM CHR or
 palette data. The normal game and **Native frame** remain authentic. Map editor
 shows the edits for authoring; Diorama captures route them through the same BG,
 camera, live raster/mosaic, windows and depth bands as their source tiles.
 
 Each repeatable `bgN-pixels` line names `cell:x,y` or `metatile:HH`, followed by
 `black:` and 64 hexadecimal digits: sixteen rows of sixteen mask bits, with the
-highest bit on the left. A cell's explicit zero mask restores original pixels
+highest bit on the left. An optional `transparent:` mask uses the same layout
+to remove source pixels. Black and transparent bits cannot overlap. Either
+mask may be supplied alone; the editor includes black zeros for transparent-only
+edits, and old black-only records keep their meaning. Both masks share one
+pixel record and the same cell/metatile scope. A cell's explicit zero mask restores original pixels
 under a metatile mask. The bounded runtime accepts 256 pixel records per BG;
 the editor checks that limit before exporting. Existing whole-plane
 `transparent:off|black|cgram-HH` settings are preserved during export.
@@ -271,6 +288,23 @@ still follow the selected artwork and animation. Paste overwrites the
 destination's presentation art, including
 transparent pixels. It does not alter gameplay maps or collision.
 
+The right-click **Delete tile / Delete selected tiles** action clears artwork
+from the selection in one Undo step. Tiles inside the original map become
+transparent replacements; added edge tiles are removed so saved bounds shrink.
+Gameplay collision and the native game view remain unchanged. Already empty
+edge space stays empty without creating saved records.
+
+Right-click **Reset tile to default / Reset selected tiles to default** to
+restore the selected cells' authentic regional artwork, flip flags, priority
+bands and pixels. Added cells without an original are removed, including their
+pixel masks, so saved scenery bounds can shrink. The whole reset is one Undo
+step. Unselected tiles, framing and authoring edge space are preserved.
+If a metatile-wide rule still affects unselected cells, reset writes local
+exceptions for the selection; these remain authored records in the highlights.
+Selecting every original instance removes the shared rule instead. Reset is
+independent of the pixel inspector's scope and applies to the selected tiles.
+Export the room section after resetting to remove old edits from the game INI.
+
 **Remove selected pasted tiles** restores the underlying ROM scenery;
 **Reset this BG's pasted scenery** also removes added edge space. Paste,
 removal, edge expansion, bands, and pixel painting share Undo/Redo. Pasted cells
@@ -289,6 +323,41 @@ blank cells. Selecting empty space does not save tiles until you edit or paste
 them. Newly painted blanks use transparent source art (`words:blank`), so
 restoring a pixel reveals transparency instead of an unrelated ROM character.
 The same tile and pixel-edit limits apply, with an atomic capacity check.
+
+### Diorama coverage and missing edge tiles
+
+**Coverage** shows a tile-aligned minimum envelope for the selected BG. Red
+shading shows where saved scenery falls short; green means its outer bounds
+cover the current baseline. **Diorama map coverage** reports the exact extra
+columns needed on the left/right and rows above/below. **Fit** and **Fit coverage**
+include that envelope. **Add required edge space** grows the workspace in one
+Undo step; stamp or paint those empty cells afterward. Workspace alone never
+counts as saved scenery, and this check does not prove that all interior pixels
+are opaque. Added transparent areas may be intentional.
+
+The **Tested minimum** calibration is `[layers:02:08]` / Bloodpool Act 2 room 8:
+`bounds:-8,-2,24,18`, or **32×20 tiles / 512×320 pixels**. At 16:10, square
+pixels, and Dynamic Cam baseline distance 3.25, this is the author's observed
+minimum at native display resolution. The original map is 16×16 tiles; it needs
+eight columns on each side and two rows above/below. This reference stays fixed
+even when editing or trimming that room later.
+
+The guide inverse-projects the game's 0.4-radian camera frustum onto each used
+BG depth. It uses the runtime's camera rotation order, includes shaped-row and
+stack depth ranges, and scales the envelope by the measured reference factor
+(about 1.084). It rounds outward to complete 16px cells. **Projection only**
+omits the calibration and shows the smaller geometric estimate. Aspect, pixel
+aspect, camera distance, tilt, selected BG depth, preview scroll and saved
+framing update the counts. Small rooms keep their native vertical center;
+taller rooms anchor at finite vertical scroll edges. Resolution at a fixed
+aspect ratio does not change the source footprint.
+
+The build seeds controls from `settings.ini`, using Dynamic Cam's baseline
+instead of the inactive Free Cam pose. Controls and visibility are preview-only
+and do not export game settings. This is a baseline extent guide; free orbit,
+reactive camera movement, raster scroll effects and transparent holes can reveal
+more than the displayed area. Review other preview scroll positions for large
+scrolling levels. Other BGs can require more area because they sit farther away.
 
 ### Saved framing for small rooms
 
@@ -344,10 +413,10 @@ It supports Undo/Redo and leaves saved framing and tile edits intact.
 framing:us+jp+eu = x:-40 y:0
 ```
 
-There are at most 512 pasted cells per BG. Bounds can span 512 tiles on either
-axis, within signed coordinates −512 through 511. Rectangles are limited to
-512 cells. Copies carrying black masks also use the shared 256 pixel-record
-budget; an oversized paste leaves the map unchanged and reports the limit.
+Pasted cells and copied rectangles have no fixed tile-count limit. Bounds and
+rectangles can span 512 tiles on either axis, within signed coordinates −512
+through 511. Copies carrying black masks still use the shared 256 pixel-record
+budget; a paste exceeding those limits leaves the map unchanged and reports why.
 
 The export uses frozen displayed SNES character words and one band per 8px
 quadrant (top-left, top-right, bottom-left, bottom-right):
@@ -367,8 +436,8 @@ Export already consolidates overlapping pastes by destination (the latest
 paste wins), sorts their coordinates, and merges identical records across
 terrain variants into combined regional keys. Band edits are emitted as
 non-overlapping horizontal runs. Pasted artwork still uses one stamp record per
-unique destination cell: the game has no rectangle/repeat stamp syntax, and
-the 512-cell limit counts these cells. Export does not turn a local paste into
+unique destination cell: the game has no rectangle/repeat stamp syntax.
+Export does not turn a local paste into
 a metatile-wide replacement or drop frozen art that happens to match the
 current source; those changes could affect other instances or later edits.
 

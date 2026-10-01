@@ -14,7 +14,7 @@ const scripts = [...manifest.matchAll(/<script src="([a-z_]+\.js)"><\/script>/g)
 
 /* Only host services used during startup are stubbed. Drawing is queued;
  * decoding, classification, INI merging, gestures and native parity run real code. */
-function editor(data) {
+function editor(data,options={}) {
   class Element {
     constructor() {
       this.value = '';
@@ -42,7 +42,9 @@ function editor(data) {
       save() {},restore() {}}; }
     getBoundingClientRect() { return this.selector==='#pixelCanvas'
       ? {left:0,top:0,width:224,height:224} : this.selector==='#tileMenu'
-        ? {left:0,top:0,width:260,height:420} : {left:0,top:0,width:960,height:640}; }
+        ? {left:0,top:0,width:260,height:420} : this.selector==='#paletteZoom'
+          ? {left:0,top:0,width:154,height:192} : this.selector==='#tilePalette'
+            ? {left:620,top:10,width:330,height:600} : {left:0,top:0,width:960,height:640}; }
     setPointerCapture() {}
     setAttribute(name,value) {this.attributes[name]=value;}
     contains(other) {return other===this||this.children.some(child=>child.contains(other));}
@@ -75,7 +77,8 @@ function editor(data) {
       this.activeElement.listeners.copy?.({defaultPrevented:false});return true;
     }};
   const context = vm.createContext({
-    window:{__ACTION_BG__:data, innerWidth:960,innerHeight:640,listeners:{}, addEventListener(name,callback) {
+    window:{__ACTION_BG__:data,__ACTION_VIEW__:options.view,__DIORAMA_LAYERS__:options.ini,
+      innerWidth:960,innerHeight:640,listeners:{}, addEventListener(name,callback) {
       (this.listeners[name]??=[]).push(callback);
     }},
     document:documentHost,
@@ -605,12 +608,15 @@ assert.equal(run('mergeDioramaIni()'),beforeWrongLayer);
 run(`setLayer(0);selectRectangle(0,0,1,1);copyTiles();startStamp();`);
 assert.equal(run('brush'),'stamp');
 run('deselect()');assert.equal(run('brush'),'select');
-/* Both capacity failures must be atomic, including map bounds and history. */
-run(`const capacityCell=tileClipboard.cells[0];
-  for(let i=0;i<512;i++)stampBucket(room,0).cells[i+',20']=capacityCell;`);
+/* Tile counts can grow past 512; coordinate/pixel failures remain atomic. */
+run(`const capacityCell={...tileClipboard.cells[0],black:ZERO_PIXEL_MASK};
+  for(let i=0;i<512;i++)stampBucket(room,0).cells[(i%32)+','+(i>>5)]=capacityCell;
+  tileClipboard={...tileClipboard,cells:tileClipboard.cells.map(c=>({...c,black:ZERO_PIXEL_MASK}))};`);
+assert.equal(run('stampTiles(0,25)'),true);
+assert.ok(run('Object.keys(stampBucket(room,0).cells).length')>512);
 const beforeCapacity=run('JSON.stringify(stampBucket(room,0))');
 const beforeCapacityUndo=run('undoStack.length');
-assert.equal(run('stampTiles(0,25)'),false);
+assert.equal(run('stampTiles(511,25)'),false);
 assert.equal(run('JSON.stringify(stampBucket(room,0))'),beforeCapacity);
 assert.equal(run('undoStack.length'),beforeCapacityUndo);
 run(`loadIniText('','capacity.ini');setLayer(0);
@@ -695,11 +701,12 @@ blanks(`selectRectangle(-2,4,-1,5);fillSelectedTransparency();`);
 assert.equal(blanks('selectedStampKeys.size'),4);
 assert.equal(blanks("stampBucket(room,0).cells['-2,4'].black"),'F'.repeat(64));
 blanks(`loadIniText('','blank-limit.ini');setLayer(0);$('#edgeCount').value='1';expandEdge('x0');
-  for(let i=0;i<512;i++)stampBucket(room,0).cells['0,'+i]=blankTile();selectOnlyTile(-1,0);`);
+  for(let i=0;i<512;i++)stampBucket(room,0).cells[(i%32)+','+(i>>5)]=blankTile();selectOnlyTile(-1,0);`);
 const blankLimitBefore=blanks('roomSectionIni(room)'),blankLimitHistory=blanks('undoStack.length');
-assert.equal(blanks('fillSelectedTransparency()'),false);
-assert.equal(blanks('roomSectionIni(room)'),blankLimitBefore);
-assert.equal(blanks('undoStack.length'),blankLimitHistory);
+assert.equal(blanks('fillSelectedTransparency()'),true);
+assert.equal(blanks('Object.keys(stampBucket(room,0).cells).length'),513);
+assert.equal(blanks('undoStack.length'),blankLimitHistory+1);
+blanks('undo();');assert.equal(blanks('roomSectionIni(room)'),blankLimitBefore);
 console.log('Blank edge selection, context fill, partial pixels, copy, round trip and atomic limits passed');
 
 /* Designer offsets are saved per BG1 terrain family and do not move as the
@@ -1103,7 +1110,8 @@ fb(`$('#highlightBy').value='1';$('#highlightBy').onchange();$('#selectChanges')
 assert.equal(fb('mergeDioramaIni()'),fb('beforeRejectedFill'));
 assert.match(fbElements.get('#tileActionStatus').textContent,/limit is 256.*No pixels were changed/);
 fb("selectedStampKeys.add('-1,0');refreshSelectionControls();$('#copyTilesQuick').onclick();");
-assert.match(fbElements.get('#tileActionStatus').textContent,/rectangle of up to 512/);
+assert.match(fbElements.get('#tileActionStatus').textContent,/Copied 33×16 tiles/);
+assert.equal(fb('tileClipboard.cells.length'),528);
 console.log('Modified/band highlighting, mixed quadrants, pasted overrides, regional isolation and bulk selection passed');
 
 /* Asymmetric 4bpp artwork exercises actual pixels, quadrant flags, masks and
@@ -1141,7 +1149,26 @@ assert.equal(pe.get('#paletteSource').children.length,2);
 assert.equal(pe.get('#paletteGrid').children.length,256);
 assert.equal(pr("paletteEntries(L,'metatile').filter(e=>!e.used).length"),255);
 assert.equal(pr('loadedCharacterIds(L).length'),576);
+/* Magnification uses the source artwork (including flipped quadrants and
+ * transparency), without selecting a stamp or changing the level. */
+pr('const beforeHoverClipboard=tileClipboard,beforeHoverUndo=undoStack.length;paletteButtons[5].button.onpointerenter();');
+assert.equal(pe.get('#paletteZoom').hidden,false);
+assert.equal(pe.get('#paletteZoomTitle').textContent,'Tile 05 · 16×16');
+assert.equal(pe.get('#paletteZoomInfo').textContent,'Unused in source map');
+assert.deepEqual(Buffer.from(pe.get('#paletteZoomCanvas').getContext('2d').image.data),
+  Buffer.from(pr('paletteButtons[5].button.children[0].getContext("2d").image.data')));
+assert.equal(pe.get('#paletteZoom').style.left,'454px');
+assert.equal(pr('tileClipboard===beforeHoverClipboard&&undoStack.length===beforeHoverUndo'),true);
+assert.equal(pr('mergeDioramaIni()'),pr('untouchedPalette'));
+pr('paletteButtons[5].button.onpointerleave();');
+assert.equal(pe.get('#paletteZoom').hidden,true);
+pr('paletteButtons[0].button.onfocus();');
+assert.equal(pe.get('#paletteZoomInfo').textContent,'Used in source map');
+pr('paletteButtons[0].button.onblur();');
+assert.equal(pe.get('#paletteZoom').hidden,true);
+pr('paletteButtons[5].button.onfocus();');
 pr("$('#paletteUsage').value='unused';$('#paletteUsage').onchange();");
+assert.equal(pe.get('#paletteZoom').hidden,true); // filters discard stale previews
 assert.equal(pe.get('#paletteGrid').children.length,255);
 assert.equal(pr('choosePaletteTile(5)'),true);
 assert.equal(pr('brush'),'stamp');
@@ -1159,6 +1186,13 @@ assert.equal(pr('choosePaletteTile(-1)'),false);
 pr(`$('#paletteSource').value='0';$('#paletteSource').onchange();choosePaletteTile(5);
   $('#paletteKind').value='character';$('#paletteUsage').value='all';$('#paletteKind').onchange();`);
 assert.equal(pe.get('#paletteGrid').children.length,576);
+pr("$('#paletteRow').value='3';$('#paletteRow').onchange();paletteButtons[1].button.onpointerenter();");
+assert.equal(pe.get('#paletteZoomTitle').textContent,'Piece 001 · 8×8');
+assert.equal(pe.get('#paletteZoomCanvas').width,8);
+assert.deepEqual(Buffer.from(pe.get('#paletteZoomCanvas').getContext('2d').image.data),
+  Buffer.from(pr('paletteButtons[1].button.children[0].getContext("2d").image.data')));
+pr("$('#paletteGrid').listeners.scroll();");
+assert.equal(pe.get('#paletteZoom').hidden,true);
 pr("$('#paletteRow').value='3';$('#paletteQuarter2').onclick();choosePaletteCharacter(0x200);");
 assert.equal(pr('paletteWords[2]'),0x0e00);
 assert.equal(pr('paletteQuarter'),3);
@@ -1226,16 +1260,19 @@ pr('openPixelInspector();');
 assert.equal(pr('tilePalette.hidden'),true);
 pr('openTilePalette();');
 assert.equal(pr('pixelInspector.hidden'),true);
+pr('paletteButtons[0].button.onfocus();');
 pr("setMode('3d');");
 assert.equal(pr('tilePalette.hidden'),true);
+assert.equal(pe.get('#paletteZoom').hidden,true);
 const cap=editor(paletteData),cr=cap.run;
 cr(`for(let cell=0;cell<512;cell++)stampBucket(room,0).cells[
   (cell%32)+','+(cell>>5)]=blankTile();
   $('#edgeCount').value='1';expandEdge('x0');selectOnlyTile(-1,0);
   const beforeFlipCapacity=mergeDioramaIni(),undoCapacity=undoStack.length;`);
-assert.equal(cr("flipSelectedTiles('h')"),false);
-assert.equal(cr('mergeDioramaIni()'),cr('beforeFlipCapacity'));
-assert.equal(cr('undoStack.length'),cr('undoCapacity'));
+assert.equal(cr("flipSelectedTiles('h')"),true);
+assert.equal(cr('Object.keys(stampBucket(room,0).cells).length'),513);
+assert.equal(cr('undoStack.length'),cr('undoCapacity')+1);
+cr('undo();');assert.equal(cr('mergeDioramaIni()'),cr('beforeFlipCapacity'));
 const pixelCap=editor(paletteData),pcr=pixelCap.run;
 pcr(`pixelBucket(room,0).byCoord={};
   for(let x=0;x<255;x++)pixelBucket(room,0).byCoord[x+',-1']='F'.repeat(64);
@@ -1248,12 +1285,284 @@ assert.equal(pcr('JSON.stringify(stampBucket(room,0).cells)'),pcr('beforeFlipPix
 const animatedData=structuredClone(paletteData);
 animatedData.rooms[0].animation={target:16,stride:32,phases:2,cadence:1};
 const animated=editor(animatedData),ar=animated.run;
-ar('openTilePalette();const phaseThumb=paletteButtons[0].button.children[0].getContext("2d").image.data.slice();');
+ar('openTilePalette();paletteButtons[0].button.onpointerenter();const phaseThumb=paletteButtons[0].button.children[0].getContext("2d").image.data.slice();');
 ar('setNativeFrame(1);');
 assert.notDeepEqual(Buffer.from(ar('paletteButtons[0].button.children[0].getContext("2d").image.data')),
   Buffer.from(ar('phaseThumb')));
 assert.equal(ar('paletteCache.endsWith(":1")'),true);
+assert.equal(ar('paletteZoom.hidden'),false);
+assert.deepEqual(Buffer.from(ar('$("#paletteZoomCanvas").getContext("2d").image.data')),
+  Buffer.from(ar('paletteButtons[0].button.children[0].getContext("2d").image.data')));
+ar('for(const callback of window.listeners.resize)callback();');
+assert.equal(ar('paletteZoom.hidden'),true);
 console.log('Loaded/unused palette, compatible sources, character composition, animated thumbnails, pixel-correct flips, range/clipboard mirroring, INI round trips and atomic limits passed');
+
+/* Large rectangular copies, repeated placement, mirroring and regional export
+ * must survive reload without losing cells beyond the old 512-record cap. */
+const largeEditor=editor(paletteData),lg=largeEditor.run;
+lg("$('#edgeCount').value='16';expandEdge('y1');selectRectangle(0,0,31,31);");
+assert.equal(lg('copyTiles()'),true);
+assert.equal(lg('tileClipboard.cells.length'),1024);
+assert.equal(lg('stampTiles(0,0)'),true);
+assert.equal(lg('stampTiles(32,0)'),true);
+assert.equal(lg("flipSelectedTiles('h',true)"),true);
+assert.equal(lg('Object.keys(stampBucket(room,0).cells).length'),2048);
+const largeIni=lg('roomSectionIni(room)');
+assert.equal((largeIni.match(/bg1-stamp/g)||[]).length,2048);
+const largeReload=editor(paletteData);
+largeReload.run(`loadIniText(${JSON.stringify(largeIni)},'large.ini');setLayer(0);`);
+assert.equal(largeReload.run('Object.keys(stampBucket(room,0).cells).length'),2048);
+assert.equal(largeReload.run('roomSectionIni(room)'),largeIni);
+lg('undo();undo();');
+assert.equal(lg('Object.keys(stampBucket(room,0).cells).length'),1024);
+lg('redo();redo();');assert.equal(lg('roomSectionIni(room)'),largeIni);
+console.log('1024-tile copies, 2048-tile patches, mirroring, undo/redo and regional INI reload passed');
+
+/* Delete clears original/pasted artwork and removes added edge cells, rather
+ * than revealing the ROM tile beneath a replacement. Masks cannot reappear. */
+const deleteData=structuredClone(paletteData);
+deleteData.rooms[0].terrainVariants[2]={...deleteData.rooms[0].terrainVariants[0],profile:2};
+const deleteEditor=editor(deleteData),del=deleteEditor.run,de=deleteEditor.elements;
+del(`pixelBucket(room,0).byId[0]='F'.repeat(64);
+  pixelBucket(room,0).byCell[0]='8000'.repeat(16);
+  selectOnlyTile(0,0);copyTiles();
+  const deleteBefore=roomSectionIni(room),deleteWords=L.words.slice();
+  const deleteNative=nativeFrameCanvas().getContext('2d').image.data.slice();
+  const deleteHistory=undoStack.length;
+  openTileMenu(0,0,50,50);`);
+assert.equal(de.get('#tileActionDelete').disabled,false);
+assert.equal(de.get('#tileActionDelete').textContent,'Delete tile');
+del("$('#tileActionDelete').onclick();");
+assert.equal(del('tileMenu.hidden'),true);
+assert.equal(del("stampBucket(room,0).cells['0,0'].blank"),true);
+assert.equal(del("Array.from({length:256},(_,i)=>stampColor(L,displayedCell(room,0,L,0,0),i%16,i>>4)).every(c=>c===null)"),true);
+assert.equal(del('undoStack.length'),del('deleteHistory')+1);
+assert.equal(del('tileClipboard.cells[0].blank'),undefined);
+assert.deepEqual(Buffer.from(del('L.words.buffer')),Buffer.from(del('deleteWords.buffer')));
+assert.deepEqual(Buffer.from(del("nativeFrameCanvas().getContext('2d').image.data")),Buffer.from(del('deleteNative')));
+const deletedIni=del('roomSectionIni(room)');
+assert.match(deletedIni,/bg1-stamp:us\+eu = cell:0,0 metatile:00 words:blank/);
+assert.match(deletedIni,/cell:0,0 black:0{64}/);
+del('undo();');assert.equal(del('roomSectionIni(room)'),del('deleteBefore'));
+del('redo();');assert.equal(del('roomSectionIni(room)'),deletedIni);
+const deletedReload=editor(deleteData);
+deletedReload.run(`loadIniText(${JSON.stringify(deletedIni)},'deleted.ini');setLayer(0);`);
+assert.equal(deletedReload.run("stampBucket(room,0).cells['0,0'].blank"),true);
+assert.equal(deletedReload.run('stampColor(L,displayedCell(room,0,L,0,0),0,0)'),null);
+deletedReload.run("$('#terrain').value='1';$('#terrain').onchange();");
+assert.equal(deletedReload.run('Object.keys(stampBucket(room,0).cells).length'),0);
+deletedReload.run("$('#terrain').value='2';$('#terrain').onchange();");
+assert.equal(deletedReload.run("stampBucket(room,0).cells['0,0'].blank"),true);
+del(`loadIniText('','delete-range.ini');setLayer(0);selectOnlyTile(0,0);copyTiles();
+  stampTiles(-2,-1);stampTiles(1,0);selectRectangle(-2,-1,1,0);
+  const deleteRangeBefore=roomSectionIni(room),deleteRangeHistory=undoStack.length;
+  openTileMenu(1,0,50,50);`);
+assert.equal(de.get('#tileActionDelete').textContent,'Delete selected tiles');
+del("$('#tileActionDelete').onclick();");
+assert.equal(del('Object.keys(stampBucket(room,0).cells).length'),2);
+assert.equal(del("stampBucket(room,0).cells['-2,-1']"),undefined);
+assert.equal(del("stampBucket(room,0).cells['1,0'].blank"),true);
+assert.equal(del('sceneryBounds(room,0).x0'),0);
+assert.equal(del('sceneryBounds(room,0).y0'),0);
+assert.equal(del('mapBounds(room,0).x0'),-2); // keep the workspace for more edits
+assert.equal(del('undoStack.length'),del('deleteRangeHistory')+1);
+assert.equal(del('deleteSelectedTiles()'),false); // no new history for empty cells
+assert.equal(del('undoStack.length'),del('deleteRangeHistory')+1);
+del('undo();');assert.equal(del('roomSectionIni(room)'),del('deleteRangeBefore'));
+del('deselect();openTileMenu(-100,-100,50,50);');
+assert.equal(de.get('#tileActionDelete').disabled,true);
+console.log('Delete original/pasted/edge tiles, transparent masks, shared terrain, elastic bounds, one-step undo and unchanged native art passed');
+
+/* Transparency removes opaque source pixels, rather than merely restoring
+ * them. Strokes, inheritance, copies and mirrored stamps must retain cutouts. */
+const cutEditor=editor(deleteData),cut=cutEditor.run,cutElements=cutEditor.elements;
+cut(`selectOnlyTile(0,0);$('#pixelScope').value='cell';
+  const cutOriginal=roomSectionIni(room),cutHistory=undoStack.length;
+  const cutNative=nativeFrameCanvas().getContext('2d').image.data.slice();
+  const cutWords=L.words.slice();$('#pixelClear').onclick();`);
+assert.notEqual(cut('pixelOriginal(L,0,0,0)'),null);
+assert.equal(cutElements.get('#pixelClear').attributes['aria-pressed'],'true');
+assert.equal(cutElements.get('#pixelBlack').attributes['aria-pressed'],'false');
+const cutCanvas=cutElements.get('#pixelCanvas');
+const cutPoint=x=>({clientX:x*14+4,clientY:4,button:0,pointerId:7,preventDefault(){}});
+cutCanvas.listeners.pointerdown(cutPoint(0));
+cutCanvas.listeners.pointermove(cutPoint(5));
+cutCanvas.listeners.pointerup(cutPoint(5));
+assert.equal(cut('undoStack.length'),cut('cutHistory')+1);
+for(let x=0;x<=5;x++)assert.equal(cut(`stampColor(L,displayedCell(room,0,L,0,0),${x},0)`),null);
+assert.equal(cut('pixelMaskAt(room,0,L,0)'), '0'.repeat(64));
+assert.notEqual(cut('stampColor(L,displayedCell(room,0,L,0,0),6,0)'),null);
+assert.equal(cut('pixelTransparencyAt(room,0,L,1)'), '0'.repeat(64));
+cut(`const cutBlit=new Uint8ClampedArray(8*8*4),originalBlit=new Uint8ClampedArray(8*8*4);
+  blitTile(L,L.words[0],cutBlit,8,0,0,null);
+  blitTile(L,L.words[0],originalBlit,8,0,0,null,0,0,ZERO_PIXEL_MASK);`);
+assert.equal(cut('cutBlit[3]'),0);assert.equal(cut('originalBlit[3]'),255);
+assert.deepEqual(Buffer.from(cut("nativeFrameCanvas().getContext('2d').image.data")),Buffer.from(cut('cutNative')));
+assert.deepEqual(Buffer.from(cut('L.words.buffer')),Buffer.from(cut('cutWords.buffer')));
+const cutIni=cut('roomSectionIni(room)');
+assert.match(cutIni,/bg1-pixels:us\+eu = cell:0,0 black:0{64} transparent:FC00[0-9A-F]{60}/);
+cut('undo();');assert.equal(cut('roomSectionIni(room)'),cut('cutOriginal'));
+cut('redo();');assert.equal(cut('roomSectionIni(room)'),cutIni);
+cut("$('#pixelBlack').onclick();beginOp('black over cutout');editPixel(0,0);commitOp();");
+assert.equal(cut('stampColor(L,displayedCell(room,0,L,0,0),0,0)'),0xff000000);
+assert.equal(cut('pixelIsBlack(focusedTransparency(),0,0)'),false);
+cut("$('#pixelRestore').onclick();beginOp('restore opaque pixel');editPixel(0,0);commitOp();");
+assert.equal(cut('stampColor(L,displayedCell(room,0,L,0,0),0,0)'),cut('pixelOriginal(L,0,0,0)'));
+cut('undo();undo();copyTiles();const cutClipboard=JSON.stringify(tileClipboard.cells);stampTiles(-1,0);');
+assert.equal(cut('stampColor(L,displayedCell(room,0,L,-1,0),0,0)'),null);
+assert.equal(cut("flipSelectedTiles('h')"),true);
+for(let x=10;x<16;x++)assert.equal(cut(`stampColor(L,displayedCell(room,0,L,-1,0),${x},0)`),null);
+assert.equal(cut('JSON.stringify(tileClipboard.cells)'),cut('cutClipboard'));
+const cutStampedIni=cut('roomSectionIni(room)'),cutReload=editor(deleteData);
+cutReload.run(`loadIniText(${JSON.stringify(cutStampedIni)},'cutouts.ini');setLayer(0);`);
+assert.equal(cutReload.run('roomSectionIni(room)'),cutStampedIni);
+assert.equal(cutReload.run('stampColor(L,displayedCell(room,0,L,-1,0),15,0)'),null);
+cutReload.run("$('#terrain').value='2';$('#terrain').onchange();");
+assert.equal(cutReload.run('stampColor(L,displayedCell(room,0,L,0,0),0,0)'),null);
+cutReload.run("$('#terrain').value='1';$('#terrain').onchange();");
+assert.equal(cutReload.run('pixelTransparencyAt(room,0,L,0)'), '0'.repeat(64));
+cut(`loadIniText('','cutout-scope.ini');setLayer(0);selectOnlyTile(0,0);
+  $('#pixelScope').value='id';$('#pixelClear').onclick();
+  beginOp('cut metatile');editPixel(2,3);commitOp();`);
+assert.equal(cut('pixelIsBlack(pixelTransparencyAt(room,0,L,1),2,3)'),true);
+cut("$('#pixelScope').value='cell';$('#pixelRestore').onclick();beginOp('local restore');editPixel(2,3);commitOp();");
+assert.equal(cut('pixelIsBlack(pixelTransparencyAt(room,0,L,0),2,3)'),false);
+assert.equal(cut('pixelIsBlack(pixelTransparencyAt(room,0,L,1),2,3)'),true);
+cut("pixelBulk('reset');");
+assert.equal(cut('pixelIsBlack(pixelTransparencyAt(room,0,L,0),2,3)'),true);
+cut("pixelBulk('transparent');");
+assert.equal(cut('pixelIsBlack(pixelMaskAt(room,0,L,0),2,3)'),true);
+assert.equal(cut('pixelIsBlack(pixelTransparencyAt(room,0,L,0),2,3)'),false);
+cut('undo();selectRectangle(0,0,1,0);fillSelectedTransparency();');
+assert.equal(cut('pixelIsBlack(pixelTransparencyAt(room,0,L,0),2,3)'),false);
+assert.equal(cut('pixelIsBlack(pixelMaskAt(room,0,L,1),2,3)'),true);
+cut(`loadIniText('','cutout-cap.ini');setLayer(0);selectOnlyTile(0,0);
+  $('#pixelScope').value='cell';$('#pixelClear').onclick();
+  for(let id=0;id<256;id++)pixelBucket(room,0).byId[id]=ZERO_PIXEL_MASK;
+  const cutCapIni=roomSectionIni(room),cutCapHistory=undoStack.length;
+  beginOp('over mask limit');editPixel(1,1);commitOp();`);
+assert.equal(cut('roomSectionIni(room)'),cut('cutCapIni'));
+assert.equal(cut('undoStack.length'),cut('cutCapHistory'));
+console.log('Transparent pixel strokes, opaque cutouts, native isolation, black/restore brushes, cell/metatile scope, fill, copy/mirror, regional export/reload and atomic limits passed');
+
+/* Reset clears every tile-local edit, including blank deletion overrides,
+ * while preserving unselected scenery and sharing only identical terrain. */
+const resetEditor=editor(deleteData),rst=resetEditor.run,resetElements=resetEditor.elements;
+rst(`selectOnlyTile(0,0);copyTiles();stampTiles(-2,-1);stampTiles(1,0);
+  flipSelectedTiles('h');selectOnlyTile(2,0);deleteSelectedTiles();
+  stampBucket(room,0).cells['-2,0']={...blankTile(),black:'F'.repeat(64)};
+  stampTiles(3,0);bucket(room,0).byCell[0]=0;
+  pixelBucket(room,0).byCell[0]=pixelMaskSet(ZERO_PIXEL_MASK,2,3,true);
+  pixelBucket(room,0).transparent.byCell[0]=pixelMaskSet(ZERO_PIXEL_MASK,4,5,true);
+  pixelBucket(room,0).byCoord={'-2,-1':'F'.repeat(64)};
+  pixelBucket(room,0).transparent.byCoord['-2,-1']=ZERO_PIXEL_MASK;
+  const resetUnselected=JSON.stringify(displayedCell(room,0,L,3,0));
+  selectRectangle(-2,-1,2,0);
+  const resetBefore=roomSectionIni(room),resetBeforeMasks=JSON.stringify(pixelBucket(room,0));
+  const resetHistory=undoStack.length,resetClipboard=JSON.stringify(tileClipboard);
+  const resetNative=nativeFrameCanvas().getContext('2d').image.data.slice();
+  const resetWords=L.words.slice();openTileMenu(1,0,50,50);`);
+assert.equal(resetElements.get('#tileActionReset').disabled,false);
+assert.equal(resetElements.get('#tileActionReset').textContent,'Reset selected tiles to default');
+rst("$('#tileActionReset').onclick();");
+assert.equal(rst('tileMenu.hidden'),true);
+assert.equal(rst('undoStack.length'),rst('resetHistory')+1);
+assert.equal(rst('tileSelectionPositions().length'),10);
+assert.equal(rst('selectedCells.size'),3);
+assert.equal(rst("Object.keys(stampBucket(room,0).cells).join(',')"),'3,0');
+for(let x=0;x<3;x++) {
+  assert.equal(rst(`displayedCell(room,0,L,${x},0).black`),'0'.repeat(64));
+  assert.equal(rst(`displayedCell(room,0,L,${x},0).transparent`),'0'.repeat(64));
+  assert.equal(rst(`displayedCell(room,0,L,${x},0).bands.every((b,q)=>b===authenticBand(displayedCell(room,0,L,${x},0).words[q]))`),true);
+  assert.equal(rst(`(()=>{for(let y=0;y<16;y++)for(let px=0;px<16;px++)
+    if(stampColor(L,displayedCell(room,0,L,${x},0),px,y)!==pixelOriginal(L,${x},px,y))return false;return true;})()`),true);
+}
+assert.equal(rst('Object.keys(pixelBucket(room,0).byCoord).length'),0);
+assert.equal(rst('Object.keys(pixelBucket(room,0).transparent.byCoord).length'),0);
+assert.equal(rst('Object.keys(bucket(room,0).byCell).length'),0);
+assert.equal(rst('sceneryBounds(room,0).x0'),0);assert.equal(rst('mapBounds(room,0).x0'),-2);
+assert.equal(rst('JSON.stringify(displayedCell(room,0,L,3,0))'),rst('resetUnselected'));
+assert.equal(rst('JSON.stringify(tileClipboard)'),rst('resetClipboard'));
+assert.deepEqual(Buffer.from(rst("nativeFrameCanvas().getContext('2d').image.data")),Buffer.from(rst('resetNative')));
+assert.deepEqual(Buffer.from(rst('L.words.buffer')),Buffer.from(rst('resetWords.buffer')));
+const resetIni=rst('roomSectionIni(room)');
+assert.equal(rst('resetSelectedTiles()'),false);
+assert.equal(rst('undoStack.length'),rst('resetHistory')+1);
+rst('undo();');assert.equal(rst('roomSectionIni(room)'),rst('resetBefore'));
+assert.equal(rst('JSON.stringify(pixelBucket(room,0))'),rst('resetBeforeMasks'));
+assert.equal(rst('selectedStampKeys.has("1,0")'),true);
+rst('redo();');assert.equal(rst('roomSectionIni(room)'),resetIni);
+const resetReload=editor(deleteData);
+resetReload.run(`loadIniText(${JSON.stringify(resetIni)},'reset.ini');setLayer(0);`);
+assert.equal(resetReload.run('roomSectionIni(room)'),resetIni);
+assert.equal(resetReload.run("stampBucket(room,0).cells['1,0']"),undefined);
+rst('selectOnlyTile(3,0);openTileMenu(3,0,50,50);');
+assert.equal(resetElements.get('#tileActionReset').textContent,'Reset tile to default');
+rst('deselect();openTileMenu(-100,-100,50,50);');
+assert.equal(resetElements.get('#tileActionReset').disabled,true);
+
+/* Local reset overrides inherited rules for just that tile. Mixed original
+ * quadrant bands need a frozen original tile; uniform bands need only a cell. */
+const uniformReset=editor(fixture()),sreset=uniformReset.run;
+sreset(`loadIniText('','reset-shared.ini');setLayer(0);
+  bucket(room,0).byId[0]=0;pixelBucket(room,0).byId[0]=pixelMaskSet(ZERO_PIXEL_MASK,2,3,true);
+  pixelBucket(room,0).transparent.byId[0]=pixelMaskSet(ZERO_PIXEL_MASK,4,5,true);
+  const sharedUnselected=JSON.stringify(displayedCell(room,0,L,1,0));
+  const sharedBefore=roomSectionIni(room);selectOnlyTile(0,0);
+  const sharedResetHistory=undoStack.length;resetSelectedTiles();`);
+assert.equal(sreset('undoStack.length'),sreset('sharedResetHistory')+1);
+assert.equal(sreset('JSON.stringify(displayedCell(room,0,L,1,0))'),sreset('sharedUnselected'));
+assert.equal(sreset('displayedCell(room,0,L,0,0).bands.join(",")'),sreset('Array.from({length:4},(_,q)=>authenticBand(L.words[(q>>1)*L.tilesW+(q&1)])).join(",")'));
+assert.equal(sreset('pixelMaskAt(room,0,L,0)'),'0'.repeat(64));
+assert.equal(sreset('pixelTransparencyAt(room,0,L,0)'),'0'.repeat(64));
+assert.equal(sreset('selectedCells.has(0)'),true);
+const sharedResetIni=sreset('roomSectionIni(room)');
+assert.equal(sreset('resetSelectedTiles()'),false);
+const sharedResetReload=editor(fixture());
+sharedResetReload.run(`loadIniText(${JSON.stringify(sharedResetIni)},'reset-local.ini');setLayer(0);`);
+assert.equal(sharedResetReload.run('roomSectionIni(room)'),sharedResetIni);
+sreset('undo();');assert.equal(sreset('roomSectionIni(room)'),sreset('sharedBefore'));
+sreset(`redo();selectOnlyTile(1,0);copyTiles();stampTiles(-1,0);
+  const resetSharedEdge=JSON.stringify(displayedCell(room,0,L,-1,0));
+  selectRectangle(0,0,L.cellsW-1,L.cellsH-1);resetSelectedTiles();`);
+assert.equal(sreset('Object.keys(bucket(room,0).byId).length'),0);
+assert.equal(sreset('Object.keys(pixelBucket(room,0).byId).length'),0);
+assert.equal(sreset('Object.keys(pixelBucket(room,0).transparent.byId).length'),0);
+assert.equal(sreset('Object.keys(pixelBucket(room,0).byCell).length'),0);
+assert.equal(sreset('Object.keys(bucket(room,0).byCell).length'),0);
+assert.equal(sreset('Object.keys(stampBucket(room,0).cells).length'),1);
+assert.equal(sreset('regionalPixelCount(room,0)'),1);
+assert.equal(sreset('JSON.stringify(displayedCell(room,0,L,-1,0))'),sreset('resetSharedEdge'));
+sreset(`loadIniText('','reset-limit.ini');setLayer(0);
+  for(let id=0;id<256;id++)pixelBucket(room,0).byId[id]=id===0?'F'.repeat(64):ZERO_PIXEL_MASK;
+  selectOnlyTile(0,0);const resetLimitIni=roomSectionIni(room),resetLimitHistory=undoStack.length;`);
+assert.equal(sreset('resetSelectedTiles()'),false);
+assert.equal(sreset('roomSectionIni(room)'),sreset('resetLimitIni'));
+assert.equal(sreset('undoStack.length'),sreset('resetLimitHistory'));
+sreset('selectRectangle(0,0,L.cellsW-1,L.cellsH-1);');
+assert.equal(sreset('resetSelectedTiles()'),true);
+assert.equal(sreset('regionalPixelCount(room,0)'),255);
+
+const mixedReset=editor(fixture()),mreset=mixedReset.run;
+mreset(`$('#terrain').value='2';$('#terrain').onchange();
+  bucket(room,0).byId[0]=0;pixelBucket(room,0).byId[0]='F'.repeat(64);
+  selectOnlyTile(0,0);const mixedBefore=roomSectionIni(room);resetSelectedTiles();`);
+assert.equal(mreset('selectedCells.has(0)'),false);
+assert.equal(mreset('selectedStampKeys.has("0,0")'),true);
+assert.equal(mreset('displayedCell(room,0,L,0,0).bands.join(",")'),'2,1,1,1');
+assert.equal(mreset('displayedCell(room,0,L,0,0).black'),'0'.repeat(64));
+assert.equal(mreset('displayedCell(room,0,L,1,0).bands.join(",")'),'0,0,0,0');
+const mixedResetIni=mreset('roomSectionIni(room)');
+assert.equal(mreset('resetSelectedTiles()'),false);
+mreset("$('#terrain').value='0';$('#terrain').onchange();undo();");
+assert.equal(mreset('room.terrainProfile'),2);assert.equal(mreset('roomSectionIni(room)'),mreset('mixedBefore'));
+mreset('redo();');assert.equal(mreset('roomSectionIni(room)'),mixedResetIni);
+const mixedReload=editor(fixture());mixedReload.run(`loadIniText(${JSON.stringify(mixedResetIni)},'mixed-reset.ini');$('#terrain').value='2';$('#terrain').onchange();`);
+assert.equal(mixedReload.run('displayedCell(room,0,L,0,0).bands.join(",")'),'2,1,1,1');
+assert.equal(mixedReload.run('displayedCell(room,0,L,0,0).black'),'0'.repeat(64));
+mixedReload.run("$('#terrain').value='0';$('#terrain').onchange();");
+assert.equal(mixedReload.run('Object.keys(stampBucket(room,0).cells).length'),0);
+console.log('Bulk/single default reset restores original art/bands/pixels, removes additions/masks, preserves other tiles, clipboard and native art, survives regional reload, and undoes in one step');
 
 /* Explicit Mirror buttons/menu reverse tile order AND artwork, while Flip
  * stays in-place. A signed 3x3 selection also catches row/column confusion. */
@@ -1306,11 +1615,118 @@ assert.equal(oe.get('#tileActionMirrorV').disabled,true);
 assert.equal(oe.get('#tileActionFlipH').disabled,false);
 console.log('Explicit horizontal/vertical range mirroring reverses ABC to flipped CBA, keeps Flip in-place, and preserves signed coordinates, clipboard order and undo');
 
+/* The measured 02:08 minimum is the calibrated default, not the smaller
+ * analytical FOV estimate. Workspace cannot satisfy saved scenery coverage. */
+const coverageData=fixture();
+for(const r of coverageData.rooms) {
+  r.bg=r.bg.map(bg=>({...bg,pagesWide:1}));
+  r.terrainVariants=r.terrainVariants.map(v=>({...v,bg1:{...v.bg1,pagesWide:1}}));
+}
+const coverageView={aspect:'16:10',pixelAspect:'square',distance:3.25,
+  tiltX:0,tiltY:0,cameraMode:'dynamic',source:'settings.ini'};
+const covEditor=editor(coverageData,{view:coverageView}),cv=covEditor.run,ce=covEditor.elements;
+assert.equal(cv('showCoverageGuide'),true);
+assert.equal(cv('framingPixelAspect'),'square');
+assert.equal(cv('framingDistance'),3.25);
+assert.equal(cv('JSON.stringify(currentCoveragePlan().required)'),'{"x0":-8,"y0":-2,"x1":24,"y1":18}');
+assert.equal(cv('JSON.stringify(currentCoveragePlan().missing)'),'{"left":8,"right":8,"top":2,"bottom":2}');
+cv('const coverageBefore=mergeDioramaIni(),coverageBeforeUndo=undoStack.length;');
+assert.equal(cv('addCoverageSpace()'),true);
+assert.equal(cv('undoStack.length'),cv('coverageBeforeUndo')+1);
+assert.equal(cv('currentCoveragePlan().fits'),false);
+assert.equal(cv('coverageFits(currentCoveragePlan().spaceMissing)'),true);
+assert.equal(ce.get('#coverageAddSpace').disabled,true);
+assert.match(ce.get('#coverageWorkspace').textContent,/Workspace is large enough/);
+assert.equal(cv('Object.keys(stampBucket(room,0).cells).length'),0);
+cv('undo()');assert.equal(cv('JSON.stringify(mapBounds(room,0))'),'{"x0":0,"y0":0,"x1":16,"y1":16}');
+cv('redo();tileClipboard={key:keyOf(room,0),w:1,h:1,cells:[blankTile()]};stampTiles(-8,-2);stampTiles(23,17);');
+assert.equal(cv('currentCoveragePlan().fits'),true);
+cv('ctx.strokes=[];drawCoverageGuide();');
+assert.equal(cv('ctx.strokes[0].color'),'#76d19c');
+cv('const coverageSaved=mergeDioramaIni();');
+cv("$('#framingX').value='16';$('#framingY').value='-16';setRoomFraming();");
+assert.equal(cv('JSON.stringify(currentCoveragePlan().required)'),'{"x0":-7,"y0":-3,"x1":25,"y1":17}');
+assert.equal(cv('JSON.stringify(currentCoveragePlan().missing)'),'{"left":0,"right":1,"top":1,"bottom":0}');
+cv('undo();');
+cv("$('#coverageAspect').value='16:9';$('#coverageAspect').onchange();");
+assert.equal(cv('currentCoveragePlan().required.x1-currentCoveragePlan().required.x0'),36);
+assert.equal(cv('JSON.stringify(currentCoveragePlan().missing)'),'{"left":2,"right":2,"top":0,"bottom":0}');
+cv("$('#coverageAspect').value='16:10';$('#coverageAspect').onchange();$('#framingPixelAspect').value='crt';$('#framingPixelAspect').onchange();");
+assert.equal(cv('currentCoveragePlan().required.x1-currentCoveragePlan().required.x0'),28);
+cv("$('#framingPixelAspect').value='square';$('#framingPixelAspect').onchange();$('#framingDistance').value='6.5';$('#framingDistance').onchange();");
+assert.equal(cv('currentCoveragePlan().required.x1-currentCoveragePlan().required.x0'),64);
+assert.equal(cv('currentCoveragePlan().required.y1-currentCoveragePlan().required.y0'),40);
+cv("$('#framingDistance').value='3.25';$('#framingDistance').onchange();$('#coverageBasis').value='projection';$('#coverageBasis').onchange();");
+assert.equal(cv('currentCoveragePlan().required.x1-currentCoveragePlan().required.x0'),30);
+assert.ok(cv('Math.abs((coverageFootprint().y1-coverageFootprint().y0)-2*3.25*Math.tan(.2)*224)<1e-8'));
+cv("$('#coverageBasis').value='calibrated';$('#coverageBasis').onchange();$('#coverageTiltX').value='10';$('#coverageTiltX').onchange();");
+assert.ok(cv('currentCoveragePlan().required.y1-currentCoveragePlan().required.y0>20'));
+cv("$('#coverageTiltX').value='0';$('#coverageTiltX').onchange();window.innerWidth=2560;window.innerHeight=1600;coverageCache=null;");
+assert.equal(cv('JSON.stringify(currentCoveragePlan().required)'),'{"x0":-8,"y0":-2,"x1":24,"y1":18}');
+assert.equal(cv('mergeDioramaIni()'),cv('coverageSaved'));
+cv("$('#coverageQuick').onclick();");
+assert.equal(cv('showCoverageGuide'),false);
+assert.equal(cv('mergeDioramaIni()'),cv('coverageSaved'));
+cv("$('#coverageFit').onclick();setNativeCamera('x',16);");
+assert.equal(cv('currentCoveragePlan().required.x0'),-8); // native 256px room does not scroll X
+cv("setMode('3d');$('#coverageFit').onclick();");
+assert.equal(cv('mode'),'2d');
+cv("selectOnlyTile(-8,-2);applySelectionBand(0);");
+assert.ok(cv('currentCoveragePlan().required.x1-currentCoveragePlan().required.x0>32'));
+cv('undo();');
+cv("$('#terrain').value='1';$('#terrain').onchange();");
+assert.equal(cv('currentCoveragePlan().fits'),false);
+assert.equal(cv('JSON.stringify(currentCoveragePlan().missing)'),'{"left":8,"right":8,"top":2,"bottom":2}');
+cv("$('#framingDistance').value='20';$('#framingDistance').onchange();$('#coverageAspect').value='16:9';$('#coverageAspect').onchange();");
+assert.equal(ce.get('#coverageAddSpace').disabled,false); // big, but still within the coordinate budget
+cv('stampBucket(room,0).bounds={x0:-496,y0:0,x1:16,y1:16};refreshCoverageControls();const coverageLimitBefore=JSON.stringify(stampBucket(room,0));');
+assert.equal(ce.get('#coverageAddSpace').disabled,true);
+assert.equal(cv('addCoverageSpace()'),false);
+assert.equal(cv('JSON.stringify(stampBucket(room,0))'),cv('coverageLimitBefore'));
+cv('stampBucket(room,0).bounds=undefined;refreshCoverageControls();');
+cv("roomConfig(room).planes.bg1={...emptyPlane(),setZ:true,z:4};refreshCoverageControls();");
+assert.equal(cv('currentCoveragePlan()!==null'),true); // far enough camera still sees this depth
+cv("$('#framingDistance').value='3.25';$('#framingDistance').onchange();");
+assert.equal(cv('currentCoveragePlan()'),null);
+assert.equal(ce.get('#coverageAddSpace').disabled,true);
+assert.equal(cv('addCoverageSpace()'),false);
+console.log('Calibrated 32x20 coverage, per-edge deficits, empty workspace, undo, framing, aspect/PAR/distance/tilt/depth, resolution independence and regional isolation passed');
+
+if(process.argv[3]) {
+  const cameras=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
+  const parity=editor(coverageData,{view:coverageView}),cp=parity.run;
+  for(const camera of cameras)for(const par of [1,7/6]) {
+    cp(`coverageTiltX=${camera.tiltX};coverageTiltY=${camera.tiltY};framingDistance=${camera.distance};
+      coverageAspect='${camera.width===1600?'16:10':'16:9'}';coverageBasis='projection';
+      framingPixelAspect='${par===1?'square':'crt'}';
+      roomConfig(room).planes.bg1={...emptyPlane(),setZ:true,z:${camera.depth+.5}};`);
+    const actual=JSON.parse(cp('JSON.stringify(coverageFootprint())'));
+    const points=[];
+    for(const x of [0,1])for(const y of [0,1]) {
+      const matrix=camera.matrix;
+      const p=Array.from(cp(`unprojectToPlane(${JSON.stringify(matrix)},${x},${y},${camera.depth},1,1)`));
+      const clipX=matrix[0]*p[0]+matrix[4]*p[1]+matrix[8]*camera.depth+matrix[12];
+      const clipY=matrix[1]*p[0]+matrix[5]*p[1]+matrix[9]*camera.depth+matrix[13];
+      const clipW=matrix[3]*p[0]+matrix[7]*p[1]+matrix[11]*camera.depth+matrix[15];
+      assert.ok(Math.abs((clipX/clipW+1)/2-x)<1e-6);
+      assert.ok(Math.abs((1-clipY/clipW)/2-y)<1e-6);
+      points.push([p[0]*224/par,-p[1]*224]);
+    }
+    const expected={x0:Math.min(...points.map(p=>p[0])),x1:Math.max(...points.map(p=>p[0])),
+      y0:Math.min(...points.map(p=>p[1])),y1:Math.max(...points.map(p=>p[1]))};
+    for(const key of Object.keys(expected))assert.ok(Math.abs(actual[key]-expected[key])<.002,
+      `C/JS inverse projection ${key}: ${actual[key]} versus ${expected[key]}`);
+  }
+  console.log(`${cameras.length} C camera matrices match editor inverse-projected coverage for square/CRT pixels`);
+}
+
 if (process.argv[2]) {
   const html = fs.readFileSync(process.argv[2], 'utf8');
   const match = html.match(/window\.__ACTION_BG__=(.*);<\/script>/);
   assert.ok(match, 'Built HTML must embed its room data');
   const data = JSON.parse(match[1]);
+  const view=JSON.parse(html.match(/window\.__ACTION_VIEW__=(.*?);<\/script>/)[1]);
+  const ini=JSON.parse(html.match(/window\.__DIORAMA_LAYERS__=(.*?);window\.__DIORAMA_LAYERS_NAME__/)[1]);
   assert.equal(data.rooms.length, 49);
   assert.equal(data.terrainProfiles.length, 3);
   const actual = editor(data);
@@ -1333,6 +1749,19 @@ if (process.argv[2]) {
   assert.equal(actual.run('nativeGoldenStatus.size'), 147);
   const bloodpool=data.rooms.findIndex(r=>r.group===2&&r.map===8);
   assert.ok(bloodpool>=0);
+  const savedCoverage=editor(data,{view,ini});
+  savedCoverage.run(`$('#room').value='${bloodpool}';$('#room').onchange();`);
+  assert.equal(savedCoverage.run('coverageAspect'),view.aspect);
+  assert.equal(savedCoverage.run('framingPixelAspect'),view.pixelAspect);
+  assert.equal(savedCoverage.run('framingDistance'),view.distance);
+  assert.equal(savedCoverage.run('coverageTiltX'),view.tiltX);
+  assert.equal(savedCoverage.run('coverageTiltY'),view.tiltY);
+  // Local settings and room edits can change independently of the measured
+  // reference. Check its geometry with an explicit pose and original artwork.
+  const referenceCoverage=editor(data,{view:coverageView});
+  referenceCoverage.run(`$('#room').value='${bloodpool}';$('#room').onchange();`);
+  assert.equal(referenceCoverage.run('JSON.stringify(currentCoveragePlan().required)'),'{"x0":-8,"y0":-2,"x1":24,"y1":18}');
+  console.log('Built view settings are respected; original Bloodpool 2:8 retains the calibrated 16:10 reference');
   actual.run(`$('#room').value='${bloodpool}';$('#room').onchange();openTilePalette();
     const bloodpoolEntries=paletteEntries(L,'metatile');
     const unusedArtwork=bloodpoolEntries.find(({id,used})=>!used&&

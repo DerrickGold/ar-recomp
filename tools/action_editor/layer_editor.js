@@ -580,7 +580,7 @@ let fitted = false;
 function fitView() {
   const r = cvs.getBoundingClientRect();
   if (r.width < 8 || r.height < 8) return false;
-  const b=mapBounds(room,bgIndex,L),w=(b.x1-b.x0)*16,h=(b.y1-b.y0)*16;
+  const b=coverageFitBounds(),w=(b.x1-b.x0)*16,h=(b.y1-b.y0)*16;
   view.scale = Math.min(r.width / w, r.height / h);
   view.x = (r.width - w*view.scale)/2 - b.x0*16*view.scale;
   view.y = (r.height - h*view.scale)/2 - b.y0*16*view.scale;
@@ -765,4 +765,5 @@ function draw2d() {
     }
   }
   drawFramingGuide();
+  drawCoverageGuide();
 }

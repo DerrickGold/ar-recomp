@@ -941,25 +941,32 @@ static bool ParseVirtualLine(DioramaRoomOverride *room, int bg,
   return true;
 }
 
-const uint16_t *DioramaLayerOrder_PixelMask(
+const DioramaPixelEdit *DioramaLayerOrder_PixelEditAt(
     const DioramaRoomOverride *room, unsigned bg, int cell_x,
     int cell_y, int metatile) {
   if (!room || bg >= 2) return NULL;
   const DioramaPixelLayerOverride *layer = &room->pixel_layers[bg];
-  const uint16_t *fallback = NULL;
+  const DioramaPixelEdit *fallback = NULL;
   for (unsigned i = 0; i < layer->count; i++) {
     const DioramaPixelEdit *edit = &layer->edits[i];
     if (edit->by_cell && edit->x == cell_x && edit->y == cell_y)
-      return edit->black;
-    if (!edit->by_cell && edit->metatile == metatile) fallback = edit->black;
+      return edit;
+    if (!edit->by_cell && edit->metatile == metatile) fallback = edit;
   }
   return fallback;
+}
+const uint16_t *DioramaLayerOrder_PixelMask(
+    const DioramaRoomOverride *room, unsigned bg, int cell_x,
+    int cell_y, int metatile) {
+  const DioramaPixelEdit *edit = DioramaLayerOrder_PixelEditAt(
+      room, bg, cell_x, cell_y, metatile);
+  return edit ? edit->black : NULL;
 }
 
 static bool ParsePixelLine(DioramaRoomOverride *room, unsigned bg,
                            unsigned terrain, const char *values, const char **out_error) {
   DioramaPixelEdit edit = {.terrain_mask = (uint8_t)terrain};
-  bool selector = false, mask = false;
+  bool selector = false, mask = false, transparent_mask = false;
   char word[96];
   const char *p = values;
   while ((p = NextWord(p, word, sizeof(word))) != NULL && word[0]) {
@@ -983,8 +990,9 @@ static bool ParsePixelLine(DioramaRoomOverride *room, unsigned bg,
       edit.x = x;
       edit.y = y;
       selector = true;
-    } else if (!strcmp(word, "black")) {
-      if (mask || strlen(colon) != 64) goto invalid;
+    } else if (!strcmp(word, "black") || !strcmp(word, "transparent")) {
+      const bool transparent = !strcmp(word, "transparent");
+      if ((transparent ? transparent_mask : mask) || strlen(colon) != 64) goto invalid;
       for (int row = 0; row < 16; row++) {
         unsigned value = 0;
         for (int x = 0; x < 4; x++) {
@@ -995,12 +1003,14 @@ static bool ParsePixelLine(DioramaRoomOverride *room, unsigned bg,
           if (digit < 0) goto invalid;
           value = (value << 4) | (unsigned)digit;
         }
-        edit.black[row] = (uint16_t)value;
+        (transparent ? edit.transparent : edit.black)[row] = (uint16_t)value;
       }
-      mask = true;
+      if (transparent) transparent_mask = true; else mask = true;
     } else goto invalid;
   }
-  if (!selector || !mask) goto invalid;
+  if (!selector || (!mask && !transparent_mask)) goto invalid;
+  for (unsigned row = 0; row < 16; ++row)
+    if (edit.black[row] & edit.transparent[row]) goto invalid;
   DioramaPixelLayerOverride *layer = &room->pixel_layers[bg];
   unsigned index = layer->count;
   for (unsigned i = 0; i < layer->count; i++) {
@@ -1018,7 +1028,7 @@ static bool ParsePixelLine(DioramaRoomOverride *room, unsigned bg,
   if (index == layer->count) layer->count++;
   return true;
 invalid:
-  if (out_error) *out_error = "expected cell:x,y or metatile:HH and black:64hex";
+  if (out_error) *out_error = "expected cell:x,y or metatile:HH and non-overlapping black:64hex / transparent:64hex masks";
   return false;
 }
 
@@ -1552,6 +1562,14 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
       APPEND(" black:");
       for (unsigned row = 0; row < 16; row++)
         APPEND("%04X", (unsigned)edit->black[row]);
+      bool transparent = false;
+      for (unsigned row = 0; row < 16; row++)
+        transparent |= edit->transparent[row] != 0;
+      if (transparent) {
+        APPEND(" transparent:");
+        for (unsigned row = 0; row < 16; row++)
+          APPEND("%04X", (unsigned)edit->transparent[row]);
+      }
       APPEND("\n");
     }
   }

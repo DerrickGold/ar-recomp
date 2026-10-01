@@ -1708,6 +1708,39 @@ static void TestPixelMasksRoundTrip(void) {
   CHECK(!memcmp(&saved, &reparsed.pixel_layers[0], sizeof(saved)));
 }
 
+static void TestTransparentPixelMasks(void) {
+  DioramaRoomOverride room = {.used = true}, resolved = {0}, reparsed = {.used = true};
+  const char *error = NULL;
+  const char *zero = "0000000000000000000000000000000000000000000000000000000000000000";
+  char line[256], text[2048];
+  snprintf(line, sizeof(line), "bg1-pixels:us+eu = metatile:23 black:8000%s transparent:4000%s",
+      zero + 4, zero + 4);
+  CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
+  snprintf(line, sizeof(line), "bg1-pixels:us+eu = cell:-1,2 transparent:0001%s", zero + 4);
+  CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
+  DioramaLayerOrder_ForTerrain(&room, 0, &resolved);
+  const DioramaPixelEdit *edit = DioramaLayerOrder_PixelEditAt(&resolved, 0, 1, 2, 0x23);
+  CHECK(edit && edit->black[0] == 0x8000 && edit->transparent[0] == 0x4000);
+  edit = DioramaLayerOrder_PixelEditAt(&resolved, 0, -1, 2, 0x23);
+  CHECK(edit && !edit->black[0] && edit->transparent[0] == 1); /* whole-record cell precedence */
+  CHECK(!DioramaLayerOrder_PixelEditAt(&resolved, 1, 0, 0, 0x23));
+  DioramaLayerOrder_ForTerrain(&room, 1, &resolved);
+  CHECK(!DioramaLayerOrder_PixelEditAt(&resolved, 0, -1, 2, 0x23));
+  DioramaLayerOrder_ForTerrain(&room, 2, &resolved);
+  CHECK(DioramaLayerOrder_PixelEditAt(&resolved, 0, -1, 2, 0x23)->transparent[0] == 1);
+  const DioramaPixelLayerOverride saved = room.pixel_layers[0];
+  snprintf(line, sizeof(line), "bg1-pixels = cell:0,0 black:8000%s transparent:8000%s", zero + 4, zero + 4);
+  CHECK(!DioramaLayerOrder_ParseLine(&room, line, &error));
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg1-pixels = cell:0,0 transparent:ZZZZ", &error));
+  CHECK(!memcmp(&saved, &room.pixel_layers[0], sizeof(saved)));
+  CHECK(DioramaLayerOrder_FormatRoom(&room, text, sizeof(text)) < sizeof(text));
+  CHECK(strstr(text, " transparent:4000") && strstr(text, " transparent:0001"));
+  for (char *record = strtok(text, "\n"); record; record = strtok(NULL, "\n"))
+    if (record[0] != '[') CHECK(DioramaLayerOrder_ParseLine(&reparsed, record, &error));
+  CHECK(!memcmp(&saved, &reparsed.pixel_layers[0], sizeof(saved)));
+  DioramaLayerOrder_ClearRoom(&resolved);
+}
+
 static bool SameStamps(const DioramaStampLayerOverride *a,
                         const DioramaStampLayerOverride *b) {
   return a->set_bounds == b->set_bounds && a->x0 == b->x0 && a->y0 == b->y0 &&
@@ -1911,6 +1944,7 @@ int main(void) {
   TestRegionalTileKeys();
   TestTileStampsRoundTrip();
   TestPixelMasksRoundTrip();
+  TestTransparentPixelMasks();
   TestNoOverrideIsIdentity();
   TestOverrideIsScopedToItsRoom();
   TestOrderEditReordersPaint();

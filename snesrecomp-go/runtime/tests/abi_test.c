@@ -4362,6 +4362,7 @@ int main(void) {
         };
         failed |= check(api->struct_size >= SNES_RUNNER_API_PPU_CAPTURE_TILES_SIZE &&
                         (api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TILES) &&
+                        (api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TRANSPARENCY) &&
                         api->replace_ppu_capture_tiles(runner, &edits) == SR_RESULT_OK &&
                         snes->ppu->captureTiles[0].apron == 64,
                         "capture tile binding failed");

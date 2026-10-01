@@ -202,14 +202,16 @@ typedef struct DioramaVirtualLayerOverride {
   DioramaVirtualCellSpan cell_spans[kDioramaVirtualCellSpanMax];
 } DioramaVirtualLayerOverride;
 
-/* Displayed 16x16 pixels; bit 15 is the leftmost pixel. Cell masks override
- * metatile masks, including explicit all-zero masks. Diorama captures only. */
+/* Displayed 16x16 pixels; bit 15 is the leftmost pixel. Black/transparent masks
+ * cannot overlap. A cell record overrides both metatile masks, including
+ * explicit all-zero masks. Diorama captures only. */
 typedef struct DioramaPixelEdit {
   bool by_cell;
   uint8_t metatile;
   uint8_t terrain_mask;
   int32_t x, y;
   uint16_t black[16];
+  uint16_t transparent[16];
 } DioramaPixelEdit;
 
 typedef struct DioramaPixelLayerOverride {
@@ -281,6 +283,9 @@ const DioramaTileStamp *DioramaLayerOrder_StampAt(
 const uint16_t *DioramaLayerOrder_PixelMask(
     const DioramaRoomOverride *room, unsigned bg, int cell_x,
     int cell_y, int metatile); /* -1 suppresses metatile inheritance */
+const DioramaPixelEdit *DioramaLayerOrder_PixelEditAt(
+    const DioramaRoomOverride *room, unsigned bg, int cell_x,
+    int cell_y, int metatile);
 
 typedef struct DioramaLayerOrderTable {
   DioramaRoomOverride rooms[kDioramaRoomOverrideMax];

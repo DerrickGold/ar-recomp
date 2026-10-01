@@ -37,6 +37,19 @@
   <div class="ctl"><label for="framingDistance">Camera distance</label>
     <input id="framingDistance" type="number" min="2" max="20" step="0.25" value="3.25" disabled></div>
   <p class="hint" id="framingViewportInfo"></p>
+  <details class="coverage-panel" open><summary>Diorama map coverage</summary>
+    <p class="hint"><label><input id="showCoverage" type="checkbox" checked> Show required tile area and uncovered edges</label></p>
+    <div class="ctl"><label for="coverageAspect">Aspect</label><select id="coverageAspect"><option value="16:10">16:10</option><option value="16:9">16:9</option><option value="4:3">4:3</option></select></div>
+    <div class="ctl"><label for="coverageBasis">Target</label><select id="coverageBasis"><option value="calibrated">Tested minimum</option><option value="projection">Projection only</option></select></div>
+    <div class="ctl"><label for="coverageTiltX">Tilt X °</label><input id="coverageTiltX" type="number" min="-45" max="45" step="0.5" value="0"></div>
+    <div class="ctl"><label for="coverageTiltY">Tilt Y °</label><input id="coverageTiltY" type="number" min="-45" max="45" step="0.5" value="0"></div>
+    <p id="coverageSummary" class="coverage-summary" role="status" aria-live="polite"></p>
+    <p id="coverageMissing" class="hint"></p>
+    <p id="coverageWorkspace" class="hint"></p>
+    <div class="palette-filters"><button id="coverageFit">Fit coverage</button><button id="coverageAddSpace">Add required edge space</button></div>
+    <p class="hint" id="coverageReference"></p>
+    <p class="hint">Uses camera distance and pixel aspect above, selected BG depth, preview scroll and saved framing. Red = uncovered area; green = saved extents fit. Empty workspace is not saved scenery: stamp or paint its tiles. This checks outer bounds, not transparent holes. Free orbit, reactive camera movement and raster effects can show more than this baseline.</p>
+  </details>
   <p class="hint">Dashed white = native view. Gold = adjusted native view.
     All colored frames move together. Drag with the Frame tool;
     arrows nudge 1 px, Shift + arrows 16 px.</p>
@@ -244,6 +257,7 @@
     <button id="modeNative">Original game frame</button>
     <button id="mode3d">Diorama 3D</button>
     <button id="frameTool" aria-pressed="false" title="Adjust the saved native viewport on the map">Frame</button>
+    <button id="coverageQuick" class="on" aria-pressed="true" title="Show the required Diorama tile area and missing rows/columns">Coverage</button>
     <button id="undoBtn" disabled>Undo</button>
     <button id="redoBtn" disabled>Redo</button>
     <button id="navFit" title="Fit the whole layer (f)">Fit</button>
@@ -328,6 +342,7 @@
         <button id="paletteUseComposite">Use assembled tile</button>
       </div>
       <p class="hint" id="paletteCount"></p>
+      <p class="hint">Hover or focus a tile for a larger preview.</p>
       <div id="paletteGrid" class="palette-grid" aria-label="Available tile artwork"></div>
       <div class="palette-stamp">
         <canvas id="paletteStampPreview" width="64" height="64" aria-label="Current stamp preview"></canvas>
@@ -348,8 +363,9 @@
       <option value="id">All instances of this metatile</option>
     </select>
     <div style="display:flex;gap:5px;margin-top:5px">
-      <button id="pixelBlack" class="on" style="flex:1">Paint black</button>
-      <button id="pixelRestore" style="flex:1">Restore pixel</button>
+      <button id="pixelBlack" class="on" style="flex:1" aria-pressed="true">Paint black</button>
+      <button id="pixelClear" style="flex:1" aria-pressed="false" title="Replace pixels with transparency in Diorama">Paint transparent</button>
+      <button id="pixelRestore" style="flex:1" aria-pressed="false" title="Remove black and transparent edits to reveal the source pixel">Restore pixel</button>
     </div>
     <div class="stack" style="margin-top:5px">
       <button id="pixelTransparent">Fill transparent pixels black</button>
@@ -357,14 +373,19 @@
       <button id="pixelReset">Reset pixel edits for this cell</button>
     </div>
   </div>
-  <p class="hint">Changes apply immediately to the Diorama preview. Checkerboard means transparency. Paint only the pixels you
-    want opaque. Cell edits take precedence over metatile edits. Undo works for
+  <p class="hint">Changes apply immediately to the Diorama preview. Checkerboard means transparency. Paint black makes pixels opaque;
+    Paint transparent cuts holes; Restore pixel reveals the original artwork. Cell edits take precedence over metatile edits. Undo works for
     pixel strokes. Export level INI, then paste the section into your game INI to keep it.</p>
 
     </section>
     <div class="tile-action-status" id="tileActionStatus" role="status" aria-live="polite"></div>
   </div>
 </div>
+</div>
+
+<div id="paletteZoom" class="palette-zoom" role="tooltip" hidden>
+  <canvas id="paletteZoomCanvas" width="16" height="16" aria-label="Magnified tile artwork"></canvas>
+  <b id="paletteZoomTitle"></b><span id="paletteZoomInfo"></span>
 </div>
 
 <div id="tileMenu" class="tile-menu" role="menu" tabindex="-1" aria-label="Tile actions" hidden>
@@ -385,6 +406,10 @@
   <button id="tileActionCopy" role="menuitem" tabindex="-1">Copy selected tiles</button>
   <button id="tileActionPaste" role="menuitem" tabindex="-1">Paste over here</button>
   <button id="tileActionStamp" role="menuitem" tabindex="-1">Stamp copied tiles…</button>
+  <button id="tileActionDelete" role="menuitem" tabindex="-1"
+    title="Clear selected tile artwork. Added edge tiles are removed.">Delete tile</button>
+  <button id="tileActionReset" role="menuitem" tabindex="-1"
+    title="Restore original artwork, flips, pixels and priority. Remove added tiles without an original.">Reset tile to default</button>
   <button id="tileActionRemove" role="menuitem" tabindex="-1">Remove selected pasted tiles</button>
   <div class="tile-menu-separator" role="separator"></div>
   <button id="tileActionDeselect" role="menuitem" tabindex="-1">Deselect</button>
@@ -422,6 +447,7 @@
 <script src="tile_menu.js"></script>
 <script src="export_editor.js"></script>
 <script src="framing_editor.js"></script>
+<script src="coverage_editor.js"></script>
 <script src="diorama_view.js"></script>
 <script src="editor.js"></script>
 <script src="help.js"></script>

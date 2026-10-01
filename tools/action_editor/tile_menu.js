@@ -2,7 +2,7 @@
  * deltas as the toolbar. A paste destination is independent of the selection. */
 const tileMenu=$('#tileMenu');
 tileMenu.hidden=true;
-const tileMenuButtons=['Priority','Far','ResetBand','Pixels','Fill','FlipH','FlipV','MirrorH','MirrorV','Copy','Paste','Stamp','Remove','Deselect']
+const tileMenuButtons=['Priority','Far','ResetBand','Pixels','Fill','FlipH','FlipV','MirrorH','MirrorV','Copy','Paste','Stamp','Delete','Reset','Remove','Deselect']
   .map(name=>$(`#tileAction${name}`));
 let tileMenuTarget=null;
 const macControlClick=ev=>ev.button===0&&ev.ctrlKey&&/Mac/.test(window.navigator?.platform||'');
@@ -38,8 +38,10 @@ function openTileMenu(cx,cy,clientX,clientY) {
   $('#tileMenuDestination').textContent=`Paste destination: ${cx}, ${cy} · Diorama only`;
   $('#tileActionPriority').textContent=allHigh?'Turn priority off':'Turn priority on';
   $('#tileActionPriority').setAttribute('aria-checked',allHigh?'true':anyHigh?'mixed':'false');
-  for(const name of ['Priority','Far','ResetBand','Fill','FlipH','FlipV','Copy','Deselect'])
+  for(const name of ['Priority','Far','ResetBand','Fill','FlipH','FlipV','Copy','Delete','Reset','Deselect'])
     $(`#tileAction${name}`).disabled=!hasSelection;
+  $('#tileActionDelete').textContent=positions.length===1?'Delete tile':'Delete selected tiles';
+  $('#tileActionReset').textContent=positions.length===1?'Reset tile to default':'Reset selected tiles to default';
   for(const axis of ['H','V'])$(`#tileActionMirror${axis}`).disabled=!selectedTileRectangle(positions);
   $('#tileActionPixels').disabled=!tile;
   $('#tileActionRemove').disabled=$('#removeStamps').disabled;
@@ -92,6 +94,8 @@ $('#tileActionPaste').onclick=()=>runTileAction(({cx,cy})=>{
 $('#tileActionStamp').onclick=()=>runTileAction(({cx,cy})=>{
   startStamp();stampHover=[cx,cy];draw();tileActionStatus('Click to stamp copied tiles; Esc finishes.');
 });
+$('#tileActionDelete').onclick=()=>runTileAction(()=>deleteSelectedTiles());
+$('#tileActionReset').onclick=()=>runTileAction(()=>resetSelectedTiles());
 $('#tileActionRemove').onclick=()=>runTileAction(()=>{
   removeStamps();tileActionStatus('Selected pasted tiles removed.');
 });

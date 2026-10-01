@@ -3940,6 +3940,14 @@ static void native_capture_tile_run(Ppu *ppu, int layer, int x, int run,
         const int px = fine_x + offset * step;
         const int column = plan->origin + x + offset;
         const bool black = (tile->black_rows[fine_y] & (0x80u >> px)) != 0u;
+        const bool transparent = (tile->transparent_rows[fine_y] & (0x80u >> px)) != 0u;
+        if (transparent) {
+            ppu->captureTileCoverage[layer][column] = 15u;
+            plan->primary[column] = 0u;
+            for (unsigned priority = 0; priority < 3; ++priority)
+                if (plan->bands[priority]) plan->bands[priority][column] = 0u;
+            continue;
+        }
         if (!replace && !black) continue;
         ppu->captureTileCoverage[layer][column] = replace ? 15u : (1u << band);
         if (replace) {

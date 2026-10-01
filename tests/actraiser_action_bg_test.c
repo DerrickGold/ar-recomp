@@ -284,7 +284,8 @@ static const SnesRunnerApi s_fake_api = {
   .struct_size = sizeof(SnesRunnerApi),
   .capabilities = SR_RUNNER_CAP_PPU_STATE |
       SR_RUNNER_CAP_BORROWED_U16_SPANS | SR_RUNNER_CAP_DMA_STATE |
-      SR_RUNNER_CAP_PPU_BACKGROUND_POLICY | SR_RUNNER_CAP_PPU_CAPTURE_TILES,
+      SR_RUNNER_CAP_PPU_BACKGROUND_POLICY | SR_RUNNER_CAP_PPU_CAPTURE_TILES |
+      SR_RUNNER_CAP_PPU_CAPTURE_TRANSPARENCY,
   .query_ppu_state = FakeQueryPpuState,
   .borrow_u16_memory = FakeBorrowU16,
   .query_dma_state = FakeQueryDmaState,
@@ -1485,6 +1486,7 @@ static void TestVirtualLayerClassificationBinding(void) {
   room.pixel_layers[0].count = 1;
   room.pixel_layers[0].edits[0] = (DioramaPixelEdit){.by_cell=true,.x=2,.y=0};
   room.pixel_layers[0].edits[0].black[5] = 1u << 12;
+  room.pixel_layers[0].edits[0].transparent[5] = 1u << 11;
 
   CHECK(ActRaiserActionBg_BindPlanWithVirtualLayers(
       wram, kActRaiserWramSize, &plan, &room, ppu) ==
@@ -1514,6 +1516,9 @@ static void TestVirtualLayerClassificationBinding(void) {
   CHECK(ActRaiserActionBg_PixelBlackAt(0, source_x, sample_y, 13, 7, &band));
   CHECK(band == 2); /* explicit virtual band wins even on a transparent pixel */
   CHECK(!ActRaiserActionBg_PixelBlackAt(0, source_x + 1, sample_y, 13, 7, &band));
+  CHECK(ActRaiserActionBg_PixelTransparentAt(0, source_x + 1, sample_y, 13, 7, &band));
+  CHECK(!ActRaiserActionBg_PixelTransparentAt(0, source_x, sample_y, 13, 7, &band));
+  CHECK(ActRaiserActionBg_PixelTransparentAt(0, source_x, sample_y, 14, 7, &band));
   CHECK(!ActRaiserActionBg_PixelBlackAt(0, source_x, sample_y + 1, 13, 7, &band));
   CHECK(ActRaiserActionBg_PixelBlackAt(0, source_x - 1, sample_y, 14, 7, &band));
   CHECK(ActRaiserActionBg_PixelBlackAt(0, source_x, sample_y, 1037, 1031, &band));
@@ -1548,7 +1553,7 @@ static void TestVirtualLayerClassificationBinding(void) {
   CHECK(capture_tile.entry == 0x10 && capture_tile.band == 0);
   CHECK(capture->lookup(capture->user_data, 4, 0, &capture_tile));
   CHECK(capture_tile.flags == 0 && capture_tile.band == 2 &&
-      capture_tile.black_rows[5] == 0x10);
+      capture_tile.black_rows[5] == 0x10 && capture_tile.transparent_rows[5] == 0x08);
   CHECK(!capture->lookup(capture->user_data, -3, -2, &capture_tile));
   CHECK(ActRaiserActionBg_StampAt(0, -1 - snapshot.camera_x,
       -1 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black, &blank));
@@ -1564,6 +1569,12 @@ static void TestVirtualLayerClassificationBinding(void) {
   CHECK(!ActRaiserActionBg_StampAt(0, -17 - snapshot.camera_x,
       -16 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black, &blank));
   CHECK(!blank);
+  room.pixel_layers[0].edits[1].transparent[15] = 2u;
+  CHECK(ActRaiserActionBg_StampAt(0, -2 - snapshot.camera_x,
+      -1 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black, &blank));
+  CHECK(blank && !black && local_x == 14);
+  CHECK(capture->lookup(capture->user_data, -1, -1, &capture_tile));
+  CHECK(capture_tile.transparent_rows[7] == 2u);
   room.stamp_layers[0].cells[0].blank = true;
   CHECK(ActRaiserActionBg_StampAt(0, -1 - snapshot.camera_x,
       -1 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black, &blank));

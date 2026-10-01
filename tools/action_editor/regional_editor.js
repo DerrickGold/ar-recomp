@@ -50,8 +50,3 @@ function regionalPixelCount(r,bg,stamps=stampBucket(r,bg).cells,pixels=pixelBuck
   return regionalRecords(r,bg,variant=>keyOf(variant,bg)===current
     ?pixelRecords(variant,bg,stamps,pixels):pixelRecords(variant,bg)).length;
 }
-function regionalStampCount(r,bg,proposed=stampBucket(r,bg).cells) {
-  const current=keyOf(r,bg);
-  return regionalRecords(r,bg,variant=>stampRecords(variant,bg,
-    keyOf(variant,bg)===current?proposed:stampBucket(variant,bg).cells)).length;
-}

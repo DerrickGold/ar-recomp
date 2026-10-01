@@ -96,7 +96,7 @@ typedef struct ActRaiserActionBgProvider {
   int camera_x, camera_y;
   uint16_t hscroll_anchor, vscroll_anchor;
   int pixel_cell_x, pixel_cell_y;
-  const uint16_t *pixel_mask;
+  const DioramaPixelEdit *pixel_edit;
 } ActRaiserActionBgProvider;
 
 static ActRaiserActionBgObserver s_observer = {
@@ -1698,13 +1698,16 @@ static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
     if (provider->pixel_band_cache_active)
       (void)ProviderBandLookup(context, tile_x, tile_y, tile->entry, &tile->band);
   }
-  const uint16_t *mask = room->pixel_layers[bg].count
-      ? DioramaLayerOrder_PixelMask(room, bg, cx, cy, metatile) : NULL;
-  if (mask)
-    for (unsigned row = 0; row < 8; ++row)
-      tile->black_rows[row] = (uint8_t)(mask[(tile_y & 1) * 8 + row] >>
-          ((tile_x & 1) ? 0 : 8));
-  return tile->band < kDioramaVirtualBandCount && (stamp || mask);
+  const DioramaPixelEdit *edit = room->pixel_layers[bg].count
+      ? DioramaLayerOrder_PixelEditAt(room, bg, cx, cy, metatile) : NULL;
+  if (edit)
+    for (unsigned row = 0; row < 8; ++row) {
+      const unsigned mask_row = (tile_y & 1) * 8 + row;
+      const unsigned shift = (tile_x & 1) ? 0 : 8;
+      tile->black_rows[row] = (uint8_t)(edit->black[mask_row] >> shift);
+      tile->transparent_rows[row] = (uint8_t)(edit->transparent[mask_row] >> shift);
+    }
+  return tile->band < kDioramaVirtualBandCount && (stamp || edit);
 }
 
 bool ActRaiserActionBg_BindCaptureTiles(uint8_t capture_mask, uint8_t apron_mask) {
@@ -1712,6 +1715,7 @@ bool ActRaiserActionBg_BindCaptureTiles(uint8_t capture_mask, uint8_t apron_mask
   if (!s_runner_api ||
       s_runner_api->struct_size < SNES_RUNNER_API_PPU_CAPTURE_TILES_SIZE ||
       !(s_runner_api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TILES) ||
+      !(s_runner_api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TRANSPARENCY) ||
       !s_runner_api->replace_ppu_capture_tiles || !QueryPpuState(&state)) return false;
   SrPpuCaptureTileRequest request = {
     .struct_size = sizeof(request), .lifetime_generation = state.lifetime_generation,
@@ -1780,18 +1784,21 @@ bool ActRaiserActionBg_StampAt(unsigned bg, int source_x, int sample_y,
   *entry = cell->words[quadrant];
   *band = (cell->bands >> (quadrant * 2)) & 3u;
   *blank = cell->blank;
-  const uint16_t *mask = DioramaLayerOrder_PixelMask(
+  const DioramaPixelEdit *edit = DioramaLayerOrder_PixelEditAt(
       provider->virtual_room, bg, cx, cy, cell->blank ? -1 : cell->metatile);
-  *black = mask && (mask[*local_y] & (1u << (15 - *local_x)));
+  const unsigned bit = 1u << (15 - *local_x);
+  const bool transparent = edit && (edit->transparent[*local_y] & bit);
+  *blank |= transparent;
+  *black = !transparent && edit && (edit->black[*local_y] & bit);
   return *band < kDioramaVirtualBandCount;
 }
 
 /* Coordinates already include the PPU's margin/mosaic policy. Reconstruct the
  * same finite world address used by the virtual tile provider; masks address
  * displayed metatile pixels, so character flips do not flip the authored mask. */
-bool ActRaiserActionBg_PixelBlackAt(unsigned bg, int source_x, int sample_y,
+static bool PixelEditedAt(unsigned bg, int source_x, int sample_y,
                                     uint16_t hscroll, uint16_t vscroll,
-                                    uint8_t *band) {
+                                    uint8_t *band, bool transparent) {
   if (bg >= kActionBgLayerCount || !band) return false;
   ActRaiserActionBgProvider *provider = &s_provider[bg];
   if (!provider->pixel_edits_active) return false;
@@ -1812,16 +1819,28 @@ bool ActRaiserActionBg_PixelBlackAt(unsigned bg, int source_x, int sample_y,
   if (provider->pixel_cell_x != x / 16 || provider->pixel_cell_y != y / 16) {
     provider->pixel_cell_x = x / 16;
     provider->pixel_cell_y = y / 16;
-    provider->pixel_mask = DioramaLayerOrder_PixelMask(
+    provider->pixel_edit = DioramaLayerOrder_PixelEditAt(
         provider->virtual_room, bg, (unsigned)x / 16, (unsigned)y / 16, id);
   }
-  if (!provider->pixel_mask ||
-      !(provider->pixel_mask[y & 15] & (1u << (15 - (x & 15)))))
+  const DioramaPixelEdit *edit = provider->pixel_edit;
+  const unsigned bit = 1u << (15 - (x & 15));
+  if (!edit || !(transparent ? edit->transparent[y & 15] & bit :
+      (edit->black[y & 15] & bit) && !(edit->transparent[y & 15] & bit)))
     return false;
   *band = (entry & 0x2000u) ? 2 : 1;
   if (provider->pixel_band_cache_active)
     (void)ProviderBandLookup(provider, tx, ty, entry, band);
   return true;
+}
+bool ActRaiserActionBg_PixelBlackAt(unsigned bg, int source_x, int sample_y,
+                                    uint16_t hscroll, uint16_t vscroll,
+                                    uint8_t *band) {
+  return PixelEditedAt(bg, source_x, sample_y, hscroll, vscroll, band, false);
+}
+bool ActRaiserActionBg_PixelTransparentAt(unsigned bg, int source_x, int sample_y,
+                                         uint16_t hscroll, uint16_t vscroll,
+                                         uint8_t *band) {
+  return PixelEditedAt(bg, source_x, sample_y, hscroll, vscroll, band, true);
 }
 
 bool ActRaiserActionBg_NativeSceneryAt(unsigned bg, int source_x, int sample_y,
@@ -1851,6 +1870,8 @@ bool ActRaiserActionBg_NativeSceneryAt(unsigned bg, int source_x, int sample_y,
   if (provider->pixel_band_cache_active)
     (void)ProviderBandLookup((void *)provider, x / 8, y / 8, *entry, band);
   *black = ActRaiserActionBg_PixelBlackAt(bg, source_x, sample_y, hscroll, vscroll, band);
+  if (ActRaiserActionBg_PixelTransparentAt(bg, source_x, sample_y, hscroll, vscroll, band))
+    return false;
   return true;
 }
 

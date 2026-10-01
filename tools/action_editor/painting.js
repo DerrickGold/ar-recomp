@@ -26,7 +26,7 @@ function beginOp(label) {
  * undo as one. Ordinary painting simply has one part. */
 function partFor(key) {
   if (!pendingOp) return null;
-  if (!pendingOp.parts[key]) pendingOp.parts[key] = { before:{ cell:{}, id:{}, pixelCell:{}, pixelId:{}, stamp:{} } };
+  if (!pendingOp.parts[key]) pendingOp.parts[key] = { before:{ cell:{}, id:{}, pixelCell:{}, pixelId:{}, pixelCoord:{}, transparentCell:{}, transparentId:{}, transparentCoord:{}, stamp:{} } };
   return pendingOp.parts[key];
 }
 function recordCellIn(key, cell) {
@@ -47,7 +47,7 @@ function commitOp() {
   let changed = false;
   for (const key in op.parts) {
     const part = op.parts[key], bucket = store[key] || { byCell:{}, byId:{} };
-    part.after = { cell:{}, id:{}, pixelCell:{}, pixelId:{}, stamp:{} };
+    part.after = { cell:{}, id:{}, pixelCell:{}, pixelId:{}, pixelCoord:{}, transparentCell:{}, transparentId:{}, transparentCoord:{}, stamp:{} };
     const pasted=stampStore[key]||{cells:{},bounds:undefined};
     for(const k in part.before.stamp) {
       part.after.stamp[k]=pasted.cells[k];
@@ -62,7 +62,9 @@ function commitOp() {
       if(part.after.framing!==part.before.framing)changed=true;
     }
     const pixels = pixelStore[key] || {byCell:{},byId:{}};
-    for (const [kind,target] of [['pixelCell',pixels.byCell],['pixelId',pixels.byId]])
+    for (const [kind,target] of [['pixelCell',pixels.byCell],['pixelId',pixels.byId],
+      ['pixelCoord',pixels.byCoord??{}],['transparentCell',pixels.transparent?.byCell??{}],
+      ['transparentId',pixels.transparent?.byId??{}],['transparentCoord',pixels.transparent?.byCoord??{}]])
       for (const k in part.before[kind]) {
         part.after[kind][k] = target[k];
         if (part.after[kind][k] !== part.before[kind][k]) changed = true;
@@ -110,10 +112,19 @@ function applySide(op, which) {
     if (!store[key]) store[key] = { byId:{}, byCell:{} };
     const bucket = store[key];
     if (!pixelStore[key]) pixelStore[key] = {byCell:{},byId:{}};
+    pixelStore[key].transparent??={byCell:{},byId:{},byCoord:{}};
+    pixelStore[key].byCoord??={};
     for (const k in side.pixelCell) setKey(pixelStore[key].byCell,k,side.pixelCell[k]);
     for (const k in side.pixelId) setKey(pixelStore[key].byId,k,side.pixelId[k]);
+    for (const k in side.pixelCoord) setKey(pixelStore[key].byCoord,k,side.pixelCoord[k]);
+    for (const k in side.transparentCell) setKey(pixelStore[key].transparent.byCell,k,side.transparentCell[k]);
+    for (const k in side.transparentId) setKey(pixelStore[key].transparent.byId,k,side.transparentId[k]);
+    for (const k in side.transparentCoord) setKey(pixelStore[key].transparent.byCoord,k,side.transparentCoord[k]);
     if (key === keyOf(room,bgIndex) &&
-        (Object.keys(side.pixelCell).length || Object.keys(side.pixelId).length))
+        (Object.keys(side.pixelCell).length || Object.keys(side.pixelId).length||
+          Object.keys(side.transparentCell).length||Object.keys(side.transparentId).length))
+      surfacesDirty = compositeDirty = true;
+    if(Object.keys(side.pixelCoord).length||Object.keys(side.transparentCoord).length)
       surfacesDirty = compositeDirty = true;
     for (const k in side.cell) setKey(bucket.byCell, k, side.cell[k]);
     for (const k in side.id)   setKey(bucket.byId,   k, side.id[k]);
@@ -121,6 +132,7 @@ function applySide(op, which) {
     for (const k in side.cell) markCellDirty(Number(k));
     for (const k in side.id)   markIdDirty(Number(k));
   }
+  syncTileSelection();
   refreshNativeCameraControls();
   refreshFramingControls();
   glDirty = true; invalidateOther(); invalidateGameComposite();
@@ -357,9 +369,6 @@ function applySelectionBand(value) {
     if(!tile)continue;
     const bands=tile.words.map(word=>value===null?authenticBand(word):value);
     if(bands.some((b,i)=>b!==tile.bands[i]))proposed[cell]={...tile,bands};
-  }
-  if(regionalStampCount(room,bgIndex,proposed)>kStampMax) {
-    commitOp();sceneryNotice('Maximum 512 added tiles per BG. No tiles were changed.');return false;
   }
   let changed=false;
   for(const cell of selectedStampKeys) {

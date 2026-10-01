@@ -331,6 +331,9 @@ bool ActRaiserActionBg_StampAt(unsigned bg, int source_x, int sample_y,
 bool ActRaiserActionBg_PixelBlackAt(unsigned bg, int source_x, int sample_y,
                                     uint16_t hscroll, uint16_t vscroll,
                                     uint8_t *band);
+bool ActRaiserActionBg_PixelTransparentAt(unsigned bg, int source_x, int sample_y,
+                                         uint16_t hscroll, uint16_t vscroll,
+                                         uint8_t *band);
 /* Native scenery for extra horizontal capture. Requires a current verified
  * world binding eligible for guard columns or authored scenery/framing. */
 bool ActRaiserActionBg_NativeSceneryAt(unsigned bg, int source_x, int sample_y,

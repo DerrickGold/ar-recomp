@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds the standalone action-mode tile classification editor.
 #
-#   sh tools/action_editor/build.sh [rom] [out.html] [diorama-layers.ini]
+#   sh tools/action_editor/build.sh [rom] [out.html] [diorama-layers.ini] [settings.ini]
 #
 # Needs only a C compiler and python3. The exporter links the shared immutable
 # ActionRoomScene decoder used by the game, so it owns no separate ROM logic.
@@ -10,6 +10,7 @@ cd "$(dirname "$0")/../.."
 ROM="${1:-ar.sfc}"
 OUT="${2:-build/action-editor/ar-action-layer-editor.html}"
 LAYERS="${3:-diorama-layers.ini}"
+VIEW_SETTINGS="${4:-settings.ini}"
 [ -f "$ROM" ] || { echo "[action-editor] no ROM at $ROM"; exit 1; }
 
 TMP="$(mktemp -d)"
@@ -22,4 +23,4 @@ trap 'rm -rf "$TMP"' EXIT
    -o "$TMP/export"
 "$TMP/export" "$ROM" "$TMP/rooms.json"
 
-"${PYTHON:-python3}" tools/action_editor/build.py "$TMP/rooms.json" "$OUT" "$LAYERS"
+"${PYTHON:-python3}" tools/action_editor/build.py "$TMP/rooms.json" "$OUT" "$LAYERS" --settings "$VIEW_SETTINGS"

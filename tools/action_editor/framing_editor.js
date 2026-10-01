@@ -2,8 +2,9 @@
  * camera. Match BG1 terrain families so different boss layouts can be tuned. */
 const roomFraming=r=>stampBucket(r,0).framing||{x:0,y:0};
 let showFramingGuide=true;
-let framingPixelAspect='crt';
-let framingProjection='native',framingDistance=3.25;
+let framingPixelAspect=window.__ACTION_VIEW__?.pixelAspect||'crt';
+let framingProjection=window.__ACTION_VIEW__?'diorama':'native';
+let framingDistance=window.__ACTION_VIEW__?.distance||3.25;
 const wideFramingGuides=[
   {id:'framing169',label:'16:9',ratio:16/9,color:'#65dce9',show:true},
   {id:'framing1610',label:'16:10',ratio:16/10,color:'#c49aff',show:true},
@@ -45,7 +46,7 @@ function refreshFramingControls() {
   $('#framingPixelAspect').value=framingPixelAspect;
   $('#framingProjection').value=framingProjection;
   $('#framingDistance').value=String(framingDistance);
-  $('#framingDistance').disabled=framingProjection!=='diorama';
+  $('#framingDistance').disabled=framingProjection!=='diorama'&&!showCoverageGuide;
   for(const guide of wideFramingGuides)$(`#${guide.id}`).checked=guide.show;
   $('#frameTool').classList.toggle('on',mode==='2d'&&brush==='framing');
   $('#frameTool').setAttribute('aria-pressed',String(mode==='2d'&&brush==='framing'));
@@ -57,6 +58,7 @@ function refreshFramingControls() {
   $('#framingViewportInfo').textContent=wideFramingGuides.filter(g=>g.show)
     .map(g=>{const r=framingRect(true,g.ratio);
       return `${g.label}: ${framingProjection==='diorama'?'≈':''}${r.w}×${r.h} map pixels`;}).join(' · ');
+  refreshCoverageControls();
 }
 function writeRoomFraming(next) {
   const target=stampBucket(room,0),part=partFor(keyOf(room,0));

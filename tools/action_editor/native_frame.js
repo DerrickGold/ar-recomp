@@ -211,7 +211,9 @@ function decodeLayer(room, bg) {
 function blitTile(L, entry, dst, dw, ox, oy, tintRGB, sourceX=ox, sourceY=oy, maskOverride=undefined) {
   const cell=Math.floor(sourceY/16)*L.cellsW+Math.floor(sourceX/16);
   const mask=maskOverride??pixelMaskAt(L.room,L.bg,L,cell);
+  const clear=maskOverride!==undefined?ZERO_PIXEL_MASK:pixelTransparencyAt(L.room,L.bg,L,cell);
   for(let py=0;py<8;py++)for(let px=0;px<8;px++) {
+    if(pixelIsBlack(clear,(sourceX&15)+px,(sourceY&15)+py))continue;
     const black=pixelIsBlack(mask,(sourceX&15)+px,(sourceY&15)+py);
     const value=nativeCharacterPixel(L,entry,px,py);
     if(!black&&!value)continue;
@@ -453,6 +455,8 @@ function nativeBandSurfaces() {
       const tile=nativeTileAt(room,state,decoded.layers,bg,u10(state.h[bg][y]+sx),
         u10(state.v[bg][y]+line));
       const cell=(tile.ty>>1)*layer.cellsW+(tile.tx>>1);
+      if(pixelIsBlack(pixelTransparencyAt(room,bg,layer,cell),
+        (tile.tx&1)*8+tile.x,(tile.ty&1)*8+tile.y))continue;
       const black=pixelIsBlack(pixelMaskAt(room,bg,layer,cell),
         (tile.tx&1)*8+tile.x,(tile.ty&1)*8+tile.y);
       const pixel=nativeLayerPixel(room,state,decoded.layers,bg,x,y);

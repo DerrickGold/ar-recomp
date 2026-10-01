@@ -36,6 +36,13 @@ select{background:var(--panel-2);border:1px solid var(--line);border-radius:5px;
 .side-section summary{cursor:pointer;color:var(--dim);font-size:11px;font-weight:600}
 .side-section summary:hover{color:var(--ink)}
 .side-section summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.coverage-panel{margin-top:10px;padding:8px;border:1px solid var(--line);border-radius:5px}
+.coverage-panel summary{font-size:11px;color:var(--dim);cursor:pointer}
+.coverage-panel .ctl{margin-top:7px}
+.coverage-panel select{flex:1;min-width:0;font-size:10px}
+.coverage-panel input[type=number]{width:70px;background:var(--sunk);border:1px solid var(--line);padding:4px}
+.coverage-summary{font-size:11px;line-height:1.5;color:#76d19c;margin:8px 0 0}
+.coverage-summary.short{color:#f48c7f}
 .main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .bar{display:flex;gap:8px;align-items:center;padding:8px 12px;
   background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
@@ -73,6 +80,13 @@ select{background:var(--panel-2);border:1px solid var(--line);border-radius:5px;
   width:4px;height:4px;border-radius:50%;background:#f0c55a}
 .tile-palette canvas{image-rendering:pixelated}
 .palette-grid canvas{width:32px;height:32px}
+.palette-zoom{position:fixed;z-index:19;pointer-events:none;width:154px;
+  max-width:calc(100vw - 16px);padding:12px;background:var(--panel);
+  border:1px solid var(--accent);border-radius:8px;box-shadow:0 8px 24px #000a;
+  font:10px/1.5 var(--mono)}
+.palette-zoom canvas{display:block;width:128px;height:128px;max-width:100%;image-rendering:pixelated}
+.palette-zoom b{display:block;margin-top:8px}
+.palette-zoom span{display:block;color:var(--dim)}
 .palette-quarters{display:grid;grid-template-columns:repeat(2,40px);gap:2px;margin:7px auto;width:82px}
 .palette-quarters button{padding:3px;line-height:0}
 .palette-quarters canvas{width:32px;height:32px}

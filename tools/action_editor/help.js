@@ -101,6 +101,11 @@ Checkerboard pixels remain transparent until painted. <b>Restore pixel</b>
 returns a pixel to its original ROM art. <b>Fill transparent pixels black</b>
 fills all transparent pixels of that tile; <b>Make whole tile black</b> also
 covers its existing art. You can instead choose all instances of the metatile.</p>
+<p><b>Paint transparent</b> replaces an opaque or black pixel with transparency.
+Drag across the grid to cut a continuous stroke; checkerboard shows the result.
+<b>Paint black</b> makes it opaque again, and <b>Restore pixel</b> clears either
+edit to reveal the source artwork. Copies and mirroring preserve these cutouts.
+Fill transparent pixels black also fills holes you have painted.</p>
 <p>Pixel edits affect <b>Diorama 3D only</b>, appear in the authoring map, and
 share Undo/Redo and INI export. Native frame keeps the original game pixels.
 A cell mask overrides a metatile mask. Reset removes the selected scope's
@@ -120,7 +125,9 @@ asks you to select a smaller range.</p>
 absent from the original scene. Gold dots mark unused definitions; filter by
 <b>Unused in source</b> to find them. Click a tile, then click the map to stamp
 it. Choices make no edits until placed. Thumbnails keep their original colors
-and show transparency as checkerboard.</p>
+and show transparency as checkerboard. Hover or keyboard-focus a tile for a
+crisp 128×128 preview with its ID and source usage; this also works for 8×8
+pieces.</p>
 <p><b>Artwork source</b> also offers other maps with identical graphics, color
 palette and animation. Their tile arrangements can be borrowed safely.
 Maps with different graphics banks require importing artwork into the game;
@@ -141,8 +148,8 @@ mirroring requires a complete rectangle; individual flips work on scattered
 selections. Existing horizontal/vertical flags are toggled, and quadrant
 positions, depth bands and black pixel edits move with the artwork.
 Copies and exports preserve those flags. One Undo reverses the whole operation.
-Flipped tiles use the same 512-tile and 256-pixel-record budgets as pasted tiles;
-an operation that exceeds a budget changes nothing.</p>
+Flipped tiles have no fixed tile-count budget. Black masks still use the shared
+256-pixel-record budget; an operation that exceeds it changes nothing.</p>
 <p>Choose <b>Select rectangle</b> and drag over the source tiles. <b>Copy selected
  tiles</b> (<kbd>Ctrl/Cmd-C</kbd>) copies the whole rectangle, including art,
  depth bands, flip flags and black masks. <b>Add edge space</b> exposes empty cells on any
@@ -153,6 +160,17 @@ an operation that exceeds a budget changes nothing.</p>
  <kbd>Esc</kbd> ends stamping. X/Y and <b>Paste</b> place precisely, with negative
  coordinates extending left or up. Copy and paste stay within the same room/BG.
  An overlapping paste uses the frozen source rectangle.</p>
+<p>Right-click and choose <b>Delete tile</b> (or <b>Delete selected tiles</b>)
+to clear the selected artwork. Original-map tiles become transparent; added
+edge tiles are removed so saved bounds can shrink. One Undo restores the entire
+selection. Deletion affects Diorama only and leaves gameplay collision unchanged.</p>
+<p>Right-click <b>Reset tile to default</b> (or <b>Reset selected tiles to default</b>)
+to restore authentic artwork, flip flags, priority bands and pixels. Added tiles
+without an original are removed, including their masks. One Undo reverses the
+whole selection reset. Other tiles, framing and authoring edge space are kept.
+Shared metatile rules are bypassed locally to preserve unselected tiles; these
+exceptions remain authored records. Selecting every original instance removes
+the shared rule instead. Export the room section to keep the reset.</p>
 <p>Select pasted cells to change bands or paint black pixels. <b>Remove selected
  pasted tiles</b> restores their original scenery. <b>Reset this BG's pasted
  scenery</b> also removes added edge space. These actions are undoable.
@@ -161,8 +179,9 @@ an operation that exceeds a budget changes nothing.</p>
  to the native bottom again.
  <b>Export level INI → Copy section</b> saves them; replace this room’s INI
  section, save the file, and restart the game.
- The additions affect Diorama only. There are 512 pasted tiles per BG; black
- masks share the 256 pixel-record budget. An oversized paste changes nothing.</p>
+ The additions affect Diorama only. Pasted tiles have no fixed count limit;
+ map bounds still span up to 512 tiles per axis, and black masks share the
+ 256 pixel-record budget. A paste exceeding those limits changes nothing.</p>
 <p>New edge space can be selected like existing tiles. <b>Fill transparency
  black</b> creates black tiles there; <b>Pixels…</b> paints part of a blank tile.
  Selection alone makes no edits. Restoring pixels on a blank reveals transparency.</p>
@@ -170,6 +189,26 @@ an operation that exceeds a budget changes nothing.</p>
  to the original map plus remaining added tiles. With no added edge tiles,
  this restores the original bounds. It keeps all tile edits and supports Undo.</p>
 <h4>Saved Diorama framing</h4>
+<p><b>Coverage</b> shows the required tile envelope for the selected BG. Red
+shading marks edges that the saved scenery does not cover; green means its
+outer bounds fit. The sidebar reports exactly how many columns to add left/right
+and rows above/below. <b>Fit coverage</b> brings the envelope into view.
+<b>Add required edge space</b> exposes those cells as one undoable operation;
+stamp or paint them afterward. Empty workspace does not satisfy saved coverage.</p>
+<p>The <b>Tested minimum</b> target uses Bloodpool 2:8's measured 32×20 tile
+(512×320 pixel) minimum at 16:10, square pixels and camera distance 3.25.
+It adds eight columns on each side and two rows above/below the native 16×16
+room. The projection footprint is enlarged by the measured reference factor,
+then rounded outward to complete 16px cells. <b>Projection only</b> omits that
+calibration and shows the smaller geometric estimate.</p>
+<p>The build reads your <code>settings.ini</code> camera baseline. Coverage
+responds to aspect, pixel aspect, distance, tilt, selected BG depth, preview
+scroll and saved framing. Set the desired aspect in <b>Diorama map coverage</b>;
+the existing colored viewport guides are independently toggled. Small rooms
+keep their native vertical center; taller maps anchor at finite vertical scroll
+edges. Output resolution at the same aspect does not change source coverage.
+This is a baseline extent check: transparent holes, reactive camera movement,
+free orbit and raster scroll effects can reveal additional gaps.</p>
 <p>Click <b>Frame</b> above the map, or <b>Adjust frame on map</b> in the sidebar.
  The dashed white rectangle shows the native 256×224 view at the current
  preview scroll; the gold rectangle shows your saved offset. Drag the gold

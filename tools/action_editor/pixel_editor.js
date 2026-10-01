@@ -1,4 +1,4 @@
-/* Sparse opaque-black masks on displayed 16x16 cells. ROM graphics and the
+/* Sparse black/transparent masks on displayed 16x16 cells. ROM graphics and the
  * authentic compositor stay unchanged; only the map authoring/Diorama views
  * apply these presentation edits. */
 const ZERO_PIXEL_MASK = '0'.repeat(64);
@@ -6,13 +6,19 @@ let pixelCell = null, pixelTool = 'black', pixelDrag = false, lastPixel = null;
 function pixelBucket(r,bg) {
   const key=keyOf(r,bg);
   if(!pixelStore[key])pixelStore[key]={byCell:{},byId:{}};
+  pixelStore[key].transparent??={byCell:{},byId:{},byCoord:{}};
   return pixelStore[key];
 }
 function pixelMaskAt(r,bg,layer,cell) {
   const edits=pixelBucket(r,bg);
   return edits.byCell[cell] ?? edits.byId[layer.cellId[cell]] ?? ZERO_PIXEL_MASK;
 }
+function pixelTransparencyAt(r,bg,layer,cell) {
+  const edits=pixelBucket(r,bg),masks=edits.transparent;
+  return (edits.byCell[cell]!==undefined?masks.byCell[cell]:masks.byId[layer.cellId[cell]])??ZERO_PIXEL_MASK;
+}
 function pixelIsBlack(mask,x,y) {
+  if(!mask)return false;
   return !!(parseInt(mask.slice(y*4,y*4+4),16)&(1<<(15-x)));
 }
 function pixelMaskSet(mask,x,y,black) {
@@ -22,34 +28,44 @@ function pixelMaskSet(mask,x,y,black) {
     +mask.slice(y*4+4);
 }
 function loadPixelIni(r,bg,values) {
-  if(!r.bg[bg]||!/^[0-9a-fA-F]{64}$/.test(values.black||''))return;
+  if(!r.bg[bg]||(!values.black&&!values.transparent)||
+      [values.black,values.transparent].some(mask=>mask!==undefined&&!/^[0-9a-fA-F]{64}$/.test(mask)))return;
+  const black=(values.black??ZERO_PIXEL_MASK).toUpperCase();
+  const transparent=(values.transparent??ZERO_PIXEL_MASK).toUpperCase();
+  for(let row=0;row<16;row++)if(parseInt(black.slice(row*4,row*4+4),16)&
+      parseInt(transparent.slice(row*4,row*4+4),16))return;
   const target=pixelBucket(r,bg),width=r.bg[bg].pagesWide*16;
-  if(/^[0-9a-fA-F]{1,2}$/.test(values.metatile||''))
-    target.byId[parseInt(values.metatile,16)]=values.black.toUpperCase();
-  else {
+  if(/^[0-9a-fA-F]{1,2}$/.test(values.metatile||'')) {
+    const id=parseInt(values.metatile,16);target.byId[id]=black;
+    target.transparent.byId[id]=transparent;
+  } else {
     const match=(values.cell||'').match(/^(-?\d+),(-?\d+)$/);
     if(!match)return;
     const [x,y]=match.slice(1).map(Number);
     if(x < -512||y < -512||x>65535||y>65535)return;
-    if(x>=0&&y>=0&&x<width&&y<r.bg[bg].pagesHigh*16)
-      target.byCell[y*width+x]=values.black.toUpperCase();
-    else (target.byCoord??={})[`${x},${y}`]=values.black.toUpperCase();
+    if(x>=0&&y>=0&&x<width&&y<r.bg[bg].pagesHigh*16) {
+      target.byCell[y*width+x]=black;target.transparent.byCell[y*width+x]=transparent;
+    } else {
+      (target.byCoord??={})[`${x},${y}`]=black;target.transparent.byCoord[`${x},${y}`]=transparent;
+    }
   }
 }
 function pixelRecords(r,bg,stamps=stampBucket(r,bg).cells,target=pixelBucket(r,bg)) {
-  const width=r.bg[bg].pagesWide*16,coords={};
+  const width=r.bg[bg].pagesWide*16,coords={},transparent=target.transparent??{};
   for(const [cell,mask] of Object.entries(target.byCell))
-    coords[`${Number(cell)%width},${Math.floor(Number(cell)/width)}`]=mask;
-  Object.assign(coords,target.byCoord);
+    coords[`${Number(cell)%width},${Math.floor(Number(cell)/width)}`]=[mask,transparent.byCell?.[cell]];
+  for(const [cell,mask] of Object.entries(target.byCoord??{}))coords[cell]=[mask,transparent.byCoord?.[cell]];
   for(const [cell,c] of Object.entries(stamps)) {
-    /* A zero override can be necessary to suppress an inherited black mask. */
-    if(c.black!==ZERO_PIXEL_MASK||!c.blank&&target.byId[c.id]!==undefined||coords[cell]!==undefined)
-      coords[cell]=c.black;
+    /* Zero overrides can suppress inherited black or transparent masks. */
+    if(c.black!==ZERO_PIXEL_MASK||(c.transparent??ZERO_PIXEL_MASK)!==ZERO_PIXEL_MASK||
+        !c.blank&&target.byId[c.id]!==undefined||coords[cell]!==undefined)
+      coords[cell]=[c.black,c.transparent];
   }
+  const masks=(black,clear)=>`black:${black}`+(clear&&clear!==ZERO_PIXEL_MASK?` transparent:${clear}`:'');
   return [...Object.entries(target.byId).sort((a,b)=>Number(a[0])-Number(b[0]))
-    .map(([id,mask])=>`metatile:${Number(id).toString(16).padStart(2,'0').toUpperCase()} black:${mask}`),
+    .map(([id,mask])=>`metatile:${Number(id).toString(16).padStart(2,'0').toUpperCase()} ${masks(mask,transparent.byId?.[id])}`),
     ...Object.entries(coords).sort((a,b)=>a[0].localeCompare(b[0]))
-      .map(([cell,mask])=>`cell:${cell} black:${mask}`)];
+      .map(([cell,[black,clear]])=>`cell:${cell} ${masks(black,clear)}`)];
 }
 function pixelIniLines(r) {
   const lines=[];
@@ -71,6 +87,13 @@ function focusedMask() {
   return $('#pixelScope').value==='id'
     ?target.byId[L.cellId[pixelCell]]??ZERO_PIXEL_MASK
     :pixelMaskAt(room,bgIndex,L,pixelCell);
+}
+function focusedTransparency() {
+  const stamp=focusedStamp();if(stamp)return stamp.transparent??ZERO_PIXEL_MASK;
+  const target=pixelBucket(room,bgIndex);
+  return $('#pixelScope').value==='id'
+    ?target.transparent.byId[L.cellId[pixelCell]]??ZERO_PIXEL_MASK
+    :pixelTransparencyAt(room,bgIndex,L,pixelCell);
 }
 function focusedOriginal(x,y) {
   const stamp=focusedStamp();return stamp?stampOriginal(L,stamp,x,y):pixelOriginal(L,pixelCell,x,y);
@@ -94,10 +117,11 @@ function refreshPixelEditor() {
     :`metatile ${(pasted?pasted.id:L.cellId[cell]).toString(16).padStart(2,'0').toUpperCase()}`);
   $('#pixelReset').textContent=!pasted&&$('#pixelScope').value==='id'
     ?'Reset pixel edits for this metatile':'Reset pixel edits for this cell';
-  const mask=pasted?pasted.black:pixelMaskAt(room,bgIndex,L,cell),image=new ImageData(224,224);
+  const mask=pasted?pasted.black:pixelMaskAt(room,bgIndex,L,cell);
+  const clear=pasted?pasted.transparent:pixelTransparencyAt(room,bgIndex,L,cell),image=new ImageData(224,224);
   const colors=new Uint32Array(256);
   for(let py=0;py<16;py++)for(let px=0;px<16;px++) {
-    const color=pixelIsBlack(mask,px,py)?0xff000000:focusedOriginal(px,py);
+    const color=pixelIsBlack(clear,px,py)?null:pixelIsBlack(mask,px,py)?0xff000000:focusedOriginal(px,py);
     colors[py*16+px]=color??(((px+py)&1)?0xff536078:0xff303a4d);
   }
   for(let y=0;y<224;y++)for(let x=0;x<224;x++) {
@@ -109,15 +133,13 @@ function refreshPixelEditor() {
   }
   canvas.getContext('2d').putImageData(image,0,0);
 }
-function writePixelMask(mask,reset=false) {
+function writePixelMask(mask,reset=false,transparent=focusedTransparency()) {
   const pasted=focusedStamp();
   if(pasted) {
-    const key=keyOf(room,bgIndex),next={...pasted,black:reset?ZERO_PIXEL_MASK:mask};
-    if(next.black===pasted.black)return;
+    const key=keyOf(room,bgIndex),next={...pasted,black:reset?ZERO_PIXEL_MASK:mask,
+      transparent:reset?ZERO_PIXEL_MASK:transparent};
+    if(next.black===pasted.black&&next.transparent===(pasted.transparent??ZERO_PIXEL_MASK))return;
     const cells={...stampBucket(room,bgIndex).cells,[pixelStamp]:next};
-    if(regionalStampCount(room,bgIndex,cells)>kStampMax) {
-      $('#pixelInfo').textContent='Maximum 512 added tiles per background';return;
-    }
     if(regionalPixelCount(room,bgIndex,cells)>256) {
       $('#pixelInfo').textContent='Maximum 256 pixel edits per background';return;
     }
@@ -129,42 +151,55 @@ function writePixelMask(mask,reset=false) {
   const byId=$('#pixelScope').value==='id';
   const id=byId?L.cellId[pixelCell]:pixelCell;
   const dict=byId?target.byId:target.byCell,kind=byId?'pixelId':'pixelCell';
+  const clearDict=byId?target.transparent.byId:target.transparent.byCell;
+  const clearKind=byId?'transparentId':'transparentCell';
   const inherited=target.byId[L.cellId[pixelCell]]??ZERO_PIXEL_MASK;
-  const value=reset||(mask===ZERO_PIXEL_MASK&&(byId||inherited===ZERO_PIXEL_MASK))
+  const inheritedClear=target.transparent.byId[L.cellId[pixelCell]]??ZERO_PIXEL_MASK;
+  const value=reset||(mask===ZERO_PIXEL_MASK&&transparent===ZERO_PIXEL_MASK&&
+      (byId||inherited===ZERO_PIXEL_MASK&&inheritedClear===ZERO_PIXEL_MASK))
     ?undefined:mask;
-  if(dict[id]===value)return;
-  const proposed={...target,byCell:{...target.byCell},byId:{...target.byId}};
+  const clearValue=value===undefined||transparent===ZERO_PIXEL_MASK?undefined:transparent;
+  if(dict[id]===value&&clearDict[id]===clearValue)return;
+  const proposed={...target,byCell:{...target.byCell},byId:{...target.byId},
+    transparent:{...target.transparent,byCell:{...target.transparent.byCell},byId:{...target.transparent.byId}}};
   setKey(byId?proposed.byId:proposed.byCell,id,value);
+  setKey(byId?proposed.transparent.byId:proposed.transparent.byCell,id,clearValue);
   if(regionalPixelCount(room,bgIndex,stampBucket(room,bgIndex).cells,proposed)>256) {
     $('#pixelInfo').textContent='Maximum 256 pixel edits per background';return;
   }
   const part=partFor(key);
   if(part&&!(id in part.before[kind]))part.before[kind][id]=dict[id];
+  if(part&&!(id in part.before[clearKind]))part.before[clearKind][id]=clearDict[id];
   /* A local zero mask intentionally restores original art despite an inherited
    * metatile edit. Reset removes that override and inherits again. */
   setKey(dict,id,value);
+  setKey(clearDict,id,clearValue);
   markEditorChanged();surfacesDirty=compositeDirty=glDirty=true;
   invalidateGameComposite();invalidateOther();refreshPixelEditor();draw();
 }
-function editPixel(x,y,black=pixelTool==='black') {
+function editPixel(x,y,tool=pixelTool) {
   if((pixelCell===null&&!focusedStamp())||x<0||y<0||x>=16||y>=16)return;
-  const mask=focusedMask();
-  writePixelMask(pixelMaskSet(mask,x,y,black));
+  if(typeof tool==='boolean')tool=tool?'black':'restore';
+  writePixelMask(pixelMaskSet(focusedMask(),x,y,tool==='black'),false,
+    pixelMaskSet(focusedTransparency(),x,y,tool==='transparent'));
 }
 function pixelBulk(kind) {
   if(pixelCell===null&&!focusedStamp())return;
   beginOp(kind==='reset'?'reset pixel edits':`black ${kind} pixels`);
-  let mask=focusedMask();
+  let mask=focusedMask(),clear=focusedTransparency();
   for(let y=0;y<16;y++)for(let x=0;x<16;x++)
-    if(kind==='whole'||(kind==='transparent'&&focusedOriginal(x,y)===null))
+    if(kind==='whole'||(kind==='transparent'&&
+        (focusedOriginal(x,y)===null||pixelIsBlack(clear,x,y)))) {
       mask=pixelMaskSet(mask,x,y,true);
-  writePixelMask(mask,kind==='reset');commitOp();
+      clear=pixelMaskSet(clear,x,y,false);
+    }
+  writePixelMask(mask,kind==='reset',clear);commitOp();
 }
-function fillTransparentMask(mask,original) {
+function fillTransparentMask(mask,original,transparent=ZERO_PIXEL_MASK) {
   let result='';
   for(let y=0;y<16;y++) {
     let row=parseInt(mask.slice(y*4,y*4+4),16);
-    for(let x=0;x<16;x++)if(original(x,y)===null)row|=1<<(15-x);
+    for(let x=0;x<16;x++)if(original(x,y)===null||pixelIsBlack(transparent,x,y))row|=1<<(15-x);
     result+=row.toString(16).padStart(4,'0').toUpperCase();
   }
   return result;
@@ -177,28 +212,28 @@ function fillSelectedTransparency() {
   const info=$('#selectionPixelInfo');
   if(!positions.size){info.textContent='Select tiles to fill their transparency.';return false;}
   const key=keyOf(room,bgIndex),pixels=pixelBucket(room,bgIndex),stamps=stampBucket(room,bgIndex);
-  const proposedPixels={...pixels,byCell:{...pixels.byCell}};
+  const proposedPixels={...pixels,byCell:{...pixels.byCell},
+    transparent:{...pixels.transparent,byCell:{...pixels.transparent.byCell}}};
   const proposedStamps={...stamps.cells},changes=[];
   for(const position of positions) {
     const [x,y]=position.split(',').map(Number);
     const pasted=stamps.cells[position]||(!nativeCell(L,x,y)?displayedCell(room,bgIndex,L,x,y):null);
     if(pasted) {
-      const mask=fillTransparentMask(pasted.black,(px,py)=>stampOriginal(L,pasted,px,py));
-      if(mask===pasted.black)continue;
-      proposedStamps[position]={...pasted,black:mask};
+      const mask=fillTransparentMask(pasted.black,(px,py)=>stampOriginal(L,pasted,px,py),pasted.transparent);
+      if(mask===pasted.black&&(pasted.transparent??ZERO_PIXEL_MASK)===ZERO_PIXEL_MASK)continue;
+      proposedStamps[position]={...pasted,black:mask,transparent:ZERO_PIXEL_MASK};
       changes.push({position,pasted:proposedStamps[position]});
     } else {
       if(x<0||y<0||x>=L.cellsW||y>=L.cellsH)continue;
       const cell=y*L.cellsW+x,previous=pixelMaskAt(room,bgIndex,L,cell);
-      const mask=fillTransparentMask(previous,(px,py)=>pixelOriginal(L,cell,px,py));
-      if(mask===previous)continue;
+      const clear=pixelTransparencyAt(room,bgIndex,L,cell);
+      const mask=fillTransparentMask(previous,(px,py)=>pixelOriginal(L,cell,px,py),clear);
+      if(mask===previous&&clear===ZERO_PIXEL_MASK)continue;
+      delete proposedPixels.transparent.byCell[cell];
       proposedPixels.byCell[cell]=mask;changes.push({cell,mask});
     }
   }
   if(!changes.length){info.textContent='Selected transparency is already filled.';return false;}
-  if(regionalStampCount(room,bgIndex,proposedStamps)>kStampMax) {
-    info.textContent='Maximum 512 added tiles per BG. No tiles were changed.';return false;
-  }
   const records=regionalPixelCount(room,bgIndex,proposedStamps,proposedPixels);
   if(records>256) {
     info.textContent=`This selection needs ${records} pixel edits; the limit is 256 per BG. `
@@ -212,7 +247,9 @@ function fillSelectedTransparency() {
     } else {
       const part=partFor(key);
       part.before.pixelCell[change.cell]=pixels.byCell[change.cell];
+      part.before.transparentCell[change.cell]=pixels.transparent.byCell[change.cell];
       pixels.byCell[change.cell]=change.mask;
+      delete pixels.transparent.byCell[change.cell];
     }
   }
   commitOp();sceneryChanged();
@@ -221,8 +258,14 @@ function fillSelectedTransparency() {
 }
 $('#pixelPick').onclick=()=>openPixelInspector();
 $('#pixelScope').onchange=refreshPixelEditor;
-$('#pixelBlack').onclick=()=>{pixelTool='black';$('#pixelBlack').classList.add('on');$('#pixelRestore').classList.remove('on');};
-$('#pixelRestore').onclick=()=>{pixelTool='restore';$('#pixelRestore').classList.add('on');$('#pixelBlack').classList.remove('on');};
+for(const [id,tool] of [['pixelBlack','black'],['pixelClear','transparent'],['pixelRestore','restore']])
+  $(`#${id}`).onclick=()=>{
+    pixelTool=tool;
+    for(const name of ['pixelBlack','pixelClear','pixelRestore']) {
+      $(`#${name}`).classList.toggle('on',name===id);
+      $(`#${name}`).setAttribute('aria-pressed',name===id?'true':'false');
+    }
+  };
 $('#pixelTransparent').onclick=()=>pixelBulk('transparent');
 $('#pixelFill').onclick=()=>pixelBulk('whole');
 $('#pixelReset').onclick=()=>pixelBulk('reset');
@@ -235,7 +278,7 @@ const pixelPosition=ev=>{const rect=$('#pixelCanvas').getBoundingClientRect();
 $('#pixelCanvas').addEventListener('pointerdown',ev=>{
   if(ev.button!==0||(pixelCell===null&&!focusedStamp()))return;
   ev.preventDefault();$('#pixelCanvas').setPointerCapture(ev.pointerId);
-  beginOp(pixelTool==='black'?'paint black pixels':'restore pixels');
+  beginOp(pixelTool==='restore'?'restore pixels':`paint ${pixelTool} pixels`);
   pixelDrag=true;lastPixel=pixelPosition(ev);editPixel(...lastPixel);
 });
 $('#pixelCanvas').addEventListener('pointermove',ev=>{

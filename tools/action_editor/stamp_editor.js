@@ -1,8 +1,7 @@
 /* Frozen displayed tile words keep pasted scenery independent of the source
  * rectangle. Coordinates are signed 16px cells; the original map is immutable. */
 const stampStore = {}, selectedStampKeys = new Set();
-const kStampMax = 512;
-const blankTile=()=>({blank:true,id:0,words:[0,0,0,0],bands:[1,1,1,1],black:ZERO_PIXEL_MASK});
+const blankTile=()=>({blank:true,id:0,words:[0,0,0,0],bands:[1,1,1,1],black:ZERO_PIXEL_MASK,transparent:ZERO_PIXEL_MASK});
 const nativeCell=(layer,x,y)=>x>=0&&y>=0&&x<layer.cellsW&&y<layer.cellsH;
 let selectionRect = null, tileClipboard = null, stampHover = null, pixelStamp = null;
 function sceneryNotice(message) {
@@ -59,7 +58,8 @@ function displayedCell(r,bg,layer,x,y) {
     words.push(layer.words[ty*layer.tilesW+tx]);
     bands.push(bandAt(bucket(r,bg),layer,tx,ty));
   }
-  return {words,bands,id:layer.cellId[cell],black:pixelMaskAt(r,bg,layer,cell)};
+  return {words,bands,id:layer.cellId[cell],black:pixelMaskAt(r,bg,layer,cell),
+    transparent:pixelTransparencyAt(r,bg,layer,cell)};
 }
 function stampOriginal(layer,stamp,x,y) {
   if(stamp.blank)return null;
@@ -68,7 +68,8 @@ function stampOriginal(layer,stamp,x,y) {
   return value?layer.pal[((entry>>10)&7)*16+value]:null;
 }
 function stampColor(layer,stamp,x,y) {
-  return pixelIsBlack(stamp.black,x,y)?0xff000000:stampOriginal(layer,stamp,x,y);
+  return pixelIsBlack(stamp.transparent,x,y)?null:
+    pixelIsBlack(stamp.black,x,y)?0xff000000:stampOriginal(layer,stamp,x,y);
 }
 function selectRectangle(x0,y0,x1,y1) {
   const bounds=mapBounds(room,bgIndex,L);
@@ -98,12 +99,15 @@ function copyTiles() {
     const positions=[...selectedCells].map(c=>[c%L.cellsW,Math.floor(c/L.cellsW)])
       .concat([...selectedStampKeys].map(k=>k.split(',').map(Number)));
     if(!positions.length)return false;
-    b={x0:Math.min(...positions.map(p=>p[0])),y0:Math.min(...positions.map(p=>p[1])),
-      x1:Math.max(...positions.map(p=>p[0]))+1,y1:Math.max(...positions.map(p=>p[1]))+1};
+    b={x0:Infinity,y0:Infinity,x1:-Infinity,y1:-Infinity};
+    for(const [x,y] of positions) {
+      b.x0=Math.min(b.x0,x);b.y0=Math.min(b.y0,y);
+      b.x1=Math.max(b.x1,x+1);b.y1=Math.max(b.y1,y+1);
+    }
   }
   const w=b.x1-b.x0,h=b.y1-b.y0;
-  if(w<=0||h<=0||w*h>kStampMax) {
-    sceneryNotice('Select a rectangle of up to 512 tiles.');return false;
+  if(w<=0||h<=0||w>512||h>512) {
+    sceneryNotice('Select a rectangle spanning up to 512 tiles on each axis.');return false;
   }
   const cells=[];
   for(let y=b.y0;y<b.y1;y++)for(let x=b.x0;x<b.x1;x++) {
@@ -127,22 +131,12 @@ function stampTiles(x,y) {
       x+clip.w>512||y+clip.h>512) {
     sceneryNotice('Paste coordinates must stay between −512 and 511.');return false;
   }
-  const added=clip.cells.reduce((n,c,i)=>n+(!!c&&!target.cells[
-    `${x+i%clip.w},${y+Math.floor(i/clip.w)}`]),0);
-  if(Object.keys(target.cells).length+added>kStampMax) {
-    sceneryNotice('Maximum 512 pasted tiles per background; remove some first.');
-    return false;
-  }
   /* Check the shared pixel-record budget before mutating anything. */
   const proposed={...target.cells};
   clip.cells.forEach((c,i)=>{if(c)proposed[
     `${x+i%clip.w},${y+Math.floor(i/clip.w)}`]=c;});
   if(regionalPixelCount(room,bgIndex,proposed)>256) {
     sceneryNotice('This paste would exceed 256 pixel edits. No tiles were changed.');
-    return false;
-  }
-  if(regionalStampCount(room,bgIndex,proposed)>kStampMax) {
-    sceneryNotice('Maximum 512 saved pasted tiles per BG across terrain versions.');
     return false;
   }
   const nextBounds=mapBounds(room,bgIndex,L);
@@ -179,6 +173,115 @@ function removeStamps(all=false) {
   for(const cell of cells){recordStamp(key,cell);delete target.cells[cell];}
   if(all){recordBounds(key);target.bounds=undefined;}
   commitOp();deselect();sceneryChanged();if(all)fitView();draw();
+}
+function deleteSelectedTiles() {
+  if(mode!=='2d'||!L)return false;
+  returnToEditedTiles();
+  const cells=stampBucket(room,bgIndex).cells,updates=[];
+  for(const [x,y] of tileSelectionPositions()) {
+    const key=`${x},${y}`,tile=cells[key];
+    if(nativeCell(L,x,y)) {
+      // A transparent replacement hides the immutable original tile and its
+      // pixel masks. Removing that replacement would reveal the original art.
+      if(!tile?.blank||tile.black!==ZERO_PIXEL_MASK)updates.push([key,blankTile()]);
+    } else if(tile) {
+      // Empty edge space has no saved tile, so removed additions stop extending
+      // the scenery bounds while the authoring workspace stays available.
+      updates.push([key,null]);
+    }
+  }
+  if(!updates.length){tileActionStatus('Selected tiles are already empty.');return false;}
+  return applyTileUpdates(updates,'Delete tiles');
+}
+function syncTileSelection() {
+  const cells=stampBucket(room,bgIndex).cells;
+  for(const cell of selectedCells) {
+    const position=`${cell%L.cellsW},${Math.floor(cell/L.cellsW)}`;
+    if(cells[position]){selectedCells.delete(cell);selectedStampKeys.add(position);}
+  }
+  for(const position of selectedStampKeys) {
+    const [x,y]=position.split(',').map(Number);
+    if(nativeCell(L,x,y)&&!cells[position]) {
+      selectedStampKeys.delete(position);selectedCells.add(y*L.cellsW+x);
+    }
+  }
+}
+function resetSelectedTiles() {
+  if(mode!=='2d'||!L)return false;
+  returnToEditedTiles();
+  const positions=[...new Map(tileSelectionPositions().map(p=>[p.join(','),p])).values()];
+  if(!positions.length)return false;
+  const key=keyOf(room,bgIndex),bands=bucket(room,bgIndex),pixels=pixelBucket(room,bgIndex);
+  const stamps=stampBucket(room,bgIndex),nextStamps={...stamps.cells};
+  const nextBands={byCell:{...bands.byCell},byId:{...bands.byId}};
+  pixels.byCoord??={};
+  const nextPixels={byCell:{...pixels.byCell},byId:{...pixels.byId},byCoord:{...pixels.byCoord},
+    transparent:{byCell:{...pixels.transparent.byCell},byId:{...pixels.transparent.byId},
+      byCoord:{...pixels.transparent.byCoord}}};
+  const nativeSelection=new Set(positions.filter(([x,y])=>nativeCell(L,x,y))
+    .map(([x,y])=>y*L.cellsW+x));
+  const wholeIds=new Set([...nativeSelection].map(cell=>L.cellId[cell]));
+  for(let cell=0;cell<L.cellId.length;cell++)
+    if(!nativeSelection.has(cell))wholeIds.delete(L.cellId[cell]);
+  // Drop a shared rule when every original instance is selected. Otherwise,
+  // restore only the selected cells with local exceptions to that rule.
+  for(const id of wholeIds) {
+    delete nextBands.byId[id];delete nextPixels.byId[id];delete nextPixels.transparent.byId[id];
+  }
+  const sameTile=(a,b)=>!!a&&a.id===b.id&&!!a.blank===!!b.blank&&
+    a.black===b.black&&(a.transparent??ZERO_PIXEL_MASK)===b.transparent&&
+    a.words.every((word,q)=>word===b.words[q])&&a.bands.every((band,q)=>band===b.bands[q]);
+  for(const [x,y] of positions) {
+    const position=`${x},${y}`;
+    delete nextStamps[position];delete nextPixels.byCoord[position];delete nextPixels.transparent.byCoord[position];
+    if(!nativeCell(L,x,y))continue;
+    const cell=y*L.cellsW+x,id=L.cellId[cell],words=[];
+    delete nextBands.byCell[cell];delete nextPixels.byCell[cell];delete nextPixels.transparent.byCell[cell];
+    for(let q=0;q<4;q++)words.push(L.words[(y*2+(q>>1))*L.tilesW+x*2+(q&1)]);
+    const original={id,words,bands:words.map(authenticBand),black:ZERO_PIXEL_MASK,transparent:ZERO_PIXEL_MASK};
+    const inheritedBand=nextBands.byId[id];
+    if(inheritedBand!==undefined&&original.bands.some(band=>band!==inheritedBand)) {
+      if(original.bands.every(band=>band===original.bands[0]))nextBands.byCell[cell]=original.bands[0];
+      else nextStamps[position]=sameTile(stamps.cells[position],original)?stamps.cells[position]:original;
+    }
+    if(!nextStamps[position]&&((nextPixels.byId[id]??ZERO_PIXEL_MASK)!==ZERO_PIXEL_MASK||
+        (nextPixels.transparent.byId[id]??ZERO_PIXEL_MASK)!==ZERO_PIXEL_MASK))
+      nextPixels.byCell[cell]=ZERO_PIXEL_MASK;
+  }
+  const changes=[];
+  for(const [kind,target,next] of [
+    ['cell',bands.byCell,nextBands.byCell],['id',bands.byId,nextBands.byId],
+    ['pixelCell',pixels.byCell,nextPixels.byCell],['pixelId',pixels.byId,nextPixels.byId],
+    ['pixelCoord',pixels.byCoord,nextPixels.byCoord],
+    ['transparentCell',pixels.transparent.byCell,nextPixels.transparent.byCell],
+    ['transparentId',pixels.transparent.byId,nextPixels.transparent.byId],
+    ['transparentCoord',pixels.transparent.byCoord,nextPixels.transparent.byCoord],
+    ['stamp',stamps.cells,nextStamps]])
+    for(const entry of new Set([...Object.keys(target),...Object.keys(next)]))
+      if(target[entry]!==next[entry])changes.push({kind,target,entry,value:next[entry]});
+  if(!changes.length){tileActionStatus('Selected tiles already use their defaults.');return false;}
+  const records=regionalPixelCount(room,bgIndex,nextStamps,nextPixels);
+  if(records>256) {
+    sceneryNotice(`Restoring these cells needs ${records} pixel records to keep other metatile edits; `
+      +'the limit is 256 per BG. Select a smaller range or all instances. No tiles were changed.');return false;
+  }
+  beginOp('reset tiles to default');
+  const part=partFor(key);
+  for(const {kind,target,entry,value} of changes) {
+    part.before[kind][entry]=target[entry];setKey(target,entry,value);
+  }
+  commitOp();
+  for(const [x,y] of positions) {
+    const position=`${x},${y}`;
+    if(!displayedCell(room,bgIndex,L,x,y)) {
+      selectedStampKeys.delete(position);selectionRect=null;
+    }
+  }
+  syncTileSelection();
+  const focused=activeSelectionPosition();focusTileAt(...(focused??[-513,-513]));
+  sceneryChanged();tileActionStatus(`Reset ${positions.length} selected tile${positions.length===1?'':'s'} to default. `
+    +'Original artwork restored; added tiles removed. Undo reverses this change.');
+  return true;
 }
 function trimEdgeSpace() {
   const key=keyOf(room,bgIndex),target=stampBucket(room,bgIndex);
@@ -223,8 +326,7 @@ function loadStampIni(r,bg,values) {
       !/^[012](,[012]){3}$/.test(values.bands||'')||
       !/^[0-9a-fA-F]{1,2}$/.test(values.metatile||''))return;
   const [x,y]=values.cell.split(',').map(Number),cell=`${x},${y}`;
-  if(x<-512||y<-512||x>=512||y>=512||
-      (!target.cells[cell]&&Object.keys(target.cells).length>=kStampMax))return;
+  if(x<-512||y<-512||x>=512||y>=512)return;
   target.cells[cell]={...(values.words==='blank'?blankTile():{}),
     words:values.words==='blank'?[0,0,0,0]:values.words.split(',').map(v=>parseInt(v,16)),
     bands:values.bands.split(',').map(Number),id:parseInt(values.metatile,16),
@@ -240,8 +342,14 @@ function hydrateStampMasks() {
       c.black=pixels.byCoord?.[cell]??
         (x>=0&&y>=0&&x<w&&y<h?pixels.byCell[y*w+x]:undefined)??
         (c.blank?undefined:pixels.byId[c.id])??ZERO_PIXEL_MASK;
+      c.transparent=(pixels.byCoord?.[cell]!==undefined?pixels.transparent.byCoord[cell]:
+        x>=0&&y>=0&&x<w&&y<h&&pixels.byCell[y*w+x]!==undefined?pixels.transparent.byCell[y*w+x]:
+          c.blank?undefined:pixels.transparent.byId[c.id])??ZERO_PIXEL_MASK;
       if(pixels.byCoord)delete pixels.byCoord[cell];
-      if(x>=0&&y>=0&&x<w&&y<h)delete pixels.byCell[y*w+x];
+      delete pixels.transparent.byCoord[cell];
+      if(x>=0&&y>=0&&x<w&&y<h) {
+        delete pixels.byCell[y*w+x];delete pixels.transparent.byCell[y*w+x];
+      }
     }
   }
 }
@@ -262,8 +370,6 @@ function stampIniLines(r) {
       return [...(b?[`bg${bg+1}-map = bounds:${b.x0},${b.y0},${b.x1},${b.y1}`]:[]),
         ...stampRecords(variant,bg)];
     });
-    if(records.filter(line=>line.includes('-stamp =')).length>kStampMax)
-      throw new Error('Maximum 512 saved pasted tiles per BG across terrain versions');
     lines.push(...records);
   }
   return lines;
@@ -279,7 +385,7 @@ function refreshStampControls() {
   const space=mapBounds(room,bgIndex);
   $('#trimEdgeSpace').disabled=['x0','y0','x1','y1'].every(k=>space[k]===b[k]);
   $('#stampInfo').textContent=(tileClipboard?`Stamp ${tileClipboard.w}×${tileClipboard.h}. `:'')
-    +`${n}/512 pasted tiles · saved bounds ${b.x0},${b.y0} to ${b.x1-1},${b.y1-1}.`
+    +`${n} pasted tiles · saved bounds ${b.x0},${b.y0} to ${b.x1-1},${b.y1-1}.`
     +(tileClipboard&&!same?' Switch back to the source room/BG to paste.':'');
   refreshTileTransformControls();refreshPaletteStamp();
 }
