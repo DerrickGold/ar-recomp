@@ -24,6 +24,10 @@ struct EditorRoomScene {
   DioramaLayerOrderTable *table;
   DioramaRoomOverride terrain;
   ActionRoomSceneFrameState frame;
+  ActionEnvironmentScene environment;
+  ActionSceneEffectFrame effects;
+  ActionEffectRecipes recipes;
+  ActionEffectPreviewEvent event;
   SrSceneSurfaces surfaces;
   SrSceneRowPolicy policies[2][224];
   uint16_t vram[32768], palette[256];
@@ -136,6 +140,11 @@ EditorRoomScene *EditorRoomScene_Create(const ActionSceneSnapshot *assets) {
     .stack_grouping = true, .skybox_prefilter = true, .priority_surface = true};
   r->scene = (DioramaScene){.render = &r->options,
     .map_group = assets->scene.group, .map_number = assets->scene.map};
+  const ActionRoomSceneFrameRequest request={0};
+  if (!ActionRoomScene_BuildFrameState(&r->assets.scene,&request,&r->frame) ||
+      !ActionEnvironmentScene_FromRoom(&r->environment,&r->assets.scene,&r->frame)) {
+    EditorRoomScene_Destroy(r); return NULL;
+  }
   return r;
 }
 void EditorRoomScene_Destroy(EditorRoomScene *r) {
@@ -205,6 +214,7 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
   free(terrain);
   return ok;
 }
+void EditorRoomScene_SetEvent(EditorRoomScene *r,const ActionEffectPreviewEvent *event) {if(r)r->event=event?*event:(ActionEffectPreviewEvent){0};}
 static int Min(int a, int b) { return a < b ? a : b; }
 static int Max(int a, int b) { return a > b ? a : b; }
 static uint16_t Extent(ActionBgExtentMode mode, uint16_t value) {
@@ -219,6 +229,23 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   const ActionRoomScene *s = &r->assets.scene;
   ActionRoomSceneFrameState *f = &r->frame;
   if (!ActionRoomScene_BuildFrameState(s, &request, f)) return false;
+  memset(&r->effects,0,sizeof(r->effects));
+  if (!ActionEnvironmentScene_FromRoom(&r->environment,s,f)) return false;
+  r->effects.game_frame = r->environment.clock;
+  ActionMapEnvironmentScene_Capture(&r->environment,&r->effects,NULL);
+  ActionEnvironmentScene_Capture(&r->environment,&r->effects);
+  r->scene.layer_section = kDioramaLayerSection_Room;
+  if (!r->effects.decoration_overflow)
+    for (unsigned i = 0; i < r->effects.decoration_count; ++i)
+      if (r->effects.decorations[i].kind == kActionEffect_AitosWaterfall)
+        r->scene.layer_section = kDioramaLayerSection_AitosWaterfall;
+  ActionEffectInstance event;
+  if(ActionEffectPreview_Build(&r->event,r->environment.clock,&event)) {
+    if(event.render_layer==kActionEffectRenderLayer_WorldDust && r->effects.decoration_count<kActionSceneDecorationMaxInstances)
+      r->effects.decorations[r->effects.decoration_count++]=event;
+    else {r->effects.effects[0]=event;r->effects.effect_count=r->effects.visible_count=1;}
+  }
+  ActionEffectRecipes_Apply(&r->recipes,s->group,s->map,r->assets.terrain_profile,r->environment.clock,&r->environment,&r->effects);
   ActionBgFrameState state = {.map_group = s->group, .map_number = s->map,
       .decorative_padding_enabled = true};
   for (unsigned bg = 0; bg < 2; ++bg)
@@ -291,7 +318,7 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
     }
     DioramaTransparentFill fill = kDioramaTransparentFill_None;
     b->fill_configured = DioramaLayerOrder_ResolveTransparentFill(r->table, s->group, s->map,
-        0, bg, &fill, &b->fill_cgram);
+        r->scene.layer_section, bg, &fill, &b->fill_cgram);
     b->fill_mode = (uint8_t)fill; r->fill_configured[bg] = b->fill_configured;
   }
   if (ActRaiserRoom_ProfileFor(s->group, s->map) == kActRaiserRoomProfile_AitosWaterfall &&
@@ -360,6 +387,11 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
 const DioramaCapture *EditorRoomScene_Capture(const EditorRoomScene *r) { return &r->capture; }
 const DioramaScene *EditorRoomScene_Scene(const EditorRoomScene *r) { return &r->scene; }
 const SrSceneSurfaces *EditorRoomScene_Surfaces(const EditorRoomScene *r) { return &r->surfaces; }
+bool EditorRoomScene_ConfigureEffects(EditorRoomScene *r, const char *text, size_t size, unsigned *line) {
+  return r && ActionEffectRecipes_Parse(&r->recipes,text,size,line);
+}
+const ActionSceneEffectFrame *EditorRoomScene_Effects(const EditorRoomScene *r) { return &r->effects; }
+const ActionEnvironmentScene *EditorRoomScene_Environment(const EditorRoomScene *r) { return &r->environment; }
 unsigned EditorRoomScene_Width(const EditorRoomScene *r) { return r->assets.scene.bg[0].pages_wide * 256u; }
 unsigned EditorRoomScene_Height(const EditorRoomScene *r) { return r->assets.scene.bg[0].pages_high * 256u; }
 
@@ -381,4 +413,56 @@ uint32_t EditorRoomScene_Hash(const EditorRoomScene *r) {
     for (unsigned i = 0; i < 256 * 256; ++i)
       hash = DeterministicHash_Fnv1a32Word(hash, r->surfaces.native_pages[bg][i]);
   return hash;
+}
+
+/* Canonical source digest deliberately excludes structure padding/pointers. */
+uint32_t EditorRoomScene_EffectHash(const EditorRoomScene *r) {
+  if (!r) return 0;
+  const ActionSceneEffectFrame *frame = &r->effects;
+  uint32_t h = DETERMINISTIC_HASH_FNV1A32_OFFSET;
+  for (unsigned list=0;list<3;++list) {
+    const unsigned count=list==2?frame->effect_count:list?frame->authored_count:frame->decoration_count;
+    const ActionEffectInstance *instances=list==2?frame->effects:list?frame->authored:frame->decorations;
+    h=DeterministicHash_Fnv1a32Word(h,count);
+    for (unsigned i=0;i<count;++i) {
+      const ActionEffectInstance *e=&instances[i];
+      const uint32_t words[]={e->generation,e->pulse_generation,(uint32_t)(int32_t)e->world_x,
+        (uint32_t)(int32_t)e->world_y,e->kind,e->phase,e->flags,e->render_layer,e->projection_plane,
+        e->age_ticks,e->phase_ticks,e->pulse_ticks,e->source_mask,e->tuning.active,e->tuning.color,
+        e->tuning.light_receivers,e->tuning.dim_receivers,e->tuning.light_receivers_set,e->tuning.dim_receivers_set,
+        e->particle_count,e->particle_lifetime,e->particle_style.active,e->particle_style.seed,e->particle_style.color_end,e->field_style.strands,e->field_style.pattern,e->field_style.placement,e->field_style.point_count};
+      for (unsigned j=0;j<sizeof(words)/sizeof(words[0]);++j) h=DeterministicHash_Fnv1a32Word(h,words[j]);
+      for(unsigned j=0;j<e->field_style.point_count && j<kActionContourMaxPoints;++j) {
+        uint32_t bits;memcpy(&bits,&e->field_style.points[j].x,4);h=DeterministicHash_Fnv1a32Word(h,bits);
+        memcpy(&bits,&e->field_style.points[j].y,4);h=DeterministicHash_Fnv1a32Word(h,bits);
+      }
+      const float values[]={e->geometry.data.rect.x0,e->geometry.data.rect.y0,
+        e->geometry.data.rect.x1,e->geometry.data.rect.y1,e->clip_rect.x0,e->clip_rect.y0,
+        e->clip_rect.x1,e->clip_rect.y1,e->tuning.intensity,e->tuning.reach,
+        e->particle_style.size_min,e->particle_style.size_max,e->particle_style.travel_x,
+        e->particle_style.travel_y,e->particle_style.wander,e->particle_style.spread,e->field_style.angle,e->field_style.fan,
+        e->field_style.softness,e->field_style.drift,e->field_style.amplitude};
+      for (unsigned j=0;j<sizeof(values)/sizeof(values[0]);++j) {
+        uint32_t bits;memcpy(&bits,&values[j],sizeof(bits));h=DeterministicHash_Fnv1a32Word(h,bits);
+      }
+    }
+  }
+  for (unsigned i=0;i<frame->authored_count;++i) {
+    const ActionEffectFloorField *floor=&frame->authored_floor[i];
+    h=DeterministicHash_Fnv1a32Word(h,floor->count);
+    for (unsigned j=0;j<floor->count;++j) {
+      const ActionEffectFloorSpan *s=&floor->spans[j];
+      const float values[]={s->x0,s->x1,s->y,s->height};
+      for (unsigned k=0;k<4;++k) {
+        uint32_t bits;memcpy(&bits,&values[k],sizeof(bits));h=DeterministicHash_Fnv1a32Word(h,bits);
+      }
+    }
+  }
+  h=DeterministicHash_Fnv1a32Word(h,frame->moonlight.valid);
+  for (unsigned i=0;i<frame->moonlight.count;++i) {
+    const ActionMoonlightOccluder *o=&frame->moonlight.rectangles[i];
+    h=DeterministicHash_Fnv1a32Word(h,(uint16_t)o->x0|((uint32_t)(uint16_t)o->x1<<16));
+    h=DeterministicHash_Fnv1a32Word(h,(uint16_t)o->y0|((uint32_t)(uint16_t)o->y1<<16));
+  }
+  return h;
 }

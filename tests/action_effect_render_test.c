@@ -1453,12 +1453,12 @@ static void TestSceneCapacityAndMalformedInput(void) {
    * record for the decoration builder; this actor-only worst case must remain
    * within it without manufacturing that separate map-derived record. */
   CHECK(batch.vertex_count ==
-        kActionSceneEffectRenderMaxVertices - kActionSceneEffectWaterfallMistExtraVertices -
+        kActionSceneEffectRenderMaxVertices - kActionAuthoredMaxVertices - kActionSceneEffectWaterfallMistExtraVertices -
             kActionSceneEffectLavaReservoirParticleExtraVertices -
             kActionSceneEffectLavaReservoirGlowExtraVertices -
             kActionSceneEffectMaxFlamingWheels * kActionSceneEffectFlamingWheelExtraVertices);
   CHECK(batch.index_count ==
-        kActionSceneEffectRenderMaxIndices - kActionSceneEffectWaterfallMistExtraIndices -
+        kActionSceneEffectRenderMaxIndices - kActionAuthoredMaxIndices - kActionSceneEffectWaterfallMistExtraIndices -
             kActionSceneEffectLavaReservoirParticleExtraIndices -
             kActionSceneEffectLavaReservoirGlowExtraIndices -
             kActionSceneEffectMaxFlamingWheels * kActionSceneEffectFlamingWheelExtraIndices);
@@ -3761,7 +3761,171 @@ static void TestMoonCloudStaysContinuousAcrossSkyboxBands(void) {
   }
 }
 
+static void TestAuthoredTorchReach(void) {
+  ActionSceneEffectFrame frame = {.decoration_count=1,.decoration_visible_count=1};
+  frame.decorations[0] = SceneEffect(kActionEffect_WallTorch,100);
+  ActionEffectInstance *effect = &frame.decorations[0];
+  effect->render_layer = kActionEffectRenderLayer_Bg1Plane;
+  static ActionSceneEffectRenderBatch original, changed;
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1Plane,
+      true,true,IdentityProjection,NULL,NULL,&original));
+  effect->tuning = (ActionEffectTuning){.active=1,.intensity=1,.reach=1,.color=0xffffff};
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1Plane,
+      true,true,IdentityProjection,NULL,NULL,&changed));
+  CHECK(SceneBatchesEqual(&original,&changed));
+  effect->tuning.reach=3;
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1Plane,
+      true,true,IdentityProjection,NULL,NULL,&changed));
+  CHECK(original.vertex_count == changed.vertex_count);
+  float before=0,after=0;
+  for(int i=0;i<kActionEffectGlowVertices;++i) {
+    before=fmaxf(before,fabsf(original.vertices[i].position.x-effect->world_x));
+    after=fmaxf(after,fabsf(changed.vertices[i].position.x-effect->world_x));
+    CHECK(original.vertices[i].color.a==changed.vertices[i].color.a);
+  }
+  CHECK(fabsf(after-before*3)<.001f);
+  /* The flame body and embers keep their original positions and brightness. */
+  CHECK(!memcmp(&original.vertices[kActionEffectGlowVertices],
+      &changed.vertices[kActionEffectGlowVertices],
+      (original.vertex_count-kActionEffectGlowVertices)*sizeof(original.vertices[0])));
+}
+
+static void TestAuthoredEmitters(void) {
+  ActionSceneEffectFrame frame={.authored_count=3};
+  for(unsigned i=0;i<3;++i) frame.authored[i]=(ActionEffectInstance){
+    .kind=(uint8_t)(kActionEffect_AuthoredLight+i),.generation=77+i,.world_x=128,.world_y=160,
+    .flags=kActionEffectFlag_Visible,.projection_plane=kActionEffectProjectionPlane_Bg1,
+    .render_layer=i==2?kActionEffectRenderLayer_WorldDust:kActionEffectRenderLayer_WorldOverlay,
+    .particle_count=64,.particle_lifetime=180,.pulse_ticks=37,
+    .tuning={.active=1,.color=0xaabbff,.intensity=1,.reach=1},
+    .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-48,-32,48,32}}};
+  static ActionSceneEffectRenderBatch first,repeat;
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldOverlay,
+      true,true,IdentityProjection,NULL,NULL,&first));
+  CHECK(first.vertex_count==97+64*4);
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldOverlay,
+      true,true,IdentityProjection,NULL,NULL,&repeat));
+  CHECK(SceneBatchesEqual(&first,&repeat));
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldDust,
+      false,true,IdentityProjection,NULL,NULL,&repeat));
+  CHECK(repeat.vertex_count==8*37);
+  for(int v=0;v<repeat.vertex_count;++v) {
+    CHECK(isfinite(repeat.vertices[v].position.x));
+    CHECK(repeat.vertices[v].color.a>=0 && repeat.vertices[v].color.a<=1);
+  }
+  CHECK(ActionEffectProjection_RequiredBgPlaneMask(NULL,&frame)&(1u<<SR_PPU_OVERLAY_BG1));
+  frame.authored[1].particle_count=129;
+  CHECK(!ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldOverlay,
+      true,true,IdentityProjection,NULL,NULL,&repeat));
+  CHECK(repeat.vertex_count==0 && repeat.index_count==0);
+}
+
+static bool FloorClip(void *context, const ActionEffectInstance *effect, ActionEffectLocalRect *out) {
+  (void)effect;*out=*(const ActionEffectLocalRect *)context;return true;
+}
+static bool DriftingMoteClip(void *context, const ActionEffectInstance *effect, ActionEffectLocalRect *out) {
+  (void)context;
+  /* Birth area [-8,8] is offscreen; the rightward drift must still be built. */
+  if(effect->geometry.data.rect.x1<=40)return false;
+  *out=(ActionEffectLocalRect){40,-32,120,160};return true;
+}
+static bool DriftingMoteProjection(void *context, const ActionEffectInstance *effect,
+    float x, float y, ArRenderPointF *point) {
+  if(x<40)return false;
+  return IdentityProjection(context,effect,x,y,point);
+}
+static void TestAuthoredMoteStyle(void) {
+  ActionSceneEffectFrame frame={.authored_count=1};
+  ActionEffectInstance *e=&frame.authored[0];
+  *e=(ActionEffectInstance){.kind=kActionEffect_AuthoredMotes,.generation=77,.pulse_generation=77,
+      .flags=kActionEffectFlag_Visible,.world_x=100,.world_y=200,
+      .render_layer=kActionEffectRenderLayer_WorldOverlay,.projection_plane=kActionEffectProjectionPlane_Bg1,
+      .particle_count=32,.particle_lifetime=180,.pulse_ticks=37,
+      .tuning={.active=1,.intensity=1,.reach=1,.color=0xff0000},
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-8,-32,8,32}},
+      .particle_style={.active=1,.size_min=1.5f,.size_max=1.5f,.travel_x=80,.travel_y=160,
+          .seed=UINT32_MAX,.color_end=0x0000ff}};
+  static ActionSceneEffectRenderBatch a,b;
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldOverlay,
+      false,true,IdentityProjection,NULL,NULL,&a));
+  CHECK(a.vertex_count==32*4 && a.index_count==32*6);
+  for(int i=0;i<a.vertex_count;i+=4) {
+    const float x=(a.vertices[i].position.x+a.vertices[i+2].position.x)*.5f;
+    const float y=(a.vertices[i].position.y+a.vertices[i+2].position.y)*.5f;
+    const float t=(x-e->world_x)/80;
+    CHECK(t>=0 && t<=1);
+    CHECK(fabsf(y-(e->world_y-32+160*t))<.001f);
+    CHECK(fabsf(a.vertices[i].color.r-(1-t))<.001f);
+    CHECK(fabsf(a.vertices[i].color.b-t)<.001f);
+    CHECK(fabsf(hypotf(a.vertices[i+1].position.x-x,a.vertices[i+1].position.y-y)-1.5f)<.001f);
+    CHECK(a.vertices[i].color.a>=0 && a.vertices[i].color.a<=1);
+  }
+  e->pulse_ticks=111;
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldOverlay,
+      false,true,IdentityProjection,NULL,NULL,&b));CHECK(!SceneBatchesEqual(&a,&b));
+  e->pulse_ticks=37;
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldOverlay,
+      false,true,IdentityProjection,NULL,NULL,&b));CHECK(SceneBatchesEqual(&a,&b));
+  for(unsigned tick=0;tick<180;++tick) {
+    e->pulse_ticks=tick;
+    CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldOverlay,
+        false,true,IdentityProjection,NULL,NULL,&b));
+    CHECK(b.vertex_count==128);
+    for(int i=0;i<b.vertex_count;++i)CHECK(b.vertices[i].color.a>=0 && b.vertices[i].color.a<=1);
+  }
+  e->pulse_ticks=37;
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldOverlay,
+      false,true,DriftingMoteProjection,DriftingMoteClip,NULL,&b));
+  CHECK(b.vertex_count>0 && b.vertex_count<a.vertex_count);
+  e->particle_style.seed=0;
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldOverlay,
+      false,true,IdentityProjection,NULL,NULL,&b));CHECK(!SceneBatchesEqual(&a,&b));
+  CHECK(e->generation==77);
+  e->particle_style.travel_y=0;
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldOverlay,
+      false,true,IdentityProjection,NULL,NULL,&b));
+  for(int i=0;i<b.vertex_count;i+=4) {
+    const float y=(b.vertices[i].position.y+b.vertices[i+2].position.y)*.5f;
+    CHECK(y>=168 && y<=232);
+  }
+  e->particle_style.size_max=NAN;
+  CHECK(!ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_WorldOverlay,
+      false,true,IdentityProjection,NULL,NULL,&b));CHECK(!b.vertex_count && !b.index_count);
+}
+static void TestAuthoredFloorMist(void) {
+  ActionSceneEffectFrame frame={.authored_count=1};
+  frame.authored[0]=(ActionEffectInstance){.kind=kActionEffect_AuthoredFloorMist,
+      .flags=kActionEffectFlag_Visible,.world_x=128,.world_y=112,.generation=41,
+      .render_layer=kActionEffectRenderLayer_Bg1Mist,.projection_plane=kActionEffectProjectionPlane_Bg1,
+      .particle_lifetime=240,.pulse_ticks=50,.tuning={.color=0x91bedf,.intensity=1,.active=1},
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-64,-32,64,32}}};
+  frame.authored_floor[0]=(ActionEffectFloorField){.count=2,.spans={{64,112,128,26},{128,176,144,26}}};
+  static ActionSceneEffectRenderBatch a,b;
+  ActionEffectLocalRect clip={-48,-16,40,28};
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1Mist,false,true,
+      IdentityProjection,FloorClip,&clip,&a));
+  CHECK(a.vertex_count==90 && a.index_count==288);
+  for(int i=0;i<a.vertex_count;++i){
+    const ArRenderVertex2D *v=&a.vertices[i];
+    CHECK(v->position.x>=80 && v->position.x<=168 && v->position.y>=96 && v->position.y<=140);
+    CHECK(v->position.x<=112 || v->position.x>=128); /* Never bridge the pit. */
+    CHECK(isfinite(v->position.y) && v->color.a>=0 && v->color.a<=1);
+    CHECK(v->color.b>v->color.r);
+  }
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1Mist,false,true,
+      IdentityProjection,FloorClip,&clip,&b));CHECK(SceneBatchesEqual(&a,&b));
+  CHECK(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1Mist,true,false,
+      IdentityProjection,FloorClip,&clip,&b));CHECK(!b.vertex_count);
+  frame.authored_floor[0].spans[0].height=NAN;
+  CHECK(!ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1Mist,false,true,
+      IdentityProjection,FloorClip,&clip,&b));CHECK(!b.vertex_count && !b.index_count);
+}
+
 int main(void) {
+  TestAuthoredTorchReach();
+  TestAuthoredEmitters();
+  TestAuthoredMoteStyle();
+  TestAuthoredFloorMist();
   TestDistantWaveCapsFollowRaster();
   TestMoonCloudStaysContinuousAcrossSkyboxBands();
   TestMoonRaysStayContinuousAcrossSkyboxBands();

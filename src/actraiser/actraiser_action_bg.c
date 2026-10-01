@@ -759,6 +759,8 @@ void ActRaiserActionBg_Reset(void) {
   s_observer.forced_blank = false;
 }
 
+uint8_t ActRaiserActionBg_TerrainProfile(void) { return s_observer.terrain_profile; }
+
 void ActRaiserActionBg_BeginRoomVariants(uint8_t profile, uint8_t mosaic,
                                          ArRegionalMediaBytes death_heim_characters) {
   s_observer.death_heim_characters=death_heim_characters;

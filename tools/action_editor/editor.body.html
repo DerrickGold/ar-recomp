@@ -87,11 +87,97 @@
   </div>
   <div class="ctl"><label>Camera X</label>
     <input id="nativeCameraX" type="range" min="0" max="0" step="1" value="0">
-    <span class="v" id="nativeCameraXv">0</span></div>
+    <input id="nativeCameraXv" aria-label="Camera X pixels" type="number" value="0"></div>
   <div class="ctl"><label>Camera Y</label>
     <input id="nativeCameraY" type="range" min="0" max="0" step="1" value="0">
-    <span class="v" id="nativeCameraYv">0</span></div>
+    <input id="nativeCameraYv" aria-label="Camera Y pixels" type="number" value="0"></div>
 
+  </details>
+  <details class="side-section"><summary>Receiver &amp; event preview</summary>
+  <label><input id="previewReceivers" type="checkbox"> Show player/enemy reference probes</label>
+  <div class="ctl"><label for="previewPlayerX">Player X</label><input id="previewPlayerX" type="number" min="-2048" max="16384" value="128"></div>
+  <div class="ctl"><label for="previewPlayerY">Player Y (feet)</label><input id="previewPlayerY" type="number" min="-2048" max="16384" value="192"></div>
+  <div class="ctl"><label for="previewEnemyX">Enemy X</label><input id="previewEnemyX" type="number" min="-2048" max="16384" value="180"></div>
+  <div class="ctl"><label for="previewEnemyY">Enemy Y (feet)</label><input id="previewEnemyY" type="number" min="-2048" max="16384" value="192"></div>
+  <button id="previewProbesHere">Place probes in current view</button>
+  <p class="hint">Blue = player; orange = enemy. These reference silhouettes use shared object tint and depth; they do not simulate actors or preview sprite artwork.</p>
+  <label for="previewEvent">Actor accent</label><select id="previewEvent"><option value="0">None</option></select>
+  <div class="ctl"><label for="previewEventX">Event X</label><input id="previewEventX" type="number" min="-2048" max="16384" value="128"></div>
+  <div class="ctl"><label for="previewEventY">Event Y</label><input id="previewEventY" type="number" min="-2048" max="16384" value="160"></div>
+  <div class="ctl"><label for="previewEventVX">Velocity X / tick</label><input id="previewEventVX" type="number" min="-16" max="16" value="1"></div>
+  <div class="ctl"><label for="previewEventVY">Velocity Y / tick</label><input id="previewEventVY" type="number" min="-16" max="16" value="0"></div>
+  <div class="ctl"><label for="previewEventStart">Start frame</label><input id="previewEventStart" type="number" min="0" max="65535" value="0"></div>
+  <div class="ctl"><label for="previewEventDuration">Duration</label><input id="previewEventDuration" type="number" min="1" max="4096" value="96"></div>
+  <div class="ctl"><label for="previewEventSeed">Seed</label><input id="previewEventSeed" type="number" min="0" max="4294967295" value="123"></div>
+  <button id="previewEventHere">Start in current view</button>
+  <p class="hint">Scrub or play the frame clock. One representative flight, strike, charge or landing phase uses the native accent renderer; no game AI runs here. Actor source edits apply to all matching actors in this room/terrain. Preview positions are temporary.</p>
+  </details>
+  <details class="side-section"><summary>Environmental sources</summary>
+  <p class="hint">Existing native sources in the current view. Overrides apply to the selected terrain variant; gameplay stays unchanged.</p>
+  <label for="effectSource">Source</label><select id="effectSource"></select>
+  <p class="hint" id="effectSourceInfo"></p>
+  <label><input id="effectEnabled" type="checkbox" checked> Enable source</label>
+  <div class="ctl"><label for="effectIntensity">Intensity</label><input id="effectIntensity" type="number" min="0" max="4" step="0.05" value="1"></div>
+  <div class="ctl"><label for="effectReach">Light reach</label><input id="effectReach" type="number" min="0.25" max="4" step="0.1" value="1"></div>
+  <div class="ctl"><label for="effectColor">Tint</label><input id="effectColor" type="color" value="#ffffff"></div>
+  <div id="receiverControls" hidden>
+    <label><input id="effectLightTargets" type="checkbox"> Override light receivers</label>
+    <p><label><input id="effectLightScenery" type="checkbox" checked> Scenery</label> <label><input id="effectLightPlayer" type="checkbox"> Player</label> <label><input id="effectLightEnemies" type="checkbox"> Enemies</label></p>
+    <label><input id="effectDimTargets" type="checkbox"> Override dimming receivers</label>
+    <p><label><input id="effectDimScenery" type="checkbox" checked> Scenery</label> <label><input id="effectDimPlayer" type="checkbox"> Player</label> <label><input id="effectDimEnemies" type="checkbox"> Enemies</label></p>
+    <p class="hint">Object lighting follows each object's position, consistently across its sprite parts. Dimming can affect scenery, the player and enemies independently. Unchecked override controls keep inherited behavior.</p>
+  </div>
+  <div id="emitterControls" hidden>
+    <div class="ctl"><label for="emitterx">Emitter X</label><input id="emitterx" type="number" min="-2048" max="16384" step="1"></div>
+    <div class="ctl"><label for="emittery">Emitter Y</label><input id="emittery" type="number" min="-2048" max="16384" step="1"></div>
+    <div class="ctl"><label for="emitterwidth">Area width</label><input id="emitterwidth" type="number" min="4" max="512" step="4"></div>
+    <div class="ctl"><label for="emitterheight">Area height</label><input id="emitterheight" type="number" min="4" max="512" step="4"></div>
+    <div class="ctl"><label for="emitterparticles">Particle count</label><input id="emitterparticles" type="number" min="1" max="128" step="1"></div>
+    <div class="ctl"><label for="emitterlifetime">Cycle frames</label><input id="emitterlifetime" type="number" min="16" max="4096" step="16"></div>
+    <div id="contourControls" hidden><label for="emitterPoints">Contour points (local X,Y pairs)</label><input id="emitterPoints" type="text" style="width:100%"><button id="contourDraw">Trace wet edge on map</button><p class="hint">Drag along the visible rock edge. Up to 16 points per stroke, within 512px. Explicit points let you avoid soft background details. Check tile depth and collision before tracing.</p></div>
+    <div id="fieldControls" hidden>
+      <div class="ctl"><label for="emitterPlacement">Depth</label><select id="emitterPlacement"><option value="background">Behind playfield</option><option value="playfield">On playfield surfaces</option><option value="foreground">In front of playfield</option></select></div>
+      <div class="ctl"><label for="emitterPattern">Particle pattern</label><select id="emitterPattern"><option value="motes">Motes</option><option value="dust">Dust</option><option value="leaves">Leaves</option><option value="snow">Snow</option><option value="sand">Sand</option><option value="insects">Insects</option><option value="scarabs">Scarabs</option><option value="sparks">Sparks</option></select></div>
+      <div class="ctl"><label for="emitterAngle">Direction (degrees)</label><input id="emitterAngle" type="number" min="-180" max="180" step="1"></div>
+      <div class="ctl"><label for="emitterFan">Fan angle</label><input id="emitterFan" type="number" min="0" max="120" step="1"></div>
+      <div class="ctl"><label for="emitterStrands">Rays / cloud lobes</label><input id="emitterStrands" type="number" min="1" max="32" step="1"></div>
+      <div class="ctl"><label for="emitterSoftness">Soft backdrop</label><input id="emitterSoftness" type="number" min="0" max="1" step="0.05"></div>
+      <div class="ctl"><label for="emitterDrift">Cloud drift / wave phase</label><input id="emitterDrift" type="number" min="-128" max="128" step="1"></div>
+      <div class="ctl"><label for="emitterAmplitude">Wave height</label><input id="emitterAmplitude" type="number" min="0" max="32" step="0.5"></div>
+      <p class="hint" id="fieldHint"></p>
+    </div>
+    <div id="moteControls" hidden>
+      <div class="ctl"><label for="emitterSizeMin">Minimum radius</label><input id="emitterSizeMin" type="number" min="0.1" max="4" step="0.05" value="0.35"></div>
+      <div class="ctl"><label for="emitterSizeMax">Maximum radius</label><input id="emitterSizeMax" type="number" min="0.1" max="4" step="0.05" value="0.75"></div>
+      <div class="ctl"><label for="emitterTravelX">Travel X / cycle</label><input id="emitterTravelX" type="number" min="-512" max="512" step="1" value="0"></div>
+      <div class="ctl"><label for="emitterTravelY">Travel Y / cycle</label><input id="emitterTravelY" type="number" min="-512" max="512" step="1" placeholder="Auto: rise by area height"></div>
+      <button id="emitterAutoRise">Use automatic rise</button>
+      <div class="ctl"><label for="emitterWander">Horizontal sway</label><input id="emitterWander" type="number" min="0" max="32" step="0.5" value="2"></div>
+      <div class="ctl"><label for="emitterSpread">Horizontal spread</label><input id="emitterSpread" type="number" min="0" max="1" step="0.05" value="1"></div>
+      <div class="ctl"><label for="emitterSeed">Pattern seed</label><input id="emitterSeed" type="number" min="0" max="4294967295" step="1" placeholder="Auto: emitter ID"></div>
+      <button id="emitterSeedShuffle">New pattern</button>
+      <label><input id="emitterColorEndEnabled" type="checkbox"> Change tint over particle age</label>
+      <div class="ctl"><label for="emitterColorEnd">End tint</label><input id="emitterColorEnd" type="color" value="#ffffff"></div>
+      <p class="hint">Sizes are radii in game pixels. Travel uses pixels per cycle: negative Y rises, positive Y falls, zero Y stays within the area. Spread 0 forms a column; 1 fills the width. Seed fixes the pattern when scrubbing. Changing area size keeps particle size fixed.</p>
+    </div>
+    <div class="ctl"><label for="emittermist-height">Mist height</label><input id="emittermist-height" type="number" min="4" max="64" step="1"></div>
+    <button id="emitterPreview">Preview selected area</button>
+    <button id="emitterDuplicate">Duplicate emitter</button>
+    <p class="hint">Ground mist searches down through the area to the first supported floor in each column. Mist height controls its depth above that floor. Free mist is airborne.</p>
+  </div>
+  <label for="emitterPreset">New emitter</label><select id="emitterPreset"><option value="soft-light">Soft light</option><option value="motes">Motes</option><option value="free-mist">Free mist</option><option value="ground-mist">Ground mist</option><option value="particle-area">Particle region</option><option value="light-fan">Light fan / window opening</option><option value="water-surface">Water ripples / glints</option><option value="drips">Water drips</option><option value="waterfall-spray">Waterfall spray</option><option value="cloud-bank">Cloud bank</option><option value="exposure">Dimming region</option><option value="wet-contour">Wet rock contour</option><option value="preset:halo">Halo / aurora light</option><option value="preset:dust">Temple dust region</option><option value="preset:leaves">Falling leaves</option><option value="preset:snow">Snow region</option><option value="preset:sand">Blowing sand</option><option value="preset:insects">Jungle insects</option><option value="preset:scarabs">Scarab swarm</option><option value="preset:sparks">Lava embers</option></select>
+  <button id="emitterAdd">Add at view centre</button>
+  <p><button id="emitterMapEdit">Edit emitters on map</button> <button id="emitterMapPlace">Place on map</button> <button id="particleAreaDraw">Draw particle region</button></p>
+  <label><input id="effectGuides" type="checkbox" checked> Show emitter areas on map</label>
+  <p class="hint">In Edit emitters, click an area to select it; drag its centre or body to move it; drag a corner to resize. Alt snaps to 16 pixels. Esc returns to tile selection.</p>
+  <p><button id="floorMistDraw">Paint ground mist</button> <button id="floorMistErase">Erase mist areas</button></p>
+  <label><input id="effectCollision" type="checkbox"> Show collision support on map</label>
+  <p class="hint">Drag a rectangle up to 512 × 512 pixels on the map. Cyan edges support mist; green cells are solid; amber cells are partial collision. Scenery painting does not change collision. Erase removes intersecting authored mist areas; undo restores them.</p>
+  <button id="effectReset">Restore source defaults</button>
+  <p><label>Load effects INI<input id="effectLoad" type="file" accept=".ini,.txt"></label></p>
+  <button id="effectExport">Export effects INI</button>
+  <button id="effectDocumentOpen">Review / paste effects INI</button>
+  <p class="hint" id="effectStatus" role="status">Effect files are separate from scenery. Preview an actor event to tune that accent family.</p>
   </details>
   <details class="side-section"><summary>Paint &amp; depth settings</summary>
   <h2>Paintbrush band</h2>
@@ -331,6 +417,7 @@
     <label>Pixels <select id="sharedPixels"><option value="0">Square</option><option value="1">CRT 4:3</option></select></label>
     <label>Extra width <input id="sharedExtra" type="number" min="0" max="128" step="8" value="120" style="width:55px"></label>
     <label>Extra height <select id="sharedVertical"><option value="0">0</option><option value="32">32</option><option value="64" selected>64</option></select></label>
+    <label><input id="sharedEffects" type="checkbox" checked> Environmental effects</label>
     <label>Backdrop <select id="sharedSky"><option value="0">Plane only</option><option value="1" selected>Skybox only</option><option value="2">Both</option></select></label>
     <label>Distance <input id="sharedDistance" type="range" min="0.5" max="2.5" step="0.01" value="1" style="width:80px"></label>
     <label>Yaw <input id="sharedYaw" type="range" min="-0.7" max="0.7" step="0.01" value="0" style="width:65px"></label>
@@ -454,6 +541,11 @@
   </div>
 </dialog>
 
+<dialog id="effectDocument"><div class="dlg-h"><h3>Effects document</h3><button id="effectDocumentClose">Close</button></div>
+<div class="dlg-b"><p>Shared native/browser format. Apply validates the entire document before replacing active effects. This is separate from diorama-layers.ini.</p>
+<textarea id="effectDocumentText" aria-label="Effects INI" rows="16" style="width:100%" spellcheck="false"></textarea>
+<p id="effectDocumentStatus" role="status"></p>
+<button id="effectDocumentApply">Apply effects document</button><button id="effectDocumentCopy">Copy effects document</button></div></dialog>
 <dialog id="docsDlg"><div class="dlg-h"><h3>Using the action map editor</h3>
   <span class="spacer" style="flex:1"></span><button id="docsX">Close</button></div>
   <div class="dlg-b" id="docsBody"></div></dialog>
@@ -474,6 +566,8 @@
 <script src="coverage_editor.js"></script>
 <script src="diorama_view.js"></script>
 <script src="webgl2_backend.js"></script>
+<script src="effect_editor.js"></script>
+<script src="effect_handles.js"></script>
 <script src="shared_room_preview.js"></script>
 <script src="editor.js"></script>
 <script src="help.js"></script>

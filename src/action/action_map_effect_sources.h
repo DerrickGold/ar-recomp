@@ -1,0 +1,36 @@
+#ifndef AR_ACTION_MAP_EFFECT_SOURCES_H
+#define AR_ACTION_MAP_EFFECT_SOURCES_H
+/* Native map-source identities shared with the immutable room resolver. */
+enum {
+  kBloodpoolTorchTopMetatile = 0x47,
+  kBloodpoolTorchBottomMetatile = 0x4F,
+  kMarahnaFirstEffectMap = 0x04,
+  kMarahnaLastEffectMap = 0x07,
+  kMarahnaBossMap = 0x08,
+  kMarahnaTorchMetatile = 0x43,
+  kAitosLavaMap = 0x01,
+  kAitosLavaLeftMetatile = 0xDC,
+  kAitosLavaMiddleMetatile = 0xDD,
+  kAitosLavaRightMetatile = 0xDE,
+  kAitosLavaFillMetatile = 0xDF,
+  kAitosLavaBubbleMetatile = 0xE7,
+  kAitosLavaMaxMiddleCells = 6,
+  kAitosSideLavaLipMetatile = 0x01,
+  kAitosSideLavaBodyMetatile = 0x05,
+  kAitosSideLavaFirstAnimatedMetatile = 0x02,
+  kAitosSideLavaLastAnimatedMetatile = 0x04,
+  kAitosSideLavaMap6AnimatedMetatile = 0x77,
+  kAitosSideLavaMaxCells = 64,
+  kAitosSplashTopLeft = 0x36,
+  kAitosSplashTopMiddle = 0x5E,
+  kAitosSplashTopRight = 0x81,
+  kAitosSplashBodyLeft = 0x4E,
+  kAitosSplashBodyMiddle = 0xF4,
+  kAitosSplashBodyRight = 0x4F,
+  kAitosSplashDripLeft = 0xF6,
+  kAitosSplashDripMiddle = 0xFC,
+  kAitosSplashDripRight = 0xFE,
+  kAitosSplashMaxCells = 8,
+  kDeathHeimViperMap = 0x06,
+};
+#endif

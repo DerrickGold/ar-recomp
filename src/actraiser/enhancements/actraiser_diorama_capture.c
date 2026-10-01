@@ -10,10 +10,22 @@
 #include "diorama/diorama_capture.h"
 #include "sim/sim3d/sim3d_textures.h"
 #include "host/host_frame_surfaces.h"
+#include "action/action_effect_manifest.h"
+#include "actraiser/actraiser_sprite_ownership.h"
 
 static uint8_t s_bg_apron_mask;
+static const ActionReceiverLighting *s_receiver_lighting;
 static DioramaBgSourceBounds s_bg2_source_bounds;
 static bool s_track_bg2_source_bounds;
+
+static SrPpuObjColorTransform ReceiverTransform(const float multiply[3],const float add[3]) {
+  SrPpuObjColorTransform result;
+  for(unsigned c=0;c<3;++c) {
+    result.multiply[c]=(uint16_t)(multiply[c]*256+.5f);
+    result.add[c]=(uint16_t)(add[c]*255+.5f);
+  }
+  return result;
+}
 
 uint8_t ActRaiser_DioramaBgApronMask(void) {
   return s_bg_apron_mask;
@@ -96,6 +108,7 @@ void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
   if (surface_width > (int)SR_PPU_SURFACE_MAX_WIDTH)
     return;
   const SrPpuObjPart *parts = ActionApron_Parts();
+  const ActionApronReceiver *receivers=ActionApron_Receivers();
   const int count = ActionApron_Count();
   const int rows = kActRaiserAuthenticHeight +
       g_ws_extra_top + g_ws_extra_bottom;
@@ -127,6 +140,14 @@ void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
         obj_capture &&
         (obj_capture->flags & SR_PPU_OVERLAY_MARK_OBJ_COLOR_MATH) != 0u &&
         ActionApron_PartUsesColorMath(part->tile_attr);
+
+    float multiply[3]={1,1,1},add[3]={0};
+    const unsigned receiver=receivers[i].role==kActRaiserSprite_Player?kActionReceiver_Player:
+        receivers[i].role==kActRaiserSprite_Enemy?kActionReceiver_Enemies:0;
+    const bool tinted=receiver&&s_receiver_lighting;
+    if(tinted)ActionEffectReceivers_Sample(s_receiver_lighting,receiver,receivers[i].x,receivers[i].y,multiply,add);
+    const SrPpuObjColorTransform transform=ReceiverTransform(multiply,add);
+    const unsigned brightness=255u*(ActRaiser_PpuFrame()->state.display_control&15u)/15u;
 
     for (int band = 0; band < 2; band++) {
       /* Intersect the part with this apron band; skip when it does not reach. */
@@ -163,8 +184,14 @@ void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
         const size_t row_base = (size_t)row * surface_width + base_col;
         for (int x = 0; x < w; x++) {
           uint32_t pixel = scratch[(size_t)y * w + x];
-          if (!pixel)
-            continue;
+          if (!pixel)continue;
+          if(tinted) {
+            const uint32_t original=pixel;pixel&=0xff000000u;
+            for(unsigned c=0;c<3;++c) {
+              const unsigned shift=16-8*c;unsigned value=((original>>shift)&255u)*transform.multiply[c]/256u+transform.add[c]*brightness/255u;
+              if(value>255)value=255;pixel|=value<<shift;
+            }
+          }
           const size_t index = row_base + x;
           bool claimed = false;
           for (int p = 0; p < 4 && !claimed; p++)
@@ -433,6 +460,38 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
 }
 
 void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
+  s_receiver_lighting=NULL;
+  if(g_settings.action_environmental_effects) {
+    const ActRaiserSpriteOwnership ownership=ActRaiserSpriteOwnership_Presented(map_group,map_number);
+    const ActionReceiverLighting *lighting=ownership.valid?
+        ActionEffectManifest_PrepareReceivers(map_group,map_number,g_ram,kActRaiserWramSize):NULL;
+    s_receiver_lighting=lighting;
+    if(lighting) {
+      SrPpuObjColorTransform transforms[128];
+      unsigned last_receiver=0;int last_x=0,last_y=0;float cached_multiply[3]={1,1,1},cached_add[3]={0};
+      for(unsigned slot=0;slot<128;++slot) {
+        const unsigned receiver=ownership.slots[slot]==kActRaiserSprite_Player?kActionReceiver_Player:
+            ownership.slots[slot]==kActRaiserSprite_Enemy?kActionReceiver_Enemies:0;
+        float multiply[3]={1,1,1},add[3]={0};
+        if(receiver) {
+          if(last_receiver!=receiver||last_x!=ownership.world_x[slot]||last_y!=ownership.world_y[slot]) {
+            ActionEffectReceivers_Sample(lighting,receiver,ownership.world_x[slot],ownership.world_y[slot],cached_multiply,cached_add);
+            last_receiver=receiver;last_x=ownership.world_x[slot];last_y=ownership.world_y[slot];
+          }
+          memcpy(multiply,cached_multiply,sizeof(multiply));memcpy(add,cached_add,sizeof(add));
+        }
+        transforms[slot]=ReceiverTransform(multiply,add);
+      }
+      const SrPpuObjCaptureRequest request={.struct_size=sizeof(request),
+        .flags=SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS,.lifetime_generation=ActRaiser_PpuFrame()->lifetime_generation,.color_transforms=transforms,.color_transform_count=128};
+      if(!ActRaiser_ConfigurePpuObjCapture(&request)) {
+        s_receiver_lighting=NULL;
+        static bool reported;
+        if(!reported){fprintf(stderr,"[action-effects] runner rejected object receiver transforms\n");reported=true;}
+      }
+    }
+  }
+
   /* Flat presentation has one already-composited framebuffer, so BG-local
    * enhancements need the PPU's real priority winners as occlusion masks.
    * Diorama owns isolated planes and inserts effects directly after BG1/BG2;
@@ -442,7 +501,7 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
       g_settings.action_environmental_effects;
   if (environmental_effects_enabled && !g_diorama_frame_active &&
       !HostDevTools_DioramaDumpArmed() &&
-      ActionSceneEffects_RoomUsesBg1Decorations(g_ram, kActRaiserWramSize)) {
+      (ActionSceneEffects_RoomUsesBg1Decorations(g_ram, kActRaiserWramSize) || ActionEffectManifest_NeedsBg1Mask(map_group,map_number))) {
     const SrPpuOverlayCaptureState *bg1 =
         ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG1);
     if (bg1->x1 <= bg1->x0 || bg1->y1 <= bg1->y0) {
@@ -464,7 +523,7 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
   }
   if (environmental_effects_enabled && !g_diorama_frame_active &&
       !HostDevTools_DioramaDumpArmed() &&
-      ActionSceneEffects_RoomUsesBg2Decorations(g_ram, kActRaiserWramSize)) {
+      (ActionSceneEffects_RoomUsesBg2Decorations(g_ram, kActRaiserWramSize) || ActionEffectManifest_HasAuthored(map_group,map_number))) {
     const SrPpuOverlayCaptureState *bg2 =
         ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG2);
     if (bg2->x1 <= bg2->x0 || bg2->y1 <= bg2->y0) {

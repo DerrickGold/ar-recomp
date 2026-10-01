@@ -1093,9 +1093,12 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
               ws_obj_size(s_action_ppu_state_valid
                               ? &s_action_ppu_state : NULL,
                           part_large);
-          (void)ActionApron_AddPart(
-              &apron_geom, exact_x, exact_y, rendered_attributes,
-              part_size);
+          const ActionApronReceiver receiver={
+              .x=(int16_t)cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_WorldX),
+              .y=(int16_t)cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_WorldY),
+              .role=(uint8_t)ActRaiserSpriteOwnership_ActionRole(object_address,
+                  cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_Flags))};
+          (void)ActionApron_AddOwnedPart(&apron_geom,exact_x,exact_y,rendered_attributes,part_size,receiver);
         }
       }
     }
@@ -1125,8 +1128,11 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
   cpu->m_flag = 0;
   cpu->P &= (uint8)~0x20;
 
-  ActRaiserSpriteOwnership_RecordAction(cpu_read16(cpu, cpu->DB,
-      object_address + kActRaiserActionObject_SourceDescriptor),
+  ActRaiserSpriteOwnership_RecordActionObject(cpu_read16(cpu, cpu->DB,
+      object_address + kActRaiserActionObject_SourceDescriptor),object_address,
+      cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_Flags),
+      (int16_t)cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_WorldX),
+      (int16_t)cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_WorldY),
       oam_before, oam_offset);
 
   /* Emulate the replaced RTS; the generated paired caller then restores S. */

@@ -50,6 +50,24 @@ void ActRaiserSpriteOwnership_RecordAction(uint16_t source,
   ActRaiserSpriteOwnership_Record(role, first_byte, end_byte);
 }
 
+ActRaiserSpriteRole ActRaiserSpriteOwnership_ActionRole(uint16_t record,uint16_t flags) {
+  const bool aligned=record>=kActRaiserWram_ActionObjectTable &&
+      record<kActRaiserWram_ActionObjectTable+kActRaiserActionObjectStride*kActRaiserActionObjectCount &&
+      (record-kActRaiserWram_ActionObjectTable)%kActRaiserActionObjectStride==0;
+  return record==kActRaiserWram_PlayerObject?kActRaiserSprite_Player:
+      aligned && record>kActRaiserWram_PlayerObject && (flags&kActRaiserObjectFlag_Attacker)?
+      kActRaiserSprite_Enemy:kActRaiserSprite_Unowned;
+}
+void ActRaiserSpriteOwnership_RecordActionObject(uint16_t source,uint16_t record,uint16_t flags,
+    int16_t x,int16_t y,unsigned first_byte,unsigned end_byte) {
+  ActRaiserSpriteOwnership_RecordAction(source,first_byte,end_byte);
+  if(!s_build.valid)return;
+  const ActRaiserSpriteRole role=ActRaiserSpriteOwnership_ActionRole(record,flags);
+  if(role==kActRaiserSprite_Unowned || (end_byte>first_byte && s_build.slots[first_byte/4]==kActRaiserSprite_StatueEyes))return;
+  ActRaiserSpriteOwnership_Record(role,first_byte,end_byte);
+  for(unsigned slot=first_byte/4;slot<end_byte/4;++slot){s_build.world_x[slot]=x;s_build.world_y[slot]=y;}
+}
+
 void ActRaiserSpriteOwnership_RecordSim(uint16_t record, uint16_t family,
     unsigned first_byte, unsigned end_byte) {
   ActRaiserSpriteRole role = kActRaiserSprite_Unowned;

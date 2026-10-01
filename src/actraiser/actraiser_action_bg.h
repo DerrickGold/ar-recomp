@@ -16,6 +16,8 @@
 #include "regional/media/regional_media.h"
 #include "snesrecomp/runner.h"
 
+uint8_t ActRaiserActionBg_TerrainProfile(void);
+
 struct DioramaRoomOverride;
 struct ActionRoomScene;
 struct ActionRoomSceneFrameState;

@@ -108,6 +108,11 @@ bool AppendSceneSoftCloud(ActionEffectGeometryWriter *writer, const ActionEffect
     ActionEffectProjectPointFn project_point, void *userdata);
 bool SceneActorHeading(const ActionEffectInstance *effect,
                               float *x, float *y);
+bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,bool lighting,bool particles,
+    ActionEffectProjectPointFn project,ActionEffectClipBoundsFn clip,void *context);
+bool AppendAuthoredEnvironment(ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect, const ActionEffectFloorField *floor, bool lighting, bool particles,
+    ActionEffectProjectPointFn project, ActionEffectClipBoundsFn clip, void *context);
 bool AppendSceneParticle(ActionEffectGeometryWriter *writer,
                                 const ActionEffectInstance *effect,
                                 float x, float y, float previous_x,

@@ -1,4 +1,5 @@
 #include "action_effect_projection.h"
+#include "action_light_kinds.h"
 
 #include <math.h>
 
@@ -106,6 +107,9 @@ static void AddRequiredBgPlanes(
   for (uint8_t i = 0; i < count; i++) {
     const ActionEffectInstance *effect = &effects[i];
     if (!(effect->flags & kActionEffectFlag_Visible)) continue;
+    if(effect->tuning.light_receivers_set && (effect->tuning.light_receivers&kActionReceiver_Scenery) &&
+        ActionLightKind_Supported(effect->kind) && effect->render_layer==kActionEffectRenderLayer_WorldOverlay)
+      *mask |= 1u << SR_PPU_OVERLAY_BG1;
     if (effect->kind == kActionEffect_BloodpoolMoonlight)
       *mask |= 1u << SR_PPU_OVERLAY_BG1;
     if (effect->render_layer == kActionEffectRenderLayer_Bg2HighAlpha)
@@ -148,6 +152,8 @@ uint32_t ActionEffectProjection_RequiredBgPlaneMask(
         &mask, spell_frame->effects, spell_frame->effect_count,
         kActionEffectMaxInstances, false);
   if (scene_frame) {
+    AddRequiredBgPlanes(&mask, scene_frame->authored, scene_frame->authored_count,
+        kActionAuthoredMaxInstances, false);
     AddRequiredBgPlanes(
         &mask, scene_frame->effects, scene_frame->effect_count,
         kActionSceneEffectMaxInstances, scene_frame->overflow != 0);

@@ -1,11 +1,19 @@
+#include "action/action_floor_support.h"
+#include "action/action_effect_receivers.h"
 #include "room_scene.h"
 #include "diorama/diorama_snapshot.h"
 #include "diorama/diorama_rom_backdrop.h"
+#include "action/action_decoration_pass.h"
+#include "action/action_environment_exposure.h"
+#include "action/action_effect_projection.h"
+#include "action/action_effect_render.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 ArRenderDevice *DioramaPreview_Device(void);
 uint8_t *DioramaPreview_Input(void);
+unsigned DioramaPreview_Capacity(void);
 void DioramaPreview_Reset(void);
 bool DioramaPreview_Begin(int width, int height);
 
@@ -30,6 +38,87 @@ static int s_named_source;
 static uint32_t s_named_art[256 * 256], s_named_default, s_named_fill;
 static ArRenderTexture s_named_texture;
 static bool s_named_uploaded;
+
+/* Shared native recipes, bounded scratch, and one submission per pass. */
+static ActionSceneEffectRenderBatch s_effect_batch;
+static bool s_effects_enabled = true;
+static unsigned s_effect_vertices;
+static bool s_probes;
+static int s_probe_x[2],s_probe_y[2];
+static ActionReceiverLighting s_receiver;
+int RoomPreview_SetReceivers(int enabled,int player_x,int player_y,int enemy_x,int enemy_y) {
+  if(player_x<-2048||player_x>16384||player_y<-2048||player_y>16384||
+      enemy_x<-2048||enemy_x>16384||enemy_y<-2048||enemy_y>16384)return 0;
+  s_probes=enabled!=0;s_probe_x[0]=player_x;s_probe_y[0]=player_y;s_probe_x[1]=enemy_x;s_probe_y[1]=enemy_y;return 1;
+}
+unsigned RoomPreview_EventCount(void){return ActionEffectPreview_Count();}
+unsigned RoomPreview_EventKind(unsigned index){return ActionEffectPreview_Kind(index);}
+int RoomPreview_SetEvent(unsigned index,int x,int y,int vx,int vy,unsigned start,unsigned duration,unsigned seed) {
+  if(!s_room||index>ActionEffectPreview_Count()||x<-2048||x>16384||y<-2048||y>16384||
+      vx<-16||vx>16||vy<-16||vy>16||start>65535||duration<1||duration>4096)return 0;
+  ActionEffectPreviewEvent event={.kind=index?ActionEffectPreview_Kind(index-1):0,
+    .x=x,.y=y,.velocity_x=vx,.velocity_y=vy,.start=start,.duration=duration,.seed=seed};
+  EditorRoomScene_SetEvent(s_room,&event);s_cached=false;return 1;
+}
+void RoomPreview_EnableEffects(int enabled) { s_effects_enabled = enabled != 0; }
+unsigned RoomPreview_EffectCount(void) {
+  return s_room && s_effects_enabled ? EditorRoomScene_Effects(s_room)->decoration_count + EditorRoomScene_Effects(s_room)->authored_count + EditorRoomScene_Effects(s_room)->effect_count : 0;
+}
+unsigned RoomPreview_EffectVertices(void) { return s_effect_vertices; }
+typedef struct RoomEffectPass {
+  const ActionSceneEffectFrame *frame;
+  ActionEffectProjectionContext projection;
+  bool valid;
+} RoomEffectPass;
+static bool DrawEffectLayer(RoomEffectPass *pass, uint8_t layer,
+    ArRenderBlendMode blend, bool lighting, bool particles) {
+  if (!ActionSceneDecorationRender_Build(pass->frame, layer, lighting, particles,
+          ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
+          &pass->projection, &s_effect_batch)) return false;
+  if (!s_effect_batch.index_count) return true;
+  s_effect_vertices += s_effect_batch.vertex_count;
+  const ArRenderDrawState state = {.flags = kArRenderDrawState_Blend, .blend = blend};
+  return ArRenderDevice_DrawGeometryWithState(DioramaPreview_Device(),
+      ArRenderTexture_Invalid(), s_effect_batch.vertices, s_effect_batch.vertex_count,
+      s_effect_batch.indices, s_effect_batch.index_count, &state);
+}
+static bool DrawProbes(RoomEffectPass *pass) {
+  ArRenderVertex2D vertices[32];int32_t indices[48];
+  static const float boxes[4][4]={{-3,-28,3,-22},{-6,-21,6,-10},{-5,-9,-1,0},{1,-9,5,0}};
+  for(unsigned role=0;role<2;++role) {
+    ActionEffectInstance e={.world_x=s_probe_x[role],.world_y=s_probe_y[role],
+      .obj_priority=2,.projection_plane=kActionEffectProjectionPlane_Obj};
+    float multiply[3]={1,1,1},add[3]={0};
+    if(s_effects_enabled)ActionEffectReceivers_Sample(&s_receiver,role?kActionReceiver_Enemies:kActionReceiver_Player,e.world_x,e.world_y,multiply,add);
+    const float base[2][3]={{.24f,.48f,.78f},{.75f,.32f,.16f}};
+    ArRenderColorF color={fminf(1,base[role][0]*multiply[0]+add[0]),fminf(1,base[role][1]*multiply[1]+add[1]),fminf(1,base[role][2]*multiply[2]+add[2]),1};
+    for(unsigned box=0;box<4;++box) {
+      const unsigned n=role*16+box*4;
+      for(unsigned corner=0;corner<4;++corner) {
+        vertices[n+corner]=(ArRenderVertex2D){.color=color};
+        if(!ActionEffectProjection_ProjectPoint(&pass->projection,&e,boxes[box][corner&1?2:0],boxes[box][corner&2?3:1],&vertices[n+corner].position))return false;
+      }
+      const int local[]={0,1,2,1,3,2};for(unsigned i=0;i<6;++i)indices[role*24+box*6+i]=n+local[i];
+    }
+  }
+  const ArRenderDrawState state={.flags=kArRenderDrawState_Blend,.blend=kArRenderBlendMode_Alpha};
+  return ArRenderDevice_DrawGeometryWithState(DioramaPreview_Device(),ArRenderTexture_Invalid(),vertices,32,indices,48,&state);
+}
+static void DrawPlaneEffects(void *userdata, int plane, const DioramaProjection *projection) {
+  RoomEffectPass *context = userdata;
+  if (!context->valid) return;
+  context->projection.diorama_projection = projection;
+  if(s_probes && plane==DioramaPlaneForObjectPriority(2) && !DrawProbes(context)){context->valid=false;return;}
+  if(!s_effects_enabled)return;
+  for (unsigned i = 0; i < sizeof(kDecorationPasses)/sizeof(kDecorationPasses[0]); ++i) {
+    const ActionDecorationPass *pass = &kDecorationPasses[i];
+    if (pass->attachment != plane ||
+        (pass->finite_plane_only && projection->bg2_skybox.count)) continue;
+    if (!DrawEffectLayer(context, pass->layer, pass->blend, pass->diorama_lighting, true)) {
+      context->valid = false; return;
+    }
+  }
+}
 
 int RoomPreview_SkyboxSource(void) {
   if (!s_room) return 0;
@@ -80,6 +169,7 @@ static ArRenderTexture ResolveSkybox(void *context, ArRenderDevice *device, int 
   return s_named_texture;
 }
 
+uint32_t RoomPreview_EffectHash(void) { return EditorRoomScene_EffectHash(s_room); }
 uint32_t RoomPreview_Hash(void) { return EditorRoomScene_Hash(s_room); }
 unsigned RoomPreview_Width(void) { return s_room ? EditorRoomScene_Width(s_room) : 0; }
 unsigned RoomPreview_Height(void) { return s_room ? EditorRoomScene_Height(s_room) : 0; }
@@ -115,6 +205,48 @@ int RoomPreview_Configure(unsigned size) {
   s_cached = false;
   return 1;
 }
+static unsigned s_recipe_error_line;
+unsigned RoomPreview_RecipeErrorLine(void) { return s_recipe_error_line; }
+int RoomPreview_ConfigureEffects(unsigned size) {
+  if (!s_room || size > kActionEffectRecipeMaxBytes ||
+      !EditorRoomScene_ConfigureEffects(s_room,(char *)DioramaPreview_Input(),size,&s_recipe_error_line)) return 0;
+  s_cached = false; return 1;
+}
+/* Explicit field access keeps the WASM ABI independent of C padding. */
+unsigned RoomPreview_SourceValue(unsigned index, unsigned field) {
+  if (!s_room) return 0;
+  const ActionSceneEffectFrame *frame = EditorRoomScene_Effects(s_room);
+  if (index >= frame->decoration_count + frame->authored_count + frame->effect_count) return 0;
+  const bool actor=index>=frame->decoration_count+frame->authored_count;
+  const bool authored=!actor && index>=frame->decoration_count;
+  const ActionEffectInstance *e=actor?&frame->effects[index-frame->decoration_count-frame->authored_count]:
+      authored?&frame->authored[index-frame->decoration_count]:&frame->decorations[index];
+  switch (field) {
+    case 0: return actor||e->kind==kActionEffect_LandingDust?0:e->generation;
+    case 1: return e->kind;
+    case 2: return (uint32_t)(int32_t)e->world_x;
+    case 3: return (uint32_t)(int32_t)e->world_y;
+    case 5: return authored;
+    case 6: return authored ? frame->authored_floor[index-frame->decoration_count].count : 0;
+    case 7: return actor||e->kind==kActionEffect_LandingDust;
+    case 4: return e->flags & kActionEffectFlag_Visible;
+    default: return 0;
+  }
+}
+/* Row-major overlay bytes in the existing exchange buffer. This API uses the
+ * same collision semantics as native recipe capture, before any GPU render. */
+unsigned RoomPreview_CollisionGrid(void) {
+  if (!s_room) return 0;
+  const ActionEnvironmentScene *scene=EditorRoomScene_Environment(s_room);
+  const unsigned w=scene->maps[0].world_width/16,h=scene->maps[0].world_height/16;
+  if (!w || !h || h>DioramaPreview_Capacity()/w) return 0;
+  uint8_t *out=DioramaPreview_Input();
+  for (unsigned y=0;y<h;++y) for (unsigned x=0;x<w;++x)
+    out[y*w+x]=(uint8_t)ActionFloorSupport_Cell(scene,x*16,y*16);
+  return w*h;
+}
+const char *RoomPreview_KindName(unsigned kind) { return ActionEffectRecipes_KindName(kind); }
+unsigned RoomPreview_ReachSupported(unsigned kind) { return ActionEffectRecipes_ReachSupported(kind); }
 static bool Upload(void) {
   ArRenderDevice *device = DioramaPreview_Device();
   const DioramaCapture *capture = EditorRoomScene_Capture(s_room);
@@ -186,7 +318,7 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
       !(pitch >= -0.7f && pitch <= 0.7f) || skybox < 0 || skybox > 2 ||
       pixel_aspect < 0 || pixel_aspect > 1 || width < 1 || height < 1 ||
       width > 2048 || height > 2048) return 0;
-  s_uploads = 0;
+  s_uploads = 0; s_effect_vertices = 0;
   if (!s_cached || x != s_x || y != s_y || frame != s_frame || extra != s_extra || vertical != s_vertical) {
     s_cached = false;
     if (!EditorRoomScene_Render(s_room, x, y, frame, extra, vertical) || !Upload()) return 0;
@@ -212,7 +344,33 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   DioramaView view = {.camera = {.tilt_x = pitch, .tilt_y = yaw},
     .distance_scale = distance, .camera_framing_weight = 1, .pixel_aspect = pixel_aspect,
     .visible_width = capture.width, .viewport = {0,0,width,height}};
+  const ActionEnvironmentScene *environment = EditorRoomScene_Environment(s_room);
+  RoomEffectPass effects = {.frame = EditorRoomScene_Effects(s_room), .valid = true,
+    .projection = {.bg1_camera_x = environment->camera_x[0], .bg1_camera_y = environment->camera_y[0],
+      .bg2_camera_x = environment->camera_x[1], .bg2_camera_y = environment->camera_y[1],
+      .ws_extra = extra, .ws_extra_top = capture.authentic_y0,
+      .visible_width = capture.width, .snes_height = capture.height, .viewport = view.viewport}};
+  if(s_probes && !ActionEffectReceivers_Prepare(effects.frame,environment->group,environment->room,
+      environment->camera_x[0],environment->camera_y[0],environment->camera_x[1],environment->camera_y[1],s_effects_enabled,&s_receiver))return 0;
+  if (s_effects_enabled || s_probes) {
+    scene.bg1_dimming = s_effects_enabled ? ActionEnvironment_Bg1Dimming(effects.frame, environment->group, environment->room) : 0;
+    scene.bg1_dimming_ramp = ActionEnvironment_Bg1DimmingRamp(environment->group, environment->room);
+    scene.effect_obj_priority_mask = ActionEffectProjection_RequiredObjPriorityMask(NULL, effects.frame) | (s_probes?1u<<2:0);
+    scene.effect_bg_plane_mask = ActionEffectProjection_RequiredBgPlaneMask(NULL, effects.frame);
+    scene.plane_effect = DrawPlaneEffects; scene.plane_effect_userdata = &effects;
+  }
   DioramaProjection projection;
-  return PresentationOutcome_IsUsable(Diorama_Composite(
-      DioramaPreview_Device(), &capture, &view, &scene, &projection));
+  if (!PresentationOutcome_IsUsable(Diorama_Composite(
+      DioramaPreview_Device(), &capture, &view, &scene, &projection)) || !effects.valid) return 0;
+  if (!s_effects_enabled) return 1;
+  effects.projection.diorama_projection = &projection;
+  if(!ActionSceneEffectRender_Build(effects.frame,true,true,ActionEffectProjection_ProjectPoint,&effects.projection,&s_effect_batch))return 0;
+  if(s_effect_batch.index_count) {
+    s_effect_vertices+=s_effect_batch.vertex_count;
+    const ArRenderDrawState state={.flags=kArRenderDrawState_Blend,.blend=kArRenderBlendMode_Add};
+    if(!ArRenderDevice_DrawGeometryWithState(DioramaPreview_Device(),ArRenderTexture_Invalid(),s_effect_batch.vertices,s_effect_batch.vertex_count,s_effect_batch.indices,s_effect_batch.index_count,&state))return 0;
+  }
+  return DrawEffectLayer(&effects, kActionEffectRenderLayer_WorldOverlay, kArRenderBlendMode_Add, true, true) &&
+      DrawEffectLayer(&effects, kActionEffectRenderLayer_WorldDust, kArRenderBlendMode_Alpha, false, true) &&
+      DrawEffectLayer(&effects, kActionEffectRenderLayer_ForegroundLight, kArRenderBlendMode_Light, true, false);
 }

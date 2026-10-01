@@ -3,7 +3,7 @@
  * no user-generated capture is part of this workflow. */
 const SharedRoomPreview = (() => {
   const canvas=document.querySelector('#sharedGl'), label=document.querySelector('#sharedRoomStatus');
-  let backend=null, api=null, key='', configDirty=true, config='', lost=false, skyboxKey=0;
+  let backend=null, api=null, key='', configDirty=true, config='', lost=false, skyboxKey=0, effectsConfig=null, collision=null, eventConfig=null;
   const setting=id=>Number(document.querySelector('#shared'+id).value);
   function send(bytes,call) {
     if(bytes.length>api.DioramaPreview_Capacity())throw Error('Room data exceeds renderer capacity.');
@@ -23,41 +23,81 @@ const SharedRoomPreview = (() => {
     }
     return roomSectionIni(room)+'\n'+scoped.join('\n');
   }
-  function render() {
-    if(!api||lost)return;
-    try {
+  function ensureRoom() {
+    if(!api||lost)throw Error('Shared renderer is still loading or unavailable.');
       const next=sceneKey(room);
       if(key!==next) {
         send(SharedActionPreview.encode(DATA,BLOBS,room),api.RoomPreview_Load);
-        key=next;config='';configDirty=true;skyboxKey=0;
+        key=next;collision=null;eventConfig=null;config='';configDirty=true;skyboxKey=0;effectsConfig=null;
       }
       if(configDirty) {
         const text=roomIni();
         if(config!==text) {send(new TextEncoder().encode(text),api.RoomPreview_Configure);config=text;}
-        const source=api.RoomPreview_SkyboxRoom();
-        if(source&&source!==skyboxKey) {
-          const sky=DATA.rooms.find(r=>r.group===(source>>>16)&&r.map===((source>>>8)&255));
-          if(!sky)throw Error('Named skybox room is missing from the catalogue.');
-          send(SharedActionPreview.encode(DATA,BLOBS,sky),api.RoomPreview_LoadSkybox);
-        }
-        skyboxKey=source;configDirty=false;
+        configDirty=false;
       }
+  }
+  function collisionGrid() {
+    ensureRoom();
+    if(!collision) {
+      const count=api.RoomPreview_CollisionGrid();
+      if(!count)throw Error('No collision map is available for this room.');
+      collision={width:api.RoomPreview_Width()/16,height:api.RoomPreview_Height()/16,
+        cells:new Uint8Array(api.memory.buffer,api.DioramaPreview_Input(),count).slice()};
+    }
+    return collision;
+  }
+  function render() {
+    if(!api||lost)return;
+    try {
+      ensureRoom();
+      if(effectsConfig!==EffectEditor.text())validateEffects(EffectEditor.text());
+      const eventValues=['previewEvent','previewEventX','previewEventY','previewEventVX','previewEventVY','previewEventStart','previewEventDuration','previewEventSeed'].map(id=>Number($('#'+id).value));
+      const nextEvent=eventValues.join(':');
+      if(eventConfig!==nextEvent) {
+        if(!api.RoomPreview_SetEvent(...eventValues))throw Error('Invalid event preview parameters.');
+        eventConfig=nextEvent;
+      }
+      if(!api.RoomPreview_SetReceivers($('#previewReceivers').checked?1:0,...['previewPlayerX','previewPlayerY','previewEnemyX','previewEnemyY'].map(id=>Number($('#'+id).value))))throw Error('Invalid receiver probe positions.');
       const w=960,h=Math.round(w/setting('Aspect'));
       if(canvas.width!==w)canvas.width=w;if(canvas.height!==h)canvas.height=h;
       backend.stats.creates=backend.stats.draws=0;
       const start=performance.now();
-      const ok=api.RoomPreview_Render(nativeCamera.x,nativeCamera.y,nativeFrame,
+      api.RoomPreview_EnableEffects($('#sharedEffects').checked ? 1 : 0);
+      const renderFrame=()=>api.RoomPreview_Render(nativeCamera.x,nativeCamera.y,nativeFrame,
         Math.max(0,Math.min(128,Math.floor(setting('Extra')))),setting('Vertical'),w,h,
         setting('Distance'),setting('Yaw'),setting('Pitch'),setting('Sky'),setting('Pixels'));
+      let ok=renderFrame();
+      let uploads=api.RoomPreview_Uploads();
+      // Resolve after the room frame selects camera-local sections (Aitos).
+      // A changed named backdrop needs one redraw; cached surfaces are reused.
+      const source=api.RoomPreview_SkyboxRoom();
+      if(source&&source!==skyboxKey) {
+        const sky=DATA.rooms.find(r=>r.group===(source>>>16)&&r.map===((source>>>8)&255));
+        if(!sky)throw Error('Named skybox room is missing from the catalogue.');
+        send(SharedActionPreview.encode(DATA,BLOBS,sky),api.RoomPreview_LoadSkybox);
+        ok=renderFrame();
+        uploads+=api.RoomPreview_Uploads();
+      }
+      skyboxKey=source;
       const error=backend.gl.getError();
       if(!ok||error)throw Error(`Room rendering failed (${error}).`);
+      EffectEditor.updateSources(api);
       label.textContent=`Shared C · ${api.RoomPreview_Width()} × ${api.RoomPreview_Height()} room · `+
-        `${backend.stats.draws} draws · ${api.RoomPreview_Uploads()} uploads · ${backend.stats.creates} allocations · `+
+        `${api.RoomPreview_EffectCount()} sources · ${api.RoomPreview_EffectVertices()} effect vertices · ${backend.stats.draws} draws · ${uploads} uploads · ${backend.stats.creates} allocations · `+
         `${(performance.now()-start).toFixed(1)} ms CPU`;
       $('#hud').textContent=`Camera ${nativeCamera.x}, ${nativeCamera.y} · frame ${nativeFrame}. `+
-        'Drag to pan; arrows move. Live scenery preview; environmental effects and actors are still pending.';
+        'Drag to pan; arrows move. Shared scenery/effects; optional reference probes and clock-based actor accents.';
     } catch(error) { label.textContent=error.message; }
   }
+  $('#previewProbesHere').onclick=()=>{
+    $('#previewPlayerX').value=nativeCamera.x+112;$('#previewEnemyX').value=nativeCamera.x+176;
+    $('#previewPlayerY').value=$('#previewEnemyY').value=nativeCamera.y+192;
+    $('#previewReceivers').checked=true;setMode('shared');draw();
+  };
+  $('#previewEventHere').onclick=()=>{
+    $('#previewEventX').value=nativeCamera.x+128;$('#previewEventY').value=nativeCamera.y+160;
+    $('#previewEventStart').value=nativeFrame;setMode('shared');draw();
+  };
   document.querySelector('#sharedControls').addEventListener('input',()=>draw());
   for(const event of ['input','change','click'])document.addEventListener(event,e=>{
     const id=e.target.id;
@@ -78,7 +118,13 @@ const SharedRoomPreview = (() => {
   });
   for(const name of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(name,()=>{drag=null;});
   canvas.addEventListener('webglcontextlost',event=>{
-    event.preventDefault();lost=true;label.textContent='Graphics context lost. Reload to restore the renderer.';
+    event.preventDefault();lost=true;label.textContent='Graphics context lost. Effects and map edits are retained while the renderer recovers.';
+  });
+  canvas.addEventListener('webglcontextrestored',()=>{
+    // Context loss invalidates every old GL object; recreate the backend and
+    // WASM handles together, then replay the current documents and camera.
+    api=null;backend=null;key='';config='';effectsConfig=null;configDirty=true;skyboxKey=0;lost=false;
+    initialize();
   });
   async function initialize() {
     if(!window.__ROOM_PREVIEW_WASM__) {label.textContent='Shared renderer was not bundled in this build.';return;}
@@ -93,11 +139,28 @@ const SharedRoomPreview = (() => {
           throw Error(`Unexpected renderer import: ${item.module}.${item.name}`);
       const instance=await WebAssembly.instantiate(module,{ar:backend.imports,wasi_snapshot_preview1:wasi});
       api=instance.exports;backend.memory=api.memory;api._initialize?.();
+      const select=$('#previewEvent');select.replaceChildren();
+      const none=document.createElement('option');none.value='0';none.textContent='None';select.append(none);
+      const bytes=new Uint8Array(api.memory.buffer),decoder=new TextDecoder();
+      for(let i=0;i<api.RoomPreview_EventCount();i++) {
+        const p=api.RoomPreview_KindName(api.RoomPreview_EventKind(i));let end=p;while(bytes[end])end++;
+        const option=document.createElement('option');option.value=String(i+1);option.textContent=decoder.decode(bytes.subarray(p,end));select.append(option);
+      }
       if(api.DioramaPreview_Version()!==1||!api.DioramaPreview_Init(backend.gl.getParameter(backend.gl.MAX_TEXTURE_SIZE)))
         throw Error('Unsupported renderer version or device.');
       $('#modeShared').disabled=false;label.textContent='Ready. Select Shared renderer to explore the level.';
+      draw();
     }catch(error){label.textContent=error.message;api=null;backend?.dispose();}
   }
+  function validateEffects(text) {
+    ensureRoom();
+    const bytes=new TextEncoder().encode(text);
+    if(bytes.length>131072)throw Error('Effect document exceeds 128 KiB.');
+    new Uint8Array(api.memory.buffer,api.DioramaPreview_Input(),bytes.length).set(bytes);
+    if(!api.RoomPreview_ConfigureEffects(bytes.length))
+      throw Error(`Effects rejected at line ${api.RoomPreview_RecipeErrorLine()}. Previous effects retained.`);
+    effectsConfig=text;
+  }
   initialize();
-  return {draw:render,invalidate:()=>{configDirty=true;}};
+  return {validateEffects,collisionGrid,draw:render,invalidate:()=>{configDirty=true;}};
 })();

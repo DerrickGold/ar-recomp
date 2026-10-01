@@ -89,6 +89,7 @@ function setKey(target, k, value) {
   if (value === undefined) delete target[k]; else target[k] = value;
 }
 function applySide(op, which) {
+  if(op.effects){EffectEditor.restore(op.effects[which]);return true;}
   const keys = Object.keys(op.parts);
   const current = keyOf(room, bgIndex);
   /* A single-layer op that belongs somewhere else switches there: undoing
@@ -242,6 +243,12 @@ cvs.addEventListener('mousedown', ev => {
     drag={shiftSelect:true,x:ev.clientX,y:ev.clientY,cx,cy,anchor:selectionAnchor};
     return;
   }
+  if(['effects','effectPlace'].includes(brush)){
+    if(EmitterMapTools.begin(ev))drag={effects:true};return;
+  }
+  if(brush==='contour'){const r=cvs.getBoundingClientRect();drag={contour:true,points:[{x:Math.round((ev.clientX-r.left-view.x)/view.scale),y:Math.round((ev.clientY-r.top-view.y)/view.scale)}]};draw();return;}
+  if(brush==='particleArea'){drag={particleArea:true,x0:cx,y0:cy,x1:cx,y1:cy};draw();return;}
+  if(brush==='floorMist'||brush==='floorErase'){drag={floorMist:true,erase:brush==='floorErase',x0:cx,y0:cy,x1:cx,y1:cy};draw();return;}
   if(brush==='stamp'){stampTiles(cx,cy);return;}
   if(brush==='selectRect'){drag={selectRect:true,x0:cx,y0:cy,x1:cx,y1:cy};draw();return;}
   if (actor.show && !ev.altKey && brush !== 'select') {
@@ -274,6 +281,16 @@ window.addEventListener('mousemove', ev => {
   if(brush==='stamp'){stampHover=[cx,cy];draw();}
   if (!drag) return;
   if(drag.framing){moveFramingDrag(ev);return;}
+  if(drag.effects){EmitterMapTools.move(ev);return;}
+  if(drag.contour){
+    const r=cvs.getBoundingClientRect(),p={x:Math.round((ev.clientX-r.left-view.x)/view.scale),y:Math.round((ev.clientY-r.top-view.y)/view.scale)};
+    const last=drag.points.at(-1);
+    if(Math.hypot(p.x-last.x,p.y-last.y)>=8) {
+      if(drag.points.length===16)drag.points=drag.points.filter((_,i)=>i%2===0||i===15);
+      drag.points.push(p);
+    }
+    draw();return;
+  }
   if(drag.shiftSelect) {
     const dx=ev.clientX-drag.x,dy=ev.clientY-drag.y;
     if(dx*dx+dy*dy<16)return;
@@ -295,10 +312,18 @@ window.addEventListener('mousemove', ev => {
     paintCell(cx, cy, drag.value);
     glDirty = true; tally(); draw();
   }
-  else if (drag.rect||drag.selectRect) { drag.x1=cx; drag.y1=cy; draw(); }
+  else if (drag.rect||drag.selectRect||drag.floorMist||drag.particleArea) { drag.x1=cx; drag.y1=cy; draw(); }
 });
 window.addEventListener('mouseup', () => {
   if(finishFramingDrag())return;
+  if(drag?.effects){drag=null;EmitterMapTools.finish();draw();return;}
+  if(drag?.contour){EffectEditor.paintContour(drag.points);drag=null;draw();return;}
+  if(drag?.particleArea){
+    EffectEditor.paintParticleRect(drag.x0,drag.y0,drag.x1,drag.y1);drag=null;draw();return;
+  }
+  if(drag?.floorMist){
+    EffectEditor.paintFloorRect(drag.x0,drag.y0,drag.x1,drag.y1,drag.erase);drag=null;draw();return;
+  }
   if(drag?.shiftSelect) {
     const [x,y]=drag.anchor||[drag.cx,drag.cy];
     selectRectangle(x,y,drag.cx,drag.cy);
@@ -352,10 +377,10 @@ $('#selPal').onclick=()=>{
   selectMatchingCells(c=>((c.words[0]>>10)&7)===palette);
 };
 function deselect() {
-  commitOp(); drag = null;
+  commitOp(); if(drag?.effects)EmitterMapTools.cancel();drag = null;
   selectedCells.clear();selectedStampKeys.clear();selectionRect=null;stampHover=null;
   selectionAnchor=null;
-  if(brush==='stamp'){$('#bSelect').onclick();}
+  if(['stamp','floorMist','floorErase','effects','effectPlace','particleArea'].includes(brush)){$('#bSelect').onclick();}
   lastEntry = null; pixelCell = null;pixelStamp=null;
   refreshSelectionControls(); draw();
 }

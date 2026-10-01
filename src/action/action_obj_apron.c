@@ -47,6 +47,7 @@ bool ActionApron_PartUsesColorMath(uint16_t tile_attr) {
 /* ── Per-frame channel ──────────────────────────────────────────────────── */
 
 static SrPpuObjPart s_parts[kActionApronMaxParts];
+static ActionApronReceiver s_receivers[kActionApronMaxParts];
 static int s_count;
 static int s_overflow;
 static int s_peak;
@@ -66,6 +67,7 @@ bool ActionApron_AddPart(const ActionApronGeometry *g, int screen_x,
     s_overflow++;
     return false;
   }
+  s_receivers[s_count]=(ActionApronReceiver){0};
   s_parts[s_count].x = (int16_t)screen_x;
   s_parts[s_count].y = (int16_t)screen_y;
   s_parts[s_count].tile_attr = tile_attr;
@@ -79,3 +81,9 @@ int ActionApron_Count(void) { return s_count; }
 int ActionApron_Overflow(void) { return s_overflow; }
 int ActionApron_PeakCount(void) { return s_peak; }
 const SrPpuObjPart *ActionApron_Parts(void) { return s_parts; }
+
+bool ActionApron_AddOwnedPart(const ActionApronGeometry *g,int x,int y,uint16_t tile,uint8_t size,ActionApronReceiver receiver) {
+  if(!ActionApron_AddPart(g,x,y,tile,size))return false;
+  s_receivers[s_count-1]=receiver;return true;
+}
+const ActionApronReceiver *ActionApron_Receivers(void) { return s_receivers; }

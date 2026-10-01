@@ -335,6 +335,8 @@ struct Ppu {
     uint8_t overlayObjRelocatedFirst, overlayObjRelocatedCount;
     PpuObjRangeCapture objRangeCapture;
     PpuObjRangeCapture objWinnerCapture;
+    bool objColorTransformsActive;
+    SrPpuObjColorTransform objColorTransforms[128];
     uint32_t renderPitch;
     uint32_t renderHeight;
     uint8_t *renderBuffer;
@@ -529,6 +531,7 @@ bool PpuSetOverlayTransparentFill(Ppu *, PpuOverlaySource,
 uint32_t PpuOverlayTransparentFillColor(const Ppu *, PpuOverlaySource);
 bool PpuSetOverlayOamRange(Ppu *, uint8_t, uint8_t);
 bool PpuSetOverlayRelocatedOamRange(Ppu *, uint8_t, uint8_t);
+bool PpuSetObjColorTransforms(Ppu *, const SrPpuObjColorTransform *, unsigned);
 bool PpuSetObjRangeCapture(Ppu *, uint8_t, uint8_t, int, int, int, int,
                            uint8_t *, size_t);
 bool PpuSetObjWinnerCapture(Ppu *, uint8_t, uint8_t, int, int, int, int,

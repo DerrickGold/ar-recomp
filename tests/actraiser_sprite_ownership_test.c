@@ -166,7 +166,29 @@ static void TestArtIndependentRoles(void) {
   CHECK(!ActRaiserSpriteOwnership_Presented(1, 1).valid);
   ActRaiserSpriteOwnership_Reset();
 }
+static void TestActionReceivers(void) {
+  uint8_t shadow[kActRaiserSpriteShadowBytes]={0};
+  ActRaiserSpriteOwnership_Begin(1,2,0);
+  ActRaiserSpriteOwnership_RecordActionObject(0,0x08a0,1,100,200,0,12);
+  ActRaiserSpriteOwnership_RecordActionObject(0,0x08e0,1,300,400,12,20);
+  ActRaiserSpriteOwnership_RecordActionObject(0,0x06a0,1,500,600,20,24);
+  ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(1,2,shadow);
+  ActRaiserSpriteOwnership owner=ActRaiserSpriteOwnership_Presented(1,2);
+  CHECK(owner.valid&&owner.slots[0]==kActRaiserSprite_Player&&owner.slots[2]==kActRaiserSprite_Player);
+  CHECK(owner.slots[3]==kActRaiserSprite_Enemy&&owner.slots[5]==kActRaiserSprite_Unowned);
+  CHECK(owner.world_x[2]==100&&owner.world_y[3]==400);
+  shadow[0]^=1;ActRaiserSpriteOwnership_Upload(1,2,shadow);CHECK(!ActRaiserSpriteOwnership_Presented(1,2).valid);
+  ActRaiserSpriteOwnership_Begin(7,1,0);
+  ActRaiserSpriteOwnership_RecordActionObject(0xf3fa,0x08e0,1,0,0,0,4);
+  ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(7,1,shadow);
+  CHECK(ActRaiserSpriteOwnership_Presented(7,1).slots[0]==kActRaiserSprite_StatueEyes);
+  ActRaiserSpriteOwnership_Begin(1,2,0);
+  ActRaiserSpriteOwnership_RecordActionObject(0,0x08a0,1,0,0,0,516);
+  ActRaiserSpriteOwnership_Complete(shadow);ActRaiserSpriteOwnership_Upload(1,2,shadow);
+  CHECK(!ActRaiserSpriteOwnership_Presented(1,2).valid);
+}
 int main(void) {
+  TestActionReceivers();
   TestNativeWrappers();
   TestPublication();
   TestArtIndependentRoles();

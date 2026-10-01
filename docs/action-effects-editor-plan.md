@@ -185,20 +185,171 @@ CPU submission measurements, not GPU or Steam Deck/D3D12 performance evidence.
 
 **Phase 2 remains in review.** Live-scene native/browser image comparisons and
 representative edited-scene motion review remain before replacing the legacy
-Diorama tab. One remaining visual case is Bloodpool 2:1 at camera (1152, 240),
-frame 37, 4:3, 64 extra rows: **Both** shows water-colored strips near the upper
-outer corners, while **Skybox only** does not. Compare that combined-mode
-composition against native before accepting its edge behavior; the captured-row
-clipping regression alone does not establish final compositor parity.
-Actors/HUD, environmental dimming/effects, camera-local effect sections,
-reactive camera behavior, gameplay-driven transitions, final CRT/heat and frame
-generation are not yet connected. Native Deck/Vulkan and Windows/D3D12 checks
-remain open. Frame controls currently scrub scenery animation; effect time and
-preview event inputs belong to the next integration.
+Diorama tab. The Bloodpool 2:1 combined-backdrop corner artifact was subsequently
+traced to capture aprons bypassing vertical layer clips. The shared PPU now
+clips the guard columns and edited tiles consistently; the regression checks
+the full surface pitch, and the browser reproduction no longer shows the water
+blocks above the sky. This fix does not establish final compositor parity.
+Actors/HUD, reactive camera behavior, gameplay-driven transitions, final CRT/heat
+and frame generation are not yet connected. Native Deck/Vulkan and Windows/D3D12
+checks remain open. Environmental integration is described below.
+
+### Shared environmental authoring increment — 2026-10-01
+
+The prior whole-room foundation was committed as `e5918817`. Environmental
+capture now has a borrowed immutable scene contract with separate native-WRAM
+and full-room adapters. Forest, cave, marsh, castle, torch and Aitos source
+recognition share the same C kernels. The editor calls no gameplay interpreter
+and manufactures no WRAM. Native actor/event observation remains in its existing
+owner. Native and browser also share the decoration pass table, exposure policy
+and effect geometry; seeking the room clock now seeks ambient animation.
+
+Implemented authoring:
+
+- Version-1 `action-effects.ini`, stable room/terrain/kind/source identities,
+  sparse enable/tint/intensity overrides and independent wall-torch spill reach.
+- A native source picker and inspector, default reset, and placed soft-light,
+  mote and free-mist emitters. Coordinates, field dimensions, tint, intensity,
+  cycle and mote count are editable. Emitters can be duplicated or removed.
+- Authored emitter map picking, placement, move and corner resize handles with
+  one-step undo, grid snapping, cancelled drafts and room/terrain isolation.
+  Mote fields expose independent radius, drift, sway/spread, seed and age tint;
+  deterministic analytic animation preserves backward seeking and fixed cost.
+- Native session-start loading, shared atomic validation, import/export and a
+  review/paste dialog. Changes participate in the map editor's undo history.
+- Separate authored storage: 16 enabled emitters and a conservative 4096-vertex
+  budget per room/terrain. The 16 native actor and 27 decoration records retain
+  their budgets. Geometry reuses the existing pass batches and retained scratch.
+- Fixed-memory offline WASM packaging, source/geometry/draw/upload/allocation
+  diagnostics and a context-restoration handler that rebuilds resources while
+  retaining in-memory documents. Recovery itself still needs browser testing.
+
+Validation: 147 regional rooms, 882 exact native/WASM surface and resolved-source
+matches, 147 authored-file round trips, finite submitted geometry, reverse seeking,
+unchanged-frame resource reuse and atomic invalid imports under the native
+ASan/UBSan oracle. Native effect/capture/presentation, PPU and Diorama tests pass
+(the optional frame-generation GPU test skips without its environment gate).
+Torch reach tests verify changed radius with unchanged peak, flame and embers.
+An authored-only presentation test verifies additive light, alpha mist and the
+Environmental effects setting independently of actor lighting/particle settings.
+Browser import, rejected version, undo/redo and source/geometry changes were
+reviewed over localhost. Export download completion remains unverified; copyable
+INI is available. No authored-file live-game visual comparison is claimed yet.
+
+These are parts of phases 3–5 and 7, **not completion of every remaining phase**.
+Current phase status and concrete remaining work:
+
+| Phase | Delivered | Remaining acceptance / implementation |
+| --- | --- | --- |
+| 0–2: shared preview | Full-room scenery and ambient sources, native kernels, deterministic camera/time, aspect/extension controls | Matched edited-scene images and motion, actor/HUD inputs, final post-processing, legacy renderer replacement after acceptance |
+| 3: data and resolver | Versioned sparse overrides, stable IDs, native loader, budgets, atomic parse, bounded field/receiver parameters and deterministic preview events | Source-group member records, explicit reload and migration fixtures |
+| 4: first authoring workflow | Source inspector, torch reach, placed light/motes/free mist, emitter canvas picking/move/resize, supported-floor mist rectangle/erase tools, shared collision overlay, duplicate/reset, undo, INI transport | Native group member handles, richer material/slope support, combined scenery/effects project, small native/browser comparison clip |
+| 5: established families | Shared native source/geometry paths; group tint/intensity/enable; authored fans, water/spray/drips/contours/clouds/exposure; particle regions; 19 recognized event families; separate scenery/player/enemy receivers | Individual native compound-member tuning, edited-silhouette occlusion, automatic material/contour recognition and family-by-family native visual acceptance |
+| 6: later treatments | Bounded snow, sand, leaf, insect, scarab, spark, cloud and halo authoring behaviors/presets | Per-stage artistic rollout and native visual review; full refraction/heat/volumetric scattering experiments remain deferred |
+| 7: hardening | Embedded WASM, fixed memory, resource reuse/teardown and invalid-input checks | Context recovery exercise, long-session/resize/DPR checks, offline browser acceptance, native Metal live-edit comparison, Deck/Vulkan and Windows/D3D12 measurements |
+
+Supported-floor authoring now uses a shared exposed-floor predicate for native
+cave defaults, authored recipe capture and the editor collision overlay. Painted
+regions split at steps/gaps, settle at spike-pocket bottoms and respect ceiling
+headroom. The renderer uses three clipped density slices behind actors, with a
+conservative whole-room geometry budget and no additional textures. Native
+flat/diorama tests include an authored-only alpha-mask regression. Browser paint, erase, undo/redo, INI import, live height editing and
+regional native/WASM source comparison cover the lower temple. Redraws retain
+uncommitted inspector input; room/terrain changes isolate source pickers.
+Flat solid surfaces and verified Fillmore capitals are supported; other partial
+and sloped shapes remain explicitly unsupported rather than being guessed.
+
+Mote/handle validation additionally covers atomic parameter rejection, independent
+emission/particle scale, the full cycle's alpha bounds, drift beyond birth-area
+culling, stable identities during seed changes, typed inspector edits, map
+move/resize undo and cancelled drafts. All 147 authored-file native/WASM round
+trips include the new parameters. Browser image review at frames 37 → 111 → 37
+restores identical preview pixels, with unchanged pass count and no warm-frame
+uploads/allocations. Review examples are in `runs/action-editor-effects/`;
+they are browser-only examples, not installed game overrides. These checks do
+not replace native Metal, Deck/Vulkan or D3D12 measurements.
+
+### Field, receiver and event authoring increment — 2026-10-01
+
+Twelve authored families now cover lights, motes, free/floor mist, large particle
+regions, fans, surface waves/glints, drips, waterfall spray, cloud banks, dimming
+regions and wet contours. The inspector supplies validated family-specific
+controls, depth placement and deterministic seed/age palettes. Region drawing
+creates one record for up to 16384 × 16384 pixels, with density per 256-pixel
+world cell and a fixed 64-cell visible-motion bound. It does not allocate native
+actors or generate the entire room each frame. Wet contours are artist-authored
+paths, not automatic slope or material recognition.
+
+The eight region patterns include motes, dust, leaves, snow, sand, insects,
+scarabs and sparks. Halo is a soft-light preset; cloud banks layer soft lobes to
+suggest volume. Water surfaces animate crest geometry and glints without an
+extra scene resolve; actual submerged-artwork refraction is deferred. This
+delivers authoring behaviors for the later-stage roadmap, not a completed
+artistic treatment of every room.
+
+Light and dimming receivers independently select scenery, player and enemies.
+Existing source records retain inherited behavior until explicitly overridden.
+Native object ownership supplies one coherent hot-point tint for all sprite/OAM
+and extended-apron parts. Color transforms are an atomic, optional runner ABI
+facet; native/reference PPU output agrees and authentic comparisons remain
+untinted. Moving accent lights retain their Action lighting gate and particle
+trails remain independent. Native receiver preparation reads a copy of the
+pending observation, without consuming ticks or modifying identity history.
+
+The browser provides movable reference silhouettes and clock-based preview
+events for all 19 registered actor accent families. These use the established
+native geometry/phase validators; they do not simulate enemy AI or draw actual
+actor artwork. Source ID zero edits the recognized family for that room/terrain,
+including subsequent native generations. Event/probe positions are preview-only.
+
+Coverage matrix:
+
+| Established family | Editable coverage | Deliberate limit |
+| --- | --- | --- |
+| Forest canopy/front rays, leaves and motes | Native group enable/tint/intensity and light receivers; placed fans and leaf/mote regions | Native individual canopy openings retain their procedural layout. |
+| Cave/temple water, sheen, drips, dust, mist, grit, ambient and tower light | Native group overrides/receivers; placed waves, spray, drips, contours, particle/cloud/mist/dimming regions | Artist paths and explicit spray anchors require visual review; no guessed collision changes. |
+| Bloodpool moonlight, reflection, water, timber, air and clouds | Native group overrides/lighting receivers; authored fans, crests/glints and cloud/particle regions | Existing native occlusion and water-band recognition remain authoritative. |
+| Castle windows, sky, mist, water and wall torches | Native group overrides/receivers, independent torch spill reach; additional opening fans/water/mist | Moving an authored fan does not move a native window or alter its source recognition. |
+| Aitos lava, waterfall/mist, splash and torch families | Native group overrides/receivers; cloud/spray/water/spark presets | Native fourteen-splash and other family budgets remain intact. |
+| Recognized projectile, electrical and boss accents plus landing dust | Nineteen native representative preview phases; enable/tint/intensity, light receivers where present | No new gameplay spawn, full boss AI, phase authoring or spell-controller replacement. |
+
+Validation includes 147 regional rooms, 882 native/WASM surface/source matches,
+147 twelve-family authored round trips, 22,172 valid recorded draws, reverse
+seeking, retained resource reuse and atomic malformed-load rejection under
+ASan/UBSan. Native tests exercise receiver isolation, glow-center ownership,
+moving-light/trail separation, pause/peek clock ownership, ABI atomicity and
+negative-margin sprite tinting. Editor tests cover one-record large-region and
+contour strokes, one-step undo, independent receiver masks and unchanged scenery.
+Browser review of an authored palace region, actor accent and player-only light
+at frames 37 → 111 → 37 restores identical preview image bytes with zero warm
+uploads/allocations. Target-device timing and matched live-game images remain
+acceptance gates.
+The retained receiver preparation/sampling stress fixture (three eight-strand
+fans and 16 object samples) measured 0.221 ms CPU per frame over 1000 runs here.
+It excludes PPU rasterization, observation and GPU work; it is not a target
+hardware frame-time measurement.
+
+Storage decision: retain semantic recipes in `action-effects.ini`, a text sidecar
+next to settings. A 256-record fixture measured 41,492 text bytes, 63,492 retained
+bytes and 0.729 ms CPU parse time averaged over 500 development-machine runs.
+The parser runs only at load/import. A binary struct dump would reduce neither
+rendering work nor retained memory, while introducing platform/layout and
+migration hazards. Consider a separately versioned binary payload only for
+future dense masks/grids/meshes/artwork, or a disposable hash-keyed cache after a
+measured loading bottleneck. See the editor guide's storage discussion.
+
+Next preserve source validation while making edited visible silhouettes available
+to light occlusion; scenery stamps must not silently become gameplay collision.
+Close native visual comparisons and target-platform measurements before marking
+the whole editor plan complete.
+
+The [editor guide](../tools/action_editor/README.md#environmental-authoring)
+documents the file format, controls, limits and current omissions.
 
 ### Extraction inventory and remaining comparison inputs
 
-These are current implementation owners, not yet user-editable presets:
+These are the implementation owners and comparison inputs for the editable
+coverage described above:
 
 | Family | Existing capture / rendering owners | Inputs the enhanced fixture must preserve |
 | --- | --- | --- |
@@ -577,7 +728,8 @@ preview events or traversal assists. Larger diagnostic captures remain optional.
 - [ ] Authoring limits prevent native-pool interference and rendering overload.
 - [ ] Browser packaging, target-platform measurements and user visual review pass.
 
-Next close phase 2's representative live-scene image and edit comparisons, then
-replace the legacy Diorama preview when accepted. Begin phase 3's shared effect
-recipes and coherent preview inputs on this full-room foundation. Keep outstanding
-phase 0/1 effect and target-platform comparisons alongside their integrations.
+Continue from the October 1 status table: native compound-member tools,
+material/slope overlays and visual acceptance. Close phase 2's
+representative live-scene image/edit comparisons before replacing the legacy
+Diorama view, and keep native target-platform acceptance separate from browser
+and CPU test results.

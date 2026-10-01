@@ -16,6 +16,8 @@ typedef enum ActRaiserSpriteRole {
   kActRaiserSprite_WorldLabel,
   kActRaiserSprite_WorldPlaque,
   kActRaiserSprite_WorldPalace,
+  kActRaiserSprite_Player,
+  kActRaiserSprite_Enemy,
 } ActRaiserSpriteRole;
 
 enum { kActRaiserSpriteSlots = 128, kActRaiserSpriteShadowBytes = 544 };
@@ -24,6 +26,7 @@ typedef struct ActRaiserSpriteOwnership {
   uint8_t group, map;
   uint16_t location;
   uint8_t slots[kActRaiserSpriteSlots];
+  int16_t world_x[kActRaiserSpriteSlots], world_y[kActRaiserSpriteSlots];
 } ActRaiserSpriteOwnership;
 
 /* Emission describes identity; the completed native OAM DMA makes it visible.
@@ -35,6 +38,9 @@ void ActRaiserSpriteOwnership_Record(ActRaiserSpriteRole role,
                                     unsigned first_byte, unsigned end_byte);
 void ActRaiserSpriteOwnership_RecordAction(uint16_t source,
     unsigned first_byte, unsigned end_byte);
+ActRaiserSpriteRole ActRaiserSpriteOwnership_ActionRole(uint16_t record,uint16_t flags);
+void ActRaiserSpriteOwnership_RecordActionObject(uint16_t source,uint16_t record,uint16_t flags,
+    int16_t world_x,int16_t world_y,unsigned first_byte,unsigned end_byte);
 void ActRaiserSpriteOwnership_RecordSim(uint16_t record, uint16_t family,
     unsigned first_byte, unsigned end_byte);
 void ActRaiserSpriteOwnership_Complete(const uint8_t *shadow);

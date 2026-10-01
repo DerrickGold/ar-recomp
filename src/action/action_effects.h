@@ -69,6 +69,18 @@ typedef enum ActionEffectKind {
   kActionEffect_CastleSky,
   kActionEffect_CastleMist,
   kActionEffect_CastleWater,
+  kActionEffect_AuthoredLight,
+  kActionEffect_AuthoredMotes,
+  kActionEffect_AuthoredMist,
+  kActionEffect_AuthoredFloorMist,
+  kActionEffect_AuthoredParticleArea,
+  kActionEffect_AuthoredFan,
+  kActionEffect_AuthoredWater,
+  kActionEffect_AuthoredDrips,
+  kActionEffect_AuthoredSpray,
+  kActionEffect_AuthoredCloud,
+  kActionEffect_AuthoredExposure,
+  kActionEffect_AuthoredContour,
   kActionEffect_KindCount,
 } ActionEffectKind;
 
@@ -185,6 +197,8 @@ typedef enum ActionEffectRenderLayer {
   kActionEffectRenderLayer_Bg1Mist,
   /* Low shoreline mist between low scenery and high-priority water/terrain. */
   kActionEffectRenderLayer_Bg2HighAlpha,
+  /* Explicit receiver lighting retains multiplicative blend on scenery. */
+  kActionEffectRenderLayer_Bg1Light,
   kActionEffectRenderLayer_Count,
 } ActionEffectRenderLayer;
 
@@ -244,6 +258,9 @@ enum {
    * seven ambient fields and six contact bursts. These host records never
    * consume native objects or the separate 16-record actor-effect budget. */
   kActionSceneDecorationMaxInstances = 27,
+  kActionAuthoredMaxInstances = 16,
+  kActionAuthoredMaxVertices = 4096,
+  kActionAuthoredMaxIndices = 24576,
   kActionSceneEffectObserverTrackCount = 80,
   kActionEffectObjPriorityCount = 4,
   kActionLandingDustMaxPuffs = 6,
@@ -258,7 +275,43 @@ enum {
    * triangle to finite source bounds, including interpolated vertex colors. */
   kActionEffectFlag_ClippedMesh = 1 << 3,
   kActionEffectFlag_ClipToRect = 1 << 4,
+  /* Capture-side feature gate for actor lighting moved into scenery passes;
+   * trails still follow the independently enabled particle setting. */
+  kActionEffectFlag_LightingOff = 1 << 5,
 };
+
+/* Captured values; zero active preserves the original recipe byte-for-byte.
+ * Reach is currently meaningful only for the torch's environmental spill. */
+enum { kActionReceiver_Scenery=1, kActionReceiver_Player=2, kActionReceiver_Enemies=4 };
+typedef struct ActionEffectTuning {
+  float intensity, reach;
+  uint32_t color;
+  uint8_t active;
+  uint8_t light_receivers, dim_receivers, light_receivers_set, dim_receivers_set;
+} ActionEffectTuning;
+
+/* Authored motes only. Travel is world pixels per particle cycle; spread is
+ * the fraction of emission width, independent of particle size. */
+typedef struct ActionEffectParticleStyle {
+  float size_min, size_max, travel_x, travel_y, wander, spread;
+  uint32_t seed, color_end;
+  uint8_t active;
+} ActionEffectParticleStyle;
+
+/* Shared authoring parameters, expressed in game pixels and gameplay ticks.
+ * Particle areas use density per 256px world cell, independent of camera size.
+ * Pattern numbers are serialized by name, never by C structure layout. */
+typedef enum ActionParticlePattern {
+  kActionParticle_Motes, kActionParticle_Dust, kActionParticle_Leaves,
+  kActionParticle_Snow, kActionParticle_Sand, kActionParticle_Insects,
+  kActionParticle_Scarabs, kActionParticle_Sparks, kActionParticle_Count,
+} ActionParticlePattern;
+enum { kActionParticleCellSize=256, kActionParticleMaxCells=64, kActionContourMaxPoints=16 };
+typedef struct ActionEffectFieldStyle {
+  float angle, fan, softness, drift, amplitude;
+  uint8_t strands, pattern, placement, point_count;
+  struct {float x,y;} points[kActionContourMaxPoints];
+} ActionEffectFieldStyle;
 
 typedef struct ActionEffectInstance {
   uint32_t generation;
@@ -298,6 +351,10 @@ typedef struct ActionEffectInstance {
   /* Optional finite scenery bounds in effect-local coordinates. Independent
    * parallax can otherwise move atmosphere over outside-world padding. */
   ActionEffectLocalRect clip_rect;
+  ActionEffectTuning tuning;
+  uint16_t particle_count, particle_lifetime;
+  ActionEffectParticleStyle particle_style;
+  ActionEffectFieldStyle field_style;
 } ActionEffectInstance;
 
 /* Diagnostic payload: the raw identity of a cohort slot that was ACTIVE while
@@ -367,6 +424,15 @@ typedef struct ActionBloodpoolDetails {
   uint8_t timber_count, post_count, valid;
 } ActionBloodpoolDetails;
 
+/* At most 33 columns for an unaligned 512px-wide painted area. Owned values,
+ * never pointers into mutable editor documents or live gameplay memory. */
+enum { kActionAuthoredFloorMaxSpans = 33, kActionAuthoredFloorVerticesPerSpan = 45 };
+typedef struct ActionEffectFloorSpan { float x0, x1, y, height; } ActionEffectFloorSpan;
+typedef struct ActionEffectFloorField {
+  unsigned count;
+  ActionEffectFloorSpan spans[kActionAuthoredFloorMaxSpans];
+} ActionEffectFloorField;
+
 typedef struct ActionSceneEffectFrame {
   uint16_t game_frame;
   uint8_t effect_count;
@@ -377,6 +443,9 @@ typedef struct ActionSceneEffectFrame {
   uint8_t decoration_visible_count;
   uint8_t decoration_overflow;
   ActionEffectInstance decorations[kActionSceneDecorationMaxInstances];
+  uint8_t authored_count;
+  ActionEffectInstance authored[kActionAuthoredMaxInstances];
+  ActionEffectFloorField authored_floor[kActionAuthoredMaxInstances];
   ActionMoonlightOcclusion moonlight;
   ActionBloodpoolDetails bloodpool;
 } ActionSceneEffectFrame;

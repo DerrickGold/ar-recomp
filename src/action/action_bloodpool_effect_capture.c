@@ -4,15 +4,6 @@
 #include "action_bloodpool_occluders.h"
 #include "action_castle_sources.h"
 
-bool IsBloodpoolMarsh(const uint8_t *wram, size_t size) {
-  return wram && size > kActRaiserWram_Bg2Height + 1 &&
-      Read8(wram, size, kActRaiserWram_MapGroup) == kActRaiserMapGroup_Bloodpool &&
-      Read8(wram, size, kActRaiserWram_CurrentMap) == 1 &&
-      Read16(wram, size, kActRaiserWram_Bg1Width) == 4096 &&
-      Read16(wram, size, kActRaiserWram_Bg1Height) == 512 &&
-      Read16(wram, size, kActRaiserWram_Bg2Width) == 256 &&
-      Read16(wram, size, kActRaiserWram_Bg2Height) == 256;
-}
 
 static bool BloodpoolWaterTile(uint8_t tile) {
   switch (tile) {
@@ -23,31 +14,18 @@ static bool BloodpoolWaterTile(uint8_t tile) {
 }
 
 static void CaptureBloodpoolWaterScroll(ActionBloodpoolDetails *dst,
-    const uint8_t *ram, size_t size) {
-  dst->water_scroll_valid = false;
-  /* The native lower-perspective table holds 127 sky rows, then 96 single
-   * water rows. Read the actual retained table: reconstructing it from the
-   * scene clock would drift during pause/hit-stop and use the wrong camera.
-   * Mode 2 retains two inherited high bits in each second data byte. */
-  const unsigned end = 0x6003+3*kActionBloodpoolWaterScrollRows;
-  if (size <= end || ram[0x6000] != 127 || Read16(ram,size,0x6001) != 0 || ram[end])
-    return;
-  for (unsigned row = 0; row < kActionBloodpoolWaterScrollRows; row++) {
-    const unsigned at = 0x6003+row*3;
-    if (ram[at] != 1) return;
-    dst->water_scroll[row] = Read16(ram,size,at+1)&0x03FF;
-  }
-  dst->water_scroll_valid = true;
+    const ActionEnvironmentScene *scene) {
+  dst->water_scroll_valid = scene->water_scroll_valid;
+  memcpy(dst->water_scroll,scene->water_scroll,sizeof(dst->water_scroll));
 }
 
 /* Merge scanline runs, then identical runs in adjacent rows. The 768x352
  * window includes the largest extended capture plus its horizontal apron.
  * Reads are bounded by the validated native map/definition table. */
 static bool CaptureMoonOccluders(ActionMoonlightOcclusion *dst,
-    const ActionBgMapView *map, const uint8_t *wram, size_t size,
-    unsigned table, unsigned mask, unsigned attributes) {
-  const int camera_x = (int16_t)Read16(wram,size,kActRaiserWram_Bg1CameraX);
-  const int camera_y = (int16_t)Read16(wram,size,kActRaiserWram_Bg1CameraY);
+    const ActionBgMapView *map, const ActionEnvironmentScene *scene, unsigned mask, unsigned attributes) {
+  const int camera_x = scene->camera_x[0];
+  const int camera_y = scene->camera_y[0];
   const int x0 = camera_x > 256 ? (camera_x-256)&~7 : 0;
   const int x1 = camera_x+512 < 4096 ? (camera_x+519)&~7 : 4096;
   const int y0 = camera_y > 64 ? camera_y-64 : 0;
@@ -65,7 +43,7 @@ static bool CaptureMoonOccluders(ActionMoonlightOcclusion *dst,
         uint16_t word = 0xFF;
         if (ActionBgMapView_LookupMetatile(map,x,y,&metatile)) {
           const unsigned quadrant = ((unsigned)y&8u)/4+((unsigned)x&8u)/8;
-          word = (Read16(wram,size,table+metatile*8+quadrant*2)&mask)|attributes;
+          word = (ActionEnvironmentScene_Word(scene,0,metatile,quadrant)&mask)|attributes;
         }
         words[(x-x0)/8] = word;
       }
@@ -116,19 +94,17 @@ static bool CaptureMoonOccluders(ActionMoonlightOcclusion *dst,
   return true;
 }
 
-static void CaptureBloodpoolMoon(ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
-    const ActionBgMapView *foreground, const uint8_t *wram, size_t size) {
-  ActionBgMapView sky;
+static void CaptureBloodpoolMoon(const ActionEnvironmentScene *scene, ActionSceneEffectFrame *dst,
+    const ActionBgMapView *foreground) {
+  const ActionBgMapView sky = scene->maps[1];
   uint8_t top, bottom;
-  const unsigned table = Read16(wram,size,0x52);
-  const unsigned mask = Read16(wram,size,0x54), attributes = Read8(wram,size,0x6B) << 8;
+  const unsigned mask = scene->word_mask[0], attributes = scene->attributes[0];
   if (dst->decoration_count > kActionSceneDecorationMaxInstances-2 ||
-      table > size || size-table < 2048 || mask != 0xECFF || attributes != 0x1000 ||
-      !ActionBgMapView_Init(&sky,wram,size,256,256,Read16(wram,size,0x4A)) ||
+      !scene->metatiles[0] || mask != 0xECFF || attributes != 0x1000 ||
       !ActionBgMapView_LookupMetatile(&sky,112,48,&top) || top != 0x3C ||
       !ActionBgMapView_LookupMetatile(&sky,112,64,&bottom) || bottom != 0x44)
     return;
-  if (!CaptureMoonOccluders(&dst->moonlight,foreground,wram,size,table,mask,attributes)) {
+  if (!CaptureMoonOccluders(&dst->moonlight,foreground,scene,mask,attributes)) {
     dst->moonlight.count = 0;
     dst->moonlight.valid = false;
     return;
@@ -137,8 +113,8 @@ static void CaptureBloodpoolMoon(ActionEffectObserver *observer, ActionSceneEffe
     const ActionEffectInstance effect = {
       .generation = 0xB1000002u+family, .pulse_generation = 0xB1000002u+family,
       .world_x = 112, .world_y = 62, .environment_room = 1,
-      .age_ticks = observer->scene_clock, .phase_ticks = observer->scene_clock,
-      .pulse_ticks = observer->scene_clock,
+      .age_ticks = scene->clock, .phase_ticks = scene->clock,
+      .pulse_ticks = scene->clock,
       .kind = family ? kActionEffect_BloodpoolMoonReflection : kActionEffect_BloodpoolMoonlight,
       .phase = kActionEffectPhase_BloodpoolEnvironment,
       .flags = kActionEffectFlag_Visible | kActionEffectFlag_ClipToRect,
@@ -151,12 +127,11 @@ static void CaptureBloodpoolMoon(ActionEffectObserver *observer, ActionSceneEffe
   }
 }
 
-static bool BloodpoolPixel(const ActionBgMapView *map, const uint8_t *ram, size_t size,
-    unsigned table, int x, int y, bool low_only) {
+static bool BloodpoolPixel(const ActionBgMapView *map, const ActionEnvironmentScene *scene, int x, int y, bool low_only) {
   uint8_t tile;
   if (!ActionBgMapView_LookupMetatile(map,x,y,&tile)) return false;
   const unsigned quadrant = ((unsigned)y&8u)/4+((unsigned)x&8u)/8;
-  const uint16_t word = (Read16(ram,size,table+tile*8+quadrant*2)&0xECFFu)|0x1000u;
+  const uint16_t word = (ActionEnvironmentScene_Word(scene,0,tile,quadrant)&0xECFFu)|0x1000u;
   if (low_only && (word&0x2000u)) return false;
   const unsigned px = (word&0x4000u) ? 7-((unsigned)x&7u) : (unsigned)x&7u;
   const unsigned py = (word&0x8000u) ? 7-((unsigned)y&7u) : (unsigned)y&7u;
@@ -170,19 +145,17 @@ static bool BloodpoolExposedWater(int x, uint16_t sources) {
   return false;
 }
 
-static bool BloodpoolPostPixel(const ActionBgMapView *map, const uint8_t *ram,
-    size_t size, unsigned table, int x, int y) {
+static bool BloodpoolPostPixel(const ActionBgMapView *map, const ActionEnvironmentScene *scene, int x, int y) {
   uint8_t tile;
   if (!ActionBgMapView_LookupMetatile(map,x,y,&tile)) return false;
   const unsigned quadrant = ((unsigned)y&8u)/4+((unsigned)x&8u)/8;
-  const uint16_t word = Read16(ram,size,table+tile*8+quadrant*2);
+  const uint16_t word = ActionEnvironmentScene_Word(scene,0,tile,quadrant);
   const unsigned px = (word&0x4000u) ? 7-((unsigned)x&7u) : (unsigned)x&7u;
   const unsigned py = (word&0x8000u) ? 7-((unsigned)y&7u) : (unsigned)y&7u;
   return (kBloodpoolPostTimber[word&255u] >> (py*8+px))&1u;
 }
 
-static bool BloodpoolTimberMaterial(uint8_t tile, const uint8_t *ram, size_t size,
-    unsigned table) {
+static bool BloodpoolTimberMaterial(uint8_t tile, const ActionEnvironmentScene *scene) {
   /* Authored horizontal timber, including moss and support variants. Verify
    * definitions as well as map IDs before interpreting the CHR silhouette. */
   static const struct { uint8_t tile; uint16_t words[4]; } materials[] = {
@@ -195,27 +168,26 @@ static bool BloodpoolTimberMaterial(uint8_t tile, const uint8_t *ram, size_t siz
   for (unsigned i = 0; i < sizeof(materials)/sizeof(materials[0]); i++) {
     if (tile != materials[i].tile) continue;
     for (unsigned q = 0; q < 4; q++)
-      if (Read16(ram,size,table+tile*8+q*2) != materials[i].words[q]) return false;
+      if (ActionEnvironmentScene_Word(scene,0,tile,q) != materials[i].words[q]) return false;
     return true;
   }
   return false;
 }
 
 static void CaptureBloodpoolDetails(ActionBloodpoolDetails *dst, const ActionBgMapView *map,
-    const uint8_t *ram, size_t size, uint16_t sources) {
+    const ActionEnvironmentScene *scene, uint16_t sources) {
   dst->valid = dst->timber_count = dst->post_count = 0;
-  const unsigned table = Read16(ram,size,0x52);
-  const int camera = (int16_t)Read16(ram,size,kActRaiserWram_Bg1CameraX);
+  const int camera = scene->camera_x[0];
   const int x0 = camera > 256 ? (camera-256)&~15 : 0;
   const int x1 = camera+512 < 4096 ? (camera+527)&~15 : 4096;
   for (int y = 0; y < 480; y += 16) for (int x = x0; x < x1; x += 16) {
     uint8_t tile;
     if (!ActionBgMapView_LookupMetatile(map,x,y,&tile) ||
-        !BloodpoolTimberMaterial(tile,ram,size,table)) continue;
+        !BloodpoolTimberMaterial(tile,scene)) continue;
     int start = 0, best_start = 0, best_length = 0;
     for (int p = 0; p <= 16; p++) {
-      if (p < 16 && BloodpoolPixel(map,ram,size,table,x+p,y,true) &&
-          !BloodpoolPixel(map,ram,size,table,x+p,y-1,false)) continue;
+      if (p < 16 && BloodpoolPixel(map,scene,x+p,y,true) &&
+          !BloodpoolPixel(map,scene,x+p,y-1,false)) continue;
       if (p-start > best_length) { best_start = start; best_length = p-start; }
       start = p+1;
     }
@@ -226,11 +198,11 @@ static void CaptureBloodpoolDetails(ActionBloodpoolDetails *dst, const ActionBgM
       .x1=(int16_t)(x+best_start+best_length),.y=(int16_t)y};
     edge->drip_x = (int16_t)(edge->x0+1+((x/16+y/16*7)%(best_length-2)));
     int bottom = y;
-    while (bottom < y+16 && BloodpoolPixel(map,ram,size,table,edge->drip_x,bottom,false)) bottom++;
+    while (bottom < y+16 && BloodpoolPixel(map,scene,edge->drip_x,bottom,false)) bottom++;
     edge->drip_y = edge->landing_y = (int16_t)bottom;
     if (bottom == y+16) continue; /* Supporting post: no invented underside. */
     int landing = bottom+1;
-    while (landing < 480 && !BloodpoolPixel(map,ram,size,table,edge->drip_x,landing,false))
+    while (landing < 480 && !BloodpoolPixel(map,scene,edge->drip_x,landing,false))
       landing++;
     edge->water_landing = landing == 480 && BloodpoolExposedWater(edge->drip_x,sources);
     edge->landing_y = (int16_t)(edge->water_landing ? 488 : landing);
@@ -241,7 +213,7 @@ static void CaptureBloodpoolDetails(ActionBloodpoolDetails *dst, const ActionBgM
     const bool post_tile = ActionBgMapView_LookupMetatile(map,x,480,&water_tile) &&
         (water_tile == 0x21 || water_tile == 0x22 || water_tile == 0x5E || water_tile == 0xA0);
     if (x < x1 && BloodpoolExposedWater(x,sources) &&
-        post_tile && BloodpoolPostPixel(map,ram,size,table,x,479)) {
+        post_tile && BloodpoolPostPixel(map,scene,x,479)) {
       if (start < 0) start = x;
       continue;
     }
@@ -250,7 +222,7 @@ static void CaptureBloodpoolDetails(ActionBloodpoolDetails *dst, const ActionBgM
       if (dst->post_count == kActionBloodpoolMaxPosts) return;
       int bottom = 480;
       for (int y = 480; y < 512; y++) for (int post_x = start; post_x < x; post_x++)
-        if (BloodpoolPostPixel(map,ram,size,table,post_x,y)) bottom = y+1;
+        if (BloodpoolPostPixel(map,scene,post_x,y)) bottom = y+1;
       dst->posts[dst->post_count++] = (ActionBloodpoolPost){
         .x0 = (int16_t)start, .x1 = (int16_t)x, .y = (int16_t)bottom};
     }
@@ -259,14 +231,13 @@ static void CaptureBloodpoolDetails(ActionBloodpoolDetails *dst, const ActionBgM
   dst->valid = true;
 }
 
-void CaptureBloodpoolMarsh(ActionEffectObserver *observer,
-    ActionSceneEffectFrame *dst, const uint8_t *wram, size_t size) {
-  if (observer->scene_map_number != 1 || !IsBloodpoolMarsh(wram, size)) return;
-  ActionBgMapView map;
+void CaptureBloodpoolMarshScene(const ActionEnvironmentScene *scene, ActionSceneEffectFrame *dst) {
+  if (scene->group != kActRaiserMapGroup_Bloodpool || scene->room != 1 ||
+      scene->maps[0].world_width != 4096 || scene->maps[0].world_height != 512 ||
+      scene->maps[1].world_width != 256 || scene->maps[1].world_height != 256) return;
+  const ActionBgMapView map = scene->maps[0];
   uint8_t bank, timber;
-  if (!ActionBgMapView_Init(&map, wram, size, 4096, 512,
-          Read16(wram, size, kActRaiserWram_BgMapPage)) ||
-      !ActionBgMapView_LookupMetatile(&map, 0, 432, &bank) || bank != 0x8A ||
+  if (!ActionBgMapView_LookupMetatile(&map, 0, 432, &bank) || bank != 0x8A ||
       !ActionBgMapView_LookupMetatile(&map, 736, 320, &timber) || timber != 0xB9)
     return; /* Reject inherited maps during entry/room changes. */
   uint16_t sources = 0;
@@ -282,13 +253,13 @@ void CaptureBloodpoolMarsh(ActionEffectObserver *observer,
     if (valid) sources |= (uint16_t)(1u << i);
   }
   if (!sources || dst->decoration_count > kActionSceneDecorationMaxInstances - 2) return;
-  const int x = (int16_t)Read16(wram, size, kActRaiserWram_Bg1CameraX) + 128;
+  const int x = scene->camera_x[0] + 128;
   for (unsigned family = 0; family < 2; family++) {
     const ActionEffectInstance effect = {
       .generation = 0xB1000000u | family, .pulse_generation = 0xB1000000u | family,
       .world_x = (int16_t)x, .world_y = 480, .environment_room = 1, .source_mask = sources,
-      .age_ticks = observer->scene_clock, .phase_ticks = observer->scene_clock,
-      .pulse_ticks = observer->scene_clock,
+      .age_ticks = scene->clock, .phase_ticks = scene->clock,
+      .pulse_ticks = scene->clock,
       .kind = family ? kActionEffect_BloodpoolMist : kActionEffect_BloodpoolWater,
       .phase = kActionEffectPhase_BloodpoolEnvironment,
       .flags = kActionEffectFlag_Visible | kActionEffectFlag_ClipToRect,
@@ -301,11 +272,11 @@ void CaptureBloodpoolMarsh(ActionEffectObserver *observer,
     };
     (void)SceneDecorationAppend(dst, &effect);
   }
-  CaptureBloodpoolMoon(observer,dst,&map,wram,size);
+  CaptureBloodpoolMoon(scene,dst,&map);
   if (!dst->moonlight.valid || dst->decoration_count > kActionSceneDecorationMaxInstances-3)
     return;
-  CaptureBloodpoolDetails(&dst->bloodpool,&map,wram,size,sources);
-  CaptureBloodpoolWaterScroll(&dst->bloodpool,wram,size);
+  CaptureBloodpoolDetails(&dst->bloodpool,&map,scene,sources);
+  CaptureBloodpoolWaterScroll(&dst->bloodpool,scene);
   const ActionEffectInstance moon = dst->decorations[dst->decoration_count-2];
   for (unsigned family = 0; family < 3; family++) {
     ActionEffectInstance detail = moon;
@@ -328,45 +299,27 @@ detail.world_x = 112;
   }
 }
 
-unsigned BloodpoolCastleRoom(const uint8_t *ram, size_t size) {
-  if (!ram || Read8(ram,size,kActRaiserWram_MapGroup) != kActRaiserMapGroup_Bloodpool)
-    return 0;
-  const unsigned room = Read8(ram,size,kActRaiserWram_CurrentMap);
-  if (room < 2 || room > 8) return 0;
-  static const uint16_t dimensions[][4] = {
-    {768,512,256,256}, {1024,1024,256,256}, {512,512,256,256},
-    {1792,1024,1792,1024}, {768,256,256,256}, {1024,1024,256,256}, {256,256,256,256},
-  };
-  const uint16_t *d = dimensions[room-2];
-  return Read16(ram,size,kActRaiserWram_Bg1Width) == d[0] &&
-      Read16(ram,size,kActRaiserWram_Bg1Height) == d[1] &&
-      Read16(ram,size,kActRaiserWram_Bg2Width) == d[2] &&
-      Read16(ram,size,kActRaiserWram_Bg2Height) == d[3] ? room : 0;
-}
 
 static bool CastleTileIs(const ActionBgMapView *map, int x, int y, uint8_t expected) {
   uint8_t tile;
   return ActionBgMapView_LookupMetatile(map,x,y,&tile) && tile == expected;
 }
 
-static void CaptureCastleWater(ActionSceneEffectFrame *dst, const uint8_t *ram,
-    size_t size, const ActionEffectInstance *castle) {
-  ActionBgMapView water;
+static void CaptureCastleWater(ActionSceneEffectFrame *dst, const ActionEnvironmentScene *scene,
+    const ActionEffectInstance *castle) {
+  const ActionBgMapView water = scene->maps[1];
   /* Room 5 blends BG2 water into the resolved BG1 masonry. Both maps scroll
    * together; light the resolved scenery rather than an occluded rear plane. */
-  if (Read16(ram,size,kActRaiserWram_Bg1CameraX) != Read16(ram,size,kActRaiserWram_Bg2CameraX) ||
-      Read16(ram,size,kActRaiserWram_Bg1CameraY) != Read16(ram,size,kActRaiserWram_Bg2CameraY)) return;
-  if (!ActionBgMapView_Init(&water,ram,size,1792,1024,
-          Read16(ram,size,kActRaiserWram_BgMapPage+kActRaiserBgLayerStateStride))) return;
-  const unsigned table = Read16(ram,size,kActRaiserWram_BgMetatileTable+kActRaiserBgLayerStateStride);
+  if (scene->camera_x[0] != scene->camera_x[1] ||
+      scene->camera_y[0] != scene->camera_y[1]) return;
   static const uint16_t surface[] = {0x0470,0x0471,0x0402,0x0403};
   for (unsigned q = 0; q < 4; q++)
-    if (Read16(ram,size,table+0x15*8+q*2) != surface[q]) return;
+    if (ActionEnvironmentScene_Word(scene,1,0x15,q) != surface[q]) return;
   ActionEffectInstance effect = *castle;
   effect.kind = kActionEffect_CastleWater;
   effect.render_layer = kActionEffectRenderLayer_Bg1Plane;
   effect.projection_plane = kActionEffectProjectionPlane_Bg1;
-  effect.world_x = (int16_t)Read16(ram,size,kActRaiserWram_Bg1CameraX)+128;
+  effect.world_x = scene->camera_x[0]+128;
   effect.world_y = kActionCastleWaterSurface;
   effect.geometry.data.rect = (ActionEffectLocalRect){-384,0,384,16};
   effect.clip_rect = (ActionEffectLocalRect){kActionCastleWaterLeft-effect.world_x,0,
@@ -383,35 +336,38 @@ static void CaptureCastleWater(ActionSceneEffectFrame *dst, const uint8_t *ram,
   if (effect.source_mask) (void)SceneDecorationAppend(dst,&effect);
 }
 
-void CaptureBloodpoolCastle(ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
-    const uint8_t *ram, size_t size) {
-  const unsigned room = BloodpoolCastleRoom(ram,size);
-  if (!room || observer->scene_map_number != room ||
+void CaptureBloodpoolCastleScene(const ActionEnvironmentScene *scene, ActionSceneEffectFrame *dst) {
+  const unsigned room = scene->room;
+  if (scene->group != kActRaiserMapGroup_Bloodpool || room < 2 || room > 8 ||
       dst->decoration_count > kActionSceneDecorationMaxInstances-3) return;
-  const unsigned width = Read16(ram,size,kActRaiserWram_Bg1Width);
-  const unsigned height = Read16(ram,size,kActRaiserWram_Bg1Height);
-  ActionBgMapView map;
+  static const uint16_t dimensions[][4] = {
+    {768,512,256,256}, {1024,1024,256,256}, {512,512,256,256},
+    {1792,1024,1792,1024}, {768,256,256,256}, {1024,1024,256,256}, {256,256,256,256},
+  };
+  const uint16_t *d = dimensions[room-2];
+  if (scene->maps[0].world_width != d[0] || scene->maps[0].world_height != d[1] ||
+      scene->maps[1].world_width != d[2] || scene->maps[1].world_height != d[3]) return;
+  const unsigned width = scene->maps[0].world_width;
+  const unsigned height = scene->maps[0].world_height;
+  const ActionBgMapView map = scene->maps[0];
   static const uint8_t witnesses[][2] = {
     {0x08,0x08}, {0x17,0x23}, {0x09,0xFA}, {0x09,0xA3},
     {0x09,0x23}, {0x09,0x09}, {0x77,0x09},
   };
-  if (!ActionBgMapView_Init(&map,ram,size,width,height,
-          Read16(ram,size,kActRaiserWram_BgMapPage)) ||
-      !CastleTileIs(&map,0,(int)height-16,witnesses[room-2][0]) ||
+  if (!CastleTileIs(&map,0,(int)height-16,witnesses[room-2][0]) ||
       !CastleTileIs(&map,(int)width-16,0,witnesses[room-2][1])) return;
   /* Check decoded shared window definitions too: same map ids with replaced
    * graphics must not silently become light emitters. No ROM address coupling. */
-  const unsigned table = Read16(ram,size,kActRaiserWram_BgMetatileTable);
   static const uint16_t window[] = {0x04EE,0x44EE,0x04FE,0x44FE};
   for (unsigned q = 0; q < 4; q++)
-    if (Read16(ram,size,table+0x44*8+q*2) != window[q]) return;
-  const int x = (int16_t)Read16(ram,size,kActRaiserWram_Bg1CameraX)+128;
-  const int y = (int16_t)Read16(ram,size,kActRaiserWram_Bg1CameraY)-160;
+    if (ActionEnvironmentScene_Word(scene,0,0x44,q) != window[q]) return;
+  const int x = scene->camera_x[0]+128;
+  const int y = scene->camera_y[0]-160;
   ActionEffectInstance effect = {
     .generation = 0xCA000000u|room, .pulse_generation = 0xCB000000u|room,
     .world_x = (int16_t)x, .world_y = (int16_t)y, .environment_room = (uint16_t)room,
-    .age_ticks = observer->scene_clock, .phase_ticks = observer->scene_clock,
-    .pulse_ticks = observer->scene_clock,
+    .age_ticks = scene->clock, .phase_ticks = scene->clock,
+    .pulse_ticks = scene->clock,
     .kind = kActionEffect_CastleLight, .phase = kActionEffectPhase_CastleEnvironment,
     .flags = kActionEffectFlag_Visible|kActionEffectFlag_ClipToRect,
     .render_layer = kActionEffectRenderLayer_Bg1Plane,
@@ -439,12 +395,12 @@ void CaptureBloodpoolCastle(ActionEffectObserver *observer, ActionSceneEffectFra
     {160,640,208}, {352,816,208}, {32,224,224},
   };
   const uint16_t *floor = floors[room-2];
-  bool supported = floor[2] != 0 && size > 0x06A0;
+  bool supported = floor[2] != 0;
   for (int fx = floor[0]; supported && fx < floor[1]; fx += 16) {
     uint8_t above, below;
     supported = ActionBgMapView_LookupMetatile(&map,fx,floor[2]-1,&above) &&
         ActionBgMapView_LookupMetatile(&map,fx,floor[2],&below) &&
-        ram[0x05A0+below] == 15 && ram[0x05A0+above] == 0 &&
+        scene->collision[below] == 15 && scene->collision[above] == 0 &&
         above != 0x03 && above != 0x04 && above != 0x46 && above != 0x4E;
   }
   if (supported) {
@@ -459,13 +415,11 @@ void CaptureBloodpoolCastle(ActionEffectObserver *observer, ActionSceneEffectFra
     (void)SceneDecorationAppend(dst,&mist);
   }
   if (room == 5) {
-    CaptureCastleWater(dst,ram,size,&effect);
+    CaptureCastleWater(dst,scene,&effect);
     return; /* Interior BG2 has water, but no moon/sky artwork. */
   }
-  ActionBgMapView sky;
-  if (!ActionBgMapView_Init(&sky,ram,size,256,256,
-          Read16(ram,size,kActRaiserWram_BgMapPage+kActRaiserBgLayerStateStride)) ||
-      !CastleTileIs(&sky,112,48,room < 6 ? 0x3C : 0x10) ||
+  const ActionBgMapView sky = scene->maps[1];
+  if (!CastleTileIs(&sky,112,48,room < 6 ? 0x3C : 0x10) ||
       !CastleTileIs(&sky,128,64,room < 6 ? 0x45 : 0x05)) return;
   effect.kind = kActionEffect_CastleSky;
   effect.render_layer = kActionEffectRenderLayer_Bg2Plane;
@@ -483,4 +437,44 @@ void CaptureBloodpoolCastle(ActionEffectObserver *observer, ActionSceneEffectFra
         (ActionEffectLocalRect){-384,-48,384,194};
   }
   (void)SceneDecorationAppend(dst,&effect);
+}
+
+bool IsBloodpoolMarsh(const uint8_t *wram, size_t size) {
+  return wram && size > kActRaiserWram_Bg2Height + 1 &&
+      Read8(wram, size, kActRaiserWram_MapGroup) == kActRaiserMapGroup_Bloodpool &&
+      Read8(wram, size, kActRaiserWram_CurrentMap) == 1 &&
+      Read16(wram, size, kActRaiserWram_Bg1Width) == 4096 &&
+      Read16(wram, size, kActRaiserWram_Bg1Height) == 512 &&
+      Read16(wram, size, kActRaiserWram_Bg2Width) == 256 &&
+      Read16(wram, size, kActRaiserWram_Bg2Height) == 256;
+}
+
+unsigned BloodpoolCastleRoom(const uint8_t *ram, size_t size) {
+  if (!ram || Read8(ram,size,kActRaiserWram_MapGroup) != kActRaiserMapGroup_Bloodpool)
+    return 0;
+  const unsigned room = Read8(ram,size,kActRaiserWram_CurrentMap);
+  if (room < 2 || room > 8) return 0;
+  static const uint16_t dimensions[][4] = {
+    {768,512,256,256}, {1024,1024,256,256}, {512,512,256,256},
+    {1792,1024,1792,1024}, {768,256,256,256}, {1024,1024,256,256}, {256,256,256,256},
+  };
+  const uint16_t *d = dimensions[room-2];
+  return Read16(ram,size,kActRaiserWram_Bg1Width) == d[0] &&
+      Read16(ram,size,kActRaiserWram_Bg1Height) == d[1] &&
+      Read16(ram,size,kActRaiserWram_Bg2Width) == d[2] &&
+      Read16(ram,size,kActRaiserWram_Bg2Height) == d[3] ? room : 0;
+}
+
+void CaptureBloodpoolMarsh(ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
+    const uint8_t *ram, size_t size) {
+  ActionEnvironmentScene scene;
+  if (ActionEnvironmentScene_FromWram(&scene,ram,size,observer->scene_clock) &&
+      observer->scene_map_number == scene.room) CaptureBloodpoolMarshScene(&scene,dst);
+}
+
+void CaptureBloodpoolCastle(ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
+    const uint8_t *ram, size_t size) {
+  ActionEnvironmentScene scene;
+  if (ActionEnvironmentScene_FromWram(&scene,ram,size,observer->scene_clock) &&
+      observer->scene_map_number == scene.room) CaptureBloodpoolCastleScene(&scene,dst);
 }

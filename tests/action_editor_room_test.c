@@ -15,13 +15,17 @@ static char *Read(const char *path, size_t *size) {
   fclose(f); p[n] = 0; *size = n; return p;
 }
 int main(int argc, char **argv) {
-  if (argc != 3) return 2;
+  if (argc != 3 && argc != 4) return 2;
   size_t n;
   char *bytes = Read(argv[1], &n);
   static ActionSceneSnapshot assets;
   assert(bytes && ActionSceneSnapshot_Decode((const uint8_t *)bytes, n, &assets)); free(bytes);
   EditorRoomScene *room = EditorRoomScene_Create(&assets); assert(room);
   char *ini = Read(argv[2], &n); assert(ini && EditorRoomScene_Configure(room, ini)); free(ini);
+  if (argc == 4) {
+    char *effects = Read(argv[3],&n); unsigned line;
+    assert(effects && EditorRoomScene_ConfigureEffects(room,effects,n,&line));free(effects);
+  }
   int x, y, extra, vertical; unsigned frame;
   while (scanf("%d %d %u %d %d", &x, &y, &frame, &extra, &vertical) == 5) {
     assert(EditorRoomScene_Render(room, x, y, frame, extra, vertical));
@@ -29,7 +33,7 @@ int main(int argc, char **argv) {
     assert(!EditorRoomScene_Render(room, -1, y, frame, extra, vertical));
     assert(!EditorRoomScene_Configure(room, "[unterminated"));
     assert(EditorRoomScene_Hash(room) == hash);
-    printf("%08x\n", hash);
+    printf("%08x %08x\n", hash, EditorRoomScene_EffectHash(room));
   }
   if (assets.scene.group == 1 && assets.scene.map == 1 && !assets.terrain_profile) {
     assert(EditorRoomScene_Configure(room, ""));
@@ -69,7 +73,7 @@ int main(int argc, char **argv) {
     /* BG2 is at its own top even though the foreground can expose extra rows.
      * No water from the bottom of the native page may wrap above its sky. */
     for (int band = 0; band < 3; ++band)
-      for (int col = 64; col < surface->width + 64; ++col)
+      for (int col = 0; col < surface->pitch_pixels; ++col)
         assert(surface->bands[1][band][col] == 0);
   }
   EditorRoomScene_Destroy(room);

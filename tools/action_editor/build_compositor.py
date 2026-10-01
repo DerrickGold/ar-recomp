@@ -61,6 +61,7 @@ def build(output, compiler='emcc', scene=None):
                '-I', str(ROOT / 'snesrecomp-go/runtime/src/core'),
                'tools/action_editor/compositor_preview.c',
                'tools/action_editor/room_preview.c', 'tools/action_editor/room_scene.c',
+                   *(ROOT / 'tools/action_editor/environment_sources.txt').read_text().splitlines(),
                'src/action/action_scene_snapshot.c', 'src/action/action_room_scene.c',
                'src/action/action_bg_world.c', 'src/diorama/diorama_capture_blend.c',
                'src/diorama/diorama_rom_backdrop.c',
@@ -71,7 +72,7 @@ def build(output, compiler='emcc', scene=None):
                '-sSTACK_SIZE=1048576', '-sINITIAL_MEMORY=67108864', '-sALLOW_MEMORY_GROWTH=0',
                *['-Wl,--export=DioramaPreview_' + x for x in exports],
                *['-Wl,--export=RoomPreview_' + x for x in
-                 ('Load', 'Configure', 'Render', 'Reset', 'Width', 'Height', 'Uploads', 'Hash', 'SkyboxSource', 'SkyboxRoom', 'LoadSkybox')],
+                 ('Load', 'Configure', 'Render', 'Reset', 'Width', 'Height', 'Uploads', 'Hash', 'SkyboxSource', 'SkyboxRoom', 'LoadSkybox', 'EnableEffects', 'EffectCount', 'EffectHash', 'EffectVertices', 'ConfigureEffects', 'RecipeErrorLine', 'SourceValue', 'KindName', 'ReachSupported', 'CollisionGrid', 'SetReceivers', 'EventCount', 'EventKind', 'SetEvent')],
                '-o', str(wasm)]
     subprocess.run(command, cwd=ROOT, env=compiler_environment(compiler), check=True)
     template = (ROOT / 'tools/action_editor/compositor_preview.html').read_text()

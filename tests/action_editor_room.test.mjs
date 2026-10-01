@@ -44,10 +44,10 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
  const x=room.bg[0].pagesWide*256-256,y=room.bg[0].pagesHigh*256-225;
  const requests=[[0,0,0,0,0],[x>>1,y>>1,37,120,64],[x,y,65535,128,32],
                  [x>>1,y>>1,37,120,64],[0,0,511,128,64],[x,y,0,0,0]];
- const hashes=[];
+ const hashes=[],effectHashes=[];
  for(const [i,request] of requests.entries()){
    assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1,`render ${base.group}:${base.map}/${terrain.profile}/${i}`);
-   hashes.push(api.RoomPreview_Hash()>>>0);
+   hashes.push(api.RoomPreview_Hash()>>>0);effectHashes.push(api.RoomPreview_EffectHash()>>>0);
    const allocations=creates,uploadCount=updates;
    assert.equal(api.RoomPreview_Render(...request,960,540,1.1,0.1,-0.1,i%3,i%2),1);
    // Targets can resize with presentation, but the CPU surfaces must not upload again.
@@ -66,11 +66,65 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
  assert.equal(send(broken,api.RoomPreview_Load),0);
  assert.equal(api.RoomPreview_Hash()>>>0,hash);assert.equal(textures.size,live);
  const file=path.join(directory,'room.arscene');fs.writeFileSync(file,packet);
- const native=execFileSync(replay,[file,iniFile],{input:requests.map(r=>r.join(' ')).join('\n')+'\n',encoding:'utf8'}).trim().split('\n').map(n=>parseInt(n,16));
- assert.deepEqual(hashes,native,`native surfaces ${base.group}:${base.map}/${terrain.profile}`);
+ const native=execFileSync(replay,[file,iniFile],{input:requests.map(r=>r.join(' ')).join('\n')+'\n',encoding:'utf8'}).trim().split('\n').map(n=>n.split(' ').map(v=>parseInt(v,16)));
+ assert.deepEqual(hashes.map((h,i)=>[h,effectHashes[i]]),native,`native surfaces ${base.group}:${base.map}/${terrain.profile}`);
+ // Authored emitters round-trip through the identical native resolver.
+ const scope=`${base.group.toString(16).padStart(2,'0')}:${base.map.toString(16).padStart(2,'0')}:${terrain.profile}`;
+ let recipes='[effects]\nversion=1\n';
+ for(const [i,kind] of ['soft-light','motes','free-mist','ground-mist'].entries()) {
+   if(kind==='ground-mist'&&base.group===1&&base.map===2)
+     recipes+=`[emitter:${scope}:${kind}:${i+1}]\nx=1280\ny=1168\nwidth=480\nheight=160\ncolor=91bedf\n`;
+   else recipes+=`[emitter:${scope}:${kind}:${i+1}]\nx=${(x>>1)+128}\ny=${(y>>1)+112}\ncolor=aabbff\n`;
+   if(kind==='motes')recipes+='size-min=.65\nsize-max=1.25\ntravel-x=60\ntravel-y=-96\nwander=5\nspread=.6\nseed=4294967295\ncolor-end=91bedf\n';
+ }
+ assert.equal(api.RoomPreview_CollisionGrid(),api.RoomPreview_Width()*api.RoomPreview_Height()/256);
+ for(const [i,kind] of ['particle-area','light-fan','water-surface','drips','waterfall-spray','cloud-bank','exposure','wet-contour'].entries()) {
+   recipes+=`[emitter:${scope}:${kind}:${i+5}]\nx=${(x>>1)+128}\ny=${(y>>1)+112}\ncolor=aabbff\n`;
+   if(kind==='particle-area')recipes+='particles=2\nwidth=2048\nheight=2048\npattern=snow\n';
+   if(kind==='light-fan')recipes+='strands=4\nangle=12\nlight-player=1\n';
+   if(kind==='cloud-bank')recipes+='strands=4\ndrift=12\namplitude=4\n';
+   if(['water-surface','drips','waterfall-spray'].includes(kind))recipes+='particles=8\n';
+   if(kind==='exposure')recipes+='dim-player=1\ndim-enemies=0\nintensity=.2\n';
+   if(kind==='wet-contour')recipes+='points=-32,12 0,-12 32,12\n';
+ }
+ const effectFile=path.join(directory,'effects.ini');fs.writeFileSync(effectFile,recipes);
+ assert.equal(send(Buffer.from(recipes),api.RoomPreview_ConfigureEffects),1);
+ assert.equal(api.RoomPreview_Render(...requests[1],960,600,1,0,0,1,0),1);
+ if(base.group===1&&base.map===2) {
+   let supports=0;
+   for(let i=0;i<api.RoomPreview_EffectCount();i++)supports+=api.RoomPreview_SourceValue(i,6);
+   assert.ok(supports>0,`temple floor supports ${scope}`);
+ }
+ const tuned=[api.RoomPreview_Hash()>>>0,api.RoomPreview_EffectHash()>>>0];
+ assert.notEqual(tuned[1],effectHashes[1]);
+ const nativeTuned=execFileSync(replay,[file,iniFile,effectFile],{input:requests[1].join(' ')+'\n',encoding:'utf8'}).trim().split(' ').map(v=>parseInt(v,16));
+ assert.deepEqual(tuned,nativeTuned,`native effect recipes ${scope}`);
+ assert.equal(api.RoomPreview_Render(...requests[4],960,600,1,0,0,1,0),1);
+ assert.equal(api.RoomPreview_Render(...requests[1],960,600,1,0,0,1,0),1);
+ assert.deepEqual([api.RoomPreview_Hash()>>>0,api.RoomPreview_EffectHash()>>>0],tuned,'authored reverse time');
+ assert.equal(send(Buffer.from(recipes+'particles=999\n'),api.RoomPreview_ConfigureEffects),0);
+ assert.equal(api.RoomPreview_Render(...requests[1],960,600,1,0,0,1,0),1);
+ assert.equal(api.RoomPreview_EffectHash()>>>0,tuned[1]);
+ if(base.group===1&&base.map===2&&terrain.profile===0) {
+   assert.equal(api.RoomPreview_SetReceivers(1,(x>>1)+128,(y>>1)+112,(x>>1)+180,(y>>1)+112),1);
+   assert.equal(api.RoomPreview_Render(...requests[1],960,600,1,0,0,1,0),1);
+   const warm=creates;
+   assert.equal(api.RoomPreview_Render(...requests[1],960,600,1,0,0,1,0),1);assert.equal(creates,warm);
+   assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);
+   assert.equal(api.RoomPreview_EventCount(),19);
+   for(let i=1;i<=api.RoomPreview_EventCount();i++) {
+     assert.equal(api.RoomPreview_SetEvent(i,(x>>1)+128,(y>>1)+112,1,0,30,96,123),1);
+     assert.equal(api.RoomPreview_Render(...requests[1],960,600,1,0,0,1,0),1,`event ${i}`);
+     const eventHash=api.RoomPreview_EffectHash()>>>0;
+     assert.equal(api.RoomPreview_Render(...requests[4],960,600,1,0,0,1,0),1);
+     assert.equal(api.RoomPreview_Render(...requests[1],960,600,1,0,0,1,0),1);
+     assert.equal(api.RoomPreview_EffectHash()>>>0,eventHash);
+   }
+   assert.equal(api.RoomPreview_SetEvent(0,0,0,0,0,0,96,123),1);
+ }
  frames+=requests.length;scenes++;
 }
 assert.equal(scenes,147);assert.equal(api.memory.buffer,memory);
 api.RoomPreview_Reset();assert.equal(textures.size,0);api.RoomPreview_Reset();
 assert.equal(api.RoomPreview_Hash(),0);
-console.log(`Whole-room renderer: ${scenes} regional rooms, ${frames} native/WASM surface matches, ${draws} valid draws; reverse time, atomic edits/loads, resource reuse and teardown passed.`);
+console.log(`Whole-room renderer: ${scenes} regional rooms, ${frames} native/WASM surface + source matches, ${scenes} authored round trips, ${draws} valid draws; reverse time, atomic edits/loads, resource reuse and teardown passed.`);

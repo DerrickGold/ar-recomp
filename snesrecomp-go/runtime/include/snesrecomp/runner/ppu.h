@@ -692,6 +692,10 @@ typedef struct SrPpuFrameResetRequest {
 #define SR_PPU_OBJ_CAPTURE_WINNERS UINT32_C(0x00000004)
 #define SR_PPU_OBJ_CAPTURE_RELOCATED UINT32_C(0x00000002)
 
+/* Presentation-only per-OAM-owner transform. 256 is identity; addition is
+ * an 8-bit channel amount, scaled by the current display brightness. */
+#define SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS UINT32_C(0x00000008)
+typedef struct SrPpuObjColorTransform { uint16_t multiply[3], add[3]; } SrPpuObjColorTransform;
 typedef struct SrPpuObjCaptureRequest {
     uint32_t struct_size;
     uint32_t flags;
@@ -708,11 +712,17 @@ typedef struct SrPpuObjCaptureRequest {
     uint32_t relocated_first;
     uint32_t relocated_count;
     uint32_t reserved[2];
+    /* Optional v3 facet: copied synchronously. count=0 clears it. */
+    const SrPpuObjColorTransform *color_transforms;
+    uint32_t color_transform_count;
+    uint32_t color_reserved;
 } SrPpuObjCaptureRequest;
 
 #define SR_PPU_OBJ_CAPTURE_REQUEST_V2_SIZE                              \
     ((uint32_t)(offsetof(SrPpuObjCaptureRequest, reserved) +             \
                 sizeof(((SrPpuObjCaptureRequest *)0)->reserved)))
+
+#define SR_PPU_OBJ_CAPTURE_REQUEST_V3_SIZE ((uint32_t)sizeof(SrPpuObjCaptureRequest))
 
 /* One sparse, host-native VRAM word replacement. Transactions compare every
  * expected value before applying any replacement, so a game-side producer

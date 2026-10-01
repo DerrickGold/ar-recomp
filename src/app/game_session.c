@@ -1,4 +1,5 @@
 #include "app/game_session.h"
+#include "action/action_effect_manifest.h"
 #include "app/game_loop.h"
 
 #include <stdio.h>
@@ -89,6 +90,7 @@ static void PrepareSubsystems(const GameSessionConfig *config) {
   /* Per-room diorama layer overrides. Absent file is the normal case and leaves
    * every room drawing as built. */
   DioramaLayerManifest_Load();
+  ActionEffectManifest_Load();
   SettingsOverlay_SetInspectorInfoProvider(
       HostDevTools_FormatInspectorInfo);
   SettingsOverlayRegionalHost_InstallHooks();

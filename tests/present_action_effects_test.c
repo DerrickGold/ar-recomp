@@ -728,7 +728,7 @@ static void TempleSceneryDimming(void) {
   assert(b.created == b.destroyed && !fatal_count);
 }
 
-static void TempleMistComposition(void) {
+static void TempleMistComposition(bool authored) {
   Backend b;
   ArRenderDevice device;
   Init(&b, &device);
@@ -748,6 +748,13 @@ static void TempleMistComposition(void) {
     .projection_plane = kActionEffectProjectionPlane_Bg1,
     .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {0,-26,64,0}},
   };
+  if (authored) {
+    ActionEffectInstance e=frame.action_scene_effects.decorations[0];
+    e.kind=kActionEffect_AuthoredFloorMist;e.particle_lifetime=240;
+    e.tuning=(ActionEffectTuning){.active=1,.intensity=1,.color=0x91bedf};
+    frame.action_scene_effects=(ActionSceneEffectFrame){.authored_count=1,.authored={e},
+      .authored_floor={{.count=1,.spans={{592,656,1680,26}}}}};
+  }
   memset(pixels,0xff,sizeof(pixels));
   pixels[0] = 0xff000000u; /* A winning actor excludes the BG1 mist. */
   assert(PresentActionEffects_UploadMask(&device,SR_PPU_OVERLAY_BG1,&frame,
@@ -1161,7 +1168,37 @@ static void SkyboxWaterfallComposition(void) {
   PresentActionEffects_Reset(&device);
 }
 
+static void AuthoredOnlyComposition(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b, &device);
+  LavaFrame();
+  frame.action_effect_lighting = frame.action_effect_particles = false;
+  frame.action_scene_effects = (ActionSceneEffectFrame){.authored_count = 1};
+  ActionEffectInstance *e = &frame.action_scene_effects.authored[0];
+  *e = (ActionEffectInstance){
+    .world_x = 128, .world_y = 112, .kind = kActionEffect_AuthoredLight,
+    .flags = kActionEffectFlag_Visible,
+    .render_layer = kActionEffectRenderLayer_WorldOverlay,
+    .projection_plane = kActionEffectProjectionPlane_Bg1,
+    .tuning = {.intensity = 1, .color = 0xdde6ff, .active = 1},
+    .particle_lifetime = 240,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-48,-32,48,32}},
+  };
+  PresentActionEffects_Draw(&device,&frame,viewport,NULL);
+  assert(b.geometries == 1 && b.geometry_blends[0] == kArRenderBlendMode_Add);
+  e->kind = kActionEffect_AuthoredMist;
+  e->render_layer = kActionEffectRenderLayer_WorldDust;
+  PresentActionEffects_Draw(&device,&frame,viewport,NULL);
+  assert(b.geometries == 2 && b.geometry_blends[1] == kArRenderBlendMode_Alpha);
+  frame.action_environmental_effects = false;
+  PresentActionEffects_Draw(&device,&frame,viewport,NULL);
+  assert(b.geometries == 2 && !b.created && !b.updated);
+  PresentActionEffects_Reset(&device);
+}
+
 int main(void) {
+  AuthoredOnlyComposition();
   TestEffectMasterBrightness();
   SkyboxWaterfallComposition();
   TestCastleDimming();
@@ -1170,7 +1207,8 @@ int main(void) {
   TempleSceneryDimming();
   CaveMaskUploadBudget();
   CaveSheenComposition();
-  TempleMistComposition();
+  TempleMistComposition(false);
+  TempleMistComposition(true);
   HeatLifecycle();
   HeatFailures();
   MasksAndPlaneComposition();

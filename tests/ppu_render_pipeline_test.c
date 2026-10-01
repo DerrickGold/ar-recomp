@@ -3028,7 +3028,61 @@ static void TestAuthenticCameraAndSurfaceContract(void) {
   ppu_free(ppu);
 }
 
+static void TestObjReceiverTransforms(void) {
+  enum {width=384,rows=352};
+  static uint32_t main_pixels[width*rows],authentic[width*rows],overlay[width*rows];
+  uint32_t native_main=0,native_overlay=0;
+  Ppu *ppu=ppu_init();CHECK(ppu!=NULL);if(!ppu)return;
+  const SnesRunnerApi *api=sr_runner_get_api(SR_RUNNER_ABI_VERSION);SrRunnerHandle *runner=TestRunnerForPpu(ppu);
+  for(unsigned rotated=0;rotated<2;++rotated)for(unsigned reference=0;reference<2;++reference) {
+    ppu_reset(ppu);memset(main_pixels,0,sizeof(main_pixels));memset(authentic,0,sizeof(authentic));memset(overlay,0,sizeof(overlay));
+    ppu->inidisp=15;ppu->bgmode=1;ppu->screenEnabled[0]=1u<<kPpuOverlaySource_Obj;
+    ppu->cgram[0x81]=bgr555(31,0,0);ppu->cgram[0x82]=bgr555(0,0,31);
+    set_solid_4bpp_tile(ppu,0,1);set_solid_4bpp_tile(ppu,1,2);
+    for(unsigned i=0;i<128;++i)ppu->oam[i*2]=0xe000;
+    ppu->oam[0]=24|(20<<8);ppu->oam[1]=2<<12;
+    ppu->oam[2]=24|(20<<8);ppu->oam[3]=1|(2<<12);
+    ppu->oam[4]=0;ppu->oam[5]=2<<12;
+    if(rotated){ppu->oamaddh=0x80;ppu->oamaddl=2;}
+    PpuSetExtraSpace(ppu,64);
+    CHECK(PpuBeginDrawingSized(ppu,(uint8_t *)main_pixels,width*4,rows,reference?kPpuRenderFlags_ReferencePixelRenderer:0));
+    SrPpuFramePolicyRequest policy={.struct_size=sizeof(policy),.lifetime_generation=1,
+      .policy={.struct_size=sizeof(SrPpuFramePolicy),.margin_budget_pixels=64,.margin_left_pixels=64,.margin_right_pixels=64,.margin_top_pixels=64,.margin_bottom_pixels=64}};
+    CHECK(api->apply_ppu_frame_policy(runner,&policy)==SR_RESULT_OK);
+    CHECK(PpuBindAuthenticSurfaceSized(ppu,(uint8_t *)authentic,width*4,rows));
+    CHECK(PpuBindOverlaySurfaceSized(ppu,kPpuOverlaySource_Obj,(uint8_t *)overlay,width*4,rows));
+    CHECK(PpuSetOverlayCapture(ppu,kPpuOverlaySource_Obj,-64,-64,width,rows,0));
+    CHECK(PpuSetOverlayOamRange(ppu,0,128));PpuSetObjExactPosition(ppu,2,-12,-48);
+    SrPpuObjColorTransform transforms[128];
+    for(unsigned i=0;i<128;++i)transforms[i]=(SrPpuObjColorTransform){.multiply={256,256,256}};
+    transforms[0]=(SrPpuObjColorTransform){.multiply={128,256,256},.add={0,64,0}};
+    transforms[1]=(SrPpuObjColorTransform){.multiply={256,256,64},.add={32,0,0}};
+    transforms[2]=transforms[0];
+    SrPpuObjCaptureRequest request={.struct_size=sizeof(request),.lifetime_generation=1,
+      .flags=SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS,.color_transforms=transforms,.color_transform_count=128};
+    CHECK(api->configure_ppu_obj_capture(runner,&request)==SR_RESULT_OK&&ppu->objColorTransformsActive);
+    transforms[0].multiply[0]=513;request.flags|=SR_PPU_OBJ_CAPTURE_RELOCATED;request.relocated_first=3;request.relocated_count=1;
+    CHECK(api->configure_ppu_obj_capture(runner,&request)==SR_RESULT_INVALID_ARGUMENT);
+    CHECK(ppu->objColorTransforms[0].multiply[0]==128&&ppu->overlayObjRelocatedCount==0);
+    request.flags=SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS;request.struct_size=SR_PPU_OBJ_CAPTURE_REQUEST_V2_SIZE;
+    CHECK(api->configure_ppu_obj_capture(runner,&request)==SR_RESULT_INVALID_ARGUMENT);
+    ppu_runLine(ppu,0);for(int line=-63;line<=0;++line)ppu_runMarginLine(ppu,line);
+    ppu_runLine(ppu,21);
+    const size_t at=(20+64)*width+64+24;
+    const uint32_t wanted=rotated?0x0020003fu:0x007f4000u;
+    CHECK((overlay[at]&0xffffff)==wanted);CHECK((main_pixels[at]&0xffffff)==wanted);
+    CHECK((overlay[(16)*width+52]&0xffffff)==0x7f4000u);
+    if(!reference){native_main=main_pixels[at];native_overlay=overlay[at];}
+    else {CHECK(native_main==main_pixels[at]);CHECK(native_overlay==overlay[at]);}
+    CHECK((authentic[at]&0xffffff)==(rotated?0xffu:0xff0000u));
+    PpuClearOverlayCaptures(ppu);CHECK(!ppu->objColorTransformsActive);
+    request=(SrPpuObjCaptureRequest){.struct_size=sizeof(request),.lifetime_generation=1,.flags=SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS};
+    CHECK(api->configure_ppu_obj_capture(runner,&request)==SR_RESULT_OK);
+  }
+  ppu_free(ppu);
+}
 int main(void) {
+  TestObjReceiverTransforms();
   TestWorldNavigationPartialBrightnessCapture();
   TestObjRangeRaster();
   TestObjRangeScanoutCapture();

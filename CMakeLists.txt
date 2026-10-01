@@ -1869,12 +1869,22 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_action_effect_capture COMMAND actraiser_action_effect_capture_test)
 
+    add_executable(actraiser_action_effect_recipes_test
+        tests/action_effect_recipes_test.c src/action/action_effect_recipes.c
+        src/action/action_floor_support.c src/action/action_bg_world.c)
+    target_include_directories(actraiser_action_effect_recipes_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_action_effect_recipes_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_action_effect_recipes COMMAND actraiser_action_effect_recipes_test)
+
     add_executable(actraiser_action_effects_test
         tests/action_effects_test.c
         src/action/action_effect_clock.c
         src/action/action_effects.c
+        src/action/action_environment_scene.c
+        src/action/action_map_effect_scene.c
         src/action/action_forest_effect_capture.c
         src/action/action_cave_effect_capture.c
+        src/action/action_floor_support.c
         src/action/action_bloodpool_effect_capture.c
         src/action/action_landing_dust.c
         src/action/action_bg_world.c
@@ -2082,6 +2092,10 @@ if(BUILD_TESTING)
         src/action/action_bloodpool_detail_render.c
         src/action/action_castle_effect_render.c
         src/action/action_scene_effect_render.c
+        src/action/action_authored_effect_render.c
+        src/action/action_authored_fields.c
+        src/action/action_effect_receivers.c
+        src/action/action_effect_preview.c
         src/action/action_forest_effect_render.c
         src/action/action_environment_geometry.c
         src/action/action_scene_lightning_render.c
@@ -2090,6 +2104,14 @@ if(BUILD_TESTING)
         src/diorama/diorama_depth_shapes.c
         src/render/scene3d_math.c
     )
+    add_executable(actraiser_action_authored_fields_test
+        tests/action_authored_fields_test.c ${AR_ACTION_EFFECT_TEST_SOURCES}
+        src/action/action_effect_recipes.c src/action/action_floor_support.c src/action/action_bg_world.c)
+    target_include_directories(actraiser_action_authored_fields_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/action ${CMAKE_SOURCE_DIR}/src/diorama ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_action_authored_fields_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_action_authored_fields COMMAND actraiser_action_authored_fields_test)
+
     add_executable(actraiser_action_effect_render_test
         tests/action_effect_render_test.c ${AR_ACTION_EFFECT_TEST_SOURCES})
     target_include_directories(actraiser_action_effect_render_test PRIVATE

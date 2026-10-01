@@ -104,11 +104,14 @@ $('#tileActionDeselect').onclick=()=>runTileAction(()=>{
 });
 cvs.addEventListener('contextmenu',ev=>{
   if(mode!=='2d')return;
-  ev.preventDefault();openTileMenu(...toCell(ev),ev.clientX,ev.clientY);
+  ev.preventDefault();
+  if(['effects','effectPlace','particleArea'].includes(brush))return;
+  openTileMenu(...toCell(ev),ev.clientX,ev.clientY);
 });
 cvs.addEventListener('keydown',ev=>{
   if(mode!=='2d'||!(ev.key==='ContextMenu'||ev.key==='F10'&&ev.shiftKey))return;
   ev.preventDefault();ev.stopPropagation();
+  if(['effects','effectPlace','particleArea'].includes(brush))return;
   const position=selectionAnchor||tileSelectionPositions()[0];
   if(!position)return;
   const [cx,cy]=position,rect=cvs.getBoundingClientRect();

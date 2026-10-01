@@ -1,3 +1,4 @@
+#include "action/action_effect_receivers.h"
 /* ActionSceneEffectRender: geometry for the effects placed in action scenes
  * (lava pits and reservoirs, molten rock, water splashes, waterfalls and their
  * mist, wall torches, statue fire, fireballs, the flaming wheel, projectiles),
@@ -956,6 +957,10 @@ static bool AppendWallTorchLighting(ActionEffectGeometryWriter *writer,
       .axis_x = 1.0f,
       .lift_y = -1.0f};
   spill = kSpill;
+  if (effect->tuning.active) {
+    spill.radius_x *= effect->tuning.reach;
+    spill.radius_y *= effect->tuning.reach;
+  }
   spill.seed = (unsigned)effect->generation;
   static const ActionEffectGlowStyle kBody = {
       .radius_x = 8.5f,
@@ -1989,7 +1994,7 @@ static bool BuildSceneEffectList(
     const ActionMoonlightOcclusion *moonlight,
     const ActionBloodpoolDetails *bloodpool,
     uint8_t capacity, bool overflow, uint8_t render_layer,
-    bool lighting_enabled, bool particles_enabled,
+    bool want_lighting, bool want_particles,
     ActionEffectProjectPointFn project_point, ActionEffectClipBoundsFn clip_bounds,
     void *project_userdata,
     ActionSceneEffectRenderBatch *batch) {
@@ -2001,7 +2006,7 @@ static bool BuildSceneEffectList(
   if (!effects || effect_count > capacity ||
       render_layer >= kActionEffectRenderLayer_Count)
     return false;
-  if (overflow || (!lighting_enabled && !particles_enabled)) return true;
+  if (overflow || (!want_lighting && !want_particles)) return true;
   if (!project_point) return false;
   ActionEffectGeometryWriter writer = GeometryWriter(
       batch->vertices, kActionSceneEffectRenderMaxVertices,
@@ -2024,12 +2029,17 @@ static bool BuildSceneEffectList(
 
   for (uint8_t i = 0; i < effect_count; i++) {
     const ActionEffectInstance *effect = &effects[i];
+    const bool lighting_enabled=want_lighting && !(effect->flags&kActionEffectFlag_LightingOff) && ActionEffectReceivers_Layer(effect)==render_layer &&
+        (!effect->tuning.light_receivers_set || !ActionEffectReceivers_IsLight(effect->kind) ||
+         (effect->tuning.light_receivers&kActionReceiver_Scenery));
+    const bool particles_enabled=want_particles && effect->render_layer==render_layer;
+    const int first_vertex = writer.vertex_count;
     if (!(effect->flags & kActionEffectFlag_Visible) ||
         effect->geometry.kind != kActionEffectGeometry_Rect ||
         !RectIsSane(&effect->geometry.data.rect) ||
         !SceneEffectStyleKnown(effect) ||
         effect->obj_priority >= kActionEffectObjPriorityCount ||
-        effect->render_layer != render_layer ||
+        (!lighting_enabled && !particles_enabled) ||
         effect->projection_plane > kActionEffectProjectionPlane_BetweenBackgrounds)
       continue;
     if ((effect->kind == kActionEffect_BloodpoolBossLightning ||
@@ -2133,6 +2143,19 @@ static bool BuildSceneEffectList(
         !AppendSceneParticles(&writer, effect, project_point, clip_bounds,
                               project_userdata))
       return false;
+    if (effect->tuning.active) {
+      const ActionEffectTuning *t = &effect->tuning;
+      if (!isfinite(t->intensity) || t->intensity < 0 || t->intensity > 4 ||
+          !isfinite(t->reach) || t->reach < .25f || t->reach > 4) return false;
+      const float red = ((t->color >> 16) & 255) / 255.0f;
+      const float green = ((t->color >> 8) & 255) / 255.0f;
+      const float blue = (t->color & 255) / 255.0f;
+      for (int v = first_vertex; v < writer.vertex_count; ++v) {
+        ArRenderColorF *c = &writer.vertices[v].color;
+        c->r *= red; c->g *= green; c->b *= blue;
+        c->a = fminf(1,c->a * t->intensity);
+      }
+    }
   }
   batch->vertex_count = writer.vertex_count;
   batch->index_count = writer.index_count;
@@ -2172,9 +2195,47 @@ bool ActionSceneDecorationRender_Build(
     }
     return false;
   }
-  return BuildSceneEffectList(
+  if (!BuildSceneEffectList(
       frame->decorations, frame->decoration_count, &frame->moonlight, &frame->bloodpool,
       kActionSceneDecorationMaxInstances, frame->decoration_overflow,
       render_layer, lighting_enabled, particles_enabled, project_point, clip_bounds,
-      project_userdata, batch);
+      project_userdata, batch)) return false;
+  /* Explicit actor receivers move just the light underneath actors. Trails
+   * retain the original late pass. Use separate scratch and bounded merging;
+   * never put moving lights into the native decoration allocation pool. */
+  if(render_layer==kActionEffectRenderLayer_Bg1Plane && lighting_enabled) {
+    static ActionSceneEffectRenderBatch actor_light;
+    if(!BuildSceneEffectList(frame->effects,frame->effect_count,NULL,NULL,
+        kActionSceneEffectMaxInstances,frame->overflow,render_layer,true,false,
+        project_point,clip_bounds,project_userdata,&actor_light) ||
+        batch->vertex_count+actor_light.vertex_count>kActionSceneEffectRenderMaxVertices ||
+        batch->index_count+actor_light.index_count>kActionSceneEffectRenderMaxIndices) {
+      batch->vertex_count=batch->index_count=0;return false;
+    }
+    const int base=batch->vertex_count;
+    memcpy(batch->vertices+base,actor_light.vertices,actor_light.vertex_count*sizeof(actor_light.vertices[0]));
+    for(int i=0;i<actor_light.index_count;++i)batch->indices[batch->index_count++]=base+actor_light.indices[i];
+    batch->vertex_count+=actor_light.vertex_count;
+  }
+  if (frame->authored_count > kActionAuthoredMaxInstances) {
+    batch->vertex_count = batch->index_count = 0;
+    return false;
+  }
+  ActionEffectGeometryWriter writer = GeometryWriter(batch->vertices,kActionSceneEffectRenderMaxVertices,
+      batch->indices,kActionSceneEffectRenderMaxIndices);
+  writer.vertex_count=batch->vertex_count;writer.index_count=batch->index_count;
+  const int base_vertices=writer.vertex_count, base_indices=writer.index_count;
+  for (unsigned i=0;i<frame->authored_count;++i) {
+    const ActionEffectInstance *e=&frame->authored[i];
+    if (!(e->flags&kActionEffectFlag_Visible) || ActionEffectReceivers_Layer(e)!=render_layer) continue;
+    if(e->tuning.light_receivers_set&&ActionEffectReceivers_IsLight(e->kind)&&
+        !(e->tuning.light_receivers&kActionReceiver_Scenery))continue;
+    if (!AppendAuthoredEnvironment(&writer,e,&frame->authored_floor[i],lighting_enabled,particles_enabled,project_point,clip_bounds,project_userdata) ||
+        writer.vertex_count-base_vertices>kActionAuthoredMaxVertices ||
+        writer.index_count-base_indices>kActionAuthoredMaxIndices) {
+      batch->vertex_count=batch->index_count=0;return false;
+    }
+  }
+  batch->vertex_count=writer.vertex_count;batch->index_count=writer.index_count;
+  return true;
 }

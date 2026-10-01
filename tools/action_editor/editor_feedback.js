@@ -157,7 +157,7 @@ function refreshEditorFeedback() {
   $('#selectionTools').hidden=mode!=='2d';
   $('#pixelSelectionBlackQuick').disabled=!selected||mode!=='2d';
   $('#copyTilesQuick').disabled=!selected||mode!=='2d';
-  const toolNames={select:'Select tiles',selectRect:'Select a rectangle',pan:'Pan',framing:'Adjust framing',
+  const toolNames={select:'Select tiles',selectRect:'Select a rectangle',pan:'Pan',framing:'Adjust framing',floorMist:'Paint ground mist',floorErase:'Erase mist areas',effects:'Edit emitters',effectPlace:'Place emitter',
     cell:'Paint one tile',class:'Paint matching tile types',rect:'Paint a rectangle',stamp:'Stamp tiles'};
   $('#selectQuick').classList.toggle('on',brush==='select');
   $('#selectRectQuick').classList.toggle('on',brush==='selectRect');
@@ -165,6 +165,10 @@ function refreshEditorFeedback() {
   let hint;
   if(compareOriginal)hint='Showing original tiles. Editing returns to your edited preview.';
   else if(brush==='select'||brush==='selectRect')hint='Selection makes no edits. Click or drag; Shift-click selects a range. Actions apply immediately.';
+  else if(brush==='effects')hint='Click an emitter area; drag its body/centre to move or a corner to resize. Alt snaps to 16 px. Esc returns to tiles.';
+  else if(brush==='effectPlace')hint='Click to place the selected emitter preset. Middle-drag pans; wheel zooms. Esc returns to tiles.';
+  else if(brush==='floorMist')hint='Drag up to 512 × 512 pixels around supported floors. Cyan edges support mist; wheel zooms; middle-drag pans.';
+  else if(brush==='floorErase')hint='Drag across authored ground-mist areas to remove them. Undo restores the complete areas.';
   else if(brush==='stamp')hint='Click places the stamp shown in Tiles. Keep clicking to repeat; Esc finishes.';
   else if(brush==='pan')hint='Drag to move the map; wheel zooms. Choose Select to pick tiles.';
   else if(brush==='framing')hint='Drag any viewport frame; all move together. Arrows: 1 px; Shift + arrows: 16 px. Dashed outline = native view. Esc returns to Select.';

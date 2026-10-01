@@ -19,6 +19,7 @@ def check(html, wasm, sanitize):
                    '-I', 'snesrecomp-go/runtime/include', '-I', 'snesrecomp-go/runtime/src',
                    '-I', 'snesrecomp-go/runtime/src/core', '-I', 'snesrecomp-go/runtime/src/runner',
                    'tests/action_editor_room_test.c', 'tools/action_editor/room_scene.c',
+                   *(ROOT / 'tools/action_editor/environment_sources.txt').read_text().splitlines(),
                    'src/action/action_scene_snapshot.c', 'src/action/action_room_scene.c',
                    'src/action/action_bg_world.c', 'src/action/action_bg_plan.c',
                    'src/diorama/diorama_capture_blend.c', 'src/diorama/diorama_layer_order.c',

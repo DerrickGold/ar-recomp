@@ -194,7 +194,7 @@ enum {
       kActionSceneEffectGlowsPerInstance * kActionEffectGlowIndices +
       (kActionSceneEffectWaterfallMistParticleCount -
        kActionSceneEffectParticlesPerInstance) * 6,
-  kActionSceneEffectRenderMaxVertices =
+  kActionSceneEffectRenderMaxVertices = kActionAuthoredMaxVertices +
       kActionSceneEffectMaxGlows * kActionEffectGlowVertices +
       kActionSceneEffectMaxParticles * 4 +
       kActionSceneEffectMaxLightningFilaments *
@@ -212,7 +212,7 @@ enum {
       kActionSceneEffectLavaReservoirGlowExtraVertices +
       kActionSceneEffectMaxFlamingWheels *
           kActionSceneEffectFlamingWheelExtraVertices,
-  kActionSceneEffectRenderMaxIndices =
+  kActionSceneEffectRenderMaxIndices = kActionAuthoredMaxIndices +
       kActionSceneEffectMaxGlows * kActionEffectGlowIndices +
       kActionSceneEffectMaxParticles * 6 +
       kActionSceneEffectMaxLightningFilaments *

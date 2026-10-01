@@ -1,4 +1,5 @@
 #include "action/action_effect_capture.h"
+#include "action/action_effect_manifest.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -16,6 +17,26 @@
  * redraws do not age effects. Both spell and scene capture share one delta. */
 static ActionEffectObserver s_action_effect_observer;
 static ActionEffectTickClock s_action_effect_tick_clock;
+
+uint16_t ActionEffectCapture_VisualClock(void) {
+  const uint16_t game_clock=(uint16_t)(g_ram[kActRaiserWram_GameFrame]|g_ram[kActRaiserWram_GameFrame+1]<<8);
+  if(!s_action_effect_observer.scene_clock_valid || !s_action_effect_observer.scene_map_valid ||
+      s_action_effect_observer.scene_map_group!=g_ram[kActRaiserWram_MapGroup] ||
+      s_action_effect_observer.scene_map_number!=g_ram[kActRaiserWram_CurrentMap])return game_clock;
+  ActionEffectTickClock pending=s_action_effect_tick_clock;
+  return (uint16_t)(s_action_effect_observer.scene_clock+ActionEffectTickClock_Capture(&pending));
+}
+
+void ActionEffectCapture_PeekScene(ActionSceneEffectFrame *frame) {
+  if(!frame)return;
+  ActionEffectObserver observer=s_action_effect_observer;
+  ActionEffectTickClock pending=s_action_effect_tick_clock;
+  ActionSceneEffects_CaptureFrame(&observer,frame,g_ram,kActRaiserWramSize,ActionEffectTickClock_Capture(&pending));
+  if(g_settings.action_environmental_effects)
+    ActionEnvironmentalEffects_CaptureFrame(&observer,frame,g_ram,kActRaiserWramSize);
+  if(!g_settings.action_effect_lighting)
+    for(unsigned i=0;i<frame->effect_count;++i)frame->effects[i].flags|=kActionEffectFlag_LightingOff;
+}
 
 static void ReportCapturedActionEffects(const FrameSlot *dst) {
   /* Capture-side twin of present_action_effects.c's "[action-fx] first spell geometry
@@ -164,5 +185,9 @@ void ActionEffectCapture_CaptureFrame(FrameSlot *dst) {
     dst->action_scene_effects.decoration_count = 0;
     dst->action_scene_effects.decoration_visible_count = 0;
   }
+  if (dst->action_environmental_effects && s_action_effect_observer.scene_map_valid) ActionEffectManifest_Apply(dst->diorama_map_group, dst->diorama_map_number,
+      s_action_effect_observer.scene_clock, g_ram, kActRaiserWramSize, &dst->action_scene_effects);
+  if(!dst->action_effect_lighting)
+    for(unsigned i=0;i<dst->action_scene_effects.effect_count;++i)dst->action_scene_effects.effects[i].flags|=kActionEffectFlag_LightingOff;
   ReportCapturedActionEffects(dst);
 }

@@ -522,7 +522,7 @@ static SrResult configure_ppu_obj_capture(
         SrRunnerHandle *runner, const SrPpuObjCaptureRequest *request) {
     Snes *snes = runner_from_handle(runner);
     const uint32_t supported = SR_PPU_OBJ_CAPTURE_RANGE |
-        SR_PPU_OBJ_CAPTURE_RELOCATED | SR_PPU_OBJ_CAPTURE_WINNERS;
+        SR_PPU_OBJ_CAPTURE_RELOCATED | SR_PPU_OBJ_CAPTURE_WINNERS | SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS;
     Ppu *ppu;
     bool range_clear = false;
     bool relocated_clear = false;
@@ -538,6 +538,14 @@ static SrResult configure_ppu_obj_capture(
     ppu = ppu_output_control_target(snes);
     if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
 
+    if(request->flags & SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS) {
+        if(request->struct_size<SR_PPU_OBJ_CAPTURE_REQUEST_V3_SIZE || request->color_reserved ||
+           (request->color_transform_count!=0 && request->color_transform_count!=128) ||
+           (!!request->color_transforms != !!request->color_transform_count))return SR_RESULT_INVALID_ARGUMENT;
+        for(unsigned i=0;i<request->color_transform_count;++i)for(unsigned c=0;c<3;++c)
+            if(request->color_transforms[i].multiply[c]>512 || request->color_transforms[i].add[c]>255)
+                return SR_RESULT_INVALID_ARGUMENT;
+    }
     if ((request->flags & (SR_PPU_OBJ_CAPTURE_RANGE | SR_PPU_OBJ_CAPTURE_WINNERS)) != 0u) {
         range_clear = request->range_count == 0u;
         if (range_clear) {
@@ -618,6 +626,8 @@ static SrResult configure_ppu_obj_capture(
             return SR_RESULT_INVALID_ARGUMENT;
         }
     }
+    if(request->flags & SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS)
+        (void)PpuSetObjColorTransforms(ppu,request->color_transforms,request->color_transform_count);
     return SR_RESULT_OK;
 }
 

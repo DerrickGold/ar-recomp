@@ -769,4 +769,5 @@ function draw2d() {
   }
   drawFramingGuide();
   drawCoverageGuide();
+  EffectEditor.drawMapOverlay(ctx,view,r);
 }

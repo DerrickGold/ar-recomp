@@ -243,8 +243,8 @@ function refreshNativeCameraControls() {
   $('#nativeCameraX').min=String(minX);$('#nativeCameraY').min=String(minY);
   $('#nativeCameraX').max=String(previewMaxX);$('#nativeCameraX').value=String(nativeCamera.x);
   $('#nativeCameraY').max=String(maxY);$('#nativeCameraY').value=String(nativeCamera.y);
-  $('#nativeCameraXv').textContent=String(nativeCamera.x);
-  $('#nativeCameraYv').textContent=String(nativeCamera.y);
+  $('#nativeCameraXv').value=String(nativeCamera.x);
+  $('#nativeCameraYv').value=String(nativeCamera.y);
   refreshFramingControls();
 }
 function setNativeCamera(axis,value) {
@@ -253,6 +253,8 @@ function setNativeCamera(axis,value) {
 }
 $('#nativeCameraX').oninput=event=>setNativeCamera('x',event.target.value);
 $('#nativeCameraY').oninput=event=>setNativeCamera('y',event.target.value);
+$('#nativeCameraXv').oninput=event=>setNativeCamera('x',event.target.value);
+$('#nativeCameraYv').oninput=event=>setNativeCamera('y',event.target.value);
 function setNativeFrame(value) {
   nativeFrame = Math.max(0, Math.min(65535, Math.floor(Number(value) || 0)));
   if(mode !== 'shared') L = decodeLayer(room,bgIndex);

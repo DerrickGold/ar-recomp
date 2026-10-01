@@ -112,6 +112,8 @@ static void update_brightness(Ppu *ppu) {
     ppu->cgramRgbValid = false;
 }
 
+static uint32_t transform_obj_color(Ppu *, int, int, uint32_t);
+
 static uint32_t color_argb(const Ppu *ppu, uint16_t color) {
     return 0xff000000u |
            ((uint32_t)ppu->brightnessMult[color & 0x1fu] << 16) |
@@ -512,6 +514,7 @@ void PpuClearOverlayCaptures(Ppu *ppu) {
     ppu->overlayObjRelocatedFirst = ppu->overlayObjRelocatedCount = 0u;
     memset(&ppu->objRangeCapture, 0, sizeof(ppu->objRangeCapture));
     memset(&ppu->objWinnerCapture, 0, sizeof(ppu->objWinnerCapture));
+    ppu->objColorTransformsActive=false;
     memset(&ppu->m7Override, 0, sizeof(ppu->m7Override));
 }
 
@@ -608,6 +611,17 @@ static bool set_obj_range_capture(PpuObjRangeCapture *capture, uint8_t first, ui
     capture->pixels = pixels;
     capture->pitch = (uint32_t)pitch;
     return true;
+}
+
+bool PpuSetObjColorTransforms(Ppu *ppu,const SrPpuObjColorTransform *transforms,unsigned count) {
+    if(!ppu || (count!=0 && count!=128) || (!!transforms != !!count))return false;
+    bool active=false;
+    for(unsigned i=0;i<count;++i)for(unsigned c=0;c<3;++c) {
+        if(transforms[i].multiply[c]>512 || transforms[i].add[c]>255)return false;
+        active|=transforms[i].multiply[c]!=256 || transforms[i].add[c]!=0;
+    }
+    if(count)memcpy(ppu->objColorTransforms,transforms,sizeof(ppu->objColorTransforms));
+    ppu->objColorTransformsActive=active;return true;
 }
 
 bool PpuSetObjRangeCapture(Ppu *ppu, uint8_t first, uint8_t count,
@@ -1982,6 +1996,9 @@ static void write_overlay(Ppu *ppu, int source, int x, int y,
                 source < 4
             ? color_math(pixel->color, ppu->fixedColor, true, false)
             : pixel->color);
+    if(source==kPpuOverlaySource_Obj && ppu->objColorTransformsActive &&
+        capture->oamFirst==0 && capture->oamCount==128 && !override_color)
+        color=transform_obj_color(ppu,x,y,color);
     if ((capture->flags & kPpuOverlayFlag_MarkObjColorMath) != 0u &&
         source == kPpuOverlaySource_Obj && pixel->palette >= 4u)
         color = (color & 0x00ffffffu) | 0x80000000u;
@@ -3814,6 +3831,23 @@ static uint16_t native_obj_cache_pixel(const PpuObjSampleCache *cache, int x) {
     return native_pack_pixel(palette, rank, kPpuOverlaySource_Obj);
 }
 
+static uint32_t transform_obj_color(Ppu *ppu,int x,int y,uint32_t argb) {
+    if(!ppu->objColorTransformsActive)return argb;
+    PpuObjSampleCache *cache=get_obj_sample_cache(ppu,y,0,0,0,0,0);
+    if(!cache || !native_obj_cache_pixel(cache,x))return argb;
+    const unsigned slot=cache->slots[x+kPpuExtraLeftRight];
+    if(slot>=128)return argb;
+    const SrPpuObjColorTransform *t=&ppu->objColorTransforms[slot];
+    uint32_t result=argb&0xff000000u;
+    for(unsigned c=0;c<3;++c) {
+        const unsigned shift=16-8*c;
+        unsigned value=((argb>>shift)&255u)*t->multiply[c]/256u+
+            t->add[c]*ppu->brightnessMult[31]/255u;
+        if(value>255)value=255;result|=value<<shift;
+    }
+    return result;
+}
+
 static void native_merge_packed_span(
         uint16_t *SR_RESTRICT main_pixels,
         uint16_t *SR_RESTRICT sub_pixels,
@@ -3839,13 +3873,14 @@ typedef struct NativeOverlayLinePlan {
     uint32_t *bands[3];
     uint8_t priority_for_rank[16];
     uint32_t colors[kPpuCgramEntries];
-    int origin;
+    int origin, screen_y;
 } NativeOverlayLinePlan;
 
 static void native_overlay_line_plan(Ppu *ppu, int source, int screen_y,
                                      NativeOverlayLinePlan *plan) {
     PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
     int row;
+    plan->screen_y=screen_y;
     /* The palette is filled below only for bound rows; clearing it first
      * would add a redundant kilobyte store per source on every scanline. */
     plan->primary = NULL;
@@ -3918,7 +3953,11 @@ static void native_write_overlay_packed(
     if (destination == plan->primary) band = 0;
     if (source < 2 && (ppu->captureTileCoverage[source][plan->origin + x] &
                       (1u << band))) return;
-    destination[plan->origin + x] = plan->colors[palette];
+    destination[plan->origin + x] = source==kPpuOverlaySource_Obj && ppu->objColorTransformsActive &&
+        ppu->overlayCaptures[source].oamFirst==0 && ppu->overlayCaptures[source].oamCount==128 &&
+        !(ppu->overlayCaptures[source].flags & (kPpuOverlayFlag_MarkMainScreenWinner |
+            kPpuOverlayFlag_MarkOwningScreenWinner | kPpuOverlayFlag_MarkVisibleMainWinner))
+        ? transform_obj_color(ppu,x,plan->screen_y,plan->colors[palette]) : plan->colors[palette];
     ppu->overlayRenderContentMask[source] |= (uint8_t)(1u << band);
 }
 
@@ -3977,6 +4016,21 @@ static void native_capture_tiles_line(Ppu *ppu, int layer, int screen_y,
         PPU_forcedBlank(ppu) || bpp_for_mode(PPU_mode(ppu), layer) != 4 ||
         !capture_surface_bound(ppu, layer) ||
         screen_y < capture->y0 || screen_y >= capture->y1) return;
+    /* Edits and guard columns must obey the same per-layer vertical limits as
+     * the native capture. Otherwise a repeating short BG wraps its bottom
+     * into the top apron even when the visible centre has been clipped. */
+    if (screen_y < 0) {
+        if (((ppu->verticalMarginLayerClip & (1u << layer)) != 0u &&
+             -screen_y > ppu->verticalMarginTopRows[layer]) ||
+            (ppu->wsLayerExtentTop[layer] != kPpuWidescreenExtentAvailable &&
+             -screen_y > ppu->wsLayerExtentTop[layer])) return;
+    } else if (screen_y >= kPpuYPixels) {
+        const int distance = screen_y - (kPpuYPixels - 1);
+        if (((ppu->verticalMarginLayerClip & (1u << layer)) != 0u &&
+             distance > ppu->verticalMarginBottomRows[layer]) ||
+            (ppu->wsLayerExtentBottom[layer] != kPpuWidescreenExtentAvailable &&
+             distance > ppu->wsLayerExtentBottom[layer])) return;
+    }
     if (!colors->primary) return;
     native_layer_window_plan(ppu, layer, true, &windows);
     const bool owner_sub = (ppu->screenEnabled[0] & (1u << layer)) == 0u;
@@ -4785,6 +4839,8 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                     : native_final_rgb(
                         ppu, main, sub, clipped, math_enabled,
                         add_subscreen, subtract, half);
+                if(!authentic && ppu->objColorTransformsActive && native_pixel_layer(main)==kPpuOverlaySource_Obj && !clipped)
+                    row[origin+x]=transform_obj_color(ppu,x,screen_y,row[origin+x]);
                 if (capture_masks) {
                     unsigned palette = main & 0xffu;
                     if (native_pixel_layer(main) ==
@@ -4830,6 +4886,8 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                     : native_final_rgb(
                         ppu, main, sub, clipped, math_enabled,
                         add_subscreen, subtract, half);
+                if(!authentic && ppu->objColorTransformsActive && native_pixel_layer(main)==kPpuOverlaySource_Obj && !clipped)
+                    row[origin+x]=transform_obj_color(ppu,x,screen_y,row[origin+x]);
                 if (capture_masks) {
                     unsigned palette = main & 0xffu;
                     if (native_pixel_layer(main) ==
@@ -5062,6 +5120,8 @@ static bool render_line_to(Ppu *ppu, int screen_y, uint8_t *buffer,
                             want_sub, dual_authentic, &main, &sub,
                             &original_main, &original_sub);
         row[origin + x] = color_rgb(ppu, final_color(ppu, x, &main, &sub));
+        if(capture && !authentic && main.layer==kPpuOverlaySource_Obj && ppu->objColorTransformsActive)
+            row[origin+x]=transform_obj_color(ppu,x,screen_y,row[origin+x]);
         if (dual_authentic && x >= 0 && x < kPpuXPixels)
             authentic_row[authentic_origin + x] = color_rgb(
                 ppu, final_color(ppu, x, &original_main, &original_sub));

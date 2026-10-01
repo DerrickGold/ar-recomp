@@ -3,6 +3,7 @@
 /* Private bounded capture operations. Each stage validates its map dimensions
  * and art witnesses before emitting records; capture never mutates WRAM. */
 #include "action/action_effects.h"
+#include "action/action_environment_scene.h"
 #include "actraiser/actraiser_room_profiles.h"
 #include "actraiser_game.h"
 #include "action/action_bg_world.h"
@@ -44,5 +45,10 @@ void CaptureBloodpoolMarsh(ActionEffectObserver *observer, ActionSceneEffectFram
     const uint8_t *wram, size_t size);
 void CaptureBloodpoolCastle(ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
     const uint8_t *wram, size_t size);
+
+void CaptureFillmoreForestScene(const ActionEnvironmentScene *, ActionSceneEffectFrame *);
+void CaptureFillmoreCaveScene(const ActionEnvironmentScene *, ActionSceneEffectFrame *);
+void CaptureBloodpoolMarshScene(const ActionEnvironmentScene *, ActionSceneEffectFrame *);
+void CaptureBloodpoolCastleScene(const ActionEnvironmentScene *, ActionSceneEffectFrame *);
 
 #endif

@@ -2,6 +2,7 @@
 #include "action/action_environment_capture_internal.h"
 #include "action_cave_surface.h"
 #include "action_landing_dust.h"
+#include "action_floor_support.h"
 
 unsigned FillmoreCaveRoom(const uint8_t *wram, size_t size) {
   if (!wram || size <= kActRaiserWram_Bg2Height + 1 ||
@@ -37,26 +38,19 @@ _Static_assert(kActionLandingDustMaxPuffs + 7 + kActionTempleMistMaxSpans <=
                    kActionSceneDecorationMaxInstances,
                "temple floor mist must leave room for landing dust and ambient fields");
 
-static int TempleMistFloor(const uint8_t *wram, const ActionBgMapView *map, int x,
-    unsigned room) {
-  /* Search only the lower hall. The native collision LUT, rather than the
-   * decorative ledge pixels, determines the supporting surface in each column.
-   * Spike artwork is non-solid: continue through it to the stone pit bottom. */
-  const int top = room == 2 ? 1120 : 1664;
-  const int bottom = room == 2 ? 1248 : 1712;
-  for (int y = top; y <= bottom; y += 16) {
-    uint8_t below, above;
-    if (!ActionBgMapView_LookupMetatile(map, x, y, &below) ||
-        !ActionBgMapView_LookupMetatile(map, x, y-1, &above)) return 0;
-    const unsigned collision = wram[0x05A0 + below];
-    const bool capital = below >= 0x54 && below <= 0x57 && collision == 3;
-    if ((collision == 15 || capital) && wram[0x05A0 + above] == 0) return y;
-  }
+static int TempleMistFloor(const ActionEnvironmentScene *scene, int x) {
+  /* Search only the lower hall using the same exposed-floor predicate as
+   * authored mist and the editor collision overlay. */
+  const int top = scene->room == 2 ? 1120 : 1664;
+  const int bottom = scene->room == 2 ? 1248 : 1712;
+  for (int y=top;y<=bottom;y+=16)
+    if (ActionFloorSupport_Cell(scene,x,y)&16) return y;
   return 0;
 }
 
-static void CaptureTempleMist(ActionSceneEffectFrame *dst, const uint8_t *wram,
-    const ActionBgMapView *map, unsigned room, uint16_t clock) {
+static void CaptureTempleMist(ActionSceneEffectFrame *dst, const ActionEnvironmentScene *scene) {
+  const unsigned room=scene->room;
+  const uint16_t clock=scene->clock;
   const uint8_t count_before = dst->decoration_count;
   const uint8_t visible_before = dst->decoration_visible_count;
   const int start = room == 2 ? 880 : 512;
@@ -64,7 +58,7 @@ static void CaptureTempleMist(ActionSceneEffectFrame *dst, const uint8_t *wram,
   int left = start, floor = 0;
   unsigned spans = 0;
   for (int x = start; x <= end; x += 16) {
-    const int next_floor = x < end ? TempleMistFloor(wram, map, x, room) : 0;
+    const int next_floor = x < end ? TempleMistFloor(scene,x) : 0;
     if (next_floor == floor) continue;
     if (floor) {
       /* A changed/fragmented map may exceed the cosmetic budget. Omit only
@@ -109,34 +103,23 @@ static uint16_t CaveWetSourceMask(const ActionBgMapView *map) {
   return mask;
 }
 
-void CaptureFillmoreCave(ActionEffectObserver *observer,
-    ActionSceneEffectFrame *dst, const uint8_t *wram, size_t size) {
-  const unsigned room = FillmoreCaveRoom(wram, size);
-  if (!room || observer->scene_map_number != room) {
-    memset(&observer->landing_dust, 0, sizeof(observer->landing_dust));
-    return;
-  }
-  const unsigned width = Read16(wram, size, kActRaiserWram_Bg1Width);
-  const unsigned height = Read16(wram, size, kActRaiserWram_Bg1Height);
-  ActionBgMapView map;
-  if (!ActionBgMapView_Init(&map, wram, size, width, height,
-          Read16(wram, size, kActRaiserWram_BgMapPage)) || !CaveMapReady(&map, room)) {
-    memset(&observer->landing_dust, 0, sizeof(observer->landing_dust));
-    return;
-  }
-  const ActionBgMapView playfield = map;
+void CaptureFillmoreCaveScene(const ActionEnvironmentScene *scene, ActionSceneEffectFrame *dst) {
+  const unsigned room = scene->room;
+  if (scene->group != kActRaiserMapGroup_Fillmore || room < 2 || room > 4) return;
+  static const unsigned dimensions[][4] = {
+    {2048,1280,2048,1280}, {1024,1792,256,512}, {512,256,256,256},
+  };
+  const unsigned *d = dimensions[room-2];
+  const unsigned width = scene->maps[0].world_width, height = scene->maps[0].world_height;
+  if (width != d[0] || height != d[1] || scene->maps[1].world_width != d[2] ||
+      scene->maps[1].world_height != d[3]) return;
+  const ActionBgMapView playfield = scene->maps[0];
+  if (!CaveMapReady(&playfield,room)) return;
   if (room == 2) {
     uint8_t pool, fall;
-    if (!ActionBgMapView_Init(&map, wram, size, 2048, 1280,
-            Read16(wram, size, kActRaiserWram_BgMapPage + kActRaiserBgLayerStateStride)) ||
-        !ActionBgMapView_LookupMetatile(&map, 0, 896, &pool) || pool != 1 ||
-        !ActionBgMapView_LookupMetatile(&map, 720, 0, &fall) || fall != 2) {
-      memset(&observer->landing_dust, 0, sizeof(observer->landing_dust));
-      return;
-    }
+    if (!ActionBgMapView_LookupMetatile(&scene->maps[1],0,896,&pool) || pool != 1 ||
+        !ActionBgMapView_LookupMetatile(&scene->maps[1],720,0,&fall) || fall != 2) return;
   }
-  ActionLandingDust_Capture(&observer->landing_dust, dst, wram, size,
-      &playfield, room, observer->scene_clock);
   const uint16_t wet_sources = room == 2 ? CaveWetSourceMask(&playfield) : 0;
   /* Aggregate fields cap this family at seven records, independent of how
    * many water tiles/emitters exist. Actor slots and their budget are untouched. */
@@ -165,16 +148,14 @@ void CaptureFillmoreCave(ActionEffectObserver *observer,
     if (!(fields[i].rooms & (1u << room))) continue;
     const uint8_t kind = fields[i].kind;
     const bool water = fields[i].plane == kActionEffectProjectionPlane_Bg2High;
-    const int x = (int16_t)Read16(wram, size, water ? kActRaiserWram_Bg2CameraX :
-                                                           kActRaiserWram_Bg1CameraX) + 128;
-    const int y = (int16_t)Read16(wram, size, water ? kActRaiserWram_Bg2CameraY :
-                                                           kActRaiserWram_Bg1CameraY) - 160;
+    const int x = scene->camera_x[water ? 1 : 0] + 128;
+    const int y = scene->camera_y[water ? 1 : 0] - 160;
     const ActionEffectInstance effect = {
       .generation = 0xC2000000u | (room << 8) | kind,
       .pulse_generation = 0xD2000000u | (room << 8) | kind,
       .world_x = (int16_t)x, .world_y = (int16_t)y, .environment_room = (uint16_t)room,
-      .age_ticks = observer->scene_clock, .phase_ticks = observer->scene_clock,
-      .pulse_ticks = observer->scene_clock,
+      .age_ticks = scene->clock, .phase_ticks = scene->clock,
+      .pulse_ticks = scene->clock,
       .kind = kind, .phase = kActionEffectPhase_CaveEnvironment,
       .source_mask = (kind == kActionEffect_CaveDrips || kind == kActionEffect_CaveSheen) ?
           wet_sources : 0,
@@ -189,5 +170,25 @@ void CaptureFillmoreCave(ActionEffectObserver *observer,
       return;
     }
   }
-  if (room <= 3) CaptureTempleMist(dst, wram, &playfield, room, observer->scene_clock);
+  if (room <= 3) CaptureTempleMist(dst, scene);
+}
+
+void CaptureFillmoreCave(ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
+    const uint8_t *ram, size_t size) {
+  ActionEnvironmentScene scene;
+  if (!ActionEnvironmentScene_FromWram(&scene,ram,size,observer->scene_clock) ||
+      !FillmoreCaveRoom(ram,size) || observer->scene_map_number != scene.room ||
+      !CaveMapReady(&scene.maps[0],scene.room)) {
+    memset(&observer->landing_dust,0,sizeof(observer->landing_dust)); return;
+  }
+  if (scene.room == 2) {
+    uint8_t pool, fall;
+    if (!ActionBgMapView_LookupMetatile(&scene.maps[1],0,896,&pool) || pool != 1 ||
+        !ActionBgMapView_LookupMetatile(&scene.maps[1],720,0,&fall) || fall != 2) {
+      memset(&observer->landing_dust,0,sizeof(observer->landing_dust)); return;
+    }
+  }
+  ActionLandingDust_Capture(&observer->landing_dust,dst,ram,size,&scene.maps[0],
+      scene.room,scene.clock);
+  CaptureFillmoreCaveScene(&scene,dst);
 }

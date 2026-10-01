@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -29,6 +30,7 @@ function editor(data,options={}) {
       this.attributes = {};
     }
     addEventListener(name,callback) { this.listeners[name]=callback; }
+    append(child) {this.appendChild(child);}
     appendChild(child) {
       this.children.push(child);
       if (this.children.length === 1) this.value = String(child.value);
@@ -93,7 +95,7 @@ function editor(data,options={}) {
     },
     getComputedStyle:() => ({getPropertyValue:property =>
       ({'--behind':'#7c5cff','--plane':'#3d8f6b','--ahead':'#e0913a'})[property]??'#aabbcc'}),
-    console,
+    console,crypto:webcrypto,TextEncoder,TextDecoder,
     Blob:class {constructor(parts) {this.parts=parts;this.text=parts.join('');}},
     URL:{createObjectURL(blob) {
       documentHost.exportedText=blob.text;documentHost.exportedParts=blob.parts;return 'blob:test';},
@@ -407,6 +409,167 @@ cm('setMode("native")');assert.equal(cmMenu.hidden,true);
 const cmNativeEvent=cmPoint(0,0);cmCanvas.listeners.contextmenu(cmNativeEvent);
 assert.equal(cmNativeEvent.prevented,undefined);
 console.log('Right-click selection, priority/bands, copy/paste, transparency, undo and keyboard menu passed');
+
+/* Authoring gestures use the same undo history without changing scenery.
+ * C parser/resolver behavior is covered by the native/WASM room gate. */
+const mist=editor(fixture());
+mist.run(`loadIniText('','mist.ini');setLayer(0);
+  SharedRoomPreview.validateEffects=()=>{};
+  SharedRoomPreview.collisionGrid=()=>({width:16,height:16,cells:new Uint8Array(256)});
+  $('#floorMistDraw').onclick();`);
+const mistCanvas=mist.elements.get('#map2d');
+const mistPoint=(x,y)=>({button:0,
+  clientX:mist.run(`view.x+(${x}*16+2)*view.scale`),clientY:mist.run(`view.y+(${y}*16+2)*view.scale`)});
+const mistScenery=mist.run('mergeDioramaIni()');
+mistCanvas.listeners.mousedown(mistPoint(2,3));
+for(const fn of mist.run('window.listeners.mousemove'))fn(mistPoint(8,9));
+for(const fn of mist.run('window.listeners.mouseup'))fn({});
+const mistText=mist.run('EffectEditor.text()');
+assert.match(mistText,/ground-mist:/);
+assert.match(mistText,/x=88\ny=104\nwidth=112\nheight=112/);
+assert.equal(mist.run('undoStack.length'),1);
+assert.equal(mist.run('mergeDioramaIni()'),mistScenery);
+mist.run('undo()');assert.doesNotMatch(mist.run('EffectEditor.text()'),/ground-mist:/);
+mist.run('redo()');assert.equal(mist.run('EffectEditor.text()'),mistText);
+mist.run(`$('#floorMistErase').onclick();`);
+mistCanvas.listeners.mousedown(mistPoint(4,5));
+for(const fn of mist.run('window.listeners.mouseup'))fn({});
+assert.doesNotMatch(mist.run('EffectEditor.text()'),/ground-mist:/);
+mist.run('undo()');assert.equal(mist.run('EffectEditor.text()'),mistText);
+mist.run(`EffectEditor.paintFloorRect(0,0,32,4,false)`);
+assert.equal(mist.run('EffectEditor.text()'),mistText);
+assert.match(mist.elements.get('#effectStatus').textContent,/512/);
+mist.run(`$('#terrain').value='1';$('#terrain').onchange();draw2d();`);
+assert.equal(mist.elements.get('#effectSource').children.length,0);
+mist.run(`$('#terrain').value='0';$('#terrain').onchange();draw2d();`);
+assert.equal(mist.elements.get('#effectSource').children.length,1);
+assert.equal(mist.run('EffectEditor.text()'),mistText);
+mist.run(`$('#emittermist-height').value='32';
+  EffectEditor.updateSources({memory:{buffer:new ArrayBuffer(4)},RoomPreview_EffectCount:()=>0});`);
+assert.equal(mist.elements.get('#emittermist-height').value,'32','a redraw must preserve an uncommitted inspector input');
+mist.run(`$('#emittermist-height').onchange({target:$('#emittermist-height')});`);
+assert.match(mist.run('EffectEditor.text()'),/mist-height=32/);
+mist.run('undo()');assert.equal(mist.run('EffectEditor.text()'),mistText);
+console.log('Mist brush: one-step undo/redo, region erase, terrain isolation, size bound and unchanged scenery passed');
+
+/* Emitter handles edit only on release. Animation parameters and pattern seeds
+ * remain attached to a stable source across move/resize/duplicate/undo. */
+const emitter=editor(fixture()),er=emitter.run,ec=emitter.elements.get('#map2d');
+er(`loadIniText('','emitters.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+  $('#emitterPreset').value='motes';$('#emitterMapPlace').onclick();`);
+const ep=(x,y,extras={})=>({button:0,clientX:er(`view.x+${x}*view.scale`),
+  clientY:er(`view.y+${y}*view.scale`),...extras});
+const emove=ev=>{for(const fn of er('window.listeners.mousemove'))fn(ev);};
+const eup=()=>{for(const fn of er('window.listeners.mouseup'))fn({});};
+ec.listeners.mousedown(ep(109,118,{altKey:true}));eup();
+assert.match(er('EffectEditor.text()'),/x=112\ny=112\nwidth=96\nheight=64/);
+const emitterId=er('EffectEditor.selected()');
+for(const [id,value] of [['emitterSizeMin','1'],['emitterSizeMax','2'],['emitterTravelX','80'],
+  ['emitterTravelY','-96'],['emitterWander','5'],['emitterSpread','.5'],['emitterSeed','42']]) {
+  er(`$('#${id}').value='${value}';$('#${id}').onchange({target:$('#${id}')});`);
+}
+er(`$('#emitterColorEndEnabled').checked=true;$('#emitterColorEndEnabled').onchange({target:$('#emitterColorEndEnabled')});
+  $('#emitterColorEnd').value='#91bedf';$('#emitterColorEnd').onchange({target:$('#emitterColorEnd')});`);
+assert.match(er('EffectEditor.text()'),/size-min=1\nsize-max=2\ntravel-x=80\ntravel-y=-96\nwander=5\nspread=.5\nseed=42\ncolor-end=91bedf/);
+assert.equal(er('EffectEditor.selected()'),emitterId);
+er(`$('#emitterMapEdit').onclick();`);
+const beforeMove=er('EffectEditor.text()'),emitterScenery=er('mergeDioramaIni()');
+let emitterHistory=er('undoStack.length');
+ec.listeners.mousedown(ep(112,112,{altKey:true}));emove(ep(175,159,{altKey:true}));
+assert.equal(er('EffectEditor.text()'),beforeMove,'drag draft must not change the document');
+assert.equal(er('undoStack.length'),emitterHistory);
+eup();
+const movedEmitter=er('EffectEditor.text()');
+assert.match(movedEmitter,/x=176\ny=160/);
+assert.equal(er('undoStack.length'),emitterHistory+1);
+assert.equal(er('EffectEditor.selected()'),emitterId);
+assert.equal(er('mergeDioramaIni()'),emitterScenery);
+er('undo()');assert.equal(er('EffectEditor.text()'),beforeMove);
+er('redo()');assert.equal(er('EffectEditor.text()'),movedEmitter);
+emitterHistory=er('undoStack.length');
+ec.listeners.mousedown(ep(224,192));emove(ep(272,240));eup();
+const resizedEmitter=er('EffectEditor.text()');
+assert.match(resizedEmitter,/x=200\ny=184\nwidth=144\nheight=112/);
+assert.match(resizedEmitter,/size-min=1\nsize-max=2/,'resizing area must not scale particles');
+assert.equal(er('undoStack.length'),emitterHistory+1);
+ec.listeners.mousedown(ep(200,184));eup();
+assert.equal(er('undoStack.length'),emitterHistory+1,'picking is not an edit');
+ec.listeners.mousedown(ep(200,184));emove(ep(300,280));er('deselect()');eup();
+assert.equal(er('EffectEditor.text()'),resizedEmitter);
+assert.equal(er('brush'),'select');
+er(`$('#emitterMapEdit').onclick();`);
+ec.listeners.mousedown(ep(200,184));emove(ep(300,280));
+for(const fn of er('window.listeners.blur'))fn({});eup();
+assert.equal(er('EffectEditor.text()'),resizedEmitter,'window blur cancels the draft');
+ec.listeners.mousedown(ep(200,184));emove(ep(300,280));
+er(`$('#terrain').value='1';$('#terrain').onchange();`);eup();
+assert.equal(er('EffectEditor.text()'),resizedEmitter,'room/terrain change cancels the draft');
+er(`$('#terrain').value='0';$('#terrain').onchange();
+  SharedRoomPreview.validateEffects=()=>{throw Error('test budget rejection');};`);
+ec.listeners.mousedown(ep(200,184));emove(ep(300,280));eup();
+assert.equal(er('EffectEditor.text()'),resizedEmitter);
+assert.match(emitter.elements.get('#effectStatus').textContent,/budget rejection/);
+er('SharedRoomPreview.validateEffects=()=>{};');
+er(`$('#emitterSeedShuffle').onclick();`);
+assert.equal(er('EffectEditor.selected()'),emitterId);
+const shuffledEmitter=er('EffectEditor.text()');
+assert.notEqual(shuffledEmitter,resizedEmitter);
+er('undo()');assert.equal(er('EffectEditor.text()'),resizedEmitter);
+er(`$('#emitterDuplicate').onclick();`);
+assert.notEqual(er('EffectEditor.selected()'),emitterId);
+assert.equal((er('EffectEditor.text()').match(/seed=42/g)||[]).length,2);
+er('undo()');assert.equal(er('EffectEditor.text()'),resizedEmitter);
+er(`$('#emitterAutoRise').onclick();`);assert.doesNotMatch(er('EffectEditor.text()'),/travel-y=/);
+er('undo()');assert.equal(er('EffectEditor.text()'),resizedEmitter);
+const emitterMenuEvent={...ep(200,184),preventDefault(){this.prevented=true;}};
+ec.listeners.contextmenu(emitterMenuEvent);
+assert.equal(emitterMenuEvent.prevented,true);
+assert.equal(er('tileMenu.hidden'),true,'emitter tool must not open tile commands');
+console.log('Emitter controls and handles: atomic moves/resizes, stable IDs, parameters, snapping, cancel, terrain isolation and undo passed');
+
+/* One large field replaces repeated emitter placement. Receiver edits are one
+ * atomic history item, independently address scenery, player and enemies, and
+ * restore inherited behavior when the override is cleared. */
+const region=editor(fixture()),rr=region.run,rc=region.elements.get('#map2d');
+rr(`loadIniText('','regions.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+  $('#particleAreaDraw').onclick();`);
+const rp=(x,y)=>({button:0,clientX:rr(`view.x+(${x}*16+2)*view.scale`),
+  clientY:rr(`view.y+(${y}*16+2)*view.scale`)});
+rc.listeners.mousedown(rp(0,0));
+for(const fn of rr('window.listeners.mousemove'))fn(rp(127,79));
+assert.equal(rr('undoStack.length'),0);
+for(const fn of rr('window.listeners.mouseup'))fn({});
+const regionText=rr('EffectEditor.text()'),regionScenery=rr('mergeDioramaIni()');
+assert.equal((regionText.match(/\[emitter:/g)||[]).length,1);
+assert.match(regionText,/particle-area:/);assert.match(regionText,/width=2048\nheight=1280/);
+assert.equal(rr('undoStack.length'),1);
+rr('undo()');assert.doesNotMatch(rr('EffectEditor.text()'),/particle-area:/);
+rr('redo()');assert.equal(rr('EffectEditor.text()'),regionText);
+rr(`$('#emitterPreset').value='soft-light';$('#emitterAdd').onclick();`);
+let regionHistory=rr('undoStack.length');
+rr(`$('#effectLightTargets').checked=true;$('#effectLightPlayer').checked=true;
+  $('#effectLightEnemies').checked=false;$('#effectLightTargets').onchange();`);
+const receiverText=rr('EffectEditor.text()');
+assert.match(receiverText,/light-scenery=1\nlight-player=1\nlight-enemies=0/);
+assert.equal(rr('undoStack.length'),regionHistory+1);
+rr(`$('#effectLightTargets').checked=false;$('#effectLightTargets').onchange();`);
+assert.doesNotMatch(rr('EffectEditor.text()'),/light-player=/);
+rr('undo()');assert.equal(rr('EffectEditor.text()'),receiverText);
+rr(`SharedRoomPreview.validateEffects=()=>{throw Error('invalid receiver');};
+  $('#effectLightEnemies').checked=true;$('#effectLightEnemies').onchange();`);
+assert.equal(rr('EffectEditor.text()'),receiverText);
+assert.equal(rr('mergeDioramaIni()'),regionScenery);
+rr(`SharedRoomPreview.validateEffects=()=>{};$('#contourDraw').onclick();`);
+rc.listeners.mousedown(rp(2,3));
+for(const fn of rr('window.listeners.mousemove'))fn(rp(4,2));
+for(const fn of rr('window.listeners.mousemove'))fn(rp(6,3));
+regionHistory=rr('undoStack.length');
+for(const fn of rr('window.listeners.mouseup'))fn({});
+assert.equal(rr('undoStack.length'),regionHistory+1);
+assert.match(rr('EffectEditor.text()'),/wet-contour:/);
+assert.match(rr('EffectEditor.text()'),/points=-32,8 0,-8 32,8/);
+rr('undo()');assert.equal(rr('EffectEditor.text()'),receiverText);
+console.log('Large particle regions, independent receiver masks and wet contours: atomic edits, one-step undo and unchanged scenery passed');
 
 /* Shift-click selects an inclusive range; Shift-drag keeps the existing pan
  * gesture. Repeated endpoints keep the same anchor and never author pixels. */

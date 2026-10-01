@@ -5,8 +5,8 @@ depth bands and authors those changes directly in `diorama-layers.ini`. The
 editor is the source of truth; the game only loads and renders the exported
 configuration.
 
-The planned [Effects workspace and shared WASM preview](../../docs/action-effects-editor-plan.md)
-will expose existing and future level-effect presets. **Shared renderer** now
+The [Effects workspace and shared WASM preview](../../docs/action-effects-editor-plan.md)
+is being implemented in stages. **Shared renderer** now
 loads complete rooms directly into the production C PPU and Diorama compositor
 via WASM/WebGL2. No game capture or gameplay session is required. The original
 JavaScript **Diorama 3D** remains available while the shared view is validated.
@@ -20,10 +20,12 @@ modes. Camera/clock/coverage changes regenerate visible art from the complete
 room; orbit-only changes reuse rasterized surfaces. Existing tile, pixel, depth,
 alpha, scenery and framing edits feed the production INI resolver.
 
-This increment covers **scenery**, including animated tiles/raster phases, priority
+This increment covers **scenery and environmental sources**, including animated tiles/raster phases, priority
 bands, copied edge tiles, independent vertical clips, bounded and named skyboxes,
-and Aitos's periodic waterfall page. Actors/HUD, environmental effects and their
-editable recipes, event-driven room changes, camera-local effect sections, final
+and Aitos's periodic waterfall page. The native forest, cave, marsh, castle and
+Aitos environmental kernels, exposure and camera-local waterfall sections also
+run in this view. Clock-based accent events and optional player/enemy reference
+silhouettes are available. Actual actor artwork/HUD, gameplay-driven transitions, final
 CRT/heat and frame generation remain pending. The preview camera uses auto-fit
 plus its own controls; it does not replay the game's reactive camera. Captures
 remain developer comparison fixtures, not an authoring requirement.
@@ -38,8 +40,251 @@ It compares 882 full-room scanouts across all 49 rooms × 3 regional terrains
 between native C and WASM, including backwards seeking, varying camera/coverage,
 authored configuration, finite skybox views and animated periodic pages. It also
 checks pixel-mask and band edits, per-layer top clipping, atomic rejection,
-resource reuse and complete teardown. The browser GPU view still needs matched
+resource reuse and complete teardown. The check also compares resolved native
+effect sources and 147 authored-effect round trips. The browser GPU view still needs matched
 live-scene image review across the remaining room families and target platforms.
+
+### Environmental authoring
+
+Open **Environmental sources** in Shared renderer. Select a source to change
+its enabled state, tint and intensity. **Light reach** adjusts a wall torch's
+spill radius independently of its flame, ember positions and peak brightness.
+Compound sources such as canopy light or gallery windows expose the whole group.
+Use placed fans, contours and particle fields for additional authored structures;
+these do not move individual members of an existing native compound group.
+
+**Add at view centre** places any of the following families:
+
+| Family | Controls and behavior |
+| --- | --- |
+| Soft light / halo | Area, tint, intensity and independent light receivers; halo is a color/size preset. |
+| Motes / particle region | Count or density, radius, motion, seed, age tint and depth. Region patterns include dust, leaves, snow, sand, insects, scarabs and sparks. |
+| Free mist / ground mist | Airborne soft volume or collision-supported floor slices. |
+| Light fan | Opening width, length, direction, fan angle, 1–32 strands and a soft backdrop. Zero degrees points down; the origin is the opening's center. |
+| Water surface | Animated crests and glints, amplitude, phase offset, cycle, particle radii and age tint. This is surface geometry, not distortion of submerged artwork. |
+| Drips / waterfall spray | Analytic falling drops or a splash arc, area, count, size, cycle, seed, tint and depth. Place spray at the native splash footprint. |
+| Cloud bank | Layered soft lobes with horizontal drift and vertical billow. This suggests volume; it is not a 3D volumetric ray marcher. |
+| Dimming region | A black alpha wash behind actors, plus separately selected player/enemy dimming. Native cave/castle dimming also exposes receiver choices. |
+| Wet rock contour | Up to 16 local path points. **Trace wet contour** draws a bounded stroke following a verified visible edge. |
+
+The palette also provides temple dust, falling leaves, snow, blowing sand,
+insects, scarabs, lava embers and halo presets for later-stage authoring. They
+reuse the shared kernels; this does not install new art across those stages.
+
+The inspector edits its playfield coordinates, width/height, tint, intensity
+and animation cycle. Motes additionally expose particle count, radius range,
+travel per cycle, horizontal sway/spread, a pattern seed and optional end tint.
+All distances are in game pixels. Negative travel Y rises, positive falls, zero
+retains each mote's starting height; a blank value rises by the area height.
+Spread 0 emits from the centre and 1 uses the full width. **New pattern** changes
+the seed without changing source identity. Particle positions/colors are analytic,
+so pause and backward time seeking reproduce the same frame. **Duplicate
+emitter** copies its settings with a new stable identity and a 16-pixel offset.
+Changing field dimensions does not enlarge individual motes. Free mist is
+explicitly airborne. Existing native floor mist remains collision-supported and
+can be tinted or dimmed.
+
+**Draw particle region** creates one record for a large rectangle, up to
+16384 × 16384 game pixels. It does not require placing point emitters throughout
+the room. Density is particles per 256 × 256 world cell (1–16, default 4), with
+at most 64 nearby cells generated per view. Motion envelopes determine which
+birth cells need evaluation. Cell seeds stay fixed while panning or seeking;
+offscreen cells do not consume the native actor/decoration pools. Increase
+density and radius independently, or change the pattern/age tint in the inspector.
+
+Lights expose **Override light receivers**, and exposure/cave/castle sources
+expose **Override dimming receivers**. Select scenery, player and enemies
+independently. Clearing an override restores inherited behavior. Explicit light
+receivers move scenery illumination under actors and sample selected objects at
+their native hot point; every OAM part and extended-apron part receives the same
+object tint. This is not per-pixel shadow tracing. Native ownership identifies
+players and attacking enemy objects without guessing from artwork. Unowned
+decorations, pickups and other objects keep their original color.
+
+Authored dimming regions apply a BG1-plane wash; higher priority scenery is
+painted afterward. Native cave/castle dimming retains its existing BG1 coverage
+and distance ramp. Independent object dimming uses the same region or ramp.
+Receiver effects require Environmental effects; moving accent lights also obey
+Action lighting, and their trails retain Action particles ownership.
+
+**Receiver & event preview** offers movable blue player/orange enemy reference
+silhouettes for testing these choices. **Actor accent** selects one of 19
+recognized families, with event position, velocity, start frame, duration and
+seed. **Start in current view** positions it and starts its clock. Seek or play
+to inspect one representative native flight, charge, strike or landing phase.
+It does not run enemy AI, spawn game actors, or show their sprite artwork.
+Selecting the resulting source exposes enable/tint/intensity and, where present,
+light receiver controls. Actor source ID zero targets that family throughout
+the selected room/terrain, including future native generations. Event/probe
+positions are temporary; source edits persist in the effects document.
+
+**Place on map** switches to BG1 and places the chosen preset at a click.
+**Edit emitters on map** picks authored areas, moves them by dragging their
+centre/body and resizes the selected area with corner handles. Hold Alt to snap
+to 16 pixels. Dragging is a draft until release and creates one undo entry;
+Esc, losing focus or switching room/terrain cancels it. **Show emitter areas on
+map** controls their guides. Native compound groups remain in the source picker;
+these handles do not guess positions for their individual members.
+
+**Paint ground mist** switches to BG1's map and enables the shared collision
+overlay. Drag a rectangle around the floors you want to cover (up to 512 × 512
+pixels). Each column searches downward for its first supported floor; spikes
+and non-solid background rocks do not catch the mist. Its **Mist height** (4–64
+pixels, default 26) controls height above the floor, independently of the search
+area. Solid ceilings limit available headroom. **Preview selected area** moves
+the shared camera there and reports the number of supported spans, or explains
+when no floor was found. **Erase mist areas** removes intersecting authored
+regions in one undoable operation; it leaves native sources alone. Select or Esc
+leaves the brush. Middle-drag pans and the wheel zooms.
+
+The overlay shows solid cells in green, partial collision in amber and supported
+top edges in cyan. It uses original gameplay collision from the same C resolver
+as the game; scenery stamps and pixel edits do not create collision. This first
+resolver supports flat solid surfaces and verified Fillmore temple capitals.
+Other partial/sloped shapes are shown but are not treated as flat supports.
+Mist splits at gaps and steps instead of bridging them, renders behind actors,
+and clips before projection. Region outlines appear only on BG1's map.
+
+Edits use the normal Undo/Redo controls. **Review / paste effects INI** provides
+a copyable document and an atomic Apply operation with line diagnostics.
+**Load effects INI** and **Export effects INI** use the same document. Save the
+export as `action-effects.ini` beside the game's `settings.ini`, then restart
+the game. It is independent of `diorama-layers.ini`; export both when sharing
+scenery and effects. The editor build embeds an effects file found beside its
+input layers file. A missing effects file preserves the approved native defaults.
+
+The shared parser supports schema version 1, sparse source overrides and twelve
+emitter kinds. Scope uses hexadecimal map group/room, decimal terrain profile
+(0 US, 1 JP, 2 EU), a named kind and hexadecimal stable source identity:
+
+```ini
+[effects]
+version=1
+
+; Obtain native source IDs from the source inspector.
+[source:02:03:0:wall-torch:54000101]
+reach=2.5
+intensity=0.75
+color=ffe6bb
+
+[emitter:01:02:0:motes:00000123]
+x=1280
+y=1056
+width=96
+height=64
+particles=48
+lifetime=300
+intensity=1
+color=ffe6bb
+size-min=0.65
+size-max=1.25
+travel-x=60
+travel-y=-96
+wander=5
+spread=0.6
+seed=42
+color-end=91bedf
+
+[emitter:01:02:0:ground-mist:00000124]
+x=1280
+y=1168
+width=480
+height=160
+mist-height=26
+color=91bedf
+
+[emitter:01:02:0:particle-area:00000125]
+x=1024
+y=1136
+width=2048
+height=256
+particles=8
+pattern=motes
+placement=playfield
+color=ffe6bb
+travel-y=-96
+
+[source:01:02:0:cave-light:c200021f]
+light-scenery=1
+light-player=0
+light-enemies=1
+dim-scenery=1
+dim-player=1
+dim-enemies=1
+```
+
+`enabled` is 0/1; intensity is 0–4; torch reach is 0.25–4. Emitter positions
+are integer pixels (−2048 to 16384), width/height 4–512 (up to 16384 for particle
+and dimming regions), mote count 1–128 (region density 1–16),
+and lifetime 16–4096 frames. Defaults are enabled, intensity/reach 1, white tint,
+position 0,0, area 96×64, 24 motes and a 240-frame cycle. Unknown versions,
+properties, kinds, duplicate records and non-finite values are rejected.
+Optional mote fields preserve those defaults when absent: `size-min`/`size-max`
+0.35/0.75 (allowed 0.1–4, minimum ≤ maximum), `travel-x` 0, `travel-y` −height
+(allowed −512 to 512), `wander` 2 (0–32), `spread` 1 (0–1), `seed` the source ID
+(decimal 0–4294967295), and `color-end` the primary tint (six hexadecimal digits).
+Drifting motes are culled by their motion envelope, independently of their birth
+area. These controls keep the four-vertex particle cost and existing pass batching.
+Source changes are sparse; removing a source record restores native defaults.
+Actor/projectile accents retain their existing settings and native bindings.
+Overrides are terrain-specific even where scenery edits share
+equivalent US/EU layouts.
+
+Each room/terrain permits 16 enabled emitters and at most 4096 added vertices;
+the file holds at most 256 records/128 KiB. Conservative costs are 97 vertices
+per light, four per mote and 296 per free-mist volume. Ground mist reserves
+`(ceil(width / 16) + 1) × 45` vertices for the worst support fragmentation,
+independent of the current camera. Each span uses three density slices and at
+most 144 indices. Over-budget documents are
+rejected as a whole. The separate authored list cannot consume the 16 native
+actor accents or 27 native decoration slots. Geometry shares retained pass
+batches; emitters create no textures or per-frame heap allocations. The status
+line reports actual submitted geometry/draws/uploads/allocations and CPU time,
+which is not a GPU timing or Steam Deck/D3D12 performance measurement. New family
+costs are bounded at export too: regions reserve 64 cells, fans reserve clipped
+triangles per strand, clouds reserve 37 vertices per lobe and contours reserve
+14 per segment. Smaller actual visible costs appear in the status line.
+An additional development-machine CPU stress fixture (three eight-strand fans,
+two retained receiver batches, 16 object samples) averaged 0.221 ms per frame
+over 1000 iterations. Reproduce with
+`build/actraiser_action_authored_fields_test --benchmark`; it excludes GPU work,
+native scene observation, PPU tinting and end-to-end frame time.
+
+Validation includes native pause-clock ownership, retained frames, malformed
+imports, budgets, unchanged torch flame/embers when reach changes, and native
+presentation of authored-only scenes. Browser smoke tests cover import, invalid
+version rejection, undo/redo and effect geometry. Download completion through
+the automation browser remains unverified; the copyable document is available.
+
+Still pending: automatic contour/material recognition, sloped mist supports,
+individual native compound-member handles, a combined scenery/effects project,
+native reload without restarting, edited-silhouette occlusion, actual actor/HUD
+art, final image parity and target-hardware acceptance. Water refraction/heat
+and full volumetric scattering remain separate experiments.
+
+#### Text versus binary storage
+
+Keep `action-effects.ini` as the canonical effects sidecar beside `settings.ini`.
+It stores small semantic recipes, not rendered vertices or particle states.
+Load/import parses it once into bounded retained records; rendering never parses
+text. A full 256-record receiver-heavy fixture was 41,492 text bytes and 63,492
+retained bytes, averaging 0.729 ms per parse over 500 runs on the development
+machine. Reproduce with `build/actraiser_action_effect_recipes_test --benchmark`.
+These are CPU measurements, not target-device load benchmarks.
+
+Text remains readable, reviewable in Git and tolerant of compiler/architecture
+changes. A raw dump of C structs would encode padding, enum sizes, endianness and
+pointers, and would be unsafe as a portable project format. A binary effects
+cache would not improve per-frame rendering or reduce retained table size.
+
+`diorama-layers.ini` currently contains about 631 KiB, mostly dense scenery edits;
+that is a different workload from effects recipes. If larger pixel masks,
+painted density grids, meshes or imported artwork make this data unwieldy, keep
+semantic settings in text and add a versioned binary asset payload with stable
+IDs, explicit little-endian lengths/counts, bounds validation and a content hash.
+Both pieces would need atomic export/import and a documented migration. An
+optional compiled cache should be disposable and keyed by text/schema hash.
+There is no measured need to introduce that format for today's effects.
 
 ```sh
 sh tools/action_editor/build.sh
