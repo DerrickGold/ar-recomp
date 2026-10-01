@@ -166,6 +166,8 @@ static void reset_layer_policy(Ppu *ppu) {
     memset(ppu->wsLayerExtentRight, 0xff, sizeof(ppu->wsLayerExtentRight));
     memset(ppu->virtualTilemap, 0, sizeof(ppu->virtualTilemap));
     memset(ppu->abiVirtualTilemap, 0, sizeof(ppu->abiVirtualTilemap));
+    memset(ppu->captureTiles, 0, sizeof(ppu->captureTiles));
+    memset(ppu->captureTileCoverage, 0, sizeof(ppu->captureTileCoverage));
 }
 
 Ppu *ppu_init(void) {
@@ -504,6 +506,8 @@ bool PpuOverlaySurfaceHasContent(const Ppu *ppu, PpuOverlaySource source,
 
 void PpuClearOverlayCaptures(Ppu *ppu) {
     if (ppu == NULL) return;
+    memset(ppu->captureTiles, 0, sizeof(ppu->captureTiles));
+    memset(ppu->captureTileCoverage, 0, sizeof(ppu->captureTileCoverage));
     memset(ppu->overlayCaptures, 0, sizeof(ppu->overlayCaptures));
     ppu->overlayObjRelocatedFirst = ppu->overlayObjRelocatedCount = 0u;
     memset(&ppu->objRangeCapture, 0, sizeof(ppu->objRangeCapture));
@@ -649,7 +653,10 @@ bool PpuSetMode7Override(Ppu *ppu, const uint32_t *rgba, int width, int height,
 }
 
 void PpuClearVirtualTilemaps(Ppu *ppu) {
-    if (ppu != NULL) memset(ppu->virtualTilemap, 0, sizeof(ppu->virtualTilemap));
+    if (ppu == NULL) return;
+    memset(ppu->virtualTilemap, 0, sizeof(ppu->virtualTilemap));
+    memset(ppu->captureTiles, 0, sizeof(ppu->captureTiles));
+    memset(ppu->captureTileCoverage, 0, sizeof(ppu->captureTileCoverage));
 }
 
 bool PpuSetVirtualTilemap(Ppu *ppu, uint8_t layer,
@@ -1968,6 +1975,8 @@ static void write_overlay(Ppu *ppu, int source, int x, int y,
     if (surface == ppu->overlayRenderBuffer[source]) band = 0;
     row = overlay_row(capture, y);
     origin = surface_origin_x(ppu, ppu->overlayRenderPitch[source]);
+    if (source < 2 && (ppu->captureTileCoverage[source][origin + x] &
+                      (1u << band))) return;
     color = override_color != 0u ? override_color : color_argb(ppu,
         (capture->flags & kPpuOverlayFlag_ApplyBgFixedColorSubtract) != 0u &&
                 source < 4
@@ -3907,8 +3916,136 @@ static void native_write_overlay_packed(
     destination = band > 0 && band <= 3 && plan->bands[band - 1] != NULL
         ? plan->bands[band - 1] : plan->primary;
     if (destination == plan->primary) band = 0;
+    if (source < 2 && (ppu->captureTileCoverage[source][plan->origin + x] &
+                      (1u << band))) return;
     destination[plan->origin + x] = plan->colors[palette];
     ppu->overlayRenderContentMask[source] |= (uint8_t)(1u << band);
+}
+
+/* Resolve authored tiles once per tile run directly into the BG capture.
+ * Ordinary export skips the owned bands, so no completed frame is repainted.
+ * Base source/winner buffers remain available to authentic output and maths. */
+static void native_capture_tile_run(Ppu *ppu, int layer, int x, int run,
+        int fine_x, int fine_y, int step, const SrPpuCaptureTile *tile,
+        NativeOverlayLinePlan *plan, uint32_t backing) {
+    const bool replace = (tile->flags & SR_PPU_CAPTURE_TILE_REPLACE) != 0u;
+    const bool blank = (tile->flags & SR_PPU_CAPTURE_TILE_BLANK) != 0u;
+    const int band = tile->band == 1u ? 0 : tile->band == 2u ? 1 : 2;
+    uint32_t *target = band ? plan->bands[band - 1] : plan->primary;
+    unsigned row = (tile->entry & 0x8000u) ? 7 - fine_y : fine_y;
+    uint32_t decoded = replace && !blank ? decoded_4bpp_row(ppu,
+        PPU_bgTileAdr(ppu, layer) + (tile->entry & 1023u) * 16 + row) : 0u;
+    unsigned palette = ((tile->entry >> 10) & 7u) * 16u;
+    for (int offset = 0; offset < run; ++offset) {
+        const int px = fine_x + offset * step;
+        const int column = plan->origin + x + offset;
+        const bool black = (tile->black_rows[fine_y] & (0x80u >> px)) != 0u;
+        if (!replace && !black) continue;
+        ppu->captureTileCoverage[layer][column] = replace ? 15u : (1u << band);
+        if (replace) {
+            plan->primary[column] = backing;
+            if (backing) ppu->overlayRenderContentMask[layer] |= 1u;
+        }
+        unsigned character_x = (tile->entry & 0x4000u) ? 7 - px : px;
+        unsigned pixel = (decoded >> (character_x * 4)) & 15u;
+        if (target != NULL && (black || pixel)) {
+            target[column] = black ? 0xff000000u : plan->colors[palette + pixel];
+            ppu->overlayRenderContentMask[layer] |= (uint8_t)(1u << band);
+        }
+    }
+}
+
+static void native_capture_tiles_line(Ppu *ppu, int layer, int screen_y,
+                                       NativeOverlayLinePlan *colors) {
+    const SrPpuCaptureTileBinding *edits = &ppu->captureTiles[layer];
+    const PpuVirtualTilemapBinding *world = &ppu->virtualTilemap[layer];
+    const PpuOverlayCapture *capture = &ppu->overlayCaptures[layer];
+    NativeLayerWindowPlan windows;
+    PpuWidescreenLayerPolicy policy;
+    SrPpuCaptureTile cached = {0};
+    int last_tx = INT_MIN, last_ty = INT_MIN;
+    bool found = false;
+    if ((!edits->lookup && !edits->apron) || !world->lookup ||
+        PPU_forcedBlank(ppu) || bpp_for_mode(PPU_mode(ppu), layer) != 4 ||
+        !capture_surface_bound(ppu, layer) ||
+        screen_y < capture->y0 || screen_y >= capture->y1) return;
+    if (!colors->primary) return;
+    native_layer_window_plan(ppu, layer, true, &windows);
+    const bool owner_sub = (ppu->screenEnabled[0] & (1u << layer)) == 0u;
+    const unsigned visibility = owner_sub ? windows.sub_mode : windows.main_mode;
+    if (!visibility) return;
+    policy = PpuResolveWidescreenLayerPolicy(ppu, (uint8_t)layer, screen_y);
+    const int mosaic = PPU_mosaicEnabled(ppu, layer) ? PPU_mosaicSize(ppu) : 1;
+    int sample_y = screen_y + 1;
+    sample_y -= ((sample_y % mosaic) + mosaic) % mosaic;
+    const int wy = world->camera_y + sample_y +
+        wrapped_delta10(ppu->vScroll[layer], world->vscroll_anchor);
+    const int ty = floor_div8(wy), fy = wy - ty * 8;
+    const int dx = world->camera_x +
+        wrapped_delta10(ppu->hScroll[layer], world->hscroll_anchor);
+    const uint32_t backing = PpuOverlayTransparentFillColor(ppu, layer);
+    const int left = capture->x0 - (int)edits->apron;
+    const int right = capture->x1 + (int)edits->apron;
+    /* Bindings are checked at the ABI boundary, but also defend against a
+     * later surface rebind or component-level caller shrinking storage. */
+    const int width = (int)(ppu->overlayRenderPitch[layer] / sizeof(uint32_t));
+    if (left + colors->origin < 0 || right + colors->origin > width ||
+        width > kPpuSurfaceWidth) return;
+    for (int x = left; x < right;) {
+        if (!edits->lookup && x == capture->x0) x = capture->x1;
+        if (x >= right) break;
+        int fetch_x = x - ((x % mosaic) + mosaic) % mosaic;
+        int source_x;
+        if (!PpuMapWidescreenLayerXWithPolicy(ppu, (uint8_t)layer,
+                fetch_x, &source_x, &policy)) { ++x; continue; }
+        int wx = dx + source_x, tx = floor_div8(wx), fx = wx - tx * 8;
+        int step = mosaic > 1 ? 0 :
+            (x < 0 || x >= kPpuXPixels) &&
+            policy.fill == kPpuWidescreenBandFill_Mirror ? -1 : 1;
+        int run = mosaic > 1 ? mosaic - (((x % mosaic) + mosaic) % mosaic) :
+            step > 0 ? 8 - fx : fx + 1;
+        int end = x < capture->x0 ? capture->x0 :
+            x < capture->x1 ? capture->x1 : right;
+        if (x < 0 && end > 0) end = 0;
+        if (x < kPpuXPixels && end > kPpuXPixels) end = kPpuXPixels;
+        if (run > end - x) run = end - x;
+        if (step < 0 && policy.motion == kPpuWidescreenMotion_NormalScroll &&
+            run > source_x + 1) run = source_x + 1;
+        if (tx != last_tx || ty != last_ty) {
+            cached = (SrPpuCaptureTile){0};
+            found = edits->lookup && edits->lookup(edits->user_data, tx, ty, &cached);
+            if (cached.band > 2 || (cached.flags & ~3u)) found = false;
+            last_tx = tx; last_ty = ty;
+        }
+        SrPpuCaptureTile tile = cached;
+        bool draw = found;
+        if ((!draw || !(tile.flags & SR_PPU_CAPTURE_TILE_REPLACE)) &&
+            (x < capture->x0 || x >= capture->x1)) {
+            if (!draw) tile = (SrPpuCaptureTile){0};
+            tile.flags = SR_PPU_CAPTURE_TILE_REPLACE;
+            draw = world->lookup(world->context, tx, ty, &tile.entry) ==
+                kPpuVirtualTilemapLookup_Found;
+            tile.band = (tile.entry & 0x2000u) ? 2u : 1u;
+            if (draw && world->band_lookup)
+                (void)world->band_lookup(world->context, tx, ty, tile.entry, &tile.band);
+            if (tile.band > 2) draw = false;
+        }
+        if (draw) {
+            /* Windows can split a tile; decode only visible runs. */
+            int offset = 0;
+            while (offset < run) {
+                if (visibility == 2u && native_window_plan_inside(&windows, x + offset)) {
+                    ++offset; continue;
+                }
+                int start = offset++;
+                while (offset < run && (visibility != 2u ||
+                       !native_window_plan_inside(&windows, x + offset))) ++offset;
+                native_capture_tile_run(ppu, layer, x + start, offset - start,
+                    fx + start * step, fy, step, &tile, colors, backing);
+            }
+        }
+        x += run;
+    }
 }
 
 static void native_write_obj_range_capture(Ppu *ppu, int screen_y,
@@ -4157,6 +4294,8 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
     for (int source = 0; source < kPpuOverlaySource_Count; ++source)
         native_overlay_line_plan(
             ppu, source, screen_y, &overlay_plans[source]);
+    for (int layer = 0; layer < 2; ++layer)
+        native_capture_tiles_line(ppu, layer, screen_y, &overlay_plans[layer]);
     native_layer_window_plan(
         ppu, kPpuOverlaySource_Obj,
         source_needs_sub[kPpuOverlaySource_Obj], &obj_visibility);
@@ -4893,6 +5032,15 @@ static bool render_line_to(Ppu *ppu, int screen_y, uint8_t *buffer,
     if (native_center &&
         (capture || (left == 0 && right == kPpuXPixels)))
         return dual_authentic;
+    if (capture && !native_center) {
+        if (!ppu->cgramRgbValid) rebuild_cgram_rgb(ppu);
+        for (int layer = 0; layer < 2; ++layer) {
+            if (!ppu->captureTiles[layer].lookup && !ppu->captureTiles[layer].apron) continue;
+            NativeOverlayLinePlan colors;
+            native_overlay_line_plan(ppu, layer, screen_y, &colors);
+            native_capture_tiles_line(ppu, layer, screen_y, &colors);
+        }
+    }
     for (int x = left; x < right; ++x) {
         int obj_offset = authentic ? ppu->authenticObjOffsetX : 0;
         if (native_center && x >= 0 && x < kPpuXPixels) continue;
@@ -4992,6 +5140,12 @@ static void render_line(Ppu *ppu, int line) {
         memset(ppu->objWinnerCapture.pixels +
                (size_t)screen_y * ppu->objWinnerCapture.pitch, 0,
                ppu->objWinnerCapture.pitch);
+    for (int layer = 0; layer < 2; ++layer) {
+        if (ppu->captureTiles[layer].lookup || ppu->captureTiles[layer].apron) {
+            memset(ppu->captureTileCoverage[layer], 0,
+                   sizeof(ppu->captureTileCoverage[layer]));
+        }
+    }
     bool authentic_done = render_line_to(
         ppu, screen_y, ppu->renderBuffer, ppu->renderPitch,
         ppu->renderHeight, true, false);

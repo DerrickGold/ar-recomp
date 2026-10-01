@@ -515,6 +515,8 @@ if(BUILD_TESTING)
         snesrecomp_runtime)
     add_test(NAME snesrecomp_runtime_ppu
         COMMAND snesrecomp_runtime_ppu_test)
+    add_test(NAME snesrecomp_runtime_capture_tiles
+        COMMAND snesrecomp_runtime_ppu_test --capture-tiles)
 
     add_executable(snesrecomp_runtime_mode7_override_test
         tests/mode7_override_test.c tests/runner_event_stub.c)

@@ -87,7 +87,6 @@ bool ActRaiser_HudObjSurfaceView(SrPpuSurfaceView *surface);
  * cannot observe host-side postprocessing, so FrameSlot uses this latch to
  * publish that plane. */
 bool ActRaiser_DioramaDeathHeimHubFacesPromoted(void);
-uint32_t ActRaiser_DioramaPixelContentMask(void);
 uint8_t ActRaiser_DioramaBgApronMask(void);
 void ActRaiser_FullSnapshot(const char *prefix);
 void RunOneFrameOfGame(void);

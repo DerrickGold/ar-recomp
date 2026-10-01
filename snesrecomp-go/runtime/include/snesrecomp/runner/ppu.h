@@ -871,6 +871,40 @@ typedef struct SrPpuVirtualTilemapRequest {
     ((uint32_t)(offsetof(SrPpuVirtualTilemapRequest, bindings) +          \
                 sizeof(((SrPpuVirtualTilemapRequest *)0)->bindings)))
 
+/* Presentation-only 8x8 edits. Coordinates use the corresponding virtual
+ * tilemap's camera and live raster scroll. A zero lookup result keeps the
+ * ordinary tile. REPLACE supplies a tile (or BLANK); otherwise only black
+ * mask bits change. Masks are in displayed tile coordinates, MSB at left,
+ * before character flips. Bands are 0=far, 1=ordinary, 2=high.
+ * Callbacks and context are borrowed until replacement or frame reset. */
+#define SR_PPU_CAPTURE_TILE_REPLACE UINT32_C(1)
+#define SR_PPU_CAPTURE_TILE_BLANK UINT32_C(2)
+typedef struct SrPpuCaptureTile {
+    uint16_t entry;
+    uint8_t band;
+    uint8_t flags;
+    uint8_t black_rows[8];
+} SrPpuCaptureTile;
+typedef uint32_t (*SrPpuCaptureTileLookup)(
+    void *user_data, int32_t tile_x, int32_t tile_y, SrPpuCaptureTile *tile);
+typedef struct SrPpuCaptureTileBinding {
+    SrPpuCaptureTileLookup lookup;
+    void *user_data;
+    /* Continue verified virtual terrain outside the overlay rectangle.
+     * Storage must include this many guard pixels on each side. */
+    uint32_t apron;
+    uint32_t reserved;
+} SrPpuCaptureTileBinding;
+typedef struct SrPpuCaptureTileRequest {
+    uint32_t struct_size;
+    uint32_t layer_mask;
+    uint64_t lifetime_generation;
+    SrPpuCaptureTileBinding bindings[2];
+} SrPpuCaptureTileRequest;
+#define SR_PPU_CAPTURE_TILE_REQUEST_SIZE                                 \
+    ((uint32_t)(offsetof(SrPpuCaptureTileRequest, bindings) +             \
+                sizeof(((SrPpuCaptureTileRequest *)0)->bindings)))
+
 #define SR_PPU_AUTHENTIC_CAMERA_CLEAR UINT32_C(0x00000001)
 #define SR_PPU_AUTHENTIC_CAMERA_BG1 UINT32_C(0x00000001)
 #define SR_PPU_AUTHENTIC_CAMERA_BG2 UINT32_C(0x00000002)

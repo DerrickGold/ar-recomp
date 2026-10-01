@@ -102,15 +102,61 @@ int main(void) {
   s_fail_replace = false;
   free(saved);
 
-  /* Never truncate oversized or non-text input while reporting a successful merge. */
-  const size_t large_size = (1 << 20) + 1;
-  char *large = malloc(large_size);
+  /* Large valid tile patches must load and save beyond the old 1 MiB read cap. */
+  const size_t large_capacity = 16000u * 128;
+  char *large = malloc(large_capacity);
   assert(large);
-  memset(large, '#', large_size);
+  size_t large_size = (size_t)snprintf(large, large_capacity,
+      "# Large authored patch\n[layers:02:08]\n");
+  for (int i = 0; i < 15000; i++) {
+    const int written = snprintf(large + large_size, large_capacity - large_size,
+        "bg1-stamp:us+jp+eu = cell:%d,%d metatile:23 "
+        "words:0010,4011,8012,E013 bands:0,1,2,1\n", i % 128, i / 128);
+    assert(written > 0 && (size_t)written < large_capacity - large_size);
+    large_size += (size_t)written;
+  }
+  assert(large_size > (1u << 20));
   Write(large, large_size);
-  assert(!DioramaLayerManifest_Save());
-  ExpectUnchanged(large, large_size);
+  assert(DioramaLayerManifest_Load());
+  room = DioramaLayerOrder_Find(view, 2, 8);
+  assert(room && room->stamp_layers[0].count == 15000);
+  const DioramaRoomOverride *resolved = DioramaLayerManifest_TerrainRoom(room, 0);
+  assert(resolved && resolved->stamp_layers[0].count == 15000);
+  assert(resolved->stamp_layers[0].occupied_bounds.set &&
+      resolved->stamp_layers[0].occupied_bounds.x0 == 0 &&
+      resolved->stamp_layers[0].occupied_bounds.x1 == 128 &&
+      resolved->stamp_layers[0].occupied_bounds.y1 == 118);
+  const DioramaTileStamp *last = DioramaLayerOrder_StampAt(
+      &resolved->stamp_layers[0], 14999 % 128, 14999 / 128);
+  assert(last && last->words[0] == 0x10);
+  for (unsigned repeat = 0; repeat < 100; ++repeat) {
+    assert(DioramaLayerManifest_TerrainRoom(room, 0) == resolved);
+    assert(DioramaLayerOrder_StampAt(&resolved->stamp_layers[0],
+        14999 % 128, 14999 / 128) == last);
+  }
+  edit = DioramaLayerOrder_FindOrAdd(DioramaLayerManifest_Edit(), 2, 8);
+  edit->stamp_layers[0].cells[14999].terrain_mask = 1;
+  edit->stamp_layers[0].cells[14999].words[0] = 0x25;
+  resolved = DioramaLayerManifest_TerrainRoom(edit, 0);
+  last = DioramaLayerOrder_StampAt(&resolved->stamp_layers[0],
+      14999 % 128, 14999 / 128);
+  assert(last && last->words[0] == 0x25);
+  resolved = DioramaLayerManifest_TerrainRoom(edit, 1);
+  assert(resolved && resolved->stamp_layers[0].count == 14999);
+  assert(!DioramaLayerOrder_StampAt(&resolved->stamp_layers[0],
+      14999 % 128, 14999 / 128));
+  assert(!DioramaLayerManifest_TerrainRoom(NULL, 0));
+  assert(!DioramaLayerManifest_TerrainRoom(edit, 99));
+  assert(DioramaLayerManifest_TerrainRoom(edit, 0)->stamp_layers[0].count == 15000);
+  assert(DioramaLayerManifest_Save());
+  assert(DioramaLayerManifest_Load());
+  room = DioramaLayerOrder_Find(view, 2, 8);
+  assert(room && room->stamp_layers[0].count == 15000);
+  saved = Read(&saved_size);
+  assert(strstr(saved, "# Large authored patch\n"));
+  free(saved);
   free(large);
+  /* Non-text input must still never become a destructive successful save. */
   const char binary[] = "# prefix\0hand-authored suffix\n";
   Write(binary, sizeof(binary) - 1);
   assert(!DioramaLayerManifest_Save());

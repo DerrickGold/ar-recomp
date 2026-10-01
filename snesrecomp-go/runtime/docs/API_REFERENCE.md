@@ -98,6 +98,7 @@ fields remain zero.
 | PPU frame transaction context and emulated-memory pointers | Callback only | No |
 | Bound output surface storage | Host-owned | The owner retains its storage; keep it alive until unbound/shutdown |
 | Virtual tilemap callbacks and `user_data` | Game-owned, retained by runner | Keep alive until replacement/reset/shutdown |
+| Capture tile callbacks and `user_data` | Game-owned, retained by runner | Keep alive until replacement/frame reset/virtual tilemap replacement/shutdown |
 | Frame-policy bands and most request arrays | Copied or consumed synchronously | Caller may release after the call returns |
 
 Borrowed memory is immutable through the SDK. Do not cast away `const`. Use a
@@ -477,6 +478,26 @@ coordinate for which it is consulted; transparent does not implicitly fall
 through to VRAM. Use the explicit fallback result for partial coverage. A span
 with null entries is likewise transparent; return a zero-length span at a
 mixed-coverage boundary to defer that coordinate to scalar lookup.
+
+`replace_ppu_capture_tiles` adds presentation-only 8×8 edits to BG1/BG2 after
+virtual tilemaps and overlay destinations have been bound. Check
+`SR_RUNNER_CAP_PPU_CAPTURE_TILES` and `SNES_RUNNER_API_PPU_CAPTURE_TILES_SIZE`.
+Tile callbacks return replacements, intentional blank tiles, and optional black
+masks in displayed tile coordinates. Capture bands are far (0), ordinary (1),
+and high (2). A zero result preserves the ordinary capture. The native capture
+export uses its cached character decoder, live scanline palette, scroll,
+mosaic, windows, and capture color policy; edits never modify gameplay source
+buffers or authentic output. Ordinary export skips bands owned by an edit,
+so there is no completed-frame repaint.
+
+The optional `apron` continues verified virtual terrain beyond the capture
+rectangle, up to `SR_PPU_OBJ_APRON` pixels per side. The bound surface must have
+that capacity; gameplay margin limits are unchanged. Callbacks are queried
+for the capture’s tile runs, independent of the total authored map size. This
+path supports 4bpp backgrounds. Unsupported formats leave normal capture intact.
+Bindings are validated atomically and cleared by frame reset or virtual tilemap
+replacement. Hosts should cache their resolved tile index and occupied bounds,
+invalidating both when authored content or terrain profiles change.
 
 ### Drive custom composition and high-refresh presentation
 

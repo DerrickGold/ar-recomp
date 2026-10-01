@@ -1044,6 +1044,38 @@ static SrResult replace_ppu_virtual_tilemaps(
     return SR_RESULT_OK;
 }
 
+static SrResult replace_ppu_capture_tiles(
+        SrRunnerHandle *runner, const SrPpuCaptureTileRequest *request) {
+    Snes *snes = runner_from_handle(runner);
+    if (snes == NULL || request == NULL ||
+        request->struct_size < SR_PPU_CAPTURE_TILE_REQUEST_SIZE ||
+        request->layer_mask > 3u) return SR_RESULT_INVALID_ARGUMENT;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    Ppu *ppu = ppu_output_control_target(snes);
+    if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
+    for (unsigned bg = 0; bg < 2; ++bg) {
+        if (!(request->layer_mask & (1u << bg))) continue;
+        const SrPpuCaptureTileBinding *binding = &request->bindings[bg];
+        const PpuOverlayCapture *capture = &ppu->overlayCaptures[bg];
+        int width = (int)(ppu->overlayRenderPitch[bg] / sizeof(uint32_t));
+        int origin = (width - kPpuXPixels) / 2;
+        if (binding->reserved || binding->apron > kPpuObjApron ||
+            ppu->virtualTilemap[bg].lookup == NULL ||
+            ppu->overlayRenderBuffer[bg] == NULL ||
+            width > kPpuSurfaceWidth || capture->x1 <= capture->x0 ||
+            capture->x0 - (int)binding->apron < -origin ||
+            capture->x1 + (int)binding->apron > width - origin)
+            return SR_RESULT_INVALID_ARGUMENT;
+    }
+    memset(ppu->captureTiles, 0, sizeof(ppu->captureTiles));
+    memset(ppu->captureTileCoverage, 0, sizeof(ppu->captureTileCoverage));
+    for (unsigned bg = 0; bg < 2; ++bg)
+        if (request->layer_mask & (1u << bg))
+            ppu->captureTiles[bg] = request->bindings[bg];
+    return SR_RESULT_OK;
+}
+
 static SrResult update_ppu_authentic_camera(
         SrRunnerHandle *runner,
         const SrPpuAuthenticCameraRequest *request) {

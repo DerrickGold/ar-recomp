@@ -2097,6 +2097,154 @@ static PpuVirtualTilemapLookupResult background_view_lookup(
     return kPpuVirtualTilemapLookup_Found;
 }
 
+typedef struct CaptureTileFixture {
+    unsigned calls;
+    bool merged;
+    bool masks;
+} CaptureTileFixture;
+
+static uint32_t capture_tile_lookup(void *context, int32_t x, int32_t y,
+                                    SrPpuCaptureTile *tile) {
+    CaptureTileFixture *fixture = context;
+    ++fixture->calls;
+    if ((x & 3) == 0 && !fixture->masks) return 0;
+    *tile = (SrPpuCaptureTile){
+        .entry = (uint16_t)(2u | ((x & 4) ? 0x4000u : 0u) |
+                           ((y & 1) ? 0x8000u : 0u)),
+        .band = (uint8_t)((unsigned)x % 3u),
+        .flags = SR_PPU_CAPTURE_TILE_REPLACE,
+    };
+    if ((x & 3) == 2) tile->flags |= SR_PPU_CAPTURE_TILE_BLANK;
+    if (fixture->masks) {
+        for (int row = 0; row < 8; ++row) tile->black_rows[row] = 0x81;
+        if ((x & 3) == 0) { tile->flags = 0; tile->band = 1; }
+    }
+    return 1;
+}
+
+static PpuVirtualTilemapLookupResult capture_world_lookup(
+        const void *context, int32_t x, int32_t y, uint16_t *entry) {
+    CaptureTileFixture *fixture = (CaptureTileFixture *)context;
+    SrPpuCaptureTile tile;
+    *entry = 1u;
+    if (fixture->merged && capture_tile_lookup(fixture, x, y, &tile) &&
+        (tile.flags & SR_PPU_CAPTURE_TILE_REPLACE))
+        *entry = (tile.flags & SR_PPU_CAPTURE_TILE_BLANK) ? 0u : tile.entry;
+    return kPpuVirtualTilemapLookup_Found;
+}
+
+static bool capture_world_band(const void *context, int32_t x, int32_t y,
+                               uint16_t entry, uint8_t *band) {
+    CaptureTileFixture *fixture = (CaptureTileFixture *)context;
+    SrPpuCaptureTile tile;
+    (void)entry;
+    *band = fixture->merged && capture_tile_lookup(fixture, x, y, &tile)
+        ? tile.band : 1u;
+    return true;
+}
+
+static void test_native_capture_tiles(void) {
+    enum { kExtra = 120, kApron = 64, kWidth = 624, kRows = 16, kOrigin = 184 };
+    static uint32_t main_pixels[3][kWidth * kRows];
+    static uint32_t authentic[3][kWidth * kPpuYPixels];
+    static uint32_t planes[3][3][kWidth * kRows];
+    Ppu *sources[3] = {ppu_init(), ppu_init(), ppu_init()};
+    CHECK(sources[0] && sources[1] && sources[2]);
+    if (!sources[0] || !sources[1] || !sources[2]) goto cleanup;
+    /* The oracle is the ordinary BG renderer with a merged tile provider,
+     * independently exercising native scalar and tile-span paths. */
+    for (int variant = 0; variant < 16; ++variant) {
+        const int bg = variant / 8, mode = variant % 8;
+        CaptureTileFixture fixtures[3] = {{0}, {.masks = mode == 7},
+            {.merged = true, .masks = mode == 7}};
+        for (int i = 0; i < 3; ++i) {
+            Ppu *ppu = sources[i];
+            ppu_reset(ppu);
+            ppu->inidisp = 15;
+            ppu->bgmode = 1;
+            ppu->screenEnabled[mode == 3 ? 1 : 0] = 1u << bg;
+            ppu->cgram[0] = 0x0421;
+            ppu->cgram[1] = 31;
+            ppu->cgram[2] = 31 << 5;
+            ppu->cgram[3] = 31 << 10;
+            for (int row = 0; row < 8; ++row) {
+                ppu->vram[16 + row] = 0x00ff;
+                ppu->vram[32 + row] = (uint16_t)(0xf00fu ^ (row * 0x101u));
+            }
+            PpuSetExtraSpace(ppu, kExtra);
+            PpuVirtualTilemapBinding world = {
+                .lookup = capture_world_lookup, .band_lookup = capture_world_band,
+                .context = &fixtures[i], .camera_x = 101, .camera_y = 5,
+                .flags = kPpuVirtualTilemapFlag_IncludeAuthentic,
+            };
+            CHECK(PpuSetVirtualTilemap(ppu, bg, &world));
+            CHECK(PpuBindOverlaySurface(ppu, bg, (uint8_t *)planes[i][0], kWidth * 4));
+            CHECK(PpuBindOverlayPrioSurface(ppu, bg, 1, (uint8_t *)planes[i][1]));
+            CHECK(PpuBindOverlayPrioSurface(ppu, bg, 2, (uint8_t *)planes[i][2]));
+            CHECK(PpuSetOverlayCapture(ppu, bg, -kExtra, 0, 496, kRows,
+                kPpuOverlayFlag_RemoveFromGame | (mode == 5
+                    ? kPpuOverlayFlag_MarkBgHalfAdd
+                    : kPpuOverlayFlag_ApplyBgFixedColorSubtract)));
+            CHECK(PpuSetOverlayTransparentFill(ppu, bg,
+                kPpuOverlayTransparentFill_Cgram, 0));
+            if (i == 1) ppu->captureTiles[bg] = (SrPpuCaptureTileBinding){
+                .lookup = capture_tile_lookup, .user_data = &fixtures[i], .apron = kApron,
+            };
+            if (mode == 1) ppu->mosaic = 0x40 | (1u << bg);
+            if (mode == 2) {
+                ppu->screenWindowed[0] = 1u << bg;
+                ppu->windowsel = 2u << (bg * 4);
+                ppu->window1left = 30; ppu->window1right = 90;
+            }
+            if (mode == 4) ppu->wsLayerMirror = 1u << bg;
+            if (mode == 6) ppu->renderFlags |= kPpuRenderFlags_ReferencePixelRenderer;
+            PpuBeginDrawing(ppu, (uint8_t *)main_pixels[i], kWidth * 4, ppu->renderFlags);
+            CHECK(PpuBindAuthenticSurfaceSized(ppu, (uint8_t *)authentic[i], kWidth * 4, kPpuYPixels));
+            for (int row = 0; row < kRows; ++row) {
+                /* Raster changes must affect edits on exactly the same row. */
+                ppu->hScroll[bg] = (uint16_t)(row & 7);
+                ppu->vScroll[bg] = (uint16_t)(row / 4);
+                ppu_write(ppu, 0x00, (uint8_t)(15 - row / 4));
+                ppu->fixedColor = (uint16_t)(row & 3);
+                ppu_write(ppu, 0x21, 2);
+                ppu_write(ppu, 0x22, (uint8_t)(row * 3));
+                ppu_write(ppu, 0x22, 0x20);
+                ppu_runLine(ppu, row + 1);
+                if (mode == 7 && i == 2) {
+                    for (int x = -kExtra; x < kPpuXPixels + kExtra; ++x) {
+                        int wx = 101 + x + (row & 7), wy = 5 + row + 1 + row / 4;
+                        int tx = wx >= 0 ? wx / 8 : (wx - 7) / 8;
+                        SrPpuCaptureTile tile;
+                        CHECK(capture_tile_lookup(&fixtures[i], tx, wy / 8, &tile));
+                        if (tile.black_rows[wy & 7] & (0x80u >> (wx & 7))) {
+                            int band = tile.band == 1 ? 0 : tile.band == 2 ? 1 : 2;
+                            planes[i][band][row * kWidth + kOrigin + x] = 0xff000000u;
+                        }
+                    }
+                }
+            }
+        }
+        CHECK(memcmp(main_pixels[0], main_pixels[1], sizeof(main_pixels[0])) == 0);
+        CHECK(memcmp(authentic[0], authentic[1], sizeof(authentic[0])) == 0);
+        CHECK(fixtures[1].calls <= (kWidth / 8 + 4) * kRows);
+        for (int band = 0; band < 3; ++band)
+            for (int row = 0; row < kRows; ++row)
+                CHECK(memcmp(&planes[1][band][row * kWidth + kApron],
+                    &planes[2][band][row * kWidth + kApron], 496 * 4) == 0);
+        CHECK(sources[1]->overlayRenderContentMask[bg] == 7u);
+        /* Guard terrain is streamed even where the native game stops. */
+        if (mode == 0) {
+            CHECK(planes[1][0][0] != 0u);
+            CHECK(planes[0][0][0] == 0u);
+        }
+        PpuClearOverlayCaptures(sources[1]);
+        CHECK(sources[1]->captureTiles[bg].lookup == NULL);
+        CHECK(sources[1]->captureTileCoverage[bg][kOrigin] == 0u);
+    }
+cleanup:
+    for (int i = 0; i < 3; ++i) ppu_free(sources[i]);
+}
+
 static void test_clamped_background_view(void) {
     /* Capture and presentation share this origin even at asymmetric margins,
      * finite edges and extreme camera values. Expected values are independent. */
@@ -2263,7 +2411,13 @@ static void test_obj_winner_capture(void) {
     }
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "--capture-tiles")) {
+        test_native_capture_tiles();
+        if (failures) return 1;
+        puts("native capture tile parity: pass");
+        return 0;
+    }
     Ppu *ppu = ppu_init();
     CHECK(ppu != NULL);
     if (ppu != NULL) {

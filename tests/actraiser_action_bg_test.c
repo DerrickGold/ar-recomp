@@ -267,18 +267,31 @@ static SrResult FakeUpdateAuthenticCamera(
   return SR_RESULT_OK;
 }
 
+static SrResult FakeReplaceCaptureTiles(SrRunnerHandle *runner,
+                                         const SrPpuCaptureTileRequest *request) {
+  (void)runner;
+  if (!s_fake_ppu || !request || request->lifetime_generation != 1u)
+    return SR_RESULT_INVALID_ARGUMENT;
+  memset(s_fake_ppu->captureTiles, 0, sizeof(s_fake_ppu->captureTiles));
+  for (unsigned bg = 0; bg < 2; ++bg)
+    if (request->layer_mask & (1u << bg))
+      s_fake_ppu->captureTiles[bg] = request->bindings[bg];
+  return SR_RESULT_OK;
+}
+
 static const SnesRunnerApi s_fake_api = {
   .abi_version = SR_RUNNER_ABI_VERSION,
   .struct_size = sizeof(SnesRunnerApi),
   .capabilities = SR_RUNNER_CAP_PPU_STATE |
       SR_RUNNER_CAP_BORROWED_U16_SPANS | SR_RUNNER_CAP_DMA_STATE |
-      SR_RUNNER_CAP_PPU_BACKGROUND_POLICY,
+      SR_RUNNER_CAP_PPU_BACKGROUND_POLICY | SR_RUNNER_CAP_PPU_CAPTURE_TILES,
   .query_ppu_state = FakeQueryPpuState,
   .borrow_u16_memory = FakeBorrowU16,
   .query_dma_state = FakeQueryDmaState,
   .update_ppu_layer_extents = FakeUpdateLayerExtents,
   .replace_ppu_virtual_tilemaps = FakeReplaceVirtualTilemaps,
   .update_ppu_authentic_camera = FakeUpdateAuthenticCamera,
+  .replace_ppu_capture_tiles = FakeReplaceCaptureTiles,
 };
 
 const SnesRunnerApi *sr_runner_get_api(uint32_t version) {
@@ -491,7 +504,7 @@ static void TestVerticalMargins(void) {
 
 static void TestAuthoredVerticalCapture(void) {
   DioramaRoomOverride room = {.used = true, .map_group = 1, .map_number = 4};
-  DioramaRoomOverride resolved;
+  DioramaRoomOverride resolved = {0};
   const char *error = NULL;
   int y0, height, top, bottom;
 
@@ -550,7 +563,7 @@ static void TestAuthoredVerticalCapture(void) {
 
   /* Bounds are optional and cannot crop away native or pasted cells. The
    * regional resolver must run first, so JP's extension cannot leak to US. */
-  memset(&room, 0, sizeof(room));
+  DioramaLayerOrder_ClearRoom(&room);
   CHECK(DioramaLayerOrder_ParseLine(&room,
       "bg1-stamp:jp = cell:0,-2 metatile:42 "
       "words:10C0,10C1,10C0,10C1 bands:1,1,1,1", &error));
@@ -573,11 +586,13 @@ static void TestAuthoredVerticalCapture(void) {
   CHECK(y0 == 0 && height == 256);
   ActRaiserActionBg_ResolveDioramaVerticalExtent(NULL, 0, 256, &y0, &height);
   CHECK(y0 == 0 && height == 256);
+  DioramaLayerOrder_ClearRoom(&room);
+  DioramaLayerOrder_ClearRoom(&resolved);
 }
 
 static void TestAuthoredHorizontalExtent(void) {
   DioramaRoomOverride room = {.used = true, .map_group = 1, .map_number = 4};
-  DioramaRoomOverride resolved;
+  DioramaRoomOverride resolved = {0};
   const char *error = NULL;
   int x0, width;
   CHECK(DioramaLayerOrder_ParseLine(&room,
@@ -605,6 +620,8 @@ static void TestAuthoredHorizontalExtent(void) {
   CHECK(x0 == 0 && width == 512);
   ActRaiserActionBg_ResolveDioramaHorizontalExtent(NULL, 0, 512, &x0, &width);
   CHECK(x0 == 0 && width == 512);
+  DioramaLayerOrder_ClearRoom(&room);
+  DioramaLayerOrder_ClearRoom(&resolved);
 }
 
 static void PopulateNativeRing(const ActionBgWorld *world,
@@ -1503,7 +1520,10 @@ static void TestVirtualLayerClassificationBinding(void) {
   CHECK(!ActRaiserActionBg_PixelBlackAt(1, source_x, sample_y, 13, 7, &band));
   CHECK(!ActRaiserActionBg_PixelBlackAt(0, -1 - snapshot.camera_x, sample_y, 13, 7, &band));
 
-  room.stamp_layers[0].count = 2;
+  room.stamp_layers[0].cells = calloc(2, sizeof(*room.stamp_layers[0].cells));
+  CHECK(room.stamp_layers[0].cells != NULL);
+  if (!room.stamp_layers[0].cells) return;
+  room.stamp_layers[0].capacity = room.stamp_layers[0].count = 2;
   room.stamp_layers[0].cells[0] = (DioramaTileStamp){
       .x = -1, .y = -1, .words = {0x10, 0x4011, 0x8012, 0xe013},
       .bands = (0 | (1 << 2) | (2 << 4) | (1 << 6)), .metatile = metatile};
@@ -1516,6 +1536,20 @@ static void TestVirtualLayerClassificationBinding(void) {
       wram, kActRaiserWramSize, &plan, &room, ppu) == kActRaiserBgLayerMask_Bg1);
   uint8_t local_x, local_y;
   bool black, blank;
+  CHECK(ActRaiserActionBg_BindCaptureTiles(true, 1));
+  const SrPpuCaptureTileBinding *capture = &ppu->captureTiles[0];
+  CHECK(capture->lookup && capture->apron == SR_PPU_OBJ_APRON);
+  SrPpuCaptureTile capture_tile;
+  CHECK(capture->lookup(capture->user_data, -1, -1, &capture_tile));
+  CHECK(capture_tile.entry == 0xe013 && capture_tile.band == 1 &&
+      capture_tile.flags == SR_PPU_CAPTURE_TILE_REPLACE &&
+      capture_tile.black_rows[7] == 1);
+  CHECK(capture->lookup(capture->user_data, -2, -2, &capture_tile));
+  CHECK(capture_tile.entry == 0x10 && capture_tile.band == 0);
+  CHECK(capture->lookup(capture->user_data, 4, 0, &capture_tile));
+  CHECK(capture_tile.flags == 0 && capture_tile.band == 2 &&
+      capture_tile.black_rows[5] == 0x10);
+  CHECK(!capture->lookup(capture->user_data, -3, -2, &capture_tile));
   CHECK(ActRaiserActionBg_StampAt(0, -1 - snapshot.camera_x,
       -1 - snapshot.camera_y, 13, 7, &entry, &band, &local_x, &local_y, &black, &blank));
   CHECK(entry == 0xe013 && band == 1 && local_x == 15 && local_y == 15 && black);
@@ -1650,8 +1684,28 @@ static void TestVirtualLayerClassificationBinding(void) {
   CHECK(!ActRaiserActionBg_NativeSceneryAt(0, 376, 8, 13, 7,
       &entry, &band, &local_x, &local_y, &black));
 
+  /* The old provider table had only 1024 slots. Sample a larger parsed patch
+   * through the real capture lookup, including a collision and a miss. */
+  const char *error = NULL;
+  char stamp[160];
+  for (int i = 0; i < 2048; i++) {
+    snprintf(stamp, sizeof(stamp), "bg1-stamp = cell:%d,%d metatile:23 "
+        "words:0010,4011,8012,E013 bands:0,1,2,1", i % 64, i / 64);
+    CHECK(DioramaLayerOrder_ParseLine(&room, stamp, &error));
+  }
+  CHECK(ActRaiserActionBg_BindPlanWithVirtualLayers(
+      wram, kActRaiserWramSize, &plan, &room, ppu));
+  CHECK(ActRaiserActionBg_StampAt(0, 63 * 16 + 15 - snapshot.camera_x,
+      31 * 16 + 15 - snapshot.camera_y, 13, 7,
+      &entry, &band, &local_x, &local_y, &black, &blank));
+  CHECK(entry == 0xe013 && band == 1 && local_x == 15 && local_y == 15);
+  CHECK(!ActRaiserActionBg_StampAt(0, 64 * 16 - snapshot.camera_x,
+      31 * 16 - snapshot.camera_y, 13, 7,
+      &entry, &band, &local_x, &local_y, &black, &blank));
+
   ActionBgWorld_Destroy(reference);
   ActRaiserActionBg_Shutdown();
+  DioramaLayerOrder_ClearRoom(&room);
   CHECK(unsetenv("AR_ACTION_ROOM_SCENE_HLE") == 0);
   free(ppu);
   free(wram);

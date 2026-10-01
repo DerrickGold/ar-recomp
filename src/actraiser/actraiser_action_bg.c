@@ -97,7 +97,6 @@ typedef struct ActRaiserActionBgProvider {
   uint16_t hscroll_anchor, vscroll_anchor;
   int pixel_cell_x, pixel_cell_y;
   const uint16_t *pixel_mask;
-  const DioramaTileStamp *stamps[1024];
 } ActRaiserActionBgProvider;
 
 static ActRaiserActionBgObserver s_observer = {
@@ -297,7 +296,13 @@ static void ResolveDioramaAxisExtent(
     /* Map bounds describe editor workspace, which can outlive deleted tiles.
      * Only actual cells extend the finite scenery: empty workspace must not
      * consume capture rows or keep the Diorama camera away from an edge. */
-    for (unsigned i = 0; i < stamps->count; i++) {
+    const DioramaMapBounds *bounds = &stamps->occupied_bounds;
+    if (bounds->set) {
+      const int first = (vertical ? bounds->y0 : bounds->x0) * kActionBgMetatilePixels;
+      const int last = (vertical ? bounds->y1 : bounds->x1) * kActionBgMetatilePixels;
+      if (first < start) start = first;
+      if (last > end) end = last;
+    } else for (size_t i = 0; i < stamps->count; i++) {
       const int cell_start = (vertical ? stamps->cells[i].y : stamps->cells[i].x) *
           kActionBgMetatilePixels;
       const int cell_end = cell_start + kActionBgMetatilePixels;
@@ -1660,6 +1665,74 @@ bool ActRaiserActionBg_PixelLayerHasEdits(unsigned bg) {
   return bg < kActionBgLayerCount && s_provider[bg].pixel_edits_active;
 }
 
+static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
+                                    int32_t tile_y, SrPpuCaptureTile *tile) {
+  const ActRaiserActionBgProvider *provider = context;
+  const DioramaRoomOverride *room = provider->virtual_room;
+  if (!room || !provider->pixel_edits_active) return 0;
+  const unsigned bg = provider->layer;
+  int cx = tile_x >= 0 ? tile_x / 2 : (tile_x - 1) / 2;
+  int cy = tile_y >= 0 ? tile_y / 2 : (tile_y - 1) / 2;
+  const DioramaTileStamp *stamp = DioramaLayerOrder_StampAt(
+      &room->stamp_layers[bg], cx, cy);
+  int metatile = -1;
+  *tile = (SrPpuCaptureTile){0};
+  if (stamp) {
+    unsigned quadrant = ((tile_y & 1) * 2) + (tile_x & 1);
+    tile->entry = stamp->words[quadrant];
+    tile->band = (stamp->bands >> (quadrant * 2)) & 3u;
+    tile->flags = SR_PPU_CAPTURE_TILE_REPLACE |
+        (stamp->blank ? SR_PPU_CAPTURE_TILE_BLANK : 0u);
+    if (!stamp->blank) metatile = stamp->metatile;
+  } else {
+    if (!room->pixel_layers[bg].count) return 0;
+    if (provider->wrap_world_x)
+      tile_x = WrapWorldTile(tile_x, ActionBgWorld_TileWidth(provider->world));
+    uint8_t id;
+    if (ActionBgWorld_Lookup(provider->world, tile_x, tile_y, &tile->entry) !=
+            kActionBgLookup_Tile ||
+        !ActionBgWorld_LookupMetatile(provider->world, tile_x, tile_y, &id)) return 0;
+    cx = tile_x / 2;
+    metatile = id;
+    tile->band = (tile->entry & 0x2000u) ? 2u : 1u;
+    if (provider->pixel_band_cache_active)
+      (void)ProviderBandLookup(context, tile_x, tile_y, tile->entry, &tile->band);
+  }
+  const uint16_t *mask = room->pixel_layers[bg].count
+      ? DioramaLayerOrder_PixelMask(room, bg, cx, cy, metatile) : NULL;
+  if (mask)
+    for (unsigned row = 0; row < 8; ++row)
+      tile->black_rows[row] = (uint8_t)(mask[(tile_y & 1) * 8 + row] >>
+          ((tile_x & 1) ? 0 : 8));
+  return tile->band < kDioramaVirtualBandCount && (stamp || mask);
+}
+
+bool ActRaiserActionBg_BindCaptureTiles(uint8_t capture_mask, uint8_t apron_mask) {
+  SrPpuStateSnapshot state;
+  if (!s_runner_api ||
+      s_runner_api->struct_size < SNES_RUNNER_API_PPU_CAPTURE_TILES_SIZE ||
+      !(s_runner_api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TILES) ||
+      !s_runner_api->replace_ppu_capture_tiles || !QueryPpuState(&state)) return false;
+  SrPpuCaptureTileRequest request = {
+    .struct_size = sizeof(request), .lifetime_generation = state.lifetime_generation,
+  };
+  for (unsigned bg = 0; bg < kActionBgLayerCount; ++bg) {
+    if (!(capture_mask & (1u << bg))) continue;
+    ActRaiserActionBgProvider *provider = &s_provider[bg];
+    const DioramaRoomOverride *room = provider->virtual_room;
+    bool edits = provider->pixel_edits_active && room &&
+        (room->stamp_layers[bg].count || room->pixel_layers[bg].count);
+    if (!edits && !(apron_mask & (1u << bg))) continue;
+    request.layer_mask |= 1u << bg;
+    request.bindings[bg] = (SrPpuCaptureTileBinding){
+      .lookup = edits ? ProviderCaptureTile : NULL,
+      .user_data = provider,
+      .apron = (apron_mask & (1u << bg)) ? SR_PPU_OBJ_APRON : 0,
+    };
+  }
+  return s_runner_api->replace_ppu_capture_tiles(s_runner, &request) == SR_RESULT_OK;
+}
+
 bool ActRaiserActionBg_PixelEditsActive(void) {
   return s_provider[0].pixel_edits_active || s_provider[1].pixel_edits_active;
 }
@@ -1681,23 +1754,6 @@ bool ActRaiserActionBg_HorizontalSourceBounds(
   return true;
 }
 
-static unsigned StampHash(int x, int y) {
-  return ((uint32_t)x * 73856093u ^ (uint32_t)y * 19349663u) & 1023u;
-}
-
-static void CompileStamps(ActRaiserActionBgProvider *provider) {
-  memset(provider->stamps, 0, sizeof(provider->stamps));
-  if (!provider->virtual_room) return;
-  const DioramaStampLayerOverride *layer =
-      &provider->virtual_room->stamp_layers[provider->layer];
-  for (unsigned i = 0; i < layer->count && i < kDioramaTileStampMax; i++) {
-    const DioramaTileStamp *cell = &layer->cells[i];
-    unsigned index = StampHash(cell->x, cell->y);
-    while (provider->stamps[index]) index = (index + 1) & 1023u;
-    provider->stamps[index] = cell;
-  }
-}
-
 bool ActRaiserActionBg_StampAt(unsigned bg, int source_x, int sample_y,
                               uint16_t hscroll, uint16_t vscroll,
                               uint16_t *entry, uint8_t *band,
@@ -1715,12 +1771,8 @@ bool ActRaiserActionBg_StampAt(unsigned bg, int source_x, int sample_y,
   /* Floor division is required for scenery extending left or above zero. */
   const int cx = x >= 0 ? x / 16 : (x - 15) / 16;
   const int cy = y >= 0 ? y / 16 : (y - 15) / 16;
-  unsigned index = StampHash(cx, cy);
-  const DioramaTileStamp *cell;
-  while ((cell = provider->stamps[index]) != NULL) {
-    if (cell->x == cx && cell->y == cy) break;
-    index = (index + 1) & 1023u;
-  }
+  const DioramaTileStamp *cell = DioramaLayerOrder_StampAt(
+      &provider->virtual_room->stamp_layers[bg], cx, cy);
   if (!cell) return false;
   *local_x = (uint8_t)(x & 15);
   *local_y = (uint8_t)(y & 15);
@@ -2037,7 +2089,6 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
         layer_plan->horizontal_extent.mode == kActionBgExtent_Available &&
         layer_plan->vertical_extent.mode == kActionBgExtent_Available &&
         layer_plan->band_count == 0;
-    CompileStamps(&s_provider[layer]);
     const SrPpuVirtualTilemapBinding binding = {
       .lookup = ProviderLookup,
       .lookup_span = ProviderLookupSpan,

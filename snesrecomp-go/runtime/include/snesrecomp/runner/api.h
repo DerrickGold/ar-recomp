@@ -219,7 +219,15 @@ typedef struct SnesRunnerApi {
         SrRunnerHandle *runner, const SrPpuScanoutRequest *request,
         const SrPpuBackgroundViewRequest *view,
         SrPpuScanoutResult *out_result);
+    /** Replace presentation-only BG edits; authentic/game pixels and hardware
+     * state are unchanged. Requires SR_RUNNER_CAP_PPU_CAPTURE_TILES. */
+    SrResult (*replace_ppu_capture_tiles)(
+        SrRunnerHandle *runner, const SrPpuCaptureTileRequest *request);
 } SnesRunnerApi;
+
+#define SNES_RUNNER_API_PPU_CAPTURE_TILES_SIZE                            \
+    ((uint32_t)(offsetof(SnesRunnerApi, replace_ppu_capture_tiles) +      \
+                sizeof(((SnesRunnerApi *)0)->replace_ppu_capture_tiles)))
 
 #define SNES_RUNNER_API_PPU_BACKGROUND_VIEW_SIZE                          \
     ((uint32_t)(offsetof(SnesRunnerApi, run_ppu_scanout_with_background_view) + \

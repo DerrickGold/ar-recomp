@@ -1708,6 +1708,14 @@ static void TestPixelMasksRoundTrip(void) {
   CHECK(!memcmp(&saved, &reparsed.pixel_layers[0], sizeof(saved)));
 }
 
+static bool SameStamps(const DioramaStampLayerOverride *a,
+                        const DioramaStampLayerOverride *b) {
+  return a->set_bounds == b->set_bounds && a->x0 == b->x0 && a->y0 == b->y0 &&
+      a->x1 == b->x1 && a->y1 == b->y1 && a->count == b->count &&
+      !memcmp(a->regional_bounds, b->regional_bounds, sizeof(a->regional_bounds)) &&
+      (!a->count || !memcmp(a->cells, b->cells, a->count * sizeof(*a->cells)));
+}
+
 static void TestTileStampsRoundTrip(void) {
   DioramaRoomOverride room = {.used = true, .map_group = 3, .map_number = 4};
   const char *error = NULL;
@@ -1738,23 +1746,48 @@ static void TestTileStampsRoundTrip(void) {
   for (char *record = strtok(text, "\n"); record; record = strtok(NULL, "\n"))
     if (record[0] != '[')
       CHECK(DioramaLayerOrder_ParseLine(&reparsed, record, &error));
-  CHECK(!memcmp(&saved, &reparsed.stamp_layers[1], sizeof(saved)));
+  CHECK(SameStamps(&saved, &reparsed.stamp_layers[1]));
   CHECK(!memcmp(&room.pixel_layers[1], &reparsed.pixel_layers[1], sizeof(room.pixel_layers[1])));
-  for (int x = 0; x < kDioramaTileStampMax - 1; x++) {
-    snprintf(text, sizeof(text), "bg2-stamp = cell:%d,1 metatile:23 "
-        "words:0010,4011,8012,E013 bands:0,1,2,1", x);
+  DioramaLayerOrder_ClearRoom(&reparsed);
+  /* Cross both the old 512 cap and a 16-bit count, exercising index growth. */
+  for (int i = 0; i < 65536; i++) {
+    snprintf(text, sizeof(text), "bg2-stamp = cell:%d,%d metatile:23 "
+        "words:0010,4011,8012,E013 bands:0,1,2,1", i % 256, i / 256);
     CHECK(DioramaLayerOrder_ParseLine(&room, text, &error));
   }
-  CHECK(room.stamp_layers[1].count == kDioramaTileStampMax);
-  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg2-stamp = cell:511,1 metatile:23 "
-      "words:0010,4011,8012,E013 bands:0,1,2,1", &error));
-  CHECK(room.stamp_layers[1].count == kDioramaTileStampMax);
+  CHECK(room.stamp_layers[1].count == 65537);
   CHECK(DioramaLayerOrder_ParseLine(&room, line, &error));
+  CHECK(room.stamp_layers[1].count == 65537); /* duplicates still replace */
+  DioramaRoomOverride resolved = {0};
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 0, &resolved));
+  CHECK(resolved.stamp_layers[1].count == 65537);
+  CHECK(resolved.stamp_layers[1].cells != room.stamp_layers[1].cells);
+  for (int i = 0; i < 65536; i++) {
+    const DioramaTileStamp *cell = DioramaLayerOrder_StampAt(
+        &resolved.stamp_layers[1], i % 256, i / 256);
+    CHECK(cell && cell->words[3] == 0xe013);
+  }
+  CHECK(!DioramaLayerOrder_StampAt(&resolved.stamp_layers[1], 256, 255));
+  const size_t length = DioramaLayerOrder_FormatRoom(&room, NULL, 0);
+  char *large = malloc(length + 1);
+  CHECK(large != NULL);
+  if (large) {
+    CHECK(DioramaLayerOrder_FormatRoom(&room, large, length + 1) == length);
+    for (char *record = strtok(large, "\n"); record; record = strtok(NULL, "\n"))
+      if (record[0] != '[')
+        CHECK(DioramaLayerOrder_ParseLine(&reparsed, record, &error));
+    CHECK(SameStamps(&room.stamp_layers[1], &reparsed.stamp_layers[1]));
+    free(large);
+  }
+  DioramaLayerOrder_ClearRoom(&resolved);
+  DioramaLayerOrder_ClearRoom(&reparsed);
+  DioramaLayerOrder_ClearRoom(&room);
+  CHECK(!room.stamp_layers[1].cells && !room.stamp_layers[1].count);
 }
 
 static void TestBlankTilesAndFraming(void) {
   DioramaRoomOverride room = {.used = true, .map_group = 1, .map_number = 4};
-  DioramaRoomOverride resolved;
+  DioramaRoomOverride resolved = {0};
   const char *error = NULL;
   CHECK(DioramaLayerOrder_ParseLine(&room, "framing:us+eu = x:-40 y:0", &error));
   CHECK(DioramaLayerOrder_ParseLine(&room, "framing:jp = x:16 y:-8", &error));
@@ -1782,12 +1815,16 @@ static void TestBlankTilesAndFraming(void) {
   for (char *line = strtok(text, "\n"); line; line = strtok(NULL, "\n"))
     if (line[0] != '[') CHECK(DioramaLayerOrder_ParseLine(&reparsed, line, &error));
   CHECK(!memcmp(room.framing, reparsed.framing, sizeof(room.framing)));
-  CHECK(!memcmp(room.stamp_layers, reparsed.stamp_layers, sizeof(room.stamp_layers)));
+  for (unsigned bg = 0; bg < 2; bg++)
+    CHECK(SameStamps(&room.stamp_layers[bg], &reparsed.stamp_layers[bg]));
+  DioramaLayerOrder_ClearRoom(&room);
+  DioramaLayerOrder_ClearRoom(&resolved);
+  DioramaLayerOrder_ClearRoom(&reparsed);
 }
 
 static void TestRegionalTileKeys(void) {
   DioramaRoomOverride room = {.used = true, .map_group = 3, .map_number = 4};
-  DioramaRoomOverride resolved;
+  DioramaRoomOverride resolved = {0};
   const char *error = NULL;
   const char *const suffixes[] = {"", ":jp", ":ge"};
   char line[256];
@@ -1863,6 +1900,9 @@ static void TestRegionalTileKeys(void) {
       "bg1-pixels:jp = obsolete\n", NULL, text, sizeof(text)) < sizeof(text));
   CHECK(strstr(text, "# keep") && !strstr(text, "obsolete"));
   CHECK(strstr(text, "bg1-stamp:eu") && strstr(text, "bg1-map:jp"));
+  DioramaLayerOrder_ClearTable(table); /* owns the transferred `room` */
+  DioramaLayerOrder_ClearRoom(&resolved);
+  DioramaLayerOrder_ClearRoom(&reparsed);
   free(table);
 }
 

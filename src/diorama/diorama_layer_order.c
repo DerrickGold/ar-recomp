@@ -304,11 +304,116 @@ bool DioramaLayerOrder_VirtualLayerHasClassification(
 
 static unsigned TerrainMask(unsigned mask) { return mask ? mask : 1u; }
 
+static size_t StampHash(int x, int y) {
+  return (uint32_t)x * 73856093u ^ (uint32_t)y * 19349663u;
+}
+
+static size_t StampSlot(const DioramaStampLayerOverride *layer, int x, int y,
+                         unsigned terrain, bool match_terrain) {
+  size_t slot = StampHash(x, y) & (layer->index_capacity - 1);
+  while (layer->cell_index[slot]) {
+    const DioramaTileStamp *cell = &layer->cells[layer->cell_index[slot] - 1];
+    if (cell->x == x && cell->y == y &&
+        (!match_terrain || cell->terrain_mask == terrain)) break;
+    slot = (slot + 1) & (layer->index_capacity - 1);
+  }
+  return slot;
+}
+
+static bool ReserveStamps(DioramaStampLayerOverride *layer, size_t count) {
+  if (!count) return true;
+  if (count > SIZE_MAX / 2) return false;
+  if (count > layer->capacity) {
+    size_t capacity = layer->capacity ? layer->capacity : 16;
+    while (capacity < count) {
+      if (capacity > SIZE_MAX / 2) return false;
+      capacity *= 2;
+    }
+    if (capacity > SIZE_MAX / sizeof(*layer->cells)) return false;
+    DioramaTileStamp *cells = realloc(layer->cells, capacity * sizeof(*cells));
+    if (!cells) return false;
+    layer->cells = cells;
+    layer->capacity = capacity;
+  }
+  if (count * 2 > layer->index_capacity) {
+    size_t capacity = layer->index_capacity ? layer->index_capacity : 32;
+    while (capacity < count * 2) {
+      if (capacity > SIZE_MAX / 2) return false;
+      capacity *= 2;
+    }
+    if (capacity > SIZE_MAX / sizeof(*layer->cell_index)) return false;
+    size_t *index = calloc(capacity, sizeof(*index));
+    if (!index) return false;
+    for (size_t i = 0; i < layer->count; i++) {
+      size_t slot = StampHash(layer->cells[i].x, layer->cells[i].y) & (capacity - 1);
+      while (index[slot]) slot = (slot + 1) & (capacity - 1);
+      index[slot] = i + 1;
+    }
+    free(layer->cell_index);
+    layer->cell_index = index;
+    layer->index_capacity = capacity;
+  }
+  return true;
+}
+
+static void PutStamp(DioramaStampLayerOverride *layer,
+                      const DioramaTileStamp *cell, bool match_terrain) {
+  const size_t slot = StampSlot(layer, cell->x, cell->y,
+                                 cell->terrain_mask, match_terrain);
+  size_t index = layer->cell_index[slot];
+  if (!index) {
+    index = ++layer->count;
+    layer->cell_index[slot] = index;
+  }
+  layer->cells[index - 1] = *cell;
+}
+
+const DioramaTileStamp *DioramaLayerOrder_StampAt(
+    const DioramaStampLayerOverride *layer, int x, int y) {
+  if (!layer || !layer->count) return NULL;
+  if (!layer->index_capacity) {
+    /* Also accept explicitly assembled layers used by pure callers. */
+    for (size_t i = layer->count; i > 0; i--)
+      if (layer->cells[i - 1].x == x && layer->cells[i - 1].y == y)
+        return &layer->cells[i - 1];
+    return NULL;
+  }
+  const size_t index = layer->cell_index[StampSlot(layer, x, y, 0, false)];
+  return index && index <= layer->count ? &layer->cells[index - 1] : NULL;
+}
+
+void DioramaLayerOrder_ClearRoom(DioramaRoomOverride *room) {
+  if (!room) return;
+  for (unsigned bg = 0; bg < 2; bg++) {
+    free(room->stamp_layers[bg].cells);
+    free(room->stamp_layers[bg].cell_index);
+  }
+  memset(room, 0, sizeof(*room));
+}
+
+void DioramaLayerOrder_ClearTable(DioramaLayerOrderTable *table) {
+  if (!table) return;
+  for (int i = 0; i < table->count; i++)
+    DioramaLayerOrder_ClearRoom(&table->rooms[i]);
+  memset(table, 0, sizeof(*table));
+}
+
 bool DioramaLayerOrder_ForTerrain(const DioramaRoomOverride *room,
                                   unsigned profile, DioramaRoomOverride *out) {
   if (!room || !out || profile >= kDioramaTerrainProfileCount || room == out)
     return false;
+  for (unsigned bg = 0; bg < 2; bg++)
+    if (!ReserveStamps(&out->stamp_layers[bg], room->stamp_layers[bg].count))
+      return false;
+  const DioramaStampLayerOverride buffers[2] = {
+      out->stamp_layers[0], out->stamp_layers[1]};
   *out = *room;
+  for (unsigned bg = 0; bg < 2; bg++) {
+    out->stamp_layers[bg].cells = buffers[bg].cells;
+    out->stamp_layers[bg].capacity = buffers[bg].capacity;
+    out->stamp_layers[bg].cell_index = buffers[bg].cell_index;
+    out->stamp_layers[bg].index_capacity = buffers[bg].index_capacity;
+  }
   out->framing[0] = room->framing[profile];
   memset(&out->framing[1], 0, sizeof(out->framing) - sizeof(out->framing[0]));
   const unsigned bit = 1u << profile;
@@ -344,6 +449,9 @@ bool DioramaLayerOrder_ForTerrain(const DioramaRoomOverride *room,
     }
     DioramaStampLayerOverride *stamps = &out->stamp_layers[bg];
     stamps->count = 0;
+    stamps->occupied_bounds = (DioramaMapBounds){0};
+    if (stamps->index_capacity)
+      memset(stamps->cell_index, 0, stamps->index_capacity * sizeof(*stamps->cell_index));
     if (profile) {
       const DioramaMapBounds *b = &room->stamp_layers[bg].regional_bounds[profile - 1];
       stamps->set_bounds = b->set;
@@ -353,17 +461,10 @@ bool DioramaLayerOrder_ForTerrain(const DioramaRoomOverride *room,
       stamps->y1 = b->y1;
     }
     memset(stamps->regional_bounds, 0, sizeof(stamps->regional_bounds));
-    for (unsigned i = 0; i < room->stamp_layers[bg].count; i++) {
+    for (size_t i = 0; i < room->stamp_layers[bg].count; i++) {
       const DioramaTileStamp *cell = &room->stamp_layers[bg].cells[i];
       if (!(TerrainMask(cell->terrain_mask) & bit)) continue;
-      unsigned index = stamps->count;
-      for (unsigned j = 0; j < stamps->count; j++)
-        if (stamps->cells[j].x == cell->x && stamps->cells[j].y == cell->y) {
-          index = j;
-          break;
-        }
-      stamps->cells[index] = *cell;
-      if (index == stamps->count) stamps->count++;
+      PutStamp(stamps, cell, false);
     }
   }
   return true;
@@ -423,7 +524,7 @@ void DioramaLayerOrder_ResetPlaneOverridesSection(
       continue;
     memset(room->planes, 0, sizeof(room->planes));
     if (!DioramaLayerOrder_RoomIsActive(room))
-      memset(room, 0, sizeof(*room));
+      DioramaLayerOrder_ClearRoom(room);
     return;
   }
 }
@@ -436,7 +537,7 @@ void DioramaLayerOrder_ResetSection(DioramaLayerOrderTable *table,
     DioramaRoomOverride *room = &table->rooms[i];
     if (room->used && room->map_group == map_group &&
         room->map_number == map_number && room->section == section) {
-      memset(room, 0, sizeof(*room));
+      DioramaLayerOrder_ClearRoom(room);
       /* Left !used so the slot is recycled; count is not decremented because
        * later entries must keep their indices. */
       return;
@@ -974,19 +1075,11 @@ static bool ParseStampLine(DioramaRoomOverride *room, unsigned bg,
   }
   if (fields != 15) goto invalid;
   DioramaStampLayerOverride *layer = &room->stamp_layers[bg];
-  unsigned index = layer->count;
-  for (unsigned i = 0; i < layer->count; i++)
-    if (layer->cells[i].terrain_mask == edit.terrain_mask &&
-        layer->cells[i].x == edit.x && layer->cells[i].y == edit.y) {
-      index = i;
-      break;
-    }
-  if (index >= kDioramaTileStampMax) {
-    if (out_error) *out_error = "too many pasted tiles";
+  if (!ReserveStamps(layer, layer->count + 1)) {
+    if (out_error) *out_error = "out of memory storing pasted tiles";
     return false;
   }
-  layer->cells[index] = edit;
-  if (index == layer->count) layer->count++;
+  PutStamp(layer, &edit, true);
   return true;
 invalid:
   if (out_error) *out_error = "expected cell, words, bands and metatile for stamp";
@@ -1482,7 +1575,7 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
       APPEND("bg%u-map%s = bounds:%d,%d,%d,%d\n", bg + 1,
              TerrainSuffix(mask), b->x0, b->y0, b->x1, b->y1);
     }
-    for (unsigned i = 0; i < layer->count; i++) {
+    for (size_t i = 0; i < layer->count; i++) {
       const DioramaTileStamp *cell = &layer->cells[i];
       APPEND("bg%u-stamp%s = cell:%d,%d metatile:%02X words:",
              bg + 1, TerrainSuffix(cell->terrain_mask), cell->x, cell->y,

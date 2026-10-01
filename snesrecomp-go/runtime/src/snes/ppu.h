@@ -295,6 +295,9 @@ struct Ppu {
     PpuVirtualTilemapBinding virtualTilemap[4];
     /* Public ABI callbacks retained behind the concrete PPU bridge. */
     SrPpuVirtualTilemapBinding abiVirtualTilemap[2];
+    SrPpuCaptureTileBinding captureTiles[2];
+    /* Per-line ownership of capture bands; never part of hardware state. */
+    uint8_t captureTileCoverage[2][kPpuSurfaceWidth];
     int16_t objPosX[128], objPosY[128];
     uint8_t objPosValid[128], objCameraRelative[128];
     uint8_t wsHudSplitHeight, wsHudLeftEnd, wsHudRightStart;

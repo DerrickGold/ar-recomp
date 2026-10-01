@@ -14,9 +14,47 @@
  * returns the defaults verbatim in built-in order, so an unedited game is
  * bit-identical to before this existed. */
 static DioramaLayerOrderTable s_layer_overrides;
+static DioramaRoomOverride s_terrain_room;
+static const DioramaRoomOverride *s_terrain_source;
+static unsigned s_terrain_profile;
+static bool s_terrain_valid;
 
 const DioramaLayerOrderTable *DioramaLayerManifest_Table(void) { return &s_layer_overrides; }
-DioramaLayerOrderTable *DioramaLayerManifest_Edit(void) { return &s_layer_overrides; }
+DioramaLayerOrderTable *DioramaLayerManifest_Edit(void) {
+  s_terrain_valid = false;
+  return &s_layer_overrides;
+}
+
+const DioramaRoomOverride *DioramaLayerManifest_TerrainRoom(
+    const DioramaRoomOverride *room, unsigned profile) {
+  if (!room) return NULL;
+  if (!s_terrain_valid || s_terrain_source != room || s_terrain_profile != profile) {
+    s_terrain_valid = false;
+    if (!DioramaLayerOrder_ForTerrain(room, profile, &s_terrain_room)) return NULL;
+    /* Only this immutable cached view carries occupied bounds. Pure mutable
+     * ForTerrain callers can still edit cells and use the uncached extent path. */
+    for (unsigned bg = 0; bg < 2; ++bg) {
+      DioramaStampLayerOverride *stamps = &s_terrain_room.stamp_layers[bg];
+      for (size_t i = 0; i < stamps->count; ++i) {
+        const DioramaTileStamp *cell = &stamps->cells[i];
+        DioramaMapBounds *bounds = &stamps->occupied_bounds;
+        if (!bounds->set) {
+          *bounds = (DioramaMapBounds){.set = true, .x0 = cell->x, .y0 = cell->y,
+              .x1 = cell->x + 1, .y1 = cell->y + 1};
+        } else {
+          if (cell->x < bounds->x0) bounds->x0 = cell->x;
+          if (cell->y < bounds->y0) bounds->y0 = cell->y;
+          if (cell->x >= bounds->x1) bounds->x1 = cell->x + 1;
+          if (cell->y >= bounds->y1) bounds->y1 = cell->y + 1;
+        }
+      }
+    }
+    s_terrain_source = room;
+    s_terrain_profile = profile;
+    s_terrain_valid = true;
+  }
+  return &s_terrain_room;
+}
 
 /* ── layer manifest I/O ──────────────────────────────────────────────────
  *
@@ -144,10 +182,13 @@ bool DioramaLayerManifest_Load(void) {
   bool complete = !ferror(file);
   if (fclose(file) != 0) complete = false;
   if (!complete) {
+    DioramaLayerOrder_ClearTable(loaded);
     free(loaded);
     fprintf(stderr, "[diorama-layers] cannot read %s -- previous overrides kept\n", path);
     return false;
   }
+  DioramaLayerOrder_ClearTable(&s_layer_overrides);
+  s_terrain_valid = false;
   s_layer_overrides = *loaded;
   free(loaded);
   fprintf(stderr, "[diorama-layers] loaded %s: %d room(s), %d plane override(s)%s\n", path, rooms,
@@ -196,7 +237,8 @@ static const char kLayerManifestPreamble[] =
     "#   bg1-pixels:us+eu = cell:4,5 black:80000000000000000000000000000000"
     "00000000000000000000000000000000\n"
     "# Plane/virtual geometry stays shared. Tile edits use active room terrain.\n"
-    "# Limits per BG across terrain: 256 pixel masks, 512 stamps, 512 cell spans.\n"
+    "# Limits per BG across terrain: 256 pixel masks, 512 cell spans.\n"
+    "# Stamp storage grows as needed; map bounds span at most 512 cells per axis.\n"
     "# Backdrop's source key selects the SKYBOX: captured uses current BG2;\n"
     "# rom-GG-MM-bgN (N=1/2) decodes a stock action BG. Backdrop alpha/z/order\n"
     "# control only the residual plane and do not disable that skybox source.\n"
@@ -208,16 +250,15 @@ static const char kLayerManifestPreamble[] =
     "# unfaded stack -- one SOLID object that, unlike thick, respects the art's\n"
     "# silhouette. All compose.\n\n";
 
-/* Preserve every byte before merging. A partial read, oversized document or
+/* Preserve every byte before merging. A partial read or
  * embedded NUL must never turn into a successful but destructive replacement. */
 static bool ReadExistingManifest(const char *path, char **out) {
-  enum { kManifestReadMax = 1 << 20 };
   *out = NULL;
   FILE *file = sr_fopen(path, "rb");
   if (!file) return errno == ENOENT;
   bool complete = fseek(file, 0, SEEK_END) == 0;
   const long length = complete ? ftell(file) : -1;
-  complete = complete && length >= 0 && length <= kManifestReadMax;
+  complete = complete && length >= 0 && (uintmax_t)length < SIZE_MAX;
   if (complete) complete = fseek(file, 0, SEEK_SET) == 0;
   char *text = complete ? malloc((size_t)length + 1) : NULL;
   if (!text) complete = false;
@@ -237,6 +278,7 @@ static bool ReadExistingManifest(const char *path, char **out) {
 }
 
 bool DioramaLayerManifest_Save(void) {
+  s_terrain_valid = false;
   char path[kHostPathCapacity];
   UserDataFile(path, sizeof path, kLayerManifestLeaf);
 

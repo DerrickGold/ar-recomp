@@ -4320,6 +4320,47 @@ int main(void) {
                                 kPpuVirtualTilemapLookup_Transparent,
                         "PPU virtual-tilemap lookup result bridge mismatch");
     }
+    {
+        static uint32_t capture_pixels[624 * kPpuYPixels];
+        uint8_t *saved_pixels = snes->ppu->overlayRenderBuffer[0];
+        uint32_t saved_pitch = snes->ppu->overlayRenderPitch[0];
+        PpuOverlayCapture saved_capture = snes->ppu->overlayCaptures[0];
+        snes->ppu->overlayRenderBuffer[0] = (uint8_t *)capture_pixels;
+        snes->ppu->overlayRenderPitch[0] = 624 * 4;
+        snes->ppu->overlayCaptures[0] = (PpuOverlayCapture){
+            .x0 = -120, .x1 = 376, .y0 = 0, .y1 = kPpuYPixels,
+        };
+        SrPpuCaptureTileRequest edits = {
+            .struct_size = sizeof(edits), .layer_mask = 1,
+            .lifetime_generation = ppu_generation.lifetime_generation,
+            .bindings = {{.apron = 64}},
+        };
+        failed |= check(api->struct_size >= SNES_RUNNER_API_PPU_CAPTURE_TILES_SIZE &&
+                        (api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TILES) &&
+                        api->replace_ppu_capture_tiles(runner, &edits) == SR_RESULT_OK &&
+                        snes->ppu->captureTiles[0].apron == 64,
+                        "capture tile binding failed");
+        edits.bindings[0].apron = 65;
+        failed |= check(api->replace_ppu_capture_tiles(runner, &edits) ==
+                        SR_RESULT_INVALID_ARGUMENT && snes->ppu->captureTiles[0].apron == 64,
+                        "invalid capture apron changed prior binding");
+        edits.bindings[0].apron = 64;
+        edits.lifetime_generation++;
+        failed |= check(api->replace_ppu_capture_tiles(runner, &edits) == SR_RESULT_STALE_VIEW,
+                        "stale capture tiles accepted");
+        edits.lifetime_generation--;
+        edits.layer_mask = 3;
+        failed |= check(api->replace_ppu_capture_tiles(runner, &edits) ==
+                        SR_RESULT_INVALID_ARGUMENT && snes->ppu->captureTiles[0].apron == 64,
+                        "unbound capture tiles partially replaced valid binding");
+        edits.layer_mask = 0;
+        failed |= check(api->replace_ppu_capture_tiles(runner, &edits) == SR_RESULT_OK &&
+                        snes->ppu->captureTiles[0].apron == 0,
+                        "capture tiles not cleared");
+        snes->ppu->overlayRenderBuffer[0] = saved_pixels;
+        snes->ppu->overlayRenderPitch[0] = saved_pitch;
+        snes->ppu->overlayCaptures[0] = saved_capture;
+    }
     virtual_tilemap_request.layer_mask = 3u;
     failed |= check(api->replace_ppu_virtual_tilemaps(
                         runner, &virtual_tilemap_request) ==

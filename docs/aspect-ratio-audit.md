@@ -65,6 +65,61 @@ Earlier isolated Fillmore, Bloodpool, and Kasandora captures exercised the
 16:9 fix. The fixed-camera 16:10 control comparison retained identical pixels
 and WRAM. Evidence is in the local `runs/widescreen-columns/` directory.
 
+### Authored tiles now use native background capture
+
+Stamped BG1/BG2 tiles, black masks, and guard terrain now enter the PPU's
+capture export in 8×8 tile runs. They share the native character-row cache,
+scanline palette, brightness, scroll, mosaic, window handling, and capture
+blend policy. Capture writes reserve their destination bands before ordinary
+export; the completed background planes no longer need a second painting
+pass. Gameplay source buffers and authentic output remain independent.
+
+The manifest caches its terrain-resolved stamp index and occupied-cell bounds.
+Reloads, mutable editor access, saves, and room/profile changes invalidate that
+view. Ordinary frames neither rebuild the entire stamp index nor rescan every
+cell to calculate camera bounds. Work during capture follows the captured tile
+runs rather than the number of authored cells in the level.
+
+Permanent native-renderer tests compare edited output with an independently
+merged tile provider for both BGs, including blank tiles, masks, all depth bands,
+negative coordinates, raster scroll/palette/brightness changes, mosaic, windows,
+subscreen ownership, mirror mapping, and the scalar reference renderer. They
+also verify unchanged gameplay/authentic output and bound callback counts.
+ABI tests cover invalid capacity, stale lifetime, atomic rejection, and clearing.
+Manifest tests cover cached 15,000-cell lookup and edit/profile invalidation.
+
+GPU comparisons retain identical composite pixels and WRAM at 4:3, 16:9, and
+16:10. The 16:9 stress fixture adds 15,000 off-screen cells to the authored Aitos
+04/01 map. Evidence and binary hashes are under `runs/stamp-native-capture/`;
+the fixture leaves the shipped map unchanged. Runtime API usage is documented
+in [the capture tile contract](../snesrecomp-go/runtime/docs/API_REFERENCE.md).
+
+On the local macOS host, eight alternating stress runs (four per executable,
+2,400 presents each) used that same 16:9 map, settings, and replay. All eight
+finished with identical WRAM. Settled CPU wall-time results were:
+
+| Scope | Baseline median | Native capture median |
+| --- | ---: | ---: |
+| PPU and capture | 14.12 ms | 3.89 ms |
+| PPU setup | 0.607 ms | 0.015 ms |
+| PPU scanout | 12.44 ms | 3.85 ms |
+| PPU finish | 0.430 ms | 0.010 ms |
+| Total measured render CPU | 14.64 ms | 4.29 ms |
+
+PPU/capture CPU time decreased by about 72%. Baseline run means ranged from
+10.66–22.64 ms, versus 3.83–4.09 ms for native capture. These are local CPU
+measurements, not GPU timings or cross-platform frame-rate guarantees. The
+full inputs, binary hashes, individual runs, and ranges are recorded in
+`runs/stamp-native-capture/stress-timing/results.json`.
+
+The 47-test runtime suite, dedicated BG capture parity test, and 11 focused
+application tests passed. Five application sanitizer targets and the runtime
+ABI/capture-tile sanitizer tests also passed. `make check` again stopped at the
+pre-existing style violations listed below; private-header, global-owner,
+and source-manifest checks passed separately. The full PPU sanitizer suite was
+replaced with the focused capture-tile test after its long debug run; no full
+runtime sanitizer-suite result is claimed.
+
 ### Ratio coverage was concentrated on 16 by 10
 
 **Coverage improved.** Existing action render checkpoint defaults selected

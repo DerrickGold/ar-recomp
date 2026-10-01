@@ -33,12 +33,11 @@ enum {
    * coalesces painted cells into horizontal rectangles, so ordinary brush
    * work costs one span per affected metatile row rather than one record per
    * cell. The largest shipped room is 128 metatile rows high; 512 leaves room
-   * for several disjoint passes while keeping DioramaLayerOrderTable a small,
-   * fixed-value object that existing reset/save code can memset safely. */
+   * for several disjoint passes while bounding classification work and its
+   * fixed storage independently of dynamically sized tile patches. */
   kDioramaVirtualCellSpanMax = 512,
   kDioramaVirtualBandCount = 3,
   kDioramaPixelEditMax = 256,
-  kDioramaTileStampMax = 512,
   kDioramaTerrainProfileCount = 3, /* US, Japan, Europe (including German) */
 };
 
@@ -238,8 +237,15 @@ typedef struct DioramaStampLayerOverride {
   bool set_bounds;
   int16_t x0, y0, x1, y1; /* editor bounds, exclusive upper edges */
   DioramaMapBounds regional_bounds[2]; /* JP, EU; base bounds are US */
-  uint16_t count;
-  DioramaTileStamp cells[kDioramaTileStampMax];
+  size_t count, capacity;
+  DioramaTileStamp *cells;
+  /* Open-addressed coordinate index, storing cell array indices plus one.
+   * Storage grows with authored cells; no fixed tile-record budget. */
+  size_t *cell_index;
+  size_t index_capacity;
+  /* Derived on immutable cached manifest views, distinct from editor workspace.
+   * Mutable/unresolved layers leave this unset. */
+  DioramaMapBounds occupied_bounds;
 } DioramaStampLayerOverride;
 
 typedef struct DioramaRoomOverride {
@@ -257,10 +263,20 @@ typedef struct DioramaRoomOverride {
   } framing[kDioramaTerrainProfileCount];
 } DioramaRoomOverride;
 
+/* Rooms/tables must start zero-initialized. Stamp buffers are owned: plain
+ * struct assignment borrows/transfers them rather than making a deep copy.
+ * Release owned rooms/tables before discarding or reinitializing them. */
+void DioramaLayerOrder_ClearRoom(DioramaRoomOverride *room);
+
 /* Resolve tile authoring for the active terrain snapshot, keeping plane and
- * depth geometry shared. The source manifest is never modified. */
+ * depth geometry shared. The source manifest is never modified. `out` must
+ * start zero-initialized and owns its own reusable stamp buffers. */
 bool DioramaLayerOrder_ForTerrain(const DioramaRoomOverride *room,
                                   unsigned profile, DioramaRoomOverride *out);
+
+/* Lookup a coordinate in a terrain-resolved stamp layer. */
+const DioramaTileStamp *DioramaLayerOrder_StampAt(
+    const DioramaStampLayerOverride *layer, int x, int y);
 
 const uint16_t *DioramaLayerOrder_PixelMask(
     const DioramaRoomOverride *room, unsigned bg, int cell_x,
@@ -270,6 +286,8 @@ typedef struct DioramaLayerOrderTable {
   DioramaRoomOverride rooms[kDioramaRoomOverrideMax];
   int count;
 } DioramaLayerOrderTable;
+
+void DioramaLayerOrder_ClearTable(DioramaLayerOrderTable *table);
 
 /* One resolved plane, ready for the caller to draw. */
 typedef struct DioramaResolvedLayer {
