@@ -939,6 +939,41 @@ void InputMap_HandleEvent(const SDL_Event *event) {
   }
 }
 
+bool InputMap_KeyHasHostBinding(int scancode) {
+  if (scancode < 0 || scancode >= SDL_SCANCODE_COUNT) return true;
+  const uint32 binding = INPUT_BIND_MAKE(kInputBind_Key, scancode, false);
+  for (int a = kInputAction_PadCount; a < kInputAction_Count; ++a)
+    if (g_settings.input_bind[kInputClass_Keyboard][a] == binding) return true;
+  return false;
+}
+
+bool InputMap_TryHandleGameOnlyEvent(const SDL_Event *event) {
+  if (!event) return false;
+  const bool axis = event->type == SDL_EVENT_GAMEPAD_AXIS_MOTION;
+  const bool button = event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
+      event->type == SDL_EVENT_GAMEPAD_BUTTON_UP;
+  if (!axis && !button) return false;
+  const int code = axis ? event->gaxis.axis : event->gbutton.button;
+  if (!JoystickIsSelected(axis ? event->gaxis.which : event->gbutton.which)) return true;
+  for (int a = kInputAction_PadCount; a < kInputAction_Count; ++a) {
+    const uint32 binding = g_settings.input_bind[kInputClass_Gamepad][a];
+    if (INPUT_BIND_KIND(binding) != (axis ? kInputBind_PadAxis : kInputBind_PadButton) ||
+        INPUT_BIND_CODE(binding) != code) continue;
+    if (!axis || code < 0 || code >= SDL_GAMEPAD_AXIS_COUNT) return false;
+    /* Resting analog noise cannot change the camera or invoke a host edge.
+     * Meaningful movement, including release from a held binding, pauses. */
+    int percent = g_settings.input_cam_deadzone;
+    if (percent < kInputCameraDeadzoneMinimumPercent) percent = kInputCameraDeadzoneMinimumPercent;
+    if (percent > kInputCameraDeadzoneMaximumPercent) percent = kInputCameraDeadzoneMaximumPercent;
+    int deadzone = kInputAxisMaximumMagnitude * percent / kPercentScale;
+    if (deadzone > kAxisReleaseThreshold) deadzone = kAxisReleaseThreshold;
+    if (abs(event->gaxis.value) > deadzone || abs(s_pad_axis_value[code]) > deadzone)
+      return false;
+  }
+  InputMap_HandleEvent(event);
+  return true;
+}
+
 /* Menu-nav edge tracking is kept apart from gameplay bits so opening the
  * overlay (which clears those) cannot desynchronize it. */
 

@@ -1410,6 +1410,29 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_parallel_work_test PRIVATE SDL3::SDL3)
     add_test(NAME actraiser_parallel_work COMMAND actraiser_parallel_work_test)
 
+    add_executable(actraiser_frame_producer_test tests/frame_producer_test.c
+        src/platform/sdl/frame_producer_sdl.c)
+    target_include_directories(actraiser_frame_producer_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_frame_producer_test PRIVATE SDL3::SDL3)
+    add_test(NAME actraiser_frame_producer COMMAND actraiser_frame_producer_test)
+
+    add_executable(actraiser_frame_queue_test tests/frame_queue_test.c
+        src/host/frame_queue.c)
+    target_include_directories(actraiser_frame_queue_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_frame_queue_test PRIVATE snesrecomp::sdk SDL3::SDL3)
+    add_test(NAME actraiser_frame_queue COMMAND actraiser_frame_queue_test)
+
+    add_executable(actraiser_frame_playout_test tests/frame_playout_test.c)
+    target_include_directories(actraiser_frame_playout_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_frame_playout_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_frame_playout COMMAND actraiser_frame_playout_test)
+
+    add_executable(actraiser_frame_pipeline_test tests/frame_pipeline_test.c
+        src/host/frame_queue.c src/platform/sdl/frame_producer_sdl.c)
+    target_include_directories(actraiser_frame_pipeline_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_frame_pipeline_test PRIVATE snesrecomp::sdk SDL3::SDL3)
+    add_test(NAME actraiser_frame_pipeline COMMAND actraiser_frame_pipeline_test)
+
     add_executable(actraiser_performance_metrics_test
         tests/performance_metrics_test.c
         src/app/performance_overlay.c)

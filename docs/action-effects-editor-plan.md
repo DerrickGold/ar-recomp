@@ -1270,6 +1270,513 @@ candidates if a stricter 90 Hz target is needed. Known-motion hints are deferred
 exact search pruning delivered a gain without weakening image-based validation.
 
 
+### Scanout/presentation overlap prototype — 2026-10-01
+
+Checkpoint `60f3fb93` contains the pending editor/effects work and the preceding
+packed-scanout/motion optimizations. The follow-up prototype is **off by default**:
+`AR_SCANOUT_OVERLAP=1` enables it only for interactive Fillmore Act 1 (`01/01`).
+Headless runs and other rooms retain synchronous execution. No player setting,
+installed Deck executable, resolution, row count, effect density or CRT setting
+was changed for this experiment.
+
+This is a bounded first experiment, **not the complete independent game-frame
+producer**. A persistent SDL worker runs the existing ordered PPU scanout,
+including HDMA and IRQ callbacks. The owner presents the previous uploaded frame
+concurrently and then joins before completing the capture. Game coroutines,
+input, frame setup/finish, metadata capture, uploads, settings, device resets and
+event processing stay on the main thread. Failure to create the worker falls
+back synchronously; failed presentation still joins. There is one outstanding
+job, no growing queue, and teardown joins before releasing the worker resources.
+
+The first version copied all retained CPU surfaces and was slower. The retained
+compositor only needs uploaded-plane presence: texture pixels, coverage masks,
+motion endpoints and diagnostic snapshot pixels are already presentation-owned.
+The retained forest slot now clears its borrowed PPU/skybox/HUD/SIM views after
+upload, and drawing uses the successful-upload mask. It cannot read a producer
+buffer while scanout overwrites it. The extra copies were removed, rather than
+trading frame coherence for throughput. Session-fatal publication is atomic so
+an IRQ error and a renderer error cannot corrupt the first-failure diagnostic.
+
+Matched Deck OLED / RADV Vulkan / X11 Desktop Mode, 1280×800 at 90 Hz, 64 extra
+rows, skybox-only, interpolation, effects and CRT enabled. All runs use the
+same moving right/left/jump replay through runtime tick 2400 and exclude the
+first five reporting windows. FPS counts completed presentations, not game
+updates; p95 below is the median of each reporting window's p95 interval.
+
+| Experiment | Median window FPS | Median window p95 ms |
+| --- | ---: | ---: |
+| Fresh synchronous control | 87.85 | 15.425 |
+| Overlap with extra CPU surface copies (discarded) | 86.35 | 16.224 |
+| Overlap using existing presentation resources | 89.45 | 14.936 |
+| Matching final-binary synchronous control | 88.20 | 15.256 |
+| Final prototype repeat | 89.70 | 14.500 |
+
+The final runs performed 1,186–1,187 worker scanouts. Actual worker scanout cost
+averaged 8.80–8.90 ms; the owner still waited 2.97–2.98 ms after presenting, with
+8.85–8.98 ms maximum joins. Minimum reporting-window FPS improved from
+80.0–82.8 to 87.0–87.1, but worst window p95 remained 15.86–16.01 ms and maximum
+intervals were about 22.4 ms. This does **not** establish reliable 90 Hz.
+The whole-PPU wall scope includes overlapped presentation/join time; it must not
+be added to presentation as if both were serial. The PPU-scanout scope itself
+runs on the worker and measures actual scanout work. GPU timestamps were not
+collected.
+
+Validation: all moving runs have identical final WRAM at tick 2400. A separate
+interpolation-disabled game-frame-1000 final-composite capture is byte-for-byte
+identical (1280×800, zero differing bytes); both capture runs also end with
+identical WRAM at tick 1550. macOS and Linux cross-builds pass. Of 29 selected
+native tests, 28 pass and one headless GPU test skips. Worker reuse, owner-thread
+presentation, synchronous fallback, failed-present joins and repeated shutdown
+pass release, Address/UndefinedBehaviorSanitizer and ThreadSanitizer tests.
+These sanitizer results cover the worker harness, not an instrumented full-game
+session. Windows/D3D12 and sustained Gaming Mode are still unmeasured.
+
+The pending endpoint is not extrapolated: an overlap present clamps to the last
+completed image; subsequent re-presents can interpolate the newly uploaded pair.
+Thus display FPS alone is insufficient acceptance. End-to-end input latency and
+interpolated motion quality have not been measured; deterministic endpoint
+identity does not prove those properties. Keep the prototype disabled by default.
+
+**Decision / next experiment:** removing the copy is worthwhile, but fork/join
+scanout overlap alone does not close the 11.11 ms deadline. A full producer must
+run on its own source clock and publish completed, coherent frames through a
+bounded handoff, allowing presentation to continue without a same-iteration
+join. Move runner/coroutine ownership, capture buffers and metadata together;
+keep SDL rendering on the main thread. Latch input/settings at safe boundaries,
+use source timestamps for interpolation, drain on pause/reset/resize, and measure
+queue age/input latency along with deadline misses. Prefer binding a small pool
+of producer-owned buffers to copying the entire framebuffer again. No additional
+HLE conversion or image-quality reduction is justified by this experiment.
+
+Raw summaries (including all reporting windows), exact environment, image hashes,
+WRAM hashes, collection script and final binary provenance are in
+`runs/deck-scanout-overlap-2026-10-01/`. The isolated Deck binary is
+`~/argame/effects-2026-10-01/scanout-overlap-03`, SHA-256
+`59d8496e1859281580f3f96402bc78f1bb32bd6d569d9b92f3d08f6e13301cd8`.
+
+
+### Independent forest producer experiment — 2026-10-01
+
+Follow-up to the fork/join experiment above. `AR_FRAME_PRODUCER=1` is a separate,
+**default-off diagnostic**, not a player setting or a production replacement.
+It takes precedence over `AR_SCANOUT_OVERLAP`. Asynchronous work is limited to
+interactive Fillmore Act 1 (`01/01`), software-paced refresh modes, no turbo,
+no scene inspector and no authentic comparison. Headless stays unchanged.
+For the measured 90 Hz configuration, use `AR_REFRESH_MODE=Limit` and
+`AR_FRAME_LIMIT_FPS=90`; the experiment never changes the user's refresh setting.
+
+One persistent SDL worker owns every game-coroutine resume from the first boot
+tick. Other rooms and unaudited modes dispatch ticks synchronously to that same
+owner; a Windows fiber/POSIX context never migrates between threads. In the
+forest, a job runs the game tick(s) and the complete ordered CPU PPU transaction.
+Its source deadline runs independently of presentation. There is at most one
+outstanding job; completion explicitly returns runner/buffer ownership before
+capture, upload, input, settings or event processing. The main thread presents
+only retained value metadata and already-uploaded resources while work runs.
+No additional full-frame copies, unbounded queue or per-frame allocations were
+introduced. SDL rendering/uploads remain on main. The worker uses an explicit
+4 MiB stack and destroys the game coroutine on its owner before exiting; the
+Windows host-fiber conversion is released as well.
+
+A completed frame is captured/uploaded before host housekeeping can change its
+settings. Housekeeping still runs before the next game tick. Input and turbo
+values are latched before handing a job to the worker. While it is pending,
+the main thread does not pump input, change settings or read live game state.
+A room transition returns without an asynchronous PPU draw, allowing the normal
+host path to handle that frame. Pause/reset/resource work remains serialized.
+This is a bounded prototype, **not a general detached simulation architecture**.
+
+The first implementation achieved 90 completed presents/s under VSync but
+produced only about **45 images/s**, despite retaining 60 game ticks/s through
+catch-up. Blocking present prevented timely completion/upload/release of the
+single producer buffer. This result was rejected. The final version uses the
+synchronous path for VSync; it does not hide a source-rate reduction behind the
+FPS counter. True concurrent VSync needs a bounded set of independently owned
+completed endpoints (or an equivalent nonblocking backend handoff).
+
+For software pacing, deadline checks now happen **before** a retained draw.
+Waiting yields back to the loop instead of sleeping inside `CompletePresent`,
+so completed producer work can be serviced between presentations. No backend
+VSync override or persistent setting change is made. The main loop still yields
+when it does not present. The source-clock timestamp travels with each uploaded
+endpoint; interpolation does not restart from upload completion or extrapolate
+past the newest image. Catch-up is bounded and image captures are logged
+separately from game ticks.
+
+Matched Deck OLED / RADV Vulkan / X11 Desktop Mode, 1280×800 at 90 Hz, 64 extra
+rows, skybox-only, effects, CRT and interpolation enabled; moving oscillation/jump
+replay through runtime tick 2400. The table uses median reporting-window FPS
+and median reporting-window p95 interval, excluding five warm-up windows.
+These are CPU/present-completion measurements, **not GPU timestamps or proof of
+what the panel displayed**.
+
+| Software-paced Limit=90 run | Median FPS | Median window p95 ms |
+| --- | ---: | ---: |
+| First matched synchronous control | 82.20 | 15.029 |
+| Independent producer | 90.00 | 13.994 |
+| Repeat synchronous control | 79.95 | 15.311 |
+| Repeat independent producer | 90.00 | 13.641 |
+| Final guarded producer | 90.00 | 14.026 |
+
+The producer sustains approximately **60.1 images and game ticks/s** on this
+path, instead of the discarded VSync variant's 45-image compromise. A separate
+Uncapped-policy pair completed about 180 presents/s versus 80.45 synchronously
+while preserving approximately 60.1 source frames/s. That policy targets twice
+nominal refresh here: it is a throughput experiment, not 180 visible panel
+updates. It must not be compared directly with VSync's pacing or queue depth.
+
+Despite the throughput improvement, the 90-limit runs still have uneven
+intervals (about 13.6–14.0 ms median window p95, with longer outliers). This does
+**not** establish reliably spaced 11.11 ms presentations. Source work averaged
+roughly 10 ms per capture. Initial 90-limit samples showed approximately
+14–15 ms from source deadline to upload and 16.5 ms from sampled input to upload.
+Those software ages exclude event arrival, display queuing, interpolation delay
+and scanout: they are not end-to-end input-latency measurements.
+
+Correctness evidence: matching tick-2400 WRAM for the measured moving runs;
+paired interpolation-disabled frame-1000 final-composite screenshots are
+byte-identical (1280×800), with identical tick-1550 WRAM. On Deck the producer
+survived pause/resume, settings open/close, diorama off/on and scheduled vertical
+extent changes 64→32→64, then exited normally. The final VSync fallback also matches the same reference
+screenshot/WRAM and issues no asynchronous jobs. macOS and Linux builds pass;
+29 selected tests pass, with one headless GPU test skipped. The producer harness
+passes ThreadSanitizer and Address/UndefinedBehaviorSanitizer, including bounded
+submission, nonblocking completion, deadlines, persistent ownership, shutdown
+with a pending job, owner-thread cleanup and repeated lifetimes. Sanitizers cover
+the harness, not an instrumented full-game run. Audio audition, actual
+input-to-display latency, sustained Gaming Mode, Windows/D3D12 and full-game
+thread-sanitizer coverage remain open.
+
+**Next:** keep the experiment disabled by default. Reduce and schedule the
+remaining main-thread capture/upload/motion-analysis handoff, and introduce
+bounded owned endpoints before enabling concurrent VSync. Validate a monotonic
+interpolation/playout timeline, source cadence, latency and sustained Gaming Mode
+together; do not accept display FPS alone or compensate by reducing effects,
+resolution or extra rows. The source transaction fits within the approximately
+16.64 ms game interval, so these measurements support fixing pipeline scheduling
+before using additional HLE as the next performance intervention.
+
+Evidence and provenance are under ignored
+`runs/deck-frame-producer-2026-10-01/`: `report.json` retains per-window data,
+source-cadence/age samples, environments, binary hashes and screenshot hashes;
+the probe, collector, build/test/sanitizer logs and complete prototype patch are
+saved alongside it. Deck binaries and test saves/settings remain isolated under
+`~/argame/effects-2026-10-01`; the installed game was not replaced.
+
+
+### Buffered forest producer validation — 2026-10-02
+
+`AR_FRAME_STREAM=1` extends the experiment with three independently owned,
+preallocated frame packets. It remains **default off and forest-only**, with the
+same inspector/authentic-comparison/turbo exclusions and persistent coroutine
+owner. It takes precedence over the earlier one-job producer. No player-facing
+setting, installed Deck binary, resolution, effects or extra-row budget changed.
+
+The worker now owns tick, ordered PPU scanout, metadata capture and pixel
+snapshotting. Main owns SDL events, upload and presentation. Each packet copies
+only requested/content-bearing action planes plus HUD/skybox sources, validates
+surface bounds and severs unsupported borrowed views. The queue uses C11
+acquire/release ownership; a held reader packet cannot be overwritten. No
+per-frame allocation, unbounded producer queue or cross-thread coroutine resume
+is introduced. The measured copy is 5.107 MiB/frame (about 307 MiB/s at source
+rate), typically 0.7–0.8 ms. This is a measurable prototype cost, not zero-copy.
+
+Ordinary controller state is sampled on main and published atomically. Host
+commands, camera changes, keyboard events, settings, resource resets and exact
+scheduled captures require an acknowledged pause. SDL polling markers and raw
+joystick notifications ignored by the normal event loop are not pause requests.
+An initial all-events pause policy repeatedly stopped production on the Deck's
+continuous axis noise: it reported 90 presents but only 47–51 source images/s.
+That implementation was rejected. The accepted input path preserves meaningful
+axis/button changes and does not dispatch host actions concurrently with game
+state. Housekeeping obtains an ownership boundary periodically as well.
+
+Presentation keeps future packets queued until their endpoints bracket a target
+approximately two source periods in the past. Upload jitter no longer restarts
+the interpolation phase. `AR_FRAME_STREAM_TRACE=<path>` records submission start,
+completion, endpoint, phase, target and source tick for every successful stream
+present. Source cadence, holds, backwards steps and delayed completions are
+checked separately from the FPS counter. The measured source-to-present software
+age is about **44.3 ms**, including this playout delay. This is not physical
+input-to-photon latency; panel scanout and compositor queueing remain unmeasured.
+
+Matched Deck OLED, native RADV Vulkan, X11 under KDE Wayland Desktop Mode,
+physical 1280×800/90 Hz, 64 extra rows, skybox-only, effects/CRT/interpolation on:
+
+| Test | Median reporting-window FPS | Median window p95 ms |
+| --- | ---: | ---: |
+| Synchronous control, 2400 moving ticks | 88.50 | 15.132 |
+| Buffered producer, 2400 moving ticks | 90.00 | 11.363 |
+| Synchronous control, 9000 moving ticks, real audio backend | 88.85 | 15.595 |
+| Buffered producer, 9000 moving ticks, real audio backend | 90.00 | 11.416 |
+| Buffered producer, live input and 64→32→64 changes | 90.00 | 11.405 |
+| Final buffered build, native Wayland / 2400 ticks | 90.00 | 11.542 |
+| Nested Gamescope, buffered producer | 89.95 | 18.867 |
+| Nested Gamescope, extra submission scheduling experiment | 89.70 | 17.673 |
+
+The sustained run's complete trace (excluding five initial seconds) measured
+**60.099 source ticks/s**, 11.445 ms p95 / 11.608 ms p99 completed-present
+interval, and nine intervals over 16.67 ms out of 11,211 intervals. Worst was
+22.652 ms; the slowest one-second reporting window was 89.0 FPS. There were zero
+backwards interpolation timestamps, three held timestamps, and 0.874% endpoint
+clamps. Temperature peaked at 58°C. Thus the desktop result is substantially
+better, but does not claim every single frame met 11.11 ms or that no source
+endpoint was briefly late. These are CPU wall/completion diagnostics, not GPU
+execution timestamps or panel presentation feedback.
+
+The extra scheduling option did not solve nested Gamescope's uneven completions
+and was removed after preserving its binary/patch/evidence. Nested Gamescope is
+not the Deck's direct Gaming Mode compositor: these results cannot prove or
+refute final Gaming Mode pacing. Its statistics confirm roughly 90 compositor
+FPS, which alone still does not establish evenly spaced game content.
+
+Correctness and portability checks so far:
+
+- All matched 2400-tick runs preserve the reference WRAM hash
+  `f8f6f7b1afe041b5446563e5383a124741885f734f93bafc566d3059bbd6abc4`.
+- The paired 9000-tick sustained runs also finish with identical WRAM
+  (`db096e764ce28afd13a8a459cdb7fbc9326e9f67c3b464019b97641f7723c4de`).
+- The buffered, interpolation-disabled gf=1000 final composite is byte-identical
+  to the reference 1280×800 image (SHA-256
+  `6c269c88db16d5b156ad486e3f41835bc7844ce2bf040dc89f6f1a1c6d13faae`);
+  tick-1550 WRAM also matches. Exact diagnostic capture boundaries are retained.
+- Live keyboard churn and scheduled vertical-extent changes complete cleanly.
+  Replay owns canonical inputs in that stress test, so it verifies host-event
+  boundaries rather than asserting that real controller input altered the replay.
+- macOS and Linux cross-builds pass. 33 selected tests pass, one GPU test skips
+  without a display. Queue tests cover pixel ownership, unsupported/invalid views,
+  arena exhaustion, no overwrite of held packets and 100,000 concurrent handoffs.
+  Queue and producer harnesses pass ThreadSanitizer and ASan/UBSan; this is not
+  full-game sanitizer coverage. The input test preserves host-action/camera
+  barriers while accepting gameplay input and resting stick noise.
+
+**Decision:** the producer/buffer architecture supports 90 Hz on the tested
+Desktop Mode workload without lowering source cadence or visual settings.
+The entire target-platform premise is **not yet signed off**. Direct Gaming Mode
+validation is pending permission to close the active KDE session; broader room
+coverage, physical input/display latency, Windows/D3D12 and full-game race
+instrumentation remain production follow-ups. Do not enable the experiment by
+default or reinterpret the nested-compositor result as a production pass.
+
+Evidence: `runs/deck-frame-stream-2026-10-02/report.json` retains every measured
+window, source sample, phase-trace summary, environment, binary/image hash and
+lifecycle message. Raw traces, captures, scripts, build/test output and the
+complete prototype patch are preserved in that directory. The final isolated
+Deck binary is `frame-stream-07`, SHA-256
+`919061ad28a04e2bc34ff8663142fd2d999f0a5b681c4499a9843608127f645a`; remote runs remain
+under the isolated `~/argame/effects-2026-10-01/results/stream-*` paths.
+
+#### Interpolation-disabled comparison — 2026-10-02
+
+A matched pair using `frame-stream-07`, native Wayland in Desktop Mode, real
+audio backend, 1280×800/90 Hz, 64 extra rows, all other effects enabled and the
+same 2400-tick moving replay also improves completed-present consistency with
+interpolation disabled:
+
+| Path | Median window presents/s | Median window p95 ms | Worst settled interval ms |
+| --- | ---: | ---: | ---: |
+| Synchronous | 89.95 | 13.295 | 21.297 |
+| Buffered producer | 90.00 | 11.454 | 12.490 |
+
+Both final WRAM hashes match the 2400-tick reference above. The buffered trace
+measures 60.093 distinct source ticks/s, with no skipped source endpoints or
+backwards steps after warmup. Its 441 repeated endpoints among 1328 presents
+are expected with interpolation disabled: roughly 60 source images on a 90 Hz
+display alternate between one and two refreshes. Distinct-image intervals thus
+still reach about 22.2 ms (p95 22.253 ms), despite regular presentation calls.
+This is a short Desktop Mode pacing result, not a 90-distinct-frame result or
+an input-latency improvement.
+
+The prototype currently keeps the same two-source-period queue policy even
+when interpolation is disabled. Rendering uses the current endpoint rather
+than the interpolated phase; its measured endpoint age at present completion
+is 36.386 ms median, not the interpolated timeline's 44.3 ms. Neither quantity
+is button-to-photon latency or a measured difference from the synchronous path.
+A production non-interpolated path should separately test earlier endpoint
+delivery and a display cadence suited to native ~60 Hz content, rather than
+inherit this interpolation buffer unconditionally. The overlap improves
+scheduling; it does not reduce total rendering work and retains the ~0.77 ms
+packet copy cost.
+
+Evidence is in the same report, under `stream-nointerp-control-awake-07` and
+`stream-nointerp-buffered-07`. The collector now reads each run's interpolation
+setting and distinguishes endpoint timing from interpolated timing. The first
+control attempt (`stream-nointerp-control-07`) timed out before gameplay with
+the display asleep and is excluded; the display was awakened before both valid
+runs. No game code or player settings were changed for this comparison.
+
+#### Old versus buffered interpolation age — 2026-10-02
+
+`AR_FRAME_SYNC_TRACE=<path>` adds an optional synchronous-loop timing trace:
+accumulator sample clock, present completion, source period/remainder, phase,
+tick and feature state. It changes no phase, capture timestamp or scheduling.
+With the normal unclamped accumulator, interpolation between the previous and
+current endpoint represents `sample_ns - source_period`; catch-up pair phase
+preserves that one-period offset. This is the nominal interpolation timeline,
+not an assertion that every effect, HUD element or fallback pixel has that age.
+
+Matched `frame-stream-08` runs used native Wayland in Desktop Mode, real audio
+backend, 1280×800/90 Hz, 64 extra rows, interpolation and effects enabled, and
+the same 2400-tick moving replay. Traces exclude the first five seconds; the
+synchronous trace also excludes the final stop's accumulator reset. No settled
+sample gap reached the accumulator's three-period cap.
+
+| Path | Median software timeline age ms | p95 software age ms | p95 completed-present interval ms |
+| --- | ---: | ---: | ---: |
+| Existing synchronous interpolation | 30.194 | 31.982 | 15.518 |
+| Buffered producer interpolation | 44.312 | 44.773 | 11.558 |
+
+The difference between median software ages is **14.118 ms**. The configured
+target moves from one source period behind the synchronous loop's sampled
+clock to two periods behind the producer presentation clock, but the measured
+difference is not exactly 16.639 ms because source work and presentation waits
+occur differently in the two paths. This demonstrates a latency/pacing tradeoff;
+it does not establish button-to-photon latency or its exact incremental change.
+The compositor, panel and real input arrival remain unmeasured. Both traces
+retain ~60.1 source ticks/s and final WRAM matches the 2400-tick reference.
+
+The trace-only change builds on macOS and Linux; no graphics quality, installed
+Deck binary or player setting changed. Isolated binary `frame-stream-08` has
+SHA-256 `42cfed1c4ffa1da675d8e9eb90c667ae00a8f8767789b89834e1a986643beed5`.
+Raw traces/logs/settings and the collector are preserved under
+`runs/deck-frame-stream-2026-10-02/stream-latency-{control,buffered}-08-00-0101-On/`,
+with summaries in `report.json` and provenance in `provenance.json`.
+
+
+#### Buffered pipeline production hardening — 2026-10-02
+
+The buffered producer was hardened and measured as an opt-in first. Following
+the user's rollout decision on 2026-10-02, it is now enabled by default for
+ordinary play. `AR_FRAME_STREAM=0` selects the synchronous diagnostic fallback;
+`AR_FRAME_STREAM=1` remains accepted. Headless replay/oracle runs stay synchronous.
+No player configuration migration is required. The installed Deck game has not
+been replaced; the default change is in the source and newly built binaries.
+
+Implementation now has one bounded producer path. The earlier fork/join scanout
+and one-job producer experiments have been removed. The coroutine stays on one
+SDL worker for its whole lifetime, including synchronous scenes and destruction;
+SDL events, settings, uploads and GPU presentation remain on the main thread.
+Three reusable packets own their action plane/HUD/skybox pixels until upload.
+Retained presentation strips borrowed CPU surfaces after upload. Unsupported
+SIM/Mode 7/inspector views and room transitions return to synchronous rendering.
+
+Playback policy is separate from ownership. Interpolation defaults to a target
+1.75 source periods behind the presentation clock; non-interpolated playback
+uploads the latest completed capture and discards stale queued images before
+upload, without dropping their game ticks. Explicit frame limits below the source
+rate retain synchronous tick coalescing so the bounded queue cannot slow the game
+to the requested render rate. Pause, room changes, interpolation/source-rate
+changes and long host interruptions invalidate old interpolation history. Host
+commands pause and acknowledge the producer before touching game state; ordinary
+keyboard/gamepad input updates a coherent atomic input snapshot without draining
+the pipeline. Queue allocation failure falls back before a coroutine is created.
+
+The delay sweep used the same moving forest replay, Desktop Mode Wayland/Vulkan,
+VSync at 90 Hz, 1280×800, 64 extra rows and all effects, with live audio backend:
+
+| Delay in source periods | Median window p95 ms | Median software image age ms | Clamped phases |
+| --- | ---: | ---: | ---: |
+| 2.00 | 11.592 | 44.283 | 0.75% |
+| **1.75** | **11.542** | **40.105** | **0.90%** |
+| 1.50 | 11.508 | 36.037 | **20.87%** |
+
+All three average 90 presents/s and preserve identical final WRAM. The 1.5-period
+setting is rejected: its attractive average/pacing conceals frequent missing
+interpolation brackets. The 1.75-period policy removes about 4.2 ms of software
+image age from the initial prototype, while retaining comparable phase coverage.
+This is still about 9.9 ms older than the earlier synchronous median of 30.194 ms;
+these are separate matched workload measurements, not physical input latency.
+Non-interpolated latest-frame delivery measures 29.485 ms, down from the old
+buffered policy's 36.386 ms, at 90 presents/s and native ~60.1 source ticks/s.
+
+Broader matched 2400-tick VSync room samples (pipeline-10):
+
+| Scene | Synchronous presents/s / window p95 ms | Buffered presents/s / window p95 ms |
+| --- | ---: | ---: |
+| Fillmore Act 2 cave, 01/02 | 90 / 12.092 | 90 / 11.455 |
+| Bloodpool Act 1 exterior, 02/01 | 79.8 / 17.265 | 90 / 11.933 |
+| Bloodpool Act 2 castle, 02/02 | 90 / 11.440 | 90 / 11.484 |
+| Aitos lava, 04/04 | 90 / 14.688 | 90 / 11.592 |
+
+Each pair preserves identical final WRAM. Buffered source cadence is 60.09–60.14
+ticks/s, with no backward timeline steps. This is representative workload coverage,
+not complete traversal of those levels or validation of all rooms/regions.
+
+Timing traces distinguish clock epochs and untimestamped startup images. Those
+images remain in presentation-gap statistics but cannot supply a meaningful
+stream timeline age; comparisons across clock resets are excluded from timeline
+continuity metrics. Scheduled pauses/rate changes are lifecycle stress, not steady
+state benchmarks. CPU completed-present timing does not measure panel scanout.
+
+Final pipeline-13 VSync sustained validation (9000 ticks, same full-quality
+forest workload) measures 90.00 median window presents/s, 60.097 source ticks/s,
+11.635 ms global p95 completed-present interval and 40.101 ms median software
+image age. Four of 11,211 measured intervals exceed 16.67 ms, with a 20.769 ms
+maximum; the timeline has no backward steps and one hold. Clamped phases are
+1.18%; peak reported temperature is 58°C. Final WRAM matches the earlier
+9000-tick reference exactly. This supports the reduced-delay policy on this
+workload, not a zero-hitch or physical display-latency claim.
+
+The same binary's software `Limit=90` sustained test also preserves that WRAM
+and ~60.102 source ticks/s, but its global p95 is 15.120 ms, with 211 intervals
+over 16.67 ms. Its lower 30.743 ms software age reflects different presentation
+waiting, not a validated low-latency display path. Keep this pacing limitation
+open and do not combine the two refresh modes into one acceptance result.
+
+Lifecycle tests cover interpolation toggles, Test 30/Native 60 source-rate
+changes, renderer toggles, host pause, settings menus, 32/64-row changes, and
+targeted keyboard churn. Final gameplay memory matches between the 2600-tick
+stress runs. Source-rate and host tests have no timeline backsteps within clock
+epochs; pause gaps remain visible in the raw pacing statistics. Input churn
+uses a replay for canonical gameplay, so it validates routing/ownership rather
+than physical input responsiveness. macOS and Linux builds pass; 34 selected
+tests pass and one GPU test skips without a display. New combined queue/worker
+lifecycle tests pass narrow ThreadSanitizer and ASan/UBSan harnesses.
+
+An explicit 20 FPS software limit exercises the synchronous fallback with and
+without the worker enabled. Both retain ~60.068 game ticks/s and 20 presents/s,
+finish on tick 2402 (the final catch-up group), and have identical WRAM
+`293ccdaa2c0f176efc1ae7853a0d4b2a3c0ccb913bd2af6eed54d4850f1ef1a7`.
+The buffered trace contains no streaming presents in that test, as intended.
+
+Matched forest-to-Bloodpool-castle warp runs also preserve identical tick-2600
+WRAM (`03449ddc3c895c8723b4c424d56d5f6f1545843fce78e06efe33203f22f83bc1`).
+Dynamic-camera captures differ slightly because presentation-time smoothing is
+not replay-clock deterministic; disabling interpolation alone does not remove
+that difference. With Free Cam and interpolation disabled, both gf=1600 composite
+captures are byte-identical (SHA-256
+`bf806dc725f9cef504df29085c0ce030de1d2b81b91ce80d0b62c4c942ae4d8e`).
+The first shortened fixed-camera attempt ended before the requested game-frame
+capture and is excluded; the completed pair uses the full 2600-tick replay.
+
+Evidence for this follow-up is under
+`runs/frame-pipeline-production-2026-10-02/`, including original dirty-work backup,
+build/test logs, harness, collector and per-run measurements. Original prototype
+results above remain historical evidence rather than the new policy's results.
+The hardening validation used isolated Deck binary `frame-pipeline-13`, SHA-256
+`5886a078236fcdd40084bde8d4ff52ce0d30a68caa654ec7a0b9039f431e5464`.
+
+Remaining validation follow-ups: direct Deck Gaming Mode, Windows/D3D12 runtime
+and fiber lifecycle, full-game race
+coverage, physical input/display latency, and broader transitions/visual acceptance.
+Desktop Mode evidence supports this default change; it does not establish that
+Gaming Mode has identical compositor pacing. These checks are follow-up work,
+not blockers to the user-authorized rollout. The unit sanitizer harnesses
+validate queue/worker ownership, not the entire renderer.
+Diagnostic framebuffer captures recapture live state while the worker is stopped;
+they must not be presented as exact pixel verification of the queued GPU path.
+
+Default-rollout verification uses `frame-pipeline-14`, SHA-256
+`072310cb94ab6a7c19ba1a68ada8d4b8d0505128bf280112e1c0897ebd5a1440`.
+macOS and Linux builds pass. A 2400-tick Deck VSync replay with **no**
+`AR_FRAME_STREAM` variable selects the buffered path and measures 90.0 median
+window presents/s and 11.611 ms global p95, with no timeline backsteps/holds.
+The matched `AR_FRAME_STREAM=0` run selects synchronous rendering. Both preserve
+the exact 2400-tick reference WRAM. Evidence and the harness (which now explicitly
+disables the pipeline for control runs) are in
+`runs/frame-pipeline-default-2026-10-02/`. These are rollout smoke checks;
+the longer performance and latency measurements remain documented above.
+
 ### Extraction inventory and remaining comparison inputs
 
 These are the implementation owners and comparison inputs for the editable

@@ -52,15 +52,16 @@ void DevAutomation_ArmScheduledDioramaDump(void) {
  *   optionally bounded by AR_SHOT_FROM / AR_SHOT_TO. Lets us compare steady
  *   state vs bug state frame by frame.
  * AR_SHOT_REQUIRE_COMPOSITE=1: fail the run instead of using raw PPU fallback. */
-void DevAutomation_CaptureScheduledScreenshot(void) {
-  static bool schedule_initialized;
-  static bool shot_done;
-  static bool shot_at_enabled;
-  static bool shot_series_enabled;
-  static unsigned shot_at;
-  static unsigned shot_every;
-  static unsigned shot_from;
-  static unsigned shot_to;
+static bool schedule_initialized;
+static bool shot_done;
+static bool shot_at_enabled;
+static bool shot_series_enabled;
+static unsigned shot_at;
+static unsigned shot_every;
+static unsigned shot_from;
+static unsigned shot_to;
+
+static void InitScreenshotSchedule(void) {
   if (!schedule_initialized) {
     /* The parse is gated by the local pointer, never by the static that
      * recorded the test: a static is shared storage, and only the pointer
@@ -87,6 +88,25 @@ void DevAutomation_CaptureScheduledScreenshot(void) {
         ? (unsigned)strtoul(value, NULL, 0) : UINT_MAX;
     schedule_initialized = true;
   }
+}
+
+bool DevAutomation_RequiresHostService(void) {
+  InitScreenshotSchedule();
+  const unsigned gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+  if ((shot_at_enabled && !shot_done && gf >= shot_at) ||
+      (shot_series_enabled && gf >= shot_from && gf <= shot_to && gf % shot_every == 0))
+    return true;
+  const char *list = getenv("AR_DIORAMA_DUMP_GF");
+  for (const char *at = list; at && *at;) {
+    if ((unsigned)strtoul(at, NULL, 0) == gf) return true;
+    const char *comma = strchr(at, ',');
+    at = comma ? comma + 1 : NULL;
+  }
+  return false;
+}
+
+void DevAutomation_CaptureScheduledScreenshot(void) {
+  InitScreenshotSchedule();
   const unsigned gf =
       ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
   int want = 0;

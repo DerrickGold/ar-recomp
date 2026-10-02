@@ -14,6 +14,8 @@
 void DevAutomation_ArmScheduledDioramaDump(void);
 /* After the frame draw: writes the screenshot scheduled for this game frame. */
 void DevAutomation_CaptureScheduledScreenshot(void);
+/* Runner owner may request a main-thread boundary for exact diagnostic frames. */
+bool DevAutomation_RequiresHostService(void);
 /* After a batch of emulated ticks: fires the scheduled warp and diorama
  * switch once their game frame is reached. */
 void DevAutomation_AfterTicks(void);

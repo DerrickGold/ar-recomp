@@ -45,6 +45,8 @@
 #include "host/host_input.h"
 #include "present/presentation_textures.h"
 #include "host/host_frame_surfaces.h"
+#include "host/frame_producer.h"
+#include "host/frame_queue.h"
 
 const uint64_t kHostDisplayEmulationFrameIntervalNs = RTL_NTSC_FRAME_INTERVAL_NS;
 int g_snes_width = kActRaiserAuthenticWidth,
@@ -78,6 +80,40 @@ static int s_active_aspect_y;
 static bool s_widescreen_runtime_allowed;
 static HostDisplayRefreshCache s_display_refresh_cache;
 static SDL_DisplayID s_active_display_id;
+static bool s_retained_upload_complete;
+static bool s_producer_pacing;
+
+void HostDisplay_SetProducerPacing(bool enabled) {
+  const bool active = enabled && g_settings.refresh_mode != kRefreshMode_Vsync;
+  if (active != s_producer_pacing) s_present_deadline_ns = 0;
+  s_producer_pacing = active;
+}
+
+bool HostDisplay_CanPresentDuringProduction(void) {
+  return HostFrameProducer_Enabled() &&
+      s_retained_frame.valid &&
+      s_retained_upload_complete && HostFramePacket_Supports(&s_retained_frame.slot) &&
+      !RenderComparison_RequiresAuthenticFrame();
+}
+
+static void RetainFrame(const FrameSlot *slot) {
+  s_retained_frame.slot = *slot;
+  s_retained_frame.valid = true;
+  s_retained_upload_complete = false;
+  if (HostFrameProducer_Enabled() &&
+      HostFramePacket_Supports(slot) && !RenderComparison_RequiresAuthenticFrame()) {
+    /* PresentUpload has consumed every CPU source. Draw uses renderer-owned
+     * textures, masks and motion endpoints plus the value-copied metadata.
+     * Remove every borrowed source so a future draw-time pixel read cannot
+     * quietly race scanout. No extra full-surface copy is needed. */
+    FrameSlot *retained = &s_retained_frame.slot;
+    memset(&retained->ppu_surfaces, 0, sizeof(retained->ppu_surfaces));
+    memset(&retained->sim3d_output_surfaces, 0, sizeof(retained->sim3d_output_surfaces));
+    retained->hud_obj_surface = (SrPpuSurfaceView){0};
+    retained->diorama_skybox_surface = (SrPpuSurfaceView){0};
+    s_retained_upload_complete = true;
+  }
+}
 
 /* Refresh only the presentation-owned camera portion of a retained SIM frame.
  * The captured game/PPU snapshot, timestamp, interpolation pair, textures, and
@@ -222,7 +258,7 @@ static uint64_t PresentIntervalNs(HostDisplayPresentMode mode) {
  * first visible result cannot mix menu/paused/old-refresh timing. */
 static bool CompletePresent(HostDisplayPresentMode mode) {
   const PerformanceScope pacing = PerformanceMetrics_Begin(kPerformance_Pacing);
-  ThrottlePresent(PresentIntervalNs(mode));
+  if (!s_producer_pacing) ThrottlePresent(PresentIntervalNs(mode));
   PerformanceMetrics_End(pacing);
   const PerformanceScope swap = PerformanceMetrics_Begin(kPerformance_Swap);
   const bool swapped = ArRenderDevice_Present(&g_render_device);
@@ -636,8 +672,7 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
   PerformanceMetrics_End(pipeline);
 
   if (game_tick) {
-    s_retained_frame.slot = slot;
-    s_retained_frame.valid = true;
+    RetainFrame(&slot);
   }
   pipeline = PerformanceMetrics_Begin(kPerformance_Presentation);
   PresentFrame(&slot,
@@ -654,6 +689,17 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
   return presented;
 }
 
+bool HostDisplay_StageOwnedFrame(const FrameSlot *slot) {
+  if (!slot || !ArRenderDevice_IsReady(&g_render_device) ||
+      !ArRenderTexture_IsValid(g_texture)) return false;
+  PerformanceContextForFrame(slot, kHostDisplayPresent_GameTick);
+  const PerformanceScope upload = PerformanceMetrics_Begin(kPerformance_Upload);
+  PresentUpload(slot);
+  RetainFrame(slot);
+  PerformanceMetrics_End(upload);
+  return s_retained_frame.valid;
+}
+
 bool HostDisplay_TryRepresentFrame(float alpha,
                                    bool diorama_frame_active,
                                    bool interpolation_enabled,
@@ -666,6 +712,17 @@ bool HostDisplay_TryRepresentFrame(float alpha,
       !HostDisplayPacing_ShouldRepresentFrame(
           (RefreshMode)g_settings.refresh_mode, redraw_pending)) {
     return false;
+  }
+
+  if (s_producer_pacing) {
+    const uint64_t interval = PresentIntervalNs(kHostDisplayPresent_GameTick);
+    const uint64_t now = SDL_GetTicksNS();
+    if (interval && s_present_deadline_ns && now < s_present_deadline_ns)
+      return false;
+    if (!s_present_deadline_ns || !interval ||
+        now > s_present_deadline_ns + kDeadlineResyncIntervalCount * interval)
+      s_present_deadline_ns = now;
+    s_present_deadline_ns += interval;
   }
 
   if (use_interpolation) {

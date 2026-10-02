@@ -135,6 +135,10 @@ void InputMap_Shutdown(void);
  * this layer owns (the caller may still want to look at it for other reasons;
  * the return value is informational, not a consume flag). */
 void InputMap_HandleEvent(const SDL_Event *event);
+/* Main-thread input-only path for the buffered producer. Host actions and
+ * meaningful analog camera changes require an acknowledged runner pause. */
+bool InputMap_TryHandleGameOnlyEvent(const SDL_Event *event);
+bool InputMap_KeyHasHostBinding(int scancode);
 /* Keyboard path, kept separate because host_input.c's hotkey chain also wants the
  * event and ordering there matters. `scancode` is SDL_Scancode; `repeated`
  * is SDL's key-down auto-repeat flag and is false for key-up. */

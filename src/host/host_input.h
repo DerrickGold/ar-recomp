@@ -13,6 +13,9 @@ union SDL_Event;
  * which remain the application loop's responsibility. Device changes and
  * releases retain their existing routes even when presses are suppressed. */
 bool HostInput_HandleEvent(const union SDL_Event *event);
+/* Main-thread input-only routing during production. False leaves the event
+ * queued for the ordinary handler after the game owner acknowledges pause. */
+bool HostInput_TryHandleGameOnlyEvent(const union SDL_Event *event);
 
 void HostInput_HandleKeyboard(int scancode, bool pressed, bool repeated);
 void HostInput_ClearHeld(void);
@@ -22,6 +25,7 @@ void HostInput_LogStatus(const char *reason);
  * resolution belongs beside each RtlRunFrame call so turbo/catch-up ticks are
  * represented individually in canonical recordings. */
 uint32_t HostInput_SampleLiveInputs(void);
+uint32_t HostInput_ResolveActionInputs(uint32_t input);
 
 bool HostInput_MenuGamepadIsActive(void);
 bool HostInput_MenuKeyboardIsActive(void);

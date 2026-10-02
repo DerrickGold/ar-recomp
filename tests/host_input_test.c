@@ -44,6 +44,7 @@ static SettingDesc s_setting;
 static InputAction s_analog_action;
 static float s_analog_value, s_camera_zoom;
 static bool s_dynamic_input_active;
+static bool s_key_host_binding;
 
 static const ActRaiserDisplayGeometry s_geometry;
 const ActRaiserDisplayGeometry *const g_actraiser_display_geometry = &s_geometry;
@@ -139,6 +140,8 @@ bool InputMap_GamepadIsActive(void) {
 void InputMap_HandleEvent(const SDL_Event * event) {
   ++s_pad_events;
 }
+bool InputMap_TryHandleGameOnlyEvent(const SDL_Event *event) { return false; }
+bool InputMap_KeyHasHostBinding(int scancode) { return s_key_host_binding; }
 void InputMap_HandleKey(int scancode, bool pressed, bool repeated) {
   ++s_keys;
 }
@@ -422,6 +425,34 @@ int main(void) {
   assert(HostInput_HandleEvent(&event));
   assert(!s_inspector_selection && HostInput_IsPaused());
   HostInput_TogglePause();
+  g_settings.scene_inspector = false;
+  const int keys_before_stream = s_keys;
+  event = (SDL_Event){.type = SDL_EVENT_KEY_DOWN};
+  event.key.key = SDLK_A; event.key.scancode = SDL_SCANCODE_A;
+  assert(HostInput_TryHandleGameOnlyEvent(&event));
+  event.type = SDL_EVENT_KEY_UP;
+  assert(HostInput_TryHandleGameOnlyEvent(&event));
+  assert(s_keys == keys_before_stream + 2);
+  s_key_host_binding = true;
+  assert(!HostInput_TryHandleGameOnlyEvent(&event));
+  s_key_host_binding = false;
+  const SDL_Keycode host_keys[] = {SDLK_ESCAPE, SDLK_P, SDLK_T, SDLK_F5,
+      SDLK_F7, SDLK_F9, SDLK_D, SDLK_C, SDLK_1, SDLK_PLUS};
+  for (unsigned i = 0; i < sizeof(host_keys)/sizeof(host_keys[0]); ++i) {
+    event.type = SDL_EVENT_KEY_DOWN; event.key.key = host_keys[i];
+    assert(!HostInput_TryHandleGameOnlyEvent(&event));
+  }
+  assert(s_keys == keys_before_stream + 2 && !HostInput_IsPaused() && !s_overlay);
+  event.key.key = SDLK_A;
+  s_pads = 1; s_pad_active = true;
+  assert(HostInput_TryHandleGameOnlyEvent(&event));
+  assert(s_keys == keys_before_stream + 2); /* Suppressed presses stay suppressed. */
+  event.type = SDL_EVENT_KEY_UP;
+  assert(HostInput_TryHandleGameOnlyEvent(&event));
+  assert(s_keys == keys_before_stream + 3); /* Releases still get through. */
+  s_overlay = true;
+  assert(!HostInput_TryHandleGameOnlyEvent(&event));
+  s_overlay = false;
   HostInput_EndSession();
   puts("host input: modal routing, device arbitration and releases passed");
   return 0;

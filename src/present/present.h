@@ -26,7 +26,11 @@
  * composite, town canvases, and presentation atlases) remain boot-owned
  * globals and are not copied. Synchronous ordering guarantees Upload consumes
  * every borrowed buffer before the next tick overwrites or invalidates it.
- * The slot is not a cross-thread handoff. */
+ * The slot alone is not a cross-thread handoff. HostFramePacket owns the
+ * action surfaces before publication through HostFrameQueue. After upload,
+ * retained action frames clear every CPU surface view; drawing then uses
+ * presentation-owned textures/masks/motion endpoints. Never upload that
+ * cleared retained slot or refresh it from the runner during production. */
 
 /* Captured overlay identities and flags follow the public runner ABI.
  * frame_slot.c checks their values against SR_PPU_* when it builds the slot. */

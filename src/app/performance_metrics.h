@@ -84,8 +84,11 @@ typedef struct PerformanceScope {
   PerformanceStage stage;
 } PerformanceScope;
 
-/* Configure/context/completion/snapshot are main-owner-thread operations,
- * after outstanding fork/join work has completed (never concurrently with Record).
+/* Configure/context/completion/snapshot are main-owner-thread operations.
+ * Configure must wait for outstanding workers before toggling/resetting the
+ * epoch. Completion may drain atomic Record/Add counters during scanout;
+ * a multi-counter record can straddle adjacent reporting windows. These
+ * rolling diagnostics are not a per-frame dependency/critical-path trace.
  * Record/Add are thread safe and allocation-free. An epoch rejects stale
  * scopes across toggles. Context changes clear completed history, preserving
  * pending work for the new scene's first frame. Failed presents do not count

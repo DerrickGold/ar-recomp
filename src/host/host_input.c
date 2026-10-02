@@ -88,6 +88,11 @@ uint32_t HostInput_SampleLiveInputs(void) {
   return ForcedInput_Apply(s_input_state, snes_frame_counter);
 }
 
+uint32_t HostInput_ResolveActionInputs(uint32_t input) {
+  /* Action-only producer owns the tick counter; no main-thread input state. */
+  return ForcedInput_Apply(input, snes_frame_counter);
+}
+
 bool HostInput_MenuGamepadIsActive(void) {
   return g_settings.input_device != kInputDevice_Keyboard &&
          InputMap_GamepadCount() > 0;
@@ -367,6 +372,18 @@ void HostInput_EndSession(void) {
 /* Capture wins over hotkeys; then the active menu device gets first use.
  * Suppression applies only to key-down. Key-up remains in the event pump so
  * previously accepted keys can always be released. */
+static bool IsHostHotkey(SDL_Keycode key) {
+  switch (key) {
+    case SDLK_ESCAPE: case SDLK_F1: case SDLK_P: case SDLK_T: case SDLK_F3:
+    case SDLK_MINUS: case SDLK_KP_MINUS: case SDLK_EQUALS: case SDLK_PLUS:
+    case SDLK_KP_PLUS: case SDLK_F5: case SDLK_F7: case SDLK_F9: case SDLK_F6:
+    case SDLK_F2: case SDLK_C: case SDLK_D:
+    case SDLK_1: case SDLK_2: case SDLK_3: case SDLK_4: case SDLK_5:
+      return true;
+    default: return false;
+  }
+}
+
 static void HandleKeyDown(const SDL_Event *event) {
   if (SettingsOverlay_HandleCaptureEvent(event))
     return;
@@ -389,6 +406,13 @@ static void HandleKeyDown(const SDL_Event *event) {
     } else {
       return;
     }
+  }
+  /* Shared with producer-time routing: a new hard-wired host command must
+   * be classified above, so both paths retain its ownership barrier. */
+  if (!IsHostHotkey(event->key.key)) {
+    HostInput_HandleKeyboard((int)event->key.scancode, true,
+                             event->key.repeat != 0);
+    return;
   }
   if (!event->key.repeat &&
       (event->key.key == SDLK_ESCAPE || event->key.key == SDLK_F1)) {
@@ -629,6 +653,20 @@ bool HostInput_HandleEvent(const SDL_Event *event) {
       return false;
   }
   return true;
+}
+
+bool HostInput_TryHandleGameOnlyEvent(const SDL_Event *event) {
+  if (!event || s_paused || SettingsOverlay_IsOpen() ||
+      SettingsOverlay_IsCapturing() || g_settings.scene_inspector ||
+      RenderComparison_FreezesGameplay()) return false;
+  if (event->type == SDL_EVENT_KEY_DOWN || event->type == SDL_EVENT_KEY_UP) {
+    if (IsHostHotkey(event->key.key) ||
+        InputMap_KeyHasHostBinding(event->key.scancode)) return false;
+    /* Preserve normal device arbitration, suppression, repeat and key-up
+     * behavior. Classification above guarantees no host callback can run. */
+    return HostInput_HandleEvent(event);
+  }
+  return InputMap_TryHandleGameOnlyEvent(event);
 }
 
 void HostInput_ApplySetting(const SettingDesc *desc) {

@@ -3,7 +3,8 @@
 /* ActRaiser runtime: binds the game to the runner: game initialization and
  * coroutine lifecycle, the runner handle, PPU frame drawing, snapshots, and
  * the capture views the presenters read.
- * Phase: game (main thread). */
+ * Phase: game (one coroutine owner; main for synchronous runs, producer owns
+ * every tick from startup). Runner access is serialized with that owner. */
 
 #include "action/action_obj_apron.h"
 #include "action/action_bg_plan.h"
@@ -96,8 +97,8 @@ void ActRaiser_FullSnapshot(const char *prefix);
 void RunOneFrameOfGame(void);
 void ActRaiser_OnInidispWrite(uint8 value);
 void ActRaiser_OnApuPortPace(uint8 port, uint8 value);
-/* Release the game coroutine's stack (guard-page mapping) / fiber at shutdown.
- * Safe to call when none was created. */
+/* Release the game coroutine's stack (guard-page mapping) / fiber at shutdown,
+ * on its owning thread, before that thread exits. Safe when none was created. */
 void ActRaiser_DestroyGameCoroutine(void);
 /* Suspend only from the executing game coroutine. Host UI decisions use this
  * without issuing a native VBlank/input/timer update while their menu is open. */

@@ -457,9 +457,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   pipeline = PerformanceMetrics_Begin(kPerformance_PpuScanout);
   DioramaPerformanceScope scanout_performance = {0};
   if (profile_diorama)
-    scanout_performance =
-        DioramaPerformance_Begin(kDioramaPerformance_Scanout);
-
+    scanout_performance = DioramaPerformance_Begin(kDioramaPerformance_Scanout);
   if (scanout_ready) {
     scanout_status = skybox_view.pixels
         ? scanout_api->run_ppu_scanout_with_background_view(
@@ -467,10 +465,10 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
         : scanout_api->run_ppu_scanout(
             scanout_runner, &scanout_request, &scanout_result);
   }
-  ActRaiser_PublishScanout(scanout_status, &scanout_result, &skybox_view,
-                           action);
   DioramaPerformance_End(scanout_performance);
   PerformanceMetrics_End(pipeline);
+  ActRaiser_PublishScanout(scanout_status, &scanout_result, &skybox_view,
+                           action);
   pipeline = PerformanceMetrics_Begin(kPerformance_PpuFinish);
   DioramaPerformanceScope producer_finish_performance = {0};
   if (profile_diorama)

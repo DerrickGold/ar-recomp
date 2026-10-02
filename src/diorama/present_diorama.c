@@ -267,16 +267,15 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
 void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float alpha) {
   DioramaPerformanceScope presentation_performance =
       DioramaPerformance_Begin(kDioramaPerformance_Total);
+  /* Compositing uses only presence, never CPU texels. Upload has already
+   * built textures, coverage masks, snapshot copies and motion endpoints.
+   * Use a real presence token, as the portable compositor tests do, instead
+   * of carrying a pointer into the producer's next scanout. */
+  static const uint8_t uploaded_plane = 0;
   const uint8_t *pixels[kDioramaPlane_Count];
-  CaptureDioramaPpuSurfaces(slot, pixels, NULL);
-  /* PresentUpload recorded exactly which requested/content-bearing surfaces
-   * uploaded successfully before releasing their producer. A NULL entry is
-   * already Diorama_Composite's established "plane absent" contract, and
-   * also prevents stale texture contents from resurfacing after an empty
-   * priority band or failed upload. */
   for (int plane = 0; plane < kDioramaPlane_Count; plane++)
-    if (!(s_diorama_uploaded_plane_mask & (1u << plane)))
-      pixels[plane] = NULL;
+    pixels[plane] = (s_diorama_uploaded_plane_mask & (1u << plane))
+        ? &uploaded_plane : NULL;
   ArRenderTexture current_textures[kDioramaPlane_Count];
   ArRenderTexture scene_textures[kDioramaPlane_Count];
   for (int plane = 0; plane < kDioramaPlane_Count; plane++)

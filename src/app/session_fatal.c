@@ -2,16 +2,19 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdatomic.h>
 
 enum { kSessionFatalMessageCapacity = 1024 };
 
-static bool s_requested;
+/* 0 empty, 1 first writer owns the payload, 2 published. */
+static atomic_int s_state;
 static char s_message[kSessionFatalMessageCapacity];
 static SessionFailureKind s_kind;
 
 static void Request(SessionFailureKind kind, const char *format, va_list arguments) {
-  if (s_requested) return;
-  s_requested = true;
+  int expected = 0;
+  if (!atomic_compare_exchange_strong_explicit(&s_state, &expected, 1,
+          memory_order_acq_rel, memory_order_acquire)) return;
   s_kind = kind;
 
   if (!format || !format[0]) {
@@ -21,6 +24,7 @@ static void Request(SessionFailureKind kind, const char *format, va_list argumen
     vsnprintf(s_message, sizeof(s_message), format, arguments);
   }
   fprintf(stderr, "[fatal-session] %s\n", s_message);
+  atomic_store_explicit(&s_state, 2, memory_order_release);
 }
 
 void SessionFatal_Request(const char *format, ...) {
@@ -37,12 +41,15 @@ void SessionFatal_RequestKind(SessionFailureKind kind, const char *format, ...) 
   va_end(arguments);
 }
 
-SessionFailureKind SessionFatal_Kind(void) { return s_kind; }
+SessionFailureKind SessionFatal_Kind(void) {
+  return atomic_load_explicit(&s_state, memory_order_acquire) == 2
+      ? s_kind : kSessionFailure_Generic;
+}
 
 bool SessionFatal_Requested(void) {
-  return s_requested;
+  return atomic_load_explicit(&s_state, memory_order_acquire) != 0;
 }
 
 const char *SessionFatal_Message(void) {
-  return s_requested ? s_message : "";
+  return atomic_load_explicit(&s_state, memory_order_acquire) == 2 ? s_message : "";
 }

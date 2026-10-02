@@ -93,6 +93,14 @@ void ScheduledSettings_Init(void) {
   }
 }
 
+bool ScheduledSettings_IsDue(void) {
+  if (snes_frame_counter <= 0) return false;
+  const uint16_t frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+  for (int i = 0; i < kScheduledSettingCapacity; ++i)
+    if (s_changes[i].pending && frame >= s_changes[i].target_game_frame) return true;
+  return false;
+}
+
 void ScheduledSettings_ApplyIfDue(void) {
   if (snes_frame_counter <= 0) return;
 

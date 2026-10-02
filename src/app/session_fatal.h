@@ -3,7 +3,7 @@
 /* SessionFatal: a latched request for an orderly, user-visible shutdown after
  * a runtime failure. The first failure wins, and its kind selects the
  * translated recovery text.
- * Phase: main/game thread.
+ * Phase: host/game/scanout thread; payload reads after worker joins.
  * Tests: tests/session_fatal_test.c */
 
 #include <stdbool.h>
@@ -20,8 +20,9 @@ typedef enum SessionFailureKind {
 /*
  * Latched request for an orderly, user-visible runtime shutdown.
  *
- * Callers must already be on the main/game thread and must return to the host
- * loop after requesting shutdown. The first failure wins so a secondary
+ * Callers must return to the host loop after requesting shutdown. A worker
+ * may latch an error; the host joins it before reading the message/kind.
+ * The first failure wins so a secondary
  * teardown or presentation error cannot hide the condition the user can act
  * on. Boot failures that occur before a session exists still use Die().
  */

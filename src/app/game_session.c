@@ -268,9 +268,8 @@ static GameSessionResult StopSession(void) {
   ManualReader_DestroyTextures();
   SettingsOverlay_Destroy();
   HostLocalization_ReleaseFonts();
-  /* Release the game coroutine's stack mapping / fiber. Safe here: the game
-   * thread is this thread and the main loop has exited, so nothing can be
-   * running on that stack. */
+  /* The synchronous loop owns the coroutine here. The buffered producer
+   * destroys it on its owning worker before joining; this is then a no-op. */
   ActRaiser_DestroyGameCoroutine();
   HostInput_EndSession();
   RuntimeDiagnostics_Unbind();

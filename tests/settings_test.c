@@ -1283,6 +1283,13 @@ static void TestNoWideBudget(void) {
  * that another row already owns steals it rather than double-binding. */
 static void TestInputBindingHints(void) {
   Settings_Init();
+  CHECK(!InputMap_KeyHasHostBinding(SDL_SCANCODE_Z));
+  CHECK(InputMap_KeyHasHostBinding(SDL_SCANCODE_M));
+  CHECK(InputMap_KeyHasHostBinding(SDL_SCANCODE_S));
+  g_settings.input_bind[kInputClass_Keyboard][kInputAction_CamYawLeft] =
+      INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_Z, false);
+  CHECK(InputMap_KeyHasHostBinding(SDL_SCANCODE_Z));
+  Settings_Init();
   char hint[64];
   const uint32 north = INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_NORTH, false);
   InputMap_FormatBindingHint(hint, sizeof(hint), north, SDL_GAMEPAD_TYPE_XBOXONE);
@@ -1355,6 +1362,28 @@ static void TestInputHintDeviceRetention(void) {
   event.gdevice.which = id;
   InputMap_HandleEvent(&event);
   CHECK(InputMap_GamepadCount() == 1);
+  /* Producer-mode controller input may change gameplay bits, but host
+   * actions/camera changes must remain queued until the owner is paused. */
+  event.type = SDL_EVENT_GAMEPAD_AXIS_MOTION;
+  event.gaxis.which = id;
+  event.gaxis.axis = SDL_GAMEPAD_AXIS_LEFTX;
+  event.gaxis.value = 25000;
+  CHECK(InputMap_TryHandleGameOnlyEvent(&event));
+  CHECK(InputMap_State() & (1u << kInputAction_Right));
+  event.gaxis.value = 0;
+  CHECK(InputMap_TryHandleGameOnlyEvent(&event));
+  CHECK(!(InputMap_State() & (1u << kInputAction_Right)));
+  event.gaxis.axis = SDL_GAMEPAD_AXIS_RIGHTX;
+  event.gaxis.value = 10;
+  CHECK(InputMap_TryHandleGameOnlyEvent(&event));
+  event.gaxis.value = 25000;
+  CHECK(!InputMap_TryHandleGameOnlyEvent(&event));
+  CHECK(InputMap_AnalogAction(kInputAction_CamYawRight) == 0);
+  event.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+  event.gbutton.which = id;
+  event.gbutton.button = SDL_GAMEPAD_BUTTON_LEFT_STICK;
+  CHECK(!InputMap_TryHandleGameOnlyEvent(&event));
+  InputMap_Clear();
   char hint[64];
   event.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
   event.gbutton.which = id;

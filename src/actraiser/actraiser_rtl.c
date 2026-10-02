@@ -1437,6 +1437,11 @@ void ActRaiser_DestroyGameCoroutine(void) {
     DeleteFiber(s_game_fiber);
     s_game_fiber = NULL;
   }
+  if (s_host_fiber) {
+    if (!ConvertFiberToThread())
+      SessionFatal_Request("Could not release the game coroutine's owning fiber.");
+    s_host_fiber = NULL;
+  }
 #else
   if (s_game_stack_map) {
     munmap(s_game_stack_map, s_game_stack_map_len);
