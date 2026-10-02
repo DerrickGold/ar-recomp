@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile src/shaders/*.{vert,frag}.glsl into committed C headers.
+"""Compile src/shaders/*.{vert,frag,comp}.glsl into committed C headers.
 
 DEVELOPER TOOL ONLY. This never runs during a build — not the CMake developer
 build, and emphatically not `snesbuild build --hermetic`, whose entire premise
@@ -29,6 +29,8 @@ match it or the shader will compile and then silently misbehave:
 
     vertex stage: set 0 = sampled textures, set 1 = uniform buffers
     fragment stage: set 2 = sampled textures, set 3 = uniform buffers
+    compute stage: set 0 = sampled/read-only storage resources,
+                   set 1 = writable storage resources, set 2 = uniform buffers
 
 Usage:
     tools/build_shaders.py            # regenerate all shaders
@@ -159,12 +161,17 @@ def compile_shader(source_path, temp_dir):
                        "-o", str(readable_spv)])
 
     msl = run_tool("spirv-cross", ["--msl", str(readable_spv)])
+    if stage == "comp":
+        # SPIRV-Cross puts storage buffers before uniform buffers; SDL compute
+        # requires the reverse. Normalize only named entrypoint attributes.
+        msl = verify_compute_bindings(source_path, msl, metal=True, remap=True)
+    msl = verify_msl_samplers(source_path, msl, remap=True)
     verify_msl_bindings(source_path, msl)
     hlsl = run_tool("spirv-cross", ["--hlsl", "--shader-model", "60",
                                     str(readable_spv)])
     verify_hlsl_bindings(source_path, hlsl)
     hlsl_path.write_text(hlsl)
-    profile = {"frag": "ps_6_0", "vert": "vs_6_0"}[stage]
+    profile = {"frag": "ps_6_0", "vert": "vs_6_0", "comp": "cs_6_0"}[stage]
     run_tool("dxc", ["-T", profile, "-E", "main", "-O3", "-Fo",
                      dxc_path(dxil_path), dxc_path(hlsl_path)])
     # DXC's dump mode parses and validates the finished container. Keep this
@@ -174,17 +181,42 @@ def compile_shader(source_path, temp_dir):
     return optimized_spv.read_bytes(), msl, dxil_path.read_bytes()
 
 
-def verify_msl_bindings(source_path, msl):
-    """Guard the assumption the whole pipeline rests on.
+def verify_msl_samplers(source_path, msl, remap=False):
+    """Keep texture AND sampler names on the GLSL/SDL slot.
 
-    spirv-cross assigns Metal resource indices itself. It happens to land
-    exactly on the slots SDL's render backend binds — [[texture(0)]],
-    [[sampler(0)]], [[buffer(0)]] — with no remapping flags, which is what
-    makes this pipeline viable at all. If a future spirv-cross ever changes
-    that, the shader would still compile and then quietly sample nothing;
-    fail loudly here instead.
+    SPIRV-Cross may enumerate resources by first use, even when their explicit
+    GLSL bindings are reversed. Merely checking that slots 0 and 1 both exist
+    cannot detect endpoints swapped by that enumeration.
     """
     source = source_path.read_text()
+    for match in re.finditer(r"layout\s*\(([^)]*)\)\s*uniform\s+sampler\w+\s+(\w+)\s*;", source):
+        layout, name = match.groups()
+        binding = re.search(r"\bbinding\s*=\s*(\d+)", layout)
+        if not binding:
+            die(f"{source_path.name}: missing sampler binding for {name}")
+        slot = int(binding[1])
+        for resource, attribute in ((name, "texture"), (name + "Smplr", "sampler")):
+            pattern = rf"(\b{re.escape(resource)}\s*)\[\[{attribute}\(\d+\)\]\]"
+            if remap:
+                msl, count = re.subn(pattern, rf"\g<1>[[{attribute}({slot})]]", msl)
+                if count != 1:
+                    die(f"{source_path.name}: ambiguous Metal binding for {resource}")
+            if not re.search(rf"\b{re.escape(resource)}\s*\[\[{attribute}\({slot}\)\]\]", msl):
+                die(f"{source_path.name}: wrong Metal binding for {resource}")
+    return msl
+
+
+def verify_msl_bindings(source_path, msl):
+    """Verify the generated Metal entrypoint and SDL resource convention.
+
+    Named sampler and compute-buffer normalization above resolves SPIRV-Cross
+    enumeration differences. Reject missing/ambiguous resources before shipping.
+    """
+    source = source_path.read_text()
+    verify_msl_samplers(source_path, msl)
+    if shader_stage(source_path) == "comp":
+        verify_compute_bindings(source_path, msl, metal=True)
+        return
     expected = ["[[stage_in]]"]
     if "sampler" in source:
         expected.extend(["[[texture(0)]]", "[[sampler(0)]]"])
@@ -210,6 +242,9 @@ def verify_msl_bindings(source_path, msl):
 def verify_hlsl_bindings(source_path, hlsl):
     """Pin SDL_GPU's D3D12 register-space and semantic conventions."""
     source = source_path.read_text()
+    if shader_stage(source_path) == "comp":
+        verify_compute_bindings(source_path, hlsl, metal=False)
+        return
     resource_space = 0 if shader_stage(source_path) == "vert" else 2
     expected = ["TEXCOORD0"]
     if "sampler" in source:
@@ -224,6 +259,79 @@ def verify_hlsl_bindings(source_path, hlsl):
             "its D3D12 register or semantic mapping; inspect the output "
             "before shipping it." % (source_path.name, ", ".join(missing))
         )
+
+
+def verify_compute_bindings(source_path, compiled, metal, remap=False):
+    """Check SDL compute resource namespaces, including Metal's unified buffers.
+
+    This deliberately accepts the small explicit layout vocabulary used by our
+    compute sources. Unknown resource declarations fail rather than silently
+    selecting a graphics-stage binding rule. Storage/sampler arrays are not yet
+    supported by this verifier.
+    """
+    source = re.sub(r"//[^\n]*|/\*.*?\*/", "", source_path.read_text(), flags=re.S)
+    resources = []
+    pattern = r"layout\(([^)]*\bset\s*=\s*\d+[^)]*)\)\s*(readonly\s+|writeonly\s+)?(buffer|uniform)\s+(\w+)\s*(\{[^}]*\}\s*\w+|\w+)\s*;"
+    for match in re.finditer(pattern, source, re.S):
+        layout, qualifier, kind, typename, body = match.groups()
+        qualifier = (qualifier or "").strip()
+        set_id = int(re.search(r"\bset\s*=\s*(\d+)", layout)[1])
+        slot = int(re.search(r"\bbinding\s*=\s*(\d+)", layout)[1])
+        if kind == "buffer":
+            resource = "read_buffer" if qualifier == "readonly" else "write_buffer"
+        elif typename.startswith("sampler"):
+            resource = "sampler"
+        elif typename.startswith("image"):
+            resource = "write_image" if qualifier == "writeonly" else "read_image"
+        elif body.startswith("{"):
+            resource = "uniform"
+        else:
+            die(f"{source_path.name}: unsupported compute resource {match[0]}")
+        name = body.split()[-1] if body.startswith("{") else body
+        required_set = 2 if resource == "uniform" else 1 if resource.startswith("write") else 0
+        if set_id != required_set:
+            die(f"{source_path.name}: {name} must use compute set {required_set}")
+        resources.append((set_id, slot, resource, name))
+    if len(resources) != len(re.findall(r"\bset\s*=", source)):
+        die(f"{source_path.name}: unsupported compute resource layout")
+    for set_id in range(3):
+        group = sorted(r for r in resources if r[0] == set_id)
+        if [r[1] for r in group] != list(range(len(group))):
+            die(f"{source_path.name}: compute set {set_id} must have consecutive bindings")
+        rank = {"sampler": 0, "read_image": 1, "read_buffer": 2,
+                "write_image": 0, "write_buffer": 1, "uniform": 0}
+        if [rank[r[2]] for r in group] != sorted(rank[r[2]] for r in group):
+            die(f"{source_path.name}: compute resources violate SDL binding order")
+    order = {"uniform": 0, "read_buffer": 1, "write_buffer": 2,
+             "sampler": 0, "read_image": 1, "write_image": 2}
+    buffers = sorted((r for r in resources if r[2] in ("uniform", "read_buffer", "write_buffer")), key=lambda r: (order[r[2]], r[1]))
+    textures = sorted((r for r in resources if r[2] in ("sampler", "read_image", "write_image")), key=lambda r: (order[r[2]], r[1]))
+    for resource in resources:
+        set_id, slot, kind, name = resource
+        if metal:
+            table = buffers if kind in ("uniform", "read_buffer", "write_buffer") else textures
+            attribute = "buffer" if table is buffers else "texture"
+            if remap:
+                compiled, count = re.subn(
+                    rf"(\b{re.escape(name)}\s*)\[\[{attribute}\(\d+\)\]\]",
+                    rf"\g<1>[[{attribute}({table.index(resource)})]]", compiled)
+                if count != 1:
+                    die(f"{source_path.name}: ambiguous Metal binding for {name}")
+            token = rf"\b{re.escape(name)}\s*\[\[{attribute}\({table.index(resource)}\)\]\]"
+        else:
+            prefix = "b" if kind == "uniform" else "u" if kind.startswith("write") else "t"
+            # SPIRV-Cross names HLSL uniform blocks after their GLSL block type.
+            token = rf"register\({prefix}{slot}, space{set_id}\)"
+        if not re.search(token, compiled):
+            die(f"{source_path.name}: wrong {'Metal' if metal else 'HLSL'} binding for {name}")
+        if kind == "sampler":
+            sampler_token = f"[[sampler({slot})]]" if metal else f"register(s{slot}, space0)"
+            if sampler_token not in compiled:
+                die(f"{source_path.name}: missing sampler binding for {name}")
+    entry = r"kernel\s+void\s+main0\(" if metal else r"\[numthreads\("
+    if not re.search(entry, compiled):
+        die(f"{source_path.name}: compute entrypoint/thread layout missing")
+    return compiled
 
 
 def render_header(source_path, spirv, msl, dxil):
@@ -349,7 +457,8 @@ def main():
     check_tools()
 
     sources = sorted(SHADER_DIR.glob("*.frag.glsl")) + \
-        sorted(SHADER_DIR.glob("*.vert.glsl"))
+        sorted(SHADER_DIR.glob("*.vert.glsl")) + \
+        sorted(SHADER_DIR.glob("*.comp.glsl"))
     if args.shaders:
         wanted = set(args.shaders)
         sources = [s for s in sources if base_name(s) in wanted]

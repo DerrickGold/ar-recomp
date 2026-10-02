@@ -354,6 +354,10 @@ struct Ppu {
     uint8_t *overlayRenderBands[kPpuOverlaySource_Count][3];
     uint8_t overlayRenderMaybeDirty[kPpuOverlaySource_Count];
     uint8_t overlayRenderContentMask[kPpuOverlaySource_Count];
+    SrPpuBgPacket *backgroundPacket; /* Borrowed only inside scanout. */
+    uint8_t backgroundTileSources, backgroundCpuSources, backgroundDeferredClear;
+    uint16_t backgroundPaletteCgram[3][256];
+    uint32_t backgroundPaletteKey[3];
     uint8_t m7OverlayMaybeDirty;
     uint8_t *m7OverlayBuffer;
     uint32_t m7OverlayPitch;

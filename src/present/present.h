@@ -107,6 +107,7 @@ typedef struct FrameSlot {
    * remain valid through synchronous upload and retained re-presents between
    * ticks, but never across a runner tick/reset/load or PPU surface rebind. */
   SrPpuSurfaceSnapshot ppu_surfaces;
+  const SrPpuBgPacket *background_packet;
   /* Application-owned products that coexist with, rather than replace, the
    * PPU's current host bindings during separated SIM capture. */
   Sim3DOutputSurfaceViews sim3d_output_surfaces;

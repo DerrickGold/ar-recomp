@@ -6,6 +6,7 @@
 #pragma once
 
 #include "snesrecomp/runner/base.h"
+#include "snesrecomp/runner/ppu_bg_packet.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -1009,7 +1010,15 @@ typedef struct SrPpuScanoutRequest {
     SrPpuScanoutLineCallback line_callback;
     SrPpuScanoutIrqCallback irq_callback;
     void *user_data;
+    /* Optional BG export, filled only during this call. V2 callers retain
+     * CPU outputs. Explicit tile ownership may omit supported CPU captures;
+     * validation preserves them. See SrPpuBgPacket.request_flags. */
+    SrPpuBgPacket *background_packet;
 } SrPpuScanoutRequest;
+
+#define SR_PPU_SCANOUT_REQUEST_BG_PACKET_SIZE                             \
+    ((uint32_t)(offsetof(SrPpuScanoutRequest, background_packet) +       \
+                sizeof(((SrPpuScanoutRequest *)0)->background_packet)))
 
 #define SR_PPU_SCANOUT_REQUEST_V2_SIZE                                   \
     ((uint32_t)(offsetof(SrPpuScanoutRequest, user_data) +                \

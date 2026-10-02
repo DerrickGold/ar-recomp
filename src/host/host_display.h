@@ -94,6 +94,16 @@ bool HostDisplay_TryRepresentFrame(float alpha,
                                    bool diorama_frame_active,
                                    bool interpolation_enabled,
                                    bool redraw_pending);
+/* Opt-in presenter-thread diagnostics. CPU wall times, not GPU timestamps or
+ * physical display times. Cleared for each TryRepresentFrame attempt. */
+typedef struct HostDisplayPresentTrace {
+  uint64_t deadline_ns, draw_start_ns, draw_ns, swap_ns, vector_wait_ns;
+} HostDisplayPresentTrace;
+void HostDisplay_EnablePresentTrace(bool enabled);
+HostDisplayPresentTrace HostDisplay_LastPresentTrace(void);
+/* Absolute next draw deadline for the independently paced producer. Zero
+ * means presentation is not currently driven by that clock. */
+uint64_t HostDisplay_NextPresentationDeadline(void);
 /* Rolling completed backend presents per second. */
 double HostDisplay_FramesPerSecond(void);
 

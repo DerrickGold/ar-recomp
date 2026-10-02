@@ -35,6 +35,15 @@ static inline uint64_t HostFramePlayout_Target(
   return now_ns > policy.delay_ns ? now_ns - policy.delay_ns : 0;
 }
 
+/* Prepare the pair needed by the next scheduled presentation while its GPU
+ * work can overlap idle time. This does not move the presentation clock or
+ * increase playback delay. Non-interpolated playback still takes the newest
+ * completed endpoint immediately. */
+static inline uint64_t HostFramePlayout_PreparationTime(
+    HostFramePlayout policy, uint64_t now_ns, uint64_t deadline_ns) {
+  return policy.interpolate && deadline_ns > now_ns ? deadline_ns : now_ns;
+}
+
 static inline bool HostFramePlayout_NeedsEndpoint(
     HostFramePlayout policy, uint64_t endpoint_ns, uint64_t target_ns) {
   return !policy.interpolate || !endpoint_ns || endpoint_ns < target_ns;

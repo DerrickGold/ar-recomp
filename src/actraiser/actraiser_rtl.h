@@ -59,6 +59,7 @@ bool ActRaiser_LiveActionBgPlan(ActionBgPlan *out,
  * world_x is the canonical left edge resolved from that scanout request. */
 void ActRaiser_LiveDioramaSkybox(SrPpuSurfaceView *out, int32_t *world_x,
                                bool *periodic);
+const SrPpuBgPacket *ActRaiser_LiveBackgroundPacket(void);
 /* Vertical geometry latched with the last rendered frame. Either pointer may
  * be NULL. */
 void ActRaiser_LiveVerticalMargins(int *top, int *bottom);

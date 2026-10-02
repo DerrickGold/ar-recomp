@@ -15,6 +15,7 @@ typedef struct HostFramePacket {
   int tick;
   uint8_t *pixels;
   size_t capacity;
+  SrPpuBgPacket *background_storage; /* Allocated only when the optional export is used. */
 } HostFramePacket;
 typedef struct HostFrameQueue HostFrameQueue;
 /* Shared eligibility for retention and packet capture. Unsupported scenes

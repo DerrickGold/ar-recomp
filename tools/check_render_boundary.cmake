@@ -160,7 +160,8 @@ list(APPEND _portable_render_files
     # projection adapter still calls the native compositor implementation.
     "${GAME_SOURCE_ROOT}/action/action_effect_render.c"
     "${GAME_SOURCE_ROOT}/action/action_scene_effect_render.c"
-    "${GAME_SOURCE_ROOT}/action/action_forest_effect_render.c"
+    "${GAME_SOURCE_ROOT}/action/action_authored_effect_render.c"
+    "${GAME_SOURCE_ROOT}/action/action_ray_field_render.c"
     "${GAME_SOURCE_ROOT}/action/action_environment_geometry.c"
     "${GAME_SOURCE_ROOT}/action/action_cave_effect_render.c"
     "${GAME_SOURCE_ROOT}/action/action_bloodpool_effect_render.c"
@@ -198,6 +199,7 @@ list(APPEND _portable_render_files
     # portable geometry, and render-device output/viewport operations. Frame
     # synthesis remains a separate optional platform adapter.
     "${GAME_SOURCE_ROOT}/diorama/diorama.h"
+    "${GAME_SOURCE_ROOT}/diorama/diorama_bg_gpu.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_frame_generation.h"
     "${GAME_SOURCE_ROOT}/diorama/diorama_projection.c")
 list(REMOVE_DUPLICATES _portable_render_files)

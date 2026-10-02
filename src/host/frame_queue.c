@@ -34,7 +34,10 @@ HostFrameQueue *HostFrameQueue_Create(void) {
 
 void HostFrameQueue_Destroy(HostFrameQueue *q) {
   if (!q) return;
-  for (int i = 0; i < kQueueCapacity; ++i) free(q->packets[i].pixels);
+  for (int i = 0; i < kQueueCapacity; ++i) {
+    free(q->packets[i].pixels);
+    free(q->packets[i].background_storage);
+  }
   free(q);
 }
 
@@ -103,7 +106,8 @@ static bool CopyView(HostFramePacket *p, SrPpuSurfaceView *view, bool needed) {
 bool HostFramePacket_OwnPixels(HostFramePacket *p) {
   FrameSlot *f = &p->frame;
   if (!HostFramePacket_Supports(f)) return false;
-  const uint32_t mask = f->diorama_plane_request_mask & f->diorama_plane_content_mask;
+  const uint32_t mask = f->diorama_plane_request_mask & f->diorama_plane_content_mask &
+      ~DioramaPlanes_GpuOwnedMask(f->background_packet);
   bool needed[SR_PPU_OVERLAY_SOURCE_COUNT][SR_PPU_SURFACE_BAND_COUNT] = {{false}};
   for (unsigned source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; ++source)
     needed[source][0] = (mask & (1u << source)) != 0;
@@ -115,9 +119,17 @@ bool HostFramePacket_OwnPixels(HostFramePacket *p) {
   needed[SR_PPU_OVERLAY_BG3][0] = true;
   needed[SR_PPU_OVERLAY_OBJ][0] = true;
   p->copied_bytes = 0;
+  if (f->background_packet) {
+    if (!p->background_storage) p->background_storage = malloc(sizeof(SrPpuBgPacket));
+    if (!p->background_storage) return false;
+    memcpy(p->background_storage, f->background_packet, SrPpuBgPacket_Size(f->background_packet));
+    f->background_packet = p->background_storage;
+  }
   if (!CopyView(p, &f->ppu_surfaces.main, (mask & (1u << kDioramaPlane_Backdrop)) != 0) ||
-      !CopyView(p, &f->hud_obj_surface, true) ||
-      !CopyView(p, &f->diorama_skybox_surface, true)) return false;
+      !CopyView(p, &f->hud_obj_surface, true)) return false;
+  if (f->background_packet && (f->background_packet->owned_sources & 4u))
+    f->diorama_skybox_surface.data = NULL;
+  else if (!CopyView(p, &f->diorama_skybox_surface, true)) return false;
   for (unsigned source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; ++source)
     for (unsigned band = 0; band < SR_PPU_SURFACE_BAND_COUNT; ++band)
       if (!CopyView(p, &f->ppu_surfaces.overlays[source][band], needed[source][band]))
@@ -126,5 +138,6 @@ bool HostFramePacket_OwnPixels(HostFramePacket *p) {
   f->ppu_surfaces.mode7 = (SrPpuSurfaceView){0};
   f->authentic_frame_serial = 0;
   memset(&f->sim3d_output_surfaces, 0, sizeof(f->sim3d_output_surfaces));
+  if (f->background_packet) p->copied_bytes += SrPpuBgPacket_Size(f->background_packet);
   return true;
 }

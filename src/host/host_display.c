@@ -9,6 +9,7 @@
  * deadline; capturing again would refresh its timestamp and break pair
  * continuity. */
 #include "host_display.h"
+#include "dev/dev_automation.h"
 
 #include <inttypes.h>
 #include <stdint.h>
@@ -82,6 +83,22 @@ static HostDisplayRefreshCache s_display_refresh_cache;
 static SDL_DisplayID s_active_display_id;
 static bool s_retained_upload_complete;
 static bool s_producer_pacing;
+static bool s_present_trace_enabled;
+static HostDisplayPresentTrace s_present_trace;
+
+void HostDisplay_EnablePresentTrace(bool enabled) {
+  s_present_trace_enabled = enabled;
+  s_present_trace = (HostDisplayPresentTrace){0};
+  DioramaFrameGeneration_EnableWaitTrace(enabled);
+}
+
+HostDisplayPresentTrace HostDisplay_LastPresentTrace(void) {
+  return s_present_trace;
+}
+
+uint64_t HostDisplay_NextPresentationDeadline(void) {
+  return s_producer_pacing ? s_present_deadline_ns : 0;
+}
 
 void HostDisplay_SetProducerPacing(bool enabled) {
   const bool active = enabled && g_settings.refresh_mode != kRefreshMode_Vsync;
@@ -680,6 +697,8 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
                HostDisplay_FramesPerSecond());
   PerformanceMetrics_End(pipeline);
 
+  DevAutomation_CaptureScheduledScreenshot(&slot);
+
   const uint64_t vsync_start_ms =
       performance_enabled ? SDL_GetTicks() : 0;
   const bool presented = CompletePresent(mode);
@@ -704,6 +723,8 @@ bool HostDisplay_TryRepresentFrame(float alpha,
                                    bool diorama_frame_active,
                                    bool interpolation_enabled,
                                    bool redraw_pending) {
+  if (s_present_trace_enabled)
+    s_present_trace = (HostDisplayPresentTrace){0};
   const bool use_interpolation =
       diorama_frame_active && interpolation_enabled;
   if (!s_retained_frame.valid ||
@@ -717,6 +738,8 @@ bool HostDisplay_TryRepresentFrame(float alpha,
   if (s_producer_pacing) {
     const uint64_t interval = PresentIntervalNs(kHostDisplayPresent_GameTick);
     const uint64_t now = SDL_GetTicksNS();
+    if (s_present_trace_enabled)
+      s_present_trace.deadline_ns = s_present_deadline_ns;
     if (interval && s_present_deadline_ns && now < s_present_deadline_ns)
       return false;
     if (!s_present_deadline_ns || !interval ||
@@ -747,15 +770,23 @@ bool HostDisplay_TryRepresentFrame(float alpha,
   PerformanceContextForFrame(&s_retained_frame.slot, kHostDisplayPresent_GameTick);
 
   const PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_Presentation);
+  if (s_present_trace_enabled) s_present_trace.draw_start_ns = SDL_GetTicksNS();
   PresentFrame(&s_retained_frame.slot,
                use_interpolation
                    ? alpha : kPresentationFrameGenerationPhaseNone,
                HostDisplay_FramesPerSecond());
   PerformanceMetrics_End(pipeline);
+  if (s_present_trace_enabled) {
+    s_present_trace.draw_ns = SDL_GetTicksNS() - s_present_trace.draw_start_ns;
+    s_present_trace.vector_wait_ns = DioramaFrameGeneration_LastWaitNs();
+  }
   PerformanceMetrics_Add(kPerformanceCount_Represents, 1);
   const uint64_t vsync_start_ms =
       performance_enabled ? SDL_GetTicks() : 0;
-  if (!CompletePresent(kHostDisplayPresent_GameTick)) return false;
+  const uint64_t swap_start = s_present_trace_enabled ? SDL_GetTicksNS() : 0;
+  const bool completed = CompletePresent(kHostDisplayPresent_GameTick);
+  if (s_present_trace_enabled) s_present_trace.swap_ns = SDL_GetTicksNS() - swap_start;
+  if (!completed) return false;
   s_represent_count++;
   if (use_interpolation && alpha > s_maximum_represent_alpha)
     s_maximum_represent_alpha = alpha;

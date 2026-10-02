@@ -61,6 +61,16 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
  * Uniform background motion, including kDioramaFrameGenerationSkybox, has one
  * offset; ungenerated/OBJ planes and reset state return zero. Query immediately
  * after Prepare on the presenter. */
+/* Diagnostic mask of backgrounds synthesized by the optional compute path. */
+uint32_t DioramaFrameGeneration_GpuPlaneMask(void);
+/* All successfully synthesized planes from the most recent Prepare, including
+ * the CPU-analysis path. Diagnostics must not count a skipped pair as parity. */
+uint32_t DioramaFrameGeneration_GeneratedPlaneMask(void);
+/* Presenter-thread diagnostic of the projection fence wait in the last
+ * Prepare. Dormant unless explicitly enabled; never performs an extra wait. */
+void DioramaFrameGeneration_EnableWaitTrace(bool enabled);
+uint64_t DioramaFrameGeneration_LastWaitNs(void);
+
 ArRenderPointF DioramaFrameGeneration_PlaneOffset(int plane);
 
 /* Drop endpoint history and backend resources. Reset is safe after a render

@@ -31,8 +31,44 @@ static void TestCadence(void) {
   assert(HostFramePlayout_Phase(p, endpoint, endpoint + period) == .9999f);
 }
 
+/* Early preparation must select the same pair at the draw deadline, rather
+ * than advancing the displayed timeline or adding another buffered frame. */
+static void TestPrepareAhead(void) {
+  const uint64_t period = 16639263, origin = 1000000000;
+  const HostFramePlayout p = HostFramePlayout_Create(period, true, 1750);
+  uint64_t early_endpoint = origin, early_next = origin + period;
+  uint64_t ordinary_endpoint = origin, ordinary_next = origin + period;
+  unsigned early_uploads = 0;
+  for (unsigned i = 1; i < 900; ++i) {
+    const uint64_t deadline = origin + 3 * period + (uint64_t)i * 11111111;
+    const uint64_t target = HostFramePlayout_Target(p, deadline);
+    for (uint64_t now = deadline - 10000000; now <= deadline; now += 1000000) {
+      const uint64_t preparation_target = HostFramePlayout_Target(p,
+          HostFramePlayout_PreparationTime(p, now, deadline));
+      while (early_next + 12000000 <= now &&
+          HostFramePlayout_NeedsEndpoint(p, early_endpoint, preparation_target)) {
+        early_endpoint = early_next; early_next += period;
+        if (now < deadline) ++early_uploads;
+      }
+    }
+    while (ordinary_next + 12000000 <= deadline &&
+        HostFramePlayout_NeedsEndpoint(p, ordinary_endpoint, target)) {
+      ordinary_endpoint = ordinary_next; ordinary_next += period;
+    }
+    assert(early_endpoint == ordinary_endpoint);
+    assert(HostFramePlayout_Phase(p, early_endpoint, target) ==
+        HostFramePlayout_Phase(p, ordinary_endpoint, target));
+    assert(HostFramePlayout_PreparationTime(p, deadline + 1, deadline) == deadline + 1);
+    assert(HostFramePlayout_PreparationTime(p, deadline, 0) == deadline);
+  }
+  assert(early_uploads > 500);
+  const HostFramePlayout raw = HostFramePlayout_Create(period, false, 1750);
+  assert(HostFramePlayout_PreparationTime(raw, origin, origin + period) == origin);
+}
+
 int main(void) {
   TestCadence();
+  TestPrepareAhead();
   HostFramePlayout p = HostFramePlayout_Create(16000000, false, 3000);
   assert(p.delay_ns == 0 && HostFramePlayout_Target(p, 123456) == 123456);
   assert(HostFramePlayout_NeedsEndpoint(p, 20000000, 123456));

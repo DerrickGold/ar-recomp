@@ -24,6 +24,10 @@ void HostDevTools_ArmDioramaDump(void);
 bool HostDevTools_DioramaDumpArmed(void);
 void HostDevTools_ServiceDioramaDump(void);
 DevToolsCaptureResult HostDevTools_WriteFramebufferPpm(FILE *file, bool require_composite);
+struct FrameSlot;
+DevToolsCaptureResult HostDevTools_WriteFramebufferPpmAtPhase(
+    FILE *file, bool require_composite, float phase,
+    const struct FrameSlot *uploaded_frame);
 
 /* The inspector selection the renderer highlights; FrameSlot_Capture copies it
  * into each slot, and closing the inspector clears it. */

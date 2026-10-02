@@ -143,6 +143,9 @@ bool sr_scene_renderer_render(SrSceneRenderer *r, const SrSceneFrame *f,
         .pixels = r->view, .pitch_bytes = f->background_view.width * 4u, .pixel_byte_size = sizeof(r->view),
     };
     bool view_valid = view.width != 0;
+    p->backgroundPacket = f->background_packet;
+    if (p->backgroundPacket)
+        SrPpuBgPacket_Begin(p->backgroundPacket, (unsigned)pitch, (unsigned)height);
     ppu_runLine(p, 0);
     for (int y = -(int)f->top; y < 224 + f->bottom; ++y) {
         int row = y < 0 ? 0 : y > 223 ? 223 : y;
@@ -155,9 +158,14 @@ bool sr_scene_renderer_render(SrSceneRenderer *r, const SrSceneFrame *f,
         else ppu_runLine(p, y + 1);
         if (view_valid) view_valid = PpuRenderBackgroundViewLine(p, &view, y);
     }
+    if (!view_valid && p->backgroundPacket) {
+        p->backgroundPacket->words[2] &= ~4u;
+        p->backgroundPacket->owned_sources &= ~4u;
+    }
     *out = (SrSceneSurfaces){.backdrop = r->pixels[0], .width = width,
         .height = height, .pitch_pixels = pitch,
         .background_view = view_valid ? r->view : NULL, .view_width = (int)view.width};
+    p->backgroundPacket = NULL;
     for (unsigned bg = 0; bg < 2; ++bg) {
         for (unsigned band = 0; band < 3; ++band) {
             out->bands[bg][band] = r->pixels[1 + bg * 3 + band];

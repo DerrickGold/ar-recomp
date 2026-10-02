@@ -10,13 +10,13 @@ static PresentationUploadMirror
 static DioramaCoverageMask s_coverage_masks[kDioramaPlane_Count];
 static uint32_t s_coverage_valid_mask;
 
-DioramaUploadResult Diorama_Upload(
+DioramaUploadResult Diorama_UploadResolved(
     ArRenderDevice *device,
     ArRenderTexture textures[kDioramaPlane_Count],
     const uint8_t *const pixels[kDioramaPlane_Count],
     const size_t pitch_bytes[kDioramaPlane_Count],
     int snes_width, int snes_height, int obj_apron, unsigned bg_apron_mask,
-    uint32_t plane_mask) {
+    uint32_t plane_mask, uint32_t gpu_mask, uint32_t gpu_changed) {
   DioramaUploadResult upload = {0};
   DioramaPerformanceScope performance =
       DioramaPerformance_Begin(kDioramaPerformance_Upload);
@@ -34,18 +34,23 @@ DioramaUploadResult Diorama_Upload(
     /* Mode 1 never draws BG4; unlike the other primary/split planes it has no
      * persistent texture and is not part of the compositor layer table. */
     if (plane == SR_PPU_OVERLAY_BG4) continue;
+    const bool on_gpu = (gpu_mask & (1u << plane)) != 0;
     if (!(plane_mask & (1u << plane)) ||
-        !ArRenderTexture_IsValid(textures[plane]) || !pixels[plane] ||
+        !ArRenderTexture_IsValid(textures[plane]) || (!on_gpu && !pixels[plane]) ||
         pitch_bytes[plane] > INT_MAX)
       continue;
     DioramaPlaneCaptureRegion region;
     if (!DioramaPlaneCaptureRegion_Resolve(
             plane, snes_width, snes_height, obj_apron, bg_apron_mask, &region))
       continue;
-    const uint8_t *source = pixels[plane] +
-        (size_t)region.x * sizeof(uint32_t);
+    const uint8_t *source = pixels[plane] ? pixels[plane] +
+        (size_t)region.x * sizeof(uint32_t) : NULL;
     PresentationUploadResult plane_upload = {0};
-    const bool synchronized = PresentationUploadMirror_UploadArgb8888(
+    if (on_gpu) {
+      s_upload_mirrors[plane].valid = false;
+      plane_upload.changed = (gpu_changed & (1u << plane)) != 0;
+    }
+    const bool synchronized = on_gpu || PresentationUploadMirror_UploadArgb8888(
         &s_upload_mirrors[plane], device, textures[plane], source,
         region.width, region.height, (int)pitch_bytes[plane],
         region.x, 0, &plane_upload);
@@ -56,7 +61,7 @@ DioramaUploadResult Diorama_Upload(
     upload.synchronized_plane_mask |= 1u << plane;
     if (plane_upload.changed) upload.changed_plane_mask |= 1u << plane;
     upload.coverage_masks[plane] = DioramaCoverage_FullMask();
-    if (DioramaPlaneUsesSparseCoverage(plane)) {
+    if (!on_gpu && DioramaPlaneUsesSparseCoverage(plane)) {
       const int displayed_width = snes_width - obj_apron * 2;
       const uint8_t *displayed = pixels[plane] +
           (size_t)obj_apron * sizeof(uint32_t);
@@ -78,6 +83,15 @@ DioramaUploadResult Diorama_Upload(
   }
   DioramaPerformance_End(performance);
   return upload;
+}
+
+DioramaUploadResult Diorama_Upload(ArRenderDevice *device,
+    ArRenderTexture textures[kDioramaPlane_Count],
+    const uint8_t *const pixels[kDioramaPlane_Count],
+    const size_t pitches[kDioramaPlane_Count], int width, int height,
+    int apron, unsigned bg_apron, uint32_t mask) {
+  return Diorama_UploadResolved(device, textures, pixels, pitches,
+      width, height, apron, bg_apron, mask, 0, 0);
 }
 
 void DioramaUpload_Reset(void) {

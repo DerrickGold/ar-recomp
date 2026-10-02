@@ -160,6 +160,7 @@ typedef struct VirtualTilemapFixture {
   int calls;
   int first_x, last_x;
   int first_y, last_y;
+  bool fallback;
 } VirtualTilemapFixture;
 
 static PpuVirtualTilemapLookupResult lookup_virtual_tile(const void *context, int32_t tile_x,
@@ -176,6 +177,7 @@ static PpuVirtualTilemapLookupResult lookup_virtual_tile(const void *context, in
     if (tile_y > map->last_y) map->last_y = tile_y;
   }
   map->calls++;
+  if (map->fallback && tile_x == 7) return kPpuVirtualTilemapLookup_FallbackAuthentic;
   if (tile_x < map->min_x || tile_x > map->max_x || tile_y < map->min_y || tile_y > map->max_y)
     return false;
   *entry = (tile_x & 1) ? map->odd_entry : map->even_entry;
@@ -596,6 +598,122 @@ static void TestVirtualTilemapPresentationBandsPreserveFlatOutput(void) {
   CHECK(memcmp(fb, baseline, sizeof(baseline)) == 0);
 
   ppu_free(ppu);
+}
+
+static uint32_t packet_edit(void *context, int32_t x, int32_t y, SrPpuCaptureTile *tile) {
+  (void)context; (void)y;
+  *tile = (SrPpuCaptureTile){.entry = (uint16_t)(3 | (3 << 10) | 0xc000),
+      .band = (uint8_t)((unsigned)x % 3),
+      .flags = (x & 1) ? SR_PPU_CAPTURE_TILE_REPLACE : 0};
+  for (unsigned row = 0; row < 8; ++row) {
+    tile->black_rows[row] = (uint8_t)(1u << row);
+    tile->transparent_rows[row] = (uint8_t)(0x80u >> row);
+  }
+  return 1;
+}
+
+static void TestBackgroundPacketScanlineHistory(void) {
+  enum { width = 288, height = 16 };
+  Ppu *ppu = ppu_init(); CHECK(ppu != NULL);
+  SrPpuBgPacket *packet = calloc(1, sizeof(*packet)); CHECK(packet != NULL);
+  static uint32_t fb[width * kH], bands[3][width * height];
+  VirtualTilemapFixture map = {.min_x = -20, .max_x = 80, .min_y = -20, .max_y = 80,
+      .even_entry = (2 | (2 << 10)), .odd_entry = (3 | (3 << 10) | 0xe000)};
+  const PpuVirtualTilemapBinding binding = {.lookup = lookup_virtual_tile,
+      .band_lookup = lookup_virtual_band, .context = &map,
+      .flags = kPpuVirtualTilemapFlag_IncludeAuthentic};
+  const unsigned policies[] = {0, kPpuOverlayFlag_MarkBgHalfAdd,
+      kPpuOverlayFlag_ApplyBgFixedColorSubtract, kPpuOverlayFlag_MarkMainScreenWinner};
+  for (unsigned tile_mode = 0; tile_mode < 2; ++tile_mode)
+  for (unsigned policy = 0; policy < 4; ++policy) {
+    setup_virtual_bg(ppu, 16, (uint8_t *)fb, width * 4);
+    CHECK(PpuBeginDrawingSized(ppu, (uint8_t *)fb, width * 4, kH, 0));
+    CHECK(PpuSetVirtualTilemap(ppu, 0, &binding));
+    CHECK(PpuBindOverlaySurfaceSized(ppu, 0, (uint8_t *)bands[0], width * 4, height));
+    for (unsigned band = 1; band < 3; ++band)
+      CHECK(PpuBindOverlayPrioSurface(ppu, 0, band, (uint8_t *)bands[band]));
+    CHECK(PpuSetOverlayCapture(ppu, 0, -16, 0, width, height, policies[policy] | (tile_mode && policy < 3 ? kPpuOverlayFlag_RemoveFromGame : 0)));
+    ppu->captureTiles[0] = (SrPpuCaptureTileBinding){.lookup = packet_edit};
+    ppu->fixedColor = bgr555(3, 2, 1);
+    memset(packet, 0, sizeof(*packet));
+    packet->request_flags = tile_mode ? SR_PPU_BG_PACKET_TILES | SR_PPU_BG_PACKET_VALIDATE_TILES : 0;
+    packet->words[0] = width; packet->words[1] = height;
+    ppu->backgroundPacket = packet;
+    ppu_runLine(ppu, 0);
+    for (unsigned y = 0; y < height; ++y) {
+      /* Every line sees different palette/brightness, tile bits, scroll and
+       * window state. Later writes must never recolour earlier packet rows. */
+      ppu_write(ppu, 0x00, (uint8_t)(7 + y % 9));
+      ppu_write(ppu, 0x21, 0x21);
+      ppu_write(ppu, 0x22, (uint8_t)(y * 13));
+      ppu_write(ppu, 0x22, (uint8_t)(y * 7));
+      ppu_write(ppu, 0x15, 0x80);
+      ppu_write(ppu, 0x16, (uint8_t)(32 + (y & 7)));
+      ppu_write(ppu, 0x17, 0);
+      ppu_write(ppu, 0x18, (uint8_t)(y * 17));
+      ppu_write(ppu, 0x19, (uint8_t)(y * 19));
+      ppu->hScroll[0] = (uint16_t)y;
+      ppu->screenWindowed[0] = y & 1;
+      ppu->windowsel = kWindow1Enabled;
+      ppu->window1left = 20; ppu->window1right = 39;
+      ppu_runLine(ppu, (int)y + 1);
+    }
+    for (unsigned y = 0; y < height; ++y) {
+      const unsigned row = SrPpuBgPacket_Row(0, y);
+      CHECK(packet->words[SR_PPU_BG_PACKET_HEADER_WORDS + row * SR_PPU_BG_PACKET_ROW_WORDS] ==
+          (policy < 3 ? (tile_mode ? 4u : 1u) : 0u));
+      if (policy >= 3) continue; /* Winner-dependent output stays on CPU. */
+      for (unsigned band = 0; band < 3; ++band) for (unsigned x = 0; x < width; ++x)
+        if (SrPpuBgPacket_Color(packet, 0, band, x, y) != bands[band][y * width + x]) {
+          fprintf(stderr, "tile=%u policy=%u band=%u (%u,%u) got=%08x expected=%08x\n",
+              tile_mode, policy, band, x, y, SrPpuBgPacket_Color(packet, 0, band, x, y), bands[band][y * width + x]);
+          CHECK(false); return;
+        }
+    }
+    ppu->backgroundPacket = NULL;
+  }
+  free(packet); ppu_free(ppu);
+}
+
+static void TestBackgroundPacketOwnershipAndFallback(void) {
+  enum { width = 320, capture_width = 288, height = 16 };
+  Ppu *ppu = ppu_init(); CHECK(ppu);
+  SrPpuBgPacket *packet = calloc(1, sizeof(*packet)); CHECK(packet);
+  static uint32_t fb[width * kH], bands[3][width * height], expected[3][width * height];
+  for (unsigned edits = 0; edits < 2; ++edits)
+  for (unsigned apron = 0; apron <= 16; apron += 16)
+  for (unsigned fallback = 0; fallback < 2; ++fallback) for (unsigned owner = 0; owner < 2; ++owner) {
+    setup_virtual_bg(ppu, 16, (uint8_t *)fb, width * 4);
+    CHECK(PpuBeginDrawingSized(ppu, (uint8_t *)fb, width * 4, kH, 0));
+    VirtualTilemapFixture map = {.min_x = -20, .max_x = 80, .min_y = -20, .max_y = 80,
+        .even_entry = (2 | (2 << 10)), .odd_entry = (3 | (3 << 10) | 0xe000), .fallback = fallback != 0};
+    const PpuVirtualTilemapBinding binding = {.lookup = lookup_virtual_tile,
+        .band_lookup = lookup_virtual_band, .context = &map,
+        .flags = kPpuVirtualTilemapFlag_IncludeAuthentic};
+    CHECK(PpuSetVirtualTilemap(ppu, 0, &binding));
+    CHECK(PpuBindOverlaySurfaceSized(ppu, 0, (uint8_t *)bands[0], width * 4, height));
+    for (unsigned band = 1; band < 3; ++band)
+      CHECK(PpuBindOverlayPrioSurface(ppu, 0, band, (uint8_t *)bands[band]));
+    CHECK(PpuSetOverlayCapture(ppu, 0, -16, 0, capture_width, height, kPpuOverlayFlag_RemoveFromGame));
+    ppu->captureTiles[0] = (SrPpuCaptureTileBinding){.lookup = edits ? packet_edit : NULL, .apron = apron};
+    packet->request_flags = owner ? SR_PPU_BG_PACKET_TILES : 0;
+    SrPpuBgPacket_Begin(packet, width, height); ppu->backgroundPacket = packet;
+    memset(bands, 0xa5, sizeof(bands));
+    ppu_runLine(ppu, 0);
+    for (unsigned y = 0; y < height; ++y) { ppu->hScroll[0] = (uint16_t)y; ppu_runLine(ppu, (int)y + 1); }
+    if (!owner) memcpy(expected, bands, sizeof(expected));
+    else {
+      CHECK(packet->owned_sources == (fallback ? 0u : 1u));
+      if (!fallback) CHECK(SrPpuBgPacket_Meta(packet, 0, 0)[0] == (edits || apron ? 4u : 3u));
+      for (unsigned band = 0; band < 3; ++band) for (unsigned y = 0; y < height; ++y)
+        for (unsigned x = 0; x < width; ++x) {
+          CHECK(SrPpuBgPacket_Color(packet, 0, band, x, y) == expected[band][y * width + x]);
+          CHECK(bands[band][y * width + x] == (fallback ? expected[band][y * width + x] : 0xa5a5a5a5u));
+        }
+    }
+    ppu->backgroundPacket = NULL;
+  }
+  free(packet); ppu_free(ppu);
 }
 
 static void TestVirtualTilemapVerticalMargin(void) {
@@ -2629,6 +2747,7 @@ static void TestCapturedPaddingReachesBudget(void) {
 
   static uint32_t capture[kCaptureWidth * 4];
   static uint8_t fb[kCaptureWidth * 4 * 4];
+  static SrPpuBgPacket packet;
 
   /* Render one line twice: once with the widened padding enabled, once with it
    * off, and compare the same column. */
@@ -2667,7 +2786,16 @@ static void TestCapturedPaddingReachesBudget(void) {
                                 kCaptureWidth * sizeof(uint32_t)));
     CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, -kBudget, 0, kCaptureWidth, 2,
                                kPpuOverlayFlag_RemoveFromGame));
+    memset(&packet, 0, sizeof(packet));
+    packet.words[0] = kCaptureWidth; packet.words[1] = 2;
+    ppu->backgroundPacket = &packet;
     ppu_runLine(ppu, 1);
+
+    /* The appended reference-sampled mirror pixels must invalidate this
+     * source row, so GPU export falls back during the collapsed-edge frame. */
+    CHECK(packet.words[SR_PPU_BG_PACKET_HEADER_WORDS +
+        SrPpuBgPacket_Row(1, 0) * SR_PPU_BG_PACKET_ROW_WORDS] == (enabled ? 0u : 1u));
+    ppu->backgroundPacket = NULL;
 
     /* Column 0 of the capture is screen x = -120, i.e. the far end of the
      * collapsed left margin. */
@@ -3082,6 +3210,8 @@ static void TestObjReceiverTransforms(void) {
   ppu_free(ppu);
 }
 int main(void) {
+  TestBackgroundPacketScanlineHistory();
+  TestBackgroundPacketOwnershipAndFallback();
   TestObjReceiverTransforms();
   TestWorldNavigationPartialBrightnessCapture();
   TestObjRangeRaster();

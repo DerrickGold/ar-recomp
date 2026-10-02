@@ -86,6 +86,45 @@ endif()
 
 find_package(SDL3 3.4.0 REQUIRED)
 
+# Standalone GPU PPU parity/throughput harness. The live experiment shares its
+# global-motion kernels, but does not link the harness or offline tile packet.
+option(AR_PPU_GPU_PROBE "Build the experimental GPU background parity/throughput probe" OFF)
+if(AR_PPU_GPU_PROBE)
+    add_executable(actraiser_ppu_gpu_probe
+        tools/ppu_gpu/probe.c tools/ppu_gpu/packet.c src/platform/sdl/gpu_global_motion_sdl.c
+        tools/ppu_gpu/motion_checks.c src/present/presentation_frame_generation.c
+        src/action/action_scene_snapshot.c src/action/action_room_scene.c src/action/action_bg_world.c
+        src/actraiser/quintet_lzss.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/scene_renderer.c
+        ${SNESRECOMP_RUNNER_DEVICE_ROOT}/src/snes/ppu.c
+        ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE})
+    target_include_directories(actraiser_ppu_gpu_probe PRIVATE src tools/ppu_gpu
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
+        ${SNESRECOMP_RUNNER_PRIVATE_INCLUDE_DIRS})
+    target_link_libraries(actraiser_ppu_gpu_probe PRIVATE SDL3::SDL3 actraiser_math)
+    target_compile_definitions(actraiser_ppu_gpu_probe PRIVATE
+        SNESRECOMP_ENABLE_SIMD=$<BOOL:${SNESRECOMP_ENABLE_SIMD}>)
+    # This isolated PPU has no runner callbacks. Drop unreferenced register-write
+    # entry points just as the native/WASM editor comparison tools do.
+    if(MSVC)
+        target_compile_options(actraiser_ppu_gpu_probe PRIVATE /Gy)
+        target_link_options(actraiser_ppu_gpu_probe PRIVATE /OPT:REF)
+    else()
+        target_compile_options(actraiser_ppu_gpu_probe PRIVATE -ffunction-sections -fdata-sections)
+        if(APPLE)
+            target_link_options(actraiser_ppu_gpu_probe PRIVATE -Wl,-dead_strip)
+        else()
+            target_link_options(actraiser_ppu_gpu_probe PRIVATE -Wl,--gc-sections)
+        endif()
+    endif()
+    if(BUILD_TESTING)
+        add_test(NAME actraiser_ppu_gpu_probe COMMAND actraiser_ppu_gpu_probe --iterations 8)
+        set_tests_properties(actraiser_ppu_gpu_probe PROPERTIES SKIP_RETURN_CODE 77)
+        add_test(NAME actraiser_ppu_gpu_motion_probe COMMAND actraiser_ppu_gpu_probe --motion --iterations 8)
+        set_tests_properties(actraiser_ppu_gpu_motion_probe PROPERTIES SKIP_RETURN_CODE 77)
+    endif()
+endif()
+
 # The game source manifest includes these too. Small ROM-free consumers share
 # this target so the host byte-provider contract has no SDL dependency.
 add_library(actraiser_font_resources STATIC
@@ -548,6 +587,9 @@ if(BUILD_TESTING)
         add_test(NAME actraiser_pipeline_performance_tool
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tests/pipeline_performance_tool_test.py)
+        add_test(NAME actraiser_frame_pacing_tool
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/frame_pacing_tool_test.py)
         set_tests_properties(actraiser_pipeline_performance_tool PROPERTIES
             ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
         add_test(NAME actraiser_action_editor_build
@@ -1415,6 +1457,12 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_frame_producer_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_frame_producer_test PRIVATE SDL3::SDL3)
     add_test(NAME actraiser_frame_producer COMMAND actraiser_frame_producer_test)
+
+    add_executable(actraiser_gamepad_poll_test tests/gamepad_poll_test.c
+        src/platform/sdl/gamepad_poll_sdl.c)
+    target_include_directories(actraiser_gamepad_poll_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_gamepad_poll_test PRIVATE SDL3::SDL3)
+    add_test(NAME actraiser_gamepad_poll COMMAND actraiser_gamepad_poll_test)
 
     add_executable(actraiser_frame_queue_test tests/frame_queue_test.c
         src/host/frame_queue.c)
@@ -2469,6 +2517,7 @@ if(BUILD_TESTING)
         # work with no SDL/PPU closure, so linking it here costs nothing.
         src/randomizer/randomizer.c src/action/action_placements.c
         src/app/input_map.c
+        src/platform/sdl/gamepad_poll_sdl.c
         src/app/user_data_dir.c
     )
     target_link_libraries(actraiser_settings_test PRIVATE
@@ -2687,6 +2736,7 @@ if(BUILD_TESTING)
         tests/host_clock_stub.c
         src/host/host_display_status.c
         src/app/input_map.c
+        src/platform/sdl/gamepad_poll_sdl.c
         src/app/user_data_dir.c
         # The layer editor's row model. Pure, so it adds no SDL/PPU closure to
         # this target -- which is the whole reason the overlay reaches the
@@ -3840,10 +3890,27 @@ if(BUILD_TESTING)
     add_executable(actraiser_diorama_frame_generation_test
         tests/diorama_frame_generation_test.c
         src/platform/sdl/diorama_frame_generation_sdl.c
+        src/platform/sdl/gpu_block_motion_sdl.c
+        src/platform/sdl/gpu_global_motion_sdl.c
         src/present/presentation_frame_generation.c
         src/platform/sdl/presentation_geometry_sdl.c
         src/render/presentation_layout.c
     )
+    add_executable(actraiser_diorama_bg_gpu_test
+        tests/diorama_bg_gpu_test.c src/platform/sdl/diorama_bg_gpu_sdl.c
+        src/platform/sdl/presentation_geometry_sdl.c src/render/presentation_layout.c)
+    add_executable(actraiser_gpu_block_motion_test
+        tests/gpu_block_motion_test.c src/platform/sdl/gpu_block_motion_sdl.c
+        src/present/presentation_frame_generation.c)
+    target_include_directories(actraiser_gpu_block_motion_test PRIVATE src)
+    target_link_libraries(actraiser_gpu_block_motion_test PRIVATE SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_gpu_block_motion COMMAND actraiser_gpu_block_motion_test)
+    set_tests_properties(actraiser_gpu_block_motion PROPERTIES SKIP_RETURN_CODE 77)
+    target_include_directories(actraiser_diorama_bg_gpu_test PRIVATE src)
+    target_link_libraries(actraiser_diorama_bg_gpu_test PRIVATE
+        actraiser_render_sdl_test_support SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_diorama_bg_gpu COMMAND actraiser_diorama_bg_gpu_test)
+    set_tests_properties(actraiser_diorama_bg_gpu PROPERTIES SKIP_RETURN_CODE 77)
     target_link_libraries(actraiser_diorama_frame_generation_test PRIVATE
         actraiser_render_sdl_test_support)
     target_include_directories(actraiser_diorama_frame_generation_test PRIVATE
@@ -3856,6 +3923,16 @@ if(BUILD_TESTING)
         COMMAND actraiser_diorama_frame_generation_test)
     set_tests_properties(actraiser_diorama_frame_generation PROPERTIES
         ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
+    add_test(NAME actraiser_diorama_frame_generation_compute
+        COMMAND actraiser_diorama_frame_generation_test)
+    set_tests_properties(actraiser_diorama_frame_generation_compute PROPERTIES
+        ENVIRONMENT "SDL_AUDIODRIVER=dummy;AR_REQUIRE_GPU_RENDERER=1;AR_GPU_BG_MOTION=validate"
+        SKIP_RETURN_CODE 77)
+    add_test(NAME actraiser_diorama_frame_generation_owned
+        COMMAND actraiser_diorama_frame_generation_test)
+    set_tests_properties(actraiser_diorama_frame_generation_owned PROPERTIES
+        ENVIRONMENT "SDL_AUDIODRIVER=dummy;AR_REQUIRE_GPU_RENDERER=1;AR_GPU_BG_MOTION=owned"
+        SKIP_RETURN_CODE 77)
     add_test(NAME actraiser_diorama_frame_generation_gpu
         COMMAND actraiser_diorama_frame_generation_test)
     set_tests_properties(actraiser_diorama_frame_generation_gpu PROPERTIES

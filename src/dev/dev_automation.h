@@ -3,7 +3,7 @@
 /* DevAutomation: developer actions scheduled from the environment, so headless
  * and replay runs can do at a chosen game frame what a developer would do by
  * hand: arm a diorama layer dump (AR_DIORAMA_DUMP_GF), write screenshots
- * (AR_SHOT_AT_GF, AR_SHOT_EVERY/FROM/TO, AR_SHOT_REQUIRE_COMPOSITE), fire the
+ * (AR_SHOT_AT_GF, AR_SHOT_EVERY/FROM/TO, AR_SHOT_REQUIRE_COMPOSITE, AR_SHOT_PHASE), fire the
  * configured warp (AR_WARP_AT), switch diorama mode on (AR_DIORAMA_AT), and
  * end the run (AR_QUIT_FRAMES). Each variable is read once.
  * Phase: host (main thread, between frames). */
@@ -12,8 +12,9 @@
 
 /* After the frame draw: arms the layer dump when this game frame is listed. */
 void DevAutomation_ArmScheduledDioramaDump(void);
-/* After the frame draw: writes the screenshot scheduled for this game frame. */
-void DevAutomation_CaptureScheduledScreenshot(void);
+struct FrameSlot;
+/* After upload when available (NULL for pure headless): writes the screenshot scheduled for this game frame. */
+void DevAutomation_CaptureScheduledScreenshot(const struct FrameSlot *uploaded_frame);
 /* Runner owner may request a main-thread boundary for exact diagnostic frames. */
 bool DevAutomation_RequiresHostService(void);
 /* After a batch of emulated ticks: fires the scheduled warp and diorama

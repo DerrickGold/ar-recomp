@@ -1,4 +1,5 @@
 #include "app/input_map.h"
+#include "host/gamepad_poll.h"
 
 #include <stddef.h>
 #include <limits.h>
@@ -151,9 +152,23 @@ void InputMap_Init(void) {
   }
   if (!s_pad_count)
     fprintf(stderr, "[input] no gamepad connected; keyboard bindings active\n");
+  const char *poll_option = getenv("AR_GAMEPAD_POLL_THREAD");
+  /* Linux HID feature reports can stall SDL's main-thread event pump. Keep
+   * other platforms on their established device path until physical-device
+   * testing there; the portable worker remains available for validation. */
+  bool use_poll_thread = false;
+#if defined(SDL_PLATFORM_LINUX)
+  use_poll_thread = true;
+#endif
+  if (poll_option) use_poll_thread = strcmp(poll_option, "0") != 0;
+  if (use_poll_thread) {
+    fprintf(stderr, "[input] gamepad polling worker %s\n",
+            HostGamepadPoll_Init() ? "enabled" : "unavailable; using event pump");
+  }
 }
 
 void InputMap_Shutdown(void) {
+  HostGamepadPoll_Shutdown();
   for (int i = 0; i < s_pad_count; i++) SDL_CloseGamepad(s_pads[i].pad);
   s_pad_count = 0;
   s_hint_class = kInputClass_Keyboard;
@@ -728,6 +743,9 @@ bool InputMap_GamepadIsActive(void) {
    * happens to appear earlier in that queue. */
   GamepadSlot *selected = SelectedGamepad();
   if (!selected || !selected->pad) return false;
+  if (HostGamepadPoll_Enabled())
+    return HostGamepadPoll_PhysicalActive(selected->id, (unsigned)stick_deadzone,
+                                         kAxisPressThreshold);
   for (int button = 0; button < SDL_GAMEPAD_BUTTON_COUNT; button++)
     if (SDL_GetGamepadButton(selected->pad, (SDL_GamepadButton)button))
       return true;

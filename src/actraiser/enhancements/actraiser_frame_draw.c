@@ -11,6 +11,93 @@
 static SrPpuSurfaceView s_live_diorama_skybox;
 static int32_t s_live_diorama_skybox_world_x;
 static bool s_live_diorama_skybox_periodic;
+static SrPpuBgPacket s_background_packet;
+static const SrPpuBgPacket *s_live_background_packet;
+
+const SrPpuBgPacket *ActRaiser_LiveBackgroundPacket(void) {
+  return s_live_background_packet;
+}
+
+/* Development gate until full-workload GPU/CPU parity and pacing pass. The
+ * packet is per-scanout state; FrameQueue owns it across producer ticks. */
+static bool BackgroundPacketEnabled(void) {
+  const char *value = getenv("AR_GPU_BG_CAPTURE");
+  return value && value[0] && value[0] != '0';
+}
+
+static void FinishBackgroundPacket(void) {
+  s_live_background_packet = NULL;
+  SrPpuBgPacket *p = &s_background_packet;
+  if (!BackgroundPacketEnabled() || !g_diorama_frame_active) return;
+  static bool reported;
+  if (!reported) {
+    reported = true;
+    fprintf(stderr, "[gpu-bg-capture] first packet=%ux%u mask=%u\n", p->words[0], p->words[1], p->words[2]);
+  }
+  if (!p->words[2]) return;
+  const char *option = getenv("AR_GPU_BG_CAPTURE");
+  const bool validate = strcmp(option, "validate") == 0 || strcmp(option, "tiles-validate") == 0;
+  static unsigned frames, rejected, mismatch_frames;
+  unsigned mismatches = 0;
+  const int planes[2][3] = {{SR_PPU_OVERLAY_BG1, kDioramaPlane_Bg1Hi, kDioramaPlane_Bg1Far},
+      {SR_PPU_OVERLAY_BG2, kDioramaPlane_Bg2Hi, kDioramaPlane_Bg2Far}};
+  for (unsigned bg = 0; bg < 2; ++bg) {
+    bool ready = (p->words[2] & (1u << bg)) != 0;
+    for (unsigned y = 0; ready && y < p->words[1]; ++y)
+      ready = p->words[SR_PPU_BG_PACKET_HEADER_WORDS +
+          SrPpuBgPacket_Row(bg, y) * SR_PPU_BG_PACKET_ROW_WORDS] != 0;
+    if (ready && validate) for (unsigned band = 0; band < 3; ++band) {
+      const uint32_t *pixels = (const uint32_t *)g_diorama_layer_pixels[planes[bg][band]];
+      for (unsigned y = 0; y < p->words[1]; ++y) for (unsigned x = 0; x < p->words[0]; ++x) {
+        const uint32_t got = SrPpuBgPacket_Color(p, bg, band, x, y);
+        const uint32_t expected = pixels ? pixels[y * p->words[0] + x] : 0;
+        if (got != expected) {
+          if (mismatches++ == 0) fprintf(stderr,
+              "[gpu-bg-capture] mismatch bg=%u band=%u x=%u y=%u got=%08x expected=%08x\n",
+              bg, band, x, y, got, expected);
+          ready = false;
+        }
+      }
+    }
+    /* The hub promotes statue faces after scanout; it remains CPU-owned. */
+    if (bg == 1 && ActRaiser_DioramaDeathHeimHubFacesPromoted()) ready = false;
+    if (!ready) {
+      /* Mixed supported/unsupported frames still have complete CPU fallback
+       * surfaces. Materialize only the rows that scanout actually omitted. */
+      if (p->owned_sources & (1u << bg)) {
+        for (unsigned y = 0; y < p->words[1]; ++y) {
+          const unsigned row = SrPpuBgPacket_Row(bg, y);
+          if (p->words[SR_PPU_BG_PACKET_HEADER_WORDS + row * SR_PPU_BG_PACKET_ROW_WORDS] < 2) continue;
+          for (unsigned band = 0; band < 3; ++band) {
+            uint32_t *dst = (uint32_t *)g_diorama_layer_pixels[planes[bg][band]];
+            if (dst) for (unsigned x = 0; x < p->words[0]; ++x)
+              dst[y * p->words[0] + x] = SrPpuBgPacket_Color(p, bg, band, x, y);
+          }
+        }
+      }
+      p->owned_sources &= ~(1u << bg);
+      p->words[2] &= ~(1u << bg); ++rejected;
+    }
+  }
+  if ((p->words[2] & 4u) && validate && s_live_diorama_skybox.data) {
+    for (unsigned y = 0; y < p->words[5]; ++y) {
+      const uint32_t *expected = (const uint32_t *)(s_live_diorama_skybox.data +
+          y * s_live_diorama_skybox.pitch_bytes);
+      for (unsigned x = 0; x < p->words[4]; ++x) {
+        const uint32_t got = SrPpuBgPacket_Color(p, 2, 0, x, y);
+        if (got != expected[x] && mismatches++ == 0)
+          fprintf(stderr, "[gpu-bg-capture] skybox mismatch x=%u y=%u got=%08x expected=%08x\n",
+              x, y, got, expected[x]);
+      }
+    }
+    if (mismatches) { p->words[2] &= ~4u; p->owned_sources &= ~4u; }
+  }
+  if (mismatches) ++mismatch_frames;
+  if (++frames % 300 == 0) fprintf(stderr,
+      "[gpu-bg-capture] frames=%u rejected-sources=%u mismatch-frames=%u mask=%u owned=%u\n",
+      frames, rejected, mismatch_frames, p->words[2], p->owned_sources);
+  if (p->words[2]) s_live_background_packet = p;
+}
 
 void ActRaiser_LiveDioramaSkybox(SrPpuSurfaceView *out, int32_t *world_x,
                                bool *periodic) {
@@ -142,11 +229,18 @@ static void ActRaiser_ReportVerticalCaptureRows(void) {
      * every row it walked. */
     const size_t plane_pitch =
         ActionApron_SurfacePitch(width, SR_PPU_OBJ_APRON);
+    const SrPpuBgPacket *packet = ActRaiser_LiveBackgroundPacket();
+    const bool gpu_bg2 = packet && (packet->owned_sources & 2u);
     if (bg2)
       for (int y = 0; y < kHostDisplayFramebufferHeight; y++) {
         const uint32_t *r = (const uint32_t *)(bg2 + (size_t)y * plane_pitch);
         for (int x = 0; x < width + (int)SR_PPU_OBJ_APRON * 2; x++)
-          if (r[x]) {
+          /* Owned captures deliberately leave CPU pixels untouched. Keep this
+           * opt-in diagnostic about the current frame, not the last CPU one. */
+          if (gpu_bg2 ? ((unsigned)y < packet->words[1] &&
+                        (unsigned)x < packet->words[0] &&
+                        SrPpuBgPacket_Color(packet, 1, 0, (unsigned)x, (unsigned)y))
+                      : r[x]) {
             if (plane0 < 0)
               plane0 = y;
             plane1 = y;
@@ -258,6 +352,7 @@ static void ActRaiser_FinishSceneCapture(void) {
    * free space. */
   const ActionApronGeometry apron_geom = ActRaiser_ObjApronGeometry();
   ActRaiser_DioramaApronFinish(&apron_geom);
+  FinishBackgroundPacket();
 }
 
 static void ActRaiser_PublishFrameCapture(SrResult scanout_status,
@@ -283,6 +378,8 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
     const SrPpuFrameTransactionContext *context);
 
 void ActRaiserDrawPpuFrame(void) {
+  s_live_background_packet = NULL;
+  s_background_packet.words[2] = 0;
   ActRaiserSimMenu_ObserveScene(ActRaiser_ReadWram16(kActRaiserWram_MapGroup));
   const PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_Ppu);
   const uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
@@ -434,6 +531,18 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   const bool observe_lines =
       ActRaiser_DioramaBoundsTrackingActive() || scanout_context.shape_trace ||
       ActRaiserActionBg_RoomSceneFrameObserverActive();
+  const char *bg_packet_option = getenv("AR_GPU_BG_CAPTURE");
+  s_background_packet.request_flags = 0;
+  if (bg_packet_option && (strcmp(bg_packet_option, "owned") == 0 ||
+      strcmp(bg_packet_option, "tiles-validate") == 0)) {
+    s_background_packet.request_flags = SR_PPU_BG_PACKET_TILES;
+    if (strcmp(bg_packet_option, "tiles-validate") == 0)
+      s_background_packet.request_flags |= SR_PPU_BG_PACKET_VALIDATE_TILES;
+  }
+  /* This native-only room promotes statue sprites into BG2 after scanout. */
+  if (g_ram[kActRaiserWram_MapGroup] == kActRaiserMapGroup_DeathHeim &&
+      g_ram[kActRaiserWram_CurrentMap] == kActRaiserDeathHeimMap_Hub)
+    s_background_packet.request_flags = 0;
   const SrPpuScanoutRequest scanout_request = {
       .struct_size = sizeof(scanout_request),
       .lifetime_generation = scanout_generations.lifetime_generation,
@@ -442,6 +551,8 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
           ? ActRaiser_PpuScanoutLineCallback : NULL,
       .irq_callback = ActRaiser_PpuScanoutIrqCallback,
       .user_data = &scanout_context,
+      .background_packet = profile_diorama && BackgroundPacketEnabled()
+          ? &s_background_packet : NULL,
   };
 
   /* Resolve the stable OAM footprint before scanout; the live sprite evaluator

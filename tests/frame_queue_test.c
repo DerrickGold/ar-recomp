@@ -3,6 +3,7 @@
 #include "support/test_assert.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static SrPpuSurfaceView View(uint32_t *pixels) {
@@ -53,6 +54,43 @@ static void TestPixels(HostFramePacket *p) {
   p->capacity = capacity;
 }
 
+static void TestBackgroundPacket(HostFramePacket *p) {
+  SrPpuBgPacket *packet = calloc(1, sizeof(*packet));
+  assert(packet);
+  packet->words[0] = 640;
+  packet->words[1] = 352;
+  packet->words[2] = 3;
+  packet->words[SR_PPU_BG_PACKET_WORDS - 1] = 0x12345678u;
+  p->frame = (FrameSlot){.diorama_active = true, .background_packet = packet};
+  assert(!p->background_storage);
+  assert(HostFramePacket_OwnPixels(p));
+  assert(p->copied_bytes == sizeof(*packet));
+  assert(p->frame.background_packet != packet);
+  memset(packet, 0, sizeof(*packet));
+  assert(p->frame.background_packet->words[2] == 3);
+  assert(p->frame.background_packet->words[SR_PPU_BG_PACKET_WORDS - 1] == 0x12345678u);
+  /* Fully owned captures carry dimensions and compact packet bytes, never
+   * stale CPU pixels. Unowned HUD captures remain independently copied. */
+  SrPpuBgPacket_Begin(packet, 2, 2);
+  packet->words[2] = packet->owned_sources = 7;
+  uint32_t pixels[] = {4, 3, 2, 1};
+  p->frame = (FrameSlot){.diorama_active = true, .background_packet = packet,
+      .diorama_plane_request_mask = 3, .diorama_plane_content_mask = 3};
+  p->frame.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][0] = View(pixels);
+  p->frame.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][0] = View(pixels);
+  p->frame.hud_obj_surface = p->frame.diorama_skybox_surface = View(pixels);
+  assert(HostFramePacket_OwnPixels(p));
+  assert(p->copied_bytes == SrPpuBgPacket_Size(packet) + sizeof(pixels));
+  assert(!p->frame.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][0].data);
+  assert(!p->frame.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][0].data);
+  assert(!p->frame.diorama_skybox_surface.data && p->frame.diorama_skybox_surface.width_pixels == 2);
+  assert(p->frame.hud_obj_surface.data && p->frame.hud_obj_surface.data != (const uint8_t *)pixels);
+  free(packet);
+  /* A recycled slot with CPU-only output must not retain the previous export. */
+  p->frame = (FrameSlot){.diorama_active = true};
+  assert(HostFramePacket_OwnPixels(p) && p->copied_bytes == 0);
+}
+
 enum { kFrames = 100000 };
 static int Writer(void *context) {
   HostFrameQueue *q = context;
@@ -72,6 +110,7 @@ int main(void) {
   assert(q && !HostFrameQueue_Read(q));
   assert(HostFrameQueue_ReadyCount(q) == 0);
   TestPixels(HostFrameQueue_BeginWrite(q));
+  TestBackgroundPacket(HostFrameQueue_BeginWrite(q));
   for (int i = 0; i < 3; ++i) {
     HostFramePacket *p = HostFrameQueue_BeginWrite(q);
     assert(p); p->tick = i;

@@ -99,6 +99,9 @@ int main(void) {
   SDL_Texture *scene = NULL;
   ArRenderDevice render_device = {0};
   ArSdlRenderBackend render_backend = {0};
+  const bool gpu_motion = getenv("AR_GPU_BG_MOTION") != NULL;
+  const bool gpu_owned = gpu_motion && strcmp(getenv("AR_GPU_BG_MOTION"), "owned") == 0;
+  const int test_plane = gpu_motion ? SR_PPU_OVERLAY_BG1 : kDioramaPlane_Backdrop;
   DioramaPlaneCaptureRegion region;
   CHECK(DioramaPlaneCaptureRegion_Resolve(
       kDioramaPlane_Backdrop, kSurfaceWidth, kHeight, kApron, 3, &region));
@@ -133,7 +136,10 @@ int main(void) {
     return kSkipNoGpuRenderer;
   }
   CHECK(window != NULL);
-  renderer = window ? CreateTestRenderer(window) : NULL;
+  if (window && gpu_motion) {
+    if (ArSdlRenderBackend_CreateForWindow(&render_device, window, NULL))
+      renderer = ArSdlRenderBackend_Renderer(&render_device);
+  } else renderer = window ? CreateTestRenderer(window) : NULL;
   if (!renderer && RequireProductionGpuRenderer()) {
     fprintf(stderr, "GPU frame-generation test skipped: %s\n", SDL_GetError());
     SDL_DestroyWindow(window);
@@ -146,7 +152,7 @@ int main(void) {
   printf("diorama frame-generation renderer=%s gpu=%s\n",
          SDL_GetRendererName(renderer),
          gpu_device ? SDL_GetGPUDeviceDriver(gpu_device) : "fallback");
-  CHECK(ArSdlRenderBackend_Bind(
+  if (!gpu_motion) CHECK(ArSdlRenderBackend_Bind(
       &render_device, &render_backend, renderer));
 
   current = SDL_CreateTexture(
@@ -168,14 +174,20 @@ int main(void) {
    * source texture has to hold this frame's pixels BEFORE Capture runs --
    * exactly the order Diorama_Upload establishes in the real path. */
   ArRenderTexture sources[kDioramaPlane_Count] = {0};
-  sources[kDioramaPlane_Backdrop] =
+  sources[test_plane] =
       ArSdlRenderBackend_BorrowTexture(current);
   const SDL_Rect source_rect = {kApron, 0, kDisplayWidth, kHeight};
-  planes[kDioramaPlane_Backdrop] = (uint8_t *)previous_pixels;
-  plane_pitches[kDioramaPlane_Backdrop] =
+  planes[test_plane] = (uint8_t *)previous_pixels;
+  plane_pitches[test_plane] =
       kSurfaceWidth * sizeof(uint32_t);
 
   static FrameSlot slot;
+  static SrPpuBgPacket packet;
+  if (gpu_owned) {
+    packet.owned_sources = packet.words[2] = 7;
+    slot.background_packet = &packet;
+    planes[test_plane] = NULL;
+  }
   slot.diorama_active = true;
   slot.interp_setting_enabled = true;
   slot.snes_width = kDisplayWidth;
@@ -183,7 +195,7 @@ int main(void) {
   slot.obj_apron = kApron;
   slot.capture_ticks = 1;
   slot.bg_mode = 1;
-  slot.diorama_plane_request_mask = 1u << kDioramaPlane_Backdrop;
+  slot.diorama_plane_request_mask = 1u << test_plane;
   slot.diorama_plane_content_mask = slot.diorama_plane_request_mask;
   slot.timestamp_ns = 1000000;
   CHECK(SDL_UpdateTexture(
@@ -191,16 +203,16 @@ int main(void) {
       kSurfaceWidth * sizeof(uint32_t)));
   DioramaFrameGeneration_Capture(
       &render_device, &slot, sources, planes, plane_pitches,
-      1u << kDioramaPlane_Backdrop);
+      1u << test_plane);
 
-  planes[kDioramaPlane_Backdrop] = (uint8_t *)current_pixels;
+  planes[test_plane] = gpu_owned ? NULL : (uint8_t *)current_pixels;
   slot.timestamp_ns += 16666667;
   CHECK(SDL_UpdateTexture(
       current, &source_rect, &current_pixels[kApron],
       kSurfaceWidth * sizeof(uint32_t)));
   DioramaFrameGeneration_Capture(
       &render_device, &slot, sources, planes, plane_pitches,
-      1u << kDioramaPlane_Backdrop);
+      1u << test_plane);
 
   CHECK(SDL_SetRenderTarget(renderer, scene));
   CHECK(SDL_SetRenderLogicalPresentation(
@@ -213,18 +225,20 @@ int main(void) {
 
   ArRenderTexture raw[kDioramaPlane_Count] = {0};
   ArRenderTexture resolved[kDioramaPlane_Count] = {0};
-  raw[kDioramaPlane_Backdrop] =
+  raw[test_plane] =
       ArSdlRenderBackend_BorrowTexture(current);
   const uint32_t generated = DioramaFrameGeneration_Prepare(
       &render_device, &slot, 0.5f, raw,
-      1u << kDioramaPlane_Backdrop, resolved);
-  CHECK(generated == (1u << kDioramaPlane_Backdrop));
-  ArRenderPointF offset = DioramaFrameGeneration_PlaneOffset(kDioramaPlane_Backdrop);
+      1u << test_plane, resolved);
+  CHECK(generated == (1u << test_plane));
+  CHECK(DioramaFrameGeneration_GeneratedPlaneMask() == generated);
+  CHECK(DioramaFrameGeneration_GpuPlaneMask() == (gpu_motion ? (1u << test_plane) : 0));
+  ArRenderPointF offset = DioramaFrameGeneration_PlaneOffset(test_plane);
   CHECK(fabsf(offset.x+1) < .001f && fabsf(offset.y) < .001f);
-  CHECK(DioramaFrameGeneration_PlaneOffset(SR_PPU_OVERLAY_BG1).x == 0);
+  CHECK(DioramaFrameGeneration_PlaneOffset(SR_PPU_OVERLAY_BG2).x == 0);
   CHECK(DioramaFrameGeneration_PlaneOffset(-1).x == 0);
   CHECK(!ArRenderTexture_Equals(
-      resolved[kDioramaPlane_Backdrop], raw[kDioramaPlane_Backdrop]));
+      resolved[test_plane], raw[test_plane]));
 
   CHECK(SDL_GetRenderTarget(renderer) == scene);
   int logical_width = 0, logical_height = 0;
@@ -248,7 +262,7 @@ int main(void) {
    * farther red endpoint would turn this purple and recreate sprite ghosting. */
   CHECK(SDL_SetRenderTarget(
       renderer, ArSdlRenderBackend_UnwrapTexture(
-                    resolved[kDioramaPlane_Backdrop])));
+                    resolved[test_plane])));
   CHECK(SDL_SetRenderLogicalPresentation(
       renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED));
   CHECK(SDL_SetRenderViewport(renderer, NULL));
@@ -297,23 +311,24 @@ int main(void) {
   const float phases[] = {.25f,.75f};
   for (unsigned i = 0; i < 2; i++) {
     CHECK(DioramaFrameGeneration_Prepare(&render_device,&slot,phases[i],raw,
-        1u << kDioramaPlane_Backdrop,resolved) == (1u << kDioramaPlane_Backdrop));
-    offset = DioramaFrameGeneration_PlaneOffset(kDioramaPlane_Backdrop);
+        1u << test_plane,resolved) == (1u << test_plane));
+    offset = DioramaFrameGeneration_PlaneOffset(test_plane);
     CHECK(fabsf(offset.x+2*(1-phases[i])) < .001f && fabsf(offset.y) < .001f);
   }
   slot.capture_ticks = 2;
   CHECK(DioramaFrameGeneration_Prepare(&render_device,&slot,.5f,raw,
-      1u << kDioramaPlane_Backdrop,resolved) == (1u << kDioramaPlane_Backdrop));
-  CHECK(fabsf(DioramaFrameGeneration_PlaneOffset(kDioramaPlane_Backdrop).x+.5f) < .001f);
+      1u << test_plane,resolved) == (1u << test_plane));
+  CHECK(fabsf(DioramaFrameGeneration_PlaneOffset(test_plane).x+.5f) < .001f);
   slot.capture_ticks = 1;
 
   memset(resolved, 0, sizeof(resolved));
   CHECK(DioramaFrameGeneration_Prepare(
       &render_device, &slot, kPresentationFrameGenerationPhaseNone, raw,
-      1u << kDioramaPlane_Backdrop, resolved) == 0);
-  CHECK(DioramaFrameGeneration_PlaneOffset(kDioramaPlane_Backdrop).x == 0);
+      1u << test_plane, resolved) == 0);
+  CHECK(DioramaFrameGeneration_GeneratedPlaneMask() == 0);
+  CHECK(DioramaFrameGeneration_PlaneOffset(test_plane).x == 0);
   CHECK(ArRenderTexture_Equals(
-      resolved[kDioramaPlane_Backdrop], raw[kDioramaPlane_Backdrop]));
+      resolved[test_plane], raw[test_plane]));
 
   /* A synchronized but byte-identical raw endpoint is already authoritative.
    * It must not create a redundant private pair or generated plane. */
@@ -323,9 +338,9 @@ int main(void) {
   memset(resolved, 0, sizeof(resolved));
   CHECK(DioramaFrameGeneration_Prepare(
       &render_device, &slot, 0.5f, raw,
-      1u << kDioramaPlane_Backdrop, resolved) == 0);
+      1u << test_plane, resolved) == 0);
   CHECK(ArRenderTexture_Equals(
-      resolved[kDioramaPlane_Backdrop], raw[kDioramaPlane_Backdrop]));
+      resolved[test_plane], raw[test_plane]));
 
   /* A room-key discontinuity seeds a new endpoint but never blends across the
    * transition. */
@@ -336,9 +351,27 @@ int main(void) {
   memset(resolved, 0, sizeof(resolved));
   CHECK(DioramaFrameGeneration_Prepare(
       &render_device, &slot, 0.5f, raw,
-      1u << kDioramaPlane_Backdrop, resolved) == 0);
+      1u << test_plane, resolved) == 0);
   CHECK(ArRenderTexture_Equals(
-      resolved[kDioramaPlane_Backdrop], raw[kDioramaPlane_Backdrop]));
+      resolved[test_plane], raw[test_plane]));
+
+  /* Shrinking and restoring the capture reallocates the compute atlas. Neither
+   * its old field nor its old endpoint can survive the geometry change. */
+  for (int pass = 0; pass < 3; ++pass) {
+    slot.snes_height = pass == 0 ? kHeight - 4 : kHeight;
+    const uint8_t *endpoint = (const uint8_t *)(pass == 2 ? current_pixels : previous_pixels);
+    planes[test_plane] = gpu_owned ? NULL : endpoint;
+    CHECK(SDL_UpdateTexture(current, &source_rect,
+        endpoint + kApron * sizeof(uint32_t), kSurfaceWidth * sizeof(uint32_t)));
+    slot.timestamp_ns += 16666667;
+    DioramaFrameGeneration_Capture(&render_device, &slot, sources, planes,
+        plane_pitches, 1u << test_plane);
+    const uint32_t expected = pass == 2 ? 1u << test_plane : 0;
+    CHECK(DioramaFrameGeneration_Prepare(&render_device, &slot, 0.5f, raw,
+        1u << test_plane, resolved) == expected);
+    CHECK(DioramaFrameGeneration_GeneratedPlaneMask() == expected);
+    if (gpu_motion) CHECK(DioramaFrameGeneration_GpuPlaneMask() == expected);
+  }
 
   /* The clamped skybox is independent of the gameplay planes and has no
    * apron. A compact source pitch must remain valid through interpolation. */
@@ -348,15 +381,18 @@ int main(void) {
   const SDL_Rect sky_rect = {0, 0, kDisplayWidth, kHeight};
   slot.diorama_plane_request_mask = slot.diorama_plane_content_mask = 0;
   slot.diorama_skybox_surface = (SrPpuSurfaceView){
-    .data = (const uint8_t *)sky_pixels,
+    .data = gpu_owned ? NULL : (const uint8_t *)sky_pixels,
     .width_pixels = kDisplayWidth, .height_pixels = kHeight,
     .pitch_bytes = kDisplayWidth * sizeof(uint32_t),
   };
   const ArRenderTexture sky_raw = ArSdlRenderBackend_BorrowTexture(current);
-  for (int endpoint = 0; endpoint < 2; ++endpoint) {
+  // Drain multiple source frames without presenting. The queued GPU result
+  // must belong to the newest pair (+4), never an earlier discarded fence.
+  const int sky_shifts[] = {0, 2, 1, 5};
+  for (int endpoint = 0; endpoint < 4; ++endpoint) {
     for (int y = 0; y < kHeight; ++y)
       for (int x = 0; x < kDisplayWidth; ++x)
-        sky_pixels[y * kDisplayWidth + x] = PatternPixel(x - endpoint * 2, y);
+        sky_pixels[y * kDisplayWidth + x] = PatternPixel(x - sky_shifts[endpoint], y);
     CHECK(SDL_UpdateTexture(current, &sky_rect, sky_pixels, kDisplayWidth * 4));
     slot.timestamp_ns += 16666667;
     DioramaFrameGeneration_CaptureWithSkybox(
@@ -368,7 +404,7 @@ int main(void) {
       (1u << kDioramaFrameGenerationSkybox));
   CHECK(!ArRenderTexture_Equals(sky_resolved, sky_raw));
   const ArRenderPointF sky_offset = DioramaFrameGeneration_PlaneOffset(kDioramaFrameGenerationSkybox);
-  CHECK(fabsf(sky_offset.x+1) < .001f && fabsf(sky_offset.y) < .001f);
+  CHECK(fabsf(sky_offset.x+2) < .001f && fabsf(sky_offset.y) < .001f);
   CHECK(SDL_GetRenderTarget(renderer) == scene);
   /* An old caller must not accidentally address the private extra slot. */
   CHECK(DioramaFrameGeneration_Prepare(
@@ -397,10 +433,10 @@ int main(void) {
 
 done:
   DioramaFrameGeneration_Shutdown();
-  ArRenderDevice_Reset(&render_device);
   SDL_DestroyTexture(scene);
   SDL_DestroyTexture(current);
-  SDL_DestroyRenderer(renderer);
+  ArSdlRenderBackend_Destroy(&render_device);
+  if (!gpu_motion) SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   SDL_Quit();
   printf("diorama frame-generation test: %s\n",

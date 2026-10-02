@@ -1934,7 +1934,77 @@ static bool capture_masks_wanted(const Ppu *ppu) {
             ppu->objWinnerCapture.count != 0u);
 }
 
-static void clear_overlay_row(Ppu *ppu, int source, int screen_y) {
+static uint32_t *background_packet_row(Ppu *ppu, unsigned source, int screen_y) {
+    if (!ppu->backgroundPacket || source >= 2) return NULL;
+    const int y = overlay_row(&ppu->overlayCaptures[source], screen_y);
+    if (y < 0 || y >= (int)ppu->backgroundPacket->words[1]) return NULL;
+    const unsigned row = SrPpuBgPacket_Row(source, (unsigned)y);
+    if (!ppu->backgroundPacket->words[SR_PPU_BG_PACKET_HEADER_WORDS +
+            row * SR_PPU_BG_PACKET_ROW_WORDS]) return NULL;
+    const uint32_t offset = ppu->backgroundPacket->words[SR_PPU_BG_PACKET_HEADER_WORDS +
+        row * SR_PPU_BG_PACKET_ROW_WORDS + 7];
+    return offset ? ppu->backgroundPacket->words + offset : NULL;
+}
+
+static void background_packet_write(uint32_t *row, unsigned x,
+        unsigned band, unsigned code) {
+    const unsigned shift = band * 9;
+    row[x] = (row[x] & ~(511u << shift)) | (code << shift);
+}
+
+static bool background_packet_palette(Ppu *ppu, unsigned source, unsigned y, unsigned flags) {
+    SrPpuBgPacket *packet = ppu->backgroundPacket;
+    const uint32_t key = PPU_brightness(ppu) | ((uint32_t)ppu->fixedColor << 4) | (flags << 20);
+    if (packet->last_palette[source] && ppu->backgroundPaletteKey[source] == key &&
+        !memcmp(ppu->backgroundPaletteCgram[source], ppu->cgram, sizeof(ppu->cgram))) {
+        SrPpuBgPacket_Meta(packet, source, y)[6] = packet->last_palette[source];
+        return true;
+    }
+    uint32_t colors[256];
+    const unsigned alpha = flags & kPpuOverlayFlag_MarkBgHalfAdd ? 0x80000000u : 0xff000000u;
+    for (unsigned i = 0; i < 256; ++i) {
+        const uint16_t color = flags & kPpuOverlayFlag_ApplyBgFixedColorSubtract
+            ? color_math(ppu->cgram[i], ppu->fixedColor, true, false) : ppu->cgram[i];
+        colors[i] = color_rgb(ppu, color) | alpha;
+    }
+    if (!SrPpuBgPacket_SetPalette(packet, source, y, colors)) return false;
+    ppu->backgroundPaletteKey[source] = key;
+    memcpy(ppu->backgroundPaletteCgram[source], ppu->cgram, sizeof(ppu->cgram));
+    return true;
+}
+
+static void background_packet_begin_row(Ppu *ppu, unsigned source, int screen_y, bool defer) {
+    SrPpuBgPacket *packet = ppu->backgroundPacket;
+    if (!packet || source >= 2) return;
+    const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
+    const int y = overlay_row(capture, screen_y);
+    if (y < 0 || y >= (int)packet->words[1] || y >= SR_PPU_BG_PACKET_HEIGHT) return;
+    const unsigned row = SrPpuBgPacket_Row(source, (unsigned)y);
+    uint32_t *meta = packet->words + SR_PPU_BG_PACKET_HEADER_WORDS +
+        row * SR_PPU_BG_PACKET_ROW_WORDS;
+    const unsigned allowed = kPpuOverlayFlag_RemoveFromGame |
+        kPpuOverlayFlag_MarkBgHalfAdd | kPpuOverlayFlag_ApplyBgFixedColorSubtract;
+    if ((capture->flags & ~allowed) || PPU_mode(ppu) != 1 ||
+        packet->words[0] > SR_PPU_BG_PACKET_WIDTH ||
+        ppu->overlayRenderPitch[source] / 4 != packet->words[0] ||
+        ppu->overlayRenderBands[source][2] != NULL ||
+        capture->y0 != -(int)ppu->extraTopCur) return;
+    const int origin = surface_origin_x(ppu, ppu->overlayRenderPitch[source]);
+    const int left = origin + capture->x0, right = origin + capture->x1;
+    if (left < 0 || right < left || right > (int)packet->words[0]) return;
+    const unsigned format = defer && (packet->request_flags & SR_PPU_BG_PACKET_TILES)
+        ? (ppu->captureTiles[source].lookup || ppu->captureTiles[source].apron ? 4u : 3u) : 1u;
+    if (meta[0] != format) meta[4] = meta[5] = meta[7] = 0;
+    meta[0] = format;
+    meta[1] = screen_y >= capture->y0 && screen_y < capture->y1
+        ? PpuOverlayTransparentFillColor(ppu, source) : 0;
+    meta[2] = (unsigned)left; meta[3] = (unsigned)right;
+    packet->words[2] |= 1u << source;
+    if (!background_packet_palette(ppu, source, (unsigned)y, capture->flags) ||
+        !SrPpuBgPacket_AllocatePixels(packet, source, (unsigned)y)) meta[0] = 0;
+}
+
+static void clear_overlay_row(Ppu *ppu, int source, int screen_y, bool defer) {
     PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
     bool active = capture->x1 > capture->x0 && capture->y1 > capture->y0;
     bool last_line =
@@ -1943,9 +2013,16 @@ static void clear_overlay_row(Ppu *ppu, int source, int screen_y) {
     uint32_t fill;
     if (ppu->overlayRenderBuffer[source] == NULL ||
         (!active && !ppu->overlayRenderMaybeDirty[source])) return;
+    background_packet_begin_row(ppu, (unsigned)source, screen_y, defer);
     row = overlay_row(capture, screen_y);
     if (last_line) ppu->overlayRenderMaybeDirty[source] = active;
     if (row < 0 || row >= kPpuBufHeight) return;
+    if (defer && source < 2 && active && screen_y >= capture->y0 && screen_y < capture->y1 &&
+        ppu->backgroundPacket && (ppu->backgroundPacket->request_flags & SR_PPU_BG_PACKET_TILES)) {
+        ppu->backgroundDeferredClear |= (uint8_t)(1u << source);
+        return;
+    }
+    ppu->backgroundDeferredClear &= (uint8_t)~(1u << source);
     memset(ppu->overlayRenderBuffer[source] +
            (size_t)row * ppu->overlayRenderPitch[source], 0,
            ppu->overlayRenderPitch[source]);
@@ -1994,6 +2071,13 @@ static void write_overlay(Ppu *ppu, int source, int x, int y,
     origin = surface_origin_x(ppu, ppu->overlayRenderPitch[source]);
     if (source < 2 && (ppu->captureTileCoverage[source][origin + x] &
                       (1u << band))) return;
+    /* The reference sampler can also append mirror/repeat guard pixels after
+     * native scanout. Its colour has no retained palette index, so invalidate
+     * this export row instead of publishing an incomplete GPU capture. */
+    if (source < 2 && background_packet_row(ppu, (unsigned)source, y))
+        ppu->backgroundPacket->words[SR_PPU_BG_PACKET_HEADER_WORDS +
+            SrPpuBgPacket_Row((unsigned)source, (unsigned)row) *
+            SR_PPU_BG_PACKET_ROW_WORDS] = 0;
     color = override_color != 0u ? override_color : color_argb(ppu,
         (capture->flags & kPpuOverlayFlag_ApplyBgFixedColorSubtract) != 0u &&
                 source < 4
@@ -2681,6 +2765,125 @@ static void native_resolve_vram_bg_span(Ppu *SR_RESTRICT ppu, int layer,
         uint16_t *SR_RESTRICT main_pixels,
         uint16_t *SR_RESTRICT sub_pixels);
 
+/* Keep eight source pixels in their native bitplanes. Scanout snapshots the
+ * two VRAM words, but palette lookup and pixel expansion belong to the GPU.
+ * Masks are lane-wise, so a split window/edit never needs a CPU pixel decode. */
+static uint32_t reverse_byte_bits(uint32_t v) {
+    v = ((v >> 1) & 0x55555555u) | ((v & 0x55555555u) << 1);
+    v = ((v >> 2) & 0x33333333u) | ((v & 0x33333333u) << 2);
+    return ((v >> 4) & 0x0f0f0f0fu) | ((v & 0x0f0f0f0fu) << 4);
+}
+
+static void background_packet_tile_to(Ppu *ppu, int layer, unsigned source_row, int origin,
+        int x, int run, int fine_x, int fine_y, int step, uint16_t entry,
+        unsigned band, bool edit, bool replace, bool blank,
+        unsigned black, unsigned transparent) {
+    const unsigned packet_source = source_row / SR_PPU_BG_PACKET_HEIGHT;
+    uint32_t *pixels = SrPpuBgPacket_AllocatePixels(ppu->backgroundPacket,
+        packet_source, source_row % SR_PPU_BG_PACKET_HEIGHT);
+    if (!pixels || band > 2u) return;
+    const unsigned row = (entry & 0x8000u) ? 7u - (unsigned)fine_y : (unsigned)fine_y;
+    const unsigned address = PPU_bgTileAdr(ppu, layer) + (entry & 1023u) * 16u + row;
+    uint32_t raw = !blank && (!edit || replace)
+        ? ppu->vram[address & 0x7fffu] | ((uint32_t)ppu->vram[(address + 8) & 0x7fffu] << 16) : 0;
+    uint32_t *meta = SrPpuBgPacket_Meta(ppu->backgroundPacket, packet_source,
+        source_row % SR_PPU_BG_PACKET_HEIGHT);
+    if (meta[0] >= 3u && !edit) {
+        /* An unedited world row is already a grid of eight-pixel tiles. Keep
+         * its native alignment and flip; the GPU selects each pixel. */
+        const unsigned column = (unsigned)(origin + x);
+        meta[4] = ((unsigned)fine_x - column) & 7u;
+        uint32_t *tile = pixels + ((column + meta[4]) / 8u) * 2u;
+        tile[0] = raw;
+        tile[1] = (tile[1] & 0xff00u) | ((entry >> 10) & 7u) |
+            (band << 3) | ((entry & 0x4000u) ? 32u : 0u) |
+            (((1u << run) - 1u) << (fine_x + 8));
+        const unsigned signal = (raw | (raw >> 8) | (raw >> 16) | (raw >> 24)) & 255u;
+        if (signal) ppu->overlayRenderContentMask[layer] |= (uint8_t)(1u << band);
+        return;
+    }
+    if (meta[0] == 4u) {
+        /* Leave native rows in tile space. Only actual authored edits and
+         * apron tiles need aligned masks; the shader composes these over the
+         * native stream instead of the CPU realigning every ordinary tile. */
+        pixels = SrPpuBgPacket_AllocateEdits(ppu->backgroundPacket, meta);
+        if (!pixels) {
+            ppu->backgroundTileSources &= (uint8_t)~(1u << layer);
+            return;
+        }
+    }
+    if (!(entry & 0x4000u)) raw = reverse_byte_bits(raw);
+    black = reverse_byte_bits(black) & 255u;
+    transparent = reverse_byte_bits(transparent) & 255u;
+    if (step < 0) {
+        raw = reverse_byte_bits(raw);
+        black = reverse_byte_bits(black) & 255u;
+        transparent = reverse_byte_bits(transparent) & 255u;
+        fine_x = 7 - fine_x;
+    }
+    const unsigned palette = (entry >> 10) & 7u;
+    for (int offset = 0; offset < run;) {
+        const int column = origin + x + offset;
+        const unsigned lane = (unsigned)column & 7u;
+        unsigned count = (unsigned)(run - offset);
+        if (count > 8u - lane) count = 8u - lane;
+        const unsigned bits = (1u << count) - 1u;
+        const unsigned mask = bits << lane;
+        const unsigned source = (unsigned)(fine_x + offset);
+        uint32_t data = ((raw >> source) & (bits * 0x01010101u)) << lane;
+        unsigned b = ((black >> source) & bits) << lane;
+        unsigned t = ((transparent >> source) & bits) << lane;
+        uint32_t *cell = pixels + ((unsigned)column / 8u) * (packet_source == 2 ? 3 : SR_PPU_BG_PACKET_CELL_WORDS);
+        for (unsigned dest = 0; dest < (packet_source == 2 ? 1u : 3u); ++dest) {
+            uint32_t *out = cell + dest * 3;
+            unsigned write = edit ? (replace ? mask : t | (dest == band ? b : 0u))
+                : dest == band ? mask & ~(out[2] >> 24) : 0u;
+            if (!write) continue;
+            const uint32_t lanes = write * 0x01010101u;
+            out[0] &= ~lanes;
+            out[1] &= ~(lanes & 0x00ffffffu);
+            out[2] &= ~lanes;
+            if (edit) {
+                out[2] |= write << 24;
+                if (dest == 0) {
+                    out[2] |= write << 16;
+                    if (replace) out[2] |= (write & ~t) << 8;
+                }
+            }
+            if (dest != band) continue;
+            const unsigned visible = write & ~t;
+            out[0] |= data & (visible * 0x01010101u);
+            out[1] |= ((palette & 1u ? visible : 0u) |
+                (palette & 2u ? visible << 8 : 0u) |
+                (palette & 4u ? visible << 16 : 0u));
+            out[2] |= b & visible;
+            const uint32_t nonzero = out[0] | (out[0] >> 8) | (out[0] >> 16) | (out[0] >> 24);
+            if (source_row < 2 * SR_PPU_BG_PACKET_HEIGHT &&
+                ((nonzero | out[2] | (out[2] >> 8)) & 255u))
+                ppu->overlayRenderContentMask[layer] |= (uint8_t)(1u << dest);
+        }
+        offset += (int)count;
+    }
+}
+
+static void background_packet_tile(Ppu *ppu, int layer, int screen_y,
+        int x, int run, int fine_x, int fine_y, int step, uint16_t entry,
+        unsigned band, bool edit, bool replace, bool blank,
+        unsigned black, unsigned transparent) {
+    if (!background_packet_row(ppu, (unsigned)layer, screen_y)) return;
+    background_packet_tile_to(ppu, layer,
+        SrPpuBgPacket_Row((unsigned)layer, (unsigned)overlay_row(&ppu->overlayCaptures[layer], screen_y)),
+        surface_origin_x(ppu, ppu->overlayRenderPitch[layer]),
+        x, run, fine_x, fine_y, step, entry, band, edit, replace, blank, black, transparent);
+}
+
+static unsigned background_packet_band(Ppu *ppu, int layer, uint16_t entry, uint8_t semantic) {
+    unsigned band = semantic == 0xffu ? (entry >> 13) & 1u :
+        semantic == 1u ? 0u : semantic == 2u ? 1u : 2u;
+    if (band && !ppu->overlayRenderBands[layer][band - 1]) band = 0;
+    return band;
+}
+
 /* Virtual Mode-1 maps expose one 8x8 tile word at a time.  Resolve a complete
  * tile span into the packed scanline just like the VRAM-backed tiled path;
  * calling the general pixel sampler here would throw away both the provider's
@@ -2810,6 +3013,7 @@ static void native_resolve_virtual_bg_span(Ppu *SR_RESTRICT ppu, int layer,
                 binding->context, tile_x, tile_y, &entry);
         }
         if (result == kPpuVirtualTilemapLookup_FallbackAuthentic) {
+            ppu->backgroundTileSources &= (uint8_t)~(1u << layer);
             native_resolve_vram_bg_span(
                 ppu, layer, screen_y, want_sub, x, x + run, origin,
                 main_pixels, sub_pixels);
@@ -2823,6 +3027,24 @@ static void native_resolve_virtual_bg_span(Ppu *SR_RESTRICT ppu, int layer,
         if (bands != NULL && binding->band_lookup != NULL)
             (void)binding->band_lookup(
                 binding->context, tile_x, tile_y, entry, &band);
+        if (ppu->backgroundTileSources & (1u << layer)) {
+            const bool owner_sub = (ppu->screenEnabled[0] & (1u << layer)) == 0u;
+            const unsigned visibility = owner_sub ? plan.sub_mode : plan.main_mode;
+            const unsigned band_slot = background_packet_band(ppu, layer, entry, band);
+            const unsigned saved_window_run = plan.run;
+            for (int at = 0; at < run;) {
+                if (!visibility || (visibility == 2u && native_window_plan_inside(&plan, x + at))) {
+                    ++at; continue;
+                }
+                const int start = at++;
+                while (at < run && (visibility != 2u || !native_window_plan_inside(&plan, x + at))) ++at;
+                background_packet_tile(ppu, layer, screen_y, x + start, at - start,
+                    fine_x + start * step, fine_y, step, entry, band_slot,
+                    false, false, false, 0, 0);
+            }
+            if (!(ppu->backgroundCpuSources & (1u << layer))) { x += run; continue; }
+            plan.run = (uint8_t)saved_window_run;
+        }
         {
             int row = (entry & 0x8000u) != 0u ? 7 - fine_y : fine_y;
             uint32_t decoded = decoded_4bpp_row(
@@ -3875,6 +4097,8 @@ static void native_merge_packed_span(
 
 typedef struct NativeOverlayLinePlan {
     uint32_t *primary;
+    uint32_t *packet_row;
+    bool tile_packet, cpu_pixels;
     uint32_t *bands[3];
     uint8_t slot_for_rank[16];
     uint8_t slot_for_semantic[4];
@@ -3892,9 +4116,12 @@ static void native_overlay_line_plan(Ppu *ppu, int source, int screen_y,
     PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
     int row;
     plan->screen_y=screen_y;
+    plan->tile_packet = source < 2 && (ppu->backgroundTileSources & (1u << source));
+    plan->cpu_pixels = !plan->tile_packet || (ppu->backgroundCpuSources & (1u << source));
     /* Leave scratch palette storage untouched; only captures with special
      * color policies need it, and unbound rows are never exported. */
     plan->primary = NULL;
+    plan->packet_row = background_packet_row(ppu, (unsigned)source, screen_y);
     plan->origin = 0;
     memset(plan->bands, 0, sizeof(plan->bands));
     if (ppu->overlayRenderBuffer[source] == NULL ||
@@ -3970,7 +4197,7 @@ static uint32_t native_overlay_color(const NativeOverlayLinePlan *plan,
 static void native_write_overlay_packed(
         Ppu *ppu, int source, int x, uint16_t packed,
         uint8_t semantic_band, NativeOverlayLinePlan *plan) {
-    if (plan->primary == NULL) return;
+    if (plan->primary == NULL || !plan->cpu_pixels) return;
     /* Destination routing and capture policy do not change between pixels.
      * The row plan also folds unbound bands back into the primary surface. */
     unsigned band = source == kPpuOverlaySource_Obj || semantic_band == 0xffu
@@ -3979,6 +4206,10 @@ static void native_write_overlay_packed(
         : source < 2 ? plan->slot_for_semantic[0] : 0u;
     const uint8_t bit = (uint8_t)(1u << band);
     if (plan->coverage && (plan->coverage[x] & bit)) return;
+    uint32_t *packet_row = plan->packet_row;
+    if (packet_row && !plan->tile_packet)
+        background_packet_write(packet_row, (unsigned)(plan->origin + x), band,
+            (packed & 0xffu) + 1u);
     uint32_t color = native_overlay_color(plan, packed & 0xffu);
     if (plan->transform_obj)
         color = transform_obj_color(ppu, x, plan->screen_y, color);
@@ -3996,16 +4227,24 @@ static void native_capture_tile_run(Ppu *ppu, int layer, int x, int run,
     const bool blank = (tile->flags & SR_PPU_CAPTURE_TILE_BLANK) != 0u;
     const int band = tile->band == 1u ? 0 : tile->band == 2u ? 1 : 2;
     uint32_t *target = band ? plan->bands[band - 1] : plan->primary;
+    if (plan->tile_packet) {
+        background_packet_tile(ppu, layer, plan->screen_y, x, run, fine_x, fine_y,
+            step, tile->entry, (unsigned)band, true, replace, blank,
+            tile->black_rows[fine_y], tile->transparent_rows[fine_y]);
+        if (!plan->cpu_pixels) return;
+    }
     unsigned row = (tile->entry & 0x8000u) ? 7 - fine_y : fine_y;
     uint32_t decoded = replace && !blank ? decoded_4bpp_row(ppu,
         PPU_bgTileAdr(ppu, layer) + (tile->entry & 1023u) * 16 + row) : 0u;
     unsigned palette = ((tile->entry >> 10) & 7u) * 16u;
+    uint32_t *packet_row = plan->tile_packet ? NULL : plan->packet_row;
     for (int offset = 0; offset < run; ++offset) {
         const int px = fine_x + offset * step;
         const int column = plan->origin + x + offset;
         const bool black = (tile->black_rows[fine_y] & (0x80u >> px)) != 0u;
         const bool transparent = (tile->transparent_rows[fine_y] & (0x80u >> px)) != 0u;
         if (transparent) {
+            if (packet_row) packet_row[column] = UINT32_C(0x80000000);
             ppu->captureTileCoverage[layer][column] = 15u;
             plan->primary[column] = 0u;
             for (unsigned priority = 0; priority < 3; ++priority)
@@ -4015,12 +4254,19 @@ static void native_capture_tile_run(Ppu *ppu, int layer, int x, int run,
         if (!replace && !black) continue;
         ppu->captureTileCoverage[layer][column] = replace ? 15u : (1u << band);
         if (replace) {
+            if (packet_row) {
+                packet_row[column] |= UINT32_C(0x80000000);
+                background_packet_write(packet_row, (unsigned)column, 0,
+                    backing ? 258u : 0u);
+            }
             plan->primary[column] = backing;
             if (backing) ppu->overlayRenderContentMask[layer] |= 1u;
         }
         unsigned character_x = (tile->entry & 0x4000u) ? 7 - px : px;
         unsigned pixel = (decoded >> (character_x * 4)) & 15u;
         if (target != NULL && (black || pixel)) {
+            if (packet_row) background_packet_write(packet_row, (unsigned)column,
+                (unsigned)band, black ? 257u : palette + pixel + 1u);
             target[column] = black ? 0xff000000u : native_overlay_color(plan, palette + pixel);
             ppu->overlayRenderContentMask[layer] |= (uint8_t)(1u << band);
         }
@@ -4376,6 +4622,47 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
     if ((full_add_mask | sub_winner_mask) != 0u)
         for (int source = 0; source < kPpuOverlaySource_Count; ++source)
             source_needs_sub[source] = true;
+    ppu->backgroundTileSources = ppu->backgroundCpuSources = 0;
+    if (ppu->backgroundPacket && (ppu->backgroundPacket->request_flags & SR_PPU_BG_PACKET_TILES) &&
+        !authentic && !dual_authentic &&
+        !(full_add_mask | main_winner_mask | sub_winner_mask | visible_winner_mask)) {
+        for (unsigned layer = 0; layer < 2; ++layer) {
+            const PpuOverlayCapture *cap = &ppu->overlayCaptures[layer];
+            const PpuWidescreenLayerPolicy policy = PpuResolveWidescreenLayerPolicy(ppu, layer, screen_y);
+            if (!background_packet_row(ppu, layer, screen_y) ||
+                !native_virtual_bg_span_eligible(ppu, (int)layer) ||
+                !(ppu->virtualTilemap[layer].flags & kPpuVirtualTilemapFlag_IncludeAuthentic) ||
+                !(cap->flags & kPpuOverlayFlag_RemoveFromGame) ||
+                cap->x0 > left || cap->x1 < right || screen_y < cap->y0 || screen_y >= cap->y1 ||
+                policy.fill == kPpuWidescreenBandFill_Mirror || policy.fill == kPpuWidescreenBandFill_Repeat)
+                continue;
+            ppu->backgroundTileSources |= (uint8_t)(1u << layer);
+            if (ppu->backgroundPacket->request_flags & SR_PPU_BG_PACKET_VALIDATE_TILES)
+                ppu->backgroundCpuSources |= (uint8_t)(1u << layer);
+            const unsigned packet_row = SrPpuBgPacket_Row(layer, (unsigned)overlay_row(cap, screen_y));
+            uint32_t *meta = ppu->backgroundPacket->words + SR_PPU_BG_PACKET_HEADER_WORDS +
+                packet_row * SR_PPU_BG_PACKET_ROW_WORDS;
+            if (meta[0] < 3u) meta[0] = 2;
+        }
+    }
+    for (unsigned layer = 0; layer < 2; ++layer) {
+        if (!(ppu->backgroundDeferredClear & (1u << layer))) continue;
+        if (!(ppu->backgroundTileSources & (1u << layer)) || (ppu->backgroundCpuSources & (1u << layer))) {
+            const unsigned format = SrPpuBgPacket_Meta(ppu->backgroundPacket, layer,
+                (unsigned)overlay_row(&ppu->overlayCaptures[layer], screen_y))[0];
+            clear_overlay_row(ppu, (int)layer, screen_y, false);
+            /* Clearing initializes the indexed fallback format. Validation
+             * still records the tile format alongside those CPU pixels. */
+            if (ppu->backgroundTileSources & (1u << layer))
+                SrPpuBgPacket_Meta(ppu->backgroundPacket, layer,
+                    (unsigned)overlay_row(&ppu->overlayCaptures[layer], screen_y))[0] = format;
+        } else {
+            const uint32_t *meta = SrPpuBgPacket_Meta(ppu->backgroundPacket, layer,
+                (unsigned)overlay_row(&ppu->overlayCaptures[layer], screen_y));
+            if (meta[1] && ((ppu->screenEnabled[0] | ppu->screenEnabled[1]) & (1u << layer)))
+                ppu->overlayRenderContentMask[layer] |= 1u;
+        }
+    }
     for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
         if ((source_mask & (1u << source)) == 0u) continue;
         memset(layer_main[source], 0, sizeof(layer_main[source]));
@@ -4458,6 +4745,28 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                             kPpuXPixels, right, kPpuExtraLeftRight,
                             layer_main[layer], layer_sub[layer], layer_bands);
                     }
+                }
+                if (overlay_plans[layer].tile_packet && !(ppu->backgroundTileSources & (1u << layer))) {
+                    /* A provider requested authentic VRAM midway through the
+                     * row. Restart the row on CPU; never publish half a tile
+                     * program or stale pixels from a previous frame. */
+                    uint32_t *packet_row = background_packet_row(ppu, (unsigned)layer, screen_y);
+                    if (packet_row) memset(packet_row, 0, SrPpuBgPacket_RowWords(
+                        SrPpuBgPacket_Meta(ppu->backgroundPacket, (unsigned)layer,
+                            (unsigned)overlay_row(&ppu->overlayCaptures[layer], screen_y)), (unsigned)layer) * sizeof(uint32_t));
+                    clear_overlay_row(ppu, layer, screen_y, false);
+                    memset(ppu->captureTileCoverage[layer], 0, sizeof(ppu->captureTileCoverage[layer]));
+                    memset(layer_main[layer], 0, sizeof(layer_main[layer]));
+                    if (source_needs_sub[layer]) memset(layer_sub[layer], 0, sizeof(layer_sub[layer]));
+                    native_overlay_line_plan(ppu, layer, screen_y, &overlay_plans[layer]);
+                    native_capture_tiles_line(ppu, layer, screen_y, &overlay_plans[layer]);
+                    native_resolve_virtual_bg_span(ppu, layer, screen_y, source_needs_sub[layer],
+                        left, right, kPpuExtraLeftRight, layer_main[layer], layer_sub[layer], layer_bands);
+                }
+                if ((ppu->backgroundTileSources & (1u << layer)) &&
+                    !(ppu->backgroundCpuSources & (1u << layer))) {
+                    source_mask &= (uint8_t)~(1u << layer);
+                    ppu->backgroundPacket->owned_sources |= 1u << layer;
                 }
                 resolved_span[layer] = true;
             } else if (ppu->virtualTilemap[layer].lookup == NULL) {
@@ -5129,7 +5438,11 @@ static bool render_line_to(Ppu *ppu, int screen_y, uint8_t *buffer,
         authentic_origin = surface_origin_x(ppu, ppu->authenticRenderPitch);
         memset(authentic_row, 0, ppu->authenticRenderPitch);
     }
-    if (PPU_forcedBlank(ppu)) return dual_authentic;
+    if (PPU_forcedBlank(ppu)) {
+        if (capture) for (int source = 0; source < 2; ++source)
+            if (ppu->backgroundDeferredClear & (1u << source)) clear_overlay_row(ppu, source, screen_y, false);
+        return dual_authentic;
+    }
     if (capture) {
         for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
             const PpuOverlayCapture *cap = &ppu->overlayCaptures[source];
@@ -5147,6 +5460,16 @@ static bool render_line_to(Ppu *ppu, int screen_y, uint8_t *buffer,
         (capture || (left == 0 && right == kPpuXPixels)))
         return dual_authentic;
     if (capture && !native_center) {
+        for (int source = 0; source < 2; ++source)
+            if (ppu->backgroundDeferredClear & (1u << source)) clear_overlay_row(ppu, source, screen_y, false);
+        /* The general pixel sampler can export winner-dependent colours.
+         * Keep its CPU row instead of publishing a partial indexed capture. */
+        if (ppu->backgroundPacket) for (unsigned source = 0; source < 2; ++source) {
+            const int y = overlay_row(&ppu->overlayCaptures[source], screen_y);
+            if (y >= 0 && y < (int)ppu->backgroundPacket->words[1])
+                ppu->backgroundPacket->words[SR_PPU_BG_PACKET_HEADER_WORDS +
+                    SrPpuBgPacket_Row(source, (unsigned)y) * SR_PPU_BG_PACKET_ROW_WORDS] = 0;
+        }
         if (!ppu->cgramRgbValid) rebuild_cgram_rgb(ppu);
         for (int layer = 0; layer < 2; ++layer) {
             if (!ppu->captureTiles[layer].lookup && !ppu->captureTiles[layer].apron) continue;
@@ -5238,6 +5561,7 @@ static void render_authentic(Ppu *ppu, int screen_y) {
 
 static void render_line(Ppu *ppu, int line) {
     int screen_y = line - 1;
+    ppu->backgroundTileSources = ppu->backgroundCpuSources = ppu->backgroundDeferredClear = 0;
     for (int slot = 0; slot < kPpuObjSampleCacheCount; ++slot)
         ppu->objSampleCache[slot].valid = false;
     for (int layer = 0; layer < 2; ++layer)
@@ -5245,7 +5569,7 @@ static void render_line(Ppu *ppu, int line) {
     ppu->mode7SampleCache.valid = false;
     update_brightness(ppu);
     for (int source = 0; source < kPpuOverlaySource_Count; ++source)
-        clear_overlay_row(ppu, source, screen_y);
+        clear_overlay_row(ppu, source, screen_y, true);
     if (ppu->objRangeCapture.count != 0u && screen_y >= ppu->objRangeCapture.y0 &&
         screen_y < ppu->objRangeCapture.y1)
         memset(ppu->objRangeCapture.pixels +
@@ -5299,14 +5623,36 @@ static void render_line(Ppu *ppu, int line) {
     render_mode7_override_line(ppu, screen_y);
 }
 
+static uint32_t *background_packet_view_row(Ppu *ppu,
+        const SrPpuBackgroundViewRequest *view, unsigned y, uint32_t fill) {
+    SrPpuBgPacket *p = ppu->backgroundPacket;
+    if (!p || !(p->request_flags & SR_PPU_BG_PACKET_TILES) ||
+        view->width > SR_PPU_BG_PACKET_WIDTH || view->height > SR_PPU_BG_PACKET_HEIGHT ||
+        y >= view->height) return NULL;
+    p->words[4] = view->width; p->words[5] = view->height; p->words[6] = view->layer;
+    const unsigned index = SrPpuBgPacket_Row(2, y);
+    uint32_t *meta = p->words + SR_PPU_BG_PACKET_HEADER_WORDS + index * SR_PPU_BG_PACKET_ROW_WORDS;
+    meta[0] = 2; meta[1] = fill; meta[2] = 0; meta[3] = view->width;
+    const PpuOverlayCapture *capture = &ppu->overlayCaptures[view->layer];
+    if (!background_packet_palette(ppu, 2, y, capture->flags)) { meta[0] = 0; return NULL; }
+    p->words[2] |= 4u;
+    if (!(p->request_flags & SR_PPU_BG_PACKET_VALIDATE_TILES)) p->owned_sources |= 4u;
+    return meta;
+}
+
 bool PpuRenderBackgroundViewLine(Ppu *ppu,
         const SrPpuBackgroundViewRequest *view, int screen_y) {
     if (screen_y < view->screen_y0 ||
         screen_y >= view->screen_y0 + (int)view->height) return true;
     uint32_t *row = (uint32_t *)((uint8_t *)view->pixels +
         (size_t)(screen_y - view->screen_y0) * (size_t)view->pitch_bytes);
-    memset(row, 0, view->width * sizeof(*row));
-    if (PPU_forcedBlank(ppu)) return true;
+    const unsigned view_y = (unsigned)(screen_y - view->screen_y0);
+    if (PPU_forcedBlank(ppu)) {
+        const uint32_t *meta = background_packet_view_row(ppu, view, view_y, 0);
+        if (!meta || !(ppu->backgroundPacket->owned_sources & 4u))
+            memset(row, 0, view->width * sizeof(*row));
+        return true;
+    }
     int layer = (int)view->layer;
     const PpuVirtualTilemapBinding *binding = &ppu->virtualTilemap[layer];
     const PpuOverlayCapture *capture = &ppu->overlayCaptures[layer];
@@ -5328,8 +5674,12 @@ bool PpuRenderBackgroundViewLine(Ppu *ppu,
          policy.fill != kPpuWidescreenBandFill_LiveWorld))
         return false;
     uint32_t fill = PpuOverlayTransparentFillColor(ppu, (PpuOverlaySource)layer);
-    if (fill != 0u)
-        for (unsigned x = 0; x < view->width; ++x) row[x] = fill;
+    uint32_t *view_meta = background_packet_view_row(ppu, view, view_y, fill);
+    const bool gpu_view = view_meta && (ppu->backgroundPacket->owned_sources & 4u);
+    if (!gpu_view) {
+        if (fill) for (unsigned x = 0; x < view->width; ++x) row[x] = fill;
+        else memset(row, 0, view->width * sizeof(*row));
+    }
     if (window || !(ppu->screenEnabled[owner_sub ? 1 : 0] & (1u << layer)))
         return true;
     int64_t world_row = (int64_t)binding->camera_y + screen_y + 1 +
@@ -5367,9 +5717,24 @@ bool PpuRenderBackgroundViewLine(Ppu *ppu,
     const uint32_t *captured = (const uint32_t *)(ppu->overlayRenderBuffer[layer] +
         (size_t)source_row * ppu->overlayRenderPitch[layer]);
     int origin = surface_origin_x(ppu, ppu->overlayRenderPitch[layer]);
-    if (end > begin)
-        memcpy(row + begin, captured + origin + source_x0 + begin,
+    if (view_meta) {
+        const unsigned bg_row = SrPpuBgPacket_Row((unsigned)layer, (unsigned)source_row);
+        if (ppu->backgroundPacket->words[SR_PPU_BG_PACKET_HEADER_WORDS +
+                bg_row * SR_PPU_BG_PACKET_ROW_WORDS] == 0) {
+            view_meta[0] = 0;
+            return false;
+        }
+        view_meta[4] = (unsigned)begin | ((unsigned)end << 16);
+        view_meta[5] = (uint32_t)(source_row * SR_PPU_BG_PACKET_WIDTH + origin + source_x0);
+    }
+    if (!gpu_view && end > begin) {
+        if (ppu->backgroundPacket && (ppu->backgroundPacket->owned_sources & (1u << layer))) {
+            for (int x = begin; x < end; ++x)
+                row[x] = SrPpuBgPacket_Color(ppu->backgroundPacket, (unsigned)layer, 0,
+                    (unsigned)(origin + source_x0 + x), (unsigned)source_row);
+        } else memcpy(row + begin, captured + origin + source_x0 + begin,
                (size_t)(end - begin) * sizeof(*row));
+    }
     if (begin == 0 && end == (int)view->width) return true;
 
     NativeOverlayLinePlan colors;
@@ -5389,6 +5754,12 @@ bool PpuRenderBackgroundViewLine(Ppu *ppu,
             if (found == kPpuVirtualTilemapLookup_FallbackAuthentic) return false;
             int tile_y = world_y & 7;
             if (entry & 0x8000u) tile_y = 7 - tile_y;
+            if (view_meta && found == kPpuVirtualTilemapLookup_Found) {
+                background_packet_tile_to(ppu, layer, SrPpuBgPacket_Row(2, view_y), 0,
+                    x, run, fine_x, world_y & 7, 1, entry, 0, false, false,
+                    (entry & 0x2000u) && ppu->overlayRenderBands[layer][0], 0, 0);
+            }
+            if (gpu_view) { x += run; continue; }
             uint32_t decoded = found == kPpuVirtualTilemapLookup_Found
                 ? decoded_4bpp_row(ppu, PPU_bgTileAdr(ppu, layer) +
                     (entry & 0x3ffu) * 16 + tile_y) : 0u;
@@ -5434,10 +5805,17 @@ bool PpuRenderNativeBackgroundView(Ppu *ppu,
      * fixed-size source snapshot, never another scanout or register write. */
     for (unsigned y = 0; y < 256; ++y) {
         uint32_t *out = (uint32_t *)((uint8_t *)view->pixels + y * view->pitch_bytes);
+        uint32_t *view_meta = background_packet_view_row(ppu, view, y, blank ? 0 : fill);
+        const bool gpu_view = view_meta && (ppu->backgroundPacket->owned_sources & 4u);
         for (unsigned x = 0; x < 256; x += 8) {
             const uint16_t entry = ppu->vram[(PPU_bgTilemapAdr(ppu, layer) +
                 (y / 8) * 32 + x / 8) & 0x7fff];
             const unsigned ty = (entry & 0x8000u) ? 7 - (y & 7) : y & 7;
+            if (view_meta) background_packet_tile_to(ppu, (int)layer,
+                SrPpuBgPacket_Row(2, y), 0, (int)x, 8, 0, (int)(y & 7), 1,
+                entry, 0, false, false, blank ||
+                    ((entry & 0x2000u) && ppu->overlayRenderBands[layer][0]), 0, 0);
+            if (gpu_view) continue;
             const uint32_t decoded = blank ||
                 ((entry & 0x2000u) && ppu->overlayRenderBands[layer][0]) ? 0 :
                 decoded_4bpp_row(ppu, PPU_bgTileAdr(ppu, layer) +

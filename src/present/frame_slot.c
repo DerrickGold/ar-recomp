@@ -2,6 +2,7 @@
  * RtlDrawPpuFrame, snapshots live game state, and hands presentation an
  * isolated value copy. */
 #include <string.h>
+#include <stdlib.h>
 
 #include "dev/host_dev_tools.h"
 #include "host/host_ppu_output.h"
@@ -107,6 +108,7 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   FramePpuView ppu_view;
   const bool have_ppu_view =
       FramePpuView_Capture(&ppu_view, &dst->ppu_surfaces);
+  dst->background_packet = ActRaiser_LiveBackgroundPacket();
   SimMenu_CaptureFrame(&dst->sim_menu,
       have_ppu_view ? ppu_view.api : NULL, ppu_view.runner);
 
@@ -166,6 +168,18 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
 
   /* Pair timestamp and feature gates for presentation-time frame generation. */
   dst->timestamp_ns = HostClock_Nanoseconds();
+  /* Explicit offline image-comparison mode only: readbacks/file IO may take
+   * longer than the live pair timeout. Keep successive emulated endpoints
+   * exactly one tick apart without changing the game or host pacing clocks. */
+  static int capture_tick_clock = -1;
+  if (capture_tick_clock < 0) {
+    const char *headless = getenv("AR_HEADLESS");
+    const char *clock = getenv("AR_FRAME_CAPTURE_TICK_CLOCK");
+    capture_tick_clock = headless && !strcmp(headless, "1") &&
+        clock && !strcmp(clock, "1");
+  }
+  if (capture_tick_clock)
+    dst->timestamp_ns = ((uint64_t)snes_frame_counter + 1u) * 1000000000u / 60u;
   dst->turbo_active = HostInput_IsTurbo();
   dst->interp_setting_enabled = g_settings.gpu_interp_enabled;
   dst->diorama_hud_flat = g_settings.diorama_hud_flat;

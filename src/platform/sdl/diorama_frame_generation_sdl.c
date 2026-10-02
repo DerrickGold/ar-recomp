@@ -8,6 +8,8 @@
 #include "present/present.h"
 #include "platform/sdl/presentation_geometry_sdl.h"
 #include "platform/sdl/render_sdl_internal.h"
+#include "platform/sdl/gpu_global_motion_sdl.h"
+#include "platform/sdl/gpu_block_motion_sdl.h"
 #include "present/presentation_frame_generation.h"
 
 enum {
@@ -34,6 +36,7 @@ typedef struct DioramaFrameGenerationPlane {
   PresentationFrameGenerationMotionField motion;
   bool current_valid;
   bool pair_valid;
+  bool gpu_only;
 } DioramaFrameGenerationPlane;
 
 typedef struct DioramaFrameGenerationKey {
@@ -55,11 +58,349 @@ static DioramaFrameGenerationKey s_last_key;
 static ArRenderPointF s_present_offsets[kFrameGenerationPlaneCount];
 static uint64_t s_pair_timestamp_ns;
 static uint32_t s_pair_mask;
+static uint32_t s_generated_mask;
+static bool s_wait_trace;
+static uint64_t s_last_wait_ns;
 static SDL_Vertex s_vertices[kFrameGenerationMaximumVertices];
 static int s_indices[kFrameGenerationMaximumIndices];
 static int s_index_blocks_x = -1;
 static int s_index_blocks_y = -1;
 static const int kQuadIndices[] = {0, 1, 2, 1, 3, 2};
+
+/* Development gate. Owned mode keeps background/skybox/residual and actor
+ * analysis/synthesis on GPU without CPU image copies. Only global vectors are
+ * downloaded for the existing CPU effect projection. Validation also retains
+ * CPU analysis and reads the actor field to check exact parity. */
+static bool GpuOwnsAnalysis(void) {
+  const char *option = getenv("AR_GPU_BG_MOTION");
+  return option && strcmp(option, "owned") == 0;
+}
+
+static bool GpuMotionPlane(int plane) {
+  return plane == SR_PPU_OVERLAY_BG1 || plane == SR_PPU_OVERLAY_BG2 ||
+      plane == kDioramaPlane_Bg1Hi || plane == kDioramaPlane_Bg2Hi ||
+      plane == kDioramaPlane_Bg1Far || plane == kDioramaPlane_Bg2Far ||
+      plane == kDioramaFrameGenerationSkybox || plane == kDioramaPlane_Backdrop ||
+      DioramaPlaneIsObjectPriority(plane);
+}
+
+static const int kGpuPlanes[12] = {SR_PPU_OVERLAY_BG1, kDioramaPlane_Bg1Hi,
+    kDioramaPlane_Bg1Far, SR_PPU_OVERLAY_BG2, kDioramaPlane_Bg2Hi, kDioramaPlane_Bg2Far,
+    kDioramaFrameGenerationSkybox, kDioramaPlane_Backdrop,
+    SR_PPU_OVERLAY_OBJ, kDioramaPlane_Obj1, kDioramaPlane_Obj2, kDioramaPlane_Obj3};
+static struct {
+  ArGpuGlobalMotion motion;
+  ArGpuBlockMotion blocks;
+  SDL_Texture *previous, *current, *output, *block_output;
+  uint32_t mask, presented_mask;
+  SDL_GPUTransferBuffer *validation;
+  SDL_GPUFence *projection_fence;
+  uint32_t pending_analysis_mask;
+  unsigned checks, errors;
+  bool attempted, ready, endpoint;
+} s_gpu;
+
+static void ResetGpu(void) {
+  if (s_gpu.projection_fence) SDL_ReleaseGPUFence(s_gpu.motion.device, s_gpu.projection_fence);
+  SDL_DestroyTexture(s_gpu.previous);
+  SDL_DestroyTexture(s_gpu.current);
+  SDL_DestroyTexture(s_gpu.output);
+  SDL_DestroyTexture(s_gpu.block_output);
+  ArGpuBlockMotion_Destroy(&s_gpu.blocks);
+  if (s_gpu.validation) SDL_ReleaseGPUTransferBuffer(s_gpu.motion.device, s_gpu.validation);
+  if (s_gpu.motion.device) ArGpuGlobalMotion_Destroy(&s_gpu.motion);
+  memset(&s_gpu, 0, sizeof(s_gpu));
+}
+
+static bool EnsureGpu(ArRenderDevice *device, int width, int height) {
+  const char *option = getenv("AR_GPU_BG_MOTION");
+  if (!option || !*option || *option == '0') return false;
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
+  const ArSdlRenderBackend *backend = renderer ? device->context : NULL;
+  /* External/legacy renderers cannot submit without also presenting their
+   * window. Only the ordered adapter establishes this dependency boundary. */
+  if (!backend || !backend->output_window || !backend->gpu_device) return false;
+  if (!s_gpu.attempted) {
+    s_gpu.attempted = true;
+    s_gpu.ready = ArGpuGlobalMotion_Init(&s_gpu.motion, backend->gpu_device) &&
+        ArGpuBlockMotion_Init(&s_gpu.blocks, backend->gpu_device);
+    s_gpu.motion.plane_count = 8;
+    s_gpu.motion.input_plane_count = 12;
+  }
+  if (!s_gpu.ready) return false;
+  if (s_gpu.previous && s_gpu.current && s_gpu.output && s_gpu.motion.height == (unsigned)height && s_gpu.blocks.width == (unsigned)width)
+    return true;
+  SDL_DestroyTexture(s_gpu.output); s_gpu.output = NULL;
+  SDL_DestroyTexture(s_gpu.block_output); s_gpu.block_output = NULL;
+  SDL_DestroyTexture(s_gpu.previous); s_gpu.previous = NULL;
+  SDL_DestroyTexture(s_gpu.current); s_gpu.current = NULL;
+  s_gpu.endpoint = false;
+  if (!ArGpuGlobalMotion_Resize(&s_gpu.motion, kFrameSlotLayerTextureWidth, (unsigned)height)) return false;
+  if (!ArGpuBlockMotion_Resize(&s_gpu.blocks, (unsigned)width, (unsigned)height)) return false;
+  s_gpu.previous = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
+      SDL_TEXTUREACCESS_TARGET, kFrameSlotLayerTextureWidth, height * 12);
+  s_gpu.current = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
+      SDL_TEXTUREACCESS_TARGET, kFrameSlotLayerTextureWidth, height * 12);
+  SDL_PropertiesID props = SDL_CreateProperties();
+  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_FORMAT_NUMBER, SDL_PIXELFORMAT_RGBA32);
+  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, kFrameSlotLayerTextureWidth);
+  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, height * 8);
+  SDL_SetPointerProperty(props, SDL_PROP_TEXTURE_CREATE_GPU_TEXTURE_POINTER, s_gpu.motion.output);
+  s_gpu.output = SDL_CreateTextureWithProperties(renderer, props);
+  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, width);
+  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, height * 4);
+  SDL_SetPointerProperty(props, SDL_PROP_TEXTURE_CREATE_GPU_TEXTURE_POINTER, s_gpu.blocks.output);
+  s_gpu.block_output = SDL_CreateTextureWithProperties(renderer, props);
+  SDL_DestroyProperties(props);
+  const bool configured = s_gpu.previous && s_gpu.current && s_gpu.output && s_gpu.block_output &&
+      SDL_SetTextureBlendMode(s_gpu.block_output, SDL_BLENDMODE_NONE) &&
+      SDL_SetTextureScaleMode(s_gpu.block_output, SDL_SCALEMODE_NEAREST) &&
+      SDL_SetTextureBlendMode(s_gpu.output, SDL_BLENDMODE_NONE) &&
+      SDL_SetTextureScaleMode(s_gpu.output, SDL_SCALEMODE_NEAREST);
+  if (!configured) {
+    /* Never reuse partially configured targets on the next capture. Latch
+     * failure until renderer reset, as with unsupported compute pipelines. */
+    ResetGpu();
+    s_gpu.attempted = true;
+  }
+  return configured;
+}
+
+static SDL_GPUTexture *NativeGpuTexture(SDL_Texture *texture) {
+  return SDL_GetPointerProperty(SDL_GetTextureProperties(texture),
+      SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, NULL);
+}
+
+/* Keep the small projection result asynchronous until presentation actually
+ * needs it. The fence precedes actor search: CPU projection must never wait on
+ * actor fields, which have no CPU consumer. Validation waits immediately. */
+static bool QueueGpuResults(bool actors) {
+  SDL_GPUDevice *gpu = s_gpu.motion.device;
+  const unsigned global_bytes = 8 * sizeof(ArGpuGlobalMotionResult);
+  const unsigned actor_words = (4 * 880 + 4) * 4;
+  const SDL_GPUTransferBufferCreateInfo info = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,
+      .size = global_bytes + actor_words * sizeof(int32_t)};
+  if (!s_gpu.validation) s_gpu.validation = SDL_CreateGPUTransferBuffer(gpu, &info);
+  if (!s_gpu.validation) return false;
+  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(gpu);
+  SDL_GPUCopyPass *copy = cmd ? SDL_BeginGPUCopyPass(cmd) : NULL;
+  if (!copy) { if (cmd) SDL_CancelGPUCommandBuffer(cmd); return false; }
+  const SDL_GPUBufferRegion source = {.buffer = s_gpu.motion.motion, .size = global_bytes};
+  const SDL_GPUTransferBufferLocation dest = {.transfer_buffer = s_gpu.validation};
+  SDL_DownloadFromGPUBuffer(copy, &source, &dest);
+  if (actors) {
+    const SDL_GPUBufferRegion field = {.buffer = s_gpu.blocks.motion, .size = actor_words * sizeof(int32_t)};
+    const SDL_GPUTransferBufferLocation actor_dest = {.transfer_buffer = s_gpu.validation, .offset = global_bytes};
+    SDL_DownloadFromGPUBuffer(copy, &field, &actor_dest);
+  }
+  SDL_EndGPUCopyPass(copy);
+  s_gpu.projection_fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+  return s_gpu.projection_fence != NULL;
+}
+
+static bool ApplyGpuResults(uint32_t analyzed_mask) {
+  const bool own = GpuOwnsAnalysis();
+  SDL_GPUDevice *gpu = s_gpu.motion.device;
+  const unsigned global_bytes = 8 * sizeof(ArGpuGlobalMotionResult);
+  if (!s_gpu.projection_fence) return false;
+  SDL_GPUFence *fence = s_gpu.projection_fence;
+  s_gpu.projection_fence = NULL;
+  const uint64_t wait_start = s_wait_trace ? SDL_GetTicksNS() : 0;
+  const bool complete = SDL_QueryGPUFence(gpu, fence) || SDL_WaitForGPUFences(gpu, true, &fence, 1);
+  if (s_wait_trace) s_last_wait_ns += SDL_GetTicksNS() - wait_start;
+  SDL_ReleaseGPUFence(gpu, fence);
+  if (!complete) return false;
+  const ArGpuGlobalMotionResult *results = SDL_MapGPUTransferBuffer(gpu, s_gpu.validation, false);
+  if (!results) return false;
+  bool matched = true;
+  for (unsigned i = 0; i < 8; ++i) {
+    if (!(analyzed_mask & (1u << kGpuPlanes[i]))) continue;
+    DioramaFrameGenerationPlane *plane = &s_planes[kGpuPlanes[i]];
+    PresentationFrameGenerationMotionField *field = &plane->motion;
+    if (own) {
+      *field = (PresentationFrameGenerationMotionField){.width = plane->texture_width,
+          .height = plane->texture_height, .blocks_x = 1, .blocks_y = 1,
+          .uniform = true, .valid = results[i].valid != 0};
+      field->forward_dx[0] = (int8_t)results[i].forward_x;
+      field->forward_dy[0] = (int8_t)results[i].forward_y;
+      field->backward_dx[0] = (int8_t)results[i].backward_x;
+      field->backward_dy[0] = (int8_t)results[i].backward_y;
+      plane->pair_valid = field->valid;
+      s_pair_mask &= ~(1u << kGpuPlanes[i]);
+      if (field->valid) s_pair_mask |= 1u << kGpuPlanes[i];
+      continue;
+    }
+    const ArGpuGlobalMotionResult expected = {field->forward_dx[0], field->forward_dy[0],
+        field->backward_dx[0], field->backward_dy[0], field->valid, {0}};
+    ++s_gpu.checks;
+    if (memcmp(results + i, &expected, sizeof(expected))) {
+      ++s_gpu.errors; matched = false;
+      SDL_Log("[gpu-bg-motion-check] mismatch plane=%d GPU=(%d,%d,%d,%d,%d) CPU=(%d,%d,%d,%d,%d)",
+          kGpuPlanes[i], results[i].forward_x, results[i].forward_y,
+          results[i].backward_x, results[i].backward_y, results[i].valid,
+          expected.forward_x, expected.forward_y, expected.backward_x, expected.backward_y, expected.valid);
+    }
+  }
+  if (!own) {
+    const int32_t *actors = (const int32_t *)((const uint8_t *)results + global_bytes);
+    for (unsigned i = 0; i < 4; ++i) {
+      if (!(analyzed_mask & (1u << kGpuPlanes[8+i]))) continue;
+      const PresentationFrameGenerationMotionField *field = &s_planes[kGpuPlanes[8+i]].motion;
+      bool same = actors[(4*880+i)*4] == field->valid;
+      for (unsigned b = 0; b < 880 && same; ++b) {
+        const int32_t *v = actors + (i*880+b)*4;
+        same = v[0] == field->forward_dx[b] && v[1] == field->forward_dy[b] &&
+            v[2] == field->backward_dx[b] && v[3] == field->backward_dy[b];
+      }
+      ++s_gpu.checks;
+      if (!same) {
+        ++s_gpu.errors; matched = false;
+        SDL_Log("[gpu-bg-motion-check] mismatch actor plane=%d", kGpuPlanes[8+i]);
+      }
+    }
+  }
+  SDL_UnmapGPUTransferBuffer(gpu, s_gpu.validation);
+  if (!own && (s_gpu.checks < 7 || s_gpu.checks % 100 < 6))
+    SDL_Log("[gpu-bg-motion-check] checks=%u errors=%u", s_gpu.checks, s_gpu.errors);
+  return matched;
+}
+
+uint32_t DioramaFrameGeneration_GpuPlaneMask(void) { return s_gpu.presented_mask; }
+uint32_t DioramaFrameGeneration_GeneratedPlaneMask(void) { return s_generated_mask; }
+void DioramaFrameGeneration_EnableWaitTrace(bool enabled) {
+  s_wait_trace = enabled;
+  s_last_wait_ns = 0;
+}
+uint64_t DioramaFrameGeneration_LastWaitNs(void) { return s_last_wait_ns; }
+
+static void CaptureGpu(ArRenderDevice *device, int width, int height, bool continuous, uint32_t analyzed_mask,
+    const ArRenderTexture source_textures[kFrameGenerationPlaneCount]) {
+  s_gpu.mask = 0;
+  // A drained source may never be presented. Retire its handle without a CPU
+  // wait; submissions stay ordered, and only the newest download is mapped.
+  if (s_gpu.projection_fence) {
+    SDL_ReleaseGPUFence(s_gpu.motion.device, s_gpu.projection_fence);
+    s_gpu.projection_fence = NULL;
+  }
+  if (!EnsureGpu(device, width, height)) { s_gpu.endpoint = false; return; }
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
+  const bool had_previous = s_gpu.endpoint && continuous;
+  s_gpu.endpoint = false;
+  SDL_Texture *swap = s_gpu.previous; s_gpu.previous = s_gpu.current; s_gpu.current = swap;
+  SDL_Texture *old_target = SDL_GetRenderTarget(renderer);
+  Uint8 r = 0, g = 0, b = 0, a = 0;
+  if (!SDL_GetRenderDrawColor(renderer, &r, &g, &b, &a)) return;
+  bool ok = SDL_SetRenderTarget(renderer, s_gpu.current) &&
+      SDL_SetRenderLogicalPresentation(renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED) &&
+      SDL_SetRenderViewport(renderer, NULL) && SDL_SetRenderClipRect(renderer, NULL) &&
+      SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0) && SDL_RenderClear(renderer);
+  uint32_t mask = 0;
+  for (int i = 0; i < 12 && ok; ++i) {
+    const int index = kGpuPlanes[i];
+    const DioramaFrameGenerationPlane *plane = &s_planes[index];
+    if (i < 8) {
+      s_gpu.motion.extents[i][0] = (float)(plane->current_valid ? plane->texture_width : 1);
+      s_gpu.motion.extents[i][1] = (analyzed_mask & (1u << index)) ? 1.0f : 0.0f;
+    } else {
+      s_gpu.blocks.extents[i-8][3] = (analyzed_mask & (1u << index)) ? 1.0f : 0.0f;
+    }
+    if (!plane->current_valid) continue;
+    SDL_Texture *source = plane->gpu_only
+        ? ArSdlRenderBackend_UnwrapTexture(source_textures[index]) : plane->current_texture;
+    SDL_BlendMode blend;
+    if (!source || !SDL_GetTextureBlendMode(source, &blend)) { ok = false; break; }
+    const SDL_FRect src = {(float)(plane->gpu_only ? plane->output_x : 0), 0,
+        (float)plane->texture_width, (float)height};
+    const SDL_FRect dest = {0, (float)(i * height), src.w, src.h};
+    const bool copied = SDL_SetTextureBlendMode(source, SDL_BLENDMODE_NONE) &&
+        SDL_RenderTexture(renderer, source, &src, &dest);
+    const bool restored = SDL_SetTextureBlendMode(source, blend);
+    ok = copied && restored;
+    if (GpuOwnsAnalysis() ? (analyzed_mask & (1u << index)) != 0 :
+        plane->pair_valid && (plane->motion.uniform || i >= 8)) mask |= 1u << index;
+  }
+  const bool target_restored = SDL_SetRenderTarget(renderer, old_target);
+  const bool color_restored = SDL_SetRenderDrawColor(renderer, r, g, b, a);
+  if (!ok || !target_restored || !color_restored || !ArSdlRenderBackend_SubmitPending(device)) return;
+  s_gpu.endpoint = true;
+  if (!had_previous || !mask) return;
+  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(s_gpu.motion.device);
+  if (!cmd) return;
+  SDL_GPUTexture *previous = NativeGpuTexture(s_gpu.previous), *current = NativeGpuTexture(s_gpu.current);
+  const bool own = GpuOwnsAnalysis();
+  if (!previous || !current || !ArGpuGlobalMotion_Analyze(&s_gpu.motion, cmd, previous, current) ||
+      (!own && !ArGpuBlockMotion_Analyze(&s_gpu.blocks, cmd, previous, current))) {
+    SDL_CancelGPUCommandBuffer(cmd); return;
+  }
+  if (!SDL_SubmitGPUCommandBuffer(cmd)) return;
+  const char *option = getenv("AR_GPU_BG_MOTION");
+  const bool validate = option && strcmp(option, "validate") == 0;
+  if (own || validate) {
+    if (!QueueGpuResults(!own)) return;
+    if (validate && !ApplyGpuResults(analyzed_mask)) return;
+  }
+  if (own) {
+    s_gpu.pending_analysis_mask = analyzed_mask;
+    // Acceptance is applied when the result is consumed by Prepare. Preserve
+    // candidate bits so a BG-only pair can reach that consumption point.
+    s_pair_mask |= mask;
+    // Actor search remains asynchronous behind the projection download.
+    cmd = SDL_AcquireGPUCommandBuffer(s_gpu.motion.device);
+    if (!cmd) return;
+    if (!ArGpuBlockMotion_Analyze(&s_gpu.blocks, cmd, previous, current)) {
+      SDL_CancelGPUCommandBuffer(cmd); return;
+    }
+    if (!SDL_SubmitGPUCommandBuffer(cmd)) return;
+  }
+  s_gpu.mask = own ? mask & s_pair_mask : mask;
+}
+
+static uint32_t PrepareGpu(ArRenderDevice *device, float phase) {
+  if (s_gpu.projection_fence) {
+    if (!ApplyGpuResults(s_gpu.pending_analysis_mask)) s_gpu.mask = 0;
+    else s_gpu.mask &= s_pair_mask;
+  }
+  if (!s_gpu.mask || !ArSdlRenderBackend_SubmitPending(device)) return 0;
+  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(s_gpu.motion.device);
+  if (!cmd) return 0;
+  if (!ArGpuGlobalMotion_Warp(&s_gpu.motion, cmd, NativeGpuTexture(s_gpu.previous),
+          NativeGpuTexture(s_gpu.current), phase)) {
+    SDL_CancelGPUCommandBuffer(cmd); return 0;
+  }
+  unsigned actor_mask = 0;
+  for (unsigned i = 0; i < 4; ++i) if (s_gpu.mask & (1u << kGpuPlanes[8+i])) actor_mask |= 1u << i;
+  if (!ArGpuBlockMotion_Warp(&s_gpu.blocks, cmd, NativeGpuTexture(s_gpu.previous),
+      NativeGpuTexture(s_gpu.current), phase, actor_mask)) { SDL_CancelGPUCommandBuffer(cmd); return 0; }
+  if (!SDL_SubmitGPUCommandBuffer(cmd)) return 0;
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
+  SDL_Texture *target = SDL_GetRenderTarget(renderer);
+  Uint8 r = 0, g = 0, b = 0, a = 0;
+  if (!SDL_GetRenderDrawColor(renderer, &r, &g, &b, &a)) return 0;
+  uint32_t mask = 0;
+  for (int i = 0; i < 12; ++i) {
+    const int index = kGpuPlanes[i];
+    if (!(s_gpu.mask & (1u << index))) continue;
+    const DioramaFrameGenerationPlane *plane = &s_planes[index];
+    const SDL_FRect src = {0, (float)((i < 8 ? i : i-8) * s_gpu.motion.height),
+        (float)plane->texture_width, (float)plane->texture_height};
+    const SDL_FRect dst = {(float)plane->output_x, 0, src.w, src.h};
+    if (SDL_SetRenderTarget(renderer, plane->generated_texture) &&
+        SDL_SetRenderLogicalPresentation(renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED) &&
+        SDL_SetRenderViewport(renderer, NULL) && SDL_SetRenderClipRect(renderer, NULL) &&
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0) && SDL_RenderClear(renderer) &&
+        SDL_RenderTexture(renderer, i < 8 ? s_gpu.output : s_gpu.block_output, &src, &dst)) mask |= 1u << index;
+  }
+  const bool restored = SDL_SetRenderTarget(renderer, target);
+  const bool color_restored = SDL_SetRenderDrawColor(renderer, r, g, b, a);
+  static bool reported;
+  if (mask && !reported) {
+    reported = true;
+    SDL_Log("[gpu-bg-motion] resident analysis/synthesis active; %s",
+        GpuOwnsAnalysis() ? "CPU pixel analysis disabled; 256-byte projection metadata download" :
+        "CPU projection oracle retained");
+  }
+  return restored && color_restored ? mask : 0;
+}
 
 _Static_assert(
     kFrameSlotLayerTextureWidth <=
@@ -70,19 +411,24 @@ _Static_assert(
         kPresentationFrameGenerationMaximumHeight,
     "capture texture height exceeds frame-generation capacity");
 
-static void DestroyPlaneTextures(DioramaFrameGenerationPlane *plane) {
+static void DestroyPlaneEndpoints(DioramaFrameGenerationPlane *plane) {
   SDL_DestroyTexture(plane->previous_texture);
   SDL_DestroyTexture(plane->current_texture);
-  SDL_DestroyTexture(plane->generated_texture);
   plane->previous_texture = NULL;
   plane->current_texture = NULL;
-  plane->generated_texture = NULL;
   plane->output_x = 0;
   plane->texture_width = 0;
   plane->texture_height = 0;
 }
 
+static void DestroyPlaneTextures(DioramaFrameGenerationPlane *plane) {
+  DestroyPlaneEndpoints(plane);
+  SDL_DestroyTexture(plane->generated_texture);
+  plane->generated_texture = NULL;
+}
+
 void DioramaFrameGeneration_Reset(void) {
+  ResetGpu();
   memset(s_present_offsets,0,sizeof(s_present_offsets));
   for (int plane = 0; plane < kFrameGenerationPlaneCount; plane++) {
     DestroyPlaneTextures(&s_planes[plane]);
@@ -93,6 +439,8 @@ void DioramaFrameGeneration_Reset(void) {
   memset(&s_last_key, 0, sizeof(s_last_key));
   s_pair_timestamp_ns = 0;
   s_pair_mask = 0;
+  s_generated_mask = 0;
+  s_last_wait_ns = 0;
   s_index_blocks_x = -1;
   s_index_blocks_y = -1;
 }
@@ -143,18 +491,20 @@ static bool EnsurePlaneTextures(SDL_Renderer *renderer, int plane_index,
   if (plane->output_x != region->x ||
       plane->texture_width != region->width ||
       plane->texture_height != region->height)
-    DestroyPlaneTextures(plane);
+    /* The output has fixed dimensions and can still be the caller's bound
+     * target. Only the capture-sized endpoints need replacement here. */
+    DestroyPlaneEndpoints(plane);
   /* The endpoints are filled by copying the already-uploaded compositor
    * texture on the GPU rather than by a second upload of the same pixels, so
    * they are render targets. Frame generation already required target
    * textures for `generated_texture`, so this adds no new device requirement
    * and needs no separate fallback. */
-  if (!plane->previous_texture)
+  if (!plane->gpu_only && !plane->previous_texture)
     plane->previous_texture =
         CreatePlaneTexture(renderer, SDL_TEXTUREACCESS_TARGET,
                            SDL_SCALEMODE_LINEAR,
                            region->width, region->height, plane_index);
-  if (!plane->current_texture)
+  if (!plane->gpu_only && !plane->current_texture)
     plane->current_texture =
         CreatePlaneTexture(renderer, SDL_TEXTUREACCESS_TARGET,
                            SDL_SCALEMODE_LINEAR,
@@ -165,8 +515,8 @@ static bool EnsurePlaneTextures(SDL_Renderer *renderer, int plane_index,
                            SDL_SCALEMODE_NEAREST,
                            kFrameSlotLayerTextureWidth,
                            kFrameSlotLayerTextureHeight, plane_index);
-  const bool ready = plane->previous_texture && plane->current_texture &&
-      plane->generated_texture;
+  const bool ready = plane->generated_texture &&
+      (plane->gpu_only || (plane->previous_texture && plane->current_texture));
   if (ready) {
     plane->output_x = region->x;
     plane->texture_width = region->width;
@@ -216,6 +566,7 @@ void DioramaFrameGeneration_CaptureWithSkybox(
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   s_pair_timestamp_ns = 0;
   s_pair_mask = 0;
+  s_gpu.mask = 0;
   if (!renderer || !slot || !layer_textures || !layer_pixels || !layer_pitches ||
       !slot->diorama_active ||
       !slot->interp_setting_enabled || !slot->capture_ticks ||
@@ -230,7 +581,8 @@ void DioramaFrameGeneration_CaptureWithSkybox(
   memcpy(pixels, layer_pixels, sizeof(*layer_pixels) * kDioramaPlane_Count);
   memcpy(pitch_bytes, layer_pitches, sizeof(*layer_pitches) * kDioramaPlane_Count);
   const bool have_skybox = ArRenderTexture_IsValid(skybox_texture) &&
-      slot->diorama_skybox_surface.data && !slot->diorama_skybox_periodic;
+      (slot->diorama_skybox_surface.data || (slot->background_packet &&
+        (slot->background_packet->owned_sources & 4u))) && !slot->diorama_skybox_periodic;
   source_textures[kDioramaFrameGenerationSkybox] = skybox_texture;
   pixels[kDioramaFrameGenerationSkybox] = have_skybox
       ? slot->diorama_skybox_surface.data : NULL;
@@ -266,6 +618,8 @@ void DioramaFrameGeneration_CaptureWithSkybox(
     return;
   }
 
+  uint32_t analyzed_bg_mask = 0;
+  const bool own_gpu_analysis = GpuOwnsAnalysis() && EnsureGpu(device, width, height);
   const bool continuous =
       KeysAreContinuous(&s_last_key, &current, slot->capture_ticks);
   /* Endpoint copies bind their own render target. Capture the caller's once
@@ -276,7 +630,17 @@ void DioramaFrameGeneration_CaptureWithSkybox(
        plane_index++) {
     DioramaFrameGenerationPlane *plane = &s_planes[plane_index];
     plane->pair_valid = false;
-    if (!(plane_mask & (1u << plane_index)) || !pixels[plane_index]) {
+    const bool gpu_analysis = own_gpu_analysis && GpuMotionPlane(plane_index);
+    if (plane->gpu_only != gpu_analysis) {
+      plane->current_valid = false;
+      DestroyPlaneEndpoints(plane);
+      plane->gpu_only = gpu_analysis;
+    }
+    const bool gpu_source = slot->background_packet &&
+        ((DioramaPlanes_GpuOwnedMask(slot->background_packet) |
+          (slot->background_packet->owned_sources & 4u ? 1u << kDioramaFrameGenerationSkybox : 0u)) & (1u << plane_index)) &&
+        ArRenderTexture_IsValid(source_textures[plane_index]);
+    if (!(plane_mask & (1u << plane_index)) || (!pixels[plane_index] && !(gpu_analysis && gpu_source))) {
       plane->current_valid = false;
       continue;
     }
@@ -294,8 +658,8 @@ void DioramaFrameGeneration_CaptureWithSkybox(
     }
     if (region.width <= 0 || region.width > kFrameSlotLayerTextureWidth ||
         region.height <= 0 || region.height > kFrameSlotLayerTextureHeight ||
-        pitch_bytes[plane_index] <
-            (size_t)(region.x + region.width) * sizeof(uint32_t)) {
+        (!gpu_analysis && pitch_bytes[plane_index] <
+            (size_t)(region.x + region.width) * sizeof(uint32_t))) {
       plane->current_valid = false;
       continue;
     }
@@ -311,21 +675,37 @@ void DioramaFrameGeneration_CaptureWithSkybox(
     if (!(changed_plane_mask & (1u << plane_index)) &&
         plane->current_valid && region_matches)
       continue;
-    if (!EnsurePlaneBuffers(plane)) {
+    if (!gpu_analysis && !EnsurePlaneBuffers(plane)) {
       plane->current_valid = false;
       continue;
     }
 
-    uint32_t *swap = plane->previous_pixels;
-    plane->previous_pixels = plane->current_pixels;
-    plane->current_pixels = swap;
+    if (!gpu_analysis) {
+      uint32_t *swap = plane->previous_pixels;
+      plane->previous_pixels = plane->current_pixels;
+      plane->current_pixels = swap;
+    }
     const bool had_previous = plane->current_valid && continuous &&
         region_matches && (s_last_key.plane_mask & (1u << plane_index));
-    CopySurfaceRegion(
+    if (!gpu_analysis) CopySurfaceRegion(
         plane->current_pixels, pixels[plane_index],
         pitch_bytes[plane_index], &region);
     if (!EnsurePlaneTextures(renderer, plane_index, &region)) {
       plane->current_valid = false;
+      continue;
+    }
+
+    if (gpu_analysis) {
+      /* The atlas owns both GPU endpoints already. Copy the raw source into
+       * it directly instead of retaining another pair of identical textures. */
+      plane->current_valid = true;
+      if (had_previous) {
+        analyzed_bg_mask |= 1u << plane_index;
+        if (DioramaPlaneIsObjectPriority(plane_index)) {
+          plane->pair_valid = true;
+          s_pair_mask |= 1u << plane_index;
+        }
+      }
       continue;
     }
 
@@ -374,6 +754,8 @@ void DioramaFrameGeneration_CaptureWithSkybox(
         DioramaPlaneIsObjectPriority(plane_index)
             ? kPresentationFrameGenerationAnalysis_Blocks
             : kPresentationFrameGenerationAnalysis_Global;
+    if (GpuMotionPlane(plane_index))
+      analyzed_bg_mask |= 1u << plane_index;
     plane->pair_valid = PresentationFrameGeneration_Analyze(
         plane->previous_pixels, plane->current_pixels,
         region.width, region.height,
@@ -383,6 +765,7 @@ void DioramaFrameGeneration_CaptureWithSkybox(
   }
   if (SDL_GetRenderTarget(renderer) != entry_target)
     (void)SDL_SetRenderTarget(renderer, entry_target);
+  CaptureGpu(device, width, height, continuous, analyzed_bg_mask, source_textures);
   s_pair_timestamp_ns = s_pair_mask ? slot->timestamp_ns : 0;
   s_last_key = current;
 }
@@ -548,6 +931,9 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
     ArRenderTexture resolved_textures[kDioramaPlane_Count],
     ArRenderTexture skybox_texture, ArRenderTexture *resolved_skybox) {
   memset(s_present_offsets,0,sizeof(s_present_offsets));
+  s_gpu.presented_mask = 0;
+  s_generated_mask = 0;
+  s_last_wait_ns = 0;
   if (resolved_skybox) *resolved_skybox = skybox_texture;
   if (!resolved_textures || !current_textures) return 0;
   memcpy(resolved_textures, current_textures,
@@ -579,13 +965,15 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
     ArSdlPresentation_PopFullOutput(renderer, &output_state);
     return 0;
   }
+  const uint32_t gpu_mask = PrepareGpu(device, phase);
+  s_gpu.presented_mask = gpu_mask;
   uint32_t generated_mask = 0;
   for (int plane = 0; plane < kFrameGenerationPlaneCount; plane++) {
     if (!((s_pair_mask & current_plane_mask) & (1u << plane)) ||
         !native_current_textures[plane])
       continue;
-    const bool generated = GeneratePlane(
-        renderer, plane, old_target, phase);
+    const bool generated = (gpu_mask & (1u << plane)) || (!s_planes[plane].gpu_only && GeneratePlane(
+        renderer, plane, old_target, phase));
     if (SDL_GetRenderTarget(renderer) != old_target) {
       (void)SDL_SetRenderTarget(renderer, old_target);
       break;
@@ -615,6 +1003,7 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
   }
   SDL_SetRenderDrawColor(renderer, old_r, old_g, old_b, old_a);
   ArSdlPresentation_PopFullOutput(renderer, &output_state);
+  s_generated_mask = generated_mask;
   return generated_mask;
 }
 

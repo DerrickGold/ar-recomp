@@ -25,6 +25,16 @@ enum {
   kDioramaPlane_Count
 };
 
+static inline uint32_t DioramaPlanes_GpuOwnedMask(const SrPpuBgPacket *packet) {
+  if (!packet) return 0;
+  uint32_t mask = 0;
+  if (packet->owned_sources & 1u) mask |= (1u << SR_PPU_OVERLAY_BG1) |
+      (1u << kDioramaPlane_Bg1Hi) | (1u << kDioramaPlane_Bg1Far);
+  if (packet->owned_sources & 2u) mask |= (1u << SR_PPU_OVERLAY_BG2) |
+      (1u << kDioramaPlane_Bg2Hi) | (1u << kDioramaPlane_Bg2Far);
+  return mask;
+}
+
 /* One routing table for PPU bindings, captured masks and texture upload.
  * Primary surfaces use band zero; these are the additional priority bands. */
 typedef struct DioramaPriorityBand {

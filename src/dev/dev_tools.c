@@ -139,6 +139,13 @@ bool DevTools_DumpSceneAssets(const DevToolsContext *context) {
  * composite so an independently scaled HUD is represented exactly. */
 DevToolsCaptureResult DevTools_WriteFramebufferPpm(
     FILE *file, const DevToolsContext *context, bool require_composite) {
+  return DevTools_WriteFramebufferPpmAtPhase(
+      file, context, require_composite, kPresentationFrameGenerationPhaseNone, NULL);
+}
+
+DevToolsCaptureResult DevTools_WriteFramebufferPpmAtPhase(
+    FILE *file, const DevToolsContext *context, bool require_composite, float phase,
+    const FrameSlot *uploaded_frame) {
   if (!file || !context)
     return (DevToolsCaptureResult){0};
 
@@ -147,11 +154,14 @@ DevToolsCaptureResult DevTools_WriteFramebufferPpm(
   DevToolsRgb24Capture capture = {0};
   if (context->readback.capture_rgb24 &&
       ArRenderTexture_IsValid(context->hud_bg_texture)) {
-    FrameSlot_Capture(&frame_slot, NULL);
-    PresentUpload(&frame_slot);
+    if (!uploaded_frame) {
+      FrameSlot_Capture(&frame_slot, NULL);
+      PresentUpload(&frame_slot);
+      uploaded_frame = &frame_slot;
+    }
     /* The same scene -> CRT resolve -> host-UI function used by the live
      * window keeps F2 captures visually identical, including an open menu. */
-    PresentFrame(&frame_slot, kPresentationFrameGenerationPhaseNone,
+    PresentFrame(uploaded_frame, phase,
                  HostDisplay_FramesPerSecond());
     have_composite = true;
   }

@@ -47,6 +47,7 @@ typedef struct SrSceneFrame {
     uint16_t fixed_color;
     uint8_t native_page_mask; /* optional 256x256 canonical pages; no edits/classification */
     bool reference_renderer; /* correctness oracle; normal tools leave false */
+    SrPpuBgPacket *background_packet; /* optional live capture export oracle */
 } SrSceneFrame;
 typedef struct SrSceneSurfaces {
     const uint32_t *backdrop;

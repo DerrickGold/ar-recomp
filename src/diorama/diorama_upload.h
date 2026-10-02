@@ -30,6 +30,15 @@ DioramaUploadResult Diorama_Upload(
     int snes_width, int snes_height, int obj_apron, unsigned bg_apron_mask,
     uint32_t plane_mask);
 
+/* The GPU has already synchronized these planes. Keep CPU coverage/mirror
+ * fallback bookkeeping without uploading their expanded pixels a second time. */
+DioramaUploadResult Diorama_UploadResolved(
+    ArRenderDevice *device, ArRenderTexture textures[kDioramaPlane_Count],
+    const uint8_t *const pixels[kDioramaPlane_Count],
+    const size_t pitch_bytes[kDioramaPlane_Count],
+    int width, int height, int apron, unsigned bg_apron_mask,
+    uint32_t plane_mask, uint32_t gpu_mask, uint32_t gpu_changed);
+
 /* Forget retained upload hashes after a render-device reset or shutdown. */
 void DioramaUpload_Reset(void);
 

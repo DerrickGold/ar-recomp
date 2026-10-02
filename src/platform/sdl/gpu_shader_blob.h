@@ -94,4 +94,27 @@ static inline SDL_GPUShader *GpuShaderBlob_CreateFragment(
       num_samplers, num_uniform_buffers);
 }
 
+static inline SDL_GPUComputePipeline *GpuShaderBlob_CreateCompute(SDL_GPUDevice *device,
+    const GpuShaderBlobs *blobs, unsigned samplers, unsigned read_buffers,
+    unsigned write_buffers, unsigned write_textures, unsigned uniforms,
+    unsigned threads_x, unsigned threads_y) {
+  SDL_GPUComputePipelineCreateInfo info = {.num_samplers = samplers,
+    .num_readonly_storage_buffers = read_buffers,
+    .num_readwrite_storage_buffers = write_buffers,
+    .num_readwrite_storage_textures = write_textures, .num_uniform_buffers = uniforms,
+    .threadcount_x = threads_x, .threadcount_y = threads_y, .threadcount_z = 1};
+  const SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
+  if (formats & SDL_GPU_SHADERFORMAT_SPIRV) {
+    info.code = blobs->spv; info.code_size = blobs->spv_size;
+    info.format = SDL_GPU_SHADERFORMAT_SPIRV; info.entrypoint = "main";
+  } else if (formats & SDL_GPU_SHADERFORMAT_DXIL) {
+    info.code = blobs->dxil; info.code_size = blobs->dxil_size;
+    info.format = SDL_GPU_SHADERFORMAT_DXIL; info.entrypoint = "main";
+  } else if (formats & SDL_GPU_SHADERFORMAT_MSL) {
+    info.code = blobs->msl; info.code_size = blobs->msl_size;
+    info.format = SDL_GPU_SHADERFORMAT_MSL; info.entrypoint = "main0";
+  } else return NULL;
+  return SDL_CreateGPUComputePipeline(device, &info);
+}
+
 #endif /* AR_GPU_SHADER_BLOB_H */

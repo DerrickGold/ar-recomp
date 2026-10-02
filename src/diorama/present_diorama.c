@@ -11,6 +11,7 @@
 #include "diorama/diorama_frame_generation.h"
 #include "diorama/diorama_performance.h"
 #include "diorama/diorama_upload.h"
+#include "diorama/diorama_bg_gpu.h"
 #include "host/host_clock.h"
 #include "present/present.h"
 #include "present/presentation_surface.h"
@@ -18,6 +19,8 @@
 #include "render/present_hud.h"
 
 static ArRenderTexture s_plane_textures[kDioramaPlane_Count];
+static ArRenderTexture s_resolved_textures[kDioramaPlane_Count];
+static uint32_t *s_bg_fallback[kDioramaPlane_Count + 1];
 static uint32_t s_diorama_uploaded_plane_mask;
 static DioramaCoverageMask s_diorama_coverage_masks[kDioramaPlane_Count];
 static uint64_t s_diorama_bg2_content_revision;
@@ -96,11 +99,96 @@ static void CaptureDioramaPpuSurfaces(
     memset(pitch_bytes, 0, sizeof(*pitch_bytes) * kDioramaPlane_Count);
   for (int plane = 0; plane < kDioramaPlane_Count; plane++) {
     const SrPpuSurfaceView *surface = DioramaPpuSurface(slot, plane);
+    if (DioramaPlanes_GpuOwnedMask(slot->background_packet) & (1u << plane)) {
+      if (pitch_bytes) pitch_bytes[plane] = slot->background_packet->words[0] * sizeof(uint32_t);
+      continue;
+    }
     if (!PresentationSurface_Holds(surface, width, height)) continue;
     pixels[plane] = surface->data;
     if (pitch_bytes)
       pitch_bytes[plane] = (size_t)surface->pitch_bytes;
   }
+}
+
+/* Renderer failure and explicitly requested pixel diagnostics remain able
+ * to consume an owned packet. Ordinary rendering never enters this decoder. */
+static void MaterializeBackgrounds(const SrPpuBgPacket *packet, uint32_t mask,
+    const uint8_t **pixels, size_t *pitches) {
+  if (!packet) return;
+  const unsigned planes[2][3] = {{SR_PPU_OVERLAY_BG1, kDioramaPlane_Bg1Hi, kDioramaPlane_Bg1Far},
+      {SR_PPU_OVERLAY_BG2, kDioramaPlane_Bg2Hi, kDioramaPlane_Bg2Far}};
+  for (unsigned bg = 0; bg < 2; ++bg) for (unsigned band = 0; band < 3; ++band) {
+    const unsigned plane = planes[bg][band];
+    if (!(mask & (1u << plane))) continue;
+    if (!s_bg_fallback[plane]) s_bg_fallback[plane] = malloc(
+        SR_PPU_BG_PACKET_WIDTH * SR_PPU_BG_PACKET_HEIGHT * sizeof(uint32_t));
+    if (!s_bg_fallback[plane]) continue;
+    for (unsigned y = 0; y < packet->words[1]; ++y)
+      for (unsigned x = 0; x < packet->words[0]; ++x)
+        s_bg_fallback[plane][y * packet->words[0] + x] = SrPpuBgPacket_Color(packet, bg, band, x, y);
+    pixels[plane] = (const uint8_t *)s_bg_fallback[plane];
+    pitches[plane] = packet->words[0] * sizeof(uint32_t);
+  }
+}
+
+/* Coarse mesh coverage reads bitplanes in eight-pixel groups. It never expands
+ * colors or retains a CPU image, and keeps sparse far/high layers cheap. */
+static DioramaCoverageMask BackgroundPacketCoverage(const SrPpuBgPacket *packet,
+    unsigned source, unsigned band, unsigned apron) {
+  const unsigned width = packet->words[0] - apron * 2, height = packet->words[1];
+  DioramaCoverageMask occupied = 0;
+  for (unsigned gy = 0; gy < kDioramaCoverageRows; ++gy) {
+    const unsigned y0 = (gy * height + kDioramaCoverageRows - 1) / kDioramaCoverageRows;
+    const unsigned y1 = ((gy + 1) * height + kDioramaCoverageRows - 1) / kDioramaCoverageRows;
+    for (unsigned gx = 0; gx < kDioramaCoverageColumns; ++gx) {
+      const unsigned x0 = apron + (gx * width + kDioramaCoverageColumns - 1) / kDioramaCoverageColumns;
+      const unsigned x1 = apron + ((gx + 1) * width + kDioramaCoverageColumns - 1) / kDioramaCoverageColumns;
+      bool found = false;
+      for (unsigned y = y0; y < y1 && !found; ++y) {
+        const unsigned row = SrPpuBgPacket_Row(source, y);
+        const uint32_t *meta = packet->words + SR_PPU_BG_PACKET_HEADER_WORDS + row * SR_PPU_BG_PACKET_ROW_WORDS;
+        if (meta[0] >= 3 && meta[7]) {
+          /* Conservative tile coverage is sufficient for mesh culling; avoid
+           * expanding the GPU-owned image just to find occupied grid cells. */
+          if (band == 0 && (meta[1] >> 24) && x0 < meta[3] && x1 > meta[2]) found = true;
+          for (unsigned x = x0; x < x1 && !found;) {
+            const unsigned column = x + meta[4];
+            const uint32_t *tile = packet->words + meta[7] + (column / 8) * 2;
+            found = tile[0] && (tile[1] & 0xff00u) && ((tile[1] >> 3) & 3u) == band;
+            x += 8u - (column & 7u);
+          }
+          if (meta[0] == 4 && meta[5])
+            for (unsigned x = x0; x < x1 && !found; x = (x | 7u) + 1u) {
+              const uint32_t *edit = packet->words + meta[5] + (x / 8u) * 9u + band * 3u;
+              found = edit[0] || (edit[2] & 0xffffu);
+            }
+          continue;
+        }
+        if (meta[0] != 2 || !meta[7]) {
+          for (unsigned x = x0; x < x1 && !found; ++x)
+            found = (SrPpuBgPacket_Color(packet, source, band, x, y) >> 24) != 0;
+          continue;
+        }
+        const uint32_t *pixels = packet->words + meta[7];
+        for (unsigned x = x0; x < x1 && !found;) {
+          unsigned end = (x | 7u) + 1;
+          if (end > x1) end = x1;
+          const unsigned mask = ((1u << (end - x)) - 1u) << (x & 7u);
+          const uint32_t *cell = pixels + (x / 8) * 9 + band * 3;
+          unsigned covered = cell[0] | (cell[0] >> 8) | (cell[0] >> 16) | (cell[0] >> 24) | cell[2];
+          if (meta[1] >> 24) {
+            covered |= cell[2] >> 8;
+            if (band == 0) for (unsigned at = x; at < end; ++at)
+              if (at >= meta[2] && at < meta[3] && !(cell[2] & (1u << ((at & 7u) + 16))))
+                covered |= 1u << (at & 7u);
+          }
+          found = (covered & mask) != 0; x = end;
+        }
+      }
+      if (found) occupied |= UINT64_C(1) << (gy * kDioramaCoverageColumns + gx);
+    }
+  }
+  return occupied ? DioramaCoverage_Dilate(occupied) : DioramaCoverage_FullMask();
 }
 
 /* AR_PLANESTAT=1: report the alpha-bearing fraction and content bounding box
@@ -168,12 +256,45 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
     return;
   }
   bool skybox_changed = false;
-  const SrPpuSurfaceView *skybox =
-      PresentationSurface_Bound(&slot->diorama_skybox_surface);
+  uint32_t upload_mask = slot->diorama_plane_request_mask &
+                         slot->diorama_plane_content_mask;
+  memcpy(s_resolved_textures, s_plane_textures, sizeof(s_resolved_textures));
+  uint32_t gpu_changed = 0;
+  const DioramaPerformanceScope gpu_capture_scope =
+      DioramaPerformance_Begin(kDioramaPerformance_Upload);
+  ArRenderTexture gpu_skybox = ArRenderTexture_Invalid();
+  const uint32_t gpu_mask = DioramaBgGpu_Resolve(device, slot->background_packet,
+      upload_mask, s_resolved_textures, &gpu_skybox, &gpu_changed);
+  if (ArRenderTexture_IsValid(gpu_skybox)) {
+    skybox_changed = (gpu_changed & (1u << kDioramaPlane_Count)) != 0;
+    if (skybox_changed) ++s_diorama_skybox_view.revision;
+    s_diorama_skybox_view.texture = gpu_skybox;
+    s_diorama_skybox_view.width = (int)slot->background_packet->words[4];
+    s_diorama_skybox_view.periodic = slot->diorama_skybox_periodic;
+  }
+  DioramaPerformance_End(gpu_capture_scope);
+  for (unsigned plane = 0; plane < kDioramaPlane_Count; ++plane)
+    if (!(gpu_mask & (1u << plane))) s_resolved_textures[plane] = s_plane_textures[plane];
+  SrPpuSurfaceView skybox_storage = slot->diorama_skybox_surface;
+  const bool owned_skybox = slot->background_packet && (slot->background_packet->owned_sources & 4u);
+  const bool skybox_diagnostic = getenv("AR_DIORAMA_SNAPSHOT") || getenv("AR_PLANESTAT");
+  if (owned_skybox && (!ArRenderTexture_IsValid(gpu_skybox) || skybox_diagnostic)) {
+    const SrPpuBgPacket *packet = slot->background_packet;
+    if (!s_bg_fallback[kDioramaPlane_Count]) s_bg_fallback[kDioramaPlane_Count] = malloc(
+        SR_PPU_BG_PACKET_WIDTH * SR_PPU_BG_PACKET_HEIGHT * sizeof(uint32_t));
+    if (s_bg_fallback[kDioramaPlane_Count]) {
+      for (unsigned y = 0; y < packet->words[5]; ++y)
+        for (unsigned x = 0; x < packet->words[4]; ++x)
+          s_bg_fallback[kDioramaPlane_Count][y * packet->words[4] + x] = SrPpuBgPacket_Color(packet, 2, 0, x, y);
+      skybox_storage.data = (uint8_t *)s_bg_fallback[kDioramaPlane_Count];
+    }
+  }
+  if (ArRenderTexture_IsValid(gpu_skybox) && !skybox_diagnostic) skybox_storage.data = NULL;
+  const SrPpuSurfaceView *skybox = PresentationSurface_Bound(&skybox_storage);
   const uint8_t *skybox_pixels = PresentationSurface_Region(skybox, 0, 0,
       skybox ? (int)skybox->width_pixels : 0,
       skybox ? (int)skybox->height_pixels : 0);
-  if (skybox_pixels) {
+  if (skybox_pixels && !ArRenderTexture_IsValid(gpu_skybox)) {
     const bool periodic = slot->diorama_skybox_periodic;
     if (periodic != s_diorama_skybox_texture_periodic) {
       ArRenderDevice_DestroyTexture(device, s_diorama_skybox_texture);
@@ -227,21 +348,33 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   const uint8_t *pixels[kDioramaPlane_Count];
   size_t pitch_bytes[kDioramaPlane_Count];
   CaptureDioramaPpuSurfaces(slot, pixels, pitch_bytes);
-  uint32_t upload_mask = slot->diorama_plane_request_mask &
-                         slot->diorama_plane_content_mask;
+  const uint32_t owned_mask = DioramaPlanes_GpuOwnedMask(slot->background_packet);
+  const char *motion_mode = getenv("AR_GPU_BG_MOTION");
+  const bool needs_cpu_analysis = slot->interp_setting_enabled &&
+      (!motion_mode || strcmp(motion_mode, "owned") != 0);
+  const bool needs_cpu_diagnostic = getenv("AR_PLANESTAT") || getenv("AR_DIORAMA_SNAPSHOT");
+  MaterializeBackgrounds(slot->background_packet, owned_mask & upload_mask &
+      (needs_cpu_analysis || needs_cpu_diagnostic ? UINT32_MAX : ~gpu_mask), pixels, pitch_bytes);
   /* Row 0 is the top of the captured world band. Upload both sides; the
    * authentic frame begins at ws_extra_top and the lower band follows it. */
-  const DioramaUploadResult upload = Diorama_Upload(
-      device, s_plane_textures, pixels, pitch_bytes,
+  const DioramaUploadResult upload = Diorama_UploadResolved(
+      device, s_resolved_textures, pixels, pitch_bytes,
       slot->snes_width + slot->obj_apron * 2,
       slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom,
-      slot->obj_apron, slot->diorama_bg_apron_mask, upload_mask);
+      slot->obj_apron, slot->diorama_bg_apron_mask, upload_mask, gpu_mask, gpu_changed);
   s_diorama_uploaded_plane_mask = upload.synchronized_plane_mask;
   if (upload.changed_plane_mask &
       (UINT32_C(1) << SR_PPU_OVERLAY_BG2))
     s_diorama_bg2_content_revision++;
-  memcpy(s_diorama_coverage_masks, upload.coverage_masks,
-         sizeof(s_diorama_coverage_masks));
+  for (unsigned plane = 0; plane < kDioramaPlane_Count; ++plane) {
+    if ((gpu_mask & (1u << plane)) && DioramaPlaneUsesSparseCoverage((int)plane)) {
+      if ((gpu_changed & (1u << plane)) || !s_diorama_coverage_masks[plane]) {
+        const bool bg2 = plane == kDioramaPlane_Bg2Hi || plane == kDioramaPlane_Bg2Far;
+        const unsigned band = plane == kDioramaPlane_Bg1Hi || plane == kDioramaPlane_Bg2Hi ? 1u : 2u;
+        s_diorama_coverage_masks[plane] = BackgroundPacketCoverage(slot->background_packet, bg2 ? 1u : 0u, band, (unsigned)slot->obj_apron);
+      }
+    } else s_diorama_coverage_masks[plane] = upload.coverage_masks[plane];
+  }
   PlaneStatCensus(
       pixels, pitch_bytes,
       slot->snes_width + slot->obj_apron * 2,
@@ -259,7 +392,7 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   DioramaPerformanceScope frame_analysis =
       DioramaPerformance_Begin(kDioramaPerformance_FrameAnalysis);
   DioramaFrameGeneration_CaptureWithSkybox(
-      device, slot, s_plane_textures, pixels, pitch_bytes,
+      device, slot, s_resolved_textures, pixels, pitch_bytes,
       upload.changed_plane_mask, s_diorama_skybox_view.texture, skybox_changed);
   DioramaPerformance_End(frame_analysis);
 }
@@ -279,7 +412,7 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
   ArRenderTexture current_textures[kDioramaPlane_Count];
   ArRenderTexture scene_textures[kDioramaPlane_Count];
   for (int plane = 0; plane < kDioramaPlane_Count; plane++)
-    current_textures[plane] = s_plane_textures[plane];
+    current_textures[plane] = s_resolved_textures[plane];
   DioramaPerformanceScope frame_synthesis =
       DioramaPerformance_Begin(kDioramaPerformance_FrameSynthesis);
   DioramaSkyboxView skybox_view = s_diorama_skybox_view;
@@ -498,6 +631,10 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
 }
 
 void PresentDiorama_Reset(ArRenderDevice *device) {
+  for (unsigned plane = 0; plane <= kDioramaPlane_Count; ++plane) {
+    free(s_bg_fallback[plane]); s_bg_fallback[plane] = NULL;
+  }
+  DioramaBgGpu_Reset(device);
   DioramaSnapshotCapture_Reset();
   ArRenderDevice_DestroyTexture(device, s_diorama_skybox_texture);
   s_diorama_skybox_texture = ArRenderTexture_Invalid();

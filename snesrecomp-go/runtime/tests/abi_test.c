@@ -4501,11 +4501,19 @@ int main(void) {
                         "unknown PPU scanout flag mutated state");
         scanout_request.flags = 0u;
     }
+    /* Old ABI callers do not own the new export tail. Even poison beyond the
+     * declared V2 size must be ignored, and no pointer may survive scanout. */
+    scanout_request.struct_size = SR_PPU_SCANOUT_REQUEST_V2_SIZE;
+    scanout_request.background_packet = (SrPpuBgPacket *)(uintptr_t)1u;
     scanout_result.struct_size = sizeof(scanout_result);
     failed |= check(api->run_ppu_scanout(
                         runner, &scanout_request, &scanout_result) ==
                             SR_RESULT_OK,
                     "PPU scanout failed");
+    failed |= check(snes->ppu->backgroundPacket == NULL,
+                    "V2 scanout retained an export pointer");
+    scanout_request.struct_size = sizeof(scanout_request);
+    scanout_request.background_packet = NULL;
     failed |= check(scanout_observer.valid &&
                         scanout_observer.before_count ==
                             SR_PPU_NATIVE_HEIGHT + 1u &&
@@ -4551,6 +4559,9 @@ int main(void) {
             .user_data = &phase_observer,
         };
         uint64_t phase_subscription_id = 0u;
+        static SrPpuBgPacket background_packet;
+        memset(&background_packet, 0xff, sizeof(background_packet));
+        scanout_request.background_packet = &background_packet;
         scanout_request.line_callback = NULL;
         scanout_request.irq_callback = observe_test_chained_ppu_irq;
         scanout_request.user_data = &chained_irq;
@@ -4573,6 +4584,12 @@ int main(void) {
                             chained_irq.lines[3] == 21u &&
                             !snes->vIrqEnabled && !snes->inIrq,
                         "chained raster IRQ timer reload mismatch");
+        failed |= check(background_packet.words[0] ==
+                            SR_PPU_NATIVE_WIDTH + kPpuObjApron * 2u &&
+                            background_packet.words[1] == SR_PPU_NATIVE_HEIGHT &&
+                            snes->ppu->backgroundPacket == NULL,
+                        "scanout export dimensions or borrowed lifetime mismatch");
+        scanout_request.background_packet = NULL;
         failed |= check(
             phase_observer.count == 10u &&
                 phase_observer.events[0].type ==

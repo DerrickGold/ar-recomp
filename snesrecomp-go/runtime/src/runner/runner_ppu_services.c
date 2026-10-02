@@ -338,6 +338,16 @@ static SrResult run_ppu_scanout(
             ppu->extraTopCur, ppu->extraBottomCur))
         return SR_RESULT_INVALID_ARGUMENT;
 
+    ppu->backgroundPacket = request->struct_size >= SR_PPU_SCANOUT_REQUEST_BG_PACKET_SIZE
+        ? request->background_packet : NULL;
+    const uint32_t packet_flags = ppu->backgroundPacket ? ppu->backgroundPacket->request_flags : 0;
+    /* Explicit digest captures consume CPU surfaces; preserve that diagnostic
+     * contract without restoring duplicate rasterization in normal scanout. */
+    if (ppu->backgroundPacket && (request->flags & SR_PPU_SCANOUT_CAPTURE_PRESENTATION_DIGEST))
+        ppu->backgroundPacket->request_flags |= SR_PPU_BG_PACKET_VALIDATE_TILES;
+    if (ppu->backgroundPacket)
+        SrPpuBgPacket_Begin(ppu->backgroundPacket, kPpuXPixels + ppu->extraLeftRight * 2 + kPpuObjApron * 2, kPpuYPixels + ppu->extraTopCur + ppu->extraBottomCur);
+
     if (sr_runner_event_enabled(SR_EVENT_MASK_FRAME)) {
         sr_runner_emit_frame_boundary(
             snes, SR_EVENT_FRAME_BEGIN | SR_EVENT_FRAME_SCANOUT,
@@ -411,6 +421,10 @@ static SrResult run_ppu_scanout(
     }
     if (native_view)
         view_ready = PpuRenderNativeBackgroundView(ppu, view);
+    if (!view_ready && ppu->backgroundPacket) {
+        ppu->backgroundPacket->words[2] &= ~4u;
+        ppu->backgroundPacket->owned_sources &= ~4u;
+    }
     snes_beginVblank(snes);
 
     out_result->final_state.struct_size = sizeof(out_result->final_state);
@@ -436,6 +450,8 @@ static SrResult run_ppu_scanout(
     if ((request->flags &
          SR_PPU_SCANOUT_CAPTURE_PRESENTATION_DIGEST) != 0u)
         (void)capture_presentation_digest(snes, out_result);
+    if (ppu->backgroundPacket) ppu->backgroundPacket->request_flags = packet_flags;
+    ppu->backgroundPacket = NULL;
     return SR_RESULT_OK;
 }
 

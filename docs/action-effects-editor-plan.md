@@ -1777,6 +1777,803 @@ disables the pipeline for control runs) are in
 `runs/frame-pipeline-default-2026-10-02/`. These are rollout smoke checks;
 the longer performance and latency measurements remain documented above.
 
+### PPU GPU-offload investigation — 2026-10-02
+
+The buffered default is committed as `0cc29867`. The next substantial CPU target
+is **Mode 1 background rasterization and capture export**, not more game-logic
+HLE or an isolated GPU tile decoder. The offline prototype below now validates
+that narrower background-capture premise on Metal and Deck Vulkan. No live-game
+PPU GPU path or whole-game speedup has been implemented or measured yet.
+
+Existing unprofiled Deck Desktop Wayland/Vulkan VSync measurements give the
+following costs. PPU and emulation scopes are normalized from milliseconds per
+presentation by the measured game ticks per presentation; packet-copy figures
+are the separate source-trace medians. These are per native game frame, **not**
+per 90 Hz presentation, and are overlapping pipeline work rather than a list to
+sum into display latency.
+
+| Workload, effects on | CPU PPU scanout ms/game frame | CPU emulation ms/game frame | Owned packet copy ms/game frame |
+| --- | ---: | ---: | ---: |
+| Fillmore Act 1 forest, sustained | 8.96 | 0.37 | 0.77 |
+| Fillmore Act 2 cave | 7.42 | 0.56 | 0.62 |
+| Bloodpool Act 1 exterior | 7.83 | 0.50 | 0.84 |
+| Bloodpool Act 2 castle | 5.68 | 0.54 | 0.78 |
+| Aitos lava | 7.23 | 0.38 | 0.88 |
+
+Source: `runs/frame-pipeline-production-2026-10-02/report.json`, pipeline-13
+forest sustained VSync and pipeline-10 room runs. This establishes the scale of
+the CPU work, not how much a GPU implementation can remove. Forest packets copy
+5.107 MiB per game frame, but actual GPU upload traffic is already reduced by the
+upload mirror; packet size must not be reported as current GPU transfer volume.
+
+A fresh 2600-tick moving forest replay on the committed default, using isolated
+Deck binary `frame-pipeline-14`, confirms where CPU cycles go. The steady profile
+excludes the first 22 seconds and final second, has approximately 2,000 samples
+and no lost samples. The following are **exclusive user-cycle shares across all
+process threads**, not GPU durations or percentages of the PPU scope:
+
+| Symbol / work | Sampled CPU cycles |
+| --- | ---: |
+| `render_native_fast_line` (includes inlined capture/composition) | 21.26% |
+| `native_capture_tiles_line` | 6.67% |
+| `native_resolve_virtual_bg_span` | 5.26% |
+| `decoded_4bpp_row` | 1.18% |
+| `FindGlobalMotion` / `AnalyzeDirection` | 4.09% / 3.32% |
+| `ActionSceneryShadow_Prepare` | 2.47% |
+
+The decoder already caches expanded rows by VRAM contents. Moving that function
+alone would address a small portion of the workload. The expensive path also
+walks world tiles, resolves scroll/priority/edits, expands palette colors, writes
+separate layer/band captures, and performs main/subscreen composition and masks.
+The existing extended-row path uses the native capture renderer; this profile
+does not indicate a slow extra-row fallback. Scenery-shadow preparation is a
+separate CPU effect cost and would not disappear with a PPU shader.
+
+The new profile retains 90.0 median window presents/s, 11.665 ms median window
+p95 and the prior 2600-tick WRAM hash
+`3d4530acb0674abd8c2c9b309300dbec8caf1ea56000c3cea2fa7af3e9b99599`.
+Use the unprofiled runs for absolute timings; sampling changes the workload.
+Raw profile, time window, thread/symbol reports, replay, settings and logs are
+saved under `runs/ppu-gpu-audit-2026-10-02/`. `audit.json` records provenance and
+the normalized costs. The installed Deck executable was not changed.
+
+**Required split and dependencies:**
+
+- Keep game execution, ordered HDMA/IRQ callbacks, beam/VBlank progression and
+  OAM evaluation/status on the CPU. `runner_ppu_services.c:run_ppu_scanout` renders
+  each row before that row's HDMA and handles IRQ-driven state changes. An
+  end-of-frame register/VRAM snapshot cannot reproduce every row. Preserve the
+  synthetic top/bottom-row policy as well as native rows.
+- Export immutable, bounded tile/span commands with resolved capture edits,
+  semantic bands, window/scroll/color state and referenced VRAM/CGRAM versions.
+  Virtual-world providers contain CPU callbacks, so shaders cannot consume the
+  current bindings directly. The scanout ABI and editor `SrSceneFrame` are useful
+  starting points, but neither is a complete live GPU frame program. Raw VRAM
+  and palette total roughly 64.5 KiB; row versions and world/capture metadata add
+  to that. Measure actual command volume instead of promising a fixed reduction.
+- Rasterize supported BG1/BG2 captures into GPU textures, including extended
+  rows, priorities, transparency and semantic bands. The first prototype may
+  retain CPU OBJ/HUD and packed priority/color-math work; count that remaining
+  work when assessing savings. Later move composition/winner-mask generation
+  only after exact CPU comparisons pass. Unsupported cases retain the CPU path.
+- Interpolation currently reads full CPU previous/current images in
+  `diorama_frame_generation_sdl.c`. It already copies GPU endpoint textures
+  without uploading them twice. Avoid a new full-frame GPU readback: either move
+  the required background motion analysis to GPU or validate a narrowly eligible
+  motion-metadata path, with explicit handling of animated tiles, row scroll,
+  edits and discontinuities. Camera delta alone is not a general replacement.
+  CPU OBJ block analysis can remain while OBJ remains CPU-rendered.
+- Audit every remaining pixel consumer: upload mirrors/content masks,
+  authentic/winner masks, diagnostic captures and interpolation. GPU plane alpha
+  can serve some lighting passes, but it is not equivalent to the native winning
+  pixel mask. Diagnostics may read back on demand; normal playback must not
+  synchronize just to recreate discarded CPU images.
+- Reuse the owned frame queue for immutable render commands. Create/submit GPU
+  work on the renderer thread, retain interpolation endpoints, and bound GPU
+  resources until their in-flight uses complete. A released CPU packet does not
+  establish GPU completion. Render source endpoints at the native game rate and
+  reuse them across higher-rate presentations.
+
+**Portable implementation and library costs:** start with a batched fragment
+tile rasterizer through the existing GPU backend. It can share tile/state rules
+with the editor's WebGL2 backend, while native shaders use the established
+MSL/SPIR-V/DXIL build pipeline. SDL's custom fragment render states are available
+in the pinned 3.4 runtime and have renderer-thread affinity
+([SDL reference](https://wiki.libsdl.org/SDL3/SDL_CreateGPURenderState)).
+Do not add one draw/update per tile or scanline. Upload dirty atlas/state ranges
+in batches and reuse resources; the previously audited SDL texture-update path
+can allocate a transfer resource per call, including committed resources on
+D3D12. Compute is an alternative if measurements justify it, not a requirement
+for pixel parallelism or a promise of asynchronous GPU execution. A custom
+command-buffer path also needs the ordering contract documented in
+`sim3d_depth_pass_sdl.c` and `ArSdlRenderBackend_SubmitPending`; a renderer flush
+alone is not a GPU completion fence. Neither present/wait time nor a CPU timer
+around a GPU draw proves available GPU headroom.
+
+**Recommended prototype sequence:**
+
+1. Define the immutable command contract and validate replay against the CPU
+   renderer. A native 256×256 BG2 page is a useful first shader fixture, but its
+   small scope alone cannot validate the performance premise. Retain the CPU
+   renderer as the oracle and headless/unsupported backend fallback.
+2. Expand the experimental path to the forest's Mode 1 world BG1/BG2 captures
+   with 64 extra rows, then Bloodpool's skybox/water-band views. Compare exported
+   RGBA, content/priority/semantic masks and placement before removing CPU export.
+   Include the existing plain, skybox-only and plane-plus-skybox policies.
+3. Complete the interpolation/pixel-consumer bridge and remove redundant CPU
+   export for supported captures. A non-interpolated microbenchmark is useful,
+   but it is not acceptance for the current default workload.
+4. Measure end-to-end producer and presentation costs, GPU execution, transfer
+   bytes/calls, allocations, sustained pacing and power/temperature. A suggested
+   go/no-go target is at least **2 ms less producer work per forest game frame**
+   with interpolation/effects/64 rows unchanged and no presentation-tail
+   regression. This is an engineering target, not a predicted speedup. Additional
+   GPU work competes with effects and synthesis, even if CPU time improves.
+5. Validate fades, HDMA palette/scroll changes, water, windows, sub-only ownership
+   such as Marahna, edited maps, room transitions, region variants and alternate
+   capture widths/heights. Check gameplay memory and status as well as pixels.
+   Exercise Metal, Deck Vulkan, Windows/D3D12 and shared editor fixtures before
+   broadening defaults. Revisit interpolation buffering only after sustained
+   completion times improve; faster PPU work does not automatically reduce the
+   current configured software image age.
+
+#### Offline GPU background prototype — 2026-10-02
+
+**Decision: proceed to a bounded live-integration experiment.** The first
+experiment is an opt-in executable, `actraiser_ppu_gpu_probe`, outside the game
+and runner ABI. `tools/ppu_gpu/packet.c` builds an owned 273,408-byte RGBA8 command
+texture with VRAM, palettes, resolved world tiles, per-row scroll/extents and
+band selection. `src/shaders/ppu_bg_probe.frag.glsl` rasterizes six captures
+(ordinary/high/far for each background) in one offscreen draw. There are no
+CPU tile-provider callbacks or borrowed VRAM pointers across the GPU boundary.
+
+The probe uses direct SDL_GPU with persistent upload storage and a maximum of
+three fenced submissions. It uploads once and draws once per job, rather than
+using per-tile or per-row renderer updates. GPU resources may cycle within that
+bounded queue. Timed streaming work includes CPU packet construction, upload,
+rendering, submission and waiting for all work to complete; validation readback
+is outside the timed loops. This measures **completed wall-clock throughput**,
+not hardware GPU timestamps, single-job latency or available GPU headroom in
+the running game. CPU and GPU parts can overlap. Resident-packet replay is a
+separate diagnostic, not a value to subtract from streaming time: clocks and
+queue behavior differ between those workloads.
+
+Final `-04` runs, 500 jobs per case, Release/O3, SIMD enabled on both CPU
+architectures, production batched `ActionBgWorld` lookups for real rooms:
+
+| Room artwork | Deck CPU scene ms | Deck packet build ms | Deck GPU streaming ms | Mac CPU scene ms | Mac GPU streaming ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Fillmore Act 1 forest, 01:01 | 4.391 | 0.186 | 0.448 | 1.579 | 0.547 |
+| Fillmore Act 2 cave, 01:02 | 4.683 | 0.185 | 0.449 | 1.725 | 0.551 |
+| Bloodpool Act 1 exterior, 02:01 | 3.274 | 0.213 | 0.438 | 1.128 | 0.501 |
+| Bloodpool Act 2 castle, 02:02 | 3.039 | 0.195 | 0.435 | 1.073 | 0.489 |
+| Aitos lava, 04:04 | 4.337 | 0.185 | 0.450 | 1.567 | 0.572 |
+
+Three further 1,000-job Deck forest runs measured CPU scene 3.833–3.881 ms,
+packet build 0.185–0.186 ms and GPU streaming 0.4046–0.4047 ms. The synthetic
+fixture measured 6.373 ms CPU / 0.551 ms streaming on Deck and 2.277 / 0.599 ms
+on Mac. SDL versions were 3.4.14 (Deck Vulkan) and 3.4.12 (Mac Metal). These are
+short standalone throughput experiments with normal dynamic device clocks,
+not sustained power-controlled game benchmarks. Earlier `-01` window-backed
+GPU timings were contaminated by presentation pacing and are not valid GPU
+work measurements; `-02` also lacked the final SIMD/batched CPU baseline.
+
+**Correctness:** all six fixtures pass 12 camera/time/policy phases on both
+devices with zero RGBA mismatches against the production PPU capture surfaces.
+The final phase also matches the slower reference pixel renderer. Replaying an
+owned packet after changing source VRAM, CGRAM and camera still gives the
+original pixels. Post-benchmark readback validates that queued output completed.
+Logs count nontransparent pixels so blank captures cannot masquerade as useful
+room coverage. Synthetic coverage includes horizontal extras 0/112/128, 128
+total extra vertical rows split 0/128 or 64/64, flips, transparency, tile
+priorities, semantic bands, clipping/extents, fixed subtract, half-add alpha,
+fill colors, sub-only capture ownership and changing row scroll. Real fixtures
+use immutable exported room artwork, rebuilt animated characters and native
+frame-state scroll values. They do not need manual gameplay captures.
+
+**Scope limits:** these real-art fixtures intentionally use finite live-world
+capture rules and do not reproduce each room's full presentation policy. They
+do not validate skybox pages, plane projection, effects, actors/HUD, main/subscreen
+composition, native winning-pixel masks or live HDMA/IRQ execution. The packet
+rejects edits, authentic fallback tiles, non-live-world edge policies,
+fill-relative motion, mosaic greater than one, native-page/background-view
+requests and winner-dependent/full-add exports. It does not encode per-row
+VRAM or CGRAM versions. The CPU timing includes clearing all seven scene
+surfaces and backdrop rendering; the GPU output is only the six BG capture
+surfaces. Their difference is **not** a measured amount removed from live PPU
+scanout, and cannot be subtracted from the earlier game-frame table.
+
+Build/run from the repository root:
+
+```sh
+cmake -S . -B build-ppu-gpu -DAR_TESTS_ONLY=ON -DAR_PPU_GPU_PROBE=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build-ppu-gpu --target actraiser_ppu_gpu_probe
+build-ppu-gpu/actraiser_ppu_gpu_probe --iterations 500
+node tools/ppu_gpu/export_fixtures.mjs build/action-editor/ar-action-layer-editor.html runs/ppu-fixtures
+build-ppu-gpu/actraiser_ppu_gpu_probe --scene runs/ppu-fixtures/room-0101.arscene --iterations 500
+```
+
+The optional CTest skips with code 77 if no GPU device is available; a skip is
+not parity acceptance. The fixture exporter reuses the existing editor encoder
+and an already built bundle; generated game artwork stays in ignored evidence.
+MSL, SPIR-V and DXIL generation/checks pass; Windows/D3D12 runtime and browser
+execution remain untested. The probe is portable C11 with strict warnings clean;
+AddressSanitizer/UBSan synthetic and real cave runs pass. Existing PPU pipeline,
+scene snapshot and runner-private-boundary tests pass. At this initial milestone the render boundary gate still referenced the absent
+`src/action/action_forest_effect_render.c`. The live-integration follow-up below
+updates that inventory to the consolidated authored/ray modules and passes both
+its positive and negative checks; this is not a claim of a full-suite run.
+Evidence, binary/source hashes, platform metadata and raw logs are in
+`runs/ppu-gpu-prototype-2026-10-02/`. No installed game executable was replaced.
+
+**Follow-up experiment (results below):** implement an eligible live Mode 1 capture job,
+retaining ordered CPU scanout/status and explicit CPU fallback. First compare
+owned commands and output against live CPU captures at matching ticks, including
+row palette/VRAM changes. Then bridge interpolation and other CPU pixel consumers
+without per-frame readback before removing CPU BG export. Retain GPU endpoint
+textures across presentations, measure the remaining CPU composition work and
+test contention with effects/frame synthesis. Only then evaluate the ≥2 ms
+producer reduction and sustained 90 Hz pacing gate above. The prototype supports
+proceeding to that test; it does not establish production readiness or reduced
+input latency.
+
+#### GPU-resident interpolation path
+
+The user asked whether interpolation can also remain on the GPU. Yes: CPU
+pixels are a requirement of the current implementation, not of interpolation
+itself. Today `DioramaFrameGeneration_CaptureWithSkybox` copies already available
+CPU capture pixels for `PresentationFrameGeneration_Analyze`, while endpoint
+copies and synthesis already run on the GPU. There is no current GPU-to-CPU
+readback in that path. Offloading PPU rendering without changing this dependency
+would introduce a new readback, which the production design should avoid.
+
+Keep previous/current capture textures resident and produce motion vectors and
+confidence on the GPU, then consume them directly in synthesis and compositing.
+Retain analysis once per new source pair, reuse it for all intermediate presents,
+and keep discontinuity/pair timestamps as small CPU control metadata. A GPU
+confidence flag must select the exact endpoint in the shader when unreliable;
+reading that flag synchronously to the CPU would recreate a stall even though
+it contains only a few bytes. Preserve alpha, priority separation, bidirectional
+consistency and nearest-endpoint pose ownership to avoid sprite trails.
+
+- Start with the background global-motion search. Its bounded integer candidate
+  scoring and deterministic tie-breaking can be evaluated in parallel and reduced
+  on GPU, with the CPU implementation as an exact motion-vector oracle. This is
+  the direct replacement for the CPU-pixel dependency introduced by GPU BGs.
+- Use known per-layer/per-row camera/scroll motion as an optimization only for
+  validated stable regions. Animation, edited tiles, palette changes, visibility
+  and newly revealed pixels require validity masks or image-based checks. A
+  single camera delta cannot describe water raster bands or all skybox motion.
+- Move OBJ block analysis afterward. The present CPU algorithm seeds blocks from
+  already computed left/upper neighbours; a naive parallel translation changes
+  its answers or races. Use explicitly staged seeds/refinement and confidence
+  passes, or a separately validated parallel search. Actor/object identities may
+  help where stable, but raw OAM slot reuse is not reliable object identity.
+- Remove secondary CPU motion consumers too. `DioramaFrameGeneration_PlaneOffset`
+  supplies offsets used by plane/skybox and effect projection. Those consumers
+  must use known metadata or the resident GPU field so lighting stays attached
+  without downloading search results. CPU-produced OBJ can initially upload once
+  and participate in GPU analysis; this does not require an OBJ rasterizer port.
+
+SDL_GPU supports compute pipelines for SPIR-V, MSL and DXIL
+([SDL compute pipeline contract](https://wiki.libsdl.org/SDL3/SDL_CreateGPUComputePipeline)).
+Dependent dispatches require separate compute passes under its synchronization
+contract ([SDL compute pass rules](https://wiki.libsdl.org/SDL3/SDL_BeginGPUComputePass)).
+The offline shader builder now supports compute with verified resource bindings;
+the global-motion experiment is described below. Keep the portable CPU fallback and separately address browser
+WebGL2, which is not covered by a native SDL compute implementation. This path
+does not require a vendor optical-flow API, but backend execution and performance
+must still be verified. Measure the combined rasterization, analysis, effects
+and synthesis workload on Deck: GPU work competes for execution and memory
+bandwidth. Fewer CPU copies and waits are promising, not proof of a faster full
+frame or of reduced interpolation buffering. Global background motion and warp
+are now prototyped and exercised in the live compositor below; removal of CPU
+pixel consumers and actor block analysis remain open.
+
+#### GPU motion and interpolation prototype — 2026-10-02
+
+The opt-in probe now accepts `--motion`. It renders directly into alternating
+GPU endpoint textures, estimates bidirectional global motion, validates its
+confidence and synthesizes the nearer endpoint entirely on the GPU. Neither
+pixels nor motion/confidence values are downloaded during the timed path. The
+CPU still builds/uploads the compact background command packet, chooses phase
+and schedules bounded GPU work. Validation readback is explicitly outside timing.
+
+`src/platform/sdl/gpu_global_motion_sdl.c` records five compute passes: nearby-candidate bounds,
+coarse displacement scoring, fine refinement, inverse/confidence validation,
+and synthesis. The first version searched all candidates and was too expensive
+(Deck forest analysis+warp 2.953 ms, combined background+analysis+warp 3.019 ms).
+Exact nonnegative-cost pruning now skips candidates that cannot beat the known
+bound, retaining ties and the CPU's deterministic selection. This improves the
+cost without replacing image analysis with a camera-only assumption. Unreliable
+motion selects current pixels on GPU; no CPU confidence flag download is needed.
+
+For new source pairs, endpoint textures swap rather than copying the previous
+full image. Additional presentations reuse the resident motion field. Scratch
+buffers and staging resources persist, resource cycling has at most three
+fenced submissions in flight, and dependent dispatches use separate passes.
+The warp clamps sampling inside each layer's own atlas band and preserves exact
+endpoint/rejected-pair pixels and nearest-pose ownership.
+
+**Correctness:** zero motion-vector or acceptance mismatches against the
+production CPU global analyzer on both Metal and Deck Vulkan. Synthesized pixel
+checks at phase 0, .25, .5, .75 and 1 allow at most one 8-bit channel value of
+linear-filter rounding for fractional phases; original endpoints and rejected
+pairs must be exact. Fixtures cover transparent, flat, repeating, random-alpha
+and decorrelated patterns, signed motion including radius limits, 96×64 and
+640×352 textures, 13×9 and 1×1 degenerate grids, and eight camera/time pairs for
+each of the five real room fixtures. The final vectors and synthesized images
+are checked again after the timed changing-frame sequence and after motion-field
+reuse, without recomputing GPU analysis in the checker. Odd/even sequence lengths
+are exercised. This validates global motion only, not the actor block algorithm.
+
+The five-room `-04` Deck measurements below use 500 source jobs per scope.
+The CPU combined scope renders the scene, retains its pixels and analyzes all
+six background bands. The GPU scope builds/uploads commands, renders the six
+bands and runs analysis/warp. The last column schedules three warps per two
+source frames, reusing analysis for the extra presentation:
+
+| Fixture | CPU scene + global analysis ms/source | GPU BG + analysis + one warp ms/source | GPU 60→90 work ratio ms/source |
+| --- | ---: | ---: | ---: |
+| Fillmore forest | 5.904 | 1.388 | 1.352 |
+| Fillmore cave | 6.327 | 1.254 | 1.189 |
+| Bloodpool exterior | 5.094 | 1.271 | 1.244 |
+| Bloodpool castle | 4.792 | 1.198 | 1.165 |
+| Aitos lava | 6.063 | 1.466 | 1.408 |
+
+Three 1,200-source forest repeats measure CPU combined 5.222–5.239 ms, GPU
+combined 1.271–1.275 ms and the 60→90 work ratio 1.289–1.297 ms/source. A reused
+warp alone costs 0.099–0.100 ms in those repeats. Mac Metal room runs measure
+CPU combined 1.504–2.056 ms and GPU 60→90 ratio 0.918–1.112 ms/source. Standalone
+GPU analysis need not beat CPU analysis on Mac; removing its CPU-image dependency
+and combining it with GPU background rendering is the relevant result.
+
+These are completed wall-clock throughput scopes, not GPU timestamp durations,
+physical latency, live 90 Hz pacing or a promise of these CPU savings in game.
+Scope order and normal dynamic clocks can make a short 90-ratio run slightly
+faster than its preceding one-warp run despite doing more work; use the longer
+repeats for that comparison. CPU scene rendering still includes backdrop/seven
+surface clears, and neither path applies the game's changed-plane skipping.
+No actors, effects, main/subscreen composition, presentation or live PPU event
+recording compete for resources in this benchmark. Room/capture eligibility
+limits from the original background probe still apply.
+
+**Portability:** `tools/build_shaders.py` now compiles `.comp.glsl` to SPIR-V,
+MSL and DXIL. It verifies SDL's compute resource order and normalizes named MSL
+buffer slots (uniforms before storage), with tests for bad/missing bindings.
+Shader freshness, strict C11 warnings, existing CPU motion/oracle/PPU/snapshot
+tests, both opt-in GPU CTests, and ASan/UBSan real-cave runs pass. Windows/D3D12
+runtime and browser execution are not verified. Browser WebGL2 needs a separate
+implementation/fallback and is not changed by these native compute kernels.
+
+The final upload tests exposed a library-specific trap:
+[SDL 3.4.12 Metal's upload implementation](https://github.com/libsdl-org/SDL/blob/release-3.4.12/src/gpu/metal/SDL_gpu_metal.m#L1668)
+uses destination width rather than the declared source row pitch. The test
+harness therefore uses packed Metal uploads and 256-byte-aligned Vulkan/D3D12
+uploads, avoiding D3D12's repacking fallback. Readback uses aligned pitch on all
+backends. The background command packet is naturally aligned and unaffected.
+Revision `-06` has this workaround; the timed kernels and workload are unchanged
+from `-04`. The failed `-05` upload experiment remains in the evidence logs.
+
+Reproduce with the existing opt-in build and exported fixtures:
+
+```sh
+build-ppu-gpu/actraiser_ppu_gpu_probe --motion --iterations 500
+build-ppu-gpu/actraiser_ppu_gpu_probe --motion --scene runs/ppu-fixtures/room-0101.arscene --iterations 1200
+```
+
+Evidence and hashes: `runs/gpu-motion-prototype-2026-10-02/`. No shipped renderer
+or installed Deck game executable changed in the offline experiment. The next
+section records the live ownership/interpolation bridge and its performance gate.
+Actor block analysis remains a separate algorithm/quality step.
+
+#### Live GPU replay and global motion — 2026-10-02
+
+Historical indexed-bridge results; the subsequent ownership experiment below
+supersedes this section's implementation status and next gate.
+
+**Decision: retain the live bridge as an opt-in experiment. Do not enable it by
+default.** It passes the exercised correctness cases on Metal and Deck Vulkan,
+but does **not** pass the ≥2 ms producer reduction gate. This is a completed
+live integration experiment, not completion of the GPU PPU migration.
+
+Two independent development switches now exercise the ordinary action renderer:
+
+- `AR_GPU_BG_CAPTURE=1`: record an owned indexed BG1/BG2 capture during ordered
+  scanout and resolve its ordinary/high/far colors on the GPU. `validate` also
+  compares the indexed replay to every matching CPU capture pixel and rejects
+  mismatched/unsupported sources. It does not read GPU pixels during gameplay.
+- `AR_GPU_BG_MOTION=1`: capture GPU endpoints, run global motion/confidence on
+  compute and reuse that resident field for intermediate background images.
+  `validate` additionally downloads the 192-byte field and compares it to the
+  CPU oracle. That explicitly fenced validation mode is excluded from timings.
+- Both are off unless explicitly set. The regular renderer and existing
+  buffered producer remain the defaults. The retained packet allocation is
+  lazy; ordinary frame-queue slots do not acquire the additional 2.417 MiB.
+
+**What this bridge proves:** `SrPpuBgPacket` records the palette/color policy at
+each row's actual scanout time. Palette, brightness, scroll, VRAM changes and
+capture edits therefore cannot be replaced accidentally by an end-of-frame
+snapshot. It is owned by the existing bounded producer queue, with no borrowed
+VRAM/provider pointers surviving scanout. The V2 scanout request remains valid;
+the optional tail is size-gated and its borrowed pointer is cleared at return.
+The packet's 2,534,416 bytes are deliberately an indexed replay of CPU-resolved
+pixels, **not** the earlier compact tile-command packet and **not** a removal
+of CPU tile decoding or CPU capture writes. This distinction is essential when
+interpreting the cost below.
+
+The SDL fragment adapter batches the packet upload, retains six plane targets
+and skips unchanged sources. Byte texture rows are naturally 1024-byte aligned;
+words are explicitly converted to little endian. Unsupported rows, reference
+padding, winner-dependent color policies and post-scanout hub edits retain CPU
+textures. Failed GPU setup also falls back. A castle transition exposed mirror
+padding appended by the reference sampler; that source now fails eligibility
+instead of presenting a partly exported row. Default-fill and authored
+transparent/black/replacement behavior is covered by the packet oracle.
+
+The compute module is shared with the standalone probe. Six atlas bands have
+independent capture widths, including the different BG apron policies. Unused
+or unchanged bands skip searching and invalidate old confidence. The adapter
+uses `ArSdlRenderBackend_SubmitPending` at SDL/raw-GPU dependency boundaries;
+`SDL_FlushRenderer` alone would not establish them. Legacy/external renderers
+retain their existing path. Target/viewport/clip state is restored, allocation
+failure cannot reuse partly configured targets, and room/size/discontinuity
+changes invalidate endpoint pairs. Normal execution downloads neither images
+nor vectors.
+
+**Remaining duplicate CPU work:** the existing CPU global analyzer still supplies
+plane/skybox/effect projection offsets. Dropping that oracle now would detach
+lights and mist from the interpolated background. Actor block motion, independent
+skybox views, coverage masks, snapshots and all CPU PPU rasterization are also
+retained. No claim is made that interpolation as a whole is now GPU-only.
+
+**Deck live comparison:** identical isolated `-03` executable, 3,000 emulation
+ticks per run, Fillmore 01:01 right/jump/attack replay, 1280×800 fullscreen desktop
+Wayland, 64 extra rows, effects/CRT/DOF/interpolation and the buffered producer,
+90 Hz cap. Validation readbacks are off. Each run takes about 50.6 seconds;
+roughly 28 seconds of the settled action trace are measured after discarding
+its first 180 presentations. The producer column is the last ten one-second
+work samples (ms/source); presentation work is trace start-to-completion CPU
+wall time (ms/present). The two overlap and must not be added as one frame cost.
+
+| Path | Producer work ms/source | Presentation work ms/present | Cadence p95 ms | Queue copy MiB/source |
+| --- | ---: | ---: | ---: | ---: |
+| Existing CPU path | 12.136 | 2.278 | 14.824 | 5.107 |
+| Indexed GPU replay only | 13.449 | 2.847 | 15.612 | 7.524 |
+| GPU global motion only, CPU offset oracle retained | 12.113 | 2.399 | 15.275 | 5.107 |
+| Both experiments | 13.521 | 3.048 | 15.789 | 7.524 |
+
+All four average approximately 90 presentations/s and 60.1 source frames/s;
+each trace contains over 2,300 fractional presentations. This capped throughput
+does not establish spare GPU capacity or uniformly paced 90 Hz. Compared with
+the CPU path, the combined experiment adds about 1.39 ms/source and 0.77
+ms/present; an earlier independent pair showed the same regression. The indexed
+packet costs additional recording, copies and uploads; global motion currently
+adds duplicate analysis and atlas work. Average selected-endpoint age at
+presentation start rises from 20.48 to 21.04 ms. These are host timestamp ages, not physical
+input-to-display latency, GPU timestamps, or changes to the configured buffering.
+Normal dynamic clocks and this short replay do not establish a long-session,
+Game Mode, power or thermal result.
+
+**Validation:** exact six-band GPU color/padding tests, motion-vector/confidence
+comparisons, endpoint and fractional warp checks (≤1 channel-value filter
+rounding), independent widths, skipped-band invalidation, target-state restoration,
+resizing, stationary pairs, room discontinuities and CPU fallback pass on Metal
+and Deck Vulkan. Live capture validation passes forest/cave/castle/lava scenes;
+actual buffered interpolation is exercised in the forest, castle and lava runs.
+The Deck forest run reports over 1,100 checked plane pairs without a mismatch;
+Mac castle reports over 300. The live lava sequence exercises only a few accepted
+pairs and is not equivalent to the broader offline motion fixture coverage.
+Focused PPU, frame queue, CPU motion/oracle, scene snapshot and renderer tests,
+ASan/UBSan checks, shader freshness and strict C11 warnings pass. SPIR-V/MSL/DXIL
+blobs are generated; Windows/D3D12 execution and browser compute remain unverified.
+The browser's existing CPU/shared renderer path is unchanged.
+
+Evidence, exact environment/settings, replay harness, traces, validation logs
+and hashes: `runs/live-gpu-capture-2026-10-02/`. Test executables use separate
+names on Deck; the installed game binary was not replaced.
+
+**Next implementation gate:** replace this indexed diagnostic bridge with a
+bounded live tile/span program that preserves row-state versions and authored
+capture policies, then move the CPU projection/mask/skybox consumers before
+removing CPU BG export. Benchmark the removal, not an extrapolation from the
+standalone timings. GPU actor block analysis can follow once the background
+path meets exactness and whole-game timing gates. Keep the current defaults
+until the duplicate work is actually gone and measured pacing improves.
+
+#### GPU-owned backgrounds and interpolation — 2026-10-02
+
+**Status: real CPU work has been removed, but the complete PPU migration is
+still open. Keep the experiment opt-in.** The indexed replay comparison above
+measured duplicate work. This stage replaces supported background capture with
+raw tile commands and gives the GPU ownership of motion analysis and synthesis.
+
+Use `AR_GPU_BG_CAPTURE=owned AR_GPU_BG_MOTION=owned` for the ownership path.
+`AR_GPU_BG_CAPTURE=tiles-validate AR_GPU_BG_MOTION=validate` deliberately retains
+CPU output/analysis and checks the GPU algorithm against it; exclude that mode
+from performance comparisons. The older indexed switches remain diagnostics.
+
+Completed ownership changes:
+
+- Supported Mode-1 BG1/BG2 ordinary/high/far captures record raw 4-bpp tile rows,
+  palette and scanline policy. CPU tile decoding and capture pixel stores are
+  skipped. Compact native rows store two words per tile. Revision `-15` also
+  uses compact native rows when edits/aprons exist: a separate lazy mask stream
+  is composed in the shader, removing CPU realignment of ordinary tiles.
+  Palettes are shared until CGRAM/brightness/policy changes.
+- Independent skybox output is also GPU-owned, including native periodic tile
+  pages and captured-world intervals. Coverage comes from raw command bits.
+  The queue copies only the used command prefix and omits owned CPU images.
+- Global background/skybox/residual motion and four OBJ block-motion fields are
+  computed on the GPU. Owned mode performs neither CPU image copies for motion
+  nor CPU motion analysis. Actor candidate costs run in parallel; ordered seed
+  propagation, tie-breaking, confidence rejection and halo handling match the
+  existing CPU algorithm. Synthesis uses GPU-resident fields and textures.
+- There is **no gameplay image readback**. A **256-byte global-vector download
+  remains** for CPU effect/skybox projection. It is submitted before actor search
+  and consumed at presentation preparation, allowing intervening CPU/GPU work
+  instead of waiting immediately. The eventual fence wait is included in the
+  measured presentation cost. It is not a fully asynchronous, readback-free
+  renderer yet. Actor vectors are downloaded only in validation mode.
+- Unsupported source policies, a provider switching to authentic tiles midway
+  through a row, GPU capability/setup failure, snapshots and post-scanout hub
+  edits retain or materialize CPU output. A source is published as owned only
+  when all of its required rows are represented. Diagnostic consumers also use
+  current commands instead of reading stale owned CPU surfaces.
+
+**Same-build Deck result:** isolated `ActRaiserRecomp-owned-14`, SHA-256
+`30398cf8547ec7e2af78165cc193fc333fa768d33482bb75dab4ce8dce4e67ec`, the same
+3,000-tick moving Fillmore 01:01 replay and 1280×800/64-extra-row/all-effects
+workload as above. Both use the production bounded producer and 90 Hz cap.
+The settled trace contains 2,496 presentations per run; cadence is measured
+from consecutive presentation starts, not the fixed source-interval CSV field.
+
+| Path | Producer ms/source | Presentation work ms/present | Cadence p95 / p99 ms | Queue copy MiB/source |
+| --- | ---: | ---: | ---: | ---: |
+| CPU capture and CPU interpolation | 12.315 | 2.388 | 15.044 / 17.127 | 5.107 |
+| Owned BG/skybox and GPU interpolation | 10.265 | 2.567 | 13.431 / 17.071 | 3.985 |
+
+This run removes **2.05 ms/source (16.6%)** of producer work and **22%** of queue
+copy traffic. Presentation work increases by 0.18 ms/present. These overlapping
+CPU wall-time columns must not be summed. Average cadence is 11.111 ms in both,
+but p95/p99 remain above the 11.111 ms budget: this does **not** establish reliably
+paced 90 Hz. Selected-endpoint age is 20.49 versus 20.71 ms on average, not
+input-to-display latency. Earlier revision `-13`, before deferring the vector
+fence, measured 2.29 versus 3.30 ms/present and worse GPU-path p95. The shorter
+wait in `-14` is promising; thermal/clocks/run variance still require repetitions
+and longer representative workloads before promotion.
+
+**Final compact-edit follow-up (`-15`):** profiling `-14` found 9.80% of settled
+user-cycle samples in tile command packing, 11.25% in virtual background span
+preparation and 5.96% in capture-edit traversal. These are whole-process CPU
+sample shares, not GPU timings. That evidence prioritized moving native tile
+alignment/edit composition to the shader before the more invasive OBJ migration.
+
+The matched `-15` executable has SHA-256
+`8b3e3f691c93038d7b7fcbb4796dc4c36d21dc4bb2c906f919d945b9da3dc4a8`:
+
+| Path | Producer ms/source | Presentation work ms/present | Cadence p95 / p99 ms | Queue copy MiB/source |
+| --- | ---: | ---: | ---: | ---: |
+| CPU | 12.301 | 2.317 | 14.792 / 17.260 | 5.107 |
+| GPU-owned, run 1 | 9.985 | 2.645 | 13.718 / 17.890 | 4.203 |
+| GPU-owned, repeat | 10.021 | 2.783 | 13.639 / 16.290 | 4.203 |
+
+The repeat supports a **2.28–2.32 ms/source (about 19%) CPU reduction** in this
+workload. GPU-path presentation CPU work remains 0.33–0.47 ms/present higher.
+The edit-overlay stream increases copy traffic relative to `-14`, but it is still
+18% below the original CPU path; producer work improves by about 0.25 ms/source.
+Pacing remains above the 90 Hz budget at p95; tail variation is material. This is
+still a migration milestone, not grounds to change the default. The final compact
+edit format passes CPU ownership/apron/window/fallback tests, ASan/UBSan and
+all-six-band Metal/Vulkan GPU pixel parity, including edit-only cache invalidation
+and malformed edit offsets. Final live forest, cave and castle comparisons also pass.
+
+**Without interpolation:** the matched `-13` pair measured producer work
+12.248 → 10.317 ms/source and presentation work 1.647 → 1.675 ms/present.
+Cadence p95 was 12.722 → 12.809 ms and p99 18.128 → 16.778 ms. Thus ownership
+saves producer work independently of interpolation, without evidence of a large
+presentation-cost improvement in that mode.
+
+**Correctness and portability:** Metal GPU color tests cover all six bands,
+raw/compact/edited formats, palettes, brightness, flips, windows, padding,
+independent and aliased skyboxes, periodic dimensions and malformed bounds.
+GPU actor tests compare all vectors/flags against the CPU across 18 dense,
+sparse, independent-motion, disappearing and disabled cases, including maximum
+640×352 captures, exact endpoints and fractional meshes. Deck Vulkan passes the
+same actor and raw-background parity checks. Frame-generation tests cover owned
+NULL CPU surfaces, resizes, discontinuities, preserved renderer state, and four
+queued frames drained without presenting (only the latest download is consumed).
+Live forest/cave/castle/lava validation reports no capture or motion mismatch;
+unsupported castle transition rows correctly fall back. The attempted Aitos
+04:02 harness warp fails its terrain-load contract before GPU capture and is
+not counted as validated. Aitos 04:04 passes.
+
+The shader tool now normalizes **named** MSL sampler and texture bindings:
+SPIRV-Cross enumeration order can otherwise silently swap previous/current
+endpoints despite containing slots 0 and 1. Compute buffer bindings and generated
+SPIR-V/MSL/DXIL freshness pass. C11 strict warnings, runtime ABI/contracts,
+PPU render-pipeline ownership sentinels, queue/snapshot tests, renderer boundary
+checks and focused ASan/UBSan runs pass. Windows/D3D12 runtime and browser compute
+remain unverified; browser CPU/shared rendering is unchanged. Separate Deck test
+binaries leave the installed game untouched.
+
+**Remaining ownership work, in dependency order:**
+
+1. Export native OBJ tile commands with per-line OAM priority/rotation, window
+   policy, VRAM/CGRAM versions and receiver color transforms. Include the apron
+   channel's cross-priority first-writer rule and the HUD icon's punch/restore
+   semantics before omitting CPU OBJ rasterization. GPU actor *motion* above
+   does not remove this sprite-raster work.
+2. Move residual main/subscreen composition and the remaining supported capture
+   policies onto the GPU. CPU sprite rasterization, HUD capture/repair and final
+   residual composition still run today. CPU world/provider lookups also remain.
+3. Move effect/skybox projection consumers to GPU-resident transforms, removing
+   the small vector transfer/fence without detaching environmental effects.
+   CPU effect geometry generation is also still present.
+4. Repeat exactness and whole-game timing gates across rooms, settings, supported
+   backends and longer Deck runs. Promote only after pacing and fidelity pass;
+   do not equate an average 90 Hz cap with meeting every 11.1 ms deadline.
+
+Evidence: `runs/live-gpu-capture-2026-10-02/ownership-comparison-15.json`,
+`ownership-comparison-14.json`, `ownership-comparison-13.json`,
+`deck-owned-profile-14/`, paired logs/traces, validation captures and the
+replay harness in that directory. No default has been changed.
+
+### Scrolling whole-composite parity gate (2026-10-02)
+
+`tools/compare_action_gpu_frames.py` now replays Fillmore 1 with actual walking,
+jumps, attacks and camera scrolling, capturing every game frame from 1000–1599.
+The primary route traverses 778 horizontal / 188 vertical BG1 pixels and
+389 / 63 BG2 pixels. Both paths use the same binary, recorded input, copied SRAM,
+room config and settings. Final WRAM hashes and per-frame room/camera coordinates
+match. The settings include 64 extra vertical rows, square pixels, 16:10,
+skybox-only, environmental lighting/particles, DOF, rim lighting, edge AA and CRT.
+The free-camera pose stays fixed to remove wall-clock camera easing from this
+pixel test; the level itself scrolls in both directions.
+
+- **Metal (Apple M2):** all 600 source frames match byte-for-byte at 720×448.
+  Each of the 25%, 50% and 75% interpolation phases adds 600 compared frames.
+  Maximum final-composite channel difference is 4/255; mean absolute error
+  per phase is below 0.00012 on the 0–255 scale. At most eight pixels in any
+  frame differ by more than two channel levels.
+- **Steam Deck Vulkan (RADV VANGOGH 26.1.99):** all 600 source frames match
+  byte-for-byte at 360×224. The same 1,800 interpolated frames have a maximum
+  channel difference of 3/255. Phase mean absolute errors are 0.0361–0.0434;
+  at most nineteen pixels in a frame differ by more than two levels. Many more
+  pixels can differ by one level on this backend: interpolation is visually
+  close, not bit-exact. Reviewed differences follow filtered texture detail,
+  without displaced silhouettes or missing geometry, consistent with sampling
+  and quantization differences between the SDL geometry and compute paths.
+- A repeated CPU midpoint run matches all 600 frames exactly. The capture clock
+  is deterministic, rather than differences being hidden by timing noise.
+- An additional 600 midpoint frames per backend disable the no-knockback cheat
+  to cover normal player colors and hit reactions. The route still scrolls
+  538 / 156 BG1 pixels; results remain within the small interpolation color
+  differences. Infinite HP stays enabled for traversal. The primary route's
+  white player silhouette is the existing invulnerability cheat, not GPU damage.
+- The diagnostic generated-plane masks confirm real synthesis. CPU skips an
+  unchanged actor plane at frame 1416 where GPU generates it; final pixels are
+  identical at all three phases. GPU background ownership is confirmed for all
+  three sources with no rejected sources. These are CPU-vs-GPU comparisons
+  *within* each backend, not claims of bit-identical cross-backend output.
+
+Scheduled screenshots now reuse the uploaded FrameSlot rather than recapturing
+and breaking interpolation history. `AR_SHOT_PHASE=0..1` selects a fixed phase;
+normal screenshots still use the current endpoint. For offline headless-video
+comparisons only, `AR_FRAME_CAPTURE_TICK_CLOCK=1` timestamps captures at a fixed
+60 Hz so readback/file IO cannot expire motion pairs. It does not change the
+game clock or live pacing. Logging records camera coordinates and generated/GPU
+plane masks so stationary captures or skipped synthesis cannot masquerade as
+coverage. The targeted frame-generation variants and renderer boundary tests
+pass. This diagnostic work makes no rendering default change.
+
+Evidence is in `runs/gpu-scroll-parity-2026-10-02/`: per-frame comparison JSON,
+input/build hashes, local captures, compact Deck reports, worst-frame difference
+images, and a 10-second 720×248 H.264 side-by-side clip under 1 MB. Large raw Deck
+frames remain in the isolated `parity-16-*` directories on Deck. These capture
+runs deliberately read back every frame and are **not performance measurements**.
+
+This increases confidence for scrolling Fillmore 1 on Metal/Vulkan. It does not
+close whole-level/boss/transition coverage, live threaded scheduling,
+reactive-camera timing, other room
+families, the aspect/plane-policy matrix, Windows D3D12 runtime testing, or the
+remaining CPU ownership work above. Keep the GPU path opt-in while broadening
+those gates. No visual mismatch in this sample warrants removing the measured
+producer-time improvement.
+
+#### Presentation pacing and input stalls — 2026-10-02
+
+The next pass separated input pumping, endpoint preparation/upload, motion
+projection fence waits, drawing and backend present return. Enable
+`AR_FRAME_PACING_TRACE=<csv>` and analyze with `tools/analyze_frame_pacing.py`.
+Upload-only iterations are retained, source work is counted separately, and
+epoch changes do not become fake frame intervals. These are CPU wall timings;
+backend completion is **not physical scanout**, and producer/presenter durations
+overlap. The trace is dormant by default.
+
+Two scheduling changes are now enabled:
+
+- Prepare the interpolation pair for the next presentation deadline during
+  available idle time. Compute the displayed phase immediately before drawing.
+  This preserves the 1.75-source-period playback delay and three-slot capacity;
+  it does not add buffering or extrapolation. `AR_FRAME_STREAM_PREPARE_AHEAD=0`
+  retains the previous timing for diagnostic comparisons. Interpolation-off
+  still consumes the newest completed endpoint.
+- On Linux, poll SDL gamepads on a separate worker at a 4 ms interval. SDL's
+  Deck HID watchdog was making three synchronous feature-report calls during
+  the main-thread event pump, producing recurring ~8 ms stalls. A child-process
+  `strace` confirmed blocking `HIDIOCSFEATURE`/`HIDIOCGFEATURE` on `/dev/hidraw3`;
+  this matches the watchdog in the tested
+  [SDL 3.4.14 Deck driver](https://raw.githubusercontent.com/libsdl-org/SDL/release-3.4.14/src/joystick/hidapi/SDL_hidapi_steamdeck.c).
+  Window/keyboard pumping, event dispatch, bindings and gameplay state remain
+  on main. Keyboard/gamepad arbitration uses an atomic physical-activity
+  snapshot so per-frame getters cannot block on the worker's joystick lock.
+  Hotplug is still serviced; shutdown joins before closing pads and restores
+  the previous SDL auto-update hint. Initialization failure keeps synchronous
+  polling. `AR_GAMEPAD_POLL_THREAD=0` disables the worker; `=1` also permits
+  testing it on other platforms, whose defaults remain unchanged pending
+  physical-device validation. The implementation uses portable SDL/C11 APIs.
+
+Matched Deck binary `pacing-19` (`56173c75…0322c`), SDL 3.4.14/Vulkan,
+90 Hz fullscreen, 64 extra rows, all effects/CRT and the moving Fillmore replay:
+each run lasts 3,600 ticks; analyze settled ticks 1,200–3,300. GPU background and
+motion ownership remain opt-in. Times below are milliseconds between backend
+present **returns**, with ~3,100 presents per interpolated run.
+
+| Path | p95 interval | p99 interval |
+| --- | ---: | ---: |
+| GPU owned, previous scheduling/input | 16.104 | 18.879 |
+| GPU owned, input worker only | 15.603 | 16.627 |
+| GPU owned, input worker + early preparation | 13.329 | 16.597 |
+| Same combined change, repeat | 13.772 | 16.632 |
+| GPU owned, interpolation off, previous input | 13.084 | 17.338 |
+| GPU owned, interpolation off, input worker | 12.453 | 13.479 |
+
+Input-pump p99 falls from 7.899 to 0.039–0.043 ms. Average projection-fence
+wait falls from 0.541 to 0.256–0.286 ms; its remaining p99 is ~2.8 ms.
+Preparation crossing a draw deadline drops from 372 to 92–134 occurrences.
+All observed queue depths remain at most one. The 4 ms device polling cadence
+is separate from playback delay; these replay measurements do not measure
+physical controller-to-photon latency.
+
+The existing CPU-analysis renderer also passes: with the input worker enabled,
+early preparation changes p95/p99 from 13.610/15.835 to 13.581/15.985 ms, within
+the observed variation. A shorter paired Mac Metal run (1,800 ticks, settled
+1,200–1,700, same executable) improves p95 from 14.404 to 12.089 ms; p99 remains
+~15.6 ms. Do not present either backend as stable 90 Hz yet.
+
+Validation includes a blocked virtual-device update while main continues pumping,
+button/axis transitions, physical arbitration state, hot removal, repeated
+start/stop and hint restoration/failure fallback. These pass on Mac and Deck.
+The poller also compiles for Windows x64 and Linux ARM64; that is not runtime
+device coverage. Playout tests prove the same endpoint pair/phase across 900
+90 Hz deadlines. Existing frame-pipeline, input/settings and Metal motion
+oracle tests pass. No shader, image or motion-estimation algorithm changed in
+this pacing pass; the scrolling parity evidence above remains applicable.
+
+Evidence: `runs/deck-pacing-2026-10-02/` contains the isolated run harness,
+binary/environment provenance, raw traces, logs and `analysis.json`. Syscall
+and sampling-profiler runs are diagnostic evidence only, not timing baselines.
+Remaining work is the projection readback dependency, upload/submission cost,
+and CPU PPU work (including OBJ and residual composition). The new trace makes
+their effect on deadline misses measurable independently of the input stall.
+
+The rebuilt defaults (`pacing-20`, SHA-256 `1eb7d074…ee3f3`) reproduce the
+result: p95/p99 completion intervals 13.647/16.600 ms, input-pump p99 0.037 ms,
+projection-wait p99 2.798 ms. A separate user-cycle sampling run starts after
+20 seconds to exclude boot. About 75.8% of sampled CPU cycles are on the frame
+producer and 23.0% on presentation; the gamepad worker accounts for ~0.5%.
+The leading producer symbols are `render_native_fast_line` (9.9% of all sampled
+cycles), `native_resolve_virtual_bg_span` (6.7%), `native_capture_tiles_line`
+(4.1%) and `background_packet_tile_to` (4.0%). Scenery capture adds 3.3%; main
+thread scenery-shadow preparation adds 2.6%. These percentages exclude blocked
+time and GPU execution, so they cannot be read as percentages of frame latency.
+They prioritize reducing CPU tile-command/PPU preparation alongside removing
+the projection fence, rather than assuming more game-logic HLE is the next win.
+The full sample stays on Deck; the report and compact hotspot table are saved
+with the local evidence. Stable 90 Hz, D3D12 runtime and broader room/transition
+acceptance remain open.
+
 ### Extraction inventory and remaining comparison inputs
 
 These are the implementation owners and comparison inputs for the editable

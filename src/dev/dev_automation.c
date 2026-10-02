@@ -1,6 +1,7 @@
 #include "dev/dev_automation.h"
 
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +13,8 @@
 #include "app/session_fatal.h"
 #include "app/settings.h"
 #include "dev/host_dev_tools.h"
+#include "diorama/diorama_frame_generation.h"
+#include "present/presentation_frame_generation.h"
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/support/utf8_fs.h"
 
@@ -51,7 +54,10 @@ void DevAutomation_ArmScheduledDioramaDump(void) {
  * AR_SHOT_EVERY=N      : a SERIES — saves/shot_<gf>.ppm every N game-frames,
  *   optionally bounded by AR_SHOT_FROM / AR_SHOT_TO. Lets us compare steady
  *   state vs bug state frame by frame.
- * AR_SHOT_REQUIRE_COMPOSITE=1: fail the run instead of using raw PPU fallback. */
+ * AR_SHOT_REQUIRE_COMPOSITE=1: fail the run instead of using raw PPU fallback.
+ * AR_SHOT_PHASE=0..1: capture a fixed interpolated phase instead of the endpoint.
+ * Pair with AR_FRAME_CAPTURE_TICK_CLOCK=1 in headless-video tests so file IO
+ * does not expire motion pairs; this does not alter live game/host clocks. */
 static bool schedule_initialized;
 static bool shot_done;
 static bool shot_at_enabled;
@@ -60,6 +66,7 @@ static unsigned shot_at;
 static unsigned shot_every;
 static unsigned shot_from;
 static unsigned shot_to;
+static float shot_phase = kPresentationFrameGenerationPhaseNone;
 
 static void InitScreenshotSchedule(void) {
   if (!schedule_initialized) {
@@ -86,6 +93,15 @@ static void InitScreenshotSchedule(void) {
     value = getenv("AR_SHOT_TO");
     shot_to = value
         ? (unsigned)strtoul(value, NULL, 0) : UINT_MAX;
+    value = getenv("AR_SHOT_PHASE");
+    if (value && value[0]) {
+      char *end = NULL;
+      const float phase = strtof(value, &end);
+      if (end == value || *end || !isfinite(phase) || phase < 0 || phase > 1)
+        SessionFatal_Request("AR_SHOT_PHASE must be a number from 0 to 1.");
+      else
+        shot_phase = phase;
+    }
     schedule_initialized = true;
   }
 }
@@ -105,7 +121,7 @@ bool DevAutomation_RequiresHostService(void) {
   return false;
 }
 
-void DevAutomation_CaptureScheduledScreenshot(void) {
+void DevAutomation_CaptureScheduledScreenshot(const struct FrameSlot *uploaded_frame) {
   InitScreenshotSchedule();
   const unsigned gf =
       ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
@@ -127,7 +143,7 @@ void DevAutomation_CaptureScheduledScreenshot(void) {
     FILE *pf = sr_fopen(fname, "wb");
     if (pf) {
       DevToolsCaptureResult shot_size =
-          HostDevTools_WriteFramebufferPpm(pf, require_composite);
+          HostDevTools_WriteFramebufferPpmAtPhase(pf, require_composite, shot_phase, uploaded_frame);
       const bool closed = fclose(pf) == 0;
       if (!closed) shot_size.kind = kDevToolsCapture_Failed;
       if (shot_size.kind == kDevToolsCapture_Failed) {
@@ -143,6 +159,14 @@ void DevAutomation_CaptureScheduledScreenshot(void) {
               margin_left, margin_right,
               Settings_DisplayModeName(g_settings.display_mode),
               DevToolsCaptureKind_Name(shot_size.kind));
+      fprintf(stderr, "[shot-state] gf=%u room=%02x%02x bg1=%d,%d bg2=%d,%d phase=%.3f generated=%03x gpu=%03x\n",
+              gf, g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
+              (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX),
+              (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY),
+              (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg2CameraX),
+              (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg2CameraY),
+              (double)shot_phase, DioramaFrameGeneration_GeneratedPlaneMask(),
+              DioramaFrameGeneration_GpuPlaneMask());
     } else {
       fprintf(stderr, "[shot] capture=failed cannot open %s\n", fname);
       if (require_composite)

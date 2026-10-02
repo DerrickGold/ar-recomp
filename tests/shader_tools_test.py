@@ -10,6 +10,65 @@ import build_shaders
 
 
 class ShaderVerificationTest(unittest.TestCase):
+    def test_metal_sampler_names_keep_declared_slots(self):
+        source = '''layout(set = 2, binding = 0) uniform sampler2D previous_texture;
+layout(set = 2, binding = 1) uniform sampler2D current_texture;'''
+        msl = 'previous_texture [[texture(1)]], previous_textureSmplr [[sampler(1)]], current_texture [[texture(0)]], current_textureSmplr [[sampler(0)]]'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'test.frag.glsl'
+            path.write_text(source)
+            with self.assertRaises(SystemExit):
+                build_shaders.verify_msl_samplers(path, msl)
+            fixed = build_shaders.verify_msl_samplers(path, msl, remap=True)
+            self.assertIn('previous_texture [[texture(0)]]', fixed)
+            self.assertIn('current_textureSmplr [[sampler(1)]]', fixed)
+            self.assertEqual(build_shaders.verify_msl_samplers(path, fixed), fixed)
+            with self.assertRaises(SystemExit):
+                build_shaders.verify_msl_samplers(path, msl + msl, remap=True)
+
+    def test_compute_metal_uniforms_precede_storage_buffers(self):
+        source = '''#version 450
+layout(local_size_x = 8) in;
+layout(std140, set = 2, binding = 0) uniform Settings { vec4 phase; } settings;
+layout(std430, set = 0, binding = 0) readonly buffer Values { uint values[]; } input_values;
+layout(std430, set = 1, binding = 0) writeonly buffer Output { uint values[]; } output_values;
+'''
+        msl = 'kernel void main0(const device Values& input_values [[buffer(0)]], device Output& output_values [[buffer(1)]], constant Settings& settings [[buffer(2)]]) {}'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'test.comp.glsl'
+            path.write_text(source)
+            with self.assertRaises(SystemExit):
+                build_shaders.verify_compute_bindings(path, msl, metal=True)
+            fixed = build_shaders.verify_compute_bindings(path, msl, metal=True, remap=True)
+            self.assertIn('settings [[buffer(0)]]', fixed)
+            self.assertIn('input_values [[buffer(1)]]', fixed)
+            self.assertIn('output_values [[buffer(2)]]', fixed)
+            self.assertEqual(build_shaders.verify_compute_bindings(path, fixed, metal=True), fixed)
+            path.write_text(source.replace('readonly buffer', 'readonly\n  buffer'))
+            self.assertEqual(build_shaders.verify_compute_bindings(path, fixed, metal=True), fixed)
+            path.write_text(source)
+            with self.assertRaises(SystemExit):
+                build_shaders.verify_compute_bindings(path, msl + msl, metal=True, remap=True)
+            path.write_text(source.replace('set = 1, binding = 0', 'set = 1, binding = 2'))
+            with self.assertRaises(SystemExit):
+                build_shaders.verify_compute_bindings(path, fixed, metal=True)
+
+    def test_compute_hlsl_sampler_and_storage_namespaces(self):
+        source = '''#version 450
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0) uniform sampler2D previous_frame;
+layout(std430, set = 0, binding = 1) readonly buffer Values { uint values[]; } input_values;
+layout(std430, set = 1, binding = 0) writeonly buffer Output { uint values[]; } output_values;
+'''
+        hlsl = 'Texture2D previous_frame : register(t0, space0); SamplerState sampler0 : register(s0, space0); ByteAddressBuffer input_values : register(t1, space0); RWByteAddressBuffer output_values : register(u0, space1); [numthreads(64, 1, 1)] void main() {}'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'test.comp.glsl'
+            path.write_text(source)
+            build_shaders.verify_compute_bindings(path, hlsl, metal=False)
+            for changed in (hlsl.replace('space1', 'space0'), hlsl.replace('s0, space0', 's1, space0'), hlsl.replace('[numthreads(64, 1, 1)]', '')):
+                with self.assertRaises(SystemExit):
+                    build_shaders.verify_compute_bindings(path, changed, metal=False)
+
     def test_compiler_identity_is_the_only_ignored_dxil_metadata(self):
         before = '; shader hash: a123\n!0 = !{!"dxc(private) old"}\n%v = fadd float %a, %b\n'
         after = before.replace('a123', 'b456').replace('old', 'new')
