@@ -119,7 +119,43 @@ static void BenchmarkStorage(void) {
   printf("Effects storage: %u records, %zu text bytes, %zu retained table bytes, %.3f ms/parse (%u iterations, CPU clock).\n",
       table.count,size,sizeof(table),ms,iterations);
 }
+static void TestLayerAnchors(void) {
+  const char *anchors[]={"bg1","bg2-point","bg2-raster"};
+  const char *depths[]={"background","playfield","foreground"};
+  const char *kinds[]={"soft-light","motes","free-mist","particle-area","light-fan","water-surface","drips","waterfall-spray","cloud-bank"};
+  char text[512];
+  for(unsigned k=0;k<sizeof(kinds)/sizeof(kinds[0]);++k)
+    for(unsigned a=0;a<3;++a)for(unsigned d=0;d<3;++d) {
+      snprintf(text,sizeof(text),"[effects]\nversion=1\n[emitter:02:01:0:%s:123]\nx=112\ny=62\nanchor=%s\nplacement=%s\n",kinds[k],anchors[a],depths[d]);
+      assert(Parse(text));
+      ActionSceneEffectFrame frame={0};
+      ActionEffectRecipes_Apply(&table,2,1,0,37,NULL,&frame);
+      assert(frame.authored_count==1);
+      const ActionEffectInstance *e=&frame.authored[0];
+      assert(e->world_x==112&&e->world_y==62);
+      assert(e->projection_plane==(a?kActionEffectProjectionPlane_Bg2:kActionEffectProjectionPlane_Bg1));
+      assert(!!(e->flags&kActionEffectFlag_StaticAnchor)==(a==1));
+      assert(ActionEffectRecipes_NeedsBgMask(&table,2,1,0,1)==(a!=0||d==0));
+      assert(ActionEffectRecipes_NeedsBgMask(&table,2,1,0,0)==(a==0||d==1));
+      /* Retained sources don't borrow recipe data or follow the BG1 camera. */
+      ActionSceneEffectFrame retained=frame;
+      assert(Parse("[effects]\nversion=1\n"));
+      assert(!memcmp(&frame,&retained,sizeof(frame)));
+    }
+  const char *invalid[]={"anchor=screen","anchor=bg2-point\nanchor=bg2-point","anchor=BG2", "anchor="};
+  before=table;
+  for(unsigned i=0;i<sizeof(invalid)/sizeof(invalid[0]);++i) {
+    snprintf(text,sizeof(text),"[effects]\nversion=1\n[emitter:02:01:0:light-fan:123]\n%s\n",invalid[i]);
+    assert(!Parse(text));assert(!memcmp(&table,&before,sizeof(table)));
+  }
+  const char *terrain[]={"ground-mist","exposure","wet-contour"};
+  for(unsigned i=0;i<3;++i) {
+    snprintf(text,sizeof(text),"[effects]\nversion=1\n[emitter:02:01:0:%s:123]\nanchor=bg2-point\n",terrain[i]);
+    assert(!Parse(text));assert(!memcmp(&table,&before,sizeof(table)));
+  }
+}
 int main(int argc,char **argv) {
+  TestLayerAnchors();
   TestFieldsAndReceivers();
   TestMoteParameters();
   TestFloorSupport();

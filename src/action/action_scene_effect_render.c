@@ -8,6 +8,17 @@
  * Tests: tests/action_effect_render_test.c */
 #include "action/action_effect_render_internal.h"
 
+static float SurfacePulse(const ActionEffectInstance *effect,const ActionSurfaceField *f){
+  const unsigned ticks=(unsigned)f->Clock[0]*effect->phase_ticks;
+  const unsigned seed=(unsigned)effect->visual*(unsigned)f->Clock[1];
+  return f->Pulse[0]+f->Pulse[1]*TriangleWave(ticks+seed,(unsigned)f->Clock[2])+
+    f->Pulse[2]*TriangleWave(ticks+seed*(unsigned)f->Clock[4],(unsigned)f->Clock[3]);
+}
+static ActionEffectGlowStyle SurfaceStyle(const ActionSurfaceField *f,unsigned index,float width,float height,unsigned seed){
+  ActionEffectGlowStyle style=f->styles[index];const float *v=index?f->Body:f->Spill;
+  style.radius_x=fmaxf(v[0],width*v[2]+v[4]);style.radius_y=fmaxf(v[1],height*v[3]+v[5]);style.seed=seed;return style;
+}
+
 /* Mist is a mass of overlapping puffs rather than a precision light halo.
  * Twelve segments keep each silhouette round at SNES presentation scale while
  * making a dense 24-puff volume cheaper than six generic 32-segment glows. */
@@ -113,69 +124,55 @@ bool AppendSceneSoftCloud(
 
 static bool AppendWaterfallMistCloudVolume(
     ActionEffectGeometryWriter *writer,
-    const ActionEffectInstance *effect, float pulse,
+    const ActionEffectInstance *effect, const ActionSurfaceField *f, float pulse,
     ActionEffectProjectPointFn project_point, void *userdata) {
-  enum { kColumns = 6, kTiers = 4 };
-  _Static_assert(kColumns * kTiers ==
-                     kActionSceneEffectWaterfallMistCloudCount,
-                 "waterfall cloud layout must fill its bounded budget");
-  static const float kTierY[kTiers] = {48.0f, 20.0f, -24.0f, -5.0f};
-  static const float kTierRadiusX[kTiers] = {108.0f, 92.0f, 76.0f, 62.0f};
-  static const float kTierRadiusY[kTiers] = {88.0f, 70.0f, 54.0f, 32.0f};
-  static const float kTierOpacity[kTiers] = {0.090f, 0.115f, 0.135f, 0.205f};
-  static const float kTierOffsetX[kTiers] = {0.0f, 28.0f, -20.0f, 12.0f};
-  static const ArRenderColorF kTierTint[kTiers] = {
-    {0.58f, 0.76f, 0.88f, 1.0f},
-    {0.68f, 0.85f, 0.94f, 1.0f},
-    {0.78f, 0.91f, 0.98f, 1.0f},
-    {0.90f, 0.97f, 1.00f, 1.0f},
-  };
+  if(!((unsigned)f->Components[0]&1))return true;
+  const unsigned kColumns=(unsigned)f->CloudCounts[0],kTiers=(unsigned)f->CloudCounts[1];
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const float span = rect->x1 - rect->x0;
-  const unsigned ticks = EffectVisualTicks(
-      effect, (unsigned)effect->pulse_ticks);
+  const unsigned ticks = (unsigned)f->Clock[0] * (unsigned)effect->pulse_ticks;
 
   /* Back to front: broad cool banks establish depth, rising mid-tier puffs
    * break their upper silhouette, and the compact bright tier reads as fresh
    * foam boiling where the waterfall meets the cloud. */
   for (unsigned cloud = 0;
-       cloud < kActionSceneEffectWaterfallMistCloudCount; cloud++) {
+       cloud < kColumns*kTiers; cloud++) {
     const unsigned tier = cloud / kColumns;
     const unsigned column = cloud % kColumns;
     const unsigned seed = DeterministicHash_Mix32(
         (uint32_t)effect->pulse_generation ^
         ((uint32_t)cloud + 1u) * 0x9E3779B9u);
-    const unsigned x_period = 132u + tier * 17u + (seed & 15u);
-    const unsigned y_period = 96u + tier * 13u + ((seed >> 4) & 15u);
+    const unsigned x_period = (unsigned)f->CloudPeriods[0] + tier * (unsigned)f->CloudPeriods[1] + (seed & (unsigned)f->CloudPeriods[2]);
+    const unsigned y_period = (unsigned)f->CloudPeriods[3] + tier * (unsigned)f->CloudPeriods[4] + ((seed >> 4) & (unsigned)f->CloudPeriods[5]);
     float x_wave = TriangleWave(ticks + seed % x_period, x_period) * 2.0f - 1.0f;
     float y_wave = TriangleWave(
         ticks + (seed >> 8) % y_period, y_period);
     if (cloud & 1u) x_wave = -x_wave;
     const float lane = ((float)column + 0.5f) / (float)kColumns;
-    const float jitter_x = (HashUnit(seed ^ 0x53u) - 0.5f) * 28.0f;
+    const float jitter_x = (HashUnit(seed ^ 0x53u) - 0.5f) * f->CloudJitter[0];
     const float jitter_y = (HashUnit(seed ^ 0xB5u) - 0.5f) *
-        (tier == 3u ? 14.0f : 28.0f);
-    float x = rect->x0 + span * lane + kTierOffsetX[tier] +
-        jitter_x + x_wave * (6.0f + 2.5f * (float)tier);
-    float y = kTierY[tier] + jitter_y -
-        y_wave * (5.0f + 1.5f * (float)tier);
+        (tier == 3u ? f->CloudJitter[2] : f->CloudJitter[1]);
+    float x = rect->x0 + span * lane + f->tiers[tier][4] +
+        jitter_x + x_wave * (f->CloudJitter[3] + f->CloudJitter[4] * (float)tier);
+    float y = f->tiers[tier][0] + jitter_y -
+        y_wave * (f->CloudJitter[5] + f->CloudJitter[6] * (float)tier);
     /* A fixed first anchor gives the production projection regression one
      * stable point while the other 23 puffs drift independently around it. */
-    if (cloud == 0u) {
+    if (cloud == 0u && f->CloudPeriods[7]) {
       x = rect->x0 + span * lane;
-      y = kTierY[tier];
+      y = f->tiers[tier][0];
     }
-    const float size_jitter = 0.88f + 0.24f * HashUnit(seed ^ 0x71u);
-    const float breathe = 0.94f + 0.08f * TriangleWave(
-        ticks + (seed >> 16) % 113u, 113u);
-    const float opacity = kTierOpacity[tier] *
-        (0.90f + 0.10f * pulse) *
-        (0.92f + 0.08f * HashUnit(seed ^ 0xA7u));
+    const float size_jitter = f->CloudShape[0] + f->CloudShape[1] * HashUnit(seed ^ 0x71u);
+    const float breathe = f->CloudShape[2] + f->CloudShape[3] * TriangleWave(
+        ticks + (seed >> 16) % (unsigned)f->CloudPeriods[6], (unsigned)f->CloudPeriods[6]);
+    const float opacity = f->tiers[tier][3] *
+        (f->CloudShape[4] + f->CloudShape[5] * pulse) *
+        (f->CloudShape[6] + f->CloudShape[7] * HashUnit(seed ^ 0xA7u));
     if (!AppendSceneSoftCloud(
             writer, effect, x, y,
-            kTierRadiusX[tier] * size_jitter * breathe,
-            kTierRadiusY[tier] * size_jitter / breathe,
-            kTierTint[tier], opacity, seed,
+            f->tiers[tier][1] * size_jitter * breathe,
+            f->tiers[tier][2] * size_jitter / breathe,
+            ((ArRenderColorF){f->tiers[tier][5],f->tiers[tier][6],f->tiers[tier][7],f->tiers[tier][8]}), opacity, seed,
             project_point, userdata))
       return false;
   }
@@ -202,25 +199,10 @@ bool SceneActorHeading(const ActionEffectInstance *effect,
   return true;
 }
 
-static void SceneFireballHeading(const ActionEffectInstance *effect,
-                                 float *x, float *y) {
-  if (!x || !y) return;
-  *x = 1.0f;
-  *y = 0.0f;
-  if (SceneActorHeading(effect, x, y)) return;
-  if (effect && effect->kind == kActionEffect_AitosLavaFireball) {
-    /* Its reset frame sits above the pit before relaunch; retain the rising
-     * shot's downward wake rather than snapping horizontally while stopped. */
-    *x = 0.0f;
-    *y = -1.0f;
-  } else if (effect && effect->kind == kActionEffect_MarahnaFireball &&
-             effect->phase == kActionEffectPhase_MarahnaFireballOrb) {
-    /* `$E047` deliberately pauses twice in its left/right animation. A still
-     * ball remains a flame: let heat climb instead of inventing a rightward
-     * trail for the two zero-velocity entries. */
-    *x = 0.0f;
-    *y = 1.0f;
-  }
+static void SceneFireballHeading(const ActionEffectInstance *effect,const ActionProjectileField *f,float *x,float *y){
+  if(SceneActorHeading(effect,x,y))return;
+  const float *rest=effect->kind==kActionEffect_MarahnaFireball&&effect->phase==kActionEffectPhase_MarahnaFireballOrb?f->OrbHeading:f->RestHeading;
+  *x=rest[0];*y=rest[1];
 }
 
 /* Centres of the twelve 16x16 fireball parts in the wheel's four measured
@@ -270,7 +252,7 @@ static bool AppendFlamingWheelFireballLighting(
 }
 
 static unsigned LavaReservoirGlowSegmentCount(
-    const ActionEffectInstance *effect) {
+    const ActionEffectInstance *effect,const ActionSurfaceField *f) {
   if (!effect || effect->kind != kActionEffect_AitosLavaReservoir ||
       effect->geometry.kind != kActionEffectGeometry_Rect)
     return 0;
@@ -278,10 +260,10 @@ static unsigned LavaReservoirGlowSegmentCount(
   const float width = rect->x1 - rect->x0;
   if (!isfinite(width) || width <= 0.0f) return 0;
   if (width > (float)(kActionSceneEffectMaxLavaGlowSegments *
-                      kActionSceneEffectLavaGlowSpanPixels))
+                      f->Segments[0]))
     return kActionSceneEffectMaxLavaGlowSegments + 1u;
   return (unsigned)ceilf(
-      width / (float)kActionSceneEffectLavaGlowSpanPixels);
+      width / (float)f->Segments[0]);
 }
 
 /* Long Act-2 lakes cannot use one reservoir-wide radial gradient: its outer
@@ -290,43 +272,22 @@ static unsigned LavaReservoirGlowSegmentCount(
  * the lip locally hot and also follow Diorama perspective more faithfully. */
 static bool AppendLavaReservoirLighting(
     ActionEffectGeometryWriter *writer,
-    const ActionEffectInstance *effect, float pulse,
+    const ActionEffectInstance *effect, const ActionSurfaceField *f, float pulse,
     ActionEffectProjectPointFn project_point, void *userdata) {
+  if(!((unsigned)f->Components[0]&1))return true;
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
-  const unsigned segments = LavaReservoirGlowSegmentCount(effect);
+  const unsigned segments = LavaReservoirGlowSegmentCount(effect,f);
   if (!segments || segments > kActionSceneEffectMaxLavaGlowSegments)
     return false;
   const float segment_width = (rect->x1 - rect->x0) / (float)segments;
   for (unsigned i = 0; i < segments; i++) {
     const float centre_x = rect->x0 + ((float)i + 0.5f) * segment_width;
-    const ActionEffectGlowStyle spill = {
-      .radius_x = fmaxf(38.0f, segment_width * 0.72f + 12.0f),
-      .radius_y = 42.0f,
-      .ring_scale = {0.18f, 0.68f, 1.0f},
-      .centre = {1.00f, 0.43f, 0.04f, 0.13f},
-      .ring = {{1.00f, 0.28f, 0.01f, 0.10f},
-               {0.82f, 0.07f, 0.00f, 0.04f},
-               {0.48f, 0.01f, 0.00f, 0.00f}},
-      .flare = 0.07f, .rise = 0.10f,
-      .axis_x = 1.0f, .lift_y = -1.0f,
-      .seed = (unsigned)effect->generation + i * 0x5BD1u,
-    };
-    const ActionEffectGlowStyle body = {
-      .radius_x = fmaxf(30.0f, segment_width * 0.58f + 7.0f),
-      .radius_y = 9.0f,
-      .ring_scale = {0.15f, 0.78f, 1.0f},
-      .centre = {1.00f, 1.00f, 0.72f, 0.62f},
-      .ring = {{1.00f, 0.68f, 0.10f, 0.36f},
-               {1.00f, 0.20f, 0.01f, 0.13f},
-               {0.72f, 0.04f, 0.00f, 0.00f}},
-      .flare = 0.12f, .rise = 0.18f,
-      .axis_x = 1.0f, .lift_y = -1.0f,
-      .seed = (unsigned)effect->pulse_generation + i * 0x7A4Du,
-    };
-    if (!AppendGlow(writer, effect, &spill, pulse, centre_x, -10.0f,
-                    project_point, userdata) ||
-        !AppendGlow(writer, effect, &body, pulse, centre_x, 0.0f,
-                    project_point, userdata))
+    const ActionEffectGlowStyle spill=SurfaceStyle(f,0,segment_width,0,(unsigned)effect->generation+i*0x5BD1u);
+    const ActionEffectGlowStyle body=SurfaceStyle(f,1,segment_width,0,(unsigned)effect->pulse_generation+i*0x7A4Du);
+    if (!AppendGlowAtTicks(writer, effect, &spill, pulse, centre_x+f->Spill[31], f->Spill[32],
+                    project_point, userdata,(unsigned)f->Clock[0]*effect->pulse_ticks) ||
+        !AppendGlowAtTicks(writer, effect, &body, pulse, centre_x+f->Body[31], f->Body[32],
+                    project_point, userdata,(unsigned)f->Clock[0]*effect->pulse_ticks))
       return false;
   }
   return true;
@@ -424,7 +385,6 @@ bool AppendSceneStarParticle(
     writer->indices[writer->index_count++] = base + kDiamonds[i];
   return true;
 }
-static const SceneParticleLifetime kSceneReservoirLifetime = {31, 5, 21};
 
 SceneParticleClock
 SceneParticleClockAt(const ActionEffectInstance *effect, unsigned visual_ticks,
@@ -452,26 +412,27 @@ ArRenderColorF SceneParticleColor(ArRenderColorF hot,
 }
 
 static bool AppendLavaPitParticles(ActionEffectGeometryWriter *writer,
-                                   const ActionEffectInstance *effect,
+                                   const ActionEffectInstance *effect, const ActionSurfaceField *f,
                                    ActionEffectProjectPointFn project_point,
                                    void *userdata) {
-  const unsigned count = kActionSceneEffectParticlesPerInstance;
-  const ArRenderColorF hot = {1.00f, 0.91f, 0.38f, 0.92f};
-  const ArRenderColorF cool = {0.90f, 0.06f, 0.00f, 0.00f};
+  if(!((unsigned)f->Components[0]&2))return true;
+  const unsigned count=(unsigned)f->Particles[0];
+  const ArRenderColorF hot={f->Hot[0],f->Hot[1],f->Hot[2],f->Hot[3]};
+  const ArRenderColorF cool={f->Cool[0],f->Cool[1],f->Cool[2],f->Cool[3]};
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const unsigned visual_ticks =
-      EffectVisualTicks(effect, (unsigned)effect->pulse_ticks);
+      (unsigned)f->Clock[0] * (unsigned)effect->pulse_ticks;
   for (unsigned i = 0; i < count; ++i) {
     const SceneParticleClock clock =
-        SceneParticleClockAt(effect, visual_ticks, i, kSceneEmberLifetime);
+        SceneParticleClockAt(effect, visual_ticks, i, (SceneParticleLifetime){(unsigned)f->Particles[1],(unsigned)f->Particles[2],(unsigned)f->Particles[3]});
     const uint32_t seed = clock.seed;
     const float t = clock.t, previous_t = clock.previous_t;
     float x = 0.0f, y = 0.0f, previous_x = 0.0f, previous_y = 0.0f;
-    float width = 0.55f, reach = 1.8f + 2.2f * t;
+    float width, reach = f->Shape[2] + f->Shape[3] * t;
     const float half_width = (rect->x1 - rect->x0) * 0.5f;
     const float birth =
-        (HashUnit(seed ^ 0x71u) * 2.0f - 1.0f) * fmaxf(1.0f, half_width - 3.0f);
-    const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 10.0f;
+        (HashUnit(seed ^ 0x71u) * 2.0f - 1.0f) * fmaxf(1.0f, half_width - f->Motion[0]);
+    const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * f->Motion[1];
     x = birth + drift * t * t;
     /* The captured rectangle covers the full bubbly volume. Its geometric
      * centre still reads too low in the isometric mouth: the apparent
@@ -479,13 +440,13 @@ static bool AppendLavaPitParticles(ActionEffectGeometryWriter *writer,
      * band around that authored plane; the fraction scales correctly for
      * both one- and two-row pits. */
     const float source_surface_y =
-        (rect->y0 + rect->y1) * 0.5f - (rect->y1 - rect->y0) * 0.25f;
+        (rect->y0 + rect->y1) * 0.5f - (rect->y1 - rect->y0) * f->Motion[2];
     const float source_y =
-        source_surface_y + (HashUnit(seed ^ 0xB5u) - 0.5f) * 3.0f;
-    y = source_y - 5.0f * t - 13.0f * t * t;
+        source_surface_y + (HashUnit(seed ^ 0xB5u) - 0.5f) * f->Motion[3];
+    y = source_y - f->Motion[4] * t - f->Motion[5] * t * t;
     previous_x = birth + drift * previous_t * previous_t;
-    previous_y = source_y - 5.0f * previous_t - 13.0f * previous_t * previous_t;
-    width = 0.50f + 0.42f * (1.0f - t);
+    previous_y = source_y - f->Motion[4] * previous_t - f->Motion[5] * previous_t * previous_t;
+    width = f->Shape[0] + f->Shape[1] * (1.0f - t);
 
     const ArRenderColorF color = SceneParticleColor(hot, cool, clock);
     if (!AppendSceneParticle(writer, effect, x, y, previous_x, previous_y,
@@ -496,85 +457,56 @@ static bool AppendLavaPitParticles(ActionEffectGeometryWriter *writer,
 }
 
 static bool AppendLavaPitLighting(ActionEffectGeometryWriter *writer,
-                                  const ActionEffectInstance *effect,
+                                  const ActionEffectInstance *effect, const ActionSurfaceField *f,
                                   ActionEffectProjectPointFn project_point,
                                   void *userdata) {
+  if(!((unsigned)f->Components[0]&1))return true;
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const float mid_x = (rect->x0 + rect->x1) * 0.5f;
-  const float mid_y = (rect->y0 + rect->y1) * 0.5f;
-  const float pulse = DeterministicPulse(effect);
-  ActionEffectGlowStyle spill = {0}, body = {0};
-  float spill_x = mid_x, spill_y = mid_y;
-  float body_x = mid_x, body_y = mid_y;
-  const float half_width = (rect->x1 - rect->x0) * 0.5f;
-  const float half_height = (rect->y1 - rect->y0) * 0.5f;
-  static const ActionEffectGlowStyle kSpill = {
-      .ring_scale = {0.22f, 0.70f, 1.0f},
-      .centre = {1.00f, 0.42f, 0.04f, 0.17f},
-      .ring = {{1.00f, 0.28f, 0.02f, 0.13f},
-               {0.80f, 0.08f, 0.00f, 0.055f},
-               {0.45f, 0.01f, 0.00f, 0.00f}},
-      .flare = 0.10f,
-      .rise = 0.12f,
-      .axis_x = 1.0f,
-      .lift_y = -1.0f};
-  spill = kSpill;
-  spill.radius_x = fmaxf(34.0f, half_width + 14.0f);
-  spill.radius_y = fmaxf(23.0f, half_height + 13.0f);
-  spill.seed = (unsigned)effect->generation;
-  static const ActionEffectGlowStyle kBody = {
-      .ring_scale = {0.16f, 0.78f, 1.0f},
-      .centre = {1.00f, 0.98f, 0.66f, 0.78f},
-      .ring = {{1.00f, 0.66f, 0.10f, 0.46f},
-               {1.00f, 0.20f, 0.01f, 0.18f},
-               {0.72f, 0.04f, 0.00f, 0.00f}},
-      .flare = 0.19f,
-      .rise = 0.24f,
-      .axis_x = 1.0f,
-      .lift_y = -1.0f};
-  body = kBody;
-  body.radius_x = fmaxf(28.0f, half_width + 3.0f);
-  body.radius_y = fmaxf(8.0f, half_height + 2.0f);
-  body.seed = (unsigned)effect->pulse_generation;
-  spill_y = -half_height * 0.30f;
-  body_y = 0.0f;
-  if (!AppendGlow(writer, effect, &spill, pulse, spill_x, spill_y,
-                  project_point, userdata))
+  const float pulse = SurfacePulse(effect,f);
+  const float half_width=(rect->x1-rect->x0)*0.5f,half_height=(rect->y1-rect->y0)*0.5f;
+  ActionEffectGlowStyle spill=SurfaceStyle(f,0,half_width,half_height,effect->generation);
+  ActionEffectGlowStyle body=SurfaceStyle(f,1,half_width,half_height,effect->pulse_generation);
+  const float spill_x=mid_x+f->Spill[31],body_x=mid_x+f->Body[31];
+  const float spill_y=half_height*f->Spill[32],body_y=f->Body[32];
+  if (!AppendGlowAtTicks(writer, effect, &spill, pulse, spill_x, spill_y,
+                  project_point, userdata,(unsigned)f->Clock[0]*effect->pulse_ticks))
     return false;
-  if (!AppendGlow(writer, effect, &body, pulse, body_x, body_y, project_point,
-                  userdata))
+  if (!AppendGlowAtTicks(writer, effect, &body, pulse, body_x, body_y, project_point,
+                  userdata, (unsigned)f->Clock[0] * effect->pulse_ticks))
     return false;
   return true;
 }
 
 static bool AppendLavaReservoirParticles(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect, const ActionSurfaceField *f,
     ActionEffectProjectPointFn project_point, void *userdata) {
-  const unsigned count = kActionSceneEffectLavaReservoirParticleCount;
-  const ArRenderColorF hot = {1.00f, 0.94f, 0.48f, 0.94f};
-  const ArRenderColorF cool = {0.94f, 0.08f, 0.00f, 0.00f};
+  if(!((unsigned)f->Components[0]&2))return true;
+  const unsigned count=(unsigned)f->Particles[0];
+  const ArRenderColorF hot={f->Hot[0],f->Hot[1],f->Hot[2],f->Hot[3]};
+  const ArRenderColorF cool={f->Cool[0],f->Cool[1],f->Cool[2],f->Cool[3]};
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const unsigned visual_ticks =
-      EffectVisualTicks(effect, (unsigned)effect->pulse_ticks);
+      (unsigned)f->Clock[0] * (unsigned)effect->pulse_ticks;
   for (unsigned i = 0; i < count; ++i) {
     const SceneParticleClock clock =
-        SceneParticleClockAt(effect, visual_ticks, i, kSceneReservoirLifetime);
+        SceneParticleClockAt(effect, visual_ticks, i, (SceneParticleLifetime){(unsigned)f->Particles[1],(unsigned)f->Particles[2],(unsigned)f->Particles[3]});
     const uint32_t seed = clock.seed;
     const float t = clock.t, previous_t = clock.previous_t;
     float x = 0.0f, y = 0.0f, previous_x = 0.0f, previous_y = 0.0f;
-    float width = 0.55f, reach = 1.8f + 2.2f * t;
+    float width, reach = f->Shape[2] + f->Shape[3] * t;
     const float half_width = (rect->x1 - rect->x0) * 0.5f;
     const float birth_x =
-        (HashUnit(seed ^ 0x71u) * 2.0f - 1.0f) * fmaxf(1.0f, half_width - 2.0f);
-    const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 22.0f;
+        (HashUnit(seed ^ 0x71u) * 2.0f - 1.0f) * fmaxf(1.0f, half_width - f->Motion[0]);
+    const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * f->Motion[1];
     const float source_y =
-        rect->y0 + 1.5f + (HashUnit(seed ^ 0xB5u) - 0.5f) * 2.0f;
+        rect->y0 + f->Motion[2] + (HashUnit(seed ^ 0xB5u) - 0.5f) * f->Motion[3];
     x = birth_x + drift * t * t;
-    y = source_y - 9.0f * t - 34.0f * t * t;
+    y = source_y - f->Motion[4] * t - f->Motion[5] * t * t;
     previous_x = birth_x + drift * previous_t * previous_t;
-    previous_y = source_y - 9.0f * previous_t - 34.0f * previous_t * previous_t;
-    width = 0.42f + 0.48f * (1.0f - t);
-    reach = 1.8f + 4.2f * t;
+    previous_y = source_y - f->Motion[4] * previous_t - f->Motion[5] * previous_t * previous_t;
+    width = f->Shape[0] + f->Shape[1] * (1.0f - t);
+    reach = f->Shape[2] + f->Shape[3] * t;
 
     const ArRenderColorF color = SceneParticleColor(hot, cool, clock);
     if (!AppendSceneParticle(writer, effect, x, y, previous_x, previous_y,
@@ -673,38 +605,39 @@ static bool AppendMoltenRockLighting(ActionEffectGeometryWriter *writer,
 }
 
 static bool AppendWaterSplashParticles(ActionEffectGeometryWriter *writer,
-                                       const ActionEffectInstance *effect,
+                                       const ActionEffectInstance *effect, const ActionSurfaceField *f,
                                        ActionEffectProjectPointFn project_point,
                                        void *userdata) {
-  const unsigned count = kActionSceneEffectParticlesPerInstance;
-  const ArRenderColorF hot = {0.92f, 1.00f, 1.00f, 0.86f};
-  const ArRenderColorF cool = {0.12f, 0.48f, 1.00f, 0.00f};
+  if(!((unsigned)f->Components[0]&2))return true;
+  const unsigned count=(unsigned)f->Particles[0];
+  const ArRenderColorF hot={f->Hot[0],f->Hot[1],f->Hot[2],f->Hot[3]};
+  const ArRenderColorF cool={f->Cool[0],f->Cool[1],f->Cool[2],f->Cool[3]};
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const unsigned visual_ticks =
-      EffectVisualTicks(effect, (unsigned)effect->pulse_ticks);
+      (unsigned)f->Clock[0] * (unsigned)effect->pulse_ticks;
   for (unsigned i = 0; i < count; ++i) {
     const SceneParticleClock clock =
-        SceneParticleClockAt(effect, visual_ticks, i, kSceneEmberLifetime);
+        SceneParticleClockAt(effect, visual_ticks, i, (SceneParticleLifetime){(unsigned)f->Particles[1],(unsigned)f->Particles[2],(unsigned)f->Particles[3]});
     const uint32_t seed = clock.seed;
     const float t = clock.t, previous_t = clock.previous_t;
     float x = 0.0f, y = 0.0f, previous_x = 0.0f, previous_y = 0.0f;
-    float width = 0.55f, reach = 1.8f + 2.2f * t;
+    float width, reach = f->Shape[2] + f->Shape[3] * t;
     const float half_width = (rect->x1 - rect->x0) * 0.5f;
     const float birth_x =
-        (HashUnit(seed ^ 0x71u) * 2.0f - 1.0f) * fmaxf(1.0f, half_width - 2.0f);
+        (HashUnit(seed ^ 0x71u) * 2.0f - 1.0f) * fmaxf(1.0f, half_width - f->Motion[0]);
     const bool drip = (i & 1u) != 0;
-    const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 5.0f;
+    const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * f->Motion[1];
     x = birth_x + drift * t;
     previous_x = birth_x + drift * previous_t;
     if (drip) {
-      y = 2.0f + 6.0f * t + 25.0f * t * t;
-      previous_y = 2.0f + 6.0f * previous_t + 25.0f * previous_t * previous_t;
+      y = f->Motion[2] + f->Motion[3] * t + f->Motion[4] * t * t;
+      previous_y = f->Motion[2] + f->Motion[3] * previous_t + f->Motion[4] * previous_t * previous_t;
     } else {
-      y = -8.0f - 12.0f * t + 18.0f * t * t;
-      previous_y = -8.0f - 12.0f * previous_t + 18.0f * previous_t * previous_t;
+      y = f->Motion[5] - f->Motion[6] * t + f->Motion[7] * t * t;
+      previous_y = f->Motion[5] - f->Motion[6] * previous_t + f->Motion[7] * previous_t * previous_t;
     }
-    width = 0.38f + 0.30f * (1.0f - t);
-    reach = 1.8f + 3.0f * t;
+    width = f->Shape[0] + f->Shape[1] * (1.0f - t);
+    reach = f->Shape[2] + f->Shape[3] * t;
 
     const ArRenderColorF color = SceneParticleColor(hot, cool, clock);
     if (!AppendSceneParticle(writer, effect, x, y, previous_x, previous_y,
@@ -715,93 +648,66 @@ static bool AppendWaterSplashParticles(ActionEffectGeometryWriter *writer,
 }
 
 static bool AppendWaterSplashLighting(ActionEffectGeometryWriter *writer,
-                                      const ActionEffectInstance *effect,
+                                      const ActionEffectInstance *effect, const ActionSurfaceField *f,
                                       ActionEffectProjectPointFn project_point,
                                       void *userdata) {
+  if(!((unsigned)f->Components[0]&1))return true;
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const float mid_x = (rect->x0 + rect->x1) * 0.5f;
-  const float mid_y = (rect->y0 + rect->y1) * 0.5f;
-  const float pulse = DeterministicPulse(effect);
-  ActionEffectGlowStyle spill = {0}, body = {0};
-  float spill_x = mid_x, spill_y = mid_y;
-  float body_x = mid_x, body_y = mid_y;
-  const float half_width = (rect->x1 - rect->x0) * 0.5f;
-  static const ActionEffectGlowStyle kSpill = {
-      .radius_y = 19.0f,
-      .ring_scale = {0.22f, 0.70f, 1.0f},
-      .centre = {0.52f, 0.90f, 1.00f, 0.12f},
-      .ring = {{0.28f, 0.70f, 1.00f, 0.08f},
-               {0.08f, 0.32f, 0.78f, 0.03f},
-               {0.02f, 0.10f, 0.38f, 0.00f}},
-      .flare = 0.025f,
-      .rise = 0.04f,
-      .axis_x = 1.0f,
-      .lift_y = 1.0f};
-  spill = kSpill;
-  spill.radius_x = fmaxf(22.0f, half_width + 10.0f);
-  spill.seed = (unsigned)effect->generation;
-  static const ActionEffectGlowStyle kBody = {
-      .radius_y = 6.0f,
-      .ring_scale = {0.18f, 0.72f, 1.0f},
-      .centre = {0.94f, 1.00f, 1.00f, 0.50f},
-      .ring = {{0.54f, 0.92f, 1.00f, 0.28f},
-               {0.16f, 0.58f, 1.00f, 0.08f},
-               {0.03f, 0.18f, 0.54f, 0.00f}},
-      .flare = 0.02f,
-      .axis_x = 1.0f,
-      .lift_y = 1.0f};
-  body = kBody;
-  body.radius_x = fmaxf(14.0f, half_width + 2.0f);
-  body.seed = (unsigned)effect->pulse_generation;
-  spill_y = 4.0f;
-  body_y = -4.0f;
-  if (!AppendGlow(writer, effect, &spill, pulse, spill_x, spill_y,
-                  project_point, userdata))
+  const float pulse = SurfacePulse(effect,f);
+  const float half_width=(rect->x1-rect->x0)*0.5f,half_height=(rect->y1-rect->y0)*0.5f;
+  ActionEffectGlowStyle spill=SurfaceStyle(f,0,half_width,half_height,effect->generation);
+  ActionEffectGlowStyle body=SurfaceStyle(f,1,half_width,half_height,effect->pulse_generation);
+  const float spill_x=mid_x+f->Spill[31],body_x=mid_x+f->Body[31];
+  const float spill_y=f->Spill[32],body_y=f->Body[32];
+  if (!AppendGlowAtTicks(writer, effect, &spill, pulse, spill_x, spill_y,
+                  project_point, userdata,(unsigned)f->Clock[0]*effect->pulse_ticks))
     return false;
-  if (!AppendGlow(writer, effect, &body, pulse, body_x, body_y, project_point,
-                  userdata))
+  if (!AppendGlowAtTicks(writer, effect, &body, pulse, body_x, body_y, project_point,
+                  userdata, (unsigned)f->Clock[0] * effect->pulse_ticks))
     return false;
   return true;
 }
 
 static bool AppendWaterfallParticles(ActionEffectGeometryWriter *writer,
-                                     const ActionEffectInstance *effect,
+                                     const ActionEffectInstance *effect, const ActionSurfaceField *f,
                                      ActionEffectProjectPointFn project_point,
                                      void *userdata) {
-  const unsigned count = kActionSceneEffectWaterfallParticleCount;
-  const ArRenderColorF hot = {0.82f, 0.98f, 1.00f, 0.46f};
-  const ArRenderColorF cool = {0.08f, 0.42f, 0.82f, 0.00f};
+  if(!((unsigned)f->Components[0]&2))return true;
+  const unsigned count=(unsigned)f->Particles[0];
+  const ArRenderColorF hot={f->Hot[0],f->Hot[1],f->Hot[2],f->Hot[3]};
+  const ArRenderColorF cool={f->Cool[0],f->Cool[1],f->Cool[2],f->Cool[3]};
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const unsigned visual_ticks =
-      EffectVisualTicks(effect, (unsigned)effect->pulse_ticks);
+      (unsigned)f->Clock[0] * (unsigned)effect->pulse_ticks;
   for (unsigned i = 0; i < count; ++i) {
     const SceneParticleClock clock =
-        SceneParticleClockAt(effect, visual_ticks, i, kSceneEmberLifetime);
+        SceneParticleClockAt(effect, visual_ticks, i, (SceneParticleLifetime){(unsigned)f->Particles[1],(unsigned)f->Particles[2],(unsigned)f->Particles[3]});
     const uint32_t seed = clock.seed;
     const float t = clock.t;
     float x = 0.0f, y = 0.0f, previous_x = 0.0f, previous_y = 0.0f;
-    float width = 0.55f, reach = 1.8f + 2.2f * t;
+    float width, reach = f->Shape[2] + f->Shape[3] * t;
     /* Stable lanes, staggered by identity, provide a slow translucent flow
      * over the fast two-frame source cycle. The varying alpha and length
      * break horizontal bands without blurring away the pixel art. */
-    const unsigned columns = 16u;
+    const unsigned columns = (unsigned)f->Motion[0];
     _Static_assert(kActionSceneEffectWaterfallParticleCount % 16u == 0u,
                    "waterfall veil must fill complete lane rows");
     const unsigned column = i % columns;
     const unsigned row = i / columns;
     const float lane = ((float)column + 0.5f) / (float)columns;
-    const float left = rect->x0 + 10.0f;
-    const float width_span = rect->x1 - rect->x0 - 20.0f;
-    const float y_span = rect->y1 - rect->y0 + 48.0f;
+    const float left = rect->x0 + f->Motion[1];
+    const float width_span = rect->x1 - rect->x0 - f->Motion[2];
+    const float y_span = rect->y1 - rect->y0 + f->Motion[3];
     const float phase = (HashUnit(seed ^ 0x29u) +
-                         (float)visual_ticks / (84.0f + (float)(row * 11u)));
+                         (float)visual_ticks / (f->Motion[4] + (float)row * f->Motion[5]));
     const float wrapped = phase - floorf(phase);
-    x = left + width_span * lane + (HashUnit(seed ^ 0x53u) - 0.5f) * 10.0f;
-    y = rect->y0 - 24.0f + y_span * wrapped;
-    previous_x = x + (HashUnit(seed ^ 0x37u) - 0.5f) * 1.5f;
-    previous_y = y - (8.0f + 7.0f * HashUnit(seed ^ 0xB5u));
-    width = 0.45f + 0.42f * HashUnit(seed ^ 0x71u);
-    reach = 6.0f + 10.0f * HashUnit(seed ^ 0xA7u);
+    x = left + width_span * lane + (HashUnit(seed ^ 0x53u) - 0.5f) * f->Motion[6];
+    y = rect->y0 - f->Motion[7] + y_span * wrapped;
+    previous_x = x + (HashUnit(seed ^ 0x37u) - 0.5f) * f->Motion[8];
+    previous_y = y - (f->Motion[9] + f->Motion[10] * HashUnit(seed ^ 0xB5u));
+    width = f->Shape[0] + f->Shape[1] * HashUnit(seed ^ 0x71u);
+    reach = f->Shape[2] + f->Shape[3] * HashUnit(seed ^ 0xA7u);
 
     const ArRenderColorF color = SceneParticleColor(hot, cool, clock);
     if (!AppendSceneParticle(writer, effect, x, y, previous_x, previous_y,
@@ -812,86 +718,58 @@ static bool AppendWaterfallParticles(ActionEffectGeometryWriter *writer,
 }
 
 static bool AppendWaterfallLighting(ActionEffectGeometryWriter *writer,
-                                    const ActionEffectInstance *effect,
+                                    const ActionEffectInstance *effect, const ActionSurfaceField *f,
                                     ActionEffectProjectPointFn project_point,
                                     void *userdata) {
+  if(!((unsigned)f->Components[0]&1))return true;
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const float mid_x = (rect->x0 + rect->x1) * 0.5f;
   const float mid_y = (rect->y0 + rect->y1) * 0.5f;
-  const float pulse = DeterministicPulse(effect);
-  ActionEffectGlowStyle spill = {0}, body = {0};
-  float spill_x = mid_x, spill_y = mid_y;
-  float body_x = mid_x, body_y = mid_y;
-  /* Two broad, low-alpha meshes act as a soft water veil. The
-   * underlying tiles remain the image; this only lowers the perceived
-   * contrast of their short animation cycle and supplies cool depth. The
-   * first live waterfall acceptance showed the original 0.01-alpha veil
-   * disappeared under CRT scaling, so these remain restrained but no
-   * longer sub-perceptual. */
-  static const ActionEffectGlowStyle kSpill = {
-      .radius_x = 330.0f,
-      .radius_y = 282.0f,
-      .ring_scale = {0.12f, 0.88f, 1.0f},
-      .centre = {0.30f, 0.70f, 1.00f, 0.042f},
-      .ring = {{0.22f, 0.62f, 1.00f, 0.034f},
-               {0.10f, 0.42f, 0.78f, 0.014f},
-               {0.03f, 0.14f, 0.30f, 0.00f}},
-      .flare = 0.008f,
-      .axis_x = 1.0f,
-      .lift_y = 1.0f};
-  spill = kSpill;
-  spill.seed = (unsigned)effect->generation;
-  static const ActionEffectGlowStyle kBody = {
-      .radius_x = 282.0f,
-      .radius_y = 230.0f,
-      .ring_scale = {0.12f, 0.92f, 1.0f},
-      .centre = {0.56f, 0.88f, 1.00f, 0.052f},
-      .ring = {{0.38f, 0.78f, 1.00f, 0.040f},
-               {0.16f, 0.52f, 0.92f, 0.017f},
-               {0.04f, 0.18f, 0.42f, 0.00f}},
-      .flare = 0.006f,
-      .axis_x = 1.0f,
-      .lift_y = 1.0f};
-  body = kBody;
-  body.seed = (unsigned)effect->pulse_generation;
-  if (!AppendGlow(writer, effect, &spill, pulse, spill_x, spill_y,
-                  project_point, userdata))
+  const float pulse = SurfacePulse(effect,f);
+  const float half_width=(rect->x1-rect->x0)*0.5f,half_height=(rect->y1-rect->y0)*0.5f;
+  ActionEffectGlowStyle spill=SurfaceStyle(f,0,half_width,half_height,effect->generation);
+  ActionEffectGlowStyle body=SurfaceStyle(f,1,half_width,half_height,effect->pulse_generation);
+  const float spill_x=mid_x+f->Spill[31],body_x=mid_x+f->Body[31];
+  const float spill_y=mid_y+f->Spill[32],body_y=mid_y+f->Body[32];
+  if (!AppendGlowAtTicks(writer, effect, &spill, pulse, spill_x, spill_y,
+                  project_point, userdata,(unsigned)f->Clock[0]*effect->pulse_ticks))
     return false;
-  if (!AppendGlow(writer, effect, &body, pulse, body_x, body_y, project_point,
-                  userdata))
+  if (!AppendGlowAtTicks(writer, effect, &body, pulse, body_x, body_y, project_point,
+                  userdata, (unsigned)f->Clock[0] * effect->pulse_ticks))
     return false;
   return true;
 }
 
 static bool AppendWaterfallMistParticles(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect, const ActionSurfaceField *f,
     ActionEffectProjectPointFn project_point, void *userdata) {
-  const unsigned count = kActionSceneEffectWaterfallMistParticleCount;
-  const ArRenderColorF hot = {0.96f, 1.00f, 1.00f, 0.54f};
-  const ArRenderColorF cool = {0.34f, 0.70f, 0.92f, 0.00f};
+  if(!((unsigned)f->Components[0]&2))return true;
+  const unsigned count=(unsigned)f->Particles[0];
+  const ArRenderColorF hot={f->Hot[0],f->Hot[1],f->Hot[2],f->Hot[3]};
+  const ArRenderColorF cool={f->Cool[0],f->Cool[1],f->Cool[2],f->Cool[3]};
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const unsigned visual_ticks =
-      EffectVisualTicks(effect, (unsigned)effect->pulse_ticks);
+      (unsigned)f->Clock[0] * (unsigned)effect->pulse_ticks;
   for (unsigned i = 0; i < count; ++i) {
     const SceneParticleClock clock =
-        SceneParticleClockAt(effect, visual_ticks, i, kSceneEmberLifetime);
+        SceneParticleClockAt(effect, visual_ticks, i, (SceneParticleLifetime){(unsigned)f->Particles[1],(unsigned)f->Particles[2],(unsigned)f->Particles[3]});
     const uint32_t seed = clock.seed;
     const float t = clock.t, previous_t = clock.previous_t;
     float x = 0.0f, y = 0.0f, previous_x = 0.0f, previous_y = 0.0f;
-    float width = 0.55f, reach = 1.8f + 2.2f * t;
+    float width, reach = f->Shape[2] + f->Shape[3] * t;
     /* Foam boils along the lower waterfall edge while lighter droplets
      * drift upward into the fog banks. Horizontal phase offsets avoid a
      * static bright seam over the gap. */
     const float span = rect->x1 - rect->x0;
     const float lane = ((float)i + HashUnit(seed ^ 0x53u)) / (float)count;
-    const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 18.0f;
-    const float base_y = 1.0f + (HashUnit(seed ^ 0xB5u) - 0.5f) * 12.0f;
+    const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * f->Motion[0];
+    const float base_y = f->Motion[1] + (HashUnit(seed ^ 0xB5u) - 0.5f) * f->Motion[2];
     x = rect->x0 + span * lane + drift * t;
-    y = base_y - 5.0f * t - 17.0f * t * t;
+    y = base_y - f->Motion[3] * t - f->Motion[4] * t * t;
     previous_x = rect->x0 + span * lane + drift * previous_t;
-    previous_y = base_y - 5.0f * previous_t - 17.0f * previous_t * previous_t;
-    width = 0.62f + 0.68f * (1.0f - t);
-    reach = 2.4f + 4.4f * t;
+    previous_y = base_y - f->Motion[3] * previous_t - f->Motion[4] * previous_t * previous_t;
+    width = f->Shape[0] + f->Shape[1] * (1.0f - t);
+    reach = f->Shape[2] + f->Shape[3] * t;
 
     const ArRenderColorF color = SceneParticleColor(hot, cool, clock);
     if (!AppendSceneParticle(writer, effect, x, y, previous_x, previous_y,
@@ -902,28 +780,29 @@ static bool AppendWaterfallMistParticles(
 }
 
 static bool AppendWallTorchParticles(ActionEffectGeometryWriter *writer,
-                                     const ActionEffectInstance *effect,
+                                     const ActionEffectInstance *effect, const ActionGlowField *f,
                                      ActionEffectProjectPointFn project_point,
                                      void *userdata) {
-  const unsigned count = 7;
-  const ArRenderColorF hot = {1.00f, 0.92f, 0.55f, 0.88f};
-  const ArRenderColorF cool = {0.95f, 0.18f, 0.01f, 0.00f};
+  if (!((unsigned)f->Components[0]&2)) return true;
+  const unsigned count = (unsigned)f->Particles[0];
+  const ArRenderColorF hot = {f->ParticleHot[0],f->ParticleHot[1],f->ParticleHot[2],f->ParticleHot[3]};
+  const ArRenderColorF cool = {f->ParticleCool[0],f->ParticleCool[1],f->ParticleCool[2],f->ParticleCool[3]};
   const unsigned visual_ticks =
-      EffectVisualTicks(effect, (unsigned)effect->pulse_ticks);
+      (unsigned)f->Clock[0] * (unsigned)effect->pulse_ticks;
   for (unsigned i = 0; i < count; ++i) {
     const SceneParticleClock clock =
-        SceneParticleClockAt(effect, visual_ticks, i, kSceneEmberLifetime);
+        SceneParticleClockAt(effect, visual_ticks, i, (SceneParticleLifetime){(unsigned)f->Particles[1],(unsigned)f->Particles[2],(unsigned)f->Particles[3]});
     const uint32_t seed = clock.seed;
     const float t = clock.t, previous_t = clock.previous_t;
     float x = 0.0f, y = 0.0f, previous_x = 0.0f, previous_y = 0.0f;
-    float width = 0.55f, reach = 1.8f + 2.2f * t;
-    const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * 7.0f;
-    const float birth = (HashUnit(seed ^ 0x71u) - 0.5f) * 5.0f;
+    float width = 0.55f, reach = f->ParticleShape[2] + f->ParticleShape[3] * t;
+    const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * f->ParticleMotion[0];
+    const float birth = (HashUnit(seed ^ 0x71u) - 0.5f) * f->ParticleMotion[1];
     x = birth + drift * t * t;
-    y = -2.0f - 9.0f * t - 25.0f * t * t;
+    y = f->ParticleMotion[2] + f->ParticleMotion[3] * t + f->ParticleMotion[4] * t * t;
     previous_x = birth + drift * previous_t * previous_t;
-    previous_y = -2.0f - 9.0f * previous_t - 25.0f * previous_t * previous_t;
-    width = 0.45f + 0.35f * (1.0f - t);
+    previous_y = f->ParticleMotion[2] + f->ParticleMotion[3] * previous_t + f->ParticleMotion[4] * previous_t * previous_t;
+    width = f->ParticleShape[0] + f->ParticleShape[1] * (1.0f - t);
 
     const ArRenderColorF color = SceneParticleColor(hot, cool, clock);
     if (!AppendSceneParticle(writer, effect, x, y, previous_x, previous_y,
@@ -934,56 +813,25 @@ static bool AppendWallTorchParticles(ActionEffectGeometryWriter *writer,
 }
 
 static bool AppendWallTorchLighting(ActionEffectGeometryWriter *writer,
-                                    const ActionEffectInstance *effect,
-                                    ActionEffectProjectPointFn project_point,
-                                    void *userdata) {
+    const ActionEffectInstance *effect, const ActionGlowField *f,
+    ActionEffectProjectPointFn project_point, void *userdata) {
+  if (!((unsigned)f->Components[0]&1)) return true;
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const float mid_x = (rect->x0 + rect->x1) * 0.5f;
   const float mid_y = (rect->y0 + rect->y1) * 0.5f;
-  const float pulse = DeterministicPulse(effect);
-  ActionEffectGlowStyle spill = {0}, body = {0};
-  float spill_x = mid_x, spill_y = mid_y;
-  float body_x = mid_x, body_y = mid_y;
-  static const ActionEffectGlowStyle kSpill = {
-      .radius_x = 30.0f,
-      .radius_y = 25.0f,
-      .ring_scale = {0.25f, 0.62f, 1.0f},
-      .centre = {1.00f, 0.48f, 0.10f, 0.14f},
-      .ring = {{1.00f, 0.34f, 0.05f, 0.10f},
-               {0.84f, 0.12f, 0.01f, 0.045f},
-               {0.55f, 0.03f, 0.00f, 0.00f}},
-      .flare = 0.12f,
-      .rise = 0.16f,
-      .axis_x = 1.0f,
-      .lift_y = -1.0f};
-  spill = kSpill;
+  const unsigned ticks=(unsigned)f->Clock[0]*effect->phase_ticks;
+  const unsigned glow_ticks=(unsigned)f->Clock[0]*effect->pulse_ticks;
+  const unsigned seed=(unsigned)f->Clock[1]*effect->visual;
+  const float pulse=f->Pulse[0]+f->Pulse[1]*TriangleWave(ticks+seed,(unsigned)f->Clock[2])+
+      f->Pulse[2]*TriangleWave(ticks+seed*(unsigned)f->Clock[4],(unsigned)f->Clock[3]);
+  ActionEffectGlowStyle spill=f->spill,body=f->body;
   if (effect->tuning.active) {
     spill.radius_x *= effect->tuning.reach;
     spill.radius_y *= effect->tuning.reach;
   }
-  spill.seed = (unsigned)effect->generation;
-  static const ActionEffectGlowStyle kBody = {
-      .radius_x = 8.5f,
-      .radius_y = 14.0f,
-      .ring_scale = {0.20f, 0.52f, 1.0f},
-      .centre = {1.00f, 0.98f, 0.82f, 0.72f},
-      .ring = {{1.00f, 0.72f, 0.22f, 0.40f},
-               {1.00f, 0.27f, 0.02f, 0.16f},
-               {0.78f, 0.07f, 0.00f, 0.00f}},
-      .flare = 0.34f,
-      .rise = 0.42f,
-      .axis_x = 1.0f,
-      .lift_y = -1.0f};
-  body = kBody;
-  body.seed = (unsigned)effect->pulse_generation;
-  body_y = -3.0f;
-  if (!AppendGlow(writer, effect, &spill, pulse, spill_x, spill_y,
-                  project_point, userdata))
-    return false;
-  if (!AppendGlow(writer, effect, &body, pulse, body_x, body_y, project_point,
-                  userdata))
-    return false;
-  return true;
+  spill.seed=effect->generation;body.seed=effect->pulse_generation;
+  return AppendGlowAtTicks(writer,effect,&spill,pulse,mid_x,mid_y,project_point,userdata,glow_ticks)&&
+      AppendGlowAtTicks(writer,effect,&body,pulse,mid_x+f->BodyOffset[0],f->BodyOffset[1],project_point,userdata,glow_ticks);
 }
 
 static bool AppendStatueFireParticles(ActionEffectGeometryWriter *writer,
@@ -1084,38 +932,36 @@ static bool AppendStatueFireLighting(ActionEffectGeometryWriter *writer,
 }
 
 static bool AppendFireballParticles(ActionEffectGeometryWriter *writer,
-                                    const ActionEffectInstance *effect,
+                                    const ActionEffectInstance *effect,const ActionProjectileField *f,
                                     ActionEffectProjectPointFn project_point,
                                     void *userdata) {
-  const bool cave_orb = effect->kind == kActionEffect_FillmoreStatueOrb;
-  const unsigned count = kActionSceneEffectParticlesPerInstance / (cave_orb ? 2 : 1);
-  const ArRenderColorF hot = cave_orb ? (ArRenderColorF){1,.44f,.08f,.8f} :
-      (ArRenderColorF){1.00f, 0.97f, 0.78f, 0.96f};
-  const ArRenderColorF cool = {1.00f, 0.10f, 0.00f, 0.00f};
+  if(!((unsigned)f->Components[0]&2))return true;
+  const unsigned count=(unsigned)f->Particles[0];
+  const ArRenderColorF hot={f->Hot[0],f->Hot[1],f->Hot[2],f->Hot[3]},cool={f->Cool[0],f->Cool[1],f->Cool[2],f->Cool[3]};
   const unsigned visual_ticks =
-      EffectVisualTicks(effect, (unsigned)effect->pulse_ticks);
+      (unsigned)f->Clock[0]*effect->pulse_ticks;
   float heading_x = 1.0f, heading_y = 0.0f;
-  SceneFireballHeading(effect, &heading_x, &heading_y);
+  SceneFireballHeading(effect,f, &heading_x, &heading_y);
   for (unsigned i = 0; i < count; ++i) {
     const SceneParticleClock clock =
-        SceneParticleClockAt(effect, visual_ticks, i, kSceneEmberLifetime);
+        SceneParticleClockAt(effect, visual_ticks, i, (SceneParticleLifetime){(unsigned)f->Particles[1],(unsigned)f->Particles[2],(unsigned)f->Particles[3]});
     const uint32_t seed = clock.seed;
     const float t = clock.t, previous_t = clock.previous_t;
     float x = 0.0f, y = 0.0f, previous_x = 0.0f, previous_y = 0.0f;
     float width = 0.55f, reach = 1.8f + 2.2f * t;
-    const float side = (HashUnit(seed ^ 0x53u) - 0.5f) * (4.0f + 14.0f * t);
+    const float side = (HashUnit(seed ^ 0x53u) - 0.5f) * (f->Motion[2] + f->Motion[3] * t);
     /* Start beyond the 16px source art instead of hiding the youngest
      * sparks inside its painted red tail. The longer cone makes the host
      * enhancement legible without bleaching the authentic projectile. */
-    const float wake = cave_orb ? 20 : 44;
-    const float distance = 10.0f + wake*t;
-    const float previous_distance = 10.0f + wake*previous_t;
+    const float wake=f->Motion[1];
+    const float distance = f->Motion[0] + wake*t;
+    const float previous_distance = f->Motion[0] + wake*previous_t;
     x = -heading_x * distance - heading_y * side;
     y = -heading_y * distance + heading_x * side;
     previous_x = -heading_x * previous_distance - heading_y * side;
     previous_y = -heading_y * previous_distance + heading_x * side;
-    width = 0.80f + 0.60f * (1.0f - t);
-    reach = cave_orb ? 1.5f+2*t : 3+5*t;
+    width = f->Shape[0] + f->Shape[1] * (1.0f - t);
+    reach = f->Shape[2]+f->Shape[3]*t;
 
     const ArRenderColorF color = SceneParticleColor(hot, cool, clock);
     if (!AppendSceneParticle(writer, effect, x, y, previous_x, previous_y,
@@ -1126,77 +972,24 @@ static bool AppendFireballParticles(ActionEffectGeometryWriter *writer,
 }
 
 static bool AppendFireballLighting(ActionEffectGeometryWriter *writer,
-                                   const ActionEffectInstance *effect,
-                                   ActionEffectProjectPointFn project_point,
-                                   void *userdata) {
-  const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
-  const float mid_x = (rect->x0 + rect->x1) * 0.5f;
-  const float mid_y = (rect->y0 + rect->y1) * 0.5f;
-  const float pulse = DeterministicPulse(effect);
-  ActionEffectGlowStyle spill = {0}, body = {0};
-  float spill_x = mid_x, spill_y = mid_y;
-  float body_x = mid_x, body_y = mid_y;
-  float hx = 1.0f, hy = 0.0f;
-  SceneFireballHeading(effect, &hx, &hy);
-  static const ActionEffectGlowStyle kSpill = {
-      .radius_x = 38.0f,
-      .radius_y = 27.0f,
-      .ring_scale = {0.28f, 0.65f, 1.0f},
-      .centre = {1.00f, 0.52f, 0.09f, 0.24f},
-      .ring = {{1.00f, 0.35f, 0.03f, 0.17f},
-               {0.92f, 0.11f, 0.00f, 0.075f},
-               {0.55f, 0.02f, 0.00f, 0.00f}},
-      .flare = 0.13f,
-      .rise = 0.18f};
-  spill = kSpill;
-  spill.axis_x = hx;
-  spill.axis_y = hy;
-  spill.lift_x = -hx;
-  spill.lift_y = -hy;
-  spill.seed = (unsigned)effect->record_address;
-  static const ActionEffectGlowStyle kBody = {
-      .radius_x = 25.0f,
-      .radius_y = 11.0f,
-      .ring_scale = {0.20f, 0.50f, 1.0f},
-      .centre = {1.00f, 0.99f, 0.88f, 0.90f},
-      .ring = {{1.00f, 0.78f, 0.28f, 0.60f},
-               {1.00f, 0.30f, 0.02f, 0.30f},
-               {0.82f, 0.07f, 0.00f, 0.00f}},
-      .flare = 0.27f,
-      .rise = 0.34f};
-  body = kBody;
-  if (effect->kind == kActionEffect_FillmoreStatueOrb) {
-    /* Broad, red-orange spill with a dim core: keep the original red orb
-     * readable and avoid whitening the player against the dark stone. */
-    spill.radius_x = 58;
-    spill.radius_y = 48;
-    spill.centre = (ArRenderColorF){1,.26f,.04f,.22f};
-    spill.ring[0] = (ArRenderColorF){1,.20f,.025f,.16f};
-    spill.ring[1] = (ArRenderColorF){.85f,.09f,.01f,.055f};
-    body.radius_x = 13;
-    body.radius_y = 11;
-    body.centre = (ArRenderColorF){1,.24f,.02f,.24f};
-    body.ring[0] = (ArRenderColorF){1,.15f,.01f,.18f};
-    body.ring[1] = (ArRenderColorF){.85f,.07f,0,.08f};
-    body.flare = .12f;
-    body.rise = .12f;
-  }
-  body.axis_x = hx;
-  body.axis_y = hy;
-  body.lift_x = -hx;
-  body.lift_y = -hy;
-  body.seed = (unsigned)effect->pulse_generation;
-  /* Pull the enhanced body into the wake so its brightest region remains
-   * visible beside the painted core instead of disappearing underneath. */
-  body_x = mid_x - hx * 6.0f;
-  body_y = mid_y - hy * 6.0f;
-  if (!AppendGlow(writer, effect, &spill, pulse, spill_x, spill_y,
-                  project_point, userdata))
-    return false;
-  if (!AppendGlow(writer, effect, &body, pulse, body_x, body_y, project_point,
-                  userdata))
-    return false;
-  return true;
+    const ActionEffectInstance *effect,const ActionProjectileField *f,
+    ActionEffectProjectPointFn project_point,void *userdata){
+  if(!((unsigned)f->Components[0]&1))return true;
+  const ActionEffectLocalRect *r=&effect->geometry.data.rect;
+  const float x=(r->x0+r->x1)*.5f,y=(r->y0+r->y1)*.5f;
+  const unsigned ticks=(unsigned)f->Clock[0]*effect->phase_ticks,seed=(unsigned)f->Clock[1]*effect->visual;
+  const float pulse=f->Pulse[0]+f->Pulse[1]*TriangleWave(ticks+seed,(unsigned)f->Clock[2])+
+      f->Pulse[2]*TriangleWave(ticks+seed*(unsigned)f->Clock[4],(unsigned)f->Clock[3]);
+  float hx,hy;SceneFireballHeading(effect,f,&hx,&hy);
+  ActionEffectGlowStyle spill=f->spill,body=f->body;
+  spill.axis_x=body.axis_x=hx;spill.axis_y=body.axis_y=hy;
+  spill.lift_x=body.lift_x=-hx;spill.lift_y=body.lift_y=-hy;
+  spill.seed=effect->record_address;body.seed=effect->pulse_generation;
+  const float body_x=x+hx*f->BodyOffset[0]-hy*f->BodyOffset[1];
+  const float body_y=y+hy*f->BodyOffset[0]+hx*f->BodyOffset[1];
+  const unsigned glow_ticks=(unsigned)f->Clock[0]*effect->pulse_ticks;
+  return AppendGlowAtTicks(writer,effect,&spill,pulse,x,y,project_point,userdata,glow_ticks)&&
+      AppendGlowAtTicks(writer,effect,&body,pulse,body_x,body_y,project_point,userdata,glow_ticks);
 }
 
 static bool AppendFlamingWheelParticles(
@@ -1635,13 +1428,14 @@ static bool AppendNorthwallMagicLighting(ActionEffectGeometryWriter *writer,
  * timing and phase-specific geometry stay together above. */
 static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
                                  const ActionEffectInstance *effect,
+                                 const ActionRayField *ray_field, const ActionWaterField *water_field, const ActionAtmosphereField *atmosphere_field, const ActionMoonField *moon_field, const ActionMarshField *marsh_field, const ActionGlowField *glow_field, const ActionArcField *arc_field, const ActionProjectileField *projectile_field, const ActionSurfaceField *surface_field, const ActionNativeMembers *members,
                                  ActionEffectProjectPointFn project_point,
                                  ActionEffectClipBoundsFn clip_bounds, void *userdata) {
   switch (effect->kind) {
   case kActionEffect_BloodpoolWater:
   case kActionEffect_BloodpoolMist:
   case kActionEffect_BloodpoolMoonReflection:
-    return AppendBloodpoolEnvironment(writer, effect, project_point, clip_bounds, userdata);
+    return AppendBloodpoolEnvironment(moon_field, marsh_field, writer, effect, project_point, clip_bounds, userdata);
   case kActionEffect_CaveMist:
   case kActionEffect_TempleGrit:
   case kActionEffect_TempleGroundMist:
@@ -1649,34 +1443,34 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
   case kActionEffect_CaveDrips:
   case kActionEffect_TempleDust:
   case kActionEffect_LandingDust:
-    return AppendCaveEnvironment(writer, effect, project_point, clip_bounds, userdata);
+    return AppendCaveEnvironment(writer, effect, water_field, atmosphere_field, members, project_point, clip_bounds, userdata);
   case kActionEffect_ForestLeaves:
-    return AppendForestLeaves(writer, effect, project_point, userdata);
+    return AppendForestLeaves(writer, effect, ray_field, members, project_point, userdata);
   case kActionEffect_ForestCanopyLight:
-    return AppendForestMotes(writer, effect, project_point, userdata);
+    return AppendForestMotes(writer, effect, ray_field, members, project_point, userdata);
   case kActionEffect_AitosLavaPit:
-    return AppendLavaPitParticles(writer, effect, project_point, userdata);
+    return AppendLavaPitParticles(writer, effect, surface_field, project_point, userdata);
   case kActionEffect_AitosLavaReservoir:
-    return AppendLavaReservoirParticles(writer, effect, project_point,
+    return AppendLavaReservoirParticles(writer, effect, surface_field, project_point,
                                         userdata);
   case kActionEffect_AitosMoltenRock:
     return AppendMoltenRockParticles(writer, effect, project_point, userdata);
   case kActionEffect_AitosWaterSplash:
-    return AppendWaterSplashParticles(writer, effect, project_point, userdata);
+    return AppendWaterSplashParticles(writer, effect, surface_field, project_point, userdata);
   case kActionEffect_AitosWaterfall:
-    return AppendWaterfallParticles(writer, effect, project_point, userdata);
+    return AppendWaterfallParticles(writer, effect, surface_field, project_point, userdata);
   case kActionEffect_AitosWaterfallMist:
-    return AppendWaterfallMistParticles(writer, effect, project_point,
+    return AppendWaterfallMistParticles(writer, effect, surface_field, project_point,
                                         userdata);
   case kActionEffect_WallTorch:
-    return AppendWallTorchParticles(writer, effect, project_point, userdata);
+    return AppendWallTorchParticles(writer, effect, glow_field?glow_field:ActionGlowField_Bundled(2,3), project_point, userdata);
   case kActionEffect_AitosStatueFire:
     return AppendStatueFireParticles(writer, effect, project_point, userdata);
   case kActionEffect_EnemyFireball:
   case kActionEffect_FillmoreStatueOrb:
   case kActionEffect_MarahnaFireball:
   case kActionEffect_AitosLavaFireball:
-    return AppendFireballParticles(writer, effect, project_point, userdata);
+    return AppendFireballParticles(writer, effect, projectile_field, project_point, userdata);
   case kActionEffect_FlamingWheel:
     return AppendFlamingWheelParticles(writer, effect, project_point, userdata);
   case kActionEffect_FlamingWheelProjectile:
@@ -1696,13 +1490,13 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
     return AppendMarahnaBossLightningParticles(writer, effect, project_point,
                                                userdata);
   case kActionEffect_LightningTrap:
-    return AppendLightningTrapParticles(writer, effect, project_point,
+    return AppendLightningTrapParticles(writer, effect, arc_field, project_point,
                                         userdata);
   case kActionEffect_NorthwallBossMagic:
     return AppendNorthwallMagicParticles(writer, effect, project_point, userdata);
   case kActionEffect_CentaurLightning:
   case kActionEffect_BloodpoolBossLightning:
-    return AppendBossLightningParticles(writer, effect, project_point, userdata);
+    return AppendBossLightningParticles(writer, effect, arc_field, project_point, userdata);
   default:
     return true;
   }
@@ -1710,40 +1504,41 @@ static bool AppendSceneParticles(ActionEffectGeometryWriter *writer,
 
 static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
                                 const ActionEffectInstance *effect,
+                                const ActionRayField *ray_field, const ActionWaterField *water_field, const ActionAtmosphereField *atmosphere_field, const ActionGlowField *glow_field, const ActionArcField *arc_field, const ActionProjectileField *projectile_field, const ActionSurfaceField *surface_field, const ActionNativeMembers *members,
                                 ActionEffectProjectPointFn project_point,
                                 ActionEffectClipBoundsFn clip_bounds, void *userdata) {
   switch (effect->kind) {
   case kActionEffect_CaveSheen:
   case kActionEffect_CaveAmbientLight:
   case kActionEffect_TowerWindowLight:
-    return AppendCaveEnvironment(writer, effect, project_point, clip_bounds, userdata);
+    return AppendCaveEnvironment(writer, effect, water_field, atmosphere_field, members, project_point, clip_bounds, userdata);
   case kActionEffect_ForestForwardLight:
-    return AppendForestRays(writer, effect, true, project_point, clip_bounds, userdata);
+    return AppendForestRays(writer, effect, ray_field, members, true, project_point, clip_bounds, userdata);
   case kActionEffect_ForestCanopyLight:
-    return AppendForestRays(writer, effect, false, project_point, clip_bounds, userdata);
+    return AppendForestRays(writer, effect, ray_field, members, false, project_point, clip_bounds, userdata);
   case kActionEffect_AitosLavaReservoir:
     return AppendLavaReservoirLighting(
-        writer, effect, DeterministicPulse(effect), project_point, userdata);
+        writer, effect, surface_field, SurfacePulse(effect,surface_field), project_point, userdata);
   case kActionEffect_WallTorch:
-    return AppendWallTorchLighting(writer, effect, project_point, userdata);
+    return AppendWallTorchLighting(writer, effect, glow_field?glow_field:ActionGlowField_Bundled(2,3), project_point, userdata);
   case kActionEffect_AitosStatueFire:
     return AppendStatueFireLighting(writer, effect, project_point, userdata);
   case kActionEffect_AitosLavaPit:
-    return AppendLavaPitLighting(writer, effect, project_point, userdata);
+    return AppendLavaPitLighting(writer, effect, surface_field, project_point, userdata);
   case kActionEffect_AitosMoltenRock:
     return AppendMoltenRockLighting(writer, effect, project_point, userdata);
   case kActionEffect_AitosWaterSplash:
-    return AppendWaterSplashLighting(writer, effect, project_point, userdata);
+    return AppendWaterSplashLighting(writer, effect, surface_field, project_point, userdata);
   case kActionEffect_AitosWaterfall:
-    return AppendWaterfallLighting(writer, effect, project_point, userdata);
+    return AppendWaterfallLighting(writer, effect, surface_field, project_point, userdata);
   case kActionEffect_AitosWaterfallMist:
     return AppendWaterfallMistCloudVolume(
-        writer, effect, DeterministicPulse(effect), project_point, userdata);
+        writer, effect, surface_field, SurfacePulse(effect,surface_field), project_point, userdata);
   case kActionEffect_EnemyFireball:
   case kActionEffect_FillmoreStatueOrb:
   case kActionEffect_MarahnaFireball:
   case kActionEffect_AitosLavaFireball:
-    return AppendFireballLighting(writer, effect, project_point, userdata);
+    return AppendFireballLighting(writer, effect, projectile_field, project_point, userdata);
   case kActionEffect_FlamingWheel:
     return AppendFlamingWheelLighting(writer, effect, project_point, userdata);
   case kActionEffect_FlamingWheelProjectile:
@@ -1763,12 +1558,12 @@ static bool AppendSceneLighting(ActionEffectGeometryWriter *writer,
   case kActionEffect_SwordBeam:
     return AppendSwordBeamLighting(writer, effect, project_point, userdata);
   case kActionEffect_LightningTrap:
-    return AppendLightningTrapLighting(writer, effect, project_point, userdata);
+    return AppendLightningTrapLighting(writer, effect, arc_field, project_point, userdata);
   case kActionEffect_NorthwallBossMagic:
     return AppendNorthwallMagicLighting(writer, effect, project_point, userdata);
   case kActionEffect_CentaurLightning:
   case kActionEffect_BloodpoolBossLightning:
-    return AppendBossLightningLighting(writer, effect, project_point, userdata);
+    return AppendBossLightningLighting(writer, effect, arc_field, project_point, userdata);
   default:
     return true;
   }
@@ -1794,7 +1589,7 @@ static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
     case kActionEffect_BloodpoolTimber:
     case kActionEffect_BloodpoolAir:
     case kActionEffect_BloodpoolCloud:
-      return effect->phase == kActionEffectPhase_BloodpoolEnvironment && effect->environment_room == 1 &&
+      return effect->phase == kActionEffectPhase_BloodpoolEnvironment &&
           effect->render_layer == (effect->kind == kActionEffect_BloodpoolTimber ?
               kActionEffectRenderLayer_Bg1Plane : effect->kind == kActionEffect_BloodpoolAir ?
               kActionEffectRenderLayer_Bg2HighAlpha : kActionEffectRenderLayer_Bg2Alpha) &&
@@ -1802,12 +1597,12 @@ static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
               kActionEffectProjectionPlane_Bg2 : kActionEffectProjectionPlane_Bg1);
     case kActionEffect_BloodpoolMoonlight:
     case kActionEffect_BloodpoolMoonReflection:
-      return effect->phase == kActionEffectPhase_BloodpoolEnvironment && effect->environment_room == 1 &&
+      return effect->phase == kActionEffectPhase_BloodpoolEnvironment &&
           effect->render_layer == kActionEffectRenderLayer_Bg2Plane &&
           effect->projection_plane == kActionEffectProjectionPlane_Bg2;
     case kActionEffect_BloodpoolWater:
     case kActionEffect_BloodpoolMist:
-      return effect->phase == kActionEffectPhase_BloodpoolEnvironment && effect->environment_room == 1 &&
+      return effect->phase == kActionEffectPhase_BloodpoolEnvironment &&
           effect->render_layer == (effect->kind == kActionEffect_BloodpoolWater ?
               kActionEffectRenderLayer_Bg1HighPlane :
               kActionEffectRenderLayer_Bg2HighAlpha) &&
@@ -1820,43 +1615,40 @@ static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
           effect->render_layer == kActionEffectRenderLayer_WorldDust &&
           effect->projection_plane == kActionEffectProjectionPlane_Bg1;
     case kActionEffect_CaveMist:
-      return effect->phase == kActionEffectPhase_CaveEnvironment && effect->environment_room == 2 &&
+      return effect->phase == kActionEffectPhase_CaveEnvironment &&
           effect->render_layer == kActionEffectRenderLayer_WorldDust &&
           effect->projection_plane == kActionEffectProjectionPlane_Bg2High;
     case kActionEffect_CaveSheen:
-      return effect->phase == kActionEffectPhase_CaveEnvironment && effect->environment_room == 2 &&
+      return effect->phase == kActionEffectPhase_CaveEnvironment &&
           effect->render_layer == kActionEffectRenderLayer_Bg1Plane &&
           effect->projection_plane == kActionEffectProjectionPlane_Bg1;
     case kActionEffect_TempleGroundMist:
       return effect->phase == kActionEffectPhase_CaveEnvironment &&
-          (effect->environment_room == 2 || effect->environment_room == 3) &&
           effect->render_layer == kActionEffectRenderLayer_Bg1Mist &&
           effect->projection_plane == kActionEffectProjectionPlane_Bg1 &&
           effect->geometry.data.rect.x0 == 0 && effect->geometry.data.rect.x1 >= 16 &&
-          effect->geometry.data.rect.x1 <= (effect->environment_room == 2 ? 880 : 448) &&
-          effect->geometry.data.rect.y0 == -26 && effect->geometry.data.rect.y1 == 0;
+          effect->geometry.data.rect.x1 <= 880 &&
+          effect->geometry.data.rect.y0 <= -1 && effect->geometry.data.rect.y0 >= -64 && effect->geometry.data.rect.y1 == 0;
     case kActionEffect_CaveAmbientLight:
     case kActionEffect_TempleGrit:
       return effect->phase == kActionEffectPhase_CaveEnvironment &&
-          effect->environment_room >= 2 && effect->environment_room <= 3 &&
           effect->render_layer == (effect->kind == kActionEffect_CaveAmbientLight ?
               kActionEffectRenderLayer_ForegroundLight : kActionEffectRenderLayer_WorldDust) &&
           effect->projection_plane == kActionEffectProjectionPlane_Bg1;
     case kActionEffect_CaveWater:
-      return effect->phase == kActionEffectPhase_CaveEnvironment && effect->environment_room == 2 &&
+      return effect->phase == kActionEffectPhase_CaveEnvironment &&
           effect->render_layer == kActionEffectRenderLayer_Bg2HighPlane &&
           effect->projection_plane == kActionEffectProjectionPlane_Bg2High;
     case kActionEffect_CaveDrips:
-      return effect->phase == kActionEffectPhase_CaveEnvironment && effect->environment_room == 2 &&
+      return effect->phase == kActionEffectPhase_CaveEnvironment &&
           effect->render_layer == kActionEffectRenderLayer_WorldOverlay &&
           effect->projection_plane == kActionEffectProjectionPlane_Bg1;
     case kActionEffect_TempleDust:
       return effect->phase == kActionEffectPhase_CaveEnvironment &&
-          effect->environment_room >= 2 && effect->environment_room <= 4 &&
           effect->render_layer == kActionEffectRenderLayer_WorldOverlay &&
           effect->projection_plane == kActionEffectProjectionPlane_Bg1;
     case kActionEffect_TowerWindowLight:
-      return effect->phase == kActionEffectPhase_CaveEnvironment && effect->environment_room == 4 &&
+      return effect->phase == kActionEffectPhase_CaveEnvironment &&
           effect->render_layer == kActionEffectRenderLayer_ForegroundLight &&
           effect->projection_plane == kActionEffectProjectionPlane_Bg1;
     case kActionEffect_ForestForwardLight:
@@ -1871,8 +1663,8 @@ static bool SceneEffectStyleKnown(const ActionEffectInstance *effect) {
       return effect->phase == kActionEffectPhase_ForestCanopyLight &&
           effect->render_layer == kActionEffectRenderLayer_Bg2Plane &&
           effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds &&
-          effect->geometry.data.rect.x0 == -384 && effect->geometry.data.rect.x1 == 384 &&
-          effect->geometry.data.rect.y0 == 0 && effect->geometry.data.rect.y1 == 544;
+          effect->geometry.data.rect.x1 - effect->geometry.data.rect.x0 <= 768 &&
+          effect->geometry.data.rect.y1 - effect->geometry.data.rect.y0 <= 544;
     case kActionEffect_WallTorch:
       return effect->phase == kActionEffectPhase_WallTorch;
     case kActionEffect_EnemyFireball:
@@ -1989,20 +1781,18 @@ static SceneEnvironmentFamily SceneEnvironmentFamilyFor(uint8_t kind) {
   }
 }
 
-static bool BuildSceneEffectList(
-    const ActionEffectInstance *effects, uint8_t effect_count,
-    const ActionMoonlightOcclusion *moonlight,
-    const ActionBloodpoolDetails *bloodpool,
-    uint8_t capacity, bool overflow, uint8_t render_layer,
-    bool want_lighting, bool want_particles,
-    ActionEffectProjectPointFn project_point, ActionEffectClipBoundsFn clip_bounds,
-    void *project_userdata,
-    ActionSceneEffectRenderBatch *batch) {
+static bool
+BuildSceneEffectList(const ActionEffectInstance *effects, uint8_t effect_count,
+                     const ActionMoonlightOcclusion *moonlight,
+                     const ActionBloodpoolDetails *bloodpool, const ActionRayField *ray_field, const ActionWaterField *water_field, const ActionAtmosphereField *atmosphere_field, const ActionMoonField *moon_field, const ActionCastleField *castle_field, const ActionGlowField *glow_field, const ActionSceneEffectFrame *field_frame, const ActionNativeMembers *members,
+                     const ActionMoonlightOcclusion *scenery, uint8_t capacity, bool overflow,
+                     bool append, uint8_t render_layer, bool want_lighting, bool want_particles,
+                     ActionEffectProjectPointFn project_point, ActionEffectClipBoundsFn clip_bounds,
+                     void *project_userdata, ActionSceneEffectRenderBatch *batch) {
   if (!batch) return false;
   /* Submitters consume only [0, count). The scene capacity is deliberately
    * large, so zeroing its unused tail would touch hundreds of KiB per build. */
-  batch->vertex_count = 0;
-  batch->index_count = 0;
+  if (!append) batch->vertex_count = batch->index_count = 0;
   if (!effects || effect_count > capacity ||
       render_layer >= kActionEffectRenderLayer_Count)
     return false;
@@ -2011,6 +1801,11 @@ static bool BuildSceneEffectList(
   ActionEffectGeometryWriter writer = GeometryWriter(
       batch->vertices, kActionSceneEffectRenderMaxVertices,
       batch->indices, kActionSceneEffectRenderMaxIndices);
+  writer.vertex_count = batch->vertex_count;
+  writer.index_count = batch->index_count;
+  const ActionMarshField *marsh_field=bloodpool&&bloodpool->field_valid?&bloodpool->field:NULL;
+  ActionSceneryShadow shadow = {0};
+  bool shadow_prepared = false;
   unsigned lightning_filaments = 0;
   unsigned marahna_lightning_links = 0;
   unsigned marahna_boss_lightning_bolts = 0;
@@ -2029,6 +1824,10 @@ static bool BuildSceneEffectList(
 
   for (uint8_t i = 0; i < effect_count; i++) {
     const ActionEffectInstance *effect = &effects[i];
+    const int surface_index=ActionSurfaceField_Index(effect->kind);
+    const ActionSurfaceField *surface_field=surface_index<0?NULL:
+      (field_frame->surface_fields_valid&(1u<<surface_index))?&field_frame->surface_fields[surface_index]:ActionSurfaceField_Bundled((unsigned)surface_index);
+    if(surface_index>=0&&!surface_field)return false;
     const bool lighting_enabled=want_lighting && !(effect->flags&kActionEffectFlag_LightingOff) && ActionEffectReceivers_Layer(effect)==render_layer &&
         (!effect->tuning.light_receivers_set || !ActionEffectReceivers_IsLight(effect->kind) ||
          (effect->tuning.light_receivers&kActionReceiver_Scenery));
@@ -2068,7 +1867,7 @@ static bool BuildSceneEffectList(
     if (effect->kind == kActionEffect_AitosLavaReservoir) {
       if (++lava_reservoirs > kActionSceneEffectMaxLavaReservoirs)
         return false;
-      const unsigned segments = LavaReservoirGlowSegmentCount(effect);
+      const unsigned segments = LavaReservoirGlowSegmentCount(effect,surface_field);
       if (!segments ||
           segments > kActionSceneEffectMaxLavaGlowSegments -
               lava_glow_segments)
@@ -2083,13 +1882,26 @@ static bool BuildSceneEffectList(
          effect->kind == kActionEffect_ForestForwardLight) && ++forest_rays > 1)
       return false;
     const SceneEnvironmentFamily family = SceneEnvironmentFamilyFor(effect->kind);
+    if(family==kSceneEnvironment_Bloodpool) {
+      if(!moon_field)moon_field=ActionMoonField_Bundled();
+      if(!marsh_field)marsh_field=ActionMarshField_Bundled();
+    }
     if (family != kSceneEnvironment_None) {
       if (environment_seen[effect->kind]) return false;
       environment_seen[effect->kind] = true;
     }
+    if (lighting_enabled && effect->kind == kActionEffect_ForestForwardLight &&
+        !shadow_prepared) {
+      if (!ActionSceneryShadow_Prepare(&shadow, &batch->shadow, scenery, project_point,
+                                       clip_bounds, project_userdata))
+        return false;
+      writer.shadow = &shadow;
+      shadow_prepared = true;
+    }
     if (family == kSceneEnvironment_Castle &&
-        !AppendCastleEnvironment(&writer,effect,lighting_enabled,particles_enabled,
-            project_point,clip_bounds,project_userdata)) return false;
+        !AppendCastleEnvironment(castle_field?castle_field:ActionCastleField_Bundled(effect->environment_room), &writer, effect, members, lighting_enabled, particles_enabled,
+                                 project_point, clip_bounds, project_userdata))
+      return false;
     if (effect->kind == kActionEffect_LandingDust &&
         ++landing_puffs > kActionLandingDustMaxPuffs)
       return false;
@@ -2101,7 +1913,7 @@ static bool BuildSceneEffectList(
     }
     if (lighting_enabled &&
         effect->kind == kActionEffect_BloodpoolMoonlight &&
-        !AppendBloodpoolMoonlight(&writer,effect,moonlight,&batch->moonlight,project_point,
+        !AppendBloodpoolMoonlight(moon_field, &writer,effect,moonlight,&batch->moonlight,project_point,
             clip_bounds,project_userdata))
       return false;
     if (family == kSceneEnvironment_Bloodpool) {
@@ -2120,28 +1932,32 @@ static bool BuildSceneEffectList(
         moon_resolved = true;
       }
       if (lighting_enabled && effect->kind == kActionEffect_BloodpoolWater &&
-          !AppendBloodpoolWaterMoonlight(&writer,effect,moon,moonlight,&batch->moonlight,
+          !AppendBloodpoolWaterMoonlight(moon_field, marsh_field, &writer,effect,moon,moonlight,&batch->moonlight,
               project_point,clip_bounds,project_userdata)) return false;
       if (lighting_enabled && effect->kind == kActionEffect_BloodpoolTimber &&
-          !AppendBloodpoolTimberMoonlight(&writer,effect,moon,bloodpool,moonlight,&batch->moonlight,
+          !AppendBloodpoolTimberMoonlight(moon_field, marsh_field, &writer,effect,moon,bloodpool,moonlight,&batch->moonlight,
               project_point,clip_bounds,project_userdata)) return false;
       if (lighting_enabled && effect->kind == kActionEffect_BloodpoolCloud &&
-          !AppendBloodpoolCloud(&writer,effect,project_point,clip_bounds,project_userdata))
+          !AppendBloodpoolCloud(moon_field, &writer,effect,project_point,clip_bounds,project_userdata))
         return false;
       if (particles_enabled && effect->kind == kActionEffect_BloodpoolMoonReflection &&
-          !AppendBloodpoolWaveCaps(&writer,effect,bloodpool,project_point,clip_bounds,
+          !AppendBloodpoolWaveCaps(moon_field, &writer,effect,bloodpool,project_point,clip_bounds,
               project_userdata)) return false;
       if (particles_enabled &&
-          !AppendBloodpoolDetailParticles(&writer,effect,moon,bloodpool,
+          !AppendBloodpoolDetailParticles(moon_field, marsh_field, &writer,effect,moon,bloodpool,
               project_point,clip_bounds,project_userdata)) return false;
     }
-    if (lighting_enabled &&
-        !AppendSceneLighting(&writer, effect, project_point, clip_bounds,
-                             project_userdata))
+    const int projectile_index=ActionProjectileField_Index(effect->kind);
+    const ActionProjectileField *projectile_field=projectile_index<0?NULL:
+      (field_frame->projectile_fields_valid&(1u<<projectile_index))?&field_frame->projectile_fields[projectile_index]:ActionProjectileField_Bundled((unsigned)projectile_index);
+    const int arc_index=ActionArcField_Index(effect->kind);
+    const ActionArcField *arc_field=arc_index<0?NULL:
+      (field_frame->arc_fields_valid&(1u<<arc_index))?&field_frame->arc_fields[arc_index]:ActionArcField_Bundled((unsigned)arc_index);
+    if (lighting_enabled && !AppendSceneLighting(&writer, effect, ray_field, water_field, atmosphere_field, glow_field, arc_field, projectile_field, surface_field, members, project_point,
+                                                 clip_bounds, project_userdata))
       return false;
-    if (particles_enabled &&
-        !AppendSceneParticles(&writer, effect, project_point, clip_bounds,
-                              project_userdata))
+    if (particles_enabled && !AppendSceneParticles(&writer, effect, ray_field, water_field, atmosphere_field, moon_field, marsh_field, glow_field, arc_field, projectile_field, surface_field, members, project_point,
+                                                   clip_bounds, project_userdata))
       return false;
     if (effect->tuning.active) {
       const ActionEffectTuning *t = &effect->tuning;
@@ -2175,11 +1991,10 @@ bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
     }
     return false;
   }
-  return BuildSceneEffectList(
-      frame->effects, frame->effect_count, NULL, NULL, kActionSceneEffectMaxInstances,
-      frame->overflow, kActionEffectRenderLayer_WorldOverlay,
-      lighting_enabled, particles_enabled, project_point, NULL, project_userdata,
-      batch);
+  return BuildSceneEffectList(frame->effects, frame->effect_count, NULL, NULL, frame->ray_field_valid?&frame->ray_field:NULL, frame->water_field_valid?&frame->water_field:NULL, frame->atmosphere_field_valid?&frame->atmosphere_field:NULL, frame->moon_field_valid?&frame->moon_field:NULL, frame->castle_field_valid?&frame->castle_field:NULL, frame->glow_field_valid?&frame->glow_field:NULL, frame, &frame->members,
+                              &frame->scenery, kActionSceneEffectMaxInstances, frame->overflow,
+                              false, kActionEffectRenderLayer_WorldOverlay, lighting_enabled,
+                              particles_enabled, project_point, NULL, project_userdata, batch);
 }
 
 bool ActionSceneDecorationRender_Build(
@@ -2195,27 +2010,22 @@ bool ActionSceneDecorationRender_Build(
     }
     return false;
   }
-  if (!BuildSceneEffectList(
-      frame->decorations, frame->decoration_count, &frame->moonlight, &frame->bloodpool,
-      kActionSceneDecorationMaxInstances, frame->decoration_overflow,
-      render_layer, lighting_enabled, particles_enabled, project_point, clip_bounds,
-      project_userdata, batch)) return false;
-  /* Explicit actor receivers move just the light underneath actors. Trails
-   * retain the original late pass. Use separate scratch and bounded merging;
-   * never put moving lights into the native decoration allocation pool. */
-  if(render_layer==kActionEffectRenderLayer_Bg1Plane && lighting_enabled) {
-    static ActionSceneEffectRenderBatch actor_light;
-    if(!BuildSceneEffectList(frame->effects,frame->effect_count,NULL,NULL,
-        kActionSceneEffectMaxInstances,frame->overflow,render_layer,true,false,
-        project_point,clip_bounds,project_userdata,&actor_light) ||
-        batch->vertex_count+actor_light.vertex_count>kActionSceneEffectRenderMaxVertices ||
-        batch->index_count+actor_light.index_count>kActionSceneEffectRenderMaxIndices) {
-      batch->vertex_count=batch->index_count=0;return false;
-    }
-    const int base=batch->vertex_count;
-    memcpy(batch->vertices+base,actor_light.vertices,actor_light.vertex_count*sizeof(actor_light.vertices[0]));
-    for(int i=0;i<actor_light.index_count;++i)batch->indices[batch->index_count++]=base+actor_light.indices[i];
-    batch->vertex_count+=actor_light.vertex_count;
+  if (!BuildSceneEffectList(frame->decorations, frame->decoration_count, &frame->moonlight,
+                            &frame->bloodpool, frame->ray_field_valid?&frame->ray_field:NULL, frame->water_field_valid?&frame->water_field:NULL, frame->atmosphere_field_valid?&frame->atmosphere_field:NULL, frame->moon_field_valid?&frame->moon_field:NULL, frame->castle_field_valid?&frame->castle_field:NULL, frame->glow_field_valid?&frame->glow_field:NULL, frame, &frame->members, &frame->scenery,
+                            kActionSceneDecorationMaxInstances, frame->decoration_overflow, false,
+                            render_layer, lighting_enabled, particles_enabled, project_point,
+                            clip_bounds, project_userdata, batch))
+    return false;
+  /* Append actor light directly to the caller's retained batch. Each caller
+   * owns its geometry, so game-thread receiver sampling and render-thread
+   * presentation cannot race through a shared actor scratch buffer. */
+  if (render_layer == kActionEffectRenderLayer_Bg1Plane && lighting_enabled &&
+      !BuildSceneEffectList(frame->effects, frame->effect_count, NULL, NULL, frame->ray_field_valid?&frame->ray_field:NULL, frame->water_field_valid?&frame->water_field:NULL, frame->atmosphere_field_valid?&frame->atmosphere_field:NULL, frame->moon_field_valid?&frame->moon_field:NULL, frame->castle_field_valid?&frame->castle_field:NULL, frame->glow_field_valid?&frame->glow_field:NULL, frame, &frame->members,
+                            &frame->scenery, kActionSceneEffectMaxInstances, frame->overflow, true,
+                            render_layer, true, false, project_point, clip_bounds, project_userdata,
+                            batch)) {
+    batch->vertex_count = batch->index_count = 0;
+    return false;
   }
   if (frame->authored_count > kActionAuthoredMaxInstances) {
     batch->vertex_count = batch->index_count = 0;
@@ -2225,12 +2035,34 @@ bool ActionSceneDecorationRender_Build(
       batch->indices,kActionSceneEffectRenderMaxIndices);
   writer.vertex_count=batch->vertex_count;writer.index_count=batch->index_count;
   const int base_vertices=writer.vertex_count, base_indices=writer.index_count;
+  ActionSceneryShadow shadow = {0};
+  bool shadow_prepared = false;
   for (unsigned i=0;i<frame->authored_count;++i) {
     const ActionEffectInstance *e=&frame->authored[i];
-    if (!(e->flags&kActionEffectFlag_Visible) || ActionEffectReceivers_Layer(e)!=render_layer) continue;
-    if(e->tuning.light_receivers_set&&ActionEffectReceivers_IsLight(e->kind)&&
-        !(e->tuning.light_receivers&kActionReceiver_Scenery))continue;
-    if (!AppendAuthoredEnvironment(&writer,e,&frame->authored_floor[i],lighting_enabled,particles_enabled,project_point,clip_bounds,project_userdata) ||
+    const bool light=lighting_enabled&&ActionEffectReceivers_Layer(e)==render_layer&&
+      (!e->tuning.light_receivers_set||!ActionEffectReceivers_IsLight(e->kind)||(e->tuning.light_receivers&kActionReceiver_Scenery));
+    const bool particles=particles_enabled&&e->render_layer==render_layer;
+    if(!(e->flags&kActionEffectFlag_Visible)||(!light&&!particles))continue;
+    if (e->kind == kActionEffect_AuthoredFan && light && !shadow_prepared) {
+      if (!ActionSceneryShadow_Prepare(&shadow, &batch->shadow, &frame->scenery,
+                                       project_point, clip_bounds, project_userdata))
+        return false;
+      writer.shadow = &shadow;
+      shadow_prepared = true;
+    }
+    bool ok;
+    if(e->kind==kActionEffect_AuthoredTorch) {
+      const ActionGlowField *field=frame->glow_field_valid?&frame->glow_field:ActionGlowField_Bundled(2,3);
+      ActionEffectInstance torch=*e;torch.kind=kActionEffect_WallTorch;torch.phase=kActionEffectPhase_WallTorch;
+      torch.geometry.data.rect=(ActionEffectLocalRect){field->Geometry[0],field->Geometry[1],field->Geometry[2],field->Geometry[3]};
+      const int begin=writer.vertex_count;
+      ok=(!light||AppendWallTorchLighting(&writer,&torch,field,project_point,project_userdata))&&
+         (!particles||AppendWallTorchParticles(&writer,&torch,field,project_point,project_userdata));
+      for(int v=begin;v<writer.vertex_count;++v){ArRenderColorF *c=&writer.vertices[v].color;
+        c->r*=((e->tuning.color>>16)&255)/255.f;c->g*=((e->tuning.color>>8)&255)/255.f;c->b*=(e->tuning.color&255)/255.f;
+        c->a=fminf(1,c->a*e->tuning.intensity);}
+    }else ok=AppendAuthoredEnvironment(&writer,e,&frame->authored_floor[i],light,particles,project_point,clip_bounds,project_userdata);
+    if (!ok ||
         writer.vertex_count-base_vertices>kActionAuthoredMaxVertices ||
         writer.index_count-base_indices>kActionAuthoredMaxIndices) {
       batch->vertex_count=batch->index_count=0;return false;

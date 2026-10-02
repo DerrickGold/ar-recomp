@@ -236,15 +236,16 @@ cvs.addEventListener('mousedown', ev => {
   }
   if(ev.button!==0)return;
   if(brush==='framing'){beginFramingDrag(ev);return;}
+  if(brush==='select'&&!ev.ctrlKey&&!ev.metaKey&&EmitterMapTools.hit(ev)){if(EmitterMapTools.begin(ev))drag={effects:true};return;}
+  if(['effects','effectPlace','effectPaste'].includes(brush)){
+    if(EmitterMapTools.begin(ev))drag={effects:true};return;
+  }
   const [cx, cy] = toCell(ev);
   /* Defer Shift-click until release. A deliberate drag still pans, while a
    * click selects an inclusive rectangle without painting or stamping. */
   if(ev.shiftKey) {
     drag={shiftSelect:true,x:ev.clientX,y:ev.clientY,cx,cy,anchor:selectionAnchor};
     return;
-  }
-  if(['effects','effectPlace'].includes(brush)){
-    if(EmitterMapTools.begin(ev))drag={effects:true};return;
   }
   if(brush==='contour'){const r=cvs.getBoundingClientRect();drag={contour:true,points:[{x:Math.round((ev.clientX-r.left-view.x)/view.scale),y:Math.round((ev.clientY-r.top-view.y)/view.scale)}]};draw();return;}
   if(brush==='particleArea'){drag={particleArea:true,x0:cx,y0:cy,x1:cx,y1:cy};draw();return;}
@@ -380,7 +381,7 @@ function deselect() {
   commitOp(); if(drag?.effects)EmitterMapTools.cancel();drag = null;
   selectedCells.clear();selectedStampKeys.clear();selectionRect=null;stampHover=null;
   selectionAnchor=null;
-  if(['stamp','floorMist','floorErase','effects','effectPlace','particleArea'].includes(brush)){$('#bSelect').onclick();}
+  if(['stamp','floorMist','floorErase','effects','effectPlace','effectPaste','particleArea'].includes(brush)){$('#bSelect').onclick();}
   lastEntry = null; pixelCell = null;pixelStamp=null;
   refreshSelectionControls(); draw();
 }

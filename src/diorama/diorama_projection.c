@@ -508,6 +508,13 @@ static int SkyboxBandAt(const DioramaSkyboxProjection *sky, float y) {
   return selected;
 }
 
+const DioramaSkyboxBandProjection *Diorama_SkyboxAnchorBand(
+    const DioramaProjection *projection, float anchor_y) {
+  if (!projection || !projection->valid) return NULL;
+  const int selected = SkyboxBandAt(&projection->bg2_skybox, anchor_y);
+  return selected < 0 ? NULL : &projection->bg2_skybox.bands[selected];
+}
+
 bool Diorama_SkyboxAnchorBounds(const DioramaProjection *projection, float anchor_y,
                                 float *x0, float *y0, float *x1, float *y1) {
   if (!projection || !projection->valid || !x0 || !y0 || !x1 || !y1) return false;

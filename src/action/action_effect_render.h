@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include "action_effects.h"
+#include "action_effect_projection.h"
 #include "render/render_types.h"
 
 enum {
@@ -268,7 +269,27 @@ enum {
 };
 /* Retained render workspace, not a per-call stack allocation. The small CPU
  * coverage field describes platform silhouettes; it is never uploaded. */
+enum { kActionShadowWidth = 400, kActionShadowHeight = 176 };
+/* Separate retained coverage: moon passes may overwrite their own workspace. */
+typedef struct ActionSceneryShadowCache {
+  ActionEffectProjectionSnapshot projection;
+  ActionMoonlightOcclusion occlusion;
+  uint8_t pixels[kActionShadowWidth * kActionShadowHeight];
+  float x, y, step;
+  bool ready;
+} ActionSceneryShadowCache;
+typedef struct ActionMoonVisibilityCache {
+  ActionEffectProjectionSnapshot projection;
+  ActionMoonlightOcclusion occlusion;
+  ActionMoonField field;
+  ActionEffectInstance anchor;
+  float visibility[kActionMoonlightColumns*kActionMoonlightRows];
+  bool ready;
+} ActionMoonVisibilityCache;
+/* Zero-initialize retained batches once before their first build. Caches have
+ * exact value keys and no GPU resources, allocations or borrowed pointers. */
 typedef struct ActionMoonlightRenderScratch {
+  ActionMoonVisibilityCache cache;
   ArRenderPointF points[kActionMoonlightColumns*kActionMoonlightRows];
   float visibility[kActionMoonlightColumns*kActionMoonlightRows];
   uint8_t coverage[kActionMoonlightMaskWidth*kActionMoonlightMaskHeight];
@@ -276,6 +297,7 @@ typedef struct ActionMoonlightRenderScratch {
 
 typedef struct ActionSceneEffectRenderBatch {
   ActionMoonlightRenderScratch moonlight;
+  ActionSceneryShadowCache shadow;
   ArRenderVertex2D vertices[kActionSceneEffectRenderMaxVertices];
   int32_t indices[kActionSceneEffectRenderMaxIndices];
   int vertex_count;
@@ -321,6 +343,7 @@ bool ActionSceneDecorationRender_Build(
  * source texture for subtle lower-screen heat refraction. The outer edge is
  * pinned exactly, so the mesh cannot sample beyond the scene target or pull
  * letterbox pixels into the game image. */
+bool ActionHeatRender_BuildWithField(const ActionSurfaceField *,uint16_t,ArRenderRectI,int,int,int,ActionHeatRenderMesh *);
 bool ActionHeatRender_Build(uint16_t game_frame,
                             ArRenderRectI output_viewport,
                             int target_width, int target_height,

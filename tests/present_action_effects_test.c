@@ -28,6 +28,7 @@ typedef struct Backend {
   ArRenderBlendMode geometry_blends[64];
   ArRenderColorF geometry_colors[64];
   float geometry_peak_rgb[64];
+  uint32_t geometry_uv_hash[64];
   ArRenderBlendMode composite_blend;
   uint32_t first_uploaded_pixel;
 } Backend;
@@ -153,6 +154,13 @@ static bool Geometry(void *ctx, ArRenderTexture texture,
     peak = fmaxf(peak, vertices[i].color.b);
   }
   b->geometry_peak_rgb[b->geometries] = peak;
+  uint32_t uv_hash = 2166136261u;
+  for (int i = 0; i < vertex_count; ++i) {
+    uint32_t words[2];
+    memcpy(words, &vertices[i].tex_coord, sizeof(words));
+    uv_hash = ((uv_hash ^ words[0]) * 16777619u ^ words[1]) * 16777619u;
+  }
+  b->geometry_uv_hash[b->geometries] = uv_hash;
   b->geometries++;
   Record(b, texture.value ? 'H' : 'G');
   return !b->fail_geometry && !(b->fail_surface_light && state &&
@@ -256,6 +264,34 @@ static void HeatLifecycle(void) {
   PresentActionHeat_Cancel(&device);
   PresentActionEffects_Reset(&device);
   assert(b.created == 3 && b.destroyed == 3 && !fatal_count);
+}
+
+static void HeatEditsInvalidateRetainedMesh(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b, &device);
+  LavaFrame();
+  frame.action_scene_effects.surface_fields_valid = 2;
+  ActionSurfaceField *field = &frame.action_scene_effects.surface_fields[1];
+  *field = *ActionSurfaceField_Bundled(1);
+  field->Components[0] = 0; /* Refraction is independent of glow/sparks. */
+  ActionSurfaceField_Prepare(field);
+  assert(PresentActionHeat_Begin(&device, &frame, viewport));
+  PresentActionHeat_End(&device, &frame, viewport);
+  const uint32_t original = b.geometry_uv_hash[0];
+  memset(field->HeatAmplitude, 0, sizeof(field->HeatAmplitude));
+  ActionSurfaceField_Prepare(field);
+  assert(PresentActionHeat_Begin(&device, &frame, viewport));
+  PresentActionHeat_End(&device, &frame, viewport);
+  assert(b.geometry_uv_hash[1] != original && b.created == 1);
+  assert(PresentActionHeat_Begin(&device, &frame, viewport));
+  PresentActionHeat_End(&device, &frame, viewport);
+  assert(b.geometry_uv_hash[2] == b.geometry_uv_hash[1]);
+  field->Heat[0] = 0;
+  ActionSurfaceField_Prepare(field);
+  assert(!PresentActionHeat_Begin(&device, &frame, viewport));
+  PresentActionEffects_Reset(&device);
+  assert(b.created == b.destroyed);
 }
 
 static void HeatFailures(void) {
@@ -1191,9 +1227,30 @@ static void AuthoredOnlyComposition(void) {
   e->render_layer = kActionEffectRenderLayer_WorldDust;
   PresentActionEffects_Draw(&device,&frame,viewport,NULL);
   assert(b.geometries == 2 && b.geometry_blends[1] == kArRenderBlendMode_Alpha);
+  /* An authored-only BG2 cloud must submit in plane and skybox-only modes,
+   * with alpha-correct flat masking and no intermediate render target. */
+  e->projection_plane=kActionEffectProjectionPlane_Bg2;
+  e->render_layer=kActionEffectRenderLayer_Bg2Alpha;
+  e->flags|=kActionEffectFlag_StaticAnchor;
+  memset(pixels,0xff,sizeof(pixels));pixels[0]=0xff000000u;
+  assert(PresentActionEffects_UploadMask(&device,SR_PPU_OVERLAY_BG2,&frame,
+      (const uint8_t *)pixels,256*4)==sizeof(pixels));
+  assert(b.first_uploaded_pixel==0);
+  const unsigned resources=b.created;
+  DioramaProjection projection={.valid=true,.output_width=800,.output_height=600,
+    .matrix={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1},.aspect_x=2,.height_scale=1,
+    .texture_width=256,.texture_height=224,.bg2_plane={.valid=true,.u1=1,.v1=1}};
+  PresentActionPlaneEffectContext context={&device,&frame,viewport};
+  PresentActionEffects_DrawDioramaPlane(&context,SR_PPU_OVERLAY_BG2,&projection);
+  assert(b.geometries==3&&b.geometry_blends[2]==kArRenderBlendMode_Alpha);
+  projection.bg2_plane.valid=false;
+  projection.bg2_skybox=(DioramaSkyboxProjection){.count=1,.active_band=0,.bands={{0,0,256,224,0,1}}};
+  PresentActionEffects_DrawDioramaPlane(&context,SR_PPU_OVERLAY_BG2,&projection);
+  assert(b.geometries==4&&b.geometry_blends[3]==kArRenderBlendMode_Alpha);
+  assert(b.created==resources&&!b.resolves&&!b.restores);
   frame.action_environmental_effects = false;
   PresentActionEffects_Draw(&device,&frame,viewport,NULL);
-  assert(b.geometries == 2 && !b.created && !b.updated);
+  assert(b.geometries == 4 && b.created==resources);
   PresentActionEffects_Reset(&device);
 }
 
@@ -1210,6 +1267,7 @@ int main(void) {
   TempleMistComposition(false);
   TempleMistComposition(true);
   HeatLifecycle();
+  HeatEditsInvalidateRetainedMesh();
   HeatFailures();
   MasksAndPlaneComposition();
   PlaneTargetFailures();

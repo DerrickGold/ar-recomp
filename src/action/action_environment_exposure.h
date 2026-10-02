@@ -3,33 +3,30 @@
 #include "action_effects.h"
 #include "actraiser_game.h"
 #include "render/render_types.h"
-static inline float ActionEnvironment_NativeBg1Dimming(const ActionSceneEffectFrame *frame, unsigned group, unsigned room) {
-  if (!frame ||
-      frame->decoration_overflow ||
-      frame->decoration_count > kActionSceneDecorationMaxInstances)
-    return 0;
-  for (unsigned i = 0; i < frame->decoration_count; i++) {
-    const ActionEffectInstance *effect = &frame->decorations[i];
-    if (group == kActRaiserMapGroup_Fillmore &&
-        (room == 2 || room == 3) &&
-        effect->kind == kActionEffect_CaveAmbientLight &&
-        effect->environment_room == room &&
-        effect->phase == kActionEffectPhase_CaveEnvironment &&
-        effect->render_layer == kActionEffectRenderLayer_ForegroundLight &&
-        effect->projection_plane == kActionEffectProjectionPlane_Bg1 &&
-        (effect->flags & kActionEffectFlag_Visible)) return .45f;
-    if (group == kActRaiserMapGroup_Bloodpool &&
-        effect->environment_room == room &&
-        (effect->environment_room == 3 || effect->environment_room == 4 || effect->environment_room == 5 ||
-         effect->environment_room == 7 || effect->environment_room == 8) &&
-        effect->kind == kActionEffect_CastleLight &&
-        effect->phase == kActionEffectPhase_CastleEnvironment &&
-        effect->render_layer == kActionEffectRenderLayer_Bg1Plane &&
-        effect->projection_plane == kActionEffectProjectionPlane_Bg1 &&
-        effect->source_mask && (effect->flags & kActionEffectFlag_Visible))
-      return effect->environment_room == 5 ? .42f : effect->environment_room == 8 ? .30f : .36f;
+/* Visual strengths and ramps belong to retained recipes. These checks only
+ * establish that the corresponding observed/validated source is active. */
+typedef struct ActionEnvironmentExposure {float amount;ArRenderRectF ramp;} ActionEnvironmentExposure;
+static inline ActionEnvironmentExposure ActionEnvironment_Exposure(const ActionSceneEffectFrame *frame,unsigned group,unsigned room){
+  ActionEnvironmentExposure result={0};
+  if(!frame||frame->decoration_overflow||frame->decoration_count>kActionSceneDecorationMaxInstances)return result;
+  for(unsigned i=0;i<frame->decoration_count;++i){const ActionEffectInstance *e=&frame->decorations[i];
+    if(!(e->flags&kActionEffectFlag_Visible)||e->environment_room!=room||e->projection_plane!=kActionEffectProjectionPlane_Bg1)continue;
+    const float *amount=NULL,*ramp=NULL;
+    if(e->kind==kActionEffect_CaveAmbientLight&&e->phase==kActionEffectPhase_CaveEnvironment&&e->render_layer==kActionEffectRenderLayer_ForegroundLight){
+      const ActionAtmosphereField *f=frame->atmosphere_field_valid?&frame->atmosphere_field:
+          group==kActRaiserMapGroup_Fillmore?ActionAtmosphereField_Bundled(room):NULL;
+      if(f){amount=f->Dimming;ramp=f->DimmingRamp;}
+    }else if(e->kind==kActionEffect_CastleLight&&e->phase==kActionEffectPhase_CastleEnvironment&&e->render_layer==kActionEffectRenderLayer_Bg1Plane&&e->source_mask){
+      const ActionCastleField *f=frame->castle_field_valid?&frame->castle_field:
+          group==kActRaiserMapGroup_Bloodpool?ActionCastleField_Bundled(room):NULL;
+      if(f){amount=f->Dimming;ramp=f->DimmingRamp;}
+    }
+    if(amount&&*amount>result.amount)result=(ActionEnvironmentExposure){*amount,{ramp[0],ramp[1],ramp[2],ramp[3]}};
   }
-  return 0;
+  return result;
+}
+static inline float ActionEnvironment_NativeBg1Dimming(const ActionSceneEffectFrame *frame,unsigned group,unsigned room){
+  return ActionEnvironment_Exposure(frame,group,room).amount;
 }
 
 static inline float ActionEnvironment_Bg1Dimming(const ActionSceneEffectFrame *frame,unsigned group,unsigned room) {
@@ -42,12 +39,7 @@ static inline float ActionEnvironment_Bg1Dimming(const ActionSceneEffectFrame *f
   return amount;
 }
 
-static inline ArRenderRectF ActionEnvironment_Bg1DimmingRamp(unsigned group, unsigned room) {
-  if (group == kActRaiserMapGroup_Fillmore &&
-      room == 2)
-    return (ArRenderRectF){800,640,320,448};
-  return (ArRenderRectF){0};
+static inline ArRenderRectF ActionEnvironment_Bg1DimmingRamp(const ActionSceneEffectFrame *frame,unsigned group,unsigned room){
+  return ActionEnvironment_Exposure(frame,group,room).ramp;
 }
-
-
 #endif

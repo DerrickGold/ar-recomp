@@ -81,7 +81,7 @@ const SharedRoomPreview = (() => {
       skyboxKey=source;
       const error=backend.gl.getError();
       if(!ok||error)throw Error(`Room rendering failed (${error}).`);
-      EffectEditor.updateSources(api);
+      EffectEditor.updateCatalogue(api);EffectEditor.updateSources(api);
       label.textContent=`Shared C · ${api.RoomPreview_Width()} × ${api.RoomPreview_Height()} room · `+
         `${api.RoomPreview_EffectCount()} sources · ${api.RoomPreview_EffectVertices()} effect vertices · ${backend.stats.draws} draws · ${uploads} uploads · ${backend.stats.creates} allocations · `+
         `${(performance.now()-start).toFixed(1)} ms CPU`;
@@ -161,6 +161,85 @@ const SharedRoomPreview = (() => {
       throw Error(`Effects rejected at line ${api.RoomPreview_RecipeErrorLine()}. Previous effects retained.`);
     effectsConfig=text;
   }
+  function syncSources() {
+    if(!api||lost)return;
+    try {ensureRoom();if(effectsConfig!==EffectEditor.text())validateEffects(EffectEditor.text());EffectEditor.updateCatalogue(api);}
+    catch(error){label.textContent=error.message;}
+  }
+  function previewActorBinding(source,x,y,start) {
+    ensureRoom();validateEffects(EffectEditor.text());
+    if(!api.RoomPreview_PreviewBinding(source===null?0:1,source??0,Math.round(x),Math.round(y),start))throw Error('Invalid actor preview anchor.');
+    render();
+  }
+  function surfaceFieldDefinition(kind) {
+    ensureRoom();const pointer=api.RoomPreview_SurfaceFieldText(kind);
+    if(!pointer)throw Error('No complete lava / waterfall definition is available.');
+    const bytes=new Uint8Array(api.memory.buffer);let end=pointer;while(bytes[end])end++;
+    return new TextDecoder().decode(bytes.subarray(pointer,end));
+  }
+  function projectileFieldDefinition(kind) {
+    ensureRoom();const pointer=api.RoomPreview_ProjectileFieldText(kind);
+    if(!pointer)throw Error('No complete projectile response definition is available.');
+    const bytes=new Uint8Array(api.memory.buffer);let end=pointer;while(bytes[end])end++;
+    return new TextDecoder().decode(bytes.subarray(pointer,end));
+  }
+  function arcFieldDefinition(kind) {
+    ensureRoom();const pointer=api.RoomPreview_ArcFieldText(kind);
+    if(!pointer)throw Error('No complete arc response definition is available.');
+    const bytes=new Uint8Array(api.memory.buffer);let end=pointer;while(bytes[end])end++;
+    return new TextDecoder().decode(bytes.subarray(pointer,end));
+  }
+  function glowFieldDefinition() {
+    ensureRoom();const pointer=api.RoomPreview_GlowFieldText();
+    if(!pointer)throw Error('No complete glow-field definition is available.');
+    const bytes=new Uint8Array(api.memory.buffer);let end=pointer;while(bytes[end])end++;
+    return new TextDecoder().decode(bytes.subarray(pointer,end));
+  }
+  function castleFieldDefinition() {
+    ensureRoom();const pointer=api.RoomPreview_CastleFieldText();
+    if(!pointer)throw Error('No complete castle-field definition is available.');
+    const bytes=new Uint8Array(api.memory.buffer);let end=pointer;while(bytes[end])end++;
+    return new TextDecoder().decode(bytes.subarray(pointer,end));
+  }
+  function marshFieldDefinition() {
+    ensureRoom();const pointer=api.RoomPreview_MarshFieldText();
+    if(!pointer)throw Error('No complete marsh-field definition is available.');
+    const bytes=new Uint8Array(api.memory.buffer);let end=pointer;while(bytes[end])end++;
+    return new TextDecoder().decode(bytes.subarray(pointer,end));
+  }
+  function moonFieldDefinition() {
+    ensureRoom();const pointer=api.RoomPreview_MoonFieldText();
+    if(!pointer)throw Error('No complete moon-field definition is available.');
+    const bytes=new Uint8Array(api.memory.buffer);let end=pointer;while(bytes[end])end++;
+    return new TextDecoder().decode(bytes.subarray(pointer,end));
+  }
+  function waterFieldDefinition() {
+    ensureRoom();const pointer=api.RoomPreview_WaterFieldText();
+    if(!pointer)throw Error('No complete water-field definition is available.');
+    const bytes=new Uint8Array(api.memory.buffer);let end=pointer;while(bytes[end])end++;
+    return new TextDecoder().decode(bytes.subarray(pointer,end));
+  }
+  function atmosphereFieldDefinition() {
+    ensureRoom();const pointer=api.RoomPreview_AtmosphereFieldText();
+    if(!pointer)throw Error('No complete atmosphere-field definition is available.');
+    const bytes=new Uint8Array(api.memory.buffer);let end=pointer;while(bytes[end])end++;
+    return new TextDecoder().decode(bytes.subarray(pointer,end));
+  }
+  function waterFieldMapScale() {
+    ensureRoom();return [api.RoomPreview_WaterFieldMapScale(0),api.RoomPreview_WaterFieldMapScale(1)];
+  }
+  function rayFieldDefinition() {
+    ensureRoom();
+    const pointer=api.RoomPreview_RayFieldText();
+    if(!pointer)throw Error('No complete ray-field definition is available.');
+    const bytes=new Uint8Array(api.memory.buffer);let end=pointer;
+    while(bytes[end])end++;
+    return new TextDecoder().decode(bytes.subarray(pointer,end));
+  }
+  function rayFieldMapScale() {
+    ensureRoom();
+    return [api.RoomPreview_RayFieldMapScale(0),api.RoomPreview_RayFieldMapScale(1)];
+  }
   initialize();
-  return {validateEffects,collisionGrid,draw:render,invalidate:()=>{configDirty=true;}};
+  return {syncSources,validateEffects,previewActorBinding,surfaceFieldDefinition,projectileFieldDefinition,arcFieldDefinition,glowFieldDefinition,castleFieldDefinition,marshFieldDefinition,atmosphereFieldDefinition,rayFieldDefinition,rayFieldMapScale,moonFieldDefinition,waterFieldDefinition,waterFieldMapScale,collisionGrid,draw:render,invalidate:()=>{configDirty=true;}};
 })();

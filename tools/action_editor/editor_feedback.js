@@ -157,7 +157,7 @@ function refreshEditorFeedback() {
   $('#selectionTools').hidden=mode!=='2d';
   $('#pixelSelectionBlackQuick').disabled=!selected||mode!=='2d';
   $('#copyTilesQuick').disabled=!selected||mode!=='2d';
-  const toolNames={select:'Select tiles',selectRect:'Select a rectangle',pan:'Pan',framing:'Adjust framing',floorMist:'Paint ground mist',floorErase:'Erase mist areas',effects:'Edit emitters',effectPlace:'Place emitter',
+  const toolNames={select:'Select tiles',selectRect:'Select a rectangle',pan:'Pan',framing:'Adjust framing',floorMist:'Paint ground mist',floorErase:'Erase mist areas',effects:'Edit emitters',effectPlace:'Place emitter',effectPaste:'Paste effects',
     cell:'Paint one tile',class:'Paint matching tile types',rect:'Paint a rectangle',stamp:'Stamp tiles'};
   $('#selectQuick').classList.toggle('on',brush==='select');
   $('#selectRectQuick').classList.toggle('on',brush==='selectRect');
@@ -165,7 +165,8 @@ function refreshEditorFeedback() {
   let hint;
   if(compareOriginal)hint='Showing original tiles. Editing returns to your edited preview.';
   else if(brush==='select'||brush==='selectRect')hint='Selection makes no edits. Click or drag; Shift-click selects a range. Actions apply immediately.';
-  else if(brush==='effects')hint='Click an emitter area; drag its body/centre to move or a corner to resize. Alt snaps to 16 px. Esc returns to tiles.';
+  else if(brush==='effects')hint='Ctrl/Cmd-click markers to select multiple effects; Shift-click resets a handle; Ctrl/Cmd-C copies. Click an emitter area; drag its body/centre to move, a corner to resize, or its round handle to turn directional light. Alt snaps to 16 px. Esc returns to tiles.';
+  else if(brush==='effectPaste')hint='Click to paste copied effects repeatedly. Relative spacing and settings are preserved. Esc finishes.';
   else if(brush==='effectPlace')hint='Click to place the selected emitter preset. Middle-drag pans; wheel zooms. Esc returns to tiles.';
   else if(brush==='floorMist')hint='Drag up to 512 × 512 pixels around supported floors. Cyan edges support mist; wheel zooms; middle-drag pans.';
   else if(brush==='floorErase')hint='Drag across authored ground-mist areas to remove them. Undo restores the complete areas.';
@@ -236,6 +237,7 @@ $('#compareOriginal').onclick=()=>{
 };
 cvs.addEventListener('dblclick',ev=>{
   if(mode!=='2d'||!['select','selectRect'].includes(brush))return;
+  if(EmitterMapTools.hit(ev))return;
   const [x,y]=toCell(ev);if(!displayedCell(room,bgIndex,L,x,y))return;
   selectOnlyTile(x,y);openPixelInspector();
 });

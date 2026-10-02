@@ -13,23 +13,7 @@
 #include "deterministic_hash.h"
 
 
-typedef struct ActionEffectGlowStyle {
-  float radius_x, radius_y;
-  float ring_scale[kActionEffectGlowRings];  /* fraction of the outer radius */
-  ArRenderColorF centre;
-  ArRenderColorF ring[kActionEffectGlowRings];
-  float flare;   /* outer-ring silhouette amplitude, fraction of radius */
-  float rise;    /* aura offset along (lift_x,lift_y), fraction of radius */
-  /* Unit vector for the ellipse's local +X. (1,0) leaves the body screen-
-   * aligned, which is right for a fire standing in place. A projectile must
-   * instead be oriented along its own heading, or its glow reads as a
-   * screen-axis blob stuck to a sprite that is plainly travelling diagonally. */
-  float axis_x, axis_y;
-  /* Unit vector the outer rings shift toward. (0,-1) is screen-up, i.e. hot
-   * gas rising; an aligned body instead trails backwards along its heading. */
-  float lift_x, lift_y;
-  unsigned seed; /* silhouette phase; distinct per flame so they churn apart */
-} ActionEffectGlowStyle;
+
 
 static const float kCircle32[kActionEffectGlowSegments][2] = {
   { 1.000000f, 0.000000f }, { 0.980785f, 0.195090f },
@@ -55,6 +39,11 @@ static const float kCircle32[kActionEffectGlowSegments][2] = {
  * index rebasing, or capacity coupling is required. Counts are committed to
  * the public batch only after the complete build succeeds, so any overflow
  * leaves a zero-count, fail-closed output. */
+typedef struct ActionSceneryShadow {
+  uint8_t *pixels;
+  float x, y, step;
+  bool valid;
+} ActionSceneryShadow;
 typedef struct ActionEffectGeometryWriter {
   ArRenderVertex2D *vertices;
   int32_t *indices;
@@ -62,7 +51,15 @@ typedef struct ActionEffectGeometryWriter {
   int index_count;
   int vertex_capacity;
   int index_capacity;
+  const ActionSceneryShadow *shadow;
 } ActionEffectGeometryWriter;
+bool ActionSceneryShadow_Prepare(ActionSceneryShadow *shadow, ActionSceneryShadowCache *cache,
+                                 const ActionMoonlightOcclusion *occlusion,
+                                 ActionEffectProjectPointFn project, ActionEffectClipBoundsFn clip,
+                                 void *context);
+void ActionSceneryShadow_Apply(ActionEffectGeometryWriter *writer, int begin,
+                               const ActionEffectInstance *effect, float x, float y, bool multiply,
+                               ActionEffectProjectPointFn project, void *context);
 
 typedef struct SceneParticleClock {
   uint32_t seed;
@@ -94,6 +91,8 @@ bool ProjectWithScale(const ActionEffectInstance *effect,
                              void *userdata, float local_x, float local_y,
                              ArRenderPointF *anchor,
                              float *scale_x, float *scale_y);
+bool AppendGlowAtTicks(ActionEffectGeometryWriter *, const ActionEffectInstance *,
+    const ActionEffectGlowStyle *, float, float, float, ActionEffectProjectPointFn, void *, unsigned);
 bool AppendGlow(ActionEffectGeometryWriter *writer,
                        const ActionEffectInstance *effect,
                        const ActionEffectGlowStyle *style, float strength,
@@ -148,67 +147,73 @@ bool AppendSceneSoftPatch(ActionEffectGeometryWriter *writer,
     const ActionEffectLocalRect *clip, float x, float y, float rx, float ry,
     ArRenderColorF color, float lean, ActionEffectProjectPointFn project_point, void *userdata);
 
-/* ---- defined in action_forest_effect_render.c ---- */
+/* ---- defined in action_ray_field_render.c ---- */
 bool AppendForestRays(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    bool foreground, ActionEffectProjectPointFn project_point,
-    ActionEffectClipBoundsFn clip_bounds, void *userdata);
+                      const ActionRayField *field, const ActionNativeMembers *members, bool foreground,
+                      ActionEffectProjectPointFn project_point,
+                      ActionEffectClipBoundsFn clip_bounds, void *userdata);
 bool AppendForestMotes(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    ActionEffectProjectPointFn project_point, void *userdata);
+                       const ActionRayField *field, const ActionNativeMembers *members, ActionEffectProjectPointFn project_point,
+                       void *userdata);
 bool AppendForestLeaves(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    ActionEffectProjectPointFn project_point, void *userdata);
+                        const ActionRayField *field, const ActionNativeMembers *members,
+                        ActionEffectProjectPointFn project_point, void *userdata);
 
 /* ---- defined in action_castle_effect_render.c ---- */
-bool AppendCastleEnvironment(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    bool lighting, bool particles, ActionEffectProjectPointFn project_point,
-    ActionEffectClipBoundsFn clip_bounds, void *userdata);
+bool AppendCastleEnvironment(const ActionCastleField *f,ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+                             const ActionNativeMembers *members, bool lighting, bool particles,
+                             ActionEffectProjectPointFn project_point,
+                             ActionEffectClipBoundsFn clip_bounds, void *userdata);
 
 /* ---- defined in action_bloodpool_effect_render.c ---- */
 typedef struct BloodpoolMoonProjection {
   ArRenderPointF origin, axis, vertical;
   float orientation;
+  const ActionMoonField *field;
 } BloodpoolMoonProjection;
-bool BloodpoolMoonProjection_Init(BloodpoolMoonProjection *projection,
+bool BloodpoolMoonProjection_Init(const ActionMoonField *f, BloodpoolMoonProjection *projection,
     const ActionEffectInstance *moon, ActionEffectProjectPointFn project_point, void *userdata);
 float BloodpoolMoonProjection_Light(
     const BloodpoolMoonProjection *projection, ArRenderPointF point);
-bool AppendBloodpoolTimberMoonlight(ActionEffectGeometryWriter *writer,
+bool AppendBloodpoolTimberMoonlight(const ActionMoonField *f, const ActionMarshField *m, ActionEffectGeometryWriter *writer,
     const ActionEffectInstance *effect, const ActionEffectInstance *moon,
     const ActionBloodpoolDetails *details, const ActionMoonlightOcclusion *occlusion,
     ActionMoonlightRenderScratch *scratch, ActionEffectProjectPointFn project_point,
     ActionEffectClipBoundsFn clip_bounds, void *userdata);
-bool AppendBloodpoolEnvironment(
+bool AppendBloodpoolEnvironment(const ActionMoonField *f, const ActionMarshField *m,
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
     ActionEffectProjectPointFn project_point, ActionEffectClipBoundsFn clip_bounds, void *userdata);
-bool AppendBloodpoolSkyRays(ActionEffectGeometryWriter *writer,
+bool AppendBloodpoolSkyRays(const ActionMoonField *f,float gain,ActionEffectGeometryWriter *writer,
     const ActionEffectInstance *effect, ActionEffectProjectPointFn project_point,
     ActionEffectClipBoundsFn clip_bounds, void *userdata);
-bool AppendBloodpoolMoonlight(
+bool AppendBloodpoolMoonlight(const ActionMoonField *f,
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
     const ActionMoonlightOcclusion *occlusion, ActionMoonlightRenderScratch *scratch,
     ActionEffectProjectPointFn project_point,
     ActionEffectClipBoundsFn clip_bounds, void *userdata);
-bool AppendBloodpoolWaterMoonlight(
+bool AppendBloodpoolWaterMoonlight(const ActionMoonField *f, const ActionMarshField *m,
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *water,
     const ActionEffectInstance *moon, const ActionMoonlightOcclusion *occlusion,
     ActionMoonlightRenderScratch *scratch, ActionEffectProjectPointFn project_point,
     ActionEffectClipBoundsFn clip_bounds, void *userdata);
-bool AppendBloodpoolWaveCaps(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+bool AppendBloodpoolWaveCaps(const ActionMoonField *f, ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
     const ActionBloodpoolDetails *details, ActionEffectProjectPointFn project_point,
     ActionEffectClipBoundsFn clip_bounds, void *userdata);
 
 /* ---- defined in action_bloodpool_detail_render.c ---- */
-float BloodpoolCloudTransmission(uint16_t ticks);
-bool AppendBloodpoolCloud(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+float BloodpoolCloudTransmission(const ActionMoonField *f, uint16_t ticks);
+bool AppendBloodpoolCloud(const ActionMoonField *f, ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
     ActionEffectProjectPointFn project_point, ActionEffectClipBoundsFn clip_bounds, void *userdata);
-bool AppendBloodpoolDetailParticles(ActionEffectGeometryWriter *writer,
+bool AppendBloodpoolDetailParticles(const ActionMoonField *f, const ActionMarshField *m, ActionEffectGeometryWriter *writer,
     const ActionEffectInstance *effect, const ActionEffectInstance *moon,
     const ActionBloodpoolDetails *details, ActionEffectProjectPointFn project_point,
     ActionEffectClipBoundsFn clip_bounds, void *userdata);
 
 /* ---- defined in action_cave_effect_render.c ---- */
-bool AppendCaveEnvironment(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    ActionEffectProjectPointFn project_point, ActionEffectClipBoundsFn clip_bounds, void *userdata);
+bool AppendCaveEnvironment(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+                           const ActionWaterField *definition, const ActionAtmosphereField *atmosphere, const ActionNativeMembers *members,
+                           ActionEffectProjectPointFn project_point,
+                           ActionEffectClipBoundsFn clip_bounds, void *userdata);
 
 /* ---- defined in action_scene_lightning_render.c ---- */
 bool AppendSwordBeamParticles(ActionEffectGeometryWriter *writer,
@@ -232,16 +237,16 @@ bool AppendMarahnaBossLightningLighting(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
     ActionEffectProjectPointFn project_point, void *userdata);
 bool AppendLightningTrapParticles(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect, const ActionArcField *field,
     ActionEffectProjectPointFn project_point, void *userdata);
 bool AppendLightningTrapLighting(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect, const ActionArcField *field,
     ActionEffectProjectPointFn project_point, void *userdata);
 bool AppendBossLightningParticles(ActionEffectGeometryWriter *writer,
-                                  const ActionEffectInstance *effect,
+                                  const ActionEffectInstance *effect, const ActionArcField *field,
                                   ActionEffectProjectPointFn project_point, void *userdata);
 bool AppendBossLightningLighting(ActionEffectGeometryWriter *writer,
-                                 const ActionEffectInstance *effect,
+                                 const ActionEffectInstance *effect, const ActionArcField *field,
                                  ActionEffectProjectPointFn project_point, void *userdata);
 
 #endif  /* AR_ACTION_EFFECT_RENDER_INTERNAL_H */

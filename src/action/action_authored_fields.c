@@ -66,6 +66,55 @@ static bool ParticleArea(ActionEffectGeometryWriter *w,const ActionEffectInstanc
   }
   return true;
 }
+/* These are geometry-only light treatments. Both use the same clipping,
+ * blend pass and receiver sampling as the other authored lights. */
+static bool Halo(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
+  const float softness=e->field_style.softness;
+  if(!isfinite(softness)||softness<0||softness>1)return false;
+  ActionEffectInstance mesh=*e;mesh.flags|=kActionEffectFlag_ClippedMesh;
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const float rx=(r->x1-r->x0)*.5f,ry=(r->y1-r->y0)*.5f;
+  /* A dark centre with a feathered inner edge, a colored rim and a diffuse
+   * outer corona. Increasing softness widens the ring, never fills the disc. */
+  const float radius[]={.86f-.30f*softness,.91f-.16f*softness,.94f,1};
+  const float alpha[]={0,.22f,.08f,0};
+  ArRenderVertex2D vertices[128];int mapped[128];
+  for(unsigned ring=0;ring<4;++ring)for(unsigned i=0;i<32;++i) {
+    const unsigned n=ring*32+i;
+    vertices[n]=(ArRenderVertex2D){.position={kCircle32[i][0]*rx*radius[ring],kCircle32[i][1]*ry*radius[ring]},
+      .color=MixColor(FieldColor(e->tuning.color),FieldColor(e->particle_style.color_end),ring/3.f)};
+    vertices[n].color.a=fminf(1,alpha[ring]*e->tuning.intensity);mapped[n]=-1;
+  }
+  for(unsigned ring=0;ring<3;++ring)for(unsigned i=0;i<32;++i){
+    const int a=ring*32+i,b=ring*32+(i+1)%32,triangles[]={a,b,a+32,b,b+32,a+32};
+    for(unsigned t=0;t<6;t+=3)if(!AppendSceneClippedTriangle(w,&mesh,vertices,mapped,triangles+t,clip,project,context))return false;
+  }
+  return true;
+}
+static bool LightGradient(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
+    const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
+  const ActionEffectLocalRect *r=&e->geometry.data.rect;
+  const float softness=e->field_style.softness,angle=e->field_style.angle;
+  if(!isfinite(softness)||softness<0||softness>1||!isfinite(angle)||fabsf(angle)>180)return false;
+  ActionEffectInstance mesh=*e;mesh.flags|=kActionEffectFlag_ClippedMesh;
+  const float dx=sinf(angle*.0174532925f),dy=cosf(angle*.0174532925f);
+  const float width=r->x1-r->x0,height=r->y1-r->y0,span=fabsf(dx)*width+fabsf(dy)*height;
+  ArRenderVertex2D vertices[25];int mapped[25];
+  for(unsigned row=0;row<5;++row)for(unsigned col=0;col<5;++col){
+    const unsigned n=row*5+col;const float x=r->x0+width*col*.25f,y=r->y0+height*row*.25f;
+    const float t=fmaxf(0,fminf(1,.5f+(x*dx+y*dy)/span));
+    const float edge=fminf(fminf(col,4-col),fminf(row,4-row))*.25f;
+    const float fade=softness>0?fminf(1,edge/(softness*.5f)):1;
+    vertices[n]=(ArRenderVertex2D){.position={x,y},.color=MixColor(FieldColor(e->tuning.color),FieldColor(e->particle_style.color_end),t)};
+    vertices[n].color.a=fminf(1,e->tuning.intensity*.18f)*fade;mapped[n]=-1;
+  }
+  for(unsigned row=0;row<4;++row)for(unsigned col=0;col<4;++col){
+    const int a=row*5+col,b=a+5,triangles[]={a,a+1,b,a+1,b+1,b};
+    for(unsigned t=0;t<6;t+=3)if(!AppendSceneClippedTriangle(w,&mesh,vertices,mapped,triangles+t,clip,project,context))return false;
+  }
+  return true;
+}
 static bool LightFan(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,
     const ActionEffectLocalRect *clip,ActionEffectProjectPointFn project,void *context) {
   const ActionEffectFieldStyle *s=&e->field_style;
@@ -208,9 +257,17 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
       const int indices[]={0,1,2,0,2,3};for(unsigned i=0;i<6;++i)w->indices[w->index_count++]=base+indices[i];
       return true;
     }
+    case kActionEffect_AuthoredHalo: return !lighting || Halo(w,e,&visible,project,context);
+    case kActionEffect_AuthoredGradient: return !lighting || LightGradient(w,e,&visible,project,context);
     case kActionEffect_AuthoredContour: return !particles || WetContour(w,e,&visible,project,context);
     case kActionEffect_AuthoredParticleArea: return !particles || ParticleArea(w,e,&visible,project,context);
-    case kActionEffect_AuthoredFan: return !lighting || LightFan(w,e,&visible,project,context);
+    case kActionEffect_AuthoredFan: {
+      if (!lighting) return true;
+      const int first = w->vertex_count;
+      if (!LightFan(w, e, &visible, project, context)) return false;
+      ActionSceneryShadow_Apply(w, first, e, 0, r->y0, false, project, context);
+      return true;
+    }
     case kActionEffect_AuthoredWater: return !particles || WaterField(w,e,&visible,project,context);
     case kActionEffect_AuthoredDrips: case kActionEffect_AuthoredSpray:
       return !particles || FallingWater(w,e,&visible,project,context);

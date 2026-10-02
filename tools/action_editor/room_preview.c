@@ -1,4 +1,5 @@
 #include "action/action_floor_support.h"
+#include "action/action_effect_members.h"
 #include "action/action_effect_receivers.h"
 #include "room_scene.h"
 #include "diorama/diorama_snapshot.h"
@@ -53,6 +54,10 @@ int RoomPreview_SetReceivers(int enabled,int player_x,int player_y,int enemy_x,i
 }
 unsigned RoomPreview_EventCount(void){return ActionEffectPreview_Count();}
 unsigned RoomPreview_EventKind(unsigned index){return ActionEffectPreview_Kind(index);}
+int RoomPreview_PreviewBinding(unsigned enabled,unsigned source,int x,int y,unsigned start) {
+  if(enabled>1||!EditorRoomScene_PreviewBinding(s_room,enabled!=0,source,x,y,start))return 0;
+  s_cached=false;return 1;
+}
 int RoomPreview_SetEvent(unsigned index,int x,int y,int vx,int vy,unsigned start,unsigned duration,unsigned seed) {
   if(!s_room||index>ActionEffectPreview_Count()||x<-2048||x>16384||y<-2048||y>16384||
       vx<-16||vx>16||vy<-16||vy>16||start>65535||duration<1||duration>4096)return 0;
@@ -222,15 +227,156 @@ unsigned RoomPreview_SourceValue(unsigned index, unsigned field) {
   const ActionEffectInstance *e=actor?&frame->effects[index-frame->decoration_count-frame->authored_count]:
       authored?&frame->authored[index-frame->decoration_count]:&frame->decorations[index];
   switch (field) {
-    case 0: return actor||e->kind==kActionEffect_LandingDust?0:e->generation;
+    case 0: return authored ? frame->authored_sources[index-frame->decoration_count] :
+        actor||e->kind==kActionEffect_LandingDust ? 0 : e->generation;
     case 1: return e->kind;
     case 2: return (uint32_t)(int32_t)e->world_x;
     case 3: return (uint32_t)(int32_t)e->world_y;
+    case 8:
+      return !actor && !authored && ActionEffectMembers_MovableSource(e->kind);
+    case 9:
+      return (unsigned)fmaxf(4, e->geometry.data.rect.x1 - e->geometry.data.rect.x0);
+    case 10:
+      return (unsigned)fmaxf(4, e->geometry.data.rect.y1 - e->geometry.data.rect.y0);
     case 5: return authored;
     case 6: return authored ? frame->authored_floor[index-frame->decoration_count].count : 0;
     case 7: return actor||e->kind==kActionEffect_LandingDust;
     case 4: return e->flags & kActionEffectFlag_Visible;
     default: return 0;
+  }
+}
+/* Catalogue coordinates are independent of the camera and recipe overrides. */
+unsigned RoomPreview_MemberCount(unsigned index) {
+  if (!s_room) return 0;
+  const ActionSceneEffectFrame *f = EditorRoomScene_Effects(s_room);
+  if (index >= f->decoration_count) return 0;
+  const ActionEnvironmentScene *s = EditorRoomScene_Environment(s_room);
+  return ActionEffectMembers_Count(f->decorations[index].kind, s->group, s->room);
+}
+unsigned RoomPreview_CatalogueCount(void) { return EditorRoomScene_DefaultSourceCount(s_room); }
+unsigned RoomPreview_CatalogueGuideCount(unsigned index) {
+  return EditorRoomScene_DefaultGuideCount(s_room, index);
+}
+double RoomPreview_CatalogueGuideValue(unsigned index, unsigned guide, unsigned field) {
+  ArRenderRectF r;
+  if (!EditorRoomScene_DefaultGuide(s_room, index, guide, &r)) return 0;
+  switch (field) {
+  case 0: return r.x + r.w * .5f;
+  case 1: return r.y + r.h * .5f;
+  case 2: return r.w;
+  case 3: return r.h;
+  default: return 0;
+  }
+}
+double RoomPreview_CatalogueValue(unsigned index, unsigned field) {
+  const EditorRoomEffectSource *s = EditorRoomScene_DefaultSource(s_room, index);
+  if (!s) return 0;
+  const ActionEffectInstance *e = &s->effect;
+  const ActionEnvironmentScene *scene = EditorRoomScene_Environment(s_room);
+  switch (field) {
+  case 0:
+    return e->generation;
+  case 1:
+    return e->kind;
+  case 2:
+    return e->world_x;
+  case 3:
+    return e->world_y;
+  case 4:
+    return fmaxf(4, e->geometry.data.rect.x1 - e->geometry.data.rect.x0);
+  case 5:
+    return fmaxf(4, e->geometry.data.rect.y1 - e->geometry.data.rect.y0);
+  case 6:
+    return ActionEffectMembers_MovableSource(e->kind);
+  case 7:
+    return ActionEffectMembers_Count(e->kind, scene->group, scene->room);
+  case 8:
+    return s->map_scale_x;
+  case 9:
+    return s->map_scale_y;
+  case 10:
+    return e->projection_plane==kActionEffectProjectionPlane_Bg2 ?
+        (e->flags&kActionEffectFlag_StaticAnchor ? 1 : 2) : 0;
+  default:
+    return 0;
+  }
+}
+/* Static editor footprints use the active recipe, before motion/occlusion.
+ * Keep these in layer coordinates so nonuniform parallax does not change the
+ * meaning of an angle. No extra geometry is generated in the game renderer. */
+static double MemberGuideValue(unsigned kind, unsigned member, unsigned field) {
+  if (kind == kActionEffect_ForestCanopyLight || kind == kActionEffect_ForestForwardLight) {
+    const ActionRayField *f = EditorRoomScene_RayField(s_room);
+    if (!f || member >= f->ray_count) return 0;
+    const ActionRayOpening *r = &f->rays[member];
+    const float source_y = r->fan ? f->fans[r->fan].y : 0;
+    switch (field) {
+    case 6: return 1; /* A sheared, widening ray. */
+    case 7: return r->fan ? (f->fans[r->fan].x-r->x)/-source_y : f->values[kActionRay_IsolatedSlope];
+    case 8: return f->values[kActionRay_WidthBase];
+    case 9: return r->fan ? f->values[kActionRay_WidthBase]*(544-source_y)/-source_y :
+      f->values[kActionRay_WidthBase]+f->values[kActionRay_WidthGrowth]*fminf(544,f->values[kActionRay_WidthGrowthLimit]);
+    }
+  } else if (kind == kActionEffect_CastleLight) {
+    const ActionCastleField *f = EditorRoomScene_CastleField(s_room);
+    if (!f || member >= (unsigned)f->SourceCount[0]) return 0;
+    const ActionCastleSource *s = &f->sources[member];
+    if (s->kind == kActionCastleSource_Torch) return 0;
+    switch (field) {
+    case 6: return 2; /* Window fan, rooted at its sill. */
+    case 7: return s->length ? (double)s->lean/s->length : 0;
+    case 8: return 1;
+    case 9: return s->width ? (double)(s->width+s->spread)/s->width : 1;
+    case 10: return s->kind == kActionCastleSource_Window ? s->sill-s->y : 0;
+    }
+  }
+  return 0;
+}
+double RoomPreview_CatalogueMemberValue(unsigned index, unsigned member, unsigned field) {
+  const EditorRoomEffectSource *s = EditorRoomScene_DefaultSource(s_room, index);
+  const ActionEnvironmentScene *scene = EditorRoomScene_Environment(s_room);
+  ActionNativeMemberSource source;
+  if (!s ||
+      !ActionEffectMembers_Source(s->effect.kind, scene->group, scene->room, member + 1, &source))
+    return 0;
+  switch (field) {
+  case 0:
+    return member + 1;
+  case 1:
+    return source.x;
+  case 2:
+    return source.y;
+  case 3:
+    return source.width;
+  case 4:
+    return source.height;
+  case 5:
+    return ActionEffectMembers_Angled(s->effect.kind, scene->group, scene->room, member + 1);
+  default:
+    return MemberGuideValue(s->effect.kind, member, field);
+  }
+}
+double RoomPreview_MemberValue(unsigned index, unsigned member, unsigned field) {
+  if (member >= RoomPreview_MemberCount(index)) return 0;
+  const ActionEnvironmentScene *s = EditorRoomScene_Environment(s_room);
+  const ActionEffectInstance *e = &EditorRoomScene_Effects(s_room)->decorations[index];
+  ActionNativeMemberSource source;
+  if (!ActionEffectMembers_Source(e->kind, s->group, s->room, member + 1, &source)) return 0;
+  switch (field) {
+  case 0:
+    return member + 1;
+  case 1:
+    return source.x;
+  case 2:
+    return source.y;
+  case 3:
+    return source.width;
+  case 4:
+    return source.height;
+  case 5:
+    return ActionEffectMembers_Angled(e->kind, s->group, s->room, member + 1);
+  default:
+    return MemberGuideValue(e->kind, member, field);
   }
 }
 /* Row-major overlay bytes in the existing exchange buffer. This API uses the
@@ -246,6 +392,53 @@ unsigned RoomPreview_CollisionGrid(void) {
   return w*h;
 }
 const char *RoomPreview_KindName(unsigned kind) { return ActionEffectRecipes_KindName(kind); }
+const char *RoomPreview_RayFieldText(void) {
+  static char text[16384];
+  const ActionRayField *field=EditorRoomScene_RayField(s_room);
+  return field&&ActionRayField_Write(field,text,sizeof(text))?text:NULL;
+}
+const char *RoomPreview_SurfaceFieldText(unsigned kind){
+  static char text[16384];const ActionSurfaceField *field=EditorRoomScene_SurfaceField(s_room,kind);
+  return field&&ActionSurfaceField_Write(field,text,sizeof(text))?text:NULL;
+}
+const char *RoomPreview_ProjectileFieldText(unsigned kind){
+  static char text[16384];const ActionProjectileField *field=EditorRoomScene_ProjectileField(s_room,kind);
+  return field&&ActionProjectileField_Write(field,text,sizeof(text))?text:NULL;
+}
+const char *RoomPreview_ArcFieldText(unsigned kind){
+  static char text[16384];const ActionArcField *field=EditorRoomScene_ArcField(s_room,kind);
+  return field&&ActionArcField_Write(field,text,sizeof(text))?text:NULL;
+}
+const char *RoomPreview_GlowFieldText(void) {
+  static char text[16384];const ActionGlowField *field=EditorRoomScene_GlowField(s_room);
+  return field&&ActionGlowField_Write(field,text,sizeof(text))?text:NULL;
+}
+const char *RoomPreview_CastleFieldText(void) {
+  static char text[16384];const ActionCastleField *field=EditorRoomScene_CastleField(s_room);
+  return field&&ActionCastleField_Write(field,text,sizeof(text))?text:NULL;
+}
+const char *RoomPreview_MarshFieldText(void) {
+  static char text[16384];const ActionMarshField *field=EditorRoomScene_MarshField(s_room);
+  return field&&ActionMarshField_Write(field,text,sizeof(text))?text:NULL;
+}
+const char *RoomPreview_MoonFieldText(void) {
+  static char text[16384];const ActionMoonField *field=EditorRoomScene_MoonField(s_room);
+  return field&&ActionMoonField_Write(field,text,sizeof(text))?text:NULL;
+}
+const char *RoomPreview_WaterFieldText(void) {
+  static char text[16384];const ActionWaterField *field=EditorRoomScene_WaterField(s_room);
+  return field&&ActionWaterField_Write(field,text,sizeof(text))?text:NULL;
+}
+const char *RoomPreview_AtmosphereFieldText(void) {
+  static char text[16384];const ActionAtmosphereField *field=EditorRoomScene_AtmosphereField(s_room);
+  return field&&ActionAtmosphereField_Write(field,text,sizeof(text))?text:NULL;
+}
+double RoomPreview_WaterFieldMapScale(unsigned axis) {
+  return EditorRoomScene_WaterFieldMapScale(s_room,axis);
+}
+double RoomPreview_RayFieldMapScale(unsigned axis) {
+  return EditorRoomScene_RayFieldMapScale(s_room, axis);
+}
 unsigned RoomPreview_ReachSupported(unsigned kind) { return ActionEffectRecipes_ReachSupported(kind); }
 static bool Upload(void) {
   ArRenderDevice *device = DioramaPreview_Device();
@@ -354,7 +547,7 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
       environment->camera_x[0],environment->camera_y[0],environment->camera_x[1],environment->camera_y[1],s_effects_enabled,&s_receiver))return 0;
   if (s_effects_enabled || s_probes) {
     scene.bg1_dimming = s_effects_enabled ? ActionEnvironment_Bg1Dimming(effects.frame, environment->group, environment->room) : 0;
-    scene.bg1_dimming_ramp = ActionEnvironment_Bg1DimmingRamp(environment->group, environment->room);
+    scene.bg1_dimming_ramp = ActionEnvironment_Bg1DimmingRamp(effects.frame,environment->group, environment->room);
     scene.effect_obj_priority_mask = ActionEffectProjection_RequiredObjPriorityMask(NULL, effects.frame) | (s_probes?1u<<2:0);
     scene.effect_bg_plane_mask = ActionEffectProjection_RequiredBgPlaneMask(NULL, effects.frame);
     scene.plane_effect = DrawPlaneEffects; scene.plane_effect_userdata = &effects;

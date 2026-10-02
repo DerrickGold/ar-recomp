@@ -10,8 +10,7 @@
 
 #include "action_effects.h"
 #include "render/render_types.h"
-
-typedef struct DioramaProjection DioramaProjection;
+#include "diorama/diorama.h"
 
 /* Immutable presentation inputs needed to map an action-world effect point.
  * Keeping this smaller than FrameSlot makes the camera/widescreen/Diorama
@@ -28,6 +27,20 @@ typedef struct ActionEffectProjectionContext {
   ArRenderRectI viewport;
   const DioramaProjection *diorama_projection;
 } ActionEffectProjectionContext;
+
+/* Owned value snapshot for optional retained CPU work. Never key a cache by a
+ * FrameSlot/projection pointer: those objects are reused as the camera moves.
+ * Zero-initialize storage. Custom projection callbacks must bypass this cache. */
+typedef struct ActionEffectProjectionSnapshot {
+  ActionEffectProjectionContext context;
+  DioramaProjection diorama;
+  bool valid, has_diorama;
+} ActionEffectProjectionSnapshot;
+bool ActionEffectProjection_Matches(const ActionEffectProjectionSnapshot *,
+                                   const ActionEffectProjectionContext *);
+void ActionEffectProjection_Remember(ActionEffectProjectionSnapshot *,
+                                    const ActionEffectProjectionContext *);
+
 
 /* Returns the authentic OBJ priority bands needed by current world-overlay
  * effects. Diorama uses this current-frame publication to retain an actor

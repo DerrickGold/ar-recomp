@@ -3,10 +3,16 @@
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "diorama/diorama_snapshot.h"
 #include "platform/sdl/render_sdl_internal.h"
 
 int main(int argc, char **argv) {
+  const bool benchmark = argc > 1 && !strcmp(argv[1], "--benchmark");
+  if (benchmark) {
+    --argc;
+    ++argv;
+  }
   if (argc != 3 && argc != 5 && argc != 9) {
     fprintf(stderr, "usage: %s scene.ardi output.bmp "
         "[width height [distance-scale yaw pitch skybox]]\n", argv[0]);
@@ -51,6 +57,29 @@ int main(int argc, char **argv) {
   DioramaProjection projection;
   if (ok) ok=PresentationOutcome_IsUsable(Diorama_Composite(
       &device,&scene.capture,&scene.view,&scene.scene,&projection));
+  if (ok && benchmark) {
+    ArSdlRenderBackend *backend = device.context;
+    enum { warmup = 16, iterations = 300 };
+    Uint64 begin = 0, cpu_ticks = 0;
+    for (unsigned i = 0; i < warmup + iterations && ok; ++i) {
+      if (i == warmup) begin = SDL_GetPerformanceCounter();
+      const Uint64 start = SDL_GetPerformanceCounter();
+      ok = ArRenderDevice_Clear(&device, (ArRenderColorF){0, 0, 0, 1}) &&
+           PresentationOutcome_IsUsable(Diorama_Composite(&device, &scene.capture, &scene.view,
+                                                          &scene.scene, &projection)) &&
+           ArSdlRenderBackend_SubmitPending(&device);
+      const Uint64 submitted = SDL_GetPerformanceCounter();
+      if (i >= warmup) cpu_ticks += submitted - start;
+      if (ok) ok = SDL_WaitForGPUIdle(backend->gpu_device);
+    }
+    const double frequency = (double)SDL_GetPerformanceFrequency();
+    if (ok)
+      printf("Native compositor %s: %dx%d, CPU submit %.3f ms, GPU-complete frame %.3f ms (%u warm "
+             "frames; static capture, no readback or swapchain present).\n",
+             SDL_GetGPUDeviceDriver(backend->gpu_device), width, height,
+             cpu_ticks * 1000 / frequency / iterations,
+             (SDL_GetPerformanceCounter() - begin) * 1000 / frequency / iterations, iterations);
+  }
   SDL_Surface *pixels=ok ? SDL_RenderReadPixels(ArSdlRenderBackend_Renderer(&device),NULL) : NULL;
   ok=pixels && SDL_SaveBMP(pixels,argv[2]);
   if (!ok) fprintf(stderr,"replay failed: %s\n",SDL_GetError());

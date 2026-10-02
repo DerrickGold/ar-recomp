@@ -1,17 +1,6 @@
 #include "action_environment_scene.h"
 #include "action_environment_capture_internal.h"
 
-static uint16_t Word(const uint8_t *p, bool big) {
-  return big ? (uint16_t)((p[0] << 8) | p[1]) :
-      (uint16_t)(p[0] | (p[1] << 8));
-}
-
-uint16_t ActionEnvironmentScene_Word(const ActionEnvironmentScene *s,
-    unsigned bg, unsigned metatile, unsigned quadrant) {
-  if (!s || bg > 1 || metatile > 255 || quadrant > 3 || !s->metatiles[bg]) return 0;
-  return Word(s->metatiles[bg] + metatile * 8 + quadrant * 2, s->big_endian);
-}
-
 bool ActionEnvironmentScene_FromWram(ActionEnvironmentScene *out,
     const uint8_t *ram, size_t size, uint16_t clock) {
   if (!out || !ram || size < 0x06a0) return false;
@@ -48,7 +37,7 @@ bool ActionEnvironmentScene_FromWram(ActionEnvironmentScene *out,
 void ActionEnvironmentScene_Capture(const ActionEnvironmentScene *s,
     ActionSceneEffectFrame *frame) {
   if (!s || !frame || frame->decoration_overflow) return;
-  CaptureFillmoreForestScene(s,frame);
+  if(!s->suppress_default_ray_field)CaptureFillmoreForestScene(s,frame);
   CaptureFillmoreCaveScene(s,frame);
   CaptureBloodpoolMarshScene(s,frame);
   CaptureBloodpoolCastleScene(s,frame);

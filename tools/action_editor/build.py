@@ -51,6 +51,8 @@ def build_document(rooms_path: Path, layers_path: Path, settings_path=None, wasm
     layers = layers_path.read_text() if layers_path.exists() else ""
     effects_path = layers_path.parent / 'action-effects.ini'
     effects = effects_path.read_text() if effects_path.exists() else '[effects]\nversion=1\n'
+    actors = json.loads((SOURCES.parent.parent / "assets/effects/actor-families.json").read_text())
+    presets = json.loads((SOURCES.parent.parent / 'assets/effects/stage-presets.json').read_text())
     preview = preview_settings(settings_path or layers_path.parent / "settings.ini")
     wasm = base64.b64encode(wasm_path.read_bytes()).decode('ascii') if wasm_path else None
     shared = base64.b64encode(compositor_wasm.read_bytes()).decode('ascii') if compositor_wasm else None
@@ -72,6 +74,7 @@ def build_document(rooms_path: Path, layers_path: Path, settings_path=None, wasm
             + "<script>window.__DIORAMA_LAYERS__=" + script_json(layers) + ";"
             + "window.__DIORAMA_LAYERS_NAME__=" + script_json(layers_path.name) + ";"
             + "window.__ACTION_EFFECTS__=" + script_json(effects) + ";"
+            + "window.__ACTION_ACTORS__=" + script_json(actors) + ";window.__ACTION_EFFECT_PRESETS__=" + script_json(presets) + ";"
             + "window.__ACTION_VIEW__=" + script_json(preview) + ";"
             + "window.__ACTION_PREVIEW_WASM__=" + script_json(wasm) + ";"
             + "window.__ROOM_PREVIEW_WASM__=" + script_json(shared) + ";"

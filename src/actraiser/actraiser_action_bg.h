@@ -19,6 +19,8 @@
 uint8_t ActRaiserActionBg_TerrainProfile(void);
 
 struct DioramaRoomOverride;
+struct ActionEnvironmentScene;
+bool ActRaiserActionBg_BindEnvironmentScenery(struct ActionEnvironmentScene *scene);
 struct ActionRoomScene;
 struct ActionRoomSceneFrameState;
 

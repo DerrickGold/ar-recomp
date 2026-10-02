@@ -34,22 +34,32 @@ bool ActionEffectReceivers_Prepare(const ActionSceneEffectFrame *frame,
   if(!frame||!out||frame->effect_count>kActionSceneEffectMaxInstances||frame->authored_count>kActionAuthoredMaxInstances||frame->decoration_count>kActionSceneDecorationMaxInstances)return false;
   out->frame=frame;out->dim_receivers=0;
   out->dimming=ActionEnvironment_NativeBg1Dimming(frame,group,room);
-  out->ramp=ActionEnvironment_Bg1DimmingRamp(group,room);
+  out->ramp=ActionEnvironment_Bg1DimmingRamp(frame,group,room);
   ReceiverProjection projection={camera_x,camera_y,bg2_x,bg2_y};
+  unsigned light_receivers=0;
+  for(unsigned list=0;list<3;++list){
+    const ActionEffectInstance *entries=list==2?frame->effects:list?frame->authored:frame->decorations;
+    const unsigned count=list==2?frame->effect_count:list?frame->authored_count:frame->decoration_count;
+    for(unsigned i=0;i<count;++i){const ActionEffectInstance *e=&entries[i];
+      if(!(e->flags&kActionEffectFlag_Visible))continue;
+      if(e->tuning.dim_receivers_set&&(e->kind==kActionEffect_CaveAmbientLight||e->kind==kActionEffect_CastleLight))out->dim_receivers|=e->tuning.dim_receivers;
+      if(ActionEffectReceivers_IsLight(e->kind)&&e->tuning.light_receivers_set)light_receivers|=e->tuning.light_receivers;
+    }
+  }
   for(unsigned role=0;role<2;++role) {
     ActionSceneEffectRenderBatch *batch=role?&out->enemies:&out->player;
     batch->vertex_count=batch->index_count=0;out->light_start[role]=0;
     const unsigned receiver=role?kActionReceiver_Enemies:kActionReceiver_Player;
-    /* Small value copy only; geometry storage stays retained and independent
-     * of native actor pools. Sources are sampled once per produced frame. */
+    if(!lighting_enabled||!(light_receivers&receiver))continue;
+    /* Frame profiles are immutable; this bounded copy filters instances only
+     * when this role actually receives authored light. Default scenes skip
+     * both the copy and all receiver geometry work. */
     ActionSceneEffectFrame selected=*frame;
     for(unsigned list=0;list<3;++list) {
       ActionEffectInstance *entries=list==2?selected.effects:list?selected.authored:selected.decorations;
       const unsigned count=list==2?selected.effect_count:list?selected.authored_count:selected.decoration_count;
       for(unsigned i=0;i<count;++i) {
         ActionEffectInstance *e=&entries[i];
-        if(e->tuning.dim_receivers_set&&(e->kind==kActionEffect_CaveAmbientLight||e->kind==kActionEffect_CastleLight))
-          out->dim_receivers|=e->tuning.dim_receivers;
         if(!ActionEffectReceivers_IsLight(e->kind)||!e->tuning.light_receivers_set||!(e->tuning.light_receivers&receiver))
           e->flags&=(uint8_t)~kActionEffectFlag_Visible;
         else {e->tuning.light_receivers=7;}

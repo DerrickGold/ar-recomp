@@ -24,6 +24,7 @@ def check(html, wasm, sanitize):
                    'src/action/action_bg_world.c', 'src/action/action_bg_plan.c',
                    'src/diorama/diorama_capture_blend.c', 'src/diorama/diorama_layer_order.c',
                    'src/diorama/diorama_projection.c', 'src/diorama/diorama_skybox_uv.c',
+                   'src/diorama/diorama_depth_shapes.c',
                    'src/render/scene3d_math.c', 'src/render/presentation_layout.c',
                    'snesrecomp-go/runtime/src/scene_renderer.c', 'snesrecomp-go/runtime/src/snes/ppu.c',
                    '-Wl,-dead_strip' if sys.platform == 'darwin' else '-Wl,--gc-sections',

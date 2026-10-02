@@ -31,9 +31,17 @@ void ActionEffectCapture_PeekScene(ActionSceneEffectFrame *frame) {
   if(!frame)return;
   ActionEffectObserver observer=s_action_effect_observer;
   ActionEffectTickClock pending=s_action_effect_tick_clock;
-  ActionSceneEffects_CaptureFrame(&observer,frame,g_ram,kActRaiserWramSize,ActionEffectTickClock_Capture(&pending));
+  const ActionSurfaceField *surfaces[kActionSurfaceFieldKinds];
+  ActionEffectManifest_SurfaceFields(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap],surfaces);
+  ActionSceneEffects_CaptureFrameFiltered(&observer,frame,g_ram,kActRaiserWramSize,ActionEffectTickClock_Capture(&pending),!ActionEffectManifest_ReplacesGlowField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),surfaces);
   if(g_settings.action_environmental_effects)
-    ActionEnvironmentalEffects_CaptureFrame(&observer,frame,g_ram,kActRaiserWramSize);
+    ActionEnvironmentalEffects_CaptureFrameFiltered(&observer,frame,g_ram,kActRaiserWramSize,
+      !ActionEffectManifest_ReplacesRayField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
+      !ActionEffectManifest_ReplacesWaterField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
+        !ActionEffectManifest_ReplacesAtmosphereField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
+        !ActionEffectManifest_ReplacesMoonField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
+        !ActionEffectManifest_ReplacesMarshField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
+        !ActionEffectManifest_ReplacesCastleField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]));
   if(!g_settings.action_effect_lighting)
     for(unsigned i=0;i<frame->effect_count;++i)frame->effects[i].flags|=kActionEffectFlag_LightingOff;
 }
@@ -148,13 +156,21 @@ void ActionEffectCapture_CaptureFrame(FrameSlot *dst) {
   ActionEffects_CaptureFrame(&s_action_effect_observer, &dst->action_effects,
                              g_ram,
                              kActRaiserWramSize, action_effect_ticks);
-  ActionSceneEffects_CaptureFrame(&s_action_effect_observer,
+  const ActionSurfaceField *surfaces[kActionSurfaceFieldKinds];
+  ActionEffectManifest_SurfaceFields(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap],surfaces);
+  ActionSceneEffects_CaptureFrameFiltered(&s_action_effect_observer,
                                   &dst->action_scene_effects, g_ram,
-                                  kActRaiserWramSize, action_effect_ticks);
+                                  kActRaiserWramSize, action_effect_ticks,!ActionEffectManifest_ReplacesGlowField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),surfaces);
   if (g_settings.action_environmental_effects)
-    ActionEnvironmentalEffects_CaptureFrame(
+    ActionEnvironmentalEffects_CaptureFrameFiltered(
         &s_action_effect_observer, &dst->action_scene_effects,
-        g_ram, kActRaiserWramSize);
+        g_ram, kActRaiserWramSize, !ActionEffectManifest_ReplacesRayField(
+          g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
+        !ActionEffectManifest_ReplacesWaterField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
+        !ActionEffectManifest_ReplacesAtmosphereField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
+        !ActionEffectManifest_ReplacesMoonField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
+        !ActionEffectManifest_ReplacesMarshField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
+        !ActionEffectManifest_ReplacesCastleField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]));
   else
     memset(&s_action_effect_observer.landing_dust, 0,
         sizeof(s_action_effect_observer.landing_dust));

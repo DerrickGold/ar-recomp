@@ -41,6 +41,7 @@ typedef struct ActionHeatMeshCache {
   ArRenderRectI viewport;
   int target_width, target_height, source_width;
   uint16_t game_frame;
+  uint32_t field_hash;
   bool valid;
 } ActionHeatMeshCache;
 
@@ -87,15 +88,17 @@ static void FadeEffectVertices(const FrameSlot *slot,
 }
 
 static bool FrameUsesBg2Alpha(const FrameSlot *slot) {
-  if (!slot || !slot->action_environmental_effects ||
-      slot->action_scene_effects.decoration_overflow ||
-      slot->action_scene_effects.decoration_count > kActionSceneDecorationMaxInstances)
-    return false;
-  for (unsigned i = 0; i < slot->action_scene_effects.decoration_count; i++) {
-    const unsigned layer = slot->action_scene_effects.decorations[i].render_layer;
-    if (layer == kActionEffectRenderLayer_Bg2Alpha ||
-        layer == kActionEffectRenderLayer_Bg2HighAlpha)
-      return true;
+  if (!slot || !slot->action_environmental_effects) return false;
+  const ActionSceneEffectFrame *frame = &slot->action_scene_effects;
+  for (unsigned list = 0; list < 2; ++list) {
+    const unsigned count = list ? frame->authored_count : frame->decoration_count;
+    if (count > (list ? kActionAuthoredMaxInstances : kActionSceneDecorationMaxInstances) ||
+        (!list && frame->decoration_overflow)) continue;
+    const ActionEffectInstance *effects = list ? frame->authored : frame->decorations;
+    for (unsigned i = 0; i < count; ++i)
+      if ((effects[i].flags & kActionEffectFlag_Visible) &&
+          (effects[i].render_layer == kActionEffectRenderLayer_Bg2Alpha ||
+           effects[i].render_layer == kActionEffectRenderLayer_Bg2HighAlpha)) return true;
   }
   return false;
 }
@@ -119,7 +122,7 @@ float PresentActionEffects_Bg1Dimming(const FrameSlot *slot) {
           slot->diorama_map_group,slot->diorama_map_number) : 0;
 }
 ArRenderRectF PresentActionEffects_Bg1DimmingRamp(const FrameSlot *slot) {
-  return slot ? ActionEnvironment_Bg1DimmingRamp(slot->diorama_map_group,
+  return slot ? ActionEnvironment_Bg1DimmingRamp(&slot->action_scene_effects,slot->diorama_map_group,
       slot->diorama_map_number) : (ArRenderRectF){0};
 }
 
@@ -253,12 +256,16 @@ static void FailActionHeatTargetState(ArRenderDevice *device, const char *operat
       ArRenderDevice_LastError(device));
 }
 
+static const ActionSurfaceField *FrameHeatField(const FrameSlot *slot){
+  return slot->action_scene_effects.surface_fields_valid&2?&slot->action_scene_effects.surface_fields[1]:ActionSurfaceField_Bundled(1);
+}
 static bool FrameUsesActionHeat(const FrameSlot *slot) {
+  const ActionSurfaceField *field=FrameHeatField(slot);
+  if(!field||!field->Heat[0])return false;
   if (ActionEffectBrightness(slot) == 0 ||
       !slot->action_environmental_effects || slot->diorama_active ||
-      ActRaiserRoom_ProfileFor(
-          slot->diorama_map_group, slot->diorama_map_number) !=
-              kActRaiserRoomProfile_AitosAct2Lava ||
+      (!(slot->action_scene_effects.surface_fields_valid&2)&&ActRaiserRoom_ProfileFor(
+          slot->diorama_map_group, slot->diorama_map_number) != kActRaiserRoomProfile_AitosAct2Lava) ||
       slot->action_scene_effects.decoration_overflow ||
       slot->action_scene_effects.decoration_count >
           kActionSceneDecorationMaxInstances)
@@ -330,19 +337,20 @@ static bool ActionHeatMeshMatches(
 }
 
 static const ActionHeatRenderMesh *ActionHeatMeshFor(
-    uint16_t game_frame, ArRenderRectI viewport,
+    const ActionSurfaceField *field,uint16_t game_frame, ArRenderRectI viewport,
     int target_width, int target_height, int source_width) {
-  if (ActionHeatMeshMatches(
+  if (field->hash==s_action_heat_mesh_cache.field_hash&&ActionHeatMeshMatches(
           &s_action_heat_mesh_cache, game_frame, viewport,
           target_width, target_height, source_width))
     return &s_action_heat_mesh_cache.mesh;
   s_action_heat_mesh_cache.valid = false;
-  if (!ActionHeatRender_Build(
-          game_frame,
+  if (!ActionHeatRender_BuildWithField(
+          field,game_frame,
           viewport,
           target_width, target_height,
           source_width, &s_action_heat_mesh_cache.mesh))
     return NULL;
+  s_action_heat_mesh_cache.field_hash=field->hash;
   s_action_heat_mesh_cache.viewport = viewport;
   s_action_heat_mesh_cache.target_width = target_width;
   s_action_heat_mesh_cache.target_height = target_height;
@@ -425,7 +433,7 @@ void PresentActionHeat_End(
   }
   const ArRenderRectI local_viewport = {0, 0, viewport.w, viewport.h};
   const ActionHeatRenderMesh *mesh = ActionHeatMeshFor(
-      slot->action_scene_effects.game_frame, local_viewport,
+      FrameHeatField(slot),slot->action_scene_effects.game_frame, local_viewport,
       s_action_heat_w, s_action_heat_h, slot->visible_width);
   const bool warped = mesh && ArRenderDevice_DrawGeometry(
       device, s_action_heat_target,

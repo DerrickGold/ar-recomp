@@ -3660,7 +3660,7 @@ static void TestMoonRaysStayContinuousAcrossSkyboxBands(void) {
   ActionEffectInstance moon = {
     .kind = kActionEffect_BloodpoolMoonlight, .world_x = 112, .world_y = 62,
     .phase = kActionEffectPhase_BloodpoolEnvironment, .visual = 1,
-    .flags = kActionEffectFlag_Visible | kActionEffectFlag_ClippedMesh,
+    .flags = kActionEffectFlag_Visible | kActionEffectFlag_ClippedMesh | kActionEffectFlag_StaticAnchor,
     .render_layer = kActionEffectRenderLayer_Bg2Plane,
     .projection_plane = kActionEffectProjectionPlane_Bg2,
     .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,194}},
@@ -3712,6 +3712,7 @@ static void TestMoonRaysStayContinuousAcrossSkyboxBands(void) {
   /* Water reflections retain the native row-band projection. Only the
    * airborne light field uses one transform through the water horizon. */
   moon.kind = kActionEffect_BloodpoolMoonReflection;
+  moon.flags &= (uint8_t)~kActionEffectFlag_StaticAnchor;
   CHECK(ActionEffectProjection_ProjectPoint(&context,&moon,32,74,&lower));
   projection.bg2_skybox.active_band = 0;
   CHECK(ActionEffectProjection_ProjectPoint(&context,&moon,32,74,&upper));
@@ -3732,7 +3733,7 @@ static void TestMoonCloudStaysContinuousAcrossSkyboxBands(void) {
   frame.decorations[0] = (ActionEffectInstance){
     .kind = kActionEffect_BloodpoolCloud, .world_x = 112, .world_y = 62,
     .phase = kActionEffectPhase_BloodpoolEnvironment, .environment_room = 1,
-    .flags = kActionEffectFlag_Visible, .phase_ticks = 600,
+    .flags = kActionEffectFlag_Visible | kActionEffectFlag_StaticAnchor, .phase_ticks = 600,
     .render_layer = kActionEffectRenderLayer_Bg2Alpha,
     .projection_plane = kActionEffectProjectionPlane_Bg2,
     .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-100,-40,100,44}},
@@ -3921,7 +3922,85 @@ static void TestAuthoredFloorMist(void) {
       IdentityProjection,FloorClip,&clip,&b));CHECK(!b.vertex_count && !b.index_count);
 }
 
+/* A wrapper deliberately takes the uncached callback contract, while using
+ * identical projection math as production. Compare complete emitted geometry
+ * through clock, camera, viewport, source, field, clipping and caster edits. */
+static bool UncachedNativeProjection(void *context, const ActionEffectInstance *effect,
+                                     float x, float y, ArRenderPointF *point) {
+  return ActionEffectProjection_ProjectPoint(context, effect, x, y, point);
+}
+static void TestRetainedShadowParity(void) {
+  static ActionSceneEffectRenderBatch warm, reference;
+  static ActionSceneEffectFrame frame;
+  ActionEffectProjectionContext context = {.visible_width=768, .snes_height=544,
+      .viewport={0,0,1280,800}, .ws_extra=256};
+  DioramaProjection sky = RakedApronProjection();
+  sky.texture_width=768;sky.texture_height=544;
+  sky.output_width=1280;sky.output_height=800;
+  sky.bg2_skybox=(DioramaSkyboxProjection){.count=2,.active_band=0,
+      .bands={{0,0,768,200,0,.5f},{0,200,768,544,.5f,1}}};
+  for (unsigned family = 0; family < 3; ++family) {
+    context.diorama_projection=family==2?&sky:NULL;
+    frame = (ActionSceneEffectFrame){.decoration_count=1,.decoration_visible_count=1};
+    ActionEffectInstance *e = &frame.decorations[0];
+    *e = (ActionEffectInstance){.flags=kActionEffectFlag_Visible,
+        .kind=family?kActionEffect_BloodpoolMoonlight:kActionEffect_ForestForwardLight,
+        .phase=family?kActionEffectPhase_BloodpoolEnvironment:kActionEffectPhase_ForestCanopyLight,
+        .render_layer=family?kActionEffectRenderLayer_Bg2Plane:kActionEffectRenderLayer_ForegroundLight,
+        .projection_plane=family?kActionEffectProjectionPlane_Bg2:kActionEffectProjectionPlane_BetweenBackgrounds,
+        .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-384,0,384,544}}};
+    if (family==2) { e->flags|=kActionEffectFlag_StaticAnchor; e->world_y=62; }
+    frame.moon_field_valid=true;frame.moon_field=*ActionMoonField_Bundled();
+    for (unsigned step = 0; step < 20; ++step) {
+      /* The lake's animated UV strip must not invalidate a static moon's
+       * visibility; switching its source band or moving BG1 must do so. */
+      sky.bg2_skybox.active_band=(int)(step%2);
+      sky.bg2_skybox.bands[1].x0=(float)step;
+      sky.bg2_skybox.bands[1].x1=768+(float)step;
+      if (step==8) sky.bg2_skybox.bands[0].x0+=4;
+      if (step==14) sky.bg1_plane.capture_offset.x+=8;
+      e->phase_ticks=(uint16_t)(step*123); e->pulse_ticks=e->phase_ticks;
+      if (step%3==0) {
+        frame.scenery=(ActionMoonlightOcclusion){.valid=1,.count=1,
+            .rectangles={{-120,(int16_t)(120+step),200,(int16_t)(135+step)}}};
+        frame.moonlight=frame.scenery;
+        context.bg1_camera_x=(int16_t)step*3;context.bg2_camera_x=(int16_t)step;
+        context.viewport.w=1280+(int)step;
+        e->world_x=(int16_t)step*4;
+      }
+      if (step==7) { frame.scenery.count=0;frame.moonlight.count=0; }
+      if (step==11) frame.moon_field.Shadow[0]*=.8f;
+      if (step==13) { e->flags|=kActionEffectFlag_ClipToRect;e->clip_rect=(ActionEffectLocalRect){-160,20,300,490}; }
+      CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+          ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,&context,&warm));
+      CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+          UncachedNativeProjection,ActionEffectProjection_ClipBounds,&context,&reference));
+      CHECK(warm.vertex_count>0 && SceneBatchesEqual(&warm,&reference));
+      CHECK(family?warm.moonlight.cache.ready:warm.shadow.ready);
+      /* An unrelated pass can overwrite scratch without altering cached visibility. */
+      memset(warm.moonlight.visibility,0,sizeof(warm.moonlight.visibility));
+      memset(warm.moonlight.coverage,255,sizeof(warm.moonlight.coverage));
+      CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+          ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,&context,&warm));
+      CHECK(SceneBatchesEqual(&warm,&reference));
+    }
+  }
+  ActionEffectProjectionSnapshot key={0};
+  DioramaProjection projection={0};
+  context.diorama_projection=&projection;
+  ActionEffectProjection_Remember(&key,&context);
+  CHECK(ActionEffectProjection_Matches(&key,&context));
+  projection.bg2_skybox.active_band=1;
+  CHECK(!ActionEffectProjection_Matches(&key,&context));
+  ActionEffectProjection_Remember(&key,&context);
+  projection.matrix[3]=.125f;
+  CHECK(!ActionEffectProjection_Matches(&key,&context));
+  context.diorama_projection=NULL;
+  CHECK(!ActionEffectProjection_Matches(&key,&context));
+}
+
 int main(void) {
+  TestRetainedShadowParity();
   TestAuthoredTorchReach();
   TestAuthoredEmitters();
   TestAuthoredMoteStyle();

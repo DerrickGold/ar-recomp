@@ -39,13 +39,23 @@ RULES = {
     'sim/world_nav/present_world_nav_internal.h': [
         'src/sim/world_nav/present_world_nav*.c', 'src/sim/world_nav/present_sim_globe.c'],
     'action/action_environment_capture_internal.h': [
-        'src/action/action_effects.c', 'src/action/action_*_effect_capture.c'],
+        'src/action/action_effects.c', 'src/action/action_*_effect_capture.c',
+        'src/action/action_environment_scene.c', 'src/action/action_map_effect_scene.c',
+        'src/action/action_ray_field_capture.c',
+        'src/action/action_moon_field_capture.c',
+        'src/action/action_marsh_field_capture.c',
+        'src/action/action_castle_field_capture.c',
+        'src/action/action_glow_field_capture.c',
+        'src/action/action_water_field_capture.c',
+        'src/action/action_atmosphere_field_capture.c'],
     'action/action_effect_render_internal.h': [
         'src/action/action_effect_render.c', 'src/action/action_scene_effect_render.c',
+        'src/action/action_scenery_shadow.c',
+        'src/action/action_authored_effect_render.c', 'src/action/action_authored_fields.c',
         'src/action/action_cave_effect_render.c', 'src/action/action_bloodpool_effect_render.c',
         'src/action/action_bloodpool_detail_render.c',
         'src/action/action_castle_effect_render.c',
-        'src/action/action_forest_effect_render.c', 'src/action/action_environment_geometry.c',
+        'src/action/action_ray_field_render.c', 'src/action/action_environment_geometry.c',
         'src/action/action_scene_lightning_render.c'],
     'platform/sdl/sim3d_depth_pass_sdl_internal.h': [
         'src/platform/sdl/sim3d_depth_pass*_sdl.c'],
@@ -59,7 +69,8 @@ RULES = {
         'src/platform/sdl/*', 'tests/render_*_test.c',
         'tests/settings_overlay_test.c', 'tests/present_world_nav_gpu_test.c',
         'tests/sim3d_depth_pass_gpu_test.c', 'tests/diorama_frame_generation_test.c',
-        'tools/sim_voxel_model_sheet.c', 'tools/benchmark_model_projection.c'],
+        'tools/sim_voxel_model_sheet.c', 'tools/benchmark_model_projection.c',
+        'tools/action_editor/replay_compositor.c'],
     'regional/session/regional_session_internal.h': [
         'src/regional/session/*', 'tests/regional_characterization_test.c'],
 }

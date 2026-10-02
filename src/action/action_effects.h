@@ -4,6 +4,17 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "action_ray_field.h"
+#include "action_water_field.h"
+#include "action_moon_field.h"
+#include "action_marsh_field.h"
+#include "action_castle_field.h"
+#include "action_glow_field.h"
+#include "action_arc_field.h"
+#include "action_projectile_field.h"
+#include "action_surface_field.h"
+#include "action_actor_effects.h"
+#include "action_atmosphere_field.h"
 
 /* Presentation-only action-stage effects. The game-thread capture owns every
  * WRAM read and publishes this small value-copy through FrameSlot; present.c
@@ -81,6 +92,10 @@ typedef enum ActionEffectKind {
   kActionEffect_AuthoredCloud,
   kActionEffect_AuthoredExposure,
   kActionEffect_AuthoredContour,
+  kActionEffect_AuthoredHalo,
+  kActionEffect_AuthoredGradient,
+  kActionEffect_AuthoredFlame,
+  kActionEffect_AuthoredTorch,
   kActionEffect_KindCount,
 } ActionEffectKind;
 
@@ -278,6 +293,10 @@ enum {
   /* Capture-side feature gate for actor lighting moved into scenery passes;
    * trails still follow the independently enabled particle setting. */
   kActionEffectFlag_LightingOff = 1 << 5,
+  /* Project the whole BG2 effect through its source row. Airborne light and
+   * clouds stay attached to a fixed layer point across independent water
+   * raster bands; surface effects instead retain per-row projection. */
+  kActionEffectFlag_StaticAnchor = 1 << 6,
 };
 
 /* Captured values; zero active preserves the original recipe byte-for-byte.
@@ -415,6 +434,8 @@ typedef struct ActionBloodpoolPost {
   int16_t x0, x1, y;
 } ActionBloodpoolPost;
 typedef struct ActionBloodpoolDetails {
+  ActionMarshField field;
+  bool field_valid;
   ActionBloodpoolTimber timber[kActionBloodpoolMaxTimber];
   ActionBloodpoolPost posts[kActionBloodpoolMaxPosts];
   /* Completed frame's native BG2 HDMA offsets. Rows after the table retain
@@ -433,11 +454,27 @@ typedef struct ActionEffectFloorField {
   ActionEffectFloorSpan spans[kActionAuthoredFloorMaxSpans];
 } ActionEffectFloorField;
 
+/* Sparse, captured native-member shapes. Stable catalogue IDs never depend on
+ * visibility, array order in a camera window, or native actor allocation. */
+enum { kActionNativeMemberMax = 64 };
+typedef struct ActionNativeMember {
+  uint8_t kind, index, enabled;
+  float offset_x, offset_y, width_scale, length_scale, angle;
+  float intensity;
+  uint32_t color;
+} ActionNativeMember;
+typedef struct ActionNativeMembers {
+  unsigned count;
+  ActionNativeMember records[kActionNativeMemberMax];
+} ActionNativeMembers;
+
 typedef struct ActionSceneEffectFrame {
   uint16_t game_frame;
   uint8_t effect_count;
   uint8_t visible_count;
   uint8_t overflow;
+  uint8_t actor_count;
+  ActionEffectActor actors[kActionEffectActorMax];
   ActionEffectInstance effects[kActionSceneEffectMaxInstances];
   uint8_t decoration_count;
   uint8_t decoration_visible_count;
@@ -445,9 +482,33 @@ typedef struct ActionSceneEffectFrame {
   ActionEffectInstance decorations[kActionSceneDecorationMaxInstances];
   uint8_t authored_count;
   ActionEffectInstance authored[kActionAuthoredMaxInstances];
+  /* Definition identity is shared by attached instances; generation remains
+   * independently seeded by the observed actor's lifetime. */
+  uint32_t authored_sources[kActionAuthoredMaxInstances];
   ActionEffectFloorField authored_floor[kActionAuthoredMaxInstances];
   ActionMoonlightOcclusion moonlight;
+  ActionMoonlightOcclusion scenery;
   ActionBloodpoolDetails bloodpool;
+  ActionNativeMembers members;
+  /* Owned recipe data. Queued/retained frames never borrow editable documents. */
+  ActionRayField ray_field;
+  uint8_t ray_field_valid;
+  ActionSurfaceField surface_fields[kActionSurfaceFieldKinds];
+  uint8_t surface_fields_valid;
+  ActionProjectileField projectile_fields[kActionProjectileFieldKinds];
+  uint8_t projectile_fields_valid;
+  ActionArcField arc_fields[kActionArcFieldKinds];
+  uint8_t arc_fields_valid;
+  ActionGlowField glow_field;
+  bool glow_field_valid;
+  ActionCastleField castle_field;
+  bool castle_field_valid;
+  ActionMoonField moon_field;
+  bool moon_field_valid;
+  ActionWaterField water_field;
+  uint8_t water_field_valid;
+  ActionAtmosphereField atmosphere_field;
+  uint8_t atmosphere_field_valid;
 } ActionSceneEffectFrame;
 
 /* Observer state is explicit so savestate/restart boundaries can reset it and
@@ -513,6 +574,8 @@ typedef struct ActionEffectObserver {
   uint8_t scene_map_group;
   uint8_t scene_map_number;
   uint8_t scene_map_valid;
+  uint32_t next_actor_generation;
+  ActionEffectActorTrack actor_tracks[kActionEffectActorMax];
   ActionLandingDustState landing_dust;
   ActionEffectObserverTrack tracks[kActionEffectObserverTrackCount];
   ActionEffectObserverTrack
@@ -537,6 +600,7 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
  * allowlist, global player sword beam, and exact two-child Aitos boss sword
  * volley. Unknown objects are ignored;
  * presentation never guesses from pixels or palette colours. */
+void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *,ActionSceneEffectFrame *,const uint8_t *,size_t,unsigned,bool,const ActionSurfaceField *const *);
 void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
                                      ActionSceneEffectFrame *dst,
                                      const uint8_t *wram, size_t wram_size,
@@ -545,6 +609,11 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
 /* Optional ambient additions, called after scene observation advances its
  * gameplay clock. The caller skips this work when Environmental effects is
  * off; it reads only WRAM and appends to the bounded decoration list. */
+/* Skip a replaced bundled field before capture, rather than building it and
+ * discarding its aggregate records. Other native families remain independent. */
+void ActionEnvironmentalEffects_CaptureFrameFiltered(
+    ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
+    const uint8_t *wram, size_t wram_size, bool native_ray_field, bool native_water_field, bool native_atmosphere_field, bool native_moon_field, bool native_marsh_field, bool native_castle_field);
 void ActionEnvironmentalEffects_CaptureFrame(
     ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
     const uint8_t *wram, size_t wram_size);

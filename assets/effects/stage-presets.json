@@ -1,0 +1,569 @@
+[
+  {
+    "id": "desert-sky",
+    "title": "Kasandora: sun haze and sand",
+    "rooms": [
+      [
+        3,
+        1
+      ]
+    ],
+    "description": "Place on BG1 at the visible horizon; a warm distant wash and slow haze sit behind drifting sand. Move the particle area to cover the desired stretch.",
+    "members": [
+      {
+        "kind": "light-gradient",
+        "x": 0,
+        "y": 0,
+        "width": "1024",
+        "height": "512",
+        "color": "f0b869",
+        "color-end": "634435",
+        "softness": "0.3",
+        "intensity": "0.8",
+        "placement": "background",
+        "angle": "0"
+      },
+      {
+        "kind": "cloud-bank",
+        "x": 0,
+        "y": -48,
+        "width": "512",
+        "height": "96",
+        "color": "c8aa82",
+        "intensity": "0.35",
+        "strands": "5",
+        "drift": "36",
+        "amplitude": "3",
+        "lifetime": "1400",
+        "softness": "0.85",
+        "placement": "background"
+      },
+      {
+        "kind": "particle-area",
+        "x": 0,
+        "y": 0,
+        "width": "1536",
+        "height": "384",
+        "pattern": "sand",
+        "color": "e6c28b",
+        "color-end": "9c713e",
+        "particles": "3",
+        "travel-x": "224",
+        "travel-y": "20",
+        "wander": "5",
+        "size-min": "0.25",
+        "size-max": "0.8",
+        "lifetime": "520",
+        "intensity": "0.65"
+      }
+    ]
+  },
+  {
+    "id": "temple-shafts",
+    "title": "Kasandora: warm temple shafts",
+    "rooms": [
+      [
+        3,
+        4
+      ]
+    ],
+    "description": "A darkened chamber with a warm opening and fine dust. The light and exposure affect scenery by default; actor receivers remain opt-in.",
+    "members": [
+      {
+        "kind": "exposure",
+        "x": 0,
+        "y": 0,
+        "width": "768",
+        "height": "640",
+        "intensity": "0.28",
+        "dim-scenery": "1",
+        "dim-player": "0",
+        "dim-enemies": "0"
+      },
+      {
+        "kind": "light-fan",
+        "x": 0,
+        "y": -160,
+        "width": "36",
+        "height": "320",
+        "angle": "17",
+        "fan": "26",
+        "strands": "20",
+        "softness": "0.7",
+        "color": "edc889",
+        "intensity": "1.2",
+        "placement": "playfield",
+        "light-scenery": "1",
+        "light-player": "0",
+        "light-enemies": "0"
+      },
+      {
+        "kind": "particle-area",
+        "x": 0,
+        "y": 0,
+        "width": "768",
+        "height": "640",
+        "pattern": "dust",
+        "particles": "3",
+        "color": "bf9872",
+        "color-end": "755c48",
+        "travel-y": "24",
+        "wander": "12",
+        "size-min": "0.25",
+        "size-max": "0.8",
+        "lifetime": "1400",
+        "intensity": "0.8"
+      }
+    ]
+  },
+  {
+    "id": "bamboo-canopy",
+    "title": "Aitos: bamboo canopy pocket",
+    "rooms": [
+      [
+        4,
+        1
+      ]
+    ],
+    "description": "Three irregular shafts and an area of falling leaves. Place the opening above a bamboo gap; playfield masks and shared shadows break up the light.",
+    "members": [
+      {
+        "kind": "light-fan",
+        "x": -76,
+        "y": -160,
+        "width": "14",
+        "height": "290",
+        "angle": "-18",
+        "fan": "16",
+        "strands": "7",
+        "softness": "0.65",
+        "color": "d5e4a2",
+        "intensity": "0.9",
+        "placement": "playfield"
+      },
+      {
+        "kind": "light-fan",
+        "x": 31,
+        "y": -176,
+        "width": "22",
+        "height": "345",
+        "angle": "-12",
+        "fan": "20",
+        "strands": "11",
+        "softness": "0.65",
+        "color": "e1ebae",
+        "intensity": "1.2",
+        "placement": "background"
+      },
+      {
+        "kind": "light-fan",
+        "x": 116,
+        "y": -160,
+        "width": "9",
+        "height": "260",
+        "angle": "-24",
+        "fan": "12",
+        "strands": "6",
+        "softness": "0.55",
+        "color": "bed093",
+        "intensity": "0.6",
+        "placement": "playfield"
+      },
+      {
+        "kind": "particle-area",
+        "x": 0,
+        "y": 0,
+        "width": "768",
+        "height": "512",
+        "pattern": "leaves",
+        "particles": "2",
+        "color": "698747",
+        "color-end": "364e29",
+        "travel-x": "-24",
+        "travel-y": "224",
+        "wander": "22",
+        "size-min": "0.6",
+        "size-max": "1.6",
+        "lifetime": "900",
+        "intensity": "0.7"
+      }
+    ]
+  },
+  {
+    "id": "lava-embers",
+    "title": "Aitos: lava glow and embers",
+    "rooms": [
+      [
+        4,
+        4
+      ]
+    ],
+    "description": "Place the lower edge on lava. A warm upward wash and ember region add depth; actual heat distortion remains a separate experiment.",
+    "members": [
+      {
+        "kind": "light-gradient",
+        "x": 0,
+        "y": -32,
+        "width": "512",
+        "height": "192",
+        "color": "241006",
+        "color-end": "ff6824",
+        "intensity": "1.25",
+        "softness": "0.6",
+        "placement": "playfield",
+        "angle": "0"
+      },
+      {
+        "kind": "particle-area",
+        "x": 0,
+        "y": -48,
+        "width": "512",
+        "height": "192",
+        "pattern": "sparks",
+        "particles": "3",
+        "color": "ffce71",
+        "color-end": "842108",
+        "travel-y": "-160",
+        "wander": "8",
+        "size-min": "0.3",
+        "size-max": "0.8",
+        "lifetime": "240",
+        "intensity": "1"
+      }
+    ]
+  },
+  {
+    "id": "jungle-humidity",
+    "title": "Marahna: humid jungle",
+    "rooms": [
+      [
+        5,
+        1
+      ]
+    ],
+    "description": "Green distant light, low drifting humidity and a broad insect region. Reposition the mist to fit open pockets; supported floor mist is available separately.",
+    "members": [
+      {
+        "kind": "exposure",
+        "x": 0,
+        "y": 0,
+        "width": "1024",
+        "height": "768",
+        "intensity": "0.23",
+        "dim-scenery": "1",
+        "dim-player": "0",
+        "dim-enemies": "0"
+      },
+      {
+        "kind": "light-gradient",
+        "x": 0,
+        "y": 0,
+        "width": "1024",
+        "height": "768",
+        "color": "729b52",
+        "color-end": "10261f",
+        "intensity": "0.7",
+        "softness": "0.4",
+        "placement": "background"
+      },
+      {
+        "kind": "cloud-bank",
+        "x": 0,
+        "y": 96,
+        "width": "512",
+        "height": "112",
+        "color": "7aaba3",
+        "intensity": "0.45",
+        "strands": "6",
+        "drift": "22",
+        "amplitude": "6",
+        "lifetime": "1800",
+        "softness": "0.85",
+        "placement": "background"
+      },
+      {
+        "kind": "particle-area",
+        "x": 0,
+        "y": 0,
+        "width": "1024",
+        "height": "640",
+        "pattern": "insects",
+        "particles": "2",
+        "color": "bfc969",
+        "color-end": "667744",
+        "travel-y": "0",
+        "travel-x": "0",
+        "wander": "22",
+        "size-min": "0.3",
+        "size-max": "0.65",
+        "lifetime": "900",
+        "intensity": "0.65"
+      }
+    ]
+  },
+  {
+    "id": "jungle-arena",
+    "title": "Marahna: arena floor fog",
+    "rooms": [
+      [
+        5,
+        3
+      ]
+    ],
+    "description": "Drag the supported mist region over the arena floor. Mist resolves actual floor contacts, including spike beds; the green wash remains behind the playfield.",
+    "members": [
+      {
+        "kind": "ground-mist",
+        "x": 0,
+        "y": 96,
+        "width": "512",
+        "height": "192",
+        "mist-height": "32",
+        "color": "7aada1",
+        "intensity": "1.1",
+        "lifetime": "1600"
+      },
+      {
+        "kind": "light-gradient",
+        "x": 0,
+        "y": 0,
+        "width": "768",
+        "height": "384",
+        "color": "66855b",
+        "color-end": "173228",
+        "intensity": "0.75",
+        "softness": "0.5",
+        "placement": "background"
+      }
+    ]
+  },
+  {
+    "id": "statue-sanctum",
+    "title": "Marahna: temple statue light",
+    "rooms": [
+      [
+        5,
+        4
+      ]
+    ],
+    "description": "Place the centre on a statue or shrine. A warm halo and restrained light wash contrast with a cool, dim room.",
+    "members": [
+      {
+        "kind": "exposure",
+        "x": 0,
+        "y": 0,
+        "width": "512",
+        "height": "512",
+        "intensity": "0.3",
+        "dim-scenery": "1",
+        "dim-player": "0",
+        "dim-enemies": "0"
+      },
+      {
+        "kind": "halo",
+        "x": 0,
+        "y": 0,
+        "width": "128",
+        "height": "160",
+        "color": "eed89a",
+        "color-end": "84522f",
+        "intensity": "0.9",
+        "softness": "0.8",
+        "placement": "playfield"
+      },
+      {
+        "kind": "soft-light",
+        "x": 0,
+        "y": 0,
+        "width": "192",
+        "height": "256",
+        "color": "d7b77c",
+        "intensity": "0.7",
+        "placement": "playfield"
+      },
+      {
+        "kind": "particle-area",
+        "x": 0,
+        "y": 0,
+        "width": "384",
+        "height": "384",
+        "pattern": "dust",
+        "particles": "2",
+        "color": "c9ac7c",
+        "travel-y": "16",
+        "wander": "8",
+        "size-min": "0.25",
+        "size-max": "0.6",
+        "lifetime": "1800",
+        "intensity": "0.7"
+      }
+    ]
+  },
+  {
+    "id": "snowfall",
+    "title": "Northwall: snowfall and spindrift",
+    "rooms": [
+      [
+        6,
+        1
+      ]
+    ],
+    "description": "A sparse far layer and faster foreground snow have distinct sizes and drift. Expand either particle region without placing individual emitters.",
+    "members": [
+      {
+        "kind": "particle-area",
+        "x": 0,
+        "y": 0,
+        "width": "1024",
+        "height": "1024",
+        "pattern": "snow",
+        "particles": "3",
+        "color": "99bddb",
+        "color-end": "658aa8",
+        "travel-x": "32",
+        "travel-y": "192",
+        "wander": "12",
+        "size-min": "0.2",
+        "size-max": "0.6",
+        "lifetime": "1000",
+        "intensity": "0.5",
+        "placement": "background"
+      },
+      {
+        "kind": "particle-area",
+        "x": 0,
+        "y": 0,
+        "width": "1024",
+        "height": "1024",
+        "pattern": "snow",
+        "particles": "2",
+        "color": "e2f1ff",
+        "color-end": "a0cbe5",
+        "travel-x": "96",
+        "travel-y": "256",
+        "wander": "24",
+        "size-min": "0.45",
+        "size-max": "1.1",
+        "lifetime": "720",
+        "intensity": "0.7"
+      },
+      {
+        "kind": "cloud-bank",
+        "x": 0,
+        "y": 128,
+        "width": "512",
+        "height": "64",
+        "color": "b8d2e3",
+        "intensity": "0.22",
+        "strands": "4",
+        "drift": "80",
+        "amplitude": "4",
+        "lifetime": "900",
+        "softness": "0.9"
+      }
+    ]
+  },
+  {
+    "id": "ice-shimmer",
+    "title": "Northwall: cool ice light",
+    "rooms": [
+      [
+        6,
+        4
+      ]
+    ],
+    "description": "Place across an ice wall. Broad blue light and sparse motes emphasize the surface without extra full-screen passes.",
+    "members": [
+      {
+        "kind": "light-gradient",
+        "x": 0,
+        "y": 0,
+        "width": "512",
+        "height": "512",
+        "color": "b6e1ec",
+        "color-end": "284573",
+        "intensity": "0.6",
+        "softness": "0.65",
+        "placement": "playfield",
+        "angle": "30"
+      },
+      {
+        "kind": "particle-area",
+        "x": 0,
+        "y": 0,
+        "width": "512",
+        "height": "512",
+        "pattern": "motes",
+        "particles": "2",
+        "color": "d8f6ff",
+        "color-end": "528fa8",
+        "travel-y": "-16",
+        "wander": "5",
+        "size-min": "0.2",
+        "size-max": "0.55",
+        "lifetime": "1600",
+        "intensity": "0.65",
+        "placement": "playfield"
+      }
+    ]
+  },
+  {
+    "id": "eclipse",
+    "title": "Death Heim: eclipse and distant wisps",
+    "rooms": [
+      [
+        7,
+        1
+      ]
+    ],
+    "description": "A true annular halo leaves its centre clear. Wisps drift behind the arena; move the halo to the eclipse or portal and resize its ellipse.",
+    "members": [
+      {
+        "kind": "halo",
+        "x": 0,
+        "y": 0,
+        "width": "176",
+        "height": "176",
+        "color": "f2dfc8",
+        "color-end": "8762b1",
+        "intensity": "1.5",
+        "softness": "0.6",
+        "placement": "background"
+      },
+      {
+        "kind": "cloud-bank",
+        "x": 0,
+        "y": 72,
+        "width": "512",
+        "height": "160",
+        "color": "72658e",
+        "intensity": "0.3",
+        "strands": "5",
+        "drift": "38",
+        "amplitude": "12",
+        "lifetime": "2600",
+        "softness": "0.95",
+        "placement": "background"
+      },
+      {
+        "kind": "particle-area",
+        "x": 0,
+        "y": 0,
+        "width": "768",
+        "height": "512",
+        "pattern": "motes",
+        "particles": "2",
+        "color": "c2a2d9",
+        "color-end": "4b3866",
+        "travel-x": "-24",
+        "travel-y": "-48",
+        "wander": "18",
+        "size-min": "0.2",
+        "size-max": "0.65",
+        "lifetime": "2400",
+        "intensity": "0.5",
+        "placement": "background"
+      }
+    ]
+  }
+]

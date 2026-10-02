@@ -29,7 +29,10 @@ function editor(data,options={}) {
       contains(name) {return classes.has(name);}};
       this.attributes = {};
     }
-    addEventListener(name,callback) { this.listeners[name]=callback; }
+    addEventListener(name,callback) {
+      const previous=this.listeners[name];
+      this.listeners[name]=previous?event=>{previous(event);callback(event);}:callback;
+    }
     append(child) {this.appendChild(child);}
     appendChild(child) {
       this.children.push(child);
@@ -38,6 +41,7 @@ function editor(data,options={}) {
     replaceChildren(...children) {this.children=[...children];}
     getContext() { return this.context ??= {putImageData(image) {this.image=image;},
       drawImage() {},clearRect() {},setTransform() {},fillRect() {},
+      beginPath() {},moveTo() {},lineTo() {},closePath() {},stroke() {},arc() {},fill() {},
       setLineDash(value) {this.dash=value;},measureText(text) {return {width:text.length*7};},
       fillText(text,x,y) {(this.labels??=[]).push({text,x,y});},
       strokeRect(x,y,w,h) {(this.strokes??=[]).push({x,y,w,h,color:this.strokeStyle});},
@@ -50,6 +54,7 @@ function editor(data,options={}) {
     setPointerCapture() {}
     setAttribute(name,value) {this.attributes[name]=value;}
     contains(other) {return other===this||this.children.some(child=>child.contains(other));}
+    closest(selector) {return element(selector);}
     focus() {documentHost.activeElement=this;}
     select() {this.selectionStart=0;this.selectionEnd=this.value.length;}
     showModal() {this.open=true;}
@@ -79,7 +84,7 @@ function editor(data,options={}) {
       this.activeElement.listeners.copy?.({defaultPrevented:false});return true;
     }};
   const context = vm.createContext({
-    window:{__ACTION_BG__:data,__ACTION_VIEW__:options.view,__DIORAMA_LAYERS__:options.ini,
+    window:{__ACTION_EFFECT_PRESETS__:JSON.parse(fs.readFileSync(path.join(root,'assets/effects/stage-presets.json'),'utf8')),__ACTION_BG__:data,__ACTION_VIEW__:options.view,__DIORAMA_LAYERS__:options.ini,
       innerWidth:960,innerHeight:640,listeners:{}, addEventListener(name,callback) {
       (this.listeners[name]??=[]).push(callback);
     }},
@@ -387,7 +392,7 @@ const cmKey=key=>({key,preventDefault(){this.prevented=true;},stopPropagation(){
 cmMenu.listeners.keydown(cmKey('End'));
 assert.equal(cm('document.activeElement.selector'),'#tileActionDeselect');
 cmMenu.listeners.keydown(cmKey('Home'));
-assert.equal(cm('document.activeElement.selector'),'#tileActionPriority');
+assert.equal(cm('document.activeElement.selector'),'#tileActionAddEffect');
 const cmSelectionBeforeEsc=cm('selectedCells.size'),cmEsc=cmKey('Escape');
 cmMenu.listeners.keydown(cmEsc);
 assert.equal(cmEsc.stopped,true);assert.equal(cmMenu.hidden,true);
@@ -451,6 +456,305 @@ mist.run(`$('#emittermist-height').onchange({target:$('#emittermist-height')});`
 assert.match(mist.run('EffectEditor.text()'),/mist-height=32/);
 mist.run('undo()');assert.equal(mist.run('EffectEditor.text()'),mistText);
 console.log('Mist brush: one-step undo/redo, region erase, terrain isolation, size bound and unchanged scenery passed');
+/* Native handles use sparse member records and never paint scenery. */
+const nativeEditor=editor(fixture()),nr=nativeEditor.run,nc=nativeEditor.elements.get('#map2d');
+nr(`loadIniText('','native.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+  const buffer=new ArrayBuffer(32);new Uint8Array(buffer).set([0,...new TextEncoder().encode('forest-forward'),0]);
+  EffectEditor.updateSources({memory:{buffer},RoomPreview_EffectCount:()=>1,RoomPreview_KindName:()=>1,
+    RoomPreview_SourceValue:(i,f)=>f===1?1:0,RoomPreview_ReachSupported:()=>0,RoomPreview_MemberCount:()=>1,
+    RoomPreview_MemberValue:(i,m,f)=>[1,200,180,80,120,1][f]});
+  $('#effectSource').value='member:01:01:0:forest-forward:00000001';$('#effectSource').onchange({target:$('#effectSource')});
+  $('#emitterMapEdit').onclick();`);
+assert.equal(nativeEditor.elements.get('#nativeShapeControls').hidden,false);
+assert.equal(nativeEditor.elements.get('#receiverControls').hidden,true);
+const nativeScenery=nr('mergeDioramaIni()'),nativeBefore=nr('EffectEditor.text()');
+const np=(x,y)=>({button:0,clientX:nr(`view.x+${x}*view.scale`),clientY:nr(`view.y+${y}*view.scale`)});
+nc.listeners.mousedown(np(200,180));for(const fn of nr('window.listeners.mousemove'))fn(np(232,196));
+assert.equal(nr('EffectEditor.text()'),nativeBefore);
+for(const fn of nr('window.listeners.mouseup'))fn({});
+assert.match(nr('EffectEditor.text()'),/member:01:01:0:forest-forward:00000001/);
+assert.match(nr('EffectEditor.text()'),/offset-x=32\noffset-y=16\nwidth-scale=1\nlength-scale=1/);
+assert.equal(nr('mergeDioramaIni()'),nativeScenery);
+const nativeMoved=nr('EffectEditor.text()');nr('undo()');assert.equal(nr('EffectEditor.text()'),nativeBefore);
+nr('redo()');assert.equal(nr('EffectEditor.text()'),nativeMoved);
+nr(`$('#nativeAngle').value='12';$('#nativeAngle').onchange({target:$('#nativeAngle')});`);
+assert.match(nr('EffectEditor.text()'),/angle=12/);
+nr(`$('#effectReset').onclick()`);assert.doesNotMatch(nr('EffectEditor.text()'),/member:/);
+nr('undo()');assert.match(nr('EffectEditor.text()'),/angle=12/);
+console.log('Native member controls: stable IDs, drag commit/undo, direction, reset and unchanged scenery passed');
+
+/* Complete field extraction is transactional, preserves exact untouched text,
+ * and config geometry supplies the bases for existing map handles. */
+const fieldEditor=editor(fixture()),fr=fieldEditor.run;
+const fieldData=fs.readFileSync(path.join(root,'assets/effects/forest-ray-field.ini'),'utf8')
+  .split('\n').filter(line=>line&&!line.startsWith('[')&&!line.startsWith('#')&&!line.startsWith('version=')&&!line.startsWith('enabled='))
+  .join('\n')+'\n';
+fr(`loadIniText('','complete.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+  SharedRoomPreview.rayFieldDefinition=()=>${JSON.stringify(fieldData)};
+  SharedRoomPreview.rayFieldMapScale=()=>[2,1];
+  const fieldBuffer=new ArrayBuffer(40);new Uint8Array(fieldBuffer).set(new TextEncoder().encode('forest-canopy\0'),1);
+  EffectEditor.updateCatalogue({memory:{buffer:fieldBuffer},RoomPreview_KindName:()=>1,RoomPreview_ReachSupported:()=>0,
+    RoomPreview_CatalogueCount:()=>1,RoomPreview_CatalogueValue:(i,f)=>[0x46000000,1,0,0,768,544,0,12,2,1][f],
+    RoomPreview_CatalogueMemberValue:(i,m,f)=>[m+1,240+m*100,0,112,544,1][f]});
+  EffectEditor.openModal('source:01:01:0:forest-canopy:46000000');$('#effectDefinitionCreate').onclick();`);
+assert.equal(fieldEditor.elements.get('#effectDefinitionControls').hidden,false);
+assert.match(fr('EffectEditor.text()'),/\[field:01:01:0:ray-field:46000000\]/);
+assert.equal(fr('undoStack.length'),0);
+fr(`EffectEditor.editEmitter(EffectEditor.selected(),{'ray-1':'900 60 .75 .5 1 0','origin-y':'80','ray-count':3});`);
+assert.equal(fr('EffectEditor.mapEmitters().find(e=>e.kind==="forest-canopy"&&!e.family).x'),1800);
+assert.equal(fr('EffectEditor.mapEmitters().find(e=>e.kind==="forest-canopy"&&!e.family).y'),80);
+assert.equal(fr('EffectEditor.mapEmitters().filter(e=>e.kind==="forest-canopy"&&!e.family).length'),3);
+assert.doesNotMatch(fr('EffectEditor.text()'),/^ray-4=/m);
+fr(`$('#effectInspectorClose').onclick()`);
+assert.doesNotMatch(fr('EffectEditor.text()'),/\[field:/);
+assert.equal(fr('EffectEditor.mapEmitters().filter(e=>e.kind==="forest-canopy"&&!e.family).length'),12);
+fr(`EffectEditor.openModal('source:01:01:0:forest-canopy:46000000');$('#effectDefinitionCreate').onclick();$('#effectInspectorApply').onclick()`);
+const completeText=fr('EffectEditor.text()');assert.equal(fr('undoStack.length'),1);
+assert.match(completeText,/profile-2=/);assert.match(completeText,/leaf-shape=/);
+fr('undo()');assert.doesNotMatch(fr('EffectEditor.text()'),/\[field:/);
+fr('redo()');assert.equal(fr('EffectEditor.text()'),completeText);
+fr(`EffectEditor.removeEffect('field:01:01:0:ray-field:46000000')`);
+assert.match(fr('EffectEditor.text()'),/enabled=0/,'disabling a definition must not restore its native fallback');
+fr('undo()');assert.equal(fr('EffectEditor.text()'),completeText);
+fr(`EffectEditor.selectEmitter('field:01:01:0:ray-field:46000000');$('#effectReset').onclick();
+  EffectEditor.placeEmitter('ray-field',640,320);`);
+assert.match(fr('EffectEditor.text()'),/origin-y=320/);assert.match(fr('EffectEditor.text()'),/^ray-1=320 /m);
+assert.match(fr('EffectEditor.text()'),/witness-count=0/);
+console.log('Complete ray-field extraction, editing, handle alignment, apply/cancel/undo, disable/reset and two-axis placement passed');
+
+
+/* Complete water definitions retain linked contacts and native member bases. */
+const waterEditor=editor(fixture()),wr=waterEditor.run;
+const waterData=fs.readFileSync(path.join(root,'assets/effects/cave-water-field.ini'),'utf8')
+ .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
+wr(`loadIniText('','water.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+ SharedRoomPreview.waterFieldDefinition=()=>${JSON.stringify(waterData)};SharedRoomPreview.waterFieldMapScale=()=>[2,4];
+ const waterBuffer=new ArrayBuffer(40);new Uint8Array(waterBuffer).set(new TextEncoder().encode('cave-water\0'),1);
+ EffectEditor.updateCatalogue({memory:{buffer:waterBuffer},RoomPreview_KindName:()=>1,RoomPreview_ReachSupported:()=>0,
+ RoomPreview_CatalogueCount:()=>1,RoomPreview_CatalogueValue:(i,f)=>[0xc2000200,1,0,0,768,544,0,7,1,1][f],
+ RoomPreview_CatalogueMemberValue:(i,m,f)=>[m+1,440,896,880,16,0][f]});
+ EffectEditor.openModal('source:01:01:0:cave-water:c2000200');$('#effectDefinitionCreate').onclick();`);
+assert.match(wr('EffectEditor.text()'),/\[field:01:01:0:water-field:c2000200\]/);
+assert.match(wr('EffectEditor.text()'),/contour-3=.*127/);
+wr(`EffectEditor.editEmitter(EffectEditor.selected(),{'pool-1':'20 500 600'});`);
+assert.equal(wr('EffectEditor.mapEmitters().find(e=>e.kind==="cave-water"&&!e.family).x'),260);
+wr(`$('#effectInspectorClose').onclick()`);assert.doesNotMatch(wr('EffectEditor.text()'),/\[field:/);
+wr(`EffectEditor.openModal('source:01:01:0:cave-water:c2000200');$('#effectDefinitionCreate').onclick();$('#effectInspectorApply').onclick()`);
+assert.equal(wr('undoStack.length'),1);
+wr(`EffectEditor.removeEffect('field:01:01:0:water-field:c2000200')`);
+assert.equal(wr('EffectEditor.mapEmitters().find(e=>e.kind==="cave-water"&&!e.family).enabled'),false);
+wr(`undo();EffectEditor.selectEmitter('field:01:01:0:water-field:c2000200');$('#effectReset').onclick();EffectEditor.placeEmitter('water-field',640,320);`);
+assert.match(wr('EffectEditor.text()'),/counts=1 0 0 0/);assert.match(wr('EffectEditor.text()'),/pool-1=296 344 80/);
+assert.match(wr('EffectEditor.text()'),/components=1/);
+console.log('Complete water contacts, contour gaps, marker bases, apply/cancel/undo, disable/reset and owning-layer placement passed');
+
+/* Linked moon field lives in BG2 coordinates; drag and modal edits share undo. */
+const moonEditor=editor(fixture()),mr=moonEditor.run;
+const moonData=fs.readFileSync(path.join(root,'assets/effects/moon-field.ini'),'utf8')
+ .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
+mr(`loadIniText('','moon.ini');setLayer(1);SharedRoomPreview.validateEffects=()=>{};
+ SharedRoomPreview.moonFieldDefinition=()=>${JSON.stringify(moonData)};
+ const moonBuffer=new ArrayBuffer(40);new Uint8Array(moonBuffer).set(new TextEncoder().encode('moonlight\0'),1);
+ EffectEditor.updateCatalogue({memory:{buffer:moonBuffer},RoomPreview_KindName:()=>1,RoomPreview_ReachSupported:()=>0,
+ RoomPreview_CatalogueCount:()=>1,RoomPreview_CatalogueValue:(i,f)=>[0xb1000002,1,112,62,768,194,0,0,1,1,1][f]});
+ EffectEditor.openModal('source:01:01:0:moonlight:b1000002');$('#effectDefinitionCreate').onclick();`);
+assert.match(mr('EffectEditor.text()'),/\[field:01:01:0:moon-field:b1000002\]/);
+assert.equal(mr('EffectEditor.mapEmitters().length'),1);
+assert.equal(mr('EffectEditor.mapEmitters()[0].x'),112);
+assert.equal(mr('EffectEditor.mapEmitters()[0].y'),62);
+mr(`EffectEditor.editEmitter(EffectEditor.selected(),{x:130,y:80,width:24,height:24});`);
+assert.match(mr('EffectEditor.text()'),/^anchor=130 80$/m);
+assert.equal(mr('EffectEditor.mapEmitters()[0].x'),130);
+mr(`$('#effectInspectorClose').onclick()`);assert.doesNotMatch(mr('EffectEditor.text()'),/\[field:/);
+mr(`EffectEditor.openModal('source:01:01:0:moonlight:b1000002');$('#effectDefinitionCreate').onclick();
+ EffectEditor.editEmitter(EffectEditor.selected(),{'low-1':'-1 .5 .8','ray-color':'.1 .2 .3','witness-count':0});
+ $('#effectInspectorApply').onclick();`);
+assert.equal(mr('undoStack.length'),1);
+assert.match(mr('EffectEditor.text()'),/^witness-2=/m,'fixed optional witness slots must survive disabling validation');
+const moonSaved=mr('EffectEditor.text()');mr('undo()');assert.doesNotMatch(mr('EffectEditor.text()'),/\[field:/);mr('redo()');assert.equal(mr('EffectEditor.text()'),moonSaved);
+mr(`view={x:0,y:0,scale:1};brush='effects';$('#effectGuides').checked=true;EffectEditor.selectEmitter('field:01:01:0:moon-field:b1000002');
+ EmitterMapTools.begin({clientX:112,clientY:62});EmitterMapTools.move({clientX:132,clientY:82});EmitterMapTools.finish();`);
+assert.match(mr('EffectEditor.text()'),/^anchor=132 82$/m);
+mr('undo()');assert.equal(mr('EffectEditor.text()'),moonSaved);
+mr(`EffectEditor.removeEffect('field:01:01:0:moon-field:b1000002')`);
+assert.equal(mr('EffectEditor.mapEmitters()[0].enabled'),false);
+mr(`undo();EffectEditor.selectEmitter('field:01:01:0:moon-field:b1000002');$('#effectReset').onclick();EffectEditor.placeEmitter('moon-field',96,48);`);
+assert.match(mr('EffectEditor.text()'),/^anchor=96 48$/m);assert.match(mr('EffectEditor.text()'),/^dimensions=0 0 0 0$/m);
+assert.match(mr('EffectEditor.text()'),/^witness-count=0$/m);
+console.log('Complete moon definition, BG2 anchor drag, apply/cancel/undo, component vectors and generic placement passed');
+
+/* Castle definitions retain source validation and all linked surface styles. */
+const castleEditor=editor(fixture()),csr=castleEditor.run;
+const castleData=fs.readFileSync(path.join(root,'assets/effects/castle-3-field.ini'),'utf8')
+ .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
+csr(`loadIniText('','castle.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+ SharedRoomPreview.castleFieldDefinition=()=>${JSON.stringify(castleData)};
+ const castleBuffer=new ArrayBuffer(40);new Uint8Array(castleBuffer).set(new TextEncoder().encode('castle-light\0'),1);
+ EffectEditor.updateCatalogue({memory:{buffer:castleBuffer},RoomPreview_KindName:()=>1,RoomPreview_ReachSupported:()=>0,
+ RoomPreview_CatalogueCount:()=>1,RoomPreview_CatalogueValue:(i,f)=>[0xca000001,1,512,480,768,80,0,0,1,1][f]});
+ EffectEditor.openModal('source:01:01:0:castle-light:ca000001');$('#effectDefinitionCreate').onclick();`);
+assert.match(csr('EffectEditor.text()'),/\[field:01:01:0:castle-field:ca000001\]/);
+csr(`EffectEditor.editEmitter(EffectEditor.selected(),{'upper-color':'.6 .2 .3','dust-counts':'12 24'});
+ $('#effectInspectorClose').onclick()`);
+assert.doesNotMatch(csr('EffectEditor.text()'),/\[field:/);
+csr(`EffectEditor.openModal('source:01:01:0:castle-light:ca000001');$('#effectDefinitionCreate').onclick();
+ EffectEditor.editEmitter(EffectEditor.selected(),{'upper-color':'.6 .2 .3','source-count':10});$('#effectInspectorApply').onclick();`);
+assert.equal(csr('undoStack.length'),1);const castleSaved=csr('EffectEditor.text()');
+assert.match(castleSaved,/^source-11=/m);
+csr('undo()');assert.doesNotMatch(csr('EffectEditor.text()'),/\[field:/);csr('redo()');assert.equal(csr('EffectEditor.text()'),castleSaved);
+csr(`EffectEditor.openModal('source:01:01:0:castle-light:ca000001');$('#effectDefinitionCreate').onclick()`);
+assert.match(csr('EffectEditor.text()'),/^upper-color=.6 .2 .3$/m,'reopening keeps edits');
+csr(`$('#effectInspectorClose').onclick();EffectEditor.selectEmitter('field:01:01:0:castle-field:ca000001');$('#effectReset').onclick();EffectEditor.placeEmitter('castle-field',96,160)`);
+assert.match(csr('EffectEditor.text()'),/^source-count=1$/m);assert.match(csr('EffectEditor.text()'),/^source-1=0 96 160 68 76 104 162/m);
+assert.match(csr('EffectEditor.text()'),/^dimensions=0 0 0 0$/m);
+console.log('Complete castle definition, surface placement, source validation, apply/cancel/undo and reopening passed');
+
+/* Marsh definitions retain source validation and all linked surface styles. */
+const marshEditor=editor(fixture()),msr=marshEditor.run;
+const marshData=fs.readFileSync(path.join(root,'assets/effects/marsh-field.ini'),'utf8')
+ .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
+msr(`loadIniText('','marsh.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+ SharedRoomPreview.marshFieldDefinition=()=>${JSON.stringify(marshData)};
+ const marshBuffer=new ArrayBuffer(40);new Uint8Array(marshBuffer).set(new TextEncoder().encode('blood-water\0'),1);
+ EffectEditor.updateCatalogue({memory:{buffer:marshBuffer},RoomPreview_KindName:()=>1,RoomPreview_ReachSupported:()=>0,
+ RoomPreview_CatalogueCount:()=>1,RoomPreview_CatalogueValue:(i,f)=>[0xb1000000,1,512,480,768,80,0,0,1,1][f]});
+ EffectEditor.openModal('source:01:01:0:blood-water:b1000000');$('#effectDefinitionCreate').onclick();`);
+assert.match(msr('EffectEditor.text()'),/\[field:01:01:0:marsh-field:b1000000\]/);
+msr(`EffectEditor.editEmitter(EffectEditor.selected(),{'span-1':'176 800','insect-count':'2','water-color':'.6 .2 .3'});
+ $('#effectInspectorClose').onclick()`);
+assert.doesNotMatch(msr('EffectEditor.text()'),/\[field:/);
+msr(`EffectEditor.openModal('source:01:01:0:blood-water:b1000000');$('#effectDefinitionCreate').onclick();
+ EffectEditor.editEmitter(EffectEditor.selected(),{'water-color':'.6 .2 .3','detail-witness-count':0});$('#effectInspectorApply').onclick();`);
+assert.equal(msr('undoStack.length'),1);const marshSaved=msr('EffectEditor.text()');
+assert.match(marshSaved,/^detail-witness-2=/m);
+msr('undo()');assert.doesNotMatch(msr('EffectEditor.text()'),/\[field:/);msr('redo()');assert.equal(msr('EffectEditor.text()'),marshSaved);
+msr(`EffectEditor.openModal('source:01:01:0:blood-water:b1000000');$('#effectDefinitionCreate').onclick()`);
+assert.match(msr('EffectEditor.text()'),/^water-color=.6 .2 .3$/m,'reopening keeps edits');
+msr(`$('#effectInspectorClose').onclick();EffectEditor.selectEmitter('field:01:01:0:marsh-field:b1000000');$('#effectReset').onclick();EffectEditor.placeEmitter('marsh-field',96,160)`);
+assert.match(msr('EffectEditor.text()'),/^span-1=64 128$/m);assert.match(msr('EffectEditor.text()'),/^surface=160 168 191 6$/m);
+assert.match(msr('EffectEditor.text()'),/^dimensions=0 0 0 0$/m);
+console.log('Complete marsh definition, surface placement, source validation, apply/cancel/undo and reopening passed');
+
+/* Atmosphere definitions expose all sources/regions, with transactional editing. */
+const atmosphereEditor=editor(fixture()),atmosRun=atmosphereEditor.run;
+const atmosphereData=fs.readFileSync(path.join(root,'assets/effects/cave-atmosphere-field.ini'),'utf8')
+ .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
+atmosRun(`loadIniText('','atmosphere.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+ SharedRoomPreview.atmosphereFieldDefinition=()=>${JSON.stringify(atmosphereData)};
+ const atmosphereBuffer=new ArrayBuffer(40);new Uint8Array(atmosphereBuffer).set(new TextEncoder().encode('cave-light\0'),1);
+ EffectEditor.updateCatalogue({memory:{buffer:atmosphereBuffer},RoomPreview_KindName:()=>1,RoomPreview_ReachSupported:()=>0,
+ RoomPreview_CatalogueCount:()=>1,RoomPreview_CatalogueValue:(i,f)=>[0xc2000200,1,0,0,768,544,0,0,1,1][f]});
+ EffectEditor.openModal('source:01:01:0:cave-light:c2000200');$('#effectDefinitionCreate').onclick();`);
+assert.match(atmosRun('EffectEditor.text()'),/\[field:01:01:0:atmosphere-field:c2000200\]/);
+assert.match(atmosRun('EffectEditor.text()'),/floor-area=880 1120 1760 1248/);
+atmosRun(`EffectEditor.editEmitter(EffectEditor.selected(),{'ambient-1':'640 320 192 128 0 .8 .4 0'});$('#effectInspectorClose').onclick();`);
+assert.equal(atmosRun('EffectEditor.text()'),'[effects]\nversion=1\n');
+atmosRun(`EffectEditor.openModal('source:01:01:0:cave-light:c2000200');$('#effectDefinitionCreate').onclick();$('#effectInspectorApply').onclick();`);
+assert.equal(atmosRun('undoStack.length'),1);
+atmosRun(`EffectEditor.removeEffect('field:01:01:0:atmosphere-field:c2000200')`);
+assert.equal(atmosRun('EffectEditor.mapEmitters().find(e=>e.kind==="cave-light").enabled'),false);
+atmosRun(`undo();EffectEditor.selectEmitter('field:01:01:0:atmosphere-field:c2000200');$('#effectReset').onclick();EffectEditor.placeEmitter('atmosphere-field',640,320);`);
+assert.match(atmosRun('EffectEditor.text()'),/counts=1 1 0 0 0/);assert.match(atmosRun('EffectEditor.text()'),/ambient-1=640 320 128 96 0 0.5 0.5 0/);
+assert.match(atmosRun('EffectEditor.text()'),/components=5/);assert.match(atmosRun('EffectEditor.text()'),/area-1=512 224 768 416/);
+console.log('Complete atmosphere extraction, modal apply/cancel/undo, source disable/reset and generic placement passed');
+
+/* The point-and-click workflow is independent of the effects brush and does
+ * not require visiting a source in the preview before configuring it. */
+const ui=editor(fixture()),ur=ui.run,uc=ui.elements.get('#map2d');
+ur(`loadIniText('','modal.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+  $('#effectGuides').checked=true;$('#emitterPreset').value='soft-light';`);
+const up=(x,y,extras={})=>({button:0,clientX:ur(`view.x+${x}*view.scale`),
+  clientY:ur(`view.y+${y}*view.scale`),preventDefault(){},...extras});
+const umove=(x,y)=>{for(const fn of ur('window.listeners.mousemove'))fn(up(x,y));};
+const uup=()=>{for(const fn of ur('window.listeners.mouseup'))fn({});};
+const uopen=(x,y)=>uc.listeners.contextmenu(up(x,y));
+const uchange=(id,value)=>{const input=ui.elements.get('#'+id);input.value=value;input.onchange({target:input});};
+const uempty=ur('EffectEditor.text()'),uscenery=ur('mergeDioramaIni()'),uhistory=ur('undoStack.length');
+uopen(197,143);ur(`$('#tileActionAddEffect').onclick()`);
+assert.equal(ui.elements.get('#effectInspector').open,true);
+assert.match(ur('EffectEditor.text()'),/x=197\ny=143/);
+uchange('emitterPreset','particle-area');uchange('emitterparticles','7');uchange('emitterwidth','2048');uchange('emitterheight','64');
+assert.match(ur('EffectEditor.text()'),/particle-area:/);
+assert.doesNotMatch(ur('EffectEditor.text()'),/soft-light:/);
+assert.equal(ur('undoStack.length'),uhistory,'modal drafts must not add history entries');
+ur(`$('#effectInspectorClose').onclick()`);
+assert.equal(ur('EffectEditor.text()'),uempty);
+assert.equal(ur('undoStack.length'),uhistory);
+uopen(197,143);ur(`$('#tileActionAddEffect').onclick()`);
+uchange('emitterparticles','7');uchange('emitterwidth','2048');uchange('emitterheight','64');
+const uid=ur('EffectEditor.selected()');ur(`$('#effectInspectorApply').onclick()`);
+const uadded=ur('EffectEditor.text()');
+assert.equal(ur('undoStack.length'),uhistory+1);
+assert.equal(ur('mergeDioramaIni()'),uscenery);
+ur('undo()');assert.equal(ur('EffectEditor.text()'),uempty);
+ur('redo()');assert.equal(ur('EffectEditor.text()'),uadded);
+// Pick and drag a marker with the ordinary tile selection tool.
+ur(`$('#bSelect').onclick()`);uc.listeners.mousedown(up(197,143));umove(220,160);
+assert.equal(ur('EffectEditor.text()'),uadded);uup();
+assert.match(ur('EffectEditor.text()'),/x=220\ny=160/);
+const umoved=ur('EffectEditor.text()');
+uc.listeners.mousedown(up(1244,192));umove(1308,208);uup();
+assert.match(ur('EffectEditor.text()'),/x=252\ny=168\nwidth=2112\nheight=80/);
+ur('undo()');assert.equal(ur('EffectEditor.text()'),umoved);
+// Cancel, Escape and view changes all roll the draft back.
+uopen(220,160);ur(`$('#tileActionEditEffect').onclick()`);uchange('effectIntensity','2');
+ui.elements.get('#effectInspector').listeners.cancel({preventDefault(){}});
+assert.equal(ur('EffectEditor.text()'),umoved);
+uopen(220,160);ur(`$('#tileActionEditEffect').onclick()`);uchange('effectIntensity','3');
+ur('setLayer(1)');assert.equal(ur('EffectEditor.text()'),umoved);ur('setLayer(0)');
+// Apply and preview centres on the marker and uses the shared renderer.
+uopen(220,160);ur(`$('#tileActionEditEffect').onclick()`);uchange('effectIntensity','1.5');
+ur(`$('#effectInspectorPreview').onclick()`);
+assert.equal(ur('mode'),'shared');assert.equal(ur('nativeCamera.x'),92);
+assert.equal(ur('nativeCamera.y'),31,'preview clamps to the native room bounds');
+assert.equal(ui.elements.get('#effectInspector').open,false);
+ur(`setMode('2d')`);uopen(220,160);ur(`$('#tileActionDeleteEffect').onclick()`);
+assert.doesNotMatch(ur('EffectEditor.text()'),/emitter:/);ur('undo()');
+assert.equal(ur('EffectEditor.selected()'),uid);
+// Overlapping emitters remain individually selectable in the menu.
+ur(`EffectEditor.placeEmitter('motes',220,160)`);const uother=ur('EffectEditor.selected()');uopen(220,160);
+assert.equal(ui.elements.get('#tileEffectChoiceRow').hidden,false);
+assert.equal(ui.elements.get('#tileEffectChoice').children.length,2);
+uchange('tileEffectChoice',uid);ur(`$('#tileActionDeleteEffect').onclick()`);
+assert.equal(ur('EffectEditor.mapEmitters().length'),1);assert.equal(ur('EffectEditor.mapEmitters()[0].id'),uother);
+// Default members are loaded for the whole map, including offscreen members;
+// a layer's scroll ratio is inverted for map edits, never written into the recipe.
+ur(`let catalogueCalls=0;
+  const catBuffer=new ArrayBuffer(80),catBytes=new Uint8Array(catBuffer);
+  catBytes.set(new TextEncoder().encode('forest-forward\0'),1);
+  catBytes.set(new TextEncoder().encode('cave-drips\0'),24);
+  const catalogue={memory:{buffer:catBuffer},RoomPreview_CatalogueCount:()=>{catalogueCalls++;return 2;},
+    RoomPreview_KindName:k=>k===1?1:24,RoomPreview_ReachSupported:()=>0,
+    RoomPreview_CatalogueValue:(i,f)=>[1,i+1,0,0,32,120,0,1,2,1][f],
+    RoomPreview_CatalogueMemberValue:(i,m,f)=>[1,i?100:400,100,32,120,1][f]};
+  EffectEditor.updateCatalogue(catalogue);EffectEditor.updateCatalogue(catalogue);
+  EffectEditor.selectEmitter('member:01:01:0:forest-forward:00000001');`);
+assert.equal(ur('catalogueCalls'),3,'one count per loop and one termination check, then cached');
+assert.equal(ur('EffectEditor.mapEmitters().filter(e=>e.native).length'),4,'parent families and members have markers');
+uopen(800,100);ur(`$('#tileActionEditEffect').onclick()`);
+assert.equal(ui.elements.get('#effectFamilyOpen').hidden,false);
+uchange('nativeAngle','12');ur(`$('#effectFamilyOpen').onclick()`);
+assert.equal(ur('EffectEditor.selected()'),'source:01:01:0:forest-forward:00000001');
+assert.match(ur('EffectEditor.text()'),/angle=12/);
+ur(`$('#effectInspectorClose').onclick();$('#bSelect').onclick()`);
+uc.listeners.mousedown(up(800,100));umove(820,110);uup();
+assert.match(ur('EffectEditor.text()'),/offset-x=10\noffset-y=10/);
+// Drips can resize in length only; unsupported width and X must stay put.
+ur(`EffectEditor.selectEmitter('member:01:01:0:cave-drips:00000001')`);
+uc.listeners.mousedown(up(200,220));umove(250,250);uup();
+assert.match(ur('EffectEditor.text()'),/offset-x=0\noffset-y=0\nlength-scale=1.25/);
+uopen(200,100);ur(`$('#tileActionDeleteEffect').onclick()`);
+assert.match(ur('EffectEditor.text()'),/enabled=0/);
+assert.equal(ur('EffectEditor.mapEmitters().find(e=>e.kind==="cave-drips"&&!e.family).enabled'),false);
+uopen(200,100);ur(`$('#tileActionEditEffect').onclick();$('#effectReset').onclick();$('#effectInspectorApply').onclick()`);
+assert.doesNotMatch(ur('EffectEditor.text()'),/member:01:01:0:cave-drips/);
+assert.equal(ur('mergeDioramaIni()'),uscenery);
+// Preview here works on empty map and does not create an effect.
+const ubeforePreview=ur('EffectEditor.text()');uopen(300,190);ur(`$('#tileActionPreview').onclick()`);
+assert.equal(ur('mode'),'shared');assert.equal(ur('nativeCamera.x'),172);
+assert.equal(ur('EffectEditor.text()'),ubeforePreview);
+console.log('Effect map workflow: context add/edit/delete/preview, modal apply/cancel/undo, ordinary drag/resize, overlapping markers and whole-room defaults passed');
+
 
 /* Emitter handles edit only on release. Animation parameters and pattern seeds
  * remain attached to a stable source across move/resize/duplicate/undo. */
@@ -524,8 +828,51 @@ er('undo()');assert.equal(er('EffectEditor.text()'),resizedEmitter);
 const emitterMenuEvent={...ep(200,184),preventDefault(){this.prevented=true;}};
 ec.listeners.contextmenu(emitterMenuEvent);
 assert.equal(emitterMenuEvent.prevented,true);
-assert.equal(er('tileMenu.hidden'),true,'emitter tool must not open tile commands');
+assert.equal(er('tileMenu.hidden'),false,'effect tools also expose the context menu');
+assert.equal(emitter.elements.get('#tileActionEditEffect').hidden,false);
 console.log('Emitter controls and handles: atomic moves/resizes, stable IDs, parameters, snapping, cancel, terrain isolation and undo passed');
+
+/* BG2 coordinates have their own markers; changing foreground camera or map
+ * tabs must not reinterpret the stored anchor. One drag remains one edit. */
+{
+const anchored=editor(fixture()),ar=anchored.run,ac=anchored.elements.get('#map2d');
+ar(`loadIniText('','anchors.ini');setLayer(1);SharedRoomPreview.validateEffects=()=>{};
+  $('#effectGuides').checked=true;$('#emitterPreset').value='light-fan';`);
+const ap=(x,y)=>({button:0,clientX:ar(`view.x+${x}*view.scale`),
+  clientY:ar(`view.y+${y}*view.scale`),preventDefault(){}});
+ac.listeners.contextmenu(ap(112,62));ar(`$('#tileActionAddEffect').onclick()`);
+assert.equal(anchored.elements.get('#effectInspector').open,true);
+assert.match(ar('EffectEditor.text()'),/x=112\ny=62\nwidth=96\nheight=64\nanchor=bg2-point\nplacement=background/);
+ar(`$('#effectInspectorApply').onclick()`);
+const aid=ar('EffectEditor.selected()'),anchorIni=ar('EffectEditor.text()');
+assert.equal(ar('EffectEditor.mapEmitters().length'),1);
+ar('setLayer(0)');assert.equal(ar('EffectEditor.mapEmitters().length'),0);
+ar('setLayer(1)');assert.equal(ar('EffectEditor.mapEmitters()[0].x'),112);
+ac.listeners.mousedown(ap(112,62));
+for(const fn of ar('window.listeners.mousemove'))fn(ap(128,70));
+for(const fn of ar('window.listeners.mouseup'))fn({});
+assert.match(ar('EffectEditor.text()'),/x=128\ny=70/);
+ar('undo()');assert.equal(ar('EffectEditor.text()'),anchorIni);
+ar(`EffectEditor.openModal(${JSON.stringify(aid)});$('#emitterLocate').onclick()`);
+assert.equal(ar('bgIndex'),1);
+assert.equal(ar('EffectEditor.selected()'),aid);
+assert.equal(ar('view.x+112*view.scale'),480);
+assert.equal(ar('view.y+62*view.scale'),320);
+const oldCamera=ar('JSON.stringify(nativeCamera)');
+ar(`EffectEditor.openModal(${JSON.stringify(aid)});$('#effectInspectorPreview').onclick()`);
+assert.equal(ar('JSON.stringify(nativeCamera)'),oldCamera,'BG2 preview does not guess a foreground camera');
+assert.equal(ar('mode'),'shared');
+ar(`setMode('2d');setLayer(1);EffectEditor.placeEmitter('water-surface',128,192)`);
+assert.match(ar('EffectEditor.text()'),/anchor=bg2-raster/);
+const withWater=ar('EffectEditor.text()');ar(`EffectEditor.restore(${JSON.stringify(withWater)})`);
+assert.equal(ar('EffectEditor.mapEmitters().length'),2);
+const waterId=ar('EffectEditor.selected()');
+ar(`EffectEditor.openModal(${JSON.stringify(waterId)})`);
+const anchorControl=anchored.elements.get('#emitterAnchor');anchorControl.value='bg1';anchorControl.onchange({target:anchorControl});
+assert.equal(ar('EffectEditor.mapEmitters().length'),1);
+ar(`$('#effectInspectorClose').onclick()`);assert.equal(ar('EffectEditor.text()'),withWater);
+console.log('BG2 anchors: placement, layer markers, drag/undo, map location, transactional edits, water raster and camera-preserving preview passed');
+}
 
 /* One large field replaces repeated emitter placement. Receiver edits are one
  * atomic history item, independently address scenery, player and enemies, and
@@ -545,7 +892,7 @@ assert.match(regionText,/particle-area:/);assert.match(regionText,/width=2048\nh
 assert.equal(rr('undoStack.length'),1);
 rr('undo()');assert.doesNotMatch(rr('EffectEditor.text()'),/particle-area:/);
 rr('redo()');assert.equal(rr('EffectEditor.text()'),regionText);
-rr(`$('#emitterPreset').value='soft-light';$('#emitterAdd').onclick();`);
+rr(`EffectEditor.placeEmitter('soft-light',128,112);`);
 let regionHistory=rr('undoStack.length');
 rr(`$('#effectLightTargets').checked=true;$('#effectLightPlayer').checked=true;
   $('#effectLightEnemies').checked=false;$('#effectLightTargets').onchange();`);
@@ -1995,7 +2342,7 @@ if (process.argv[2]) {
     Buffer.from(actual.run('originalNative')));
   console.log('Kassandora 3:4: range transparency fill preserves opaque artwork and native frame');
   console.log(`${verified} exported room/terrain C/JavaScript golden frames passed`);
-  const embeddedWasm=html.match(/window\.__ACTION_PREVIEW_WASM__=(.*?);<\/script>/);
+  const embeddedWasm=html.match(/window\.__ACTION_PREVIEW_WASM__=("[A-Za-z0-9+/=]*");/);
   const wasm=embeddedWasm&&JSON.parse(embeddedWasm[1]);
   if(wasm){
     await actual.run(`SharedActionPreview.initialize(B64(${JSON.stringify(wasm)}))`);
@@ -2025,3 +2372,188 @@ if (process.argv[2]) {
     console.log('Shared WASM editor wiring: pixels, retained canvas, band tint, snapshot export and failure fallback passed');
   }
 }
+
+const glowEditor=editor(fixture()),glr=glowEditor.run;
+const glowData=fs.readFileSync(path.join(root,'assets/effects/torch-glow-field.ini'),'utf8')
+ .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
+glr(`loadIniText('','glow.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+ SharedRoomPreview.glowFieldDefinition=()=>${JSON.stringify(glowData)};
+ EffectEditor.openModal(null,128,160);EffectEditor.placeEmitter('glow-field',128,160);`);
+assert.match(glr('EffectEditor.text()'),/\[field:01:01:0:glow-field:54000000\]/);
+assert.match(glr('EffectEditor.text()'),/^source-1=128 160 0$/m);
+glr(`EffectEditor.editEmitter(EffectEditor.selected(),{'spill-radius':'60 42',receivers:'6'});$('#effectInspectorClose').onclick()`);
+assert.doesNotMatch(glr('EffectEditor.text()'),/\[field:/);
+glr(`EffectEditor.openModal(null,128,160);EffectEditor.placeEmitter('glow-field',128,160);
+ EffectEditor.editEmitter(EffectEditor.selected(),{'spill-radius':'60 42',receivers:'6'});$('#effectInspectorApply').onclick()`);
+assert.equal(glr('undoStack.length'),1);const glowSaved=glr('EffectEditor.text()');
+glr('undo()');assert.doesNotMatch(glr('EffectEditor.text()'),/\[field:/);glr('redo()');assert.equal(glr('EffectEditor.text()'),glowSaved);
+console.log('Complete flame/glow placement, parameters, modal apply/cancel and undo passed');
+
+const stageEditor=editor(fixture()),spr=stageEditor.run;
+spr(`loadIniText('','stage.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};$('#emitterPreset').value='stage:desert-sky';EffectEditor.openModal(null,256,192)`);
+assert.equal(spr('EffectEditor.mapEmitters().filter(e=>!e.native).length'),3);
+assert.match(spr('EffectEditor.text()'),/light-gradient/);assert.match(spr('EffectEditor.text()'),/^pattern=sand$/m);
+spr(`$('#effectInspectorClose').onclick()`);assert.doesNotMatch(spr('EffectEditor.text()'),/emitter:/);
+spr(`$('#emitterPreset').value='stage:desert-sky';EffectEditor.openModal(null,256,192);$('#effectInspectorApply').onclick()`);
+assert.equal(spr('undoStack.length'),1);const stageSaved=spr('EffectEditor.text()');
+spr('undo()');assert.doesNotMatch(spr('EffectEditor.text()'),/emitter:/);spr('redo()');assert.equal(spr('EffectEditor.text()'),stageSaved);
+assert.match(spr('EffectEditor.text()'),/^x=256$/m);
+console.log('Stage compositions add ordinary editable markers and apply/cancel/undo as one operation');
+
+const arcEditor=editor(fixture()),acr=arcEditor.run;
+const arcData=fs.readFileSync(path.join(root,'assets/effects/trap-field.ini'),'utf8')
+ .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
+acr(`loadIniText('','arcs.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+ SharedRoomPreview.arcFieldDefinition=()=>${JSON.stringify(arcData)};$('#emitterPreset').value='trap-field';EffectEditor.openModal(null,128,160)`);
+assert.match(acr('EffectEditor.text()'),/\[field:01:01:0:trap-field:00000000\]/);
+acr(`EffectEditor.editEmitter(EffectEditor.selected(),{receivers:'6',particles:'8 11 6 7'});$('#effectInspectorApply').onclick()`);
+assert.equal(acr('undoStack.length'),1);const arcSaved=acr('EffectEditor.text()');
+acr('undo()');assert.doesNotMatch(acr('EffectEditor.text()'),/\[field:/);acr('redo()');assert.equal(acr('EffectEditor.text()'),arcSaved);
+console.log('Complete arc response controls, receiver selection, apply and undo passed');
+
+const bindingEditor=editor(fixture()),bir=bindingEditor.run;
+bir(`loadIniText('','bindings.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+ EffectEditor.placeEmitter('flame',128,160);EffectEditor.selectEmitter(EffectEditor.selected());
+ $('#actorBindingTarget').value='family';$('#actorBindingSource').value='B786';$('#actorBindingParent').value='B786';
+ $('#actorBindingState').value='0,1';$('#actorBindingAnimation').value='5000';$('#actorBindingApply').onclick()`);
+assert.match(bir('EffectEditor.text()'),/^actor-source=B786$/m);assert.match(bir('EffectEditor.text()'),/^x=0$/m);
+const bindSaved=bir('EffectEditor.text()');bir('undo()');assert.doesNotMatch(bir('EffectEditor.text()'),/actor-target=/);bir('redo()');assert.equal(bir('EffectEditor.text()'),bindSaved);
+console.log('General actor attachment controls preserve selectors and use one undo entry');
+
+const copiedEditor=editor(fixture()),cpr=copiedEditor.run;
+cpr(`loadIniText('','copied-effects.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+ EffectEditor.placeEmitter('torch',80,120);globalThis.firstTorch=EffectEditor.selected();
+ EffectEditor.placeEmitter('cloud-bank',160,140);globalThis.secondCloud=EffectEditor.selected();
+ EffectEditor.selectEmitter(firstTorch);EffectEditor.selectEmitter(secondCloud,true);EffectEditor.copyEffects();
+ globalThis.beforePaste=EffectEditor.text();globalThis.undoBeforePaste=undoStack.length;
+ EffectEditor.pasteEffects(240,200)`);
+assert.equal(cpr('EffectEditor.mapEmitters().filter(e=>!e.native).length'),4);
+assert.equal(cpr('undoStack.length'),cpr('undoBeforePaste')+1);
+assert.equal(cpr('EffectEditor.mapEmitters().some(e=>e.kind==="cloud-bank"&&e.x===320&&e.y===220)'),true);
+const copySaved=cpr('EffectEditor.text()');cpr('undo()');assert.equal(cpr('EffectEditor.text()'),cpr('beforePaste'));cpr('redo()');assert.equal(cpr('EffectEditor.text()'),copySaved);
+cpr('EffectEditor.pasteEffects(400,200)');assert.equal(cpr('EffectEditor.mapEmitters().filter(e=>!e.native).length'),6);
+cpr(`setLayer(1)`);assert.equal(cpr('EffectEditor.pasteEffects(100,100)'),false);
+console.log('Multi-effect copy/paste preserves spacing and settings, repeats with fresh identities, isolates BG coordinates and undoes atomically');
+
+const surfaceEditor=editor(fixture()),sur=surfaceEditor.run;
+const surfaceData=fs.readFileSync(path.join(root,'assets/effects/lava-lake-field.ini'),'utf8')
+ .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
+sur(`loadIniText('','surfaces.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+ SharedRoomPreview.surfaceFieldDefinition=()=>${JSON.stringify(surfaceData)};$('#emitterPreset').value='lava-lake-field';EffectEditor.openModal(null,128,160)`);
+assert.match(sur('EffectEditor.text()'),/^source-1=128 160 -16 -4 16 4 1$/m);
+sur(`EffectEditor.editEmitter(EffectEditor.selected(),{'heat-amplitude':'0.75 1 6.5'});$('#effectInspectorApply').onclick()`);
+assert.equal(sur('undoStack.length'),1);const surfaceSaved=sur('EffectEditor.text()');sur('undo()');assert.doesNotMatch(sur('EffectEditor.text()'),/\[field:/);sur('redo()');assert.equal(sur('EffectEditor.text()'),surfaceSaved);
+assert.equal(bir('EffectEditor.mapEmitters().find(e=>e.attached).x'),bir('actor.x'));
+assert.equal(bir('EffectEditor.mapEmitters().find(e=>e.attached).y'),bir('actor.y'));
+console.log('Aitos surface placement, heat parameters, modal undo and actor-relative map markers passed');
+
+// Multiple runtime actors share one authored definition in the source picker.
+bir(`globalThis.bindingId=EffectEditor.selected();
+ const bytes=new Uint8Array([0,102,108,97,109,101,0]);
+ const api={memory:{buffer:bytes.buffer},RoomPreview_EffectCount:()=>2,RoomPreview_KindName:()=>1,
+ RoomPreview_SourceValue:(i,f)=>({0:parseInt(bindingId.split(':').at(-1),16),1:99,2:120+i*16,3:100,5:1,9:64,10:96}[f]||0),
+ RoomPreview_ReachSupported:()=>0,RoomPreview_MemberCount:()=>0};
+ EffectEditor.updateSources(api)`);
+assert.equal(bir('EffectEditor.mapEmitters().filter(e=>e.attached).length'),1);
+assert.equal(bir('EffectEditor.selected()'),bir('bindingId'));
+console.log('Multiple attached runtime instances retain one editable marker and selected definition');
+
+const nativeTorchEditor=editor(fixture()),ntr=nativeTorchEditor.run;
+ntr(`loadIniText('','native-torch-copy.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+ const bytes=new Uint8Array([0,119,97,108,108,45,116,111,114,99,104,0]);
+ const api={memory:{buffer:bytes.buffer},RoomPreview_EffectCount:()=>1,RoomPreview_KindName:()=>1,
+ RoomPreview_SourceValue:(i,f)=>({0:123,1:99,2:80,3:120,8:1,9:32,10:32}[f]||0),
+ RoomPreview_ReachSupported:()=>1,RoomPreview_MemberCount:()=>0};
+ EffectEditor.updateSources(api);globalThis.nativeTorch=EffectEditor.mapEmitters().find(e=>e.kind==='wall-torch').id;
+ EffectEditor.selectEmitter(nativeTorch);EffectEditor.editEmitter(nativeTorch,{reach:'1.5',color:'ddbb99','light-scenery':'0','light-player':'1','light-enemies':'0'});
+ EffectEditor.copyEffects();EffectEditor.pasteEffects(200,140)`);
+assert.match(ntr('EffectEditor.text()'),/\[emitter:[^\]]+:torch:/);
+assert.match(ntr('EffectEditor.text()').split('[emitter:')[1],/^light-player=1$/m);
+assert.match(ntr('EffectEditor.text()').split('[emitter:')[1],/^reach=1.5$/m);
+console.log('Individual native torch copies preserve authored reach, tint and receiver settings');
+
+ntr('EffectEditor.selectEmitter(EffectEditor.mapEmitters().find(e=>!e.native&&e.kind==="torch").id)');
+assert.equal(ntr("$('#effectReach').disabled"),false,'copied torch reach is editable before rendering');
+
+/* Camera-window origins are not source positions. A grouped shoreline has
+ * one guide per receiver; moon sources belong on BG2, not the BG1 map top. */
+const spatialEditor=editor(fixture()),sr=spatialEditor.run;
+sr(`loadIniText('','spatial.ini');SharedRoomPreview.validateEffects=()=>{};
+ SharedRoomPreview.marshFieldDefinition=()=>${JSON.stringify(marshData)};
+ const spatialBuffer=new ArrayBuffer(200),names=['blood-water','blood-mist','wet-timber','marsh-air','moonlight','moon-cloud','moon-reflection'];
+ const positions=[1,24,48,72,96,120,144];names.forEach((n,i)=>new Uint8Array(spatialBuffer).set(new TextEncoder().encode(n+'\\0'),positions[i]));
+ globalThis.spatialShift=0;
+ globalThis.spatialApi={memory:{buffer:spatialBuffer},RoomPreview_KindName:k=>positions[k],RoomPreview_ReachSupported:()=>0,
+ RoomPreview_CatalogueCount:()=>7,RoomPreview_CatalogueValue:(i,f)=>[0xb1000000+i,i,128,0,768,512,0,0,1,1,i>=4?1:0][f],
+ RoomPreview_CatalogueGuideCount:i=>i<4?2:1,RoomPreview_CatalogueGuideValue:(i,g,f)=>
+  (i===0?[528+g*1000+spatialShift,499.5,704,23]:i===1?[528+g*1000+spatialShift,463,704,46]:
+   i===2?[216+g*1000,401,16,2]:i===3?[200+g*1000,457,28,22]:i===4?[112,62,16,16]:i===5?[88,60,170,36]:[112,207,132,122])[f]};
+ EffectEditor.updateCatalogue(spatialApi);`);
+assert.equal(sr('EffectEditor.mapEmitters(0).length'),8);
+assert(sr('EffectEditor.mapEmitters(0).every(e=>e.y>400&&!e.kind.startsWith("moon"))'));
+assert.equal(sr('EffectEditor.mapEmitters(1).length'),3,'moon, cloud and reflected-water guides live on BG2');
+assert.equal(sr('EffectEditor.mapEmitters(1).find(e=>e.kind==="moonlight").x'),112);
+sr(`EffectEditor.openModal('source:01:01:0:blood-water:b1000000');$('#effectDefinitionCreate').onclick();
+ EffectEditor.editEmitter(EffectEditor.selected(),{'span-1':'192 880'});spatialShift=8;EffectEditor.updateCatalogue(spatialApi);`);
+assert.equal(sr('EffectEditor.mapEmitters(0).find(e=>e.kind==="blood-water").x'),536,'guides refresh when the field changes');
+sr(`$('#effectInspectorApply').onclick();EffectEditor.removeEffect('field:01:01:0:marsh-field:b1000000')`);
+assert(sr('EffectEditor.mapEmitters(0).every(e=>!e.enabled)'),'linked field disable affects every terrain guide');
+sr('undo()');assert(sr('EffectEditor.mapEmitters(0).every(e=>e.enabled)'));
+console.log('Spatial shoreline, insect, timber and BG2 guides, field refresh and linked controls passed');
+const placedMarshEditor=editor(fixture()),pmr=placedMarshEditor.run;
+pmr(`loadIniText('','placed-marsh.ini');SharedRoomPreview.validateEffects=()=>{};
+ SharedRoomPreview.marshFieldDefinition=()=>${JSON.stringify(marshData)};EffectEditor.placeEmitter('marsh-field',96,160);`);
+assert.equal(pmr('EffectEditor.mapEmitters(0).length'),1);
+assert.equal(pmr('EffectEditor.mapEmitters(0)[0].x'),96);
+assert.equal(pmr('EffectEditor.mapEmitters(0)[0].y'),160);
+
+/* Ray footprints and gestures must share direction and respect layer scaling.
+ * Shift resets are edits, not range dragging or accumulating another undo. */
+const shapes=editor(fixture()),shr=shapes.run;
+shr(`loadIniText('','shape.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+  EffectEditor.placeEmitter('light-fan',200,100);$('#emitterMapEdit').onclick();view={x:0,y:0,scale:1};`);
+const sid=shr('EffectEditor.selected()');
+shr(`EffectEditor.editEmitter(EffectEditor.selected(),{angle:45,fan:60,width:100,height:160});`);
+assert.equal(shr('EffectEditor.mapEmitters()[0].rotatable'),true);
+assert(shr('EffectGeometry.rayPoint(EffectEditor.mapEmitters()[0],1).x')>300);
+assert(shr('EffectGeometry.contains(EffectEditor.mapEmitters()[0],{x:300,y:180})'));
+assert(!shr('EffectGeometry.contains(EffectEditor.mapEmitters()[0],{x:160,y:40})'));
+const rh=shr('EffectGeometry.rotation(EffectEditor.mapEmitters()[0],view.scale)');
+const beforeRotate=shr('EffectEditor.text()'),beforeRotateUndo=shr('undoStack.length');
+shr(`EmitterMapTools.begin({clientX:${rh.x},clientY:${rh.y}});EmitterMapTools.move({clientX:248,clientY:100});`);
+assert.equal(shr('EffectEditor.text()'),beforeRotate,'rotation is a draft until release');
+shr('EmitterMapTools.finish()');assert.match(shr('EffectEditor.text()'),/angle=90/);
+assert.equal(shr('undoStack.length'),beforeRotateUndo+1);
+shr('undo()');assert.equal(shr('EffectEditor.text()'),beforeRotate);shr('redo()');
+shr(`EmitterMapTools.begin({clientX:248,clientY:100,shiftKey:true});EmitterMapTools.finish()`);
+assert.doesNotMatch(shr('EffectEditor.text()'),/^angle=/m,'rotation resets to the placed default');
+shr(`EffectEditor.openModal(EffectEditor.selected());$('#emitterwidth').listeners.pointerdown({shiftKey:true,preventDefault(){},stopPropagation(){}});`);
+assert.match(shr('EffectEditor.text()'),/width=96/);
+shr(`$('#effectInspectorClose').onclick()`);assert.match(shr('EffectEditor.text()'),/width=100/);
+shr(`$('#emitterwidth').listeners.pointerdown({shiftKey:true,preventDefault(){},stopPropagation(){}});`);
+assert.match(shr('EffectEditor.text()'),/width=96/);
+const once=shr('undoStack.length');
+shr(`$('#emitterwidth').listeners.pointerdown({shiftKey:true,preventDefault(){},stopPropagation(){}});`);
+assert.equal(shr('undoStack.length'),once,'resetting a default does not add undo');
+shr(`EffectEditor.editEmitter(EffectEditor.selected(),{x:240,y:120});EmitterMapTools.begin({clientX:240,clientY:120,shiftKey:true});EmitterMapTools.finish()`);
+assert.equal(shr('EffectEditor.mapEmitters()[0].x'),200);
+assert.equal(shr('EffectEditor.mapEmitters()[0].y'),100);
+const forestShape=shr(`({x:100,y:0,width:80,height:300,guide:[1,.6,.8,1.1,0],angle:0,scaleX:2,scaleY:1,rotatable:true})`);
+shr(`const forestShape=${JSON.stringify(forestShape)};`);
+assert.equal(shr('EffectGeometry.rayPoint(forestShape,1).x'),-260);
+assert(Math.abs(shr('EffectGeometry.angleAt(forestShape,EffectGeometry.rotation({...forestShape,angle:12},1))')-12)<1e-10);
+shr(`EmitterMapTools.draw(cvs.getContext('2d'),view,{width:960,height:640})`);
+// Native offsets reset to inherited defaults even when a nonzero override existed.
+nr(`$('#nativeAngle').listeners.pointerdown({shiftKey:true,preventDefault(){},stopPropagation(){}})`);
+assert.doesNotMatch(nr('EffectEditor.text()'),/^angle=/m);
+// Complete vector components reset independently, without disturbing siblings.
+fr(`EffectEditor.selectEmitter('field:01:01:0:ray-field:46000000');EffectEditor.editEmitter(EffectEditor.selected(),{'ray-1':'1000 70 .6 .4 1 0'});EffectEditor.resetValues(EffectEditor.selected(),['ray-1'],1);`);
+assert.match(fr('EffectEditor.text()'),new RegExp('ray-1=1000 '+fieldData.match(/^ray-1=\S+ (\S+)/m)[1]+' .6 .4 1 0'));
+console.log('Directional footprints, scaled native angles, rotation drafts/undo, Shift resets and modal cancellation passed');
+
+shr(`$('#emitterwidth').value='999';$('#emitterwidth').listeners.click({shiftKey:true,preventDefault(){},stopPropagation(){}})`);
+assert.equal(Number(shapes.elements.get('#emitterwidth').value),96,'reset discards uncommitted text even when the document is already at its default');
+
+fr(`EffectEditor.editEmitter(EffectEditor.selected(),{'ray-count':2});EffectEditor.resetValues(EffectEditor.selected(),['ray-count']);`);
+assert.match(fr('EffectEditor.text()'),/^ray-count=12$/m);
+assert.match(fr('EffectEditor.text()'),new RegExp('^'+fieldData.match(/^ray-12=.*$/m)[0]+'$','m'));

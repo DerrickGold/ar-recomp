@@ -284,62 +284,78 @@ static MotionSearchResult FindGlobalMotion(
     int source_pitch, int target_pitch, int width, int height) {
   MotionVector best = {0, 0};
   unsigned best_cost = UINT_MAX;
-  /* Exhaust the small 15x15 search on a coarse grid. The former three-step
-   * hill climb was faster but could settle in a diagonal local minimum on
-   * high-frequency pixel art and move an entire background the wrong way.
-   *
-   * The exhaustive search is kept; only its memory access order changes.
-   * Scoring one candidate at a time walked the whole plane 225 times, and at
-   * a 16-pixel stride every sample landed on its own cache line, so the pair
-   * of surfaces was streamed 225 times over. Accumulating all 225 candidates
-   * per sample instead reads each source pixel once and takes every target
-   * from the 15x15 neighbourhood already around it.
-   *
-   * The result is bit-identical, not merely equivalent: the same terms are
-   * summed into the same accumulators, and unsigned addition is associative
-   * and commutative (including on wrap), so reordering cannot change a cost.
-   * BetterMotion is a total order over distinct candidates, so the winner
-   * does not depend on visit order either. */
+  /* Establish a complete cost bound with the small motions common to
+   * scrolling. Then discard other candidates only when their partial cost
+   * already exceeds that bound. Every term is nonnegative, so no discarded
+   * vector can win; ties remain eligible for BetterMotion's total ordering.
+   * Unlike a camera hint or hill climb this preserves the exhaustive result
+   * for animation, raster scrolling and authored map edits as well. */
+  _Static_assert(
+      ((kPresentationFrameGenerationMaximumWidth +
+        kGlobalMotionCoarseSampleStep - 1u) / kGlobalMotionCoarseSampleStep) *
+      ((kPresentationFrameGenerationMaximumHeight +
+        kGlobalMotionCoarseSampleStep - 1u) / kGlobalMotionCoarseSampleStep) * 1275u +
+      2u * kPresentationFrameGenerationSearchRadius * kMotionDistancePenalty <
+          UINT_MAX,
+      "Coarse motion costs must not overflow their monotonic bound");
+  for (int dy = -1; dy <= 1; dy++) {
+    for (int dx = -1; dx <= 1; dx++) {
+      const MotionVector candidate = {dx, dy};
+      const unsigned cost = GlobalCost(source, target, source_pitch, target_pitch,
+          width, height, dx, dy, kGlobalMotionCoarseSampleStep);
+      if (BetterMotion(cost, candidate, best_cost, best)) {
+        best = candidate;
+        best_cost = cost;
+      }
+    }
+  }
   enum {
     kSearchSpan = kPresentationFrameGenerationSearchRadius * 2 + 1,
     kSearchCandidates = kSearchSpan * kSearchSpan,
   };
-  unsigned costs[kSearchCandidates];
-  for (int index = 0; index < kSearchCandidates; index++) {
-    const int dy = index / kSearchSpan - kPresentationFrameGenerationSearchRadius;
-    const int dx = index % kSearchSpan - kPresentationFrameGenerationSearchRadius;
-    costs[index] =
-        (unsigned)(AbsInt(dx) + AbsInt(dy)) * kMotionDistancePenalty;
+  struct Candidate {
+    MotionVector motion;
+    ptrdiff_t offset;
+    unsigned cost;
+  } candidates[kSearchCandidates];
+  int count = 0;
+  for (int dy = -kPresentationFrameGenerationSearchRadius;
+       dy <= kPresentationFrameGenerationSearchRadius; dy++) {
+    for (int dx = -kPresentationFrameGenerationSearchRadius;
+         dx <= kPresentationFrameGenerationSearchRadius; dx++) {
+      if (AbsInt(dx) <= 1 && AbsInt(dy) <= 1) continue;
+      const unsigned cost = (unsigned)(AbsInt(dx) + AbsInt(dy)) *
+          kMotionDistancePenalty;
+      if (cost > best_cost) continue;
+      candidates[count++] = (struct Candidate){
+        {dx, dy}, (ptrdiff_t)dy * target_pitch + dx, cost};
+    }
   }
   for (int y = kPresentationFrameGenerationSearchRadius;
-       y < height - kPresentationFrameGenerationSearchRadius;
+       count && y < height - kPresentationFrameGenerationSearchRadius;
        y += kGlobalMotionCoarseSampleStep) {
-    const uint32_t *source_row = source + (size_t)y * (size_t)source_pitch;
+    const uint32_t *source_row = source + (size_t)y * source_pitch;
+    const uint32_t *target_row = target + (size_t)y * target_pitch;
+    /* Retain sample-first locality: surviving target pixels are in the same
+     * small neighbourhood, rather than re-streaming a plane per candidate. */
     for (int x = kPresentationFrameGenerationSearchRadius;
          x < width - kPresentationFrameGenerationSearchRadius;
          x += kGlobalMotionCoarseSampleStep) {
       const uint32_t sample = source_row[x];
-      unsigned *cost_row = costs;
-      for (int dy = -kPresentationFrameGenerationSearchRadius;
-           dy <= kPresentationFrameGenerationSearchRadius;
-           dy++, cost_row += kSearchSpan) {
-        const uint32_t *target_row =
-            target + (size_t)(y + dy) * (size_t)target_pitch + x;
-        for (int dx = 0; dx < kSearchSpan; dx++)
-          cost_row[dx] += PixelDifference(
-              sample,
-              target_row[dx - kPresentationFrameGenerationSearchRadius]);
-      }
+      for (int i = 0; i < count; i++)
+        candidates[i].cost += PixelDifference(
+            sample, target_row[x + candidates[i].offset]);
     }
+    int remaining = 0;
+    for (int i = 0; i < count; i++)
+      if (candidates[i].cost <= best_cost)
+        candidates[remaining++] = candidates[i];
+    count = remaining;
   }
-  for (int index = 0; index < kSearchCandidates; index++) {
-    const MotionVector candidate = {
-      index % kSearchSpan - kPresentationFrameGenerationSearchRadius,
-      index / kSearchSpan - kPresentationFrameGenerationSearchRadius,
-    };
-    if (BetterMotion(costs[index], candidate, best_cost, best)) {
-      best = candidate;
-      best_cost = costs[index];
+  for (int i = 0; i < count; i++) {
+    if (BetterMotion(candidates[i].cost, candidates[i].motion, best_cost, best)) {
+      best = candidates[i].motion;
+      best_cost = candidates[i].cost;
     }
   }
   /* Re-score the coarse winner and its immediate neighbours on twice the
@@ -408,9 +424,13 @@ bool PresentationFrameGeneration_Analyze(
   if (mode == kPresentationFrameGenerationAnalysis_Global) {
     const MotionSearchResult forward = FindGlobalMotion(
         previous, current, previous_pitch, current_pitch, width, height);
+    if (!forward.reliable) {
+      memset(field, 0, sizeof(*field));
+      return false;
+    }
     const MotionSearchResult backward = FindGlobalMotion(
         current, previous, current_pitch, previous_pitch, width, height);
-    if (!forward.reliable || !backward.reliable ||
+    if (!backward.reliable ||
         !MotionsAreInverse(forward.motion, backward.motion)) {
       memset(field, 0, sizeof(*field));
       return false;

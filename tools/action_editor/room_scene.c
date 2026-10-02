@@ -6,6 +6,7 @@
 #include "diorama/diorama_capture_blend.h"
 #include "diorama/diorama_scene_extent.h"
 #include "deterministic_hash.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -25,8 +26,18 @@ struct EditorRoomScene {
   DioramaRoomOverride terrain;
   ActionRoomSceneFrameState frame;
   ActionEnvironmentScene environment;
+  ActionSceneryCaptureCache scenery_cache;
   ActionSceneEffectFrame effects;
+  EditorRoomEffectSource default_sources[1024];
+  unsigned default_source_count;
+  ArRenderRectF timber_guides[1024];
+  unsigned timber_guide_count;
+  bool default_sources_ready;
   ActionEffectRecipes recipes;
+  uint32_t actor_preview_source;
+  int16_t actor_preview_x,actor_preview_y;
+  uint16_t actor_preview_start;
+  bool actor_preview_enabled;
   ActionEffectPreviewEvent event;
   SrSceneSurfaces surfaces;
   SrSceneRowPolicy policies[2][224];
@@ -40,6 +51,242 @@ struct EditorRoomScene {
   bool fill_configured[2];
   uint32_t fill_argb[2];
 };
+const ActionSurfaceField *EditorRoomScene_SurfaceField(const EditorRoomScene *r,unsigned index){
+  if(!r||index>=kActionSurfaceFieldKinds)return NULL;
+  for(unsigned i=0;i<r->recipes.count;++i){const ActionEffectRecipe *e=&r->recipes.records[i];
+    if(e->surface_field&&ActionSurfaceField_Index(e->kind)==(int)index&&e->group==r->assets.scene.group&&e->room==r->assets.scene.map&&e->terrain==r->assets.terrain_profile)
+      return &r->recipes.surface_fields[e->surface_field-1];}
+  return ActionSurfaceField_Bundled((unsigned)index);
+}
+const ActionProjectileField *EditorRoomScene_ProjectileField(const EditorRoomScene *r,unsigned index){
+  if(!r||index>=kActionProjectileFieldKinds)return NULL;
+  for(unsigned i=0;i<r->recipes.count;++i){const ActionEffectRecipe *e=&r->recipes.records[i];
+    if(e->projectile_field&&ActionProjectileField_Index(e->kind)==(int)index&&e->group==r->assets.scene.group&&e->room==r->assets.scene.map&&e->terrain==r->assets.terrain_profile)
+      return &r->recipes.projectile_fields[e->projectile_field-1];}
+  return ActionProjectileField_Bundled((unsigned)index);
+}
+const ActionArcField *EditorRoomScene_ArcField(const EditorRoomScene *r,unsigned index){
+  if(!r||index>=kActionArcFieldKinds)return NULL;
+  for(unsigned i=0;i<r->recipes.count;++i){const ActionEffectRecipe *e=&r->recipes.records[i];
+    if(e->arc_field&&ActionArcField_Index(e->kind)==(int)index&&e->group==r->assets.scene.group&&e->room==r->assets.scene.map&&e->terrain==r->assets.terrain_profile)
+      return &r->recipes.arc_fields[e->arc_field-1];}
+  return ActionArcField_Bundled((unsigned)index);
+}
+const ActionGlowField *EditorRoomScene_GlowField(const EditorRoomScene *r) {
+  if(!r)return NULL;
+  for(unsigned i=0;i<r->recipes.count;++i) {
+    const ActionEffectRecipe *e=&r->recipes.records[i];
+    if(e->glow_field&&e->group==r->assets.scene.group&&e->room==r->assets.scene.map&&
+       e->terrain==r->assets.terrain_profile)return &r->recipes.glow_fields[e->glow_field-1];
+  }
+  const ActionGlowField *field=ActionGlowField_Bundled(r->assets.scene.group,r->assets.scene.map);
+  return field?field:ActionGlowField_Bundled(2,3);
+}
+const ActionCastleField *EditorRoomScene_CastleField(const EditorRoomScene *r) {
+  if(!r)return NULL;
+  for(unsigned i=0;i<r->recipes.count;++i) {
+    const ActionEffectRecipe *e=&r->recipes.records[i];
+    if(e->castle_field&&e->group==r->assets.scene.group&&e->room==r->assets.scene.map&&
+       e->terrain==r->assets.terrain_profile)return &r->recipes.castle_fields[e->castle_field-1];
+  }
+  return ActionCastleField_Bundled(r->assets.scene.group==2&&r->assets.scene.map>=2?r->assets.scene.map:3);
+}
+const ActionMarshField *EditorRoomScene_MarshField(const EditorRoomScene *r) {
+  if(!r)return NULL;
+  for(unsigned i=0;i<r->recipes.count;++i) {
+    const ActionEffectRecipe *e=&r->recipes.records[i];
+    if(e->marsh_field&&e->group==r->assets.scene.group&&e->room==r->assets.scene.map&&
+       e->terrain==r->assets.terrain_profile)return &r->recipes.marsh_fields[e->marsh_field-1];
+  }
+  return ActionMarshField_Bundled();
+}
+const ActionMoonField *EditorRoomScene_MoonField(const EditorRoomScene *r) {
+  if(!r)return NULL;
+  for(unsigned i=0;i<r->recipes.count;++i) {
+    const ActionEffectRecipe *e=&r->recipes.records[i];
+    if(e->moon_field&&e->group==r->assets.scene.group&&e->room==r->assets.scene.map&&
+       e->terrain==r->assets.terrain_profile)return &r->recipes.moon_fields[e->moon_field-1];
+  }
+  return ActionMoonField_Bundled();
+}
+const ActionWaterField *EditorRoomScene_WaterField(const EditorRoomScene *r) {
+  if(!r)return NULL;
+  for(unsigned i=0;i<r->recipes.count;++i) {
+    const ActionEffectRecipe *e=&r->recipes.records[i];
+    if(e->water_field&&e->group==r->assets.scene.group&&e->room==r->assets.scene.map&&
+       e->terrain==r->assets.terrain_profile)return &r->recipes.water_fields[e->water_field-1];
+  }
+  return ActionWaterField_Bundled();
+}
+const ActionAtmosphereField *EditorRoomScene_AtmosphereField(const EditorRoomScene *r) {
+  if(!r)return NULL;
+  for(unsigned i=0;i<r->recipes.count;++i) {
+    const ActionEffectRecipe *e=&r->recipes.records[i];
+    if(e->atmosphere_field&&e->group==r->assets.scene.group&&e->room==r->assets.scene.map&&
+       e->terrain==r->assets.terrain_profile)return &r->recipes.atmosphere_fields[e->atmosphere_field-1];
+  }
+  return ActionAtmosphereField_Bundled(r&&r->assets.scene.group==1&&r->assets.scene.map>=2&&r->assets.scene.map<=4?r->assets.scene.map:2);
+}
+double EditorRoomScene_WaterFieldMapScale(const EditorRoomScene *r,unsigned axis) {
+  if(!r||axis>1)return 1;
+  ActionRoomSceneFrameRequest probe=r->assets.frame;probe.camera_x=probe.camera_y=256;
+  ActionRoomSceneFrameState frame;
+  if(!ActionRoomScene_BuildFrameState(&r->assets.scene,&probe,&frame))return 1;
+  const int32_t *camera=axis?frame.layer_camera_y:frame.layer_camera_x;
+  return camera[1]>0?256.0/camera[1]:1;
+}
+const ActionRayField *EditorRoomScene_RayField(const EditorRoomScene *r) {
+  if(!r)return NULL;
+  for(unsigned i=0;i<r->recipes.count;++i) {
+    const ActionEffectRecipe *e=&r->recipes.records[i];
+    if(e->field&&e->group==r->assets.scene.group&&e->room==r->assets.scene.map&&
+       e->terrain==r->assets.terrain_profile)return &r->recipes.fields[e->field-1];
+  }
+  return ActionRayField_Bundled();
+}
+double EditorRoomScene_RayFieldMapScale(const EditorRoomScene *r, unsigned axis) {
+  if (!r || axis > 1) return 1;
+  ActionRoomSceneFrameRequest probe = r->assets.frame;
+  probe.camera_x = probe.camera_y = 256;
+  ActionRoomSceneFrameState frame;
+  if (!ActionRoomScene_BuildFrameState(&r->assets.scene, &probe, &frame)) return 1;
+  const int32_t *camera = axis ? frame.layer_camera_y : frame.layer_camera_x;
+  const float position = (camera[0] + camera[1]) * .5f;
+  return position > 0 ? 256 / position : 1;
+}
+
+static int CompareTimberGuides(const void *a, const void *b) {
+  const ArRenderRectF *left = a, *right = b;
+  if (left->y != right->y) return left->y < right->y ? -1 : 1;
+  return (left->x > right->x) - (left->x < right->x);
+}
+
+unsigned EditorRoomScene_DefaultSourceCount(EditorRoomScene *r) {
+  if (!r) return 0;
+  if (r->default_sources_ready) return r->default_source_count;
+  r->default_sources_ready = true;
+  const unsigned width = r->assets.scene.bg[0].pages_wide * 256u;
+  const unsigned height = r->assets.scene.bg[0].pages_high * 256u;
+  float map_scale[2][2] = {{1, 1}, {1, 1}};
+  ActionRoomSceneFrameRequest probe = r->assets.frame;
+  probe.camera_x = probe.camera_y = 256;
+  ActionRoomSceneFrameState p;
+  if (ActionRoomScene_BuildFrameState(&r->assets.scene, &probe, &p))
+    for (unsigned axis = 0; axis < 2; ++axis) {
+      const int32_t *camera = axis ? p.layer_camera_y : p.layer_camera_x;
+      const float positions[2] = {camera[1], (camera[0] + camera[1]) * .5f};
+      for (unsigned plane = 0; plane < 2; ++plane)
+        if (positions[plane] > 0) map_scale[plane][axis] = 256 / positions[plane];
+    }
+  ActionSceneEffectFrame sample = {0};
+  for (unsigned y = 0; y < height; y += 224)
+    for (unsigned x = 0; x < width; x += 256) {
+      ActionRoomSceneFrameRequest request = r->assets.frame;
+      request.camera_x = x;
+      request.camera_y = y;
+      request.game_frame = 0;
+      ActionRoomSceneFrameState frame;
+      ActionEnvironmentScene scene;
+      if (!ActionRoomScene_BuildFrameState(&r->assets.scene, &request, &frame) ||
+          !ActionEnvironmentScene_FromRoom(&scene, &r->assets.scene, &frame))
+        continue;
+      memset(&sample, 0, sizeof(sample));
+      ActionMapEnvironmentScene_Capture(&scene, &sample, NULL);
+      ActionEnvironmentScene_Capture(&scene, &sample);
+      /* Capture only once while inventorying the room. These silhouettes are
+       * derived from terrain, so expose the actual timber rather than the
+       * camera-local origin of its aggregate render record. */
+      for (unsigned i = 0; i < sample.bloodpool.timber_count; ++i) {
+        const ActionBloodpoolTimber *t = &sample.bloodpool.timber[i];
+        const ArRenderRectF guide = {t->x0, t->y, t->x1 - t->x0, 2};
+        bool found = false;
+        for (unsigned j = 0; j < r->timber_guide_count; ++j)
+          if (!memcmp(&guide, &r->timber_guides[j], sizeof(guide))) { found = true; break; }
+        if (!found && r->timber_guide_count < 1024)
+          r->timber_guides[r->timber_guide_count++] = guide;
+      }
+      for (unsigned i = 0; i < sample.decoration_count; ++i) {
+        const ActionEffectInstance *e = &sample.decorations[i];
+        bool found = false;
+        for (unsigned j = 0; j < r->default_source_count; ++j)
+          if (r->default_sources[j].effect.kind == e->kind &&
+              r->default_sources[j].effect.generation == e->generation)
+            found = true;
+        if (found) continue;
+        if (r->default_source_count == 1024) return r->default_source_count;
+        EditorRoomEffectSource *source = &r->default_sources[r->default_source_count++];
+        source->effect = *e;
+        /* Catalogue guides use the light layer's native coordinates. Map
+         * handles invert its scroll ratio to operate in BG1 map pixels. */
+        source->map_scale_x = source->map_scale_y = 1;
+        if (e->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds ||
+            e->projection_plane == kActionEffectProjectionPlane_Bg2) {
+          const unsigned plane =
+              e->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds ? 1 : 0;
+          source->map_scale_x = map_scale[plane][0];
+          source->map_scale_y = map_scale[plane][1];
+        }
+      }
+    }
+  /* A log can span several metatiles. One guide per continuous exposed edge
+   * is enough to reach its shared controls and avoids a row of stacked icons. */
+  qsort(r->timber_guides, r->timber_guide_count, sizeof(r->timber_guides[0]), CompareTimberGuides);
+  unsigned count = 0;
+  for (unsigned i = 0; i < r->timber_guide_count; ++i) {
+    const ArRenderRectF next = r->timber_guides[i];
+    ArRenderRectF *last = count ? &r->timber_guides[count-1] : NULL;
+    if (last && last->y == next.y && next.x <= last->x + last->w)
+      last->w = fmaxf(last->x + last->w, next.x + next.w) - last->x;
+    else r->timber_guides[count++] = next;
+  }
+  r->timber_guide_count = count;
+  return r->default_source_count;
+}
+const EditorRoomEffectSource *EditorRoomScene_DefaultSource(EditorRoomScene *r, unsigned index) {
+  return index < EditorRoomScene_DefaultSourceCount(r) ? &r->default_sources[index] : NULL;
+}
+
+unsigned EditorRoomScene_DefaultGuideCount(EditorRoomScene *r, unsigned index) {
+  const EditorRoomEffectSource *s = EditorRoomScene_DefaultSource(r, index);
+  if (!s) return 0;
+  switch (s->effect.kind) {
+  case kActionEffect_BloodpoolWater: case kActionEffect_BloodpoolMist:
+    return (unsigned)EditorRoomScene_MarshField(r)->SpanCount[0];
+  case kActionEffect_BloodpoolAir:
+    return (unsigned)EditorRoomScene_MarshField(r)->SpanCount[0] * 2;
+  case kActionEffect_BloodpoolTimber: return r->timber_guide_count;
+  case kActionEffect_BloodpoolMoonlight: case kActionEffect_BloodpoolMoonReflection:
+  case kActionEffect_BloodpoolCloud: return 1;
+  default: return 0;
+  }
+}
+bool EditorRoomScene_DefaultGuide(EditorRoomScene *r, unsigned index, unsigned guide,
+                                  ArRenderRectF *bounds) {
+  if (!bounds || guide >= EditorRoomScene_DefaultGuideCount(r, index)) return false;
+  const unsigned kind = r->default_sources[index].effect.kind;
+  const ActionMarshField *m = EditorRoomScene_MarshField(r);
+  const ActionMoonField *f = EditorRoomScene_MoonField(r);
+  if (kind == kActionEffect_BloodpoolTimber) *bounds = r->timber_guides[guide];
+  else if (kind == kActionEffect_BloodpoolAir) {
+    const float bank = guide & 1 ? m->spans[guide/2][1] - m->InsectRegion[0] :
+                                  m->spans[guide/2][0] + m->InsectRegion[0];
+    const float rx = m->InsectMotion[2] + m->InsectMotion[4], ry = m->InsectMotion[6];
+    *bounds = (ArRenderRectF){bank-rx, m->InsectRegion[1]-ry, rx*2, m->InsectRegion[2]+ry*2};
+  } else if (kind == kActionEffect_BloodpoolWater || kind == kActionEffect_BloodpoolMist) {
+    const float top = kind == kActionEffect_BloodpoolMist ? m->Surface[0]+m->MistWindow[0] : m->Surface[1];
+    const float bottom = kind == kActionEffect_BloodpoolMist ? m->Surface[0]+m->MistWindow[1] : m->Surface[2];
+    *bounds = (ArRenderRectF){m->spans[guide][0], top, m->spans[guide][1]-m->spans[guide][0], bottom-top};
+  } else if (kind == kActionEffect_BloodpoolMoonlight) {
+    *bounds = (ArRenderRectF){f->Anchor[0]-8, f->Anchor[1]-8, 16, 16};
+  } else if (kind == kActionEffect_BloodpoolCloud) {
+    *bounds = (ArRenderRectF){f->Anchor[0]+f->CloudMotion[2]-f->CloudShape[0],
+        f->Anchor[1]+f->CloudMotion[5]-f->CloudShape[1], f->CloudShape[0]*2, f->CloudShape[1]*2};
+  } else {
+    *bounds = (ArRenderRectF){f->Anchor[0]+f->ReflectionGlow[0]-f->ReflectionGlow[2],
+        f->Anchor[1]+f->ReflectionGlow[1]-f->ReflectionGlow[3], f->ReflectionGlow[2]*2, f->ReflectionGlow[3]*2};
+  }
+  return true;
+}
 
 static int Wrap(int x, unsigned size) {
   int v = x % (int)size;
@@ -112,6 +359,27 @@ static uint32_t Edit(void *context, int32_t x, int32_t y, SrPpuCaptureTile *tile
     tile->transparent_rows[row] = (uint8_t)(edit->transparent[at] >> shift);
   }
   return tile->band < 3 && (stamp || edit);
+}
+static bool EnvironmentTileEdit(void *context, unsigned bg, int x, int y,
+                                ActionEnvironmentTileEdit *out) {
+  EditorRoomScene *r = context;
+  if (bg >= 2) return false;
+  RoomLayer *l = &r->layers[bg];
+  SrPpuCaptureTile tile;
+  if (!Edit(l, x, y, &tile)) {
+    uint16_t word;
+    if (!Lookup(l, x, y, &word)) return false;
+    tile = (SrPpuCaptureTile){.entry = word, .band = (word & 0x2000) ? 2 : 1};
+    (void)Band(l, x, y, word, &tile.band);
+  }
+  *out = (ActionEnvironmentTileEdit){.entry = tile.entry,
+                                     .band = tile.band,
+                                     /* Both paths above resolve the actual world word. */
+                                     .replace = 1,
+                                     .blank = (tile.flags & SR_PPU_CAPTURE_TILE_BLANK) != 0};
+  memcpy(out->black, tile.black_rows, 8);
+  memcpy(out->transparent, tile.transparent_rows, 8);
+  return true;
 }
 EditorRoomScene *EditorRoomScene_Create(const ActionSceneSnapshot *assets) {
   if (!assets) return NULL;
@@ -214,6 +482,24 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
   free(terrain);
   return ok;
 }
+bool EditorRoomScene_PreviewBinding(EditorRoomScene *r,bool enabled,uint32_t source,int x,int y,unsigned start) {
+  if(!r||x<-2048||x>16384||y<-2048||y>16384||start>65535)return false;
+  r->actor_preview_enabled=enabled;r->actor_preview_source=source;
+  r->actor_preview_x=x;r->actor_preview_y=y;r->actor_preview_start=start;return true;
+}
+static void CaptureBindingPreview(EditorRoomScene *r) {
+  if(!r->actor_preview_enabled)return;
+  for(unsigned i=0;i<r->recipes.count;++i){const ActionEffectRecipe *e=&r->recipes.records[i];
+    if(!e->emitter||!e->actor.target||e->source!=r->actor_preview_source||e->group!=r->environment.group||
+        e->room!=r->environment.room||e->terrain!=r->assets.terrain_profile)continue;
+    const ActionEffectActorSelector *a=&e->actor;
+    const uint16_t age=(uint16_t)(r->environment.clock-r->actor_preview_start);
+    r->effects.actors[0]=(ActionEffectActor){.generation=1,.source=a->source,.parent_source=a->parent,.animation=a->animation,
+      .state=a->state_first,.visual=a->visual_first,.handler=a->handler,.resume=a->resume,.age=age,.phase_ticks=age,
+      .x=r->actor_preview_x,.y=r->actor_preview_y,.bank=0x7e,.priority=2,.visible=1,.player=a->target==2};
+    r->effects.actor_count=1;return;
+  }
+}
 void EditorRoomScene_SetEvent(EditorRoomScene *r,const ActionEffectPreviewEvent *event) {if(r)r->event=event?*event:(ActionEffectPreviewEvent){0};}
 static int Min(int a, int b) { return a < b ? a : b; }
 static int Max(int a, int b) { return a > b ? a : b; }
@@ -231,8 +517,38 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   if (!ActionRoomScene_BuildFrameState(s, &request, f)) return false;
   memset(&r->effects,0,sizeof(r->effects));
   if (!ActionEnvironmentScene_FromRoom(&r->environment,s,f)) return false;
+  uint8_t chars[kActionRoomSceneCharacterBytes];
+  if (!ActionRoomScene_BuildCharacters(s, frame, f->animation_phase, chars, sizeof(chars)))
+    return false;
+  for (unsigned i = 0; i < sizeof(chars) / 2; ++i)
+    r->vram[i] = chars[i * 2] | ((uint16_t)chars[i * 2 + 1] << 8);
+  for (unsigned i = 0; i < sizeof(s->extra_characters) / 2; ++i)
+    r->vram[sizeof(chars) / 2 + i] =
+        s->extra_characters[i * 2] | ((uint16_t)s->extra_characters[i * 2 + 1] << 8);
+  for (unsigned i = 0; i < sizeof(s->palette) / 2; ++i)
+    r->palette[i] = s->palette[i * 2] | ((uint16_t)s->palette[i * 2 + 1] << 8);
+  r->environment.vram = r->vram;
+  r->environment.tile_base[0] = 0;
+  r->environment.tile_base[1] = 0;
+  r->environment.tile_edit = EnvironmentTileEdit;
+  r->environment.tile_edit_context = r;
   r->effects.game_frame = r->environment.clock;
+  r->environment.suppress_default_glow_field=ActionEffectRecipes_ReplacesGlowField(&r->recipes,
+      r->environment.group,r->environment.room,r->assets.terrain_profile);
+  ActionEffectRecipes_SurfaceFields(&r->recipes,r->environment.group,r->environment.room,r->assets.terrain_profile,r->environment.surface_fields);
   ActionMapEnvironmentScene_Capture(&r->environment,&r->effects,NULL);
+  r->environment.suppress_default_castle_field=ActionEffectRecipes_ReplacesCastleField(&r->recipes,
+      r->environment.group,r->environment.room,r->assets.terrain_profile);
+  r->environment.suppress_default_marsh_field=ActionEffectRecipes_ReplacesMarshField(&r->recipes,
+      r->environment.group,r->environment.room,r->assets.terrain_profile);
+  r->environment.suppress_default_moon_field=ActionEffectRecipes_ReplacesMoonField(&r->recipes,
+      r->environment.group,r->environment.room,r->assets.terrain_profile);
+  r->environment.suppress_default_water_field=ActionEffectRecipes_ReplacesWaterField(&r->recipes,
+      r->environment.group,r->environment.room,r->assets.terrain_profile);
+  r->environment.suppress_default_atmosphere_field=ActionEffectRecipes_ReplacesAtmosphereField(&r->recipes,
+      r->environment.group,r->environment.room,r->assets.terrain_profile);
+  r->environment.suppress_default_ray_field=ActionEffectRecipes_ReplacesRayField(&r->recipes,
+      r->environment.group,r->environment.room,r->assets.terrain_profile);
   ActionEnvironmentScene_Capture(&r->environment,&r->effects);
   r->scene.layer_section = kDioramaLayerSection_Room;
   if (!r->effects.decoration_overflow)
@@ -245,7 +561,6 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
       r->effects.decorations[r->effects.decoration_count++]=event;
     else {r->effects.effects[0]=event;r->effects.effect_count=r->effects.visible_count=1;}
   }
-  ActionEffectRecipes_Apply(&r->recipes,s->group,s->map,r->assets.terrain_profile,r->environment.clock,&r->environment,&r->effects);
   ActionBgFrameState state = {.map_group = s->group, .map_number = s->map,
       .decorative_padding_enabled = true};
   for (unsigned bg = 0; bg < 2; ++bg)
@@ -266,15 +581,6 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   if (bottom < budget) top += Min(remaining, Min(Max(0, room_y), budget * 2) - top);
   else if (top < budget) bottom += Min(remaining,
       Min(Max(0, world_height - 225 - room_y), budget * 2) - bottom);
-  uint8_t chars[kActionRoomSceneCharacterBytes];
-  if (!ActionRoomScene_BuildCharacters(s, frame, f->animation_phase, chars, sizeof(chars))) return false;
-  for (unsigned i = 0; i < sizeof(chars) / 2; ++i)
-    r->vram[i] = chars[i * 2] | ((uint16_t)chars[i * 2 + 1] << 8);
-  for (unsigned i = 0; i < sizeof(s->extra_characters) / 2; ++i)
-    r->vram[sizeof(chars) / 2 + i] = s->extra_characters[i * 2] |
-        ((uint16_t)s->extra_characters[i * 2 + 1] << 8);
-  for (unsigned i = 0; i < sizeof(s->palette) / 2; ++i)
-    r->palette[i] = s->palette[i * 2] | ((uint16_t)s->palette[i * 2 + 1] << 8);
   SrSceneFrame input = {.struct_size = sizeof(input), .vram = r->vram,
     .cgram = r->palette, .mosaic = f->mosaic, .extra_x = extra_x, .top = top, .bottom = bottom,
     .main_screen = f->screen_enabled[0] & 3, .sub_screen = f->screen_enabled[1] & 3,
@@ -321,6 +627,10 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
         r->scene.layer_section, bg, &fill, &b->fill_cgram);
     b->fill_mode = (uint8_t)fill; r->fill_configured[bg] = b->fill_configured;
   }
+  CaptureBindingPreview(r);
+  r->environment.scenery_cache = &r->scenery_cache;
+  ActionEffectRecipes_Apply(&r->recipes, s->group, s->map, r->assets.terrain_profile,
+                            r->environment.clock, &r->environment, &r->effects);
   if (ActRaiserRoom_ProfileFor(s->group, s->map) == kActRaiserRoomProfile_AitosWaterfall &&
       plan.layer[1].source == kActionBgSource_NativeTilemap)
     input.native_page_mask = 2;
@@ -420,6 +730,68 @@ uint32_t EditorRoomScene_EffectHash(const EditorRoomScene *r) {
   if (!r) return 0;
   const ActionSceneEffectFrame *frame = &r->effects;
   uint32_t h = DETERMINISTIC_HASH_FNV1A32_OFFSET;
+  for(unsigned i=0;i<kActionSurfaceFieldKinds;++i){
+    const ActionSurfaceField *field=(frame->surface_fields_valid&(1u<<i))?&frame->surface_fields[i]:ActionSurfaceField_Bundled(i);
+    h=DeterministicHash_Fnv1a32Word(h,field->hash);
+    h=DeterministicHash_Fnv1a32Word(h,(unsigned)field->Components[0]);
+  }
+  for(unsigned i=0;i<kActionProjectileFieldKinds;++i){
+    const ActionProjectileField *field=(frame->projectile_fields_valid&(1u<<i))?&frame->projectile_fields[i]:ActionProjectileField_Bundled(i);
+    h=DeterministicHash_Fnv1a32Word(h,field->hash);
+    h=DeterministicHash_Fnv1a32Word(h,(unsigned)field->Components[0]);
+  }
+  for(unsigned i=0;i<kActionArcFieldKinds;++i){
+    const ActionArcField *field=(frame->arc_fields_valid&(1u<<i))?&frame->arc_fields[i]:ActionArcField_Bundled(i);
+    h=DeterministicHash_Fnv1a32Word(h,field->hash);
+    h=DeterministicHash_Fnv1a32Word(h,(unsigned)field->Components[0]);
+  }
+  h=DeterministicHash_Fnv1a32Word(h,frame->glow_field_valid);
+  if(frame->glow_field_valid) {
+    char definition[16384];
+    const size_t size=ActionGlowField_Write(&frame->glow_field,definition,sizeof(definition));
+    for(size_t i=0;i<size;++i)h=(h^(unsigned char)definition[i])*16777619u;
+  }
+  h=DeterministicHash_Fnv1a32Word(h,frame->castle_field_valid);
+  if(frame->castle_field_valid) {
+    char definition[16384];
+    const size_t size=ActionCastleField_Write(&frame->castle_field,definition,sizeof(definition));
+    for(size_t i=0;i<size;++i)h=(h^(unsigned char)definition[i])*16777619u;
+  }
+  h=DeterministicHash_Fnv1a32Word(h,frame->bloodpool.field_valid);
+  if(frame->bloodpool.field_valid) {
+    char definition[16384];
+    const size_t size=ActionMarshField_Write(&frame->bloodpool.field,definition,sizeof(definition));
+    for(size_t i=0;i<size;++i)h=(h^(unsigned char)definition[i])*16777619u;
+  }
+  h=DeterministicHash_Fnv1a32Word(h,frame->moon_field_valid);
+  if(frame->moon_field_valid) {
+    char definition[16384];
+    const size_t size=ActionMoonField_Write(&frame->moon_field,definition,sizeof(definition));
+    for(size_t i=0;i<size;++i)h=(h^(unsigned char)definition[i])*16777619u;
+  }
+  h=DeterministicHash_Fnv1a32Word(h,frame->water_field_valid);
+  if(frame->water_field_valid) {
+    char definition[16384];
+    const size_t size=ActionWaterField_Write(&frame->water_field,definition,sizeof(definition));
+    for(size_t i=0;i<size;++i)h=(h^(unsigned char)definition[i])*16777619u;
+  }
+  h=DeterministicHash_Fnv1a32Word(h,frame->atmosphere_field_valid);
+  if(frame->atmosphere_field_valid) {
+    char definition[16384];
+    const size_t size=ActionAtmosphereField_Write(&frame->atmosphere_field,definition,sizeof(definition));
+    for(size_t i=0;i<size;++i)h=(h^(unsigned char)definition[i])*16777619u;
+  }
+  h = DeterministicHash_Fnv1a32Word(h, frame->ray_field_valid);
+  if (frame->ray_field_valid) {
+    /* The codec omits padding and uses round-trip decimal values. This debug
+     * digest is outside capture/rendering; it must include complete recipes. */
+    char definition[16384];
+    const size_t size = ActionRayField_Write(&frame->ray_field, definition, sizeof(definition));
+    for (size_t i = 0; i < size; ++i) {
+      h ^= (unsigned char)definition[i];
+      h *= UINT32_C(16777619);
+    }
+  }
   for (unsigned list=0;list<3;++list) {
     const unsigned count=list==2?frame->effect_count:list?frame->authored_count:frame->decoration_count;
     const ActionEffectInstance *instances=list==2?frame->effects:list?frame->authored:frame->decorations;
@@ -457,6 +829,27 @@ uint32_t EditorRoomScene_EffectHash(const EditorRoomScene *r) {
         uint32_t bits;memcpy(&bits,&values[k],sizeof(bits));h=DeterministicHash_Fnv1a32Word(h,bits);
       }
     }
+  }
+  h = DeterministicHash_Fnv1a32Word(h, frame->members.count);
+  for (unsigned i = 0; i < frame->members.count; ++i) {
+    const ActionNativeMember *m = &frame->members.records[i];
+    h = DeterministicHash_Fnv1a32Word(h, m->kind | ((uint32_t)m->index << 8) |
+                                             ((uint32_t)m->enabled << 16));
+    h = DeterministicHash_Fnv1a32Word(h, m->color);
+    const float values[] = {m->offset_x,     m->offset_y, m->width_scale,
+                            m->length_scale, m->angle,    m->intensity};
+    for (unsigned j = 0; j < 6; ++j) {
+      uint32_t bits;
+      memcpy(&bits, &values[j], 4);
+      h = DeterministicHash_Fnv1a32Word(h, bits);
+    }
+  }
+  h = DeterministicHash_Fnv1a32Word(h, frame->scenery.valid);
+  h = DeterministicHash_Fnv1a32Word(h, frame->scenery.count);
+  for (unsigned i = 0; i < frame->scenery.count; ++i) {
+    const ActionMoonlightOccluder *o = &frame->scenery.rectangles[i];
+    h = DeterministicHash_Fnv1a32Word(h, (uint16_t)o->x0 | ((uint32_t)(uint16_t)o->x1 << 16));
+    h = DeterministicHash_Fnv1a32Word(h, (uint16_t)o->y0 | ((uint32_t)(uint16_t)o->y1 << 16));
   }
   h=DeterministicHash_Fnv1a32Word(h,frame->moonlight.valid);
   for (unsigned i=0;i<frame->moonlight.count;++i) {

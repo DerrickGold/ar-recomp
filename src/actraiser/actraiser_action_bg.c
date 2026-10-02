@@ -8,6 +8,7 @@
 
 #include "actraiser_game.h"
 #include "action/action_room_scene.h"
+#include "action/action_environment_scene.h"
 #include "action/action_room_terrain.h"
 #include "action/action_room_mosaic.h"
 #include "deterministic_hash.h"
@@ -1684,6 +1685,48 @@ static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
       tile->transparent_rows[row] = (uint8_t)(edit->transparent[mask_row] >> shift);
     }
   return tile->band < kDioramaVirtualBandCount && (stamp || edit);
+}
+
+static bool EnvironmentTileEdit(void *context, unsigned bg, int x, int y,
+                                ActionEnvironmentTileEdit *out) {
+  const ActionEnvironmentScene *scene = context;
+  if (bg >= 2 || !scene || !ActRaiserActionBg_HleEnabled() || !s_observer.map_valid ||
+      s_observer.map_group != scene->group || s_observer.map_number != scene->room)
+    return false;
+  const ActRaiserActionBgProvider *p = &s_provider[bg];
+  if (!p->world ||
+      (!p->world_apron_available && !p->horizontal_bounds_available && !p->pixel_edits_active))
+    return false;
+  SrPpuCaptureTile tile;
+  const bool edited = ProviderCaptureTile((void *)p, x, y, &tile) != 0;
+  if (!edited) {
+    uint16_t word;
+    if (!p->world || ActionBgWorld_Lookup(p->world, x, y, &word) != kActionBgLookup_Tile)
+      return false;
+    tile = (SrPpuCaptureTile){.entry = word, .band = (word & 0x2000) ? 2 : 1};
+    if (p->pixel_band_cache_active) (void)ProviderBandLookup((void *)p, x, y, word, &tile.band);
+  }
+  *out = (ActionEnvironmentTileEdit){.entry = tile.entry,
+                                     .band = tile.band,
+                                     /* Both paths above resolve the actual world word. */
+                                     .replace = 1,
+                                     .blank = (tile.flags & SR_PPU_CAPTURE_TILE_BLANK) != 0};
+  memcpy(out->black, tile.black_rows, 8);
+  memcpy(out->transparent, tile.transparent_rows, 8);
+  return true;
+}
+bool ActRaiserActionBg_BindEnvironmentScenery(ActionEnvironmentScene *scene) {
+  SrPpuStateSnapshot ppu;
+  SrBorrowedU16Span vram;
+  if (!scene || !QueryPpuState(&ppu) || ppu.bg_mode != 1 ||
+      !BorrowVram(ppu.lifetime_generation, &vram))
+    return false;
+  scene->vram = vram.data;
+  for (unsigned i = 0; i < 2; ++i)
+    scene->tile_base[i] = ppu.backgrounds[i].tile_base_word;
+  scene->tile_edit = EnvironmentTileEdit;
+  scene->tile_edit_context = scene;
+  return true;
 }
 
 bool ActRaiserActionBg_BindCaptureTiles(uint8_t capture_mask, uint8_t apron_mask) {

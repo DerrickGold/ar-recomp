@@ -1,0 +1,1227 @@
+[
+  {
+    "group": 1,
+    "type": 0,
+    "source": "A934",
+    "animation": "4000",
+    "label": "Actor type 00"
+  },
+  {
+    "group": 1,
+    "type": 1,
+    "source": "A9B3",
+    "animation": "4000",
+    "label": "Actor type 01"
+  },
+  {
+    "group": 1,
+    "type": 2,
+    "source": "A9DA",
+    "animation": "4000",
+    "label": "Actor type 02"
+  },
+  {
+    "group": 1,
+    "type": 3,
+    "source": "AA9A",
+    "animation": "4000",
+    "label": "Actor type 03"
+  },
+  {
+    "group": 1,
+    "type": 4,
+    "source": "AD45",
+    "animation": "5000",
+    "label": "Actor type 04"
+  },
+  {
+    "group": 1,
+    "type": 5,
+    "source": "ABAB",
+    "animation": "4000",
+    "label": "Actor type 05"
+  },
+  {
+    "group": 1,
+    "type": 6,
+    "source": "AB30",
+    "animation": "4000",
+    "label": "Actor type 06"
+  },
+  {
+    "group": 1,
+    "type": 7,
+    "source": "AB3E",
+    "animation": "4000",
+    "label": "Actor type 07"
+  },
+  {
+    "group": 1,
+    "type": 8,
+    "source": "AB4C",
+    "animation": "4000",
+    "label": "Actor type 08"
+  },
+  {
+    "group": 1,
+    "type": 9,
+    "source": "AC8E",
+    "animation": "4000",
+    "label": "Actor type 09"
+  },
+  {
+    "group": 1,
+    "type": 10,
+    "source": "AF5D",
+    "animation": "5000",
+    "label": "Actor type 0A"
+  },
+  {
+    "group": 1,
+    "type": 14,
+    "source": "B0B4",
+    "animation": "4000",
+    "label": "Actor type 0E"
+  },
+  {
+    "group": 1,
+    "type": 15,
+    "source": "B041",
+    "animation": "4000",
+    "label": "Actor type 0F"
+  },
+  {
+    "group": 1,
+    "type": 16,
+    "source": "B155",
+    "animation": "4000",
+    "label": "Actor type 10"
+  },
+  {
+    "group": 1,
+    "type": 17,
+    "source": "B173",
+    "animation": "4000",
+    "label": "Actor type 11"
+  },
+  {
+    "group": 1,
+    "type": 18,
+    "source": "B191",
+    "animation": "4000",
+    "label": "Actor type 12"
+  },
+  {
+    "group": 1,
+    "type": 19,
+    "source": "B1AF",
+    "animation": "4000",
+    "label": "Actor type 13"
+  },
+  {
+    "group": 1,
+    "type": 20,
+    "source": "B28D",
+    "animation": "4000",
+    "label": "Actor type 14"
+  },
+  {
+    "group": 1,
+    "type": 21,
+    "source": "B2B3",
+    "animation": "4000",
+    "label": "Actor type 15"
+  },
+  {
+    "group": 1,
+    "type": 22,
+    "source": "B2FD",
+    "animation": "4000",
+    "label": "Actor type 16"
+  },
+  {
+    "group": 1,
+    "type": 23,
+    "source": "B379",
+    "animation": "4000",
+    "label": "Actor type 17"
+  },
+  {
+    "group": 1,
+    "type": 24,
+    "source": "B3A1",
+    "animation": "4000",
+    "label": "Actor type 18"
+  },
+  {
+    "group": 1,
+    "type": 25,
+    "source": "B3BF",
+    "animation": "4000",
+    "label": "Actor type 19"
+  },
+  {
+    "group": 1,
+    "type": 26,
+    "source": "B246",
+    "animation": "4000",
+    "label": "Actor type 1A"
+  },
+  {
+    "group": 1,
+    "type": 27,
+    "source": "ACDB",
+    "animation": "4000",
+    "label": "Actor type 1B"
+  },
+  {
+    "group": 1,
+    "type": 28,
+    "source": "AC02",
+    "animation": "4000",
+    "label": "Actor type 1C"
+  },
+  {
+    "group": 1,
+    "type": 29,
+    "source": "AC32",
+    "animation": "4000",
+    "label": "Actor type 1D"
+  },
+  {
+    "group": 1,
+    "type": 30,
+    "source": "AC5E",
+    "animation": "4000",
+    "label": "Actor type 1E"
+  },
+  {
+    "group": 2,
+    "type": 0,
+    "source": "B499",
+    "animation": "4000",
+    "label": "Actor type 00"
+  },
+  {
+    "group": 2,
+    "type": 1,
+    "source": "B4C0",
+    "animation": "4000",
+    "label": "Actor type 01"
+  },
+  {
+    "group": 2,
+    "type": 2,
+    "source": "B4F9",
+    "animation": "4000",
+    "label": "Actor type 02"
+  },
+  {
+    "group": 2,
+    "type": 3,
+    "source": "B571",
+    "animation": "4000",
+    "label": "Actor type 03"
+  },
+  {
+    "group": 2,
+    "type": 4,
+    "source": "B61A",
+    "animation": "4000",
+    "label": "Actor type 04"
+  },
+  {
+    "group": 2,
+    "type": 5,
+    "source": "B727",
+    "animation": "4000",
+    "label": "Actor type 05"
+  },
+  {
+    "group": 2,
+    "type": 6,
+    "source": "B786",
+    "animation": "5000",
+    "label": "Bloodpool Act 1 boss"
+  },
+  {
+    "group": 2,
+    "type": 15,
+    "source": "B977",
+    "animation": "4000",
+    "label": "Actor type 0F"
+  },
+  {
+    "group": 2,
+    "type": 16,
+    "source": "B9A3",
+    "animation": "4000",
+    "label": "Actor type 10"
+  },
+  {
+    "group": 2,
+    "type": 17,
+    "source": "B9D2",
+    "animation": "4000",
+    "label": "Actor type 11"
+  },
+  {
+    "group": 2,
+    "type": 18,
+    "source": "BA01",
+    "animation": "4000",
+    "label": "Actor type 12"
+  },
+  {
+    "group": 2,
+    "type": 19,
+    "source": "BA12",
+    "animation": "4000",
+    "label": "Actor type 13"
+  },
+  {
+    "group": 2,
+    "type": 20,
+    "source": "BA23",
+    "animation": "4000",
+    "label": "Actor type 14"
+  },
+  {
+    "group": 2,
+    "type": 21,
+    "source": "BA34",
+    "animation": "4000",
+    "label": "Actor type 15"
+  },
+  {
+    "group": 2,
+    "type": 22,
+    "source": "BA48",
+    "animation": "4000",
+    "label": "Actor type 16"
+  },
+  {
+    "group": 2,
+    "type": 23,
+    "source": "BA5C",
+    "animation": "4000",
+    "label": "Actor type 17"
+  },
+  {
+    "group": 2,
+    "type": 24,
+    "source": "BA70",
+    "animation": "4000",
+    "label": "Actor type 18"
+  },
+  {
+    "group": 2,
+    "type": 30,
+    "source": "BD84",
+    "animation": "4000",
+    "label": "Actor type 1E"
+  },
+  {
+    "group": 2,
+    "type": 31,
+    "source": "BCC3",
+    "animation": "4000",
+    "label": "Actor type 1F"
+  },
+  {
+    "group": 2,
+    "type": 32,
+    "source": "BAE5",
+    "animation": "4000",
+    "label": "Actor type 20"
+  },
+  {
+    "group": 2,
+    "type": 33,
+    "source": "BB19",
+    "animation": "4000",
+    "label": "Actor type 21"
+  },
+  {
+    "group": 2,
+    "type": 34,
+    "source": "BB78",
+    "animation": "4000",
+    "label": "Actor type 22"
+  },
+  {
+    "group": 2,
+    "type": 35,
+    "source": "BBA8",
+    "animation": "4000",
+    "label": "Actor type 23"
+  },
+  {
+    "group": 2,
+    "type": 36,
+    "source": "BCB5",
+    "animation": "4000",
+    "label": "Actor type 24"
+  },
+  {
+    "group": 2,
+    "type": 37,
+    "source": "BD2A",
+    "animation": "4000",
+    "label": "Actor type 25"
+  },
+  {
+    "group": 2,
+    "type": 38,
+    "source": "BD76",
+    "animation": "4000",
+    "label": "Actor type 26"
+  },
+  {
+    "group": 2,
+    "type": 39,
+    "source": "BDFF",
+    "animation": "5000",
+    "label": "Actor type 27"
+  },
+  {
+    "group": 3,
+    "type": 4,
+    "source": "C66F",
+    "animation": "5000",
+    "label": "Actor type 04"
+  },
+  {
+    "group": 3,
+    "type": 5,
+    "source": "C2F2",
+    "animation": "4000",
+    "label": "Actor type 05"
+  },
+  {
+    "group": 3,
+    "type": 6,
+    "source": "C3A5",
+    "animation": "4000",
+    "label": "Actor type 06"
+  },
+  {
+    "group": 3,
+    "type": 7,
+    "source": "C45F",
+    "animation": "4000",
+    "label": "Actor type 07"
+  },
+  {
+    "group": 3,
+    "type": 8,
+    "source": "C56A",
+    "animation": "4000",
+    "label": "Actor type 08"
+  },
+  {
+    "group": 3,
+    "type": 9,
+    "source": "C59E",
+    "animation": "4000",
+    "label": "Actor type 09"
+  },
+  {
+    "group": 3,
+    "type": 10,
+    "source": "C603",
+    "animation": "4000",
+    "label": "Actor type 0A"
+  },
+  {
+    "group": 3,
+    "type": 11,
+    "source": "C1A2",
+    "animation": "5000",
+    "label": "Actor type 0B"
+  },
+  {
+    "group": 3,
+    "type": 12,
+    "source": "C80E",
+    "animation": "4000",
+    "label": "Actor type 0C"
+  },
+  {
+    "group": 3,
+    "type": 13,
+    "source": "C863",
+    "animation": "4000",
+    "label": "Actor type 0D"
+  },
+  {
+    "group": 3,
+    "type": 14,
+    "source": "C8E5",
+    "animation": "4000",
+    "label": "Actor type 0E"
+  },
+  {
+    "group": 3,
+    "type": 15,
+    "source": "C8F3",
+    "animation": "4000",
+    "label": "Actor type 0F"
+  },
+  {
+    "group": 3,
+    "type": 16,
+    "source": "C961",
+    "animation": "4000",
+    "label": "Actor type 10"
+  },
+  {
+    "group": 3,
+    "type": 17,
+    "source": "C9BE",
+    "animation": "4000",
+    "label": "Actor type 11"
+  },
+  {
+    "group": 3,
+    "type": 18,
+    "source": "CA8B",
+    "animation": "4000",
+    "label": "Actor type 12"
+  },
+  {
+    "group": 3,
+    "type": 19,
+    "source": "C8C9",
+    "animation": "5000",
+    "label": "Actor type 13"
+  },
+  {
+    "group": 3,
+    "type": 20,
+    "source": "C8D7",
+    "animation": "5000",
+    "label": "Actor type 14"
+  },
+  {
+    "group": 3,
+    "type": 21,
+    "source": "CB45",
+    "animation": "5000",
+    "label": "Actor type 15"
+  },
+  {
+    "group": 3,
+    "type": 22,
+    "source": "CB7B",
+    "animation": "5000",
+    "label": "Actor type 16"
+  },
+  {
+    "group": 3,
+    "type": 23,
+    "source": "CC31",
+    "animation": "4000",
+    "label": "Actor type 17"
+  },
+  {
+    "group": 3,
+    "type": 24,
+    "source": "CC1D",
+    "animation": "5000",
+    "label": "Actor type 18"
+  },
+  {
+    "group": 3,
+    "type": 25,
+    "source": "CC09",
+    "animation": "5000",
+    "label": "Actor type 19"
+  },
+  {
+    "group": 3,
+    "type": 26,
+    "source": "CCF5",
+    "animation": "5000",
+    "label": "Actor type 1A"
+  },
+  {
+    "group": 3,
+    "type": 27,
+    "source": "CCCD",
+    "animation": "5000",
+    "label": "Actor type 1B"
+  },
+  {
+    "group": 4,
+    "type": 3,
+    "source": "CE39",
+    "animation": "4000",
+    "label": "Actor type 03"
+  },
+  {
+    "group": 4,
+    "type": 4,
+    "source": "CE48",
+    "animation": "4000",
+    "label": "Actor type 04"
+  },
+  {
+    "group": 4,
+    "type": 5,
+    "source": "CEEC",
+    "animation": "4000",
+    "label": "Actor type 05"
+  },
+  {
+    "group": 4,
+    "type": 6,
+    "source": "CF2E",
+    "animation": "4000",
+    "label": "Actor type 06"
+  },
+  {
+    "group": 4,
+    "type": 7,
+    "source": "CF60",
+    "animation": "4000",
+    "label": "Actor type 07"
+  },
+  {
+    "group": 4,
+    "type": 8,
+    "source": "CF9E",
+    "animation": "4000",
+    "label": "Actor type 08"
+  },
+  {
+    "group": 4,
+    "type": 9,
+    "source": "D025",
+    "animation": "4000",
+    "label": "Actor type 09"
+  },
+  {
+    "group": 4,
+    "type": 10,
+    "source": "D033",
+    "animation": "4000",
+    "label": "Actor type 0A"
+  },
+  {
+    "group": 4,
+    "type": 11,
+    "source": "D2A2",
+    "animation": "4000",
+    "label": "Actor type 0B"
+  },
+  {
+    "group": 4,
+    "type": 12,
+    "source": "D382",
+    "animation": "4000",
+    "label": "Actor type 0C"
+  },
+  {
+    "group": 4,
+    "type": 13,
+    "source": "D646",
+    "animation": "5000",
+    "label": "Actor type 0D"
+  },
+  {
+    "group": 4,
+    "type": 17,
+    "source": "D3BF",
+    "animation": "4000",
+    "label": "Actor type 11"
+  },
+  {
+    "group": 4,
+    "type": 18,
+    "source": "D3CE",
+    "animation": "4000",
+    "label": "Actor type 12"
+  },
+  {
+    "group": 4,
+    "type": 19,
+    "source": "D3DD",
+    "animation": "4000",
+    "label": "Actor type 13"
+  },
+  {
+    "group": 4,
+    "type": 20,
+    "source": "D4A1",
+    "animation": "4000",
+    "label": "Actor type 14"
+  },
+  {
+    "group": 4,
+    "type": 21,
+    "source": "D524",
+    "animation": "4000",
+    "label": "Actor type 15"
+  },
+  {
+    "group": 4,
+    "type": 22,
+    "source": "D5B1",
+    "animation": "4000",
+    "label": "Actor type 16"
+  },
+  {
+    "group": 4,
+    "type": 23,
+    "source": "D5C0",
+    "animation": "4000",
+    "label": "Actor type 17"
+  },
+  {
+    "group": 4,
+    "type": 24,
+    "source": "D61E",
+    "animation": "4000",
+    "label": "Actor type 18"
+  },
+  {
+    "group": 4,
+    "type": 25,
+    "source": "D601",
+    "animation": "4000",
+    "label": "Actor type 19"
+  },
+  {
+    "group": 4,
+    "type": 26,
+    "source": "D838",
+    "animation": "5000",
+    "label": "Actor type 1A"
+  },
+  {
+    "group": 4,
+    "type": 28,
+    "source": "D117",
+    "animation": "4000",
+    "label": "Actor type 1C"
+  },
+  {
+    "group": 4,
+    "type": 29,
+    "source": "D176",
+    "animation": "4000",
+    "label": "Actor type 1D"
+  },
+  {
+    "group": 4,
+    "type": 30,
+    "source": "D233",
+    "animation": "4000",
+    "label": "Actor type 1E"
+  },
+  {
+    "group": 5,
+    "type": 5,
+    "source": "D974",
+    "animation": "5000",
+    "label": "Actor type 05"
+  },
+  {
+    "group": 5,
+    "type": 6,
+    "source": "DDA8",
+    "animation": "4000",
+    "label": "Actor type 06"
+  },
+  {
+    "group": 5,
+    "type": 7,
+    "source": "DE08",
+    "animation": "4000",
+    "label": "Actor type 07"
+  },
+  {
+    "group": 5,
+    "type": 8,
+    "source": "DB54",
+    "animation": "4000",
+    "label": "Actor type 08"
+  },
+  {
+    "group": 5,
+    "type": 9,
+    "source": "DC09",
+    "animation": "4000",
+    "label": "Actor type 09"
+  },
+  {
+    "group": 5,
+    "type": 10,
+    "source": "DBAA",
+    "animation": "4000",
+    "label": "Actor type 0A"
+  },
+  {
+    "group": 5,
+    "type": 11,
+    "source": "DC46",
+    "animation": "4000",
+    "label": "Actor type 0B"
+  },
+  {
+    "group": 5,
+    "type": 12,
+    "source": "DCDB",
+    "animation": "4000",
+    "label": "Actor type 0C"
+  },
+  {
+    "group": 5,
+    "type": 13,
+    "source": "DE96",
+    "animation": "4000",
+    "label": "Actor type 0D"
+  },
+  {
+    "group": 5,
+    "type": 14,
+    "source": "DF86",
+    "animation": "4000",
+    "label": "Actor type 0E"
+  },
+  {
+    "group": 5,
+    "type": 15,
+    "source": "DFE5",
+    "animation": "4000",
+    "label": "Actor type 0F"
+  },
+  {
+    "group": 5,
+    "type": 16,
+    "source": "E047",
+    "animation": "4000",
+    "label": "Actor type 10"
+  },
+  {
+    "group": 5,
+    "type": 17,
+    "source": "DFF3",
+    "animation": "4000",
+    "label": "Actor type 11"
+  },
+  {
+    "group": 5,
+    "type": 18,
+    "source": "E0BA",
+    "animation": "4000",
+    "label": "Actor type 12"
+  },
+  {
+    "group": 5,
+    "type": 19,
+    "source": "E18E",
+    "animation": "4000",
+    "label": "Actor type 13"
+  },
+  {
+    "group": 5,
+    "type": 20,
+    "source": "E254",
+    "animation": "4000",
+    "label": "Actor type 14"
+  },
+  {
+    "group": 5,
+    "type": 21,
+    "source": "E292",
+    "animation": "4000",
+    "label": "Actor type 15"
+  },
+  {
+    "group": 5,
+    "type": 22,
+    "source": "E2A6",
+    "animation": "4000",
+    "label": "Actor type 16"
+  },
+  {
+    "group": 5,
+    "type": 23,
+    "source": "E2BD",
+    "animation": "4000",
+    "label": "Actor type 17"
+  },
+  {
+    "group": 5,
+    "type": 24,
+    "source": "E2D1",
+    "animation": "4000",
+    "label": "Actor type 18"
+  },
+  {
+    "group": 5,
+    "type": 25,
+    "source": "E2F3",
+    "animation": "4000",
+    "label": "Actor type 19"
+  },
+  {
+    "group": 5,
+    "type": 26,
+    "source": "E304",
+    "animation": "4000",
+    "label": "Actor type 1A"
+  },
+  {
+    "group": 5,
+    "type": 27,
+    "source": "E315",
+    "animation": "4000",
+    "label": "Actor type 1B"
+  },
+  {
+    "group": 5,
+    "type": 28,
+    "source": "E326",
+    "animation": "4000",
+    "label": "Actor type 1C"
+  },
+  {
+    "group": 5,
+    "type": 29,
+    "source": "E351",
+    "animation": "4000",
+    "label": "Actor type 1D"
+  },
+  {
+    "group": 5,
+    "type": 30,
+    "source": "E368",
+    "animation": "4000",
+    "label": "Actor type 1E"
+  },
+  {
+    "group": 5,
+    "type": 31,
+    "source": "E37F",
+    "animation": "4000",
+    "label": "Actor type 1F"
+  },
+  {
+    "group": 5,
+    "type": 32,
+    "source": "E3A1",
+    "animation": "4000",
+    "label": "Actor type 20"
+  },
+  {
+    "group": 5,
+    "type": 33,
+    "source": "E42A",
+    "animation": "4000",
+    "label": "Actor type 21"
+  },
+  {
+    "group": 5,
+    "type": 34,
+    "source": "E483",
+    "animation": "5000",
+    "label": "Actor type 22"
+  },
+  {
+    "group": 5,
+    "type": 36,
+    "source": "E5CF",
+    "animation": "5000",
+    "label": "Actor type 24"
+  },
+  {
+    "group": 5,
+    "type": 37,
+    "source": "E606",
+    "animation": "5000",
+    "label": "Actor type 25"
+  },
+  {
+    "group": 6,
+    "type": 7,
+    "source": "E7C6",
+    "animation": "5000",
+    "label": "Actor type 07"
+  },
+  {
+    "group": 6,
+    "type": 8,
+    "source": "F161",
+    "animation": "5000",
+    "label": "Actor type 08"
+  },
+  {
+    "group": 6,
+    "type": 9,
+    "source": "E952",
+    "animation": "4000",
+    "label": "Actor type 09"
+  },
+  {
+    "group": 6,
+    "type": 10,
+    "source": "EA08",
+    "animation": "4000",
+    "label": "Actor type 0A"
+  },
+  {
+    "group": 6,
+    "type": 11,
+    "source": "EA99",
+    "animation": "4000",
+    "label": "Actor type 0B"
+  },
+  {
+    "group": 6,
+    "type": 12,
+    "source": "EAA7",
+    "animation": "4000",
+    "label": "Actor type 0C"
+  },
+  {
+    "group": 6,
+    "type": 13,
+    "source": "EB25",
+    "animation": "4000",
+    "label": "Actor type 0D"
+  },
+  {
+    "group": 6,
+    "type": 14,
+    "source": "EB85",
+    "animation": "4000",
+    "label": "Actor type 0E"
+  },
+  {
+    "group": 6,
+    "type": 15,
+    "source": "EC22",
+    "animation": "4000",
+    "label": "Actor type 0F"
+  },
+  {
+    "group": 6,
+    "type": 16,
+    "source": "EC8C",
+    "animation": "4000",
+    "label": "Actor type 10"
+  },
+  {
+    "group": 6,
+    "type": 17,
+    "source": "ECD4",
+    "animation": "4000",
+    "label": "Actor type 11"
+  },
+  {
+    "group": 6,
+    "type": 18,
+    "source": "ED1C",
+    "animation": "4000",
+    "label": "Actor type 12"
+  },
+  {
+    "group": 6,
+    "type": 19,
+    "source": "ED1F",
+    "animation": "4000",
+    "label": "Actor type 13"
+  },
+  {
+    "group": 6,
+    "type": 20,
+    "source": "ED1F",
+    "animation": "4000",
+    "label": "Actor type 14"
+  },
+  {
+    "group": 6,
+    "type": 21,
+    "source": "EC30",
+    "animation": "4000",
+    "label": "Actor type 15"
+  },
+  {
+    "group": 6,
+    "type": 22,
+    "source": "ED4B",
+    "animation": "4000",
+    "label": "Actor type 16"
+  },
+  {
+    "group": 6,
+    "type": 23,
+    "source": "EE39",
+    "animation": "4000",
+    "label": "Actor type 17"
+  },
+  {
+    "group": 6,
+    "type": 24,
+    "source": "EEA0",
+    "animation": "4000",
+    "label": "Actor type 18"
+  },
+  {
+    "group": 6,
+    "type": 25,
+    "source": "EF3D",
+    "animation": "4000",
+    "label": "Actor type 19"
+  },
+  {
+    "group": 6,
+    "type": 26,
+    "source": "EFC8",
+    "animation": "4000",
+    "label": "Actor type 1A"
+  },
+  {
+    "group": 6,
+    "type": 27,
+    "source": "EFD6",
+    "animation": "4000",
+    "label": "Actor type 1B"
+  },
+  {
+    "group": 6,
+    "type": 28,
+    "source": "F0E6",
+    "animation": "4000",
+    "label": "Actor type 1C"
+  },
+  {
+    "group": 7,
+    "type": 0,
+    "source": "F6CA",
+    "animation": "5000",
+    "label": "Actor type 00"
+  },
+  {
+    "group": 7,
+    "type": 1,
+    "source": "F6E2",
+    "animation": "5000",
+    "label": "Actor type 01"
+  },
+  {
+    "group": 7,
+    "type": 2,
+    "source": "F6FA",
+    "animation": "5000",
+    "label": "Actor type 02"
+  },
+  {
+    "group": 7,
+    "type": 3,
+    "source": "F712",
+    "animation": "5000",
+    "label": "Actor type 03"
+  },
+  {
+    "group": 7,
+    "type": 4,
+    "source": "F72A",
+    "animation": "5000",
+    "label": "Actor type 04"
+  },
+  {
+    "group": 7,
+    "type": 5,
+    "source": "F760",
+    "animation": "5000",
+    "label": "Actor type 05"
+  },
+  {
+    "group": 7,
+    "type": 6,
+    "source": "F80F",
+    "animation": "5000",
+    "label": "Actor type 06"
+  },
+  {
+    "group": 7,
+    "type": 11,
+    "source": "F3C8",
+    "animation": "4000",
+    "label": "Actor type 0B"
+  },
+  {
+    "group": 7,
+    "type": 12,
+    "source": "F408",
+    "animation": "4000",
+    "label": "Actor type 0C"
+  },
+  {
+    "group": 7,
+    "type": 13,
+    "source": "F3FA",
+    "animation": "4000",
+    "label": "Actor type 0D"
+  },
+  {
+    "group": 7,
+    "type": 14,
+    "source": "F458",
+    "animation": "4000",
+    "label": "Actor type 0E"
+  },
+  {
+    "group": 7,
+    "type": 15,
+    "source": "F494",
+    "animation": "4000",
+    "label": "Actor type 0F"
+  },
+  {
+    "group": 7,
+    "type": 16,
+    "source": "F486",
+    "animation": "4000",
+    "label": "Actor type 10"
+  },
+  {
+    "group": 7,
+    "type": 17,
+    "source": "F4B2",
+    "animation": "4000",
+    "label": "Actor type 11"
+  },
+  {
+    "group": 7,
+    "type": 18,
+    "source": "F4E3",
+    "animation": "4000",
+    "label": "Actor type 12"
+  },
+  {
+    "group": 7,
+    "type": 20,
+    "source": "F742",
+    "animation": "5000",
+    "label": "Actor type 14"
+  },
+  {
+    "group": 7,
+    "type": 21,
+    "source": "F751",
+    "animation": "5000",
+    "label": "Actor type 15"
+  },
+  {
+    "group": 7,
+    "type": 22,
+    "source": "F430",
+    "animation": "4000",
+    "label": "Actor type 16"
+  }
+]

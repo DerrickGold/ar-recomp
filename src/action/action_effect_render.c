@@ -479,12 +479,12 @@ bool ProjectWithScale(const ActionEffectInstance *effect,
 
 /* One ring-gradient glow centred on a local point. Shared by the burst body
  * and the per-part cores — they differ only in radius and palette. */
-bool AppendGlow(ActionEffectGeometryWriter *writer,
+bool AppendGlowAtTicks(ActionEffectGeometryWriter *writer,
                        const ActionEffectInstance *effect,
                        const ActionEffectGlowStyle *style, float strength,
                        float local_x, float local_y,
                        ActionEffectProjectPointFn project_point,
-                       void *userdata) {
+                       void *userdata, unsigned visual_ticks) {
   enum {
     kSegments = kActionEffectGlowSegments,
     kRings = kActionEffectGlowRings,
@@ -532,7 +532,7 @@ bool AppendGlow(ActionEffectGeometryWriter *writer,
     for (int s = 0; s < kSegments; s++) {
       float shape = 1.0f + wobble * FlameSilhouette(
           style->seed,
-          EffectVisualTicks(effect, (unsigned)effect->pulse_ticks), s);
+          visual_ticks, s);
       float ux = kCircle32[s][0] * radius_x * scale * shape;
       float uy = kCircle32[s][1] * radius_y * scale * shape;
       writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
@@ -565,6 +565,13 @@ bool AppendGlow(ActionEffectGeometryWriter *writer,
     }
   }
   return true;
+}
+
+bool AppendGlow(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    const ActionEffectGlowStyle *style, float strength, float x, float y,
+    ActionEffectProjectPointFn project, void *userdata) {
+  return AppendGlowAtTicks(writer,effect,style,strength,x,y,project,userdata,
+      EffectVisualTicks(effect,(unsigned)effect->pulse_ticks));
 }
 
 /* One ember's offset from its birth point at normalised age `t`, in local
@@ -981,7 +988,7 @@ bool ActionEffectRender_Build(const ActionEffectFrame *frame,
   return true;
 }
 
-bool ActionHeatRender_Build(uint16_t game_frame, ArRenderRectI output_viewport,
+bool ActionHeatRender_BuildWithField(const ActionSurfaceField *field,uint16_t game_frame, ArRenderRectI output_viewport,
                             int target_width, int target_height,
                             int source_width,
                             ActionHeatRenderMesh *mesh) {
@@ -989,7 +996,7 @@ bool ActionHeatRender_Build(uint16_t game_frame, ArRenderRectI output_viewport,
     mesh->vertex_count = 0;
     mesh->index_count = 0;
   }
-  if (!mesh || output_viewport.x < 0 || output_viewport.y < 0 ||
+  if (!field || !mesh || output_viewport.x < 0 || output_viewport.y < 0 ||
       output_viewport.w <= 0 || output_viewport.h <= 0 ||
       target_width <= 0 || target_height <= 0 || source_width <= 0)
     return false;
@@ -1005,9 +1012,9 @@ bool ActionHeatRender_Build(uint16_t game_frame, ArRenderRectI output_viewport,
    * authentic pixel of displacement, which made the haze appear to switch on
    * only where high-contrast art happened to reveal it. This remains below
    * one authentic pixel at ordinary scales and is bounded at 6.5px. */
-  const float amplitude = fminf(6.50f, fmaxf(0.75f,
-      source_pixel_scale * 0.82f));
-  const float phase = (float)game_frame * 0.117f;
+  const float amplitude = fminf(field->HeatAmplitude[2], fmaxf(field->HeatAmplitude[0],
+      source_pixel_scale * field->HeatAmplitude[1]));
+  const float phase = (float)game_frame * field->HeatMotion[0];
   const ArRenderColorF white = {1.0f, 1.0f, 1.0f, 1.0f};
   for (int row = 0; row <= kActionHeatMeshRows; row++) {
     const float ny = (float)row / (float)kActionHeatMeshRows;
@@ -1015,21 +1022,21 @@ bool ActionHeatRender_Build(uint16_t game_frame, ArRenderRectI output_viewport,
         (float)output_viewport.h * ny;
     /* sin(pi*y) pins top/bottom; weighting toward the floor keeps the HUD-
      * free upper room readable while the lava half visibly shimmers. */
-    const float edge_y = sinf(ny * 3.141592654f) * (0.28f + 0.72f * ny);
+    const float edge_y = sinf(ny * 3.141592654f) * (field->HeatEnvelope[0] + field->HeatEnvelope[1] * ny);
     for (int column = 0; column <= kActionHeatMeshColumns; column++) {
       const float nx = (float)column / (float)kActionHeatMeshColumns;
       const float x = (float)output_viewport.x +
           (float)output_viewport.w * nx;
       const float edge_x = sinf(nx * 3.141592654f);
       const float envelope = edge_x * edge_y;
-      const float wave = sinf(nx * 10.681f + ny * 20.420f + phase) +
-          0.42f * sinf(nx * 23.562f - ny * 11.938f - phase * 1.37f);
+      const float wave = sinf(nx * field->HeatWave[0] + ny * field->HeatWave[1] + phase) +
+          field->HeatWave[2] * sinf(nx * field->HeatWave[3] + ny * field->HeatWave[4] - phase * field->HeatMotion[1]);
       const float cross_wave =
-          sinf(nx * 16.336f + ny * 8.168f - phase * 0.73f);
+          sinf(nx * field->HeatCross[0] + ny * field->HeatCross[1] - phase * field->HeatMotion[2]);
       const float sample_x = (float)target_width * nx +
           amplitude * target_x_per_output * envelope * wave;
       const float sample_y = (float)target_height * ny +
-          amplitude * target_y_per_output * 0.24f * envelope * cross_wave;
+          amplitude * target_y_per_output * field->HeatCross[2] * envelope * cross_wave;
       mesh->vertices[mesh->vertex_count++] = (ArRenderVertex2D){
         {x, y}, white,
         {sample_x / (float)target_width,
@@ -1053,4 +1060,8 @@ bool ActionHeatRender_Build(uint16_t game_frame, ArRenderRectI output_viewport,
   }
   return mesh->vertex_count == kActionHeatMeshVertices &&
       mesh->index_count == kActionHeatMeshIndices;
+}
+
+bool ActionHeatRender_Build(uint16_t game_frame,ArRenderRectI viewport,int width,int height,int source_width,ActionHeatRenderMesh *mesh){
+  return ActionHeatRender_BuildWithField(ActionSurfaceField_Bundled(1),game_frame,viewport,width,height,source_width,mesh);
 }

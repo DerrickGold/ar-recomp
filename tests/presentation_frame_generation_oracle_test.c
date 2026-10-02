@@ -1,19 +1,9 @@
-/* Bit-identity oracle for the global-motion search's loop interchange.
+/* Bit-identity oracle for optimized global-motion search.
  *
- * The search still visits the same 15x15 candidate set; only the order in
- * which samples and candidates are visited changed, so that each source pixel
- * is read once instead of the whole surface being streamed once per candidate.
- * That reordering is only safe if it cannot alter a single chosen vector.
- *
- * This test re-implements the ORIGINAL candidate-outer order independently and
- * requires the shipping analyzer to agree exactly, over image pairs chosen to
- * stress the parts most likely to diverge: exact ties, wrap-around magnitudes,
- * high-frequency pixel art (which is why the exhaustive search exists at all),
- * and motion at the edge of the search radius.
- *
- * It compares the public Analyze output rather than the internal cost array:
- * agreement on the vector is the property that matters, and it keeps the test
- * independent of the search's internals. */
+ * The reference exhaustively scores every candidate without pruning. Require
+ * identical acceptance and vectors for ties, texture, transparency, animation,
+ * degenerate surfaces and maximum supported extents. It deliberately does not
+ * share the shipping search's bound or traversal logic. */
 
 #include <limits.h>
 #include <stdio.h>
@@ -264,10 +254,38 @@ static void TestDegenerateExtents(void) {
   }
 }
 
+static void TestExtendedSurfaces(void) {
+  enum { width = kPresentationFrameGenerationMaximumWidth,
+         height = kPresentationFrameGenerationMaximumHeight, pitch = width + 11 };
+  static uint32_t previous[pitch * height], current[pitch * height];
+  uint32_t seed = 0x1978abcdu;
+  for (int pattern = 0; pattern < 3; ++pattern) {
+    for (int y = 0; y < height; ++y)
+      for (int x = 0; x < width; ++x) {
+        const uint32_t noise = NextRandom(&seed);
+        previous[y * pitch + x] = pattern == 0 ? noise :
+            pattern == 1 ? (x > width / 2 && y > height / 2 ? noise : 0u) :
+            ((x / 8 + y / 8) & 1 ? 0xffffffffu : 0u);
+      }
+    ShiftFrame(previous, current, width, height, pitch,
+               pattern == 0 ? 1 : -7, pattern == 0 ? -1 : 6, &seed);
+    CompareOne("maximum extent RGBA/sparse/tied shift", previous, current,
+               width, height, pitch);
+    /* Animation can make the locally promising vectors poor matches overall.
+     * Compare rejections as well as accepted pairs against exhaustive search. */
+    for (int y = height / 2; y < height; ++y)
+      for (int x = 0; x < width; ++x)
+        current[y * pitch + x] = NextRandom(&seed);
+    CompareOne("maximum extent partial animation", previous, current,
+               width, height, pitch);
+  }
+}
+
 int main(void) {
   TestShiftedPatterns();
   TestRandomPairs();
   TestDegenerateExtents();
+  TestExtendedSurfaces();
   /* A silently vacuous oracle is worse than none: if Analyze rejected every
    * pair, nothing was ever compared and the test proves nothing. */
   if (comparisons < 20) {

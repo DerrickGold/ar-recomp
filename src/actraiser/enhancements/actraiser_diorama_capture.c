@@ -523,7 +523,7 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
   }
   if (environmental_effects_enabled && !g_diorama_frame_active &&
       !HostDevTools_DioramaDumpArmed() &&
-      (ActionSceneEffects_RoomUsesBg2Decorations(g_ram, kActRaiserWramSize) || ActionEffectManifest_HasAuthored(map_group,map_number))) {
+      (ActionSceneEffects_RoomUsesBg2Decorations(g_ram, kActRaiserWramSize) || ActionEffectManifest_NeedsBg2Mask(map_group,map_number))) {
     const SrPpuOverlayCaptureState *bg2 =
         ActRaiser_PpuCapture(SR_PPU_OVERLAY_BG2);
     if (bg2->x1 <= bg2->x0 || bg2->y1 <= bg2->y0) {

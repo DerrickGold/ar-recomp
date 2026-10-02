@@ -2,6 +2,7 @@
 #include "action_light_kinds.h"
 
 #include <math.h>
+#include <string.h>
 
 #include "diorama/diorama.h"
 
@@ -12,17 +13,14 @@ static bool EffectUsesSkybox(const DioramaProjection *projection,
        effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds);
 }
 
-static bool EffectUsesMoonAnchor(const ActionEffectInstance *effect) {
-  /* The cloud shades this same moon and its rays. Native raster bands may
-   * scroll the lake independently; they must not split the airborne veil. */
-  return effect->kind == kActionEffect_BloodpoolMoonlight ||
-      effect->kind == kActionEffect_BloodpoolCloud;
+static bool EffectUsesStaticAnchor(const ActionEffectInstance *effect) {
+  return (effect->flags & kActionEffectFlag_StaticAnchor) != 0;
 }
 
 static bool SkyboxEffectBounds(const DioramaProjection *projection,
     const ActionEffectInstance *effect, float anchor_y,
     float *x0, float *y0, float *x1, float *y1) {
-  if (EffectUsesMoonAnchor(effect))
+  if (EffectUsesStaticAnchor(effect))
     return Diorama_SkyboxAnchorBounds(projection, anchor_y, x0, y0, x1, y1);
   return Diorama_SkyboxCaptureBounds(projection, x0, y0, x1, y1);
 }
@@ -92,7 +90,6 @@ static void AddRequiredObjPriorities(
   for (uint8_t i = 0; i < count; i++) {
     const ActionEffectInstance *effect = &effects[i];
     if (!(effect->flags & kActionEffectFlag_Visible) ||
-        effect->render_layer != kActionEffectRenderLayer_WorldOverlay ||
         effect->projection_plane != kActionEffectProjectionPlane_Obj ||
         effect->obj_priority >= kActionEffectObjPriorityCount)
       continue;
@@ -111,6 +108,15 @@ static void AddRequiredBgPlanes(
         ActionLightKind_Supported(effect->kind) && effect->render_layer==kActionEffectRenderLayer_WorldOverlay)
       *mask |= 1u << SR_PPU_OVERLAY_BG1;
     if (effect->kind == kActionEffect_BloodpoolMoonlight)
+      *mask |= 1u << SR_PPU_OVERLAY_BG1;
+    /* Source projection and insertion point are independent for authored
+     * effects. Request the attachment callback as well as its camera plane. */
+    if (effect->render_layer == kActionEffectRenderLayer_Bg2Alpha ||
+        effect->render_layer == kActionEffectRenderLayer_Bg2Plane)
+      *mask |= 1u << SR_PPU_OVERLAY_BG2;
+    if (effect->render_layer == kActionEffectRenderLayer_Bg1Mist ||
+        effect->render_layer == kActionEffectRenderLayer_Bg1Plane ||
+        effect->render_layer == kActionEffectRenderLayer_Bg1Light)
       *mask |= 1u << SR_PPU_OVERLAY_BG1;
     if (effect->render_layer == kActionEffectRenderLayer_Bg2HighAlpha)
       *mask |= 1u << kDioramaPlane_Bg2Hi;
@@ -136,6 +142,11 @@ uint8_t ActionEffectProjection_RequiredObjPriorityMask(
         &mask, spell_frame->effects, spell_frame->effect_count,
         kActionEffectMaxInstances, false);
   if (scene_frame) {
+    /* Attached authored lights and alpha particles also need an object plane
+     * even when no native sprite or recognized accent occupies that depth. */
+    AddRequiredObjPriorities(
+        &mask, scene_frame->authored, scene_frame->authored_count,
+        kActionAuthoredMaxInstances, false);
     AddRequiredObjPriorities(
         &mask, scene_frame->effects, scene_frame->effect_count,
         kActionSceneEffectMaxInstances, scene_frame->overflow != 0);
@@ -292,7 +303,7 @@ bool ActionEffectProjection_ProjectPoint(
     else if (effect->projection_plane == kActionEffectProjectionPlane_Bg2 ||
              effect->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds) {
       if (EffectUsesSkybox(context->diorama_projection, effect) &&
-          EffectUsesMoonAnchor(effect))
+          EffectUsesStaticAnchor(effect))
         valid = Diorama_ProjectSkyboxAnchorPoint(
             context->diorama_projection, screen_y + context->ws_extra_top,
             capture_x, texture_y, &projected);
@@ -355,4 +366,24 @@ bool ActionEffectProjection_IntersectsFlatViewport(
   const float visible_x1 = visible_x0 + (float)context->visible_width;
   return x1 > visible_x0 && x0 < visible_x1 &&
       y1 > 0.0f && y0 < (float)context->snes_height;
+}
+
+/* Comparing the full value is conservative: padding or unused fields may
+ * cause a miss, but cannot reuse a stale transform. Stored pointers are null. */
+bool ActionEffectProjection_Matches(const ActionEffectProjectionSnapshot *s,
+                                    const ActionEffectProjectionContext *c) {
+  if (!s || !s->valid || !c || s->has_diorama != (c->diorama_projection != NULL)) return false;
+  ActionEffectProjectionContext value = *c;
+  value.diorama_projection = NULL;
+  return !memcmp(&s->context, &value, sizeof(value)) &&
+      (!s->has_diorama || !memcmp(&s->diorama, c->diorama_projection, sizeof(s->diorama)));
+}
+void ActionEffectProjection_Remember(ActionEffectProjectionSnapshot *s,
+                                     const ActionEffectProjectionContext *c) {
+  s->valid = c != NULL;
+  if (!c) return;
+  s->context = *c;
+  s->context.diorama_projection = NULL;
+  s->has_diorama = c->diorama_projection != NULL;
+  if (s->has_diorama) s->diorama = *c->diorama_projection;
 }

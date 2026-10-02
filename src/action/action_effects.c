@@ -250,6 +250,7 @@ static void RetireSceneAll(ActionEffectObserver *observer) {
   if (!observer) return;
   memset(observer->scene_tracks, 0, sizeof(observer->scene_tracks));
   memset(&observer->landing_dust, 0, sizeof(observer->landing_dust));
+  memset(observer->actor_tracks,0,sizeof(observer->actor_tracks));
   observer->scene_clock_valid = 0;
   observer->scene_map_valid = 0;
 }
@@ -1742,9 +1743,9 @@ bool ActionSceneEffects_RoomUsesBg2Decorations(
        Read8(wram, wram_size, kActRaiserWram_CurrentMap) <= 3);
 }
 
-void ActionEnvironmentalEffects_CaptureFrame(
+void ActionEnvironmentalEffects_CaptureFrameFiltered(
     ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
-    const uint8_t *wram, size_t wram_size) {
+    const uint8_t *wram, size_t wram_size, bool native_ray_field, bool native_water_field, bool native_atmosphere_field, bool native_moon_field, bool native_marsh_field, bool native_castle_field) {
   /* Environmental fields are optional, bounded records. Their observers
    * continue keeping scene time while this capture is gated off. */
   if (!observer || !dst || !observer->scene_clock_valid ||
@@ -1752,16 +1753,22 @@ void ActionEnvironmentalEffects_CaptureFrame(
       dst->decoration_overflow)
     return;
   if (observer->scene_map_group == kActRaiserMapGroup_Bloodpool) {
-    CaptureBloodpoolMarsh(observer, dst, wram, wram_size);
-    CaptureBloodpoolCastle(observer, dst, wram, wram_size);
+    CaptureBloodpoolMarsh(observer, dst, wram, wram_size,native_moon_field,native_marsh_field);
+    CaptureBloodpoolCastle(observer, dst, wram, wram_size,native_castle_field);
     return;
   }
   if (observer->scene_map_group != kActRaiserMapGroup_Fillmore) return;
   if (observer->scene_map_number != 1) {
-    CaptureFillmoreCave(observer, dst, wram, wram_size);
+    CaptureFillmoreCaveFiltered(observer, dst, wram, wram_size,native_water_field,native_atmosphere_field);
     return;
   }
-  CaptureFillmoreForest(observer, dst, wram, wram_size);
+  if(native_ray_field)CaptureFillmoreForest(observer, dst, wram, wram_size);
+}
+
+void ActionEnvironmentalEffects_CaptureFrame(
+    ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
+    const uint8_t *wram, size_t wram_size) {
+  ActionEnvironmentalEffects_CaptureFrameFiltered(observer,dst,wram,wram_size,true,true,true,true,true,true);
 }
 
 static void PopulateSceneObjectEffect(ActionEffectInstance *effect,
@@ -1807,6 +1814,32 @@ static void PopulateSceneObjectEffect(ActionEffectInstance *effect,
     effect->flags |= kActionEffectFlag_FlipVertical;
 }
 
+/* No new game objects or renderer identity tests: every active composition can
+ * be selected by an authored effect, including previously unrecognized attacks. */
+static void CaptureAuthoringActor(ActionEffectObserver *observer,ActionSceneEffectFrame *dst,
+    unsigned slot,uint16_t address,const ActionObjectSnapshot *object,const uint8_t *ram,size_t size,unsigned ticks) {
+  ActionEffectActorTrack *track=&observer->actor_tracks[slot];
+  ActionEffectActor actor={.source=object->source_descriptor,.animation=object->animation_address,
+    .bank=object->animation_bank,.state=object->animation_state,.visual=object->visual,
+    .handler=object->handler,.resume=object->resume_address,.address=address,
+    .x=object->world_x,.y=object->world_y,.vx=object->velocity_x,.vy=object->velocity_y,
+    .priority=ScenePriorityFromSpriteAttributeBias(ram,size),.visible=ActionObjectVisible(object),
+    .flip=(uint8_t)(object->flip_attributes>>8),.player=address==kActRaiserWram_PlayerObject};
+  const unsigned parent=object->spawner_backlink;
+  if(parent>=kActRaiserWram_ActionObjectTable && parent<kActRaiserWram_ActionObjectTable+kActionEffectActorMax*kActRaiserActionObjectStride &&
+      (parent-kActRaiserWram_ActionObjectTable)%kActRaiserActionObjectStride==0 &&
+      !(Read16(ram,size,parent+kActRaiserActionObject_Status)&kActRaiserObjectStatus_InactiveMask))
+    actor.parent_source=Read16(ram,size,parent+kActRaiserActionObject_SourceDescriptor);
+  const ActionEffectActor *old=&track->actor;
+  const bool same=track->active&&old->source==actor.source&&old->animation==actor.animation&&old->bank==actor.bank&&
+    old->parent_source==actor.parent_source&&abs((int)actor.x-old->x)<=128&&abs((int)actor.y-old->y)<=128;
+  actor.generation=same?old->generation:AllocateSequence(&observer->next_actor_generation);
+  actor.age=same?AddSaturated16(old->age,ticks):0;
+  actor.phase_ticks=same&&old->state==actor.state?AddSaturated16(old->phase_ticks,ticks):0;
+  *track=(ActionEffectActorTrack){actor,1};
+  if(dst->actor_count<kActionEffectActorMax)dst->actors[dst->actor_count++]=actor;
+}
+
 /* AR_AITOS_WATERFALL_LOG=1: the veil appended below is what publishes the
  * `waterfall` section token (action_effect_capture.c), which in turn admits the
  * folded BG2 continuation (diorama.c). Those three live in different files, so
@@ -1838,10 +1871,10 @@ static void AitosWaterfallLog(const ActionSceneEffectFrame *dst,
 }
 
 
-void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
+void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
                                      ActionSceneEffectFrame *dst,
                                      const uint8_t *wram, size_t wram_size,
-                                     unsigned elapsed_ticks) {
+                                     unsigned elapsed_ticks, bool native_glow,const ActionSurfaceField *const *surfaces) {
   if (!dst) return;
   memset(dst, 0, sizeof(*dst));
   if (!observer) return;
@@ -1880,6 +1913,8 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
   }
   ActionEnvironmentScene map_scene;
   if (ActionEnvironmentScene_FromWram(&map_scene,wram,wram_size,observer->scene_clock)) {
+    map_scene.suppress_default_glow_field=!native_glow;
+    if(surfaces)memcpy(map_scene.surface_fields,surfaces,sizeof(map_scene.surface_fields));
     ActionEnvironmentWaterfallTrace trace = {0};
     ActionMapEnvironmentScene_Capture(&map_scene,dst,&trace);
     if (trace.valid) AitosWaterfallLog(dst,&trace);
@@ -1931,8 +1966,11 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     ActionObjectSnapshot object;
     if (!ReadActionObject(wram, wram_size, address, &object) ||
         (object.status & kActRaiserObjectStatus_InactiveMask) ||
-        !object.composition)
+        !object.composition) {
+      observer->actor_tracks[slot].active=0;
       continue;
+    }
+    CaptureAuthoringActor(observer,dst,slot,address,&object,wram,wram_size,elapsed_ticks);
 
     uint8_t kind = kActionEffect_None;
     uint8_t phase = kActionEffectPhase_None;
@@ -2141,4 +2179,11 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
     dst->effect_count = 0;
     dst->visible_count = 0;
   }
+}
+
+void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,
+                                     ActionSceneEffectFrame *dst,
+                                     const uint8_t *wram, size_t wram_size,
+                                     unsigned elapsed_ticks) {
+  ActionSceneEffects_CaptureFrameFiltered(observer,dst,wram,wram_size,elapsed_ticks,true,NULL);
 }

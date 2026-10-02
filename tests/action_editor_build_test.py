@@ -37,6 +37,10 @@ class Scripts(HTMLParser):
 
 
 class ActionEditorBuildTest(unittest.TestCase):
+    def test_bundled_effects_match_canonical_data(self):
+        subprocess.run([sys.executable, str(ROOT / 'tools/generate_effect_defaults.py'),
+                        '--check'], check=True)
+
     def test_regional_terrain_switching_and_scoped_ini(self):
         # Compare the editor against matrices emitted by the game's actual
         # camera math, including tilt/depth/aspect combinations.
@@ -102,9 +106,12 @@ int main(void) {
             self.assertEqual(json.loads(result), {
                 "__ACTION_BG__": data, "__DIORAMA_LAYERS__": text,
                 "__DIORAMA_LAYERS_NAME__": layers.name,
+                "__ACTION_EFFECTS__": "[effects]\nversion=1\n",
                 "__ACTION_VIEW__": preview_settings(root / "settings.ini"),
                 "__ACTION_PREVIEW_WASM__": None, "__ROOM_PREVIEW_WASM__": None,
-                "__ROOM_PREVIEW_SHADERS__": []})
+                "__ROOM_PREVIEW_SHADERS__": [],
+                "__ACTION_ACTORS__": json.loads((ROOT / "assets/effects/actor-families.json").read_text()),
+            "__ACTION_EFFECT_PRESETS__": json.loads((ROOT / "assets/effects/stage-presets.json").read_text())})
 
     def test_wasm_is_embedded_without_network_or_external_loader(self):
         with tempfile.TemporaryDirectory() as directory:

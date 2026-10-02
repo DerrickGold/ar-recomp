@@ -93,6 +93,7 @@ function selectRectangle(x0,y0,x1,y1) {
   refreshSelectionControls();draw();
 }
 function copyTiles() {
+  EffectEditor.deactivateClipboard();EffectEditor.clearMapSelection();
   returnToEditedTiles();
   let b=selectionRect;
   if(!b) {

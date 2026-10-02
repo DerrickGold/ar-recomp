@@ -6,100 +6,54 @@
  * Tests: tests/action_effect_render_test.c */
 #include "action/action_effect_render_internal.h"
 
-/* Visuals $00-$05 are not frames of one generic bolt. The `$7E:5000`
- * compositions author two different centre lines (vertical and diagonal),
- * each clipped to long/medium/short lengths. These are the per-row centroids
- * of the real 8x8 OAM parts at $5346/$5401/$5492 and $54F2/$55C2/$5661.
- * Following them fixes both endpoint placement and every bend angle; a coarse
- * interpolation across the culling rect cannot recover this information. */
-static const int8_t kBossLightningVerticalX[] = {
-  4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 6, 7, 6, 5, 7, 7, 2, 5, 4,
-  4, 4, 4, 6, 6, 4,
-};
-static const int8_t kBossLightningDiagonalX[] = {
-  0, -4, -5, -5, -6, -12, -10, -11, -16, -20, -20, -22, -26,
-  -30, -30, -32, -30, -29, -29, -33, -36, -36, -40, -44, -44,
-};
-
-/* Centaur $635B..$645E: bright-pixel centroids sampled every eight rows
- * from the eight growing bolt compositions (CHR $13:B12F). They are not
- * scaled copies: the short/medium ends and the full diagonal turn differ. */
-static const int8_t kCentaurLightningX[8][14] = {
-    {-1, -2, 4},
-    {-1, -2, 2, 8, 12, 7, -2},
-    {-1, -2, 2, 8, 12, 0, -13, -17, -18, -12},
-    {-1, -2, 2, 8, 12, 0, -13, -17, -18, -14, -8, -4, -9, -16},
-    {-2, -8, -14},
-    {-2, -14, -27, -34, -39, -46},
-    {-2, -14, -27, -34, -39, -46, -48, -46, -52, -60},
-    {-2, -14, -27, -34, -39, -46, -48, -46, -52, -56, -51, -44, -46, -42},
-};
-
-static ArRenderColorF BossLightningColor(const ActionEffectInstance *effect, ArRenderColorF color) {
-  if (effect->kind == kActionEffect_CentaurLightning) {
-    /* The same white-hot core/corona style as the Wizard, in the Centaur's
-     * native blue palette. Swapping red/blue preserves the alpha profile. */
-    const float red = color.r;
-    color.r = color.b;
-    color.b = red;
-  }
-  return color;
+static ArRenderColorF ArcColor(const float *v){return (ArRenderColorF){v[0],v[1],v[2],v[3]};}
+static float ArcPulse(const ActionEffectInstance *e,const ActionArcField *f){
+  const unsigned ticks=(unsigned)f->Clock[0]*e->phase_ticks,seed=(unsigned)f->Clock[1]*e->visual;
+  return f->Pulse[0]+f->Pulse[1]*TriangleWave(ticks+seed,(unsigned)f->Clock[2])+
+    f->Pulse[2]*TriangleWave(ticks+seed*(unsigned)f->Clock[4],(unsigned)f->Clock[3]);
+}
+/* Native visuals select the observed pose. The response owns its path,
+ * colors, radius and animation, independently of attack state/timing. */
+static bool BossLightningPathFor(const ActionEffectInstance *effect,const ActionArcField *f,
+    const float **path,unsigned *count){
+  if(!effect||!f||!count)return false;
+  unsigned index=effect->visual;
+  if(effect->kind==kActionEffect_CentaurLightning){if(index<0x19||index>0x20)return false;index-=0x19;}
+  else if(index>5)return false;
+  *count=(unsigned)f->PathCounts[index];if(*count<2||*count>25)return false;
+  if(path)*path=f->paths[index];return true;
 }
 
-static bool BossLightningPathFor(const ActionEffectInstance *effect,
-                                 const int8_t **path_x,
-                                 unsigned *joint_count) {
-  if (!effect || !joint_count) return false;
-  if (effect->kind == kActionEffect_CentaurLightning) {
-    static const uint8_t kCounts[] = {3, 7, 10, 14, 3, 6, 10, 14};
-    if (effect->visual < 0x19 || effect->visual > 0x20) return false;
-    const unsigned visual = effect->visual - 0x19;
-    if (path_x) *path_x = kCentaurLightningX[visual];
-    *joint_count = kCounts[visual];
-    return true;
-  }
-  if (effect->visual > 5u) return false;
-  const unsigned family_visual = effect->visual % 3u;
-  if (path_x) {
-    *path_x = effect->visual < 3u ? kBossLightningVerticalX
-                                 : kBossLightningDiagonalX;
-  }
-  *joint_count = family_visual == 0u ? 25u
-      : (family_visual == 1u ? 19u : 13u);
-  return true;
-}
-
-static bool BossLightningPathPoint(const ActionEffectInstance *effect,
+static bool BossLightningPathPoint(const ActionEffectInstance *effect, const ActionArcField *f,
                                    unsigned joint, float *x, float *y) {
-  const int8_t *path_x = NULL;
+  const float *path_x = NULL;
   unsigned joint_count = 0;
-  if (!BossLightningPathFor(effect, &path_x, &joint_count) ||
+  if (!BossLightningPathFor(effect,f, &path_x, &joint_count) ||
       joint >= joint_count || !x || !y)
     return false;
-  *x = (float)path_x[joint];
-  if (effect->kind == kActionEffect_CentaurLightning) *x += .5f;
+  *x = path_x[3+joint]+path_x[0];
   if (effect->flags & kActionEffectFlag_FlipHorizontal) *x = -*x;
   /* `$8D68`'s action-OBJ emitter stores Y with one extra draw-bias pixel
    * after the camera-origin bias cancels. Subtract it here so the filament
    * runs through the emitted tile centres, not one row below them. */
-  *y = (effect->kind == kActionEffect_CentaurLightning ? 3.5f : -80.0f) + (float)joint * 8.0f;
+  *y = path_x[1]+(float)joint*path_x[2];
   return true;
 }
 
-static bool BossLightningPathSample(const ActionEffectInstance *effect,
+static bool BossLightningPathSample(const ActionEffectInstance *effect, const ActionArcField *f,
                                     float along, float *x, float *y) {
   unsigned joint_count = 0;
-  if (!BossLightningPathFor(effect, NULL, &joint_count) || !x || !y ||
+  if (!BossLightningPathFor(effect,f, NULL, &joint_count) || !x || !y ||
       !isfinite(along))
     return false;
   along = fmaxf(0.0f, fminf(1.0f, along));
   const float scaled = along * (float)(joint_count - 1u);
   unsigned segment = (unsigned)scaled;
   if (segment >= joint_count - 1u)
-    return BossLightningPathPoint(effect, joint_count - 1u, x, y);
+    return BossLightningPathPoint(effect,f, joint_count - 1u, x, y);
   float x0, y0, x1, y1;
-  if (!BossLightningPathPoint(effect, segment, &x0, &y0) ||
-      !BossLightningPathPoint(effect, segment + 1u, &x1, &y1))
+  if (!BossLightningPathPoint(effect,f, segment, &x0, &y0) ||
+      !BossLightningPathPoint(effect,f, segment + 1u, &x1, &y1))
     return false;
   const float t = scaled - (float)segment;
   *x = x0 + (x1 - x0) * t;
@@ -110,7 +64,7 @@ static bool BossLightningPathSample(const ActionEffectInstance *effect,
 static bool AppendProjectedRibbonSegments(
     ActionEffectGeometryWriter *writer, const ArRenderPointF *points,
     const float *scales, unsigned joint_count, float half_width,
-    ArRenderColorF color) {
+    ArRenderColorF color, float end_taper) {
   if (!writer || !points || !scales || joint_count < 2u) return true;
   const unsigned segment_count = joint_count - 1u;
   if (!Reserve(writer, (int)segment_count * 4, (int)segment_count * 6))
@@ -123,9 +77,9 @@ static bool AppendProjectedRibbonSegments(
     if (length < 0.001f) continue;
     dx /= length;
     dy /= length;
-    const float taper0 = i == 0 ? 0.55f : 1.0f;
+    const float taper0 = i == 0 ? end_taper : 1.0f;
     const float taper1 = i + 1 == segment_count
-        ? 0.55f : 1.0f;
+        ? end_taper : 1.0f;
     const float width0 = half_width * scales[i] * taper0;
     const float width1 = half_width * scales[i + 1] * taper1;
     const int base = writer->vertex_count;
@@ -153,36 +107,36 @@ static bool AppendProjectedRibbonSegments(
 }
 
 static bool AppendBossLightningRibbonLayer(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect, const ActionArcField *f,
     float half_width, ArRenderColorF color,
     ActionEffectProjectPointFn project_point, void *userdata) {
   enum { kJoints = kActionSceneEffectLightningSegments + 1 };
   ArRenderPointF points[kJoints];
   float scales[kJoints];
   unsigned joint_count = 0;
-  if (!BossLightningPathFor(effect, NULL, &joint_count)) return true;
+  if (!BossLightningPathFor(effect,f, NULL, &joint_count)) return true;
   for (unsigned i = 0; i < joint_count; i++) {
     float local_x, local_y, scale_x, scale_y;
-    if (!BossLightningPathPoint(effect, i, &local_x, &local_y) ||
+    if (!BossLightningPathPoint(effect,f, i, &local_x, &local_y) ||
         !ProjectWithScale(effect, project_point, userdata, local_x, local_y,
                           &points[i], &scale_x, &scale_y))
       return true;
     scales[i] = fmaxf(0.5f, (scale_x + scale_y) * 0.5f);
   }
   return AppendProjectedRibbonSegments(writer, points, scales, joint_count,
-                                       half_width, color);
+                                       half_width, color, f->Ribbon[2]);
 }
 
 static bool AppendBossLightningRibbon(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect, const ActionArcField *f,
     ActionEffectProjectPointFn project_point, void *userdata) {
   if (effect->phase != kActionEffectPhase_BossLightningStrike) return true;
-  const float pulse = DeterministicPulse(effect);
-  ArRenderColorF corona = {1.00f, 0.54f, 0.04f, 0.17f * pulse};
-  ArRenderColorF filament = {1.00f, 0.98f, 0.68f, 0.88f * pulse};
-  return AppendBossLightningRibbonLayer(writer, effect, 4.8f, BossLightningColor(effect, corona),
+  const float pulse = ArcPulse(effect,f);
+  ArRenderColorF corona=ArcColor(f->Corona);corona.a*=pulse;
+  ArRenderColorF filament=ArcColor(f->Filament);filament.a*=pulse;
+  return AppendBossLightningRibbonLayer(writer, effect, f, f->Ribbon[0], corona,
                                         project_point, userdata) &&
-         AppendBossLightningRibbonLayer(writer, effect, 1.15f, BossLightningColor(effect, filament),
+         AppendBossLightningRibbonLayer(writer, effect, f, f->Ribbon[1], filament,
                                         project_point, userdata);
 }
 
@@ -222,7 +176,7 @@ static bool AppendMarahnaLightningRibbonLayer(
     scales[i] = fmaxf(0.5f, (scale_x + scale_y) * 0.5f);
   }
   return AppendProjectedRibbonSegments(writer, points, scales, kJoints,
-                                       half_width, color);
+                                       half_width, color, .55f);
 }
 
 static bool AppendMarahnaLightningRibbon(
@@ -287,7 +241,7 @@ static bool AppendMarahnaBossLightningRibbonLayer(
     scales[i] = fmaxf(0.5f, (scale_x + scale_y) * 0.5f);
   }
   return AppendProjectedRibbonSegments(writer, points, scales, kJoints,
-                                       half_width, color);
+                                       half_width, color, .55f);
 }
 
 static bool AppendMarahnaBossLightningRibbon(
@@ -813,45 +767,46 @@ bool AppendMarahnaBossLightningLighting(
 }
 
 bool AppendLightningTrapParticles(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect, const ActionArcField *f,
     ActionEffectProjectPointFn project_point, void *userdata) {
-  const unsigned count = kActionSceneEffectParticlesPerInstance;
-  const ArRenderColorF hot = {0.98f, 1.00f, 1.00f, 0.92f};
-  const ArRenderColorF cool = {0.18f, 0.48f, 1.00f, 0.00f};
+  if(!((unsigned)f->Components[0]&2))return true;
+  const unsigned count=(unsigned)f->Particles[0];
+  const ArRenderColorF hot = ArcColor(f->Hot);
+  const ArRenderColorF cool = ArcColor(f->Cool);
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const unsigned visual_ticks =
-      EffectVisualTicks(effect, (unsigned)effect->pulse_ticks);
+      (unsigned)f->Clock[0]*effect->pulse_ticks;
   for (unsigned i = 0; i < count; ++i) {
     const SceneParticleClock clock =
-        SceneParticleClockAt(effect, visual_ticks, i, kSceneLightningLifetime);
+        SceneParticleClockAt(effect, visual_ticks, i, (SceneParticleLifetime){(unsigned)f->Particles[1],(unsigned)f->Particles[2],(unsigned)f->Particles[3]});
     const uint32_t seed = clock.seed;
     const float t = clock.t, previous_t = clock.previous_t;
     float x = 0.0f, y = 0.0f, previous_x = 0.0f, previous_y = 0.0f;
     float width = 0.55f, reach = 1.8f + 2.2f * t;
     /* Most sparks crawl across the full bolt; the last quarter burst away
      * from its lower impact so the strike has both a shaft and a contact. */
-    if (i >= count * 3u / 4u) {
+    if (i >= (unsigned)((float)count*f->StrikeMotion[0])) {
       const float *direction =
           kCircle32[(i * 7u + (seed >> 12)) & kActionEffectGlowSegmentMask];
-      const float distance = 3.0f + 20.0f * t;
-      const float old_distance = 3.0f + 20.0f * previous_t;
+      const float distance = f->StrikeMotion[1] + f->StrikeMotion[2] * t;
+      const float old_distance = f->StrikeMotion[1] + f->StrikeMotion[2] * previous_t;
       x = (rect->x0 + rect->x1) * 0.5f + direction[0] * distance;
-      y = rect->y1 + direction[1] * distance * 0.55f;
+      y = rect->y1 + direction[1] * distance * f->StrikeMotion[3];
       previous_x = (rect->x0 + rect->x1) * 0.5f + direction[0] * old_distance;
-      previous_y = rect->y1 + direction[1] * old_distance * 0.55f;
+      previous_y = rect->y1 + direction[1] * old_distance * f->StrikeMotion[3];
     } else {
       const float along = HashUnit(seed ^ 0x29u);
       const float base_y = rect->y0 + (rect->y1 - rect->y0) * along;
       const float jitter =
-          (HashUnit(seed ^ (visual_ticks * 0x27D4EB2Du)) - 0.5f) * 12.0f;
-      const float old_jitter = -jitter * 0.55f;
+          (HashUnit(seed ^ (visual_ticks * 0x27D4EB2Du)) - 0.5f) * f->ShaftMotion[0];
+      const float old_jitter = -jitter * f->ShaftMotion[1];
       x = (rect->x0 + rect->x1) * 0.5f + jitter;
-      y = base_y + (t - 0.5f) * 5.0f;
+      y = base_y + (t - 0.5f) * f->ShaftMotion[2];
       previous_x = (rect->x0 + rect->x1) * 0.5f + old_jitter;
-      previous_y = base_y + (previous_t - 0.5f) * 5.0f;
+      previous_y = base_y + (previous_t - 0.5f) * f->ShaftMotion[2];
     }
-    width = 0.42f + 0.28f * (1.0f - t);
-    reach = 2.0f + 2.5f * (1.0f - t);
+    width = f->StrikeShape[0] + f->StrikeShape[1] * (1.0f - t);
+    reach = f->StrikeShape[2] + f->StrikeShape[3] * (1.0f - t);
 
     const ArRenderColorF color = SceneParticleColor(hot, cool, clock);
     if (!AppendSceneParticle(writer, effect, x, y, previous_x, previous_y,
@@ -861,71 +816,40 @@ bool AppendLightningTrapParticles(
   return true;
 }
 
-bool AppendLightningTrapLighting(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    ActionEffectProjectPointFn project_point, void *userdata) {
-  const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
-  const float mid_x = (rect->x0 + rect->x1) * 0.5f;
-  const float mid_y = (rect->y0 + rect->y1) * 0.5f;
-  const float pulse = DeterministicPulse(effect);
-  ActionEffectGlowStyle spill = {0}, body = {0};
-  float spill_x = mid_x, spill_y = mid_y;
-  float body_x = mid_x, body_y = mid_y;
-  spill = (ActionEffectGlowStyle){
-      .radius_x = 76.0f,
-      .radius_y = fmaxf(64.0f, (rect->y1 - rect->y0) * 0.70f),
-      /* Broad spill lights the damp corridor around the captured arc; the
-       * narrow body below preserves the electrode/beam definition. Same two
-       * meshes and peak intensity, with no extra lights or draw calls. */
-      .ring_scale = {0.24f, 0.86f, 1.0f},
-      .centre = {0.68f, 0.90f, 1.00f, 0.13f},
-      .ring = {{0.48f, 0.76f, 1.00f, 0.09f},
-               {0.22f, 0.48f, 1.00f, 0.04f},
-               {0.08f, 0.18f, 0.72f, 0.00f}},
-      .flare = 0.07f,
-      .axis_x = 1.0f,
-      .lift_y = -1.0f,
-      .seed = (unsigned)effect->record_address,
-  };
-  static const ActionEffectGlowStyle kBody = {
-      .radius_x = 9.0f,
-      .ring_scale = {0.16f, 0.92f, 1.0f},
-      .centre = {1.00f, 1.00f, 1.00f, 0.62f},
-      .ring = {{0.82f, 0.96f, 1.00f, 0.34f},
-               {0.34f, 0.68f, 1.00f, 0.13f},
-               {0.10f, 0.28f, 0.84f, 0.00f}},
-      .flare = 0.13f,
-      .axis_x = 1.0f,
-      .lift_y = -1.0f};
-  body = kBody;
-  body.radius_y = fmaxf(38.0f, (rect->y1 - rect->y0) * 0.55f);
-  body.seed = (unsigned)effect->pulse_generation;
-  if (!AppendGlow(writer, effect, &spill, pulse, spill_x, spill_y,
-                  project_point, userdata))
-    return false;
-  if (!AppendGlow(writer, effect, &body, pulse, body_x, body_y, project_point,
-                  userdata))
-    return false;
-  return true;
+bool AppendLightningTrapLighting(ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect,const ActionArcField *f,ActionEffectProjectPointFn project_point,void *userdata){
+  if(!((unsigned)f->Components[0]&1))return true;
+  const ActionEffectLocalRect *r=&effect->geometry.data.rect;
+  const float x=(r->x0+r->x1)*.5f,y=(r->y0+r->y1)*.5f,pulse=ArcPulse(effect,f);
+  ActionEffectGlowStyle spill=f->styles[0],body=f->styles[1];
+  spill.radius_x=fmaxf(spill.radius_x,(r->x1-r->x0)*f->StrikeSpill[2]);
+  spill.radius_y=fmaxf(spill.radius_y,(r->y1-r->y0)*f->StrikeSpill[3]);
+  body.radius_x=fmaxf(body.radius_x,(r->x1-r->x0)*f->StrikeBody[2]);
+  body.radius_y=fmaxf(body.radius_y,(r->y1-r->y0)*f->StrikeBody[3]);
+  spill.seed=effect->record_address;body.seed=effect->pulse_generation;
+  const unsigned ticks=(unsigned)f->Clock[0]*effect->pulse_ticks;
+  return AppendGlowAtTicks(writer,effect,&spill,pulse,x,y,project_point,userdata,ticks)&&
+      AppendGlowAtTicks(writer,effect,&body,pulse,x,y,project_point,userdata,ticks);
 }
 
 bool AppendBossLightningParticles(ActionEffectGeometryWriter *writer,
-                                  const ActionEffectInstance *effect,
+                                  const ActionEffectInstance *effect, const ActionArcField *f,
                                   ActionEffectProjectPointFn project_point, void *userdata) {
-  const unsigned count = kActionSceneEffectParticlesPerInstance;
+  if(!((unsigned)f->Components[0]&2))return true;
+  const unsigned count=(unsigned)f->Particles[0];
   const ArRenderColorF hot =
-      BossLightningColor(effect, (ArRenderColorF){1.00f, 1.00f, 0.82f, 0.98f});
+      ArcColor(f->Hot);
   const ArRenderColorF cool =
-      BossLightningColor(effect, (ArRenderColorF){1.00f, 0.34f, 0.01f, 0.00f});
+      ArcColor(f->Cool);
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const float emission_y = effect->kind == kActionEffect_CentaurLightning
                                ? (rect->y0 + rect->y1) * .5f
-                               : rect->y1 - 2.0f;
+                               : rect->y1 + f->BurstMotion[3];
   const unsigned visual_ticks =
-      EffectVisualTicks(effect, (unsigned)effect->pulse_ticks);
+      (unsigned)f->Clock[0]*effect->pulse_ticks;
   for (unsigned i = 0; i < count; ++i) {
     const SceneParticleClock clock =
-        SceneParticleClockAt(effect, visual_ticks, i, kSceneLightningLifetime);
+        SceneParticleClockAt(effect, visual_ticks, i, (SceneParticleLifetime){(unsigned)f->Particles[1],(unsigned)f->Particles[2],(unsigned)f->Particles[3]});
     const uint32_t seed = clock.seed;
     const float t = clock.t, previous_t = clock.previous_t;
     float x = 0.0f, y = 0.0f, previous_x = 0.0f, previous_y = 0.0f;
@@ -933,41 +857,41 @@ bool AppendBossLightningParticles(ActionEffectGeometryWriter *writer,
     if (effect->phase == kActionEffectPhase_BossLightningStrike) {
       float endpoint_x = (rect->x0 + rect->x1) * 0.5f;
       float endpoint_y = rect->y1;
-      BossLightningPathSample(effect, 1.0f, &endpoint_x, &endpoint_y);
-      if (i >= count * 3u / 4u) {
+      BossLightningPathSample(effect,f, 1.0f, &endpoint_x, &endpoint_y);
+      if (i >= (unsigned)((float)count*f->StrikeMotion[0])) {
         const float *direction =
             kCircle32[(i * 9u + (seed >> 11)) & kActionEffectGlowSegmentMask];
-        const float distance = 4.0f + 24.0f * t;
-        const float old_distance = 4.0f + 24.0f * previous_t;
+        const float distance = f->StrikeMotion[1] + f->StrikeMotion[2] * t;
+        const float old_distance = f->StrikeMotion[1] + f->StrikeMotion[2] * previous_t;
         x = endpoint_x + direction[0] * distance;
-        y = endpoint_y + direction[1] * distance * 0.48f;
+        y = endpoint_y + direction[1] * distance * f->StrikeMotion[3];
         previous_x = endpoint_x + direction[0] * old_distance;
-        previous_y = endpoint_y + direction[1] * old_distance * 0.48f;
+        previous_y = endpoint_y + direction[1] * old_distance * f->StrikeMotion[3];
       } else {
         const float birth = HashUnit(seed ^ 0x29u);
-        float along = birth + 0.34f * t;
-        float previous_along = birth + 0.34f * previous_t;
+        float along = birth + f->StrikeMotion[4] * t;
+        float previous_along = birth + f->StrikeMotion[4] * previous_t;
         if (along > 1.0f) along -= 1.0f;
         if (previous_along > 1.0f) previous_along -= 1.0f;
-        if (!BossLightningPathSample(effect, along, &x, &y) ||
-            !BossLightningPathSample(effect, previous_along, &previous_x,
+        if (!BossLightningPathSample(effect,f, along, &x, &y) ||
+            !BossLightningPathSample(effect,f, previous_along, &previous_x,
                                      &previous_y))
           continue;
       }
-      width = 0.55f + 0.38f * (1.0f - t);
-      reach = 2.5f + 3.5f * (1.0f - t);
+      width = f->StrikeShape[0] + f->StrikeShape[1] * (1.0f - t);
+      reach = f->StrikeShape[2] + f->StrikeShape[3] * (1.0f - t);
     } else {
       /* Charges and floor bursts expand around their own captured artwork. */
       const float *direction =
           kCircle32[(i * 11u + (seed >> 13)) & kActionEffectGlowSegmentMask];
-      const float distance = 2.0f + 26.0f * t;
-      const float old_distance = 2.0f + 26.0f * previous_t;
+      const float distance = f->BurstMotion[0] + f->BurstMotion[1] * t;
+      const float old_distance = f->BurstMotion[0] + f->BurstMotion[1] * previous_t;
       x = (rect->x0 + rect->x1) * 0.5f + direction[0] * distance;
-      y = emission_y + direction[1] * distance * 0.38f;
+      y = emission_y + direction[1] * distance * f->BurstMotion[2];
       previous_x = (rect->x0 + rect->x1) * 0.5f + direction[0] * old_distance;
-      previous_y = emission_y + direction[1] * old_distance * 0.38f;
-      width = 0.50f + 0.32f * (1.0f - t);
-      reach = 2.0f + 2.8f * (1.0f - t);
+      previous_y = emission_y + direction[1] * old_distance * f->BurstMotion[2];
+      width = f->BurstShape[0] + f->BurstShape[1] * (1.0f - t);
+      reach = f->BurstShape[2] + f->BurstShape[3] * (1.0f - t);
     }
 
     const ArRenderColorF color = SceneParticleColor(hot, cool, clock);
@@ -979,48 +903,31 @@ bool AppendBossLightningParticles(ActionEffectGeometryWriter *writer,
 }
 
 bool AppendBossLightningLighting(ActionEffectGeometryWriter *writer,
-                                 const ActionEffectInstance *effect,
+                                 const ActionEffectInstance *effect, const ActionArcField *f,
                                  ActionEffectProjectPointFn project_point, void *userdata) {
+  if(!((unsigned)f->Components[0]&1))return true;
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const float mid_x = (rect->x0 + rect->x1) * 0.5f;
   const float mid_y = (rect->y0 + rect->y1) * 0.5f;
-  const float pulse = DeterministicPulse(effect);
+  const float pulse = ArcPulse(effect,f);
   ActionEffectGlowStyle spill = {0}, body = {0};
   float spill_x = mid_x, spill_y = mid_y;
   float body_x = mid_x, body_y = mid_y;
   if (effect->phase == kActionEffectPhase_BossLightningStrike) {
-    BossLightningPathSample(effect, 0.5f, &spill_x, &spill_y);
+    BossLightningPathSample(effect,f, 0.5f, &spill_x, &spill_y);
     body_x = spill_x;
     body_y = spill_y;
-    static const ActionEffectGlowStyle kSpill = {
-        .ring_scale = {0.24f, 0.72f, 1.0f},
-        .centre = {1.00f, 0.72f, 0.17f, 0.19f},
-        .ring = {{1.00f, 0.48f, 0.06f, 0.13f},
-                 {0.86f, 0.18f, 0.01f, 0.055f},
-                 {0.52f, 0.04f, 0.00f, 0.00f}},
-        .flare = 0.10f,
-        .axis_x = 1.0f,
-        .lift_y = -1.0f};
-    spill = kSpill;
-    spill.radius_x = fmaxf(42.0f, (rect->x1 - rect->x0) * 1.15f);
-    spill.radius_y = fmaxf(58.0f, (rect->y1 - rect->y0) * 0.64f);
+    spill = f->styles[0];
+    spill.radius_x = fmaxf(spill.radius_x,(rect->x1-rect->x0)*f->StrikeSpill[2]);
+    spill.radius_y = fmaxf(spill.radius_y,(rect->y1-rect->y0)*f->StrikeSpill[3]);
     spill.seed = (unsigned)effect->record_address;
-    static const ActionEffectGlowStyle kBody = {
-        .radius_x = 15.0f,
-        .ring_scale = {0.16f, 0.78f, 1.0f},
-        .centre = {1.00f, 1.00f, 0.86f, 0.70f},
-        .ring = {{1.00f, 0.88f, 0.34f, 0.42f},
-                 {1.00f, 0.47f, 0.05f, 0.16f},
-                 {0.80f, 0.10f, 0.00f, 0.00f}},
-        .flare = 0.16f,
-        .axis_x = 1.0f,
-        .lift_y = -1.0f};
-    body = kBody;
-    body.radius_y = fmaxf(45.0f, (rect->y1 - rect->y0) * 0.53f);
+    body = f->styles[1];
+    body.radius_x=fmaxf(body.radius_x,(rect->x1-rect->x0)*f->StrikeBody[2]);
+    body.radius_y = fmaxf(body.radius_y,(rect->y1-rect->y0)*f->StrikeBody[3]);
     body.seed = (unsigned)effect->pulse_generation;
     float start_x, start_y, end_x, end_y;
-    if (BossLightningPathSample(effect, 0.0f, &start_x, &start_y) &&
-        BossLightningPathSample(effect, 1.0f, &end_x, &end_y)) {
+    if (BossLightningPathSample(effect,f, 0.0f, &start_x, &start_y) &&
+        BossLightningPathSample(effect,f, 1.0f, &end_x, &end_y)) {
       const float path_x = end_x - start_x;
       const float path_y = end_y - start_y;
       const float path_length = hypotf(path_x, path_y);
@@ -1028,54 +935,32 @@ bool AppendBossLightningLighting(ActionEffectGeometryWriter *writer,
         /* Local +Y is the ellipse's long axis; rotate it onto the
          * authored start-to-end chord. The ribbon retains the individual
          * OAM bends while its surrounding body agrees with their angle. */
-        spill.axis_x = body.axis_x = path_y / path_length;
-        spill.axis_y = body.axis_y = -path_x / path_length;
+        const float ax=path_y/path_length,ay=-path_x/path_length;
+        const float spill_x=spill.axis_x,body_x=body.axis_x;
+        spill.axis_x=spill_x*ax-spill.axis_y*ay;spill.axis_y=spill_x*ay+spill.axis_y*ax;
+        body.axis_x=body_x*ax-body.axis_y*ay;body.axis_y=body_x*ay+body.axis_y*ax;
       }
     }
   } else {
-    static const ActionEffectGlowStyle kSpill = {
-        .radius_x = 37.0f,
-        .radius_y = 15.0f,
-        .ring_scale = {0.24f, 0.66f, 1.0f},
-        .centre = {1.00f, 0.82f, 0.35f, 0.18f},
-        .ring = {{1.00f, 0.60f, 0.12f, 0.13f},
-                 {0.92f, 0.28f, 0.02f, 0.055f},
-                 {0.58f, 0.05f, 0.00f, 0.00f}},
-        .flare = 0.08f,
-        .axis_x = 1.0f,
-        .lift_y = -1.0f};
-    spill = kSpill;
+    spill = f->styles[2];
     spill.seed = (unsigned)effect->record_address;
-    static const ActionEffectGlowStyle kBody = {
-        .radius_x = 18.0f,
-        .radius_y = 8.0f,
-        .ring_scale = {0.18f, 0.58f, 1.0f},
-        .centre = {1.00f, 1.00f, 0.84f, 0.68f},
-        .ring = {{1.00f, 0.86f, 0.32f, 0.38f},
-                 {1.00f, 0.42f, 0.04f, 0.14f},
-                 {0.76f, 0.08f, 0.00f, 0.00f}},
-        .flare = 0.12f,
-        .axis_x = 1.0f,
-        .lift_y = -1.0f};
-    body = kBody;
+    body = f->styles[3];
+    spill.radius_x=fmaxf(spill.radius_x,(rect->x1-rect->x0)*f->BurstSpill[2]);
+    spill.radius_y=fmaxf(spill.radius_y,(rect->y1-rect->y0)*f->BurstSpill[3]);
+    body.radius_x=fmaxf(body.radius_x,(rect->x1-rect->x0)*f->BurstBody[2]);
+    body.radius_y=fmaxf(body.radius_y,(rect->y1-rect->y0)*f->BurstBody[3]);
     body.seed = (unsigned)effect->pulse_generation;
-    spill_y = body_y = effect->kind == kActionEffect_CentaurLightning ? mid_y : rect->y1 - 2.0f;
+    spill_y = body_y = effect->kind == kActionEffect_CentaurLightning ? mid_y : rect->y1 + f->BurstMotion[3];
     if (effect->phase == kActionEffectPhase_CentaurStaffCharge) {
-      spill.radius_x = spill.radius_y = 26;
-      body.radius_x = body.radius_y = 10;
+      spill.radius_x = spill.radius_y = f->StaffRadius[0];
+      body.radius_x = body.radius_y = f->StaffRadius[1];
     }
   }
-  spill.centre = BossLightningColor(effect, spill.centre);
-  body.centre = BossLightningColor(effect, body.centre);
-  for (int i = 0; i < kActionEffectGlowRings; ++i) {
-    spill.ring[i] = BossLightningColor(effect, spill.ring[i]);
-    body.ring[i] = BossLightningColor(effect, body.ring[i]);
-  }
-  if (!AppendGlow(writer, effect, &spill, pulse, spill_x, spill_y,
-                  project_point, userdata))
+  if (!AppendGlowAtTicks(writer, effect, &spill, pulse, spill_x, spill_y,
+                  project_point, userdata,(unsigned)f->Clock[0]*effect->pulse_ticks))
     return false;
-  if (!AppendGlow(writer, effect, &body, pulse, body_x, body_y, project_point,
-                  userdata))
+  if (!AppendGlowAtTicks(writer, effect, &body, pulse, body_x, body_y, project_point,
+                  userdata,(unsigned)f->Clock[0]*effect->pulse_ticks))
     return false;
-  return AppendBossLightningRibbon(writer, effect, project_point, userdata);
+  return AppendBossLightningRibbon(writer, effect, f, project_point, userdata);
 }

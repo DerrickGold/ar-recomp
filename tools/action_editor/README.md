@@ -46,14 +46,42 @@ live-scene image review across the remaining room families and target platforms.
 
 ### Environmental authoring
 
-Open **Environmental sources** in Shared renderer. Select a source to change
-its enabled state, tint and intensity. **Light reach** adjusts a wall torch's
-spill radius independently of its flame, ember positions and peak brightness.
-Compound sources such as canopy light or gallery windows expose the whole group.
-Use placed fans, contours and particle fields for additional authored structures;
-these do not move individual members of an existing native compound group.
+Right-click BG1's map and choose **Add effect…**. The modal starts at the exact
+clicked map position. Choose a family or preset, then configure its appearance,
+area, particles and receivers in the wider inspector. Unsupported controls are
+hidden. **Add effect** / **Apply changes** saves one undoable operation;
+**Cancel** or Escape discards the whole draft. **Apply & preview** commits and
+opens the shared native renderer at the selected marker. **Preview here** from
+the map menu centres the native camera on any clicked point, clamped to the room.
 
-**Add at view centre** places any of the following families:
+Markers include the whole room's native defaults, without visiting their camera
+positions or capturing scenes. Click and drag a marker with ordinary tile
+selection to move it; select it and drag a corner to resize its supported ranges.
+Double-click or right-click a marker to configure it. When markers overlap, the
+context menu offers **Effects at this point** to pick the intended source.
+Deleting an authored effect removes it; deleting a default disables it, leaving
+a grey marker available for re-enabling or **Restore source defaults**. Room-wide
+families have fixed markers near the map origin, with position/size editing
+limited to their individual members. **Apply and configure family lighting…**
+opens the member's parent controls for shared receiver settings.
+
+**Environmental sources** remains an optional source picker and import/export
+panel. Select **Configure selected effect…** to open the same modal. Change a
+source's enabled state, tint and intensity there. **Light reach** adjusts a wall torch's
+spill radius independently of its flame, ember positions and peak brightness.
+Compound sources also expose stable numbered catalogue members: forest openings,
+castle windows and bounce lights, and Fillmore cave water, mist, drips and wet
+surfaces. Select a numbered member to enable, tint, move or scale it independently.
+**Offset X/Y** move its native anchor; **Width/Length scale** change its shape.
+**Angle offset** rotates forest/window directions. Unsupported controls are
+unavailable: drips keep their particle size, water keeps its surface depth, and
+torches use **Light reach** for their spill instead of scaling their flame.
+Ceiling drip and forest ray length handles keep the upper source anchor fixed.
+Single wall torches and Aitos waterfall/splash sources also expose anchor offsets.
+Receiver choices belong to the parent source family; members inherit them.
+Use placed fans, contours and particle fields for additional authored structures.
+
+**Add effect…** also works from the sidebar at the preview centre. It offers these families:
 
 | Family | Controls and behavior |
 | --- | --- |
@@ -71,7 +99,7 @@ The palette also provides temple dust, falling leaves, snow, blowing sand,
 insects, scarabs, lava embers and halo presets for later-stage authoring. They
 reuse the shared kernels; this does not install new art across those stages.
 
-The inspector edits its playfield coordinates, width/height, tint, intensity
+The inspector edits its layer coordinates, width/height, tint, intensity
 and animation cycle. Motes additionally expose particle count, radius range,
 travel per cycle, horizontal sway/spread, a pattern seed and optional end tint.
 All distances are in game pixels. Negative travel Y rises, positive falls, zero
@@ -118,13 +146,93 @@ light receiver controls. Actor source ID zero targets that family throughout
 the selected room/terrain, including future native generations. Event/probe
 positions are temporary; source edits persist in the effects document.
 
-**Place on map** switches to BG1 and places the chosen preset at a click.
+**Place on map** uses the selected BG and places the chosen preset at a click.
 **Edit emitters on map** picks authored areas, moves them by dragging their
 centre/body and resizes the selected area with corner handles. Hold Alt to snap
 to 16 pixels. Dragging is a draft until release and creates one undo entry;
-Esc, losing focus or switching room/terrain cancels it. **Show emitter areas on
-map** controls their guides. Native compound groups remain in the source picker;
-these handles do not guess positions for their individual members.
+Esc, losing focus or switching layer/room/terrain cancels it. **Show effect markers on
+map** controls their guides; only the selected marker shows its bounds. Numbered native members and movable single sources
+also have handles. Their guides describe catalogue anchors and extents, rather
+than tracing every animated ray or particle. Native offsets retain the original
+source's coordinate space; forest openings belong to the intermediate light
+layer and scroll at its existing parallax. Authored emitters use their selected
+anchor layer.
+Moving a member changes presentation only: it does not move window artwork,
+change collision or bypass native source-art validation.
+
+**Complete linked moon field:** select Bloodpool's moon, reflection or cloud
+source and choose **Edit complete moon-field definition…**. The popup exposes
+its fixed BG2 anchor, six low and five middle ray profiles, soft-shadow source
+radius/depths, cloud veil and modulation, distant reflection wash/glints, and
+wave caps tied to the game's actual water rows. Individual component checkboxes
+turn each part on or off. Source/profile changes use the same native/WASM
+kernels; foreground water/timber/insect lighting follows the shared profile.
+
+Apply creates one ordinary `moon-field` definition in `action-effects.ini`,
+replacing the bundled moon group. Its single marker on BG2 moves the complete
+light source, cloud and reflections together. It does not move the moon artwork.
+The palette also offers **Linked moon, cloud veil and water glints (BG2)** for
+other rooms; BG2 placement uses the clicked point. From BG1 it starts at the BG2
+map centre because a static background has no unique inverse foreground position.
+If the room has no native water-row animation, only those wave caps are omitted.
+Apply/Cancel, undo, disable/reset and export/reload work like other definitions.
+**Complete marsh and castle fields:** the corresponding native sources now offer
+**Edit complete marsh-field definition…** or **Edit complete castle-field definition…**.
+The palette can add either group to another room. Marsh controls include water
+spans and materials, shoreline mist, wet timber, drips, ripples and insects.
+Castle controls include explicit opening/sill witnesses, arch samples, source
+positions/reach, stacked-window blends, gallery highlights, torch bounce, dust,
+floor haze, moat glints and an independently editable BG2 moon profile.
+Component toggles keep the aggregate native batching; none creates native actors.
+Material witnesses must match the room artwork before a source becomes active.
+The source ID preserves variation when positions change. Floor haze still checks
+collision support. Apply/Cancel, undo/redo and export/reload use ordinary field
+records. Dimming strength, world-space depth ramps and scenery/player/enemy receiver
+checkboxes are part of the atmosphere/castle definitions. Preserve original
+receivers keeps the existing cave light composition; selecting explicit light
+receivers routes it through the shared receiver path. Older version-1 complete
+fields gain their previous dimming values at import. Torch-flame accents and
+actor/trap responses remain separate migration work.
+
+**Anchor coordinates** is separate from **Draw placement**. Choose **BG1** for
+playfield pixels, **BG2 · fixed point** for a source such as Bloodpool's moon,
+or **BG2 · surface raster** for effects riding the water bands. Fixed means
+stationary in BG2's map, not pinned to the display: the source follows BG2's
+camera and plane/skybox projection. The whole light or cloud uses the source
+row's transform, so independent water bands cannot split or bend it. Surface
+raster mode deliberately follows each band's mapping. Neither mode adds a
+rendering pass or creates textures; both use the existing shared geometry path.
+
+Right-clicking BG2 now adds BG2 effects (water ripples default to surface raster;
+other free effects to a fixed point). Their drag/resize markers live on the BG2
+map. **Apply and show anchor on map** locates the selected emitter on its owning
+layer. Changing the anchor selector keeps the saved numeric X/Y values; it does
+not guess a conversion between independent maps. Previewing a BG2 point keeps
+the current foreground camera, since a static backdrop does not identify one
+unique position along a level. Terrain-supported mist, traced playfield contours
+and dimming regions still require BG1.
+
+Bloodpool's existing moon and cloud markers also appear at their shared BG2
+point `(112,62)`. Their native source position and coupled ray/reflection profiles
+still await complete-definition migration; these catalogue markers currently
+open the family's sparse appearance/receiver controls. A placed fan is not a
+replacement for the native pixel-shadowed moon field.
+
+```ini
+[emitter:02:01:0:light-fan:00000126]
+anchor=bg2-point
+placement=background
+x=112
+y=62
+width=32
+height=256
+strands=12
+```
+
+`anchor` defaults to `bg1`, preserving existing documents; the other values are
+`bg2-point` and `bg2-raster`. Parsing resolves this once into the retained source's
+projection plane and fixed-point flag. Bounds, geometry limits and batching are
+unchanged, and only required source/attachment masks are requested.
 
 **Paint ground mist** switches to BG1's map and enables the shared collision
 overlay. Drag a rectangle around the floors you want to cover (up to 512 × 512
@@ -161,7 +269,13 @@ emitter kinds. Scope uses hexadecimal map group/room, decimal terrain profile
 [effects]
 version=1
 
-; Obtain native source IDs from the source inspector.
+; Obtain native source and numbered member IDs from the source inspector.
+[member:01:01:0:forest-forward:00000004]
+offset-x=48
+width-scale=1.5
+angle=6
+
+; The parent family still controls receiver selection.
 [source:02:03:0:wall-torch:54000101]
 reach=2.5
 intensity=0.75
@@ -256,11 +370,166 @@ presentation of authored-only scenes. Browser smoke tests cover import, invalid
 version rejection, undo/redo and effect geometry. Download completion through
 the automation browser remains unverified; the copyable document is available.
 
-Still pending: automatic contour/material recognition, sloped mist supports,
-individual native compound-member handles, a combined scenery/effects project,
-native reload without restarting, edited-silhouette occlusion, actual actor/HUD
-art, final image parity and target-hardware acceptance. Water refraction/heat
-and full volumetric scattering remain separate experiments.
+The forest default is now a complete editable grouped `ray-field` recipe.
+Select a forest family and choose **Edit complete ray-field definition…** to
+extract its entire definition into the effects document. This replaces its
+bundled capture, preserving aggregate rendering. The modal exposes openings,
+origin groups, rear/front profiles, light-responsive mote clusters, leaves,
+colors, motion, bounds and source-art witnesses. Existing member handles follow
+the configured base positions/count; sparse member and receiver overrides still
+apply. Untouched decimal values keep their exact round-trip representation.
+**Disable field** keeps the replacement disabled; **Restore source defaults**
+removes it and resolves the bundled definition. Apply/Cancel and Undo work as
+for other effects. The grouped field is also available in the Add effect palette.
+Its positions use the independent light layer; placement converts the map's
+scroll ratio, as native member handles do.
+
+`assets/effects/forest-ray-field.ini` is the single source of bundled visual data.
+After editing it, run `python3 tools/generate_effect_defaults.py` and the native
+recipe tests. Editor builds verify that its checked-in embedding is current.
+Complete field records are version 1 additions; existing source/member/emitter
+documents remain supported. They require every defining property, allow one field
+per room/terrain, and retain the twelve-opening/four-origin/two-profile bounds.
+Native and WASM capture/rendering use the same codec and pure kernels, with no
+runtime INI parsing or new per-frame GPU resources. Fresh config reconstruction
+matches the pinned earlier geometry across the tested cameras and clocks.
+
+Complete definitions are also available for cave water/atmosphere, Bloodpool
+moon/marsh/castle lighting, torch/temple glows, trap/wizard/centaur lightning,
+four projectile families and Aitos lava/splash/waterfalls. Select a native source
+and use **Edit complete … definition** to extract its recipe. The same field
+families appear in **Add effect**. Their source rules, geometry, palettes,
+clocks and component controls are retained data shared with the native renderer.
+Aitos fields offer material recognition or manual source lists. Add/remove source
+buttons preserve valid bounds and unique identities. Lava-lake heat controls
+operate the existing flat game refraction pass; the shared diorama preview shows
+its glow/sparks but does **not** preview that flat-only distortion.
+
+#### Actor attachments and reusable fire/clouds
+
+A placed emitter's modal offers **Attach to an actor or attack**. Choose the
+player or a family from the room picker; custom family IDs and optional parent,
+state, visual-frame, animation and handler filters identify runtime attacks.
+This works for actors without an existing native accent. **Bloodpool boss fire
+preset** selects the Act 1 boss's fire children. The preset is supported by native
+descriptor/handler analysis and observer tests; gameplay appearance still needs
+review. Family IDs describe native game identities, independent of regional art.
+
+Attached X/Y are offsets from the actor. The map marker uses the reference actor
+position; dragging edits its offset. **Preview attached effect** or **Apply &
+preview** supplies one matching visual actor sample and lets you scrub its age.
+This does not simulate AI, spawn game objects or display actual actor artwork.
+A maximum-visible-instances setting reserves authored capacity at import time.
+Terrain effects and large particle regions stay attached to terrain rather than
+actors. Receiver checkboxes independently control scenery, player and enemy
+lighting; excluding scenery light does not suppress companion particles.
+
+Use **Flame / fire with embers** for a reusable warm fire, or **Torch** for the
+shared native flame profile with independent spill reach. **Cloud bank** supplies
+layered moving clouds. All can be configured without new C code. Later-stage
+compositions add ordinary editable halo, gradient, mist, ray and particle markers;
+they are authoring starting points, not final art approval for those stages.
+
+#### Copy and repeat placement
+
+Select an effect marker; Shift-click adds more markers. Ctrl/Cmd-C copies the
+selection. Ctrl/Cmd-V enters repeat placement: click to paste, Escape to finish.
+The right-click menu also offers copy/paste. Each paste gets fresh identities,
+preserves spacing/settings and is one undoable operation. Individual native
+torches copy into authored torches; their flame profile comes from the destination
+room's shared glow field. Actor attachments copy their selector and local offset.
+BG1/BG2 effects stay in their owning coordinate system. Whole compound fields are
+edited through their source lists rather than duplicated as map markers. The
+internal effect clipboard is separate from the exported INI clipboard.
+
+Remaining native actor phases, landing dust and spell-controller visuals still
+need complete recipe extraction. Sparse overrides alone cannot reconstruct
+those defaults. See the [native-default contract and audit](../../docs/action-effects-editor-plan.md#native-defaults-must-be-reconstructible-from-configuration).
+Further work includes compound handles, material/slope tools, a combined
+scenery/effects project, live native reload, actual actor/HUD artwork, final image
+parity and target-hardware acceptance. Camera-aligned editing and detached live
+preview follow the remaining effect migrations. Full volumetric scattering and
+diorama heat/refraction remain separate experiments.
+
+#### Native members and edited light occlusion
+
+Member identities are catalogue ordinal + 1, with append-only catalogue order.
+Transforms are sparse `[member:GG:RR:T:kind:ID]` records in the same version-1
+file. Each room/terrain allows 64 member overrides separately from its 16
+additional emitters. Offsets are limited to ±512 game pixels, shape scales to
+0.25–2, and supported angle offsets to ±30 degrees. Reset removes the record
+and restores its native defaults. Tint and intensity combine with the parent.
+Large transforms remain subject to existing room/source clipping and geometry
+budgets; they do not make an invisible or unrecognized native source valid.
+
+Directional lights now read the renderer's edited BG1 silhouette, including
+stamped/copied tiles, flips, depth bands, painted black and transparent pixels.
+Only the playfield band casts these atmospheric shadows; far/high bands do not
+silently become playfield occluders. Bloodpool Act 1's moon sampler uses this
+same edited opacity, while forest front rays, castle windows and authored fans
+share a bounded projected coverage field. The three finite-depth samples soften
+and attenuate rays under platforms without suppressing all light below them.
+This is an atmospheric approximation applied to mesh vertices, not full
+volumetric or per-pixel shadow tracing. Changing scenery never creates gameplay
+collision, mist support or source-art witnesses.
+
+The capture examines a 768 × 352 game-pixel window, merges opaque scanline runs
+into at most 2048 rectangles and reuses each retained batch's coverage scratch.
+The generic coverage field is 400 × 176 bytes. Overflow disables this optional
+capture instead of overrunning its capacity. No extra GPU targets, texture
+uploads, readbacks or per-frame heap allocations were added. Receiver sampling
+and presentation use caller-owned retained batches; actor light meshes append
+directly, without a shared global scratch buffer or an intermediate copy.
+
+#### Mac performance sample — 2026-10-01
+
+On this Apple M2, 500 animated native room frames at maximum 128/64 extensions
+measured the following CPU costs. The full-room figure includes PPU scanout,
+source/caster capture and effect meshes; meshes and opacity are sub-costs, not
+additional totals. Opacity is timed separately even for the cave scene where no
+native directional caster field is needed.
+
+| Room sample | PPU/capture + meshes | Effect meshes | Edited opacity capture |
+| --- | ---: | ---: | ---: |
+| Fillmore forest, 1800/400 | 3.595 ms | 0.168 ms | 0.189 ms |
+| Fillmore cave, 1450/1000 | 3.016 ms | 0.035 ms | 0.144 ms |
+| Bloodpool outdoors, 1600/240 | 3.871 ms | 0.804 ms | 0.203 ms |
+| Bloodpool gallery, 800/0 | 2.442 ms | 0.131 ms | 0.113 ms |
+
+The native SDL/Metal compositor, tested separately for 300 warmed static capture
+frames, measured 0.056 ms CPU submission / 1.081 ms GPU-complete frame at
+960 × 600 (Fillmore), and 0.147 / 1.758 ms at 1440 × 900 (Bloodpool). These
+exclude dynamic mesh generation, gameplay and swapchain presentation; do not
+add them to the CPU samples as an end-to-end frame-time claim.
+
+The native room oracle accepts a final `--benchmark` flag and the usual camera
+pose on stdin. The compositor replay accepts `--benchmark` before its arguments:
+
+```sh
+build/actraiser_diorama_replay --benchmark runs/action-editor-captured-scene/bloodpool/scene.ardi /tmp/bloodpool-perf.bmp 1440 900
+```
+
+Steam Deck/Vulkan and Windows/D3D12 hardware measurements, along with matched
+live-game images, remain acceptance work. The new effects use the existing
+portable geometry/renderer interfaces and introduce no backend-specific pass.
+
+#### Whole-room default markers and inventory cost
+
+The map inventory scans immutable room assets once per loaded room using the
+native source producers and deduplicates stable kind/source IDs. The scan has a
+1024-source bound and makes no PPU render, GPU texture, upload or draw calls. It
+preserves the current preview frame and recipes; edits use sparse overrides.
+Numbered members come from the shared native catalogue. Parallax source handles
+convert between source-layer coordinates and BG1 map pixels when moving them.
+Actor events are previewed separately; moving game objects are not static map
+markers. Source-art checks still apply, so removing a source's supporting tile
+can stop that native effect even though its default marker remains available.
+
+On Apple M2, four native inventories took 0.106 ms (Fillmore 1:1), 0.394 ms
+(Fillmore 1:2), 4.293 ms (Bloodpool 2:1) and 0.171 ms (Bloodpool 2:7). These are
+one-time native CPU samples, not WASM or end-to-end frame measurements. Warm map
+redraws reuse the inventory. The 147-room native/WASM gate checks unique IDs,
+finite member/scroll geometry, cache reuse and unchanged live hashes/GPU counters.
 
 #### Text versus binary storage
 
@@ -1012,3 +1281,64 @@ node tests/action_editor_terrain.test.mjs build/action-editor/ar-action-layer-ed
 `editor.body.html` is the load-order manifest for both the builder and ESLint;
 diagnostics point back to the individual source file and line. New script files
 must appear in that manifest.
+
+
+The cave water default is also a complete editable `water-field` recipe.
+Choose a cave water, drip, splash-mist or wet-sheen family and **Edit complete
+water-field definition…**. Pools and falls use their owning BG2 world pixels;
+wet contacts and rock contours use BG1. The field includes exact material IDs,
+33 measured contour columns (127 denotes a gap), linked contact/ripple timing,
+water colors, glows and layered splash-mist parameters. The bounds and witnesses
+are explicit; a missing wet material disables that contact rather than attaching
+water to decorative rock. Existing native member controls remain relative to
+these configured bases.
+
+**Linked water, wet rock and splash field** in the placement palette starts a
+single pool at the clicked location, converted into BG2 coordinates. Configure
+its contacts and components in the popup; counts and sampling rates are bounded
+by the native geometry budget. Every scalar and vector is included in exported
+`action-effects.ini`. Disable retains an explicit disabled definition; restoring
+defaults removes that override. The canonical bundled definition is
+`assets/effects/cave-water-field.ini`; regenerate the embedding with
+`python3 tools/generate_effect_defaults.py` after editing it.
+
+Forest and linked cave-water reconstruction now pass independent geometry and
+regional native/WASM gates. The native cave atmosphere, marsh, castle, compound
+flow/glow, actor/contact and exposure definitions still require migration before
+the complete native-default reconstruction milestone is accepted.
+
+### Complete cave and temple atmosphere definitions
+
+Choose a native `temple-dust`, `cave-light`, `temple-grit`, `floor-mist` or
+`tower-window` source, open its configuration modal, and choose **Edit complete
+atmosphere definition…**. This extracts the current room's entire atmosphere
+into an ordinary `atmosphere-field` record. It replaces the native field while
+using the same geometry kernels. Apply and Cancel remain transactional; resetting
+the complete definition restores the bundled default. Source-level receiver
+masks and sparse appearance overrides remain independent.
+
+The three defaults are in `assets/effects/{cave,temple,tower}-atmosphere-field.ini`.
+Regenerate embeddings with `python3 tools/generate_effect_defaults.py` after
+editing these files. No C lighting/source table must be edited as well.
+
+All positions use BG1 world pixels. `counts` selects active ambient sources,
+dust rectangles, grit contacts, tower origins and map witnesses, respectively.
+`components` is a sum of dust=1, tower light=2, ambient light=4, grit=8 and floor
+mist=16. Keep inactive slots in the file: complete fields are strict, bounded
+records. Dust coverage is the union of `area-N` rectangles. The modal labels
+source radii, exposure versus surface gain, particle timing, RGB/opacity and
+profile values separately. The **Atmosphere: light, dust, mist and grit** palette
+entry starts a generic light pool and dust region at the clicked point, with
+room-art witnesses disabled so it can work in other rooms.
+
+`floor-area` is a 16-pixel-grid search rectangle: each column uses its first
+exposed supported floor. Spikes with no collision do not stop mist above their
+base. The region is limited to 880 pixels wide and a 128-pixel vertical search;
+fragmentation beyond the existing native mist-span budget omits only floor mist.
+`floor-style` controls volume height and ambient-light response. The `mist-*`
+properties describe the same layered volume kernel used by splash mist.
+`grit-*` and `grain-*` configure falling grit and its landing burst; actor jump
+and landing event scheduling is still a separate native family.
+
+Atmosphere sub-sources currently use labeled modal vectors; individual drag
+handles for those vectors remain on the editor usability backlog.

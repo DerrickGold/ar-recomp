@@ -510,6 +510,7 @@ const resetCamera = () => {
   draw();
 };
 window.addEventListener('keydown', e => {
+  if(EffectEditor.modalOpen())return;
   if(!tileMenu.hidden||exportDialog.open||$('#docsDlg').open)return;
   if (['SELECT','INPUT','TEXTAREA'].includes(e.target.tagName)||e.target.isContentEditable) return;
   const accel = e.metaKey || e.ctrlKey;
@@ -517,10 +518,10 @@ window.addEventListener('keydown', e => {
     e.preventDefault();finishFramingDrag(true);$('#bSelect').onclick();return;
   }
   if (e.key === 'Escape' || (accel && e.key.toLowerCase() === 'd')) {
-    e.preventDefault(); deselect(); return;
+    e.preventDefault(); EffectEditor.clearMapSelection();deselect(); return;
   }
-  if(accel&&e.key.toLowerCase()==='c'&&mode==='2d'){e.preventDefault();copyTiles();return;}
-  if(accel&&e.key.toLowerCase()==='v'){e.preventDefault();startStamp();return;}
+  if(accel&&e.key.toLowerCase()==='c'&&mode==='2d'){e.preventDefault();if(brush==='effects'||EffectEditor.hasMapSelection())EffectEditor.copyEffects();else copyTiles();return;}
+  if(accel&&e.key.toLowerCase()==='v'){e.preventDefault();if(!EffectEditor.startEffectPaste())startStamp();return;}
   if (accel && (e.key === 'z' || e.key === 'Z')) {
     e.preventDefault(); e.shiftKey ? redo() : undo(); return;
   }
@@ -549,6 +550,7 @@ window.addEventListener('keydown', e => {
 });
 function setMode(m) {
   finishFramingDrag();
+  if(EffectEditor.modalOpen())EffectEditor.finishModal(false);
   closeTileMenu();
   tileActionStatus('');
   if(m!=='2d'){compareOriginal=false;pixelInspector.hidden=true;closeTilePalette(false);}
@@ -574,6 +576,7 @@ function setMode(m) {
   refreshEditorFeedback();glDirty = true; draw();
 }
 function setLayer(i) {
+  if(EffectEditor.modalOpen())EffectEditor.finishModal(false);
   finishFramingDrag();
   if(i!==0&&brush==='framing')$('#bSelect').onclick();
   closeTileMenu();

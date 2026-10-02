@@ -51,6 +51,13 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer, ActionScene
   expected_scene_clock = observer->scene_clock;
   *dst = scene;
 }
+void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
+    ActionSceneEffectFrame *dst,const uint8_t *wram,size_t size,unsigned ticks,bool native_glow,const ActionSurfaceField *const *surfaces) {
+  (void)surfaces;
+  assert(native_glow);ActionSceneEffects_CaptureFrame(observer,dst,wram,size,ticks);
+}
+void ActionEffectManifest_SurfaceFields(unsigned group,unsigned room,const ActionSurfaceField **fields){(void)group;(void)room;memset(fields,0,sizeof(*fields)*kActionSurfaceFieldKinds);}
+bool ActionEffectManifest_ReplacesGlowField(unsigned group,unsigned room) {(void)group;(void)room;return false;}
 void ActionEnvironmentalEffects_CaptureFrame(ActionEffectObserver *observer,
     ActionSceneEffectFrame *dst, const uint8_t *wram, size_t size) {
   if(peeking) {
@@ -61,6 +68,19 @@ void ActionEnvironmentalEffects_CaptureFrame(ActionEffectObserver *observer,
   assert(wram == g_ram && size == sizeof(g_ram));
   assert(g_settings.action_environmental_effects);
   environment_calls++;
+}
+void ActionEnvironmentalEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
+    ActionSceneEffectFrame *dst,const uint8_t *wram,size_t size,bool native_ray_field, bool native_water_field, bool native_atmosphere_field, bool native_moon_field, bool native_marsh_field, bool native_castle_field) {
+  assert(native_ray_field&&native_water_field&&native_atmosphere_field&&native_moon_field&&native_marsh_field&&native_castle_field);
+  ActionEnvironmentalEffects_CaptureFrame(observer,dst,wram,size);
+}
+bool ActionEffectManifest_ReplacesCastleField(unsigned group,unsigned room) {(void)group;(void)room;return false;}
+bool ActionEffectManifest_ReplacesMarshField(unsigned group,unsigned room) {(void)group;(void)room;return false;}
+bool ActionEffectManifest_ReplacesMoonField(unsigned group,unsigned room) {(void)group;(void)room;return false;}
+bool ActionEffectManifest_ReplacesWaterField(unsigned group,unsigned room) {(void)group;(void)room;return false;}
+bool ActionEffectManifest_ReplacesAtmosphereField(unsigned group,unsigned room) {(void)group;(void)room;return false;}
+bool ActionEffectManifest_ReplacesRayField(unsigned group,unsigned room) {
+  (void)group;(void)room;return false;
 }
 void Diorama_PublishLiveLayerSection(uint8_t group, uint8_t map, uint8_t section) {
   assert(scene_calls == spell_calls);

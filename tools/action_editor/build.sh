@@ -14,6 +14,7 @@ OUT="${2:-build/action-editor/ar-action-layer-editor.html}"
 LAYERS="${3:-diorama-layers.ini}"
 VIEW_SETTINGS="${4:-settings.ini}"
 [ -f "$ROM" ] || { echo "[action-editor] no ROM at $ROM"; exit 1; }
+"${PYTHON:-python3}" tools/generate_effect_defaults.py --check
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

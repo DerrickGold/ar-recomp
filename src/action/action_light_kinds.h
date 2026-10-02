@@ -5,6 +5,7 @@
  * receiver sampling on the same catalog; particle-only sources stay excluded. */
 static inline bool ActionLightKind_Supported(unsigned kind) {
   switch(kind) {
+    case kActionEffect_AuthoredHalo:case kActionEffect_AuthoredGradient:case kActionEffect_AuthoredFlame:case kActionEffect_AuthoredTorch:
     case kActionEffect_AuthoredLight:case kActionEffect_AuthoredFan:case kActionEffect_WallTorch:
     case kActionEffect_ForestCanopyLight:case kActionEffect_ForestForwardLight:
     case kActionEffect_CaveSheen:case kActionEffect_CaveAmbientLight:case kActionEffect_TowerWindowLight:

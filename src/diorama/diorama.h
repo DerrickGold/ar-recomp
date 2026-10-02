@@ -195,6 +195,9 @@ bool Diorama_SkyboxCaptureBounds(const DioramaProjection *projection,
  * to the active band's output rows, expressed through that source mapping. */
 bool Diorama_SkyboxAnchorBounds(const DioramaProjection *projection, float anchor_y,
                                 float *x0, float *y0, float *x1, float *y1);
+/* Validated source band for a static anchor; borrowed from projection. */
+const DioramaSkyboxBandProjection *Diorama_SkyboxAnchorBand(
+    const DioramaProjection *projection, float anchor_y);
 bool Diorama_ProjectSkyboxAnchorPoint(const DioramaProjection *projection, float anchor_y,
                                       float x, float y, ArRenderPointF *point);
 

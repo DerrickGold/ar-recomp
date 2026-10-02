@@ -53,21 +53,27 @@ bool AppendAuthoredEnvironment(ActionEffectGeometryWriter *writer,
   if (!writer || !effect || !project) return false;
   const ActionEffectLocalRect *r = &effect->geometry.data.rect;
   if (effect->geometry.kind != kActionEffectGeometry_Rect || !RectIsSane(r) ||
-      r->x1-r->x0 > ((effect->kind==kActionEffect_AuthoredParticleArea||effect->kind==kActionEffect_AuthoredExposure)?16384:512) ||
-      r->y1-r->y0 > ((effect->kind==kActionEffect_AuthoredParticleArea||effect->kind==kActionEffect_AuthoredExposure)?16384:512) || effect->particle_count > 128 ||
+      r->x1-r->x0 > ((effect->kind==kActionEffect_AuthoredParticleArea||effect->kind==kActionEffect_AuthoredExposure||effect->kind==kActionEffect_AuthoredGradient)?16384:512) ||
+      r->y1-r->y0 > ((effect->kind==kActionEffect_AuthoredParticleArea||effect->kind==kActionEffect_AuthoredExposure||effect->kind==kActionEffect_AuthoredGradient)?16384:512) || effect->particle_count > 128 ||
       effect->particle_lifetime < 16 || effect->particle_lifetime > 4096 ||
       !isfinite(effect->tuning.intensity) || effect->tuning.intensity < 0 || effect->tuning.intensity > 4)
     return false;
-  if(effect->kind>=kActionEffect_AuthoredParticleArea)
+  if(effect->kind>=kActionEffect_AuthoredParticleArea&&effect->kind!=kActionEffect_AuthoredFlame)
     return AppendAuthoredField(writer,effect,lighting,particles,project,clip,context);
   ActionEffectParticleStyle style=effect->particle_style.active ? effect->particle_style :
       ActionAuthoredParticles_Default(r->y1-r->y0,effect->generation);
   if (!effect->particle_style.active) style.color_end=effect->tuning.color;
   ActionEffectInstance motion=*effect;
-  if (effect->kind==kActionEffect_AuthoredMotes) {
+  if (effect->kind==kActionEffect_AuthoredMotes||effect->kind==kActionEffect_AuthoredFlame) {
     if (!ActionAuthoredParticles_Valid(&style)) return false;
     motion.geometry.data.rect=ActionAuthoredParticles_Bounds(r,&style);
     motion.pulse_generation=style.seed;
+    if(effect->kind==kActionEffect_AuthoredFlame) {
+      motion.geometry.data.rect.x0=fminf(motion.geometry.data.rect.x0,r->x0);
+      motion.geometry.data.rect.x1=fmaxf(motion.geometry.data.rect.x1,r->x1);
+      motion.geometry.data.rect.y0=fminf(motion.geometry.data.rect.y0,r->y0-(r->y1-r->y0)*.3f);
+      motion.geometry.data.rect.y1=fmaxf(motion.geometry.data.rect.y1,r->y1);
+    }
   }
   ActionEffectLocalRect visible=motion.geometry.data.rect;
   if (clip && !clip(context,&motion,&visible)) return true;
@@ -84,11 +90,25 @@ bool AppendAuthoredEnvironment(ActionEffectGeometryWriter *writer,
     glow.ring[1].a=.05f*intensity;glow.ring[2].a=0;
     return AppendGlow(writer,effect,&glow,1,0,0,project,context);
   }
+  if(effect->kind==kActionEffect_AuthoredFlame&&lighting) {
+    const unsigned ticks=EffectVisualTicks(effect,effect->pulse_ticks);
+    const uint32_t seed=effect->generation^style.seed;
+    const float pulse=.78f+.14f*HashUnit(seed^(ticks/7))+.08f*HashUnit(seed^(ticks/23));
+    ActionEffectGlowStyle glow={.radius_x=width*.5f,.radius_y=height*.5f,
+      .ring_scale={.16f,.54f,1},.centre=tint,.ring={tint,tint,tint},.axis_x=1,.lift_y=-1,.flare=.2f,.rise=.25f};
+    glow.centre.a=.18f*intensity;glow.ring[0].a=.14f*intensity;glow.ring[1].a=.045f*intensity;glow.ring[2].a=0;
+    if(!AppendGlow(writer,effect,&glow,pulse,0,-height*.15f,project,context))return false;
+    const uint32_t hot=style.color_end;
+    glow.radius_x=width*.13f;glow.radius_y=height*.32f;glow.flare=.34f;glow.rise=.5f;
+    glow.centre=(ArRenderColorF){((hot>>16)&255)/255.f,((hot>>8)&255)/255.f,(hot&255)/255.f,.8f*intensity};
+    glow.ring[0]=glow.centre;glow.ring[0].a=.6f*intensity;glow.ring[1]=tint;glow.ring[1].a=.15f*intensity;
+    if(!AppendGlow(writer,effect,&glow,pulse,0,-height*.16f,project,context))return false;
+  }
   if (!particles) return true;
   if (effect->kind == kActionEffect_AuthoredFloorMist)
     return FloorMist(writer,effect,floor,&visible,tint,project,context);
   const unsigned ticks=EffectVisualTicks(effect,effect->pulse_ticks);
-  if (effect->kind == kActionEffect_AuthoredMotes) {
+  if (effect->kind == kActionEffect_AuthoredMotes || effect->kind==kActionEffect_AuthoredFlame) {
     const ArRenderColorF end={((style.color_end>>16)&255)/255.0f,
       ((style.color_end>>8)&255)/255.0f,(style.color_end&255)/255.0f,1};
     for (unsigned i=0;i<effect->particle_count;++i) {
@@ -97,7 +117,7 @@ bool AppendAuthoredEnvironment(ActionEffectGeometryWriter *writer,
           (SceneParticleLifetime){effect->particle_lifetime,0,0});
       const float x=(r->x0+r->x1)*.5f+width*style.spread*(HashUnit(seed)-.5f)+
           style.travel_x*clock.t+sinf(clock.t*6.283185f+HashUnit(seed^71)*6)*style.wander;
-      const float y=style.travel_y < 0 ? r->y1+style.travel_y*clock.t :
+      const float y=style.travel_y < 0 ? (effect->kind==kActionEffect_AuthoredFlame?0:r->y1)+style.travel_y*clock.t :
           style.travel_y > 0 ? r->y0+style.travel_y*clock.t : r->y0+height*HashUnit(seed^91);
       const float size=style.size_min+(style.size_max-style.size_min)*HashUnit(seed^27);
       ArRenderColorF c=MixColor(tint,end,clock.t);

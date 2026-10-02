@@ -37,6 +37,83 @@ Existing behaviors and their combinations should be reusable through presets and
 authored parameters. Future effects are not considered implemented merely because
 their category appears in the palette.
 
+Priority update, 2026-10-01: finish the remaining native-default migrations and
+planned editor effect capabilities before implementing camera-aligned editing
+or a detached live shared-renderer window. Both view improvements are queued in
+phase 6a below; they must not displace the current effects work.
+
+### Native defaults must be reconstructible from configuration
+
+Required by the user on 2026-10-01: bundled level effects must be ordinary,
+editable definitions in the same effects suite used for authoring. They must be
+reconstructible from configuration with the native default definitions disabled,
+without losing appearance, behavior or rendering performance. Editable overrides
+of a C-owned effect do not satisfy this requirement.
+
+The current implementation does **not** yet meet this gate for all defaults.
+Complete configuration definitions now cover forest rays; cave water and
+atmosphere; Bloodpool moon, marsh and castle groups; torch/temple glows;
+trap, wizard and centaur lightning; fireball, orb, jungle-fire and lava-fire
+responses; and Aitos lava, splash, waterfall and waterfall mist. These families
+have independent pre-migration geometry oracles as well as native/WASM checks.
+Other actor phases, landing dust and spell-controller visuals still contain
+C-owned recipes. Their sparse overrides and representative preview events do
+not count as complete reconstruction. Sixteen freely placed emitter families,
+generic actor bindings and later-stage composition presets extend authoring;
+matching a family name alone is not evidence of native fidelity.
+
+The implementation contract is:
+
+- Bundled defaults and user-created effects use the same versioned semantic
+  recipe format, resolver, reusable kernels and editor controls. Exporting a
+  default must preserve its complete definition and dependencies; importing it
+  into a room with that default disabled must reproduce it. Reset resolves the
+  bundled recipe, rather than re-entering a separate hard-coded visual path.
+- Extend the suite with reusable capabilities when a default cannot be expressed:
+  compound sources, sampled opening/falloff profiles, shared-origin ray groups,
+  linked light/cloud/particle/water responses, explicit layer/priority attachment,
+  contextual animation clocks and configurable event responses. Do not implement
+  an opaque "native preset" or a room-name switch that secretly calls the old
+  effect. Specialized optimized kernels are allowed when their defining data is
+  available to arbitrary authored recipes and editable with the same controls.
+- Keep source discovery and gameplay observation separate from visual recipes.
+  Existing map-material validation, floor support, raster-row offsets, actor
+  bindings and event facts remain read-only inputs. Recipes need explicit,
+  reusable bindings to those inputs, including source witnesses and dependency
+  IDs where needed. Configuration never spawns actors or changes collision.
+- Compile and validate configuration at load/edit time into bounded retained
+  data. Preserve aggregation, culling, deterministic seeds, gameplay-clock
+  ownership, source-relative transforms, blend modes and receiver gates. Moving
+  twelve native rays into twelve separately submitted emitters, raising pool
+  limits, or adding per-frame parsing/allocations is not an acceptable migration.
+- Sparse user overrides may remain layered over bundled definitions for upgrades;
+  a complete editable definition must also be exportable. Store semantic data,
+  not captured meshes, C struct dumps or per-frame vertex recordings.
+
+Migration proceeds family by family while preserving the working renderer as a
+comparison oracle. First capture matched unmodified baselines, then extract the
+missing reusable data/controls and compile bundled defaults through that path.
+Remove each legacy visual default only after its independent reconstruction
+passes. Do not claim the editor complete while any approved default relies on
+an inaccessible visual definition.
+
+For each migrated family, compare the legacy baseline against a fresh config-only
+load with native defaults disabled, then export/reload, move, duplicate, retune
+and reset it. Exercise complete rooms, camera extremes, forward/reverse time,
+pause, regional terrain, edited source art, plane/skybox modes and receiver
+selection. Compare source identities, deterministic geometry, colors, indices,
+pass/blend/depth structure and motion before using GPU image tolerances. Verify
+that dependencies survive duplication without pointing back to native defaults.
+
+Performance acceptance requires unchanged visible geometry and draw/submission
+counts, uploads, scene resolves, allocations and retained resource bounds for
+equivalent definitions. Measure capture/resolution, mesh generation, receiver
+sampling and GPU time separately with identical scenes and settings. Timings
+must show no reproducible regression beyond measurement noise; equal counts
+alone do not prove equal performance. Native Metal, Deck/Vulkan and Windows/D3D12
+checks remain required, including dense authored combinations. Browser parity
+cannot substitute for target-device measurements.
+
 ## Current foundation and verified limits
 
 - The standalone editor already has room/BG selection, regional terrain families,
@@ -242,10 +319,10 @@ Current phase status and concrete remaining work:
 | Phase | Delivered | Remaining acceptance / implementation |
 | --- | --- | --- |
 | 0–2: shared preview | Full-room scenery and ambient sources, native kernels, deterministic camera/time, aspect/extension controls | Matched edited-scene images and motion, actor/HUD inputs, final post-processing, legacy renderer replacement after acceptance |
-| 3: data and resolver | Versioned sparse overrides, stable IDs, native loader, budgets, atomic parse, bounded field/receiver parameters and deterministic preview events | Source-group member records, explicit reload and migration fixtures |
-| 4: first authoring workflow | Source inspector, torch reach, placed light/motes/free mist, emitter canvas picking/move/resize, supported-floor mist rectangle/erase tools, shared collision overlay, duplicate/reset, undo, INI transport | Native group member handles, richer material/slope support, combined scenery/effects project, small native/browser comparison clip |
-| 5: established families | Shared native source/geometry paths; group tint/intensity/enable; authored fans, water/spray/drips/contours/clouds/exposure; particle regions; 19 recognized event families; separate scenery/player/enemy receivers | Individual native compound-member tuning, edited-silhouette occlusion, automatic material/contour recognition and family-by-family native visual acceptance |
-| 6: later treatments | Bounded snow, sand, leaf, insect, scarab, spark, cloud and halo authoring behaviors/presets | Per-stage artistic rollout and native visual review; full refraction/heat/volumetric scattering experiments remain deferred |
+| 3: data and resolver | Versioned recipes and sparse overrides, strict codec, stable IDs, bounded retained data, full definitions for migrated scenery/arc/projectile families | Remaining actor/contact/spell recipes, complete dependency exports, explicit reload and migration fixtures |
+| 4: authoring workflow | Context add/edit/delete/preview, popup inspector, native markers, drag/resize, multi-effect copy/paste, repeat placement, mist/particle region tools, actor family/attack selectors, undo and INI transport | Compound group handles, material/slope tools, combined project and native/browser review clip |
+| 5: established families | Config-only forest/cave/Bloodpool/castle/glow/Aitos surface families, three arc and four projectile families, generic actor attachments and independent receivers | Remaining native actor/contact/spell defaults, target rendering-cost acceptance and gameplay visual review |
+| 6: later treatments | Snow, sand, leaf, insect, scarab, spark, cloud, flame, torch, halo and gradient authoring; ten stage compositions | Per-stage artistic rollout; diorama refraction/heat and full volumetric scattering remain experiments |
 | 7: hardening | Embedded WASM, fixed memory, resource reuse/teardown and invalid-input checks | Context recovery exercise, long-session/resize/DPR checks, offline browser acceptance, native Metal live-edit comparison, Deck/Vulkan and Windows/D3D12 measurements |
 
 Supported-floor authoring now uses a shared exposed-floor predicate for native
@@ -304,14 +381,117 @@ including subsequent native generations. Event/probe positions are preview-only.
 
 Coverage matrix:
 
-| Established family | Editable coverage | Deliberate limit |
+| Established family | Editable coverage | Remaining limit |
 | --- | --- | --- |
-| Forest canopy/front rays, leaves and motes | Native group enable/tint/intensity and light receivers; placed fans and leaf/mote regions | Native individual canopy openings retain their procedural layout. |
-| Cave/temple water, sheen, drips, dust, mist, grit, ambient and tower light | Native group overrides/receivers; placed waves, spray, drips, contours, particle/cloud/mist/dimming regions | Artist paths and explicit spray anchors require visual review; no guessed collision changes. |
-| Bloodpool moonlight, reflection, water, timber, air and clouds | Native group overrides/lighting receivers; authored fans, crests/glints and cloud/particle regions | Existing native occlusion and water-band recognition remain authoritative. |
-| Castle windows, sky, mist, water and wall torches | Native group overrides/receivers, independent torch spill reach; additional opening fans/water/mist | Moving an authored fan does not move a native window or alter its source recognition. |
-| Aitos lava, waterfall/mist, splash and torch families | Native group overrides/receivers; cloud/spray/water/spark presets | Native fourteen-splash and other family budgets remain intact. |
-| Recognized projectile, electrical and boss accents plus landing dust | Nineteen native representative preview phases; enable/tint/intensity, light receivers where present | No new gameplay spawn, full boss AI, phase authoring or spell-controller replacement. |
+| Forest canopy/front rays, leaves and motes | Complete `ray-field`; openings, profiles, clocks, colors, particles and witnesses; member handles | Target-device timing and final image review. |
+| Cave/temple water and atmosphere | Complete `water-field` and `atmosphere-field`; contacts, contours, dust regions, grit, mist support, lighting and exposure | Landing dust event recipe is separate and still C-owned. |
+| Bloodpool moon, water, timber, air and clouds | Complete linked `moon-field` / `marsh-field`; fixed BG2 point or raster-row attachment | Target-device and full edited-room visual acceptance. |
+| Castle windows, gallery, boss, moat and torches | Complete `castle-field` and `glow-field`; opening joins, source witnesses, material response, glow profiles, independent receivers and exposure | Compound group handles remain less direct than ordinary emitter handles. |
+| Aitos lava, heat, waterfall/mist and splash | Complete five surface fields; map rules or manual sources, glow/particle/cloud profiles and heat coefficients | Existing heat pass is flat-mode only; the shared diorama preview does not show refraction. |
+| Actor, projectile, electrical and boss accents | Complete trap/bolt/centaur and four projectile fields; generic attachment of authored effects to any visible family/player, including previously unrecognized attacks | Remaining native phase recipes, landing events and spells still need extraction. Preview uses a synthetic actor sample, not AI or sprite artwork. |
+| Reusable cloud/fire and later-stage atmosphere | Cloud bank, flame, native-profile torch, halo and gradient; ten editable stage compositions | Per-stage art rollout and gameplay validation remain separate. |
+
+### Native-default reconstruction audit — 2026-10-01
+
+| Native behavior | Current data ownership | Remaining acceptance work |
+| --- | --- | --- |
+| Forest canopy/front light and boss clearing | Complete `ray-field` configuration, unchanged aggregate passes | Native target timing and image review. |
+| Cave pools, waterfall contacts, wet rock and drips | Complete `water-field`, including 33-column contours and material witnesses | Native target timing and image review. |
+| Cave/temple atmosphere and tower light | Complete atmosphere source, motion, floor-support and exposure profiles | Extract actor landing/contact response; hardware acceptance. |
+| Bloodpool moon/cloud/distant lake | Complete `moon-field` with linked shadow, cloud, reflection and row-motion response | Hardware acceptance. |
+| Bloodpool foreground water, timber, shoreline and insects | Complete `marsh-field`, preserving moon linkage and material selectors | Hardware acceptance. |
+| Castle windows, gallery and boss | Complete room-specific `castle-field`, including arches, joins, columns, mist, water, dust and exposure | Hardware acceptance and compound handle UX. |
+| Torches and temple glows | Complete `glow-field` source rules/manual points and multi-component profiles; placed `torch` uses the same kernel | Copied torches use the destination room's shared glow profile. |
+| Aitos lava, heat, splash and waterfalls | Complete `lava-pit-field`, `lava-lake-field`, `splash-field`, `waterfall-field`, `waterfall-mist-field` | Heat is flat-only; retain that limit until a measured diorama implementation exists. |
+| Trap, wizard and centaur lightning | Complete `trap-field`, `bolt-field`, `centaur-field` with phase/profile/path data | Hardware acceptance and native gameplay visual review. |
+| Fireball, statue orb, jungle fire and lava fire | Complete four projectile response fields | Other native actor responses and spell phases remain C-owned. |
+| Landing dust and other actor/spell responses | Generic actor selectors are available; the remaining per-phase recipes, event variation and contact cooldowns still need extraction | Preserve read-only observation, detached bursts and native actor budgets. |
+| Scene dimming and receivers | Migrated atmosphere/castle exposure and per-field/emitter receiver controls are data-driven | Audit any remaining stage-specific treatment during that stage's migration. |
+
+The migration inventory includes defaults outside the decoration list, such as
+scenery exposure and actor/contact responses. A complete room export must include
+every required visual dependency, not merely the currently visible markers.
+Additional effect families must meet this same contract when introduced.
+
+### Actor authoring, Aitos surfaces and repeat placement — 2026-10-01
+
+Authored emitters can bind to the player or a native actor family, with optional
+parent, animation, state, visual-frame and handler filters. Observation covers
+previously unrecognized families, without allocating native actors or modifying
+WRAM. A room actor picker is generated from the canonical descriptor tables;
+custom family IDs cover runtime-created attacks. Bloodpool Act 1 boss fire has
+an audited selector preset (`B786`, parent `B786`, animation `5000`, states 0–1).
+Raw-memory and selector tests cover this identity; actual boss gameplay visual
+review is still pending. Attachment preview supplies one synthetic actor sample.
+Its marker/drag uses actor-local offsets and requests the required object plane,
+even when the scene has no sprite at that depth.
+
+The reusable `flame` supplies a warm body, spill and independently seeded embers;
+`torch` reuses the configured native flame kernel. Cloud banks remain freely
+placeable/attachable. Shift-click selects several effect markers; Ctrl/Cmd-C and
+Ctrl/Cmd-V support repeated click placement, with fresh IDs and one undo per
+paste. Native torch points can be copied into ordinary authored torches. Copying
+whole compound definitions is not yet a map gesture; edit their source lists.
+BG1/BG2 selections remain in their owning coordinates. Actor copies retain their
+selector/offset; placement does not turn them into map sources.
+
+Aitos source selection now resolves from complete bounded surface definitions,
+using material rules or explicitly placed sources. Rendering retains the native
+fourteen-splash limit, twelve lava glow segments and existing cloud/particle caps.
+Heat coefficients feed the existing retained flat refraction mesh and target;
+edits invalidate the mesh without allocating another target. Glow/spark and heat
+enables are independent. No new render passes or per-emitter textures were added.
+Receiver preparation skips frame copies and receiver meshes when no actor lights
+are enabled. Config parsing and style decoding remain outside frame rendering.
+
+Validation includes 19 focused native suites, editor model/build tests, strict
+WASM compilation and sanitized whole-room checks across 147 regional rooms:
+882 native/WASM surface/source matches, 147 authored round trips and 30 stage
+preset reconstructions. The Aitos legacy oracle matches 1,200 camera/shape/clock
+and component cases exactly (`957be29d`, 559,800 vertices / 2,220,480 indices).
+Seven alternating host CPU trials of geometry plus hashing measured medians
+0.011624 ms/case before and 0.011782 after, with overlapping ranges
+(0.011519–0.012504 / 0.011542–0.013073). These exclude GPU work and do not close
+Metal, Steam Deck/Vulkan or Windows/D3D12 acceptance.
+
+### Grouped ray-field reconstruction increment — 2026-10-01
+
+The first migrated family uses complete `[field:GG:RR:T:ray-field:ID]` records.
+The canonical forest document supplies all opening/fan/profile data, particle
+regions, counts, colors, motion, clipping, source dimensions and material
+witnesses. The embedded default is generated from this document and parsed once
+through the same strict codec. No forest visual table remains in C. Room selection
+chooses the default definition; generic capture/rendering also work in another
+room with explicit bindings. Captured frames own copied data, so subsequent
+imports cannot change retained frames. A configured field suppresses the native
+capture and keeps the original three aggregate decorations and passes.
+
+The inspector extracts the complete field, exposes its numeric/vector controls,
+and preserves untouched round-trip values. Existing member handles follow its
+ray positions and count; sparse enable/tint/transform/receiver overrides remain
+independent. Apply, Cancel, Undo, reset and disable use the existing transactional
+workflow. New placements convert both axes through the room's light-layer
+scroll ratio. One aggregate field per room/terrain is allowed, with up to twelve
+openings, four origin groups and two profiles. Adding another ray uses that
+field rather than introducing another draw.
+
+Validation pins pre-migration vertex/color/index digests for 210 combinations
+of camera, time, projection and lighting/particle gates. Tests also cover a fresh
+empty-frame reconstruction, another room, full export/reload, mutable controls,
+source-art rejection, zero components, retained frames and invalid definitions.
+All 147 regional rooms and 882 native/WASM surface/source comparisons pass under
+ASan/UBSan; all three regional forest definitions reconstruct identically, with
+22,298 valid recorded draws across the suite. Browser review confirms the complete
+definition affects the shared renderer without warm uploads or allocations.
+
+An optimized Mac CPU comparison against the earlier forest kernel measured
+approximately 0.0156 ms/frame before and 0.0158 ms/frame after across seven camera
+positions and five clock values. The geometry digest and total vertices/indices
+were identical. Shared-origin sway is computed once per fan. The roughly 0.0002 ms CPU increase is recorded; equal GPU resource
+and draw counts are not evidence of identical timings. Metal, Deck/Vulkan and
+Windows/D3D12 timing/image acceptance remains open. This earlier increment did not close the full native-default gate. Later
+scenery migrations are listed in the current audit above; remaining actor/contact
+and spell responses must be completed before the queued view work.
 
 Validation includes 147 regional rooms, 882 native/WASM surface/source matches,
 147 twelve-family authored round trips, 22,172 valid recorded draws, reverse
@@ -338,13 +518,757 @@ migration hazards. Consider a separately versioned binary payload only for
 future dense masks/grids/meshes/artwork, or a disposable hash-keyed cache after a
 measured loading bottleneck. See the editor guide's storage discussion.
 
-Next preserve source validation while making edited visible silhouettes available
-to light occlusion; scenery stamps must not silently become gameplay collision.
-Close native visual comparisons and target-platform measurements before marking
-the whole editor plan complete.
+### Linked wet-surface field reconstruction increment — 2026-10-01
+
+`assets/effects/cave-water-field.ini` now owns the complete cave water definition:
+three pools, four waterfall splash contacts, eight wet contacts with exact material
+IDs, 33-column rock contours including open gaps, mandatory map witnesses and
+all glint/ripple/drop/sheen/glow/layered-spray visual parameters. There is no native
+pool or contour catalogue left in C. The canonical document is embedded by the
+same reproducible generator as the forest field, then parsed once into typed,
+owned data. Contacts and contours are prepared at load time; retained frames
+perform no parsing or float-to-contour conversion.
+
+The reusable `water-field` captures four aggregate records through the shared
+production kernels. Read-only material validation suppresses a removed wet
+contact and its linked drip/patch; mandatory room witnesses fail closed for the
+whole field. Config selection suppresses native capture before construction.
+Replacement retains the native layer submission order relative to dust/grit,
+contact bursts and floor mist. The same definition works in another room without
+a room-name visual switch. Existing source/member receiver controls remain
+separate from the complete definition.
+
+The editor can extract the complete default from any cave-water/drips/mist/sheen
+family. The modal exposes each contact, contour column, palette, timing profile
+and mist slice parameter. Native marker bases follow edited contacts, and existing
+member offsets remain relative to those bases. Disable keeps the field disabled;
+reset restores the bundled definition. The placement palette can start a simple
+pool field in any room, using the owning background's scroll conversion. Numeric
+sampling/count limits preserve the existing geometry budgets, including member
+scale and offset bounds; other wet contacts can be enabled within those limits.
+
+Validation pins the original vertex/color/index digests for 288 combinations of
+camera, time, projection and lighting/particle gates. Fresh empty-frame loading,
+other-room reconstruction, export/reload, actual visual parameter changes,
+zero components, missing artwork, retained frames and atomic malformed/incomplete
+imports pass. All three regional cave definitions reconstruct exactly in the
+native/WASM whole-room suite: 147 rooms, 882 comparisons, 147 authored round trips
+and 22,451 valid recorded draws, with ASan/UBSan. The transactional editor tests
+cover extraction, linked marker bases, apply/cancel/undo, disable/reset and
+owning-layer placement. Browser inspection covers an edited pool definition and
+the native waterfall splash with no console errors.
+
+An optimized Mac geometry microbenchmark against the immediately preceding
+kernel produces identical geometry digests and 26,341,196 vertices / 56,169,414
+indices over seven rounds. Across repeated runs, warm samples ranged around 0.0048–0.0058 ms/frame before
+and 0.0049–0.0055 ms/frame after. Some runs measured a roughly 0.0002 ms increase
+and others a small decrease; this short CPU sample does not establish equal
+target-hardware timings. The field adds no render passes, GPU resources, warm allocations or
+uploads; complete native Metal, Deck/Vulkan and Windows/D3D12 image/timing
+acceptance remains open. Cave atmosphere was migrated in the following increment;
+exposure and actor/contact response remain ahead of the other editor polish.
+
+### Cave/temple atmosphere reconstruction increment — 2026-10-01
+
+Three canonical documents (`assets/effects/cave-atmosphere-field.ini`,
+`temple-atmosphere-field.ini`, and `tower-atmosphere-field.ini`) now own every
+visual parameter of their five atmosphere families. Ambient pool positions,
+radii, lean, exposure and surface gain are explicit. Dust covers a union of up
+to three rectangles with editable grid density, motion, size, color and a lower
+hall density band. Grit specifies individual ceiling/landing contacts and seeds,
+fall timing, and the grain burst's color, shape, diffusion and lifetime. Floor
+mist specifies its collision-search region, height and all three density slices;
+the search still sinks through non-colliding spikes to supported ground. Tower
+light owns its three origins, five-row width/intensity profile and cloud motion.
+
+Native selection loads the same complete bundled text used by the editor.
+The render kernels contain no room-specific light/dust/grit/profile tables.
+Loaded definitions cache contiguous source vectors once and retained frames
+own their data. Atmosphere and splash mist share one mesh kernel through explicit
+style views, without falling back to another field's visual defaults. Water and
+atmosphere share the strict vector codec. Counts and region sizes retain fixed
+record/geometry ceilings; malformed or incomplete documents fail atomically.
+Flat-mode mask selection now follows enabled field components: atmosphere only
+needs BG1 for floor mist, forest uses BG2, and water uses its actual owning
+layers. Exporting a native field no longer requests both masks indiscriminately.
+
+The editor exposes **Edit complete atmosphere definition…** from temple dust,
+cave light, grit, floor mist and tower sources. The add-effect palette can create
+a generic atmosphere field in any room; the modal exposes all contacts and
+coverage vectors with labeled units. Existing source overrides still control
+receiver masks and tuning. Definition edits, Apply/Cancel, disable/reset and
+Undo preserve the complete data. Individual atmosphere sub-source drag handles
+remain a later usability improvement; current editing uses the complete modal.
+
+Validation: 1,008 fixed room/camera/clock/toggle/projection combinations match the
+independent pre-migration vertex/color/index digests (`161e87d6`, `628197c5`).
+Fresh config-only capture, reconstruction in a different room, export/reload,
+actual parameter edits, zero components, retained-frame ownership, invalid
+inputs, missing room witnesses and mist following edited support all pass.
+All 147 regional room fixtures pass ASan/UBSan with 882 native/WASM surface/source
+comparisons and 22,847 valid draws, including complete definitions in the three
+Fillmore rooms for all terrain variants. Browser testing confirms the temple
+modal extracts and applies an ambient radius edit without console errors.
+
+A Mac `-O2` geometry microbenchmark over seven rounds of 7,000 frames preserves
+11,381,167 vertices / 27,319,929 indices and digest `0179ee3d`. Source lookup in
+particle loops initially added measurable CPU cost; load-time decoding removed
+that overhead. Latest warmed samples are roughly 0.0095–0.0100 ms/frame before
+and 0.0095–0.0098 after (first configured sample 0.0110). This is a CPU kernel
+check, not GPU or full-frame acceptance. No new draws, textures, render targets,
+warm allocations or uploads are introduced. Metal, Deck/Vulkan and Windows/D3D12
+capture/timing acceptance remains open.
+
+Next after this increment: Bloodpool moon/cloud/water/timber definitions, then castle opening/gallery
+profiles, compound glow/flow families, actor/contact responses and exposure.
+The full native-default reconstruction gate remains open.
+
+### Marsh and castle reconstruction increment — 2026-10-01
+
+Bloodpool's foreground water/shoreline mist, timber lighting/drips, post ripples
+and insects now use `assets/effects/marsh-field.ini`. The seven Act 2 rooms use
+`assets/effects/castle-{2..8}-field.ini` for their window sources and sampled
+arch contours, stacked joins, soft/broken fan profiles, opening/sill/pillar/floor
+highlights, torch bounce, drifting dust, floor haze, exterior moon and moat water.
+Each castle definition owns a complete sky-ray profile. Neither family dispatches
+visual styles from an authored room number or borrows C-owned visual defaults.
+Native source-art/material/collision checks remain read-only observations.
+Scenery dimming, world-space depth ramps and scenery/player/enemy receiver
+choices now live in the atmosphere/castle definitions too. The original cave
+light receiver behavior is preserved until explicitly changed. Version-1 fields
+saved before those controls are upgraded at load, then export the complete data.
+Native flame accents and actor/trap responses remain pending migrations; this
+does not close the whole native-default gate.
+
+The editor offers complete-definition extraction and new placement in its modal,
+with component toggles and named vector controls. Apply/Cancel, reopen, undo/redo,
+serialization and generic-room capture are covered. The marsh definition keeps
+its water/material dependencies; castle sources include stable variation IDs,
+arch profiles, source/sill witnesses and clip bounds. A real browser smoke passed
+marsh/castle extraction, a component edit, apply, reopen and undo. Existing map
+member handles still edit sparse native member overrides; full compound handles
+remain in the subsequent usability work.
+
+The saved pre-migration renderer oracles match exactly: marsh 720 cases,
+828,519 vertices / 3,063,978 indices (`004603af` optimized); castle 840 cases,
+260,256 vertices / 906,489 indices (`d6a30baa` optimized). Full-room comparison
+caught a cloud-mask ordering dependency when marsh capture followed moon capture;
+the linked witness mask is now refreshed in either ordering. Seven castle defaults
+also pass independent config-only reconstruction and owned-data round trips.
+Fourteen focused C tests, editor interaction/build tests and the full native build
+pass. ASan/UBSan regional checks cover all 147 room variants, native/WASM surfaces
+and source definitions, including complete castle definitions in 21 variants.
+
+No draw/texture/target limits were raised. Arch samples and ray profiles prepare
+at load time; frames retain owned values, with no configuration parsing or heap
+allocation in capture/render. Alternating local Mac CPU geometry-plus-hash probes
+measured marsh medians 0.11067 ms before / 0.11111 ms after, and castle 0.01303 /
+0.01341 ms, with overlapping timing ranges. These are small CPU fixtures, not
+GPU/frame-time acceptance or proof about Deck/D3D12. Target hardware and broader
+capture/presentation timings remain open.
+
+### Linked moon-field reconstruction increment — 2026-10-01
+
+`assets/effects/moon-field.ini` is now the canonical definition for Bloodpool's
+BG2 moon, cloud veil and distant reflections/wave caps. Native defaults and
+exported definitions use the same kernels. An override suppresses the bundled
+visual capture; material detection for the remaining marsh effects continues.
+The capture owns its prepared data and preserves native alpha submission order.
+Definitions can also be placed in other rooms without a Bloodpool room gate.
+
+The definition exposes the BG2 source, six low and five middle ray profiles,
+haze gains/palette, source radius and shadow depths, cloud motion/density/shape,
+reflection rows/glow/color, and native-raster wave rows/glints/seeds. Source and
+cloud retain a fixed BG2-point projection; water follows the retained HDMA rows.
+Foreground water, timber and insects consume the edited projected moon profile.
+Their own receiver-material/particle recipes remain a separate migration.
+Shadow coverage dimensions, mesh resolution, maximum ray/crest counts and
+submission budgets stay fixed. Parameter bounds prevent expanding those budgets.
+
+The popup has individual component toggles, labeled source/profile controls and
+transactional Apply/Cancel. Extract via **Edit complete moon-field definition…**,
+or add **Linked moon, cloud veil and water glints (BG2)**. The linked field has
+one draggable BG2 source marker; new placement uses the clicked BG2 coordinate.
+Drag, popup edits, disable/reset, export/reload and undo are tested. Moving this
+source changes the illumination, not the moon's painted artwork.
+
+Validation: 12 focused C tests; editor interaction/build tests; ASan/UBSan across
+147 regional rooms with 882 native/WASM surface/source matches and 23,502 valid
+draws, including full moon reconstruction in all three terrain variants.
+The independent pre-migration projection fixture retains exactly 5,716,240
+vertices / 22,331,610 indices: optimized digest `4b12f297`, unoptimized digest
+`ec229576` (different compiler floating-point evaluation, each pinned before
+migration). Generic-room reconstruction, retained ownership, HDMA changes,
+component gates, missing witnesses and atomic rejection are covered.
+
+Clock-independent radial/angular profiles are prepared once at load, avoiding
+extra math in the mesh loop. Three alternating Mac `-O2` CPU runs (five rounds
+of 360 frames each) measured about 0.600–0.613 ms/frame before versus
+0.564–0.571 warmed after, with identical geometry/digest. This measures geometry
+plus hashing, not capture or GPU frame time. No new draws, render targets,
+textures, per-frame parsing, allocations or uploads were added. Native Metal,
+Steam Deck/Vulkan and Windows/D3D12 image/timing acceptance remains open.
+
+Next: compound glow/flow families, actor/contact responses and exposure. Compound source handles and the remaining editor UX follow complete definitions; the view improvements remain queued in phase 6a.
+
+### BG2 source anchoring increment — 2026-10-01
+
+Authored effects now specify `anchor=bg1|bg2-point|bg2-raster`, independently of
+draw placement. A BG2 point remains fixed in layer coordinates and follows its
+camera/projection. In skybox mode its entire mesh uses the source row's transform;
+water raster bands cannot bend an airborne beam or cloud. Raster binding instead
+preserves native row motion for surface effects. The projection code uses an
+explicit retained-source flag, replacing its special moon/cloud kind check.
+Native Bloodpool capture opts its moon and cloud into that same generic policy.
+
+The editor supports right-click placement, selection, dragging, resizing and
+transactional modal configuration on BG2, plus an apply-and-locate action. BG2
+preview preserves the foreground camera because a static background point has
+no unique inverse foreground position. Collision-supported mist, dimming regions
+and traced playfield contours remain BG1-bound. Native moon/cloud catalogue
+markers appear at `(112,62)` on BG2. The following moon-field increment adds
+their full editable coupled definition; this anchoring increment alone did not.
+
+An audit found two related authored-only gaps: BG2 alpha submission ignored
+authored records, and the requested Diorama callbacks could omit an effect's
+draw attachment when it differed from its source plane. Both now include the
+existing authored list/attachment. Required-mask queries no longer request both
+background masks indiscriminately for every placed emitter.
+
+Validation covers 81 kind/anchor/placement combinations, invalid bindings,
+retained ownership, independent BG1/BG2 camera movement, flat/plane/skybox/both
+projection, two output aspects, extended rows and raster seams. Presenter tests
+verify authored-only clouds on plane and skybox paths, alpha-correct flat masks,
+and no added textures, resolves or intermediate targets. Browser verification
+uses the real WASM validator and BG2 modal/preview.
+
+A Mac `-O2` comparison over 1,800 native moon/cloud/reflection frames preserves
+5,716,240 vertices, 22,331,610 indices and geometry/color digest `4b12f297` against
+the pre-change projection. Five 360-frame CPU samples (including digest work)
+measure 0.591–0.612 ms before and 0.590–0.630 ms after; warmed medians are about
+0.60 ms. This is not a GPU or target-device benchmark. No new parser work occurs
+per frame, geometry budgets are unchanged, and Deck/Vulkan, Windows/D3D12 and
+native full-frame timing acceptance remains open.
+
+### Native member and edited silhouette increment — 2026-10-01
+
+The previous increment is committed as `9e807853`. Items 3 and 4 now provide
+stable numbered native members for forest openings, castle windows/bounce
+lights and cave water/mist/drip/sheen sources, plus movable single torch and
+Aitos waterfall/splash anchors. Sparse member records expose enable/tint/intensity,
+offsets, shape scales and applicable direction controls. Source validation and
+native pool bounds remain in force; reset restores catalogue defaults. Parent
+families own receiver selection. Map handles and inspector changes share atomic
+validation and one-step undo. Native coordinate spaces remain unchanged.
+
+Native and browser capture now resolve edited tile silhouettes from the same
+stamps, depth bands, flips and black/transparent pixel masks as rendering.
+Gameplay collision and source-art witnesses remain independent. Bloodpool's
+moonlight reads edited opacity; forest front rays, castle windows and authored
+fans use a bounded projected field with finite-depth attenuation. This mesh-based
+atmospheric approximation does not claim full volumetric shadow tracing. It
+reuses retained batch scratch without new GPU textures, resolves or readbacks.
+Actor lighting now appends to caller-owned retained geometry, removing a global
+scratch race and an intermediate geometry copy.
+
+Validation extends the 147 regional room / 882 scanout-and-source comparisons
+and all authored round trips to member records, edited opacity, reverse seeking,
+atomic invalid imports and finite geometry under ASan/UBSan. Native tests cover
+flips/transparency/depth, caster removal restoring light, bounded overlapping
+forest members, unsupported controls and terrain isolation. Browser inspection
+covers a numbered forest ray, offsets/scales/angle, live rendering and undo/redo.
+
+Mac CPU samples at 128 horizontal / 64 vertical extension measured 2.442–3.871 ms
+for animated room PPU/capture/effect meshes, with 0.035–0.804 ms spent on meshes
+and 0.113–0.203 ms on separately sampled opacity capture. Static native Metal
+compositor checks measured 1.081 ms at 960 × 600 and 1.758 ms at 1440 × 900 on
+Apple M2. These are separate workloads, not complete gameplay frame times.
+See the editor guide for room samples, methodology, limits and reproduction.
+
+The point-and-click editor now loads default-source markers for the entire room
+without captures or preview scrubbing. BG1 context menus add effects at the click,
+edit or disable native defaults, delete authored effects, choose overlapping
+markers and preview any map point through the shared renderer. Ordinary tile
+selection also moves effect markers and resizes supported dimensions. Modal
+controls replace the crowded effect settings in the sidebar, hide unsupported
+fields and offer one-step Apply/Cancel/Undo; member controls link to parent-family
+receiver settings. Native catalogue guides show source anchors and reference
+extents, not every animated ray or particle boundary. Room families stay fixed;
+actor events are configured through their separate preview workflow.
+
+Whole-room default inventory is cached, bounded to 1024 sources and uses no
+renderer/GPU calls. Four native Apple M2 inventory samples took 0.106–4.293 ms
+once per room. UI regression tests exercise exact-point placement, modal rollback,
+undo/redo, drag/resize, overlap choice, disabled-default reset and shared preview
+positioning. The 147-room parity gate also verifies inventory identity, finite
+coordinates, cache reuse and unchanged preview/GPU state under ASan/UBSan.
+
+Next close native-default reconstruction, matched native visual comparisons,
+long-session/context recovery, combined scenery/effects transport and target-platform measurements before
+marking the whole editor plan complete. Deck/Vulkan and Windows/D3D12 hardware
+acceptance is still outstanding.
 
 The [editor guide](../tools/action_editor/README.md#environmental-authoring)
 documents the file format, controls, limits and current omissions.
+
+### Steam Deck performance gate — 2026-10-01
+
+Actor migration is paused for this hardware check. **The initial performance
+gate was not closed:** the Deck run found a severe existing flat-mode fallback
+and a measurable cost from the new edited-scenery shadows. The initial
+measurements below precede the fixes and remeasurement recorded at the end of
+this section.
+
+The current working tree and committed baseline `9e807853` were cross-built with
+Zig 0.16.0, `x86_64-linux-gnu`, `-O2`, the portable runner source fallback and the
+same generated CPU sources. Both use SDL 3.4.14 and SDL_ttf 3.2.2 from Steam
+Runtime packages. The baseline needed one build-manifest repair: restoring the
+missing `source =` prefix for `action_effect_preview.c`; its C sources were
+unchanged. This is a matched comparison, not the Mac ThinLTO release build.
+Binary identities, source hashes, hardware details, per-window samples and the
+isolated runner are in
+[Deck evidence](evidence/action-effects-deck-2026-10-01/measurements.json),
+[CSV](evidence/action-effects-deck-2026-10-01/measurements.csv) and
+[probe.py](evidence/action-effects-deck-2026-10-01/probe.py).
+
+The actual device was a Steam Deck OLED, AMD APU 0932 / RADV VANGOGH,
+Mesa 26.2.0-devel (`035ae2f854`), on AC power with the existing 15 W cap and
+`powersave` governor. Tests used Desktop Mode, X11 through XWayland, Vulkan,
+1280 × 800 borderless output, 90 Hz Vsync, 16:10 square pixels, dynamic Diorama
+camera with zero tilt and distance 325, skybox-only, 64 extra vertical rows,
+CRT/DOF/rim/edge-AA/interpolation enabled and three render workers. Action
+lighting and particles stayed enabled; only Environmental effects changed in
+the main on/off pairs. Audio used the dummy device and replacement music was
+disabled, so this is not audio-inclusive release acceptance. Temperatures in
+the 28 accepted timing runs peaked at 53°C; power/display settings were not
+changed. Every run used private settings, input and save copies in
+`~/argame/effects-2026-10-01`, leaving the prior installation intact.
+
+Five scene-specific reporting windows are discarded for warm-up. FPS below is
+the median reporting-window FPS; p95 is the **median of window p95s**, not a
+pooled percentile. Stage times are frame-weighted CPU wall time per present,
+including any driver blocking. Nested stages must not be added together.
+GPU timestamps remain unavailable. The normal draw/vertex counters do not count
+environmental callback geometry, so their small values do not establish a total
+effects submission budget.
+
+| Diorama sample | Effects off FPS | Effects on FPS | Off / on window p95 (ms) |
+| --- | ---: | ---: | ---: |
+| Fillmore Act 1 entry `0101` | 89.75 | 88.85 | 14.16 / 15.17 |
+| Fillmore Act 2 cave entry `0102` | 90.00 | 90.00 | 12.89 / 13.08 |
+| Bloodpool Act 1 entry `0201` | 89.75 | 88.00 | 14.17 / 15.15 |
+| Bloodpool Act 2 exterior entry `0202` | 90.00 | 90.00 | 11.96 / 11.87 |
+| Aitos Act 1 entry `0401` | 83.40 | 81.35 | 15.87 / 15.99 |
+| Aitos Act 2 lava entry `0404` | 90.05 | 89.85 | 13.85 / 13.91 |
+| Aitos Act 1 waterfall route `0402` | 75.50 | 77.20 | 17.63 / 17.58 |
+
+The six entry pairs are stationary samples with native animation/enemies; the
+waterfall uses its existing seed/replay setup and moves within the room. An
+on-result above an off-result is not evidence that effects improve performance.
+The Aitos `0401` and waterfall `0402` samples had about 0.001 ms effects callback
+time and were already limited with effects off: they expose base scene/capture
+cost, not a measurement of dense visible waterfall effect geometry. Castle
+interior/gallery, lower temple, boss and densely authored scenes remain open.
+
+Findings to address before resuming actor migration:
+
+1. **Flat cave masks select the reference PPU renderer.** Fillmore `0102` flat
+   mode measured 90.0 FPS with Environmental effects off and 30.9 FPS on
+   (profiled runs); the committed baseline with effects on measured 31.9 FPS
+   without profiling. The current on-run spends 29.59 ms/present in PPU scanout.
+   `ActRaiser_PrepareSceneMasks` requests
+   `SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER`, and
+   `capture_needs_reference_sampler` in `snesrecomp-go/runtime/src/snes/ppu.c`
+   rejects the packed scanline path for that policy. The
+   [CPU profile](evidence/action-effects-deck-2026-10-01/flat-cave-profile.txt)
+   is dominated by `sample_bg`, `render_line_to` and screen resolution. Preserve
+   main/subscreen ownership and color-math semantics while adding an equivalent
+   fast mask path; do not merely switch flags without parity checks. This
+   predates the migration. A zero view-fallback counter does not detect this
+   internal PPU fallback.
+2. **Edited-scenery shadow work is repeated.** In the matched forest sample,
+   baseline/current callback CPU time is 0.065 / 0.458 ms and frame snapshot time
+   is 0.055 / 0.464 ms. Current timing repeats at essentially the same values.
+   [CPU sampling](evidence/action-effects-deck-2026-10-01/forest-profile.txt)
+   confirms `ActionEnvironmentScene_CaptureScenery`,
+   `ActionSceneryShadow_Prepare` and their projection calls. Capture scans a
+   768 × 352 opacity window and presentation rebuilds the projected coverage.
+   Cache/reuse must track camera/projection, animated tile opacity and edits;
+   retained or interpolated presents must not blindly rebuild unchanged work.
+   This is added shadow functionality in the current migration, not evidence
+   that parsing the new configuration files is expensive every frame.
+3. **Bloodpool remains a heavier effects workload.** Its current callback costs
+   about 2.38 ms/present at 90 Hz; the baseline measured 2.62 ms. It did not show
+   the forest's callback regression, but its minimum reporting window fell to
+   78.1 FPS in the main on-run. Profile coverage/mesh work and library submission
+   costs before raising authored capacities. Scene texture upload volume stayed
+   close between off/on at the same camera (about 0.116 / 0.119 MiB per present);
+   this is not a measurement of all GPU geometry or transparent overdraw.
+
+Reducing vertical extension to 32 improved forest/Aitos entry median FPS to
+90.0/89.8, but Bloodpool measured 76.2. It changes the presented coverage and
+timing mix, so these single comparisons do not support a blanket lower-row
+recommendation. At 64 rows with the app's 60 FPS limiter, forest/Bloodpool/Aitos
+entry medians were 60.0/59.6/60.0, with window p95s 17.16/17.90/16.97 ms and
+worst intervals 23.9/27.1/25.5 ms. Those are not locked 60 FPS results. The panel
+remained 90 Hz; Gamescope's limiter and a 60 Hz display mode were not tested.
+
+All seven equal-final-tick Diorama on/off pairs produced identical final WRAM.
+Baseline/current forest and Bloodpool comparisons also matched final WRAM.
+Accepted timed runs reported no fatal/MX/dispatch/Vulkan errors or failed
+presents; settled main entry pairs had no upload-mirror reallocations. This is
+bounded replay evidence, not a long-session memory-leak or full traversal test.
+Separate 1280 × 800 composite captures were inspected for forest, cave,
+Bloodpool exterior/castle entry and lava; captures are excluded from timings.
+Traversal assists were enabled, so player flash frames are not visual sign-off.
+
+Excluded/limited attempts remain recorded in the local raw evidence:
+
+- Forced visible Wayland initially stalled at frame zero in a DRM sync-object
+  wait. Automatic SDL selection later chose X11 and completed successfully.
+  Do not generalize the forced-driver failure to Gaming Mode or all Wayland;
+  the native Wayland path needs a separate bounded investigation.
+- The initial hidden smoke used 1080 × 672, so it is excluded from the native
+  1280 × 800 timing table. Initial capture attempts before the requested game
+  frame were superseded by verified composite captures.
+- Direct `0103` warp lacked prerequisite terrain state and failed at the native
+  asset-load boundary. It is an invalid fixture, not a regression finding.
+- The moving Bloodpool 60 FPS attempt left the action scene before collecting
+  sufficient settled windows. Its later menu frames are excluded; the reported
+  60 FPS numbers are from the subsequent stationary tests.
+- The profiled flat cave on-run ended at tick 1901 versus the requested 1900.
+  Its valid timing windows are retained, but it is excluded from equal-tick
+  gameplay-memory claims and is not used to infer a 1 FPS baseline regression.
+
+Raw logs, private fixtures, captures, build logs and perf recordings remain in
+`runs/deck-effects-2026-10-01` locally and the isolated Deck folder. To repeat,
+copy the evidence `probe.py` beside those staged assets and run, for example,
+`python3 probe.py --driver x11 --tag repeat64 --rooms 0101 0102 0201 0202 0401 0404 --order Off On`.
+Use a fresh tag; the runner refuses to overwrite a previous case. `--mode 2d`
+selects flat presentation, `--profile` records CPU samples and
+`--refresh Limit --fps 60` selects the app limiter. No production code was
+changed or committed during this pass. Windows/D3D12, Gaming Mode, full-room
+routes, dense authoring stress, GPU timings and long-session acceptance remain
+open; this evidence must not be used to check off those gates.
+
+### Steam Deck fixes and remeasurement — 2026-10-01
+
+The three identified effects hot spots now have fixes. The broader hardware
+gate remains open, particularly moving-scene cadence and Windows/D3D12.
+
+- Pure owning-screen winner masks now stay in the packed PPU renderer. Main
+  and subscreen masks resolve the complete pre-extraction competition, including
+  subscreen-owned backgrounds when output color math is disabled. Combined
+  policies still use the reference renderer. Expanded oracle tests also caught
+  an existing reference Mode 7 bug: disabled BG2 and nonexistent BG3/BG4 must
+  not sample the affine map simply because their TM/TS bits are set.
+- Scenery capture retains exact opacity bytes and extracted runs. It still
+  observes VRAM animation, stamps, transparency, depth and camera movement;
+  unchanged opacity skips run reconstruction. Resolved tile edits avoid a
+  duplicate base metatile lookup. Native and editor callers own their caches.
+- Forest/castle/authored-fan coverage retains its own buffer and compares the
+  actual occluders and projection values. It never relies on recycled frame
+  pointers or on the moonlight workspace remaining untouched.
+- Moon visibility retains the transport result separately from animated ray
+  geometry. A static skybox anchor keys its exact source band and BG1 caster
+  projection, so other water bands and repeated strip callbacks cannot force
+  a rebuild. Source movement, caster changes, field edits and actual projection
+  changes still invalidate it. Custom projection callbacks bypass both render
+  caches. Each present still updates light pulses, cloud transmission and rays.
+
+These are portable CPU changes with no added GPU passes, textures, readbacks or
+per-frame allocations. Retained storage adds approximately 117 KiB per render
+batch and 82 KiB per scenery-capture owner; batches/caches must be zero-initialized
+once. Geometry limits, blend order and the SDL rendering backend are unchanged.
+
+The same isolated Deck installation, SDK, compiler options, 1280 × 800 output,
+64 rows and 90 Hz display were used. Final binary `optimized3` has SHA-256
+`04f52ce654cc266fe9cc2c09d697030b2d4260476c06aa86501907c593ee77f9`.
+The evidence records the intermediate cache variants as well as the final one:
+[optimization measurements](evidence/action-effects-deck-2026-10-01/optimization-measurements.json),
+[runner](evidence/action-effects-deck-2026-10-01/optimization-probe.py),
+[source hashes](evidence/action-effects-deck-2026-10-01/optimization-source-hashes.json)
+and [Bloodpool CPU profile](evidence/action-effects-deck-2026-10-01/moon-optimization-profile.txt).
+As above, stage values are CPU wall milliseconds per present and nest; FPS/p95
+are reporting-window medians, not GPU measurements or pooled percentiles.
+
+| Sample / cost | Before | After |
+| --- | ---: | ---: |
+| Flat cave, effects on: FPS | 30.9 profiled; 31.9 committed baseline unprofiled | 90.0 |
+| Flat cave: PPU scanout | 29.59 ms | 2.71 ms |
+| Forest stationary: effects callback | 0.458 ms | 0.074 ms |
+| Forest stationary: frame snapshot | 0.464 ms | 0.350 ms |
+| Bloodpool stationary: effects callback | 2.38–2.40 ms | 1.25 ms |
+| Bloodpool stationary: frame snapshot | 0.464–0.475 ms | 0.449 ms |
+
+The packed-mask measurements precede the later moon/scenery-only refinements;
+their PPU implementation is the same. Final forest and Bloodpool stationary
+medians were 89.5 and 87.95 FPS. Bloodpool's refined-cache repeats measured
+1.233/1.234 ms callbacks before the final tile-lookup change. Aitos entry was
+86.75 FPS with approximately 0.001 ms effects callback time; its base rendering
+cost remains outside these effects fixes. Accepted follow-up runs peaked at 47°C.
+
+Moving-camera verification used a back-and-forth/jump replay, not a stationary
+cache-hit workload. Final forest callback cost was 0.428 ms versus 0.407–0.417 ms
+before, with snapshot cost 0.423 ms versus 0.497–0.502 ms. Median FPS did **not**
+improve: final 70.15 versus prior repeats 72.9–73.8, while median window p95
+improved to 17.36 ms from 17.94–17.95 ms. The mix of presentations changed:
+re-presents fell from roughly 20% to 17%; PPU cost per actual scanout call stayed
+at 9.22 ms versus 9.18–9.25 ms. Thus the per-present scanout increase is largely
+the changed presentation mix, not a slower PPU invocation. Effects-off moving samples were also
+limited (69.95 prior / 71.7 optimized), and the app's 60 FPS limiter measured
+59.05 with 17.70 ms window p95 on an intermediate build. These results do not
+establish a moving-scene FPS win or locked 60/90 FPS. Base PPU/capture cost,
+presentation cadence and Gaming Mode/refresh combinations need separate work;
+the effects-only savings must not conceal that remaining gap.
+
+Validation:
+
+- Full runtime PPU oracle tests and capture-tile parity pass under ASan/UBSan.
+  Modes 0–7, main/sub ownership changes, windows, extraction, authentic output,
+  extended rows and classified virtual tiles are covered. Margin tests assert
+  actual batched provider use, preventing a slow-path-only parity success.
+- 56 action/render/Diorama CTest cases pass; the GPU frame-generation test is
+  explicitly skipped by this test configuration. Native/WASM whole-room checks
+  pass under ASan/UBSan: 147 regional rooms, 882 surface/source comparisons,
+  147 authored round trips, 30 preset reconstructions and 28,263 valid draws.
+  The standalone parity runner's missing depth-shape link dependency was fixed.
+- Cached and uncached geometry match through animation, camera, clipping,
+  viewport, field, source-band and occluder changes. The final forest and
+  Bloodpool Deck captures are byte-identical to the prior build at game frame
+  1000. Cave captures and final WRAM also match when both enter Diorama before
+  room entry. The usual flat lead-in instead shifts one native enemy animation
+  by a tick on the slow prior build; disabling interpolation alone does not
+  remove that timing difference. Cave scenery/effect pixels were unchanged in
+  those earlier comparisons too. Equal-tick forest/Bloodpool stationary and
+  moving comparisons preserve final WRAM; the optimized flat cave on/off pair
+  does as well.
+- The first follow-up timed out because the panel was asleep, with roughly
+  980 ms spent waiting to present; it is excluded. Waking the panel restored
+  normal cadence without changing persistent settings. Native Wayland then
+  completed both a visible capture and a timed 1280 × 800 cave run at 90.05 FPS.
+  This supersedes the earlier startup-only failure as evidence of a general
+  Wayland incompatibility, but is not Gaming Mode or long-session acceptance.
+
+No commits, player-save changes or installed-game replacement were performed.
+The isolated Deck folder retains the prior and optimized binaries for follow-up.
+
+### Bloodpool regression follow-up (2026-10-01)
+
+The field migration had two gaps that the native/WASM parity checks did not
+cover. The editor placed non-movable family markers in a synthetic top-left
+row. Bloodpool now publishes semantic guides from the shared C room adapter:
+eight water spans, eight mist spans, sixteen bank insect regions, continuous
+exposed timber edges, and BG2 moon/cloud/reflection regions. The inventory is
+cached per room; field edits refresh guide positions without rendering or
+allocating textures. Terrain guides explicitly edit linked field settings;
+they do not pretend to be freely movable individual emitters. BG2 effects no
+longer appear as false foreground anchors. Apply/cancel/undo and component
+enablement retain those semantics.
+
+The migration also applied foreground occlusion to the castle's own receiving
+surfaces. This dimmed the opening, arch/sill spill, column edges and gallery
+floor highlights against the masonry they should illuminate. That extra pass
+and its unnecessary castle-only opacity capture are removed. Rear moon shafts
+still pass behind the native wall/pillar silhouettes through normal composition.
+The original geometry oracle now runs with populated opaque scenery as well as
+an empty mask, so this error cannot pass on empty synthetic fixtures again.
+
+The current WebGL/shared-C output matches a separately compiled HEAD `9e807853`
+renderer pixel-for-pixel for gallery, large stacked windows, narrow windows and
+boss views at frame 743 (960×600, 64 extra rows). Plane-only, skybox/plane and
+skybox-only option selections were checked. The broken gallery differed on
+45,184 pixels; the restored capture differs on zero. Review fixture and original
+module are retained under `runs/bloodpool-regressions/`. These are browser
+comparisons of production C, not a new Deck or D3D12 hardware qualification.
+
+Validation: 56 action/render/Diorama tests pass with the GPU frame-generation
+test skipped; the editor gesture suite and six bundle tests pass. ASan/UBSan
+whole-room checks pass for all 147 regional rooms, including semantic guide
+positions, 882 native/WASM surface/source matches, 147 authored round trips,
+30 preset reconstructions and 28,263 draws. No new runtime GPU resources,
+passes, particles or allocations were added by these fixes.
+
+
+### Effect footprints, rotation and per-value resets (2026-10-01)
+
+The map now draws static, unoccluded footprints rather than treating every
+source as an axis-aligned box. Forest ray slope/fan growth and castle sill/lean
+metadata come from the active C recipe. Layer scale is applied independently in
+X and Y. Authored fans show several strands and their spread; soft lights,
+halos, mist and clouds use elliptical area guides. Rectangular emitters retain
+area bounds. These are layout guides, not a second effects renderer: the shared
+preview remains authoritative for sway, fading, particles and terrain occlusion.
+
+Selected directional lights have a round rotation handle. Native member offsets
+retain their validated ±30-degree range; authored fans/gradients use ±180.
+Symmetric effects and terrain-dependent mist/water do not expose a rotation
+control that the renderer would ignore. Ray size handles follow the footprint;
+rotation and resize drafts submit one validated undo operation on release.
+
+Shift-click resets an effect value or a position/size/rotation handle. Native
+source/member overrides return to inherited game defaults. Placed or loaded
+complete definitions retain their initial session values, including placement,
+so resetting a parameter does not unexpectedly send a custom effect to (0,0).
+Vector controls reset only the selected component; count resets restore missing
+ray records. Focused, uncommitted text resets as well. Modal cancel and undo
+remain atomic. Ctrl/Cmd-click now selects several effect markers.
+
+Validation: source/built-editor tests cover directional hit testing, nonuniform
+layer scale, rotation drafts/undo, reset no-ops, vector/count defaults and modal
+cancel. The browser confirmed a native ray-handle drag and Shift-click reset.
+The shared room oracle passes all 147 regional rooms / 882 surface-source
+comparisons under ASan/UBSan. This adds no game-renderer passes or hot-path work.
+Screenshot: `runs/bloodpool-regressions/editor-ray-guides.png`.
+
+
+
+### Moving-forest Steam Deck cost audit (2026-10-01)
+
+Seven isolated runs reproduced and narrowed the ~70 FPS issue. This uses the
+previously verified `optimized3` binary (SHA-256
+`04f52ce654cc266fe9cc2c09d697030b2d4260476c06aa86501907c593ee77f9`),
+whose forest rendering is unchanged by the subsequent castle/editor fixes.
+Deck OLED, Desktop Mode, Vulkan, 1280×800, 90 Hz, skybox only, 64 extended rows,
+three configured render workers; deterministic right/left/jump replay through
+game frame 2400. Each run excludes the first five reporting windows after
+entering Diorama. All seven final WRAM hashes match. Temperatures stayed ≤53°C.
+
+| Moving forest variant | Median reporting-window FPS | Median window p95 ms |
+| --- | ---: | ---: |
+| 64 rows, effects/interpolation/CRT on, unprofiled X11 | 71.75 | 17.344 |
+| Same, CPU profiler attached | 70.35 | 17.924 |
+| Environmental effects off, profiler attached | 74.40 | 16.681 |
+| Interpolation off | 88.00 | 15.080 |
+| CRT off | 69.30 | 17.355 |
+| 32 rows, interpolation/effects on | 87.90 | 15.338 |
+| 64 rows, native Wayland | 73.60 | 17.496 |
+
+These are presentation rates, including repeated frames. The interpolation-off
+88 FPS result does not mean 88 distinct game updates or smooth generated frames.
+The game remains near its normal 60 Hz simulation. None of these short Desktop
+Mode runs establishes locked 90 FPS, Gaming Mode behavior or D3D12 performance.
+
+The unprofiled baseline's top-level mean wall scopes per presentation are PPU
+scanout 7.437 ms, upload/preparation 2.600 ms, frame presentation 0.70 ms or less,
+and present/wait 1.206 ms. Nested interpolation analysis accounts for 1.536 ms
+of upload/preparation; it must not be added to upload again. The equivalent
+profiled run spends about 9.25 ms per actual PPU scanout (after excluding retained
+presentations) and about 1.9 ms of interpolation analysis per new image. Effects
+geometry callback is only ~0.43 ms per presentation. Larger surfaces plus these
+serial costs cross the 11.11 ms 90 Hz budget; reducing rows or removing analysis
+moves the same workload back near the panel limit. Switching X11/Wayland or
+removing CRT does not resolve the bottleneck.
+
+Moving-only user-cycle samples (22 seconds after first sample through one second
+before the last; no lost samples) put ~21% in `render_native_fast_line` including
+inlined capture/composition, ~7.5% in `native_capture_tiles_line`, ~6% in
+`native_overlay_line_plan`, ~6% in `native_write_overlay_packed`, and ~5% in
+`native_resolve_virtual_bg_span`. `FindGlobalMotion` and `AnalyzeDirection`
+contribute another ~7%. The hot paths are packed/native paths, not evidence of
+an extra-row reference-sampler fallback. PPU scanout remains serial to preserve
+HDMA/IRQ ordering; configured render helpers do not parallelize this path
+(the benchmark reports zero helper jobs). Interpolation analyzes changed
+background images with global image search and object planes with block search.
+It still incurs this work when scrolling, when stationary reuse cannot apply.
+
+Prioritized follow-up:
+
+1. Reduce duplicate palette/overlay-plan construction, capture export and tile
+   edit passes in the packed scanout. Preserve line-local HDMA/CGRAM/window and
+   main/subscreen ownership behavior; extend oracle coverage before changing
+   any state reuse. Do not solve this by silently reducing extended rows.
+2. Add validated known-motion hints for suitable background/skybox planes, with
+   image-search fallback for raster motion, animation, edits and discontinuities.
+   Audit endpoint/motion preparation before changing interpolation quality.
+3. Recheck remaining upload/mirror/coverage memory passes (about 6 MiB scanned
+   per presentation), then repeat the moving 64-row test in Gaming Mode and on
+   D3D12 hardware. GPU timestamps were not collected; the CPU measurements and
+   controlled toggles identify the current critical path, not every GPU cost.
+
+No runtime performance algorithm or persistent player setting was changed in
+this audit. Evidence: `runs/deck-effects-2026-10-01/moving-audit/` contains all
+seven raw run summaries, moving-only profiles and the summarization script.
+
+
+### Steam Deck capture/interpolation optimization — 2026-10-02
+
+Implemented the moving-forest audit's CPU priorities without changing extended
+rows, effect density, interpolation quality, CRT, resolution or player settings:
+
+- Ordinary capture shares the current RGB palette instead of constructing a
+  256-color ARGB table for every source/scanline. Fixed-color subtraction and
+  object color-math metadata retain their specialized tables. All decisions
+  remain line-local, preserving HDMA, brightness and CGRAM changes.
+- Capture destinations, priority/semantic-band routing and object-color policy
+  are resolved once per bound scanline. Unbound/aliased bands retain the prior
+  primary-surface fallback and content-mask behavior.
+- Background capture export is separate from packed main/subscreen composition.
+  Removed capture regions skip composition; the remaining max-merge loops use
+  the existing vectorizable portable implementation. Authentic/winner buffers,
+  authored tiles, windowing and the reference renderer remain intact.
+- Global interpolation search uses complete small-motion scores as an upper
+  bound. It discards a candidate only when its nonnegative partial cost already
+  exceeds that bound; ties, refinement and inverse validation remain unchanged.
+  A compile-time bound proves costs cannot overflow. A rejected forward search
+  no longer triggers a redundant backward search. No camera-motion assumption,
+  reduced search radius, new worker synchronization or GPU pass was introduced.
+
+The exhaustive motion oracle now also covers maximum-size RGBA surfaces, sparse
+transparency, ties and partially animated surfaces. A separate per-pixel
+"already exported" shortcut was tried and discarded after the Deck measurement
+showed no benefit.
+
+Matched Deck OLED / RADV Vulkan / X11 Desktop Mode runs use 1280×800 at 90 Hz,
+64 extended rows, skybox only, interpolation/effects/CRT enabled and a deterministic
+right/left/jump replay through runtime frame 2400. As before, the first five
+reporting windows are excluded. The control build contains all current editor
+and castle changes and replaces only the two optimized implementation files
+with their pre-pass snapshots.
+
+| Scene/run | Median window FPS | Median window p95 ms |
+| --- | ---: | ---: |
+| Moving forest, freshly built matching control | 71.25 | 17.632 |
+| Moving forest, optimized | 88.60 | 15.235 |
+| Moving forest, warmer repeat | 84.45 | 16.395 |
+| Moving forest, final source-matched build | 87.40 | 16.014 |
+| Fillmore cave, optimized | 90.00 | 11.460 |
+| Bloodpool exterior, optimized | 89.80 | 14.061 |
+| Bloodpool castle, optimized | 90.00 | 11.361 |
+| Aitos lava, optimized | 89.00 | 14.498 |
+
+The previous optimized3 control independently repeated at 70.7–71.6 FPS. Forest
+PPU scanout falls from 9.27 to 8.38–8.43 ms per new image; interpolation analysis
+falls from 1.93 to 1.50–1.64 ms per new image. Analysis is nested inside upload
+and must not be added to that scope again. All moving-forest runs finish with
+identical WRAM. Device temperatures reached 56°C during these short tests.
+Presentation FPS includes interpolated/repeated frames, not extra game updates;
+this is an approximately 19–24% throughput improvement, not a locked-90 claim.
+Other room rows are coverage measurements, not before/after speedup claims.
+
+Validation: full PPU/reference and capture-tile tests pass, including ASan/UBSan;
+58 selected native tests pass (one additional headless GPU test skips); the exhaustive motion
+oracle passes in release and sanitizer builds. The macOS build and editor WASM
+build pass, as do 147 regional-room / 882 native-WASM surface/source comparisons
+and 30 preset reconstructions. The CPU code adds no backend-specific dependency.
+All five matched Deck final-composite captures (1280×800, game frame 1000,
+interpolation disabled for deterministic endpoint comparison) are byte-for-byte
+identical, with identical final WRAM as well. Motion decisions are checked
+separately against the exhaustive oracle. The stress microbenchmark also keeps
+large-shift cases near the old search cost while improving small shifts and
+unrelated-frame rejection. On the Deck's synthetic maximum-size RGBA fixture,
+small shifts take ~0.21 ms instead of ~1.55 ms; large shifts take ~1.66 ms instead
+of ~1.53 ms (an 8–9% search-only tradeoff), and unrelated pairs take ~0.82 ms
+instead of ~1.54 ms. This is a microbenchmark, not an in-game FPS measurement. Raw measurements, image hashes, profiles, source/
+binary hashes and the stress harness live in `runs/deck-effects-2026-10-02/`.
+
+Remaining platform acceptance: sustained Gaming Mode and Windows/D3D12 hardware
+measurements. Forest frame pacing still has room to improve; these runs do not
+establish every-room worst-case or a GPU timing budget. The remaining packed
+scanout, capture-tile lookup and upload/coverage passes are the next measured
+candidates if a stricter 90 Hz target is needed. Known-motion hints are deferred:
+exact search pruning delivered a gain without weakening image-based validation.
+
 
 ### Extraction inventory and remaining comparison inputs
 
@@ -612,13 +1536,16 @@ renderer or change approved art during extraction.
 
 - Implement the versioned schema, shared resolver, stable IDs, registry,
   validation, persistence, reload and default/override semantics.
+- Extend the format to complete bundled definitions and reusable source/dependency
+  bindings; sparse overrides alone cannot close native-default reconstruction.
 - Migrate representative existing torch/window light and supported-floor mist
   into recipes while retaining source validation and output.
 - Introduce coherent preview event inputs instead of relying on fabricated WRAM
   or linking the entire game just to place a light.
 - **Exit:** unchanged defaults match native baselines; edits survive round trips,
   reload and default upgrades; malformed or oversized changes are rejected
-  atomically without corrupting the active scene.
+  atomically without corrupting the active scene. A complete exported definition
+  reproduces its baseline with the corresponding native visual default disabled.
 
 ### 4. Deliver the first useful authoring workflow
 
@@ -632,13 +1559,19 @@ renderer or change approved art during extraction.
 
 ### 5. Cover every established effect family
 
-- Migrate the remaining forest, cave, marsh, castle and Aitos source groups in
-  small stages, adding ray/opening, water/contour, particle and exposure tools.
+- Finish actor/contact/spell recipe extraction after the migrated forest, cave,
+  marsh, castle, glow and Aitos surface groups. Add missing compound handles
+  without changing source ownership or aggregation.
+- Replace C-owned visual defaults with bundled configurations through the same
+  authoring suite. Add missing reusable capabilities from the reconstruction audit;
+  opaque native preset wrappers and approximate substitutions do not count.
 - Expose recognized actor/event accent parameters and deterministic preview
   actions. Preserve material recognition, regional applicability and native clocks.
 - **Exit:** every existing level-effect family has a coverage-matrix entry with
   editable defaults, working export/reload, native/browser tests and review
   evidence. Existing compound effects are selectable and retain their variation.
+  Each family also passes config-only reconstruction and equal-cost acceptance
+  from the native-default contract, including every required dependency.
 
 ### 6. Support later-stage treatments through the editor
 
@@ -654,6 +1587,36 @@ renderer or change approved art during extraction.
   silhouette experiments have explicit accept/defer decisions with evidence;
   do not silently count them as shipped or make unproven experiments prerequisites
   for basic authoring.
+
+### 6a. Camera-aligned editing and detached live preview
+
+Queued by the user on 2026-10-01, **after** the remaining default migrations and
+planned effect additions in phases 5–6. These improvements are not implemented.
+The current full-map canvas offsets/repeats the other background for inspection;
+its combined view is not aligned through the room's camera/parallax rules.
+
+- Add effect picking and drag/resize handles over the shared renderer. Resolve
+  their positions and inverse dragging through the same BG1/BG2 and plane/skybox
+  projections as their effects. Keep the full-layer map for artwork editing.
+  BG2 fixed-point and surface-raster anchors must remain in their owning map's
+  coordinates, including with static BG2, independent X/Y parallax and water
+  bands. Camera scrubbing must show their changing relationship to BG1.
+- Allow the shared renderer to open in a separate popup window while the main
+  editor remains available for map edits and effect configuration. Stream current
+  in-memory edits, selected room/terrain, camera, animation time and view settings
+  to that preview without export/reload or scene captures. Maintain one document
+  and undo history; expose how navigation/time controls are linked.
+- Reuse the existing shared rendering path. Coalesce edit updates, retain assets
+  and update only changed resources. Avoid running a redundant hidden embedded
+  renderer while the popup is active; bound any additional renderer resources.
+  Closing/reopening the popup must preserve edits, and a blocked popup must leave
+  the embedded preview usable. Handle resize and graphics-context recovery.
+- **Exit:** place/move BG2 sources while observing their actual relationship to
+  BG1, then scrub both axes and time in static, parallax and raster-band rooms.
+  Check flat/plane/skybox presentation, aspect/zoom/extended rows, supported effect
+  handles, live tile/effect edits and undo/redo in the detached preview. Verify
+  open/close/reopen synchronization and measure edit latency, memory and frame
+  cost with only the intended preview rendering.
 
 ### 7. Harden and package
 
@@ -720,16 +1683,24 @@ preview events or traversal assists. Larger diagnostic captures remain optional.
       view coverage and deterministic time scrubbing work with authored edits.
 - [ ] Baseline captures and edited scenes meet native/browser parity gates.
 - [ ] Existing effects are discoverable, editable and resettable without C edits.
+- [ ] Every native default can be completely exported and reconstructed with its
+      C-owned visual default disabled, using ordinary authoring controls and the
+      same optimized kernels, aggregation and resource budgets.
+- [ ] Config-only reconstructions preserve appearance/motion and show no measured
+      performance regression on the supported native targets.
 - [ ] All established families pass the coverage matrix and persistence checks.
 - [ ] Later-stage baseline treatments are authorable; optional experiments have
       explicit status and extension points.
+- [ ] After effect coverage is complete, camera-aligned effect editing and a
+      detached shared-renderer window reflect live edits with shared undo/state
+      and verified synchronization, resource bounds and performance.
 - [ ] Flat, plane and skybox compatibility is verified beyond the initial rooms.
 - [ ] User overrides survive upgrades and projects export/reload reproducibly.
 - [ ] Authoring limits prevent native-pool interference and rendering overload.
 - [ ] Browser packaging, target-platform measurements and user visual review pass.
 
-Continue from the October 1 status table: native compound-member tools,
-material/slope overlays and visual acceptance. Close phase 2's
+Continue with remaining actor/contact/spell recipe extraction, compound
+source handles, material/slope overlays and visual acceptance. Close phase 2's
 representative live-scene image/edit comparisons before replacing the legacy
 Diorama view, and keep native target-platform acceptance separate from browser
 and CPU test results.

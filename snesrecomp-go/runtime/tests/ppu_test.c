@@ -1309,7 +1309,7 @@ static void test_native_capture_path_parity(void) {
     compare_native_capture_path(false, 1u, 1u, -1, true, true, 0x10);
 }
 
-static void compare_main_winner_masks(uint8_t mode, int extra, int variant, bool authentic) {
+static void compare_main_winner_masks(uint8_t mode, int extra, int variant, bool authentic, bool owning) {
     enum { kRows = 32, kPlanes = 4 };
     const int width = kPpuXPixels + extra * 2;
     const size_t bytes = (size_t)width * kRows * sizeof(uint32_t);
@@ -1345,7 +1345,8 @@ static void compare_main_winner_masks(uint8_t mode, int extra, int variant, bool
              * subscreen competition must agree with reference capture. */
             int left = source == kPpuOverlaySource_Bg3 ? 19 : -extra;
             int extent = source == kPpuOverlaySource_Bg3 ? 181 : width;
-            unsigned flags = kPpuOverlayFlag_MarkMainScreenWinner;
+            unsigned flags = owning ? kPpuOverlayFlag_MarkOwningScreenWinner
+                                    : kPpuOverlayFlag_MarkMainScreenWinner;
             if (variant == 3 && source == kPpuOverlaySource_Bg2)
                 flags = kPpuOverlayFlag_RemoveFromGame; /* masks retain pre-removal winners */
             if (variant == 4 && (source == kPpuOverlaySource_Bg3 ||
@@ -1366,7 +1367,16 @@ static void compare_main_winner_masks(uint8_t mode, int extra, int variant, bool
             CHECK(PpuBindAuthenticSurface(p, (uint8_t *)original[implementation],
                 width * sizeof(uint32_t)));
         ppu_runLine(p, 0);
-        for (int line = 1; line <= kRows; ++line) ppu_runLine(p, line);
+        for (int line = 1; line <= kRows; ++line) {
+            if (owning) {
+                /* Ownership and subscreen consumption may change mid-frame.
+                 * Native text/OBJ removal must not affect these masks. */
+                p->screenEnabled[0] = line < 12 ? 0x1fu : line < 24 ? 0x14u : 0x02u;
+                p->screenEnabled[1] = line < 20 ? 0x1fu : 0x19u;
+                p->cgwsel = (uint8_t)((p->cgwsel & ~2u) | (line & 1 ? 2u : 0u));
+            }
+            ppu_runLine(p, line);
+        }
     }
     CHECK(!memcmp(pixels[0], pixels[1], bytes));
     CHECK(!memcmp(original[0], original[1], bytes));
@@ -1396,8 +1406,9 @@ static void test_main_winner_masks(void) {
         for (int wide = 0; wide < 2; ++wide)
             for (int variant = 0; variant < 6; ++variant)
                 for (int authentic = 0; authentic < 2; ++authentic)
-                    compare_main_winner_masks(mode, wide ? kPpuExtraLeftRight : 0,
-                        variant, authentic != 0);
+                    for (int owning = 0; owning < 2; ++owning)
+                        compare_main_winner_masks(mode, wide ? kPpuExtraLeftRight : 0,
+                            variant, authentic != 0, owning != 0);
 }
 
 static void test_unbound_capture_fails_open(void) {
@@ -1746,6 +1757,8 @@ static void compare_native_virtual_capture(
         capture_flags |= kPpuOverlayFlag_MarkBgHalfAdd;
     if (scenario == 6u)
         capture_flags = kPpuOverlayFlag_MarkMainScreenWinner;
+    if (scenario == 10u || scenario == 11u)
+        capture_flags = kPpuOverlayFlag_MarkOwningScreenWinner;
     Ppu *sources[2] = {fast, reference};
     for (int i = 0; i < 2; ++i) {
         Ppu *ppu = sources[i];
@@ -1758,7 +1771,7 @@ static void compare_native_virtual_capture(
         if (scenario == 1u) { /* Main-only, no color math. */
             ppu->screenEnabled[1] &= (uint8_t)~1u;
             ppu->cgwsel = ppu->cgadsub = 0u;
-        } else if (scenario == 2u) { /* Subscreen-owned even without math. */
+        } else if (scenario == 2u || scenario == 11u) { /* Subscreen-owned even without math. */
             ppu->screenEnabled[0] &= (uint8_t)~1u;
             ppu->cgwsel = ppu->cgadsub = 0u;
         } else if (scenario == 3u) { /* Subscreen full-add export. */
@@ -1920,7 +1933,7 @@ static void test_native_virtual_capture_path_parity(void) {
         /* Full and partial tiles, both flips, transparent provider gaps and
          * texels, hardware/custom bands, live raster changes, main/sub owners
          * and the capture policies used by action dioramas. */
-        for (unsigned scenario = 0; scenario <= 9u; ++scenario) {
+        for (unsigned scenario = 0; scenario <= 11u; ++scenario) {
             for (size_t i = 0; i < sizeof(fills) / sizeof(fills[0]); ++i)
                 compare_native_virtual_capture(fills[i],
                     kPpuWidescreenMotion_FillRelative, 1u,

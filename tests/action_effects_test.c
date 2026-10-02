@@ -5,7 +5,7 @@
 #include "action_effect_clock.h"
 #include "action_effects.h"
 #include "action_landing_dust.h"
-#include "action_cave_surface.h"
+#include "action_water_field.h"
 #include "action_bg_plan.h"
 #include "action_bg_world.h"
 #include "actraiser_game.h"
@@ -3004,6 +3004,8 @@ static void TestBloodpoolEnvironmentCapture(void) {
       CHECK(opaque == expected);
     }
     CHECK(frame.decorations[2].world_x == 112 && frame.decorations[2].world_y == 62);
+    for(unsigned family=0;family<7;++family)
+      CHECK(!!(frame.decorations[family].flags&kActionEffectFlag_StaticAnchor)==(family==2||family==6));
     CHECK(!memcmp(before,ram,sizeof(ram)));
   }
   /* Capture the retained native HDMA table, not a reconstruction from clock
@@ -3480,8 +3482,9 @@ static void TestCaveWetMaterials(void) {
   ram[CaveTestTileAddress(0x8000,2048,420,432)] = 0xB9;
   ram[CaveTestTileAddress(0xC000,2048,0,896)] = 1;
   ram[CaveTestTileAddress(0xC000,2048,720,0)] = 2;
-  for (unsigned i = 0; i < kActionCaveWetSourceCount; i++) {
-    const ActionCaveWetSource *s = &kActionCaveWetSources[i];
+  for (unsigned i = 0; i < (unsigned)ActionWaterField_Bundled()->Counts[2]; i++) {
+    const ActionCaveWetSource source=ActionWaterField_Wet(ActionWaterField_Bundled(),i);
+    const ActionCaveWetSource *s=&source;
     ram[CaveTestTileAddress(0x8000,2048,s->x,s->ceiling_y-1)] = s->ceiling_tile;
     ram[CaveTestTileAddress(0x8000,2048,s->x,s->landing_y)] = s->landing_tile;
   }
@@ -3591,7 +3594,27 @@ static void TestFillmoreStatueOrbs(void) {
   }
 }
 
+static void TestGenericActorFacts(void) {
+  static uint8_t ram[kActRaiserWramSize],unchanged[kActRaiserWramSize];
+  static ActionSceneEffectFrame frame;static ActionEffectObserver observer;
+  memset(ram,0,sizeof(ram));ActionEffectObserver_Reset(&observer);ram[0x18]=2;ram[0x19]=1;
+  const unsigned parent=0x12e0,child=0x1320;
+  for(unsigned at=parent;at<=child;at+=0x40){Write16(ram,at+2,120);Write16(ram,at+4,96);Write16(ram,at+0x16,0x5000);
+    ram[at+0x18]=0x7e;Write16(ram,at+0x20,0x5220);Write16(ram,at+0x32,0xb786);}
+  Write16(ram,parent+0x1a,7);Write16(ram,child+0x1a,1);Write16(ram,child+0x3a,parent);Write16(ram,child+0x12,0xb90d);
+  memcpy(unchanged,ram,sizeof(ram));ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
+  CHECK(!memcmp(ram,unchanged,sizeof(ram)));CHECK(frame.actor_count==2&&frame.effect_count==0);
+  CHECK(frame.actors[1].source==0xb786&&frame.actors[1].parent_source==0xb786&&frame.actors[1].state==1&&frame.actors[1].handler==0xb90d);
+  const uint32_t generation=frame.actors[1].generation;
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),7);CHECK(frame.actors[1].generation==generation&&frame.actors[1].age==7);
+  ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),0);CHECK(frame.actors[1].age==7);
+  Write16(ram,child,0x4000);ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);CHECK(frame.actor_count==1);
+  Write16(ram,child,0);ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);CHECK(frame.actors[1].generation!=generation&&frame.actors[1].age==0);
+  const uint32_t replacement=frame.actors[1].generation;ram[0x19]=2;ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);CHECK(frame.actors[1].generation!=replacement);
+}
+
 int main(void) {
+  TestGenericActorFacts();
   TestBloodpoolEnvironmentCapture();
   TestCastleEnvironmentCapture();
   TestCastleGalleryAndWaterCapture();
