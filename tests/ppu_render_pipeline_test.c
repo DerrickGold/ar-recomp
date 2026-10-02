@@ -680,11 +680,22 @@ static void TestBackgroundPacketOwnershipAndFallback(void) {
   Ppu *ppu = ppu_init(); CHECK(ppu);
   SrPpuBgPacket *packet = calloc(1, sizeof(*packet)); CHECK(packet);
   static uint32_t fb[width * kH], bands[3][width * height], expected[3][width * height];
+  /* Both owners, window splits, edits/aprons and mid-row provider fallback
+   * must agree with full CPU rendering through every fine-scroll phase. */
+  for (unsigned screen = 0; screen < 2; ++screen)
+  for (unsigned window = 0; window < 2; ++window)
   for (unsigned edits = 0; edits < 2; ++edits)
   for (unsigned apron = 0; apron <= 16; apron += 16)
   for (unsigned fallback = 0; fallback < 2; ++fallback) for (unsigned owner = 0; owner < 2; ++owner) {
     setup_virtual_bg(ppu, 16, (uint8_t *)fb, width * 4);
     CHECK(PpuBeginDrawingSized(ppu, (uint8_t *)fb, width * 4, kH, 0));
+    ppu->screenEnabled[0] = screen == 0 ? 1u : 0u;
+    ppu->screenEnabled[1] = screen == 1 ? 1u : 0u;
+    if (window) {
+      ppu->screenWindowed[screen] = 1u;
+      ppu->windowsel = kWindow1Enabled;
+      ppu->window1left = 23; ppu->window1right = 38;
+    }
     VirtualTilemapFixture map = {.min_x = -20, .max_x = 80, .min_y = -20, .max_y = 80,
         .even_entry = (2 | (2 << 10)), .odd_entry = (3 | (3 << 10) | 0xe000), .fallback = fallback != 0};
     const PpuVirtualTilemapBinding binding = {.lookup = lookup_virtual_tile,
@@ -700,7 +711,24 @@ static void TestBackgroundPacketOwnershipAndFallback(void) {
     SrPpuBgPacket_Begin(packet, width, height); ppu->backgroundPacket = packet;
     memset(bands, 0xa5, sizeof(bands));
     ppu_runLine(ppu, 0);
-    for (unsigned y = 0; y < height; ++y) { ppu->hScroll[0] = (uint16_t)y; ppu_runLine(ppu, (int)y + 1); }
+    for (unsigned y = 0; y < height; ++y) {
+      /* Asymmetric live VRAM and palettes exercise both flips and prevent
+       * accidentally reusing a prior row's packet data across HBlank. */
+      ppu->hScroll[0] = (uint16_t)y;
+      const uint16_t color = bgr555(31 - y, y, 7);
+      ppu_write(ppu, 0x21, 0x21);
+      ppu_write(ppu, 0x22, (uint8_t)color);
+      ppu_write(ppu, 0x22, (uint8_t)(color >> 8));
+      ppu_write(ppu, 0x15, 0x80);
+      ppu_write(ppu, 0x17, 0);
+      ppu_write(ppu, 0x16, (uint8_t)(2 * 16 + ((y + 1) & 7u)));
+      ppu_write(ppu, 0x18, (uint8_t)(0x81u | (1u << (y & 7u))));
+      ppu_write(ppu, 0x19, 0);
+      ppu_write(ppu, 0x16, (uint8_t)(3 * 16 + (7u - ((y + 1) & 7u))));
+      ppu_write(ppu, 0x18, (uint8_t)(0x42u | (1u << ((y + 3) & 7u))));
+      ppu_write(ppu, 0x19, 0);
+      ppu_runLine(ppu, (int)y + 1);
+    }
     if (!owner) memcpy(expected, bands, sizeof(expected));
     else {
       CHECK(packet->owned_sources == (fallback ? 0u : 1u));

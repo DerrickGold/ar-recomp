@@ -2574,6 +2574,76 @@ The full sample stays on Deck; the report and compact hotspot table are saved
 with the local evidence. Stable 90 Hz, D3D12 runtime and broader room/transition
 acceptance remain open.
 
+#### Scanline packet preparation — 2026-10-02
+
+Committed the preceding GPU/pacing work as `d6caf024`, then measured two follow-ups.
+Parallelizing the ten fine global-motion searches into separate GPU workgroups
+preserved the Metal motion oracle and scrolling comparison, but did not produce
+a consistent overall Deck pacing improvement. Its p95 completion interval was
+13.665/13.269 ms against the intervening control's 13.224 ms. The prototype is
+discarded; its patch and comparison remain in `runs/gpu-refine-2026-10-02/` and
+`runs/deck-pacing-2026-10-02/refine-analysis.json`. No changed shader is retained.
+
+The retained change prepares the compact packet row once for an unwindowed
+virtual BG span. Individual tiles reuse its metadata, pixel pointer and surface
+origin instead of repeating row lookup, allocation checks and per-pixel window
+iteration. The compact tile encoder is shared with the general writer. VRAM,
+palette, provider lookup and scroll still follow each scanline; there is no
+cross-scanline cache or added allocation. Window splits and other packet formats
+retain the general path. A provider fallback still cancels ownership and
+reconstructs the complete CPU row.
+
+Matched Deck Vulkan binary `pacing-22` (`c6c50205…13c3d0`) versus the committed
+`pacing-20`, using the same 3,600-tick moving Fillmore replay, 64 extra rows,
+effects/CRT, 90 Hz fullscreen and settled ticks 1,200–3,300:
+
+| Interpolated GPU-owned path | Control | Prepared row | Repeat |
+| --- | ---: | ---: | ---: |
+| Producer mean, ms | 10.075 | 9.139 | 9.219 |
+| Producer p95, ms | 10.564 | 9.716 | 10.008 |
+| Completion interval p95, ms | 13.378 | 12.568 | 12.718 |
+| Completion interval p99, ms | 16.663 | 16.695 | 16.620 |
+| Projection wait mean, ms | 0.247 | 0.161 | 0.179 |
+| Uploads crossing a deadline | 88 | 15 | 36 |
+
+This removes 0.86–0.94 ms (8.5–9.3%) of average CPU production work. It does
+not establish stable 90 Hz: the completion tail remains about 16.6 ms. Queue
+depth stays at most one and playback delay is unchanged. These are backend
+present-return intervals, not physical scanout measurements. A paired Mac Metal
+check (3,000 ticks; analyze 1,200–2,700) reduces producer mean from 4.501 to
+4.248 ms; completion p95/p99 changes from 12.133/15.623 to 12.270/15.827 ms,
+so no Mac pacing improvement is claimed.
+
+Interpolation-off Deck repeats reduce producer mean from 10.183/10.165 to
+9.062/9.049 ms (about 11%). Captured-source age at drawing also falls from
+18.854/18.707 to 17.674/17.701 ms; this is not an input-latency measurement.
+There is a small pacing tradeoff: completion p95 rises from 12.480/12.494 to
+12.787/12.711 ms, while p99 is 13.399/13.579 versus 13.673/13.584 ms. Retain the
+CPU saving, but do not claim universal pacing improvement. Endpoint uploads
+still cross some deadlines; addressing that without delaying fresh input is a
+separate scheduling/upload task. Full results are in `row-nointerp-analysis.json`.
+
+Validation adds main/subscreen ownership and window splits to the packet/CPU
+oracle, including every fine-scroll phase, asymmetric flipped tiles, per-line
+VRAM/CGRAM writes, authored edits, aprons and fallback partway through a row.
+Release and ASan/UBSan tests pass. The PPU translation unit also compiles for
+Windows x64 and Linux ARM64; these are compile checks, not runtime coverage.
+On Metal, all 600 scrolling source-frame comparisons are byte-exact. Another
+600 midpoint comparisons preserve the existing tiny filtering differences
+(worst reviewed frame: 89 of 322,560 pixels differ; maximum channel difference
+3/255, mean 0.000155/255). A 1,800-tick live Deck validation run also exercises
+GPU synthesis with the CPU oracle: zero packet mismatches and zero motion-vector
+errors across all 42 reported check batches. Evidence lives in
+`runs/ppu-row-2026-10-02/`, with
+Deck traces and provenance in `runs/deck-pacing-2026-10-02/row-analysis.json`.
+
+The next architectural target remains the CPU dependency on GPU projection
+results: skybox mapping and effect-plane offsets consume those results before
+drawing. Removing the fence requires moving those consumers to the GPU while
+preserving confidence rejection and endpoint selection. Upload/submission cost,
+OBJ work and residual composition remain separate targets. Keep the owned GPU
+path opt-in until broader room/transition and D3D12 runtime gates pass.
+
 ### Extraction inventory and remaining comparison inputs
 
 These are the implementation owners and comparison inputs for the editable

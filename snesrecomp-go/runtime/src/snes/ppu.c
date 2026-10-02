@@ -2774,6 +2774,21 @@ static uint32_t reverse_byte_bits(uint32_t v) {
     return ((v >> 4) & 0x0f0f0f0fu) | ((v & 0x0f0f0f0fu) << 4);
 }
 
+/* Compact rows preserve their native tile alignment; only the GPU expands
+ * pixels. Shared by the general writer and the prepared virtual-row path. */
+static void background_packet_native_tile(uint32_t *pixels, uint32_t *meta,
+        unsigned column, int run, int fine_x, uint32_t raw,
+        uint16_t entry, unsigned band, uint8_t *content_mask) {
+    meta[4] = ((unsigned)fine_x - column) & 7u;
+    uint32_t *tile = pixels + ((column + meta[4]) / 8u) * 2u;
+    tile[0] = raw;
+    tile[1] = (tile[1] & 0xff00u) | ((entry >> 10) & 7u) |
+        (band << 3) | ((entry & 0x4000u) ? 32u : 0u) |
+        (((1u << run) - 1u) << (fine_x + 8));
+    const unsigned signal = (raw | (raw >> 8) | (raw >> 16) | (raw >> 24)) & 255u;
+    if (signal) *content_mask |= (uint8_t)(1u << band);
+}
+
 static void background_packet_tile_to(Ppu *ppu, int layer, unsigned source_row, int origin,
         int x, int run, int fine_x, int fine_y, int step, uint16_t entry,
         unsigned band, bool edit, bool replace, bool blank,
@@ -2789,17 +2804,8 @@ static void background_packet_tile_to(Ppu *ppu, int layer, unsigned source_row, 
     uint32_t *meta = SrPpuBgPacket_Meta(ppu->backgroundPacket, packet_source,
         source_row % SR_PPU_BG_PACKET_HEIGHT);
     if (meta[0] >= 3u && !edit) {
-        /* An unedited world row is already a grid of eight-pixel tiles. Keep
-         * its native alignment and flip; the GPU selects each pixel. */
-        const unsigned column = (unsigned)(origin + x);
-        meta[4] = ((unsigned)fine_x - column) & 7u;
-        uint32_t *tile = pixels + ((column + meta[4]) / 8u) * 2u;
-        tile[0] = raw;
-        tile[1] = (tile[1] & 0xff00u) | ((entry >> 10) & 7u) |
-            (band << 3) | ((entry & 0x4000u) ? 32u : 0u) |
-            (((1u << run) - 1u) << (fine_x + 8));
-        const unsigned signal = (raw | (raw >> 8) | (raw >> 16) | (raw >> 24)) & 255u;
-        if (signal) ppu->overlayRenderContentMask[layer] |= (uint8_t)(1u << band);
+        background_packet_native_tile(pixels, meta, (unsigned)(origin + x),
+            run, fine_x, raw, entry, band, &ppu->overlayRenderContentMask[layer]);
         return;
     }
     if (meta[0] == 4u) {
@@ -2939,6 +2945,18 @@ static void native_resolve_virtual_bg_span(Ppu *SR_RESTRICT ppu, int layer,
         ppu, (uint8_t)layer, screen_y);
     native_layer_window_plan(ppu, layer, want_sub, &plan);
     if (plan.main_mode == 0u && plan.sub_mode == 0u) return;
+    const bool owner_sub = (ppu->screenEnabled[0] & (1u << layer)) == 0u;
+    const unsigned visibility = owner_sub ? plan.sub_mode : plan.main_mode;
+    uint32_t *packet_pixels = NULL, *packet_meta = NULL;
+    int packet_origin = 0;
+    if ((ppu->backgroundTileSources & (1u << layer)) && visibility == 1u) {
+        const unsigned y = (unsigned)overlay_row(&ppu->overlayCaptures[layer], screen_y);
+        packet_meta = SrPpuBgPacket_Meta(ppu->backgroundPacket, (unsigned)layer, y);
+        if (packet_meta[0] >= 3u) {
+            packet_pixels = background_packet_row(ppu, (unsigned)layer, screen_y);
+            packet_origin = surface_origin_x(ppu, ppu->overlayRenderPitch[layer]);
+        }
+    }
     for (int x = left; x < right;) {
         int source_x;
         int step = 1;
@@ -3028,19 +3046,31 @@ static void native_resolve_virtual_bg_span(Ppu *SR_RESTRICT ppu, int layer,
             (void)binding->band_lookup(
                 binding->context, tile_x, tile_y, entry, &band);
         if (ppu->backgroundTileSources & (1u << layer)) {
-            const bool owner_sub = (ppu->screenEnabled[0] & (1u << layer)) == 0u;
-            const unsigned visibility = owner_sub ? plan.sub_mode : plan.main_mode;
             const unsigned band_slot = background_packet_band(ppu, layer, entry, band);
             const unsigned saved_window_run = plan.run;
-            for (int at = 0; at < run;) {
-                if (!visibility || (visibility == 2u && native_window_plan_inside(&plan, x + at))) {
-                    ++at; continue;
+            if (packet_pixels && step == 1) {
+                /* Row ownership has already allocated the fixed packet arena.
+                 * Hoist its setup out of the tile loop, but keep VRAM reads and
+                 * provider results live for this scanline. A provider fallback
+                 * clears backgroundTileSources and bypasses this path. */
+                const unsigned row = (entry & 0x8000u) ? 7u - (unsigned)fine_y : (unsigned)fine_y;
+                const unsigned address = (unsigned)tile_address + (entry & 1023u) * 16u + row;
+                const uint32_t raw = ppu->vram[address & 0x7fffu] |
+                    ((uint32_t)ppu->vram[(address + 8u) & 0x7fffu] << 16);
+                background_packet_native_tile(packet_pixels, packet_meta,
+                    (unsigned)(packet_origin + x), run, fine_x, raw, entry,
+                    band_slot, &ppu->overlayRenderContentMask[layer]);
+            } else {
+                for (int at = 0; at < run;) {
+                    if (!visibility || (visibility == 2u && native_window_plan_inside(&plan, x + at))) {
+                        ++at; continue;
+                    }
+                    const int start = at++;
+                    while (at < run && (visibility != 2u || !native_window_plan_inside(&plan, x + at))) ++at;
+                    background_packet_tile(ppu, layer, screen_y, x + start, at - start,
+                        fine_x + start * step, fine_y, step, entry, band_slot,
+                        false, false, false, 0, 0);
                 }
-                const int start = at++;
-                while (at < run && (visibility != 2u || !native_window_plan_inside(&plan, x + at))) ++at;
-                background_packet_tile(ppu, layer, screen_y, x + start, at - start,
-                    fine_x + start * step, fine_y, step, entry, band_slot,
-                    false, false, false, 0, 0);
             }
             if (!(ppu->backgroundCpuSources & (1u << layer))) { x += run; continue; }
             plan.run = (uint8_t)saved_window_run;
