@@ -2831,6 +2831,13 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_scheduled_settings
         COMMAND actraiser_scheduled_settings_test)
 
+    add_executable(actraiser_dev_tools_capture_trace_test
+        tests/dev_tools_capture_trace_test.c src/dev/dev_tools_capture.c)
+    target_include_directories(actraiser_dev_tools_capture_trace_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_dev_tools_capture_trace
+        COMMAND actraiser_dev_tools_capture_trace_test)
+
     # SDL3 render-pipeline regression guard: presents a known framebuffer
     # through the same texture/FRect/logical-presentation path main.c uses and
     # asserts the read-back frame is not black (the prior SDL3 attempt's bug).

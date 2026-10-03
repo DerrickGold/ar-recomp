@@ -761,6 +761,15 @@ void ActRaiser_ApplyWidescreenPolicy(void) {
           &bg_plan, bg_hle_bindings, visible_bg_layers);
       if (fallback_world_layers) {
         clamp |= fallback_world_layers;
+        /* X Clamp cannot protect synthetic Y reads from the native streaming
+         * ring. Fail each unbound world layer closed to its authentic rows,
+         * without changing the requested/captured canvas for other layers. */
+        frame_policy.vertical_clip_layer_mask |= fallback_world_layers;
+        for (int layer = 0; layer < kActionBgPlanLayerCount; ++layer) {
+          if (!(fallback_world_layers & (1u << layer))) continue;
+          frame_policy.vertical_clip_top_rows[layer] = 0u;
+          frame_policy.vertical_clip_bottom_rows[layer] = 0u;
+        }
         /* The failed world layer was atomically converted to a viewport Clamp
          * plan above. Recompile before the one band-application site so none
          * of its tuner-authored row overrides can bypass that safe fallback. */

@@ -174,6 +174,7 @@ int main(void) {
           "range and explicit-part rasterization diverged");
   }
 
+  ppu_free(ppu);
   if (s_failures) {
     fprintf(stderr, "%d failure(s)\n", s_failures);
     return 1;

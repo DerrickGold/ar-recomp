@@ -2552,6 +2552,53 @@ static void TestVerticalMarginLayerClip(void) {
   ppu_free(ppu);
 }
 
+/* An unbound/off world provider falls back to the native streaming ring.
+ * X Clamp alone still reads that ring in synthetic Y rows. Zero Y budgets
+ * must clear those rows without removing the requested canvas or native band. */
+static void TestUnboundWorldVerticalFallback(void) {
+  enum { top = 37, bottom = 37, rows = kH + top + bottom };
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  static uint8_t framebuffer[kW * rows * 4];
+  static uint32_t capture[kW * rows];
+  for (int fail_closed = 0; fail_closed < 2; ++fail_closed) {
+    ppu_reset(ppu);
+    memset(framebuffer, 0, sizeof(framebuffer));
+    memset(capture, 0, sizeof(capture));
+    ppu->inidisp = 15;
+    ppu->bgmode = 1;
+    ppu->screenEnabled[0] = 1u << kActRaiserPpuLayer_Bg1;
+    ppu->cgram[1] = bgr555(31, 0, 0);
+    set_solid_4bpp_tile(ppu, 1, 1);
+    ppu->bgXsc[kActRaiserPpuLayer_Bg1] = 0x20 | 3;
+    for (int i = 0; i < 0x1000; ++i) ppu->vram[0x2000 + i] = 1;
+    CHECK(ppu->virtualTilemap[kActRaiserPpuLayer_Bg1].lookup == NULL);
+    PpuSetExtraVerticalSpace(ppu, top, bottom);
+    PpuSetWidescreenLayerClamp(ppu, 1u << kActRaiserPpuLayer_Bg1);
+    PpuSetVerticalMarginLayerClip(ppu, kActRaiserPpuLayer_Bg1,
+        fail_closed ? 0 : top, fail_closed ? 0 : bottom);
+    PpuBeginDrawing(ppu, framebuffer, kW * 4, 0);
+    CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1,
+        (uint8_t *)capture, kW * 4));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, -top,
+        kW, rows, kPpuOverlayFlag_RemoveFromGame));
+    ppu_runLine(ppu, 0);
+    for (int line = 1 - top; line <= 0; ++line) ppu_runMarginLine(ppu, line);
+    for (int line = 1; line <= kH; ++line) ppu_runLine(ppu, line);
+    for (int line = kH + 1; line <= kH + bottom; ++line)
+      ppu_runMarginLine(ppu, line);
+    CHECK(ppu->extraTopCur == top && ppu->extraBottomCur == bottom);
+    for (int y = 0; y < rows; ++y) {
+      if (fail_closed && (y < top || y >= top + kH))
+        CHECK(capture[y * kW] == 0);
+      else
+        CHECK((capture[y * kW] & 0xffffffu) != 0);
+    }
+  }
+  ppu_free(ppu);
+}
+
 /* The bottom half of the same contract. A layer can reach its finite-world
  * floor before the primary playfield does; rows after that point must become
  * transparent rather than wrapping to the layer's top. */
@@ -3168,6 +3215,7 @@ static void TestCapturedPaddingReachesBudget(void) {
     CHECK((row[1] & 0xffffffu) != 0);
     CHECK((row[kCaptureWidth - 2] & 0xffffffu) != 0);
   }
+  ppu_free(ppu);
 }
 
 static void TestAuthenticComparisonSurface(void) {
@@ -3420,6 +3468,7 @@ int main(void) {
   TestVerticalMarginLayerClip();
   TestAsymmetricVerticalCapture();
   TestVerticalMarginBottomLayerClip();
+  TestUnboundWorldVerticalFallback();
   TestVerticalMarginExactObj();
   TestLayerPresentationExtents();
   TestMovingEdgePoliciesInVerticalMargins();

@@ -126,6 +126,7 @@ list(APPEND _portable_render_files
     "${GAME_SOURCE_ROOT}/dev/present_scene_inspector.c"
     "${GAME_SOURCE_ROOT}/dev/present_scene_inspector.h"
     "${GAME_SOURCE_ROOT}/dev/dev_tools.c"
+    "${GAME_SOURCE_ROOT}/dev/dev_tools_capture.c"
     "${GAME_SOURCE_ROOT}/dev/dev_tools.h"
     "${GAME_SOURCE_ROOT}/dev/dev_tools_readback.h"
     "${GAME_SOURCE_ROOT}/action/action_effect_capture.c"
