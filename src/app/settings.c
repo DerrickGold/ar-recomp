@@ -377,6 +377,10 @@ static bool ParseExtendedAspect(const char *text, void *field) {
     *value = kScreenAspect_Stretch;
     return true;
   }
+  if (!strcmp(text, "auto") || !strcmp(text, "Auto") || !strcmp(text, "4")) {
+    *value = kScreenAspect_Auto;
+    return true;
+  }
   return false;
 }
 
@@ -629,6 +633,7 @@ static const char *const kScreenAspectLabels[] = {
   "16:9",
   "16:10",
   "Stretch",
+  "Auto",
 };
 
 static const char *const kWindowModeLabels[] = {
@@ -1274,11 +1279,12 @@ const SettingDesc g_setting_descs[] = {
                "Substitute HD art per game-assets/manifest.ini entries when their art is present.",
                kSettingCat_Display, 1, false, HdReplacementsAvailable, NULL),
   { "extended_aspect", "AR_EXTENDED_ASPECT_RATIO", "Screen ratio",
-    "Output aspect: authentic 4:3, widescreen 16:9 / 16:10, or Stretch to "
-    "fill the whole window. Video geometry updates live.",
+    "4:3, 16:9, 16:10, or Stretch. Auto expands action stages to the drawable "
+    "window without stretching. Level bounds and capture limits can leave "
+    "borders. Towns and Mode 7 keep native framing.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.extended_aspect, kScreenAspect_43,
-    kScreenAspect_43, kScreenAspect_Stretch, 1, false,
+    kScreenAspect_43, kScreenAspect_Auto, 1, false,
     kScreenAspectLabels, kScreenAspect_Count, NULL, OnScreenRatioChanged,
     ParseExtendedAspect, NULL, .modern_env = true },
   { "pixel_aspect", "AR_ASPECT_PAR", "Pixel aspect",
@@ -2058,8 +2064,8 @@ const SettingDesc g_setting_descs[] = {
    * (rendering-engine.md §4). 64 covers the measured 48px camera jump while
    * exact signed OBJ positions avoid the 8-bit OAM Y ambiguity. */
   { "diorama_vertical_extend", NULL, "Vertical extend",
-    "Scanlines of extra world drawn above and below the screen. 0 keeps the "
-    "authentic 224-line frame.",
+    "Manual Diorama extra rows per side. 0 keeps the authentic 224-line frame. "
+    "Screen ratio Auto chooses its own budget.",
     kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
     &g_settings.diorama_vertical_extend, 0, 0, 64, 4, false, NULL, 0,
     Diorama_ModeIsOn, NULL, NULL, NULL },
@@ -3377,7 +3383,7 @@ static bool ApplyLegacyEnvironmentValue(const SettingDesc *desc,
 }
 
 static int InferDisplayMode(void) {
-  if (!g_ws_active)
+  if (!g_ws_active && g_settings.extended_aspect != kScreenAspect_Auto)
     return kDisplayMode_43;
 
   const bool raw = g_settings.ws_action && g_settings.ws_sim &&
@@ -3753,7 +3759,10 @@ bool Settings_WriteSnapshot(const char *path, const char *text, size_t size) {
 
 void Settings_SetDisplayMode(int mode) {
   if (mode < 0 || mode >= kDisplayMode_PresetCount) return;
-  if (!g_ws_active && mode != kDisplayMode_43)
+  /* Auto has no drawable budget before renderer creation. Its saved profile
+   * is a preference, not a statement about the current capture dimensions. */
+  if (!g_ws_active && g_settings.extended_aspect != kScreenAspect_Auto &&
+      mode != kDisplayMode_43)
     mode = kDisplayMode_43;
   g_settings.display_mode = mode;
 
@@ -3774,6 +3783,8 @@ void Settings_SetDisplayMode(int mode) {
 }
 
 void Settings_ReconcileDisplayModeAfterGeometryChange(int previous_mode) {
+  /* Auto changes effective action drawing, never the retained manual profile. */
+  if (g_settings.extended_aspect == kScreenAspect_Auto) return;
   if (!g_ws_active) {
     Settings_SetDisplayMode(kDisplayMode_43);
   } else if (previous_mode == kDisplayMode_43 ||
@@ -3820,12 +3831,15 @@ const char *Settings_DisplayModeName(int mode) {
  * render margin exceeds the display margin (diorama mode), the visible
  * window is the centre 256+2*display_extra columns. */
 int Settings_VisibleX0(void) {
+  if (g_settings.extended_aspect == kScreenAspect_Auto)
+    return g_ws_extra - g_ws_display_extra;
   if (g_settings.display_mode == kDisplayMode_43) return g_ws_extra;
   return g_ws_extra - g_ws_display_extra;
 }
 
 int Settings_VisibleWidth(void) {
-  return (g_settings.display_mode == kDisplayMode_43)
+  return (g_settings.display_mode == kDisplayMode_43 &&
+          g_settings.extended_aspect != kScreenAspect_Auto)
              ? kActRaiserAuthenticWidth
              : kActRaiserAuthenticWidth + 2 * g_ws_display_extra;
 }

@@ -327,6 +327,7 @@ typedef struct DioramaView {
   int pixel_aspect;
   bool ignore_aspect_ratio;
   int visible_width;
+  int visible_height; /* Requested Auto canvas; 0 keeps native/manual fit. */
   ArRenderRectI viewport;
 } DioramaView;
 

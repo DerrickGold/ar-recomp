@@ -2838,6 +2838,14 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_dev_tools_capture_trace
         COMMAND actraiser_dev_tools_capture_trace_test)
 
+    add_executable(actraiser_auto_canvas_test
+        tests/auto_canvas_test.c
+        src/present/display_geometry.c
+        src/render/presentation_layout.c)
+    target_include_directories(actraiser_auto_canvas_test PRIVATE src)
+    target_link_libraries(actraiser_auto_canvas_test PRIVATE SDL3::SDL3)
+    add_test(NAME actraiser_auto_canvas COMMAND actraiser_auto_canvas_test)
+
     # SDL3 render-pipeline regression guard: presents a known framebuffer
     # through the same texture/FRect/logical-presentation path main.c uses and
     # asserts the read-back frame is not black (the prior SDL3 attempt's bug).

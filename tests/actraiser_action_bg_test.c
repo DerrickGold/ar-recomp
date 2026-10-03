@@ -476,6 +476,19 @@ static void TestVerticalMargins(void) {
   ActRaiserActionBg_ResolveVerticalMargins(8, 512, 4, NULL, &bottom);
   CHECK(bottom == 4);
 
+  /* Auto's square CRT (37), 1240x1080 CRT (18), and square PAR (16)
+   * budgets use the same 225-row camera bound, not a changed camera/FOV. */
+  const int auto_budgets[] = {37,18,16};
+  for (unsigned i=0;i<sizeof(auto_budgets)/sizeof(auto_budgets[0]);++i) {
+    const int requested=auto_budgets[i];
+    ActRaiserActionBg_ResolveVerticalMargins(3,512,requested,&top,&bottom);
+    CHECK(top==3 && bottom==requested);
+    ActRaiserActionBg_ResolveVerticalMargins(284,512,requested,&top,&bottom);
+    CHECK(top==requested && bottom==3);
+    ActRaiserActionBg_ResolveVerticalMargins(0,225,requested,&top,&bottom);
+    CHECK(top==0 && bottom==0);
+  }
+
   /* Kassandora's ledge/floor snapshots must retain the same world window:
    * the seven unavailable lower rows move above, rather than losing the top. */
   const int cameras[] = {264, 280, 287, 280};

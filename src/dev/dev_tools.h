@@ -37,6 +37,10 @@ typedef struct DevToolsContext {
   InspectorPresentationSelection *inspector_presentation;
   int snes_width;
   int snes_height;
+  int visible_width;
+  int visible_x0;
+  int visible_height;
+  int visible_top;
   int pixel_aspect;
   int widescreen_extra;
   bool widescreen_active;

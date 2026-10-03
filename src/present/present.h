@@ -128,6 +128,7 @@ typedef struct FrameSlot {
    * present-time code; these are the already-resolved results). */
   int snes_width;
   int snes_height;
+  int extended_aspect; /* ScreenAspect selection paired with these pixels. */
   int display_mode;
   int pixel_aspect;
   bool ws_active;
@@ -135,6 +136,8 @@ typedef struct FrameSlot {
   bool ignore_aspect_ratio;
   int visible_x0;
   int visible_width;
+  int visible_height; /* Requested canvas, independent of bounded capture. */
+  int visible_top;    /* Requested rows above authentic screen y=0. */
   /* Centred 256x224 crop inside the independent native-camera PPU pass. */
   int authentic_x0;
   int authentic_y0;
@@ -145,8 +148,7 @@ typedef struct FrameSlot {
    * surfaces are snes_height + ws_extra_top + ws_extra_bottom rows tall and
    * authentic scanline 0
    * lives at row ws_extra_top -- just as texture column 0 is screen
-   * x = -ws_extra. Zero on every non-diorama frame, which is what keeps the
-   * flat presentation path (which assumes row 0) correct by construction. */
+   * x = -ws_extra. Auto also captures these rows for flat action stages. */
   int ws_extra_top;
   int ws_extra_bottom;
   /* Capture guard columns per side beyond the ordinary scanout span. These
@@ -341,6 +343,14 @@ typedef struct FrameSlot {
   bool scene_inspector_enabled;
   InspectorPresentationSelection inspector_selection;
 } FrameSlot;
+
+/* Zero-initialized native/test slots retain the authentic-height default. */
+static inline int FrameSlot_VisibleHeight(const FrameSlot *slot) {
+  return slot->visible_height > 0 ? slot->visible_height : slot->snes_height;
+}
+static inline int FrameSlot_CaptureHeight(const FrameSlot *slot) {
+  return slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom;
+}
 
 /* Sole writer, implemented in frame_slot.c. Call on the game thread after
  * RtlDrawPpuFrame. Pass that frame's annotated simulation data when available;

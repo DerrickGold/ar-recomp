@@ -15,7 +15,8 @@ static int InspectorScreenToOutputX(ArRenderRectI viewport, double screen_x,
 
 static int InspectorScreenToOutputY(ArRenderRectI viewport, double screen_y,
                                     const FrameSlot *slot) {
-  return viewport.y + (int)(screen_y * viewport.h / slot->snes_height + 0.5);
+  return viewport.y + (int)((screen_y + slot->visible_top) * viewport.h /
+                            FrameSlot_VisibleHeight(slot) + 0.5);
 }
 
 static int HudSourceToOutputX(const HudPresentationChunk *chunk, double source_x) {

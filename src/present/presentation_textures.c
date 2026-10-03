@@ -15,7 +15,7 @@ ArRenderTexture g_authentic_texture;
 void PresentationTextures_Create(void) {
   const ArRenderTextureDesc base_texture = {
     .width = SR_PPU_SURFACE_MAX_WIDTH,
-    .height = g_snes_height,
+    .height = SR_PPU_SURFACE_MAX_HEIGHT,
     .format = kArRenderPixelFormat_Argb8888,
     .usage = kArRenderTextureUsage_Streaming,
     .filter = kArRenderFilter_Nearest,

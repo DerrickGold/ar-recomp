@@ -99,7 +99,7 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
   } else {
     image = ComputePresentationViewportWithOutput(
         &g_render_device, slot->ignore_aspect_ratio,
-        slot->pixel_aspect, slot->visible_width, slot->snes_height,
+        slot->pixel_aspect, slot->visible_width, FrameSlot_VisibleHeight(slot),
         &output_size);
     (void)BeginCrtPost();
     if (SessionFatal_Requested()) return image;
@@ -107,18 +107,18 @@ static ArRenderRectI DrawFrame(const FrameSlot *slot, float alpha,
     if (!blank && !SessionFatal_Requested()) PresentSimMenu_Draw(slot, image);
     if (SessionFatal_Requested()) {
       (void)EndCrtPost(
-          slot->visible_width, slot->snes_height, image);
+          slot->visible_width, FrameSlot_VisibleHeight(slot), image);
       return image;
     }
     if (!blank && view == kRenderComparison_SideBySide &&
         !PresentAuthenticPictureInPicture(slot, image)) {
       RequestComparisonDrawFailure("picture-in-picture view");
       (void)EndCrtPost(
-          slot->visible_width, slot->snes_height, image);
+          slot->visible_width, FrameSlot_VisibleHeight(slot), image);
       return image;
     }
     image = EndCrtPost(
-        slot->visible_width, slot->snes_height, image);
+        slot->visible_width, FrameSlot_VisibleHeight(slot), image);
   }
   if (SessionFatal_Requested()) return image;
   const uint8_t fade = RenderComparison_TransitionFadeAlpha();

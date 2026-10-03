@@ -61,7 +61,7 @@ int ArHudLayout_BuildPresentationChunks(
         },
         (ArRenderRectI){0, 0, in->authentic_width, body_height},
         (ArRenderRectI){
-          native_x, viewport.y, native_width,
+          native_x, viewport.y + ScaledCoordinate(in->authentic_y0, native_scale_y), native_width,
           ScaledPixels(body_height, native_scale_y),
         },
         kInspectorPresentation_HudBg, 0);
@@ -83,7 +83,7 @@ int ArHudLayout_BuildPresentationChunks(
           },
           (ArRenderRectI){
             native_x + ScaledCoordinate(in->obj_icon_x, native_scale_x),
-            viewport.y + ScaledCoordinate(in->obj_icon_y, native_scale_y),
+            viewport.y + ScaledCoordinate(in->authentic_y0 + in->obj_icon_y, native_scale_y),
             ScaledPixels(kIconSize, native_scale_x),
             ScaledPixels(kIconSize, native_scale_y),
           },
@@ -219,7 +219,7 @@ int ArHudLayout_BuildPresentationChunks(
     };
     const ArRenderRectI body_destination = {
       viewport.x + (viewport.w - body_destination_width) / 2,
-      viewport.y + ScaledCoordinate(height, body_scale_y),
+      viewport.y + ScaledCoordinate(in->authentic_y0 + height, body_scale_y),
       body_destination_width, ScaledPixels(body_height, body_scale_y),
     };
     AddChunk(

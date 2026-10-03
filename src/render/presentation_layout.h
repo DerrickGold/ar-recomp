@@ -18,4 +18,10 @@ ArRenderRectI ArPresentationLayout_ResolveViewport(
     int output_width, int output_height, bool stretch,
     bool crt_pixel_aspect, int visible_width, int visible_height);
 
+/* Place only valid captured rows inside a stable requested canvas. Missing
+ * rows remain the caller's clear colour, never stretched or sampled. */
+ArRenderRectF ArPresentationLayout_CaptureDestination(
+    ArRenderRectI viewport, int visible_height, int requested_top,
+    int capture_height, int capture_top);
+
 #endif /* AR_PRESENTATION_LAYOUT_H */

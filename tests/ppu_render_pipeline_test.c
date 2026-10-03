@@ -2172,7 +2172,7 @@ static void TestSkyPalaceWinnerCapture(void) {
 /* Temple grading consumes the extracted scene, so relocated HUD glyphs and
  * icons must reveal BG1 while ordinary actors still occlude it. Both packed
  * scanout and the independent reference renderer must export that same mask. */
-static void TestVisibleMainWinnerMask(void) {
+static void TestVisibleMainWinnerMask(int background) {
   Ppu *ppu = ppu_init();
   CHECK(ppu != NULL);
   if (!ppu) return;
@@ -2181,9 +2181,9 @@ static void TestVisibleMainWinnerMask(void) {
   ppu_reset(ppu);
   ppu->inidisp = 15;
   ppu->bgmode = 9;
-  ppu->screenEnabled[0] = 0x15; /* BG1, BG3 and OBJ. */
+  ppu->screenEnabled[0] = (1u << background) | 0x14; /* BG, BG3 and OBJ. */
   ppu->bgTileAdr = 0x0400;
-  ppu->bgXsc[0] = 0x20;
+  ppu->bgXsc[background] = 0x20;
   ppu->bgXsc[2] = 0x28;
   ppu->cgram[0x11] = bgr555(0, 0, 31);
   ppu->cgram[5] = bgr555(31, 31, 31);
@@ -2200,7 +2200,7 @@ static void TestVisibleMainWinnerMask(void) {
   ppu->oam[1] = 2 | (3 << 12);
   ppu->oam[2] = 112;
   ppu->oam[3] = 2 | (3 << 12);
-  CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, (uint8_t *)mask, sizeof(mask)));
+  CHECK(PpuBindOverlaySurface(ppu, background, (uint8_t *)mask, sizeof(mask)));
   CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3, (uint8_t *)hud, sizeof(hud)));
   CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, (uint8_t *)icons, sizeof(icons)));
   CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg3, 0, 0, 64, 1,
@@ -2211,12 +2211,12 @@ static void TestVisibleMainWinnerMask(void) {
   for (int renderer = 0; renderer < 2; renderer++) {
     const uint32_t flags = renderer ? kPpuRenderFlags_ReferencePixelRenderer : 0;
     PpuBeginDrawing(ppu, (uint8_t *)fb, sizeof(fb), flags);
-    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+    CHECK(PpuSetOverlayCapture(ppu, background, 0, 0, kW, 1,
                                kPpuOverlayFlag_MarkMainScreenWinner));
     render_first_line(ppu);
     CHECK(mask[0] == 0xff000000u && mask[80] == 0xff000000u);
     memcpy(reference_fb, fb, sizeof(fb));
-    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, 0, kW, 1,
+    CHECK(PpuSetOverlayCapture(ppu, background, 0, 0, kW, 1,
                                kPpuOverlayFlag_MarkVisibleMainWinner));
     render_first_line(ppu);
     CHECK(mask[0] == 0xffffffffu && mask[80] == 0xffffffffu);
@@ -2628,6 +2628,41 @@ static void TestVerticalMarginLayerClip(void) {
     PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, NULL, 0);
   }
 
+  ppu_free(ppu);
+}
+
+/* Auto's BG3 remains screen-space even while BG1/BG2 capture extra world.
+ * Its staged tilemap cells must never wrap into either synthetic band. */
+static void TestVerticalMarginHudClip(void) {
+  enum { top=16, bottom=16, rows=224+top+bottom };
+  Ppu *ppu=ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+  static uint8_t framebuffer[kW*rows*4];
+  static uint32_t capture[kW*rows];
+  ppu_reset(ppu);
+  ppu->inidisp=15;
+  ppu->bgmode=1;
+  ppu->screenEnabled[0]=1u<<kActRaiserPpuLayer_Bg3;
+  ppu->cgram[1]=bgr555(0,31,0);
+  set_solid_2bpp_tile(ppu,0,1,1);
+  ppu->bgXsc[kActRaiserPpuLayer_Bg3]=0x20|3;
+  for (int i=0;i<0x1000;++i) ppu->vram[0x2000+i]=1;
+  PpuSetExtraVerticalSpace(ppu,top,bottom);
+  PpuSetVerticalMarginLayerClip(ppu,kActRaiserPpuLayer_Bg3,0,0);
+  PpuBeginDrawing(ppu,framebuffer,kW*4,0);
+  CHECK(PpuBindOverlaySurface(ppu,kPpuOverlaySource_Bg3,
+      (uint8_t *)capture,kW*4));
+  CHECK(PpuSetOverlayCapture(ppu,kPpuOverlaySource_Bg3,0,-top,kW,rows,
+      kPpuOverlayFlag_RemoveFromGame));
+  ppu_runLine(ppu,0);
+  for (int line=1-top;line<=0;++line) ppu_runMarginLine(ppu,line);
+  for (int line=1;line<=224;++line) ppu_runLine(ppu,line);
+  for (int line=225;line<=224+bottom;++line) ppu_runMarginLine(ppu,line);
+  for (int y=0;y<rows;++y) {
+    if (y<top || y>=top+224) CHECK((capture[y*kW]&0xffffffu)==0);
+    else CHECK((capture[y*kW]&0xffffffu)!=0);
+  }
   ppu_free(ppu);
 }
 
@@ -3542,13 +3577,15 @@ int main(void) {
   TestSubscreenOnlyOverlayCapture();
   TestFullAddSubscreenWinnerCapture();
   TestMainScreenWinnerMask();
-  TestVisibleMainWinnerMask();
+  TestVisibleMainWinnerMask(kPpuOverlaySource_Bg1);
+  TestVisibleMainWinnerMask(kPpuOverlaySource_Bg2);
   TestSkyPalaceWinnerCapture();
   TestBg3NativeParityComposite();
   TestVerticalMarginLayerClip();
   TestAsymmetricVerticalCapture();
   TestVerticalMarginBottomLayerClip();
   TestUnboundWorldVerticalFallback();
+  TestVerticalMarginHudClip();
   TestVerticalMarginExactObj();
   TestLayerPresentationExtents();
   TestMovingEdgePoliciesInVerticalMargins();

@@ -21,6 +21,7 @@
 #include "present/presentation_upload_mirror.h"
 #include "render/effect_batch.h"
 #include "render/render_output.h"
+#include "render/presentation_layout.h"
 
 static ArRenderTexture s_action_bg1_mask_texture;
 static ArRenderTexture s_action_bg2_mask_texture;
@@ -68,7 +69,7 @@ static bool s_action_bg1_mask_has_alpha;
 static bool s_action_bg1_mask_ready;
 static bool s_action_bg2_mask_has_alpha;
 static bool s_action_bg2_mask_ready;
-static uint32_t s_action_alpha_mask[kFrameSlotLayerTextureWidth * kFrameSlotAuthenticHeight];
+static uint32_t s_action_alpha_mask[kFrameSlotLayerTextureWidth * kFrameSlotLayerTextureHeight];
 
 static float ActionEffectBrightness(const FrameSlot *slot) {
   return slot && !(slot->inidisp & 0x80)
@@ -167,7 +168,7 @@ uint64_t PresentActionEffects_UploadMask(
   if (!ArRenderTexture_IsValid(*texture)) {
     const ArRenderTextureDesc desc = {
       .width = kFrameSlotLayerTextureWidth,
-      .height = kFrameSlotAuthenticHeight,
+      .height = kFrameSlotLayerTextureHeight,
       .format = kArRenderPixelFormat_Argb8888,
       .usage = kArRenderTextureUsage_Streaming,
       .filter = kArRenderFilter_Nearest,
@@ -178,13 +179,13 @@ uint64_t PresentActionEffects_UploadMask(
   }
   if (ArRenderTexture_IsValid(*texture)) {
     const ArRenderRectI mask = {
-      0, 0, slot->snes_width, slot->snes_height,
+      0, 0, slot->snes_width, FrameSlot_CaptureHeight(slot),
     };
     const bool alpha_mask = plane == SR_PPU_OVERLAY_BG2 ?
         FrameUsesAlphaBg2Mask(slot) : FrameUsesAlphaBg1Mask(slot);
     if (alpha_mask) {
       if (mask.w <= 0 || mask.w > kFrameSlotLayerTextureWidth || mask.h <= 0 ||
-          mask.h > kFrameSlotAuthenticHeight || pitch_bytes < mask.w * 4)
+          mask.h > kFrameSlotLayerTextureHeight || pitch_bytes < mask.w * 4)
         return 0;
       /* Native winner masks use opaque black outside BG2. Direct masked
        * geometry needs zero alpha there, for light, water and leaf passes. */
@@ -280,7 +281,10 @@ static bool FrameUsesActionHeat(const FrameSlot *slot) {
     .ws_extra = slot->ws_extra,
     .visible_x0 = slot->visible_x0,
     .visible_width = slot->visible_width,
-    .snes_height = slot->snes_height,
+    .snes_height = FrameSlot_VisibleHeight(slot),
+    .visible_top = slot->visible_top,
+    .ws_extra_top = slot->ws_extra_top,
+    .capture_height = FrameSlot_CaptureHeight(slot),
   };
   for (uint8_t i = 0;
        i < slot->action_scene_effects.decoration_count; i++) {
@@ -616,7 +620,9 @@ void PresentActionEffects_DrawWithSource(
     .ws_extra_top = slot->ws_extra_top,
     .visible_x0 = slot->visible_x0,
     .visible_width = slot->visible_width,
-    .snes_height = slot->snes_height,
+    .snes_height = FrameSlot_VisibleHeight(slot),
+    .visible_top = slot->visible_top,
+    .capture_height = FrameSlot_CaptureHeight(slot),
     .diorama_projection = diorama_projection,
     .viewport = {viewport.x, viewport.y, viewport.w, viewport.h},
   };
@@ -758,9 +764,10 @@ static ActionEffectProjectionContext DecorationProjection(
   return (ActionEffectProjectionContext){
     .bg1_camera_x = slot->bg1_camera_x, .bg1_camera_y = slot->bg1_camera_y,
     .bg2_camera_x = slot->bg2_camera_x, .bg2_camera_y = slot->bg2_camera_y,
-    .ws_extra = slot->ws_extra, .ws_extra_top = diorama ? slot->ws_extra_top : 0,
+    .ws_extra = slot->ws_extra, .ws_extra_top = slot->ws_extra_top,
     .visible_x0 = slot->visible_x0, .visible_width = slot->visible_width,
-    .snes_height = slot->snes_height, .diorama_projection = diorama,
+    .snes_height = FrameSlot_VisibleHeight(slot), .visible_top = slot->visible_top,
+    .capture_height = FrameSlot_CaptureHeight(slot), .diorama_projection = diorama,
     /* Flat geometry is target-local; its submission restores viewport offset. */
     .viewport = {diorama ? viewport.x : 0, diorama ? viewport.y : 0,
                  viewport.w, viewport.h},
@@ -867,8 +874,9 @@ static bool DrawAlphaMaskedGeometry(
     ArRenderVertex2D *v = &geometry->vertices[i];
     v->tex_coord.x = (slot->visible_x0 + v->position.x * slot->visible_width / viewport.w) /
         kFrameSlotLayerTextureWidth;
-    v->tex_coord.y = (v->position.y * slot->snes_height / viewport.h) /
-        kFrameSlotAuthenticHeight;
+    v->tex_coord.y = (v->position.y * FrameSlot_VisibleHeight(slot) / viewport.h -
+        slot->visible_top + slot->ws_extra_top) /
+        kFrameSlotLayerTextureHeight;
     v->position.x += viewport.x;
     v->position.y += viewport.y;
   }
@@ -943,11 +951,12 @@ static bool DrawActionPlaneEffectFlat(ArRenderDevice *device,
   if (submitted && s_action_plane_blend_supported) {
     const ArRenderRectF src = {
       (float)slot->visible_x0, 0.0f,
-      (float)slot->visible_width, (float)slot->snes_height,
+      (float)slot->visible_width, (float)FrameSlot_CaptureHeight(slot),
     };
-    const ArRenderRectF dst = {
-      0.0f, 0.0f, (float)viewport.w, (float)viewport.h,
-    };
+    const ArRenderRectF dst = ArPresentationLayout_CaptureDestination(
+        (ArRenderRectI){0, 0, viewport.w, viewport.h},
+        FrameSlot_VisibleHeight(slot), slot->visible_top,
+        FrameSlot_CaptureHeight(slot), slot->ws_extra_top);
     const ArRenderDrawState mask_state = {
       .flags = kArRenderDrawState_Blend,
       .blend = kArRenderBlendMode_Multiply,

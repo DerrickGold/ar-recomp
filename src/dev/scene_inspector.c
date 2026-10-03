@@ -162,7 +162,7 @@ static bool MapLayerX(const ScenePpuView *view, int layer, int screen_y,
   /* Promoted BG3 HUD chunks use the full allocated margin, even when a finite
    * world's live margin is smaller. Reproduce the exact source biases. */
   int hud_extra = view->frame.margin_budget;
-  if (layer == 2 && view->frame.hud_split_height &&
+  if (layer == 2 && screen_y >= 0 && view->frame.hud_split_height &&
       scan_y < view->frame.hud_split_height && hud_extra) {
     if (screen_x < -hud_extra ||
       screen_x >= kActRaiserAuthenticWidth + hud_extra)
@@ -532,12 +532,12 @@ bool SceneInspector_SelectFiltered(int screen_x, int screen_y,
                                    unsigned bg_mask,
                                    bool inspect_objects) {
   ScenePpuView view;
-  if (screen_y < 0 ||
-      screen_y >= kActRaiserAuthenticHeight ||
+  if (!CapturePpuView(&view) ||
+      screen_y < -(int)view.state.margin_top ||
+      screen_y >= kActRaiserAuthenticHeight + (int)view.state.margin_bottom ||
       screen_x < -(int)SR_PPU_HORIZONTAL_MARGIN_MAX ||
       screen_x >= kActRaiserAuthenticWidth +
-          (int)SR_PPU_HORIZONTAL_MARGIN_MAX ||
-      !CapturePpuView(&view))
+          (int)SR_PPU_HORIZONTAL_MARGIN_MAX)
     return false;
 
   memset(&s, 0, sizeof(s));

@@ -132,7 +132,8 @@ static HudProjectionInputs BuildProjectionInputs(const FrameSlot *slot) {
   in.hud_scale_percent = slot->hud_scale_percent;
   in.crt_pixel_aspect = slot->pixel_aspect == kPixelAspect_Crt43;
   in.snes_width = slot->snes_width;
-  in.snes_height = slot->snes_height;
+  in.snes_height = FrameSlot_VisibleHeight(slot);
+  in.authentic_y0 = slot->visible_top;
   in.visible_width = slot->visible_width;
   in.authentic_width = kFrameSlotAuthenticWidth;
   in.hud_split_height = slot->hud_split_height;

@@ -178,6 +178,9 @@ static void RetainFrame(const FrameSlot *slot) {
   }
 }
 
+static void ResolveVideoGeometry(bool apply_runtime_changes,
+                                 bool resize_window);
+
 /* Refresh only the presentation-owned camera portion of a retained SIM frame.
  * The captured game/PPU snapshot, timestamp, interpolation pair, textures, and
  * object metadata remain untouched. This lets a retained re-present show the
@@ -409,7 +412,7 @@ void HostDisplay_CalculateWindowSize(int scale, int *width, int *height) {
   if (g_settings.display_mode == kDisplayMode_43) {
     if (g_active_pixel_aspect == kPixelAspect_Crt43)
       window_width = (window_height * 4 + 1) / 3;
-  } else if (g_ws_active &&
+  } else if (g_ws_active && s_active_aspect_x && s_active_aspect_y &&
              g_active_pixel_aspect == kPixelAspect_Crt43) {
     window_width =
         (window_height * s_active_aspect_x + s_active_aspect_y / 2) /
@@ -422,6 +425,10 @@ void HostDisplay_CalculateWindowSize(int scale, int *width, int *height) {
 
 void HostDisplay_RecomputeLogicalPresentation(void) {
   if (!g_window || !ArRenderDevice_IsReady(&g_render_device)) return;
+  /* Drawable pixels, not window points or the desktop mode. The apply path
+   * never changes the window size. It runs at boot and on both resize events. */
+  if (g_settings.extended_aspect == kScreenAspect_Auto)
+    ResolveVideoGeometry(true, false);
   ArSdlPresentationDevice_ApplyLogical(
       &g_render_device, Settings_IgnoreAspectRatio(),
       g_active_pixel_aspect == kPixelAspect_Crt43,
@@ -439,48 +446,94 @@ void HostDisplay_ApplyWindowScale(void) {
       point_scale, &window_width, &window_height);
 
   HostDisplay_RecomputeLogicalPresentation();
-  if (g_settings.window_mode == kWindowMode_Windowed)
+  if (g_settings.window_mode == kWindowMode_Windowed &&
+      g_settings.extended_aspect != kScreenAspect_Auto)
     SDL_SetWindowSize(g_window, window_width, window_height);
 }
 
 void HostDisplay_ResolveVideoGeometry(bool apply_runtime_changes) {
+  ResolveVideoGeometry(apply_runtime_changes, true);
+}
+
+static void ResolveVideoGeometry(bool apply_runtime_changes,
+                                 bool resize_window) {
   const int previous_display_mode = g_settings.display_mode;
+  const int previous_extra = g_ws_extra;
+  const int previous_display_extra = g_ws_display_extra;
+  const int previous_rows =
+      g_actraiser_display_geometry->auto_vertical_budget;
+  const int previous_par = g_active_pixel_aspect;
   s_active_aspect_x = Settings_ExtendedAspectX();
   s_active_aspect_y = Settings_ExtendedAspectY();
   g_active_pixel_aspect = g_settings.pixel_aspect;
 
-  const ActRaiserDisplayGeometry geometry = DisplayGeometry_CalculateHorizontal(
-      g_snes_height, s_widescreen_runtime_allowed ? s_active_aspect_x : 0,
-      s_active_aspect_y, g_active_pixel_aspect == kPixelAspect_Crt43,
-      g_settings.diorama_mode);
-  DisplayGeometry_SetHorizontal(geometry.render_extra, geometry.display_extra);
+  const bool automatic = g_settings.extended_aspect == kScreenAspect_Auto;
+  int extra_rows = 0;
+  int extra_columns = 0;
+  if (automatic && s_widescreen_runtime_allowed) {
+    int width = 0, height = 0;
+    ActRaiserAutoCanvas canvas;
+    if (ArRenderDevice_GetOutputSize(&g_render_device, &width, &height) &&
+        DisplayGeometry_ResolveAutoCanvas(
+            width, height, g_active_pixel_aspect == kPixelAspect_Crt43,
+            &canvas)) {
+      extra_columns = canvas.extra_columns;
+      extra_rows = canvas.extra_rows;
+    } else {
+      /* A minimized/unready drawable does not destroy the last valid budget. */
+      extra_columns = previous_display_extra;
+      extra_rows = previous_rows;
+    }
+  } else {
+    const ActRaiserDisplayGeometry geometry = DisplayGeometry_CalculateHorizontal(
+        g_snes_height, s_widescreen_runtime_allowed ? s_active_aspect_x : 0,
+        s_active_aspect_y, g_active_pixel_aspect == kPixelAspect_Crt43,
+        false);
+    extra_columns = geometry.display_extra;
+  }
+
+  const int display_extra = extra_columns;
+  if (g_settings.diorama_mode && (extra_columns > 0 || extra_rows > 0))
+    extra_columns = kActRaiserWidescreenExtraMax;
+
+  DisplayGeometry_SetAutoVerticalBudget(extra_rows);
+  DisplayGeometry_SetHorizontal(extra_columns, display_extra);
   g_snes_width =
-      kActRaiserAuthenticWidth + 2 * geometry.render_extra;
+      kActRaiserAuthenticWidth + 2 * extra_columns;
+
+  if (!resize_window && previous_extra == extra_columns &&
+      previous_display_extra == display_extra && previous_rows == extra_rows &&
+      previous_par == g_active_pixel_aspect)
+    return;
 
   if (apply_runtime_changes) {
     /* Aspect/PAR changes alter the framebuffer budget, not the selected HLE
      * correction profile. */
-    Settings_ReconcileDisplayModeAfterGeometryChange(previous_display_mode);
+    /* A drawable resize changes capture budgets, not persisted profiles. */
+    if (resize_window)
+      Settings_ReconcileDisplayModeAfterGeometryChange(previous_display_mode);
     memset(g_pixels, 0, sizeof(g_pixels));
     memset(g_authentic_pixels, 0, sizeof(g_authentic_pixels));
     memset(g_hud_bg_pixels, 0, sizeof(g_hud_bg_pixels));
     memset(g_hud_obj_pixels, 0, sizeof(g_hud_obj_pixels));
     HostPpuOutput_Rebind();
-    HostDisplay_ApplyWindowScale();
+    if (resize_window && !automatic) HostDisplay_ApplyWindowScale();
     HostDisplay_InvalidatePresentHistory();
   }
 
   fprintf(stderr,
           "[video-geometry] %s %s -> %d extra columns/side "
-          "(render width %d)\n",
-          s_active_aspect_x
+          "(render width %d, requested canvas %dx%d)\n",
+          automatic ? "Auto" : s_active_aspect_x
               ? (s_active_aspect_y == 9 ? "16:9" : "16:10")
               : "4:3",
           g_active_pixel_aspect == kPixelAspect_Crt43
               ? "4:3-PAR"
               : "square-PAR",
           g_ws_extra,
-          g_snes_width);
+          g_snes_width,
+          kActRaiserAuthenticWidth + 2 * display_extra,
+          kActRaiserAuthenticHeight + 2 * extra_rows);
 }
 
 void HostDisplay_ApplyWindowMode(void) {

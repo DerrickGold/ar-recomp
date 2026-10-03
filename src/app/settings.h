@@ -33,6 +33,7 @@ typedef enum {
   kScreenAspect_1610,
   kScreenAspect_Stretch,   /* fill the window, ignore aspect (was a separate
                             * "Stretch to window" toggle) */
+  kScreenAspect_Auto,      /* appended: saved manual indices stay stable */
   kScreenAspect_Count,
 } ScreenAspect;
 

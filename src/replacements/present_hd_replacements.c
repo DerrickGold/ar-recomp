@@ -56,7 +56,7 @@ void PresentHdReplacements_DrawScreen(
   int vis_x0 = slot->visible_x0;
   int extra = (slot->snes_width - kFrameSlotAuthenticWidth) / 2;
   double scale_x = (double)viewport.w / vis_w;
-  double scale_y = (double)viewport.h / slot->snes_height;
+  double scale_y = (double)viewport.h / FrameSlot_VisibleHeight(slot);
 
   for (int i = 0; i < slot->hd_entry_count; i++) {
     const FrameSlotHdEntry *entry = &slot->hd_entries[i];
@@ -69,8 +69,8 @@ void PresentHdReplacements_DrawScreen(
     int dx0 = (int)((capture->x0 + entry->image_inset_left + extra - vis_x0) *
                     scale_x + 0.5);
     int dx1 = (int)((capture->x1 + extra - vis_x0) * scale_x + 0.5);
-    int dy0 = (int)(capture->y0 * scale_y + 0.5);
-    int dy1 = (int)(capture->y1 * scale_y + 0.5);
+    int dy0 = (int)((slot->visible_top + capture->y0) * scale_y + 0.5);
+    int dy1 = (int)((slot->visible_top + capture->y1) * scale_y + 0.5);
     const ArRenderRectI dst = {
       viewport.x + dx0, viewport.y + dy0, dx1 - dx0, dy1 - dy0,
     };

@@ -2010,7 +2010,10 @@ static void PrepareDioramaView(const DioramaCapture *capture,
 
   float screen_aspect = (float)geometry->width / (float)geometry->height;
   float tan_half = tanf(kDioramaFovY * 0.5f);
-  float fit_h = 0.5f / tan_half;
+  const float visible_height = view->visible_height > 0
+      ? (float)view->visible_height : (float)kActRaiserAuthenticHeight;
+  float fit_h = 0.5f * visible_height /
+      (float)kActRaiserAuthenticHeight / tan_half;
   float fit_w = vis_half_w / (tan_half * screen_aspect);
   static const float kDioramaZ_Hud = 0.95f;
   geometry->auto_distance =

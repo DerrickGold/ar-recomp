@@ -1154,6 +1154,14 @@ static void TestMutationApi(void) {
   Settings_FormatValue(aspect, value, sizeof(value));
   CHECK(!strcmp(value, "16:9"));
   CHECK(Settings_SetText(aspect, "21:9") == kSettingChange_Rejected);
+  CHECK(Settings_SetText(aspect, "Auto") == kSettingChange_Applied);
+  CHECK(g_settings.extended_aspect == kScreenAspect_Auto);
+  CHECK(!Settings_IgnoreAspectRatio() && !g_settings.ignore_aspect_ratio);
+  Settings_FormatValue(aspect, value, sizeof(value));
+  CHECK(!strcmp(value, "Auto"));
+  CHECK(Settings_SetText(aspect, "auto") == kSettingChange_Unchanged);
+  CHECK(Settings_SetText(aspect, "4") == kSettingChange_Unchanged);
+  CHECK(Settings_SetText(aspect, "16:9") == kSettingChange_Applied);
   const SettingDesc *pixel_aspect = Settings_Find("pixel_aspect");
   CHECK(Settings_SetText(pixel_aspect, "Square pixels") == kSettingChange_Applied);
   const SettingDesc *window_scale = Settings_Find("window_scale");
@@ -2340,6 +2348,65 @@ static void TestRandomizerDraftEdits(void) {
   CHECK(Randomizer_AppliedStatScale().attack_percent == 100);
 }
 
+static void TestAutoBootPreservesDisplayPreferences(void) {
+  const char *path = "actraiser-settings-auto-boot-test.ini";
+  ClearSettingsEnv();
+  Settings_SetChangeObserver(NULL);
+  CHECK(WriteTextFile(path, "extended_aspect = Auto\n"
+                            "display_mode = Widescreen full\n"));
+  DisplayGeometry_SetHorizontal(0, 0); /* No renderer/drawable at boot. */
+  DisplayGeometry_SetAutoVerticalBudget(0);
+  Settings_InitWithFile(path);
+  Settings_FinalizeDisplayMode();
+  CHECK(g_settings.display_mode == kDisplayMode_WideFull);
+  CHECK(g_settings.ws_sprites && g_settings.ws_margin_objects &&
+        g_settings.ws_margin_activation);
+  CHECK(Settings_Save(path));
+  CHECK(FileContains(path, "display_mode = Widescreen full"));
+  CHECK(FileContains(path, "ws_sprites = On"));
+
+  /* The first square/wide budgets must not overwrite retained preferences. */
+  for (int wide = 0; wide < 2; ++wide) {
+    DisplayGeometry_SetHorizontal(wide ? 43 : 0, wide ? 43 : 0);
+    DisplayGeometry_SetAutoVerticalBudget(wide ? 0 : 37);
+    Settings_ReconcileDisplayModeAfterGeometryChange(kDisplayMode_WideFull);
+    CHECK(g_settings.display_mode == kDisplayMode_WideFull);
+    CHECK(g_settings.ws_sprites && g_settings.ws_margin_objects);
+  }
+
+  CHECK(WriteTextFile(path, "extended_aspect = 4:3\n"
+                            "display_mode = 4:3 authentic\n"));
+  setenv("AR_EXTENDED_ASPECT_RATIO", "Auto", 1);
+  DisplayGeometry_SetHorizontal(0, 0);
+  Settings_InitWithFile(path);
+  Settings_FinalizeDisplayMode();
+  CHECK(g_settings.extended_aspect == kScreenAspect_Auto);
+  CHECK(g_settings.display_mode == kDisplayMode_43);
+  for (int wide = 0; wide < 2; ++wide) {
+    DisplayGeometry_SetHorizontal(wide ? 43 : 0, wide ? 43 : 0);
+    DisplayGeometry_SetAutoVerticalBudget(wide ? 0 : 37);
+    Settings_ReconcileDisplayModeAfterGeometryChange(kDisplayMode_43);
+    CHECK(g_settings.display_mode == kDisplayMode_43);
+    CHECK(!g_settings.ws_sprites && !g_settings.ws_margin_objects &&
+          !g_settings.ws_margin_activation);
+  }
+  ClearSettingsEnv();
+  /* CUSTOM has no preset row in settings.ini. Do not infer 4:3 from a missing
+   * drawable and then save a preset that clears these flags on the next boot. */
+  CHECK(WriteTextFile(path, "extended_aspect = Auto\n"
+                            "ws_sprites = Off\n"
+                            "ws_margin_objects = On\n"));
+  DisplayGeometry_SetAutoVerticalBudget(0);
+  DisplayGeometry_SetHorizontal(0, 0);
+  Settings_InitWithFile(path);
+  Settings_FinalizeDisplayMode();
+  CHECK(g_settings.display_mode == kDisplayMode_Custom);
+  CHECK(!g_settings.ws_sprites && g_settings.ws_margin_objects);
+  CHECK(Settings_Save(path));
+  CHECK(!FileContains(path, "display_mode ="));
+  remove(path);
+}
+
 int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--dump-ui-catalog")) {
     DumpInterfaceInventory();
@@ -2369,6 +2436,7 @@ int main(int argc, char **argv) {
   TestCategoryReset();
   TestCheatsCanBeStagedOutsideTheirRuntimeMode();
   TestNoWideBudget();
+  TestAutoBootPreservesDisplayPreferences();
   TestInputBindings();
   TestInputBindingHints();
   TestInputHintDeviceRetention();

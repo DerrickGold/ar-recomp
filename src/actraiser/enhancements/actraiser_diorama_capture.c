@@ -460,6 +460,8 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
 }
 
 void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
+  const SrPpuFrameTransactionContext *frame = ActRaiser_PpuFrame();
+  const SrPpuStateSnapshot *ppu = frame ? &frame->state : NULL;
   s_receiver_lighting=NULL;
   if(g_settings.action_environmental_effects) {
     const ActRaiserSpriteOwnership ownership=ActRaiserSpriteOwnership_Presented(map_group,map_number);
@@ -510,12 +512,11 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
                                   g_action_bg1_mask_pixels, (size_t)width * 4,
                                   kHostDisplayFramebufferHeight)) {
         ActRaiser_SetPpuOverlayCapture(
-            SR_PPU_OVERLAY_BG1, -g_ws_extra, 0, width,
-            kActRaiserAuthenticHeight,
-            /* These rooms use main-screen BG1. Reuse packed winners after
-             * HUD extraction; subscreen rooms retain their owning-screen policy. */
-            ((map_group == kActRaiserMapGroup_Fillmore && map_number == 3) ||
-             (map_group == kActRaiserMapGroup_Bloodpool && map_number == 1))
+            SR_PPU_OVERLAY_BG1, -g_ws_extra, -g_ws_extra_top, width,
+            kActRaiserAuthenticHeight + g_ws_extra_top + g_ws_extra_bottom,
+            /* Light the remaining scene after HUD extraction. Testing the
+             * actual owning screen also covers Auto's newly exposed HUD area. */
+            (ppu && (ppu->main_screen & (1u << SR_PPU_OVERLAY_BG1)))
                 ? SR_PPU_OVERLAY_MARK_VISIBLE_MAIN_WINNER
                 : SR_PPU_OVERLAY_MARK_OWNING_SCREEN_WINNER);
       }
@@ -531,9 +532,10 @@ void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
       if (ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG2, 0u,
                                   g_action_bg2_mask_pixels, (size_t)width * 4,
                                   kHostDisplayFramebufferHeight)) {
-        ActRaiser_SetPpuOverlayCapture(SR_PPU_OVERLAY_BG2, -g_ws_extra, 0,
-                                       width, kActRaiserAuthenticHeight,
-                                       SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER);
+        ActRaiser_SetPpuOverlayCapture(SR_PPU_OVERLAY_BG2, -g_ws_extra, -g_ws_extra_top,
+                                       width, kActRaiserAuthenticHeight +
+                                           g_ws_extra_top + g_ws_extra_bottom,
+                                       SR_PPU_OVERLAY_MARK_VISIBLE_MAIN_WINNER);
       }
     }
   }

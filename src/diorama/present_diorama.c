@@ -576,6 +576,7 @@ retry_projection:;
       .pixel_aspect = slot->pixel_aspect,
       .ignore_aspect_ratio = slot->ignore_aspect_ratio,
       .visible_width = slot->visible_width,
+      .visible_height = FrameSlot_VisibleHeight(slot),
       .viewport = viewport,
   };
   ArRenderRectF dimming_ramp = PresentActionEffects_Bg1DimmingRamp(slot);

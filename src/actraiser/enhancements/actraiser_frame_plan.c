@@ -234,7 +234,8 @@ void ActRaiser_ClearWidescreenMarginGaps(
             : 0u;
     ActRaiserFillMarginGaps(
         context->main.data, (size_t)context->main.pitch_bytes,
-        kActRaiserAuthenticHeight, context->frame.margin_budget,
+        kActRaiserAuthenticHeight + context->state.margin_top +
+            context->state.margin_bottom, context->frame.margin_budget,
         left, right, gap_fill);
     last_left = left;
     last_right = right;
@@ -285,7 +286,10 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
   DisplayGeometry_SetVertical(0, 0);
   if (!frame_policy) return;
 
-  int budget = g_settings.diorama_vertical_extend;
+  const bool automatic = g_settings.extended_aspect == kScreenAspect_Auto;
+  int budget = automatic
+      ? g_actraiser_display_geometry->auto_vertical_budget
+      : g_settings.diorama_vertical_extend;
   const int primary_layer =
       ActionBgPlan_PrimaryLayer(&s_pending_action_bg_plan);
   const int playfield = ActionBgPlan_PlayfieldLayer(&s_pending_action_bg_plan);
@@ -298,7 +302,9 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
           room, (unsigned)playfield, layer->world_width,
           &s_pending_diorama_world_x0, &s_pending_diorama_world_width);
   }
-  if (budget > 0 && Diorama_IsActiveThisFrame() &&
+  const uint32_t ppu_display = RtlGamePpuDisplayState();
+  if (budget > 0 && (automatic || Diorama_IsActiveThisFrame()) &&
+      (RTL_GAME_PPU_BG_MODE_CONTROL(ppu_display) & 7u) != 7u &&
       ActRaiser_IsActionMapGroup(map_group) &&
       !ActRaiser_IsSimulationTown(map_group, map_number) &&
       primary_layer >= 0) {
@@ -310,7 +316,8 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
         ActRaiser_CurrentVirtualLayerRoom(), (unsigned)primary_layer,
         ActRaiser_ReadWram16(kActRaiserWram_Bg1Height + layer_offset),
         &s_pending_diorama_world_y0, &s_pending_diorama_world_height);
-    ActRaiserActionBg_ResolveVerticalCaptureMargins(
+    (automatic ? ActRaiserActionBg_ResolveVerticalMargins
+               : ActRaiserActionBg_ResolveVerticalCaptureMargins)(
         ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraY + layer_offset) -
             s_pending_diorama_world_y0,
         s_pending_diorama_world_height,
@@ -341,6 +348,11 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
       frame_policy->vertical_clip_bottom_rows[layer] =
           (uint32_t)bottom_rows;
     }
+    /* BG3 is screen-space HUD/title text, not additional world. Auto must
+     * not expose its staged/wrapped tilemap rows above or below the screen. */
+    if (automatic)
+      frame_policy->vertical_clip_layer_mask |=
+          1u << SR_PPU_OVERLAY_BG3; /* Its zero row budgets remain native-only. */
   }
 
   /* AR_VEXT_TILES=1: dump the primary tilemap ids the band reads next to the
@@ -497,8 +509,10 @@ void ActRaiser_ApplyWidescreenPolicy(void) {
       !survey && (ActRaiserLocalizationRoute_InScope(map_group, map_number) ||
                   (g_settings.localization_presentation &&
                    ActRaiserLocalizationRoute_FixedTextInScope(map_group, map_number)));
-  const bool flat_diorama = !survey && Diorama_IsActiveThisFrame() &&
-      g_settings.diorama_hud_flat;
+  const bool flat_diorama = !survey &&
+      ((Diorama_IsActiveThisFrame() && g_settings.diorama_hud_flat) ||
+       (g_settings.extended_aspect == kScreenAspect_Auto &&
+        ActRaiser_IsActionMapGroup(map_group)));
   const int bg3_capture_height = ArBg3Composite_CaptureHeight(
       &(ArBg3CompositeCaptureInputs){
         .scoped_text_scene = scoped_text_scene,
@@ -630,7 +644,8 @@ void ActRaiser_ApplyWidescreenPolicy(void) {
      * oracle; the bounded HLE provider supplies eligible world coordinates,
      * while the audited $8C98/$8D68 seams widen drawing and activation.
      * AR_WS_ACTION=0 restores the pillarboxed action baseline. */
-    wide = g_settings.ws_action;
+    wide = g_settings.extended_aspect == kScreenAspect_Auto ||
+        g_settings.ws_action;
     ActionBgPresentationPolicy bg_policy;
     if (ActRaiser_ResolveActionBgPlan(
             map_group, map_number, true, &bg_plan, &bg_policy)) {
@@ -687,7 +702,10 @@ void ActRaiser_ApplyWidescreenPolicy(void) {
    * RAW must not inherit a sim BG2 clamp or an action finite-world margin just
    * because those policies are normally useful. The individual HLE builders
    * and sprite/activation seams are disabled by the RAW preset's ws_* flags. */
-  if (g_settings.display_mode == kDisplayMode_43) {
+  /* Auto must keep finite-world and per-layer safety even if a previous
+   * manual ratio used the debug RAW/43 profile. Do not rewrite that profile. */
+  if (g_settings.extended_aspect != kScreenAspect_Auto &&
+      g_settings.display_mode == kDisplayMode_43) {
     wide = 0;
     clamp = 0;
     mirror = 0;
@@ -696,13 +714,25 @@ void ActRaiser_ApplyWidescreenPolicy(void) {
     bg_presentation = (ActionBgPresentationPolicy){ 0 };
     bg_hle_allowed = 0;
     project_final_bg_policy = true;
-  } else if (g_settings.display_mode == kDisplayMode_WideRaw) {
+  } else if (g_settings.extended_aspect != kScreenAspect_Auto &&
+             g_settings.display_mode == kDisplayMode_WideRaw) {
     wide = 1;
     clamp = 0;
     mirror = 0;
     repeat = 0;
     bounded_world_margins = 0;
     bg_presentation = (ActionBgPresentationPolicy){ 0 };
+    bg_hle_allowed = 0;
+    project_final_bg_policy = true;
+  }
+
+  /* Auto applies only to action. Do not widen classic towns or Mode 7. */
+  if (g_settings.extended_aspect == kScreenAspect_Auto &&
+      !ActRaiser_IsActionMapGroup(map_group)) {
+    wide = 0;
+    clamp = mirror = repeat = 0;
+    bounded_world_margins = 0;
+    bg_presentation = (ActionBgPresentationPolicy){0};
     bg_hle_allowed = 0;
     project_final_bg_policy = true;
   }

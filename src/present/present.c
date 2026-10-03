@@ -166,7 +166,7 @@ void PresentUpload(const FrameSlot *slot) {
   PresentDiorama_Upload(&g_render_device, slot);
   if (!slot->diorama_active && PresentationConsumesMainPpuTexture(slot)) {
     ArRenderRectI upload = {
-      0, 0, slot->snes_width, slot->snes_height,
+      0, 0, slot->snes_width, FrameSlot_CaptureHeight(slot),
     };
     const SrPpuSurfaceView *surface =
         PresentationSurface_Bound(&slot->ppu_surfaces.main);
@@ -193,14 +193,14 @@ void PresentUpload(const FrameSlot *slot) {
       PresentationSurface_Bound(
           &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][0]);
   if (!slot->diorama_active && slot->action_bg1_mask_valid &&
-      PresentationSurface_Holds(bg1_surface, slot->snes_width, slot->snes_height)) {
+      PresentationSurface_Holds(bg1_surface, slot->snes_width, FrameSlot_CaptureHeight(slot))) {
     const uint64_t bytes = PresentActionEffects_UploadMask(
         &g_render_device, SR_PPU_OVERLAY_BG1, slot,
         bg1_surface->data, (int)bg1_surface->pitch_bytes);
     if (bytes) Sim3DPerformance_AddUpload(bytes);
   }
   if (!slot->diorama_active && slot->action_bg2_mask_valid &&
-      PresentationSurface_Holds(bg2_surface, slot->snes_width, slot->snes_height)) {
+      PresentationSurface_Holds(bg2_surface, slot->snes_width, FrameSlot_CaptureHeight(slot))) {
     const uint64_t bytes = PresentActionEffects_UploadMask(
         &g_render_device, SR_PPU_OVERLAY_BG2, slot,
         bg2_surface->data, (int)bg2_surface->pitch_bytes);
@@ -225,7 +225,7 @@ bool Present_ResolveOutputViewport(
   if (!slot || !viewport) return false;
   const int aspect_width = slot->visible_width *
       (slot->pixel_aspect == kPixelAspect_Crt43 ? 7 : 1);
-  const int aspect_height = slot->snes_height *
+  const int aspect_height = FrameSlot_VisibleHeight(slot) *
       (slot->pixel_aspect == kPixelAspect_Crt43 ? 6 : 1);
   ArRenderRectI resolved;
   if (!ArRenderOutput_ResolveAspectFit(
@@ -282,7 +282,7 @@ static void PresentActionBgExtentGuides(const FrameSlot *slot,
 
   const float scale_x = (float)viewport.w / (float)slot->visible_width;
   const float scale_y =
-      (float)viewport.h / (float)kFrameSlotAuthenticHeight;
+      (float)viewport.h / (float)FrameSlot_VisibleHeight(slot);
   const float authentic_x0 =
       ((float)slot->visible_width - (float)kFrameSlotAuthenticWidth) * 0.5f;
   for (int i = 0; i < count; i++) {
@@ -294,8 +294,8 @@ static void PresentActionBgExtentGuides(const FrameSlot *slot,
                            48.0f / 255.0f, 220.0f / 255.0f};
     float x0 = viewport.x + (authentic_x0 + guide->x0) * scale_x;
     float x1 = viewport.x + (authentic_x0 + guide->x1) * scale_x;
-    float y0 = viewport.y + guide->y0 * scale_y;
-    float y1 = viewport.y + guide->y1 * scale_y;
+    float y0 = viewport.y + (slot->visible_top + guide->y0) * scale_y;
+    float y1 = viewport.y + (slot->visible_top + guide->y1) * scale_y;
     (void)ArRenderDevice_DrawLine(
         &g_render_device, (ArRenderPointF){x0, y0},
         (ArRenderPointF){x1, y1}, 1.0f, color,
@@ -509,14 +509,14 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   }
   const ArRenderRectI local_viewport = {0, 0, viewport.w, viewport.h};
   const ArRenderRectI src = {
-    slot->visible_x0, 0, slot->visible_width, slot->snes_height,
+    slot->visible_x0, 0, slot->visible_width, FrameSlot_CaptureHeight(slot),
   };
   ArRenderRectF source = {
     (float)src.x, (float)src.y, (float)src.w, (float)src.h,
   };
-  const ArRenderRectF destination = {
-    0.0f, 0.0f, (float)viewport.w, (float)viewport.h,
-  };
+  const ArRenderRectF destination = ArPresentationLayout_CaptureDestination(
+      local_viewport, FrameSlot_VisibleHeight(slot), slot->visible_top,
+      FrameSlot_CaptureHeight(slot), slot->ws_extra_top);
   if (slot->sim.view == kSimView_SkyPalace) {
     const PresentationOutcome palace = PresentSkyPalace_Draw(
         &g_render_device, slot, local_viewport,

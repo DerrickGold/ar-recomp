@@ -23,7 +23,8 @@ typedef struct HudProjectionInputs {
   int hud_scale_percent;
   bool crt_pixel_aspect;
   int snes_width;
-  int snes_height;
+  int snes_height; /* Presentation canvas height. */
+  int authentic_y0; /* Scene-space body offset; status groups stay anchored. */
   int visible_width;
   int authentic_width;
   uint8_t hud_split_height, hud_left_end, hud_right_start;

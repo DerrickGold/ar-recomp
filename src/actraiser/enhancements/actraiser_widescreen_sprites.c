@@ -253,8 +253,15 @@ static inline int ws_biased_in_window(uint16 biased, int margin_neg,
          (uint16)(biased_limit + (uint16)margin_neg + (uint16)margin_pos);
 }
 
+/* Auto's action DRAW gates are independent of the retained manual profile.
+ * The activation gate below deliberately keeps its saved gameplay preference. */
+static int ws_auto_action_draw_enabled(void) {
+  return g_settings.extended_aspect == kScreenAspect_Auto &&
+      ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]);
+}
+
 static int ws_sprite_widen_enabled(void) {
-  return g_settings.ws_sprites;
+  return g_settings.ws_sprites || ws_auto_action_draw_enabled();
 }
 
 static int ws_sprite_debug_enabled(void) {
@@ -417,7 +424,7 @@ void ActRaiser_WidescreenSpriteActivationProbe(void) {
 }
 
 static int ws_margin_objects_enabled(void) {
-  return g_settings.ws_margin_objects;
+  return g_settings.ws_margin_objects || ws_auto_action_draw_enabled();
 }
 
 static int ws_margin_activation_enabled(void) {

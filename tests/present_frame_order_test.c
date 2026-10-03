@@ -68,7 +68,7 @@ ArRenderRectI ComputePresentationViewportWithOutput(
   } else {
     CHECK(pixel_aspect == 7);
     CHECK(visible_width == 256);
-    CHECK(snes_height == 224);
+    CHECK(snes_height == FrameSlot_VisibleHeight(s_expected_slot));
   }
   CHECK(output_size != NULL);
   *output_size = (ArRenderExtentI){1280, 720};
@@ -147,7 +147,8 @@ ArRenderRectI CrtPost_End(ArRenderDevice *device,
   CHECK(s_stage++ == expected_stage);
   CHECK(device == &g_render_device);
   CHECK(scan_columns == 256);
-  CHECK(scan_lines == 224);
+  CHECK(scan_lines == (s_expected_view == kRenderComparison_Authentic
+      ? 224 : FrameSlot_VisibleHeight(s_expected_slot)));
   CHECK(image.x == kFallback.x && image.y == kFallback.y &&
         image.w == kFallback.w && image.h == kFallback.h);
   return (ArRenderRectI){
@@ -207,6 +208,13 @@ int main(int argc, char **argv) {
     return s_failures ? 1 : 0;
   }
   RunCase(&slot);
+  slot.visible_height = 298;
+  slot.visible_top = 37;
+  slot.ws_extra_top = 0; /* Level edge: requested CRT rows must not collapse. */
+  slot.ws_extra_bottom = 37;
+  RunCase(&slot);
+  CHECK(slot.snes_height == 224);
+  slot.visible_height = slot.visible_top = slot.ws_extra_bottom = 0;
 
   slot.inidisp = 0x0f;
   slot.localization.dialogue_ticket = 10;
@@ -265,6 +273,12 @@ int main(int argc, char **argv) {
   slot.sim_menu.valid = false;
   slot.localization.dialogue_ticket = 0;
 
+  /* Re-present an immutable expanded slot. Authentic comparison must still
+   * use only 256x224; PiP must retain the requested 298-row enhanced canvas. */
+  slot.visible_height = 298;
+  slot.visible_top = 37;
+  slot.ws_extra_top = 3;
+  slot.ws_extra_bottom = 37;
   /* Authentic bypasses the enhanced compositor while retaining the player's
    * independent CRT configuration. */
   RenderComparison_OnPress(1000);

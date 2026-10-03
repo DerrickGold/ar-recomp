@@ -4103,7 +4103,35 @@ static void TestRetainedShadowParity(void) {
   CHECK(!ActionEffectProjection_Matches(&key,&context));
 }
 
+static void TestAutoFlatProjection(void) {
+  ActionEffectProjectionContext context = {
+    .bg1_camera_x=100,.bg1_camera_y=200,.ws_extra=0,
+    .visible_width=256,.snes_height=256,.visible_top=16,
+    .ws_extra_top=0,.capture_height=240,.viewport={10,20,512,512},
+  };
+  ActionEffectInstance effect = {
+    .world_x=120,.world_y=200,.flags=kActionEffectFlag_Visible,
+    .projection_plane=kActionEffectProjectionPlane_Bg1,
+    .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={0,-16,16,240}},
+  };
+  ArRenderPointF point;
+  CHECK(ActionEffectProjection_ProjectPoint(&context,&effect,0,0,&point));
+  CHECK(point.x==50 && point.y==52); /* Authentic y=0 is not the canvas top. */
+  ActionEffectLocalRect bounds={0,-16,16,256};
+  CHECK(ActionEffectProjection_ClipBounds(&context,&effect,&bounds));
+  CHECK(bounds.y0==0 && bounds.y1==240); /* No effect over missing world rows. */
+  context.ws_extra_top=16;
+  context.capture_height=256;
+  bounds=(ActionEffectLocalRect){0,-32,16,256};
+  CHECK(ActionEffectProjection_ClipBounds(&context,&effect,&bounds));
+  CHECK(bounds.y0==-16 && bounds.y1==240);
+  CHECK(ActionEffectProjection_ProjectPoint(&context,&effect,0,-16,&point));
+  CHECK(point.y==20);
+  CHECK(ActionEffectProjection_IntersectsFlatViewport(&context,&effect));
+}
+
 int main(void) {
+  TestAutoFlatProjection();
   TestRetainedShadowParity();
   TestAuthoredTorchReach();
   TestAuthoredEmitters();

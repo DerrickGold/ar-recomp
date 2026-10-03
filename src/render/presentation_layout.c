@@ -2,6 +2,19 @@
 
 #include <stdint.h>
 
+ArRenderRectF ArPresentationLayout_CaptureDestination(
+    ArRenderRectI viewport, int visible_height, int requested_top,
+    int capture_height, int capture_top) {
+  if (visible_height <= 0 || capture_height <= 0)
+    return (ArRenderRectF){0};
+  const float scale = (float)viewport.h / (float)visible_height;
+  return (ArRenderRectF){
+    (float)viewport.x,
+    viewport.y + (requested_top - capture_top) * scale,
+    (float)viewport.w, capture_height * scale,
+  };
+}
+
 void ArPresentationLayout_ResolveLogicalSize(
     bool crt_pixel_aspect, int visible_width, int visible_height,
     int *logical_width, int *logical_height) {

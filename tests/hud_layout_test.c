@@ -146,6 +146,20 @@ int main(void) {
     }
   }
 
+  /* Auto scales the status at canvas scale and keeps it at the upper edge.
+   * Native scene-space title/pause cards below it move with authentic y=0. */
+  HudProjectionInputs expanded = inputs;
+  expanded.snes_height = 256;
+  expanded.authentic_y0 = 16;
+  assert(ArHudLayout_BuildPresentationChunks(
+      (ArRenderRectI){0,0,256,256}, &expanded, chunks) == 8);
+  CheckRect(chunks[0].output_destination,0,0,64,8);
+  CheckRect(chunks[6].output_destination,0,48,256,32);
+  expanded.hud_split_height = 0;
+  assert(ArHudLayout_BuildPresentationChunks(
+      (ArRenderRectI){0,0,256,256}, &expanded, chunks) == 2);
+  CheckRect(chunks[0].output_destination,0,16,256,64);
+
   HudProjectionInputs invalid = inputs;
   invalid.authentic_width = 0;
   assert(ArHudLayout_BuildPresentationChunks(

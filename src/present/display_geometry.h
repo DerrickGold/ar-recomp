@@ -14,7 +14,20 @@ typedef struct ActRaiserDisplayGeometry {
   int display_extra;
   int extra_top;
   int extra_bottom;
+  int auto_vertical_budget; /* Requested canvas; not the bounded capture. */
 } ActRaiserDisplayGeometry;
+
+typedef struct ActRaiserAutoCanvas {
+  int extra_columns;
+  int extra_rows;
+} ActRaiserAutoCanvas;
+
+/* Expand one axis of 256x224, with 120 columns/64 rows per side.
+ * Invalid/minimized drawable sizes return false and leave the result intact. */
+bool DisplayGeometry_ResolveAutoCanvas(
+    int drawable_width, int drawable_height, bool crt_pixel_aspect,
+    ActRaiserAutoCanvas *canvas);
+void DisplayGeometry_SetAutoVerticalBudget(int budget);
 
 /* Consumers receive a read-only process-lifetime view. Horizontal mutation is
  * owned by the host display policy; vertical mutation is owned by the

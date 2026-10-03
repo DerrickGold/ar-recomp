@@ -23,7 +23,7 @@ typedef struct Backend {
   bool fail_create, fail_geometry, fail_restore, fail_bind, fail_update;
   bool fail_viewport, fail_surface_light, check_mask_uv;
   ArRenderRectI update;
-  ArRenderRectF mask_source;
+  ArRenderRectF mask_source, mask_destination;
   char draws[64];
   int draw_count;
   ArRenderBlendMode geometry_blends[64];
@@ -119,6 +119,7 @@ static bool Texture(void *ctx, ArRenderTexture texture,
                 state->blend == kArRenderBlendMode_Modulate)) {
     assert(src);
     b->mask_source = *src;
+    b->mask_destination = *dst;
     Record(b, 'M');
   } else if (state && state->blend == kArRenderBlendMode_DestinationAlphaMask) {
     Record(b, 'A');
@@ -141,7 +142,7 @@ static bool Geometry(void *ctx, ArRenderTexture texture,
       /* The visible 224x224 crop starts at native X=16, at output (20,30). */
       assert(fabsf(vertices[i].tex_coord.x * kFrameSlotLayerTextureWidth -
           (16 + (vertices[i].position.x - 20) * .35f)) < .001f);
-      assert(fabsf(vertices[i].tex_coord.y * kFrameSlotAuthenticHeight -
+      assert(fabsf(vertices[i].tex_coord.y * kFrameSlotLayerTextureHeight -
           (vertices[i].position.y - 30) / 2) < .001f);
     }
   }
@@ -468,7 +469,7 @@ static void ForestFoliageComposition(void) {
   frame.visible_width = 224;
   frame.bg1_camera_x = frame.bg2_camera_x = 800;
   frame.bg1_camera_y = frame.bg2_camera_y = 240;
-  frame.ws_extra_top = 160;
+  frame.ws_extra_top = 0; /* Flat native frame has no captured top rows. */
   frame.action_scene_effects.decorations[0] = (ActionEffectInstance){
     .world_x = 928, .world_y = 80,
     .generation = 0x46000000u, .pulse_generation = 0x66000000u, .phase_ticks = 512,
@@ -511,6 +512,7 @@ static void ForestFoliageComposition(void) {
       (const uint8_t *)pixels, 256 * 4)); /* Successful unchanged upload. */
   assert(PresentActionEffects_DrawFlatPlanes(&device, &frame, viewport));
   assert(b.geometries == 4); /* Recovery and retained-mask readiness. */
+  frame.ws_extra_top = 160; /* Separate Diorama projection fixture. */
   DioramaProjection projection = {
     .valid = true, .matrix = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1},
     .aspect_x = 1, .height_scale = 1, .texture_x_origin = 384,
@@ -775,7 +777,7 @@ static void TempleMistComposition(bool authored) {
   frame.bg1_camera_y = 1500;
   frame.visible_x0 = 16;
   frame.visible_width = 224;
-  frame.ws_extra_top = 64;
+  frame.ws_extra_top = 0; /* Native flat capture, not a Diorama apron. */
   frame.action_bg1_mask_valid = true;
   frame.action_scene_effects.decorations[0] = (ActionEffectInstance){
     .world_x = 592, .world_y = 1680, .phase_ticks = 80,
@@ -1320,7 +1322,35 @@ static void SourcePacketCaptureLifetime(void) {
   PresentActionEffects_Reset(&device);
 }
 
+static void AutoExpandedMask(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b,&device);
+  LavaFrame();
+  frame.visible_x0=8;
+  frame.visible_width=240;
+  frame.visible_height=256;
+  frame.visible_top=16;
+  frame.ws_extra_top=0; /* At the top of a finite room. */
+  frame.ws_extra_bottom=16;
+  frame.action_bg1_mask_valid=true;
+  static uint32_t expanded[256*240];
+  memset(expanded,0xff,sizeof(expanded));
+  assert(PresentActionEffects_UploadMask(&device,SR_PPU_OVERLAY_BG1,&frame,
+      (const uint8_t *)expanded,256*4)==sizeof(expanded));
+  assert(b.update.h==240);
+  assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
+  assert(b.mask_source.h==240);
+  assert(b.mask_destination.y==28 && b.mask_destination.h==420);
+  /* Retained uploads must keep their immutable dimensions even after the
+   * next host canvas was resized. Only a newly captured slot changes them. */
+  assert(PresentActionEffects_UploadMask(&device,SR_PPU_OVERLAY_BG1,&frame,
+      (const uint8_t *)expanded,256*4)==0);
+  PresentActionEffects_Reset(&device);
+}
+
 int main(void) {
+  AutoExpandedMask();
   SourcePacketCaptureLifetime();
   AuthoredOnlyComposition();
   TestEffectMasterBrightness();

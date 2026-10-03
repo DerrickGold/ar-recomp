@@ -31,6 +31,8 @@ static SrResult QueryPpuState(SrRunnerHandle *runner,
   state->object_size_select = PPU_objSize(&s_ppu);
   state->margin_left = s_ppu.extraLeftCur;
   state->margin_right = s_ppu.extraRightCur;
+  state->margin_top = s_ppu.extraTopCur;
+  state->margin_bottom = s_ppu.extraBottomCur;
   state->object_tile_base_1_word = PPU_objTileAdr1(&s_ppu);
   state->object_tile_base_2_word = PPU_objTileAdr2(&s_ppu);
   state->mode7_select = s_ppu.m7sel;
@@ -279,10 +281,31 @@ static void TestPlaneFiltering(void) {
   CHECK(strstr(SceneInspector_PanelText(), "NO VISIBLE") != NULL);
 }
 
+static void TestVerticalCaptureBounds(void) {
+  ResetPpu();
+  CHECK(!SceneInspector_Select(4, -1));
+  CHECK(!SceneInspector_Select(4, 224));
+  s_ppu.extraTopCur = 3;
+  s_ppu.extraBottomCur = 7;
+  s_ppu.screenEnabled[0] = 1;
+  s_ppu.bgTileAdr = 1;
+  /* Screen -1 fetches scanline zero, in the extra rows rather than the HUD. */
+  s_ppu.vram[0] = 5;
+  s_ppu.vram[0x1000 + 5 * 16] = 1 << 3;
+  CHECK(SceneInspector_Select(4, -1));
+  CHECK(strstr(SceneInspector_PanelText(), "BG1 T$005") != NULL);
+  CHECK(strstr(SceneInspector_PanelText(), "PIX1 CENTER") != NULL);
+  CHECK(SceneInspector_Select(4, -3));
+  CHECK(SceneInspector_Select(4, 230));
+  CHECK(!SceneInspector_Select(4, -4));
+  CHECK(!SceneInspector_Select(4, 231));
+}
+
 int main(void) {
   TestBgAndMirrorMapping();
   TestObjectIdentity();
   TestPlaneFiltering();
+  TestVerticalCaptureBounds();
   SceneInspector_Clear();
   CHECK(!SceneInspector_HasSelection());
   if (s_failures) {

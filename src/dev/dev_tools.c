@@ -310,8 +310,9 @@ static void FillLiveHudProjectionInputs(const DevToolsContext *context,
   inputs->crt_pixel_aspect =
       context->pixel_aspect == kPixelAspect_Crt43;
   inputs->snes_width = context->snes_width;
-  inputs->snes_height = context->snes_height;
-  inputs->visible_width = Settings_VisibleWidth();
+  inputs->snes_height = context->visible_height;
+  inputs->authentic_y0 = context->visible_top;
+  inputs->visible_width = context->visible_width;
   inputs->authentic_width = kFrameSlotAuthenticWidth;
   if (!context->ppu_snapshot_valid) return;
 
@@ -364,7 +365,7 @@ bool DevTools_InspectWindowPoint(const DevToolsContext *context,
   const ArRenderRectI viewport = ComputePresentationViewport(
       context->render_device, context->ignore_aspect_ratio,
       context->pixel_aspect,
-      Settings_VisibleWidth(), context->snes_height);
+      context->visible_width, context->visible_height);
   int output_width = 0;
   int output_height = 0;
   (void)ArRenderDevice_GetOutputSize(
@@ -425,17 +426,18 @@ bool DevTools_InspectWindowPoint(const DevToolsContext *context,
   if (!PointInRect(output_x, output_y, viewport)) return false;
 
   const int visible_left =
-      Settings_VisibleX0() - context->widescreen_extra;
+      context->visible_x0 - context->widescreen_extra;
   const double screen_position_x = visible_left +
-      (double)(output_x - viewport.x) * Settings_VisibleWidth() / viewport.w;
+      (double)(output_x - viewport.x) * context->visible_width / viewport.w;
   const double screen_position_y =
-      (double)(output_y - viewport.y) * context->snes_height / viewport.h;
+      (double)(output_y - viewport.y) * context->visible_height / viewport.h -
+      context->visible_top;
   const int screen_x = visible_left +
-      (int)((double)(output_x - viewport.x) * Settings_VisibleWidth() /
+      (int)((double)(output_x - viewport.x) * context->visible_width /
             viewport.w);
   const int screen_y =
-      (int)((double)(output_y - viewport.y) * context->snes_height /
-            viewport.h);
+      (int)((double)(output_y - viewport.y) * context->visible_height /
+            viewport.h) - context->visible_top;
   if (!SceneInspector_Select(screen_x, screen_y)) return false;
 
   *context->inspector_presentation = (InspectorPresentationSelection){

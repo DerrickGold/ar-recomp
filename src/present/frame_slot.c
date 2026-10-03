@@ -133,6 +133,7 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
 
   dst->snes_width = g_snes_width;
   dst->snes_height = g_snes_height;
+  dst->extended_aspect = g_settings.extended_aspect;
   dst->display_mode = g_settings.display_mode;
   dst->pixel_aspect = g_active_pixel_aspect;
   dst->ws_active = g_ws_active;
@@ -140,6 +141,17 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   dst->ignore_aspect_ratio = Settings_IgnoreAspectRatio();
   dst->visible_x0 = Settings_VisibleX0();
   dst->visible_width = Settings_VisibleWidth();
+  const bool automatic = dst->extended_aspect == kScreenAspect_Auto;
+  const bool auto_action_canvas = automatic && have_ppu_view &&
+      ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]) &&
+      ppu_view.state.bg_mode != 7;
+  dst->visible_top = auto_action_canvas
+      ? g_actraiser_display_geometry->auto_vertical_budget : 0;
+  dst->visible_height = dst->snes_height + 2 * dst->visible_top;
+  if (automatic && !auto_action_canvas) {
+    dst->visible_x0 = dst->ws_extra;
+    dst->visible_width = kFrameSlotAuthenticWidth;
+  }
   /* Latched, not read from g_ppu, for the same reason extra_left_cur is. */
   ActRaiser_LiveVerticalMargins(
       &dst->ws_extra_top, &dst->ws_extra_bottom);
@@ -255,7 +267,8 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
     dst->action_bg2_mask_valid =
         !dst->diorama_active &&
         (ppu_frame->overlays[SR_PPU_OVERLAY_BG2].flags &
-         SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER) != 0u &&
+         (SR_PPU_OVERLAY_MARK_MAIN_SCREEN_WINNER |
+          SR_PPU_OVERLAY_MARK_VISIBLE_MAIN_WINNER)) != 0u &&
         (ppu_frame->overlays[SR_PPU_OVERLAY_BG2].content_band_mask & 1u) != 0u;
     dst->diorama_bg_transparent_fill_argb[0] =
         ppu_frame->overlays[SR_PPU_OVERLAY_BG1].transparent_fill_argb;

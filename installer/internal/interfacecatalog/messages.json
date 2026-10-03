@@ -2148,10 +2148,10 @@
   {
     "key": "setting.extended_aspect.help",
     "text": [
-      "Output aspect: authentic 4:3, widescreen 16:9 / 16:10, or Stretch to fill the whole window. Video geometry updates live.",
-      "Format de sortie : 4:3 authentique, 16:9/16:10 panoramique ou étirement sur toute la fenêtre. La géométrie change immédiatement.",
-      "Ausgabeformat: originalgetreues 4:3, Breitbild 16:9/16:10 oder auf das ganze Fenster gestreckt. Die Bildgeometrie ändert sich sofort.",
-      "出力比率は本来の4:3、ワイドの16:9・16:10、またはウィンドウ全体への引き伸ばしです。映像の形状はすぐに更新されます。"
+      "4:3, 16:9, 16:10, or Stretch. Auto expands action stages to the drawable window without stretching. Level bounds and capture limits can leave borders. Towns and Mode 7 keep native framing.",
+      "4:3, 16:9, 16:10 ou Étirer. Auto agrandit les niveaux d’action selon la fenêtre, sans étirement. Les limites du niveau et de capture peuvent laisser des bordures. Les villes et le Mode 7 gardent le cadrage d’origine.",
+      "4:3, 16:9, 16:10 oder Strecken. Auto erweitert Aktionslevel passend zum Fenster, ohne Strecken. Level- und Aufnahmegrenzen können Ränder lassen. Städte und Mode 7 behalten den originalen Bildausschnitt.",
+      "4:3、16:9、16:10、または引き伸ばし。自動はウィンドウの描画領域に合わせてアクションステージを引き伸ばさずに拡張します。ステージと描画範囲の上限により余白が残る場合があります。街とMode 7は本来の表示範囲を保ちます。"
     ]
   },
   {
@@ -2940,10 +2940,10 @@
   {
     "key": "setting.diorama_vertical_extend.help",
     "text": [
-      "Scanlines of extra world drawn above and below the screen. 0 keeps the authentic 224-line frame.",
-      "Lignes supplémentaires du monde dessinées au-dessus et au-dessous de l'écran. 0 conserve les 224 lignes d'origine.",
-      "Zusätzliche Bildzeilen der Welt ober- und unterhalb des Bildschirms. 0 behält das originale Bild mit 224 Zeilen bei.",
-      "画面の上下に追加描画する走査線数。0でオリジナルの224行を維持します。"
+      "Manual Diorama extra rows per side. 0 keeps the authentic 224-line frame. Screen ratio Auto chooses its own budget.",
+      "Lignes supplémentaires par côté pour le Diorama manuel. 0 conserve les 224 lignes d’origine. Le format Auto choisit sa propre limite.",
+      "Manuelle zusätzliche Diorama-Zeilen je Seite. 0 behält die originalen 224 Zeilen bei. Bildschirmformat Auto wählt seine eigene Grenze.",
+      "ジオラマで手動追加する上下各側の行数。0は本来の224行を保ちます。画面比率が自動の場合は別の行数を使います。"
     ]
   },
   {
@@ -4679,6 +4679,7 @@
   {"key":"setting.extended_aspect.value.1","text":["16:9","16:9","16:9","16:9"]},
   {"key":"setting.extended_aspect.value.2","text":["16:10","16:10","16:10","16:10"]},
   {"key":"setting.extended_aspect.value.3","text":["Stretch","Étirer","Strecken","引き伸ばし"]},
+  {"key":"setting.extended_aspect.value.4","text":["Auto","Auto","Auto","自動"]},
   {"key":"setting.pixel_aspect.label","text":["Pixel aspect","Format des pixels","Pixelseitenverhältnis","ピクセルの縦横比"]},
   {"key":"setting.pixel_aspect.value.0","text":["Square pixels","Pixels carrés","Quadratische Pixel","正方形ピクセル"]},
   {"key":"setting.pixel_aspect.value.1","text":["4:3 CRT","Tube cathodique 4:3","4:3-Röhrenbild","4:3ブラウン管"]},

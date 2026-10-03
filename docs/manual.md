@@ -398,9 +398,19 @@ cannot be decoded. No ROM-derived graphics are committed.
 
 ## Display and scaling
 
-Screen ratio offers 4:3, 16:9, and 16:10. Ratio, pixel aspect, render profile,
+Screen ratio offers 4:3, 16:9, 16:10, Stretch, and Auto. Ratio, pixel aspect, render profile,
 renderer path, render scale, window mode, stretching, HUD/menu scale, and
 widescreen policy changes apply live.
+
+**Auto** fits action stages to the window's drawable aspect ratio, respecting
+the selected CRT or square pixel aspect. Wider windows reveal extra columns;
+taller windows reveal extra rows, up to 120 columns or 64 rows per side.
+Resizing recalculates the view, including while paused. The status HUD stays
+at the top; title and pause cards stay aligned with the original game frame.
+Unavailable room rows remain blank instead of stretching the level. Towns,
+menus and Mode 7 retain their native canvas. Auto works with flat and 3D action
+rendering; a manually adjusted 3D camera still controls its own zoom and pose.
+Returning to a fixed ratio restores its saved render-profile settings.
 
 *Render scale* is the internal render/upscale multiple of the SNES output
 (1–8, default 3). Higher values render more actual detail in the 3D town and

@@ -23,7 +23,9 @@ typedef struct ActionEffectProjectionContext {
   int ws_extra_top;
   int visible_x0;
   int visible_width;
-  int snes_height;
+  int snes_height; /* Flat requested canvas height. */
+  int visible_top;
+  int capture_height; /* 0 retains legacy full-canvas clipping. */
   ArRenderRectI viewport;
   const DioramaProjection *diorama_projection;
 } ActionEffectProjectionContext;

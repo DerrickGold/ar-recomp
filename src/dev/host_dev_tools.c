@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "actraiser/actraiser_rtl.h"
+#include "actraiser_game.h"
 #include "dev_tools.h"
 #include "present/display_geometry.h"
 #include "host/host_ppu_output.h"
@@ -45,7 +46,8 @@ static DevToolsContext CurrentContext(void) {
     .hud_obj_texture = PresentHud_ObjectTexture(),
     .runner = RtlGameRunner(),
     .framebuffer_pixels =
-        g_pixels + ActionApron_DisplayOffset(SR_PPU_OBJ_APRON),
+        g_pixels + ActionApron_DisplayOffset(SR_PPU_OBJ_APRON) +
+        g_ws_extra_top * (g_snes_width + (int)SR_PPU_OBJ_APRON * 2) * 4,
     .framebuffer_pitch =
         (g_snes_width + (int)SR_PPU_OBJ_APRON * 2) * 4,
     .obj_apron = SR_PPU_OBJ_APRON,
@@ -55,6 +57,9 @@ static DevToolsContext CurrentContext(void) {
     .inspector_presentation = &s_inspector_presentation,
     .snes_width = g_snes_width,
     .snes_height = g_snes_height,
+    .visible_width = Settings_VisibleWidth(),
+    .visible_x0 = Settings_VisibleX0(),
+    .visible_height = g_snes_height,
     .pixel_aspect = g_active_pixel_aspect,
     .widescreen_extra = g_ws_extra,
     .widescreen_active = g_ws_active,
@@ -93,6 +98,18 @@ static DevToolsContext CurrentContext(void) {
       context.ppu_frame.lifetime_generation == generation &&
       context.oam.lifetime_generation == generation &&
       context.high_oam.lifetime_generation == generation;
+  if (g_settings.extended_aspect == kScreenAspect_Auto) {
+    const bool action = context.ppu_snapshot_valid &&
+        ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]) &&
+        context.ppu_state.bg_mode != 7;
+    if (action) {
+      context.visible_top = g_actraiser_display_geometry->auto_vertical_budget;
+      context.visible_height += 2 * context.visible_top;
+    } else {
+      context.visible_width = kFrameSlotAuthenticWidth;
+      context.visible_x0 = context.widescreen_extra;
+    }
+  }
   return context;
 }
 

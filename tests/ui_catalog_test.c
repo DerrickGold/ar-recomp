@@ -21,6 +21,14 @@ int main(void) {
   CHECK(!strcmp(ArUiCatalog_Text(kArUiLocale_German, "common.save", NULL), "Speichern"));
   CHECK(!strcmp(ArUiCatalog_Text(kArUiLocale_Japanese, "common.save", NULL), "保存"));
   CHECK(!strcmp(ArUiCatalog_Text((ArUiLocale)-1, "common.save", NULL), "Save"));
+  for (int locale=0;locale<kArUiLocale_Count;++locale) {
+    CHECK(strcmp(ArUiCatalog_Text((ArUiLocale)locale,
+        "setting.extended_aspect.value.4","missing"),"missing"));
+    CHECK(strstr(ArUiCatalog_Text((ArUiLocale)locale,
+        "setting.extended_aspect.help",NULL),"Mode 7"));
+  }
+  CHECK(!strcmp(ArUiCatalog_Text(kArUiLocale_English,
+      "setting.extended_aspect.value.4",NULL),"Auto"));
   const char *custom = "Save — {my_pack} 日本語";
   CHECK(ArUiCatalog_Text(kArUiLocale_Japanese, "unknown.key", custom) == custom);
   CHECK(!strcmp(ArUiCatalog_Text(kArUiLocale_Japanese, NULL, NULL), ""));

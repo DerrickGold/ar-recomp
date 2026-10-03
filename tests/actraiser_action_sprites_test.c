@@ -388,7 +388,41 @@ static void TestCompleteBubblesAtWindowEdges(void) {
         }
 }
 
+static void TestAutoDrawIgnoresManualProfile(void) {
+  /* Square and wide drawables, flat and Diorama, retain the saved 4:3 flags.
+   * Exercise both the object scan and component emitter, not a gate proxy. */
+  for (unsigned diorama = 0; diorama < 2; ++diorama) {
+    for (unsigned vertical = 0; vertical < 2; ++vertical) {
+      Reset(vertical ? 37 : 0);
+      g_settings = (Settings){.extended_aspect = kScreenAspect_Auto,
+          .display_mode = kDisplayMode_43, .diorama_mode = diorama};
+      s_ppu.margin_left = s_ppu.margin_right = vertical ? 0 : 43;
+      const unsigned obj = Object(0, vertical ? -40 : 40, 1, 7);
+      if (!vertical) Write(obj + kActRaiserActionObject_WorldX, 280);
+      const uint16_t camera_x = Read(kActRaiserWram_Bg1CameraX);
+      const uint16_t camera_y = Read(kActRaiserWram_Bg1CameraY);
+      Scan();
+      assert(s_position_count == 1);
+      assert(s_positions[0].x == (vertical ? 100 : 280));
+      assert(s_positions[0].y == (vertical ? -41 : 39));
+      assert(Read(kActRaiserOamShadow + 2) == 7);
+      assert(Read(obj + kActRaiserActionObject_Flags) &
+          kActRaiserObjectFlag_OutsideActivation);
+      assert(Read(kActRaiserWram_Bg1CameraX) == camera_x);
+      assert(Read(kActRaiserWram_Bg1CameraY) == camera_y);
+      assert(!g_settings.ws_sprites && !g_settings.ws_margin_objects &&
+          !g_settings.ws_margin_activation);
+
+      /* The same retained manual profile still culls margin-only actors. */
+      g_settings.extended_aspect = kScreenAspect_169;
+      Scan();
+      assert(s_position_count == 0);
+    }
+  }
+}
+
 int main(int argc, char **argv) {
+  TestAutoDrawIgnoresManualProfile();
   TestCaptureGuardParts();
   if (argc == 2 && !strcmp(argv[1], "sim-bubbles")) {
     TestCompleteBubblesAtWindowEdges();
