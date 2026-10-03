@@ -9,10 +9,12 @@
 
 /* Opaque identity tokens, never dereferenced as SDL objects. */
 static max_align_t s_renderer, s_window, s_target, s_source, s_swapchain, s_device, s_commands;
+static uint64_t s_clock;
+static uint64_t TestTicks(void) { return s_clock += 100; }
 static struct {
-  bool wrong_target, fail_producer, no_source, no_commands;
+  bool wrong_target, fail_flush, fail_producer, no_source, no_commands;
   bool fail_acquire, no_swapchain, fail_submit;
-  unsigned producers, acquired, cancelled, blitted, submitted;
+  unsigned flushed, producers, acquired, cancelled, blitted, submitted;
 } s_test;
 
 static SDL_Texture *TestGetRenderTarget(SDL_Renderer *renderer) {
@@ -23,6 +25,11 @@ static bool TestRenderPresent(SDL_Renderer *renderer) {
   assert(renderer == (SDL_Renderer *)&s_renderer);
   ++s_test.producers;
   return !s_test.fail_producer;
+}
+static bool TestFlush(SDL_Renderer *renderer) {
+  assert(renderer == (SDL_Renderer *)&s_renderer);
+  ++s_test.flushed;
+  return !s_test.fail_flush;
 }
 static SDL_PropertiesID TestGetTextureProperties(SDL_Texture *texture) {
   assert(texture == (SDL_Texture *)&s_target);
@@ -66,6 +73,7 @@ static void TestBlit(SDL_GPUCommandBuffer *commands, const SDL_GPUBlitInfo *blit
 
 #define SDL_GetRenderTarget TestGetRenderTarget
 #define SDL_RenderPresent TestRenderPresent
+#define SDL_FlushRenderer TestFlush
 #define SDL_GetTextureProperties TestGetTextureProperties
 #define SDL_GetPointerProperty TestGetPointerProperty
 #define SDL_AcquireGPUCommandBuffer TestAcquireCommands
@@ -73,6 +81,7 @@ static void TestBlit(SDL_GPUCommandBuffer *commands, const SDL_GPUBlitInfo *blit
 #define SDL_CancelGPUCommandBuffer TestCancel
 #define SDL_SubmitGPUCommandBuffer TestSubmit
 #define SDL_BlitGPUTexture TestBlit
+#define SDL_GetTicksNS TestTicks
 #include "../src/platform/sdl/render_sdl.c"
 
 int main(void) {
@@ -83,6 +92,12 @@ int main(void) {
   };
   ArRenderDevice device;
   assert(ArRenderDevice_Init(&device, &kSdlRenderOps, &backend, (ArRenderCapabilities){0}));
+  ArSdlRenderBackend_EnablePresentTrace(&device, true);
+  assert(ArRenderDevice_Present(&device));
+  const ArSdlPresentTrace trace = ArSdlRenderBackend_LastPresentTrace(&device);
+  assert(trace.flush_ns == 100 && trace.acquire_ns == 100 && trace.submit_ns == 200);
+  ArSdlRenderBackend_EnablePresentTrace(&device, false);
+  assert(ArSdlRenderBackend_LastPresentTrace(&device).submit_ns == 0);
   /* Repeated hidden/visible transitions always submit the terminal buffer.
    * No blit is permitted without an image; no wait/readback API is introduced. */
   for (unsigned frame = 0; frame < 512; ++frame) {
@@ -93,12 +108,35 @@ int main(void) {
     assert(s_test.submitted == 1 && s_test.cancelled == 0);
     assert(s_test.blitted == (s_test.no_swapchain ? 0u : 1u));
   }
+  /* An early acquire must not present, duplicate the producer submission, or
+   * lose a hidden-window cleanup buffer. The eventual Present consumes it
+   * exactly once, regardless of the elapsed time between the calls. */
+  for (unsigned hidden = 0; hidden < 2; ++hidden) {
+    memset(&s_test, 0, sizeof(s_test));
+    s_test.no_swapchain = hidden != 0;
+    ArSdlRenderBackend_EnablePresentTrace(&device, true);
+    assert(ArSdlRenderBackend_PreparePresent(&device));
+    assert(backend.present_commands && s_test.acquired == 1 && !s_test.submitted);
+    assert(s_test.blitted == (hidden ? 0u : 1u));
+    assert(ArSdlRenderBackend_PreparePresent(&device));
+    s_clock += 5000000; /* The scheduled output wait is not backend work. */
+    assert(ArRenderDevice_Present(&device));
+    assert(!backend.present_commands && s_test.submitted == 1 && !s_test.cancelled);
+    assert(s_test.producers == 1 && s_test.acquired == 1);
+    assert(ArSdlRenderBackend_LastPresentTrace(&device).submit_ns == 200);
+    ArSdlRenderBackend_EnablePresentTrace(&device, false);
+  }
+  memset(&s_test, 0, sizeof(s_test));
+  s_test.fail_flush = true;
+  assert(!ArSdlRenderBackend_PreparePresent(&device));
+  assert(!backend.present_commands && !s_test.producers && !s_test.acquired);
   for (unsigned hidden = 0; hidden < 2; ++hidden) {
     memset(&s_test, 0, sizeof(s_test));
     s_test.no_swapchain = hidden != 0;
     s_test.fail_submit = true;
     assert(!ArRenderDevice_Present(&device));
     assert(s_test.submitted == 1 && s_test.cancelled == 0);
+    assert(!backend.present_commands);
   }
   memset(&s_test, 0, sizeof(s_test));
   s_test.fail_acquire = true;

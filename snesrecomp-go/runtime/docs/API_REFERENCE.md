@@ -488,6 +488,16 @@ before writing the appended `transparent_rows` callback field. Its bits cut
 holes in all captured bands, taking precedence over black and replacement art.
 They also suppress opaque transparent-fill backing at those pixels. Older
 callbacks remain compatible and retain their black-only edits.
+Hosts may opt into `SR_RUNNER_CAP_PPU_CAPTURE_TILE_CACHE` by passing
+`SR_PPU_CAPTURE_TILE_REQUEST_V2_SIZE` (or larger) and setting `stable_layer_mask`
+for selected layers. This promises that authored callback hits **and misses**
+depend only on tile coordinates until the next scanout frame or binding
+replacement. The runtime then reuses tile metadata across scanlines in a bounded
+cache. Rebinding invalidates the cache even with identical pointers. Legacy
+request prefixes and a zero mask preserve live lookup behavior. VRAM animation,
+palettes, scroll registers, and virtual terrain callbacks are never cached by
+this opt-in; no game-specific knowledge is required.
+
 Capture bands are far (0), ordinary (1),
 and high (2). A zero result preserves the ordinary capture. The native capture
 export uses its cached character decoder, live scanline palette, scroll,

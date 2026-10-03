@@ -103,6 +103,12 @@ static bool CopyView(HostFramePacket *p, SrPpuSurfaceView *view, bool needed) {
   return true;
 }
 
+SrPpuBgPacket *HostFramePacket_BackgroundTarget(HostFramePacket *p) {
+  if (!p) return NULL;
+  if (!p->background_storage) p->background_storage = malloc(sizeof(SrPpuBgPacket));
+  return p->background_storage;
+}
+
 bool HostFramePacket_OwnPixels(HostFramePacket *p) {
   FrameSlot *f = &p->frame;
   if (!HostFramePacket_Supports(f)) return false;
@@ -119,10 +125,13 @@ bool HostFramePacket_OwnPixels(HostFramePacket *p) {
   needed[SR_PPU_OVERLAY_BG3][0] = true;
   needed[SR_PPU_OVERLAY_OBJ][0] = true;
   p->copied_bytes = 0;
+  size_t background_copied = 0;
   if (f->background_packet) {
-    if (!p->background_storage) p->background_storage = malloc(sizeof(SrPpuBgPacket));
-    if (!p->background_storage) return false;
-    memcpy(p->background_storage, f->background_packet, SrPpuBgPacket_Size(f->background_packet));
+    if (!HostFramePacket_BackgroundTarget(p)) return false;
+    if (f->background_packet != p->background_storage) {
+      background_copied = SrPpuBgPacket_Size(f->background_packet);
+      memcpy(p->background_storage, f->background_packet, background_copied);
+    }
     f->background_packet = p->background_storage;
   }
   if (!CopyView(p, &f->ppu_surfaces.main, (mask & (1u << kDioramaPlane_Backdrop)) != 0) ||
@@ -138,6 +147,6 @@ bool HostFramePacket_OwnPixels(HostFramePacket *p) {
   f->ppu_surfaces.mode7 = (SrPpuSurfaceView){0};
   f->authentic_frame_serial = 0;
   memset(&f->sim3d_output_surfaces, 0, sizeof(f->sim3d_output_surfaces));
-  if (f->background_packet) p->copied_bytes += SrPpuBgPacket_Size(f->background_packet);
+  p->copied_bytes += background_copied;
   return true;
 }

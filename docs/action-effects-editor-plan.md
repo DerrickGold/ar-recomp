@@ -3758,3 +3758,856 @@ Remaining platform/coverage limits are explicit rather than room whitelists:
 - Image outliers above remain recorded. Gameplay traversal of every room,
   every authored extreme, and every camera/aspect/extension combination is not
   implied by the three-pose room matrix or the recipe fixtures.
+
+### VRAM background packets and authored floor recovery — 2026-10-03
+
+The completed migration was committed first as `f484a0f4`. The next profile
+identified ordinary VRAM-backed BG capture as remaining CPU pixel work.
+Mode-1 BG1/BG2 with 8x8 tiles now publish scanline bitplanes directly, using
+the existing GPU decoder. Repeated 256px pages retain compact tile alignment;
+mirrored margins use the existing aligned bitplane cells. Windows, H/V flips,
+HDMA scroll, live VRAM/CGRAM changes, brightness and supported capture colour
+policies remain scanline state. Unsupported mosaic/16x16 and winner-dependent
+captures retain CPU ownership. No shader variant, thread or GPU readback was
+added. This supersedes the earlier Bloodpool ownership limitation above:
+Bloodpool now reports available mask 3 / owned mask 3.
+
+The first candidate deliberately left mirror/repeat on CPU and still reported
+owned mask 1 in Bloodpool; those timings are not evidence of BG2 offload. The
+revised candidate exercised ownership 3, passed the tile validation oracle,
+and reproduced all 40 committed Bloodpool source images exactly on Metal.
+
+The reported gap below Bloodpool's platform was also reproduced with Dynamic
+Cam. The camera correctly framed the authored 528px scenery, including the
+extra painted row beneath the native 512px map, but `native_capture_tiles_line`
+discarded that row at the native vertical limit. The overbroad guard originated
+in `9e807853` (2026-10-01), before this iteration. Explicit authored tiles now
+survive native clipping, while the automatic apron lookup remains clipped so
+short/repeating backgrounds cannot wrap into the margins. Both CPU and GPU
+capture share the correction. Live Dynamic Cam images confirm the gap is
+filled; manual orbit/zoom and the camera clamp were not changed.
+
+Validation:
+
+- 10/10 PPU, action-background and Diorama camera/compositor checks pass. New
+  CPU-oracle comparisons cover both BG layers, main/sub owners, every fine
+  scroll phase, map wrapping, window splits, scanline palette/brightness/tile
+  writes, extended rows, partial bounds, both mirror directions, repeat bands,
+  and CPU/validation/GPU ownership. Unsupported tile sizes/mosaic stay on CPU.
+- A separate authored-margin regression compares the reference pixel renderer,
+  native CPU capture and GPU packet output, checking explicit stamps inside
+  and outside the ordinary horizontal capture while unedited margins stay
+  empty. This would fail with the old clipping guard.
+- Steam Deck Bloodpool `tiles-validate` reports zero rejected sources and zero
+  mismatching frames at both 300- and 600-frame checkpoints, including the
+  corrected floor row. The ordinary candidate uses GPU ownership 3.
+- 60 scrolling Fillmore images at interpolation phase .5 are exact against
+  the committed build: BG1 moves 760px horizontally/188px vertically, BG2
+  380px/63px. Inputs, settings, camera state and final WRAM hashes match.
+- For the corrected Bloodpool floor, the full CPU reference versus resident
+  GPU comparison retains the prior small effect-rasterization differences:
+  39/40 frames have no channel difference above 2/255; one frame has one pixel
+  above that threshold (maximum 5/255). The floor is present in both paths.
+- The comparison tool now offers explicit Dynamic Cam capture and opt-in
+  cross-build comparison. Different executable hashes are rejected by default;
+  opting in still requires identical assets, settings, replay, camera state
+  and final gameplay memory, and records both executable hashes.
+
+Deck measurements retain the preceding production settings and the original
+1,200–3,300 tick interval (see the warmup correction below). Three baseline Bloodpool runs bracket the candidates;
+two repeated candidate-C runs include the restored floor. Times below are
+CPU scopes and backend-present completion intervals, not GPU timestamps or
+physical display scanout. Producer work overlaps presentation.
+
+| Scene / build | Producer mean | Upload mean | CPU draw mean | Completion interval p99 |
+| --- | ---: | ---: | ---: | ---: |
+| Bloodpool committed baseline, three runs | 11.02–11.09 ms | 2.20–2.21 ms | 2.62–2.65 ms | 13.44–13.53 ms |
+| Bloodpool tile offload, before floor fix | 10.14 ms | 2.03 ms | 2.67 ms | 13.80 ms |
+| Bloodpool tile offload + restored floor, two runs | 10.27 ms | 2.06–2.08 ms | 2.65–2.66 ms | 13.69–13.71 ms |
+| Bloodpool final reviewed build D | 10.08 ms | 2.06 ms | 2.64 ms | 13.57 ms |
+| Fillmore scrolling baseline | 9.20 ms | 1.46 ms | 0.99 ms | 12.99 ms |
+| Fillmore scrolling candidate | 9.32 ms | 1.48 ms | 0.99 ms | 12.85 ms |
+
+This saves about 0.8 ms (7%) of Bloodpool producer work after restoring the
+missing scenery. It is **not a pacing win**: the measured Bloodpool completion
+tail is about 0.2–0.3 ms worse, with 821–828 intervals over the 90Hz budget plus
+1 ms versus 743–768 in the controls (3,125 presents per run). Fillmore is
+essentially unchanged; its BG sources already used tile ownership. All runs
+retain zero motion-metadata waits. Keep the CPU headroom evidence distinct
+from the unresolved 90Hz pacing target. The next investigation should isolate
+presentation deadline scheduling and GPU submission/completion variance,
+instead of assuming another producer saving will fix the presentation tail.
+
+Final review kept the aligned-mirror allocation restricted to eligible VRAM
+sources, leaving unsupported virtual/mosaic/16x16 allocation unchanged. Build D
+passes the same 10 checks and all 40 Dynamic Cam images match candidate C
+exactly. Its separate Deck confirmation saves 0.99 ms (9%) of producer work,
+with 769 intervals over budget plus 1 ms and completion p99 13.57 ms. This is
+closer to the baseline pacing than the two preceding candidate runs, but still
+does not establish a presentation improvement. Final pinned SHA-256 hashes:
+
+- Metal: `fefdadf94c9be7e9a5946b92bc368dec3a61d2eda8e035f01a62dd4ebc60895c`.
+- Deck: `60f8ac4efc05a04b3d2d65e7d4f45354492f618a4f752bdaceb2a1506882491a`.
+
+Evidence: `runs/gpu-vram-2026-10-03/` contains pinned binaries, image comparisons,
+`vram-final-pacing.json`, `vram-d-pacing.json`, and `deck-evidence/` with raw
+traces and provenance.
+The diagnostic Free Cam images intentionally bypass framing; the separately
+labeled Dynamic Cam images establish the actual floor correction. Failed
+early harness attempts that demanded resident projection with CPU capture
+are retained but are not counted as passing runs. Metal and Deck/Vulkan were
+exercised; there is no new D3D12 hardware or Gamescope qualification here.
+
+### Presentation tail and warmup audit — 2026-10-03
+
+The 1,200-tick cutoff excluded level entry (tick 502) and the requested Diorama
+activation (tick 900), but did **not** exclude streaming-path startup: the first
+nonzero source tick in all three Bloodpool controls and final build D is 1,214.
+Calling that entire interval settled was too strong. Re-analysis starts at
+tick 1,800, approximately ten seconds after streaming begins, and retains about
+25 seconds / 2,248 presentations in the same room and stream epoch. No room
+transition or epoch boundary is being excluded within this later interval.
+
+| Bloodpool timing | Original ticks 1,200–3,300 | Later ticks 1,800–3,300 |
+| --- | ---: | ---: |
+| Baseline completion p99, three runs | 13.44–13.53 ms | 13.43–13.48 ms |
+| Final D completion p99 | 13.57 ms | 13.45 ms |
+| Final D maximum completion interval | 18.42 ms | 15.46 ms |
+| Final D producer work p99 | 11.38 ms | 11.36 ms |
+
+The later D interval still contains 95/2,247 completion intervals above 13 ms;
+the three controls contain 67, 110 and 113. Disjoint D windows 1,800–2,399 and
+2,400–2,999 retain p99 values of 13.25 and 13.52 ms. Early samples inflate the
+maximum and modestly affect p99, but cannot explain the recurring presentation
+tail. D's later p99 falls within the baseline spread: these traces establish
+neither a pacing improvement nor a meaningful p99 regression from tile offload.
+
+Of D's 95 later intervals above 13 ms, 29 upload an endpoint in the presenting
+iteration (median draw deadline lateness 2.98 ms); 66 do not (median 0.89 ms).
+This supports inspecting both upload/deadline overlap and varying draw/present
+cost. It does not identify the exact cause or establish GPU execution time.
+The trace measures host-side backend-present return, not physical scanout.
+Periodic pipeline logging and CSV tracing remain enabled, so their contribution
+and desktop scheduling/driver noise still need a controlled measurement.
+
+Next pacing comparisons should report startup separately, use a warmup relative
+to actual streaming activation, and retain late-window p99/max plus repeated
+runs. Prioritize presentation scheduling/submission tails over treating another
+producer mean reduction as proof of stable 90Hz. Re-analysis evidence is saved
+in `runs/gpu-vram-2026-10-03/tail-window-audit.json` alongside the raw traces.
+
+### Presentation scheduling experiments — 2026-10-03
+
+The follow-up isolates presentation tails with 4,200-tick Deck runs. Analysis
+excludes ten seconds after the first actual streamed endpoint and stops at
+tick 3,900: about 35 seconds / 3,124 presents per run. The analyzer now supports
+`--warmup-seconds`, records actual measured ticks, and exposes both same-epoch
+and all-interval statistics so a clock reset cannot silently hide a hitch.
+These runs have no epoch boundary in the measured window. Settings, source
+clock, effects, and resolution remain those of the preceding Deck comparison.
+
+The main findings are scheduling costs, not loading contamination:
+
+- Disabling pipeline metrics and the auxiliary capture/phase traces did not
+  remove the tail: completion p99 was 13.32 ms with diagnostics and 13.64 ms
+  with only the pacing trace. This does not measure the cost of the pacing
+  trace itself, but rules out the other diagnostics as the main explanation.
+- A precise final deadline wait reduced draw-start lateness p99 from about
+  2.94 to 0.79 ms, but completion p99 only improved to 13.12 ms. The original
+  presenter starts drawing at the deadline, so varying draw cost still shifts
+  the final submission even when waking accurately.
+- Preparing the draw early, submitting offscreen work, and waiting for the
+  output deadline absorbs that variation. Sampling interpolation at the
+  intended output time is required. An initial ungated prototype reached
+  11.53 ms p99 but lacked the required interpolation endpoint on 559 measured
+  frames; it is rejected as a pacing success. A readiness check now waits for
+  the correct pair while time remains, with the ordinary bounded hold retained
+  if the source is genuinely late at the output deadline.
+
+| Deck case | Completion p99 | Intervals >12.11 ms | Mean animation age at present |
+| --- | ---: | ---: | ---: |
+| Bloodpool control, phase trace enabled | 13.46 ms | 811 | 32.26 ms |
+| Bloodpool early draw, readiness check, existing 1.75-source-frame delay | 13.22 ms | 186 | 29.88 ms |
+| Bloodpool early draw, 1.9-source-frame delay, two runs | 11.53 / 11.53 ms | 4 / 4 | 32.26 / 32.24 ms |
+| Bloodpool early draw, 2-source-frame delay, two runs | 11.55 / 11.54 ms | 3 / 4 | 33.90 / 33.91 ms |
+| Scrolling Fillmore control | 12.83 ms | 152 | 30.51 ms |
+| Scrolling Fillmore early draw, existing 1.75-source-frame delay | 11.41 ms | 3 | 29.64 ms |
+
+All readiness-aware cases above have zero targets beyond their available
+interpolation endpoint and no backward reconstructed timeline. Animation age
+is backend-present completion minus the reconstructed interpolated source time,
+not measured input latency or physical scanout. The 1.9-frame policy adds about
+2.50 ms to the nominal buffer (29.12 to 31.61 ms), but earlier drawing removes
+approximately that much downstream delay in Bloodpool. Two-frame buffering
+adds real age without improving p99 here; it is not the preferred candidate.
+
+The largest remaining misses are separate from the broad p99 improvement:
+
+- In the final instrumented Bloodpool run, p99 is 11.56 ms and five intervals
+  exceed 12.11 ms. The four largest (14.25–15.72 ms) occur on the first source
+  after periodic owner service. Their producer starts are 4.82–6.06 ms late,
+  while backend work on those frames is only 0.44–0.66 ms. The current owner
+  handoff waits for queued endpoints to drain before running housekeeping and
+  restarting the producer. That interruption is the next concrete target;
+  another general draw-throughput change does not address it directly.
+- A diagnostic run disabling only the periodic timer, preserving event and
+  scheduled service, reduced the worst interval from 15.12 to 13.01 ms and
+  intervals over 12.11 ms from four to two; p99 remained 11.52 ms. This is an
+  isolation experiment, not a proposal to stop servicing saves/settings.
+- Earlier runs contain rare backend-scope spikes around 3 ms. New opt-in
+  scopes separate offscreen flush, swapchain acquisition, and final blit/submit.
+  Those 3 ms spikes did not recur in the instrumented run: their respective
+  maxima were 0.21, 0.51 and 1.07 ms. Attribution to Vulkan, compositor or OS
+  scheduling is still unproved; do not label these as a confirmed GPU stall.
+
+The prototype remains opt-in: `AR_PRESENT_PRECISE_YIELD=1` and
+`AR_PRESENT_PREPARE_LEAD_US=5500`; the lead is capped to half the refresh period.
+`AR_FRAME_STREAM_DELAY_PERMILLE=1900` exercises the Bloodpool buffer candidate.
+`AR_FRAME_STREAM_SERVICE_MS` defaults to 1,000; zero is diagnostic only. Ordinary
+presentation and the default 1.75-frame buffer remain unchanged. No shader,
+framebuffer queue expansion, or readback was introduced. The SDL adapter now
+exposes offscreen submission without leaking its internal struct to the host.
+
+Validation: six pacing/playout/queue/producer/backend tests pass, including a
+60/90 Hz readiness simulation across relative phase alignments and the existing
+hidden-swapchain/error protocol checks. Metal builds and scrolling smoke tests
+pass; the warmed Metal p99 comparison is 12.45 to 11.19 ms. Final gameplay WRAM
+matches between the corresponding controls/candidates: Bloodpool hash
+`e0f49116efd6da3e4bada8e7b8e09137cbc8208d08c9dbb004572f3172efd1a7`,
+Fillmore hash `55a18e330a5743beb1b2a0c1755c9c7886d95b2325bcc39674951b3104d4c42f`.
+These are timing/continuity checks, not a new frame-by-frame visual oracle or
+physical scanout qualification. Non-interpolated play, all rooms, D3D12 hardware,
+and Gamescope remain to be qualified before making the policy the default.
+
+Evidence is in `runs/pacing-tail-2026-10-03/`: pinned binaries A–F, the runner,
+raw Deck traces/logs/provenance, `summarize_tail.py`, `tail-results.json`, and the
+two Metal runs. Final instrumented Deck binary F SHA-256:
+`c40c723ab08e6ff49b217b49f5741524d2ee1141e6b4141469e905323520015e`.
+
+
+### Cooperative maintenance and event handoffs — 2026-10-03
+
+The next pacing investigation found and corrected two avoidable interruptions
+of the independent producer:
+
+- Routine persistence previously stopped the producer at an arbitrary point
+  in its source interval, drained future frame packets at their display times,
+  then resumed production. Keeping those owned packets removes the drain delay,
+  but alone still allowed 3.4–3.7 ms late restarts. The producer now offers the
+  maintenance boundary immediately after publishing a source, giving main the
+  idle time before the next source tick to service persistence and resume.
+  No source-clock reset, additional buffer, thread, or GPU readback is involved.
+- The streaming event loop classified/consumed game-only and ignored events,
+  then peeked again to decide whether to pause. The asynchronous gamepad poller
+  could post a notification between those two operations. A trace caught an
+  ignored `SDL_EVENT_GAMEPAD_UPDATE_COMPLETE` causing a full handoff and a
+  6.04 ms late producer restart / 15.29 ms presentation interval. Only an event
+  actually classified as requiring host ownership may now request the pause.
+  Newly arriving events are classified on the next loop iteration.
+
+Main still waits for the producer acknowledgement before reading the runner
+or doing persistence. Warps, settings application, screenshots/dumps, room
+changes, errors, and real host events retain the full drained boundary.
+Developer automation now reports due warp/diorama actions through the same
+host-service predicate as captures, so the persistence-only path cannot skip
+those actions. Audio completion remains in each producer tick. Persisting an
+actual changed save may still involve disk work; replay timing does not test
+save-write latency because replays deliberately protect save data.
+
+The matched Deck runs retain the prior 90 Hz, 1280×800, Vulkan/Wayland desktop,
+64-row, effects/CRT, skybox-only settings. Each runs 4,200 ticks, discards ten
+seconds after actual streaming starts, and measures through tick 3,900 (about
+3,124 presents). Ordinary game state and resources are unchanged.
+
+| Bloodpool interpolated case | Completion p99 | Worst interval | Intervals >12.11 ms | Worst periodic restart lateness |
+| --- | ---: | ---: | ---: | ---: |
+| Previous instrumented baseline F | 11.56 ms | 15.72 ms | 5 | 6.06 ms |
+| Interleaved baseline F repeat | 11.51 ms | 15.12 ms | 3 | 4.62 ms |
+| Combined handoff/event fix I, run 1 | 11.56 ms | 22.73 ms | 2 | 0.11 ms |
+| Combined handoff/event fix I, run 2 | 11.55 ms | 12.11 ms | 0 | 0.10 ms |
+
+The two fixed runs have zero spurious event handoffs, missing interpolation
+endpoints, backward reconstructed source motion, or measured epoch changes.
+Animation age remains 32.25 / 32.22 ms versus 32.25 / 32.22 ms in the controls.
+The broad p99 improvement belongs to the earlier early-draw experiment; this
+change removes identifiable maintenance/input tails, not another throughput
+bottleneck. The 22.73 ms outlier must not be discarded: its source was ready,
+backend work was small, and the main loop resumed late before drawing. It was
+not a periodic-service restart. Build J adds opt-in long-yield logging and
+records slow idle event-loop iterations, closing the gap in the earlier trace.
+A separate 13.90 ms interval spent about 2.97 ms in swapchain acquisition.
+These observations do not establish physical scanout timing or a 90 Hz
+worst-case guarantee.
+
+Scrolling Fillmore with I remains at 11.41 ms p99 (previous prototype 11.41),
+29.66 ms animation age (29.64), and zero missing endpoints/backward motion.
+The two measured intervals above 12.11 ms remain recorded (worst 13.50 ms).
+
+Validation includes an actual persistent producer plus bounded queue regression:
+64 maintenance resumptions with three future packets retained, alternating
+explicit pause and producer completion, preserve owned pixels, tick order,
+source timestamps, and thread ownership. Eight focused queue/producer/playout,
+pacing, input/replay and backend checks pass. Metal builds and the boundary
+exercise pass: extension changes at game frames 1,300/1,500 and composite
+captures at 1,350/1,500/1,650 still execute at the full safe boundary.
+
+The final J diagnostic repeats the restart result (35 periodic services,
+maximum 0.10 ms late, zero event handoffs). Its reported p99 is 11.55 ms and
+one interval is 13.96 ms. That last outlier exposes a measurement issue: the
+pacing CSV sampled completion after writing the phase CSV, about 2.6 ms beyond
+the measured draw/present scopes on this frame. Build K timestamps completion
+before either trace write, and uses 1 MiB / 4 MiB diagnostic buffers to reduce
+file-flush interference. Earlier tables retain their raw results rather than
+retroactively subtracting unmeasured logging costs. They should not be read
+as exact backend-return or physical-scanout intervals. J also catches one
+1 ms idle yield lasting 3.36 ms; the earlier 22.73 ms outlier did not recur,
+so its specific cause remains unproved.
+
+With interpolation and the early-draw prototype disabled, the ordinary
+90 Hz non-interpolated comparison is effectively unchanged in broad pacing:
+p99 13.39 ms control / 13.50 ms fixed, mean displayed-source age 21.59 / 21.84 ms.
+The periodic restart maximum improves from 2.52 to 0.09 ms, but the existing
+start-drawing-at-deadline policy still dominates this case. Do not claim a
+non-interpolated p99 win from maintenance alone. Final WRAM is identical across
+the Bloodpool control, both interpolated candidates, and both non-interpolated
+runs (`e0f49116efd6da3e4bada8e7b8e09137cbc8208d08c9dbb004572f3172efd1a7`).
+The scrolling Fillmore control/candidate also match
+(`55a18e330a5743beb1b2a0c1755c9c7886d95b2325bcc39674951b3104d4c42f`).
+
+The handoff/event fixes apply to the ordinary bounded stream. The earlier
+precise/early-draw and 1.9-frame timing settings remain diagnostic opt-ins;
+this work does not silently promote them to defaults. Gamescope and D3D12
+hardware qualification remain outstanding.
+
+Evidence: `runs/pacing-tail-2026-10-03/`, `run_handoff.py`,
+`service_tails.py` / `service-results.json`, and the `tail-maintenance-*`,
+`tail-cooperative-*`, `tail-eventfix-*` logs/traces. Tested Deck build I SHA-256:
+`d106edb4b5af406865680bd5c078b43cb79a6b99515fd7eeb4a71cca22883d26`.
+Diagnostic build J SHA-256:
+`84e6df112ac7b1faa97496a15786f7d0861833670926ab16990248b7b18515d9`.
+
+
+With corrected completion timestamps and buffered traces, final build K measures
+11.504 ms completion p99 / 13.270 ms maximum, with three intervals >12.11 ms
+among 3,123 warmed intervals. All 35 periodic restarts are within 0.113 ms;
+there are zero spurious event handoffs, missing interpolation endpoints,
+backward timeline steps or measured epoch changes. Mean animation age is
+32.227 ms. The largest interval includes a 2.60 ms swapchain acquire, and the
+second includes 1.77 ms final blit/submit; these remaining measured tails are
+not the fixed maintenance boundary. No >2 ms idle-yield overshoot was logged
+in K. The earlier isolated 22.73 ms gap remains an unresolved observation,
+not evidence that every tail is eliminated. No extra render work or memory
+is added in ordinary playback by the diagnostic buffering.
+
+Final Deck build K SHA-256:
+`a7264d269ee68defe3c3251bda7e475cd6866380b77b94650b18cfbd88fcaee7`.
+Evidence is `tail-eventfix-timestamp`; its final WRAM matches the Bloodpool
+controls. Mac release build also succeeds. The next narrow investigation is
+swapchain acquisition/final submission and occasional host wakeup gaps, with
+completion sampled before logging. Do not increase source buffering to hide
+these downstream tails without measuring its latency cost.
+
+### Prepare the final swapchain blit before the deadline — 2026-10-03
+
+The remaining backend tail can be reduced without another buffered frame.
+`AR_PRESENT_PREPARE_SWAPCHAIN=1`, used with the existing early-draw experiment,
+submits the finished offscreen draw, acquires the window image and records its
+blit before waiting for the same scheduled output deadline. Only the final
+command-buffer submission remains at that deadline. It also removes an empty
+SDL renderer submission that the previous early-flush path made after waiting.
+There is no new worker, GPU readback, source delay, or rendering change.
+
+The window owner acquires and submits the command buffer on the same thread.
+Preparation is idempotent; no drawing or output-setting changes may occur until
+Present consumes it. A successful hidden-window acquire with no image still
+submits the cleanup buffer. Acquisition failure cancels the unacquired buffer;
+submission failure consumes it. Teardown retires any prepared buffer before
+releasing its source/window. These paths use the common SDL GPU API rather than
+Vulkan-specific calls. The existing completion trace now distinguishes work
+performed before the deadline from the remaining final Present call; backend
+flush/acquire/blit scopes must not be added to that final-call duration.
+
+Eight matched Deck runs use one pinned binary L and the established 1280×800,
+Vulkan/Wayland desktop, 90 Hz cap, 64-row, effects/CRT and skybox-only workload.
+All enable precise/early drawing with a 5,500 µs lead and use a 1.9-period buffer
+when interpolating. Only early swapchain preparation changes within each pair.
+Bloodpool runs in off/on/on/off order; scrolling Fillmore runs off/on, and
+Bloodpool without interpolation runs on/off. Each excludes ten seconds after
+streaming begins and measures through tick 3,900, about 3,123–3,124 presents.
+
+| Case | Completion p99 | Worst interval | Intervals >12.11 ms | Mean displayed-source age |
+| --- | ---: | ---: | ---: | ---: |
+| Bloodpool, acquire at deadline, run 1 | 11.551 ms | 13.673 ms | 2 | 32.265 ms |
+| Bloodpool, acquire early, run 1 | 11.434 ms | 11.952 ms | 0 | 31.937 ms |
+| Bloodpool, acquire early, run 2 | 11.432 ms | 12.557 ms | 3 | 31.930 ms |
+| Bloodpool, acquire at deadline, run 2 | 11.537 ms | 14.228 ms | 4 | 32.239 ms |
+| Scrolling Fillmore, acquire at deadline | 11.479 ms | 13.849 ms | 1 | 32.171 ms |
+| Scrolling Fillmore, acquire early | 11.449 ms | 12.693 ms | 1 | 31.958 ms |
+| Bloodpool, interpolation off, acquire at deadline | 11.537 ms | 13.223 ms | 1 | 24.512 ms |
+| Bloodpool, interpolation off, acquire early | 11.366 ms | 12.840 ms | 1 | 24.272 ms |
+
+Bloodpool's final Present call averages 0.610–0.638 ms in the controls and
+0.298–0.308 ms with preparation. Producer work stays around 10.0–10.1 ms and
+upload/preparation around 2.16–2.18 ms; this is scheduling improvement, not a
+claim that those costs disappeared. The three >12.11 ms intervals in the
+second candidate coincide with late source preparation (3.17/4.29 ms uploads,
+or a 12.06 ms producer tick), while final Present remains only 0.20–0.28 ms.
+Submission variability remains in other frames. A sampling profile follows to
+identify the next preparation target instead of increasing buffering again.
+
+Every matched run has zero backwards source-time steps and measured epoch
+changes; interpolated runs have zero missing endpoints. All six Bloodpool
+WRAM hashes match the existing `e0f49116…efd1a7` control, and both scrolling
+Fillmore hashes match `55a18e33…c42f`. CPU time/RSS show no material increase in
+the repeated Bloodpool comparison. Eight focused pipeline/backend/input tests
+pass, including delayed prepare/present, hidden windows and failure cleanup.
+The pacing analyzer also preserves backend-stage evidence for individual worst
+intervals and tests that early acquire work is not double counted. Metal builds
+and the scrolling geometry-change/capture exercise pass; the captured final
+composition was inspected. D3D12 and Gamescope runtime tests remain outstanding.
+
+Keep the switch opt-in with the other early-draw settings for now. These are
+CPU/backend-return intervals, not physical scanout or input-to-photon latency.
+The rare tails and limited run lengths do not establish a worst-case 90 Hz
+guarantee; the scrolling p99 difference in particular is small.
+
+Evidence: `runs/pacing-tail-2026-10-03/run_swapchain.py`, the eight
+`tail-swapchain-*` control/early directories and their `late-analysis.json`.
+Deck binary L SHA-256:
+`49607bcb53968118a9b692d5bdbe59f8c6382723b4b404c8786abebcccc55ec0`.
+Metal binary L SHA-256:
+`1ae0acf8005f5c28c9c48a2943ad9a0378ee0d3b06ab43899c3e46ef591e11e7`.
+
+The next profile identified useful steady-work reduction independently of
+pacing: `ResolveNative` accounted for 3.84% of all sampled user cycles, about
+11.8% of the main thread's samples. Instruction annotation attributes over
+98% of that function's samples to the scalar packet-copy loop, including its
+per-word reload of the packet size. Little-endian hosts now `memcpy` the
+non-aliasing packet into the mapped transfer allocation; big-endian hosts
+retain explicit conversion with a cached word count. Packet bytes, resource
+ownership, GPU commands and shaders are unchanged.
+
+An interleaved L/M/M/L Deck comparison with early swapchain preparation enabled
+reduces source preparation/upload mean from 2.186–2.188 ms to 1.960–1.963 ms
+(about 10%). Its p99 falls from 2.573–2.641 ms to 2.335–2.341 ms. Completion
+p99 is effectively unchanged: 11.442/11.447 ms in controls, 11.426/11.438 ms
+with the copy fix. Do not count this as another established pacing win.
+Final Bloodpool WRAM matches in both candidates. Metal's ordinary/native GPU
+packet fixtures pass, and 20 deterministic scrolling composites at phase 0.5
+are pixel-exact between L and M, with identical generated-plane masks and
+camera ranges. Both release builds succeed. The first short image run was
+rejected because it ended before all requested game-frame captures and the
+ownership report; the completed 2,000-tick repeat supplies the comparison.
+
+One M run records a 20.525 ms interval. There is a 14.633 ms gap between the
+previous completed present and the next loop entry; its source was already
+ready, and drawing/submission do not account for that gap. The previous pacing
+CSV row crosses a 4 KiB flush boundary. A direct probe on the Deck establishes
+that `setvbuf(file, NULL, _IOFBF, 4194304)` actually creates a **4,096-byte**
+buffer in its C library. The 1 MiB request likewise becomes 4 KiB. Supplying
+owned storage yields the full requested sizes. Thus the previous "buffered"
+K/L/M captures still permitted frequent diagnostic writes; the corrected
+completion timestamp is valid, but logging can disturb the following frame.
+This is a strong specific observer-effect lead, not proof that every long gap
+was a disk write or that OS scheduling noise is absent.
+
+Build N owns the diagnostic buffers through `fclose`, disables a trace with a
+clear diagnostic if allocation/setup fails, and reports trace-write wall
+scopes exceeding 1 ms. Ordinary untraced playback allocates none of this
+storage. Longer traces still flush when their real buffers fill. A longer
+hardware capture follows with these corrections before assigning isolated
+maxima to renderer work or system noise. Earlier raw measurements remain
+preserved; they are not silently corrected or filtered.
+
+Evidence: `tail-swapchain-profile` (sampling only, not a timing control),
+`tail-packet-*`, `metal-packet-parity-r2-*`, and `metal-packet-parity-r2-report`.
+Deck M SHA-256:
+`a57b5a37875b49240430f89fd1e058025d2ea815a69bfb85a7b863d86ab55fe1`.
+Deck N SHA-256:
+`27396ec329bf72e7db96b6486c1a2e92b2a9035b7d799c8bb36b0a0a493dda7a`.
+
+**Corrected longer capture and focus table.** N completes 9,000 ticks / 150.45
+seconds. After ten seconds of actual-stream warmup, ticks 1,815–8,700 contain
+10,312 presents (about 114.6 seconds). The pacing and phase files are 3,622,773
+and 916,136 bytes, below their real 4 MiB/1 MiB buffers. There are no logged
+>1 ms trace-write scopes. Completion mean is 11.111 ms, median 11.121 ms,
+p95 11.297 ms and p99 11.408 ms: p99 is 0.287 ms / 2.58% above the median.
+Ten intervals exceed 12.11 ms; the worst is 13.740 ms. The 20+ ms gap does not
+recur, but that alone does not prove its earlier cause. There are zero missing
+interpolation endpoints, backwards timeline steps or measured epoch changes.
+Mean displayed-source age is 31.940 ms.
+
+| CPU wall scope | Mean | Median | p99 | Focus |
+| --- | ---: | ---: | ---: | --- |
+| Completed-frame cadence | 11.111 ms | 11.121 ms | 11.408 ms | Outcome, not active rendering cost |
+| Game/PPU producer | 10.063 ms | 10.001 ms | 11.086 ms | Overlaps main; roughly 60 Hz source budget |
+| Main source preparation/upload | 1.953 ms | 1.951 ms | 2.297 ms | Keep bulk-copy win; inspect remaining copies/encoding |
+| Main drawing/command preparation | 2.597 ms | 2.594 ms | 3.648 ms | Highest remaining active-work target |
+| Early swapchain acquisition | 0.227 ms | 0.221 ms | 0.313 ms | Usually hidden by lead; one 3.162 ms tail remains |
+| Final Present call | 0.312 ms | 0.293 ms | 0.636 ms | Driver/submission variability still visible |
+| Event processing and owner polling | 0.020 ms | 0.017 ms | 0.054 ms | Low priority after handoff fixes |
+
+Rows overlap or run at different rates and must not be summed as one frame.
+These are still CPU wall scopes, not GPU execution timestamps or physical
+scanout. The table uses the early-presentation prototype, not ordinary pacing
+settings. The bigger outliers need finer attribution: a logged 0.200 ms idle
+yield lasts 2.638 ms near tick 7,046; four tails contain 4.87–6.44 ms draw scopes;
+one includes a 4.63 ms upload, another a 3.16 ms acquire, and another a 1.54 ms
+final Present. The largest interval at tick 8,112 includes roughly 2.57 ms not
+accounted for by measured backend work and scheduled wait. Do not mislabel
+that residual as GPU execution or as a proven timer oversleep. Thread CPU-time
+and scheduling/wait attribution are the next diagnostic step for these tails.
+The steady-work priority is effect/draw-command construction followed by the
+remaining source-preparation costs; event polling and small worker wake costs
+are no longer the promising targets. Evidence: `tail-owned-trace-long` and
+its `long-analysis.json`.
+
+### Producer breakdown on Deck (2026-10-03)
+
+The broad producer number hid a larger CPU scanout cost than the earlier
+whole-process cycle samples suggested. Prioritize this source-side work along
+with presentation construction; it is not primarily recompiled game logic or
+scheduler noise. Source frames still have a 60.0988 Hz deadline, but completing
+them earlier gives 90 Hz presentation more preparation headroom.
+
+Measured with the same Bloodpool 0201 workload, 64-pixel vertical extension,
+624×352 background packet, resident GPU ownership, and the early-presentation
+prototype (5.5 ms preparation lead, 1900 permille stream delay, precise yield,
+early swapchain acquisition). Each 4,200-tick run measures ticks 1,815–3,900
+(2,086 source frames) after excluding ten seconds from stream startup. Fillmore
+0101 also uses the scrolling replay. Per-tick monotonic wall scopes and Linux
+thread CPU time are recorded independently on the producer, with an owned
+8 MiB CSV buffer; complete trace files fit without mid-run buffer flushes.
+These are CPU timings, not GPU execution timestamps.
+
+Bloodpool broad scopes, milliseconds per source frame:
+
+| Stage | Mean | Median | p99 |
+| --- | ---: | ---: | ---: |
+| Entire producer | 10.098 | 10.035 | 11.273 |
+| PPU scanout | 6.962 | 6.886 | 8.106 |
+| PPU policy/setup/finish, excluding scanout | 0.122 | — | — |
+| APU timeline advancement (nested in emulation) | 1.177 | 1.160 | 1.623 |
+| Recompiled game execution (nested in emulation) | 0.214 | 0.206 | 0.701 |
+| Emulation total | 1.397 | 1.380 | 1.858 |
+| Frame snapshot/effects | 0.714 | 0.702 | 0.922 |
+| Owned packet/surface copying | 0.839 | 0.819 | 1.107 |
+| SIM capture | 0.055 | 0.052 | 0.096 |
+| Audio post-tick service | 0.002 | 0.001 | 0.004 |
+
+Nested rows are not additive; neither are marginal percentiles. Effects account
+for 0.613 ms of snapshot capture: actor observation 0.050 ms, environmental
+observation 0.203 ms, and recipe application 0.360 ms. Background packet copying
+is 0.339 ms of the 0.839 ms ownership copy; remaining surfaces/housekeeping cost
+0.500 ms. Total owned payload is 4.730 MiB per Bloodpool source frame.
+
+Thread CPU time averages 9.958 ms versus 10.098 ms wall time. The remaining
+0.140 ms includes off-CPU waits/descheduling and measurement boundary skew; it
+is not enough to explain the steady cost. In the slowest 1% of source frames,
+mean total rises to 11.551 ms, thread CPU to 10.972 ms, and the wall-minus-CPU
+residual to 0.579 ms. PPU work accounts for 1.190 ms of that cohort's 1.453 ms
+wall-time increase. There is both execution variation and off-CPU noise.
+
+Fine scanout scopes (nested in scanout above; means in milliseconds):
+
+| Scanout operation | Bloodpool 0201 | Scrolling Fillmore 0101 |
+| --- | ---: | ---: |
+| Authored tile/apron lookup and packet capture | 1.613 | 1.548 |
+| BG1 native/world tile resolution and packet construction | 0.394 | 0.458 |
+| BG2 native/world tile resolution and packet construction | 0.881 | 0.465 |
+| BG3/HUD tile resolution | 0.266 | 0.259 |
+| Sprite evaluation, margins and range capture | 0.215 | 0.224 |
+| Sprite pixel export/composition | 1.115 | 1.089 |
+| Overlay row clearing/cache reset/packet row initialization | 0.707 | 0.551 |
+| Final RGB output/color math | 0.680 | 0.660 |
+| BG export/composition | 0.191 | 0.185 |
+| Capture-line setup | 0.131 | 0.125 |
+| Winner masks | 0.015 | 0.014 |
+| Remaining scanout, including probe overhead | 1.045 | 1.012 |
+| Full scanout with these probes | 7.253 | 6.590 |
+
+Every capture-line stage runs 352 times per source frame, including the extra
+vertical rows. GPU-owned BG sources avoid CPU pixel decoding, but the CPU still
+walks map/edit providers and builds their scanline programs. That distinction
+matters: “GPU-owned” does not mean all background preparation is off the CPU.
+The existing sampled profile independently identifies
+`native_capture_tiles_line`, tile providers and packet construction as hot work.
+
+A second diagnostic layout split authored capture by layer: BG1 takes 1.619 ms,
+BG2 just 0.014 ms. It also measures HDMA at 0.014 ms and confirms there are no
+scanline observer callbacks or separate background-view calls in this Bloodpool
+run. The post-raster scanline block accounts for 0.747 ms of the earlier residual.
+Its sprite-export scope measures 0.854 ms instead of 1.115 ms: instrumentation
+changes code generation/layout as well as reading clocks, so treat fine-stage
+figures as a targeting range rather than exact promised savings.
+
+A final, shorter Q run (3,000 total ticks, warmed ticks 1,815–2,700;
+886 samples) splits the post-raster block: padding 0.016 ms, authentic-surface
+check 0.014 ms, **Mode 7 overlay cleanup 0.759 ms**. This is a concrete stale-dirty
+flag bug, not useful Mode 7 rendering in Bloodpool:
+
+- `HdReplacementHost_BindSurfaces`/`RebindSurfaces` binds a Mode 7 surface with
+  height `224 * scale`; binding sets `m7OverlayMaybeDirty`.
+- `render_mode7_override_line` returns when `output_row * scale` reaches that
+  surface's height. It resets the dirty flag only on
+  `screen_y == 223 + extraBottomCur`, after that bounds return.
+- With 64 top and bottom rows, the intended reset is output row 351, outside
+  the 224-row overlay. It never runs. The inactive high-resolution buffer is
+  therefore cleared on every frame instead of once after invalidation.
+
+Fix retirement at the end of the actually covered output surface, preserving
+proper invalidation on bind/reset, active Mode 7 drawing, geometry changes, and
+scene transitions. This should precede larger refactoring. The ~0.75 ms is the
+measured cleanup scope, not yet a validated net saving. No fix was applied as
+part of this measurement pass.
+
+Controls and reproducibility:
+
+- Uninstrumented binary N: mean producer 10.012 ms, p99 11.033 ms. Broad-scope
+  binary O: 10.098 ms, p99 11.273 ms. Fine O: 10.394 ms, p99 11.567 ms. Deep P:
+  10.256 ms, p99 11.296 ms. Separate runs cannot distinguish all code-generation,
+  timer, thermal, and scheduling effects; no timing overhead has been subtracted
+  from individual scopes.
+- Scrolling Fillmore fine O: mean producer 9.407 ms, p99 10.509 ms, thread CPU
+  9.305 ms. The leading scanout work persists during scrolling.
+- All four full Bloodpool runs preserve WRAM SHA256
+  `e0f49116efd6da3e4bada8e7b8e09137cbc8208d08c9dbb004572f3172efd1a7`.
+  Fillmore preserves `55a18e330a5743beb1b2a0c1755c9c7886d95b2325bcc39674951b3104d4c42f`.
+  GPU ownership remains 3 for Bloodpool and 7 for Fillmore, with no rejected
+  sources/fatal errors or resident-effect metadata downloads. These ownership
+  logs are not a new pixel-parity comparison.
+- Evidence, scripts, source patches and original source hashes are under
+  `runs/producer-breakdown-2026-10-03/`. Each `instrument*.py` restores every
+  touched source byte in `finally`; diagnostic binaries are explicitly named
+  `ActRaiserRecomp-producer-*`. No timer probes or Linux-only timing dependencies
+  were left in production source. All measured windows and stage percentiles
+  are retained in each run's `producer-analysis.json`; use `run_producer.py`
+  with `--producer-trace` and optionally `--fine` for diagnostic binaries only.
+
+Next optimization order:
+
+1. Fix the inactive Mode 7 surface dirty-flag retirement described above and
+   test extended-height/short-surface transitions.
+2. Reduce repeated BG1 edit/apron/provider walks. Cache tile-level edit and band
+   decisions by map/edit generation, or publish compact resident tile/map data
+   and per-row state for GPU consumption. Preserve HDMA scroll/palette changes,
+   VRAM animation and provider fallback semantics; do not simply cache a whole
+   rendered scanline across frames.
+3. Specialize sprite export for empty rows/spans and common capture policies;
+   eventually evaluate a resident sprite command path. Sprite evaluation itself
+   is small compared with scanning/exporting/compositing its destination pixels.
+4. Remove unnecessary clear/RGB work where ownership proves there is no CPU
+   consumer, and reduce the remaining packet/surface copy. Keep CPU HUD, native
+   presentation, comparison, capture, and unusual PPU policy fallbacks correct.
+5. Revisit effect-scene/occlusion snapshot invalidation, then APU scheduling.
+   APU timeline advancement is worthwhile (~1.18 ms), but moving it off-owner
+   requires preserving deterministic SPC-port synchronization. More gameplay
+   HLE is low priority with game execution averaging only ~0.21 ms.
+
+These are measured cost targets, not projected recoverable time. Validate each
+change with scrolling pixel parity and the same producer/presentation traces.
+
+### 2026-10-03 — Portable producer optimizations, pass R
+
+Implemented the first three producer targets above. Runtime changes are based
+only on PPU state, surface bounds and explicit capture contracts:
+
+- Retire an inactive Mode 7 surface's dirty flag at the bound surface end,
+  including a partial scaled row. Extended scanout can continue past that end.
+  The previous final-scanline-only check repeatedly cleared an already-clean
+  high-resolution surface. Rebinding, reset and active artwork retain their
+  invalidation behavior.
+- Add an optional, versioned `SR_RUNNER_CAP_PPU_CAPTURE_TILE_CACHE` contract.
+  Hosts select stable authored lookup layers in the appended request field;
+  the runtime caches hits and misses by full tile coordinates for one scanout
+  frame. Cache storage is bounded, and frame start/rebinding invalidate it.
+  Legacy request prefixes remain live. VRAM, palette, scroll and virtual-world
+  callbacks remain live even when authored metadata is cached. ActRaiser's
+  adapter opts in for its immutable published edits; no room IDs, game memory
+  addresses or environment rules enter `snesrecomp-go`.
+- Track occupied sprite spans, including synthetic horizontal margins. For
+  whole-OAM extraction with uniform visibility, export only occupied pixels
+  and merge the remaining packed source spans separately. Partial OAM ranges,
+  variable windows and winner-dependent captures keep the general path.
+
+Deck results below use normal binaries, not the instrumented build. Same
+4200-tick workload, 64 extended rows, resident background/effect rendering,
+90 Hz presenter, early swapchain preparation, 5.5 ms lead and 1.9-frame delay.
+The first ten seconds of actual streamed output are excluded; the measurement
+ends at tick 3900 (2085–2086 producer samples per run). Bloodpool was repeated
+in A/B/B/A order. Times are milliseconds of **producer work**, not GPU time
+or end-to-end input latency; producer and presenter overlap.
+
+| Workload | Before mean | After mean | Before p99 | After p99 |
+|---|---:|---:|---:|---:|
+| Bloodpool, interpolation, pair 1 | 10.066 | 8.130 | 11.098 | 9.173 |
+| Bloodpool, interpolation, pair 2 | 10.028 | 8.100 | 10.902 | 9.136 |
+| Scrolling Fillmore, interpolation | 9.267 | 7.365 | 10.553 | 8.332 |
+| Bloodpool, interpolation disabled | 10.020 | 8.127 | 11.058 | 9.305 |
+
+This recovers about 1.9 ms (19–21%) of producer work in these workloads.
+Bloodpool presentation interval p99 remains roughly 11.41 ms in both builds;
+this gives the producer headroom, rather than proving every presentation tail
+is fixed. Its deadline-lateness p99 improved from 2.472 to 1.107 ms in pair 1.
+The interpolation-disabled run still uses the 90 Hz presenter to repeat native
+endpoints; it is not a claim of 90 Hz game simulation.
+
+A separate fine-scope build attributes the changes. The earlier fine O and new
+fine R measurements include probe/code-generation overhead, so their deltas
+must not replace the uninstrumented totals above:
+
+| PPU scope | Fine O mean | Fine R mean |
+|---|---:|---:|
+| Total scanout | 7.253 | 5.148 |
+| Authored tile/apron capture | 1.613 | 1.389 |
+| OBJ resolve | 0.215 | 0.213 |
+| OBJ export/composition | 1.115 | 0.024 |
+| Row clear/setup | 0.838 | 0.825 |
+| RGB output | 0.680 | 0.653 |
+| Remaining scanout scopes, including Mode 7 cleanup | 1.045 | 0.313 |
+
+Validation:
+
+- Generic PPU oracle tests, ABI/C/C++ header tests and Mode 7 tests pass.
+  The new Mode 7 test failed before the fix. Cached/uncached authored capture
+  agrees with live scroll, brightness, palette and VRAM changes, masks,
+  mosaic, mirror policies and frame invalidation. Sprite tests cover empty
+  rows, margins, movement, visibility, partial rectangles and OAM ranges.
+- ASan/UBSan capture/ABI/Mode 7 checks pass. The PPU suite also passes with
+  32-bit mask words. macOS ARM64 and Linux x86-64 builds succeed; no new
+  platform-specific intrinsics or timing dependencies ship in the runtime.
+- Forty controlled Metal frames match byte-for-byte: twenty scrolling Fillmore
+  composites at interpolation phase 0.5, and twenty stationary Bloodpool source
+  composites. Fillmore's BG1 moves 546 pixels horizontally and 188 vertically.
+  GPU background parity tests also pass. These are sampled comparisons, not
+  exhaustive visual coverage of every platform/room.
+- Dynamic Cam initially produced small differences even between repeated runs
+  of the same executable: its presentation damping uses wall time. Fixed
+  presentation-camera orientation removes that variable while game/level
+  scrolling continues. Those dynamic runs are retained as diagnostics, not
+  counted as exact parity. A Bloodpool walking capture fell into a pit and
+  failed room/ownership validation; the valid Bloodpool comparison is stationary.
+- The shared WASM renderer builds; whole-room native/WASM tests pass across
+  147 regional rooms, 882 surface/source comparisons, 147 authored round trips,
+  30 preset reconstructions and 28263 draws. Host queue, producer, playout,
+  input, pacing and PPU integration tests pass.
+- All matching Deck replay pairs preserve final WRAM hashes: Bloodpool
+  `e0f49116efd6da3e4bada8e7b8e09137cbc8208d08c9dbb004572f3172efd1a7`,
+  Fillmore `55a18e330a5743beb1b2a0c1755c9c7886d95b2325bcc39674951b3104d4c42f`.
+  No fatal sessions, rejected background sources or effect metadata downloads.
+
+Evidence is in `runs/producer-opt-2026-10-03/`: pinned before/after executables,
+capture manifests, comparison reports, A/B traces, state hashes and a separate
+instrumentation script/patch. Production Deck R SHA256 is
+`818ea31aa0f8cc0551017ab1a718d5b2bc864f1e502f8824e3136feae3fcada1`.
+Every instrumented source was restored byte-for-byte after the diagnostic
+build; probes are not left in shipping code.
+
+Remaining producer priorities: authored tile/apron packet generation (1.389 ms),
+BG2 resolution (0.872 ms), packet/surface copying (0.849 ms), row clears
+(0.691 ms), RGB conversion (0.653 ms), and effect snapshot capture (0.730 ms).
+Further clear/RGB/copy elision needs explicit CPU-consumer and buffer-lifetime
+proof; those ownership changes are still pending. APU timeline work remains
+1.182 ms, with deterministic port synchronization required before threading it.
+Sprite export is no longer a leading target. Presenter tail work remains a
+separate investigation from these producer savings.
+### 2026-10-03 — Packet ownership and tile capture optimizations, pass U
+
+The next producer pass removes the per-frame background packet copy. Scanout
+writes into its reserved queue slot; the slot remains immutable until released
+by the presenter. The ordinary copy path remains available for external packet
+storage. When the producer yields ownership, it copies its last publication
+into the synchronous snapshot once, so paused redraws and diagnostics can
+recapture safely without another scanout or a pointer into recycled storage.
+Queue allocation remains lazy and bounded; no new thread, GPU readback, packet
+format, shader or graphics-backend dependency is introduced.
+
+Portable `snesrecomp-go` changes:
+
+- Uniform-visibility authored tiles are emitted as a whole run without walking
+  individual pixels to rediscover that there is no window split.
+- Complete authored replacements clear their three destination bands together
+  and write only the selected band. Partial masks and skybox cells retain the
+  general writer, preserving black, transparent and backing semantics.
+- Main/authentic RGB rows clear only guard columns that scanout will not
+  overwrite. Forced blank still clears the whole row.
+- A new dirty-buffer/colour-math test exposed a pre-existing native/reference
+  mismatch: clipping the main colour could skip an actor's colour transform
+  even though subsequent colour maths produced visible output. The native
+  path now applies the transform after maths, matching the reference sampler.
+
+A uniform-RGB-span experiment did not produce a useful measured saving and was
+removed. The implementation retains the ordinary per-pixel RGB path, avoiding
+an extra uniformity scan on dense scenes. Runtime decisions remain based on
+PPU state and capture contracts; game-specific orchestration stays in the host.
+
+Normal Deck binaries, with the same pass-R workload and settings: 4200 ticks,
+64 extended rows, 90 Hz presentation, resident rendering, 5.5 ms prepare lead
+and 1.9-frame playout delay. Exclude ten seconds of streamed warmup and stop
+measurement at tick 3900 (2085–2086 source samples). These are producer work
+costs, not input latency or total serial CPU+GPU time.
+
+| Workload | R mean | U mean | R p99 | U p99 |
+|---|---:|---:|---:|---:|
+| Bloodpool, interpolation, pair 1 | 8.085 | 7.724 | 9.140 | 8.906 |
+| Bloodpool, interpolation, pair 2 | 8.145 | 7.698 | 9.247 | 8.837 |
+| Scrolling Fillmore, interpolation | 7.411 | 7.064 | 8.454 | 8.066 |
+| Bloodpool, interpolation disabled | 8.110 | 7.673 | 9.590 | 8.721 |
+
+This saves another 0.35–0.45 ms of average producer work, approximately 5%.
+Presentation interval p99 remains 11.3–11.4 ms; more producer headroom is not
+proof that every 90 Hz presentation tail is solved. The interpolation-disabled
+case still presents repeated native 60 Hz endpoints on the 90 Hz schedule.
+
+Validation:
+
+- Forty controlled Metal composites match pass R byte-for-byte: twenty
+  scrolling Fillmore phase-0.5 frames (BG1 traverses 546×188 pixels), and twenty
+  Bloodpool source frames. Three additional streamed Bloodpool captures across
+  vertical-view changes 64→32→64 also match exactly, with identical final WRAM.
+- That transition test caught and corrected an intermediate ownership bug:
+  clearing the live publication after each capture removed GPU-owned scenery
+  from later host recaptures. U preserves the publication when yielding, before
+  borrowed queue storage can be freed. Intermediate S/T binaries are diagnostic
+  evidence only and must not be distributed.
+- Queue tests cover direct capture, ordinary copied packets, slot reuse and
+  retaining a frame while production resumes. Native/reference PPU tests cover
+  dirty guards, blank/resume, colour-window/maths combinations, per-actor tints,
+  authored tile masks, provider/raster changes and fallback paths. ASan/UBSan
+  focused checks, C/C++ API checks, 32-bit-mask PPU tests, host queue/producer/
+  input/presentation tests and GPU background parity checks pass.
+- Shared WASM rendering builds and matches all 147 regional rooms: 882 surface/
+  source comparisons, 147 authored round trips, 30 presets and 28263 draws.
+  macOS ARM64/Metal and Linux x86-64/Vulkan are exercised. Windows/D3D12 is not
+  run here; these changes introduce no backend-specific code or intrinsics.
+
+A separate diagnostic build attributes the improvement; probe overhead means
+these figures should not replace the normal-binary totals above:
+
+| Producer scope | Fine R mean (ms) | Fine U mean (ms) |
+|---|---:|---:|
+| Packet/surface copies | 0.849 | 0.494 |
+| Background packet copy per frame | 0.343 | 0.000 |
+| PPU scanout | 5.148 | 5.072 |
+| Authored tile/apron capture | 1.389 | 1.285 |
+
+Copied bytes fall from 4.730 to 2.766 MiB per source frame.
+The snapshot copy at an ownership handoff (normally about once a second for
+maintenance) is outside the per-frame copy scope. Presentation traces include
+those handoffs; no claim is made that all copying has disappeared.
+
+All matching Deck replay pairs preserve WRAM hashes: Bloodpool
+`e0f49116efd6da3e4bada8e7b8e09137cbc8208d08c9dbb004572f3172efd1a7`, Fillmore
+`55a18e330a5743beb1b2a0c1755c9c7886d95b2325bcc39674951b3104d4c42f`. No rejected background sources, fatal sessions, or resident
+effect metadata downloads occurred. Remaining measured work includes roughly
+1.29 ms authored tile capture, 1.19 ms APU advancement, 0.73 ms frame/effect
+capture and 0.49 ms CPU surface copies. Those need separate changes and
+validation; game-specific APU shortcuts have not been introduced.
+
+Evidence is under `runs/producer-opt2-2026-10-03/`, including pinned binaries,
+before-source snapshots, normal traces, capture comparisons, transition
+regression evidence and `profile-u/`'s reproducible diagnostic patch. Every
+instrumented production source was restored byte-for-byte. The final Deck U
+binary SHA256 is
+`3e008df0ff53824074027e9b9a9059a47814ec83d2d6c97a55eb17a73a3e14f0`.
+Changes are left uncommitted for review.

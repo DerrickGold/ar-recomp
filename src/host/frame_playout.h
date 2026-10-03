@@ -49,6 +49,16 @@ static inline bool HostFramePlayout_NeedsEndpoint(
   return !policy.interpolate || !endpoint_ns || endpoint_ns < target_ns;
 }
 
+/* Early drawing is optional; publishing a stale pair for a future sample is
+ * not. Wait only while there is still time before that planned sample. A late
+ * source at the actual deadline retains the ordinary bounded hold policy. */
+static inline bool HostFramePlayout_AwaitEndpoint(
+    HostFramePlayout policy, uint64_t endpoint_ns, uint64_t target_ns,
+    uint64_t now_ns, uint64_t sample_ns) {
+  return policy.interpolate && sample_ns > now_ns &&
+      HostFramePlayout_NeedsEndpoint(policy, endpoint_ns, target_ns);
+}
+
 static inline float HostFramePlayout_Phase(
     HostFramePlayout policy, uint64_t endpoint_ns, uint64_t target_ns) {
   if (!policy.interpolate) return -1.0f; /* No frame generation. */

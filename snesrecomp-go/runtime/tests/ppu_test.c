@@ -1309,6 +1309,99 @@ static void test_native_capture_path_parity(void) {
     compare_native_capture_path(false, 1u, 1u, -1, true, true, 0x10);
 }
 
+/* Uniform and varying RGB spans must preserve colour maths and per-actor
+ * transforms, with and without authentic output. Dirty guard columns are
+ * checked independently: both paths share the output clearing code. */
+static void test_rgb_spans_and_guards(void) {
+    enum { kExtra = 16, kWidth = 320, kRows = 10 };
+    static uint32_t pixels[2][kRows][kWidth], original[2][kRows][kWidth];
+    static uint32_t overlay[2][kRows][kWidth];
+    Ppu *p[2] = {ppu_init(), ppu_init()};
+    CHECK(p[0] && p[1]);
+    if (!p[0] || !p[1]) goto cleanup;
+    for (int variant = 0; variant < 4; ++variant)
+    for (int authentic = 0; authentic < 2; ++authentic)
+    for (int math = 0; math < 8; ++math) {
+        memset(pixels, 0xcd, sizeof(pixels));
+        memset(original, 0xab, sizeof(original));
+        memset(overlay, 0, sizeof(overlay));
+        for (int implementation = 0; implementation < 2; ++implementation) {
+            Ppu *q = p[implementation];
+            setup_native_fast_fixture(q, 1u, 0u, false);
+            q->screenEnabled[0] = variant < 2 ? 0 : variant == 2 ? 1 : 16;
+            q->screenEnabled[1] = variant == 1 ? 2 : 0;
+            q->screenWindowed[0] = q->screenWindowed[1] = 0;
+            q->cgadsub = (math & 1 ? 0x3f : 0) |
+                (math & 2 ? 0x80 : 0) | (math & 4 ? 0x40 : 0);
+            if (variant == 3) {
+                /* A uniform packed OBJ span may still need different colour
+                 * transforms for adjacent sprites using the same palette. */
+                SrPpuObjColorTransform transforms[128] = {0};
+                q->obsel = 0;
+                memset(q->highOam, 0, sizeof(q->highOam));
+                for (int slot = 0; slot < 128; ++slot) {
+                    q->oam[slot * 2] = slot < 32 ? slot * 8 : 0xe000;
+                    q->oam[slot * 2 + 1] = (4 << 9) | (3 << 12);
+                    for (int c = 0; c < 3; ++c)
+                        transforms[slot].multiply[c] = slot & 1 ? 128 : 256;
+                }
+                for (int y = 0; y < 8; ++y) {
+                    q->vram[y] = 0x00ff;
+                    q->vram[y + 8] = 0;
+                }
+                CHECK(PpuSetObjColorTransforms(q, transforms, 128));
+            }
+            PpuSetExtraSpace(q, kExtra);
+            PpuBeginDrawing(q, (uint8_t *)pixels[implementation], kWidth * 4,
+                implementation ? kPpuRenderFlags_ReferencePixelRenderer : 0);
+            CHECK(PpuBindOverlaySurface(q, kPpuOverlaySource_Bg1,
+                (uint8_t *)overlay[implementation], kWidth * 4));
+            /* Capture without removing the main layer keeps both uniform
+             * backdrop and nonuniform native winners reachable. */
+            CHECK(PpuSetOverlayCapture(q, kPpuOverlaySource_Bg1,
+                -kExtra, 0, 256 + 2 * kExtra, kRows, 0));
+            if (authentic) CHECK(PpuBindAuthenticSurface(q,
+                (uint8_t *)original[implementation], kWidth * 4));
+            ppu_runLine(q, 0);
+            for (int line = 1; line < kRows; ++line) {
+                q->extraLeftCur = line & 1 ? kExtra : 0;
+                q->extraRightCur = line & 2 ? 5 : kExtra;
+                ppu_write(q, 0x00, line == 7 ? 0x8f : (uint8_t)(line + 6));
+                /* Fixed colour, subscreen, clipping and prevention change
+                 * within this frame, including a forced-blank/resume. */
+                q->cgwsel = (uint8_t)(((line & 3) << 6) |
+                    (((line + 1) & 3) << 4) | (line & 1 ? 2 : 0));
+                ppu_runLine(q, line);
+                const int origin = kWidth / 2 - 128;
+                for (int x = 0; x < kWidth; ++x) {
+                    if (line == 7 || x < origin - q->extraLeftCur ||
+                        x >= origin + 256 + q->extraRightCur)
+                        CHECK(pixels[implementation][line - 1][x] == 0);
+                    if (authentic && (line == 7 || x < origin || x >= origin + 256))
+                        CHECK(original[implementation][line - 1][x] == 0);
+                }
+            }
+            for (int x = 0; x < kWidth; ++x) {
+                CHECK(pixels[implementation][kRows - 1][x] == 0xcdcdcdcdu);
+                CHECK(original[implementation][kRows - 1][x] == 0xababababu);
+            }
+        }
+        if (memcmp(pixels[0], pixels[1], sizeof(pixels[0]))) {
+            for (int y = 0; y < kRows; ++y) for (int x = 0; x < kWidth; ++x)
+                if (pixels[0][y][x] != pixels[1][y][x]) {
+                    fprintf(stderr, "RGB mismatch variant=%d authentic=%d math=%d x=%d y=%d fast=%x ref=%x\n",
+                        variant, authentic, math, x, y, pixels[0][y][x], pixels[1][y][x]);
+                    goto reported;
+                }
+        }
+reported:
+        CHECK(!memcmp(pixels[0], pixels[1], sizeof(pixels[0])));
+        CHECK(!memcmp(original[0], original[1], sizeof(original[0])));
+    }
+cleanup:
+    ppu_free(p[0]); ppu_free(p[1]);
+}
+
 static void compare_main_winner_masks(uint8_t mode, int extra, int variant, bool authentic, bool owning) {
     enum { kRows = 32, kPlanes = 4 };
     const int width = kPpuXPixels + extra * 2;
@@ -2161,19 +2254,19 @@ static bool capture_world_band(const void *context, int32_t x, int32_t y,
 
 static void test_native_capture_tiles(void) {
     enum { kExtra = 120, kApron = 64, kWidth = 624, kRows = 16, kOrigin = 184 };
-    static uint32_t main_pixels[3][kWidth * kRows];
-    static uint32_t authentic[3][kWidth * kPpuYPixels];
-    static uint32_t planes[3][3][kWidth * kRows];
-    Ppu *sources[3] = {ppu_init(), ppu_init(), ppu_init()};
-    CHECK(sources[0] && sources[1] && sources[2]);
-    if (!sources[0] || !sources[1] || !sources[2]) goto cleanup;
+    static uint32_t main_pixels[4][kWidth * kRows];
+    static uint32_t authentic[4][kWidth * kPpuYPixels];
+    static uint32_t planes[4][3][kWidth * kRows];
+    Ppu *sources[4] = {ppu_init(), ppu_init(), ppu_init(), ppu_init()};
+    CHECK(sources[0] && sources[1] && sources[2] && sources[3]);
+    if (!sources[0] || !sources[1] || !sources[2] || !sources[3]) goto cleanup;
     /* The oracle is the ordinary BG renderer with a merged tile provider,
      * independently exercising native scalar and tile-span paths. */
     for (int variant = 0; variant < 16; ++variant) {
         const int bg = variant / 8, mode = variant % 8;
-        CaptureTileFixture fixtures[3] = {{0}, {.masks = mode == 7},
-            {.merged = true, .masks = mode == 7}};
-        for (int i = 0; i < 3; ++i) {
+        CaptureTileFixture fixtures[4] = {{0}, {.masks = mode == 7},
+            {.merged = true, .masks = mode == 7}, {.masks = mode == 7}};
+        for (int i = 0; i < 4; ++i) {
             Ppu *ppu = sources[i];
             ppu_reset(ppu);
             ppu->inidisp = 15;
@@ -2203,9 +2296,10 @@ static void test_native_capture_tiles(void) {
                     : kPpuOverlayFlag_ApplyBgFixedColorSubtract)));
             CHECK(PpuSetOverlayTransparentFill(ppu, bg,
                 kPpuOverlayTransparentFill_Cgram, 0));
-            if (i == 1) ppu->captureTiles[bg] = (SrPpuCaptureTileBinding){
+            if (i == 1 || i == 3) ppu->captureTiles[bg] = (SrPpuCaptureTileBinding){
                 .lookup = capture_tile_lookup, .user_data = &fixtures[i], .apron = kApron,
             };
+            if (i == 3) ppu->captureTileStableMask = 1u << bg;
             if (mode == 1) ppu->mosaic = 0x40 | (1u << bg);
             if (mode == 2) {
                 ppu->screenWindowed[0] = 1u << bg;
@@ -2218,6 +2312,10 @@ static void test_native_capture_tiles(void) {
             CHECK(PpuBindAuthenticSurfaceSized(ppu, (uint8_t *)authentic[i], kWidth * 4, kPpuYPixels));
             for (int row = 0; row < kRows; ++row) {
                 /* Raster changes must affect edits on exactly the same row. */
+                ppu_write(ppu, 0x15, 0x80);
+                ppu_write(ppu, 0x16, 32 + (row & 7));
+                ppu_write(ppu, 0x17, 0);
+                ppu_write(ppu, 0x18, (uint8_t)(0x0f ^ row));
                 ppu->hScroll[bg] = (uint16_t)(row & 7);
                 ppu->vScroll[bg] = (uint16_t)(row / 4);
                 ppu_write(ppu, 0x00, (uint8_t)(15 - row / 4));
@@ -2251,6 +2349,22 @@ static void test_native_capture_tiles(void) {
             for (int row = 0; row < kRows; ++row)
                 CHECK(memcmp(&planes[1][band][row * kWidth + kApron],
                     &planes[2][band][row * kWidth + kApron], 496 * 4) == 0);
+        CHECK(memcmp(main_pixels[1], main_pixels[3], sizeof(main_pixels[1])) == 0);
+        CHECK(memcmp(authentic[1], authentic[3], sizeof(authentic[1])) == 0);
+        CHECK(memcmp(planes[1], planes[3], sizeof(planes[1])) == 0);
+        CHECK(fixtures[3].calls < fixtures[1].calls / 2);
+        /* Hits and misses expire at frame start, even with the same binding.
+         * Changing authored metadata must not leave prior-frame tiles behind. */
+        for (int frame = 0; frame < 2; ++frame) {
+            for (int i = 1; i <= 3; i += 2) {
+                fixtures[i].masks = frame == 0;
+                fixtures[i].calls = 0;
+                ppu_runLine(sources[i], 0);
+                for (int row = 1; row <= kRows; ++row) ppu_runLine(sources[i], row);
+            }
+            CHECK(memcmp(planes[1], planes[3], sizeof(planes[1])) == 0);
+            CHECK(fixtures[3].calls > 0 && fixtures[3].calls < fixtures[1].calls / 2);
+        }
         CHECK(sources[1]->overlayRenderContentMask[bg] == 7u);
         /* Guard terrain is streamed even where the native game stops. */
         if (mode == 0) {
@@ -2262,7 +2376,7 @@ static void test_native_capture_tiles(void) {
         CHECK(sources[1]->captureTileCoverage[bg][kOrigin] == 0u);
     }
 cleanup:
-    for (int i = 0; i < 3; ++i) ppu_free(sources[i]);
+    for (int i = 0; i < 4; ++i) ppu_free(sources[i]);
 }
 
 static void test_native_background_view(void) {
@@ -2438,6 +2552,66 @@ cleanup:
     ppu_free(sources[1]);
 }
 
+static void test_sparse_obj_export(void) {
+    enum { kWidth = 496, kRows = 32, kPixels = kWidth * kRows };
+    static uint32_t output[2][kPixels], planes[2][4][kPixels];
+    for (unsigned scenario = 0; scenario < 32; ++scenario) {
+        memset(output, 0, sizeof(output));
+        memset(planes, 0, sizeof(planes));
+        for (unsigned reference = 0; reference < 2; ++reference) {
+            Ppu *ppu = ppu_init();
+            CHECK(ppu != NULL);
+            if (!ppu) return;
+            ppu_reset(ppu);
+            ppu->inidisp = 15;
+            ppu->bgmode = 1;
+            ppu->screenEnabled[(scenario >> 1) & 1] = 0x10;
+            ppu->cgram[0] = 0x0421;
+            ppu->cgram[0x81] = 0x001f;
+            ppu->cgwsel = 2; ppu->cgadsub = 0x30;
+            for (unsigned slot = 0; slot < 128; ++slot)
+                ppu->oam[slot * 2] = 0xe000;
+            for (unsigned row = 0; row < 8; ++row) ppu->vram[row] = 0x003c;
+            for (unsigned slot = 0; slot < 4; ++slot) {
+                ppu->oam[slot * 2 + 1] = (uint16_t)(slot << 12);
+                PpuSetObjExactPosition(ppu, (uint8_t)slot, -116 + (int)slot * 158, 2);
+            }
+            PpuSetExtraSpace(ppu, 120);
+            CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj,
+                (uint8_t *)planes[reference][0], kWidth * 4));
+            for (unsigned band = 1; band < 4; ++band)
+                CHECK(PpuBindOverlayPrioSurface(ppu, kPpuOverlaySource_Obj,
+                    (uint8_t)band, (uint8_t *)planes[reference][band]));
+            CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Obj,
+                scenario & 4 ? -100 : -120, 0, scenario & 4 ? 450 : kWidth, kRows,
+                (uint8_t)(kPpuOverlayFlag_MarkObjColorMath |
+                    (scenario & 1 ? kPpuOverlayFlag_RemoveFromGame : 0))));
+            CHECK(PpuSetOverlayOamRange(ppu, scenario & 16 ? 1 : 0,
+                scenario & 16 ? 2 : 128));
+            if (scenario & 8) {
+                ppu->screenWindowed[0] = ppu->screenWindowed[1] = 0x10;
+                ppu->windowsel = 2u << 16;
+                ppu->window1left = 30; ppu->window1right = 100;
+            }
+            PpuBeginDrawing(ppu, (uint8_t *)output[reference], kWidth * 4,
+                reference ? kPpuRenderFlags_ReferencePixelRenderer : 0);
+            ppu_runLine(ppu, 0);
+            for (unsigned row = 1; row <= kRows; ++row) {
+                /* Empty rows, OAM movement and palette writes invalidate the
+                 * occupied span and colours independently of capture policy. */
+                if (row == 16) PpuSetObjExactPosition(ppu, 0, 20, 17);
+                ppu_write(ppu, 0x21, 0x81);
+                ppu_write(ppu, 0x22, (uint8_t)row);
+                ppu_write(ppu, 0x22, 0);
+                ppu_runLine(ppu, (int)row);
+            }
+            ppu_free(ppu);
+        }
+        CHECK(!memcmp(output[0], output[1], sizeof(output[0])));
+        CHECK(!memcmp(planes[0], planes[1], sizeof(planes[0])));
+    }
+}
+
 static void test_obj_winner_capture(void) {
     enum { kPixels = kPpuXPixels * kPpuYPixels };
     static uint32_t output[kPixels], range[2][kPixels], winners[2][kPixels];
@@ -2489,6 +2663,10 @@ static void test_obj_winner_capture(void) {
 }
 
 int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "--rgb-spans")) {
+        test_rgb_spans_and_guards();
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && !strcmp(argv[1], "--capture-tiles")) {
         test_native_capture_tiles();
         if (failures) return 1;
@@ -2517,6 +2695,8 @@ int main(int argc, char **argv) {
         test_native_fast_path_parity();
         test_native_capture_path_parity();
         test_obj_winner_capture();
+        test_sparse_obj_export();
+        test_rgb_spans_and_guards();
         test_main_winner_masks();
         test_winner_mask_only_when_captured();
         test_unbound_capture_fails_open();

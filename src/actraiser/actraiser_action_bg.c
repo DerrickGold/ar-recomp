@@ -1747,6 +1747,10 @@ bool ActRaiserActionBg_BindCaptureTiles(uint8_t capture_mask, uint8_t apron_mask
         (room->stamp_layers[bg].count || room->pixel_layers[bg].count);
     if (!edits && !(apron_mask & (1u << bg))) continue;
     request.layer_mask |= 1u << bg;
+    /* The published room edits/world are immutable through scanout. Raster
+     * scroll, CHR and palette changes remain owned by the runtime. */
+    if (edits && (s_runner_api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TILE_CACHE))
+      request.stable_layer_mask |= 1u << bg;
     request.bindings[bg] = (SrPpuCaptureTileBinding){
       .lookup = edits ? ProviderCaptureTile : NULL,
       .user_data = provider,

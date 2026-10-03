@@ -240,6 +240,50 @@ static uint32_t sample(unsigned scale, unsigned x, unsigned y) {
     return overlay[1 + y * kWidth * scale + 8 * scale + x];
 }
 
+static void test_inactive_short_surface(Ppu *ppu, unsigned reference) {
+    for (unsigned scale = 1; scale <= 4; ++scale) {
+        setup(ppu, scale, reference);
+        PpuClearOverlayCaptures(ppu);
+        ppu->bgmode = 1;
+        /* A host's optional high-resolution surface can be shorter than the
+         * PPU output, including a partial final subpixel row. */
+        const unsigned height = kRows * scale - 1;
+        CHECK(PpuBindMode7OverlaySurface(ppu, (uint8_t *)(overlay + 1),
+            kWidth * scale * 4u, (uint8_t)scale, height));
+        ppu->extraTopCur = ppu->extraBottomCur = 64;
+        ppu_runLine(ppu, 0);
+        for (int y = -64; y < kPpuYPixels + 64; ++y)
+            ppu_runMarginLine(ppu, y + 1);
+        CHECK(!ppu->m7OverlayMaybeDirty);
+        for (unsigned i = 0; i < kWidth * scale * height; ++i)
+            CHECK(overlay[1 + i] == 0);
+        CHECK(overlay[0] == 0xa5a5a5a5u);
+        CHECK(overlay[1 + kWidth * scale * height] == 0xa5a5a5a5u);
+
+        /* No subsequent inactive frame should rewrite the clean surface. */
+        overlay[1] = 0x12345678;
+        ppu_runLine(ppu, 0);
+        ppu_runMarginLine(ppu, 1 - 64);
+        CHECK(overlay[1] == 0x12345678);
+        CHECK(PpuBindMode7OverlaySurface(ppu, (uint8_t *)(overlay + 1),
+            kWidth * scale * 4u, (uint8_t)scale, height));
+        ppu_runMarginLine(ppu, 1 - 64);
+        CHECK(overlay[1] == 0); /* rebinding invalidates it again */
+
+        /* Active artwork must keep the surface dirty for its removal frame. */
+        ppu->extraTopCur = ppu->extraBottomCur = 0;
+        ppu->bgmode = 7;
+        CHECK(PpuSetMode7Override(ppu, art, 4, 4, 10, 1, 12, 3, 0));
+        for (int y = 0; y < kRows; ++y) ppu_runLine(ppu, y + 1);
+        CHECK(ppu->m7OverlayMaybeDirty);
+        PpuClearOverlayCaptures(ppu);
+        for (int y = 0; y < kRows; ++y) ppu_runLine(ppu, y + 1);
+        CHECK(!ppu->m7OverlayMaybeDirty);
+        for (unsigned i = 0; i < kWidth * scale * height; ++i)
+            CHECK(overlay[1 + i] == 0);
+    }
+}
+
 int main(void) {
     Ppu *ppu = ppu_init();
     if (!ppu) return 1;
@@ -256,6 +300,7 @@ int main(void) {
         test_transform(ppu, reference);
         test_visibility(ppu, reference);
         test_bounds_and_lifetime(ppu, reference);
+        test_inactive_short_surface(ppu, reference);
     }
     ppu_free(ppu);
     if (failures) fprintf(stderr, "Mode-7 override: %u failures\n", failures);

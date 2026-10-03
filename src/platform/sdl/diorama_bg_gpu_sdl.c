@@ -229,7 +229,16 @@ static uint32_t ResolveNative(ArRenderDevice *device, const SrPpuBgPacket *p,
     const Uint32 size = p->words[3] * (Uint32)sizeof(uint32_t);
     uint32_t *data = SDL_MapGPUTransferBuffer(s_bg.gpu, s_bg.upload, true);
     if (!data) return 0;
-    for (unsigned i = 0; i < p->words[3]; ++i) data[i] = SDL_Swap32LE(p->words[i]);
+    /* The packet is already in GPU byte order on little-endian hosts. A
+     * word-at-a-time loop cannot assume this mapped pointer doesn't alias p,
+     * and compiled to scalar stores plus a size reload on every word on Deck.
+     * The transfer allocation is separate; use the platform's bulk copy. */
+#if SDL_BYTEORDER == SDL_LIL_ENDIAN
+    memcpy(data, p->words, size);
+#else
+    const unsigned words = size / sizeof(uint32_t);
+    for (unsigned i = 0; i < words; ++i) data[i] = SDL_Swap32LE(p->words[i]);
+#endif
     SDL_UnmapGPUTransferBuffer(s_bg.gpu, s_bg.upload);
     if (!ArSdlRenderBackend_SubmitPending(device)) return 0;
     SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(s_bg.gpu);

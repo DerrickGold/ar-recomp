@@ -4,6 +4,9 @@
 Completion is the return from the backend present call, not physical scanout.
 Upload rows without a present are retained: preparation can happen between
 refresh deadlines. CPU producer work overlaps presentation and is not additive.
+With early swapchain preparation, backend flush/acquire and blit recording
+precede the scheduled wait. They are not contained in backend_present_ms,
+which measures only the final Present call and its immediate bookkeeping.
 """
 from __future__ import annotations
 
@@ -24,10 +27,18 @@ def stats(values):
                 p50=percentile(.5), p95=percentile(.95), p99=percentile(.99), max=values[-1])
 
 
-def analyze(path, start=1200, end=3300, refresh=90):
+def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0):
+    if refresh <= 0 or end < start or warmup_seconds < 0:
+        raise ValueError('Invalid timing range or warmup')
     with Path(path).open() as f:
         rows = [{k:int(v) for k,v in row.items()} for row in csv.DictReader(f)]
-    rows = [r for r in rows if start <= r['tick'] <= end]
+    # The game may enter the room long before the independent presenter starts.
+    # Warm up against the first actual streamed endpoint, not a boot tick guess.
+    first_source = next((r for r in rows if r['tick'] > 0 and r['source_ns']), None)
+    if first_source is None:
+        raise ValueError('No streamed source in trace')
+    cutoff = first_source['loop_ns'] + int(warmup_seconds * 1e9)
+    rows = [r for r in rows if start <= r['tick'] <= end and r['loop_ns'] >= cutoff]
     presents = [r for r in rows if r['presented']]
     if len(presents) < 100:
         raise ValueError('Need at least 100 completed presents in the requested tick range')
@@ -50,6 +61,11 @@ def analyze(path, start=1200, end=3300, refresh=90):
     sources = {(r['epoch'],r['tick']):r for r in uploads}
     lateness = [max(0,r['draw_ns']-r['deadline_ns'])/1e6 for r in presents if r['deadline_ns']]
     result = dict(path=str(path), ticks=[start,end], presents=len(presents), uploads=len(uploads),
+                  warmup_seconds=warmup_seconds, first_stream_tick=first_source['tick'],
+                  measured_ticks=[presents[0]['tick'], presents[-1]['tick']],
+                  first_present_after_stream_ms=(presents[0]['draw_ns']-first_source['loop_ns'])/1e6,
+                  epoch_boundaries=sum(a['epoch']!=b['epoch'] for a,b in zip(presents,presents[1:])),
+                  all_complete_interval_ms=stats([(b['complete_ns']-a['complete_ns'])/1e6 for a,b in zip(presents,presents[1:])]),
                   upload_without_present=sum(not r['presented'] for r in uploads),
                   multiple_uploads=sum(r['uploads']>1 for r in uploads),
                   queue_depth=stats([r['queue_before'] for r in rows]),
@@ -73,15 +89,36 @@ def analyze(path, start=1200, end=3300, refresh=90):
                   event_work_ms=stats([(r['prepare_ns']-r['loop_ns'])/1e6 for r in rows]))
     for key in ('pump_ns', 'input_events_ns', 'owner_poll_ns'):
         if key in rows[0]: result[key.replace('_ns','_ms')] = stats(durations(key))
+    if 'submit_start_ns' in rows[0]:
+        for r in presents:
+            if not r['draw_ns'] <= r['submit_start_ns'] <= r['complete_ns']:
+                raise ValueError('Missing/inconsistent submit timestamp')
+        result['submit_interval_ms'] = stats(cadence('submit_start_ns'))
+        result['submit_wait_ms'] = stats(durations('submit_wait_ns', presents))
+        result['backend_present_ms'] = stats([(r['complete_ns']-r['submit_start_ns'])/1e6 for r in presents])
+        result['submit_late_ms'] = stats([max(0,r['submit_start_ns']-r['submit_deadline_ns'])/1e6
+                                         for r in presents if r['submit_deadline_ns']])
+    for key in ('backend_flush_ns', 'backend_acquire_ns', 'backend_submit_ns'):
+        if key in rows[0]: result[key.replace('_ns','_ms')] = stats(durations(key, presents))
     # Preserve the worst intervals with their stage evidence for causal inspection.
     worst = []
     for a,b in zip(presents,presents[1:]):
         if a['epoch'] != b['epoch']: continue
-        worst.append(dict(tick=b['tick'], interval_ms=(b['complete_ns']-a['complete_ns'])/1e6,
+        evidence = dict(tick=b['tick'], interval_ms=(b['complete_ns']-a['complete_ns'])/1e6,
                           upload_ms=b['upload_ns']/1e6, draw_ms=b['draw_work_ns']/1e6,
                           swap_ms=b['swap_ns']/1e6, wait_ms=b['vector_wait_ns']/1e6,
                           deadline_late_ms=max(0,b['draw_ns']-b['deadline_ns'])/1e6,
-                          source_age_ms=(b['draw_ns']-b['source_ns'])/1e6))
+                          source_age_ms=(b['draw_ns']-b['source_ns'])/1e6)
+        if 'submit_start_ns' in b:
+            evidence['backend_present_ms'] = (b['complete_ns']-b['submit_start_ns'])/1e6
+            if b['submit_deadline_ns']:
+                evidence['submit_late_ms'] = max(0,b['submit_start_ns']-b['submit_deadline_ns'])/1e6
+                # Signed slack: negative means the producer itself finished
+                # after this output deadline, before owner-side preparation.
+                evidence['source_ready_slack_ms'] = (b['submit_deadline_ns']-b['producer_complete_ns'])/1e6
+        for key in ('backend_flush_ns', 'backend_acquire_ns', 'backend_submit_ns'):
+            if key in b: evidence[key.replace('_ns','_ms')] = b[key]/1e6
+        worst.append(evidence)
     result['worst_intervals'] = sorted(worst,key=lambda r:r['interval_ms'],reverse=True)[:12]
     return result
 
@@ -92,10 +129,12 @@ def main():
     p.add_argument('--start',type=int,default=1200)
     p.add_argument('--end',type=int,default=3300)
     p.add_argument('--refresh',type=int,default=90)
+    p.add_argument('--warmup-seconds',type=float,default=0,
+                   help='Exclude time after the first streamed endpoint (e.g. 10), in addition to --start')
     p.add_argument('--output',type=Path)
     a=p.parse_args()
-    if a.refresh<=0 or a.end<a.start: p.error('Invalid timing range')
-    reports=[analyze(t,a.start,a.end,a.refresh) for t in a.traces]
+    if a.refresh<=0 or a.end<a.start or a.warmup_seconds<0: p.error('Invalid timing range or warmup')
+    reports=[analyze(t,a.start,a.end,a.refresh,a.warmup_seconds) for t in a.traces]
     payload=json.dumps(reports,indent=2)
     if a.output:a.output.write_text(payload+'\n')
     print(payload)

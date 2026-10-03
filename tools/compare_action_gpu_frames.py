@@ -5,7 +5,9 @@ Requires a staged game directory (ar.sfc, config.ini, seed.srm, input.rec,
 assets/, game-assets/, diorama-layers.ini). Never writes its inputs. Captures
 are correctness evidence, NOT performance measurements. Compare with --compare;
 numpy accelerates image analysis; Pillow adds PNG previews. Keep raw evidence until differences have
-been reviewed. Use the same executable/backend and settings for both variants.
+been reviewed. Use the same executable/backend and settings for both variants;
+--allow-binary-change explicitly permits a comparison between builds. Free Cam
+isolates rendering by default; use --camera-mode 'Dynamic Cam' to check framing.
 """
 from __future__ import annotations
 
@@ -62,7 +64,8 @@ diorama_skybox = Skybox only
 action_effect_lighting = On
 action_effect_particles = On
 action_environmental_effects = On
-''' .replace('diorama_skybox = Skybox only', f'diorama_skybox = {a.skybox}')
+''' .replace('diorama_camera_mode = Free Cam', f'diorama_camera_mode = {a.camera_mode}')
+    .replace('diorama_skybox = Skybox only', f'diorama_skybox = {a.skybox}')
     .replace('diorama_tilt_x_mrad = 0', f'diorama_tilt_x_mrad = {a.tilt_x}')
     .replace('diorama_tilt_y_mrad = 0', f'diorama_tilt_y_mrad = {a.tilt_y}')
     .replace('diorama_distance_x100 = 325', f'diorama_distance_x100 = {a.distance}')
@@ -167,7 +170,9 @@ def compare(a):
     except ImportError:
         Image = None
     cpu, gpu = [json.loads((p / 'capture.json').read_text()) for p in a.compare]
-    for key in ('binary_sha256', 'inputs', 'replay_sha256', 'settings_sha256',
+    if cpu['binary_sha256'] != gpu['binary_sha256'] and not a.allow_binary_change:
+        raise ValueError('Unmatched binary_sha256; use --allow-binary-change for a build regression comparison')
+    for key in ('inputs', 'replay_sha256', 'settings_sha256',
                 'phase', 'start', 'end', 'every', 'final_wram_sha256'):
         if cpu[key] != gpu[key]:
             raise ValueError(f'Unmatched {key}; comparison invalid')
@@ -225,6 +230,7 @@ def compare(a):
         c, g = [np.asarray(Image.open(p), dtype=np.int16) for p in worst[2]]
         Image.fromarray(np.clip(np.abs(c-g)*16, 0, 255).astype('uint8')).save(work / 'worst-difference-x16.png')
     report = dict(cpu=str(a.compare[0].resolve()), gpu=str(a.compare[1].resolve()),
+                  binary_sha256=[cpu['binary_sha256'], gpu['binary_sha256']],
                   phase=cpu['phase'], frames=len(rows),
                   candidate_mask_frames=sum(r['cpu_generated'] != r['gpu_generated'] for r in rows), exact_frames=sum(r['changed_pixels'] == 0 for r in rows),
                   frames_over_2=sum(r['pixels_over_2'] > 0 for r in rows),
@@ -242,6 +248,8 @@ def main():
     p.add_argument('--variant', choices=('cpu', 'gpu'), default='cpu')
     p.add_argument('--room', default='0101')
     p.add_argument('--stationary', action='store_true', help='Remain at the room entrance after the boot recording')
+    p.add_argument('--camera-mode', choices=('Free Cam', 'Dynamic Cam'), default='Free Cam',
+                   help='Free Cam isolates rendering; Dynamic Cam exercises the gameplay framing clamps')
     p.add_argument('--skybox', choices=('Skybox only', 'Plane + skybox', 'Off'), default='Skybox only')
     p.add_argument('--tilt-x', type=int, default=0)
     p.add_argument('--tilt-y', type=int, default=0)
@@ -258,6 +266,8 @@ def main():
     p.add_argument('--end', type=int, default=1599)
     p.add_argument('--every', type=int, default=1)
     p.add_argument('--compare', type=Path, nargs=2, metavar=('CPU_RUN', 'GPU_RUN'))
+    p.add_argument('--allow-binary-change', action='store_true',
+                   help='Compare builds; still require identical assets, replay, settings, camera and gameplay state')
     a = p.parse_args()
     if a.validate_existing:
         work = a.validate_existing.resolve()

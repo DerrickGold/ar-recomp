@@ -1,4 +1,5 @@
 #include "host/frame_queue.h"
+#include "host/frame_producer.h"
 #include "diorama/diorama_planes.h"
 #include "support/test_assert.h"
 #include <SDL3/SDL.h>
@@ -86,6 +87,14 @@ static void TestBackgroundPacket(HostFramePacket *p) {
   assert(!p->frame.diorama_skybox_surface.data && p->frame.diorama_skybox_surface.width_pixels == 2);
   assert(p->frame.hud_obj_surface.data && p->frame.hud_obj_surface.data != (const uint8_t *)pixels);
   free(packet);
+  SrPpuBgPacket *direct = HostFramePacket_BackgroundTarget(p);
+  assert(direct && direct == p->background_storage);
+  SrPpuBgPacket_Begin(direct, 2, 2);
+  direct->words[2] = direct->owned_sources = 3;
+  p->frame = (FrameSlot){.diorama_active = true, .background_packet = direct};
+  assert(HostFramePacket_OwnPixels(p));
+  assert(p->copied_bytes == 0 && p->frame.background_packet == direct);
+  assert(direct->words[2] == 3);
   /* A recycled slot with CPU-only output must not retain the previous export. */
   p->frame = (FrameSlot){.diorama_active = true};
   assert(HostFramePacket_OwnPixels(p) && p->copied_bytes == 0);
@@ -103,6 +112,85 @@ static int Writer(void *context) {
     HostFrameQueue_Publish(q);
   }
   return 0;
+}
+
+typedef struct Stream {
+  HostFrameQueue *queue;
+  unsigned next, stop_at;
+  SDL_ThreadID owner;
+} Stream;
+
+static void ProduceUntilPaused(void *context) {
+  Stream *stream = context;
+  if (stream->owner) assert(stream->owner == SDL_GetCurrentThreadID());
+  stream->owner = SDL_GetCurrentThreadID();
+  while (!HostFrameQueue_PauseRequested(stream->queue) &&
+         (!stream->stop_at || stream->next < stream->stop_at)) {
+    HostFramePacket *packet = HostFrameQueue_BeginWrite(stream->queue);
+    if (!packet) { SDL_DelayNS(1000); continue; }
+    uint32_t pixels[] = {stream->next, 1, 2, 3};
+    packet->frame = (FrameSlot){.diorama_active = true, .hud_obj_surface = View(pixels)};
+    SrPpuBgPacket *background = HostFramePacket_BackgroundTarget(packet);
+    assert(background);
+    SrPpuBgPacket_Begin(background, 2, 2);
+    background->words[2] = 3;
+    background->words[SR_PPU_BG_PACKET_ARENA_BASE] = stream->next;
+    background->words[3]++;
+    packet->frame.background_packet = background;
+    packet->tick = (int)stream->next;
+    packet->source_ns = (uint64_t)stream->next * 16666667;
+    assert(HostFramePacket_OwnPixels(packet));
+    assert(packet->frame.background_packet == background);
+    assert(packet->copied_bytes == sizeof(pixels));
+    HostFrameQueue_Publish(stream->queue);
+    ++stream->next;
+  }
+}
+
+static void AwaitFullQueue(HostFrameQueue *queue) {
+  const uint64_t timeout = SDL_GetTicksNS() + 2000000000;
+  while (HostFrameQueue_ReadyCount(queue) < 3) {
+    assert(SDL_GetTicksNS() < timeout);
+    SDL_DelayNS(1000);
+  }
+}
+
+static void TestMaintenanceWithFutureFrames(HostFrameQueue *queue) {
+  Stream stream = {.queue = queue};
+  assert(HostFrameProducer_Init(NULL, NULL));
+  assert(HostFrameProducer_Submit(ProduceUntilPaused, &stream));
+  AwaitFullQueue(queue);
+  HostFrameQueue_RequestPause(queue);
+  HostFrameProducer_Wait();
+  for (unsigned tick = 0; tick < 64; ++tick) {
+    const HostFramePacket *held = HostFrameQueue_Read(queue);
+    assert(held && held->tick == (int)tick);
+    assert(stream.next == tick + 3);
+    assert(held->source_ns == (uint64_t)tick * 16666667);
+    assert(held->frame.background_packet == held->background_storage);
+    assert(held->frame.background_packet->words[SR_PPU_BG_PACKET_ARENA_BASE] == tick);
+    assert(((const uint32_t *)held->frame.hud_obj_surface.data)[0] == tick);
+    /* Maintenance reads the idle owner's state; restart must not discard or
+     * overwrite this retained packet, even when the producer immediately runs. */
+    /* Exercise both an explicit pause and a producer returning after its own
+     * maintenance deadline, without requiring the consumer to drain first. */
+    stream.stop_at = (tick & 1) ? tick + 4 : 0;
+    HostFrameQueue_Resume(queue);
+    assert(HostFrameProducer_Submit(ProduceUntilPaused, &stream));
+    assert(HostFrameQueue_Read(queue) == held);
+    assert(held->frame.background_packet->words[SR_PPU_BG_PACKET_ARENA_BASE] == tick);
+    assert(((const uint32_t *)held->frame.hud_obj_surface.data)[0] == tick);
+    HostFrameQueue_Release(queue);
+    AwaitFullQueue(queue);
+    HostFrameQueue_RequestPause(queue);
+    HostFrameProducer_Wait();
+  }
+  for (unsigned tick = 64; tick < 67; ++tick) {
+    assert(HostFrameQueue_Read(queue)->tick == (int)tick);
+    HostFrameQueue_Release(queue);
+  }
+  assert(!HostFrameQueue_Read(queue));
+  HostFrameProducer_Shutdown();
 }
 
 int main(void) {
@@ -140,6 +228,7 @@ int main(void) {
     HostFrameQueue_Release(q);
   }
   SDL_WaitThread(thread, NULL);
+  TestMaintenanceWithFutureFrames(q);
   HostFrameQueue_Destroy(q);
   puts("frame_queue_test: PASS");
   return 0;

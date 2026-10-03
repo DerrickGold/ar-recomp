@@ -66,9 +66,49 @@ static void TestPrepareAhead(void) {
   assert(HostFramePlayout_PreparationTime(raw, origin, origin + period) == origin);
 }
 
+static void TestEarlyDrawWaitsForItsPair(void) {
+  const uint64_t period = 16639263, origin = 1000000000;
+  const HostFramePlayout p = HostFramePlayout_Create(period, true, 1750);
+  uint64_t endpoint = origin, next = origin + period;
+  unsigned delayed_draws = 0;
+  double last_timeline = 0;
+  for (unsigned i = 1; i < 900; ++i) {
+    const uint64_t deadline = origin + 3 * period + (uint64_t)i * 11111111;
+    const uint64_t target = HostFramePlayout_Target(p, deadline);
+    uint64_t draw = deadline - 5500000;
+    bool waited = false;
+    for (;;) {
+      /* Capture and upload finish after 12 ms, across all relative phases of
+       * the 60 Hz producer and 90 Hz presenter. */
+      while (next + 12000000 <= draw &&
+          HostFramePlayout_NeedsEndpoint(p, endpoint, target)) {
+        endpoint = next;
+        next += period;
+      }
+      if (!HostFramePlayout_AwaitEndpoint(p, endpoint, target, draw, deadline)) break;
+      waited = true;
+      draw += 200000;
+    }
+    delayed_draws += waited;
+    const float phase = HostFramePlayout_Phase(p, endpoint, target);
+    const double timeline = (double)(endpoint - period) + phase * period;
+    assert(draw <= deadline);
+    assert(phase > 0 && phase < .9999f);
+    assert(fabs(timeline - (double)target) < 2000);
+    assert(timeline > last_timeline);
+    last_timeline = timeline;
+  }
+  assert(delayed_draws > 100);
+  assert(!HostFramePlayout_AwaitEndpoint(p, 1, 2, 100, 100));
+  assert(!HostFramePlayout_AwaitEndpoint(p, 1, 2, 101, 100));
+  const HostFramePlayout raw = HostFramePlayout_Create(period, false, 1750);
+  assert(!HostFramePlayout_AwaitEndpoint(raw, 0, 2, 90, 100));
+}
+
 int main(void) {
   TestCadence();
   TestPrepareAhead();
+  TestEarlyDrawWaitsForItsPair();
   HostFramePlayout p = HostFramePlayout_Create(16000000, false, 3000);
   assert(p.delay_ns == 0 && HostFramePlayout_Target(p, 123456) == 123456);
   assert(HostFramePlayout_NeedsEndpoint(p, 20000000, 123456));

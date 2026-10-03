@@ -12,11 +12,26 @@
 static SrPpuSurfaceView s_live_diorama_skybox;
 static int32_t s_live_diorama_skybox_world_x;
 static bool s_live_diorama_skybox_periodic;
-static SrPpuBgPacket s_background_packet;
+static SrPpuBgPacket s_default_background_packet;
+static SrPpuBgPacket *s_background_packet = &s_default_background_packet;
 static const SrPpuBgPacket *s_live_background_packet;
 
 const SrPpuBgPacket *ActRaiser_LiveBackgroundPacket(void) {
   return s_live_background_packet;
+}
+
+void ActRaiser_SetBackgroundPacketTarget(SrPpuBgPacket *packet) {
+  if (!packet && s_live_background_packet &&
+      s_live_background_packet != &s_default_background_packet) {
+    /* Paused redraws and diagnostics can recapture without another scanout.
+     * Preserve that publication when the producer yields ownership, before
+     * its queue can be recycled or destroyed. This copies once per handoff,
+     * rather than once per produced frame. */
+    memcpy(&s_default_background_packet, s_live_background_packet,
+        SrPpuBgPacket_Size(s_live_background_packet));
+    s_live_background_packet = &s_default_background_packet;
+  }
+  s_background_packet = packet ? packet : &s_default_background_packet;
 }
 
 /* The packet is per-scanout state; FrameQueue owns it across producer ticks. */
@@ -30,7 +45,7 @@ static bool BackgroundPacketEnabled(void) {
 
 static void FinishBackgroundPacket(void) {
   s_live_background_packet = NULL;
-  SrPpuBgPacket *p = &s_background_packet;
+  SrPpuBgPacket *p = s_background_packet;
   if (!BackgroundPacketEnabled() || !g_diorama_frame_active) return;
   static bool reported;
   if (!reported) {
@@ -383,7 +398,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
 
 void ActRaiserDrawPpuFrame(void) {
   s_live_background_packet = NULL;
-  s_background_packet.words[2] = 0;
+  s_background_packet->words[2] = 0;
   ActRaiserSimMenu_ObserveScene(ActRaiser_ReadWram16(kActRaiserWram_MapGroup));
   const PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_Ppu);
   const uint8_t map_group = g_ram[kActRaiserWram_MapGroup];
@@ -536,17 +551,17 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
       ActRaiser_DioramaBoundsTrackingActive() || scanout_context.shape_trace ||
       ActRaiserActionBg_RoomSceneFrameObserverActive();
   const DioramaGpuCaptureMode bg_packet_mode = BackgroundPacketMode();
-  s_background_packet.request_flags = 0;
+  s_background_packet->request_flags = 0;
   if (bg_packet_mode == kDioramaGpuCapture_Owned ||
       bg_packet_mode == kDioramaGpuCapture_TilesValidate) {
-    s_background_packet.request_flags = SR_PPU_BG_PACKET_TILES;
+    s_background_packet->request_flags = SR_PPU_BG_PACKET_TILES;
     if (bg_packet_mode == kDioramaGpuCapture_TilesValidate)
-      s_background_packet.request_flags |= SR_PPU_BG_PACKET_VALIDATE_TILES;
+      s_background_packet->request_flags |= SR_PPU_BG_PACKET_VALIDATE_TILES;
   }
   /* This native-only room promotes statue sprites into BG2 after scanout. */
   if (g_ram[kActRaiserWram_MapGroup] == kActRaiserMapGroup_DeathHeim &&
       g_ram[kActRaiserWram_CurrentMap] == kActRaiserDeathHeimMap_Hub)
-    s_background_packet.request_flags = 0;
+    s_background_packet->request_flags = 0;
   const SrPpuScanoutRequest scanout_request = {
       .struct_size = sizeof(scanout_request),
       .lifetime_generation = scanout_generations.lifetime_generation,
@@ -556,7 +571,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
       .irq_callback = ActRaiser_PpuScanoutIrqCallback,
       .user_data = &scanout_context,
       .background_packet = profile_diorama && BackgroundPacketEnabled()
-          ? &s_background_packet : NULL,
+          ? s_background_packet : NULL,
   };
 
   /* Resolve the stable OAM footprint before scanout; the live sprite evaluator

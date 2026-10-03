@@ -915,10 +915,20 @@ typedef struct SrPpuCaptureTileRequest {
     uint32_t layer_mask;
     uint64_t lifetime_generation;
     SrPpuCaptureTileBinding bindings[2];
+    /* Optional V2 contract, gated by SR_RUNNER_CAP_PPU_CAPTURE_TILE_CACHE.
+     * For selected layers, lookup results (including misses) depend only on
+     * tile coordinates until the next scanout frame or binding replacement.
+     * Replacing this request invalidates cached results, even with identical
+     * callbacks. Zero preserves live per-line lookup. VRAM, palettes, scrolling
+     * and the virtual terrain provider remain live regardless of this mask. */
+    uint32_t stable_layer_mask;
 } SrPpuCaptureTileRequest;
 #define SR_PPU_CAPTURE_TILE_REQUEST_SIZE                                 \
     ((uint32_t)(offsetof(SrPpuCaptureTileRequest, bindings) +             \
                 sizeof(((SrPpuCaptureTileRequest *)0)->bindings)))
+#define SR_PPU_CAPTURE_TILE_REQUEST_V2_SIZE                              \
+    ((uint32_t)(offsetof(SrPpuCaptureTileRequest, stable_layer_mask) +     \
+                sizeof(((SrPpuCaptureTileRequest *)0)->stable_layer_mask)))
 
 #define SR_PPU_AUTHENTIC_CAMERA_CLEAR UINT32_C(0x00000001)
 #define SR_PPU_AUTHENTIC_CAMERA_BG1 UINT32_C(0x00000001)

@@ -26,6 +26,24 @@ bool ArSdlRenderBackend_HasGpuDriver(const char *name);
 /* SDL driver name of the running device, or NULL before creation. */
 const char *ArSdlRenderBackend_GpuDriver(const ArRenderDevice *device);
 
+/* Submit preceding offscreen commands without presenting the window or
+ * waiting for a fence/readback. Legacy adapters retain their Flush behavior. */
+bool ArSdlRenderBackend_SubmitPending(const ArRenderDevice *device);
+
+/* Submit the completed offscreen draw and record the final window blit early.
+ * Follow with Present on the same owner, without drawing or changing output
+ * settings in between. Acquisition may wait; presentation still occurs only
+ * at Present. Repeated preparation retains the same command buffer. Legacy
+ * renderers retain SubmitPending behavior. */
+bool ArSdlRenderBackend_PreparePresent(const ArRenderDevice *device);
+
+/* Opt-in owner-thread CPU scopes, not GPU timestamps or scanout timings. */
+typedef struct ArSdlPresentTrace {
+  uint64_t flush_ns, acquire_ns, submit_ns;
+} ArSdlPresentTrace;
+void ArSdlRenderBackend_EnablePresentTrace(const ArRenderDevice *device, bool enabled);
+ArSdlPresentTrace ArSdlRenderBackend_LastPresentTrace(const ArRenderDevice *device);
+
 /* Platform display policy expressed without exporting the native renderer to
  * host callers. `active` reports the state observed after the request. */
 bool ArSdlRenderBackend_SetVSync(ArRenderDevice *device, int requested,

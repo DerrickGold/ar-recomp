@@ -15,7 +15,7 @@ void DevAutomation_ArmScheduledDioramaDump(void);
 struct FrameSlot;
 /* After upload when available (NULL for pure headless): writes the screenshot scheduled for this game frame. */
 void DevAutomation_CaptureScheduledScreenshot(const struct FrameSlot *uploaded_frame);
-/* Runner owner may request a main-thread boundary for exact diagnostic frames. */
+/* Runner owner requests a main-thread boundary for due actions/captures. */
 bool DevAutomation_RequiresHostService(void);
 /* After a batch of emulated ticks: fires the scheduled warp and diorama
  * switch once their game frame is reached. */

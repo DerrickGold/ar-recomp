@@ -60,6 +60,10 @@ bool ActRaiser_LiveActionBgPlan(ActionBgPlan *out,
 void ActRaiser_LiveDioramaSkybox(SrPpuSurfaceView *out, int32_t *world_x,
                                bool *periodic);
 const SrPpuBgPacket *ActRaiser_LiveBackgroundPacket(void);
+/* Scanout-owner only. A non-null target must live through frame consumption.
+ * Reset before yielding ownership; this retains the last publication for
+ * paused/diagnostic recapture before borrowed storage can be released. */
+void ActRaiser_SetBackgroundPacketTarget(SrPpuBgPacket *packet);
 /* Vertical geometry latched with the last rendered frame. Either pointer may
  * be NULL. */
 void ActRaiser_LiveVerticalMargins(int *top, int *bottom);

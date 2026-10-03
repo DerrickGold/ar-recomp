@@ -17,6 +17,7 @@ typedef struct ArSdlRenderBackend {
    * the adapter owns its default output and the one final window present. */
   SDL_Window *output_window;
   SDL_Texture *output_target;
+  SDL_GPUCommandBuffer *present_commands; /* Prepared final blit; owner-thread only. */
   int output_width, output_height;
   SDL_GPUPresentMode output_present_mode;
   uint32_t applied_frames_in_flight;
@@ -24,6 +25,8 @@ typedef struct ArSdlRenderBackend {
   bool owns_renderer;
   bool owns_context;
   bool owns_gpu_device;
+  bool present_trace_enabled;
+  ArSdlPresentTrace present_trace;
   struct ArSdlFragmentShaderEntry *fragment_shaders;
 } ArSdlRenderBackend;
 
@@ -37,10 +40,6 @@ SDL_Renderer *ArSdlRenderBackend_Renderer(const ArRenderDevice *device);
 SDL_GPUShader *ArSdlRenderBackend_FragmentShader(ArRenderDevice *device,
     const GpuShaderBlobs *blobs, const char *label,
     Uint32 samplers, Uint32 uniform_buffers);
-/* Submit preceding SDL commands before a custom GPU consumer/target reuse.
- * Ordered mode uses offscreen Present (no swapchain, fence wait or readback).
- * Legacy externally bound/window renderers retain their Flush behavior. */
-bool ArSdlRenderBackend_SubmitPending(const ArRenderDevice *device);
 bool ArSdlRenderBackend_WindowOutputSize(const ArRenderDevice *device,
     int *width, int *height);
 ArRenderTexture ArSdlRenderBackend_BorrowTexture(SDL_Texture *texture);

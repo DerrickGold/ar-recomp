@@ -20,6 +20,27 @@
 
 enum { kUnreadEnvironmentOption = -2 };
 
+typedef struct ScheduledAction {
+  long at;
+  bool fired;
+} ScheduledAction;
+
+static ScheduledAction warp = {.at = kUnreadEnvironmentOption};
+static ScheduledAction diorama = {.at = kUnreadEnvironmentOption};
+
+/* Queried on the runner owner; consumed on main after it acknowledges stop.
+ * A due state-changing action must drain the old scene, even when routine
+ * persistence maintenance can safely leave owned frames queued. */
+static bool ScheduledActionDue(ScheduledAction *action, const char *option,
+                               unsigned gf) {
+  if (action->at == kUnreadEnvironmentOption) {
+    const char *value = getenv(option);
+    action->at = value && value[0] ? strtol(value, NULL, 0) : -1;
+  }
+  return !action->fired && action->at >= 0 &&
+      gf != kActRaiserPowerOnGameFrame && gf >= (unsigned)action->at;
+}
+
 /* AR_DIORAMA_DUMP_GF=<gf>[,<gf>...]: arm the Shift+D layer dump from a replay
  * instead of the keyboard, so a diorama frame can be inspected headlessly.
  * The PNGs keep the captured ALPHA, which is what makes F4's half-add
@@ -109,6 +130,9 @@ static void InitScreenshotSchedule(void) {
 bool DevAutomation_RequiresHostService(void) {
   InitScreenshotSchedule();
   const unsigned gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+  if (ScheduledActionDue(&warp, "AR_WARP_AT", gf) ||
+      ScheduledActionDue(&diorama, "AR_DIORAMA_AT", gf))
+    return true;
   if ((shot_at_enabled && !shot_done && gf >= shot_at) ||
       (shot_series_enabled && gf >= shot_from && gf <= shot_to && gf % shot_every == 0))
     return true;
@@ -180,25 +204,10 @@ void DevAutomation_AfterTicks(void) {
    * 16-bit game-frame counter reaches the value. Headless runs can't press
    * F6; used e.g. to sweep the warp table capturing each level's music src
    * (AR_MUSICLOG). Same transition-capable-state caveats as F6. */
-  {
-    static long warp_at = kUnreadEnvironmentOption;
-    static bool warp_fired;
-    if (warp_at == kUnreadEnvironmentOption) {
-      const char *at = getenv("AR_WARP_AT");
-      warp_at = (at && at[0]) ? strtol(at, NULL, 0) : -1;
-    }
-    if (warp_at >= 0 && !warp_fired) {
-      const unsigned gf =
-          ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-      /* The power-on fill value is numerically above ordinary scheduled
-       * frames. Ignore it just like AR_DIORAMA_AT below, or windowed startup
-       * can stage a warp before the game has initialized its transition
-       * state. */
-      if (gf != kActRaiserPowerOnGameFrame && gf >= (unsigned)warp_at) {
-        warp_fired = true;
-        (void)RuntimeSettings_HandleAction(Settings_Find("warp_now"));
-      }
-    }
+  const unsigned gf = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+  if (ScheduledActionDue(&warp, "AR_WARP_AT", gf)) {
+    warp.fired = true;
+    (void)RuntimeSettings_HandleAction(Settings_Find("warp_now"));
   }
 
   /* AR_DIORAMA_AT=<gameframe>: flip Diorama 3D on once the game-frame counter
@@ -207,27 +216,12 @@ void DevAutomation_AfterTicks(void) {
    * changes the rendered baseline, so a visual-regression run should replay
    * flat into the stage and only then switch. Canonical input is host-tick
    * ordered; the game-frame value here is only the deterministic trigger. */
-  {
-    static long diorama_at = kUnreadEnvironmentOption;
-    static bool diorama_fired;
-    if (diorama_at == kUnreadEnvironmentOption) {
-      const char *at = getenv("AR_DIORAMA_AT");
-      diorama_at = (at && at[0]) ? strtol(at, NULL, 0) : -1;
-    }
-    if (diorama_at >= 0 && !diorama_fired) {
-      const unsigned gf =
-          ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-      /* $0088 is $5555-filled before the game initialises it; ignore that
-       * boot sentinel or every target fires on frame 0. */
-      if (gf != kActRaiserPowerOnGameFrame &&
-          gf >= (unsigned)diorama_at) {
-        diorama_fired = true;
-        const SettingDesc *mode = Settings_Find("diorama_mode");
-        if (mode && Settings_IsAvailable(mode) && !g_settings.diorama_mode) {
-          Settings_SetLong(mode, 1);
-          fprintf(stderr, "[diorama] ON via AR_DIORAMA_AT at gf=%u\n", gf);
-        }
-      }
+  if (ScheduledActionDue(&diorama, "AR_DIORAMA_AT", gf)) {
+    diorama.fired = true;
+    const SettingDesc *mode = Settings_Find("diorama_mode");
+    if (mode && Settings_IsAvailable(mode) && !g_settings.diorama_mode) {
+      Settings_SetLong(mode, 1);
+      fprintf(stderr, "[diorama] ON via AR_DIORAMA_AT at gf=%u\n", gf);
     }
   }
 }

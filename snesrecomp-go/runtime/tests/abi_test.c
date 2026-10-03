@@ -4366,6 +4366,27 @@ int main(void) {
                         api->replace_ppu_capture_tiles(runner, &edits) == SR_RESULT_OK &&
                         snes->ppu->captureTiles[0].apron == 64,
                         "capture tile binding failed");
+        failed |= check((api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_TILE_CACHE) != 0,
+                        "capture tile cache capability missing");
+        edits.stable_layer_mask = 1;
+        failed |= check(api->replace_ppu_capture_tiles(runner, &edits) == SR_RESULT_OK &&
+                        snes->ppu->captureTileStableMask == 1,
+                        "capture tile cache opt-in failed");
+        snes->ppu->captureTileCache[0][0].valid = true;
+        failed |= check(api->replace_ppu_capture_tiles(runner, &edits) == SR_RESULT_OK &&
+                        !snes->ppu->captureTileCache[0][0].valid,
+                        "rebinding capture tiles did not invalidate cache");
+        edits.stable_layer_mask = 2;
+        failed |= check(api->replace_ppu_capture_tiles(runner, &edits) == SR_RESULT_INVALID_ARGUMENT &&
+                        snes->ppu->captureTileStableMask == 1,
+                        "invalid stable layer mask changed prior binding");
+        edits.struct_size = SR_PPU_CAPTURE_TILE_REQUEST_SIZE;
+        edits.stable_layer_mask = UINT32_MAX; /* absent tail must not be read */
+        failed |= check(api->replace_ppu_capture_tiles(runner, &edits) == SR_RESULT_OK &&
+                        snes->ppu->captureTileStableMask == 0,
+                        "legacy capture request unexpectedly opted into cache");
+        edits.struct_size = sizeof(edits);
+        edits.stable_layer_mask = 0;
         edits.bindings[0].apron = 65;
         failed |= check(api->replace_ppu_capture_tiles(runner, &edits) ==
                         SR_RESULT_INVALID_ARGUMENT && snes->ppu->captureTiles[0].apron == 64,

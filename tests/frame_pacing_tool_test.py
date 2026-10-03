@@ -31,14 +31,14 @@ class PacingTraceTest(unittest.TestCase):
                              vector_wait_ns=250_000, queue_before=0))
         return rows
 
-    def report(self, rows):
+    def report(self, rows, **options):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'pacing.csv'
             with path.open('w', newline='') as f:
                 writer = csv.DictWriter(f, rows[0].keys())
                 writer.writeheader()
                 writer.writerows(rows)
-            return analyze(path)
+            return analyze(path, **options)
 
     def test_idle_uploads_and_overlapping_scopes(self):
         result = self.report(self.rows())
@@ -70,6 +70,64 @@ class PacingTraceTest(unittest.TestCase):
             row['epoch'] = 2
         result = self.report(rows)
         self.assertEqual(result['complete_interval_ms']['samples'], 118)
+        self.assertEqual(result['all_complete_interval_ms']['samples'], 119)
+        self.assertEqual(result['epoch_boundaries'], 1)
+
+    def test_warmup_uses_actual_stream_start(self):
+        rows = self.rows()
+        # A large absolute clock must not satisfy a relative warmup by itself.
+        for row in rows:
+            for key in ('loop_ns', 'prepare_ns', 'ready_ns', 'complete_ns',
+                        'deadline_ns', 'source_ns', 'producer_start_ns',
+                        'producer_complete_ns', 'input_ns'):
+                row[key] += 20_000_000_000
+            if row['draw_ns']:
+                row['draw_ns'] += 20_000_000_000
+        result = self.report(rows, warmup_seconds=.16)
+        self.assertEqual(result['first_stream_tick'], 1200)
+        self.assertEqual(result['measured_ticks'], [1210, 1319])
+        self.assertEqual(result['presents'], 110)
+        self.assertGreaterEqual(result['first_present_after_stream_ms'], 160)
+        with self.assertRaises(ValueError):
+            self.report(rows, warmup_seconds=10)
+
+    def test_separate_scheduled_wait_from_backend_present(self):
+        rows = self.rows()
+        for row in rows:
+            row.update(submit_start_ns=0, submit_deadline_ns=0, submit_wait_ns=0)
+            if row['presented']:
+                row.update(submit_start_ns=row['complete_ns']-300_000,
+                           submit_deadline_ns=row['complete_ns']-400_000,
+                           submit_wait_ns=200_000)
+        result = self.report(rows)
+        self.assertEqual(result['backend_present_ms']['mean'], .3)
+        self.assertEqual(result['submit_wait_ms']['mean'], .2)
+        self.assertEqual(result['submit_late_ms']['mean'], .1)
+        worst = result['worst_intervals'][0]
+        self.assertEqual(worst['backend_present_ms'], .3)
+        self.assertEqual(worst['submit_late_ms'], .1)
+        self.assertEqual(worst['source_ready_slack_ms'], 7)
+        rows[1]['submit_start_ns'] = 0
+        with self.assertRaises(ValueError):
+            self.report(rows)
+
+    def test_early_acquire_is_outside_final_present(self):
+        rows = self.rows()
+        for row in rows:
+            row.update(submit_start_ns=0, submit_deadline_ns=0, submit_wait_ns=0,
+                       backend_flush_ns=0, backend_acquire_ns=0, backend_submit_ns=0)
+            if row['presented']:
+                row.update(submit_start_ns=row['complete_ns']-100_000,
+                           submit_deadline_ns=row['complete_ns']-100_000,
+                           backend_flush_ns=200_000, backend_acquire_ns=300_000,
+                           backend_submit_ns=100_000)
+        result = self.report(rows)
+        # Early CPU work must not be added a second time to completion or
+        # misreported as work still occurring after the presentation deadline.
+        self.assertEqual(result['backend_present_ms']['mean'], .1)
+        self.assertEqual(result['backend_acquire_ms']['mean'], .3)
+        self.assertEqual(result['worst_intervals'][0]['backend_flush_ms'], .2)
+        self.assertEqual(result['complete_interval_ms']['mean'], 16)
 
 
 if __name__ == '__main__':

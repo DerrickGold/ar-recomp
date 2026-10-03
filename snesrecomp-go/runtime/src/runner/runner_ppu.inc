@@ -1064,6 +1064,9 @@ static SrResult replace_ppu_capture_tiles(
         return SR_RESULT_STALE_VIEW;
     Ppu *ppu = ppu_output_control_target(snes);
     if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
+    const uint32_t stable_mask = request->struct_size >= SR_PPU_CAPTURE_TILE_REQUEST_V2_SIZE
+        ? request->stable_layer_mask : 0u;
+    if (stable_mask & ~request->layer_mask) return SR_RESULT_INVALID_ARGUMENT;
     for (unsigned bg = 0; bg < 2; ++bg) {
         if (!(request->layer_mask & (1u << bg))) continue;
         const SrPpuCaptureTileBinding *binding = &request->bindings[bg];
@@ -1079,6 +1082,8 @@ static SrResult replace_ppu_capture_tiles(
             return SR_RESULT_INVALID_ARGUMENT;
     }
     memset(ppu->captureTiles, 0, sizeof(ppu->captureTiles));
+    ppu->captureTileStableMask = (uint8_t)stable_mask;
+    memset(ppu->captureTileCache, 0, sizeof(ppu->captureTileCache));
     memset(ppu->captureTileCoverage, 0, sizeof(ppu->captureTileCoverage));
     for (unsigned bg = 0; bg < 2; ++bg)
         if (request->layer_mask & (1u << bg))

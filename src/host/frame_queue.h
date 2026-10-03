@@ -27,6 +27,8 @@ static inline bool HostFramePacket_Supports(const FrameSlot *frame) {
 HostFrameQueue *HostFrameQueue_Create(void);
 void HostFrameQueue_Destroy(HostFrameQueue *queue); /* Both owners stopped. */
 HostFramePacket *HostFrameQueue_BeginWrite(HostFrameQueue *queue);
+/* Writer only, before scanout. Returned storage lives until slot release. */
+SrPpuBgPacket *HostFramePacket_BackgroundTarget(HostFramePacket *packet);
 bool HostFramePacket_OwnPixels(HostFramePacket *packet);
 void HostFrameQueue_Publish(HostFrameQueue *queue);
 const HostFramePacket *HostFrameQueue_Read(HostFrameQueue *queue);

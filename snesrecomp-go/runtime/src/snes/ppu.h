@@ -112,10 +112,18 @@ typedef struct PpuObjSampleCache {
     uint8_t slots[kPpuXPixels + 2 * kPpuExtraLeftRight];
     PpuBitWord opaque[kPpuPixelMaskWords];
     int16_t screen_y, x_offset;
+    int16_t opaque_left, opaque_right; /* half-open, includes synthetic margins */
     uint8_t include_first, include_count;
     uint8_t exclude_first, exclude_count;
     bool valid;
 } PpuObjSampleCache;
+
+enum { kPpuCaptureTileCacheSize = 128 };
+typedef struct PpuCaptureTileCacheEntry {
+    SrPpuCaptureTile tile;
+    int32_t x, y;
+    bool valid, found;
+} PpuCaptureTileCacheEntry;
 
 /* Decoded planar rows are derived scratch, indexed by their first VRAM word.
  * Keeping the source words beside the pixels makes direct VRAM mutation and
@@ -296,6 +304,8 @@ struct Ppu {
     /* Public ABI callbacks retained behind the concrete PPU bridge. */
     SrPpuVirtualTilemapBinding abiVirtualTilemap[2];
     SrPpuCaptureTileBinding captureTiles[2];
+    uint8_t captureTileStableMask;
+    PpuCaptureTileCacheEntry captureTileCache[2][kPpuCaptureTileCacheSize];
     /* Per-line ownership of capture bands; never part of hardware state. */
     uint8_t captureTileCoverage[2][kPpuSurfaceWidth];
     int16_t objPosX[128], objPosY[128];

@@ -1465,7 +1465,7 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_gamepad_poll COMMAND actraiser_gamepad_poll_test)
 
     add_executable(actraiser_frame_queue_test tests/frame_queue_test.c
-        src/host/frame_queue.c)
+        src/host/frame_queue.c src/platform/sdl/frame_producer_sdl.c)
     target_include_directories(actraiser_frame_queue_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_frame_queue_test PRIVATE snesrecomp::sdk SDL3::SDL3)
     add_test(NAME actraiser_frame_queue COMMAND actraiser_frame_queue_test)
