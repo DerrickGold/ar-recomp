@@ -92,6 +92,8 @@ ActionEffectGeometryWriter GeometryWriter(
 
 bool Reserve(const ActionEffectGeometryWriter *writer,
                     int vertices, int indices) {
+  if (writer && writer->source)
+    return !writer->source->failed && vertices >= 0 && indices >= 0;
   return writer && writer->vertices && writer->indices &&
       vertices >= 0 && indices >= 0 &&
       vertices <= writer->vertex_capacity &&
@@ -489,6 +491,32 @@ bool AppendGlowAtTicks(ActionEffectGeometryWriter *writer,
     kSegments = kActionEffectGlowSegments,
     kRings = kActionEffectGlowRings,
   };
+  if (writer->source) {
+    float corners[kActionEffectGlowVertices][4] = {{0}};
+    ArRenderColorF colors[kRings + 1];
+    colors[0] = style->centre;
+    colors[0].a *= strength;
+    for (int r = 0; r < kRings; ++r) {
+      colors[r + 1] = style->ring[r];
+      colors[r + 1].a *= strength;
+      const float outerness = (float)r / (float)(kRings - 1);
+      const float scale = style->ring_scale[r];
+      const float lift = style->rise * outerness * scale;
+      for (int s = 0; s < kSegments; ++s) {
+        const float shape = 1 + style->flare * outerness *
+            FlameSilhouette(style->seed, visual_ticks, s);
+        const float x = kCircle32[s][0] * scale * shape;
+        const float y = kCircle32[s][1] * scale * shape;
+        float *c = corners[1 + r * kSegments + s];
+        c[0] = x * style->axis_x;
+        c[1] = -y * style->axis_y + style->lift_x * lift;
+        c[2] = x * style->axis_y;
+        c[3] = y * style->axis_x + style->lift_y * lift;
+      }
+    }
+    return AppendSourceBillboard(writer, effect, local_x, local_y,
+        style->radius_x, style->radius_y, 3, 2, kSegments, corners, colors);
+  }
   ArRenderPointF anchor;
   float scale_x, scale_y;
   if (!ProjectWithScale(effect, project_point, userdata, local_x, local_y,
@@ -705,6 +733,28 @@ static bool AppendEmbers(ActionEffectGeometryWriter *writer,
       EmberOffset(drift, fmaxf(0.0f, t - 0.12f), &prev_x, &prev_y);
     }
 
+    /* Per-ember brightness flicker, decorrelated from the body pulse so the
+     * plume shimmers instead of blinking with the glow. */
+    float flicker = 0.65f + 0.35f * HashUnit(
+        seed ^ (((unsigned)anchor->pulse_ticks / 2u + i) * 0x27D4EB2Du));
+
+    ArRenderColorF color = MixColor(ember_hot, ember_cool, t);
+    /* Fade in over the first few ticks of life. Without it an ember pops into
+     * existence at full brightness inside the flame body, which reads as a
+     * flicker artifact rather than as a spark being thrown. */
+    float birth_fade = t * 8.0f;
+    if (birth_fade > 1.0f) birth_fade = 1.0f;
+    color.a *= burst->strength * flicker * birth_fade;
+
+    if (writer->source) {
+      if (!ActionEffectSource_Particle(writer->source, anchor, birth_x + ox, birth_y + oy,
+              birth_x + prev_x, birth_y + prev_y, .95f - .60f * t,
+              1.6f + 4.2f * t, color)) return false;
+      writer->source->primitives[writer->source->count - 1].meta[0] = kActionSourceEmber;
+      writer->vertex_count = (int)writer->source->count;
+      continue;
+    }
+
     ArRenderPointF position, previous;
     float scale_x, scale_y;
     if (!ProjectWithScale(anchor, project_point, userdata, birth_x + ox,
@@ -730,19 +780,6 @@ static bool AppendEmbers(ActionEffectGeometryWriter *writer,
     float width = (0.95f - 0.60f * t) * output_scale;
     if (width < 0.40f) width = 0.40f;
     float reach = width * (1.6f + 4.2f * t);
-
-    /* Per-ember brightness flicker, decorrelated from the body pulse so the
-     * plume shimmers instead of blinking with the glow. */
-    float flicker = 0.65f + 0.35f * HashUnit(
-        seed ^ (((unsigned)anchor->pulse_ticks / 2u + i) * 0x27D4EB2Du));
-
-    ArRenderColorF color = MixColor(ember_hot, ember_cool, t);
-    /* Fade in over the first few ticks of life. Without it an ember pops into
-     * existence at full brightness inside the flame body, which reads as a
-     * flicker artifact rather than as a spark being thrown. */
-    float birth_fade = t * 8.0f;
-    if (birth_fade > 1.0f) birth_fade = 1.0f;
-    color.a *= burst->strength * flicker * birth_fade;
 
     static const int kQuad[] = { 0, 1, 2, 0, 2, 3 };
     if (!Reserve(writer, 4, 6)) return false;
@@ -857,6 +894,7 @@ bool ActionEffectRender_Build(const ActionEffectFrame *frame,
   ActionEffectGeometryWriter writer = GeometryWriter(
       batch->vertices, kActionEffectRenderMaxVertices,
       batch->indices, kActionEffectRenderMaxIndices);
+  if (project_point == ActionEffectSource_ProjectPoint) writer.source = project_userdata;
 
   ActionEffectBurst burst;
   if (!BuildBurst(frame, &burst)) return true;

@@ -5,6 +5,7 @@
 #include "actraiser/enhancements/actraiser_enhancements_internal.h"
 #include "host/host_ppu_output.h"
 #include "host/host_frame_surfaces.h"
+#include "diorama/diorama_gpu_policy.h"
 
 /* The diorama skybox view the last frame published; ActRaiser_LiveDioramaSkybox
  * hands out a copy. */
@@ -18,11 +19,13 @@ const SrPpuBgPacket *ActRaiser_LiveBackgroundPacket(void) {
   return s_live_background_packet;
 }
 
-/* Development gate until full-workload GPU/CPU parity and pacing pass. The
- * packet is per-scanout state; FrameQueue owns it across producer ticks. */
+/* The packet is per-scanout state; FrameQueue owns it across producer ticks. */
+static DioramaGpuCaptureMode BackgroundPacketMode(void) {
+  return DioramaGpuPolicy_ForRoom(g_ram[kActRaiserWram_MapGroup],
+      g_ram[kActRaiserWram_CurrentMap]).capture;
+}
 static bool BackgroundPacketEnabled(void) {
-  const char *value = getenv("AR_GPU_BG_CAPTURE");
-  return value && value[0] && value[0] != '0';
+  return BackgroundPacketMode() != kDioramaGpuCapture_Off;
 }
 
 static void FinishBackgroundPacket(void) {
@@ -35,8 +38,9 @@ static void FinishBackgroundPacket(void) {
     fprintf(stderr, "[gpu-bg-capture] first packet=%ux%u mask=%u\n", p->words[0], p->words[1], p->words[2]);
   }
   if (!p->words[2]) return;
-  const char *option = getenv("AR_GPU_BG_CAPTURE");
-  const bool validate = strcmp(option, "validate") == 0 || strcmp(option, "tiles-validate") == 0;
+  const DioramaGpuCaptureMode mode = BackgroundPacketMode();
+  const bool validate = mode == kDioramaGpuCapture_Validate ||
+      mode == kDioramaGpuCapture_TilesValidate;
   static unsigned frames, rejected, mismatch_frames;
   unsigned mismatches = 0;
   const int planes[2][3] = {{SR_PPU_OVERLAY_BG1, kDioramaPlane_Bg1Hi, kDioramaPlane_Bg1Far},
@@ -531,12 +535,12 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   const bool observe_lines =
       ActRaiser_DioramaBoundsTrackingActive() || scanout_context.shape_trace ||
       ActRaiserActionBg_RoomSceneFrameObserverActive();
-  const char *bg_packet_option = getenv("AR_GPU_BG_CAPTURE");
+  const DioramaGpuCaptureMode bg_packet_mode = BackgroundPacketMode();
   s_background_packet.request_flags = 0;
-  if (bg_packet_option && (strcmp(bg_packet_option, "owned") == 0 ||
-      strcmp(bg_packet_option, "tiles-validate") == 0)) {
+  if (bg_packet_mode == kDioramaGpuCapture_Owned ||
+      bg_packet_mode == kDioramaGpuCapture_TilesValidate) {
     s_background_packet.request_flags = SR_PPU_BG_PACKET_TILES;
-    if (strcmp(bg_packet_option, "tiles-validate") == 0)
+    if (bg_packet_mode == kDioramaGpuCapture_TilesValidate)
       s_background_packet.request_flags |= SR_PPU_BG_PACKET_VALIDATE_TILES;
   }
   /* This native-only room promotes statue sprites into BG2 after scanout. */

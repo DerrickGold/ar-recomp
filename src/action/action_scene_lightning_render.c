@@ -117,11 +117,18 @@ static bool AppendBossLightningRibbonLayer(
   if (!BossLightningPathFor(effect,f, NULL, &joint_count)) return true;
   for (unsigned i = 0; i < joint_count; i++) {
     float local_x, local_y, scale_x, scale_y;
-    if (!BossLightningPathPoint(effect,f, i, &local_x, &local_y) ||
-        !ProjectWithScale(effect, project_point, userdata, local_x, local_y,
+    if (!BossLightningPathPoint(effect,f, i, &local_x, &local_y)) return true;
+    if (writer->source) { points[i] = (ArRenderPointF){local_x, local_y}; continue; }
+    if (!ProjectWithScale(effect, project_point, userdata, local_x, local_y,
                           &points[i], &scale_x, &scale_y))
       return true;
     scales[i] = fmaxf(0.5f, (scale_x + scale_y) * 0.5f);
+  }
+  if (writer->source) {
+    const bool ok = ActionEffectSource_Ribbon(writer->source, effect, points, joint_count,
+        half_width, f->Ribbon[2], color);
+    writer->vertex_count = (int)writer->source->count;
+    return ok;
   }
   return AppendProjectedRibbonSegments(writer, points, scales, joint_count,
                                        half_width, color, f->Ribbon[2]);
@@ -169,11 +176,18 @@ static bool AppendMarahnaLightningRibbonLayer(
       if (horizontal) y += bend;
       else x += bend;
     }
+    if (writer->source) { points[i] = (ArRenderPointF){x, y}; continue; }
     float scale_x, scale_y;
     if (!ProjectWithScale(effect, project_point, userdata, x, y, &points[i],
                           &scale_x, &scale_y))
       return true;
     scales[i] = fmaxf(0.5f, (scale_x + scale_y) * 0.5f);
+  }
+  if (writer->source) {
+    const bool ok = ActionEffectSource_Ribbon(writer->source, effect, points, kJoints,
+        half_width, .55f, color);
+    writer->vertex_count = (int)writer->source->count;
+    return ok;
   }
   return AppendProjectedRibbonSegments(writer, points, scales, kJoints,
                                        half_width, color, .55f);
@@ -234,11 +248,18 @@ static bool AppendMarahnaBossLightningRibbonLayer(
       x += normal_x * bend;
       y += normal_y * bend;
     }
+    if (writer->source) { points[i] = (ArRenderPointF){x, y}; continue; }
     float scale_x, scale_y;
     if (!ProjectWithScale(effect, project_point, userdata, x, y, &points[i],
                           &scale_x, &scale_y))
       return true;
     scales[i] = fmaxf(0.5f, (scale_x + scale_y) * 0.5f);
+  }
+  if (writer->source) {
+    const bool ok = ActionEffectSource_Ribbon(writer->source, effect, points, kJoints,
+        half_width, .55f, color);
+    writer->vertex_count = (int)writer->source->count;
+    return ok;
   }
   return AppendProjectedRibbonSegments(writer, points, scales, kJoints,
                                        half_width, color, .55f);
@@ -284,6 +305,14 @@ static bool AppendSwordBeamTrailLayer(
     tail_y - py * tail_half_width,
     tail_y + py * tail_half_width,
   };
+  if (writer->source) {
+    ArRenderPointF local[4];
+    for (unsigned i = 0; i < 4; ++i) local[i] = (ArRenderPointF){local_x[i], local_y[i]};
+    const ArRenderColorF colors[4] = {head_color, head_color, tail_color, tail_color};
+    const bool ok = ActionEffectSource_Quad(writer->source, effect, local, colors);
+    writer->vertex_count = (int)writer->source->count;
+    return ok;
+  }
   ArRenderPointF points[4];
   for (unsigned i = 0; i < 4; i++)
     if (!project_point(userdata, effect, local_x[i], local_y[i], &points[i]))

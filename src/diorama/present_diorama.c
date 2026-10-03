@@ -1,3 +1,4 @@
+#include "diorama/diorama_gpu_policy.h"
 #include "diorama/present_diorama.h"
 
 #include <stdio.h>
@@ -33,6 +34,7 @@ static PresentationUploadMirror s_diorama_skybox_mirror;
 static DioramaCameraPresenter s_diorama_camera = DIORAMA_CAMERA_PRESENTER_INIT;
 
 void PresentDiorama_DestroyPlanes(ArRenderDevice *device) {
+  DioramaFrameGeneration_FinishCapture();
   for (int i = 0; i < kDioramaPlane_Count; i++) {
     ArRenderDevice_DestroyTexture(device, s_plane_textures[i]);
     s_plane_textures[i] = ArRenderTexture_Invalid();
@@ -247,7 +249,16 @@ static void PlaneStatCensus(
   }
 }
 
+/* Every scene recipe uses source-space projection. Hardware/resource failures
+ * are handled by full-frame recovery, never by a room/effect whitelist. */
+static bool SourceProjectionQualified(const FrameSlot *slot) {
+  return DioramaGpuPolicy_ForRoom(slot->diorama_map_group, slot->diorama_map_number).resident;
+}
+
 void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
+  PresentActionEffects_InvalidateSourcePackets();
+  DioramaFrameGeneration_FinishCapture();
+  DioramaFrameGeneration_AllowSourceProjection(SourceProjectionQualified(slot));
   s_diorama_skybox_view.texture = ArRenderTexture_Invalid();
   if (!ArRenderDevice_IsReady(device)) return;
   if (!slot->diorama_active) {
@@ -349,9 +360,8 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   size_t pitch_bytes[kDioramaPlane_Count];
   CaptureDioramaPpuSurfaces(slot, pixels, pitch_bytes);
   const uint32_t owned_mask = DioramaPlanes_GpuOwnedMask(slot->background_packet);
-  const char *motion_mode = getenv("AR_GPU_BG_MOTION");
   const bool needs_cpu_analysis = slot->interp_setting_enabled &&
-      (!motion_mode || strcmp(motion_mode, "owned") != 0);
+      !DioramaFrameGeneration_UsesGpuAnalysis(device, slot);
   const bool needs_cpu_diagnostic = getenv("AR_PLANESTAT") || getenv("AR_DIORAMA_SNAPSHOT");
   MaterializeBackgrounds(slot->background_packet, owned_mask & upload_mask &
       (needs_cpu_analysis || needs_cpu_diagnostic ? UINT32_MAX : ~gpu_mask), pixels, pitch_bytes);
@@ -413,6 +423,11 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
   ArRenderTexture scene_textures[kDioramaPlane_Count];
   for (int plane = 0; plane < kDioramaPlane_Count; plane++)
     current_textures[plane] = s_resolved_textures[plane];
+  const DioramaCameraView camera = DioramaCamera_Present(
+      &s_diorama_camera, &slot->diorama_camera,
+      slot->timestamp_ns, HostClock_Nanoseconds());
+  bool retried_projection = false;
+retry_projection:;
   DioramaPerformanceScope frame_synthesis =
       DioramaPerformance_Begin(kDioramaPerformance_FrameSynthesis);
   DioramaSkyboxView skybox_view = s_diorama_skybox_view;
@@ -433,11 +448,8 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
   /* The existing graphics setting now selects frame-space generation.
    * Prepare fails individual planes closed when either endpoint or pair
    * continuity is unavailable, leaving their current raw textures intact. */
-  const DioramaCameraView camera = DioramaCamera_Present(
-      &s_diorama_camera, &slot->diorama_camera,
-      slot->timestamp_ns, HostClock_Nanoseconds());
 
-  /* Fix B/BH6: resolve BG2's row-banded valid capture spans from the slot
+  /* Resolve BG2's row-banded valid capture spans from the slot
    * alone (the presenter only reads the captured frame). ws_extra, not
    * extra_left_right, is the offset: the capture pitch and Diorama_Upload's
    * rect are both derived from ws_extra, so it is what texture column 0
@@ -493,8 +505,10 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
           s_diorama_uploaded_plane_mask);
   (void)PresentActionHeat_Begin(device, slot, output_viewport);
   const ArRenderRectI viewport = PresentActionHeat_SceneViewport(output_viewport);
+  const PresentActionSourceDraw source_draw = DioramaFrameGeneration_SourceProjectionActive()
+      ? DioramaFrameGeneration_DrawSource : NULL;
   PresentActionPlaneEffectContext plane_effect = {
-    device, slot, viewport,
+    device, slot, viewport, source_draw,
   };
   ArRenderPointF plane_offsets[kDioramaPlane_Count];
   for (int plane = 0; plane < kDioramaPlane_Count; plane++)
@@ -575,6 +589,7 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
   }
   DioramaRenderOptions render;
   Diorama_CaptureRenderOptions(&render);
+  if (source_draw) render.draw_resident_skybox = DioramaFrameGeneration_DrawSkybox;
   const DioramaScene scene = {
       .render = &render,
       .map_group = slot->diorama_map_group,
@@ -594,6 +609,13 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
       device, &capture, &view, &scene, &action_projection);
   if (PresentationOutcome_IsUsable(diorama))
     Diorama_SetAutoCameraDistance(action_projection.auto_distance);
+  if ((!PresentationOutcome_IsUsable(diorama) ||
+       DioramaFrameGeneration_SourceProjectionFailed()) && source_draw && !retried_projection) {
+    PresentActionHeat_Cancel(device);
+    DioramaFrameGeneration_RecoverSourceProjection(device);
+    retried_projection = true;
+    goto retry_projection;
+  }
   if (!PresentationOutcome_IsUsable(diorama)) {
     PresentActionHeat_Cancel(device);
     DioramaPerformance_End(presentation_performance);
@@ -607,8 +629,14 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
   }
   DioramaPerformanceScope callback_performance =
       DioramaPerformance_Begin(kDioramaPerformance_Callback);
-  PresentActionEffects_Draw(device, slot, viewport, &action_projection);
+  PresentActionEffects_DrawWithSource(device, slot, viewport, &action_projection, source_draw);
   DioramaPerformance_End(callback_performance);
+  if (source_draw && DioramaFrameGeneration_SourceProjectionFailed() && !retried_projection) {
+    PresentActionHeat_Cancel(device);
+    DioramaFrameGeneration_RecoverSourceProjection(device);
+    retried_projection = true;
+    goto retry_projection;
+  }
   PresentActionHeat_End(device, slot, output_viewport);
   /* Flat HUD mode leaves BG3 in the same RemoveFromGame capture used by flat
    * presentation. Reconstruct its split pieces into one texture before
@@ -631,6 +659,7 @@ void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float al
 }
 
 void PresentDiorama_Reset(ArRenderDevice *device) {
+  DioramaFrameGeneration_Reset();
   for (unsigned plane = 0; plane <= kDioramaPlane_Count; ++plane) {
     free(s_bg_fallback[plane]); s_bg_fallback[plane] = NULL;
   }
@@ -640,5 +669,4 @@ void PresentDiorama_Reset(ArRenderDevice *device) {
   s_diorama_skybox_texture = ArRenderTexture_Invalid();
   s_diorama_skybox_view = (DioramaSkyboxView){0};
   PresentationUploadMirror_Reset(&s_diorama_skybox_mirror);
-  DioramaFrameGeneration_Reset();
 }

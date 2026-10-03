@@ -2357,6 +2357,9 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_action_effect_render
         COMMAND actraiser_action_effect_render_test)
+    add_test(NAME actraiser_action_effect_render_deferred COMMAND actraiser_action_effect_render_test)
+    set_tests_properties(actraiser_action_effect_render_deferred PROPERTIES
+        ENVIRONMENT "AR_TEST_DEFERRED_RECIPES=1")
 
     add_executable(actraiser_sim3d_textures_test
         tests/sim3d_textures_test.c src/sim/sim3d/sim3d_textures.c
@@ -2436,6 +2439,39 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_diorama_replay PRIVATE actraiser_render_sdl_test_support)
 
+
+    # Complete room assets exercise every environmental family without relying
+    # on raw warps into intermediate rooms that require natural game setup.
+    file(STRINGS "${CMAKE_SOURCE_DIR}/tools/action_editor/environment_sources.txt" _room_environment_sources)
+    add_executable(actraiser_action_room_gpu_compare
+        tools/action_editor/check_native_projection.c tools/action_editor/room_preview.c
+        tools/action_editor/room_scene.c tools/action_editor/compositor_profile_stub.c
+        ${_room_environment_sources} ${_diorama_compositor_sources}
+        src/action/action_scene_snapshot.c src/action/action_room_scene.c
+        src/action/action_bg_world.c src/diorama/diorama_capture_blend.c
+        src/diorama/diorama_rom_backdrop.c src/diorama/diorama_snapshot.c
+        snesrecomp-go/runtime/src/scene_renderer.c snesrecomp-go/runtime/src/snes/ppu.c
+        src/platform/sdl/diorama_effect_backend_sdl.c src/platform/sdl/action_effect_source_sdl.c
+        src/app/session_fatal.c src/actraiser/quintet_lzss.c
+        ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE})
+    target_include_directories(actraiser_action_room_gpu_compare PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
+        ${CMAKE_SOURCE_DIR}/snesrecomp-go/runtime/src
+        ${CMAKE_SOURCE_DIR}/snesrecomp-go/runtime/src/runner
+        ${CMAKE_SOURCE_DIR}/snesrecomp-go/runtime/src/core)
+    target_link_libraries(actraiser_action_room_gpu_compare PRIVATE actraiser_render_sdl_test_support)
+
+    if(MSVC)
+        target_compile_options(actraiser_action_room_gpu_compare PRIVATE /Gy)
+        target_link_options(actraiser_action_room_gpu_compare PRIVATE /OPT:REF)
+    else()
+        target_compile_options(actraiser_action_room_gpu_compare PRIVATE -ffunction-sections -fdata-sections)
+        if(APPLE)
+            target_link_options(actraiser_action_room_gpu_compare PRIVATE -Wl,-dead_strip)
+        else()
+            target_link_options(actraiser_action_room_gpu_compare PRIVATE -Wl,--gc-sections)
+        endif()
+    endif()
 
     add_executable(actraiser_diorama_projection_test
         tests/diorama_projection_test.c
@@ -3889,13 +3925,43 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_diorama_frame_generation_test
         tests/diorama_frame_generation_test.c
+        src/diorama/diorama_projection.c
+        src/diorama/diorama_depth_shapes.c
+        src/render/scene3d_math.c
+        src/platform/sdl/action_scene_pass_sdl.c
         src/platform/sdl/diorama_frame_generation_sdl.c
+        src/platform/sdl/action_effect_source_sdl.c
         src/platform/sdl/gpu_block_motion_sdl.c
         src/platform/sdl/gpu_global_motion_sdl.c
+        src/platform/sdl/gpu_frame_handoff_sdl.c
         src/present/presentation_frame_generation.c
         src/platform/sdl/presentation_geometry_sdl.c
         src/render/presentation_layout.c
     )
+    add_executable(actraiser_gpu_frame_handoff_test
+        tests/gpu_frame_handoff_test.c
+        src/platform/sdl/gpu_frame_handoff_sdl.c
+        src/platform/sdl/action_scene_pass_sdl.c)
+    target_include_directories(actraiser_gpu_frame_handoff_test PRIVATE src tests)
+    target_link_libraries(actraiser_gpu_frame_handoff_test PRIVATE SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_gpu_frame_handoff COMMAND actraiser_gpu_frame_handoff_test)
+    add_test(NAME actraiser_gpu_frame_handoff_worker
+        COMMAND actraiser_gpu_frame_handoff_test --worker)
+    set_tests_properties(actraiser_gpu_frame_handoff actraiser_gpu_frame_handoff_worker
+        PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
+
+    add_executable(actraiser_action_scene_pass_gpu_test
+        tests/action_scene_pass_gpu_test.c
+        src/platform/sdl/action_scene_pass_sdl.c
+        src/platform/sdl/gpu_global_motion_sdl.c
+        src/present/presentation_frame_generation.c
+        src/diorama/diorama_projection.c
+        src/diorama/diorama_depth_shapes.c
+        src/render/scene3d_math.c)
+    target_include_directories(actraiser_action_scene_pass_gpu_test PRIVATE src tests)
+    target_link_libraries(actraiser_action_scene_pass_gpu_test PRIVATE SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_action_scene_pass_gpu COMMAND actraiser_action_scene_pass_gpu_test)
+    set_tests_properties(actraiser_action_scene_pass_gpu PROPERTIES SKIP_RETURN_CODE 77)
     add_executable(actraiser_diorama_bg_gpu_test
         tests/diorama_bg_gpu_test.c src/platform/sdl/diorama_bg_gpu_sdl.c
         src/platform/sdl/presentation_geometry_sdl.c src/render/presentation_layout.c)
@@ -3911,6 +3977,9 @@ if(BUILD_TESTING)
         actraiser_render_sdl_test_support SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_diorama_bg_gpu COMMAND actraiser_diorama_bg_gpu_test)
     set_tests_properties(actraiser_diorama_bg_gpu PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME actraiser_diorama_bg_gpu_native COMMAND actraiser_diorama_bg_gpu_test)
+    set_tests_properties(actraiser_diorama_bg_gpu_native PROPERTIES SKIP_RETURN_CODE 77
+        ENVIRONMENT "AR_GPU_BG_DECODE=native" TIMEOUT 30)
     target_link_libraries(actraiser_diorama_frame_generation_test PRIVATE
         actraiser_render_sdl_test_support)
     target_include_directories(actraiser_diorama_frame_generation_test PRIVATE
@@ -3933,6 +4002,23 @@ if(BUILD_TESTING)
     set_tests_properties(actraiser_diorama_frame_generation_owned PROPERTIES
         ENVIRONMENT "SDL_AUDIODRIVER=dummy;AR_REQUIRE_GPU_RENDERER=1;AR_GPU_BG_MOTION=owned"
         SKIP_RETURN_CODE 77)
+    foreach(handoff IN ITEMS unpack all)
+        add_test(NAME actraiser_diorama_frame_generation_native_${handoff}
+            COMMAND actraiser_diorama_frame_generation_test)
+        set_tests_properties(actraiser_diorama_frame_generation_native_${handoff} PROPERTIES
+            ENVIRONMENT "SDL_AUDIODRIVER=dummy;AR_REQUIRE_GPU_RENDERER=1;AR_GPU_BG_MOTION=owned;AR_GPU_FRAME_HANDOFF=${handoff}"
+            SKIP_RETURN_CODE 77)
+    endforeach()
+    add_test(NAME actraiser_diorama_frame_generation_resident
+        COMMAND actraiser_diorama_frame_generation_test)
+    set_tests_properties(actraiser_diorama_frame_generation_resident PROPERTIES
+        SKIP_RETURN_CODE 77 TIMEOUT 30
+        ENVIRONMENT "AR_REQUIRE_GPU_RENDERER=1;AR_GPU_BG_MOTION=owned;AR_GPU_FRAME_HANDOFF=all;AR_GPU_EFFECT_PROJECTION=resident")
+    add_test(NAME actraiser_diorama_frame_generation_native_worker
+        COMMAND actraiser_diorama_frame_generation_test)
+    set_tests_properties(actraiser_diorama_frame_generation_native_worker PROPERTIES
+        ENVIRONMENT "SDL_AUDIODRIVER=dummy;AR_REQUIRE_GPU_RENDERER=1;AR_GPU_BG_MOTION=owned;AR_GPU_FRAME_HANDOFF=all;AR_GPU_PREPARE_WORKER=1"
+        SKIP_RETURN_CODE 77 TIMEOUT 30)
     add_test(NAME actraiser_diorama_frame_generation_gpu
         COMMAND actraiser_diorama_frame_generation_test)
     set_tests_properties(actraiser_diorama_frame_generation_gpu PROPERTIES

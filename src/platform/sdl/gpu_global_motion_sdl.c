@@ -29,7 +29,9 @@ bool ArGpuGlobalMotion_Init(ArGpuGlobalMotion *p, SDL_GPUDevice *device) {
   p->costs = SDL_CreateGPUBuffer(device, &buffer);
   buffer.size = 16 * 9 * sizeof(uint32_t); p->bounds = SDL_CreateGPUBuffer(device, &buffer);
   buffer.size = 16 * 4 * sizeof(int32_t); p->directions = SDL_CreateGPUBuffer(device, &buffer);
-  buffer.size = 8 * sizeof(ArGpuGlobalMotionResult); p->motion = SDL_CreateGPUBuffer(device, &buffer);
+  buffer.size = 8 * sizeof(ArGpuGlobalMotionResult);
+  buffer.usage |= SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+  p->motion = SDL_CreateGPUBuffer(device, &buffer);
   const SDL_GPUSamplerCreateInfo sampler = {.min_filter = SDL_GPU_FILTER_LINEAR,
     .mag_filter = SDL_GPU_FILTER_LINEAR, .mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST,
     .address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,

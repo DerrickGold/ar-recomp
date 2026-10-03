@@ -42,6 +42,14 @@ planned editor effect capabilities before implementing camera-aligned editing
 or a detached live shared-renderer window. Both view improvements are queued in
 phase 6a below; they must not displace the current effects work.
 
+Priority update, 2026-10-02: **GPU-owned action composition comes first**, ahead
+of the remaining actor/default migrations and editor UX work. The user explicitly
+prioritized replacing the CPU-projected SDL_Renderer scene contract so that
+previously constrained solutions can be reconsidered. Follow the
+[compositor migration and acceptance gates](#next-architectural-milestone-gpu-owned-action-composition)
+below. Keep those deferred editor tasks in the queue and preserve the shared
+native/browser rendering goal; this priority change does not close their gates.
+
 ### Native defaults must be reconstructible from configuration
 
 Required by the user on 2026-10-01: bundled level effects must be ordinary,
@@ -2644,6 +2652,535 @@ preserving confidence rejection and endpoint selection. Upload/submission cost,
 OBJ work and residual composition remain separate targets. Keep the owned GPU
 path opt-in until broader room/transition and D3D12 runtime gates pass.
 
+#### Projection submission follow-up — 2026-10-02
+
+Committed the scanline packet change as `aae8fc07`. The next small change appends
+the 256-byte projection download to global analysis instead of submitting a
+separate command buffer for it. Its fence still precedes actor search. Presentation
+queues motion synthesis and destination copies before consuming projection
+metadata, so independent preparation can overlap the remaining wait. GPU confidence
+rejection still selects the current endpoint; only accepted planes and their
+offsets are exposed. No motion algorithm, playback delay or queue limit changes.
+`AR_GPU_PROJECTION_PREPARE_FIRST=0` retains the earlier wait-before-preparation
+order for diagnostic comparisons, with the merged submission still enabled.
+
+Matched Deck Vulkan runs use the preceding 3,600-tick replay/settings and settled
+ticks 1,200–3,300. Candidate `pacing-23` is SHA-256 `1dc7e1c2…458e5c`:
+
+| Metric, ms | Control | Candidate | Control repeat | Candidate repeat |
+| --- | ---: | ---: | ---: | ---: |
+| Upload preparation mean | 2.130 | 2.003 | 2.033 | 1.967 |
+| Projection wait mean | 0.188 | 0.139 | 0.140 | 0.141 |
+| Projection wait p99 | 2.684 | 2.523 | 2.639 | 2.570 |
+| Completion interval p95 | 12.816 | 12.511 | 12.377 | 12.643 |
+| Completion interval p99 | 16.757 | 16.337 | 16.485 | 16.437 |
+
+Retain the simpler submission path and modest upload-preparation saving, but do
+not claim a consistent overall pacing improvement: the repeat reverses the p95
+change. The main-thread projection dependency remains, and 90 Hz is not closed.
+The diagnostic early-wait run gives upload mean 1.994 ms and completion p95/p99
+12.626/16.659 ms; that also argues against treating late consumption alone as a
+large win. CPU scopes overlap and are not GPU timer measurements. Completion is
+the backend present return, not physical scanout or controller-to-photon latency.
+
+All four Metal frame-generation test modes pass, including changed uniform
+endpoints whose rejected motion must not expose a prepared image or stale offset.
+The 600 scrolling midpoint comparisons retain exactly the previous filtering
+difference statistics (worst reviewed frame: 89 pixels, maximum channel difference
+3/255). A live Deck CPU-oracle run exercises synthesis with zero packet mismatches
+and zero vector errors across 43 reported check batches. Evidence is in
+`runs/gpu-stall-2026-10-02/` and
+`runs/deck-pacing-2026-10-02/{stall-analysis,stall-repeat-analysis}.json`.
+D3D12 runtime and broader room/transition acceptance remain open.
+
+#### Next architectural milestone: GPU-owned action composition
+
+The limitation is the current rendering contract, not merely SDL call overhead.
+`ArRenderBackendOps.draw_geometry` accepts already projected CPU vertices and
+individual textures. SDL_Renderer's GPU render-state extension supplies custom
+fragment shaders and GPU resource bindings, but no custom vertex shader. Our
+CPU skybox mapping, effect clipping and plane projection therefore consume GPU
+motion results before drawing. The current path also packs endpoint textures
+into motion atlases and copies warped atlas slices back into per-plane textures.
+Those round trips between representations and submission boundaries remain even
+when every individual shader is fast.
+
+Keep SDL platform services and SDL_GPU's portable Metal/Vulkan/D3D12 backend.
+Use direct SDL_GPU passes for action composition, following the native GPU pass
+pattern already used by SIM3D and actor warping. Replacing SDL with raw Vulkan
+would retain the dependency if the CPU-projected rendering contract stayed intact.
+The prioritized migration is:
+
+1. Define a backend-neutral scene-pass contract carrying source-space geometry,
+   plane/camera parameters, endpoint resources and GPU motion bindings. Give the
+   action compositor explicit resource lifetime and pass ownership, with one
+   deliberate handoff to any retained SDL_Renderer UI/presentation work. Do not
+   multiply Renderer/GPU flush boundaries for individual effects.
+2. Draw BG/skybox planes directly from resident endpoints and motion resources.
+   Move projection and confidence/endpoint selection into shaders, and fuse
+   synthesis with sampling where parity and measured cost permit. Remove redundant
+   atlas-to-plane copies as their consumers migrate; do not assume all passes
+   can safely be fused.
+3. Migrate attached effects' projection, finite clipping and visibility alongside
+   those planes. Preserve skybox mapping, bow/rake/folds, masks and occlusion;
+   applying a 2D offset after CPU projection is not equivalent. Keep gameplay,
+   emitter/event simulation and coherent frame snapshots on the CPU where useful.
+   Remove production projection readback only when every live consumer has moved;
+   retain explicit oracle readback for diagnostics.
+4. Preserve the CPU/browser fallback and shared projection semantics. Compare
+   scrolling, actor movement, confidence rejection, fades and room transitions
+   across plane/skybox combinations, aspect ratios, zoom and extended rows before
+   making the new path the default. GPU projection must not change authoring data
+   or weaken the editor's native-preview parity contract.
+5. Accept using repeated full-frame Deck 90 Hz and non-interpolated measurements,
+   plus Metal and D3D12 runtime coverage. Record CPU waits, GPU pass times,
+   submissions, copy traffic and memory; require unchanged playback buffering.
+   An isolated shader win or lower average CPU cost does not close pacing.
+
+The first source-space pass is implemented and exercised by a standalone GPU
+test, and now backs an opt-in live endpoint packing pass (see the handoff
+measurements below). **It does not yet replace final scene composition or remove
+the game's projection download**. `DioramaSceneDraw` carries capture-space vertices, a plane
+or skybox-band mapping, finite bounds, blend and a motion-result binding.
+`ArGpuActionScenePass_Encode` consumes the GPU result directly in its vertex
+shader. Its caller records analysis/warp, scene rendering and final presentation
+in order; the pass never submits, waits, downloads, or owns a swapchain. Existing
+affine triangle interpolation is retained deliberately. Rake, bow, world Y offset
+and overflow-fold equations follow the CPU projection oracle.
+
+One retained, cycled upload covers the bounded vertex/index list and one render
+pass preserves draw order. Native textures/atlas rectangles bind separately from
+the portable scene description. The proof draws directly from the resident warp
+atlas, without copying its slices into per-plane textures. It retains the warp
+itself: fusing its filtering with final sampling is a separate parity/performance
+experiment, not an assumed free optimization. Complete-list preflight rejects
+unsupported materials, invalid indices/mappings, capacity overruns and target
+feedback before recording the pass. This first adapter supports opaque, alpha
+and additive materials only.
+
+The GPU fixture compares **35 scene/phase images per backend** against CPU motion
+analysis, the shipped CPU projection routines and SDL_RenderGeometry. Metal and
+Steam Deck Vulkan pass independent X/Y motion, phases 0/.25/.5/.75/1, rejected
+uniform pairs, viewport/aspect changes, skybox cropping, hidden capture margins,
+352/224 height scaling, rake/bow/fold geometry, attached additive light and alpha
+particles, finite skybox clipping and retained-resource reuse. No GPU result is
+downloaded until the final comparison image. Interior channel error is at most
+2/255 in these runs. Each backend has one image with one different boundary pixel
+whose centre is within .01 output pixel of a CPU-projected edge. The test allows
+up to four such pixels and 3/255 interior error, with a separate mean-error bound;
+it must not mask interior displacement as a generic image tolerance.
+
+The shader tool now verifies/remaps named graphics storage-buffer bindings as
+well as compute bindings: Metal places uniforms before storage, while SPIR-V and
+DXIL retain their separate resource sets. MSL/SPIR-V/DXIL blobs are generated
+offline. Strict C11 checks and Windows x64/Linux ARM64 compile checks pass;
+D3D12 runtime remains open. Existing frame-generation and GPU block-motion tests
+pass on Metal, as do ASan/UBSan checks, render-boundary checks and the release
+build. This is functional evidence, **not** a live 90 Hz or end-to-end
+performance result. Evidence is under `runs/action-compositor-2026-10-02/`.
+
+**Live handoff checkpoint — 2026-10-02.** `AR_GPU_FRAME_HANDOFF=all`
+now routes endpoint packing through the native source-space pass, records global
+analysis in that same command buffer, and copies warped planes in one native
+copy pass. `unpack` isolates the output-copy change; absent/`0` retains the
+reference handoff. RGBA8 generated targets match the compute atlas format, while
+packing samples source textures to preserve RGBA/BGRA conversion and transparent
+RGB. Padding is cleared at allocation/extent changes, retained without cycling,
+and never reused across an invalidated capture region. Pair timestamps,
+confidence rejection, unchanged sources and renderer state restoration remain
+owned by the existing frame-generation transaction. Command recording/submission
+failures invalidate the endpoint instead of exposing partially packed data.
+
+This is an intermediate resource migration, **not the architectural performance
+comparison**. It still warps into atlases, copies them into per-plane textures,
+projects effects on the CPU and downloads the 256-byte global motion result.
+The expected architectural gains require removing those dependencies; repeating
+or tuning this bridge alone is not the next performance priority.
+
+Moving Fillmore with all established effects, CRT, 64 extra rows, GPU-owned
+capture/motion and a 90 Hz cap was replayed for 3,600 ticks per Deck run. Settled
+ticks 1,200–3,300 contain 3,126 presents per run. Native and reference use the
+same executable/settings/replay; the second pair reverses their order.
+
+| CPU/presentation metric (ms) | Reference | Native handoff | Reference repeat | Native repeat |
+| --- | ---: | ---: | ---: | ---: |
+| Upload/preparation mean | 2.002 | 1.988 | 1.995 | 2.025 |
+| Draw work mean (includes projection wait) | 1.289 | 1.305 | 1.284 | 1.280 |
+| Projection wait mean | 0.134 | 0.134 | 0.126 | 0.118 |
+| Completion interval p95 | 12.573 | 12.530 | 12.466 | 12.316 |
+| Completion interval p99 | 16.542 | 16.468 | 16.511 | 16.371 |
+
+No material speedup is established. In particular, tail completion intervals
+remain above the 11.11 ms refresh budget. These are CPU wall scopes and backend
+present-return intervals, not GPU timestamps, physical scanout or input latency.
+The unpack-only sample is likewise flat (draw mean 1.321 ms, completion p95/p99
+12.639/16.480 ms). The bridge stays opt-in.
+
+Visual evidence: **600/600 moving Metal frames and 250/250 moving Vulkan frames
+are byte exact** at midpoint, including matching generated-plane masks, camera
+coordinates and final WRAM. The twelve-plane native handoff fixture is byte exact
+on both backends for RGBA/BGRA sources, transparent RGB, crops, repeated writes
+and smaller replacement extents with cleared padding. Eight Metal scene-pass /
+frame-generation tests pass, including production-adapter native-all/native-unpack
+modes, rejected pairs and restored renderer state. ASan/UBSan, strict C11 and
+Windows x64/Linux ARM64 handoff compile checks pass. D3D12 runtime remains open.
+Bloodpool acceptance is not claimed: the generic Fillmore route left that room,
+and its stationary retry did not exercise GPU synthesis. An initial Metal timing
+pair rebuilt its executable between variants and is excluded. Recordings with
+incomplete capture schedules were also excluded.
+
+[Measurements and provenance](evidence/action-gpu-handoff-2026-10-02/measurements.json)
+and the [isolated timing probe](evidence/action-gpu-handoff-2026-10-02/probe.py)
+are retained; full local traces/captures are under `runs/gpu-handoff-2026-10-02/`.
+The next performance gate is **live GPU projection plus direct resident sampling
+with real materials/effects**, removing readback and the obsolete intermediate
+work before interpreting the full architecture's speed. Keep the handoff as a
+migration/regression baseline, not evidence for or against that design.
+
+**Immediate integration gates, in order:**
+
+- Replace the live scene's per-plane texture handoff with coherent resident
+  endpoint/atlas and motion bindings, tagged to the same frame epoch/pair. Preserve
+  drained-source handling, rejected/unchanged pairs, resets and device recreation.
+- Migrate actual source-space BG/skybox meshes and attached-effect construction.
+  Preserve skybox camera-follow/crop/band selection and static-source semantics.
+  Effect kernels currently mix per-point projection with screen-space offsets,
+  local derivative scales and CPU clipping: passing their final screen vertices
+  through an inverse transform is not an exact migration. Port those operations
+  explicitly, including near-camera rejection and curved finite boundaries.
+- Cover all existing materials and passes: priority/color-math surfaces, exposure,
+  actor/scenery receivers, shadow grouping, edge AA, DOF/rim, overflow/skirts,
+  heat/refraction, HUD/CRT handoff and authored blend modes. Unsupported scenes
+  retain the complete existing path, rather than silently dropping an effect.
+- Run moving Fillmore and Bloodpool image sequences with every established effect
+  active, then representative Aitos/water/band/transition cases. Exercise the
+  browser/shared-renderer contract before removing production readback and before
+  accepting any default switch. Finally repeat Deck 90 Hz/non-interpolated and
+  desktop performance measurements with the CPU work actually removed.
+
+**Reopened options and limits:**
+
+| Option | Why revisit it / remaining constraint |
+| --- | --- |
+| GPU projection and effect placement | Custom vertex stage can read the resident motion result; first pass proves the dependency can stay GPU-side. |
+| Direct atlas sampling and combined scene passes | Per-plane SDL textures and renderer flush boundaries are no longer required by the new contract. Preserve blend/pass order and measure bandwidth. |
+| Retained source meshes / GPU particle expansion | Source geometry no longer depends on each camera projection. Reuse world/capture geometry or instances where topology and effect clocks permit; avoid replacing small cheap CPU tasks with costly dispatches. |
+| Compact masks and explicit depth/occlusion passes | Native GPU resource formats and depth targets can bypass Renderer format/depth restrictions. Check format support and port mask semantics; a depth buffer cannot replace SNES priority/color math or transparent ordering wholesale. |
+| Fused interpolation, shading and final sampling | New pass ownership makes this testable. Intermediate UNORM rounding, edge sampling, DOF and nonlinear projection must be compared before removing resolves. |
+| Worker-owned native GPU preparation | SDL_GPU permits offscreen command buffers acquired, encoded and submitted by a worker. Replace remaining Renderer calls and shared mutable resources first; preserve the existing frame delay and ordered dependent submissions. See the threading audit below. |
+| Parallel fine-motion search | The earlier prototype was rejected for inconsistent measured gains, not an SDL_Renderer prohibition. Keep its evidence; retest only when changed workload or scheduling gives a specific reason. |
+| Explicit async-compute queues / GPU timestamps | Direct SDL_GPU command buffers do not by themselves prove concurrent queues or provide measured GPU execution time. Do not relabel CPU timers or promise overlap from a new pass layout. |
+
+Assess lower-level API limits only if profiling the migrated path identifies an
+actual remaining SDL_GPU restriction. Keep SDL platform services and the portable
+GPU backend unless that evidence justifies a separate backend experiment.
+
+**Threading re-evaluation — 2026-10-02.** The old
+[SDL_RenderGeometry](https://wiki.libsdl.org/SDL3/SDL_RenderGeometry) contract
+requires main-thread rendering. Native
+[GPU command buffers](https://wiki.libsdl.org/SDL3/SDL_AcquireGPUCommandBuffer)
+may be prepared on workers, but each must be acquired, used and submitted on
+the same thread. [Swapchain acquisition](https://wiki.libsdl.org/SDL3/SDL_WaitAndAcquireGPUSwapchainTexture)
+still belongs to the window-creating thread. Keep input/window/presentation on
+main; there is no reason to replace SDL platform services to use this split.
+Ordered submissions and CPU parallel recording do not establish simultaneous
+GPU compute/graphics execution or expose an explicit async-compute queue.
+
+The `actraiser_gpu_frame_handoff_worker` fixture now checks main-thread upload,
+worker-owned native packing, and main-thread consumption. A persistent worker
+owns command acquisition/encoding/submission. A semaphore publishes submission
+before the consumer records dependent work; **there is no GPU fence wait at
+that handoff**. The final readback oracle alone waits for completion. Sixty-four
+updates of twelve RGBA/BGRA planes, changing content/crops/padding, are byte exact
+on Metal and Steam Deck Vulkan. Main acquires its consumer command buffer while
+the worker prepares its producer command. This validates ownership and backend
+ordering, not live scheduling speed, concurrent frame-resource reuse, swapchain
+thread migration or D3D12 runtime behavior. No production worker/default changes
+are made by this fixture.
+
+Re-analysis of the four existing handoff timing traces (same settled ticks
+1,200–3,300; no new performance runs) narrows the opportunity:
+
+| Deck run | Endpoint preparations between presents / total | Completion intervals >15 ms | Of those, motion wait >1 ms | Mean wait in those intervals |
+| --- | ---: | ---: | ---: | ---: |
+| Reference | 1,942 / 2,068 | 80 | 80 | 2.376 ms |
+| Native handoff | 1,945 / 2,067 | 82 | 82 | 2.383 ms |
+| Reference repeat | 1,941 / 2,067 | 82 | 82 | 2.318 ms |
+| Native repeat | 1,963 / 2,065 | 70 | 70 | 2.364 ms |
+
+Endpoint preparation averages ~2 ms, but most already happens between presents;
+that whole duration is **not** an available per-present saving. All 314 >15 ms
+intervals include >1 ms projection-result waiting; 313 also upload in the same
+iteration. This is an association in CPU/present-return traces, not a GPU-time
+measurement or proof that threading alone eliminates the tail. Remove the CPU
+motion-result consumer and prototype overlapping preparation together.
+
+| Candidate | Decision and ownership requirement |
+| --- | --- |
+| Native upload/decode and endpoint-analysis worker | Highest-priority threading experiment after resident resources are integrated. Consume an immutable owned frame; keep its upload buffers, pass scratch and endpoint resources exclusively owned until safely published/reused. Main can draw the previous eligible pair while preparation runs. |
+| Parallel CPU scenery/effect preparation | Possible, but it was not prohibited by SDL when it used only CPU data. `CaptureScenery` currently borrows WRAM/VRAM/edit callbacks; shadow rasterization has overlapping coverage writes; effect presentation owns shared static scratch/caches. Snapshot or join borrowed data, partition output, and assemble in deterministic blend order. Re-profile after GPU projection/mask migration before adding work that the migration will remove. |
+| Threading motion search / fence polling | Search already runs on GPU. Moving encoding or polling to another CPU thread does not remove the CPU projection dependency. Keep the rejected GPU fine-search experiment separate from CPU threading proposals. |
+| Parallel live PPU scanlines | Not a safe drop-in optimization. HDMA, per-line VRAM/CGRAM and shared packet/cache state impose ordering. Freeze raster inputs before any parallel decoding; prefer the planned GPU packet decode rather than duplicate legacy CPU work. |
+| More generic render helpers | `HostParallelWork` currently serves SIM/world navigation, not the action presentation path. `AR_RENDER_WORKERS=3` does not mean action rendering is already split across three helpers. Test one coarse native preparation worker first; extra workers can compete with the game/audio threads and GPU for Deck resources. |
+
+The game/PPU producer and Linux gamepad polling are already on persistent
+workers. Do not count those existing gains a second time. The ~9.1–9.2 ms
+producer scope overlaps presentation; it cannot be added to ~2 ms upload and
+~1.3 ms draw work to estimate a serial frame cost.
+
+**Worker integration acceptance:**
+
+1. Give the native preparation stage a single owner and a bounded immutable job
+   tagged with epoch, source tick and frame-pair identity. Existing SPSC packets
+   cannot be released while a worker still borrows their contents; introduce
+   explicit ownership transfer or hold them until preparation acknowledges the
+   borrow. Snapshot settings, never read live runner globals on this worker.
+2. Keep in-flight GPU resources separate from the pair being displayed. Explicitly
+   manage upload-buffer cycling and reuse after last GPU use; CPU submission is
+   not GPU completion. Keep control metadata on main or publish immutable
+   results, rather than concurrently touching `s_gpu`, Renderer texture wrappers
+   or effect caches. Join/cancel obsolete jobs on resets, room changes, device
+   recreation and shutdown; reject stale epochs before display.
+3. Acquire/submit each offscreen command buffer on its worker. Publish successful
+   submission before main records/submits dependent passes. Final swapchain
+   acquisition/presentation stays main. Failure must invalidate that endpoint
+   and preserve the supported fallback, never expose partially prepared work.
+4. Compare the **same fully migrated native path** with preparation inline versus
+   one worker. Separately retain the old renderer as a visual oracle. Preserve
+   the 1.75-source-period interpolated playout policy and bounded queue; do not
+   add a queued frame to hide work. For non-interpolated output, preserve its
+   current source-age policy too.
+5. Measure worker wake/record/submit time, endpoint-ready time, main waits,
+   producer duration, queue depth and input/source age alongside present p95/p99.
+   Repeat reversed-order moving Fillmore/Bloodpool comparisons, interpolation on
+   and off, on Deck and Mac. Verify frame masks/pixels and transitions; D3D12
+   runtime remains a separate portability gate. Accept only measured pacing or
+   latency improvement without visual or producer regressions.
+
+**Live preparation-worker experiment — 2026-10-02.** The narrow first threading
+slice is now available with `AR_GPU_PREPARE_WORKER=1`, alongside
+`AR_GPU_FRAME_HANDOFF=all` and `AR_GPU_BG_MOTION=owned`. One persistent worker
+records/submits native endpoint packing, global analysis/download and actor
+analysis. Inline and worker variants execute the same native job and preserve
+the projection-fence-before-actor-search order. Packet validation/decode, raw
+texture uploads, CPU projection and its 256-byte result download are still in
+the existing path. This experiment isolates command-preparation overlap; it is
+not the full worker-owned upload/scene architecture described above.
+
+The job contains copied descriptors/extents and native resources only. It reads
+no FrameSlot/WRAM/settings. Main joins CPU submission before source texture
+overwrite/destruction, next capture, preparation or reset. Reset stops the worker
+before resource release. Jobs are single-flight; there is no new frame queue,
+playout delay or GPU-completion wait at the thread handoff. Failed work cannot
+publish an endpoint. `AR_GPU_PREPARE_TRACE` records queue/start/submit/join times
+without moving shared presentation metrics onto the worker.
+
+Four 3,600-tick Deck runs use one pinned binary, moving Fillmore, all established
+effects, CRT, 64 extra rows and the 90 Hz cap. Order is inline, worker, worker,
+inline; settled ticks 1,200–3,300 contain 3,126 presents per run.
+
+| CPU/presentation metric (ms) | Inline | Worker | Worker repeat | Inline repeat |
+| --- | ---: | ---: | ---: | ---: |
+| Upload/preparation mean | 1.985 | 1.842 | 1.807 | 2.006 |
+| Draw work mean, including projection wait | 1.303 | 1.307 | 1.308 | 1.343 |
+| Projection wait p99 | 2.620 | 2.579 | 2.558 | 2.644 |
+| Completion interval p95 | 12.699 | 12.531 | 12.598 | 12.724 |
+| Completion interval p99 | 16.531 | 16.536 | 16.551 | 16.632 |
+| Game/PPU producer mean (overlapping, not additive) | 9.353 | 9.281 | 9.335 | 9.351 |
+
+Main preparation drops by roughly 0.14–0.20 ms, but **no material p99 improvement
+is established**. Native packing/analysis command work is only 0.169–0.171 ms
+inline. On the worker, its wall scope takes 0.268–0.269 ms plus 0.045–0.047 ms
+wake-up; the main submission join averages 0.012–0.013 ms. The latter is not the
+GPU projection fence wait. These wall scopes do not distinguish CPU execution
+from driver contention or preemption. About 6% of jobs are unfinished when main
+reaches the join. Upload savings therefore cannot be counted as a matching
+reduction in total work or endpoint-ready latency. Queue p95/p99 remains one;
+input-sample age at draw remains roughly 21.7 ms mean with no physical input
+latency claim.
+
+One matched Mac pair likewise does not support enabling this by default: upload
+mean 0.653 → 0.605 ms, draw mean 0.559 → 0.555 ms, completion p95 12.286 → 12.378
+ms and p99 15.305 → 15.546 ms. The Mac sample has no reversed-order repeat and
+does not establish a small regression either. All figures are CPU scopes and
+backend present-return intervals, not GPU timestamps or scanout measurements.
+
+Keep the worker **opt-in**. This is a small overlap opportunity, not a solution
+to 90 Hz pacing. Do not add workers to chase the remaining projection stall:
+migrate its consumers to resident GPU projection and migrate the larger
+remaining upload/decode stages. Revisit whole-frame preparation concurrency
+with separate in-flight resources once those stages are available. Interpolation
+off does not execute this worker, so no non-interpolated improvement is claimed.
+
+Release Mac/hermetic Deck builds and strict C11 checks pass. Metal frame-generation
+tests cover seven modes; the native inline/worker tests additionally cover reset
+immediately after dispatch and repeated lifetimes. ASan/UBSan passes for the
+frame-generation/lifecycle fixture (leak detection disabled; linked backend/SDL
+support libraries are not instrumented). Moving Fillmore midpoint replays match
+all 250 frames exactly on Metal and all 250 on Vulkan, with matching camera,
+generated-plane masks and WRAM. D3D12 runtime remains untested. Full
+trace/provenance and comparison data are under `runs/gpu-worker-2026-10-02/`.
+
+**Large-stall priority — 2026-10-02.** Stop optimizing command-worker wake-up
+as the primary pacing effort. The remaining production dependency is the CPU
+consumer of resident GPU motion: `ApplyGpuResults` waits before updating accepted
+plane masks, effect capture offsets and finite-skybox placement. Port those
+consumers to source-space GPU composition together; moving only the fence poll
+to a worker does not remove the dependency. Keep the current frame delay and
+bounded queue, and reject a shortcut that simply omits attached effect motion.
+
+The next measured slice is `AR_GPU_BG_DECODE=native`: upload integer packet words
+directly to a cycled GPU storage buffer, then decode requested priority bands in
+one compute dispatch per source (BG1, BG2, independent skybox). This replaces the
+RGBA packet staging texture, texture-lock/repacking loop and per-band Renderer
+passes. Background decoding was already GPU-based; the experiment changes its
+resource and submission architecture, not ownership of the game/PPU producer.
+It also runs without interpolation. The existing fragment decoder remains the
+default and unsupported native setups fall back. Runtime native failure latches
+the caller's CPU reconstruction until renderer reset, with a diagnostic.
+
+Packet validation, changed-source detection, band semantics and alpha/palette
+policies are shared with the reference. Upload/compute commands are ordered
+after prior Renderer consumers. Native output wrappers are borrowed only until
+reset; teardown submits pending consumers before releasing wrappers/resources.
+This slice does not add a worker, buffering, frame delay or CPU fence wait.
+It makes the decode stage usable from an eventual coarse preparation worker;
+source lifetime and endpoint resource ownership must still be separated before
+that integration. D3D12 shaders are built offline, but runtime testing there is
+still outstanding.
+
+The final decoder's four-run order is fragment, native, native, fragment on each
+host, using a pinned binary per host and settled ticks 1,200–3,300 (3,126 presents
+per run). The preparation worker is disabled to isolate this resource-path
+change. CPU/present-return timings:
+
+| Deck metric (ms) | Fragment | Native | Native repeat | Fragment repeat |
+| --- | ---: | ---: | ---: | ---: |
+| Upload/preparation mean | 2.000 | 1.559 | 1.567 | 2.045 |
+| Projection wait p99 | 2.547 | 2.131 | 2.261 | 2.535 |
+| Completion interval p95 | 12.329 | 12.292 | 12.312 | 12.367 |
+| Completion interval p99 | 16.432 | 14.963 | 15.310 | 16.409 |
+
+This saves about 0.44–0.48 ms of main preparation and improves the tail by about
+1.1–1.5 ms. Queue p95/p99 remains one; mean input-sample age at draw is roughly
+21.5 ms native versus 21.7–21.8 ms reference. These are not physical input-latency
+or GPU execution measurements. Producer means remain around 9.0–9.1 ms and
+already overlap presentation on their own worker.
+
+Metal also repeats the improvement: preparation 0.662/0.670 → 0.491/0.500 ms;
+completion p99 15.632/15.631 → 13.893/14.119 ms. Its p95 does not consistently
+improve, and producer wall time varies across runs, so do not generalize the
+entire distribution from the tail improvement alone.
+
+One non-interpolated Deck pair saves preparation time too: 1.686 → 1.245 ms;
+completion p95 12.731 → 12.263 ms and p99 13.742 → 12.727 ms. Draw means are
+0.930 → 0.948 ms; no motion-result waits occur in either variant. This pair has
+no reversed repeat, so it establishes a promising broader benefit rather than
+a final default decision.
+
+Keep native decode opt-in pending wider room/backend qualification. It advances
+the architecture and measurably improves this workload, but it does not yet
+provide reliable 11.1 ms completion intervals. The remaining 2.1–2.3 ms p99
+projection wait is the next primary target. The packet oracle covers all four
+row formats, alpha, palettes, edits, skybox aliases, padding, dimensions and bad
+inputs. Final Metal/Vulkan fixtures also queue changing texture revisions with
+no intermediate readbacks; every saved revision remains exact. Metal's legacy
+Renderer fallback and fully instrumented project-side ASan/UBSan fixture pass
+(SDL itself is not instrumented; leak checking disabled). Final-binary moving midpoint
+image comparisons match all 250 frames on Metal and all 250 on Vulkan exactly,
+including camera positions, generation masks and final WRAM. Full hashes, timings, validation scope and
+per-frame reports are under `runs/gpu-bg-decode-2026-10-02/`.
+
+#### Resident effect projection without motion readback — 2026-10-02
+
+The complete moving Fillmore Act 1 workload now has an opt-in path that removes
+the motion-metadata download and its CPU fence wait. Select
+`AR_GPU_EFFECT_PROJECTION=resident` with `AR_GPU_BG_CAPTURE=owned`,
+`AR_GPU_BG_MOTION=owned`, and `AR_GPU_FRAME_HANDOFF=all`; the measurements also use
+`AR_GPU_BG_DECODE=native`. Defaults remain unchanged.
+
+Existing recipes still produce bounded source-space primitives on the CPU.
+Compute shaders perform finite clipping, projection, particle sizing, leaf
+geometry and scenery-shadow sampling directly from resident motion/confidence.
+The finite skybox follows the camera and fits its aspect on the GPU. OBJ-only
+accents keep their existing CPU projection, which does not consume background
+motion metadata. Effects, shadows and particles are not omitted to obtain the
+result, and neither frame delay nor queue capacity was increased.
+
+The source packet has fixed bounds (4,096 primitives, at most 15 output vertices
+per primitive); uploads and output buffers are retained/cycled. Renderer/native
+submissions preserve ordering without a result fence. CPU masks now identify
+candidate planes on this path; the shaders apply confidence rejection and use
+zero displacement/current-endpoint pixels when motion is rejected.
+
+Qualification is deliberately limited to the complete forest recipes in 0101,
+OBJ accents and a single finite captured skybox band. Authored additions, other
+recipe families, ROM/periodic skyboxes and unqualified rooms retain the reference
+readback path. Unsupported primitive construction or failed native submission
+fails explicitly rather than silently losing an effect. This is a prototype
+qualification boundary, not completion of all-room GPU migration.
+
+Final matched scrolling comparisons cover 250 frames per pair, with BG1 moving
+638 x 188 pixels and BG2 319 x 63. Metal covers phases .25/.5/.75 (the .25/.75
+runs use camera tilts 120/-100 mrad), and Vulkan covers .25/.5 with the same
+tilted-camera check at .25. Every frame is within one 8-bit color unit; exact
+counts are 215/219/211 on Metal and 228/227 on Vulkan. Camera positions, replay,
+settings and final WRAM match. The largest changed-pixel count is 135 of 322,560
+on Metal; Vulkan's worst is 17 of 80,640. These image-capture dimensions are
+separate from the 1280x800 fullscreen Deck performance runs.
+
+The image comparison caught two actual implementation differences: a linear
+sampler used on a nearest-filtered skybox, and GPU division/UV operation order
+crossing nearest-sampling boundaries. The adapter now honors texture filtering,
+and skybox fitting corrects the division residual and preserves endpoint
+arithmetic. The original band-sized differences are gone; the remaining tiny
+differences are color/raster rounding, not displaced background rows.
+
+Four 3,600-tick runs per host use a pinned executable in reference, resident,
+resident, reference order. Settled ticks 1,200–3,300 contain 3,125–3,126 presents
+per run at a 90 Hz cap, with effects, CRT and 64 extra rows. The preparation
+worker is disabled. These are CPU scopes and backend present-return intervals,
+not GPU execution timestamps, physical scanout or input latency.
+
+| Deck metric (ms) | Reference | Resident | Resident repeat | Reference repeat |
+| --- | ---: | ---: | ---: | ---: |
+| Upload/preparation mean | 1.500 | 1.492 | 1.493 | 1.494 |
+| CPU drawing mean | 1.239 | 1.004 | 1.008 | 1.251 |
+| CPU drawing p99 | 3.416 | 1.339 | 1.355 | 3.368 |
+| Projection wait p99 | 2.294 | 0 | 0 | 2.270 |
+| Completion interval p95 | 12.302 | 12.101 | 12.114 | 12.276 |
+| Completion interval p99 | 15.043 | 12.828 | 13.111 | 15.153 |
+
+Each resident run records 1,998 resident captures, **zero metadata downloads and
+zero downloaded bytes**, plus 10,728 source draws and about 1.339 million
+primitives. Reference runs perform 1,998 metadata downloads (511,488 bytes).
+The resident projection wait is zero throughout, not merely at a percentile.
+Queue p99 remains one and mean input-sample age at drawing stays near 21.4 ms.
+This is a repeated 2.0–2.2 ms improvement to the completion tail, but still not
+reliable 11.1 ms completion intervals.
+
+Metal repeats the benefit: completion p99 13.975/14.097 → 12.522/12.482 ms;
+projection-wait p99 1.803/1.854 → zero. CPU drawing mean rises slightly
+(0.551/0.554 → 0.570/0.576 ms), while its p99 falls from 2.201/2.242 to
+0.905/0.877 ms. Do not equate eliminating the wait with eliminating all work.
+
+Release Metal and hermetic Deck builds pass. CPU recipe/bounds, compositor,
+projection and skybox tests pass. GPU fixtures cover triangle/particle/leaf
+projection, asymmetric forward/backward motion at five phases, confidence
+rejection, reference/resident transitions and repeated teardown. Committed
+SPIR-V, MSL and DXIL outputs pass freshness checks; D3D12 runtime remains
+untested. Evidence, scripts, hashes and measurements are under
+`runs/gpu-effect-resident-2026-10-02/`; the Deck executable is isolated under
+`/home/deck/argame/effects-2026-10-01/ActRaiserRecomp-resident-effects-final`.
+
+Next, broaden recipe/skybox qualification with the same image gates. For further
+pacing work, profile the remaining main-thread upload/preparation (about 1.49 ms
+mean, 2.1 ms p99 on Deck) and late draw deadlines: several remaining outliers
+coincide with 2–3 ms uploads. Separate in-flight endpoint ownership before moving
+whole preparation jobs off main; do not reintroduce a readback dependency or
+increase buffering to hide it. This path is interpolation-specific, so no new
+non-interpolated improvement is claimed here.
+
 ### Extraction inventory and remaining comparison inputs
 
 These are the implementation owners and comparison inputs for the editable
@@ -3078,3 +3615,146 @@ source handles, material/slope overlays and visual acceptance. Close phase 2's
 representative live-scene image/edit comparisons before replacing the legacy
 Diorama view, and keep native target-platform acceptance separate from browser
 and CPU test results.
+
+
+### Full action-scene GPU migration — 2026-10-02 implementation ledger
+
+The production target is all 49 action rooms and every native/authored effect,
+not a Fillmore rollout. The earlier measurements above remain the pinned
+prototype baseline; they are not performance or parity claims for this larger
+migration. The reference renderer remains an oracle and a recovery path for
+unsupported hardware or resource failures.
+
+Implemented and enabled automatically for action Diorama scenes:
+
+- Shared producer/presenter automatic policy for every valid action room.
+  `AR_GPU_PIPELINE=reference` selects the reference pipeline; stage overrides
+  remain diagnostic controls. Backend initialization and full-frame recovery
+  determine availability, independently of room identity.
+- Deferred triangles, quads, glows/cloud billboards, stars, particles/leaves,
+  embers, lightning ribbons, sword trails and authored floor mist. CPU recipe
+  fixtures exercise construction without CPU projection. Actual Metal checks
+  cover projection, clipping, OBJ priorities, folds and lighting transport.
+- Captured finite skyboxes share raw-band mapping and aspect fitting with their
+  attached GPU effects. Periodic Aitos art follows BG1 motion; static ROM art
+  uses no generated motion. A source band entering the sampled window is kept
+  available on GPU instead of being culled using stale CPU motion.
+- Forest scenery shadows and Bloodpool moon transport, water highlights, wet
+  timber and illuminated insects consume captured occluders on GPU. No normal
+  motion/pixel readback is required by these consumers.
+- Actor and spell submission uses the same primitive packet path as decorations.
+  All source packets retain bounded allocation and explicit failure reporting.
+
+Validation and retained evidence (2026-10-02):
+
+- All 49 action rooms render through the reference and resident consumers at
+  three camera poses, all three plane/skybox modes, and zero/.25/.75 motion:
+  **1,323 paired images on Metal and 1,323 on Steam Deck/Vulkan**. The fractional
+  cases inject matched forward/backward motion into both consumers; they test
+  projection, not motion estimation or a complete gameplay traversal.
+- Metal: 1,027 pairs are exact. All but three pairs stay within 2/255 per
+  channel; those three Aitos 0403 images each differ above that threshold at
+  one particle-edge pixel (maximum 36/255). Vulkan: 964 exact pairs; 29 pairs
+  have one or two pixels above 2/255 (maximum 106/255, two torch-edge pixels in
+  Marahna 0504). Reviewed the largest outlier as enlarged reference/resident
+  crops. No missing room geometry or effect family was observed. The strict
+  comparison harness **returns failure for these outliers**; do not describe
+  this as bit-exact parity or silently increase its tolerance.
+- Final-build Metal gameplay comparisons retain 40 matched frames each for
+  moving Fillmore 0101 (interpolation off), Fillmore cave 0102 (phase .25),
+  Bloodpool water 0201 (off), and castle 0202 (.25). Exact pairs: 38/40, 40/40,
+  6/40 and 38/40 respectively. Only one Bloodpool frame exceeds 2/255: nine
+  glint-edge pixels, maximum 34/255; other changed pixels stay within 1/255.
+  The stationary Bloodpool recording does not produce accepted reference motion
+  vectors, so it is deliberately **not** claimed as interpolated gameplay
+  evidence. Earlier moving forest phase-.5 and Aitos lava comparisons remain
+  pinned separately; all-room injected motion covers Bloodpool projection.
+- The whole-room native/WASM suite passed 147 regional rooms, 882 surface/source
+  comparisons, 147 authored round trips and 30 preset reconstructions, including
+  reverse time, edit/load atomicity and teardown. This is regional/browser
+  contract evidence, not 147 rooms tested on each native GPU.
+- Final renderer suite: 38/38 checks, including all deferred recipe fixtures,
+  shader bindings, backend boundaries, raw/no-interpolation rendering,
+  interpolation, packet lifetime/fades, failed source submission, recovery
+  latching and reset. Actual Metal gameplay also verified
+  `AR_GPU_PIPELINE=reference` disables the automatic pipeline.
+
+The complete migration exposed repeated Bloodpool recipe construction and
+primitive uploads for skybox bands/repaints. The presenter now retains bounded
+CPU packets per captured frame, and the GPU retains their primitive buffers.
+New captures, in-place edits, toggles and resets invalidate those packets;
+projection, motion, shadows and brightness still resolve for each presentation.
+Failed construction/allocation/submission requests a complete reference redraw,
+never a partially missing effect. This reduced Bloodpool resident CPU draw mean
+from 3.61 ms before retention to 2.65 ms in the final run.
+
+Final Deck timings use the isolated directory
+`/home/deck/argame/effects-2026-10-01`, the production bounded frame pipeline,
+90 Hz cap, 64 extra rows, 16:10 square pixels, skybox-only, effects and CRT on,
+no preparation worker, 3,600 ticks, and the settled 1,200–3,300 interval.
+Automatic runs remove all GPU stage overrides.
+
+| Scene / path | CPU draw mean | CPU draw p99 | Present-completion interval p99 | Motion metadata waits |
+| --- | ---: | ---: | ---: | ---: |
+| Fillmore scrolling, reference projection (candidate B, two controls) | 1.21–1.23 ms | 3.38–3.44 ms | 14.82 ms | p99 2.26–2.28 ms |
+| Fillmore scrolling, final automatic | 1.00 ms | 1.37 ms | 12.88 ms | zero |
+| Bloodpool, final reference projection | 2.28 ms | 3.86 ms | 14.57 ms | present |
+| Bloodpool, final automatic | 2.65 ms | 3.71 ms | 13.66 ms | zero |
+| Fillmore scrolling, final automatic, interpolation off | 0.84 ms | 1.22 ms | 12.97 ms | zero |
+
+Bloodpool retains a **0.37 ms higher average CPU draw cost** than reference
+projection while improving the measured tail and presentation pacing. Do not
+hide this tradeoff, sum overlapping producer/presenter timings, call these GPU
+timestamps, or claim locked 90 Hz/physical scanout latency. Further work should
+measure producer PPU work and per-band GPU submission/lighting cost. The final
+Bloodpool process high-water RSS was 204.9 MiB versus 178.2 MiB for reference;
+scrolling Fillmore was 184.0 MiB (178.5 MiB with interpolation off). The complete Vulkan room sweep peaked at
+69.0 MiB in its standalone harness. These are process measurements, not VRAM
+allocation measurements or proof that every driver has the same memory use.
+
+Evidence lives under `runs/gpu-production-2026-10-02/` (ignored local artifacts):
+
+- `room-oracle-final/results.jsonl`, `deck-room-oracle-final.jsonl`,
+  `deck-room-oracle-final-run.json`, and `rooms-repro/manifest.json`.
+- `metal-d-*-compare/comparison.json`, matched captures and magnified differences;
+  `metal-d-reference-policy/` records the escape-hatch run.
+- `production-d-pacing.json`, `production-d-nointerp-pacing.json` and
+  `deck-final-evidence/` preserve timings, full
+  stage configuration, clean-shutdown/readback counters and binary hashes.
+- Final Metal binary SHA-256:
+  `d241b21ab40fdd6e36b463a845c6f52de1b6fad7e54e8e1b5d4671533d4f8669`.
+- Final Deck binary SHA-256:
+  `d1b1fcb1699a10c280a2955a3d8d039ce377f5a261dc88bd78d2fa43c9877d67`.
+
+To regenerate the GPU room oracle from a locally built editor (no scene capture
+required):
+
+```sh
+node tools/action_editor/export_gpu_rooms.mjs build/action-editor/ar-action-layer-editor.html runs/gpu-rooms
+cmake --build build-tests-release --target actraiser_action_room_gpu_compare
+mkdir -p runs/gpu-room-comparison
+build-tests-release/actraiser_action_room_gpu_compare runs/gpu-room-comparison diorama-layers.ini runs/gpu-rooms/*.arscene > runs/gpu-room-comparison/results.jsonl
+```
+
+The exporter accepts terrain profile 0/1/2 as its third argument and pins the
+editor/input hashes in its manifest. The measured GPU sweeps used profile 0.
+The oracle writes image pairs for every pixel-threshold failure; retain those
+with its JSONL instead of treating a nonzero exit as an unspecified GPU failure.
+
+Remaining platform/coverage limits are explicit rather than room whitelists:
+
+- Windows/D3D12 shaders compile, but this change has no Windows hardware timing
+  or visual qualification. Steam Deck tests ran on the available desktop
+  Wayland/Vulkan session, not a separate Gamescope/game-mode qualification.
+- CPU game logic, recipe evaluation, and special PPU capture sources still
+  exist. Non-virtual/colour-math BG sources and Death Heim's post-scanout statue
+  promotion can publish CPU-decoded pixels into the new pipeline. For example,
+  Bloodpool legitimately reports available BG mask 3 with GPU-owned mask 1.
+  This does not require downloading GPU motion/pixels, but it is not a claim
+  that every PPU operation has moved to the GPU.
+- Flat and simulation rendering keep their existing owners. All action
+  Diorama rooms/effects share the new path; the reference implementation remains
+  for unsupported hardware, diagnostics, and exceptional full-frame recovery.
+- Image outliers above remain recorded. Gameplay traversal of every room,
+  every authored extreme, and every camera/aspect/extension combination is not
+  implied by the three-pose room matrix or the recipe fixtures.

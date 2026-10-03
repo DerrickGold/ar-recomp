@@ -46,10 +46,10 @@ static inline const char *GpuShaderBlob_FormatName(
  * Returns NULL on failure, having already reported it. The application decides
  * feature availability at boot; selected core paths must not silently change
  * the presentation if a later operation fails. */
-static inline SDL_GPUShader *GpuShaderBlob_Create(
+static inline SDL_GPUShader *GpuShaderBlob_CreateWithStorage(
     SDL_GPUDevice *device, const GpuShaderBlobs *blobs, const char *label,
     SDL_GPUShaderStage stage, Uint32 num_samplers,
-    Uint32 num_uniform_buffers) {
+    Uint32 num_uniform_buffers, Uint32 num_storage_buffers) {
   const SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
 
   SDL_GPUShaderCreateInfo info;
@@ -78,12 +78,20 @@ static inline SDL_GPUShader *GpuShaderBlob_Create(
   info.stage = stage;
   info.num_samplers = num_samplers;
   info.num_uniform_buffers = num_uniform_buffers;
+  info.num_storage_buffers = num_storage_buffers;
 
   SDL_GPUShader *shader = SDL_CreateGPUShader(device, &info);
   if (!shader)
     fprintf(stderr, "[gpu-fx] %s shader compile failed (%s): %s\n", label,
             GpuShaderBlob_FormatName(info.format), SDL_GetError());
   return shader;
+}
+
+static inline SDL_GPUShader *GpuShaderBlob_Create(
+    SDL_GPUDevice *device, const GpuShaderBlobs *blobs, const char *label,
+    SDL_GPUShaderStage stage, Uint32 num_samplers, Uint32 num_uniform_buffers) {
+  return GpuShaderBlob_CreateWithStorage(device, blobs, label, stage,
+      num_samplers, num_uniform_buffers, 0);
 }
 
 static inline SDL_GPUShader *GpuShaderBlob_CreateFragment(

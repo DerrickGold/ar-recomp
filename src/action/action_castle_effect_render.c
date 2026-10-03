@@ -423,6 +423,7 @@ bool AppendCastleEnvironment(const ActionCastleField *f, ActionEffectGeometryWri
     const int left = ((int)floorf((clip.x0+effect->world_x)/f->MistCells[0])-1)*(int)f->MistCells[0];
     const int right = (int)ceilf(clip.x1+effect->world_x);
     for (int x = left; x < right; x += (int)f->MistCells[0]) {
+      const unsigned source_begin = writer->source ? writer->source->count : 0;
       const uint32_t seed = DeterministicHash_Mix32((unsigned)x+(unsigned)f->MistSeed[0]);
       const float t = ((effect->phase_ticks+seed)&((unsigned)f->MistCells[1]-1))*f->MistCells[2];
       const float ry = f->MistShape[0]+f->MistShape[1]*HashUnit(seed);
@@ -430,6 +431,17 @@ bool AppendCastleEnvironment(const ActionCastleField *f, ActionEffectGeometryWri
       if (!AppendSceneSoftPatch(writer,&mesh,&clip,x-effect->world_x+f->MistShape[2]*sinf(t),-ry,
               f->MistShape[3]+f->MistShape[4]*HashUnit(seed^7u),ry,(ArRenderColorF){f->MistColor[0],f->MistColor[1],f->MistColor[2],opacity},
               f->MistShape[5]*cosf(t),project_point,userdata)) return false;
+      /* The reference selects whole cells using the projected plane's clip
+       * window, then clips each patch. Defer that same selection when the
+       * window depends on GPU-resident motion; triangle clipping alone would
+       * admit an extra patch overlapping the far edge. */
+      if (writer->source) for (unsigned i=source_begin;i<writer->source->count;++i) {
+        ActionEffectSourcePrimitive *p=&writer->source->primitives[i];
+        p->origin[2]=(float)((unsigned)p->origin[2]|8u);
+        p->points[5][0]=effect->world_x;
+        p->points[5][1]=x;
+        p->points[5][2]=f->MistCells[0];
+      }
     }
     return true;
   }
@@ -531,11 +543,11 @@ bool AppendCastleEnvironment(const ActionCastleField *f, ActionEffectGeometryWri
         ++below_ordinal;
       const ActionNativeMember *below_member =
           ActionEffectMembers_Find(members, effect->kind, below_ordinal);
-      ActionEffectMembers_Tint(member, writer->vertices, first_vertex, joined_start, false);
-      ActionEffectMembers_Tint(below_member, writer->vertices, joined_start, joined_end, false);
-      ActionEffectMembers_Tint(member, writer->vertices, joined_end, writer->vertex_count, false);
+      TintEffectMember(writer, member, first_vertex, joined_start, false);
+      TintEffectMember(writer, below_member, joined_start, joined_end, false);
+      TintEffectMember(writer, member, joined_end, writer->vertex_count, false);
     } else
-      ActionEffectMembers_Tint(member, writer->vertices, first_vertex, writer->vertex_count, false);
+      TintEffectMember(writer, member, first_vertex, writer->vertex_count, false);
   }
   return true;
 }

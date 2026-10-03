@@ -8,10 +8,12 @@
 #include "render/scenery_dimming.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "action/action_effect_projection.h"
 #include "action/action_effect_render.h"
+#include "action/action_effect_source.h"
 #include "actraiser/actraiser_room_profiles.h"
 #include "app/session_fatal.h"
 #include "diorama/diorama.h"
@@ -482,9 +484,120 @@ _Static_assert(kActionEffectObjPriorityCount ==
                    kDioramaObjectPriorityCount,
                "action effects and diorama must agree on OBJ bands");
 
-void PresentActionEffects_Draw(
+/* Retained bounded staging; only the presenter uses this workspace. */
+static ActionEffectSourcePrimitive s_source_primitives[kActionSourceMaximumPrimitives];
+static ActionEffectSourceLightJob s_source_lights[kActionSourceMaxLightJobs];
+
+/* Source geometry depends only on the immutable capture, not the camera's
+ * current interpolation phase or skybox band. Keep one bounded packet per pass
+ * and rebuild on capture upload. Light jobs borrow occluders from that same
+ * retained FrameSlot; invalidation must precede release/reuse of the capture. */
+typedef struct ActionSourcePacketCache {
+  ActionEffectSourcePrimitive *primitives;
+  ActionEffectSourceLightJob *lights;
+  unsigned count, capacity, light_count, light_capacity;
+  uint64_t revision;
+  bool valid, failed, lighting, particles;
+} ActionSourcePacketCache;
+
+static ActionSourcePacketCache s_source_packets[kActionSourcePacketSlots];
+static const FrameSlot *s_source_slot;
+static uint64_t s_source_timestamp, s_source_revision;
+
+void PresentActionEffects_InvalidateSourcePackets(void) {
+  for (unsigned i = 0; i < sizeof(s_source_packets) / sizeof(s_source_packets[0]); ++i)
+    s_source_packets[i].valid = false;
+  s_source_slot = NULL;
+}
+
+static bool RetainSourcePacket(ActionSourcePacketCache *cache,
+                               const ActionEffectSourceBatch *source) {
+  if (source->failed) return false;
+  if (source->count > cache->capacity) {
+    void *allocation = realloc(cache->primitives, source->count * sizeof(*cache->primitives));
+    if (!allocation) return false;
+    cache->primitives = allocation;
+    cache->capacity = source->count;
+  }
+  if (source->light_count > cache->light_capacity) {
+    void *allocation = realloc(cache->lights, source->light_count * sizeof(*cache->lights));
+    if (!allocation) return false;
+    cache->lights = allocation;
+    cache->light_capacity = source->light_count;
+  }
+  if (source->count)
+    memcpy(cache->primitives, source->primitives, source->count * sizeof(*cache->primitives));
+  if (source->light_count)
+    memcpy(cache->lights, source->lights, source->light_count * sizeof(*cache->lights));
+  cache->count = source->count;
+  cache->light_count = source->light_count;
+  return true;
+}
+
+static bool DrawSourcePacket(ArRenderDevice *device, const FrameSlot *slot,
+    const ActionEffectProjectionContext *projection, unsigned pass,
+    bool lighting, bool particles, ArRenderBlendMode blend, PresentActionSourceDraw submit) {
+  if (s_source_slot != slot || s_source_timestamp != slot->timestamp_ns) {
+    PresentActionEffects_InvalidateSourcePackets();
+    s_source_slot = slot;
+    s_source_timestamp = slot->timestamp_ns;
+  }
+  ActionSourcePacketCache *cache = &s_source_packets[pass];
+  if (!cache->valid || cache->lighting != lighting || cache->particles != particles) {
+    ActionEffectSourceBatch source = {.context = *projection,
+        .primitives = s_source_primitives, .capacity = kActionSourceMaximumPrimitives,
+        .lights = s_source_lights, .light_capacity = kActionSourceMaxLightJobs};
+    bool built;
+    if (pass < kActionEffectRenderLayer_Count)
+      built = ActionSceneDecorationRender_Build(&slot->action_scene_effects, pass,
+          lighting, particles, ActionEffectSource_ProjectPoint, ActionEffectSource_ClipBounds,
+          &source, &s_action_effect_render_scratch.scene);
+    else if (pass == kActionEffectRenderLayer_Count)
+      built = ActionSceneEffectRender_Build(&slot->action_scene_effects, lighting, particles,
+          ActionEffectSource_ProjectPoint, &source, &s_action_effect_render_scratch.scene);
+    else
+      built = ActionEffectRender_Build(&slot->action_effects, lighting, particles,
+          ActionEffectSource_ProjectPoint, &source, &s_action_effect_render_scratch.spell);
+    cache->failed = !built || !RetainSourcePacket(cache, &source);
+    cache->lighting = lighting;
+    cache->particles = particles;
+    cache->valid = true;
+    if (++s_source_revision == 0) ++s_source_revision;
+    cache->revision = s_source_revision;
+  }
+  /* Never retain the stack-owned projection. Every repaint supplies its current
+   * transform, brightness and motion; packet construction failures still request
+   * the owner's full-frame reference recovery. */
+  ActionEffectSourceBatch source = {.context = *projection,
+      .primitives = cache->primitives, .count = cache->count, .capacity = cache->capacity,
+      .lights = cache->lights, .light_count = cache->light_count,
+      .light_capacity = cache->light_capacity, .failed = cache->failed,
+      .revision = cache->revision, .packet_slot = pass};
+  if (!submit(device, &source, projection->diorama_projection,
+          &slot->action_scene_effects.scenery, blend, ActionEffectBrightness(slot))) return false;
+  return source.count != 0;
+}
+
+static bool DrawSourceDecoration(ArRenderDevice *device, const FrameSlot *slot,
+    const ActionEffectProjectionContext *projection, unsigned layer,
+    bool lighting, bool particles, ArRenderBlendMode blend, PresentActionSourceDraw submit) {
+  return DrawSourcePacket(device, slot, projection, layer, lighting, particles, blend, submit);
+}
+
+static bool DrawSourceActors(ArRenderDevice *device, const FrameSlot *slot,
+    const ActionEffectProjectionContext *projection, bool spells, PresentActionSourceDraw submit) {
+  return DrawSourcePacket(device, slot, projection, kActionEffectRenderLayer_Count + spells,
+      slot->action_effect_lighting, slot->action_effect_particles, kArRenderBlendMode_Add, submit);
+}
+
+void PresentActionEffects_Draw(ArRenderDevice *device, const FrameSlot *slot,
+    ArRenderRectI viewport, const DioramaProjection *diorama_projection) {
+  PresentActionEffects_DrawWithSource(device, slot, viewport, diorama_projection, NULL);
+}
+
+void PresentActionEffects_DrawWithSource(
     ArRenderDevice *device, const FrameSlot *slot, ArRenderRectI viewport,
-    const DioramaProjection *diorama_projection) {
+    const DioramaProjection *diorama_projection, PresentActionSourceDraw source_draw) {
   if (ActionEffectBrightness(slot) == 0 || (!slot->action_effects.visible_count &&
                 !slot->action_scene_effects.visible_count &&
                 !slot->action_scene_effects.decoration_visible_count &&
@@ -512,7 +625,7 @@ void PresentActionEffects_Draw(
       &s_action_effect_render_scratch.scene;
   geometry->vertex_count = geometry->index_count = 0;
   scene_geometry->vertex_count = scene_geometry->index_count = 0;
-  if ((slot->action_effects.visible_count &&
+  if (!source_draw && ((slot->action_effects.visible_count &&
        !ActionEffectRender_Build(
            &slot->action_effects, slot->action_effect_lighting,
            slot->action_effect_particles,
@@ -522,7 +635,7 @@ void PresentActionEffects_Draw(
            &slot->action_scene_effects, slot->action_effect_lighting,
            slot->action_effect_particles,
            ActionEffectProjection_ProjectPoint, &projection,
-           scene_geometry)))
+           scene_geometry))))
     return;
   const int actor_vertex_count = scene_geometry->vertex_count;
   const int actor_index_count = scene_geometry->index_count;
@@ -545,8 +658,8 @@ void PresentActionEffects_Draw(
     .vertex_capacity = kActionSceneEffectRenderMaxVertices,
     .index_capacity = kActionSceneEffectRenderMaxIndices,
   };
-  bool spell_submitted = true;
-  bool scene_submitted = true;
+  bool spell_submitted = !source_draw || DrawSourceActors(device, slot, &projection, true, source_draw);
+  bool scene_submitted = !source_draw || DrawSourceActors(device, slot, &projection, false, source_draw);
   if (spell_batch.index_count || scene_batch.index_count) {
     spell_submitted = EffectRenderer_Submit(
         device, &spell_batch, kArRenderBlendMode_Add);
@@ -559,7 +672,16 @@ void PresentActionEffects_Draw(
    * budget without allocating another workspace. BG2 decorations and bottom
    * atmosphere are submitted by their dedicated depth-ordered passes. */
   bool decoration_submitted = false;
-  if (slot->action_environmental_effects &&
+  if (source_draw && slot->action_environmental_effects) {
+    decoration_submitted |= DrawSourceDecoration(device, slot, &projection,
+        kActionEffectRenderLayer_WorldOverlay, true, true, kArRenderBlendMode_Add, source_draw);
+    decoration_submitted |= DrawSourceDecoration(device, slot, &projection,
+        kActionEffectRenderLayer_WorldDust, false, true, kArRenderBlendMode_Alpha, source_draw);
+    if (s_action_surface_light_supported)
+      decoration_submitted |= DrawSourceDecoration(device, slot, &projection,
+          kActionEffectRenderLayer_ForegroundLight, true, false, kArRenderBlendMode_Light, source_draw);
+  }
+  if (!source_draw && slot->action_environmental_effects &&
       (slot->action_scene_effects.decoration_visible_count || slot->action_scene_effects.authored_count) &&
       ActionSceneDecorationRender_Build(
           &slot->action_scene_effects,
@@ -575,7 +697,7 @@ void PresentActionEffects_Draw(
   }
   /* Contact clouds are translucent matter, so share the bounded scratch but
    * submit with source alpha after the additive airborne specks. */
-  if (slot->action_environmental_effects &&
+  if (!source_draw && slot->action_environmental_effects &&
       (slot->action_scene_effects.decoration_visible_count || slot->action_scene_effects.authored_count) &&
       ActionSceneDecorationRender_Build(
           &slot->action_scene_effects, kActionEffectRenderLayer_WorldDust, false, true,
@@ -587,7 +709,7 @@ void PresentActionEffects_Draw(
     decoration_submitted |= EffectRenderer_Submit(
         device, &scene_batch, kArRenderBlendMode_Alpha);
   }
-  if (slot->action_environmental_effects && s_action_surface_light_supported &&
+  if (!source_draw && slot->action_environmental_effects && s_action_surface_light_supported &&
       (slot->action_scene_effects.decoration_visible_count || slot->action_scene_effects.authored_count) &&
       ActionSceneDecorationRender_Build(
           &slot->action_scene_effects, kActionEffectRenderLayer_ForegroundLight,
@@ -684,6 +806,11 @@ void PresentActionEffects_DrawDioramaPlane(
         (pass->finite_plane_only && diorama_projection->bg2_skybox.count)) continue;
     if (pass->layer == kActionEffectRenderLayer_Bg2Alpha && !FrameUsesBg2Alpha(slot))
       continue;
+    if (context->source_draw) {
+      DrawSourceDecoration(context->device, slot, &projection, pass->layer,
+          pass->diorama_lighting, true, pass->blend, context->source_draw);
+      continue;
+    }
     if (!ActionSceneDecorationRender_Build(&slot->action_scene_effects, pass->layer,
             pass->diorama_lighting, true, ActionEffectProjection_ProjectPoint,
             ActionEffectProjection_ClipBounds, &projection, geometry)) {
@@ -896,6 +1023,12 @@ bool PresentActionEffects_DrawFlatPlanes(
 }
 
 void PresentActionEffects_Reset(ArRenderDevice *device) {
+  PresentActionEffects_InvalidateSourcePackets();
+  for (unsigned i = 0; i < sizeof(s_source_packets) / sizeof(s_source_packets[0]); ++i) {
+    free(s_source_packets[i].primitives);
+    free(s_source_packets[i].lights);
+    s_source_packets[i] = (ActionSourcePacketCache){0};
+  }
   ArRenderDevice_DestroyTexture(device, s_action_bg1_mask_texture);
   ArRenderDevice_DestroyTexture(device, s_action_bg2_mask_texture);
   ArRenderDevice_DestroyTexture(

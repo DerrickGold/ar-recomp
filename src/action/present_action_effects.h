@@ -7,6 +7,10 @@
 
 typedef struct FrameSlot FrameSlot;
 typedef struct DioramaProjection DioramaProjection;
+typedef struct ActionEffectSourceBatch ActionEffectSourceBatch;
+typedef struct ActionMoonlightOcclusion ActionMoonlightOcclusion;
+typedef bool (*PresentActionSourceDraw)(ArRenderDevice *, const ActionEffectSourceBatch *,
+    const DioramaProjection *, const ActionMoonlightOcclusion *, ArRenderBlendMode, float);
 
 /* Optional BG1 scenery dimming, 0..1. Shared by flat masks and Diorama's
  * existing layer colors; requires this frame's validated environmental field. */
@@ -28,12 +32,16 @@ bool PresentActionEffects_DrawFlatPlanes(
 void PresentActionEffects_Draw(
     ArRenderDevice *device, const FrameSlot *slot, ArRenderRectI viewport,
     const DioramaProjection *diorama_projection);
+void PresentActionEffects_DrawWithSource(
+    ArRenderDevice *, const FrameSlot *, ArRenderRectI,
+    const DioramaProjection *, PresentActionSourceDraw);
 
 /* Stack-owned for the synchronous Diorama_Composite plane callback. */
 typedef struct PresentActionPlaneEffectContext {
   ArRenderDevice *device;
   const FrameSlot *slot;
   ArRenderRectI viewport;
+  PresentActionSourceDraw source_draw;
 } PresentActionPlaneEffectContext;
 void PresentActionEffects_DrawDioramaPlane(
     void *userdata, int plane, const DioramaProjection *diorama_projection);
@@ -47,6 +55,10 @@ ArRenderRectI PresentActionHeat_SceneViewport(ArRenderRectI output_viewport);
 void PresentActionHeat_Cancel(ArRenderDevice *device);
 void PresentActionHeat_End(
     ArRenderDevice *device, const FrameSlot *slot, ArRenderRectI viewport);
+
+/* Invalidate before uploading/releasing a retained capture, including captures
+ * with an unchanged timestamp (save-state loads and editor changes). */
+void PresentActionEffects_InvalidateSourcePackets(void);
 
 /* Called on render-device reset and shutdown, outside any active pass. */
 void PresentActionEffects_Reset(ArRenderDevice *device);

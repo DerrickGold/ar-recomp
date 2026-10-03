@@ -415,7 +415,8 @@ static bool AppendMoonRayMesh(const ActionMoonField *f, ActionEffectGeometryWrit
       BloodpoolCloudTransmission(f, mesh->phase_ticks);
   /* Unshadowed exterior haze needs fewer samples than Act 1's fine platform
    * penumbras. Both densities sample the same fixed angular/radial profile. */
-  const unsigned step = visibility ? 1 : 2;
+  const bool deferred = writer->source && writer->source->lit_triangles;
+  const unsigned step = visibility || deferred ? 1 : 2;
   const unsigned rows = (kActionMoonlightRows-1)/step+1;
   const unsigned columns = (kActionMoonlightColumns-1)/step+1;
   int previous_column[kActionMoonlightRows];
@@ -440,6 +441,12 @@ static bool AppendMoonRayMesh(const ActionMoonField *f, ActionEffectGeometryWrit
             start*angular_fade*pulse*gain);
         const unsigned at = row*2+column;
         vertices[at] = (ArRenderVertex2D){{slope*y,y},{f->RayColor[0],f->RayColor[1],f->RayColor[2],alpha},{0,0}};
+        if (deferred) {
+          vertices[at].color.a = f->RayGain[2]*near_light*start*angular_fade*pulse*gain;
+          vertices[at].tex_coord.x = 1+(writer->source->light_count-1)*kActionSourceMaxLightPoints+
+              (sample*kActionMoonlightRows+row)*step;
+          vertices[at].tex_coord.y = f->RayGain[1]*far_light*far_fade*start*angular_fade*pulse*gain;
+        }
         mapped[at] = column ? -1 : previous_column[row];
       }
     }
@@ -467,6 +474,21 @@ bool AppendBloodpoolMoonlight(const ActionMoonField *f,
       !MoonClip(f, effect,clip_bounds,userdata,&clip)) return true;
   ActionEffectInstance mesh = *effect;
   mesh.flags |= kActionEffectFlag_ClippedMesh;
+  if (writer->source) {
+    ActionEffectSourceBatch *b=writer->source;
+    ActionEffectSourceLightJob *job=ActionEffectSource_BeginLight(b,&mesh,&mesh,f,occlusion,0,&clip);
+    if(!job)return false;
+    for(unsigned col=0;col<kActionMoonlightColumns;++col)for(unsigned row=0;row<kActionMoonlightRows;++row) {
+      const unsigned at=col*kActionMoonlightRows+row;
+      job->data.points[at][0]=MoonSlope(f,col)*MoonRow(f,row);
+      job->data.points[at][1]=MoonRow(f,row);
+    }
+    job->data.meta[0]=kActionMoonlightColumns*kActionMoonlightRows;
+    b->lit_triangles=true;b->light_cap=f->RayGain[0];
+    const bool ok=AppendMoonRayMesh(f,writer,&mesh,&clip,NULL,1,project_point,userdata);
+    b->lit_triangles=false;
+    return ok;
+  }
   if (!MoonVisibilityField(f, &mesh,occlusion,scratch,project_point,clip_bounds,userdata)) return true;
   return AppendMoonRayMesh(f, writer,&mesh,&clip,scratch->visibility,1,project_point,userdata);
 }
@@ -544,7 +566,7 @@ bool AppendBloodpoolWaterMoonlight(const ActionMoonField *f, const ActionMarshFi
    * Its slope ratio is invariant under perspective, unlike subtracting BG1
    * and BG2 world coordinates or assuming equal screen scales. */
   BloodpoolMoonProjection projection;
-  if (!BloodpoolMoonProjection_Init(f, &projection,&source,project_point,userdata)) return true;
+  if (!writer->source && !BloodpoolMoonProjection_Init(f, &projection,&source,project_point,userdata)) return true;
 
   enum { kWaterRows = 5, kWaterColumns = 194 };
   _Static_assert(kWaterRows*kWaterColumns <= kActionMoonlightColumns*kActionMoonlightRows,
@@ -557,10 +579,19 @@ bool AppendBloodpoolWaterMoonlight(const ActionMoonField *f, const ActionMarshFi
   if (columns > kWaterColumns) return false;
   const float pulse = (f->Pulse[2]+f->Pulse[3]*sinf((moon->phase_ticks&((unsigned)f->Pulse[0]-1))*f->Pulse[1])) *
       BloodpoolCloudTransmission(f, moon->phase_ticks);
+  ActionEffectSourceLightJob *job=writer->source?
+      ActionEffectSource_BeginLight(writer->source,&source,&mesh,f,occlusion,1,&clip):NULL;
+  if(writer->source&&!job)return false;
+  if(job)job->data.meta[0]=columns*kWaterRows;
   for (unsigned col = 0; col < columns; col++) {
     const float x = (first+(int)col)*4-water->world_x;
     for (unsigned row = 0; row < kWaterRows; row++) {
       const unsigned at = col*kWaterRows+row;
+      if(job) {
+        job->data.points[at][0]=x;job->data.points[at][1]=rows[row];
+        scratch->visibility[at]=m->WaterLight[0]*exposure[row]*pulse;
+        continue;
+      }
       ArRenderPointF p;
       if (!project_point(userdata,&mesh,x,rows[row],&p)) return true;
       scratch->points[at] = p;
@@ -568,6 +599,7 @@ bool AppendBloodpoolWaterMoonlight(const ActionMoonField *f, const ActionMarshFi
           m->WaterLight[0]*BloodpoolMoonProjection_Light(&projection,p)*exposure[row]*pulse;
     }
   }
+  if (!job) {
   MoonCoverageField field;
   ArRenderPointF sources[kMoonSources];
   if (!PrepareMoonCoverage(f, &source,occlusion,scratch,columns*kWaterRows,&field,sources,
@@ -585,6 +617,8 @@ bool AppendBloodpoolWaterMoonlight(const ActionMoonField *f, const ActionMarshFi
     }
     scratch->visibility[at] *= fmaxf(0,1-blocked);
   }
+  }
+  if(job){writer->source->lit_triangles=true;writer->source->light_cap=1e9f;}
   /* Add light only to validated exposed water, in its existing BG1-high
    * additive batch. Dry banks, upper shoreline art and actors are untouched. */
   for (unsigned pool = 0; pool < (unsigned)m->SpanCount[0]; pool++) {
@@ -605,6 +639,8 @@ bool AppendBloodpoolWaterMoonlight(const ActionMoonField *f, const ActionMarshFi
           const unsigned at = row*2+side;
           const float alpha = scratch->visibility[(col+side)*kWaterRows+row];
           vertices[at] = (ArRenderVertex2D){{x+side*4,rows[row]},{m->WaterLight[1],m->WaterLight[2],m->WaterLight[3],alpha},{0,0}};
+          if(job)vertices[at].tex_coord.x=1+(writer->source->light_count-1)*kActionSourceMaxLightPoints+
+              (col+side)*kWaterRows+row;
           mapped[at] = side ? -1 : previous[row];
         }
       }
@@ -617,6 +653,7 @@ bool AppendBloodpoolWaterMoonlight(const ActionMoonField *f, const ActionMarshFi
       for (unsigned row = 0; row < kWaterRows; row++) previous[row] = mapped[row*2+1];
     }
   }
+  if(job)writer->source->lit_triangles=false;
   return true;
 }
 
@@ -634,7 +671,10 @@ bool AppendBloodpoolTimberMoonlight(const ActionMoonField *f, const ActionMarshF
   mesh.flags |= kActionEffectFlag_ClippedMesh;
   source.flags |= kActionEffectFlag_ClippedMesh;
   BloodpoolMoonProjection projection;
-  if (!BloodpoolMoonProjection_Init(f, &projection,&source,project_point,userdata)) return true;
+  if (!writer->source && !BloodpoolMoonProjection_Init(f, &projection,&source,project_point,userdata)) return true;
+  ActionEffectSourceLightJob *job=writer->source?
+      ActionEffectSource_BeginLight(writer->source,&source,&mesh,f,occlusion,2,&clip):NULL;
+  if(writer->source&&!job)return false;
   unsigned selected[kActionBloodpoolMaxTimber], count = 0;
   for (unsigned i = 0; i < details->timber_count; i++) {
     const ActionBloodpoolTimber *edge = &details->timber[i];
@@ -643,20 +683,26 @@ bool AppendBloodpoolTimberMoonlight(const ActionMoonField *f, const ActionMarshF
     if (edge->x0 < m->Bounds[0] || edge->x1 > m->Bounds[2] || edge->x1 <= edge->x0 || edge->y < m->Bounds[1] || edge->y >= m->Surface[0])
       return true;
     if (x < clip.x0-8 || x > clip.x1+8 || y < clip.y0-1 || y > clip.y1) continue;
-    if (!project_point(userdata,&mesh,x,y,&scratch->points[count])) return true;
-    scratch->visibility[count] = BloodpoolMoonProjection_Light(&projection,scratch->points[count]);
+    if(job) {
+      job->data.points[count][0]=x;job->data.points[count][1]=y;
+      scratch->visibility[count]=1;
+    } else {
+      if (!project_point(userdata,&mesh,x,y,&scratch->points[count])) return true;
+      scratch->visibility[count] = BloodpoolMoonProjection_Light(&projection,scratch->points[count]);
+    }
     selected[count++] = i;
   }
   if (!count) return true;
   MoonCoverageField field;
   ArRenderPointF sources[kMoonSources];
-  if (!PrepareMoonCoverage(f, &source,occlusion,scratch,count,&field,sources,
+  if (!job && !PrepareMoonCoverage(f, &source,occlusion,scratch,count,&field,sources,
           project_point,clip_bounds,userdata)) return true;
+  if(job){job->data.meta[0]=count;writer->source->lit_triangles=true;writer->source->light_cap=1e9f;}
   const float cloud = BloodpoolCloudTransmission(f, effect->phase_ticks);
   for (unsigned i = 0; i < count; i++) {
     const ActionBloodpoolTimber *edge = &details->timber[selected[i]];
     float blocked = 0;
-    for (unsigned s = 0; s < kMoonSources; s++) {
+    for (unsigned s = 0; !job && s < kMoonSources; s++) {
       const ArRenderPointF crossing = {sources[s].x*f->Shadow[4]+scratch->points[i].x*f->Shadow[5],
                                       sources[s].y*f->Shadow[4]+scratch->points[i].y*f->Shadow[5]};
       blocked += MoonCoverage(&field,crossing)/kMoonSources;
@@ -667,16 +713,19 @@ bool AppendBloodpoolTimberMoonlight(const ActionMoonField *f, const ActionMarshF
     const float x0 = edge->x0+m->TimberShape[0]-effect->world_x, x1 = edge->x1-m->TimberShape[0]-effect->world_x;
     const float mid = (x0+x1)*.5f, y = edge->y+m->TimberShape[1]-effect->world_y;
     const ArRenderColorF clear = {m->TimberColor[0],m->TimberColor[1],m->TimberColor[2],0}, lit = {m->TimberColor[0],m->TimberColor[1],m->TimberColor[2],alpha};
-    const ArRenderVertex2D vertices[] = {
+    ArRenderVertex2D vertices[] = {
       {{x0,y},clear,{0,0}},{{mid,y},lit,{0,0}},{{x1,y},clear,{0,0}},
       {{x0,y+m->TimberShape[2]},clear,{0,0}},{{mid,y+m->TimberShape[2]},clear,{0,0}},{{x1,y+m->TimberShape[2]},clear,{0,0}},
     };
+    if(job)for(unsigned v=0;v<6;++v)
+      vertices[v].tex_coord.x=1+(writer->source->light_count-1)*kActionSourceMaxLightPoints+i;
     int mapped[] = {-1,-1,-1,-1,-1,-1};
     const int triangles[] = {0,1,3,1,4,3,1,2,4,2,5,4};
     for (unsigned t = 0; t < 12; t += 3)
       if (!AppendSceneClippedTriangle(writer,&mesh,vertices,mapped,&triangles[t],&clip,
               project_point,userdata)) return false;
   }
+  if(job)writer->source->lit_triangles=false;
   return true;
 }
 

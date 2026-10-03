@@ -2,6 +2,8 @@
 #include "action/action_effect_members.h"
 #include "action/action_effect_receivers.h"
 #include "room_scene.h"
+#include "room_preview_native.h"
+#include "action/action_effect_source.h"
 #include "diorama/diorama_snapshot.h"
 #include "diorama/diorama_rom_backdrop.h"
 #include "action/action_decoration_pass.h"
@@ -42,6 +44,18 @@ static bool s_named_uploaded;
 
 /* Shared native recipes, bounded scratch, and one submission per pass. */
 static ActionSceneEffectRenderBatch s_effect_batch;
+static PresentActionSourceDraw s_source_draw;
+static DioramaSkyboxDraw s_skybox_draw;
+static const ArRenderPointF *s_projection_offsets;
+static ArRenderPointF s_skybox_offset;
+static ActionEffectSourcePrimitive s_source_primitives[kActionSourceMaximumPrimitives];
+static ActionEffectSourceLightJob s_source_lights[kActionSourceMaxLightJobs];
+void RoomPreview_SetSourceProjection(PresentActionSourceDraw effects, DioramaSkyboxDraw skybox) {
+  s_source_draw = effects; s_skybox_draw = skybox;
+}
+void RoomPreview_SetProjectionOffsets(const ArRenderPointF *planes, ArRenderPointF skybox) {
+  s_projection_offsets=planes;s_skybox_offset=skybox;
+}
 static bool s_effects_enabled = true;
 static unsigned s_effect_vertices;
 static bool s_probes;
@@ -77,6 +91,16 @@ typedef struct RoomEffectPass {
 } RoomEffectPass;
 static bool DrawEffectLayer(RoomEffectPass *pass, uint8_t layer,
     ArRenderBlendMode blend, bool lighting, bool particles) {
+  if (s_source_draw) {
+    ActionEffectSourceBatch source = {.context=pass->projection,
+        .primitives=s_source_primitives,.capacity=kActionSourceMaximumPrimitives,
+        .lights=s_source_lights,.light_capacity=kActionSourceMaxLightJobs};
+    if (!ActionSceneDecorationRender_Build(pass->frame,layer,lighting,particles,
+        ActionEffectSource_ProjectPoint,ActionEffectSource_ClipBounds,&source,&s_effect_batch)) return false;
+    s_effect_vertices += source.count;
+    return s_source_draw(DioramaPreview_Device(),&source,pass->projection.diorama_projection,
+        &pass->frame->scenery,blend,1);
+  }
   if (!ActionSceneDecorationRender_Build(pass->frame, layer, lighting, particles,
           ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
           &pass->projection, &s_effect_batch)) return false;
@@ -520,10 +544,13 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   if (!DioramaPreview_Begin(width, height)) return 0;
   DioramaCapture capture = *EditorRoomScene_Capture(s_room);
   capture.textures = s_textures; capture.pixels = s_pixels;
+  capture.plane_capture_offsets=s_projection_offsets;
   /* Orbit/aspect changes reuse the filtered skybox until its pixels change. */
   capture.bg2_revision = s_bg2_revision;
   capture.bg2_dynamic = false;
   DioramaSkyboxView extended = *capture.skybox;
+  extended.capture_offset.x+=s_skybox_offset.x;
+  extended.capture_offset.y+=s_skybox_offset.y;
   if (EditorRoomScene_Surfaces(s_room)->background_view) {
     extended.texture = s_view; extended.revision = s_view_revision; capture.skybox = &extended;
   }
@@ -533,6 +560,7 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   DioramaScene scene = *EditorRoomScene_Scene(s_room);
   DioramaRenderOptions options = *scene.render;
   options.resolve_skybox = ResolveSkybox;
+  options.draw_resident_skybox = s_skybox_draw;
   options.skybox = (DioramaSkyMode)skybox; scene.render = &options;
   DioramaView view = {.camera = {.tilt_x = pitch, .tilt_y = yaw},
     .distance_scale = distance, .camera_framing_weight = 1, .pixel_aspect = pixel_aspect,
@@ -557,11 +585,19 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
       DioramaPreview_Device(), &capture, &view, &scene, &projection)) || !effects.valid) return 0;
   if (!s_effects_enabled) return 1;
   effects.projection.diorama_projection = &projection;
+  if(s_source_draw) {
+    ActionEffectSourceBatch source = {.context=effects.projection,
+        .primitives=s_source_primitives,.capacity=kActionSourceMaximumPrimitives,
+        .lights=s_source_lights,.light_capacity=kActionSourceMaxLightJobs};
+    if(!ActionSceneEffectRender_Build(effects.frame,true,true,ActionEffectSource_ProjectPoint,&source,&s_effect_batch) ||
+       !s_source_draw(DioramaPreview_Device(),&source,&projection,&effects.frame->scenery,kArRenderBlendMode_Add,1))return 0;
+  } else {
   if(!ActionSceneEffectRender_Build(effects.frame,true,true,ActionEffectProjection_ProjectPoint,&effects.projection,&s_effect_batch))return 0;
   if(s_effect_batch.index_count) {
     s_effect_vertices+=s_effect_batch.vertex_count;
     const ArRenderDrawState state={.flags=kArRenderDrawState_Blend,.blend=kArRenderBlendMode_Add};
     if(!ArRenderDevice_DrawGeometryWithState(DioramaPreview_Device(),ArRenderTexture_Invalid(),s_effect_batch.vertices,s_effect_batch.vertex_count,s_effect_batch.indices,s_effect_batch.index_count,&state))return 0;
+  }
   }
   return DrawEffectLayer(&effects, kActionEffectRenderLayer_WorldOverlay, kArRenderBlendMode_Add, true, true) &&
       DrawEffectLayer(&effects, kActionEffectRenderLayer_WorldDust, kArRenderBlendMode_Alpha, false, true) &&

@@ -63,17 +63,12 @@ static void Fill(SrPpuBgPacket *p, unsigned width, unsigned height, unsigned pha
 int main(void) {
   if (!SDL_Init(SDL_INIT_VIDEO)) return 77;
   SDL_Window *window = SDL_CreateWindow("BG capture GPU parity", 64, 64, SDL_WINDOW_HIDDEN);
-  ArRenderDevice device = {0}; ArSdlRenderBackend backend = {0};
-  SDL_PropertiesID props = SDL_CreateProperties();
-  SDL_SetStringProperty(props, SDL_PROP_RENDERER_CREATE_NAME_STRING, SDL_GPU_RENDERER);
-  SDL_SetPointerProperty(props, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, window);
-  SDL_SetBooleanProperty(props, SDL_PROP_RENDERER_CREATE_GPU_SHADERS_SPIRV_BOOLEAN, true);
-  SDL_SetBooleanProperty(props, SDL_PROP_RENDERER_CREATE_GPU_SHADERS_DXIL_BOOLEAN, true);
-  SDL_SetBooleanProperty(props, SDL_PROP_RENDERER_CREATE_GPU_SHADERS_MSL_BOOLEAN, true);
-  SDL_Renderer *renderer = SDL_CreateRendererWithProperties(props);
-  SDL_DestroyProperties(props);
-  if (!renderer) { SDL_DestroyWindow(window); SDL_Quit(); return 77; }
-  assert(ArSdlRenderBackend_Bind(&device, &backend, renderer));
+  ArRenderDevice device = {0};
+  if (!ArSdlRenderBackend_CreateForWindow(&device, window, NULL)) {
+    SDL_DestroyWindow(window); SDL_Quit(); return 77;
+  }
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(&device);
+  SDL_Texture *base_target = SDL_GetRenderTarget(renderer);
   SrPpuBgPacket *packet = malloc(sizeof(*packet)); assert(packet);
   const unsigned planes[2][3] = {{0, kDioramaPlane_Bg1Hi, kDioramaPlane_Bg1Far},
       {1, kDioramaPlane_Bg2Hi, kDioramaPlane_Bg2Far}};
@@ -84,7 +79,7 @@ int main(void) {
     Fill(packet, widths[phase], heights[phase], phase);
     ArRenderTexture textures[kDioramaPlane_Count] = {0}; uint32_t changed = 0;
     assert(DioramaBgGpu_Resolve(&device, packet, mask, textures, NULL, &changed) == mask);
-    assert(changed == mask && SDL_GetRenderTarget(renderer) == NULL);
+    assert(changed == mask && SDL_GetRenderTarget(renderer) == base_target);
     for (unsigned bg = 0; bg < 2; ++bg) for (unsigned band = 0; band < 3; ++band) {
       assert(SDL_SetRenderTarget(renderer, ArSdlRenderBackend_UnwrapTexture(textures[planes[bg][band]])));
       SDL_Surface *raw = SDL_RenderReadPixels(renderer, NULL); assert(raw);
@@ -99,7 +94,7 @@ int main(void) {
       }
       SDL_DestroySurface(pixels); SDL_DestroySurface(raw);
     }
-    assert(SDL_SetRenderTarget(renderer, NULL));
+    assert(SDL_SetRenderTarget(renderer, base_target));
     assert(DioramaBgGpu_Resolve(&device, packet, mask, textures, NULL, &changed) == mask);
     assert(changed == 0);
   }
@@ -134,7 +129,7 @@ int main(void) {
       assert(((const uint32_t *)((const uint8_t *)pixels->pixels + y * pixels->pitch))[x] == expected);
     }
     SDL_DestroySurface(pixels); SDL_DestroySurface(raw);
-    assert(SDL_SetRenderTarget(renderer, NULL));
+    assert(SDL_SetRenderTarget(renderer, base_target));
   }
   Fill(packet, 384, 224, 2);
   ArRenderTexture restored_planes[kDioramaPlane_Count] = {0}; uint32_t restored_changed;
@@ -167,7 +162,7 @@ int main(void) {
   edit_row[5] = edit_offset;
   packet->words[0] = SR_PPU_BG_PACKET_WIDTH + 1;
   assert(DioramaBgGpu_Resolve(&device, packet, mask, resolved, NULL, &changed) == 0);
-  assert(changed == 0 && SDL_GetRenderTarget(renderer) == NULL);
+  assert(changed == 0 && SDL_GetRenderTarget(renderer) == base_target);
   Fill(packet, 17, 9, 4);
   uint32_t *bad_row = SrPpuBgPacket_Meta(packet, 0, 0);
   const unsigned palette = bad_row[6];
@@ -196,11 +191,39 @@ int main(void) {
   assert(memcmp(&restored, &viewport, sizeof(restored)) == 0);
   assert(SDL_RenderClipEnabled(renderer) && SDL_GetRenderClipRect(renderer, &restored));
   assert(memcmp(&restored, &clip, sizeof(restored)) == 0);
-  assert(SDL_SetRenderTarget(renderer, NULL));
+  assert(SDL_SetRenderTarget(renderer, base_target));
   SDL_DestroyTexture(scene);
+  /* Queue consumers between changed packets without readbacks. Every saved
+   * tile must retain its own revision while transfer/storage buffers cycle. */
+  SDL_Texture *history = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
+      SDL_TEXTUREACCESS_TARGET, 512, 32);
+  assert(history && SDL_SetRenderTarget(renderer, history));
+  assert(SDL_SetRenderLogicalPresentation(renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED));
+  assert(SDL_SetRenderViewport(renderer, NULL) && SDL_SetRenderClipRect(renderer, NULL));
+  for (unsigned step = 0; step < 16; ++step) {
+    Fill(packet, 32, 32, 20 + step);
+    const unsigned plane = planes[0][step % 3];
+    assert(DioramaBgGpu_Resolve(&device, packet, 1u << plane, resolved, NULL, &changed) == (1u << plane));
+    SDL_Texture *source = ArSdlRenderBackend_UnwrapTexture(resolved[plane]);
+    const SDL_FRect from = {0, 0, 32, 32}, to = {(float)step * 32, 0, 32, 32};
+    assert(SDL_SetTextureBlendMode(source, SDL_BLENDMODE_NONE));
+    assert(SDL_RenderTexture(renderer, source, &from, &to));
+  }
+  SDL_Surface *raw = SDL_RenderReadPixels(renderer, NULL); assert(raw);
+  SDL_Surface *pixels = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888); assert(pixels);
+  for (unsigned step = 0; step < 16; ++step) {
+    Fill(packet, 32, 32, 20 + step);
+    for (unsigned y = 0; y < 32; ++y) for (unsigned x = 0; x < 32; ++x) {
+      uint32_t got = ((uint32_t *)((uint8_t *)pixels->pixels + y * pixels->pitch))[step * 32 + x];
+      assert(got == SrPpuBgPacket_Color(packet, 0, step % 3, x, y));
+    }
+  }
+  SDL_DestroySurface(pixels); SDL_DestroySurface(raw);
+  assert(SDL_SetRenderTarget(renderer, base_target));
+  SDL_DestroyTexture(history);
   DioramaBgGpu_Reset(&device);
   free(packet); ArSdlRenderBackend_Destroy(&device);
-  SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); SDL_Quit();
+  SDL_DestroyWindow(window); SDL_Quit();
   puts("live BG capture GPU parity passed (all six bands, changing palettes, padding and extents)");
   return 0;
 }

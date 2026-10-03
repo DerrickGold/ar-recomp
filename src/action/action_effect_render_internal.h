@@ -5,6 +5,7 @@
  * in another. Not a public API; only the action effect renderers include it.
  * Phase: pure. */
 #include "action/action_effect_render.h"
+#include "action/action_effect_source.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -52,6 +53,7 @@ typedef struct ActionEffectGeometryWriter {
   int vertex_capacity;
   int index_capacity;
   const ActionSceneryShadow *shadow;
+  ActionEffectSourceBatch *source;
 } ActionEffectGeometryWriter;
 bool ActionSceneryShadow_Prepare(ActionSceneryShadow *shadow, ActionSceneryShadowCache *cache,
                                  const ActionMoonlightOcclusion *occlusion,
@@ -138,6 +140,9 @@ static inline float SceneSoftFalloff(float distance) {
 }
 
 /* ---- defined in action_environment_geometry.c ---- */
+bool AppendSourceBillboard(ActionEffectGeometryWriter *, const ActionEffectInstance *,
+    float, float, float, float, float, float, unsigned, const float (*)[4], const ArRenderColorF *);
+void TintEffectMember(ActionEffectGeometryWriter *, const ActionNativeMember *, int, int, bool);
 bool AppendSceneClippedTriangle(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *mesh,
     const ArRenderVertex2D *source, int *mapped, const int *triangle,

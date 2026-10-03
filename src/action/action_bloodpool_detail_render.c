@@ -166,7 +166,10 @@ static bool MarshInsects(const ActionMoonField *f, const ActionMarshField *m, Ac
     const ActionEffectInstance *moon, const ActionEffectLocalRect *clip,
     ActionEffectProjectPointFn project_point, void *userdata) {
   BloodpoolMoonProjection light;
-  const bool lit = moon && BloodpoolMoonProjection_Init(f, &light,moon,project_point,userdata);
+  const bool lit = !writer->source && moon && BloodpoolMoonProjection_Init(f, &light,moon,project_point,userdata);
+  ActionEffectSourceLightJob *job=writer->source&&moon?
+      ActionEffectSource_BeginLight(writer->source,moon,mesh,f,NULL,3,clip):NULL;
+  if(writer->source&&moon&&!job)return false;
   for (unsigned pool = 0; pool < (unsigned)m->SpanCount[0]; pool++) {
     if (!(mesh->source_mask&(1u<<pool))) continue;
     for (unsigned side = 0; side < 2; side++) {
@@ -179,7 +182,7 @@ static bool MarshInsects(const ActionMoonField *f, const ActionMarshField *m, Ac
         const float x = bank+m->InsectMotion[2]*sinf(t*m->InsectMotion[3])+m->InsectMotion[4]*cosf(t*m->InsectMotion[5])-mesh->world_x;
         const float y = m->InsectRegion[1]+m->InsectRegion[2]*HashUnit(seed)+m->InsectMotion[6]*sinf(t*m->InsectMotion[7]+m->InsectMotion[8])-mesh->world_y;
         ArRenderPointF p;
-        if (!project_point(userdata,mesh,x,y,&p)) continue;
+        if (!writer->source && !project_point(userdata,mesh,x,y,&p)) continue;
         const float exposure = lit ? BloodpoolMoonProjection_Light(&light,p) : 0;
         float flash = fmaxf(0,sinf(t+m->InsectMotion[9]));
         flash *= flash;
@@ -188,8 +191,17 @@ static bool MarshInsects(const ActionMoonField *f, const ActionMarshField *m, Ac
         const float alpha = m->InsectGain[0]+m->InsectGain[1]*exposure+m->InsectGain[2]*flash;
         if (flash > m->InsectGain[3] && !DetailSpark(writer,mesh,clip,x,y,m->InsectShape[0],m->InsectShape[1],
                 (ArRenderColorF){m->InsectColor[0],m->InsectColor[1],m->InsectColor[2],m->InsectGain[4]*flash},project_point,userdata)) return false;
+        if(job) {
+          const unsigned at=(unsigned)job->data.meta[0];
+          if(at>=kActionSourceMaxLightPoints){writer->source->failed=true;return false;}
+          job->data.points[at][0]=x;job->data.points[at][1]=y;job->data.meta[0]++;
+          writer->source->lit_triangles=true;writer->source->light_cap=1e9f;
+          writer->source->light_sample=1+(writer->source->light_count-1)*kActionSourceMaxLightPoints+at;
+          writer->source->light_base=alpha;
+        }
         if (!DetailSpark(writer,mesh,clip,x,y,m->InsectShape[2]+m->InsectShape[3]*flash,m->InsectShape[4]+m->InsectShape[5]*flash,
-                (ArRenderColorF){m->InsectColor[0],m->InsectColor[1],m->InsectColor[2],alpha},project_point,userdata)) return false;
+                (ArRenderColorF){m->InsectColor[0],m->InsectColor[1],m->InsectColor[2],job?m->InsectGain[1]:alpha},project_point,userdata)) return false;
+        if(job){writer->source->lit_triangles=false;writer->source->light_sample=0;}
       }
     }
   }

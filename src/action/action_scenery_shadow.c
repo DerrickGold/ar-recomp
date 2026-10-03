@@ -128,6 +128,10 @@ static float Coverage(const ActionSceneryShadow *s, float x, float y) {
 void ActionSceneryShadow_Apply(ActionEffectGeometryWriter *w, int begin,
                                const ActionEffectInstance *e, float x, float y, bool multiply,
                                ActionEffectProjectPointFn project, void *context) {
+  if (w->source) {
+    ActionEffectSource_Shadow(w->source, (unsigned)begin, x, y, multiply);
+    return;
+  }
   const ActionSceneryShadow *s = w->shadow;
   if (!s || !s->valid) return;
   ActionEffectInstance source = *e;

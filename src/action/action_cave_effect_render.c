@@ -52,6 +52,15 @@ static bool CaveQuad(ActionEffectGeometryWriter *writer, const ActionEffectInsta
     const ArRenderPointF *world, ArRenderColorF color,
     ActionEffectProjectPointFn project_point, void *userdata) {
   ArRenderPointF points[4];
+  if (writer->source) {
+    for (int i = 0; i < 4; i++)
+      points[i] = (ArRenderPointF){world[i].x - effect->world_x,
+                                  world[i].y - effect->world_y};
+    const ArRenderColorF colors[4] = {color, color, color, color};
+    const bool ok = ActionEffectSource_Quad(writer->source, effect, points, colors);
+    writer->vertex_count = (int)writer->source->count;
+    return ok;
+  }
   for (int i = 0; i < 4; i++)
     if (!project_point(userdata, effect, world[i].x - effect->world_x,
             world[i].y - effect->world_y, &points[i]))
@@ -133,7 +142,7 @@ static bool CaveWater(ActionEffectGeometryWriter *writer, const ActionEffectInst
     if (!CaveRipple(writer, effect, p, x, water->surface_y + p->PoolRipple[1], age, p->PoolRipple[2],
             project_point, userdata))
       return false;
-    ActionEffectMembers_Tint(member, writer->vertices, first_vertex, writer->vertex_count, false);
+    TintEffectMember(writer, member, first_vertex, writer->vertex_count, false);
   }
   for (unsigned fall = 0; fall < (unsigned)p->Counts[1]; fall++) {
     const ActionNativeMember *member =
@@ -157,7 +166,7 @@ static bool CaveWater(ActionEffectGeometryWriter *writer, const ActionEffectInst
         return false;
     }
     if (!InCaveField(effect, end.x, end.y, 24)) {
-      ActionEffectMembers_Tint(member, writer->vertices, first_vertex, writer->vertex_count, false);
+      TintEffectMember(writer, member, first_vertex, writer->vertex_count, false);
       continue;
     }
     const float pulse = p->FallMotion[5] + p->FallMotion[6] * sinf((effect->phase_ticks & ((unsigned)p->FallPulse[0]-1)) * p->FallPulse[1] + fall);
@@ -172,7 +181,7 @@ static bool CaveWater(ActionEffectGeometryWriter *writer, const ActionEffectInst
     if (!AppendGlow(writer, effect, &glow, pulse, end.x - effect->world_x,
             end.y + p->FallGlow[2] - effect->world_y, project_point, userdata))
       return false;
-    ActionEffectMembers_Tint(member, writer->vertices, first_vertex, writer->vertex_count, false);
+    TintEffectMember(writer, member, first_vertex, writer->vertex_count, false);
   }
   return true;
 }
@@ -219,7 +228,7 @@ static bool CaveDrips(ActionEffectGeometryWriter *writer, const ActionEffectInst
                   project_point, userdata)) return false;
       }
     }
-    ActionEffectMembers_Tint(member, writer->vertices, first_vertex, writer->vertex_count, false);
+    TintEffectMember(writer, member, first_vertex, writer->vertex_count, false);
   }
   return true;
 }
@@ -341,7 +350,7 @@ static bool CaveMist(ActionEffectGeometryWriter *writer, const ActionEffectInsta
     if (!CaveMistVolume(writer, effect, MIST_STYLE(p), &clip, x - width, x + width, y, height, seed, p->SprayShape[3],
                         project_point, userdata))
       return false;
-    ActionEffectMembers_Tint(member, writer->vertices, first_vertex, writer->vertex_count, false);
+    TintEffectMember(writer, member, first_vertex, writer->vertex_count, false);
   }
   return true;
 }
@@ -384,7 +393,7 @@ static bool CaveSheen(ActionEffectGeometryWriter *writer, const ActionEffectInst
               (ArRenderColorF){p->SheenLip[0],p->SheenLip[1],p->SheenLip[2],fminf(1,fmaxf(0,edge*(p->SheenLip[3]+p->SheenLip[4]*shimmer*shimmer)))},
               project_point,userdata)) return false;
     }
-    ActionEffectMembers_Tint(member, writer->vertices, first_vertex, writer->vertex_count, false);
+    TintEffectMember(writer, member, first_vertex, writer->vertex_count, false);
   }
   return true;
 }

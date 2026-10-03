@@ -2,6 +2,7 @@
 #include "render/scenery_dimming.h"
 #include "action/action_effect_projection.h"
 #include "action/action_effect_render.h"
+#include "action/action_effect_source.h"
 #include "actraiser_game.h"
 #include "app/session_fatal.h"
 #include "diorama/diorama.h"
@@ -1254,7 +1255,73 @@ static void AuthoredOnlyComposition(void) {
   PresentActionEffects_Reset(&device);
 }
 
+static uint32_t source_hash;
+static unsigned source_count, source_submissions;
+static const DioramaProjection *source_projection;
+static float source_brightness;
+
+static bool InspectSourcePacket(ArRenderDevice *device, const ActionEffectSourceBatch *batch,
+    const DioramaProjection *projection, const ActionMoonlightOcclusion *scenery,
+    ArRenderBlendMode blend, float brightness) {
+  (void)device; (void)scenery; (void)blend;
+  assert(!batch->failed && batch->context.diorama_projection == projection);
+  if (!batch->count) return true;
+  source_projection = projection;
+  source_brightness = brightness;
+  source_count = batch->count;
+  source_hash = 2166136261u;
+  const uint8_t *bytes = (const uint8_t *)batch->primitives;
+  for (size_t i = 0; i < batch->count * sizeof(*batch->primitives); ++i)
+    source_hash = (source_hash ^ bytes[i]) * 16777619u;
+  ++source_submissions;
+  return true;
+}
+
+static void SourcePacketCaptureLifetime(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b, &device);
+  LavaFrame();
+  frame.action_effects.visible_count = 0;
+  frame.action_scene_effects = (ActionSceneEffectFrame){.authored_count = 1};
+  ActionEffectInstance *e = &frame.action_scene_effects.authored[0];
+  *e = (ActionEffectInstance){
+    .world_x = 128, .world_y = 112, .kind = kActionEffect_AuthoredLight,
+    .flags = kActionEffectFlag_Visible,
+    .render_layer = kActionEffectRenderLayer_WorldOverlay,
+    .projection_plane = kActionEffectProjectionPlane_Bg1,
+    .tuning = {.intensity = 1, .color = 0xdde6ff, .active = 1},
+    .particle_lifetime = 240,
+    .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-48,-32,48,32}},
+  };
+  DioramaProjection a = {.valid = true}, next_band = {.valid = true};
+  source_submissions = 0;
+  PresentActionEffects_DrawWithSource(&device, &frame, viewport, &a, InspectSourcePacket);
+  assert(source_submissions == 1 && source_count && source_projection == &a);
+  const uint32_t original_hash = source_hash;
+  /* Model an in-place editor edit: packets stay immutable until explicitly
+   * invalidated, but the current band/projection and fade must never be cached. */
+  e->world_x += 17;
+  frame.inidisp = 7;
+  PresentActionEffects_DrawWithSource(&device, &frame, viewport, &next_band, InspectSourcePacket);
+  assert(source_submissions == 2 && source_hash == original_hash);
+  assert(source_projection == &next_band && source_brightness == 7.0f / 15.0f);
+  PresentActionEffects_InvalidateSourcePackets();
+  PresentActionEffects_DrawWithSource(&device, &frame, viewport, &a, InspectSourcePacket);
+  assert(source_submissions == 3 && source_hash != original_hash);
+  e->world_x -= 17;
+  ++frame.timestamp_ns;
+  PresentActionEffects_DrawWithSource(&device, &frame, viewport, &a, InspectSourcePacket);
+  assert(source_submissions == 4 && source_hash == original_hash);
+  PresentActionEffects_Reset(&device);
+  e->world_x += 23;
+  PresentActionEffects_DrawWithSource(&device, &frame, viewport, &a, InspectSourcePacket);
+  assert(source_submissions == 5 && source_hash != original_hash);
+  PresentActionEffects_Reset(&device);
+}
+
 int main(void) {
+  SourcePacketCaptureLifetime();
   AuthoredOnlyComposition();
   TestEffectMasterBrightness();
   SkyboxWaterfallComposition();

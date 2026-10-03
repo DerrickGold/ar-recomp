@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include "diorama_planes.h"
+#include "diorama_skybox_source.h"
 #include "render/render_device.h"
 
 typedef struct FrameSlot FrameSlot;
@@ -40,6 +41,11 @@ void DioramaFrameGeneration_CaptureWithSkybox(
     uint32_t changed_plane_mask, ArRenderTexture skybox_texture,
     bool skybox_changed);
 
+/* Join optional native preparation before changing/destroying any captured
+ * source texture. Waits for CPU submission only, never GPU completion. Prepare
+ * and Reset also join before consuming or invalidating a pending endpoint. */
+void DioramaFrameGeneration_FinishCapture(void);
+
 /* Resolve the plane textures for one host present. `current_textures` are the
  * exact 60 Hz endpoints uploaded by Diorama_Upload. Valid generated planes are
  * rendered into private targets and substituted in `resolved_textures`; every
@@ -61,7 +67,9 @@ uint32_t DioramaFrameGeneration_PrepareWithSkybox(
  * Uniform background motion, including kDioramaFrameGenerationSkybox, has one
  * offset; ungenerated/OBJ planes and reset state return zero. Query immediately
  * after Prepare on the presenter. */
-/* Diagnostic mask of backgrounds synthesized by the optional compute path. */
+/* Diagnostic mask of backgrounds synthesized by the optional compute path.
+ * Resident projection reports candidate planes; motion rejection is resolved
+ * on GPU by returning the current endpoint, without downloading confidence. */
 uint32_t DioramaFrameGeneration_GpuPlaneMask(void);
 /* All successfully synthesized planes from the most recent Prepare, including
  * the CPU-analysis path. Diagnostics must not count a skipped pair as parity. */
@@ -72,6 +80,24 @@ void DioramaFrameGeneration_EnableWaitTrace(bool enabled);
 uint64_t DioramaFrameGeneration_LastWaitNs(void);
 
 ArRenderPointF DioramaFrameGeneration_PlaneOffset(int plane);
+
+/* Resident source-projection path. The presenter selects the shared action
+ * policy before Capture; unavailable backends keep the reference path.
+ * Active is latched per capture, so its consumers and metadata policy agree. */
+typedef struct ActionEffectSourceBatch ActionEffectSourceBatch;
+typedef struct ActionMoonlightOcclusion ActionMoonlightOcclusion;
+typedef struct DioramaProjection DioramaProjection;
+void DioramaFrameGeneration_AllowSourceProjection(bool allowed);
+/* Capability check before dropping CPU background copies. Presenter only. */
+bool DioramaFrameGeneration_UsesGpuAnalysis(ArRenderDevice *, const FrameSlot *);
+bool DioramaFrameGeneration_SourceProjectionActive(void);
+bool DioramaFrameGeneration_SourceProjectionFailed(void);
+void DioramaFrameGeneration_RecoverSourceProjection(ArRenderDevice *);
+unsigned DioramaFrameGeneration_MetadataReadbackCount(void);
+bool DioramaFrameGeneration_DrawSource(ArRenderDevice *, const ActionEffectSourceBatch *,
+    const DioramaProjection *, const ActionMoonlightOcclusion *, ArRenderBlendMode, float);
+bool DioramaFrameGeneration_DrawSkybox(ArRenderDevice *, ArRenderTexture,
+    const DioramaSkyboxSourceDraw *);
 
 /* Drop endpoint history and backend resources. Reset is safe after a render
  * reset event; Shutdown is also used during orderly teardown. */

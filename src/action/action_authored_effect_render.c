@@ -22,6 +22,21 @@ static bool FloorMist(ActionEffectGeometryWriter *w, const ActionEffectInstance 
         floor>e->geometry.data.rect.y1||floor-s->height<e->geometry.data.rect.y0) return false;
     if (right<=clip->x0||left>=clip->x1||floor<=clip->y0||floor-s->height>=clip->y1) continue;
     for (unsigned slice=0;slice<3;++slice) {
+      if(w->source) {
+        for(unsigned row=0;row<2;++row)for(unsigned col=0;col<4;++col) {
+          const ArRenderPointF corners[]={{left+(right-left)*col*.25f,row},
+              {left+(right-left)*(col+1)*.25f,row},{left+(right-left)*col*.25f,row+1},
+              {left+(right-left)*(col+1)*.25f,row+1}};
+          const unsigned indices[]={0,1,2,1,3,2};
+          for(unsigned t=0;t<6;t+=3) {
+            const ArRenderPointF triangle[]={corners[indices[t]],corners[indices[t+1]],corners[indices[t+2]]};
+            if(!ActionEffectSource_FloorTriangle(w->source,&mesh,clip,triangle,floor,s->height,
+                    phase,seed,slice,tint))return false;
+          }
+        }
+        w->vertex_count=(int)w->source->count;
+        continue;
+      }
       if (!Reserve(w,15,48)) return false;
       const int base=w->vertex_count;
       for (unsigned row=0;row<3;++row) for (unsigned col=0;col<5;++col) {

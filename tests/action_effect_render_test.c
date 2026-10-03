@@ -1,4 +1,6 @@
+#include "action/action_effect_source.h"
 #include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -17,6 +19,67 @@ static int s_failures;
       s_failures++;                                                                                \
     }                                                                                              \
   } while (0)
+
+/* Exercise the established scene fixtures through the deferred recipe writer.
+ * Geometry/image parity is checked separately on real backends; this catches a
+ * newly added recipe accidentally depending on the CPU projection callback. */
+static bool CheckDeferredDecoration(const ActionSceneEffectFrame *frame, uint8_t layer,
+    bool lighting, bool particles, ActionEffectProjectPointFn project,
+    ActionEffectClipBoundsFn clip, void *context, ActionSceneEffectRenderBatch *batch) {
+  const bool ok=ActionSceneDecorationRender_Build(frame,layer,lighting,particles,project,clip,context,batch);
+  if(ok && batch && batch->index_count && project!=ActionEffectSource_ProjectPoint && getenv("AR_TEST_DEFERRED_RECIPES")) {
+    static ActionEffectSourcePrimitive primitives[kActionSourceMaximumPrimitives];
+    static ActionEffectSourceLightJob jobs[kActionSourceMaxLightJobs];
+    static ActionSceneEffectRenderBatch scratch;
+    ActionEffectSourceBatch source={.primitives=primitives,.capacity=kActionSourceMaximumPrimitives,
+        .lights=jobs,.light_capacity=kActionSourceMaxLightJobs};
+    const bool complete=ActionSceneDecorationRender_Build(frame,layer,lighting,particles,
+        ActionEffectSource_ProjectPoint,ActionEffectSource_ClipBounds,&source,&scratch);
+    if(!complete || source.failed) {
+      fprintf(stderr,"deferred recipe failure: layer=%u lights=%d particles=%d kinds=",layer,lighting,particles);
+      for(unsigned i=0;i<frame->decoration_count;++i)fprintf(stderr," %u",frame->decorations[i].kind);
+      for(unsigned i=0;i<frame->authored_count;++i)fprintf(stderr," authored:%u",frame->authored[i].kind);
+      fprintf(stderr," primitives=%u\n",source.count);
+      CHECK(complete&&!source.failed);
+    }
+  }
+  return ok;
+}
+#define ActionSceneDecorationRender_Build CheckDeferredDecoration
+
+static bool CheckDeferredActionEffectRender(const ActionEffectFrame *frame, bool lighting, bool particles,
+    ActionEffectProjectPointFn project, void *context, ActionEffectRenderBatch *batch) {
+  const bool ok=ActionEffectRender_Build(frame,lighting,particles,project,context,batch);
+  if(ok && batch && batch->index_count && project!=ActionEffectSource_ProjectPoint && getenv("AR_TEST_DEFERRED_RECIPES")) {
+    static ActionEffectSourcePrimitive primitives[kActionSourceMaximumPrimitives];
+    static ActionEffectRenderBatch scratch;
+    ActionEffectSourceBatch source={.primitives=primitives,.capacity=kActionSourceMaximumPrimitives};
+    const bool complete=ActionEffectRender_Build(frame,lighting,particles,ActionEffectSource_ProjectPoint,&source,&scratch);
+    if(!complete || source.failed) {
+      fprintf(stderr,"deferred ActionEffectRender failure: lights=%d particles=%d primitives=%u\n",lighting,particles,source.count);
+      CHECK(complete&&!source.failed);
+    }
+  }
+  return ok;
+}
+#define ActionEffectRender_Build CheckDeferredActionEffectRender
+
+static bool CheckDeferredActionSceneEffectRender(const ActionSceneEffectFrame *frame, bool lighting, bool particles,
+    ActionEffectProjectPointFn project, void *context, ActionSceneEffectRenderBatch *batch) {
+  const bool ok=ActionSceneEffectRender_Build(frame,lighting,particles,project,context,batch);
+  if(ok && batch && batch->index_count && project!=ActionEffectSource_ProjectPoint && getenv("AR_TEST_DEFERRED_RECIPES")) {
+    static ActionEffectSourcePrimitive primitives[kActionSourceMaximumPrimitives];
+    static ActionSceneEffectRenderBatch scratch;
+    ActionEffectSourceBatch source={.primitives=primitives,.capacity=kActionSourceMaximumPrimitives};
+    const bool complete=ActionSceneEffectRender_Build(frame,lighting,particles,ActionEffectSource_ProjectPoint,&source,&scratch);
+    if(!complete || source.failed) {
+      fprintf(stderr,"deferred ActionSceneEffectRender failure: lights=%d particles=%d primitives=%u\n",lighting,particles,source.count);
+      CHECK(complete&&!source.failed);
+    }
+  }
+  return ok;
+}
+#define ActionSceneEffectRender_Build CheckDeferredActionSceneEffectRender
 
 static bool EffectBatchesEqual(const ActionEffectRenderBatch *a, const ActionEffectRenderBatch *b) {
   return a->vertex_count == b->vertex_count && a->index_count == b->index_count &&
@@ -1757,6 +1820,47 @@ static void TestForestClippingPreservesField(int16_t world_x, int16_t world_y) {
     CHECK(clipped.vertex_count == 0 && clipped.index_count == 0);
     frame.decoration_count = 1;
   }
+}
+
+static void TestDeferredForestRecipes(void) {
+  static ActionEffectSourcePrimitive primitives[kActionSourceMaximumPrimitives];
+  static ActionSceneEffectRenderBatch scratch;
+  ActionSceneEffectFrame frame = {.decoration_count = 1, .decoration_visible_count = 1};
+  ActionEffectInstance *e = &frame.decorations[0];
+  *e = (ActionEffectInstance){.kind = kActionEffect_ForestCanopyLight,
+      .phase = kActionEffectPhase_ForestCanopyLight, .flags = kActionEffectFlag_Visible,
+      .generation = 1, .pulse_generation = 2, .phase_ticks = 123,
+      .render_layer = kActionEffectRenderLayer_Bg2Plane,
+      .projection_plane = kActionEffectProjectionPlane_BetweenBackgrounds,
+      .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384, 0, 384, 544}}};
+  const unsigned kinds[] = {kActionEffect_ForestCanopyLight, kActionEffect_ForestLeaves,
+      kActionEffect_ForestForwardLight};
+  for (unsigned i = 0; i < 3; ++i) {
+    e->kind = kinds[i];
+    e->render_layer = i == 1 ? kActionEffectRenderLayer_Bg2Alpha :
+        i == 2 ? kActionEffectRenderLayer_ForegroundLight : kActionEffectRenderLayer_Bg2Plane;
+    ActionEffectSourceBatch source = {.primitives = primitives, .capacity = kActionSourceMaximumPrimitives};
+    CHECK(ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+        ActionEffectSource_ProjectPoint, ActionEffectSource_ClipBounds, &source, &scratch));
+    CHECK(!source.failed && source.count > 0);
+    unsigned triangles = 0, particles = 0, leaves = 0, shadows = 0;
+    for (unsigned p = 0; p < source.count; ++p) {
+      triangles += primitives[p].meta[0] == kActionSourceTriangle;
+      particles += primitives[p].meta[0] == kActionSourceParticle;
+      leaves += primitives[p].meta[0] == kActionSourceLeaf;
+      shadows += primitives[p].meta[3] != 0;
+    }
+    if (i == 0) CHECK(triangles && particles);
+    if (i == 1) CHECK(leaves && !triangles && !particles);
+    if (i == 2) CHECK(triangles && shadows == triangles);
+    source.count = 0; source.capacity = 1;
+    CHECK(!ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+        ActionEffectSource_ProjectPoint, ActionEffectSource_ClipBounds, &source, &scratch));
+    CHECK(source.failed && source.count <= source.capacity);
+  }
+  ActionEffectSourceBatch unsupported = {0}; ArRenderPointF point;
+  CHECK(!ActionEffectSource_ProjectPoint(&unsupported, e, 0, 0, &point));
+  CHECK(unsupported.failed);
 }
 
 static void TestForestCanopyGeometry(void) {
@@ -4025,6 +4129,7 @@ int main(void) {
   TestTempleGroundMist();
   TestForestClippingPreservesField(928, 80);
   TestForestClippingPreservesField(2918, 202);
+  TestDeferredForestRecipes();
   TestForestCanopyGeometry();
   TestForestFanOut();
   TestForestParticles();

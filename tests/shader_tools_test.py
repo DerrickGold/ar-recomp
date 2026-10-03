@@ -10,6 +10,56 @@ import build_shaders
 
 
 class ShaderVerificationTest(unittest.TestCase):
+    def test_compute_bindings_include_shared_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'test.comp.glsl'
+            path.write_text('#include "context.glsl"\nlayout(local_size_x=64) in;\n'
+                'layout(std430,set=0,binding=0) readonly buffer Data {uint v[];} data;')
+            header = root / 'context.glsl'
+            header.write_text('layout(std140,set=2,binding=0) uniform Context {vec4 x;} settings;')
+            msl = 'kernel void main0(device Data& data [[buffer(0)]], constant Context& settings [[buffer(1)]]) {}'
+            fixed = build_shaders.verify_compute_bindings(path, msl, metal=True, remap=True)
+            self.assertIn('settings [[buffer(0)]]', fixed)
+            self.assertIn('data [[buffer(1)]]', fixed)
+            header.write_text('#include "test.comp.glsl"')
+            with self.assertRaises(SystemExit):
+                build_shaders.shader_source(path)
+
+    def test_graphics_motion_buffer_follows_uniform_in_metal(self):
+        source = '''layout(std430, set = 0, binding = 0) readonly buffer Motion { ivec4 values[]; } motions;
+layout(std140, set = 1, binding = 0) uniform View { mat4 matrix; } settings;'''
+        msl = 'vertex main0_out main0(const device Motion& motions [[buffer(0)]], constant View& settings [[buffer(1)]]) {}'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'test.vert.glsl'
+            path.write_text(source)
+            with self.assertRaises(SystemExit):
+                build_shaders.verify_graphics_buffers(path, msl, metal=True)
+            fixed = build_shaders.verify_graphics_buffers(path, msl, metal=True, remap=True)
+            self.assertIn('settings [[buffer(0)]]', fixed)
+            self.assertIn('motions [[buffer(1)]]', fixed)
+            self.assertEqual(build_shaders.verify_graphics_buffers(path, fixed, metal=True), fixed)
+            hlsl = 'ByteAddressBuffer motions : register(t0, space0); cbuffer View : register(b0, space1);'
+            build_shaders.verify_graphics_buffers(path, hlsl, metal=False)
+            for broken in (hlsl.replace('t0', 't1'), hlsl.replace('space1', 'space0')):
+                with self.assertRaises(SystemExit):
+                    build_shaders.verify_graphics_buffers(path, broken, metal=False)
+            with self.assertRaises(SystemExit):
+                build_shaders.verify_graphics_buffers(path, msl + msl, metal=True, remap=True)
+            path.write_text(source.replace('readonly buffer', 'buffer'))
+            with self.assertRaises(SystemExit):
+                build_shaders.verify_graphics_buffers(path, fixed, metal=True)
+
+    def test_vertex_pulling_does_not_require_stage_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'pull.vert.glsl'
+            path.write_text('void main() { gl_Position = vec4(float(gl_VertexIndex)); }')
+            metal = 'vertex main0_out main0(uint id [[vertex_id]]) {}'
+            build_shaders.verify_msl_bindings(path, metal)
+            path.write_text('layout(location=0) in vec2 position;')
+            with self.assertRaises(SystemExit):
+                build_shaders.verify_msl_bindings(path, metal)
+
     def test_metal_sampler_names_keep_declared_slots(self):
         source = '''layout(set = 2, binding = 0) uniform sampler2D previous_texture;
 layout(set = 2, binding = 1) uniform sampler2D current_texture;'''

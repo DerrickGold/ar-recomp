@@ -219,7 +219,8 @@ bool AppendForestRays(ActionEffectGeometryWriter *writer, const ActionEffectInst
     if (ray.member) {
       ActionNativeMember tint = *ray.member;
       tint.intensity = 1;
-      ActionEffectMembers_Tint(&tint, writer->vertices, first_vertex, writer->vertex_count,
+      if (writer->source) ActionEffectSource_Tint(writer->source, first_vertex, tint.color, tint.intensity, foreground);
+      else ActionEffectMembers_Tint(&tint, writer->vertices, first_vertex, writer->vertex_count,
                                foreground);
     }
   }
@@ -346,6 +347,10 @@ bool AppendForestLeaves(ActionEffectGeometryWriter *writer, const ActionEffectIn
     bool visible = true;
     for (int j = 0; j < 6; j++) {
       const float lx = field->leaf_shape[j].x * twist, ly = field->leaf_shape[j].y;
+      if (writer->source) {
+        points[j] = (ArRenderPointF){x + c * lx - s * ly, y + s * lx + c * ly};
+        continue;
+      }
       if (!project_point(userdata, effect, x + c * lx - s * ly,
               y + s * lx + c * ly, &points[j])) {
         visible = false;
@@ -353,6 +358,15 @@ bool AppendForestLeaves(ActionEffectGeometryWriter *writer, const ActionEffectIn
       }
     }
     if (!visible) continue;
+    if (writer->source) {
+      const ArRenderColorF color = {field->leaf_color.r, field->leaf_color.g,
+          field->leaf_color.b, alpha * field->leaf_color.a};
+      const ArRenderColorF rim = {field->leaf_rim_color.r, field->leaf_rim_color.g,
+          field->leaf_rim_color.b, fminf(1, alpha * (P(LeafRimBase) + P(LeafRimResponse) * light) * field->leaf_rim_color.a)};
+      if (!ActionEffectSource_Leaf(writer->source, effect, points, color, rim)) return false;
+      writer->vertex_count = (int)writer->source->count;
+      continue;
+    }
     if (!Reserve(writer, 9, 15)) return false;
     const int base = writer->vertex_count;
     for (int j = 0; j < 6; j++)

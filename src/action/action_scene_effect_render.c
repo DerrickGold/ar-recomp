@@ -47,6 +47,24 @@ bool AppendSceneSoftCloud(
     kSegments = kActionSceneEffectWaterfallMistCloudSegments,
     kRings = kActionEffectGlowRings,
   };
+  if (writer->source) {
+    float corners[kActionSceneEffectWaterfallMistCloudVertices][4] = {{0}};
+    const ArRenderColorF white = {1, 1, 1, opacity};
+    ArRenderColorF colors[4] = {MixColor(tint, white, .42f),
+        MixColor(tint, white, .24f), tint, tint};
+    colors[0].a = opacity; colors[1].a = opacity * .84f;
+    colors[2].a = opacity * .34f; colors[3].a = 0;
+    const float scales[3] = {.24f, .70f, 1};
+    const unsigned ticks = EffectVisualTicks(effect, (unsigned)effect->pulse_ticks) / 4u;
+    for (int r = 0; r < kRings; ++r) for (int s = 0; s < kSegments; ++s) {
+      const float shape = 1 + (.035f + .055f * r) *
+          FlameSilhouette(seed, ticks, s * kActionEffectGlowSegments / kSegments);
+      corners[1 + r * kSegments + s][0] = kMistCircle12[s][0] * scales[r] * shape;
+      corners[1 + r * kSegments + s][3] = kMistCircle12[s][1] * scales[r] * shape;
+    }
+    return AppendSourceBillboard(writer, effect, local_x, local_y,
+        local_radius_x, local_radius_y, 4, 3, kSegments, corners, colors);
+  }
   ArRenderPointF anchor;
   float scale_x, scale_y;
   if (!ProjectWithScale(effect, project_point, userdata, local_x, local_y,
@@ -300,6 +318,12 @@ bool AppendSceneParticle(ActionEffectGeometryWriter *writer,
                                 ArRenderColorF color,
                                 ActionEffectProjectPointFn project_point,
                                 void *userdata) {
+  if (writer->source) {
+    const bool ok = ActionEffectSource_Particle(writer->source, effect, x, y,
+        previous_x, previous_y, width, reach, color);
+    writer->vertex_count = (int)writer->source->count;
+    return ok;
+  }
   ArRenderPointF position, previous;
   float scale_x, scale_y;
   if (!ProjectWithScale(effect, project_point, userdata, x, y, &position,
@@ -345,6 +369,11 @@ bool AppendSceneStarParticle(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
     float local_x, float local_y, float size, ArRenderColorF color,
     ActionEffectProjectPointFn project_point, void *userdata) {
+  if (writer->source) {
+    const bool ok = ActionEffectSource_Star(writer->source, effect, local_x, local_y, size, color);
+    writer->vertex_count = (int)writer->source->count;
+    return ok;
+  }
   ArRenderPointF centre, sample_x, sample_y;
   if (!project_point(userdata, effect, local_x, local_y, &centre) ||
       !project_point(userdata, effect, local_x + 1.0f, local_y, &sample_x) ||
@@ -1801,6 +1830,7 @@ BuildSceneEffectList(const ActionEffectInstance *effects, uint8_t effect_count,
   ActionEffectGeometryWriter writer = GeometryWriter(
       batch->vertices, kActionSceneEffectRenderMaxVertices,
       batch->indices, kActionSceneEffectRenderMaxIndices);
+  if (project_point == ActionEffectSource_ProjectPoint) writer.source = project_userdata;
   writer.vertex_count = batch->vertex_count;
   writer.index_count = batch->index_count;
   const ActionMarshField *marsh_field=bloodpool&&bloodpool->field_valid?&bloodpool->field:NULL;
@@ -1890,7 +1920,7 @@ BuildSceneEffectList(const ActionEffectInstance *effects, uint8_t effect_count,
       if (environment_seen[effect->kind]) return false;
       environment_seen[effect->kind] = true;
     }
-    if (lighting_enabled && effect->kind == kActionEffect_ForestForwardLight &&
+    if (!writer.source && lighting_enabled && effect->kind == kActionEffect_ForestForwardLight &&
         !shadow_prepared) {
       if (!ActionSceneryShadow_Prepare(&shadow, &batch->shadow, scenery, project_point,
                                        clip_bounds, project_userdata))
@@ -1966,7 +1996,8 @@ BuildSceneEffectList(const ActionEffectInstance *effects, uint8_t effect_count,
       const float red = ((t->color >> 16) & 255) / 255.0f;
       const float green = ((t->color >> 8) & 255) / 255.0f;
       const float blue = (t->color & 255) / 255.0f;
-      for (int v = first_vertex; v < writer.vertex_count; ++v) {
+      if (writer.source) ActionEffectSource_Tint(writer.source, first_vertex, t->color, t->intensity, false);
+      else for (int v = first_vertex; v < writer.vertex_count; ++v) {
         ArRenderColorF *c = &writer.vertices[v].color;
         c->r *= red; c->g *= green; c->b *= blue;
         c->a = fminf(1,c->a * t->intensity);
@@ -2033,6 +2064,7 @@ bool ActionSceneDecorationRender_Build(
   }
   ActionEffectGeometryWriter writer = GeometryWriter(batch->vertices,kActionSceneEffectRenderMaxVertices,
       batch->indices,kActionSceneEffectRenderMaxIndices);
+  if (project_point == ActionEffectSource_ProjectPoint) writer.source = project_userdata;
   writer.vertex_count=batch->vertex_count;writer.index_count=batch->index_count;
   const int base_vertices=writer.vertex_count, base_indices=writer.index_count;
   ActionSceneryShadow shadow = {0};
@@ -2043,7 +2075,7 @@ bool ActionSceneDecorationRender_Build(
       (!e->tuning.light_receivers_set||!ActionEffectReceivers_IsLight(e->kind)||(e->tuning.light_receivers&kActionReceiver_Scenery));
     const bool particles=particles_enabled&&e->render_layer==render_layer;
     if(!(e->flags&kActionEffectFlag_Visible)||(!light&&!particles))continue;
-    if (e->kind == kActionEffect_AuthoredFan && light && !shadow_prepared) {
+    if (!writer.source && e->kind == kActionEffect_AuthoredFan && light && !shadow_prepared) {
       if (!ActionSceneryShadow_Prepare(&shadow, &batch->shadow, &frame->scenery,
                                        project_point, clip_bounds, project_userdata))
         return false;
@@ -2058,13 +2090,14 @@ bool ActionSceneDecorationRender_Build(
       const int begin=writer.vertex_count;
       ok=(!light||AppendWallTorchLighting(&writer,&torch,field,project_point,project_userdata))&&
          (!particles||AppendWallTorchParticles(&writer,&torch,field,project_point,project_userdata));
-      for(int v=begin;v<writer.vertex_count;++v){ArRenderColorF *c=&writer.vertices[v].color;
+      if (writer.source) ActionEffectSource_Tint(writer.source, begin, e->tuning.color, e->tuning.intensity, false);
+      else for(int v=begin;v<writer.vertex_count;++v){ArRenderColorF *c=&writer.vertices[v].color;
         c->r*=((e->tuning.color>>16)&255)/255.f;c->g*=((e->tuning.color>>8)&255)/255.f;c->b*=(e->tuning.color&255)/255.f;
         c->a=fminf(1,c->a*e->tuning.intensity);}
     }else ok=AppendAuthoredEnvironment(&writer,e,&frame->authored_floor[i],light,particles,project_point,clip_bounds,project_userdata);
-    if (!ok ||
-        writer.vertex_count-base_vertices>kActionAuthoredMaxVertices ||
-        writer.index_count-base_indices>kActionAuthoredMaxIndices) {
+    if (!ok || (!writer.source &&
+        (writer.vertex_count-base_vertices>kActionAuthoredMaxVertices ||
+         writer.index_count-base_indices>kActionAuthoredMaxIndices))) {
       batch->vertex_count=batch->index_count=0;return false;
     }
   }

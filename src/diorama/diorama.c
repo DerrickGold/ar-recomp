@@ -1329,7 +1329,7 @@ static PresentationOutcome DrawDioramaSkybox(
     float blur_radius, bool rom_source,
     uint64_t source_revision, bool source_dynamic,
     const DioramaBgValidSpanPlan *valid_spans,
-    ArRenderPointF capture_offset, bool follow_camera,
+    ArRenderPointF capture_offset, int motion_source, bool follow_camera,
     int authentic_y0, float camera_delta, float pixel_aspect,
     DioramaSkyboxProjection *projection, const DioramaRenderOptions *options) {
   if (!ArRenderTexture_IsValid(skybox_texture) || snes_height <= 0)
@@ -1427,9 +1427,57 @@ static PresentationOutcome DrawDioramaSkybox(
       DioramaSkyboxVerticalMapping_Build(
           valid_spans, snes_height, source_height,
           blur_radius, &vertical);
-  if (!rom_source && follow_camera && vertical_valid)
+  const DioramaSkyboxVerticalMapping raw_vertical = vertical;
+  float motion_follow[8] = {0};
+  if (!rom_source && follow_camera && vertical_valid) {
+    const float low = vertical.texture_v0 * source_height;
+    const float high = vertical.texture_v1 * source_height;
+    motion_follow[0] = low;
+    motion_follow[1] = high - fminf(kActRaiserAuthenticHeight, high - low);
+    motion_follow[2] = camera_delta;
+    motion_follow[3] = authentic_y0;
+    motion_follow[7] = fminf(kActRaiserAuthenticHeight, high - low);
     DioramaSkyboxVerticalMapping_FollowCamera(
         &vertical, source_height, authentic_y0, camera_delta + capture_offset.y);
+  }
+  if (projection) projection->motion_source = rom_source ? 1 : motion_source;
+  if (options->draw_resident_skybox && !rom_source) {
+    DioramaSkyboxSourceDraw draw = {
+      .indices = indices, .vertex_count = 4, .index_count = 6, .blend = draw_state.blend,
+      .texture_width = source_width, .texture_height = source_height,
+      .radius = blur_bound ? blur_radius : 0,
+      .motion_slot = motion_source == 3 ? 3 : 6,
+      .mapping = {.meta = {span_count, source_width, source_height, pixel_aspect},
+        .output = {out_w, out_h, capture_offset.x, capture_offset.y},
+        .vertical = {raw_vertical.capture_y0, raw_vertical.capture_y1,
+                     raw_vertical.texture_v0, raw_vertical.texture_v1},
+        .follow = {motion_follow[0], motion_follow[1], motion_follow[2], motion_follow[3]},
+        .fit = {motion_follow[7]}}};
+    for (unsigned i = 0; i < span_count; ++i) {
+      float *band = draw.mapping.bands[i];
+      DioramaSkyboxUvRange(source_width, spans[i].x0, spans[i].x1, blur_radius, &band[0], &band[1]);
+      if (spans[i].x1 <= spans[i].x0) band[0] = band[1] = 0;
+      band[2] = spans[i].y0; band[3] = spans[i].y1;
+    }
+    if (vertical_valid) {
+      const ArRenderVertex2D verts[] = {
+        {{0,0},tint,{0,0}}, {{out_w,0},tint,{1,0}},
+        {{out_w,out_h},tint,{1,1}}, {{0,out_h},tint,{0,1}}};
+      draw.vertices = verts;
+      for (unsigned i = 0; i < span_count; ++i) {
+        draw.band = i;
+        if (!options->draw_resident_skybox(device, skybox_texture, &draw))
+          outcome = kPresentationOutcome_CoreFailure;
+      }
+      if (projection) {
+        projection->resident = draw.mapping;
+        projection->count = span_count;
+        projection->active_band = -1;
+      }
+    }
+    if (blur_bound && !DioramaEffectBackend_Unbind(device)) return kPresentationOutcome_CoreFailure;
+    return outcome;
+  }
   float band_u0[kDioramaBgMaxValidSpans] = {0};
   float band_u1[kDioramaBgMaxValidSpans] = {0};
   float available_width = INFINITY;
@@ -1449,6 +1497,11 @@ static PresentationOutcome DrawDioramaSkybox(
   /* Preserve pixel shape with one vertical window across raster bands. A wide
    * capture usually needs a horizontal crop; a narrow finite source crops the
    * vertical window instead. Published effect bounds use these same UVs. */
+  motion_follow[4] = available_width;
+  motion_follow[5] = out_h > 0 ? (float)out_w / out_h : 0;
+  motion_follow[6] = pixel_aspect;
+  if (projection && options->draw_resident_skybox)
+    memcpy(projection->motion_follow, motion_follow, sizeof(motion_follow));
   const float fitted_width = DioramaSkyboxVerticalMapping_FitAspect(
       &vertical, source_height, available_width,
       out_h > 0 ? (float)out_w / out_h : 0.0f, pixel_aspect);
@@ -1484,8 +1537,9 @@ static PresentationOutcome DrawDioramaSkybox(
       { { (float)out_w, draw_y1 }, tint, { u1, v1 } },
       { { 0.0f, draw_y1 },         tint, { u0, v1 } },
     };
-    if (!SubmitDioramaGeometry(
-            device, skybox_texture, verts, 4, indices, 6, &draw_state)) {
+    const bool submitted = SubmitDioramaGeometry(
+        device, skybox_texture, verts, 4, indices, 6, &draw_state);
+    if (!submitted) {
       outcome = kPresentationOutcome_CoreFailure;
     } else if (projection && u1 > u0 && v1 > v0 &&
                projection->count < kDioramaBgMaxValidSpans) {
@@ -1784,15 +1838,21 @@ static PresentationOutcome DrawPeriodicDioramaSkybox(
     .address_u = kArRenderTextureAddressMode_Wrap,
     .address_v = kArRenderTextureAddressMode_Wrap,
   };
-  if (!SubmitDioramaGeometry(device, capture->skybox->texture,
-          vertices, count, indices, index_count, &state))
+  const DioramaSkyboxSourceDraw source = {.vertices = vertices, .indices = indices,
+      .vertex_count = count, .index_count = index_count, .blend = state.blend,
+      .texture_width = 256, .texture_height = 256, .motion_slot = 0, .periodic = true};
+  const bool submitted = geometry->options->draw_resident_skybox
+      ? geometry->options->draw_resident_skybox(device, capture->skybox->texture, &source)
+      : SubmitDioramaGeometry(device, capture->skybox->texture,
+          vertices, count, indices, index_count, &state);
+  if (!submitted)
     return kPresentationOutcome_CoreFailure;
   if (projection) {
     projection->bg2_skybox = (DioramaSkyboxProjection){
       .world_plane = {.valid = true, .capture_offset = motion,
         .u0 = geometry->u0, .v0 = geometry->v0,
         .u1 = geometry->u1, .v1 = geometry->v1, .z_world = reference_z},
-      .count = 1, .active_band = -1,
+      .count = 1, .active_band = -1, .motion_source = 2,
       .bands = {{x0,y0,x1,y1,0,1}},
     };
   }
@@ -1818,6 +1878,7 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
     bool skybox_dynamic = capture->bg2_dynamic;
     int skybox_apron = capture->obj_apron;
     int skybox_width = capture->width;
+    int skybox_motion_source = 3;
     ArRenderPointF capture_offset = {capture->obj_apron,0};
     if (capture->plane_capture_offsets) {
       capture_offset.x += capture->plane_capture_offsets[SR_PPU_OVERLAY_BG2].x;
@@ -1848,6 +1909,7 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
       skybox_dynamic = capture->skybox->dynamic;
       skybox_apron = 0;
       skybox_width = capture->skybox->width;
+      skybox_motion_source = 0;
       capture_offset = capture->skybox->capture_offset;
       skybox_spans = *capture->bg2_valid_spans;
       for (unsigned i = 0; i < skybox_spans.count; ++i) {
@@ -1899,7 +1961,7 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
           geometry->width, geometry->height, both,
           both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly, rom_skybox,
           skybox_revision, skybox_dynamic, skybox_valid_spans, capture_offset,
-          capture->bg2_scroll_valid, capture->authentic_y0,
+          skybox_motion_source, capture->bg2_scroll_valid, capture->authentic_y0,
           (geometry->world_y_offset + geometry->bg2_world_y_offset) *
               kActRaiserAuthenticHeight,
           geometry->aspect_x * kActRaiserAuthenticHeight / capture->width,

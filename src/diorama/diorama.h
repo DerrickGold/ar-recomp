@@ -160,6 +160,13 @@ typedef struct DioramaSkyboxProjection {
    * band so clipping and interpolation never bridge a row-policy boundary. */
   int active_band;
   DioramaSkyboxBandProjection bands[kDioramaBgMaxValidSpans];
+  /* Optional GPU camera-follow inputs: low, high minus window height,
+   * camera delta, authentic Y, available width, output aspect, pixel aspect,
+   * window height (zero disables following). CPU projections include motion
+   * in the bands; resident shaders repeat the same clamping and aspect crop. */
+  float motion_follow[8];
+  int motion_source; /* 0 private capture, 1 static art, 2 BG1, 3 BG2 */
+  DioramaSkyboxSourceMapping resident;
 } DioramaSkyboxProjection;
 
 /* Resolved action-world projection for presentation-only overlays. The

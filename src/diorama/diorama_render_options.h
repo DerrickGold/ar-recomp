@@ -4,6 +4,7 @@
  * callers own decoding, settings, persistence and backend resource lifetime. */
 
 #include "diorama_layer_order.h"
+#include "diorama_skybox_source.h"
 #include "render/presentation_options.h"
 #include "render/render_device.h"
 
@@ -11,6 +12,9 @@ typedef ArRenderTexture (*DioramaSkyboxResolver)(
     void *userdata, ArRenderDevice *device, int source,
     bool transparent_fill_configured, uint32_t transparent_fill_argb,
     bool *state_restore_failed);
+
+typedef bool (*DioramaSkyboxDraw)(ArRenderDevice *, ArRenderTexture,
+    const DioramaSkyboxSourceDraw *);
 
 typedef struct DioramaRenderOptions {
   uint32_t visible_planes;
@@ -29,6 +33,9 @@ typedef struct DioramaRenderOptions {
   /* NULL leaves named art unavailable, retaining the captured-BG fallback. */
   DioramaSkyboxResolver resolve_skybox;
   void *skybox_userdata;
+  /* Optional native draw for generated capture motion. NULL retains
+   * the portable renderer used by the editor and reference comparisons. */
+  DioramaSkyboxDraw draw_resident_skybox;
 } DioramaRenderOptions;
 
 /* Desktop adapter: snapshot the current settings and manifest for one draw. */
