@@ -8,27 +8,15 @@
 
 /* ── The action-side OBJ apron channel ────────────────────────────────────
  *
- * A captured OBJ plane is WIDER than the span the diorama displays: the extra
- * kPpuObjApron columns per side are RESOLVE headroom, never shown. This module
- * owns what goes in them.
+ * A captured OBJ plane is wider than the ordinary scanout window. The extra
+ * SR_PPU_OBJ_APRON columns per side provide filtering headroom and visible sprite
+ * coverage when perspective exposes more of the scene. This module owns them.
  *
- * Why it exists, stated precisely (the plan's Phase 3 correction, 2026-08-06 --
- * an earlier framing claimed the apron makes a sprite "slide in whole", which
- * it cannot):
- *
- *   - Clipping at the shown edge is INHERENT to a finite shown region and is
- *     not what this fixes. What it fixes is the shown edge being the same
- *     instant as the BUFFER edge, so a part straddling it was abandoned
- *     mid-write. Object $10E0 in Fillmore act 1 shows the signature: column
- *     occupancy ramping 0,0,6,10,22,27,28,29,35,37 into the plane's final
- *     column -- a sprite fading out of the buffer, not a sprite of that shape.
- *   - With the apron filled, the display edge has real neighbouring texels, so
- *     linear filtering, the crisp-path supersample and the DOF/edge-AA shaders
- *     stop blending the last real texel against nothing. DrawDioramaSkybox
- *     documents this exact failure for BG2 and works around it by insetting the
- *     UV range; the apron fixes it properly instead.
- *   - It is the machinery the sim synthetic part channel needs (plan Phases
- *     5-6), built where a byte-identity gate can prove it.
+ * Parts crossing the scanout boundary retain their outer pixels here. Those
+ * pixels support linear filtering, supersampling and DOF/edge-AA, and the
+ * compositor draws them when perspective exposes that part of the plane.
+ * The outer capture boundary is still finite; this channel does not activate
+ * more objects or enlarge the gameplay allocation pool.
  *
  * Ordinary background scanout ends at the ActRaiser-specific 120-pixel cap.
  * The separate scenery capture pass can fill BG guard columns from verified
@@ -36,10 +24,11 @@
  * This OBJ channel keeps its own capture and display bounds independently.
  *
  * INVARIANT, and the reason this is a separate channel rather than a wider
- * emit window: real OAM is NEVER widened. A part outside the display window
+ * emit window: real OAM is NEVER widened. A part outside the scanout window
  * stays parked in the OAM shadow exactly as the ROM left it, and rides here
  * instead, carrying its EXACT position rather than the lossy 9-bit/8-bit
- * encoding. */
+ * encoding. Accepted OAM parts that straddle the edge also ride here; this
+ * channel writes only their pixels beyond scanout's window. */
 
 enum {
   /* Capacity, not a truncation policy: overflow is counted and reported, never
@@ -47,8 +36,8 @@ enum {
   kActionApronMaxParts = 128,
 };
 
-/* Both margins in columns per side. `apron` is kPpuObjApron; `ws_extra` is the
- * DISPLAY margin (g_ws_extra), which is what the surface layout is keyed to --
+/* Both margins in columns per side. `apron` is SR_PPU_OBJ_APRON; `ws_extra` is the
+ * scanout margin (g_ws_extra), which is what the surface layout is keyed to --
  * deliberately not extraLeftCur/extraRightCur, which shrink at level bounds
  * while the surface geometry does not. */
 typedef struct ActionApronGeometry {
@@ -68,15 +57,15 @@ int ActionApron_SurfaceWidth(const ActionApronGeometry *g);
  * trivial; the bug is always "which width am I holding?", so the fix is to make
  * every call site name the answer.
  *
- * `display_width` is ALWAYS 256 + 2*ws_extra -- the span that is shown. `apron`
- * is 0 for a surface bound at scanline width. */
+ * `display_width` is always 256 + 2*ws_extra, excluding both guards even when
+ * the compositor draws them. `apron` is 0 for a surface bound at scanline width. */
 
 /* Row stride, in bytes, of a surface carrying `apron` columns per side. */
 static inline size_t ActionApron_SurfacePitch(int display_width, int apron) {
   return (size_t)(display_width + apron * 2) * 4;
 }
 
-/* Byte offset from a surface's base to the first DISPLAYED column. Add this
+/* Byte offset from a surface's base to the first ordinary scanout column. Add this
  * before handing the surface to anything that expects screen x = -ws_extra at
  * column 0 (the flat upload, Sim3D's capture, the metadata trace, dev-tools). */
 static inline size_t ActionApron_DisplayOffset(int apron) {

@@ -23,6 +23,7 @@ static bool s_sim_test;
 static SrPpuObjPart s_sim_parts[4];
 static unsigned s_sim_part_count, s_sim_native_count, s_sim_clipped_count;
 static ActRaiserDisplayGeometry s_geometry;
+static ActionApronGeometry s_apron;
 const ActRaiserDisplayGeometry *const g_actraiser_display_geometry = &s_geometry;
 extern RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu);
 extern RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu);
@@ -72,7 +73,7 @@ const SnesRunnerApi *sr_runner_get_api(uint32_t version) {
   };
   return &api;
 }
-ActionApronGeometry ActRaiser_ObjApronGeometry(void) { return (ActionApronGeometry){0}; }
+ActionApronGeometry ActRaiser_ObjApronGeometry(void) { return s_apron; }
 RecompReturn bank_00_923A_M0X0(CpuState *cpu) {
   /* No HUD parts in these pressure fixtures. */
   cpu->Y = 0;
@@ -174,6 +175,7 @@ SimEruptionFlightPlan SimEruptionScript_ResolveFlight(SimEruptionScriptFetch fet
 }
 
 static void Reset(unsigned extend) {
+  s_apron = (ActionApronGeometry){0};
   s_sim_test = false;
   s_sim_part_count = s_sim_native_count = s_sim_clipped_count = 0;
   memset(g_ram, 0, sizeof(g_ram));
@@ -216,6 +218,45 @@ static void Scan(void) {
   CpuState cpu = {.S = 0x1ff, .ram = g_ram};
   assert(ActRaiser_ObjectVisibilityScanWide(&cpu) == RECOMP_RETURN_NORMAL);
   assert(cpu.S == 0x201);
+}
+static void TestCaptureGuardParts(void) {
+  /* Includes Aitos' X=370 large bamboo tile straddling the 376px scanout
+   * edge, wholly outside parts, left-edge straddlers and finite guard limits. */
+  const int positions[] = {
+      -200,-199,-192,-184,-144,-136,-124,-104,100,360,362,370,376,384,432,440};
+  for (unsigned large=0;large<2;++large) for (unsigned i=0;i<sizeof(positions)/sizeof(*positions);++i) {
+    Reset(64);
+    s_ppu.margin_left = s_ppu.margin_right = 120;
+    s_apron = (ActionApronGeometry){120,64};
+    const int x = positions[i], size = large ? 16 : 8;
+    const unsigned obj = Object(0,40,1,0x230c);
+    Write(obj + kActRaiserActionObject_WorldX,(uint16_t)x);
+    Write(obj + kActRaiserActionObject_RightExtent,(uint16_t)size);
+    g_ram[0x4005] = large;
+    Scan();
+    const bool emitted = x >= -136 && x < 376;
+    const bool guard = (x < -120 && x+size > -184) || (x < 440 && x+size > 376);
+    assert(s_position_count == (unsigned)emitted);
+    assert(ActionApron_Count() == (int)guard);
+    if (guard) {
+      const SrPpuObjPart *part = ActionApron_Parts();
+      assert(part[0].x == x && part[0].y == 39 && part[0].size == size);
+      assert(part[0].tile_attr == 0x230c);
+    }
+    if (emitted) assert(s_positions[0].x == x && Read(kActRaiserOamShadow+2) == 0x230c);
+    else assert(Read(kActRaiserOamShadow) == 0xe080);
+  }
+  /* Completing the last real OAM slot must still record its outer pixels. */
+  Reset(0);
+  s_ppu.margin_left = s_ppu.margin_right = 120;
+  s_apron = (ActionApronGeometry){120,64};
+  Object(0,40,127,1);
+  const unsigned last = Object(1,40,1,2);
+  Write(last+kActRaiserActionObject_WorldX,370);
+  g_ram[0x4805] = 1;
+  Scan();
+  assert(s_position_count == 128 && ActionApron_Count() == 1);
+  assert(ActionApron_Parts()[0].x == 370 && ActionApron_Parts()[0].tile_attr == 2);
 }
 static void TestFullPoolStillUpdatesActivation(void) {
   for (unsigned extend = 0; extend <= 64; extend += 64) {
@@ -348,6 +389,7 @@ static void TestCompleteBubblesAtWindowEdges(void) {
 }
 
 int main(int argc, char **argv) {
+  TestCaptureGuardParts();
   if (argc == 2 && !strcmp(argv[1], "sim-bubbles")) {
     TestCompleteBubblesAtWindowEdges();
     puts("SIM bubble edge regression passed");

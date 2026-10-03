@@ -4790,3 +4790,34 @@ tests pass on Metal with no skips. `git diff --check` passes.
 Finding 1 is fixed at source level. Native Windows D3D12 timing and correctness
 qualification remain outstanding; no Windows performance gain is claimed.
 Findings 2–5 and the shader reproducibility gate remain open.
+
+### 2026-10-03 — Widescreen sprite edge coverage
+
+Committed the preceding mapped-upload fix as `6bf2601a`. Investigated
+`saves/snapshots/snap_01_gf2437`: Aitos `0401`, camera `(190,488)`, 120 extra
+columns per side and 64 extra rows above/below. The right bamboo includes a
+16-pixel part at X=370 crossing the ordinary scanout boundary at X=376.
+
+Two omissions caused the premature clip. The host apron channel recorded only
+X-rejected parts, losing the outer pixels of accepted straddlers. The compositor
+then cropped OBJ meshes to the ordinary window even though verified BG meshes
+could draw their guards. Capture now records both types in component order;
+the apron rasterizer still writes only outside ordinary scanout. OBJ meshes
+draw the complete existing capture, with matching sparse-coverage masks. UVs
+and mesh width expand together to preserve sprite positions and attached-effect
+projection. OAM admission, object activation and allocation limits are unchanged.
+
+No new GPU submissions, readbacks, textures or shader variants are introduced.
+The extra CPU work is limited to rasterizing accepted parts that overlap the
+existing guard and including guard columns in cached OBJ coverage scans. This
+is not a new performance benchmark or Windows/Deck qualification.
+
+Validation: Release build and five sprite/compositor tests pass. The compositor
+also passes native ASan/UBSan and 108 native/WASM command/projection comparisons
+covering 4:3, 16:9, 16:10, extended rows, zoom, tilt and skybox modes. Sprite cases
+cover both edges, 8/16-pixel parts, finite guard limits and the final OAM slot.
+Matched Metal captures at camera `(190,488)` restore the right bamboo; WRAM,
+OAM, high OAM, VRAM and CGRAM are byte-identical before/after. Evidence and the
+isolated capture script are under `runs/sprite-edge-2026-10-03/` (`before-wide`
+and `after-wide`). Comments and the release notes now describe the visible
+guard behavior consistently.

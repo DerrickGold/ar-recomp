@@ -60,7 +60,7 @@ uint32_t ActionEffectProjection_RequiredBgPlaneMask(
 
 /* ActionEffectProjectPointFn-compatible projection callback. Flat mode maps
  * through the resolved viewport. Diorama mode uses the compositor-published
- * BG1/BG2/OBJ source plane, including display margins and the hidden apron
+ * BG1/BG2/OBJ source plane, including display margins and the capture apron
  * owned by DioramaProjection. */
 bool ActionEffectProjection_ProjectPoint(
     void *userdata, const ActionEffectInstance *effect,

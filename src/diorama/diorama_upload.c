@@ -62,18 +62,18 @@ DioramaUploadResult Diorama_UploadResolved(
     if (plane_upload.changed) upload.changed_plane_mask |= 1u << plane;
     upload.coverage_masks[plane] = DioramaCoverage_FullMask();
     if (!on_gpu && DioramaPlaneUsesSparseCoverage(plane)) {
-      const int displayed_width = snes_width - obj_apron * 2;
-      const uint8_t *displayed = pixels[plane] +
+      const bool object = DioramaPlaneIsObjectPriority(plane);
+      const int coverage_width = object ? region.width : snes_width - obj_apron * 2;
+      const uint8_t *covered_pixels = object ? source : pixels[plane] +
           (size_t)obj_apron * sizeof(uint32_t);
       const uint32_t plane_bit = UINT32_C(1) << (unsigned)plane;
       if (plane_upload.changed || !(s_coverage_valid_mask & plane_bit)) {
         const DioramaCoverageMask coverage = DioramaCoverage_FromArgb8888(
-            displayed, pitch_bytes[plane], displayed_width, snes_height);
-        /* A content-bearing plane whose winners all lie in the resolve apron
-         * is invisible to the ordinary layer mesh. Keep the established full
-         * draw as a fail-safe instead of turning its required submission into
-         * an empty-index failure. BG guard meshes bypass this ordinary-window
-         * mask, but share the same conservative zero-mask policy. */
+            covered_pixels, pitch_bytes[plane], coverage_width, snes_height);
+        /* OBJ meshes display the complete captured guard; sparse culling must
+         * use the same width. BG guard meshes bypass their ordinary-window
+         * mask. Keep a conservative full draw for an empty footprint rather
+         * than turning a required submission into an empty-index failure. */
         s_coverage_masks[plane] = coverage
             ? coverage : DioramaCoverage_FullMask();
         s_coverage_valid_mask |= plane_bit;

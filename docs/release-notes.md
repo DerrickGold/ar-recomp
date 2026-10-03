@@ -113,6 +113,7 @@ See [Modern SIM menu](manual.md#modern-sim-menu) and
 - Speed up initial loading of the globe's terrain.
 - Improve action-rendering performance when showing extra rows above and
   below the original view with **Action 3D → Scene → Vertical extend**.
+- Fix sprites clipping early at the edges of widescreen Action 3D views.
 - Reduce CPU use for game audio.
 - Keep original music muted when switching between replacement music tracks.
 - Fix macOS startup keyboard focus when entering fullscreen.

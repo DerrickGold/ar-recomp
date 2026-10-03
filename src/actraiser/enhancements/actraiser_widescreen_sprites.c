@@ -1000,6 +1000,29 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
       uint16 biased_x = (uint16)(
           component_offset_x + ws_dp16(cpu, kSpriteDp_ScreenOriginX));
 
+      const int exact_x = (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginX) +
+          component_offset_x - kSpriteDrawBias;
+      const int exact_y = (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginY) +
+          component_offset_y - (kSpriteDrawBias + 1);
+      /* Preserve every part that touches the capture guard, including an
+       * accepted OAM part straddling the display edge. Scanout writes only the
+       * display window; the apron pass writes only the guard. Recording both
+       * cases here keeps component/OAM order without allocating more slots. */
+      if (apron_geom.apron > 0 &&
+          ws_biased_in_window(biased_x, resolve_left, resolve_right, kSpriteBiasedWidth)) {
+        const uint8_t size = ws_obj_size(
+            s_action_ppu_state_valid ? &s_action_ppu_state : NULL, part.large);
+        if (ActionApron_PartTouchesApron(&apron_geom, exact_x, size)) {
+          const ActionApronReceiver receiver = {
+              .x = (int16_t)cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_WorldX),
+              .y = (int16_t)cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_WorldY),
+              .role = (uint8_t)ActRaiserSpriteOwnership_ActionRole(object_address,
+                  cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_Flags))};
+          (void)ActionApron_AddOwnedPart(
+              &apron_geom, exact_x, exact_y, rendered_attributes, size, receiver);
+        }
+      }
+
       /* Authentic: x<$110 => screen-x in [-16,256). Wide:
        * (x+L)<$110+L+R => screen-x in [-16-L,256+R). The 16px left reach is
        * exactly ActRaiser's maximum OAM tile width. The historical fixed-64
@@ -1026,12 +1049,6 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
          * component offsets include signed regional anchor compensation), which is what
          * keeps a slot with an exact position byte-identical wherever the
          * encoding was not lossy. */
-        const int exact_x =
-            (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginX) +
-            (int)component_offset_x - kSpriteDrawBias;
-        const int exact_y =
-            (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginY) +
-            (int)component_offset_y - (kSpriteDrawBias + 1);
         ws_action_record_obj_position(
             (uint8)(oam_offset >> 2), exact_x, exact_y);
         uint16 slots = (uint16)(
@@ -1073,33 +1090,6 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
         cpu_write16(cpu, definition_bank,
                     (uint16)(kActRaiserOamShadow + oam_offset),
                     kParkedActionOamEntry);
-
-        /* The slot STAYS parked -- this part never reaches real OAM. If it
-         * lands in the apron, it rides the host part channel instead, carrying
-         * the exact position the 9-bit OAM X could not represent out here.
-         * Same expressions as the exact-position publish on the accept side, so
-         * an apron part and an OAM part describe position identically. */
-        if (apron_geom.apron > 0 &&
-            ws_biased_in_window(biased_x, resolve_left, resolve_right,
-                                kSpriteBiasedWidth)) {
-          const int part_large = part.large;
-          const int exact_x =
-              (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginX) +
-              (int)component_offset_x - kSpriteDrawBias;
-          const int exact_y =
-              (int)(int16)ws_dp16(cpu, kSpriteDp_ScreenOriginY) +
-              (int)component_offset_y - (kSpriteDrawBias + 1);
-          const uint8_t part_size =
-              ws_obj_size(s_action_ppu_state_valid
-                              ? &s_action_ppu_state : NULL,
-                          part_large);
-          const ActionApronReceiver receiver={
-              .x=(int16_t)cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_WorldX),
-              .y=(int16_t)cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_WorldY),
-              .role=(uint8_t)ActRaiserSpriteOwnership_ActionRole(object_address,
-                  cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_Flags))};
-          (void)ActionApron_AddOwnedPart(&apron_geom,exact_x,exact_y,rendered_attributes,part_size,receiver);
-        }
       }
     }
 

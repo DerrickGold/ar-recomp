@@ -289,7 +289,7 @@ typedef struct DioramaSkyboxView {
   ArRenderPointF capture_offset;
 } DioramaSkyboxView;
 
-/* Borrowed for this draw. Width excludes the hidden apron; authentic_y0 is
+/* Borrowed for this draw. Width excludes the capture guards; authentic_y0 is
  * the first native row inside the vertically expanded capture. A non-NULL
  * pixels entry certifies current content, not merely an allocated texture.
  * Valid BG2 spans bound skybox sampling and waterfall attachment, never the

@@ -167,7 +167,7 @@ static bool LayerUsesFocalAperture(int plane) {
  * layer gets one texture-filtering path or the other, never both. */
 enum { kDioramaSupersample = 4 };
 
-/* BG guard columns and ordinary OBJ captures have two widths in one frame.
+/* Guard-bearing captures and ordinary planes have two widths in one frame.
  * Retain both exact sizes instead of resizing one intermediate between layers.
  * Pixels are refreshed on every use; only allocation is cached. */
 enum { kDioramaScratchSizeCount = 2 };
@@ -2884,13 +2884,16 @@ static PresentationOutcome DrawDioramaLayerFace(
   return outcome;
 }
 
-/* The guard columns occupy the existing apron allocation. Expand only BG
- * geometry and its texture crop; native/OBJ coordinates retain their anchor. */
-static bool DioramaUsesBgApron(const DioramaCapture *capture, int plane) {
-  return capture->obj_apron > 0 && DioramaPlaneUsesBgApron(plane, capture->bg_apron_mask);
+/* The perspective viewport can see beyond the ordinary scanout window.
+ * Draw captured OBJ guards as well as verified BG guards, scaling both UVs
+ * and world width so every existing pixel retains its position and size. */
+static bool DioramaUsesCaptureApron(const DioramaCapture *capture, int plane) {
+  return capture->obj_apron > 0 && (DioramaPlaneIsObjectPriority(plane) ||
+      DioramaPlaneUsesBgApron(plane, capture->bg_apron_mask));
 }
 
-static void DioramaExpandBgApron(DioramaCapture *capture, DioramaViewGeometry *geometry) {
+static void DioramaExpandCaptureApron(DioramaCapture *capture,
+                                     DioramaViewGeometry *geometry, int plane) {
   const int width = capture->width + 2 * capture->obj_apron;
   if (geometry) {
     geometry->aspect_x *= (float)width / capture->width;
@@ -2899,8 +2902,9 @@ static void DioramaExpandBgApron(DioramaCapture *capture, DioramaViewGeometry *g
   }
   capture->width = width;
   capture->obj_apron = 0;
-  /* Coverage cells describe the ordinary window, not these wider meshes. */
-  capture->coverage_masks = NULL;
+  /* OBJ coverage describes its complete capture. BG masks still describe
+   * the ordinary window, so cannot cull a wider guard mesh. */
+  if (!DioramaPlaneIsObjectPriority(plane)) capture->coverage_masks = NULL;
 }
 
 static PresentationOutcome DrawResolvedDioramaLayer(
@@ -2955,9 +2959,9 @@ static PresentationOutcome DrawResolvedDioramaLayer(
   DioramaLayerMesh mesh;
   DioramaViewGeometry layer_geometry = *geometry;
   DioramaCapture layer_capture;
-  if (DioramaUsesBgApron(capture, description->plane)) {
+  if (DioramaUsesCaptureApron(capture, description->plane)) {
     layer_capture = *capture;
-    DioramaExpandBgApron(&layer_capture, &layer_geometry);
+    DioramaExpandCaptureApron(&layer_capture, &layer_geometry, description->plane);
     capture = &layer_capture;
     geometry = &layer_geometry;
   }
@@ -3067,8 +3071,8 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
   DioramaFocalAperture aperture;
   DioramaCapture focal_capture = *capture;
   DioramaViewGeometry focal_geometry = geometry;
-  if (DioramaUsesBgApron(capture, SR_PPU_OVERLAY_BG1))
-    DioramaExpandBgApron(&focal_capture, &focal_geometry);
+  if (DioramaUsesCaptureApron(capture, SR_PPU_OVERLAY_BG1))
+    DioramaExpandCaptureApron(&focal_capture, &focal_geometry, SR_PPU_OVERLAY_BG1);
   PrepareDioramaAperture(&focal_capture, scene, &focal_geometry, textures, resolved, resolved_count,
                          &aperture);
   int draw_order[kDioramaLayerCount];

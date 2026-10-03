@@ -147,11 +147,10 @@ typedef struct FrameSlot {
    * flat presentation path (which assumes row 0) correct by construction. */
   int ws_extra_top;
   int ws_extra_bottom;
-  /* Columns of RESOLVE apron each captured surface carries per side beyond the
-   * displayed span. Distinct from ws_extra, which is DISPLAY margin: the apron
-   * is never shown as extra world, it is headroom so a sprite is fully
-   * resolved before it reaches the visible plane edge instead of being clipped
-   * as it crosses. Screen x = 0 sits at surface column obj_apron + ws_extra. */
+  /* Capture guard columns per side beyond the ordinary scanout span. These
+   * supply filtering headroom and are drawn on OBJ and verified BG planes
+   * when perspective exposes them. Screen x = 0 sits at surface column
+   * obj_apron + ws_extra. Flat presentation crops to the ordinary span. */
   int obj_apron;
   int hud_scale_percent;
   bool show_fps;

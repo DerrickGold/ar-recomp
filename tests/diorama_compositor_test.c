@@ -20,6 +20,9 @@ typedef struct Recorder {
   int width, height;
   bool shaders, fail_draw, fail_restore;
   int bound_effect;
+  const DioramaCapture *capture;
+  const DioramaProjection *projection;
+  unsigned checked_object_meshes;
 } Recorder;
 
 static void Record(float value) {
@@ -174,6 +177,31 @@ static bool Geometry(void *ctx, ArRenderTexture t, const ArRenderVertex2D *v,
                      int nv, const int32_t *indices, int ni, const ArRenderDrawState *state) {
   Recorder *r = ctx;
   assert(!t.value || (t.value < 128 && r->textures[t.value].width > 0));
+  if (r->capture && r->projection && r->bound_effect == kDioramaEffect_RimLight) {
+    for (unsigned priority=0;priority<4;++priority) {
+      const int plane = DioramaPlaneForObjectPriority(priority);
+      if (t.value != r->capture->textures[plane].value) continue;
+      float min_u=INFINITY, max_u=-INFINITY;
+      for (int i=0;i<nv;++i) {
+        min_u=fminf(min_u,v[i].tex_coord.x);
+        max_u=fmaxf(max_u,v[i].tex_coord.x);
+        /* Enlarging the drawable mesh must not shift/stretch the sprites or
+         * disagree with the published transform used by attached effects. */
+        const DioramaPlaneProjection *p=&r->projection->object_planes[priority];
+        const float x=v[i].tex_coord.x*SR_PPU_SURFACE_MAX_WIDTH-
+            r->capture->obj_apron-p->capture_offset.x;
+        const float y=v[i].tex_coord.y*SR_PPU_SURFACE_MAX_HEIGHT-p->capture_offset.y;
+        ArRenderPointF expected;
+        assert(Diorama_ProjectCapturedPoint(r->projection,x,y,priority,&expected,NULL,NULL));
+        assert(fabsf(v[i].position.x+r->projection->output_x-expected.x)<.002f);
+        assert(fabsf(v[i].position.y+r->projection->output_y-expected.y)<.002f);
+      }
+      assert(min_u == 0);
+      assert(fabsf(max_u-(float)(r->capture->width+2*r->capture->obj_apron)/
+          SR_PPU_SURFACE_MAX_WIDTH)<.00001f);
+      ++r->checked_object_meshes;
+    }
+  }
   Record(10);
   Record(t.value);
   Record(nv);
@@ -359,7 +387,7 @@ unsigned DioramaFixture_Run(unsigned scenario) {
   DioramaCapture capture = {
     .width = ext == 3 ? 576 : (ext ? 384 : 256),
     .height = 224 + (ext == 3 ? extension[ext] : 2 * extension[ext]),
-    .authentic_y0 = extension[ext], .obj_apron = 32,
+    .authentic_y0 = extension[ext], .obj_apron = ext == 3 ? 32 : 64,
     .textures = textures, .pixels = pixels, .coverage_masks = masks,
     .plane_capture_offsets = offsets, .camera_y = 320,
     .bg2_camera_y = 160, .bg2_world_height = 1024, .bg2_vertical_ratio = 0x12,
@@ -395,6 +423,8 @@ unsigned DioramaFixture_Run(unsigned scenario) {
     .effect_obj_priority_mask = 15, .effect_bg_plane_mask = 3,
     .plane_effect = PlaneEffect, .plane_effect_userdata = &r};
   DioramaProjection projection;
+  r.capture = &capture;
+  r.projection = &projection;
   const unsigned base_resources = r.live;
   for (int frame = 0; frame < 2; ++frame) {
     unsigned creates = r.creates;
@@ -402,6 +432,7 @@ unsigned DioramaFixture_Run(unsigned scenario) {
         &device, &capture, &view, &scene, &projection);
     assert(PresentationOutcome_IsUsable(outcome));
     assert(projection.valid && r.draws && r.bound_effect == -1);
+    if (r.shaders) assert(r.checked_object_meshes >= (unsigned)(frame+1)*4);
     assert(!r.state.target.value && !r.state.viewport_set && !r.state.clip_enabled);
     assert(r.live <= base_resources + 7); /* Two SS, two DOF, priority, stack, skybox. */
     if (frame) assert(r.creates == creates); /* Retained intermediates, no churn. */
