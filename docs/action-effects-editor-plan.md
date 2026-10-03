@@ -4611,3 +4611,182 @@ instrumented production source was restored byte-for-byte. The final Deck U
 binary SHA256 is
 `3e008df0ff53824074027e9b9a9059a47814ec83d2d6c97a55eb17a73a3e14f0`.
 Changes are left uncommitted for review.
+
+### 2026-10-03 — D3D12 rendering audit after producer commit
+
+The pending producer, pacing and validation work above was committed as
+`084af97f` (`Optimize PPU frame production and stabilize streamed presentation
+pacing`). This audit reviews that commit; it does not change production code
+or claim native Windows performance acceptance.
+
+Scope: the ordered SDL_GPU/SDL_Renderer adapter, action background decoding,
+GPU motion and endpoint handoff, resident effect and skybox projection,
+CPU-produced plane uploads, SIM retained geometry/material uploads, shader
+generation, resource retirement and presentation. SDK references below are
+Microsoft's D3D12/DXGI documentation. Library behavior was checked against SDL
+release **3.4.12 and 3.4.16** source, not inferred from the SDL API names.
+The local Metal test installation reports 3.4.12. The two versions have identical
+`SDL_render_gpu.c`; the D3D12 backend has a few intervening fixes. Packaging
+resolves an SDL version at bundle creation, so a Windows test must record the
+actual DLL/SDK lock rather than assuming it matches the Mac.
+
+#### Findings and proposed order
+
+| Order | Finding | Evidence and consequence | Next change / acceptance |
+|---|---|---|---|
+| 1 | **P2: CPU reads from mapped upload memory** | `action_effect_source_sdl.c:314–339` copies primitives into upload storage, then multiplies their mapped colors in place. It also accumulates occluder bounds in the mapped buffer. Brightness changes and shadowed batches can therefore read write-combined memory. | Compute each adjusted primitive and bounds in ordinary CPU memory/registers, then write once to staging. Check fade/color and shadow parity. Do not add another GPU wait. |
+| 2 | **P2: the old per-update allocation/repacking path remains for CPU planes** | `diorama_upload.c:53` → `presentation_upload_mirror.c:195` → `render_sdl.c:160` still reaches `SDL_UpdateTexture` for changed non-GPU-owned planes, including actors. SDL creates/releases an upload buffer per call. Its D3D12 implementation uses a committed resource, and on adapters lacking unrestricted buffer/texture copy pitch it creates another upload buffer when a tightly packed dirty width is not 256-byte aligned. | Add a reusable, cycled staging arena for these uploads in the ordered adapter; align rows/offsets, batch copies and preserve SDL/native queue ordering. Keep dirty detection and unchanged-texture skipping. Compare native and interpolated output, partial dirty rectangles, resize and repeated in-flight uploads. |
+| 3 | **P2: submission boundaries scale with effect batches** | Each resident effect/skybox batch calls `SubmitPending`, acquires its own command buffer, records work and submits. `SubmitPending` unconditionally calls offscreen `SDL_RenderPresent`, which also submits even when no SDL commands were added. SDL D3D12 closes/executes a command list and signals a fence per submission; descriptor pools and pass state also have to be rebound. | First count submissions/empty submissions and their CPU costs by scene. Then record adjacent native batches into a shared command buffer and submit at actual SDL/native dependency boundaries. Preserve transparent draw order and all required compute dependencies. |
+| 4 | **P2: new action PSOs are created during first capture/draw** | `EnsureGpu`, `EnsureSourceProjection`, `ArGpuActionScenePass_Init` and background `EnsureNative` lazily create motion, effect, projection and decode pipelines. `RenderPreparation_Prepare` warms older postprocessing/SIM paths but does not prepare this newer action pipeline. | Prepare pipelines before interactive action rendering and preallocate known bounded resources. Treat room-entry/resize costs separately from steady-state p99. Cached DXIL removes frontend shader compilation, not driver PSO creation. |
+| 5 | **P2: offscreen SDL submission failure is not propagated** | `render_sdl.c:595–596` checks flush/present, but SDL 3.4.12/3.4.16 `GPU_RenderPresent` ignores the return of `SDL_SubmitGPUCommandBuffer` and returns true. A successful flush only establishes successful recording, not successful submission. This affects device/resource-failure handling, not measured normal-frame performance. | Use a checked submission boundary through an SDL fix/API or a fully owned command path; add failure-injection coverage. Checking a stale `SDL_GetError` string is not a reliable substitute. |
+
+Microsoft explicitly warns against CPU reads from UPLOAD/write-combined memory
+in [ID3D12Resource::Map](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12resource-map).
+Our code contains the read/modify/write pattern; the size of the Windows penalty
+is unmeasured. Likewise, upload allocation and extra command submissions are
+confirmed source paths, not measured D3D12 millisecond savings.
+
+For finding 2, the relevant library chain is
+[`GPU_UpdateTextureInternal`](https://github.com/libsdl-org/SDL/blob/release-3.4.16/src/render/gpu/SDL_render_gpu.c#L436)
+→ [`D3D12_CreateTransferBuffer`](https://github.com/libsdl-org/SDL/blob/release-3.4.16/src/gpu/d3d12/SDL_gpu_d3d12.c#L4040)
+→ `D3D12_INTERNAL_CreateBuffer` / `CreateCommittedResource`, followed by
+[`D3D12_UploadToTexture`](https://github.com/libsdl-org/SDL/blob/release-3.4.16/src/gpu/d3d12/SDL_gpu_d3d12.c#L5971).
+Microsoft's [texture upload guidance](https://learn.microsoft.com/en-us/windows/win32/direct3d12/upload-and-readback-of-texture-data)
+specifies the 256-byte row / 512-byte placement alignment baseline. The existing
+SIM atlas uploader already handles it with `ArSdlTextureUploadLayout_Append`;
+the ordinary SDL texture-update path does not use that helper. Our upload-byte
+counters measure texel payload, so they omit SDL's extra allocations and copies.
+
+For finding 3, see
+[`D3D12_Submit`](https://github.com/libsdl-org/SDL/blob/release-3.4.16/src/gpu/d3d12/SDL_gpu_d3d12.c#L7964)
+and Microsoft's [command queue guidance](https://learn.microsoft.com/en-us/windows/win32/direct3d12/executing-and-synchronizing-command-lists).
+Reducing submissions must not remove the real ordering boundary between queued
+SDL work and a native consumer. `SDL_FlushRenderer` alone does not submit an
+offscreen renderer's command buffer. Separate dependent compute passes remain
+necessary under SDL's contract; merging command buffers and merging dependent
+dispatches into one pass are different changes.
+
+For finding 4, Microsoft's
+[PSO cache sample](https://learn.microsoft.com/en-us/samples/microsoft/directx-graphics-samples/d3d12-pipeline-state-cache-sample-win32/)
+explains first-use compilation hitches. Existing pipelines are retained after
+creation; this finding does not allege per-frame shader recompilation.
+
+For finding 5, see
+[`GPU_RenderPresent`](https://github.com/libsdl-org/SDL/blob/release-3.4.16/src/render/gpu/SDL_render_gpu.c#L1473).
+The native final swapchain submission already checks its own return value;
+that does not validate earlier offscreen submissions.
+
+#### Contracts that the inspected paths preserve
+
+- **No normal resident motion readback:** `CaptureOwnedNative` passes a null
+  download target while resident, and analysis, actor motion and projection stay
+  on the GPU. Downloads/fence waits remain for validation, a deliberately
+  nonresident path and exceptional recovery. Those must be identified separately
+  in performance results rather than described as zero readbacks for every mode.
+- **Thread ownership and lifetime:** the optional preparation worker acquires
+  and submits its own command buffer; its semaphore publishes submission, not
+  GPU completion. Consumers are ordered after submission, and teardown joins
+  the worker before releasing resources. SDL's resource tracking/deferred release
+  and transfer-buffer cycling cover in-flight GPU use. Do not replace cycling
+  with a fixed modulo reuse rule without fences. See Microsoft's
+  [fence-based resource management](https://learn.microsoft.com/en-us/windows/win32/direct3d12/fence-based-resource-management).
+- **Compute dependencies:** bound/cost/refine/validate and effect-mask stages
+  use distinct passes. SDL D3D12 performs UAV/resource transitions at the pass
+  boundaries. The native BG decoder binds distinct skybox placeholder outputs;
+  handoff validation rejects source/destination aliasing. No explicit app-level
+  device-idle wait was found in the normal resident rendering path. See
+  [D3D12 resource barriers](https://learn.microsoft.com/en-us/windows/win32/direct3d12/using-resource-barriers-to-synchronize-resource-states-in-direct3d-12).
+- **Resource reuse:** background packets, native vertex/index buffers, effect
+  buffers, shaders, samplers and retained SIM meshes are reused; growth is bounded
+  or geometric. This is distinct from finding 2's residual SDL uploads. SDL itself
+  owns descriptor heaps and command allocator retirement; the game must not
+  reset or mutate those native objects behind SDL's tracking.
+- **Portability:** current shaders use generated SM 6.0 DXIL, explicit register
+  spaces and checked C/GLSL layouts. Reviewed kernels use 64-thread or 8×8
+  workgroups without a wave-size assumption. Optional device features remain
+  disabled and the reduced D3D12 resource-slot option remains enabled. This is
+  source-level evidence, not an integrated-GPU or Windows qualification.
+- **Presentation:** the ordered adapter has one window present; offscreen
+  `SDL_RenderPresent` calls are submissions, not extra window presents. SDL uses
+  `DXGI_SWAP_EFFECT_FLIP_DISCARD` and transitions the swapchain image for present.
+  Our offscreen work precedes swapchain acquisition, and a prepared swapchain
+  command buffer is submitted during teardown rather than cancelled.
+
+#### Remaining backend limits and validation gaps
+
+SDL 3.4.12/3.4.16 D3D12 uses the single direct queue for the inspected GPU work.
+The preparation worker enables CPU recording overlap, not a separate asynchronous
+compute queue. Also, its swapchain code clamps buffer count to 2–3 and advances
+its in-flight fence ring using that count: requesting one frame in flight does
+not reproduce a DXGI one-frame latency limit. It does not create a
+`FRAME_LATENCY_WAITABLE_OBJECT` swapchain. We request one in Vsync mode, so our
+log currently reports a requested policy, not proof of the effective Windows
+display queue depth. Microsoft discusses flip-model latency controls in
+[DXGI guidance](https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/for-best-performance--use-dxgi-flip-model).
+Do not infer actual input/display latency from that setting or assume Deck
+prepare-lead timings transfer unchanged to Windows.
+
+The full shader consistency check was run using the existing local DXC 1.9
+build. **41 of 44 shader headers pass; three fail the strict DXIL program
+comparison:** `action_effect_moon_comp.h`, `action_effect_project_comp.h` and
+`action_effect_shadow_comp.h`. Their regenerated MSL and SPIR-V are byte exact.
+DXIL differences include local allocation/SSA ordering beyond the build-ID
+exception; no changed visual behavior or invalid DXIL has been demonstrated.
+Three repeat compilations of the same shadow HLSL with the local tool are stable.
+This remains a reproducibility gate: pin/recover the generating DXC build,
+compare its output and validate native Windows images before choosing new blobs.
+Do not silently weaken the check or overwrite the committed shader arrays just
+to make this audit pass.
+
+Seven focused non-GPU tests pass: shader tools, upload mirror, upload rectangle
+coalescing, SDL state, SDL presentation, upload metrics and upload alignment.
+Eight Metal tests pass with no skips: shader blobs, main/worker handoff, action
+scene projection, block motion, native BG decode, resident frame generation and
+worker frame generation. The first sandboxed shader-blob attempt could not
+access the display; the explicit GPU-enabled rerun passes. The full shader
+consistency command is **not** reported as passing.
+
+No Windows D3D12 device, PIX capture, GPU-based validation or D3D12 timings were
+available/executed in this audit. Normal SDL debug mode is not proof of GPU-based
+validation. Microsoft documents its distinct shader/resource checks and overhead
+in [GPU-based validation](https://learn.microsoft.com/en-us/windows/win32/direct3d12/using-d3d12-debug-layer-gpu-based-validation).
+Run correctness with the debug layer/GBV first, then performance without GBV.
+Use [PIX timing captures](https://devblogs.microsoft.com/pix/timing-captures-new/)
+to separate CPU submission stalls, GPU pass cost, queue bubbles and presentation.
+
+Windows acceptance should explicitly select `SDL_GPU_DRIVER=direct3d12`, reject
+GPU-test skips, record the SDL/DXC/driver versions, and cover moving Fillmore,
+Bloodpool water/gallery, Aitos waterfall rooms `0402`/`0403`, dense effects and
+SIM retained geometry. Include interpolation on/off, maximum extended view,
+resize, minimize/restore and scene transitions. Report cold startup separately
+from warm producer/GPU/presentation distributions. This also closes the Aitos
+coverage gap; the old 75–77 FPS waterfall result cannot qualify this renderer.
+
+Audit evidence: `runs/d3d12-audit-2026-10-03/` holds the versioned upstream source
+snapshots, Metal test log, full shader check and per-format shader comparisons.
+The findings above remain open. Only this audit record is changed after the
+user-requested commit.
+
+### 2026-10-03 — Remove mapped upload-memory reads
+
+Implemented finding 1 from the D3D12 audit in `action_effect_source_sdl.c`.
+Faded primitives are adjusted one at a time in an ordinary CPU local and copied
+once into upload storage. Full-brightness batches retain their bulk `memcpy`.
+Occluder rectangles and aggregate bounds are calculated in CPU locals before
+copying to upload storage, including the empty-set infinity bounds. Mapped
+upload storage is no longer read by the effect upload path.
+
+Packet revision/brightness caching, transfer-buffer cycling, GPU submissions,
+shader layouts and shader blobs are unchanged. There are no new heap allocations,
+GPU waits or whole-batch CPU scratch buffers.
+
+Expanded the existing resident GPU oracle to cover RGB and alpha preservation,
+quad fourth-corner colors, fading to black and recovery, unchanged source
+primitives, repeated faded packet reuse, camera/apron-translated occluder bounds,
+actual shadow attenuation and removal of all casters after a populated upload.
+The Release test target builds; the resident and native-worker frame-generation
+tests pass on Metal with no skips. `git diff --check` passes.
+
+Finding 1 is fixed at source level. Native Windows D3D12 timing and correctness
+qualification remain outstanding; no Windows performance gain is claimed.
+Findings 2–5 and the shader reproducibility gate remain open.

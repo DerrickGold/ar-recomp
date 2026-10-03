@@ -134,12 +134,15 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
   };
   ActionEffectSourceBatch batch = {.primitives=primitives,.count=6,.capacity=6};
   const float phases[]={0,.25f,.5f,.75f,1};
+  const float brightnesses[]={1,.5f,.5f,0,1};
   for (unsigned valid=0; valid<2; ++valid) for (unsigned phase=0; phase<5; ++phase) {
     /* Repaints reuse one GPU packet while motion changes. The next capture
      * changes its revision/color; master brightness may change independently. */
     batch.revision = valid + 1;
     primitives[0].colors[0][0] = valid ? .6f : 1.0f;
-    const float brightness = phase == 4 ? .5f : 1.0f;
+    const float brightness = brightnesses[phase];
+    ActionEffectSourcePrimitive original[6];
+    memcpy(original, primitives, sizeof(original));
     int32_t *vectors = SDL_MapGPUTransferBuffer(gpu, upload, true);
     CHECK(vectors != NULL); if (!vectors) continue;
     memset(vectors,0,256); vectors[6*8]=3; vectors[6*8+1]=-3;
@@ -154,6 +157,7 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
     CHECK(ArGpuEffectSource_Draw(&effect,device,motion,1u<<6,phases[phase],&batch,&view,NULL,
         kArRenderBlendMode_Add,brightness));
     CHECK(effect.packets[0].revision == batch.revision);
+    CHECK(memcmp(original, primitives, sizeof(original)) == 0);
     cmd=SDL_AcquireGPUCommandBuffer(gpu); copy=SDL_BeginGPUCopyPass(cmd);
     const SDL_GPUBufferRegion source={.buffer=effect.vertices,.size=90*32};
     const SDL_GPUTransferBufferLocation dest={.transfer_buffer=download};
@@ -164,10 +168,11 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
     if (!out) continue;
     const float dx=valid?(phases[phase]<.5f?-2+3*phases[phase]:-2*(1-phases[phase])):0;
     const float dy=-dx;
-    CHECK(fabsf(out[4] - primitives[0].colors[0][0] * brightness) < .0001f);
     for(unsigned j=0;j<3;++j) {
       CHECK(fabsf(out[j*8]-(5+primitives[0].points[j][0]+dx)*2)<.0001f);
       CHECK(fabsf(out[j*8+1]-(2+primitives[0].points[j][1]+dy)*4)<.0001f);
+      for (unsigned c=0;c<4;++c)
+        CHECK(fabsf(out[j*8+4+c]-primitives[0].colors[j][c]*(c<3?brightness:1))<.0001f);
     }
     /* Unit X/Y project to 2/4 pixels, so billboard scale is their mean, 3. */
     CHECK(fabsf(out[15*8]-(9+dx)*2)<.0001f);
@@ -177,12 +182,62 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
     CHECK(fabsf(out[44*8]-((14+dx)*2*.72f+(14+dx)*2*.28f))<.0001f);
     CHECK(fabsf(out[45*8]-(7+dx)*2)<.0001f);
     CHECK(fabsf(out[50*8+1]-(7+dy)*4)<.0001f);
-    CHECK(fabsf(out[50*8+4]-.1f*brightness)<.0001f && fabsf(out[50*8+7]-.4f)<.0001f);
+    for (unsigned c=0;c<4;++c)
+      CHECK(fabsf(out[50*8+4+c]-primitives[3].extra[c]*(c<3?brightness:1))<.0001f);
     CHECK(fabsf(out[60*8]-((8+dx)*2+1))<.0001f);
     CHECK(fabsf(out[66*8+1]-((6+dy)*4+2.7f))<.0001f);
     CHECK(fabsf(out[75*8]-(8+dx)*2)<.0001f);
     CHECK(fabsf(out[76*8]-((8+dx)*2+3))<.0001f); // screen minimum
     CHECK(fabsf(out[77*8+1]-((6+dy)*4+8))<.0001f);
+    SDL_UnmapGPUTransferBuffer(gpu,download);
+  }
+  /* World-space casters have independent camera/apron offsets. Verify both
+   * their uploaded bounds and the resulting shadow, including retained
+   * packets, fades, and removal of all casters after a populated upload. */
+  const DioramaProjection shadow_view = {.valid=true,.texture_width=32,.texture_height=16,
+      .output_width=64,.output_height=64,.aspect_x=2,.height_scale=2,
+      .matrix={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1},
+      .bg1_plane={.valid=true,.u1=1,.v1=1}};
+  ActionEffectSourcePrimitive shadow_primitive = {.meta={kActionSourceTriangle,1,0,1},
+      .origin={16,0},.clip={-100,-100,100,100},.points={{0,8},{1,8},{0,9}},
+      .colors={{1,.4f,.2f,.6f},{1,.4f,.2f,.6f},{1,.4f,.2f,.6f}}};
+  const ActionEffectSourcePrimitive original_shadow = shadow_primitive;
+  ActionMoonlightOcclusion scenery = {.valid=true,.rectangles={{5,8,19,16},{-3,4,1,6}}};
+  ActionEffectSourceBatch shadow_batch = {.primitives=&shadow_primitive,.count=1,.capacity=1,
+      .context={.ws_extra=9,.bg1_camera_x=4,.ws_extra_top=7,.bg1_camera_y=10}};
+  const float shadow_brightness[]={1,1,.5f,.5f,0,1};
+  for (unsigned sample=0;sample<6;++sample) {
+    scenery.count = sample && sample<5 ? 2 : 0;
+    shadow_batch.revision = 100 + scenery.count;
+    CHECK(ArGpuEffectSource_Draw(&effect,device,motion,0,.5f,&shadow_batch,&shadow_view,&scenery,
+        kArRenderBlendMode_Add,shadow_brightness[sample]));
+    CHECK(memcmp(&original_shadow,&shadow_primitive,sizeof(shadow_primitive)) == 0);
+    CHECK(effect.packets[0].shadow_count == scenery.count);
+    SDL_GPUCommandBuffer *cmd=SDL_AcquireGPUCommandBuffer(gpu);
+    SDL_GPUCopyPass *copy=SDL_BeginGPUCopyPass(cmd);
+    const SDL_GPUBufferRegion vertices={.buffer=effect.vertices,.size=15*32};
+    const SDL_GPUBufferRegion casters={.buffer=effect.occluders,.size=(scenery.count+1)*16};
+    const SDL_GPUTransferBufferLocation vertex_to={.transfer_buffer=download},
+        caster_to={.transfer_buffer=download,.offset=15*32};
+    SDL_DownloadFromGPUBuffer(copy,&vertices,&vertex_to);
+    SDL_DownloadFromGPUBuffer(copy,&casters,&caster_to);
+    SDL_EndGPUCopyPass(copy);
+    SDL_GPUFence *fence=SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+    CHECK(fence && SDL_WaitForGPUFences(gpu,true,&fence,1));SDL_ReleaseGPUFence(gpu,fence);
+    const float *out=SDL_MapGPUTransferBuffer(gpu,download,false);CHECK(out!=NULL);
+    if(!out)continue;
+    const float *rects=out+15*8;
+    if (scenery.count) {
+      const float expected[]={2,1,24,13, 10,5,24,13, 2,1,6,3};
+      for (unsigned i=0;i<12;++i) CHECK(rects[i] == expected[i]);
+    } else {
+      CHECK(rects[0] == INFINITY && rects[1] == INFINITY);
+      CHECK(rects[2] == -INFINITY && rects[3] == -INFINITY);
+    }
+    for (unsigned j=0;j<3;++j) for (unsigned c=0;c<4;++c) {
+      const float factor=c<3?shadow_brightness[sample]*(scenery.count?.14f:1):1;
+      CHECK(fabsf(out[j*8+4+c]-shadow_primitive.colors[j][c]*factor)<.001f);
+    }
     SDL_UnmapGPUTransferBuffer(gpu,download);
   }
   /* The same world transform must cover OBJ priorities, high BG planes,

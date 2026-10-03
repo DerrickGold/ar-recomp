@@ -313,31 +313,35 @@ bool ArGpuEffectSource_Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GP
   const unsigned primitive_upload_bytes = upload_primitives ? bytes : 0;
   unsigned char *mapped = SDL_MapGPUTransferBuffer(p->device, p->upload, true);
   if (!mapped) return false;
+  /* Upload storage can be write-combined on D3D12. Read/modify only CPU
+   * locals, then copy the finished data once; never read the mapped buffer. */
   if (upload_primitives) {
-    memcpy(mapped, batch->primitives, bytes);
-    if (brightness != 1.0f)
-      for (unsigned i = 0; i < batch->count; ++i)
-        for (unsigned c = 0; c < (batch->primitives[i].meta[0] == kActionSourceQuad ? 4u : 3u); ++c)
+    if (brightness == 1.0f) {
+      memcpy(mapped, batch->primitives, bytes);
+    } else {
+      for (unsigned i = 0; i < batch->count; ++i) {
+        ActionEffectSourcePrimitive primitive = batch->primitives[i];
+        for (unsigned c = 0; c < (primitive.meta[0] == kActionSourceQuad ? 4u : 3u); ++c)
           for (unsigned rgb = 0; rgb < 3; ++rgb)
-            (c < 3 ? ((ActionEffectSourcePrimitive *)mapped)[i].colors[c] :
-                     ((ActionEffectSourcePrimitive *)mapped)[i].extra)[rgb] *= brightness;
+            (c < 3 ? primitive.colors[c] : primitive.extra)[rgb] *= brightness;
+        memcpy(mapped + i * sizeof(primitive), &primitive, sizeof(primitive));
+      }
+    }
   }
-  float (*rects)[4] = (float (*)[4])(mapped + primitive_upload_bytes);
-  rects[0][0] = rects[0][1] = INFINITY;
-  rects[0][2] = rects[0][3] = -INFINITY;
+  unsigned char *rects = mapped + primitive_upload_bytes;
+  float bounds[4] = {INFINITY, INFINITY, -INFINITY, -INFINITY};
   const int ox = batch->context.ws_extra - batch->context.bg1_camera_x;
   const int oy = batch->context.ws_extra_top - batch->context.bg1_camera_y;
   for (unsigned i = 0; i < shadow_count; ++i) {
     const ActionMoonlightOccluder *r = &scenery->rectangles[i];
-    rects[i + 1][0] = r->x0 + ox;
-    rects[i + 1][1] = r->y0 + oy;
-    rects[i + 1][2] = r->x1 + ox;
-    rects[i + 1][3] = r->y1 + oy;
-    rects[0][0] = fminf(rects[0][0], rects[i + 1][0]);
-    rects[0][1] = fminf(rects[0][1], rects[i + 1][1]);
-    rects[0][2] = fmaxf(rects[0][2], rects[i + 1][2]);
-    rects[0][3] = fmaxf(rects[0][3], rects[i + 1][3]);
+    const float rect[4] = {r->x0 + ox, r->y0 + oy, r->x1 + ox, r->y1 + oy};
+    bounds[0] = fminf(bounds[0], rect[0]);
+    bounds[1] = fminf(bounds[1], rect[1]);
+    bounds[2] = fmaxf(bounds[2], rect[2]);
+    bounds[3] = fmaxf(bounds[3], rect[3]);
+    memcpy(rects + (i + 1) * sizeof(rect), rect, sizeof(rect));
   }
+  memcpy(rects, bounds, sizeof(bounds));
   unsigned light_offset[kActionSourceMaxLightJobs], light_occluders[kActionSourceMaxLightJobs];
   unsigned upload_end = primitive_upload_bytes + (shadow_count + 1) * 16;
   for (unsigned i = 0; i < batch->light_count; ++i) {
