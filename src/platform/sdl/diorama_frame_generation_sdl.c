@@ -1,5 +1,6 @@
 #include "diorama/diorama_gpu_policy.h"
 #include "diorama/diorama_frame_generation.h"
+#include "app/performance_metrics.h"
 
 #include <SDL3/SDL.h>
 #include <stddef.h>
@@ -115,6 +116,9 @@ static bool s_source_allowed;
 void DioramaFrameGeneration_AllowSourceProjection(bool allowed) { s_source_allowed = allowed; }
 bool DioramaFrameGeneration_SourceProjectionActive(void) { return s_gpu.resident; }
 bool DioramaFrameGeneration_SourceProjectionFailed(void) { return s_gpu.effects_failed; }
+bool DioramaFrameGeneration_SourceProjectionFallback(void) {
+  return s_source_allowed && s_policy.resident && s_gpu.effects_disabled;
+}
 unsigned DioramaFrameGeneration_MetadataReadbackCount(void) { return s_gpu.metadata_downloads; }
 
 /* Diagnostic stage controls also permit isolated packing/unpacking comparisons. */
@@ -543,6 +547,7 @@ static bool EnsureSourceProjection(ArRenderDevice *device) {
       s_gpu.identity_motion = SDL_CreateGPUBuffer(backend->gpu_device,&info);
     if (!s_gpu.identity_motion) {
       s_gpu.effects_disabled = true;
+      PerformanceMetrics_Add(kPerformanceCount_EffectProjectionFallbacks, 1);
       SDL_Log("[gpu-effect-projection] initialization unavailable; reference path retained: %s",SDL_GetError());
     }
   }
@@ -1436,6 +1441,7 @@ void DioramaFrameGeneration_RecoverSourceProjection(ArRenderDevice *device) {
   s_gpu.resident = false;
   s_gpu.effects_disabled = true;
   s_gpu.effects_failed = false;
+  PerformanceMetrics_Add(kPerformanceCount_EffectProjectionFallbacks, 1);
   bool recovered = s_gpu.mask == 0;
   if (!recovered && ArSdlRenderBackend_SubmitPending(device)) {
     SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(s_gpu.motion.device);

@@ -115,7 +115,11 @@ void PerformanceOverlay_Build(const PerformanceSnapshot *snapshot, int level,
          snapshot->counts[kPerformanceCount_HelperJobs]);
     Line(model, 0, 7, "GPU execution: unavailable");
     Line(model, 0, 8, "*Parallel sum, not frame time");
-    Line(model, 0, 9, "Full stage details in run log");
+    if (snapshot->counts[kPerformanceCount_EffectProjectionFallbackFrames] > 0 ||
+        snapshot->counts[kPerformanceCount_EffectProjectionFallbacks] > 0)
+      Line(model, 0, 9, "Effect GPU fallback: %.0f%% frames",
+          100 * snapshot->counts[kPerformanceCount_EffectProjectionFallbackFrames]);
+    else Line(model, 0, 9, "Full stage details in run log");
     return;
   }
   Line(model, 0, 3, "CPU wall time: avg ms/present | peak ms/call. Nested rows overlap.");
@@ -148,6 +152,10 @@ void PerformanceOverlay_Build(const PerformanceSnapshot *snapshot, int level,
     for (int i = 0; i < count; i++) Stage(model, snapshot, 1, 6 + i, (PerformanceStage)(first + i));
   }
   const double *work = snapshot->counts;
+  if (action)
+    Line(model, 1, 25, "FX fallback %.0f%% / %.1f events/s",
+        100 * work[kPerformanceCount_EffectProjectionFallbackFrames],
+        snapshot->fps * work[kPerformanceCount_EffectProjectionFallbacks]);
   Line(model, 1, 26, "Scene batches %.0f / verts %.0f", work[kPerformanceCount_Draws],
        work[kPerformanceCount_Vertices]);
   /* Upload calls sit beside the byte count because a per-call cost can dwarf

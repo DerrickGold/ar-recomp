@@ -246,15 +246,16 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
       if(!lighting&&!particles)return true;
       if(!(e->tuning.dim_receivers&kActionReceiver_Scenery))return true;
       if(e->tuning.intensity>1)return false;
-      if(!Reserve(w,4,6))return false;
-      const int base=w->vertex_count;
-      const float points[4][2]={{visible.x0,visible.y0},{visible.x1,visible.y0},{visible.x1,visible.y1},{visible.x0,visible.y1}};
+      ActionEffectInstance mesh=*e;mesh.flags|=kActionEffectFlag_ClippedMesh;
+      const float points[4][2]={{r->x0,r->y0},{r->x1,r->y0},{r->x1,r->y1},{r->x0,r->y1}};
+      ArRenderVertex2D vertices[4];int mapped[4]={-1,-1,-1,-1};
       for(unsigned i=0;i<4;++i) {
-        ArRenderVertex2D v={.color={0,0,0,e->tuning.intensity}};
-        if(!project(context,e,points[i][0],points[i][1],&v.position))return true;
-        w->vertices[w->vertex_count++]=v;
+        vertices[i]=(ArRenderVertex2D){.position={points[i][0],points[i][1]},
+            .color={0,0,0,e->tuning.intensity}};
       }
-      const int indices[]={0,1,2,0,2,3};for(unsigned i=0;i<6;++i)w->indices[w->index_count++]=base+indices[i];
+      const int indices[]={0,1,2,0,2,3};
+      for(unsigned t=0;t<6;t+=3)
+        if(!AppendSceneClippedTriangle(w,&mesh,vertices,mapped,indices+t,&visible,project,context))return false;
       return true;
     }
     case kActionEffect_AuthoredHalo: return !lighting || Halo(w,e,&visible,project,context);

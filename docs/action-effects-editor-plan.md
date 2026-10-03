@@ -4923,3 +4923,50 @@ composites are not byte-identical: the worst mean channel difference is
 0.086/255, with 351 of 322,560 pixels differing by more than 2/255. The reviewed
 captures have no terrain seams. Reports and previews are beside the live
 camera evidence in `cave-comparison/` and `cave-compare-validate/`.
+
+### Authored GPU projection audit closure — 2026-10-03
+
+The independent audit correctly identified two authored-effect gaps that were
+not exercised by the shipped-room sweep. `exposure` projected its quad directly
+through the CPU callback, which deliberately rejects resident source batches.
+`particle-area` used the entire saved region as its generation clip, exceeding
+the 64-cell work budget for room-wide fields. Either failure could latch native
+effect projection onto the reference path until renderer reset.
+
+Exposure now emits two source triangles through the shared clipping helper.
+Particle generation uses the finite source view, all skybox bands and a motion
+apron; travel and wander still backtrack to deterministic world birth cells.
+Final clipping/projection remains on the GPU. Retained particle packets key on
+finite source bounds rather than a byte comparison of the entire projection.
+They rebuild when a paused view exposes new source cells, but reuse across
+skybox bands and changes to screen size or camera matrix that leave those
+bounds unchanged. Reference clipping and source generation share a direct
+view-bounds helper; no fabricated oversized effect is needed to query it.
+Other source packets remain independent of the presentation transform. No
+shader changes, new readbacks, threads or larger particle budgets are needed.
+
+All 16 authored emitter families now exercise both CPU and source callbacks,
+with nonempty geometry, lighting/particle switches, physical floor spans and
+large-area coverage; a registry check prevents newly added emitter kinds from
+silently escaping the fixture list. Presenter tests check packet reuse and
+paused-view invalidation. Failure-recovery tests verify the diagnostic latch resets;
+the performance overlay and `[effect-projection]` report fallback events and
+latched fallback frames separately from intentional reference/flat rendering.
+Fallback frames are counted after the successful recovery path, including the
+first recovered frame, instead of before the retry.
+
+The native GPU oracle accepts `AR_ORACLE_EFFECTS`; permanent exposure and
+particle-area fixtures and reproduction commands live beside the editor tools.
+On Metal, each 16,000-square fixture passes 27/27 pixel comparisons exactly.
+The regenerated 49-room sweep has 1,323 rendered comparisons, 1,027 byte-exact
+pairs, and the same three Aitos `0403` particle-edge outliers (peak 36/255) as
+the audit baseline. Every case's difference statistics are unchanged. Release
+and ASan/UBSan effect/presenter tests pass, as does real Metal failure recovery.
+
+The rebuilt editor passes 147 regional rooms, 882 native/WASM surface/source
+matches, 147 authored round trips, 30 stage preset reconstructions and 28,263
+valid draws. Evidence is under `runs/effects-gpu-fixes-2026-10-03/`. This is a
+correctness/coverage fix, not a new frame-time benchmark or Windows/Deck runtime
+qualification. CPU recipe assembly, the browser/reference projection and the
+separate heat-refraction mesh remain intentional; “GPU migration” does not mean
+all game/effect computation executes on the GPU.

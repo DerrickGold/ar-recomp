@@ -173,15 +173,49 @@ bool ActionEffectSource_ProjectPoint(void *userdata, const ActionEffectInstance 
   return false;
 }
 
+bool ActionEffectSource_ParticleViewBounds(const ActionEffectProjectionContext *input,
+    const ActionEffectInstance *effect, ActionEffectLocalRect *bounds) {
+  if (!input) return false;
+  ActionEffectProjectionContext context = *input;
+  DioramaProjection projection;
+  if (context.diorama_projection) {
+    projection = *context.diorama_projection;
+    /* One retained packet serves all skybox bands in the same capture. */
+    projection.bg2_skybox.active_band = -1;
+    context.diorama_projection = &projection;
+  }
+  if (!ActionEffectProjection_ViewBounds(&context, effect, bounds)) return false;
+  /* Only bound particle birth-cell work here. This apron covers the resident
+   * global-motion endpoints (+/-7 pixels) and their interpolated displacement
+   * (up to 10.5). GPU clipping still decides visibility on every repaint.
+   * ParticleArea separately backtracks travel/wander; no motion download. */
+  const float apron = 16;
+  bounds->x0 -= apron;
+  bounds->y0 -= apron;
+  bounds->x1 += apron;
+  bounds->y1 += apron;
+  return true;
+}
+
 bool ActionEffectSource_ClipBounds(void *userdata, const ActionEffectInstance *effect,
     ActionEffectLocalRect *bounds) {
-  (void)userdata;
+  if (!effect || !bounds || effect->geometry.kind != kActionEffectGeometry_Rect) return false;
   *bounds = effect->geometry.data.rect;
   if (effect->flags & kActionEffectFlag_ClipToRect) {
     bounds->x0 = fmaxf(bounds->x0, effect->clip_rect.x0);
     bounds->y0 = fmaxf(bounds->y0, effect->clip_rect.y0);
     bounds->x1 = fminf(bounds->x1, effect->clip_rect.x1);
     bounds->y1 = fminf(bounds->y1, effect->clip_rect.y1);
+  }
+  if (effect->kind == kActionEffect_AuthoredParticleArea) {
+    const ActionEffectSourceBatch *source = userdata;
+    if (!source) return false;
+    ActionEffectLocalRect view;
+    if (!ActionEffectSource_ParticleViewBounds(&source->context, effect, &view)) return false;
+    bounds->x0 = fmaxf(bounds->x0, view.x0);
+    bounds->y0 = fmaxf(bounds->y0, view.y0);
+    bounds->x1 = fminf(bounds->x1, view.x1);
+    bounds->y1 = fminf(bounds->y1, view.y1);
   }
   return RectIsSane(bounds) && bounds->x0 < bounds->x1 && bounds->y0 < bounds->y1;
 }

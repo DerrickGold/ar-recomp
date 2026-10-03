@@ -187,6 +187,9 @@ static void Publish(uint64_t now) {
         out->counts[kPerformanceCount_GpuReuse], out->counts[kPerformanceCount_GeometryPublish],
         out->counts[kPerformanceCount_GeometryOptOut], out->counts[kPerformanceCount_GeometryLimit],
         out->counts[kPerformanceCount_GeometryRejected]);
+    fprintf(stderr, "[effect-projection] fallback-events=%.3f fallback-frames=%.3f (per-present; exceptional failures only)\n",
+        out->counts[kPerformanceCount_EffectProjectionFallbacks],
+        out->counts[kPerformanceCount_EffectProjectionFallbackFrames]);
   }
   memset(s_window.elapsed, 0, sizeof(s_window.elapsed));
   memset(s_window.maximum, 0, sizeof(s_window.maximum));

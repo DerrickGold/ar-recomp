@@ -1,5 +1,31 @@
 # Action-mode layer editor
 
+### Native GPU effect validation
+
+The browser shares the C recipes and reference projection. It does not execute
+the native Metal/Vulkan/D3D12 effect compute shaders, so browser parity alone
+cannot qualify an effect for resident GPU projection. The authored-field unit
+test covers all 16 emitter families through both projection interfaces.
+
+For pixel comparisons, export rooms from the rebuilt editor and run the native
+oracle with an optional effects file (a rejected file fails the run):
+
+```sh
+node tools/action_editor/export_gpu_rooms.mjs build/action-editor/ar-action-layer-editor.html runs/gpu-rooms
+cmake --build build-tests-release --target actraiser_action_room_gpu_compare
+mkdir -p runs/gpu-authored-exposure runs/gpu-authored-particles
+AR_ORACLE_EFFECTS=tests/fixtures/action-effects-gpu-exposure.ini build-tests-release/actraiser_action_room_gpu_compare runs/gpu-authored-exposure diorama-layers.ini runs/gpu-rooms/0102.arscene
+AR_ORACLE_EFFECTS=tests/fixtures/action-effects-gpu-particles.ini build-tests-release/actraiser_action_room_gpu_compare runs/gpu-authored-particles diorama-layers.ini runs/gpu-rooms/0102.arscene
+```
+
+Each run compares 27 combinations of camera pose, backdrop mode and interpolated
+motion. Retain JSONL output and any failure image pairs. Omit `AR_ORACLE_EFFECTS`
+and pass all exported rooms to validate shipped defaults. The game's detailed
+performance overlay and `[effect-projection]` log report exceptional fallback
+events and the fraction of frames still using the latched reference path.
+
+### Editing and preview
+
 This standalone editor classifies action-room background tiles into virtual
 depth bands and authors those changes directly in `diorama-layers.ini`. The
 editor is the source of truth; the game only loads and renders the exported

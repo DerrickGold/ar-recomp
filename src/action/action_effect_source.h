@@ -70,7 +70,14 @@ typedef struct ActionEffectSourceBatch {
  * points. An unexpected recipe use fails the entire batch, never drops art. */
 bool ActionEffectSource_ProjectPoint(void *, const ActionEffectInstance *, float, float,
                                      ArRenderPointF *);
+/* Uses batch.context to bound room-wide particle generation, with a motion
+ * apron and all skybox bands. Retained particle packets must be invalidated
+ * when the generation view changes; final clipping stays on the GPU. */
 bool ActionEffectSource_ClipBounds(void *, const ActionEffectInstance *, ActionEffectLocalRect *);
+/* The same finite generation view used by ClipBounds, before intersecting the
+ * emitter geometry. Packet caches key on these bounds, not screen transforms. */
+bool ActionEffectSource_ParticleViewBounds(const ActionEffectProjectionContext *,
+    const ActionEffectInstance *, ActionEffectLocalRect *);
 bool ActionEffectSource_Triangle(ActionEffectSourceBatch *, const ActionEffectInstance *,
                                  const ArRenderVertex2D *, const int *,
                                  const ActionEffectLocalRect *);

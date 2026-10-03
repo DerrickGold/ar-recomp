@@ -51,6 +51,10 @@ typedef enum PerformanceCount {
   /* Actual native source cadence; 90 Hz naturally holds some 60 Hz ticks. */
   kPerformanceCount_NativePresents, kPerformanceCount_SourceHolds,
   kPerformanceCount_SourceSkips,
+  /* Exceptional resident-effect failures, distinct from an intentional
+   * reference/flat policy. The latch can outlive the reporting window. */
+  kPerformanceCount_EffectProjectionFallbacks,
+  kPerformanceCount_EffectProjectionFallbackFrames,
   kPerformanceCount_Count,
 } PerformanceCount;
 

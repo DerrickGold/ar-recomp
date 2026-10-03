@@ -40,7 +40,7 @@ static unsigned Read(const char *path) {
   memcpy(s_input,data,n);s_input[n]=0;SDL_free(data);return (unsigned)n;
 }
 int main(int argc,char **argv) {
-  if(argc<4){fprintf(stderr,"usage: %s output-dir layers.ini room.arscene [...]\n",argv[0]);return 2;}
+  if(argc<4){fprintf(stderr,"usage: %s output-dir layers.ini room.arscene [...]\nOptional AR_ORACLE_EFFECTS=effects.ini overlays authored recipes on each room.\n",argv[0]);return 2;}
   if(!SDL_Init(SDL_INIT_VIDEO))return 77;
   SDL_Window *window=SDL_CreateWindow("Complete-room GPU projection comparison",720,448,SDL_WINDOW_HIDDEN);
   if(!window || !ArSdlRenderBackend_CreateForWindow(&s_device,window,NULL))return 77;
@@ -70,6 +70,10 @@ int main(int argc,char **argv) {
     unsigned n=Read(argv[room]);
     if(!n || !RoomPreview_Load(n) || !(n=Read(argv[2])) || !RoomPreview_Configure(n)) {
       fprintf(stderr,"room load failed: %s\n",argv[room]);++failures;continue;
+    }
+    const char *effects = getenv("AR_ORACLE_EFFECTS");
+    if(effects && (!(n=Read(effects)) || !RoomPreview_ConfigureEffects(n))) {
+      fprintf(stderr,"effects load failed: %s\n",effects);++failures;continue;
     }
     unsigned w=RoomPreview_Width(),h=RoomPreview_Height();
     unsigned named=RoomPreview_SkyboxRoom();
