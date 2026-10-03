@@ -150,6 +150,16 @@ uint8_t ActionEffectProjection_RequiredObjPriorityMask(
     AddRequiredObjPriorities(
         &mask, scene_frame->effects, scene_frame->effect_count,
         kActionSceneEffectMaxInstances, scene_frame->overflow != 0);
+    /* Detached smoke keeps its source depth after the last actor retires. */
+    const ActionFireballSmoke *smoke = &scene_frame->fireball_smoke;
+    if (smoke->count <= kActionFireballSmokeMaxPuffs) {
+      for (unsigned i = 0; i < smoke->count; ++i) {
+        const ActionFireballSmokePuff *puff = &smoke->puffs[i];
+        if (puff->age < kActionFireballSmokeLifetime &&
+            puff->priority < kActionEffectObjPriorityCount)
+          mask |= (uint8_t)(1u << puff->priority);
+      }
+    }
   }
   return mask;
 }

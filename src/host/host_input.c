@@ -389,7 +389,6 @@ static bool IsHostHotkey(SDL_Keycode key) {
     case SDLK_MINUS: case SDLK_KP_MINUS: case SDLK_EQUALS: case SDLK_PLUS:
     case SDLK_KP_PLUS: case SDLK_F5: case SDLK_F7: case SDLK_F9: case SDLK_F6:
     case SDLK_F2: case SDLK_C: case SDLK_D:
-    case SDLK_1: case SDLK_2: case SDLK_3: case SDLK_4: case SDLK_5:
       return true;
     default: return false;
   }
@@ -501,21 +500,6 @@ static void HandleKeyDown(const SDL_Event *event) {
         fprintf(stderr, "[diorama] %s\n",
                 g_settings.diorama_mode ? "ON" : "OFF");
       }
-    }
-  } else if (g_settings.diorama_mode && !event->key.repeat &&
-             event->key.key >= SDLK_1 && event->key.key <= SDLK_5) {
-    static const char *const kLayerKeys[] = {
-        "diorama_layer_backdrop", "diorama_layer_bg2", "diorama_layer_bg1",
-        "diorama_layer_obj",      "diorama_layer_bg3",
-    };
-    int index = (int)(event->key.key - SDLK_1);
-    const SettingDesc *row = Settings_Find(kLayerKeys[index]);
-    long value = 0;
-    if (row && Settings_GetLong(row, &value)) {
-      Settings_SetLong(row, !value);
-      fprintf(stderr, "[diorama] %s %s\n", row->label,
-              value ? "hidden" : "shown");
-      HostInput_RequestPausedRedraw();
     }
   } else {
     HostInput_HandleKeyboard((int)event->key.scancode, true,

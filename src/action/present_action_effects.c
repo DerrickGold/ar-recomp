@@ -604,6 +604,7 @@ void PresentActionEffects_DrawWithSource(
     const DioramaProjection *diorama_projection, PresentActionSourceDraw source_draw) {
   if (ActionEffectBrightness(slot) == 0 || (!slot->action_effects.visible_count &&
                 !slot->action_scene_effects.visible_count &&
+                !slot->action_scene_effects.fireball_smoke.count &&
                 !slot->action_scene_effects.decoration_visible_count &&
                 !slot->action_scene_effects.authored_count) ||
       (!slot->action_effect_lighting && !slot->action_effect_particles &&
@@ -678,6 +679,22 @@ void PresentActionEffects_DrawWithSource(
    * budget without allocating another workspace. BG2 decorations and bottom
    * atmosphere are submitted by their dedicated depth-ordered passes. */
   bool decoration_submitted = false;
+  /* Combat smoke outlives its source actor and follows Particles, independently
+   * of the environmental-effects switch. It is matter, never additive light. */
+  if (slot->action_effect_particles && slot->action_scene_effects.fireball_smoke.count) {
+    if (source_draw) {
+      decoration_submitted |= DrawSourceDecoration(device, slot, &projection,
+          kActionEffectRenderLayer_WorldSmoke, false, true, kArRenderBlendMode_Alpha, source_draw);
+    } else if (ActionSceneDecorationRender_Build(&slot->action_scene_effects,
+          kActionEffectRenderLayer_WorldSmoke, false, true,
+          ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
+          &projection, scene_geometry) && scene_geometry->index_count) {
+      scene_batch.vertex_count = scene_geometry->vertex_count;
+      scene_batch.index_count = scene_geometry->index_count;
+      FadeEffectVertices(slot, scene_geometry->vertices, scene_geometry->vertex_count);
+      decoration_submitted |= EffectRenderer_Submit(device, &scene_batch, kArRenderBlendMode_Alpha);
+    }
+  }
   if (source_draw && slot->action_environmental_effects) {
     decoration_submitted |= DrawSourceDecoration(device, slot, &projection,
         kActionEffectRenderLayer_WorldOverlay, true, true, kArRenderBlendMode_Add, source_draw);

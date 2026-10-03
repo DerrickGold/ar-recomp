@@ -250,6 +250,7 @@ static void RetireSceneAll(ActionEffectObserver *observer) {
   if (!observer) return;
   memset(observer->scene_tracks, 0, sizeof(observer->scene_tracks));
   memset(&observer->landing_dust, 0, sizeof(observer->landing_dust));
+  memset(&observer->fireball_smoke, 0, sizeof(observer->fireball_smoke));
   memset(observer->actor_tracks,0,sizeof(observer->actor_tracks));
   observer->scene_clock_valid = 0;
   observer->scene_map_valid = 0;
@@ -476,7 +477,7 @@ static void BeginOrAdvanceSceneTrack(ActionEffectObserver *observer,
                                      ActionEffectInstance *effect) {
   if (!observer || !track || !object || !effect) return;
   /* Resume/source are stable for the original projectile and trap families.
-   * Fireball's handler is stable too and strengthens its identity; trap
+   * Fireball's handler and parent are stable too and strengthen its identity; trap
    * lightning omits it because one live bolt transitions between $BD36 and
    * the generic timed animation handler $8683 without becoming a new actor.
    * Marahna's orb and split children share a source but retain distinct
@@ -484,9 +485,10 @@ static void BeginOrAdvanceSceneTrack(ActionEffectObserver *observer,
    * and the Bloodpool boss child use their validated source/backlink pair. */
   uint32_t continuity_key = (uint32_t)object->source_descriptor |
       ((uint32_t)object->resume_address << 16);
-  if (kind == kActionEffect_EnemyFireball)
+  if (kind == kActionEffect_EnemyFireball) {
     continuity_key ^= (uint32_t)object->handler * 0x9E3779B9u;
-  else if (kind == kActionEffect_MarahnaFireball)
+    continuity_key ^= (uint32_t)object->spawner_backlink * 0x85EBCA6Bu;
+  } else if (kind == kActionEffect_MarahnaFireball)
     continuity_key = (uint32_t)object->source_descriptor |
         ((uint32_t)object->resume_address << 16);
   else if (kind == kActionEffect_SwordBeam) {
@@ -632,6 +634,8 @@ enum {
   kEnemyFireballState = 0x0023,
   kEnemyFireballSourceFirst = 0xBD76,
   kEnemyFireballSourceSecond = 0xBD84,
+  kBloodpoolAct1BossSource = 0xB786,
+  kBloodpoolAct1BossFireballHandler = 0xB90D,
   kLightningSourceDescriptor = 0xBD2A,
   kLightningResume = 0xBD69,
   kLightningState = 0x0014,
@@ -802,6 +806,79 @@ static bool IsEnemyFireball(const ActionObjectSnapshot *object) {
       (object->visual == 0x0018 && object->composition == 0x4610);
 }
 
+static bool ActionObjectAddressIsValid(uint16_t address);
+
+static bool IsBloodpoolAct1BossFireball(const ActionObjectSnapshot *object,
+                                       const uint8_t *wram, size_t size) {
+  /* $B8E9 initializes a cloned boss record as a stationary state-0 flame. $B90D owns
+   * launched state-1 fireballs; each retains one of four spawn call sites.
+   * The body and death fragments share $B786/$5000, so require the flight
+   * artwork and a live root boss before adding the directional fire trail. */
+  if (object->source_descriptor != kBloodpoolAct1BossSource ||
+      object->handler != kBloodpoolAct1BossFireballHandler ||
+      object->animation_address != kBossAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      object->animation_state != 1 ||
+      (object->flip_attributes & kActRaiserObjectFlip_Vertical) ||
+      !((object->visual == 6 && object->composition == 0x5207) ||
+        (object->visual == 7 && object->composition == 0x521A)) ||
+      !(object->resume_address == 0xB82D || object->resume_address == 0xB841 ||
+        object->resume_address == 0xB867 || object->resume_address == 0xB87B) ||
+      !ActionObjectAddressIsValid(object->spawner_backlink))
+    return false;
+  ActionObjectSnapshot parent;
+  return ReadActionObject(wram, size, object->spawner_backlink, &parent) &&
+      !(parent.status & kActRaiserObjectStatus_InactiveMask) &&
+      (parent.flags & 0x4000u) && parent.composition &&
+      !parent.spawner_backlink &&
+      parent.source_descriptor == kBloodpoolAct1BossSource &&
+      parent.animation_address == kBossAnimationAddress &&
+      parent.animation_bank == kSceneAnimationBank;
+}
+
+static void AgeFireballSmoke(ActionFireballSmoke *smoke, unsigned ticks) {
+  unsigned count = 0;
+  for (unsigned i = 0; i < smoke->count; ++i) {
+    ActionFireballSmokePuff puff = smoke->puffs[i];
+    if (ticks >= kActionFireballSmokeLifetime - puff.age) continue;
+    puff.age += ticks;
+    smoke->puffs[count++] = puff;
+  }
+  smoke->count = (uint8_t)count;
+}
+
+static void EmitFireballSmoke(ActionFireballSmoke *smoke,
+                             const ActionEffectInstance *effect, unsigned ticks) {
+  if (!ticks || !(effect->flags & kActionEffectFlag_Visible) ||
+      (!effect->velocity_x && !effect->velocity_y)) return;
+  /* Reconstruct emissions across skipped captures, oldest first. Restrict the
+   * history to this generation and the smoke lifetime: a recycled slot must
+   * not bridge from its previous occupant, and catch-up work stays bounded. */
+  unsigned back = effect->age_ticks % kActionFireballSmokeInterval;
+  if (back >= ticks) return;
+  unsigned history = ticks - 1;
+  if (history > effect->age_ticks) history = effect->age_ticks;
+  if (history >= kActionFireballSmokeLifetime) history = kActionFireballSmokeLifetime - 1;
+  back += (history - back) / kActionFireballSmokeInterval * kActionFireballSmokeInterval;
+  const int tail = effect->velocity_x < 0 ? 12 : -12;
+  for (;;) {
+    if (smoke->count == kActionFireballSmokeMaxPuffs) {
+      memmove(smoke->puffs, smoke->puffs + 1,
+              (kActionFireballSmokeMaxPuffs - 1) * sizeof(smoke->puffs[0]));
+      --smoke->count;
+    }
+    smoke->puffs[smoke->count++] = (ActionFireballSmokePuff){
+      .seed = effect->generation * 0x9E3779B9u +
+          (effect->age_ticks - back) / kActionFireballSmokeInterval,
+      .x = (int16_t)(effect->world_x - effect->velocity_x * (int)back + tail),
+      .y = (int16_t)(effect->world_y - effect->velocity_y * (int)back - 1),
+      .age = (uint16_t)back, .priority = effect->obj_priority,
+    };
+    if (back < kActionFireballSmokeInterval) break;
+    back -= kActionFireballSmokeInterval;
+  }
+}
+
 static bool IsFillmoreStatueOrb(const ActionObjectSnapshot *object,
     const uint8_t *wram, size_t size) {
   /* $B3EA clones the statue; $B406/$B42F run its rolling/falling ball.
@@ -850,8 +927,6 @@ typedef struct MarahnaFireballOrbLifecycle {
   int16_t velocity_x, velocity_y;
   uint16_t visual, composition;
 } MarahnaFireballOrbLifecycle;
-
-static bool ActionObjectAddressIsValid(uint16_t address);
 
 static bool MarahnaFireballSplitParentIsValid(
     const uint8_t *wram, size_t wram_size,
@@ -1911,6 +1986,7 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
   } else {
     observer->scene_clock = (uint16_t)(observer->scene_clock + elapsed_ticks);
   }
+  AgeFireballSmoke(&observer->fireball_smoke, elapsed_ticks);
   ActionEnvironmentScene map_scene;
   if (ActionEnvironmentScene_FromWram(&map_scene,wram,wram_size,observer->scene_clock)) {
     map_scene.suppress_default_glow_field=!native_glow;
@@ -1975,6 +2051,9 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
     uint8_t kind = kActionEffect_None;
     uint8_t phase = kActionEffectPhase_None;
     bool aitos_boss_sword_beam = false;
+    const bool bloodpool_boss_fireball =
+        map_group == kActRaiserMapGroup_Bloodpool && map_number == 1 &&
+        IsBloodpoolAct1BossFireball(&object, wram, wram_size);
     if (map_group == kActRaiserMapGroup_Fillmore && map_number == 1 &&
         (phase = MatchCentaurLightning(&object)) != kActionEffectPhase_None) {
       kind = kActionEffect_CentaurLightning;
@@ -2022,7 +2101,8 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
     } else if (tanzara_map && IsTanzaraProjectile(&object)) {
       kind = kActionEffect_TanzaraProjectile;
       phase = kActionEffectPhase_TanzaraProjectileFlight;
-    } else if (bloodpool_act2_map && IsEnemyFireball(&object)) {
+    } else if (bloodpool_boss_fireball ||
+               (bloodpool_act2_map && IsEnemyFireball(&object))) {
       kind = kActionEffect_EnemyFireball;
       phase = kActionEffectPhase_EnemyFireballFlight;
     } else if (map_group == kActRaiserMapGroup_Fillmore &&
@@ -2104,7 +2184,7 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
         }
       }
     }
-    if (kind == kActionEffect_AitosStatueFire ||
+    if (bloodpool_boss_fireball || kind == kActionEffect_AitosStatueFire ||
         kind == kActionEffect_FillmoreStatueOrb ||
         kind == kActionEffect_FlamingWheel ||
         kind == kActionEffect_FlamingWheelProjectile) {
@@ -2144,6 +2224,9 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
               : (ActionEffectLocalRect){-8.0f, -9.0f, 16.0f, 15.0f};
         }
       } else {
+        /* Player crescents have raw part priority zero. Match $8D68's live
+         * room bias, including band 2 in the Bloodpool Act 1 boss arena. */
+        effect.obj_priority = ScenePriorityFromSpriteAttributeBias(wram, wram_size);
         /* These headers use signed 8-bit origins even though the action ABI
          * publishes them as words. `$8D68` performs wrapping byte arithmetic:
          * state $13's normal X=0/8 parts minus left=$E0 draw at +32..+48, not
@@ -2168,6 +2251,13 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
      * reseed every spark whenever the source sprite changed frame. */
     BeginOrAdvanceSceneTrack(observer, &observer->scene_tracks[slot], &object,
                              kind, phase, elapsed_ticks, &effect);
+    if (bloodpool_boss_fireball) {
+      EmitFireballSmoke(&observer->fireball_smoke, &effect, elapsed_ticks);
+      /* Native boss shots keep flying after leaving the activation window.
+       * Track those slots, but do not let invisible shots exhaust the shared
+       * render list and suppress the player's sword beam during a long fight. */
+      if (!(effect.flags & kActionEffectFlag_Visible)) continue;
+    }
     SceneFrameAppend(dst, &effect);
   }
   for (unsigned i = 0; i < kActionSceneEffectObserverTrackCount; i++)
@@ -2179,6 +2269,14 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
     dst->effect_count = 0;
     dst->visible_count = 0;
   }
+  dst->fireball_smoke = observer->fireball_smoke;
+  dst->fireball_smoke.clock = observer->scene_clock;
+  dst->fireball_smoke.camera_delta_x = (int16_t)(
+      Read16(wram, wram_size, kActRaiserWram_Bg1CameraX) -
+      Read16(wram, wram_size, kActRaiserWram_Bg2CameraX));
+  dst->fireball_smoke.camera_delta_y = (int16_t)(
+      Read16(wram, wram_size, kActRaiserWram_Bg1CameraY) -
+      Read16(wram, wram_size, kActRaiserWram_Bg2CameraY));
 }
 
 void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,

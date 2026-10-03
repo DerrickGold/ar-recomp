@@ -514,7 +514,7 @@ int main(void) {
   assert(!HostInput_TryHandleGameOnlyEvent(&event));
   s_key_host_binding = false;
   const SDL_Keycode host_keys[] = {SDLK_ESCAPE, SDLK_P, SDLK_T, SDLK_F5,
-      SDLK_F7, SDLK_F9, SDLK_D, SDLK_C, SDLK_1, SDLK_PLUS};
+      SDLK_F7, SDLK_F9, SDLK_D, SDLK_C, SDLK_PLUS};
   for (unsigned i = 0; i < sizeof(host_keys)/sizeof(host_keys[0]); ++i) {
     event.type = SDL_EVENT_KEY_DOWN; event.key.key = host_keys[i];
     assert(!HostInput_TryHandleGameOnlyEvent(&event));

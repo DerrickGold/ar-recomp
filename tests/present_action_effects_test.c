@@ -1349,7 +1349,34 @@ static void AutoExpandedMask(void) {
   PresentActionEffects_Reset(&device);
 }
 
+static void DetachedFireballSmokeComposition(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b, &device);
+  LavaFrame();
+  frame.action_effects = (ActionEffectFrame){0};
+  frame.action_scene_effects = (ActionSceneEffectFrame){0};
+  frame.action_environmental_effects = frame.action_effect_lighting = false;
+  frame.action_effect_particles = true;
+  frame.action_scene_effects.fireball_smoke.count = 1;
+  frame.action_scene_effects.fireball_smoke.puffs[0] = (ActionFireballSmokePuff){
+    .seed = 42, .x = 128, .y = 120, .age = 40, .priority = 2,
+  };
+  PresentActionEffects_Draw(&device, &frame, viewport, NULL);
+  assert(b.geometries == 1 && b.geometry_blends[0] == kArRenderBlendMode_Alpha);
+  frame.action_effect_particles = false;
+  PresentActionEffects_Draw(&device, &frame, viewport, NULL);
+  assert(b.geometries == 1);
+  frame.action_effect_particles = true;
+  const unsigned before = source_submissions;
+  PresentActionEffects_InvalidateSourcePackets();
+  PresentActionEffects_DrawWithSource(&device, &frame, viewport, NULL, InspectSourcePacket);
+  assert(source_submissions == before + 1 && source_count > 0);
+  PresentActionEffects_Reset(&device);
+}
+
 int main(void) {
+  DetachedFireballSmokeComposition();
   AutoExpandedMask();
   SourcePacketCaptureLifetime();
   AuthoredOnlyComposition();

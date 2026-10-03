@@ -792,6 +792,122 @@ static void TestFlamingWheelRimAndProjectile(void) {
   CHECK(lighting.index_count == 2 * kActionEffectGlowIndices);
 }
 
+static void TestBloodpoolFireballSmoke(void) {
+  ActionSceneEffectFrame frame = {0};
+  static ActionSceneEffectRenderBatch smoke, repeat, lit, aged;
+  frame.fireball_smoke.count = 1;
+  frame.fireball_smoke.puffs[0] = (ActionFireballSmokePuff){
+    .seed = 42, .x = 160, .y = 200, .age = 40, .priority = 2,
+  };
+  /* The last projectile can retire while its detached smoke still needs depth. */
+  CHECK(ActionEffectProjection_RequiredObjPriorityMask(NULL, &frame) == (1u << 2));
+  const unsigned layer = kActionEffectRenderLayer_WorldSmoke;
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &smoke));
+  CHECK(smoke.vertex_count == 2 * kActionSceneEffectWaterfallMistCloudVertices);
+  CHECK(smoke.vertices[0].color.a > 0 && smoke.vertices[0].color.a < .36f);
+  float top = smoke.vertices[0].position.y, bottom = top;
+  for (int i = 1; i < smoke.vertex_count; ++i) {
+    top = fminf(top, smoke.vertices[i].position.y);
+    bottom = fmaxf(bottom, smoke.vertices[i].position.y);
+  }
+  CHECK(bottom - top > 24);  /* Billows exceed the native fireball's 16px height. */
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &repeat));
+  CHECK(SceneBatchesEqual(&smoke, &repeat));
+  frame.fireball_smoke.puffs[0].age = 100;
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &aged));
+  CHECK(aged.vertices[0].position.y < smoke.vertices[0].position.y);
+  CHECK(aged.vertices[0].color.a < smoke.vertices[0].color.a);
+  frame.fireball_smoke.puffs[0].age = 40;
+  frame.decoration_count = 1;
+  frame.decorations[0] = (ActionEffectInstance){
+    .kind = kActionEffect_BloodpoolMoonlight, .world_x = 112, .world_y = 62,
+    .flags = kActionEffectFlag_Visible,
+  };
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &lit));
+  CHECK(lit.vertex_count == 2 * kActionSceneEffectWaterfallMistCloudVertices);
+  CHECK(lit.vertices[0].color.b > smoke.vertices[0].color.b);
+  frame.fireball_smoke.camera_delta_x = 2000;
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &repeat));
+  CHECK(SceneBatchesEqual(&smoke, &repeat));
+  frame.fireball_smoke.camera_delta_x = 0;
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, true, false,
+      IdentityProjection, NULL, NULL, &repeat));
+  CHECK(repeat.vertex_count == 0);
+  frame.projectile_fields_valid = 1;
+  frame.projectile_fields[0] = *ActionProjectileField_Bundled(0);
+  frame.projectile_fields[0].Components[0] = 1;
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &repeat));
+  CHECK(repeat.vertex_count == 0);
+  frame.projectile_fields_valid = 0;
+  frame.fireball_smoke.puffs[0].age = kActionFireballSmokeLifetime;
+  CHECK(ActionEffectProjection_RequiredObjPriorityMask(NULL, &frame) == 0);
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &repeat));
+  CHECK(repeat.vertex_count == 0);
+  frame.fireball_smoke.puffs[0].age = 40;
+  frame.fireball_smoke.puffs[0].priority = kActionEffectObjPriorityCount;
+  CHECK(ActionEffectProjection_RequiredObjPriorityMask(NULL, &frame) == 0);
+  frame.fireball_smoke.puffs[0].priority = 2;
+  frame.fireball_smoke.count = kActionFireballSmokeMaxPuffs;
+  for (unsigned i = 1; i < frame.fireball_smoke.count; ++i)
+    frame.fireball_smoke.puffs[i] = frame.fireball_smoke.puffs[0];
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &repeat));
+  CHECK(repeat.vertex_count == frame.fireball_smoke.count * lit.vertex_count);
+  /* Smoke never reduces the existing actor/sword geometry allowance, even
+   * at the full 16-actor, three-sword-stream and 96-puff limits together. */
+  frame.effect_count = frame.visible_count = kActionSceneEffectMaxInstances;
+  for (unsigned i = 0; i < frame.effect_count; ++i)
+    frame.effects[i] = SceneEffect(i < kActionSceneEffectMaxSwordStreams
+        ? kActionEffect_SwordBeam : kActionEffect_EnemyFireball, 160 + i * 8);
+  CHECK(ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, &smoke));
+  CHECK(smoke.vertex_count > 0);
+  frame.fireball_smoke.count = 0;
+  CHECK(ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, &aged));
+  CHECK(SceneBatchesEqual(&smoke, &aged));
+  frame.fireball_smoke.count = kActionFireballSmokeMaxPuffs;
+  frame.effect_count = frame.visible_count = 0;
+  ++frame.fireball_smoke.count;
+  CHECK(ActionEffectProjection_RequiredObjPriorityMask(NULL, &frame) == 0);
+  CHECK(!ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &repeat));
+}
+
+static void TestBloodpoolAct1BossFireballRendering(void) {
+  ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
+  static ActionSceneEffectRenderBatch lighting, particles, off;
+  ActionEffectInstance *effect = &frame.effects[0];
+  *effect = SceneEffect(kActionEffect_EnemyFireball, 400);
+  effect->geometry.data.rect = (ActionEffectLocalRect){-16, -8, 16, 8};
+  effect->obj_priority = 2;
+  for (unsigned visual = 6; visual <= 7; ++visual) {
+    effect->visual = visual;
+    effect->composition = visual == 6 ? 0x5207 : 0x521A;
+    for (int direction = -1; direction <= 1; direction += 2) {
+      effect->velocity_x = 4 * direction;
+      CHECK(ActionSceneEffectRender_Build(&frame, true, false, IdentityProjection,
+                                         NULL, &lighting));
+      CHECK(lighting.vertex_count == 2 * kActionEffectGlowVertices);
+      CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection,
+                                         NULL, &particles));
+      CHECK(particles.vertex_count == 12 * 4);
+      float mean_x = 0;
+      for (int i = 0; i < particles.vertex_count; ++i)
+        mean_x += particles.vertices[i].position.x;
+      mean_x /= particles.vertex_count;
+      CHECK((mean_x - effect->world_x) * direction < -16);
+      CHECK(ActionSceneEffectRender_Build(&frame, false, false, IdentityProjection, NULL, &off));
+      CHECK(off.vertex_count == 0);
+    }
+  }
+}
+
 static void TestMarahnaFireballFramesAndDirections(void) {
   ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
   static ActionSceneEffectRenderBatch lighting, particles;
@@ -4178,6 +4294,8 @@ int main(void) {
   TestAitosStatueFireLightingAndFacing();
   TestAitosSideLavaLightingAndHeatMesh();
   TestFlamingWheelRimAndProjectile();
+  TestBloodpoolAct1BossFireballRendering();
+  TestBloodpoolFireballSmoke();
   TestMarahnaFireballFramesAndDirections();
   TestAitosUsesRakedDioramaSourcePlanes();
   TestCurrentActorEffectsRequestExactObjPlanes();

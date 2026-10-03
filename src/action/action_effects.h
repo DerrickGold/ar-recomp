@@ -214,6 +214,8 @@ typedef enum ActionEffectRenderLayer {
   kActionEffectRenderLayer_Bg2HighAlpha,
   /* Explicit receiver lighting retains multiplicative blend on scenery. */
   kActionEffectRenderLayer_Bg1Light,
+  /* Detached combat smoke, alpha blended and controlled by Particles. */
+  kActionEffectRenderLayer_WorldSmoke,
   kActionEffectRenderLayer_Count,
 } ActionEffectRenderLayer;
 
@@ -281,6 +283,9 @@ enum {
   kActionLandingDustMaxPuffs = 6,
   kActionLandingDustLifetime = 48,
   kActionLandingDustPatchCount = 2*kActionLandingDustMaxPuffs,
+  kActionFireballSmokeMaxPuffs = 96,
+  kActionFireballSmokeLifetime = 144,
+  kActionFireballSmokeInterval = 4,
   /* Collision-derived floor runs, including spike bases, share one bounded mist draw. */
   kActionTempleMistMaxSpans = 14,
   kActionEffectFlag_Visible = 1 << 0,
@@ -468,6 +473,23 @@ typedef struct ActionNativeMembers {
   ActionNativeMember records[kActionNativeMemberMax];
 } ActionNativeMembers;
 
+/* Small owned samples survive projectile retirement; positions never follow a
+ * recycled actor slot. Oldest puffs are discarded if the cosmetic pool fills. */
+typedef struct ActionFireballSmokePuff {
+  uint32_t seed;
+  int16_t x, y;
+  uint16_t age;
+  uint8_t priority;
+} ActionFireballSmokePuff;
+
+typedef struct ActionFireballSmoke {
+  ActionFireballSmokePuff puffs[kActionFireballSmokeMaxPuffs];
+  uint8_t count;
+  /* Captured BG1-to-BG2 translation for camera-independent moon-ray tint. */
+  int16_t camera_delta_x, camera_delta_y;
+  uint16_t clock;
+} ActionFireballSmoke;
+
 typedef struct ActionSceneEffectFrame {
   uint16_t game_frame;
   uint8_t effect_count;
@@ -489,6 +511,7 @@ typedef struct ActionSceneEffectFrame {
   ActionMoonlightOcclusion moonlight;
   ActionMoonlightOcclusion scenery;
   ActionBloodpoolDetails bloodpool;
+  ActionFireballSmoke fireball_smoke;
   ActionNativeMembers members;
   /* Owned recipe data. Queued/retained frames never borrow editable documents. */
   ActionRayField ray_field;
@@ -577,6 +600,7 @@ typedef struct ActionEffectObserver {
   uint32_t next_actor_generation;
   ActionEffectActorTrack actor_tracks[kActionEffectActorMax];
   ActionLandingDustState landing_dust;
+  ActionFireballSmoke fireball_smoke;
   ActionEffectObserverTrack tracks[kActionEffectObserverTrackCount];
   ActionEffectObserverTrack
       scene_tracks[kActionSceneEffectObserverTrackCount];
