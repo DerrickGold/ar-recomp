@@ -1,5 +1,6 @@
 #include "host/host_ppu_output.h"
 #include "host/host_input.h"
+#include "host/host_clock.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -199,7 +200,9 @@ void HostInput_ResetSim3DCamera(void) {
   RequestCameraRedrawIfFrozen();
 }
 
-void HostInput_ApplyAnalogCamera(void) {
+/* Both host loops share a clock, including handoffs between them. Streamed
+ * presentation may only touch host camera state, never live runner/SIM state. */
+static void ApplyAnalogCamera(bool diorama, bool sim3d, bool update_sim) {
   enum { kMaximumAnalogCameraElapsedMs = 100 };
   static const uint64_t kMaximumElapsedNs =
       (uint64_t)kMaximumAnalogCameraElapsedMs *
@@ -209,19 +212,12 @@ void HostInput_ApplyAnalogCamera(void) {
   static const float kZoomUnitsPerSecond = 6.0f;
   static uint64_t last_ns;
 
-  const uint64_t now_ns = SDL_GetTicksNS();
+  const uint64_t now_ns = HostClock_Nanoseconds();
   uint64_t elapsed_ns = last_ns ? now_ns - last_ns : 0;
   last_ns = now_ns;
   /* A long stall (load, alt-tab) must not teleport the camera. */
   if (elapsed_ns > kMaximumElapsedNs) elapsed_ns = kMaximumElapsedNs;
   if (!elapsed_ns) return;
-
-  const bool diorama =
-      !SettingsOverlay_IsOpen() &&
-      !RenderComparison_FreezesGameplay() && Diorama_IsActiveThisFrame();
-  const bool sim3d = !SettingsOverlay_IsOpen() &&
-      !RenderComparison_FreezesGameplay() && !diorama &&
-      Sim3DCamera_ControlsAvailable(Sim3DTextures_Ready());
 
   const float elapsed_seconds =
       (float)elapsed_ns / (float)kNanosecondsPerSecond;
@@ -256,12 +252,27 @@ void HostInput_ApplyAnalogCamera(void) {
       sim3d && (orbit_input || Sim3DCamera_IsDragging());
   const bool diorama_changed = Diorama_UpdateDynamicCamera(
       elapsed_seconds, diorama_input_active);
-  const bool sim_changed = Sim3DCamera_UpdateDynamic(
+  const bool sim_changed = update_sim && Sim3DCamera_UpdateDynamic(
       elapsed_seconds, sim_orbit_held);
   if ((diorama && camera_input) || (diorama && diorama_changed))
     RequestCameraRedrawIfFrozen();
   if (sim3d && sim_changed)
     RequestCameraRedrawIfFrozen();
+}
+
+void HostInput_ApplyAnalogCamera(void) {
+  const bool controls_enabled = !SettingsOverlay_IsOpen() &&
+      !RenderComparison_FreezesGameplay();
+  const bool diorama = controls_enabled && Diorama_IsActiveThisFrame();
+  const bool sim3d = controls_enabled && !diorama &&
+      Sim3DCamera_ControlsAvailable(Sim3DTextures_Ready());
+  ApplyAnalogCamera(diorama, sim3d, true);
+}
+
+void HostInput_ApplyDioramaPresentationCamera(void) {
+  const bool controls_enabled = !SettingsOverlay_IsOpen() &&
+      !RenderComparison_FreezesGameplay();
+  ApplyAnalogCamera(controls_enabled, false, false);
 }
 
 static bool AuthenticFrameReady(void) {

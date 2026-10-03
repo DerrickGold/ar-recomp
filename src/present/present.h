@@ -30,7 +30,9 @@
  * action surfaces before publication through HostFrameQueue. After upload,
  * retained action frames clear every CPU surface view; drawing then uses
  * presentation-owned textures/masks/motion endpoints. Never upload that
- * cleared retained slot or refresh it from the runner during production. */
+ * cleared retained slot or refresh it from the runner during production.
+ * Action camera controls are filled/refreshed by the main thread before
+ * presentation; the producer captures only camera motion and strength. */
 
 /* Captured overlay identities and flags follow the public runner ABI.
  * frame_slot.c checks their values against SR_PPU_* when it builds the slot. */
@@ -242,8 +244,9 @@ typedef struct FrameSlot {
    * left in the game-thread capture instead (actraiser_rtl.c), so it
    * renders as diorama.c's ordinary tilted BG3 layer. */
   bool diorama_hud_flat;
-  /* Captured motion and host controls have separate lifetimes. Retained
-   * presents refresh only controls; diorama_camera.c owns response behavior. */
+  /* Producer motion and main-thread controls have separate lifetimes. The
+   * host fills controls before drawing synchronous or retained frames;
+   * diorama_camera.c owns response behavior. */
   DioramaCameraFrame diorama_camera;
 
   /* SIM town response and world inspection orbit share one captured contract.

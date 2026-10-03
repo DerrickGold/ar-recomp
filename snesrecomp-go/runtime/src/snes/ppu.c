@@ -5629,6 +5629,11 @@ static bool render_line_to(Ppu *ppu, int screen_y, uint8_t *buffer,
             if ((cap->flags & kPpuOverlayFlag_MarkFullAddSubscreen) != 0u)
                 full_add_capture = true;
         }
+    } else {
+        /* Tile export belongs only to the capture pass. A separate authentic
+         * pass may use a different camera: retaining these flags would both
+         * overwrite the captured GPU row and omit its own CPU background. */
+        ppu->backgroundTileSources = ppu->backgroundCpuSources = 0;
     }
     native_center = render_native_fast_line(
         ppu, screen_y, row, origin, capture,

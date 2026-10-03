@@ -744,6 +744,85 @@ static void TestBackgroundPacketOwnershipAndFallback(void) {
   free(packet); ppu_free(ppu);
 }
 
+static void TestBackgroundPacketAuthenticCameraIsolation(void) {
+  enum { margin = 120, apron = 64, top = 64, width = 624, height = kH + 2 * top };
+  Ppu *ppu = ppu_init(); CHECK(ppu);
+  SrPpuBgPacket *packet = calloc(1, sizeof(*packet)); CHECK(packet);
+  static uint32_t fb[width * height], bands[3][width * height];
+  static uint32_t expected[3][width * height];
+  static uint32_t authentic[width * height], expected_authentic[width * height];
+  static uint16_t native_scroll[kH];
+  /* A separately rendered authentic camera must neither overwrite the GPU
+   * capture with its scroll coordinates nor skip its own CPU background.
+   * Cover BG1/BG2, camera clamping, sub-tile phases, OBJ-only camera changes,
+   * guard columns, and the full vertical extension around the native rows. */
+  for (unsigned layer = 0; layer < 2; ++layer)
+  for (unsigned camera = 0; camera < 3; ++camera)
+  for (unsigned renderer = 0; renderer < 3; ++renderer) {
+    setup_virtual_bg(ppu, margin, (uint8_t *)fb, width * 4);
+    CHECK(PpuBindOverlaySurface(ppu, 1u - layer, NULL, 0));
+    PpuSetExtraVerticalSpace(ppu, top, top);
+    CHECK(PpuBeginDrawingSized(ppu, (uint8_t *)fb, width * 4, height, 0));
+    ppu->screenEnabled[0] = (uint8_t)(1u << layer);
+    VirtualTilemapFixture map = {.min_x = -80, .max_x = 160, .min_y = -80, .max_y = 80,
+        .even_entry = 2 | (2 << 10), .odd_entry = 3 | (3 << 10) | 0xe000};
+    PpuVirtualTilemapBinding binding = {.lookup = lookup_virtual_tile,
+        .band_lookup = lookup_virtual_band, .context = &map,
+        .camera_x = margin, .camera_y = top, .hscroll_anchor = margin,
+        .flags = kPpuVirtualTilemapFlag_IncludeAuthentic};
+    CHECK(PpuSetVirtualTilemap(ppu, (uint8_t)layer, &binding));
+    CHECK(PpuBindOverlaySurfaceSized(ppu, layer, (uint8_t *)bands[0], width * 4, height));
+    for (unsigned band = 1; band < 3; ++band)
+      CHECK(PpuBindOverlayPrioSurface(ppu, layer, band, (uint8_t *)bands[band]));
+    CHECK(PpuSetOverlayCapture(ppu, layer, -margin, -top, kW + 2 * margin,
+        height, kPpuOverlayFlag_RemoveFromGame));
+    ppu->captureTiles[layer] = (SrPpuCaptureTileBinding){.apron = apron};
+    for (unsigned y = 0; y < kH; ++y)
+      native_scroll[y] = (uint16_t)(camera == 0 ? 0 : camera == 1 ? 253 - (y & 7) : margin + (y & 7));
+    CHECK(PpuBindAuthenticSurfaceSized(ppu, (uint8_t *)authentic, width * 4, height));
+    CHECK(PpuSetAuthenticCameraFrame(ppu, (uint8_t)(1u << layer),
+        layer == 0 ? native_scroll : NULL, layer == 1 ? native_scroll : NULL,
+        camera == 2 ? 8 : 0));
+    memset(authentic, 0xa5, sizeof(authentic));
+    memset(bands, 0xa5, sizeof(bands));
+    if (renderer) {
+      packet->request_flags = SR_PPU_BG_PACKET_TILES |
+          (renderer == 2 ? SR_PPU_BG_PACKET_VALIDATE_TILES : 0);
+      SrPpuBgPacket_Begin(packet, width, height);
+      ppu->backgroundPacket = packet;
+    }
+    ppu_runLine(ppu, 0);
+    for (int y = -top; y < kH + top; ++y) {
+      ppu->hScroll[layer] = (uint16_t)(margin + ((unsigned)y & 7));
+      if (y < 0 || y >= kH) ppu_runMarginLine(ppu, y + 1);
+      else ppu_runLine(ppu, y + 1);
+    }
+    if (!renderer) {
+      memcpy(expected, bands, sizeof(expected));
+      memcpy(expected_authentic, authentic, sizeof(expected_authentic));
+    } else {
+      CHECK(packet->owned_sources == (renderer == 1 ? 1u << layer : 0u));
+      CHECK(memcmp(authentic, expected_authentic, sizeof(authentic)) == 0);
+      for (unsigned band = 0; band < 3; ++band)
+        for (unsigned y = 0; y < height; ++y) for (unsigned x = 0; x < width; ++x) {
+          if (SrPpuBgPacket_Color(packet, layer, band, x, y) != expected[band][y * width + x]) {
+            fprintf(stderr, "authentic isolation layer=%u camera=%u renderer=%u band=%u x=%u y=%u got=%08x expected=%08x\n",
+                layer, camera, renderer, band, x, y,
+                SrPpuBgPacket_Color(packet, layer, band, x, y), expected[band][y * width + x]);
+            CHECK(false);
+            goto done;
+          }
+          CHECK(bands[band][y * width + x] ==
+              (renderer == 1 ? 0xa5a5a5a5u : expected[band][y * width + x]));
+        }
+    }
+    ppu->backgroundPacket = NULL;
+  }
+done:
+  ppu->backgroundPacket = NULL;
+  free(packet); ppu_free(ppu);
+}
+
 static void TestVramBackgroundPacketOwnership(void) {
   enum { width = 320, extra = 16, height = kH + extra * 2 };
   Ppu *ppu = ppu_init(); CHECK(ppu);
@@ -3444,6 +3523,7 @@ static void TestObjReceiverTransforms(void) {
 int main(void) {
   TestBackgroundPacketScanlineHistory();
   TestBackgroundPacketOwnershipAndFallback();
+  TestBackgroundPacketAuthenticCameraIsolation();
   TestVramBackgroundPacketOwnership();
   TestAuthoredTilesBeyondNativeVerticalClip();
   TestObjReceiverTransforms();

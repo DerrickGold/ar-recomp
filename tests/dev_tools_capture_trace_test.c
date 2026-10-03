@@ -14,12 +14,17 @@ static const FrameSlot *drawn_slot;
 static const ArRenderRectI actual_viewport = {1, 0, 2, 2};
 static uint8_t rgb[24];
 
+void Diorama_CaptureCameraPresentationState(DioramaCameraPresentationState *state) {
+  *state = (DioramaCameraPresentationState){.zoom_offset = 1.25f};
+}
+
 void FrameSlot_Capture(FrameSlot *slot, const SimFrameData *sim) {
   assert(!sim);
   ++captured;
   *slot = (FrameSlot){.snes_width = 256, .snes_height = 224, .visible_width = 256};
 }
 void PresentUpload(const FrameSlot *slot) {
+  assert(slot->diorama_camera.controls.zoom_offset == 1.25f);
   ++uploaded;
   drawn_slot = slot;
   if (fatal_upload) fatal = true;

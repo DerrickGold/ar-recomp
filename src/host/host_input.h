@@ -53,6 +53,10 @@ void HostInput_AdjustSim3DCamera(float yaw_delta, float pitch_delta,
                                  float zoom_delta);
 void HostInput_ResetSim3DCamera(void);
 void HostInput_ApplyAnalogCamera(void);
+/* Main-thread update for a captured action/diorama frame, including while
+ * the game producer runs. Uses no live WRAM or SIM camera state. Shares the
+ * elapsed-time clock above so stream handoffs cannot double-step the camera. */
+void HostInput_ApplyDioramaPresentationCamera(void);
 
 /* Advances the session-only click/hold comparison control. A pending fresh
  * native-frame upload and the visible transition both count as host pauses;

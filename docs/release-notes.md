@@ -114,6 +114,10 @@ See [Modern SIM menu](manual.md#modern-sim-menu) and
 - Improve action-rendering performance when showing extra rows above and
   below the original view with **Action 3D → Scene → Vertical extend**.
 - Fix sprites clipping early at the edges of widescreen Action 3D views.
+- Fix repeated or displaced terrain at extended viewport seams when GPU
+  background capture and the original-view comparison use different cameras.
+- Restore held camera input and Dynamic Cam's automatic return and edge
+  framing during streamed action rendering.
 - Reduce CPU use for game audio.
 - Keep original music muted when switching between replacement music tracks.
 - Fix macOS startup keyboard focus when entering fullscreen.

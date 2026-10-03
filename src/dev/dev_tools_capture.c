@@ -31,6 +31,7 @@ DevToolsCaptureResult DevTools_WriteFramebufferPpmAtPhase(
       ArRenderTexture_IsValid(context->hud_bg_texture)) {
     if (!uploaded_frame) {
       FrameSlot_Capture(&frame_slot, NULL);
+      Diorama_CaptureCameraPresentationState(&frame_slot.diorama_camera.controls);
       PresentUpload(&frame_slot);
       if (SessionFatal_Requested()) return (DevToolsCaptureResult){0};
       uploaded_frame = &frame_slot;

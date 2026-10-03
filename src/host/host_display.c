@@ -199,7 +199,7 @@ static void RefreshRetainedSimCamera(FrameSlot *slot) {
 /* Action's camera is presentation-owned for the same reason as SIM's. Only
  * these host fields are refreshed: velocity lean, hit/landing impulses, and
  * every game/PPU field stay paired with the retained tick that captured them. */
-static void RefreshRetainedDioramaCamera(FrameSlot *slot) {
+static void RefreshDioramaCamera(FrameSlot *slot) {
   if (!slot || !slot->diorama_active) return;
   Diorama_CaptureCameraPresentationState(&slot->diorama_camera.controls);
 }
@@ -740,6 +740,7 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
   FrameSlot slot;
   PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_Capture);
   FrameSlot_Capture(&slot, annotated_sim);
+  RefreshDioramaCamera(&slot);
   PerformanceMetrics_End(pipeline);
   PerformanceContextForFrame(&slot, mode);
   const uint64_t render_start_ms =
@@ -831,7 +832,12 @@ bool HostDisplay_TryRepresentFrame(float alpha,
   const bool performance_enabled = PresentPerformanceEnabled();
   const uint64_t render_start_ms =
       performance_enabled ? SDL_GetTicks() : 0;
-  RefreshRetainedDioramaCamera(&s_retained_frame.slot);
+  /* Streaming can stay in the presentation loop indefinitely. Advance held
+   * input and manual return on each due present, without borrowing the runner
+   * or waiting for its next ownership handoff. */
+  if (s_retained_frame.slot.diorama_active)
+    HostInput_ApplyDioramaPresentationCamera();
+  RefreshDioramaCamera(&s_retained_frame.slot);
   RefreshRetainedSimCamera(&s_retained_frame.slot);
   s_retained_frame.slot.performance_overlay = g_settings.performance_overlay;
   PerformanceContextForFrame(&s_retained_frame.slot, kHostDisplayPresent_GameTick);

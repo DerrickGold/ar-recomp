@@ -160,7 +160,9 @@ DioramaCameraView DioramaCamera_Present(
     fprintf(stderr,
       "[dyncam] mode=%d gain=%.3f lean_yaw=%.3f lean_pitch=%.3f "
       "target(x=%.4f y=%.4f d=%.3f) render(x=%.4f y=%.4f d=%.3f) "
-      "kick(pitch=%.4f zoom=%.4f) evt(hit=%d land=%d boost=%d)\n",
+      "kick(pitch=%.4f zoom=%.4f) evt(hit=%d land=%d boost=%d) "
+      "manual(yaw=%.4f pitch=%.4f zoom=%.4f framing=%.4f) "
+      "present-ns=%llu capture-ns=%llu\n",
       frame->controls.mode,
       (double)frame->reactive_strength / (double)kPercentScale,
       (double)frame->motion.lean_yaw,
@@ -172,7 +174,10 @@ DioramaCameraView DioramaCamera_Present(
       (double)presenter->pose.distance,
       (double)presenter->kick_pitch, (double)presenter->kick_zoom,
       frame->motion.event_hit, frame->motion.event_land,
-      frame->motion.event_boost);
+      frame->motion.event_boost,
+      (double)frame->controls.orbit_yaw, (double)frame->controls.orbit_pitch,
+      (double)frame->controls.zoom_offset, (double)frame->controls.framing_override,
+      (unsigned long long)now_ns, (unsigned long long)capture_ns);
   }
 
   return (DioramaCameraView){

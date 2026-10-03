@@ -183,9 +183,10 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   dst->turbo_active = HostInput_IsTurbo();
   dst->interp_setting_enabled = g_settings.gpu_interp_enabled;
   dst->diorama_hud_flat = g_settings.diorama_hud_flat;
-  /* Tick and retained-frame presentation share the same camera units and mode.
-   */
-  DioramaCamera_CaptureFrame(&dst->diorama_camera, elapsed_ticks);
+  /* Manual controls are main-thread owned and can change during production.
+   * The host fills them before presentation; only game motion travels through
+   * the queue. Never sample presentation state here. */
+  DioramaCamera_CaptureMotion(&dst->diorama_camera, elapsed_ticks);
 
   Sim3DCamera_CaptureFrame(&dst->sim_camera, elapsed_ticks);
   /* Stable game-authored camera coordinates used by action effect projection.

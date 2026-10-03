@@ -4821,3 +4821,105 @@ OAM, high OAM, VRAM and CGRAM are byte-identical before/after. Evidence and the
 isolated capture script are under `runs/sprite-edge-2026-10-03/` (`before-wide`
 and `after-wide`). Comments and the release notes now describe the visible
 guard behavior consistently.
+
+
+### 2026-10-03 — Extended viewport GPU capture regression
+
+Prioritized `saves/snapshots/snap_01_gf1996` ahead of the remaining fork PR
+port. Fillmore `0102`, camera `(120,328)`, 120 extra columns and 64 extra rows
+per side reproduced the repeated terrain and hard seam at the native-frame
+boundary. The pre-PR1 and pre-sprite-fix binaries reproduce it too; CPU-only
+background rendering is correct. The fault was introduced with GPU tile
+capture in `d6caf024`, not the contributor fixes or sprite guard expansion.
+
+`backgroundTileSources` and `backgroundCpuSources` survived the capture pass
+into the separately rendered authentic comparison pass. A clamped extended
+camera differs from the native camera. The second pass therefore overwrote
+the native rectangle of the GPU packet with different world coordinates and
+also skipped the background needed for its own CPU output. This can happen
+without opening the comparison: a configured comparison binding enables its
+capture surface. The shared runtime now clears these pass-local flags before
+non-capture rendering. GPU packet ownership remains intact; there are no new
+readbacks, uploads, shader variants or game-specific PPU rules.
+
+The new test fails on the original code at packet `(184,64)`, exactly the
+first native-frame column/row in the reproduced capture, and also detects the
+incorrect authentic output. It covers both BG layers, different camera
+positions and fine-scroll phases, an OBJ-only camera offset, priority bands,
+guard columns and 64 extended rows. Owned and validation packets match the CPU
+reference, while the owned pass still leaves CPU capture pixels untouched.
+Release PPU, exact-position, host-output, action-background, compositor and
+three sprite tests pass; the PPU suite also passes macOS ASan/UBSan.
+
+The release binary is rebuilt. The fixed cave capture has zero GPU tile
+validation mismatches through 1,200 reported frames. Its clean CPU/GPU final
+composites differ only in the FPS counter (135 pixels); all scene pixels match.
+WRAM, VRAM, OAM, high OAM and CGRAM are byte-identical across the reproduced
+pre/post-fix captures. Evidence, isolated scripts, and the corrected preview
+are in `runs/viewport-regression-2026-10-03/`. Windows/Deck execution has not
+been repeated for this portable runtime fix.
+
+Additional Metal runs captured 31 scrolling frames each in Fillmore `0101`,
+Fillmore `0102` and Aitos `0401`, using Dynamic Cam. BG1 traversed respectively
+922x188, 192x160 and 576x167 world pixels; BG2 traversed 461x63, 192x160 and
+288x0. All three validation runs report zero rejected sources and zero tile
+mismatches through 900 reported frames per route. Normal GPU ownership was separately
+confirmed. Final post-processed CPU/GPU images are not byte-identical (worst
+mean channel differences 0.124, 0.071 and 0.099/255); these do not substitute for
+the direct tile equality check. The hard terrain seams are absent in the
+reviewed captures, and the new camera-isolation unit test locks down the cause.
+
+### 2026-10-03 — Audit follow-up: streamed Dynamic Cam return
+
+Verified the supplied third-party audit against the code and capture evidence.
+It independently confirms the authentic-pass packet overwrite above and
+identifies a qualification gap: the scrolling fixture did not bind Compare,
+so it never exercised the divergent authentic-camera pass. The fixture now
+binds Tab without activating comparison. Its native-decode assertion also
+applies only to the GPU variant; a CPU reference intentionally disables it.
+
+The camera problem is separate. The streaming branch bypasses
+`HostInput_ApplyAnalogCamera`, which was still only serviced by the outer loop.
+The bounded stream in `0cc29867` reduced updates to ownership handoffs; the
+maintenance resume in `084af97f` lets the stream stay inside that branch
+indefinitely. Held analog input and manual orbit/zoom return therefore stopped
+advancing, leaving the manual framing override set and automatic edge clamps
+disabled.
+
+Due retained-frame presentations now advance action camera input and return,
+using the same monotonic elapsed-time clock as the synchronous/paused path.
+The streamed adapter uses the captured frame's action gate and never queries
+live WRAM or SIM camera state. Camera capture is split by ownership: the game
+producer records motion and reactive strength; the main thread samples manual
+controls before synchronous, retained, and fallback screenshot presentation.
+This avoids a race with producer capture when held input updates Free Cam
+settings or Dynamic Cam offsets. No per-frame producer handoff, new lock,
+GPU transfer, or extra game tick is needed. Existing idle/return timing and
+stationary-mouse-drag behavior remain unchanged.
+
+Regression tests drive the host update without game ticks or new input events
+at 60, 90 and 120 Hz. They check sustained zoom, idle grace, full return of zoom
+and framing, shared-clock handoff, modal suppression, and absence of runner/SIM
+reads on the presentation path. The screenshot fallback test also checks that
+host controls are populated before upload. Eleven focused release tests pass;
+camera, input, screenshot and PPU tests pass macOS ASan/UBSan.
+
+The rebuilt Metal game was tested with real mouse-wheel input in Fillmore
+`0102`, streaming and interpolation enabled, and a 90 Hz presentation limit.
+A +4.75 zoom offset and full framing override returned to zero in 3.622 seconds
+across 327 presents (90.02 Hz during that interval). Seventy-three successive
+pairs updated the return while retaining the same captured game frame. Only
+the normal maintenance resumes occurred during the return; none drained into
+the outer input loop. Evidence is in
+`runs/camera-stream-fix-2026-10-03/camera-result.json` and the referenced isolated
+run log. These are functional checks, not a new performance benchmark, and do
+not claim Windows or Steam Deck runtime qualification.
+
+Repeated the cave scrolling qualification with Compare bound: 31 CPU/GPU
+captures, identical gameplay state and camera positions, and 192x160 pixels
+of travel on both backgrounds. Direct tile validation reports zero rejected
+sources/mismatches through 900 reported frames. The final post-processed
+composites are not byte-identical: the worst mean channel difference is
+0.086/255, with 351 of 322,560 pixels differing by more than 2/255. The reviewed
+captures have no terrain seams. Reports and previews are beside the live
+camera evidence in `cave-comparison/` and `cave-compare-validate/`.

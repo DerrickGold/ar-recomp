@@ -1149,9 +1149,9 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_host_ppu_output COMMAND actraiser_host_ppu_output_test)
 
     add_executable(actraiser_host_input_test
-        tests/host_input_test.c src/host/host_input.c)
+        tests/host_input_test.c src/host/host_input.c src/diorama/diorama_camera.c)
     target_include_directories(actraiser_host_input_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_link_libraries(actraiser_host_input_test PRIVATE SDL3::SDL3)
+    target_link_libraries(actraiser_host_input_test PRIVATE SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_host_input COMMAND actraiser_host_input_test)
 
     add_executable(actraiser_host_audio_pause_test

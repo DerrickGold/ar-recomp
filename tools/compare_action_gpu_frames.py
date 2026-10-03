@@ -8,6 +8,8 @@ numpy accelerates image analysis; Pillow adds PNG previews. Keep raw evidence un
 been reviewed. Use the same executable/backend and settings for both variants;
 --allow-binary-change explicitly permits a comparison between builds. Free Cam
 isolates rendering by default; use --camera-mode 'Dynamic Cam' to check framing.
+The comparison binding stays enabled to exercise the separate authentic pass
+at camera clamps, even though the walkthrough never opens comparison mode.
 """
 from __future__ import annotations
 
@@ -64,6 +66,7 @@ diorama_skybox = Skybox only
 action_effect_lighting = On
 action_effect_particles = On
 action_environmental_effects = On
+bind_key_render_compare = Key 43 Tab
 ''' .replace('diorama_camera_mode = Free Cam', f'diorama_camera_mode = {a.camera_mode}')
     .replace('diorama_skybox = Skybox only', f'diorama_skybox = {a.skybox}')
     .replace('diorama_tilt_x_mrad = 0', f'diorama_tilt_x_mrad = {a.tilt_x}')
@@ -122,7 +125,7 @@ def validate_capture(a, work, provenance, returncode=0):
         # every source is eligible, and retain each observed mask as evidence.
         if not ownership or not all(int(owned, 16) and not (int(owned, 16) & ~int(mask, 16)) for mask, owned in ownership):
             raise RuntimeError('GPU background ownership was not confirmed')
-    if a.bg_decode == 'native' and '[gpu-bg-decode] native storage-buffer compute active' not in log:
+    if a.variant == 'gpu' and a.bg_decode == 'native' and '[gpu-bg-decode] native storage-buffer compute active' not in log:
         raise RuntimeError('Native background decode was not exercised')
     if a.handoff != '0' and a.phase != 'source' and '[gpu-frame-handoff] native ' not in log:
         raise RuntimeError('Native handoff was not exercised')

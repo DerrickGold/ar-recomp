@@ -3,7 +3,7 @@
 /* Reactive action-camera behavior, from captured player motion to the pose
  * drawn on screen. Calculations use explicit inputs and separate capture and
  * presentation histories; this module never reads live game state.
- * Host settings/manual controls are captured by diorama.c; diorama_host.c
+ * Host settings/manual controls are captured by diorama_controls.c; diorama_host.c
  * supplies WRAM observations. Tests: tests/diorama_camera_test.c. */
 
 #include <stdbool.h>
@@ -108,9 +108,10 @@ DioramaCameraView DioramaCamera_Present(
     DioramaCameraPresenter *presenter, const DioramaCameraFrame *frame,
     uint64_t capture_ns, uint64_t now_ns);
 
-/* Host adapters: controls from settings/manual orbit, then motion from WRAM.
- * CaptureFrame is called for every frame, even when Diorama is not active. */
+/* Host adapters with separate ownership: presentation captures controls on
+ * the main thread; the game producer captures only motion/strength from the
+ * runner and stable settings, even when Diorama is not active. */
 void Diorama_CaptureCameraPresentationState(DioramaCameraPresentationState *state);
-void DioramaCamera_CaptureFrame(DioramaCameraFrame *frame, int elapsed_ticks);
+void DioramaCamera_CaptureMotion(DioramaCameraFrame *frame, int elapsed_ticks);
 
 #endif /* AR_DIORAMA_CAMERA_H */

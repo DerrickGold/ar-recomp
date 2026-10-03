@@ -20,8 +20,7 @@ bool g_diorama_frame_active;
 
 static DioramaCameraObserver s_camera_observer = DIORAMA_CAMERA_OBSERVER_INIT;
 
-void DioramaCamera_CaptureFrame(DioramaCameraFrame *frame, int elapsed_ticks) {
-  Diorama_CaptureCameraPresentationState(&frame->controls);
+void DioramaCamera_CaptureMotion(DioramaCameraFrame *frame, int elapsed_ticks) {
   frame->reactive_strength = g_settings.diorama_reactive_strength;
   const DioramaCameraObservation input = {
     .velocity_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_PlayerVelocityX),

@@ -1,6 +1,7 @@
 /* Characterize modal input routing without a window, renderer or game. */
 #include "host/host_ppu_output.h"
 #include "host/host_input.h"
+#include "host/host_clock.h"
 #include "actraiser/actraiser_rtl.h"
 #include "actraiser/actraiser_sim_menu.h"
 #include "snesrecomp/game/bootstrap.h"
@@ -30,6 +31,7 @@
 #include <SDL3/SDL.h>
 #include "support/test_assert.h"
 #include <stdio.h>
+#include <math.h>
 #include <string.h>
 
 static bool s_overlay, s_capture, s_pad_active, s_manual, s_diorama;
@@ -45,6 +47,12 @@ static InputAction s_analog_action;
 static float s_analog_value, s_camera_zoom;
 static bool s_dynamic_input_active;
 static bool s_key_host_binding;
+static uint64_t s_now_ns = 1000000000;
+static int s_runner_camera_reads;
+static DioramaCameraManualState s_manual_camera;
+
+/* Advance host time deterministically without sleeping or running game ticks. */
+uint64_t HostClock_Nanoseconds(void) { return s_now_ns; }
 
 static const ActRaiserDisplayGeometry s_geometry;
 const ActRaiserDisplayGeometry *const g_actraiser_display_geometry = &s_geometry;
@@ -67,11 +75,18 @@ void ActRaiser_RequestMagicCycle(void) {
 }
 void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
   s_camera_zoom = d_zoom;
+  if (g_settings.diorama_camera_mode == kDioramaCam_Dynamic) {
+    s_manual_camera.offset.tilt_y += d_yaw;
+    s_manual_camera.offset.tilt_x += d_pitch;
+    s_manual_camera.offset.distance += d_zoom;
+    DioramaCameraManual_Input(&s_manual_camera);
+  }
 }
 float Diorama_DragRadPerPx(void) {
   return 0;
 }
 bool Diorama_IsActiveThisFrame(void) {
+  ++s_runner_camera_reads;
   return s_diorama;
 }
 bool Diorama_IsDragging(void) {
@@ -84,7 +99,11 @@ void Diorama_SetDragging(bool dragging) {
 }
 bool Diorama_UpdateDynamicCamera(float elapsed_seconds, bool input_active) {
   s_dynamic_input_active = input_active;
-  return 0;
+  if (g_settings.diorama_camera_mode != kDioramaCam_Dynamic) {
+    s_manual_camera = (DioramaCameraManualState){0};
+    return false;
+  }
+  return DioramaCameraManual_Update(&s_manual_camera, elapsed_seconds, input_active);
 }
 float Diorama_ZoomStep(void) {
   return 0;
@@ -264,6 +283,7 @@ SettingChangeResult Settings_SetLong(const SettingDesc * desc, long value) {
 void Sim3DCamera_Adjust(float yaw_delta, float pitch_delta, float zoom_delta) {
 }
 bool Sim3DCamera_ControlsAvailable(bool textures_ready) {
+  ++s_runner_camera_reads;
   return 0;
 }
 bool Sim3DCamera_IsDragging(void) {
@@ -275,6 +295,7 @@ void Sim3DCamera_SetDragging(bool dragging) {
   s_sim_drag = dragging;
 }
 bool Sim3DCamera_UpdateDynamic(float elapsed_seconds, bool orbit_held) {
+  ++s_runner_camera_reads;
   return 0;
 }
 char *UserDataFile(char * buf, size_t size, const char * leaf) {
@@ -286,6 +307,60 @@ static void Key(Uint32 type, SDL_Keycode key) {
   event.key.key = key;
   event.key.scancode = SDL_SCANCODE_A;
   assert(HostInput_HandleEvent(&event));
+}
+
+static void CheckStreamedCamera(void) {
+  const int rates[] = {60, 90, 120};
+  g_settings.diorama_camera_mode = kDioramaCam_Dynamic;
+  /* The retained action frame, not the live map group, authorizes this path. */
+  s_diorama = false;
+  const int runner_reads = s_runner_camera_reads;
+  for (unsigned r = 0; r < sizeof(rates) / sizeof(rates[0]); ++r) {
+    const int rate = rates[r];
+    const uint64_t interval_ns = 1000000000 / rate;
+    s_manual_camera = (DioramaCameraManualState){0};
+    s_analog_action = kInputAction_CamZoomOut;
+    s_analog_value = 1.0f;
+    /* No new input events and no emulation ticks/ownership handoffs. */
+    for (int i = 0; i < rate; ++i) {
+      s_now_ns += interval_ns;
+      HostInput_ApplyDioramaPresentationCamera();
+    }
+    assert(fabsf(s_manual_camera.offset.distance - 6.0f) < .0001f);
+    assert(s_manual_camera.framing_override == 1.0f);
+    s_analog_value = 0.0f;
+    for (int i = 0; i < rate / 3; ++i) {
+      s_now_ns += interval_ns;
+      HostInput_ApplyDioramaPresentationCamera();
+    }
+    assert(s_manual_camera.framing_override == 1.0f); /* Idle grace. */
+    s_now_ns += 100000000;
+    HostInput_ApplyDioramaPresentationCamera();
+    assert(s_manual_camera.framing_override < 1.0f);
+    for (int i = 0; i < rate * 4; ++i) {
+      s_now_ns += interval_ns;
+      HostInput_ApplyDioramaPresentationCamera();
+    }
+    assert(s_manual_camera.offset.distance == 0.0f);
+    assert(s_manual_camera.framing_override == 0.0f);
+  }
+  assert(s_runner_camera_reads == runner_reads);
+
+  /* Switching host paths at the same timestamp cannot integrate twice. */
+  s_diorama = true;
+  s_analog_value = 1.0f;
+  s_now_ns += 10000000;
+  HostInput_ApplyAnalogCamera();
+  const float zoom = s_manual_camera.offset.distance;
+  HostInput_ApplyDioramaPresentationCamera();
+  assert(s_manual_camera.offset.distance == zoom);
+  /* Modal input suppression still applies during retained presentation. */
+  s_overlay = true;
+  s_now_ns += 10000000;
+  HostInput_ApplyDioramaPresentationCamera();
+  assert(s_manual_camera.offset.distance == zoom && !s_dynamic_input_active);
+  s_overlay = false;
+  s_analog_value = 0.0f;
 }
 
 int main(void) {
@@ -352,22 +427,24 @@ int main(void) {
   s_analog_action = kInputAction_CamZoomOut;
   s_analog_value = 1.0f;
   HostInput_ApplyAnalogCamera();
-  SDL_Delay(1);
+  s_now_ns += 1000000;
   HostInput_ApplyAnalogCamera();
   assert(s_camera_zoom > 0.0f && s_dynamic_input_active);
   s_analog_value = 0.0f;
   s_diorama_drag = true;
-  SDL_Delay(1);
+  s_now_ns += 1000000;
   HostInput_ApplyAnalogCamera();
   assert(!s_dynamic_input_active);
   s_diorama_drag = false;
   g_settings.diorama_camera_mode = kDioramaCam_Free;
   s_analog_value = 1.0f;
   s_camera_zoom = 0.0f;
-  SDL_Delay(1);
+  s_now_ns += 1000000;
   HostInput_ApplyAnalogCamera();
   assert(s_camera_zoom > 0.0f && !s_dynamic_input_active);
   s_analog_value = 0.0f;
+
+  CheckStreamedCamera();
 
   /* Keyboard and pad save-state commands reach the same application action. */
   Key(SDL_EVENT_KEY_DOWN, SDLK_F5);
