@@ -10,7 +10,7 @@
  * separated action planes/HUD/skybox are supported; no SIM or authentic views. */
 typedef struct HostFramePacket {
   FrameSlot frame;
-  uint64_t source_ns, input_ns, started_ns, completed_ns, copy_ns;
+  uint64_t source_ns, input_ns, started_ns, completed_ns, copy_ns, cpu_ns;
   uint64_t copied_bytes;
   int tick;
   uint8_t *pixels;
@@ -32,6 +32,9 @@ SrPpuBgPacket *HostFramePacket_BackgroundTarget(HostFramePacket *packet);
 bool HostFramePacket_OwnPixels(HostFramePacket *packet);
 void HostFrameQueue_Publish(HostFrameQueue *queue);
 const HostFramePacket *HostFrameQueue_Read(HostFrameQueue *queue);
+/* Reader only. Look ahead inside the current published snapshot without
+ * releasing the preceding packet or exposing an in-progress writer. */
+const HostFramePacket *HostFrameQueue_Peek(HostFrameQueue *queue, unsigned offset);
 /* Reader-owned snapshot: bound one drain even if production continues. */
 unsigned HostFrameQueue_ReadyCount(const HostFrameQueue *queue);
 void HostFrameQueue_Release(HostFrameQueue *queue);

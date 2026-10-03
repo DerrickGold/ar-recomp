@@ -48,6 +48,9 @@ typedef enum PerformanceCount {
   kPerformanceCount_DepthCopyBytes, kPerformanceCount_DepthCopyCalls,
   kPerformanceCount_AtlasReuse, kPerformanceCount_AtlasCopyBytes,
   kPerformanceCount_AtlasCopyCalls,
+  /* Actual native source cadence; 90 Hz naturally holds some 60 Hz ticks. */
+  kPerformanceCount_NativePresents, kPerformanceCount_SourceHolds,
+  kPerformanceCount_SourceSkips,
   kPerformanceCount_Count,
 } PerformanceCount;
 

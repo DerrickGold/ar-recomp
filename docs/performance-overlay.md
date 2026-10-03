@@ -12,9 +12,15 @@ use `AR_PIPELINE_PERF=1`.
 
 - **FPS / ms / p95 / max** describe displayed frame intervals, not simulation
   speed. The percentile and maximum help identify uneven frame delivery.
-- **Ticks / repeats** describe simulation ticks and repeated presentations per
-  displayed frame. A 60-Hz simulation displayed at 120 Hz can have roughly
-  0.5 ticks and 0.5 repeats.
+- **Ticks / redraws** describe simulation ticks and retained-frame draw calls per
+  presentation. Redraws are not held game frames: streaming uses that draw path
+  for every presentation, even when the source tick changes.
+- **Source holds / skips** replace that row during native streamed playback.
+  They count actual repeated source ticks and omitted ticks per second.
+  At 90 Hz, a 60 Hz source naturally holds about 30 presentations per second;
+  at 60 Hz, the 60.0988 Hz source naturally omits roughly one tick every ten
+  seconds. Those counts alone do not prove judder. Interpolated endpoints are
+  excluded because they do not identify the synthesized image on screen.
 - **AVG / PEAK** measure CPU wall time, including any driver calls that block.
   Nested stages overlap, so adding every row does not give total frame time.
 - **Present/wait** includes submission and waiting inside the presentation API.
@@ -78,3 +84,48 @@ artificially large peak. These stages overlap existing parent stages.
 
 The existing per-scene window still resets on scene changes. It is not a
 cross-transition hitch trace, and a short-lived scene may end before a report.
+
+
+### Source cadence traces
+
+`AR_FRAME_PACING_TRACE=/path/to/pacing.csv` adds source tick/epoch, source
+interval, playout target/sample time, and producer thread CPU time to the
+existing stage trace. CPU sampling is off outside trace runs. CPU time and
+wall time refer to uploaded endpoints; skipped packets are not separate CSV
+rows. Unaccounted wall time includes blocking and descheduling, and cannot
+establish that a thread was runnable throughout a stall.
+
+Analyze a settled native run with, for example:
+
+```sh
+python3 tools/analyze_frame_pacing.py pacing.csv --refresh 90 \
+  --start 1825 --end 3000 --warmup-seconds 10 --max-irregular-percent 2
+```
+
+The optional threshold fails the command if source cadence exceeds the stated
+percentage. The analyzer fits one constant source/display phase per epoch and
+reports the fraction of presents inconsistent with it. This accommodates
+normal 1/2 holds at 90 Hz, source/display drift, and low-refresh skips. It is a
+lower bound on irregular selection based on present-return timestamps, not
+physical scanout or input-to-photon latency. Hold histograms omit the truncated
+first and last hold of each epoch. Interpolated traces have no native cadence
+percentage, and requesting a native threshold on them fails explicitly.
+Use `--native` only for older traces known to have interpolation disabled;
+legacy files without a source interval assume NTSC timing.
+
+`[pipeline-cadence]` logs actual native holds and skipped ticks per completed
+present. `[pipeline-work] repre` remains a count of retained-frame draw calls.
+
+Native streamed presentation selects the newest source scheduled before its
+presentation target, with a 0.75-source-period delay (about 12.48 ms at NTSC).
+VSync uses a filtered refresh estimate from present returns; capped playback
+uses its scheduled deadline. Future packets stay queued, and waiting for a due
+packet is bounded. Game and audio clocks are unchanged. Unlimited presentation
+retains newest-completed selection; unsupported scenes and below-source caps
+keep their existing synchronous path. Interpolation retains its existing delay.
+
+Diagnostic comparisons can set `AR_FRAME_STREAM_NATIVE_DELAY_US=0` to restore
+newest-completed selection. Positive values up to 33000 override native delay.
+On macOS, `AR_FRAME_PRODUCER_QOS=default|initiated|interactive` compares scheduling
+classes; production defaults to interactive. Linux and Windows scheduling
+priorities are unchanged. These are diagnostic overrides, not saved settings.

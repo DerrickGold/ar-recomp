@@ -197,6 +197,7 @@ int main(void) {
   HostFrameQueue *q = HostFrameQueue_Create();
   assert(q && !HostFrameQueue_Read(q));
   assert(HostFrameQueue_ReadyCount(q) == 0);
+  assert(!HostFrameQueue_Peek(q, 1));
   TestPixels(HostFrameQueue_BeginWrite(q));
   TestBackgroundPacket(HostFrameQueue_BeginWrite(q));
   for (int i = 0; i < 3; ++i) {
@@ -206,6 +207,9 @@ int main(void) {
     assert(HostFrameQueue_ReadyCount(q) == (unsigned)i + 1);
   }
   assert(!HostFrameQueue_BeginWrite(q));
+  assert(HostFrameQueue_Peek(q, 1)->tick == 1);
+  assert(HostFrameQueue_Peek(q, 2)->tick == 2);
+  assert(!HostFrameQueue_Peek(q, 3));
   const HostFramePacket *held = HostFrameQueue_Read(q);
   assert(held && held->tick == 0 && !HostFrameQueue_BeginWrite(q));
   for (int i = 0; i < 3; ++i) {
@@ -224,6 +228,8 @@ int main(void) {
     const HostFramePacket *p;
     while (!(p = HostFrameQueue_Read(q))) SDL_DelayNS(1000);
     assert(p->tick == i && p->source_ns == (uint64_t)i * 12345);
+    const HostFramePacket *next = HostFrameQueue_Peek(q, 1);
+    if (next) assert(next->tick == i + 1);
     for (int b = 0; b < 128; ++b) assert(p->pixels[b] == (i & 255));
     HostFrameQueue_Release(q);
   }

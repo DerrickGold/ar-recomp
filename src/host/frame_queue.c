@@ -52,9 +52,13 @@ void HostFrameQueue_Publish(HostFrameQueue *q) {
 }
 
 const HostFramePacket *HostFrameQueue_Read(HostFrameQueue *q) {
+  return HostFrameQueue_Peek(q, 0);
+}
+
+const HostFramePacket *HostFrameQueue_Peek(HostFrameQueue *q, unsigned offset) {
   const uint64_t r = atomic_load_explicit(&q->consumed, memory_order_relaxed);
   const uint64_t w = atomic_load_explicit(&q->published, memory_order_acquire);
-  return r != w ? &q->packets[r % kQueueCapacity] : NULL;
+  return offset < w - r ? &q->packets[(r + offset) % kQueueCapacity] : NULL;
 }
 
 unsigned HostFrameQueue_ReadyCount(const HostFrameQueue *q) {

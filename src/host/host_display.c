@@ -48,6 +48,7 @@
 #include "host/host_frame_surfaces.h"
 #include "host/frame_producer.h"
 #include "host/frame_queue.h"
+#include "host/frame_playout.h"
 
 const uint64_t kHostDisplayEmulationFrameIntervalNs = RTL_NTSC_FRAME_INTERVAL_NS;
 int g_snes_width = kActRaiserAuthenticWidth,
@@ -86,6 +87,7 @@ static bool s_producer_pacing;
 static bool s_present_trace_enabled;
 static HostDisplayPresentTrace s_present_trace;
 static uint64_t s_submit_deadline_ns;
+static HostFrameRefreshClock s_refresh_clock;
 
 /* Diagnostic pacing experiments; ordinary playback retains its current
  * policy until the measured tails and visual timing have been qualified. */
@@ -126,6 +128,13 @@ static bool PrepareSwapchainEarly(void) {
 uint64_t HostDisplay_PresentationSampleTime(uint64_t now_ns) {
   return s_producer_pacing && PresentPreparationLeadNs() &&
       s_present_deadline_ns > now_ns ? s_present_deadline_ns : now_ns;
+}
+
+uint64_t HostDisplay_NativeFrameSampleTime(uint64_t now_ns) {
+  if (s_producer_pacing)
+    return s_present_deadline_ns > now_ns ? s_present_deadline_ns : now_ns;
+  return g_settings.refresh_mode == kRefreshMode_Vsync
+      ? HostFrameRefreshClock_Next(s_refresh_clock, now_ns) : now_ns;
 }
 
 void HostDisplay_EnablePresentTrace(bool enabled) {
@@ -357,6 +366,10 @@ static bool CompletePresent(HostDisplayPresentMode mode) {
   const uint64_t completed_at_ns = SDL_GetTicksNS();
   PerformanceMetrics_PresentCompleted(completed_at_ns);
   const HostDisplayPacingOptions options = CurrentPacingOptions();
+  HostFrameRefreshClock_Observe(&s_refresh_clock, completed_at_ns,
+      options.refresh_mode == kRefreshMode_Vsync && options.vsync_active &&
+          !options.vsync_software_fallback && options.nominal_refresh_hz > 0
+          ? kNanosecondsPerSecond / options.nominal_refresh_hz : 0);
   if (HostDisplayPacing_RecordVsyncPresent(
           &s_vsync_guard,
           options.refresh_mode == kRefreshMode_Vsync &&
@@ -701,6 +714,7 @@ void HostDisplay_DisableVsync(void) {
 
 void HostDisplay_ResetVsyncPacing(void) {
   HostDisplayPacing_ResetVsyncGuard(&s_vsync_guard);
+  s_refresh_clock = (HostFrameRefreshClock){0};
   s_present_deadline_ns = 0;
 }
 

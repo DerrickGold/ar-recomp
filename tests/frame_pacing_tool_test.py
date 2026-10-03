@@ -2,11 +2,12 @@
 import csv
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from analyze_frame_pacing import analyze
+from analyze_frame_pacing import analyze, source_cadence
 
 
 class PacingTraceTest(unittest.TestCase):
@@ -39,6 +40,61 @@ class PacingTraceTest(unittest.TestCase):
                 writer.writeheader()
                 writer.writerows(rows)
             return analyze(path, **options)
+
+    def test_native_cadence_allows_natural_holds_and_ntsc_drift(self):
+        period = 16639263
+        for refresh in (30, 60, 90, 120):
+            rows = []
+            for i in range(1, refresh * 30):
+                complete = 1_000_000_000 + i * 1_000_000_000 // refresh
+                tick = (complete - 14_000_000) // period
+                rows.append(dict(tick=tick, source_ns=tick*period,
+                                 complete_ns=complete, interval_ns=period,
+                                 epoch=1, interpolation=0))
+            clean = source_cadence(rows)
+            self.assertEqual(clean['best_phase_mismatches'], 0)
+            for i in range(100, len(rows), 100):
+                rows[i]['tick'] -= 1
+                rows[i]['source_ns'] -= period
+            bad = source_cadence(rows)
+            self.assertGreater(bad['best_phase_mismatches'], 0)
+            for row in rows:
+                row['interpolation'] = 1
+            self.assertIsNone(source_cadence(rows)['best_phase_mismatch_percent'])
+
+    def test_native_epoch_resets_and_legacy_opt_in(self):
+        rows = [dict(tick=i, source_ns=i*16000000, complete_ns=i*16000000+delay,
+                     interval_ns=16000000, epoch=epoch)
+                for epoch, delay in [(1, 20000000), (2, 50000000)] for i in range(100)]
+        self.assertEqual(source_cadence(rows)['samples'], 0)
+        result = source_cadence(rows, assume_native=True)
+        self.assertEqual(result['best_phase_mismatches'], 0)
+        self.assertEqual(result['skipped_ticks'], 0)
+        self.assertEqual(result['held_presents'], 0)
+
+    def test_cadence_threshold_exit_status(self):
+        rows = self.rows()
+        for row in rows:
+            row.update(interpolation=0, interval_ns=16000000, producer_cpu_ns=7000000)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'pacing.csv'
+            def write():
+                with path.open('w', newline='') as f:
+                    writer = csv.DictWriter(f, rows[0].keys())
+                    writer.writeheader(); writer.writerows(rows)
+            command = [sys.executable, str(Path(__file__).resolve().parents[1] /
+                       'tools/analyze_frame_pacing.py'), str(path), '--max-irregular-percent', '0']
+            write()
+            self.assertEqual(subprocess.run(command, capture_output=True).returncode, 0)
+            rows[121]['source_ns'] -= 16000000
+            rows[121]['tick'] -= 1
+            write()
+            self.assertEqual(subprocess.run(command, capture_output=True).returncode, 1)
+        report = self.report(self.rows())
+        self.assertEqual(report['producer_cpu_ms']['samples'], 0)
+        measured = self.report(rows)
+        self.assertEqual(measured['producer_cpu_ms']['mean'], 7)
+        self.assertEqual(measured['producer_unaccounted_wall_ms']['mean'], 3)
 
     def test_idle_uploads_and_overlapping_scopes(self):
         result = self.report(self.rows())

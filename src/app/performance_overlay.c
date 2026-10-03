@@ -80,9 +80,14 @@ void PerformanceOverlay_Build(const PerformanceSnapshot *snapshot, int level,
       snapshot->fps, snapshot->frame_mean_ms, snapshot->frame_p95_ms, snapshot->frame_max_ms);
   char cap[16] = "off";
   if (context->limit_fps > 0) snprintf(cap, sizeof(cap), "%d", context->limit_fps);
-  Line(model, 0, 2, "%dx%d  vsync %s  cap %s | ticks %.2f  repeats %.2f",
+  Line(model, 0, 2, "%dx%d  vsync %s  cap %s | ticks %.2f  redraws %.2f",
       context->width, context->height, context->vsync ? "on" : "off", cap,
       snapshot->counts[kPerformanceCount_Ticks], snapshot->counts[kPerformanceCount_Represents]);
+  if (!menu && snapshot->counts[kPerformanceCount_NativePresents] > 0)
+    Line(model, 0, 2, "%dx%d | source holds %.1f/s skips %.1f/s (refresh-dependent)",
+        context->width, context->height,
+        snapshot->counts[kPerformanceCount_SourceHolds] * snapshot->fps,
+        snapshot->counts[kPerformanceCount_SourceSkips] * snapshot->fps);
   if (menu) {
     Line(model, 0, 3, "CPU menu %.2f  present/wait %.2f  sleep %.2f ms",
         snapshot->stages[kPerformance_SettingsUi].mean_ms,

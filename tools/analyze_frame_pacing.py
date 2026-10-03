@@ -27,7 +27,62 @@ def stats(values):
                 p50=percentile(.5), p95=percentile(.95), p99=percentile(.99), max=values[-1])
 
 
-def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0):
+def source_cadence(presents, assume_native=False):
+    """Measure real held/skipped ticks and fit one constant playout phase/epoch.
+
+    A native tick is correct for any delay in (age-period, age]. Maximum
+    interval overlap finds the best stable phase, without counting the normal
+    60.0988/60 drift or 90 Hz 1/2 holds as judder. This is a diagnostic lower
+    bound on irregular selection, not proof of physical scanout timing.
+    Interpolated endpoint IDs are not displayed-frame IDs; exclude them.
+    """
+    epochs = {}
+    for row in presents:
+        if row.get('interpolation', 0 if assume_native else 1) == 0:
+            epochs.setdefault(row['epoch'], []).append(row)
+    samples = repeats = skips = mismatches = 0
+    holds = {}
+    phases = []
+    for epoch, rows in epochs.items():
+        samples += len(rows)
+        events = {}
+        for row in rows:
+            age = row['complete_ns'] - row['source_ns']
+            period = row.get('interval_ns', 16639263)
+            if period <= 0:
+                raise ValueError('Invalid source interval')
+            lo, hi = age - period + 1, age + 1
+            events[lo] = events.get(lo, 0) + 1
+            events[hi] = events.get(hi, 0) - 1
+        active = best = 0
+        phase = 0
+        for point, change in sorted(events.items()):
+            active += change
+            if active > best:
+                best, phase = active, point
+        mismatches += len(rows) - best
+        phases.append(dict(epoch=epoch, fitted_delay_ms=phase / 1e6,
+                           samples=len(rows), mismatches=len(rows)-best))
+        run = 1
+        first_run = True
+        for a, b in zip(rows, rows[1:]):
+            delta = b['tick'] - a['tick']
+            if delta == 0:
+                repeats += 1
+                run += 1
+            else:
+                skips += max(0, delta - 1)
+                if not first_run:
+                    holds[str(run)] = holds.get(str(run), 0) + 1
+                first_run, run = False, 1
+        # Initial/final holds can be truncated by the requested sample window.
+    return dict(samples=samples, held_presents=repeats, skipped_ticks=skips,
+                complete_hold_lengths=holds, best_phase_mismatches=mismatches,
+                best_phase_mismatch_percent=100 * mismatches / samples if samples else None,
+                epochs=phases)
+
+
+def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_native=False):
     if refresh <= 0 or end < start or warmup_seconds < 0:
         raise ValueError('Invalid timing range or warmup')
     with Path(path).open() as f:
@@ -87,6 +142,24 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0):
                   vector_wait_ms=stats(durations('vector_wait_ns',presents)),
                   vector_wait_nonzero_ms=stats([r['vector_wait_ns']/1e6 for r in presents if r['vector_wait_ns']]),
                   event_work_ms=stats([(r['prepare_ns']-r['loop_ns'])/1e6 for r in rows]))
+    result['source_cadence'] = source_cadence(presents, assume_native)
+    scheduled_native = [r for r in presents if r.get('interpolation') == 0 and
+                        r.get('interval_ns', 0) and r.get('playout_target_ns', 0)]
+    result['native_target_late_presents'] = sum(
+        r['source_ns'] + r['interval_ns'] <= r['playout_target_ns'] for r in scheduled_native)
+    result['native_target_future_presents'] = sum(
+        r['source_ns'] > r['playout_target_ns'] for r in scheduled_native)
+    result['sample_prediction_error_ms'] = stats([
+        (r['complete_ns'] - r['sample_ns']) / 1e6 for r in scheduled_native if r.get('sample_ns', 0)])
+    result['source_age_at_complete_ms'] = stats([
+        (r['complete_ns'] - r['source_ns']) / 1e6 for r in presents])
+    cpu_sources = [r for r in sources.values() if r.get('producer_cpu_ns', 0)]
+    result['producer_cpu_ms'] = stats([r['producer_cpu_ns'] / 1e6 for r in cpu_sources])
+    # Includes waits, descheduling and clock/scope noise. Not evidence that the
+    # thread was runnable the entire time, nor GPU execution time.
+    result['producer_unaccounted_wall_ms'] = stats([
+        max(0, r['producer_complete_ns'] - r['producer_start_ns'] - r['producer_cpu_ns']) / 1e6
+        for r in cpu_sources])
     for key in ('pump_ns', 'input_events_ns', 'owner_poll_ns'):
         if key in rows[0]: result[key.replace('_ns','_ms')] = stats(durations(key))
     if 'submit_start_ns' in rows[0]:
@@ -132,12 +205,23 @@ def main():
     p.add_argument('--warmup-seconds',type=float,default=0,
                    help='Exclude time after the first streamed endpoint (e.g. 10), in addition to --start')
     p.add_argument('--output',type=Path)
+    p.add_argument('--native', action='store_true', help='Identify legacy traces known to have interpolation disabled')
+    p.add_argument('--max-irregular-percent', type=float,
+                   help='Fail when the native best-phase mismatch percentage exceeds this limit')
     a=p.parse_args()
     if a.refresh<=0 or a.end<a.start or a.warmup_seconds<0: p.error('Invalid timing range or warmup')
-    reports=[analyze(t,a.start,a.end,a.refresh,a.warmup_seconds) for t in a.traces]
+    reports=[analyze(t,a.start,a.end,a.refresh,a.warmup_seconds,a.native) for t in a.traces]
     payload=json.dumps(reports,indent=2)
     if a.output:a.output.write_text(payload+'\n')
     print(payload)
+    if a.max_irregular_percent is not None:
+        if not 0 <= a.max_irregular_percent <= 100:
+            p.error('Irregular percentage must be between 0 and 100')
+        rates = [r['source_cadence']['best_phase_mismatch_percent'] for r in reports]
+        if any(rate is None for rate in rates):
+            p.error('Native source metadata (or --native for a legacy trace) is required')
+        if any(rate > a.max_irregular_percent for rate in rates):
+            raise SystemExit(1)
 
 
 if __name__=='__main__':main()

@@ -180,7 +180,7 @@ typedef struct StreamJob {
   HostFramePlayout playout;
   uint8_t map_group, map_number;
   unsigned frames, full_waits;
-  bool stopped, transition, maintenance;
+  bool stopped, transition, maintenance, measure_cpu;
 } StreamJob;
 
 static void ProduceFrameStream(void *context) {
@@ -197,6 +197,7 @@ static void ProduceFrameStream(void *context) {
     HostFramePacket *packet = HostFrameQueue_BeginWrite(stream->queue);
     if (!packet) { ++stream->full_waits; SDL_Delay(1); continue; }
     packet->started_ns = SDL_GetTicksNS();
+    const uint64_t cpu_start = stream->measure_cpu ? HostFrameProducer_ThreadCpuTimeNs() : 0;
     packet->source_ns = stream->next_ns;
     const uint64_t sample = atomic_load_explicit(&stream->input_sample, memory_order_acquire);
     const uint32_t age_ms = (uint32_t)SDL_GetTicks() - (uint32_t)(sample >> 32);
@@ -247,6 +248,8 @@ static void ProduceFrameStream(void *context) {
     packet->copy_ns = SDL_GetTicksNS() - copy_start;
     packet->tick = snes_frame_counter;
     packet->completed_ns = SDL_GetTicksNS();
+    const uint64_t cpu_end = cpu_start ? HostFrameProducer_ThreadCpuTimeNs() : 0;
+    packet->cpu_ns = cpu_end >= cpu_start ? cpu_end - cpu_start : 0;
     HostRuntimeDiagnostics_EndDraw(profile);
     HostFrameQueue_Publish(stream->queue);
     ++stream->frames;
@@ -462,6 +465,15 @@ void GameLoop_Run(const GameSessionConfig *config) {
 
   bool running = true;
   unsigned delay_permille = kHostFramePlayoutDefaultDelayPermille;
+  /* A zero override retains the old newest-completed policy for A/B traces. */
+  int native_delay_us = -1;
+  const char *native_delay_option = getenv("AR_FRAME_STREAM_NATIVE_DELAY_US");
+  if (native_delay_option) {
+    char *end;
+    const long value = strtol(native_delay_option, &end, 10);
+    if (end != native_delay_option && !*end && value >= 0 && value <= 33000)
+      native_delay_us = (int)value;
+  }
   const char *delay_option = getenv("AR_FRAME_STREAM_DELAY_PERMILLE");
   if (delay_option) {
     char *end;
@@ -498,7 +510,8 @@ void GameLoop_Run(const GameSessionConfig *config) {
   uint64_t stream_frames = 0, stream_last_source_ns = 0;
   double stream_work_ms = 0, stream_copy_ms = 0, stream_bytes = 0, stream_age_ms = 0;
   unsigned stream_event = 0;
-  int stream_tick = 0;
+  int stream_tick = 0, cadence_tick = 0;
+  uint64_t cadence_epoch = 0;
   const char *trace_path = getenv("AR_FRAME_STREAM_TRACE");
   char *stream_trace_buffer = NULL;
   FILE *stream_trace = OpenBufferedDiagnosticTrace(
@@ -512,13 +525,15 @@ void GameLoop_Run(const GameSessionConfig *config) {
   FILE *pacing_trace = OpenBufferedDiagnosticTrace(
       stream_enabled ? pacing_trace_path : NULL, 4 * 1024 * 1024,
       &pacing_trace_buffer);
+  stream.measure_cpu = pacing_trace != NULL;
   const char *prepare_option = getenv("AR_FRAME_STREAM_PREPARE_AHEAD");
   const bool prepare_ahead = !prepare_option || strcmp(prepare_option, "0") != 0;
   HostDisplay_EnablePresentTrace(pacing_trace != NULL);
   if (pacing_trace) {
-    fprintf(pacing_trace, "loop_ns,prepare_ns,ready_ns,draw_ns,complete_ns,deadline_ns,upload_ns,uploads,draw_work_ns,swap_ns,vector_wait_ns,queue_before,queue_after,presented,tick,epoch,source_ns,producer_start_ns,producer_complete_ns,input_ns,pump_ns,input_events_ns,owner_poll_ns,submit_deadline_ns,submit_start_ns,submit_wait_ns,backend_flush_ns,backend_acquire_ns,backend_submit_ns\n");
+    fprintf(pacing_trace, "loop_ns,prepare_ns,ready_ns,draw_ns,complete_ns,deadline_ns,upload_ns,uploads,draw_work_ns,swap_ns,vector_wait_ns,queue_before,queue_after,presented,tick,epoch,source_ns,producer_start_ns,producer_complete_ns,input_ns,pump_ns,input_events_ns,owner_poll_ns,submit_deadline_ns,submit_start_ns,submit_wait_ns,backend_flush_ns,backend_acquire_ns,backend_submit_ns,producer_cpu_ns,playout_target_ns,sample_ns,interval_ns,interpolation\n");
   }
   uint64_t trace_producer_start = 0, trace_producer_complete = 0, trace_input = 0;
+  uint64_t trace_producer_cpu = 0;
   const char *sync_trace_path = getenv("AR_FRAME_SYNC_TRACE");
   FILE *sync_trace = !config->headless && sync_trace_path
       ? fopen(sync_trace_path, "w") : NULL;
@@ -556,8 +571,8 @@ void GameLoop_Run(const GameSessionConfig *config) {
         running = false;
         continue;
       }
-      /* Poll SDL only for presence; no event handlers or live-state reads
-       * until the producer acknowledges a pause. Keep presenting meanwhile. */
+      /* Handle game input and presentation controls without live runner reads.
+       * Other events wait for the producer to acknowledge ownership. */
       SDL_PumpEvents();
       const uint64_t trace_pump_end = pacing_trace ? SDL_GetTicksNS() : 0;
       /* PumpEvents adds this bookkeeping marker even when nobody supplied
@@ -572,8 +587,16 @@ void GameLoop_Run(const GameSessionConfig *config) {
         const bool ignored = (type >= SDL_EVENT_JOYSTICK_AXIS_MOTION &&
             type <= SDL_EVENT_JOYSTICK_UPDATE_COMPLETE) ||
             type == SDL_EVENT_GAMEPAD_UPDATE_COMPLETE ||
-            type == SDL_EVENT_GAMEPAD_SENSOR_UPDATE;
-        if (!ignored && !HostInput_TryHandleGameOnlyEvent(&pending_event)) {
+            type == SDL_EVENT_GAMEPAD_SENSOR_UPDATE ||
+            type == SDL_EVENT_WINDOW_MOUSE_ENTER || type == SDL_EVENT_WINDOW_MOUSE_LEAVE ||
+            type == SDL_EVENT_WINDOW_MOVED || type == SDL_EVENT_WINDOW_EXPOSED ||
+            type == SDL_EVENT_WINDOW_OCCLUDED;
+        /* Focus notifications do not change runner state or display timing. */
+        const bool focus = type == SDL_EVENT_WINDOW_FOCUS_GAINED ||
+            type == SDL_EVENT_WINDOW_FOCUS_LOST;
+        if (focus && g_window && pending_event.window.windowID == SDL_GetWindowID(g_window))
+          HostInput_LogStatus(type == SDL_EVENT_WINDOW_FOCUS_GAINED ? "focus-gained" : "focus-lost");
+        if (!ignored && !focus && !HostInput_TryHandleStreamEvent(&pending_event)) {
           has_event = true;
           break;
         }
@@ -620,7 +643,8 @@ void GameLoop_Run(const GameSessionConfig *config) {
         stream_done = false;
       }
       const uint64_t present_start_ns = SDL_GetTicksNS();
-      const uint64_t preparation_ns = prepare_ahead
+      const uint64_t preparation_ns = !stream.playout.interpolate && stream.playout.delay_ns
+          ? HostDisplay_NativeFrameSampleTime(present_start_ns) : prepare_ahead
           ? HostFramePlayout_PreparationTime(stream.playout, present_start_ns,
                 HostDisplay_NextPresentationDeadline())
           : present_start_ns;
@@ -634,11 +658,17 @@ void GameLoop_Run(const GameSessionConfig *config) {
       if (!stream.playout.interpolate) {
         /* No interpolation history is needed. Discard stale captures before
          * upload, not after doing their CPU/GPU preparation. Ticks still ran. */
-        while (ready > 1) { HostFrameQueue_Release(stream.queue); --ready; }
+        while (ready > 1 &&
+            (packet = HostFrameQueue_Peek(stream.queue, 1)) &&
+            HostFramePlayout_AcceptsPacket(stream.playout, packet->source_ns, target_ns)) {
+          HostFrameQueue_Release(stream.queue);
+          --ready;
+        }
       }
       while (ready && HostFramePlayout_NeedsEndpoint(
                  stream.playout, stream_endpoint_ns, target_ns) &&
-             (packet = HostFrameQueue_Read(stream.queue))) {
+             (packet = HostFrameQueue_Read(stream.queue)) &&
+             HostFramePlayout_AcceptsPacket(stream.playout, packet->source_ns, target_ns)) {
         --ready;
         if (!HostDisplay_StageOwnedFrame(&packet->frame)) {
           HostFrameQueue_RequestPause(stream.queue);
@@ -652,6 +682,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
           trace_producer_start = packet->started_ns;
           trace_producer_complete = packet->completed_ns;
           trace_input = packet->input_ns;
+          trace_producer_cpu = packet->cpu_ns;
         }
         const uint64_t now = SDL_GetTicksNS();
         if (!stream_report_ns) stream_report_ns = now;
@@ -677,7 +708,8 @@ void GameLoop_Run(const GameSessionConfig *config) {
       if (!stream_done || HostFrameQueue_Read(stream.queue)) {
         const uint64_t trace_ready_ns = pacing_trace ? SDL_GetTicksNS() : 0;
         const uint64_t sample_now_ns = SDL_GetTicksNS();
-        const uint64_t sample_ns = HostDisplay_PresentationSampleTime(sample_now_ns);
+        const uint64_t sample_ns = !stream.playout.interpolate && stream.playout.delay_ns
+            ? preparation_ns : HostDisplay_PresentationSampleTime(sample_now_ns);
         const uint64_t present_target_ns = prepare_ahead
             ? HostFramePlayout_Target(stream.playout, sample_ns) : target_ns;
         /* An early draw must not clamp an old pair just because the producer
@@ -690,6 +722,17 @@ void GameLoop_Run(const GameSessionConfig *config) {
             stream.playout, stream_endpoint_ns, present_target_ns);
         const bool presented = !await_endpoint && HostDisplay_TryRepresentFrame(
             phase, true, stream.playout.interpolate, false);
+        if (presented && !stream.playout.interpolate && stream_endpoint_ns) {
+          PerformanceMetrics_Add(kPerformanceCount_NativePresents, 1);
+          if (cadence_epoch == stream_epoch) {
+            if (stream_tick == cadence_tick)
+              PerformanceMetrics_Add(kPerformanceCount_SourceHolds, 1);
+            else if (stream_tick > cadence_tick + 1)
+              PerformanceMetrics_Add(kPerformanceCount_SourceSkips, stream_tick - cadence_tick - 1);
+          }
+          cadence_epoch = stream_epoch;
+          cadence_tick = stream_tick;
+        }
         /* Capture completion before either CSV write; a phase-trace flush
          * used to inflate the next pacing row's apparent backend duration. */
         const uint64_t trace_complete_ns = (stream_trace || pacing_trace)
@@ -707,7 +750,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
                             trace_ready_ns - trace_loop_ns > 1000000)) {
           const HostDisplayPresentTrace trace = await_endpoint
               ? (HostDisplayPresentTrace){0} : HostDisplay_LastPresentTrace();
-          fprintf(pacing_trace, "%llu,%llu,%llu,%llu,%llu,%llu,%llu,%u,%llu,%llu,%llu,%u,%u,%d,%d,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
+          fprintf(pacing_trace, "%llu,%llu,%llu,%llu,%llu,%llu,%llu,%u,%llu,%llu,%llu,%u,%u,%d,%d,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%d\n",
               (unsigned long long)trace_loop_ns,
               (unsigned long long)present_start_ns,
               (unsigned long long)trace_ready_ns,
@@ -732,7 +775,11 @@ void GameLoop_Run(const GameSessionConfig *config) {
               (unsigned long long)trace.submit_wait_ns,
               (unsigned long long)trace.backend_flush_ns,
               (unsigned long long)trace.backend_acquire_ns,
-              (unsigned long long)trace.backend_submit_ns);
+              (unsigned long long)trace.backend_submit_ns,
+              (unsigned long long)trace_producer_cpu,
+              (unsigned long long)present_target_ns,
+              (unsigned long long)sample_ns,
+              (unsigned long long)stream.interval_ns, stream.playout.interpolate);
         }
         if (trace_complete_ns) {
           const uint64_t trace_write_ns = SDL_GetTicksNS() - trace_complete_ns;
@@ -897,6 +944,10 @@ void GameLoop_Run(const GameSessionConfig *config) {
     stream.interval_ns = source_interval_ns;
     stream.playout = HostFramePlayout_Create(source_interval_ns,
         g_settings.gpu_interp_enabled, delay_permille);
+    if (!stream.playout.interpolate) {
+      if (native_delay_us >= 0) stream.playout.delay_ns = (uint64_t)native_delay_us * 1000;
+      if (g_settings.refresh_mode == kRefreshMode_Unlimited) stream.playout.delay_ns = 0;
+    }
     /* Below-source software limits intentionally coalesce several ticks into
      * one draw. Keep that established accumulator behavior; a bounded image
      * queue must not throttle the game clock down to the requested render rate. */

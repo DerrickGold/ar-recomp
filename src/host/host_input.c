@@ -650,18 +650,41 @@ bool HostInput_HandleEvent(const SDL_Event *event) {
   return true;
 }
 
-bool HostInput_TryHandleGameOnlyEvent(const SDL_Event *event) {
-  if (!event || s_paused || SettingsOverlay_IsOpen() ||
+bool HostInput_TryHandleStreamEvent(const SDL_Event *event) {
+  if (!event || s_paused || ManualReader_IsOpen() || SettingsOverlay_IsOpen() ||
       SettingsOverlay_IsCapturing() || g_settings.scene_inspector ||
       RenderComparison_FreezesGameplay()) return false;
   if (event->type == SDL_EVENT_KEY_DOWN || event->type == SDL_EVENT_KEY_UP) {
     if (IsHostHotkey(event->key.key) ||
-        InputMap_KeyHasHostBinding(event->key.scancode)) return false;
+        InputMap_KeyRequiresHandoff(event->key.scancode)) return false;
     /* Preserve normal device arbitration, suppression, repeat and key-up
      * behavior. Classification above guarantees no host callback can run. */
     return HostInput_HandleEvent(event);
   }
-  return InputMap_TryHandleGameOnlyEvent(event);
+  /* The caller guarantees an active action diorama. Do not query the live
+   * runner here. Camera reset still needs ownership because it edits settings. */
+  switch (event->type) {
+    case SDL_EVENT_MOUSE_MOTION:
+      if (Diorama_IsDragging())
+        Diorama_AdjustCamera(event->motion.xrel * Diorama_DragRadPerPx(),
+            event->motion.yrel * Diorama_DragRadPerPx(), 0.0f);
+      return true;
+    case SDL_EVENT_MOUSE_WHEEL:
+      Diorama_AdjustCamera(0.0f, 0.0f, -event->wheel.y * Diorama_ZoomStep());
+      return true;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+      if (event->button.button == SDL_BUTTON_MIDDLE) return false;
+      if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && !s_logged_mouse_down) {
+        s_logged_mouse_down = true;
+        HostInput_LogStatus("first-mouse-button-down");
+      }
+      if (event->button.button == SDL_BUTTON_RIGHT)
+        Diorama_SetDragging(event->type == SDL_EVENT_MOUSE_BUTTON_DOWN);
+      return true;
+    default: break;
+  }
+  return InputMap_TryHandleStreamEvent(event);
 }
 
 void HostInput_ApplySetting(const SettingDesc *desc) {

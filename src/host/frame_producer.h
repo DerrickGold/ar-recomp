@@ -17,5 +17,8 @@ bool HostFrameProducer_Submit(HostFrameProducerWork work, void *context);
 bool HostFrameProducer_Poll(void);
 void HostFrameProducer_Wait(void);
 void HostFrameProducer_Shutdown(void);
+/* Diagnostic CPU clock of the calling thread, not elapsed wall time. Zero
+ * means unavailable. Call on the producer around measured work only. */
+uint64_t HostFrameProducer_ThreadCpuTimeNs(void);
 
 #endif

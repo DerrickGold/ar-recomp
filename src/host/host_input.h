@@ -13,9 +13,9 @@ union SDL_Event;
  * which remain the application loop's responsibility. Device changes and
  * releases retain their existing routes even when presses are suppressed. */
 bool HostInput_HandleEvent(const union SDL_Event *event);
-/* Main-thread input-only routing during production. False leaves the event
- * queued for the ordinary handler after the game owner acknowledges pause. */
-bool HostInput_TryHandleGameOnlyEvent(const union SDL_Event *event);
+/* Main-thread routing during action-diorama production: gameplay inputs and
+ * host camera pose only. False leaves the event queued until runner pause. */
+bool HostInput_TryHandleStreamEvent(const union SDL_Event *event);
 
 void HostInput_HandleKeyboard(int scancode, bool pressed, bool repeated);
 void HostInput_ClearHeld(void);

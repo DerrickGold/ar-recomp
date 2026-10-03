@@ -140,6 +140,11 @@ static void Publish(uint64_t now) {
   for (int i = 0; i < kPerformanceCount_Count; i++)
     out->counts[i] = (double)s_window.counts[i] / s_window.frames;
   if (s_log) {
+    if (out->counts[kPerformanceCount_NativePresents] > 0)
+      fprintf(stderr, "[pipeline-cadence] native=%.3f holds=%.3f skipped-ticks=%.3f (per-present; holds depend on refresh)\n",
+          out->counts[kPerformanceCount_NativePresents],
+          out->counts[kPerformanceCount_SourceHolds],
+          out->counts[kPerformanceCount_SourceSkips]);
     fprintf(
         stderr,
         "[pipeline-perf] scene=%s host=%d map=%02x/%02x output=%dx%d frames=%" PRIu64

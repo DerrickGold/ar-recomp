@@ -1154,6 +1154,13 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_host_input_test PRIVATE SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_host_input COMMAND actraiser_host_input_test)
 
+    add_executable(actraiser_diorama_controls_test
+        tests/diorama_controls_test.c src/diorama/diorama_controls.c
+        src/diorama/diorama_camera.c)
+    target_include_directories(actraiser_diorama_controls_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_diorama_controls_test PRIVATE snesrecomp::sdk actraiser_math)
+    add_test(NAME actraiser_diorama_controls COMMAND actraiser_diorama_controls_test)
+
     add_executable(actraiser_host_audio_pause_test
         tests/host_audio_pause_test.c
         src/host/host_audio.c
