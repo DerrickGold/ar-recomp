@@ -139,6 +139,7 @@ typedef struct WorldNavigationGroundKey {
   ArRenderRectI viewport;
   uint32_t geography_serial;
   int snes_width, snes_height, visible_width, visible_x0;
+  int visible_height, visible_top;
   int light_azimuth, light_elevation, lighting;
   Sim3DDepthSurfaceFocus focus;
 } WorldNavigationGroundKey;

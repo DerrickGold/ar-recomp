@@ -34,6 +34,7 @@
 #include "sim/sim3d/present_sim3d_environment.h"
 #include "render/render_device.h"
 #include "render/render_output.h"
+#include "render/presentation_layout.h"
 #include "sim/sim3d/present_sim3d_canvas.h"
 #include "host/host_video.h"
 #include "present/presentation_textures.h"
@@ -1171,7 +1172,7 @@ static void DrawSimGroundExtension(ArRenderTexture texture,
       if (!ProjectSimTexturePoint(matrix, source, viewport, texture_x,
                                   texture_y, 0.0f, &projected))
         return;
-      float away = SimCullProximityAt(fade, texture_x, texture_y, source);
+      float away = SimCullProximityAt(fade, texture_x, texture_y);
       float extent_alpha =
           SimGroundExtentAlphaAt(fade, texture_x, texture_y);
       /* Multiplied into the vertex colour, so it darkens whatever the texture
@@ -1200,7 +1201,7 @@ static void DrawSimGroundExtension(ArRenderTexture texture,
           centre_x >= exclude->x && centre_x < exclude->x + exclude->w &&
           centre_y >= exclude->y && centre_y < exclude->y + exclude->h) {
         float away =
-            SimCullProximityAt(fade, centre_x, centre_y, source);
+            SimCullProximityAt(fade, centre_x, centre_y);
         float cull_alpha = fade ? 1.0f - away * fade->fade : 1.0f;
         float extent_alpha =
             SimGroundExtentAlphaAt(fade, centre_x, centre_y);
@@ -1282,7 +1283,7 @@ static void DrawSimCullMarkers(const FrameSlot *slot, ArRenderRectI source,
      * underlay_screen_x0 is the column holding SNES x = 0. */
     float texture_x = (float)slot->sim.underlay_screen_x0 +
         (float)record->anchor_x - 16.0f;
-    float texture_y = (float)source.y + (float)record->anchor_y - 17.0f;
+    float texture_y = (float)record->anchor_y - 17.0f;
     /* Placed where the renderer draws the record, not where the record sits.
      * The cover above was timed off the unlifted anchor because that is what
      * the emitter culls on; putting the cover there too would leave it under
@@ -1714,7 +1715,9 @@ static PresentationOutcome RenderSimProfile(
         ((enabled_planes & (1u << kSim3DPlane_Bg1High)) &&
          ArRenderTexture_IsValid(
              Sim3DTextures_Layer(kSim3DPlane_Bg1High))));
-    ArRenderRectF live_ground = PortableRect(source);
+    ArRenderRectF live_ground = {
+      source.x, 0, source.w, slot->snes_height,
+    };
     Sim3DPerformanceScope performance =
         Sim3DPerformance_Begin(kSim3DPerformance_Terrain);
     DrawSimTownCanvas(slot, source, viewport, matrix, cull_haze, lift_inset,
@@ -1723,8 +1726,13 @@ static PresentationOutcome RenderSimProfile(
     Sim3DPerformance_End(performance);
   }
 
-  const ArRenderRectF portable_source = PortableRect(source);
-  const ArRenderRectF portable_destination = PortableRect(viewport);
+  /* The projection may show extra rows, but captured planes still contain
+   * only the native scanout. Keep their UVs and UI inside that real capture. */
+  const ArRenderRectF portable_source = {
+    source.x, 0, source.w, slot->snes_height,
+  };
+  const ArRenderRectF portable_destination = ArPresentationLayout_CaptureDestination(
+      viewport, source.h, -source.y, slot->snes_height, 0);
   float town_extent_x0 =
       (float)slot->sim.underlay_screen_x0 - (float)slot->sim.camera_x;
   float town_extent_y0 = -(float)slot->sim.camera_y;
@@ -1839,7 +1847,7 @@ static PresentationOutcome RenderSimProfile(
       if (!background_voxels) {
         Sim3DPerformanceScope performance =
             Sim3DPerformance_Begin(kSim3DPerformance_Terrain);
-        DrawSimGroundPlane(texture, source, viewport, matrix,
+        DrawSimGroundPlane(texture, source, slot->snes_height, viewport, matrix,
                            (fade_ground_planes || underlay)
                                ? &ground_fade : NULL);
         Sim3DPerformance_End(performance);
@@ -2009,7 +2017,7 @@ PresentationOutcome PresentSim3D(const FrameSlot *slot) {
 
   const int aspect_width = slot->visible_width *
       (slot->pixel_aspect == kPixelAspect_Crt43 ? 7 : 1);
-  const int aspect_height = slot->snes_height *
+  const int aspect_height = FrameSlot_VisibleHeight(slot) *
       (slot->pixel_aspect == kPixelAspect_Crt43 ? 6 : 1);
   const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
   ArRenderOutputFrame output_frame;
@@ -2023,7 +2031,8 @@ PresentationOutcome PresentSim3D(const FrameSlot *slot) {
     0, 0, output_frame.viewport.w, output_frame.viewport.h,
   };
   ArRenderRectI source = {
-    slot->visible_x0, 0, slot->visible_width, slot->snes_height,
+    slot->visible_x0, -slot->visible_top,
+    slot->visible_width, FrameSlot_VisibleHeight(slot),
   };
 
   SimBackgroundCraterAnchor crater={0};

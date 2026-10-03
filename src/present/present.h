@@ -352,6 +352,21 @@ static inline int FrameSlot_CaptureHeight(const FrameSlot *slot) {
   return slot->snes_height + slot->ws_extra_top + slot->ws_extra_bottom;
 }
 
+/* Project original game coordinates into the visible scene. Unlike anchored
+ * status HUD groups, dialogue and world-map labels stay in the native band.
+ * Use the captured crop so asymmetric source rectangles also remain aligned. */
+static inline ArRenderRectF FrameSlot_ProjectNativeRect(
+    const FrameSlot *slot, ArRenderRectI viewport, ArRenderRectF native) {
+  const double sx = (double)viewport.w / slot->visible_width;
+  const double sy = (double)viewport.h / FrameSlot_VisibleHeight(slot);
+  const double native_x0 = (slot->snes_width - kFrameSlotAuthenticWidth) * 0.5;
+  return (ArRenderRectF){
+    viewport.x + (native_x0 - slot->visible_x0 + native.x) * sx,
+    viewport.y + (slot->visible_top + native.y) * sy,
+    native.w * sx, native.h * sy,
+  };
+}
+
 /* Sole writer, implemented in frame_slot.c. Call on the game thread after
  * RtlDrawPpuFrame. Pass that frame's annotated simulation data when available;
  * NULL captures current metadata for a screenshot or paused redraw. The input

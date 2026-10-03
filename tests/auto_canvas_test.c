@@ -3,6 +3,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include "support/test_assert.h"
+#include "actraiser_game.h"
 #include "present/display_geometry.h"
 #include "present/present.h"
 #include "render/presentation_layout.h"
@@ -33,6 +34,63 @@ static void TestGeometry(void) {
   assert(!DisplayGeometry_ResolveAutoCanvas(1240,-1,true,&kept));
   assert(kept.extra_columns == 43 && kept.extra_rows == 0);
   assert(!DisplayGeometry_ResolveAutoCanvas(1,1,true,NULL));
+}
+
+static void TestSceneCanvasLimits(void) {
+  const ActRaiserAutoCanvas requests[] = {{43,0}, {0,37}, {0,64}, {0,0}};
+  for (unsigned i=0; i<sizeof(requests)/sizeof(requests[0]); ++i) {
+    const ActRaiserAutoCanvas requested = requests[i];
+    /* Every action region and town shares the same capability contract. */
+    for (int group=kActRaiserActionMapGroup_First;
+         group<=kActRaiserActionMapGroup_Last; ++group) {
+      const ActRaiserAutoCanvas result = DisplayGeometry_ConstrainAutoCanvas(
+          requested,group,1,1,false);
+      assert(result.extra_columns==requested.extra_columns);
+      assert(result.extra_rows==requested.extra_rows);
+    }
+    for (int map=kActRaiserNonActionMap_Title;
+         map<=kActRaiserNonActionMap_WorldMap+1; ++map) {
+      for (int projected=0; projected<=1; ++projected) {
+        const ActRaiserAutoCanvas result = DisplayGeometry_ConstrainAutoCanvas(
+            requested,kActRaiserMapGroup_NonAction,map,7,projected);
+        const bool town_or_world =
+            (map>=kActRaiserSimulationTown_First && map<=kActRaiserSimulationTown_Last) ||
+            map==kActRaiserNonActionMap_WorldMap;
+        const bool wide = town_or_world || map==kActRaiserNonActionMap_SkyPalace;
+        assert(result.extra_columns==(wide ? requested.extra_columns : 0));
+        assert(result.extra_rows==(town_or_world && projected ? requested.extra_rows : 0));
+      }
+    }
+    const int unavailable_modes[] = {-1,7};
+    for (unsigned mode=0; mode<2; ++mode) {
+      const ActRaiserAutoCanvas result = DisplayGeometry_ConstrainAutoCanvas(
+          requested,kActRaiserMapGroup_Fillmore,1,unavailable_modes[mode],false);
+      assert(!result.extra_columns && !result.extra_rows);
+    }
+    const ActRaiserAutoCanvas ending = DisplayGeometry_ConstrainAutoCanvas(
+        requested,kActRaiserMapGroup_Ending,1,1,true);
+    assert(!ending.extra_columns && !ending.extra_rows);
+  }
+}
+
+static void TestNativeOverlayPlacement(void) {
+  FrameSlot frame = {.snes_width=496,.snes_height=224,
+      .visible_width=256,.visible_x0=120};
+  const int rows[] = {0,16,37,64,0};
+  for (unsigned i=0; i<sizeof(rows)/sizeof(rows[0]); ++i) {
+    frame.visible_top=rows[i];
+    frame.visible_height=224+2*rows[i];
+    const ArRenderRectI view={11,17,896,frame.visible_height*3};
+    const ArRenderRectF rect=FrameSlot_ProjectNativeRect(
+        &frame,view,(ArRenderRectF){32,40,128,24});
+    assert(rect.x==123 && rect.y==137+rows[i]*3);
+    assert(rect.w==448 && rect.h==72);
+  }
+  /* Crop offsets, rather than an assumed centred viewport, own placement. */
+  frame.visible_x0+=8;
+  const ArRenderRectF shifted=FrameSlot_ProjectNativeRect(
+      &frame,(ArRenderRectI){11,17,896,672},(ArRenderRectF){32,40,128,24});
+  assert(shifted.x==95 && shifted.y==137);
 }
 
 static uint32_t Pixel(SDL_Surface *surface, int x, int y) {
@@ -101,6 +159,8 @@ static void TestCapturePlacement(void) {
 
 int main(void) {
   TestGeometry();
+  TestSceneCanvasLimits();
+  TestNativeOverlayPlacement();
   assert(SDL_Init(0));
   TestCapturePlacement();
   SDL_Quit();

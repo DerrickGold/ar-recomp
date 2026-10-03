@@ -473,9 +473,10 @@ void ActRaiser_ApplyWidescreenPolicy(void) {
    * BG3 rows 0-3 are extracted into a transparent surface, then the host
    * scales and anchors the status groups after the framebuffer is presented.
    * Keeping this policy ahead of the no-widescreen-budget return is what makes
-   * HUD scale work in authentic 4:3 as well as 16:x. Wide Raw deliberately
-   * remains the unsplit comparison mode. */
-  if (!survey && g_settings.display_mode != kDisplayMode_WideRaw) {
+   * HUD scale work in authentic 4:3 as well as 16:x. With a fixed aspect ratio,
+   * Wide Raw remains the unsplit comparison mode. Auto always splits the HUD. */
+  if (!survey && (g_settings.extended_aspect == kScreenAspect_Auto ||
+                  g_settings.display_mode != kDisplayMode_WideRaw)) {
     if (ActRaiser_IsActionMapGroup(map_group)) {
       /* y=0-19 ACT/TIME/SCORE; y=20-27 player; y=28-39 enemy. */
       hud_split_height = kActRaiserActionHudHeight;
@@ -619,7 +620,8 @@ void ActRaiser_ApplyWidescreenPolicy(void) {
          * same-binary authentic baseline for town regression captures. BG2 is
          * the bounded dialog/overlay plane and remains center-clamped. The
          * separate ADAD/AE6F and B473 ports use this same $01-$06 range. */
-        wide = g_settings.ws_sim;
+        wide = g_settings.extended_aspect == kScreenAspect_Auto ||
+            g_settings.ws_sim;
         bounded_world_margins = wide;
         canvas_layer = kActRaiserPpuLayer_Bg1;
         clamp = kActRaiserBgLayerMask_Bg2;
@@ -722,17 +724,6 @@ void ActRaiser_ApplyWidescreenPolicy(void) {
     repeat = 0;
     bounded_world_margins = 0;
     bg_presentation = (ActionBgPresentationPolicy){ 0 };
-    bg_hle_allowed = 0;
-    project_final_bg_policy = true;
-  }
-
-  /* Auto applies only to action. Do not widen classic towns or Mode 7. */
-  if (g_settings.extended_aspect == kScreenAspect_Auto &&
-      !ActRaiser_IsActionMapGroup(map_group)) {
-    wide = 0;
-    clamp = mirror = repeat = 0;
-    bounded_world_margins = 0;
-    bg_presentation = (ActionBgPresentationPolicy){0};
     bg_hle_allowed = 0;
     project_final_bg_policy = true;
   }

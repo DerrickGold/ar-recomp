@@ -786,6 +786,8 @@ static WorldNavigationGroundKey WorldNavigationGroundKeyFor(
   key.snes_height = slot->snes_height;
   key.visible_width = slot->visible_width;
   key.visible_x0 = slot->visible_x0;
+  key.visible_height = FrameSlot_VisibleHeight(slot);
+  key.visible_top = slot->visible_top;
   key.light_azimuth = slot->sim.light_azimuth_deg;
   key.light_elevation = slot->sim.light_elevation_deg;
   key.lighting = slot->sim.world_navigation_lighting;

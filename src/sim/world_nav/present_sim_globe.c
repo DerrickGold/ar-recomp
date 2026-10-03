@@ -378,7 +378,7 @@ static bool AppendSimGlobeSurfaces(const FrameSlot *slot, ArRenderRectI source,
      * follows its smaller live sprite window. Both are draw-time materials,
      * never reasons to rebuild resident terrain/model sources on a pan. */
     const Sim3DDepthSurfaceFocus visibility =
-        PresentSimGlobeFocus_ResolveVisibility(&map, &slot->sim, source);
+        PresentSimGlobeFocus_ResolveVisibility(&map, &slot->sim);
     ok = PresentSimGlobeTerrain_Append(
              projection->matrix, map.radius,
              SimBackgroundVoxelRenderer_GroundTexture(slot->sim.background_voxel_serial),

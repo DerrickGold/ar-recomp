@@ -1088,6 +1088,46 @@ static void TestAspectFitAndLocalGeometry(void) {
   assert(backend.ground_vertices[3].position.y < backend.ground_vertices[1].position.y);
 }
 
+static void TestExpandedNavigationCanvas(void) {
+  const struct { int width, height, columns, rows, pixel_aspect; } cases[] = {
+    {1280,720,43,0,kPixelAspect_Crt43},
+    {1280,800,26,0,kPixelAspect_Crt43},
+    {900,900,0,37,kPixelAspect_Crt43},
+    {900,900,0,16,kPixelAspect_Square},
+  };
+  FakeBackend backend = {0};
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend,
+                             (ArRenderCapabilities){0}));
+  FrameSlot slot = WorldNavigationSlot();
+  slot.extended_aspect = kScreenAspect_Auto;
+  UploadWorldNavigationComposition(&slot);
+  for (unsigned i=0; i<sizeof(cases)/sizeof(cases[0]); ++i) {
+    backend.output_width = cases[i].width;
+    backend.output_height = cases[i].height;
+    slot.pixel_aspect = cases[i].pixel_aspect;
+    slot.snes_width = slot.visible_width = 256 + 2*cases[i].columns;
+    slot.visible_top = cases[i].rows;
+    slot.visible_height = 224 + 2*cases[i].rows;
+    assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
+    const ArRenderRectI view = backend.viewport;
+    assert(abs(view.w-cases[i].width) <= 4);
+    assert(abs(view.h-cases[i].height) <= 4);
+    const ArRenderPointF centre = WorldNavigationComposition_ProjectPoint(
+        &slot, view, 128, 112);
+    assert(fabsf(centre.x - (view.x + view.w*.5f)) < .001f);
+    assert(fabsf(centre.y - (view.y + view.h*.5f)) < .001f);
+    const ArRenderPointF corner = WorldNavigationComposition_ProjectPoint(
+        &slot, view, 0, 0);
+    const float sx = (centre.x-corner.x)/128;
+    const float sy = (centre.y-corner.y)/112;
+    const float par = slot.pixel_aspect == kPixelAspect_Crt43 ? 7.0f/6 : 1;
+    assert(fabsf(sx/sy-par) < .005f);
+    assert(slot.snes_height == 224); /* No fabricated Mode 7 scanout rows. */
+  }
+  PresentWorldNav_ResetResources();
+  ArRenderDevice_Reset(&g_render_device);
+}
+
 static void TestTownReliefRegistration(void) {
   const float datum_offset[kSimTownCount] = {0, 3, 4, 4, 0, 4};
   for (uint8_t town = 1; town <= kSimTownCount; town++) {
@@ -3005,6 +3045,7 @@ int main(void) {
   assert(rom && SimWorldMap_Init(rom, 0x100000));
   free(rom);
   TestAspectFitAndLocalGeometry();
+  TestExpandedNavigationCanvas();
   TestNativeNavigationZoom();
   TestRejectedNavigationModelsStayCached();
   TestCacheBudgetRecovery();

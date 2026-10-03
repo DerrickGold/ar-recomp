@@ -402,14 +402,18 @@ Screen ratio offers 4:3, 16:9, 16:10, Stretch, and Auto. Ratio, pixel aspect, re
 renderer path, render scale, window mode, stretching, HUD/menu scale, and
 widescreen policy changes apply live.
 
-**Auto** fits action stages to the window's drawable aspect ratio, respecting
-the selected CRT or square pixel aspect. Wider windows reveal extra columns;
-taller windows reveal extra rows, up to 120 columns or 64 rows per side.
+**Auto** fits action stages, world navigation and simulation towns to the
+window's drawable aspect ratio, respecting the selected CRT or square pixel
+aspect. Wider windows reveal extra columns; taller windows reveal extra rows,
+up to 120 columns or 64 rows per side.
 Resizing recalculates the view, including while paused. The status HUD stays
 at the top; title and pause cards stay aligned with the original game frame.
-Unavailable room rows remain blank instead of stretching the level. Towns,
-menus and Mode 7 retain their native canvas. Auto works with flat and 3D action
-rendering; a manually adjusted 3D camera still controls its own zoom and pose.
+Unavailable room rows remain blank instead of stretching the level. Enhanced
+3D towns and world navigation project extra rows from their host-owned worlds;
+classic flat towns, Mode 7 and the Sky Palace extend horizontally while keeping
+their native height. Title screens and cutscenes retain their original framing.
+Auto works with flat and 3D action rendering; a manually adjusted 3D camera
+still controls its own zoom and pose.
 Returning to a fixed ratio restores its saved render-profile settings.
 
 *Render scale* is the internal render/upscale multiple of the SNES output

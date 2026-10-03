@@ -27,6 +27,12 @@ typedef struct ActRaiserAutoCanvas {
 bool DisplayGeometry_ResolveAutoCanvas(
     int drawable_width, int drawable_height, bool crt_pixel_aspect,
     ActRaiserAutoCanvas *canvas);
+/* Restrict an already bounded Auto budget to what the current scene can draw.
+ * bg_mode=-1 means unavailable. projected_sim uses the final presentation
+ * decision, including capture fallback; classic scenes never add PPU rows. */
+ActRaiserAutoCanvas DisplayGeometry_ConstrainAutoCanvas(
+    ActRaiserAutoCanvas requested, int map_group, int map_number, int bg_mode,
+    bool projected_sim);
 void DisplayGeometry_SetAutoVerticalBudget(int budget);
 
 /* Consumers receive a read-only process-lifetime view. Horizontal mutation is

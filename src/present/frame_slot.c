@@ -141,17 +141,21 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   dst->ignore_aspect_ratio = Settings_IgnoreAspectRatio();
   dst->visible_x0 = Settings_VisibleX0();
   dst->visible_width = Settings_VisibleWidth();
-  const bool automatic = dst->extended_aspect == kScreenAspect_Auto;
-  const bool auto_action_canvas = automatic && have_ppu_view &&
-      ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]) &&
-      ppu_view.state.bg_mode != 7;
-  dst->visible_top = auto_action_canvas
-      ? g_actraiser_display_geometry->auto_vertical_budget : 0;
-  dst->visible_height = dst->snes_height + 2 * dst->visible_top;
-  if (automatic && !auto_action_canvas) {
-    dst->visible_x0 = dst->ws_extra;
-    dst->visible_width = kFrameSlotAuthenticWidth;
+  if (dst->extended_aspect == kScreenAspect_Auto) {
+    const SimViewKind sim_view = Sim3D_PresentationDecision(&dst->sim).view;
+    const bool projected_sim = sim_view == kSimView_WorldNavigation ||
+        (sim_view == kSimView_Enhanced &&
+         (dst->sim.effective_features & kSimFeature_GroundProjection));
+    const ActRaiserAutoCanvas canvas = DisplayGeometry_ConstrainAutoCanvas(
+        (ActRaiserAutoCanvas){g_ws_display_extra,
+            g_actraiser_display_geometry->auto_vertical_budget},
+        g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
+        have_ppu_view ? ppu_view.state.bg_mode : -1, projected_sim);
+    dst->visible_x0 = dst->ws_extra - canvas.extra_columns;
+    dst->visible_width = kFrameSlotAuthenticWidth + 2 * canvas.extra_columns;
+    dst->visible_top = canvas.extra_rows;
   }
+  dst->visible_height = dst->snes_height + 2 * dst->visible_top;
   /* Latched, not read from g_ppu, for the same reason extra_left_cur is. */
   ActRaiser_LiveVerticalMargins(
       &dst->ws_extra_top, &dst->ws_extra_bottom);

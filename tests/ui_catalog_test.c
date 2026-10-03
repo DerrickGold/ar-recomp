@@ -25,7 +25,7 @@ int main(void) {
     CHECK(strcmp(ArUiCatalog_Text((ArUiLocale)locale,
         "setting.extended_aspect.value.4","missing"),"missing"));
     CHECK(strstr(ArUiCatalog_Text((ArUiLocale)locale,
-        "setting.extended_aspect.help",NULL),"Mode 7"));
+        "setting.extended_aspect.help",NULL),"3D"));
   }
   CHECK(!strcmp(ArUiCatalog_Text(kArUiLocale_English,
       "setting.extended_aspect.value.4",NULL),"Auto"));

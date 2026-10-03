@@ -1150,6 +1150,10 @@ static void TestMutationApi(void) {
    * left to select between and the key must no longer resolve. */
   CHECK(Settings_Find("new_renderer") == NULL);
   const SettingDesc *aspect = Settings_Find("extended_aspect");
+  CHECK(Settings_IsMenuVisible(aspect));
+  CHECK(aspect->enum_count == kScreenAspect_Count);
+  CHECK(aspect->maxval == kScreenAspect_Auto);
+  CHECK(!strcmp(aspect->enum_labels[kScreenAspect_Auto], "Auto"));
   CHECK(Settings_SetText(aspect, "16:9") == kSettingChange_Applied);
   Settings_FormatValue(aspect, value, sizeof(value));
   CHECK(!strcmp(value, "16:9"));

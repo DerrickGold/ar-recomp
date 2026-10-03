@@ -944,7 +944,7 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
 
   const int aspect_width = slot->visible_width *
       (slot->pixel_aspect == kPixelAspect_Crt43 ? 7 : 1);
-  const int aspect_height = slot->snes_height *
+  const int aspect_height = FrameSlot_VisibleHeight(slot) *
       (slot->pixel_aspect == kPixelAspect_Crt43 ? 6 : 1);
   const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
   ArRenderOutputFrame output_frame;
