@@ -473,13 +473,17 @@ typedef struct ActionNativeMembers {
   ActionNativeMember records[kActionNativeMemberMax];
 } ActionNativeMembers;
 
-/* Small owned samples survive projectile retirement; positions never follow a
- * recycled actor slot. Oldest puffs are discarded if the cosmetic pool fills. */
+/* Small owned samples normally survive projectile retirement. A stopped source
+ * freezes its own trail until hidden or retired; generations prevent slot reuse
+ * from inheriting it. Oldest puffs are discarded if the cosmetic pool fills. */
 typedef struct ActionFireballSmokePuff {
   uint32_t seed;
+  uint32_t source_generation;
+  uint16_t source_address;
   int16_t x, y;
   uint16_t age;
   uint8_t priority;
+  uint8_t frozen;
 } ActionFireballSmokePuff;
 
 typedef struct ActionFireballSmoke {

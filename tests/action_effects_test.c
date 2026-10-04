@@ -3606,11 +3606,8 @@ static void TestFillmoreStatueOrbs(void) {
   }
 }
 
-static void TestBloodpoolAct1BossFireballs(void) {
-  static uint8_t ram[kActRaiserWramSize], unchanged[kActRaiserWramSize];
-  static ActionSceneEffectFrame frame;
-  ActionEffectObserver observer = {0};
-  memset(ram, 0, sizeof(ram));
+static void SeedBloodpoolAct1BossFireball(uint8_t *ram) {
+  memset(ram, 0, kActRaiserWramSize);
   ram[0x18] = 2;
   ram[0x19] = 1;
   const unsigned parent = 0x0CA0, child = 0x0CE0;
@@ -3631,6 +3628,18 @@ static void TestBloodpoolAct1BossFireballs(void) {
   Write16(ram, child + 0x1A, 1);
   Write16(ram, child + 0x32, 0xB786);
   Write16(ram, child + 0x3A, parent);
+  Write16(ram, child + 6, (uint16_t)-4);
+  Write16(ram, child + 0x1E, 0xB82D);
+  Write16(ram, child + 0x20, 0x5207);
+  Write16(ram, child + 0x22, 6);
+}
+
+static void TestBloodpoolAct1BossFireballs(void) {
+  static uint8_t ram[kActRaiserWramSize], unchanged[kActRaiserWramSize];
+  static ActionSceneEffectFrame frame;
+  ActionEffectObserver observer = {0};
+  SeedBloodpoolAct1BossFireball(ram);
+  const unsigned parent = 0x0CA0, child = 0x0CE0;
   const unsigned resumes[] = {0xB82D, 0xB841, 0xB867, 0xB87B};
   for (unsigned r = 0; r < 4; ++r) {
     Write16(ram, child + 0x1E, resumes[r]);
@@ -3671,10 +3680,10 @@ static void TestBloodpoolAct1BossFireballs(void) {
   /* Formation, death debris, stale parents and cross-room lookalikes fail closed. */
   const unsigned addresses[] = {child, child + 0x12, child + 0x16, child + 0x18,
       child + 0x1A, child + 0x1E, child + 0x20, child + 0x22, child + 0x28,
-      child + 0x32, child + 0x3A, parent, parent + 0x16, parent + 0x18,
-      parent + 0x20, parent + 0x30, parent + 0x32, parent + 0x3A, 0x18};
+      child + 0x32, child + 0x3A, parent + 0x16, parent + 0x18,
+      parent + 0x32, parent + 0x3A, 0x18};
   const uint16_t values[] = {0x4000, 0xB8FB, 0x4000, 7, 0, 0xB8DE, 0x522D, 8,
-      0x8000, 0xBD76, 0x0CA1, 0x4000, 0x4000, 7, 0, 0, 0xBDFF, child, 0x0802};
+      0x8000, 0xBD76, 0x0CA1, 0x4000, 7, 0xBDFF, child, 0x0802};
   for (unsigned i = 0; i < sizeof(addresses) / sizeof(addresses[0]); ++i) {
     memcpy(unchanged, ram, sizeof(ram));
     Write16(ram, addresses[i], values[i]);
@@ -3768,6 +3777,106 @@ static void TestBloodpoolAct1BossFireballs(void) {
   CHECK(frame.fireball_smoke.count == 0);
 }
 
+static void TestBloodpoolFireballDeathLifetime(void) {
+  static uint8_t ram[kActRaiserWramSize], unchanged[kActRaiserWramSize];
+  static ActionSceneEffectFrame frame;
+  ActionEffectObserver observer = {0};
+  const unsigned parent = 0x0CA0, child = 0x0CE0;
+  SeedBloodpoolAct1BossFireball(ram);
+  for (unsigned tick = 0; tick <= 20; ++tick) {
+    Write16(ram, child + 2, 3900 - tick * 4);
+    ActionSceneEffects_CaptureFrame(&observer, &frame, ram, sizeof(ram), 1);
+  }
+  CHECK(frame.effect_count == 1 && frame.fireball_smoke.count == 6);
+  const ActionEffectInstance moving = frame.effects[0];
+  const ActionFireballSmoke trail = frame.fireball_smoke;
+
+  /* A lethal hit changes the root to $A593, HP0, flags $0032. The child
+   * remains its own live projectile and may keep moving during the flash. */
+  Write16(ram, parent + 0x12, 0xA593);
+  Write16(ram, parent + 0x30, 0x0032);
+  Write16(ram, child + 2, 3816);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, ram, sizeof(ram), 1);
+  CHECK(frame.effect_count == 1 && frame.visible_count == 1);
+  CHECK(frame.effects[0].generation == moving.generation);
+  CHECK(frame.effects[0].age_ticks == moving.age_ticks + 1);
+  CHECK(frame.fireball_smoke.puffs[0].age == trail.puffs[0].age + 1);
+  const ActionEffectInstance stopped = frame.effects[0];
+  const ActionFireballSmoke stopped_trail = frame.fireball_smoke;
+
+  /* Freeze on actual lack of motion, even if native velocity stays nonzero.
+   * Clearing velocity later must not rotate or restart the attached wake. */
+  for (unsigned tick = 0; tick < 180; ++tick) {
+    if (tick == 40) Write16(ram, child + 6, 0);
+    if (tick == 80) {
+      Write16(ram, parent, 0x4000);
+      Write16(ram, parent + 0x20, 0);
+    }
+    memcpy(unchanged, ram, sizeof(ram));
+    ActionSceneEffects_CaptureFrame(&observer, &frame, ram, sizeof(ram), 1);
+    CHECK(!memcmp(ram, unchanged, sizeof(ram)));
+    CHECK(frame.effect_count == 1 && frame.visible_count == 1);
+    CHECK(!memcmp(&frame.effects[0], &stopped, sizeof(stopped)));
+    CHECK(frame.fireball_smoke.count == stopped_trail.count);
+    for (unsigned i = 0; i < frame.fireball_smoke.count; ++i) {
+      CHECK(frame.fireball_smoke.puffs[i].frozen);
+      CHECK(frame.fireball_smoke.puffs[i].age == stopped_trail.puffs[i].age);
+      CHECK(frame.fireball_smoke.puffs[i].seed == stopped_trail.puffs[i].seed);
+    }
+  }
+  /* A fresh capture during death still recognizes the child's own artwork. */
+  ActionEffectObserver fresh = {0};
+  ActionSceneEffects_CaptureFrame(&fresh, &frame, ram, sizeof(ram), 0);
+  CHECK(frame.effect_count == 1 && frame.visible_count == 1);
+
+  /* A resumed source advances normally instead of staying latched frozen. */
+  Write16(ram, child + 6, (uint16_t)-4);
+  Write16(ram, child + 2, 3812);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, ram, sizeof(ram), 1);
+  CHECK(frame.effects[0].age_ticks == stopped.age_ticks + 1);
+  CHECK(!frame.fireball_smoke.puffs[0].frozen);
+  CHECK(frame.fireball_smoke.puffs[0].age == stopped_trail.puffs[0].age + 1);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, ram, sizeof(ram), 1);
+  Write16(ram, child, 0x4000);
+  ActionSceneEffects_CaptureFrame(&observer, &frame, ram, sizeof(ram), 1);
+  CHECK(frame.effect_count == 0 && frame.fireball_smoke.count == 0);
+
+  /* Smoke follows each generation independently: a stopped shot cannot
+   * freeze a moving neighbour, and hidden/recycled sources release it. */
+  for (unsigned removal = 0; removal < 3; ++removal) {
+    SeedBloodpoolAct1BossFireball(ram);
+    ActionEffectObserver_Reset(&observer);
+    const unsigned other = child + 0x40;
+    memcpy(ram + other, ram + child, 0x40);
+    for (unsigned tick = 0; tick <= 12; ++tick) {
+      Write16(ram, child + 2, 3900 - tick * 4);
+      Write16(ram, other + 2, 3800 - tick * 4);
+      ActionSceneEffects_CaptureFrame(&observer, &frame, ram, sizeof(ram), 1);
+    }
+    const uint32_t generation = frame.effects[0].generation;
+    for (unsigned tick = 1; tick <= 8; ++tick) {
+      Write16(ram, other + 2, 3752 - tick * 4);
+      ActionSceneEffects_CaptureFrame(&observer, &frame, ram, sizeof(ram), 1);
+    }
+    CHECK(frame.effects[0].age_ticks == 12 && frame.effects[1].age_ticks == 20);
+    unsigned frozen_count = 0;
+    for (unsigned i = 0; i < frame.fireball_smoke.count; ++i) {
+      const ActionFireballSmokePuff *puff = &frame.fireball_smoke.puffs[i];
+      CHECK(puff->frozen == (puff->source_generation == generation));
+      frozen_count += puff->frozen;
+    }
+    CHECK(frozen_count == 4);
+    if (removal == 0) Write16(ram, child, 0x2000); /* Native no-draw. */
+    if (removal == 1) Write16(ram, child + 0x30, 0x0400);
+    if (removal == 2) Write16(ram, child + 2, 1000); /* Same-slot reuse. */
+    Write16(ram, other + 2, 3716);
+    ActionSceneEffects_CaptureFrame(&observer, &frame, ram, sizeof(ram), 1);
+    for (unsigned i = 0; i < frame.fireball_smoke.count; ++i)
+      CHECK(frame.fireball_smoke.puffs[i].source_generation != generation);
+    CHECK(frame.fireball_smoke.count > 0);
+  }
+}
+
 static void TestGenericActorFacts(void) {
   static uint8_t ram[kActRaiserWramSize],unchanged[kActRaiserWramSize];
   static ActionSceneEffectFrame frame;static ActionEffectObserver observer;
@@ -3789,6 +3898,7 @@ static void TestGenericActorFacts(void) {
 
 int main(void) {
   TestBloodpoolAct1BossFireballs();
+  TestBloodpoolFireballDeathLifetime();
   TestGenericActorFacts();
   TestBloodpoolEnvironmentCapture();
   TestCastleEnvironmentCapture();

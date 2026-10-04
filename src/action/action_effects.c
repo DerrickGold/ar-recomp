@@ -469,13 +469,14 @@ static bool SceneTrackDiscontinuous(const ActionEffectObserverTrack *track,
   return AbsInt(dx) > limit_x || AbsInt(dy) > limit_y;
 }
 
-static void BeginOrAdvanceSceneTrack(ActionEffectObserver *observer,
+static bool BeginOrAdvanceSceneTrack(ActionEffectObserver *observer,
                                      ActionEffectObserverTrack *track,
                                      const ActionObjectSnapshot *object,
                                      uint8_t kind, uint8_t phase,
                                      unsigned elapsed_ticks,
+                                     bool freeze_when_stationary,
                                      ActionEffectInstance *effect) {
-  if (!observer || !track || !object || !effect) return;
+  if (!observer || !track || !object || !effect) return false;
   /* Resume/source are stable for the original projectile and trap families.
    * Fireball's handler and parent are stable too and strengthen its identity; trap
    * lightning omits it because one live bolt transitions between $BD36 and
@@ -510,13 +511,26 @@ static void BeginOrAdvanceSceneTrack(ActionEffectObserver *observer,
   if (SceneTrackDiscontinuous(track, object, kind, continuity_key,
                               elapsed_ticks))
     memset(track, 0, sizeof(*track));
-  BeginOrAdvanceTrack(observer, track, kind, phase, 0, elapsed_ticks, effect);
+  const bool frozen = freeze_when_stationary && track->active &&
+      track->kind == kind && track->continuity_valid &&
+      track->continuity_key == continuity_key &&
+      track->last_world_x == object->world_x &&
+      track->last_world_y == object->world_y;
+  if (frozen && !effect->velocity_x && !effect->velocity_y) {
+    /* A stopped native projectile can retain its velocity or clear it. Keep
+     * the last heading so its frozen light and ember wake do not turn around. */
+    effect->velocity_x = track->last_velocity_x;
+    effect->velocity_y = track->last_velocity_y;
+  }
+  BeginOrAdvanceTrack(observer, track, kind, phase, 0,
+                      frozen ? 0 : elapsed_ticks, effect);
   track->continuity_key = continuity_key;
   track->last_world_x = object->world_x;
   track->last_world_y = object->world_y;
-  track->last_velocity_x = object->velocity_x;
-  track->last_velocity_y = object->velocity_y;
+  track->last_velocity_x = effect->velocity_x;
+  track->last_velocity_y = effect->velocity_y;
   track->continuity_valid = 1;
+  return frozen;
 }
 
 void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
@@ -813,7 +827,8 @@ static bool IsBloodpoolAct1BossFireball(const ActionObjectSnapshot *object,
   /* $B8E9 initializes a cloned boss record as a stationary state-0 flame. $B90D owns
    * launched state-1 fireballs; each retains one of four spawn call sites.
    * The body and death fragments share $B786/$5000, so require the flight
-   * artwork and a live root boss before adding the directional fire trail. */
+   * artwork and retained root identity. The parent's boss flag, status and
+   * composition change during death while its launched shots still exist. */
   if (object->source_descriptor != kBloodpoolAct1BossSource ||
       object->handler != kBloodpoolAct1BossFireballHandler ||
       object->animation_address != kBossAnimationAddress ||
@@ -828,20 +843,37 @@ static bool IsBloodpoolAct1BossFireball(const ActionObjectSnapshot *object,
     return false;
   ActionObjectSnapshot parent;
   return ReadActionObject(wram, size, object->spawner_backlink, &parent) &&
-      !(parent.status & kActRaiserObjectStatus_InactiveMask) &&
-      (parent.flags & 0x4000u) && parent.composition &&
       !parent.spawner_backlink &&
       parent.source_descriptor == kBloodpoolAct1BossSource &&
       parent.animation_address == kBossAnimationAddress &&
       parent.animation_bank == kSceneAnimationBank;
 }
 
-static void AgeFireballSmoke(ActionFireballSmoke *smoke, unsigned ticks) {
+enum { kFireballSmokeSourceAbsent, kFireballSmokeSourceMoving, kFireballSmokeSourceFrozen };
+
+static void AgeFireballSmoke(ActionFireballSmoke *smoke,
+                             const ActionEffectObserver *observer,
+                             const uint8_t *sources, unsigned ticks) {
   unsigned count = 0;
   for (unsigned i = 0; i < smoke->count; ++i) {
     ActionFireballSmokePuff puff = smoke->puffs[i];
-    if (ticks >= kActionFireballSmokeLifetime - puff.age) continue;
-    puff.age += ticks;
+    unsigned source = kFireballSmokeSourceAbsent;
+    if (ActionObjectAddressIsValid(puff.source_address)) {
+      const unsigned slot = (puff.source_address - kActRaiserWram_ActionObjectTable) /
+          kActRaiserActionObjectStride;
+      if (observer->scene_tracks[slot].active &&
+          observer->scene_tracks[slot].generation == puff.source_generation)
+        source = sources[slot];
+    }
+    /* Stopped trails disappear with their source. Ordinary detached smoke
+     * still dissipates, and a reused slot cannot inherit a frozen trail. */
+    if (puff.frozen && source == kFireballSmokeSourceAbsent) continue;
+    /* Re-presenting a paused frame is not evidence that this actor stopped. */
+    if (ticks) puff.frozen = source == kFireballSmokeSourceFrozen;
+    if (!puff.frozen) {
+      if (ticks >= kActionFireballSmokeLifetime - puff.age) continue;
+      puff.age += ticks;
+    }
     smoke->puffs[count++] = puff;
   }
   smoke->count = (uint8_t)count;
@@ -870,6 +902,8 @@ static void EmitFireballSmoke(ActionFireballSmoke *smoke,
     smoke->puffs[smoke->count++] = (ActionFireballSmokePuff){
       .seed = effect->generation * 0x9E3779B9u +
           (effect->age_ticks - back) / kActionFireballSmokeInterval,
+      .source_generation = effect->generation,
+      .source_address = effect->record_address,
       .x = (int16_t)(effect->world_x - effect->velocity_x * (int)back + tail),
       .y = (int16_t)(effect->world_y - effect->velocity_y * (int)back - 1),
       .age = (uint16_t)back, .priority = effect->obj_priority,
@@ -1986,7 +2020,6 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
   } else {
     observer->scene_clock = (uint16_t)(observer->scene_clock + elapsed_ticks);
   }
-  AgeFireballSmoke(&observer->fireball_smoke, elapsed_ticks);
   ActionEnvironmentScene map_scene;
   if (ActionEnvironmentScene_FromWram(&map_scene,wram,wram_size,observer->scene_clock)) {
     map_scene.suppress_default_glow_field=!native_glow;
@@ -2035,6 +2068,7 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
       Read8(wram, wram_size, kActRaiserWram_CurrentMap) ==
           kActRaiserDeathHeimMap_FinalBoss;
   bool seen[kActionSceneEffectObserverTrackCount] = {false};
+  uint8_t smoke_sources[kActionSceneEffectObserverTrackCount] = {0};
   for (unsigned slot = 0; slot < kActionSceneEffectObserverTrackCount;
        slot++) {
     const uint16_t address = (uint16_t)(kActRaiserWram_ActionObjectTable +
@@ -2249,14 +2283,15 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
     /* Animation index advances inside one projectile/strike lifecycle. It is
      * artwork cadence, not a new emission pulse; using it as pulse_key would
      * reseed every spark whenever the source sprite changed frame. */
-    BeginOrAdvanceSceneTrack(observer, &observer->scene_tracks[slot], &object,
-                             kind, phase, elapsed_ticks, &effect);
+    const bool frozen = BeginOrAdvanceSceneTrack(
+        observer, &observer->scene_tracks[slot], &object,
+        kind, phase, elapsed_ticks, bloodpool_boss_fireball, &effect);
     if (bloodpool_boss_fireball) {
-      EmitFireballSmoke(&observer->fireball_smoke, &effect, elapsed_ticks);
       /* Native boss shots keep flying after leaving the activation window.
        * Track those slots, but do not let invisible shots exhaust the shared
        * render list and suppress the player's sword beam during a long fight. */
       if (!(effect.flags & kActionEffectFlag_Visible)) continue;
+      smoke_sources[slot] = frozen ? kFireballSmokeSourceFrozen : kFireballSmokeSourceMoving;
     }
     SceneFrameAppend(dst, &effect);
   }
@@ -2264,6 +2299,15 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
     if (!seen[i])
       memset(&observer->scene_tracks[i], 0,
              sizeof(observer->scene_tracks[i]));
+
+  AgeFireballSmoke(&observer->fireball_smoke, observer, smoke_sources, elapsed_ticks);
+  for (unsigned i = 0; i < dst->effect_count; ++i) {
+    const ActionEffectInstance *effect = &dst->effects[i];
+    const unsigned slot = (effect->record_address - kActRaiserWram_ActionObjectTable) /
+        kActRaiserActionObjectStride;
+    if (smoke_sources[slot] == kFireballSmokeSourceMoving)
+      EmitFireballSmoke(&observer->fireball_smoke, effect, elapsed_ticks);
+  }
 
   if (dst->overflow) {
     dst->effect_count = 0;

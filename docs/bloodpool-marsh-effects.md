@@ -288,7 +288,7 @@ the `fireball-field` particle component; it remains neutral grey when the moon
 effect is disabled. Both CPU and deferred projection use the captured tint.
 
 Capture validates the `$B786` family, `$B90D` flight handler, state 1, both
-authored fireball compositions and the live boss backlink in room `02/01`.
+authored fireball compositions and the retained boss identity in room `02/01`.
 Stationary formation, boss-body poses and death fragments do not acquire a
 flight trail. The exact native identity is recorded in `ram-map.md`; observation
 does not write WRAM or allocate native actors.
@@ -326,3 +326,20 @@ so this comparison establishes visual recovery, not byte-exact WRAM parity.
 Native OAM in the assisted boss replay also places the player beam in priority
 2; its enhancement now inherits `$008F` instead of assuming priority 0. All
 101 paired WRAM snapshots match before and after that projection correction.
+
+Fireball effects now survive the root boss's death-state change to `$A593`
+and flags `$0032`. Recognition uses the child's flight identity and its
+retained root backlink, without requiring the parent to remain active or
+keep its boss flag and composition. A moving shot keeps its normal trail.
+When its world position stops changing, its effect clocks and owned smoke
+puffs freeze; clearing native velocity preserves the last trail direction.
+Frozen smoke retires when that shot becomes hidden, disappears or is replaced.
+Ordinary detached smoke still fades, and each shot advances independently.
+
+Capture regressions cover a 180-tick stop, movement resuming, a retired parent,
+fresh observation during death, independent neighbouring shots, visibility
+and slot reuse. Capture, CPU/deferred geometry and presenter checks pass under
+ASan/UBSan. Assisted Metal replay `20261003-200802` confirms that the launched
+fireball retains glow, embers and smoke during the boss's death animation;
+`runs/bloodpool-act1-boss-fire/death-fireball-after.png` records the result.
+All 57 paired full-WRAM snapshots match the earlier replay.
