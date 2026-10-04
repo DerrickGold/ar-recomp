@@ -78,19 +78,42 @@ static uint32_t Sample(const uint32_t *pixels, float x, float y) {
   return result;
 }
 
-static SDL_Texture *OracleTexture(SDL_Renderer *renderer, const uint32_t *a, const uint32_t *b,
-    const PresentationFrameGenerationMotionField *field, float phase) {
-  uint32_t pixels[W*H];
-  const bool forward = phase < .5f;
-  const float factor = forward ? phase : 1-phase;
-  float dx = (forward ? field->forward_dx[0] : field->backward_dx[0])*factor;
-  float dy = (forward ? field->forward_dy[0] : field->backward_dy[0])*factor;
-  for (unsigned y = 0; y < H; ++y) for (unsigned x = 0; x < W; ++x)
-    pixels[y*W+x] = field->valid ? Sample(forward ? a : b, x+.5f-dx, y+.5f-dy) : b[y*W+x];
+/* Use the validated GPU warp bytes for the projection oracle. Quantization
+ * at the intermediate RGBA8 texture is checked independently below. */
+static SDL_Texture *ReferenceTexture(SDL_Renderer *renderer, const uint32_t *pixels) {
   SDL_Texture *t = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, W, H);
   assert(t && SDL_UpdateTexture(t, NULL, pixels, W*4));
   assert(SDL_SetTextureScaleMode(t, SDL_SCALEMODE_LINEAR));
   return t;
+}
+
+static void CheckWarp(const uint32_t *actual, const uint32_t *a, const uint32_t *b,
+    const PresentationFrameGenerationMotionField *field, unsigned scene, float phase) {
+  unsigned maximum = 0;
+  for (unsigned plane = 0; plane < N; ++plane) {
+    const bool forward = phase < .5f;
+    const float factor = forward ? phase : 1 - phase;
+    const float dx = (forward ? field[plane].forward_dx[0] : field[plane].backward_dx[0]) * factor;
+    const float dy = (forward ? field[plane].forward_dy[0] : field[plane].backward_dy[0]) * factor;
+    for (unsigned y = 0; y < H; ++y) for (unsigned x = 0; x < W; ++x) {
+      const unsigned i = (plane * H + y) * W + x;
+      const uint32_t expected = field[plane].valid
+          ? Sample((forward ? a : b) + plane * W * H, x + .5f - dx, y + .5f - dy) : b[i];
+      for (unsigned channel = 0; channel < 4; ++channel) {
+        const unsigned shift = channel * 8;
+        const unsigned error = (unsigned)abs((int)((actual[i] >> shift) & 255) -
+                                            (int)((expected >> shift) & 255));
+        if (!field[plane].valid) assert(error == 0); /* Unfiltered fallback. */
+        if (error > maximum) maximum = error;
+      }
+    }
+  }
+  printf("action-warp case=%u phase=%.2f max=%u\n", scene, phase, maximum);
+  /* The CPU rounds ideal bilinear samples, while hardware filtering and
+   * storage quantize normalized channels. Windows NVIDIA and Apple Metal
+   * differ by up to one byte at this intermediate stage. Integer endpoints
+   * must remain exact; no projection or composition error is hidden here. */
+  assert(maximum <= (phase == 0 || phase == 1 ? 0u : 1u));
 }
 
 static SDL_Surface *Reference(SDL_Renderer *renderer, unsigned width, unsigned height,
@@ -153,18 +176,35 @@ static SDL_Surface *Reference(SDL_Renderer *renderer, unsigned width, unsigned h
   return rgba;
 }
 
-static void Compare(SDL_GPUDevice *gpu, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *output,
-    const SDL_Surface *reference, unsigned label, float phase) {
-  const unsigned w = reference->w, h = reference->h, pitch = (w*4 + 255u) & ~255u;
-  const SDL_GPUTransferBufferCreateInfo info = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, .size = pitch*h};
+static void Compare(SDL_GPUDevice *gpu, SDL_Renderer *renderer, SDL_GPUCommandBuffer *cmd,
+    SDL_GPUTexture *output, SDL_GPUTexture *warped, unsigned w, unsigned h,
+    const DioramaSceneDraw *draws, unsigned count, const uint32_t *a, const uint32_t *b,
+    const PresentationFrameGenerationMotionField *motion, unsigned label, float phase) {
+  const unsigned pitch = (w*4 + 255u) & ~255u;
+  const unsigned warp_offset = (pitch*h + 511u) & ~511u;
+  const SDL_GPUTransferBufferCreateInfo info = {
+    .usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, .size = warp_offset + W*H*N*4,
+  };
   SDL_GPUTransferBuffer *download = SDL_CreateGPUTransferBuffer(gpu, &info); assert(download);
   SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd); assert(copy);
   const SDL_GPUTextureRegion src = {.texture=output, .w=w, .h=h, .d=1};
   const SDL_GPUTextureTransferInfo dst = {.transfer_buffer=download, .pixels_per_row=pitch/4, .rows_per_layer=h};
-  SDL_DownloadFromGPUTexture(copy, &src, &dst); SDL_EndGPUCopyPass(copy);
+  SDL_DownloadFromGPUTexture(copy, &src, &dst);
+  const SDL_GPUTextureRegion warp_src = {.texture=warped, .w=W, .h=H*N, .d=1};
+  const SDL_GPUTextureTransferInfo warp_dst = {.transfer_buffer=download, .offset=warp_offset,
+      .pixels_per_row=W, .rows_per_layer=H*N};
+  SDL_DownloadFromGPUTexture(copy, &warp_src, &warp_dst);
+  SDL_EndGPUCopyPass(copy);
+  /* Both native passes finish before this single readback/fence. The fixture
+   * still exercises GPU-only motion -> warp -> scene resource ordering. */
   SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd); assert(fence);
   assert(SDL_WaitForGPUFences(gpu, true, &fence, 1)); SDL_ReleaseGPUFence(gpu, fence);
   const unsigned char *actual = SDL_MapGPUTransferBuffer(gpu, download, false); assert(actual);
+  const uint32_t *warp = (const uint32_t *)(actual + warp_offset);
+  CheckWarp(warp, a, b, motion, label, phase);
+  SDL_Texture *refs[] = {ReferenceTexture(renderer, warp), ReferenceTexture(renderer, warp + W*H), NULL, NULL};
+  SDL_Surface *reference = Reference(renderer, w, h, draws, count, refs, motion, phase);
+  assert(SDL_RenderPresent(renderer));
   unsigned max = 0, over = 0, edge_channels = 0, edge_pixels = 0, last_edge_pixel = UINT32_MAX; uint64_t total = 0;
   for (unsigned y=0; y<h; ++y) for (unsigned x=0; x<w*4; ++x) {
     int difference = abs(actual[y*pitch+x] - ((const unsigned char *)reference->pixels)[y*reference->pitch+x]);
@@ -186,6 +226,7 @@ static void Compare(SDL_GPUDevice *gpu, SDL_GPUCommandBuffer *cmd, SDL_GPUTextur
    * Interior filtering/composition still has a strict 3/255 channel limit. */
   assert(over == edge_channels && edge_pixels <= 4);
   assert((double)total/(w*h*4) < .25);
+  SDL_DestroySurface(reference); SDL_DestroyTexture(refs[0]); SDL_DestroyTexture(refs[1]);
   SDL_UnmapGPUTransferBuffer(gpu, download); SDL_ReleaseGPUTransferBuffer(gpu, download);
 }
 
@@ -268,19 +309,13 @@ int main(void) {
     for (unsigned i=0;i<4;++i) textures[i]=(ArGpuActionSceneTexture){motion.output,W,H*N,{0,i==1?H:0,W,H}};
     for (unsigned step=0;step<5;++step) {
       float phase=phases[step];
-      SDL_Texture *refs[]={OracleTexture(renderer,a,b,&field[0],phase),
-          OracleTexture(renderer,a+W*H,b+W*H,&field[1],phase),NULL,NULL};
-      SDL_Surface *reference=Reference(renderer,width,height,draws,4,refs,field,phase);
-      // The oracle has completed its own SDL commands before native work.
-      assert(SDL_RenderPresent(renderer));
       cmd=SDL_AcquireGPUCommandBuffer(gpu); assert(cmd);
       assert(ArGpuGlobalMotion_Warp(&motion,cmd,previous,current,phase));
       assert(ArGpuActionScenePass_Encode(&pass,cmd,output,width,height,motion.motion,phase,draws,textures,4,
           SDL_GPU_LOADOP_CLEAR,(ArRenderColorF){0,0,0,1}));
       if (retained_vertices) assert(pass.vertices==retained_vertices && pass.indices==retained_indices);
       retained_vertices=pass.vertices; retained_indices=pass.indices;
-      Compare(gpu,cmd,output,reference,scene,phase);
-      SDL_DestroySurface(reference); SDL_DestroyTexture(refs[0]); SDL_DestroyTexture(refs[1]);
+      Compare(gpu,renderer,cmd,output,motion.output,width,height,draws,4,a,b,field,scene,phase);
     }
     // Fail before recording a partial pass. Reject invalid geometry/mapping.
     cmd=SDL_AcquireGPUCommandBuffer(gpu); assert(cmd);
