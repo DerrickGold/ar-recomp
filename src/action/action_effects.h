@@ -542,6 +542,15 @@ typedef struct ActionSceneEffectFrame {
  * tests do not depend on process-global history. pulse_key is capture-private:
  * future repeated-launch spells can advance pulse_generation without ending
  * the actor's outer generation. */
+typedef enum ActionSceneEffectFamily {
+  kActionSceneFamily_None,
+#define SCENE_RULE(name, kind, match, phase, room, ownership, dependency, clock) \
+  kActionSceneFamily_##name,
+#include "action_scene_effect_rules.inc"
+#undef SCENE_RULE
+  kActionSceneFamily_Count
+} ActionSceneEffectFamily;
+
 typedef struct ActionEffectObserverTrack {
   uint32_t generation;
   uint32_t pulse_generation;
@@ -560,6 +569,7 @@ typedef struct ActionEffectObserverTrack {
   uint8_t phase;
   uint8_t active;
   uint8_t continuity_valid;
+  uint8_t scene_family;
 } ActionEffectObserverTrack;
 
 /* Producer-owned contact history and detached, bounded landing events. */

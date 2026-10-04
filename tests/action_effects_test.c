@@ -1246,6 +1246,7 @@ static void TestAitosBossSwordVolleyIdentityAndGeometry(void) {
   /* Reflection belongs to the complete controller/child lifecycle. A lone
    * reflected projectile cannot acquire the boss effect by visual tuple. */
   Write16(wram, 0x1620 + 0x28, 0);
+  ActionEffectObserver_Reset(&observer); /* Test new admission, not an existing child. */
   ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
   CHECK(frame.effect_count == 0);
 
@@ -1267,10 +1268,12 @@ static void TestAitosBossSwordVolleyIdentityAndGeometry(void) {
   CHECK(frame.effects[0].record_address == 0x1660);
   SeedAitosBossSwordVolley(wram, false);
   Write16(wram, 0x1620 + 0x1E, 0xD794);
+  ActionEffectObserver_Reset(&observer); /* Test new admission, not an existing child. */
   ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
   CHECK(frame.effect_count == 0);
   SeedAitosBossSwordVolley(wram, false);
   Write16(wram, 0x12E0 + 0x32, 0xD645);
+  ActionEffectObserver_Reset(&observer); /* Test new admission, not an existing child. */
   ActionSceneEffects_CaptureFrame(&observer, &frame, wram, sizeof(wram), 1);
   CHECK(frame.effect_count == 0);
 }
@@ -3600,6 +3603,7 @@ static void TestFillmoreStatueOrbs(void) {
   for (unsigned i = 0; i < 5; i++) {
     const uint16_t saved = (uint16_t)(ram[addresses[i]] | ram[addresses[i]+1]<<8);
     Write16(ram,addresses[i],values[i]);
+    ActionEffectObserver_Reset(&observer); /* Test new admission, not an existing child. */
     ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);
     CHECK(!frame.effect_count);
     Write16(ram,addresses[i],saved);
@@ -3896,7 +3900,11 @@ static void TestGenericActorFacts(void) {
   const uint32_t replacement=frame.actors[1].generation;ram[0x19]=2;ActionSceneEffects_CaptureFrame(&observer,&frame,ram,sizeof(ram),1);CHECK(frame.actors[1].generation!=replacement);
 }
 
+#include "action_effect_lifecycle_test.inc"
+
 int main(void) {
+  TestSceneLifecycleContracts();
+  TestAuthoredParentProvenance();
   TestBloodpoolAct1BossFireballs();
   TestBloodpoolFireballDeathLifetime();
   TestGenericActorFacts();
