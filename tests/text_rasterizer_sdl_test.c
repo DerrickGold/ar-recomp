@@ -739,10 +739,26 @@ static void TestRasterization(void) {
   request.flags |= kArTextRasterFlag_IncludeRevealClusters;
   CHECK(ArTextRasterizer_Rasterize(rasterizer, &request, &bitmap, NULL, error, sizeof(error)));
   const uint64_t upright_hash = BitmapHash(&bitmap);
-  /* Banded ink is a reviewed appearance; pin it so moving the formula behind
-   * the portable contract cannot quietly change a pixel. */
-  CHECK(request.style_id != kArTextStyle_RetailPaletteBands ||
-        upright_hash == UINT64_C(0x3924da22796386bc));
+  /* FreeType versions can change antialiased edge coverage. Compare the
+   * adapter with the same shaped white ink, preserving every alpha value and
+   * cluster. TestStyleBands pins the palette independently on fixed coverage. */
+  ArTextRasterRequest plain_request = request;
+  plain_request.style_id = kArTextStyle_PlainWhite;
+  ArTextBitmap plain = {0};
+  CHECK(ArTextRasterizer_Rasterize(rasterizer, &plain_request, &plain, NULL, error, sizeof(error)));
+  CHECK(plain.width == bitmap.width && plain.height == bitmap.height);
+  CHECK(plain.ascent == bitmap.ascent && plain.line_advance == bitmap.line_advance);
+  CHECK(plain.reveal_cluster_count == bitmap.reveal_cluster_count);
+  if (plain.pixels && plain.reveal_cluster_count == bitmap.reveal_cluster_count) {
+    for (size_t i = 0; i < plain.reveal_cluster_count; ++i)
+      CHECK(!memcmp(&plain.reveal_clusters[i], &bitmap.reveal_clusters[i],
+                    sizeof(ArTextRevealCluster)));
+    CHECK(ArTextBitmap_ApplyStyleBands(plain.pixels, plain.width, plain.height,
+        plain.pitch_bytes, plain.format, plain.reveal_clusters, plain.reveal_cluster_count,
+        request.band_rgb, request.body_rgb));
+    CHECK(BitmapHash(&plain) == upright_hash);
+  }
+  ArTextRasterizer_ReleaseBitmap(rasterizer, &plain);
   uint8_t r, g, b;
   CHECK(BottomClusterInk(&bitmap, 1, NULL, &r, &g, &b));
   CHECK(r == 0xe0 && g == 0x80 && b == 0);
@@ -1179,6 +1195,55 @@ static void TestMissingGlyphWarnings(void) {
   }
 }
 
+static void TestStyleBands(void) {
+  /* Expected gold/body colors at two ink heights, independent of a font
+   * rasterizer. The tall cluster lands on each band boundary; the short one
+   * samples between them. Different tops/bottoms require per-cluster bands. */
+  static const uint32_t tall[] = {
+      0xe08000, 0xe08000, 0xe08000, 0xe08000, 0xe08000, 0xe08000,
+      0xe08000, 0xe08000, 0xe08000, 0xe08000, 0xe08000, 0xe08000,
+      0xe49212, 0xe9a425, 0xedb637, 0xf2c949, 0xf6db5b, 0xfbed6e,
+      0xffff80, 0xffff80, 0xffff80, 0xffff80, 0xffff80, 0xffff80,
+      0xffff80, 0xffff80, 0xffff80, 0xffff80, 0xffff80, 0xffff80,
+      0xffff80, 0xffff80, 0xffff80, 0xfbed6e, 0xf6db5b, 0xf2c949,
+      0xedb637, 0xe9a425, 0xe49212, 0xe08000, 0xe08000, 0xe08000,
+      0xe08000, 0xe08000, 0xe08000, 0xe08000, 0xe08000, 0xe08000,
+      0xe08000, 0xe08000, 0xe08000,
+  };
+  static const uint32_t short_ink[] = {
+      0xe08000, 0xe08000, 0xe08000, 0xe08000, 0xe08000, 0xe79b1b,
+      0xf2c949, 0xfdf677, 0xffff80, 0xffff80, 0xffff80, 0xffff80,
+      0xffff80, 0xfdf677, 0xf2c949, 0xe79b1b, 0xe08000, 0xe08000,
+      0xe08000, 0xe08000, 0xe08000,
+  };
+  enum { kWidth = 6, kHeight = 53, kStride = 8 };
+  uint32_t pixels[kHeight * kStride], expected[kHeight * kStride];
+  for (int y = 0; y < kHeight; ++y)
+    for (int x = 0; x < kStride; ++x)
+      pixels[y * kStride + x] = expected[y * kStride + x] =
+          x < kWidth ? UINT32_C(0x12345600) : UINT32_C(0xdeadbeef);
+  for (size_t row = 0; row < sizeof(tall) / sizeof(tall[0]); ++row) {
+    const size_t at = (row + 1) * kStride + 1;
+    const uint32_t alpha = row % 2 ? 255 : 1;
+    pixels[at] = UINT32_C(0xffffff00) | alpha;
+    pixels[at + 1] = UINT32_C(0xffffff7f);
+    expected[at] = (tall[row] << 8) | alpha;
+    expected[at + 1] = (tall[row] << 8) | 127;
+  }
+  for (size_t row = 0; row < sizeof(short_ink) / sizeof(short_ink[0]); ++row) {
+    const size_t at = (row + 11) * kStride + 4;
+    pixels[at] = UINT32_C(0xffffff80);
+    expected[at] = (short_ink[row] << 8) | 128;
+  }
+  const ArTextRevealCluster clusters[] = {
+      {.x = 0, .y = 0, .width = 3, .height = kHeight},
+      {.x = 3, .y = 0, .width = 3, .height = kHeight},
+  };
+  CHECK(ArTextBitmap_ApplyStyleBands(pixels, kWidth, kHeight, kStride * 4,
+      kArRenderPixelFormat_Rgba8888, clusters, 2, 0xe08000, 0xffff80));
+  CHECK(!memcmp(pixels, expected, sizeof(expected)));
+}
+
 /* The shadow pass is pure pixel work with two hazards worth pinning: it must
  * read original coverage (or one shadow pixel seeds the next and the run
  * smears sideways), and it must never paint over a letterform. */
@@ -1289,6 +1354,7 @@ int main(int argc, char **argv) {
   s_test_font = ArHostFontResources_RegisterFile(&s_font_store, AR_TEST_FONT_PATH, NULL, 0);
   CHECK(s_test_font);
   if (!s_test_font) return 1;
+  TestStyleBands();
   TestStyleShadow();
   TestStyleShadowTraversalMatchesSnapshot();
   if (argc == 2 && !strcmp(argv[1], "--missing-glyph-warnings"))
