@@ -261,6 +261,12 @@ typedef struct WorldNavigationMountainSourceWork {
 } WorldNavigationMountainSourceWork;
 
 /* ---- state shared by the parts; defined in present_world_nav.c ---- */
+typedef struct WorldNavigationArtVersionState {
+  uint8_t tilemap[kSimWorldMapBytes];
+  SimWorldNavigationTownGround sources;
+  uint32_t geography;
+} WorldNavigationArtVersionState;
+
 typedef struct WorldNavigationArtState {
   uint8_t tilemap[kSimWorldMapBytes];
   uint32_t serial;
@@ -277,6 +283,8 @@ typedef struct WorldNavigationArtState {
   bool animation_unavailable;
   bool cliffs;
   Sim3DDepthAtlasCache *atlas_cache;
+  WorldNavigationArtVersionState versions[kSim3DDepthAtlasVersionLimit];
+  uint32_t *patch_pixels; /* Sparse scratch; never certifies the mutable atlas. */
   bool atlas_cache_unavailable;
   int displayed_version; /* Per-frame selection only; never a CPU publication key. */
 } WorldNavigationArtState;

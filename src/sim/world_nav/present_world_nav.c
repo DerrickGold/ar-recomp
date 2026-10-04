@@ -243,8 +243,9 @@ static bool WorldNavigationAnimationBlockChanged(
   return false;
 }
 
-static bool UploadWorldNavigationAnimation(const SimWorldNavigationArtChanges *changes) {
-  enum { kMaxRegions = 256, kCell = kSimTownCellPixels,
+static bool UploadWorldNavigationAnimation(const SimWorldNavigationArtChanges *changes,
+    const uint32_t *pixels, int version) {
+  enum { kMaxRegions = kSimWorldMapBytes / 2, kCell = kSimTownCellPixels,
          kWidth = kSimWorldNavigationArtPixels };
   ArRenderRectI regions[kMaxRegions];
   int count, step = 1;
@@ -270,18 +271,23 @@ collect:
       /* Numerous small shores use coarser upload regions, never coarser art.
        * The 16x16 block grid has at most 128 horizontal runs; copying retained
        * unchanged texels between them is exact and bounds submission work. */
-      if (count == kMaxRegions) {
+      if (count == 256 && version < 0) {
         step = 8;
         goto collect;
       }
+      /* Version patches use sparse scratch: never upload clean cells from a
+       * coarse region. At most 64 exact horizontal runs exist per world row. */
+      if (count == kMaxRegions) return false;
       regions[count++] = span;
     }
   }
   if (!count) return true;
   const Sim3DPerformanceScope transfer = Sim3DPerformance_Begin(kSim3DPerformance_WorldTransfer);
-  const bool uploaded = Sim3DDepthPass_UploadAtlasRegions(&g_render_device, kSim3DDepthPass_Ground,
-          g_world_nav_art.pixels, kWidth, kWidth, kWidth * (int)sizeof(uint32_t),
-          regions, count);
+  const bool uploaded = version >= 0
+      ? Sim3DDepthPass_UpdateAtlasVersionRegions(&g_render_device, g_world_nav_art.atlas_cache,
+          (unsigned)version, pixels, kWidth, kWidth, kWidth * (int)sizeof(uint32_t), regions, count)
+      : Sim3DDepthPass_UploadAtlasRegions(&g_render_device, kSim3DDepthPass_Ground,
+          pixels, kWidth, kWidth, kWidth * (int)sizeof(uint32_t), regions, count);
   Sim3DPerformance_End(transfer);
   if (!uploaded) return false;
   uint64_t bytes = 0;
@@ -294,24 +300,25 @@ static void RebuildWorldNavigationAnimationRange(void *context, size_t first, si
   SimWorldNavigationArt_RenderAnimationRows(context, first, end);
 }
 
-static bool UpdateWorldNavigationAnimation(const uint32_t *developed,
+static bool UpdateWorldNavigationAnimation(uint32_t *pixels, const uint32_t *developed,
     const uint8_t *world_cells, const SimWorldNavigationTownGround *ground,
-    bool detailed, bool models, uint8_t phase, SimWorldNavigationArtChanges *changes) {
+    bool detailed, bool models, uint8_t previous_phase, uint8_t phase,
+    SimWorldNavigationArtChanges *changes) {
   if (!g_world_nav_art.animation && !g_world_nav_art.animation_unavailable) {
     g_world_nav_art.animation = malloc(sizeof(*g_world_nav_art.animation));
     g_world_nav_art.animation_unavailable = !g_world_nav_art.animation;
   }
   if (!g_world_nav_art.animation)
     return SimWorldNavigationArt_UpdateAnimation(
-        g_world_nav_art.pixels, kSimWorldNavigationArtPixels, developed, kSimWorldMapPixels,
+        pixels, kSimWorldNavigationArtPixels, developed, kSimWorldMapPixels,
         world_cells, ground, detailed, models,
-        g_world_nav_terrain.cliffs.town_mask != 0, g_world_nav_art.phase, phase, changes);
+        g_world_nav_terrain.cliffs.town_mask != 0, previous_phase, phase, changes);
   SimWorldNavigationArtAnimation *work = g_world_nav_art.animation;
   if (!SimWorldNavigationArt_PrepareAnimation(work,
-          g_world_nav_art.pixels, kSimWorldNavigationArtPixels,
+          pixels, kSimWorldNavigationArtPixels,
           developed, kSimWorldMapPixels,
           world_cells, ground, detailed, models, g_world_nav_terrain.cliffs.town_mask != 0,
-          g_world_nav_art.phase, phase)) return false;
+          previous_phase, phase)) return false;
   HostParallelWork_Run(WorldNavigationWorkers(), kSimWorldMapTiles, 16,
       RebuildWorldNavigationAnimationRange, work);
   *changes = work->changes;
@@ -339,14 +346,97 @@ static void CaptureWorldNavigationArtVersion(const FrameSlot *slot, uint8_t phas
   if (!g_world_nav_art.atlas_cache)
     g_world_nav_art.atlas_cache = Sim3DDepthPass_CreateAtlasCache();
   if (g_world_nav_art.atlas_cache &&
-      Sim3DDepthPass_CaptureAtlasVersion(g_world_nav_art.atlas_cache, version)) return;
+      Sim3DDepthPass_CaptureAtlasVersion(g_world_nav_art.atlas_cache, version)) {
+    WorldNavigationArtVersionState *state = &g_world_nav_art.versions[version];
+    state->geography = g_world_nav_art.geography;
+    state->sources = g_world_nav_art.sources;
+    memcpy(state->tilemap, g_world_nav_art.tilemap, sizeof(state->tilemap));
+    return;
+  }
   Sim3DDepthPass_DestroyAtlasCache(g_world_nav_art.atlas_cache);
   g_world_nav_art.atlas_cache = NULL;
   g_world_nav_art.atlas_cache_unavailable = true;
   fprintf(stderr, "[world-navigation] GPU ground snapshots unavailable; using mutable atlas\n");
 }
 
+static bool WorldNavigationArtPatchesEnabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *option = getenv("AR_SIM_GROUND_VERSION_PATCH");
+    enabled = !option || strcmp(option, "0");
+  }
+  return enabled != 0;
+}
+
+static void TraceWorldNavigationArt(const FrameSlot *slot, uint8_t phase,
+    bool changed, bool patch, const SimWorldNavigationArtChanges *changes,
+    const uint64_t stamps[7]) {
+  unsigned cells = 0;
+  for (size_t i = 0; i < sizeof(changes->cells); ++i) cells += changes->cells[i] != 0;
+  fprintf(stderr, "[sim-ground] gf=%u phase=%u changed=%d patch=%d cells=%u",
+      slot->sim.game_frame, phase, changed, patch, cells);
+  const char *names[] = {"inputs", "pixels", "cleanup", "transition", "upload", "capture"};
+  for (unsigned i = 0; i < 6; ++i)
+    fprintf(stderr, " %s-ms=%.3f", names[i], (double)(stamps[i+1] - stamps[i]) / 1e6);
+  fprintf(stderr, " start-ns=%llu end-ns=%llu\n",
+      (unsigned long long)stamps[0], (unsigned long long)stamps[6]);
+}
+
+static bool PatchWorldNavigationArtVersion(const FrameSlot *slot, uint8_t phase,
+    unsigned version, bool detailed, bool models, bool uses_sources, bool trace) {
+  WorldNavigationArtVersionState *state = &g_world_nav_art.versions[version];
+  const SimWorldNavigationTownGround *ground = &slot->sim.world_navigation_towns.ground;
+  if (state->geography == SimWorldMap_GeographySerial() &&
+      (!uses_sources || !memcmp(&state->sources, ground, sizeof(*ground)))) return true;
+  uint64_t stamps[7] = {trace ? HostClock_Nanoseconds() : 0};
+  uint8_t tilemap[kSimWorldMapBytes];
+  const uint32_t *developed = SimWorldMap_BakedPixels();
+  if (!developed || !SimWorldMap_CopyTilemap(tilemap)) return false;
+  if (!g_world_nav_art.patch_pixels)
+    g_world_nav_art.patch_pixels = malloc(
+        (size_t)kSimWorldNavigationArtPixels * kSimWorldNavigationArtPixels * sizeof(uint32_t));
+  uint32_t *pixels = g_world_nav_art.patch_pixels;
+  if (!pixels) return false;
+  SimWorldNavigationArtChanges inputs = {0}, changes;
+  SimWorldNavigationArt_MarkChanges(&inputs, state->tilemap, tilemap,
+      &state->sources, uses_sources ? ground : &state->sources);
+  if (trace) stamps[1] = HostClock_Nanoseconds();
+  /* This version already owns the requested water/native phase. Rebuild only
+   * changed geography/ownership, with the ordinary Scale2x halo and overlays.
+   * Scratch clean cells are undefined and must never reach the GPU. The full
+   * CPU image and mutable atlas keep their independent publication keys. */
+  const Sim3DPerformanceScope animation =
+      Sim3DPerformance_Begin(kSim3DPerformance_WorldAnimation);
+  bool updated = UpdateWorldNavigationAnimation(pixels, developed, inputs.cells,
+      detailed || models ? ground : NULL, detailed, models, phase, phase, &changes);
+  if (trace) stamps[2] = HostClock_Nanoseconds();
+  updated = updated && (!g_world_nav_mountains.active || SimWorldNavigationMountains_ClearGround(
+      pixels, kSimWorldNavigationArtPixels, ground,
+      g_world_nav_mountains.scene.town_mask, changes.cells));
+  if (trace) stamps[3] = HostClock_Nanoseconds();
+  updated = updated && (!g_world_nav_mountains.transition_ready ||
+      SimWorldNavigationMountainTransition_Apply(&g_world_nav_mountains.transition,
+          pixels, kSimWorldNavigationArtPixels, changes.cells));
+  if (trace) stamps[4] = HostClock_Nanoseconds();
+  Sim3DPerformance_End(animation);
+  if (!updated || !UploadWorldNavigationAnimation(&changes, pixels, (int)version)) return false;
+  if (trace) stamps[5] = HostClock_Nanoseconds();
+  state->geography = SimWorldMap_GeographySerial();
+  state->sources = *ground;
+  memcpy(state->tilemap, tilemap, sizeof(tilemap));
+  if (trace) {
+    stamps[6] = HostClock_Nanoseconds();
+    TraceWorldNavigationArt(slot, phase, true, true, &changes, stamps);
+  }
+  return true;
+}
+
 static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) {
+  static int trace = -1;
+  if (trace < 0) {
+    const char *option = getenv("AR_SIM_GROUND_TRACE");
+    trace = option && strcmp(option, "0");
+  }
   g_world_nav_art.displayed_version = -1;
   if (!slot || !slot->sim.underlay_serial) return false;
   const bool detailed = slot->sim.world_navigation_ground_detail != 0;
@@ -365,7 +455,16 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
       g_world_nav_art.detailed == detailed && g_world_nav_art.models == models;
   const bool same_image = g_world_nav_art.serial == slot->sim.underlay_serial;
   unsigned version;
-  if (same_style && same_sources && same_geography && g_world_nav_art.serial &&
+  if (same_style && WorldNavigationArtPatchesEnabled() &&
+      WorldNavigationArtVersion(slot, phase, &version) &&
+      Sim3DDepthPass_HasAtlasVersion(g_world_nav_art.atlas_cache, version) &&
+      PatchWorldNavigationArtVersion(slot, phase, version, detailed, models, uses_sources, trace)) {
+    Sim3DPerformance_AddAtlasReuse();
+    g_world_nav_art.displayed_version = (int)version;
+    return true;
+  }
+  if (!WorldNavigationArtPatchesEnabled() &&
+      same_style && same_sources && same_geography && g_world_nav_art.serial &&
       WorldNavigationArtVersion(slot, phase, &version) && g_world_nav_art.atlas_cache &&
       Sim3DDepthPass_HasAtlasVersion(g_world_nav_art.atlas_cache, version)) {
     /* These keys certify CPU pixels AND the mutable atlas, not the image
@@ -383,12 +482,15 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
   if (same_style && g_world_nav_art.serial &&
       slot->sim.underlay_serial == SimWorldMap_Serial() && !g_world_nav_art.unavailable &&
       g_world_nav_art.pixels) {
+    uint64_t stamps[7] = {trace ? HostClock_Nanoseconds() : 0};
     SimWorldNavigationArtChanges changes, inputs = {0};
     uint8_t tilemap[kSimWorldMapBytes];
     const bool snapshot = SimWorldMap_CopyTilemap(tilemap);
     if (!same_sources || !same_geography) {
-      Sim3DDepthPass_DestroyAtlasCache(g_world_nav_art.atlas_cache);
-      g_world_nav_art.atlas_cache = NULL;
+      if (!WorldNavigationArtPatchesEnabled()) {
+        Sim3DDepthPass_DestroyAtlasCache(g_world_nav_art.atlas_cache);
+        g_world_nav_art.atlas_cache = NULL;
+      }
       if (snapshot) SimWorldNavigationArt_MarkChanges(&inputs, g_world_nav_art.tilemap,
           tilemap, &g_world_nav_art.sources, uses_sources ? ground : &g_world_nav_art.sources);
     }
@@ -398,23 +500,30 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
     const bool world_ready = snapshot && (same_image || SimWorldMap_WaterAnimationCells(water_cells));
     if (!same_image && world_ready)
       for (size_t i = 0; i < sizeof(water_cells); ++i) inputs.cells[i] |= water_cells[i];
-    const bool updated = world_ready && UpdateWorldNavigationAnimation(developed,
+    if (trace) stamps[1] = HostClock_Nanoseconds();
+    bool updated = world_ready && UpdateWorldNavigationAnimation(g_world_nav_art.pixels, developed,
             inputs.cells, detailed || models ? ground : NULL,
-            detailed, models, phase, &changes) &&
+            detailed, models, g_world_nav_art.phase, phase, &changes);
+    if (trace) stamps[2] = HostClock_Nanoseconds();
+    updated = updated &&
         (!g_world_nav_mountains.active || SimWorldNavigationMountains_ClearGround(
             g_world_nav_art.pixels, kSimWorldNavigationArtPixels, ground,
-            g_world_nav_mountains.scene.town_mask, changes.cells)) &&
+            g_world_nav_mountains.scene.town_mask, changes.cells));
+    if (trace) stamps[3] = HostClock_Nanoseconds();
+    updated = updated &&
         (!g_world_nav_mountains.transition_ready || SimWorldNavigationMountainTransition_Apply(
             &g_world_nav_mountains.transition, g_world_nav_art.pixels,
             kSimWorldNavigationArtPixels, changes.cells));
+    if (trace) stamps[4] = HostClock_Nanoseconds();
     Sim3DPerformance_End(animation);
     if (updated) {
-      if (!UploadWorldNavigationAnimation(&changes)) {
+      if (!UploadWorldNavigationAnimation(&changes, g_world_nav_art.pixels, -1)) {
         /* CPU pixels advanced but the GPU transaction did not. Reconstruct
          * and fully upload on retry, even if the simulation clock rewinds. */
         InvalidateWorldNavigationArtPublication();
         return false;
       }
+      if (trace) stamps[5] = HostClock_Nanoseconds();
       g_world_nav_art.geography = SimWorldMap_GeographySerial();
       g_world_nav_art.sources = *ground;
       memcpy(g_world_nav_art.tilemap, tilemap, sizeof(tilemap));
@@ -422,6 +531,11 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
       g_world_nav_art.serial = slot->sim.underlay_serial;
       ++g_world_nav_art.image_revision;
       CaptureWorldNavigationArtVersion(slot, phase);
+      if (trace) {
+        stamps[6] = HostClock_Nanoseconds();
+        TraceWorldNavigationArt(slot, phase, !same_sources || !same_geography,
+            false, &changes, stamps);
+      }
       return true;
     }
   }
@@ -501,6 +615,8 @@ bool EnsureWorldNavigationBlur(const FrameSlot *slot) {
  * none of the underlay geometry. Its captured Mode-7 matrix supplies focus,
  * zoom and in-plane rotation before the shared town perspective is applied. */
 static void ResetWorldNavigationArt(void) {
+  free(g_world_nav_art.patch_pixels);
+  g_world_nav_art.patch_pixels = NULL;
   free(g_world_nav_art.animation);
   g_world_nav_art.animation = NULL;
   g_world_nav_art.animation_unavailable = false;

@@ -1730,6 +1730,77 @@ static void TestWorldAtlasVersions(SDL_Renderer *renderer, const FrameSlot *slot
   puts("world atlas: 16 animation pairs, cold/incremental/revisited/reset images exact");
 }
 
+static void TestWorldAtlasConstruction(SDL_Renderer *renderer, const FrameSlot *slot) {
+  const char *incoming = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
+  char *saved = incoming ? SDL_strdup(incoming) : NULL;
+  CHECK(!incoming || saved);
+  CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+  InitSyntheticBloodpoolArt(true);
+  FrameSlot *probe = malloc(sizeof(*probe));
+  CHECK(probe);
+  uint8_t before[kSimWorldMapBytes], tilemap[kSimWorldMapBytes];
+  CHECK(SimWorldMap_CopyTilemap(before));
+  SDL_Surface *warm[64] = {0};
+  for (unsigned cold = 0; cold < 2; ++cold) {
+    PresentWorldNav_ResetResources();
+    for (unsigned frame = 0; frame < 64; ++frame) {
+      if (cold) PresentWorldNav_ResetResources();
+      InitSlot(probe);
+      probe->sim.world_navigation_ground_detail = true;
+      SimWorldNavigationTownGround *ground = &probe->sim.world_navigation_towns.ground;
+      ground->enabled_town_mask = 2;
+      memset(ground->terrain[1], 8, 32 * 32);
+      memcpy(tilemap, before, sizeof(tilemap));
+      if (frame >= 16 && frame < 48) {
+        tilemap[64 * kSimWorldMapTiles + 64] = 0;
+        if (frame >= 20) ground->native_rows[1][15] = 1u << 15;
+        if (frame >= 24) ground->development_tier[1] = 2;
+        if (frame >= 28) tilemap[65 * kSimWorldMapTiles + 64] = 0;
+        /* More than 256 exact regions: sparse patches must not upload
+         * uninitialised clean scratch pixels via coarse rectangles. */
+        if (frame >= 32)
+          for (unsigned y = 0; y < 32; ++y)
+            ground->native_rows[1][y] = y & 1 ? 0xAAAAAAAAu : 0x55555555u;
+      }
+      CHECK(SimWorldMap_PublishBuiltTilemap(tilemap) >= 0);
+      const unsigned version = frame * 7 % 16;
+      SimWorldMap_SetWaterAnimationSource(kWorldWaterSourceFirst +
+          (version / 4) * kWorldWaterSourceStride);
+      probe->sim.game_frame = (uint16_t)(1 + (version % 4) * kSimTownGroundAnimationTicks);
+      BuildScene(probe);
+      PerformanceMetrics_Configure(true, false);
+      SDL_Surface *actual = Render(renderer, probe, NULL);
+      PerformanceMetrics_PresentCompleted(1);
+      PerformanceMetrics_PresentCompleted(UINT64_C(1000000001));
+      PerformanceSnapshot measured;
+      PerformanceMetrics_Snapshot(&measured);
+      CHECK(measured.ready);
+      if (!cold && frame >= 16) {
+        CHECK(measured.counts[kPerformanceCount_AtlasCopyCalls] == 0);
+        CHECK(measured.counts[kPerformanceCount_AtlasReuse] > 0);
+      }
+      PerformanceMetrics_Configure(false, false);
+      if (!cold) warm[frame] = actual;
+      else {
+        CHECK(Differences(warm[frame], actual) == 0);
+        SDL_DestroySurface(actual);
+      }
+    }
+  }
+  CHECK(Differences(warm[0], warm[16]) > 0);
+  for (unsigned frame = 0; frame < 64; ++frame) SDL_DestroySurface(warm[frame]);
+  CHECK(SimWorldMap_PublishBuiltTilemap(before) >= 0);
+  PresentWorldNav_ResetResources();
+  SimTownGroundArt_Shutdown();
+  if (saved) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID", saved, 1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+  SDL_free(saved);
+  free(probe);
+  UploadWorldNavigationComposition(slot);
+  puts("world atlas construction: all phases, skipped revisions, fragmented ownership and rollback "
+       "match cold pixels without full recapture");
+}
+
 static SDL_Surface *RenderSimGlobePresentation(SDL_Renderer *renderer, const FrameSlot *slot,
                                                const Scene3DCamera *camera, ArRenderRectI source,
                                                float radius_scale, bool sim_facades) {
@@ -2842,7 +2913,8 @@ static void TestVoxelShadows(SDL_Renderer *renderer) {
   SimBackgroundVoxels_Reset();
 }
 
-static void TestSynthetic(SDL_Renderer *renderer, bool captured_motion_only) {
+static void TestSynthetic(SDL_Renderer *renderer, bool captured_motion_only,
+    bool ground_atlas_only) {
   /* Legacy projected-geometry/cache oracles intentionally use compatibility.
    * TestGpuGridRevisions below explicitly clears this to verify the default. */
   const char *incoming_grid = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
@@ -2875,6 +2947,13 @@ static void TestSynthetic(SDL_Renderer *renderer, bool captured_motion_only) {
   FrameSlot *slot = malloc(sizeof(*slot));
   CHECK(slot);
   InitSlot(slot);
+  if (ground_atlas_only) {
+    TestRetainedMountainSurfaces(renderer, slot);
+    TestGpuGridRevisions(renderer, slot);
+    TestWorldAtlasVersions(renderer, slot);
+    TestWorldAtlasConstruction(renderer, slot);
+    goto cleanup;
+  }
   if (captured_motion_only) {
     TestFacingTownScene(renderer);
     goto cleanup;
@@ -3043,6 +3122,7 @@ static void TestSynthetic(SDL_Renderer *renderer, bool captured_motion_only) {
   TestTallModelViewport(renderer, slot);
   TestGpuGridRevisions(renderer, slot);
   TestWorldAtlasVersions(renderer, slot);
+  TestWorldAtlasConstruction(renderer, slot);
   TestColdTerrainWorkers(renderer);
   TestNavigationZoomEntry(renderer);
   TestContinuousTownScene(renderer);
@@ -4590,17 +4670,20 @@ int main(int argc, char **argv) {
   bool voxel_shadows_only = argc == 3 && !strcmp(argv[1], "--voxel-shadows");
   bool shadow_cache_only = argc == 3 && !strcmp(argv[1], "--shadow-cache");
   bool captured_motion_only = argc == 3 && !strcmp(argv[1], "--captured-motion");
-  if (!voxel_shadows_only && !shadow_cache_only && !captured_motion_only &&
+  bool ground_atlas_only = argc == 3 && !strcmp(argv[1], "--ground-atlas");
+  if (!voxel_shadows_only && !shadow_cache_only && !captured_motion_only && !ground_atlas_only &&
       argc != 1 && (argc < 4 || argc > 10)) {
     fprintf(stderr,
-            "usage: %s [--voxel-shadows|--shadow-cache|--captured-motion existing-output-directory] | "
+            "usage: %s [--voxel-shadows|--shadow-cache|--captured-motion|--ground-atlas "
+            "existing-output-directory] | "
             "[ROM WRAM existing-output-directory [--weather-sequence] [--town-matrix] "
             "[--sim-globe-prototype] | --sim-town SIM-snapshot-prefix [--sim-height-sweep | "
             "--sim-landscape-height 0..150] [--sim-radius-scale 1..4]]\n",
             argv[0]);
     return 1;
   }
-  if (voxel_shadows_only || shadow_cache_only || captured_motion_only) output_directory = argv[2];
+  if (voxel_shadows_only || shadow_cache_only || captured_motion_only || ground_atlas_only)
+    output_directory = argv[2];
   else if (argc >= 4) output_directory = argv[3];
   bool radius_requested = false;
   bool landscape_requested = false;
@@ -4693,9 +4776,10 @@ int main(int argc, char **argv) {
   /* The ROM-free suite remains the default CTest entry. A frozen SIM capture
    * is independent and can be iterated without re-running orbital weather. */
   if (!sim_town_snapshot && !voxel_shadows_only && !shadow_cache_only)
-    TestSynthetic(renderer, captured_motion_only);
+    TestSynthetic(renderer, captured_motion_only, ground_atlas_only);
   if (shadow_cache_only) TestShadowHullCameraChanges(renderer);
-  else if (!sim_town_snapshot && !captured_motion_only) TestVoxelShadows(renderer);
+  else if (!sim_town_snapshot && !captured_motion_only && !ground_atlas_only)
+    TestVoxelShadows(renderer);
   if (argc >= 4) TestCaptured(renderer, argv[1], argv[2]);
   if (sim_town_snapshot)
     ArSdlRenderBackend_Destroy(&g_render_device);

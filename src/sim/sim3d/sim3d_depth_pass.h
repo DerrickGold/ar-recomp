@@ -464,7 +464,7 @@ bool Sim3DDepthPass_UploadAtlasRegions(
     const ArRenderRectI *regions, int region_count);
 
 /* Optional owner-thread snapshots of the Ground atlas. One cache may exist,
- * with at most 16 immutable versions, each at most 2048x2048 RGBA8 (256 MiB
+ * with at most 16 versions, each at most 2048x2048 RGBA8 (256 MiB
  * total). Callers own content/revision identities; the adapter only copies
  * a successfully published mutable atlas, entirely on the GPU. Capture is
  * atomic and does not select a different version. Each Begin restores the
@@ -478,6 +478,14 @@ enum { kSim3DDepthAtlasVersionLimit = 16 };
 Sim3DDepthAtlasCache *Sim3DDepthPass_CreateAtlasCache(void);
 bool Sim3DDepthPass_HasAtlasVersion(const Sim3DDepthAtlasCache *cache, unsigned version);
 bool Sim3DDepthPass_CaptureAtlasVersion(Sim3DDepthAtlasCache *cache, unsigned version);
+/* Repair an existing same-size version using the ordinary ARGB/region
+ * contract. Clean texels, other versions and the mutable atlas are preserved.
+ * Requires no queued Ground geometry; failed updates leave its pixels and
+ * selection intact. Caller advances content keys only after success. */
+bool Sim3DDepthPass_UpdateAtlasVersionRegions(
+    ArRenderDevice *device, Sim3DDepthAtlasCache *cache, unsigned version,
+    const uint32_t *argb_pixels, int width, int height, int pitch,
+    const ArRenderRectI *regions, int region_count);
 bool Sim3DDepthPass_SelectAtlasVersion(Sim3DDepthAtlasCache *cache, unsigned version);
 void Sim3DDepthPass_DestroyAtlasCache(Sim3DDepthAtlasCache *cache);
 bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer,

@@ -28,6 +28,9 @@ _Static_assert(sizeof(Sim3DDepthModelVertex) == 7 * sizeof(float) &&
 struct Sim3DDepthAtlasCache {
   SDL_GPUDevice *device;
   SDL_GPUTexture *versions[kSim3DDepthAtlasVersionLimit];
+  int widths[kSim3DDepthAtlasVersionLimit], heights[kSim3DDepthAtlasVersionLimit];
+  SDL_GPUTransferBuffer *transfer;
+  Uint32 transfer_size;
 };
 static Sim3DDepthAtlasCache *s_atlas_cache;
 
@@ -62,6 +65,7 @@ static void ReleaseAtlasCacheStorage(Sim3DDepthAtlasCache *cache) {
   if (!cache) return;
   for (unsigned i = 0; i < kSim3DDepthAtlasVersionLimit; ++i)
     if (cache->versions[i]) SDL_ReleaseGPUTexture(cache->device, cache->versions[i]);
+  if (cache->transfer) SDL_ReleaseGPUTransferBuffer(cache->device, cache->transfer);
   memset(cache, 0, sizeof(*cache));
   g_depth_pass.selected_ground = NULL;
 }
@@ -125,6 +129,8 @@ bool Sim3DDepthPass_CaptureAtlasVersion(Sim3DDepthAtlasCache *cache, unsigned ve
   if (old) SDL_ReleaseGPUTexture(g_depth_pass.device, old);
   cache->device = g_depth_pass.device;
   cache->versions[version] = texture;
+  cache->widths[version] = atlas->width;
+  cache->heights[version] = atlas->height;
   Sim3DPerformance_AddAtlasCopy((uint64_t)atlas->width * atlas->height * 4);
   return true;
 }
@@ -137,16 +143,11 @@ void Sim3DDepthPass_DestroyAtlasCache(Sim3DDepthAtlasCache *cache) {
   s_atlas_cache = NULL;
 }
 
-bool Sim3DDepthPass_UploadAtlasRegions(
-    ArRenderDevice *device, Sim3DDepthPassLayer layer,
+static bool UploadAtlasRegions(
+    ArRenderDevice *device, Sim3DDepthAtlas *atlas,
     const uint32_t *argb_pixels,
     int width, int height, int pitch,
     const ArRenderRectI *regions, int region_count) {
-  if (layer != kSim3DDepthPass_Mountain && layer != kSim3DDepthPass_Ground &&
-      layer != kSim3DDepthPass_GroundBlur && layer != kSim3DDepthPass_Cloud &&
-      layer != kSim3DDepthPass_WorldMountain && layer != kSim3DDepthPass_VolumeCloud)
-    return false;
-  Sim3DDepthAtlas *atlas = &g_depth_pass.atlases[layer];
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   if (!renderer || !argb_pixels || width <= 0 || height <= 0 || pitch <= 0 ||
       !regions || region_count <= 0)
@@ -284,6 +285,38 @@ bool Sim3DDepthPass_UploadAtlasRegions(
     return false;
   }
   return true;
+}
+
+bool Sim3DDepthPass_UploadAtlasRegions(
+    ArRenderDevice *device, Sim3DDepthPassLayer layer, const uint32_t *argb_pixels,
+    int width, int height, int pitch, const ArRenderRectI *regions, int region_count) {
+  if (layer != kSim3DDepthPass_Mountain && layer != kSim3DDepthPass_Ground &&
+      layer != kSim3DDepthPass_GroundBlur && layer != kSim3DDepthPass_Cloud &&
+      layer != kSim3DDepthPass_WorldMountain && layer != kSim3DDepthPass_VolumeCloud)
+    return false;
+  return UploadAtlasRegions(device, &g_depth_pass.atlases[layer], argb_pixels,
+      width, height, pitch, regions, region_count);
+}
+
+bool Sim3DDepthPass_UpdateAtlasVersionRegions(
+    ArRenderDevice *device, Sim3DDepthAtlasCache *cache, unsigned version,
+    const uint32_t *argb_pixels, int width, int height, int pitch,
+    const ArRenderRectI *regions, int region_count) {
+  if (!Sim3DDepthPass_HasAtlasVersion(cache, version) || GroundIsQueued() ||
+      ArSdlRenderBackend_Renderer(device) != g_depth_pass.renderer ||
+      width != cache->widths[version] || height != cache->heights[version]) return false;
+  /* One bounded staging buffer serves all versions. Same-size partial writes
+   * preserve clean texels and never replace/cycle the destination texture.
+   * Commands are ordered after previous draws; failure before submission
+   * leaves the published version intact, including its selected binding. */
+  Sim3DDepthAtlas target = {.texture = cache->versions[version],
+      .width = width, .height = height, .transfer = cache->transfer,
+      .transfer_size = cache->transfer_size};
+  const bool uploaded = UploadAtlasRegions(device, &target, argb_pixels,
+      width, height, pitch, regions, region_count);
+  cache->transfer = target.transfer;
+  cache->transfer_size = target.transfer_size;
+  return uploaded;
 }
 
 bool Sim3DDepthPass_UploadMountainAtlasRegions(

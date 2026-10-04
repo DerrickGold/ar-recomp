@@ -1715,6 +1715,8 @@ static void TestAtlasVersions(ArRenderDevice *device, SDL_Renderer *renderer) {
     CHECK(AppendRect(kSim3DDepthPass_Ground, 0, 0, 32, 16, .5f, (ArRenderColorF){1, 1, 1, 1}));
     CHECK(!Sim3DDepthPass_SelectAtlasVersion(NULL, 0));
     CHECK(!Sim3DDepthPass_CaptureAtlasVersion(cache, v));
+    CHECK(!Sim3DDepthPass_UpdateAtlasVersionRegions(device, cache, v,
+        pixels, 2, 2, 8, &full, 1));
     SDL_Surface *actual = ReadPass(device, renderer);
     CHECK(actual && reference[v]);
     if (actual && reference[v])
@@ -1731,6 +1733,51 @@ static void TestAtlasVersions(ArRenderDevice *device, SDL_Renderer *renderer) {
       CHECK(!memcmp((uint8_t *)base->pixels + y * base->pitch,
                     (uint8_t *)reference[15]->pixels + y * reference[15]->pitch, 32 * 4));
   SDL_DestroySurface(base);
+  /* A region repair must preserve clean texels, the mutable atlas, every
+   * other version and the current selection. Reject all invalid regions
+   * before uploading even the valid prefix of a transaction. */
+  const ArRenderRectI repair = {0, 0, 1, 1};
+  const ArRenderRectI invalid[] = {{0, 0, 1, 1}, {2, 0, 1, 1}};
+  uint32_t repaired[4];
+  memcpy(repaired, pixels, sizeof(repaired));
+  repaired[0] = 0xffed129a;
+  CHECK(!Sim3DDepthPass_UpdateAtlasVersionRegions(device, cache, 15,
+      repaired, 2, 2, 8, invalid, 2));
+  CHECK(!Sim3DDepthPass_UpdateAtlasVersionRegions(device, cache, 15,
+      repaired, 1, 2, 8, &repair, 1));
+  CHECK(Sim3DDepthPass_Begin(device, 32, 16, kArRenderFilter_Nearest));
+  CHECK(Sim3DDepthPass_SelectAtlasVersion(cache, 15));
+  base = ReadGroundAtlas(device, renderer);
+  for (int y = 0; y < 16; ++y)
+    CHECK(!memcmp((uint8_t *)base->pixels + y * base->pitch,
+        (uint8_t *)reference[15]->pixels + y * reference[15]->pitch, 32 * 4));
+  SDL_DestroySurface(base);
+  CHECK(Sim3DDepthPass_Begin(device, 32, 16, kArRenderFilter_Nearest));
+  CHECK(Sim3DDepthPass_SelectAtlasVersion(cache, 15));
+  CHECK(Sim3DDepthPass_UpdateAtlasVersionRegions(device, cache, 15,
+      repaired, 2, 2, 8, &repair, 1));
+  SDL_Surface *patched = ReadGroundAtlas(device, renderer);
+  CHECK(Sim3DDepthPass_Begin(device, 32, 16, kArRenderFilter_Nearest));
+  base = ReadGroundAtlas(device, renderer);
+  CHECK(Sim3DDepthPass_UploadAtlasRegions(device, kSim3DDepthPass_Ground,
+      repaired, 2, 2, 8, &full, 1));
+  CHECK(Sim3DDepthPass_Begin(device, 32, 16, kArRenderFilter_Nearest));
+  SDL_Surface *oracle = ReadGroundAtlas(device, renderer);
+  CHECK(Sim3DDepthPass_Begin(device, 32, 16, kArRenderFilter_Nearest));
+  CHECK(Sim3DDepthPass_SelectAtlasVersion(cache, 0));
+  SDL_Surface *other = ReadGroundAtlas(device, renderer);
+  for (int y = 0; y < 16; ++y) {
+    CHECK(!memcmp((uint8_t *)patched->pixels + y * patched->pitch,
+        (uint8_t *)oracle->pixels + y * oracle->pitch, 32 * 4));
+    CHECK(!memcmp((uint8_t *)base->pixels + y * base->pitch,
+        (uint8_t *)reference[15]->pixels + y * reference[15]->pitch, 32 * 4));
+    CHECK(!memcmp((uint8_t *)other->pixels + y * other->pitch,
+        (uint8_t *)reference[0]->pixels + y * reference[0]->pitch, 32 * 4));
+  }
+  SDL_DestroySurface(patched);
+  SDL_DestroySurface(oracle);
+  SDL_DestroySurface(other);
+  SDL_DestroySurface(base);
   /* A selected retained sample is just as immutable as an ordinary batch. */
   CHECK(Sim3DDepthPass_Begin(device, 32, 16, kArRenderFilter_Nearest));
   Sim3DDepthMesh *mesh = Sim3DDepthPass_CreateGeometryMesh();
@@ -1741,6 +1788,8 @@ static void TestAtlasVersions(ArRenderDevice *device, SDL_Renderer *renderer) {
   CHECK(Sim3DDepthPass_AppendGeometryMesh(kSim3DDepthPass_Ground, mesh));
   CHECK(!Sim3DDepthPass_SelectAtlasVersion(cache, 1));
   CHECK(!Sim3DDepthPass_CaptureAtlasVersion(cache, 1));
+  CHECK(!Sim3DDepthPass_UpdateAtlasVersionRegions(device, cache, 1,
+      pixels, 2, 2, 8, &full, 1));
   Sim3DDepthPass_DestroyAtlasCache(cache);
   CHECK(!ArRenderTexture_IsValid(Sim3DDepthPass_Submit(device, ArRenderTexture_Invalid())));
   Sim3DDepthPass_DestroyMesh(mesh);
@@ -1748,6 +1797,8 @@ static void TestAtlasVersions(ArRenderDevice *device, SDL_Renderer *renderer) {
   CHECK(cache && Sim3DDepthPass_CaptureAtlasVersion(cache, 0));
   Sim3DDepthPass_Reset(device);
   CHECK(!Sim3DDepthPass_HasAtlasVersion(cache, 0));
+  CHECK(!Sim3DDepthPass_UpdateAtlasVersionRegions(device, cache, 0,
+      pixels, 2, 2, 8, &full, 1));
   CHECK(Sim3DDepthPass_Require(device));
   CHECK(
       Sim3DDepthPass_UploadAtlasRegions(device, kSim3DDepthPass_Ground, pixels, 2, 2, 8, &full, 1));

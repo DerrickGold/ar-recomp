@@ -1447,7 +1447,10 @@ if(BUILD_TESTING)
         AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
     add_test(NAME actraiser_present_world_nav_gpu
         COMMAND actraiser_present_world_nav_gpu_test)
-    set_tests_properties(actraiser_present_world_nav_gpu PROPERTIES
+    add_test(NAME actraiser_present_world_nav_ground_atlas_gpu
+        COMMAND actraiser_present_world_nav_gpu_test --ground-atlas ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(actraiser_present_world_nav_gpu
+        actraiser_present_world_nav_ground_atlas_gpu PROPERTIES
         ENVIRONMENT "SDL_AUDIODRIVER=dummy" SKIP_RETURN_CODE 77)
 
     add_executable(actraiser_parallel_work_test tests/parallel_work_test.c

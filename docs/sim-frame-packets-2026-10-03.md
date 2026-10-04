@@ -758,3 +758,129 @@ sources above, not automatically safe for terrain or textured surfaces.
   `deck-feedback-construction-{reuse,control}-long`,
   `construction-model-key-summary.json`, `feedback-construction-model-key.json`,
   and `feedback-construction-final.json` in the existing run directory.
+
+## Construction ground-art recovery (2026-10-03)
+
+The preceding content-clock, exact refresh-period cache, model-source key, tests
+and measurements were committed as `9b565afa` before this work. This section
+covers construction target 1 only: returning ground-animation versions.
+
+### Attribution and implementation
+
+`AR_SIM_GROUND_TRACE=1` separates input preparation, pixel generation, mountain
+cleanup, transition material blending, upload and version capture/publication.
+It includes native game-frame IDs and enclosing monotonic timestamps. The
+initial 9,000-frame Deck profile showed roughly 8,795 cells rebuilt on each
+returning animation phase, despite a construction change affecting only a few
+cells. Pixel generation cost approximately 2.4–3.7 ms and upload 2.6–3.3 ms;
+GPU snapshot capture was about 0.1 ms. These are CPU wall scopes, not GPU timer
+queries. Reusing allocation alone could not eliminate the dominant work.
+
+Each of the existing 16 water/native-animation GPU versions now retains its
+own geography and native-ground source snapshot. On reuse, differences from
+that version are rebuilt into sparse scratch pixels, including the existing
+Scale2x neighbor halo, town overlays, mountain cleanup and material blending.
+Only those regions are uploaded into that version. Unchanged water and other
+phase-dependent pixels remain resident. A version can skip several geography
+revisions or receive a rollback without losing the correct comparison base.
+
+The mutable CPU image and mutable GPU atlas retain their separate publication
+keys. Style/mountain invalidation and resource teardown still discard versions;
+missing versions retain the existing complete capture path. Repair failure
+falls back to that existing path and never advances the version's source keys.
+`AR_SIM_GROUND_VERSION_PATCH=0` restores the prior invalidation policy for A/B
+measurement. Incremental repair is enabled by default.
+
+The depth adapter exposes same-size region updates for existing versions. It
+preflights the entire request, preserves untouched texels and other versions,
+keeps the current selection, and rejects writes after ground geometry is
+queued. One shared transfer buffer serves repairs across versions. Sparse
+scratch uploads use exact regions, including fragmented updates beyond the
+mutable atlas's old 256-region coarsening threshold. Coarse rectangles would
+otherwise include undefined scratch pixels.
+
+Additional retained CPU storage is one lazily allocated 16 MiB scratch image
+and about 376 KiB of version source metadata. No additional GPU snapshots are
+added; upload staging grows to accommodate the largest repair and is released
+with the cache.
+
+### Correctness checks
+
+- Release and ASan/UBSan pass the focused ground-atlas suite and complete depth
+  GPU suite on Metal. Coverage includes all 16 animation pairs, repeated/skipped
+  revisions, development tiers, fragmented native ownership, rollback, reset,
+  mountain/surface interactions and exact cold-versus-retained pixels.
+- Adapter tests verify clean texels, other versions and the mutable atlas remain
+  unchanged; invalid requests and queued geometry reject writes.
+- The old-policy negative control fails the new zero-full-recapture assertion,
+  demonstrating that the construction test exercises the optimization.
+- Captured SIM motion/model GPU tests also pass with the repaired ground path.
+- Six relevant CPU tests pass: ground art, playout, refresh cache, pacing,
+  producer and queue. Mac Release and Deck cross builds pass. Changed C files
+  add no style violations; `git diff --check` passes.
+- The focused suite is registered separately as
+  `actraiser_present_world_nav_ground_atlas_gpu`, so the previously documented
+  unrelated full-suite cloud assertion cannot hide these regressions. This does
+  not resolve or reclassify that failure or the earlier action ABI limitation.
+
+### Deck measurements
+
+The pinned candidate is `ground-patch-deck`, SHA-256
+`383afcf4b0329c7bdd8f39ad7b3e79ef3eabc2d10cc578382a0025ec980c28fe`.
+Candidate and old-policy control use that same binary, fullscreen 1280×800 at
+90 Hz, the same moving Aitos replay, and 9,000 native ticks.
+
+For the first candidate/control pair, median ground-art work across the three
+returning phases after each event was:
+
+| Construction frame | Old policy | Incremental repair | Rebuilt cells per phase |
+|---|---:|---:|---:|
+| 4,432 | 5.90 ms | 0.85 ms | 8,795 → 9 |
+| 5,576 | 5.71 ms | 0.71 ms | 8,795 → 9 |
+| 6,711 | 5.19 ms | 0.90 ms | 8,795 → 9 |
+| 7,846 | 5.38 ms | 0.81 ms | 8,795 → 9 |
+
+The first construction draw still rebuilds terrain/cliffs and globe surfaces.
+Its total CPU draw scope at those four events changed from
+32.32/33.16/31.90/32.86 ms to 29.27/26.88/26.81/28.72 ms. This work substantially
+reduces recovery costs; it does not remove the remaining main construction stall.
+
+A second candidate run reproduced median follow-up costs of
+0.89/0.78/0.82/0.76 ms. Individual candidate follow-ups reached 1.71 ms, so the
+medians should not be read as upper bounds.
+
+Actual display feedback is more variable than the CPU saving. These are maximum
+physical display gaps, with missed-refresh counts in parentheses, from fixed
+host-tick windows enclosing each event:
+
+| Window | Same-binary old policy | First candidate | Repeat candidate |
+|---|---:|---:|---:|
+| 1,900–2,200 | 44.44 ms (24) | 55.55 ms (18) | 44.44 ms (17) |
+| 3,230–3,340 | 33.33 ms (9) | 33.33 ms (4) | 33.33 ms (4) |
+| 4,400–4,470 | 33.33 ms (2) | 22.22 ms (3) | 11.11 ms (0) |
+| 5,540–5,620 | 44.44 ms (6) | 22.22 ms (1) | 11.11 ms (0) |
+| 6,680–6,760 | 33.33 ms (3) | 22.22 ms (1) | 11.11 ms (0) |
+| 7,810–7,900 | 22.22 ms (3) | 33.33 ms (5) | 11.11 ms (0) |
+
+The first candidate also had 28 discarded/missed frames in the pre-construction
+1,100–1,900 window, versus one in the control. The candidate repeat had zero;
+the initial pre-change profile also had zero. No partial-repair work occurs in
+that window. The observation is retained as a pacing limitation, not silently
+removed from the comparison or attributed conclusively to this change. These
+runs establish a repeatable reduction in construction CPU work, but not uniform
+display improvement at every event or an unconditional 90 Hz lock.
+
+All four runs exited cleanly, recorded no foreign game process, and ended with
+identical WRAM SHA-256:
+`d2c147d0fc639328a835842cbe1ab34476f062b5ee4fae14957febac68d7903c`.
+The first profile took 204.75 seconds because the Deck display initially slept;
+it was awakened before the measured construction windows. The candidate,
+same-binary control and repeat each took 150.90 seconds.
+
+Artifacts in `runs/sim-pipeline-2026-10-03/`:
+`deck-ground-profile-long`, `deck-ground-patch-long`,
+`deck-ground-patch-control-long`, `deck-ground-patch-repeat-long`,
+`ground-patch-cpu-summary.json`, and `feedback-ground-patch-final.{json,txt}`.
+Correctness/build logs use the `ground-patch-*` and `build-ground-patch-*`
+prefixes. Terrain/cliff and globe-surface reconstruction remain the next
+construction target; SIM interpolation remains deferred.
