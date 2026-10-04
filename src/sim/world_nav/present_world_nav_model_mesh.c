@@ -410,8 +410,14 @@ bool WorldNavigationModelMesh_DrawFacingTown(
   bool only_captured_motion = same_style && style->captured_poses && !matching;
   for (size_t i = 0; i < count && only_captured_motion; ++i) {
     WorldNavigationModelSource stable = sources[i];
-    if (stable.object.kind == kSimBackgroundVoxel_Windmill)
+    if (stable.object.kind == kSimBackgroundVoxel_Windmill) {
       stable.object.animation_phase = s_town_models.sources[i].object.animation_phase;
+      /* Native spin frames change both phase and metatile ($24/$26/$16).
+       * The windmill compiler uses phase/state, not the tile identity. Keep
+       * this change in the animated stream instead of rebuilding the static
+       * town. State, construction flags and every other source still match. */
+      stable.object.visual_metatile = s_town_models.sources[i].object.visual_metatile;
+    }
     only_captured_motion = !memcmp(&stable,&s_town_models.sources[i],sizeof(stable));
   }
   if (matching && s_town_models.rejected) return false;

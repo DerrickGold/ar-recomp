@@ -40,6 +40,7 @@ static const char *const kNames[kPerformanceStage_Count] = {
   "settings write*", "battery save", "music start",
   "terrain rebuild", "terrain samples", "globe grid bake",
   "globe surface", "globe water", "voxel atlas upload", "voxel palettes",
+  "shadow actors", "shadow voxels", "shadow blur", "shadow target", "shadow hulls",
 };
 
 const char *PerformanceMetrics_StageName(PerformanceStage stage) {

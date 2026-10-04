@@ -5,6 +5,8 @@
 #include <string.h>
 #include "diorama/diorama_planes.h"
 #include "present/presentation_surface.h"
+#include "sim/sim_frame_capture.h"
+#include "sim/sim_render_atlas.h"
 
 enum { kQueueCapacity = 3 };
 struct HostFrameQueue {
@@ -37,6 +39,7 @@ void HostFrameQueue_Destroy(HostFrameQueue *q) {
   for (int i = 0; i < kQueueCapacity; ++i) {
     free(q->packets[i].pixels);
     free(q->packets[i].background_storage);
+    free(q->packets[i].sim_storage);
   }
   free(q);
 }
@@ -89,7 +92,7 @@ static bool CopyView(HostFramePacket *p, SrPpuSurfaceView *view, bool needed) {
     return true;
   }
   if (!PresentationSurface_Bound(view) || !view->width_pixels || view->width_pixels > SR_PPU_SURFACE_MAX_WIDTH ||
-      !view->height_pixels || view->height_pixels > SR_PPU_SURFACE_MAX_HEIGHT ||
+      !view->height_pixels || view->height_pixels > kSimObjAtlasHeight ||
       !PresentationSurface_Holds(view, (int)view->width_pixels, (int)view->height_pixels))
     return false;
   const size_t pitch = (size_t)view->width_pixels * sizeof(uint32_t);
@@ -113,9 +116,49 @@ SrPpuBgPacket *HostFramePacket_BackgroundTarget(HostFramePacket *p) {
   return p->background_storage;
 }
 
+struct SimFrameInputs *HostFramePacket_SimTarget(HostFramePacket *p) {
+  if (!p) return NULL;
+  if (!p->sim_storage) p->sim_storage = calloc(1, sizeof(*p->sim_storage));
+  return p->sim_storage;
+}
+
+static bool OwnSimPixels(HostFramePacket *p) {
+  FrameSlot *f = &p->frame;
+  if (!f->sim_inputs || f->sim_inputs != p->sim_storage) return false;
+  p->copied_bytes = 0;
+  Sim3DOutputSurfaceViews *sim = &f->sim3d_output_surfaces;
+  const bool have_hud_bg = PresentationSurface_Bound(&sim->hud_bg) != NULL;
+  const bool have_hud_obj = PresentationSurface_Bound(&sim->hud_obj) != NULL;
+  if (!CopyView(p, &f->ppu_surfaces.main,
+          !(f->sim.effective_features & kSimFeature_SeparatedComposite)) ||
+      !CopyView(p, &f->hud_obj_surface, !have_hud_obj)) return false;
+  for (unsigned source = 0; source < SR_PPU_OVERLAY_SOURCE_COUNT; ++source) {
+    const bool needed = (source == SR_PPU_OVERLAY_BG3 && !have_hud_bg) ||
+        (source == SR_PPU_OVERLAY_OBJ && !have_hud_obj && !f->hud_obj_surface.data) ||
+        (source == SR_PPU_OVERLAY_BG1 && f->action_bg1_mask_valid) ||
+        (source == SR_PPU_OVERLAY_BG2 && f->action_bg2_mask_valid);
+    for (unsigned band = 0; band < SR_PPU_SURFACE_BAND_COUNT; ++band)
+      if (!CopyView(p, &f->ppu_surfaces.overlays[source][band], needed && band == 0)) return false;
+  }
+  for (unsigned plane = 0; plane < kSim3DPlane_Count; ++plane)
+    if (!CopyView(p, &sim->planes[plane],
+        (sim->upload_plane_mask & (1u << plane)) != 0)) return false;
+  if (!CopyView(p, &sim->atlas, f->sim.atlas_valid) ||
+      !CopyView(p, &sim->flat, !(f->sim.effective_features & kSimFeature_GroundProjection)) ||
+      !CopyView(p, &sim->hud_bg, true) || !CopyView(p, &sim->hud_obj, true)) return false;
+  f->ppu_surfaces.authentic = (SrPpuSurfaceView){0};
+  f->ppu_surfaces.mode7 = (SrPpuSurfaceView){0};
+  f->diorama_skybox_surface = (SrPpuSurfaceView){0};
+  f->background_packet = NULL;
+  f->authentic_frame_serial = 0;
+  p->copied_bytes += sizeof(*p->sim_storage);
+  return true;
+}
+
 bool HostFramePacket_OwnPixels(HostFramePacket *p) {
   FrameSlot *f = &p->frame;
   if (!HostFramePacket_Supports(f)) return false;
+  if (f->sim.view == kSimView_Enhanced) return OwnSimPixels(p);
   const uint32_t mask = f->diorama_plane_request_mask & f->diorama_plane_content_mask &
       ~DioramaPlanes_GpuOwnedMask(f->background_packet);
   bool needed[SR_PPU_OVERLAY_SOURCE_COUNT][SR_PPU_SURFACE_BAND_COUNT] = {{false}};

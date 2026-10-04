@@ -48,6 +48,7 @@
 #include "host/host_frame_surfaces.h"
 #include "host/frame_producer.h"
 #include "host/frame_queue.h"
+#include "sim/sim_frame_capture.h"
 #include "host/frame_playout.h"
 
 const uint64_t kHostDisplayEmulationFrameIntervalNs = RTL_NTSC_FRAME_INTERVAL_NS;
@@ -190,6 +191,7 @@ static void RetainFrame(const FrameSlot *slot) {
     FrameSlot *retained = &s_retained_frame.slot;
     memset(&retained->ppu_surfaces, 0, sizeof(retained->ppu_surfaces));
     memset(&retained->sim3d_output_surfaces, 0, sizeof(retained->sim3d_output_surfaces));
+    retained->sim_inputs = NULL;
     retained->hud_obj_surface = (SrPpuSurfaceView){0};
     retained->diorama_skybox_surface = (SrPpuSurfaceView){0};
     s_retained_upload_complete = true;
@@ -205,6 +207,7 @@ static void ResolveVideoGeometry(bool apply_runtime_changes,
  * current mouse orbit rather than either drawing a stale pose or waiting for
  * the next emulation tick. */
 static void RefreshRetainedSimCamera(FrameSlot *slot) {
+  if (slot) Sim3DCamera_SetPresentationScene(&slot->sim);
   if (!slot || (slot->sim.view != kSimView_Enhanced &&
                 slot->sim.view != kSimView_WorldNavigation)) return;
   Sim3DCameraPresentationState camera;
@@ -831,6 +834,7 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
   PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_Capture);
   FrameSlot_Capture(&slot, annotated_sim);
   RefreshDioramaCamera(&slot);
+  RefreshRetainedSimCamera(&slot);
   PerformanceMetrics_End(pipeline);
   PerformanceContextForFrame(&slot, mode);
   const uint64_t render_start_ms =
@@ -859,15 +863,23 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
   return presented;
 }
 
-bool HostDisplay_StageOwnedFrame(const FrameSlot *slot) {
-  if (!slot || !ArRenderDevice_IsReady(&g_render_device) ||
-      !ArRenderTexture_IsValid(g_texture)) return false;
+static bool StagePreparedFrame(const FrameSlot *slot) {
   PerformanceContextForFrame(slot, kHostDisplayPresent_GameTick);
   const PerformanceScope upload = PerformanceMetrics_Begin(kPerformance_Upload);
   PresentUpload(slot);
   RetainFrame(slot);
   PerformanceMetrics_End(upload);
   return s_retained_frame.valid;
+}
+
+bool HostDisplay_StageOwnedFrame(const FrameSlot *slot) {
+  if (!slot || !ArRenderDevice_IsReady(&g_render_device) ||
+      !ArRenderTexture_IsValid(g_texture)) return false;
+  if (!slot->sim_inputs) return StagePreparedFrame(slot);
+  FrameSlot prepared = *slot;
+  SimFrameCapture_PrepareOwned(&prepared.sim, prepared.sim_inputs);
+  RefreshRetainedSimCamera(&prepared);
+  return StagePreparedFrame(&prepared);
 }
 
 bool HostDisplay_TryRepresentFrame(float alpha,
@@ -927,12 +939,16 @@ bool HostDisplay_TryRepresentFrame(float alpha,
    * or waiting for its next ownership handoff. */
   if (s_retained_frame.slot.diorama_active)
     HostInput_ApplyDioramaPresentationCamera();
+  else if (s_retained_frame.slot.sim.view == kSimView_Enhanced)
+    HostInput_ApplySimPresentationCamera();
   RefreshDioramaCamera(&s_retained_frame.slot);
   RefreshRetainedSimCamera(&s_retained_frame.slot);
   s_retained_frame.slot.performance_overlay = g_settings.performance_overlay;
   PerformanceContextForFrame(&s_retained_frame.slot, kHostDisplayPresent_GameTick);
 
   const PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_Presentation);
+  const uint64_t draw_cpu_start = s_present_trace_enabled
+      ? HostFrameProducer_ThreadCpuTimeNs() : 0;
   if (s_present_trace_enabled) s_present_trace.draw_start_ns = SDL_GetTicksNS();
   PresentFrame(&s_retained_frame.slot,
                use_interpolation
@@ -941,6 +957,9 @@ bool HostDisplay_TryRepresentFrame(float alpha,
   PerformanceMetrics_End(pipeline);
   if (s_present_trace_enabled) {
     s_present_trace.draw_ns = SDL_GetTicksNS() - s_present_trace.draw_start_ns;
+    const uint64_t cpu_end = HostFrameProducer_ThreadCpuTimeNs();
+    s_present_trace.draw_cpu_ns = draw_cpu_start && cpu_end >= draw_cpu_start
+        ? cpu_end - draw_cpu_start : 0;
     s_present_trace.vector_wait_ns = DioramaFrameGeneration_LastWaitNs();
   }
   PerformanceMetrics_Add(kPerformanceCount_Represents, 1);

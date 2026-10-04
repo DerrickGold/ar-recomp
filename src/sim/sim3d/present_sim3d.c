@@ -1495,14 +1495,14 @@ static bool SimPlaneIsMenu(int plane) {
  * they are supposed to be coming out of. */
 static void PublishSimCraterAnchor(const FrameSlot *slot, const SimBackgroundCraterAnchor *anchor) {
   if (!anchor->valid) {
-    SimRenderMetadata_SetEruptionCraterAnchor(false, 0, 0, 0);
+    SimRenderMetadata_SetEruptionCraterAnchor(slot->sim.town, false, 0, 0, 0);
     return;
   }
   unsigned scale = slot->sim.height_scale_x100;
   if (!scale) scale = kPercentScale;
   float height = anchor->height_pixels * (float)kPercentScale / (float)scale;
   SimRenderMetadata_SetEruptionCraterAnchor(
-      true,
+      slot->sim.town, true,
       (int16_t)lroundf(anchor->local_x +
                        (float)slot->sim.underlay_screen_x0 - slot->ws_extra),
       (int16_t)lroundf(anchor->local_y),

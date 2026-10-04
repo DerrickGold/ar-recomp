@@ -21,6 +21,7 @@
 #include "sim/sim3d/sim_shadow_effect_backend.h"
 #include "host/host_video.h"
 #include "sim/sim3d/sim3d_textures.h"
+#include "app/performance_metrics.h"
 
 #ifndef AR_SIM3D_TERRAIN_ELEVATION
 #define AR_SIM3D_TERRAIN_ELEVATION 0
@@ -334,9 +335,11 @@ static PresentationOutcome BuildSimShadowMask(
   float light_x, light_y;
   SimShadowLight(slot, &light_x, &light_y);
 
+  const PerformanceScope target_scope = PerformanceMetrics_Begin(kPerformance_ShadowTarget);
   ArRenderTargetState target_state = {0};
   const ArRenderTargetBeginResult begin = ArRenderDevice_BeginTarget(
       &g_render_device, mask, &target_state);
+  PerformanceMetrics_End(target_scope);
   if (begin == kArRenderTargetBegin_StateLost)
     return kPresentationOutcome_CoreFailure;
   if (begin != kArRenderTargetBegin_Ready)
@@ -344,6 +347,7 @@ static PresentationOutcome BuildSimShadowMask(
   bool mask_valid = ArRenderDevice_Clear(
       &g_render_device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
 
+  const PerformanceScope actors_scope = PerformanceMetrics_Begin(kPerformance_ShadowActors);
   int vertex_count = 0;
   int index_count = 0;
   for (size_t i = 0; i < slot->sim.object_count; i++) {
@@ -464,7 +468,9 @@ static PresentationOutcome BuildSimShadowMask(
     }
   }
 
+  PerformanceMetrics_End(actors_scope);
   if (mask_valid && voxel_caster) {
+    const PerformanceScope voxels_scope = PerformanceMetrics_Begin(kPerformance_ShadowVoxels);
     SimBackgroundVoxelRenderParams voxel_params =
         SimVoxelRenderParams(slot, source, local_viewport, matrix);
     if (presentation_params)
@@ -473,21 +479,26 @@ static PresentationOutcome BuildSimShadowMask(
     else
       SimBackgroundVoxelRenderer_DrawShadowMask(
           &g_render_device, &voxel_params, light_x, light_y);
+    PerformanceMetrics_End(voxels_scope);
   }
 
   PresentationOutcome outcome = mask_valid
       ? kPresentationOutcome_Complete
       : kPresentationOutcome_OptionalOmitted;
   if (mask_valid && soft_shadows) {
+    const PerformanceScope blur_scope = PerformanceMetrics_Begin(kPerformance_ShadowBlur);
     const PresentationOutcome blur = BlurSimShadowMask(
         mask, shadow_w, shadow_h, slot->sim.shadow_softness_pct,
         presentation_params ? (float)presentation_params->source.h/source.h : 1,
         &mask_valid);
+    PerformanceMetrics_End(blur_scope);
     outcome = PresentationOutcome_Combine(outcome, blur);
   }
 
+  const PerformanceScope restore_scope = PerformanceMetrics_Begin(kPerformance_ShadowTarget);
   const bool target_restored = ArRenderDevice_EndTarget(
       &g_render_device, &target_state);
+  PerformanceMetrics_End(restore_scope);
   if (!target_restored || !PresentationOutcome_IsUsable(outcome))
     return kPresentationOutcome_CoreFailure;
   if (!mask_valid) return kPresentationOutcome_OptionalOmitted;

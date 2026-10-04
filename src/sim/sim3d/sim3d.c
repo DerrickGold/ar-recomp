@@ -1448,10 +1448,10 @@ void Sim3D_LogViewTransition(const SimFrameData *frame) {
 }
 
 bool Sim3D_TownCanvasNeedsPpuView(const SimFrameData *frame) {
-  return frame && frame->town && s_sim3d.separated_valid &&
-      (s_sim3d.status == kSim3DCapture_Ready ||
-       s_sim3d.status == kSim3DCapture_PixelMismatch ||
-       s_sim3d.status == kSim3DCapture_AtlasInvalid);
+  return frame && frame->town && frame->separated_valid &&
+      (frame->separated_status == kSim3DCapture_Ready ||
+       frame->separated_status == kSim3DCapture_PixelMismatch ||
+       frame->separated_status == kSim3DCapture_AtlasInvalid);
 }
 
 void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
@@ -1486,7 +1486,7 @@ void Sim3D_RenderTownCanvas(const SimFrameData *frame, const uint8 *wram,
     return;
   PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_CanvasRaster);
   SimTownCanvas_Render(frame->town, wram, vram->data, cgram->data,
-                       ppu->brightness, s_sim3d.backdrop_argb);
+                       ppu->brightness, frame->separated_backdrop_argb);
   PerformanceMetrics_End(performance);
   performance = PerformanceMetrics_Begin(kPerformance_CanvasEnhance);
   if (frame->background_voxel_enabled) {

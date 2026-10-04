@@ -112,6 +112,7 @@ int main(void) {
     .pitch_bytes = 16 * 4, .width_pixels = 16, .height_pixels = 8,
     .flags = SR_PPU_SURFACE_BOUND, .pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32,
   };
+  frame.sim3d_output_surfaces.flat = frame.sim3d_output_surfaces.planes[kSim3DPlane_Bg1Low];
   Sim3DTextures_Upload(&device, &frame);
   assert(canvas_needed && transfers == 1 && bytes == sizeof(pixels));
   assert(last_texture.value == Sim3DTextures_Flat().value);

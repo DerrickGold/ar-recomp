@@ -197,6 +197,12 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_nat
     result['producer_unaccounted_wall_ms'] = stats([
         max(0, r['producer_complete_ns'] - r['producer_start_ns'] - r['producer_cpu_ns']) / 1e6
         for r in cpu_sources])
+    cpu_draws = [r for r in presents if r.get('draw_cpu_ns', 0)]
+    result['draw_cpu_ms'] = stats([r['draw_cpu_ns'] / 1e6 for r in cpu_draws])
+    # Excludes helper CPU time. Wall minus owner CPU includes helper joins,
+    # driver waits and descheduling; it is not a GPU timer.
+    result['draw_unaccounted_wall_ms'] = stats([
+        max(0, r['draw_work_ns'] - r['draw_cpu_ns']) / 1e6 for r in cpu_draws])
     for key in ('pump_ns', 'input_events_ns', 'owner_poll_ns'):
         if key in rows[0]: result[key.replace('_ns','_ms')] = stats(durations(key))
     if 'submit_start_ns' in rows[0]:
@@ -228,6 +234,9 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_nat
                 evidence['source_ready_slack_ms'] = (b['submit_deadline_ns']-b['producer_complete_ns'])/1e6
         for key in ('backend_flush_ns', 'backend_acquire_ns', 'backend_submit_ns'):
             if key in b: evidence[key.replace('_ns','_ms')] = b[key]/1e6
+        if b.get('draw_cpu_ns', 0):
+            evidence['draw_cpu_ms'] = b['draw_cpu_ns']/1e6
+            evidence['draw_unaccounted_wall_ms'] = max(0, b['draw_work_ns']-b['draw_cpu_ns'])/1e6
         worst.append(evidence)
     result['worst_intervals'] = sorted(worst,key=lambda r:r['interval_ms'],reverse=True)[:12]
     return result

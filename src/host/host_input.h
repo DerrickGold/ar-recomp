@@ -15,7 +15,7 @@ union SDL_Event;
 bool HostInput_HandleEvent(const union SDL_Event *event);
 /* Main-thread routing during action-diorama production: gameplay inputs and
  * host camera pose only. False leaves the event queued until runner pause. */
-bool HostInput_TryHandleStreamEvent(const union SDL_Event *event);
+bool HostInput_TryHandleStreamEvent(const union SDL_Event *event, bool sim_town);
 
 void HostInput_HandleKeyboard(int scancode, bool pressed, bool repeated);
 void HostInput_ClearHeld(void);
@@ -57,6 +57,8 @@ void HostInput_ApplyAnalogCamera(void);
  * the game producer runs. Uses no live WRAM or SIM camera state. Shares the
  * elapsed-time clock above so stream handoffs cannot double-step the camera. */
 void HostInput_ApplyDioramaPresentationCamera(void);
+/* Uses the presentation-owned SIM scene installed by HostDisplay. */
+void HostInput_ApplySimPresentationCamera(void);
 
 /* Advances the session-only click/hold comparison control. A pending fresh
  * native-frame upload and the visible transition both count as host pauses;

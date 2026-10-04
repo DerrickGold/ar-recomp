@@ -21,18 +21,16 @@
  * populates it immediately after RtlDrawPpuFrame; presentation consumes the
  * captured values instead of reading g_ppu, g_settings, or geometry globals.
  *
- * PPU-bound pixel buffers travel as immutable, borrowed runner-ABI surface
- * descriptors in the slot. Host-derived products (the SIM OBJ atlas, flat
- * composite, town canvases, and presentation atlases) remain boot-owned
- * globals and are not copied. Synchronous ordering guarantees Upload consumes
- * every borrowed buffer before the next tick overwrites or invalidates it.
- * The slot alone is not a cross-thread handoff. HostFramePacket owns the
- * action surfaces before publication through HostFrameQueue. After upload,
- * retained action frames clear every CPU surface view; drawing then uses
- * presentation-owned textures/masks/motion endpoints. Never upload that
- * cleared retained slot or refresh it from the runner during production.
- * Action camera controls are filled/refreshed by the main thread before
- * presentation; the producer captures only camera motion and strength. */
+ * PPU pixels and SIM atlas/composite pixels travel as borrowed surface views.
+ * Synchronous upload consumes them before the next tick. The slot alone is
+ * not a cross-thread handoff: HostFramePacket owns the action or enhanced-town
+ * pixel copies and, for towns, the source WRAM/VRAM/palette snapshot.
+ * The presentation owner builds world/town/voxel resources from that snapshot
+ * before upload, then clears every CPU source pointer in retained frames.
+ * Retained draws use renderer-owned resources and value-copied metadata; never
+ * upload a cleared retained slot or refresh it from the runner during production.
+ * Both cameras' controls are filled/refreshed by the main thread. The producer
+ * captures only game motion and strength. */
 
 /* Captured overlay identities and flags follow the public runner ABI.
  * frame_slot.c checks their values against SR_PPU_* when it builds the slot. */
@@ -113,6 +111,8 @@ typedef struct FrameSlot {
   /* Application-owned products that coexist with, rather than replace, the
    * PPU's current host bindings during separated SIM capture. */
   Sim3DOutputSurfaceViews sim3d_output_surfaces;
+  /* Owned only by HostFramePacket; consumed before release, cleared on retain. */
+  const struct SimFrameInputs *sim_inputs;
   /* The independent selected-magic range capture can coexist with a Diorama
    * OBJ plane bound as the PPU source's primary surface. The primary binding
    * snapshot therefore cannot name these pixels; publish their host-owned

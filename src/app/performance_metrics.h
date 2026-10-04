@@ -26,6 +26,8 @@ typedef enum PerformanceStage {
   kPerformance_TerrainPrepare, kPerformance_TerrainSamples, kPerformance_GlobeBuild,
   kPerformance_GlobeSurface, kPerformance_GlobeWater,
   kPerformance_VoxelAtlasUpload, kPerformance_VoxelPalette,
+  kPerformance_ShadowActors, kPerformance_ShadowVoxels,
+  kPerformance_ShadowBlur, kPerformance_ShadowTarget, kPerformance_ShadowHulls,
   kPerformanceStage_Count,
 } PerformanceStage;
 

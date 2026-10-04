@@ -99,6 +99,7 @@ bool HostDisplay_TryRepresentFrame(float alpha,
  * includes any scheduled submit wait; submit_start_ns separates backend work. */
 typedef struct HostDisplayPresentTrace {
   uint64_t deadline_ns, draw_start_ns, draw_ns, swap_ns, vector_wait_ns;
+  uint64_t draw_cpu_ns;
   uint64_t submit_deadline_ns, submit_start_ns, submit_wait_ns;
   uint64_t backend_flush_ns, backend_acquire_ns, backend_submit_ns;
 } HostDisplayPresentTrace;

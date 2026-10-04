@@ -70,13 +70,27 @@ typedef struct SimBackgroundVoxelModelFace {
  * Cast slopes include the presentation lean and light shear per unit of
  * authored height. The caller scales/translates the returned ground polygon.
  * Twenty-four samples per crown ring keep this independent of render LOD. */
-enum { kSimBackgroundVoxelFoliageShadowMaxPoints = 64 };
+enum {
+  kSimBackgroundVoxelFoliageShadowMaxPoints = 64,
+  kSimBackgroundVoxelFoliageShadowMaxSamples = 1024,
+};
 bool SimBackgroundVoxelModel_UsesFoliageShadow(const SimBackgroundVoxelObject *object);
 /* Equal keys share a crown profile; callers can reuse hulls at the same shear.
  * Keys never collide across families. */
 uint16_t SimBackgroundVoxelModel_FoliageShadowVariant(const SimBackgroundVoxelObject *object);
 int SimBackgroundVoxelModel_FoliageShadowHull(
     const SimBackgroundVoxelObject *object, float cast_x, float cast_y,
+    SimBackgroundVoxelModelPoint out[kSimBackgroundVoxelFoliageShadowMaxPoints]);
+
+/* Split the same builder at its immutable authored-point boundary. A render
+ * owner may retain samples by kind/variant while camera and light shear vary.
+ * Project never mutates the samples; both entry points return zero on invalid
+ * input. No quantization or approximation is applied to either cache layer. */
+int SimBackgroundVoxelModel_FoliageShadowSamples(
+    const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelModelPoint out[kSimBackgroundVoxelFoliageShadowMaxSamples]);
+int SimBackgroundVoxelModel_ProjectFoliageShadow(
+    const SimBackgroundVoxelModelPoint *samples, int count, float cast_x, float cast_y,
     SimBackgroundVoxelModelPoint out[kSimBackgroundVoxelFoliageShadowMaxPoints]);
 
 /* Grounded rocks, bridges and low pen posts keep surface shading without a

@@ -159,14 +159,16 @@ void Sim3DTextures_Upload(ArRenderDevice *device, const FrameSlot *slot) {
    * all descriptors in this immutable slot are bounded by that rectangle. */
   if (ArRenderTexture_IsValid(s_atlas) &&
       slot->sim.town && slot->sim.atlas_valid &&
-      slot->sim.atlas_used_width && slot->sim.atlas_used_height) {
+      slot->sim.atlas_used_width && slot->sim.atlas_used_height &&
+      PresentationSurface_Holds(&slot->sim3d_output_surfaces.atlas,
+          slot->sim.atlas_used_width, slot->sim.atlas_used_height)) {
     const ArRenderRectI atlas = {
       0, 0, slot->sim.atlas_used_width, slot->sim.atlas_used_height,
     };
     UploadSurface(
         device, s_atlas, kSim3DUploadSurface_Atlas,
-        g_sim_obj_atlas_pixels, atlas.w, atlas.h,
-        kSimObjAtlasWidth);
+        (const uint32_t *)slot->sim3d_output_surfaces.atlas.data, atlas.w, atlas.h,
+        (int)(slot->sim3d_output_surfaces.atlas.pitch_bytes / sizeof(uint32_t)));
   }
 
   if (slot->sim.separated_valid) {
@@ -197,11 +199,13 @@ void Sim3DTextures_Upload(ArRenderDevice *device, const FrameSlot *slot) {
     /* Ground projection samples the separated planes directly. Upload the
      * CPU flat composite only for the fallback stage that actually draws it. */
     if (ArRenderTexture_IsValid(s_flat) &&
-        !(slot->sim.effective_features & kSimFeature_GroundProjection)) {
+        !(slot->sim.effective_features & kSimFeature_GroundProjection) &&
+        PresentationSurface_Holds(&slot->sim3d_output_surfaces.flat, frame.w, frame.h)) {
       UploadSurface(
           device, s_flat, kSim3DUploadSurface_Flat,
-          g_sim3d_flat_pixels,
-          frame.w, frame.h, frame.w);
+          (const uint32_t *)slot->sim3d_output_surfaces.flat.data,
+          frame.w, frame.h,
+          (int)(slot->sim3d_output_surfaces.flat.pitch_bytes / sizeof(uint32_t)));
     }
   }
   PresentSim3DCanvas_Upload(device,

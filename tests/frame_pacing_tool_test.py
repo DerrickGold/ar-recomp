@@ -125,6 +125,17 @@ class PacingTraceTest(unittest.TestCase):
         self.assertEqual(result['vector_wait_ms']['mean'], .25)
         self.assertEqual(result['deadline_over_1ms'], 0)
 
+    def test_draw_cpu_excludes_idle_and_unavailable_samples(self):
+        rows = self.rows()
+        for row in rows:
+            row['draw_cpu_ns'] = 600_000 if row['presented'] else 400_000
+        rows[1]['draw_cpu_ns'] = 0
+        result = self.report(rows)
+        self.assertEqual(result['draw_cpu_ms']['samples'], 119)
+        self.assertAlmostEqual(result['draw_cpu_ms']['mean'], .6)
+        self.assertAlmostEqual(result['draw_unaccounted_wall_ms']['mean'], .4)
+        self.assertEqual(self.report(self.rows())['draw_cpu_ms']['samples'], 0)
+
     def test_reject_invalid_stage_or_partial_run(self):
         rows = self.rows()
         for key, value in [('draw_ns', 0), ('vector_wait_ns', 2_000_000),

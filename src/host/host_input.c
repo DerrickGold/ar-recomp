@@ -269,6 +269,11 @@ void HostInput_ApplyAnalogCamera(void) {
   ApplyAnalogCamera(diorama, sim3d, true);
 }
 
+void HostInput_ApplySimPresentationCamera(void) {
+  const bool enabled = !SettingsOverlay_IsOpen() && !RenderComparison_FreezesGameplay();
+  ApplyAnalogCamera(false, enabled && Sim3DCamera_ControlsAvailable(Sim3DTextures_Ready()), true);
+}
+
 void HostInput_ApplyDioramaPresentationCamera(void) {
   const bool controls_enabled = !SettingsOverlay_IsOpen() &&
       !RenderComparison_FreezesGameplay();
@@ -650,7 +655,7 @@ bool HostInput_HandleEvent(const SDL_Event *event) {
   return true;
 }
 
-bool HostInput_TryHandleStreamEvent(const SDL_Event *event) {
+bool HostInput_TryHandleStreamEvent(const SDL_Event *event, bool sim_town) {
   if (!event || s_paused || ManualReader_IsOpen() || SettingsOverlay_IsOpen() ||
       SettingsOverlay_IsCapturing() || g_settings.scene_inspector ||
       RenderComparison_FreezesGameplay()) return false;
@@ -660,6 +665,26 @@ bool HostInput_TryHandleStreamEvent(const SDL_Event *event) {
     /* Preserve normal device arbitration, suppression, repeat and key-up
      * behavior. Classification above guarantees no host callback can run. */
     return HostInput_HandleEvent(event);
+  }
+  if (sim_town) {
+    switch (event->type) {
+      case SDL_EVENT_MOUSE_MOTION:
+        if (Sim3DCamera_IsDragging() && Sim3DCamera_ControlsAvailable(Sim3DTextures_Ready()))
+          HostInput_AdjustSim3DCamera(event->motion.xrel * Diorama_DragRadPerPx(),
+              event->motion.yrel * Diorama_DragRadPerPx(), 0.0f);
+        return true;
+      case SDL_EVENT_MOUSE_WHEEL:
+        if (Sim3DCamera_ControlsAvailable(Sim3DTextures_Ready()))
+          HostInput_AdjustSim3DCamera(0.0f, 0.0f, -event->wheel.y * Diorama_ZoomStep());
+        return true;
+      case SDL_EVENT_MOUSE_BUTTON_DOWN:
+      case SDL_EVENT_MOUSE_BUTTON_UP:
+        if (event->button.button == SDL_BUTTON_MIDDLE) return false;
+        if (event->button.button == SDL_BUTTON_RIGHT)
+          Sim3DCamera_SetDragging(event->type == SDL_EVENT_MOUSE_BUTTON_DOWN);
+        return true;
+      default: return InputMap_TryHandleStreamEvent(event);
+    }
   }
   /* The caller guarantees an active action diorama. Do not query the live
    * runner here. Camera reset still needs ownership because it edits settings. */

@@ -2480,7 +2480,7 @@ enum {
   kShadowShrubRings = 16,
   kShadowLobeRings = 8,
   kShadowFrondSegments = 12,
-  kShadowMaxSamples = 1024,
+  kShadowMaxSamples = kSimBackgroundVoxelFoliageShadowMaxSamples,
 };
 
 /* Only the rims can be silhouette extrema; a ground-level rim is flat. */
@@ -2722,17 +2722,25 @@ static int DiscardInteriorShadowPoints(SimBackgroundVoxelModelPoint *points, int
   return kept;
 }
 
-int SimBackgroundVoxelModel_FoliageShadowHull(
-    const SimBackgroundVoxelObject *object, float cast_x, float cast_y,
+int SimBackgroundVoxelModel_FoliageShadowSamples(
+    const SimBackgroundVoxelObject *object,
+    SimBackgroundVoxelModelPoint out[kSimBackgroundVoxelFoliageShadowMaxSamples]) {
+  if (!out || !SimBackgroundVoxelModel_UsesFoliageShadow(object)) return 0;
+  const int count = FoliageShadowSamples(object, out);
+  if (object->tree_edges && (object->kind == kSimBackgroundVoxel_Tree ||
+      object->kind == kSimBackgroundVoxel_BroadTree))
+    for (int i = 0; i < count; ++i) out[i] = ForestPoint(object, out[i]);
+  return count;
+}
+
+int SimBackgroundVoxelModel_ProjectFoliageShadow(
+    const SimBackgroundVoxelModelPoint *samples, int count, float cast_x, float cast_y,
     SimBackgroundVoxelModelPoint out[kSimBackgroundVoxelFoliageShadowMaxPoints]) {
-  if (!out || !SimBackgroundVoxelModel_UsesFoliageShadow(object) ||
+  if (!out || !samples || count < 3 || count > kShadowMaxSamples ||
       !isfinite(cast_x) || !isfinite(cast_y)) return 0;
   SimBackgroundVoxelModelPoint points[kShadowMaxSamples], hull[kShadowMaxSamples * 2];
-  int count = FoliageShadowSamples(object, points);
+  memcpy(points, samples, (size_t)count * sizeof(*points));
   for (int i = 0; i < count; i++) {
-    if (object->tree_edges && (object->kind == kSimBackgroundVoxel_Tree ||
-        object->kind == kSimBackgroundVoxel_BroadTree))
-      points[i] = ForestPoint(object, points[i]);
     points[i].x += points[i].z * cast_x;
     points[i].y += points[i].z * cast_y;
     points[i].z = 0;
@@ -2763,6 +2771,16 @@ int SimBackgroundVoxelModel_FoliageShadowHull(
   if (n < 3 || n > kSimBackgroundVoxelFoliageShadowMaxPoints) return 0;
   memcpy(out, hull, n * sizeof(*out));
   return n;
+}
+
+int SimBackgroundVoxelModel_FoliageShadowHull(
+    const SimBackgroundVoxelObject *object, float cast_x, float cast_y,
+    SimBackgroundVoxelModelPoint out[kSimBackgroundVoxelFoliageShadowMaxPoints]) {
+  if (!out || !SimBackgroundVoxelModel_UsesFoliageShadow(object) ||
+      !isfinite(cast_x) || !isfinite(cast_y)) return 0;
+  SimBackgroundVoxelModelPoint samples[kShadowMaxSamples];
+  const int count = SimBackgroundVoxelModel_FoliageShadowSamples(object, samples);
+  return SimBackgroundVoxelModel_ProjectFoliageShadow(samples, count, cast_x, cast_y, out);
 }
 
 static void AddCastleGatehouse(SimBackgroundVoxelModel *model) {

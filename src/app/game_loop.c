@@ -46,6 +46,8 @@
 #include "settings_overlay/settings_overlay.h"
 #include "sim/sim3d/sim3d.h"
 #include "sim/sim_frame_capture.h"
+#include "sim/sim_world_map.h"
+#include "actraiser/actraiser_sim_menu.h"
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game/bootstrap.h"
 #include "snesrecomp/game_runtime.h"
@@ -179,6 +181,8 @@ typedef struct StreamJob {
   uint64_t next_ns, interval_ns, service_deadline_ns;
   HostFramePlayout playout;
   uint8_t map_group, map_number;
+  uint32_t underlay_serial;
+  bool sim_town;
   unsigned frames, full_waits;
   bool stopped, transition, maintenance, measure_cpu;
 } StreamJob;
@@ -209,29 +213,35 @@ static void ProduceFrameStream(void *context) {
     stream->stopped = tick.stop_requested || DevAutomation_ShouldQuit();
     if (SessionFatal_Requested()) { stream->stopped = true; break; }
     /* Every room change crosses the host boundary before the next capture.
-     * New resources, settings, native/SIM scenes and Mode 7 stay synchronous
+     * New resources, settings, unsupported views and Mode 7 stay synchronous
      * until a supported, fully uploaded endpoint establishes ownership. */
     if (g_ram[kActRaiserWram_MapGroup] != stream->map_group ||
         g_ram[kActRaiserWram_CurrentMap] != stream->map_number ||
-        !Diorama_IsActiveThisFrame()) {
+        (!stream->sim_town && !Diorama_IsActiveThisFrame()) ||
+        (stream->sim_town && (ActRaiserSimMenu_OwnsInput() ||
+                             ActRaiserSimMenu_OwnsPresentation()))) {
       stream->transition = true;
       break;
     }
     const uint64_t profile = HostRuntimeDiagnostics_BeginDraw();
-    SrPpuBgPacket *background_target = HostFramePacket_BackgroundTarget(packet);
-    if (!background_target) {
+    SrPpuBgPacket *background_target = stream->sim_town ? NULL :
+        HostFramePacket_BackgroundTarget(packet);
+    SimFrameInputs *sim_inputs = stream->sim_town ? HostFramePacket_SimTarget(packet) : NULL;
+    if (stream->sim_town ? !sim_inputs : !background_target) {
       HostRuntimeDiagnostics_EndDraw(profile);
-      SessionFatal_Request("Frame stream could not allocate background packet storage.");
+      SessionFatal_Request("Frame stream could not allocate source packet storage.");
       stream->stopped = true;
       break;
     }
     ActRaiser_SetBackgroundPacketTarget(background_target);
     RtlDrawPpuFrame();
     SimFrameData sim;
-    SimFrameCapture_Produce(&sim);
+    if (sim_inputs) SimFrameCapture_ProduceOwned(&sim, sim_inputs, stream->underlay_serial);
+    else SimFrameCapture_Produce(&sim);
     const PerformanceScope capture = PerformanceMetrics_Begin(kPerformance_Capture);
     FrameSlot_Capture(&packet->frame, &sim);
     packet->frame.timestamp_ns = packet->source_ns;
+    packet->frame.sim_inputs = sim_inputs;
     PerformanceMetrics_End(capture);
     if (!HostFramePacket_Supports(&packet->frame)) {
       HostRuntimeDiagnostics_EndDraw(profile);
@@ -241,7 +251,7 @@ static void ProduceFrameStream(void *context) {
     const uint64_t copy_start = SDL_GetTicksNS();
     if (!HostFramePacket_OwnPixels(packet)) {
       HostRuntimeDiagnostics_EndDraw(profile);
-      SessionFatal_Request("Frame stream could not own the captured action surfaces.");
+      SessionFatal_Request("Frame stream could not own the captured surfaces.");
       stream->stopped = true;
       break;
     }
@@ -488,9 +498,17 @@ void GameLoop_Run(const GameSessionConfig *config) {
   const bool stream_enabled = !config->headless &&
       (!stream_option || strcmp(stream_option, "0") != 0);
   if (stream_enabled)
-    fprintf(stderr, "[frame-producer] bounded action pipeline %s\n",
+    fprintf(stderr, "[frame-producer] bounded frame pipeline %s\n",
         HostFrameProducer_Init(DestroyProducerCoroutine, NULL)
             ? "enabled" : "unavailable; synchronous fallback");
+  const char *sim_stream_option = getenv("AR_SIM_FRAME_STREAM");
+  const char *world_oracle_option = getenv("AR_WORLDMAP_HLE_COMPARE");
+  const char *sim_metadata_trace = getenv("AR_SIM3D_D1_TRACE");
+  /* Town streaming keeps the same native source clock. Diagnostics needing
+   * live CPU transactions or fully prepared capture metadata stay synchronous. */
+  const bool sim_stream_enabled = (!sim_stream_option || strcmp(sim_stream_option, "0")) &&
+      (!world_oracle_option || !world_oracle_option[0] || !strcmp(world_oracle_option, "0")) &&
+      (!sim_metadata_trace || !sim_metadata_trace[0]);
   StreamJob stream = {0};
   atomic_init(&stream.input_sample, 0);
   bool stream_pending = false;
@@ -531,7 +549,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
   const bool prepare_ahead = !prepare_option || strcmp(prepare_option, "0") != 0;
   HostDisplay_EnablePresentTrace(pacing_trace != NULL);
   if (pacing_trace) {
-    fprintf(pacing_trace, "loop_ns,prepare_ns,ready_ns,draw_ns,complete_ns,deadline_ns,upload_ns,uploads,draw_work_ns,swap_ns,vector_wait_ns,queue_before,queue_after,presented,tick,epoch,source_ns,producer_start_ns,producer_complete_ns,input_ns,pump_ns,input_events_ns,owner_poll_ns,submit_deadline_ns,submit_start_ns,submit_wait_ns,backend_flush_ns,backend_acquire_ns,backend_submit_ns,producer_cpu_ns,playout_target_ns,sample_ns,interval_ns,interpolation,pacing_source\n");
+    fprintf(pacing_trace, "loop_ns,prepare_ns,ready_ns,draw_ns,complete_ns,deadline_ns,upload_ns,uploads,draw_work_ns,swap_ns,vector_wait_ns,queue_before,queue_after,presented,tick,epoch,source_ns,producer_start_ns,producer_complete_ns,input_ns,pump_ns,input_events_ns,owner_poll_ns,submit_deadline_ns,submit_start_ns,submit_wait_ns,backend_flush_ns,backend_acquire_ns,backend_submit_ns,producer_cpu_ns,playout_target_ns,sample_ns,interval_ns,interpolation,pacing_source,draw_cpu_ns\n");
   }
   uint64_t trace_producer_start = 0, trace_producer_complete = 0, trace_input = 0;
   uint64_t trace_producer_cpu = 0;
@@ -606,7 +624,8 @@ void GameLoop_Run(const GameSessionConfig *config) {
             type == SDL_EVENT_WINDOW_FOCUS_LOST;
         if (focus && g_window && pending_event.window.windowID == SDL_GetWindowID(g_window))
           HostInput_LogStatus(type == SDL_EVENT_WINDOW_FOCUS_GAINED ? "focus-gained" : "focus-lost");
-        if (!ignored && !focus && !HostInput_TryHandleStreamEvent(&pending_event)) {
+        if (!ignored && !focus &&
+            !HostInput_TryHandleStreamEvent(&pending_event, stream.sim_town)) {
           has_event = true;
           break;
         }
@@ -760,7 +779,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
                             trace_ready_ns - trace_loop_ns > 1000000)) {
           const HostDisplayPresentTrace trace = await_endpoint
               ? (HostDisplayPresentTrace){0} : HostDisplay_LastPresentTrace();
-          fprintf(pacing_trace, "%llu,%llu,%llu,%llu,%llu,%llu,%llu,%u,%llu,%llu,%llu,%u,%u,%d,%d,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%d,%d\n",
+          fprintf(pacing_trace, "%llu,%llu,%llu,%llu,%llu,%llu,%llu,%u,%llu,%llu,%llu,%u,%u,%d,%d,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%d,%d,%llu\n",
               (unsigned long long)trace_loop_ns,
               (unsigned long long)present_start_ns,
               (unsigned long long)trace_ready_ns,
@@ -790,7 +809,8 @@ void GameLoop_Run(const GameSessionConfig *config) {
               (unsigned long long)present_target_ns,
               (unsigned long long)sample_ns,
               (unsigned long long)stream.interval_ns, stream.playout.interpolate,
-              HostDisplay_PacingSource());
+              HostDisplay_PacingSource(),
+              (unsigned long long)trace.draw_cpu_ns);
         }
         if (trace_complete_ns) {
           const uint64_t trace_write_ns = SDL_GetTicksNS() - trace_complete_ns;
@@ -943,10 +963,11 @@ void GameLoop_Run(const GameSessionConfig *config) {
         kHostDisplayEmulationFrameIntervalNs, Diorama_IsActiveThisFrame(),
         g_settings.gpu_interp_enabled,
         (InterpolationSourceRate)g_settings.gpu_interp_source_rate);
+    const bool source_interpolation = Diorama_IsActiveThisFrame() && g_settings.gpu_interp_enabled;
     const uint64_t source_now_ns = SDL_GetTicksNS();
     if (stream.queue && stream.playout.interval_ns &&
         (stream.interval_ns != source_interval_ns ||
-         stream.playout.interpolate != (g_settings.gpu_interp_enabled != 0) ||
+         stream.playout.interpolate != source_interpolation ||
          (stream.next_ns && source_now_ns > stream.next_ns + 3 * source_interval_ns))) {
       /* A changed source clock or long host interruption invalidates the old
        * interpolation pair. Establish a fresh synchronous capture before
@@ -956,7 +977,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
     }
     stream.interval_ns = source_interval_ns;
     stream.playout = HostFramePlayout_Create(source_interval_ns,
-        g_settings.gpu_interp_enabled, delay_permille);
+        source_interpolation, delay_permille);
     if (!stream.playout.interpolate) {
       if (native_delay_us >= 0) stream.playout.delay_ns = (uint64_t)native_delay_us * 1000;
       if (g_settings.refresh_mode == kRefreshMode_Unlimited) stream.playout.delay_ns = 0;
@@ -967,9 +988,14 @@ void GameLoop_Run(const GameSessionConfig *config) {
     const bool low_render_limit = g_settings.refresh_mode == kRefreshMode_Limit &&
         (uint64_t)g_settings.frame_limit_fps < kNanosecondsPerSecond / source_interval_ns;
     if (stream.queue && !low_render_limit && !s_window_hidden && !HostInput_IsTurbo() &&
-        Diorama_IsActiveThisFrame() && !g_settings.scene_inspector &&
-        HostDisplay_CanPresentDuringProduction()) {
+        (Diorama_IsActiveThisFrame() || (sim_stream_enabled &&
+            ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
+                g_ram[kActRaiserWram_CurrentMap]) &&
+            !ActRaiserSimMenu_OwnsInput() && !ActRaiserSimMenu_OwnsPresentation())) &&
+        !g_settings.scene_inspector && HostDisplay_CanPresentDuringProduction()) {
       HostDisplay_SetProducerPacing(true);
+      stream.sim_town = !Diorama_IsActiveThisFrame();
+      stream.underlay_serial = stream.sim_town ? SimWorldMap_Serial() : 0;
       stream.map_group = g_ram[kActRaiserWram_MapGroup];
       stream.map_number = g_ram[kActRaiserWram_CurrentMap];
       const uint64_t now = SDL_GetTicksNS();

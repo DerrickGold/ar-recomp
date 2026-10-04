@@ -557,11 +557,15 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
                                              bool sim_facades, bool detailed_town,
                                              const PresentSimGlobeContent *content,
                                              PresentSimGlobeView *out_view) {
+  static int trace = -1;
+  if (trace < 0) trace = getenv("AR_SIM_GLOBE_TRACE") != NULL;
+  uint64_t stamps[9] = {trace ? HostClock_Nanoseconds() : 0};
   WorldNavigationProjection projection;
   PresentSimGlobeView view;
   if (!PrepareSimGlobeView(slot, source, viewport, camera, matrix, radius_scale, sim_facades,
                            &projection, &view))
     return kPresentationOutcome_CoreFailure;
+  if (trace) stamps[1] = HostClock_Nanoseconds();
   const SimGlobeMapping map = view.map;
   if (out_view) *out_view = view;
   if (detailed_town) {
@@ -572,27 +576,46 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
       fprintf(stderr, "[sim-globe-town] native mountain preparation rejected\n");
       goto failed;
     }
+    if (trace) stamps[2] = HostClock_Nanoseconds();
     if (!PresentSimGlobeTerrain_Prepare(&map, SimWorldMap_GeographySerial())) {
       fprintf(stderr, "[sim-globe-town] native terrain preparation rejected\n");
       goto failed;
     }
   }
+  if (trace) stamps[3] = HostClock_Nanoseconds();
   PresentSimGlobeGroundShadow town_shadow = {0};
   if (content && content->prepare && !content->prepare(content->userdata, &view, &town_shadow)) {
     fprintf(stderr, "[sim-globe-town] dynamic content preparation rejected\n");
     goto failed;
   }
+  if (trace) stamps[4] = HostClock_Nanoseconds();
   if (!Sim3DDepthPass_Begin(&g_render_device, viewport.w, viewport.h, kArRenderFilter_Linear))
     goto failed;
   if (!SimGlobeBuildSurface(slot, &projection, &map, detailed_town)) goto failed;
   const Sim3DDepthSurfaceTransform transform = SimGlobeSurfaceTransform(slot, &view);
   bool ok = AppendSimGlobeSurfaces(slot, source, viewport, &projection, &map, detailed_town,
                                    content, &town_shadow, transform);
+  if (trace) stamps[5] = HostClock_Nanoseconds();
   if (ok)
     ok = AppendSimGlobeModels(slot, source, viewport, matrix, &view, sim_facades, detailed_town,
                               transform);
+  if (trace) stamps[6] = HostClock_Nanoseconds();
   if (ok && content) ok = content->append && content->append(content->userdata, &view);
+  if (trace) stamps[7] = HostClock_Nanoseconds();
   ArRenderTexture composite = Sim3DDepthPass_Submit(&g_render_device, ArRenderTexture_Invalid());
+  if (trace) {
+    stamps[8] = HostClock_Nanoseconds();
+    if (!detailed_town) stamps[2] = stamps[1];
+    if (stamps[8] - stamps[0] > 8000000) {
+      fprintf(stderr, "[sim-globe-trace] gf=%u total-ms=%.3f", slot->sim.game_frame,
+          (double)(stamps[8] - stamps[0]) / 1e6);
+      static const char *const names[] = {
+        "view", "mountains", "terrain", "shadows", "surface", "models", "actors", "submit"};
+      for (unsigned i = 0; i < 8; ++i)
+        fprintf(stderr, " %s-ms=%.3f", names[i], (double)(stamps[i+1] - stamps[i]) / 1e6);
+      fputc('\n', stderr);
+    }
+  }
   if (!ArRenderTexture_IsValid(composite))
     fprintf(stderr, "[sim-globe-underlay] composite rejected\n");
   if (!ok || !ArRenderTexture_IsValid(composite)) goto failed;

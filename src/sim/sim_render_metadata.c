@@ -1,6 +1,7 @@
 #include "sim/sim_render_metadata.h"
 
 #include <math.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>   /* getenv: AR_SIM_ERUPTION_HLE */
 #include <string.h>
@@ -1034,9 +1035,22 @@ typedef struct SimEruptionMouth {
 
 static SimEruptionMouth s_eruption_mouth;
 
+static atomic_uint_fast64_t s_eruption_mouth_publication;
+
 void SimRenderMetadata_SetEruptionCraterAnchor(
-    bool valid, int16_t map_x, int16_t map_y, int16_t height) {
-  s_eruption_mouth = (SimEruptionMouth){ valid, map_x, map_y, height };
+    uint8_t town, bool valid, int16_t map_x, int16_t map_y, int16_t height) {
+  const uint64_t packed = (uint16_t)map_x | ((uint64_t)(uint16_t)map_y << 16) |
+      ((uint64_t)(uint16_t)height << 32) | ((uint64_t)town << 48) |
+      ((uint64_t)valid << 56);
+  atomic_store_explicit(&s_eruption_mouth_publication, packed, memory_order_release);
+}
+
+static void CaptureEruptionCraterAnchor(uint8_t town) {
+  const uint64_t packed = atomic_load_explicit(&s_eruption_mouth_publication, memory_order_acquire);
+  s_eruption_mouth = (SimEruptionMouth){
+    .valid = (packed >> 56) && town && (uint8_t)(packed >> 48) == town,
+    .x = (int16_t)packed, .y = (int16_t)(packed >> 16), .height = (int16_t)(packed >> 32),
+  };
 }
 
 /* Which rule produced the positions currently retained in the trails. */
@@ -1205,6 +1219,7 @@ static int16_t UpdateProjectileArc(const SimSourceRecord *source,
 }
 
 static void ResetProjectileArcs(void) {
+  atomic_store_explicit(&s_eruption_mouth_publication, 0, memory_order_release);
   memset(s_projectile_arc, 0, sizeof(s_projectile_arc));
   s_eruption_source = (SimEruptionSource){0};
   s_arc_town = 0;
@@ -2221,10 +2236,20 @@ void SimRenderMetadata_CaptureSkyPalaceFrame(
 
 void SimRenderMetadata_CaptureFrame(
     SimFrameData *dst, const uint8 *wram, bool town_master_enabled,
+    bool world_navigation_enabled, SimRenderFeatureMask requested_features,
+    uint32_t diagnostic_layer_mask, SimRenderFeatureMask implemented_features) {
+  SimRenderMetadata_CaptureFrameWithUnderlay(dst, wram, town_master_enabled,
+      world_navigation_enabled, requested_features, diagnostic_layer_mask,
+      implemented_features,
+      SimWorldMap_DevelopedAvailable() ? SimWorldMap_Serial() : 0);
+}
+
+void SimRenderMetadata_CaptureFrameWithUnderlay(
+    SimFrameData *dst, const uint8 *wram, bool town_master_enabled,
     bool world_navigation_enabled,
     SimRenderFeatureMask requested_features,
     uint32_t diagnostic_layer_mask,
-    SimRenderFeatureMask implemented_features) {
+    SimRenderFeatureMask implemented_features, uint32_t underlay_serial) {
   if (!dst) return;
   memset(dst, 0, sizeof(*dst));
   /* Zero is a deliberate "ground everything" tuning value, so a frame that is
@@ -2244,14 +2269,14 @@ void SimRenderMetadata_CaptureFrame(
       : world_navigation ? world_navigation_enabled : false;
   dst->town = town ? map_number : 0;
   int underlay_x = 0, underlay_y = 0;
-  if (town && SimWorldMap_DevelopedAvailable() &&
+  if (town && underlay_serial &&
       SimWorldMap_OriginForTown(map_number, &underlay_x, &underlay_y)) {
-    dst->underlay_serial = SimWorldMap_Serial();
+    dst->underlay_serial = underlay_serial;
     dst->underlay_origin_tile_x = (uint8_t)underlay_x;
     dst->underlay_origin_tile_y = (uint8_t)underlay_y;
-  } else if (world_navigation && SimWorldMap_DevelopedAvailable()) {
+  } else if (world_navigation && underlay_serial) {
     /* The navigation scene consumes the complete map, so its origin is zero. */
-    dst->underlay_serial = SimWorldMap_Serial();
+    dst->underlay_serial = underlay_serial;
   }
   dst->game_frame = ReadMirror16(wram, kActRaiserWram_GameFrame);
   dst->camera_x = ReadMirror16(wram, kActRaiserWram_Bg1CameraX);
@@ -2321,7 +2346,7 @@ void SimRenderMetadata_CaptureFrame(
     dst->view = kSimView_None;
     dst->view_reason = world_navigation
         ? kSimViewReason_Disabled : kSimViewReason_OutsideScene;
-  } else if (!SimWorldMap_DevelopedAvailable()) {
+  } else if (!underlay_serial) {
     dst->view = kSimView_AuthenticFallback;
     dst->view_reason = kSimViewReason_WorldMapUnavailable;
   } else if (!SimWorldNavigationScene_Build(
@@ -2346,6 +2371,7 @@ void SimRenderMetadata_CaptureFrame(
    * flight as though no time had passed. */
   if (!town || dst->town != s_arc_town) ResetProjectileArcs();
   s_arc_town = dst->town;
+  CaptureEruptionCraterAnchor(dst->town);
 
   /* The semantic record producer describes simulation-town records only.
    * Never leak its last town build into a $09 frame: navigation OAM has a

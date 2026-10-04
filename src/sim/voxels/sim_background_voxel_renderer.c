@@ -1565,6 +1565,111 @@ typedef struct SimBackgroundFoliageShadowCacheEntry {
 } SimBackgroundFoliageShadowCacheEntry;
 
 enum {
+  kRetainedShadowHullSets = 128, kRetainedShadowHullWays = 4,
+  kRetainedShadowSampleSets = 64, kRetainedShadowSampleWays = 4,
+};
+typedef struct SimBackgroundRetainedShadowHull {
+  SimBackgroundFoliageShadowCacheEntry hull;
+  float cast_x, cast_y;
+  uint8_t kind;
+  uint64_t used;
+} SimBackgroundRetainedShadowHull;
+
+/* Render-owner cache of model-local outlines, before terrain/camera projection.
+ * The shape variant and exact shear are the complete inputs to the pure hull
+ * builder. Camera/light changes miss naturally; town growth, animated atlases
+ * and unrelated scene serials do not discard unchanged canopy shapes. Four
+ * ways retain nearby views and prevent boundary variants thrashing interiors.
+ * Storage is bounded at about 400 KiB and owns no GPU resources. */
+static struct {
+  SimBackgroundRetainedShadowHull entries[kRetainedShadowHullSets][kRetainedShadowHullWays];
+  uint64_t clock;
+} s_shadow_hulls;
+
+typedef struct SimBackgroundRetainedShadowSamples {
+  SimBackgroundVoxelModelPoint points[kSimBackgroundVoxelFoliageShadowMaxSamples];
+  int count;
+  uint16_t variant;
+  uint8_t kind;
+  uint64_t used;
+} SimBackgroundRetainedShadowSamples;
+
+/* The camera may change every frame. Retaining only its final 2D hull would
+ * still rebuild all of the trigonometric crown/branch samples on each miss.
+ * This independent, bounded 3 MiB source cache keeps moving views inexpensive.
+ * Entries are plain CPU data owned by this renderer and reset with it. */
+static struct {
+  SimBackgroundRetainedShadowSamples
+      entries[kRetainedShadowSampleSets][kRetainedShadowSampleWays];
+  uint64_t clock;
+} s_shadow_samples;
+
+static uint32_t ShadowShapeHash(uint8_t kind, uint16_t variant) {
+  uint32_t hash = variant | ((uint32_t)kind << 16);
+  hash ^= hash >> 16;
+  hash *= UINT32_C(0x7feb352d);
+  return hash ^ (hash >> 15);
+}
+
+static const SimBackgroundRetainedShadowSamples *RetainedFoliageShadowSamples(
+    const SimBackgroundVoxelObject *object, uint16_t variant) {
+  SimBackgroundRetainedShadowSamples *set = s_shadow_samples.entries[
+      ShadowShapeHash(object->kind, variant) % kRetainedShadowSampleSets];
+  SimBackgroundRetainedShadowSamples *oldest = set;
+  for (int way = 0; way < kRetainedShadowSampleWays; ++way) {
+    SimBackgroundRetainedShadowSamples *entry = &set[way];
+    if (entry->used && entry->kind == object->kind && entry->variant == variant) {
+      entry->used = ++s_shadow_samples.clock;
+      return entry;
+    }
+    if (entry->used < oldest->used) oldest = entry;
+  }
+  oldest->count = SimBackgroundVoxelModel_FoliageShadowSamples(object, oldest->points);
+  oldest->kind = object->kind;
+  oldest->variant = variant;
+  oldest->used = ++s_shadow_samples.clock;
+  return oldest;
+}
+
+static void BuildFoliageShadowHull(const SimBackgroundVoxelObject *object,
+    float cast_x, float cast_y, uint16_t variant,
+    SimBackgroundFoliageShadowCacheEntry *out) {
+  const PerformanceScope scope = PerformanceMetrics_Begin(kPerformance_ShadowHulls);
+  out->count = SimBackgroundVoxelModel_FoliageShadowHull(object, cast_x, cast_y, out->points);
+  out->variant = variant;
+  PerformanceMetrics_End(scope);
+}
+
+static const SimBackgroundFoliageShadowCacheEntry *RetainedFoliageShadowHull(
+    const SimBackgroundVoxelObject *object, float cast_x, float cast_y, uint16_t variant) {
+  const uint32_t hash = ShadowShapeHash(object->kind, variant);
+  SimBackgroundRetainedShadowHull *set =
+      s_shadow_hulls.entries[hash % kRetainedShadowHullSets];
+  SimBackgroundRetainedShadowHull *oldest = set;
+  for (int way = 0; way < kRetainedShadowHullWays; ++way) {
+    SimBackgroundRetainedShadowHull *entry = &set[way];
+    if (entry->used && entry->kind == object->kind && entry->hull.variant == variant &&
+        entry->cast_x == cast_x && entry->cast_y == cast_y) {
+      entry->used = ++s_shadow_hulls.clock;
+      return &entry->hull;
+    }
+    if (entry->used < oldest->used) oldest = entry;
+  }
+  const PerformanceScope scope = PerformanceMetrics_Begin(kPerformance_ShadowHulls);
+  const SimBackgroundRetainedShadowSamples *samples =
+      RetainedFoliageShadowSamples(object, variant);
+  oldest->hull.count = SimBackgroundVoxelModel_ProjectFoliageShadow(
+      samples->points, samples->count, cast_x, cast_y, oldest->hull.points);
+  oldest->hull.variant = variant;
+  PerformanceMetrics_End(scope);
+  oldest->kind = object->kind;
+  oldest->cast_x = cast_x;
+  oldest->cast_y = cast_y;
+  oldest->used = ++s_shadow_hulls.clock;
+  return &oldest->hull;
+}
+
+enum {
   /* Singles and forest interiors have dedicated seeded slots. Boundary
    * overhangs and palms use small pools; a boundary must not evict the much
    * more frequent interior crowns or neighboring isolated trees. */
@@ -1605,7 +1710,7 @@ static void AppendFoliageShadow(
     ArRenderDevice *device, SimBackgroundGeometryBatch *batch,
     const SimBackgroundVoxelRenderParams *params,
     const SimBackgroundVoxelObject *object, const SimBackgroundProjectionAxis *axis,
-    float light_x, float light_y,
+    float light_x, float light_y, bool retain_hulls,
     SimBackgroundFoliageShadowCacheEntry cache[kFoliageShadowCacheSlots]) {
   const SimBackgroundVoxelProportions *proportions =
       SimBackgroundVoxelProportions_Get((SimBackgroundVoxelKind)object->kind);
@@ -1619,8 +1724,15 @@ static void AppendFoliageShadow(
   uint16_t variant = SimBackgroundVoxelModel_FoliageShadowVariant(object);
   SimBackgroundFoliageShadowCacheEntry *entry = &cache[FoliageShadowCacheSlot(object, variant)];
   if (!entry->count || entry->variant != variant) {
-    entry->count = SimBackgroundVoxelModel_FoliageShadowHull(object, cast_x, cast_y, entry->points);
-    entry->variant = variant;
+    if (retain_hulls) {
+      const SimBackgroundFoliageShadowCacheEntry *retained =
+          RetainedFoliageShadowHull(object, cast_x, cast_y, variant);
+      entry->count = retained->count;
+      entry->variant = retained->variant;
+      memcpy(entry->points, retained->points, (size_t)retained->count * sizeof(*entry->points));
+    } else {
+      BuildFoliageShadowHull(object, cast_x, cast_y, variant, entry);
+    }
   }
   const SimBackgroundVoxelModelPoint *hull = entry->points;
   int count = entry->count;
@@ -1660,6 +1772,11 @@ static void DrawShadowMaskResolved(
    * repeated outline once. Per-pass storage avoids shared mutable state or
    * camera invalidation. */
   SimBackgroundFoliageShadowCacheEntry foliage_cache[kFoliageShadowCacheSlots] = {0};
+  /* Experimental: exact caches save CPU work, but the synchronous Deck path
+   * regresses moving-view cadence. Retain the original per-pass default until
+   * owner-side scheduling/overlap can turn that headroom into smoother output. */
+  const char *cache_option = getenv("AR_SIM_SHADOW_HULL_CACHE");
+  const bool retain_hulls = cache_option && strcmp(cache_option, "1") == 0;
   SimBackgroundGeometryBatch *batch = &g_renderer_state.batch;
   batch->vertex_count = 0;
   batch->index_count = 0;
@@ -1673,7 +1790,8 @@ static void DrawShadowMaskResolved(
         object, params, center_x, center_y);
     if (cull && !ObjectMayBeVisible(object, params, axis, model_lift)) continue;
     if (SimBackgroundVoxelModel_UsesFoliageShadow(object)) {
-      AppendFoliageShadow(device, batch, params, object, axis, light_x, light_y, foliage_cache);
+      AppendFoliageShadow(device, batch, params, object, axis, light_x, light_y,
+          retain_hulls, foliage_cache);
       continue;
     }
     SimBackgroundShadowBounds bounds[kSimBackgroundMaxShadowVolumes];
@@ -1726,6 +1844,8 @@ void SimBackgroundVoxelRenderer_DrawTownShadowMask(
 }
 
 void SimBackgroundVoxelRenderer_Reset(ArRenderDevice *device) {
+  if (s_shadow_hulls.clock) memset(&s_shadow_hulls, 0, sizeof(s_shadow_hulls));
+  if (s_shadow_samples.clock) memset(&s_shadow_samples, 0, sizeof(s_shadow_samples));
   ArRenderDevice_DestroyTexture(device, g_renderer_state.ground);
   Sim3DDepthPass_DestroyMesh(g_renderer_state.solid_pass.mesh);
   Sim3DDepthPass_DestroyMesh(g_renderer_state.shadow_pass.mesh);

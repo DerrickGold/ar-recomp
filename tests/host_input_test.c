@@ -506,52 +506,52 @@ int main(void) {
   const int keys_before_stream = s_keys;
   event = (SDL_Event){.type = SDL_EVENT_KEY_DOWN};
   event.key.key = SDLK_A; event.key.scancode = SDL_SCANCODE_A;
-  assert(HostInput_TryHandleStreamEvent(&event));
+  assert(HostInput_TryHandleStreamEvent(&event, false));
   event.type = SDL_EVENT_KEY_UP;
-  assert(HostInput_TryHandleStreamEvent(&event));
+  assert(HostInput_TryHandleStreamEvent(&event, false));
   assert(s_keys == keys_before_stream + 2);
   s_key_host_binding = true;
-  assert(!HostInput_TryHandleStreamEvent(&event));
+  assert(!HostInput_TryHandleStreamEvent(&event, false));
   s_key_host_binding = false;
   const SDL_Keycode host_keys[] = {SDLK_ESCAPE, SDLK_P, SDLK_T, SDLK_F5,
       SDLK_F7, SDLK_F9, SDLK_D, SDLK_C, SDLK_PLUS};
   for (unsigned i = 0; i < sizeof(host_keys)/sizeof(host_keys[0]); ++i) {
     event.type = SDL_EVENT_KEY_DOWN; event.key.key = host_keys[i];
-    assert(!HostInput_TryHandleStreamEvent(&event));
+    assert(!HostInput_TryHandleStreamEvent(&event, false));
   }
   assert(s_keys == keys_before_stream + 2 && !HostInput_IsPaused() && !s_overlay);
   event.key.key = SDLK_A;
   s_pads = 1; s_pad_active = true;
-  assert(HostInput_TryHandleStreamEvent(&event));
+  assert(HostInput_TryHandleStreamEvent(&event, false));
   assert(s_keys == keys_before_stream + 2); /* Suppressed presses stay suppressed. */
   event.type = SDL_EVENT_KEY_UP;
-  assert(HostInput_TryHandleStreamEvent(&event));
+  assert(HostInput_TryHandleStreamEvent(&event, false));
   assert(s_keys == keys_before_stream + 3); /* Releases still get through. */
   s_overlay = true;
-  assert(!HostInput_TryHandleStreamEvent(&event));
+  assert(!HostInput_TryHandleStreamEvent(&event, false));
   s_overlay = false;
   const int runner_reads = s_runner_camera_reads;
   event = (SDL_Event){.type = SDL_EVENT_MOUSE_MOTION};
-  assert(HostInput_TryHandleStreamEvent(&event));
+  assert(HostInput_TryHandleStreamEvent(&event, false));
   event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
   event.button.button = SDL_BUTTON_RIGHT;
-  assert(HostInput_TryHandleStreamEvent(&event) && s_diorama_drag);
+  assert(HostInput_TryHandleStreamEvent(&event, false) && s_diorama_drag);
   event.type = SDL_EVENT_MOUSE_MOTION;
-  assert(HostInput_TryHandleStreamEvent(&event));
+  assert(HostInput_TryHandleStreamEvent(&event, false));
   event.type = SDL_EVENT_MOUSE_WHEEL;
   event.wheel.y = 2;
-  assert(HostInput_TryHandleStreamEvent(&event));
+  assert(HostInput_TryHandleStreamEvent(&event, false));
   event.type = SDL_EVENT_MOUSE_BUTTON_UP;
   event.button.button = SDL_BUTTON_RIGHT;
-  assert(HostInput_TryHandleStreamEvent(&event) && !s_diorama_drag);
+  assert(HostInput_TryHandleStreamEvent(&event, false) && !s_diorama_drag);
   event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
   event.button.button = SDL_BUTTON_MIDDLE;
-  assert(!HostInput_TryHandleStreamEvent(&event));
+  assert(!HostInput_TryHandleStreamEvent(&event, false));
   event.type = SDL_EVENT_WINDOW_RESIZED;
-  assert(!HostInput_TryHandleStreamEvent(&event));
+  assert(!HostInput_TryHandleStreamEvent(&event, false));
   s_manual = true;
   event.type = SDL_EVENT_MOUSE_MOTION;
-  assert(!HostInput_TryHandleStreamEvent(&event));
+  assert(!HostInput_TryHandleStreamEvent(&event, false));
   s_manual = false;
   assert(s_runner_camera_reads == runner_reads);
   HostInput_EndSession();

@@ -917,6 +917,19 @@ static void CheckFoliageShadows(void) {
           float dx = casts[cast][0], dy = casts[cast][1];
           int count = SimBackgroundVoxelModel_FoliageShadowHull(&object, dx, dy, hull);
           CHECK(count >= 8 && count <= kSimBackgroundVoxelFoliageShadowMaxPoints);
+          SimBackgroundVoxelModelPoint samples[kSimBackgroundVoxelFoliageShadowMaxSamples];
+          SimBackgroundVoxelModelPoint saved[kSimBackgroundVoxelFoliageShadowMaxSamples];
+          int samples_count = SimBackgroundVoxelModel_FoliageShadowSamples(&object, samples);
+          CHECK(samples_count >= count);
+          memcpy(saved, samples, (size_t)samples_count * sizeof(*samples));
+          CHECK(SimBackgroundVoxelModel_ProjectFoliageShadow(
+              samples, samples_count, dx, dy, same) == count);
+          CHECK(!memcmp(hull, same, (size_t)count * sizeof(*hull)));
+          CHECK(!memcmp(samples, saved, (size_t)samples_count * sizeof(*samples)));
+          CHECK(!SimBackgroundVoxelModel_ProjectFoliageShadow(NULL, samples_count, dx, dy, same));
+          CHECK(!SimBackgroundVoxelModel_ProjectFoliageShadow(samples, 0, dx, dy, same));
+          CHECK(!SimBackgroundVoxelModel_ProjectFoliageShadow(samples,
+              kSimBackgroundVoxelFoliageShadowMaxSamples + 1, dx, dy, same));
           float twice_area = 0;
           float min_x = plot, min_y = plot, max_x = 0, max_y = 0;
           for (int i = 0; i < count; i++) {

@@ -18,13 +18,20 @@ void Diorama_CaptureCameraPresentationState(DioramaCameraPresentationState *stat
   *state = (DioramaCameraPresentationState){.zoom_offset = 1.25f};
 }
 
+void Sim3DCamera_CapturePresentationState(Sim3DCameraPresentationState *state) {
+  *state = (Sim3DCameraPresentationState){.mode = 1, .orbit_yaw = .25f, .orbit_pitch = -.5f};
+}
+
 void FrameSlot_Capture(FrameSlot *slot, const SimFrameData *sim) {
   assert(!sim);
   ++captured;
-  *slot = (FrameSlot){.snes_width = 256, .snes_height = 224, .visible_width = 256};
+  *slot = (FrameSlot){.snes_width = 256, .snes_height = 224, .visible_width = 256,
+      .sim = {.view = kSimView_Enhanced}};
 }
 void PresentUpload(const FrameSlot *slot) {
   assert(slot->diorama_camera.controls.zoom_offset == 1.25f);
+  assert(slot->sim_camera.mode == 1 && slot->sim_camera.orbit_yaw == .25f &&
+      slot->sim_camera.orbit_pitch == -.5f);
   ++uploaded;
   drawn_slot = slot;
   if (fatal_upload) fatal = true;
