@@ -121,10 +121,6 @@ bool AppendSceneParticle(ActionEffectGeometryWriter *writer,
                                 ArRenderColorF color,
                                 ActionEffectProjectPointFn project_point,
                                 void *userdata);
-bool AppendSceneStarParticle(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    float local_x, float local_y, float size, ArRenderColorF color,
-    ActionEffectProjectPointFn project_point, void *userdata);
 SceneParticleClock
 SceneParticleClockAt(const ActionEffectInstance *effect, unsigned visual_ticks,
                      unsigned index, SceneParticleLifetime timing);

@@ -359,62 +359,6 @@ bool AppendSceneParticle(ActionEffectGeometryWriter *writer,
   return true;
 }
 
-/* A sword-beam sparkle is two crossed additive diamonds. Forty-eight fixed
- * glints independently materialize along the magical path rather than moving
- * backward like fire embers. The bounded extra capacity is explicit in
- * action_effect_render.h.
- * Projected local unit vectors keep the cross on the OBJ plane in Diorama
- * mode instead of leaving it screen-axis-aligned. */
-bool AppendSceneStarParticle(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    float local_x, float local_y, float size, ArRenderColorF color,
-    ActionEffectProjectPointFn project_point, void *userdata) {
-  if (writer->source) {
-    const bool ok = ActionEffectSource_Star(writer->source, effect, local_x, local_y, size, color);
-    writer->vertex_count = (int)writer->source->count;
-    return ok;
-  }
-  ArRenderPointF centre, sample_x, sample_y;
-  if (!project_point(userdata, effect, local_x, local_y, &centre) ||
-      !project_point(userdata, effect, local_x + 1.0f, local_y, &sample_x) ||
-      !project_point(userdata, effect, local_x, local_y + 1.0f, &sample_y))
-    return true;
-  float xx = sample_x.x - centre.x, xy = sample_x.y - centre.y;
-  float yx = sample_y.x - centre.x, yy = sample_y.y - centre.y;
-  const float x_length = hypotf(xx, xy), y_length = hypotf(yx, yy);
-  if (x_length < 0.001f || y_length < 0.001f) return true;
-  xx /= x_length;
-  xy /= x_length;
-  yx /= y_length;
-  yy /= y_length;
-  const float long_x = size * x_length;
-  const float long_y = size * 1.35f * y_length;
-  const float thin_x = fmaxf(0.45f, size * 0.23f * x_length);
-  const float thin_y = fmaxf(0.45f, size * 0.23f * y_length);
-  if (!Reserve(writer, 8, 12)) return false;
-  const int base = writer->vertex_count;
-  const ArRenderPointF points[] = {
-    {centre.x + xx * long_x, centre.y + xy * long_x},
-    {centre.x + yx * thin_y, centre.y + yy * thin_y},
-    {centre.x - xx * long_x, centre.y - xy * long_x},
-    {centre.x - yx * thin_y, centre.y - yy * thin_y},
-    {centre.x + yx * long_y, centre.y + yy * long_y},
-    {centre.x + xx * thin_x, centre.y + xy * thin_x},
-    {centre.x - yx * long_y, centre.y - yy * long_y},
-    {centre.x - xx * thin_x, centre.y - xy * thin_x},
-  };
-  for (unsigned i = 0; i < 8; i++)
-    writer->vertices[writer->vertex_count++] =
-        (ArRenderVertex2D){points[i], color, {0.0f, 0.0f}};
-  static const int kDiamonds[12] = {
-    0, 1, 2, 0, 2, 3,
-    4, 5, 6, 4, 6, 7,
-  };
-  for (unsigned i = 0; i < 12; i++)
-    writer->indices[writer->index_count++] = base + kDiamonds[i];
-  return true;
-}
-
 SceneParticleClock
 SceneParticleClockAt(const ActionEffectInstance *effect, unsigned visual_ticks,
                      unsigned index, SceneParticleLifetime timing) {
