@@ -36,6 +36,8 @@ The game-data references describe the US ROM unless stated otherwise. Entries
 marked uncertain should not be treated as verified offsets or behavior.
 
 - [RAM map](ram-map.md) and [ROM map](rom-map.md) — known state and data regions.
+- [Projectile identity and lifetime](ram-map.md#projectile-identity-and-lifetime)
+  — retained source/backlink semantics, native phase continuity, and effect ownership.
 - [Regional differences: technical evidence](regional-differences-technical.md)
   — ROM tables, native code boundaries, measurements, and limits of the evidence.
 - [Regional media extraction and package format](regional-media.md)

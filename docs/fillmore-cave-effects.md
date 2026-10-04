@@ -480,10 +480,15 @@ colors. One grit path that terminated on spike artwork was removed.
 
 Statue balls are identified by source `$B3BF`, animation `$7E:4000`, saved resume
 `$B3E9`, native rolling/falling handlers `$B406/$B42F` and states `$0A/$0B`.
-Visuals `$1B..$1E` map to compositions `$48F0/$48FC/$4908/$4914`. A live, aligned
-backlink must identify the parent statue in state `$24`; the shared source by
-itself is insufficient. These identities retain the loaded regional runtime
-contract. Capture follows the room's `$008F` OBJ band. A broad red-orange glow,
+Visuals `$1B..$1E` map to compositions `$48F0/$48FC/$4908/$4914`. On first
+effect admission, an aligned backlink must identify a live parent statue in
+state `$24`; the shared source by itself is insufficient. The admitted ball then
+owns its lifetime, so a changed, retired or reused statue slot cannot extinguish
+its enhancement. Its effect clock freezes when its position stops, even if native
+velocity remains nonzero. The [RAM contract](ram-map.md#projectile-identity-and-lifetime)
+distinguishes this spawn evidence from continuous attachment. These identities
+retain the loaded regional runtime contract. Capture follows the room's `$008F`
+OBJ band. A broad red-orange glow,
 restrained warm core and short ember wake move with the projectile. They use the
 existing two-glow budget and half the usual fireball particle count, without a
 new render pass or texture. The native red sprite remains readable.

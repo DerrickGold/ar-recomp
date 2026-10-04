@@ -328,9 +328,13 @@ Native OAM in the assisted boss replay also places the player beam in priority
 101 paired WRAM snapshots match before and after that projection correction.
 
 Fireball effects now survive the root boss's death-state change to `$A593`
-and flags `$0032`. Recognition uses the child's flight identity and its
-retained root backlink, without requiring the parent to remain active or
-keep its boss flag and composition. A moving shot keeps its normal trail.
+and flags `$0032`. Recognition checks the child's flight identity and retained
+root backlink at first admission, without requiring the parent to remain active
+or keep its boss flag and composition. The shared lifecycle contract now retains
+that admission if the root slot is subsequently reused as well; the child's own
+identity and continuity govern its remaining lifetime. Cold observation still
+requires retained root evidence. See [projectile identity and lifetime](ram-map.md#projectile-identity-and-lifetime).
+A moving shot keeps its normal trail.
 When its world position stops changing, its effect clocks and owned smoke
 puffs freeze; clearing native velocity preserves the last trail direction.
 Frozen smoke retires when that shot becomes hidden, disappears or is replaced.

@@ -288,7 +288,8 @@ Bloodpool Act 1 boss death also has a native replay reproduction.
 
 The source of truth is
 [`action_scene_effect_rules.inc`](../src/action/action_scene_effect_rules.inc).
-Its 24 entries declare recognition, room, ownership, dependency, and clock.
+Its 24 entries declare recognition, room, ownership, dependency, clock, and an
+optional predecessor for a phase that continues the same native child.
 Original and Death Heim sources remain separately restricted to their rooms.
 
 **Record** means the record's own identity defines the entire lifetime.
@@ -316,7 +317,7 @@ stationary animation. These clock choices are explicit, independent of ownership
 | MarahnaLink | Horizontal/vertical lightning between endpoints (`E18E`, partner `E254`) | Relationship is intentional: both endpoints and midpoint must remain valid | Attached / Gameplay |
 | ViperBody | Marahna boss charge and orb on the boss itself (`E483`, rematch `F72A`) | Body phases correctly end with their own record/pose | Record / Gameplay |
 | ViperBolt | Launched diagonal lightning from that boss | Mutable parent attack state/handler and liveness rejected child | Spawn / Motion |
-| ViperGround | Moving floor charge from that boss | Required parent to remain in its exact post-impact state | Spawn / Motion |
+| ViperGround | Moving floor charge from that boss | Required parent to remain in its exact post-impact state; diagonal-to-floor is the same child | Spawn / Motion; continues ViperBolt |
 | AitosLava | Rising, held, then falling lava fireball (`CF9E`) | Already independent; zero-speed hold is intentional | Record / Gameplay |
 | AitosStatue | Statue flame growth and breath (`D5B1`, `D5C0`) | Effect belongs to the stationary flame record itself | Record / Gameplay |
 | AitosRock | Molten rock launch (`CEEC`) | Already independent; native launch reuses the mouth's own slot | Record / Motion |
@@ -347,10 +348,13 @@ without allowing the parent to revoke an admitted child's lifetime.
 2. `AdmitSceneObject` applies the ownership rule centrally. Spawn proof runs only
    for a new generation; attached proof runs on every capture. A missing required
    dependency validator rejects admission.
-3. Continuation requires the same family, own source/animation/backlink key, and
+3. Continuation requires the same family or a declared predecessor, own source/animation/backlink key, and
    plausible position continuity. Native inactive/empty records, rejected own
    signatures, room transitions, and observer resets retire history. Another
-   projectile in the same renderer kind cannot inherit admission across families.
+   projectile in the same renderer kind cannot inherit admission across unrelated
+   families. `ViperBolt` → `ViperGround` is the explicit same-child transition:
+   generation and age survive while the new phase clock starts at zero. The
+   reverse transition and fresh ground-charge admission still require spawn proof.
 4. Motion clocks retain the last heading when a previously admitted, unchanged
    projectile clears velocity. This does not weaken admission of new stationary
    lookalikes. Gameplay clocks retain intentional stationary phases. Zero elapsed
@@ -361,7 +365,9 @@ without allowing the parent to revoke an admitted child's lifetime.
 6. `TestSceneLifecycleContracts` iterates **every registry ID** and demands an
    independently seeded WRAM fixture. Adding a registry entry without that fixture
    fails the test. Fixture expectations for ownership and clock are not generated
-   from the production policy, so declaring the wrong policy also fails.
+   from the production policy, so declaring the wrong policy also fails. Each
+   declared predecessor also requires an independent transition fixture through
+   `TestSceneContinuationContracts`; a new edge cannot silently skip coverage.
 
 The matrix checks unchanged-child survival across parent flag, handler, state,
 inactive status, composition and slot changes; stable generation and clocks;
@@ -391,6 +397,8 @@ For a new effect, choose its owner and clock in the registry, keep its signature
 object-local, provide any birth/attachment validator, and add a measured fixture
 with the intended lifetime expectations. A new phase that changes ownership must
 have a distinct family entry; sharing a renderer does not imply sharing a lifetime.
+When two entries describe consecutive phases of the same native child, declare
+the predecessor explicitly and test that transition after parent loss.
 
 ### Validation of this change
 
@@ -409,3 +417,10 @@ and **57 full WRAM snapshots** are byte-identical. This confirms preservation of
 the working boss-death presentation and native behavior. Other families' parent
 death/reuse scenarios are validated with captured-layout fixtures, not claims of
 complete native playthrough coverage.
+
+Documentation cross-checking exposed a missing same-child transition in the
+initial registry: Viper's floor phase rechecked the parent after its already
+admitted diagonal phase. Existing RAM facts and generated `$E579` control flow
+confirm a state-7 change through `$8657`, not a second allocation. The added
+original/rematch, both-facing regression failed on the initial implementation;
+the declared predecessor preserves admission, generation, age and phase timing.

@@ -441,6 +441,16 @@ preset** selects the Act 1 boss's fire children. The preset is supported by nati
 descriptor/handler analysis and observer tests; gameplay appearance still needs
 review. Family IDs describe native game identities, independent of regional art.
 
+The optional `actor-parent` filter matches the parent's source captured when the
+child is first observed. That association remains fixed for the child's lifetime,
+even if the parent dies or its slot is reused. It resets with the child's identity
+or room/observer reset. If the parent source is already unavailable on first
+observation, a parent-specific filter cannot match; a later occupant of that slot
+does not retroactively become the child's parent. State, visual-frame and handler
+filters still follow the child's current facts. See the native
+[projectile identity and lifetime](../../docs/ram-map.md#projectile-identity-and-lifetime)
+reference.
+
 Attached X/Y are offsets from the actor. The map marker uses the reference actor
 position; dragging edits its offset. **Preview attached effect** or **Apply &
 preview** supplies one matching visual actor sample and lets you scrub its age.
