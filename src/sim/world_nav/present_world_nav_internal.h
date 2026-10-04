@@ -72,7 +72,7 @@
 
 
 typedef struct WorldNavigationModelBounds {
-  float minimum_rise, maximum_rise, angular_radius;
+  float minimum_rise, maximum_rise, angular_radius, footprint_extent;
 } WorldNavigationModelBounds;
 typedef struct WorldNavigationCliffProjection {
   Sim3DDepthVertex depth[4];

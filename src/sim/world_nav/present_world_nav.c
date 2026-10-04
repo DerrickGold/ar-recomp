@@ -654,9 +654,10 @@ static float WorldNavigationModelHeightBound(const FrameSlot *slot) {
     return 0.0f; /* The draw path rejects invalid captures. */
   const bool same_bounds_basis =
       g_world_nav_models.detail == slot->sim.background_voxel_detail &&
-      g_world_nav_models.style == slot->sim.background_voxel_style &&
-      g_world_nav_models.chart_radius_tiles == WorldNavigationChartRadius(slot);
-  if (same_bounds_basis && g_world_nav_models.object_count == towns->object_count &&
+      g_world_nav_models.style == slot->sim.background_voxel_style;
+  const float chart_radius = WorldNavigationChartRadius(slot);
+  if (same_bounds_basis && g_world_nav_models.chart_radius_tiles == chart_radius &&
+      g_world_nav_models.object_count == towns->object_count &&
       !memcmp(g_world_nav_models.objects, towns->objects,
           towns->object_count * sizeof(towns->objects[0])))
     return g_world_nav_models.maximum_rise;
@@ -680,12 +681,16 @@ static float WorldNavigationModelHeightBound(const FrameSlot *slot) {
             fabsf(measured.max_y - footprint.depth * .5f));
         bound->minimum_rise = measured.min_z * proportions->height_scale / kSimTownCellPixels;
         bound->maximum_rise = measured.max_z * proportions->height_scale / kSimTownCellPixels;
-        bound->angular_radius = hypotf(extent_x, extent_y) * proportions->footprint_scale /
-            (kSimTownCellPixels * WorldNavigationChartRadius(slot));
+        bound->footprint_extent = hypotf(extent_x, extent_y) * proportions->footprint_scale;
       }
       memcpy(&g_world_nav_models.objects[i], object, sizeof(*object));
     }
-    maximum = fmaxf(maximum, g_world_nav_models.bounds[i].maximum_rise);
+    /* Curvature changes the culling angle, not the authored model envelope.
+     * Keep the unscaled extent so switching view families avoids rebuilding
+     * every LOD and windmill pose and still matches a cold calculation. */
+    WorldNavigationModelBounds *bound = &g_world_nav_models.bounds[i];
+    bound->angular_radius = bound->footprint_extent / (kSimTownCellPixels * chart_radius);
+    maximum = fmaxf(maximum, bound->maximum_rise);
   }
   g_world_nav_models.object_count = towns->object_count;
   g_world_nav_models.detail = slot->sim.background_voxel_detail;
