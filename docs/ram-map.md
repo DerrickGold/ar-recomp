@@ -9,7 +9,7 @@ Unless a release is explicitly named, addresses below describe the US ROM.
 ### Game Mode & Navigation
 | Address | Size | Description |
 |---------|------|-------------|
-| $7E:0018 | 1 | Mode/region group: `$00` non-action (town/world/UI); `$01-$06` six two-act kingdom action regions; `$07` Death Heim boss-rush/final-boss action region (no ordinary acts); `$08` ending/credits (post-Death-Heim: mode-0 world montage cycling `$19=09`↔towns, then `$18=08` — presenter at `$02:AA9C`, stamps 'ACT' into SRAM `$70:1FF0`, waits for Start, exits to `$00:8059`) |
+| $7E:0018 | 1 | Mode/region group: `$00` non-action (town/world/UI); `$01-$06` six two-act kingdom action regions; `$07` Death Heim boss-rush/final-boss action region (no ordinary acts); `$08` ending/credits (post-Death-Heim: mode-0 world montage cycling `$19=09`↔towns, then `$18=08` — presenter at `$02:AA9C`, stamps 'ACT' into SRAM `$70:1FF0`, parks until reset; the recomp yields so the host overlay remains accessible. Only the Game Over path waits for Start and exits to `$00:8059`) |
 | $7E:0019 | 1 | Current raw map/sub-flow number (second byte of map ID). With `$18=00`, `$01-$06` are the six simulation towns in order (Fillmore through Northwall), `$07` is Sky Palace, `$08` is the temple, and `$09` is the world map. In action mode it is not a uniform act selector: Act 2 starts at `$02/$02/$03/$04/$04/$05` for regions `$01-$06`; Death Heim uses `$01` for its hub, `$02-$07` for the six rematch arenas, and `$08` for the final boss |
 | $7E:001A | 1 | Destination map number |
 | $7E:001B | 1 | Destination map group (first byte of map ID) |
@@ -737,10 +737,26 @@ from the later bank. [Source and tests](regional-differences-technical.md#town-t
 | $7F:3800-$7F:53FF | Construction predicate `$03:96BE` requires bit2 **set**, plus tile `$08` or `$D0-$DA`; a visually empty cell is not necessarily available. |
 | $7F:6BCF+2N / $7F:6BDB+2N | X/Y plot coordinates consumed as the flood-fill seed by US/PAL `$03:9156` / JP `$03:8F3B`. Each is multiplied by four to obtain cell coordinates. The wrapper clears/rebuilds the town's visited bits; treating every eligible terrain cell as visited bypasses real construction constraints. |
 | $7F:6B26+2N | Per-town **support capacity** (census `$03:C07E`: US32/48/72, JP16/24/32; bridges32US/16JP). Admission checks old population ≤ support+2; not a resident cap |
-| $7F:6BE7-$7F:77E6 | Per-town **structure-record arrays**, `$200` each (base = `word[$03:DC74+town*2]`): 128 × 4-byte records `{cell X, cell Y, flags/type, action/progress}`. Flags byte: bit7 active, **bit6 not-yet-contributing / per-class visual variant — NOT a construction flag** (the allocator never sets it; on a class-3 windmill it is the "no wind" story state), bits 4-5 subtype (house civ level / wheat `$10` / bridge orientation), low nibble type class (0 house, 1 bridge, 2 field, 3/4 factory tier). Action byte bit7 is the `$03:A004` initialization latch; completed records can remain at initialized action0. It is not a visual-program completion flag. Allocator `$03:9D9F`; the 128-slot exhaustion is the game's 128-structure cap |
+| $7F:6BE7-$7F:77E6 | Per-town **structure-record arrays**, `$200` each (base = `word[$03:DC74+town*2]`): 128 × 4-byte records `{cell X, cell Y, flags/type, action/progress}`. Flags byte: bit7 active, **bit6 not-yet-contributing / per-class visual variant — NOT a construction flag** (the allocator never sets it; on a class-3 windmill it is the "no wind" story state), bits 4-5 subtype (house civ level / wheat `$10` / bridge orientation), low nibble type class (0 house, 1 bridge, 2 field, 3 windmill, 4 factory, 5 animal pen observed in Aitos). Action byte bit7 is the `$03:A004` initialization latch; completed records can remain at initialized action0. It is not a visual-program completion flag. Allocator `$03:9D9F`; the 128-slot exhaustion is the game's 128-structure cap |
 | $7F:77E7-$7F:7BE6 | Slot layout, from interpreter `$03:A4F7` (decoded 2026-08-17): `+0` countdown, decremented once per tick, entry executes when it hits 0; `+1` loop repeat counter; `+2` program cursor (bank-`$03` address of the NEXT entry); `+4` loop restart address, set by the program's `$FF` opcode; `+6` address of the CURRENT entry's draw-list pointer word, which `$03:A591` dereferences to redraw. The armer initialises `+0`/`+1`/`+2`/`+4` only, so `+6` is stale until the first tick |
 | $7F:7BE7 | Step/tick scratch variable (record index during scanner passes) |
 | $7F:7BE9 | Scanner gate: nonzero makes `$03:A4A8/$03:A4B8` (arm rebuild/construction visual step) and `$03:A4F7` early-out |
+
+#### Aitos animal pen
+
+In a US Aitos capture, slot 0 at `$7F:71E7` (`$7F:6BE7 + 3*$200`) contains
+`10 18 85 01`: cell `(16,24)`, active class 5, action 1. This is an ordinary
+structure record with a 2×2-cell footprint; the slot and coordinates are an
+observed instance, not a fixed identity test.
+
+All four semantic cell-map entries in that footprint are `$E7`. The displayed
+BG1 artwork instead matches structure-atlas IDs `$E0,$E1 / $E8,$E9` at
+`$7E:3100`, as specified by the [pen's ROM draw lists](rom-map.md#aitos-animal-pen).
+Comparing all four 8×8 tile words per cell with mask `$DDFF` confirms the match
+(ignoring definition traversal bit 9 and tile-priority bit 13). These are distinct ID
+spaces: the pen's structure-atlas `$E1` does not identify a north-south bridge
+as a semantic cell-map `$E1` does. Use the record class plus displayed artwork
+when identifying the enclosure; a semantic marker is not an atlas index.
 
 #### Record `+3` = action/progress byte, and the per-type state machines (mapped 2026-07-22)
 

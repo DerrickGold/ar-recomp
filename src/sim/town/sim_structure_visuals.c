@@ -68,7 +68,7 @@ static const SimStructureVisualFrame kFactoryFrames[] = {
   {0x36, kSimStructureVisualState_Finished, 0},
 };
 
-/* Class 5's construction and rebuild programs ($03:D6BF/$03:D53E) both
+/* Class 5's construction and rebuild draw lists ($03:D6BF/$03:D53E) both
  * stamp the finished $E0/$E1/$E8/$E9 enclosure in one step. */
 static const SimStructureVisualFrame kAnimalPenFrames[] = {
   {0xE0, kSimStructureVisualState_Finished, 0},

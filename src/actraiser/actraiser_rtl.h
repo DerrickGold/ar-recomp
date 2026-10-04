@@ -98,6 +98,8 @@ void ActRaiser_DestroyGameCoroutine(void);
 /* Suspend only from the executing game coroutine. Host UI decisions use this
  * without issuing a native VBlank/input/timer update while their menu is open. */
 void ActRaiser_YieldToHost(void);
+/* Terminal credits self-loops: yield until the host resets the coroutine. */
+RecompReturn ActRaiser_CreditsWaitForReset(CpuState *cpu);
 /* Native vblank replacement: consumes the JSR return frame and yields. */
 RecompReturn ActRaiser_WaitForVblank(CpuState *cpu);
 int ActRaiser_ReadRdnmi(const RtlRdnmiReadContext *context);

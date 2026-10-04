@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Render an exhaustive SIM-town background-tile classification catalog.
+"""Render a SIM-town background-tile classification catalog.
 
 The catalog joins two authoritative sources:
 
 * a GF-stable SIM snapshot supplies the current town's BG1 CHR, palette,
   64x64-tile map, terrain/structure metatile definitions, and structure records;
-* the stock ROM supplies all 94 structure draw lists at $03:D928-$03:DC73.
+* the stock ROM supplies the 94 structure draw lists at $03:D928-$03:DC73.
+
+That draw-list range is not exhaustive: the animal-pen lists at $03:D6BF and
+$03:D53E lie outside it (see docs/rom-map.md, Aitos animal pen).
 
 The result is intended for the object-extrusion research pass: it keeps every
 tile/metatile/list address visible so houses, cathedrals, factories, and trees
@@ -65,7 +68,7 @@ VISUAL_WORD_MASK = 0xFDFF              # $03:9B5A/$9C43 clear bit 9
 DRAW_LIST_BANK = 0x03
 DRAW_LIST_START = 0xD928
 DRAW_LIST_END = 0xDC74                 # exclusive
-# Visual shortlist only: the exhaustive sheet remains authoritative. These are
+# Visual shortlist only: use the full sheet for this draw-list range. These are
 # the obvious house/support/special/factory compositions; the review CSV keeps
 # them unclassified until a human assigns names and footprint/elevation roles.
 LIKELY_BUILDING_DRAW_LISTS = frozenset(
@@ -784,15 +787,16 @@ def write_readme(path: Path, snapshots: list[Snapshot], draw_lists: list[DrawLis
         "It deliberately keeps authentic tile IDs, metatile IDs, draw-list addresses, and town",
         "coordinates visible.",
         "",
-        f"The building side is exhaustive: {len(draw_lists)} ROM draw lists at",
-        f"`$03:D928-$03:DC73` reference {len(structure_ids)} structure metatiles. The terrain",
-        "candidate sheets are conservative: they contain every actual terrain metatile ID",
+        f"The building side covers {len(draw_lists)} ROM draw lists at",
+        f"`$03:D928-$03:DC73`, referencing {len(structure_ids)} structure metatiles.",
+        "This range omits other lists, including the animal pen at `$03:D6BF/$03:D53E`.",
+        "The terrain candidate sheets are conservative: they contain every actual terrain metatile ID",
         "present in that town's current 32x32 cell map (the `$E0-$EF` structure marks are",
         "excluded), so trees are not missed; ordinary terrain can simply be left unclassified.",
         "",
         "Use `draw-list-classification.csv` for whole structures and multi-cell relationships.",
         "The building-focused PNG is a visual shortlist for convenience, not a semantic claim;",
-        "the exhaustive 94-list sheet and `candidate_scope` column remain available for review.",
+        "the full 94-list range sheet and `candidate_scope` column remain available for review.",
         "Use `town-cell-classification.csv` for base landmarks such as the cathedral and for",
         "tree cells found in the full live map; it records all four 8x8 BG words per 16x16 cell.",
         "Use `bg-tile-classification.csv` only when classification needs to reach the underlying",

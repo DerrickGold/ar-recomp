@@ -3904,6 +3904,7 @@ static void TestGenericActorFacts(void) {
 
 int main(void) {
   TestSceneLifecycleContracts();
+  TestSceneContinuationContracts();
   TestAuthoredParentProvenance();
   TestBloodpoolAct1BossFireballs();
   TestBloodpoolFireballDeathLifetime();

@@ -544,7 +544,7 @@ typedef struct ActionSceneEffectFrame {
  * the actor's outer generation. */
 typedef enum ActionSceneEffectFamily {
   kActionSceneFamily_None,
-#define SCENE_RULE(name, kind, match, phase, room, ownership, dependency, clock) \
+#define SCENE_RULE(name, kind, match, phase, room, ownership, dependency, clock, predecessor) \
   kActionSceneFamily_##name,
 #include "action_scene_effect_rules.inc"
 #undef SCENE_RULE

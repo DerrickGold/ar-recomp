@@ -1069,14 +1069,14 @@ static void TestFramePlanCapture(void) {
   CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available);
   CHECK(plan.layer[1].source == kActionBgSource_WorldMap);
   CHECK(plan.layer[1].wrap_world_x);
-  CHECK(plan.layer[1].default_edge == kActionBgEdge_Repeat);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_RawWrap);
   CHECK(plan.layer[1].default_motion == kActionBgMotion_FillRelative);
   CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
   CHECK(plan.layer[1].horizontal_extent.left == 128 &&
         plan.layer[1].horizontal_extent.right == 128);
   CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
   CHECK(plan.layer[1].band_count == 0);
-  CHECK(policy.repeat_layers == kActRaiserBgLayerMask_Bg2);
+  CHECK(policy.repeat_layers == 0);
   CHECK(policy.normal_scroll_layers == 0);
 
   wram[kActRaiserWram_CurrentMap] = 9;

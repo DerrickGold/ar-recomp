@@ -1932,7 +1932,7 @@ typedef enum SceneRoom {
   kSceneRoom_AitosLava, kSceneRoom_AitosStatue, kSceneRoom_AitosBoss, kSceneRoom_Wizard
 } SceneRoom;
 typedef struct SceneEffectRule {
-  uint8_t kind, phase_filter;
+  uint8_t kind, phase_filter, predecessor;
   SceneRoom room;
   SceneOwnership ownership;
   SceneClock clock;
@@ -1941,9 +1941,10 @@ typedef struct SceneEffectRule {
 } SceneEffectRule;
 
 static const SceneEffectRule kSceneRules[kActionSceneFamily_Count] = {
-#define SCENE_RULE(name, kind, match, phase, room, ownership, dependency, clock) \
+#define SCENE_RULE(name, kind, match, phase, room, ownership, dependency, clock, predecessor) \
   [kActionSceneFamily_##name] = {kActionEffect_##kind, kActionEffectPhase_##phase, \
-      kSceneRoom_##room, kSceneOwnership_##ownership, kSceneClock_##clock, match, dependency},
+      kActionSceneFamily_##predecessor, kSceneRoom_##room, kSceneOwnership_##ownership, \
+      kSceneClock_##clock, match, dependency},
 #include "action_scene_effect_rules.inc"
 #undef SCENE_RULE
 };
@@ -1991,9 +1992,12 @@ static bool SceneRuleRoomMatches(SceneRoom room, uint8_t group, uint8_t map, uin
 static bool SceneTrackContinues(const ActionEffectObserverTrack *track,
                                 const ActionObjectSnapshot *object,
                                 uint8_t family, unsigned ticks) {
-  const uint8_t kind = kSceneRules[family].kind;
+  const SceneEffectRule *rule = &kSceneRules[family];
+  const uint8_t kind = rule->kind;
   const uint32_t key = SceneContinuityKey(object, kind);
-  return track->active && track->continuity_valid && track->scene_family == family &&
+  return track->active && track->continuity_valid &&
+      (track->scene_family == family ||
+       (rule->predecessor && track->scene_family == rule->predecessor)) &&
       track->kind == kind && track->continuity_key == key &&
       !SceneTrackDiscontinuous(track, object, kind, key, ticks);
 }

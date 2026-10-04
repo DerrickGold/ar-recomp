@@ -44,9 +44,8 @@ Development is active.
 
 | | |
 |---|---|
-| ✅ | **Action stages:** All USA action routes across the six regions and Death Heim have been completed end to end. |
-| 🟡 | **Simulation mode:** Event coverage is confirmed in Fillmore, Bloodpool, Kasandora, Aitos, and Marahna; Northwall remains to be validated. |
-| 🟡 | **Diorama mode:** Every action route except Northwall has been play-tested, with further room-by-room refinement planned. |
+| ✅ | **Native graphics:** All six towns, all 12 acts, Death Heim, and the ending have been play-tested, including overlay access at The End. The full USA campaign is verified completable end to end. |
+| 🟡 | **Diorama mode:** Every action route except Northwall has been play-tested. Follow-up testing and room-by-room polishing of stage graphics and environmental effects are ongoing across the levels. |
 | 🟡 | **Platforms:** Windows, macOS arm64, and Steam Deck have been tested and boot successfully. macOS x86_64 and generic Linux still need representative launch testing. |
 | 🟡 | **Localization and regional support:** Language packs, enhanced fonts, and Workshop authoring are available. [US, Japanese, and European gameplay presets](docs/regional-settings.md) support per-campaign customization, with independent [regional artwork and music](docs/regional-media.md). Combined regional play-testing is ongoing. |
 | 📋 | **Achievements:** In planning. |

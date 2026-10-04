@@ -374,3 +374,70 @@ static void TestAuthoredParentProvenance(void) {
     CHECK(actor && !actor->parent_source);
   }
 }
+
+/* $E579 selects state 7 on the existing child; saved resume becomes $E57E.
+ * An effect-phase transition is not a new native projectile allocation. */
+static void TestViperProjectilePhaseContinuation(void) {
+  static uint8_t ram[kActRaiserWramSize];
+  static ActionEffectObserver observer;
+  static ActionSceneEffectFrame frame;
+  for (unsigned rematch = 0; rematch < 2; ++rematch) {
+    for (unsigned right = 0; right < 2; ++right) {
+      LifecycleFixture fixture;
+      SeedLifecycleFixture(ram, kActionSceneFamily_ViperBolt, rematch, &fixture);
+      const unsigned child = fixture.child, parent = fixture.parent;
+      SeedMarahnaBossBolt(ram, 11, 49, right);
+      Write16(ram, child + 0x32, rematch ? 0xF72A : 0xE483);
+      Write16(ram, child + 2, right ? 316 : 196);
+      Write16(ram, child + 4, 480);
+      ActionEffectObserver_Reset(&observer);
+      ActionSceneEffects_CaptureFrame(&observer, &frame, ram, sizeof(ram), 1);
+      const ActionEffectInstance *effect = LifecycleEffect(&frame, child);
+      CHECK(effect && effect->phase == kActionEffectPhase_MarahnaBossLightningBolt);
+      if (!effect) continue;
+      const uint32_t generation = effect->generation;
+      memset(ram + parent, 0, 0x40);
+      SeedMarahnaBossGroundCharge(ram, 11, 49, right, 0x13);
+      Write16(ram, child + 0x32, rematch ? 0xF72A : 0xE483);
+      ActionSceneEffects_CaptureFrame(&observer, &frame, ram, sizeof(ram), 1);
+      effect = LifecycleEffect(&frame, child);
+      CHECK(effect && effect->generation == generation && effect->age_ticks == 1);
+      CHECK(effect && effect->phase == kActionEffectPhase_MarahnaBossLightningGroundCharge);
+      CHECK(effect && !effect->phase_ticks);
+      ActionSceneEffects_CaptureFrame(&observer, &frame, ram, sizeof(ram), 8);
+      effect = LifecycleEffect(&frame, child);
+      CHECK(effect && effect->generation == generation && effect->age_ticks == 1);
+      /* The declared transition is directional: a new bolt must not borrow
+       * the ground charge's proof. Nor can a cold observer recognize it. */
+      SeedMarahnaBossBolt(ram, 11, 49, right);
+      Write16(ram, child + 0x32, rematch ? 0xF72A : 0xE483);
+      Write16(ram, child + 2, right ? 316 : 196);
+      Write16(ram, child + 4, 480);
+      ActionSceneEffects_CaptureFrame(&observer, &frame, ram, sizeof(ram), 1);
+      CHECK(!LifecycleEffect(&frame, child));
+      ActionEffectObserver_Reset(&observer);
+      SeedMarahnaBossGroundCharge(ram, 11, 49, right, 0x13);
+      Write16(ram, child + 0x32, rematch ? 0xF72A : 0xE483);
+      ActionSceneEffects_CaptureFrame(&observer, &frame, ram, sizeof(ram), 1);
+      CHECK(!LifecycleEffect(&frame, child));
+    }
+  }
+}
+
+static void TestSceneContinuationContracts(void) {
+  static const uint8_t predecessors[kActionSceneFamily_Count] = {
+#define SCENE_RULE(name, kind, match, phase, room, ownership, dependency, clock, predecessor) \
+    [kActionSceneFamily_##name] = kActionSceneFamily_##predecessor,
+#include "action_scene_effect_rules.inc"
+#undef SCENE_RULE
+  };
+  for (unsigned family = 1; family < kActionSceneFamily_Count; ++family) {
+    if (family == kActionSceneFamily_ViperGround) {
+      CHECK(predecessors[family] == kActionSceneFamily_ViperBolt);
+      TestViperProjectilePhaseContinuation();
+    } else {
+      /* Every additional declared edge needs its own independent phase test. */
+      CHECK(predecessors[family] == kActionSceneFamily_None);
+    }
+  }
+}

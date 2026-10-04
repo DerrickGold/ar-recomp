@@ -468,9 +468,13 @@ special case `$00:82C3` (`CMP #$08` → `LDA #$02; PHA; LDX #$AA9B; PHX; RTL`, a
 cross-bank RTL long-jump; the only site of that byte shape in bank 0). The
 ending/credits presenter `$02:AA9C` relocates S to `$01FF`, drives 17+ credit
 entries via `JSR $02:AB30`, stamps `'A','C','T'` into SRAM `$70:1FF0-1FF2`
-(the beat-the-game marker), waits for Start (`$4219` bit 4), and RTL-jumps
-back to the main loop top `$00:8059` (the ROM's only other RTL-jump site,
-`$02:AAFD`).
+(the beat-the-game marker), then shows page 17 (The End). The normal and
+professional completion pages end in `BRA -2` self-loops at `$02:AADF` and
+`$02:AAE7`, awaiting console reset. The recomp replaces those terminal loops
+with host yields so its overlay can reset or quit while the final page stays
+visible. Only the Game Over path (page 19, `$02:AAE9`) waits for Start
+(`$4219` bit 4) and RTL-jumps back to the main loop top `$00:8059` (the ROM's
+only other RTL-jump site, `$02:AAFD`).
 
 The final asset-script entry is **08/01**, not the preceding final-boss entry
 07/08. It selects video profile `$2F`, uploads sixteen colours from file
@@ -527,10 +531,13 @@ ram-map "Road Construction Encoding" for the bit layout):
 | `$03:855C-$85C9` / JP `$03:851B-$8579` | `0x1855C` / `0x1851B` | Growth-status producer. Western store merges computed `$7C05` flags into preserved status bits `$0050`; JP computes temporary flags but stores only preserved bits. Low-growth thresholds and plot-count tables also differ; [bounded native evidence](regional-differences-technical.md#regional-growth-status-producer). |
 | `$03:DC74-$03:DC7F` | `0x1DC74` | Per-town structure-record array base pointers (`$7F:6BE7 + town*0x200`, 128 × 4-byte records each) |
 | `$03:AB6C+` | `0x1AB6C` | Per-town pointers to initial structure-record images (`$FF`-terminated 4-byte records, copied at new-game init `$03:AA51`) |
-| `$03:A017/$A364/$A0D1/$A1A1/$A23D/$A29C/$A2F5` | `0x1A017+` | Per-type-class 8-entry action tables (pushed-address−1): house/bridge/field/factory-tier/4/5/6 × actions 0-7. Bridge rows 2-6 all point at the `$A435` no-op — the bridge-indestructibility row |
+| `$03:A017/$A364/$A0D1/$A1A1/$A23D/$A29C/$A2F5` | `0x1A017+` | Per-type-class 8-entry action tables (pushed-address−1): house/bridge/field/windmill/factory/animal pen/class 6 × actions 0-7. Bridge rows 2-6 all point at the `$A435` no-op — the bridge-indestructibility row |
 | `$03:D4D2+/$03:D4E2+` | `0x1D4D2/0x1D4E2` | Two indirections: `program = word[ word[base + class] + variant ]`, both operands byte offsets, so classes and variants step by 2 |
 | `$03:D591/$D5A5/$D5B9`, `$03:D716/$D73A/$D74E` | `0x1D591`, `0x1D716` | **Windmill (visual class 6)** rebuild and construction programs, variants 0/2/4 = turning / restarting / stopped. Record class 3 selects class 6 at `$03:9F37` (rebuild) and `$03:A21A` (construction) |
 | `$03:D70C`, `$03:D58B` | `0x1D70C` | **Factory tier (visual class 8)** construction and rebuild programs, from record class 4 (`$03:A24D`, `$03:9F44`) |
+| `$03:D6B7` / `$03:D536` | `0x1D6B7` / `0x1D536` | **Animal pen (record class 5, visual class byte offset `$0A`)** construction/rebuild variant-pointer entries, selected through `$D4D2+$0A` / `$D4E2+$0A`, variant offset 0 |
+| `$03:D6B9-$D6BE` / `$03:D538-$D53D` | `0x1D6B9` / `0x1D538` | Animal-pen construction/rebuild programs: one `{30, draw_list}` entry followed by `$00FD` (end). Both stamp the finished pen; these programs have no separate scaffold frame |
+| `$03:D6BF-$D6CB` / `$03:D53E-$D54A` | `0x1D6BF` / `0x1D53E` | Identical animal-pen draw lists: count 4, then `{0,0,$E0}`, `{1,0,$E1}`, `{0,1,$E8}`, `{1,1,$E9}`. These are structure-atlas metatile IDs |
 | `$03:D5EF+`/`$D784+` | `0x1D5EF` | **House (visual class 0)** rebuild/construction programs, variants `$00`-`$0E` by development level and `$10`-`$1E` for the same levels with record flag `$40` set. A `+$10` pair shares both scaffold frames with its base and differs only in the finished metatile it lands on (`$02` vs `$03` at level 0) — which is why `$40` on a house is a finished-art variant, not a construction marker |
 | `$03:D754-$D77E` | `0x1D754` | **Bridge (visual class 2)** construction programs: first stage `$4C/$4D`, completed `$44/$45`; variants `+8` select Northwall ice `$EA/$EB` then `$E2/$E3`. Orientation occupies variant bit 2 and build stage bit 1 |
 | `$03:DBBD/$DBCA/$DBD7/$DBE4` | `0x1DBBD` | Windmill construction draw lists: top-left metatiles `$04`/`$06`/`$14`/`$16`. The fourth draws the finished mill, identical to blade frame 2 |
@@ -553,6 +560,19 @@ Draw lists are a **one-byte** count followed by that many `{dx, dy, metatile}` t
 to the record's cell X/Y. This is why a windmill's animation is not tile animation: the town
 has exactly one animated CHR page and it is water (see rendering §7). A mill turns because
 its step program rewrites its own 2×2 block in the BG1 tilemap.
+
+#### Aitos animal pen
+
+The US pen occupies a 2×2-cell (32×32-pixel) footprint. Construction and rebuild
+both draw `$E0,$E1 / $E8,$E9`, hold for 30 ticks, then terminate with the frame
+still displayed. These two draw lists lie outside the commonly catalogued
+94-list range `$03:D928-$DC73`; that range is not a complete inventory of
+structure artwork.
+
+The [observed RAM record and cell markers](ram-map.md#aitos-animal-pen)
+distinguish the pen's class-5 identity from its displayed structure-atlas IDs.
+The addresses and program bytes above were checked in the US ROM; no JP/PAL
+address or program equivalence is established here.
 
 ### Town scenery / ambient-actor tables (banks $03/$01/$0A)
 

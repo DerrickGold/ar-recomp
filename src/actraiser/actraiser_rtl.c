@@ -1065,6 +1065,16 @@ static VOID CALLBACK game_coroutine_fiber(LPVOID param) {
 }
 #endif
 
+RecompReturn ActRaiser_CreditsWaitForReset(CpuState *cpu) {
+  /* The ROM parks forever at $02:AADF (The End) or $02:AAE7 (Best Player).
+   * Keep that final page and native CPU/stack intact, but let the host service
+   * input and its reset/quit overlay between frames. A reset destroys this
+   * coroutine; there is no native return address to pop or resume. */
+  (void)cpu;
+  for (;;)
+    ActRaiser_YieldToHost();
+}
+
 RecompReturn ActRaiser_WaitForVblank(CpuState *cpu) {
   ActRaiserCredits_ObserveWait(cpu);
   /* A85E (and the identical $00:8418) are HLE'd to this function. The real ROM
