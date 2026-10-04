@@ -217,8 +217,9 @@ int SimBackgroundVoxelModel_Contacts(const SimBackgroundVoxelObject *object,
       return 1;
     case kSimBackgroundVoxel_Boulder:
     case kSimBackgroundVoxel_Rocks:
-      /* Stones already meet the terrain; do not paint contact decals beneath
-       * them, especially a shared rectangle around scattered pebbles. */
+    case kSimBackgroundVoxel_AnimalPen:
+      /* Stones and short posts meet the terrain directly. A shared contact
+       * rectangle would darken the gaps between them and the open pasture. */
       return 0;
     case kSimBackgroundVoxel_StoryTree:
       out[0] = (SimBackgroundVoxelModelContact){12.0f, 18.0f, 20.0f, 26.0f};
@@ -280,6 +281,11 @@ uint16_t SimBackgroundVoxelModel_ObjectFaceBudget(
    * Low. Repeated buildings and vegetation keep the normal density limits. */
   if (object && object->kind == kSimBackgroundVoxel_BloodpoolCastle &&
       detail == kSimBackgroundVoxelDetail_Low) return 128;
+  /* All 22 octagonal posts retain eight sides and three cap quads at every
+   * detail level: 242 faces preserve both their shape and the open gaps. */
+  if (object && object->kind == kSimBackgroundVoxel_AnimalPen &&
+      (detail == kSimBackgroundVoxelDetail_Low ||
+       detail == kSimBackgroundVoxelDetail_Balanced)) return 256;
   if (object && object->kind == kSimBackgroundVoxel_MarahnaTemple) {
     if (detail == kSimBackgroundVoxelDetail_Low) return 144;
     if (detail == kSimBackgroundVoxelDetail_Balanced) return 256;
@@ -337,6 +343,49 @@ static void AddStandardBox(SimBackgroundVoxelModel *model,
 
 static void BuildConstructionFrame(SimBackgroundVoxelModel *model,
                                    float width, float depth, float height);
+
+static void AddAnimalPenPost(SimBackgroundVoxelModel *model, float x, float y) {
+  /* Aitos houses render at about 7.5-10 units after house proportions. The
+   * two-unit posts keep a quarter-height fence without scaling the 32x32
+   * footprint or painting a slab over the grass and entrance. */
+  const float radius = .65f;
+  const float inset = radius * .414213562f;
+  const float ring[8][2] = {
+    {-inset, -radius}, {inset, -radius}, {radius, -inset}, {radius, inset},
+    {inset, radius}, {-inset, radius}, {-radius, inset}, {-radius, -inset},
+  };
+  static const uint8_t shades[8] = {178, 191, 204, 218, 232, 211, 190, 184};
+  SimBackgroundVoxelModelPoint base[8], top[8];
+  for (int corner = 0; corner < 8; corner++) {
+    base[corner] = Point(x + ring[corner][0], y + ring[corner][1], 0);
+    top[corner] = Point(base[corner].x, base[corner].y, 2.0f);
+  }
+  for (int side = 0; side < 8; side++) {
+    int next = (side + 1) % 8;
+    AddFace(model, kSimVoxelMaterial_Wood, shades[side],
+            base[next], base[side], top[side], top[next]);
+  }
+  /* Three coplanar quads tile the flat cut end without a square overhang.
+   * No box metadata: a square solid would incorrectly fill the cut corners. */
+  for (int corner = 1; corner < 7; corner += 2)
+    AddFace(model, kSimVoxelMaterial_Trim, 255,
+            top[0], top[corner], top[corner + 1], top[corner + 2]);
+}
+
+static void BuildAnimalPen(SimBackgroundVoxelModel *model) {
+  /* $E0/$E1/$E8/$E9: eight north posts, four on either side and six
+   * south posts. The missing fifth/sixth south posts form the native gate. */
+  for (int column = 0; column < 8; column++) {
+    float x = 1.5f + column * 4.0f;
+    AddAnimalPenPost(model, x, 4.0f);
+    if (column != 4 && column != 5) AddAnimalPenPost(model, x, 28.0f);
+  }
+  for (int row = 0; row < 4; row++) {
+    float y = 10.0f + row * 4.0f;
+    AddAnimalPenPost(model, 1.5f, y);
+    AddAnimalPenPost(model, 29.5f, y);
+  }
+}
 
 enum {
   kStoneBridgeDeckBrightness = 245,
@@ -2617,6 +2666,7 @@ uint16_t SimBackgroundVoxelModel_FoliageShadowVariant(const SimBackgroundVoxelOb
 bool SimBackgroundVoxelModel_CastsShadow(const SimBackgroundVoxelObject *object) {
   return object && object->kind < kSimBackgroundVoxelKindCount &&
       object->kind != kSimBackgroundVoxel_Boulder && object->kind != kSimBackgroundVoxel_Rocks &&
+      object->kind != kSimBackgroundVoxel_AnimalPen &&
       object->kind != kSimBackgroundVoxel_Bridge;
 }
 
@@ -3437,7 +3487,8 @@ static void BuildSilhouetteTrim(
       /* Landmark silhouettes carry their own authored trim. */
       break;
     case kSimBackgroundVoxel_Bridge:
-      /* Native masonry already has its complete silhouette. */
+    case kSimBackgroundVoxel_AnimalPen:
+      /* Native masonry and the low posts already have complete silhouettes. */
       break;
   }
 }
@@ -3560,6 +3611,7 @@ static void BuildDeterministicVariation(
       /* Unique town landmarks do not need random silhouettes. */
       break;
     case kSimBackgroundVoxel_Bridge:
+    case kSimBackgroundVoxel_AnimalPen:
       break;
   }
 }
@@ -3647,6 +3699,9 @@ static void BuildAuthoredModel(
       break;
     case kSimBackgroundVoxel_Bridge:
       BuildStoneBridge(object, detail, out);
+      break;
+    case kSimBackgroundVoxel_AnimalPen:
+      BuildAnimalPen(out);
       break;
   }
   if (object->kind != kSimBackgroundVoxel_Bridge &&

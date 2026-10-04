@@ -44,10 +44,12 @@ typedef enum SimBackgroundVoxelKind {
   /* Native terrain $61 and scattered-stone $62/$63/$69-$6B. */
   kSimBackgroundVoxel_Boulder,
   kSimBackgroundVoxel_Rocks,
+  /* Aitos' class-5 pasture: individual low posts around a 2x2 grass plot. */
+  kSimBackgroundVoxel_AnimalPen,
 } SimBackgroundVoxelKind;
 
 enum {
-  kSimBackgroundVoxelKindCount = kSimBackgroundVoxel_Rocks + 1,
+  kSimBackgroundVoxelKindCount = kSimBackgroundVoxel_AnimalPen + 1,
 };
 
 typedef enum SimBackgroundBridgeAxis {

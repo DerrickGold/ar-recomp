@@ -79,7 +79,8 @@ int SimBackgroundVoxelModel_FoliageShadowHull(
     const SimBackgroundVoxelObject *object, float cast_x, float cast_y,
     SimBackgroundVoxelModelPoint out[kSimBackgroundVoxelFoliageShadowMaxPoints]);
 
-/* Grounded rocks and bridges retain surface shading but cast no ground mask. */
+/* Grounded rocks, bridges and low pen posts keep surface shading without a
+ * ground mask; a shared footprint would black out the open pasture. */
 bool SimBackgroundVoxelModel_CastsShadow(const SimBackgroundVoxelObject *object);
 
 typedef struct SimBackgroundVoxelModelBox {
@@ -120,8 +121,8 @@ int SimBackgroundVoxelModel_Contacts(const SimBackgroundVoxelObject *object,
 uint16_t SimBackgroundVoxelModel_FaceBudget(
     SimBackgroundVoxelDetail detail);
 
-/* The two multi-part town landmarks get an object-specific detail allowance;
- * repeated buildings keep FaceBudget's limits. Ultra's ceiling is unchanged. */
+/* Multi-part landmarks and the pen get enough faces to preserve their layout
+ * at Low; repeated buildings keep FaceBudget's limits. Ultra is unchanged. */
 uint16_t SimBackgroundVoxelModel_ObjectFaceBudget(
     const SimBackgroundVoxelObject *object, SimBackgroundVoxelDetail detail);
 

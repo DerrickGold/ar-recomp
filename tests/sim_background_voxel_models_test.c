@@ -1128,7 +1128,50 @@ static void CheckHousesMeetGroundWithoutSlabs(void) {
             }
 }
 
+static void CheckAnimalPen(void) {
+  const SimBackgroundVoxelObject object = {
+      .kind = kSimBackgroundVoxel_AnimalPen, .town = 4,
+      .source_cells_w = 2, .source_cells_h = 2,
+      .footprint_cells_w = 2, .footprint_cells_d = 2,
+  };
+  for (int detail = 0; detail < kSimBackgroundVoxelDetail_Count; detail++)
+    for (int style = 0; style < kSimBackgroundVoxelStyle_Count; style++) {
+      SimBackgroundVoxelModel model;
+      SimBackgroundVoxelModel_BuildStyled(&object, detail, style, &model);
+      CHECK(!model.overflow && model.box_count == 0);
+      CHECK(model.min_z == 0 && model.max_z == 2.0f);
+      CHECK(model.min_x > 0 && model.max_x < 32);
+      CHECK(model.min_y > 0 && model.max_y < 32);
+      CHECK(MaterialFaces(&model, kSimVoxelMaterial_Wood) == 22 * 8);
+      CHECK(MaterialFaces(&model, kSimVoxelMaterial_Trim) == 22 * 3);
+      CHECK(SurfaceHeightAt(&model, 16, 16) < 0); /* Exposed grass. */
+      for (int column = 0; column < 8; column++) {
+        float x = 1.5f + column * 4;
+        CHECK(SurfaceHeightAt(&model, x, 4) == 2);
+        /* The flat cap reaches the four cardinal edges, while every corner
+         * of the old square cross-section is now outside the timber. */
+        for (int sign = -1; sign <= 1; sign += 2) {
+          CHECK(fabsf(SurfaceHeightAt(&model, x + sign * .6f, 4) - 2) < .0001f);
+          CHECK(fabsf(SurfaceHeightAt(&model, x, 4 + sign * .6f) - 2) < .0001f);
+          CHECK(SurfaceHeightAt(&model, x + sign * .6f, 4.6f) < 0);
+          CHECK(SurfaceHeightAt(&model, x + sign * .6f, 3.4f) < 0);
+        }
+        CHECK(SurfaceHeightAt(&model, x, 28) ==
+              (column == 4 || column == 5 ? -1 : 2));
+        if (column < 7) CHECK(SurfaceHeightAt(&model, x + 2, 4) < 0);
+      }
+      for (int row = 0; row < 4; row++) {
+        CHECK(SurfaceHeightAt(&model, 1.5f, 10 + row * 4) == 2);
+        CHECK(SurfaceHeightAt(&model, 29.5f, 10 + row * 4) == 2);
+      }
+    }
+  SimBackgroundVoxelModelContact contacts[kSimBackgroundVoxelModelMaxContacts];
+  CHECK(SimBackgroundVoxelModel_Contacts(&object, contacts) == 0);
+  CHECK(!SimBackgroundVoxelModel_CastsShadow(&object));
+}
+
 int main(void) {
+  CheckAnimalPen();
   CheckHousesMeetGroundWithoutSlabs();
   CheckAuditRegressions();
   CheckRecognitionPolish();
@@ -1675,7 +1718,8 @@ int main(void) {
     CHECK(high.face_count <= ultra.face_count);
     /* The sparse native rocks already fit Low in full. Higher settings need
      * not invent extra stones or subdivide flat faces for a larger count. */
-    if (kind == kSimBackgroundVoxel_Boulder || kind == kSimBackgroundVoxel_Rocks) {
+    if (kind == kSimBackgroundVoxel_Boulder || kind == kSimBackgroundVoxel_Rocks ||
+        kind == kSimBackgroundVoxel_AnimalPen) {
       CHECK(SameBounds(&low, &ultra));
       continue;
     }

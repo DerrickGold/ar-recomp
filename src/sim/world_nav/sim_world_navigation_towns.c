@@ -23,6 +23,7 @@ enum {
   kStructureClassField = 2,
   kStructureClassWindmill = 3,
   kStructureClassFactory = 4,
+  kStructureClassAnimalPen = 5,
   kTownCells = 32,
   kTownCellCount = kTownCells * kTownCells,
   /* $02:BD70 copies $0A:8000..AFFF to $7F:D000..FFFF. $03:AB7E
@@ -196,6 +197,11 @@ static void CaptureStructures(
         break;
       case kStructureClassFactory:
         kind = kSimBackgroundVoxel_Factory;
+        cells = 2;
+        break;
+      case kStructureClassAnimalPen:
+        kind = town == 4 ? kSimBackgroundVoxel_AnimalPen
+                         : kSimWorldNavigationTown_Support;
         cells = 2;
         break;
       default:

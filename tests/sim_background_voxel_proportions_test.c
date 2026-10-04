@@ -51,6 +51,17 @@ int main(void) {
   CHECK(house->footprint_scale == factory->footprint_scale);
   CHECK(house->footprint_scale == tree->footprint_scale);
 
+  SimBackgroundVoxelObject aitos = {
+    .kind = kSimBackgroundVoxel_House, .town = 4, .development_level = 2,
+  };
+  SimBackgroundVoxelModel aitos_model;
+  SimBackgroundVoxelModel_Build(&aitos, kSimBackgroundVoxelDetail_High, &aitos_model);
+  float pen_height = EffectiveHeight(kSimBackgroundVoxel_AnimalPen);
+  float aitos_height = aitos_model.max_z * house->height_scale;
+  CHECK(pen_height > aitos_height * .20f && pen_height < aitos_height * .30f);
+  CHECK(pen_height < EffectiveHeight(kSimBackgroundVoxel_Boulder));
+  CHECK(SimBackgroundVoxelProportions_Get(kSimBackgroundVoxel_AnimalPen)->footprint_scale == 1);
+
   if (failures) {
     fprintf(stderr, "%d sim background voxel proportion checks failed\n",
             failures);

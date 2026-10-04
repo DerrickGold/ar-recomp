@@ -109,7 +109,10 @@ enum {
 };
 _Static_assert(kSourceModelMaximumVertices / 4 <= kSim3DMeshSetMaximumQuads,
     "every live town model must fit the partitioned source contract");
-_Static_assert(kSimBackgroundVoxelKindCount + 1 <= kSim3DDepthLinearAxisCount,
+/* The pen shares terrain's upright axis 0. The other families retain their
+ * existing kind+1 slots, keeping the backend's 16-axis layout unchanged. */
+_Static_assert(kSimBackgroundVoxel_AnimalPen == kSimBackgroundVoxelKindCount - 1 &&
+    kSimBackgroundVoxelKindCount <= kSim3DDepthLinearAxisCount,
     "SIM axes must fit the backend-neutral displacement table");
 
 static bool SourceModelsEnabled(ArRenderDevice *device) {
@@ -706,6 +709,7 @@ static bool ObjectUsesBuriedFoundation(
     case kSimBackgroundVoxel_Palm:
     case kSimBackgroundVoxel_Boulder:
     case kSimBackgroundVoxel_Rocks:
+    case kSimBackgroundVoxel_AnimalPen:
     case kSimBackgroundVoxel_Shrub:
     case kSimBackgroundVoxel_StoryTree:
     case kSimBackgroundVoxel_Bridge:
@@ -1009,7 +1013,9 @@ static void DrawModel(
               proportions->footprint_scale;
       float local_z = source->points[point].z *
           proportions->height_scale;
-      bool projected = BuildSolidVertex(params, axis, object->kind + 1,
+      unsigned axis_index = object->kind == kSimBackgroundVoxel_AnimalPen
+          ? 0 : object->kind + 1;
+      bool projected = BuildSolidVertex(params, axis, axis_index,
           origin_x + local_x, origin_y + local_y, local_z, anchor_lift,
           object->kind == kSimBackgroundVoxel_Bridge ? depth_lift : anchor_lift,
           &face, point, builder);
@@ -1198,6 +1204,7 @@ static bool DrawSourceModels(const SimBackgroundVoxelRenderParams *params,
   SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount];
   SimBackgroundVoxelProject_ResolveAxes(params, axes);
   for (unsigned kind = 0; kind < kSimBackgroundVoxelKindCount; ++kind) {
+    if (kind == kSimBackgroundVoxel_AnimalPen) continue;
     transform.axes[kind+1][0] = axes[kind].x_per_height;
     transform.axes[kind+1][1] = axes[kind].y_per_height;
     transform.axes[kind+1][2] = axes[kind].height_scale;
@@ -1462,6 +1469,7 @@ static int ShadowBounds(const SimBackgroundVoxelObject *object,
     case kSimBackgroundVoxel_StoryTree:
     case kSimBackgroundVoxel_Boulder:
     case kSimBackgroundVoxel_Rocks:
+    case kSimBackgroundVoxel_AnimalPen:
       return 0;
     case kSimBackgroundVoxel_BloodpoolCastle:
     case kSimBackgroundVoxel_MarahnaTemple:
