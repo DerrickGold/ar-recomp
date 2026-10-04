@@ -585,7 +585,7 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
       goto failed;
     }
     if (trace) stamps[2] = HostClock_Nanoseconds();
-    if (!PresentSimGlobeTerrain_Prepare(&map, SimWorldMap_GeographySerial())) {
+    if (!PresentSimGlobeTerrain_Prepare(&map, SimWorldMap_TerrainSerial())) {
       fprintf(stderr, "[sim-globe-town] native terrain preparation rejected\n");
       goto failed;
     }

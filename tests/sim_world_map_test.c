@@ -875,9 +875,19 @@ static void TestIndependentMaterialRevisions(void) {
   map[0] = 0x41; /* Same coverage, different mountain shades. */
   CHECK(SimWorldMap_PublishBuiltTilemap(map) == 1);
   CHECK(SimWorldMap_MountainSerial() == ++mountains && SimWorldMap_TerrainSerial() == terrain);
-  map[1] = 0x60; /* Removing vegetation affects terrain, not mountain sources. */
+  const uint32_t geography = SimWorldMap_GeographySerial();
+  CHECK(SimWorldMap_VegetationCoverage(1, 0) == 1);
+  map[1] = 0x60; /* Construction replaces vegetation art, not the terrain. */
   CHECK(SimWorldMap_PublishBuiltTilemap(map) == 1);
-  CHECK(SimWorldMap_MountainSerial() == mountains && SimWorldMap_TerrainSerial() == ++terrain);
+  CHECK(SimWorldMap_GeographySerial() != geography);
+  CHECK(SimWorldMap_VegetationCoverage(1, 0) == 1);
+  CHECK(SimWorldMap_MountainSerial() == mountains && SimWorldMap_TerrainSerial() == terrain);
+  map[1] = 0x10; /* Actual water/land transitions still invalidate geometry. */
+  CHECK(SimWorldMap_PublishBuiltTilemap(map) == 1);
+  CHECK(SimWorldMap_CellIsOpenWater(1, 0) && SimWorldMap_TerrainSerial() == ++terrain);
+  map[1] = 0x60;
+  CHECK(SimWorldMap_PublishBuiltTilemap(map) == 1);
+  CHECK(!SimWorldMap_CellIsOpenWater(1, 0) && SimWorldMap_TerrainSerial() == ++terrain);
   for (int phase = 0; phase < 4; ++phase) SimWorldMap_SetWaterAnimationSource(0xB000 + phase * 64);
   CHECK(SimWorldMap_MountainSerial() == mountains && SimWorldMap_TerrainSerial() == terrain);
   CHECK(SimWorldMap_BakedPixels() && SimWorldMap_CopyTilemap(copy));

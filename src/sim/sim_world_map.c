@@ -1,6 +1,7 @@
 #include "sim/sim_world_map.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ROM residency, all uncompressed and all verified byte-for-byte against a
@@ -76,6 +77,15 @@ static struct {
    * simulation development over it. */
   uint8_t baseline[kSimWorldMapBytes];
 } g_world;
+
+static bool StableTerrainVegetation(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *option = getenv("AR_SIM_STABLE_TERRAIN");
+    enabled = !option || strcmp(option, "0");
+  }
+  return enabled != 0;
+}
 
 bool SimWorldMap_CopyTileArt(uint8_t tile, uint32_t pixels[64], uint8_t indices[64]) {
   if (!g_world.available || !pixels) return false;
@@ -188,7 +198,8 @@ int SimWorldMap_PublishBuiltTilemap(const uint8_t *tilemap) {
     if (g_world.tilemap[i] == tilemap[i]) continue;
     const uint8_t a = g_world.tilemap[i], b = tilemap[i];
     terrain_changed |= g_world.mountain_pixels[a] != g_world.mountain_pixels[b] ||
-        g_world.vegetation_pixels[a] != g_world.vegetation_pixels[b] ||
+        (!StableTerrainVegetation() &&
+            g_world.vegetation_pixels[a] != g_world.vegetation_pixels[b]) ||
         g_world.water_pixels[a] != g_world.water_pixels[b];
     const uint8_t *before = g_world.tiles + g_world.tilemap[i] * kWorldTileBytes;
     const uint8_t *after = g_world.tiles + tilemap[i] * kWorldTileBytes;
@@ -295,7 +306,11 @@ float SimWorldMap_VegetationCoverage(int tile_x, int tile_y) {
   if (!g_world.available || tile_x < 0 || tile_y < 0 ||
       tile_x >= kSimWorldMapTiles || tile_y >= kSimWorldMapTiles)
     return 0.0f;
-  const uint8_t tile = g_world.tilemap[tile_y * kSimWorldMapTiles + tile_x];
+  /* Construction replaces vegetation artwork, not the underlying elevation.
+   * Keep this weak lowland prior tied to the pristine map. Water and rock
+   * retain their live inputs so actual coastline/terrain edits still publish. */
+  const uint8_t *map = StableTerrainVegetation() ? g_world.baseline : g_world.tilemap;
+  const uint8_t tile = map[tile_y * kSimWorldMapTiles + tile_x];
   return g_world.vegetation_pixels[tile] / (float)kWorldTileBytes;
 }
 

@@ -1846,6 +1846,103 @@ static SDL_Surface *RenderSimGlobe(SDL_Renderer *renderer, const FrameSlot *slot
   return RenderSimGlobeScene(renderer, slot, camera, source, 3);
 }
 
+static void TestConstructionTerrainReuse(SDL_Renderer *renderer, const FrameSlot *slot) {
+  const char *incoming = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
+  char *saved = incoming ? SDL_strdup(incoming) : NULL;
+  CHECK(!incoming || saved);
+  CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+  InitSyntheticBloodpoolArt(false);
+  FrameSlot *probe = malloc(sizeof(*probe));
+  CHECK(probe);
+  uint8_t before[kSimWorldMapBytes], map[kSimWorldMapBytes];
+  CHECK(SimWorldMap_CopyTilemap(before));
+  const Scene3DCamera camera = {-.575f, 0, 2, .4f};
+  const ArRenderRectI source = {0, 0, 360, 224};
+  for (unsigned sim = 0; sim < 2; ++sim)
+    for (unsigned relief = 0; relief < 2; ++relief) {
+      SDL_Surface *warm[6] = {0};
+      for (unsigned cold = 0; cold < 2; ++cold) {
+        PresentWorldNav_ResetResources();
+        InitSlot(probe);
+        probe->sim.landscape_height_pct = relief ? 100 : 0;
+        probe->sim.world_navigation_ground_detail = true;
+        probe->sim.world_navigation_towns.ground.enabled_town_mask = 2;
+        memset(probe->sim.world_navigation_towns.ground.terrain[1], 8, 32 * 32);
+        if (sim) {
+          probe->sim.view = kSimView_Enhanced;
+          probe->sim.town = 2;
+          probe->sim.underlay_origin_tile_x = 48;
+          probe->sim.underlay_origin_tile_y = 48;
+        }
+        for (unsigned state = 0; state < 6; ++state) {
+          memcpy(map, before, sizeof(map));
+          /* Replace green art with paving; then undo construction. Neither
+           * operation changes the geometry, including native cliff caps. */
+          if (state == 1)
+            for (int y = 60; y < 68; ++y) memset(map + y * 128 + 60, 0xfe, 8);
+          /* Expose land at the chart's sea boundary, as Marahna can do.
+           * Even with heights off, edge opacity must update and undo. */
+          if (state == 4)
+            for (int y = 120; y < 128; ++y) memset(map + y * 128 + 70, 1, 8);
+          ArRenderRectI visible_source = source;
+          if (state >= 3) {
+            probe->sim.world_navigation.focus_x = 74 * 8;
+            probe->sim.world_navigation.focus_y = 124 * 8;
+            if (sim) {
+              probe->sim.town = 5;
+              probe->sim.underlay_origin_tile_x = 64;
+              probe->sim.underlay_origin_tile_y = 96;
+              visible_source.y = 288;
+            }
+          }
+          CHECK(SimWorldMap_PublishBuiltTilemap(map) >= 0);
+          if (cold) PresentWorldNav_ResetResources();
+          BuildScene(probe);
+          UploadWorldNavigationComposition(probe);
+          PerformanceMetrics_Configure(true, false);
+          SDL_Surface *actual = sim ? RenderSimGlobe(renderer, probe, &camera, visible_source)
+                                    : Render(renderer, probe, NULL);
+          PerformanceMetrics_PresentCompleted(1);
+          PerformanceMetrics_PresentCompleted(UINT64_C(1000000001));
+          PerformanceSnapshot measured;
+          PerformanceMetrics_Snapshot(&measured);
+          CHECK(measured.ready);
+          if (!cold && (state == 1 || state == 2)) {
+            CHECK(measured.stages[kPerformance_TerrainPrepare].calls == 0);
+            CHECK(measured.stages[kPerformance_TerrainSamples].calls == 0);
+            CHECK(measured.stages[kPerformance_GlobeBuild].calls == 0);
+            CHECK(measured.counts[kPerformanceCount_DepthUploadBytes] == 0);
+          }
+          if (!cold && state >= 4) {
+            CHECK(measured.stages[kPerformance_TerrainSamples].calls > 0);
+            if (sim) CHECK(measured.stages[kPerformance_GlobeBuild].calls > 0);
+          }
+          PerformanceMetrics_Configure(false, false);
+          if (!cold) warm[state] = actual;
+          else {
+            CHECK(Differences(warm[state], actual) == 0);
+            SDL_DestroySurface(actual);
+          }
+        }
+      }
+      CHECK(Differences(warm[0], warm[1]) > 0);
+      CHECK(Differences(warm[0], warm[2]) == 0);
+      CHECK(Differences(warm[3], warm[4]) > 0);
+      CHECK(Differences(warm[3], warm[5]) == 0);
+      for (unsigned state = 0; state < 6; ++state) SDL_DestroySurface(warm[state]);
+    }
+  CHECK(SimWorldMap_PublishBuiltTilemap(before) >= 0);
+  PresentWorldNav_ResetResources();
+  SimTownGroundArt_Shutdown();
+  if (saved) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID", saved, 1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+  SDL_free(saved);
+  free(probe);
+  UploadWorldNavigationComposition(slot);
+  puts("construction terrain: world/SIM, flat/relief, exact cold pixels; no geometry uploads; "
+       "water-to-land changes and rollback still rebuild");
+}
+
 static void TestColdTerrainWorkers(SDL_Renderer *renderer) {
   const char *incoming = SDL_getenv("AR_RENDER_WORKERS");
   char *saved = incoming ? SDL_strdup(incoming) : NULL;
@@ -2939,6 +3036,8 @@ static void TestSynthetic(SDL_Renderer *renderer, bool captured_motion_only,
   rom[0xE3F93 + 3] = 0x03;
   memset(rom + 0x70000 + 64, 1, 64);
   memset(rom + 0x70000 + 0xfd * 64, 1, 64);
+  memset(rom + 0x70000 + 0xfe * 64, 0x20, 64);
+  rom[0xE3F93 + 0x20 * 2] = 0x1f; /* Non-vegetation construction artwork. */
   for (int y = 40; y < 88; y++)
     memset(rom + 0x33341 + y * 128 + 40, 1, 48);
   CHECK(SimWorldMap_Init(rom, kRomBytes));
@@ -2952,6 +3051,7 @@ static void TestSynthetic(SDL_Renderer *renderer, bool captured_motion_only,
     TestGpuGridRevisions(renderer, slot);
     TestWorldAtlasVersions(renderer, slot);
     TestWorldAtlasConstruction(renderer, slot);
+    TestConstructionTerrainReuse(renderer, slot);
     goto cleanup;
   }
   if (captured_motion_only) {
@@ -3123,6 +3223,7 @@ static void TestSynthetic(SDL_Renderer *renderer, bool captured_motion_only,
   TestGpuGridRevisions(renderer, slot);
   TestWorldAtlasVersions(renderer, slot);
   TestWorldAtlasConstruction(renderer, slot);
+  TestConstructionTerrainReuse(renderer, slot);
   TestColdTerrainWorkers(renderer);
   TestNavigationZoomEntry(renderer);
   TestContinuousTownScene(renderer);

@@ -98,8 +98,9 @@ uint32_t SimWorldMap_GeographySerial(void);
 /* Only authored rock coverage/shade identities; houses and waves do not
  * change the mountain continuation geometry or atlas. */
 uint32_t SimWorldMap_MountainSerial(void);
-/* Height inference consumes per-cell water, rock and vegetation coverage,
- * independently of color, individual texel arrangement and water animation. */
+/* Height inference consumes live water/rock coverage and pristine vegetation.
+ * Construction changes artwork and model foundations, not this lowland prior.
+ * Actual water/rock edits (including exposed land) still advance the revision. */
 uint32_t SimWorldMap_TerrainSerial(void);
 /* Each consumer owns its previous snapshot; image baking cannot consume it. */
 bool SimWorldMap_CopyTilemap(uint8_t tilemap[kSimWorldMapBytes]);
@@ -108,7 +109,7 @@ bool SimWorldMap_CopyTilemap(uint8_t tilemap[kSimWorldMapBytes]);
  * ($40-$45). Desert sand ($2C-$2F), snow, forests and buildings are separate
  * materials. Zero for unavailable/out-of-range cells. */
 float SimWorldMap_MountainCoverage(int tile_x, int tile_y);
-/* Native lowland source ramp $01..$09; independent of RGB and fades. */
+/* Pristine lowland source ramp $01..$09; independent of development, RGB and fades. */
 float SimWorldMap_VegetationCoverage(int tile_x, int tile_y);
 /* True only when every texel in the developed cell belongs to the authored
  * ocean/wave palette ($10/$11). Mixed shores and unknown cells return false.

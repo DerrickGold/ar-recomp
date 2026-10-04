@@ -884,3 +884,126 @@ Artifacts in `runs/sim-pipeline-2026-10-03/`:
 Correctness/build logs use the `ground-patch-*` and `build-ground-patch-*`
 prefixes. Terrain/cliff and globe-surface reconstruction remain the next
 construction target; SIM interpolation remains deferred.
+
+## Construction terrain ownership (2026-10-04)
+
+Step 1 was committed as `b40d150d` (repair cached ground-animation versions).
+Step 2 removes construction artwork from the inferred lowland terrain input.
+The user's terrain clarification was important: placing a building does not
+reshape the native landscape. `AppendBuildingFoundation` emits model faces
+against existing terrain heights; it does not write the world height field.
+The tiny height differences seen in the initial profile instead came from
+`vegetation * 0.08` in the world prior. A road or building replacing green
+pixels could change inferred relief near the town's feathered boundary.
+
+The diagnostic build `terrain-profile-deck` (SHA-256
+`dab63d38a457c9086fc8182165400e880b335426aa83a6b571708b2e28f962b9`)
+confirmed that all compared construction cliff scenes were byte-identical.
+Later events changed zero terrain vertices while rebuilding cliffs for about
+5–9 ms. Some early events changed 1–16 shared vertices through the artwork
+inference. The diagnostic-only mesh comparison and experimental derived-value
+cache key are not retained: neither prevents that incorrect input dependency.
+
+### Retained change
+
+- `SimWorldMap_VegetationCoverage` reads the pristine ROM map, keeping the weak
+  lowland relief estimate independent of development. Publishing changed art
+  still advances image/geography revisions, so textures and models update.
+- `TerrainSerial` advances for live water/rock coverage changes, not vegetation
+  artwork. Thus ordinary construction retains the world prior, samples, cliff
+  scene and SIM globe surface. This also avoids their allocations and uploads.
+- Detailed native town terrain preparation uses `TerrainSerial` instead of the
+  broad artwork revision. Its placement, landscape scale and town mapping
+  remain part of its own key.
+- `AR_SIM_STABLE_TERRAIN=0` restores live vegetation and its invalidation for
+  diagnostic comparisons. It is not a user setting.
+
+Live water/rock classification remains authoritative. Exposed land and its
+reversal still invalidate the affected geometry, including chart-edge opacity
+with relief disabled. Marahna's existing native canvas publication and water
+mask paths are unchanged. The authored town elevation field is already static;
+its earthquake redraw exposes land on the existing water-datum vertices.
+The synthetic earthquake canvas/voxel regressions and water-to-land geometry
+checks pass; this round does not claim a new live Marahna earthquake replay.
+
+### Validation
+
+- Release and ASan/UBSan world-map, terrain and town-canvas CTests pass. The
+  terrain regression replaces vegetation across the map, forces a subsequent
+  real prior rebuild, and compares all 16,641 heights and all native cliff
+  faces exactly. The old-policy control fails the construction assertion.
+- Release world-art, material/mountain and background-voxel CTests pass.
+- The focused ground-atlas GPU suite passes under Metal in Release and
+  ASan/UBSan. Added checks cover navigation/SIM, flat/relief, construction and
+  undo, water-to-land and undo, and cache reset. Construction uploads zero
+  depth-geometry bytes and does no terrain/sample/globe-grid rebuilding;
+  retained images exactly match cold images while changed art remains visible.
+- The captured-motion GPU suite passes, including model changes, windmill
+  phases, camera movement and fresh/cached model parity.
+- macOS Release application and hermetic Linux build pass. Changed files add
+  no style-ratchet violations. The previously recorded full GPU suite limitation
+  still applies; the focused passes are not a claim that the full suite passes.
+
+### Same-binary Steam Deck comparison
+
+Pinned binary `stable-terrain-deck`, SHA-256
+`317ab6db81e2bab40a6f1d18e502f7cb7aa0c756751cd4ce237936d0083ec94c`.
+The shared checkout also contained unrelated action/runner work, so comparisons
+use this exact binary with the vegetation diagnostic switch on/off, rather than
+attributing differences against a separately built older revision. All tests
+use the isolated `effects-2026-10-01` workspace and the existing 9,000-frame
+Aitos construction replay with movement after tick 1100, Original SIM menus,
+1280×800 fullscreen, and the exact-submit Wayland presentation probe.
+
+First SIM draw at each late construction event, milliseconds (not whole-frame
+or display intervals):
+
+| Native frame | Old input policy | Stable terrain | Repeat |
+|---|---:|---:|---:|
+| 4432 | 27.736 | 8.571 | 8.910 |
+| 5576 | 28.084 | 9.904 | 8.235 |
+| 6711 | 27.113 | 8.649 | 8.173 |
+| 7846 | 27.320 | 9.259 | 8.795 |
+
+At these events, view/resource preparation drops from 12.1–12.2 ms to
+1.0–1.2 ms, detailed native terrain preparation drops from 0.76–0.79 ms to
+0–0.001 ms, and surface work drops from 9.1–10.0 ms to 2.5–3.7 ms. The
+remaining surface work includes the live native-water overlay, which still
+uses the broader geography/ground inputs. Native mountain preparation also
+still costs about 1 ms. These are candidates for the next attribution pass.
+The early events improve too: gf2001 is 29.025 → 9.267/7.494 ms; gf2110 is
+44.124 → 9.530/11.232 ms. This is not a guarantee that every construction draw
+fits the 11.11 ms display budget.
+
+Physical presentation feedback (maximum interval in ms / missed refreshes):
+
+| Host tick window | Old input policy | Stable terrain | Repeat |
+|---|---:|---:|---:|
+| 1900–2200 | 44.44 / 19 | 22.22 / 2 | 22.22 / 3 |
+| 3230–3340 | 22.22 / 3 | 11.11 / 0 | 11.11 / 0 |
+| 4400–4470 | 22.22 / 1 | 22.22 / 1 | 11.11 / 0 |
+| 5540–5620 | 22.22 / 3 | 11.11 / 0 | 11.11 / 0 |
+| 6680–6760 | 22.22 / 2 | 22.22 / 1 | 11.11 / 0 |
+| 7810–7900 | 22.22 / 2 | 11.11 / 0 | 11.11 / 0 |
+
+All feedback uses flags 7 and exact submit/commit FIFO association. The early
+1900–2200 source-cadence fitted mismatch remains unresolved: 20.80% control,
+25.50% candidate and 37.53% repeat, despite fewer missed physical refreshes.
+Do not interpret this as a uniform pacing win or a solved source-clock issue.
+Later construction windows have 0–0.94% candidate mismatch and 0% on repeat.
+Ordinary moving ticks 2200–3200 have 2/1/2 missed refreshes and 1.07/1.27/0.93%
+mismatch respectively. The earlier 1100–1900 window has 16/2/1 discarded
+frames; no construction terrain rebuild occurs there, so that difference
+cannot be credited to this fix. Display recovery/latency remains variable:
+late-window median source age is about 41–50 ms control, 49–54 ms candidate,
+and 58–62 ms repeat. These trials establish removal of unnecessary CPU work,
+not lower source latency or perfect steady-state pacing.
+
+Runs `deck-stable-terrain-on`, `deck-stable-terrain-off`, and
+`deck-stable-terrain-repeat` all finish 9,000 frames in about 150.9 seconds
+without fatal errors or detected foreign game processes. All three final
+WRAM hashes match:
+`d2c147d0fc639328a835842cbe1ab34476f062b5ee4fae14957febac68d7903c`.
+Logs, `stable-terrain-event-costs.json`, and `feedback-stable-terrain.json`
+are retained under `runs/sim-pipeline-2026-10-03/`. No installed Deck game
+files were changed.

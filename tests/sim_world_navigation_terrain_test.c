@@ -236,6 +236,55 @@ static void TestCoastalLandPreserved(void) {
        "inferred ocean grades outside town");
 }
 
+/* Construction must retain both cached and freshly derived terrain. Comparing
+ * the complete field catches the tiny feather changes outside a town that
+ * an interior-only check would miss. */
+static void TestConstructionPreservesTerrain(void) {
+  uint8_t before[kSimWorldMapBytes], map[kSimWorldMapBytes];
+  assert(SimWorldMap_CopyTilemap(before));
+  memcpy(map, before, sizeof(map));
+  SimWorldNavigationTerrainHeights *heights = calloc(129 * 129, sizeof(*heights));
+  assert(heights);
+  for (int y = 0; y <= 128; ++y)
+    for (int x = 0; x <= 128; ++x)
+      assert(SimWorldNavigationTerrain_SampleHeights(x, y, &heights[y * 129 + x]));
+  SimWorldNavigationCliffScene cliffs = {0};
+  assert(SimWorldNavigationCliffs_Build(63, &cliffs));
+  const uint32_t terrain = SimWorldMap_TerrainSerial();
+  for (int y = 0; y < 128; ++y)
+    for (int x = 0; x < 128; ++x)
+      if (map[y * 128 + x] == 0) map[y * 128 + x] = 1;
+  assert(SimWorldMap_PublishBuiltTilemap(map) > 0);
+  assert(SimWorldMap_TerrainSerial() == terrain);
+  /* Force a real prior rebuild without resetting the baseline: temporarily
+   * expose water, then restore the constructed map. A stale cached answer
+   * must not conceal continued use of developed vegetation. */
+  const uint8_t saved = map[0];
+  map[0] = saved == 4 ? 1 : 4;
+  assert(SimWorldMap_PublishBuiltTilemap(map) == 1);
+  assert(SimWorldNavigationTerrain_RebuildWorldPrior());
+  map[0] = saved;
+  assert(SimWorldMap_PublishBuiltTilemap(map) == 1);
+  assert(SimWorldNavigationTerrain_RebuildWorldPrior());
+  for (int y = 0; y <= 128; ++y)
+    for (int x = 0; x <= 128; ++x) {
+      SimWorldNavigationTerrainHeights actual;
+      assert(SimWorldNavigationTerrain_SampleHeights(x, y, &actual));
+      assert(!memcmp(&actual, &heights[y * 129 + x], sizeof(actual)));
+    }
+  SimWorldNavigationCliffScene rebuilt = {0};
+  assert(SimWorldNavigationCliffs_Build(63, &rebuilt));
+  assert(cliffs.face_count == rebuilt.face_count);
+  assert(!memcmp(cliffs.replacement, rebuilt.replacement, sizeof(cliffs.replacement)));
+  assert(!memcmp(cliffs.faces, rebuilt.faces, cliffs.face_count * sizeof(*cliffs.faces)));
+  SimWorldNavigationCliffs_Destroy(&cliffs);
+  SimWorldNavigationCliffs_Destroy(&rebuilt);
+  free(heights);
+  assert(SimWorldMap_PublishBuiltTilemap(before) > 0);
+  assert(SimWorldNavigationTerrain_RebuildWorldPrior());
+  puts("construction: all world heights and native cliff faces remain exact after a fresh rebuild");
+}
+
 static void TestPaletteIndependentWorldMaterials(void) {
   uint8_t *rom = calloc(1, kRomBytes);
   assert(rom);
@@ -448,6 +497,7 @@ int main(void) {
   assert(SimWorldNavigationTerrain_FloorHeightUnits(NAN, 0) == 0);
   assert(SimWorldNavigationTerrain_FloorHeightUnits(0, INFINITY) == 0);
   TestCoastalLandPreserved();
+  TestConstructionPreservesTerrain();
   TestPaletteIndependentWorldMaterials();
   SimWorldMap_Shutdown();
   assert(!SimWorldNavigationTerrain_RebuildWorldPrior());
