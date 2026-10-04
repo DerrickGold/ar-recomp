@@ -112,6 +112,9 @@ See [Modern SIM menu](manual.md#modern-sim-menu) and
 - Add **Screen ratio → Auto** for action stages. It adapts extra rows or
   columns to the window, including paused resizing, while retaining the
   selected pixel aspect. Thanks to Simon W. Jackson for the contribution.
+- Extend Auto to world navigation, simulation towns and the Sky Palace.
+  Enhanced 3D worlds and towns can also expand vertically; native flat paths
+  retain their scanout height. Keep menus and HUD graphics at their pixel aspect.
 - Remove HUD-shaped shadows from scene lighting when the HUD is relocated.
 - Improve town-rendering performance.
 - Speed up initial loading of the globe's terrain.

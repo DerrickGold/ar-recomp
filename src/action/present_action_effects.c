@@ -492,7 +492,7 @@ _Static_assert(kActionEffectObjPriorityCount ==
 static ActionEffectSourcePrimitive s_source_primitives[kActionSourceMaximumPrimitives];
 static ActionEffectSourceLightJob s_source_lights[kActionSourceMaxLightJobs];
 
-/* Source geometry depends only on the immutable capture, not the camera's
+/* Source geometry normally depends only on the immutable capture, not the
  * current interpolation phase or skybox band. Keep one bounded packet per pass
  * and rebuild on capture upload. Light jobs borrow occluders from that same
  * retained FrameSlot; invalidation must precede release/reuse of the capture. */
@@ -502,7 +502,11 @@ typedef struct ActionSourcePacketCache {
   unsigned count, capacity, light_count, light_capacity;
   uint64_t revision;
   bool valid, failed, lighting, particles;
+  uint32_t particle_mask;
+  ActionEffectLocalRect particle_bounds[kActionAuthoredMaxInstances];
 } ActionSourcePacketCache;
+
+_Static_assert(kActionAuthoredMaxInstances <= 32, "source particle mask capacity");
 
 static ActionSourcePacketCache s_source_packets[kActionSourcePacketSlots];
 static const FrameSlot *s_source_slot;
@@ -538,6 +542,25 @@ static bool RetainSourcePacket(ActionSourcePacketCache *cache,
   return true;
 }
 
+/* Only source visibility changes require new particle cells. Camera matrices,
+ * output size and the active skybox band are GPU projection inputs and must
+ * not rebuild/upload identical source geometry on every repaint. */
+static bool UpdateSourceParticleBounds(ActionSourcePacketCache *cache,
+    const ActionSceneEffectFrame *frame, const ActionEffectProjectionContext *projection) {
+  bool changed = false;
+  for (unsigned i = 0; i < kActionAuthoredMaxInstances; ++i) {
+    if (!(cache->particle_mask & (1u << i))) continue;
+    ActionEffectLocalRect bounds;
+    if (!ActionEffectSource_ParticleViewBounds(projection, &frame->authored[i], &bounds))
+      bounds = (ActionEffectLocalRect){0};
+    const ActionEffectLocalRect *old = &cache->particle_bounds[i];
+    changed |= old->x0 != bounds.x0 || old->y0 != bounds.y0 ||
+        old->x1 != bounds.x1 || old->y1 != bounds.y1;
+    cache->particle_bounds[i] = bounds;
+  }
+  return changed;
+}
+
 static bool DrawSourcePacket(ArRenderDevice *device, const FrameSlot *slot,
     const ActionEffectProjectionContext *projection, unsigned pass,
     bool lighting, bool particles, ArRenderBlendMode blend, PresentActionSourceDraw submit) {
@@ -547,6 +570,18 @@ static bool DrawSourcePacket(ArRenderDevice *device, const FrameSlot *slot,
     s_source_timestamp = slot->timestamp_ns;
   }
   ActionSourcePacketCache *cache = &s_source_packets[pass];
+  if (!cache->valid) {
+    cache->particle_mask = 0;
+    if (pass < kActionEffectRenderLayer_Count)
+      for (unsigned i = 0; i < slot->action_scene_effects.authored_count && i < kActionAuthoredMaxInstances; ++i) {
+        const ActionEffectInstance *effect = &slot->action_scene_effects.authored[i];
+        if (effect->kind == kActionEffect_AuthoredParticleArea && effect->render_layer == pass)
+          cache->particle_mask |= 1u << i;
+      }
+  }
+  if (particles && cache->particle_mask &&
+      UpdateSourceParticleBounds(cache, &slot->action_scene_effects, projection))
+    cache->valid = false;
   if (!cache->valid || cache->lighting != lighting || cache->particles != particles) {
     ActionEffectSourceBatch source = {.context = *projection,
         .primitives = s_source_primitives, .capacity = kActionSourceMaximumPrimitives,
@@ -604,6 +639,7 @@ void PresentActionEffects_DrawWithSource(
     const DioramaProjection *diorama_projection, PresentActionSourceDraw source_draw) {
   if (ActionEffectBrightness(slot) == 0 || (!slot->action_effects.visible_count &&
                 !slot->action_scene_effects.visible_count &&
+                !slot->action_scene_effects.fireball_smoke.count &&
                 !slot->action_scene_effects.decoration_visible_count &&
                 !slot->action_scene_effects.authored_count) ||
       (!slot->action_effect_lighting && !slot->action_effect_particles &&
@@ -678,6 +714,22 @@ void PresentActionEffects_DrawWithSource(
    * budget without allocating another workspace. BG2 decorations and bottom
    * atmosphere are submitted by their dedicated depth-ordered passes. */
   bool decoration_submitted = false;
+  /* Combat smoke outlives its source actor and follows Particles, independently
+   * of the environmental-effects switch. It is matter, never additive light. */
+  if (slot->action_effect_particles && slot->action_scene_effects.fireball_smoke.count) {
+    if (source_draw) {
+      decoration_submitted |= DrawSourceDecoration(device, slot, &projection,
+          kActionEffectRenderLayer_WorldSmoke, false, true, kArRenderBlendMode_Alpha, source_draw);
+    } else if (ActionSceneDecorationRender_Build(&slot->action_scene_effects,
+          kActionEffectRenderLayer_WorldSmoke, false, true,
+          ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
+          &projection, scene_geometry) && scene_geometry->index_count) {
+      scene_batch.vertex_count = scene_geometry->vertex_count;
+      scene_batch.index_count = scene_geometry->index_count;
+      FadeEffectVertices(slot, scene_geometry->vertices, scene_geometry->vertex_count);
+      decoration_submitted |= EffectRenderer_Submit(device, &scene_batch, kArRenderBlendMode_Alpha);
+    }
+  }
   if (source_draw && slot->action_environmental_effects) {
     decoration_submitted |= DrawSourceDecoration(device, slot, &projection,
         kActionEffectRenderLayer_WorldOverlay, true, true, kArRenderBlendMode_Add, source_draw);

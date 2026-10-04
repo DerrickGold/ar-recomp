@@ -957,15 +957,15 @@ void InputMap_HandleEvent(const SDL_Event *event) {
   }
 }
 
-bool InputMap_KeyHasHostBinding(int scancode) {
+bool InputMap_KeyRequiresHandoff(int scancode) {
   if (scancode < 0 || scancode >= SDL_SCANCODE_COUNT) return true;
   const uint32 binding = INPUT_BIND_MAKE(kInputBind_Key, scancode, false);
-  for (int a = kInputAction_PadCount; a < kInputAction_Count; ++a)
+  for (int a = kInputAction_PadCount; a < kInputAction_EdgeEnd; ++a)
     if (g_settings.input_bind[kInputClass_Keyboard][a] == binding) return true;
   return false;
 }
 
-bool InputMap_TryHandleGameOnlyEvent(const SDL_Event *event) {
+bool InputMap_TryHandleStreamEvent(const SDL_Event *event) {
   if (!event) return false;
   const bool axis = event->type == SDL_EVENT_GAMEPAD_AXIS_MOTION;
   const bool button = event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
@@ -973,13 +973,13 @@ bool InputMap_TryHandleGameOnlyEvent(const SDL_Event *event) {
   if (!axis && !button) return false;
   const int code = axis ? event->gaxis.axis : event->gbutton.button;
   if (!JoystickIsSelected(axis ? event->gaxis.which : event->gbutton.which)) return true;
-  for (int a = kInputAction_PadCount; a < kInputAction_Count; ++a) {
+  for (int a = kInputAction_PadCount; a < kInputAction_EdgeEnd; ++a) {
     const uint32 binding = g_settings.input_bind[kInputClass_Gamepad][a];
     if (INPUT_BIND_KIND(binding) != (axis ? kInputBind_PadAxis : kInputBind_PadButton) ||
         INPUT_BIND_CODE(binding) != code) continue;
     if (!axis || code < 0 || code >= SDL_GAMEPAD_AXIS_COUNT) return false;
-    /* Resting analog noise cannot change the camera or invoke a host edge.
-     * Meaningful movement, including release from a held binding, pauses. */
+    /* Camera axes only update held host state. Bindings shared with an edge
+     * action must still hand off, including release of a held edge. */
     int percent = g_settings.input_cam_deadzone;
     if (percent < kInputCameraDeadzoneMinimumPercent) percent = kInputCameraDeadzoneMinimumPercent;
     if (percent > kInputCameraDeadzoneMaximumPercent) percent = kInputCameraDeadzoneMaximumPercent;

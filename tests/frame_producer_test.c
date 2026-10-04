@@ -13,12 +13,15 @@ typedef struct Work {
 static void Produce(void *context) {
   Work *work = context;
   work->worker = SDL_GetCurrentThreadID();
+  const uint64_t cpu_start = HostFrameProducer_ThreadCpuTimeNs();
   work->started_ns = SDL_GetTicksNS();
   if (work->entered) {
     SDL_SignalSemaphore(work->entered);
     assert(SDL_WaitSemaphoreTimeout(work->release, 2000));
   }
   work->completed++;
+  const uint64_t cpu_end = HostFrameProducer_ThreadCpuTimeNs();
+  assert(!cpu_start || cpu_end >= cpu_start);
 }
 
 static void Cleanup(void *context) {

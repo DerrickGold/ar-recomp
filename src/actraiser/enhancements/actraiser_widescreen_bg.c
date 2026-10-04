@@ -52,7 +52,8 @@ static int ws_bg_debug_enabled(void) {
 }
 
 static int ws_sky_palace_bg_enabled(void) {
-  return g_settings.ws_skypalace_bg;
+  return g_settings.extended_aspect == kScreenAspect_Auto ||
+      g_settings.ws_skypalace_bg;
 }
 
 static uint16 ws_tilemap_addr_64(uint16 base, int tile_x, int tile_y) {

@@ -364,10 +364,8 @@ static void ActRaiser_FinishSceneCapture(void) {
   ActRaiser_ReportSim3DCaptureContractFailure();
   /* Promote captured sprites before publishing the frame's planes. */
   ActRaiser_DioramaDeathHeimHubStatuesFinish(width);
-  /* After the HUD-icon promote, not before: that pass PUNCHES the promoted
-   * icon out of the OBJ planes, and the apron's claimed-set test reads those
-   * planes. Running first would let a hole it is about to punch look like
-   * free space. */
+  /* Expand scene sprites after scanout and Death Heim promotion, so the
+   * apron's claimed-set test sees the completed scene planes. */
   const ActionApronGeometry apron_geom = ActRaiser_ObjApronGeometry();
   ActRaiser_DioramaApronFinish(&apron_geom);
   FinishBackgroundPacket();

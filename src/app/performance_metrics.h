@@ -24,6 +24,10 @@ typedef enum PerformanceStage {
   kPerformance_SettingsWrite = kPerformance_ActionFirst + kPerformance_ActionCount,
   kPerformance_SaveWrite, kPerformance_MusicStart,
   kPerformance_TerrainPrepare, kPerformance_TerrainSamples, kPerformance_GlobeBuild,
+  kPerformance_GlobeSurface, kPerformance_GlobeWater,
+  kPerformance_VoxelAtlasUpload, kPerformance_VoxelPalette,
+  kPerformance_ShadowActors, kPerformance_ShadowVoxels,
+  kPerformance_ShadowBlur, kPerformance_ShadowTarget, kPerformance_ShadowHulls,
   kPerformanceStage_Count,
 } PerformanceStage;
 
@@ -48,6 +52,13 @@ typedef enum PerformanceCount {
   kPerformanceCount_DepthCopyBytes, kPerformanceCount_DepthCopyCalls,
   kPerformanceCount_AtlasReuse, kPerformanceCount_AtlasCopyBytes,
   kPerformanceCount_AtlasCopyCalls,
+  /* Actual native source cadence; 90 Hz naturally holds some 60 Hz ticks. */
+  kPerformanceCount_NativePresents, kPerformanceCount_SourceHolds,
+  kPerformanceCount_SourceSkips,
+  /* Exceptional resident-effect failures, distinct from an intentional
+   * reference/flat policy. The latch can outlive the reporting window. */
+  kPerformanceCount_EffectProjectionFallbacks,
+  kPerformanceCount_EffectProjectionFallbackFrames,
   kPerformanceCount_Count,
 } PerformanceCount;
 
@@ -60,7 +71,7 @@ typedef enum PerformanceScene {
 typedef struct PerformanceContext {
   PerformanceScene scene;
   int host_mode; /* 0 game, 1 paused, 2 settings, 3 comparison */
-  int map_group, map_number, width, height, refresh_mode, limit_fps;
+  int map_group, map_number, width, height, refresh_mode, limit_fps, pacing_source;
   bool vsync;
 } PerformanceContext;
 

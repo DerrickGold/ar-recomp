@@ -178,6 +178,7 @@ static void ResetCase(void) {
   slot.snes_width = 512;
   slot.snes_height = 224;
   slot.visible_width = 256;
+  slot.visible_x0 = 128;
   slot.hud_split_height = 32;
   slot.hud_left_end = 64;
   slot.hud_right_start = 192;
@@ -321,6 +322,13 @@ int main(void) {
   assert(chunks[6].output_destination.x + chunks[6].output_destination.w / 2 ==
          viewport.x + viewport.w / 2);
   assert(chunks[6].texture_source.x==144); /* Texture widescreen padding. */
+  slot.visible_top=37;
+  slot.visible_height=298;
+  const ArRenderRectI tall_viewport={100,50,896,894};
+  assert(PresentHud_BuildChunks(&slot,tall_viewport,chunks)==7);
+  assert(chunks[6].output_destination.x==156 && chunks[6].output_destination.y==350);
+  assert(chunks[6].output_destination.w==784 && chunks[6].output_destination.h==24);
+  slot.visible_top=slot.visible_height=0;
   slot.bg3_vscroll=252; /* Native -4 scroll still follows its own status row. */
   assert(PresentHud_BuildChunks(&slot, viewport, chunks)==7);
   assert(chunks[6].screen_source.y==67);

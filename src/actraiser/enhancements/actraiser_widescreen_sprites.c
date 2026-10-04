@@ -1154,8 +1154,9 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
  * side margin; it never changes OAM or game state. */
 
 static int ws_sim_sprite_widen_enabled(void) {
-  /* Still gated on the AR_WS_SIM master, as before the refactor. */
-  return g_settings.ws_sim_sprites && g_settings.ws_sim;
+  /* Auto enables the safe town emitter without rewriting manual presets. */
+  return g_settings.extended_aspect == kScreenAspect_Auto ||
+      (g_settings.ws_sim_sprites && g_settings.ws_sim);
 }
 
 static int ws_sim_sprite_debug_enabled(void) {

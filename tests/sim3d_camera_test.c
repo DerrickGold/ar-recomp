@@ -36,9 +36,27 @@ char *UserDataFile(char *buf, size_t size, const char *leaf) {
   return buf;
 }
 
+/* Emulate the owner's captured scene publication; camera controls themselves
+ * must never sample mutable WRAM or producer metadata. */
+static void PublishScene(void) {
+  const bool town = ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
+      g_ram[kActRaiserWram_CurrentMap]);
+  const bool world = g_settings.sim3d_world_navigation &&
+      g_ram[kActRaiserWram_MapGroup] == kActRaiserMapGroup_NonAction &&
+      g_ram[kActRaiserWram_CurrentMap] == kActRaiserNonActionMap_WorldMap;
+  const SimFrameData scene = {
+    .view = town && g_settings.sim3d_mode ? kSimView_Enhanced :
+        world ? kSimView_WorldNavigation : kSimView_None,
+    .effective_features = requested_features,
+  };
+  Sim3DCamera_SetPresentationScene(&scene);
+}
+
 static void TestTownZoomFromVisiblePose(void) {
   g_settings.sim3d_mode = true;
+  PublishScene();
   g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  PublishScene();
   for (int mode = kSimCam_Free; mode <= kSimCam_Dynamic; ++mode) {
     g_settings.sim3d_camera_mode = mode;
     g_settings.sim3d_distance_x100 = g_settings.sim3d_dyncam_baseline_distance_x100 = 2000;
@@ -68,6 +86,7 @@ static void TestTownZoomFromVisiblePose(void) {
     assert(*distance > 200 && *distance < 247);
     /* Flat-underlay users retain their larger inspection range. */
     requested_features &= ~kSimFeature_GlobeUnderlay;
+    PublishScene();
     *distance = 550;
     Sim3DCamera_CapturePresentationState(&state);
     assert(state.distance_x100 == 550);
@@ -76,14 +95,17 @@ static void TestTownZoomFromVisiblePose(void) {
     Sim3DCamera_Adjust(0, 0, 100);
     assert(*distance == 2000);
     requested_features = kSimFeature_All;
+    PublishScene();
     /* Navigation keeps its own native-scale baseline and wider zoom range. */
     g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_WorldMap;
+    PublishScene();
     Sim3DCamera_CapturePresentationState(&state);
     assert(state.distance_x100 == 0);
     Sim3DCamera_Adjust(0, 0, 100);
     Sim3DCamera_CapturePresentationState(&state);
     assert(state.distance_x100 == 2000 && *distance == 2000);
     g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+    PublishScene();
     Sim3DCamera_CapturePresentationState(&state);
     assert(state.distance_x100 == 450 && *distance == 2000);
     Sim3DCamera_Adjust(0, 0, -.25f);
@@ -105,8 +127,11 @@ static void ResetTownOrbit(void) {
 static void TestTownRotationFromVisiblePose(void) {
   const float limit = kSim3DConnectedCameraYawMaximumMrad / 1000.0f;
   g_settings.sim3d_mode = true;
+  PublishScene();
   g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  PublishScene();
   requested_features = kSimFeature_All;
+  PublishScene();
   for (int mode = kSimCam_Free; mode <= kSimCam_Dynamic; ++mode) {
     for (int sign = -1; sign <= 1; sign += 2) {
       ResetTownOrbit();
@@ -137,9 +162,11 @@ static void TestTownRotationFromVisiblePose(void) {
       g_settings.sim3d_camera_mode = kSimCam_Dynamic;
       g_settings.sim3d_dyncam_baseline_tilt_y_mrad = 0;
       requested_features &= ~kSimFeature_GlobeUnderlay;
+      PublishScene();
       Sim3DCamera_Adjust(sign * 100, 0, 0);
       assert(fabsf(CapturedTownYaw() - sign * .7f) < .00001f);
       requested_features = kSimFeature_All;
+      PublishScene();
       assert(fabsf(CapturedTownYaw() - sign * limit) < .00001f);
       float yaw;
       Sim3DCamera_GetDynamicOrbit(&yaw, NULL);
@@ -156,55 +183,87 @@ static void TestTownRotationFromVisiblePose(void) {
   ResetTownOrbit();
   /* Ordinary SIM retains its wider inspection range and saved pose. */
   requested_features &= ~kSimFeature_GlobeUnderlay;
+  PublishScene();
   g_settings.sim3d_tilt_y_mrad = 650;
   assert(fabsf(CapturedTownYaw() - .65f) < .00001f);
   Sim3DCamera_Adjust(.05f, 0, 0);
   assert(g_settings.sim3d_tilt_y_mrad == 700);
   requested_features = kSimFeature_All;
+  PublishScene();
 }
 
 static void TestCaptureUsesAngelRecord(void) {
   g_settings.sim3d_camera_mode = kSimCam_Dynamic;
   g_settings.sim3d_reactive_strength = 70;
   g_ram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Aitos;
+  PublishScene();
   Sim3DCameraFrame frame;
   Sim3DCamera_CaptureFrame(&frame, 30);
   assert(frame.motion.lean_yaw == 0 && !frame.motion.event_hit);
   g_ram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
+  PublishScene();
   g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  PublishScene();
   ActRaiser_WriteWram16(kActRaiserWram_PlayerVelocityX, INT16_MAX);
   ActRaiser_WriteWram16(kActRaiserWram_SimAngelRecord + 0x1a, 2);
   ActRaiser_WriteWram16(kActRaiserWram_SimAngelRecord + 0x1c, (uint16_t)-3);
   g_ram[kActRaiserWram_AngelCurrentHp] = 8;
+  PublishScene();
   Sim3DCamera_CaptureFrame(&frame, 1);
-  assert(frame.mode == kSimCam_Dynamic && frame.reactive_strength == 70);
+  /* Manual mode/orbit are filled by the owner, never by the producer. */
+  assert(frame.mode == 0 && frame.orbit_yaw == 0 && frame.reactive_strength == 70);
   assert(frame.motion.lean_yaw > .1f && frame.motion.lean_yaw < .3f);
   assert(frame.motion.lean_pitch < 0 && !frame.motion.event_hit);
   const float lean = frame.motion.lean_yaw;
   g_ram[kActRaiserWram_AngelCurrentHp] = 7;
+  PublishScene();
   Sim3DCamera_CaptureFrame(&frame, 0);
   assert(frame.motion.event_hit && frame.motion.lean_yaw == lean);
   Sim3DCamera_CaptureFrame(&frame, 0);
   assert(!frame.motion.event_hit);
   g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_WorldMap;
+  PublishScene();
   ActRaiser_WriteWram16(kActRaiserWram_SimAngelRecord + 0x1a, INT16_MAX);
   Sim3DCamera_CaptureFrame(&frame, 60);
   assert(frame.motion.lean_yaw == 0 && frame.motion.lean_pitch == 0);
   g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+  PublishScene();
   ActRaiser_WriteWram16(kActRaiserWram_SimAngelRecord + 0x1a, 2);
   g_ram[kActRaiserWram_AngelCurrentHp] = 1;
+  PublishScene();
   Sim3DCamera_CaptureFrame(&frame, 0);
   assert(!frame.motion.event_hit && frame.motion.lean_yaw == lean);
 }
 
+static void TestControlsUseCapturedScene(void) {
+  const SimFrameData scene = {.view = kSimView_Enhanced,
+      .effective_features = kSimFeature_All};
+  Sim3DCamera_SetPresentationScene(&scene);
+  g_settings.sim3d_camera_mode = kSimCam_Free;
+  g_settings.sim3d_distance_x100 = 400;
+  /* The producer may already be changing scenes. Controls must continue to
+   * describe the displayed town until the owner installs its next endpoint. */
+  g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_WorldMap;
+  Sim3DCameraPresentationState state;
+  Sim3DCamera_CapturePresentationState(&state);
+  assert(state.distance_x100 == 400 && Sim3DCamera_ControlsAvailable(true));
+  Sim3DCamera_Adjust(0, 0, 100);
+  Sim3DCamera_CapturePresentationState(&state);
+  assert(state.distance_x100 == 450);
+  Sim3DCamera_SetPresentationScene(NULL);
+  assert(!Sim3DCamera_ControlsAvailable(true));
+}
+
 int main(void) {
   g_settings.sim3d_world_navigation = true;
+  PublishScene();
   g_settings.sim3d_camera_mode = kSimCam_Free;
   g_settings.sim3d_tilt_x_mrad = -575;
   g_settings.sim3d_distance_x100 = 300;
   g_settings.sim3d_dyncam_baseline_tilt_x_mrad = -575;
   g_settings.sim3d_dyncam_baseline_distance_x100 = 300;
   g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_WorldMap;
+  PublishScene();
   assert(Sim3DCamera_ControlsAvailable(true)); /* Independent town master. */
   assert(!Sim3DCamera_ControlsAvailable(false));
   const Settings original = g_settings;
@@ -283,27 +342,34 @@ int main(void) {
     Sim3DCamera_Adjust(1, -.4f, 4);
     Sim3DCamera_UpdateDynamic(2, true);
     g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_Fillmore;
+    PublishScene();
     Sim3DCamera_CapturePresentationState(&state);
     assert(state.orbit_yaw == 0 && state.orbit_pitch == 0 && state.distance_x100 == 300);
     assert(!Sim3DCamera_ControlsAvailable(true));
     g_settings.sim3d_mode = 1;
+    PublishScene();
     assert(Sim3DCamera_ControlsAvailable(true));
     g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_WorldMap;
+    PublishScene();
     Sim3DCamera_CapturePresentationState(&state);
     assert(state.orbit_yaw == 0 && state.distance_x100 == 0);
     Sim3DCamera_Adjust(.5f, .3f, 1);
     g_settings.sim3d_world_navigation = false;
+    PublishScene();
     assert(!Sim3DCamera_ControlsAvailable(true));
     Sim3DCamera_CapturePresentationState(&state);
     g_settings.sim3d_world_navigation = true;
+    PublishScene();
     Sim3DCamera_CapturePresentationState(&state);
     assert(state.orbit_yaw == 0 && state.distance_x100 == 0);
     g_settings.sim3d_mode = 0;
+    PublishScene();
   }
   assert(settings_writes == 0);
   TestTownZoomFromVisiblePose();
   TestTownRotationFromVisiblePose();
   TestCaptureUsesAngelRecord();
+  TestControlsUseCapturedScene();
   puts("sim3d_camera_test: PASS");
   return 0;
 }

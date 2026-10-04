@@ -26,6 +26,7 @@ static void TestTownBordersAndScale(void) {
   CHECK(developed != NULL && output != NULL);
   if (!developed || !output) {
     free(output);
+    SimWorldMap_Shutdown();
     free(developed);
     return;
   }
@@ -61,6 +62,7 @@ static void TestTownBordersAndScale(void) {
   CHECK(!SimWorldNavigationArt_Build(output, kSimWorldNavigationArtPixels - 1, developed,
                                      kSimWorldMapPixels));
   free(output);
+  SimWorldMap_Shutdown();
   free(developed);
 }
 
@@ -540,6 +542,39 @@ static void TestAnimatedGroundComposition(void) {
     SimWorldNavigationArt_RenderAnimationRows(&work, 0, kSimWorldMapTiles);
     CHECK(!memcmp(first, second, count * sizeof(*first)));
   }
+  if (developed) {
+    CHECK(SimWorldMap_Init(rom, 0x100000));
+    for (int gates = 0; gates < 8; ++gates) {
+      const bool detailed = gates & 1, models = gates & 2, cliffs = gates & 4;
+      uint8_t old_map[kSimWorldMapBytes] = {0}, new_map[kSimWorldMapBytes] = {0};
+      SimWorldNavigationTownGround previous = ground;
+      CHECK(SimWorldNavigationArt_Build(first, pitch, developed, source_pitch));
+      CHECK(SimWorldNavigationArt_OverlayTownGround(first, pitch, &ground, detailed, models, cliffs, 0));
+      for (int step = 0; step < 7; ++step) {
+        if (step == 0) ground.terrain[0][0] = 0x25;
+        if (step == 1) ground.object_rows[0][0] ^= 1;
+        if (step == 2) ground.development_tier[0] = 3 - ground.development_tier[0];
+        if (step == 3) ground.enabled_town_mask ^= 1;
+        if (step == 4) ground.enabled_town_mask ^= 1;
+        if (step == 5) ground.native_rows[5][21] ^= 1u << 9;
+        /* Both outside corners and an exact town-border Scale2x dependency. */
+        const int cx = step == 0 ? 0 : step == 1 ? 127 : 48;
+        const int cy = step == 0 ? 0 : step == 1 ? 127 : 56;
+        new_map[cy * 128 + cx]++;
+        developed[(size_t)cy * 8 * source_pitch + cx * 8] ^= 0x00103060u;
+        SimWorldNavigationArtChanges dirty = {0}, applied;
+        SimWorldNavigationArt_MarkChanges(&dirty, old_map, new_map, &previous, &ground);
+        CHECK(SimWorldNavigationArt_UpdateAnimation(first, pitch, developed, source_pitch,
+            dirty.cells, &ground, detailed, models, cliffs, 0, 0, &applied));
+        CHECK(SimWorldNavigationArt_Build(second, pitch, developed, source_pitch));
+        CHECK(SimWorldNavigationArt_OverlayTownGround(second, pitch, &ground, detailed, models, cliffs, 0));
+        CHECK(!memcmp(first, second, count * sizeof(*first)));
+        previous = ground;
+        memcpy(old_map, new_map, sizeof(old_map));
+      }
+    }
+  }
+  SimWorldMap_Shutdown();
   free(developed);
   ground.enabled_town_mask = 0;
   CHECK(SimWorldNavigationArt_OverlayTownGround(second, pitch, &ground, true, true, true, 2));

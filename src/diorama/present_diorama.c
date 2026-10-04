@@ -7,6 +7,7 @@
 #include "action/action_effect_projection.h"
 #include "action/present_action_effects.h"
 #include "app/session_fatal.h"
+#include "app/performance_metrics.h"
 #include "dev/diorama_snapshot_capture.h"
 #include "diorama/diorama.h"
 #include "diorama/diorama_frame_generation.h"
@@ -639,6 +640,9 @@ retry_projection:;
     goto retry_projection;
   }
   PresentActionHeat_End(device, slot, output_viewport);
+  /* Count once after recovery, including the first frame that fell back. */
+  if (DioramaFrameGeneration_SourceProjectionFallback())
+    PerformanceMetrics_Add(kPerformanceCount_EffectProjectionFallbackFrames, 1);
   /* Flat HUD mode leaves BG3 in the same RemoveFromGame capture used by flat
    * presentation. Reconstruct its split pieces into one texture before
    * drawing the screen-space overlay; drawing them directly creates seams

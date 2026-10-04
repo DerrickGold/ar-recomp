@@ -147,10 +147,10 @@ SimBackgroundModelLean SimBackgroundVoxelProject_CameraFacingLean(
 static SimBackgroundModelLean CameraFacingModelLean(
     const SimBackgroundVoxelRenderParams *params,
     SimBackgroundVoxelKind kind) {
-  /* Bridges and grounded rocks retain their world-space footprint. Camera
-   * facing corrections would shear their surfaces as the view moves. */
+  /* Bridges, rocks and low pen posts retain their world-space footprint.
+   * Camera facing corrections would shear them as the view moves. */
   if (kind == kSimBackgroundVoxel_Bridge || kind == kSimBackgroundVoxel_Boulder ||
-      kind == kSimBackgroundVoxel_Rocks)
+      kind == kSimBackgroundVoxel_Rocks || kind == kSimBackgroundVoxel_AnimalPen)
     return (SimBackgroundModelLean){0.0f, 0.0f};
   float billboard_blend = 0.35f;
   if (params->facing == kSimBackgroundVoxelFacing_PerModel) {

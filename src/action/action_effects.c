@@ -250,6 +250,7 @@ static void RetireSceneAll(ActionEffectObserver *observer) {
   if (!observer) return;
   memset(observer->scene_tracks, 0, sizeof(observer->scene_tracks));
   memset(&observer->landing_dust, 0, sizeof(observer->landing_dust));
+  memset(&observer->fireball_smoke, 0, sizeof(observer->fireball_smoke));
   memset(observer->actor_tracks,0,sizeof(observer->actor_tracks));
   observer->scene_clock_valid = 0;
   observer->scene_map_valid = 0;
@@ -468,15 +469,9 @@ static bool SceneTrackDiscontinuous(const ActionEffectObserverTrack *track,
   return AbsInt(dx) > limit_x || AbsInt(dy) > limit_y;
 }
 
-static void BeginOrAdvanceSceneTrack(ActionEffectObserver *observer,
-                                     ActionEffectObserverTrack *track,
-                                     const ActionObjectSnapshot *object,
-                                     uint8_t kind, uint8_t phase,
-                                     unsigned elapsed_ticks,
-                                     ActionEffectInstance *effect) {
-  if (!observer || !track || !object || !effect) return;
+static uint32_t SceneContinuityKey(const ActionObjectSnapshot *object, uint8_t kind) {
   /* Resume/source are stable for the original projectile and trap families.
-   * Fireball's handler is stable too and strengthens its identity; trap
+   * Fireball's handler and parent are stable too and strengthen its identity; trap
    * lightning omits it because one live bolt transitions between $BD36 and
    * the generic timed animation handler $8683 without becoming a new actor.
    * Marahna's orb and split children share a source but retain distinct
@@ -484,9 +479,10 @@ static void BeginOrAdvanceSceneTrack(ActionEffectObserver *observer,
    * and the Bloodpool boss child use their validated source/backlink pair. */
   uint32_t continuity_key = (uint32_t)object->source_descriptor |
       ((uint32_t)object->resume_address << 16);
-  if (kind == kActionEffect_EnemyFireball)
+  if (kind == kActionEffect_EnemyFireball) {
     continuity_key ^= (uint32_t)object->handler * 0x9E3779B9u;
-  else if (kind == kActionEffect_MarahnaFireball)
+    continuity_key ^= (uint32_t)object->spawner_backlink * 0x85EBCA6Bu;
+  } else if (kind == kActionEffect_MarahnaFireball)
     continuity_key = (uint32_t)object->source_descriptor |
         ((uint32_t)object->resume_address << 16);
   else if (kind == kActionEffect_SwordBeam) {
@@ -505,16 +501,43 @@ static void BeginOrAdvanceSceneTrack(ActionEffectObserver *observer,
   else if (kind == kActionEffect_FlamingWheel)
     continuity_key = (uint32_t)object->source_descriptor |
         ((uint32_t)object->spawner_backlink << 16);
+  /* Every child retains its backlink, even families whose resume is the primary key. */
+  return continuity_key ^ (uint32_t)object->spawner_backlink * 0x27D4EB2Du ^
+      (uint32_t)object->animation_address * 0x165667B1u ^ object->animation_bank;
+}
+
+static bool BeginOrAdvanceSceneTrack(ActionEffectObserver *observer,
+                                     ActionEffectObserverTrack *track,
+                                     const ActionObjectSnapshot *object,
+                                     uint8_t kind, uint8_t phase,
+                                     unsigned elapsed_ticks,
+                                     bool freeze_when_stationary,
+                                     ActionEffectInstance *effect) {
+  if (!observer || !track || !object || !effect) return false;
+  const uint32_t continuity_key = SceneContinuityKey(object, kind);
   if (SceneTrackDiscontinuous(track, object, kind, continuity_key,
                               elapsed_ticks))
     memset(track, 0, sizeof(*track));
-  BeginOrAdvanceTrack(observer, track, kind, phase, 0, elapsed_ticks, effect);
+  const bool frozen = freeze_when_stationary && track->active &&
+      track->kind == kind && track->continuity_valid &&
+      track->continuity_key == continuity_key &&
+      track->last_world_x == object->world_x &&
+      track->last_world_y == object->world_y;
+  if (frozen && !effect->velocity_x && !effect->velocity_y) {
+    /* A stopped native projectile can retain its velocity or clear it. Keep
+     * the last heading so its frozen light and ember wake do not turn around. */
+    effect->velocity_x = track->last_velocity_x;
+    effect->velocity_y = track->last_velocity_y;
+  }
+  BeginOrAdvanceTrack(observer, track, kind, phase, 0,
+                      frozen ? 0 : elapsed_ticks, effect);
   track->continuity_key = continuity_key;
   track->last_world_x = object->world_x;
   track->last_world_y = object->world_y;
-  track->last_velocity_x = object->velocity_x;
-  track->last_velocity_y = object->velocity_y;
+  track->last_velocity_x = effect->velocity_x;
+  track->last_velocity_y = effect->velocity_y;
   track->continuity_valid = 1;
+  return frozen;
 }
 
 void ActionEffects_CaptureFrame(ActionEffectObserver *observer,
@@ -632,6 +655,8 @@ enum {
   kEnemyFireballState = 0x0023,
   kEnemyFireballSourceFirst = 0xBD76,
   kEnemyFireballSourceSecond = 0xBD84,
+  kBloodpoolAct1BossSource = 0xB786,
+  kBloodpoolAct1BossFireballHandler = 0xB90D,
   kLightningSourceDescriptor = 0xBD2A,
   kLightningResume = 0xBD69,
   kLightningState = 0x0014,
@@ -720,66 +745,6 @@ static bool SourceIs(uint16_t source, uint16_t original,
   return source == original || source == death_heim;
 }
 
-static bool IsOriginalOrDeathHeimRoom(const uint8_t *wram, size_t wram_size,
-                                      uint8_t original_group,
-                                      uint8_t original_map,
-                                      uint8_t death_heim_map) {
-  const uint8_t group = Read8(wram, wram_size, kActRaiserWram_MapGroup);
-  const uint8_t map = Read8(wram, wram_size, kActRaiserWram_CurrentMap);
-  return (group == original_group && map == original_map) ||
-      (group == kActRaiserMapGroup_DeathHeim && map == death_heim_map);
-}
-
-static bool SourceMatchesOriginalOrDeathHeimRoom(
-    const uint8_t *wram, size_t wram_size, uint16_t source,
-    uint8_t original_group, uint8_t original_map, uint16_t original_source,
-    uint8_t death_heim_map, uint16_t death_heim_source) {
-  const uint8_t group = Read8(wram, wram_size, kActRaiserWram_MapGroup);
-  const uint8_t map = Read8(wram, wram_size, kActRaiserWram_CurrentMap);
-  return (group == original_group && map == original_map &&
-          source == original_source) ||
-      (group == kActRaiserMapGroup_DeathHeim && map == death_heim_map &&
-       source == death_heim_source);
-}
-
-static bool IsMarahnaEffectMap(const uint8_t *wram, size_t wram_size) {
-  if (!wram ||
-      Read8(wram, wram_size, kActRaiserWram_MapGroup) !=
-          kActRaiserMapGroup_Marahna)
-    return false;
-  const uint8_t map = Read8(wram, wram_size, kActRaiserWram_CurrentMap);
-  return map >= kMarahnaFirstEffectMap && map <= kMarahnaLastEffectMap;
-}
-
-static bool IsBloodpoolAct2Map(const uint8_t *wram, size_t wram_size) {
-  if (!wram ||
-      Read8(wram, wram_size, kActRaiserWram_MapGroup) !=
-          kActRaiserMapGroup_Bloodpool)
-    return false;
-  const uint8_t map = Read8(wram, wram_size, kActRaiserWram_CurrentMap);
-  /* Bloodpool Act 2 loads one ordinary-enemy animation family at map $02 and
-   * retains it through map $08. Randomized enemies are therefore legal in
-   * every room of this range, not only the rooms in the discovery capture. */
-  return map >= kBloodpoolAct2FirstMap && map <= kBloodpoolAct2LastMap;
-}
-
-static bool IsAitosLavaMap(const uint8_t *wram, size_t wram_size) {
-  return wram &&
-      Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
-          kActRaiserMapGroup_Aitos &&
-      Read8(wram, wram_size, kActRaiserWram_CurrentMap) == kAitosLavaMap;
-}
-
-static bool IsAitosStatueFireMap(const uint8_t *wram, size_t wram_size) {
-  return wram &&
-      Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
-          kActRaiserMapGroup_Aitos &&
-      Read8(wram, wram_size, kActRaiserWram_CurrentMap) ==
-          kAitosStatueFireMap;
-}
-
-
-
 static bool ActionObjectVisible(const ActionObjectSnapshot *object) {
   return object &&
       !(object->status & (kActRaiserObjectStatus_InactiveMask |
@@ -802,11 +767,107 @@ static bool IsEnemyFireball(const ActionObjectSnapshot *object) {
       (object->visual == 0x0018 && object->composition == 0x4610);
 }
 
-static bool IsFillmoreStatueOrb(const ActionObjectSnapshot *object,
-    const uint8_t *wram, size_t size) {
+static bool ActionObjectAddressIsValid(uint16_t address);
+
+static bool IsBloodpoolAct1BossFireball(const ActionObjectSnapshot *object) {
+  /* $B8E9 initializes a cloned boss record as a stationary state-0 flame. $B90D owns
+   * launched state-1 fireballs; each retains one of four spawn call sites.
+   * The body and death fragments share $B786/$5000, so require the flight
+   * artwork and retained root identity. The parent's boss flag, status and
+   * composition change during death while its launched shots still exist. */
+  if (object->source_descriptor != kBloodpoolAct1BossSource ||
+      object->handler != kBloodpoolAct1BossFireballHandler ||
+      object->animation_address != kBossAnimationAddress ||
+      object->animation_bank != kSceneAnimationBank ||
+      object->animation_state != 1 ||
+      (object->flip_attributes & kActRaiserObjectFlip_Vertical) ||
+      !((object->visual == 6 && object->composition == 0x5207) ||
+        (object->visual == 7 && object->composition == 0x521A)) ||
+      !(object->resume_address == 0xB82D || object->resume_address == 0xB841 ||
+        object->resume_address == 0xB867 || object->resume_address == 0xB87B) ||
+      !ActionObjectAddressIsValid(object->spawner_backlink))
+    return false;
+  return true;
+}
+
+static bool BloodpoolAct1BossFireballParentIsValid(const uint8_t *wram, size_t size,
+    const ActionObjectSnapshot *object) {
+  ActionObjectSnapshot parent;
+  return ReadActionObject(wram, size, object->spawner_backlink, &parent) &&
+      !parent.spawner_backlink &&
+      parent.source_descriptor == kBloodpoolAct1BossSource &&
+      parent.animation_address == kBossAnimationAddress &&
+      parent.animation_bank == kSceneAnimationBank;
+}
+
+enum { kFireballSmokeSourceAbsent, kFireballSmokeSourceMoving, kFireballSmokeSourceFrozen };
+
+static void AgeFireballSmoke(ActionFireballSmoke *smoke,
+                             const ActionEffectObserver *observer,
+                             const uint8_t *sources, unsigned ticks) {
+  unsigned count = 0;
+  for (unsigned i = 0; i < smoke->count; ++i) {
+    ActionFireballSmokePuff puff = smoke->puffs[i];
+    unsigned source = kFireballSmokeSourceAbsent;
+    if (ActionObjectAddressIsValid(puff.source_address)) {
+      const unsigned slot = (puff.source_address - kActRaiserWram_ActionObjectTable) /
+          kActRaiserActionObjectStride;
+      if (observer->scene_tracks[slot].active &&
+          observer->scene_tracks[slot].generation == puff.source_generation)
+        source = sources[slot];
+    }
+    /* Stopped trails disappear with their source. Ordinary detached smoke
+     * still dissipates, and a reused slot cannot inherit a frozen trail. */
+    if (puff.frozen && source == kFireballSmokeSourceAbsent) continue;
+    /* Re-presenting a paused frame is not evidence that this actor stopped. */
+    if (ticks) puff.frozen = source == kFireballSmokeSourceFrozen;
+    if (!puff.frozen) {
+      if (ticks >= kActionFireballSmokeLifetime - puff.age) continue;
+      puff.age += ticks;
+    }
+    smoke->puffs[count++] = puff;
+  }
+  smoke->count = (uint8_t)count;
+}
+
+static void EmitFireballSmoke(ActionFireballSmoke *smoke,
+                             const ActionEffectInstance *effect, unsigned ticks) {
+  if (!ticks || !(effect->flags & kActionEffectFlag_Visible) ||
+      (!effect->velocity_x && !effect->velocity_y)) return;
+  /* Reconstruct emissions across skipped captures, oldest first. Restrict the
+   * history to this generation and the smoke lifetime: a recycled slot must
+   * not bridge from its previous occupant, and catch-up work stays bounded. */
+  unsigned back = effect->age_ticks % kActionFireballSmokeInterval;
+  if (back >= ticks) return;
+  unsigned history = ticks - 1;
+  if (history > effect->age_ticks) history = effect->age_ticks;
+  if (history >= kActionFireballSmokeLifetime) history = kActionFireballSmokeLifetime - 1;
+  back += (history - back) / kActionFireballSmokeInterval * kActionFireballSmokeInterval;
+  const int tail = effect->velocity_x < 0 ? 12 : -12;
+  for (;;) {
+    if (smoke->count == kActionFireballSmokeMaxPuffs) {
+      memmove(smoke->puffs, smoke->puffs + 1,
+              (kActionFireballSmokeMaxPuffs - 1) * sizeof(smoke->puffs[0]));
+      --smoke->count;
+    }
+    smoke->puffs[smoke->count++] = (ActionFireballSmokePuff){
+      .seed = effect->generation * 0x9E3779B9u +
+          (effect->age_ticks - back) / kActionFireballSmokeInterval,
+      .source_generation = effect->generation,
+      .source_address = effect->record_address,
+      .x = (int16_t)(effect->world_x - effect->velocity_x * (int)back + tail),
+      .y = (int16_t)(effect->world_y - effect->velocity_y * (int)back - 1),
+      .age = (uint16_t)back, .priority = effect->obj_priority,
+    };
+    if (back < kActionFireballSmokeInterval) break;
+    back -= kActionFireballSmokeInterval;
+  }
+}
+
+static bool IsFillmoreStatueOrb(const ActionObjectSnapshot *object) {
   /* $B3EA clones the statue; $B406/$B42F run its rolling/falling ball.
    * Parent and child share a source, so neither that nor a red palette is
-   * sufficient identity. Verify the flight animation AND live statue backlink. */
+   * sufficient identity. Verify flight artwork; the admission rule checks the statue. */
   if (object->source_descriptor != 0xB3BF ||
       object->animation_address != kSceneAnimationAddress ||
       object->animation_bank != kSceneAnimationBank ||
@@ -820,6 +881,11 @@ static bool IsFillmoreStatueOrb(const ActionObjectSnapshot *object,
           kActionSceneEffectObserverTrackCount*kActRaiserActionObjectStride ||
       (object->spawner_backlink-kActRaiserWram_ActionObjectTable) % kActRaiserActionObjectStride)
     return false;
+  return true;
+}
+
+static bool FillmoreStatueOrbParentIsValid(const uint8_t *wram, size_t size,
+    const ActionObjectSnapshot *object) {
   ActionObjectSnapshot parent;
   return ReadActionObject(wram, size, object->spawner_backlink, &parent) &&
       !(parent.status & kActRaiserObjectStatus_InactiveMask) &&
@@ -850,8 +916,6 @@ typedef struct MarahnaFireballOrbLifecycle {
   int16_t velocity_x, velocity_y;
   uint16_t visual, composition;
 } MarahnaFireballOrbLifecycle;
-
-static bool ActionObjectAddressIsValid(uint16_t address);
 
 static bool MarahnaFireballSplitParentIsValid(
     const uint8_t *wram, size_t wram_size,
@@ -913,7 +977,6 @@ static bool MarahnaSnakeFireballParentIsValid(
 }
 
 static uint8_t MatchMarahnaSnakeFireballShot(
-    const uint8_t *wram, size_t wram_size,
     const ActionObjectSnapshot *object) {
   if (!object ||
       object->source_descriptor != kMarahnaSnakeSourceDescriptor ||
@@ -926,7 +989,7 @@ static uint8_t MatchMarahnaSnakeFireballShot(
       object->right_extent != 8 || object->bottom_extent != 4 ||
       object->velocity_y != 0 || object->local_counter != 6 ||
       (object->flip_attributes & kActRaiserObjectFlip_Vertical) ||
-      !MarahnaSnakeFireballParentIsValid(wram, wram_size, object))
+      !ActionObjectAddressIsValid(object->spawner_backlink))
     return kActionEffectPhase_None;
   const bool horizontal_flip =
       (object->flip_attributes & kActRaiserObjectFlip_Horizontal) != 0;
@@ -938,11 +1001,10 @@ static uint8_t MatchMarahnaSnakeFireballShot(
   return kActionEffectPhase_None;
 }
 
-static uint8_t MatchMarahnaFireball(const uint8_t *wram, size_t wram_size,
-                                    const ActionObjectSnapshot *object) {
+static uint8_t MatchMarahnaFireball(const ActionObjectSnapshot *object) {
   if (!object) return kActionEffectPhase_None;
   if (object->source_descriptor == kMarahnaSnakeSourceDescriptor)
-    return MatchMarahnaSnakeFireballShot(wram, wram_size, object);
+    return MatchMarahnaSnakeFireballShot(object);
   if (object->source_descriptor != kMarahnaFireballSourceDescriptor ||
       object->handler != kAnimationDelayHandler ||
       object->animation_address != kSceneAnimationAddress ||
@@ -981,7 +1043,7 @@ static uint8_t MatchMarahnaFireball(const uint8_t *wram, size_t wram_size,
   if (object->resume_address != kSharedActionChildResume ||
       object->left_extent != 4 || object->top_extent != 4 ||
       object->right_extent != 4 || object->bottom_extent != 4 ||
-      !MarahnaFireballSplitParentIsValid(wram, wram_size, object))
+      !ActionObjectAddressIsValid(object->spawner_backlink))
     return kActionEffectPhase_None;
   for (size_t i = 0; i < sizeof(kSplit) / sizeof(kSplit[0]); i++)
     if (object->velocity_x == kSplit[i].velocity_x &&
@@ -1120,8 +1182,7 @@ static bool MarahnaLightningEndpointMatches(
       object->composition == (vertical ? 0x45C4 : 0x45B8);
 }
 
-static bool IsMarahnaLightningLink(const uint8_t *wram, size_t wram_size,
-                                   const ActionObjectSnapshot *object) {
+static bool IsMarahnaLightningLink(const ActionObjectSnapshot *object) {
   if (!object || object->handler != kMarahnaLightningHandler ||
       object->source_descriptor != kMarahnaLightningSourceDescriptor ||
       object->resume_address != kMarahnaLightningResume ||
@@ -1141,8 +1202,12 @@ static bool IsMarahnaLightningLink(const uint8_t *wram, size_t wram_size,
       object->visual == 0x0031 && object->composition == 0x4B82 &&
       object->left_extent == 5 && object->right_extent == 5 &&
       object->top_extent == 40 && object->bottom_extent == 40;
-  if (!horizontal && !vertical) return false;
+  return horizontal || vertical;
+}
 
+static bool MarahnaLightningLinkEndpointsAreValid(
+    const uint8_t *wram, size_t wram_size, const ActionObjectSnapshot *object) {
+  const bool vertical = object->animation_state == kMarahnaLightningVerticalState;
   const unsigned partner_address =
       (unsigned)object->spawner_backlink + kActRaiserActionObjectStride;
   if (partner_address > UINT16_MAX ||
@@ -1189,7 +1254,6 @@ static bool MarahnaBossParentMatches(const ActionObjectSnapshot *object) {
 }
 
 static uint8_t MatchMarahnaBossLightning(
-    const uint8_t *wram, size_t wram_size,
     const ActionObjectSnapshot *object) {
   if (!object ||
       !SourceIs(object->source_descriptor,
@@ -1256,19 +1320,25 @@ static uint8_t MatchMarahnaBossLightning(
       !ActionObjectAddressIsValid(object->spawner_backlink))
     return kActionEffectPhase_None;
 
+  return phase;
+}
+
+static bool MarahnaBossLightningParentIsValid(
+    const uint8_t *wram, size_t wram_size, const ActionObjectSnapshot *object) {
+  const uint8_t phase = MatchMarahnaBossLightning(object);
   ActionObjectSnapshot parent;
   if (!ReadActionObject(wram, wram_size, object->spawner_backlink, &parent) ||
       !MarahnaBossParentMatches(&parent) ||
       parent.source_descriptor != object->source_descriptor)
-    return kActionEffectPhase_None;
+    return false;
   const bool post_impact_parent =
       parent.handler == kAnimationRepeatHandler &&
       parent.animation_state == 0x000A &&
       parent.resume_address == kMarahnaBossLightningGroundParentResume;
   if ((phase == kActionEffectPhase_MarahnaBossLightningGroundCharge) !=
       post_impact_parent)
-    return kActionEffectPhase_None;
-  return phase;
+    return false;
+  return true;
 }
 
 static bool PlayerSwordBeamParentIsValid(
@@ -1286,15 +1356,14 @@ static bool PlayerSwordBeamParentIsValid(
       player.source_descriptor == object->source_descriptor;
 }
 
-static bool IsPlayerSwordBeam(const uint8_t *wram, size_t wram_size,
-                              const ActionObjectSnapshot *object) {
+static bool IsPlayerSwordBeam(const ActionObjectSnapshot *object) {
   if (!object || object->handler != kSwordBeamHandler ||
       object->animation_address != kSwordBeamAnimationAddress ||
       object->animation_bank != kSwordBeamAnimationBank ||
       !object->source_descriptor ||
       (object->flip_attributes & kActRaiserObjectFlip_Vertical) ||
       !(object->flags & kActRaiserObjectFlag_Attacker) ||
-      !PlayerSwordBeamParentIsValid(wram, wram_size, object))
+      object->spawner_backlink != kActRaiserWram_PlayerObject)
     return false;
   return (object->animation_state == kSwordBeamHorizontalState &&
           object->visual == 0x0030 && object->composition == 0x99E8) ||
@@ -1334,8 +1403,7 @@ static bool AitosBossSwordBeamParentIsValid(
       boss.spawner_backlink == 0 && (boss.flags & 0x4000);
 }
 
-static bool IsAitosBossSwordBeam(const uint8_t *wram, size_t wram_size,
-                                 const ActionObjectSnapshot *object) {
+static bool IsAitosBossSwordBeam(const ActionObjectSnapshot *object) {
   const uint16_t reflected_flips =
       kActRaiserObjectFlip_Horizontal | kActRaiserObjectFlip_Vertical;
   if (!object ||
@@ -1348,7 +1416,7 @@ static bool IsAitosBossSwordBeam(const uint8_t *wram, size_t wram_size,
       (object->flip_attributes != 0 &&
        object->flip_attributes != reflected_flips) ||
       object->flags != 0x0020 ||
-      !AitosBossSwordBeamParentIsValid(wram, wram_size, object))
+      !ActionObjectAddressIsValid(object->spawner_backlink))
     return false;
 
   /* Run 20260812-224123 measured the controller's other facing. The engine
@@ -1406,7 +1474,6 @@ static bool BloodpoolBossLightningParentIsValid(
 }
 
 static uint8_t MatchBloodpoolBossLightning(
-    const uint8_t *wram, size_t wram_size,
     const ActionObjectSnapshot *object) {
   if (!object ||
       !SourceIs(object->source_descriptor, kBossLightningSourceDescriptor,
@@ -1415,7 +1482,7 @@ static uint8_t MatchBloodpoolBossLightning(
       object->animation_address != kBossAnimationAddress ||
       object->animation_bank != kSceneAnimationBank ||
       (object->flip_attributes & kActRaiserObjectFlip_Vertical) ||
-      !BloodpoolBossLightningParentIsValid(wram, wram_size, object))
+      !ActionObjectAddressIsValid(object->spawner_backlink))
     return kActionEffectPhase_None;
 
   static const uint16_t kStrikeCompositions[] = {
@@ -1531,8 +1598,7 @@ static bool BossFamilyParentIsValid(const uint8_t *wram, size_t wram_size,
       parent.animation_bank == kSceneAnimationBank;
 }
 
-static bool IsMinotaurAxe(const uint8_t *wram, size_t wram_size,
-                         const ActionObjectSnapshot *object) {
+static bool IsMinotaurAxe(const ActionObjectSnapshot *object) {
   static const uint16_t kCompositions[] = {
     0x50FB, 0x5138, 0x5159, 0x5196, 0x51B7, 0x51F4, 0x5215, 0x5252,
   };
@@ -1544,9 +1610,7 @@ static bool IsMinotaurAxe(const uint8_t *wram, size_t wram_size,
       object->animation_address != kBossAnimationAddress ||
       object->animation_bank != kSceneAnimationBank ||
       object->animation_state != 0x0003 ||
-      !BossFamilyParentIsValid(wram, wram_size, object,
-                               kMinotaurSourceDescriptor,
-                               kDeathHeimMinotaurSourceDescriptor))
+      !ActionObjectAddressIsValid(object->spawner_backlink))
     return false;
   if (object->visual <= 7u)
     return object->composition == kCompositions[object->visual];
@@ -1574,7 +1638,6 @@ static bool IsFlamingWheel(const ActionObjectSnapshot *object) {
 }
 
 static bool IsFlamingWheelProjectile(
-    const uint8_t *wram, size_t wram_size,
     const ActionObjectSnapshot *object) {
   static const uint16_t kCompositions[] = {
     0x51B5, 0x51C1, 0x51CD, 0x51D9,
@@ -1607,6 +1670,11 @@ static bool IsFlamingWheelProjectile(
       object->velocity_y != kVelocity[direction][1])
     return false;
 
+  return true;
+}
+
+static bool FlamingWheelProjectileParentIsValid(
+    const uint8_t *wram, size_t wram_size, const ActionObjectSnapshot *object) {
   ActionObjectSnapshot parent;
   return ReadActionObject(wram, wram_size, object->spawner_backlink,
                           &parent) &&
@@ -1614,8 +1682,7 @@ static bool IsFlamingWheelProjectile(
       IsFlamingWheel(&parent);
 }
 
-static bool IsIceDragonIceBall(const uint8_t *wram, size_t wram_size,
-                               const ActionObjectSnapshot *object) {
+static bool IsIceDragonIceBall(const ActionObjectSnapshot *object) {
   static const uint16_t kCompositions[] = {
     0x5D9C, 0x5DA8, 0x5DB4, 0x5DC0,
     0x5DCC, 0x5DD8, 0x5DE4, 0x5DF0,
@@ -1627,9 +1694,7 @@ static bool IsIceDragonIceBall(const uint8_t *wram, size_t wram_size,
       object->resume_address != kIceDragonIceBallResume ||
       object->animation_address != kBossAnimationAddress ||
       object->animation_bank != kSceneAnimationBank ||
-      !BossFamilyParentIsValid(wram, wram_size, object,
-                               kIceDragonSourceDescriptor,
-                               kDeathHeimIceDragonSourceDescriptor))
+      !ActionObjectAddressIsValid(object->spawner_backlink))
     return false;
   if (object->visual < 0x0012 || object->visual > 0x0019)
     return false;
@@ -1814,6 +1879,157 @@ static void PopulateSceneObjectEffect(ActionEffectInstance *effect,
     effect->flags |= kActionEffectFlag_FlipVertical;
 }
 
+/* Recognition is object-local. Only this admission layer can consult another
+ * record, so a spawn validator cannot accidentally become a lifetime gate. */
+#define FIXED_SCENE_MATCHER(name, phase) \
+  static uint8_t Match##name(const ActionObjectSnapshot *object) { \
+    return Is##name(object) ? kActionEffectPhase_##phase : kActionEffectPhase_None; \
+  }
+FIXED_SCENE_MATCHER(MinotaurAxe, MinotaurAxeFlight)
+FIXED_SCENE_MATCHER(FlamingWheel, FlamingWheelBody)
+FIXED_SCENE_MATCHER(FlamingWheelProjectile, FlamingWheelProjectileFlight)
+FIXED_SCENE_MATCHER(IceDragonIceBall, IceDragonIceBallFlight)
+FIXED_SCENE_MATCHER(TanzaraProjectile, TanzaraProjectileFlight)
+FIXED_SCENE_MATCHER(BloodpoolAct1BossFireball, EnemyFireballFlight)
+FIXED_SCENE_MATCHER(EnemyFireball, EnemyFireballFlight)
+FIXED_SCENE_MATCHER(FillmoreStatueOrb, EnemyFireballFlight)
+FIXED_SCENE_MATCHER(MarahnaLightningLink, MarahnaLightningActive)
+FIXED_SCENE_MATCHER(AitosLavaFireball, AitosLavaFireballFlight)
+FIXED_SCENE_MATCHER(AitosStatueFire, AitosStatueFireBreath)
+FIXED_SCENE_MATCHER(AitosMoltenRock, AitosMoltenRockFlight)
+FIXED_SCENE_MATCHER(AitosBossSwordBeam, SwordBeamFlight)
+FIXED_SCENE_MATCHER(PlayerSwordBeam, SwordBeamFlight)
+FIXED_SCENE_MATCHER(LightningTrap, LightningActive)
+#undef FIXED_SCENE_MATCHER
+
+static uint8_t MatchMarahnaBossBody(const ActionObjectSnapshot *object) {
+  const uint8_t phase = MatchMarahnaBossLightning(object);
+  return phase == kActionEffectPhase_MarahnaBossLightningCharge ||
+      phase == kActionEffectPhase_MarahnaBossLightningOrb ? phase : kActionEffectPhase_None;
+}
+
+static bool MinotaurAxeParentIsValid(const uint8_t *ram, size_t size,
+                                    const ActionObjectSnapshot *object) {
+  return BossFamilyParentIsValid(ram, size, object,
+      kMinotaurSourceDescriptor, kDeathHeimMinotaurSourceDescriptor);
+}
+
+static bool IceDragonIceBallParentIsValid(const uint8_t *ram, size_t size,
+                                         const ActionObjectSnapshot *object) {
+  return BossFamilyParentIsValid(ram, size, object,
+      kIceDragonSourceDescriptor, kDeathHeimIceDragonSourceDescriptor);
+}
+
+typedef enum SceneOwnership {
+  kSceneOwnership_Record = 1, kSceneOwnership_Spawn, kSceneOwnership_Attached
+} SceneOwnership;
+typedef enum SceneClock { kSceneClock_Gameplay = 1, kSceneClock_Motion } SceneClock;
+typedef enum SceneRoom {
+  kSceneRoom_Any, kSceneRoom_Centaur, kSceneRoom_NorthwallMagic,
+  kSceneRoom_Minotaur, kSceneRoom_FlamingWheel, kSceneRoom_IceDragon,
+  kSceneRoom_Tanzara, kSceneRoom_BloodpoolAct1, kSceneRoom_BloodpoolAct2,
+  kSceneRoom_FillmoreStatue, kSceneRoom_Marahna, kSceneRoom_Viper,
+  kSceneRoom_AitosLava, kSceneRoom_AitosStatue, kSceneRoom_AitosBoss, kSceneRoom_Wizard
+} SceneRoom;
+typedef struct SceneEffectRule {
+  uint8_t kind, phase_filter;
+  SceneRoom room;
+  SceneOwnership ownership;
+  SceneClock clock;
+  uint8_t (*match)(const ActionObjectSnapshot *);
+  bool (*dependency)(const uint8_t *, size_t, const ActionObjectSnapshot *);
+} SceneEffectRule;
+
+static const SceneEffectRule kSceneRules[kActionSceneFamily_Count] = {
+#define SCENE_RULE(name, kind, match, phase, room, ownership, dependency, clock) \
+  [kActionSceneFamily_##name] = {kActionEffect_##kind, kActionEffectPhase_##phase, \
+      kSceneRoom_##room, kSceneOwnership_##ownership, kSceneClock_##clock, match, dependency},
+#include "action_scene_effect_rules.inc"
+#undef SCENE_RULE
+};
+_Static_assert(kActionSceneFamily_Count <= UINT8_MAX, "Scene family must fit observer track");
+
+static bool SceneRuleRoomMatches(SceneRoom room, uint8_t group, uint8_t map, uint16_t source) {
+  switch (room) {
+    case kSceneRoom_Any: return true;
+    case kSceneRoom_Centaur: return group == kActRaiserMapGroup_Fillmore && map == 1;
+    case kSceneRoom_NorthwallMagic: return group == kActRaiserMapGroup_Northwall && map == 4;
+    case kSceneRoom_BloodpoolAct1: return group == kActRaiserMapGroup_Bloodpool && map == 1;
+    case kSceneRoom_BloodpoolAct2:
+      return group == kActRaiserMapGroup_Bloodpool &&
+          map >= kBloodpoolAct2FirstMap && map <= kBloodpoolAct2LastMap;
+    case kSceneRoom_FillmoreStatue:
+      return group == kActRaiserMapGroup_Fillmore && (map == 2 || map == 3);
+    case kSceneRoom_Marahna:
+      return group == kActRaiserMapGroup_Marahna &&
+          map >= kMarahnaFirstEffectMap && map <= kMarahnaLastEffectMap;
+    case kSceneRoom_AitosLava: return group == kActRaiserMapGroup_Aitos && map == kAitosLavaMap;
+    case kSceneRoom_AitosStatue: return group == kActRaiserMapGroup_Aitos && map == kAitosStatueFireMap;
+    case kSceneRoom_AitosBoss: return group == kActRaiserMapGroup_Aitos && map == kAitosBossMap;
+    case kSceneRoom_Tanzara:
+      return group == kActRaiserMapGroup_DeathHeim && map == kActRaiserDeathHeimMap_FinalBoss;
+#define BOSS_ROOM(name, group_name, original_map, original_source, rematch_map, rematch_source) \
+    case kSceneRoom_##name: \
+      return (group == kActRaiserMapGroup_##group_name && \
+              map == original_map && source == original_source) || \
+          (group == kActRaiserMapGroup_DeathHeim && map == rematch_map && source == rematch_source);
+    BOSS_ROOM(Minotaur, Fillmore, kFillmoreBossMap, kMinotaurSourceDescriptor,
+              kDeathHeimMinotaurMap, kDeathHeimMinotaurSourceDescriptor)
+    BOSS_ROOM(FlamingWheel, Aitos, kFlamingWheelBossMap, kFlamingWheelSourceDescriptor,
+              kDeathHeimFlamingWheelMap, kDeathHeimFlamingWheelSourceDescriptor)
+    BOSS_ROOM(IceDragon, Northwall, kNorthwallBossMap, kIceDragonSourceDescriptor,
+              kDeathHeimIceDragonMap, kDeathHeimIceDragonSourceDescriptor)
+    BOSS_ROOM(Viper, Marahna, kMarahnaBossMap, kMarahnaBossLightningSourceDescriptor,
+              kDeathHeimViperMap, kDeathHeimViperSourceDescriptor)
+    BOSS_ROOM(Wizard, Bloodpool, kBloodpoolBossMap, kBossLightningSourceDescriptor,
+              kDeathHeimWizardMap, kDeathHeimWizardSourceDescriptor)
+#undef BOSS_ROOM
+  }
+  return false;
+}
+
+static bool SceneTrackContinues(const ActionEffectObserverTrack *track,
+                                const ActionObjectSnapshot *object,
+                                uint8_t family, unsigned ticks) {
+  const uint8_t kind = kSceneRules[family].kind;
+  const uint32_t key = SceneContinuityKey(object, kind);
+  return track->active && track->continuity_valid && track->scene_family == family &&
+      track->kind == kind && track->continuity_key == key &&
+      !SceneTrackDiscontinuous(track, object, kind, key, ticks);
+}
+
+static uint8_t AdmitSceneObject(ActionEffectObserverTrack *track,
+                                ActionObjectSnapshot *object, uint8_t group, uint8_t map,
+                                const uint8_t *ram, size_t size, unsigned ticks, uint8_t *phase) {
+  for (uint8_t family = 1; family < kActionSceneFamily_Count; ++family) {
+    const SceneEffectRule *rule = &kSceneRules[family];
+    if (!SceneRuleRoomMatches(rule->room, group, map, object->source_descriptor)) continue;
+    const bool continuing = SceneTrackContinues(track, object, family, ticks);
+    ActionObjectSnapshot candidate = *object;
+    /* A native stop can clear velocity. Recover only a previously admitted
+     * heading, at the same position and identity; never admit a new zero-speed
+     * lookalike by relaxing a family's measured flight signature. */
+    if (continuing && rule->clock == kSceneClock_Motion &&
+        object->world_x == track->last_world_x && object->world_y == track->last_world_y &&
+        !object->velocity_x && !object->velocity_y) {
+      candidate.velocity_x = track->last_velocity_x;
+      candidate.velocity_y = track->last_velocity_y;
+    }
+    const uint8_t matched = rule->match(&candidate);
+    if (!matched || (rule->phase_filter && matched != rule->phase_filter)) continue;
+    if (rule->ownership == kSceneOwnership_Attached ||
+        (rule->ownership == kSceneOwnership_Spawn && !continuing)) {
+      if (!rule->dependency || !rule->dependency(ram, size, &candidate)) continue;
+    }
+    if (!continuing) memset(track, 0, sizeof(*track));
+    track->scene_family = family;
+    *phase = matched;
+    *object = candidate;
+    return family;
+  }
+  return kActionSceneFamily_None;
+}
+
 /* No new game objects or renderer identity tests: every active composition can
  * be selected by an authored effect, including previously unrecognized attacks. */
 static void CaptureAuthoringActor(ActionEffectObserver *observer,ActionSceneEffectFrame *dst,
@@ -1825,18 +2041,25 @@ static void CaptureAuthoringActor(ActionEffectObserver *observer,ActionSceneEffe
     .x=object->world_x,.y=object->world_y,.vx=object->velocity_x,.vy=object->velocity_y,
     .priority=ScenePriorityFromSpriteAttributeBias(ram,size),.visible=ActionObjectVisible(object),
     .flip=(uint8_t)(object->flip_attributes>>8),.player=address==kActRaiserWram_PlayerObject};
-  const unsigned parent=object->spawner_backlink;
-  if(parent>=kActRaiserWram_ActionObjectTable && parent<kActRaiserWram_ActionObjectTable+kActionEffectActorMax*kActRaiserActionObjectStride &&
-      (parent-kActRaiserWram_ActionObjectTable)%kActRaiserActionObjectStride==0 &&
-      !(Read16(ram,size,parent+kActRaiserActionObject_Status)&kActRaiserObjectStatus_InactiveMask))
-    actor.parent_source=Read16(ram,size,parent+kActRaiserActionObject_SourceDescriptor);
-  const ActionEffectActor *old=&track->actor;
-  const bool same=track->active&&old->source==actor.source&&old->animation==actor.animation&&old->bank==actor.bank&&
-    old->parent_source==actor.parent_source&&abs((int)actor.x-old->x)<=128&&abs((int)actor.y-old->y)<=128;
+  const uint16_t parent = object->spawner_backlink;
+  const ActionEffectActor *old = &track->actor;
+  const bool same = track->active && old->source == actor.source &&
+      old->animation == actor.animation && old->bank == actor.bank &&
+      track->parent_address == parent && abs((int)actor.x - old->x) <= 128 &&
+      abs((int)actor.y - old->y) <= 128;
+  if (same) {
+    /* actor-parent describes spawn provenance, not the current occupant of
+     * the parent's reusable pool slot. Even an unknown (zero) origin is stable. */
+    actor.parent_source = old->parent_source;
+  } else if (ActionObjectAddressIsValid(parent) &&
+      !(Read16(ram, size, parent + kActRaiserActionObject_Status) &
+        kActRaiserObjectStatus_InactiveMask)) {
+    actor.parent_source = Read16(ram, size, parent + kActRaiserActionObject_SourceDescriptor);
+  }
   actor.generation=same?old->generation:AllocateSequence(&observer->next_actor_generation);
   actor.age=same?AddSaturated16(old->age,ticks):0;
   actor.phase_ticks=same&&old->state==actor.state?AddSaturated16(old->phase_ticks,ticks):0;
-  *track=(ActionEffectActorTrack){actor,1};
+  *track = (ActionEffectActorTrack){.actor = actor, .parent_address = parent, .active = 1};
   if(dst->actor_count<kActionEffectActorMax)dst->actors[dst->actor_count++]=actor;
 }
 
@@ -1923,42 +2146,8 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
     dst->decoration_count = 0;
     dst->decoration_visible_count = 0;
   }
-  const bool marahna_effect_map = IsMarahnaEffectMap(wram, wram_size);
-  const bool bloodpool_act2_map = IsBloodpoolAct2Map(wram, wram_size);
-  const bool aitos_lava_map = IsAitosLavaMap(wram, wram_size);
-  const bool aitos_statue_fire_map =
-      IsAitosStatueFireMap(wram, wram_size);
-  const bool aitos_boss_map =
-      Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
-          kActRaiserMapGroup_Aitos &&
-      Read8(wram, wram_size, kActRaiserWram_CurrentMap) == kAitosBossMap;
-  const bool boss_lightning_map =
-      IsOriginalOrDeathHeimRoom(wram, wram_size,
-                                kActRaiserMapGroup_Bloodpool,
-                                kBloodpoolBossMap, kDeathHeimWizardMap);
-  const bool marahna_boss_map =
-      IsOriginalOrDeathHeimRoom(wram, wram_size,
-                                kActRaiserMapGroup_Marahna,
-                                kMarahnaBossMap, kDeathHeimViperMap);
-  const bool minotaur_map =
-      IsOriginalOrDeathHeimRoom(wram, wram_size,
-                                kActRaiserMapGroup_Fillmore,
-                                kFillmoreBossMap, kDeathHeimMinotaurMap);
-  const bool flaming_wheel_map =
-      IsOriginalOrDeathHeimRoom(wram, wram_size,
-                                kActRaiserMapGroup_Aitos,
-                                kFlamingWheelBossMap,
-                                kDeathHeimFlamingWheelMap);
-  const bool ice_dragon_map =
-      IsOriginalOrDeathHeimRoom(wram, wram_size,
-                                kActRaiserMapGroup_Northwall,
-                                kNorthwallBossMap, kDeathHeimIceDragonMap);
-  const bool tanzara_map =
-      Read8(wram, wram_size, kActRaiserWram_MapGroup) ==
-          kActRaiserMapGroup_DeathHeim &&
-      Read8(wram, wram_size, kActRaiserWram_CurrentMap) ==
-          kActRaiserDeathHeimMap_FinalBoss;
   bool seen[kActionSceneEffectObserverTrackCount] = {false};
+  uint8_t smoke_sources[kActionSceneEffectObserverTrackCount] = {0};
   for (unsigned slot = 0; slot < kActionSceneEffectObserverTrackCount;
        slot++) {
     const uint16_t address = (uint16_t)(kActRaiserWram_ActionObjectTable +
@@ -1972,118 +2161,14 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
     }
     CaptureAuthoringActor(observer,dst,slot,address,&object,wram,wram_size,elapsed_ticks);
 
-    uint8_t kind = kActionEffect_None;
     uint8_t phase = kActionEffectPhase_None;
-    bool aitos_boss_sword_beam = false;
-    if (map_group == kActRaiserMapGroup_Fillmore && map_number == 1 &&
-        (phase = MatchCentaurLightning(&object)) != kActionEffectPhase_None) {
-      kind = kActionEffect_CentaurLightning;
-    } else if (map_group == kActRaiserMapGroup_Northwall && map_number == 4 &&
-               (phase = MatchNorthwallBossMagic(&object)) != kActionEffectPhase_None) {
-      kind = kActionEffect_NorthwallBossMagic;
-    } else if (minotaur_map &&
-        SourceMatchesOriginalOrDeathHeimRoom(
-            wram, wram_size, object.source_descriptor,
-            kActRaiserMapGroup_Fillmore, kFillmoreBossMap,
-            kMinotaurSourceDescriptor, kDeathHeimMinotaurMap,
-            kDeathHeimMinotaurSourceDescriptor) &&
-        IsMinotaurAxe(wram, wram_size, &object)) {
-      kind = kActionEffect_MinotaurAxe;
-      phase = kActionEffectPhase_MinotaurAxeFlight;
-    } else if (flaming_wheel_map &&
-               SourceMatchesOriginalOrDeathHeimRoom(
-                   wram, wram_size, object.source_descriptor,
-                   kActRaiserMapGroup_Aitos, kFlamingWheelBossMap,
-                   kFlamingWheelSourceDescriptor,
-                   kDeathHeimFlamingWheelMap,
-                   kDeathHeimFlamingWheelSourceDescriptor) &&
-               IsFlamingWheel(&object)) {
-      kind = kActionEffect_FlamingWheel;
-      phase = kActionEffectPhase_FlamingWheelBody;
-    } else if (flaming_wheel_map &&
-               SourceMatchesOriginalOrDeathHeimRoom(
-                   wram, wram_size, object.source_descriptor,
-                   kActRaiserMapGroup_Aitos, kFlamingWheelBossMap,
-                   kFlamingWheelSourceDescriptor,
-                   kDeathHeimFlamingWheelMap,
-                   kDeathHeimFlamingWheelSourceDescriptor) &&
-               IsFlamingWheelProjectile(wram, wram_size, &object)) {
-      kind = kActionEffect_FlamingWheelProjectile;
-      phase = kActionEffectPhase_FlamingWheelProjectileFlight;
-    } else if (ice_dragon_map &&
-               SourceMatchesOriginalOrDeathHeimRoom(
-                   wram, wram_size, object.source_descriptor,
-                   kActRaiserMapGroup_Northwall, kNorthwallBossMap,
-                   kIceDragonSourceDescriptor, kDeathHeimIceDragonMap,
-                   kDeathHeimIceDragonSourceDescriptor) &&
-               IsIceDragonIceBall(wram, wram_size, &object)) {
-      kind = kActionEffect_IceDragonIceBall;
-      phase = kActionEffectPhase_IceDragonIceBallFlight;
-    } else if (tanzara_map && IsTanzaraProjectile(&object)) {
-      kind = kActionEffect_TanzaraProjectile;
-      phase = kActionEffectPhase_TanzaraProjectileFlight;
-    } else if (bloodpool_act2_map && IsEnemyFireball(&object)) {
-      kind = kActionEffect_EnemyFireball;
-      phase = kActionEffectPhase_EnemyFireballFlight;
-    } else if (map_group == kActRaiserMapGroup_Fillmore &&
-        (map_number == 2 || map_number == 3) &&
-        IsFillmoreStatueOrb(&object, wram, wram_size)) {
-      kind = kActionEffect_FillmoreStatueOrb;
-      phase = kActionEffectPhase_EnemyFireballFlight;
-    } else if (marahna_effect_map &&
-               (phase = MatchMarahnaFireball(
-                    wram, wram_size, &object)) !=
-                   kActionEffectPhase_None) {
-      kind = kActionEffect_MarahnaFireball;
-    } else if (marahna_effect_map &&
-               IsMarahnaLightningLink(wram, wram_size, &object)) {
-      kind = kActionEffect_MarahnaLightningLink;
-      phase = kActionEffectPhase_MarahnaLightningActive;
-    } else if (marahna_boss_map &&
-               SourceMatchesOriginalOrDeathHeimRoom(
-                   wram, wram_size, object.source_descriptor,
-                   kActRaiserMapGroup_Marahna, kMarahnaBossMap,
-                   kMarahnaBossLightningSourceDescriptor,
-                   kDeathHeimViperMap,
-                   kDeathHeimViperSourceDescriptor) &&
-               (phase = MatchMarahnaBossLightning(
-                    wram, wram_size, &object)) !=
-                   kActionEffectPhase_None) {
-      kind = kActionEffect_MarahnaBossLightning;
-    } else if (aitos_lava_map && IsAitosLavaFireball(&object)) {
-      kind = kActionEffect_AitosLavaFireball;
-      phase = kActionEffectPhase_AitosLavaFireballFlight;
-    } else if (aitos_statue_fire_map && IsAitosStatueFire(&object)) {
-      kind = kActionEffect_AitosStatueFire;
-      phase = kActionEffectPhase_AitosStatueFireBreath;
-    } else if (aitos_lava_map && IsAitosMoltenRock(&object)) {
-      kind = kActionEffect_AitosMoltenRock;
-      phase = kActionEffectPhase_AitosMoltenRockFlight;
-    } else if (aitos_boss_map &&
-               IsAitosBossSwordBeam(wram, wram_size, &object)) {
-      kind = kActionEffect_SwordBeam;
-      phase = kActionEffectPhase_SwordBeamFlight;
-      aitos_boss_sword_beam = true;
-    } else if (IsPlayerSwordBeam(wram, wram_size, &object)) {
-      kind = kActionEffect_SwordBeam;
-      phase = kActionEffectPhase_SwordBeamFlight;
-    } else if (bloodpool_act2_map && IsLightningTrap(&object)) {
-      kind = kActionEffect_LightningTrap;
-      phase = kActionEffectPhase_LightningActive;
-    } else if (boss_lightning_map &&
-               SourceMatchesOriginalOrDeathHeimRoom(
-                   wram, wram_size, object.source_descriptor,
-                   kActRaiserMapGroup_Bloodpool, kBloodpoolBossMap,
-                   kBossLightningSourceDescriptor,
-                   kDeathHeimWizardMap,
-                   kDeathHeimWizardSourceDescriptor) &&
-               (phase = MatchBloodpoolBossLightning(
-                    wram, wram_size, &object)) !=
-                   kActionEffectPhase_None) {
-      kind = kActionEffect_BloodpoolBossLightning;
-    } else {
-      continue;
-    }
+    const uint8_t family = AdmitSceneObject(&observer->scene_tracks[slot], &object,
+        map_group, map_number, wram, wram_size, elapsed_ticks, &phase);
+    if (!family) continue;
+    const SceneEffectRule *rule = &kSceneRules[family];
+    const uint8_t kind = rule->kind;
+    const bool bloodpool_boss_fireball = family == kActionSceneFamily_BloodpoolBossFireball;
+    const bool aitos_boss_sword_beam = family == kActionSceneFamily_AitosSword;
 
     seen[slot] = true;
     ActionEffectInstance effect;
@@ -2104,7 +2189,7 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
         }
       }
     }
-    if (kind == kActionEffect_AitosStatueFire ||
+    if (bloodpool_boss_fireball || kind == kActionEffect_AitosStatueFire ||
         kind == kActionEffect_FillmoreStatueOrb ||
         kind == kActionEffect_FlamingWheel ||
         kind == kActionEffect_FlamingWheelProjectile) {
@@ -2144,6 +2229,9 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
               : (ActionEffectLocalRect){-8.0f, -9.0f, 16.0f, 15.0f};
         }
       } else {
+        /* Player crescents have raw part priority zero. Match $8D68's live
+         * room bias, including band 2 in the Bloodpool Act 1 boss arena. */
+        effect.obj_priority = ScenePriorityFromSpriteAttributeBias(wram, wram_size);
         /* These headers use signed 8-bit origins even though the action ABI
          * publishes them as words. `$8D68` performs wrapping byte arithmetic:
          * state $13's normal X=0/8 parts minus left=$E0 draw at +32..+48, not
@@ -2166,8 +2254,17 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
     /* Animation index advances inside one projectile/strike lifecycle. It is
      * artwork cadence, not a new emission pulse; using it as pulse_key would
      * reseed every spark whenever the source sprite changed frame. */
-    BeginOrAdvanceSceneTrack(observer, &observer->scene_tracks[slot], &object,
-                             kind, phase, elapsed_ticks, &effect);
+    const bool frozen = BeginOrAdvanceSceneTrack(
+        observer, &observer->scene_tracks[slot], &object,
+        kind, phase, elapsed_ticks, rule->clock == kSceneClock_Motion, &effect);
+    observer->scene_tracks[slot].scene_family = family;
+    if (bloodpool_boss_fireball) {
+      /* Native boss shots keep flying after leaving the activation window.
+       * Track those slots, but do not let invisible shots exhaust the shared
+       * render list and suppress the player's sword beam during a long fight. */
+      if (!(effect.flags & kActionEffectFlag_Visible)) continue;
+      smoke_sources[slot] = frozen ? kFireballSmokeSourceFrozen : kFireballSmokeSourceMoving;
+    }
     SceneFrameAppend(dst, &effect);
   }
   for (unsigned i = 0; i < kActionSceneEffectObserverTrackCount; i++)
@@ -2175,10 +2272,27 @@ void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
       memset(&observer->scene_tracks[i], 0,
              sizeof(observer->scene_tracks[i]));
 
+  AgeFireballSmoke(&observer->fireball_smoke, observer, smoke_sources, elapsed_ticks);
+  for (unsigned i = 0; i < dst->effect_count; ++i) {
+    const ActionEffectInstance *effect = &dst->effects[i];
+    const unsigned slot = (effect->record_address - kActRaiserWram_ActionObjectTable) /
+        kActRaiserActionObjectStride;
+    if (smoke_sources[slot] == kFireballSmokeSourceMoving)
+      EmitFireballSmoke(&observer->fireball_smoke, effect, elapsed_ticks);
+  }
+
   if (dst->overflow) {
     dst->effect_count = 0;
     dst->visible_count = 0;
   }
+  dst->fireball_smoke = observer->fireball_smoke;
+  dst->fireball_smoke.clock = observer->scene_clock;
+  dst->fireball_smoke.camera_delta_x = (int16_t)(
+      Read16(wram, wram_size, kActRaiserWram_Bg1CameraX) -
+      Read16(wram, wram_size, kActRaiserWram_Bg2CameraX));
+  dst->fireball_smoke.camera_delta_y = (int16_t)(
+      Read16(wram, wram_size, kActRaiserWram_Bg1CameraY) -
+      Read16(wram, wram_size, kActRaiserWram_Bg2CameraY));
 }
 
 void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer,

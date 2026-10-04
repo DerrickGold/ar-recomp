@@ -1280,9 +1280,9 @@ const SettingDesc g_setting_descs[] = {
                "Substitute HD art per game-assets/manifest.ini entries when their art is present.",
                kSettingCat_Display, 1, false, HdReplacementsAvailable, NULL),
   { "extended_aspect", "AR_EXTENDED_ASPECT_RATIO", "Screen ratio",
-    "4:3, 16:9, 16:10, or Stretch. Auto expands action stages to the drawable "
-    "window without stretching. Level bounds and capture limits can leave "
-    "borders. Towns and Mode 7 keep native framing.",
+    "4:3, 16:9, 16:10, Stretch, or Auto. Auto adapts action, world navigation, "
+    "and towns to the window without stretching. Extra rows need action or "
+    "3D world/town rendering. Scene bounds and capture limits can leave borders.",
     kSettingType_Enum, kApply_Callback, kSettingCat_Display,
     &g_settings.extended_aspect, kScreenAspect_43,
     kScreenAspect_43, kScreenAspect_Auto, 1, false,
@@ -3788,7 +3788,7 @@ void Settings_SetDisplayMode(int mode) {
 }
 
 void Settings_ReconcileDisplayModeAfterGeometryChange(int previous_mode) {
-  /* Auto changes effective action drawing, never the retained manual profile. */
+  /* Auto changes effective scene drawing, never the retained manual profile. */
   if (g_settings.extended_aspect == kScreenAspect_Auto) return;
   if (!g_ws_active) {
     Settings_SetDisplayMode(kDisplayMode_43);

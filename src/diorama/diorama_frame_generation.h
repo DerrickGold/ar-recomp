@@ -92,6 +92,8 @@ void DioramaFrameGeneration_AllowSourceProjection(bool allowed);
 bool DioramaFrameGeneration_UsesGpuAnalysis(ArRenderDevice *, const FrameSlot *);
 bool DioramaFrameGeneration_SourceProjectionActive(void);
 bool DioramaFrameGeneration_SourceProjectionFailed(void);
+/* Exceptional failure latch, excluding a deliberately selected CPU policy. */
+bool DioramaFrameGeneration_SourceProjectionFallback(void);
 void DioramaFrameGeneration_RecoverSourceProjection(ArRenderDevice *);
 unsigned DioramaFrameGeneration_MetadataReadbackCount(void);
 bool DioramaFrameGeneration_DrawSource(ArRenderDevice *, const ActionEffectSourceBatch *,

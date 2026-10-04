@@ -150,6 +150,16 @@ uint8_t ActionEffectProjection_RequiredObjPriorityMask(
     AddRequiredObjPriorities(
         &mask, scene_frame->effects, scene_frame->effect_count,
         kActionSceneEffectMaxInstances, scene_frame->overflow != 0);
+    /* Detached smoke keeps its source depth after the last actor retires. */
+    const ActionFireballSmoke *smoke = &scene_frame->fireball_smoke;
+    if (smoke->count <= kActionFireballSmokeMaxPuffs) {
+      for (unsigned i = 0; i < smoke->count; ++i) {
+        const ActionFireballSmokePuff *puff = &smoke->puffs[i];
+        if (puff->age < kActionFireballSmokeLifetime &&
+            puff->priority < kActionEffectObjPriorityCount)
+          mask |= (uint8_t)(1u << puff->priority);
+      }
+    }
   }
   return mask;
 }
@@ -197,17 +207,9 @@ static void IntersectClipRect(ActionEffectLocalRect *a, const ActionEffectLocalR
   a->y1 = fminf(a->y1, b->y1);
 }
 
-bool ActionEffectProjection_ClipBounds(
-    void *userdata, const ActionEffectInstance *effect, ActionEffectLocalRect *bounds) {
-  const ActionEffectProjectionContext *context = userdata;
-  if (!context || !effect || !bounds || effect->geometry.kind != kActionEffectGeometry_Rect)
-    return false;
-  *bounds = effect->geometry.data.rect;
-  if (!ClipRectIsValid(bounds)) return false;
-  if (effect->flags & kActionEffectFlag_ClipToRect) {
-    if (!ClipRectIsValid(&effect->clip_rect)) return false;
-    IntersectClipRect(bounds, &effect->clip_rect);
-  }
+bool ActionEffectProjection_ViewBounds(const ActionEffectProjectionContext *context,
+    const ActionEffectInstance *effect, ActionEffectLocalRect *bounds) {
+  if (!context || !effect || !bounds) return false;
   const int camera_x = EffectCameraCoordinate(
       effect, context->bg1_camera_x, context->bg2_camera_x);
   const int camera_y = EffectCameraCoordinate(
@@ -259,6 +261,22 @@ bool ActionEffectProjection_ClipBounds(
     }
   }
   if (!ClipRectIsValid(&visible)) return false;
+  *bounds = visible;
+  return true;
+}
+
+bool ActionEffectProjection_ClipBounds(
+    void *userdata, const ActionEffectInstance *effect, ActionEffectLocalRect *bounds) {
+  if (!effect || !bounds || effect->geometry.kind != kActionEffectGeometry_Rect)
+    return false;
+  *bounds = effect->geometry.data.rect;
+  if (!ClipRectIsValid(bounds)) return false;
+  if (effect->flags & kActionEffectFlag_ClipToRect) {
+    if (!ClipRectIsValid(&effect->clip_rect)) return false;
+    IntersectClipRect(bounds, &effect->clip_rect);
+  }
+  ActionEffectLocalRect visible;
+  if (!ActionEffectProjection_ViewBounds(userdata, effect, &visible)) return false;
   IntersectClipRect(bounds, &visible);
   return ClipRectIsValid(bounds);
 }

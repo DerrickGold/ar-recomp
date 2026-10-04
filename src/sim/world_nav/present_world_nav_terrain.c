@@ -25,7 +25,7 @@ void EnsureWorldNavigationCliffs(const FrameSlot *slot, float radius_tiles) {
       SimTownGroundArt_Available())
     mask = slot->sim.world_navigation_towns.ground.enabled_town_mask;
 #endif
-  const uint32_t geography = SimWorldMap_GeographySerial();
+  const uint32_t geography = SimWorldMap_TerrainSerial();
   if (g_world_nav_terrain.cliffs_ready && g_world_nav_terrain.cliff_mask == mask &&
       g_world_nav_terrain.cliff_chart_radius_tiles == radius_tiles &&
       g_world_nav_terrain.cliff_geography == geography && (!mask || g_world_nav_terrain.ready))
@@ -100,7 +100,7 @@ static void BuildWorldNavigationTerrainRows(void *context, size_t first, size_t 
 }
 
 void PrepareWorldNavigationTerrain(void) {
-  const uint32_t world_serial = SimWorldMap_GeographySerial();
+  const uint32_t world_serial = SimWorldMap_TerrainSerial();
   if (g_world_nav_terrain.ready && g_world_nav_terrain.serial == world_serial) return;
   const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_TerrainPrepare);
   g_world_nav_terrain.samples_ready = false;
@@ -351,7 +351,7 @@ bool PrepareWorldNavigationGroundSamples(const WorldNavigationProjection *projec
   memset(&work.key, 0, sizeof(work.key));
   work.samples = g_world_nav_terrain.samples;
   work.key.chart_radius_tiles = projection->chart_radius_tiles;
-  work.key.geography_serial = SimWorldMap_GeographySerial();
+  work.key.geography_serial = SimWorldMap_TerrainSerial();
   work.key.cliff_serial = g_world_nav_terrain.cliff_serial;
   work.key.heights = projection->height_world_per_unit > 0;
   if (g_world_nav_terrain.samples_ready &&

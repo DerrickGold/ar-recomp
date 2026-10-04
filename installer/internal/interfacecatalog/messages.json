@@ -2150,10 +2150,10 @@
   {
     "key": "setting.extended_aspect.help",
     "text": [
-      "4:3, 16:9, 16:10, or Stretch. Auto expands action stages to the drawable window without stretching. Level bounds and capture limits can leave borders. Towns and Mode 7 keep native framing.",
-      "4:3, 16:9, 16:10 ou Étirer. Auto agrandit les niveaux d’action selon la fenêtre, sans étirement. Les limites du niveau et de capture peuvent laisser des bordures. Les villes et le Mode 7 gardent le cadrage d’origine.",
-      "4:3, 16:9, 16:10 oder Strecken. Auto erweitert Aktionslevel passend zum Fenster, ohne Strecken. Level- und Aufnahmegrenzen können Ränder lassen. Städte und Mode 7 behalten den originalen Bildausschnitt.",
-      "4:3、16:9、16:10、または引き伸ばし。自動はウィンドウの描画領域に合わせてアクションステージを引き伸ばさずに拡張します。ステージと描画範囲の上限により余白が残る場合があります。街とMode 7は本来の表示範囲を保ちます。"
+      "4:3, 16:9, 16:10, Stretch, or Auto. Auto adapts action, world navigation, and towns to the window without stretching. Extra rows need action or 3D world/town rendering. Scene bounds and capture limits can leave borders.",
+      "4:3, 16:9, 16:10, Étirer ou Auto. Auto adapte l’action, la navigation mondiale et les villes à la fenêtre sans étirement. Les lignes supplémentaires nécessitent l’action ou le rendu 3D du monde ou des villes. Les limites de scène et de capture peuvent laisser des bordures.",
+      "4:3, 16:9, 16:10, Strecken oder Auto. Auto passt Action, Weltnavigation und Städte ohne Strecken ans Fenster an. Zusätzliche Zeilen benötigen Action oder die 3D-Darstellung von Welt oder Stadt. Szenen- und Aufnahmegrenzen können Ränder lassen.",
+      "4:3、16:9、16:10、引き伸ばし、または自動。自動はアクション、ワールド移動、街の表示を引き伸ばさずにウィンドウに合わせます。上下の拡張にはアクション、またはワールド・街の3D描画が必要です。シーンや描画範囲の制限により余白が残る場合があります。"
     ]
   },
   {

@@ -27,11 +27,100 @@ def stats(values):
                 p50=percentile(.5), p95=percentile(.95), p99=percentile(.99), max=values[-1])
 
 
-def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0):
+def source_cadence(presents, assume_native=False):
+    """Measure real held/skipped ticks and fit one constant playout phase/epoch.
+
+    A native tick is correct for any delay in (age-period, age]. Maximum
+    interval overlap finds the best stable phase, without counting the normal
+    60.0988/60 drift or 90 Hz 1/2 holds as judder. This is a diagnostic lower
+    bound on irregular selection, not proof of physical scanout timing.
+    Interpolated endpoint IDs are not displayed-frame IDs; exclude them.
+    """
+    epochs = {}
+    for row in presents:
+        if row.get('interpolation', 0 if assume_native else 1) == 0:
+            epochs.setdefault(row['epoch'], []).append(row)
+    samples = repeats = skips = mismatches = 0
+    holds = {}
+    phases = []
+    for epoch, rows in epochs.items():
+        samples += len(rows)
+        events = {}
+        for row in rows:
+            age = row['complete_ns'] - row['source_ns']
+            period = row.get('interval_ns', 16639263)
+            if period <= 0:
+                raise ValueError('Invalid source interval')
+            lo, hi = age - period + 1, age + 1
+            events[lo] = events.get(lo, 0) + 1
+            events[hi] = events.get(hi, 0) - 1
+        active = best = 0
+        phase = 0
+        for point, change in sorted(events.items()):
+            active += change
+            if active > best:
+                best, phase = active, point
+        mismatches += len(rows) - best
+        phases.append(dict(epoch=epoch, fitted_delay_ms=phase / 1e6,
+                           samples=len(rows), mismatches=len(rows)-best))
+        run = 1
+        first_run = True
+        for a, b in zip(rows, rows[1:]):
+            delta = b['tick'] - a['tick']
+            if delta == 0:
+                repeats += 1
+                run += 1
+            else:
+                skips += max(0, delta - 1)
+                if not first_run:
+                    holds[str(run)] = holds.get(str(run), 0) + 1
+                first_run, run = False, 1
+        # Initial/final holds can be truncated by the requested sample window.
+    return dict(samples=samples, held_presents=repeats, skipped_ticks=skips,
+                complete_hold_lengths=holds, best_phase_mismatches=mismatches,
+                best_phase_mismatch_percent=100 * mismatches / samples if samples else None,
+                epochs=phases)
+
+
+def analyze_sync(rows, path, start, end, refresh, warmup_seconds):
+    """Synchronous traces have no packet queue or independent producer timings."""
+    first = next((r for r in rows if r['source_ns'] > 0), None)
+    if first is None:
+        raise ValueError('No synchronous source in trace')
+    cutoff = first['sample_ns'] + int(warmup_seconds * 1e9)
+    rows = [r for r in rows if start <= r['tick'] <= end and
+            r['sample_ns'] >= cutoff and r['source_ns'] > 0]
+    if len(rows) < 100:
+        raise ValueError('Need at least 100 completed presents in the requested tick range')
+    for a, b in zip(rows, rows[1:]):
+        if b['sample_ns'] <= a['sample_ns'] or b['complete_ns'] <= a['complete_ns']:
+            raise ValueError('Non-monotonic trace')
+    if any(r['complete_ns'] < r['sample_ns'] or r['tick_delta'] < 0 for r in rows):
+        raise ValueError('Inconsistent synchronous timestamps/ticks')
+    sources = {}
+    for r in rows:
+        key = str(r['pacing_source'])
+        sources[key] = sources.get(key, 0) + 1
+    return dict(path=str(path), path_kind='synchronous', presents=len(rows),
+        measured_ticks=[rows[0]['tick'], rows[-1]['tick']], pacing_sources=sources,
+        epoch_boundaries=sum(a['epoch'] != b['epoch'] for a,b in zip(rows,rows[1:])),
+        source_cadence=source_cadence(rows),
+        all_complete_interval_ms=stats([(b['complete_ns']-a['complete_ns'])/1e6
+                                      for a,b in zip(rows,rows[1:])]),
+        source_age_at_complete_ms=stats([(r['complete_ns']-r['source_ns'])/1e6 for r in rows]),
+        iteration_ms=stats([(r['complete_ns']-r['sample_ns'])/1e6 for r in rows]),
+        zero_tick_presents=sum(r['tick_delta'] == 0 for r in rows),
+        multi_tick_presents=sum(r['tick_delta'] > 1 for r in rows))
+
+
+def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_native=False):
     if refresh <= 0 or end < start or warmup_seconds < 0:
         raise ValueError('Invalid timing range or warmup')
     with Path(path).open() as f:
-        rows = [{k:int(v) for k,v in row.items()} for row in csv.DictReader(f)]
+        rows = [{k:(float(v) if k == 'alpha' else int(v)) for k,v in row.items()}
+                for row in csv.DictReader(f)]
+    if rows and 'tick_delta' in rows[0]:
+        return analyze_sync(rows, path, start, end, refresh, warmup_seconds)
     # The game may enter the room long before the independent presenter starts.
     # Warm up against the first actual streamed endpoint, not a boot tick guess.
     first_source = next((r for r in rows if r['tick'] > 0 and r['source_ns']), None)
@@ -87,6 +176,33 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0):
                   vector_wait_ms=stats(durations('vector_wait_ns',presents)),
                   vector_wait_nonzero_ms=stats([r['vector_wait_ns']/1e6 for r in presents if r['vector_wait_ns']]),
                   event_work_ms=stats([(r['prepare_ns']-r['loop_ns'])/1e6 for r in rows]))
+    result['source_cadence'] = source_cadence(presents, assume_native)
+    if presents and 'pacing_source' in presents[0]:
+        result['pacing_sources'] = {str(k):sum(r['pacing_source'] == k for r in presents)
+                                    for k in sorted({r['pacing_source'] for r in presents})}
+    scheduled_native = [r for r in presents if r.get('interpolation') == 0 and
+                        r.get('interval_ns', 0) and r.get('playout_target_ns', 0)]
+    result['native_target_late_presents'] = sum(
+        r['source_ns'] + r['interval_ns'] <= r['playout_target_ns'] for r in scheduled_native)
+    result['native_target_future_presents'] = sum(
+        r['source_ns'] > r['playout_target_ns'] for r in scheduled_native)
+    result['sample_prediction_error_ms'] = stats([
+        (r['complete_ns'] - r['sample_ns']) / 1e6 for r in scheduled_native if r.get('sample_ns', 0)])
+    result['source_age_at_complete_ms'] = stats([
+        (r['complete_ns'] - r['source_ns']) / 1e6 for r in presents])
+    cpu_sources = [r for r in sources.values() if r.get('producer_cpu_ns', 0)]
+    result['producer_cpu_ms'] = stats([r['producer_cpu_ns'] / 1e6 for r in cpu_sources])
+    # Includes waits, descheduling and clock/scope noise. Not evidence that the
+    # thread was runnable the entire time, nor GPU execution time.
+    result['producer_unaccounted_wall_ms'] = stats([
+        max(0, r['producer_complete_ns'] - r['producer_start_ns'] - r['producer_cpu_ns']) / 1e6
+        for r in cpu_sources])
+    cpu_draws = [r for r in presents if r.get('draw_cpu_ns', 0)]
+    result['draw_cpu_ms'] = stats([r['draw_cpu_ns'] / 1e6 for r in cpu_draws])
+    # Excludes helper CPU time. Wall minus owner CPU includes helper joins,
+    # driver waits and descheduling; it is not a GPU timer.
+    result['draw_unaccounted_wall_ms'] = stats([
+        max(0, r['draw_work_ns'] - r['draw_cpu_ns']) / 1e6 for r in cpu_draws])
     for key in ('pump_ns', 'input_events_ns', 'owner_poll_ns'):
         if key in rows[0]: result[key.replace('_ns','_ms')] = stats(durations(key))
     if 'submit_start_ns' in rows[0]:
@@ -107,8 +223,9 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0):
         evidence = dict(tick=b['tick'], interval_ms=(b['complete_ns']-a['complete_ns'])/1e6,
                           upload_ms=b['upload_ns']/1e6, draw_ms=b['draw_work_ns']/1e6,
                           swap_ms=b['swap_ns']/1e6, wait_ms=b['vector_wait_ns']/1e6,
-                          deadline_late_ms=max(0,b['draw_ns']-b['deadline_ns'])/1e6,
                           source_age_ms=(b['draw_ns']-b['source_ns'])/1e6)
+        if b['deadline_ns']:
+            evidence['deadline_late_ms'] = max(0,b['draw_ns']-b['deadline_ns'])/1e6
         if 'submit_start_ns' in b:
             evidence['backend_present_ms'] = (b['complete_ns']-b['submit_start_ns'])/1e6
             if b['submit_deadline_ns']:
@@ -118,6 +235,9 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0):
                 evidence['source_ready_slack_ms'] = (b['submit_deadline_ns']-b['producer_complete_ns'])/1e6
         for key in ('backend_flush_ns', 'backend_acquire_ns', 'backend_submit_ns'):
             if key in b: evidence[key.replace('_ns','_ms')] = b[key]/1e6
+        if b.get('draw_cpu_ns', 0):
+            evidence['draw_cpu_ms'] = b['draw_cpu_ns']/1e6
+            evidence['draw_unaccounted_wall_ms'] = max(0, b['draw_work_ns']-b['draw_cpu_ns'])/1e6
         worst.append(evidence)
     result['worst_intervals'] = sorted(worst,key=lambda r:r['interval_ms'],reverse=True)[:12]
     return result
@@ -132,12 +252,23 @@ def main():
     p.add_argument('--warmup-seconds',type=float,default=0,
                    help='Exclude time after the first streamed endpoint (e.g. 10), in addition to --start')
     p.add_argument('--output',type=Path)
+    p.add_argument('--native', action='store_true', help='Identify legacy traces known to have interpolation disabled')
+    p.add_argument('--max-irregular-percent', type=float,
+                   help='Fail when the native best-phase mismatch percentage exceeds this limit')
     a=p.parse_args()
     if a.refresh<=0 or a.end<a.start or a.warmup_seconds<0: p.error('Invalid timing range or warmup')
-    reports=[analyze(t,a.start,a.end,a.refresh,a.warmup_seconds) for t in a.traces]
+    reports=[analyze(t,a.start,a.end,a.refresh,a.warmup_seconds,a.native) for t in a.traces]
     payload=json.dumps(reports,indent=2)
     if a.output:a.output.write_text(payload+'\n')
     print(payload)
+    if a.max_irregular_percent is not None:
+        if not 0 <= a.max_irregular_percent <= 100:
+            p.error('Irregular percentage must be between 0 and 100')
+        rates = [r['source_cadence']['best_phase_mismatch_percent'] for r in reports]
+        if any(rate is None for rate in rates):
+            p.error('Native source metadata (or --native for a legacy trace) is required')
+        if any(rate > a.max_irregular_percent for rate in rates):
+            raise SystemExit(1)
 
 
 if __name__=='__main__':main()

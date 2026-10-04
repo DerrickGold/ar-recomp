@@ -1200,12 +1200,12 @@ void SimRenderMetadata_RecordFlightPlan(SimEruptionFlightPlan plan);
  * retuned -- so the arc asks the model instead, and the model answers with the
  * same point it drew the crater glow and the smoke plume on.
  *
- * One frame stale by construction, which is invisible: the mouth only moves
- * when the camera does. `valid` false restores the derived fallback, so a
+ * Published atomically with its town identity; a producer frame uses the
+ * latest complete presentation result. `valid` false restores the fallback, so a
  * town with no volcano, or a detail level that draws no mountains, still
  * launches from somewhere sensible. */
 void SimRenderMetadata_SetEruptionCraterAnchor(
-    bool valid, int16_t map_x, int16_t map_y, int16_t height);
+    uint8_t town, bool valid, int16_t map_x, int16_t map_y, int16_t height);
 /* The emitter's biased composition origin for the record now open. Separate
  * from BeginRecord so the D1 producer contract and its callers are unchanged;
  * a record without this call simply has no cull-lead anchor. */
@@ -1236,6 +1236,15 @@ void SimRenderMetadata_CaptureFrame(
     SimRenderFeatureMask requested_features,
     uint32_t diagnostic_layer_mask,
     SimRenderFeatureMask implemented_features);
+
+/* Producer variant: the entry underlay generation is supplied by the owner.
+ * Presentation replaces it with the generation built from this packet before
+ * upload. This capture never reads the presentation-owned world-map cache. */
+void SimRenderMetadata_CaptureFrameWithUnderlay(
+    SimFrameData *dst, const uint8 *wram, bool town_master_enabled,
+    bool world_navigation_enabled, SimRenderFeatureMask requested_features,
+    uint32_t diagnostic_layer_mask, SimRenderFeatureMask implemented_features,
+    uint32_t underlay_serial);
 
 /* Optional Palace specialization after ordinary frame capture. The caller
  * resolves both settings gates; game-thread semantic values are copied, not

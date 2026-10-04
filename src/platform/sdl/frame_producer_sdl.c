@@ -2,6 +2,32 @@
 
 #include <SDL3/SDL.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#if defined(__APPLE__)
+#include <pthread/qos.h>
+#endif
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <time.h>
+#endif
+
+uint64_t HostFrameProducer_ThreadCpuTimeNs(void) {
+#if defined(_WIN32)
+  FILETIME created, exited, kernel, user;
+  if (!GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user)) return 0;
+  const uint64_t k = ((uint64_t)kernel.dwHighDateTime << 32) | kernel.dwLowDateTime;
+  const uint64_t u = ((uint64_t)user.dwHighDateTime << 32) | user.dwLowDateTime;
+  return (k + u) * 100;
+#elif defined(CLOCK_THREAD_CPUTIME_ID)
+  struct timespec time;
+  if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time) != 0) return 0;
+  return (uint64_t)time.tv_sec * 1000000000 + (uint64_t)time.tv_nsec;
+#else
+  return 0;
+#endif
+}
 
 static struct {
   SDL_Thread *thread;
@@ -13,6 +39,19 @@ static struct {
 
 static int Produce(void *unused) {
   (void)unused;
+#if defined(__APPLE__)
+  /* This thread supplies animation deadlines. Use Darwin QoS without
+   * changing scheduling policy on other platforms. The override is for
+   * paired scheduling measurements, not a user preset. */
+  const char *option = getenv("AR_FRAME_PRODUCER_QOS");
+  const qos_class_t qos = option && !strcmp(option, "default") ? QOS_CLASS_DEFAULT :
+      option && !strcmp(option, "initiated") ? QOS_CLASS_USER_INITIATED :
+      QOS_CLASS_USER_INTERACTIVE;
+  const int qos_error = pthread_set_qos_class_self_np(qos, 0);
+  fprintf(stderr, "[frame-producer] Darwin QoS=%s result=%d\n",
+      qos == QOS_CLASS_DEFAULT ? "default" :
+      qos == QOS_CLASS_USER_INITIATED ? "user-initiated" : "user-interactive", qos_error);
+#endif
   for (;;) {
     SDL_WaitSemaphore(s_producer.start);
     if (s_producer.stop) break;

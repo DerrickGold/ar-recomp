@@ -48,6 +48,8 @@
 #include "host/host_frame_surfaces.h"
 #include "host/frame_producer.h"
 #include "host/frame_queue.h"
+#include "sim/sim_frame_capture.h"
+#include "host/frame_playout.h"
 
 const uint64_t kHostDisplayEmulationFrameIntervalNs = RTL_NTSC_FRAME_INTERVAL_NS;
 int g_snes_width = kActRaiserAuthenticWidth,
@@ -86,6 +88,8 @@ static bool s_producer_pacing;
 static bool s_present_trace_enabled;
 static HostDisplayPresentTrace s_present_trace;
 static uint64_t s_submit_deadline_ns;
+static HostFrameRefreshClock s_refresh_clock;
+static HostDisplayPacingOptions CurrentPacingOptions(void);
 
 /* Diagnostic pacing experiments; ordinary playback retains its current
  * policy until the measured tails and visual timing have been qualified. */
@@ -126,6 +130,21 @@ static bool PrepareSwapchainEarly(void) {
 uint64_t HostDisplay_PresentationSampleTime(uint64_t now_ns) {
   return s_producer_pacing && PresentPreparationLeadNs() &&
       s_present_deadline_ns > now_ns ? s_present_deadline_ns : now_ns;
+}
+
+uint64_t HostDisplay_NativeFrameSampleTime(uint64_t now_ns) {
+  if (HostDisplay_PacingSource() == 2)
+    return s_present_deadline_ns > now_ns ? s_present_deadline_ns : now_ns;
+  return g_settings.refresh_mode == kRefreshMode_Vsync
+      ? HostFrameRefreshClock_Next(s_refresh_clock, now_ns) : now_ns;
+}
+
+int HostDisplay_PacingSource(void) {
+  const HostDisplayPacingOptions options = CurrentPacingOptions();
+  if (s_vsync_guard.probing) return 3;
+  if (HostDisplayPacing_GameIntervalNs(options, kHostDisplayEmulationFrameIntervalNs))
+    return 2;
+  return options.refresh_mode == kRefreshMode_Vsync && s_refresh_clock.period_ns ? 1 : 0;
 }
 
 void HostDisplay_EnablePresentTrace(bool enabled) {
@@ -172,6 +191,7 @@ static void RetainFrame(const FrameSlot *slot) {
     FrameSlot *retained = &s_retained_frame.slot;
     memset(&retained->ppu_surfaces, 0, sizeof(retained->ppu_surfaces));
     memset(&retained->sim3d_output_surfaces, 0, sizeof(retained->sim3d_output_surfaces));
+    retained->sim_inputs = NULL;
     retained->hud_icon.surface = (SrPpuSurfaceView){0};
     retained->diorama_skybox_surface = (SrPpuSurfaceView){0};
     s_retained_upload_complete = true;
@@ -187,6 +207,7 @@ static void ResolveVideoGeometry(bool apply_runtime_changes,
  * current mouse orbit rather than either drawing a stale pose or waiting for
  * the next emulation tick. */
 static void RefreshRetainedSimCamera(FrameSlot *slot) {
+  if (slot) Sim3DCamera_SetPresentationScene(&slot->sim);
   if (!slot || (slot->sim.view != kSimView_Enhanced &&
                 slot->sim.view != kSimView_WorldNavigation)) return;
   Sim3DCameraPresentationState camera;
@@ -325,7 +346,8 @@ static uint64_t PresentIntervalNs(HostDisplayPresentMode mode) {
 static bool CompletePresent(HostDisplayPresentMode mode) {
   const PerformanceScope pacing = PerformanceMetrics_Begin(kPerformance_Pacing);
   bool prepared = true;
-  if (!s_producer_pacing) ThrottlePresent(PresentIntervalNs(mode));
+  if (!s_producer_pacing)
+    ThrottlePresent(s_vsync_guard.probing ? 0 : PresentIntervalNs(mode));
   if (s_producer_pacing && s_submit_deadline_ns) {
     /* Let the GPU execute the completed offscreen draw while the owner waits
      * for the output deadline. The final swapchain blit remains on this owner. */
@@ -357,6 +379,18 @@ static bool CompletePresent(HostDisplayPresentMode mode) {
   const uint64_t completed_at_ns = SDL_GetTicksNS();
   PerformanceMetrics_PresentCompleted(completed_at_ns);
   const HostDisplayPacingOptions options = CurrentPacingOptions();
+  HostFrameRefreshClock_Observe(&s_refresh_clock, completed_at_ns,
+      options.refresh_mode == kRefreshMode_Vsync && options.vsync_active &&
+          !options.vsync_software_fallback && options.nominal_refresh_hz > 0
+          ? kNanosecondsPerSecond / options.nominal_refresh_hz : 0);
+  /* Diagnostic A/B control; pacing selection still uses the same period. */
+  static int filter_phase = -1;
+  if (filter_phase < 0) {
+    const char *option = getenv("AR_FRAME_REFRESH_PHASE");
+    filter_phase = !option || strcmp(option, "0");
+  }
+  if (!filter_phase && s_refresh_clock.period_ns) s_refresh_clock.phase_ns = completed_at_ns;
+  const bool was_fallback = s_vsync_guard.software_fallback_active;
   if (HostDisplayPacing_RecordVsyncPresent(
           &s_vsync_guard,
           options.refresh_mode == kRefreshMode_Vsync &&
@@ -372,6 +406,10 @@ static bool CompletePresent(HostDisplayPresentMode mode) {
               "[display] renderer Vsync is not pacing completed presents; "
               "using the native-rate software safety cadence\n");
     }
+  }
+  if (was_fallback && !s_vsync_guard.software_fallback_active) {
+    s_present_deadline_ns = 0;
+    fprintf(stderr, "[display] renderer Vsync pacing recovered after bounded probe\n");
   }
 
   if (!g_settings.show_fps) {
@@ -701,6 +739,7 @@ void HostDisplay_DisableVsync(void) {
 
 void HostDisplay_ResetVsyncPacing(void) {
   HostDisplayPacing_ResetVsyncGuard(&s_vsync_guard);
+  s_refresh_clock = (HostFrameRefreshClock){0};
   s_present_deadline_ns = 0;
 }
 
@@ -768,6 +807,7 @@ static void PerformanceContextForFrame(const FrameSlot *slot, HostDisplayPresent
     .refresh_mode = g_settings.refresh_mode,
     .limit_fps = g_settings.refresh_mode == kRefreshMode_Limit ? g_settings.frame_limit_fps : 0,
     .vsync = HostDisplayStatus_VsyncActive(),
+    .pacing_source = HostDisplay_PacingSource(),
   };
   const PresentationViewDecision view = PresentationView_Resolve(
       slot, RenderComparison_PresentView());
@@ -794,6 +834,7 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
   PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_Capture);
   FrameSlot_Capture(&slot, annotated_sim);
   RefreshDioramaCamera(&slot);
+  RefreshRetainedSimCamera(&slot);
   PerformanceMetrics_End(pipeline);
   PerformanceContextForFrame(&slot, mode);
   const uint64_t render_start_ms =
@@ -822,15 +863,23 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
   return presented;
 }
 
-bool HostDisplay_StageOwnedFrame(const FrameSlot *slot) {
-  if (!slot || !ArRenderDevice_IsReady(&g_render_device) ||
-      !ArRenderTexture_IsValid(g_texture)) return false;
+static bool StagePreparedFrame(const FrameSlot *slot) {
   PerformanceContextForFrame(slot, kHostDisplayPresent_GameTick);
   const PerformanceScope upload = PerformanceMetrics_Begin(kPerformance_Upload);
   PresentUpload(slot);
   RetainFrame(slot);
   PerformanceMetrics_End(upload);
   return s_retained_frame.valid;
+}
+
+bool HostDisplay_StageOwnedFrame(const FrameSlot *slot) {
+  if (!slot || !ArRenderDevice_IsReady(&g_render_device) ||
+      !ArRenderTexture_IsValid(g_texture)) return false;
+  if (!slot->sim_inputs) return StagePreparedFrame(slot);
+  FrameSlot prepared = *slot;
+  SimFrameCapture_PrepareOwned(&prepared.sim, prepared.sim_inputs);
+  RefreshRetainedSimCamera(&prepared);
+  return StagePreparedFrame(&prepared);
 }
 
 bool HostDisplay_TryRepresentFrame(float alpha,
@@ -890,12 +939,16 @@ bool HostDisplay_TryRepresentFrame(float alpha,
    * or waiting for its next ownership handoff. */
   if (s_retained_frame.slot.diorama_active)
     HostInput_ApplyDioramaPresentationCamera();
+  else if (s_retained_frame.slot.sim.view == kSimView_Enhanced)
+    HostInput_ApplySimPresentationCamera();
   RefreshDioramaCamera(&s_retained_frame.slot);
   RefreshRetainedSimCamera(&s_retained_frame.slot);
   s_retained_frame.slot.performance_overlay = g_settings.performance_overlay;
   PerformanceContextForFrame(&s_retained_frame.slot, kHostDisplayPresent_GameTick);
 
   const PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_Presentation);
+  const uint64_t draw_cpu_start = s_present_trace_enabled
+      ? HostFrameProducer_ThreadCpuTimeNs() : 0;
   if (s_present_trace_enabled) s_present_trace.draw_start_ns = SDL_GetTicksNS();
   PresentFrame(&s_retained_frame.slot,
                use_interpolation
@@ -904,6 +957,9 @@ bool HostDisplay_TryRepresentFrame(float alpha,
   PerformanceMetrics_End(pipeline);
   if (s_present_trace_enabled) {
     s_present_trace.draw_ns = SDL_GetTicksNS() - s_present_trace.draw_start_ns;
+    const uint64_t cpu_end = HostFrameProducer_ThreadCpuTimeNs();
+    s_present_trace.draw_cpu_ns = draw_cpu_start && cpu_end >= draw_cpu_start
+        ? cpu_end - draw_cpu_start : 0;
     s_present_trace.vector_wait_ns = DioramaFrameGeneration_LastWaitNs();
   }
   PerformanceMetrics_Add(kPerformanceCount_Represents, 1);

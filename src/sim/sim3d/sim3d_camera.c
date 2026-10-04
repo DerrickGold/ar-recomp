@@ -35,10 +35,20 @@ static CameraOrbit s_world_orbit;
 static float s_world_zoom;
 static bool s_world_active;
 
+/* Presentation controls follow the displayed scene, never the live runner.
+ * CaptureFrame below is the independent producer-owned motion observer. */
+static SimViewKind s_view;
+static SimRenderFeatureMask s_features;
+static bool s_picker;
+
+void Sim3DCamera_SetPresentationScene(const SimFrameData *frame) {
+  s_view = frame ? frame->view : kSimView_None;
+  s_features = frame ? frame->effective_features : 0;
+  s_picker = frame && frame->picker_flag;
+}
+
 static bool WorldNavigationActive(void) {
-  return g_settings.sim3d_world_navigation &&
-      g_ram[kActRaiserWram_MapGroup] == kActRaiserMapGroup_NonAction &&
-      g_ram[kActRaiserWram_CurrentMap] == kActRaiserNonActionMap_WorldMap;
+  return s_view == kSimView_WorldNavigation;
 }
 
 static bool SyncWorldNavigationCamera(void) {
@@ -65,11 +75,8 @@ typedef struct TownCameraLimits {
 static TownCameraLimits ResolveTownCameraLimits(void) {
   const SimRenderFeatureMask required = kSimFeature_SeparatedComposite |
       kSimFeature_GroundProjection | kSimFeature_WorldUnderlay | kSimFeature_GlobeUnderlay;
-  const SimRenderFeatureMask features =
-      Settings_Sim3DRequestedFeatures() & Sim3D_ImplementedFeatures();
-  const bool connected = g_settings.sim3d_mode &&
-      ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
-          g_ram[kActRaiserWram_CurrentMap]) && (features & required) == required;
+  const bool connected = s_view == kSimView_Enhanced &&
+      (s_features & required) == required;
   return (TownCameraLimits){
     connected ? kSim3DConnectedCameraDistanceMaximumX100 : kSim3DCameraDistanceMaximumX100,
     connected ? kSim3DConnectedCameraYawMaximumMrad : kSim3DCameraYawMaximumMrad,
@@ -95,13 +102,8 @@ static float ClampTownOrbitYaw(float baseline, float offset, int maximum_mrad) {
 
 bool Sim3DCamera_ControlsAvailable(bool textures_ready) {
   if (WorldNavigationActive()) return textures_ready;
-  if (!g_settings.sim3d_mode || !textures_ready ||
-      !(Sim3D_ImplementedFeatures() & kSimFeature_GroundProjection) ||
-      !ActRaiser_IsSimulationTown(g_ram[kActRaiserWram_MapGroup],
-                                  g_ram[kActRaiserWram_CurrentMap]) ||
-      ActRaiser_SimMapPickerActive())
-    return false;
-  return ProfileUsesGround(Settings_Sim3DRequestedFeatures());
+  return textures_ready && s_view == kSimView_Enhanced && !s_picker &&
+      ProfileUsesGround(s_features);
 }
 
 void Sim3DCamera_CapturePresentationState(
@@ -325,12 +327,7 @@ enum {
 };
 
 void Sim3DCamera_CaptureFrame(Sim3DCameraFrame *frame, int elapsed_ticks) {
-  Sim3DCameraPresentationState controls;
-  Sim3DCamera_CapturePresentationState(&controls);
-  frame->mode = controls.mode;
-  frame->reactive_strength = g_settings.sim3d_reactive_strength;
-  frame->orbit_yaw = controls.orbit_yaw;
-  frame->orbit_pitch = controls.orbit_pitch;
+  *frame = (Sim3DCameraFrame){.reactive_strength = g_settings.sim3d_reactive_strength};
   Sim3DCameraObservation input = {
     .in_town = ActRaiser_IsSimulationTown(
         g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap]),

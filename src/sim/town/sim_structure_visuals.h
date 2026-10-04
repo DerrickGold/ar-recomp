@@ -6,13 +6,14 @@
 #include <stdint.h>
 
 /* The native structure step machine publishes presentation by copying one
- * metatile from the structure atlas into a plot. These are the four families
+ * metatile from the structure atlas into a plot. These are the families
  * whose authentic art the enhanced town replaces with authored geometry. */
 typedef enum SimStructureVisualFamily {
   kSimStructureVisual_House,
   kSimStructureVisual_Bridge,
   kSimStructureVisual_Windmill,
   kSimStructureVisual_Factory,
+  kSimStructureVisual_AnimalPen,
   kSimStructureVisualFamilyCount,
 } SimStructureVisualFamily;
 

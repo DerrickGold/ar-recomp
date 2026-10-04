@@ -61,12 +61,12 @@ typedef struct SimCullFade {
 } SimCullFade;
 
 float SimCullProximityAt(
-    const SimCullFade *fade, float texture_x, float texture_y,
-    ArRenderRectI source);
+    const SimCullFade *fade, float texture_x, float texture_y);
 float SimGroundExtentAlphaAt(
     const SimCullFade *fade, float texture_x, float texture_y);
 void DrawSimGroundPlane(
-    ArRenderTexture texture, ArRenderRectI source, ArRenderRectI viewport,
+    ArRenderTexture texture, ArRenderRectI source, int capture_height,
+    ArRenderRectI viewport,
     const float matrix[16], const SimCullFade *fade);
 
 /* Height conversions. A virtual height is authored in source pixels; world

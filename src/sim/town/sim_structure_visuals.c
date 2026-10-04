@@ -68,6 +68,12 @@ static const SimStructureVisualFrame kFactoryFrames[] = {
   {0x36, kSimStructureVisualState_Finished, 0},
 };
 
+/* Class 5's construction and rebuild programs ($03:D6BF/$03:D53E) both
+ * stamp the finished $E0/$E1/$E8/$E9 enclosure in one step. */
+static const SimStructureVisualFrame kAnimalPenFrames[] = {
+  {0xE0, kSimStructureVisualState_Finished, 0},
+};
+
 const SimStructureVisualFrame *SimStructureVisuals_Frames(
     SimStructureVisualFamily family, size_t *count) {
   if (count) *count = 0;
@@ -85,6 +91,9 @@ const SimStructureVisualFrame *SimStructureVisuals_Frames(
     case kSimStructureVisual_Factory:
       if (count) *count = sizeof(kFactoryFrames) / sizeof(kFactoryFrames[0]);
       return kFactoryFrames;
+    case kSimStructureVisual_AnimalPen:
+      if (count) *count = sizeof(kAnimalPenFrames) / sizeof(kAnimalPenFrames[0]);
+      return kAnimalPenFrames;
     case kSimStructureVisualFamilyCount:
       break;
   }
@@ -102,6 +111,7 @@ const char *SimStructureVisuals_FamilyName(SimStructureVisualFamily family) {
     case kSimStructureVisual_Bridge: return "bridge";
     case kSimStructureVisual_Windmill: return "windmill";
     case kSimStructureVisual_Factory: return "factory";
+    case kSimStructureVisual_AnimalPen: return "animal-pen";
     case kSimStructureVisualFamilyCount: break;
   }
   return "unknown";

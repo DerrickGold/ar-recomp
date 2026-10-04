@@ -280,203 +280,235 @@ static bool AppendMarahnaBossLightningRibbon(
              writer, effect, 1.10f, filament, project_point, userdata);
 }
 
-static bool AppendSwordBeamTrailLayer(
+typedef enum SwordBeamStrip {
+  kSwordBeamStrip_Haze,
+  kSwordBeamStrip_UpperWake,
+  kSwordBeamStrip_LowerWake,
+  kSwordBeamStrip_ArcCorona,
+  kSwordBeamStrip_ArcCore,
+  kSwordBeamStrip_Count,
+} SwordBeamStrip;
+
+_Static_assert((int)kSwordBeamStrip_Count == (int)kActionSceneEffectSwordStripLayers,
+               "sword strip styles must match the geometry budget");
+_Static_assert(kActionSceneEffectSwordStripAcross == 5,
+               "sword strip feathering needs two edges, two shoulders and a centre");
+_Static_assert(kActionEffectGlowSegments % kActionSceneEffectSwordMoteSegments == 0,
+               "sword motes must sample evenly around the circle table");
+
+static float SwordSmoothStep(float t) {
+  t = fmaxf(0.0f, fminf(1.0f, t));
+  return t * t * (3.0f - 2.0f * t);
+}
+
+static float SwordBeamPulse(const ActionEffectInstance *effect) {
+  return 0.94f + 0.06f * sinf((float)effect->age_ticks * 0.21f);
+}
+
+/* Keep the same local mesh in the reference and resident-GPU paths. All edges
+ * are transparent; additive strips must never expose a solid quad boundary. */
+static bool AppendSwordMesh(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    float length, float head_half_width, float tail_half_width,
-    ArRenderColorF head_color, ArRenderColorF tail_color,
-    ActionEffectProjectPointFn project_point, void *userdata) {
-  float hx = 1.0f, hy = 0.0f;
-  if (!SceneActorHeading(effect, &hx, &hy)) return true;
-  const float px = -hy, py = hx;
-  const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
-  const float centre_x = (rect->x0 + rect->x1) * 0.5f;
-  const float centre_y = (rect->y0 + rect->y1) * 0.5f;
-  const float tail_x = centre_x - hx * length;
-  const float tail_y = centre_y - hy * length;
-  const float local_x[] = {
-    centre_x + px * head_half_width,
-    centre_x - px * head_half_width,
-    tail_x - px * tail_half_width,
-    tail_x + px * tail_half_width,
-  };
-  const float local_y[] = {
-    centre_y + py * head_half_width,
-    centre_y - py * head_half_width,
-    tail_y - py * tail_half_width,
-    tail_y + py * tail_half_width,
-  };
+    ArRenderVertex2D *vertices, unsigned vertex_count, const int *indices,
+    unsigned index_count, ActionEffectProjectPointFn project, void *userdata) {
   if (writer->source) {
-    ArRenderPointF local[4];
-    for (unsigned i = 0; i < 4; ++i) local[i] = (ArRenderPointF){local_x[i], local_y[i]};
-    const ArRenderColorF colors[4] = {head_color, head_color, tail_color, tail_color};
-    const bool ok = ActionEffectSource_Quad(writer->source, effect, local, colors);
+    ActionEffectLocalRect bounds = {vertices[0].position.x, vertices[0].position.y,
+                                   vertices[0].position.x, vertices[0].position.y};
+    for (unsigned i = 1; i < vertex_count; ++i) {
+      bounds.x0 = fminf(bounds.x0, vertices[i].position.x);
+      bounds.y0 = fminf(bounds.y0, vertices[i].position.y);
+      bounds.x1 = fmaxf(bounds.x1, vertices[i].position.x);
+      bounds.y1 = fmaxf(bounds.y1, vertices[i].position.y);
+    }
+    for (unsigned i = 0; i < index_count; i += 3)
+      if (!ActionEffectSource_Triangle(writer->source, effect, vertices,
+                                       indices + i, &bounds)) return false;
     writer->vertex_count = (int)writer->source->count;
-    return ok;
+    return true;
   }
-  ArRenderPointF points[4];
-  for (unsigned i = 0; i < 4; i++)
-    if (!project_point(userdata, effect, local_x[i], local_y[i], &points[i]))
-      return true;
-  if (!Reserve(writer, 4, 6)) return false;
+  for (unsigned i = 0; i < vertex_count; ++i)
+    if (!project(userdata, effect, vertices[i].position.x, vertices[i].position.y,
+                 &vertices[i].position)) return true;
+  if (!Reserve(writer, (int)vertex_count, (int)index_count)) return false;
   const int base = writer->vertex_count;
-  writer->vertices[writer->vertex_count++] =
-      (ArRenderVertex2D){points[0], head_color, {0.0f, 0.0f}};
-  writer->vertices[writer->vertex_count++] =
-      (ArRenderVertex2D){points[1], head_color, {0.0f, 0.0f}};
-  writer->vertices[writer->vertex_count++] =
-      (ArRenderVertex2D){points[2], tail_color, {0.0f, 0.0f}};
-  writer->vertices[writer->vertex_count++] =
-      (ArRenderVertex2D){points[3], tail_color, {0.0f, 0.0f}};
-  static const int kQuad[6] = {0, 1, 2, 0, 2, 3};
-  for (unsigned i = 0; i < 6; i++)
-    writer->indices[writer->index_count++] = base + kQuad[i];
+  memcpy(writer->vertices + base, vertices, vertex_count * sizeof(*vertices));
+  writer->vertex_count += (int)vertex_count;
+  for (unsigned i = 0; i < index_count; ++i)
+    writer->indices[writer->index_count++] = base + indices[i];
   return true;
 }
 
-static bool AppendSwordBeamTrail(
+/* Three flowing wake ribbons, then a corona/core pair wrapped around the
+ * native crescent. Five samples across each strip feather both edges. */
+static bool AppendSwordBeamStrip(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    ActionEffectProjectPointFn project_point, void *userdata) {
-  if (effect->kind != kActionEffect_SwordBeam ||
-      effect->phase != kActionEffectPhase_SwordBeamFlight)
-    return true;
-  const float pulse = DeterministicPulse(effect);
-  ArRenderColorF outer_head = {0.32f, 0.78f, 1.00f, 0.19f * pulse};
-  ArRenderColorF outer_tail = {0.05f, 0.22f, 0.82f, 0.00f};
-  ArRenderColorF inner_head = {0.78f, 0.98f, 1.00f, 0.27f * pulse};
-  ArRenderColorF inner_tail = {0.10f, 0.42f, 1.00f, 0.00f};
+    SwordBeamStrip layer, ActionEffectProjectPointFn project, void *userdata) {
+  enum { kSegments = kActionSceneEffectSwordStripSegments,
+         kAcross = kActionSceneEffectSwordStripAcross,
+         kVertices = (kSegments + 1) * kAcross };
+  ArRenderVertex2D vertices[kVertices];
+  int indices[kSegments * (kAcross - 1) * 6];
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
-  const float crescent_half_height = (rect->y1 - rect->y0) * 0.5f;
-  const float outer_head_width = fmaxf(6.0f, crescent_half_height * 0.95f);
-  const float inner_head_width = fmaxf(2.75f,
-                                       crescent_half_height * 0.58f);
-  /* Both layers now meet nearly the full decoded crescent height. They remain
-   * low-alpha and taper immediately, avoiding the detached headlight while
-   * fixing the centreline-only attachment captured in 20260810-190729. */
-  return AppendSwordBeamTrailLayer(
-             writer, effect, 80.0f, outer_head_width, 2.0f,
-             outer_head, outer_tail, project_point, userdata) &&
-      AppendSwordBeamTrailLayer(
-             writer, effect, 56.0f, inner_head_width, 1.0f,
-             inner_head, inner_tail, project_point, userdata);
+  const float cx = (rect->x0 + rect->x1) * 0.5f;
+  const float cy = (rect->y0 + rect->y1) * 0.5f;
+  const float half_height = (rect->y1 - rect->y0) * 0.5f;
+  const float half_width = (rect->x1 - rect->x0) * 0.5f;
+  float hx = 1.0f, hy = 0.0f;
+  SceneActorHeading(effect, &hx, &hy);
+  const unsigned ticks = effect->age_ticks;
+  const float clock = (float)ticks;
+  const float speed = hypotf((float)effect->velocity_x, (float)effect->velocity_y);
+  const bool arc = layer == kSwordBeamStrip_ArcCorona || layer == kSwordBeamStrip_ArcCore;
+  const bool haze = layer == kSwordBeamStrip_Haze;
+  const bool corona = layer == kSwordBeamStrip_ArcCorona;
+  const float lane = layer == kSwordBeamStrip_UpperWake ? -1.0f : 1.0f;
+  const float length = fminf(haze ? 96.0f : 78.0f,
+                            clock * fmaxf(2.0f, speed) + 2.0f);
+  const float pulse = SwordBeamPulse(effect);
+  const uint32_t seed = DeterministicHash_Mix32(effect->generation ^ effect->record_address);
+  const float noise_blend = SwordSmoothStep((float)(ticks % 3u) / 3.0f);
+  static const float cross_alpha[kAcross] = {0.0f, 0.32f, 1.0f, 0.32f, 0.0f};
+  for (unsigned i = 0; i <= kSegments; ++i) {
+    const float t = (float)i / kSegments;
+    const float remain = 1.0f - t;
+    float along, side, width, alpha;
+    ArRenderColorF color;
+    if (arc) {
+      /* Smooth interpolation between three-tick noise samples keeps the bolt
+       * lively without teleporting or detaching from the original sprite. */
+      const float noise0 = HashUnit(seed ^ (i * 0x85EBCA6Bu) ^ ((ticks / 3u) * 0x9E3779B9u));
+      const float noise1 = HashUnit(seed ^ (i * 0x85EBCA6Bu) ^ ((ticks / 3u + 1u) * 0x9E3779B9u));
+      const float taper = sinf(t * 3.14159265f);
+      const float bend = (noise0 + (noise1 - noise0) * noise_blend - 0.5f) * 3.2f * taper;
+      /* Skim the outer edge: a white filament inside the white sprite would
+       * disappear under additive blending. Let small bends peek outside it. */
+      along = half_width * (0.95f - 1.3f * (2.0f * t - 1.0f) * (2.0f * t - 1.0f)) + bend;
+      side = (2.0f * t - 1.0f) * half_height * 0.94f;
+      width = (corona ? 2.4f : 0.65f) * (0.35f + 0.65f * taper);
+      alpha = SwordSmoothStep(t * 9.0f) * SwordSmoothStep(remain * 9.0f) * pulse;
+      color = corona ? (ArRenderColorF){0.20f, 0.62f, 1.0f, 0.45f}
+                     : (ArRenderColorF){0.79f, 0.97f, 1.0f, 0.95f};
+    } else {
+      along = -length * t;
+      const float wave = sinf(t * 8.0f - clock * 0.17f + lane * 0.8f);
+      side = haze ? wave * 1.4f * t * remain
+          : lane * half_height * 0.62f + wave * 3.2f * t * remain;
+      /* Carry the blade's width and energy through the wake. Dissolve the
+       * final quarter in alpha instead of pinching it into a triangular cone. */
+      width = haze ? half_height * 0.92f + 2.0f : 4.1f;
+      alpha = (1.0f - 0.15f * t) * SwordSmoothStep(remain * 4.0f) *
+              SwordSmoothStep((t + 0.035f) * 9.0f) * pulse;
+      color = MixColor((ArRenderColorF){0.52f, 0.90f, 1.0f, haze ? 0.36f : 0.48f},
+                       (ArRenderColorF){0.36f, 0.48f, 1.0f, haze ? 0.30f : 0.40f}, t);
+    }
+    for (unsigned j = 0; j < kAcross; ++j) {
+      const float offset = ((float)j / (kAcross - 1) * 2.0f - 1.0f) * width;
+      const float x = along + (arc ? offset : 0.0f);
+      const float y = side + (arc ? 0.0f : offset);
+      ArRenderColorF c = color;
+      c.a *= alpha * cross_alpha[j];
+      vertices[i * kAcross + j] = (ArRenderVertex2D){
+          {cx + hx * x - hy * y, cy + hy * x + hx * y}, c, {0.0f, 0.0f}};
+    }
+  }
+  unsigned count = 0;
+  for (unsigned i = 0; i < kSegments; ++i) {
+    for (unsigned j = 0; j + 1 < kAcross; ++j) {
+      const int a = (int)(i * kAcross + j), b = a + kAcross;
+      const int quad[] = {a, b, b + 1, a, b + 1, a + 1};
+      memcpy(indices + count, quad, sizeof(quad));
+      count += 6;
+    }
+  }
+  return AppendSwordMesh(writer, effect, vertices, kVertices, indices, count, project, userdata);
 }
-static const SceneParticleLifetime kSceneLightningLifetime = {11, 6, 7};
 
 bool AppendSwordBeamParticles(ActionEffectGeometryWriter *writer,
-                                     const ActionEffectInstance *effect,
-                                     ActionEffectProjectPointFn project_point,
-                                     void *userdata) {
-  const unsigned count = kActionSceneEffectSwordStarCount;
-  const ArRenderColorF hot = {0.96f, 1.00f, 1.00f, 1.00f};
-  const ArRenderColorF cool = {0.10f, 0.48f, 1.00f, 0.55f};
+    const ActionEffectInstance *effect, ActionEffectProjectPointFn project, void *userdata) {
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
-  const unsigned visual_ticks =
-      EffectVisualTicks(effect, (unsigned)effect->pulse_ticks);
-  float heading_x = 1.0f, heading_y = 0.0f;
-  SceneActorHeading(effect, &heading_x, &heading_y);
-  for (unsigned i = 0; i < count; ++i) {
-    const SceneParticleClock clock =
-        SceneParticleClockAt(effect, visual_ticks, i, kSceneEmberLifetime);
-    const uint32_t seed = clock.seed;
-    float x = 0.0f, y = 0.0f;
-    float sword_path_t = 0.0f;
-    /* Sixteen fixed cross-sections span the path, each with top/centre/
-     * bottom lanes. Position depends only on identity; the materialization
-     * clock below changes alpha and size without pushing stars backward. */
-    const unsigned lane_count = 3u;
-    const unsigned cross_section_count = count / lane_count;
-    const unsigned cross_section = i / lane_count;
-    sword_path_t =
-        cross_section_count > 1u
-            ? (float)cross_section / (float)(cross_section_count - 1u)
-            : 0.0f;
-    const float centre_x = (rect->x0 + rect->x1) * 0.5f;
-    const float centre_y = (rect->y0 + rect->y1) * 0.5f;
-    const float half_height = (rect->y1 - rect->y0) * 0.5f;
-    const float lane = (float)(i % lane_count) - 1.0f;
-    const float lane_half_span =
-        fmaxf(2.0f, half_height - 2.5f) * (1.0f - 0.35f * sword_path_t);
-    const float jitter = (HashUnit(seed ^ 0x53u) - 0.5f) * 1.5f;
-    const float side = lane * lane_half_span + jitter;
-    const float distance = 4.0f + 84.0f * sword_path_t;
-    x = centre_x - heading_x * distance - heading_y * side;
-    y = centre_y - heading_y * distance + heading_x * side;
-
-    ArRenderColorF color = MixColor(hot, cool, sword_path_t);
-    float materialize = TriangleWave(visual_ticks + i * 7u, 18u);
-    materialize = materialize * materialize * (3.0f - 2.0f * materialize);
-    color.a *= materialize * (1.0f - 0.35f * sword_path_t) *
-               (0.82f + 0.18f * HashUnit(seed ^ 0xA7u));
-    const float base_size =
-        1.15f + 1.30f * (1.0f - sword_path_t) *
-                    (0.78f + 0.22f * HashUnit(seed ^ 0xD3u));
-    const float star_size = base_size * (0.70f + 0.50f * materialize);
-    if (!AppendSceneStarParticle(writer, effect, x, y, star_size, color,
-                                 project_point, userdata))
-      return false;
+  const float cx = (rect->x0 + rect->x1) * 0.5f;
+  const float cy = (rect->y0 + rect->y1) * 0.5f;
+  const float half_height = (rect->y1 - rect->y0) * 0.5f;
+  float hx = 1.0f, hy = 0.0f;
+  SceneActorHeading(effect, &hx, &hy);
+  const float speed = hypotf((float)effect->velocity_x, (float)effect->velocity_y);
+  /* Use actor age/identity so animation-pose changes cannot restart the wake.
+   * Each slot is born near the crescent, advects backward in actor space, then
+   * becomes transparent before reseeding. No pre-aged tail appears on spawn. */
+  for (unsigned i = 0; i < kActionSceneEffectSwordMoteCount; ++i) {
+    const uint32_t identity = DeterministicHash_Mix32(effect->generation * 0x9E3779B9u ^
+        (uint32_t)effect->record_address * 0x85EBCA6Bu ^ i * 0xC2B2AE35u);
+    const unsigned lifetime = 14u + ((identity >> 8) % 9u);
+    const unsigned delay = identity % lifetime;
+    const unsigned elapsed = effect->age_ticks >= delay ? effect->age_ticks - delay : 0;
+    const unsigned age = elapsed % lifetime;
+    const uint32_t seed = DeterministicHash_Mix32(identity ^ (elapsed / lifetime) * 0x27D4EB2Du);
+    const float t = (float)age / (float)(lifetime - 1);
+    const float birth = SwordSmoothStep(t / 0.18f);
+    const float fade = 1.0f - SwordSmoothStep((t - 0.18f) / 0.82f);
+    const float spread = (HashUnit(seed ^ 0x53u) * 2.0f - 1.0f);
+    const float distance = 2.0f + (float)age * (speed * 0.82f + 0.45f);
+    const float side = spread * half_height * 0.78f + spread * 4.0f * t +
+        sinf(t * 5.0f + HashUnit(seed ^ 0x97u) * 6.2831853f) * 2.0f * t;
+    const float x = cx - hx * distance - hy * side;
+    const float y = cy - hy * distance + hx * side;
+    const bool glint = i % 6u == 0;
+    const float size = (0.85f + HashUnit(seed ^ 0xD3u) * 0.9f) *
+        (0.65f + 0.35f * fade) * (glint ? 1.65f : 1.0f);
+    ArRenderColorF color = MixColor((ArRenderColorF){0.88f, 0.99f, 1.0f, 0.98f},
+                                   (ArRenderColorF){0.38f, 0.48f, 1.0f, 0.65f}, t);
+    color.a *= birth * fade * (0.7f + HashUnit(seed ^ 0xA7u) * 0.3f);
+    ArRenderVertex2D vertices[kActionSceneEffectSwordMoteVertices];
+    int indices[kActionSceneEffectSwordMoteIndices];
+    vertices[0] = (ArRenderVertex2D){{x, y}, color, {0.0f, 0.0f}};
+    color.a = 0.0f;
+    for (unsigned j = 0; j < kActionSceneEffectSwordMoteSegments; ++j) {
+      const float radius = glint && (j & 1u) ? size * 0.22f : size;
+      const unsigned circle_index = j * (kActionEffectGlowSegments / kActionSceneEffectSwordMoteSegments);
+      vertices[j + 1] = (ArRenderVertex2D){
+          {x + kCircle32[circle_index][0] * radius, y + kCircle32[circle_index][1] * radius},
+          color, {0.0f, 0.0f}};
+      indices[j * 3] = 0;
+      indices[j * 3 + 1] = (int)j + 1;
+      indices[j * 3 + 2] = (int)((j + 1u) % kActionSceneEffectSwordMoteSegments) + 1;
+    }
+    if (!AppendSwordMesh(writer, effect, vertices, kActionSceneEffectSwordMoteVertices,
+                          indices, kActionSceneEffectSwordMoteIndices, project, userdata)) return false;
   }
   return true;
 }
 
 bool AppendSwordBeamLighting(ActionEffectGeometryWriter *writer,
-                                    const ActionEffectInstance *effect,
-                                    ActionEffectProjectPointFn project_point,
-                                    void *userdata) {
+    const ActionEffectInstance *effect, ActionEffectProjectPointFn project, void *userdata) {
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
-  const float mid_x = (rect->x0 + rect->x1) * 0.5f;
-  const float mid_y = (rect->y0 + rect->y1) * 0.5f;
-  const float pulse = DeterministicPulse(effect);
-  ActionEffectGlowStyle spill = {0}, body = {0};
-  float spill_x = mid_x, spill_y = mid_y;
-  float body_x = mid_x, body_y = mid_y;
+  const float cx = (rect->x0 + rect->x1) * 0.5f;
+  const float cy = (rect->y0 + rect->y1) * 0.5f;
   float hx = 1.0f, hy = 0.0f;
   SceneActorHeading(effect, &hx, &hy);
-  static const ActionEffectGlowStyle kSpill = {
-      .radius_x = 24.0f,
-      .radius_y = 22.0f,
-      .ring_scale = {0.25f, 0.64f, 1.0f},
-      .centre = {0.52f, 0.88f, 1.00f, 0.13f},
-      .ring = {{0.26f, 0.70f, 1.00f, 0.09f},
-               {0.08f, 0.34f, 0.98f, 0.035f},
-               {0.02f, 0.10f, 0.60f, 0.00f}},
-      .flare = 0.035f,
-      .rise = 0.11f};
-  spill = kSpill;
-  spill.axis_x = hx;
-  spill.axis_y = hy;
-  spill.lift_x = -hx;
-  spill.lift_y = -hy;
-  spill.seed = (unsigned)effect->record_address;
-  static const ActionEffectGlowStyle kBody = {
-      .radius_x = 10.0f,
-      .radius_y = 18.0f,
-      .ring_scale = {0.20f, 0.58f, 1.0f},
-      .centre = {0.94f, 1.00f, 1.00f, 0.52f},
-      .ring = {{0.48f, 0.92f, 1.00f, 0.30f},
-               {0.12f, 0.56f, 1.00f, 0.10f},
-               {0.03f, 0.18f, 0.72f, 0.00f}},
-      .flare = 0.025f,
-      .rise = 0.10f};
-  body = kBody;
-  body.axis_x = hx;
-  body.axis_y = hy;
-  body.lift_x = -hx;
-  body.lift_y = -hy;
-  body.seed = (unsigned)effect->pulse_generation;
-  /* Anchor the restrained halo to the decoded OAM rectangle. Only the
-   * outer spill leans slightly into the wake; the luminous core remains
-   * on the painted crescent. */
-  spill_x = mid_x - hx * 2.0f;
-  spill_y = mid_y - hy * 2.0f;
-  body_x = mid_x;
-  body_y = mid_y;
-  if (!AppendGlow(writer, effect, &spill, pulse, spill_x, spill_y,
-                  project_point, userdata))
-    return false;
-  if (!AppendGlow(writer, effect, &body, pulse, body_x, body_y, project_point,
-                  userdata))
-    return false;
-  return AppendSwordBeamTrail(writer, effect, project_point, userdata);
+  const float pulse = SwordBeamPulse(effect);
+  /* A smooth, restrained pool of light leaves the authored crescent readable.
+   * The brighter arc follows its curve instead of filling its bounding box. */
+  const ActionEffectGlowStyle spill = {
+      .radius_x = 23.0f, .radius_y = 25.0f, .axis_x = hx, .axis_y = hy,
+      .ring_scale = {0.22f, 0.55f, 1.0f},
+      .centre = {0.40f, 0.78f, 1.0f, 0.20f},
+      .ring = {{0.25f, 0.60f, 1.0f, 0.13f}, {0.18f, 0.26f, 0.85f, 0.035f},
+               {0.10f, 0.14f, 0.55f, 0.0f}}};
+  const ActionEffectGlowStyle body = {
+      .radius_x = 9.0f, .radius_y = (rect->y1 - rect->y0) * 0.57f,
+      .axis_x = hx, .axis_y = hy, .ring_scale = {0.20f, 0.52f, 1.0f},
+      .centre = {0.75f, 0.97f, 1.0f, 0.30f},
+      .ring = {{0.32f, 0.81f, 1.0f, 0.19f}, {0.12f, 0.46f, 1.0f, 0.06f},
+               {0.04f, 0.16f, 0.70f, 0.0f}}};
+  if (!AppendGlow(writer, effect, &spill, pulse, cx - hx * 2.0f, cy - hy * 2.0f,
+                  project, userdata) ||
+      !AppendGlow(writer, effect, &body, pulse, cx, cy, project, userdata)) return false;
+  for (int layer = 0; layer < kSwordBeamStrip_Count; ++layer)
+    if (!AppendSwordBeamStrip(writer, effect, (SwordBeamStrip)layer, project, userdata)) return false;
+  return true;
 }
+
+static const SceneParticleLifetime kSceneLightningLifetime = {11, 6, 7};
 
 bool AppendMarahnaLightningLinkParticles(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,

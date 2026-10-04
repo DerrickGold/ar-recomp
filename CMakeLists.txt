@@ -1154,6 +1154,13 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_host_input_test PRIVATE SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_host_input COMMAND actraiser_host_input_test)
 
+    add_executable(actraiser_diorama_controls_test
+        tests/diorama_controls_test.c src/diorama/diorama_controls.c
+        src/diorama/diorama_camera.c)
+    target_include_directories(actraiser_diorama_controls_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(actraiser_diorama_controls_test PRIVATE snesrecomp::sdk actraiser_math)
+    add_test(NAME actraiser_diorama_controls COMMAND actraiser_diorama_controls_test)
+
     add_executable(actraiser_host_audio_pause_test
         tests/host_audio_pause_test.c
         src/host/host_audio.c
@@ -1347,7 +1354,7 @@ if(BUILD_TESTING)
         tests/present_sim_globe_water_test.c src/sim/world_nav/present_sim_globe_water.c
         src/sim/world_nav/present_sim_globe_mapping.c src/sim/world_nav/sim_world_navigation_globe.c)
     target_link_libraries(actraiser_present_sim_globe_water_test PRIVATE
-        actraiser_town_model_test_support)
+        actraiser_town_model_test_support actraiser_performance_test_support)
     target_include_directories(actraiser_present_sim_globe_water_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_present_sim_globe_water_test PRIVATE actraiser_math)
     add_test(NAME actraiser_present_sim_globe_water COMMAND actraiser_present_sim_globe_water_test)

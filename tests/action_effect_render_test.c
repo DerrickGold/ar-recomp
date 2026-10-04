@@ -792,6 +792,122 @@ static void TestFlamingWheelRimAndProjectile(void) {
   CHECK(lighting.index_count == 2 * kActionEffectGlowIndices);
 }
 
+static void TestBloodpoolFireballSmoke(void) {
+  ActionSceneEffectFrame frame = {0};
+  static ActionSceneEffectRenderBatch smoke, repeat, lit, aged;
+  frame.fireball_smoke.count = 1;
+  frame.fireball_smoke.puffs[0] = (ActionFireballSmokePuff){
+    .seed = 42, .x = 160, .y = 200, .age = 40, .priority = 2,
+  };
+  /* The last projectile can retire while its detached smoke still needs depth. */
+  CHECK(ActionEffectProjection_RequiredObjPriorityMask(NULL, &frame) == (1u << 2));
+  const unsigned layer = kActionEffectRenderLayer_WorldSmoke;
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &smoke));
+  CHECK(smoke.vertex_count == 2 * kActionSceneEffectWaterfallMistCloudVertices);
+  CHECK(smoke.vertices[0].color.a > 0 && smoke.vertices[0].color.a < .36f);
+  float top = smoke.vertices[0].position.y, bottom = top;
+  for (int i = 1; i < smoke.vertex_count; ++i) {
+    top = fminf(top, smoke.vertices[i].position.y);
+    bottom = fmaxf(bottom, smoke.vertices[i].position.y);
+  }
+  CHECK(bottom - top > 24);  /* Billows exceed the native fireball's 16px height. */
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &repeat));
+  CHECK(SceneBatchesEqual(&smoke, &repeat));
+  frame.fireball_smoke.puffs[0].age = 100;
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &aged));
+  CHECK(aged.vertices[0].position.y < smoke.vertices[0].position.y);
+  CHECK(aged.vertices[0].color.a < smoke.vertices[0].color.a);
+  frame.fireball_smoke.puffs[0].age = 40;
+  frame.decoration_count = 1;
+  frame.decorations[0] = (ActionEffectInstance){
+    .kind = kActionEffect_BloodpoolMoonlight, .world_x = 112, .world_y = 62,
+    .flags = kActionEffectFlag_Visible,
+  };
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &lit));
+  CHECK(lit.vertex_count == 2 * kActionSceneEffectWaterfallMistCloudVertices);
+  CHECK(lit.vertices[0].color.b > smoke.vertices[0].color.b);
+  frame.fireball_smoke.camera_delta_x = 2000;
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &repeat));
+  CHECK(SceneBatchesEqual(&smoke, &repeat));
+  frame.fireball_smoke.camera_delta_x = 0;
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, true, false,
+      IdentityProjection, NULL, NULL, &repeat));
+  CHECK(repeat.vertex_count == 0);
+  frame.projectile_fields_valid = 1;
+  frame.projectile_fields[0] = *ActionProjectileField_Bundled(0);
+  frame.projectile_fields[0].Components[0] = 1;
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &repeat));
+  CHECK(repeat.vertex_count == 0);
+  frame.projectile_fields_valid = 0;
+  frame.fireball_smoke.puffs[0].age = kActionFireballSmokeLifetime;
+  CHECK(ActionEffectProjection_RequiredObjPriorityMask(NULL, &frame) == 0);
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &repeat));
+  CHECK(repeat.vertex_count == 0);
+  frame.fireball_smoke.puffs[0].age = 40;
+  frame.fireball_smoke.puffs[0].priority = kActionEffectObjPriorityCount;
+  CHECK(ActionEffectProjection_RequiredObjPriorityMask(NULL, &frame) == 0);
+  frame.fireball_smoke.puffs[0].priority = 2;
+  frame.fireball_smoke.count = kActionFireballSmokeMaxPuffs;
+  for (unsigned i = 1; i < frame.fireball_smoke.count; ++i)
+    frame.fireball_smoke.puffs[i] = frame.fireball_smoke.puffs[0];
+  CHECK(ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &repeat));
+  CHECK(repeat.vertex_count == frame.fireball_smoke.count * lit.vertex_count);
+  /* Smoke never reduces the existing actor/sword geometry allowance, even
+   * at the full 16-actor, three-sword-stream and 96-puff limits together. */
+  frame.effect_count = frame.visible_count = kActionSceneEffectMaxInstances;
+  for (unsigned i = 0; i < frame.effect_count; ++i)
+    frame.effects[i] = SceneEffect(i < kActionSceneEffectMaxSwordStreams
+        ? kActionEffect_SwordBeam : kActionEffect_EnemyFireball, 160 + i * 8);
+  CHECK(ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, &smoke));
+  CHECK(smoke.vertex_count > 0);
+  frame.fireball_smoke.count = 0;
+  CHECK(ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, &aged));
+  CHECK(SceneBatchesEqual(&smoke, &aged));
+  frame.fireball_smoke.count = kActionFireballSmokeMaxPuffs;
+  frame.effect_count = frame.visible_count = 0;
+  ++frame.fireball_smoke.count;
+  CHECK(ActionEffectProjection_RequiredObjPriorityMask(NULL, &frame) == 0);
+  CHECK(!ActionSceneDecorationRender_Build(&frame, layer, false, true,
+      IdentityProjection, NULL, NULL, &repeat));
+}
+
+static void TestBloodpoolAct1BossFireballRendering(void) {
+  ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
+  static ActionSceneEffectRenderBatch lighting, particles, off;
+  ActionEffectInstance *effect = &frame.effects[0];
+  *effect = SceneEffect(kActionEffect_EnemyFireball, 400);
+  effect->geometry.data.rect = (ActionEffectLocalRect){-16, -8, 16, 8};
+  effect->obj_priority = 2;
+  for (unsigned visual = 6; visual <= 7; ++visual) {
+    effect->visual = visual;
+    effect->composition = visual == 6 ? 0x5207 : 0x521A;
+    for (int direction = -1; direction <= 1; direction += 2) {
+      effect->velocity_x = 4 * direction;
+      CHECK(ActionSceneEffectRender_Build(&frame, true, false, IdentityProjection,
+                                         NULL, &lighting));
+      CHECK(lighting.vertex_count == 2 * kActionEffectGlowVertices);
+      CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection,
+                                         NULL, &particles));
+      CHECK(particles.vertex_count == 12 * 4);
+      float mean_x = 0;
+      for (int i = 0; i < particles.vertex_count; ++i)
+        mean_x += particles.vertices[i].position.x;
+      mean_x /= particles.vertex_count;
+      CHECK((mean_x - effect->world_x) * direction < -16);
+      CHECK(ActionSceneEffectRender_Build(&frame, false, false, IdentityProjection, NULL, &off));
+      CHECK(off.vertex_count == 0);
+    }
+  }
+}
+
 static void TestMarahnaFireballFramesAndDirections(void) {
   ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
   static ActionSceneEffectRenderBatch lighting, particles;
@@ -1372,118 +1488,211 @@ static void TestMarahnaBossLightningStagesAndOrientations(void) {
   CHECK(particles.vertex_count == 0);
 }
 
-static void TestSwordBeamLightingTrailAndStars(void) {
+static void TestSwordBeamLighting(void) {
   ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
   frame.effects[0] = SceneEffect(kActionEffect_SwordBeam, 300);
-  static ActionSceneEffectRenderBatch lighting, particles, repeat;
+  ActionEffectInstance *effect = &frame.effects[0];
+  effect->age_ticks = 24;
+  static ActionSceneEffectRenderBatch lighting, repeat;
   CHECK(ActionSceneEffectRender_Build(&frame, true, false, IdentityProjection, NULL, &lighting));
-  CHECK(lighting.vertex_count == 2 * kActionEffectGlowVertices + 8);
-  CHECK(lighting.index_count == 2 * kActionEffectGlowIndices + 12);
-  /* Run 20260810-184935 proves the normal state-$13 crescent centre is local
-   * (40,-17), not (8,15). Keep the core there and lean only the spill 2px
-   * into the wake. Both haze layers meet the decoded 32px crescent height,
-   * then taper over their 80px and 56px lengths. */
+  CHECK(lighting.vertex_count == 2 * kActionEffectGlowVertices +
+      kActionSceneEffectSwordStripLayers * kActionSceneEffectSwordStripVertices);
+  CHECK(lighting.index_count == 2 * kActionEffectGlowIndices +
+      kActionSceneEffectSwordStripLayers * kActionSceneEffectSwordStripIndices);
+  /* Preserve the captured crescent centre (40,-17) and its full height. */
   CHECK(fabsf(lighting.vertices[0].position.x - 338.0f) < 0.01f);
   CHECK(fabsf(lighting.vertices[0].position.y - 103.0f) < 0.01f);
   CHECK(fabsf(lighting.vertices[kActionEffectGlowVertices].position.x - 340.0f) < 0.01f);
   const int trail = 2 * kActionEffectGlowVertices;
-  CHECK(fabsf(lighting.vertices[trail + 2].position.x - 260.0f) < 0.01f);
-  CHECK(lighting.vertices[trail + 2].color.a == 0.0f);
-  CHECK(fabsf(lighting.vertices[trail + 6].position.x - 284.0f) < 0.01f);
-  CHECK(fabsf(lighting.vertices[trail].position.y - lighting.vertices[trail + 1].position.y) >
-        30.0f);
-
-  CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &particles));
-  CHECK(particles.vertex_count == kActionSceneEffectSwordStarCount * 8);
-  CHECK(particles.index_count == kActionSceneEffectSwordStarCount * 12);
-  float nearest_star_x = -10000.0f, farthest_star_x = 10000.0f;
-  float near_min_y = 10000.0f, near_max_y = -10000.0f;
-  int near_star_count = 0;
-  for (int i = 0; i < kActionSceneEffectSwordStarCount; i++) {
-    const int base = i * 8;
-    const float star_x =
-        (particles.vertices[base].position.x + particles.vertices[base + 2].position.x) * 0.5f;
-    const float star_y =
-        (particles.vertices[base].position.y + particles.vertices[base + 2].position.y) * 0.5f;
-    CHECK(star_x < 340.0f); /* every glint is behind the rightward crescent */
-    if (star_x > nearest_star_x) nearest_star_x = star_x;
-    if (star_x < farthest_star_x) farthest_star_x = star_x;
-    if (star_x > 320.0f) {
-      near_star_count++;
-      if (star_y < near_min_y) near_min_y = star_y;
-      if (star_y > near_max_y) near_max_y = star_y;
+  const int across = kActionSceneEffectSwordStripAcross;
+  const int last = kActionSceneEffectSwordStripSegments * across;
+  CHECK(fabsf(lighting.vertices[trail + last + 2].position.x - 244.0f) < 0.01f);
+  /* All strip edges and tail ends feather to zero, including the electrical
+   * pair. Its illuminated centreline hugs the decoded sprite, with at most
+   * 1.6 pixels of electrical jitter beyond its outer edge. */
+  for (int layer = 0; layer < kActionSceneEffectSwordStripLayers; ++layer) {
+    const int base = trail + layer * kActionSceneEffectSwordStripVertices;
+    for (int joint = 0; joint <= kActionSceneEffectSwordStripSegments; ++joint) {
+      const int row = base + joint * across;
+      CHECK(lighting.vertices[row].color.a == 0.0f);
+      CHECK(lighting.vertices[row + across - 1].color.a == 0.0f);
+      if (layer >= 3) {
+        const ArRenderVertex2D centre = lighting.vertices[row + 2];
+        CHECK(centre.position.x >= 332.0f && centre.position.x <= 349.6f);
+        CHECK(centre.position.y >= 87.0f && centre.position.y <= 119.0f);
+        if (joint > 0 && joint < kActionSceneEffectSwordStripSegments)
+          CHECK(centre.color.a > 0.0f);
+      }
+    }
+    for (int j = 0; j < across; ++j)
+      CHECK(lighting.vertices[base + last + j].color.a == 0.0f);
+    if (layer < 3) {
+      /* Broad wake and sustained brightness through 75% of its length;
+       * only the final quarter dissolves. */
+      const float head_width = lighting.vertices[base + across - 1].position.y -
+          lighting.vertices[base].position.y;
+      const int middle = base + (kActionSceneEffectSwordStripSegments / 2) * across;
+      const int late = base + (kActionSceneEffectSwordStripSegments * 3 / 4) * across;
+      const float tail_width = lighting.vertices[base + last + across - 1].position.y -
+          lighting.vertices[base + last].position.y;
+      CHECK(fabsf(head_width - tail_width) < 0.01f);
+      CHECK(lighting.vertices[middle + 2].color.a > 0.25f);
+      CHECK(lighting.vertices[late + 2].color.a > 0.24f);
     }
   }
-  CHECK(nearest_star_x - farthest_star_x > 70.0f);
-  CHECK(near_star_count >= 6);
-  CHECK(near_max_y - near_min_y > 24.0f);
-  CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &repeat));
-  CHECK(SceneBatchesEqual(&particles, &repeat));
-  frame.effects[0].pulse_ticks++;
-  CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &repeat));
-  CHECK(!SceneBatchesEqual(&particles, &repeat));
-  bool materialization_changed = false;
-  for (int i = 0; i < kActionSceneEffectSwordStarCount; i++) {
-    const int base = i * 8;
-    const float before_x =
-        (particles.vertices[base].position.x + particles.vertices[base + 2].position.x) * 0.5f;
-    const float before_y =
-        (particles.vertices[base].position.y + particles.vertices[base + 2].position.y) * 0.5f;
-    const float after_x =
-        (repeat.vertices[base].position.x + repeat.vertices[base + 2].position.x) * 0.5f;
-    const float after_y =
-        (repeat.vertices[base].position.y + repeat.vertices[base + 2].position.y) * 0.5f;
-    CHECK(fabsf(before_x - after_x) < 0.01f);
-    CHECK(fabsf(before_y - after_y) < 0.01f);
-    if (fabsf(particles.vertices[base].color.a - repeat.vertices[base].color.a) > 0.001f)
-      materialization_changed = true;
-  }
-  CHECK(materialization_changed);
-  frame.effects[0].pulse_ticks--;
+  /* Spawn builds a short wake; it does not flash a full-length cone. */
+  effect->age_ticks = 0;
+  CHECK(ActionSceneEffectRender_Build(&frame, true, false, IdentityProjection, NULL, &repeat));
+  CHECK(repeat.vertices[trail + last + 2].position.x > 337.0f);
 
-  frame.effects[0].velocity_x = -8;
-  frame.effects[0].flags |= kActionEffectFlag_FlipHorizontal;
-  frame.effects[0].geometry.data.rect = (ActionEffectLocalRect){-48.0f, -33.0f, -32.0f, -1.0f};
+  effect->age_ticks = 24;
+  effect->velocity_x = -8;
+  effect->flags |= kActionEffectFlag_FlipHorizontal;
+  effect->geometry.data.rect = (ActionEffectLocalRect){-48, -33, -32, -1};
   CHECK(ActionSceneEffectRender_Build(&frame, true, false, IdentityProjection, NULL, &repeat));
   CHECK(fabsf(repeat.vertices[0].position.x - 262.0f) < 0.01f);
-  CHECK(fabsf(repeat.vertices[trail + 2].position.x - 340.0f) < 0.01f);
-  CHECK(fabsf(repeat.vertices[trail + 6].position.x - 316.0f) < 0.01f);
+  CHECK(fabsf(repeat.vertices[trail + last + 2].position.x - 356.0f) < 0.01f);
+  for (int i = trail; i < lighting.vertex_count; ++i) {
+    CHECK(fabsf(repeat.vertices[i].position.x + lighting.vertices[i].position.x - 600.0f) < 0.01f);
+    CHECK(fabsf(repeat.vertices[i].position.y + lighting.vertices[i].position.y - 206.0f) < 0.01f);
+  }
+}
 
-  frame.effects[0].visual = 0x31;
-  frame.effects[0].flags &= ~kActionEffectFlag_FlipHorizontal;
-  frame.effects[0].geometry.data.rect = (ActionEffectLocalRect){40.0f, -9.0f, 56.0f, 23.0f};
-  CHECK(ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, &repeat));
-  CHECK(repeat.vertex_count > 0);
-  /* Aitos's boss-authored upper/lower crescents use the same portable comet
-   * style while retaining their diagonal headings and priority-2 source. */
-  frame.effects[0].visual = 0x21;
-  frame.effects[0].velocity_x = -3;
-  frame.effects[0].velocity_y = 1;
-  frame.effects[0].obj_priority = 2;
-  frame.effects[0].geometry.data.rect = (ActionEffectLocalRect){-8.0f, -17.0f, 16.0f, 7.0f};
-  CHECK(ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, &repeat));
-  CHECK(repeat.vertex_count ==
-        2 * kActionEffectGlowVertices + 8 + kActionSceneEffectSwordStarCount * 8);
-  frame.effects[0].visual = 0x20;
-  frame.effects[0].velocity_y = -1;
-  frame.effects[0].geometry.data.rect = (ActionEffectLocalRect){-8.0f, -9.0f, 16.0f, 15.0f};
-  CHECK(ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, &repeat));
-  CHECK(repeat.vertex_count > 0);
-  /* Reflected state 1 from run 20260812-224123 travels right/up. Its wake
-   * must therefore taper left/down, proving the newly admitted facing reaches
-   * the heading-driven renderer rather than merely passing capture. */
-  frame.effects[0].visual = 0x21;
-  frame.effects[0].velocity_x = 3;
-  frame.effects[0].velocity_y = -1;
-  frame.effects[0].flags =
-      kActionEffectFlag_Visible | kActionEffectFlag_FlipHorizontal | kActionEffectFlag_FlipVertical;
-  frame.effects[0].geometry.data.rect = (ActionEffectLocalRect){-16.0f, -9.0f, 8.0f, 15.0f};
-  CHECK(ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, &repeat));
-  CHECK(repeat.vertices[trail].position.x > repeat.vertices[trail + 2].position.x);
-  CHECK(repeat.vertices[trail].position.y < repeat.vertices[trail + 2].position.y);
-  frame.effects[0].visual = 0x32;
-  CHECK(ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, &repeat));
-  CHECK(repeat.vertex_count == 0);
+static void TestSwordBeamMoteLifecycle(void) {
+  ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
+  frame.effects[0] = SceneEffect(kActionEffect_SwordBeam, 300);
+  ActionEffectInstance *effect = &frame.effects[0];
+  effect->age_ticks = 24;
+  static ActionSceneEffectRenderBatch particles, repeat;
+  CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &particles));
+  CHECK(particles.vertex_count == kActionSceneEffectSwordMoteCount * kActionSceneEffectSwordMoteVertices);
+  CHECK(particles.index_count == kActionSceneEffectSwordMoteCount * kActionSceneEffectSwordMoteIndices);
+  CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &repeat));
+  CHECK(SceneBatchesEqual(&particles, &repeat));
+  /* A new animation pose/pulse must not restart otherwise continuous motes. */
+  effect->phase_ticks++;
+  effect->pulse_ticks = 0;
+  effect->pulse_generation++;
+  CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &repeat));
+  CHECK(SceneBatchesEqual(&particles, &repeat));
+  /* The alternate authored pose moves the local centre by (8,24), but must
+   * preserve each mote's identity, age, shape and brightness. */
+  effect->visual = 0x31;
+  effect->geometry.data.rect = (ActionEffectLocalRect){40, -9, 56, 23};
+  CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &repeat));
+  for (int i = 0; i < particles.vertex_count; ++i) {
+    CHECK(fabsf(repeat.vertices[i].position.x - particles.vertices[i].position.x - 8.0f) < 0.01f);
+    CHECK(fabsf(repeat.vertices[i].position.y - particles.vertices[i].position.y - 24.0f) < 0.01f);
+    CHECK(memcmp(&repeat.vertices[i].color, &particles.vertices[i].color, sizeof(ArRenderColorF)) == 0);
+  }
+  effect->visual = 0x30;
+  effect->geometry.data.rect = (ActionEffectLocalRect){32, -33, 48, -1};
+  ArRenderVertex2D previous_motes[kActionSceneEffectSwordMoteCount];
+  int resets = 0, drifting = 0;
+  for (unsigned tick = 0; tick < 96; ++tick) {
+    effect->age_ticks = tick;
+    CHECK(ActionSceneEffectRender_Build(&frame, false, true, IdentityProjection, NULL, &repeat));
+    for (int mote = 0; mote < kActionSceneEffectSwordMoteCount; ++mote) {
+      const int base = mote * kActionSceneEffectSwordMoteVertices;
+      const ArRenderVertex2D now = repeat.vertices[base];
+      CHECK(now.position.x < 340.0f);
+      CHECK(now.color.a >= 0.0f && now.color.a <= 1.0f);
+      for (int j = 1; j < kActionSceneEffectSwordMoteVertices; ++j)
+        CHECK(repeat.vertices[base + j].color.a == 0.0f);
+      if (tick == 0) CHECK(now.color.a == 0.0f);
+      if (tick > 0) {
+        const ArRenderVertex2D previous = previous_motes[mote];
+        if (now.position.x > previous.position.x + 1.0f) {
+          CHECK(now.color.a == 0.0f && previous.color.a < 0.0001f);
+          resets++;
+        } else if (now.color.a > 0.05f && previous.color.a > 0.05f) {
+          /* Once world movement is added, motes drift gently forward while
+           * falling behind the faster blade, with no fixed blinking grid. */
+          const float world_dx = now.position.x - previous.position.x + 8.0f;
+          CHECK(world_dx > 0.0f && world_dx < 2.0f);
+          CHECK(fabsf(now.position.y - previous.position.y) < 1.5f);
+          drifting++;
+        }
+      }
+      previous_motes[mote] = now;
+    }
+  }
+  CHECK(resets > kActionSceneEffectSwordMoteCount);
+  CHECK(drifting > kActionSceneEffectSwordMoteCount);
+}
+
+static void TestSwordBeamFacingsAndSourceParity(void) {
+  /* Captured player poses and Aitos's upper/lower volley, including its
+   * horizontal+vertical reflection. Velocities are already world-facing. */
+  static const struct {
+    uint8_t visual, flags;
+    int16_t vx, vy;
+    ActionEffectLocalRect rect;
+  } cases[] = {
+      {0x30, 0, 8, 0, {32, -33, 48, -1}},
+      {0x30, kActionEffectFlag_FlipHorizontal, -8, 0, {-48, -33, -32, -1}},
+      {0x31, 0, 8, 0, {40, -9, 56, 23}},
+      {0x31, kActionEffectFlag_FlipHorizontal, -8, 0, {-56, -9, -40, 23}},
+      {0x21, 0, -3, 1, {-8, -17, 16, 7}},
+      {0x20, 0, -3, -1, {-8, -9, 16, 15}},
+      {0x21, kActionEffectFlag_FlipHorizontal | kActionEffectFlag_FlipVertical,
+       3, -1, {-16, -9, 8, 15}},
+      {0x20, kActionEffectFlag_FlipHorizontal | kActionEffectFlag_FlipVertical,
+       3, 1, {-16, -17, 8, 7}},
+  };
+  ActionSceneEffectFrame frame = {.effect_count = 1, .visible_count = 1};
+  ActionEffectInstance *effect = &frame.effects[0];
+  *effect = SceneEffect(kActionEffect_SwordBeam, 300);
+  effect->age_ticks = 24;
+  effect->obj_priority = 2;
+  static ActionSceneEffectRenderBatch reference, scratch;
+  static ActionEffectSourcePrimitive primitives[kActionSourceMaximumPrimitives];
+  const int trail = 2 * kActionEffectGlowVertices;
+  const int centre = kActionSceneEffectSwordStripAcross / 2;
+  const int last = kActionSceneEffectSwordStripSegments * kActionSceneEffectSwordStripAcross;
+  for (unsigned c = 0; c < sizeof(cases) / sizeof(cases[0]); ++c) {
+    effect->visual = cases[c].visual;
+    effect->flags = kActionEffectFlag_Visible | cases[c].flags;
+    effect->velocity_x = cases[c].vx;
+    effect->velocity_y = cases[c].vy;
+    effect->geometry.data.rect = cases[c].rect;
+    CHECK(ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, &reference));
+    CHECK(reference.vertex_count == 2 * kActionEffectGlowVertices + kActionSceneEffectSwordVerticesPerInstance);
+    const ArRenderPointF head = reference.vertices[trail + centre].position;
+    const ArRenderPointF tail = reference.vertices[trail + last + centre].position;
+    CHECK((head.x - tail.x) * effect->velocity_x > 0.0f);
+    if (effect->velocity_y) CHECK((head.y - tail.y) * effect->velocity_y > 0.0f);
+    else CHECK(fabsf(head.y - tail.y) < 0.01f);
+
+    /* Both paths receive identical local triangles, RGBA and OBJ priority.
+     * The first two billboard glows use their separately tested primitive. */
+    ActionEffectSourceBatch source = {.primitives = primitives, .capacity = kActionSourceMaximumPrimitives};
+    CHECK(ActionSceneEffectRender_Build(&frame, true, true, ActionEffectSource_ProjectPoint, &source, &scratch));
+    CHECK(!source.failed);
+    CHECK(source.count == (unsigned)reference.index_count / 3);
+    if (source.failed || source.count != (unsigned)reference.index_count / 3) return;
+    for (unsigned tri = 2 * kActionEffectGlowIndices / 3; tri < source.count; ++tri) {
+      const ActionEffectSourcePrimitive *p = &primitives[tri];
+      CHECK(p->meta[0] == kActionSourceTriangle);
+      CHECK(p->meta[2] == effect->obj_priority);
+      for (unsigned j = 0; j < 3; ++j) {
+        const ArRenderVertex2D *v = &reference.vertices[reference.indices[tri * 3 + j]];
+        CHECK(fabsf(p->points[j][0] + effect->world_x - v->position.x) < 0.01f);
+        CHECK(fabsf(p->points[j][1] + effect->world_y - v->position.y) < 0.01f);
+        CHECK(memcmp(p->colors[j], &v->color, sizeof(v->color)) == 0);
+      }
+    }
+    /* A full deferred packet must fail the build without publishing a
+     * partially emitted beam. */
+    source.capacity = source.count - 1;
+    source.count = 0;
+    CHECK(!ActionSceneEffectRender_Build(&frame, true, true, ActionEffectSource_ProjectPoint, &source, &scratch));
+    CHECK(source.failed);
+    CHECK(scratch.vertex_count == 0 && scratch.index_count == 0);
+  }
+  effect->visual = 0x32;
+  CHECK(ActionSceneEffectRender_Build(&frame, true, true, IdentityProjection, NULL, &reference));
+  CHECK(reference.vertex_count == 0);
 }
 
 static void TestSceneCapacityAndMalformedInput(void) {
@@ -4178,6 +4387,8 @@ int main(void) {
   TestAitosStatueFireLightingAndFacing();
   TestAitosSideLavaLightingAndHeatMesh();
   TestFlamingWheelRimAndProjectile();
+  TestBloodpoolAct1BossFireballRendering();
+  TestBloodpoolFireballSmoke();
   TestMarahnaFireballFramesAndDirections();
   TestAitosUsesRakedDioramaSourcePlanes();
   TestCurrentActorEffectsRequestExactObjPlanes();
@@ -4186,7 +4397,9 @@ int main(void) {
   TestBossLightningFilamentAndStages();
   TestMarahnaLightningLinksAndOrientations();
   TestMarahnaBossLightningStagesAndOrientations();
-  TestSwordBeamLightingTrailAndStars();
+  TestSwordBeamLighting();
+  TestSwordBeamMoteLifecycle();
+  TestSwordBeamFacingsAndSourceParity();
   TestSceneCapacityAndMalformedInput();
   if (s_failures) {
     fprintf(stderr, "%d action-effect render test(s) failed\n", s_failures);

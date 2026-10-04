@@ -224,6 +224,37 @@ bool SimWorldNavigationArt_OverlayTownGround(
   return true;
 }
 
+void SimWorldNavigationArt_MarkChanges(SimWorldNavigationArtChanges *changes,
+    const uint8_t *before, const uint8_t *after,
+    const SimWorldNavigationTownGround *old_ground,
+    const SimWorldNavigationTownGround *new_ground) {
+  if (!changes || !before || !after || !old_ground || !new_ground) return;
+  for (int y = 0; y < kSimWorldMapTiles; ++y)
+    for (int x = 0; x < kSimWorldMapTiles; ++x) {
+      if (before[y * kSimWorldMapTiles + x] == after[y * kSimWorldMapTiles + x]) continue;
+      for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
+        const int cx = x + dx, cy = y + dy;
+        if (cx >= 0 && cy >= 0 && cx < kSimWorldMapTiles && cy < kSimWorldMapTiles)
+          changes->cells[cy * kSimWorldMapTiles + cx] = 1;
+      }
+    }
+  for (int t = 0; t < kSimTownCount; ++t) {
+    const unsigned bit = 1u << t;
+    if (!((old_ground->enabled_town_mask | new_ground->enabled_town_mask) & bit)) continue;
+    int ox, oy;
+    if (!SimWorldMap_OriginForTown(t + 1, &ox, &oy)) continue;
+    const bool all = ((old_ground->enabled_town_mask ^ new_ground->enabled_town_mask) & bit) ||
+        old_ground->development_tier[t] != new_ground->development_tier[t];
+    for (int y = 0; y < kSimTownCells; ++y) for (int x = 0; x < kSimTownCells; ++x) {
+      const unsigned mask = UINT32_C(1) << x;
+      if (all || old_ground->terrain[t][y * 32 + x] != new_ground->terrain[t][y * 32 + x] ||
+          ((old_ground->object_rows[t][y] ^ new_ground->object_rows[t][y]) & mask) ||
+          ((old_ground->native_rows[t][y] ^ new_ground->native_rows[t][y]) & mask))
+        changes->cells[(oy + y) * kSimWorldMapTiles + ox + x] = 1;
+    }
+  }
+}
+
 bool SimWorldNavigationArt_PrepareAnimation(
     SimWorldNavigationArtAnimation *work,
     uint32_t *out_pixels, int out_pitch_pixels,

@@ -430,8 +430,8 @@ PresentationOutcome DrawSimCloudShroud(const FrameSlot *slot, ArRenderRectI sour
 
   float clear_x0 = (float)slot->sim.cloud_clear_x0;
   float clear_x1 = (float)slot->sim.cloud_clear_x1;
-  float clear_y0 = (float)(source.y + slot->sim.cloud_clear_y0);
-  float clear_y1 = (float)(source.y + slot->sim.cloud_clear_y1);
+  float clear_y0 = (float)slot->sim.cloud_clear_y0;
+  float clear_y1 = (float)slot->sim.cloud_clear_y1;
   float falloff = (float)slot->sim.cloud_falloff_px;
   float inset = (float)slot->sim.cloud_inset_px;
   float opacity =

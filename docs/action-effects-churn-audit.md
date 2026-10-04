@@ -2,6 +2,9 @@
 
 Snapshot: `746cbc0f`, 2026-09-28.
 
+The [2026-10-03 lifecycle audit](#projectile-lifecycle-audit-2026-10-03) below
+records the later projectile ownership fixes and the complete capture inventory.
+
 The recent growth mostly represents new effects and their validation. The main
 maintenance risk is that stage capture, effect dispatch and presentation policy
 continue accumulating in shared files. A focused consolidation pass is warranted
@@ -271,3 +274,138 @@ This is a bounded consolidation pass. The large test files and the presenter's
 small stage-dimming policy remain further organization opportunities. Their
 existing coverage is retained. It does not add the duplicate-moon art treatment,
 change lighting style, or establish Steam Deck/D3D12 hardware performance.
+
+## Projectile lifecycle audit, 2026-10-03
+
+Scope: every native object matcher in `ActionSceneEffects_CaptureFrameFiltered`,
+the authored actor binding path, spell cohorts, and detached/environmental
+emitters. The inventory is of **implemented enhancements**, not every projectile
+in the original game. Parent-only WRAM mutations established capture failures;
+they do not prove that every original enemy reaches each mutation during play.
+Bloodpool Act 1 boss death also has a native replay reproduction.
+
+### Complete native scene inventory
+
+The source of truth is
+[`action_scene_effect_rules.inc`](../src/action/action_scene_effect_rules.inc).
+Its 24 entries declare recognition, room, ownership, dependency, and clock.
+Original and Death Heim sources remain separately restricted to their rooms.
+
+**Record** means the record's own identity defines the entire lifetime.
+**Spawn** adds dependency validation on first admission to a new generation;
+subsequent captures depend only on the child's identity and continuity.
+**Attached** revalidates a continuing physical relationship every capture.
+**Motion** freezes phase/age when position stops; **Gameplay** permits deliberate
+stationary animation. These clock choices are explicit, independent of ownership.
+
+| Registry family | Implemented effect / source | Previous dependency risk | Ownership / clock |
+| --- | --- | --- | --- |
+| Centaur | Fillmore Act 1 staff charge, lightning strike and floor impact (`AD45`) | Child signatures already independent; staff charge is on the boss record | Record / Gameplay |
+| NorthwallMagic | Act 1 charge, falling magic and floor expansion (`E7C6`) | Already independent, including impacts outliving their falling parent | Record / Gameplay |
+| MinotaurAxe | Thrown axe, including small flight artwork (`AF5D`, rematch `F6CA`) | Parent composition clearing or reuse rejected child | Spawn / Motion |
+| FlamingWheelBody | Boss body emitter (`D838`, rematch `F712`) | Own boss flag intentionally gates the body | Record / Gameplay |
+| FlamingWheelShot | Five launched directions from that boss | Parent boss flag, composition, or slot reuse rejected child | Spawn / Motion |
+| IceDragonBall | Northwall Act 2 ice balls (`F161`, rematch `F760`) | Parent composition clearing or reuse rejected child | Spawn / Motion |
+| Tanzara | Final boss projectile/burst tuples (`F80F`) | Already independent; multiple stationary burst phases | Record / Gameplay |
+| BloodpoolBossFireball | Act 1 boss fireballs (`B786`) and their smoke source | Previous fix tolerated death flags; complete parent reuse could still reject child | Spawn / Motion |
+| BloodpoolFireball | Act 2 ordinary/statue fireballs (`BD76`, `BD84`) | Already independent | Record / Motion |
+| FillmoreOrb | Act 2 statue red orbs, maps 2–3; map 3 is room 2 (`B3BF`) | Parent retirement, state change, or reuse rejected child; merely scrolling the statue out did not | Spawn / Motion |
+| MarahnaOrb | Unsplit orb (`E047`), including intentional hold poses | Already independent | Record / Gameplay |
+| MarahnaSplit | Four cardinal children of that orb | Revalidated an exact **retired** parent pose; reuse rejected child | Spawn / Motion |
+| MarahnaSnake | Snake-launched fireballs (`DE96`) | Parent death handler, retirement, composition change, or reuse rejected child | Spawn / Motion |
+| MarahnaLink | Horizontal/vertical lightning between endpoints (`E18E`, partner `E254`) | Relationship is intentional: both endpoints and midpoint must remain valid | Attached / Gameplay |
+| ViperBody | Marahna boss charge and orb on the boss itself (`E483`, rematch `F72A`) | Body phases correctly end with their own record/pose | Record / Gameplay |
+| ViperBolt | Launched diagonal lightning from that boss | Mutable parent attack state/handler and liveness rejected child | Spawn / Motion |
+| ViperGround | Moving floor charge from that boss | Required parent to remain in its exact post-impact state | Spawn / Motion |
+| AitosLava | Rising, held, then falling lava fireball (`CF9E`) | Already independent; zero-speed hold is intentional | Record / Gameplay |
+| AitosStatue | Statue flame growth and breath (`D5B1`, `D5C0`) | Effect belongs to the stationary flame record itself | Record / Gameplay |
+| AitosRock | Molten rock launch (`CEEC`) | Already independent; native launch reuses the mouth's own slot | Record / Motion |
+| AitosSword | Act 1 dragon's two diagonal sword crescents (`D646`) | Revalidated a retired launch controller **and** a live boss root | Spawn / Motion |
+| PlayerSword | Player extended sword beam (`979A` measured player family) | Revalidated the player's current liveness/source/composition | Spawn / Motion |
+| BloodpoolTrap | Act 2 lightning trap (`BD2A`) | Already independent | Record / Gameplay |
+| WizardLightning | Bloodpool Act 2 strike and floor impact (`BDFF`, rematch `F6E2`) | Parent retirement/clearing/reuse rejected child; impact's parent is the strike | Spawn / Gameplay |
+
+The 12 Spawn entries are the paths that previously consulted mutable parent
+contents on every capture. The change preserves their initial identity checks
+without allowing the parent to revoke an admitted child's lifetime.
+
+### Other capture and emission contracts
+
+| Path | Lifetime owner and handling |
+| --- | --- |
+| Authored actor selectors / recipe instances | Actor generation owns age and phase. `actor-parent` is retained spawn provenance, not a lookup of the parent's current slot occupant. Parent death/reuse no longer resets the child or changes its selector. Child source, animation, bank, backlink, retirement, room change, or a large position discontinuity starts a new generation. Stationary authored body effects still animate. |
+| Magical Fire, Stardust, Aura, Light | Explicit native magic controller and its cohort slots own the cast. These intentionally retire when that controller ends; they are not enemy-parent relationships. Existing spell lifecycle and pulse tests remain in place. |
+| Bloodpool fireball smoke | Bounded detached puffs retain source address **and generation**. Moving-source smoke dissipates after detachment. A frozen trail follows its source freeze and disappears when that source disappears; slot reuse cannot inherit it. |
+| Landing dust | Bounded contact events have a finite independent lifetime; depletion patches and room reset govern further emission. No live parent dependency. |
+| Room/metatile decorations and environmental fields | Torches, lava surfaces, waterfalls, forest/cave/marsh/castle particles, water, moonlight, atmosphere, rays and other placed fields belong to the captured room/map or authored field. Their room clock and filters are intentional; there is no projectile-parent liveness lookup to latch. Actor-bound variants use the authored actor contract above. |
+
+### Shared admission and enforcement
+
+1. Every scene family enters through the registry. A matcher receives only a
+   `const ActionObjectSnapshot *`, so it cannot read mutable parent WRAM through
+   its API. Parent/endpoint validators are separate callbacks.
+2. `AdmitSceneObject` applies the ownership rule centrally. Spawn proof runs only
+   for a new generation; attached proof runs on every capture. A missing required
+   dependency validator rejects admission.
+3. Continuation requires the same family, own source/animation/backlink key, and
+   plausible position continuity. Native inactive/empty records, rejected own
+   signatures, room transitions, and observer resets retire history. Another
+   projectile in the same renderer kind cannot inherit admission across families.
+4. Motion clocks retain the last heading when a previously admitted, unchanged
+   projectile clears velocity. This does not weaken admission of new stationary
+   lookalikes. Gameplay clocks retain intentional stationary phases. Zero elapsed
+   gameplay ticks never advance either clock.
+5. Visibility remains separate from lifetime. A hidden native sprite emits no
+   visible light; its identity can remain tracked for reappearance. The existing
+   Bloodpool boss render-budget exclusion and independent smoke budget remain.
+6. `TestSceneLifecycleContracts` iterates **every registry ID** and demands an
+   independently seeded WRAM fixture. Adding a registry entry without that fixture
+   fails the test. Fixture expectations for ownership and clock are not generated
+   from the production policy, so declaring the wrong policy also fails.
+
+The matrix checks unchanged-child survival across parent flag, handler, state,
+inactive status, composition and slot changes; stable generation and clocks;
+stop/clear-velocity/resume; child retirement and invalid identity; room change;
+visibility; fresh admission; and WRAM immutability. It repeats the applicable
+families in all five Death Heim rematches and includes separate Wizard impact
+children. Authored-selector tests cover retained and initially unknown provenance.
+Existing detailed artwork, direction, phase transition, scope, smoke, renderer,
+presenter, capture and recipe tests complement the matrix.
+
+### Boundaries of the guarantee
+
+Spawn validation remains conservative on a cold observer. If a savestate is
+loaded after the parent evidence has already vanished, the observer cannot prove
+that an otherwise plausible child was previously admitted. It rejects that new
+admission rather than guessing. Ordinary observer continuity survives parent
+death and reuse; observer reset deliberately does not preserve those old proofs.
+
+The native pool has no allocation generation counter available to this observer.
+A slot that is destroyed and recreated between captures with identical observed
+identity and position cannot be distinguished from uninterrupted existence.
+Detected retirement, identity/backlink changes, family changes, room/reset
+boundaries and implausible motion do prevent inheritance. Stronger guarantees
+would require native allocation events, beyond this read-only capture layer.
+
+For a new effect, choose its owner and clock in the registry, keep its signature
+object-local, provide any birth/attachment validator, and add a measured fixture
+with the intended lifetime expectations. A new phase that changes ownership must
+have a distinct family entry; sharing a renderer does not imply sharing a lifetime.
+
+### Validation of this change
+
+The release game builds successfully. All seven focused ASan/UBSan tests pass:
+native scene effects (including the complete lifecycle matrix), frame capture,
+recipes, authored actor binding, immediate and deferred rendering, and presentation.
+Compared with HEAD, changed C/header files introduce no style violations; new
+registry/test includes have none. The repository-wide style command still fails
+on pre-existing violations across the tree (including unchanged counts in touched
+files); this change does not refresh that baseline. `git diff --check` is clean.
+
+The native Metal Bloodpool death replay is saved under the ignored directory
+`runs/bloodpool-act1-boss-fire/lifecycle-diorama-after/runs/20261003-204727`.
+Against the previously fixed `death-diorama-after` replay, all **24 screenshots**
+and **57 full WRAM snapshots** are byte-identical. This confirms preservation of
+the working boss-death presentation and native behavior. Other families' parent
+death/reuse scenarios are validated with captured-layout fixtures, not claims of
+complete native playthrough coverage.

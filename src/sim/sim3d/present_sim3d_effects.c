@@ -784,16 +784,6 @@ void DrawSimEffectParticles(
   EffectRenderer_Submit(&g_render_device, &batch, kArRenderBlendMode_Add);
 }
 
-bool SimObjectIsPromotedHud(const FrameSlot *slot,
-                                   const SimRenderObject *object) {
-  const FrameSlotOverlayCapture *capture =
-      &slot->overlay_captures[kFrameSlotOverlay_Obj];
-  return object->tier == kSimRecordTier_Fixed && capture->oamCount &&
-      object->oam_first >= capture->oamFirst &&
-      object->oam_first + object->oam_count <=
-          capture->oamFirst + capture->oamCount;
-}
-
 void DrawSimMapPlaneObject(const FrameSlot *slot,
                                   const SimRenderObject *object,
                                   int screen_origin_x, int screen_origin_y,

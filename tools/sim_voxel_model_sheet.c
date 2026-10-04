@@ -238,6 +238,7 @@ static SimBackgroundVoxelObject BaseObject(
     case kSimBackgroundVoxel_BloodpoolCastle:
     case kSimBackgroundVoxel_MarahnaTemple:
     case kSimBackgroundVoxel_Pyramid:
+    case kSimBackgroundVoxel_AnimalPen:
       object.source_cells_w = object.source_cells_h = 2;
       object.footprint_cells_w = object.footprint_cells_d = 2;
       break;
@@ -514,6 +515,9 @@ static bool RenderAll(SDL_Renderer *renderer, const char *output_dir,
     snprintf(label, sizeof(label), "Aitos scattered rocks - $%02X", rock_tiles[at]);
     EMIT("Town environment", filename, label, object);
   }
+
+  object = BaseObject(kSimBackgroundVoxel_AnimalPen, 4);
+  EMIT("Town environment", "aitos-animal-pen", "Aitos wooden animal pen", object);
 
 #undef EMIT
   /* Keep the historical 67 baseline numbers stable. Regional geometry gets

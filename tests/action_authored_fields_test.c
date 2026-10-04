@@ -3,6 +3,7 @@
 #include "action/action_effect_preview.h"
 #include "action/action_environment_exposure.h"
 #include "action/action_effect_projection.h"
+#include "action/action_effect_source.h"
 #include "diorama/diorama.h"
 #include "support/test_assert.h"
 #include <math.h>
@@ -13,6 +14,8 @@ static ActionEffectRecipes recipes;
 static ActionSceneEffectFrame frame;
 static ActionSceneEffectRenderBatch a,b;
 static ActionReceiverLighting receiver;
+static ActionEffectSourcePrimitive primitives[kActionSourceMaximumPrimitives];
+static ActionEffectSourceLightJob light_jobs[kActionSourceMaxLightJobs];
 static bool Project(void *context,const ActionEffectInstance *e,float x,float y,ArRenderPointF *p) {
   (void)context;*p=(ArRenderPointF){e->world_x+x,e->world_y+y};return true;
 }
@@ -50,6 +53,91 @@ static void Geometry(void) {
   const ArRenderVertex2D saved=a.vertices[0];clip.x0+=16;clip.x1+=16;
   assert(ActionSceneDecorationRender_Build(&frame,frame.authored[0].render_layer,true,true,Project,Clip,&clip,&b));
   bool found=false;for(int i=0;i<b.vertex_count;++i)if(!memcmp(&saved,&b.vertices[i],sizeof(saved)))found=true;assert(found);
+}
+/* CPU-only recipe tests cannot detect direct project() calls or whole-room
+ * traversal that silently latches the game onto reference projection. */
+static unsigned SourceBuild(unsigned layer, bool lighting, bool particles,
+    const ActionEffectProjectionContext *context) {
+  ActionEffectSourceBatch source={.context=*context,.primitives=primitives,
+      .capacity=kActionSourceMaximumPrimitives,.lights=light_jobs,
+      .light_capacity=kActionSourceMaxLightJobs};
+  assert(ActionSceneDecorationRender_Build(&frame,layer,lighting,particles,
+      ActionEffectSource_ProjectPoint,ActionEffectSource_ClipBounds,&source,&b));
+  assert(!source.failed);
+  return source.count;
+}
+static void DeferredAuthored(void) {
+  static const struct {const char *kind,*extra;} cases[]={
+    {"soft-light",""},{"motes",""},{"free-mist",""},{"ground-mist","mist-height=26\n"},
+    {"particle-area","particles=8\npattern=snow\n"},{"light-fan",""},{"water-surface",""},
+    {"drips",""},{"waterfall-spray",""},{"cloud-bank",""},
+    {"exposure","intensity=.5\ndim-scenery=1\n"},{"wet-contour","points=0,0 40,10 80,0\n"},
+    {"halo",""},{"light-gradient",""},{"flame",""},{"torch",""}};
+  ActionEffectProjectionContext context={.visible_width=512,.snes_height=448,
+      .capture_height=448,.viewport={0,0,1024,896}};
+  bool covered[kActionEffect_KindCount]={0};
+  for(unsigned k=0;k<sizeof(cases)/sizeof(cases[0]);++k) {
+    frame=(ActionSceneEffectFrame){0};
+    char text[512];snprintf(text,sizeof(text),
+        "[effects]\nversion=1\n[emitter:01:02:0:%s:123]\nx=128\ny=160\nwidth=192\nheight=128\n%s",
+        cases[k].kind,cases[k].extra);Parse(text);
+    assert(frame.authored_count==1);
+    covered[frame.authored[0].kind]=true;
+    frame.authored_floor[0]=(ActionEffectFloorField){.count=2,.spans={{64,128,176,26},{128,192,192,26}}};
+    frame.authored[0].flags|=kActionEffectFlag_Visible;
+    unsigned total=0,cpu_total=0;
+    for(unsigned layer=0;layer<kActionEffectRenderLayer_Count;++layer)for(unsigned pass=0;pass<4;++pass) {
+      const bool lighting=(pass&1)!=0,particles=(pass&2)!=0;
+      assert(ActionSceneDecorationRender_Build(&frame,layer,lighting,particles,
+          ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,&context,&a));
+      const unsigned count=SourceBuild(layer,lighting,particles,&context);
+      if(a.index_count)assert(count);
+      if(!pass)assert(!count);
+      total+=count;
+      cpu_total+=(unsigned)a.index_count;
+    }
+    if(!total)fprintf(stderr,"No deferred geometry for authored family %s\n",cases[k].kind);
+    assert(total && cpu_total);
+  }
+  for(unsigned kind=0;kind<kActionEffect_KindCount;++kind) {
+    if(ActionEffectRecipes_IsEmitter(kind) && !covered[kind]) {
+      fprintf(stderr,"Missing deferred emitter fixture: %s\n",ActionEffectRecipes_KindName(kind));
+      assert(covered[kind]);
+    }
+  }
+}
+static void DeferredParticleArea(void) {
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-area:123]\nx=8000\ny=8000\nwidth=16000\nheight=16000\nparticles=8\npattern=snow\n");
+  ActionEffectProjectionContext context={.bg1_camera_x=7000,.bg1_camera_y=7000,
+      .visible_width=1000,.snes_height=352,.capture_height=352,.viewport={0,0,1000,352}};
+  const unsigned layer=frame.authored[0].render_layer;
+  const unsigned count=SourceBuild(layer,false,true,&context);
+  assert(count && count<512); /* Work follows the view, not the saved region. */
+  const ActionEffectSourcePrimitive saved=primitives[count/2];
+  context.bg1_camera_x+=16;
+  const unsigned moved=SourceBuild(layer,false,true,&context);
+  bool found=false;
+  for(unsigned i=0;i<moved;++i)if(!memcmp(saved.points,primitives[i].points,sizeof(saved.points)) &&
+      !memcmp(saved.colors,primitives[i].colors,sizeof(saved.colors)))found=true;
+  assert(found); /* World-cell seeds survive panning. */
+  context.bg1_camera_x=-4000;assert(!SourceBuild(layer,false,true,&context));
+
+  /* BG2 scrolls independently. A retained packet must cover every skybox
+   * band, including static anchors stretched over multiple bands. */
+  DioramaProjection sky={.valid=true,.bg2_skybox={.count=2,.active_band=0,
+      .bands={{.x0=0,.x1=512,.y0=0,.y1=224,.output_y0=0,.output_y1=.5f},
+              {.x0=0,.x1=512,.y0=224,.y1=448,.output_y0=.5f,.output_y1=1}}}};
+  context.diorama_projection=&sky;context.bg2_camera_x=context.bg2_camera_y=7000;
+  frame.authored[0].projection_plane=kActionEffectProjectionPlane_Bg2;
+  ActionEffectSourceBatch source={.context=context};
+  ActionEffectLocalRect first,second;
+  assert(ActionEffectSource_ClipBounds(&source,&frame.authored[0],&first));
+  sky.bg2_skybox.active_band=1;
+  assert(ActionEffectSource_ClipBounds(&source,&frame.authored[0],&second));
+  assert(!memcmp(&first,&second,sizeof(first)));
+  assert(first.y1>=7000+448-frame.authored[0].world_y);
+  frame.authored[0].flags|=kActionEffectFlag_StaticAnchor;
+  assert(SourceBuild(layer,false,true,&context));
 }
 static void HaloAndGradient(void) {
   Parse("[effects]\nversion=1\n[emitter:01:02:0:halo:123]\nx=100\ny=100\nwidth=160\nheight=160\ncolor=ffffff\ncolor-end=445588\nsoftness=.5\nlight-player=1\n");
@@ -342,6 +430,7 @@ static void LayerAnchors(void) {
   assert(ActionEffectProjection_RequiredBgPlaneMask(NULL,&frame)==3);
 }
 int main(int argc, char **argv) {
+  DeferredAuthored();DeferredParticleArea();
   LayerAnchors();
   Geometry();HaloAndGradient();
   Receivers();
@@ -349,7 +438,7 @@ int main(int argc, char **argv) {
   MovingLightReceivers();
   NativeMembers();
   EditedOcclusion();
-  puts("Authored fields: clipping, bounded areas, viewport-stable particles, reverse seeking, "
+  puts("Authored fields: 16 CPU/source families, clipping, bounded areas, viewport-stable particles, reverse seeking, "
        "receiver separation, moving lights, glow centre and 19 preview families passed.");
   if (argc == 2 && !strcmp(argv[1], "--benchmark")) BenchmarkReceivers();
   return 0;

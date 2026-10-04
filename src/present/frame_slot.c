@@ -27,6 +27,7 @@
 #include "constants.h"
 #include "actraiser/actraiser_rtl.h"
 #include "snesrecomp/game_runtime.h"
+#include "sim/sim_render_atlas.h"
 #include "snesrecomp/game/runtime.h" /* g_ram */
 #include "present/frame_timing.h"
 #include "snesrecomp/runner.h"
@@ -130,6 +131,26 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   else
     SimFrameCapture_RefreshMetadata(&dst->sim);
   Sim3D_CaptureOutputSurfaceViews(&dst->sim3d_output_surfaces);
+  dst->sim3d_output_surfaces.upload_plane_mask = Sim3D_PlaneTextureUploadMask(
+      dst->sim.effective_features, dst->sim.separated_plane_mask);
+  if (dst->sim.town && dst->sim.atlas_valid && dst->sim.atlas_used_height) {
+    dst->sim3d_output_surfaces.atlas = (SrPpuSurfaceView){
+      .data = (const uint8_t *)g_sim_obj_atlas_pixels,
+      .byte_size = (uint64_t)kSimObjAtlasPitch * dst->sim.atlas_used_height,
+      .pitch_bytes = kSimObjAtlasPitch, .width_pixels = kSimObjAtlasWidth,
+      .height_pixels = dst->sim.atlas_used_height,
+      .flags = SR_PPU_SURFACE_BOUND, .pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32,
+    };
+  }
+  if (dst->sim.separated_valid) {
+    dst->sim3d_output_surfaces.flat = (SrPpuSurfaceView){
+      .data = (const uint8_t *)g_sim3d_flat_pixels,
+      .byte_size = (uint64_t)g_snes_width * g_snes_height * sizeof(uint32_t),
+      .pitch_bytes = (uint64_t)g_snes_width * sizeof(uint32_t),
+      .width_pixels = g_snes_width, .height_pixels = g_snes_height,
+      .flags = SR_PPU_SURFACE_BOUND, .pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32,
+    };
+  }
   const char *reference = getenv("AR_CHURCH_ALTAR_REFERENCE");
   dst->church_reference_altar = reference && strcmp(reference, "1") == 0;
   dst->church_enabled = Sim3D_ChurchIsOn();
@@ -158,17 +179,21 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   dst->ignore_aspect_ratio = Settings_IgnoreAspectRatio();
   dst->visible_x0 = Settings_VisibleX0();
   dst->visible_width = Settings_VisibleWidth();
-  const bool automatic = dst->extended_aspect == kScreenAspect_Auto;
-  const bool auto_action_canvas = automatic && have_ppu_view &&
-      ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]) &&
-      ppu_view.state.bg_mode != 7;
-  dst->visible_top = auto_action_canvas
-      ? g_actraiser_display_geometry->auto_vertical_budget : 0;
-  dst->visible_height = dst->snes_height + 2 * dst->visible_top;
-  if (automatic && !auto_action_canvas) {
-    dst->visible_x0 = dst->ws_extra;
-    dst->visible_width = kFrameSlotAuthenticWidth;
+  if (dst->extended_aspect == kScreenAspect_Auto) {
+    const SimViewKind sim_view = Sim3D_PresentationDecision(&dst->sim).view;
+    const bool projected_sim = sim_view == kSimView_WorldNavigation ||
+        (sim_view == kSimView_Enhanced &&
+         (dst->sim.effective_features & kSimFeature_GroundProjection));
+    const ActRaiserAutoCanvas canvas = DisplayGeometry_ConstrainAutoCanvas(
+        (ActRaiserAutoCanvas){g_ws_display_extra,
+            g_actraiser_display_geometry->auto_vertical_budget},
+        g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
+        have_ppu_view ? ppu_view.state.bg_mode : -1, projected_sim);
+    dst->visible_x0 = dst->ws_extra - canvas.extra_columns;
+    dst->visible_width = kFrameSlotAuthenticWidth + 2 * canvas.extra_columns;
+    dst->visible_top = canvas.extra_rows;
   }
+  dst->visible_height = dst->snes_height + 2 * dst->visible_top;
   /* Latched, not read from g_ppu, for the same reason extra_left_cur is. */
   ActRaiser_LiveVerticalMargins(
       &dst->ws_extra_top, &dst->ws_extra_bottom);

@@ -30,10 +30,15 @@ void DrawSimSunRays(const FrameSlot *slot, bool lighting, bool particles,
 void DrawSimEffectFireballHeads(
     const FrameSlot *slot, bool billboards, const SimSceneProjection *scene);
 
-/* An object the HUD has promoted out of the world tier; drawn on the map
- * plane rather than as a billboard. */
-bool SimObjectIsPromotedHud(
-    const FrameSlot *slot, const SimRenderObject *object);
+/* Atlas billboards bypass PPU scene planes, so they must honor the same
+ * completed HUD transfer. Generic OBJ captures describe scene/menu ownership. */
+static inline bool SimObjectIsPromotedHud(const FrameSlot *slot,
+                                         const SimRenderObject *object) {
+  const HudIconFrame *icon = &slot->hud_icon;
+  return object->tier == kSimRecordTier_Fixed && object->oam_count &&
+      icon->scene_removed && icon->count && object->oam_first >= icon->first &&
+      object->oam_first + object->oam_count <= icon->first + icon->count;
+}
 void DrawSimMapPlaneObject(
     const FrameSlot *slot, const SimRenderObject *object, int screen_origin_x,
     int screen_origin_y, ArRenderRectI source, ArRenderRectI viewport,

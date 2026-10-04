@@ -4,6 +4,7 @@
 #include "sim/world_nav/sim_world_navigation_terrain.h"
 #include "sim/town/sim_town_terrain.h"
 #include "app/performance_metrics.h"
+#include "sim/sim3d/sim3d.h"
 #include "support/test_assert.h"
 #include <math.h>
 #include <stdio.h>
@@ -157,7 +158,63 @@ static void TestBubbleMountainPlacement(void) {
   assert(!SimObjectUsesMountainSurface(NULL));
 }
 
+typedef struct GroundCaptureCheck {
+  ArRenderRectI source, viewport;
+  float matrix[16];
+  int draws;
+} GroundCaptureCheck;
+
+static bool CheckGroundCapture(void *context, ArRenderTexture texture,
+    const ArRenderVertex2D *vertices, int vertex_count,
+    const int32_t *indices, int index_count, const ArRenderDrawState *state) {
+  (void)state;
+  GroundCaptureCheck *check = context;
+  assert(texture.value == 1 && vertex_count > 0 && index_count > 0);
+  bool top = false, bottom = false;
+  for (int i=0; i<vertex_count; ++i) {
+    const ArRenderVertex2D *v = &vertices[i];
+    const float x = v->tex_coord.x * kSim3DMaxWidth;
+    const float y = v->tex_coord.y * kSim3DMaxHeight;
+    assert(y >= 0 && y <= 224.001f);
+    top |= y == 0;
+    bottom |= fabsf(y-224) < .001f;
+    Scene3DPoint expected;
+    assert(ProjectSimTexturePoint(check->matrix, check->source, check->viewport,
+                                   x, y, 0, &expected));
+    Near(v->position.x, expected.x);
+    Near(v->position.y, expected.y);
+  }
+  for (int i=0; i<index_count; ++i)
+    assert(indices[i] >= 0 && indices[i] < vertex_count);
+  assert(top && bottom);
+  ++check->draws;
+  return true;
+}
+
+static void TestExpandedTownCanvas(void) {
+  const ArRenderBackendOps ops = {.draw_geometry = CheckGroundCapture};
+  GroundCaptureCheck check = {0};
+  /* This unit observes only the geometry dispatch; no resources are created. */
+  g_render_device = (ArRenderDevice){.ops=&ops, .context=&check};
+  const int rows[] = {0,16,37,64,0};
+  for (unsigned i=0; i<sizeof(rows)/sizeof(rows[0]); ++i) {
+    check.source = (ArRenderRectI){43,-rows[i],256,224+2*rows[i]};
+    check.viewport = (ArRenderRectI){11,17,768,check.source.h*3};
+    const Scene3DCamera camera = {0,0,Scene3D_AutoFitDistance(.4f),.4f};
+    Scene3D_BuildViewProjection(&camera,check.viewport.w,check.viewport.h,check.matrix);
+    DrawSimGroundPlane((ArRenderTexture){1},check.source,224,check.viewport,check.matrix,NULL);
+    Scene3DPoint centre;
+    assert(ProjectSimTexturePoint(check.matrix,check.source,check.viewport,
+                                   43+128,112,0,&centre));
+    Near(centre.x,check.viewport.x+check.viewport.w*.5f);
+    Near(centre.y,check.viewport.y+check.viewport.h*.5f);
+  }
+  assert(check.draws == 5);
+  ArRenderDevice_Reset(&g_render_device);
+}
+
 int main(void) {
+  TestExpandedTownCanvas();
   TestBubbleMountainPlacement();
   TestEffects();
   puts("present_sim3d_project_test: PASS");

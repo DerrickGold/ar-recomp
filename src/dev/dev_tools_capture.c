@@ -32,6 +32,14 @@ DevToolsCaptureResult DevTools_WriteFramebufferPpmAtPhase(
     if (!uploaded_frame) {
       FrameSlot_Capture(&frame_slot, NULL);
       Diorama_CaptureCameraPresentationState(&frame_slot.diorama_camera.controls);
+      if (frame_slot.sim.view == kSimView_Enhanced ||
+          frame_slot.sim.view == kSimView_WorldNavigation) {
+        Sim3DCameraPresentationState camera;
+        Sim3DCamera_CapturePresentationState(&camera);
+        frame_slot.sim_camera.mode = camera.mode;
+        frame_slot.sim_camera.orbit_yaw = camera.orbit_yaw;
+        frame_slot.sim_camera.orbit_pitch = camera.orbit_pitch;
+      }
       PresentUpload(&frame_slot);
       if (SessionFatal_Requested()) return (DevToolsCaptureResult){0};
       uploaded_frame = &frame_slot;
@@ -86,4 +94,3 @@ DevToolsCaptureResult DevTools_WriteFramebufferPpmAtPhase(
       (DevToolsCaptureResult){visible_width, context->snes_height,
                               kDevToolsCapture_NativeFramebuffer};
 }
-

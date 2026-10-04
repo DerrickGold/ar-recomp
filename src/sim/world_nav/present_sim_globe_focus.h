@@ -44,7 +44,7 @@ static inline Sim3DDepthSurfaceFocus PresentWorldNavigationFocus_Resolve(
  * enter this policy; only native pan, captured margins and lift compensation.
  * Mask units are chart cells / 128, shared with the coastal water source. */
 static inline Sim3DDepthSurfaceFocus PresentSimGlobeFocus_ResolveVisibility(
-    const SimGlobeMapping *map, const SimFrameData *sim, ArRenderRectI source) {
+    const SimGlobeMapping *map, const SimFrameData *sim) {
   if (!map || !map->town || !sim || !(sim->effective_features & kSimFeature_CullHaze))
     return (Sim3DDepthSurfaceFocus){0};
   const unsigned lifted = kSimFeature_ObjectBillboards | kSimFeature_VirtualHeight;
@@ -59,7 +59,7 @@ static inline Sim3DDepthSurfaceFocus PresentSimGlobeFocus_ResolveVisibility(
   return (Sim3DDepthSurfaceFocus){
     .clear_rect = {
       map->origin_x/128 + (sim->camera_x-16.0f-sim->sprite_margin_left)/units,
-      map->origin_y/128 + (sim->camera_y+source.y-17.0f-sim->sprite_margin_top)/units,
+      map->origin_y/128 + (sim->camera_y-17.0f-sim->sprite_margin_top)/units,
       width/units, (height-fminf(lift,height*.5f))/units},
     .feather = lead/units, .inset = lead/units,
     .corner_radius = sim->cull_corner_px/units,

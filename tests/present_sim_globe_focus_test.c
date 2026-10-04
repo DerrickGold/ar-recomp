@@ -60,7 +60,6 @@ int main(void) {
                                  .origin_x = variant % 3 * 32,
                                  .origin_y = variant % 4 * 24,
                                  .chart_radius = 96 * (1 + variant % 4)};
-    const ArRenderRectI source = {variant % 3 * 20, variant % 2 * 32, 360, 224};
     sim->effective_features =
         kSimFeature_CullHaze | kSimFeature_ObjectBillboards | kSimFeature_VirtualHeight;
     sim->camera_x = variant * 11;
@@ -76,11 +75,11 @@ int main(void) {
     sim->height_scale_x100 = 100;
     sim->cull_dim_pct = 35;
     sim->cull_haze_pct = 10;
-    const Sim3DDepthSurfaceFocus focus = PresentSimGlobeFocus_ResolveVisibility(&map, sim, source);
+    const Sim3DDepthSurfaceFocus focus = PresentSimGlobeFocus_ResolveVisibility(&map, sim);
     for (int y = -64; y <= 576; y += 8)
       for (int x = -64; x <= 576; x += 8) {
         const float expected = Sim3D_CullProximity(
-            x - sim->camera_x + 16, y - sim->camera_y - source.y + 17, sim->sprite_margin_left,
+            x - sim->camera_x + 16, y - sim->camera_y + 17, sim->sprite_margin_left,
             sim->sprite_margin_right, sim->sprite_margin_top, sim->sprite_margin_bottom,
             sim->cull_haze_lead_px ? sim->cull_haze_lead_px : kSimCullHazeLeadDefaultPx,
             sim->cull_corner_px, sim->cull_lift_inset ? Sim3D_MaxDrawLift(100) : 0);
@@ -95,10 +94,10 @@ int main(void) {
     assert(PresentSimGlobeFocus_Color(&focus, 1, color).a == color.a);
     sim->effective_features = 0;
     const Sim3DDepthSurfaceFocus disabled =
-        PresentSimGlobeFocus_ResolveVisibility(&map, sim, source);
+        PresentSimGlobeFocus_ResolveVisibility(&map, sim);
     assert(PresentSimGlobeFocus_Weight(&disabled, -2, -2) == 0);
     sim->effective_features = kSimFeature_CullHaze; /* No lift without billboards/height. */
-    const Sim3DDepthSurfaceFocus flat = PresentSimGlobeFocus_ResolveVisibility(&map, sim, source);
+    const Sim3DDepthSurfaceFocus flat = PresentSimGlobeFocus_ResolveVisibility(&map, sim);
     assert(flat.clear_rect.h ==
            (kSimSpriteWindowBiasedHeight + sim->sprite_margin_top + sim->sprite_margin_bottom) /
                (16.0f * 128));
@@ -112,7 +111,7 @@ int main(void) {
   sim->cull_haze_lead_px = kSimCullHazeLeadDefaultPx;
   const SimGlobeMapping map = {.town = 1, .origin_x = 32, .origin_y = 24, .chart_radius = 288};
   const Sim3DDepthSurfaceFocus defaults =
-      PresentSimGlobeFocus_ResolveVisibility(&map, sim, (ArRenderRectI){0, 0, 360, 224});
+      PresentSimGlobeFocus_ResolveVisibility(&map, sim);
   assert(defaults.corner_radius == 0 && defaults.haze.a == 0 && defaults.dim > 0);
   const ArRenderRectF r = defaults.clear_rect;
   assert(PresentSimGlobeFocus_Weight(&defaults, r.x + r.w * .5f, r.y + r.h * .5f) == 0);

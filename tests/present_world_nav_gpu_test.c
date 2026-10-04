@@ -2119,6 +2119,10 @@ static void TestCapturedFacingMotion(SDL_Renderer *renderer, const FrameSlot *sl
   }
   sources[kCount - 1].object.flags = kSimBackgroundVoxel_UnderConstruction;
   sources[kCount - 1].object.animation_phase = 1;
+  /* Native blade rotation changes the displayed metatile together with the
+   * phase. Testing only phase misses whole-town invalidation on each spin. */
+  static const uint8_t rotor_tiles[] = {0x24, 0x26, 0x16};
+  sources[kStatic].object.visual_metatile = rotor_tiles[0];
   WorldNavigationModelSourceStyle style = {.embedding = view.map,
                                            .surface_revision = SimWorldMap_GeographySerial(),
                                            .chart_radius_tiles = view.map.chart_radius,
@@ -2136,6 +2140,7 @@ static void TestCapturedFacingMotion(SDL_Renderer *renderer, const FrameSlot *sl
   CHECK(cold_bytes > 0);
   for (unsigned phase = 1; phase <= 3; ++phase) {
     sources[kStatic].object.animation_phase = phase % 3;
+    sources[kStatic].object.visual_metatile = rotor_tiles[phase % 3];
     /* The adjacent scaffold stays at phase 1, not the moving rotor's phase. */
     SDL_Surface *warm = RenderCapturedFacingModels(renderer, sources, kCount, &style, axes,
                                                    view.matrix, &motion_bytes);
@@ -2495,7 +2500,7 @@ static void BuildVoxelShadowScene(VoxelShadowScene scene, bool dense) {
   CHECK(SimBackgroundVoxelRenderer_Ready(SimBackgroundVoxels_Serial()));
 }
 
-static SDL_Surface *RenderVoxelShadowProbe(SDL_Renderer *renderer,
+static SDL_Surface *RenderVoxelShadowProbeOnce(SDL_Renderer *renderer,
     const SimBackgroundVoxelRenderParams *params, float light_x, float light_y,
     bool town_mask, const char *name) {
   CHECK(ArRenderDevice_Clear(&g_render_device, (ArRenderColorF){1, 1, 1, 1}));
@@ -2511,6 +2516,68 @@ static SDL_Surface *RenderVoxelShadowProbe(SDL_Renderer *renderer,
   CHECK(SDL_RenderPresent(renderer));
   SaveImage(surface, name);
   return surface;
+}
+
+/* Every shadow fixture checks both a warm retained outline and the original
+ * fresh per-pass builder. This covers shape variants, mixed families, all LODs,
+ * opposing lights, both projection paths and cache reset on scene replacement. */
+static SDL_Surface *RenderVoxelShadowProbe(SDL_Renderer *renderer,
+    const SimBackgroundVoxelRenderParams *params, float light_x, float light_y,
+    bool town_mask, const char *name) {
+  const char *option = getenv("AR_SIM_SHADOW_HULL_CACHE");
+  char *saved = option ? SDL_strdup(option) : NULL;
+  CHECK(!SDL_setenv_unsafe("AR_SIM_SHADOW_HULL_CACHE", "1", 1));
+  SDL_Surface *first = RenderVoxelShadowProbeOnce(
+      renderer, params, light_x, light_y, town_mask, name);
+  SDL_Surface *warm = RenderVoxelShadowProbeOnce(
+      renderer, params, light_x, light_y, town_mask, NULL);
+  CHECK(Differences(first, warm) == 0);
+  CHECK(!SDL_setenv_unsafe("AR_SIM_SHADOW_HULL_CACHE", "0", 1));
+  SDL_Surface *reference = RenderVoxelShadowProbeOnce(
+      renderer, params, light_x, light_y, town_mask, NULL);
+  CHECK(Differences(first, reference) == 0);
+  SDL_DestroySurface(warm);
+  SDL_DestroySurface(reference);
+  if (saved) CHECK(!SDL_setenv_unsafe("AR_SIM_SHADOW_HULL_CACHE", saved, 1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM_SHADOW_HULL_CACHE"));
+  SDL_free(saved);
+  return first;
+}
+
+static void TestShadowHullCameraChanges(SDL_Renderer *renderer) {
+  SimBackgroundVoxelRenderParams params = {
+    .detail = kSimBackgroundVoxelDetail_Ultra,
+    .shading = kSimBackgroundVoxelShading_MaterialAware,
+    .style = kSimBackgroundVoxelStyle_Varied,
+    .source = {0, 0, 512, 512}, .viewport = {32, 32, 512, 512},
+  };
+  const VoxelShadowScene scenes[] = {kVoxelShadowScene_Tree, kVoxelShadowScene_Shrub,
+      kVoxelShadowScene_MixedFoliage, kVoxelShadowScene_Palm,
+      kVoxelShadowScene_BroadTree, kVoxelShadowScene_StoryTree};
+  for (size_t scene = 0; scene < sizeof(scenes) / sizeof(*scenes); ++scene) {
+    BuildVoxelShadowScene(scenes[scene], scenes[scene] != kVoxelShadowScene_StoryTree);
+    params.serial = SimBackgroundVoxels_Serial();
+    params.town = VoxelShadowSceneTown(scenes[scene]);
+    for (int view = 0; view < 12; ++view) {
+      float matrix[16] = {2,0,0,0, 0,2,0,0, 0,0,1,0, 0,0,0,1};
+      /* The final view revisits the initial shear after cache pressure. */
+      const int step = view == 11 ? 0 : view;
+      matrix[3] = .015f * step;
+      matrix[7] = -.025f * step;
+      params.matrix = matrix;
+      params.facing = step & 1
+          ? kSimBackgroundVoxelFacing_PerModel : kSimBackgroundVoxelFacing_Shared;
+      params.camera_x = 3 * step;
+      params.camera_y = 2 * step;
+      params.landscape_height_pct = 15 * step;
+      params.viewport.w = 512 + step;
+      SDL_Surface *surface = RenderVoxelShadowProbe(renderer, &params,
+          .07f * step, -.035f * step, view & 1, NULL);
+      SDL_DestroySurface(surface);
+    }
+  }
+  puts("retained shadow hulls: warm/fresh pixel parity across camera, light, terrain, "
+       "families and eviction");
 }
 
 static void RenderVoxelShadowPreview(SDL_Renderer *renderer,
@@ -2612,6 +2679,7 @@ static void TestVoxelShadows(SDL_Renderer *renderer) {
     .facing = kSimBackgroundVoxelFacing_PerModel,
     .source = {0, 0, 512, 512}, .viewport = {32, 32, 512, 512}, .matrix = matrix,
   };
+  TestShadowHullCameraChanges(renderer);
   BuildVoxelShadowScene(kVoxelShadowScene_Rocks, false);
   params.serial = SimBackgroundVoxels_Serial();
   for (int town_mask = 0; town_mask < 2; town_mask++) {
@@ -2731,7 +2799,7 @@ static void TestVoxelShadows(SDL_Renderer *renderer) {
   SimBackgroundVoxels_Reset();
 }
 
-static void TestSynthetic(SDL_Renderer *renderer) {
+static void TestSynthetic(SDL_Renderer *renderer, bool captured_motion_only) {
   /* Legacy projected-geometry/cache oracles intentionally use compatibility.
    * TestGpuGridRevisions below explicitly clears this to verify the default. */
   const char *incoming_grid = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
@@ -2763,6 +2831,10 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   FrameSlot *slot = malloc(sizeof(*slot));
   CHECK(slot);
   InitSlot(slot);
+  if (captured_motion_only) {
+    TestFacingTownScene(renderer);
+    goto cleanup;
+  }
   TestGroundLightDirections(renderer, slot, "synthetic");
   SDL_Surface *front = Render(renderer, slot, "synthetic-front");
   const uint32_t green = Pixel(front, kWidth / 2, kHeight / 2);
@@ -2932,6 +3004,7 @@ static void TestSynthetic(SDL_Renderer *renderer) {
   TestContinuousTownScene(renderer);
   TestFacingTownScene(renderer);
   TestBridgeTerrainClearance(renderer);
+cleanup:
   free(slot);
   PresentWorldNav_ResetResources();
   Sim3DDepthPass_Reset(&g_render_device);
@@ -3662,6 +3735,55 @@ static void TestLiveCraterComposition(SDL_Renderer *renderer, FrameSlot *slot,
        "omission PASS");
 }
 
+static void TestDetailedMountainGroundCache(SDL_Renderer *renderer, FrameSlot *slot,
+                                            ArRenderRectI source) {
+  FrameSlot *saved = malloc(sizeof(*saved));
+  CHECK(saved);
+  *saved = *slot;
+  const char *option = SDL_getenv("AR_SIM_MOUNTAIN_GROUND_CACHE");
+  char *saved_option = option ? SDL_strdup(option) : NULL;
+  CHECK(!option || saved_option);
+  size_t cached_samples = 0, reference_samples = 0;
+  for (unsigned step = 0; step < 12; ++step) {
+    *slot = *saved;
+    slot->sim.camera_x = 48 + step * 13;
+    slot->sim.camera_y = 64 + step * 17;
+    slot->sim.background_voxel_detail = step % kSimBackgroundVoxelDetail_Count;
+    slot->sim.landscape_height_pct = (step / 4) * 75;
+    const Scene3DCamera camera = {-.45f - step * .035f, -.3f + step * .05f, 3.5f, .4f};
+    CHECK(!SDL_setenv_unsafe("AR_SIM_MOUNTAIN_GROUND_CACHE", "1", 1));
+    PresentSimGlobeMountains_Reset();
+    SDL_Surface *cached = RenderDetailedTown(renderer, slot, &camera, source, false);
+    const size_t samples = PresentSimGlobeMountains_TestGroundSamples();
+    cached_samples += samples;
+    SimBackgroundCraterAnchor cached_anchor, reference_anchor;
+    const bool cached_crater = PresentSimGlobeMountains_CraterAnchor(&cached_anchor);
+    CHECK(!SDL_setenv_unsafe("AR_SIM_MOUNTAIN_GROUND_CACHE", "0", 1));
+    PresentSimGlobeMountains_Reset();
+    SDL_Surface *reference = RenderDetailedTown(renderer, slot, &camera, source, false);
+    const size_t uncached = PresentSimGlobeMountains_TestGroundSamples();
+    reference_samples += uncached;
+    CHECK(samples <= uncached && Differences(cached, reference) == 0);
+    CHECK(PresentSimGlobeMountains_CraterAnchor(&reference_anchor) == cached_crater);
+    if (cached_crater) {
+      CHECK(cached_anchor.local_x == reference_anchor.local_x &&
+            cached_anchor.local_y == reference_anchor.local_y &&
+            cached_anchor.height_pixels == reference_anchor.height_pixels);
+    }
+    SDL_DestroySurface(cached);
+    SDL_DestroySurface(reference);
+  }
+  CHECK(reference_samples > 0 && cached_samples < reference_samples * 3 / 4);
+  printf("mountain ground samples: %zu cached / %zu reference; camera, detail, landscape "
+         "pixels and crater anchors exact PASS\n", cached_samples, reference_samples);
+  if (saved_option) CHECK(!SDL_setenv_unsafe("AR_SIM_MOUNTAIN_GROUND_CACHE", saved_option, 1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM_MOUNTAIN_GROUND_CACHE"));
+  SDL_free(saved_option);
+  PresentSimGlobeMountains_Reset();
+  *slot = *saved;
+  free(saved);
+}
+
 static void TestDetailedMountainReuse(SDL_Renderer *renderer, FrameSlot *slot,
                                       ArRenderRectI source) {
   FrameSlot *saved = malloc(sizeof(*saved));
@@ -4134,6 +4256,7 @@ static void CaptureTownPresentation(SDL_Renderer *renderer, FrameSlot *slot, con
     }
   }
   TestDetailedMountainReuse(renderer, slot, source);
+  TestDetailedMountainGroundCache(renderer, slot, source);
   TestDetailedVisibility(renderer, slot, source);
   TestLiveCraterComposition(renderer, slot, source);
   TestDetailedCameraLimits(renderer, slot, source);
@@ -4421,15 +4544,19 @@ static void TestTerrainSource(void) {
 
 int main(int argc, char **argv) {
   bool voxel_shadows_only = argc == 3 && !strcmp(argv[1], "--voxel-shadows");
-  if (!voxel_shadows_only && argc != 1 && (argc < 4 || argc > 10)) {
+  bool shadow_cache_only = argc == 3 && !strcmp(argv[1], "--shadow-cache");
+  bool captured_motion_only = argc == 3 && !strcmp(argv[1], "--captured-motion");
+  if (!voxel_shadows_only && !shadow_cache_only && !captured_motion_only &&
+      argc != 1 && (argc < 4 || argc > 10)) {
     fprintf(stderr,
-            "usage: %s [--voxel-shadows existing-output-directory] | [ROM WRAM existing-output-directory [--weather-sequence] [--town-matrix] "
+            "usage: %s [--voxel-shadows|--shadow-cache|--captured-motion existing-output-directory] | "
+            "[ROM WRAM existing-output-directory [--weather-sequence] [--town-matrix] "
             "[--sim-globe-prototype] | --sim-town SIM-snapshot-prefix [--sim-height-sweep | "
             "--sim-landscape-height 0..150] [--sim-radius-scale 1..4]]\n",
             argv[0]);
     return 1;
   }
-  if (voxel_shadows_only) output_directory = argv[2];
+  if (voxel_shadows_only || shadow_cache_only || captured_motion_only) output_directory = argv[2];
   else if (argc >= 4) output_directory = argv[3];
   bool radius_requested = false;
   bool landscape_requested = false;
@@ -4521,8 +4648,10 @@ int main(int argc, char **argv) {
          SDL_GetGPUDeviceDriver(SDL_GetGPURendererDevice(renderer)));
   /* The ROM-free suite remains the default CTest entry. A frozen SIM capture
    * is independent and can be iterated without re-running orbital weather. */
-  if (!sim_town_snapshot && !voxel_shadows_only) TestSynthetic(renderer);
-  if (!sim_town_snapshot) TestVoxelShadows(renderer);
+  if (!sim_town_snapshot && !voxel_shadows_only && !shadow_cache_only)
+    TestSynthetic(renderer, captured_motion_only);
+  if (shadow_cache_only) TestShadowHullCameraChanges(renderer);
+  else if (!sim_town_snapshot && !captured_motion_only) TestVoxelShadows(renderer);
   if (argc >= 4) TestCaptured(renderer, argv[1], argv[2]);
   if (sim_town_snapshot)
     ArSdlRenderBackend_Destroy(&g_render_device);

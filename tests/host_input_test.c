@@ -159,8 +159,8 @@ bool InputMap_GamepadIsActive(void) {
 void InputMap_HandleEvent(const SDL_Event * event) {
   ++s_pad_events;
 }
-bool InputMap_TryHandleGameOnlyEvent(const SDL_Event *event) { return false; }
-bool InputMap_KeyHasHostBinding(int scancode) { return s_key_host_binding; }
+bool InputMap_TryHandleStreamEvent(const SDL_Event *event) { return false; }
+bool InputMap_KeyRequiresHandoff(int scancode) { return s_key_host_binding; }
 void InputMap_HandleKey(int scancode, bool pressed, bool repeated) {
   ++s_keys;
 }
@@ -506,30 +506,54 @@ int main(void) {
   const int keys_before_stream = s_keys;
   event = (SDL_Event){.type = SDL_EVENT_KEY_DOWN};
   event.key.key = SDLK_A; event.key.scancode = SDL_SCANCODE_A;
-  assert(HostInput_TryHandleGameOnlyEvent(&event));
+  assert(HostInput_TryHandleStreamEvent(&event, false));
   event.type = SDL_EVENT_KEY_UP;
-  assert(HostInput_TryHandleGameOnlyEvent(&event));
+  assert(HostInput_TryHandleStreamEvent(&event, false));
   assert(s_keys == keys_before_stream + 2);
   s_key_host_binding = true;
-  assert(!HostInput_TryHandleGameOnlyEvent(&event));
+  assert(!HostInput_TryHandleStreamEvent(&event, false));
   s_key_host_binding = false;
   const SDL_Keycode host_keys[] = {SDLK_ESCAPE, SDLK_P, SDLK_T, SDLK_F5,
-      SDLK_F7, SDLK_F9, SDLK_D, SDLK_C, SDLK_1, SDLK_PLUS};
+      SDLK_F7, SDLK_F9, SDLK_D, SDLK_C, SDLK_PLUS};
   for (unsigned i = 0; i < sizeof(host_keys)/sizeof(host_keys[0]); ++i) {
     event.type = SDL_EVENT_KEY_DOWN; event.key.key = host_keys[i];
-    assert(!HostInput_TryHandleGameOnlyEvent(&event));
+    assert(!HostInput_TryHandleStreamEvent(&event, false));
   }
   assert(s_keys == keys_before_stream + 2 && !HostInput_IsPaused() && !s_overlay);
   event.key.key = SDLK_A;
   s_pads = 1; s_pad_active = true;
-  assert(HostInput_TryHandleGameOnlyEvent(&event));
+  assert(HostInput_TryHandleStreamEvent(&event, false));
   assert(s_keys == keys_before_stream + 2); /* Suppressed presses stay suppressed. */
   event.type = SDL_EVENT_KEY_UP;
-  assert(HostInput_TryHandleGameOnlyEvent(&event));
+  assert(HostInput_TryHandleStreamEvent(&event, false));
   assert(s_keys == keys_before_stream + 3); /* Releases still get through. */
   s_overlay = true;
-  assert(!HostInput_TryHandleGameOnlyEvent(&event));
+  assert(!HostInput_TryHandleStreamEvent(&event, false));
   s_overlay = false;
+  const int runner_reads = s_runner_camera_reads;
+  event = (SDL_Event){.type = SDL_EVENT_MOUSE_MOTION};
+  assert(HostInput_TryHandleStreamEvent(&event, false));
+  event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+  event.button.button = SDL_BUTTON_RIGHT;
+  assert(HostInput_TryHandleStreamEvent(&event, false) && s_diorama_drag);
+  event.type = SDL_EVENT_MOUSE_MOTION;
+  assert(HostInput_TryHandleStreamEvent(&event, false));
+  event.type = SDL_EVENT_MOUSE_WHEEL;
+  event.wheel.y = 2;
+  assert(HostInput_TryHandleStreamEvent(&event, false));
+  event.type = SDL_EVENT_MOUSE_BUTTON_UP;
+  event.button.button = SDL_BUTTON_RIGHT;
+  assert(HostInput_TryHandleStreamEvent(&event, false) && !s_diorama_drag);
+  event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+  event.button.button = SDL_BUTTON_MIDDLE;
+  assert(!HostInput_TryHandleStreamEvent(&event, false));
+  event.type = SDL_EVENT_WINDOW_RESIZED;
+  assert(!HostInput_TryHandleStreamEvent(&event, false));
+  s_manual = true;
+  event.type = SDL_EVENT_MOUSE_MOTION;
+  assert(!HostInput_TryHandleStreamEvent(&event, false));
+  s_manual = false;
+  assert(s_runner_camera_reads == runner_reads);
   HostInput_EndSession();
   puts("host input: modal routing, device arbitration and releases passed");
   return 0;

@@ -39,6 +39,8 @@ static const char *const kNames[kPerformanceStage_Count] = {
   "action DOF", "action submit", "action callback",
   "settings write*", "battery save", "music start",
   "terrain rebuild", "terrain samples", "globe grid bake",
+  "globe surface", "globe water", "voxel atlas upload", "voxel palettes",
+  "shadow actors", "shadow voxels", "shadow blur", "shadow target", "shadow hulls",
 };
 
 const char *PerformanceMetrics_StageName(PerformanceStage stage) {
@@ -102,7 +104,8 @@ static bool SameContext(const PerformanceContext *a, const PerformanceContext *b
   return a->scene == b->scene && a->host_mode == b->host_mode &&
       a->map_group == b->map_group && a->map_number == b->map_number &&
       a->width == b->width && a->height == b->height &&
-      a->refresh_mode == b->refresh_mode && a->limit_fps == b->limit_fps && a->vsync == b->vsync;
+      a->refresh_mode == b->refresh_mode && a->limit_fps == b->limit_fps && a->vsync == b->vsync &&
+      a->pacing_source == b->pacing_source;
 }
 void PerformanceMetrics_SetContext(const PerformanceContext *context) {
   if (!PerformanceMetrics_Enabled() || !context || SameContext(context, &s_window.context)) return;
@@ -140,14 +143,20 @@ static void Publish(uint64_t now) {
   for (int i = 0; i < kPerformanceCount_Count; i++)
     out->counts[i] = (double)s_window.counts[i] / s_window.frames;
   if (s_log) {
+    if (out->counts[kPerformanceCount_NativePresents] > 0)
+      fprintf(stderr, "[pipeline-cadence] native=%.3f holds=%.3f skipped-ticks=%.3f (per-present; holds depend on refresh)\n",
+          out->counts[kPerformanceCount_NativePresents],
+          out->counts[kPerformanceCount_SourceHolds],
+          out->counts[kPerformanceCount_SourceSkips]);
     fprintf(
         stderr,
         "[pipeline-perf] scene=%s host=%d map=%02x/%02x output=%dx%d frames=%" PRIu64
-        " fps=%.1f cadence-ms=%.3f p95=%.3f max=%.3f refresh=%d vsync=%d cap=%d gpu-ms=unavailable\n",
+        " fps=%.1f cadence-ms=%.3f p95=%.3f max=%.3f refresh=%d vsync=%d cap=%d pacing-source=%d gpu-ms=unavailable\n",
         PerformanceMetrics_SceneName(out->context.scene), out->context.host_mode,
         out->context.map_group, out->context.map_number, out->context.width, out->context.height,
         out->presents, out->fps, out->frame_mean_ms, out->frame_p95_ms, out->frame_max_ms,
-        out->context.refresh_mode, (int)out->context.vsync, out->context.limit_fps);
+        out->context.refresh_mode, (int)out->context.vsync, out->context.limit_fps,
+        out->context.pacing_source);
     for (int i = 0; i < kPerformanceStage_Count; i++) if (out->stages[i].calls)
       fprintf(stderr, "[pipeline-stage] %s mean-ms=%.4f peak-call-ms=%.4f calls=%" PRIu64 "\n",
           kNames[i], out->stages[i].mean_ms, out->stages[i].maximum_ms, out->stages[i].calls);
@@ -182,6 +191,9 @@ static void Publish(uint64_t now) {
         out->counts[kPerformanceCount_GpuReuse], out->counts[kPerformanceCount_GeometryPublish],
         out->counts[kPerformanceCount_GeometryOptOut], out->counts[kPerformanceCount_GeometryLimit],
         out->counts[kPerformanceCount_GeometryRejected]);
+    fprintf(stderr, "[effect-projection] fallback-events=%.3f fallback-frames=%.3f (per-present; exceptional failures only)\n",
+        out->counts[kPerformanceCount_EffectProjectionFallbacks],
+        out->counts[kPerformanceCount_EffectProjectionFallbackFrames]);
   }
   memset(s_window.elapsed, 0, sizeof(s_window.elapsed));
   memset(s_window.maximum, 0, sizeof(s_window.maximum));

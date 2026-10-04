@@ -32,6 +32,7 @@ typedef DioramaCameraPose DioramaCamera;
 static DioramaCamera s_diorama_cam;
 static float s_diorama_auto_distance = 5.0f;
 static bool s_diorama_settings_dirty;
+static bool s_diorama_pose_dirty;
 static uint64_t s_diorama_settings_dirty_at;
 static bool s_diorama_dragging;
 static DioramaCameraManualState s_diorama_manual;
@@ -47,6 +48,7 @@ static float Clampf(float v, float lo, float hi) {
 
 void Diorama_SeedCameraFromSettings(void) {
   s_diorama_manual = (DioramaCameraManualState){0};
+  s_diorama_pose_dirty = false;
   s_diorama_cam.tilt_x =
       (float)g_settings.diorama_tilt_x_mrad / (float)kPermilleScale;
   s_diorama_cam.tilt_y =
@@ -60,14 +62,7 @@ void Diorama_CaptureCameraPresentationState(
   if (!state) return;
   *state = (DioramaCameraPresentationState){
     .mode = g_settings.diorama_camera_mode,
-    .free_pose = {
-      .tilt_x =
-          (float)g_settings.diorama_tilt_x_mrad / (float)kPermilleScale,
-      .tilt_y =
-          (float)g_settings.diorama_tilt_y_mrad / (float)kPermilleScale,
-      .distance =
-          (float)g_settings.diorama_distance_x100 / (float)kPercentScale,
-    },
+    .free_pose = s_diorama_cam,
     .dynamic_baseline = {
       .tilt_x =
           (float)g_settings.diorama_dyncam_baseline_tilt_x_mrad /
@@ -126,12 +121,8 @@ void Diorama_AdjustCamera(float d_yaw, float d_pitch, float d_zoom) {
     s_diorama_cam.distance = Clampf(base + d_zoom,
                                     kDioramaDistMin, kDioramaDistMax);
   }
-  g_settings.diorama_tilt_x_mrad =
-      (int)(s_diorama_cam.tilt_x * (float)kPermilleScale);
-  g_settings.diorama_tilt_y_mrad =
-      (int)(s_diorama_cam.tilt_y * (float)kPermilleScale);
-  g_settings.diorama_distance_x100 =
-      (int)(s_diorama_cam.distance * (float)kPercentScale);
+  /* Presentation owns this pose; the producer may be reading settings. */
+  s_diorama_pose_dirty = true;
   s_diorama_settings_dirty = true;
   s_diorama_settings_dirty_at = HostClock_Milliseconds();
 }
@@ -178,6 +169,16 @@ void Diorama_ResetCamera(void) {
 }
 
 void Diorama_FlushSettingsIfDirty(void) {
+  /* Called with runner ownership returned, including before settings UI. */
+  if (s_diorama_pose_dirty) {
+    g_settings.diorama_tilt_x_mrad =
+        (int)(s_diorama_cam.tilt_x * (float)kPermilleScale);
+    g_settings.diorama_tilt_y_mrad =
+        (int)(s_diorama_cam.tilt_y * (float)kPermilleScale);
+    g_settings.diorama_distance_x100 =
+        (int)(s_diorama_cam.distance * (float)kPercentScale);
+    s_diorama_pose_dirty = false;
+  }
   if (s_diorama_settings_dirty && !s_diorama_dragging &&
       HostClock_Milliseconds() - s_diorama_settings_dirty_at > 500) {
     char settings_path[kHostPathCapacity];

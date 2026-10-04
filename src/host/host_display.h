@@ -99,6 +99,7 @@ bool HostDisplay_TryRepresentFrame(float alpha,
  * includes any scheduled submit wait; submit_start_ns separates backend work. */
 typedef struct HostDisplayPresentTrace {
   uint64_t deadline_ns, draw_start_ns, draw_ns, swap_ns, vector_wait_ns;
+  uint64_t draw_cpu_ns;
   uint64_t submit_deadline_ns, submit_start_ns, submit_wait_ns;
   uint64_t backend_flush_ns, backend_acquire_ns, backend_submit_ns;
 } HostDisplayPresentTrace;
@@ -111,6 +112,9 @@ uint64_t HostDisplay_NextPresentationDeadline(void);
 /* Diagnostic early preparation samples the intended output time, preserving
  * interpolation phase when drawing ahead of that time. Otherwise returns now. */
 uint64_t HostDisplay_PresentationSampleTime(uint64_t now_ns);
+uint64_t HostDisplay_NativeFrameSampleTime(uint64_t now_ns);
+/* 0 immediate, 1 renderer refresh, 2 software deadline, 3 VSync probe. */
+int HostDisplay_PacingSource(void);
 /* Rolling completed backend presents per second. */
 double HostDisplay_FramesPerSecond(void);
 

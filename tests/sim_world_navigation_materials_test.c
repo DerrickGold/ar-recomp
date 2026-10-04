@@ -1617,7 +1617,27 @@ static void TestSkyCloudVolume(void) {
   free(again);
 }
 
+static void TestMountainSourceInvalidation(void) {
+  SimWorldNavigationTownGround a = {.enabled_town_mask = 1};
+  memset(a.terrain[0], 8, sizeof(a.terrain[0]));
+  a.terrain[0][0] = 0x78;
+  SimWorldNavigationTownGround b = a;
+  b.terrain[0][1] = 0xE1;
+  b.object_rows[0][0] = 2;
+  b.native_rows[0][0] = 2;
+  assert(SimWorldNavigationMountains_SameSources(&a, &b));
+  b.object_rows[0][0] |= 1; /* Occupancy on mountain sources changes clipping. */
+  assert(!SimWorldNavigationMountains_SameSources(&a, &b));
+  b = a; b.terrain[0][0] = 8;
+  assert(!SimWorldNavigationMountains_SameSources(&a, &b));
+  b = a; b.development_tier[0]++;
+  assert(!SimWorldNavigationMountains_SameSources(&a, &b));
+  b = a; b.enabled_town_mask = 0;
+  assert(!SimWorldNavigationMountains_SameSources(&a, &b));
+}
+
 int main(int argc, char **argv) {
+  TestMountainSourceInvalidation();
   TestMountainTileSampling();
   TestSkyCloudBounds();
   TestSkyCloudVolume();

@@ -174,6 +174,7 @@ float SimBackgroundVoxelRegion_AuthoredHeight(
     case kSimBackgroundVoxel_Shrub: return 13.6f;
     case kSimBackgroundVoxel_Boulder: return 8.0f;
     case kSimBackgroundVoxel_Rocks: return 4.5f;
+    case kSimBackgroundVoxel_AnimalPen: return 2.0f;
     /* The three unique landmarks each own a 2x2 plot, so their heights are
      * measured against a 32-pixel base rather than the old oversized cover. */
     case kSimBackgroundVoxel_StoryTree: return 30.0f;

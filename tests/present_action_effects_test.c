@@ -1259,6 +1259,7 @@ static void AuthoredOnlyComposition(void) {
 
 static uint32_t source_hash;
 static unsigned source_count, source_submissions;
+static uint64_t source_revision;
 static const DioramaProjection *source_projection;
 static float source_brightness;
 
@@ -1271,6 +1272,7 @@ static bool InspectSourcePacket(ArRenderDevice *device, const ActionEffectSource
   source_projection = projection;
   source_brightness = brightness;
   source_count = batch->count;
+  source_revision = batch->revision;
   source_hash = 2166136261u;
   const uint8_t *bytes = (const uint8_t *)batch->primitives;
   for (size_t i = 0; i < batch->count * sizeof(*batch->primitives); ++i)
@@ -1322,6 +1324,54 @@ static void SourcePacketCaptureLifetime(void) {
   PresentActionEffects_Reset(&device);
 }
 
+static void SourceParticleViewLifetime(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b, &device);
+  LavaFrame();
+  frame.action_effects = (ActionEffectFrame){0};
+  frame.action_scene_effects = (ActionSceneEffectFrame){.authored_count=1};
+  frame.bg2_camera_x = frame.bg2_camera_y = 7000;
+  frame.action_scene_effects.authored[0] = (ActionEffectInstance){
+    .world_x=8000,.world_y=8000,.kind=kActionEffect_AuthoredParticleArea,
+    .flags=kActionEffectFlag_Visible|kActionEffectFlag_StaticAnchor,
+    .render_layer=kActionEffectRenderLayer_WorldOverlay,
+    .projection_plane=kActionEffectProjectionPlane_Bg2,
+    .tuning={.intensity=1,.color=0xdde6ff,.active=1},
+    .particle_count=8,.particle_lifetime=240,.pulse_ticks=37,
+    .particle_style={.active=1,.size_min=.35f,.size_max=.75f,.travel_y=32,.spread=1},
+    .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-8000,-8000,8000,8000}},
+  };
+  DioramaProjection projection={.valid=true,.bg2_skybox={.count=2,.active_band=0,
+      .bands={{0,0,512,224,0,.5f},{0,224,512,448,.5f,1}}}};
+  source_submissions=0;
+  PresentActionEffects_InvalidateSourcePackets();
+  PresentActionEffects_DrawWithSource(&device,&frame,viewport,&projection,InspectSourcePacket);
+  assert(source_submissions==1 && source_count && source_count<512);
+  uint64_t revision=source_revision;
+  const uint32_t hash=source_hash;
+  projection.bg2_skybox.active_band=1;
+  PresentActionEffects_DrawWithSource(&device,&frame,viewport,&projection,InspectSourcePacket);
+  assert(source_submissions==2 && source_revision==revision && source_hash==hash);
+  /* Reprojection alone does not change which world cells are needed. */
+  projection.output_width=1280;
+  projection.output_height=800;
+  projection.matrix[0]=.85f;
+  projection.matrix[8]=.15f;
+  PresentActionEffects_DrawWithSource(&device,&frame,viewport,&projection,InspectSourcePacket);
+  assert(source_revision==revision && source_hash==hash);
+  /* Resize/zoom while the capture is paused: new source cells must be emitted.
+   * The ordinary light packet test above still reuses geometry across views. */
+  projection.bg2_skybox.bands[0].x1=1024;
+  projection.bg2_skybox.bands[1].x1=1024;
+  PresentActionEffects_DrawWithSource(&device,&frame,viewport,&projection,InspectSourcePacket);
+  assert(source_submissions==4 && source_revision!=revision && source_hash!=hash);
+  revision=source_revision;
+  PresentActionEffects_DrawWithSource(&device,&frame,viewport,&projection,InspectSourcePacket);
+  assert(source_submissions==5 && source_revision==revision);
+  PresentActionEffects_Reset(&device);
+}
+
 static void AutoExpandedMask(void) {
   Backend b;
   ArRenderDevice device;
@@ -1349,9 +1399,37 @@ static void AutoExpandedMask(void) {
   PresentActionEffects_Reset(&device);
 }
 
+static void DetachedFireballSmokeComposition(void) {
+  Backend b;
+  ArRenderDevice device;
+  Init(&b, &device);
+  LavaFrame();
+  frame.action_effects = (ActionEffectFrame){0};
+  frame.action_scene_effects = (ActionSceneEffectFrame){0};
+  frame.action_environmental_effects = frame.action_effect_lighting = false;
+  frame.action_effect_particles = true;
+  frame.action_scene_effects.fireball_smoke.count = 1;
+  frame.action_scene_effects.fireball_smoke.puffs[0] = (ActionFireballSmokePuff){
+    .seed = 42, .x = 128, .y = 120, .age = 40, .priority = 2,
+  };
+  PresentActionEffects_Draw(&device, &frame, viewport, NULL);
+  assert(b.geometries == 1 && b.geometry_blends[0] == kArRenderBlendMode_Alpha);
+  frame.action_effect_particles = false;
+  PresentActionEffects_Draw(&device, &frame, viewport, NULL);
+  assert(b.geometries == 1);
+  frame.action_effect_particles = true;
+  const unsigned before = source_submissions;
+  PresentActionEffects_InvalidateSourcePackets();
+  PresentActionEffects_DrawWithSource(&device, &frame, viewport, NULL, InspectSourcePacket);
+  assert(source_submissions == before + 1 && source_count > 0);
+  PresentActionEffects_Reset(&device);
+}
+
 int main(void) {
+  DetachedFireballSmokeComposition();
   AutoExpandedMask();
   SourcePacketCaptureLifetime();
+  SourceParticleViewLifetime();
   AuthoredOnlyComposition();
   TestEffectMasterBrightness();
   SkyboxWaterfallComposition();

@@ -2,6 +2,8 @@
 
 #include <limits.h>
 #include <stddef.h>
+#include <string.h>
+#include "sim/sim_world_map.h"
 
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
@@ -27,13 +29,13 @@
 /* Both produced frames and paused redraws resolve one coherent set of
  * settings and camera controls before annotation. Keep that mapping with the
  * SIM producer; the frame-slot transport does not interpret SIM policy. */
-static Sim3DTuning CaptureTuning(void) {
+static Sim3DTuning CaptureTuning(bool owned) {
   int sim_margin_left = 0, sim_margin_right = 0;
   int sim_margin_top = 0, sim_margin_bottom = 0;
   ActRaiser_SimSpriteMargins(&sim_margin_left, &sim_margin_right,
                              &sim_margin_top, &sim_margin_bottom);
-  Sim3DCameraPresentationState sim_camera;
-  Sim3DCamera_CapturePresentationState(&sim_camera);
+  Sim3DCameraPresentationState sim_camera = {0};
+  if (!owned) Sim3DCamera_CapturePresentationState(&sim_camera);
   return (Sim3DTuning){
       .pitch_mrad = sim_camera.pitch_mrad,
       .yaw_mrad = sim_camera.yaw_mrad,
@@ -88,15 +90,20 @@ static Sim3DTuning CaptureTuning(void) {
       .sprite_margin_bottom = sim_margin_bottom };
 }
 
-static void CaptureMetadata(SimFrameData *sim) {
-  SimRenderMetadata_CaptureFrame(
+static void CaptureMetadata(SimFrameData *sim, bool owned, uint32_t underlay_serial) {
+  if (owned) SimRenderMetadata_CaptureFrameWithUnderlay(
+      sim, g_ram, g_settings.sim3d_mode, false,
+      Settings_Sim3DRequestedFeatures(), g_settings.sim3d_diagnostic_layers,
+      Sim3D_ImplementedFeatures(), underlay_serial);
+  else SimRenderMetadata_CaptureFrame(
       sim, g_ram, g_settings.sim3d_mode,
       g_settings.sim3d_world_navigation,
       Settings_Sim3DRequestedFeatures(),
       g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
-  SimRenderMetadata_CaptureSkyPalaceFrame(sim, g_ram,
+  if (!owned) SimRenderMetadata_CaptureSkyPalaceFrame(sim, g_ram,
       g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
-  Sim3DTuning tuning = CaptureTuning();
+  if (!owned && sim->view != kSimView_None) Sim3DCamera_SetPresentationScene(sim);
+  Sim3DTuning tuning = CaptureTuning(owned || sim->view == kSimView_None);
   Sim3D_AnnotateFrame(sim, &tuning);
   /* Match the visit's active selection AND donor availability. Requested
    * settings may be pending, and a missing donor leaves the native BG plain. */
@@ -117,7 +124,7 @@ static void CaptureMetadata(SimFrameData *sim) {
     if (world_artwork & (1u << kArRegionalArtwork_PyramidDetail))
       object->flags |= kSimBackgroundVoxel_PyramidEye;
   }
-  SimWorldNavigationCapture_Capture(sim, RtlGameRunner());
+  if (!owned) SimWorldNavigationCapture_Capture(sim, RtlGameRunner());
 }
 
 static void CaptureCanvasSerials(SimFrameData *sim) {
@@ -126,7 +133,7 @@ static void CaptureCanvasSerials(SimFrameData *sim) {
 }
 
 void SimFrameCapture_RefreshMetadata(SimFrameData *sim) {
-  CaptureMetadata(sim);
+  CaptureMetadata(sim, false, 0);
   CaptureCanvasSerials(sim);
 }
 
@@ -155,9 +162,9 @@ static bool CaptureTownCanvasPpuView(SrPpuStateSnapshot *ppu,
       cgram->lifetime_generation == ppu->lifetime_generation;
 }
 
-/* Producer-side work is owned here, not by the pure SIM classifier or the
- * render backend. This group is independent of presentation's helpers; both
- * stages synchronously join, so their jobs cannot oversubscribe one another. */
+/* Resource preparation owns this group. During town streaming it runs only
+ * on the presentation owner, independently of producer PPU helpers. Each
+ * dispatch joins before the canvas can be uploaded or another packet prepared. */
 static HostParallelWork *s_town_pixel_work;
 static bool s_town_pixel_work_attempted;
 
@@ -171,6 +178,19 @@ static void DispatchTownPixelRows(void *context, size_t count,
   HostParallelWork_Run(s_town_pixel_work, count, 64, range, work);
 }
 
+static void TraceFrame(const SimFrameData *sim) {
+  /* g_pixels is bound apron-wide; offset past the apron so the trace sees
+   * the authentic frame at column 0, as it always has. */
+  const size_t trace_pitch =
+      ActionApron_SurfacePitch(g_snes_width, SR_PPU_OBJ_APRON);
+  if (trace_pitch <= INT_MAX) {
+    SimRenderMetadata_TraceFrame(
+        (uint32)snes_frame_counter, sim,
+        g_pixels + ActionApron_DisplayOffset(SR_PPU_OBJ_APRON),
+        g_snes_width, g_snes_height, (int)trace_pitch);
+  }
+}
+
 void SimFrameCapture_Produce(SimFrameData *sim) {
   /* Own the developed world tilemap instead of observing $7E:C000, which acts
    * and towns both reuse as unrelated scratch. This runs only on the game
@@ -182,7 +202,7 @@ void SimFrameCapture_Produce(SimFrameData *sim) {
   pipeline = PerformanceMetrics_Begin(kPerformance_Metadata);
   SimPhase0Trace_Frame((uint32)snes_frame_counter, g_ram,
                        RtlGameRunner());
-  CaptureMetadata(sim);
+  CaptureMetadata(sim, false, 0);
   PerformanceMetrics_End(pipeline);
   pipeline = PerformanceMetrics_Begin(kPerformance_TownCanvas);
   /* This site runs for every drawn frame, including headless runs that never
@@ -203,20 +223,54 @@ void SimFrameCapture_Produce(SimFrameData *sim) {
   PerformanceMetrics_End(pipeline);
   Sim3D_LogViewTransition(sim);
   SceneInspector_SetSimFrameData(sim);
-  /* g_pixels is bound apron-wide; offset past the apron so the trace sees
-   * the authentic frame at column 0, as it always has. */
-  const size_t trace_pitch =
-      ActionApron_SurfacePitch(g_snes_width, SR_PPU_OBJ_APRON);
-  if (trace_pitch <= INT_MAX) {
-    SimRenderMetadata_TraceFrame(
-        (uint32)snes_frame_counter, sim,
-        g_pixels + ActionApron_DisplayOffset(SR_PPU_OBJ_APRON),
-        g_snes_width, g_snes_height, (int)trace_pitch);
-  }
+  TraceFrame(sim);
 }
 
 void SimFrameCapture_Shutdown(void) {
   HostParallelWork_Destroy(s_town_pixel_work);
   s_town_pixel_work = NULL;
   s_town_pixel_work_attempted = false;
+}
+
+void SimFrameCapture_ProduceOwned(SimFrameData *sim, SimFrameInputs *inputs,
+                                 uint32_t underlay_serial) {
+  PerformanceScope scope = PerformanceMetrics_Begin(kPerformance_Metadata);
+  SimPhase0Trace_Frame((uint32)snes_frame_counter, g_ram, RtlGameRunner());
+  CaptureMetadata(sim, true, underlay_serial);
+  PerformanceMetrics_End(scope);
+  SrBorrowedU16Span vram, cgram;
+  inputs->ppu_valid = Sim3D_TownCanvasNeedsPpuView(sim) &&
+      CaptureTownCanvasPpuView(&inputs->ppu, &vram, &cgram);
+  memcpy(inputs->wram, g_ram, sizeof(inputs->wram));
+  if (inputs->ppu_valid) {
+    memcpy(inputs->vram, vram.data, sizeof(inputs->vram));
+    memcpy(inputs->cgram, cgram.data, sizeof(inputs->cgram));
+  }
+  Sim3D_LogViewTransition(sim);
+  TraceFrame(sim);
+}
+
+void SimFrameCapture_PrepareOwned(SimFrameData *sim, const SimFrameInputs *inputs) {
+  if (!sim || !inputs) return;
+  PerformanceScope scope = PerformanceMetrics_Begin(kPerformance_WorldMap);
+  SimWorldMap_BuildFromSnapshot(inputs->wram);
+  sim->underlay_serial = SimWorldMap_DevelopedAvailable() ? SimWorldMap_Serial() : 0;
+  PerformanceMetrics_End(scope);
+  scope = PerformanceMetrics_Begin(kPerformance_TownCanvas);
+  const SrBorrowedU16Span vram = {
+    .struct_size = sizeof(vram), .region = SR_MEMORY_VRAM,
+    .data = inputs->vram, .element_count = SR_PPU_VRAM_WORD_COUNT,
+    .lifetime_generation = inputs->ppu.lifetime_generation,
+  };
+  const SrBorrowedU16Span cgram = {
+    .struct_size = sizeof(cgram), .region = SR_MEMORY_CGRAM,
+    .data = inputs->cgram, .element_count = SR_PPU_CGRAM_WORD_COUNT,
+    .lifetime_generation = inputs->ppu.lifetime_generation,
+  };
+  Sim3D_RenderTownCanvas(sim, inputs->wram,
+      inputs->ppu_valid ? &inputs->ppu : NULL,
+      inputs->ppu_valid ? &vram : NULL, inputs->ppu_valid ? &cgram : NULL,
+      DispatchTownPixelRows, NULL);
+  CaptureCanvasSerials(sim);
+  PerformanceMetrics_End(scope);
 }

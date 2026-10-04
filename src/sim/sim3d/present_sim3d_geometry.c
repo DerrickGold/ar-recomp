@@ -14,12 +14,12 @@
 
 /* Cull proximity at a captured-texture point, 0..1. The conversion back to
  * the emitter's biased coordinates keeps the visual boundary identical to the
- * cull predicate instead of maintaining a second approximation of it. */
+ * cull predicate. Extra presentation rows do not move the native emitter. */
 float SimCullProximityAt(const SimCullFade *fade, float texture_x,
-                                float texture_y, ArRenderRectI source) {
+                         float texture_y) {
   if (!fade) return 0.0f;
   int16_t biased_x = (int16_t)(texture_x - (float)fade->screen_x0 + 16.0f);
-  int16_t biased_y = (int16_t)(texture_y - (float)source.y + 17.0f);
+  int16_t biased_y = (int16_t)(texture_y + 17.0f);
   return Sim3D_CullProximity(biased_x, biased_y, fade->margin_left,
                              fade->margin_right, fade->margin_top,
                              fade->margin_bottom, fade->lead,
@@ -74,10 +74,11 @@ enum {
 };
 
 void DrawSimGroundPlane(ArRenderTexture texture, ArRenderRectI source,
+                        int capture_height,
                         ArRenderRectI viewport, const float matrix[16],
                         const SimCullFade *fade) {
   if (!ArRenderTexture_IsValid(texture) ||
-      source.w <= 0 || source.h <= 0 ||
+      source.w <= 0 || source.h <= 0 || capture_height <= 0 ||
       viewport.w <= 0 || viewport.h <= 0)
     return;
 
@@ -88,19 +89,22 @@ void DrawSimGroundPlane(ArRenderTexture texture, ArRenderRectI source,
   static ArRenderVertex2D vertices[kSimGroundVertexCount];
   static int32_t indices[kSimGroundIndexCount];
   int vertex_count = 0, index_count = 0;
+  const float fy0 = -(float)source.y / source.h;
+  const float fy_scale = (float)capture_height / source.h;
 
   for (int row = 0; row <= kSimGroundRows; row++) {
     float fy = (float)row / (float)kSimGroundRows;
+    const float texture_y = fy * capture_height;
+    const float world_y = 0.5f - (fy0 + fy * fy_scale);
     for (int column = 0; column <= kSimGroundColumns; column++) {
       float fx = (float)column / (float)kSimGroundColumns;
       float texture_x = source.x + fx * source.w;
-      float texture_y = source.y + fy * source.h;
       Scene3DPoint projected;
       if (!Scene3D_ProjectWorldPoint(
-              matrix, (fx - 0.5f) * aspect, 0.5f - fy, 0.0f,
+              matrix, (fx - 0.5f) * aspect, world_y, 0.0f,
               viewport.w, viewport.h, &projected))
         return;
-      float away = SimCullProximityAt(fade, texture_x, texture_y, source);
+      float away = SimCullProximityAt(fade, texture_x, texture_y);
       float bright = fade ? 1.0f - away * fade->dim : 1.0f;
       float extent_alpha =
           SimGroundExtentAlphaAt(fade, texture_x, texture_y);

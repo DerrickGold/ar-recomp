@@ -185,7 +185,33 @@ static void TestFacing(FrameSlot *slot, SimSceneProjection *scene) {
   scene->globe = NULL;
 }
 
+static void TestHudAtlasOwnership(void) {
+  static FrameSlot slot;
+  SimRenderObject object = {.tier = kSimRecordTier_Fixed, .oam_first = 11, .oam_count = 4};
+  /* Broad scene claims must not hide ordinary menu artwork. */
+  slot.overlay_captures[kFrameSlotOverlay_Obj].oamCount = 128;
+  assert(!SimObjectIsPromotedHud(&slot, &object));
+  slot.hud_icon = (HudIconFrame){.first = 11, .count = 4, .scene_removed = true};
+  assert(SimObjectIsPromotedHud(&slot, &object));
+  /* Retained metadata is enough, even after borrowed pixels are released. */
+  slot.overlay_captures[kFrameSlotOverlay_Obj].oamCount = 0;
+  assert(SimObjectIsPromotedHud(&slot, &object));
+  object.oam_first = 15;
+  assert(!SimObjectIsPromotedHud(&slot, &object));
+  object.oam_first = 10;
+  assert(!SimObjectIsPromotedHud(&slot, &object));
+  object.oam_first = 11;
+  object.oam_count = slot.hud_icon.count = 1;
+  assert(SimObjectIsPromotedHud(&slot, &object));
+  slot.hud_icon.scene_removed = false;
+  assert(!SimObjectIsPromotedHud(&slot, &object));
+  slot.hud_icon.scene_removed = true;
+  object.tier = kSimRecordTier_World;
+  assert(!SimObjectIsPromotedHud(&slot, &object));
+}
+
 int main(void) {
+  TestHudAtlasOwnership();
   static FrameSlot slot;
   const float matrix[16] = {0};
   const Scene3DCamera camera = {.fov_y = .4f};

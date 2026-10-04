@@ -165,23 +165,24 @@ static bool OracleComparisonEnabled(void) {
   return enabled;
 }
 
-static bool BuildTilemapHle(const uint8_t *baseline, uint8_t *out) {
+static bool BuildTilemapHle(const uint8_t *wram, const uint8_t *baseline, uint8_t *out,
+                            bool compare_oracle) {
   if (!s_rom_tables_available) return false;
 
   uint16_t enabled[kSimWorldMapTownCount];
   for (int town = 0; town < kSimWorldMapTownCount; town++) {
-    const uint8_t *word = g_ram + kDevelopmentTiers + town * 2;
+    const uint8_t *word = wram + kDevelopmentTiers + town * 2;
     enabled[town] = (uint16_t)(word[0] | ((uint16_t)word[1] << 8));
   }
   const uint8_t (*town_maps)[kSimWorldMapTownCells] =
       (const uint8_t (*)[kSimWorldMapTownCells])
-          (g_ram + kOverlaySource);
+          (wram + kOverlaySource);
   if (!SimWorldMap_ComposeDeveloped(
-          out, baseline, town_maps, enabled, g_ram[kWorldStateFlags],
+          out, baseline, town_maps, enabled, wram[kWorldStateFlags],
           &s_rom_tables))
     return false;
 
-  if (!OracleComparisonEnabled()) return true;
+  if (!compare_oracle) return true;
   if (!BuildTilemapOracle(baseline, s_oracle_tilemap)) {
     fprintf(stderr, "[sim-worldmap] HLE oracle call failed\n");
     return false;
@@ -205,25 +206,26 @@ static bool BuildTilemapHle(const uint8_t *baseline, uint8_t *out) {
   return false;
 }
 
-static bool InputsChanged(void) {
+static bool InputsChanged(const uint8_t *wram) {
   return !s_have_cached_inputs ||
-      s_cached_world_flag != (uint8)(g_ram[kWorldStateFlags] & 1) ||
-      memcmp(s_cached_tiers, g_ram + kDevelopmentTiers,
+      s_cached_world_flag != (uint8)(wram[kWorldStateFlags] & 1) ||
+      memcmp(s_cached_tiers, wram + kDevelopmentTiers,
              sizeof(s_cached_tiers)) != 0 ||
-      memcmp(s_cached_source, g_ram + kOverlaySource,
+      memcmp(s_cached_source, wram + kOverlaySource,
              sizeof(s_cached_source)) != 0;
 }
 
-static void CacheInputs(void) {
-  s_cached_world_flag = (uint8)(g_ram[kWorldStateFlags] & 1);
-  memcpy(s_cached_tiers, g_ram + kDevelopmentTiers, sizeof(s_cached_tiers));
-  memcpy(s_cached_source, g_ram + kOverlaySource, sizeof(s_cached_source));
+static void CacheInputs(const uint8_t *wram) {
+  s_cached_world_flag = (uint8)(wram[kWorldStateFlags] & 1);
+  memcpy(s_cached_tiers, wram + kDevelopmentTiers, sizeof(s_cached_tiers));
+  memcpy(s_cached_source, wram + kOverlaySource, sizeof(s_cached_source));
   s_have_cached_inputs = true;
 }
 
-void SimWorldMap_BuildIfNeeded(bool sky_palace_enabled) {
-  const uint8 map_group = g_ram[kActRaiserWram_MapGroup];
-  const uint8 map_number = g_ram[kActRaiserWram_CurrentMap];
+static void BuildFromWram(const uint8_t *wram, bool sky_palace_enabled,
+                          bool compare_oracle) {
+  const uint8 map_group = wram[kActRaiserWram_MapGroup];
+  const uint8 map_number = wram[kActRaiserWram_CurrentMap];
   SimWorldMapBuildConsumer consumer = kBuildConsumer_None;
   if (ActRaiser_IsSimulationTown(map_group, map_number))
     consumer = kBuildConsumer_Town;
@@ -251,12 +253,13 @@ void SimWorldMap_BuildIfNeeded(bool sky_palace_enabled) {
    * towns so the underlay does not freeze when navigation is absent. */
   if (consumer == kBuildConsumer_WorldNavigation) {
     const uint16_t source =
-        (uint16_t)(g_ram[kWorldWaterAnimationSource] |
-                   ((uint16_t)g_ram[kWorldWaterAnimationSource + 1] << 8));
+        (uint16_t)(wram[kWorldWaterAnimationSource] |
+                   ((uint16_t)wram[kWorldWaterAnimationSource + 1] << 8));
     SimWorldMap_SetWaterAnimationSource(source);
   } else {
     const uint16_t game_frame =
-        ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+        (uint16_t)(wram[kActRaiserWram_GameFrame] |
+                   ((uint16_t)wram[kActRaiserWram_GameFrame + 1] << 8));
     const unsigned phase =
         (((uint16_t)(game_frame - 1)) >> 3) & kWorldWaterFrameMask;
     SimWorldMap_SetWaterAnimationSource(
@@ -264,11 +267,11 @@ void SimWorldMap_BuildIfNeeded(bool sky_palace_enabled) {
                    phase * kWorldWaterSourceStride));
   }
 
-  if (s_previous_consumer == consumer && !InputsChanged()) return;
+  if (s_previous_consumer == consumer && !InputsChanged(wram)) return;
 
   const bool entry = s_previous_consumer != consumer;
   const uint8_t *baseline = SimWorldMap_Baseline();
-  if (!baseline || !BuildTilemapHle(baseline, s_built_tilemap)) {
+  if (!baseline || !BuildTilemapHle(wram, baseline, s_built_tilemap, compare_oracle)) {
     /* Do not cache a failed attempt. The next supported frame retries. */
     s_previous_consumer = kBuildConsumer_None;
     fprintf(stderr, "[sim-worldmap] HLE tilemap build failed; retrying\n");
@@ -276,7 +279,7 @@ void SimWorldMap_BuildIfNeeded(bool sky_palace_enabled) {
   }
 
   const int changed = SimWorldMap_PublishBuiltTilemap(s_built_tilemap);
-  CacheInputs();
+  CacheInputs(wram);
   s_previous_consumer = consumer;
   const char *reason = "development change";
   if (entry)
@@ -286,7 +289,16 @@ void SimWorldMap_BuildIfNeeded(bool sky_palace_enabled) {
   fprintf(stderr,
           "[sim-worldmap] HLE built from sim state at gf=%u after %s "
           "(%d tile%s changed)\n",
-          ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+          (uint16_t)(wram[kActRaiserWram_GameFrame] |
+                   ((uint16_t)wram[kActRaiserWram_GameFrame + 1] << 8)),
           reason,
           changed, changed == 1 ? "" : "s");
+}
+
+void SimWorldMap_BuildIfNeeded(bool sky_palace_enabled) {
+  BuildFromWram(g_ram, sky_palace_enabled, OracleComparisonEnabled());
+}
+
+void SimWorldMap_BuildFromSnapshot(const uint8_t *wram) {
+  if (wram) BuildFromWram(wram, false, false);
 }

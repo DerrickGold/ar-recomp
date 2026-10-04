@@ -2,6 +2,7 @@
  * existing SIM mountain recipe, with no game-state or backend dependencies. */
 #ifndef AR_PRESENT_SIM_GLOBE_MOUNTAINS_H
 #define AR_PRESENT_SIM_GLOBE_MOUNTAINS_H
+#include <stddef.h>
 #include "sim/world_nav/present_sim_globe_mapping.h"
 #include "sim/voxels/sim_background_voxel_renderer.h"
 
@@ -17,4 +18,8 @@ bool PresentSimGlobeMountains_CraterAnchor(SimBackgroundCraterAnchor *out);
 bool PresentSimGlobeMountains_AppendEffects(const float matrix[16], ArRenderRectI viewport,
     uint16_t frame, uint8_t detail, uint8_t style, PresentSimGlobeGroundSample sample);
 void PresentSimGlobeMountains_Reset(void);
+#if AR_SIM_GLOBE_TESTING
+/* Expensive ground evaluations in the latest source rebuild. */
+size_t PresentSimGlobeMountains_TestGroundSamples(void);
+#endif
 #endif

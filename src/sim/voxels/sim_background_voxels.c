@@ -57,6 +57,7 @@ enum {
   kStructureClassBridge = 1,
   kStructureClassWindmill = 3,
   kStructureClassFactory = 4,
+  kStructureClassAnimalPen = 5,
   kBridgeTileNorthSouth = 0xE1,
   kBridgeTileEastWest = 0xE2,
   /* Stock terrain beneath every audited bridge site. The live structure stamp
@@ -612,6 +613,26 @@ void SimBackgroundVoxels_ClassifyWithArtwork(uint8_t town, const uint8_t *wram,
       if (!ApplyStructureFrame(wram, kSimStructureVisual_Factory,
                                x, y, &object)) {
         RecordUnmatchedVisual(out, kSimStructureVisual_Factory,
+                              x, y, (uint8_t)slot);
+        continue;
+      }
+    } else if (structure_class == kStructureClassAnimalPen && town == 4) {
+      object.kind = kSimBackgroundVoxel_AnimalPen;
+      object.source_cells_w = object.source_cells_h = 2;
+      object.footprint_cells_w = object.footprint_cells_d = 2;
+      bool known = ApplyStructureFrame(wram, kSimStructureVisual_AnimalPen,
+                                       x, y, &object);
+      /* Match the whole enclosure before erasing its native art. The plot
+       * has no scaffold frame, and an unstamped record must remain flat. */
+      for (int row = 0; row < 2 && known; row++)
+        for (int column = 0; column < 2 && known; column++) {
+          uint16_t live[4];
+          LiveCellEntries(wram, x + column, y + row, live);
+          known = MetatileMatches(wram, kStructureDefinitionsWram,
+                                  (uint8_t)(0xE0 + row * 8 + column), live);
+        }
+      if (!known) {
+        RecordUnmatchedVisual(out, kSimStructureVisual_AnimalPen,
                               x, y, (uint8_t)slot);
         continue;
       }
@@ -1437,6 +1458,9 @@ static bool VisualFamilyForKind(uint8_t kind,
       return true;
     case kSimBackgroundVoxel_Factory:
       *family = kSimStructureVisual_Factory;
+      return true;
+    case kSimBackgroundVoxel_AnimalPen:
+      *family = kSimStructureVisual_AnimalPen;
       return true;
     default:
       return false;

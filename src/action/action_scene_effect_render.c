@@ -359,62 +359,6 @@ bool AppendSceneParticle(ActionEffectGeometryWriter *writer,
   return true;
 }
 
-/* A sword-beam sparkle is two crossed additive diamonds. Forty-eight fixed
- * glints independently materialize along the magical path rather than moving
- * backward like fire embers. The bounded extra capacity is explicit in
- * action_effect_render.h.
- * Projected local unit vectors keep the cross on the OBJ plane in Diorama
- * mode instead of leaving it screen-axis-aligned. */
-bool AppendSceneStarParticle(
-    ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
-    float local_x, float local_y, float size, ArRenderColorF color,
-    ActionEffectProjectPointFn project_point, void *userdata) {
-  if (writer->source) {
-    const bool ok = ActionEffectSource_Star(writer->source, effect, local_x, local_y, size, color);
-    writer->vertex_count = (int)writer->source->count;
-    return ok;
-  }
-  ArRenderPointF centre, sample_x, sample_y;
-  if (!project_point(userdata, effect, local_x, local_y, &centre) ||
-      !project_point(userdata, effect, local_x + 1.0f, local_y, &sample_x) ||
-      !project_point(userdata, effect, local_x, local_y + 1.0f, &sample_y))
-    return true;
-  float xx = sample_x.x - centre.x, xy = sample_x.y - centre.y;
-  float yx = sample_y.x - centre.x, yy = sample_y.y - centre.y;
-  const float x_length = hypotf(xx, xy), y_length = hypotf(yx, yy);
-  if (x_length < 0.001f || y_length < 0.001f) return true;
-  xx /= x_length;
-  xy /= x_length;
-  yx /= y_length;
-  yy /= y_length;
-  const float long_x = size * x_length;
-  const float long_y = size * 1.35f * y_length;
-  const float thin_x = fmaxf(0.45f, size * 0.23f * x_length);
-  const float thin_y = fmaxf(0.45f, size * 0.23f * y_length);
-  if (!Reserve(writer, 8, 12)) return false;
-  const int base = writer->vertex_count;
-  const ArRenderPointF points[] = {
-    {centre.x + xx * long_x, centre.y + xy * long_x},
-    {centre.x + yx * thin_y, centre.y + yy * thin_y},
-    {centre.x - xx * long_x, centre.y - xy * long_x},
-    {centre.x - yx * thin_y, centre.y - yy * thin_y},
-    {centre.x + yx * long_y, centre.y + yy * long_y},
-    {centre.x + xx * thin_x, centre.y + xy * thin_x},
-    {centre.x - yx * long_y, centre.y - yy * long_y},
-    {centre.x - xx * thin_x, centre.y - xy * thin_x},
-  };
-  for (unsigned i = 0; i < 8; i++)
-    writer->vertices[writer->vertex_count++] =
-        (ArRenderVertex2D){points[i], color, {0.0f, 0.0f}};
-  static const int kDiamonds[12] = {
-    0, 1, 2, 0, 2, 3,
-    4, 5, 6, 4, 6, 7,
-  };
-  for (unsigned i = 0; i < 12; i++)
-    writer->indices[writer->index_count++] = base + kDiamonds[i];
-  return true;
-}
-
 SceneParticleClock
 SceneParticleClockAt(const ActionEffectInstance *effect, unsigned visual_ticks,
                      unsigned index, SceneParticleLifetime timing) {
@@ -2028,6 +1972,93 @@ bool ActionSceneEffectRender_Build(const ActionSceneEffectFrame *frame,
                               particles_enabled, project_point, NULL, project_userdata, batch);
 }
 
+static bool BuildFireballSmoke(const ActionSceneEffectFrame *frame, bool particles,
+    ActionEffectProjectPointFn project_point, void *userdata,
+    ActionSceneEffectRenderBatch *batch) {
+  if (!batch) return false;
+  batch->vertex_count = batch->index_count = 0;
+  const ActionFireballSmoke *smoke = &frame->fireball_smoke;
+  if (smoke->count > kActionFireballSmokeMaxPuffs) return false;
+  if (!particles || !smoke->count) return true;
+  const unsigned field_index = ActionProjectileField_Index(kActionEffect_EnemyFireball);
+  if ((frame->projectile_fields_valid & (1u << field_index)) &&
+      !((unsigned)frame->projectile_fields[field_index].Components[0] & 2u)) return true;
+  if (!project_point) return false;
+  _Static_assert(2 * kActionFireballSmokeMaxPuffs *
+      kActionSceneEffectWaterfallMistCloudVertices <= kActionSceneEffectRenderMaxVertices,
+      "detached smoke must fit the existing geometry workspace");
+  _Static_assert(2 * kActionFireballSmokeMaxPuffs *
+      kActionSceneEffectWaterfallMistCloudIndices <= kActionSceneEffectRenderMaxIndices,
+      "detached smoke indices must fit the existing geometry workspace");
+  _Static_assert(2 * kActionFireballSmokeMaxPuffs *
+      (kActionSceneEffectWaterfallMistCloudIndices / 3) <= kActionSourceMaximumPrimitives,
+      "detached smoke must also fit the deferred triangle packet");
+  ActionEffectGeometryWriter writer = GeometryWriter(
+      batch->vertices, kActionSceneEffectRenderMaxVertices,
+      batch->indices, kActionSceneEffectRenderMaxIndices);
+  if (project_point == ActionEffectSource_ProjectPoint) writer.source = userdata;
+
+  const ActionMoonField *field = frame->moon_field_valid
+      ? &frame->moon_field : ActionMoonField_Bundled();
+  const ActionEffectInstance *moon = NULL;
+  if (frame->decoration_count > kActionSceneDecorationMaxInstances) return false;
+  for (unsigned i = 0; i < frame->decoration_count; ++i) {
+    const ActionEffectInstance *e = &frame->decorations[i];
+    if (e->kind == kActionEffect_BloodpoolMoonlight &&
+        (e->flags & kActionEffectFlag_Visible)) moon = e;
+  }
+  /* Sample the captured native moon-ray field before projection. CPU and
+   * deferred packets therefore share tint, even when a retained frame is
+   * reprojected by a moving Diorama camera. This is scattered moonlight on
+   * airborne smoke, without the foreground surface-shadow receiver mask. */
+  BloodpoolMoonProjection light = {
+    .origin = {moon ? moon->world_x + smoke->camera_delta_x : 0,
+               moon ? moon->world_y + smoke->camera_delta_y : 0},
+    .axis = {128, 0}, .vertical = {0, 128}, .orientation = 16384, .field = field,
+  };
+  const float transmission = moon && field && ((unsigned)field->Components[0] & 1u)
+      ? BloodpoolCloudTransmission(field, smoke->clock) : 0;
+  for (unsigned i = 0; i < smoke->count; ++i) {
+    const ActionFireballSmokePuff *p = &smoke->puffs[i];
+    if (p->age >= kActionFireballSmokeLifetime || p->priority >= kActionEffectObjPriorityCount)
+      continue;
+    const float age = p->age, t = age / kActionFireballSmokeLifetime;
+    const float phase = 6.2831853f * HashUnit(p->seed);
+    const float x = .045f * age + 5 * t * sinf(age * .045f + phase);
+    const float y = -.12f * age - 12 * t * t +
+        7 * fminf(1, age / 24) * cosf(age * .035f + phase);
+    const float envelope = fminf(1, age / 8) * (1 - t);
+    const float rx = 14 + 14 * t + 3 * HashUnit(p->seed ^ 31u);
+    const float ry = 9 + 18 * t;
+    float moonlight = transmission > 0
+        ? BloodpoolMoonProjection_Light(&light, (ArRenderPointF){p->x + x, p->y + y}) *
+            transmission * field->RayGain[0] : 0;
+    if (moon && moon->tuning.active) moonlight *= moon->tuning.intensity;
+    moonlight = fminf(1, fmaxf(0, moonlight));
+    const float warm = fmaxf(0, 1 - age / 24);
+    const ArRenderColorF tint = {.14f + .15f * warm + .14f * moonlight,
+        .15f + .04f * warm + .20f * moonlight, .19f + .28f * moonlight, 1};
+    ActionEffectInstance puff = {
+      .world_x = p->x, .world_y = p->y, .pulse_ticks = p->age,
+      .kind = kActionEffect_EnemyFireball, .obj_priority = p->priority,
+      .projection_plane = kActionEffectProjectionPlane_Obj,
+      .render_layer = kActionEffectRenderLayer_WorldSmoke,
+      .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-40,-72,48,24}},
+    };
+    if (!AppendSceneSoftCloud(&writer, &puff, x, y, rx, ry,
+            tint, .48f * envelope, p->seed, project_point, userdata)) return false;
+    const ArRenderColorF upper = MixColor((ArRenderColorF){.22f,.23f,.27f,1},
+        (ArRenderColorF){.48f,.67f,.94f,1}, .75f * moonlight);
+    if (!AppendSceneSoftCloud(&writer, &puff,
+            x + 6 * sinf(age * .032f + phase), y - ry * .38f, rx * .8f, ry * .8f,
+            upper, (.27f + .13f * moonlight) * envelope,
+            p->seed ^ 47u, project_point, userdata)) return false;
+  }
+  batch->vertex_count = writer.vertex_count;
+  batch->index_count = writer.index_count;
+  return true;
+}
+
 bool ActionSceneDecorationRender_Build(
     const ActionSceneEffectFrame *frame, uint8_t render_layer,
     bool lighting_enabled, bool particles_enabled,
@@ -2041,6 +2072,8 @@ bool ActionSceneDecorationRender_Build(
     }
     return false;
   }
+  if (render_layer == kActionEffectRenderLayer_WorldSmoke)
+    return BuildFireballSmoke(frame, particles_enabled, project_point, project_userdata, batch);
   if (!BuildSceneEffectList(frame->decorations, frame->decoration_count, &frame->moonlight,
                             &frame->bloodpool, frame->ray_field_valid?&frame->ray_field:NULL, frame->water_field_valid?&frame->water_field:NULL, frame->atmosphere_field_valid?&frame->atmosphere_field:NULL, frame->moon_field_valid?&frame->moon_field:NULL, frame->castle_field_valid?&frame->castle_field:NULL, frame->glow_field_valid?&frame->glow_field:NULL, frame, &frame->members, &frame->scenery,
                             kActionSceneDecorationMaxInstances, frame->decoration_overflow, false,

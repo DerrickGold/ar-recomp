@@ -14,6 +14,9 @@ typedef struct ActionEffectActor {
 } ActionEffectActor;
 typedef struct ActionEffectActorTrack {
   ActionEffectActor actor;
+  /* Provenance is sampled once per actor generation, never refreshed from a
+   * parent slot that can retire or be reused while the child still exists. */
+  uint16_t parent_address;
   uint8_t active;
 } ActionEffectActorTrack;
 typedef struct ActionEffectActorSelector {

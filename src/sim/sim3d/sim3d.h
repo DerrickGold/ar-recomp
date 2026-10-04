@@ -61,8 +61,11 @@ enum {
  * game producer publishes these immutable, host-owned views beside its frame
  * metadata. */
 typedef struct Sim3DOutputSurfaceViews {
+  uint32_t upload_plane_mask; /* Captured feature policy, independent of live state. */
   SrPpuSurfaceView planes[kSim3DPlane_Count];
   SrPpuSurfaceView hud_bg;
+  SrPpuSurfaceView atlas;
+  SrPpuSurfaceView flat;
 } Sim3DOutputSurfaceViews;
 
 /* Raw capture buffers are game-thread-written until PresentUpload completes.

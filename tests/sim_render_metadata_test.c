@@ -181,6 +181,22 @@ static void TestWorldNavigationAllTownObjects(void) {
   CHECK(towns.ground.object_rows[0][0] & 1u);          /* tree source */
   CHECK(towns.ground.object_rows[0][13] & (1u << 13)); /* cathedral */
   CHECK(FindNavigationTownObject(&towns, 3, kSimBackgroundVoxel_House, 1, 1) != NULL);
+
+  uint8 *aitos = wram + kStructureRecordsWram + 3 * kStructureRecordsPerTownBytes;
+  aitos[0] = 16; aitos[1] = 24; aitos[2] = 0x85;
+  SimWorldNavigationTowns_Capture(wram, &towns);
+  CHECK(!FindNavigationTownObject(&towns, 4, kSimBackgroundVoxel_AnimalPen, 16, 24));
+  Write16(wram, kDevelopmentTiersWram + 6, 1);
+  SimWorldNavigationTowns_Capture(wram, &towns);
+  const SimWorldNavigationTownObject *pen =
+      FindNavigationTownObject(&towns, 4, kSimBackgroundVoxel_AnimalPen, 16, 24);
+  CHECK(pen != NULL);
+  if (pen) {
+    CHECK(pen->footprint_cells_w == 2 && pen->footprint_cells_d == 2);
+    CHECK(pen->source_cells_w == 2 && pen->source_cells_h == 2);
+  }
+  CHECK((towns.ground.object_rows[3][24] & (3u << 16)) == (3u << 16));
+  CHECK((towns.ground.object_rows[3][25] & (3u << 16)) == (3u << 16));
 }
 
 static void TestWorldNavigationRocks(void) {

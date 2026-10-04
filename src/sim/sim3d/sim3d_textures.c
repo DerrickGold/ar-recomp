@@ -148,19 +148,27 @@ static void UploadSurface(
 }
 
 void Sim3DTextures_Upload(ArRenderDevice *device, const FrameSlot *slot) {
+  /* Resolve this frame's replacement before suppressing any source upload.
+   * Captured BG1 stays available to HUD reconstruction and diagnostics. */
+  SimBackgroundVoxelRenderer_Upload(device);
+  const Sim3DGroundSource ground_source = Sim3D_ResolveGroundSource(
+      slot->sim.effective_features, slot->sim.background_voxel_enabled,
+      SimBackgroundVoxelRenderer_Ready(slot->sim.background_voxel_serial));
   /* D1b: the raw atlas follows the same upload-before-release ownership as
    * every other frame pixel buffer. Only the packed used rectangle is copied;
    * all descriptors in this immutable slot are bounded by that rectangle. */
   if (ArRenderTexture_IsValid(s_atlas) &&
       slot->sim.town && slot->sim.atlas_valid &&
-      slot->sim.atlas_used_width && slot->sim.atlas_used_height) {
+      slot->sim.atlas_used_width && slot->sim.atlas_used_height &&
+      PresentationSurface_Holds(&slot->sim3d_output_surfaces.atlas,
+          slot->sim.atlas_used_width, slot->sim.atlas_used_height)) {
     const ArRenderRectI atlas = {
       0, 0, slot->sim.atlas_used_width, slot->sim.atlas_used_height,
     };
     UploadSurface(
         device, s_atlas, kSim3DUploadSurface_Atlas,
-        g_sim_obj_atlas_pixels, atlas.w, atlas.h,
-        kSimObjAtlasWidth);
+        (const uint32_t *)slot->sim3d_output_surfaces.atlas.data, atlas.w, atlas.h,
+        (int)(slot->sim3d_output_surfaces.atlas.pitch_bytes / sizeof(uint32_t)));
   }
 
   if (slot->sim.separated_valid) {
@@ -173,6 +181,8 @@ void Sim3DTextures_Upload(ArRenderDevice *device, const FrameSlot *slot) {
             slot->sim.separated_plane_mask);
     if (PresentSimMenu_Active(slot))
       plane_upload_mask |= slot->sim.separated_plane_mask;
+    else if (ground_source == kSim3DGround_Voxels && !g_settings.scene_inspector)
+      plane_upload_mask &= ~((1u << kSim3DPlane_Bg1Low) | (1u << kSim3DPlane_Bg1High));
     for (int plane = 0; plane < kSim3DPlane_Count; plane++) {
       const SrPpuSurfaceView *surface =
           PresentationSurface_Bound(&slot->sim3d_output_surfaces.planes[plane]);
@@ -189,17 +199,15 @@ void Sim3DTextures_Upload(ArRenderDevice *device, const FrameSlot *slot) {
     /* Ground projection samples the separated planes directly. Upload the
      * CPU flat composite only for the fallback stage that actually draws it. */
     if (ArRenderTexture_IsValid(s_flat) &&
-        !(slot->sim.effective_features & kSimFeature_GroundProjection)) {
+        !(slot->sim.effective_features & kSimFeature_GroundProjection) &&
+        PresentationSurface_Holds(&slot->sim3d_output_surfaces.flat, frame.w, frame.h)) {
       UploadSurface(
           device, s_flat, kSim3DUploadSurface_Flat,
-          g_sim3d_flat_pixels,
-          frame.w, frame.h, frame.w);
+          (const uint32_t *)slot->sim3d_output_surfaces.flat.data,
+          frame.w, frame.h,
+          (int)(slot->sim3d_output_surfaces.flat.pitch_bytes / sizeof(uint32_t)));
     }
   }
-  SimBackgroundVoxelRenderer_Upload(device);
-  const Sim3DGroundSource ground_source = Sim3D_ResolveGroundSource(
-      slot->sim.effective_features, slot->sim.background_voxel_enabled,
-      SimBackgroundVoxelRenderer_Ready(slot->sim.background_voxel_serial));
   PresentSim3DCanvas_Upload(device,
       slot->sim.view == kSimView_Enhanced && slot->sim.separated_valid &&
       ground_source == kSim3DGround_Canvas);

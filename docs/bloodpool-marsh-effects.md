@@ -267,3 +267,79 @@ part of the broader hardware validation, not established by these checks.
 `runs/bloodpool-wavecaps/bloodpool-wave-caps-small.mp4` is the 480×300, 20 fps
 before/after preview (238 KB), including a backdrop-plane segment. It uses an
 isolated save/settings directory and labeled assisted traversal.
+
+### Act 1 boss fireballs — October 3
+
+The boss's launched fireballs now use the existing `fireball-field` warm glow
+and twelve fading ember streaks. Trails follow velocity; the captured room OBJ
+priority keeps the effect attached in Diorama. Lighting and particles remain
+independently controlled by their existing Effects settings. The room editor's
+`fireball-field` response can tune this effect without a new recipe format.
+
+Launched boss shots also shed broad smoke billows every four gameplay ticks.
+Two overlapping soft lobes start at roughly the fireball's size, expand, curl
+upward and fade over 144 ticks (2.4 seconds). Their world-space anchors remain
+after the projectile disappears. A bounded, captured pool of 96 puffs freezes
+on pause and clears on room changes; recycled actor slots do not bridge trails.
+The existing moon-ray field and cloud transmission tint exposed smoke pale
+blue. This is scattered light on airborne smoke, without foreground surface
+shadow masking. Smoke uses alpha blending and the Particles switch, including
+the `fireball-field` particle component; it remains neutral grey when the moon
+effect is disabled. Both CPU and deferred projection use the captured tint.
+
+Capture validates the `$B786` family, `$B90D` flight handler, state 1, both
+authored fireball compositions and the retained boss identity in room `02/01`.
+Stationary formation, boss-body poses and death fragments do not acquire a
+flight trail. The exact native identity is recorded in `ram-map.md`; observation
+does not write WRAM or allocate native actors.
+
+The five focused capture, geometry, projectile-recipe and presenter tests pass,
+including deferred projection. Capture, geometry and presenter tests also pass
+ASan/UBSan, and the game build succeeds. Tests cover four retained spawn resumes,
+both artwork frames, both facings, room-supplied depth, pause, retirement,
+invalid identities, detached smoke lifetime, pool capacity and moonlight tint.
+Review regressions compare one-, two-, four- and eight-tick capture intervals
+and preserve the smoke's Diorama OBJ plane after the last projectile retires.
+Isolated assisted Metal replays in `runs/bloodpool-act1-boss-fire/` show the
+effect in flat and Diorama views. All four paired full-WRAM snapshots from the
+Diorama effects-on/off replay match. These runs pin player position to exercise
+the boss; they are visual checks, not an unassisted gameplay walkthrough.
+The final billowing smoke was visually checked in flat and Diorama views; the
+final Diorama replay also matches all four reference WRAM snapshots.
+`runs/bloodpool-act1-boss-fire/billowing-smoke-preview.mp4` shows the final
+Diorama trail at 20 fps.
+The repository-wide style gate has existing violations; changed C files add none.
+
+The 96-puff smoke pool and its separate render pass leave actor geometry
+unchanged at the full 16-actor, three-sword-stream limit. A longer assisted
+boss replay did reproduce the missing sword enhancement: 22 live boss
+fireballs, only one visible, overflowed the 16-record actor list and cleared
+every actor accent. Native shots keep flying outside the activation window.
+Their observer tracks now continue without publishing invisible boss shots
+into the render list. Regression coverage retains the beam, four visible
+fireballs and full smoke pool alongside twenty invisible fireballs.
+The corrected long replay restores the sword glow and extended trail with 22
+native fireballs still live; `runs/bloodpool-act1-boss-fire/sword-restored.png`
+records the result. The long before/after runs differ in native timing state,
+so this comparison establishes visual recovery, not byte-exact WRAM parity.
+
+Native OAM in the assisted boss replay also places the player beam in priority
+2; its enhancement now inherits `$008F` instead of assuming priority 0. All
+101 paired WRAM snapshots match before and after that projection correction.
+
+Fireball effects now survive the root boss's death-state change to `$A593`
+and flags `$0032`. Recognition uses the child's flight identity and its
+retained root backlink, without requiring the parent to remain active or
+keep its boss flag and composition. A moving shot keeps its normal trail.
+When its world position stops changing, its effect clocks and owned smoke
+puffs freeze; clearing native velocity preserves the last trail direction.
+Frozen smoke retires when that shot becomes hidden, disappears or is replaced.
+Ordinary detached smoke still fades, and each shot advances independently.
+
+Capture regressions cover a 180-tick stop, movement resuming, a retired parent,
+fresh observation during death, independent neighbouring shots, visibility
+and slot reuse. Capture, CPU/deferred geometry and presenter checks pass under
+ASan/UBSan. Assisted Metal replay `20261003-200802` confirms that the launched
+fireball retains glow, embers and smoke during the boss's death animation;
+`runs/bloodpool-act1-boss-fire/death-fireball-after.png` records the result.
+All 57 paired full-WRAM snapshots match the earlier replay.

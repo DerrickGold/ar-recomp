@@ -31,6 +31,11 @@ typedef struct HostDisplayVsyncGuard {
   uint8_t excessive_rate_windows;
   bool initialized;
   bool software_fallback_active;
+  /* Probe without software sleeps for at most nine presents every five
+   * seconds. A startup/occlusion burst must not latch fallback forever. */
+  uint64_t probe_after_ns, probe_previous_ns;
+  uint8_t probe_intervals, probe_paced_intervals;
+  bool probing;
 } HostDisplayVsyncGuard;
 
 /* Rolling completed-present rate. Count intervals between present-completion
@@ -57,8 +62,8 @@ double HostDisplayPacing_FramesPerSecond(
 
 void HostDisplayPacing_ResetVsyncGuard(HostDisplayVsyncGuard *guard);
 /* Returns true exactly when this sample activates software pacing. The guard
- * requires two sustained excessive-rate windows, so a startup burst cannot
- * disable otherwise working renderer VSync. */
+ * requires two sustained excessive-rate windows. Bounded probes allow
+ * recovery if startup or occlusion temporarily removed renderer pacing. */
 bool HostDisplayPacing_RecordVsyncPresent(
     HostDisplayVsyncGuard *guard, bool vsync_expected,
     int nominal_refresh_hz, uint64_t completed_at_ns);

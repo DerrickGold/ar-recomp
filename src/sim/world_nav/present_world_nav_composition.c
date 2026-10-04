@@ -69,14 +69,9 @@ void UploadWorldNavigationComposition(const FrameSlot *slot) {
 ArRenderPointF WorldNavigationComposition_ProjectPoint(const FrameSlot *slot,
                                                        ArRenderRectI viewport, float authentic_x,
                                                        float authentic_y) {
-  const float authentic_x0 =
-      ((float)slot->snes_width - (float)kSimWorldNavigationCompositionWidth) * 0.5f;
-  const float captured_x = authentic_x0 + authentic_x;
-  return (ArRenderPointF){
-      (float)viewport.x +
-          (captured_x - (float)slot->visible_x0) * (float)viewport.w / (float)slot->visible_width,
-      (float)viewport.y + authentic_y * (float)viewport.h / (float)slot->snes_height,
-  };
+  const ArRenderRectF projected = FrameSlot_ProjectNativeRect(
+      slot, viewport, (ArRenderRectF){authentic_x, authentic_y, 0, 0});
+  return (ArRenderPointF){projected.x, projected.y};
 }
 
 bool WorldNavigationComposition_DrawLayer(const FrameSlot *slot, ArRenderRectI viewport,

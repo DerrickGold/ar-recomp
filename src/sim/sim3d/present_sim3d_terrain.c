@@ -272,7 +272,7 @@ static bool ProjectSimTerrainQuad(void *user,
             SimTerrainHeightWorld(slot, source, height_units[i]), &point))
       return false;
     float away = SimCullProximityAt(
-        fade, texture_xy[i][0], texture_xy[i][1], source);
+        fade, texture_xy[i][0], texture_xy[i][1]);
     float brightness = (1.0f - away * fade->dim) * shade[i];
     float alpha = (1.0f - away * fade->fade) *
         SimGroundExtentAlphaAt(fade, texture_xy[i][0], texture_xy[i][1]);

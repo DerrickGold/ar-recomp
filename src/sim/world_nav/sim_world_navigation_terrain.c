@@ -263,7 +263,7 @@ float SimWorldNavigationTerrain_MaxMountainRise(void) {
 }
 
 bool SimWorldNavigationTerrain_RebuildWorldPrior(void) {
-  const uint32_t serial = SimWorldMap_GeographySerial();
+  const uint32_t serial = SimWorldMap_TerrainSerial();
   if (!serial) return false;
   if (serial == s_world_prior_serial) return true;
   for (int y = 0; y < kWorldCells; y++)

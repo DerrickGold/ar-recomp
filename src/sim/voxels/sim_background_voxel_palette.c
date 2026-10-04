@@ -532,6 +532,15 @@ void SimBackgroundVoxelPalette_Build(
         VaryMaterial(palette, leaves[material], variation);
       break;
     }
+    case kSimBackgroundVoxel_AnimalPen:
+      /* Warm timber shafts and pale cut ends from the native pen. */
+      SetRamp(palette, kSimVoxelMaterial_Wood,
+              Argb(82, 49, 8), Argb(115, 74, 8),
+              Argb(148, 98, 16), Argb(172, 123, 32));
+      SetRamp(palette, kSimVoxelMaterial_Trim,
+              Argb(131, 106, 41), Argb(164, 139, 65),
+              Argb(197, 180, 98), Argb(222, 205, 131));
+      break;
     case kSimBackgroundVoxel_Boulder:
     case kSimBackgroundVoxel_Rocks:
       /* Native $61-$6B stone shares the grey-green terrain ramp, not the

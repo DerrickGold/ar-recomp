@@ -63,7 +63,7 @@ static void TestPrepareAhead(void) {
   }
   assert(early_uploads > 500);
   const HostFramePlayout raw = HostFramePlayout_Create(period, false, 1750);
-  assert(HostFramePlayout_PreparationTime(raw, origin, origin + period) == origin);
+  assert(HostFramePlayout_PreparationTime(raw, origin, origin + period) == origin + period);
 }
 
 static void TestEarlyDrawWaitsForItsPair(void) {
@@ -105,12 +105,101 @@ static void TestEarlyDrawWaitsForItsPair(void) {
   assert(!HostFramePlayout_AwaitEndpoint(raw, 0, 2, 90, 100));
 }
 
+/* Variable completion time must not decide which source tick is shown.
+ * Include full NTSC/display phase drift, 30 Hz drops and 90/120 Hz holds. */
+static void TestNativeTimeline(void) {
+  const uint64_t period = 16639263, origin = 1000000000;
+  const HostFramePlayout p = HostFramePlayout_Create(period, false, 1750);
+  const unsigned rates[] = {30, 60, 90, 120};
+  for (unsigned r = 0; r < sizeof(rates) / sizeof(rates[0]); ++r) {
+    uint64_t endpoint = origin, next = origin + period;
+    for (unsigned i = 1; i < rates[r] * 90; ++i) {
+      const uint64_t sample = origin + 3 * period + (uint64_t)i * 1000000000 / rates[r];
+      const uint64_t target = HostFramePlayout_Target(p, sample);
+      uint64_t now = sample - 8000000;
+      for (;;) {
+        const uint64_t cost = 3000000 + (next / period * 7919) % 6500000;
+        if (next + cost <= now && HostFramePlayout_AcceptsPacket(p, next, target)) {
+          endpoint = next; next += period;
+          continue;
+        }
+        if (!HostFramePlayout_AwaitEndpoint(p, endpoint, target, now, sample)) break;
+        now += 100000;
+      }
+      assert(endpoint == origin + ((target - origin) / period) * period);
+      assert(!HostFramePlayout_AcceptsPacket(p, next, target));
+      assert(HostFramePlayout_Phase(p, endpoint, target) < 0);
+    }
+  }
+  assert(!HostFramePlayout_AwaitEndpoint(p, origin, origin + period, origin + 2 * period, origin + 2 * period));
+  HostFramePlayout latest = p; latest.delay_ns = 0;
+  assert(HostFramePlayout_AcceptsPacket(latest, origin + period, origin));
+  HostFrameRefreshClock clock = {0};
+  assert(HostFrameRefreshClock_Next(clock, origin) == origin);
+  HostFrameRefreshClock_Observe(&clock, origin, 16666667);
+  HostFrameRefreshClock_Observe(&clock, origin + 50000001, 16666667);
+  assert(clock.period_ns == 16666667);
+  assert(HostFrameRefreshClock_Next(clock, origin + 50000001) == origin + 66666668);
+  HostFrameRefreshClock_Observe(&clock, origin + 66666668, 0);
+  assert(!clock.period_ns && !clock.completed_ns);
+}
+
+static void TestRefreshPhase(void) {
+  const uint64_t origin = 1000000000, period = 16666667;
+  HostFrameRefreshClock clock = {0};
+  uint64_t filtered_error = 0, raw_error = 0;
+  for (unsigned i = 0; i < 6000; ++i) {
+    const uint64_t ideal = origin + i * period;
+    const int64_t jitter = (i % 4 == 0 ? 1200000 : i % 4 == 2 ? -1200000 : 0);
+    const uint64_t complete = (uint64_t)((int64_t)ideal + jitter);
+    HostFrameRefreshClock_Observe(&clock, complete, period);
+    if (i > 100) {
+      const uint64_t prediction = HostFrameRefreshClock_Next(clock, complete);
+      const uint64_t target = ideal + period;
+      filtered_error += prediction > target ? prediction - target : target - prediction;
+      raw_error += jitter < 0 ? -jitter : jitter;
+    }
+  }
+  assert(filtered_error < raw_error / 2);
+  uint64_t stall = clock.completed_ns + 8 * period;
+  HostFrameRefreshClock_Observe(&clock, stall, period);
+  assert(clock.phase_ns == stall);
+  HostFrameRefreshClock_Observe(&clock, stall + 11111111, 11111111);
+  assert(clock.period_ns == 11111111 && clock.phase_ns == stall + 11111111);
+  HostFrameRefreshClock_Observe(&clock, origin, period);
+  assert(clock.phase_ns == origin);
+}
+
+static void TestSynchronousRelease(void) {
+  const uint64_t period = 16639263, origin = 1000000000;
+  for (unsigned rate = 60; rate <= 120; rate += 30) {
+    HostFrameTickSchedule clock = {0};
+    uint64_t source = 0;
+    unsigned total = 0;
+    for (unsigned i = 0; i < rate * 90; ++i) {
+      uint64_t target = origin + (uint64_t)i * 1000000000 / rate;
+      total += HostFrameTickSchedule_Release(&clock, target, period, 3, &source);
+      assert(source <= target && source + period > target);
+      assert(clock.epoch == 1);
+    }
+    assert(total >= 5407 && total <= 5409);
+    const uint64_t next = clock.next_ns;
+    assert(HostFrameTickSchedule_Release(&clock, source - 1000, period, 3, &source) == 0);
+    assert(clock.next_ns == next);
+    assert(HostFrameTickSchedule_Release(&clock, next + period * 30, period, 3, &source) == 3);
+    assert(clock.epoch == 2 && source == next + period * 30);
+  }
+}
+
 int main(void) {
+  TestRefreshPhase();
+  TestSynchronousRelease();
+  TestNativeTimeline();
   TestCadence();
   TestPrepareAhead();
   TestEarlyDrawWaitsForItsPair();
   HostFramePlayout p = HostFramePlayout_Create(16000000, false, 3000);
-  assert(p.delay_ns == 0 && HostFramePlayout_Target(p, 123456) == 123456);
+  assert(p.delay_ns == 12000000 && HostFramePlayout_Target(p, 123456) == 0);
   assert(HostFramePlayout_NeedsEndpoint(p, 20000000, 123456));
   assert(HostFramePlayout_Phase(p, 20000000, 123456) < 0);
   p = HostFramePlayout_Create(16000000, true, 1750);

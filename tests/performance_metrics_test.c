@@ -309,6 +309,27 @@ static void TestOverlayLayout(void) {
     atlas_line |= !strcmp(copy_model.lines[i].text, "Atlas hit 1.0 copy 4.00MiB/2.0");
   }
   CHECK(copy_line && atlas_line);
+  snapshot.context.scene = kPerformanceScene_Action;
+  snapshot.counts[kPerformanceCount_EffectProjectionFallbackFrames] = 1;
+  snapshot.counts[kPerformanceCount_EffectProjectionFallbacks] = .025;
+  PerformanceOverlay_Build(&snapshot, 2, (ArRenderExtentI){1280, 800}, &copy_model);
+  bool effect_fallback = false;
+  for(int i=0;i<copy_model.line_count;++i)
+    effect_fallback |= !strcmp(copy_model.lines[i].text, "FX fallback 100% / 1.0 events/s");
+  CHECK(effect_fallback);
+  PerformanceOverlay_Build(&snapshot, 1, (ArRenderExtentI){1280, 800}, &copy_model);
+  effect_fallback = false;
+  for(int i=0;i<copy_model.line_count;++i)
+    effect_fallback |= !strcmp(copy_model.lines[i].text, "Effect GPU fallback: 100% frames");
+  CHECK(effect_fallback);
+  snapshot.counts[kPerformanceCount_NativePresents] = 1;
+  snapshot.counts[kPerformanceCount_SourceHolds] = .5;
+  snapshot.counts[kPerformanceCount_SourceSkips] = .025;
+  PerformanceOverlay_Build(&snapshot, 2, (ArRenderExtentI){1280, 800}, &copy_model);
+  bool cadence_line = false;
+  for (int i = 0; i < copy_model.line_count; ++i)
+    cadence_line |= strstr(copy_model.lines[i].text, "immediate | holds 20.0/s skips 1.0/s") != NULL;
+  CHECK(cadence_line);
   const ArRenderExtentI sizes[] = {{1280, 800}, {800, 1280}, {640, 480}, {560, 390},
                                    {320, 240},  {240, 120},  {0, 0}};
   for (int i = 0; i < kPerformanceStage_Count; i++) {

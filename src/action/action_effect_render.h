@@ -151,19 +151,26 @@ enum {
   kActionSceneEffectMarahnaBossLightningIndicesPerInstance =
       kActionSceneEffectMarahnaBossLightningSegments * 6 *
       kActionSceneEffectMarahnaBossLightningLayers,
-  /* One player crescent can coexist with the Aitos boss's two-child diagonal
-   * volley. Their shared magical path uses fixed crossed stars (8 vertices/
-   * 12 indices) plus two wake quads. Reserve only the measured three-stream
-   * peak above an ordinary scene actor's 12-quad particle budget. */
+  /* Player plus the Aitos boss's two crescents: three feathered wake strips,
+   * two crescent electrical strips and soft motes with occasional glints. */
   kActionSceneEffectMaxSwordStreams = 3,
-  kActionSceneEffectSwordStarCount = 48,
-  kActionSceneEffectSwordWakeLayers = 2,
+  kActionSceneEffectSwordMoteCount = 36,
+  kActionSceneEffectSwordMoteSegments = 8,
+  kActionSceneEffectSwordMoteVertices = 1 + kActionSceneEffectSwordMoteSegments,
+  kActionSceneEffectSwordMoteIndices = 3 * kActionSceneEffectSwordMoteSegments,
+  kActionSceneEffectSwordStripSegments = 16,
+  kActionSceneEffectSwordStripAcross = 5,
+  kActionSceneEffectSwordStripLayers = 5,
+  kActionSceneEffectSwordStripVertices =
+      (kActionSceneEffectSwordStripSegments + 1) * kActionSceneEffectSwordStripAcross,
+  kActionSceneEffectSwordStripIndices =
+      kActionSceneEffectSwordStripSegments * (kActionSceneEffectSwordStripAcross - 1) * 6,
   kActionSceneEffectSwordVerticesPerInstance =
-      kActionSceneEffectSwordStarCount * 8 +
-      kActionSceneEffectSwordWakeLayers * 4,
+      kActionSceneEffectSwordMoteCount * kActionSceneEffectSwordMoteVertices +
+      kActionSceneEffectSwordStripLayers * kActionSceneEffectSwordStripVertices,
   kActionSceneEffectSwordIndicesPerInstance =
-      kActionSceneEffectSwordStarCount * 12 +
-      kActionSceneEffectSwordWakeLayers * 6,
+      kActionSceneEffectSwordMoteCount * kActionSceneEffectSwordMoteIndices +
+      kActionSceneEffectSwordStripLayers * kActionSceneEffectSwordStripIndices,
   kActionSceneEffectSwordExtraVertices =
       kActionSceneEffectSwordVerticesPerInstance -
       kActionSceneEffectParticlesPerInstance * 4,

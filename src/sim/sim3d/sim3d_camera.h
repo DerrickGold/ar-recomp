@@ -1,8 +1,8 @@
 #ifndef AR_SIM3D_CAMERA_H
 #define AR_SIM3D_CAMERA_H
-/* SIM camera controls and reactive town motion. sim3d_camera.c samples host
- * controls/WRAM; sim3d_camera_motion.c interprets explicit observations and
- * clocks. World navigation uses manual orbit without town motion. */
+/* SIM camera controls use a presentation-owned scene snapshot. The separate
+ * producer motion observer samples WRAM; sim3d_camera_motion.c interprets its
+ * explicit observations and clocks. Navigation has no town motion. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -14,6 +14,9 @@
  * baseline while orbit is a transient offset that decays after release.
  * Globe inspection uses a separate visit-local orbit/zoom, never town settings;
  * orbit returns on release in either town-camera mode. Reset restores travel. */
+struct SimFrameData;
+/* Owner only. Install the captured scene before reading/updating controls. */
+void Sim3DCamera_SetPresentationScene(const struct SimFrameData *frame);
 bool Sim3DCamera_ControlsAvailable(bool textures_ready);
 
 /* Camera fields are host-owned presentation state rather than emulated scene
@@ -39,7 +42,7 @@ bool Sim3DCamera_IsDragging(void);
 void Sim3DCamera_SetDragging(bool dragging);
 void Sim3DCamera_FlushSettingsIfDirty(void);
 
-/* The game snapshot carries only reactive inputs and manual offsets here.
+/* The producer captures only reactive inputs; the owner fills mode/orbit.
  * The resolved base pose remains in SimFrameData.projection_* for all scene
  * geometry. Retained presents refresh mode/orbit, never motion or strength. */
 typedef struct Sim3DCameraMotion {

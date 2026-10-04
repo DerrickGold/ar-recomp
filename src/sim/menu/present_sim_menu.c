@@ -328,11 +328,7 @@ static ArRenderRectI QuestionInk(const FrameSlot *slot,
 
 static ArRenderRectF DialogueRect(const FrameSlot *slot, ArRenderRectI view,
                                    float x,float y,float w,float h) {
-  /* Same scene-coordinate projection as the ordinary HUD dialogue body. */
-  const float sx=(float)view.w/slot->visible_width;
-  const float sy=(float)view.h/slot->snes_height;
-  return (ArRenderRectF){view.x+(view.w-256*sx)*0.5f+x*sx,
-                         view.y+y*sy,w*sx,h*sy};
+  return FrameSlot_ProjectNativeRect(slot, view, (ArRenderRectF){x,y,w,h});
 }
 
 /* Every menu prose surface comes through this dialogue path: questions,

@@ -780,6 +780,7 @@ int main(void) {
       DioramaFrameGeneration_CaptureWithSkybox(
           &render_device,&slot,sources,planes,plane_pitches,0,sky_raw,true);
       CHECK(DioramaFrameGeneration_SourceProjectionActive()==(attempt!=1));
+      CHECK(DioramaFrameGeneration_SourceProjectionFallback()==(attempt==1));
       CHECK(DioramaFrameGeneration_PrepareWithSkybox(
           &render_device,&slot,.5f,raw,0,resolved,sky_raw,&sky_resolved)==0);
       CHECK(DioramaFrameGeneration_MetadataReadbackCount()==0);
@@ -789,6 +790,10 @@ int main(void) {
         CHECK(DioramaFrameGeneration_SourceProjectionFailed());
         DioramaFrameGeneration_RecoverSourceProjection(&render_device);
         CHECK(!DioramaFrameGeneration_SourceProjectionActive());
+        CHECK(DioramaFrameGeneration_SourceProjectionFallback());
+        DioramaFrameGeneration_AllowSourceProjection(false);
+        CHECK(!DioramaFrameGeneration_SourceProjectionFallback());
+        DioramaFrameGeneration_AllowSourceProjection(true);
       } else if(attempt==1) DioramaFrameGeneration_Reset();
     }
     slot.interp_setting_enabled=true;

@@ -1,5 +1,6 @@
 #include "host/frame_queue.h"
 #include "host/frame_producer.h"
+#include "sim/sim_frame_capture.h"
 #include "diorama/diorama_planes.h"
 #include "support/test_assert.h"
 #include <SDL3/SDL.h>
@@ -110,6 +111,64 @@ static void TestBackgroundPacket(HostFramePacket *p) {
   assert(HostFramePacket_OwnPixels(p) && p->copied_bytes == 0);
 }
 
+static void TestSimPacket(HostFramePacket *p) {
+  uint32_t pixels[] = {0xff001122, 0xff334455, 0xff667788, 0xff99aabb};
+  SimFrameInputs *inputs = HostFramePacket_SimTarget(p);
+  assert(inputs && inputs == HostFramePacket_SimTarget(p));
+  *inputs = (SimFrameInputs){0};
+  inputs->wram[0x12000] = 7;
+  inputs->vram[123] = 0xface;
+  inputs->cgram[45] = 0x1234;
+  FrameSlot *f = &p->frame;
+  *f = (FrameSlot){.sim = {.view = kSimView_Enhanced, .town = 3,
+      .master_enabled = true, .separated_valid = true, .underlay_serial = 17,
+      .atlas_valid = true, .separated_plane_mask = 1}, .sim_inputs = inputs};
+  assert(HostFramePacket_Supports(f));
+  f->sim.separated_valid = false;
+  assert(!HostFramePacket_Supports(f));
+  f->sim.separated_valid = true;
+  f->sim.view = kSimView_WorldNavigation;
+  assert(!HostFramePacket_Supports(f));
+  f->sim.view = kSimView_Enhanced;
+  f->sim_menu.model.phase = kSimMenu_Browse;
+  assert(!HostFramePacket_Supports(f));
+  f->sim_menu.model.phase = kSimMenu_Closed;
+  f->hud_icon = (HudIconFrame){.frame_serial = 23, .x = 144, .y = 11,
+      .first = 11, .count = 4, .scene_removed = true};
+  f->ppu_surfaces.main = f->ppu_surfaces.authentic = View(pixels);
+  f->sim3d_output_surfaces.upload_plane_mask = 1;
+  f->sim3d_output_surfaces.planes[0] = View(pixels);
+  f->sim3d_output_surfaces.atlas = f->sim3d_output_surfaces.flat = View(pixels);
+  f->sim3d_output_surfaces.hud_bg = f->hud_icon.surface = View(pixels);
+  assert(HostFramePacket_OwnPixels(p));
+  assert(p->copied_bytes == 6 * sizeof(pixels) + sizeof(*inputs));
+  memset(pixels, 0, sizeof(pixels));
+  assert(!f->ppu_surfaces.authentic.data && !f->background_packet);
+  assert(((const uint32_t *)f->sim3d_output_surfaces.atlas.data)[3] == 0xff99aabb);
+  assert(((const uint32_t *)f->sim3d_output_surfaces.planes[0].data)[0] == 0xff001122);
+  assert(((const uint32_t *)f->sim3d_output_surfaces.hud_bg.data)[1] == 0xff334455);
+  assert(((const uint32_t *)f->hud_icon.surface.data)[3] == 0xff99aabb);
+  assert(f->hud_icon.frame_serial == 23 && f->hud_icon.scene_removed &&
+         f->hud_icon.x == 144 && f->hud_icon.count == 4);
+  assert(f->sim_inputs->wram[0x12000] == 7 && f->sim_inputs->vram[123] == 0xface);
+  /* The 512-row atlas is taller than a PPU surface. Own its final row too. */
+  uint32_t *atlas = calloc(512 * 512, sizeof(uint32_t));
+  assert(atlas);
+  atlas[512 * 512 - 1] = 0xffabcdef;
+  f->sim3d_output_surfaces.atlas = (SrPpuSurfaceView){
+    .data = (const uint8_t *)atlas, .byte_size = 512 * 512 * 4,
+    .pitch_bytes = 512 * 4, .width_pixels = 512, .height_pixels = 512,
+    .flags = SR_PPU_SURFACE_BOUND, .pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32,
+  };
+  /* Reinitialize other borrowed views; don't recopy overlapping packet storage. */
+  f->ppu_surfaces.main = f->sim3d_output_surfaces.planes[0] = View(pixels);
+  f->sim3d_output_surfaces.flat = f->sim3d_output_surfaces.hud_bg =
+      f->hud_icon.surface = View(pixels);
+  assert(HostFramePacket_OwnPixels(p));
+  free(atlas);
+  assert(((const uint32_t *)f->sim3d_output_surfaces.atlas.data)[512 * 512 - 1] == 0xffabcdef);
+}
+
 enum { kFrames = 100000 };
 static int Writer(void *context) {
   HostFrameQueue *q = context;
@@ -147,11 +206,28 @@ static void ProduceUntilPaused(void *context) {
     background->words[SR_PPU_BG_PACKET_ARENA_BASE] = stream->next;
     background->words[3]++;
     packet->frame.background_packet = background;
+    if (stream->next & 1u) {
+      SimFrameInputs *inputs = HostFramePacket_SimTarget(packet);
+      assert(inputs);
+      inputs->wram[0x12000] = (uint8_t)stream->next;
+      inputs->vram[9] = (uint16_t)(stream->next + 7);
+      packet->frame.diorama_active = false;
+      packet->frame.sim = (SimFrameData){.view = kSimView_Enhanced, .town = 3,
+          .master_enabled = true, .separated_valid = true, .underlay_serial = 17,
+          .atlas_valid = true};
+      packet->frame.sim_inputs = inputs;
+      packet->frame.sim3d_output_surfaces.atlas = View(pixels);
+    }
     packet->tick = (int)stream->next;
     packet->source_ns = (uint64_t)stream->next * 16666667;
     assert(HostFramePacket_OwnPixels(packet));
-    assert(packet->frame.background_packet == background);
-    assert(packet->copied_bytes == sizeof(pixels));
+    if (stream->next & 1u) {
+      assert(!packet->frame.background_packet);
+      assert(packet->copied_bytes == sizeof(*packet->sim_storage) + 2 * sizeof(pixels));
+    } else {
+      assert(packet->frame.background_packet == background);
+      assert(packet->copied_bytes == sizeof(pixels));
+    }
     HostFrameQueue_Publish(stream->queue);
     ++stream->next;
   }
@@ -163,6 +239,19 @@ static void AwaitFullQueue(HostFrameQueue *queue) {
     assert(SDL_GetTicksNS() < timeout);
     SDL_DelayNS(1000);
   }
+}
+
+static void AssertHeldPacket(const HostFramePacket *held, unsigned tick) {
+  if (tick & 1u) {
+    assert(held->frame.sim_inputs == held->sim_storage);
+    assert(held->frame.sim_inputs->wram[0x12000] == tick);
+    assert(held->frame.sim_inputs->vram[9] == tick + 7);
+    assert(((const uint32_t *)held->frame.sim3d_output_surfaces.atlas.data)[0] == tick);
+  } else {
+    assert(held->frame.background_packet == held->background_storage);
+    assert(held->frame.background_packet->words[SR_PPU_BG_PACKET_ARENA_BASE] == tick);
+  }
+  assert(((const uint32_t *)held->frame.hud_icon.surface.data)[0] == tick);
 }
 
 static void TestMaintenanceWithFutureFrames(HostFrameQueue *queue) {
@@ -177,9 +266,7 @@ static void TestMaintenanceWithFutureFrames(HostFrameQueue *queue) {
     assert(held && held->tick == (int)tick);
     assert(stream.next == tick + 3);
     assert(held->source_ns == (uint64_t)tick * 16666667);
-    assert(held->frame.background_packet == held->background_storage);
-    assert(held->frame.background_packet->words[SR_PPU_BG_PACKET_ARENA_BASE] == tick);
-    assert(((const uint32_t *)held->frame.hud_icon.surface.data)[0] == tick);
+    AssertHeldPacket(held, tick);
     /* Maintenance reads the idle owner's state; restart must not discard or
      * overwrite this retained packet, even when the producer immediately runs. */
     /* Exercise both an explicit pause and a producer returning after its own
@@ -188,8 +275,7 @@ static void TestMaintenanceWithFutureFrames(HostFrameQueue *queue) {
     HostFrameQueue_Resume(queue);
     assert(HostFrameProducer_Submit(ProduceUntilPaused, &stream));
     assert(HostFrameQueue_Read(queue) == held);
-    assert(held->frame.background_packet->words[SR_PPU_BG_PACKET_ARENA_BASE] == tick);
-    assert(((const uint32_t *)held->frame.hud_icon.surface.data)[0] == tick);
+    AssertHeldPacket(held, tick);
     HostFrameQueue_Release(queue);
     AwaitFullQueue(queue);
     HostFrameQueue_RequestPause(queue);
@@ -207,8 +293,10 @@ int main(void) {
   HostFrameQueue *q = HostFrameQueue_Create();
   assert(q && !HostFrameQueue_Read(q));
   assert(HostFrameQueue_ReadyCount(q) == 0);
+  assert(!HostFrameQueue_Peek(q, 1));
   TestPixels(HostFrameQueue_BeginWrite(q));
   TestBackgroundPacket(HostFrameQueue_BeginWrite(q));
+  TestSimPacket(HostFrameQueue_BeginWrite(q));
   for (int i = 0; i < 3; ++i) {
     HostFramePacket *p = HostFrameQueue_BeginWrite(q);
     assert(p); p->tick = i;
@@ -216,6 +304,9 @@ int main(void) {
     assert(HostFrameQueue_ReadyCount(q) == (unsigned)i + 1);
   }
   assert(!HostFrameQueue_BeginWrite(q));
+  assert(HostFrameQueue_Peek(q, 1)->tick == 1);
+  assert(HostFrameQueue_Peek(q, 2)->tick == 2);
+  assert(!HostFrameQueue_Peek(q, 3));
   const HostFramePacket *held = HostFrameQueue_Read(q);
   assert(held && held->tick == 0 && !HostFrameQueue_BeginWrite(q));
   for (int i = 0; i < 3; ++i) {
@@ -234,6 +325,8 @@ int main(void) {
     const HostFramePacket *p;
     while (!(p = HostFrameQueue_Read(q))) SDL_DelayNS(1000);
     assert(p->tick == i && p->source_ns == (uint64_t)i * 12345);
+    const HostFramePacket *next = HostFrameQueue_Peek(q, 1);
+    if (next) assert(next->tick == i + 1);
     for (int b = 0; b < 128; ++b) assert(p->pixels[b] == (i & 255));
     HostFrameQueue_Release(q);
   }

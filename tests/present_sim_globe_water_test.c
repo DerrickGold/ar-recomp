@@ -14,7 +14,10 @@ static Sim3DDepthSurfaceVertex *captured;
 static ArRenderPointF *coordinates;
 static size_t captured_count;
 static bool reject_upload;
+uint64_t HostClock_Nanoseconds(void) { return 0; }
 static unsigned pattern;
+static uint32_t geography = 1;
+uint32_t SimWorldMap_GeographySerial(void) { return geography; }
 
 bool Sim3DMeshSet_Ready(const Sim3DMeshSet *set) { return set->valid; }
 void Sim3DMeshSet_Destroy(Sim3DMeshSet *set) {
@@ -198,6 +201,10 @@ int main(void) {
       assert(PresentSimGlobeWater_Matches(&map, &ground));
       assert(PresentSimGlobeWater_QuadCount() == captured_count && captured_count > 0);
       CheckSurface(&map, &ground, grid);
+      ++geography; /* Equal terrain coverage can still change shoreline texels. */
+      assert(!PresentSimGlobeWater_Matches(&map, &ground));
+      assert(PresentSimGlobeWater_Prepare(&map, &ground, grid));
+      assert(PresentSimGlobeWater_Matches(&map, &ground));
       const float matrix[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
       const Sim3DDepthSurfaceFocus focus = {0};
       assert(PresentSimGlobeWater_Append(matrix, map.radius, (ArRenderTexture){123}, &focus));

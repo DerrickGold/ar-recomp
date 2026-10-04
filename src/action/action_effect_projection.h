@@ -68,6 +68,11 @@ bool ActionEffectProjection_ProjectPoint(
     void *userdata, const ActionEffectInstance *effect,
     float local_x, float local_y, ArRenderPointF *point);
 
+/* Finite source view in effect-local space, before intersecting the effect's
+ * geometry or authored clip. Shared by reference clipping and GPU generation. */
+bool ActionEffectProjection_ViewBounds(const ActionEffectProjectionContext *,
+    const ActionEffectInstance *, ActionEffectLocalRect *);
+
 /* Finite room, capture-plane and viewport intersection in effect-local space.
  * ActionEffectClipBoundsFn-compatible; does not alter geometry or its colors. */
 bool ActionEffectProjection_ClipBounds(

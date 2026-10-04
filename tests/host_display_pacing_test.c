@@ -238,6 +238,26 @@ static void TestVsyncCompletionRateGuard(void) {
   }
   CHECK(!guard.software_fallback_active);
 
+  /* Recovery requires unthrottled observations, never the software cap's own
+   * 60 Hz timestamps. A persistently broken backend gets only nine probes. */
+  guard.software_fallback_active = true;
+  guard.probe_after_ns = now_ns;
+  CHECK(!HostDisplayPacing_RecordVsyncPresent(&guard, true, 60, ++now_ns));
+  CHECK(guard.probing);
+  for (int i = 0; i < 9; ++i) {
+    now_ns += 100000;
+    HostDisplayPacing_RecordVsyncPresent(&guard, true, 60, now_ns);
+  }
+  CHECK(guard.software_fallback_active && !guard.probing);
+  now_ns = guard.probe_after_ns;
+  HostDisplayPacing_RecordVsyncPresent(&guard, true, 60, now_ns);
+  CHECK(guard.probing);
+  for (int i = 0; i < 9; ++i) {
+    now_ns += 16666667;
+    HostDisplayPacing_RecordVsyncPresent(&guard, true, 60, now_ns);
+  }
+  CHECK(!guard.software_fallback_active && !guard.probing);
+
   /* Leaving VSync clears every observation and the active fallback. */
   CHECK(!HostDisplayPacing_RecordVsyncPresent(
       &guard, false, 120, now_ns + 1u));

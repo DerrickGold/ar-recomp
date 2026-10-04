@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "constants.h"
+#include "actraiser_game.h"
 
 bool DisplayGeometry_ResolveAutoCanvas(
     int drawable_width, int drawable_height, bool crt_pixel_aspect,
@@ -28,6 +29,23 @@ bool DisplayGeometry_ResolveAutoCanvas(
     canvas->extra_rows = extra > 64 ? 64 : (int)extra;
   }
   return true;
+}
+
+ActRaiserAutoCanvas DisplayGeometry_ConstrainAutoCanvas(
+    ActRaiserAutoCanvas requested, int map_group, int map_number, int bg_mode,
+    bool projected_sim) {
+  if (ActRaiser_IsActionMapGroup(map_group) && bg_mode >= 0 && bg_mode != 7)
+    return requested;
+  if (ActRaiser_IsSimulationTown(map_group, map_number) ||
+      (map_group == kActRaiserMapGroup_NonAction &&
+       map_number == kActRaiserNonActionMap_WorldMap)) {
+    if (!projected_sim) requested.extra_rows = 0;
+    return requested;
+  }
+  if (map_group == kActRaiserMapGroup_NonAction &&
+      map_number == kActRaiserNonActionMap_SkyPalace)
+    return (ActRaiserAutoCanvas){.extra_columns = requested.extra_columns};
+  return (ActRaiserAutoCanvas){0};
 }
 
 static ActRaiserDisplayGeometry s_geometry;

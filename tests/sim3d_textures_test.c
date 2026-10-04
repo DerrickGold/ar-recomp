@@ -14,7 +14,7 @@ uint32_t g_sim_obj_atlas_pixels[kSimObjAtlasWidth * kSimObjAtlasHeight];
 uint32_t g_sim3d_flat_pixels[kSim3DMaxWidth * kSim3DMaxHeight];
 static FrameSlot frame;
 static uint32_t pixels[16 * 8];
-static bool menu_active, canvas_needed;
+static bool menu_active, canvas_needed, voxels_ready;
 static uint32_t upload_mask;
 static int attempts, created, destroyed, fail_at, fatals, transfers;
 static bool alive[64], fail_upload;
@@ -35,10 +35,10 @@ Sim3DGroundSource Sim3D_ResolveGroundSource(SimRenderFeatureMask features,
   (void)features;
   (void)enabled;
   (void)ready;
-  return kSim3DGround_Canvas;
+  return voxels_ready ? kSim3DGround_Voxels : kSim3DGround_Canvas;
 }
 void SimBackgroundVoxelRenderer_Upload(ArRenderDevice *device) { assert(device); }
-bool SimBackgroundVoxelRenderer_Ready(uint32_t serial) { (void)serial; return false; }
+bool SimBackgroundVoxelRenderer_Ready(uint32_t serial) { (void)serial; return voxels_ready; }
 void PresentSim3DCanvas_Upload(ArRenderDevice *device, bool needed) {
   assert(device);
   canvas_needed = needed;
@@ -112,6 +112,7 @@ int main(void) {
     .pitch_bytes = 16 * 4, .width_pixels = 16, .height_pixels = 8,
     .flags = SR_PPU_SURFACE_BOUND, .pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32,
   };
+  frame.sim3d_output_surfaces.flat = frame.sim3d_output_surfaces.planes[kSim3DPlane_Bg1Low];
   Sim3DTextures_Upload(&device, &frame);
   assert(canvas_needed && transfers == 1 && bytes == sizeof(pixels));
   assert(last_texture.value == Sim3DTextures_Flat().value);
@@ -120,6 +121,16 @@ int main(void) {
   frame.sim.effective_features = kSimFeature_GroundProjection;
   Sim3DTextures_Upload(&device, &frame);
   assert(transfers == 1); /* Projected view omits its unused flat fallback. */
+  upload_mask = frame.sim.separated_plane_mask;
+  voxels_ready = true;
+  Sim3DTextures_Upload(&device, &frame);
+  assert(!canvas_needed && transfers == 1); /* Ready replacement omits BG1. */
+  g_settings.scene_inspector = true;
+  Sim3DTextures_Upload(&device, &frame);
+  assert(transfers == 2); /* Inspector retains complete source textures. */
+  g_settings.scene_inspector = false;
+  Sim3DTextures_ResetUploads();
+  transfers = 1; /* Repeat the original menu checks with a fresh mirror. */
   menu_active = true;
   Sim3DTextures_Upload(&device, &frame);
   assert(transfers == 2); /* Menu still needs captured planes omitted by the scene policy. */

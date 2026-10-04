@@ -87,6 +87,7 @@ const SimBackgroundVoxelProportions *SimBackgroundVoxelProportions_Get(
     case kSimBackgroundVoxel_Bridge:
     case kSimBackgroundVoxel_Boulder:
     case kSimBackgroundVoxel_Rocks:
+    case kSimBackgroundVoxel_AnimalPen:
       return &kBridge;
   }
   return &kHouse;

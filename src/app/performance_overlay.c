@@ -67,6 +67,9 @@ void PerformanceOverlay_Build(const PerformanceSnapshot *snapshot, int level,
       menu ? output.height - height - margin : margin, width, height};
   static const char *const modes[] = {"game", "paused", "settings", "A/B"};
   const PerformanceContext *context = &snapshot->context;
+  static const char *const clocks[] = {"immediate", "renderer", "software", "probe"};
+  const char *clock = context->pacing_source >= 0 && context->pacing_source < 4
+      ? clocks[context->pacing_source] : "unknown";
   const char *host = context->host_mode >= 0 && context->host_mode < 4
       ? modes[context->host_mode] : "unknown";
   Line(model, 0, 0, "PERFORMANCE | %s / %s | %02X:%02X",
@@ -80,9 +83,14 @@ void PerformanceOverlay_Build(const PerformanceSnapshot *snapshot, int level,
       snapshot->fps, snapshot->frame_mean_ms, snapshot->frame_p95_ms, snapshot->frame_max_ms);
   char cap[16] = "off";
   if (context->limit_fps > 0) snprintf(cap, sizeof(cap), "%d", context->limit_fps);
-  Line(model, 0, 2, "%dx%d  vsync %s  cap %s | ticks %.2f  repeats %.2f",
+  Line(model, 0, 2, "%dx%d  vsync %s  cap %s | ticks %.2f  redraws %.2f",
       context->width, context->height, context->vsync ? "on" : "off", cap,
       snapshot->counts[kPerformanceCount_Ticks], snapshot->counts[kPerformanceCount_Represents]);
+  if (!menu && snapshot->counts[kPerformanceCount_NativePresents] > 0)
+    Line(model, 0, 2, "%dx%d %s | holds %.1f/s skips %.1f/s (refresh-dependent)",
+        context->width, context->height, clock,
+        snapshot->counts[kPerformanceCount_SourceHolds] * snapshot->fps,
+        snapshot->counts[kPerformanceCount_SourceSkips] * snapshot->fps);
   if (menu) {
     Line(model, 0, 3, "CPU menu %.2f  present/wait %.2f  sleep %.2f ms",
         snapshot->stages[kPerformance_SettingsUi].mean_ms,
@@ -110,7 +118,11 @@ void PerformanceOverlay_Build(const PerformanceSnapshot *snapshot, int level,
          snapshot->counts[kPerformanceCount_HelperJobs]);
     Line(model, 0, 7, "GPU execution: unavailable");
     Line(model, 0, 8, "*Parallel sum, not frame time");
-    Line(model, 0, 9, "Full stage details in run log");
+    if (snapshot->counts[kPerformanceCount_EffectProjectionFallbackFrames] > 0 ||
+        snapshot->counts[kPerformanceCount_EffectProjectionFallbacks] > 0)
+      Line(model, 0, 9, "Effect GPU fallback: %.0f%% frames",
+          100 * snapshot->counts[kPerformanceCount_EffectProjectionFallbackFrames]);
+    else Line(model, 0, 9, "Full stage details in run log");
     return;
   }
   Line(model, 0, 3, "CPU wall time: avg ms/present | peak ms/call. Nested rows overlap.");
@@ -143,6 +155,10 @@ void PerformanceOverlay_Build(const PerformanceSnapshot *snapshot, int level,
     for (int i = 0; i < count; i++) Stage(model, snapshot, 1, 6 + i, (PerformanceStage)(first + i));
   }
   const double *work = snapshot->counts;
+  if (action)
+    Line(model, 1, 25, "FX fallback %.0f%% / %.1f events/s",
+        100 * work[kPerformanceCount_EffectProjectionFallbackFrames],
+        snapshot->fps * work[kPerformanceCount_EffectProjectionFallbacks]);
   Line(model, 1, 26, "Scene batches %.0f / verts %.0f", work[kPerformanceCount_Draws],
        work[kPerformanceCount_Vertices]);
   /* Upload calls sit beside the byte count because a per-call cost can dwarf

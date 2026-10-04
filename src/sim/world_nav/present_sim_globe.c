@@ -6,6 +6,7 @@
 #include "sim/world_nav/present_world_nav_internal.h"
 static struct {
   Sim3DMeshSet surface;
+  Sim3DDepthSurfaceVertex *points;
   SimGlobeMapping map;
   uint32_t geography, mountains, cliffs;
   uint16_t height_percent;
@@ -81,10 +82,10 @@ static void BuildSimGlobeGridRows(void *context, size_t first, size_t end) {
   }
 }
 
-static bool SimGlobeBuildSurface(const FrameSlot *slot,
+static bool SimGlobeBuildSurfaceWork(const FrameSlot *slot,
     const WorldNavigationProjection *projection, const SimGlobeMapping *map,
     bool detailed_town) {
-  const uint32_t geography = SimWorldMap_GeographySerial();
+  const uint32_t geography = SimWorldMap_TerrainSerial();
   const bool water_ready = !detailed_town ||
       PresentSimGlobeWater_Matches(map,&slot->sim.world_navigation_towns.ground);
   if (s_sim_globe.ready && Sim3DMeshSet_Ready(&s_sim_globe.surface) &&
@@ -92,7 +93,10 @@ static bool SimGlobeBuildSurface(const FrameSlot *slot,
       s_sim_globe.geography == geography && s_sim_globe.detailed_town == detailed_town &&
       s_sim_globe.mountains == g_world_nav_mountains.geometry_revision &&
       s_sim_globe.cliffs == g_world_nav_terrain.cliff_serial &&
-      s_sim_globe.height_percent == slot->sim.height_scale_x100 && water_ready) return true;
+      s_sim_globe.height_percent == slot->sim.height_scale_x100) {
+    return water_ready || PresentSimGlobeWater_Prepare(
+        map, &slot->sim.world_navigation_towns.ground, s_sim_globe.points);
+  }
   if (!PrepareWorldNavigationGroundSamples(projection)) return false;
   const size_t cliffs = g_world_nav_terrain.cliffs.face_count;
   const size_t mountains =
@@ -183,12 +187,15 @@ static bool SimGlobeBuildSurface(const FrameSlot *slot,
   if (ok && detailed_town)
     ok = PresentSimGlobeWater_Prepare(map,&slot->sim.world_navigation_towns.ground,points);
   free(vertices);
-  free(points);
   free(mask);
   if (!ok) {
+    free(points);
+    s_sim_globe.ready = false;
     fprintf(stderr,"[sim-globe-underlay] surface publication rejected quads=%zu\n",count);
     return false;
   }
+  free(s_sim_globe.points);
+  s_sim_globe.points = points;
   s_sim_globe.map = *map;
   s_sim_globe.geography = geography;
   s_sim_globe.mountains = g_world_nav_mountains.geometry_revision;
@@ -202,6 +209,14 @@ static bool SimGlobeBuildSurface(const FrameSlot *slot,
     fprintf(stderr,"[sim-globe-town] source town=%u quads=%zu mountains=%zu\n",
         slot->sim.town,count,count-mountain_first);
   return true;
+}
+
+static bool SimGlobeBuildSurface(const FrameSlot *slot,
+    const WorldNavigationProjection *projection, const SimGlobeMapping *map, bool detailed_town) {
+  const PerformanceScope scope = PerformanceMetrics_Begin(kPerformance_GlobeSurface);
+  const bool ok = SimGlobeBuildSurfaceWork(slot, projection, map, detailed_town);
+  PerformanceMetrics_End(scope);
+  return ok;
 }
 
 #if AR_SIM_GLOBE_TESTING
@@ -378,7 +393,7 @@ static bool AppendSimGlobeSurfaces(const FrameSlot *slot, ArRenderRectI source,
      * follows its smaller live sprite window. Both are draw-time materials,
      * never reasons to rebuild resident terrain/model sources on a pan. */
     const Sim3DDepthSurfaceFocus visibility =
-        PresentSimGlobeFocus_ResolveVisibility(&map, &slot->sim, source);
+        PresentSimGlobeFocus_ResolveVisibility(&map, &slot->sim);
     ok = PresentSimGlobeTerrain_Append(
              projection->matrix, map.radius,
              SimBackgroundVoxelRenderer_GroundTexture(slot->sim.background_voxel_serial),
@@ -542,11 +557,18 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
                                              bool sim_facades, bool detailed_town,
                                              const PresentSimGlobeContent *content,
                                              PresentSimGlobeView *out_view) {
+  static int trace = -1;
+  if (trace < 0) {
+    const char *option = getenv("AR_SIM_GLOBE_TRACE");
+    trace = option ? (!strcmp(option, "all") ? 2 : 1) : 0;
+  }
+  uint64_t stamps[9] = {trace ? HostClock_Nanoseconds() : 0};
   WorldNavigationProjection projection;
   PresentSimGlobeView view;
   if (!PrepareSimGlobeView(slot, source, viewport, camera, matrix, radius_scale, sim_facades,
                            &projection, &view))
     return kPresentationOutcome_CoreFailure;
+  if (trace) stamps[1] = HostClock_Nanoseconds();
   const SimGlobeMapping map = view.map;
   if (out_view) *out_view = view;
   if (detailed_town) {
@@ -557,27 +579,46 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
       fprintf(stderr, "[sim-globe-town] native mountain preparation rejected\n");
       goto failed;
     }
+    if (trace) stamps[2] = HostClock_Nanoseconds();
     if (!PresentSimGlobeTerrain_Prepare(&map, SimWorldMap_GeographySerial())) {
       fprintf(stderr, "[sim-globe-town] native terrain preparation rejected\n");
       goto failed;
     }
   }
+  if (trace) stamps[3] = HostClock_Nanoseconds();
   PresentSimGlobeGroundShadow town_shadow = {0};
   if (content && content->prepare && !content->prepare(content->userdata, &view, &town_shadow)) {
     fprintf(stderr, "[sim-globe-town] dynamic content preparation rejected\n");
     goto failed;
   }
+  if (trace) stamps[4] = HostClock_Nanoseconds();
   if (!Sim3DDepthPass_Begin(&g_render_device, viewport.w, viewport.h, kArRenderFilter_Linear))
     goto failed;
   if (!SimGlobeBuildSurface(slot, &projection, &map, detailed_town)) goto failed;
   const Sim3DDepthSurfaceTransform transform = SimGlobeSurfaceTransform(slot, &view);
   bool ok = AppendSimGlobeSurfaces(slot, source, viewport, &projection, &map, detailed_town,
                                    content, &town_shadow, transform);
+  if (trace) stamps[5] = HostClock_Nanoseconds();
   if (ok)
     ok = AppendSimGlobeModels(slot, source, viewport, matrix, &view, sim_facades, detailed_town,
                               transform);
+  if (trace) stamps[6] = HostClock_Nanoseconds();
   if (ok && content) ok = content->append && content->append(content->userdata, &view);
+  if (trace) stamps[7] = HostClock_Nanoseconds();
   ArRenderTexture composite = Sim3DDepthPass_Submit(&g_render_device, ArRenderTexture_Invalid());
+  if (trace) {
+    stamps[8] = HostClock_Nanoseconds();
+    if (!detailed_town) stamps[2] = stamps[1];
+    if (trace == 2 || stamps[8] - stamps[0] > 8000000) {
+      fprintf(stderr, "[sim-globe-trace] gf=%u total-ms=%.3f", slot->sim.game_frame,
+          (double)(stamps[8] - stamps[0]) / 1e6);
+      static const char *const names[] = {
+        "view", "mountains", "terrain", "shadows", "surface", "models", "actors", "submit"};
+      for (unsigned i = 0; i < 8; ++i)
+        fprintf(stderr, " %s-ms=%.3f", names[i], (double)(stamps[i+1] - stamps[i]) / 1e6);
+      fputc('\n', stderr);
+    }
+  }
   if (!ArRenderTexture_IsValid(composite))
     fprintf(stderr, "[sim-globe-underlay] composite rejected\n");
   if (!ok || !ArRenderTexture_IsValid(composite)) goto failed;
@@ -630,6 +671,7 @@ void ResetWorldNavigationGlobeSurfaces(void) {
   PresentSimGlobeTerrain_Reset();
   PresentSimGlobeWater_Reset();
   Sim3DMeshSet_Destroy(&s_sim_globe.surface);
+  free(s_sim_globe.points);
   memset(&s_sim_globe, 0, sizeof(s_sim_globe));
   Sim3DDepthPass_DestroyMesh(g_world_nav_surfaces.mesh);
   memset(&g_world_nav_surfaces, 0, sizeof(g_world_nav_surfaces));

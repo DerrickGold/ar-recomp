@@ -162,8 +162,9 @@ ctest --test-dir build-tests-release --output-on-failure -R actraiser_church_sce
 The implementation only changes presentation. The original game still owns
 all dialogue, input and item transfers. BG2 and the complete OBJ plane are
 captured observationally. The shared HUD owns the complete status band;
-native fallback crops that band from the base room so the hourglass appears
-exactly once. The independent authentic comparison scanout is untouched.
+the selected icon is handed off during scanout so it appears exactly once in
+the enhanced view, including native-room fallback. The independent authentic
+comparison scanout is untouched.
 
 Church panel frames and offering controls now use the shared HUD layout and
 localized-text compositor. The status bar anchors to the sides and body UI stays
@@ -433,3 +434,43 @@ frame-queue ownership and sole-source presentation. A church listening replay
 with enhanced text and native PiP matches the prior working composite exactly,
 including both people. The initial integration replay exposed a missing actor
 range setup, which was restored before this patch was applied to the worktree.
+
+Before merging main, all nine standard GPU replay scenarios passed with 99
+byte-identical captures and matching final WRAM. The full Debug and optimized
+game suites each passed 355 of 358 tests; the three pre-existing failures were
+private-header boundaries, the style baseline, and the world-navigation Metal
+GPU test. Go tests and vet passed. The tooling gate lacked Ruff and shader
+regeneration explicitly skipped without DXC.
+
+### Integration with current main
+
+The streamed town queue owns the same icon record and pixels as action frames.
+The SIM atlas renderer also excludes that completed semantic range: atlas
+billboards bypass the PPU scene planes, so leaving its old generic-capture check
+in place produced a second hourglass after returning from church. Its regression
+coverage includes broad and empty scene captures, one- and four-slot icons,
+retained metadata without borrowed pixels, and independent menu/world objects.
+
+Final validation on the integrated build:
+
+- All 12 focused optimized checks and all 11 corresponding Debug checks pass,
+  including the real PPU, queue, HUD, church GPU/cache and atlas ownership paths.
+- The two standard town replay scenarios retain 26 byte-identical captures and
+  identical final WRAM against the pre-consolidation game.
+- Listen retains both native people and matches the prior working composite
+  exactly. Offerings, native fallback, and return-to-town PiP captures show one
+  selected icon per view. The full offering round trip matches control WRAM/SRAM.
+- A normal windowed replay exercises the live frame pipeline before entering
+  church and after returning to town (520 streamed presents), with identical
+  final WRAM/SRAM to the synchronous replay. This is functional acceptance,
+  not a Steam Deck performance measurement.
+- Main integration's full Debug suite passed 350/359 and the optimized suite
+  passed 347/359. Six Debug and eight optimized action-recipe hash failures
+  reproduce in a clean archive of main at `546ba473`. The three earlier
+  private-header/style/world-navigation failures remain. An additional optimized
+  native-worker GPU failure passed when rerun separately. No baselines were
+  changed; modified authored files introduce no style-count increases.
+
+Local integration evidence is retained under `build-release/church-demo/`,
+including `church-final-listen.png`, `church-final-town.png`,
+`church-final-stream-town.png`, and the merged/focused/baseline test logs.

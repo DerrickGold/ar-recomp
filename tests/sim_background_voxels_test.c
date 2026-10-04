@@ -549,6 +549,55 @@ static void CheckCleanMountainAtlasPublication(void) {
   CHECK(memcmp(atlas_before, SimBackgroundVoxels_AtlasPixels(), sizeof(atlas_before)) == 0);
 }
 
+static void CheckAnimalPenClassification(void) {
+  static uint8_t wram[kWramBytes];
+  static uint32_t pixels[kSimTownCanvasPixels * kSimTownCanvasPixels];
+  SimBackgroundVoxelScene scene;
+  uint8_t *record = wram + kRecords + 3 * kRecordsPerTown;
+  record[0] = 16; record[1] = 24; record[2] = 0x85;
+  for (int row = 0; row < 2; row++)
+    for (int column = 0; column < 2; column++) {
+      uint8_t tile = (uint8_t)(0xE0 + row * 8 + column);
+      uint16_t a = (uint16_t)(0x100 + (row * 2 + column) * 4);
+      SetStructureDefinition(wram, tile, a, a + 1, a + 2, a + 3);
+      SetCanvasCell(wram, 16 + column, 24 + row, a, a + 1, a + 2, a + 3);
+    }
+  SimBackgroundVoxels_Classify(4, wram, true, &scene);
+  const SimBackgroundVoxelObject *pen = FindKind(&scene, kSimBackgroundVoxel_AnimalPen);
+  CHECK(pen && scene.unmatched_visual_count == 0);
+  if (pen) {
+    CHECK(pen->cell_x == 16 && pen->cell_y == 24 && pen->record_slot == 0);
+    CHECK(pen->source_cells_w == 2 && pen->source_cells_h == 2);
+    CHECK(pen->footprint_cells_w == 2 && pen->footprint_cells_d == 2);
+    CHECK(pen->visual_metatile == 0xE0 &&
+          pen->visual_state == kSimStructureVisualState_Finished);
+  }
+  for (size_t at = 0; at < sizeof(pixels) / sizeof(*pixels); at++)
+    pixels[at] = 0xFF884400;
+  wram[TownCellIndex(3, 0, 0)] = 0x08;
+  SetTerrainDefinition(wram, 0x08, 0x190, 0x191, 0x192, 0x193);
+  SetCanvasCell(wram, 0, 0, 0x190, 0x191, 0x192, 0x193);
+  FillCell(pixels, 0, 0, 0xFF708020);
+  SimBackgroundVoxels_Reset();
+  SimBackgroundVoxels_Build(4, wram, pixels, NULL, 1, 1, true);
+  CHECK(FindKind(SimBackgroundVoxels_Scene(), kSimBackgroundVoxel_AnimalPen));
+  CHECK(SimBackgroundVoxels_GroundPixels()[CellCentre(16, 24)] != 0xFF884400);
+  CHECK(SimBackgroundVoxels_GroundPixels()[CellCentre(17, 25)] != 0xFF884400);
+  CHECK(SimBackgroundVoxels_GroundPixels()[CellCentre(18, 25)] == 0xFF884400);
+  CHECK(SimBackgroundVoxels_StructureHeight(16 * 16, 24 * 16) == 0);
+  /* Partial/repainting plots must retain their original art, even if the
+   * record is active and the top-left tile is already the pen. */
+  SetCanvasCell(wram, 17, 25, 0x180, 0x181, 0x182, 0x183);
+  SimBackgroundVoxels_Build(4, wram, pixels, NULL, 2, 2, true);
+  CHECK(!FindKind(SimBackgroundVoxels_Scene(), kSimBackgroundVoxel_AnimalPen));
+  CHECK(SimBackgroundVoxels_Scene()->unmatched_visual_count == 1);
+  CHECK(SimBackgroundVoxels_GroundPixels()[CellCentre(16, 24)] == 0xFF884400);
+  record[2] = 0;
+  SimBackgroundVoxels_Classify(4, wram, true, &scene);
+  CHECK(!FindKind(&scene, kSimBackgroundVoxel_AnimalPen));
+  SimBackgroundVoxels_Reset();
+}
+
 static void CheckStructureVisualCatalog(void) {
   static const uint8_t expected_metatiles[kSimStructureVisualFamilyCount][32] = {
       {
@@ -559,12 +608,14 @@ static void CheckStructureVisualCatalog(void) {
       {0x4C, 0x44, 0x4D, 0x45, 0xEA, 0xE2, 0xEB, 0xE3},
       {0x04, 0x06, 0x14, 0x24, 0x26, 0x16},
       {0x34, 0x36},
+      {0xE0},
   };
   static const size_t expected_counts[kSimStructureVisualFamilyCount] = {
       32,
       8,
       6,
       2,
+      1,
   };
   bool seen[256] = {false};
   for (int family = 0; family < kSimStructureVisualFamilyCount; family++) {
@@ -592,6 +643,8 @@ static void CheckStructureVisualCatalog(void) {
         CHECK(frames[frame].animation_phase == (uint8_t)(frame % 3));
         CHECK(frames[frame].state == (frame < 3 ? kSimStructureVisualState_Construction0 + frame
                                                 : kSimStructureVisualState_Finished));
+      } else if (family == kSimStructureVisual_AnimalPen) {
+        CHECK(frames[frame].state == kSimStructureVisualState_Finished);
       } else {
         CHECK(frames[frame].state == (frame == 0 ? kSimStructureVisualState_Construction0
                                                  : kSimStructureVisualState_Finished));
@@ -1565,6 +1618,7 @@ int main(int argc, char **argv) {
 
   CheckWindmillFrames();
   CheckStructureVisualCatalog();
+  CheckAnimalPenClassification();
   CheckHouseFramesEndToEnd();
   CheckAitosSnapshotHouseFrame();
   CheckUnknownFramesFailClosed();

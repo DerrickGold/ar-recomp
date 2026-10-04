@@ -25,5 +25,8 @@ bool SimWorldMapBuild_Init(const uint8_t *rom_data, size_t rom_size);
  * mutates no emulator state. */
 /* Palace reuse is explicitly requested by the application settings gate. */
 void SimWorldMap_BuildIfNeeded(bool sky_palace_enabled);
+/* Presentation owner consumes an immutable town packet. Never calls the
+ * optional live-CPU oracle; callers keep that diagnostic synchronous. */
+void SimWorldMap_BuildFromSnapshot(const uint8_t *wram);
 
 #endif /* AR_SIM_WORLD_MAP_BUILD_H */
