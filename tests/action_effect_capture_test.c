@@ -21,6 +21,8 @@ static unsigned environment_calls, manifest_calls;
 static uint16_t expected_scene_clock;
 static uint8_t published_group, published_map, published_section;
 static bool peeking;
+static uint8_t scenery_section;
+uint8_t ActRaiser_LiveScenerySection(void) { return scenery_section; }
 
 void ActionEffects_CaptureFrame(ActionEffectObserver *observer, ActionEffectFrame *dst,
     const uint8_t *wram, size_t size, unsigned ticks) {
@@ -187,6 +189,15 @@ int main(void) {
   g_settings.action_effect_particles = false;
   ActionEffectGameplayClock_CompletePass();
   Capture(1, kDioramaLayerSection_Room);
+  g_ram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_DeathHeim;
+  g_ram[kActRaiserWram_CurrentMap] = kActRaiserDeathHeimMap_Hub;
+  scenery_section = kDioramaLayerSection_DeathHeimCompletion;
+  scene.decoration_count = 1;
+  scene.decorations[0].kind = kActionEffect_AitosWaterfall;
+  Capture(0, kDioramaLayerSection_DeathHeimCompletion);
+  scene.decoration_count = 0;
+  scenery_section = kDioramaLayerSection_Room;
+  Capture(0, kDioramaLayerSection_Room);
   puts("Action capture: shared gameplay clock, pause, settings and section publication passed");
   return 0;
 }

@@ -37,6 +37,9 @@ class Scripts(HTMLParser):
 
 
 class ActionEditorBuildTest(unittest.TestCase):
+    def test_project_archive_interoperability_and_rejection(self):
+        subprocess.run(['node', str(ROOT / 'tests/action_editor_project_archive.test.mjs')], check=True)
+
     def test_bundled_effects_match_canonical_data(self):
         subprocess.run([sys.executable, str(ROOT / 'tools/generate_effect_defaults.py'),
                         '--check'], check=True)

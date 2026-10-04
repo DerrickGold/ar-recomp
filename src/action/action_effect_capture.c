@@ -7,6 +7,7 @@
 #include "action/action_effect_clock.h"
 #include "action/action_effects.h"
 #include "actraiser_game.h"
+#include "actraiser/actraiser_rtl.h"
 #include "app/settings.h"
 #include "diorama/diorama.h"
 #include "diorama/diorama_layer_order.h"
@@ -176,8 +177,9 @@ void ActionEffectCapture_CaptureFrame(FrameSlot *dst) {
         sizeof(s_action_effect_observer.landing_dust));
   dst->diorama_map_group = g_ram[kActRaiserWram_MapGroup];
   dst->diorama_map_number = g_ram[kActRaiserWram_CurrentMap];
-  dst->diorama_layer_section = kDioramaLayerSection_Room;
-  if (!dst->action_scene_effects.decoration_overflow) {
+  dst->diorama_layer_section = ActRaiser_LiveScenerySection();
+  if (dst->diorama_layer_section == kDioramaLayerSection_Room &&
+      !dst->action_scene_effects.decoration_overflow) {
     for (unsigned i = 0;
          i < dst->action_scene_effects.decoration_count; i++) {
       if (dst->action_scene_effects.decorations[i].kind ==

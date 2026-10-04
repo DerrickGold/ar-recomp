@@ -110,6 +110,75 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
  const native=execFileSync(replay,[file,iniFile],{input:requests.map(r=>r.join(' ')).join('\n')+'\n',encoding:'utf8'}).trim().split('\n').map(n=>n.split(' ').map(v=>parseInt(v,16)));
  assert.deepEqual(hashes.map((h,i)=>[h,effectHashes[i]]),native,`native surfaces ${base.group}:${base.map}/${terrain.profile}`);
 
+ // Faces and completion select separate authored scopes and native policies.
+ if(base.group===7&&base.map===1) {
+   const completion=base.section==='completion';
+   assert.equal(api.RoomPreview_Policy(0,0,37,1),98);
+   const defaults=Array.from(new Int32Array(memory,api.DioramaPreview_Input(),98));
+   assert.equal(defaults[49+3],completion?3:2);
+   assert.equal(defaults[49+11],completion?0:1);
+   const independent='[layers:07:01]\nbg2-policy = edge:repeat horizontal:fixed left:7 right:9 bands:0\n'+
+     '[layers:07:01:completion]\nbg2-policy = edge:transparent horizontal:fixed left:23 right:41 bands:0\n'+
+     'bg1-stamp = cell:2,2 metatile:00 words:blank bands:1,1,1,1\n';
+   assert.equal(send(Buffer.from(independent),api.RoomPreview_Configure),1);
+   assert.equal(api.RoomPreview_Policy(0,0,37,0),98);
+   const policy=Array.from(new Int32Array(memory,api.DioramaPreview_Input(),98));
+   assert.equal(policy[49+3],completion?0:4);
+   assert.deepEqual(policy.slice(49+6,49+8),completion?[23,41]:[7,9]);
+   const request=[0,0,37,128,64];
+   assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
+   const phaseIni=path.join(directory,'death-heim-scenes.ini');fs.writeFileSync(phaseIni,independent);
+   const observed=[api.RoomPreview_Hash()>>>0,api.RoomPreview_EffectHash()>>>0];
+   const native=execFileSync(replay,[file,phaseIni],{input:request.join(' ')+'\n',encoding:'utf8'}).trim().split(' ').map(v=>parseInt(v,16));
+   assert.deepEqual(observed,native,'A/B saved scene policy and tile edits match native replay');
+   if(completion) {
+     assert.equal(send(Buffer.from('[layers:07:01]\nbg2-policy = edge:repeat\n'),api.RoomPreview_Configure),1);
+     assert.equal(api.RoomPreview_Policy(0,0,37,0),98);
+     assert.deepEqual(Array.from(new Int32Array(memory,api.DioramaPreview_Input(),98)),defaults,
+       'A edits do not become B defaults when B has no authored section');
+   }
+   assert.equal(send(Buffer.from(ini),api.RoomPreview_Configure),1);
+ }
+
+ // Saved policies use the planner, affect pixels, and survive native replay.
+ if(base.group===7&&base.map===3) {
+   const policy=(defaults=false)=>{
+     assert.equal(api.RoomPreview_Policy(0,0,37,defaults?1:0),98);
+     return Array.from(new Int32Array(memory,api.DioramaPreview_Input(),98));
+   };
+   const canonical=policy(true);
+   assert.equal(canonical[3],3,'Death Heim room 3 BG1 defaults to mirror');
+   assert.deepEqual(canonical.slice(5,8),[2,80,80]);
+   const header='[layers:07:03]\n',request=[0,0,37,128,64];
+   assert.equal(send(Buffer.from(header),api.RoomPreview_Configure),1);
+   assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
+   const mirrored=api.RoomPreview_Hash()>>>0;
+   const authored=header+'bg1-policy = edge:world motion:normal horizontal:available vertical:available bands:0\n';
+   assert.equal(send(Buffer.from(authored),api.RoomPreview_Configure),1);
+   const effective=policy();assert.equal(effective[3],1);
+   assert.deepEqual(effective.slice(5,8),[1,0,0]);assert.equal(effective[11],0);
+   assert.deepEqual(effective.slice(49),canonical.slice(49),'BG2 remains canonical');
+   assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
+   const painted=api.RoomPreview_Hash()>>>0;
+   assert.notEqual(painted,mirrored,'removing mirroring changes actual scanout');
+   const policyIni=path.join(directory,'policy.ini');fs.writeFileSync(policyIni,authored);
+   const actual=[painted,api.RoomPreview_EffectHash()>>>0];
+   const expected=execFileSync(replay,[file,policyIni],{input:request.join(' ')+'\n',encoding:'utf8'}).trim().split(' ').map(v=>parseInt(v,16));
+   assert.deepEqual(actual,expected,'saved policy produces the same native/WASM pixels');
+   const crossing=header+'bg1-policy = bands:2\n'+
+     'bg1-policy-band = index:0 rows:0,100 anchor:screen edge:mirror motion:normal horizontal:inherit\n'+
+     'bg1-policy-band = index:1 rows:100,224 anchor:world edge:repeat motion:normal horizontal:inherit\n';
+   for(const invalid of [crossing,header+'bg1-policy = horizontal:fixed left:129 right:0\n',
+       header+'bg1-policy = bands:1\n',header+'bg1-policy = bands:5\n']) {
+     assert.equal(send(Buffer.from(invalid),api.RoomPreview_Configure),0);
+     assert.deepEqual(policy(),effective,'failed edits retain the complete previous policy');
+     assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
+     assert.equal(api.RoomPreview_Hash()>>>0,painted);
+   }
+   assert.deepEqual(policy(true),canonical,'defaults remain available after authoring');
+   assert.equal(send(Buffer.from(ini),api.RoomPreview_Configure),1);
+ }
+
  // Aitos surfaces use the same bounded capture and mesh kernels from complete data.
  if(base.group===4&&[1,2,3,4,6].includes(base.map)){
    const indices=base.map===1?[0]:[2,3].includes(base.map)?[2,3,4]:[1];
@@ -395,7 +464,7 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
  assert.equal(send(Buffer.from('[effects]\nversion=1\n'),api.RoomPreview_ConfigureEffects),1);
  frames+=requests.length;scenes++;
 }
-assert.equal(presetChecks,stagePresets.length*3);assert.equal(scenes,147);assert.equal(api.memory.buffer,memory);
+assert.equal(presetChecks,data.rooms.reduce((n,r)=>n+stagePresets.filter(p=>p.rooms.some(([g,m])=>g===r.group&&m===r.map)).length,0)*3);assert.equal(scenes,150);assert.equal(api.memory.buffer,memory);
 api.RoomPreview_Reset();assert.equal(textures.size,0);api.RoomPreview_Reset();
 assert.equal(api.RoomPreview_Hash(),0);
 console.log(`Whole-room renderer: ${scenes} regional rooms, ${frames} native/WASM surface + source matches, ${scenes} authored round trips, ${presetChecks} stage preset reconstructions, ${draws} valid draws; reverse time, atomic edits/loads, resource reuse and teardown passed.`);

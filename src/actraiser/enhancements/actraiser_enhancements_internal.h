@@ -6,6 +6,7 @@
  * in actraiser/enhancements/ include it (tools/check_private_headers.py).
  * Phase: game (frame transaction). */
 #include "actraiser/actraiser_rtl_internal.h"
+#include "actraiser/actraiser_death_heim_hub.h"
 
 typedef struct ActRaiserPpuFrameAccess {
   const SrPpuFrameTransactionContext *context;
@@ -62,10 +63,6 @@ bool ActRaiser_ConfigurePpuObjCapture(
 void ActRaiser_HudIconBeginFrame(void);
 void ActRaiser_HudIconPrepare(void);
 void ActRaiser_HudIconComplete(SrResult status, const SrPpuScanoutResult *result);
-
-/* ---- defined in actraiser_death_heim_hub.c ---- */
-void ActRaiser_DioramaDeathHeimEyesPrepare(void);
-void ActRaiser_DioramaDeathHeimHubStatuesFinish(int width);
 
 /* ---- defined in actraiser_diorama_capture.c ---- */
 bool ActRaiser_DioramaBoundsTrackingActive(void);

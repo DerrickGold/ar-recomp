@@ -17,7 +17,8 @@ const SharedRoomPreview = (() => {
     for(const line of sourceIniText.split(/\r?\n/)) {
       if(/^\s*\[/.test(line)) {
         const m=stripIniComment(line).match(/^\[layers:([\da-f]+):([\da-f]+):[^\]]+\]$/i);
-        keep=!!m&&parseInt(m[1],16)===room.group&&parseInt(m[2],16)===room.map;
+        keep=!!m&&!roomFromSection(stripIniComment(line))&&!room.section&&
+          parseInt(m[1],16)===room.group&&parseInt(m[2],16)===room.map;
       }
       if(keep)scoped.push(line);
     }
@@ -152,6 +153,49 @@ const SharedRoomPreview = (() => {
       draw();
     }catch(error){label.textContent=error.message;api=null;backend?.dispose();}
   }
+  function validateScenery(text) {
+    ensureRoom();
+    try {send(new TextEncoder().encode(text),api.RoomPreview_Configure);}
+    catch {throw Error('Row bands must stay ordered and separate throughout camera travel, within 224 screen rows or the BG world height.');}
+    config=text;configDirty=true;
+  }
+  function validatePolicyDocument(text) {
+    const policies=parseBgPolicyDocument(text);
+    if(!Object.keys(policies).length)return;
+    ensureRoom();
+    try {
+      for(const [identity,pair] of Object.entries(policies)) {
+        const base=DATA.rooms.find(r=>roomKey(r)===identity);
+        for(let terrain=0;terrain<3;terrain++) {
+          const variant=terrainRoom(base,terrain);
+          send(SharedActionPreview.encode(DATA,BLOBS,variant),api.RoomPreview_Load);
+          try {send(new TextEncoder().encode(roomSectionHeader(base)+'\n'+bgPolicyPairLines(pair).join('\n')),api.RoomPreview_Configure);}
+          catch {throw Error(`Background policy rejected for room ${base.group}:${base.map}, ${terrainLabel(variant)} terrain. Check band order, overlap and world row bounds.`);}
+        }
+      }
+    } finally {
+      key='';config='';configDirty=true;effectsConfig=null;collision=null;eventConfig=null;skyboxKey=0;
+      ensureRoom();
+    }
+  }
+  function policyPlan(defaults=false) {
+    ensureRoom();
+    if(api.RoomPreview_Policy(nativeCamera.x,nativeCamera.y,nativeFrame,defaults?1:0)!==98)
+      throw Error('Unable to resolve background policy at this camera.');
+    const words=new Int32Array(api.memory.buffer,api.DioramaPreview_Input(),98).slice();
+    return [0,1].map(bg=>{
+      const f=words.subarray(bg*49,(bg+1)*49),bands=[];
+      for(let i=0;i<f[11];i++) {
+        const b=f.subarray(17+i*8,25+i*8);
+        bands.push({y0:b[0],y1:b[1],edge:BG_POLICY_EDGES[b[2]],motion:BG_POLICY_MOTIONS[b[3]],
+          anchor:['screen','world'][b[4]],horizontal:{mode:BG_POLICY_EXTENTS[b[5]],left:b[6],right:b[7]}});
+      }
+      return {valid:!!f[0],role:f[1],source:f[2],edge:BG_POLICY_EDGES[f[3]],motion:BG_POLICY_MOTIONS[f[4]],
+        horizontal:{mode:BG_POLICY_EXTENTS[f[5]],left:f[6],right:f[7]},
+        vertical:{mode:BG_POLICY_EXTENTS[f[8]],top:f[9],bottom:f[10]},bands,
+        cameraX:f[12],cameraY:f[13],width:f[14],height:f[15],wrap:!!f[16]};
+    });
+  }
   function validateEffects(text) {
     ensureRoom();
     const bytes=new TextEncoder().encode(text);
@@ -241,5 +285,5 @@ const SharedRoomPreview = (() => {
     return [api.RoomPreview_RayFieldMapScale(0),api.RoomPreview_RayFieldMapScale(1)];
   }
   initialize();
-  return {syncSources,validateEffects,previewActorBinding,surfaceFieldDefinition,projectileFieldDefinition,arcFieldDefinition,glowFieldDefinition,castleFieldDefinition,marshFieldDefinition,atmosphereFieldDefinition,rayFieldDefinition,rayFieldMapScale,moonFieldDefinition,waterFieldDefinition,waterFieldMapScale,collisionGrid,draw:render,invalidate:()=>{configDirty=true;}};
+  return {syncSources,validateScenery,validatePolicyDocument,policyPlan,validateEffects,previewActorBinding,surfaceFieldDefinition,projectileFieldDefinition,arcFieldDefinition,glowFieldDefinition,castleFieldDefinition,marshFieldDefinition,atmosphereFieldDefinition,rayFieldDefinition,rayFieldMapScale,moonFieldDefinition,waterFieldDefinition,waterFieldMapScale,collisionGrid,draw:render,invalidate:()=>{configDirty=true;}};
 })();

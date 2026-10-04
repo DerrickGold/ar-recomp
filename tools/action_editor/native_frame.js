@@ -47,7 +47,13 @@ function terrainRoom(base, profile = terrainProfile) {
     bg:[variant.bg1,base.bg[1]], nativeGolden:variant.nativeGolden,
     changedCells:variant.changedCells, changedMetatiles:variant.changedMetatiles} : base;
 }
-const sceneKey = r => `${r.group}:${r.map}:${r.terrainProfile || 0}`;
+const sceneIdentity = r => `${r.group}:${r.map}${r.section?':'+r.section:''}`;
+const sceneKey = r => `${sceneIdentity(r)}:${r.terrainProfile || 0}`;
+function roomFromSection(header) {
+  const m=header.match(/^\[layers:([\da-f]{1,2}):([\da-f]{1,2})(?::(completion))?\]$/i);
+  return m&&DATA.rooms.find(r=>r.group===parseInt(m[1],16)&&r.map===parseInt(m[2],16)&&
+    (r.section||'')===(m[3]||''));
+}
 const terrainLabel = r => (TERRAIN_PROFILES.find(
   p => p.profile === (r.terrainProfile || 0)) || TERRAIN_PROFILES[0]).label;
 /* These are diorama.c's real defaults, including its paint slots. INI values

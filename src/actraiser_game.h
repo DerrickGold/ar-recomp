@@ -60,8 +60,18 @@ enum {
   kActRaiserDeathHeimMap_LastBoss = 0x07,
   kActRaiserDeathHeimMap_FinalBoss = 0x08,
   kActRaiserDeathHeimProgress_FinalBossBeaten = 0x07,
-  kActRaiserDeathHeimEndingState_SkySettled = 0x03,
 };
+
+/* $00:F5F0..F619 changes both tilemap pages under the final-boss fade.
+ * Progress is already 7 while the faces are still visible. $0334 is a song
+ * selection, so it cannot identify this scenery transition. */
+static inline bool ActRaiser_IsDeathHeimCompletionScene(
+    uint8 group, uint8 map, uint8 progress, uint8 bg1sc, uint8 bg2sc) {
+  return group == kActRaiserMapGroup_DeathHeim &&
+      map == kActRaiserDeathHeimMap_Hub &&
+      progress >= kActRaiserDeathHeimProgress_FinalBossBeaten &&
+      (bg1sc & 0xfc) == 0x64 && (bg2sc & 0xfc) == 0x74;
+}
 
 /* Stable low-WRAM state addresses. These are offsets within g_ram's $7E bank
  * mirror, not general SNES bus addresses. */
@@ -142,7 +152,7 @@ enum {
   kActRaiserWram_WorldZoomTarget = 0x0318,
   kActRaiserWram_WorldEmergenceState = 0x031A,
 
-  kActRaiserWram_DeathHeimEndingState = 0x0334,
+  kActRaiserWram_SongSelection = 0x0334,
   /* $01:B6CA clears this, then writes the 1-based entry selected from the
    * seven region table at $01:B73C. Zero means outside every border. The same
    * value owns the world-map label and destination. */

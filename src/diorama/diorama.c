@@ -625,6 +625,19 @@ static const DioramaLayerDesc *DioramaDescForPlane(int plane) {
   return NULL;
 }
 
+static bool DeathHeimFaceScene(const DioramaScene *scene) {
+  return scene->map_group == kActRaiserMapGroup_DeathHeim &&
+      scene->map_number == kActRaiserDeathHeimMap_Hub &&
+      scene->layer_section == kDioramaLayerSection_Room;
+}
+
+static bool SkyboxReplacesPlane(const DioramaScene *scene, int plane) {
+  /* Room 1 A's far band contains the faces and their captured eye sprites.
+   * Ordinary BG2 is the independently scrolling water below those faces. */
+  return scene->render->skybox == kDioramaSky_Only &&
+      !(DeathHeimFaceScene(scene) && plane == SR_PPU_OVERLAY_BG2);
+}
+
 /* Projection publication and drawing must describe the same frame. Keeping
  * every visibility/resource gate here prevents a hidden or unuploaded plane
  * from remaining projectable to presentation effects. */
@@ -636,7 +649,7 @@ static bool DioramaLayerIsDrawable(
       ArRenderTexture_IsValid(textures[layer->plane]),
       pixels[layer->plane] != NULL,
       scene->render->hud_flat,
-      scene->render->skybox == kDioramaSky_Only,
+      SkyboxReplacesPlane(scene, layer->plane),
       scene->additive_plane_mask);
 }
 
@@ -658,7 +671,7 @@ static bool DioramaLayerIsProjectable(
       ArRenderTexture_IsValid(textures[layer->plane]),
       pixels[layer->plane] != NULL,
       has_obj_effect || has_bg_effect, scene->render->hud_flat,
-      scene->render->skybox == kDioramaSky_Only,
+      SkyboxReplacesPlane(scene, layer->plane),
       scene->additive_plane_mask);
 }
 
@@ -1331,6 +1344,7 @@ static PresentationOutcome DrawDioramaSkybox(
     const DioramaBgValidSpanPlan *valid_spans,
     ArRenderPointF capture_offset, int motion_source, bool follow_camera,
     int authentic_y0, float camera_delta, float pixel_aspect,
+    float face_bottom_y, float foreground_top_y,
     DioramaSkyboxProjection *projection, const DioramaRenderOptions *options) {
   if (!ArRenderTexture_IsValid(skybox_texture) || snes_height <= 0)
     return kPresentationOutcome_CoreFailure;
@@ -1427,7 +1441,7 @@ static PresentationOutcome DrawDioramaSkybox(
       DioramaSkyboxVerticalMapping_Build(
           valid_spans, snes_height, source_height,
           blur_radius, &vertical);
-  const DioramaSkyboxVerticalMapping raw_vertical = vertical;
+  DioramaSkyboxVerticalMapping raw_vertical = vertical;
   float motion_follow[8] = {0};
   if (!rom_source && follow_camera && vertical_valid) {
     const float low = vertical.texture_v0 * source_height;
@@ -1440,13 +1454,62 @@ static PresentationOutcome DrawDioramaSkybox(
     DioramaSkyboxVerticalMapping_FollowCamera(
         &vertical, source_height, authentic_y0, camera_delta + capture_offset.y);
   }
+  float band_u0[kDioramaBgMaxValidSpans] = {0};
+  float band_u1[kDioramaBgMaxValidSpans] = {0};
+  float available_width = INFINITY;
+  for (unsigned i = 0; i < span_count; i++) {
+    if (!vertical_valid || spans[i].x1 <= spans[i].x0 ||
+        spans[i].y1 <= vertical.capture_y0 || spans[i].y0 >= vertical.capture_y1)
+      continue;
+    if (rom_source)
+      DioramaRomSkyboxUvRange(
+          snes_width, source_width, &band_u0[i], &band_u1[i]);
+    else
+      DioramaSkyboxUvRange(source_width, spans[i].x0, spans[i].x1,
+                            blur_radius, &band_u0[i], &band_u1[i]);
+    available_width = fminf(available_width,
+        (band_u1[i] - band_u0[i]) * source_width);
+  }
+  /* Preserve pixel shape with one vertical window across raster bands. A wide
+   * capture usually needs a horizontal crop; a narrow finite source crops the
+   * vertical window instead. Published effect bounds use these same UVs. */
+  motion_follow[4] = available_width;
+  motion_follow[5] = out_h > 0 ? (float)out_w / out_h : 0;
+  motion_follow[6] = pixel_aspect;
+  if (projection && options->draw_resident_skybox)
+    memcpy(projection->motion_follow, motion_follow, sizeof(motion_follow));
+  const float fitted_width = DioramaSkyboxVerticalMapping_FitAspect(
+      &vertical, source_height, available_width,
+      out_h > 0 ? (float)out_w / out_h : 0.0f, pixel_aspect);
+  if (face_bottom_y > 0.0f && isfinite(foreground_top_y) && fitted_width > 0.0f) {
+    /* The horizontal fit makes the faces larger than the water plane. Keep
+     * their last source row above the projected cloud edge, with eight native
+     * output rows of breathing room. Translate the sampling window without
+     * changing its size, so faces and eye sprites retain the same scale. */
+    const float texture_height = (vertical.texture_v1 - vertical.texture_v0) * source_height;
+    const float target = fmaxf(0.0f, fminf(1.0f,
+        foreground_top_y / out_h - 8.0f / kActRaiserAuthenticHeight));
+    const float bottom = (face_bottom_y + capture_offset.y -
+        vertical.texture_v0 * source_height) / texture_height;
+    const float shift = fmaxf(0.0f, bottom - target) * texture_height;
+    const float capture_shift = shift *
+        (vertical.capture_y1 - vertical.capture_y0) / texture_height;
+    vertical.capture_y0 += capture_shift;
+    vertical.capture_y1 += capture_shift;
+    vertical.texture_v0 += shift / source_height;
+    vertical.texture_v1 += shift / source_height;
+    raw_vertical.capture_y0 += capture_shift;
+    raw_vertical.capture_y1 += capture_shift;
+    raw_vertical.texture_v0 += shift / source_height;
+    raw_vertical.texture_v1 += shift / source_height;
+  }
   if (projection) projection->motion_source = rom_source ? 1 : motion_source;
   if (options->draw_resident_skybox && !rom_source) {
     DioramaSkyboxSourceDraw draw = {
       .indices = indices, .vertex_count = 4, .index_count = 6, .blend = draw_state.blend,
       .texture_width = source_width, .texture_height = source_height,
       .radius = blur_bound ? blur_radius : 0,
-      .motion_slot = motion_source == 3 ? 3 : 6,
+      .motion_slot = motion_source == 4 ? 5 : motion_source == 3 ? 3 : 6,
       .mapping = {.meta = {span_count, source_width, source_height, pixel_aspect},
         .output = {out_w, out_h, capture_offset.x, capture_offset.y},
         .vertical = {raw_vertical.capture_y0, raw_vertical.capture_y1,
@@ -1478,33 +1541,6 @@ static PresentationOutcome DrawDioramaSkybox(
     if (blur_bound && !DioramaEffectBackend_Unbind(device)) return kPresentationOutcome_CoreFailure;
     return outcome;
   }
-  float band_u0[kDioramaBgMaxValidSpans] = {0};
-  float band_u1[kDioramaBgMaxValidSpans] = {0};
-  float available_width = INFINITY;
-  for (unsigned i = 0; i < span_count; i++) {
-    if (!vertical_valid || spans[i].x1 <= spans[i].x0 ||
-        spans[i].y1 <= vertical.capture_y0 || spans[i].y0 >= vertical.capture_y1)
-      continue;
-    if (rom_source)
-      DioramaRomSkyboxUvRange(
-          snes_width, source_width, &band_u0[i], &band_u1[i]);
-    else
-      DioramaSkyboxUvRange(source_width, spans[i].x0, spans[i].x1,
-                            blur_radius, &band_u0[i], &band_u1[i]);
-    available_width = fminf(available_width,
-        (band_u1[i] - band_u0[i]) * source_width);
-  }
-  /* Preserve pixel shape with one vertical window across raster bands. A wide
-   * capture usually needs a horizontal crop; a narrow finite source crops the
-   * vertical window instead. Published effect bounds use these same UVs. */
-  motion_follow[4] = available_width;
-  motion_follow[5] = out_h > 0 ? (float)out_w / out_h : 0;
-  motion_follow[6] = pixel_aspect;
-  if (projection && options->draw_resident_skybox)
-    memcpy(projection->motion_follow, motion_follow, sizeof(motion_follow));
-  const float fitted_width = DioramaSkyboxVerticalMapping_FitAspect(
-      &vertical, source_height, available_width,
-      out_h > 0 ? (float)out_w / out_h : 0.0f, pixel_aspect);
   for (unsigned i = 0; i < span_count; i++) {
     /* The layer capture may contain unavailable top/bottom rows when another
      * primary plane owns a taller world. A skybox is an enveloping backdrop:
@@ -1859,11 +1895,47 @@ static PresentationOutcome DrawPeriodicDioramaSkybox(
   return kPresentationOutcome_Complete;
 }
 
+enum { kDeathHeimFaceRows = 9 * 16 };
+
+/* The cloud band's top is one line across the BG2 mesh. Clip its projected
+ * endpoints to the output before choosing the highest visible point; a yawed
+ * off-screen corner must not pull the faces out of view. */
+static float DeathHeimCloudTop(const DioramaCapture *capture,
+    const DioramaViewGeometry *geometry, const DioramaResolvedLayer *resolved,
+    int resolved_count) {
+  for (int i = 0; i < resolved_count; i++) {
+    const DioramaResolvedLayer *layer = &resolved[i];
+    if (layer->plane != SR_PPU_OVERLAY_BG2 || !layer->alpha) continue;
+    const float offset_y = capture->plane_capture_offsets
+        ? capture->plane_capture_offsets[SR_PPU_OVERLAY_BG2].y : 0.0f;
+    const float t = (capture->authentic_y0 + kDeathHeimFaceRows + offset_y) /
+        capture->height;
+    const float y = (0.5f - t) * geometry->height_scale + geometry->bg2_world_y_offset;
+    const float z = DioramaTiltedRowDepth(layer->z - 0.5f, layer->rake, layer->bow, t);
+    ArRenderPointF left, right;
+    if (!ProjectWorldPoint(geometry->matrix, -0.5f * geometry->aspect_x, y, z,
+            geometry->width, geometry->height, &left) ||
+        !ProjectWorldPoint(geometry->matrix, 0.5f * geometry->aspect_x, y, z,
+            geometry->width, geometry->height, &right)) return NAN;
+    if (left.x > right.x) {
+      const ArRenderPointF swap = left;
+      left = right;
+      right = swap;
+    }
+    const float x0 = fmaxf(0.0f, left.x), x1 = fminf(geometry->width, right.x);
+    if (x1 < x0) return NAN;
+    const float slope = right.x > left.x ? (right.y - left.y) / (right.x - left.x) : 0;
+    return fminf(left.y + (x0 - left.x) * slope, left.y + (x1 - left.x) * slope);
+  }
+  return NAN;
+}
+
 /* The skybox draws first. Missing ROM art falls back to current captured
  * BG2; failed renderer restoration is a core failure, never a fallback. */
 static PresentationOutcome DrawResolvedDioramaSkybox(
     ArRenderDevice *device, const DioramaCapture *capture,
-    const DioramaViewGeometry *geometry, const ArRenderTexture *textures,
+    const DioramaScene *scene, const DioramaViewGeometry *geometry,
+    const ArRenderTexture *textures,
     const DioramaResolvedLayer *resolved, int resolved_count,
     DioramaProjection *projection) {
   PresentationOutcome outcome = kPresentationOutcome_Complete;
@@ -1888,7 +1960,27 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
     const DioramaBgValidSpanPlan *skybox_valid_spans = capture->bg2_valid_spans;
     const int skybox_source =
         DioramaLayerOrder_SkyboxSource(resolved, resolved_count);
-    if (skybox_source == kDioramaLayerSource_Captured && capture->skybox &&
+    const bool face_skybox = DeathHeimFaceScene(scene) &&
+        skybox_source == kDioramaLayerSource_Captured;
+    if (face_skybox) {
+      skybox_texture = textures[kDioramaPlane_Bg2Far];
+      skybox_motion_source = 4;
+      capture_offset = (ArRenderPointF){capture->obj_apron, 0};
+      if (capture->plane_capture_offsets) {
+        capture_offset.x += capture->plane_capture_offsets[kDioramaPlane_Bg2Far].x;
+        capture_offset.y += capture->plane_capture_offsets[kDioramaPlane_Bg2Far].y;
+      }
+      /* The water's repeating row policy must not widen or shrink the faces.
+       * Fit the authentic face image to the enveloping skybox; both the eye
+       * sprites and authored tile pixels already share this capture space. */
+      const int x0 = capture->obj_apron +
+          (capture->width - kActRaiserAuthenticWidth) / 2;
+      skybox_spans = (DioramaBgValidSpanPlan){.count = 1, .spans = {{
+          capture->authentic_y0, capture->authentic_y0 + kActRaiserAuthenticHeight,
+          x0, x0 + kActRaiserAuthenticWidth}}};
+      skybox_valid_spans = &skybox_spans;
+    }
+    if (!face_skybox && skybox_source == kDioramaLayerSource_Captured && capture->skybox &&
         capture->skybox->periodic && ArRenderTexture_IsValid(capture->skybox->texture)) {
       float reference_z = DioramaBg1ReferenceZ() - 0.5f;
       for (int i = 0; i < resolved_count; ++i)
@@ -1900,7 +1992,7 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
       /* A camera looking past the plane's horizon uses the ordinary captured
        * skybox. Never submit partially initialized inverse-projection data. */
     }
-    if (skybox_source == kDioramaLayerSource_Captured && capture->skybox &&
+    if (!face_skybox && skybox_source == kDioramaLayerSource_Captured && capture->skybox &&
         !capture->skybox->periodic &&
         ArRenderTexture_IsValid(capture->skybox->texture) &&
         capture->bg2_valid_spans) {
@@ -1953,20 +2045,26 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
       }
     }
 
-    if (rom_skybox || capture->pixels[SR_PPU_OVERLAY_BG2] ||
-        (capture->skybox &&
+    if (rom_skybox || capture->pixels[face_skybox
+            ? kDioramaPlane_Bg2Far : SR_PPU_OVERLAY_BG2] ||
+        (!face_skybox && capture->skybox &&
          ArRenderTexture_IsValid(capture->skybox->texture))) {
+      DioramaRenderOptions skybox_options = *geometry->options;
+      if (face_skybox) skybox_options.margin_fix = true;
       const PresentationOutcome skybox = DrawDioramaSkybox(
           device, skybox_texture, skybox_apron, skybox_width, capture->height,
           geometry->width, geometry->height, both,
           both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly, rom_skybox,
           skybox_revision, skybox_dynamic, skybox_valid_spans, capture_offset,
-          skybox_motion_source, capture->bg2_scroll_valid, capture->authentic_y0,
+          skybox_motion_source, !face_skybox && capture->bg2_scroll_valid,
+          capture->authentic_y0,
           (geometry->world_y_offset + geometry->bg2_world_y_offset) *
               kActRaiserAuthenticHeight,
           geometry->aspect_x * kActRaiserAuthenticHeight / capture->width,
-          projection && !projection->bg2_plane.valid
-              ? &projection->bg2_skybox : NULL, geometry->options);
+          face_skybox ? capture->authentic_y0 + kDeathHeimFaceRows : 0,
+          face_skybox ? DeathHeimCloudTop(capture, geometry, resolved, resolved_count) : NAN,
+          projection && (face_skybox || !projection->bg2_plane.valid)
+              ? &projection->bg2_skybox : NULL, &skybox_options);
       outcome = PresentationOutcome_Combine(outcome, skybox);
       if (!PresentationOutcome_IsUsable(skybox)) {
         return kPresentationOutcome_CoreFailure;
@@ -2128,6 +2226,42 @@ static void PrepareDioramaView(const DioramaCapture *capture,
         for (int c = 0; c < 16; ++c)
           geometry->matrix[c] += framing_weight * (clamped[c] - geometry->matrix[c]);
     }
+  }
+}
+
+/* A's water is a finite moving plane. Lower it to the viewport's bottom;
+ * the enlarged faces occupy the space above it. Four native rows of guard
+ * keep the captured bottom border and its filter footprint below the output. */
+static void PlaceDeathHeimWater(const DioramaCapture *capture,
+    const DioramaScene *scene, const ArRenderTexture *textures,
+    const DioramaResolvedLayer *resolved, int resolved_count,
+    DioramaViewGeometry *geometry) {
+  if (!DeathHeimFaceScene(scene) || scene->render->skybox != kDioramaSky_Only)
+    return;
+  const float slope = geometry->matrix[5] + geometry->matrix[7];
+  if (slope <= 0.0f) return;
+  for (int i = 0; i < resolved_count; i++) {
+    const DioramaResolvedLayer *layer = &resolved[i];
+    if (layer->plane != SR_PPU_OVERLAY_BG2 || !layer->alpha ||
+        !DioramaLayerIsDrawable(DioramaDescForPlane(layer->plane),
+            textures, capture->pixels, scene)) continue;
+    const ArRenderPointF offset = capture->plane_capture_offsets
+        ? capture->plane_capture_offsets[layer->plane] : (ArRenderPointF){0};
+    const float t = (capture->authentic_y0 + kActRaiserAuthenticHeight - 4 + offset.y) /
+        capture->height;
+    const float y = (0.5f - t) * geometry->height_scale + geometry->bg2_world_y_offset;
+    const float z = DioramaTiltedRowDepth(layer->z - 0.5f, layer->rake, layer->bow, t);
+    float shift = 0.0f;
+    for (int side = 0; side < 2; side++) {
+      Scene3DClipPoint point;
+      if (!Scene3D_TransformToClip(geometry->matrix,
+              (side - 0.5f + offset.x / capture->width) * geometry->aspect_x,
+              y, z, &point) ||
+          point.w <= kScene3DMinimumProjectionDepth) return;
+      shift = fminf(shift, (-point.w - point.y) / slope);
+    }
+    geometry->bg2_world_y_offset += shift;
+    return;
   }
 }
 
@@ -3038,15 +3172,17 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
   const int resolved_count = Diorama_ResolveSceneLayers(scene, resolved);
   PrepareDioramaView(capture, view, scene, textures, resolved, resolved_count,
                      &geometry);
+  PlaceDeathHeimWater(capture, scene, textures, resolved, resolved_count, &geometry);
   PublishDioramaView(capture, view, &geometry, out_projection);
   PublishDioramaPlanes(capture, scene, &geometry, textures, resolved,
                        resolved_count, out_projection);
   PresentationOutcome outcome = DrawResolvedDioramaSkybox(
-      device, capture, &geometry, textures, resolved, resolved_count, out_projection);
+      device, capture, scene, &geometry, textures, resolved, resolved_count, out_projection);
   if (!PresentationOutcome_IsUsable(outcome))
     goto failed;
 
-  if (out_projection && out_projection->bg2_skybox.count &&
+  if (out_projection && !out_projection->bg2_plane.valid &&
+      out_projection->bg2_skybox.count &&
       (scene->effect_bg_plane_mask & (1u << SR_PPU_OVERLAY_BG2))) {
     /* The skybox replaces BG2-low. Draw its attached enhancements here once
      * per UV band, before enclosure, foreground scenery and actors. Keep the

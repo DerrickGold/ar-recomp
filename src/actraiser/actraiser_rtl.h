@@ -55,6 +55,8 @@ void ActRaiser_LiveMargins(int *left, int *right);
  * belonging to those same pixels. Returns false only for an invalid plan. */
 bool ActRaiser_LiveActionBgPlan(ActionBgPlan *out,
                                 bool *pad_captured_to_budget);
+/* Scene identity latched with the rendered pixels, before effect-local scopes. */
+uint8_t ActRaiser_LiveScenerySection(void);
 /* Optional host-owned skybox pixels from the same completed scanout. Borrowed
  * until the next tick/reset, like the other FrameSlot surface products.
  * world_x is the canonical left edge resolved from that scanout request. */

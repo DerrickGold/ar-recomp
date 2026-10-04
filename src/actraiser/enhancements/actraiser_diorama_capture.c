@@ -263,9 +263,19 @@ static void ActRaiser_BindDioramaPriorityBands(size_t pitch) {
           ActRaiser_CurrentVirtualLayerRoom();
       const int virtual_bg =
           bands[i].plane == kDioramaPlane_Bg1Far ? 0 : 1;
-      if (!virtual_room || (!DioramaLayerOrder_VirtualLayerIsAuthored(
+      const SrPpuFrameTransactionContext *frame = ActRaiser_PpuFrame();
+      const bool face_skybox = virtual_bg == 1 && frame &&
+          g_settings.diorama_skybox != kDioramaSky_Off &&
+          g_ram[kActRaiserWram_MapGroup] == kActRaiserMapGroup_DeathHeim &&
+          g_ram[kActRaiserWram_CurrentMap] == kActRaiserDeathHeimMap_Hub &&
+          !ActRaiser_IsDeathHeimCompletionScene(
+              g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
+              g_ram[kActRaiserWram_DeathHeimProgress],
+              frame->state.background_tilemap_control[0],
+              frame->state.background_tilemap_control[1]);
+      if (!face_skybox && (!virtual_room || (!DioramaLayerOrder_VirtualLayerIsAuthored(
                                &virtual_room->virtual_layers[virtual_bg]) &&
-                            !virtual_room->stamp_layers[virtual_bg].count))
+                            !virtual_room->stamp_layers[virtual_bg].count)))
         continue;
     }
     ActRaiser_BindPpuOutput(SR_PPU_OUTPUT_OVERLAY_PRIORITY, bands[i].source,

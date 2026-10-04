@@ -241,10 +241,10 @@ static bool Uniform(const DioramaProjection *v, unsigned width, unsigned height,
   u->planes[4] = Plane(v, &v->bg2_high_plane, 4);
   for (unsigned i = 0; i < kDioramaObjectPriorityCount; ++i)
     u->planes[i ? 5 + i : 0] = Plane(v, &v->object_planes[i], -1);
-  if (v->bg2_skybox.count) {
+  if (v->bg2_skybox.count && !v->bg2_plane.valid) {
     const DioramaSkyboxProjection *sky = &v->bg2_skybox;
     const int motion_slot = sky->motion_source == 1 ? -1 : sky->motion_source == 2 ? 0 :
-        sky->motion_source == 3 ? 3 : 6;
+        sky->motion_source == 4 ? 5 : sky->motion_source == 3 ? 3 : 6;
     u->sky_mapping = sky->resident;
     u->sky_meta[0] = sky->count; u->sky_meta[1] = sky->active_band;
     if (sky->world_plane.valid) {

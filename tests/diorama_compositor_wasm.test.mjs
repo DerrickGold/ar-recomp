@@ -33,7 +33,7 @@ instance.exports._initialize?.();
 const memorySize = instance.exports.memory.buffer.byteLength;
 let offset = 0, maxError = 0, total = 0;
 const cases = instance.exports.DioramaFixture_Count();
-assert.equal(cases, 108);
+assert.equal(cases, 120);
 for (let test = 0; test < cases; test++) {
   let count;
   try { count = instance.exports.DioramaFixture_Run(test); }

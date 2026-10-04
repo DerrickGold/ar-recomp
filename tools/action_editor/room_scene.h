@@ -27,6 +27,9 @@ void EditorRoomScene_Destroy(EditorRoomScene *room);
 /* Complete selected-room INI text; parser/terrain resolution are production C.
  * Bad edits leave the previous configuration intact. */
 bool EditorRoomScene_Configure(EditorRoomScene *room, const char *text);
+/* Query the production planner before/after saved overrides at this camera. */
+bool EditorRoomScene_BgPolicy(const EditorRoomScene *room, int x, int y,
+                              uint32_t frame, bool defaults, ActionBgPlan *out, int camera_x[2]);
 bool EditorRoomScene_Render(EditorRoomScene *room, int x, int y, uint32_t frame,
                             int extra_x, int vertical_budget);
 const DioramaCapture *EditorRoomScene_Capture(const EditorRoomScene *room);

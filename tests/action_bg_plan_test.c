@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "action/action_bg_plan.h"
+#include "diorama/diorama_bg_policy.h"
 
 static int failures;
 #define CHECK(e) do { if (!(e)) { \
@@ -974,20 +975,19 @@ static void TestDeathHeimStates(void) {
         plan.layer[1].horizontal_extent.right == 128);
   CHECK(plan.layer[1].vertical_extent.mode == kActionBgExtent_Available);
 
-  /* The settled-state fallback reaches the same immutable policy if the page
-   * registers are no longer observable at their transition values. */
-  state.layer[0].bgsc = 0x60;
+  /* Neither final progress nor a half-completed page swap selects B. The
+   * later song-3 write is audio state and no longer participates in this plan. */
+  state.layer[0].bgsc = 0x64;
   state.layer[1].bgsc = 0x70;
-  state.death_heim_ending_state = 3;
   plan = Build(&state);
-  CHECK(plan.layer[1].default_edge == kActionBgEdge_Mirror);
-  CHECK(plan.layer[1].horizontal_extent.mode == kActionBgExtent_Fixed);
-  CHECK(plan.layer[1].horizontal_extent.left == 128 &&
-        plan.layer[1].horizontal_extent.right == 128);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Clamp);
+  state.layer[0].bgsc = 0x60;
+  state.layer[1].bgsc = 0x74;
+  plan = Build(&state);
+  CHECK(plan.layer[1].default_edge == kActionBgEdge_Clamp);
 
   /* Matching pages without completed progress are not sufficient. */
   state.death_heim_progress = 0;
-  state.death_heim_ending_state = 0;
   state.layer[0].bgsc = 0x64;
   state.layer[1].bgsc = 0x74;
   plan = Build(&state);
@@ -1069,7 +1069,54 @@ static void TestEveryKnownMapClassifies(void) {
   }
 }
 
+static void TestSavedPolicyOverrides(void) {
+  ActionBgFrameState state = State(7, 3);
+  ActionBgPlan plan = Build(&state), canonical = plan;
+  DioramaBgPolicyOverride edits[2] = {0};
+  CHECK(DioramaBgPolicy_Apply(edits, &plan));
+  CHECK(!memcmp(&plan, &canonical, sizeof(plan)));
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_Mirror);
+  edits[0] = (DioramaBgPolicyOverride){
+    .set_edge = true, .edge = kActionBgEdge_LiveWorld,
+    .set_horizontal = true, .horizontal = {.mode = kActionBgExtent_Available},
+    .set_vertical = true, .vertical = {.mode = kActionBgExtent_Fixed, .bottom = 64},
+    .set_bands = true,
+  };
+  CHECK(DioramaBgPolicy_Apply(edits, &plan));
+  CHECK(plan.layer[0].default_edge == kActionBgEdge_LiveWorld);
+  CHECK(plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available);
+  CHECK(plan.layer[0].vertical_extent.bottom == 64 && !plan.layer[0].band_count);
+  CHECK(plan.layer[0].source == canonical.layer[0].source);
+  CHECK(plan.layer[0].role == canonical.layer[0].role);
+  CHECK(!memcmp(&plan.layer[1], &canonical.layer[1], sizeof(plan.layer[1])));
+  edits[0].band_count = 2;
+  edits[0].band_mask = 3;
+  edits[0].bands[0] = (ActionBgBand){.y0 = 0, .y1 = 100,
+      .edge = kActionBgEdge_Mirror, .anchor = kActionBgBandAnchor_Screen};
+  edits[0].bands[1] = (ActionBgBand){.y0 = 100, .y1 = 224,
+      .edge = kActionBgEdge_Repeat, .anchor = kActionBgBandAnchor_Screen};
+  CHECK(DioramaBgPolicy_Apply(edits, &plan));
+  ActionBgRowPolicy row;
+  CHECK(ActionBgLayerPlan_ResolveRow(&plan.layer[0], 99, &row));
+  CHECK(row.edge == kActionBgEdge_Mirror);
+  CHECK(ActionBgLayerPlan_ResolveRow(&plan.layer[0], 100, &row));
+  CHECK(row.edge == kActionBgEdge_Repeat);
+  ActionBgPlan previous = plan;
+  edits[0].bands[1].anchor = kActionBgBandAnchor_World;
+  /* These adjacent rows overlap once a world band scrolls against a screen band. */
+  CHECK(!DioramaBgPolicy_Apply(edits, &plan));
+  CHECK(!memcmp(&plan, &previous, sizeof(plan)));
+  edits[0].bands[1].anchor = kActionBgBandAnchor_Screen;
+  edits[0].band_mask = 1;
+  CHECK(!DioramaBgPolicy_Apply(edits, &plan));
+  CHECK(!memcmp(&plan, &previous, sizeof(plan)));
+  edits[0].band_mask = 3;
+  edits[0].set_bands = false;
+  CHECK(!DioramaBgPolicy_Apply(edits, &plan));
+}
+
 int main(void) {
+  TestSavedPolicyOverrides();
   TestValidationAndFallback();
   TestResolvedPresentationProjection();
   TestExtentValidationAndRowResolution();

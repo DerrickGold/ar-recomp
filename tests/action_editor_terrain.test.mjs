@@ -90,6 +90,7 @@ function editor(data,options={}) {
     }},
     document:documentHost,
     navigator:{clipboard:{async writeText(text) {documentHost.clipboardText=text;}}},
+    confirm(message) {documentHost.confirmMessage=message;return documentHost.confirmAnswer!==false;},
     atob:s => Buffer.from(s, 'base64').toString('binary'),
     requestAnimationFrame() {},
     ResizeObserver:class { observe() {} },
@@ -137,6 +138,198 @@ function fixture() {
     bg1Attributes:0x10, bg2Attributes:1, frameWidth:256, frameHeight:224,
     terrainProfiles:[{profile:0,label:'US'}, {profile:1,label:'Japanese'},
       {profile:2,label:'European'}]};
+}
+
+/* Same ROM room, independent scenery identities, including cross-scene undo. */
+{
+  const data=fixture(),base={...data.rooms[0],group:7,map:1,section:'',sceneLabel:'1 A — faces'};
+  data.rooms=[base,{...base,section:'completion',sceneLabel:'1 B — completion scenery'}];
+  const {run,elements}=editor(data,{ini:'; keep scene comments\n[layers:07:01]\nbg1-policy = edge:clamp\n[layers:07:01:completion]\nbg1-policy = edge:mirror\n'});
+  assert.match(elements.get('#room').children[0].textContent,/1 A — faces/);
+  assert.match(elements.get('#room').children[1].textContent,/1 B — completion scenery/);
+  assert.equal(run("roomConfig(DATA.rooms[0]).policy[0].edge"),'clamp');
+  assert.equal(run("roomConfig(DATA.rooms[1]).policy[0].edge"),'mirror');
+  assert.equal(run('bucket(DATA.rooms[0],0)===bucket(DATA.rooms[1],0)'),false);
+  assert.equal(run('stampBucket(DATA.rooms[0],0)===stampBucket(DATA.rooms[1],0)'),false);
+  run("selectCell(0,0);applySelectionBand(0); $('#room').value='1';$('#room').onchange();");
+  assert.equal(run('Object.keys(bucket(room,0).byCell).length'),0);
+  run('undo();');
+  assert.equal(run('room.section'),'');
+  run("redo(); $('#room').value='1';$('#room').onchange();selectCell(0,0);applySelectionBand(2);");
+  const document=run('mergeDioramaIni()');
+  assert.match(document,/\[layers:07:01:completion\]/);
+  assert.match(document,/keep scene comments/);
+  const reloaded=editor(data,{ini:document});
+  assert.equal(reloaded.run('bucket(DATA.rooms[0],0).byCell[0]'),0);
+  assert.equal(reloaded.run('bucket(DATA.rooms[1],0).byCell[0]'),2);
+  assert.equal(reloaded.run('roomConfig(DATA.rooms[1]).policy[0].edge'),'mirror');
+  run("stampBucket(room,0).cells['-1,0']=paletteTile(L,0);const bStamp=mergeDioramaIni();");
+  const stamped=editor(data,{ini:run('bStamp')});
+  assert.equal(stamped.run("!!stampBucket(DATA.rooms[0],0).cells['-1,0']"),false);
+  assert.equal(stamped.run("!!stampBucket(DATA.rooms[1],0).cells['-1,0']"),true);
+  console.log('Death Heim A/B: separate policy/depth/tile stores, selection, undo and INI reload passed');
+}
+
+/* Policy controls edit a whole transaction; the C boundary is mocked here,
+ * while the full room gate below exercises real planner acceptance and pixels. */
+{
+const policy=editor(fixture()),run=policy.run;
+run(`let rejectPolicy=false,policyValidations=0;
+  const defaultPolicy={valid:true,role:1,source:1,edge:'mirror',motion:'normal',
+    horizontal:{mode:'fixed',left:80,right:80},vertical:{mode:'available',top:0,bottom:0},
+    bands:[{y0:0,y1:80,anchor:'screen',edge:'repeat',motion:'fill',horizontal:{mode:'inherit',left:0,right:0}}],
+    cameraX:64,cameraY:47,width:512,height:256};
+  SharedRoomPreview.policyPlan=(defaults=false)=>[0,1].map(bg=>({...cloneBgPolicy(defaultPolicy),
+    ...(defaults?{}:cloneBgPolicy(roomConfig(room).policy[bg]))}));
+  SharedRoomPreview.validateScenery=text=>{policyValidations++;parseBgPolicyDocument(text);if(rejectPolicy)throw Error('Bands overlap across camera travel.');};
+  SharedRoomPreview.validatePolicyDocument=text=>parseBgPolicyDocument(text);
+  SharedRoomPreview.validateEffects=()=>{};
+  BackgroundPolicyEditor.refresh();`);
+assert.match(policy.elements.get('#bgPolicyEdge').children[0].textContent,/Mirror/);
+assert.equal(run('ProjectEditor.dirty()'),false);
+const effectsBefore=run('EffectEditor.text()');
+run(`$('#bgPolicyEdge').value='world';$('#bgPolicyEdge').onchange();
+  $('#bgPolicyHorizontal').value='available';$('#bgPolicyHorizontal').onchange();`);
+assert.equal(run('BackgroundPolicyEditor.pending()'),true);
+assert.equal(run('ProjectEditor.save()'),null);
+assert.match(policy.elements.get('#projectStatus').textContent,/Apply or discard background policy drafts/);
+run(`$('#bgPolicyApply').onclick()`);
+assert.equal(run('BackgroundPolicyEditor.pending()'),false);
+assert.equal(run('undoStack.length'),1);
+assert.equal(run('ProjectEditor.dirty()'),true);
+assert.match(run('mergeDioramaIni()'),/bg1-policy = edge:world horizontal:available/);
+assert.equal(run('roomConfig(room).policy[1].edge'),undefined);
+assert.equal(run('EffectEditor.text()'),effectsBefore);
+run('undo()');assert.equal(run('ProjectEditor.dirty()'),false);
+run('redo()');assert.equal(run('roomConfig(room).policy[0].edge'),'world');
+run(`$('#bgPolicyEdge').value='repeat';$('#bgPolicyEdge').onchange();setLayer(1)`);
+assert.equal(run('BackgroundPolicyEditor.pending()'),true,'draft survives switching backgrounds');
+assert.match(policy.elements.get('#bgPolicyDrafts').textContent,/01:01 BG1/);
+assert.equal(run('ProjectEditor.save()'),null,'another BG draft also prevents incomplete saves');
+run('setLayer(0)');assert.equal(policy.elements.get('#bgPolicyEdge').value,'repeat');
+run(`$('#bgPolicyDiscard').onclick()`);assert.equal(run('BackgroundPolicyEditor.pending()'),false);
+assert.equal(run('roomConfig(room).policy[0].edge'),'world');
+run(`$('#bgPolicyPainted').onclick()`);
+assert.deepEqual(JSON.parse(run('JSON.stringify(roomConfig(room).policy[0].bands)')),[]);
+assert.match(run('mergeDioramaIni()'),/vertical:available bands:0/);
+run(`const custom={edge:'mirror',horizontal:{mode:'fixed',left:24,right:48},bands:[
+    {anchor:'screen',y0:0,y1:112,edge:'mirror',motion:'normal',horizontal:{mode:'inherit',left:0,right:0}},
+    {anchor:'screen',y0:112,y1:224,edge:'repeat',motion:'fill',horizontal:{mode:'fixed',left:16,right:32}}]};
+  BackgroundPolicyEditor.apply(custom);`);
+const beforeInvalid=run('mergeDioramaIni()'),history=run('undoStack.length');
+assert.equal(run(`BackgroundPolicyEditor.apply({...custom,horizontal:{mode:'fixed',left:129,right:0}})`),false);
+assert.equal(run('mergeDioramaIni()'),beforeInvalid);
+run('rejectPolicy=true');assert.equal(run('BackgroundPolicyEditor.apply({...custom,edge:"raw"})'),false);
+assert.match(policy.elements.get('#bgPolicyStatus').textContent,/Bands overlap/);
+assert.equal(run('mergeDioramaIni()'),beforeInvalid);assert.equal(run('undoStack.length'),history);
+run('rejectPolicy=false');
+assert.throws(()=>run(`loadIniText('[layers:01:01]\\nbg1-policy = bands:1\\n','broken.ini')`),/missing a declared row band/);
+assert.equal(run('mergeDioramaIni()'),beforeInvalid,'invalid import preserves current scenery');
+assert.throws(()=>run(`parseBgPolicyDocument('[layers:01:01]\\nbg1-policy:jp = edge:mirror')`),/base room section/);
+assert.throws(()=>run(`parseBgPolicyDocument('[layers:01:01:aitos-waterfall]\\nbg1-policy = edge:mirror')`),/base room section/);
+
+run(`$('#terrain').value='1';$('#terrain').onchange()`);
+assert.equal(run('roomConfig(room).policy[0].horizontal.left'),24,'policy is shared across terrain');
+run(`$('#bgPolicyGuides').checked=true;BackgroundPolicyEditor.refresh();BackgroundPolicyEditor.drawGuides()`);
+const context=policy.elements.get('#map2d').getContext();
+assert(context.labels.some(l=>l.text.includes('policy limits')));
+assert(context.labels.some(l=>l.text.includes('Band 2')));
+const documents={...run('ProjectEditor.files()')};
+assert(run('ProjectEditor.save()'));
+assert.deepEqual({...await run('ActionProjectArchive.decode(document.exportedParts[0])')},documents);
+assert.equal(run('ProjectEditor.dirty()'),false);
+run(`$('#room').value='1';$('#room').onchange();undo()`);
+assert.equal(run('room.map'),1,'policy undo selects the edited room');
+assert.equal(run('bgIndex'),0);
+run('redo()');assert.equal(run('mergeDioramaIni()'),documents['diorama-layers.ini']);
+run(`$('#bgPolicyReset').onclick()`);assert.equal(run('roomIniLines(room).some(line=>line.includes("policy"))'),false);
+run(`ProjectEditor.load(${JSON.stringify(documents)},'policies.zip')`);
+assert.equal(run('mergeDioramaIni()'),documents['diorama-layers.ini']);
+assert.equal(run('EffectEditor.text()'),effectsBefore);
+console.log('Background policy controls: defaults, drafts, fill removal, caps/bands, native rejection, guides, undo, terrain sharing and project persistence passed');
+}
+
+/* Saving a project must keep every room/terrain and both documents, and must
+ * never hide effect-only edits or destroy work after a failed/cancelled load. */
+{
+const project=editor(fixture()),pj=project.run;
+pj(`SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=text=>{if(text.includes('INVALID'))throw Error('Effects rejected at line 3.');};
+  loadIniText('# preserved comment\\n[unrelated]\\nname=森\\n','scenery.ini');setLayer(0);
+  selectOnlyTile(0,0);applySelectionBand(0);
+  $('#terrain').value='1';$('#terrain').onchange();selectOnlyTile(1,0);applySelectionBand(2);
+  $('#room').value='1';$('#room').onchange();selectOnlyTile(2,0);applySelectionBand(0);
+  EffectEditor.placeEmitter('soft-light',64,96);`);
+assert.equal(pj('ProjectEditor.dirty()'),true);
+assert.equal(project.elements.get('#saveState').textContent,'Unsaved changes');
+const projectFiles={...pj('ProjectEditor.files()')};
+assert.match(projectFiles['diorama-layers.ini'],/name=森/);
+assert.match(projectFiles['diorama-layers.ini'],/layers:01:02/);
+assert.match(projectFiles['diorama-layers.ini'],/bg1-virtual:jp/);
+const projectBytes=pj('ProjectEditor.save()');
+assert(projectBytes);
+assert.deepEqual({...await pj('ActionProjectArchive.decode(document.exportedParts[0])')},projectFiles);
+assert.equal(pj('ProjectEditor.dirty()'),false);
+assert.equal(project.elements.get('#saveState').textContent,'Matches saved project');
+pj(`EffectEditor.editEmitter(EffectEditor.selected(),{intensity:'.5'});`);
+assert.equal(pj('editorHasUnexportedChanges()'),false);
+assert.equal(pj('ProjectEditor.dirty()'),true,'effect-only edits are unsaved');
+assert.equal(project.elements.get('#saveState').textContent,'Unsaved changes');
+pj('undo()');assert.equal(pj('ProjectEditor.dirty()'),false);
+pj('redo()');assert.equal(pj('ProjectEditor.dirty()'),true);
+pj(`$('#exportDownload').onclick()`);
+assert.equal(pj('ProjectEditor.dirty()'),true,'scenery export cannot mark effects saved');
+const failedSaveBefore=pj('EffectEditor.text()');
+pj(`const originalCreateElement=document.createElement;document.createElement=()=>{throw Error('download blocked');};ProjectEditor.save();document.createElement=originalCreateElement;`);
+assert.equal(pj('ProjectEditor.dirty()'),true);
+assert.equal(pj('EffectEditor.text()'),failedSaveBefore);
+assert.match(project.elements.get('#projectStatus').textContent,/download blocked/);
+const rejectedFiles={...projectFiles,'action-effects.ini':'[effects]\nversion=1\nINVALID'};
+assert.throws(()=>pj(`ProjectEditor.load(${JSON.stringify(rejectedFiles)},'bad.zip')`),/Effects rejected/);
+assert.equal(pj('EffectEditor.text()'),failedSaveBefore);
+assert.equal(pj('ProjectEditor.dirty()'),true);
+const tooManySpans='[layers:01:01]\n'+['us','jp'].map((terrain,t)=>Array.from({length:512},(_,cell)=>{
+  const x=cell%32,y=Math.floor(cell/32);
+  return `bg1-virtual:${terrain} = cells:${x},${y}-${x},${y} band:${(x+y+t)%2?2:0}\n`;
+}).join('')).join('');
+assert.throws(()=>pj(`ProjectEditor.load(${JSON.stringify({...projectFiles,'diorama-layers.ini':tooManySpans})})`),/Maximum 512/);
+assert.equal(pj('mergeDioramaIni()'),projectFiles['diorama-layers.ini'],'failed scenery load retains every previous edit');
+assert.equal(pj('EffectEditor.text()'),failedSaveBefore);
+assert.equal(pj('ProjectEditor.dirty()'),true);
+const legacyFiles=Object.entries(projectFiles).map(([name,text])=>({name,size:Buffer.byteLength(text),text:async()=>text}));
+project.elements.get('#projectLoad').files=legacyFiles;
+pj('document.confirmAnswer=false;');
+await pj("$('#projectLoad').onchange({target:$('#projectLoad')})");
+assert.equal(pj('EffectEditor.text()'),failedSaveBefore);
+assert.match(pj('document.confirmMessage'),/unsaved scenery and effects/);
+assert.match(project.elements.get('#projectStatus').textContent,/cancelled/);
+pj('document.confirmAnswer=true;');
+await pj("$('#projectLoad').onchange({target:$('#projectLoad')})");
+assert.deepEqual({...pj('ProjectEditor.files()')},projectFiles);
+assert.equal(pj('ProjectEditor.dirty()'),false);
+assert.equal(pj('undoStack.length+redoStack.length'),0);
+assert.equal(project.elements.get('#saveState').textContent,'Loaded project');
+project.elements.get('#projectLoad').files=[{name:'saved-project.zip',size:projectBytes.length,
+  arrayBuffer:async()=>projectBytes.buffer}];
+await pj("$('#projectLoad').onchange({target:$('#projectLoad')})");
+assert.deepEqual({...pj('ProjectEditor.files()')},projectFiles);
+assert.equal(project.elements.get('#iniName').textContent,'saved-project.zip');
+assert.equal(project.elements.get('#projectLoad').value,'');
+const reopen=editor(fixture()),rp=reopen.run;
+rp('SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};');
+rp(`ProjectEditor.load(${JSON.stringify(projectFiles)},'reopened.zip')`);
+assert.deepEqual({...rp('ProjectEditor.files()')},projectFiles);
+rp(`$('#room').value='1';$('#room').onchange();$('#terrain').value='1';$('#terrain').onchange();
+  EffectEditor.editEmitter(EffectEditor.mapEmitters()[0].id,{intensity:'.25'});`);
+const unload={preventDefault(){this.prevented=true;}};
+for(const callback of reopen.run('window.listeners.beforeunload'))callback(unload);
+assert.equal(unload.prevented,true);
+assert.equal(unload.returnValue,'');
+rp('undo()');assert.equal(rp('ProjectEditor.dirty()'),false);
+rp(`let saveKeyHandled=false;for(const callback of window.listeners.keydown)callback({key:'s',metaKey:true,
+  target:$('#nativeFrame'),preventDefault(){saveKeyHandled=true;}});`);
+assert.equal(rp('saveKeyHandled'),true,'Cmd-S saves the project even when a control has focus');
+assert.equal(reopen.elements.get('#saveState').textContent,'Matches saved project');
+console.log('Project save/load: all rooms/terrains, both INIs, ZIP and two-file imports, effect-only dirty state, undo, cancelled/rejected loads and failed-download retention passed');
 }
 
 const {run, elements} = editor(fixture());
@@ -419,7 +612,7 @@ console.log('Right-click selection, priority/bands, copy/paste, transparency, un
  * C parser/resolver behavior is covered by the native/WASM room gate. */
 const mist=editor(fixture());
 mist.run(`loadIniText('','mist.ini');setLayer(0);
-  SharedRoomPreview.validateEffects=()=>{};
+  SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
   SharedRoomPreview.collisionGrid=()=>({width:16,height:16,cells:new Uint8Array(256)});
   $('#floorMistDraw').onclick();`);
 const mistCanvas=mist.elements.get('#map2d');
@@ -458,7 +651,7 @@ mist.run('undo()');assert.equal(mist.run('EffectEditor.text()'),mistText);
 console.log('Mist brush: one-step undo/redo, region erase, terrain isolation, size bound and unchanged scenery passed');
 /* Native handles use sparse member records and never paint scenery. */
 const nativeEditor=editor(fixture()),nr=nativeEditor.run,nc=nativeEditor.elements.get('#map2d');
-nr(`loadIniText('','native.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+nr(`loadIniText('','native.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
   const buffer=new ArrayBuffer(32);new Uint8Array(buffer).set([0,...new TextEncoder().encode('forest-forward'),0]);
   EffectEditor.updateSources({memory:{buffer},RoomPreview_EffectCount:()=>1,RoomPreview_KindName:()=>1,
     RoomPreview_SourceValue:(i,f)=>f===1?1:0,RoomPreview_ReachSupported:()=>0,RoomPreview_MemberCount:()=>1,
@@ -489,7 +682,7 @@ const fieldEditor=editor(fixture()),fr=fieldEditor.run;
 const fieldData=fs.readFileSync(path.join(root,'assets/effects/forest-ray-field.ini'),'utf8')
   .split('\n').filter(line=>line&&!line.startsWith('[')&&!line.startsWith('#')&&!line.startsWith('version=')&&!line.startsWith('enabled='))
   .join('\n')+'\n';
-fr(`loadIniText('','complete.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+fr(`loadIniText('','complete.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
   SharedRoomPreview.rayFieldDefinition=()=>${JSON.stringify(fieldData)};
   SharedRoomPreview.rayFieldMapScale=()=>[2,1];
   const fieldBuffer=new ArrayBuffer(40);new Uint8Array(fieldBuffer).set(new TextEncoder().encode('forest-canopy\0'),1);
@@ -527,7 +720,7 @@ console.log('Complete ray-field extraction, editing, handle alignment, apply/can
 const waterEditor=editor(fixture()),wr=waterEditor.run;
 const waterData=fs.readFileSync(path.join(root,'assets/effects/cave-water-field.ini'),'utf8')
  .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
-wr(`loadIniText('','water.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+wr(`loadIniText('','water.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
  SharedRoomPreview.waterFieldDefinition=()=>${JSON.stringify(waterData)};SharedRoomPreview.waterFieldMapScale=()=>[2,4];
  const waterBuffer=new ArrayBuffer(40);new Uint8Array(waterBuffer).set(new TextEncoder().encode('cave-water\0'),1);
  EffectEditor.updateCatalogue({memory:{buffer:waterBuffer},RoomPreview_KindName:()=>1,RoomPreview_ReachSupported:()=>0,
@@ -552,7 +745,7 @@ console.log('Complete water contacts, contour gaps, marker bases, apply/cancel/u
 const moonEditor=editor(fixture()),mr=moonEditor.run;
 const moonData=fs.readFileSync(path.join(root,'assets/effects/moon-field.ini'),'utf8')
  .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
-mr(`loadIniText('','moon.ini');setLayer(1);SharedRoomPreview.validateEffects=()=>{};
+mr(`loadIniText('','moon.ini');setLayer(1);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
  SharedRoomPreview.moonFieldDefinition=()=>${JSON.stringify(moonData)};
  const moonBuffer=new ArrayBuffer(40);new Uint8Array(moonBuffer).set(new TextEncoder().encode('moonlight\0'),1);
  EffectEditor.updateCatalogue({memory:{buffer:moonBuffer},RoomPreview_KindName:()=>1,RoomPreview_ReachSupported:()=>0,
@@ -587,7 +780,7 @@ console.log('Complete moon definition, BG2 anchor drag, apply/cancel/undo, compo
 const castleEditor=editor(fixture()),csr=castleEditor.run;
 const castleData=fs.readFileSync(path.join(root,'assets/effects/castle-3-field.ini'),'utf8')
  .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
-csr(`loadIniText('','castle.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+csr(`loadIniText('','castle.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
  SharedRoomPreview.castleFieldDefinition=()=>${JSON.stringify(castleData)};
  const castleBuffer=new ArrayBuffer(40);new Uint8Array(castleBuffer).set(new TextEncoder().encode('castle-light\0'),1);
  EffectEditor.updateCatalogue({memory:{buffer:castleBuffer},RoomPreview_KindName:()=>1,RoomPreview_ReachSupported:()=>0,
@@ -613,7 +806,7 @@ console.log('Complete castle definition, surface placement, source validation, a
 const marshEditor=editor(fixture()),msr=marshEditor.run;
 const marshData=fs.readFileSync(path.join(root,'assets/effects/marsh-field.ini'),'utf8')
  .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
-msr(`loadIniText('','marsh.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+msr(`loadIniText('','marsh.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
  SharedRoomPreview.marshFieldDefinition=()=>${JSON.stringify(marshData)};
  const marshBuffer=new ArrayBuffer(40);new Uint8Array(marshBuffer).set(new TextEncoder().encode('blood-water\0'),1);
  EffectEditor.updateCatalogue({memory:{buffer:marshBuffer},RoomPreview_KindName:()=>1,RoomPreview_ReachSupported:()=>0,
@@ -639,7 +832,7 @@ console.log('Complete marsh definition, surface placement, source validation, ap
 const atmosphereEditor=editor(fixture()),atmosRun=atmosphereEditor.run;
 const atmosphereData=fs.readFileSync(path.join(root,'assets/effects/cave-atmosphere-field.ini'),'utf8')
  .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
-atmosRun(`loadIniText('','atmosphere.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+atmosRun(`loadIniText('','atmosphere.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
  SharedRoomPreview.atmosphereFieldDefinition=()=>${JSON.stringify(atmosphereData)};
  const atmosphereBuffer=new ArrayBuffer(40);new Uint8Array(atmosphereBuffer).set(new TextEncoder().encode('cave-light\0'),1);
  EffectEditor.updateCatalogue({memory:{buffer:atmosphereBuffer},RoomPreview_KindName:()=>1,RoomPreview_ReachSupported:()=>0,
@@ -661,7 +854,7 @@ console.log('Complete atmosphere extraction, modal apply/cancel/undo, source dis
 /* The point-and-click workflow is independent of the effects brush and does
  * not require visiting a source in the preview before configuring it. */
 const ui=editor(fixture()),ur=ui.run,uc=ui.elements.get('#map2d');
-ur(`loadIniText('','modal.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+ur(`loadIniText('','modal.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
   $('#effectGuides').checked=true;$('#emitterPreset').value='soft-light';`);
 const up=(x,y,extras={})=>({button:0,clientX:ur(`view.x+${x}*view.scale`),
   clientY:ur(`view.y+${y}*view.scale`),preventDefault(){},...extras});
@@ -759,7 +952,7 @@ console.log('Effect map workflow: context add/edit/delete/preview, modal apply/c
 /* Emitter handles edit only on release. Animation parameters and pattern seeds
  * remain attached to a stable source across move/resize/duplicate/undo. */
 const emitter=editor(fixture()),er=emitter.run,ec=emitter.elements.get('#map2d');
-er(`loadIniText('','emitters.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+er(`loadIniText('','emitters.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
   $('#emitterPreset').value='motes';$('#emitterMapPlace').onclick();`);
 const ep=(x,y,extras={})=>({button:0,clientX:er(`view.x+${x}*view.scale`),
   clientY:er(`view.y+${y}*view.scale`),...extras});
@@ -809,11 +1002,11 @@ ec.listeners.mousedown(ep(200,184));emove(ep(300,280));
 er(`$('#terrain').value='1';$('#terrain').onchange();`);eup();
 assert.equal(er('EffectEditor.text()'),resizedEmitter,'room/terrain change cancels the draft');
 er(`$('#terrain').value='0';$('#terrain').onchange();
-  SharedRoomPreview.validateEffects=()=>{throw Error('test budget rejection');};`);
+  SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{throw Error('test budget rejection');};`);
 ec.listeners.mousedown(ep(200,184));emove(ep(300,280));eup();
 assert.equal(er('EffectEditor.text()'),resizedEmitter);
 assert.match(emitter.elements.get('#effectStatus').textContent,/budget rejection/);
-er('SharedRoomPreview.validateEffects=()=>{};');
+er('SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};');
 er(`$('#emitterSeedShuffle').onclick();`);
 assert.equal(er('EffectEditor.selected()'),emitterId);
 const shuffledEmitter=er('EffectEditor.text()');
@@ -836,7 +1029,7 @@ console.log('Emitter controls and handles: atomic moves/resizes, stable IDs, par
  * tabs must not reinterpret the stored anchor. One drag remains one edit. */
 {
 const anchored=editor(fixture()),ar=anchored.run,ac=anchored.elements.get('#map2d');
-ar(`loadIniText('','anchors.ini');setLayer(1);SharedRoomPreview.validateEffects=()=>{};
+ar(`loadIniText('','anchors.ini');setLayer(1);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
   $('#effectGuides').checked=true;$('#emitterPreset').value='light-fan';`);
 const ap=(x,y)=>({button:0,clientX:ar(`view.x+${x}*view.scale`),
   clientY:ar(`view.y+${y}*view.scale`),preventDefault(){}});
@@ -878,7 +1071,7 @@ console.log('BG2 anchors: placement, layer markers, drag/undo, map location, tra
  * atomic history item, independently address scenery, player and enemies, and
  * restore inherited behavior when the override is cleared. */
 const region=editor(fixture()),rr=region.run,rc=region.elements.get('#map2d');
-rr(`loadIniText('','regions.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+rr(`loadIniText('','regions.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
   $('#particleAreaDraw').onclick();`);
 const rp=(x,y)=>({button:0,clientX:rr(`view.x+(${x}*16+2)*view.scale`),
   clientY:rr(`view.y+(${y}*16+2)*view.scale`)});
@@ -902,11 +1095,11 @@ assert.equal(rr('undoStack.length'),regionHistory+1);
 rr(`$('#effectLightTargets').checked=false;$('#effectLightTargets').onchange();`);
 assert.doesNotMatch(rr('EffectEditor.text()'),/light-player=/);
 rr('undo()');assert.equal(rr('EffectEditor.text()'),receiverText);
-rr(`SharedRoomPreview.validateEffects=()=>{throw Error('invalid receiver');};
+rr(`SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{throw Error('invalid receiver');};
   $('#effectLightEnemies').checked=true;$('#effectLightEnemies').onchange();`);
 assert.equal(rr('EffectEditor.text()'),receiverText);
 assert.equal(rr('mergeDioramaIni()'),regionScenery);
-rr(`SharedRoomPreview.validateEffects=()=>{};$('#contourDraw').onclick();`);
+rr(`SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};$('#contourDraw').onclick();`);
 rc.listeners.mousedown(rp(2,3));
 for(const fn of rr('window.listeners.mousemove'))fn(rp(4,2));
 for(const fn of rr('window.listeners.mousemove'))fn(rp(6,3));
@@ -1409,20 +1602,20 @@ assert.equal(fb('undoStack.length'),fbHistory+1);
 assert.equal(fbElements.get('#selectionApplied').textContent,'Applied band: Priority');
 assert.equal(fb('band'),0); // applying a selection action does not change the brush
 assert.equal(fb('currentTileChanges().cells.length'),4);
-assert.equal(fbElements.get('#saveState').textContent,'Unexported changes');
+assert.equal(fbElements.get('#saveState').textContent,'Unsaved changes');
 fb('undo()');
 assert.equal(fb('editorHasUnexportedChanges()'),false);
 assert.equal(fb('currentTileChanges().cells.length'),0);
 fb("redo();$('#export').onclick();");
 assert.equal(fb('document.exportedText'),undefined); // opening is not a download or savepoint
-assert.equal(fbElements.get('#saveState').textContent,'Unexported changes');
+assert.equal(fbElements.get('#saveState').textContent,'Unsaved changes');
 assert.equal(fbElements.get('#exportText').value,fb('roomSectionIni(room)'));
 await fb("$('#exportCopy').onclick();");
 assert.equal(fb('document.clipboardText'),fb('roomSectionIni(room)'));
 assert.equal(fbElements.get('#saveState').textContent,'Matches last copy');
 fb("$('#exportClose').onclick();");
 fb('undo()');
-assert.equal(fbElements.get('#saveState').textContent,'Unexported changes');
+assert.equal(fbElements.get('#saveState').textContent,'Unsaved changes');
 fb('redo()');
 assert.equal(fbElements.get('#saveState').textContent,'Matches last copy');
 fb(`selectOnlyTile(0,0);$('#pixelScope').value='cell';beginOp('one pixel');editPixel(3,5);commitOp();
@@ -1520,7 +1713,7 @@ ex("$('#export').onclick();");
 await ex("$('#exportCopy').onclick();");
 assert.equal(ex('document.clipboardText'),section);
 assert.equal(ex('editorHasUnexportedChanges()'),true); // room 2 still needs export
-assert.equal(exElements.get('#saveState').textContent,'Unexported changes');
+assert.equal(exElements.get('#saveState').textContent,'Unsaved changes');
 ex(`$('#exportClose').onclick();$('#room').value='1';$('#room').onchange();$('#export').onclick();`);
 await ex("$('#exportCopy').onclick();");
 assert.equal(ex('editorHasUnexportedChanges()'),false);
@@ -2238,7 +2431,7 @@ if (process.argv[2]) {
   const data = JSON.parse(match[1]);
   const view=JSON.parse(html.match(/window\.__ACTION_VIEW__=(.*?);(?:window\.__ACTION_PREVIEW_WASM__|<\/script>)/)[1]);
   const ini=JSON.parse(html.match(/window\.__DIORAMA_LAYERS__=(.*?);window\.__DIORAMA_LAYERS_NAME__/)[1]);
-  assert.equal(data.rooms.length, 49);
+  assert.equal(data.rooms.length, 50);
   assert.equal(data.terrainProfiles.length, 3);
   const actual = editor(data);
   const sharing=actual.run(`DATA.rooms.map(r=>({group:r.group,map:r.map,
@@ -2257,7 +2450,7 @@ if (process.argv[2]) {
       verified++;
     }
   }
-  assert.equal(actual.run('nativeGoldenStatus.size'), 147);
+  assert.equal(actual.run('nativeGoldenStatus.size'), 150);
   const bloodpool=data.rooms.findIndex(r=>r.group===2&&r.map===8);
   assert.ok(bloodpool>=0);
   const savedCoverage=editor(data,{view,ini});
@@ -2376,7 +2569,7 @@ if (process.argv[2]) {
 const glowEditor=editor(fixture()),glr=glowEditor.run;
 const glowData=fs.readFileSync(path.join(root,'assets/effects/torch-glow-field.ini'),'utf8')
  .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
-glr(`loadIniText('','glow.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+glr(`loadIniText('','glow.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
  SharedRoomPreview.glowFieldDefinition=()=>${JSON.stringify(glowData)};
  EffectEditor.openModal(null,128,160);EffectEditor.placeEmitter('glow-field',128,160);`);
 assert.match(glr('EffectEditor.text()'),/\[field:01:01:0:glow-field:54000000\]/);
@@ -2390,7 +2583,7 @@ glr('undo()');assert.doesNotMatch(glr('EffectEditor.text()'),/\[field:/);glr('re
 console.log('Complete flame/glow placement, parameters, modal apply/cancel and undo passed');
 
 const stageEditor=editor(fixture()),spr=stageEditor.run;
-spr(`loadIniText('','stage.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};$('#emitterPreset').value='stage:desert-sky';EffectEditor.openModal(null,256,192)`);
+spr(`loadIniText('','stage.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};$('#emitterPreset').value='stage:desert-sky';EffectEditor.openModal(null,256,192)`);
 assert.equal(spr('EffectEditor.mapEmitters().filter(e=>!e.native).length'),3);
 assert.match(spr('EffectEditor.text()'),/light-gradient/);assert.match(spr('EffectEditor.text()'),/^pattern=sand$/m);
 spr(`$('#effectInspectorClose').onclick()`);assert.doesNotMatch(spr('EffectEditor.text()'),/emitter:/);
@@ -2403,7 +2596,7 @@ console.log('Stage compositions add ordinary editable markers and apply/cancel/u
 const arcEditor=editor(fixture()),acr=arcEditor.run;
 const arcData=fs.readFileSync(path.join(root,'assets/effects/trap-field.ini'),'utf8')
  .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
-acr(`loadIniText('','arcs.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+acr(`loadIniText('','arcs.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
  SharedRoomPreview.arcFieldDefinition=()=>${JSON.stringify(arcData)};$('#emitterPreset').value='trap-field';EffectEditor.openModal(null,128,160)`);
 assert.match(acr('EffectEditor.text()'),/\[field:01:01:0:trap-field:00000000\]/);
 acr(`EffectEditor.editEmitter(EffectEditor.selected(),{receivers:'6',particles:'8 11 6 7'});$('#effectInspectorApply').onclick()`);
@@ -2412,7 +2605,7 @@ acr('undo()');assert.doesNotMatch(acr('EffectEditor.text()'),/\[field:/);acr('re
 console.log('Complete arc response controls, receiver selection, apply and undo passed');
 
 const bindingEditor=editor(fixture()),bir=bindingEditor.run;
-bir(`loadIniText('','bindings.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+bir(`loadIniText('','bindings.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
  EffectEditor.placeEmitter('flame',128,160);EffectEditor.selectEmitter(EffectEditor.selected());
  $('#actorBindingTarget').value='family';$('#actorBindingSource').value='B786';$('#actorBindingParent').value='B786';
  $('#actorBindingState').value='0,1';$('#actorBindingAnimation').value='5000';$('#actorBindingApply').onclick()`);
@@ -2421,7 +2614,7 @@ const bindSaved=bir('EffectEditor.text()');bir('undo()');assert.doesNotMatch(bir
 console.log('General actor attachment controls preserve selectors and use one undo entry');
 
 const copiedEditor=editor(fixture()),cpr=copiedEditor.run;
-cpr(`loadIniText('','copied-effects.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+cpr(`loadIniText('','copied-effects.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
  EffectEditor.placeEmitter('torch',80,120);globalThis.firstTorch=EffectEditor.selected();
  EffectEditor.placeEmitter('cloud-bank',160,140);globalThis.secondCloud=EffectEditor.selected();
  EffectEditor.selectEmitter(firstTorch);EffectEditor.selectEmitter(secondCloud,true);EffectEditor.copyEffects();
@@ -2438,7 +2631,7 @@ console.log('Multi-effect copy/paste preserves spacing and settings, repeats wit
 const surfaceEditor=editor(fixture()),sur=surfaceEditor.run;
 const surfaceData=fs.readFileSync(path.join(root,'assets/effects/lava-lake-field.ini'),'utf8')
  .split('\n').filter(line=>line&&!/^[;#[]/.test(line)&&!line.startsWith('version=')&&!line.startsWith('enabled=')).join('\n')+'\n';
-sur(`loadIniText('','surfaces.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+sur(`loadIniText('','surfaces.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
  SharedRoomPreview.surfaceFieldDefinition=()=>${JSON.stringify(surfaceData)};$('#emitterPreset').value='lava-lake-field';EffectEditor.openModal(null,128,160)`);
 assert.match(sur('EffectEditor.text()'),/^source-1=128 160 -16 -4 16 4 1$/m);
 sur(`EffectEditor.editEmitter(EffectEditor.selected(),{'heat-amplitude':'0.75 1 6.5'});$('#effectInspectorApply').onclick()`);
@@ -2459,7 +2652,7 @@ assert.equal(bir('EffectEditor.selected()'),bir('bindingId'));
 console.log('Multiple attached runtime instances retain one editable marker and selected definition');
 
 const nativeTorchEditor=editor(fixture()),ntr=nativeTorchEditor.run;
-ntr(`loadIniText('','native-torch-copy.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+ntr(`loadIniText('','native-torch-copy.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
  const bytes=new Uint8Array([0,119,97,108,108,45,116,111,114,99,104,0]);
  const api={memory:{buffer:bytes.buffer},RoomPreview_EffectCount:()=>1,RoomPreview_KindName:()=>1,
  RoomPreview_SourceValue:(i,f)=>({0:123,1:99,2:80,3:120,8:1,9:32,10:32}[f]||0),
@@ -2478,7 +2671,7 @@ assert.equal(ntr("$('#effectReach').disabled"),false,'copied torch reach is edit
 /* Camera-window origins are not source positions. A grouped shoreline has
  * one guide per receiver; moon sources belong on BG2, not the BG1 map top. */
 const spatialEditor=editor(fixture()),sr=spatialEditor.run;
-sr(`loadIniText('','spatial.ini');SharedRoomPreview.validateEffects=()=>{};
+sr(`loadIniText('','spatial.ini');SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
  SharedRoomPreview.marshFieldDefinition=()=>${JSON.stringify(marshData)};
  const spatialBuffer=new ArrayBuffer(200),names=['blood-water','blood-mist','wet-timber','marsh-air','moonlight','moon-cloud','moon-reflection'];
  const positions=[1,24,48,72,96,120,144];names.forEach((n,i)=>new Uint8Array(spatialBuffer).set(new TextEncoder().encode(n+'\\0'),positions[i]));
@@ -2501,7 +2694,7 @@ assert(sr('EffectEditor.mapEmitters(0).every(e=>!e.enabled)'),'linked field disa
 sr('undo()');assert(sr('EffectEditor.mapEmitters(0).every(e=>e.enabled)'));
 console.log('Spatial shoreline, insect, timber and BG2 guides, field refresh and linked controls passed');
 const placedMarshEditor=editor(fixture()),pmr=placedMarshEditor.run;
-pmr(`loadIniText('','placed-marsh.ini');SharedRoomPreview.validateEffects=()=>{};
+pmr(`loadIniText('','placed-marsh.ini');SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
  SharedRoomPreview.marshFieldDefinition=()=>${JSON.stringify(marshData)};EffectEditor.placeEmitter('marsh-field',96,160);`);
 assert.equal(pmr('EffectEditor.mapEmitters(0).length'),1);
 assert.equal(pmr('EffectEditor.mapEmitters(0)[0].x'),96);
@@ -2510,7 +2703,7 @@ assert.equal(pmr('EffectEditor.mapEmitters(0)[0].y'),160);
 /* Ray footprints and gestures must share direction and respect layer scaling.
  * Shift resets are edits, not range dragging or accumulating another undo. */
 const shapes=editor(fixture()),shr=shapes.run;
-shr(`loadIniText('','shape.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+shr(`loadIniText('','shape.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
   EffectEditor.placeEmitter('light-fan',200,100);$('#emitterMapEdit').onclick();view={x:0,y:0,scale:1};`);
 const sid=shr('EffectEditor.selected()');
 shr(`EffectEditor.editEmitter(EffectEditor.selected(),{angle:45,fan:60,width:100,height:160});`);

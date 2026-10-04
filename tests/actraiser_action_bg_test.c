@@ -272,6 +272,11 @@ static SrResult FakeReplaceCaptureTiles(SrRunnerHandle *runner,
   (void)runner;
   if (!s_fake_ppu || !request || request->lifetime_generation != 1u)
     return SR_RESULT_INVALID_ARGUMENT;
+  /* The public runner requires a coordinate binding even when the capture
+   * edits a native page and leaves authentic scanout entirely native. */
+  for (unsigned bg = 0; bg < 2; bg++)
+    if ((request->layer_mask & (1u << bg)) && !s_fake_ppu->virtualTilemap[bg].lookup)
+      return SR_RESULT_INVALID_ARGUMENT;
   memset(s_fake_ppu->captureTiles, 0, sizeof(s_fake_ppu->captureTiles));
   for (unsigned bg = 0; bg < 2; ++bg)
     if (request->layer_mask & (1u << bg))
@@ -1823,7 +1828,64 @@ static void TestMarahnaCyclicBackdropBinding(void) {
   free(wram);
 }
 
+static void TestDeathHeimNativeCaptureEdits(void) {
+  uint8_t *wram = BuildWram();
+  Ppu *ppu = calloc(1, sizeof(*ppu));
+  CHECK(wram && ppu);
+  if (!wram || !ppu) { free(wram); free(ppu); return; }
+  ActRaiserActionBg_Shutdown();
+  CHECK(setenv("AR_ACTION_BG_HLE", "0", 1) == 0);
+  wram[kActRaiserWram_MapGroup] = 7;
+  wram[kActRaiserWram_CurrentMap] = 1;
+  wram[kActRaiserWram_DeathHeimProgress] = 7;
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] = 3;
+  for (unsigned bg = 0; bg < 2; bg++) {
+    unsigned offset = bg * kActRaiserBgLayerStateStride;
+    Write16(wram, kActRaiserWram_Bg1Height + offset, 256);
+    Write16(wram, kActRaiserWram_Bg1CameraX + offset, 0);
+    Write16(wram, kActRaiserWram_Bg1CameraY + offset, 0);
+  }
+  for (unsigned phase = 0; phase < 2; phase++) {
+    DioramaRoomOverride room = {.used = true, .map_group = 7, .map_number = 1,
+        .section = phase ? kDioramaLayerSection_DeathHeimCompletion : kDioramaLayerSection_Room};
+    ppu->bgXsc[0] = phase ? 0x64 : 0x60;
+    ppu->bgXsc[1] = phase ? 0x74 : 0x70;
+    CHECK(DioramaLayerOrder_ParseLine(&room, "bg1-virtual = cells:0,0-0,0 band:0", NULL));
+    CHECK(DioramaLayerOrder_ParseLine(&room,
+        "bg2-stamp = cell:-1,0 metatile:00 words:0001,0002,0003,0004 bands:1,1,1,1", NULL));
+    ActionBgPlan plan;
+    ActionBgPresentationPolicy policy;
+    CHECK(ActRaiserActionBg_BuildPlan(wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+    CHECK(!ActRaiserActionBg_BindPlanWithVirtualLayers(
+        wram, kActRaiserWramSize, &plan, &room, ppu));
+    CHECK(ppu->virtualTilemap[0].lookup);
+    CHECK(!(ppu->virtualTilemap[0].flags & kPpuVirtualTilemapFlag_IncludeAuthentic));
+    CHECK(ActRaiserActionBg_PixelLayerHasEdits(0));
+    CHECK(ActRaiserActionBg_BindCaptureTiles(3, 3));
+    CHECK(ActRaiserActionBg_CaptureTilesBound(0));
+    SrPpuCaptureTile tile;
+    CHECK(ppu->captureTiles[0].lookup(ppu->captureTiles[0].user_data, 0, 0, &tile));
+    CHECK(tile.band == 0 && (tile.flags & SR_PPU_CAPTURE_TILE_REPLACE));
+    CHECK(tile.entry == phase * 37 * 4); /* B uses the second resident page */
+    CHECK(ppu->captureTiles[1].lookup(ppu->captureTiles[1].user_data, -2, 0, &tile));
+    CHECK(tile.entry == 1 && (tile.flags & SR_PPU_CAPTURE_TILE_REPLACE));
+    CHECK(ActRaiserActionBg_BindPlanWithVirtualLayers(
+        wram, kActRaiserWramSize, &plan, NULL, ppu) == 0);
+    CHECK(!ActRaiserActionBg_PixelEditsActive());
+    CHECK(!ActRaiserActionBg_CaptureTilesBound(0));
+    CHECK(ActRaiserActionBg_BindCaptureTiles(3, 0));
+    CHECK(!ppu->captureTiles[0].lookup && !ppu->captureTiles[1].lookup);
+    DioramaLayerOrder_ClearRoom(&room);
+  }
+  ActRaiserActionBg_Shutdown();
+  CHECK(unsetenv("AR_ACTION_BG_HLE") == 0);
+  free(ppu);
+  free(wram);
+}
+
 int main(void) {
+  TestDeathHeimNativeCaptureEdits();
   TestCapture();
   TestVerticalMargins();
   TestAuthoredVerticalCapture();

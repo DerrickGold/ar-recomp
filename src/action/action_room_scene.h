@@ -151,6 +151,11 @@ bool ActionRoomScene_Load(ActionRoomScene *scene,
                           const uint8_t *rom, size_t rom_size,
                           uint8_t group, uint8_t map);
 
+/* Project one of the two resident $0701 scenery pages into a local 256px
+ * authoring map. Apply after terrain projection of the complete loaded assets.
+ * Completion frame requests also select BGSC $64/$74. */
+bool ActionRoomScene_ProjectDeathHeimScene(ActionRoomScene *scene, bool completion);
+
 bool ActionRoomScene_HasBackground(const ActionRoomScene *scene,
                                    uint8_t bg_layer);
 unsigned ActionRoomScene_TileWidth(const ActionRoomScene *scene,

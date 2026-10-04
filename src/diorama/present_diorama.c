@@ -375,7 +375,7 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
       slot->obj_apron, slot->diorama_bg_apron_mask, upload_mask, gpu_mask, gpu_changed);
   s_diorama_uploaded_plane_mask = upload.synchronized_plane_mask;
   if (upload.changed_plane_mask &
-      (UINT32_C(1) << SR_PPU_OVERLAY_BG2))
+      ((UINT32_C(1) << SR_PPU_OVERLAY_BG2) | (UINT32_C(1) << kDioramaPlane_Bg2Far)))
     s_diorama_bg2_content_revision++;
   for (unsigned plane = 0; plane < kDioramaPlane_Count; ++plane) {
     if ((gpu_mask & (1u << plane)) && DioramaPlaneUsesSparseCoverage((int)plane)) {
@@ -567,7 +567,8 @@ retry_projection:;
       .skybox = &skybox_view,
       .bg2_revision = s_diorama_bg2_content_revision,
       .bg2_dynamic =
-          (generated_plane_mask & (UINT32_C(1) << SR_PPU_OVERLAY_BG2)) != 0,
+          (generated_plane_mask & ((UINT32_C(1) << SR_PPU_OVERLAY_BG2) |
+              (UINT32_C(1) << kDioramaPlane_Bg2Far))) != 0,
   };
   const DioramaView view = {
       .camera = camera.pose,

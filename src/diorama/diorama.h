@@ -165,7 +165,7 @@ typedef struct DioramaSkyboxProjection {
    * window height (zero disables following). CPU projections include motion
    * in the bands; resident shaders repeat the same clamping and aspect crop. */
   float motion_follow[8];
-  int motion_source; /* 0 private capture, 1 static art, 2 BG1, 3 BG2 */
+  int motion_source; /* 0 private capture, 1 static art, 2 BG1, 3 BG2, 4 BG2 far */
   DioramaSkyboxSourceMapping resident;
 } DioramaSkyboxProjection;
 

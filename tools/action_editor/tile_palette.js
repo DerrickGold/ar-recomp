@@ -139,7 +139,7 @@ function refreshTilePalette(force=false) {
   const context=`${room.group}:${room.map}:${room.terrainProfile||0}:${bgIndex}`;
   if(context!==paletteContext) {
     paletteContext=context;paletteCache='';paletteChoice=null;paletteQuarter=0;
-    paletteSourceIndex=DATA.rooms.findIndex(r=>r.group===room.group&&r.map===room.map);
+    paletteSourceIndex=DATA.rooms.findIndex(r=>sceneIdentity(r)===sceneIdentity(room));
     paletteWords=Array.from(L.metatileWords.slice(0,4));
     const select=$('#paletteSource');select.replaceChildren();
     let count=0;

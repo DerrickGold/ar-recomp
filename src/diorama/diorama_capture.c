@@ -32,7 +32,7 @@ static uint32_t RequestedPlanes(void) {
   if (g_settings.diorama_layer_bg2)
     mask |= SourcePlanes(SR_PPU_OVERLAY_BG2);
   else if (g_settings.diorama_skybox != kDioramaSky_Off)
-    mask |= PlaneBit(SR_PPU_OVERLAY_BG2);
+    mask |= SourcePlanes(SR_PPU_OVERLAY_BG2);
   if (g_settings.diorama_layer_obj)
     mask |= SourcePlanes(SR_PPU_OVERLAY_OBJ);
   if (g_settings.diorama_layer_bg3 && !g_settings.diorama_hud_flat)

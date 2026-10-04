@@ -78,7 +78,7 @@ if(roomsFile){
     assert.throws(()=>preview.encode(data,blobs,room,{bgscMask:4}),/Invalid/);
     frames+=requests.length;scenes++;
   }
-  assert.equal(scenes,147);
+  assert.equal(scenes,150);
 }
 assert.equal(api.memory.buffer,memory,'fixed resident memory across every room');
 api.ActionPreview_Reset();

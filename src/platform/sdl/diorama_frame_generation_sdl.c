@@ -1423,6 +1423,7 @@ bool DioramaFrameGeneration_DrawSkybox(ArRenderDevice *device, ArRenderTexture t
     const DioramaSkyboxSourceDraw *draw) {
   if (!s_gpu.resident || s_gpu.effects_failed) return false;
   const unsigned plane = draw->motion_slot == 6 ? kDioramaFrameGenerationSkybox :
+      draw->motion_slot == 5 ? kDioramaPlane_Bg2Far :
       draw->motion_slot == 0 ? SR_PPU_OVERLAY_BG1 : SR_PPU_OVERLAY_BG2;
   const int slot = draw->motion_slot >= 0 && (s_gpu.presented_mask & (1u << plane))
       ? draw->motion_slot : -1;

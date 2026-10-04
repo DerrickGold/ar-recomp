@@ -23,6 +23,7 @@ typedef struct Recorder {
   const DioramaCapture *capture;
   const DioramaProjection *projection;
   unsigned checked_object_meshes;
+  uint32_t skybox_inputs;
 } Recorder;
 
 static void Record(float value) {
@@ -177,6 +178,10 @@ static bool Geometry(void *ctx, ArRenderTexture t, const ArRenderVertex2D *v,
                      int nv, const int32_t *indices, int ni, const ArRenderDrawState *state) {
   Recorder *r = ctx;
   assert(!t.value || (t.value < 128 && r->textures[t.value].width > 0));
+  if (r->capture && nv == 4 && ni == 6)
+    for (int plane = 0; plane < kDioramaPlane_Count; plane++)
+      if (t.value == r->capture->textures[plane].value)
+        r->skybox_inputs |= 1u << plane;
   if (r->capture && r->projection && r->bound_effect == kDioramaEffect_RimLight) {
     for (unsigned priority=0;priority<4;++priority) {
       const int plane = DioramaPlaneForObjectPriority(priority);
@@ -324,7 +329,7 @@ static ArRenderTexture Skybox(void *data, ArRenderDevice *d, int source,
   return *(ArRenderTexture *)data;
 }
 
-unsigned DioramaFixture_Count(void) { return 108; }
+unsigned DioramaFixture_Count(void) { return 120; }
 const float *DioramaFixture_Trace(void) { return s_trace; }
 unsigned DioramaFixture_Run(unsigned scenario) {
   assert(scenario < DioramaFixture_Count());
@@ -333,7 +338,10 @@ unsigned DioramaFixture_Run(unsigned scenario) {
   const int widths[] = {640,960,960}, heights[] = {480,540,600};
   const int extension[] = {0,32,64,128};
   const unsigned aspect = scenario % 3, ext = (scenario / 3) % 4;
-  const unsigned zoom = (scenario / 12) % 3, sky = scenario / 36;
+  const bool death_heim = scenario >= 108;
+  const bool completion = death_heim && ((scenario - 108) & 2u);
+  const unsigned zoom = (scenario / 12) % 3;
+  const unsigned sky = death_heim ? (scenario - 108) / 4 : scenario / 36;
   Recorder r = {.width = widths[aspect]+16, .height = heights[aspect]+20,
     .shaders = scenario % 2 != 0, .bound_effect = -1};
   ArRenderDevice device;
@@ -367,8 +375,10 @@ unsigned DioramaFixture_Run(unsigned scenario) {
   if (scenario % 4 == 0) options.visible_planes &= ~(1u << kDioramaPlane_Bg1Far);
   s_layers.count = 1;
   DioramaRoomOverride *room = &s_layers.rooms[0];
-  room->map_group = 1;
-  room->map_number = 2;
+  room->map_group = death_heim ? 7 : 1;
+  room->map_number = death_heim ? 1 : 2;
+  room->section = completion ? kDioramaLayerSection_DeathHeimCompletion :
+      kDioramaLayerSection_Room;
   DioramaPlaneOverride *bg1 = &room->planes[SR_PPU_OVERLAY_BG1];
   bg1->set_rake = bg1->set_bow = true;
   bg1->rake = scenario % 2 ? 0 : 0.17f;
@@ -380,7 +390,7 @@ unsigned DioramaFixture_Run(unsigned scenario) {
   bg2->set_stack = bg2->set_stack_copies = true;
   bg2->stack = 0.12f;
   bg2->stack_copies = 3;
-  if (scenario % 9 == 0) {
+  if (!death_heim && scenario % 9 == 0) {
     room->planes[kDioramaPlane_Backdrop].set_source = true;
     room->planes[kDioramaPlane_Backdrop].source = kDioramaLayerSource_AitosSky;
   }
@@ -415,10 +425,12 @@ unsigned DioramaFixture_Run(unsigned scenario) {
     .periodic = scenario % 8 == 0, .capture_offset = {0.25f,-0.5f},
   };
   if (scenario % 2) capture.bg2_valid_spans = &spans;
-  if (scenario % 4 == 0) capture.skybox = &skybox;
+  if (!death_heim && scenario % 4 == 0) capture.skybox = &skybox;
   if (scenario % 5 == 0) capture.bg_apron_mask = 3;
   if (scenario % 6 == 0) capture.vertical_bounds.top_reached = true;
-  DioramaScene scene = {.render = &options, .map_group = 1, .map_number = 2,
+  DioramaScene scene = {.render = &options,
+    .map_group = room->map_group, .map_number = room->map_number,
+    .layer_section = room->section,
     .bg1_dimming = 0.23f, .bg1_dimming_ramp = {0.1f,0.2f,0.2f,0.1f},
     .effect_obj_priority_mask = 15, .effect_bg_plane_mask = 3,
     .plane_effect = PlaneEffect, .plane_effect_userdata = &r};
@@ -432,6 +444,42 @@ unsigned DioramaFixture_Run(unsigned scenario) {
         &device, &capture, &view, &scene, &projection);
     assert(PresentationOutcome_IsUsable(outcome));
     assert(projection.valid && r.draws && r.bound_effect == -1);
+    if (death_heim) {
+      assert(projection.bg2_plane.valid == (sky != kDioramaSky_Only || !completion));
+      if (sky != kDioramaSky_Off && !completion) {
+        assert(r.skybox_inputs & (1u << kDioramaPlane_Bg2Far));
+        assert(projection.bg2_skybox.count == 1);
+        assert(projection.bg2_skybox.motion_source == 4);
+        /* The enlarged face image must end above the moving cloud plane.
+         * Check the published transforms used by effect/light projection too. */
+        DioramaProjection water = projection;
+        water.bg2_skybox = (DioramaSkyboxProjection){0};
+        ArRenderPointF cloud, face;
+        const float bottom = capture.authentic_y0 + 9 * 16;
+        assert(Diorama_ProjectCapturedBg2Point(&water, capture.width * 0.5f,
+            bottom, &cloud, NULL, NULL));
+        assert(Diorama_ProjectSkyboxAnchorPoint(&projection, bottom,
+            capture.width * 0.5f, bottom, &face));
+        const float clearance = projection.output_height * 8.0f / 224;
+        if (cloud.y >= projection.output_y + clearance)
+          assert(face.y <= cloud.y - clearance + 0.01f);
+        if (sky == kDioramaSky_Only) {
+          /* Lower the existing water, including its published effect mapping,
+           * until its bottom covers the viewport at both projected sides. */
+          for (int side = 0; side < 2; side++) {
+            ArRenderPointF edge;
+            assert(Diorama_ProjectCapturedBg2Point(&water,
+                side * capture.width, capture.authentic_y0 + 224 - 4,
+                &edge, NULL, NULL));
+            assert(edge.y >= projection.output_y + projection.output_height - 0.01f);
+          }
+          assert(!water.bg2_plane.overflow_valid);
+        }
+      } else if (sky == kDioramaSky_Only) {
+        assert(r.skybox_inputs & (1u << SR_PPU_OVERLAY_BG2));
+        assert(projection.bg2_skybox.motion_source == 3);
+      }
+    }
     if (r.shaders) assert(r.checked_object_meshes >= (unsigned)(frame+1)*4);
     assert(!r.state.target.value && !r.state.viewport_set && !r.state.clip_enabled);
     assert(r.live <= base_resources + 7); /* Two SS, two DOF, priority, stack, skybox. */
@@ -519,7 +567,7 @@ int main(int argc, char **argv) {
     }
   }
   if (stream) assert(fclose(stream) == 0);
-  else puts("Diorama compositor: 108 scenarios passed");
+  else puts("Diorama compositor: 120 scenarios passed, including Death Heim A/B skies and water");
   return 0;
 }
 #endif

@@ -315,6 +315,8 @@ const ActRaiserActionBgDiagnostics *ActRaiserActionBg_GetDiagnostics(void);
  * and scroll state. No character/palette memory or normal output is changed. */
 bool ActRaiserActionBg_PixelEditsActive(void);
 bool ActRaiserActionBg_PixelLayerHasEdits(unsigned bg);
+/* True only after the current capture accepted this layer's authored callback. */
+bool ActRaiserActionBg_CaptureTilesBound(unsigned bg);
 /* Bind authored tiles/masks and guard terrain to native BG capture export. */
 bool ActRaiserActionBg_BindCaptureTiles(uint8_t capture_mask, uint8_t apron_mask);
 /* A current world binding with ordinary live-world edges and no tuned caps

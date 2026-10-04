@@ -56,9 +56,12 @@ $('#importIni').onchange = async event => {
   const file = event.target.files && event.target.files[0];
   event.target.value = '';
   if (!file) return;
-  if (editorHasUnexportedChanges() && !confirm('Loading another INI replaces the unexported edits in this editor. Continue?'))
+  if ((editorHasUnexportedChanges()||BackgroundPolicyEditor.pending()) && !confirm('Loading another scenery INI replaces unsaved scenery edits. Effects stay loaded. Continue?'))
     return;
-  loadIniText(await file.text(),file.name);
+  try {
+    const text=await file.text();SharedRoomPreview.validatePolicyDocument(text);
+    loadIniText(text,file.name);
+  } catch(error){$('#projectStatus').textContent=`Cannot load scenery INI: ${error.message}`;return;}
   undoStack.length=0; redoStack.length=0; pendingOp=null;
   refreshHistoryButtons();
   surfacesDirty=compositeDirty=glDirty=true; composite=null;
@@ -195,6 +198,7 @@ function draw() {
   requestAnimationFrame(() => { framePending = false; drawNow(); });
 }
 function drawNow() {
+  BackgroundPolicyEditor.refresh();
   refreshEditorFeedback();
   if (mode === '2d') draw2d();
   else if (mode === 'native') drawNative2d();
@@ -510,10 +514,11 @@ const resetCamera = () => {
   draw();
 };
 window.addEventListener('keydown', e => {
+  const accel = e.metaKey || e.ctrlKey;
+  if(accel&&e.key.toLowerCase()==='s'){e.preventDefault();ProjectEditor.save();return;}
   if(EffectEditor.modalOpen())return;
   if(!tileMenu.hidden||exportDialog.open||$('#docsDlg').open)return;
   if (['SELECT','INPUT','TEXTAREA'].includes(e.target.tagName)||e.target.isContentEditable) return;
-  const accel = e.metaKey || e.ctrlKey;
   if(e.key==='Escape'&&brush==='framing') {
     e.preventDefault();finishFramingDrag(true);$('#bSelect').onclick();return;
   }
@@ -583,6 +588,8 @@ function setLayer(i) {
   tileActionStatus('');
   if (!room.bg[i]) return;
   bgIndex = i;changeCache=null;
+  $('#roomSceneInfo').textContent=room.sceneLabel
+    ? 'Room 1 A and 1 B have separate scenery, depth, framing and background policies. Effects settings are shared by room 1.' : '';
   if(!planeToken.startsWith(`bg${i+1}`))planeToken=`bg${i+1}`;
   $('#bg1').classList.toggle('on', i===0); $('#bg2').classList.toggle('on', i===1);
   L = decodeLayer(room, i); st = bucket(room, i);
@@ -596,6 +603,7 @@ function setLayer(i) {
   refreshVirtualControls(); refreshPlaneControls(); refreshNativePhaseControls();
   refreshNativeCameraControls();
   refreshTilePalette();
+  BackgroundPolicyEditor.refresh();
   fitView(); tally(); draw();
 }
 const sel = $('#room');
@@ -606,7 +614,7 @@ DATA.rooms.forEach((r, i) => {
   const names=['','Fillmore','Bloodpool','Kassandora','Aitos','Marahna','Northwall','Death Heim'];
   const act2=[0,2,2,3,4,4,5];
   const act=r.group<7?`Act ${r.map>=act2[r.group]?2:1} · `:'';
-  o.textContent = `${names[r.group]||r.group} · ${act}Room ${r.map} (${r.group}:${r.map})`
+  o.textContent = `${names[r.group]||r.group} · ${act}Room ${r.sceneLabel||r.map} (${r.group}:${r.map})`
     + `  \u2014  BG1 ${a?a.pagesWide*256+'\u00d7'+a.pagesHigh*256:'\u2013'}`
     + `, BG2 ${b?b.pagesWide*256+'\u00d7'+b.pagesHigh*256:'\u2013'}`
     + `  [P${Number(r.videoProfile).toString(16).padStart(2,'0')}`

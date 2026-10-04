@@ -11,6 +11,7 @@ const SharedActionPreview = (() => {
     return hash;
   };
   function encode(data,blobs,r,request={}) {
+    request={...(r.section==='completion'?{bgscMask:3,bgsc:0x7464}:{}),...request};
     const integer=(value,min,max,label)=>{
       if(!Number.isInteger(value)||value<min||value>max)throw Error(`Invalid ${label}`);
       return value;

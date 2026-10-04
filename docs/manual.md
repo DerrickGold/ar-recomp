@@ -365,6 +365,15 @@ diorama and Town 3D numeric tuning dials, their per-layer and per-stage A/B
 toggles, the granular widescreen flags, and the scene inspector. With it off,
 the menu keeps to the master toggles and the major on/off effects.
 
+The standalone [action editor](../tools/action_editor/README.md#background-policy)
+provides saved **Background policy** controls for each room and BG. It shows the
+planner's defaults, previews fill/motion/extent and row-band overrides, and draws
+policy guides on the map. **Apply policy** commits an undoable edit; **Save project**
+stores it with tile edits in `diorama-layers.ini`. These room policies apply with
+Diorama enabled and are shared across terrain variants. For Death Heim room 3's
+BG1, **Use painted scenery (disable fill)** removes the mirror fill so authored
+tiles can supply the surrounding scenery.
+
 The developer-only **Layers → BG Extents** tab authors action-stage background
 policies. Select BG1 or BG2, then edit its role, source, edge strategy, motion,
 or per-side caps. Each layer supports up to four non-overlapping row bands with

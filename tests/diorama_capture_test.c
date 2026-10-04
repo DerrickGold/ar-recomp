@@ -87,11 +87,13 @@ int main(void) {
 
   g_settings.diorama_skybox = kDioramaSky_Only;
   Capture(NULL);
-  assert(slot.diorama_plane_request_mask == Bit(SR_PPU_OVERLAY_BG2));
+  const uint32_t sky_sources = Bit(SR_PPU_OVERLAY_BG2) |
+      Bit(kDioramaPlane_Bg2Hi) | Bit(kDioramaPlane_Bg2Far);
+  assert(slot.diorama_plane_request_mask == sky_sources);
   g_settings.diorama_skybox = kDioramaSky_Both;
   Capture(NULL);
   assert(slot.diorama_plane_request_mask ==
-         (Bit(kDioramaPlane_Backdrop) | Bit(SR_PPU_OVERLAY_BG2)));
+         (Bit(kDioramaPlane_Backdrop) | sky_sources));
   g_settings.diorama_layer_bg1 = g_settings.diorama_layer_bg2 = true;
   g_settings.diorama_layer_bg3 = g_settings.diorama_layer_obj = true;
   Capture(NULL);

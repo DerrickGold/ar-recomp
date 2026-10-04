@@ -1,5 +1,91 @@
 # Action-mode layer editor
 
+### Load and save a project
+
+Use **Save project** above the map (or Ctrl/Cmd-S) to download one `action-project.zip` containing
+`diorama-layers.ini` and `action-effects.ini`. It preserves all authored scenery
+effects and background policies across every room and regional terrain. **Load project** restores
+both together; its picker also accepts the two existing INI files selected at
+once. ZIP files saved by the editor need no server, network or external library.
+Ordinary compressed ZIP imports use the browser's `DecompressionStream` support.
+Both INIs must be at the archive root. Missing, corrupt or invalid effect files
+are rejected before replacing the active project.
+
+The **Unsaved changes** badge covers scenery and effects, including Undo/Redo.
+Save before refreshing or closing the editor. A save downloads a new file through
+the browser; it does not overwrite the original file automatically. Projects
+store authoring data; ROM artwork and temporary preview camera/event controls
+remain supplied by the editor. To use a project in the game, extract both INIs
+beside `settings.ini` and restart the game.
+
+The sidebar's **Individual INI files** section retains **Load scenery INI**,
+**Export level INI**, **Load effects INI**, **Export effects INI** and the effects
+document panel for working with one document at a time. Each individual import
+keeps the other document loaded. **Export level INI → Download full INI…**
+downloads scenery from every room; **Export effects INI** downloads effects.
+
+### Background policy
+
+Death Heim room 1 has separate **1 A — faces** and **1 B — completion scenery**
+selections. Each displays only its own 256×256 background pages. Tile edits,
+depth, framing and background policies save independently: A keeps the existing
+`[layers:07:01]` section; B uses `[layers:07:01:completion]` and inherits no A
+overrides. Both sections travel together in **Save project**. Effects settings
+remain shared by raw room 1.
+
+In game, choose **Diorama → Skybox → Skybox only** to enlarge A's faces around
+the scene. Their live eye sprites are captured into the same skybox image;
+the scrolling water stays on its foreground BG2 plane. The skybox uses the
+authentic 256-pixel face region, independently of the water's repeat policy.
+Its lower edge stays above the projected cloud band as the camera moves,
+keeping the bottom faces clear without reducing their size.
+In **Skybox only**, A's water plane is lowered until its bottom covers the
+viewport, preserving the original water artwork and scrolling animation.
+Authored far-band tiles and stamps feed that image too. B uses its own captured
+completion background and never receives A's face/eye promotion.
+
+In game, final-boss progress becomes 7 before the faces have faded away. The
+completion scene and its overrides activate together when the native script
+switches BG1SC/BG2SC to `$64/$74` at `$00:F5F0–F619`, after waiting for the
+fade controller to reach black. The later song-3 selection at `$00:F650`
+occurs after the returning fade-in and is not needed to time the policy switch.
+
+Choose a room and BG1/BG2, then open **Background policy** near the top of the
+sidebar. Each selector shows the room's C-planner default. Override edge fill,
+scroll motion, horizontal/vertical extents, or up to four row bands, then select
+**Apply policy** to commit one undoable edit. **Preview policy in shared renderer**
+shows the resulting pixels. The map guides mark the authentic viewport in white,
+extent caps in green, and row bands in purple. Available extents are drawn at the
+renderer limit of 128 pixels; actual coverage also depends on world/scenery
+bounds and the preview's horizontal and vertical budgets.
+
+For Death Heim room 3, select **BG1 → Use painted scenery (disable fill)**.
+This selects Live world and Available extents, and removes row-band fills so you
+can supply the scenery with tiles. **Reset to room defaults** removes all authored
+policy overrides and restores the room's built-in mirror policy.
+
+Screen bands use half-open rows within 0–224. World bands use this BG's world
+rows and move with its camera. The native planner rejects overlapping bands,
+including screen/world bands that would cross later during camera travel.
+Layer source and semantic role are shown for context and stay owned by the
+planner. Policies belong to the room and apply across its terrain variants.
+
+**Save project** includes applied policies alongside tile edits in
+`diorama-layers.ini`; a policy draft must be applied first. No third INI is needed.
+The game loads these overrides with Diorama enabled, before its temporary debug
+BG Extents draft. Older INIs without policy records retain their existing defaults.
+For example:
+
+```ini
+[layers:07:03]
+bg1-policy = edge:world motion:normal horizontal:available vertical:available bands:0
+```
+
+Omitted fields inherit defaults. `bands:0` explicitly removes bands;
+`bands:1` through `bands:4` replace them with complete, ordered
+`bg1-policy-band` / `bg2-policy-band` records. Fixed extents include the
+corresponding `left`/`right` or `top`/`bottom` caps (0–128).
+
 ### Native GPU effect validation
 
 The browser shares the C recipes and reference projection. It does not execute
@@ -62,12 +148,12 @@ The dedicated whole-room gate uses a built editor containing local assets:
 python3 tools/action_editor/check_room.py --sanitize
 ```
 
-It compares 882 full-room scanouts across all 49 rooms × 3 regional terrains
+It compares 900 full-room scanouts across 50 scenery selections × 3 regional terrains
 between native C and WASM, including backwards seeking, varying camera/coverage,
 authored configuration, finite skybox views and animated periodic pages. It also
 checks pixel-mask and band edits, per-layer top clipping, atomic rejection,
 resource reuse and complete teardown. The check also compares resolved native
-effect sources and 147 authored-effect round trips. The browser GPU view still needs matched
+effect sources and 150 authored-effect round trips. The browser GPU view still needs matched
 live-scene image review across the remaining room families and target platforms.
 
 ### Environmental authoring
@@ -279,12 +365,13 @@ Other partial/sloped shapes are shown but are not treated as flat supports.
 Mist splits at gaps and steps instead of bridging them, renders behind actors,
 and clips before projection. Region outlines appear only on BG1's map.
 
-Edits use the normal Undo/Redo controls. **Review / paste effects INI** provides
+Edits use the normal Undo/Redo controls. **Save project** keeps scenery and
+effects together. Under **Individual INI files**, **Review / paste effects INI** provides
 a copyable document and an atomic Apply operation with line diagnostics.
 **Load effects INI** and **Export effects INI** use the same document. Save the
 export as `action-effects.ini` beside the game's `settings.ini`, then restart
 the game. It is independent of `diorama-layers.ini`; export both when sharing
-scenery and effects. The editor build embeds an effects file found beside its
+scenery and effects separately, or save one project ZIP. The editor build embeds an effects file found beside its
 input layers file. A missing effects file preserves the approved native defaults.
 
 The shared parser supports schema version 1, sparse source overrides and twelve
@@ -481,8 +568,8 @@ internal effect clipboard is separate from the exported INI clipboard.
 Remaining native actor phases, landing dust and spell-controller visuals still
 need complete recipe extraction. Sparse overrides alone cannot reconstruct
 those defaults. See the [native-default contract and audit](../../docs/action-effects-editor-plan.md#native-defaults-must-be-reconstructible-from-configuration).
-Further work includes compound handles, material/slope tools, a combined
-scenery/effects project, live native reload, actual actor/HUD artwork, final image
+Further work includes compound handles, material/slope tools,
+live native reload, actual actor/HUD artwork, final image
 parity and target-hardware acceptance. Camera-aligned editing and detached live
 preview follow the remaining effect migrations. Full volumetric scattering and
 diorama heat/refraction remain separate experiments.
@@ -564,7 +651,7 @@ can stop that native effect even though its default marker remains available.
 On Apple M2, four native inventories took 0.106 ms (Fillmore 1:1), 0.394 ms
 (Fillmore 1:2), 4.293 ms (Bloodpool 2:1) and 0.171 ms (Bloodpool 2:7). These are
 one-time native CPU samples, not WASM or end-to-end frame measurements. Warm map
-redraws reuse the inventory. The 147-room native/WASM gate checks unique IDs,
+redraws reuse the inventory. The 150-scene native/WASM gate checks unique IDs,
 finite member/scroll geometry, cache reuse and unchanged live hashes/GPU counters.
 
 #### Text versus binary storage
@@ -610,13 +697,14 @@ does not write game settings.
 
 ### Shared original-background comparison
 
-If Emscripten **5.0.7** is installed, the build embeds the WASM module directly in
-the HTML. Opening the editor requires no compiler, server, adjacent files, or
-network access. `ACTION_EDITOR_WASM=on` requires this module;
-`ACTION_EDITOR_WASM=off` builds the existing JavaScript-only editor. The default
-`auto` builds it when `emcc` is available; a different compiler version reports
-an error instead of silently changing the comparison toolchain. `EMCC` selects
-the compiler and `EM_CACHE` can override the workspace-local build cache.
+The build defaults to `ACTION_EDITOR_WASM=on`, requiring Emscripten **5.0.7**
+and embedding both the original-background comparison and shared renderer WASM
+modules directly in the HTML. Opening the editor requires no compiler, server,
+adjacent files, or network access. `ACTION_EDITOR_WASM=off` builds the existing
+JavaScript-only editor with just a C compiler and Python 3.
+`ACTION_EDITOR_WASM=auto` builds shared previews when `emcc` is available;
+a different compiler version reports an error. `EMCC` selects the compiler and
+`EM_CACHE` can override the workspace-local build cache.
 
 **Original game frame** uses shared C for original BG1/BG2 decoding, regional
 terrain, animation, raster scrolling, mosaic and color math. Room, camera and
@@ -641,10 +729,10 @@ the pinned Emscripten compiler, C compiler, Python and Node):
 
 ```sh
 python3 tools/action_editor/check_preview.py          # synthetic, no ROM required
-python3 tools/action_editor/check_preview.py ar.sfc   # 49 rooms x 3 terrain variants
+python3 tools/action_editor/check_preview.py ar.sfc   # 50 scenery selections x 3 terrain variants
 ```
 
-The larger gate checks 1,176 frames, native export goldens, RGBA upload conversion,
+The larger gate checks 1,200 frames, native export goldens, RGBA upload conversion,
 clock boundaries, phase overrides, invalid input, reset/reload and fixed memory
 across repeated room changes. See [the snapshot contract](scene-snapshot.md) for
 format and comparison scope. Passing this gate does not establish enhanced
@@ -669,7 +757,8 @@ ctest --test-dir build -R '^actraiser_diorama_compositor$' --output-on-failure
 `EMCC` selects pinned Emscripten 5.0.7; `CC` selects the native C compiler. The
 native and WASM harnesses share `compositor_sources.txt`. Their recording backend
 validates draw/resource ownership, geometry, shader parameters and projection
-across 108 aspect/zoom/extension/skybox configurations. It also checks bounded
+across 120 aspect/zoom/extension/skybox configurations, including Death Heim
+A/B face skies and independent foreground water. It also checks bounded
 scratch-target reuse/eviction, repeated reset, invalid input and failed draw/target
 restoration. WASM runs in fixed 32 MiB memory. Only failure diagnostics use WASI;
 unexpected host imports fail the test. Native/WASM float agreement allows 0.001
@@ -748,7 +837,7 @@ reinstalls. A source checkout without `defaults/` uses the edited INI directly.
 
 ## Regional terrain
 
-**Terrain variant** selects US, Japanese, or European terrain for all 49 rooms
+**Terrain variant** selects US, Japanese, or European terrain for all 49 rooms (50 scenery selections)
 in Map editor, Native frame, and Diorama 3D. The build projects BG1's map and
 metatile definitions with `ActionRoomTerrain_Project`, the same authority used
 by the game's **Platforms and terrain** setting. Each variant carries its own
@@ -885,12 +974,14 @@ exist, append the copied block. Repeated base sections are consolidated in the
 copied output and should be replaced with that single block.
 
 Opening or closing the modal does not mark edits exported. Successful copying
-updates only that room's savepoint; other rooms keep **Unexported changes**.
+updates only that room's scenery savepoint; other unsaved scenery or effects
+keep the **Unsaved changes** badge.
 When every room matches its loaded, copied or downloaded state, the badge shows
 **Matches last copy** or **Matches last export**. Undo/Redo updates the badge.
 **Select all** and Ctrl/Cmd-C work when browser clipboard access is blocked.
 **Download full INI…** saves all rooms. Export before refreshing the editor;
-use **Load INI** with the updated file afterward to resume your work.
+use **Load scenery INI** with the updated file afterward, or **Load project**
+with your saved ZIP to resume scenery and effects together.
 
 Advanced paint/depth, native-frame and edge-space controls live in expandable
 sidebar sections. The sidebar's **Paintbrush band** sets the advanced brushes;
@@ -1293,6 +1384,7 @@ The browser code is authored in ordinary JavaScript files, checked by the local
 - `editor_feedback.js`: selection actions, applied-state inspection, edit review and export savepoints.
 - `tile_menu.js`: context actions, paste destination, and keyboard menu navigation.
 - `export_editor.js`: room-section modal, clipboard fallback and full INI download.
+- `project_archive.js` / `project_editor.js`: offline ZIP transport, combined load/save and project feedback.
 - `framing_editor.js`: saved offsets relative to the room's scroll anchor.
 - `diorama_view.js`: WebGL preview and orbit interaction.
 - `editor.js`: reference actor, UI controls and startup.
@@ -1306,7 +1398,7 @@ embedding, including text containing HTML script delimiters.
 `python3 tests/action_editor_build_test.py` also checks regional switching,
 shared INI export, selection, pixel undo/round trips, render-cache identity,
 and cross-room undo without a ROM.
-After building with a local ROM, check all 147 C/JavaScript reference frames
+After building with a local ROM, check all 150 C/JavaScript reference frames
 and a single-pixel transparency edit in Kassandora Room 4:
 
 ```sh

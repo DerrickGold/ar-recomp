@@ -1,7 +1,7 @@
 # Original-background comparison snapshot v1
 
-This is the first comparison fixture for the
-[shared-renderer editor plan](../../docs/action-effects-editor-plan.md).
+This format stores original-background comparison fixtures for the
+[action editor](README.md#shared-original-background-comparison).
 `ActionSceneSnapshot_Encode/Decode` is the native format authority. The editor
 encodes the same format and the WASM host validates it through that C decoder.
 The snapshot contains asset bytes, never a ROM path, native struct dump, pointer,
@@ -78,7 +78,7 @@ or render, memory cannot grow, and the module has no host imports.
 - The ROM-free WASM test consumes a C-encoded synthetic scene and compares its
   frame hash with native replay. Reset, repeated load, missing required assets,
   invalid data and failed module initialization are explicit cases.
-- The optional local-ROM gate covers all 49 rooms × three terrain profiles at
+- The optional local-ROM gate covers all 50 scenery selections × three terrain profiles at
   eight camera/time/phase combinations each. At frame 37 it also checks the
   exporter's independently loaded native golden. Other cases include room-edge
   cameras, frames 0/1/511/65535/65536/UINT32_MAX, raster-camera history, entry-frame
@@ -89,8 +89,3 @@ or render, memory cannot grow, and the module has no host imports.
 - Browser UI, actual `file://` loading and enhanced rendering have separate
   acceptance checks. Node executes the real WASM and checks its output, but does
   not prove browser canvas, WebGL, Metal, Vulkan or D3D12 behavior.
-
-The next contract extension needs owned edited surfaces/masks, resolved effect
-sources, frame/settings inputs and dynamic source clocks. Replay it natively
-before adding the corresponding WebGL backend. Do not serialize a raw `FrameSlot`
-or introduce desktop-global stubs to make the linker succeed.

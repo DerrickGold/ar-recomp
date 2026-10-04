@@ -10,6 +10,8 @@ from build_preview import ROOT
 
 
 def check(html, wasm, sanitize):
+    subprocess.run(['node', str(ROOT / 'tests/action_editor_policy_transport.test.mjs'),
+                    str(html.resolve()), str(wasm.resolve())], cwd=ROOT, check=True)
     with tempfile.TemporaryDirectory(prefix='action-room-') as directory:
         work = Path(directory)
         compiler = os.environ.get('CC', 'cc')

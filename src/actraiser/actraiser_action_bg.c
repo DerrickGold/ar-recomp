@@ -92,6 +92,7 @@ typedef struct ActRaiserActionBgProvider {
   bool reported_tile_band_cache_failure;
   uint8_t layer;
   bool pixel_edits_active, pixel_band_cache_active;
+  bool capture_native_tiles;
   bool world_apron_available;
   bool horizontal_bounds_available;
   int scenery_x0, scenery_width;
@@ -110,6 +111,7 @@ static ActRaiserActionBgObserver s_observer = {
   .room_scene_compare_verbose = -1,
 };
 static ActRaiserActionBgProvider s_provider[kActionBgLayerCount];
+static uint8_t s_capture_edit_mask;
 static SrRunnerHandle *s_runner;
 static const SnesRunnerApi *s_runner_api;
 
@@ -484,7 +486,6 @@ bool ActRaiserActionBg_BuildPlan(
     .map_group = wram[kActRaiserWram_MapGroup],
     .map_number = wram[kActRaiserWram_CurrentMap],
     .death_heim_progress = wram[kActRaiserWram_DeathHeimProgress],
-    .death_heim_ending_state = wram[kActRaiserWram_DeathHeimEndingState],
     .decorative_padding_enabled = decorative_padding_enabled,
   };
   for (unsigned layer = 0; layer < kActionBgLayerCount; layer++) {
@@ -718,6 +719,7 @@ bool ActRaiserActionBg_InitRoomScenes(const uint8_t *rom, size_t rom_size) {
 }
 
 static void ResetWorlds(void) {
+  s_capture_edit_mask = 0;
   for (unsigned layer = 0; layer < kActionBgLayerCount; layer++) {
     ActionBgWorld_Reset(s_observer.provider_world[layer]);
     ActionBgWorld_Reset(s_observer.comparison_world[layer]);
@@ -1642,6 +1644,10 @@ bool ActRaiserActionBg_PixelLayerHasEdits(unsigned bg) {
   return bg < kActionBgLayerCount && s_provider[bg].pixel_edits_active;
 }
 
+bool ActRaiserActionBg_CaptureTilesBound(unsigned bg) {
+  return bg < kActionBgLayerCount && (s_capture_edit_mask & (1u << bg));
+}
+
 static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
                                     int32_t tile_y, SrPpuCaptureTile *tile) {
   const ActRaiserActionBgProvider *provider = context;
@@ -1662,7 +1668,7 @@ static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
         (stamp->blank ? SR_PPU_CAPTURE_TILE_BLANK : 0u);
     if (!stamp->blank) metatile = stamp->metatile;
   } else {
-    if (!room->pixel_layers[bg].count) return 0;
+    if (!room->pixel_layers[bg].count && !provider->pixel_band_cache_active) return 0;
     if (provider->wrap_world_x)
       tile_x = WrapWorldTile(tile_x, ActionBgWorld_TileWidth(provider->world));
     uint8_t id;
@@ -1674,6 +1680,11 @@ static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
     tile->band = (tile->entry & 0x2000u) ? 2u : 1u;
     if (provider->pixel_band_cache_active)
       (void)ProviderBandLookup(context, tile_x, tile_y, tile->entry, &tile->band);
+    /* The native $0701 page has no authentic virtual-band classifier. Export
+     * its live tile through the capture callback to apply the authored band;
+     * the renderer keeps the original source for ordinary output/color math. */
+    if (provider->capture_native_tiles)
+      tile->flags = SR_PPU_CAPTURE_TILE_REPLACE;
   }
   const DioramaPixelEdit *edit = room->pixel_layers[bg].count
       ? DioramaLayerOrder_PixelEditAt(room, bg, cx, cy, metatile) : NULL;
@@ -1684,7 +1695,8 @@ static uint32_t ProviderCaptureTile(void *context, int32_t tile_x,
       tile->black_rows[row] = (uint8_t)(edit->black[mask_row] >> shift);
       tile->transparent_rows[row] = (uint8_t)(edit->transparent[mask_row] >> shift);
     }
-  return tile->band < kDioramaVirtualBandCount && (stamp || edit);
+  return tile->band < kDioramaVirtualBandCount &&
+      (stamp || edit || provider->pixel_band_cache_active);
 }
 
 static bool EnvironmentTileEdit(void *context, unsigned bg, int x, int y,
@@ -1730,6 +1742,7 @@ bool ActRaiserActionBg_BindEnvironmentScenery(ActionEnvironmentScene *scene) {
 }
 
 bool ActRaiserActionBg_BindCaptureTiles(uint8_t capture_mask, uint8_t apron_mask) {
+  s_capture_edit_mask = 0;
   SrPpuStateSnapshot state;
   if (!s_runner_api ||
       s_runner_api->struct_size < SNES_RUNNER_API_PPU_CAPTURE_TILES_SIZE ||
@@ -1744,7 +1757,8 @@ bool ActRaiserActionBg_BindCaptureTiles(uint8_t capture_mask, uint8_t apron_mask
     ActRaiserActionBgProvider *provider = &s_provider[bg];
     const DioramaRoomOverride *room = provider->virtual_room;
     bool edits = provider->pixel_edits_active && room &&
-        (room->stamp_layers[bg].count || room->pixel_layers[bg].count);
+        (room->stamp_layers[bg].count || room->pixel_layers[bg].count ||
+         provider->pixel_band_cache_active);
     if (!edits && !(apron_mask & (1u << bg))) continue;
     request.layer_mask |= 1u << bg;
     /* The published room edits/world are immutable through scanout. Raster
@@ -1757,7 +1771,12 @@ bool ActRaiserActionBg_BindCaptureTiles(uint8_t capture_mask, uint8_t apron_mask
       .apron = (apron_mask & (1u << bg)) ? SR_PPU_OBJ_APRON : 0,
     };
   }
-  return s_runner_api->replace_ppu_capture_tiles(s_runner, &request) == SR_RESULT_OK;
+  if (s_runner_api->replace_ppu_capture_tiles(s_runner, &request) != SR_RESULT_OK)
+    return false;
+  for (unsigned bg = 0; bg < kActionBgLayerCount; bg++)
+    if ((request.layer_mask & (1u << bg)) && request.bindings[bg].lookup)
+      s_capture_edit_mask |= (uint8_t)(1u << bg);
+  return true;
 }
 
 bool ActRaiserActionBg_PixelEditsActive(void) {
@@ -1940,11 +1959,67 @@ uint8_t ActRaiserActionBg_BindPlan(
       wram, wram_size, plan, NULL);
 }
 
+/* $0701 has native single-page raster layers, outside the scrolling 64x64
+ * ring provider's domain. Capture edits can still use the live metatile page:
+ * the PPU retains original pixels/scroll/color math and only authored tiles
+ * or depth bands change. Select the same page as the current scene section. */
+static void PrepareDeathHeimCaptureEdits(const uint8_t *wram, size_t wram_size,
+    const SrPpuStateSnapshot *ppu, const DioramaRoomOverride *room,
+    SrPpuVirtualTilemapRequest *bindings) {
+  if (!room || room->map_group != kActRaiserMapGroup_DeathHeim ||
+      room->map_number != kActRaiserDeathHeimMap_Hub ||
+      wram[kActRaiserWram_MapGroup] != room->map_group ||
+      wram[kActRaiserWram_CurrentMap] != room->map_number ||
+      (ppu->flags & SR_PPU_STATE_FORCED_BLANK) || ppu->bg_mode != 1) return;
+  for (unsigned bg = 0; bg < kActionBgLayerCount; bg++) {
+    const bool classified = DioramaLayerOrder_VirtualLayerHasClassification(
+        &room->virtual_layers[bg]);
+    if (!classified && !room->stamp_layers[bg].count && !room->pixel_layers[bg].count) continue;
+    ActRaiserActionBgLayerSnapshot snapshot;
+    if (!ActRaiserActionBg_CaptureLayer(wram, wram_size, bg,
+        ppu->background_tilemap_control[bg], &snapshot) ||
+        (snapshot.bgsc & 3) != 0 ||
+        snapshot.decode.world_width != 512 || snapshot.decode.world_height != 256) continue;
+    const unsigned page = (snapshot.bgsc & 0xfc) == (bg ? 0x74 : 0x64);
+    if ((snapshot.bgsc & 0xfc) != (bg ? 0x70 : 0x60) && !page) continue;
+    snapshot.decode.world_width = 256;
+    snapshot.decode.map_page += page * 256;
+    ActionBgWorld *world = WorldForLayer(
+        s_observer.provider_world, bg, room->map_group, room->map_number);
+    if (!world || !ActionBgWorld_Update(world, &snapshot.decode)) continue;
+    ActRaiserActionBgProvider *provider = &s_provider[bg];
+    provider->world = world;
+    provider->virtual_room = room;
+    provider->layer = (uint8_t)bg;
+    provider->wrap_world_x = true;
+    provider->camera_x = snapshot.camera_x;
+    provider->camera_y = snapshot.camera_y;
+    provider->hscroll_anchor = ppu->backgrounds[bg].h_scroll & 0x3ff;
+    provider->vscroll_anchor = ppu->backgrounds[bg].v_scroll & 0x3ff;
+    provider->pixel_cell_x = provider->pixel_cell_y = -1;
+    provider->pixel_band_cache_active = classified && CompileTileBandCache(provider);
+    provider->pixel_edits_active = true;
+    provider->capture_native_tiles = true;
+    /* Capture authoring uses the runner's coordinate binding, without its
+     * INCLUDE_AUTHENTIC flag. The original VRAM page and R8 raster continue
+     * to own ordinary scanout; only the isolated capture can replace tiles. */
+    bindings->layer_mask |= 1u << bg;
+    bindings->bindings[bg] = (SrPpuVirtualTilemapBinding){
+        .lookup = ProviderLookup, .user_data = provider,
+        .camera_x = provider->camera_x, .camera_y = provider->camera_y,
+        .hscroll_anchor = provider->hscroll_anchor,
+        .vscroll_anchor = provider->vscroll_anchor,
+    };
+  }
+}
+
 uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
     const uint8_t *wram, size_t wram_size, const ActionBgPlan *plan,
     const struct DioramaRoomOverride *virtual_room) {
+  s_capture_edit_mask = 0;
   for (unsigned bg = 0; bg < kActionBgLayerCount; bg++) {
     s_provider[bg].pixel_edits_active = false;
+    s_provider[bg].capture_native_tiles = false;
     s_provider[bg].world_apron_available = false;
     s_provider[bg].horizontal_bounds_available = false;
   }
@@ -1959,10 +2034,17 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
   if (s_runner_api->replace_ppu_virtual_tilemaps(
           s_runner, &binding_request) != SR_RESULT_OK)
     return 0;
-  if (!ActRaiserActionBg_HleEnabled() ||
-      !wram || !plan || !plan->valid ||
+  if (!wram || !plan || !plan->valid ||
       !SyncFrameIdentity(wram, wram_size))
     return 0;
+  PrepareDeathHeimCaptureEdits(wram, wram_size, &ppu, virtual_room, &binding_request);
+  if (binding_request.layer_mask && s_runner_api->replace_ppu_virtual_tilemaps(
+      s_runner, &binding_request) != SR_RESULT_OK) {
+    for (unsigned bg = 0; bg < kActionBgLayerCount; bg++)
+      s_provider[bg].pixel_edits_active = false;
+    return 0;
+  }
+  if (!ActRaiserActionBg_HleEnabled()) return 0;
   const uint8_t map_group = wram[kActRaiserWram_MapGroup];
   const uint8_t map_number = wram[kActRaiserWram_CurrentMap];
   if (!ActRaiser_IsActionMapGroup(map_group)) return 0;

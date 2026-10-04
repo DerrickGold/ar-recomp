@@ -234,6 +234,35 @@ int RoomPreview_Configure(unsigned size) {
   s_cached = false;
   return 1;
 }
+/* Two 49-word records: 17 layer fields followed by four 8-word bands.
+ * Enum fields retain the action_bg_plan.h values. No browser policy model. */
+unsigned RoomPreview_Policy(int x, int y, uint32_t frame, unsigned defaults) {
+  ActionBgPlan plan;
+  int camera_x[2];
+  if (defaults > 1 || !EditorRoomScene_BgPolicy(s_room, x, y, frame, defaults != 0,
+                                               &plan, camera_x)) return 0;
+  int32_t *out = (int32_t *)DioramaPreview_Input();
+  for (unsigned bg = 0; bg < 2; bg++) {
+    const ActionBgLayerPlan *p = &plan.layer[bg];
+    const int32_t fields[17] = {
+      p->valid, p->role, p->source, p->default_edge, p->default_motion,
+      p->horizontal_extent.mode, p->horizontal_extent.left, p->horizontal_extent.right,
+      p->vertical_extent.mode, p->vertical_extent.top, p->vertical_extent.bottom,
+      p->band_count, camera_x[bg], p->camera_y, p->world_width, p->world_height,
+      p->wrap_world_x,
+    };
+    memcpy(out, fields, sizeof(fields));
+    out += 17;
+    for (unsigned i = 0; i < kActionBgMaxBands; i++) {
+      const ActionBgBand *b = &p->bands[i];
+      const int32_t fields[8] = {b->y0, b->y1, b->edge, b->motion, b->anchor,
+          b->horizontal_extent.mode, b->horizontal_extent.left, b->horizontal_extent.right};
+      memcpy(out, fields, sizeof(fields));
+      out += 8;
+    }
+  }
+  return 98;
+}
 static unsigned s_recipe_error_line;
 unsigned RoomPreview_RecipeErrorLine(void) { return s_recipe_error_line; }
 int RoomPreview_ConfigureEffects(unsigned size) {

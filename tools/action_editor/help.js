@@ -34,13 +34,42 @@ edits and keeps the selection. <b>Compare original tiles</b> temporarily hides b
 masks, pasted scenery and band tint; your edits stay intact. Editing returns
 to the edited view. <b>Original game frame</b> shows the native presentation.</p>
 <p>Actions apply immediately to the preview; <b>Undo</b> reverses them.
-<b>Unexported changes</b> means some room edits have not been copied or downloaded.
+<b>Save project</b> (Ctrl/Cmd-S) downloads one ZIP containing <code>diorama-layers.ini</code>
+and <code>action-effects.ini</code>, with scenery and effect edits for every room
+and terrain. <b>Load project</b> restores both from that ZIP. You can also select
+both INI files together in its file picker. Save before refreshing or closing the
+page; the <b>Unsaved changes</b> badge tracks scenery and effects, including Undo/Redo.
+Downloads create a file in your browser's download folder; they do not overwrite
+the file you loaded. To use a project in the game, extract both INIs beside
+<code>settings.ini</code> and restart. ROM artwork and temporary preview controls
+are supplied by the editor and are not part of the project.</p>
+<p>The sidebar's <b>Individual INI files</b> section keeps separate imports and
+exports available. <b>Load scenery INI</b> changes scenery while retaining effects;
+<b>Load effects INI</b> changes effects while retaining scenery.
 <b>Export level INI</b> opens a modal for the current room. Choose <b>Copy section</b>,
 replace that room’s section in <code>diorama-layers.ini</code>, save, and restart.
 Copying updates only this room’s savepoint; other rooms stay flagged.
 Opening or closing the modal does not mark anything exported. Undo/Redo also
 updates the badge. <b>Download full INI…</b> saves every room in one file.
-Export before refreshing this page, then use <b>Load INI</b> to resume.</p>
+<b>Export effects INI</b> downloads effects alone. Use <b>Save project</b> for
+one file containing both.</p>
+
+<h4>Background policy</h4>
+<p>Select a room and BG, then use the sidebar’s <b>Background policy</b> controls.
+Each selector shows the room default from the shared C planner. Set edge fill,
+motion, horizontal/vertical caps or row bands, then click <b>Apply policy</b>.
+That commits one Undo step; <b>Save project</b> keeps it with your tiles in
+<code>diorama-layers.ini</code>. Policies apply across terrain variants and in
+the game with Diorama enabled.</p>
+<p>For Death Heim room 3’s BG1, <b>Use painted scenery (disable fill)</b> selects
+Live world and Available extents and removes row-band fills. You can then fill
+edge space with tiles. <b>Reset to room defaults</b> restores its mirror policy.</p>
+<p><b>Preview policy in shared renderer</b> shows the resulting pixels. On the map,
+white outlines the authentic viewport, green marks extent caps, and purple shows
+row bands. Available is shown at the renderer’s 128 px limit; scenery and preview
+budgets determine actual coverage. Screen bands use rows 0–224; world bands
+follow the BG camera. The end row is excluded. Up to four bands must remain
+ordered and separate throughout camera travel, including mixed anchors.</p>
 
 <h4>Regional terrain</h4>
 <p><b>Terrain variant</b> selects US, Japanese, or European platforms and

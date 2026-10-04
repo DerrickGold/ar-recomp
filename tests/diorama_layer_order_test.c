@@ -1939,7 +1939,85 @@ static void TestRegionalTileKeys(void) {
   free(table);
 }
 
+static void TestBackgroundPolicyPersistence(void) {
+  DioramaRoomOverride room = {.used = true, .map_group = 7, .map_number = 3};
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg1-policy = edge:world motion:normal horizontal:available vertical:fixed"
+      " top:0 bottom:48 bands:1", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(&room,
+      "bg1-policy-band = index:0 rows:0,136 anchor:screen edge:mirror"
+      " motion:fill horizontal:fixed left:32 right:64", NULL));
+  CHECK(DioramaLayerOrder_RoomIsActive(&room));
+  CHECK(room.bg_policy[0].band_mask == 1);
+  CHECK(!DioramaBgPolicy_IsAuthored(&room.bg_policy[1]));
+  DioramaBgPolicyOverride previous = room.bg_policy[0];
+  CHECK(!DioramaLayerOrder_ParseLine(&room,
+      "bg1-policy = edge:repeat horizontal:fixed left:129 right:0", NULL));
+  CHECK(!DioramaLayerOrder_ParseLine(&room,
+      "bg1-policy = edge:mirror edge:repeat", NULL));
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg1-policy = horizontal:inherit", NULL));
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg1-policy = left:4", NULL));
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg1-policy:jp = edge:mirror", NULL));
+  CHECK(!memcmp(&room.bg_policy[0], &previous, sizeof(previous)));
+  room.section = kDioramaLayerSection_AitosWaterfall;
+  CHECK(!DioramaLayerOrder_ParseLine(&room, "bg1-policy = edge:mirror", NULL));
+  room.section = kDioramaLayerSection_Room;
+  char text[2048];
+  CHECK(DioramaLayerOrder_FormatRoom(&room, text, sizeof(text)) < sizeof(text));
+  CHECK(strstr(text, "bg1-policy = edge:world motion:normal horizontal:available") != NULL);
+  DioramaRoomOverride copy = {.used = true};
+  for (char *line = strtok(text, "\n"); line; line = strtok(NULL, "\n"))
+    if (*line != '[') CHECK(DioramaLayerOrder_ParseLine(&copy, line, NULL));
+  CHECK(!memcmp(copy.bg_policy, room.bg_policy, sizeof(copy.bg_policy)));
+  DioramaRoomOverride terrain = {0};
+  CHECK(DioramaLayerOrder_ForTerrain(&room, 1, &terrain));
+  CHECK(!memcmp(terrain.bg_policy, room.bg_policy, sizeof(room.bg_policy)));
+  CHECK(DioramaLayerOrder_ParseLine(&copy, "bg1-policy = bands:0", NULL));
+  CHECK(copy.bg_policy[0].set_bands && !copy.bg_policy[0].band_count &&
+        !copy.bg_policy[0].band_mask);
+  DioramaLayerOrder_ClearRoom(&room);
+  DioramaLayerOrder_ClearRoom(&copy);
+  DioramaLayerOrder_ClearRoom(&terrain);
+}
+
+static void TestDeathHeimIndependentScenes(void) {
+  DioramaLayerOrderTable table = {0};
+  uint8_t group, map, section;
+  CHECK(DioramaLayerOrder_ParseScopedSection("layers:07:01:completion", &group, &map, &section));
+  CHECK(group == 7 && map == 1 && section == kDioramaLayerSection_DeathHeimCompletion);
+  CHECK(!DioramaLayerOrder_ParseScopedSection("layers:07:02:completion", NULL, NULL, NULL));
+  DioramaRoomOverride *a = DioramaLayerOrder_FindOrAdd(&table, 7, 1);
+  CHECK(DioramaLayerOrder_ParseLine(a, "bg2 = z:0.8 transparent:black", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(a, "bg2-policy = edge:repeat", NULL));
+  DioramaResolvedLayer resolved[32];
+  const int count = sizeof(kDefaults) / sizeof(kDefaults[0]);
+  CHECK(DioramaLayerOrder_ResolveSection(
+      &table, 7, 1, section, kDefaults, count, resolved, 32) == count);
+  for (int i = 0; i < count; i++) CHECK(resolved[i].z == kDefaults[i].z);
+  DioramaTransparentFill fill;
+  CHECK(!DioramaLayerOrder_ResolveTransparentFill(
+      &table, 7, 1, section, SR_PPU_OVERLAY_BG2, &fill, NULL));
+  DioramaRoomOverride *b = DioramaLayerOrder_FindOrAddSection(&table, 7, 1, section);
+  CHECK(DioramaLayerOrder_ParseLine(b, "bg2 = z:0.3", NULL));
+  CHECK(DioramaLayerOrder_ParseLine(b, "bg2-policy = edge:transparent bands:0", NULL));
+  CHECK(a->bg_policy[1].edge == kActionBgEdge_Repeat);
+  CHECK(b->bg_policy[1].edge == kActionBgEdge_Transparent);
+  CHECK(!b->virtual_layers[1].cell_span_count);
+  CHECK(DioramaLayerOrder_ResolveSection(
+      &table, 7, 1, section, kDefaults, count, resolved, 32) == count);
+  for (int i = 0; i < count; i++)
+    CHECK(resolved[i].z == (kDefaults[i].plane == SR_PPU_OVERLAY_BG2 ? 0.3f : kDefaults[i].z));
+  char text[4096];
+  CHECK(DioramaLayerOrder_MergeManifest(
+      &table, "; scenes\n", NULL, text, sizeof(text)) < sizeof(text));
+  CHECK(strstr(text, "[layers:07:01]") && strstr(text, "[layers:07:01:completion]"));
+  CHECK(strstr(text, "bg2-policy = edge:transparent bands:0"));
+  DioramaLayerOrder_ClearTable(&table);
+}
+
 int main(void) {
+  TestDeathHeimIndependentScenes();
+  TestBackgroundPolicyPersistence();
   TestBlankTilesAndFraming();
   TestRegionalTileKeys();
   TestTileStampsRoundTrip();

@@ -3,9 +3,9 @@
 const TERRAIN_TOKENS = ['us','jp','eu'];
 const terrainFamilies = new Map();
 function editFamilies(r,bg) {
-  const key=`${r.group}:${r.map}:${bg}`;
+  const key=`${sceneIdentity(r)}:${bg}`;
   if(terrainFamilies.has(key))return terrainFamilies.get(key);
-  const base=DATA.rooms.find(b=>b.group===r.group&&b.map===r.map)||r;
+  const base=DATA.rooms.find(b=>sceneIdentity(b)===sceneIdentity(r))||r;
   const families=[],equal=(a,b)=>a.length===b.length&&a.every((v,i)=>v===b[i]);
   for(const {profile} of TERRAIN_PROFILES) {
     const variant=terrainRoom(base,profile),layer=decodeLayer(variant,bg);

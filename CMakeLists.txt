@@ -4224,6 +4224,17 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_diorama_capture COMMAND actraiser_diorama_capture_test)
 
+    add_executable(actraiser_death_heim_hub_test
+        tests/actraiser_death_heim_hub_test.c
+        src/actraiser/enhancements/actraiser_death_heim_hub.c
+        src/action/action_obj_apron.c
+        src/diorama/diorama_layer_order.c)
+    target_include_directories(actraiser_death_heim_hub_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/recomp
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_death_heim_hub_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_death_heim_hub COMMAND actraiser_death_heim_hub_test)
+
     # Which captured layers are half-added with the subscreen and carry 50% alpha.
     add_executable(actraiser_diorama_capture_blend_test
         tests/diorama_capture_blend_test.c

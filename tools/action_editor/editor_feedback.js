@@ -193,12 +193,14 @@ function refreshEditorFeedback() {
   $('#editOutlines').classList.toggle('on',showEditOutlines);
   $('#editOutlines').setAttribute('aria-pressed',String(showEditOutlines));
   $('#editOutlines').title=`Show ${highlightLabel().toLowerCase()} on the map. Blue selection remains separate.`;
-  const dirty=editorHasUnexportedChanges();
-  $('#saveState').textContent=dirty?'Unexported changes':savepointKind==='exported'?'Matches last export'
+  const dirty=editorHasUnexportedChanges()||EffectEditor.dirty()||
+    typeof BackgroundPolicyEditor!=='undefined'&&BackgroundPolicyEditor.pending();
+  $('#saveState').textContent=dirty?'Unsaved changes':savepointKind==='saved'?'Matches saved project'
+    :savepointKind==='project'?'Loaded project':savepointKind==='exported'?'Matches last export'
     :savepointKind==='copied'?'Matches last copy':'Loaded INI';
   $('#saveState').classList.toggle('dirty',dirty);
-  $('#saveState').title=dirty?'Some room edits have not been copied or downloaded. Export level INI to keep them.'
-    :'The game uses its own INI file. Paste the copied section into that file and restart the game.';
+  $('#saveState').title=dirty?'Save project to keep all scenery and effects in one file.'
+    :'Save project downloads both INIs together. Extract them beside settings.ini to use them in the game.';
   $('#export').textContent='Export level INI';
 }
 for(let value=0;value<3;value++)$(`#selectionBand${value}`).onclick=()=>{

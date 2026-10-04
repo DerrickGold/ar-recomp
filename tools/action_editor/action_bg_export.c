@@ -69,13 +69,16 @@ static void WriteBackground(FILE *out, const ActionRoomSceneBg *layer) {
           InternBlob(layer->map, layer->map_size), layer->pages_wide, layer->pages_high);
 }
 
-static bool NativeGoldenHash(const ActionRoomScene *scene, uint32_t *pixels, uint32_t *hash) {
+static bool NativeGoldenHash(const ActionRoomScene *scene, bool completion,
+    uint32_t *pixels, uint32_t *hash) {
   const ActionRoomSceneFrameRequest request = {
       .camera_x = 0,
       .camera_y = 0,
       .game_frame = 37,
       .animation_phase = -1,
       .page_phase = -1,
+      .bgsc_override_mask = completion ? 3 : 0,
+      .bgsc_override = {0x64, 0x74},
   };
   ActionRoomSceneFrameState state;
   if (!ActionRoomScene_BuildFrameState(scene, &request, &state) ||
@@ -132,106 +135,127 @@ int main(int argc, char **argv) {
   for (unsigned group = 1; group <= 7; group++) {
     for (unsigned map = 1; map <= 8; map++) {
       if (!ActRaiser_IsActionMap((uint8_t)group, (uint8_t)map)) continue;
-      static ActionRoomScene scene;
-      if (!ActionRoomScene_Load(&scene, rom, (size_t)rom_size, (uint8_t)group, (uint8_t)map)) {
-        fprintf(stderr, "[export] %u:%u asset script failed\n", group, map);
-        failures++;
-        continue;
-      }
-      static ActionRoomScene variants[kArRegionalSource_Count];
-      uint32_t native_hash[kArRegionalSource_Count];
-      uint8_t terrain_profiles[kArRegionalSource_Count];
-      bool valid = true;
-      for (unsigned source = 0; source < kArRegionalSource_Count; source++) {
-        variants[source] = scene;
-        if (!ArRegionalTerrain_Resolve((ArRegionalSource)source, &terrain_profiles[source]) ||
-            !ActionRoomTerrain_Project(&variants[source], terrain_profiles[source]) ||
-            !NativeGoldenHash(&variants[source], native_pixels, &native_hash[source])) {
-          fprintf(stderr, "[export] %u:%u terrain profile %u failed\n", group, map, source);
-          valid = false;
-          break;
+      const bool split = group == kActRaiserMapGroup_DeathHeim && map == kActRaiserDeathHeimMap_Hub;
+      for (unsigned phase = 0; phase < (split ? 2u : 1u); phase++) {
+        static ActionRoomScene scene;
+        if (!ActionRoomScene_Load(&scene, rom, (size_t)rom_size, (uint8_t)group, (uint8_t)map)) {
+          fprintf(stderr, "[export] %u:%u asset script failed\n", group, map);
+          failures++;
+          continue;
         }
-      }
-      if (!valid) {
-        failures++;
-        continue;
-      }
-      if (rooms) fprintf(out, ",\n");
-      if (scene.have_raster_waveform)
-        raster_waveform_blob =
-            InternBlob(scene.raster_waveform, kActionRoomSceneRasterWaveformBytes);
-      if (scene.have_raster_mosaic_wave_window)
-        raster_mosaic_wave_window_blob = InternBlob(scene.raster_mosaic_wave_window,
-                                                    kActionRoomSceneRasterMosaicWaveWindowBytes);
-      fprintf(out,
-              "{\"group\":%u,\"map\":%u,\"chars\":%d,\"extraChars\":%d,"
-              "\"palette\":%d,\"rasterWorkspace\":%d,\"bg\":[",
-              group, map,
-              scene.have_character_bank[0]
-                  ? InternBlob(scene.characters, kActionRoomSceneCharacterBytes)
-                  : -1,
-              scene.have_extra_characters
-                  ? InternBlob(scene.extra_characters, kActionRoomSceneExtraCharacterBytes)
-                  : -1,
-              scene.have_palette ? InternBlob(scene.palette, kActionRoomScenePaletteBytes) : -1,
-              scene.have_raster_workspace
-                  ? InternBlob(scene.raster_workspace, kActionRoomSceneRasterWorkspaceBytes)
-                  : -1);
-      for (unsigned bg = 0; bg < 2; bg++) {
-        if (bg) fputc(',', out);
-        WriteBackground(out, &scene.bg[bg]);
-      }
-      fprintf(out, "],\"videoProfile\":%d,\"video\":[",
-              scene.have_video_profile ? scene.video_profile_index : -1);
-      if (scene.have_video_profile) {
-        for (unsigned i = 0; i < kActionRoomSceneVideoProfileBytes; i++) {
-          if (i) fputc(',', out);
-          fprintf(out, "%u", scene.video_profile[i]);
+        static ActionRoomScene variants[kArRegionalSource_Count];
+        uint32_t native_hash[kArRegionalSource_Count];
+        uint8_t terrain_profiles[kArRegionalSource_Count];
+        bool valid = true;
+        for (unsigned source = 0; source < kArRegionalSource_Count; source++) {
+          variants[source] = scene;
+          uint32_t resident_hash = 0;
+          if (!ArRegionalTerrain_Resolve((ArRegionalSource)source, &terrain_profiles[source]) ||
+              !ActionRoomTerrain_Project(&variants[source], terrain_profiles[source]) ||
+              (split && (!NativeGoldenHash(
+                             &variants[source], phase != 0, native_pixels, &resident_hash) ||
+                         !ActionRoomScene_ProjectDeathHeimScene(&variants[source], phase != 0))) ||
+              !NativeGoldenHash(
+                  &variants[source], phase != 0, native_pixels, &native_hash[source])) {
+            fprintf(stderr, "[export] %u:%u terrain profile %u failed\n", group, map, source);
+            valid = false;
+            break;
+          }
+          if (split && resident_hash != native_hash[source]) {
+            fprintf(stderr, "[export] Death Heim scene projection changed native scanout\n");
+            valid = false;
+            break;
+          }
         }
-      }
-      fprintf(out, "],\"animation\":");
-      if (ActionRoomScene_HasCharacterAnimation(&scene)) {
+        if (!valid) {
+          failures++;
+          continue;
+        }
+        if (split && !ActionRoomScene_ProjectDeathHeimScene(&scene, phase != 0)) {
+          failures++;
+          continue;
+        }
+        if (rooms) fprintf(out, ",\n");
+        /* A keeps the existing base-section identity for authored projects. */
+        if (scene.have_raster_waveform)
+          raster_waveform_blob =
+              InternBlob(scene.raster_waveform, kActionRoomSceneRasterWaveformBytes);
+        if (scene.have_raster_mosaic_wave_window)
+          raster_mosaic_wave_window_blob = InternBlob(scene.raster_mosaic_wave_window,
+                                                      kActionRoomSceneRasterMosaicWaveWindowBytes);
         fprintf(out,
-                "{\"target\":%u,\"stride\":%u,\"phases\":%u,"
-                "\"cadence\":%u,\"continuation\":%s}",
-                ActionRoomScene_CharacterAnimationTarget(&scene),
-                ActionRoomScene_CharacterAnimationStride(&scene),
-                ActionRoomScene_CharacterAnimationPhaseCount(&scene),
-                ActionRoomScene_CharacterAnimationCadence(&scene),
-                ActionRoomScene_CharacterAnimationContinues(&scene) ? "true" : "false");
-      } else {
-        fprintf(out, "null");
+                "{\"group\":%u,\"map\":%u,\"chars\":%d,\"extraChars\":%d,"
+                "\"palette\":%d,\"rasterWorkspace\":%d,\"bg\":[",
+                group, map,
+                scene.have_character_bank[0]
+                    ? InternBlob(scene.characters, kActionRoomSceneCharacterBytes)
+                    : -1,
+                scene.have_extra_characters
+                    ? InternBlob(scene.extra_characters, kActionRoomSceneExtraCharacterBytes)
+                    : -1,
+                scene.have_palette ? InternBlob(scene.palette, kActionRoomScenePaletteBytes) : -1,
+                scene.have_raster_workspace
+                    ? InternBlob(scene.raster_workspace, kActionRoomSceneRasterWorkspaceBytes)
+                    : -1);
+        for (unsigned bg = 0; bg < 2; bg++) {
+          if (bg) fputc(',', out);
+          WriteBackground(out, &scene.bg[bg]);
+        }
+        fprintf(out, "],\"videoProfile\":%d,\"video\":[",
+                scene.have_video_profile ? scene.video_profile_index : -1);
+        if (scene.have_video_profile) {
+          for (unsigned i = 0; i < kActionRoomSceneVideoProfileBytes; i++) {
+            if (i) fputc(',', out);
+            fprintf(out, "%u", scene.video_profile[i]);
+          }
+        }
+        fprintf(out, "],\"animation\":");
+        if (ActionRoomScene_HasCharacterAnimation(&scene)) {
+          fprintf(out,
+                  "{\"target\":%u,\"stride\":%u,\"phases\":%u,"
+                  "\"cadence\":%u,\"continuation\":%s}",
+                  ActionRoomScene_CharacterAnimationTarget(&scene),
+                  ActionRoomScene_CharacterAnimationStride(&scene),
+                  ActionRoomScene_CharacterAnimationPhaseCount(&scene),
+                  ActionRoomScene_CharacterAnimationCadence(&scene),
+                  ActionRoomScene_CharacterAnimationContinues(&scene) ? "true" : "false");
+        } else {
+          fprintf(out, "null");
+        }
+        fprintf(out, ",\"bg2PageCycle\":");
+        if (ActionRoomScene_HasBg2PageCycle(&scene))
+          fprintf(out, "{\"phases\":4,\"cadence\":5,\"order\":[1,2,3,0]}");
+        else
+          fprintf(out, "null");
+        fprintf(out, ",\"raster\":%u,\"nativeGolden\":", (unsigned)scene.raster_effect);
+        WriteNativeGolden(out, native_hash[0]);
+        fprintf(out, ",\"rasterEntryCameraX\":");
+        if (scene.have_raster_entry_camera_x)
+          fprintf(out, "%u", scene.raster_entry_camera_x);
+        else
+          fprintf(out, "null");
+        fprintf(out, ",\"terrainVariants\":[");
+        for (unsigned source = 0; source < kArRegionalSource_Count; source++) {
+          if (source) fputc(',', out);
+          const ActionRoomSceneBg *base = &scene.bg[0], *layer = &variants[source].bg[0];
+          unsigned changed_cells = 0, changed_metatiles = 0;
+          for (size_t i = 0; i < base->map_size; i++)
+            changed_cells += base->map[i] != layer->map[i];
+          for (unsigned i = 0; i < kActionRoomSceneMetatileBytes; i += 8)
+            changed_metatiles += memcmp(base->metatiles + i, layer->metatiles + i, 8) != 0;
+          fprintf(out, "{\"profile\":%u,\"bg1\":", terrain_profiles[source]);
+          WriteBackground(out, layer);
+          fprintf(out, ",\"changedCells\":%u,\"changedMetatiles\":%u,\"nativeGolden\":",
+                  changed_cells, changed_metatiles);
+          WriteNativeGolden(out, native_hash[source]);
+          fputc('}', out);
+        }
+        const char *scene_label = split
+            ? (phase ? "1 B — completion scenery" : "1 A — faces") : "";
+        fprintf(out, "],\"section\":\"%s\",\"sceneLabel\":\"%s\"}",
+                phase ? "completion" : "", scene_label);
+        rooms++;
       }
-      fprintf(out, ",\"bg2PageCycle\":");
-      if (ActionRoomScene_HasBg2PageCycle(&scene))
-        fprintf(out, "{\"phases\":4,\"cadence\":5,\"order\":[1,2,3,0]}");
-      else
-        fprintf(out, "null");
-      fprintf(out, ",\"raster\":%u,\"nativeGolden\":", (unsigned)scene.raster_effect);
-      WriteNativeGolden(out, native_hash[0]);
-      fprintf(out, ",\"rasterEntryCameraX\":");
-      if (scene.have_raster_entry_camera_x)
-        fprintf(out, "%u", scene.raster_entry_camera_x);
-      else
-        fprintf(out, "null");
-      fprintf(out, ",\"terrainVariants\":[");
-      for (unsigned source = 0; source < kArRegionalSource_Count; source++) {
-        if (source) fputc(',', out);
-        const ActionRoomSceneBg *base = &scene.bg[0], *layer = &variants[source].bg[0];
-        unsigned changed_cells = 0, changed_metatiles = 0;
-        for (size_t i = 0; i < base->map_size; i++)
-          changed_cells += base->map[i] != layer->map[i];
-        for (unsigned i = 0; i < kActionRoomSceneMetatileBytes; i += 8)
-          changed_metatiles += memcmp(base->metatiles + i, layer->metatiles + i, 8) != 0;
-        fprintf(out, "{\"profile\":%u,\"bg1\":", terrain_profiles[source]);
-        WriteBackground(out, layer);
-        fprintf(out, ",\"changedCells\":%u,\"changedMetatiles\":%u,\"nativeGolden\":",
-                changed_cells, changed_metatiles);
-        WriteNativeGolden(out, native_hash[source]);
-        fputc('}', out);
-      }
-      fprintf(out, "]}");
-      rooms++;
     }
   }
 

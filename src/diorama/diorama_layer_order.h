@@ -6,6 +6,7 @@
 #include <stddef.h>
 
 #include "diorama_planes.h"
+#include "diorama_bg_policy.h"
 
 /* Pure per-room diorama authoring keyed by the game's (map group, map) pair.
  * Paint order is independent of geometric z because SDL does not depth-sort
@@ -49,6 +50,8 @@ enum {
 typedef enum DioramaLayerSection {
   kDioramaLayerSection_Room = 0,
   kDioramaLayerSection_AitosWaterfall,
+  /* Independent room 1 B: deliberately inherits no room 1 A authoring. */
+  kDioramaLayerSection_DeathHeimCompletion,
   kDioramaLayerSection_Count,
 } DioramaLayerSection;
 
@@ -259,6 +262,7 @@ typedef struct DioramaRoomOverride {
   DioramaVirtualLayerOverride virtual_layers[2]; /* BG1, BG2 */
   DioramaPixelLayerOverride pixel_layers[2];
   DioramaStampLayerOverride stamp_layers[2];
+  DioramaBgPolicyOverride bg_policy[2];
   struct {
     bool set;
     int16_t x, y; /* view offset in native pixels, relative to native scroll */

@@ -41,7 +41,14 @@ const EffectEditor=(()=>{
     rebuildSources(sources.filter(s=>!s.emitter));
     refreshInspector();
     SharedRoomPreview.invalidate();draw();
-    status(text===saved?'Effects match the loaded/exported document.':'Unsaved effect changes. Export action-effects.ini to use them in game.');
+    status(text===saved?'Effects match the loaded/saved document.':'Unsaved effect changes. Save project to keep scenery and effects together.');
+    refreshEditorFeedback();
+  }
+  function markSaved() {saved=documentText;status('Effects match the loaded/saved document.');refreshEditorFeedback();}
+  function loadDocument(text) {
+    resetRecords.clear();mapSelection.clear();effectClipboard=null;clipboardActive=false;
+    selected='';sources=[];sourceKey='';sourceScope='';catalogueSources=[];catalogueScope='';catalogueDocument='';
+    saved=text;restore(text);
   }
   function change(text,label) {
     try {
@@ -1288,7 +1295,7 @@ const EffectEditor=(()=>{
     const file=e.target.files[0];if(!file)return;
     try{
       if(file.size>131072)throw Error('Effect document exceeds 128 KiB.');
-      change(await file.text(),'load effect document');
+      if(change(await file.text(),'load effect document'))markSaved();
     }catch(error){status(error.message);}finally{e.target.value='';}
   };
   $('#effectExport').onclick=()=>{
@@ -1296,7 +1303,7 @@ const EffectEditor=(()=>{
       SharedRoomPreview.validateEffects(documentText);
       const url=URL.createObjectURL(new Blob([documentText],{type:'text/plain'}));
       const link=document.createElement('a');link.href=url;link.download='action-effects.ini';link.click();
-      setTimeout(()=>URL.revokeObjectURL(url),1000);saved=documentText;
+      setTimeout(()=>URL.revokeObjectURL(url),1000);markSaved();
       status('Download requested. Place action-effects.ini beside settings.ini and restart the game.');
     }catch(error){status(error.message);}
   };
@@ -1307,7 +1314,7 @@ const EffectEditor=(()=>{
   $('#effectDocumentApply').onclick=()=>change($('#effectDocumentText').value,'apply effects document');
   $('#effectDocumentCopy').onclick=async()=>{
     const field=$('#effectDocumentText');field.focus();field.select();
-    try{await navigator.clipboard.writeText(field.value);saved=field.value;status('Copied effects INI. Save it as action-effects.ini beside settings.ini.');}
+    try{await navigator.clipboard.writeText(field.value);if(field.value===documentText)markSaved();status('Copied effects INI. Save it as action-effects.ini beside settings.ini.');}
     catch{status('Text selected. Press Ctrl/Cmd-C to copy.');}
   };
   function updateSources(api) {
@@ -1600,5 +1607,5 @@ const EffectEditor=(()=>{
       ['emitterColorEnd','color-end'],['emitterAnchor','anchor'],['emitterPoints','points'],
       ...actorFields.map(([id,key])=>['actorBinding'+id,key])])resetControl($('#'+id),[key]);
   refreshInspector();
-  return {resetValues,resetHandle,copyEffects,pasteEffects,startEffectPaste,clearMapSelection,hasClipboard:()=>clipboardActive&&!!effectClipboard,deactivateClipboard:()=>{clipboardActive=false;},isMapSelected:id=>mapSelection.has(id),hasMapSelection:()=>mapEmitters().some(e=>mapSelection.has(e.id)),openModal,finishModal,previewAt,removeEffect,updateCatalogue,modalOpen:()=>!!modal,placeEmitter,editEmitter,mapEmitters,paintContour,selectEmitter,selected:()=>selected,paintFloorRect,paintParticleRect,drawMapOverlay,text:()=>documentText,restore,updateSources,dirty:()=>documentText!==saved};
+  return {resetValues,resetHandle,copyEffects,pasteEffects,startEffectPaste,clearMapSelection,hasClipboard:()=>clipboardActive&&!!effectClipboard,deactivateClipboard:()=>{clipboardActive=false;},isMapSelected:id=>mapSelection.has(id),hasMapSelection:()=>mapEmitters().some(e=>mapSelection.has(e.id)),openModal,finishModal,previewAt,removeEffect,updateCatalogue,modalOpen:()=>!!modal,placeEmitter,editEmitter,mapEmitters,paintContour,selectEmitter,selected:()=>selected,paintFloorRect,paintParticleRect,drawMapOverlay,text:()=>documentText,restore,loadDocument,markSaved,updateSources,dirty:()=>documentText!==saved};
 })();

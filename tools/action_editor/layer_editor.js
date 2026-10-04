@@ -10,7 +10,7 @@
  * same art is often reused both near and far in one room. */
 const pixelStore = {};
 const store = {};   /* store[`${g}:${m}:${bg}:${family}`] = { byId:{}, byCell:{} } */
-const keyOf = (r, bg) => `${r.group}:${r.map}:${bg}:${editFamily(r,bg).profile}`;
+const keyOf = (r, bg) => `${r.group}:${r.map}:${bg}:${editFamily(r,bg).profile}${r.section?":"+r.section:""}`;
 function bucket(r, bg) {
   const k = keyOf(r, bg);
   if (!store[k]) store[k] = { byId:{}, byCell:{} };
@@ -28,7 +28,7 @@ let configDirty = false;
 const configRooms = {};
 const kVirtualCellSpanMax = 512;
 const planeTokens = new Set(Object.keys(PLANE_DEFAULTS));
-const roomKey = r => `${r.group}:${r.map}`;
+const roomKey = sceneIdentity;
 function emptyPlane() {
   return {
     setOrder:false,order:0,setZ:false,z:0,setAlpha:false,alpha:255,
@@ -48,7 +48,7 @@ function emptyVirtual() {
 function roomConfig(r) {
   const key = roomKey(r);
   if (!configRooms[key])
-    configRooms[key] = { planes:{}, virtual:[emptyVirtual(),emptyVirtual()] };
+    configRooms[key] = { planes:{}, virtual:[emptyVirtual(),emptyVirtual()], policy:[{},{}] };
   return configRooms[key];
 }
 function resolvedPlane(token) {
@@ -130,7 +130,10 @@ function resetLoadedConfig() {
   for (const key of Object.keys(configRooms)) delete configRooms[key];
 }
 function loadIniText(text, name) {
+  const policies=parseBgPolicyDocument(text);
+  BackgroundPolicyEditor.clearDrafts();
   resetLoadedConfig();
+  for(const r of DATA.rooms)if(policies[roomKey(r)])roomConfig(r).policy=policies[roomKey(r)];
   sourceIniText = String(text || '');
   sourceIniName = name || 'diorama-layers.ini';
   let active = null;
@@ -139,10 +142,7 @@ function loadIniText(text, name) {
     const line = stripIniComment(raw);
     if (!line) continue;
     if (line[0] === '[') {
-      const match = line.match(/^\[layers:([0-9a-fA-F]{1,2}):([0-9a-fA-F]{1,2})\]$/);
-      if (!match) { active = null; continue; }
-      const group = parseInt(match[1],16), map = parseInt(match[2],16);
-      active = DATA.rooms.find(r => r.group === group && r.map === map) || null;
+      active = roomFromSection(line) || null;
       continue;
     }
     if (!active) continue;
@@ -319,18 +319,19 @@ function virtualIniLines(r) {
   }
   return lines;
 }
-const roomIniLines = r => [...framingIniLines(r),...planeIniLines(r),...virtualIniLines(r),...pixelIniLines(r),...stampIniLines(r)];
+const roomIniLines = r => [...bgPolicyIniLines(r),...framingIniLines(r),...planeIniLines(r),...virtualIniLines(r),...pixelIniLines(r),...stampIniLines(r)];
 function ownedIniLine(line) {
   const match=stripIniComment(line).match(/^([^=\s]+)\s*=/);
   if(!match)return false;
   const key=regionalKey(match[1]);
   if(!key)return false;
   const [token,region]=key;
-  return EDITABLE_PLANE_TOKENS.has(token)&&region===undefined||
+  return /^bg[12]-policy(-band)?$/.test(token)&&region===undefined||
+    EDITABLE_PLANE_TOKENS.has(token)&&region===undefined||
     token==='framing'&&!!terrainMask(region)||
     /^bg[12]-(virtual|pixels|stamp|map)$/.test(token)&&!!terrainMask(region);
 }
-const roomSectionHeader = r => `[layers:${r.group.toString(16).toUpperCase().padStart(2,'0')}:${r.map.toString(16).toUpperCase().padStart(2,'0')}]`;
+const roomSectionHeader = r => `[layers:${r.group.toString(16).toUpperCase().padStart(2,'0')}:${r.map.toString(16).toUpperCase().padStart(2,'0')}${r.section?':'+r.section:''}]`;
 function mergeRoomIniBody(body,canonical) {
   const first=body.findIndex(ownedIniLine),kept=body.filter(line=>!ownedIniLine(line));
   let at=first>=0?body.slice(0,first).filter(line=>!ownedIniLine(line)).length:kept.length;
@@ -345,8 +346,8 @@ function roomSectionIni(r) {
   let active=false;
   for(const raw of sourceIniText.split(/\r?\n/)) {
     if(/^\s*\[/.test(raw)) {
-      const match=stripIniComment(raw).match(/^\[layers:([0-9a-fA-F]{1,2}):([0-9a-fA-F]{1,2})\]$/);
-      active=!!match&&parseInt(match[1],16)===r.group&&parseInt(match[2],16)===r.map;
+      const matched=roomFromSection(stripIniComment(raw));
+      active=!!matched&&roomKey(matched)===roomKey(r);
       const comment=active?raw.slice(raw.indexOf(']')+1).trim():'';
       if(/^[#;]/.test(comment))body.push(comment);
     } else if(active)body.push(raw);
@@ -366,8 +367,7 @@ function mergeDioramaIni() {
     const start = i, header = stripIniComment(lines[i++]);
     while (i < lines.length && !/^\s*\[/.test(lines[i])) i++;
     const block = lines.slice(start, i);
-    const match = header.match(/^\[layers:([0-9a-fA-F]{1,2}):([0-9a-fA-F]{1,2})\]$/);
-    const r = match && DATA.rooms.find(x => x.group===parseInt(match[1],16) && x.map===parseInt(match[2],16));
+    const r = roomFromSection(header);
     if (!r) { out.push(...block); continue; }
     written.add(roomKey(r));
     out.push(block[0],...mergeRoomIniBody(block.slice(1),roomIniLines(r)));
@@ -769,5 +769,6 @@ function draw2d() {
   }
   drawFramingGuide();
   drawCoverageGuide();
+  BackgroundPolicyEditor.drawGuides();
   EffectEditor.drawMapOverlay(ctx,view,r);
 }

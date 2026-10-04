@@ -43,10 +43,6 @@ enum {
   kDeathHeimLastBoss = 7,
   kDeathHeimFinalBoss = 8,
   kDeathHeimFogStartY = 144,
-  kDeathHeimFinalProgress = 7,
-  kDeathHeimSkySettled = 3,
-  kEndingSkyBg1Page = 0x64,
-  kEndingSkyBg2Page = 0x74,
   kBgscPageMask = 0xFC,
 };
 
@@ -509,12 +505,9 @@ static void ApplyTunedMapOverrides(const ActionBgFrameState *state,
 }
 
 static bool DeathHeimEndingSky(const ActionBgFrameState *state) {
-  const bool sky_pages =
-      (state->layer[0].bgsc & kBgscPageMask) == kEndingSkyBg1Page &&
-      (state->layer[1].bgsc & kBgscPageMask) == kEndingSkyBg2Page;
-  return state->death_heim_progress >= kDeathHeimFinalProgress &&
-      (sky_pages ||
-       state->death_heim_ending_state >= kDeathHeimSkySettled);
+  return ActRaiser_IsDeathHeimCompletionScene(state->map_group,
+      state->map_number, state->death_heim_progress,
+      state->layer[0].bgsc, state->layer[1].bgsc);
 }
 
 static void ClassifyDeathHeim(const ActionBgFrameState *state,

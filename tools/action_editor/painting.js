@@ -89,6 +89,7 @@ function setKey(target, k, value) {
   if (value === undefined) delete target[k]; else target[k] = value;
 }
 function applySide(op, which) {
+  if(op.policy)return BackgroundPolicyEditor.restore(op.policy,which);
   if(op.effects){EffectEditor.restore(op.effects[which]);return true;}
   const keys = Object.keys(op.parts);
   const current = keyOf(room, bgIndex);
@@ -96,8 +97,8 @@ function applySide(op, which) {
    * into a layer you cannot see would look like nothing happened. A
    * multi-layer op stays put and just refreshes what is on screen. */
   if (keys.length === 1 && keys[0] !== current) {
-    const [g, m, bg, profile] = keys[0].split(':').map(Number);
-    const idx = DATA.rooms.findIndex(r => r.group===g && r.map===m);
+    const parts=keys[0].split(':'),[g,m,bg,profile]=parts.slice(0,4).map(Number),section=parts[4]||'';
+    const idx = DATA.rooms.findIndex(r => r.group===g && r.map===m && (r.section||'')===section);
     if (idx >= 0) {
       terrainProfile=profile;room = terrainRoom(DATA.rooms[idx],profile);
       $('#room').value = String(idx);setLayer(bg);
@@ -439,7 +440,7 @@ $('#clearEverything').onclick = () => {
   const edited = keys.filter(k => store[k] &&
     (Object.keys(store[k].byCell).length || Object.keys(store[k].byId).length));
   if (!edited.length) { alert('Nothing is edited — everything is already at the ROM default.'); return; }
-  const rooms = new Set(edited.map(k => k.split(':').slice(0,2).join(':')));
+  const rooms = new Set(edited.map(k => {const parts=k.split(':');return parts.slice(0,2).join(':')+(parts[4]?':'+parts[4]:'');}));
   if (!confirm(`Reset every edit back to the ROM's own priority bits?\n\n`
              + `${edited.length} layer(s) across ${rooms.size} room(s).\n`
              + `This is undoable with ctrl/cmd-Z.`)) return;

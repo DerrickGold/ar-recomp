@@ -37,7 +37,6 @@ typedef struct ActionBgFrameState {
   uint8_t map_group;
   uint8_t map_number;
   uint8_t death_heim_progress;
-  uint8_t death_heim_ending_state;
   bool decorative_padding_enabled;
 } ActionBgFrameState;
 

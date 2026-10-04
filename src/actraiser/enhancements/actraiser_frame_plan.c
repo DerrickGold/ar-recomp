@@ -33,6 +33,7 @@ static void CaptureChurchPlanes(uint8_t group, uint8_t map) {
  * Keeping pending and live values separate prevents a surface rebind between
  * scanout and FrameSlot_Capture from describing the next policy state. */
 static ActionBgPlan s_pending_action_bg_plan;
+static uint8_t s_pending_scenery_section;
 static bool s_pending_bg_capture_pad_to_budget;
 static int s_pending_diorama_world_y0;
 static int s_pending_diorama_world_height;
@@ -147,14 +148,15 @@ static bool ActRaiser_ResolveActionBgPlan(
   static bool reported_rejected_draft;
   if (!plan || !presentation || !ActRaiserActionBg_BuildCurrentPlan(
           g_ram, kActRaiserWramSize,
-          g_settings.ws_bg2_padding, plan, presentation) ||
-      !ActionBgTuner_ObservePlan(
+          g_settings.ws_bg2_padding, plan, presentation)) return false;
+  const DioramaRoomOverride *room = ActRaiser_CurrentVirtualLayerRoom();
+  if (room) DioramaBgPolicy_Apply(room->bg_policy, plan);
+  if (!ActionBgTuner_ObservePlan(
           map_group, map_number, plan,
           (ActionBgTunerLimits) {
             SR_PPU_HORIZONTAL_MARGIN_MAX, SR_PPU_HORIZONTAL_MARGIN_MAX,
             SR_PPU_VERTICAL_MARGIN_MAX, SR_PPU_VERTICAL_MARGIN_MAX,
-          }))
-    return false;
+          })) return false;
   if (apply_tuner_draft && !ActionBgTuner_ApplyDraft(plan) &&
       !reported_rejected_draft) {
     reported_rejected_draft = true;
@@ -431,21 +433,24 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
   }
 }
 
+static uint8_t CurrentScenerySection(void) {
+  if (g_ram[kActRaiserWram_MapGroup] != kActRaiserMapGroup_DeathHeim ||
+      g_ram[kActRaiserWram_CurrentMap] != kActRaiserDeathHeimMap_Hub ||
+      g_ram[kActRaiserWram_DeathHeimProgress] < kActRaiserDeathHeimProgress_FinalBossBeaten)
+    return kDioramaLayerSection_Room;
+  SrPpuStateSnapshot ppu;
+  return ActRaiser_QueryPpuState(&ppu) && ActRaiser_IsDeathHeimCompletionScene(
+      g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
+      g_ram[kActRaiserWram_DeathHeimProgress],
+      ppu.background_tilemap_control[0], ppu.background_tilemap_control[1])
+      ? kDioramaLayerSection_DeathHeimCompletion : kDioramaLayerSection_Room;
+}
+
 const DioramaRoomOverride *ActRaiser_CurrentVirtualLayerRoom(void) {
   if (!g_settings.diorama_mode) return NULL;
-  const DioramaRoomOverride *room = DioramaLayerOrder_Find(
+  const DioramaRoomOverride *room = DioramaLayerOrder_FindSection(
       DioramaLayerManifest_Table(), g_ram[kActRaiserWram_MapGroup],
-      g_ram[kActRaiserWram_CurrentMap]);
-  /* Raw map 0701 is reused after the final boss. The face scene owns BG2SC
-   * $70; the sky/cloud return scene switches it to $74. The manifest's virtual
-   * face band must not make that later sky foreground-sharp merely because the
-   * two scenes share map bytes. */
-  SrPpuStateSnapshot ppu;
-  if (room && g_ram[kActRaiserWram_MapGroup] == kActRaiserMapGroup_DeathHeim &&
-      g_ram[kActRaiserWram_CurrentMap] == kActRaiserDeathHeimMap_Hub &&
-      (!ActRaiser_QueryPpuState(&ppu) ||
-       ppu.backgrounds[1].tilemap_base_word != 0x7000))
-    return NULL;
+      g_ram[kActRaiserWram_CurrentMap], CurrentScenerySection());
   return DioramaLayerManifest_TerrainRoom(room, ActRaiserRegional_TerrainSnapshot());
 }
 
@@ -473,6 +478,9 @@ void ActRaiser_ApplyWidescreenPolicy(void) {
   }
   const uint8 map_group = g_ram[kActRaiserWram_MapGroup];
   const uint8 map_number = g_ram[kActRaiserWram_CurrentMap];
+  s_pending_scenery_section = CurrentScenerySection();
+  if (map_group == kActRaiserMapGroup_DeathHeim && map_number == kActRaiserDeathHeimMap_Hub)
+    Diorama_PublishLiveLayerSection(map_group, map_number, s_pending_scenery_section);
   uint8 hud_split_height = 0;
   uint8 hud_split_left_end = 0;
   uint8 hud_split_right_start = 0;
@@ -937,6 +945,7 @@ static int s_live_margin_right;
 static int s_live_margin_top;
 static int s_live_margin_bottom;
 static ActionBgPlan s_live_action_bg_plan;
+static uint8_t s_live_scenery_section;
 static bool s_live_bg_capture_pad_to_budget;
 static int s_live_diorama_world_y0;
 static int s_live_diorama_world_height;
@@ -953,6 +962,7 @@ void ActRaiser_CommitFramePlan(int left, int right, int top, int bottom) {
   s_live_margin_top = top;
   s_live_margin_bottom = bottom;
   s_live_action_bg_plan = s_pending_action_bg_plan;
+  s_live_scenery_section = s_pending_scenery_section;
   s_live_bg_capture_pad_to_budget = s_pending_bg_capture_pad_to_budget;
   s_live_diorama_world_y0 = s_pending_diorama_world_y0;
   s_live_diorama_world_height = s_pending_diorama_world_height;
@@ -1003,4 +1013,8 @@ bool ActRaiser_LiveActionBgPlan(ActionBgPlan *out,
   if (pad_captured_to_budget)
     *pad_captured_to_budget = s_live_bg_capture_pad_to_budget;
   return s_live_action_bg_plan.valid;
+}
+
+uint8_t ActRaiser_LiveScenerySection(void) {
+  return s_live_scenery_section;
 }

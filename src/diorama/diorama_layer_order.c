@@ -30,6 +30,7 @@ static const int kPlaneTokenCount =
 static const char *const kSectionTokens[kDioramaLayerSection_Count] = {
   [kDioramaLayerSection_Room] = NULL,
   [kDioramaLayerSection_AitosWaterfall] = "waterfall",
+  [kDioramaLayerSection_DeathHeimCompletion] = "completion",
 };
 
 const char *DioramaLayerOrder_SectionToken(int section) {
@@ -497,7 +498,8 @@ bool DioramaLayerOrder_RoomIsActive(const DioramaRoomOverride *room) {
       return true;
   }
   for (int bg = 0; bg < 2; bg++)
-    if (room->pixel_layers[bg].count || room->stamp_layers[bg].count ||
+    if (DioramaBgPolicy_IsAuthored(&room->bg_policy[bg]) ||
+        room->pixel_layers[bg].count || room->stamp_layers[bg].count ||
         room->stamp_layers[bg].set_bounds ||
         room->stamp_layers[bg].regional_bounds[0].set ||
         room->stamp_layers[bg].regional_bounds[1].set ||
@@ -584,7 +586,8 @@ bool DioramaLayerOrder_ResolveTransparentFill(
                  plane != SR_PPU_OVERLAY_BG2))
     return false;
   const DioramaRoomOverride *rooms[2] = {
-    DioramaLayerOrder_Find(table, map_group, map_number),
+    section == kDioramaLayerSection_DeathHeimCompletion ? NULL :
+        DioramaLayerOrder_Find(table, map_group, map_number),
     section == kDioramaLayerSection_Room ? NULL :
         DioramaLayerOrder_FindSection(table, map_group, map_number, section),
   };
@@ -619,7 +622,8 @@ int DioramaLayerOrder_ResolveSection(const DioramaLayerOrderTable *table,
   int n = default_count < capacity ? default_count : capacity;
 
   const DioramaRoomOverride *rooms[2] = {
-    DioramaLayerOrder_Find(table, map_group, map_number),
+    section == kDioramaLayerSection_DeathHeimCompletion ? NULL :
+        DioramaLayerOrder_Find(table, map_group, map_number),
     section == kDioramaLayerSection_Room ? NULL :
         DioramaLayerOrder_FindSection(table, map_group, map_number, section),
   };
@@ -791,6 +795,10 @@ bool DioramaLayerOrder_ParseScopedSection(const char *section,
   } else if (*end != '\0') {
     return false;
   }
+
+  if (layer_section == kDioramaLayerSection_DeathHeimCompletion &&
+      (group != kActRaiserMapGroup_DeathHeim || map != kActRaiserDeathHeimMap_Hub))
+    return false;
 
   if (out_group) *out_group = (uint8_t)group;
   if (out_map) *out_map = (uint8_t)map;
@@ -1157,6 +1165,143 @@ static const char *TerrainSuffix(unsigned mask) {
   return mask < 8 ? suffixes[mask] : "";
 }
 
+/* Policy token tables are local to the manifest codec, so this codec remains
+ * usable without linking the planner. Enum order is part of the file contract. */
+static const char *const kPolicyEdges[] = {
+  "transparent", "world", "clamp", "mirror", "repeat", "raw",
+};
+static const char *const kPolicyMotions[] = { "fill", "normal" };
+static const char *const kPolicyExtents[] = { "inherit", "available", "fixed" };
+static const char *const kPolicyAnchors[] = { "screen", "world" };
+
+static int PolicyEnum(const char *value, const char *const *names, unsigned count) {
+  for (unsigned i = 0; i < count; i++)
+    if (!strcmp(value, names[i])) return (int)i;
+  return -1;
+}
+
+static bool PolicyNumber(const char *value, unsigned max, uint16_t *out) {
+  if (!*value) return false;
+  for (const char *p = value; *p; p++)
+    if (*p < '0' || *p > '9') return false;
+  char *end;
+  unsigned long n = strtoul(value, &end, 10);
+  if (*end || n > max) return false;
+  *out = (uint16_t)n;
+  return true;
+}
+
+static bool ParsePolicyLine(DioramaRoomOverride *room, unsigned bg, bool is_band,
+                            const char *text, const char **error) {
+  DioramaBgPolicyOverride next = room->bg_policy[bg];
+  ActionBgBand band = {0};
+  uint16_t index = 0, left = 0, right = 0, top = 0, bottom = 0;
+  unsigned seen = 0;
+  char word[64];
+  const char *at = text;
+  while ((at = NextWord(at, word, sizeof(word))) != NULL) {
+    char *value = strchr(word, ':');
+    if (!value) goto bad;
+    *value++ = 0;
+    unsigned bit = 0;
+    int n;
+    if (!strcmp(word, "edge")) {
+      bit = 1u;
+      n = PolicyEnum(value, kPolicyEdges, 6);
+      if (n < 0) goto bad;
+      if (is_band) band.edge = (ActionBgEdgeMode)n;
+      else { next.set_edge = true; next.edge = (ActionBgEdgeMode)n; }
+    } else if (!strcmp(word, "motion")) {
+      bit = 2u;
+      n = PolicyEnum(value, kPolicyMotions, 2);
+      if (n < 0) goto bad;
+      if (is_band) band.motion = (ActionBgMotionMode)n;
+      else { next.set_motion = true; next.motion = (ActionBgMotionMode)n; }
+    } else if (!strcmp(word, "horizontal")) {
+      bit = 4u;
+      n = PolicyEnum(value, kPolicyExtents, 3);
+      if (n < 0 || (!is_band && n == 0)) goto bad;
+      if (is_band) band.horizontal_extent.mode = (ActionBgExtentMode)n;
+      else {
+        next.set_horizontal = true;
+        next.horizontal = (ActionBgHorizontalExtent){.mode = (ActionBgExtentMode)n};
+      }
+    } else if (!is_band && !strcmp(word, "vertical")) {
+      bit = 8u;
+      n = PolicyEnum(value, kPolicyExtents, 3);
+      if (n <= 0) goto bad;
+      next.set_vertical = true;
+      next.vertical = (ActionBgVerticalExtent){.mode = (ActionBgExtentMode)n};
+    } else if (!strcmp(word, "left")) {
+      bit = 16u;
+      if (!PolicyNumber(value, 128, &left)) goto bad;
+    } else if (!strcmp(word, "right")) {
+      bit = 32u;
+      if (!PolicyNumber(value, 128, &right)) goto bad;
+    } else if (!is_band && !strcmp(word, "top")) {
+      bit = 64u;
+      if (!PolicyNumber(value, 128, &top)) goto bad;
+    } else if (!is_band && !strcmp(word, "bottom")) {
+      bit = 128u;
+      if (!PolicyNumber(value, 128, &bottom)) goto bad;
+    } else if (!is_band && !strcmp(word, "bands")) {
+      bit = 256u;
+      uint16_t count;
+      if (!PolicyNumber(value, kActionBgMaxBands, &count)) goto bad;
+      next.set_bands = true;
+      next.band_count = (uint8_t)count;
+      next.band_mask = 0;
+      memset(next.bands, 0, sizeof(next.bands));
+    } else if (is_band && !strcmp(word, "index")) {
+      bit = 512u;
+      if (!PolicyNumber(value, kActionBgMaxBands - 1, &index)) goto bad;
+    } else if (is_band && !strcmp(word, "anchor")) {
+      bit = 1024u;
+      n = PolicyEnum(value, kPolicyAnchors, 2);
+      if (n < 0) goto bad;
+      band.anchor = (ActionBgBandAnchor)n;
+    } else if (is_band && !strcmp(word, "rows")) {
+      bit = 2048u;
+      char *end = strchr(value, ',');
+      if (!end) goto bad;
+      *end++ = 0;
+      if (!PolicyNumber(value, 65535, &band.y0) ||
+          !PolicyNumber(end, 65535, &band.y1) || band.y0 >= band.y1) goto bad;
+    } else goto bad;
+    if (seen & bit) goto bad;
+    seen |= bit;
+  }
+  if (!seen) goto bad;
+  ActionBgHorizontalExtent *h = is_band ? &band.horizontal_extent : &next.horizontal;
+  if (seen & 4u) {
+    if (h->mode == kActionBgExtent_Fixed) {
+      if ((seen & 48u) != 48u) goto bad;
+      h->left = left;
+      h->right = right;
+    } else if (seen & 48u) goto bad;
+  } else if (seen & 48u) goto bad;
+  if (seen & 8u) {
+    if (next.vertical.mode == kActionBgExtent_Fixed) {
+      if ((seen & 192u) != 192u) goto bad;
+      next.vertical.top = top;
+      next.vertical.bottom = bottom;
+    } else if (seen & 192u) goto bad;
+  } else if (seen & 192u) goto bad;
+  if (is_band) {
+    const unsigned required = 1u | 2u | 4u | 512u | 1024u | 2048u;
+    if ((seen & required) != required || !next.set_bands ||
+        index >= next.band_count || (next.band_mask & (1u << index)) ||
+        (band.anchor == kActionBgBandAnchor_Screen && band.y1 > 224)) goto bad;
+    next.bands[index] = band;
+    next.band_mask |= (uint8_t)(1u << index);
+  }
+  room->bg_policy[bg] = next;
+  return true;
+ bad:
+  if (error) *error = "invalid background policy (caps 0..128; bands 0..4)";
+  return false;
+}
+
 bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
                                  const char **out_error) {
   if (out_error) *out_error = NULL;
@@ -1218,6 +1363,18 @@ bool DioramaLayerOrder_ParseLine(DioramaRoomOverride *room, const char *line,
   if (scoped) {
     if (out_error) *out_error = "terrain suffix only applies to tile edit keys";
     return false;
+  }
+  for (unsigned bg = 0; bg < 2; bg++) {
+    const char *policy = bg ? "bg2-policy" : "bg1-policy";
+    const char *band = bg ? "bg2-policy-band" : "bg1-policy-band";
+    if ((!strcmp(token, policy) || !strcmp(token, band)) &&
+        room->section != kDioramaLayerSection_Room &&
+        room->section != kDioramaLayerSection_DeathHeimCompletion) {
+      if (out_error) *out_error = "background policy belongs in a room scene section";
+      return false;
+    }
+    if (!strcmp(token, policy) || !strcmp(token, band))
+      return ParsePolicyLine(room, bg, !strcmp(token, band), equals + 1, out_error);
   }
   int plane = DioramaLayerOrder_PlaneFromToken(token);
   if (plane < 0 || plane >= kDioramaPlane_Count) {
@@ -1478,6 +1635,36 @@ static void DioramaLayerOrder_FormatRoomBody(const DioramaRoomOverride *room,
     written_framing |= mask;
     APPEND("framing%s = x:%d y:%d\n", TerrainSuffix(mask),
            room->framing[profile].x, room->framing[profile].y);
+  }
+  for (unsigned bg = 0; bg < 2; bg++) {
+    const DioramaBgPolicyOverride *p = &room->bg_policy[bg];
+    if (!DioramaBgPolicy_IsAuthored(p)) continue;
+    APPEND("bg%u-policy =", bg + 1);
+    if (p->set_edge) APPEND(" edge:%s", kPolicyEdges[p->edge]);
+    if (p->set_motion) APPEND(" motion:%s", kPolicyMotions[p->motion]);
+    if (p->set_horizontal) {
+      APPEND(" horizontal:%s", kPolicyExtents[p->horizontal.mode]);
+      if (p->horizontal.mode == kActionBgExtent_Fixed)
+        APPEND(" left:%u right:%u", p->horizontal.left, p->horizontal.right);
+    }
+    if (p->set_vertical) {
+      APPEND(" vertical:%s", kPolicyExtents[p->vertical.mode]);
+      if (p->vertical.mode == kActionBgExtent_Fixed)
+        APPEND(" top:%u bottom:%u", p->vertical.top, p->vertical.bottom);
+    }
+    if (p->set_bands) APPEND(" bands:%u", p->band_count);
+    APPEND("\n");
+    for (unsigned i = 0; i < kActionBgMaxBands; i++) {
+      if (!(p->band_mask & (1u << i))) continue;
+      const ActionBgBand *b = &p->bands[i];
+      APPEND("bg%u-policy-band = index:%u anchor:%s rows:%u,%u edge:%s motion:%s"
+             " horizontal:%s", bg + 1, i, kPolicyAnchors[b->anchor], b->y0, b->y1,
+             kPolicyEdges[b->edge], kPolicyMotions[b->motion],
+             kPolicyExtents[b->horizontal_extent.mode]);
+      if (b->horizontal_extent.mode == kActionBgExtent_Fixed)
+        APPEND(" left:%u right:%u", b->horizontal_extent.left, b->horizontal_extent.right);
+      APPEND("\n");
+    }
   }
   /* Emit in table-token order, not plane-index order, so a diff between two
    * exports is stable and readable. */

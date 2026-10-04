@@ -8,6 +8,7 @@
 
   <h2>Room</h2>
   <select id="room" style="width:100%"></select>
+  <p class="hint" id="roomSceneInfo"></p>
   <h2>Terrain variant</h2>
   <select id="terrain" style="width:100%"></select>
   <p class="hint" id="terrainInfo"></p>
@@ -17,6 +18,28 @@
     <button id="bg1" class="on" style="flex:1">BG1</button>
     <button id="bg2" style="flex:1">BG2</button>
   </div>
+
+  <details class="side-section bg-policy" open><summary>Background policy</summary>
+    <p class="hint" id="bgPolicyInfo"></p>
+    <div class="ctl"><label for="bgPolicyEdge">Edge fill</label><select id="bgPolicyEdge"></select></div>
+    <div class="ctl"><label for="bgPolicyMotion">Motion</label><select id="bgPolicyMotion"></select></div>
+    <div class="ctl"><label for="bgPolicyHorizontal">Horizontal extent</label><select id="bgPolicyHorizontal"></select></div>
+    <div class="ctl"><label for="bgPolicyLeft">Left</label><input id="bgPolicyLeft" type="number" min="0" max="128" step="1">
+      <label for="bgPolicyRight">Right</label><input id="bgPolicyRight" type="number" min="0" max="128" step="1"></div>
+    <div class="ctl"><label for="bgPolicyVertical">Vertical extent</label><select id="bgPolicyVertical"></select></div>
+    <div class="ctl"><label for="bgPolicyTop">Top</label><input id="bgPolicyTop" type="number" min="0" max="128" step="1">
+      <label for="bgPolicyBottom">Bottom</label><input id="bgPolicyBottom" type="number" min="0" max="128" step="1"></div>
+    <div class="ctl"><label for="bgPolicyBands">Row bands</label><select id="bgPolicyBands"></select></div>
+    <div id="bgPolicyBandList"></div><button id="bgPolicyAddBand">Add row band</button>
+    <p class="hint">Rows end before the end value. Screen bands use rows 0–224; world bands follow this BG’s camera. Up to four ordered bands.</p>
+    <button id="bgPolicyApply">Apply policy</button><button id="bgPolicyDiscard">Discard draft</button><button id="bgPolicyReset">Reset to room defaults</button>
+    <button id="bgPolicyPainted">Use painted scenery (disable fill)</button>
+    <button id="bgPolicyPreview">Preview policy in shared renderer</button>
+    <label class="hint"><input id="bgPolicyGuides" type="checkbox" checked> Show policy guides on map</label>
+    <p class="hint" id="bgPolicyStatus" role="status"></p>
+    <p class="hint" id="bgPolicyDrafts"></p>
+    <p class="hint">Green: extent caps; white: authentic view; purple: row bands. Available is shown at the renderer’s 128 px limit. Actual coverage also depends on scenery and view budgets. Policies are saved with tiles in the project and apply in game with Diorama enabled.</p>
+  </details>
 
   <h2>Pixel editing</h2>
   <button id="pixelPick" style="width:100%">Open pixel editor…</button>
@@ -124,10 +147,16 @@
   <p><button id="floorMistDraw">Paint ground mist</button> <button id="floorMistErase">Erase mist areas</button></p>
   <label><input id="effectCollision" type="checkbox"> Show collision support on map</label>
   <p class="hint">Drag a rectangle up to 512 × 512 pixels on the map. Cyan edges support mist; green cells are solid; amber cells are partial collision. Scenery painting does not change collision. Erase removes intersecting authored mist areas; undo restores them.</p>
+  <p class="hint" id="effectStatus" role="status">Save project keeps your scenery and effects together.</p>
+  </details>
+  <details class="side-section"><summary>Individual INI files</summary>
+  <p class="hint">For importing or exporting one part separately. Use Load project and Save project above the map to keep both together.</p>
+  <label for="importIni" class="file-btn">Load scenery INI</label>
+  <input id="importIni" type="file" accept=".ini,text/plain" hidden>
+  <button id="export">Export level INI</button>
   <p><label>Load effects INI<input id="effectLoad" type="file" accept=".ini,.txt"></label></p>
   <button id="effectExport">Export effects INI</button>
   <button id="effectDocumentOpen">Review / paste effects INI</button>
-  <p class="hint" id="effectStatus" role="status">Effect files are separate from scenery. Preview an actor event to tune that accent family.</p>
   </details>
   <details class="side-section"><summary>Paint &amp; depth settings</summary>
   <h2>Paintbrush band</h2>
@@ -317,12 +346,13 @@
     <span class="spacer"></span>
     <button id="tint">Band tint</button>
     <button id="compareOriginal">Compare original tiles</button>
-    <label for="importIni" class="file-btn">Load INI</label>
-    <input id="importIni" type="file" accept=".ini,text/plain" hidden>
+    <label for="projectLoad" class="file-btn" title="Open one project ZIP, or select both INI files together">Load project</label>
+    <input id="projectLoad" type="file" accept=".zip,.ini,application/zip,text/plain" multiple hidden>
+    <button id="projectSave" title="Download all scenery and effects in one ZIP (Ctrl/Cmd-S)">Save project</button>
     <span id="saveState" class="save-state" role="status">Loaded INI</span>
-    <button id="export">Export level INI</button>
     <button id="docs">Docs</button>
   </div>
+  <p class="project-status" id="projectStatus" role="status" aria-live="polite">Save project downloads both INIs together. Load project opens that ZIP or both INIs selected together.</p>
   <div class="selection-tools" id="selectionTools">
     <div class="selection-summary"><b id="selectionSummary">No tiles selected</b>
       <span id="selectionApplied"></span><span id="selectionScope"></span></div>
@@ -641,5 +671,8 @@
 <script src="effect_geometry.js"></script>
 <script src="effect_handles.js"></script>
 <script src="shared_room_preview.js"></script>
+<script src="bg_policy_editor.js"></script>
+<script src="project_archive.js"></script>
+<script src="project_editor.js"></script>
 <script src="editor.js"></script>
 <script src="help.js"></script>

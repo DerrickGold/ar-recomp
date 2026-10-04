@@ -3,6 +3,7 @@
 #include "room_scene.h"
 #include "action/action_bg_world.h"
 #include "actraiser/actraiser_room_profiles.h"
+#include "actraiser_game.h"
 #include "diorama/diorama_capture_blend.h"
 #include "diorama/diorama_scene_extent.h"
 #include "deterministic_hash.h"
@@ -408,7 +409,7 @@ EditorRoomScene *EditorRoomScene_Create(const ActionSceneSnapshot *assets) {
     .stack_grouping = true, .skybox_prefilter = true, .priority_surface = true};
   r->scene = (DioramaScene){.render = &r->options,
     .map_group = assets->scene.group, .map_number = assets->scene.map};
-  const ActionRoomSceneFrameRequest request={0};
+  const ActionRoomSceneFrameRequest request=assets->frame;
   if (!ActionRoomScene_BuildFrameState(&r->assets.scene,&request,&r->frame) ||
       !ActionEnvironmentScene_FromRoom(&r->environment,&r->assets.scene,&r->frame)) {
     EditorRoomScene_Destroy(r); return NULL;
@@ -425,6 +426,37 @@ void EditorRoomScene_Destroy(EditorRoomScene *r) {
   DioramaLayerOrder_ClearRoom(&r->terrain);
   free(r);
 }
+static bool BuildBgPlan(const EditorRoomScene *r,
+                        const ActionRoomSceneFrameState *f, ActionBgPlan *out) {
+  const ActionRoomScene *s = &r->assets.scene;
+  ActionBgFrameState state = {.map_group = s->group, .map_number = s->map,
+      .death_heim_progress = kActRaiserDeathHeimProgress_FinalBossBeaten,
+      .decorative_padding_enabled = true};
+  for (unsigned bg = 0; bg < 2; bg++)
+    state.layer[bg] = (ActionBgLayerState){
+      .camera_x = (uint16_t)f->layer_camera_x[bg],
+      .camera_y = (uint16_t)f->layer_camera_y[bg],
+      .world_width = s->bg[bg].pages_wide * 256,
+      .world_height = s->bg[bg].pages_high * 256,
+      .bgsc = f->bgsc[bg], .tilemap_base = (f->bgsc[bg] & 0xfc) << 8};
+  return ActionBgPlan_Build(&state, out);
+}
+
+bool EditorRoomScene_BgPolicy(const EditorRoomScene *r, int x, int y,
+                              uint32_t clock, bool defaults, ActionBgPlan *out, int camera_x[2]) {
+  if (!r || !out || x < 0 || y < 0 || x > 65535 || y > 65535) return false;
+  ActionRoomSceneFrameRequest request = r->assets.frame;
+  request.camera_x = x;
+  request.camera_y = y;
+  request.game_frame = clock;
+  ActionRoomSceneFrameState frame;
+  if (!ActionRoomScene_BuildFrameState(&r->assets.scene, &request, &frame) ||
+      !BuildBgPlan(r, &frame, out)) return false;
+  if (camera_x)
+    for (unsigned bg = 0; bg < 2; bg++) camera_x[bg] = frame.layer_camera_x[bg];
+  return defaults || DioramaBgPolicy_Apply(r->terrain.bg_policy, out);
+}
+
 bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
   if (!r || !text) return false;
   DioramaLayerOrderTable *table = calloc(1, sizeof(*table));
@@ -453,8 +485,17 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
       }
     } else if (current && !DioramaLayerOrder_ParseLine(current, s, NULL)) ok = false;
   }
-  const DioramaRoomOverride *base = DioramaLayerOrder_Find(table, r->scene.map_group, r->scene.map_number);
+  const uint8_t section = ActRaiser_IsDeathHeimCompletionScene(
+      r->assets.scene.group, r->assets.scene.map, 7,
+      r->assets.frame.bgsc_override[0], r->assets.frame.bgsc_override[1]) &&
+      r->assets.frame.bgsc_override_mask == 3
+      ? kDioramaLayerSection_DeathHeimCompletion : kDioramaLayerSection_Room;
+  const DioramaRoomOverride *base = DioramaLayerOrder_FindSection(table,
+      r->scene.map_group, r->scene.map_number, section);
   if (ok && base) ok = DioramaLayerOrder_ForTerrain(base, r->assets.terrain_profile, terrain);
+  ActionBgPlan policy;
+  if (ok) ok = EditorRoomScene_BgPolicy(r, 0, 0, 0, true, &policy, NULL) &&
+      DioramaBgPolicy_Apply(terrain->bg_policy, &policy);
   uint8_t *bands[2] = {0};
   for (unsigned bg = 0; ok && bg < 2; ++bg) {
     if (!DioramaLayerOrder_VirtualLayerHasClassification(&terrain->virtual_layers[bg])) continue;
@@ -550,8 +591,9 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   r->environment.suppress_default_ray_field=ActionEffectRecipes_ReplacesRayField(&r->recipes,
       r->environment.group,r->environment.room,r->assets.terrain_profile);
   ActionEnvironmentScene_Capture(&r->environment,&r->effects);
-  r->scene.layer_section = kDioramaLayerSection_Room;
-  if (!r->effects.decoration_overflow)
+  r->scene.layer_section = ActRaiser_IsDeathHeimCompletionScene(s->group, s->map,
+      7, f->bgsc[0], f->bgsc[1]) ? kDioramaLayerSection_DeathHeimCompletion : kDioramaLayerSection_Room;
+  if (r->scene.layer_section == kDioramaLayerSection_Room && !r->effects.decoration_overflow)
     for (unsigned i = 0; i < r->effects.decoration_count; ++i)
       if (r->effects.decorations[i].kind == kActionEffect_AitosWaterfall)
         r->scene.layer_section = kDioramaLayerSection_AitosWaterfall;
@@ -561,15 +603,9 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
       r->effects.decorations[r->effects.decoration_count++]=event;
     else {r->effects.effects[0]=event;r->effects.effect_count=r->effects.visible_count=1;}
   }
-  ActionBgFrameState state = {.map_group = s->group, .map_number = s->map,
-      .decorative_padding_enabled = true};
-  for (unsigned bg = 0; bg < 2; ++bg)
-    state.layer[bg] = (ActionBgLayerState){
-      .camera_x = (uint16_t)f->layer_camera_x[bg], .camera_y = (uint16_t)f->layer_camera_y[bg],
-      .world_width = s->bg[bg].pages_wide * 256, .world_height = s->bg[bg].pages_high * 256,
-      .bgsc = f->bgsc[bg], .tilemap_base = (bg ? 0x70 : 0x60) << 8};
   ActionBgPlan plan;
-  if (!ActionBgPlan_Build(&state, &plan)) return false;
+  if (!BuildBgPlan(r, f, &plan) ||
+      !DioramaBgPolicy_Apply(r->terrain.bg_policy, &plan)) return false;
   const int playfield = ActionBgPlan_PlayfieldLayer(&plan);
   if (ActionBgPlan_PrimaryLayer(&plan) < 0) budget = 0;
   int world_x0, world_width, world_y0, world_height;
@@ -614,7 +650,7 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
       .capture_flags = SR_PPU_OVERLAY_REMOVE_FROM_GAME,
       .clip_vertical = top || bottom,
       .clip_top = Min(Max(0, f->layer_camera_y[bg]), Max(top, bottom)),
-      .clip_bottom = Min(Max(0, state.layer[bg].world_height - 225 - f->layer_camera_y[bg]), Max(top, bottom))};
+      .clip_bottom = Min(Max(0, plan.layer[bg].world_height - 225 - f->layer_camera_y[bg]), Max(top, bottom))};
     if (DioramaCaptureBlend_LayerIsHalfAdded(f->cgwsel, f->cgadsub, input.sub_screen, 1u << bg))
       b->capture_flags |= SR_PPU_OVERLAY_MARK_BG_HALF_ADD;
     if (additive & (1u << bg)) {
@@ -664,7 +700,7 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
       if (delta >= 512) delta -= 1024;
       int left = -f->layer_camera_x[1] - delta;
       DioramaBgSourceBounds_AddRow(&bounds, &plan.layer[1], row,
-          left, left + state.layer[1].world_width, 1);
+          left, left + plan.layer[1].world_width, 1);
     }
   }
   DioramaBgValidSpanPlan_Build(extra_x + 64, extra_x, extra_x, extra_x, true,
@@ -684,7 +720,7 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   r->capture = (DioramaCapture){.skybox = &r->skybox,.width = width, .height = height, .authentic_y0 = top,
     .obj_apron = 64, .bg_apron_mask = 3, .camera_y = y,
     .bg2_camera_x = f->layer_camera_x[1], .bg2_camera_y = f->layer_camera_y[1],
-    .bg2_world_height = state.layer[1].world_height, .bg2_vertical_ratio = s->video_profile[10],
+    .bg2_world_height = plan.layer[1].world_height, .bg2_vertical_ratio = s->video_profile[10],
     .bg2_scroll_valid = true, .pixels = r->pixels, .bg2_valid_spans = &r->spans,
     .bg_transparent_fill_configured = r->fill_configured, .bg_transparent_fill_argb = r->fill_argb,
     .vertical_bounds = playfield == 0 ? DioramaVerticalBounds_Resolve(0, room_y, world_height, top, height)

@@ -712,6 +712,22 @@ typedef struct NativePixel {
   uint8_t rank;
 } NativePixel;
 
+bool ActionRoomScene_ProjectDeathHeimScene(ActionRoomScene *scene, bool completion) {
+  if (!scene || scene->group != kActRaiserMapGroup_DeathHeim ||
+      scene->map != kActRaiserDeathHeimMap_Hub) return false;
+  for (unsigned bg = 0; bg < kActionRoomSceneBgCount; bg++)
+    if (!scene->bg[bg].have_map || scene->bg[bg].pages_wide != 2 ||
+        scene->bg[bg].pages_high != 1 || scene->bg[bg].map_size != 512)
+      return false;
+  for (unsigned bg = 0; bg < kActionRoomSceneBgCount; bg++) {
+    ActionRoomSceneBg *layer = &scene->bg[bg];
+    if (completion) memmove(layer->map, layer->map + 256, 256);
+    layer->map_size = 256;
+    layer->pages_wide = 1;
+  }
+  return true;
+}
+
 static unsigned WrapCoordinate(int coordinate, unsigned extent) {
   if (!extent) return 0;
   int result = coordinate % (int)extent;
@@ -732,6 +748,14 @@ static bool LookupFrameTile(const ActionRoomScene *scene,
     const unsigned page = state->bg2_page_index;
     x = (x & 0xffu) + (page & 1u) * 256u;
     y = (y & 0xffu) + (page >> 1) * 256u;
+  } else if (scene->group == kActRaiserMapGroup_DeathHeim &&
+             scene->map == kActRaiserDeathHeimMap_Hub) {
+    /* The native BGSC selects one 32x32 tile page, even though the asset
+     * script uploads both faces and completion art side by side. Projected
+     * editor maps already contain only the selected page. */
+    unsigned page = width > 256 && (state->bgsc[bg] & 0xfc) == (bg ? 0x74 : 0x64);
+    x = (x & 0xffu) + page * 256u;
+    y &= 0xffu;
   } else {
     x = WrapCoordinate((int)x, width);
     y = WrapCoordinate((int)y, height);
