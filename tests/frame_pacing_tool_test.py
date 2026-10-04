@@ -136,6 +136,17 @@ class PacingTraceTest(unittest.TestCase):
         self.assertAlmostEqual(result['draw_unaccounted_wall_ms']['mean'], .4)
         self.assertEqual(self.report(self.rows())['draw_cpu_ms']['samples'], 0)
 
+    def test_no_deadline_does_not_report_absolute_clock_as_lateness(self):
+        rows = self.rows()
+        for row in rows:
+            row['deadline_ns'] = 0
+        result = self.report(rows)
+        self.assertEqual(result['deadline_late_ms']['samples'], 0)
+        for frame in result['worst_intervals']:
+            self.assertNotIn('deadline_late_ms', frame)
+        scheduled = self.report(self.rows())
+        self.assertEqual(scheduled['worst_intervals'][0]['deadline_late_ms'], 0)
+
     def test_reject_invalid_stage_or_partial_run(self):
         rows = self.rows()
         for key, value in [('draw_ns', 0), ('vector_wait_ns', 2_000_000),

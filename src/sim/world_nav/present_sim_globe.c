@@ -558,7 +558,10 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
                                              const PresentSimGlobeContent *content,
                                              PresentSimGlobeView *out_view) {
   static int trace = -1;
-  if (trace < 0) trace = getenv("AR_SIM_GLOBE_TRACE") != NULL;
+  if (trace < 0) {
+    const char *option = getenv("AR_SIM_GLOBE_TRACE");
+    trace = option ? (!strcmp(option, "all") ? 2 : 1) : 0;
+  }
   uint64_t stamps[9] = {trace ? HostClock_Nanoseconds() : 0};
   WorldNavigationProjection projection;
   PresentSimGlobeView view;
@@ -606,7 +609,7 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
   if (trace) {
     stamps[8] = HostClock_Nanoseconds();
     if (!detailed_town) stamps[2] = stamps[1];
-    if (stamps[8] - stamps[0] > 8000000) {
+    if (trace == 2 || stamps[8] - stamps[0] > 8000000) {
       fprintf(stderr, "[sim-globe-trace] gf=%u total-ms=%.3f", slot->sim.game_frame,
           (double)(stamps[8] - stamps[0]) / 1e6);
       static const char *const names[] = {

@@ -3735,6 +3735,55 @@ static void TestLiveCraterComposition(SDL_Renderer *renderer, FrameSlot *slot,
        "omission PASS");
 }
 
+static void TestDetailedMountainGroundCache(SDL_Renderer *renderer, FrameSlot *slot,
+                                            ArRenderRectI source) {
+  FrameSlot *saved = malloc(sizeof(*saved));
+  CHECK(saved);
+  *saved = *slot;
+  const char *option = SDL_getenv("AR_SIM_MOUNTAIN_GROUND_CACHE");
+  char *saved_option = option ? SDL_strdup(option) : NULL;
+  CHECK(!option || saved_option);
+  size_t cached_samples = 0, reference_samples = 0;
+  for (unsigned step = 0; step < 12; ++step) {
+    *slot = *saved;
+    slot->sim.camera_x = 48 + step * 13;
+    slot->sim.camera_y = 64 + step * 17;
+    slot->sim.background_voxel_detail = step % kSimBackgroundVoxelDetail_Count;
+    slot->sim.landscape_height_pct = (step / 4) * 75;
+    const Scene3DCamera camera = {-.45f - step * .035f, -.3f + step * .05f, 3.5f, .4f};
+    CHECK(!SDL_setenv_unsafe("AR_SIM_MOUNTAIN_GROUND_CACHE", "1", 1));
+    PresentSimGlobeMountains_Reset();
+    SDL_Surface *cached = RenderDetailedTown(renderer, slot, &camera, source, false);
+    const size_t samples = PresentSimGlobeMountains_TestGroundSamples();
+    cached_samples += samples;
+    SimBackgroundCraterAnchor cached_anchor, reference_anchor;
+    const bool cached_crater = PresentSimGlobeMountains_CraterAnchor(&cached_anchor);
+    CHECK(!SDL_setenv_unsafe("AR_SIM_MOUNTAIN_GROUND_CACHE", "0", 1));
+    PresentSimGlobeMountains_Reset();
+    SDL_Surface *reference = RenderDetailedTown(renderer, slot, &camera, source, false);
+    const size_t uncached = PresentSimGlobeMountains_TestGroundSamples();
+    reference_samples += uncached;
+    CHECK(samples <= uncached && Differences(cached, reference) == 0);
+    CHECK(PresentSimGlobeMountains_CraterAnchor(&reference_anchor) == cached_crater);
+    if (cached_crater) {
+      CHECK(cached_anchor.local_x == reference_anchor.local_x &&
+            cached_anchor.local_y == reference_anchor.local_y &&
+            cached_anchor.height_pixels == reference_anchor.height_pixels);
+    }
+    SDL_DestroySurface(cached);
+    SDL_DestroySurface(reference);
+  }
+  CHECK(reference_samples > 0 && cached_samples < reference_samples * 3 / 4);
+  printf("mountain ground samples: %zu cached / %zu reference; camera, detail, landscape "
+         "pixels and crater anchors exact PASS\n", cached_samples, reference_samples);
+  if (saved_option) CHECK(!SDL_setenv_unsafe("AR_SIM_MOUNTAIN_GROUND_CACHE", saved_option, 1));
+  else CHECK(!SDL_unsetenv_unsafe("AR_SIM_MOUNTAIN_GROUND_CACHE"));
+  SDL_free(saved_option);
+  PresentSimGlobeMountains_Reset();
+  *slot = *saved;
+  free(saved);
+}
+
 static void TestDetailedMountainReuse(SDL_Renderer *renderer, FrameSlot *slot,
                                       ArRenderRectI source) {
   FrameSlot *saved = malloc(sizeof(*saved));
@@ -4137,6 +4186,7 @@ static void CaptureTownPresentation(SDL_Renderer *renderer, FrameSlot *slot, con
     }
   }
   TestDetailedMountainReuse(renderer, slot, source);
+  TestDetailedMountainGroundCache(renderer, slot, source);
   TestDetailedVisibility(renderer, slot, source);
   TestLiveCraterComposition(renderer, slot, source);
   TestDetailedCameraLimits(renderer, slot, source);

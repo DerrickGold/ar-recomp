@@ -223,8 +223,9 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_nat
         evidence = dict(tick=b['tick'], interval_ms=(b['complete_ns']-a['complete_ns'])/1e6,
                           upload_ms=b['upload_ns']/1e6, draw_ms=b['draw_work_ns']/1e6,
                           swap_ms=b['swap_ns']/1e6, wait_ms=b['vector_wait_ns']/1e6,
-                          deadline_late_ms=max(0,b['draw_ns']-b['deadline_ns'])/1e6,
                           source_age_ms=(b['draw_ns']-b['source_ns'])/1e6)
+        if b['deadline_ns']:
+            evidence['deadline_late_ms'] = max(0,b['draw_ns']-b['deadline_ns'])/1e6
         if 'submit_start_ns' in b:
             evidence['backend_present_ms'] = (b['complete_ns']-b['submit_start_ns'])/1e6
             if b['submit_deadline_ns']:

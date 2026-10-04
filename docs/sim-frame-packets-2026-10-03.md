@@ -240,3 +240,77 @@ Paired 3,200-tick final WRAM hashes match exactly:
 This fixes a repeatable steady-state pacing defect without adding latency. The
 remaining smaller variation includes endpoint waiting and moving-view mountain
 preparation; construction-triggered world rebuilds remain separate work.
+
+## Moving-view follow-up: shared mountain ground samples
+
+The frame-packet and windmill work above was committed as `5e7dc3db`. The next
+steady-state cost is curved mountain preparation when camera facing changes.
+Relief tiles and skirts repeatedly evaluate the same exact ground XY: native
+terrain height, town/world floor registration, globe placement and local metric.
+Rotation legitimately changes the relief's stack direction, so retaining the
+entire old mesh would change its appearance.
+
+`PresentSimGlobeMountains_Prepare` now uses a bounded 4,096-entry lookup during
+each source emission. Entries store exact float-bit XY keys and the resolved
+ground point/metric; elevation, facing, UVs and color still follow the existing
+recipe. Collisions replace entries. The 112 KiB temporary cache is discarded at
+the end of emission, with uncached fallback on allocation failure. Nothing
+survives to become stale across a camera, town, landscape or geography change.
+There is no quality reduction or source-delay change.
+
+`AR_SIM_MOUNTAIN_GROUND_CACHE=0` selects the uncached calculation for profiling
+and parity tests. `AR_SIM_GLOBE_TRACE=all` records every stage sample; the existing
+`=1` mode continues logging only draws above 8 ms. The pacing analyzer also stops
+reporting an absolute clock value as deadline lateness in its worst-frame list
+when the trace has no software deadline, as in the VSync runs below.
+
+### Deck results
+
+Same isolated Aitos replay, 1280×800 90 Hz KDE/Wayland, 3,200 ticks and unchanged
+presentation settings. All six runs use one binary with the cache enabled or
+disabled, SHA-256:
+`ae69a6648fddad67468b39145b9d3fcf3902b7cf41e4a7d373765b8af6fe323d`.
+Both variants use `AR_SIM_GLOBE_TRACE=all`. The measured windows contain no logged
+world-map development changes. Average rates remain approximately 90 FPS.
+
+| Window | Workload | Mean mountain stage before → after | p99 present interval before → after | Fitted cadence mismatch before → after |
+|---|---|---:|---:|---:|
+| 1,100–1,900 | Moving, pair A | 2.084 → 1.092 ms | 16.64 → 15.36 ms | 0.33% → 0.00% |
+| 2,200–3,200 | Moving, pair A | 2.029 → 1.098 ms | 16.13 → 15.13 ms | 0.40% → 0.00% |
+| 1,100–1,900 | Moving, pair B | 2.052 → 1.061 ms | 16.43 → 15.34 ms | 1.00% → 0.00% |
+| 2,200–3,200 | Moving, pair B | 2.044 → 1.070 ms | 16.08 → 15.13 ms | 0.60% → 0.00% |
+| 1,100–1,900 | Idle | 2.100 → 1.130 ms | 16.25 → 14.98 ms | 1.16% → 0.00% |
+| 2,200–3,200 | Idle | 0.006 → 0.004 ms | 13.71 → 13.22 ms | 0.20% → 0.33% |
+
+Moving pair A runs baseline then optimized; pair B reverses that order. The idle
+pair also runs optimized first. The first idle window still has changing camera
+facing. In the later idle window the camera has settled and only two mountain
+rebuilds occur, so the small pacing differences there should not be attributed
+to this optimization. Both repeated moving runs cut mountain preparation by
+roughly half. Whole-draw CPU savings are smaller than that stage saving; this
+does not remove the other draw, upload or scheduling costs.
+
+These are application present-completion intervals, not scanout timestamps.
+Zero fitted source-cadence mismatch does not mean every present is 11.1 ms apart.
+For example, optimized moving pair A still has a 17.26 ms interval at tick 2,207:
+8.94 ms before the presenting loop, 1.70 ms upload, 6.25 ms drawing and 0.33 ms
+final present. Source waiting before upload/draw remains a separate investigation;
+the existing playback policy was retained.
+
+All six runs exited cleanly with no detected foreign game process. Paired final
+WRAM hashes exactly match the idle and moving hashes recorded above. Data is in
+`runs/sim-pipeline-2026-10-03/deck-mountain-{base,fix}-{idle-a,move-a,move-b}`;
+`analyze_mountains.py` regenerates `mountain-summary.json` and verifies the selected
+windows exclude logged development changes.
+
+### Regression coverage
+
+Captured Fillmore and Aitos GPU suites compare cache-enabled and uncached images
+across 12 camera/detail/landscape combinations, including all four detail levels
+and 0/75/150% landscape height. Pixels and curved crater anchors match exactly.
+Ground evaluations fall from 61,452 to 19,553 for Fillmore and 85,500 to 29,439 for
+Aitos, reductions of 68% and 66%. Existing camera-limit, held/cold, live crater
+and immutable-capture checks also pass. Both town suites pass in Release and
+ASan/UBSan. Seven related terrain/mountain/playout CTests and twelve pacing
+analyzer tests pass. Mac Release and Deck cross builds succeed; changed C files
+add no style violations relative to HEAD.

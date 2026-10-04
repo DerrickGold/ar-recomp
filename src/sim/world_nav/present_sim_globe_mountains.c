@@ -32,18 +32,35 @@ static struct {
   Sim3DDepthSurfaceVertex *vertices;
 } s_mountains;
 
+/* Relief tiles and skirts share many ground positions. Reuse only exact XY
+ * samples within one source emission, so camera, geography, detail and town
+ * changes cannot leave stale entries. Collisions replace an entry; storage
+ * and lookup work stay bounded even for unusually large mountain fields. */
+enum { kMountainGroundCacheEntries = 4096 };
+typedef struct MountainGroundPoint {
+  uint32_t key[2];
+  float point[3], metric;
+  bool valid;
+} MountainGroundPoint;
+
 typedef struct MountainBuilder {
   const SimGlobeMapping *map;
   PresentSimGlobeGroundSample sample;
   Sim3DDepthSurfaceVertex *vertices;
+  MountainGroundPoint *ground;
   size_t count, capacity;
   bool failed;
 } MountainBuilder;
 
-static bool MountainPoint(const SimGlobeMapping *map, PresentSimGlobeGroundSample sample,
-    float x, float y, float z, const SimBackgroundProjectionAxis *axis, float point[3]) {
+#if AR_SIM_GLOBE_TESTING
+static size_t s_ground_samples;
+size_t PresentSimGlobeMountains_TestGroundSamples(void) { return s_ground_samples; }
+#endif
+
+static bool MountainGround(const SimGlobeMapping *map, PresentSimGlobeGroundSample sample,
+    float x, float y, float point[3], float *metric) {
   const float cx=map->origin_x+x/16, cy=map->origin_y+y/16;
-  float floor, normal[3], metric;
+  float floor, normal[3];
   if (x>=0 && x<=512 && y>=0 && y<=512) {
     if (!SimWorldNavigationTerrain_RegisterTownFloor(
             map->town, x / 16, y / 16,
@@ -52,12 +69,47 @@ static bool MountainPoint(const SimGlobeMapping *map, PresentSimGlobeGroundSampl
       return false;
   } else if (sample) floor=sample(cx,cy);
   else return false;
-  if (!SimGlobeMapping_Point(map,cx,cy,floor,0,point) ||
-      !SimWorldNavigationGlobe_SampleAtRadius(map->chart_radius,cx,cy,normal,&metric)) return false;
+  return SimGlobeMapping_Point(map,cx,cy,floor,0,point) &&
+      SimWorldNavigationGlobe_SampleAtRadius(map->chart_radius,cx,cy,normal,metric);
+}
+
+static bool MountainPoint(const SimGlobeMapping *map, PresentSimGlobeGroundSample sample,
+    float x, float y, float z, const SimBackgroundProjectionAxis *axis, float point[3]) {
+  float metric;
+  if (!MountainGround(map,sample,x,y,point,&metric)) return false;
   const float height=z/16*metric/map->metric;
   point[0]+=axis->x_per_height*height;
   point[1]-=axis->y_per_height*height;
   point[2]+=axis->height_scale*height;
+  return true;
+}
+
+static bool CachedMountainGround(MountainBuilder *b, float x, float y,
+                                  float point[3], float *metric) {
+  uint32_t key[2];
+  memcpy(&key[0], &x, sizeof(x));
+  memcpy(&key[1], &y, sizeof(y));
+  uint32_t hash = key[0] * UINT32_C(0x9e3779b9) ^ key[1];
+  hash ^= hash >> 16;
+  hash *= UINT32_C(0x85ebca6b);
+  hash ^= hash >> 13;
+  MountainGroundPoint *entry = b->ground
+      ? &b->ground[hash & (kMountainGroundCacheEntries - 1)] : NULL;
+  if (entry && entry->valid && !memcmp(entry->key, key, sizeof(key))) {
+    memcpy(point, entry->point, sizeof(entry->point));
+    *metric = entry->metric;
+    return true;
+  }
+#if AR_SIM_GLOBE_TESTING
+  ++s_ground_samples;
+#endif
+  if (!MountainGround(b->map, b->sample, x, y, point, metric)) return false;
+  if (entry) {
+    memcpy(entry->key, key, sizeof(key));
+    memcpy(entry->point, point, sizeof(entry->point));
+    entry->metric = *metric;
+    entry->valid = true;
+  }
   return true;
 }
 
@@ -96,11 +148,15 @@ static void EmbedMountain(void *user, const float x[4], const float y[4],
   }
   const SimGlobeMapping *map = b->map;
   for (int p = 0; p < 4; ++p) {
-    float point[3];
-    if (!MountainPoint(map,b->sample,x[p],y[p],z[p],axis,point)) {
+    float point[3], metric;
+    if (!CachedMountainGround(b,x[p],y[p],point,&metric)) {
       b->failed = true;
       return;
     }
+    const float height = z[p]/16*metric/map->metric;
+    point[0] += axis->x_per_height*height;
+    point[1] -= axis->y_per_height*height;
+    point[2] += axis->height_scale*height;
     point[2] += map->radius;
     const float length = sqrtf(point[0]*point[0]+point[1]*point[1]+point[2]*point[2]);
     if (!isfinite(length) || length <= 0) { b->failed = true; return; }
@@ -136,7 +192,16 @@ bool PresentSimGlobeMountains_Prepare(
     return true;
   }
   MountainBuilder b = {.map = map,.sample = sample};
+  /* Keep an uncached reference for profiling/parity. Allocation failure also
+   * falls back to the same exact calculation. No cache survives this build. */
+  const char *cache = getenv("AR_SIM_MOUNTAIN_GROUND_CACHE");
+  if (!cache || strcmp(cache, "0"))
+    b.ground = calloc(kMountainGroundCacheEntries, sizeof(*b.ground));
+#if AR_SIM_GLOBE_TESTING
+  s_ground_samples = 0;
+#endif
   const int count = SimBackgroundMountainRender_EmitSource(params,EmbedMountain,&b);
+  free(b.ground);
   SimBackgroundMountainEffectSource effects;
   SimBackgroundCraterAnchor crater;
   const bool ok = !b.failed && count >= 0 && (size_t)count == b.count &&
