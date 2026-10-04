@@ -190,6 +190,8 @@ static void Compare(SDL_GPUDevice *gpu, SDL_GPUCommandBuffer *cmd, SDL_GPUTextur
 }
 
 int main(void) {
+  /* Preserve the failing case's pixel diagnostics when assert aborts. */
+  setvbuf(stdout, NULL, _IONBF, 0);
   if (!SDL_Init(SDL_INIT_VIDEO)) return 77;
   SDL_GPUDevice *gpu = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL, true, NULL);
   if (!gpu) { SDL_Quit(); return 77; }

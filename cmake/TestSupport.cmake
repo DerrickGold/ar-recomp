@@ -17,7 +17,8 @@ ar_test_support(actraiser_render_test_support
     src/render/render_device.c)
 
 ar_test_support(actraiser_render_sdl_test_support
-    src/platform/sdl/render_sdl.c)
+    src/platform/sdl/render_sdl.c
+    src/platform/sdl/host_clock_sdl.c)
 
 ar_test_support(actraiser_scene_math_test_support
     src/render/scene3d_math.c)

@@ -78,6 +78,16 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def stage_asset_directory(source: Path, destination: Path) -> None:
+    """Keep runs isolated on Windows accounts without symlink privileges."""
+    try:
+        destination.symlink_to(source, target_is_directory=True)
+    except OSError as error:
+        if getattr(error, "winerror", None) != 1314:
+            raise
+        shutil.copytree(source, destination)
+
+
 def replay_bytes(path: Path) -> bytes:
     """Controller pulses only; `frames` is the final index, including boot frame 0."""
     if path.suffix != ".json":
@@ -162,6 +172,15 @@ def verify_runs(results: list[dict], captures: bool = False) -> None:
         raise ValueError("Final composite pixels differ; inspect captures")
 
 
+GPU_BACKENDS = {"direct3d12": "Direct3D 12", "vulkan": "Vulkan", "metal": "Metal"}
+
+
+def validate_gpu_backend(log: str, expected: str) -> None:
+    actual = re.findall(r"\[graphics-capabilities\] backend=(\S+)", log)
+    if not actual or any(backend != expected for backend in actual):
+        raise ValueError(f"Requested GPU backend {expected} was not confirmed: {actual}")
+
+
 def validate_capture_view(log: str, images: dict, required: str) -> None:
     """A brief visit before capture is not coverage of the requested view."""
     transitions = []
@@ -183,6 +202,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--control", required=True, type=Path)
     parser.add_argument("--candidate", required=True, type=Path)
+    parser.add_argument("--control-backend", choices=GPU_BACKENDS,
+                        help="Force and verify the control GPU backend")
+    parser.add_argument("--candidate-backend", choices=GPU_BACKENDS,
+                        help="Force and verify the candidate GPU backend")
     parser.add_argument("--rom", type=Path, default=ROOT / "ar.sfc")
     parser.add_argument("--config", type=Path, default=ROOT / "config.ini")
     parser.add_argument("--manifest", type=Path,
@@ -208,6 +231,8 @@ def main() -> None:
     parser.add_argument("--output", type=Path,
                         help="New output directory; existing paths are refused")
     args = parser.parse_args()
+    if bool(args.control_backend) != bool(args.candidate_backend):
+        parser.error("Provide both --control-backend and --candidate-backend")
     if args.quit_frames < 1 or args.timeout < 1:
         parser.error("Frame limit and timeout must be positive")
     if (args.capture_from < 0 or args.capture_to < args.capture_from or
@@ -269,13 +294,14 @@ def main() -> None:
                    AR_SHOT_FROM=str(args.capture_from), AR_SHOT_TO=str(args.capture_to),
                    AR_SHOT_EVERY=str(args.capture_every))
     results = []
+    backends = {"control": args.control_backend, "candidate": args.candidate_backend}
     report = {"schema": "actraiser-pipeline-comparison-v1", "scene": args.scene, "map": map_id,
               "control_scene": args.control_scene or args.scene,
               "input_sha256": hashes, "seed_sha256": seed_hash,
               "environment": {k: v for k, v in env.items() if k.startswith("AR_")},
               "workers": {"control": args.control_workers,
                           "candidate": args.candidate_workers},
-              "verification": args.verify_only, "runs": results}
+              "verification": args.verify_only, "backends": backends, "runs": results}
     print(f"Evidence: {output}", flush=True)
     order = (("control", "candidate") if args.verify_only else
              ("control", "candidate", "candidate", "control") * 2)
@@ -283,11 +309,14 @@ def main() -> None:
         if any(digest(Path(path)) != expected for path, expected in hashes.items()):
             raise RuntimeError("Benchmark inputs changed; discard this comparison")
         env["AR_RENDER_WORKERS"] = str(report["workers"][variant])
+        if backends[variant]:
+            env["SDL_GPU_DRIVER"] = backends[variant]
+            env["AR_GPU_BACKEND"] = GPU_BACKENDS[backends[variant]]
         # Keep all runtime outputs and campaigns private, including paths not
         # covered by the replay's battery/settings persistence protection.
         work = output / f"{index}-{variant}"
         work.mkdir()
-        (work / "game-assets").symlink_to(ROOT / "game-assets", target_is_directory=True)
+        stage_asset_directory(ROOT / "game-assets", work / "game-assets")
         shutil.copyfile(ROOT / "diorama-layers.ini", work / "diorama-layers.ini")
         isolated_seed = work / "seed.srm"
         isolated_settings = work / "settings.ini"
@@ -307,6 +336,8 @@ def main() -> None:
             raise RuntimeError("Benchmark inputs changed during run")
         scene = args.control_scene if variant == "control" and args.control_scene else args.scene
         log = log_path.read_text()
+        if backends[variant]:
+            validate_gpu_backend(log, backends[variant])
         completion = validate_run_completion(log, args.quit_frames)
         if args.require_scene and not re.search(
                 rf"\[pipeline-perf\] scene={re.escape(args.require_scene)} ", log):
@@ -324,6 +355,8 @@ def main() -> None:
         else:
             result.update(summarize_log(log, scene, map_id=map_id))
         result.update(variant=variant, log=str(log_path))
+        if backends[variant]:
+            result["gpu_backend"] = backends[variant]
         results.append(result)
         (output / "results.json").write_text(json.dumps(report, indent=2) + "\n")
         message = (f"{len(result['images'])} composite captures" if args.verify_only else

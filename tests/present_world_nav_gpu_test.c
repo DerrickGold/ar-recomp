@@ -1,3 +1,4 @@
+#include "support/test_sdl_environment.h"
 /* Frozen-scene integration test: production presenter, model compiler,
  * atlases, SDL GPU shaders and shared D32 depth. No runner, live input,
  * settings persistence or save writes. Optional ROM/WRAM inputs are read-only. */
@@ -105,6 +106,7 @@ static bool sim_height_sweep_requested;
 static unsigned sim_town_radius_scale = 3;
 static unsigned sim_town_landscape_pct = kSimTownTerrainLandscapeHeightDefaultPct;
 static void ResizeTestOutput(SDL_Renderer *renderer, int width, int height);
+static SDL_Window *test_window;
 
 static uint32_t Pixel(const SDL_Surface *surface, int x, int y) {
   uint32_t pixel;
@@ -633,7 +635,7 @@ static void TestSelectedTownFocus(SDL_Renderer *renderer, const FrameSlot *slot)
   probe->sim.underlay_haze_pct = probe->sim.underlay_defocus_pct = 0;
   probe->sim.cull_dim_pct = kSimCullDimDefaultPct;
   for (int gpu = 0; gpu < 2; ++gpu) {
-    CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID", gpu ? "1" : "0", 1));
+    CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_GRID", gpu ? "1" : "0", 1));
     PresentWorldNav_ResetResources();
     probe->sim.world_navigation_haze = false;
     probe->sim.world_navigation.active_location = 1;
@@ -683,8 +685,8 @@ static void TestSelectedTownFocus(SDL_Renderer *renderer, const FrameSlot *slot)
     SDL_Surface *styled = Render(renderer, probe, "selected-town-1-with-weather");
     SDL_DestroySurface(styled);
   }
-  if (saved) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID", saved, 1));
-  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+  if (saved) CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_GRID", saved, 1));
+  else CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_GRID"));
   SDL_free(saved);
   PresentWorldNav_ResetResources();
   UploadWorldNavigationComposition(slot);
@@ -877,15 +879,21 @@ static void TestTownLodMotion(SDL_Renderer *renderer, const FrameSlot *slot) {
     if (i && (int)detail != previous_detail) transitions++;
     previous_detail = detail;
     /* The user ceiling must produce the same model when it matches the
-     * chosen tier, and remove actual detail when lowered further. */
+     * chosen tier, and select the lower model when lowered further. */
     probe->sim.background_voxel_detail = detail;
     SDL_Surface *capped = Render(renderer, probe, NULL);
     CHECK(Differences(frames[i], capped) == 0);
     SDL_DestroySurface(capped);
     if (detail > kSimBackgroundVoxelDetail_Low) {
+      /* Navigation looks straight down: the factory roof can completely
+       * hide the High-tier facade trim. Verify the model actually selected
+       * by the draw instead of requiring a pixel change in hidden geometry.
+       * A cold cache makes the selected tier observable; probing all tiers
+       * afterward restores the warm-cache precondition for the sweep. */
       probe->sim.background_voxel_detail = detail - 1;
+      SimBackgroundVoxelModelCache_Reset();
       capped = Render(renderer, probe, NULL);
-      CHECK(Differences(frames[i], capped) > 0);
+      CHECK(RenderedSingleObjectDetail(probe) == detail - 1);
       SDL_DestroySurface(capped);
     }
     probe->sim.background_voxel_detail = kSimBackgroundVoxelDetail_Ultra;
@@ -967,11 +975,11 @@ static void TestAnimatedTownCache(SDL_Renderer *renderer, const FrameSlot *slot,
   CHECK(!incoming_ground || saved_ground);
   PerformanceSnapshot measured[5];
   for (int retained = 0; retained < 5; ++retained) {
-    CHECK(SDL_setenv_unsafe("AR_SIM3D_RETAINED_SOLIDS", retained ? "1" : "0", 1) == 0);
-    CHECK(SDL_setenv_unsafe("AR_SIM3D_RETAINED_GROUND", retained >= 2 ? "1" : "0", 1) == 0);
+    CHECK(Test_SDLSetEnv("AR_SIM3D_RETAINED_SOLIDS", retained ? "1" : "0", 1) == 0);
+    CHECK(Test_SDLSetEnv("AR_SIM3D_RETAINED_GROUND", retained >= 2 ? "1" : "0", 1) == 0);
     if (retained == 4) {
-      CHECK(SDL_unsetenv_unsafe("AR_SIM3D_RETAINED_SOLIDS") == 0);
-      CHECK(SDL_unsetenv_unsafe("AR_SIM3D_RETAINED_GROUND") == 0);
+      CHECK(Test_SDLUnsetEnv("AR_SIM3D_RETAINED_SOLIDS") == 0);
+      CHECK(Test_SDLUnsetEnv("AR_SIM3D_RETAINED_GROUND") == 0);
     }
     PresentWorldNav_ResetResources();
     UploadWorldNavigationComposition(probe);
@@ -999,10 +1007,19 @@ static void TestAnimatedTownCache(SDL_Renderer *renderer, const FrameSlot *slot,
         PerformanceMetrics_Configure(false, false);
       }
       if (i >= 2) {
-        /* Both static factories stay cached across forward/backward phase
-         * changes. Animated models retain their interleaved submission order. */
-        const uint64_t hits = SimBackgroundVoxelModelCache_Stats().hits - before.hits;
-        CHECK(dense ? hits == 72 : hits == 3);
+        /* Static factories bypass compiler-cache lookups across phase changes.
+         * Animated models retain their interleaved submission order. Count
+         * lookups, not just hits: the bounded set-associative compiler cache
+         * can evict a pose even though projected static geometry stays warm. */
+        const SimBackgroundVoxelModelCacheStats after_frame = SimBackgroundVoxelModelCache_Stats();
+        const uint64_t lookups = (uint64_t)(after_frame.hits - before.hits) +
+                                (after_frame.misses - before.misses);
+        if (lookups != (dense ? 72u : 3u))
+          fprintf(stderr, "animated town cache: dense=%d retained=%d step=%zu phase=%d "
+                  "lookups=%llu expected=%u\n", (int)dense, retained, i, phases[i],
+                  (unsigned long long)lookups, dense ? 72u : 3u);
+        CHECK(dense ? lookups == 72 : lookups == 3);
+        CHECK(after_frame.allocation_failures == before.allocation_failures);
       }
     }
     CHECK(measured[retained].ready);
@@ -1043,14 +1060,14 @@ static void TestAnimatedTownCache(SDL_Renderer *renderer, const FrameSlot *slot,
          measured[2].counts[kPerformanceCount_DepthUploadBytes],
          measured[2].counts[kPerformanceCount_Draws]);
   if (saved)
-    CHECK(SDL_setenv_unsafe("AR_SIM3D_RETAINED_SOLIDS", saved, 1) == 0);
+    CHECK(Test_SDLSetEnv("AR_SIM3D_RETAINED_SOLIDS", saved, 1) == 0);
   else
-    CHECK(SDL_unsetenv_unsafe("AR_SIM3D_RETAINED_SOLIDS") == 0);
+    CHECK(Test_SDLUnsetEnv("AR_SIM3D_RETAINED_SOLIDS") == 0);
   SDL_free(saved);
   if (saved_ground)
-    CHECK(SDL_setenv_unsafe("AR_SIM3D_RETAINED_GROUND", saved_ground, 1) == 0);
+    CHECK(Test_SDLSetEnv("AR_SIM3D_RETAINED_GROUND", saved_ground, 1) == 0);
   else
-    CHECK(SDL_unsetenv_unsafe("AR_SIM3D_RETAINED_GROUND") == 0);
+    CHECK(Test_SDLUnsetEnv("AR_SIM3D_RETAINED_GROUND") == 0);
   SDL_free(saved_ground);
   for (int phase = 0; phase < 3; ++phase)
     SDL_DestroySurface(reference[phase]);
@@ -1065,7 +1082,7 @@ static void TestRadialTownResidency(SDL_Renderer *renderer, const FrameSlot *slo
   char *saved = incoming ? SDL_strdup(incoming) : NULL;
   CHECK(!incoming || saved);
   /* Exercise the shipping default, not an opt-in-only shader path. */
-  CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+  CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_MODELS"));
   ResizeTestOutput(renderer, 1792, 1344);
   FrameSlot *probe = malloc(sizeof(*probe));
   CHECK(probe);
@@ -1125,9 +1142,9 @@ static void TestRadialTownResidency(SDL_Renderer *renderer, const FrameSlot *slo
   }
   PresentWorldNav_ResetResources();
   if (saved)
-    CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
+    CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
   else
-    CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+    CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_MODELS"));
   SDL_free(saved);
   UploadWorldNavigationComposition(slot);
   ResizeTestOutput(renderer, kWidth, kHeight);
@@ -1144,7 +1161,7 @@ static void TestGroundCacheRevisions(SDL_Renderer *renderer, const FrameSlot *sl
   CHECK(!incoming || saved);
   SDL_Surface *reference[kStates] = {0};
   for (int retained = 0; retained < 2; ++retained) {
-    CHECK(SDL_setenv_unsafe("AR_SIM3D_RETAINED_GROUND", retained ? "1" : "0", 1) == 0);
+    CHECK(Test_SDLSetEnv("AR_SIM3D_RETAINED_GROUND", retained ? "1" : "0", 1) == 0);
     PresentWorldNav_ResetResources();
     InitSlot(probe);
     memcpy(map, SimWorldMap_Baseline(), kSimWorldMapBytes);
@@ -1212,9 +1229,9 @@ static void TestGroundCacheRevisions(SDL_Renderer *renderer, const FrameSlot *sl
   for (int state = 0; state < kStates; ++state)
     SDL_DestroySurface(reference[state]);
   if (saved)
-    CHECK(SDL_setenv_unsafe("AR_SIM3D_RETAINED_GROUND", saved, 1) == 0);
+    CHECK(Test_SDLSetEnv("AR_SIM3D_RETAINED_GROUND", saved, 1) == 0);
   else
-    CHECK(SDL_unsetenv_unsafe("AR_SIM3D_RETAINED_GROUND") == 0);
+    CHECK(Test_SDLUnsetEnv("AR_SIM3D_RETAINED_GROUND") == 0);
   SDL_free(saved);
   PresentWorldNav_ResetResources();
   UploadWorldNavigationComposition(slot);
@@ -1263,9 +1280,9 @@ static void TestRetainedMountainSurfaces(SDL_Renderer *renderer, const FrameSlot
   PerformanceSnapshot measured[3];
   for (int mode = 0; mode < 3; ++mode) {
     if (!mode)
-      CHECK(!SDL_setenv_unsafe("AR_SIM3D_RETAINED_GROUND", "0", 1));
+      CHECK(!Test_SDLSetEnv("AR_SIM3D_RETAINED_GROUND", "0", 1));
     else
-      CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_RETAINED_GROUND")); /* Shipping default. */
+      CHECK(!Test_SDLUnsetEnv("AR_SIM3D_RETAINED_GROUND")); /* Shipping default. */
     PresentWorldNav_ResetResources();
     ResizeTestOutput(renderer, kWidth, kHeight);
     InitSlot(probe);
@@ -1372,9 +1389,9 @@ static void TestRetainedMountainSurfaces(SDL_Renderer *renderer, const FrameSlot
   for (int state = 0; state < kStates; ++state)
     SDL_DestroySurface(reference[state]);
   if (saved)
-    CHECK(!SDL_setenv_unsafe("AR_SIM3D_RETAINED_GROUND", saved, 1));
+    CHECK(!Test_SDLSetEnv("AR_SIM3D_RETAINED_GROUND", saved, 1));
   else
-    CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_RETAINED_GROUND"));
+    CHECK(!Test_SDLUnsetEnv("AR_SIM3D_RETAINED_GROUND"));
   SDL_free(saved);
   PresentWorldNav_ResetResources();
   SimTownGroundArt_Shutdown();
@@ -1519,16 +1536,16 @@ static void TestGpuGridRevisions(SDL_Renderer *renderer, const FrameSlot *slot) 
   SDL_Surface *reference[kStates] = {0};
   bool compacted = false;
   for (unsigned warm = 0; warm < 3; ++warm) {
-    CHECK(!SDL_setenv_unsafe("AR_RENDER_WORKERS", warm ? "3" : "0", 1));
+    CHECK(!Test_SDLSetEnv("AR_RENDER_WORKERS", warm ? "3" : "0", 1));
     /* Default and explicitly enabled source must draw identically. */
     if (warm)
-      CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+      CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_GRID"));
     else
-      CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID", "1", 1));
+      CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_GRID", "1", 1));
     if (warm == 1)
-      CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID_CULL")); /* Default culls. */
+      CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_GRID_CULL")); /* Default culls. */
     else
-      CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID_CULL", warm ? "1" : "0", 1));
+      CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_GRID_CULL", warm ? "1" : "0", 1));
     PresentWorldNav_ResetResources();
     InitSlot(probe);
     probe->sim.world_navigation_towns.ground.enabled_town_mask = 2;
@@ -1643,21 +1660,21 @@ static void TestGpuGridRevisions(SDL_Renderer *renderer, const FrameSlot *slot) 
   for (unsigned state = 0; state < kStates; ++state)
     SDL_DestroySurface(reference[state]);
   if (saved)
-    CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID", saved, 1));
+    CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_GRID", saved, 1));
   else
-    CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+    CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_GRID"));
   SDL_free(saved);
   free(map);
   free(probe);
   if (saved_cull)
-    CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID_CULL", saved_cull, 1));
+    CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_GRID_CULL", saved_cull, 1));
   else
-    CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID_CULL"));
+    CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_GRID_CULL"));
   SDL_free(saved_cull);
   if (saved_workers)
-    CHECK(!SDL_setenv_unsafe("AR_RENDER_WORKERS", saved_workers, 1));
+    CHECK(!Test_SDLSetEnv("AR_RENDER_WORKERS", saved_workers, 1));
   else
-    CHECK(!SDL_unsetenv_unsafe("AR_RENDER_WORKERS"));
+    CHECK(!Test_SDLUnsetEnv("AR_RENDER_WORKERS"));
   SDL_free(saved_workers);
   SimTownGroundArt_Shutdown();
   PresentWorldNav_ResetResources();
@@ -1670,7 +1687,7 @@ static void TestWorldAtlasVersions(SDL_Renderer *renderer, const FrameSlot *slot
   const char *incoming = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
   char *saved = incoming ? SDL_strdup(incoming) : NULL;
   CHECK(!incoming || saved);
-  CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+  CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_GRID"));
   InitSyntheticBloodpoolArt(true);
   FrameSlot *probe = malloc(sizeof(*probe));
   CHECK(probe);
@@ -1721,9 +1738,9 @@ static void TestWorldAtlasVersions(SDL_Renderer *renderer, const FrameSlot *slot
   PresentWorldNav_ResetResources();
   SimTownGroundArt_Shutdown();
   if (saved)
-    CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID", saved, 1));
+    CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_GRID", saved, 1));
   else
-    CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+    CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_GRID"));
   SDL_free(saved);
   free(probe);
   UploadWorldNavigationComposition(slot);
@@ -1734,7 +1751,7 @@ static void TestWorldAtlasConstruction(SDL_Renderer *renderer, const FrameSlot *
   const char *incoming = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
   char *saved = incoming ? SDL_strdup(incoming) : NULL;
   CHECK(!incoming || saved);
-  CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+  CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_GRID"));
   InitSyntheticBloodpoolArt(true);
   FrameSlot *probe = malloc(sizeof(*probe));
   CHECK(probe);
@@ -1792,8 +1809,8 @@ static void TestWorldAtlasConstruction(SDL_Renderer *renderer, const FrameSlot *
   CHECK(SimWorldMap_PublishBuiltTilemap(before) >= 0);
   PresentWorldNav_ResetResources();
   SimTownGroundArt_Shutdown();
-  if (saved) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID", saved, 1));
-  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+  if (saved) CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_GRID", saved, 1));
+  else CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_GRID"));
   SDL_free(saved);
   free(probe);
   UploadWorldNavigationComposition(slot);
@@ -1850,7 +1867,7 @@ static void TestConstructionTerrainReuse(SDL_Renderer *renderer, const FrameSlot
   const char *incoming = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
   char *saved = incoming ? SDL_strdup(incoming) : NULL;
   CHECK(!incoming || saved);
-  CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+  CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_GRID"));
   InitSyntheticBloodpoolArt(false);
   FrameSlot *probe = malloc(sizeof(*probe));
   CHECK(probe);
@@ -1934,8 +1951,8 @@ static void TestConstructionTerrainReuse(SDL_Renderer *renderer, const FrameSlot
   CHECK(SimWorldMap_PublishBuiltTilemap(before) >= 0);
   PresentWorldNav_ResetResources();
   SimTownGroundArt_Shutdown();
-  if (saved) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID", saved, 1));
-  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+  if (saved) CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_GRID", saved, 1));
+  else CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_GRID"));
   SDL_free(saved);
   free(probe);
   UploadWorldNavigationComposition(slot);
@@ -1950,7 +1967,7 @@ static void TestColdTerrainWorkers(SDL_Renderer *renderer) {
   const char *incoming_grid = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
   char *saved_grid = incoming_grid ? SDL_strdup(incoming_grid) : NULL;
   CHECK(!incoming_grid || saved_grid);
-  CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID", "1", 1));
+  CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_GRID", "1", 1));
   FrameSlot *probe = malloc(sizeof(*probe));
   CHECK(probe);
   /* One warm-up per worker count, then two ABBA blocks. Report only narrow
@@ -1961,7 +1978,7 @@ static void TestColdTerrainWorkers(SDL_Renderer *renderer) {
   for (unsigned sim = 0; sim < 2; ++sim) {
     SDL_Surface *reference = NULL;
     for (unsigned pass = 0; pass < sizeof(helpers) / sizeof(helpers[0]); ++pass) {
-      CHECK(!SDL_setenv_unsafe("AR_RENDER_WORKERS", helpers[pass] ? "3" : "0", 1));
+      CHECK(!Test_SDLSetEnv("AR_RENDER_WORKERS", helpers[pass] ? "3" : "0", 1));
       PresentWorldNav_ResetResources();
       InitSlot(probe);
       if (sim) {
@@ -2015,14 +2032,14 @@ static void TestColdTerrainWorkers(SDL_Renderer *renderer) {
   }
   free(probe);
   if (saved)
-    CHECK(!SDL_setenv_unsafe("AR_RENDER_WORKERS", saved, 1));
+    CHECK(!Test_SDLSetEnv("AR_RENDER_WORKERS", saved, 1));
   else
-    CHECK(!SDL_unsetenv_unsafe("AR_RENDER_WORKERS"));
+    CHECK(!Test_SDLUnsetEnv("AR_RENDER_WORKERS"));
   SDL_free(saved);
   if (saved_grid)
-    CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID", saved_grid, 1));
+    CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_GRID", saved_grid, 1));
   else
-    CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+    CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_GRID"));
   SDL_free(saved_grid);
   PresentWorldNav_ResetResources();
 }
@@ -2737,20 +2754,20 @@ static SDL_Surface *RenderVoxelShadowProbe(SDL_Renderer *renderer,
     bool town_mask, const char *name) {
   const char *option = getenv("AR_SIM_SHADOW_HULL_CACHE");
   char *saved = option ? SDL_strdup(option) : NULL;
-  CHECK(!SDL_setenv_unsafe("AR_SIM_SHADOW_HULL_CACHE", "1", 1));
+  CHECK(!Test_SDLSetEnv("AR_SIM_SHADOW_HULL_CACHE", "1", 1));
   SDL_Surface *first = RenderVoxelShadowProbeOnce(
       renderer, params, light_x, light_y, town_mask, name);
   SDL_Surface *warm = RenderVoxelShadowProbeOnce(
       renderer, params, light_x, light_y, town_mask, NULL);
   CHECK(Differences(first, warm) == 0);
-  CHECK(!SDL_setenv_unsafe("AR_SIM_SHADOW_HULL_CACHE", "0", 1));
+  CHECK(!Test_SDLSetEnv("AR_SIM_SHADOW_HULL_CACHE", "0", 1));
   SDL_Surface *reference = RenderVoxelShadowProbeOnce(
       renderer, params, light_x, light_y, town_mask, NULL);
   CHECK(Differences(first, reference) == 0);
   SDL_DestroySurface(warm);
   SDL_DestroySurface(reference);
-  if (saved) CHECK(!SDL_setenv_unsafe("AR_SIM_SHADOW_HULL_CACHE", saved, 1));
-  else CHECK(!SDL_unsetenv_unsafe("AR_SIM_SHADOW_HULL_CACHE"));
+  if (saved) CHECK(!Test_SDLSetEnv("AR_SIM_SHADOW_HULL_CACHE", saved, 1));
+  else CHECK(!Test_SDLUnsetEnv("AR_SIM_SHADOW_HULL_CACHE"));
   SDL_free(saved);
   return first;
 }
@@ -3011,13 +3028,13 @@ static void TestVoxelShadows(SDL_Renderer *renderer) {
 }
 
 static void TestSynthetic(SDL_Renderer *renderer, bool captured_motion_only,
-    bool ground_atlas_only) {
+    bool ground_atlas_only, bool town_lod_only) {
   /* Legacy projected-geometry/cache oracles intentionally use compatibility.
    * TestGpuGridRevisions below explicitly clears this to verify the default. */
   const char *incoming_grid = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
   char *saved_grid = incoming_grid ? SDL_strdup(incoming_grid) : NULL;
   CHECK(!incoming_grid || saved_grid);
-  CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID", "0", 1));
+  CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_GRID", "0", 1));
   uint8_t *rom = calloc(kRomBytes, 1);
   CHECK(rom);
   /* A green central continent in blue ocean. Only public immutable decoder
@@ -3046,6 +3063,14 @@ static void TestSynthetic(SDL_Renderer *renderer, bool captured_motion_only,
   FrameSlot *slot = malloc(sizeof(*slot));
   CHECK(slot);
   InitSlot(slot);
+  if (town_lod_only) {
+    /* This fixture checks exact CPU projected-cache reuse counters. */
+    CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", "0", 1));
+    PresentWorldNav_ResetResources();
+    UploadWorldNavigationComposition(slot);
+    TestTownLodMotion(renderer, slot);
+    goto cleanup;
+  }
   if (ground_atlas_only) {
     TestRetainedMountainSurfaces(renderer, slot);
     TestGpuGridRevisions(renderer, slot);
@@ -3202,16 +3227,16 @@ static void TestSynthetic(SDL_Renderer *renderer, bool captured_motion_only,
   const char *incoming_models = SDL_getenv("AR_SIM3D_WORLD_GPU_MODELS");
   char *saved_models = incoming_models ? SDL_strdup(incoming_models) : NULL;
   CHECK(!incoming_models || saved_models);
-  CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", "0", 1));
+  CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", "0", 1));
   PresentWorldNav_ResetResources();
   UploadWorldNavigationComposition(slot);
   TestTownLodMotion(renderer, slot);
   TestAnimatedTownCache(renderer, slot, false);
   TestAnimatedTownCache(renderer, slot, true);
   if (saved_models)
-    CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved_models, 1));
+    CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", saved_models, 1));
   else
-    CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+    CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_MODELS"));
   SDL_free(saved_models);
   PresentWorldNav_ResetResources();
   UploadWorldNavigationComposition(slot);
@@ -3236,9 +3261,9 @@ cleanup:
   SimBackgroundVoxelModelCache_Reset();
   SimWorldMap_Shutdown();
   if (saved_grid)
-    CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_GRID", saved_grid, 1));
+    CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_GRID", saved_grid, 1));
   else
-    CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_GRID"));
+    CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_GRID"));
   SDL_free(saved_grid);
 }
 
@@ -3252,13 +3277,15 @@ static uint8_t *ReadFile(const char *path, size_t size) {
 }
 
 static void ResizeTestOutput(SDL_Renderer *renderer, int width, int height) {
-  SDL_Window *window = SDL_GetRenderWindow(renderer);
+  SDL_Window *window = test_window;
   CHECK(window && SDL_SetWindowSize(window, width, height));
   CHECK(SDL_SyncWindow(window));
   SDL_PumpEvents();
-  /* Retire the hidden GPU renderer's previous-size output before capturing
-   * the new view. SDL's size query alone does not prove that the acquired
-   * output has changed. This is test plumbing, not a timed game frame. */
+  /* Hidden Vulkan windows do not acquire a swapchain image. Use the game's
+   * explicitly sized output target there; presenting a hidden window cannot
+   * retire SDL's old backbuffer. Visible-window coverage still exercises the
+   * ordinary renderer's resize/present path. */
+  CHECK(ArRenderDevice_SetRenderTarget(&g_render_device, ArRenderTexture_Invalid()));
   CHECK(SDL_SetRenderViewport(renderer, NULL));
   CHECK(SDL_SetRenderClipRect(renderer, NULL));
   CHECK(SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255));
@@ -3976,14 +4003,14 @@ static void TestDetailedMountainGroundCache(SDL_Renderer *renderer, FrameSlot *s
     slot->sim.background_voxel_detail = step % kSimBackgroundVoxelDetail_Count;
     slot->sim.landscape_height_pct = (step / 4) * 75;
     const Scene3DCamera camera = {-.45f - step * .035f, -.3f + step * .05f, 3.5f, .4f};
-    CHECK(!SDL_setenv_unsafe("AR_SIM_MOUNTAIN_GROUND_CACHE", "1", 1));
+    CHECK(!Test_SDLSetEnv("AR_SIM_MOUNTAIN_GROUND_CACHE", "1", 1));
     PresentSimGlobeMountains_Reset();
     SDL_Surface *cached = RenderDetailedTown(renderer, slot, &camera, source, false);
     const size_t samples = PresentSimGlobeMountains_TestGroundSamples();
     cached_samples += samples;
     SimBackgroundCraterAnchor cached_anchor, reference_anchor;
     const bool cached_crater = PresentSimGlobeMountains_CraterAnchor(&cached_anchor);
-    CHECK(!SDL_setenv_unsafe("AR_SIM_MOUNTAIN_GROUND_CACHE", "0", 1));
+    CHECK(!Test_SDLSetEnv("AR_SIM_MOUNTAIN_GROUND_CACHE", "0", 1));
     PresentSimGlobeMountains_Reset();
     SDL_Surface *reference = RenderDetailedTown(renderer, slot, &camera, source, false);
     const size_t uncached = PresentSimGlobeMountains_TestGroundSamples();
@@ -4001,8 +4028,8 @@ static void TestDetailedMountainGroundCache(SDL_Renderer *renderer, FrameSlot *s
   CHECK(reference_samples > 0 && cached_samples < reference_samples * 3 / 4);
   printf("mountain ground samples: %zu cached / %zu reference; camera, detail, landscape "
          "pixels and crater anchors exact PASS\n", cached_samples, reference_samples);
-  if (saved_option) CHECK(!SDL_setenv_unsafe("AR_SIM_MOUNTAIN_GROUND_CACHE", saved_option, 1));
-  else CHECK(!SDL_unsetenv_unsafe("AR_SIM_MOUNTAIN_GROUND_CACHE"));
+  if (saved_option) CHECK(!Test_SDLSetEnv("AR_SIM_MOUNTAIN_GROUND_CACHE", saved_option, 1));
+  else CHECK(!Test_SDLUnsetEnv("AR_SIM_MOUNTAIN_GROUND_CACHE"));
   SDL_free(saved_option);
   PresentSimGlobeMountains_Reset();
   *slot = *saved;
@@ -4537,7 +4564,7 @@ static void TestLockedLandmarks(SDL_Renderer *renderer, const uint8_t *rom) {
   CHECK(!previous || saved);
   const uint8_t kinds[] = {kSimBackgroundVoxel_BloodpoolCastle, kSimBackgroundVoxel_StoryTree};
   for (int gpu = 0; gpu < 2; gpu++) {
-    CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", gpu ? "1" : "0", 1));
+    CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", gpu ? "1" : "0", 1));
     PresentWorldNav_ResetResources();
     for (unsigned target = 0; target < 2; target++) {
       SimWorldNavigationTowns_CaptureCached(wram, towns);
@@ -4577,8 +4604,8 @@ static void TestLockedLandmarks(SDL_Renderer *renderer, const uint8_t *rom) {
       SDL_DestroySurface(visible);
     }
   }
-  if (saved) CHECK(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
-  else CHECK(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+  if (saved) CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
+  else CHECK(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_MODELS"));
   SDL_free(saved);
   SimWorldNavigationTowns_Shutdown();
   PresentWorldNav_ResetResources();
@@ -4768,14 +4795,16 @@ static void TestTerrainSource(void) {
 #endif
 
 int main(int argc, char **argv) {
+  bool town_lod_only = argc == 2 && !strcmp(argv[1], "--town-lod");
+  bool resize_only = argc == 2 && !strcmp(argv[1], "--resize-output");
   bool voxel_shadows_only = argc == 3 && !strcmp(argv[1], "--voxel-shadows");
   bool shadow_cache_only = argc == 3 && !strcmp(argv[1], "--shadow-cache");
   bool captured_motion_only = argc == 3 && !strcmp(argv[1], "--captured-motion");
   bool ground_atlas_only = argc == 3 && !strcmp(argv[1], "--ground-atlas");
-  if (!voxel_shadows_only && !shadow_cache_only && !captured_motion_only && !ground_atlas_only &&
+  if (!town_lod_only && !resize_only && !voxel_shadows_only && !shadow_cache_only && !captured_motion_only && !ground_atlas_only &&
       argc != 1 && (argc < 4 || argc > 10)) {
     fprintf(stderr,
-            "usage: %s [--voxel-shadows|--shadow-cache|--captured-motion|--ground-atlas "
+            "usage: %s [--resize-output|--town-lod] | [--voxel-shadows|--shadow-cache|--captured-motion|--ground-atlas "
             "existing-output-directory] | "
             "[ROM WRAM existing-output-directory [--weather-sequence] [--town-matrix] "
             "[--sim-globe-prototype] | --sim-town SIM-snapshot-prefix [--sim-height-sweep | "
@@ -4837,8 +4866,10 @@ int main(int argc, char **argv) {
     fprintf(stderr, "World navigation GPU test skipped: video unavailable: %s\n", SDL_GetError());
     return 77;
   }
-  SDL_Window *window =
-      SDL_CreateWindow("World navigation GPU test", kWidth, kHeight, SDL_WINDOW_HIDDEN);
+  const bool visible = SDL_GetHintBoolean("AR_TEST_VISIBLE_WINDOW", false);
+  SDL_Window *window = test_window =
+      SDL_CreateWindow("World navigation GPU test", kWidth, kHeight,
+                       visible ? 0 : SDL_WINDOW_HIDDEN);
   if (!window) {
     fprintf(stderr, "World navigation GPU test skipped: window unavailable: %s\n", SDL_GetError());
     SDL_Quit();
@@ -4846,12 +4877,13 @@ int main(int argc, char **argv) {
   }
   SDL_Renderer *renderer = NULL;
   ArSdlRenderBackend backend = {0};
-  if (sim_town_snapshot) {
+  const bool ordered_output = sim_town_snapshot || !visible;
+  if (ordered_output) {
     /* The detailed ground borrows a streaming SDL texture in a custom GPU
      * pass. Use the game's ordered adapter so its first upload is submitted
      * before consumption; a legacy Flush-only binding needs a prior present
      * and would hide cold-entry problems behind reference-view warmup. */
-    SDL_unsetenv_unsafe("AR_SDL_GPU_ORDERED");
+    Test_SDLUnsetEnv("AR_SDL_GPU_ORDERED");
     if (ArSdlRenderBackend_CreateForWindow(&g_render_device, window, NULL))
       renderer = ArSdlRenderBackend_Renderer(&g_render_device);
   } else {
@@ -4876,13 +4908,20 @@ int main(int argc, char **argv) {
          SDL_GetGPUDeviceDriver(SDL_GetGPURendererDevice(renderer)));
   /* The ROM-free suite remains the default CTest entry. A frozen SIM capture
    * is independent and can be iterated without re-running orbital weather. */
-  if (!sim_town_snapshot && !voxel_shadows_only && !shadow_cache_only)
-    TestSynthetic(renderer, captured_motion_only, ground_atlas_only);
+  if (resize_only) {
+    static const int sizes[][2] = {
+      {800, 600}, {1120, 840}, {1280, 720}, {640, 480},
+      {800, 600}, {2688, 2016}, {1792, 1344}, {800, 600},
+    };
+    for (unsigned i = 0; i < SDL_arraysize(sizes); ++i)
+      ResizeTestOutput(renderer, sizes[i][0], sizes[i][1]);
+  } else if (!sim_town_snapshot && !voxel_shadows_only && !shadow_cache_only)
+    TestSynthetic(renderer, captured_motion_only, ground_atlas_only, town_lod_only);
   if (shadow_cache_only) TestShadowHullCameraChanges(renderer);
-  else if (!sim_town_snapshot && !captured_motion_only && !ground_atlas_only)
+  else if (!town_lod_only && !resize_only && !sim_town_snapshot && !captured_motion_only && !ground_atlas_only)
     TestVoxelShadows(renderer);
   if (argc >= 4) TestCaptured(renderer, argv[1], argv[2]);
-  if (sim_town_snapshot)
+  if (ordered_output)
     ArSdlRenderBackend_Destroy(&g_render_device);
   else
     SDL_DestroyRenderer(renderer);

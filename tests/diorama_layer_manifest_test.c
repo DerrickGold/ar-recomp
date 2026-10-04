@@ -24,7 +24,7 @@ bool AtomicReplaceFile(const char *temporary, const char *path) {
   return !s_fail_replace && sr_replace_file(temporary, path) != 0;
 }
 
-static void RemoveDirectory(const char *path) {
+static void RemoveTestDirectory(const char *path) {
 #ifdef _WIN32
   wchar_t *wide = sr_win_path(path);
   assert(wide && !_wrmdir(wide));
@@ -94,7 +94,7 @@ int main(void) {
   assert(!sr_mkdir(kTemporary));
   assert(!DioramaLayerManifest_Save());
   ExpectUnchanged(saved, saved_size);
-  RemoveDirectory(kTemporary);
+  RemoveTestDirectory(kTemporary);
   s_fail_replace = true;
   assert(!DioramaLayerManifest_Save());
   ExpectUnchanged(saved, saved_size);
@@ -171,7 +171,7 @@ int main(void) {
   ExpectUnchanged(saved, saved_size);
   free(saved);
   assert(!sr_remove(kPath));
-  RemoveDirectory(kRoot);
+  RemoveTestDirectory(kRoot);
   puts("layer manifest: load/edit/merge round trips and failed-save preservation passed");
   return 0;
 }

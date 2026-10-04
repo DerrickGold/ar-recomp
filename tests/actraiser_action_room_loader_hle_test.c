@@ -1,3 +1,4 @@
+#include "support/test_environment.h"
 #include "actraiser/actraiser_action_room_loader.h"
 
 #include <stdio.h>
@@ -266,10 +267,10 @@ static void TestGuardedFallbacks(void) {
   script_bank[kScriptAddress] = 0;
   CHECK(!ActRaiser_ActionMapLoadHleEnabled(&cpu));
 
-  CHECK(setenv("AR_ACTION_ROOM_LOAD_HLE", "0", 1) == 0);
+  CHECK(Test_SetEnv("AR_ACTION_ROOM_LOAD_HLE", "0", 1) == 0);
   script_bank[kScriptAddress] = 1;
   CHECK(!ActRaiser_ActionMapLoadHleEnabled(&cpu));
-  CHECK(unsetenv("AR_ACTION_ROOM_LOAD_HLE") == 0);
+  CHECK(Test_UnsetEnv("AR_ACTION_ROOM_LOAD_HLE") == 0);
 }
 
 int main(void) {

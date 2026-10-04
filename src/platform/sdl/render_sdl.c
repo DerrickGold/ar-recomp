@@ -1,5 +1,6 @@
 #include "render_sdl_internal.h"
 #include "app/performance_metrics.h"
+#include "platform/sdl/gpu_texture_upload_layout.h"
 
 #include <limits.h>
 #include <stddef.h>
@@ -131,10 +132,97 @@ static void DestroyTexture(void *context, ArRenderTexture texture) {
   SDL_DestroyTexture(ArSdlRenderBackend_UnwrapTexture(texture));
 }
 
+/* SDL's GPU renderer allocates and releases a transfer buffer per update.
+ * Retain one per texture on D3D12, with aligned rows to avoid its additional
+ * realignment allocation. SDL cycles staging that is still in flight. */
+#define AR_UPLOAD_PROPERTY "actraiser.texture.upload"
+typedef struct TextureUpload {
+  SDL_GPUDevice *device;
+  SDL_GPUTransferBuffer *buffer;
+  Uint32 capacity;
+} TextureUpload;
+
+static void SDLCALL DestroyTextureUpload(void *userdata, void *value) {
+  (void)userdata;
+  TextureUpload *upload = value;
+  if (upload->buffer) SDL_ReleaseGPUTransferBuffer(upload->device, upload->buffer);
+  free(upload);
+}
+
+static bool UpdateGpuTexture(ArSdlRenderBackend *backend, SDL_Texture *texture,
+    const SDL_Rect *rect, const void *pixels, int pitch) {
+  const SDL_PropertiesID props = SDL_GetTextureProperties(texture);
+  const SDL_PixelFormat format = (SDL_PixelFormat)SDL_GetNumberProperty(
+      props, SDL_PROP_TEXTURE_FORMAT_NUMBER, SDL_PIXELFORMAT_UNKNOWN);
+  const int width = (int)SDL_GetNumberProperty(props, SDL_PROP_TEXTURE_WIDTH_NUMBER, 0);
+  const int height = (int)SDL_GetNumberProperty(props, SDL_PROP_TEXTURE_HEIGHT_NUMBER, 0);
+  const SDL_Rect region = rect ? *rect : (SDL_Rect){0, 0, width, height};
+  SDL_GPUTexture *gpu_texture = SDL_GetPointerProperty(props, SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, NULL);
+  /* Other SDL formats may have an internal converted texture. Let SDL own
+   * that conversion, as well as its legacy clipping/error semantics. */
+  if (!gpu_texture || (format != SDL_PIXELFORMAT_RGBA32 && format != SDL_PIXELFORMAT_BGRA32) ||
+      region.w <= 0 || region.h <= 0 || region.x < 0 || region.y < 0 ||
+      region.w > width || region.h > height || region.x > width - region.w ||
+      region.y > height - region.h || region.w > INT_MAX / 4 || pitch < region.w * 4)
+    return SDL_UpdateTexture(texture, rect, pixels, pitch);
+  Uint32 size = 0;
+  ArSdlTextureUploadLayout layout;
+  const bool aligned = !strcmp(SDL_GetGPUDeviceDriver(backend->gpu_device), "direct3d12");
+  if (!ArSdlTextureUploadLayout_Append(region.w, region.h, aligned, &size, &layout))
+    return SDL_SetError("texture upload is too large");
+  TextureUpload *upload = SDL_GetPointerProperty(props, AR_UPLOAD_PROPERTY, NULL);
+  if (!upload) {
+    upload = calloc(1, sizeof(*upload));
+    if (!upload) return SDL_SetError("out of memory creating texture upload");
+    upload->device = backend->gpu_device;
+    /* SDL owns this cleanup even when the renderer destroys a live texture. */
+    if (!SDL_SetPointerPropertyWithCleanup(props, AR_UPLOAD_PROPERTY, upload, DestroyTextureUpload, NULL))
+      return false; /* SDL calls the cleanup callback on failure too. */
+  }
+  if (upload->capacity < size) {
+    const SDL_GPUTransferBufferCreateInfo info = {
+      .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = size,
+    };
+    SDL_GPUTransferBuffer *buffer = SDL_CreateGPUTransferBuffer(upload->device, &info);
+    if (!buffer) return false;
+    if (upload->buffer) SDL_ReleaseGPUTransferBuffer(upload->device, upload->buffer);
+    upload->buffer = buffer;
+    upload->capacity = size;
+  }
+  void *mapped = SDL_MapGPUTransferBuffer(upload->device, upload->buffer, true);
+  if (!mapped) return false;
+  const size_t row_bytes = (size_t)region.w * 4;
+  if (row_bytes == layout.row_pitch && pitch == (int)row_bytes)
+    memcpy(mapped, pixels, row_bytes * region.h);
+  else
+    for (int y = 0; y < region.h; ++y)
+      memcpy((uint8_t *)mapped + (size_t)y * layout.row_pitch,
+             (const uint8_t *)pixels + (size_t)y * pitch, row_bytes);
+  SDL_UnmapGPUTransferBuffer(upload->device, upload->buffer);
+  /* Publish all earlier SDL draws/uploads before writing the borrowed native
+   * texture. The offscreen renderer's present submits without a window swap.
+   * Keep the texture uncycled: SDL caches its native binding across draws. */
+  if (!SDL_FlushRenderer(backend->renderer) || !SDL_RenderPresent(backend->renderer)) return false;
+  SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(upload->device);
+  if (!commands) return false;
+  SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(commands);
+  if (!copy) { SDL_CancelGPUCommandBuffer(commands); return false; }
+  const SDL_GPUTextureTransferInfo source = {
+    .transfer_buffer = upload->buffer, .pixels_per_row = layout.row_pitch / 4,
+    .rows_per_layer = (Uint32)region.h,
+  };
+  const SDL_GPUTextureRegion destination = {
+    .texture = gpu_texture, .x = (Uint32)region.x, .y = (Uint32)region.y,
+    .w = (Uint32)region.w, .h = (Uint32)region.h, .d = 1,
+  };
+  SDL_UploadToGPUTexture(copy, &source, &destination, false);
+  SDL_EndGPUCopyPass(copy);
+  return SDL_SubmitGPUCommandBuffer(commands);
+}
+
 static bool UpdateTexture(void *context, ArRenderTexture texture,
                           const ArRenderRectI *destination,
                           const void *pixels, int pitch_bytes) {
-  (void)context;
   SDL_Rect converted;
   const SDL_Rect *rect = NULL;
   if (destination) {
@@ -156,8 +244,13 @@ static bool UpdateTexture(void *context, ArRenderTexture texture,
     PerformanceMetrics_AddTextureUpload(1, width > 0 && height > 0
         ? (uint64_t)width * height * SDL_BYTESPERPIXEL(format) : 0);
   }
-  return SDL_UpdateTexture(
-      native, rect, pixels, pitch_bytes);
+  const PerformanceScope scope = PerformanceMetrics_Begin(kPerformance_TextureUpdate);
+  ArSdlRenderBackend *backend = context;
+  const bool ok = backend->reuse_texture_uploads
+      ? UpdateGpuTexture(backend, native, rect, pixels, pitch_bytes)
+      : SDL_UpdateTexture(native, rect, pixels, pitch_bytes);
+  PerformanceMetrics_End(scope);
+  return ok;
 }
 
 static bool EnsureOutputTarget(ArSdlRenderBackend *backend) {
@@ -774,6 +867,8 @@ static bool CreateForWindowWithDriver(ArRenderDevice *device,
       return false;
     }
     backend->output_window = window;
+    backend->reuse_texture_uploads = SDL_GetHintBoolean("AR_SDL_GPU_UPLOAD_REUSE",
+        !strcmp(SDL_GetGPUDeviceDriver(gpu), "direct3d12"));
     backend->output_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
     backend->owns_renderer = backend->owns_context = backend->owns_gpu_device = true;
     if (!EnsureOutputTarget(backend) || !SetRenderTarget(backend, ArRenderTexture_Invalid())) {

@@ -1,3 +1,4 @@
+#include "support/test_environment.h"
 #include "actraiser/actraiser_action_room_graphics.h"
 #include "actraiser/regional/actraiser_regional_media.h"
 #include "actraiser/regional/actraiser_actor_art.h"
@@ -314,10 +315,10 @@ static void TestGuardedFallbacks(void) {
   script_bank[kScriptAddress + 2] = 0x20;
   CHECK(!ActRaiser_ActionPaletteLoadHleEnabled(&cpu));
 
-  CHECK(setenv("AR_ACTION_ROOM_GFX_HLE", "0", 1) == 0);
+  CHECK(Test_SetEnv("AR_ACTION_ROOM_GFX_HLE", "0", 1) == 0);
   script_bank[kScriptAddress + 2] = 0x80;
   CHECK(!ActRaiser_ActionPaletteLoadHleEnabled(&cpu));
-  CHECK(unsetenv("AR_ACTION_ROOM_GFX_HLE") == 0);
+  CHECK(Test_UnsetEnv("AR_ACTION_ROOM_GFX_HLE") == 0);
 }
 
 static void TestDeathHeimDonor(void) {
@@ -363,9 +364,9 @@ static void TestDeathHeimDonor(void) {
               if (changed) memcpy(native_vram + 0x2000, donor, sizeof(donor));
               CHECK(!memcmp(vram, native_vram, sizeof(vram)));
               CpuState guard = MakeCpu();
-              setenv("AR_ACTION_ROOM_GFX_HLE", "0", 1);
+              Test_SetEnv("AR_ACTION_ROOM_GFX_HLE", "0", 1);
               CHECK(ActRaiser_ActionCharacterLoadHleEnabled(&guard) == changed);
-              unsetenv("AR_ACTION_ROOM_GFX_HLE");
+              Test_UnsetEnv("AR_ACTION_ROOM_GFX_HLE");
             }
           }
         }
@@ -445,10 +446,10 @@ static void TestActorDonor(void) {
               CHECK(!memcmp(vram, native_vram, sizeof(vram)) &&
                     !memcmp(cgram, native_cgram, sizeof(cgram)));
               CpuState guard = MakeCpu();
-              setenv("AR_ACTION_ROOM_GFX_HLE", "0", 1);
+              Test_SetEnv("AR_ACTION_ROOM_GFX_HLE", "0", 1);
               CHECK((kind == 1 ? ActRaiser_ActionCharacterLoadHleEnabled(&guard)
                                : ActRaiser_ActionPaletteLoadHleEnabled(&guard)) == changed);
-              unsetenv("AR_ACTION_ROOM_GFX_HLE");
+              Test_UnsetEnv("AR_ACTION_ROOM_GFX_HLE");
             }
           }
         }

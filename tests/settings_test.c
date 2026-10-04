@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
+#include "support/test_environment.h"
 #include "app/config.h"
 #include "present/display_geometry.h"
 #include "app/input_map.h"
@@ -65,10 +66,10 @@ static void InputActionObserved(InputAction action) {
 }
 
 static void ClearSettingsEnv(void) {
-  unsetenv("AR_LOCALIZATION_PACK");
+  Test_UnsetEnv("AR_LOCALIZATION_PACK");
   Settings_ClearConfigLayer();
   for (int i = 0; i < g_setting_desc_count; i++) {
-    if (g_setting_descs[i].env) unsetenv(g_setting_descs[i].env);
+    if (g_setting_descs[i].env) Test_UnsetEnv(g_setting_descs[i].env);
   }
 }
 
@@ -501,19 +502,19 @@ static void TestDefaultsAndMetadata(void) {
 
 static void TestSim3DEnvironmentLabels(void) {
   ClearSettingsEnv();
-  setenv("AR_SIM3D", "on", 1);
-  setenv("AR_SIM3D_WORLD_NAV", "on", 1);
-  setenv("AR_SIM3D_WORLD_NAV_LIGHTING", "off", 1);
-  setenv("AR_SIM3D_WORLD_NAV_CLOUDS", "on", 1);
-  setenv("AR_SIM3D_WORLD_NAV_CLOUD_SHADOWS", "off", 1);
-  setenv("AR_SIM3D_WORLD_NAV_ATMOSPHERE", "off", 1);
-  setenv("AR_SIM3D_WORLD_NAV_TOWNS", "off", 1);
-  setenv("AR_SIM3D_WORLD_NAV_RELIEF", "off", 1);
-  setenv("AR_SIM3D_WORLD_NAV_GROUND_DETAIL", "off", 1);
-  setenv("AR_SIM3D_WORLD_NAV_MOUNTAINS", "off", 1);
-  setenv("AR_SIM3D_SHADOWS", "off", 1);
-  setenv("AR_SIM3D_HEIGHT", "off", 1);
-  setenv("AR_SIM3D_PITCH", "350", 1);
+  Test_SetEnv("AR_SIM3D", "on", 1);
+  Test_SetEnv("AR_SIM3D_WORLD_NAV", "on", 1);
+  Test_SetEnv("AR_SIM3D_WORLD_NAV_LIGHTING", "off", 1);
+  Test_SetEnv("AR_SIM3D_WORLD_NAV_CLOUDS", "on", 1);
+  Test_SetEnv("AR_SIM3D_WORLD_NAV_CLOUD_SHADOWS", "off", 1);
+  Test_SetEnv("AR_SIM3D_WORLD_NAV_ATMOSPHERE", "off", 1);
+  Test_SetEnv("AR_SIM3D_WORLD_NAV_TOWNS", "off", 1);
+  Test_SetEnv("AR_SIM3D_WORLD_NAV_RELIEF", "off", 1);
+  Test_SetEnv("AR_SIM3D_WORLD_NAV_GROUND_DETAIL", "off", 1);
+  Test_SetEnv("AR_SIM3D_WORLD_NAV_MOUNTAINS", "off", 1);
+  Test_SetEnv("AR_SIM3D_SHADOWS", "off", 1);
+  Test_SetEnv("AR_SIM3D_HEIGHT", "off", 1);
+  Test_SetEnv("AR_SIM3D_PITCH", "350", 1);
   Settings_Init();
   CHECK(g_settings.sim3d_mode);
   CHECK(g_settings.sim3d_world_navigation);
@@ -788,7 +789,7 @@ static void TestLandscapeHeightDefaultAndPersistence(void) {
   CHECK(g_settings.sim3d_landscape_height_pct == 100);
   CHECK(Settings_Save(path));
   CHECK(FileContains(path, "sim3d_landscape_height_pct = 100"));
-  setenv("AR_SIM3D_LANDSCAPE_HEIGHT", "75", 1);
+  Test_SetEnv("AR_SIM3D_LANDSCAPE_HEIGHT", "75", 1);
   Settings_InitWithFile(path);
   CHECK(g_settings.sim3d_landscape_height_pct == 75);
   ClearSettingsEnv();
@@ -860,8 +861,8 @@ static void TestFogDefaultsAndPersistence(void) {
 
   /* Environment overrides still win, including zero; they must not rewrite
    * an existing saved preference just because defaults changed. */
-  setenv("AR_SIM3D_CULL_CORNER", "0", 1);
-  setenv("AR_SIM3D_CULL_DIM", "55", 1);
+  Test_SetEnv("AR_SIM3D_CULL_CORNER", "0", 1);
+  Test_SetEnv("AR_SIM3D_CULL_DIM", "55", 1);
   Settings_InitWithFile(path);
   CHECK(g_settings.sim3d_cull_corner_px == 0);
   CHECK(g_settings.sim3d_cull_dim_pct == 55);
@@ -912,9 +913,9 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
 
   /* Real environment values must remain distinguishable from config.ini's
    * staged AR_* compatibility values and win over both file layers. */
-  setenv("AR_AUDIO_VOLUME", "85", 1);
-  setenv("AR_MUSIC_VOLUME", "55", 1);
-  setenv("AR_WS_SPRITES", "0", 1);
+  Test_SetEnv("AR_AUDIO_VOLUME", "85", 1);
+  Test_SetEnv("AR_MUSIC_VOLUME", "55", 1);
+  Test_SetEnv("AR_WS_SPRITES", "0", 1);
   DisplayGeometry_SetHorizontal(52, 52);
   Settings_InitWithFile(settings_path);
   Settings_FinalizeDisplayMode();
@@ -973,7 +974,7 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
   CHECK(FileContains(saved_path, "audio_master_volume = 45%"));
 
   ClearSettingsEnv();
-  setenv("AR_WINDOW_MODE", "Windowed", 1);
+  Test_SetEnv("AR_WINDOW_MODE", "Windowed", 1);
   DisplayGeometry_SetHorizontal(52, 52);
   Settings_InitWithFile(saved_path);
   Settings_FinalizeDisplayMode();
@@ -995,16 +996,16 @@ static void TestConfigSettingsEnvironmentPrecedence(void) {
 
 static void TestLegacySeedEncodings(void) {
   ClearSettingsEnv();
-  setenv("AR_INF_MP", "1", 1);
-  setenv("AR_INF_HP", "0x20", 1); /* leading zero historically disables */
-  setenv("AR_MOONJUMP", "9", 1);
-  setenv("AR_NO_KNOCKBACK", "1", 1); /* now a plain on/off toggle */
-  setenv("AR_PIN", "7E00210A,7F1234AA", 1);
-  setenv("AR_WS_SPRITES", "0", 1);
-  setenv("AR_AUDIO_VOLUME", "137", 1);
-  setenv("AR_DIALOG_BLIP", "0", 1);
-  setenv("AR_TURBO_MULT", "1", 1);
-  setenv("AR_WARP", "0605", 1);
+  Test_SetEnv("AR_INF_MP", "1", 1);
+  Test_SetEnv("AR_INF_HP", "0x20", 1); /* leading zero historically disables */
+  Test_SetEnv("AR_MOONJUMP", "9", 1);
+  Test_SetEnv("AR_NO_KNOCKBACK", "1", 1); /* now a plain on/off toggle */
+  Test_SetEnv("AR_PIN", "7E00210A,7F1234AA", 1);
+  Test_SetEnv("AR_WS_SPRITES", "0", 1);
+  Test_SetEnv("AR_AUDIO_VOLUME", "137", 1);
+  Test_SetEnv("AR_DIALOG_BLIP", "0", 1);
+  Test_SetEnv("AR_TURBO_MULT", "1", 1);
+  Test_SetEnv("AR_WARP", "0605", 1);
   DisplayGeometry_SetHorizontal(43, 43);
   Settings_Init();
 
@@ -1022,7 +1023,7 @@ static void TestLegacySeedEncodings(void) {
   CHECK(g_settings.pins[1].off == 0x11234 && g_settings.pins[1].val == 0xaa);
   CHECK(g_settings.display_mode == kDisplayMode_Custom);
 
-  setenv("AR_DISPLAY_MODE", "1", 1);
+  Test_SetEnv("AR_DISPLAY_MODE", "1", 1);
   Settings_Init();
   CHECK(g_settings.display_mode == kDisplayMode_WideRaw);
   CHECK(g_settings.ws_action && g_settings.ws_sim);
@@ -1295,7 +1296,7 @@ static void TestCheatsCanBeStagedOutsideTheirRuntimeMode(void) {
 
 static void TestNoWideBudget(void) {
   ClearSettingsEnv();
-  setenv("AR_DISPLAY_MODE", "2", 1);
+  Test_SetEnv("AR_DISPLAY_MODE", "2", 1);
   DisplayGeometry_SetHorizontal(0, 0);
   Settings_Init();
   CHECK(g_settings.display_mode == kDisplayMode_43);
@@ -1834,7 +1835,7 @@ static void TestEnvironmentalEffectsSetting(void) {
   CHECK(!Settings_IsAvailable(environment));
   Settings_ApplyRenderCapabilities(kRenderFeature_All);
   CHECK(g_settings.action_environmental_effects);
-  setenv("AR_ACTION_ENVIRONMENTAL_EFFECTS", "0", 1);
+  Test_SetEnv("AR_ACTION_ENVIRONMENTAL_EFFECTS", "0", 1);
   Settings_Init();
   CHECK(!g_settings.action_environmental_effects);
   ClearSettingsEnv();
@@ -2105,11 +2106,11 @@ static void TestLocalizationPreferences(void) {
   CHECK(!pixel->available());
   CHECK(Settings_IsMenuVisible(source));
 
-  setenv("AR_LOCALIZATION_PACK", "/synthetic/pack.ini", 1);
+  Test_SetEnv("AR_LOCALIZATION_PACK", "/synthetic/pack.ini", 1);
   Settings_Init();
   CHECK(g_settings.localization_content == 1);
   CHECK(g_settings.localization_presentation == 1);
-  setenv("AR_LOCALIZATION_PRESENTATION", "Native", 1);
+  Test_SetEnv("AR_LOCALIZATION_PRESENTATION", "Native", 1);
   Settings_Init();
   CHECK(g_settings.localization_content == 1);
   CHECK(g_settings.localization_presentation == 1);
@@ -2119,11 +2120,11 @@ static void TestLocalizationPreferences(void) {
   CHECK(mode->available());
   CHECK(Settings_SetText(mode, "Native") == kSettingChange_Applied);
   ClearSettingsEnv();
-  setenv("AR_LOCALIZATION_PRESENTATION", "Enhanced", 1);
-  setenv("AR_LOCALIZATION_CONTENT", "Native US", 1);
-  setenv("AR_LOCALIZATION_FONT_SAMPLING", "Smooth", 1);
-  setenv("AR_LOCALIZATION_FONT_PIXELATION", "Low resolution", 1);
-  setenv("AR_LOCALIZATION_FONT_SCALE_PERCENT", "103", 1);
+  Test_SetEnv("AR_LOCALIZATION_PRESENTATION", "Enhanced", 1);
+  Test_SetEnv("AR_LOCALIZATION_CONTENT", "Native US", 1);
+  Test_SetEnv("AR_LOCALIZATION_FONT_SAMPLING", "Smooth", 1);
+  Test_SetEnv("AR_LOCALIZATION_FONT_PIXELATION", "Low resolution", 1);
+  Test_SetEnv("AR_LOCALIZATION_FONT_SCALE_PERCENT", "103", 1);
   Settings_Init();
   CHECK(g_settings.localization_content == 0);
   CHECK(g_settings.localization_presentation == 1);
@@ -2225,7 +2226,7 @@ static void TestRememberTownPreference(void) {
   CHECK(FileContains(path, "remember_last_town = Off"));
   Settings_InitWithFile(path);
   CHECK(!g_settings.remember_last_town);
-  setenv("AR_REMEMBER_LAST_TOWN", "1", 1);
+  Test_SetEnv("AR_REMEMBER_LAST_TOWN", "1", 1);
   Settings_InitWithFile(path);
   CHECK(g_settings.remember_last_town);
   ClearSettingsEnv();
@@ -2403,7 +2404,7 @@ static void TestAutoBootPreservesDisplayPreferences(void) {
 
   CHECK(WriteTextFile(path, "extended_aspect = 4:3\n"
                             "display_mode = 4:3 authentic\n"));
-  setenv("AR_EXTENDED_ASPECT_RATIO", "Auto", 1);
+  Test_SetEnv("AR_EXTENDED_ASPECT_RATIO", "Auto", 1);
   DisplayGeometry_SetHorizontal(0, 0);
   Settings_InitWithFile(path);
   Settings_FinalizeDisplayMode();

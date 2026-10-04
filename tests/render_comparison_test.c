@@ -1,3 +1,4 @@
+#include "support/test_environment.h"
 #include "present/render_comparison.h"
 
 #include <stdio.h>
@@ -7,8 +8,8 @@ static void Environment(const char *key, const char *value) {
 #ifdef _WIN32
   _putenv_s(key, value ? value : "");
 #else
-  if (value) setenv(key, value, 1);
-  else unsetenv(key);
+  if (value) Test_SetEnv(key, value, 1);
+  else Test_UnsetEnv(key);
 #endif
 }
 

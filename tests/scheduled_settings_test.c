@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
+#include "support/test_environment.h"
 #include "app/scheduled_settings.h"
 
 #include "actraiser_game.h"
@@ -64,10 +65,10 @@ static void SetGameFrame(uint16 frame) {
 }
 
 static void Configure(const char *specification, const char *frame) {
-  unsetenv("AR_SETTING_SET_2");
-  unsetenv("AR_SETTING_AT_GF_2");
-  CHECK(setenv("AR_SETTING_SET", specification, 1) == 0);
-  CHECK(setenv("AR_SETTING_AT_GF", frame, 1) == 0);
+  Test_UnsetEnv("AR_SETTING_SET_2");
+  Test_UnsetEnv("AR_SETTING_AT_GF_2");
+  CHECK(Test_SetEnv("AR_SETTING_SET", specification, 1) == 0);
+  CHECK(Test_SetEnv("AR_SETTING_AT_GF", frame, 1) == 0);
   ScheduledSettings_Init();
 }
 
@@ -105,10 +106,10 @@ static void TestOrdinarySettingStillUsesMutationApi(void) {
 static void TestSecondScheduledChangeSurvivesFirst(void) {
   s_action_calls = 0;
   s_set_calls = 0;
-  CHECK(setenv("AR_SETTING_SET", "save_state=run", 1) == 0);
-  CHECK(setenv("AR_SETTING_AT_GF", "10", 1) == 0);
-  CHECK(setenv("AR_SETTING_SET_2", "audio_master_volume=45", 1) == 0);
-  CHECK(setenv("AR_SETTING_AT_GF_2", "12", 1) == 0);
+  CHECK(Test_SetEnv("AR_SETTING_SET", "save_state=run", 1) == 0);
+  CHECK(Test_SetEnv("AR_SETTING_AT_GF", "10", 1) == 0);
+  CHECK(Test_SetEnv("AR_SETTING_SET_2", "audio_master_volume=45", 1) == 0);
+  CHECK(Test_SetEnv("AR_SETTING_AT_GF_2", "12", 1) == 0);
   ScheduledSettings_Init();
   SetGameFrame(10);
   ScheduledSettings_ApplyIfDue();
@@ -126,10 +127,10 @@ int main(void) {
   TestActionRequiresRunValue();
   TestOrdinarySettingStillUsesMutationApi();
   TestSecondScheduledChangeSurvivesFirst();
-  unsetenv("AR_SETTING_SET");
-  unsetenv("AR_SETTING_AT_GF");
-  unsetenv("AR_SETTING_SET_2");
-  unsetenv("AR_SETTING_AT_GF_2");
+  Test_UnsetEnv("AR_SETTING_SET");
+  Test_UnsetEnv("AR_SETTING_AT_GF");
+  Test_UnsetEnv("AR_SETTING_SET_2");
+  Test_UnsetEnv("AR_SETTING_AT_GF_2");
   if (s_failures) {
     fprintf(stderr, "scheduled_settings_test: %d failure(s)\n", s_failures);
     return 1;

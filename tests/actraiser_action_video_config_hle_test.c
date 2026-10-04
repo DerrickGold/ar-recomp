@@ -1,3 +1,4 @@
+#include "support/test_environment.h"
 #include "actraiser/actraiser_action_video_config.h"
 
 #include <stdio.h>
@@ -249,15 +250,15 @@ static void TestGuardedFallbacks(void) {
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_NonAction;
   CHECK(!ActRaiser_ActionVideoConfigHleEnabled(&cpu));
   wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Fillmore;
-  CHECK(setenv("AR_ACTION_ROOM_VIDEO_HLE", "0", 1) == 0);
+  CHECK(Test_SetEnv("AR_ACTION_ROOM_VIDEO_HLE", "0", 1) == 0);
   CHECK(!ActRaiser_ActionVideoConfigHleEnabled(&cpu));
   CHECK(ActRaiser_ActionVideoConfigEntry(&cpu));
-  CHECK(unsetenv("AR_ACTION_ROOM_VIDEO_HLE") == 0);
+  CHECK(Test_UnsetEnv("AR_ACTION_ROOM_VIDEO_HLE") == 0);
 }
 
 static void TestRegionalWrapper(void) {
   for (unsigned native = 0; native < 2; ++native) {
-    if (native) CHECK(setenv("AR_ACTION_ROOM_VIDEO_HLE", "0", 1) == 0);
+    if (native) CHECK(Test_SetEnv("AR_ACTION_ROOM_VIDEO_HLE", "0", 1) == 0);
     for (unsigned changed = 0; changed < 2; ++changed) {
       ResetFixture();
       CpuState expected = MakeCpu();
@@ -286,7 +287,7 @@ static void TestRegionalWrapper(void) {
   CHECK(timer_calls == calls && !memcmp(&cpu, &before, sizeof(cpu)));
   CHECK(artwork_calls == timer_calls);
   CHECK(ActRaiser_ActionVideoConfigEntry(&cpu)); /* guard restored on escape */
-  CHECK(unsetenv("AR_ACTION_ROOM_VIDEO_HLE") == 0);
+  CHECK(Test_UnsetEnv("AR_ACTION_ROOM_VIDEO_HLE") == 0);
 }
 
 int main(void) {

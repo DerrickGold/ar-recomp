@@ -15,7 +15,8 @@
  *
  *   2. The selectable entrypoint name differs for SPIR-V and MSL: glslc leaves
  *      SPIR-V at `main`, while spirv-cross emits Metal `main0`. Swapping them
- *      must fail. DXIL is already a single compiled stage container and D3D12
+ *      is checked in SPIR-V metadata; live pipelines validate linkage.
+ *      Vulkan module creation need not resolve an entrypoint. DXIL is already a single compiled stage container and D3D12
  *      implementations may ignore this field, so only its positive case is
  *      meaningful.
  *
@@ -28,6 +29,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
 
 typedef struct {
   const unsigned char *msl;
@@ -52,6 +55,7 @@ typedef struct {
 #include "shaders/sim3d_shadow_batch_frag.h"
 #include "shaders/sim_shadow_blur_frag.h"
 #include "shaders/sim_cloud_frag.h"
+#include "shaders/sim3d_model_clipped_frag.h"
 
 static int s_failures;
 #define CHECK(expr)                                                                                \
@@ -62,16 +66,17 @@ static int s_failures;
     }                                                                                              \
   } while (0)
 
-/* Every shader the game ships. Adding a .frag.glsl without adding it here
+/* Representative shaders from each graphics interface the game ships. Adding a .frag.glsl without adding it here
  * would leave it unguarded, so keep this list in step with the platform effect
  * implementations. */
-static const struct {
+typedef struct ShaderCase {
   const char *name;
   GpuShaderBlobs blobs;
   SDL_GPUShaderStage stage;
   Uint32 samplers;
   Uint32 uniforms;
-} kShaders[] = {
+} ShaderCase;
+static const ShaderCase kShaders[] = {
     {"sim3d_shadow_batch_vertex",
      {kSim3dShadowBatchVertMSL, kSim3dShadowBatchVertMSLSize, kSim3dShadowBatchVertSPV,
       kSim3dShadowBatchVertSPVSize, kSim3dShadowBatchVertDXIL, kSim3dShadowBatchVertDXILSize},
@@ -154,6 +159,11 @@ static const struct {
      SDL_GPU_SHADERSTAGE_FRAGMENT,
      1,
      1},
+    {"sim3d_model_clipped_fragment",
+     {kSim3dModelClippedFragMSL, kSim3dModelClippedFragMSLSize,
+      kSim3dModelClippedFragSPV, kSim3dModelClippedFragSPVSize,
+      kSim3dModelClippedFragDXIL, kSim3dModelClippedFragDXILSize},
+     SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0},
 };
 static const int kShaderCount = (int)(sizeof(kShaders) / sizeof(kShaders[0]));
 
@@ -187,7 +197,99 @@ static SDL_GPUShader *CreateFrom(SDL_GPUDevice *device, const GpuShaderBlobs *bl
   return SDL_CreateGPUShader(device, &info);
 }
 
+/* Decode little-endian words without alignment/aliasing assumptions. Opcode
+ * 15 is OpEntryPoint; its execution model is Vertex=0 or Fragment=4. Check
+ * the whole instruction stream so a truncated string cannot pass by prefix. */
+static uint32_t SpvWord(const unsigned char *p) {
+  return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+static bool HasSpirvEntryPoint(const GpuShaderBlobs *blob, SDL_GPUShaderStage stage,
+                               const char *name) {
+  if (blob->spv_size < 20 || blob->spv_size % 4 || SpvWord(blob->spv) != 0x07230203)
+    return false;
+  bool found = false;
+  for (size_t at = 20; at < blob->spv_size;) {
+    uint32_t instruction = SpvWord(blob->spv + at);
+    size_t bytes = (instruction >> 16) * 4;
+    if (!bytes || bytes > blob->spv_size - at) return false;
+    if ((instruction & 0xffff) == 15) {
+      if (bytes < 16) return false;
+      const char *entry = (const char *)blob->spv + at + 12;
+      const char *end = memchr(entry, 0, bytes - 12);
+      if (!end) return false;
+      if (SpvWord(blob->spv + at + 4) == (stage == SDL_GPU_SHADERSTAGE_VERTEX ? 0u : 4u) &&
+          (size_t)(end - entry) == strlen(name) && !memcmp(entry, name, strlen(name)))
+        found = true;
+    }
+    at += bytes;
+  }
+  return found;
+}
+
+static const ShaderCase *FindShader(const char *name) {
+  for (int i = 0; i < kShaderCount; ++i)
+    if (!strcmp(kShaders[i].name, name)) return &kShaders[i];
+  return NULL;
+}
+
+/* Pipeline creation, not Vulkan shader-module creation, resolves names and
+ * links stage interfaces. Pair every tested module with its matching stage. */
+static void CheckPipeline(SDL_GPUDevice *device, const ShaderCase *test, const char *entry) {
+  const bool shadow = strstr(test->name, "shadow_batch") != NULL;
+  const bool linear = !strcmp(test->name, "sim3d_linear_vertex") ||
+                      !strcmp(test->name, "sim3d_model_clipped_fragment");
+  const ShaderCase *vertex = test->stage == SDL_GPU_SHADERSTAGE_VERTEX ? test :
+      FindShader(shadow ? "sim3d_shadow_batch_vertex" :
+                 linear ? "sim3d_linear_vertex" : "sim3d_depth_vertex");
+  const ShaderCase *fragment = test->stage == SDL_GPU_SHADERSTAGE_FRAGMENT ? test :
+      FindShader(shadow ? "sim3d_shadow_batch_fragment" :
+                 linear ? "sim3d_model_clipped_fragment" : "sim3d_depth_fragment");
+  SDL_GPUShader *vs = CreateFrom(device, &vertex->blobs, entry, vertex->stage,
+                                 vertex->samplers, vertex->uniforms);
+  SDL_GPUShader *fs = CreateFrom(device, &fragment->blobs, entry, fragment->stage,
+                                 fragment->samplers, fragment->uniforms);
+  CHECK(vs && fs);
+  if (vs && fs) {
+    const bool spherical = !strcmp(vertex->name, "sim3d_spherical_vertex");
+    const bool model = !strcmp(vertex->name, "sim3d_model_vertex");
+    const unsigned count = shadow ? 8 : spherical ? 10 : model ? 2 : 3;
+    SDL_GPUVertexAttribute attributes[10];
+    for (unsigned i = 0; i < count; ++i)
+      attributes[i] = (SDL_GPUVertexAttribute){i, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, i * 16};
+    if (model) attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+    if (count == 3) attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+    const SDL_GPUVertexBufferDescription buffer = {
+      .slot = 0, .pitch = count * 16,
+      .input_rate = shadow || spherical ? SDL_GPU_VERTEXINPUTRATE_INSTANCE : SDL_GPU_VERTEXINPUTRATE_VERTEX,
+    };
+    const SDL_GPUColorTargetDescription color = {.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM};
+    const SDL_GPUGraphicsPipelineCreateInfo info = {
+      .vertex_shader = vs, .fragment_shader = fs,
+      .vertex_input_state = {&buffer, 1, attributes, count},
+      .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+      .rasterizer_state = {.fill_mode = SDL_GPU_FILLMODE_FILL, .cull_mode = SDL_GPU_CULLMODE_NONE,
+                          .front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE, .enable_depth_clip = true},
+      .multisample_state = {.sample_count = SDL_GPU_SAMPLECOUNT_1},
+      .target_info = {.color_target_descriptions = &color, .num_color_targets = 1},
+    };
+    SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
+    CHECK(pipeline);
+    if (!pipeline) fprintf(stderr, "  %s pipeline rejected: %s\n", test->name, SDL_GetError());
+    else SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
+  }
+  if (vs) SDL_ReleaseGPUShader(device, vs);
+  if (fs) SDL_ReleaseGPUShader(device, fs);
+}
+
 int main(void) {
+  for (int i = 0; i < kShaderCount; ++i) {
+    CHECK(HasSpirvEntryPoint(&kShaders[i].blobs, kShaders[i].stage, "main"));
+    CHECK(!HasSpirvEntryPoint(&kShaders[i].blobs, kShaders[i].stage, "main0"));
+    CHECK(!HasSpirvEntryPoint(&kShaders[i].blobs,
+        kShaders[i].stage == SDL_GPU_SHADERSTAGE_VERTEX ? SDL_GPU_SHADERSTAGE_FRAGMENT : SDL_GPU_SHADERSTAGE_VERTEX,
+        "main"));
+  }
+  if (s_failures) return 1;
   if (!SDL_Init(SDL_INIT_VIDEO)) {
     fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
     return 1;
@@ -218,18 +320,9 @@ int main(void) {
          SDL_GetGPUDeviceDriver(device), (unsigned)formats,
          spirv ? "SPIR-V" : (dxil ? "DXIL" : "MSL"), good, kShaderCount);
 
-  /* 1. Every committed blob compiles on this backend. */
-  for (int i = 0; i < kShaderCount; i++) {
-    SDL_GPUShader *shader = CreateFrom(device, &kShaders[i].blobs, good, kShaders[i].stage,
-                                       kShaders[i].samplers, kShaders[i].uniforms);
-    CHECK(shader != NULL);
-    if (!shader)
-      fprintf(stderr, "  %s blob rejected: %s\n", kShaders[i].name, SDL_GetError());
-    else
-      SDL_ReleaseGPUShader(device, shader);
-  }
+  for (int i = 0; i < kShaderCount; i++) CheckPipeline(device, &kShaders[i], good);
 
-  if (!dxil) {
+  if (!spirv && !dxil) {
     /* The other source module's entrypoint name must be rejected. One shader
      * is enough: the name comes from the module format, not the effect. */
     printf("shader_blob_test: negative case follows; one backend "
@@ -246,7 +339,7 @@ int main(void) {
       SDL_ReleaseGPUShader(device, wrong);
     }
   } else {
-    printf("shader_blob_test: DXIL container has no alternate entrypoint "
+    printf("shader_blob_test: SPIR-V metadata checked; DXIL has no alternate entrypoint "
            "negative case\n");
   }
 

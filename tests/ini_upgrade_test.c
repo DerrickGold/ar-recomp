@@ -10,6 +10,7 @@
  * user wrote is rewritten or removed, so the worst a bug here can do is fail to
  * add a setting -- never lose one. Most of these tests assert exactly that.
  */
+#include "snesrecomp/support/utf8_fs.h"
 #include "app/ini_upgrade.h"
 #include "app/ini_upgrade_apply.h"
 
@@ -18,6 +19,16 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+static char *MakeTemporaryDirectory(char *path) {
+#ifdef _WIN32
+  /* _mkdir reserves the generated name; never reuse an existing directory. */
+  if (_mktemp_s(path, strlen(path) + 1) || sr_mkdir(path)) return NULL;
+  return path;
+#else
+  return mkdtemp(path);
+#endif
+}
 
 static int s_failures;
 
@@ -429,7 +440,7 @@ static char *ReadFileText(const char *path) {
 
 static void TestApplierKeepsUserValuesAndAddsNewOnes(void) {
   char template_dir[] = "/tmp/ar-iniupg-XXXXXX";
-  if (!mkdtemp(template_dir)) {
+  if (!MakeTemporaryDirectory(template_dir)) {
     CHECK(!"could not create a temp dir");
     return;
   }
@@ -439,7 +450,7 @@ static void TestApplierKeepsUserValuesAndAddsNewOnes(void) {
     return;
   }
   CHECK(chdir(template_dir) == 0);
-  CHECK(mkdir("defaults", 0755) == 0);
+  CHECK(sr_mkdir("defaults") == 0);
 
   /* The user's played install, and a NEW default that adds a key -- so a write
    * genuinely happens. (With nothing to add the applier correctly does not
@@ -485,7 +496,7 @@ static void TestApplierKeepsUserValuesAndAddsNewOnes(void) {
  * config, which is the exact loss this module exists to prevent. */
 static void TestApplierSkipsALiveFileItCannotRead(void) {
   char template_dir[] = "/tmp/ar-iniupg-unreadable-XXXXXX";
-  if (!mkdtemp(template_dir)) {
+  if (!MakeTemporaryDirectory(template_dir)) {
     CHECK(!"could not create a temp dir");
     return;
   }
@@ -495,7 +506,7 @@ static void TestApplierSkipsALiveFileItCannotRead(void) {
     return;
   }
   CHECK(chdir(template_dir) == 0);
-  CHECK(mkdir("defaults", 0755) == 0);
+  CHECK(sr_mkdir("defaults") == 0);
   CHECK(WriteFileText("defaults/config.ini", "[Graphics]\nWindowScale = 3\nBrandNewKey = 7\n"));
 
   /* CASE 1: present but past the size cap (kIniUpgradeMaxFileBytes). */
@@ -548,7 +559,7 @@ static void TestApplierSkipsALiveFileItCannotRead(void) {
  * corrections to existing Diorama rooms, including legacy installations. */
 static void TestApplierUsesTheRightSectionKindPerFile(void) {
   char template_dir[] = "/tmp/ar-iniupg-kinds-XXXXXX";
-  if (!mkdtemp(template_dir)) {
+  if (!MakeTemporaryDirectory(template_dir)) {
     CHECK(!"could not create a temp dir");
     return;
   }
@@ -558,9 +569,9 @@ static void TestApplierUsesTheRightSectionKindPerFile(void) {
     return;
   }
   CHECK(chdir(template_dir) == 0);
-  CHECK(mkdir("defaults", 0755) == 0);
-  CHECK(mkdir("game-assets", 0755) == 0);
-  CHECK(mkdir("defaults/game-assets", 0755) == 0);
+  CHECK(sr_mkdir("defaults") == 0);
+  CHECK(sr_mkdir("game-assets") == 0);
+  CHECK(sr_mkdir("defaults/game-assets") == 0);
 
   /* Each live file has had a shipped key REMOVED by the user. */
   CHECK(
@@ -603,9 +614,9 @@ static bool FileTextEquals(const char *path, const char *expected) {
 static void TestReleaseContentUpdatesAndRetries(void) {
   char template_dir[] = "/tmp/ar-iniupg-content-XXXXXX", original[1024];
   CHECK(getcwd(original, sizeof original) != NULL);
-  CHECK(mkdtemp(template_dir) != NULL);
+  CHECK(MakeTemporaryDirectory(template_dir) != NULL);
   CHECK(chdir(template_dir) == 0);
-  CHECK(mkdir("defaults", 0755) == 0);
+  CHECK(sr_mkdir("defaults") == 0);
   const char *live_path = "diorama-layers.ini";
   const char *default_path = "defaults/diorama-layers.ini";
   const char *baseline_path = "diorama-layers.ini.installed";
@@ -645,7 +656,7 @@ static void TestReleaseContentUpdatesAndRetries(void) {
   /* A failed atomic replacement must not advance the installed baseline.
    * Its successful retry reuses the backup rather than making duplicates. */
   CHECK(WriteFileText(default_path, third));
-  CHECK(mkdir("diorama-layers.ini.tmp", 0755) == 0);
+  CHECK(sr_mkdir("diorama-layers.ini.tmp") == 0);
   IniUpgrade_ApplyShippedDefaults();
   CHECK(FileTextEquals(live_path, second));
   CHECK(FileTextEquals(baseline_path, second));
@@ -659,7 +670,7 @@ static void TestReleaseContentUpdatesAndRetries(void) {
 
   /* Never replace a file when its pre-update copy cannot be preserved. */
   CHECK(WriteFileText(default_path, first));
-  CHECK(mkdir("diorama-layers.ini.pre-update-3.tmp", 0755) == 0);
+  CHECK(sr_mkdir("diorama-layers.ini.pre-update-3.tmp") == 0);
   IniUpgrade_ApplyShippedDefaults();
   CHECK(FileTextEquals(live_path, third));
   CHECK(FileTextEquals(baseline_path, third));
@@ -667,7 +678,7 @@ static void TestReleaseContentUpdatesAndRetries(void) {
 
   /* An unreadable baseline is not a first installation. */
   CHECK(unlink(baseline_path) == 0);
-  CHECK(mkdir(baseline_path, 0755) == 0);
+  CHECK(sr_mkdir(baseline_path) == 0);
   IniUpgrade_ApplyShippedDefaults();
   CHECK(FileTextEquals(live_path, third));
   CHECK(chdir(original) == 0);

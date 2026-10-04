@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
+#include "support/test_environment.h"
 #include "save/save_editor.h"
 
 #include <stdio.h>
@@ -168,7 +169,7 @@ static void TestActions(void) {
         kSaveEditorAction_Failed);
   CHECK(s_apply_calls == 3 && !s_armed && !s_backup);
 
-  unsetenv("AR_SAVE_IMPORT");
+  Test_UnsetEnv("AR_SAVE_IMPORT");
   s_default_available = false;
   CHECK(SaveEditor_HandleAction(kSettingAction_SaveImport, &draft) == kSaveEditorAction_Failed);
   CHECK(s_import_calls == 0);
@@ -180,12 +181,12 @@ static void TestActions(void) {
   CHECK(SaveEditor_HandleAction(kSettingAction_SaveImport, &draft) ==
         kSaveEditorAction_RestartRequired);
   CHECK(!strcmp(s_import_path, "library/selected.srm") && s_backup);
-  setenv("AR_SAVE_IMPORT", "explicit.srm", 1);
+  Test_SetEnv("AR_SAVE_IMPORT", "explicit.srm", 1);
   s_default_available = false;
   CHECK(SaveEditor_HandleAction(kSettingAction_SaveImport, &draft) ==
         kSaveEditorAction_RestartRequired);
   CHECK(!strcmp(s_import_path, "explicit.srm"));
-  unsetenv("AR_SAVE_IMPORT");
+  Test_UnsetEnv("AR_SAVE_IMPORT");
 
   const SettingAction exports[] = {kSettingAction_SaveExportCampaign, kSettingAction_SaveExportSrm,
                                    kSettingAction_SaveExportIni};
@@ -207,11 +208,11 @@ static void TestPickedFiles(void) {
   SaveError error = {{0}};
   s_success = true;
   const int imports = s_import_calls, exports = s_export_calls;
-  setenv("AR_SAVE_IMPORT", "must-not-import-this.srm", 1);
+  Test_SetEnv("AR_SAVE_IMPORT", "must-not-import-this.srm", 1);
   CHECK(SaveEditor_HandleFileAction(kSettingAction_SaveImport, "chosen.srm", &settings, &error) ==
         kSaveEditorAction_RestartRequired);
   CHECK(s_import_calls == imports + 1 && !strcmp(s_import_path, "chosen.srm") && s_backup);
-  unsetenv("AR_SAVE_IMPORT");
+  Test_UnsetEnv("AR_SAVE_IMPORT");
   const SettingAction actions[] = {kSettingAction_SaveExportCampaign, kSettingAction_SaveExportSrm,
                                    kSettingAction_SaveExportIni};
   const char *extensions[] = {"arsave", "srm", "ini"};

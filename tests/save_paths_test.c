@@ -7,7 +7,7 @@
 #ifndef _WIN32
 #include <unistd.h>
 #endif
-static void RemoveDirectory(const char *path) {
+static void RemoveTestDirectory(const char *path) {
 #ifdef _WIN32
   wchar_t *wide = sr_win_path(path);
   assert(wide);
@@ -75,9 +75,9 @@ int main(void) {
   const char *dirs[] = {"backups/03", "backups", "imports", "exports"};
   for (unsigned i = 0; i < 4; ++i) {
     snprintf(directory, sizeof(directory), "%s/%s", root, dirs[i]);
-    RemoveDirectory(directory);
+    RemoveTestDirectory(directory);
   }
-  RemoveDirectory(root);
+  RemoveTestDirectory(root);
   puts("save paths: Unicode roots, import fallback, unique exports and per-slot backups passed");
   return 0;
 }

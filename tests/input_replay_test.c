@@ -1,3 +1,4 @@
+#include "support/test_environment.h"
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -137,17 +138,17 @@ static InputReplayFrameResult ResolveAt(uint16_t frame, uint32_t live) {
 }
 
 static void ClearEnvironment(void) {
-  CHECK(unsetenv("AR_INPUT_REPLAY") == 0);
-  CHECK(unsetenv("AR_INPUT_RECORD") == 0);
-  CHECK(unsetenv("AR_REPLAY_NOSTOP") == 0);
-  CHECK(unsetenv("AR_REPLAY_LIVE_AFTER_END") == 0);
-  CHECK(unsetenv("AR_GFLOG") == 0);
-  CHECK(unsetenv("AR_REPLAY_CHECKPOINT_INTERVAL") == 0);
+  CHECK(Test_UnsetEnv("AR_INPUT_REPLAY") == 0);
+  CHECK(Test_UnsetEnv("AR_INPUT_RECORD") == 0);
+  CHECK(Test_UnsetEnv("AR_REPLAY_NOSTOP") == 0);
+  CHECK(Test_UnsetEnv("AR_REPLAY_LIVE_AFTER_END") == 0);
+  CHECK(Test_UnsetEnv("AR_GFLOG") == 0);
+  CHECK(Test_UnsetEnv("AR_REPLAY_CHECKPOINT_INTERVAL") == 0);
   s_use_fake_api = false;
 }
 
 static void TestDefaultStop(const char *path) {
-  CHECK(setenv("AR_INPUT_REPLAY", path, 1) == 0);
+  CHECK(Test_SetEnv("AR_INPUT_REPLAY", path, 1) == 0);
   InputReplay_Init();
   CHECK(InputReplay_BeginSession(NULL, "actraiser"));
   CHECK(InputReplay_ShouldProtectSaveData());
@@ -168,8 +169,8 @@ static void TestDefaultStop(const char *path) {
 }
 
 static void TestNoStopHoldsLastInput(const char *path) {
-  CHECK(setenv("AR_INPUT_REPLAY", path, 1) == 0);
-  CHECK(setenv("AR_REPLAY_NOSTOP", "1", 1) == 0);
+  CHECK(Test_SetEnv("AR_INPUT_REPLAY", path, 1) == 0);
+  CHECK(Test_SetEnv("AR_REPLAY_NOSTOP", "1", 1) == 0);
   InputReplay_Init();
   CHECK(InputReplay_BeginSession(NULL, "actraiser"));
 
@@ -197,10 +198,10 @@ static void TestLiveHandoffAndCombinedRecording(const char *path) {
   }
   close(descriptor);
 
-  CHECK(setenv("AR_INPUT_REPLAY", path, 1) == 0);
-  CHECK(setenv("AR_INPUT_RECORD", record_path, 1) == 0);
-  CHECK(setenv("AR_REPLAY_LIVE_AFTER_END", "1", 1) == 0);
-  CHECK(setenv("AR_REPLAY_NOSTOP", "1", 1) == 0);
+  CHECK(Test_SetEnv("AR_INPUT_REPLAY", path, 1) == 0);
+  CHECK(Test_SetEnv("AR_INPUT_RECORD", record_path, 1) == 0);
+  CHECK(Test_SetEnv("AR_REPLAY_LIVE_AFTER_END", "1", 1) == 0);
+  CHECK(Test_SetEnv("AR_REPLAY_NOSTOP", "1", 1) == 0);
   ConfigureFakeApi();
   s_fake_frame_counter = 0u;
   s_fake_inputs = 0u;
@@ -260,7 +261,7 @@ static void TestLiveHandoffAndCombinedRecording(const char *path) {
   s_fake_frame_counter = 0u;
   s_fake_inputs = 0u;
   s_fake_digest_byte = 0x44u;
-  CHECK(setenv("AR_INPUT_REPLAY", record_path, 1) == 0);
+  CHECK(Test_SetEnv("AR_INPUT_REPLAY", record_path, 1) == 0);
   InputReplay_Init();
   CHECK(InputReplay_BeginSession(FakeRunner(), "actraiser"));
   const uint16_t canonical_expected[] = {0, 0x11, 0x22, 0x33, 0x44};
@@ -294,8 +295,8 @@ static void TestCanonicalIdentityAndCheckpoint(void) {
   s_fake_frame_counter = 10u;
   s_fake_inputs = 0x654321u;
   s_fake_digest_byte = 0x5au;
-  CHECK(setenv("AR_INPUT_RECORD", record_path, 1) == 0);
-  CHECK(setenv("AR_REPLAY_CHECKPOINT_INTERVAL", "1", 1) == 0);
+  CHECK(Test_SetEnv("AR_INPUT_RECORD", record_path, 1) == 0);
+  CHECK(Test_SetEnv("AR_REPLAY_CHECKPOINT_INTERVAL", "1", 1) == 0);
   InputReplay_Init();
   CHECK(InputReplay_BeginSession(FakeRunner(), "actraiser"));
   CHECK(!InputReplay_PolicyChangesAllowed());
@@ -334,7 +335,7 @@ static void TestCanonicalIdentityAndCheckpoint(void) {
   }
 
   ClearEnvironment();
-  CHECK(setenv("AR_INPUT_REPLAY", record_path, 1) == 0);
+  CHECK(Test_SetEnv("AR_INPUT_REPLAY", record_path, 1) == 0);
   InputReplay_Init();
   CHECK(!InputReplay_BeginSession(NULL, "actraiser"));
   CHECK(strstr(InputReplay_LastError(), "input-state service") != NULL);
@@ -345,7 +346,7 @@ static void TestCanonicalIdentityAndCheckpoint(void) {
   s_fake_frame_counter = 10u;
   s_fake_inputs = 0u;
   s_fake_digest_byte = 0x5au;
-  CHECK(setenv("AR_INPUT_REPLAY", record_path, 1) == 0);
+  CHECK(Test_SetEnv("AR_INPUT_REPLAY", record_path, 1) == 0);
   InputReplay_Init();
   CHECK(InputReplay_BeginSession(FakeRunner(), "actraiser"));
   result = InputReplay_Resolve(0u);
@@ -385,8 +386,8 @@ static void TestPolicyIdentity(const char *legacy_path) {
     s_fake_frame_counter = 0;
     s_fake_digest_byte = 0x71;
     int policy = recorded;
-    CHECK(setenv("AR_INPUT_RECORD", path, 1) == 0);
-    CHECK(setenv("AR_REPLAY_CHECKPOINT_INTERVAL", "1", 1) == 0);
+    CHECK(Test_SetEnv("AR_INPUT_RECORD", path, 1) == 0);
+    CHECK(Test_SetEnv("AR_REPLAY_CHECKPOINT_INTERVAL", "1", 1) == 0);
     InputReplay_Init();
     CHECK(InputReplay_SetPolicyDigest(Policy, &policy));
     CHECK(InputReplay_BeginSession(FakeRunner(), "actraiser"));
@@ -396,7 +397,7 @@ static void TestPolicyIdentity(const char *legacy_path) {
     InputReplay_Shutdown();
     ClearEnvironment();
     ConfigureFakeApi();
-    CHECK(setenv("AR_INPUT_REPLAY", path, 1) == 0);
+    CHECK(Test_SetEnv("AR_INPUT_REPLAY", path, 1) == 0);
     InputReplay_Init();
     CHECK(InputReplay_SetPolicyDigest(Policy, &policy));
     CHECK(InputReplay_BeginSession(FakeRunner(), "actraiser"));
@@ -423,7 +424,7 @@ static void TestPolicyIdentity(const char *legacy_path) {
     ClearEnvironment();
   }
   int policy = 1;
-  CHECK(setenv("AR_INPUT_REPLAY", legacy_path, 1) == 0);
+  CHECK(Test_SetEnv("AR_INPUT_REPLAY", legacy_path, 1) == 0);
   InputReplay_Init();
   CHECK(InputReplay_SetPolicyDigest(Policy, &policy));
   CHECK(!InputReplay_BeginSession(FakeRunner(), "actraiser"));
@@ -431,7 +432,7 @@ static void TestPolicyIdentity(const char *legacy_path) {
   InputReplay_Shutdown();
   ClearEnvironment();
   ConfigureFakeApi();
-  CHECK(setenv("AR_INPUT_RECORD", path, 1) == 0);
+  CHECK(Test_SetEnv("AR_INPUT_RECORD", path, 1) == 0);
   policy = -1;
   InputReplay_Init();
   CHECK(InputReplay_SetPolicyDigest(Policy, &policy));
@@ -495,12 +496,12 @@ static void TestPolicyEditPermission(void) {
   CHECK(InputReplay_PolicyChangesAllowed());
   InputReplay_Shutdown();
   CHECK(!InputReplay_PolicyChangesAllowed());
-  CHECK(setenv("AR_INPUT_REPLAY", "/nonexistent-regional-replay.rec", 1) == 0);
+  CHECK(Test_SetEnv("AR_INPUT_REPLAY", "/nonexistent-regional-replay.rec", 1) == 0);
   InputReplay_Init();
   CHECK(!InputReplay_PolicyChangesAllowed());
   InputReplay_Shutdown();
   ClearEnvironment();
-  CHECK(setenv("AR_INPUT_RECORD", "/nonexistent-regional-output/record.rec", 1) == 0);
+  CHECK(Test_SetEnv("AR_INPUT_RECORD", "/nonexistent-regional-output/record.rec", 1) == 0);
   InputReplay_Init();
   CHECK(!InputReplay_PolicyChangesAllowed());
   InputReplay_Shutdown();

@@ -1449,8 +1449,17 @@ if(BUILD_TESTING)
         COMMAND actraiser_present_world_nav_gpu_test)
     add_test(NAME actraiser_present_world_nav_ground_atlas_gpu
         COMMAND actraiser_present_world_nav_gpu_test --ground-atlas ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME actraiser_present_world_nav_lod_gpu
+        COMMAND actraiser_present_world_nav_gpu_test --town-lod)
+    add_test(NAME actraiser_present_world_nav_resize_gpu
+        COMMAND actraiser_present_world_nav_gpu_test --resize-output)
+    add_test(NAME actraiser_present_world_nav_resize_visible_gpu
+        COMMAND actraiser_present_world_nav_gpu_test --resize-output)
+    set_tests_properties(actraiser_present_world_nav_resize_visible_gpu PROPERTIES
+        ENVIRONMENT "SDL_AUDIODRIVER=dummy;AR_TEST_VISIBLE_WINDOW=1" SKIP_RETURN_CODE 77)
     set_tests_properties(actraiser_present_world_nav_gpu
-        actraiser_present_world_nav_ground_atlas_gpu PROPERTIES
+        actraiser_present_world_nav_ground_atlas_gpu actraiser_present_world_nav_resize_gpu
+        actraiser_present_world_nav_lod_gpu PROPERTIES
         ENVIRONMENT "SDL_AUDIODRIVER=dummy" SKIP_RETURN_CODE 77)
 
     add_executable(actraiser_parallel_work_test tests/parallel_work_test.c
@@ -1593,8 +1602,15 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_render_sdl_state
         COMMAND actraiser_render_sdl_state_test)
 
+    add_executable(actraiser_render_sdl_upload_test tests/render_sdl_upload_test.c)
+    target_link_libraries(actraiser_render_sdl_upload_test PRIVATE
+        actraiser_render_sdl_test_support SDL3::SDL3 actraiser_math)
+    target_include_directories(actraiser_render_sdl_upload_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_render_sdl_upload COMMAND actraiser_render_sdl_upload_test)
+    set_tests_properties(actraiser_render_sdl_upload PROPERTIES SKIP_RETURN_CODE 77)
+
     add_executable(actraiser_render_sdl_present_test
-        tests/render_sdl_present_test.c)
+        tests/render_sdl_present_test.c src/platform/sdl/host_clock_sdl.c)
     target_link_libraries(actraiser_render_sdl_present_test PRIVATE
         actraiser_performance_test_support
         actraiser_render_test_support)

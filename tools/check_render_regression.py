@@ -21,10 +21,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--control", type=Path, required=True)
     parser.add_argument("--candidate", type=Path, required=True)
+    parser.add_argument("--control-backend", choices=("direct3d12", "vulkan", "metal"))
+    parser.add_argument("--candidate-backend", choices=("direct3d12", "vulkan", "metal"))
     parser.add_argument("--rom", type=Path, default=ROOT / "ar.sfc")
     parser.add_argument("--case", action="append", help="Named case; default: all")
     parser.add_argument("--output", type=Path, help="New directory for retained evidence")
     args = parser.parse_args()
+    if bool(args.control_backend) != bool(args.candidate_backend):
+        parser.error("Provide both --control-backend and --candidate-backend")
     cases = json.loads(SUITE.read_text())["cases"]
     unknown = set(args.case or ()) - cases.keys()
     if unknown:
@@ -46,6 +50,9 @@ def main():
                    "--checkpoint", case["checkpoint"], "--timeout", "600"]
         if "replay" in case:
             command += ["--replay", str(ROOT / case["replay"])]
+        if args.control_backend:
+            command += ["--control-backend", args.control_backend,
+                        "--candidate-backend", args.candidate_backend]
         for key in ("quit_frames", "capture_from", "capture_to", "capture_every",
                     "require_scene", "require_view"):
             if key in case:

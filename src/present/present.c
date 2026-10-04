@@ -165,7 +165,9 @@ void PresentUpload(const FrameSlot *slot) {
   }
 
   PresentChurch_Upload(&g_render_device, slot);
+  const PerformanceScope diorama_upload = PerformanceMetrics_Begin(kPerformance_DioramaUploadPrepare);
   PresentDiorama_Upload(&g_render_device, slot);
+  PerformanceMetrics_End(diorama_upload);
   if (!slot->diorama_active && PresentationConsumesMainPpuTexture(slot)) {
     ArRenderRectI upload = {
       0, 0, slot->snes_width, FrameSlot_CaptureHeight(slot),

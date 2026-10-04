@@ -1,3 +1,4 @@
+#include "support/test_sdl_environment.h"
 #include "sim/world_nav/present_world_nav.h"
 #include "sim/world_nav/present_world_nav_composition.h"
 #include "sim/sim3d/present_sim3d_environment.h"
@@ -115,6 +116,21 @@ bool Sim3DDepthPass_SelectAtlasVersion(Sim3DDepthAtlasCache *cache, unsigned ver
 bool Sim3DDepthPass_CaptureAtlasVersion(Sim3DDepthAtlasCache *cache, unsigned version) {
   (void)cache;
   (void)version;
+  return false;
+}
+bool Sim3DDepthPass_UpdateAtlasVersionRegions(
+    ArRenderDevice *device, Sim3DDepthAtlasCache *cache, unsigned version,
+    const uint32_t *pixels, int width, int height, int pitch,
+    const ArRenderRectI *regions, int region_count) {
+  (void)device;
+  (void)version;
+  (void)pixels;
+  (void)width;
+  (void)height;
+  (void)pitch;
+  (void)regions;
+  (void)region_count;
+  assert(!cache);
   return false;
 }
 void Sim3DDepthPass_DestroyAtlasCache(Sim3DDepthAtlasCache *cache) { assert(!cache); }
@@ -948,7 +964,7 @@ static void TestRejectedNavigationModelsStayCached(void) {
   const char *incoming = SDL_getenv("AR_SIM3D_WORLD_GPU_MODELS");
   char *saved = incoming ? SDL_strdup(incoming) : NULL;
   assert(!incoming || saved);
-  assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", "1", 1));
+  assert(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", "1", 1));
   PresentWorldNav_ResetResources();
   radial_accept = radial_reject_selection = true;
   FakeBackend backend = {.output_width = 960, .output_height = 720};
@@ -987,9 +1003,9 @@ static void TestRejectedNavigationModelsStayCached(void) {
   PresentWorldNav_ResetResources();
   radial_accept = false;
   if (saved)
-    assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
+    assert(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
   else
-    assert(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+    assert(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_MODELS"));
   SDL_free(saved);
   PresentWorldNav_ResetResources();
 }
@@ -998,7 +1014,7 @@ static void TestCacheBudgetRecovery(void) {
   const char *incoming = SDL_getenv("AR_SIM3D_WORLD_GPU_MODELS");
   char *saved = incoming ? SDL_strdup(incoming) : NULL;
   assert(!incoming || saved);
-  assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", "0", 1));
+  assert(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", "0", 1));
   PresentWorldNav_ResetResources();
   PresentWorldNav_TestCacheBudgets(0, 0);
   FakeBackend backend = {.output_width = 960, .output_height = 720};
@@ -1045,9 +1061,9 @@ static void TestCacheBudgetRecovery(void) {
   assert(SimBackgroundVoxelModelCache_Stats().misses == warm.misses);
   PresentWorldNav_ResetResources();
   if (saved)
-    assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
+    assert(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
   else
-    assert(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+    assert(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_MODELS"));
   SDL_free(saved);
 }
 
@@ -2551,20 +2567,20 @@ static void TestRadialModelDefault(void) {
   const char *incoming = SDL_getenv("AR_SIM3D_WORLD_GPU_MODELS");
   char *saved = incoming ? SDL_strdup(incoming) : NULL;
   assert(!incoming || saved);
-  assert(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+  assert(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_MODELS"));
   WorldNavigationModelMesh_Reset();
   assert(WorldNavigationModelMesh_Enabled());
-  assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", "0", 1));
+  assert(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", "0", 1));
   assert(WorldNavigationModelMesh_Enabled()); /* Read once per resource generation. */
   WorldNavigationModelMesh_Reset();
   assert(!WorldNavigationModelMesh_Enabled());
-  assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", "1", 1));
+  assert(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", "1", 1));
   WorldNavigationModelMesh_Reset();
   assert(WorldNavigationModelMesh_Enabled());
   if (saved)
-    assert(!SDL_setenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
+    assert(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
   else
-    assert(!SDL_unsetenv_unsafe("AR_SIM3D_WORLD_GPU_MODELS"));
+    assert(!Test_SDLUnsetEnv("AR_SIM3D_WORLD_GPU_MODELS"));
   SDL_free(saved);
   WorldNavigationModelMesh_Reset();
 }
@@ -3032,7 +3048,7 @@ int main(void) {
                              NULL) == kPresentationOutcome_CoreFailure);
   /* These counters/vertex oracles exercise the complete compatibility path.
    * The default's declining-adapter behavior is checked separately below. */
-  setenv("AR_SIM3D_WORLD_GPU_GRID", "0", 1);
+  Test_SetEnv("AR_SIM3D_WORLD_GPU_GRID", "0", 1);
   TestAtmosphereOcclusionBounds();
   TestClippedBatch();
   TestRadialBounds();
@@ -3055,14 +3071,14 @@ int main(void) {
   TestSpaceAndCloudCover();
   /* An unavailable GPU adapter must preserve the complete ordinary world,
    * including all land/ocean shadow samples, and stop retrying each frame. */
-  unsetenv("AR_SIM3D_WORLD_GPU_GRID");
+  Test_UnsetEnv("AR_SIM3D_WORLD_GPU_GRID");
   {
     PresentWorldNav_ResetResources();
     const unsigned attempts = surface_mesh_attempts;
     TestSpaceAndCloudCover();
     assert(surface_mesh_attempts > attempts + 1); /* Changed views may retry. */
   }
-  setenv("AR_SIM3D_WORLD_GPU_GRID", "0", 1);
+  Test_SetEnv("AR_SIM3D_WORLD_GPU_GRID", "0", 1);
   TestGroundCacheInvalidation();
   TestSelectedTownDimming();
   TestGroundWorkerParity();

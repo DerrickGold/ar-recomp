@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
+#include "support/test_environment.h"
 #include "diorama_layer_editor.h"
 #include "host_clock_stub.h"
 #include "action/action_bg_tuner.h"
@@ -2785,11 +2786,11 @@ int main(int argc, char **argv) {
   snprintf(settings_path, sizeof(settings_path), "/tmp/actraiser-overlay-settings-%ld.ini",
            (long)getpid());
   snprintf(settings_temporary, sizeof(settings_temporary), "%s.tmp", settings_path);
-  setenv("AR_OVERLAY_TEST_SETTINGS_PATH", settings_path, 1);
+  Test_SetEnv("AR_OVERLAY_TEST_SETTINGS_PATH", settings_path, 1);
   remove(settings_path);
   remove(settings_temporary);
-  setenv("SDL_VIDEODRIVER", "dummy", 1);
-  setenv("SDL_AUDIODRIVER", "dummy", 1);
+  Test_SetEnv("SDL_VIDEODRIVER", "dummy", 1);
+  Test_SetEnv("SDL_AUDIODRIVER", "dummy", 1);
 
   DisplayGeometry_SetHorizontal(43, 43);
   Settings_ClearConfigLayer();

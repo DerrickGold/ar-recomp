@@ -8,6 +8,7 @@ import tempfile
 import json
 import struct
 import hashlib
+from unittest import mock
 
 spec = importlib.util.spec_from_file_location(
     "compare_pipeline", Path(__file__).resolve().parents[1] /
@@ -30,6 +31,31 @@ def sample(frames, cost, scene="Town 3D"):
 
 
 class PipelinePerformanceTest(unittest.TestCase):
+    def test_backend_fallback_or_missing_evidence_invalidates_comparison(self):
+        confirmed = "[graphics-capabilities] backend=vulkan device=test"
+        module.validate_gpu_backend(confirmed, "vulkan")
+        for log in ("", "requested backend=vulkan", confirmed.replace("vulkan", "direct3d12"),
+                    confirmed + "\n[graphics-capabilities] backend=direct3d12 device=test"):
+            with self.subTest(log=log), self.assertRaises(ValueError):
+                module.validate_gpu_backend(log, "vulkan")
+
+    def test_asset_staging_without_windows_symlink_privilege(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "assets"
+            source.mkdir()
+            (source / "fixture.bin").write_bytes(b"original")
+            denied = OSError("Administrator privilege required")
+            denied.winerror = 1314
+            with mock.patch.object(Path, "symlink_to", side_effect=denied):
+                module.stage_asset_directory(source, root / "staged")
+            self.assertEqual((root / "staged/fixture.bin").read_bytes(), b"original")
+            (root / "staged/fixture.bin").write_bytes(b"changed")
+            self.assertEqual((source / "fixture.bin").read_bytes(), b"original")
+            with mock.patch.object(Path, "symlink_to", side_effect=FileNotFoundError):
+                with self.assertRaises(FileNotFoundError):
+                    module.stage_asset_directory(source, root / "missing")
+
     def test_capture_view_must_cover_each_image_not_just_appear_in_log(self):
         def transition(frame, view):
             return f"[sim3d-view] gf={frame} old -> new (inactive, view={view}, integrity=$0)\n"

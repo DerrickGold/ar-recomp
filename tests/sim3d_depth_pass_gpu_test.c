@@ -1,3 +1,4 @@
+#include "support/test_sdl_environment.h"
 #include <SDL3/SDL.h>
 
 #include <stdint.h>
@@ -105,7 +106,7 @@ static void TestBillboardRim(ArRenderDevice *device, SDL_Renderer *renderer);
 static void TestBorrowedSurfaceOverlay(ArRenderDevice *device, SDL_Renderer *renderer);
 
 static void TestOrderedSubmission(SDL_Window *window) {
-  SDL_unsetenv_unsafe("AR_SDL_GPU_ORDERED");
+  Test_SDLUnsetEnv("AR_SDL_GPU_ORDERED");
   ArRenderDevice device = {0};
   CHECK(ArSdlRenderBackend_CreateForWindow(&device, window, NULL));
   if (!ArRenderDevice_IsReady(&device)) return;
@@ -228,9 +229,9 @@ static void TestOrderedSubmission(SDL_Window *window) {
   ArSdlRenderBackend_Destroy(&device);
   CHECK(!ArRenderDevice_IsReady(&device));
   /* Only an explicit diagnostic zero selects the former window renderer. */
-  CHECK(SDL_setenv_unsafe("AR_SDL_GPU_ORDERED", "0", 1) == 0);
+  CHECK(Test_SDLSetEnv("AR_SDL_GPU_ORDERED", "0", 1) == 0);
   CHECK(ArSdlRenderBackend_CreateForWindow(&device, window, NULL));
-  SDL_unsetenv_unsafe("AR_SDL_GPU_ORDERED");
+  Test_SDLUnsetEnv("AR_SDL_GPU_ORDERED");
   CHECK(ArRenderDevice_IsReady(&device));
   if (ArRenderDevice_IsReady(&device)) {
     CHECK(((ArSdlRenderBackend *)device.context)->output_window == NULL);

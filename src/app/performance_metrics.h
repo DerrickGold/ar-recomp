@@ -28,6 +28,8 @@ typedef enum PerformanceStage {
   kPerformance_VoxelAtlasUpload, kPerformance_VoxelPalette,
   kPerformance_ShadowActors, kPerformance_ShadowVoxels,
   kPerformance_ShadowBlur, kPerformance_ShadowTarget, kPerformance_ShadowHulls,
+  /* Nested upload diagnostics; do not add these to the top-level CPU total. */
+  kPerformance_TextureUpdate, kPerformance_DioramaUploadPrepare,
   kPerformanceStage_Count,
 } PerformanceStage;
 

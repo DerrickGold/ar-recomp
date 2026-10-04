@@ -24,7 +24,9 @@ import struct
 import subprocess
 import sys
 
-from compare_pipeline_performance import capture_evidence, run_evidence, validate_run_completion
+from compare_pipeline_performance import (
+    capture_evidence, run_evidence, stage_asset_directory, validate_run_completion
+)
 
 
 def sha(path):
@@ -37,7 +39,7 @@ def capture(a):
     inputs = {name: sha(root / name) for name in
               ('ar.sfc', 'config.ini', 'seed.srm', 'input.rec', 'diorama-layers.ini')}
     for name in ('assets', 'game-assets'):
-        (work / name).symlink_to(root / name, target_is_directory=True)
+        stage_asset_directory(root / name, work / name)
     for name in ('seed.srm', 'diorama-layers.ini'):
         shutil.copy2(root / name, work / name)
     # Shared boot recording followed by a deterministic right/jump/attack route.
