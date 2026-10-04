@@ -14,8 +14,8 @@ static HostDisplayRefreshCacheEntry *FindEntry(
 
 void HostDisplayRefreshCache_Remember(
     HostDisplayRefreshCache *cache, uint32_t display_id,
-    int nominal_refresh_hz) {
-  if (!cache || !display_id || nominal_refresh_hz <= 0) return;
+    int nominal_refresh_hz, uint64_t interval_ns) {
+  if (!cache || !display_id || nominal_refresh_hz <= 0 || !interval_ns) return;
   HostDisplayRefreshCacheEntry *entry = FindEntry(cache, display_id);
   if (!entry) {
     for (int index = 0; index < kHostDisplayRefreshCacheCapacity; index++) {
@@ -30,7 +30,7 @@ void HostDisplayRefreshCache_Remember(
         cache->replacement_cursor % kHostDisplayRefreshCacheCapacity];
     cache->replacement_cursor++;
   }
-  *entry = (HostDisplayRefreshCacheEntry){display_id, nominal_refresh_hz};
+  *entry = (HostDisplayRefreshCacheEntry){display_id, nominal_refresh_hz, interval_ns};
 }
 
 int HostDisplayRefreshCache_Get(
@@ -39,6 +39,16 @@ int HostDisplayRefreshCache_Get(
   for (int index = 0; index < kHostDisplayRefreshCacheCapacity; index++) {
     if (cache->entries[index].display_id == display_id)
       return cache->entries[index].nominal_refresh_hz;
+  }
+  return 0;
+}
+
+uint64_t HostDisplayRefreshCache_IntervalNs(
+    const HostDisplayRefreshCache *cache, uint32_t display_id) {
+  if (!cache || !display_id) return 0;
+  for (int index = 0; index < kHostDisplayRefreshCacheCapacity; index++) {
+    if (cache->entries[index].display_id == display_id)
+      return cache->entries[index].interval_ns;
   }
   return 0;
 }

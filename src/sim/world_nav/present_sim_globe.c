@@ -517,7 +517,12 @@ static bool AppendSimGlobeModels(const FrameSlot *slot, ArRenderRectI source,
   WorldNavigationModelSourceStyle style;
   memset(&style, 0, sizeof(style));
   style.embedding = map;
-  style.surface_revision = SimWorldMap_GeographySerial();
+  /* Every source owns its resolved floor/depth heights; the mapping owns the
+   * remaining terrain transform. A world-map revision alone changes no model
+   * vertex and must not evict unchanged neighbouring models. */
+  const char *source_key = getenv("AR_SIM_MODEL_SOURCE_KEY");
+  if (source_key && !strcmp(source_key, "0"))
+    style.surface_revision = SimWorldMap_GeographySerial();
   style.chart_radius_tiles = map.chart_radius;
   style.tile_world = 1 / map.metric;
   style.height_percent = slot->sim.height_scale_x100;
@@ -616,7 +621,10 @@ static PresentationOutcome DrawSimGlobeScene(const FrameSlot *slot, ArRenderRect
         "view", "mountains", "terrain", "shadows", "surface", "models", "actors", "submit"};
       for (unsigned i = 0; i < 8; ++i)
         fprintf(stderr, " %s-ms=%.3f", names[i], (double)(stamps[i+1] - stamps[i]) / 1e6);
-      fputc('\n', stderr);
+      /* Native game-frame IDs can lag host ticks. Join with pacing rows by
+       * their enclosing draw timestamps, including repeated source frames. */
+      fprintf(stderr, " start-ns=%llu end-ns=%llu\n",
+          (unsigned long long)stamps[0], (unsigned long long)stamps[8]);
     }
   }
   if (!ArRenderTexture_IsValid(composite))

@@ -91,6 +91,21 @@ static uint64_t s_submit_deadline_ns;
 static HostFrameRefreshClock s_refresh_clock;
 static HostDisplayPacingOptions CurrentPacingOptions(void);
 
+static bool FixedRefreshTimeline(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *value = getenv("AR_FRAME_REFRESH_TIMELINE");
+    enabled = !value || strcmp(value, "0");
+  }
+  return enabled != 0;
+}
+
+static uint64_t PreciseRefreshIntervalNs(uint64_t fallback_ns) {
+  const uint64_t interval_ns = HostDisplayRefreshCache_IntervalNs(
+      &s_display_refresh_cache, s_active_display_id);
+  return interval_ns ? interval_ns : fallback_ns;
+}
+
 /* Diagnostic pacing experiments; ordinary playback retains its current
  * policy until the measured tails and visual timing have been qualified. */
 static uint64_t PresentPreparationLeadNs(void) {
@@ -135,6 +150,9 @@ uint64_t HostDisplay_PresentationSampleTime(uint64_t now_ns) {
 uint64_t HostDisplay_NativeFrameSampleTime(uint64_t now_ns) {
   if (HostDisplay_PacingSource() == 2)
     return s_present_deadline_ns > now_ns ? s_present_deadline_ns : now_ns;
+  if (FixedRefreshTimeline() && g_settings.refresh_mode == kRefreshMode_Vsync &&
+      s_refresh_clock.period_ns)
+    return HostFrameRefreshClock_TimelineTime(s_refresh_clock, now_ns);
   return g_settings.refresh_mode == kRefreshMode_Vsync
       ? HostFrameRefreshClock_Next(s_refresh_clock, now_ns) : now_ns;
 }
@@ -379,17 +397,21 @@ static bool CompletePresent(HostDisplayPresentMode mode) {
   const uint64_t completed_at_ns = SDL_GetTicksNS();
   PerformanceMetrics_PresentCompleted(completed_at_ns);
   const HostDisplayPacingOptions options = CurrentPacingOptions();
-  HostFrameRefreshClock_Observe(&s_refresh_clock, completed_at_ns,
-      options.refresh_mode == kRefreshMode_Vsync && options.vsync_active &&
+  const uint64_t nominal_ns = options.refresh_mode == kRefreshMode_Vsync && options.vsync_active &&
           !options.vsync_software_fallback && options.nominal_refresh_hz > 0
-          ? kNanosecondsPerSecond / options.nominal_refresh_hz : 0);
+          ? kNanosecondsPerSecond / options.nominal_refresh_hz : 0;
+  if (FixedRefreshTimeline())
+    HostFrameRefreshClock_Advance(&s_refresh_clock, completed_at_ns,
+        nominal_ns ? PreciseRefreshIntervalNs(nominal_ns) : 0);
+  else HostFrameRefreshClock_Observe(&s_refresh_clock, completed_at_ns, nominal_ns);
   /* Diagnostic A/B control; pacing selection still uses the same period. */
   static int filter_phase = -1;
   if (filter_phase < 0) {
     const char *option = getenv("AR_FRAME_REFRESH_PHASE");
     filter_phase = !option || strcmp(option, "0");
   }
-  if (!filter_phase && s_refresh_clock.period_ns) s_refresh_clock.phase_ns = completed_at_ns;
+  if (!FixedRefreshTimeline() && !filter_phase && s_refresh_clock.period_ns)
+    s_refresh_clock.phase_ns = completed_at_ns;
   const bool was_fallback = s_vsync_guard.software_fallback_active;
   if (HostDisplayPacing_RecordVsyncPresent(
           &s_vsync_guard,
@@ -609,14 +631,22 @@ static int DisplayModeRefreshHz(const SDL_DisplayMode *mode) {
       : 0;
 }
 
-static int QueryDisplayRefreshHz(SDL_DisplayID display_id) {
-  if (!display_id) return 0;
+static void QueryDisplayRefreshRate(SDL_DisplayID display_id) {
+  if (!display_id) return;
   const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display_id);
   int refresh_hz = DisplayModeRefreshHz(mode);
-  if (refresh_hz <= 0)
-    refresh_hz = DisplayModeRefreshHz(
-        SDL_GetDesktopDisplayMode(display_id));
-  return refresh_hz;
+  if (refresh_hz <= 0) {
+    mode = SDL_GetDesktopDisplayMode(display_id);
+    refresh_hz = DisplayModeRefreshHz(mode);
+  }
+  if (refresh_hz <= 0) return;
+  const uint64_t interval_ns =
+      mode->refresh_rate_numerator > 0 && mode->refresh_rate_denominator > 0
+      ? (kNanosecondsPerSecond * (uint64_t)mode->refresh_rate_denominator +
+          mode->refresh_rate_numerator / 2) / mode->refresh_rate_numerator
+      : (uint64_t)((double)kNanosecondsPerSecond / mode->refresh_rate + 0.5);
+  HostDisplayRefreshCache_Remember(
+      &s_display_refresh_cache, display_id, refresh_hz, interval_ns);
 }
 
 /* Select the window's session-stable display ID and publish its last valid
@@ -635,11 +665,7 @@ static void UpdateRefreshRate(bool force_query) {
   s_active_display_id = display_id;
   int refresh_hz = HostDisplayRefreshCache_Get(
       &s_display_refresh_cache, display_id);
-  if (force_query || refresh_hz <= 0) {
-    const int queried_refresh_hz = QueryDisplayRefreshHz(display_id);
-    HostDisplayRefreshCache_Remember(
-        &s_display_refresh_cache, display_id, queried_refresh_hz);
-  }
+  if (force_query || refresh_hz <= 0) QueryDisplayRefreshRate(display_id);
   refresh_hz = HostDisplayRefreshCache_Get(
       &s_display_refresh_cache, display_id);
   HostDisplayStatus_SetNominalRefreshHz(refresh_hz);
@@ -672,8 +698,7 @@ void HostDisplay_WindowDisplayScaleChanged(void) {
 
 void HostDisplay_DisplayModeChanged(uint32_t display_id) {
   const SDL_DisplayID id = (SDL_DisplayID)display_id;
-  const int refresh_hz = QueryDisplayRefreshHz(id);
-  HostDisplayRefreshCache_Remember(&s_display_refresh_cache, id, refresh_hz);
+  QueryDisplayRefreshRate(id);
   if (id == s_active_display_id) {
     HostDisplay_ResetVsyncPacing();
     HostDisplayStatus_SetNominalRefreshHz(

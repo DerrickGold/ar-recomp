@@ -41,10 +41,9 @@ static inline unsigned HostFrameTickSchedule_Release(HostFrameTickSchedule *cloc
   return ticks;
 }
 
-/* Present return is an estimate of refresh, not a physical scanout timestamp.
- * Filter both period and phase on single-refresh samples. Present-return
- * jitter must not move the source-selection boundary at the NTSC/display beat.
- * Stalls and discontinuities resynchronize instead of teaching a slower rate. */
+/* Present return is not a physical scanout timestamp. The fixed content clock
+ * uses the display mode's precise period; the old return-time filter is kept
+ * below for diagnostic A/B comparisons. */
 typedef struct HostFrameRefreshClock {
   uint64_t completed_ns, period_ns, phase_ns, nominal_ns;
 } HostFrameRefreshClock;
@@ -76,6 +75,32 @@ static inline uint64_t HostFrameRefreshClock_Next(
   if (!clock.completed_ns || !clock.period_ns) return now_ns;
   const uint64_t next = clock.phase_ns + clock.period_ns;
   return next > now_ns ? next : now_ns;
+}
+
+/* Fixed-refresh content timeline. Advance once per successful present;
+ * ordinary CPU return jitter must not change the native source boundary.
+ * This is a content timestamp, not a CPU deadline: a draining/refilling output
+ * queue can legitimately put it before the next iteration's wall clock.
+ * Large phase errors, long stalls, clock discontinuities and rate changes
+ * restart it. The phase bound also prevents sustained slow rendering from
+ * accumulating lag and blocking the native producer behind a full queue. */
+static inline void HostFrameRefreshClock_Advance(
+    HostFrameRefreshClock *clock, uint64_t completed_ns, uint64_t interval_ns) {
+  if (!interval_ns) { *clock = (HostFrameRefreshClock){0}; return; }
+  const uint64_t predicted = clock->phase_ns + interval_ns;
+  const bool reset = !clock->phase_ns || clock->nominal_ns != interval_ns ||
+      completed_ns <= clock->completed_ns ||
+      completed_ns - clock->completed_ns > 3 * interval_ns ||
+      (completed_ns > predicted && completed_ns - predicted > 3 * interval_ns) ||
+      (predicted > completed_ns && predicted - completed_ns > 3 * interval_ns);
+  *clock = (HostFrameRefreshClock){.completed_ns = completed_ns,
+      .period_ns = interval_ns, .nominal_ns = interval_ns,
+      .phase_ns = reset ? completed_ns : predicted};
+}
+
+static inline uint64_t HostFrameRefreshClock_TimelineTime(
+    HostFrameRefreshClock clock, uint64_t now_ns) {
+  return clock.period_ns ? clock.phase_ns + clock.period_ns : now_ns;
 }
 
 /* Interpolation delay was measured across forest, cave, castle, lake and lava

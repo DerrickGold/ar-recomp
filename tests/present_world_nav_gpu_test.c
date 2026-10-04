@@ -2301,6 +2301,48 @@ static void TestBridgeTerrainClearance(SDL_Renderer *renderer) {
   WorldNavigationModelMesh_Reset();
 }
 
+static void TestModelGeographyReuse(SDL_Renderer *renderer, FrameSlot *slot,
+                                    const Scene3DCamera *camera, ArRenderRectI source) {
+  uint8_t before[kSimWorldMapBytes], after[kSimWorldMapBytes];
+  CHECK(SimWorldMap_CopyTilemap(before));
+  memcpy(after, before, sizeof(after));
+  after[60 * 128 + 60] = 0xfd; /* Synthetic alias of the same land artwork. */
+  const uint32_t terrain = SimWorldMap_TerrainSerial();
+  const uint32_t geography = SimWorldMap_GeographySerial();
+  const uint8_t cell_x = slot->sim.world_navigation_towns.objects[0].cell_x;
+  SDL_Surface *initial = RenderSimGlobePresentation(renderer, slot, camera, source, 2, true);
+  CHECK(SimWorldMap_PublishBuiltTilemap(after) == 1);
+  CHECK(SimWorldMap_TerrainSerial() == terrain && SimWorldMap_GeographySerial() != geography);
+  BuildScene(slot);
+  for (unsigned change = 0; change < 2; ++change) {
+    if (change) --slot->sim.world_navigation_towns.objects[0].cell_x;
+    PerformanceMetrics_Configure(true, false);
+    SDL_Surface *warm = RenderSimGlobePresentation(renderer, slot, camera, source, 2, true);
+    PerformanceMetrics_PresentCompleted(1);
+    PerformanceMetrics_PresentCompleted(UINT64_C(1000000001));
+    PerformanceSnapshot measured;
+    PerformanceMetrics_Snapshot(&measured);
+    CHECK(measured.ready);
+    const double compiled =
+        measured.stages[kPerformance_SimFirst + kSim3DPerformance_DepthVoxel].calls;
+    CHECK(change ? compiled > 0 : compiled == 0);
+    PerformanceMetrics_Configure(false, false);
+    WorldNavigationModelMesh_Reset();
+    SDL_Surface *cold = RenderSimGlobePresentation(renderer, slot, camera, source, 2, true);
+    CHECK(Differences(warm, cold) == 0);
+    CHECK(change ? Differences(initial, warm) > 0 : Differences(initial, warm) == 0);
+    SDL_DestroySurface(warm);
+    SDL_DestroySurface(cold);
+  }
+  slot->sim.world_navigation_towns.objects[0].cell_x = cell_x;
+  CHECK(SimWorldMap_PublishBuiltTilemap(before) == 1);
+  BuildScene(slot);
+  SDL_DestroySurface(initial);
+  WorldNavigationModelMesh_Reset();
+  puts("SIM model geography: unchanged resolved sources retained; "
+       "changed models match cold pixels");
+}
+
 static void TestFacingTownScene(SDL_Renderer *renderer) {
   FrameSlot *slot = malloc(sizeof(*slot));
   CHECK(slot);
@@ -2347,6 +2389,7 @@ static void TestFacingTownScene(SDL_Renderer *renderer) {
         kPresentationOutcome_CoreFailure);
   slot->sim.background_voxel_shading = kSimBackgroundVoxelShading_MaterialAware;
   TestCapturedFacingMotion(renderer, slot, &camera, source);
+  TestModelGeographyReuse(renderer, slot, &camera, source);
   SDL_Surface *raw = RenderSimGlobeScene(renderer, slot, &camera, source, 2);
   SDL_Surface *facing = RenderSimGlobePresentation(renderer, slot, &camera, source, 2, true);
   CHECK(Differences(raw, facing) > 100);
@@ -2823,6 +2866,7 @@ static void TestSynthetic(SDL_Renderer *renderer, bool captured_motion_only) {
   rom[0xE3F93 + 2] = 0x04;
   rom[0xE3F93 + 3] = 0x03;
   memset(rom + 0x70000 + 64, 1, 64);
+  memset(rom + 0x70000 + 0xfd * 64, 1, 64);
   for (int y = 40; y < 88; y++)
     memset(rom + 0x33341 + y * 128 + 40, 1, 48);
   CHECK(SimWorldMap_Init(rom, kRomBytes));

@@ -191,7 +191,58 @@ static void TestSynchronousRelease(void) {
   }
 }
 
+/* The same native source must be chosen at a given refresh regardless of
+ * early/late CPU return phases. Include fractional display rates and source
+ * phase drift, then a real stall and a display-mode change. */
+static void TestFixedRefreshTimeline(void) {
+  const uint64_t origin = 1000000000, source_period = 16639263;
+  const uint64_t periods[] = {16683333, 11110617, 8333333};
+  const int64_t jitter[] = {0, 4400000, 600000, -500000, 2800000, 0};
+  const HostFramePlayout policy = HostFramePlayout_Create(source_period, false, 1750);
+  for (unsigned rate = 0; rate < 3; ++rate) {
+    HostFrameRefreshClock clock = {0};
+    const uint64_t period = periods[rate];
+    for (unsigned i = 0; i < 12000; ++i) {
+      const uint64_t ideal = origin + i * period;
+      const uint64_t complete = (uint64_t)((int64_t)ideal + jitter[i % 6]);
+      HostFrameRefreshClock_Advance(&clock, complete, period);
+      const uint64_t sample = HostFrameRefreshClock_TimelineTime(clock, complete);
+      const uint64_t target = HostFramePlayout_Target(policy, sample);
+      const uint64_t expected = HostFramePlayout_Target(policy, ideal + period);
+      assert(target / source_period == expected / source_period);
+      assert(clock.period_ns == period);
+    }
+    const uint64_t after_stall = clock.completed_ns + 8 * period;
+    HostFrameRefreshClock_Advance(&clock, after_stall, period);
+    assert(HostFrameRefreshClock_Next(clock, after_stall) == after_stall + period);
+    HostFrameRefreshClock_Advance(&clock, after_stall + 10000000, 10000000);
+    assert(HostFrameRefreshClock_Next(clock, after_stall) == after_stall + 20000000);
+    HostFrameRefreshClock_Advance(&clock, origin, period);
+    assert(HostFrameRefreshClock_Next(clock, origin) == origin + period);
+    HostFrameRefreshClock_Advance(&clock, origin + period, 0);
+    assert(HostFrameRefreshClock_Next(clock, origin + period) == origin + period);
+    /* A short disruption can drain queued output without losing its order.
+     * Do not replace the next frame's content time with the late CPU time. */
+    HostFrameRefreshClock_Advance(&clock, origin, period);
+    const uint64_t late = origin + 2 * period + period / 2;
+    HostFrameRefreshClock_Advance(&clock, late, period);
+    assert(HostFrameRefreshClock_TimelineTime(clock, late) == origin + 2 * period);
+    HostFrameRefreshClock_Advance(&clock, late + 1000000, period);
+    assert(HostFrameRefreshClock_TimelineTime(clock, late + 1000000) == origin + 3 * period);
+    /* Sustained rendering below refresh must not accumulate unbounded lag
+     * and eventually slow the producer behind a full packet queue. */
+    clock = (HostFrameRefreshClock){0};
+    for (unsigned i = 0; i < 3000; ++i) {
+      const uint64_t now = origin + i * (period + period / 4);
+      HostFrameRefreshClock_Advance(&clock, now, period);
+      const uint64_t sample = HostFrameRefreshClock_TimelineTime(clock, now);
+      assert(sample > now || now - sample <= 3 * period);
+    }
+  }
+}
+
 int main(void) {
+  TestFixedRefreshTimeline();
   TestRefreshPhase();
   TestSynchronousRelease();
   TestNativeTimeline();
