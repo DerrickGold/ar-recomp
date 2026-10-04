@@ -2,6 +2,7 @@
 #define AR_SIM_BACKGROUND_MOUNTAIN_RENDER_H
 
 #include "sim/voxels/sim_background_voxel_renderer.h"
+#include "sim/voxels/sim_background_voxels.h"
 #include "sim/mountains/sim_background_mountain_mesh.h"
 #include "sim/voxels/sim_background_voxel_project.h"
 
@@ -52,6 +53,15 @@ bool SimBackgroundMountainRender_SourceStyle(
 int SimBackgroundMountainRender_EmitSource(
     const SimBackgroundVoxelRenderParams *params,
     SimBackgroundMountainSourceEmit emit, void *user);
+
+/* Alternate presentations can outlive the live SIM buffers. Source cells are
+ * one-based atlas cell indices (zero means use the scene's native tile source).
+ * This emits the identical source recipe using only these captured inputs. */
+int SimBackgroundMountainRender_EmitSnapshot(const SimBackgroundVoxelRenderParams *params,
+                                             const SimBackgroundVoxelScene *scene,
+                                             const uint32_t *atlas,
+                                             const uint16_t source_cells[256],
+                                             SimBackgroundMountainSourceEmit emit, void *user);
 
 /* Owned effect recipe, resolved alongside static source geometry. Native XY
  * and authored rise precede terrain lift, facing and world projection. This

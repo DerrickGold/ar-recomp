@@ -80,7 +80,8 @@ void ActRaiserSpriteOwnership_RecordSim(uint16_t record, uint16_t family,
     /* +$0E is the native $01:A227 spawn family, not an OAM tile or an
      * animation frame. $01:9128 owns the selected-magic record at $083E;
      * other records can use the same spell families inside menus. */
-    if (ActRaiser_IsSimulationTown(s_build.group, s_build.map) &&
+    if ((ActRaiser_IsSimulationTown(s_build.group, s_build.map) ||
+         s_build.map == kActRaiserNonActionMap_Temple) &&
         record == 0x083e && family >= 2 && family <= 4)
       role = kActRaiserSprite_HudIcon;
     if (s_build.map == kActRaiserNonActionMap_SkyPalace &&

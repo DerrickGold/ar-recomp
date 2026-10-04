@@ -228,6 +228,14 @@ uint32_t SimWorldMap_Serial(void) {
   return g_world.available ? g_world.serial : 0;
 }
 
+bool SimWorldMap_CopyWaterFrames(uint32_t pixels[kWorldWaterFrameCount][64]) {
+  if (!pixels || !g_world.available) return false;
+  for (unsigned frame = 0; frame < kWorldWaterFrameCount; frame++)
+    for (unsigned p = 0; p < 64; p++)
+      pixels[frame][p] = g_world.palette[g_world.water_frames[frame][p]];
+  return true;
+}
+
 bool SimWorldMap_WaterAnimationFrame(uint8_t *frame) {
   if (!frame || !g_world.available || !g_world.water_source_valid) return false;
   *frame = (uint8_t)((g_world.water_source - kWorldWaterSourceFirst) /

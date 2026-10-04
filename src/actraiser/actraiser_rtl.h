@@ -6,6 +6,7 @@
  * Phase: game (one coroutine owner; main for synchronous runs, producer owns
  * every tick from startup). Runner access is serialized with that owner. */
 
+#include "render/hud_icon_frame.h"
 #include "action/action_obj_apron.h"
 #include "action/action_bg_plan.h"
 #include "snesrecomp/game.h"
@@ -79,19 +80,8 @@ void ActRaiser_LiveDioramaFraming(int *x, int *y);
 bool ActRaiser_DioramaBg2SourceBounds(int *x0, int *x1);
 unsigned ActRaiser_TakeVextUnlockedObjects(void);
 
-/* The OAM slots the widescreen HUD-icon promote validated for the frame being
- * drawn, plus the rows it claimed, or false when it promoted nothing. This is
- * the ONLY reliable answer to "which sprites are the flat HUD icon, and how
- * tall is the surface holding them": overlayCaptures[Obj] carries an OAM range
- * and a height too, but diorama mode overwrites that capture with its own
- * full-frame 0..127 scene claim, so reading either back from there silently
- * loses the icon exactly when the diorama is on. Any pointer may be NULL. */
-bool ActRaiser_HudObjIconRange(uint8_t *first, uint8_t *count,
-                               uint8_t *rows);
-/* Publish the host-owned pixel surface containing that promoted icon. The
- * capture owner supplies its format, pitch, dimensions, and lifetime contract;
- * presentation must not reconstruct those details from the backing buffer. */
-bool ActRaiser_HudObjSurfaceView(SrPpuSurfaceView *surface);
+/* Completed transfer for the current frame, or an empty record. */
+HudIconFrame ActRaiser_HudIconFrame(void);
 /* True when the most recently rendered frame moved Death Heim 0701's face
  * band into its focal virtual plane after native capture. The PPU content mask
  * cannot observe host-side postprocessing, so FrameSlot uses this latch to

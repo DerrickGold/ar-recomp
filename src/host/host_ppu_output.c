@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "action/action_obj_apron.h"
 #include "host/host_frame_surfaces.h"
 #include "host/host_display.h"
@@ -171,6 +172,11 @@ void HostPpuOutput_Rebind(void) {
       hud_object_ready ? sizeof(g_hud_obj_pixels) : 0u,
       hud_object_ready ? pitch : 0u,
       hud_object_ready ? kHostDisplayFramebufferHeight : 0u, 0u);
+  /* Observe native church art and dialogue frames. Bind
+   * before scanout; frame-policy transactions only claim captures. */
+  (void)HostPpuOutputControl_Bind(&output, SR_PPU_OUTPUT_OVERLAY, SR_PPU_OVERLAY_BG2, 0u, 0u,
+                                  g_action_bg2_mask_pixels, sizeof(g_action_bg2_mask_pixels), pitch,
+                                  kHostDisplayFramebufferHeight, 0u);
   HdReplacementHost_RebindSurfaces(&output);
   if (g_ws_active)
     (void)HostPpuOutputControl_SetHorizontalMargin(

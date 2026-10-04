@@ -23,6 +23,8 @@ static struct {
   float brightness;
 } backend;
 static bool menu_active;
+static ArRenderRectF s_backdrop_body;
+static int s_backdrop_draws;
 
 bool PresentSimMenu_Active(const FrameSlot *frame) { (void)frame; return menu_active; }
 void SessionFatal_Request(const char *format, ...) { assert(format); backend.fatals++; }
@@ -146,6 +148,12 @@ static bool Draw(void *context, ArRenderTexture texture, const ArRenderRectF *so
     return !backend.fail_flatten;
   }
   assert(source && source->w > 0 && source->h > 0);
+  if (texture.value == 999) {
+    s_backdrop_draws++;
+    assert(source->x >= 0 && source->x + source->w <= 256);
+    if (source->y == slot.hud_split_height && source->h == 224 - slot.hud_split_height)
+      s_backdrop_body = *dest;
+  }
   if (backend.target.value) backend.composite_draws++;
   else backend.native_draws++;
   return true;
@@ -181,11 +189,9 @@ static void ResetCase(void) {
   assert(PresentHud_CreateSources(&s_device, slot.snes_height));
 }
 
-/* A promoted spell icon may have only 32 rows even while the diorama scene
- * owns a full-height OBJ capture. Use distinct pixels to verify source priority
- * as well as extent; a successful upload of the wrong surface is still a bug. */
+/* Only a completed transfer supplies HUD OBJ pixels, regardless of scene. */
 static uint32_t bg_pixels[512 * 224], obj_pixels[512 * 224];
-static uint32_t sim_bg_pixels[512 * 224], sim_obj_pixels[512 * 224];
+static uint32_t sim_bg_pixels[512 * 224];
 static uint32_t icon_pixels[512 * 32];
 
 static SrPpuSurfaceView Surface(uint32_t *pixels, unsigned rows) {
@@ -206,35 +212,40 @@ static void SourceSelectionAndExtents(void) {
   bg_pixels[0] = 0xff010101;
   obj_pixels[0] = 0xff020202;
   sim_bg_pixels[0] = 0xff030303;
-  sim_obj_pixels[0] = 0xff040404;
-  icon_pixels[0] = 0xff050505;
+  const int source = 8 * 512 + 352;
+  icon_pixels[source] = 0xff050505;
   slot.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG3][0] = Surface(bg_pixels, 224);
   slot.ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][0] = Surface(obj_pixels, 224);
   slot.overlay_captures[kFrameSlotOverlay_Obj].y1 = 224;
-  slot.hud_obj_surface = Surface(icon_pixels, 32);
-  slot.hud_icon_rows = 32;
+  slot.hud_icon = (HudIconFrame){.surface = Surface(icon_pixels, 32),
+                                 .x = 224,
+                                 .y = 8,
+                                 .width = 16,
+                                 .height = 16,
+                                 .count = 1,
+                                 .scene_removed = true};
+  slot.hud_icon.surface.origin_x = 128;
   slot.diorama_active = true;
   const PresentHudUploadResult uploaded = PresentHud_Upload(&s_device, &slot);
   assert(uploaded.background_bytes == 512u * 64 * 4);
-  assert(uploaded.object_bytes == 512u * 32 * 4);
-  assert(backend.first_pixel[0] == bg_pixels[0] && backend.first_pixel[1] == icon_pixels[0]);
-  assert(backend.upload[0].w == 512 && backend.upload[0].h == 64);
-  assert(backend.upload[1].h == 32 && backend.pitches[1] == 512 * 4);
-  assert(UploadFrame() == 0); /* Retained contents skip transfer. */
+  assert(uploaded.object_bytes == 16u * 16 * 4);
+  assert(backend.first_pixel[0] == bg_pixels[0] && backend.first_pixel[1] == icon_pixels[source]);
+  assert(backend.upload[1].x == 352 && backend.upload[1].y == 8);
+  assert(backend.upload[1].w == 16 && backend.upload[1].h == 16);
+  assert(UploadFrame() == 0);
   assert(backend.updates[0] == 1 && backend.updates[1] == 1);
 
   slot.sim3d_output_surfaces.hud_bg = Surface(sim_bg_pixels, 224);
-  slot.sim3d_output_surfaces.hud_obj = Surface(sim_obj_pixels, 224);
   assert(UploadFrame() > 0);
-  assert(backend.first_pixel[0] == sim_bg_pixels[0]);
-  assert(backend.first_pixel[1] == sim_obj_pixels[0] && backend.upload[1].h == 224);
+  assert(backend.first_pixel[0] == sim_bg_pixels[0] && backend.updates[1] == 1);
   slot.sim3d_output_surfaces.hud_bg = (SrPpuSurfaceView){0};
-  slot.sim3d_output_surfaces.hud_obj = (SrPpuSurfaceView){0};
-  slot.hud_obj_surface = (SrPpuSurfaceView){0};
+  slot.hud_icon.scene_removed = false;
+  icon_pixels[source]++;
   assert(UploadFrame() > 0);
-  assert(backend.first_pixel[0] == bg_pixels[0] && backend.first_pixel[1] == obj_pixels[0]);
+  assert(backend.first_pixel[0] == bg_pixels[0] && backend.updates[1] == 1);
+  slot.hud_icon = (HudIconFrame){0};
+  assert(UploadFrame() == 0); /* No generic OBJ fallback and no stale icon. */
 
-  /* Detached BG3 body text still uploads without a status-bar split. */
   slot.hud_split_height = 0;
   bg_pixels[0]++;
   assert(UploadFrame() == 0);
@@ -323,9 +334,9 @@ int main(void) {
   slot.overlay_captures[kFrameSlotOverlay_Bg3].y1=64;
   menu_active = false;
   slot.oam_valid = true;
-  slot.hud_icon_first = 8;
-  slot.hud_icon_count = 1;
-  slot.oam[16] = (8u << 8) | 224u;
+  slot.hud_icon = (HudIconFrame){
+      .first = 8, .count = 1, .scene_removed = true, .x = 224, .y = 8, .width = 16, .height = 16};
+  slot.oam[16] = 0; /* Live OAM cannot move a completed transfer. */
   assert(PresentHud_BuildChunks(&slot, viewport, chunks) == 8);
   assert(chunks[7].inspector_kind == kInspectorPresentation_HudObj);
   assert(chunks[7].texture_source.x == 352 && chunks[7].texture_source.y == 8);
@@ -374,6 +385,22 @@ int main(void) {
   backend.fail_viewport = backend.fail_restore = true;
   PresentHud_DrawComposited(&s_device, &slot, viewport);
   assert(backend.fatals == 1 && !backend.native_draws && !backend.composite_draws);
+  for (int i = 0; i < 3; i++) {
+    ResetCase();
+    slot.visible_width = (int[]){256, 306, 342}[i];
+    const ArRenderRectI output = {0, 0, slot.visible_width * 4, 896};
+    s_backdrop_draws = 0;
+    PresentHud_DrawCompositedWithBackdrop(&s_device, &slot, output, (ArRenderTexture){999});
+    assert(s_backdrop_draws == 7);
+    assert(s_backdrop_body.w == 1024 && s_backdrop_body.h == (224 - 32) * 4);
+    assert(s_backdrop_body.x == (output.w - 1024) / 2 && s_backdrop_body.y == 128);
+    assert(backend.flattened == 1 && !backend.native_draws);
+    PresentHud_Reset(&s_device);
+    backend.fail_create = true;
+    s_backdrop_draws = 0;
+    PresentHud_DrawCompositedWithBackdrop(&s_device, &slot, output, (ArRenderTexture){999});
+    assert(s_backdrop_draws == 7 && backend.native_draws == 14 && !backend.fatals);
+  }
   PresentHud_Reset(&s_device);
   PresentHud_DestroySources(&s_device);
   puts("HUD presentation: uploads, source lifetime, captured layout, target lifetime, "

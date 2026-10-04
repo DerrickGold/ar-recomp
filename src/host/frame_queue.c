@@ -135,7 +135,8 @@ bool HostFramePacket_OwnPixels(HostFramePacket *p) {
     f->background_packet = p->background_storage;
   }
   if (!CopyView(p, &f->ppu_surfaces.main, (mask & (1u << kDioramaPlane_Backdrop)) != 0) ||
-      !CopyView(p, &f->hud_obj_surface, true)) return false;
+      !CopyView(p, &f->hud_icon.surface, true))
+    return false;
   if (f->background_packet && (f->background_packet->owned_sources & 4u))
     f->diorama_skybox_surface.data = NULL;
   else if (!CopyView(p, &f->diorama_skybox_surface, true)) return false;

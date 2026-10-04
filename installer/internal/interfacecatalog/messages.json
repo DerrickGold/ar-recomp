@@ -1,4 +1,6 @@
 [
+  {"key":"setting.sim3d_church.label","text":["Church interior 3D","Intérieur de l’église en 3D","Kirchenraum in 3D","教会内部の3D表示"]},
+  {"key":"setting.sim3d_church.help","text":["View audiences and offerings inside a softly lit church overlooking the town. Off keeps the original church graphics. Requires Simulation town 3D.","Recevez les habitants et leurs offrandes dans une église doucement éclairée donnant sur la ville. Désactivez cette option pour conserver les graphismes d’origine. Nécessite les villes de simulation en 3D.","Empfange Bewohner und Opfergaben in einer sanft beleuchteten Kirche mit Blick auf die Stadt. Aus behält die Originalgrafik der Kirche bei. Benötigt Simulationsstadt in 3D.","町を見渡せる柔らかな光の教会で、人々の話を聞き、お供え物を受け取ります。オフでは元の教会グラフィックを使用します。町の3D表示が必要です。"]},
   {"key":"builder.version.rebuild_now","text":["Rebuild now","Recompiler maintenant","Jetzt neu erstellen","今すぐ再ビルド"]},
   {"key":"builder.build.rebuild_game","text":["Rebuild game","Recompiler le jeu","Spiel neu erstellen","ゲームを再ビルド"]},
   {"key":"builder.build.saved_rom","text":["Using saved ROM: {path}. Choose another file only if you want to replace it.","ROM enregistrée : {path}. Ne choisissez un autre fichier que pour la remplacer.","Gespeicherte ROM: {path}. Wähle nur dann eine andere Datei, wenn du sie ersetzen möchtest.","保存済みROM：{path}。置き換える場合のみ別のファイルを選択してください。"]},

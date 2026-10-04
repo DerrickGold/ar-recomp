@@ -18,6 +18,16 @@ enum {
   kNoActionBgPlanSource = -1,
 };
 
+/* Observe church panels and actors without changing native composition. */
+static void CaptureChurchPlanes(uint8_t group, uint8_t map) {
+  if (!Sim3D_ChurchIsOn() || group != kActRaiserMapGroup_NonAction) return;
+  if (map != kActRaiserNonActionMap_Temple) return;
+  ActRaiser_ClaimOverlayCapture(SR_PPU_OVERLAY_BG2, 0, 0, kActRaiserAuthenticWidth,
+                                kActRaiserAuthenticHeight, 0);
+  ActRaiser_ClaimOverlayCapture(SR_PPU_OVERLAY_OBJ, 0, 0, kActRaiserAuthenticWidth,
+                                kActRaiserAuthenticHeight, 0);
+}
+
 /* ApplyWidescreenPolicy resolves these before scanout; the draw tail promotes
  * them into the live latch beside the exact margins after the pixels exist.
  * Keeping pending and live values separate prevents a surface rebind between
@@ -485,7 +495,8 @@ void ActRaiser_ApplyWidescreenPolicy(void) {
       hud_left_only_y = kActRaiserActionHudEnemyRowY;
     } else if (map_group == kActRaiserMapGroup_NonAction &&
                map_number >= kActRaiserSimulationTown_First &&
-               map_number <= kActRaiserNonActionMap_SkyPalace) {
+               (map_number <= kActRaiserNonActionMap_SkyPalace ||
+                (map_number == kActRaiserNonActionMap_Temple && Sim3D_ChurchIsOn()))) {
       hud_split_height = kActRaiserSimulationHudHeight;
       hud_split_left_end = kActRaiserSimulationHudSplit;
       hud_split_right_start = kActRaiserSimulationHudSplit;
@@ -555,6 +566,7 @@ void ActRaiser_ApplyWidescreenPolicy(void) {
       ActRaiser_ClaimOverlayCapture(
           SR_PPU_OVERLAY_BG3, 0, 0, kActRaiserAuthenticWidth,
           bg3_capture_height, bg3_capture_flags);
+    CaptureChurchPlanes(map_group, map_number);
     if (bind_plan)
       ActRaiserActionBg_BindPlanWithVirtualLayers(
           g_ram, kActRaiserWramSize, &plan,
@@ -770,6 +782,7 @@ void ActRaiser_ApplyWidescreenPolicy(void) {
     ActRaiser_ClaimOverlayCapture(
         SR_PPU_OVERLAY_BG3, 0, 0, kActRaiserAuthenticWidth,
         bg3_capture_height, bg3_capture_flags);
+  CaptureChurchPlanes(map_group, map_number);
   if (wide) {
     if (bg_hle_allowed && bg_plan_valid) {
       bg_hle_bindings = ActRaiserActionBg_BindPlanWithVirtualLayers(

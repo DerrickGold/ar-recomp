@@ -70,6 +70,7 @@ RULES = {
         'tests/settings_overlay_test.c', 'tests/present_world_nav_gpu_test.c',
         'tests/sim3d_depth_pass_gpu_test.c', 'tests/diorama_frame_generation_test.c',
         'tools/sim_voxel_model_sheet.c', 'tools/benchmark_model_projection.c',
+        'tools/church_preview.c',
         'tools/action_editor/replay_compositor.c'],
     'regional/session/regional_session_internal.h': [
         'src/regional/session/*', 'tests/regional_characterization_test.c'],

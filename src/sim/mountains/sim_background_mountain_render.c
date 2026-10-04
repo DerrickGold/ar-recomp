@@ -285,6 +285,7 @@ typedef struct MountainTileContext {
   float origin_x, origin_y;
   SimBackgroundMountainSourceEmit source_emit;
   void *source_user;
+  const uint16_t *source_cells;
 } MountainTileContext;
 
 static bool MountainCapSource(
@@ -428,9 +429,9 @@ static bool EmitCraterEffects(const SimBackgroundCraterSource *crater,
   return true;
 }
 
-static void RecordMountainPeakColumn(
-    uint16_t component, int destination_cell_x, int destination_cell_y,
-    int source_cell_x, int source_cell_y) {
+static void RecordMountainPeakColumn(uint16_t component, int destination_cell_x,
+                                     int destination_cell_y, int source_cell_x, int source_cell_y,
+                                     const uint32_t *atlas) {
   if (!component || component > kSimBackgroundMountainCellCount ||
       destination_cell_x < 0 ||
       destination_cell_x >= kSimBackgroundMountainTownCells ||
@@ -439,7 +440,6 @@ static void RecordMountainPeakColumn(
       source_cell_y < 0 ||
       source_cell_y >= kSimBackgroundMountainTownCells)
     return;
-  const uint32_t *atlas = SimBackgroundVoxels_AtlasPixels();
   int peak_y = INT_MAX;
   int source_x0 = source_cell_x * kSimBackgroundCellPixels;
   int source_y0 = source_cell_y * kSimBackgroundCellPixels;
@@ -458,9 +458,8 @@ static void RecordMountainPeakColumn(
         (int16_t)peak_y;
 }
 
-static void BuildMountainPeakColumns(
-    const SimBackgroundMountainField *field,
-    const SimBackgroundMountainCaps *caps) {
+static void BuildMountainPeakColumns(const SimBackgroundMountainField *field,
+                                     const SimBackgroundMountainCaps *caps, const uint32_t *atlas) {
   for (int component = 0;
        component <= kSimBackgroundMountainCellCount; component++)
     for (int x = 0; x < kSimBackgroundMountainTownCells; x++)
@@ -471,7 +470,7 @@ static void BuildMountainPeakColumns(
       int cell = y * kSimBackgroundMountainTownCells + x;
       uint16_t component = field->component[cell];
       if (!component) component = 1;
-      RecordMountainPeakColumn(component, x, y, x, y);
+      RecordMountainPeakColumn(component, x, y, x, y, atlas);
     }
   for (uint8_t at = 0; at < caps->tile_count; at++) {
     const SimBackgroundMountainCapTile *tile = &caps->tiles[at];
@@ -480,9 +479,8 @@ static void BuildMountainPeakColumns(
             field, tile, &source_cell_x, &source_cell_y))
       continue;
     uint16_t component = tile->component ? tile->component : 1;
-    RecordMountainPeakColumn(
-        component, tile->cell_x, tile->cell_y,
-        source_cell_x, source_cell_y);
+    RecordMountainPeakColumn(component, tile->cell_x, tile->cell_y, source_cell_x, source_cell_y,
+                             atlas);
   }
 }
 
@@ -638,12 +636,14 @@ static int BuildProjectedMountainObjectFaces(
           continue;
         int source_x, source_y;
         uint8_t source_tile = object->source_tile[row][column];
-        if (!source_tile ||
-            (!SimBackgroundVoxels_MountainTileSource(
-                 source_tile, &source_x, &source_y) &&
-             !SimBackgroundMountains_TileSource(
-                 field, source_tile, &source_x, &source_y)))
+        if (!source_tile) continue;
+        const uint16_t source_cell = context.source_cells[source_tile];
+        if (source_cell) {
+          source_x = (source_cell - 1) % kSimBackgroundMountainTownCells;
+          source_y = (source_cell - 1) / kSimBackgroundMountainTownCells;
+        } else if (!SimBackgroundMountains_TileSource(field, source_tile, &source_x, &source_y)) {
           continue;
+        }
         AddMountainStackTile(
             &context, baseline, baseline, maximum_rise, maximum_rise,
             destination_x, destination_y, source_x, source_y, 0, &count);
@@ -798,9 +798,10 @@ bool SimBackgroundMountainRender_EmitEffects(
 }
 
 static int BuildMountainFaces(const SimBackgroundVoxelRenderParams *params,
-    SimBackgroundMountainSourceEmit emit, void *user) {
+                              SimBackgroundMountainSourceEmit emit, void *user,
+                              const SimBackgroundVoxelScene *scene, const uint32_t *atlas,
+                              const uint16_t source_cells[256], uint32_t scene_serial) {
   const bool source_only = emit != NULL;
-  const SimBackgroundVoxelScene *scene = SimBackgroundVoxels_Scene();
   const SimBackgroundMountainField *field = &scene->mountains;
   if (!field->cell_count) return 0;
   SimBackgroundMountainSourceStyle style;
@@ -813,22 +814,22 @@ static int BuildMountainFaces(const SimBackgroundVoxelRenderParams *params,
   float origin_x = (float)params->town_screen_x0 - params->camera_x;
   float origin_y = -(float)params->camera_y;
   MountainTileContext context = {
-    .params = params,
-    .axis = &style.axis,
-    .relief = &relief,
-    .stack_direction = style.stack_direction,
-    /* Landscape magnitude translates the mountain's BASE through
-     * SimBackgroundVoxelProject_TerrainLiftPixels at every vertex. It must
-     * not resize the mountain's separately authored relief; a 50% landscape
-     * remains a full mountain on gentler ground rather than turning the
-     * mountain itself into a hill. */
-    .height_scale = 1.0f,
-    .origin_x = origin_x,
-    .origin_y = origin_y,
-    .source_emit = emit,
-    .source_user = user,
+      .params = params,
+      .axis = &style.axis,
+      .relief = &relief,
+      .stack_direction = style.stack_direction,
+      /* Landscape magnitude translates the mountain's BASE through
+       * SimBackgroundVoxelProject_TerrainLiftPixels at every vertex. It must
+       * not resize the mountain's separately authored relief; a 50% landscape
+       * remains a full mountain on gentler ground rather than turning the
+       * mountain itself into a hill. */
+      .height_scale = 1.0f,
+      .origin_x = origin_x,
+      .origin_y = origin_y,
+      .source_emit = emit,
+      .source_user = user,
+      .source_cells = source_cells,
   };
-  const uint32_t scene_serial = SimBackgroundVoxels_SceneSerial();
   const bool cache_hit = !source_only && MountainProjectionCacheMatches(
       params, scene_serial);
   if (!cache_hit) {
@@ -884,7 +885,7 @@ static int BuildMountainFaces(const SimBackgroundVoxelRenderParams *params,
     if (top < component_top[component])
       component_top[component] = top;
   }
-  BuildMountainPeakColumns(field, &scene->mountain_caps);
+  BuildMountainPeakColumns(field, &scene->mountain_caps, atlas);
   BuildMountainBaseColumns(field);
   int count = 0;
   for (int cell_y = 0; cell_y < kSimBackgroundMountainTownCells;
@@ -921,23 +922,47 @@ static int BuildMountainFaces(const SimBackgroundVoxelRenderParams *params,
   return g_mountain_state.projected_count;
 }
 
-int SimBackgroundMountainRender_BuildFaces(
-    const SimBackgroundVoxelRenderParams *params) {
-  return BuildMountainFaces(params,NULL,NULL);
+static int BuildLiveMountainFaces(const SimBackgroundVoxelRenderParams *params,
+                                  SimBackgroundMountainSourceEmit emit, void *user) {
+  uint16_t source_cells[256] = {0};
+  for (int tile = 0; tile < 256; tile++) {
+    int x, y;
+    if (SimBackgroundVoxels_MountainTileSource((uint8_t)tile, &x, &y))
+      source_cells[tile] = (uint16_t)(y * kSimBackgroundMountainTownCells + x + 1);
+  }
+  return BuildMountainFaces(params, emit, user, SimBackgroundVoxels_Scene(),
+                            SimBackgroundVoxels_AtlasPixels(), source_cells,
+                            SimBackgroundVoxels_SceneSerial());
+}
+
+int SimBackgroundMountainRender_BuildFaces(const SimBackgroundVoxelRenderParams *params) {
+  return BuildLiveMountainFaces(params, NULL, NULL);
+}
+
+int SimBackgroundMountainRender_EmitSnapshot(const SimBackgroundVoxelRenderParams *params,
+                                             const SimBackgroundVoxelScene *scene,
+                                             const uint32_t *atlas,
+                                             const uint16_t source_cells[256],
+                                             SimBackgroundMountainSourceEmit emit, void *user) {
+  SimBackgroundMountainSourceStyle style;
+  if (!emit || !scene || !atlas || !source_cells ||
+      !SimBackgroundMountainRender_SourceStyle(params, &style) || scene->town != params->town ||
+      scene->mountain_caps.tile_count > kSimBackgroundMountainMaxCapTiles)
+    return -1;
+  for (int tile = 0; tile < 256; tile++)
+    if (source_cells[tile] > kSimBackgroundMountainCellCount) return -1;
+  /* Source emission borrows scratch tables; retire the live projection key
+   * so a different snapshot cannot leave another scene's object cache valid. */
+  g_mountain_state.projection_valid = false;
+  return BuildMountainFaces(params, emit, user, scene, atlas, source_cells, 0);
 }
 
 int SimBackgroundMountainRender_EmitSource(
     const SimBackgroundVoxelRenderParams *params,
     SimBackgroundMountainSourceEmit emit, void *user) {
-  if (!params || !emit || !params->matrix || params->source.w <= 0 ||
-      params->source.h <= 0 || params->viewport.w <= 0 || params->viewport.h <= 0 ||
-      params->town < 1 || params->town > kSimTownCount ||
-      params->detail >= kSimBackgroundVoxelDetail_Count ||
-      params->lod >= kSimBackgroundVoxelLod_Count ||
-      params->facing >= kSimBackgroundVoxelFacing_Count ||
-      params->render_scale >= kSimBackgroundVoxelRenderScale_Count)
-    return -1;
-  return BuildMountainFaces(params,emit,user);
+  SimBackgroundMountainSourceStyle style;
+  if (!emit || !SimBackgroundMountainRender_SourceStyle(params, &style)) return -1;
+  return BuildLiveMountainFaces(params, emit, user);
 }
 
 static void AppendProjectedMountainReliefFace(

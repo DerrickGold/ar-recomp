@@ -158,6 +158,13 @@ static void TestWaterAnimation(void) {
 
   uint32_t serial = SimWorldMap_Serial();
   const uint32_t geography_serial = SimWorldMap_GeographySerial();
+  uint32_t frames[4][64];
+  CHECK(SimWorldMap_CopyWaterFrames(frames));
+  CHECK(!SimWorldMap_CopyWaterFrames(NULL));
+  for (unsigned i = 0; i < 4; i++)
+    CHECK(frames[i][0] == ColorForTile(0x11 + i));
+  CHECK(SimWorldMap_Serial() == serial && SimWorldMap_GeographySerial() == geography_serial);
+  CHECK(!SimWorldMap_WaterAnimationFrame(&phase)); /* copying does not advance water */
   const int water_cells = 129; /* 128 synthetic tile-$00 cells plus tile 1. */
   CHECK(SimWorldMap_SetWaterAnimationSource(0xB000) == water_cells);
   CHECK(SimWorldMap_WaterAnimationFrame(&phase) && phase == 0);

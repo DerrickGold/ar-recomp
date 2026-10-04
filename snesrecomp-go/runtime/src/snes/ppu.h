@@ -115,6 +115,7 @@ typedef struct PpuObjSampleCache {
     int16_t opaque_left, opaque_right; /* half-open, includes synthetic margins */
     uint8_t include_first, include_count;
     uint8_t exclude_first, exclude_count;
+    bool handoff;
     bool valid;
 } PpuObjSampleCache;
 
@@ -226,6 +227,7 @@ typedef struct PpuObjRangeBounds { int16_t x0, y0, x1, y1; }
 typedef struct PpuObjRangeCapture {
     int16_t x0, y0, x1, y1;
     uint8_t first, count;
+    bool handoff;
     uint8_t *pixels;
     uint32_t pitch;
 } PpuObjRangeCapture;
@@ -238,6 +240,7 @@ typedef struct PpuNativeLineScratch {
     uint16_t layerSub[kPpuOverlaySource_Count][kPpuBufWidth];
     uint16_t mainPixels[kPpuBufWidth], subPixels[kPpuBufWidth];
     uint16_t originalMain[kPpuBufWidth], originalSub[kPpuBufWidth];
+    uint16_t authenticObjMain[kPpuXPixels], authenticObjSub[kPpuXPixels];
     uint8_t bands[2][kPpuBufWidth];
 } PpuNativeLineScratch;
 

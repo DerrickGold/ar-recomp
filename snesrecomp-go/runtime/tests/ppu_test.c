@@ -1050,7 +1050,7 @@ static void compare_native_capture_path(bool deferred, uint8_t mode,
                                         int sub_owned_layer,
                                         bool color_math,
                                         bool full_add_only,
-                                        int math_layers) {
+                                        int math_layers, bool handoff) {
     enum { kRows = 48, kPlanes = 4 };
     const size_t pixel_count = (size_t)kPpuXPixels * kRows;
     Ppu *fast = ppu_init();
@@ -1179,6 +1179,7 @@ static void compare_native_capture_path(bool deferred, uint8_t mode,
     CHECK(PpuSetObjRangeCapture(
         reference, 0u, 2u, 0, 0, kPpuXPixels, kRows,
         (uint8_t *)reference_range, kPpuXPixels * sizeof(uint32_t)));
+    fast->objRangeCapture.handoff = reference->objRangeCapture.handoff = handoff;
     PpuBeginDrawing(fast, (uint8_t *)fast_pixels,
                     kPpuXPixels * sizeof(uint32_t), 0u);
     PpuBeginDrawing(reference, (uint8_t *)reference_pixels,
@@ -1280,33 +1281,37 @@ cleanup:
 }
 
 static void test_native_capture_path_parity(void) {
-    compare_native_capture_path(false, 1u, 1u, -1, true, false, -1);
-    compare_native_capture_path(true, 1u, 1u, -1, true, false, -1);
-    compare_native_capture_path(false, 7u, 1u, -1, true, false, -1);
-    compare_native_capture_path(false, 1u, 5u, -1, true, false, -1);
-    compare_native_capture_path(false, 3u, 16u, -1, true, false, -1);
-    /* Per-source subscreen need: a captured, subscreen-owned BG must still
-     * resolve its subscreen when no colour operation can read the composed
-     * one, while its main-only siblings skip that work. */
-    compare_native_capture_path(false, 1u, 1u, 0, false, false, -1);
-    compare_native_capture_path(true, 1u, 1u, 0, false, false, -1);
-    compare_native_capture_path(false, 1u, 1u, 1, false, false, -1);
-    compare_native_capture_path(false, 3u, 1u, 0, false, false, -1);
-    compare_native_capture_path(false, 1u, 1u, 0, true, false, -1);
-    compare_native_capture_path(false, 1u, 1u, -1, false, false, -1);
-    /* Full-add-subscreen resolved by the packed capture path itself. These
-     * are the cases that keep such a line off the reference sampler, so they
-     * are the oracle for that export. */
-    compare_native_capture_path(false, 1u, 1u, -1, true, true, -1);
-    compare_native_capture_path(false, 3u, 1u, -1, true, true, -1);
-    compare_native_capture_path(false, 7u, 1u, -1, true, true, -1);
-    compare_native_capture_path(false, 1u, 1u, 1, true, true, -1);
-    compare_native_capture_path(false, 1u, 5u, -1, true, true, -1);
-    /* Partial and empty CGADSUB masks pin the math-bearing-winner gate. */
-    compare_native_capture_path(false, 1u, 1u, -1, true, true, 0x02);
-    compare_native_capture_path(false, 1u, 1u, -1, true, true, 0x01);
-    compare_native_capture_path(false, 1u, 1u, -1, true, true, 0x00);
-    compare_native_capture_path(false, 1u, 1u, -1, true, true, 0x10);
+  compare_native_capture_path(false, 1u, 1u, -1, true, false, -1, false);
+  compare_native_capture_path(true, 1u, 1u, -1, true, false, -1, false);
+  compare_native_capture_path(false, 7u, 1u, -1, true, false, -1, false);
+  compare_native_capture_path(false, 1u, 5u, -1, true, false, -1, false);
+  compare_native_capture_path(false, 3u, 16u, -1, true, false, -1, false);
+  /* Per-source subscreen need: a captured, subscreen-owned BG must still
+   * resolve its subscreen when no colour operation can read the composed
+   * one, while its main-only siblings skip that work. */
+  compare_native_capture_path(false, 1u, 1u, 0, false, false, -1, false);
+  compare_native_capture_path(true, 1u, 1u, 0, false, false, -1, false);
+  compare_native_capture_path(false, 1u, 1u, 1, false, false, -1, false);
+  compare_native_capture_path(false, 3u, 1u, 0, false, false, -1, false);
+  compare_native_capture_path(false, 1u, 1u, 0, true, false, -1, false);
+  compare_native_capture_path(false, 1u, 1u, -1, false, false, -1, false);
+  /* Full-add-subscreen resolved by the packed capture path itself. These
+   * are the cases that keep such a line off the reference sampler, so they
+   * are the oracle for that export. */
+  compare_native_capture_path(false, 1u, 1u, -1, true, true, -1, false);
+  compare_native_capture_path(false, 3u, 1u, -1, true, true, -1, false);
+  compare_native_capture_path(false, 7u, 1u, -1, true, true, -1, false);
+  compare_native_capture_path(false, 1u, 1u, 1, true, true, -1, false);
+  compare_native_capture_path(false, 1u, 5u, -1, true, true, -1, false);
+  /* Partial and empty CGADSUB masks pin the math-bearing-winner gate. */
+  compare_native_capture_path(false, 1u, 1u, -1, true, true, 0x02, false);
+  compare_native_capture_path(false, 1u, 1u, -1, true, true, 0x01, false);
+  compare_native_capture_path(false, 1u, 1u, -1, true, true, 0x00, false);
+  compare_native_capture_path(false, 1u, 1u, -1, true, true, 0x10, false);
+  compare_native_capture_path(false, 1u, 1u, -1, true, false, -1, true);
+  compare_native_capture_path(true, 1u, 1u, -1, true, false, -1, true);
+  compare_native_capture_path(false, 1u, 1u, -1, true, true, -1, true);
+  compare_native_capture_path(false, 1u, 5u, 0, false, false, -1, true);
 }
 
 /* Uniform and varying RGB spans must preserve colour maths and per-actor
@@ -2662,6 +2667,90 @@ static void test_obj_winner_capture(void) {
     }
 }
 
+/* A transferred icon is emitted once, with the real live underlay left in
+ * scene captures and an untouched authentic comparison. Menu copies using
+ * identical art are deliberately outside the semantic range. */
+static void test_obj_handoff(void) {
+  enum { kPixels = 256 * 224 };
+  static uint32_t output[kPixels], authentic[kPixels], range[kPixels], scene[kPixels];
+  const uint8_t policies[] = {0,
+                              kPpuOverlayFlag_RemoveFromGame,
+                              kPpuOverlayFlag_MarkFullAddSubscreen,
+                              kPpuOverlayFlag_MarkMainScreenWinner,
+                              kPpuOverlayFlag_MarkOwningScreenWinner,
+                              kPpuOverlayFlag_MarkVisibleMainWinner};
+  for (int reference = 0; reference < 2; ++reference)
+    for (int count = 1; count <= 4; count += 3)
+      for (unsigned policy = 0; policy <= sizeof(policies); ++policy) {
+        const bool bound = policy < sizeof(policies);
+        const uint8_t flags = bound ? policies[policy] : 0;
+        memset(output, 0, sizeof(output));
+        memset(authentic, 0, sizeof(authentic));
+        memset(range, 0, sizeof(range));
+        memset(scene, 0, sizeof(scene));
+        Ppu *ppu = ppu_init();
+        CHECK(ppu != NULL);
+        if (!ppu) return;
+        ppu_reset(ppu);
+        ppu->inidisp = 15;
+        ppu->bgmode = 1;
+        ppu->screenEnabled[0] = ppu->screenEnabled[1] = 0x10;
+        ppu->cgwsel = 2;
+        ppu->cgadsub = 0x10;
+        ppu->cgram[0xc1] = 0x001f;
+        ppu->cgram[0xd1] = 0x03e0;
+        for (int slot = 0; slot < 128; ++slot)
+          ppu->oam[slot * 2] = 0xe000;
+        for (int tile = 0; tile < 18; ++tile)
+          for (int row = 0; row < 8; ++row)
+            ppu->vram[tile * 16 + row] = 0xff;
+        for (int slot = 0; slot < count; ++slot) {
+          ppu->oam[slot * 2] = (20 + (slot % 2) * 8) | ((20 + (slot / 2) * 8) << 8);
+          ppu->oam[slot * 2 + 1] = (3 << 12) | (4 << 9);
+        }
+        if (count == 1) ppu->highOam[0] = 2;
+        ppu->oam[8] = 20 | (20 << 8);
+        ppu->oam[9] = (2 << 12) | (5 << 9);
+        ppu->oam[10] = 80 | (20 << 8);
+        ppu->oam[11] = (3 << 12) | (4 << 9);
+        ppu->highOam[1] = 2 | (2 << 2);
+        PpuBeginDrawing(ppu, (uint8_t *)output, 256 * 4,
+                        reference ? kPpuRenderFlags_ReferencePixelRenderer : 0);
+        CHECK(PpuBindAuthenticSurface(ppu, (uint8_t *)authentic, 256 * 4));
+        if (bound) {
+          CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, (uint8_t *)scene, 256 * 4));
+          CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Obj, 0, 0, 256, 224, flags));
+          CHECK(PpuSetOverlayOamRange(ppu, 0, 128));
+        }
+        CHECK(PpuSetObjRangeCapture(ppu, 0, count, 20, 20, 16, 16, (uint8_t *)range, 256 * 4));
+        ppu->objRangeCapture.handoff = true;
+        /* A later broad scene claim must not steal the transfer. */
+        if (bound) CHECK(PpuSetOverlayOamRange(ppu, 0, 128));
+        ppu_runLine(ppu, 0);
+        ppu_runLine(ppu, 21);
+        CHECK(range[20 * 256 + 20] == 0xffff0000);
+        CHECK((authentic[20 * 256 + 20] & 0xffffff) == 0xff0000);
+        if (bound) {
+          CHECK((scene[20 * 256 + 20] & 0xffffff) == (policy >= 3 ? 0xffffff : 0x00ff00));
+          CHECK((scene[20 * 256 + 80] & 0xffffff) == (policy >= 3 ? 0xffffff : 0xff0000));
+        }
+        CHECK((output[20 * 256 + 20] & 0xffffff) ==
+              (flags == kPpuOverlayFlag_RemoveFromGame ? 0 : 0x00ff00));
+        /* Capture observes live palette changes, independent of the scene. */
+        ppu_write(ppu, 0x21, 0xc1);
+        ppu_write(ppu, 0x22, 0);
+        ppu_write(ppu, 0x22, 0x7c);
+        ppu_runLine(ppu, 22);
+        CHECK(range[21 * 256 + 20] == 0xff0000ff);
+        CHECK(range[20 * 256 + 20] == 0xffff0000);
+        PpuClearOverlayCaptures(ppu);
+        CHECK(!ppu->objRangeCapture.handoff);
+        ppu_runLine(ppu, 23);
+        CHECK((output[22 * 256 + 20] & 0xffffff) == 0x0000ff);
+        ppu_free(ppu);
+      }
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && !strcmp(argv[1], "--rgb-spans")) {
         test_rgb_spans_and_guards();
@@ -2695,6 +2784,7 @@ int main(int argc, char **argv) {
         test_native_fast_path_parity();
         test_native_capture_path_parity();
         test_obj_winner_capture();
+        test_obj_handoff();
         test_sparse_obj_export();
         test_rgb_spans_and_guards();
         test_main_winner_masks();

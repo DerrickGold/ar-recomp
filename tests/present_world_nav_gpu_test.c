@@ -3955,6 +3955,73 @@ static void CaptureLandscapeHeightSweep(SDL_Renderer *renderer, FrameSlot *slot,
   free(unchanged);
 }
 
+typedef struct MountainSnapshotDigest {
+  uint64_t hash;
+  unsigned count;
+} MountainSnapshotDigest;
+
+static void MountainDigestBytes(MountainSnapshotDigest *digest, const void *data, size_t size) {
+  const unsigned char *bytes = data;
+  for (size_t i = 0; i < size; i++)
+    digest->hash = (digest->hash ^ bytes[i]) * UINT64_C(1099511628211);
+}
+
+static void DigestMountain(void *user, const float x[4], const float y[4], const float z[4],
+                           const SimBackgroundProjectionAxis *axis,
+                           const SimBackgroundMountainMeshUV uv[4], const uint8_t brightness[4],
+                           const uint8_t alpha[4]) {
+  MountainSnapshotDigest *digest = user;
+  MountainDigestBytes(digest, x, sizeof(float) * 4);
+  MountainDigestBytes(digest, y, sizeof(float) * 4);
+  MountainDigestBytes(digest, z, sizeof(float) * 4);
+  MountainDigestBytes(digest, &axis->x_per_height, sizeof(float));
+  MountainDigestBytes(digest, &axis->y_per_height, sizeof(float));
+  MountainDigestBytes(digest, &axis->height_scale, sizeof(float));
+  MountainDigestBytes(digest, uv, sizeof(*uv) * 4);
+  MountainDigestBytes(digest, brightness, 4);
+  MountainDigestBytes(digest, alpha, 4);
+  digest->count++;
+}
+
+static void TestMountainSnapshot(uint8_t town) {
+  SimBackgroundVoxelScene *snapshot = malloc(sizeof(*snapshot));
+  uint32_t *atlas = malloc(512 * 512 * sizeof(*atlas));
+  CHECK(snapshot && atlas);
+  *snapshot = *SimBackgroundVoxels_Scene();
+  memcpy(atlas, SimBackgroundVoxels_AtlasPixels(), 512 * 512 * sizeof(*atlas));
+  uint16_t sources[256] = {0};
+  for (int tile = 0; tile < 256; tile++) {
+    int x, y;
+    if (SimBackgroundVoxels_MountainTileSource(tile, &x, &y)) sources[tile] = y * 32 + x + 1;
+  }
+  float matrix[16];
+  const Scene3DCamera camera = {-.4f, 0, 2, .4f};
+  Scene3D_BuildViewProjection(&camera, kWidth, kHeight, matrix);
+  const SimBackgroundVoxelRenderParams params = {.town = town,
+                                                 .matrix = matrix,
+                                                 .source = {0, 0, 512, 512},
+                                                 .viewport = {0, 0, kWidth, kHeight},
+                                                 .detail = kSimBackgroundVoxelDetail_Ultra,
+                                                 .lod = kSimBackgroundVoxelLod_Fixed,
+                                                 .facing = kSimBackgroundVoxelFacing_PerModel};
+  MountainSnapshotDigest live = {UINT64_C(14695981039346656037), 0}, captured = live;
+  const int count = SimBackgroundMountainRender_EmitSource(&params, DigestMountain, &live);
+  CHECK(count >= 0 && (!snapshot->mountains.cell_count || live.count > 0));
+  /* Native church transitions recycle these live buffers. Captured geometry
+   * must remain byte-identical, including UVs, after they have been retired. */
+  SimBackgroundVoxelRenderer_Reset(&g_render_device);
+  SimBackgroundVoxels_Reset();
+  CHECK(SimBackgroundMountainRender_EmitSnapshot(&params, snapshot, atlas, sources, DigestMountain,
+                                                 &captured) == count);
+  CHECK(captured.count == live.count && captured.hash == live.hash);
+  sources[0] = 1025;
+  CHECK(SimBackgroundMountainRender_EmitSnapshot(&params, snapshot, atlas, sources, DigestMountain,
+                                                 &captured) == -1);
+  free(atlas);
+  free(snapshot);
+  puts("mountain snapshot: native source parity after live buffers are reset PASS");
+}
+
 static void CaptureTownPresentation(SDL_Renderer *renderer, FrameSlot *slot, const uint8_t *rom,
                                     const uint8_t *wram) {
   /* Match video boot: all production paths are prepared before capture. */
@@ -3990,6 +4057,9 @@ static void CaptureTownPresentation(SDL_Renderer *renderer, FrameSlot *slot, con
   SimWorldMap_PublishBuiltTilemap(developed);
   SimWorldMap_SetWaterAnimationSource(kWorldWaterSourceFirst);
   SimTownCanvas_Render(town, wram, vram, cgram, 15, 0xff000000);
+  SimBackgroundVoxels_Build(town, wram, SimTownCanvas_Pixels(), SimTownCanvas_SourceOpacity(),
+                            SimTownCanvas_Serial(), SimTownCanvas_TilemapSerial(), false);
+  TestMountainSnapshot(town);
   SimBackgroundVoxels_Build(town, wram, SimTownCanvas_Pixels(), SimTownCanvas_SourceOpacity(),
                             SimTownCanvas_Serial(), SimTownCanvas_TilemapSerial(), false);
   SimBackgroundVoxelRenderer_Upload(&g_render_device);

@@ -488,6 +488,7 @@ typedef struct Settings {
    * masks.  D1 exposes the controls while the implemented-capability mask is
    * still zero, so every selection safely resolves to authentic output. */
   bool sim3d_mode;
+  bool sim3d_church;           /* Optional enhanced interior; Original remains the default. */
   bool native_menu_quick_use;  /* Native Use skips explanations; Describe keeps the full flow. */
   int sim_menu_style;          /* Original / Modern; independent of renderer. */
   int sim_menu_scale_percent;  /* 50-100% of the modern menu's full layout. */
@@ -832,6 +833,7 @@ int Settings_VisibleWidth(void);
  * host render/hotkey paths so the gate has exactly one spelling (§D14). */
 bool Diorama_ModeIsOn(void);
 bool Sim3D_ModeIsOn(void);
+bool Sim3D_ChurchIsOn(void);
 int Settings_ExtendedAspectX(void);
 int Settings_ExtendedAspectY(void);
 bool Settings_IgnoreAspectRatio(void);

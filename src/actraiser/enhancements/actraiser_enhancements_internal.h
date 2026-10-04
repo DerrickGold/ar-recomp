@@ -59,9 +59,9 @@ bool ActRaiser_ConfigurePpuObjCapture(
     const SrPpuObjCaptureRequest *request);
 
 /* ---- defined in actraiser_hud_icon_promotion.c ---- */
-void ActRaiser_WidescreenHudObjPromote(void);
-void ActRaiser_DioramaHudObjPrepare(void);
-void ActRaiser_DioramaHudObjFinish(int width);
+void ActRaiser_HudIconBeginFrame(void);
+void ActRaiser_HudIconPrepare(void);
+void ActRaiser_HudIconComplete(SrResult status, const SrPpuScanoutResult *result);
 
 /* ---- defined in actraiser_death_heim_hub.c ---- */
 void ActRaiser_DioramaDeathHeimEyesPrepare(void);

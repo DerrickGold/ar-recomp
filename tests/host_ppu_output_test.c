@@ -73,7 +73,7 @@ int main(void) {
 
   bind_count = 0;
   HostPpuOutput_Rebind();
-  assert(bind_count == 6 && feature_index == 5 && margin_index == 5);
+  assert(bind_count == 7 && feature_index == 6 && margin_index == 6);
   assert(generation_queries == 2); /* One lifetime snapshot covers the whole batch. */
   assert(bindings[0].kind == SR_PPU_OUTPUT_MAIN && bindings[0].pixels == g_pixels);
   assert(bindings[0].pitch_bytes == ActionApron_SurfacePitch(320, SR_PPU_OBJ_APRON));
@@ -81,7 +81,9 @@ int main(void) {
   assert(bindings[2].kind == SR_PPU_OUTPUT_CLEAR_OVERLAY_SOURCES);
   assert(bindings[3].source == SR_PPU_OVERLAY_BG3 && bindings[3].pixels == g_hud_bg_pixels);
   assert(bindings[4].source == SR_PPU_OVERLAY_OBJ && !bindings[4].pixel_byte_size);
-  assert(bindings[5].kind == SR_PPU_OUTPUT_AUTHENTIC && bindings[5].pixels);
+  assert(bindings[5].source == SR_PPU_OVERLAY_BG2 &&
+         bindings[5].pixels == g_action_bg2_mask_pixels);
+  assert(bindings[6].kind == SR_PPU_OUTPUT_AUTHENTIC && bindings[6].pixels);
   assert(margin.mode == SR_PPU_HORIZONTAL_MARGIN_CENTERED && margin.budget_pixels == 32);
   assert(!HostPpuOutput_AuthenticFrameSerial());
   HostPpuOutput_AuthenticFrameCompleted(true);
@@ -93,7 +95,7 @@ int main(void) {
   generation++;
   bind_count = 0;
   HostPpuOutput_Rebind();
-  assert(bindings[5].pitch_bytes == 256 * 4 && !HostPpuOutput_AuthenticFrameSerial());
+  assert(bindings[6].pitch_bytes == 256 * 4 && !HostPpuOutput_AuthenticFrameSerial());
   assert(margin.mode == SR_PPU_HORIZONTAL_MARGIN_AVAILABLE && !margin.budget_pixels);
   reject_authentic = true;
   HostPpuOutput_Rebind();

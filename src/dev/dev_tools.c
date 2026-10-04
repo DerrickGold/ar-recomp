@@ -328,24 +328,10 @@ static void FillLiveHudProjectionInputs(const DevToolsContext *context,
       bg3_capture->y1 <= kHostDisplayFramebufferHeight)
     inputs->hud_body_y1 = (uint8_t)bg3_capture->y1;
 
-  /* Same source of truth the present path uses (present_hud.c's
-   * PresentHud_BuildChunks): the promote's latched range, not
-   * overlayCaptures[Obj], whose OAM range diorama mode replaces with its
-   * full-frame scene claim. Reading the capture here would make the inspector's
-   * hit-test disagree with what was actually drawn. */
-  uint8_t icon_first = 0, icon_count = 0;
-  ActRaiser_HudObjIconRange(&icon_first, &icon_count, NULL);
-  if (icon_count && context->oam.data && context->high_oam.data) {
-    const int first = icon_first;
-    const uint64_t oam_word = (uint64_t)first * 2u;
-    const uint64_t high_oam_byte = (uint64_t)first >> 2;
-    if (oam_word >= context->oam.element_count ||
-        high_oam_byte >= context->high_oam.byte_size)
-      return;
-    inputs->obj_icon_x = (context->oam.data[oam_word] & 0xff) |
-        ((context->high_oam.data[high_oam_byte] >>
-          ((first & 3) * 2)) & 1) << 8;
-    inputs->obj_icon_y = context->oam.data[oam_word] >> 8;
+  const HudIconFrame icon = ActRaiser_HudIconFrame();
+  if (icon.scene_removed && icon.count) {
+    inputs->obj_icon_x = icon.x;
+    inputs->obj_icon_y = icon.y;
     inputs->obj_icon_valid = true;
   }
 }

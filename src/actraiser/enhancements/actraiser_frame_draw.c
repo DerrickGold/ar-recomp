@@ -363,7 +363,6 @@ static void ActRaiser_FinishSceneCapture(void) {
                       ActRaiser_ReadWram16(kActRaiserWram_GameFrame));
   ActRaiser_ReportSim3DCaptureContractFailure();
   /* Promote captured sprites before publishing the frame's planes. */
-  ActRaiser_DioramaHudObjFinish(width);
   ActRaiser_DioramaDeathHeimHubStatuesFinish(width);
   /* After the HUD-icon promote, not before: that pass PUNCHES the promoted
    * icon out of the OBJ planes, and the apron's claimed-set test reads those
@@ -446,7 +445,7 @@ void ActRaiserDrawPpuFrame(void) {
   /* Sky Palace: synthesize only BG2's offscreen margin columns from its ROM
    * source page. The paired restore after scanout preserves UI staging. */
   ActRaiser_WidescreenSkyPalacePrepare(ActRaiser_Runner());
-  ActRaiser_WidescreenHudObjPromote();
+  ActRaiser_HudIconBeginFrame();
   /* Manifest-driven HD substitutions (game-assets/manifest.ini) — e.g. the
    * settled title logo. Runs after the HUD/OAM capture policies so a busy
    * source is detected rather than clobbered; entries without host-loaded
@@ -504,6 +503,11 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
     frame_access.captures[source] =
         ActRaiser_OverlayCaptureState(&context->frame.overlays[source]);
   ActRaiser_BeginPpuFrameAccess(&frame_access);
+  /* Complete the church scene capture with all actor/menu sprites. HUD
+   * transfer is independent and excludes its semantic range during scanout. */
+  if (Sim3D_ChurchIsOn() && map_group == kActRaiserMapGroup_NonAction &&
+      map_number == kActRaiserNonActionMap_Temple)
+    ActRaiser_SetPpuOverlayOamRange(0, 128);
   if (profile_diorama)
     producer_setup_performance =
         DioramaPerformance_Begin(kDioramaPerformance_ProducerSetup);
@@ -576,7 +580,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
 
   /* Resolve the stable OAM footprint before scanout; the live sprite evaluator
    * writes the selected range to the HUD surface while each line is fetched. */
-  ActRaiser_DioramaHudObjPrepare();
+  ActRaiser_HudIconPrepare();
   ActRaiser_DioramaDeathHeimEyesPrepare();
 
   SrPpuBackgroundViewRequest skybox_view = ActRaiser_PrepareSkyboxView(
@@ -597,6 +601,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   }
   DioramaPerformance_End(scanout_performance);
   PerformanceMetrics_End(pipeline);
+  ActRaiser_HudIconComplete(scanout_status, &scanout_result);
   ActRaiser_PublishScanout(scanout_status, &scanout_result, &skybox_view,
                            action);
   pipeline = PerformanceMetrics_Begin(kPerformance_PpuFinish);

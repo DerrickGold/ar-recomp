@@ -172,7 +172,7 @@ static void RetainFrame(const FrameSlot *slot) {
     FrameSlot *retained = &s_retained_frame.slot;
     memset(&retained->ppu_surfaces, 0, sizeof(retained->ppu_surfaces));
     memset(&retained->sim3d_output_surfaces, 0, sizeof(retained->sim3d_output_surfaces));
-    retained->hud_obj_surface = (SrPpuSurfaceView){0};
+    retained->hud_icon.surface = (SrPpuSurfaceView){0};
     retained->diorama_skybox_surface = (SrPpuSurfaceView){0};
     s_retained_upload_complete = true;
   }

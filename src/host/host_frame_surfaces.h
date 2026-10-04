@@ -27,7 +27,8 @@ extern uint8_t g_pixels[kHostFrameSurfaceBytes];
  * extractions remove layers. It stays at the active scanline width (no OBJ
  * apron) because comparison presents only a native 256x224 crop. */
 extern uint8_t g_authentic_pixels[kHostFrameSurfaceBytes];
-/* The HUD planes (BG3 and OBJ) split out for the widescreen HUD overlay. */
+/* BG3 HUD text and the generic OBJ overlay/scene capture. Selected HUD icons
+ * have a separate live-scanout surface owned by ActRaiser's HUD handoff. */
 extern uint8_t g_hud_bg_pixels[kHostFrameSurfaceBytes];
 extern uint8_t g_hud_obj_pixels[kHostFrameSurfaceBytes];
 /* Flat-mode mask of pixels for which BG1 wins the priority resolve of its

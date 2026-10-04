@@ -3131,6 +3131,29 @@ int main(void) {
                         snes->ppu->overlayObjRelocatedFirst == 2u &&
                         snes->ppu->overlayObjRelocatedCount == 2u,
                     "PPU OBJ capture configuration failed");
+    obj_capture_request.flags = SR_PPU_OBJ_CAPTURE_RANGE | SR_PPU_OBJ_CAPTURE_HANDOFF;
+    failed |= check(api->configure_ppu_obj_capture(runner, &obj_capture_request) == SR_RESULT_OK &&
+                        snes->ppu->objRangeCapture.handoff,
+                    "generic OBJ handoff was not configured");
+    obj_capture_request.flags = SR_PPU_OBJ_CAPTURE_HANDOFF;
+    failed |= check(api->configure_ppu_obj_capture(runner, &obj_capture_request) ==
+                            SR_RESULT_INVALID_ARGUMENT &&
+                        snes->ppu->objRangeCapture.handoff,
+                    "handoff without range must fail atomically");
+    obj_capture_request.flags = SR_PPU_OBJ_CAPTURE_WINNERS | SR_PPU_OBJ_CAPTURE_HANDOFF;
+    failed |= check(api->configure_ppu_obj_capture(runner, &obj_capture_request) ==
+                        SR_RESULT_INVALID_ARGUMENT,
+                    "observational winners cannot transfer ownership");
+    obj_capture_request.flags = SR_PPU_OBJ_CAPTURE_RANGE | SR_PPU_OBJ_CAPTURE_HANDOFF;
+    obj_capture_request.lifetime_generation++;
+    failed |=
+        check(api->configure_ppu_obj_capture(runner, &obj_capture_request) == SR_RESULT_STALE_VIEW,
+              "stale OBJ handoff must fail");
+    obj_capture_request.lifetime_generation--;
+    obj_capture_request.flags = SR_PPU_OBJ_CAPTURE_RANGE;
+    failed |= check(api->configure_ppu_obj_capture(runner, &obj_capture_request) == SR_RESULT_OK &&
+                        !snes->ppu->objRangeCapture.handoff,
+                    "observational range must clear prior handoff");
     obj_capture_request.flags = SR_PPU_OBJ_CAPTURE_WINNERS;
     obj_capture_request.range_first = 5u;
     failed |= check(api->configure_ppu_obj_capture(runner, &obj_capture_request) == SR_RESULT_OK &&

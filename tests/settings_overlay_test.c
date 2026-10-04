@@ -3166,6 +3166,12 @@ int main(int argc, char **argv) {
   CHECK(g_settings.sim3d_world_navigation_mountains);
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
   CHECK(g_settings.sim3d_mode);
+  RowToKey("sim3d_church");
+  CHECK(!g_settings.sim3d_church);
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(g_settings.sim3d_church && Sim3D_ChurchIsOn());
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  CHECK(!g_settings.sim3d_church);
   RowToKey("sim3d_voxel_preset");
   CHECK(g_settings.sim3d_voxel_preset == kSimBackgroundVoxelPreset_Balanced);
   CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));

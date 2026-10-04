@@ -90,6 +90,9 @@ bool ArRenderDevice_SetClipRect(ArRenderDevice *device,
  * clipping. Omitted guarantees that the caller state is intact; StateLost is
  * fatal to the current frame because subsequent draw ownership is unknown.
  * A Ready begin must be paired with EndTarget exactly once. */
+/* Save the current target/viewport/clip without changing them. Pair a
+ * successful save with EndTarget to isolate a recoverable scene attempt. */
+bool ArRenderDevice_CaptureTargetState(ArRenderDevice *device, ArRenderTargetState *state);
 ArRenderTargetBeginResult ArRenderDevice_BeginTarget(
     ArRenderDevice *device, ArRenderTexture target,
     ArRenderTargetState *state);

@@ -736,10 +736,12 @@ static void TestTownStatusTranslations(void) {
 static void TestUnicodeNameHandoff(void) {
   const char *native_path = AR_TEST_NATIVE_FIXTURE_DIR "/name.srm";
   const char *sidecar_path = AR_TEST_NATIVE_FIXTURE_DIR "/name.srm.arname";
+  const char *checkpoint_path = AR_TEST_NATIVE_FIXTURE_DIR "/name.srm.archeckpoint";
   const char *ini_path = AR_TEST_NATIVE_FIXTURE_DIR "/name.ini";
   for (int native_at_finish = 0; native_at_finish < 2; ++native_at_finish) {
     remove(native_path);
     remove(sidecar_path);
+    remove(checkpoint_path);
     ActRaiserLocalizationRuntime_Shutdown();
     ActRaiserLocalizationText_ResetObservation();
     memset(g_ram, 0, sizeof(g_ram));
@@ -892,6 +894,7 @@ static void TestUnicodeNameHandoff(void) {
   }
   remove(native_path);
   remove(sidecar_path);
+  remove(checkpoint_path);
   ActRaiserLocalizationRuntime_Shutdown();
 }
 

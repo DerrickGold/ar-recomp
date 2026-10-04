@@ -35,7 +35,14 @@ static void TestPixels(HostFramePacket *p) {
   f->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][0] = View(pixels);
   f->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG3][0] = View(pixels);
   f->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][0] = View(pixels);
-  f->hud_obj_surface = f->diorama_skybox_surface = View(pixels);
+  f->hud_icon = (HudIconFrame){.lifetime_generation = 7,
+                               .frame_serial = 12,
+                               .x = 144,
+                               .y = 11,
+                               .first = 11,
+                               .count = 4,
+                               .scene_removed = true};
+  f->hud_icon.surface = f->diorama_skybox_surface = View(pixels);
   f->ppu_surfaces.main = f->ppu_surfaces.authentic = f->ppu_surfaces.mode7 = View(pixels);
   assert(HostFramePacket_OwnPixels(p));
   assert(p->copied_bytes == 5 * sizeof(pixels));
@@ -44,7 +51,9 @@ static void TestPixels(HostFramePacket *p) {
   assert(copy != pixels && copy[0] == 1 && copy[3] == 4);
   assert(!f->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][0].data);
   assert(!f->ppu_surfaces.main.data && !f->ppu_surfaces.authentic.data && !f->ppu_surfaces.mode7.data);
-  assert(f->hud_obj_surface.data && f->diorama_skybox_surface.data);
+  assert(f->hud_icon.surface.data && f->diorama_skybox_surface.data);
+  assert(f->hud_icon.scene_removed && f->hud_icon.frame_serial == 12 &&
+         f->hud_icon.lifetime_generation == 7 && f->hud_icon.x == 144 && f->hud_icon.count == 4);
   f->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][1] = View(pixels);
   f->ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][1].byte_size--;
   assert(!HostFramePacket_OwnPixels(p));
@@ -79,13 +88,14 @@ static void TestBackgroundPacket(HostFramePacket *p) {
       .diorama_plane_request_mask = 3, .diorama_plane_content_mask = 3};
   p->frame.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][0] = View(pixels);
   p->frame.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][0] = View(pixels);
-  p->frame.hud_obj_surface = p->frame.diorama_skybox_surface = View(pixels);
+  p->frame.hud_icon.surface = p->frame.diorama_skybox_surface = View(pixels);
   assert(HostFramePacket_OwnPixels(p));
   assert(p->copied_bytes == SrPpuBgPacket_Size(packet) + sizeof(pixels));
   assert(!p->frame.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG1][0].data);
   assert(!p->frame.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][0].data);
   assert(!p->frame.diorama_skybox_surface.data && p->frame.diorama_skybox_surface.width_pixels == 2);
-  assert(p->frame.hud_obj_surface.data && p->frame.hud_obj_surface.data != (const uint8_t *)pixels);
+  assert(p->frame.hud_icon.surface.data &&
+         p->frame.hud_icon.surface.data != (const uint8_t *)pixels);
   free(packet);
   SrPpuBgPacket *direct = HostFramePacket_BackgroundTarget(p);
   assert(direct && direct == p->background_storage);
@@ -129,7 +139,7 @@ static void ProduceUntilPaused(void *context) {
     HostFramePacket *packet = HostFrameQueue_BeginWrite(stream->queue);
     if (!packet) { SDL_DelayNS(1000); continue; }
     uint32_t pixels[] = {stream->next, 1, 2, 3};
-    packet->frame = (FrameSlot){.diorama_active = true, .hud_obj_surface = View(pixels)};
+    packet->frame = (FrameSlot){.diorama_active = true, .hud_icon.surface = View(pixels)};
     SrPpuBgPacket *background = HostFramePacket_BackgroundTarget(packet);
     assert(background);
     SrPpuBgPacket_Begin(background, 2, 2);
@@ -169,7 +179,7 @@ static void TestMaintenanceWithFutureFrames(HostFrameQueue *queue) {
     assert(held->source_ns == (uint64_t)tick * 16666667);
     assert(held->frame.background_packet == held->background_storage);
     assert(held->frame.background_packet->words[SR_PPU_BG_PACKET_ARENA_BASE] == tick);
-    assert(((const uint32_t *)held->frame.hud_obj_surface.data)[0] == tick);
+    assert(((const uint32_t *)held->frame.hud_icon.surface.data)[0] == tick);
     /* Maintenance reads the idle owner's state; restart must not discard or
      * overwrite this retained packet, even when the producer immediately runs. */
     /* Exercise both an explicit pause and a producer returning after its own
@@ -179,7 +189,7 @@ static void TestMaintenanceWithFutureFrames(HostFrameQueue *queue) {
     assert(HostFrameProducer_Submit(ProduceUntilPaused, &stream));
     assert(HostFrameQueue_Read(queue) == held);
     assert(held->frame.background_packet->words[SR_PPU_BG_PACKET_ARENA_BASE] == tick);
-    assert(((const uint32_t *)held->frame.hud_obj_surface.data)[0] == tick);
+    assert(((const uint32_t *)held->frame.hud_icon.surface.data)[0] == tick);
     HostFrameQueue_Release(queue);
     AwaitFullQueue(queue);
     HostFrameQueue_RequestPause(queue);

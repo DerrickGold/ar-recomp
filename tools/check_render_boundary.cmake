@@ -71,6 +71,7 @@ ar_glob_required(_portable_render_files GLOB_RECURSE
     "${GAME_SOURCE_ROOT}/sim/world_nav/present_world_nav*.c"
     "${GAME_SOURCE_ROOT}/sim/world_nav/present_world_nav*.h"
     "${GAME_SOURCE_ROOT}/sim/world_nav/present_sky_palace*.[ch]"
+    "${GAME_SOURCE_ROOT}/sim/church/*.[ch]"
     "${GAME_SOURCE_ROOT}/present/presentation_view*.[ch]"
     "${GAME_SOURCE_ROOT}/present/render_preparation*.[ch]"
     "${GAME_SOURCE_ROOT}/render/render_capabilities.h"

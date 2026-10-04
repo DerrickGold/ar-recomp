@@ -722,6 +722,7 @@ static const char *const kSaveItemLabels[] = {
  * greyed out rather than silently ignored (§D15). */
 bool Diorama_ModeIsOn(void) { return g_settings.diorama_mode; }
 bool Sim3D_ModeIsOn(void) { return g_settings.sim3d_mode; }
+bool Sim3D_ChurchIsOn(void) { return g_settings.sim3d_mode && g_settings.sim3d_church; }
 static bool SimMenuModernSelected(void) { return g_settings.sim_menu_style == 1; }
 /* Screen ratio owns stretching. Keep the old bool as a load-only alias so
  * existing config.ini/settings.ini files still migrate cleanly, but never let
@@ -1357,6 +1358,10 @@ const SettingDesc g_setting_descs[] = {
                "AR_SIM3D_PICKER_TOPDOWN=1 to restore the flat picker view).",
                kSettingCat_Simulation, 0, false, NULL,
                NULL),
+  BOOL_SETTING_MODERN(sim3d_church, "AR_SIM3D_CHURCH", "Church interior 3D",
+               "View audiences and offerings inside a softly lit church overlooking "
+               "the town. Off keeps the original church graphics. Requires Simulation town 3D.",
+               kSettingCat_Simulation, 0, false, Sim3D_ModeIsOn, NULL),
   { "sim_menu_style", "AR_SIM_MENU_STYLE", "SIM menu",
     "Original uses the original town menu. Modern uses a compact crossbar. "
     "Use Describe menu item to read descriptions; remap it under Controls. "

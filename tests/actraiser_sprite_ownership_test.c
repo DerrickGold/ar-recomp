@@ -118,6 +118,11 @@ static void TestPublication(void) {
   ActRaiserSpriteOwnership_Complete(shadow);
   ActRaiserSpriteOwnership_Upload(0, 1, shadow);
   Expect(0, 1, kActRaiserSprite_HudIcon, 0, 0); /* World record is not HUD. */
+  ActRaiserSpriteOwnership_Begin(0, 8, 1);
+  ActRaiserSpriteOwnership_RecordSim(0x083e, 3, 4, 8);
+  ActRaiserSpriteOwnership_Complete(shadow);
+  ActRaiserSpriteOwnership_Upload(0, 8, shadow);
+  Expect(0, 8, kActRaiserSprite_HudIcon, 1, 1);
   ActRaiserSpriteOwnership_Begin(0, 9, 3);
   ActRaiserSpriteOwnership_RecordSim(0x06a0, 0x33, 0, 28);
   ActRaiserSpriteOwnership_Complete(shadow);

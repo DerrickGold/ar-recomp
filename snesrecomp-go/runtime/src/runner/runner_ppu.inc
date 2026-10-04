@@ -522,13 +522,16 @@ static SrResult configure_ppu_obj_capture(
         SrRunnerHandle *runner, const SrPpuObjCaptureRequest *request) {
     Snes *snes = runner_from_handle(runner);
     const uint32_t supported = SR_PPU_OBJ_CAPTURE_RANGE |
-        SR_PPU_OBJ_CAPTURE_RELOCATED | SR_PPU_OBJ_CAPTURE_WINNERS | SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS;
+        SR_PPU_OBJ_CAPTURE_RELOCATED | SR_PPU_OBJ_CAPTURE_WINNERS |
+        SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS | SR_PPU_OBJ_CAPTURE_HANDOFF;
     Ppu *ppu;
     bool range_clear = false;
     bool relocated_clear = false;
     if (snes == NULL || request == NULL ||
         request->struct_size < SR_PPU_OBJ_CAPTURE_REQUEST_V2_SIZE ||
         request->flags == 0u ||
+        ((request->flags & SR_PPU_OBJ_CAPTURE_HANDOFF) != 0u &&
+         (request->flags & SR_PPU_OBJ_CAPTURE_RANGE) == 0u) ||
         (request->flags & (SR_PPU_OBJ_CAPTURE_RANGE | SR_PPU_OBJ_CAPTURE_WINNERS)) ==
             (SR_PPU_OBJ_CAPTURE_RANGE | SR_PPU_OBJ_CAPTURE_WINNERS) || (request->flags & ~supported) != 0u ||
         request->reserved[0] != 0u || request->reserved[1] != 0u)
@@ -615,6 +618,8 @@ static SrResult configure_ppu_obj_capture(
                        (size_t)request->range_pitch_bytes)) {
             return SR_RESULT_INVALID_ARGUMENT;
         }
+        capture->handoff = !range_clear &&
+            (request->flags & SR_PPU_OBJ_CAPTURE_HANDOFF) != 0u;
     }
     if ((request->flags & SR_PPU_OBJ_CAPTURE_RELOCATED) != 0u) {
         if (relocated_clear) {

@@ -687,6 +687,12 @@ typedef struct SrPpuFrameResetRequest {
  * moved to an independent presentation layer. A zero count clears that facet.
  * The range surface remains caller-owned and must stay alive through scanout. */
 #define SR_PPU_OBJ_CAPTURE_RANGE UINT32_C(0x00000001)
+/* With RANGE, transfer the selected slots inside the capture rectangle to the
+ * independent surface. Enhanced main/sub composition and scene OBJ exports
+ * exclude those pixels and resolve their underlay during the same scanout.
+ * Authentic output and WINNERS remain native. Clearing/replacing RANGE clears
+ * the transfer too. Scene overlay policies cannot overwrite this ownership. */
+#define SR_PPU_OBJ_CAPTURE_HANDOFF UINT32_C(0x00000010)
 /* Independent surface containing only full-OAM winners belonging to the
  * requested range. Uses range_* fields; cannot combine with RANGE in one
  * request. Neither capture changes native OBJ composition. */

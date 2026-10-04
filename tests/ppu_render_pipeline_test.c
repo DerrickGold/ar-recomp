@@ -1709,25 +1709,17 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
 
   CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg3, 0, 0, kActRaiserAuthenticWidth,
                              kActRaiserAuthenticHeight, kPpuOverlayFlag_RemoveFromGame));
-  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Obj, 0, 0, kActRaiserAuthenticWidth,
-                             kActRaiserSimulationHudHeight, kPpuOverlayFlag_RemoveFromGame));
-  CHECK(PpuSetOverlayOamRange(ppu, kMenuHourglassFirst, kActRaiserHudObjOamCount));
 
   const int extra = 43;
   const int width = kActRaiserAuthenticWidth + 2 * extra;
   static uint32_t hud_bg[kSim3DMaxWidth * kActRaiserAuthenticHeight];
   static uint32_t hud_obj[kSim3DMaxWidth * kActRaiserAuthenticHeight];
   static uint32_t authentic[kSim3DMaxWidth * kActRaiserAuthenticHeight];
-  /* Give every referenced OBJ tile an opaque test colour. The handoff
-   * rasterizes the promoted range before capture ownership changes, so this
-   * makes its output observable without running a complete PPU frame. */
+  /* Opaque synthetic art makes live capture observable without a ROM. */
   memset(ppu->vram, 0xff, sizeof(ppu->vram));
   ppu->cgram[0xff] = bgr555(31, 0, 31);
   CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Obj, (uint8_t *)hud_obj,
                               (size_t)width * sizeof(uint32_t)));
-  CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Obj, 0, 0, kActRaiserAuthenticWidth,
-                             kActRaiserSimulationHudHeight, kPpuOverlayFlag_RemoveFromGame));
-  CHECK(PpuSetOverlayOamRange(ppu, kMenuHourglassFirst, kActRaiserHudObjOamCount));
 
   Sim3DCaptureRequest request = {
       .town = true,
@@ -1748,13 +1740,14 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
   CHECK(obj->oamFirst == 0 && obj->oamCount == 128);
   CHECK(Sim3D_BeginFrame());
 
-  /* The promoted HUD surface must be rebuilt identically whether raw OBJ is
-   * the selected fallback or billboards suppress all four raw bands. This is
-   * the stale/cleared-buffer boundary: PrepareHudHandoff retains the original
-   * HUD destination before OBJ is rebound or unbound, and FinishCapture
-   * repopulates it from the independent range raster. */
+  /* Independent HUD transfer survives both full scene OBJ capture and the
+   * billboard path that deliberately unbinds raw scene OBJ planes. */
   for (int suppress_raw = 0; suppress_raw <= 1; suppress_raw++) {
     PpuClearOverlayBindings(ppu);
+    CHECK(PpuSetObjRangeCapture(ppu, kMenuHourglassFirst, 4, kActRaiserSimulationHourglassLeftX,
+                                kActRaiserHudObjUpperY, 16, 16, (uint8_t *)hud_obj,
+                                width * sizeof(uint32_t)));
+    ppu->objRangeCapture.handoff = true;
     memset(hud_bg, 0, sizeof(hud_bg));
     memset(hud_obj, 0, sizeof(hud_obj));
     memset(authentic, 0, sizeof(authentic));
@@ -1764,13 +1757,8 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
                                 (size_t)width * sizeof(uint32_t)));
     CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg3, 0, 0, kActRaiserAuthenticWidth,
                                kActRaiserAuthenticHeight, kPpuOverlayFlag_RemoveFromGame));
-    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Obj, 0, 0, kActRaiserAuthenticWidth,
-                               kActRaiserSimulationHudHeight, kPpuOverlayFlag_RemoveFromGame));
-    CHECK(PpuSetOverlayOamRange(ppu, kMenuHourglassFirst, kActRaiserHudObjOamCount));
     CHECK(PpuSetOverlayTransparentFill(ppu, kPpuOverlaySource_Bg3, kPpuOverlayTransparentFill_Cgram,
                                        0x21));
-    CHECK(PpuSetOverlayTransparentFill(ppu, kPpuOverlaySource_Obj, kPpuOverlayTransparentFill_Black,
-                                       0));
     request.requested_features =
         kSimFeature_SeparatedComposite |
         (suppress_raw ? kSimFeature_GroundProjection | kSimFeature_ObjectBillboards : 0);
@@ -1787,6 +1775,12 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
     }
     CHECK(Sim3D_PrepareCapture(TestRunnerForPpu(ppu), &request));
     CHECK((ppu->overlayRenderBuffer[kPpuOverlaySource_Obj] == NULL) == (suppress_raw != 0));
+    PpuBeginDrawing(ppu, (uint8_t *)authentic, width * sizeof(uint32_t), 0);
+    ppu_runLine(ppu, 0);
+    for (int line = 1; line <= 32; ++line)
+      ppu_runLine(ppu, line);
+    CHECK(ppu->objRangeCapture.handoff);
+
     /* Exercise a body row, not just the historical 32-row status handoff.
      * BG3-high survives as the native winner; BG3-low behind BG1-low remains
      * transparent in the late composite. */
@@ -1816,10 +1810,7 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
     CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].transparentFillMode ==
           kPpuOverlayTransparentFill_Cgram);
     CHECK(ppu->overlayCaptures[kPpuOverlaySource_Bg3].transparentFillCgram == 0x21);
-    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Obj].oamFirst == kMenuHourglassFirst);
-    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Obj].oamCount == kActRaiserHudObjOamCount);
-    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Obj].transparentFillMode ==
-          kPpuOverlayTransparentFill_Black);
+    CHECK(ppu->overlayCaptures[kPpuOverlaySource_Obj].oamCount == 0);
     CHECK(hud_obj[(size_t)kActRaiserHudObjUpperY * width + extra +
                   kActRaiserSimulationHourglassLeftX] != 0);
     CHECK(hud_bg[(size_t)kBodyProbeY * width + extra + kBg3WinnerX] == 0xffffffffu);
@@ -1836,9 +1827,6 @@ static void TestSim3DWidescreenHudCaptureHandoff(void) {
             (const uint8_t *)g_sim3d_layer_pixels[kSim3DPlane_Obj0]);
       CHECK(views.hud_bg.data == (const uint8_t *)hud_bg);
       CHECK(views.hud_bg.height_pixels == kActRaiserAuthenticHeight);
-      CHECK(views.hud_obj.data == (const uint8_t *)hud_obj);
-      CHECK(views.hud_obj.width_pixels == (uint32_t)width);
-      CHECK(views.hud_obj.height_pixels == kActRaiserSimulationHudHeight);
     }
     CHECK(Sim3D_BeginFrame());
     ppu->cgadsub = 0;

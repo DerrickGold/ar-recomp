@@ -4067,6 +4067,76 @@ if(BUILD_TESTING)
         ENVIRONMENT "SDL_AUDIODRIVER=dummy"
         SKIP_RETURN_CODE 77)
 
+    add_executable(actraiser_church_art_test tests/church_art_test.c src/sim/church/church_art.c)
+    target_include_directories(actraiser_church_art_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests)
+    add_test(NAME actraiser_church_art COMMAND actraiser_church_art_test)
+
+    add_executable(actraiser_present_church_test
+        tests/present_church_test.c src/sim/church/present_church.c)
+    target_link_libraries(actraiser_present_church_test PRIVATE actraiser_render_test_support)
+    target_include_directories(actraiser_present_church_test PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+    add_test(NAME actraiser_present_church COMMAND actraiser_present_church_test)
+
+    add_executable(actraiser_church_lighting_test
+        tests/church_lighting_test.c src/sim/church/church_lighting.c)
+    target_link_libraries(actraiser_church_lighting_test PRIVATE
+        actraiser_scene_math_test_support actraiser_math)
+    target_include_directories(actraiser_church_lighting_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_church_lighting COMMAND actraiser_church_lighting_test)
+
+    add_executable(actraiser_church_exterior_test
+        tests/church_exterior_test.c src/sim/church/church_exterior.c
+        src/sim/voxels/sim_background_voxel_model_cache.c
+        src/sim/voxels/sim_background_voxel_lighting.c
+        src/sim/voxels/sim_background_voxel_surface.c
+        src/sim/voxels/sim_background_voxel_biome.c
+        src/sim/voxels/sim_background_voxel_proportions.c)
+    target_link_libraries(actraiser_church_exterior_test PRIVATE
+        actraiser_town_model_test_support actraiser_math)
+    target_include_directories(actraiser_church_exterior_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(actraiser_church_exterior_test PRIVATE AR_SIM3D_TERRAIN_ELEVATION=1)
+    add_test(NAME actraiser_church_exterior COMMAND actraiser_church_exterior_test)
+
+    add_executable(actraiser_church_landscape_test
+        tests/church_landscape_test.c src/sim/church/church_landscape.c)
+    target_link_libraries(actraiser_church_landscape_test PRIVATE actraiser_math)
+    target_include_directories(actraiser_church_landscape_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_church_landscape COMMAND actraiser_church_landscape_test)
+
+    add_executable(actraiser_church_detail_test tests/church_detail_test.c
+        src/sim/church/church_detail.c)
+    target_link_libraries(actraiser_church_detail_test PRIVATE actraiser_math)
+    target_include_directories(actraiser_church_detail_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_church_detail COMMAND actraiser_church_detail_test)
+
+    # Opt-in ROM-free review window for the church interior prototype.
+    add_executable(actraiser_church_preview
+        tools/church_preview.c src/sim/church/church_detail.c src/sim/church/church_scene.c
+        src/sim/mountains/sim_background_mountain_render.c
+        src/sim/mountains/sim_background_mountain_mesh.c
+        src/sim/mountains/sim_background_mountain_objects.c
+        src/sim/voxels/sim_background_voxel_lod.c
+        src/sim/church/church_lighting.c src/sim/church/church_exterior.c
+        src/sim/voxels/sim_background_voxel_project.c
+        src/platform/sdl/sim3d_depth_pass_sdl.c
+        src/platform/sdl/sim3d_depth_pass_pipelines_sdl.c
+        src/platform/sdl/sim3d_depth_pass_meshes_sdl.c
+        src/sim/voxels/sim_background_voxel_model_cache.c
+        src/sim/voxels/sim_background_voxel_lighting.c
+        src/sim/voxels/sim_background_voxel_surface.c
+        src/sim/voxels/sim_background_voxel_biome.c
+        src/sim/voxels/sim_background_voxel_palette.c
+        src/sim/voxels/sim_background_voxel_proportions.c)
+    target_link_libraries(actraiser_church_preview PRIVATE
+        actraiser_render_sdl_test_support actraiser_scene_math_test_support
+        actraiser_town_model_test_support SDL3::SDL3 actraiser_math)
+    target_include_directories(actraiser_church_preview PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(actraiser_church_preview PRIVATE
+        AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
+
+    add_test(NAME actraiser_church_scene_gpu COMMAND actraiser_church_preview --verify)
+    set_tests_properties(actraiser_church_scene_gpu PROPERTIES SKIP_RETURN_CODE 77)
+
     # Opt-in architectural benchmark; not used by shipping game views.
     add_executable(actraiser_model_projection_benchmark
         tools/benchmark_model_projection.c

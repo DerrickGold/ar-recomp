@@ -48,6 +48,8 @@
 #include "sim/sim_phase0_trace.h"
 #include "sim/sim_render_metadata.h"
 #include "sim/sim_world_map.h"
+#include "sim/church/church_art.h"
+#include "sim/church/present_church.h"
 #include "sim/sim_world_map_build.h"
 #include "sim/town/sim_town_ground_art.h"
 #include "sim/world_nav/sim_world_navigation_towns.h"
@@ -75,6 +77,7 @@ static void PrepareSubsystems(const GameSessionConfig *config) {
   HostLocalization_InstallInterfaceFonts();
   /* The world-map image and pure development-builder tables are immutable ROM
    * data. Failure is not fatal: consumers retain the authentic presentation. */
+  (void)ChurchArt_Init(config->rom_data, config->rom_size);
   if (SimWorldMap_Init(config->rom_data, config->rom_size))
     SimWorldMapBuild_Init(config->rom_data, config->rom_size);
   if (!SimTownGroundArt_Init(config->rom_data, config->rom_size))
@@ -261,6 +264,8 @@ static GameSessionResult StopSession(void) {
   HdReplacementHost_Shutdown();
   HostPpuOutput_Reset();
   PresentRendererResources_Reset();
+  PresentChurch_Reset(&g_render_device);
+  (void)ChurchArt_Init(NULL, 0);
   SimTownGroundArt_Shutdown();
   SimWorldNavigationTowns_Shutdown();
   DioramaFrameGeneration_Shutdown();

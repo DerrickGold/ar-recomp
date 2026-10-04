@@ -176,8 +176,7 @@ void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
         continue;
 
       for (int y = 0; y < h; y++) {
-        /* Plane rows are CAPTURE space: row 0 is screen y = -g_ws_extra_top,
-         * the same bias ActRaiser_DioramaHudObjFinish applies. */
+        /* Plane rows are capture space: row 0 is screen y = -g_ws_extra_top. */
         const int row = win_y0 + y + g_ws_extra_top;
         if (row < 0 || row >= rows)
           continue;

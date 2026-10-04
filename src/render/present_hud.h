@@ -35,6 +35,10 @@ int PresentHud_BuildChunks(const FrameSlot *slot, ArRenderRectI viewport,
 void PresentHud_Draw(ArRenderDevice *device, const FrameSlot *slot, ArRenderRectI viewport);
 void PresentHud_DrawComposited(ArRenderDevice *device, const FrameSlot *slot,
                                ArRenderRectI viewport);
+/* Native 256x224 panel frames and controls below the HUD/text. Shares the
+ * status anchors and body projection, including direct-draw fallback. */
+void PresentHud_DrawCompositedWithBackdrop(ArRenderDevice *device, const FrameSlot *slot,
+                                           ArRenderRectI viewport, ArRenderTexture backdrop);
 /* On device reset or shutdown, while the host render device is still alive. */
 void PresentHud_Reset(ArRenderDevice *device);
 

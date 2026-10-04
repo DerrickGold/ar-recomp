@@ -79,36 +79,17 @@ PresentHudUploadResult PresentHud_Upload(ArRenderDevice *device, const FrameSlot
             (int)surface->pitch_bytes, hud.x, hud.y);
     }
     if (ArRenderTexture_IsValid(s_object_texture)) {
-      /* Choose the surface before its extent: the two are not interchangeable.
-       * The promoted-icon surface is described by the promote's own latched
-       * row count, never by overlay_captures[Obj] -- that capture is whatever
-       * policy claimed the single OBJ slot last, and a full-frame scene claim
-       * legitimately overwrites it. Taking the extent from the capture while
-       * taking the pixels from the promoted surface asked for more rows than
-       * that surface has, so validation rejected the upload and the icon's
-       * texture was silently never filled. It is the same rule hud_icon_first/count
-       * already follow. */
-      bool promoted_icon = false;
-      const SrPpuSurfaceView *surface = PresentationSurface_Bound(
-          &slot->sim3d_output_surfaces.hud_obj);
-      if (!surface) {
-        surface = PresentationSurface_Bound(&slot->hud_obj_surface);
-        promoted_icon = surface != NULL;
+      const HudIconFrame *icon = &slot->hud_icon;
+      const SrPpuSurfaceView *surface = PresentationSurface_Bound(&icon->surface);
+      if (icon->scene_removed && icon->count &&
+          PresentationSurface_Holds(surface, slot->snes_width, icon->y + icon->height)) {
+        /* Only this frame's captured footprint can be sampled. */
+        const int x = icon->x + surface->origin_x;
+        const uint8_t *pixels = surface->data + icon->y * surface->pitch_bytes + x * 4;
+        uploaded.object_bytes =
+            UploadSource(device, s_object_texture, &s_object_mirror, pixels, icon->width,
+                         icon->height, (int)surface->pitch_bytes, x, icon->y);
       }
-      if (!surface)
-        surface = PresentationSurface_Bound(
-            &slot->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][0]);
-      int rows = promoted_icon
-          ? slot->hud_icon_rows
-          : slot->overlay_captures[kFrameSlotOverlay_Obj].y1;
-      if (rows < split_rows) rows = split_rows;
-      const ArRenderRectI hud = {0, 0, slot->snes_width, rows};
-      if (PresentationSurface_Holds(surface, hud.w, hud.h))
-        uploaded.object_bytes = UploadSource(
-            device, s_object_texture,
-            &s_object_mirror,
-            surface->data, hud.w, hud.h,
-            (int)surface->pitch_bytes, hud.x, hud.y);
     }
   }
   return uploaded;
@@ -150,21 +131,9 @@ static HudProjectionInputs BuildProjectionInputs(const FrameSlot *slot) {
       in.hud_body_y1 = (uint8_t)bg3->y1;
   }
 
-  /* The promote's own latched range, NOT overlay_captures[Obj].oamFirst/Count:
-   * in diorama mode that capture describes the full-frame 0..127 scene claim
-   * that legitimately overwrote the icon's capture, so keying off it dropped
-   * obj_icon_valid and the icon fell back to whatever the scene did with it
-   * (drawn tilted and centered rather than anchored beside the right group).
-   *
-   * Any nonzero count, not ==4: the promote only ever latches a range it has
-   * validated as a 16x16 HUD icon, and Sky Palace spends 1 slot on that icon
-   * for three of the four spells and 4 for Magical Fire. Demanding 4 here was
-   * the second half of the bug that stranded those three at centre screen. */
-  if (slot->oam_valid && slot->hud_icon_count) {
-    int first = slot->hud_icon_first;
-    in.obj_icon_x = (slot->oam[first * 2] & 0xff) |
-        ((slot->high_oam[first >> 2] >> ((first & 3) * 2)) & 1) << 8;
-    in.obj_icon_y = slot->oam[first * 2] >> 8;
+  if (slot->hud_icon.scene_removed && slot->hud_icon.count) {
+    in.obj_icon_x = slot->hud_icon.x;
+    in.obj_icon_y = slot->hud_icon.y;
     in.obj_icon_valid = true;
   }
   return in;
@@ -253,12 +222,32 @@ static ArRenderTexture EnsureHudCompositeTexture(ArRenderDevice *device, int w, 
   return s_hud_composite_texture;
 }
 
+static void DrawBackdrop(ArRenderDevice *device, const FrameSlot *slot, ArRenderRectI viewport,
+                         ArRenderTexture texture) {
+  if (!ArRenderTexture_IsValid(texture)) return;
+  HudProjectionInputs in = BuildProjectionInputs(slot);
+  in.hud_bg_texture = texture;
+  in.hud_obj_texture = ArRenderTexture_Invalid();
+  in.snes_width = kFrameSlotAuthenticWidth;
+  in.hud_body_y1 = kFrameSlotAuthenticHeight;
+  HudPresentationChunk chunks[kHudPresentationChunkCapacity];
+  const int count = ArHudLayout_BuildPresentationChunks(viewport, &in, chunks);
+  for (int i = 0; i < count; i++)
+    RenderHudChunk(device, texture, chunks[i].texture_source, chunks[i].output_destination);
+}
+
 void PresentHud_DrawComposited(ArRenderDevice *device, const FrameSlot *slot,
                                ArRenderRectI viewport) {
+  PresentHud_DrawCompositedWithBackdrop(device, slot, viewport, ArRenderTexture_Invalid());
+}
+
+void PresentHud_DrawCompositedWithBackdrop(ArRenderDevice *device, const FrameSlot *slot,
+                                           ArRenderRectI viewport, ArRenderTexture backdrop) {
   ArRenderTexture composite = EnsureHudCompositeTexture(
       device, viewport.w, viewport.h);
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
   if (!ArRenderTexture_IsValid(composite)) {
+    DrawBackdrop(device, slot, viewport, backdrop);
     PresentHudChunksDirect(device, slot, viewport);
     return;
   }
@@ -285,6 +274,7 @@ void PresentHud_DrawComposited(ArRenderDevice *device, const FrameSlot *slot,
           "(%s). Restart the game; if this repeats, update your graphics "
           "driver.", ArRenderDevice_LastError(device));
     else {
+      DrawBackdrop(device, slot, viewport, backdrop);
       PresentHudChunksDirect(device, slot, viewport);
     }
     return;
@@ -296,6 +286,7 @@ void PresentHud_DrawComposited(ArRenderDevice *device, const FrameSlot *slot,
           (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
   bool localized_drawn = false;
   if (target_ready) {
+    DrawBackdrop(device, slot, local_viewport, backdrop);
     bool masks_valid = true;
     for (int i = 0; i < count; i++) {
       if (!localized.mask_count) {
@@ -334,6 +325,7 @@ void PresentHud_DrawComposited(ArRenderDevice *device, const FrameSlot *slot,
     return;
   }
   if (!target_ready) {
+    DrawBackdrop(device, slot, viewport, backdrop);
     PresentHudChunksDirect(device, slot, viewport);
     return;
   }
@@ -357,6 +349,7 @@ void PresentHud_DrawComposited(ArRenderDevice *device, const FrameSlot *slot,
       ArTextPresentation_MarkReady(localized.ready_dialogue_ticket);
     }
   } else {
+    DrawBackdrop(device, slot, viewport, backdrop);
     PresentHudChunksDirect(device, slot, viewport);
   }
 }

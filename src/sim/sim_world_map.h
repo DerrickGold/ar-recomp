@@ -80,6 +80,8 @@ int SimWorldMap_SetWaterAnimationSource(uint16_t source);
 /* Current validated animation identity, not a clock approximation. Unknown
  * initial ROM art is not frame zero. Failure leaves the output unchanged. */
 bool SimWorldMap_WaterAnimationFrame(uint8_t *frame);
+/* Copy the four original 8x8 water frames in the active world palette. No mutation. */
+bool SimWorldMap_CopyWaterFrames(uint32_t pixels[kWorldWaterFrameCount][64]);
 
 /* Marks cells whose developed OR baseline pixels can change with a wave
  * phase, including the one-cell halo needed by Scale2x. Does not consume the

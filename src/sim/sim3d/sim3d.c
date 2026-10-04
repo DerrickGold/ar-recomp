@@ -40,15 +40,10 @@ typedef struct Sim3DCaptureState {
   bool raw_obj_planes;
   bool hud_handoff;
   bool hud_bg3;
-  bool hud_obj;
   bool object_half_add;
   Sim3DCaptureStatus status;
   int width, height;
   int live_x0, live_x1;
-  int hud_obj_priority;
-  int hud_obj_mask_width;
-  int hud_obj_mask_x0, hud_obj_mask_y0;
-  int hud_obj_mask_x1, hud_obj_mask_y1;
   SrRunnerHandle *runner;
   const SnesRunnerApi *api;
   uint64_t lifetime_generation;
@@ -57,9 +52,7 @@ typedef struct Sim3DCaptureState {
   SrPpuOverlayCaptureState
       active_captures[SR_PPU_OVERLAY_SOURCE_COUNT];
   uint8_t *hud_bg_pixels;
-  uint8_t *hud_obj_pixels;
   uint32_t hud_bg_pitch;
-  uint32_t hud_obj_pitch;
   uint32_t backdrop_argb;
   /* Colour-math evidence for the view-transition log; see SimFrameData. */
   uint8_t cgwsel, cgadsub;
@@ -80,7 +73,6 @@ typedef struct Sim3DCaptureState {
 } Sim3DCaptureState;
 
 static Sim3DCaptureState s_sim3d;
-static uint32_t s_sim3d_hud_obj_mask[kSim3DMaxWidth * kSim3DMaxHeight];
 
 static bool DemoArtifactsArmable(void);
 
@@ -177,27 +169,10 @@ static bool StandardTownHudPolicyActive(const SrPpuFrameSnapshot *frame) {
 static bool StandardTownHudCapture(
     const SrPpuFrameTransactionContext *context, int source,
     const SrPpuOverlayCaptureState *capture) {
-  if (!StandardTownHudPolicyActive(&context->frame) ||
-      (source != SR_PPU_OVERLAY_BG3 &&
-       source != SR_PPU_OVERLAY_OBJ) ||
-      capture->x0 != 0 || capture->x1 != kActRaiserAuthenticWidth ||
-      capture->y0 != 0)
-    return false;
-  if (source == SR_PPU_OVERLAY_BG3) {
-    return capture->y1 == kActRaiserAuthenticHeight &&
-        capture->flags == SR_PPU_OVERLAY_REMOVE_FROM_GAME &&
-        capture->oam_count == 0;
-  }
-  if (capture->y1 != kActRaiserSimulationHudHeight ||
-      capture->flags != SR_PPU_OVERLAY_REMOVE_FROM_GAME)
-    return false;
-  const ActRaiserSpriteOwnership ownership =
-      ActRaiserSpriteOwnership_Presented(g_ram[kActRaiserWram_MapGroup],
-          g_ram[kActRaiserWram_CurrentMap]);
-  uint8_t first, count;
-  return ActRaiserSpriteOwnership_Range(&ownership, kActRaiserSprite_HudIcon,
-                                       &first, &count) &&
-      capture->oam_first == first && capture->oam_count == count;
+  return StandardTownHudPolicyActive(&context->frame) && source == SR_PPU_OVERLAY_BG3 &&
+         capture->x0 == 0 && capture->x1 == kActRaiserAuthenticWidth && capture->y0 == 0 &&
+         capture->y1 == kActRaiserAuthenticHeight &&
+         capture->flags == SR_PPU_OVERLAY_REMOVE_FROM_GAME && capture->oam_count == 0;
 }
 
 static bool OverlayPolicyConflicts(
@@ -224,114 +199,18 @@ static bool OverlayPolicyConflicts(
   return false;
 }
 
-static void ClearPriorHudObjMask(void) {
-  int width = s_sim3d.hud_obj_mask_width;
-  int x0 = s_sim3d.hud_obj_mask_x0;
-  int y0 = s_sim3d.hud_obj_mask_y0;
-  int x1 = s_sim3d.hud_obj_mask_x1;
-  int y1 = s_sim3d.hud_obj_mask_y1;
-  if (width > 0 && x0 >= 0 && x1 <= width && x1 > x0 &&
-      y0 >= 0 && y1 <= kSim3DMaxHeight && y1 > y0) {
-    for (int y = y0; y < y1; y++)
-      memset(&s_sim3d_hud_obj_mask[
-                 (size_t)y * (size_t)width + (size_t)x0], 0,
-             (size_t)(x1 - x0) * sizeof(s_sim3d_hud_obj_mask[0]));
-  }
-  s_sim3d.hud_obj_mask_x0 = s_sim3d.hud_obj_mask_y0 = 0;
-  s_sim3d.hud_obj_mask_x1 = s_sim3d.hud_obj_mask_y1 = 0;
-}
-
-static bool PrepareHudHandoff(
-    const SnesRunnerApi *api, SrRunnerHandle *runner,
-    const SrPpuFrameTransactionContext *context, int width) {
-  const SrPpuOverlayCaptureState *bg3 =
-      &s_sim3d.prior_captures[SR_PPU_OVERLAY_BG3];
-  const SrPpuOverlayCaptureState *obj =
-      &s_sim3d.prior_captures[SR_PPU_OVERLAY_OBJ];
-  s_sim3d.hud_bg3 = !CaptureIsEmpty(bg3);
-  s_sim3d.hud_obj = !CaptureIsEmpty(obj);
-  s_sim3d.hud_handoff = s_sim3d.hud_bg3 || s_sim3d.hud_obj;
-  if (!s_sim3d.hud_handoff) return true;
-
+/* BG3 text still shares the generic layer capture. OBJ HUD ownership is
+ * handled independently by the shared live-scanout handoff. */
+static void PrepareHudHandoff(const SnesRunnerApi *api, SrRunnerHandle *runner,
+                              const SrPpuFrameTransactionContext *context) {
+  s_sim3d.hud_bg3 = !CaptureIsEmpty(&s_sim3d.prior_captures[SR_PPU_OVERLAY_BG3]);
+  s_sim3d.hud_handoff = s_sim3d.hud_bg3;
   s_sim3d.runner = runner;
   s_sim3d.api = api;
   s_sim3d.lifetime_generation = context->lifetime_generation;
-  const SrPpuWritableSurfaceView *bg_surface =
-      &context->overlays[SR_PPU_OVERLAY_BG3];
-  const SrPpuWritableSurfaceView *obj_surface =
-      &context->overlays[SR_PPU_OVERLAY_OBJ];
-  s_sim3d.hud_bg_pixels = bg_surface->data;
-  s_sim3d.hud_obj_pixels = obj_surface->data;
-  s_sim3d.hud_bg_pitch = bg_surface->pitch_bytes <= UINT32_MAX
-      ? (uint32_t)bg_surface->pitch_bytes : 0u;
-  s_sim3d.hud_obj_pitch = obj_surface->pitch_bytes <= UINT32_MAX
-      ? (uint32_t)obj_surface->pitch_bytes : 0u;
-  /* Only the prior frame's nontransparent raster can be dirty. Remember the
-   * pitch it used because a display-mode change can alter `width` between
-   * captures; clearing the entire 448x240 ceiling here used to write 430 KB
-   * every enhanced town frame for a HUD icon that is at most 32x32 pixels. */
-  ClearPriorHudObjMask();
-  s_sim3d.hud_obj_mask_width = width;
-  if (!s_sim3d.hud_obj) return true;
-
-  if (obj->oam_count == 0u || context->oam.data == NULL ||
-      (uint64_t)obj->oam_first * 2u + 1u >= context->oam.element_count)
-    return false;
-  int priority =
-      (context->oam.data[obj->oam_first * 2u + 1u] >> 12) & 3;
-  enum { kHudRasterLimit = 128 };
-  uint32_t raster[kHudRasterLimit * kHudRasterLimit];
-  SrPpuObjRasterRequest raster_request = {
-    .struct_size = sizeof(raster_request),
-    .lifetime_generation = context->lifetime_generation,
-    .first_sprite = obj->oam_first,
-    .sprite_count = obj->oam_count,
-    .priority = (uint32_t)priority,
-    .pixel_format = SR_PPU_OBJ_PIXEL_FORMAT_ARGB8888_U32,
-    .pixels = raster,
-    .pixel_byte_size = sizeof(raster),
-    .pitch_bytes = kHudRasterLimit * sizeof(uint32_t),
-  };
-  SrPpuObjRasterResult raster_result = {
-    .struct_size = sizeof(raster_result),
-  };
-  if (api->rasterize_ppu_obj_range(
-          runner, &raster_request, &raster_result) != SR_RESULT_OK)
-    return false;
-  int raster_width = (int)raster_result.width;
-  int raster_height = (int)raster_result.height;
-  if (raster_width <= 0 || raster_height <= 0 ||
-      raster_width > kHudRasterLimit || raster_height > kHudRasterLimit)
-    return false;
-
-  int extra = (width - kActRaiserAuthenticWidth) / 2;
-  int mask_x0 = width, mask_y0 = kSim3DMaxHeight;
-  int mask_x1 = 0, mask_y1 = 0;
-  for (int y = 0; y < raster_height; y++) {
-    int screen_y = raster_result.y0 + y;
-    if (screen_y < 0 || screen_y >= kSim3DMaxHeight) continue;
-    for (int x = 0; x < raster_width; x++) {
-      int texture_x = raster_result.x0 + x + extra;
-      if (texture_x < 0 || texture_x >= width) continue;
-      uint32_t pixel = raster[
-          (size_t)y * kHudRasterLimit + (size_t)x];
-      if (!pixel) continue;
-      s_sim3d_hud_obj_mask[
-          (size_t)screen_y * (size_t)width + (size_t)texture_x] = pixel;
-      if (texture_x < mask_x0) mask_x0 = texture_x;
-      if (screen_y < mask_y0) mask_y0 = screen_y;
-      if (texture_x + 1 > mask_x1) mask_x1 = texture_x + 1;
-      if (screen_y + 1 > mask_y1) mask_y1 = screen_y + 1;
-    }
-  }
-  if (mask_x1 > mask_x0 && mask_y1 > mask_y0) {
-    s_sim3d.hud_obj_mask_x0 = mask_x0;
-    s_sim3d.hud_obj_mask_y0 = mask_y0;
-    s_sim3d.hud_obj_mask_x1 = mask_x1;
-    s_sim3d.hud_obj_mask_y1 = mask_y1;
-  }
-  s_sim3d.hud_obj_priority = priority;
-  return true;
+  const SrPpuWritableSurfaceView *surface = &context->overlays[SR_PPU_OVERLAY_BG3];
+  s_sim3d.hud_bg_pixels = surface->data;
+  s_sim3d.hud_bg_pitch = surface->pitch_bytes <= UINT32_MAX ? (uint32_t)surface->pitch_bytes : 0u;
 }
 
 bool Sim3D_BeginFrame(void) {
@@ -345,7 +224,6 @@ bool Sim3D_BeginFrame(void) {
   s_sim3d.raw_obj_planes = false;
   s_sim3d.hud_handoff = false;
   s_sim3d.hud_bg3 = false;
-  s_sim3d.hud_obj = false;
   s_sim3d.object_half_add = false;
   s_sim3d.runner = NULL;
   s_sim3d.api = NULL;
@@ -512,10 +390,7 @@ static SrResult PrepareCaptureFromPpuView(
     s_sim3d.status = kSim3DCapture_AllocationFailure;
     return SR_RESULT_OK;
   }
-  if (!PrepareHudHandoff(api, runner, context, request->width)) {
-    s_sim3d.status = kSim3DCapture_OverlayConflict;
-    return SR_RESULT_OK;
-  }
+  PrepareHudHandoff(api, runner, context);
 
   const uint64_t pitch =
       (uint64_t)(unsigned)request->width * sizeof(uint32_t);
@@ -952,8 +827,7 @@ static uint32_t BuildDifference(const uint8_t *authentic_pixels,
   return mismatch;
 }
 
-static uint32_t ComposeTownPixelWithoutHud(int x, int y,
-                                           bool skip_bg3, bool skip_obj) {
+static uint32_t ComposeTownPixelWithoutHud(int x, int y, bool skip_bg3) {
   bool live = x >= s_sim3d.live_x0 && x < s_sim3d.live_x1;
   bool hud_composite_span = s_sim3d.hud_bg3 &&
       y < s_sim3d.prior_captures[SR_PPU_OVERLAY_BG3].y1;
@@ -964,9 +838,6 @@ static uint32_t ComposeTownPixelWithoutHud(int x, int y,
     if (!(s_sim3d.captured_plane_mask & (1u << plane))) continue;
     if (skip_bg3 &&
         (plane == kSim3DPlane_Bg3Low || plane == kSim3DPlane_Bg3High))
-      continue;
-    if (skip_obj &&
-        plane == Sim3D_ObjPlaneForPriority(s_sim3d.hud_obj_priority))
       continue;
     /* Same live-area rule the composed side uses: a wrapped-negative OBJ
      * rasterizes into margin columns the hardware leaves black. */
@@ -1021,12 +892,11 @@ static bool ComposeTownBg3WinnerPixel(int x, int y, uint32_t *out_color) {
   return false;
 }
 
-static void RestoreTownHudPixel(uint8_t *authentic_pixels,
-                                int authentic_pitch, int x, int y,
-                                bool skip_bg3, bool skip_obj) {
+static void RestoreTownHudPixel(uint8_t *authentic_pixels, int authentic_pitch, int x, int y,
+                                bool skip_bg3) {
   size_t index =
       (size_t)y * (size_t)s_sim3d.width + (size_t)x;
-  uint32_t color = ComposeTownPixelWithoutHud(x, y, skip_bg3, skip_obj);
+  uint32_t color = ComposeTownPixelWithoutHud(x, y, skip_bg3);
   memcpy(authentic_pixels + (size_t)y * (size_t)authentic_pitch +
              (size_t)x * sizeof(color),
          &color, sizeof(color));
@@ -1035,11 +905,6 @@ static void RestoreTownHudPixel(uint8_t *authentic_pixels,
     g_sim3d_layer_pixels[kSim3DPlane_Bg3Low][index] = 0;
     g_sim3d_layer_pixels[kSim3DPlane_Bg3High][index] = 0;
   }
-  if (skip_obj) {
-    int plane = Sim3D_ObjPlaneForPriority(s_sim3d.hud_obj_priority);
-    if (s_sim3d.captured_plane_mask & (1u << plane))
-      g_sim3d_layer_pixels[plane][index] = 0;
-  }
 }
 
 static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
@@ -1047,9 +912,7 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
   if (!s_sim3d.hud_handoff || !s_sim3d.runner) return;
   const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_SimHud);
 
-  /* Recreate the two standard host HUD surfaces that the full-plane capture
-   * temporarily superseded. BG3's two priority bands are mutually exclusive
-   * per source pixel; the exact OAM-range raster was prepared before scanout. */
+  /* Recreate BG3 text temporarily superseded by scene capture. */
   if (s_sim3d.hud_bg_pixels && s_sim3d.hud_bg_pitch) {
     const SrPpuOverlayCaptureState *capture =
         &s_sim3d.prior_captures[SR_PPU_OVERLAY_BG3];
@@ -1067,26 +930,8 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
       }
     }
   }
-  if (s_sim3d.hud_obj_pixels && s_sim3d.hud_obj_pitch) {
-    memset(s_sim3d.hud_obj_pixels, 0,
-           (size_t)s_sim3d.hud_obj_pitch * kActRaiserSimulationHudHeight);
-    for (int y = 0; y < kActRaiserSimulationHudHeight; y++) {
-      uint8_t *dst = s_sim3d.hud_obj_pixels +
-          (size_t)y * (size_t)s_sim3d.hud_obj_pitch;
-      memcpy(dst, &s_sim3d_hud_obj_mask[
-                      (size_t)y * (size_t)s_sim3d.width],
-             (size_t)s_sim3d.width * sizeof(uint32_t));
-    }
-  }
-
-  /* The full-plane capture does not use RemoveFromGame, so the PPU framebuffer
-   * entering this function is already correct everywhere except the promoted
-   * HUD pixels. Patch only the BG3 capture
-   * rectangle and the sparse OBJ raster instead of recompositing all ten planes
-   * over the entire frame, then scanning all ten planes over it a second time.
-   *
-   * Published SIM textures omit the HUD too; PresentSim3D adds the anchored
-   * host overlay after either A/B profile has rendered. */
+  /* OBJ is already resolved without the transferred icon and with its
+   * correct underlay; only pixels occupied by BG3 text need recomposition. */
   int bg_x0 = 0, bg_y0 = 0, bg_x1 = 0, bg_y1 = 0;
   if (s_sim3d.hud_bg3) {
     const SrPpuOverlayCaptureState *capture =
@@ -1102,35 +947,8 @@ static void RestoreTownHudPolicy(uint8_t *authentic_pixels,
     if (bg_y1 > s_sim3d.height) bg_y1 = s_sim3d.height;
     for (int y = bg_y0; y < bg_y1; y++) {
       for (int x = bg_x0; x < bg_x1; x++) {
-        bool skip_obj = s_sim3d.hud_obj &&
-            s_sim3d_hud_obj_mask[
-                (size_t)y * (size_t)s_sim3d.width + (size_t)x] != 0;
-        /* Full-plane scanout already produced the correct authentic pixel
-         * when neither promoted source exists here. Keep that pixel verbatim,
-         * including its hardware colour math, and avoid a ten-plane rebuild. */
-        if (!skip_obj && !TownBg3HasPixel(
-                (size_t)y * (size_t)s_sim3d.width + (size_t)x))
-          continue;
-        RestoreTownHudPixel(authentic_pixels, authentic_pitch, x, y,
-                            true, skip_obj);
-      }
-    }
-  }
-
-  if (s_sim3d.hud_obj) {
-    int obj_y1 = s_sim3d.hud_obj_mask_y1;
-    if (obj_y1 > s_sim3d.height) obj_y1 = s_sim3d.height;
-    for (int y = s_sim3d.hud_obj_mask_y0;
-         y < obj_y1; y++) {
-      for (int x = s_sim3d.hud_obj_mask_x0;
-           x < s_sim3d.hud_obj_mask_x1; x++) {
-        if (!s_sim3d_hud_obj_mask[
-                (size_t)y * (size_t)s_sim3d.width + (size_t)x])
-          continue;
-        if (x >= bg_x0 && x < bg_x1 && y >= bg_y0 && y < bg_y1)
-          continue;  /* The BG3 loop patched the union once already. */
-        RestoreTownHudPixel(authentic_pixels, authentic_pitch, x, y,
-                            false, true);
+        if (!TownBg3HasPixel((size_t)y * s_sim3d.width + x)) continue;
+        RestoreTownHudPixel(authentic_pixels, authentic_pitch, x, y, true);
       }
     }
   }
@@ -1377,10 +1195,6 @@ void Sim3D_CaptureOutputSurfaceViews(Sim3DOutputSurfaceViews *views) {
     InitOutputSurfaceView(
         &views->hud_bg, s_sim3d.hud_bg_pixels, s_sim3d.hud_bg_pitch,
         (uint32_t)s_sim3d.prior_captures[SR_PPU_OVERLAY_BG3].y1);
-  if (s_sim3d.hud_obj)
-    InitOutputSurfaceView(
-        &views->hud_obj, s_sim3d.hud_obj_pixels, s_sim3d.hud_obj_pitch,
-        kActRaiserSimulationHudHeight);
 }
 
 /* One line whenever the simulation presentation changes ownership or loses a

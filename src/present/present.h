@@ -12,6 +12,7 @@
 #include "action/action_bg_plan.h"
 #include "present/presentation_frame_generation.h"
 #include "render/hud_layout.h"
+#include "render/hud_icon_frame.h"
 #include "sim/menu/sim_menu_art.h"
 #include "render/render_device.h"
 #include "localization/localization_frame.h"
@@ -117,7 +118,7 @@ typedef struct FrameSlot {
    * OBJ plane bound as the PPU source's primary surface. The primary binding
    * snapshot therefore cannot name these pixels; publish their host-owned
    * surface explicitly beside the frame. */
-  SrPpuSurfaceView hud_obj_surface;
+  HudIconFrame hud_icon;
   /* Fixed-width, world-clamped BG view, captured alongside the PPU without
    * rebinding the gameplay plane. Same synchronous-upload lifetime above. */
   SrPpuSurfaceView diorama_skybox_surface;
@@ -196,6 +197,12 @@ typedef struct FrameSlot {
   /* Simulation-town semantic payload. Presentation consumes this value copy;
    * the live HLE producer state stays private. Disabled stages remain inert. */
   SimFrameData sim;
+
+  /* Optional church interior, resolved on the game owner beside native pixels. */
+  bool church_enabled;
+  uint64_t church_reset_generation, church_load_generation;
+  bool church_reference_altar;
+  uint8_t church_town;
 
   /* Immutable enhanced-text payload captured beside the PPU pixels whose BG3
    * cells it may replace. Empty means native presentation is untouched. */
@@ -302,24 +309,6 @@ typedef struct FrameSlot {
   uint8_t bg3_tilemap_width_tiles, bg3_tilemap_height_tiles;
 
   FrameSlotOverlayCapture overlay_captures[kFrameSlotOverlaySourceCount];
-
-  /* OBJ HUD-icon promotion. The OAM slots ActRaiser_WidescreenHudObjPromote
-   * validated this frame, latched from ActRaiser_HudObjIconRange; a zero count
-   * means it promoted nothing.
-   *
-   * Do NOT re-derive this from overlay_captures[Obj].oamFirst/oamCount. That
-   * range is whatever policy claimed the ONE OBJ capture slot last, and in
-   * diorama mode that is the full-frame 0..127 scene claim, not the icon —
-   * which is exactly how the icon used to get lost and fall back to being
-   * drawn centered with the scene instead of anchored right. */
-  uint8_t hud_icon_first, hud_icon_count;
-  /* Rows the promote claimed, latched under that same rule and for the same
-   * reason: it describes hud_obj_surface, while overlay_captures[Obj].y1
-   * describes whatever claimed the OBJ slot last. Taking the extent from the
-   * capture while taking the pixels from the promoted surface is how the icon
-   * silently stopped being uploaded — a full-frame claim made y1 taller than
-   * that surface, so the upload was skipped and the texture stayed empty. */
-  uint8_t hud_icon_rows;
 
   /* oam/high_oam are only populated when there is an OBJ overlay or a promoted
    * icon to resolve (§2.8 cost note); oam_valid says whether this frame

@@ -106,6 +106,20 @@ bool ArRenderDevice_SetClipRect(ArRenderDevice *device,
       device->ops->set_clip_rect(device->context, clip);
 }
 
+bool ArRenderDevice_CaptureTargetState(ArRenderDevice *device, ArRenderTargetState *state) {
+  if (state) memset(state, 0, sizeof(*state));
+  if (!ArRenderDevice_IsReady(device) || !state ||
+      !ArRenderCapabilities_Has(&device->capabilities, kArRenderCapability_ScopedRenderTargets) ||
+      !device->ops->capture_render_target_state || !device->ops->restore_render_target_state)
+    return false;
+  if (!device->ops->capture_render_target_state(device->context, state)) {
+    memset(state, 0, sizeof(*state));
+    return false;
+  }
+  state->valid = true;
+  return true;
+}
+
 ArRenderTargetBeginResult ArRenderDevice_BeginTarget(
     ArRenderDevice *device, ArRenderTexture target,
     ArRenderTargetState *state) {

@@ -52,7 +52,7 @@ static DevToolsContext CurrentContext(void) {
         (g_snes_width + (int)SR_PPU_OBJ_APRON * 2) * 4,
     .obj_apron = SR_PPU_OBJ_APRON,
     .hud_bg_pixels = g_hud_bg_pixels,
-    .hud_obj_pixels = g_hud_obj_pixels,
+    .hud_obj_pixels = ActRaiser_HudIconFrame().surface.data,
     .diorama_layer_pixels = g_diorama_layer_pixels,
     .inspector_presentation = &s_inspector_presentation,
     .snes_width = g_snes_width,

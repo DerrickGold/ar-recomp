@@ -63,7 +63,6 @@ enum {
 typedef struct Sim3DOutputSurfaceViews {
   SrPpuSurfaceView planes[kSim3DPlane_Count];
   SrPpuSurfaceView hud_bg;
-  SrPpuSurfaceView hud_obj;
 } Sim3DOutputSurfaceViews;
 
 /* Raw capture buffers are game-thread-written until PresentUpload completes.

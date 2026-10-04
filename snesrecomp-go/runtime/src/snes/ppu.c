@@ -610,6 +610,7 @@ static bool set_obj_range_capture(PpuObjRangeCapture *capture, uint8_t first, ui
     capture->y1 = (int16_t)(y + height);
     capture->first = first;
     capture->count = count;
+    capture->handoff = false;
     capture->pixels = pixels;
     capture->pitch = (uint32_t)pitch;
     return true;
@@ -1662,10 +1663,25 @@ static unsigned append_obj_slots(PpuBitWord mask, unsigned base,
     return count;
 }
 
+/* Handoff is bounded to the same rectangle whose pixels are captured. Native
+ * evaluation still establishes the eligible sprites/slivers before filtering,
+ * so removing a presentation owner cannot admit sprites dropped by hardware. */
+static bool obj_handoff_on_line(const Ppu *ppu, int y) {
+    const PpuObjRangeCapture *range = &ppu->objRangeCapture;
+    return range->handoff && range->count && range->pixels &&
+        y >= range->y0 && y < range->y1;
+}
+
+static bool obj_handoff_at(const Ppu *ppu, int x, unsigned slot) {
+    const PpuObjRangeCapture *range = &ppu->objRangeCapture;
+    return x >= range->x0 && x < range->x1 &&
+        slot_in_range(slot, range->first, range->count);
+}
+
 static void build_obj_sample_cache(Ppu *ppu, PpuObjSampleCache *cache,
                                    int screen_y, int x_offset,
                                    int include_first, int include_count,
-                                   int exclude_first, int exclude_count) {
+                                   int exclude_first, int exclude_count, bool handoff) {
     unsigned start = (ppu->oamaddh & 0x80u) != 0u
         ? ppu->oamaddl >> 1 : 0u;
     const PpuBitWord *eligible = obj_scanline_masks(ppu, screen_y);
@@ -1763,6 +1779,7 @@ static void build_obj_sample_cache(Ppu *ppu, PpuObjSampleCache *cache,
             int output_x = part.x + output_tile * 8;
             for (int tile_x = 0; tile_x < 8; ++tile_x) {
                 int x = output_x + tile_x;
+                if (handoff && obj_handoff_at(ppu, x, slot)) continue;
                 int source_x = hflip ? 7 - tile_x : tile_x;
                 int pixel, index;
                 PpuZbufType current;
@@ -1793,12 +1810,14 @@ finish:
     cache->include_count = (uint8_t)include_count;
     cache->exclude_first = (uint8_t)exclude_first;
     cache->exclude_count = (uint8_t)exclude_count;
+    cache->handoff = handoff;
     cache->valid = true;
 }
 
-static PpuObjSampleCache *get_obj_sample_cache(Ppu *ppu, int screen_y,
+static PpuObjSampleCache *get_obj_sample_cache_internal(Ppu *ppu, int screen_y,
         int x_offset, int include_first, int include_count,
-        int exclude_first, int exclude_count) {
+        int exclude_first, int exclude_count, bool handoff) {
+    handoff = handoff && obj_handoff_on_line(ppu, screen_y);
     PpuObjSampleCache *cache = NULL;
     for (int slot = 0; slot < kPpuObjSampleCacheCount; ++slot) {
         PpuObjSampleCache *candidate = &ppu->objSampleCache[slot];
@@ -1807,7 +1826,8 @@ static PpuObjSampleCache *get_obj_sample_cache(Ppu *ppu, int screen_y,
             candidate->include_first == include_first &&
             candidate->include_count == include_count &&
             candidate->exclude_first == exclude_first &&
-            candidate->exclude_count == exclude_count) {
+            candidate->exclude_count == exclude_count &&
+            candidate->handoff == handoff) {
             cache = candidate;
             break;
         }
@@ -1816,21 +1836,33 @@ static PpuObjSampleCache *get_obj_sample_cache(Ppu *ppu, int screen_y,
     if (cache != NULL && !cache->valid)
         build_obj_sample_cache(ppu, cache, screen_y, x_offset,
                                include_first, include_count,
-                               exclude_first, exclude_count);
+                               exclude_first, exclude_count, handoff);
     return cache;
+}
+
+static PpuObjSampleCache *get_obj_sample_cache(Ppu *ppu, int y, int offset,
+        int first, int count, int exclude_first, int exclude_count) {
+    return get_obj_sample_cache_internal(ppu, y, offset, first, count,
+        exclude_first, exclude_count, false);
+}
+
+static PpuObjSampleCache *get_scene_obj_sample_cache(Ppu *ppu, int y, int offset,
+        int first, int count, int exclude_first, int exclude_count) {
+    return get_obj_sample_cache_internal(ppu, y, offset, first, count,
+        exclude_first, exclude_count, true);
 }
 
 static bool sample_obj_cached(Ppu *ppu, int screen_x, int screen_y,
         int x_offset, int include_first, int include_count,
-        int exclude_first, int exclude_count,
+        int exclude_first, int exclude_count, bool handoff,
         SrPpuPixel *out, bool *handled) {
     PpuObjSampleCache *cache;
     int index = screen_x + kPpuExtraLeftRight;
     *handled = true;
     if (index < 0 || index >= kPpuBufWidth) return false;
-    cache = get_obj_sample_cache(ppu, screen_y, x_offset,
+    cache = get_obj_sample_cache_internal(ppu, screen_y, x_offset,
                                  include_first, include_count,
-                                 exclude_first, exclude_count);
+                                 exclude_first, exclude_count, handoff);
     if (cache == NULL) {
         *handled = false;
         return false;
@@ -1857,13 +1889,14 @@ static bool sample_obj_cached(Ppu *ppu, int screen_x, int screen_y,
     }
 }
 
-static bool sample_obj_filtered(Ppu *ppu, int screen_x, int screen_y,
+static bool sample_obj_filtered_internal(Ppu *ppu, int screen_x, int screen_y,
         int x_offset, int include_first, int include_count,
-        int exclude_first, int exclude_count, SrPpuPixel *out,
+        int exclude_first, int exclude_count, bool handoff, SrPpuPixel *out,
         int *out_slot) {
     unsigned start = (ppu->oamaddh & 0x80u) != 0u ? ppu->oamaddl >> 1 : 0u;
     bool margin = screen_y < 0 || screen_y >= kPpuYPixels;
     memset(out, 0, sizeof(*out));
+    handoff = handoff && obj_handoff_on_line(ppu, screen_y);
     /* A capture of OAM 0..127 is the complete OBJ source, not a filtered
      * source.  Canonicalize it before selecting the sampler so full-scene
      * layer capture shares the scanline cache with ordinary composition.
@@ -1882,12 +1915,13 @@ static bool sample_obj_filtered(Ppu *ppu, int screen_x, int screen_y,
         bool handled;
         bool found = sample_obj_cached(
             ppu, screen_x, screen_y, x_offset,
-            include_first, include_count, exclude_first, exclude_count,
+            include_first, include_count, exclude_first, exclude_count, handoff,
             out, &handled);
         if (handled) return found;
     }
     for (unsigned step = 0; step < 128u; ++step) {
         unsigned slot = (start + step) & 127u;
+        if (handoff && obj_handoff_at(ppu, screen_x, slot)) continue;
         PpuObjPart part;
         int pixel, palette;
         uint8_t rank;
@@ -1912,6 +1946,20 @@ static bool sample_obj_filtered(Ppu *ppu, int screen_x, int screen_y,
         if (out_slot != NULL) *out_slot = (int)slot;
     }
     return out->valid;
+}
+
+static bool sample_obj_filtered(Ppu *ppu, int x, int y, int offset,
+        int first, int count, int exclude_first, int exclude_count,
+        SrPpuPixel *out, int *slot) {
+    return sample_obj_filtered_internal(ppu, x, y, offset, first, count,
+        exclude_first, exclude_count, false, out, slot);
+}
+
+static bool sample_scene_obj_filtered(Ppu *ppu, int x, int y, int offset,
+        int first, int count, int exclude_first, int exclude_count,
+        SrPpuPixel *out, int *slot) {
+    return sample_obj_filtered_internal(ppu, x, y, offset, first, count,
+        exclude_first, exclude_count, true, out, slot);
 }
 
 static bool capture_active(const PpuOverlayCapture *capture, int x, int y) {
@@ -2180,7 +2228,7 @@ static void capture_obj_sources(Ppu *ppu, int x, int y, int obj_offset) {
         return;
     {
         SrPpuPixel pixel;
-        if (sample_obj_filtered(ppu, x, y, obj_offset,
+        if (sample_scene_obj_filtered(ppu, x, y, obj_offset,
                 capture->oamFirst, capture->oamCount, 0, 0,
                 &pixel, NULL))
             write_overlay(ppu, kPpuOverlaySource_Obj, x, y, &pixel, 0u);
@@ -2240,10 +2288,11 @@ static SrPpuPixel resolve_screen(Ppu *ppu, int x, int y, bool sub,
             exclude_first = cap->oamFirst;
             exclude_count = cap->oamCount;
         }
-        if (exclude_count == 0 && unremoved_out != NULL) {
+        if (exclude_count == 0 && !obj_handoff_on_line(ppu, y) &&
+            unremoved_out != NULL) {
             pixel = original_pixel;
         } else {
-            (void)sample_obj_filtered(ppu, x, y, obj_offset, 0, 0,
+            (void)sample_scene_obj_filtered(ppu, x, y, obj_offset, 0, 0,
                                       exclude_first, exclude_count,
                                       &pixel, NULL);
         }
@@ -2315,10 +2364,11 @@ static void resolve_screen_pair(Ppu *ppu, int x, int y, bool capture,
                 exclude_first = cap->oamFirst;
                 exclude_count = cap->oamCount;
             }
-            if (exclude_count == 0) {
+            if (exclude_count == 0 &&
+                !(honor_removal && obj_handoff_on_line(ppu, y))) {
                 pixel = original;
             } else {
-                (void)sample_obj_filtered(ppu, x, y, obj_offset, 0, 0,
+                (void)sample_scene_obj_filtered(ppu, x, y, obj_offset, 0, 0,
                                           exclude_first, exclude_count,
                                           &pixel, NULL);
             }
@@ -4151,7 +4201,7 @@ static uint16_t native_obj_cache_pixel(const PpuObjSampleCache *cache, int x) {
 
 static uint32_t transform_obj_color(Ppu *ppu,int x,int y,uint32_t argb) {
     if(!ppu->objColorTransformsActive)return argb;
-    PpuObjSampleCache *cache=get_obj_sample_cache(ppu,y,0,0,0,0,0);
+    PpuObjSampleCache *cache=get_scene_obj_sample_cache(ppu,y,0,0,0,0,0);
     if(!cache || !native_obj_cache_pixel(cache,x))return argb;
     const unsigned slot=cache->slots[x+kPpuExtraLeftRight];
     if(slot>=128)return argb;
@@ -4998,6 +5048,33 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
         }
 #undef RESOLVE_OBJ_MARGIN_SPAN
     }
+    /* Preserve the unmodified OBJ source for authentic comparison, then resolve
+     * the scene under the transferred range. Only the affected line/rectangle
+     * needs a second source sample; no post-scanout erasure or raster repair. */
+    const bool handoff = obj_handoff_on_line(ppu, screen_y);
+    if (handoff) {
+        const int obj = kPpuOverlaySource_Obj;
+        if (dual_authentic) {
+            memcpy(scratch->authenticObjMain, layer_main[obj] + kPpuExtraLeftRight,
+                   sizeof(scratch->authenticObjMain));
+            if (output_needs_sub)
+                memcpy(scratch->authenticObjSub, layer_sub[obj] + kPpuExtraLeftRight,
+                       sizeof(scratch->authenticObjSub));
+        }
+        PpuObjSampleCache *scene = get_scene_obj_sample_cache(
+            ppu, screen_y, obj_offset, 0, 0, 0, 0);
+        int begin = ppu->objRangeCapture.x0 > left ? ppu->objRangeCapture.x0 : left;
+        int end = ppu->objRangeCapture.x1 < right ? ppu->objRangeCapture.x1 : right;
+        for (int x = begin; x < end; ++x) {
+            int index = x + kPpuExtraLeftRight;
+            uint16_t pixel = native_obj_cache_pixel(scene, x);
+            layer_main[obj][index] = source_visible_on_screen(ppu, obj, false, x)
+                ? pixel : 0u;
+            if (source_needs_sub[obj])
+                layer_sub[obj][index] = source_visible_on_screen(ppu, obj, true, x)
+                    ? pixel : 0u;
+        }
+    }
     native_write_obj_range_capture(ppu, screen_y, obj_offset,
                                    &ppu->objRangeCapture, false);
     native_write_obj_range_capture(ppu, screen_y, obj_offset,
@@ -5006,14 +5083,14 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
         native_capture_intersects(obj_capture, screen_y) &&
         obj_capture->oamCount != 0u) {
         if (obj_capture->oamFirst == 0u && obj_capture->oamCount == 128u) {
-            obj_capture_cache = get_obj_sample_cache(
+            obj_capture_cache = get_scene_obj_sample_cache(
                 ppu, screen_y, obj_offset, 0, 0, 0, 0);
         } else {
-            obj_capture_cache = get_obj_sample_cache(
+            obj_capture_cache = get_scene_obj_sample_cache(
                 ppu, screen_y, obj_offset,
                 obj_capture->oamFirst, obj_capture->oamCount, 0, 0);
             if ((obj_capture->flags & kPpuOverlayFlag_RemoveFromGame) != 0u)
-                obj_removed_cache = get_obj_sample_cache(
+                obj_removed_cache = get_scene_obj_sample_cache(
                     ppu, screen_y, obj_offset, 0, 0,
                     obj_capture->oamFirst, obj_capture->oamCount);
         }
@@ -5265,7 +5342,7 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
         bool obj_sub_enabled =
             (ppu->screenEnabled[1] & (1u << kPpuOverlaySource_Obj)) != 0u;
         PpuObjSampleCache *sub_obj_cache = obj_sub_enabled
-            ? get_obj_sample_cache(
+            ? get_scene_obj_sample_cache(
                   ppu, screen_y, 0, 0, 0,
                   ppu->overlayObjRelocatedCount != 0u
                       ? ppu->overlayObjRelocatedFirst : 0u,
@@ -5321,11 +5398,13 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
             if ((source_mask & (1u << source)) == 0u) continue;
             for (int x = 0; x < kPpuXPixels; ++x) {
                 int index = x + kPpuExtraLeftRight;
-                uint16_t source_main = layer_main[source][index];
+                uint16_t source_main = handoff && source == kPpuOverlaySource_Obj
+                    ? scratch->authenticObjMain[x] : layer_main[source][index];
                 if (source_main > original_main[index])
                     original_main[index] = source_main;
                 if (output_needs_sub) {
-                    uint16_t source_sub = layer_sub[source][index];
+                    uint16_t source_sub = handoff && source == kPpuOverlaySource_Obj
+                        ? scratch->authenticObjSub[x] : layer_sub[source][index];
                     if (source_sub > original_sub[index])
                         original_sub[index] = source_sub;
                 }
@@ -5689,7 +5768,7 @@ static bool render_line_to(Ppu *ppu, int screen_y, uint8_t *buffer,
             }
             full_main = main;
             full_sub = sub;
-            if (deferred_capture && !dual_authentic) {
+            if (deferred_capture && (!dual_authentic || obj_handoff_on_line(ppu, screen_y))) {
                 original_main = resolve_screen(ppu, x, screen_y, false, false,
                                                obj_offset, false, -1, false,
                                                NULL);

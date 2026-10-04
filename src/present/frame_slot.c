@@ -130,6 +130,23 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   else
     SimFrameCapture_RefreshMetadata(&dst->sim);
   Sim3D_CaptureOutputSurfaceViews(&dst->sim3d_output_surfaces);
+  const char *reference = getenv("AR_CHURCH_ALTAR_REFERENCE");
+  dst->church_reference_altar = reference && strcmp(reference, "1") == 0;
+  dst->church_enabled = Sim3D_ChurchIsOn();
+  if (dst->church_enabled) {
+    SrGenerationSnapshot generations = {.struct_size = sizeof(generations)};
+    if (!have_ppu_view ||
+        ppu_view.api->query_generations(ppu_view.runner, &generations) != SR_RESULT_OK)
+      dst->church_enabled = false;
+    else {
+      dst->church_reset_generation = generations.reset_generation;
+      dst->church_load_generation = generations.load_generation;
+    }
+  }
+  if (dst->church_enabled && g_ram[kActRaiserWram_MapGroup] == kActRaiserMapGroup_NonAction &&
+      g_ram[kActRaiserWram_CurrentMap] == kActRaiserNonActionMap_Temple) {
+    dst->church_town = g_ram[kActRaiserWram_WorldLocation];
+  }
 
   dst->snes_width = g_snes_width;
   dst->snes_height = g_snes_height;
@@ -304,15 +321,12 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
       d->oamCount = src->oam_count;
     }
 
-    ActRaiser_HudObjIconRange(&dst->hud_icon_first, &dst->hud_icon_count,
-                              &dst->hud_icon_rows);
-    if (dst->hud_icon_count)
-      ActRaiser_HudObjSurfaceView(&dst->hud_obj_surface);
+    dst->hud_icon = ActRaiser_HudIconFrame();
+    if (dst->hud_icon.lifetime_generation != ppu_frame->lifetime_generation)
+      dst->hud_icon = (HudIconFrame){0};
 
-    /* Only needed when an OBJ overlay/HUD icon is active this frame (§2.8
-     * cost note). */
-    if (ppu_frame->overlays[SR_PPU_OVERLAY_OBJ].oam_count ||
-        dst->hud_icon_count) {
+    /* Scene/inspector OAM is independent of the completed HUD transfer. */
+    if (ppu_frame->overlays[SR_PPU_OVERLAY_OBJ].oam_count) {
       SrBorrowedU16Span oam = {sizeof(oam), 0u, NULL, 0u, 0u};
       SrBorrowedSpan high_oam = {
           sizeof(high_oam), 0u, NULL, 0u, 0u};

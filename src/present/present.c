@@ -16,6 +16,7 @@
 #include "present/present.h"
 #include "sim/menu/present_sim_menu.h"
 #include "sim/world_nav/present_sky_palace.h"
+#include "sim/church/present_church.h"
 #include "sim/sim3d/sim3d_textures.h"
 #include "action/present_action_effects.h"
 #include "render/effect_batch.h"
@@ -163,6 +164,7 @@ void PresentUpload(const FrameSlot *slot) {
     }
   }
 
+  PresentChurch_Upload(&g_render_device, slot);
   PresentDiorama_Upload(&g_render_device, slot);
   if (!slot->diorama_active && PresentationConsumesMainPpuTexture(slot)) {
     ArRenderRectI upload = {
@@ -418,6 +420,7 @@ void PresentRendererResources_Reset(void) {
   PerformanceOverlay_Reset(&g_render_device);
   Sim3DTextures_ResetUploads();
   ResetActionUploadMirrors();
+  PresentChurch_ResetResources(&g_render_device);
   PresentSkyPalace_Reset(&g_render_device);
   PresentHud_Reset(&g_render_device);
   PresentActionEffects_Reset(&g_render_device);
@@ -514,10 +517,22 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
   ArRenderRectF source = {
     (float)src.x, (float)src.y, (float)src.w, (float)src.h,
   };
-  const ArRenderRectF destination = ArPresentationLayout_CaptureDestination(
+  ArRenderRectF destination = ArPresentationLayout_CaptureDestination(
       local_viewport, FrameSlot_VisibleHeight(slot), slot->visible_top,
       FrameSlot_CaptureHeight(slot), slot->ws_extra_top);
-  if (slot->sim.view == kSimView_SkyPalace) {
+  bool church_drawn = false;
+  if (PresentChurch_Active(slot)) {
+    const PresentationOutcome church = PresentChurch_Draw(&g_render_device, slot, local_viewport);
+    church_drawn = church == kPresentationOutcome_Complete;
+    if (!PresentationOutcome_IsUsable(church)) {
+      ArRenderOutputFrame_Abort(&output_frame);
+      PresentActionHeat_Cancel(&g_render_device);
+      SessionFatal_Request("The church renderer could not restore its scene target (%s).",
+                           ArRenderDevice_LastError(&g_render_device));
+      return;
+    }
+  }
+  if (!church_drawn && slot->sim.view == kSimView_SkyPalace) {
     const PresentationOutcome palace = PresentSkyPalace_Draw(
         &g_render_device, slot, local_viewport,
         &source, &destination);
@@ -532,8 +547,8 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
           ArRenderDevice_LastError(&g_render_device));
       return;
     }
-  } else if (!ArRenderDevice_DrawTexture(
-          &g_render_device, g_texture, &source, &destination)) {
+  } else if (!church_drawn &&
+             !ArRenderDevice_DrawTexture(&g_render_device, g_texture, &source, &destination)) {
     ArRenderOutputFrame_Abort(&output_frame);
     PresentActionHeat_Cancel(&g_render_device);
     SessionFatal_Request(
@@ -567,7 +582,11 @@ void PresentCompositeScene(const FrameSlot *slot, float alpha) {
    * can be the final single unit without covering a BG1/BG2 HD replacement.
    * Drawing replacements first also makes the ordering explicit for future
    * enhanced glyph claims inside this same composite. */
-  PresentHud_Draw(&g_render_device, slot, output_viewport);
+  if (PresentChurch_Active(slot))
+    PresentHud_DrawCompositedWithBackdrop(&g_render_device, slot, output_viewport,
+                                          PresentChurch_UiBackdrop());
+  else
+    PresentHud_Draw(&g_render_device, slot, output_viewport);
 }
 
 bool PresentAuthenticScene(const FrameSlot *slot, ArRenderRectI viewport) {
@@ -642,12 +661,13 @@ bool PresentAuthenticPictureInPicture(const FrameSlot *slot,
   const int frame_size = kSettingsOverlayGlyphSize * frame_scale;
   int margin = priority_viewport.h * kPipMarginPercent / 100;
   if (margin < frame_size + 8) margin = frame_size + 8;
-  /* Menu phases do not move or resize the comparison inset. */
-  const ArRenderRectF destination = {
+  /* Menu phases within a scene do not move or resize the comparison inset. */
+  ArRenderRectF destination = {
     (float)(priority_viewport.x + priority_viewport.w - margin - width),
     (float)(priority_viewport.y + priority_viewport.h - margin - height),
     (float)width, (float)height,
   };
+  PresentChurch_PlaceComparison(slot, priority_viewport, margin, frame_size, &destination);
   const ArRenderRectI frame = {
     (int)destination.x - frame_size,
     (int)destination.y - frame_size,

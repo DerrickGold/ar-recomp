@@ -112,7 +112,7 @@ static void TestDefaultsAndMetadata(void) {
    * Seeded regional rolls add two options; save slots add two entry actions.
    * Remember last town adds a native/enhanced QoL preference; native menu
    * quick use adds an independent QoL toggle. Save editing adds Apply and restart. */
-  const int expected_descriptors = 306;
+  const int expected_descriptors = 307;
   if (g_setting_desc_count != expected_descriptors)
     fprintf(stderr, "Setting descriptors: expected %d, got %d\n",
             expected_descriptors, g_setting_desc_count);
@@ -319,6 +319,20 @@ static void TestDefaultsAndMetadata(void) {
   const SettingDesc *inspector = Settings_Find("scene_inspector");
   const SettingDesc *dump_assets = Settings_Find("dump_scene_assets");
   const SettingDesc *sim_mode = Settings_Find("sim3d_mode");
+  const SettingDesc *church = Settings_Find("sim3d_church");
+  CHECK(church && church->category == kSettingCat_Simulation);
+  CHECK(!Settings_IsDebugOnly(church) && Settings_IsMenuVisible(church));
+  CHECK(church->defval == 0);
+  {
+    const bool mode = g_settings.sim3d_mode, selected = g_settings.sim3d_church;
+    g_settings.sim3d_mode = false;
+    g_settings.sim3d_church = true;
+    CHECK(!Settings_IsAvailable(church) && !Sim3D_ChurchIsOn());
+    g_settings.sim3d_mode = true;
+    CHECK(Settings_IsAvailable(church) && Sim3D_ChurchIsOn());
+    g_settings.sim3d_mode = mode;
+    g_settings.sim3d_church = selected;
+  }
   const SettingDesc *world_navigation = Settings_Find("sim3d_world_navigation");
   const SettingDesc *world_navigation_lighting = Settings_Find("sim3d_world_navigation_lighting");
   const SettingDesc *world_navigation_clouds = Settings_Find("sim3d_world_navigation_clouds");
@@ -1214,6 +1228,7 @@ static void TestCategoryReset(void) {
   Settings_SetChangeObserver(NULL);
 
   const SettingDesc *sim_mode = Settings_Find("sim3d_mode");
+
   const SettingDesc *sim_tilt = Settings_Find("sim3d_tilt_x_mrad");
   const SettingDesc *volume = Settings_Find("audio_master_volume");
   const SettingDesc *frequency = Settings_Find("audio_frequency");
