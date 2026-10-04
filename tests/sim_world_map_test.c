@@ -854,7 +854,34 @@ static void TestCapturedFixtures(const char *rom_path, const char *act_path,
   free(rom);
 }
 
+static void TestIndependentMaterialRevisions(void) {
+  uint8_t *rom = BuildRom(), map[kSimWorldMapBytes], copy[kSimWorldMapBytes];
+  CHECK(SimWorldMap_Init(rom, kRomSize));
+  CHECK(SimWorldMap_CopyTilemap(map));
+  uint32_t mountains = SimWorldMap_MountainSerial(), terrain = SimWorldMap_TerrainSerial();
+  map[0] = 0x60; /* Non-rock art with unchanged terrain coverage. */
+  CHECK(SimWorldMap_PublishBuiltTilemap(map) == 1);
+  CHECK(SimWorldMap_MountainSerial() == mountains && SimWorldMap_TerrainSerial() == terrain);
+  map[0] = 0x40;
+  CHECK(SimWorldMap_PublishBuiltTilemap(map) == 1);
+  CHECK(SimWorldMap_MountainSerial() == ++mountains && SimWorldMap_TerrainSerial() == ++terrain);
+  map[0] = 0x41; /* Same coverage, different mountain shades. */
+  CHECK(SimWorldMap_PublishBuiltTilemap(map) == 1);
+  CHECK(SimWorldMap_MountainSerial() == ++mountains && SimWorldMap_TerrainSerial() == terrain);
+  map[1] = 0x60; /* Removing vegetation affects terrain, not mountain sources. */
+  CHECK(SimWorldMap_PublishBuiltTilemap(map) == 1);
+  CHECK(SimWorldMap_MountainSerial() == mountains && SimWorldMap_TerrainSerial() == ++terrain);
+  for (int phase = 0; phase < 4; ++phase) SimWorldMap_SetWaterAnimationSource(0xB000 + phase * 64);
+  CHECK(SimWorldMap_MountainSerial() == mountains && SimWorldMap_TerrainSerial() == terrain);
+  CHECK(SimWorldMap_BakedPixels() && SimWorldMap_CopyTilemap(copy));
+  CHECK(!memcmp(copy, map, sizeof(map))); /* Baking does not consume snapshots. */
+  SimWorldMap_Shutdown();
+  CHECK(!SimWorldMap_CopyTilemap(copy) && !SimWorldMap_MountainSerial() && !SimWorldMap_TerrainSerial());
+  free(rom);
+}
+
 int main(int argc, char **argv) {
+  TestIndependentMaterialRevisions();
   TestUnavailableRom();
   TestCopyTileArt();
   TestDecodedTileParity();

@@ -112,6 +112,8 @@ uint64_t HostDisplay_NextPresentationDeadline(void);
  * interpolation phase when drawing ahead of that time. Otherwise returns now. */
 uint64_t HostDisplay_PresentationSampleTime(uint64_t now_ns);
 uint64_t HostDisplay_NativeFrameSampleTime(uint64_t now_ns);
+/* 0 immediate, 1 renderer refresh, 2 software deadline, 3 VSync probe. */
+int HostDisplay_PacingSource(void);
 /* Rolling completed backend presents per second. */
 double HostDisplay_FramesPerSecond(void);
 

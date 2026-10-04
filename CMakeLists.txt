@@ -1354,7 +1354,7 @@ if(BUILD_TESTING)
         tests/present_sim_globe_water_test.c src/sim/world_nav/present_sim_globe_water.c
         src/sim/world_nav/present_sim_globe_mapping.c src/sim/world_nav/sim_world_navigation_globe.c)
     target_link_libraries(actraiser_present_sim_globe_water_test PRIVATE
-        actraiser_town_model_test_support)
+        actraiser_town_model_test_support actraiser_performance_test_support)
     target_include_directories(actraiser_present_sim_globe_water_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(actraiser_present_sim_globe_water_test PRIVATE actraiser_math)
     add_test(NAME actraiser_present_sim_globe_water COMMAND actraiser_present_sim_globe_water_test)

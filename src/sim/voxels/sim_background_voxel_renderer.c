@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "constants.h"
+#include "app/performance_metrics.h"
 #include "render/upload_rect_run.h"
 #include "render/scene3d_math.h"
 #include "sim/sim3d/sim3d_depth_pass.h"
@@ -483,10 +484,13 @@ void SimBackgroundVoxelRenderer_Upload(ArRenderDevice *device) {
     for (int region = 0; region < region_count; region++)
       uploaded_bytes += (uint64_t)regions[region].w *
           (uint64_t)regions[region].h * sizeof(uint32_t);
-    if (!Sim3DDepthPass_UploadMountainAtlasRegions(
+    const PerformanceScope atlas_performance = PerformanceMetrics_Begin(kPerformance_VoxelAtlasUpload);
+    const bool atlas_uploaded = Sim3DDepthPass_UploadMountainAtlasRegions(
             device, SimBackgroundVoxels_AtlasPixels(),
             kSimTownCanvasPixels, kSimTownCanvasPixels, pitch,
-            regions, region_count)) {
+            regions, region_count);
+    PerformanceMetrics_End(atlas_performance);
+    if (!atlas_uploaded) {
       fprintf(stderr, "[sim-bg-voxels] GPU mountain atlas upload failed: %s\n",
               Sim3DDepthPass_LastError());
       g_renderer_state.allocation_failed = true;
@@ -503,12 +507,14 @@ void SimBackgroundVoxelRenderer_Upload(ArRenderDevice *device) {
 
   uint32_t scene_serial = SimBackgroundVoxels_SceneSerial();
   if (scene_serial != g_renderer_state.uploaded_scene_serial) {
+    const PerformanceScope palette_performance = PerformanceMetrics_Begin(kPerformance_VoxelPalette);
     g_renderer_state.biome = SimBackgroundVoxelBiome_ForTown(scene->town);
     for (uint16_t i = 0; i < scene->object_count; i++)
       SimBackgroundVoxelPalette_Build(
           &scene->objects[i], g_renderer_state.biome,
           &g_renderer_state.palettes[i]);
     g_renderer_state.uploaded_scene_serial = scene_serial;
+    PerformanceMetrics_End(palette_performance);
   }
   g_renderer_state.uploaded_serial = serial;
 }

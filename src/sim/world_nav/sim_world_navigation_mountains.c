@@ -562,6 +562,29 @@ static void BackObject(const SimBackgroundMountainObject *object,
   }
 }
 
+/* Compare exactly the town inputs consumed by mountain classification,
+ * source art and rear/join clipping. Occupancy on non-mountain cells cannot
+ * change an already-disallowed rear/join cell. */
+bool SimWorldNavigationMountains_SameSources(
+    const SimWorldNavigationTownGround *a, const SimWorldNavigationTownGround *b) {
+  if (!a || !b || a->enabled_town_mask != b->enabled_town_mask) return false;
+  if (!memcmp(a, b, sizeof(*a))) return true;
+  for (uint8_t town = 1; town <= kSimTownCount; ++town) {
+    const int t = town - 1;
+    if (!(a->enabled_town_mask & (1u << t))) continue;
+    if (a->development_tier[t] != b->development_tier[t]) return false;
+    for (int p = 0; p < kSimTownCells * kSimTownCells; ++p) {
+      const uint8_t x = a->terrain[t][p], y = b->terrain[t][p];
+      const bool am = SimBackgroundMountains_TileFlags(town, x) != 0;
+      const bool bm = SimBackgroundMountains_TileFlags(town, y) != 0;
+      if (am != bm || (am && (x != y ||
+          ((a->object_rows[t][p / 32] ^ b->object_rows[t][p / 32]) & (UINT32_C(1) << (p % 32))))))
+        return false;
+    }
+  }
+  return true;
+}
+
 bool SimWorldNavigationMountains_Build(
     const SimWorldNavigationTownGround *ground,
     SimWorldNavigationMountainScene *out) {

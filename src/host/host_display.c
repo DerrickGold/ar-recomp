@@ -88,6 +88,7 @@ static bool s_present_trace_enabled;
 static HostDisplayPresentTrace s_present_trace;
 static uint64_t s_submit_deadline_ns;
 static HostFrameRefreshClock s_refresh_clock;
+static HostDisplayPacingOptions CurrentPacingOptions(void);
 
 /* Diagnostic pacing experiments; ordinary playback retains its current
  * policy until the measured tails and visual timing have been qualified. */
@@ -131,10 +132,18 @@ uint64_t HostDisplay_PresentationSampleTime(uint64_t now_ns) {
 }
 
 uint64_t HostDisplay_NativeFrameSampleTime(uint64_t now_ns) {
-  if (s_producer_pacing)
+  if (HostDisplay_PacingSource() == 2)
     return s_present_deadline_ns > now_ns ? s_present_deadline_ns : now_ns;
   return g_settings.refresh_mode == kRefreshMode_Vsync
       ? HostFrameRefreshClock_Next(s_refresh_clock, now_ns) : now_ns;
+}
+
+int HostDisplay_PacingSource(void) {
+  const HostDisplayPacingOptions options = CurrentPacingOptions();
+  if (s_vsync_guard.probing) return 3;
+  if (HostDisplayPacing_GameIntervalNs(options, kHostDisplayEmulationFrameIntervalNs))
+    return 2;
+  return options.refresh_mode == kRefreshMode_Vsync && s_refresh_clock.period_ns ? 1 : 0;
 }
 
 void HostDisplay_EnablePresentTrace(bool enabled) {
@@ -334,7 +343,8 @@ static uint64_t PresentIntervalNs(HostDisplayPresentMode mode) {
 static bool CompletePresent(HostDisplayPresentMode mode) {
   const PerformanceScope pacing = PerformanceMetrics_Begin(kPerformance_Pacing);
   bool prepared = true;
-  if (!s_producer_pacing) ThrottlePresent(PresentIntervalNs(mode));
+  if (!s_producer_pacing)
+    ThrottlePresent(s_vsync_guard.probing ? 0 : PresentIntervalNs(mode));
   if (s_producer_pacing && s_submit_deadline_ns) {
     /* Let the GPU execute the completed offscreen draw while the owner waits
      * for the output deadline. The final swapchain blit remains on this owner. */
@@ -370,6 +380,14 @@ static bool CompletePresent(HostDisplayPresentMode mode) {
       options.refresh_mode == kRefreshMode_Vsync && options.vsync_active &&
           !options.vsync_software_fallback && options.nominal_refresh_hz > 0
           ? kNanosecondsPerSecond / options.nominal_refresh_hz : 0);
+  /* Diagnostic A/B control; pacing selection still uses the same period. */
+  static int filter_phase = -1;
+  if (filter_phase < 0) {
+    const char *option = getenv("AR_FRAME_REFRESH_PHASE");
+    filter_phase = !option || strcmp(option, "0");
+  }
+  if (!filter_phase && s_refresh_clock.period_ns) s_refresh_clock.phase_ns = completed_at_ns;
+  const bool was_fallback = s_vsync_guard.software_fallback_active;
   if (HostDisplayPacing_RecordVsyncPresent(
           &s_vsync_guard,
           options.refresh_mode == kRefreshMode_Vsync &&
@@ -385,6 +403,10 @@ static bool CompletePresent(HostDisplayPresentMode mode) {
               "[display] renderer Vsync is not pacing completed presents; "
               "using the native-rate software safety cadence\n");
     }
+  }
+  if (was_fallback && !s_vsync_guard.software_fallback_active) {
+    s_present_deadline_ns = 0;
+    fprintf(stderr, "[display] renderer Vsync pacing recovered after bounded probe\n");
   }
 
   if (!g_settings.show_fps) {
@@ -782,6 +804,7 @@ static void PerformanceContextForFrame(const FrameSlot *slot, HostDisplayPresent
     .refresh_mode = g_settings.refresh_mode,
     .limit_fps = g_settings.refresh_mode == kRefreshMode_Limit ? g_settings.frame_limit_fps : 0,
     .vsync = HostDisplayStatus_VsyncActive(),
+    .pacing_source = HostDisplay_PacingSource(),
   };
   const PresentationViewDecision view = PresentationView_Resolve(
       slot, RenderComparison_PresentView());

@@ -13,29 +13,68 @@ typedef struct HostFramePlayout {
   bool interpolate;
 } HostFramePlayout;
 
+/* Fixed source schedule for synchronous native rendering. Presentation may
+ * release several ticks, but never changes their interval. A genuine stall
+ * retains the loop's bounded catch-up policy and starts a new trace epoch. */
+typedef struct HostFrameTickSchedule {
+  uint64_t next_ns, interval_ns, epoch;
+} HostFrameTickSchedule;
+
+static inline unsigned HostFrameTickSchedule_Release(HostFrameTickSchedule *clock,
+    uint64_t target_ns, uint64_t interval_ns, unsigned maximum, uint64_t *source_ns) {
+  if (!interval_ns || !maximum) return 0;
+  if (!clock->next_ns || clock->interval_ns != interval_ns) {
+    clock->next_ns = target_ns;
+    clock->interval_ns = interval_ns;
+    ++clock->epoch;
+  } else if (target_ns > clock->next_ns &&
+             (target_ns - clock->next_ns) / interval_ns >= maximum) {
+    clock->next_ns = target_ns - (maximum - 1) * interval_ns;
+    ++clock->epoch;
+  }
+  unsigned ticks = 0;
+  while (clock->next_ns <= target_ns && ticks < maximum) {
+    *source_ns = clock->next_ns;
+    clock->next_ns += interval_ns;
+    ++ticks;
+  }
+  return ticks;
+}
+
 /* Present return is an estimate of refresh, not a physical scanout timestamp.
- * Filter its period only on single-refresh samples; stalls must not teach the
- * predictor a slower display rate. Reset on display/pacing changes. */
+ * Filter both period and phase on single-refresh samples. Present-return
+ * jitter must not move the source-selection boundary at the NTSC/display beat.
+ * Stalls and discontinuities resynchronize instead of teaching a slower rate. */
 typedef struct HostFrameRefreshClock {
-  uint64_t completed_ns, period_ns;
+  uint64_t completed_ns, period_ns, phase_ns, nominal_ns;
 } HostFrameRefreshClock;
 
 static inline void HostFrameRefreshClock_Observe(
     HostFrameRefreshClock *clock, uint64_t completed_ns, uint64_t nominal_ns) {
   if (!nominal_ns) { *clock = (HostFrameRefreshClock){0}; return; }
+  if (clock->nominal_ns != nominal_ns || completed_ns <= clock->completed_ns)
+    *clock = (HostFrameRefreshClock){.nominal_ns = nominal_ns};
   if (!clock->period_ns) clock->period_ns = nominal_ns;
   if (completed_ns > clock->completed_ns && clock->completed_ns) {
     const uint64_t elapsed = completed_ns - clock->completed_ns;
     if (elapsed > nominal_ns * 9 / 10 && elapsed < nominal_ns * 11 / 10)
       clock->period_ns = (clock->period_ns * 7 + elapsed) / 8;
   }
+  const uint64_t predicted = clock->phase_ns + clock->period_ns;
+  const uint64_t error = completed_ns > predicted
+      ? completed_ns - predicted : predicted - completed_ns;
+  if (!clock->phase_ns || error > clock->period_ns / 2)
+    clock->phase_ns = completed_ns;
+  else
+    clock->phase_ns = completed_ns > predicted
+        ? predicted + error / 8 : predicted - error / 8;
   clock->completed_ns = completed_ns;
 }
 
 static inline uint64_t HostFrameRefreshClock_Next(
     HostFrameRefreshClock clock, uint64_t now_ns) {
   if (!clock.completed_ns || !clock.period_ns) return now_ns;
-  const uint64_t next = clock.completed_ns + clock.period_ns;
+  const uint64_t next = clock.phase_ns + clock.period_ns;
   return next > now_ns ? next : now_ns;
 }
 

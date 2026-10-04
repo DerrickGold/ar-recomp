@@ -262,6 +262,7 @@ typedef struct WorldNavigationMountainSourceWork {
 
 /* ---- state shared by the parts; defined in present_world_nav.c ---- */
 typedef struct WorldNavigationArtState {
+  uint8_t tilemap[kSimWorldMapBytes];
   uint32_t serial;
   uint64_t image_revision;
   uint32_t geography;

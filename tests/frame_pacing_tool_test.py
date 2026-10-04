@@ -41,6 +41,23 @@ class PacingTraceTest(unittest.TestCase):
                 writer.writerows(rows)
             return analyze(path, **options)
 
+    def test_synchronous_trace_uses_source_schedule(self):
+        period = 16639263
+        rows = []
+        for i in range(180):
+            now = 1_000_000_000 + i * 1_000_000_000 // 90
+            tick = (now - 1_000_000_000) // period + 1200
+            rows.append(dict(sample_ns=now, complete_ns=now+2_000_000,
+                interval_ns=period, remainder_ns=0, alpha=0.0, tick=tick,
+                produced=1, interpolation=0, source_ns=1_000_000_000+(tick-1200)*period,
+                epoch=1, tick_delta=1 if i == 0 or tick != rows[-1]['tick'] else 0,
+                pacing_source=2, target_ns=now, map_group=0, map_number=4))
+        report = self.report(rows)
+        self.assertEqual(report['source_cadence']['best_phase_mismatches'], 0)
+        self.assertGreater(report['zero_tick_presents'], 50)
+        self.assertEqual(report['pacing_sources'], {'2': 180})
+        self.assertNotIn('producer_work_ms', report)
+
     def test_native_cadence_allows_natural_holds_and_ntsc_drift(self):
         period = 16639263
         for refresh in (30, 60, 90, 120):

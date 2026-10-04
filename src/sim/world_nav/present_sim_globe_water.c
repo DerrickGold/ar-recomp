@@ -1,6 +1,7 @@
 #include "sim/world_nav/present_sim_globe_water.h"
 #include "sim/sim3d/sim3d_mesh_set.h"
 #include "sim/town/sim_town_ground_art.h"
+#include "app/performance_metrics.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,7 @@ static struct {
   Sim3DMeshSet mesh;
   SimGlobeMapping map;
   SimWorldNavigationTownGround ground;
+  uint32_t geography;
   bool ready;
   size_t count;
 } s_water;
@@ -196,10 +198,11 @@ static bool BuildRectangles(WaterBuilder *b) {
 bool PresentSimGlobeWater_Matches(const SimGlobeMapping *map,
     const SimWorldNavigationTownGround *ground) {
   return map && ground && s_water.ready && Sim3DMeshSet_Ready(&s_water.mesh) &&
+      s_water.geography == SimWorldMap_GeographySerial() &&
       !memcmp(map,&s_water.map,sizeof(*map)) && !memcmp(ground,&s_water.ground,sizeof(*ground));
 }
 
-bool PresentSimGlobeWater_Prepare(const SimGlobeMapping *map,
+static bool PrepareWater(const SimGlobeMapping *map,
     const SimWorldNavigationTownGround *ground, const Sim3DDepthSurfaceVertex *grid) {
   int ox,oy;
   if (!map || !ground || !grid || !map->town ||
@@ -231,7 +234,20 @@ bool PresentSimGlobeWater_Prepare(const SimGlobeMapping *map,
   free(b.focus);
   free(coverage);
   s_water.ready = ok;
-  if (ok) { s_water.map = *map; s_water.ground = *ground; s_water.count = b.count; }
+  if (ok) {
+    s_water.geography = SimWorldMap_GeographySerial();
+    s_water.map = *map;
+    s_water.ground = *ground;
+    s_water.count = b.count;
+  }
+  return ok;
+}
+
+bool PresentSimGlobeWater_Prepare(const SimGlobeMapping *map,
+    const SimWorldNavigationTownGround *ground, const Sim3DDepthSurfaceVertex *grid) {
+  const PerformanceScope scope = PerformanceMetrics_Begin(kPerformance_GlobeWater);
+  const bool ok = PrepareWater(map, ground, grid);
+  PerformanceMetrics_End(scope);
   return ok;
 }
 

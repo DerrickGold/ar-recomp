@@ -39,7 +39,7 @@ static bool DrawWorldNavigationGpuGrid(const FrameSlot *slot,
   if (!WorldNavigationGpuGridEnabled()) return false;
   if (g_world_nav_gpu_grid.unavailable) {
     if (!memcmp(&g_world_nav_gpu_grid.rejected_projection, projection, sizeof(*projection)) &&
-        g_world_nav_gpu_grid.rejected_geography == SimWorldMap_GeographySerial() &&
+        g_world_nav_gpu_grid.rejected_geography == SimWorldMap_TerrainSerial() &&
         g_world_nav_gpu_grid.rejected_cliffs == g_world_nav_terrain.cliff_serial &&
         g_world_nav_gpu_grid.rejected_mountains == g_world_nav_mountains.geometry_revision)
       return false;
@@ -277,7 +277,7 @@ static bool DrawWorldNavigationGpuGrid(const FrameSlot *slot,
 unavailable:
   Sim3DMeshSet_Destroy(&g_world_nav_gpu_grid.meshes);
   g_world_nav_gpu_grid.rejected_projection = *projection;
-  g_world_nav_gpu_grid.rejected_geography = SimWorldMap_GeographySerial();
+  g_world_nav_gpu_grid.rejected_geography = SimWorldMap_TerrainSerial();
   g_world_nav_gpu_grid.rejected_cliffs = g_world_nav_terrain.cliff_serial;
   g_world_nav_gpu_grid.rejected_mountains = g_world_nav_mountains.geometry_revision;
   g_world_nav_gpu_grid.unavailable = true;
@@ -781,7 +781,7 @@ static WorldNavigationGroundKey WorldNavigationGroundKeyFor(
          sizeof(key.source_to_screen));
   key.viewport = viewport;
   /* Shore opacity still follows geography when optional relief is off. */
-  key.geography_serial = SimWorldMap_GeographySerial();
+  key.geography_serial = SimWorldMap_TerrainSerial();
   key.snes_width = slot->snes_width;
   key.snes_height = slot->snes_height;
   key.visible_width = slot->visible_width;

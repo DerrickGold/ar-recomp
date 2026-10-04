@@ -328,7 +328,7 @@ static void TestOverlayLayout(void) {
   PerformanceOverlay_Build(&snapshot, 2, (ArRenderExtentI){1280, 800}, &copy_model);
   bool cadence_line = false;
   for (int i = 0; i < copy_model.line_count; ++i)
-    cadence_line |= strstr(copy_model.lines[i].text, "source holds 20.0/s skips 1.0/s") != NULL;
+    cadence_line |= strstr(copy_model.lines[i].text, "immediate | holds 20.0/s skips 1.0/s") != NULL;
   CHECK(cadence_line);
   const ArRenderExtentI sizes[] = {{1280, 800}, {800, 1280}, {640, 480}, {560, 390},
                                    {320, 240},  {240, 120},  {0, 0}};

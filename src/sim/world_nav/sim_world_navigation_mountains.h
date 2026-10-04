@@ -75,6 +75,9 @@ bool SimWorldNavigationMountains_UpdateLava(
     SimWorldNavigationMountainScene *scene, uint16_t game_frame,
     SimWorldNavigationMountainAtlasUpdate *update);
 
+bool SimWorldNavigationMountains_SameSources(
+    const SimWorldNavigationTownGround *a, const SimWorldNavigationTownGround *b);
+
 bool SimWorldNavigationMountains_Build(
     const SimWorldNavigationTownGround *ground,
     SimWorldNavigationMountainScene *out);

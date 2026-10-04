@@ -63,7 +63,32 @@ bool HostDisplayPacing_RecordVsyncPresent(
     HostDisplayPacing_ResetVsyncGuard(guard);
     return false;
   }
-  if (guard->software_fallback_active) return false;
+  if (guard->software_fallback_active) {
+    if (nominal_refresh_hz <= 0) { guard->probing = false; return false; }
+    if (!guard->probing) {
+      if (nominal_refresh_hz > 0 && completed_at_ns >= guard->probe_after_ns) {
+        guard->probing = true;
+        guard->probe_previous_ns = 0;
+        guard->probe_intervals = guard->probe_paced_intervals = 0;
+      }
+      return false;
+    }
+    if (guard->probe_previous_ns && completed_at_ns > guard->probe_previous_ns) {
+      const uint64_t period = kNanosecondsPerSecond / (uint64_t)nominal_refresh_hz;
+      const uint64_t elapsed = completed_at_ns - guard->probe_previous_ns;
+      guard->probe_paced_intervals += elapsed > period * 8 / 10 && elapsed < period * 12 / 10;
+      if (++guard->probe_intervals == 8) {
+        if (guard->probe_paced_intervals >= 7) {
+          HostDisplayPacing_ResetVsyncGuard(guard);
+        } else {
+          guard->probing = false;
+          guard->probe_after_ns = completed_at_ns + 5000000000ull;
+        }
+      }
+    }
+    guard->probe_previous_ns = completed_at_ns;
+    return false;
+  }
   if (!guard->initialized || completed_at_ns <= guard->sample_start_ns) {
     guard->sample_start_ns = completed_at_ns;
     guard->completed_intervals = 0;
@@ -98,6 +123,7 @@ bool HostDisplayPacing_RecordVsyncPresent(
     return false;
 
   guard->software_fallback_active = true;
+  guard->probe_after_ns = completed_at_ns + 5000000000ull;
   return true;
 }
 

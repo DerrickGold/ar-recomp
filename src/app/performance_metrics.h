@@ -24,6 +24,8 @@ typedef enum PerformanceStage {
   kPerformance_SettingsWrite = kPerformance_ActionFirst + kPerformance_ActionCount,
   kPerformance_SaveWrite, kPerformance_MusicStart,
   kPerformance_TerrainPrepare, kPerformance_TerrainSamples, kPerformance_GlobeBuild,
+  kPerformance_GlobeSurface, kPerformance_GlobeWater,
+  kPerformance_VoxelAtlasUpload, kPerformance_VoxelPalette,
   kPerformanceStage_Count,
 } PerformanceStage;
 
@@ -67,7 +69,7 @@ typedef enum PerformanceScene {
 typedef struct PerformanceContext {
   PerformanceScene scene;
   int host_mode; /* 0 game, 1 paused, 2 settings, 3 comparison */
-  int map_group, map_number, width, height, refresh_mode, limit_fps;
+  int map_group, map_number, width, height, refresh_mode, limit_fps, pacing_source;
   bool vsync;
 } PerformanceContext;
 

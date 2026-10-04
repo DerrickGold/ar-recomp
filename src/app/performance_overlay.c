@@ -67,6 +67,9 @@ void PerformanceOverlay_Build(const PerformanceSnapshot *snapshot, int level,
       menu ? output.height - height - margin : margin, width, height};
   static const char *const modes[] = {"game", "paused", "settings", "A/B"};
   const PerformanceContext *context = &snapshot->context;
+  static const char *const clocks[] = {"immediate", "renderer", "software", "probe"};
+  const char *clock = context->pacing_source >= 0 && context->pacing_source < 4
+      ? clocks[context->pacing_source] : "unknown";
   const char *host = context->host_mode >= 0 && context->host_mode < 4
       ? modes[context->host_mode] : "unknown";
   Line(model, 0, 0, "PERFORMANCE | %s / %s | %02X:%02X",
@@ -84,8 +87,8 @@ void PerformanceOverlay_Build(const PerformanceSnapshot *snapshot, int level,
       context->width, context->height, context->vsync ? "on" : "off", cap,
       snapshot->counts[kPerformanceCount_Ticks], snapshot->counts[kPerformanceCount_Represents]);
   if (!menu && snapshot->counts[kPerformanceCount_NativePresents] > 0)
-    Line(model, 0, 2, "%dx%d | source holds %.1f/s skips %.1f/s (refresh-dependent)",
-        context->width, context->height,
+    Line(model, 0, 2, "%dx%d %s | holds %.1f/s skips %.1f/s (refresh-dependent)",
+        context->width, context->height, clock,
         snapshot->counts[kPerformanceCount_SourceHolds] * snapshot->fps,
         snapshot->counts[kPerformanceCount_SourceSkips] * snapshot->fps);
   if (menu) {

@@ -121,7 +121,7 @@ static void InvalidateWorldNavigationMountainSurface(void) {
 static void RebuildWorldNavigationMountainTransition(
     const SimWorldNavigationTownGround *ground, float radius_tiles) {
   SimWorldNavigationMountainTransition_Destroy(&g_world_nav_mountains.transition);
-  g_world_nav_mountains.transition_serial = SimWorldMap_GeographySerial();
+  g_world_nav_mountains.transition_serial = SimWorldMap_MountainSerial();
   g_world_nav_mountains.chart_radius_tiles = radius_tiles;
   g_world_nav_mountains.transition_ready = g_world_nav_mountains.active &&
       SimWorldNavigationMountainTransition_BuildAtRadius(&g_world_nav_mountains.scene,
@@ -180,8 +180,9 @@ static void EnsureWorldNavigationMountains(const FrameSlot *slot, float radius_t
   if (g_world_nav_mountains.ready &&
       g_world_nav_mountains.chart_radius_tiles == radius_tiles &&
       g_world_nav_mountains.developed == SimWorldMap_DevelopedAvailable() &&
-      g_world_nav_mountains.transition_serial == SimWorldMap_GeographySerial() && !memcmp(
-          ground, &g_world_nav_mountains.sources, sizeof(*ground))) {
+      g_world_nav_mountains.transition_serial == SimWorldMap_MountainSerial() &&
+      SimWorldNavigationMountains_SameSources(ground, &g_world_nav_mountains.sources)) {
+    g_world_nav_mountains.sources = *ground;
     if (relief_changed)
       RefreshWorldNavigationMountainGeometry();
     UpdateWorldNavigationLava(slot);
@@ -356,17 +357,15 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
   const uint8_t phase =
       (detailed || models) && ground->enabled_town_mask && !g_world_nav_art.unavailable
           ? SimTownGroundArt_AnimationPhase(slot->sim.game_frame) : 0;
+  const bool uses_sources = detailed || models || g_world_nav_mountains.active;
+  const bool same_sources = !uses_sources || !memcmp(&g_world_nav_art.sources, ground, sizeof(*ground));
+  const bool same_geography = g_world_nav_art.geography == SimWorldMap_GeographySerial();
   const bool same_style =
       g_world_nav_art.cliffs == (g_world_nav_terrain.cliffs.town_mask != 0) &&
-      g_world_nav_art.detailed == detailed &&
-      g_world_nav_art.models == models &&
-      (!(detailed || models || g_world_nav_mountains.active) ||
-       !memcmp(&g_world_nav_art.sources,
-                            ground, sizeof(*ground)));
+      g_world_nav_art.detailed == detailed && g_world_nav_art.models == models;
   const bool same_image = g_world_nav_art.serial == slot->sim.underlay_serial;
   unsigned version;
-  if (same_style && g_world_nav_art.serial &&
-      g_world_nav_art.geography == SimWorldMap_GeographySerial() &&
+  if (same_style && same_sources && same_geography && g_world_nav_art.serial &&
       WorldNavigationArtVersion(slot, phase, &version) && g_world_nav_art.atlas_cache &&
       Sim3DDepthPass_HasAtlasVersion(g_world_nav_art.atlas_cache, version)) {
     /* These keys certify CPU pixels AND the mutable atlas, not the image
@@ -375,23 +374,32 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
     g_world_nav_art.displayed_version = (int)version;
     return true;
   }
-  if (same_style && same_image && g_world_nav_art.phase == phase) {
+  if (same_style && same_sources && same_geography && same_image && g_world_nav_art.phase == phase) {
     CaptureWorldNavigationArtVersion(slot, phase);
     return true;
   }
   const uint32_t *developed = SimWorldMap_BakedPixels();
   if (!developed) return false;
   if (same_style && g_world_nav_art.serial &&
-      g_world_nav_art.geography == SimWorldMap_GeographySerial() &&
       slot->sim.underlay_serial == SimWorldMap_Serial() && !g_world_nav_art.unavailable &&
       g_world_nav_art.pixels) {
-    SimWorldNavigationArtChanges changes;
-    uint8_t world_cells[kSimWorldMapBytes];
+    SimWorldNavigationArtChanges changes, inputs = {0};
+    uint8_t tilemap[kSimWorldMapBytes];
+    const bool snapshot = SimWorldMap_CopyTilemap(tilemap);
+    if (!same_sources || !same_geography) {
+      Sim3DDepthPass_DestroyAtlasCache(g_world_nav_art.atlas_cache);
+      g_world_nav_art.atlas_cache = NULL;
+      if (snapshot) SimWorldNavigationArt_MarkChanges(&inputs, g_world_nav_art.tilemap,
+          tilemap, &g_world_nav_art.sources, uses_sources ? ground : &g_world_nav_art.sources);
+    }
     const Sim3DPerformanceScope animation =
         Sim3DPerformance_Begin(kSim3DPerformance_WorldAnimation);
-    const bool world_ready = same_image || SimWorldMap_WaterAnimationCells(world_cells);
+    uint8_t water_cells[kSimWorldMapBytes];
+    const bool world_ready = snapshot && (same_image || SimWorldMap_WaterAnimationCells(water_cells));
+    if (!same_image && world_ready)
+      for (size_t i = 0; i < sizeof(water_cells); ++i) inputs.cells[i] |= water_cells[i];
     const bool updated = world_ready && UpdateWorldNavigationAnimation(developed,
-            same_image ? NULL : world_cells, detailed || models ? ground : NULL,
+            inputs.cells, detailed || models ? ground : NULL,
             detailed, models, phase, &changes) &&
         (!g_world_nav_mountains.active || SimWorldNavigationMountains_ClearGround(
             g_world_nav_art.pixels, kSimWorldNavigationArtPixels, ground,
@@ -407,6 +415,9 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
         InvalidateWorldNavigationArtPublication();
         return false;
       }
+      g_world_nav_art.geography = SimWorldMap_GeographySerial();
+      g_world_nav_art.sources = *ground;
+      memcpy(g_world_nav_art.tilemap, tilemap, sizeof(tilemap));
       g_world_nav_art.phase = phase;
       g_world_nav_art.serial = slot->sim.underlay_serial;
       ++g_world_nav_art.image_revision;
@@ -464,8 +475,8 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
   g_world_nav_art.models = models;
   g_world_nav_art.phase = phase;
   g_world_nav_art.cliffs = g_world_nav_terrain.cliffs.town_mask != 0;
-  if (detailed || models || g_world_nav_mountains.active)
-    g_world_nav_art.sources = *ground;
+  g_world_nav_art.sources = *ground;
+  (void)SimWorldMap_CopyTilemap(g_world_nav_art.tilemap);
   CaptureWorldNavigationArtVersion(slot, phase);
   return true;
 }
@@ -789,10 +800,7 @@ static bool DrawWorldNavigationMasterFade(
 bool EnsureWorldNavigationResourcesAtRadius(const FrameSlot *slot, float radius_tiles) {
   Sim3DPerformanceScope art_performance =
       Sim3DPerformance_Begin(kSim3DPerformance_Upload);
-  const bool setup_timing = Sim3DPerformance_Enabled() &&
-      ((!g_world_nav_mountains.ready && WorldNavigationMountainsEnabled(slot)) ||
-       !g_world_nav_terrain.cliffs_ready ||
-       !g_world_nav_art.serial);
+  const bool setup_timing = Sim3DPerformance_Enabled();
   const uint64_t setup_started = setup_timing ? HostClock_Nanoseconds() : 0;
   EnsureWorldNavigationMountains(slot,radius_tiles);
   const uint64_t mountains_done = setup_timing ? HostClock_Nanoseconds() : 0;

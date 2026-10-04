@@ -93,6 +93,14 @@ uint32_t SimWorldMap_Serial(void);
 /* Changes only with geography, not the eight-tick water animation. Relief
  * meshes must not be reclassified (or visibly breathe) on each wave frame. */
 uint32_t SimWorldMap_GeographySerial(void);
+/* Only authored rock coverage/shade identities; houses and waves do not
+ * change the mountain continuation geometry or atlas. */
+uint32_t SimWorldMap_MountainSerial(void);
+/* Height inference consumes per-cell water, rock and vegetation coverage,
+ * independently of color, individual texel arrangement and water animation. */
+uint32_t SimWorldMap_TerrainSerial(void);
+/* Each consumer owns its previous snapshot; image baking cannot consume it. */
+bool SimWorldMap_CopyTilemap(uint8_t tilemap[kSimWorldMapBytes]);
 
 /* Fraction of the cell painted with the authored mountain-rock palette
  * ($40-$45). Desert sand ($2C-$2F), snow, forests and buildings are separate

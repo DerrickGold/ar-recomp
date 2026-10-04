@@ -50,6 +50,14 @@ typedef struct SimWorldNavigationArtChanges {
   uint8_t cells[kSimWorldMapBytes];
 } SimWorldNavigationArtChanges;
 
+/* Add changed overview cells (with Scale2x neighbours) and native town
+ * cells to a consumer-owned mask. Inputs are complete snapshots; no shared
+ * dirty queue is consumed. Also handles town enable/disable and tier changes. */
+void SimWorldNavigationArt_MarkChanges(SimWorldNavigationArtChanges *changes,
+    const uint8_t *before, const uint8_t *after,
+    const SimWorldNavigationTownGround *old_ground,
+    const SimWorldNavigationTownGround *new_ground);
+
 /* Prepared pixel work, not a renderer resource. Preparation resolves borrowed
  * atlas tiles on their owner before execution. Keep all input pixels and the
  * town-art module unchanged until every requested row range has completed;
@@ -87,8 +95,8 @@ bool SimWorldNavigationArt_PrepareAnimation(
 void SimWorldNavigationArt_RenderAnimationRows(
     const SimWorldNavigationArtAnimation *work, size_t first, size_t end);
 
-/* Animation-only update of an already composed atlas. Geography and model/
- * cliff gates must match its full bake. world_cells optionally identifies
+/* Patch an already composed atlas. Model/cliff gates and mountain cleanup
+ * must match its full bake. Geographic/native changes must be in world_cells. world_cells optionally identifies
  * changed overview cells (including Scale2x neighbours); NULL means only
  * native town animation changed. Ground may be NULL when both detailed ground
  * and models are disabled; model cleanup remains active without ground detail.

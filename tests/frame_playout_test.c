@@ -144,7 +144,56 @@ static void TestNativeTimeline(void) {
   assert(!clock.period_ns && !clock.completed_ns);
 }
 
+static void TestRefreshPhase(void) {
+  const uint64_t origin = 1000000000, period = 16666667;
+  HostFrameRefreshClock clock = {0};
+  uint64_t filtered_error = 0, raw_error = 0;
+  for (unsigned i = 0; i < 6000; ++i) {
+    const uint64_t ideal = origin + i * period;
+    const int64_t jitter = (i % 4 == 0 ? 1200000 : i % 4 == 2 ? -1200000 : 0);
+    const uint64_t complete = (uint64_t)((int64_t)ideal + jitter);
+    HostFrameRefreshClock_Observe(&clock, complete, period);
+    if (i > 100) {
+      const uint64_t prediction = HostFrameRefreshClock_Next(clock, complete);
+      const uint64_t target = ideal + period;
+      filtered_error += prediction > target ? prediction - target : target - prediction;
+      raw_error += jitter < 0 ? -jitter : jitter;
+    }
+  }
+  assert(filtered_error < raw_error / 2);
+  uint64_t stall = clock.completed_ns + 8 * period;
+  HostFrameRefreshClock_Observe(&clock, stall, period);
+  assert(clock.phase_ns == stall);
+  HostFrameRefreshClock_Observe(&clock, stall + 11111111, 11111111);
+  assert(clock.period_ns == 11111111 && clock.phase_ns == stall + 11111111);
+  HostFrameRefreshClock_Observe(&clock, origin, period);
+  assert(clock.phase_ns == origin);
+}
+
+static void TestSynchronousRelease(void) {
+  const uint64_t period = 16639263, origin = 1000000000;
+  for (unsigned rate = 60; rate <= 120; rate += 30) {
+    HostFrameTickSchedule clock = {0};
+    uint64_t source = 0;
+    unsigned total = 0;
+    for (unsigned i = 0; i < rate * 90; ++i) {
+      uint64_t target = origin + (uint64_t)i * 1000000000 / rate;
+      total += HostFrameTickSchedule_Release(&clock, target, period, 3, &source);
+      assert(source <= target && source + period > target);
+      assert(clock.epoch == 1);
+    }
+    assert(total >= 5407 && total <= 5409);
+    const uint64_t next = clock.next_ns;
+    assert(HostFrameTickSchedule_Release(&clock, source - 1000, period, 3, &source) == 0);
+    assert(clock.next_ns == next);
+    assert(HostFrameTickSchedule_Release(&clock, next + period * 30, period, 3, &source) == 3);
+    assert(clock.epoch == 2 && source == next + period * 30);
+  }
+}
+
 int main(void) {
+  TestRefreshPhase();
+  TestSynchronousRelease();
   TestNativeTimeline();
   TestCadence();
   TestPrepareAhead();

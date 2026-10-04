@@ -6,6 +6,7 @@
 #include "sim/world_nav/present_world_nav_internal.h"
 static struct {
   Sim3DMeshSet surface;
+  Sim3DDepthSurfaceVertex *points;
   SimGlobeMapping map;
   uint32_t geography, mountains, cliffs;
   uint16_t height_percent;
@@ -81,10 +82,10 @@ static void BuildSimGlobeGridRows(void *context, size_t first, size_t end) {
   }
 }
 
-static bool SimGlobeBuildSurface(const FrameSlot *slot,
+static bool SimGlobeBuildSurfaceWork(const FrameSlot *slot,
     const WorldNavigationProjection *projection, const SimGlobeMapping *map,
     bool detailed_town) {
-  const uint32_t geography = SimWorldMap_GeographySerial();
+  const uint32_t geography = SimWorldMap_TerrainSerial();
   const bool water_ready = !detailed_town ||
       PresentSimGlobeWater_Matches(map,&slot->sim.world_navigation_towns.ground);
   if (s_sim_globe.ready && Sim3DMeshSet_Ready(&s_sim_globe.surface) &&
@@ -92,7 +93,10 @@ static bool SimGlobeBuildSurface(const FrameSlot *slot,
       s_sim_globe.geography == geography && s_sim_globe.detailed_town == detailed_town &&
       s_sim_globe.mountains == g_world_nav_mountains.geometry_revision &&
       s_sim_globe.cliffs == g_world_nav_terrain.cliff_serial &&
-      s_sim_globe.height_percent == slot->sim.height_scale_x100 && water_ready) return true;
+      s_sim_globe.height_percent == slot->sim.height_scale_x100) {
+    return water_ready || PresentSimGlobeWater_Prepare(
+        map, &slot->sim.world_navigation_towns.ground, s_sim_globe.points);
+  }
   if (!PrepareWorldNavigationGroundSamples(projection)) return false;
   const size_t cliffs = g_world_nav_terrain.cliffs.face_count;
   const size_t mountains =
@@ -183,12 +187,15 @@ static bool SimGlobeBuildSurface(const FrameSlot *slot,
   if (ok && detailed_town)
     ok = PresentSimGlobeWater_Prepare(map,&slot->sim.world_navigation_towns.ground,points);
   free(vertices);
-  free(points);
   free(mask);
   if (!ok) {
+    free(points);
+    s_sim_globe.ready = false;
     fprintf(stderr,"[sim-globe-underlay] surface publication rejected quads=%zu\n",count);
     return false;
   }
+  free(s_sim_globe.points);
+  s_sim_globe.points = points;
   s_sim_globe.map = *map;
   s_sim_globe.geography = geography;
   s_sim_globe.mountains = g_world_nav_mountains.geometry_revision;
@@ -202,6 +209,14 @@ static bool SimGlobeBuildSurface(const FrameSlot *slot,
     fprintf(stderr,"[sim-globe-town] source town=%u quads=%zu mountains=%zu\n",
         slot->sim.town,count,count-mountain_first);
   return true;
+}
+
+static bool SimGlobeBuildSurface(const FrameSlot *slot,
+    const WorldNavigationProjection *projection, const SimGlobeMapping *map, bool detailed_town) {
+  const PerformanceScope scope = PerformanceMetrics_Begin(kPerformance_GlobeSurface);
+  const bool ok = SimGlobeBuildSurfaceWork(slot, projection, map, detailed_town);
+  PerformanceMetrics_End(scope);
+  return ok;
 }
 
 #if AR_SIM_GLOBE_TESTING
@@ -630,6 +645,7 @@ void ResetWorldNavigationGlobeSurfaces(void) {
   PresentSimGlobeTerrain_Reset();
   PresentSimGlobeWater_Reset();
   Sim3DMeshSet_Destroy(&s_sim_globe.surface);
+  free(s_sim_globe.points);
   memset(&s_sim_globe, 0, sizeof(s_sim_globe));
   Sim3DDepthPass_DestroyMesh(g_world_nav_surfaces.mesh);
   memset(&g_world_nav_surfaces, 0, sizeof(g_world_nav_surfaces));

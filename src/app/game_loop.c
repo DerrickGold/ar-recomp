@@ -294,16 +294,17 @@ static void FinishFrameCapture(uint64_t profile, SimFrameData *sim) {
   HostRuntimeDiagnostics_EndDraw(profile);
 }
 
-static void DrawAndPresentFrame(HostDisplayPresentMode present_mode,
+static bool DrawAndPresentFrame(HostDisplayPresentMode present_mode,
                                 float alpha) {
   const uint64_t profile = HostRuntimeDiagnostics_BeginDraw();
   RtlDrawPpuFrame();
   SimFrameData sim;
   FinishFrameCapture(profile, &sim);
 
-  if (present_mode == kHostDisplayPresent_None ||
-      !HostDisplay_SubmitFrame(present_mode, alpha, &sim))
-    DevAutomation_CaptureScheduledScreenshot(NULL);
+  const bool presented = present_mode != kHostDisplayPresent_None &&
+      HostDisplay_SubmitFrame(present_mode, alpha, &sim);
+  if (!presented) DevAutomation_CaptureScheduledScreenshot(NULL);
+  return presented;
 }
 
 /* Host-side work that follows one or more completed emulation ticks. Catch-up
@@ -530,15 +531,16 @@ void GameLoop_Run(const GameSessionConfig *config) {
   const bool prepare_ahead = !prepare_option || strcmp(prepare_option, "0") != 0;
   HostDisplay_EnablePresentTrace(pacing_trace != NULL);
   if (pacing_trace) {
-    fprintf(pacing_trace, "loop_ns,prepare_ns,ready_ns,draw_ns,complete_ns,deadline_ns,upload_ns,uploads,draw_work_ns,swap_ns,vector_wait_ns,queue_before,queue_after,presented,tick,epoch,source_ns,producer_start_ns,producer_complete_ns,input_ns,pump_ns,input_events_ns,owner_poll_ns,submit_deadline_ns,submit_start_ns,submit_wait_ns,backend_flush_ns,backend_acquire_ns,backend_submit_ns,producer_cpu_ns,playout_target_ns,sample_ns,interval_ns,interpolation\n");
+    fprintf(pacing_trace, "loop_ns,prepare_ns,ready_ns,draw_ns,complete_ns,deadline_ns,upload_ns,uploads,draw_work_ns,swap_ns,vector_wait_ns,queue_before,queue_after,presented,tick,epoch,source_ns,producer_start_ns,producer_complete_ns,input_ns,pump_ns,input_events_ns,owner_poll_ns,submit_deadline_ns,submit_start_ns,submit_wait_ns,backend_flush_ns,backend_acquire_ns,backend_submit_ns,producer_cpu_ns,playout_target_ns,sample_ns,interval_ns,interpolation,pacing_source\n");
   }
   uint64_t trace_producer_start = 0, trace_producer_complete = 0, trace_input = 0;
   uint64_t trace_producer_cpu = 0;
   const char *sync_trace_path = getenv("AR_FRAME_SYNC_TRACE");
-  FILE *sync_trace = !config->headless && sync_trace_path
-      ? fopen(sync_trace_path, "w") : NULL;
+  char *sync_trace_buffer = NULL;
+  FILE *sync_trace = OpenBufferedDiagnosticTrace(
+      !config->headless ? sync_trace_path : NULL, 4 * 1024 * 1024, &sync_trace_buffer);
   if (sync_trace) fprintf(sync_trace,
-      "sample_ns,complete_ns,interval_ns,remainder_ns,alpha,tick,produced,interpolation\n");
+      "sample_ns,complete_ns,interval_ns,remainder_ns,alpha,tick,produced,interpolation,source_ns,epoch,tick_delta,pacing_source,target_ns,map_group,map_number,presentation_sample_ns\n");
   if (stream_enabled && HostFrameProducer_Enabled()) {
     stream.queue = HostFrameQueue_Create();
     if (!stream.queue) {
@@ -557,6 +559,14 @@ void GameLoop_Run(const GameSessionConfig *config) {
   /* M6/§3.1,§3.3: fixed-timestep accumulator, non-headless only. */
   static const int kMaxCatchupFrames = 3;     /* spiral-of-death cap, §3.1 */
   uint64_t accumulator = 0;
+  HostFrameTickSchedule sync_schedule = {0};
+  uint64_t sync_source_ns = 0, sync_epoch = 0, sync_schedule_epoch = 0;
+  int sync_last_tick = 0, sync_pacing = -1;
+  bool sync_reset = true, sync_was_scheduled = false;
+  const char *sync_option = getenv("AR_FRAME_SYNC_SCHEDULE");
+  /* Experimental: on a busy 90 Hz Deck the serial tick/capture path misses
+   * refreshes and scheduled release scores worse than the accumulator. */
+  const bool sync_scheduling = sync_option && strcmp(sync_option, "1") == 0;
   uint64_t last_time_ns = SDL_GetTicksNS();
   const HostDisplayPresentMode emulated_frame_present_mode =
       HostDisplay_EmulatedFramePresentMode(
@@ -750,7 +760,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
                             trace_ready_ns - trace_loop_ns > 1000000)) {
           const HostDisplayPresentTrace trace = await_endpoint
               ? (HostDisplayPresentTrace){0} : HostDisplay_LastPresentTrace();
-          fprintf(pacing_trace, "%llu,%llu,%llu,%llu,%llu,%llu,%llu,%u,%llu,%llu,%llu,%u,%u,%d,%d,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%d\n",
+          fprintf(pacing_trace, "%llu,%llu,%llu,%llu,%llu,%llu,%llu,%u,%llu,%llu,%llu,%u,%u,%d,%d,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%d,%d\n",
               (unsigned long long)trace_loop_ns,
               (unsigned long long)present_start_ns,
               (unsigned long long)trace_ready_ns,
@@ -779,7 +789,8 @@ void GameLoop_Run(const GameSessionConfig *config) {
               (unsigned long long)trace_producer_cpu,
               (unsigned long long)present_target_ns,
               (unsigned long long)sample_ns,
-              (unsigned long long)stream.interval_ns, stream.playout.interpolate);
+              (unsigned long long)stream.interval_ns, stream.playout.interpolate,
+              HostDisplay_PacingSource());
         }
         if (trace_complete_ns) {
           const uint64_t trace_write_ns = SDL_GetTicksNS() - trace_complete_ns;
@@ -808,6 +819,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
       }
       if (stream.stopped || SessionFatal_Requested()) { running = false; continue; }
       accumulator = 0;
+      sync_reset = true;
       last_time_ns = SDL_GetTicksNS();
     }
     const bool pipeline_log = HostRuntimeDiagnostics_PipelineLoggingEnabled();
@@ -850,6 +862,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
        * re-stamped every paused iteration below, so it's always "just now"
        * by the time the game actually unpauses. */
       accumulator = 0;
+      sync_reset = true;
       /* R17/C2: a pause can last minutes, and a settings change applied during
        * it (ScheduledSettings_ApplyIfDue runs below, on the first unpaused
        * iteration, BEFORE any tick can fire) re-derives geometry. Drop the
@@ -1009,7 +1022,37 @@ void GameLoop_Run(const GameSessionConfig *config) {
       const uint64_t catchup_cap_ns =
           HostDisplay_CatchupCapNs(
               emulation_frame_interval_ns, kMaxCatchupFrames);
-      if (accumulator > catchup_cap_ns) accumulator = catchup_cap_ns;
+      const bool catchup_limited = accumulator > catchup_cap_ns;
+      if (catchup_limited) accumulator = catchup_cap_ns;
+      const int pacing_source = HostDisplay_PacingSource();
+      const bool native_sync = !(g_diorama_frame_active && g_settings.gpu_interp_enabled);
+      const uint64_t sample_ns = HostDisplay_NativeFrameSampleTime(now_ns);
+      const bool scheduled = sync_scheduling && native_sync && !low_render_limit &&
+          !s_window_hidden && !HostInput_IsTurbo() &&
+          (pacing_source == 1 || pacing_source == 2);
+      if (!scheduled && catchup_limited) sync_reset = true;
+      if (sync_reset || scheduled != sync_was_scheduled || pacing_source != sync_pacing) {
+        sync_schedule.next_ns = 0;
+        ++sync_epoch;
+        sync_last_tick = 0;
+        sync_reset = false;
+      }
+      sync_was_scheduled = scheduled;
+      sync_pacing = pacing_source;
+      const HostFramePlayout sync_policy = HostFramePlayout_Create(
+          emulation_frame_interval_ns, false, kHostFramePlayoutNativeDelayPermille);
+      const uint64_t target_ns = scheduled ? HostFramePlayout_Target(sync_policy, sample_ns) : now_ns;
+      const int tick_before = snes_frame_counter;
+      if (scheduled) {
+        const unsigned ticks = HostFrameTickSchedule_Release(&sync_schedule, target_ns,
+            emulation_frame_interval_ns, kMaxCatchupFrames, &sync_source_ns);
+        if (sync_schedule.epoch != sync_schedule_epoch) {
+          sync_schedule_epoch = sync_schedule.epoch;
+          ++sync_epoch;
+          sync_last_tick = 0;
+        }
+        accumulator = (uint64_t)ticks * emulation_frame_interval_ns;
+      }
 
       bool produced_frame = false;
       while (running && accumulator >= emulation_frame_interval_ns) {
@@ -1019,6 +1062,8 @@ void GameLoop_Run(const GameSessionConfig *config) {
         accumulator -= emulation_frame_interval_ns;
         produced_frame = true;
       }
+      if (produced_frame && !scheduled) sync_source_ns = now_ns - accumulator;
+      else if (scheduled && accumulator) sync_source_ns -= accumulator;
       if (DevAutomation_ShouldQuit()) running = false;
       // A replay/fatal stop can leave undrained catch-up ticks. They must not
       // execute after its final transaction or become an invalid alpha.
@@ -1059,8 +1104,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
       bool presented = false;
       if (!s_window_hidden) {
         if (produced_frame) {
-          DrawAndPresentFrame(emulated_frame_present_mode, alpha);
-          presented = true;
+          presented = DrawAndPresentFrame(emulated_frame_present_mode, alpha);
         } else if (HostDisplay_TryRepresentFrame(
                        alpha,
                        g_diorama_frame_active,
@@ -1069,17 +1113,30 @@ void GameLoop_Run(const GameSessionConfig *config) {
           presented = true;
         }
       }
-      /* The synchronous accumulator's interpolated timeline is one source
-       * period behind now_ns, not behind capture completion. Record both
-       * clocks without changing the phase or adding a presentation wait.
-       * This is software timeline age, not physical input/display latency. */
-      if (presented && sync_trace && g_diorama_frame_active) {
+      /* Count the selected native source at every completed present, including
+       * held ticks. Trace source schedule and completion separately; this is
+       * software timeline age, not physical input/display latency. */
+      if (presented && native_sync && sync_source_ns) {
+        PerformanceMetrics_Add(kPerformanceCount_NativePresents, 1);
+        if (sync_last_tick) {
+          if (snes_frame_counter == sync_last_tick)
+            PerformanceMetrics_Add(kPerformanceCount_SourceHolds, 1);
+          else if (snes_frame_counter > sync_last_tick + 1)
+            PerformanceMetrics_Add(kPerformanceCount_SourceSkips, snes_frame_counter - sync_last_tick - 1);
+        }
+        sync_last_tick = snes_frame_counter;
+      }
+      if (presented && sync_trace) {
         const uint64_t completed_ns = SDL_GetTicksNS();
-        fprintf(sync_trace, "%llu,%llu,%llu,%llu,%.8f,%d,%d,%d\n",
+        fprintf(sync_trace, "%llu,%llu,%llu,%llu,%.8f,%d,%d,%d,%llu,%llu,%d,%d,%llu,%u,%u,%llu\n",
             (unsigned long long)now_ns, (unsigned long long)completed_ns,
             (unsigned long long)emulation_frame_interval_ns,
             (unsigned long long)accumulator, alpha, snes_frame_counter,
-            produced_frame, g_settings.gpu_interp_enabled);
+            produced_frame, !native_sync, (unsigned long long)sync_source_ns,
+            (unsigned long long)sync_epoch, snes_frame_counter - tick_before,
+            pacing_source, (unsigned long long)target_ns,
+            g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
+            (unsigned long long)sample_ns);
       }
       /* INVARIANT: every iteration either presents (normally blocking on vsync
        * or a guaranteed-nonzero throttle; explicit Unlimited presentation is
@@ -1102,6 +1159,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
   free(pacing_trace_buffer);
   HostDisplay_EnablePresentTrace(false);
   if (sync_trace) fclose(sync_trace);
+  free(sync_trace_buffer);
   HostDisplay_SetProducerPacing(false);
   HostDisplay_InvalidatePresentHistory();
 }

@@ -82,11 +82,45 @@ def source_cadence(presents, assume_native=False):
                 epochs=phases)
 
 
+def analyze_sync(rows, path, start, end, refresh, warmup_seconds):
+    """Synchronous traces have no packet queue or independent producer timings."""
+    first = next((r for r in rows if r['source_ns'] > 0), None)
+    if first is None:
+        raise ValueError('No synchronous source in trace')
+    cutoff = first['sample_ns'] + int(warmup_seconds * 1e9)
+    rows = [r for r in rows if start <= r['tick'] <= end and
+            r['sample_ns'] >= cutoff and r['source_ns'] > 0]
+    if len(rows) < 100:
+        raise ValueError('Need at least 100 completed presents in the requested tick range')
+    for a, b in zip(rows, rows[1:]):
+        if b['sample_ns'] <= a['sample_ns'] or b['complete_ns'] <= a['complete_ns']:
+            raise ValueError('Non-monotonic trace')
+    if any(r['complete_ns'] < r['sample_ns'] or r['tick_delta'] < 0 for r in rows):
+        raise ValueError('Inconsistent synchronous timestamps/ticks')
+    sources = {}
+    for r in rows:
+        key = str(r['pacing_source'])
+        sources[key] = sources.get(key, 0) + 1
+    return dict(path=str(path), path_kind='synchronous', presents=len(rows),
+        measured_ticks=[rows[0]['tick'], rows[-1]['tick']], pacing_sources=sources,
+        epoch_boundaries=sum(a['epoch'] != b['epoch'] for a,b in zip(rows,rows[1:])),
+        source_cadence=source_cadence(rows),
+        all_complete_interval_ms=stats([(b['complete_ns']-a['complete_ns'])/1e6
+                                      for a,b in zip(rows,rows[1:])]),
+        source_age_at_complete_ms=stats([(r['complete_ns']-r['source_ns'])/1e6 for r in rows]),
+        iteration_ms=stats([(r['complete_ns']-r['sample_ns'])/1e6 for r in rows]),
+        zero_tick_presents=sum(r['tick_delta'] == 0 for r in rows),
+        multi_tick_presents=sum(r['tick_delta'] > 1 for r in rows))
+
+
 def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_native=False):
     if refresh <= 0 or end < start or warmup_seconds < 0:
         raise ValueError('Invalid timing range or warmup')
     with Path(path).open() as f:
-        rows = [{k:int(v) for k,v in row.items()} for row in csv.DictReader(f)]
+        rows = [{k:(float(v) if k == 'alpha' else int(v)) for k,v in row.items()}
+                for row in csv.DictReader(f)]
+    if rows and 'tick_delta' in rows[0]:
+        return analyze_sync(rows, path, start, end, refresh, warmup_seconds)
     # The game may enter the room long before the independent presenter starts.
     # Warm up against the first actual streamed endpoint, not a boot tick guess.
     first_source = next((r for r in rows if r['tick'] > 0 and r['source_ns']), None)
@@ -143,6 +177,9 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_nat
                   vector_wait_nonzero_ms=stats([r['vector_wait_ns']/1e6 for r in presents if r['vector_wait_ns']]),
                   event_work_ms=stats([(r['prepare_ns']-r['loop_ns'])/1e6 for r in rows]))
     result['source_cadence'] = source_cadence(presents, assume_native)
+    if presents and 'pacing_source' in presents[0]:
+        result['pacing_sources'] = {str(k):sum(r['pacing_source'] == k for r in presents)
+                                    for k in sorted({r['pacing_source'] for r in presents})}
     scheduled_native = [r for r in presents if r.get('interpolation') == 0 and
                         r.get('interval_ns', 0) and r.get('playout_target_ns', 0)]
     result['native_target_late_presents'] = sum(
