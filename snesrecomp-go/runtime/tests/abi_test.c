@@ -691,6 +691,113 @@ static int test_public_vertical_margin_scanout(
     return failed;
 }
 
+static int test_compact_obj_capture_background_view(
+        const SnesRunnerApi *api, SrRunnerHandle *runner, Snes *snes) {
+    enum { kWidth = 496, kHudRows = 40, kRows = 352 };
+    /* Adjacent allocations make a false full-frame OBJ extent deterministic.
+     * Northwall's finite skybox exposed this with a compact HUD icon capture. */
+    static struct {
+        uint32_t hud[kWidth * kHudRows];
+        uint32_t sky[kWidth * kRows];
+    } pixels;
+    static uint32_t main_pixels[kWidth * kRows];
+    SrGenerationSnapshot generation = {.struct_size = sizeof(generation)};
+    int failed = 0;
+    Ppu *saved_ppu = snes->ppu;
+    Ppu *ppu = ppu_init();
+    if (!ppu) return check(0, "compact capture PPU allocation failed");
+    snes->ppu = ppu;
+    sr_runner_bind_ppu_owner(snes, ppu, true);
+    ppu_reset(snes->ppu);
+    ppu->inidisp = 0x80;
+    dma_reset(snes->dma);
+    snes->vIrqEnabled = false;
+    failed |= check(api->query_generations(runner, &generation) == SR_RESULT_OK,
+                    "compact capture generation query failed");
+    SrPpuOutputBindingRequest binding = {
+        .struct_size = sizeof(binding),
+        .lifetime_generation = generation.lifetime_generation,
+        .kind = SR_PPU_OUTPUT_MAIN,
+        .pixels = (uint8_t *)main_pixels,
+        .pixel_byte_size = sizeof(main_pixels),
+        .pitch_bytes = kWidth * sizeof(uint32_t),
+        .height_pixels = kRows,
+    };
+    SrPpuFramePolicyRequest policy = {
+        .struct_size = sizeof(policy),
+        .lifetime_generation = generation.lifetime_generation,
+        .policy = {
+            .struct_size = sizeof(policy.policy),
+            .horizontal_mode = SR_PPU_HORIZONTAL_MARGIN_CENTERED,
+            .margin_budget_pixels = 120,
+            .margin_top_pixels = 64,
+            .margin_bottom_pixels = 64,
+        },
+    };
+    SrPpuFrameResetRequest reset = {
+        .struct_size = sizeof(reset),
+        .lifetime_generation = generation.lifetime_generation,
+    };
+    SrPpuScanoutRequest scanout = {
+        .struct_size = sizeof(scanout),
+        .lifetime_generation = generation.lifetime_generation,
+        .irq_callback = observe_test_ppu_scanout_irq,
+    };
+    SrPpuBackgroundViewRequest view = {
+        .struct_size = sizeof(view), .layer = 1,
+        .world_width = 512, .world_height = 768,
+        .screen_x0 = -120, .screen_y0 = -64,
+        .width = kWidth, .height = kRows,
+        .pixels = pixels.sky, .pitch_bytes = kWidth * sizeof(uint32_t),
+        .pixel_byte_size = sizeof(pixels.sky),
+    };
+    failed |= check(api->bind_ppu_output_surface(runner, &binding) == SR_RESULT_OK &&
+                    api->apply_ppu_frame_policy(runner, &policy) == SR_RESULT_OK,
+                    "compact capture surface setup failed");
+    for (unsigned winners = 0; winners < 2; ++winners) {
+        SrPpuObjCaptureRequest capture = {
+            .struct_size = sizeof(capture),
+            .lifetime_generation = generation.lifetime_generation,
+            .flags = winners ? SR_PPU_OBJ_CAPTURE_WINNERS : SR_PPU_OBJ_CAPTURE_RANGE,
+            .range_count = 1, .range_y = 24,
+            .range_width = 16, .range_height = 16,
+            .range_pixels = (uint8_t *)pixels.hud,
+            .range_pixel_byte_size = sizeof(pixels.hud),
+            .range_pitch_bytes = kWidth * sizeof(uint32_t),
+        };
+        SrPpuScanoutResult result = {.struct_size = sizeof(result)};
+        failed |= check(api->reset_ppu_frame_state(runner, &reset) == SR_RESULT_OK &&
+                        api->configure_ppu_obj_capture(runner, &capture) == SR_RESULT_OK,
+                        "compact OBJ capture setup failed");
+        memset(&pixels, 0xa5, sizeof(pixels));
+        /* A one-pixel overlap with the last captured row must still fail
+         * before either output or scanout state changes. */
+        SrPpuBackgroundViewRequest aliased = view;
+        aliased.pixels = &pixels.hud[kWidth * kHudRows - 1];
+        const bool even_frame = snes->ppu->evenFrame;
+        failed |= check(api->run_ppu_scanout_with_background_view(
+                            runner, &scanout, &aliased, &result) == SR_RESULT_INVALID_ARGUMENT &&
+                        snes->ppu->evenFrame == even_frame &&
+                        pixels.hud[kWidth * kHudRows - 1] == UINT32_C(0xa5a5a5a5) &&
+                        pixels.sky[0] == UINT32_C(0xa5a5a5a5),
+                        "overlapping compact capture was not rejected atomically");
+        failed |= check(api->run_ppu_scanout_with_background_view(
+                            runner, &scanout, &view, &result) == SR_RESULT_OK &&
+                        (result.flags & SR_PPU_SCANOUT_BACKGROUND_VIEW_READY),
+                        "adjacent compact OBJ and skybox captures were rejected");
+        for (unsigned i = 0; i < kWidth * kRows; ++i) {
+            if (pixels.sky[i] != 0) {
+                failed |= check(0, "compact capture skybox scanout missed a row");
+                break;
+            }
+        }
+    }
+    snes->ppu = saved_ppu;
+    sr_runner_bind_ppu_owner(snes, saved_ppu, true);
+    ppu_free(ppu);
+    return failed;
+}
+
 static void setup_public_mode2_hdma_opt_state(Snes *snes, uint8_t *wram) {
     Ppu *ppu = snes->ppu;
     unsigned row;
@@ -4483,6 +4590,7 @@ int main(void) {
                     "PPU authentic-camera clear failed");
 
     failed |= test_public_vertical_margin_scanout(api, runner, snes);
+    failed |= test_compact_obj_capture_background_view(api, runner, snes);
     failed |= test_public_mode2_hdma_opt_scanout(
         api, runner, snes, wram);
 

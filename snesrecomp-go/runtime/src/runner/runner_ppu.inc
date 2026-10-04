@@ -1178,14 +1178,17 @@ static bool valid_background_view(const Ppu *ppu,
         view->pixel_byte_size < view->pitch_bytes * view->height ||
         view->pitch_bytes * view->height > UINTPTR_MAX - (uintptr_t)view->pixels)
         return false;
+    /* OBJ captures use absolute screen rows, but only require storage through
+     * y1. A HUD icon can have a compact buffer; assuming 224 rows invents an
+     * overlap with an unrelated skybox allocation beyond that buffer. */
     if (background_view_overlaps(view, ppu->renderBuffer,
             (uint64_t)ppu->renderPitch * ppu->renderHeight) ||
         background_view_overlaps(view, ppu->authenticRenderBuffer,
             (uint64_t)ppu->authenticRenderPitch * ppu->authenticRenderHeight) ||
         background_view_overlaps(view, ppu->objRangeCapture.pixels,
-            (uint64_t)ppu->objRangeCapture.pitch * kPpuYPixels) ||
+            (uint64_t)ppu->objRangeCapture.pitch * ppu->objRangeCapture.y1) ||
         background_view_overlaps(view, ppu->objWinnerCapture.pixels,
-            (uint64_t)ppu->objWinnerCapture.pitch * kPpuYPixels))
+            (uint64_t)ppu->objWinnerCapture.pitch * ppu->objWinnerCapture.y1))
         return false;
     for (int source = 0; source < kPpuOverlaySource_Count; ++source) {
         uint64_t bytes = (uint64_t)ppu->overlayRenderPitch[source] *

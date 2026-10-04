@@ -338,9 +338,18 @@ static void ActRaiser_PublishScanout(SrResult scanout_status,
     };
   }
   if (scanout_status != SR_RESULT_OK) {
+    fprintf(stderr,
+        "[ppu-scanout] status=%d gf=%u map=%02x/%02x "
+        "skybox=%ux%u world=%ux%u origin=%d,%d flags=%u\n",
+        (int)scanout_status,
+        ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+        g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
+        skybox->width, skybox->height, skybox->world_width,
+        skybox->world_height, skybox->screen_x0, skybox->screen_y0,
+        skybox->flags);
     SessionFatal_Request(
-        "The runner could not execute the PPU scanout ABI service. "
-        "Restart after rebuilding the game and runner together.");
+        "The runner could not render the current PPU frame. Restart the game. "
+        "If this repeats, report the room and the [ppu-scanout] diagnostic.");
   }
   const uint32_t authentic_camera_flags =
       SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG1 | SR_PPU_SCANOUT_AUTHENTIC_CAMERA_BG2;
