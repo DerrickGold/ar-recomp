@@ -102,6 +102,14 @@ python3 tools/analyze_frame_pacing.py pacing.csv --refresh 90 \
   --start 1825 --end 3000 --warmup-seconds 10 --max-irregular-percent 2
 ```
 
+The `presentation_fps` result reports completed presents over elapsed time,
+including held source ticks and epoch transitions. Its `one_percent_low` is
+the reciprocal of the average slowest 1% of frame intervals, rounded up to a
+whole interval. These are render presentation rates measured at backend
+present return; they are separate from the SNES update rate and physical
+display scanout. Use **Unlimited** for throughput comparisons: **Uncapped**
+still applies a soft limit at twice the nominal display refresh rate.
+
 The optional threshold fails the command if source cadence exceeds the stated
 percentage. The analyzer fits one constant source/display phase per epoch and
 reports the fraction of presents inconsistent with it. This accommodates

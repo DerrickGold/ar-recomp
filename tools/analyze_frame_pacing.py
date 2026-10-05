@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 from pathlib import Path
 import statistics
 
@@ -25,6 +26,24 @@ def stats(values):
         return values[min(len(values)-1, int((len(values)-1)*fraction))]
     return dict(samples=len(values), mean=statistics.fmean(values),
                 p50=percentile(.5), p95=percentile(.95), p99=percentile(.99), max=values[-1])
+
+
+def presentation_fps(presents):
+    """Count completed presents over elapsed time, including held source ticks.
+
+    The 1% low is the reciprocal of the mean slowest ceil(1% * intervals)
+    frame times, not the reciprocal of p99 or a CPU scope. Epoch transitions
+    remain in the measurement so a room-change stall cannot inflate FPS.
+    Completion means backend present return, not physical scanout.
+    """
+    intervals = [b['complete_ns'] - a['complete_ns'] for a, b in zip(presents, presents[1:])]
+    if not intervals or any(value <= 0 for value in intervals):
+        raise ValueError('FPS requires at least two monotonically completed presents')
+    elapsed = sum(intervals) / 1e9
+    slow = sorted(intervals, reverse=True)[:math.ceil(len(intervals) / 100)]
+    return dict(average=len(intervals) / elapsed,
+                one_percent_low=1e9 / statistics.fmean(slow),
+                completed_presents=len(presents), elapsed_seconds=elapsed)
 
 
 def source_cadence(presents, assume_native=False):
@@ -102,6 +121,7 @@ def analyze_sync(rows, path, start, end, refresh, warmup_seconds):
         key = str(r['pacing_source'])
         sources[key] = sources.get(key, 0) + 1
     return dict(path=str(path), path_kind='synchronous', presents=len(rows),
+        presentation_fps=presentation_fps(rows),
         measured_ticks=[rows[0]['tick'], rows[-1]['tick']], pacing_sources=sources,
         epoch_boundaries=sum(a['epoch'] != b['epoch'] for a,b in zip(rows,rows[1:])),
         source_cadence=source_cadence(rows),
@@ -150,6 +170,7 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_nat
     sources = {(r['epoch'],r['tick']):r for r in uploads}
     lateness = [max(0,r['draw_ns']-r['deadline_ns'])/1e6 for r in presents if r['deadline_ns']]
     result = dict(path=str(path), ticks=[start,end], presents=len(presents), uploads=len(uploads),
+                  presentation_fps=presentation_fps(presents),
                   warmup_seconds=warmup_seconds, first_stream_tick=first_source['tick'],
                   measured_ticks=[presents[0]['tick'], presents[-1]['tick']],
                   first_present_after_stream_ms=(presents[0]['draw_ns']-first_source['loop_ns'])/1e6,

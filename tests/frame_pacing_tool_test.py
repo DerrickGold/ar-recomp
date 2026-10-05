@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from analyze_frame_pacing import analyze, source_cadence
+from analyze_frame_pacing import analyze, presentation_fps, source_cadence
 
 
 class PacingTraceTest(unittest.TestCase):
@@ -57,6 +57,26 @@ class PacingTraceTest(unittest.TestCase):
         self.assertGreater(report['zero_tick_presents'], 50)
         self.assertEqual(report['pacing_sources'], {'2': 180})
         self.assertNotIn('producer_work_ms', report)
+        self.assertAlmostEqual(report['presentation_fps']['average'], 90, places=5)
+
+    def test_fps_counts_presents_and_averages_slowest_frame_times(self):
+        # All presents hold one native source tick. CPU scope duration, source
+        # clock and a percentile reciprocal must not stand in for rendering FPS.
+        rows = [dict(complete_ns=1_000_000_000, tick=1200, epoch=1)]
+        for interval in [1_000_000] * 198 + [20_000_000, 40_000_000]:
+            rows.append(dict(complete_ns=rows[-1]['complete_ns'] + interval, tick=1200, epoch=2))
+        fps = presentation_fps(rows)
+        self.assertEqual(fps['completed_presents'], 201)
+        self.assertAlmostEqual(fps['elapsed_seconds'], .258)
+        self.assertAlmostEqual(fps['average'], 200 / .258)
+        self.assertAlmostEqual(fps['one_percent_low'], 1000 / 30)
+        rounded = [dict(complete_ns=0)]
+        for interval in [1_000_000] * 100 + [40_000_000]:
+            rounded.append(dict(complete_ns=rounded[-1]['complete_ns'] + interval))
+        self.assertAlmostEqual(presentation_fps(rounded)['one_percent_low'], 1000 / 20.5)
+        for invalid in ([], rows[:1], [rows[0], rows[0]], [rows[1], rows[0]]):
+            with self.assertRaises(ValueError):
+                presentation_fps(invalid)
 
     def test_native_cadence_allows_natural_holds_and_ntsc_drift(self):
         period = 16639263
@@ -121,6 +141,8 @@ class PacingTraceTest(unittest.TestCase):
         self.assertEqual(result['producer_work_ms']['mean'], 10)
         self.assertEqual(result['upload_ms']['mean'], 2)
         self.assertEqual(result['complete_interval_ms']['mean'], 16)
+        self.assertEqual(result['presentation_fps']['average'], 62.5)
+        self.assertEqual(result['presentation_fps']['one_percent_low'], 62.5)
         self.assertEqual(result['draw_work_ms']['mean'], 1)
         self.assertEqual(result['vector_wait_ms']['mean'], .25)
         self.assertEqual(result['deadline_over_1ms'], 0)
