@@ -110,6 +110,19 @@ present return; they are separate from the SNES update rate and physical
 display scanout. Use **Unlimited** for throughput comparisons: **Uncapped**
 still applies a soft limit at twice the nominal display refresh rate.
 
+For live presentation comparisons, keep the displays awake, the desktop session
+unlocked, and the game visible. Record those states alongside the power and
+output settings. On macOS, waking the displays does not unlock the session;
+presentation behind the login screen can behave differently even with VSync
+disabled. Treat those runs as background diagnostics rather than normal-play
+throughput or pacing results.
+
+The trace's `backend_acquire_ns` includes command-buffer acquisition and the
+swapchain wait. That wait can include both earlier GPU work completing and a
+display image becoming available. A large acquisition scope alone does not
+identify GPU execution time, compositor delay, or a driver fault. Separate those
+boundaries before choosing a fix.
+
 The optional threshold fails the command if source cadence exceeds the stated
 percentage. The analyzer fits one constant source/display phase per epoch and
 reports the fraction of presents inconsistent with it. This accommodates
