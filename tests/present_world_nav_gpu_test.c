@@ -2239,15 +2239,16 @@ static void TestContinuousTownScene(SDL_Renderer *renderer) {
 }
 
 static SDL_Surface *
-RenderCapturedFacingModels(SDL_Renderer *renderer, const WorldNavigationModelSource *sources,
+RenderFacingModels(SDL_Renderer *renderer, const WorldNavigationModelSource *sources,
                            size_t count, const WorldNavigationModelSourceStyle *style,
                            const SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount],
-                           const float matrix[16], double *uploaded_bytes) {
+                           const float matrix[16], SimBackgroundVoxelShading shading,
+                           PerformanceSnapshot *traffic) {
   PerformanceMetrics_Configure(false, false);
   PerformanceMetrics_Configure(true, false);
   CHECK(Sim3DDepthPass_Begin(&g_render_device, kWidth, kHeight, kArRenderFilter_Nearest));
   CHECK(WorldNavigationModelMesh_DrawFacingTown(
-      sources, count, style, kSimBackgroundVoxelShading_MaterialAware, axes, matrix, 0));
+      sources, count, style, shading, axes, matrix, 0));
   ArRenderTexture result = Sim3DDepthPass_Submit(&g_render_device, ArRenderTexture_Invalid());
   CHECK(ArRenderTexture_IsValid(result));
   CHECK(ArRenderDevice_SetRenderTarget(&g_render_device, result));
@@ -2259,12 +2260,154 @@ RenderCapturedFacingModels(SDL_Renderer *renderer, const WorldNavigationModelSou
   CHECK(ArRenderDevice_SetRenderTarget(&g_render_device, ArRenderTexture_Invalid()));
   PerformanceMetrics_PresentCompleted(1);
   PerformanceMetrics_PresentCompleted(UINT64_C(1000000001));
-  PerformanceSnapshot traffic;
-  PerformanceMetrics_Snapshot(&traffic);
-  CHECK(traffic.ready);
-  *uploaded_bytes = traffic.counts[kPerformanceCount_DepthUploadBytes] * 2;
+  PerformanceMetrics_Snapshot(traffic);
+  CHECK(traffic->ready);
   PerformanceMetrics_Configure(false, false);
   return image;
+}
+
+static SDL_Surface *
+RenderCapturedFacingModels(SDL_Renderer *renderer, const WorldNavigationModelSource *sources,
+                           size_t count, const WorldNavigationModelSourceStyle *style,
+                           const SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount],
+                           const float matrix[16], double *uploaded_bytes) {
+  PerformanceSnapshot traffic;
+  SDL_Surface *image = RenderFacingModels(renderer, sources, count, style, axes, matrix,
+      kSimBackgroundVoxelShading_MaterialAware, &traffic);
+  *uploaded_bytes = traffic.counts[kPerformanceCount_DepthUploadBytes] * 2;
+  return image;
+}
+
+/* Exercise per-source reuse with every geometry family and each town's biome.
+ * Preparation counts distinguish reuse from a visually correct full rebuild;
+ * cold readback catches stale ground, bridge depth, palette and lighting. */
+static void TestFacingModelReuse(SDL_Renderer *renderer) {
+  for (unsigned town = 1; town <= kSimBackgroundTownCount; ++town) {
+    int ox, oy;
+    CHECK(SimWorldMap_OriginForTown(town, &ox, &oy));
+    WorldNavigationModelSourceStyle style = {.chart_radius_tiles = 160,
+        .height_percent = 100, .light_elevation = 85,
+        .style = kSimBackgroundVoxelStyle_Varied, .lighting = true, .captured_poses = true};
+    CHECK(SimGlobeMapping_Build(town, ox, oy, 160, 4, .4f, &style.embedding));
+    style.tile_world = 1 / style.embedding.metric;
+    WorldNavigationModelSource sources[kSimBackgroundVoxelKindCount + 1] = {0};
+    size_t count = kSimBackgroundVoxelKindCount;
+    for (unsigned kind = 0; kind < count; ++kind) {
+      const unsigned x = 8 + (kind % 4) * 5, y = 8 + (kind / 4) * 5;
+      sources[kind] = (WorldNavigationModelSource){
+          .object = {.town = town, .kind = kind, .cell_x = x, .cell_y = y,
+              .development_level = 2, .source_cells_w = 2, .source_cells_h = 2,
+              .footprint_cells_w = 2, .footprint_cells_d = 2,
+              .visual_state = kSimStructureVisualState_Finished},
+          .detail = kSimBackgroundVoxelDetail_Ultra, .object_index = kind,
+          .source_x = (ox + x) * 8, .source_y = (oy + y) * 8,
+          .centre_x = 16, .centre_y = 16, .anchor_height = 4, .depth_height = 5};
+      if (kind == kSimBackgroundVoxel_Bridge) {
+        SimBackgroundVoxelObject *bridge = &sources[kind].object;
+        bridge->bridge_axis = kSimBackgroundBridgeAxis_EastWest;
+        bridge->bridge_bank_a_x = x - 1; bridge->bridge_bank_a_y = y;
+        bridge->bridge_bank_b_x = x + 1; bridge->bridge_bank_b_y = y;
+        const SimBackgroundBridgeBounds bounds = SimBackgroundBridge_ResolveBounds(bridge);
+        sources[kind].source_x = ox * 8 + bounds.origin_x * .5f;
+        sources[kind].source_y = oy * 8 + bounds.origin_y * .5f;
+        sources[kind].centre_x = bounds.width * .5f;
+        sources[kind].centre_y = bounds.depth * .5f;
+      }
+    }
+    SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount];
+    for (unsigned i = 0; i < kSimBackgroundVoxelKindCount; ++i)
+      axes[i] = kSimBackgroundUprightProjectionAxis;
+    float center[3];
+    CHECK(SimGlobeMapping_Point(&style.embedding, ox + 16, oy + 16, 4, 0, center));
+    float matrix[16] = {.07f, 0, 0, 0, 0, .055f, .001f, 0, 0, .03f, -.002f, 0, 0, 0, 0, 1};
+    for (unsigned row = 0; row < 3; ++row)
+      matrix[12 + row] = -(matrix[row] * center[0] + matrix[4 + row] * center[1] +
+                           matrix[8 + row] * center[2]);
+    SimBackgroundVoxelShading shading = kSimBackgroundVoxelShading_MaterialAware;
+    PerformanceSnapshot traffic;
+    WorldNavigationModelMesh_Reset();
+    SDL_Surface *first = RenderFacingModels(renderer, sources, count, &style, axes, matrix,
+                                            shading, &traffic);
+    CHECK(traffic.stages[kPerformance_SimFirst + kSim3DPerformance_DepthVoxel].calls == count);
+    unsigned visible = 0;
+    for (int y = 0; y < kHeight; ++y)
+      for (int x = 0; x < kWidth; ++x) visible += (Pixel(first, x, y) >> 24) != 0;
+    CHECK(visible > 100);
+    SDL_DestroySurface(first);
+    for (unsigned change = 0; change < 18; ++change) {
+      uint64_t expected = 2; /* One edited static model and one windmill. */
+      switch (change) {
+        case 0: sources[0].object.flags = kSimBackgroundVoxel_UnderConstruction;
+                sources[0].object.visual_state = kSimStructureVisualState_Construction1; break;
+        case 1: sources[0].object.flags = 0;
+                sources[0].object.visual_state = kSimStructureVisualState_Finished; break;
+        case 2: sources[kSimBackgroundVoxel_Bridge].anchor_height += 1; break;
+        case 3: sources[kSimBackgroundVoxel_Bridge].depth_height += 2; break;
+        case 4: {
+          const WorldNavigationModelSource swap = sources[4];
+          sources[4] = sources[5]; sources[5] = swap;
+          expected = 1; break;
+        }
+        case 5: memmove(sources + 1, sources, count * sizeof(*sources));
+                ++count; sources[0].object.cell_x += 1; sources[0].source_x += 8; break;
+        case 6: --count; memmove(sources, sources + 1, count * sizeof(*sources));
+                expected = 1; break;
+        case 7: expected = 1; break; /* Only capture ordinals change below. */
+        case 8: sources[kSimBackgroundVoxel_Windmill].object.flags =
+                    kSimBackgroundVoxel_UnderConstruction;
+                sources[kSimBackgroundVoxel_Windmill].object.visual_state =
+                    kSimStructureVisualState_Construction1;
+                expected = 1; break;
+        case 9: sources[0].detail = kSimBackgroundVoxelDetail_Low; break;
+        case 10: sources[0].source_x += 8; break;
+        case 11: style.light_azimuth += 45; expected = count; break;
+        case 12: CHECK(SimGlobeMapping_Build(town, ox, oy, 160, 4, 1, &style.embedding));
+                 expected = count; break;
+        case 13: shading = kSimBackgroundVoxelShading_Basic; expected = count; break;
+        case 14: ++style.model_revision; expected = count; break;
+        case 15: style.style = kSimBackgroundVoxelStyle_Basic; expected = count; break;
+        case 16: style.captured_poses = false; expected = count + 2; break;
+        case 17: WorldNavigationModelMesh_Reset(); expected = count + 2; break;
+      }
+      for (size_t i = 0; i < count; ++i) sources[i].object_index = i + (change == 7 ? 20 : 0);
+      SDL_Surface *warm = RenderFacingModels(renderer, sources, count, &style, axes, matrix,
+                                             shading, &traffic);
+      const uint64_t prepared =
+          traffic.stages[kPerformance_SimFirst + kSim3DPerformance_DepthVoxel].calls;
+      if (prepared != expected)
+        fprintf(stderr, "town %u change %u: prepared %llu, expected %llu\n", town, change,
+                (unsigned long long)prepared, (unsigned long long)expected);
+      CHECK(prepared == expected);
+      SDL_Surface *held = RenderFacingModels(renderer, sources, count, &style, axes, matrix,
+                                             shading, &traffic);
+      CHECK(traffic.stages[kPerformance_SimFirst + kSim3DPerformance_DepthVoxel].calls == 0);
+      CHECK(traffic.counts[kPerformanceCount_DepthUploadBytes] == 0);
+      CHECK(Differences(warm, held) == 0);
+      /* Consecutive edits exercise the alternating working buffers before
+       * reset; returning to the same anchor must restore identical pixels. */
+      const float anchor = sources[0].anchor_height;
+      sources[0].anchor_height += 1;
+      SDL_Surface *moved = RenderFacingModels(renderer, sources, count, &style, axes, matrix,
+                                              shading, &traffic);
+      SDL_DestroySurface(moved);
+      sources[0].anchor_height = anchor;
+      SDL_Surface *restored = RenderFacingModels(renderer, sources, count, &style, axes, matrix,
+                                                 shading, &traffic);
+      CHECK(Differences(warm, restored) == 0);
+      CHECK(traffic.stages[kPerformance_SimFirst + kSim3DPerformance_DepthVoxel].calls ==
+            (style.captured_poses ? 2 : 4));
+      SDL_DestroySurface(restored);
+      WorldNavigationModelMesh_Reset();
+      SDL_Surface *cold = RenderFacingModels(renderer, sources, count, &style, axes, matrix,
+                                             shading, &traffic);
+      CHECK(Differences(warm, cold) == 0);
+      SDL_DestroySurface(warm); SDL_DestroySurface(held); SDL_DestroySurface(cold);
+    }
+  }
+  WorldNavigationModelMesh_Reset();
+  puts("facing model reuse: all six towns and model kinds; construction, insertion/removal, "
+       "reordering, bridge heights, LOD, placement, lighting, embedding, shading, style and reset "
+       "match cold pixels with only affected sources prepared");
 }
 
 static void TestCapturedFacingMotion(SDL_Renderer *renderer, const FrameSlot *slot,
@@ -2573,6 +2716,7 @@ static void TestFacingTownScene(SDL_Renderer *renderer) {
   CHECK(PresentSimGlobe_TestFacingTownScene(slot, source, viewport, &camera, matrix, 2, NULL) ==
         kPresentationOutcome_CoreFailure);
   slot->sim.background_voxel_shading = kSimBackgroundVoxelShading_MaterialAware;
+  TestFacingModelReuse(renderer);
   TestCapturedFacingMotion(renderer, slot, &camera, source);
   TestModelGeographyReuse(renderer, slot, &camera, source);
   SDL_Surface *raw = RenderSimGlobeScene(renderer, slot, &camera, source, 2);

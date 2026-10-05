@@ -45,7 +45,38 @@ static struct {
   bool observed, ready, rejected;
 } s_town_models;
 
+typedef struct TownSourceBuilder {
+  Sim3DDepthLinearVertex *vertices;
+  size_t count, capacity;
+} TownSourceBuilder;
+
+/* Retain only the current static town's embedded vertices. A construction
+ * change must not recompute every unchanged model's curved ground positions.
+ * Two buffers alternate so updates also avoid repeatedly allocating/touching
+ * several MiB of fresh pages. Each has a 16 MiB retention bound. Larger scenes
+ * keep the ordinary full rebuild instead of growing this cache. */
+enum { kTownStaticCacheBytes = 16 * 1024 * 1024 };
+typedef struct TownCachedSource {
+  WorldNavigationModelSource source;
+  size_t first, count;
+} TownCachedSource;
+static struct {
+  TownCachedSource *sources;
+  Sim3DDepthLinearVertex *vertices;
+  size_t count, capacity;
+  TownSourceBuilder scratch;
+  bool valid;
+} s_town_static;
+
+static void ClearTownStatic(void) {
+  free(s_town_static.sources);
+  free(s_town_static.vertices);
+  free(s_town_static.scratch.vertices);
+  memset(&s_town_static, 0, sizeof(s_town_static));
+}
+
 static void ResetTownModels(void) {
+  ClearTownStatic();
   for (unsigned i = 0; i < kTownModelPoseCount; ++i)
     Sim3DMeshSet_Destroy(&s_town_models.meshes[i]);
   free(s_town_models.sources);
@@ -306,19 +337,7 @@ bool WorldNavigationModelMesh_Repeat(const Sim3DDepthRadialTransform *transform)
   return ready;
 }
 
-typedef struct TownSourceBuilder {
-  Sim3DDepthLinearVertex *vertices;
-  size_t count, capacity;
-} TownSourceBuilder;
-
-static bool AppendFacingSource(const WorldNavigationModelSource *source,
-    const WorldNavigationModelSourceStyle *style, SimBackgroundVoxelShading shading,
-    unsigned pose, TownSourceBuilder *builder) {
-  WorldPreparedModel prepared;
-  const bool bridge = source->object.kind == kSimBackgroundVoxel_Bridge;
-  if (!PrepareSourceModel(source,style,pose,
-          bridge ? kSimBackgroundVoxelShading_AmbientOcclusion : shading,&prepared)) return false;
-  const size_t added = (size_t)prepared.model->face_count*4;
+static bool ReserveTownVertices(TownSourceBuilder *builder, size_t added) {
   if (added > (size_t)kSim3DMeshSetMaximumQuads*4-builder->count) return false;
   const size_t needed = builder->count+added;
   if (needed > builder->capacity) {
@@ -331,6 +350,17 @@ static bool AppendFacingSource(const WorldNavigationModelSource *source,
     builder->vertices = vertices;
     builder->capacity = capacity;
   }
+  return true;
+}
+
+static bool AppendFacingSource(const WorldNavigationModelSource *source,
+    const WorldNavigationModelSourceStyle *style, SimBackgroundVoxelShading shading,
+    unsigned pose, TownSourceBuilder *builder) {
+  WorldPreparedModel prepared;
+  const bool bridge = source->object.kind == kSimBackgroundVoxel_Bridge;
+  if (!PrepareSourceModel(source,style,pose,
+          bridge ? kSimBackgroundVoxelShading_AmbientOcclusion : shading,&prepared)) return false;
+  if (!ReserveTownVertices(builder, (size_t)prepared.model->face_count * 4)) return false;
   const float source_scale = (float)kSimWorldMapTilePixels/kSimTownCellPixels;
   for (unsigned face = 0; face < prepared.model->face_count; ++face) {
     const SimBackgroundVoxelModelFace *authored = &prepared.model->faces[face];
@@ -385,6 +415,84 @@ static bool AppendFacingSource(const WorldNavigationModelSource *source,
   return true;
 }
 
+static WorldNavigationModelSource StaticSourceKey(WorldNavigationModelSource source) {
+  /* This ordinal addresses the capture, not the geometry. Inserting a model
+   * may renumber unchanged neighbours; their semantic identities still match. */
+  source.object_index = 0;
+  return source;
+}
+
+static bool PublishTownStatic(const WorldNavigationModelSource *sources, size_t count,
+    const WorldNavigationModelSourceStyle *style, SimBackgroundVoxelShading shading,
+    bool reuse) {
+  reuse = reuse && s_town_static.valid;
+  size_t static_count = 0;
+  bool unchanged = reuse;
+  for (size_t i = 0; i < count; ++i) {
+    if (sources[i].object.kind == kSimBackgroundVoxel_Windmill) continue;
+    const WorldNavigationModelSource key = StaticSourceKey(sources[i]);
+    if (unchanged)
+      unchanged = static_count < s_town_static.count &&
+          !memcmp(&key, &s_town_static.sources[static_count].source, sizeof(key));
+    ++static_count;
+  }
+  /* Also covers windmill construction, additions and removals: they cannot
+   * change an otherwise identical static stream's GPU publication. */
+  if (unchanged && static_count == s_town_static.count) return true;
+  TownCachedSource *next = static_count ? calloc(static_count, sizeof(*next)) : NULL;
+  if (static_count && !next) return false;
+  TownSourceBuilder builder = s_town_static.scratch;
+  s_town_static.scratch = (TownSourceBuilder){0};
+  builder.count = 0;
+  size_t at = 0;
+  bool ok = true;
+  for (size_t i = 0; i < count && ok; ++i) {
+    if (sources[i].object.kind == kSimBackgroundVoxel_Windmill) continue;
+    TownCachedSource *entry = &next[at++];
+    entry->source = StaticSourceKey(sources[i]);
+    entry->first = builder.count;
+    const TownCachedSource *cached = NULL;
+    for (size_t j = 0; reuse && j < s_town_static.count; ++j) {
+      if (!memcmp(&entry->source, &s_town_static.sources[j].source, sizeof(entry->source))) {
+        cached = &s_town_static.sources[j];
+        break;
+      }
+    }
+    if (cached) {
+      ok = ReserveTownVertices(&builder, cached->count);
+      if (ok && cached->count) {
+        memcpy(builder.vertices + builder.count, s_town_static.vertices + cached->first,
+               cached->count * sizeof(*builder.vertices));
+        builder.count += cached->count;
+      }
+    } else {
+      ok = AppendFacingSource(&sources[i], style, shading, 0, &builder);
+    }
+    entry->count = builder.count - entry->first;
+  }
+  if (ok) ok = Sim3DMeshSet_UpdateLinear(&s_town_models.meshes[0],
+                                        builder.vertices, builder.count / 4);
+  /* Never reuse an incomplete or rejected publication. The bound includes
+   * spare vertex capacity; source metadata is separately bounded by the town. */
+  TownSourceBuilder previous = {
+      .vertices = s_town_static.vertices, .capacity = s_town_static.capacity};
+  s_town_static.vertices = NULL;
+  ClearTownStatic();
+  if (ok && builder.capacity <= kTownStaticCacheBytes / sizeof(*builder.vertices)) {
+    s_town_static.sources = next;
+    s_town_static.vertices = builder.vertices;
+    s_town_static.count = static_count;
+    s_town_static.capacity = builder.capacity;
+    s_town_static.scratch = previous;
+    s_town_static.valid = true;
+  } else {
+    free(next);
+    free(builder.vertices);
+    free(previous.vertices);
+  }
+  return ok;
+}
+
 bool WorldNavigationModelMesh_DrawFacingTown(
     const WorldNavigationModelSource *sources, size_t count,
     const WorldNavigationModelSourceStyle *style, SimBackgroundVoxelShading shading,
@@ -404,8 +512,9 @@ bool WorldNavigationModelMesh_DrawFacingTown(
   bool ready = s_town_models.ready;
   for (unsigned pose = 0; pose < kTownModelPoseCount && ready; ++pose)
     ready = Sim3DMeshSet_Ready(&s_town_models.meshes[pose]);
-  const bool same_style = s_town_models.observed && count == s_town_models.count &&
+  const bool same_render_style = s_town_models.observed &&
       shading == s_town_models.shading && !memcmp(style,&s_town_models.style,sizeof(*style));
+  const bool same_style = same_render_style && count == s_town_models.count;
   const bool matching = same_style && !memcmp(sources,s_town_models.sources,count*sizeof(*sources));
   bool only_captured_motion = same_style && style->captured_poses && !matching;
   for (size_t i = 0; i < count && only_captured_motion; ++i) {
@@ -443,6 +552,10 @@ bool WorldNavigationModelMesh_DrawFacingTown(
      * navigation still prepublishes its three clock-selected pose streams. */
     for (unsigned pose = motion_update ? 1 : 0;
          pose < (motion_update ? 2 : kTownModelPoseCount) && ok; ++pose) {
+      if (!pose) {
+        ok = PublishTownStatic(sources, count, style, shading, same_render_style && ready);
+        continue;
+      }
       builder.count = 0;
       for (size_t i = 0; i < count && ok; ++i) {
         if (style->captured_poses && pose > 1) break;

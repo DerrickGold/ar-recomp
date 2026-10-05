@@ -50,7 +50,10 @@ void WorldNavigationModelMesh_Reset(void);
  * camera-facing displacement, with a separate conservative depth envelope.
  * Static models and the three windmill poses are retained independently;
  * captured_poses instead updates only a separate small windmill stream using
- * the supplied individual phases, leaving static buildings resident. No new backend
+ * the supplied individual phases, leaving static buildings resident. Static
+ * edits reuse unchanged embedded models across capture renumbering. Current
+ * geometry and working buffers retain at most 16 MiB each; larger scenes use
+ * a full rebuild at the requested detail. No new backend
  * contract, per-object draw, native state or frame pointer is retained. */
 bool WorldNavigationModelMesh_DrawFacingTown(
     const WorldNavigationModelSource *sources, size_t count,
