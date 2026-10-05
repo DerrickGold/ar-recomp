@@ -4,9 +4,9 @@
 Completion is the return from the backend present call, not physical scanout.
 Upload rows without a present are retained: preparation can happen between
 refresh deadlines. CPU producer work overlaps presentation and is not additive.
-With early swapchain preparation, backend flush/acquire and blit recording
-precede the scheduled wait. They are not contained in backend_present_ms,
-which measures only the final Present call and its immediate bookkeeping.
+Historical early-preparation traces remain readable. In those traces, backend
+flush/acquire and blit recording precede the scheduled wait and are not
+contained in backend_present_ms, which starts at the final Present call.
 """
 from __future__ import annotations
 
@@ -231,10 +231,12 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_nat
             if not r['draw_ns'] <= r['submit_start_ns'] <= r['complete_ns']:
                 raise ValueError('Missing/inconsistent submit timestamp')
         result['submit_interval_ms'] = stats(cadence('submit_start_ns'))
-        result['submit_wait_ms'] = stats(durations('submit_wait_ns', presents))
+        if 'submit_wait_ns' in rows[0]:
+            result['submit_wait_ms'] = stats(durations('submit_wait_ns', presents))
         result['backend_present_ms'] = stats([(r['complete_ns']-r['submit_start_ns'])/1e6 for r in presents])
-        result['submit_late_ms'] = stats([max(0,r['submit_start_ns']-r['submit_deadline_ns'])/1e6
-                                         for r in presents if r['submit_deadline_ns']])
+        if 'submit_deadline_ns' in rows[0]:
+            result['submit_late_ms'] = stats([max(0,r['submit_start_ns']-r['submit_deadline_ns'])/1e6
+                                             for r in presents if r['submit_deadline_ns']])
     for key in ('backend_flush_ns', 'backend_acquire_ns', 'backend_submit_ns'):
         if key in rows[0]: result[key.replace('_ns','_ms')] = stats(durations(key, presents))
     # Preserve the worst intervals with their stage evidence for causal inspection.
@@ -249,7 +251,7 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_nat
             evidence['deadline_late_ms'] = max(0,b['draw_ns']-b['deadline_ns'])/1e6
         if 'submit_start_ns' in b:
             evidence['backend_present_ms'] = (b['complete_ns']-b['submit_start_ns'])/1e6
-            if b['submit_deadline_ns']:
+            if b.get('submit_deadline_ns', 0):
                 evidence['submit_late_ms'] = max(0,b['submit_start_ns']-b['submit_deadline_ns'])/1e6
                 # Signed slack: negative means the producer itself finished
                 # after this output deadline, before owner-side preparation.

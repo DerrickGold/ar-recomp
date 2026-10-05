@@ -95,23 +95,19 @@ bool HostDisplay_TryRepresentFrame(float alpha,
                                    bool interpolation_enabled,
                                    bool redraw_pending);
 /* Opt-in presenter-thread diagnostics. CPU wall times, not GPU timestamps or
- * physical display times. Cleared for each TryRepresentFrame attempt. swap_ns
- * includes any scheduled submit wait; submit_start_ns separates backend work. */
+ * physical display times. Cleared for each TryRepresentFrame attempt.
+ * submit_start_ns separates backend presentation work from drawing. */
 typedef struct HostDisplayPresentTrace {
   uint64_t deadline_ns, draw_start_ns, draw_ns, swap_ns, vector_wait_ns;
   uint64_t draw_cpu_ns;
-  uint64_t submit_deadline_ns, submit_start_ns, submit_wait_ns;
+  uint64_t submit_start_ns;
   uint64_t backend_flush_ns, backend_acquire_ns, backend_submit_ns;
 } HostDisplayPresentTrace;
 void HostDisplay_EnablePresentTrace(bool enabled);
 HostDisplayPresentTrace HostDisplay_LastPresentTrace(void);
-/* Absolute next presentation sample deadline for the independent producer.
- * Ordinarily this is the draw deadline; the early-draw experiment retains it
- * as the output deadline. Zero means that clock is not active. */
+/* Absolute next presentation deadline for the independent producer.
+ * Zero means that clock is not active. */
 uint64_t HostDisplay_NextPresentationDeadline(void);
-/* Diagnostic early preparation samples the intended output time, preserving
- * interpolation phase when drawing ahead of that time. Otherwise returns now. */
-uint64_t HostDisplay_PresentationSampleTime(uint64_t now_ns);
 /* Native content timestamp, not a CPU deadline or measured scanout time.
  * Vsync selects against the last completed output slot and advances by the
  * precise refresh period; ordinary queue recovery can leave it before now. */

@@ -87,7 +87,6 @@ static bool s_retained_upload_complete;
 static bool s_producer_pacing;
 static bool s_present_trace_enabled;
 static HostDisplayPresentTrace s_present_trace;
-static uint64_t s_submit_deadline_ns;
 static HostFrameRefreshClock s_refresh_clock;
 static HostDisplayPacingOptions CurrentPacingOptions(void);
 
@@ -104,47 +103,6 @@ static uint64_t PreciseRefreshIntervalNs(uint64_t fallback_ns) {
   const uint64_t interval_ns = HostDisplayRefreshCache_IntervalNs(
       &s_display_refresh_cache, s_active_display_id);
   return interval_ns ? interval_ns : fallback_ns;
-}
-
-/* Diagnostic pacing experiments; ordinary playback retains its current
- * policy until the measured tails and visual timing have been qualified. */
-static uint64_t PresentPreparationLeadNs(void) {
-  static bool initialized;
-  static uint64_t lead_ns;
-  if (!initialized) {
-    const char *value = getenv("AR_PRESENT_PREPARE_LEAD_US");
-    if (value) {
-      char *end;
-      const long us = strtol(value, &end, 10);
-      if (end != value && !*end && us > 0 && us <= 8000)
-        lead_ns = (uint64_t)us * 1000;
-    }
-    initialized = true;
-  }
-  return lead_ns;
-}
-
-static bool PrecisePresentYield(void) {
-  static int enabled = -1;
-  if (enabled < 0) {
-    const char *value = getenv("AR_PRESENT_PRECISE_YIELD");
-    enabled = value && strcmp(value, "1") == 0;
-  }
-  return enabled != 0;
-}
-
-static bool PrepareSwapchainEarly(void) {
-  static int enabled = -1;
-  if (enabled < 0) {
-    const char *value = getenv("AR_PRESENT_PREPARE_SWAPCHAIN");
-    enabled = value && strcmp(value, "1") == 0;
-  }
-  return enabled != 0;
-}
-
-uint64_t HostDisplay_PresentationSampleTime(uint64_t now_ns) {
-  return s_producer_pacing && PresentPreparationLeadNs() &&
-      s_present_deadline_ns > now_ns ? s_present_deadline_ns : now_ns;
 }
 
 uint64_t HostDisplay_NativeFrameSampleTime(uint64_t now_ns) {
@@ -184,7 +142,6 @@ void HostDisplay_SetProducerPacing(bool enabled) {
   const bool active = enabled && g_settings.refresh_mode != kRefreshMode_Vsync;
   if (active != s_producer_pacing) {
     s_present_deadline_ns = 0;
-    s_submit_deadline_ns = 0;
   }
   s_producer_pacing = active;
 }
@@ -363,25 +320,12 @@ static uint64_t PresentIntervalNs(HostDisplayPresentMode mode) {
  * first visible result cannot mix menu/paused/old-refresh timing. */
 static bool CompletePresent(HostDisplayPresentMode mode) {
   const PerformanceScope pacing = PerformanceMetrics_Begin(kPerformance_Pacing);
-  bool prepared = true;
   if (!s_producer_pacing)
     ThrottlePresent(s_vsync_guard.probing ? 0 : PresentIntervalNs(mode));
-  if (s_producer_pacing && s_submit_deadline_ns) {
-    /* Let the GPU execute the completed offscreen draw while the owner waits
-     * for the output deadline. The final swapchain blit remains on this owner. */
-    prepared = PrepareSwapchainEarly()
-        ? ArSdlRenderBackend_PreparePresent(&g_render_device)
-        : ArSdlRenderBackend_SubmitPending(&g_render_device);
-    const uint64_t now = SDL_GetTicksNS();
-    if (prepared && now < s_submit_deadline_ns)
-      SDL_DelayPrecise(s_submit_deadline_ns - now);
-    if (s_present_trace_enabled) s_present_trace.submit_wait_ns = SDL_GetTicksNS() - now;
-    s_submit_deadline_ns = 0;
-  }
   PerformanceMetrics_End(pacing);
   const PerformanceScope swap = PerformanceMetrics_Begin(kPerformance_Swap);
   if (s_present_trace_enabled) s_present_trace.submit_start_ns = SDL_GetTicksNS();
-  const bool swapped = prepared && ArRenderDevice_Present(&g_render_device);
+  const bool swapped = ArRenderDevice_Present(&g_render_device);
   PerformanceMetrics_End(swap);
   if (!swapped) {
     PerformanceMetrics_Add(kPerformanceCount_FailedPresents, 1);
@@ -404,14 +348,6 @@ static bool CompletePresent(HostDisplayPresentMode mode) {
     HostFrameRefreshClock_Advance(&s_refresh_clock, completed_at_ns,
         nominal_ns ? PreciseRefreshIntervalNs(nominal_ns) : 0);
   else HostFrameRefreshClock_Observe(&s_refresh_clock, completed_at_ns, nominal_ns);
-  /* Diagnostic A/B control; pacing selection still uses the same period. */
-  static int filter_phase = -1;
-  if (filter_phase < 0) {
-    const char *option = getenv("AR_FRAME_REFRESH_PHASE");
-    filter_phase = !option || strcmp(option, "0");
-  }
-  if (!FixedRefreshTimeline() && !filter_phase && s_refresh_clock.period_ns)
-    s_refresh_clock.phase_ns = completed_at_ns;
   const bool was_fallback = s_vsync_guard.software_fallback_active;
   if (HostDisplayPacing_RecordVsyncPresent(
           &s_vsync_guard,
@@ -926,20 +862,11 @@ bool HostDisplay_TryRepresentFrame(float alpha,
   if (s_producer_pacing) {
     const uint64_t interval = PresentIntervalNs(kHostDisplayPresent_GameTick);
     const uint64_t now = SDL_GetTicksNS();
-    uint64_t lead = PresentPreparationLeadNs();
-    if (lead > interval / 2) lead = interval / 2;
-    const uint64_t draw_deadline = s_present_deadline_ns > lead
-        ? s_present_deadline_ns - lead : 0;
-    if (s_present_trace_enabled)
-      s_present_trace.deadline_ns = draw_deadline;
-    if (interval && draw_deadline && now < draw_deadline)
-      return false;
+    if (s_present_trace_enabled) s_present_trace.deadline_ns = s_present_deadline_ns;
+    if (interval && s_present_deadline_ns && now < s_present_deadline_ns) return false;
     if (!s_present_deadline_ns || !interval ||
         now > s_present_deadline_ns + kDeadlineResyncIntervalCount * interval)
       s_present_deadline_ns = now;
-    s_submit_deadline_ns = lead ? s_present_deadline_ns : 0;
-    if (s_present_trace_enabled)
-      s_present_trace.submit_deadline_ns = s_submit_deadline_ns;
     s_present_deadline_ns += interval;
   }
 
@@ -1016,21 +943,8 @@ void HostDisplay_YieldIfNoPresent(bool presented,
     s_no_present_no_sleep_iteration_count++;
   const PerformanceScope pacing = PerformanceMetrics_Begin(kPerformance_Pacing);
   const uint64_t yield_start = s_present_trace_enabled ? SDL_GetTicksNS() : 0;
-  uint64_t requested_ns = 1000000;
-  if (s_producer_pacing && PrecisePresentYield()) {
-    const uint64_t interval = PresentIntervalNs(kHostDisplayPresent_GameTick);
-    uint64_t lead = PresentPreparationLeadNs();
-    if (lead > interval / 2) lead = interval / 2;
-    const uint64_t deadline = s_present_deadline_ns > lead
-        ? s_present_deadline_ns - lead : 0;
-    const uint64_t now = SDL_GetTicksNS();
-    if (deadline > now) {
-      const uint64_t left = deadline - now;
-      /* Keep servicing endpoints and input while far from the draw deadline. */
-      if (left > 1500000) SDL_Delay(1);
-      else { requested_ns = left; SDL_DelayPrecise(left); }
-    } else { requested_ns = 200000; SDL_DelayNS(requested_ns); }
-  } else SDL_Delay(1);
+  const uint64_t requested_ns = 1000000;
+  SDL_Delay(1);
   if (s_present_trace_enabled) {
     const uint64_t elapsed = SDL_GetTicksNS() - yield_start;
     if (elapsed > requested_ns + 2000000)

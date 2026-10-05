@@ -208,6 +208,17 @@ class PacingTraceTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.report(rows, warmup_seconds=10)
 
+    def test_backend_present_without_experimental_columns(self):
+        rows = self.rows()
+        for row in rows:
+            row['submit_start_ns'] = row['complete_ns'] - 300_000 if row['presented'] else 0
+        result = self.report(rows)
+        self.assertEqual(result['backend_present_ms']['mean'], .3)
+        self.assertEqual(result['submit_interval_ms']['mean'], 16)
+        self.assertNotIn('submit_wait_ms', result)
+        self.assertNotIn('submit_late_ms', result)
+        self.assertEqual(result['worst_intervals'][0]['backend_present_ms'], .3)
+
     def test_separate_scheduled_wait_from_backend_present(self):
         rows = self.rows()
         for row in rows:

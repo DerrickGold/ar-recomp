@@ -95,7 +95,7 @@ int main(void) {
   ArSdlRenderBackend_EnablePresentTrace(&device, true);
   assert(ArRenderDevice_Present(&device));
   const ArSdlPresentTrace trace = ArSdlRenderBackend_LastPresentTrace(&device);
-  assert(trace.flush_ns == 100 && trace.acquire_ns == 100 && trace.submit_ns == 200);
+  assert(trace.flush_ns == 100 && trace.acquire_ns == 100 && trace.submit_ns == 100);
   ArSdlRenderBackend_EnablePresentTrace(&device, false);
   assert(ArSdlRenderBackend_LastPresentTrace(&device).submit_ns == 0);
   /* Repeated hidden/visible transitions always submit the terminal buffer.
@@ -108,35 +108,16 @@ int main(void) {
     assert(s_test.submitted == 1 && s_test.cancelled == 0);
     assert(s_test.blitted == (s_test.no_swapchain ? 0u : 1u));
   }
-  /* An early acquire must not present, duplicate the producer submission, or
-   * lose a hidden-window cleanup buffer. The eventual Present consumes it
-   * exactly once, regardless of the elapsed time between the calls. */
-  for (unsigned hidden = 0; hidden < 2; ++hidden) {
-    memset(&s_test, 0, sizeof(s_test));
-    s_test.no_swapchain = hidden != 0;
-    ArSdlRenderBackend_EnablePresentTrace(&device, true);
-    assert(ArSdlRenderBackend_PreparePresent(&device));
-    assert(backend.present_commands && s_test.acquired == 1 && !s_test.submitted);
-    assert(s_test.blitted == (hidden ? 0u : 1u));
-    assert(ArSdlRenderBackend_PreparePresent(&device));
-    s_clock += 5000000; /* The scheduled output wait is not backend work. */
-    assert(ArRenderDevice_Present(&device));
-    assert(!backend.present_commands && s_test.submitted == 1 && !s_test.cancelled);
-    assert(s_test.producers == 1 && s_test.acquired == 1);
-    assert(ArSdlRenderBackend_LastPresentTrace(&device).submit_ns == 200);
-    ArSdlRenderBackend_EnablePresentTrace(&device, false);
-  }
   memset(&s_test, 0, sizeof(s_test));
   s_test.fail_flush = true;
-  assert(!ArSdlRenderBackend_PreparePresent(&device));
-  assert(!backend.present_commands && !s_test.producers && !s_test.acquired);
+  assert(!ArRenderDevice_Present(&device));
+  assert(!s_test.producers && !s_test.acquired);
   for (unsigned hidden = 0; hidden < 2; ++hidden) {
     memset(&s_test, 0, sizeof(s_test));
     s_test.no_swapchain = hidden != 0;
     s_test.fail_submit = true;
     assert(!ArRenderDevice_Present(&device));
     assert(s_test.submitted == 1 && s_test.cancelled == 0);
-    assert(!backend.present_commands);
   }
   memset(&s_test, 0, sizeof(s_test));
   s_test.fail_acquire = true;

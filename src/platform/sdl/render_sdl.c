@@ -573,8 +573,7 @@ static bool DrawGeometry(void *context, ArRenderTexture texture,
   return rendered && restored && address_restored;
 }
 
-static bool PrepareWindowPresent(ArSdlRenderBackend *backend) {
-  if (backend->present_commands) return true;
+static bool PresentWindow(ArSdlRenderBackend *backend) {
   const bool trace = backend->present_trace_enabled;
   if (trace) backend->present_trace = (ArSdlPresentTrace){0};
   const uint64_t started = trace ? SDL_GetTicksNS() : 0;
@@ -613,27 +612,17 @@ static bool PrepareWindowPresent(ArSdlRenderBackend *backend) {
     };
     SDL_BlitGPUTexture(commands, &blit);
   }
-  backend->present_commands = commands;
-  /* Keep submit_ns comparable with the synchronous path: blit recording plus
-   * final submission, excluding any intentional wait between those stages. */
-  if (trace) backend->present_trace.submit_ns = SDL_GetTicksNS() - acquired;
-  return true;
-}
-
-static bool SubmitPreparedPresent(ArSdlRenderBackend *backend) {
-  SDL_GPUCommandBuffer *commands = backend->present_commands;
-  backend->present_commands = NULL; /* Submission consumes it even on failure. */
-  const uint64_t started = backend->present_trace_enabled ? SDL_GetTicksNS() : 0;
+  /* Submission consumes the command buffer even on failure. Keep acquisition,
+   * blit recording and terminal submission inside this owner-thread call. */
   const bool submitted = SDL_SubmitGPUCommandBuffer(commands);
-  if (backend->present_trace_enabled)
-    backend->present_trace.submit_ns += SDL_GetTicksNS() - started;
+  if (trace) backend->present_trace.submit_ns = SDL_GetTicksNS() - acquired;
   return submitted;
 }
 
 static bool Present(void *context) {
   ArSdlRenderBackend *backend = context;
   if (!backend->output_window) return SDL_RenderPresent(backend->renderer);
-  return PrepareWindowPresent(backend) && SubmitPreparedPresent(backend);
+  return PresentWindow(backend);
 }
 
 static const char *LastError(void *context) {
@@ -687,13 +676,6 @@ bool ArSdlRenderBackend_SubmitPending(const ArRenderDevice *device) {
    * RenderPresent does not propagate its internal command-flush result. */
   if (!SDL_FlushRenderer(renderer)) return false;
   return !backend->output_window || SDL_RenderPresent(renderer);
-}
-
-bool ArSdlRenderBackend_PreparePresent(const ArRenderDevice *device) {
-  if (!ArSdlRenderBackend_Renderer(device)) return false;
-  ArSdlRenderBackend *backend = device->context;
-  return backend->output_window ? PrepareWindowPresent(backend)
-      : ArSdlRenderBackend_SubmitPending(device);
 }
 
 bool ArSdlRenderBackend_WindowOutputSize(const ArRenderDevice *device,
@@ -953,9 +935,6 @@ void ArSdlRenderBackend_Destroy(ArRenderDevice *device) {
   }
   ArSdlRenderBackend *backend = device->context;
   SDL_Renderer *renderer = backend->renderer;
-  /* An acquired swapchain cannot be cancelled. Retire any prepared blit
-   * before releasing its source textures or window during teardown. */
-  if (backend->present_commands) (void)SubmitPreparedPresent(backend);
   const bool owns_renderer = backend->owns_renderer;
   const bool owns_context = backend->owns_context;
   SDL_GPUDevice *gpu = backend->owns_gpu_device ? backend->gpu_device : NULL;

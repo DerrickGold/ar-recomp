@@ -10,8 +10,11 @@ use `AR_PIPELINE_PERF=1`.
 
 ## Reading the panel
 
-- **FPS / ms / p95 / max** describe displayed frame intervals, not simulation
-  speed. The percentile and maximum help identify uneven frame delivery.
+- **FPS / ms / p95 / max** describe completed backend presents, including
+  repeated source states. They measure submission/return cadence, rather than
+  simulation speed, physical scanout or the delivery rate of distinct game
+  states. Lower CPU intervals or higher FPS alone do not establish smoother
+  visible motion.
 - **Ticks / redraws** describe simulation ticks and retained-frame draw calls per
   presentation. Redraws are not held game frames: streaming uses that draw path
   for every presentation, even when the source tick changes.
@@ -122,6 +125,14 @@ swapchain wait. That wait can include both earlier GPU work completing and a
 display image becoming available. A large acquisition scope alone does not
 identify GPU execution time, compositor delay, or a driver fault. Separate those
 boundaries before choosing a fix.
+
+The Metal pending-presentation skip prototype and drawable-pool experiments
+remain outside production. They improved uncapped submission throughput in
+short windowed samples, but did not demonstrate smoother delivery of distinct
+native game states. Their native interception is diagnostic instrumentation,
+not a supported application readiness API. The game retains ordinary backend
+presentation and its existing frame limiter; it has no SDL patch or native
+presentation interception.
 
 The optional threshold fails the command if source cadence exceeds the stated
 percentage. The analyzer fits one constant source/display phase per epoch and

@@ -17,7 +17,6 @@ typedef struct ArSdlRenderBackend {
    * the adapter owns its default output and the one final window present. */
   SDL_Window *output_window;
   SDL_Texture *output_target;
-  SDL_GPUCommandBuffer *present_commands; /* Prepared final blit; owner-thread only. */
   int output_width, output_height;
   SDL_GPUPresentMode output_present_mode;
   uint32_t applied_frames_in_flight;
