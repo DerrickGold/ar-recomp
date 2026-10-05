@@ -1961,31 +1961,37 @@ uint8_t ActRaiserActionBg_BindPlan(
       wram, wram_size, plan, NULL);
 }
 
-/* $0701 has native single-page raster layers, outside the scrolling 64x64
- * ring provider's domain. Capture edits can still use the live metatile page:
+/* Native single-page backgrounds are outside the scrolling 64x64 ring
+ * provider's domain. Capture edits can still use the live metatile page:
  * the PPU retains original pixels/scroll/color math and only authored tiles
- * or depth bands change. Select the same page as the current scene section. */
-static void PrepareDeathHeimCaptureEdits(const uint8_t *wram, size_t wram_size,
-    const SrPpuStateSnapshot *ppu, const DioramaRoomOverride *room,
+ * or depth bands change. $0701 selects one of its two resident scene pages. */
+static void PrepareNativeCaptureEdits(const uint8_t *wram, size_t wram_size,
+    const SrPpuStateSnapshot *ppu, const ActionBgPlan *plan, const DioramaRoomOverride *room,
     SrPpuVirtualTilemapRequest *bindings) {
-  if (!room || room->map_group != kActRaiserMapGroup_DeathHeim ||
-      room->map_number != kActRaiserDeathHeimMap_Hub ||
+  if (!room ||
       wram[kActRaiserWram_MapGroup] != room->map_group ||
       wram[kActRaiserWram_CurrentMap] != room->map_number ||
       (ppu->flags & SR_PPU_STATE_FORCED_BLANK) || ppu->bg_mode != 1) return;
+  const bool hub = room->map_group == kActRaiserMapGroup_DeathHeim &&
+      room->map_number == kActRaiserDeathHeimMap_Hub;
   for (unsigned bg = 0; bg < kActionBgLayerCount; bg++) {
+    if (!plan->layer[bg].valid || plan->layer[bg].source == kActionBgSource_WorldMap) continue;
     const bool classified = DioramaLayerOrder_VirtualLayerHasClassification(
         &room->virtual_layers[bg]);
     if (!classified && !room->stamp_layers[bg].count && !room->pixel_layers[bg].count) continue;
     ActRaiserActionBgLayerSnapshot snapshot;
     if (!ActRaiserActionBg_CaptureLayer(wram, wram_size, bg,
         ppu->background_tilemap_control[bg], &snapshot) ||
-        (snapshot.bgsc & 3) != 0 ||
-        snapshot.decode.world_width != 512 || snapshot.decode.world_height != 256) continue;
-    const unsigned page = (snapshot.bgsc & 0xfc) == (bg ? 0x74 : 0x64);
-    if ((snapshot.bgsc & 0xfc) != (bg ? 0x70 : 0x60) && !page) continue;
-    snapshot.decode.world_width = 256;
-    snapshot.decode.map_page += page * 256;
+        (snapshot.bgsc & 3) != 0 || snapshot.decode.world_height != 256) continue;
+    if (hub) {
+      if (snapshot.decode.world_width != 512) continue;
+      const unsigned page = (snapshot.bgsc & 0xfc) == (bg ? 0x74 : 0x64);
+      if ((snapshot.bgsc & 0xfc) != (bg ? 0x70 : 0x60) && !page) continue;
+      snapshot.decode.world_width = 256;
+      snapshot.decode.map_page += page * 256;
+    } else if (snapshot.decode.world_width != 256) {
+      continue;
+    }
     ActionBgWorld *world = WorldForLayer(
         s_observer.provider_world, bg, room->map_group, room->map_number);
     if (!world || !ActionBgWorld_Update(world, &snapshot.decode)) continue;
@@ -2003,7 +2009,7 @@ static void PrepareDeathHeimCaptureEdits(const uint8_t *wram, size_t wram_size,
     provider->pixel_edits_active = true;
     provider->capture_native_tiles = true;
     /* Capture authoring uses the runner's coordinate binding, without its
-     * INCLUDE_AUTHENTIC flag. The original VRAM page and R8 raster continue
+     * INCLUDE_AUTHENTIC flag. The original VRAM page and live raster continue
      * to own ordinary scanout; only the isolated capture can replace tiles. */
     bindings->layer_mask |= 1u << bg;
     bindings->bindings[bg] = (SrPpuVirtualTilemapBinding){
@@ -2039,7 +2045,7 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
   if (!wram || !plan || !plan->valid ||
       !SyncFrameIdentity(wram, wram_size))
     return 0;
-  PrepareDeathHeimCaptureEdits(wram, wram_size, &ppu, virtual_room, &binding_request);
+  PrepareNativeCaptureEdits(wram, wram_size, &ppu, plan, virtual_room, &binding_request);
   if (binding_request.layer_mask && s_runner_api->replace_ppu_virtual_tilemaps(
       s_runner, &binding_request) != SR_RESULT_OK) {
     for (unsigned bg = 0; bg < kActionBgLayerCount; bg++)

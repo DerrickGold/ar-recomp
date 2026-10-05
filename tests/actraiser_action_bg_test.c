@@ -1887,8 +1887,71 @@ static void TestDeathHeimNativeCaptureEdits(void) {
   free(wram);
 }
 
+static void TestDeathHeimRematchCaptureEdits(void) {
+  uint8_t *wram = BuildWram();
+  Ppu *ppu = calloc(1, sizeof(*ppu));
+  CHECK(wram && ppu);
+  if (!wram || !ppu) { free(wram); free(ppu); return; }
+  ActRaiserActionBg_Shutdown();
+  CHECK(Test_SetEnv("AR_ACTION_BG_HLE", "0", 1) == 0);
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_DeathHeim;
+  Write16(wram, kActRaiserWram_Bg2Width, 256);
+  Write16(wram, kActRaiserWram_Bg2Height, 256);
+  Write16(wram, kActRaiserWram_Bg2CameraX, 0);
+  Write16(wram, kActRaiserWram_Bg2CameraY, 0);
+  ppu->bgmode = 1;
+  ppu->screenEnabled[0] = 3;
+  ppu->bgXsc[0] = 0x63;
+  ppu->bgXsc[1] = 0x70;
+  for (unsigned map = 2; map <= 8; ++map) {
+    wram[kActRaiserWram_CurrentMap] = (uint8_t)map;
+    DioramaRoomOverride room = {.used = true, .map_group = 7, .map_number = (uint8_t)map};
+    CHECK(DioramaLayerOrder_ParseLine(&room,
+        "bg2-pixels = cell:4,5 black:8000000000000000000000000000000000000000000000000000000000000000 "
+        "transparent:4000000000000000000000000000000000000000000000000000000000000000", NULL));
+    CHECK(DioramaLayerOrder_ParseLine(&room,
+        "bg2-stamp = cell:-1,0 metatile:00 words:0DAF,0DAF,0DAF,0DAF bands:1,1,1,1", NULL));
+    ActionBgPlan plan;
+    ActionBgPresentationPolicy policy;
+    CHECK(ActRaiserActionBg_BuildPlan(wram, kActRaiserWramSize, ppu, true, &plan, &policy));
+    CHECK(plan.layer[1].source == (map == 8 ? kActionBgSource_NativeTilemap
+                                         : kActionBgSource_AuthenticViewport));
+    CHECK(!ActRaiserActionBg_BindPlanWithVirtualLayers(wram, kActRaiserWramSize, &plan, &room, ppu));
+    CHECK(ActRaiserActionBg_PixelLayerHasEdits(1));
+    CHECK(ppu->virtualTilemap[1].lookup);
+    CHECK(!(ppu->virtualTilemap[1].flags & kPpuVirtualTilemapFlag_IncludeAuthentic));
+    CHECK(ActRaiserActionBg_BindCaptureTiles(3, 2));
+    CHECK(ActRaiserActionBg_CaptureTilesBound(1));
+    SrPpuCaptureTile tile;
+    const SrPpuCaptureTileBinding *edits = &ppu->captureTiles[1];
+    if (!edits->lookup) {
+      DioramaLayerOrder_ClearRoom(&room);
+      continue;
+    }
+    CHECK(edits->lookup(edits->user_data, 8, 10, &tile));
+    CHECK(tile.black_rows[0] == 0x80 && tile.transparent_rows[0] == 0x40);
+    CHECK(edits->lookup(edits->user_data, -2, 0, &tile));
+    CHECK(tile.entry == 0x0DAF && tile.band == 1 && (tile.flags & SR_PPU_CAPTURE_TILE_REPLACE));
+    CHECK(DioramaLayerOrder_ParseLine(&room, "bg2-virtual = cells:0,0-0,0 band:0", NULL));
+    CHECK(!ActRaiserActionBg_BindPlanWithVirtualLayers(wram, kActRaiserWramSize, &plan, &room, ppu));
+    CHECK(ActRaiserActionBg_BindCaptureTiles(3, 2));
+    CHECK(edits->lookup(edits->user_data, 0, 0, &tile));
+    CHECK(tile.band == 0);
+    CHECK(!ActRaiserActionBg_BindPlanWithVirtualLayers(wram, kActRaiserWramSize, &plan, NULL, ppu));
+    CHECK(!ActRaiserActionBg_PixelLayerHasEdits(1));
+    CHECK(ActRaiserActionBg_BindCaptureTiles(3, 0));
+    CHECK(!ppu->captureTiles[1].lookup);
+    DioramaLayerOrder_ClearRoom(&room);
+  }
+  ActRaiserActionBg_Shutdown();
+  CHECK(Test_UnsetEnv("AR_ACTION_BG_HLE") == 0);
+  free(ppu);
+  free(wram);
+}
+
 int main(void) {
   TestDeathHeimNativeCaptureEdits();
+  TestDeathHeimRematchCaptureEdits();
   TestCapture();
   TestVerticalMargins();
   TestAuthoredVerticalCapture();

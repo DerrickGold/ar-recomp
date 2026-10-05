@@ -925,6 +925,65 @@ static uint32_t margin_stamp(void *context, int32_t x, int32_t y, SrPpuCaptureTi
   return 1;
 }
 
+static uint32_t native_black_cover(void *context, int32_t x, int32_t y, SrPpuCaptureTile *tile) {
+  (void)context; (void)y;
+  if (x != 0 && x != 1 && x != -2) return 0;
+  *tile = (SrPpuCaptureTile){.entry = 3 | (3 << 10), .band = 1,
+      .flags = x == 1 ? SR_PPU_CAPTURE_TILE_REPLACE : 0};
+  if (x != 1) {
+    memset(tile->black_rows, 0xff, sizeof(tile->black_rows));
+    tile->black_rows[3] &= (uint8_t)~0x10u;
+    tile->transparent_rows[3] = 0x10;
+  }
+  return 1;
+}
+
+static void TestNativeBg2OpaqueBlackCover(void) {
+  enum { width = 288, height = 16, origin = 16 };
+  Ppu *ppu = ppu_init(); CHECK(ppu);
+  SrPpuBgPacket *packet = calloc(1, sizeof(*packet)); CHECK(packet);
+  static uint32_t fb[width * kH], bands[3][width * height];
+  /* Death Heim's narrow BG2 retains live native scanout. Both painted black
+   * over transparent art and pasted opaque-black art must cover the skybox;
+   * only the explicitly transparent pixel may reveal it. */
+  for (unsigned renderer = 0; renderer < 3; ++renderer) {
+    setup_virtual_bg(ppu, origin, (uint8_t *)fb, width * 4);
+    CHECK(PpuBeginDrawingSized(ppu, (uint8_t *)fb, width * 4, kH,
+        renderer == 0 ? kPpuRenderFlags_ReferencePixelRenderer : 0));
+    ppu->screenEnabled[0] = 2;
+    ppu->bgXsc[1] = 0x30;
+    ppu->cgram[0x31] = 0;
+    VirtualTilemapFixture map = {.min_x = -80, .max_x = 80, .min_y = -80, .max_y = 80,
+        .even_entry = 2 | (2 << 10), .odd_entry = 2 | (2 << 10)};
+    const PpuVirtualTilemapBinding binding = {.lookup = lookup_virtual_tile, .context = &map};
+    CHECK(PpuSetVirtualTilemap(ppu, 1, &binding));
+    CHECK(PpuBindOverlaySurfaceSized(ppu, 1, (uint8_t *)bands[0], width * 4, height));
+    for (unsigned band = 1; band < 3; ++band)
+      CHECK(PpuBindOverlayPrioSurface(ppu, 1, band, (uint8_t *)bands[band]));
+    CHECK(PpuSetOverlayCapture(ppu, 1, -origin, 0, width, height, kPpuOverlayFlag_RemoveFromGame));
+    ppu->captureTiles[1] = (SrPpuCaptureTileBinding){.lookup = native_black_cover};
+    if (renderer == 2) {
+      packet->request_flags = SR_PPU_BG_PACKET_TILES;
+      SrPpuBgPacket_Begin(packet, width, height); ppu->backgroundPacket = packet;
+    }
+    memset(bands, 0xa5, sizeof(bands));
+    ppu_runLine(ppu, 0);
+    for (unsigned y = 0; y < height; ++y) ppu_runLine(ppu, (int)y + 1);
+    for (unsigned y = 0; y < height; ++y) {
+      for (unsigned x = 0; x < 16; ++x) {
+        const uint32_t expected = x == 3 && ((y + 1) & 7u) == 3 ? 0 : 0xff000000u;
+        CHECK(bands[0][y * width + origin + x] == expected);
+        CHECK(!bands[1][y * width + origin + x] && !bands[2][y * width + origin + x]);
+        if (renderer == 2) CHECK(SrPpuBgPacket_Color(packet, 1, 0, origin + x, y) == expected);
+      }
+      for (unsigned x = 16; x < 256; ++x)
+        CHECK(!bands[0][y * width + origin + x]); /* live native art stays transparent */
+    }
+    ppu->backgroundPacket = NULL;
+  }
+  free(packet); ppu_free(ppu);
+}
+
 static void TestAuthoredTilesBeyondNativeVerticalClip(void) {
   enum { width = 320, extra = 8, height = kH + extra * 2 };
   Ppu *ppu = ppu_init(); CHECK(ppu);
@@ -3548,6 +3607,7 @@ int main(void) {
   TestBackgroundPacketOwnershipAndFallback();
   TestBackgroundPacketAuthenticCameraIsolation();
   TestVramBackgroundPacketOwnership();
+  TestNativeBg2OpaqueBlackCover();
   TestAuthoredTilesBeyondNativeVerticalClip();
   TestObjReceiverTransforms();
   TestWorldNavigationPartialBrightnessCapture();
