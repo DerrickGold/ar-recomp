@@ -113,8 +113,8 @@ uint64_t HostDisplay_NextPresentationDeadline(void);
  * interpolation phase when drawing ahead of that time. Otherwise returns now. */
 uint64_t HostDisplay_PresentationSampleTime(uint64_t now_ns);
 /* Native content timestamp, not a CPU deadline or measured scanout time.
- * Vsync advances it by the precise refresh period per successful present;
- * ordinary queue recovery may leave it slightly before now. */
+ * Vsync selects against the last completed output slot and advances by the
+ * precise refresh period; ordinary queue recovery can leave it before now. */
 uint64_t HostDisplay_NativeFrameSampleTime(uint64_t now_ns);
 /* 0 immediate, 1 renderer refresh, 2 software deadline, 3 VSync probe. */
 int HostDisplay_PacingSource(void);

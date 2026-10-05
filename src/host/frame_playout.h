@@ -79,8 +79,9 @@ static inline uint64_t HostFrameRefreshClock_Next(
 
 /* Fixed-refresh content timeline. Advance once per successful present;
  * ordinary CPU return jitter must not change the native source boundary.
- * This is a content timestamp, not a CPU deadline: a draining/refilling output
- * queue can legitimately put it before the next iteration's wall clock.
+ * This is a content timestamp, not a CPU deadline. Initial swapchain submissions
+ * can complete without waiting; allow half a period of return jitter, but do not
+ * let those submissions advance content several frames into the future.
  * Large phase errors, long stalls, clock discontinuities and rate changes
  * restart it. The phase bound also prevents sustained slow rendering from
  * accumulating lag and blocking the native producer behind a full queue. */
@@ -92,7 +93,7 @@ static inline void HostFrameRefreshClock_Advance(
       completed_ns <= clock->completed_ns ||
       completed_ns - clock->completed_ns > 3 * interval_ns ||
       (completed_ns > predicted && completed_ns - predicted > 3 * interval_ns) ||
-      (predicted > completed_ns && predicted - completed_ns > 3 * interval_ns);
+      (predicted > completed_ns && predicted - completed_ns > interval_ns / 2);
   *clock = (HostFrameRefreshClock){.completed_ns = completed_ns,
       .period_ns = interval_ns, .nominal_ns = interval_ns,
       .phase_ns = reset ? completed_ns : predicted};
@@ -100,7 +101,11 @@ static inline void HostFrameRefreshClock_Advance(
 
 static inline uint64_t HostFrameRefreshClock_TimelineTime(
     HostFrameRefreshClock clock, uint64_t now_ns) {
-  return clock.period_ns ? clock.phase_ns + clock.period_ns : now_ns;
+  /* Select content for the last completed output slot. Adding another refresh
+   * here predicts a future source tick when the swapchain queue is filling.
+   * The capture delay supplies bounded slack for the producer; it must not
+   * become a reason to stall presentation at a source/display rate boundary. */
+  return clock.period_ns ? clock.phase_ns : now_ns;
 }
 
 /* Interpolation delay was measured across forest, cave, castle, lake and lava
@@ -157,11 +162,11 @@ static inline bool HostFramePlayout_AwaitEndpoint(
   if (policy.interpolate)
     return sample_ns > now_ns &&
         HostFramePlayout_NeedsEndpoint(policy, endpoint_ns, target_ns);
-  /* Reserve drawing time before an estimated refresh. This bounded wait is
-   * only for a tick already due on the source timeline, never a future tick. */
-  return policy.delay_ns && endpoint_ns && target_ns > endpoint_ns &&
-      target_ns - endpoint_ns >= policy.interval_ns &&
-      sample_ns > now_ns && sample_ns - now_ns > 2000000;
+  /* Native playback holds its last image if the selected capture is late.
+   * Content time may lead or trail wall time while output buffers refill; it
+   * is not a deadline on which to wait for production. The next output slot
+   * coalesces obsolete captures without delaying or dropping simulation ticks. */
+  return false;
 }
 
 static inline float HostFramePlayout_Phase(

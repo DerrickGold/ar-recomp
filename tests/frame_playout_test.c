@@ -105,31 +105,47 @@ static void TestEarlyDrawWaitsForItsPair(void) {
   assert(!HostFramePlayout_AwaitEndpoint(raw, 0, 2, 90, 100));
 }
 
-/* Variable completion time must not decide which source tick is shown.
- * Include full NTSC/display phase drift, 30 Hz drops and 90/120 Hz holds. */
+/* Variable capture and present completion must not decide which tick is
+ * shown. Exercise 90 seconds of NTSC/display drift, including fractional
+ * refresh, below-source FPS limits, and above-source refresh holds. */
 static void TestNativeTimeline(void) {
   const uint64_t period = 16639263, origin = 1000000000;
   const HostFramePlayout p = HostFramePlayout_Create(period, false, 1750);
-  const unsigned rates[] = {30, 60, 90, 120};
-  for (unsigned r = 0; r < sizeof(rates) / sizeof(rates[0]); ++r) {
+  const uint64_t output_periods[] = {33333333, 20000000, 16683333, 16666667,
+                                    11111111, 8333333};
+  const int64_t jitter[] = {0, 2200000, -500000, 600000};
+  for (unsigned r = 0; r < sizeof(output_periods) / sizeof(output_periods[0]); ++r) {
+    const uint64_t output_period = output_periods[r];
+    HostFrameRefreshClock clock = {0};
     uint64_t endpoint = origin, next = origin + period;
-    for (unsigned i = 1; i < rates[r] * 90; ++i) {
-      const uint64_t sample = origin + 3 * period + (uint64_t)i * 1000000000 / rates[r];
+    unsigned holds = 0, drops = 0, produced = 0;
+    for (unsigned i = 0; i * output_period < 90000000000ull; ++i) {
+      const uint64_t ideal = origin + 3 * period + i * output_period;
+      const uint64_t now = (uint64_t)((int64_t)ideal + jitter[i % 4]);
+      HostFrameRefreshClock_Advance(&clock, now, output_period);
+      const uint64_t sample = HostFrameRefreshClock_TimelineTime(clock, now);
       const uint64_t target = HostFramePlayout_Target(p, sample);
-      uint64_t now = sample - 8000000;
+      const uint64_t previous = endpoint;
       for (;;) {
         const uint64_t cost = 3000000 + (next / period * 7919) % 6500000;
         if (next + cost <= now && HostFramePlayout_AcceptsPacket(p, next, target)) {
-          endpoint = next; next += period;
+          endpoint = next; next += period; ++produced;
           continue;
         }
-        if (!HostFramePlayout_AwaitEndpoint(p, endpoint, target, now, sample)) break;
-        now += 100000;
+        break;
       }
+      assert(!HostFramePlayout_AwaitEndpoint(p, endpoint, target, now, sample));
       assert(endpoint == origin + ((target - origin) / period) * period);
       assert(!HostFramePlayout_AcceptsPacket(p, next, target));
       assert(HostFramePlayout_Phase(p, endpoint, target) < 0);
+      if (i) {
+        holds += endpoint == previous;
+        if (endpoint > previous) drops += (unsigned)((endpoint - previous) / period - 1);
+      }
     }
+    assert(produced >= 5407 && produced <= 5412);
+    if (output_period > period) assert(drops > 0 && holds == 0);
+    else assert(holds > 0 && drops == 0);
   }
   assert(!HostFramePlayout_AwaitEndpoint(p, origin, origin + period, origin + 2 * period, origin + 2 * period));
   HostFramePlayout latest = p; latest.delay_ns = 0;
@@ -142,6 +158,29 @@ static void TestNativeTimeline(void) {
   assert(HostFrameRefreshClock_Next(clock, origin + 50000001) == origin + 66666668);
   HostFrameRefreshClock_Observe(&clock, origin + 66666668, 0);
   assert(!clock.period_ns && !clock.completed_ns);
+}
+
+static void TestNativeNeverWaitsForFutureCapture(void) {
+  const uint64_t period = 16639263, now = 1000000000;
+  const HostFramePlayout p = HostFramePlayout_Create(period, false, 1750);
+  /* Recorded Windows failure: a queued content clock predicts a source tick
+   * 10.6 ms in the future. Waiting for it caused a missed output opportunity. */
+  const uint64_t endpoint = now - 6000000, sample = now + 23200000;
+  const uint64_t target = HostFramePlayout_Target(p, sample);
+  assert(endpoint + period > now && target >= endpoint + period);
+  assert(!HostFramePlayout_AwaitEndpoint(p, endpoint, target, now, sample));
+  /* Even a late capture holds the image; it cannot stall the presenter.
+   * Once production catches up, coalesce all due captures on the next slot. */
+  const uint64_t later = now + 3 * period;
+  const uint64_t later_target = HostFramePlayout_Target(p, later);
+  uint64_t selected = endpoint;
+  unsigned captures = 0;
+  while (HostFramePlayout_AcceptsPacket(p, selected + period, later_target)) {
+    selected += period;
+    ++captures;
+  }
+  assert(captures >= 2 && selected <= later_target && selected + period > later_target);
+  assert(!HostFramePlayout_AwaitEndpoint(p, selected, later_target, later, later));
 }
 
 static void TestRefreshPhase(void) {
@@ -208,7 +247,7 @@ static void TestFixedRefreshTimeline(void) {
       HostFrameRefreshClock_Advance(&clock, complete, period);
       const uint64_t sample = HostFrameRefreshClock_TimelineTime(clock, complete);
       const uint64_t target = HostFramePlayout_Target(policy, sample);
-      const uint64_t expected = HostFramePlayout_Target(policy, ideal + period);
+      const uint64_t expected = HostFramePlayout_Target(policy, ideal);
       assert(target / source_period == expected / source_period);
       assert(clock.period_ns == period);
     }
@@ -226,9 +265,23 @@ static void TestFixedRefreshTimeline(void) {
     HostFrameRefreshClock_Advance(&clock, origin, period);
     const uint64_t late = origin + 2 * period + period / 2;
     HostFrameRefreshClock_Advance(&clock, late, period);
-    assert(HostFrameRefreshClock_TimelineTime(clock, late) == origin + 2 * period);
+    assert(HostFrameRefreshClock_TimelineTime(clock, late) == origin + period);
     HostFrameRefreshClock_Advance(&clock, late + 1000000, period);
-    assert(HostFrameRefreshClock_TimelineTime(clock, late + 1000000) == origin + 3 * period);
+    assert(HostFrameRefreshClock_TimelineTime(clock, late + 1000000) == origin + 2 * period);
+    /* Initial swapchain submissions need not block. They must not move the
+     * content clock several frames into the future before Vsync takes over. */
+    clock = (HostFrameRefreshClock){0};
+    for (unsigned i = 0; i < 3; ++i) {
+      const uint64_t now = origin + i * 1000000;
+      HostFrameRefreshClock_Advance(&clock, now, period);
+      assert(HostFrameRefreshClock_TimelineTime(clock, now) == now);
+    }
+    const uint64_t queued = clock.phase_ns;
+    for (unsigned i = 1; i < 3000; ++i) {
+      const uint64_t now = queued + i * period;
+      HostFrameRefreshClock_Advance(&clock, now, period);
+      assert(HostFrameRefreshClock_TimelineTime(clock, now) == now);
+    }
     /* Sustained rendering below refresh must not accumulate unbounded lag
      * and eventually slow the producer behind a full packet queue. */
     clock = (HostFrameRefreshClock){0};
@@ -246,6 +299,7 @@ int main(void) {
   TestRefreshPhase();
   TestSynchronousRelease();
   TestNativeTimeline();
+  TestNativeNeverWaitsForFutureCapture();
   TestCadence();
   TestPrepareAhead();
   TestEarlyDrawWaitsForItsPair();
