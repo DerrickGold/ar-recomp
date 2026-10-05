@@ -3,6 +3,18 @@
 #include <math.h>
 #include <string.h>
 
+bool SimGlobeMapping_Equal(const SimGlobeMapping *a, const SimGlobeMapping *b) {
+  if (!a || !b) return false;
+  for (unsigned i = 0; i < 3; ++i)
+    if (a->frame.right[i] != b->frame.right[i] || a->frame.up[i] != b->frame.up[i] ||
+        a->frame.outward[i] != b->frame.outward[i])
+      return false;
+  return a->origin_x == b->origin_x && a->origin_y == b->origin_y &&
+         a->chart_radius == b->chart_radius && a->radius == b->radius && a->metric == b->metric &&
+         a->reference_height == b->reference_height && a->landscape == b->landscape &&
+         a->town_landscape == b->town_landscape && a->town == b->town;
+}
+
 bool SimGlobeMapping_Build(uint8_t town, float ox, float oy, float radius,
     float reference, float landscape, SimGlobeMapping *out) {
   if (!out || town < 1 || town > kSimTownCount || !isfinite(ox) || !isfinite(oy) ||

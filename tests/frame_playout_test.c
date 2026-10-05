@@ -209,27 +209,6 @@ static void TestRefreshPhase(void) {
   assert(clock.phase_ns == origin);
 }
 
-static void TestSynchronousRelease(void) {
-  const uint64_t period = 16639263, origin = 1000000000;
-  for (unsigned rate = 60; rate <= 120; rate += 30) {
-    HostFrameTickSchedule clock = {0};
-    uint64_t source = 0;
-    unsigned total = 0;
-    for (unsigned i = 0; i < rate * 90; ++i) {
-      uint64_t target = origin + (uint64_t)i * 1000000000 / rate;
-      total += HostFrameTickSchedule_Release(&clock, target, period, 3, &source);
-      assert(source <= target && source + period > target);
-      assert(clock.epoch == 1);
-    }
-    assert(total >= 5407 && total <= 5409);
-    const uint64_t next = clock.next_ns;
-    assert(HostFrameTickSchedule_Release(&clock, source - 1000, period, 3, &source) == 0);
-    assert(clock.next_ns == next);
-    assert(HostFrameTickSchedule_Release(&clock, next + period * 30, period, 3, &source) == 3);
-    assert(clock.epoch == 2 && source == next + period * 30);
-  }
-}
-
 /* The same native source must be chosen at a given refresh regardless of
  * early/late CPU return phases. Include fractional display rates and source
  * phase drift, then a real stall and a display-mode change. */
@@ -297,7 +276,6 @@ static void TestFixedRefreshTimeline(void) {
 int main(void) {
   TestFixedRefreshTimeline();
   TestRefreshPhase();
-  TestSynchronousRelease();
   TestNativeTimeline();
   TestNativeNeverWaitsForFutureCapture();
   TestCadence();

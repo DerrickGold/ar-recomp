@@ -592,13 +592,19 @@ static bool DrawWorldNavigationGpuModels(const FrameSlot *slot,
     const WorldNavigationProjection *projection,
     const WorldNavigationVisibleTownObject *visible, size_t count) {
   g_world_nav_models.gpu_current_ready = false;
+  g_world_nav_models.gpu_current_rejected = false;
   if (count > g_world_nav_models.gpu_source_capacity) {
     void *sources =
         realloc(g_world_nav_models.gpu_sources, count * sizeof(*g_world_nav_models.gpu_sources));
-    if (!sources) { g_world_nav_models.gpu_sources_unavailable = true; return false; }
+    if (!sources) {
+      g_world_nav_models.gpu_sources_retry_after_ms =
+          HostClock_Milliseconds() + kMillisecondsPerSecond;
+      return false;
+    }
     g_world_nav_models.gpu_sources = sources;
     g_world_nav_models.gpu_source_capacity = count;
   }
+  g_world_nav_models.gpu_sources_retry_after_ms = 0;
   WorldNavigationModelSource *sources = g_world_nav_models.gpu_sources;
   size_t source_count = 0;
   const float source_scale = (float)kSimWorldMapTilePixels / kSimTownCellPixels;
@@ -663,6 +669,8 @@ static bool DrawWorldNavigationGpuModels(const FrameSlot *slot,
   const Sim3DDepthRadialTransform transform = WorldNavigationRadialTransform(slot, projection);
   g_world_nav_models.gpu_current_ready =
       WorldNavigationModelMesh_Draw(sources, source_count, &style, &transform);
+  g_world_nav_models.gpu_current_rejected =
+      !g_world_nav_models.gpu_current_ready && WorldNavigationModelMesh_Rejected();
   return g_world_nav_models.gpu_current_ready;
 }
 
@@ -693,8 +701,10 @@ bool DrawWorldNavigationTowns(
   }
   /* A declined selection still gets the held CPU/multicore cache. Retry GPU
    * selection on a changed view, not every frame of the same oversized view. */
-  const bool gpu_models = WorldNavigationModelMesh_Enabled() &&
-      !g_world_nav_models.gpu_sources_unavailable &&
+  const bool gpu_models =
+      WorldNavigationModelMesh_Enabled() &&
+      (!g_world_nav_models.gpu_sources_retry_after_ms ||
+       HostClock_Milliseconds() >= g_world_nav_models.gpu_sources_retry_after_ms) &&
       !(same_projection && g_world_nav_models.gpu_current_rejected);
   if (gpu_models && same_projection && g_world_nav_models.gpu_current_ready) {
     const Sim3DDepthRadialTransform transform = WorldNavigationRadialTransform(slot, projection);
@@ -872,9 +882,9 @@ bool DrawWorldNavigationTowns(
    * set while iterating this one. Failure only reduces cache effectiveness. */
   (void)SimBackgroundVoxelModelCache_Reserve((uint32_t)visible_count * 2);
   if (gpu_models) {
-    g_world_nav_models.gpu_current_rejected =
-        !DrawWorldNavigationGpuModels(slot, projection, visible, (size_t)visible_count);
-    if (!g_world_nav_models.gpu_current_rejected) {
+    const bool drawn =
+        DrawWorldNavigationGpuModels(slot, projection, visible, (size_t)visible_count);
+    if (drawn) {
       g_world_nav_models.projection_key = key;
       g_world_nav_models.projection_key_ready = true;
       return true;
@@ -907,7 +917,7 @@ void ResetWorldNavigationModels(void) {
   free(g_world_nav_models.gpu_sources);
   g_world_nav_models.gpu_sources = NULL;
   g_world_nav_models.gpu_source_capacity = 0;
-  g_world_nav_models.gpu_sources_unavailable = false;
+  g_world_nav_models.gpu_sources_retry_after_ms = 0;
   g_world_nav_models.gpu_current_ready = false;
   g_world_nav_models.gpu_current_rejected = false;
   free(s_world_model_batch);

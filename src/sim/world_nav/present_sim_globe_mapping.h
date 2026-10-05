@@ -10,6 +10,8 @@ typedef struct SimGlobeMapping {
   float landscape, town_landscape;
   uint8_t town;
 } SimGlobeMapping;
+/* Compare placement values without depending on structure padding. */
+bool SimGlobeMapping_Equal(const SimGlobeMapping *a, const SimGlobeMapping *b);
 /* One continuous sphere: no flat footprint, transition collar or alternate
  * height transform at the active town boundary. */
 bool SimGlobeMapping_Build(uint8_t town, float origin_x, float origin_y,

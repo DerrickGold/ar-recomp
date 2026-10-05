@@ -26,6 +26,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -400,18 +401,29 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer, const Sim3DDepthVertex
   return true;
 }
 
-/* This lightweight adapter deliberately declines the optional retained-mesh
- * optimization, exercising the exact ordinary-geometry fallback. The GPU
- * integration suite covers the production split-input implementation. */
+struct Sim3DDepthMesh {
+  bool ready, linear;
+};
+static bool linear_accept;
+static unsigned linear_creations, linear_uploads, linear_appends, linear_fail_upload_at;
+/* Ordinary presentation cases decline retained meshes. Focused cache cases
+ * enable linear storage and inject failures before anything is appended. */
 Sim3DDepthMesh *Sim3DDepthPass_CreateMesh(void) { return NULL; }
 Sim3DDepthMesh *Sim3DDepthPass_CreateGeometryMesh(void) { return NULL; }
-Sim3DDepthMesh *Sim3DDepthPass_CreateLinearMesh(void) { return NULL; }
+Sim3DDepthMesh *Sim3DDepthPass_CreateLinearMesh(void) {
+  ++linear_creations;
+  if (!linear_accept) return NULL;
+  Sim3DDepthMesh *mesh = calloc(1, sizeof(*mesh));
+  assert(mesh);
+  mesh->linear = true;
+  return mesh;
+}
 bool Sim3DDepthPass_UpdateLinearMesh(Sim3DDepthMesh *mesh, const Sim3DDepthLinearVertex *vertices,
                                      size_t count) {
-  (void)mesh;
-  (void)vertices;
-  (void)count;
-  return false;
+  assert(linear_accept && mesh && mesh->linear && vertices && count);
+  if (++linear_uploads == linear_fail_upload_at) return false;
+  mesh->ready = true;
+  return true;
 }
 bool Sim3DDepthPass_UpdateLinearMeshRange(Sim3DDepthMesh *mesh,
                                           const Sim3DDepthLinearVertex *vertices, size_t first_quad,
@@ -435,10 +447,11 @@ bool Sim3DDepthPass_SpliceLinearMesh(Sim3DDepthMesh *mesh, const Sim3DDepthLinea
 }
 bool Sim3DDepthPass_AppendLinearMeshes(Sim3DDepthMesh *const *meshes, size_t count,
                                        const Sim3DDepthLinearTransform *transform) {
-  (void)meshes;
-  (void)count;
-  (void)transform;
-  return false;
+  assert(linear_accept && meshes && count && transform);
+  for (size_t i = 0; i < count; ++i)
+    assert(meshes[i] && meshes[i]->linear && meshes[i]->ready);
+  ++linear_appends;
+  return true;
 }
 bool Sim3DDepthPass_AppendSurfaceMeshBatches(const Sim3DDepthSurfaceMeshBatch *batches,
                                              size_t count) {
@@ -489,20 +502,19 @@ bool Sim3DDepthPass_AppendSurfaceLayers(Sim3DDepthMesh *mesh, const Sim3DDepthSu
   (void)no;
   return false;
 }
-struct Sim3DDepthMesh {
-  bool ready;
-};
 static struct Sim3DDepthMesh radial_mesh;
-static bool radial_accept, radial_reject_selection;
-static unsigned radial_publications, radial_selections, radial_appends;
+static bool radial_accept, radial_reject_selection, radial_reject_upload;
+static unsigned radial_publications, radial_selections, radial_appends, radial_creations;
 static size_t radial_vertices;
 static unsigned radial_variants;
 Sim3DDepthMesh *Sim3DDepthPass_CreateRadialMesh(void) {
+  ++radial_creations;
   return radial_accept ? &radial_mesh : NULL;
 }
 bool Sim3DDepthPass_UpdateRadialMesh(Sim3DDepthMesh *mesh, const Sim3DDepthRadialVertex *vertices,
                                      size_t count) {
   assert(radial_accept && mesh == &radial_mesh && vertices && count);
+  if (radial_reject_upload) return false;
   radial_vertices = count * 4;
   radial_variants = 0;
   for (size_t i = 0; i < count * 4; ++i) {
@@ -602,7 +614,8 @@ bool Sim3DDepthPass_AppendSphericalSample(Sim3DDepthPassLayer layer, Sim3DDepthM
   return false;
 }
 bool Sim3DDepthPass_MeshReady(const Sim3DDepthMesh *mesh) {
-  return radial_accept && mesh == &radial_mesh && radial_mesh.ready;
+  return mesh && (mesh->linear ? linear_accept && mesh->ready
+                               : radial_accept && mesh == &radial_mesh && radial_mesh.ready);
 }
 bool Sim3DDepthPass_UpdateMesh(Sim3DDepthMesh *mesh, const Sim3DDepthPosition *positions,
                                size_t count) {
@@ -621,8 +634,13 @@ bool Sim3DDepthPass_AppendMeshSample(Sim3DDepthPassLayer layer, Sim3DDepthMesh *
   return false;
 }
 void Sim3DDepthPass_DestroyMesh(Sim3DDepthMesh *mesh) {
-  assert(!mesh || mesh == &radial_mesh);
-  if (mesh) radial_mesh.ready = false;
+  if (!mesh) return;
+  if (mesh->linear)
+    free(mesh);
+  else {
+    assert(mesh == &radial_mesh);
+    radial_mesh.ready = false;
+  }
 }
 
 bool Sim3DDepthPass_AppendQuads(Sim3DDepthPassLayer layer, const Sim3DDepthVertex *vertices,
@@ -992,12 +1010,14 @@ static void TestNativeNavigationZoom(void) {
   PresentWorldNav_ResetResources();
 }
 
-static void TestRejectedNavigationModelsStayCached(void) {
+static void TestResourceFailureKeepsNavigationFallbackCached(void) {
   const char *incoming = SDL_getenv("AR_SIM3D_WORLD_GPU_MODELS");
   char *saved = incoming ? SDL_strdup(incoming) : NULL;
   assert(!incoming || saved);
   assert(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", "1", 1));
   PresentWorldNav_ResetResources();
+  const uint64_t saved_time = weather_time_ms;
+  weather_time_ms = 1000;
   radial_accept = radial_reject_selection = true;
   FakeBackend backend = {.output_width = 960, .output_height = 720};
   assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
@@ -1017,7 +1037,7 @@ static void TestRejectedNavigationModelsStayCached(void) {
   UploadWorldNavigationComposition(&slot);
   for (unsigned frame = 0; frame < 3; ++frame)
     assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
-  assert(depth_solid_faces > 0 && WorldNavigationModelMesh_Enabled());
+  assert(depth_solid_faces > 0 && !WorldNavigationModelMesh_Enabled());
   const unsigned selections = radial_selections;
   const SimBackgroundVoxelModelCacheStats warm = SimBackgroundVoxelModelCache_Stats();
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
@@ -1026,14 +1046,14 @@ static void TestRejectedNavigationModelsStayCached(void) {
   assert(SimBackgroundVoxelModelCache_Stats().misses == warm.misses);
   radial_reject_selection = false;
   const unsigned appends = radial_appends;
-  slot.sim.projection_distance_x100 += 100;
-  /* The GPU source selection is unchanged, so a remembered rejection stays
-   * cheap; a source/style revision must make the healthy adapter usable. */
-  slot.sim.light_azimuth_deg++;
+  /* The held CPU fallback stays cheap during cooldown, then the identical
+   * view must recover without a content/style change or resource reset. */
+  weather_time_ms += 1000;
   assert(PresentWorldNavigation3D(&slot) == kPresentationOutcome_Complete);
   assert(radial_appends > appends);
   PresentWorldNav_ResetResources();
   radial_accept = false;
+  weather_time_ms = saved_time;
   if (saved)
     assert(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", saved, 1));
   else
@@ -2744,6 +2764,173 @@ static void TestRadialModelResidency(void) {
   SimBackgroundVoxelModelCache_Reset();
 }
 
+/* Poison only ABI padding, preserving every semantic value. These requests
+ * must hit a warm cache even when they came from differently filled storage. */
+static void PoisonModelKeyPadding(WorldNavigationModelSource *source,
+                                  WorldNavigationModelSourceStyle *style) {
+  const size_t source_end =
+      offsetof(WorldNavigationModelSource, object_index) + sizeof(source->object_index);
+  memset((uint8_t *)source + source_end, 0xa5,
+         offsetof(WorldNavigationModelSource, source_x) - source_end);
+  const size_t map_end = offsetof(SimGlobeMapping, town) + sizeof(style->embedding.town);
+  memset((uint8_t *)&style->embedding + map_end, 0xa5, sizeof(SimGlobeMapping) - map_end);
+  const size_t style_end =
+      offsetof(WorldNavigationModelSourceStyle, captured_poses) + sizeof(style->captured_poses);
+  memset((uint8_t *)style + style_end, 0xa5,
+         offsetof(WorldNavigationModelSourceStyle, focus) - style_end);
+}
+
+static void TestTownModelResourceRecovery(void) {
+  WorldNavigationModelMesh_Reset();
+  const uint64_t saved_time = weather_time_ms;
+  weather_time_ms = 10000;
+  WorldNavigationModelSource sources[2] = {0};
+  for (unsigned i = 0; i < 2; ++i) {
+    sources[i] = (WorldNavigationModelSource){
+        .object = {.town = 2,
+                   .kind = i ? kSimBackgroundVoxel_Windmill : kSimBackgroundVoxel_Factory,
+                   .source_cells_w = 2,
+                   .source_cells_h = 2,
+                   .footprint_cells_w = 2,
+                   .footprint_cells_d = 2,
+                   .visual_state = kSimStructureVisualState_Finished},
+        .object_index = (uint16_t)i,
+        .detail = kSimBackgroundVoxelDetail_Low,
+        .source_x = 384 + i * 32,
+        .source_y = 384,
+        .centre_x = 16,
+        .centre_y = 16,
+        .anchor_height = 2};
+  }
+  WorldNavigationModelSourceStyle style = {
+      .chart_radius_tiles = 96, .tile_world = 1, .height_percent = 100};
+  assert(SimGlobeMapping_Build(2, 48, 48, 96, 0, 1, &style.embedding));
+  const SimBackgroundProjectionAxis axes[kSimBackgroundVoxelKindCount] = {0};
+  const float matrix[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+  linear_accept = false;
+  assert(!WorldNavigationModelMesh_DrawFacingTown(
+      sources, 2, &style, kSimBackgroundVoxelShading_Basic, axes, matrix, 0));
+  const unsigned failed_creations = linear_creations;
+  linear_accept = true;
+  weather_time_ms += 999;
+  assert(!WorldNavigationModelMesh_DrawFacingTown(
+      sources, 2, &style, kSimBackgroundVoxelShading_Basic, axes, matrix, 0));
+  assert(linear_creations == failed_creations && !linear_appends);
+  ++weather_time_ms;
+  assert(WorldNavigationModelMesh_DrawFacingTown(
+      sources, 2, &style, kSimBackgroundVoxelShading_Basic, axes, matrix, 0));
+  unsigned uploads = linear_uploads;
+  PoisonModelKeyPadding(&sources[0], &style);
+  assert(WorldNavigationModelMesh_DrawFacingTown(
+      sources, 2, &style, kSimBackgroundVoxelShading_Basic, axes, matrix, 2));
+  assert(linear_uploads == uploads);
+  sources[0].object_index += 5; /* Capture renumbering leaves static geometry resident. */
+  assert(WorldNavigationModelMesh_DrawFacingTown(
+      sources, 2, &style, kSimBackgroundVoxelShading_Basic, axes, matrix, 0));
+  assert(linear_uploads == uploads + 3); /* Only the three windmill poses rebuild. */
+  uploads = linear_uploads;
+  sources[0].anchor_height += 1;
+  assert(WorldNavigationModelMesh_DrawFacingTown(
+      sources, 2, &style, kSimBackgroundVoxelShading_Basic, axes, matrix, 0));
+  assert(linear_uploads == uploads + 4); /* A semantic geometry edit republishes. */
+  const unsigned appends = linear_appends;
+  linear_fail_upload_at = linear_uploads + 2; /* Static succeeds, first windmill fails. */
+  ++style.height_percent;
+  assert(!WorldNavigationModelMesh_DrawFacingTown(
+      sources, 2, &style, kSimBackgroundVoxelShading_Basic, axes, matrix, 0));
+  uploads = linear_uploads;
+  weather_time_ms += 999;
+  assert(!WorldNavigationModelMesh_DrawFacingTown(
+      sources, 2, &style, kSimBackgroundVoxelShading_Basic, axes, matrix, 0));
+  assert(linear_uploads == uploads && linear_appends == appends);
+  ++weather_time_ms;
+  assert(WorldNavigationModelMesh_DrawFacingTown(
+      sources, 2, &style, kSimBackgroundVoxelShading_Basic, axes, matrix, 0));
+  assert(linear_uploads == uploads + 4 && linear_appends == appends + 1);
+  /* Invalid mapping is deterministic: suppress rebuilds until its key changes. */
+  style.embedding.chart_radius = 0;
+  assert(!WorldNavigationModelMesh_DrawFacingTown(
+      sources, 2, &style, kSimBackgroundVoxelShading_Basic, axes, matrix, 0));
+  const SimBackgroundVoxelModelCacheStats rejected = SimBackgroundVoxelModelCache_Stats();
+  weather_time_ms += 10000;
+  assert(!WorldNavigationModelMesh_DrawFacingTown(
+      sources, 2, &style, kSimBackgroundVoxelShading_Basic, axes, matrix, 0));
+  assert(SimBackgroundVoxelModelCache_Stats().hits == rejected.hits);
+  style.embedding.chart_radius = 96;
+  assert(WorldNavigationModelMesh_DrawFacingTown(
+      sources, 2, &style, kSimBackgroundVoxelShading_Basic, axes, matrix, 0));
+  WorldNavigationModelMesh_Reset();
+  linear_accept = false;
+  linear_fail_upload_at = 0;
+  weather_time_ms = saved_time;
+}
+
+static void TestRadialModelResourceRecovery(void) {
+  WorldNavigationModelMesh_Reset();
+  const uint64_t saved_time = weather_time_ms;
+  weather_time_ms = 20000;
+  WorldNavigationModelSource source = {
+      .object = {.town = 2,
+                 .kind = kSimBackgroundVoxel_Factory,
+                 .source_cells_w = 2,
+                 .source_cells_h = 2,
+                 .footprint_cells_w = 2,
+                 .footprint_cells_d = 2,
+                 .visual_state = kSimStructureVisualState_Finished},
+      .detail = kSimBackgroundVoxelDetail_Low,
+      .source_x = 256,
+      .source_y = 128,
+      .centre_x = 16,
+      .centre_y = 16,
+      .anchor_height = 2};
+  WorldNavigationModelSourceStyle style = {
+      .chart_radius_tiles = 96, .tile_world = 1, .height_percent = 100};
+  Sim3DDepthRadialTransform transform = {.variant = 1};
+  radial_accept = false;
+  assert(!WorldNavigationModelMesh_Draw(&source, 1, &style, &transform));
+  assert(!WorldNavigationModelMesh_Rejected());
+  const unsigned creations = radial_creations;
+  radial_accept = true;
+  weather_time_ms += 999;
+  assert(!WorldNavigationModelMesh_Draw(&source, 1, &style, &transform));
+  assert(radial_creations == creations);
+  ++weather_time_ms;
+  assert(WorldNavigationModelMesh_Draw(&source, 1, &style, &transform));
+  unsigned publications = radial_publications;
+  PoisonModelKeyPadding(&source, &style);
+  assert(WorldNavigationModelMesh_Draw(&source, 1, &style, &transform));
+  assert(radial_publications == publications);
+  for (unsigned failure = 0; failure < 2; ++failure) {
+    ++style.height_percent;
+    radial_reject_upload = failure == 0;
+    radial_reject_selection = failure == 1;
+    const unsigned appends = radial_appends;
+    assert(!WorldNavigationModelMesh_Draw(&source, 1, &style, &transform));
+    assert(!WorldNavigationModelMesh_Rejected() && radial_appends == appends);
+    radial_reject_upload = radial_reject_selection = false;
+    publications = radial_publications;
+    weather_time_ms += 999;
+    assert(!WorldNavigationModelMesh_Draw(&source, 1, &style, &transform));
+    assert(radial_publications == publications);
+    ++weather_time_ms;
+    assert(WorldNavigationModelMesh_Draw(&source, 1, &style, &transform));
+    assert(radial_appends == appends + 1);
+  }
+  source.detail =
+      kSimBackgroundVoxelDetail_Ultra + 1; /* Invalid source remains rejected past any cooldown. */
+  assert(!WorldNavigationModelMesh_Draw(&source, 1, &style, &transform));
+  assert(WorldNavigationModelMesh_Rejected());
+  const unsigned rejected_creations = radial_creations;
+  weather_time_ms += 10000;
+  assert(!WorldNavigationModelMesh_Draw(&source, 1, &style, &transform));
+  assert(radial_creations == rejected_creations);
+  source.detail = kSimBackgroundVoxelDetail_Low;
+  assert(WorldNavigationModelMesh_Draw(&source, 1, &style, &transform));
+  WorldNavigationModelMesh_Reset();
+  radial_accept = false;
+  weather_time_ms = saved_time;
+}
+
 static float BoundsRandom(uint32_t *state) {
   *state = *state * 1664525u + 1013904223u;
   return (*state >> 8) / 16777216.0f;
@@ -3133,6 +3320,8 @@ int main(void) {
   TestRadialModelDefault();
   TestRadialModelResidency();
   TestRadialModelCapacityRecovery();
+  TestTownModelResourceRecovery();
+  TestRadialModelResourceRecovery();
   TestShadowClipPlanParity();
   TestTownReliefRegistration();
   uint8_t *rom = calloc(1, 0x100000);
@@ -3141,7 +3330,7 @@ int main(void) {
   TestAspectFitAndLocalGeometry();
   TestExpandedNavigationCanvas();
   TestNativeNavigationZoom();
-  TestRejectedNavigationModelsStayCached();
+  TestResourceFailureKeepsNavigationFallbackCached();
   TestCacheBudgetRecovery();
   TestFailureRestoresFullOutput();
   TestAuthoredTownModelsUseSharedCacheAndDepth();

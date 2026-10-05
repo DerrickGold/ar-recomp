@@ -29,6 +29,10 @@ typedef struct WorldNavigationModelSourceStyle {
 
 /* Default on; AR_SIM3D_WORLD_GPU_MODELS=0 opts out until resource reset. */
 bool WorldNavigationModelMesh_Enabled(void);
+/* True only for deterministic content/capacity rejection of the last selection.
+ * Resource failures instead impose a one-second cooldown on Enabled/Draw,
+ * then retry unchanged content. Reset clears both policies. */
+bool WorldNavigationModelMesh_Rejected(void);
 /* Sources are already whole-object culled and LOD selected, in draw order.
  * No FrameSlot or compiler view is retained. False queues nothing: the caller
  * can use its existing multicore renderer. Camera/viewport/pose changes alone

@@ -13,34 +13,6 @@ typedef struct HostFramePlayout {
   bool interpolate;
 } HostFramePlayout;
 
-/* Fixed source schedule for synchronous native rendering. Presentation may
- * release several ticks, but never changes their interval. A genuine stall
- * retains the loop's bounded catch-up policy and starts a new trace epoch. */
-typedef struct HostFrameTickSchedule {
-  uint64_t next_ns, interval_ns, epoch;
-} HostFrameTickSchedule;
-
-static inline unsigned HostFrameTickSchedule_Release(HostFrameTickSchedule *clock,
-    uint64_t target_ns, uint64_t interval_ns, unsigned maximum, uint64_t *source_ns) {
-  if (!interval_ns || !maximum) return 0;
-  if (!clock->next_ns || clock->interval_ns != interval_ns) {
-    clock->next_ns = target_ns;
-    clock->interval_ns = interval_ns;
-    ++clock->epoch;
-  } else if (target_ns > clock->next_ns &&
-             (target_ns - clock->next_ns) / interval_ns >= maximum) {
-    clock->next_ns = target_ns - (maximum - 1) * interval_ns;
-    ++clock->epoch;
-  }
-  unsigned ticks = 0;
-  while (clock->next_ns <= target_ns && ticks < maximum) {
-    *source_ns = clock->next_ns;
-    clock->next_ns += interval_ns;
-    ++ticks;
-  }
-  return ticks;
-}
-
 /* Present return is not a physical scanout timestamp. The fixed content clock
  * uses the display mode's precise period; the old return-time filter is kept
  * below for diagnostic A/B comparisons. */

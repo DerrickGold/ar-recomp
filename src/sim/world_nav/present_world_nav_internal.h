@@ -336,7 +336,7 @@ typedef struct WorldNavigationModelState {
   uint32_t revision;
   WorldNavigationModelSource *gpu_sources;
   size_t gpu_source_capacity;
-  bool gpu_sources_unavailable;
+  uint64_t gpu_sources_retry_after_ms;
   bool gpu_current_ready;
   bool gpu_current_rejected;
   WorldNavigationModelProjectionKey projection_key;

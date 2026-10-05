@@ -239,14 +239,22 @@ static bool BuildRectangles(WaterBuilder *b) {
   return true;
 }
 
+static bool GroundEqual(const SimWorldNavigationTownGround *a,
+                        const SimWorldNavigationTownGround *b) {
+  return a->enabled_town_mask == b->enabled_town_mask &&
+         !memcmp(a->development_tier, b->development_tier, sizeof(a->development_tier)) &&
+         !memcmp(a->terrain, b->terrain, sizeof(a->terrain)) &&
+         !memcmp(a->native_rows, b->native_rows, sizeof(a->native_rows)) &&
+         !memcmp(a->object_rows, b->object_rows, sizeof(a->object_rows));
+}
+
 bool PresentSimGlobeWater_Matches(const SimGlobeMapping *map,
     const SimWorldNavigationTownGround *ground) {
   if (!map || !ground || !s_water.ready || !Sim3DMeshSet_Ready(&s_water.mesh) ||
-      memcmp(map, &s_water.map, sizeof(*map)))
+      !SimGlobeMapping_Equal(map, &s_water.map))
     return false;
   const uint32_t geography = SimWorldMap_GeographySerial();
-  if (s_water.geography == geography && !memcmp(ground, &s_water.ground, sizeof(*ground)))
-    return true;
+  if (s_water.geography == geography && GroundEqual(ground, &s_water.ground)) return true;
   uint8_t sources[kSimTownCells * kSimTownCells];
   const bool any = WaterSources(map, ground, sources);
   if (memcmp(sources, s_water.sources, sizeof(sources)) ||

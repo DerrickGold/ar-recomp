@@ -7,6 +7,7 @@
 #include "support/test_assert.h"
 #include <math.h>
 #include <stdio.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -103,6 +104,15 @@ static void CheckReuse(const SimGlobeMapping *map, const SimWorldNavigationTownG
   const unsigned before = uploads;
   const size_t count = captured_count;
   assert(PresentSimGlobeWater_Matches(map, ground) && uploads == before);
+  SimGlobeMapping padded_map = *map;
+  const size_t map_end = offsetof(SimGlobeMapping, town) + sizeof(map->town);
+  memset((uint8_t *)&padded_map + map_end, 0xa5, sizeof(padded_map) - map_end);
+  SimWorldNavigationTownGround padded_ground = *ground;
+  const size_t terrain_end =
+      offsetof(SimWorldNavigationTownGround, terrain) + sizeof(ground->terrain);
+  memset((uint8_t *)&padded_ground + terrain_end, 0xa5,
+         offsetof(SimWorldNavigationTownGround, native_rows) - terrain_end);
+  assert(PresentSimGlobeWater_Matches(&padded_map, &padded_ground) && uploads == before);
   Sim3DDepthSurfaceVertex *vertices = malloc(count * 4 * sizeof(*vertices));
   ArRenderPointF *focus = malloc(count * 4 * sizeof(*focus));
   assert(vertices && focus);
