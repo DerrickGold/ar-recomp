@@ -108,6 +108,7 @@ const SharedRoomPreview = (() => {
   document.addEventListener('keydown',e=>{if(e.ctrlKey||e.metaKey)configDirty=true;});
   let drag=null;
   canvas.addEventListener('pointerdown',e=>{
+    if(e.button===2||macControlClick(e))return;
     canvas.focus();canvas.setPointerCapture(e.pointerId);
     drag={x:e.clientX,y:e.clientY,cx:nativeCamera.x,cy:nativeCamera.y};
   });

@@ -1,14 +1,18 @@
 /* One project download holds all scenery and effect edits in every room and
  * terrain. Its two ordinary INIs can also be extracted directly into the game. */
 const ProjectEditor=(()=>{
-  let name='action-project.zip',loading=false;
+  let name='action-project.zip',loading=false,downloadUrl=null,downloadBytes=null,activating=false;
+  const saveLink=$('#projectSave');
   const status=message=>{$('#projectStatus').textContent=message;};
   function files() {
     return {'diorama-layers.ini':mergeDioramaIni(),'action-effects.ini':EffectEditor.text()};
   }
   function dirty(){return editorHasUnexportedChanges()||EffectEditor.dirty()||BackgroundPolicyEditor.pending();}
-  function save() {
-    if(loading)return;
+  function save(event) {
+    // Pointer saves use the anchor's ordinary browser download. Keyboard/API
+    // saves activate that same anchor once after preparing the current ZIP.
+    if(activating)return downloadBytes;
+    if(loading){event?.preventDefault();return;}
     try {
       if(EffectEditor.modalOpen())throw Error('Apply or cancel the effect draft before saving your project.');
       if(drag)throw Error('Finish the current map gesture before saving your project.');
@@ -17,14 +21,20 @@ const ProjectEditor=(()=>{
       const documents=files();SharedRoomPreview.validatePolicyDocument(documents['diorama-layers.ini']);
       const bytes=ActionProjectArchive.encode(documents);
       const url=URL.createObjectURL(new Blob([bytes],{type:'application/zip'}));
-      const link=document.createElement('a');link.href=url;link.download=name;
-      try {document.body.appendChild(link);link.click();}
-      finally {link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+      const previous=downloadUrl;downloadUrl=url;downloadBytes=bytes;
+      saveLink.href=url;saveLink.download=name;
+      // Keep the current URL alive for browsers which consume downloads later.
+      // Each save gets a fresh ZIP; superseded downloads have time to finish.
+      if(previous)setTimeout(()=>URL.revokeObjectURL(previous),60000);
+      if(!event) {
+        activating=true;
+        try {saveLink.click();} finally {activating=false;}
+      }
       EffectEditor.markSaved();captureEditorSavepoint('saved');refreshEditorFeedback();
       $('#iniName').textContent=name;$('#iniName').title='Project contains scenery and effects for all rooms and terrains.';
       status('Project download started: all scenery and effects. Extract both INIs beside settings.ini to use them in the game.');
       return bytes;
-    } catch(error){status(`Cannot save project: ${error.message}`);return null;}
+    } catch(error){event?.preventDefault();status(`Cannot save project: ${error.message}`);return null;}
   }
   function load(files,filename='action-project.zip') {
     for(const [key,limit] of Object.entries(ActionProjectArchive.limits)) {
@@ -83,17 +93,21 @@ const ProjectEditor=(()=>{
       throw Error('Select both diorama-layers.ini and action-effects.ini, or use the individual INI imports.');
     return {files,name:'action-project.zip'};
   }
-  $('#projectSave').onclick=save;
+  saveLink.onclick=save;
+  saveLink.addEventListener('keydown',event=>{
+    if(event.key!=='Enter'&&event.key!==' ')return;
+    event.preventDefault();save();
+  });
   $('#projectLoad').onchange=async event=>{
     const selected=Array.from(event.target.files||[]);event.target.value='';
     if(!selected.length||loading)return;
-    loading=true;$('#projectSave').disabled=true;status('Reading project…');
+    loading=true;saveLink.disabled=true;saveLink.setAttribute('aria-disabled','true');status('Reading project…');
     try {
       const project=await read(selected);
       if(dirty()&&!confirm('Loading a project replaces unsaved scenery and effects. Continue?')){status('Project load cancelled.');return;}
       load(project.files,project.name);
     }catch(error){status(`Cannot load project: ${error.message}`);}
-    finally {loading=false;$('#projectSave').disabled=false;}
+    finally {loading=false;saveLink.disabled=false;saveLink.setAttribute('aria-disabled','false');}
   };
   window.addEventListener('beforeunload',event=>{
     if(!dirty())return;event.preventDefault();event.returnValue='';

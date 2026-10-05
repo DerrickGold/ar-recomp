@@ -2,7 +2,7 @@
  * deltas as the toolbar. A paste destination is independent of the selection. */
 const tileMenu=$('#tileMenu');
 tileMenu.hidden=true;
-const tileMenuButtons=['AddEffect','EditEffect','DeleteEffect','CopyEffect','PasteEffect','Preview','Priority','Far','ResetBand','Pixels','Fill','FlipH','FlipV','MirrorH','MirrorV','Copy','Paste','Stamp','Delete','Reset','Remove','Deselect']
+const tileMenuButtons=['AddEffect','EditEffect','DeleteEffect','CopyEffect','PasteEffect','Preview','Settings','Priority','Far','ResetBand','Pixels','Fill','FlipH','FlipV','MirrorH','MirrorV','Copy','Paste','Stamp','Delete','Reset','Remove','Deselect']
   .map(name=>$(`#tileAction${name}`));
 let tileMenuTarget=null;
 const macControlClick=ev=>ev.button===0&&ev.ctrlKey&&/Mac/.test(window.navigator?.platform||'');
@@ -51,7 +51,7 @@ function openTileMenu(cx,cy,clientX,clientY) {
     choices.append(option);
   }
   choices.value=effect?.id??'';$('#tileEffectChoiceRow').hidden=overlaps.length<2;
-  for(const button of tileMenuButtons.slice(6))button.hidden=!!effect;
+  for(const button of tileMenuButtons.slice(7))button.hidden=!!effect;
   $('#tileMenuTitle').textContent=effect?`${effect.kind} · ${Math.round(effect.x)}, ${Math.round(effect.y)}`:`${positions.length} tile${positions.length===1?'':'s'} selected · BG${bgIndex+1}`;
   $('#tileMenuDestination').hidden=!!effect;
   $('#tileMenuDestination').textContent=`Paste destination: ${cx}, ${cy} · Diorama only`;
@@ -135,6 +135,7 @@ $('#tileActionRemove').onclick=()=>runTileAction(()=>{
 $('#tileActionDeselect').onclick=()=>runTileAction(()=>{
   deselect();tileActionStatus('Selection cleared.');
 });
+$('#tileActionSettings').onclick=()=>runTileAction(()=>EditorLayout.openSettings());
 cvs.addEventListener('contextmenu',ev=>{
   if(mode!=='2d')return;
   ev.preventDefault();

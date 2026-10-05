@@ -104,8 +104,9 @@ function editor(data,options={}) {
     console,crypto:webcrypto,TextEncoder,TextDecoder,
     Blob:class {constructor(parts) {this.parts=parts;this.text=parts.join('');}},
     URL:{createObjectURL(blob) {
-      documentHost.exportedText=blob.text;documentHost.exportedParts=blob.parts;return 'blob:test';},
-      revokeObjectURL() {}},
+      documentHost.exportedText=blob.text;documentHost.exportedParts=blob.parts;
+      return `blob:test-${documentHost.downloadCount=(documentHost.downloadCount||0)+1}`;},
+      revokeObjectURL(url) {(documentHost.revokedUrls??=[]).push(url);}},
     setTimeout(callback) {callback();},
     devicePixelRatio:1,
   });
@@ -270,6 +271,12 @@ assert(projectBytes);
 assert.deepEqual({...await pj('ActionProjectArchive.decode(document.exportedParts[0])')},projectFiles);
 assert.equal(pj('ProjectEditor.dirty()'),false);
 assert.equal(project.elements.get('#saveState').textContent,'Matches saved project');
+const firstDownloadUrl=project.elements.get('#projectSave').href;
+assert(pj('ProjectEditor.save()'),'an unchanged project can be saved again');
+assert.notEqual(project.elements.get('#projectSave').href,firstDownloadUrl);
+assert.equal(pj('document.downloadCount'),2,'each save prepares exactly one ZIP');
+assert.deepEqual({...await pj('ActionProjectArchive.decode(document.exportedParts[0])')},projectFiles);
+assert.equal(pj('document.revokedUrls.includes($("#projectSave").href)'),false,'the current download stays alive');
 pj(`EffectEditor.editEmitter(EffectEditor.selected(),{intensity:'.5'});`);
 assert.equal(pj('editorHasUnexportedChanges()'),false);
 assert.equal(pj('ProjectEditor.dirty()'),true,'effect-only edits are unsaved');
@@ -279,10 +286,25 @@ pj('redo()');assert.equal(pj('ProjectEditor.dirty()'),true);
 pj(`$('#exportDownload').onclick()`);
 assert.equal(pj('ProjectEditor.dirty()'),true,'scenery export cannot mark effects saved');
 const failedSaveBefore=pj('EffectEditor.text()');
-pj(`const originalCreateElement=document.createElement;document.createElement=()=>{throw Error('download blocked');};ProjectEditor.save();document.createElement=originalCreateElement;`);
+pj(`const originalDownloadClick=$('#projectSave').click;$('#projectSave').click=()=>{throw Error('download blocked');};ProjectEditor.save();$('#projectSave').click=originalDownloadClick;`);
 assert.equal(pj('ProjectEditor.dirty()'),true);
 assert.equal(pj('EffectEditor.text()'),failedSaveBefore);
 assert.match(project.elements.get('#projectStatus').textContent,/download blocked/);
+assert(pj(`$('#projectSave').onclick({preventDefault(){throw Error('valid save was prevented');}})`),
+  'a pointer save succeeds after a failed download');
+const revisedFiles={...await pj('ActionProjectArchive.decode(document.exportedParts[0])')};
+assert.equal(revisedFiles['action-effects.ini'],failedSaveBefore,'second save includes the latest effect edit');
+assert.equal(pj('ProjectEditor.dirty()'),false);
+pj('undo()');assert.equal(pj('ProjectEditor.dirty()'),true);
+pj('redo()');assert.equal(pj('ProjectEditor.dirty()'),false);
+// Restore the earlier savepoint so rejection tests continue with unsaved edits.
+pj('EffectEditor.restore('+JSON.stringify(projectFiles['action-effects.ini'])+');EffectEditor.markSaved();EffectEditor.restore('+JSON.stringify(failedSaveBefore)+');');
+const beforeDraftSave=pj('document.downloadCount'),blockedPointer={preventDefault(){this.prevented=true;}};
+pj('const savedPendingCheck=BackgroundPolicyEditor.pending;BackgroundPolicyEditor.pending=()=>true;');
+assert.equal(project.elements.get('#projectSave').onclick(blockedPointer),null);
+assert.equal(blockedPointer.prevented,true,'a rejected pointer save cannot download the previous ZIP');
+assert.equal(pj('document.downloadCount'),beforeDraftSave);
+pj('BackgroundPolicyEditor.pending=savedPendingCheck;');
 const rejectedFiles={...projectFiles,'action-effects.ini':'[effects]\nversion=1\nINVALID'};
 assert.throws(()=>pj(`ProjectEditor.load(${JSON.stringify(rejectedFiles)},'bad.zip')`),/Effects rejected/);
 assert.equal(pj('EffectEditor.text()'),failedSaveBefore);

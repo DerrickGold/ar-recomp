@@ -517,7 +517,7 @@ window.addEventListener('keydown', e => {
   const accel = e.metaKey || e.ctrlKey;
   if(accel&&e.key.toLowerCase()==='s'){e.preventDefault();ProjectEditor.save();return;}
   if(EffectEditor.modalOpen())return;
-  if(!tileMenu.hidden||exportDialog.open||$('#docsDlg').open)return;
+  if(!tileMenu.hidden||exportDialog.open||$('#docsDlg').open||EditorLayout.modalOpen())return;
   if (['SELECT','INPUT','TEXTAREA'].includes(e.target.tagName)||e.target.isContentEditable) return;
   if(e.key==='Escape'&&brush==='framing') {
     e.preventDefault();finishFramingDrag(true);$('#bSelect').onclick();return;

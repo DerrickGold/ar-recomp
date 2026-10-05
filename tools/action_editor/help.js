@@ -4,6 +4,16 @@
  * part that is expensive to rediscover, and it is the part someone will need
  * when they come to wire the export into the engine. */
 $('#docsBody').innerHTML = `
+<h4>Arrange your workspace</h4>
+<p><b>Hide sidebar</b> and <b>Hide tools</b> collapse the left panel and extra
+toolbar rows independently. Their Show buttons restore them. Sidebar sections
+also collapse individually or together with <b>Collapse sections</b>.</p>
+<p>Right-click the map and choose <b>Editor settings…</b> for every sidebar
+section in a modal. Other previews and the sidebar offer those sections directly
+on right-click. <b>Settings…</b> above the map opens the same dialog, including
+when the sidebar is hidden. These are the same live controls; Apply buttons keep
+their existing drafts. <b>Done</b> or Escape closes settings without discarding
+edits. Map tools return to the canvas and effect controls open their inspector.</p>
 <h4>Edit from the map</h4>
 <p>Choose <b>Select</b>, click a tile, or Shift-click another tile to select a
 range. The bar above the map shows the selection count, its <b>applied band</b>

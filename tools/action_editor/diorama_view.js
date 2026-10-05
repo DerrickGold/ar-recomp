@@ -307,6 +307,7 @@ function actorHit3d(ev) {
          p[1] >= actor.y - 6 && p[1] <= actor.y + actor.h + 6;
 }
 glc.addEventListener('mousedown', ev => {
+  if(ev.button===2||macControlClick(ev))return;
   /* Capture the pointer so a drag that leaves the canvas keeps tracking
    * instead of stopping and resuming somewhere else. */
   if (glc.setPointerCapture && ev.pointerId !== undefined)

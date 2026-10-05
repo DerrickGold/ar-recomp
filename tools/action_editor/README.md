@@ -13,7 +13,8 @@ are rejected before replacing the active project.
 
 The **Unsaved changes** badge covers scenery and effects, including Undo/Redo.
 Save before refreshing or closing the editor. A save downloads a new file through
-the browser; it does not overwrite the original file automatically. Projects
+the browser; it does not overwrite the original file automatically. You can save
+repeatedly, including an unchanged project; each ZIP contains the latest edits. Projects
 store authoring data; ROM artwork and temporary preview camera/event controls
 remain supplied by the editor. To use a project in the game, extract both INIs
 beside `settings.ini` and restart the game.
@@ -23,6 +24,24 @@ The sidebar's **Individual INI files** section retains **Load scenery INI**,
 document panel for working with one document at a time. Each individual import
 keeps the other document loaded. **Export level INI → Download full INI…**
 downloads scenery from every room; **Export effects INI** downloads effects.
+
+### Layout and settings
+
+**Hide sidebar** and **Hide tools** above the map independently collapse the left
+panel and the extra toolbar rows. **Show sidebar** / **Show tools** restore them;
+view switching, project load/save and **Settings…** remain available. Sidebar
+sections are collapsible, with **Collapse sections** / **Expand sections** for all
+sections together. Only the room picker is expanded initially.
+
+Right-click the map and choose **Editor settings…** to open a modal containing
+every sidebar section. Right-click other previews or the sidebar to choose a
+section directly. **Settings…** in the top bar opens the same modal, even with
+the sidebar hidden. The dialog uses the same live controls: ordinary edits apply
+immediately; Background policy still requires **Apply policy** or **Discard
+draft**. **Done** or Escape closes the dialog without discarding settings.
+Map tools return to the canvas; effect configuration opens its existing inspector.
+The context menus also support arrows, Home/End and Escape. Shift-F10 opens the
+menu on a selected map tile, or opens settings from another focused preview.
 
 ### Background policy
 
@@ -1389,6 +1408,7 @@ The browser code is authored in ordinary JavaScript files, checked by the local
 - `tile_menu.js`: context actions, paste destination, and keyboard menu navigation.
 - `export_editor.js`: room-section modal, clipboard fallback and full INI download.
 - `project_archive.js` / `project_editor.js`: offline ZIP transport, combined load/save and project feedback.
+- `editor_layout.js`: collapsible panels and shared sidebar controls in context-menu settings modals.
 - `framing_editor.js`: saved offsets relative to the room's scroll anchor.
 - `diorama_view.js`: WebGL preview and orbit interaction.
 - `editor.js`: reference actor, UI controls and startup.

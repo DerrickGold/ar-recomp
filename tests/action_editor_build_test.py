@@ -37,6 +37,9 @@ class Scripts(HTMLParser):
 
 
 class ActionEditorBuildTest(unittest.TestCase):
+    def test_settings_modal_control_lifecycle(self):
+        subprocess.run(['node', str(ROOT / 'tests/action_editor_layout.test.mjs')], check=True)
+
     def test_project_archive_interoperability_and_rejection(self):
         subprocess.run(['node', str(ROOT / 'tests/action_editor_project_archive.test.mjs')], check=True)
 
