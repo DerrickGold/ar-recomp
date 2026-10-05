@@ -1772,11 +1772,11 @@ static void DrawShadowMaskResolved(
    * repeated outline once. Per-pass storage avoids shared mutable state or
    * camera invalidation. */
   SimBackgroundFoliageShadowCacheEntry foliage_cache[kFoliageShadowCacheSlots] = {0};
-  /* Experimental: exact caches save CPU work, but the synchronous Deck path
-   * regresses moving-view cadence. Retain the original per-pass default until
-   * owner-side scheduling/overlap can turn that headroom into smoother output. */
+  /* Retain exact model-local samples and light/camera shears. The native frame
+   * scheduler now preserves cadence with the cheaper moving-view path. Keep
+   * the fresh builder available as an explicit diagnostic opt-out. */
   const char *cache_option = getenv("AR_SIM_SHADOW_HULL_CACHE");
-  const bool retain_hulls = cache_option && strcmp(cache_option, "1") == 0;
+  const bool retain_hulls = !cache_option || strcmp(cache_option, "1") == 0;
   SimBackgroundGeometryBatch *batch = &g_renderer_state.batch;
   batch->vertex_count = 0;
   batch->index_count = 0;
