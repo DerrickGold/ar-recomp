@@ -19,6 +19,11 @@ store authoring data; ROM artwork and temporary preview camera/event controls
 remain supplied by the editor. To use a project in the game, extract both INIs
 beside `settings.ini` and restart the game.
 
+Unapplied background policy drafts in any room block a project save. The editor
+names every affected room/BG and opens a draft in the settings modal.
+Choose **Apply policy** to keep that draft or **Discard draft** to retain the
+already applied settings, then save again. Other rooms' tile edits stay intact.
+
 The sidebar's **Individual INI files** section retains **Load scenery INI**,
 **Export level INI**, **Load effects INI**, **Export effects INI** and the effects
 document panel for working with one document at a time. Each individual import

@@ -172,9 +172,10 @@ bool ActRaiserActionBg_CompareLayer(
     ActRaiserActionBgCompareResult *result);
 
 /* Resolve the real finite-world rows immediately above and below ActRaiser's
- * authentic 224-line action viewport. The game clamps its camera against
- * world_height - 225, so the lower expression intentionally uses 225 rather
- * than 224. Each result is independently capped by budget. */
+ * authentic 224-line action viewport. Scanlines 1..224 sample camera_y + 1
+ * through camera_y + 224: row 0 is an upper-margin row at camera_y = 0.
+ * The lower expression intentionally uses 225, matching the game's camera
+ * bound. Each result is independently capped by budget. */
 void ActRaiserActionBg_ResolveVerticalMargins(
     int camera_y, int world_height, int budget,
     int *top, int *bottom);

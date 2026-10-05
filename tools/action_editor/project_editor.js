@@ -3,7 +3,10 @@
 const ProjectEditor=(()=>{
   let name='action-project.zip',loading=false,downloadUrl=null,downloadBytes=null,activating=false;
   const saveLink=$('#projectSave');
-  const status=message=>{$('#projectStatus').textContent=message;};
+  const status=(message,error=false)=>{
+    const element=$('#projectStatus');element.textContent=message;
+    element.classList.toggle('error',error);element.setAttribute('role',error?'alert':'status');
+  };
   function files() {
     return {'diorama-layers.ini':mergeDioramaIni(),'action-effects.ini':EffectEditor.text()};
   }
@@ -16,7 +19,12 @@ const ProjectEditor=(()=>{
     try {
       if(EffectEditor.modalOpen())throw Error('Apply or cancel the effect draft before saving your project.');
       if(drag)throw Error('Finish the current map gesture before saving your project.');
-      if(BackgroundPolicyEditor.pending())throw Error('Apply or discard background policy drafts before saving your project.');
+      if(BackgroundPolicyEditor.pending()) {
+        const targets=BackgroundPolicyEditor.pendingTargets().map(item=>item.label).join(', ');
+        BackgroundPolicyEditor.reviewPending();
+        throw Error('Apply or discard background policy drafts before saving your project.'
+          +(targets?' Unapplied: '+targets+'.':''));
+      }
       commitOp();SharedRoomPreview.validateEffects(EffectEditor.text());
       const documents=files();SharedRoomPreview.validatePolicyDocument(documents['diorama-layers.ini']);
       const bytes=ActionProjectArchive.encode(documents);
@@ -34,7 +42,7 @@ const ProjectEditor=(()=>{
       $('#iniName').textContent=name;$('#iniName').title='Project contains scenery and effects for all rooms and terrains.';
       status('Project download started: all scenery and effects. Extract both INIs beside settings.ini to use them in the game.');
       return bytes;
-    } catch(error){event?.preventDefault();status(`Cannot save project: ${error.message}`);return null;}
+    } catch(error){event?.preventDefault();status(`Cannot save project: ${error.message}`,true);return null;}
   }
   function load(files,filename='action-project.zip') {
     for(const [key,limit] of Object.entries(ActionProjectArchive.limits)) {
@@ -106,7 +114,7 @@ const ProjectEditor=(()=>{
       const project=await read(selected);
       if(dirty()&&!confirm('Loading a project replaces unsaved scenery and effects. Continue?')){status('Project load cancelled.');return;}
       load(project.files,project.name);
-    }catch(error){status(`Cannot load project: ${error.message}`);}
+    }catch(error){status(`Cannot load project: ${error.message}`,true);}
     finally {loading=false;saveLink.disabled=false;saveLink.setAttribute('aria-disabled','false');}
   };
   window.addEventListener('beforeunload',event=>{

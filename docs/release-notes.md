@@ -2,7 +2,7 @@
 
 Unreleased changes since **v0494** (September 16, 2026).
 The next version number and release date are not assigned yet.
-Reviewed through **272d7262** (October 4, 2026), covering all 165 commits
+Reviewed through **141fbf89** (October 5, 2026), covering all 184 commits
 after the tag, including merged work. Related changes are grouped below.
 
 **A major milestone for this release: the full USA campaign has been
@@ -17,7 +17,8 @@ also an ongoing per-level effort, with treatments currently implemented for
 Fillmore Acts 1/2 and Bloodpool Acts 1/2.
 
 This update adds customizable regional gameplay, ten independent save slots,
-an optional modern town menu, 3D church interiors, and editable scenery effects.
+an optional modern town menu, 3D church interiors, a completion ocean scene,
+and editable scenery effects with combined editor projects.
 It expands widescreen and Diorama authoring, moves more rendering work onto the
 GPU, improves frame pacing, and adds styled translation templates. The Builder
 also starts and builds faster, with a clearer update workflow.
@@ -211,11 +212,16 @@ See [Modern SIM menu](manual.md#modern-sim-menu) and
 
 - Give Death Heim room 1 separate A (faces) and B (completion) scenery and
   background policies, switching during the original black fade.
+- Correct Death Heim's face and eye skybox placement, keep the faces clear
+  above the cloud band, and extend the independently scrolling foreground
+  water to cover the viewport in **Skybox only** mode.
 - Add an optional completion ocean scene with luminous clouds, light shafts,
   waves, sun glints, subtle pixel water, cherubs and feathers. Preserve the
   native platform, hero, text, music timing and ending pace. Its controls live
-  under **Action 3D → Death Heim**, independently of Town/World 3D, with visible
-  setup guidance and a reset that restores only completion effects.
+  under **Action 3D → Death Heim** and require **Diorama 3D** with **Skybox** set
+  to **Skybox only**. Add platform reflections, ripples, spray and golden rim
+  light. Each effect has its own saved switch, independently of Town/World 3D,
+  with visible setup guidance and a reset that restores only completion effects.
 - Add authored scenery tiles and regional room extensions for wider views.
   Every level has now been play-tested in Diorama mode, with extensive
   presentation corrections still to address across tile maps, background
@@ -239,6 +245,16 @@ See [Modern SIM menu](manual.md#modern-sim-menu) and
 
 ## Action scene and effects editor
 
+- Save scenery, environmental effects and background policies together with
+  **Save project** or **Ctrl/Cmd-S**, producing one `action-project.zip` for
+  all rooms and regional terrain variants. **Load project** restores both
+  `diorama-layers.ini` and `action-effects.ini`; the individual INI tools remain
+  available. The **Unsaved changes** badge tracks scenery and effects together,
+  including Undo/Redo. Invalid projects are rejected before replacing your work.
+- Author BG1/BG2 edge fill, scroll motion, horizontal and vertical extents,
+  and row-band policies through **Background policy**. Apply an undoable edit,
+  preview it in **Shared renderer**, or restore the room's defaults. Policies
+  save with the scenery, including independent Death Heim A/B scene settings.
 - Label Death Heim room 1 B's browser preview as native artwork, with directions
   to the enhanced completion scene's in-game controls.
 - Expand the standalone [action editor](https://github.com/DerrickGold/ar-recomp/blob/main/tools/action_editor/README.md) with
@@ -281,15 +297,29 @@ not all represented in that preview; see the editor guide for its current scope.
   retain their scanout height. Keep menus and HUD graphics at their pixel aspect.
 - Remove HUD-shaped shadows from scene lighting when the HUD is relocated.
 - Enable buffered frame production for action stages and enhanced SIM towns.
-  Schedule native frames against presentation deadlines to reduce pacing
-  irregularities, and keep camera input from repeatedly interrupting production.
+  Select native frames against the completed output timeline, holding the last
+  image when the next capture is late. Reduce pacing irregularities without
+  skipping simulation updates, and keep camera input from repeatedly
+  interrupting production.
+- Reduce room-transition and pause stalls by retaining frame-generation GPU
+  resources while clearing outdated frame history.
 - Render supported action backgrounds, motion and effect projection on the
   GPU, retaining scene data across presentations and using a reference fallback
   when needed. Reduce repeated PPU work, tile-packet setup and CPU transfers.
 - Reuse unchanged town models and world geometry, share mountain ground
   samples, and avoid full town rebuilds when native windmill tiles animate.
+  Construction, insertion and removal update only changed town mesh ranges,
+  moving unchanged portions on the GPU to reduce preparation and upload work.
+- Reuse model bounds when switching between the Sky Palace and world navigation.
+  Retain globe shoreline geometry when inland town changes leave its water
+  sources and coastal coverage unchanged.
+- Enable cached town-model shadow shapes by default to reduce repeated
+  shadow preparation as the view moves.
+- Retry GPU model rendering after temporary memory or upload failures, and
+  keep retained model and shoreline caches synchronized with their source data.
 - Avoid unused or unchanged SIM texture uploads, correct D3D12 atlas-transfer
-  alignment, and improve cache recovery and upload accounting.
+  alignment, and reuse texture-upload buffers on Windows D3D12 to reduce
+  repeated allocations. Improve cache recovery and upload accounting.
 - Speed up initial loading of the globe's terrain.
 - Improve action-rendering performance when showing extra rows above and
   below the original view with **Action 3D → Scene → Vertical extend**.
@@ -306,6 +336,8 @@ not all represented in that preview; see the editor guide for its current scope.
 - Expand the performance overlay and logs with source-frame holds/skips,
   frame age, producer and presentation timing, and effect-fallback information.
   Add startup focus/input diagnostics for troubleshooting.
+- Reduce Windows presentation stalls when performance logging is enabled by
+  writing each periodic report in a batch.
 
 ## Languages and Workshop
 
@@ -360,6 +392,16 @@ See [Language pack authoring](language-pack-format.md) for the v2 format and
   replay comparisons, including an edge-sequence digest.
 - Extend public runner interfaces for HD Mode 7 scanout, owned background
   packets, room rendering and native/GPU comparison tools.
+- Build the action editor with its embedded WASM previews by default, using
+  pinned Emscripten 5.0.7. The generated editor works offline; source builds
+  can still select `ACTION_EDITOR_WASM=off` for the JavaScript-only editor.
+- Add explicit maximum-quality profiles and verified graphics-backend selection
+  to replay comparisons, with broader D3D12, Vulkan and Metal coverage.
+- Report measured average presentation FPS and 1% lows in the frame-pacing
+  analyzer, including held frames and scene transitions. These rates measure
+  completed backend presentations. Document display, session and power-state
+  requirements for reproducible live comparisons; see
+  [Performance overlay](performance-overlay.md#source-cadence-traces).
 - Organize application, host, rendering, regional, save, text and editor code
   by subsystem, with explicit private state and resource lifetimes. Normalize
   authored source formatting and track move/format commits for useful blame.

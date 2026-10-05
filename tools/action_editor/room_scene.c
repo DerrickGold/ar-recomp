@@ -612,9 +612,11 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
   DioramaScenery_AxisExtent(&r->terrain, 0, EditorRoomScene_Width(r), false, &world_x0, &world_width);
   DioramaScenery_AxisExtent(&r->terrain, 0, EditorRoomScene_Height(r), true, &world_y0, &world_height);
   const int room_y = y - world_y0;
-  int top = Min(Max(0, room_y), budget), bottom = Min(Max(0, world_height - 225 - room_y), budget);
+  /* Match the game's finite-world margins: scanline 1 starts at camera + 1,
+   * so the source's first row is part of the upper margin. */
+  int top = Min(Max(0, room_y + 1), budget), bottom = Min(Max(0, world_height - 225 - room_y), budget);
   int remaining = budget * 2 - top - bottom;
-  if (bottom < budget) top += Min(remaining, Min(Max(0, room_y), budget * 2) - top);
+  if (bottom < budget) top += Min(remaining, Min(Max(0, room_y + 1), budget * 2) - top);
   else if (top < budget) bottom += Min(remaining,
       Min(Max(0, world_height - 225 - room_y), budget * 2) - bottom);
   SrSceneFrame input = {.struct_size = sizeof(input), .vram = r->vram,
@@ -649,7 +651,7 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
       .bottom = Extent(l->plan.vertical_extent.mode, l->plan.vertical_extent.bottom),
       .capture_flags = SR_PPU_OVERLAY_REMOVE_FROM_GAME,
       .clip_vertical = top || bottom,
-      .clip_top = Min(Max(0, f->layer_camera_y[bg]), Max(top, bottom)),
+      .clip_top = Min(Max(0, f->layer_camera_y[bg] + 1), Max(top, bottom)),
       .clip_bottom = Min(Max(0, plan.layer[bg].world_height - 225 - f->layer_camera_y[bg]), Max(top, bottom))};
     if (DioramaCaptureBlend_LayerIsHalfAdded(f->cgwsel, f->cgadsub, input.sub_screen, 1u << bg))
       b->capture_flags |= SR_PPU_OVERLAY_MARK_BG_HALF_ADD;

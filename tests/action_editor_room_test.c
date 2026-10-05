@@ -175,6 +175,28 @@ int main(int argc, char **argv) {
       for (int col = 0; col < surface->pitch_pixels; ++col)
         assert(surface->bands[1][band][col] == 0);
   }
+  if (assets.scene.group == 7 && assets.scene.map == 5) {
+    /* Death Heim's solid ceiling extension meets native map row 0. The PPU
+     * samples scanline 1 at world row 1, so the last upper margin must retain
+     * native row 0 instead of leaving a transparent line at the handoff. */
+    assert(EditorRoomScene_Configure(room,
+        "[layers:07:05]\n"
+        "bg1-stamp:us+jp+eu = cell:0,-1 metatile:06 "
+        "words:3072,3072,3072,3072 bands:2,2,2,2\n"));
+    for (int camera_y = 0; camera_y <= 3; ++camera_y) {
+      assert(EditorRoomScene_Render(room, 0, camera_y, 0, 0, 8));
+      const SrSceneSurfaces *surface = EditorRoomScene_Surfaces(room);
+      const int top = EditorRoomScene_Capture(room)->authentic_y0;
+      const int handoff = top - camera_y - 1;
+      const uint32_t *ceiling = surface->bands[0][1];
+      assert(handoff > 0);
+      const uint32_t solid = ceiling[(handoff - 1) * surface->pitch_pixels + 64];
+      assert((solid >> 24) == 255);
+      for (int row = handoff; row <= handoff + 1; ++row)
+        for (int col = 64; col < 80; ++col)
+          assert(ceiling[row * surface->pitch_pixels + col] == solid);
+    }
+  }
   EditorRoomScene_Destroy(room);
   return 0;
 }

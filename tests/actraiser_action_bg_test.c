@@ -472,6 +472,8 @@ static void TestVerticalMargins(void) {
   CHECK(436 >= 232 - 64 && 436 < 232 + 224 + 55);
 
   ActRaiserActionBg_ResolveVerticalMargins(0, 512, 64, &top, &bottom);
+  CHECK(top == 1 && bottom == 64);
+  ActRaiserActionBg_ResolveVerticalMargins(-1, 512, 64, &top, &bottom);
   CHECK(top == 0 && bottom == 64);
   ActRaiserActionBg_ResolveVerticalMargins(287, 512, 64, &top, &bottom);
   CHECK(top == 64 && bottom == 0);
@@ -488,11 +490,11 @@ static void TestVerticalMargins(void) {
   for (unsigned i=0;i<sizeof(auto_budgets)/sizeof(auto_budgets[0]);++i) {
     const int requested=auto_budgets[i];
     ActRaiserActionBg_ResolveVerticalMargins(3,512,requested,&top,&bottom);
-    CHECK(top==3 && bottom==requested);
+    CHECK(top==4 && bottom==requested);
     ActRaiserActionBg_ResolveVerticalMargins(284,512,requested,&top,&bottom);
     CHECK(top==requested && bottom==3);
     ActRaiserActionBg_ResolveVerticalMargins(0,225,requested,&top,&bottom);
-    CHECK(top==0 && bottom==0);
+    CHECK(top==1 && bottom==0);
   }
 
   /* Kassandora's ledge/floor snapshots must retain the same world window:
@@ -510,12 +512,12 @@ static void TestVerticalMargins(void) {
   ActRaiserActionBg_ResolveVerticalCaptureMargins(287, 512, 64, &top, &bottom);
   CHECK(top == 128 && bottom == 0);
   ActRaiserActionBg_ResolveVerticalCaptureMargins(0, 512, 64, &top, &bottom);
-  CHECK(top == 0 && bottom == 128);
+  CHECK(top == 1 && bottom == 127);
   ActRaiserActionBg_ResolveVerticalCaptureMargins(128, 512, 64, &top, &bottom);
   CHECK(top == 64 && bottom == 64);
   /* A short room cannot manufacture more world, even with a large setting. */
   ActRaiserActionBg_ResolveVerticalCaptureMargins(16, 256, 64, &top, &bottom);
-  CHECK(top == 16 && bottom == 15);
+  CHECK(top == 17 && bottom == 15);
   ActRaiserActionBg_ResolveVerticalCaptureMargins(287, 512, 999, &top, &bottom);
   CHECK(top == 128 && bottom == 0);
   ActRaiserActionBg_ResolveVerticalCaptureMargins(287, 512, 0, &top, &bottom);
@@ -553,7 +555,7 @@ static void TestAuthoredVerticalCapture(void) {
         &resolved, 1, 256, &y0, &height);
     CHECK(y0 == 0 && height == 256);
     ActRaiserActionBg_ResolveVerticalMargins(31, 256, 64, &top, &bottom);
-    CHECK(top == 31 && bottom == 0);
+    CHECK(top == 32 && bottom == 0);
   }
 
   /* Removing the bottom extension must restore bottom anchoring even if the

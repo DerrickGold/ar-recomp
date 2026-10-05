@@ -97,6 +97,24 @@ const BackgroundPolicyEditor=(()=>{
   const fields=['Edge','Motion','Horizontal','Left','Right','Vertical','Top','Bottom','Bands'];
   const elements=fields.map(name=>$('#bgPolicy'+name));
   const status=message=>{$('#bgPolicyStatus').textContent=message;};
+  function pendingTargets() {
+    const keys=new Set(drafts.keys());if(editing)keys.add(scope);
+    return [...keys].map(key=>{
+      const parts=key.split(':'),bg=Number(parts.pop()),target=DATA.rooms.find(r=>roomKey(r)===parts.join(':'));
+      const address=parts.slice(0,2).map(v=>Number(v).toString(16).padStart(2,'0')).join(':');
+      const names=['','Fillmore','Bloodpool','Kassandora','Aitos','Marahna','Northwall','Death Heim'];
+      return {key,target,bg,label:target
+        ? `${names[target.group]||target.group} room ${target.sceneLabel||target.map} (${address}) BG${bg+1}`
+        : `${address} BG${bg+1}`};
+    });
+  }
+  function reviewPending() {
+    const targets=pendingTargets(),next=targets.find(item=>item.key===scope)||targets[0];
+    if(next?.target&&(roomKey(room)!==roomKey(next.target)||bgIndex!==next.bg)) {
+      room=terrainRoom(next.target,terrainProfile);$('#room').value=String(DATA.rooms.indexOf(next.target));setLayer(next.bg);
+    }
+    EditorLayout.openSettings('policy');
+  }
   function options(select,values,labels,value) {
     select.replaceChildren();values.forEach((v,i)=>{
       const o=document.createElement('option');o.value=v;o.textContent=labels[i];select.append(o);
@@ -105,11 +123,10 @@ const BackgroundPolicyEditor=(()=>{
   const extentLabel=e=>e.mode==='fixed'?`Fixed (${e.left??e.top} / ${e.right??e.bottom} px)`:'Available';
   function draftFeedback() {
     $('#bgPolicyApply').disabled=$('#bgPolicyDiscard').disabled=!editing;
-    const keys=new Set(drafts.keys());if(editing)keys.add(scope);
-    $('#bgPolicyDrafts').textContent=keys.size?'Unapplied drafts: '+[...keys].map(key=>{
-      const parts=key.split(':'),bg=Number(parts.pop()),target=DATA.rooms.find(r=>roomKey(r)===parts.join(':'));
-      return `${target?.sceneLabel||parts.slice(0,2).map(v=>Number(v).toString(16).padStart(2,'0')).join(':')} BG${bg+1}`;
-    }).join(', ')+'. Return to each BG to apply or discard.':'';
+    const targets=pendingTargets();
+    $('#bgPolicyDrafts').hidden=!targets.length;
+    $('#bgPolicyDrafts').textContent=targets.length?'Unapplied drafts: '+targets.map(item=>item.label)
+      .join(', ')+'. Apply or discard each draft before saving the project.':'';
     refreshEditorFeedback();
   }
   function controls() {
@@ -270,7 +287,7 @@ const BackgroundPolicyEditor=(()=>{
       ctx.fillStyle='#e4a4ff';ctx.fillText(`Band ${index+1} · ${b.anchor} ${b.y0}–${b.y1} · ${b.edge}`,view.x+(x-l)*s+4,view.y+by*s+13);
     });ctx.restore();
   }
-  return {refresh,apply,restore,drawGuides,pending:()=>editing||drafts.size>0,
+  return {refresh,apply,restore,drawGuides,pendingTargets,reviewPending,pending:()=>editing||drafts.size>0,
     clearDrafts:()=>{drafts.clear();editing=false;saved='';scope='';},
     captureDrafts:()=>cloneBgPolicy({scope,saved,draft,editing,drafts:[...drafts]}),
     restoreDrafts:state=>{

@@ -281,7 +281,9 @@ void ActRaiserActionBg_ResolveVerticalMargins(
     int camera_y, int world_height, int budget,
     int *top, int *bottom) {
   if (budget < 0) budget = 0;
-  int available_top = camera_y > 0 ? camera_y : 0;
+  /* PPU scanlines 1..224 sample camera_y + 1..224. Native world row 0
+   * therefore belongs to the upper margin even when camera_y is zero. */
+  int available_top = camera_y >= 0 ? camera_y + 1 : 0;
   int available_bottom =
       world_height - kActRaiserActionCameraViewportHeight - camera_y;
   if (available_bottom < 0) available_bottom = 0;
