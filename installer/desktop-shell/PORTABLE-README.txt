@@ -5,6 +5,14 @@ Extract this entire folder somewhere writable. Keep the Builder app and its
 Workshop to build the game. BuilderData holds the build workspace; the default
 game output is the adjacent ActRaiserRecomp folder.
 
+Updating an existing game: close the game, back up its entire saves/ directory,
+then choose that game folder in the new Builder and rebuild. On the game's
+first upgraded launch, older save.srm/save.ini files (or actraiser.srm when
+neither exists) in saves/ are automatically adopted into Slot 1. Originals are
+retained in saves/legacy-layout/. Choose Continue at the title screen to resume.
+For another or older utils/ installation, use Import previous installation to
+copy its data into the selected game folder before launching the rebuilt game.
+
 The first launch verifies the bundled files. Later launches reuse checks for
 unchanged files to open faster. To force a complete check, close the Builder
 and launch its executable with --verify-bundle. See the full guide linked below

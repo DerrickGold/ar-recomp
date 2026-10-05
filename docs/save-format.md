@@ -4,8 +4,9 @@ ActRaiser's native battery save is an 8 KiB SRAM image. This reference documents
 the US layout and the Recomp's lossless INI alternative. For the in-game editor,
 see the [manual](manual.md#save-editor); for corresponding memory locations,
 see the [RAM map](ram-map.md).
-Complete campaign transactions, checkpoint versions, and ownership are described
-in [Save persistence ownership](save-persistence.md).
+Complete campaigns use the [checkpoint journal](#regional-campaign-checkpoints)
+and portable `.arsave` format described below. For automatic adoption of older
+saves, see [Upgrading older saves](manual.md#upgrading-older-saves).
 
 The starting field map came from
 [RyudoSynbios/game-tools-collection](https://github.com/RyudoSynbios/game-tools-collection/tree/master/src/lib/templates/actraiser/saveEditor).
@@ -267,10 +268,14 @@ still needs a host-specific test before adding a companion commit contract.
 
 The game supports two save formats:
 
-| Backend | Default path | Purpose |
+| Backend | Managed slot path (`NN` = `01`–`10`) | Purpose |
 |---|---|---|
-| `native-srm` | `saves/save.srm` | Existing behavior and byte-compatible interchange with emulators |
-| `ini` | `saves/save.ini` | Human-readable verified fields plus a lossless copy of the complete SRAM image |
+| `native-srm` | `saves/slots/NN/save.srm` | Byte-compatible interchange with emulators |
+| `ini` | `saves/slots/NN/save.ini` | Human-readable verified fields plus a lossless copy of the complete SRAM image |
+
+Older root-level `saves/save.srm` and `saves/save.ini` files are automatically
+adopted into Slot 1. External diagnostic sessions can still use those paths or
+an explicitly selected path; normal interactive play uses the managed layout.
 
 `native-srm` is the default. INI mode is an
 explicit setting, not an automatic preference based on which files happen to
@@ -414,8 +419,7 @@ loads the previous complete snapshot, including its old name.
 The accepted name can precede the first battery save. It remains host-owned
 session metadata until SRAM contains its compatibility spelling. Name-only
 updates use the same journal transaction and cannot persist session-only SRAM
-edits. See [Save persistence ownership](save-persistence.md) for the commit and
-migration contracts.
+edits. The checkpoint format and migration rules follow below.
 
 ### Regional campaign checkpoints
 
@@ -431,6 +435,20 @@ an interrupted save can select the metadata matching whichever image reached
 disk. A damaged, newer-format, or unmatched companion is preserved and reported
 as an error, not silently applied to another campaign. Older rollbacks beyond
 the retained pair need their corresponding companion backup.
+
+The journal header contains `ARCHECK\0`, little-endian version/count fields,
+one or two records, and an FNV-1a-64 hash over the preceding bytes. Version 2
+records contain a 32-bit feature length, 16-bit UTF-8 name length, 16-bit flags,
+8,192 SRAM bytes, feature bytes, then name bytes. Flag bit 0 owns the name,
+including an explicitly empty one; other flags are rejected.
+
+Version 1 journals and raw native/INI saves remain readable. Valid legacy
+`.arname` companions supply their names until the first successful write
+upgrades the journal. Merely reading a journal does not rewrite it; this is
+separate from the automatic slot-directory migration. Legacy name files are
+preserved, but version 2 records with an authoritative name never fall back to
+them. A journaled legacy campaign with no feature bytes still requires its
+journal so that its enhanced name is not silently discarded.
 
 Accepted New Game creates a fresh campaign identity in memory; it does not
 overwrite the old saved campaign. The native story-save completion captures
@@ -459,9 +477,9 @@ codec before replacing gameplay. The feature owner rebinds only the destination
 slot ID; campaign identity, histories, requested/effective regional rules, seed
 and generator recipe are retained. Import commits through the normal checkpoint
 transaction, installs the donor name (or retires the previous name), and the
-menu requests a restart. A post-commit name failure remains retryable and does
-not falsely report that the gameplay import failed. The source archive remains
-available for recovery.
+menu requests a restart only after the complete snapshot is saved. SRAM,
+feature metadata and the name commit together; an interrupted write retains
+the previous complete snapshot. The source archive remains available for recovery.
 
 Raw SRAM/INI exports still contain only cartridge data for emulator interchange.
 Raw import accepts a matching regional companion and optional valid name beside

@@ -53,9 +53,7 @@ marked uncertain should not be treated as verified offsets or behavior.
   voices, requests, and effect sequences.
 - [Simulation objects](sim-object-catalog.md) — object records and visual identities.
 - [SIM 3D model art index](sim-model-art-index.md) — original/3D comparisons,
-  regional variants, reproduction instructions and the current model audit.
-- [SIM model corrections](sim-model-fixes-2026-09-27.md) — architectural fixes
-  and validation coverage.
+  regional variants and reproduction instructions.
 - [Action scene editor](https://github.com/DerrickGold/ar-recomp/blob/main/tools/action_editor/README.md) and
   [diorama depth shapes](diorama-depth-shapes.md) — authoring enhanced room layouts.
 

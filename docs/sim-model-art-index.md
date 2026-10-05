@@ -7,44 +7,10 @@ composition, asset offsets, and pixel hashes. An auxiliary manifest adds three
 regional renders (pyramid eye and both Japanese developed-house views) without
 renumbering the baseline.
 
-Open the locally generated [regional gallery](../runs/sim-straw-huts-2026-09-27/art-index/index.html)
-or [provenance TSV](../runs/sim-straw-huts-2026-09-27/art-index/art-index.tsv).
-See the [original audit](sim-model-audit-2026-09-27.md) and the
-[implemented corrections](sim-model-fixes-2026-09-27.md) and
-[environment models](sim-environment-models-2026-09-27.md). Generated images require local ROMs and remain in ignored
-`runs/`; the generator and documentation are the reproducible repository artifacts.
-
-The focused [palm audit](sim-palm-audit-2026-09-27.md) and subsequent
-[palm refinement](sim-palm-polish-2026-09-27.md) cover entry 56. Its current
-model uses a natural palm interpretation with curved, feathered fronds and
-a slim tapered stem while preserving the game's faceted style.
-
-The subsequent [full-set recognition and style review](sim-model-recognition-audit-2026-09-27.md)
-records which existing models should be retained, refined or reworked, including
-Low-detail identity and construction-stage coverage. The resulting
-[recognition refinements](sim-model-polish-2026-09-27.md) are now reflected in
-this gallery, including the ancient tree's landmark budget. The subsequent
-[shelter and alternate-house refinement](sim-shelter-refinement-2026-09-27.md)
-adds grounded straw/canvas shelters, their distinct construction stages,
-alternate crowns, awnings, dormers and roof-access details, cleaner windows and
-consistent steep-roof snow. Seven supplemental panels cover the second ordinary
-house stage, both bridge axes and both stages of straw/canvas construction,
-without changing the native comparison count or existing numbers.
-The [tree-lighting and ground-shadow correction](sim-tree-shadow-fix-2026-09-27.md)
-brightens evergreen surfaces, replaces their tile-sized shadow proxies with
-canopy outlines, and removes cast/contact shadows from all six rock layouts.
-The latest [model review follow-up](sim-model-review-followup-2026-09-27.md)
-corrects Bloodpool's protruding house extension, alternate straw crowns,
-standing canvas tents, Aitos's chimney, stilt stairs, striped windmill sails,
-factory roofs and chimneys, evergreen silhouettes, and the ancient tree's
-central crown. It includes native/before/after comparison images.
-The [alternate straw-hut correction](sim-straw-crown-2026-09-27.md) replaces
-the overly flat cap with the native broad raised crest, including its outer
-tips and five dark straw bands. Two more supplemental panels show this hut's
-crest frame and partial covering, bringing the supplemental count to nine.
-The [shared straw-hut refinement](sim-straw-huts-2026-09-27.md) gives both
-facings upright reed walls and rounded, overhanging thatch roofs. The front
-has a bundled straw peak; the alternate retains its broad crest.
+Generate a local gallery with the commands below to compare original art and
+production models. The gallery includes regional variants, construction stages,
+vegetation and landmarks. Generated images require local ROMs and remain in
+ignored `runs/`; no review captures or benchmark history are distributed.
 
 ## Regional coverage
 
@@ -82,10 +48,6 @@ Release filtering shows the native donor artwork. It does not emulate every
 combination of the game's independent regional settings. The Japanese pyramid
 eye, for example, can be selected without selecting Japanese gameplay.
 
-The new index supplements the archived single-source
-[comparison index](../development/documentation-archive/docs/research/sim-voxel-model-audit/original-vs-voxel-audit-index.tsv).
-That historical index is preserved rather than relabeled as multi-release data.
-
 ## Regenerate
 
 Use a Python environment with Pillow, plus the existing SDL3/ImageMagick model
@@ -96,10 +58,10 @@ for shared composition identities. The generator verifies that those composition
 bytes also exist in each supplied donor and records the input ROM hashes.
 
 ```sh
-bash tools/make-sim-voxel-model-sheet.sh runs/sim-straw-huts-2026-09-27/model-sheet.png
+bash tools/make-sim-voxel-model-sheet.sh runs/sim-model-index/model-sheet.png
 python3 tools/make_sim_voxel_regional_index.py \
   --renders "${TMPDIR:-/tmp}/actraiser-sim-voxel-model-sheet/renders" \
-  --out runs/sim-straw-huts-2026-09-27/art-index
+  --out runs/sim-model-index/art-index
 ```
 
 Use `--rom-dir` for a different ROM directory. Open `index.html` locally; it

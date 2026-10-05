@@ -251,6 +251,17 @@ Message Speed selector from **50–100%** in 5% steps; the default is 50%.
 Descriptions, follow-up dialogue and the HUD keep their own sizing. Native PiP
 keeps its established size and position and may overlap the menu.
 
+### 3D church interiors
+
+Under **Town 3D → Scene**, enable **Simulation town 3D** and **Church interior
+3D**, then choose **Listen** or **Take an Offering** in a town. The optional
+interior shows a stone church and altar with soft lighting, dust and a view of
+the surrounding terrain. People retain their original animated sprites;
+dialogue, offering selection and controls work as usual.
+
+**Church interior 3D** defaults to Off. Turn it off, or disable Simulation town
+3D, to return to the original church graphics.
+
 ### Camera control
 
 In diorama mode, 3D towns and 3D world navigation, the right stick orbits, the triggers zoom,
@@ -556,10 +567,8 @@ bindings change pages; Confirm enters the details, Up/Down scrolls them, and
 **F3 / SNES X** opens the full text. Back returns to the slot list.
 
 When no saved campaign or prepared new game exists, this menu opens before
-the title screen starts. Old `saves/save.srm` or `saves/save.ini` files are
-automatically adopted into Slot 1 on the first slot-system launch, with the
-original retained in `saves/legacy-layout`. The file's format takes precedence
-over the new-slot format preference.
+the title screen starts. Older saves are automatically adopted into Slot 1;
+see [Upgrading older saves](#upgrading-older-saves).
 
 The slot list has a scrollbar, with **Advanced** at the bottom for the save
 editor, import/export and storage format. Press **SNES Y** (default keyboard
@@ -605,6 +614,37 @@ root saves and drafts are retained in `saves/legacy-layout`; conflicting files
 stop migration without being overwritten. Existing historical backups remain
 where they were; new backups and redevelopment recovery copies use the numbered
 backup directories. Move the entire `saves` directory when moving a collection.
+
+### Upgrading older saves
+
+Close the game and back up its entire `saves/` directory before updating.
+Rebuild into the same game folder with the newer Builder. The **game's first
+launch** automatically imports the old save into **Slot 1**:
+
+- `saves/save.srm` or `saves/save.ini` is adopted with its matching campaign
+  and name companions. If only one format exists, that format is retained
+  regardless of the new-slot preference. If both exist, the configured save
+  backend selects the active one; both originals are preserved.
+- If neither exists, the older `saves/actraiser.srm` is adopted and converted
+  to the configured save backend if needed.
+- The active files live in `saves/slots/01/`. Exact originals are retained in
+  `saves/legacy-layout/`; conflicting or invalid files stop migration and
+  report an error instead of overwriting data.
+
+Choose **Continue** at the title screen to resume. You do not need to rename
+files, convert them yourself, or use **Import save** for this upgrade. Keep
+the backup until you have checked the campaign. Existing managed collections
+also upgrade automatically while retaining their slots.
+
+Automatic adoption only checks the game's selected data directory. To move
+from another installation, use the desktop Builder's **Import previous
+installation…** workflow first, or copy the complete `saves/` directory into
+a fresh game data folder with the game closed. Older archive installs keep
+their data under `utils/`; portable and per-user installations use different
+[data locations](desktop-packaging.md#portable-and-per-user-storage). Once the data is
+in the new location, the same first-launch migration applies. For moving a
+single campaign into an existing collection, use **Import save** in the
+[save editor](#save-editor) and review the active slot it will replace.
 
 ## Save editor
 

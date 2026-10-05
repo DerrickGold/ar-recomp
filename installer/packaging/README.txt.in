@@ -109,6 +109,17 @@ replace only the application in your chosen location. Leave the new Builder's
 .portable sidecar behind. Your existing per-user data remains in its operating
 system directory and is reused by the updated application.
 
+The upgraded game's first launch automatically imports older saves into Slot 1.
+It adopts saves/save.srm or saves/save.ini from the selected game data directory
+(utils/saves/ in this portable archive). If neither exists, saves/actraiser.srm
+is adopted. The active files go under saves/slots/01/; exact originals remain
+in saves/legacy-layout/. Choose Continue at the title screen to resume.
+No manual conversion or in-game Import save action is needed for this upgrade.
+If your saves are in another installation, use the desktop Builder's Import
+previous installation workflow first, or copy the complete saves/ directory
+into a fresh destination with the game closed. See utils/docs/manual.md,
+"Upgrading older saves", for format selection and recovery details.
+
 Shipped defaults are separate from live settings. New settings are merged in
 alongside yours, and you will see a line like
 
@@ -227,8 +238,9 @@ Install a reviewed pack, restart the game, then select its name in the overlay's
 Localization menu. Enhanced text uses the selected source. Native rendering
 keeps original USA text/font. The editor preview is a script preview, not final
 in-game font layout; visually check translations before sharing them.
-Opening/importing and saving only change your workshop copy. Use the explicit
-Pack actions → Install in game workflow to update the installed version the game uses.
+Install a new project with Pack actions → Install in game. Once its package ID
+is installed, saving Workshop edits also refreshes that game copy, preserving
+its enabled/disabled state. Restart the game to load the updated text.
 Local installation keeps all supplied translations; redistribution consent and
 WIP filtering belong to Export for sharing. Under Import new pack, choose an
 .arlang file, or drop one .arlang at a time into the Workshop from any section.

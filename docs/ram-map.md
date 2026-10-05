@@ -172,7 +172,7 @@ The tile/attribute word contains no size information.
 | slot `+1A/+1C` | 2+2 | Animation state and entry index |
 | slot `+1E` | 2 | Nested-dispatch resume value. Yield helpers store the JSR return address, so the next executed instruction is `value+1`: live fireball `$BDD9` resumes at `$BDDA`; live lightning `$BD69` resumes at `$BD6A`; Marahna's large orb/split and snake children retain `$E061/$A65D`, while its boss diagonal/ground children retain `$E578/$E57E`; the post-impact boss parent repeats through `$E4D7`. Aitos lava fireballs retain `$CFCD`; launched `$CEEC` molten rocks retain `$CF16`, distinct from stationary `$CF1C` mouths. Flaming Wheel's cyan shots use shared `$A65D`; Minotaur axes retain `$B008`, Ice Dragon balls retain `$F2CA`, and Tanzara's exact admitted families retain `$FBEA/$FBF5/$FC13/$FC21/$FCA1/$FCAF/$FCB5/$FCD6/$FCED/$FCFB/$FD22/$FD44/$FD77/$FD9E`. |
 | slot `+20/+22/+24` | 2 each | Current composition pointer, visual ID, and animation wait counter |
-| slot `+26` | 2 | Enemy hit timer: surviving sword/beam damage sets 8 and flag `+30 & $0008`. `$00:8915` retains protection through timer 0 and clears it on the ninth update (`$FFFF`). A beam is not consumed on contact and can hit again after this recovery if still overlapping. See [damage audit](action-damage-audit.md). Other actor roles also use this field, including player invulnerability. |
+| slot `+26` | 2 | Enemy hit timer: surviving sword/beam damage sets 8 and flag `+30 & $0008`. `$00:8915` retains protection through timer 0 and clears it on the ninth update (`$FFFF`). A beam is not consumed on contact and can hit again after this recovery if still overlapping. See [sword and beam damage](#sword-and-beam-damage). Other actor roles also use this field, including player invulnerability. |
 | slot `+28`/`+29` | 1+1 (see note) | Attribute/transform. Masking the 16-bit read at `+28` with `$C000` selects the horizontal/vertical flip, which works because the bits live in the **byte at `+29`**; `+28`'s own byte measured `$00` on every spell actor observed, and `$00:95F0` writes `+28` byte-wise. Treat as two bytes rather than one word until a case is found that needs the low half. `+19` carries the same base attribute value as `+29`. |
 | slot `+2A/+2C/+2E` | 2 each | Attack, HP, and BCD death-score value copied from spawn-record bytes `+7/+8/+9` by `$00:95F0`. Death-score units are tens of displayed points: Aitos skull `$20` means 200 points, not20. |
 | slot `+30` | 2 | Object flags. Bit `$0001` marks an attacker (including the player sword beam); bit `$0008` marks a hit and blocks further enemy damage until recovery; bit `$0400` marks an object outside the activation window. This is distinct from whether its sprite is drawn. |
@@ -180,6 +180,24 @@ The tile/attribute word contains no size information.
 | slot `+38` | 2 | Role-specific counter/flag. Controller `$0860+38` is selected spell ID; cohort spells reuse `+38` for repeat counts. Original/rematch Pharaoh root uses it as a pending-sphere flag: successful allocation increments it, the child clears it through `+$3A` after formation, and the root checks between waiting sequences. It is not a shared boss timer. |
 | slot `+3A` | 2 | Spawner backlink. The cast controller and player sword-beam child point to player `$08A0`; Bloodpool boss-lightning strike child `$08E0` points to boss `$12E0`, while its floor child `$0920` points to `$08E0`. Marahna split fireballs point to their retired `$E047` orb, snake fireballs point to their validated `$DE96` parent, linked-lightning children point to the first `$E18E` endpoint while the `$E254` partner occupies the next slot, and both `$E483` boss bolt stages point to boss `$12E0`. Death Heim's room owner is `$001C`; the Viper parent and the visible Flaming Wheel body retain it in their rematches. Minotaur axes and Ice Dragon balls point to their allocator with the same original/rematch source; the address does not promise that allocator remains live. The original Flaming Wheel body is root-owned (`0`); helper/child records have action-object backlinks and are rejected. Combined with `+32`, this establishes provenance at admission. The backlink value can remain stable after the referenced slot retires or is reused; it is not a lifetime owner or a globally unique identity. |
 | `$7E:00F4/$00F8/$00F9` | 2 each | Input-enable mask, cast-active gate, and cast-transition state used by `$9DE1-$9F10` |
+
+### Sword and beam damage
+
+The native enemy-hit resolver (`$00:8A3C`) marks a victim hit before applying
+attack damage. A powered sword and its beam overlapping that victim during
+one collision pass deal 2 total damage, not 4; multiple beam composition parts
+do not produce multiple hits in that pass. The ordinary sword deals 1, while
+the original sword power-up raises melee damage to 2 and creates a beam with
+attack 2. The Recomp's ranged-sword option uses that native power-up.
+
+Protection belongs to the victim, not to a list of targets on each projectile.
+The timer set to 8 remains protective through zero and expires on the ninth
+object update. A surviving beam can then damage the same enemy again, or damage
+a different enemy sooner. `$00:9D1C` moves the beam by 8 pixels per update;
+contact itself does not consume it. Original-ROM and generated-code checks of
+the Fillmore Minotaur reproduced HP 24 → 22 → 20 from one beam, nine updates
+apart, with the player outside melee reach. This is native behavior, not an
+extra damage operation added by the port.
 
 ### Projectile identity and lifetime
 

@@ -91,7 +91,8 @@ find_package(SDL3 3.4.0 REQUIRED)
 option(AR_PPU_GPU_PROBE "Build the experimental GPU background parity/throughput probe" OFF)
 if(AR_PPU_GPU_PROBE)
     add_executable(actraiser_ppu_gpu_probe
-        tools/ppu_gpu/probe.c tools/ppu_gpu/packet.c src/platform/sdl/gpu_global_motion_sdl.c
+        tools/ppu_gpu/probe.c tools/ppu_gpu/packet.c tools/ppu_gpu/runner_events_stub.c
+        src/platform/sdl/gpu_global_motion_sdl.c
         tools/ppu_gpu/motion_checks.c src/present/presentation_frame_generation.c
         src/action/action_scene_snapshot.c src/action/action_room_scene.c src/action/action_bg_world.c
         src/actraiser/quintet_lzss.c
@@ -219,6 +220,7 @@ if(_AR_ENHANCED_TEXT)
         tools/text_preview_probe.c
         src/platform/sdl/text_preview_cli.c
         src/platform/sdl/render_sdl.c
+        src/platform/sdl/host_clock_sdl.c
         src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c
         src/localization/dialogue_session.c src/localization/language_pack.c
         src/localization/text_template.c src/localization/language_contract.c
@@ -2483,6 +2485,7 @@ if(BUILD_TESTING)
     # on raw warps into intermediate rooms that require natural game setup.
     file(STRINGS "${CMAKE_SOURCE_DIR}/tools/action_editor/environment_sources.txt" _room_environment_sources)
     add_executable(actraiser_action_room_gpu_compare
+        tools/ppu_gpu/runner_events_stub.c
         tools/action_editor/check_native_projection.c tools/action_editor/room_preview.c
         tools/action_editor/room_scene.c tools/action_editor/compositor_profile_stub.c
         ${_room_environment_sources} ${_diorama_compositor_sources}

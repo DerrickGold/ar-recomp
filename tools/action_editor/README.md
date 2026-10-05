@@ -174,8 +174,7 @@ depth bands and authors those changes directly in `diorama-layers.ini`. The
 editor is the source of truth; the game only loads and renders the exported
 configuration.
 
-The [Effects workspace and shared WASM preview](../../docs/action-effects-editor-plan.md)
-is being implemented in stages. **Shared renderer** now
+The effects workspace includes a shared WASM preview. **Shared renderer**
 loads complete rooms directly into the production C PPU and Diorama compositor
 via WASM/WebGL2. No game capture or gameplay session is required. The original
 JavaScript **Diorama 3D** remains available while the shared view is validated.
@@ -624,7 +623,8 @@ internal effect clipboard is separate from the exported INI clipboard.
 
 Remaining native actor phases, landing dust and spell-controller visuals still
 need complete recipe extraction. Sparse overrides alone cannot reconstruct
-those defaults. See the [native-default contract and audit](../../docs/action-effects-editor-plan.md#native-defaults-must-be-reconstructible-from-configuration).
+those defaults; exporting an override is not a complete definition of a native
+actor effect.
 Further work includes compound handles, material/slope tools,
 live native reload, actual actor/HUD artwork, final image
 parity and target-hardware acceptance. Camera-aligned editing and detached live
@@ -661,38 +661,6 @@ uploads, readbacks or per-frame heap allocations were added. Receiver sampling
 and presentation use caller-owned retained batches; actor light meshes append
 directly, without a shared global scratch buffer or an intermediate copy.
 
-#### Mac performance sample — 2026-10-01
-
-On this Apple M2, 500 animated native room frames at maximum 128/64 extensions
-measured the following CPU costs. The full-room figure includes PPU scanout,
-source/caster capture and effect meshes; meshes and opacity are sub-costs, not
-additional totals. Opacity is timed separately even for the cave scene where no
-native directional caster field is needed.
-
-| Room sample | PPU/capture + meshes | Effect meshes | Edited opacity capture |
-| --- | ---: | ---: | ---: |
-| Fillmore forest, 1800/400 | 3.595 ms | 0.168 ms | 0.189 ms |
-| Fillmore cave, 1450/1000 | 3.016 ms | 0.035 ms | 0.144 ms |
-| Bloodpool outdoors, 1600/240 | 3.871 ms | 0.804 ms | 0.203 ms |
-| Bloodpool gallery, 800/0 | 2.442 ms | 0.131 ms | 0.113 ms |
-
-The native SDL/Metal compositor, tested separately for 300 warmed static capture
-frames, measured 0.056 ms CPU submission / 1.081 ms GPU-complete frame at
-960 × 600 (Fillmore), and 0.147 / 1.758 ms at 1440 × 900 (Bloodpool). These
-exclude dynamic mesh generation, gameplay and swapchain presentation; do not
-add them to the CPU samples as an end-to-end frame-time claim.
-
-The native room oracle accepts a final `--benchmark` flag and the usual camera
-pose on stdin. The compositor replay accepts `--benchmark` before its arguments:
-
-```sh
-build/actraiser_diorama_replay --benchmark runs/action-editor-captured-scene/bloodpool/scene.ardi /tmp/bloodpool-perf.bmp 1440 900
-```
-
-Steam Deck/Vulkan and Windows/D3D12 hardware measurements, along with matched
-live-game images, remain acceptance work. The new effects use the existing
-portable geometry/renderer interfaces and introduce no backend-specific pass.
-
 #### Whole-room default markers and inventory cost
 
 The map inventory scans immutable room assets once per loaded room using the
@@ -705,46 +673,25 @@ Actor events are previewed separately; moving game objects are not static map
 markers. Source-art checks still apply, so removing a source's supporting tile
 can stop that native effect even though its default marker remains available.
 
-On Apple M2, four native inventories took 0.106 ms (Fillmore 1:1), 0.394 ms
-(Fillmore 1:2), 4.293 ms (Bloodpool 2:1) and 0.171 ms (Bloodpool 2:7). These are
-one-time native CPU samples, not WASM or end-to-end frame measurements. Warm map
-redraws reuse the inventory. The 150-scene native/WASM gate checks unique IDs,
-finite member/scroll geometry, cache reuse and unchanged live hashes/GPU counters.
+#### Effects storage
 
-#### Text versus binary storage
-
-Keep `action-effects.ini` as the canonical effects sidecar beside `settings.ini`.
-It stores small semantic recipes, not rendered vertices or particle states.
-Load/import parses it once into bounded retained records; rendering never parses
-text. A full 256-record receiver-heavy fixture was 41,492 text bytes and 63,492
-retained bytes, averaging 0.729 ms per parse over 500 runs on the development
-machine. Reproduce with `build/actraiser_action_effect_recipes_test --benchmark`.
-These are CPU measurements, not target-device load benchmarks.
-
-Text remains readable, reviewable in Git and tolerant of compiler/architecture
-changes. A raw dump of C structs would encode padding, enum sizes, endianness and
-pointers, and would be unsafe as a portable project format. A binary effects
-cache would not improve per-frame rendering or reduce retained table size.
-
-`diorama-layers.ini` currently contains about 631 KiB, mostly dense scenery edits;
-that is a different workload from effects recipes. If larger pixel masks,
-painted density grids, meshes or imported artwork make this data unwieldy, keep
-semantic settings in text and add a versioned binary asset payload with stable
-IDs, explicit little-endian lengths/counts, bounds validation and a content hash.
-Both pieces would need atomic export/import and a documented migration. An
-optional compiled cache should be disposable and keyed by text/schema hash.
-There is no measured need to introduce that format for today's effects.
+Keep `action-effects.ini` beside `settings.ini`. It stores semantic effect
+recipes and sparse overrides; `diorama-layers.ini` stores the room's layer,
+framing and scenery edits. Preserve both files when moving an authored room.
+The game reads these files on launch. Exported recipes contain settings and
+source identities, rather than rendered vertices or particle states.
 
 ```sh
 sh tools/action_editor/build.sh
 sh tools/action_editor/build.sh ar.sfc out.html path/to/diorama-layers.ini
 ```
 
-The build needs a C compiler and Python 3. Its output is a self-contained HTML
-file that can open from `file://`. The default output is
+The default build needs a C compiler, Python 3 and Emscripten **5.0.7**. Its
+output is a self-contained HTML file that can open from `file://`. The default output is
 `build/action-editor/ar-action-layer-editor.html`, keeping the generated editor
 out of the source tree and Git. By default it embeds the repository ROM and
-`diorama-layers.ini`; **Load INI** can replace the configuration at runtime and
+`diorama-layers.ini`; **Load project** replaces scenery and effects together.
+**Load scenery INI** under **Individual INI files** replaces scenery alone, and
 **Export level INI** opens a copyable replacement section for the current room.
 The dialog also offers **Download full INI…** for a complete merged file.
 The build also reads `settings.ini` for the Diorama coverage guide's aspect,

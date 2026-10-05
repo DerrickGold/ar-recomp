@@ -470,6 +470,12 @@ install(FILES
     ${GAME_ROOT}/docs/manual.md
     ${GAME_ROOT}/docs/builder-workshop.md
     ${GAME_ROOT}/docs/desktop-packaging.md
+    ${GAME_ROOT}/docs/release-notes.md
+    ${GAME_ROOT}/docs/regional-settings.md
+    ${GAME_ROOT}/docs/regional-media.md
+    ${GAME_ROOT}/docs/regional-differences.md
+    ${GAME_ROOT}/docs/regional-differences-technical.md
+    ${GAME_ROOT}/docs/unused-content.md
     ${GAME_ROOT}/docs/language-pack-format.md
     ${GAME_ROOT}/docs/language-packs.md
     ${GAME_ROOT}/docs/language-authoring-reference.json
@@ -480,6 +486,9 @@ install(FILES
     ${GAME_ROOT}/docs/save-format.md
     ${GAME_ROOT}/docs/randomizer.md
     ${GAME_ROOT}/docs/sim-object-catalog.md
+    ${GAME_ROOT}/docs/sim-menu-reference.md
+    ${GAME_ROOT}/docs/sim-model-art-index.md
+    ${GAME_ROOT}/docs/text-template-core.md
     ${GAME_ROOT}/docs/diorama-depth-shapes.md
     ${GAME_ROOT}/docs/dialogue-system.md
     ${GAME_ROOT}/docs/snes-native-audio-channels.md

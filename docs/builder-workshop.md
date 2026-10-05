@@ -20,6 +20,10 @@ language packs and custom assets are preserved, and the folder is never cleared.
 For an old `utils/` installation, choose a new game folder and use **Import
 previous installation** to bring its data forward.
 
+After rebuilding, the game's first launch automatically imports older saves
+in that data folder into Slot 1 and retains the originals. No manual save
+conversion is required; see [Upgrading older saves](manual.md#upgrading-older-saves).
+
 The Builder remembers your selection. **Change game folder…** in the sidebar
 changes it for the next launch only: finish or save your work, then close and
 reopen the Builder. Changing folders does not move or copy the previous game.

@@ -102,9 +102,9 @@ beam compositions, beam creation/movement/retirement, and the native object-loop
 hit timer. It checks same-pass sword/beam exclusion, repeated passes, immunity,
 deflection, lethal hits, score, and later hits by a surviving projectile. No ROM,
 save, generated source or game executable is changed. Keep the game build current;
-this is separate from the ROM-free CTest tier. See
-[the damage audit](../docs/action-damage-audit.md) for the original-ROM comparison
-and the limits of these controlled fixtures.
+this is separate from the ROM-free CTest tier. See the
+[native sword and beam rules](../docs/ram-map.md#sword-and-beam-damage).
+Controlled fixtures do not establish complete-campaign coverage.
 
 ## Shared implementation dependencies
 
@@ -141,6 +141,19 @@ flush, and six rock variants with no shadow pixels. It also captures isolated
 tree, forest and rock previews through the production depth renderer.
 
 The model tests check the canopy proxy against projected vertices at every
-detail level and verify that rocks omit contact decals. See the
-[tree-shadow review](../docs/sim-tree-shadow-fix-2026-09-27.md) for captures and
-validation limits.
+detail level and verify that rocks omit contact decals. These isolated checks
+do not replace live town and world-navigation review.
+
+## Windows compiler launch regression
+
+From `installer/`, run the real bundled compiler at long paths containing
+spaces and Unicode on native Windows x64 and ARM64:
+
+```powershell
+$env:AR_TEST_ZIG = 'C:\path\to\bundled\zig.exe'
+go test ./internal/compilerlaunch -run TestRealZigLongPaths -v
+```
+
+The test compiles, archives, links and runs a small program with short and deep
+workspaces. It is skipped without `AR_TEST_ZIG`; running it on another OS does
+not validate Windows path behavior.

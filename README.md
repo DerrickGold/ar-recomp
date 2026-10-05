@@ -30,24 +30,26 @@ and rebindable controls. The in-game settings menu explains each option.
 > others. The current build is based on the USA release, which differs from the
 > Japanese version in many ways beyond the language itself. Language packs and
 > Japanese gameplay rules are now available, with supported regional artwork
-> and music extracted locally from your own ROMs. Japanese-language coverage
-> and regional play-testing are still in progress; language packs alone do not
-> change the game mechanics.
+> and music extracted locally from your own ROMs. Players can create and share
+> their own translations. Regional play-testing is still in progress; language
+> packs alone do not change the game mechanics.
 >
-> 本プロジェクトに関心を寄せていただき、ありがとうございます。また、本作を広めてくださった皆さまにも心より御礼申し上げます。現在のビルドは北米版をベースとしており、日本版とは言語以外にも多くの違いがあります。日本語のテキストに対応した言語パックに加え、日本版のゲームルールも選べるようになりました。対応する画像や音楽は、お持ちのROMから抽出して使用できます。日本語化と各地域のルールでのプレイ検証は引き続き進めています。なお、言語パックだけではゲームの仕様は日本版に変わりません。
+> 本プロジェクトに関心を寄せていただき、ありがとうございます。また、本作を広めてくださった皆さまにも心より御礼申し上げます。現在のビルドは北米版をベースとしており、日本版とは言語以外にも多くの違いがあります。日本語のテキストに対応した言語パックに加え、日本版のゲームルールも選べるようになりました。対応する画像や音楽は、お持ちのROMから抽出して使用できます。プレイヤー自身で翻訳を作成し、配布することもできます。各地域のルールでのプレイ検証は引き続き進めています。なお、言語パックだけではゲームの仕様は日本版に変わりません。
 
 ---
 
 ## Progress at a glance
 
-Development is active.
+**Release milestone: the full USA campaign has been successfully played from
+start to finish.** Development and visual improvements remain active.
 
 | | |
 |---|---|
 | ✅ | **Native graphics:** All six towns, all 12 acts, Death Heim, and the ending have been play-tested, including overlay access at The End. The full USA campaign is verified completable end to end. |
-| 🟡 | **Diorama mode:** Every action route except Northwall has been play-tested. Follow-up testing and room-by-room polishing of stage graphics and environmental effects are ongoing across the levels. |
-| 🟡 | **Platforms:** Windows, macOS arm64, and Steam Deck have been tested and boot successfully. macOS x86_64 and generic Linux still need representative launch testing. |
-| 🟡 | **Localization and regional support:** Language packs, enhanced fonts, and Workshop authoring are available. [US, Japanese, and European gameplay presets](docs/regional-settings.md) support per-campaign customization, with independent [regional artwork and music](docs/regional-media.md). Combined regional play-testing is ongoing. |
+| 🟡 | **Action Mode Enhancements:** Extensive presentation work remains in 3D Diorama mode: manually extending tile maps to fill widescreen space, correcting background policies, and fixing skybox rendering. Adding unique environmental effects is an ongoing per-level effort, currently implemented for Fillmore Acts 1/2 and Bloodpool Acts 1/2. |
+| ✅ | **Platforms:** Windows, macOS arm64, and Steam Deck have been tested and boot successfully. macOS x86_64 and generic Linux still need representative launch testing. |
+| ✅ | **Localization:** Language packs, enhanced fonts, and Workshop authoring are ready. Players can create and distribute their own translations. |
+| 🔵 | **Regionalization:** Implementation is complete and ready for testing. [US, Japanese, and European gameplay presets](docs/regional-settings.md) support per-campaign customization, with independent [regional artwork and music](docs/regional-media.md). |
 | 📋 | **Achievements:** In planning. |
 
 ---
@@ -194,9 +196,19 @@ Select your existing game folder to use its settings, assets, ROM and saves
 directly, or select an empty folder to start fresh.
 
 Back up your saves, then rebuild into the same game folder with the newer
-Builder. Saves, settings, language packs, authored diorama rooms, and custom
-assets are retained. For a per-user macOS or Linux installation, replace only
-the generated application.
+Builder. Saves, settings, language packs, and custom assets are retained.
+Updated bundled diorama rooms replace `diorama-layers.ini` after preserving
+the previous file in a numbered `.pre-update-N` backup; see
+[shipped content updates](docs/desktop-packaging.md#portable-and-per-user-storage).
+For a per-user macOS or Linux installation, replace only the generated application.
+
+On the first launch of the upgraded game, old `saves/save.srm` or
+`saves/save.ini` files are automatically imported into **Slot 1**. The older
+`saves/actraiser.srm` is also adopted when neither of those files exists.
+Original files are retained in `saves/legacy-layout`; the active save moves to
+`saves/slots/01`. Choose **Continue** at the title screen to resume. No manual
+conversion is needed. See [save migration](docs/manual.md#upgrading-older-saves)
+for format selection and recovery details.
 
 To copy data from a different or legacy installation, use **Import previous installation…**,
 review the detected data, and close the game before importing. The Builder
@@ -371,8 +383,8 @@ to translated dialogue.
   the game graphics. The original US script can also use its native font.
 - **Create and share:** Start a translation from the US script, edit messages
   alongside a reference, check font coverage, and export a language pack from
-  the Workshop. Saving a project and installing it into the game are separate
-  steps.
+  the Workshop. Install a new project explicitly; later saves refresh its
+  installed copy. Restart the game to load the updated text.
 
 The Workshop interface supports English, French, German, and Japanese;
 its language is independent of the game's selected pack. Translation coverage
