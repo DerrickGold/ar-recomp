@@ -75,6 +75,7 @@ Uint32 MeshVertexBytes(const Sim3DDepthMesh *mesh) {
 
 void ReleaseMeshStorage(Sim3DDepthMesh *mesh) {
   if (mesh->positions) SDL_ReleaseGPUBuffer(mesh->device, mesh->positions);
+  if (mesh->linear_spare) SDL_ReleaseGPUBuffer(mesh->device, mesh->linear_spare);
   if (mesh->transfer) SDL_ReleaseGPUTransferBuffer(mesh->device, mesh->transfer);
   if (mesh->selection) SDL_ReleaseGPUBuffer(mesh->device, mesh->selection);
   if (mesh->selection_transfer)
@@ -90,6 +91,9 @@ void ReleaseMeshStorage(Sim3DDepthMesh *mesh) {
   mesh->device = NULL;
   mesh->count = mesh->capacity = 0;
   mesh->linear_update_first = mesh->linear_update_count = 0;
+  mesh->linear_spare = NULL;
+  mesh->linear_removed = mesh->linear_tail_count = 0;
+  mesh->linear_splice = false;
   mesh->width = mesh->height = 0;
   mesh->dirty = mesh->queued = false;
 }
@@ -166,6 +170,7 @@ static void PublishMesh(Sim3DDepthMesh *mesh, Uint32 count) {
   mesh->height = g_depth_pass.height;
   mesh->dirty = true;
   mesh->linear_update_first = mesh->linear_update_count = 0;
+  mesh->linear_splice = false;
 }
 
 bool Sim3DDepthPass_UpdateMesh(Sim3DDepthMesh *mesh,
@@ -484,6 +489,44 @@ bool Sim3DDepthPass_UpdateLinearMeshRange(Sim3DDepthMesh *mesh,
   PublishMesh(mesh, (Uint32)total_quads * 4);
   mesh->linear_update_first = (Uint32)first_quad * 4;
   mesh->linear_update_count = count;
+  return true;
+}
+
+bool Sim3DDepthPass_SpliceLinearMesh(Sim3DDepthMesh *mesh, const Sim3DDepthLinearVertex *vertices,
+                                     size_t first_quad, size_t removed_quads,
+                                     size_t inserted_quads) {
+  if (!Sim3DDepthPass_MeshReady(mesh) || mesh->kind != kMeshLinear || mesh->dirty || mesh->queued ||
+      first_quad > mesh->count / 4 || removed_quads > mesh->count / 4 - first_quad ||
+      inserted_quads > kSim3DDepthMaximumSourceQuads - (mesh->count / 4 - removed_quads) ||
+      (inserted_quads && !vertices))
+    return false;
+  const size_t total_quads = mesh->count / 4 - removed_quads + inserted_quads;
+  if (!total_quads || total_quads > mesh->capacity / 4) return false;
+  float extent[5];
+  memcpy(extent, mesh->linear_extent, sizeof(extent));
+  if (!LinearVerticesExtent(vertices, (Uint32)inserted_quads * 4, extent)) return false;
+  if (!mesh->linear_spare) {
+    const SDL_GPUBufferCreateInfo info = {
+        .usage = SDL_GPU_BUFFERUSAGE_VERTEX,
+        .size = mesh->capacity * MeshVertexBytes(mesh),
+    };
+    mesh->linear_spare = SDL_CreateGPUBuffer(g_depth_pass.device, &info);
+    if (!mesh->linear_spare) return false;
+  }
+  void *mapped = SDL_MapGPUTransferBuffer(g_depth_pass.device, mesh->transfer, true);
+  if (!mapped) return false;
+  if (inserted_quads) memcpy(mapped, vertices, inserted_quads * 4 * sizeof(*vertices));
+  const Uint32 tail = mesh->count - (Uint32)(first_quad + removed_quads) * 4;
+  PublishMesh(mesh, (Uint32)total_quads * 4);
+  SDL_GPUBuffer *previous = mesh->positions;
+  mesh->positions = mesh->linear_spare;
+  mesh->linear_spare = previous;
+  memcpy(mesh->linear_extent, extent, sizeof(extent));
+  mesh->linear_update_first = (Uint32)first_quad * 4;
+  mesh->linear_update_count = (Uint32)inserted_quads * 4;
+  mesh->linear_removed = (Uint32)removed_quads * 4;
+  mesh->linear_tail_count = tail;
+  mesh->linear_splice = true;
   return true;
 }
 

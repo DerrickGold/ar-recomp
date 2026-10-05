@@ -28,6 +28,9 @@ bool Sim3DMeshSet_UpdateLinear(Sim3DMeshSet *set,
  * UpdateLinearMeshRange; rejection leaves the set unchanged for full fallback. */
 bool Sim3DMeshSet_UpdateLinearRange(Sim3DMeshSet *set, const Sim3DDepthLinearVertex *vertices,
                                     size_t first_quad, size_t quad_count, size_t total_quads);
+/* Single-allocation splice; rejection preserves the set for full fallback. */
+bool Sim3DMeshSet_SpliceLinear(Sim3DMeshSet *set, const Sim3DDepthLinearVertex *vertices,
+                               size_t first_quad, size_t removed_quads, size_t inserted_quads);
 bool Sim3DMeshSet_UpdateSurface(Sim3DMeshSet *set,
     const Sim3DDepthSurfaceVertex *vertices, const ArRenderPointF *mask_uv, size_t quads);
 /* Sorted, nonoverlapping source ranges. NULL/zero restores the full source.

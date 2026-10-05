@@ -182,6 +182,15 @@ bool Sim3DDepthPass_UpdateLinearMesh(Sim3DDepthMesh *mesh,
 bool Sim3DDepthPass_UpdateLinearMeshRange(Sim3DDepthMesh *mesh,
                                           const Sim3DDepthLinearVertex *vertices, size_t first_quad,
                                           size_t quad_count, size_t total_quads);
+/* Replace/remove an interval, shifting the retained suffix on the GPU. Only
+ * inserted vertices are validated and uploaded; prefix/suffix retain their
+ * exact order. Requires a submitted source and existing allocation capacity.
+ * One same-sized spare GPU buffer is retained until reset/destroy. No CPU
+ * readback or fence. Invalid/queued/unsubmitted requests leave publication
+ * unchanged; full Update remains the allocation-growth fallback. */
+bool Sim3DDepthPass_SpliceLinearMesh(Sim3DDepthMesh *mesh, const Sim3DDepthLinearVertex *vertices,
+                                     size_t first_quad, size_t removed_quads,
+                                     size_t inserted_quads);
 bool Sim3DDepthPass_AppendLinearMesh(Sim3DDepthMesh *mesh,
     const Sim3DDepthLinearTransform *transform);
 

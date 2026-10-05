@@ -423,6 +423,16 @@ bool Sim3DDepthPass_UpdateLinearMeshRange(Sim3DDepthMesh *mesh,
   (void)total_quads;
   return false;
 }
+bool Sim3DDepthPass_SpliceLinearMesh(Sim3DDepthMesh *mesh, const Sim3DDepthLinearVertex *vertices,
+                                     size_t first_quad, size_t removed_quads,
+                                     size_t inserted_quads) {
+  (void)mesh;
+  (void)vertices;
+  (void)first_quad;
+  (void)removed_quads;
+  (void)inserted_quads;
+  return false;
+}
 bool Sim3DDepthPass_AppendLinearMeshes(Sim3DDepthMesh *const *meshes, size_t count,
                                        const Sim3DDepthLinearTransform *transform) {
   (void)meshes;

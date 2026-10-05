@@ -775,6 +775,7 @@ ArRenderTexture Sim3DDepthPass_Submit(
     .size = total * (Uint32)sizeof(Sim3DGpuVertex),
   };
   uint64_t vertex_upload_bytes = destination.size;
+  uint64_t vertex_copy_bytes = 0, vertex_copy_calls = 0;
   if (total) SDL_UploadToGPUBuffer(copy, &source, &destination, true);
   if (g_depth_pass.sample_count) {
     const SDL_GPUTransferBufferLocation sample_source = {
@@ -792,6 +793,24 @@ ArRenderTexture Sim3DDepthPass_Submit(
       if (mesh->dirty) {
         const bool partial = mesh->linear_update_count != 0;
         const Uint32 vertex_bytes = MeshVertexBytes(mesh);
+        bool copied = false;
+        if (mesh->linear_splice) {
+          /* Separate source/destination buffers make shifted, overlapping
+           * logical ranges safe. Cycle only the first destination write. */
+          const Uint32 counts[2] = {mesh->linear_update_first, mesh->linear_tail_count};
+          const Uint32 from[2] = {0, mesh->linear_update_first + mesh->linear_removed};
+          const Uint32 to[2] = {0, mesh->linear_update_first + mesh->linear_update_count};
+          for (unsigned i = 0; i < 2; ++i) {
+            if (!counts[i]) continue;
+            const SDL_GPUBufferLocation src = {mesh->linear_spare, from[i] * vertex_bytes};
+            const SDL_GPUBufferLocation dst = {mesh->positions, to[i] * vertex_bytes};
+            const Uint32 bytes = counts[i] * vertex_bytes;
+            SDL_CopyGPUBufferToBuffer(copy, &src, &dst, bytes, !copied);
+            copied = true;
+            vertex_copy_bytes += bytes;
+            ++vertex_copy_calls;
+          }
+        }
         const SDL_GPUTransferBufferLocation mesh_source = {.transfer_buffer = mesh->transfer};
         const SDL_GPUBufferRegion mesh_destination = {
             .buffer = mesh->positions,
@@ -801,8 +820,11 @@ ArRenderTexture Sim3DDepthPass_Submit(
         /* Cycling makes the new allocation's untouched bytes undefined. A
          * partial update must retain them; GPU ordering protects earlier draws
          * without introducing a CPU fence or readback. */
-        SDL_UploadToGPUBuffer(copy, &mesh_source, &mesh_destination, !partial);
-        vertex_upload_bytes += mesh_destination.size;
+        if (!mesh->linear_splice || partial) {
+          SDL_UploadToGPUBuffer(copy, &mesh_source, &mesh_destination,
+                                mesh->linear_splice ? !copied : !partial);
+          vertex_upload_bytes += mesh_destination.size;
+        }
       }
       if (mesh->selection_dirty && mesh->kind != kMeshSurface) {
         const SDL_GPUTransferBufferLocation selection_source = { .transfer_buffer =
@@ -833,7 +855,6 @@ ArRenderTexture Sim3DDepthPass_Submit(
   /* Source uploads precede compaction. Cycle the destination only on the first
    * range; subsequent copies populate the same new buffer. Selection ranges
    * remain owned/immutable through submission, with no readback or CPU fence. */
-  uint64_t vertex_copy_bytes = 0, vertex_copy_calls = 0;
   bool compact = false;
   for (Sim3DDepthMesh *mesh = g_depth_pass_meshes; mesh; mesh = mesh->next)
     compact |= mesh->queued && mesh->kind == kMeshSurface && mesh->selection_dirty;

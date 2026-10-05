@@ -479,11 +479,44 @@ static bool PublishTownStatic(const WorldNavigationModelSource *sources, size_t 
   }
   if (ok) {
     if (dirty_first == SIZE_MAX) dirty_first = dirty_end = builder.count;
+    bool spliced = false;
+    const char *splice_option = getenv("AR_SIM_MODEL_SPLICE");
+    if (reuse && (!splice_option || strcmp(splice_option, "0"))) {
+      size_t prefix = 0, prefix_vertices = 0, suffix = 0, suffix_vertices = 0;
+      while (prefix < static_count && prefix < s_town_static.count &&
+             next[prefix].count == s_town_static.sources[prefix].count &&
+             !memcmp(&next[prefix].source, &s_town_static.sources[prefix].source,
+                     sizeof(next[prefix].source))) {
+        prefix_vertices += next[prefix].count;
+        ++prefix;
+      }
+      while (suffix < static_count - prefix && suffix < s_town_static.count - prefix) {
+        const TownCachedSource *a = &next[static_count - suffix - 1];
+        const TownCachedSource *b = &s_town_static.sources[s_town_static.count - suffix - 1];
+        if (a->count != b->count || memcmp(&a->source, &b->source, sizeof(a->source))) break;
+        suffix_vertices += a->count;
+        ++suffix;
+      }
+      const size_t old_vertices = s_town_static.count
+                                      ? s_town_static.sources[s_town_static.count - 1].first +
+                                            s_town_static.sources[s_town_static.count - 1].count
+                                      : 0;
+      /* Preserve packed draw order while moving the unchanged tail entirely
+       * on the GPU. Equal-size edits already use the cheaper in-place range. */
+      if (suffix_vertices && old_vertices != builder.count) {
+        const size_t inserted = builder.count - prefix_vertices - suffix_vertices;
+        spliced = Sim3DMeshSet_SpliceLinear(
+            &s_town_models.meshes[0], inserted ? builder.vertices + prefix_vertices : NULL,
+            prefix_vertices / 4, (old_vertices - prefix_vertices - suffix_vertices) / 4,
+            inserted / 4);
+      }
+    }
     const bool patched =
-        reuse && Sim3DMeshSet_UpdateLinearRange(
-                     &s_town_models.meshes[0],
-                     dirty_end > dirty_first ? builder.vertices + dirty_first : NULL,
-                     dirty_first / 4, (dirty_end - dirty_first) / 4, builder.count / 4);
+        spliced ||
+        (reuse && Sim3DMeshSet_UpdateLinearRange(
+                      &s_town_models.meshes[0],
+                      dirty_end > dirty_first ? builder.vertices + dirty_first : NULL,
+                      dirty_first / 4, (dirty_end - dirty_first) / 4, builder.count / 4));
     if (!patched)
       ok = Sim3DMeshSet_UpdateLinear(&s_town_models.meshes[0], builder.vertices, builder.count / 4);
   }

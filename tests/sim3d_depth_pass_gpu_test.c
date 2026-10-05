@@ -1142,6 +1142,136 @@ static void TestLinearRangeUpdates(ArRenderDevice *device, SDL_Renderer *rendere
   Sim3DDepthPass_Reset(device);
 }
 
+static void TestLinearSplices(ArRenderDevice *device, SDL_Renderer *renderer) {
+  Sim3DDepthPass_Reset(device);
+  CHECK(Sim3DDepthPass_Begin(device, 64, 16, kArRenderFilter_Nearest));
+  Sim3DDepthMesh *mesh = Sim3DDepthPass_CreateLinearMesh();
+  Sim3DDepthMesh *reference = Sim3DDepthPass_CreateLinearMesh();
+  CHECK(mesh && reference);
+  if (!mesh || !reference) return;
+  const Sim3DDepthLinearTransform transform = {
+      .matrix = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1},
+      .axes = {{0, .125f, 0}},
+      .pixel_centers = true,
+  };
+  Sim3DDepthLinearVertex source[32], inserted[8];
+  for (unsigned q = 0; q < 4; ++q)
+    for (unsigned p = 0; p < 4; ++p)
+      source[q * 4 + p] = (Sim3DDepthLinearVertex){
+          .position = {-.95f + q * .5f + (p == 1 || p == 2 ? .4f : 0), p >= 2 ? .5f : -.5f, .25f},
+          .color = {q == 0 || q == 3, q == 1 || q == 3, q == 2, 1},
+      };
+  memcpy(inserted, source + 4, sizeof(inserted));
+  for (unsigned p = 0; p < 8; ++p) {
+    inserted[p].color = (ArRenderColorF){.3f, .6f, .8f, 1};
+    inserted[p].displacement = p % 4 >= 2 ? .25f : 0;
+    inserted[p].depth_offset = -.125f;
+  }
+  CHECK(!Sim3DDepthPass_SpliceLinearMesh(mesh, inserted, 1, 1, 2));
+  CHECK(Sim3DDepthPass_UpdateLinearMesh(mesh, source, 4));
+  CHECK(!Sim3DDepthPass_SpliceLinearMesh(mesh, inserted, 1, 1, 2));
+  CHECK(Sim3DDepthPass_AppendLinearMesh(mesh, &transform));
+  SDL_Surface *initial = ReadPass(device, renderer);
+  CHECK(initial);
+  SDL_DestroySurface(initial);
+  const size_t edits[][3] = {
+      {1, 1, 2}, {2, 2, 0}, {0, 1, 2}, {3, 1, 0}, {3, 0, 1},
+      {0, 4, 3}, {1, 0, 0}, {0, 0, 2}, {0, 2, 0},
+  };
+  size_t total = 4;
+  for (unsigned edit = 0; edit < sizeof(edits) / sizeof(edits[0]); ++edit) {
+    const size_t first = edits[edit][0], removed = edits[edit][1], added = edits[edit][2];
+    CHECK(Sim3DDepthPass_Begin(device, 64, 16, kArRenderFilter_Nearest));
+    CHECK(!Sim3DDepthPass_SpliceLinearMesh(mesh, inserted, SIZE_MAX, 0, 1));
+    CHECK(!Sim3DDepthPass_SpliceLinearMesh(mesh, inserted, 0, SIZE_MAX, 1));
+    CHECK(!Sim3DDepthPass_SpliceLinearMesh(mesh, inserted, 0, 0, SIZE_MAX));
+    CHECK(!Sim3DDepthPass_SpliceLinearMesh(mesh, NULL, 0, 0, 1));
+    CHECK(!Sim3DDepthPass_SpliceLinearMesh(mesh, inserted, 0, total, 0));
+    CHECK(!Sim3DDepthPass_SpliceLinearMesh(mesh, inserted, 0, 0, 2049));
+    for (unsigned bad = 0; bad < 7; ++bad) {
+      Sim3DDepthLinearVertex invalid[4];
+      memcpy(invalid, inserted, sizeof(invalid));
+      if (bad == 0) invalid[0].position[0] = NAN;
+      if (bad == 1) invalid[0].displacement = INFINITY;
+      if (bad == 2) invalid[0].depth_offset = NAN;
+      if (bad == 3) invalid[0].axis = kSim3DDepthLinearAxisCount;
+      if (bad == 4) invalid[0].axis = .5f;
+      if (bad == 5) invalid[0].axis = 1;
+      if (bad == 6) invalid[0].color.r = 2;
+      CHECK(!Sim3DDepthPass_SpliceLinearMesh(mesh, invalid, 1, 0, 1));
+    }
+    const size_t retained = total - removed;
+    memmove(source + (first + added) * 4, source + (first + removed) * 4,
+            (total - first - removed) * 4 * sizeof(*source));
+    /* Full replacement uses three quads; the third may differ from the first
+     * two so the source-copy lifetime check covers the entire inserted span. */
+    for (size_t q = 0; q < added; ++q)
+      memcpy(source + (first + q) * 4, inserted + (q % 2) * 4, 4 * sizeof(*source));
+    total = retained + added;
+    Sim3DDepthLinearVertex copied[32];
+    memcpy(copied, source, total * 4 * sizeof(*source));
+    CHECK(Sim3DDepthPass_SpliceLinearMesh(mesh, added ? copied + first * 4 : NULL, first, removed,
+                                          added));
+    memset(copied, 0, sizeof(copied));
+    CHECK(!Sim3DDepthPass_SpliceLinearMesh(mesh, inserted, 0, 0, 1));
+    CHECK(Sim3DDepthPass_AppendLinearMesh(mesh, &transform));
+    CHECK(!Sim3DDepthPass_SpliceLinearMesh(mesh, inserted, 0, 0, 1));
+    const uint64_t uploads = geometry_upload_bytes, copies = geometry_copy_bytes;
+    SDL_Surface *warm = ReadPass(device, renderer);
+    CHECK(geometry_upload_bytes - uploads == added * 4 * sizeof(*source));
+    CHECK(geometry_copy_bytes - copies == retained * 4 * sizeof(*source));
+    CHECK(Sim3DDepthPass_Begin(device, 64, 16, kArRenderFilter_Nearest));
+    CHECK(Sim3DDepthPass_UpdateLinearMesh(reference, source, total));
+    CHECK(Sim3DDepthPass_AppendLinearMesh(reference, &transform));
+    SDL_Surface *cold = ReadPass(device, renderer);
+    CHECK(warm && cold);
+    if (warm && cold)
+      for (int y = 0; y < 16; ++y)
+        for (int x = 0; x < 64; ++x)
+          CHECK(ReadArgb(warm, x, y) == ReadArgb(cold, x, y));
+    SDL_DestroySurface(warm);
+    SDL_DestroySurface(cold);
+  }
+  /* Alternate buffers while submissions remain in flight. Mix splices and
+   * range updates so pending copy state cannot leak into ordinary publication. */
+  for (unsigned frame = 0; frame < 64; ++frame) {
+    CHECK(Sim3DDepthPass_Begin(device, 64, 16, kArRenderFilter_Nearest));
+    const size_t removed = frame & 1, added = !(frame & 1);
+    memmove(source + (1 + added) * 4, source + (1 + removed) * 4,
+            (total - 1 - removed) * 4 * sizeof(*source));
+    if (added) memcpy(source + 4, inserted, 4 * sizeof(*source));
+    total = total - removed + added;
+    CHECK(Sim3DDepthPass_SpliceLinearMesh(mesh, added ? source + 4 : NULL, 1, removed, added));
+    CHECK(Sim3DDepthPass_AppendLinearMesh(mesh, &transform));
+    CHECK(ArRenderTexture_IsValid(Sim3DDepthPass_Submit(device, ArRenderTexture_Invalid())));
+    CHECK(Sim3DDepthPass_Begin(device, 64, 16, kArRenderFilter_Nearest));
+    source[0].color.r = (frame & 1) != 0;
+    CHECK(Sim3DDepthPass_UpdateLinearMeshRange(mesh, source, 0, 1, total));
+    CHECK(Sim3DDepthPass_AppendLinearMesh(mesh, &transform));
+    CHECK(ArRenderTexture_IsValid(Sim3DDepthPass_Submit(device, ArRenderTexture_Invalid())));
+  }
+  CHECK(Sim3DDepthPass_Begin(device, 64, 16, kArRenderFilter_Nearest));
+  CHECK(Sim3DDepthPass_AppendLinearMesh(mesh, &transform));
+  SDL_Surface *warm = ReadPass(device, renderer);
+  CHECK(Sim3DDepthPass_Begin(device, 64, 16, kArRenderFilter_Nearest));
+  CHECK(Sim3DDepthPass_UpdateLinearMesh(reference, source, total));
+  CHECK(Sim3DDepthPass_AppendLinearMesh(reference, &transform));
+  SDL_Surface *cold = ReadPass(device, renderer);
+  CHECK(warm && cold);
+  if (warm && cold)
+    for (int y = 0; y < 16; ++y)
+      for (int x = 0; x < 64; ++x)
+        CHECK(ReadArgb(warm, x, y) == ReadArgb(cold, x, y));
+  SDL_DestroySurface(warm);
+  SDL_DestroySurface(cold);
+  Sim3DDepthPass_Reset(device);
+  CHECK(Sim3DDepthPass_Begin(device, 64, 16, kArRenderFilter_Nearest));
+  CHECK(!Sim3DDepthPass_SpliceLinearMesh(mesh, inserted, 1, 1, 2));
+  Sim3DDepthPass_DestroyMesh(mesh);
+  Sim3DDepthPass_DestroyMesh(reference);
+  Sim3DDepthPass_Reset(device);
+}
+
 static bool AppendCpuClippedModel(const Sim3DDepthModelVertex source[4], const float matrix[16],
                                   int width, int height) {
   WorldNavigationProjection projection = {.clip_frustum = true};
@@ -4293,6 +4423,7 @@ int main(void) {
   TestHardwareClippedModels(&render_device, renderer);
   TestLinearModels(&render_device, renderer);
   TestLinearRangeUpdates(&render_device, renderer);
+  TestLinearSplices(&render_device, renderer);
   TestRadialModels(&render_device, renderer);
   TestSurfaceGeometry(&render_device, renderer);
   TestSurfaceFocus(&render_device, renderer);

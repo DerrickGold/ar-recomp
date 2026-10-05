@@ -68,6 +68,16 @@ bool Sim3DMeshSet_UpdateLinearRange(Sim3DMeshSet *set, const Sim3DDepthLinearVer
   return true;
 }
 
+bool Sim3DMeshSet_SpliceLinear(Sim3DMeshSet *set, const Sim3DDepthLinearVertex *vertices,
+                               size_t first_quad, size_t removed_quads, size_t inserted_quads) {
+  if (!Sim3DMeshSet_Ready(set) || !set->linear || set->count != 1 ||
+      !Sim3DDepthPass_SpliceLinearMesh(set->meshes[0], vertices, first_quad, removed_quads,
+                                       inserted_quads))
+    return false;
+  set->quads = set->selected[0] = set->quads - removed_quads + inserted_quads;
+  return true;
+}
+
 bool Sim3DMeshSet_UpdateSurface(Sim3DMeshSet *set,
     const Sim3DDepthSurfaceVertex *vertices, const ArRenderPointF *mask, size_t quads) {
   return Update(set, vertices, mask, quads, false);

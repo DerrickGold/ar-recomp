@@ -2685,6 +2685,7 @@ static void TestFacingModelReuse(SDL_Renderer *renderer) {
                 (unsigned long long)prepared, (unsigned long long)expected);
       CHECK(prepared == expected);
       const double warm_bytes = traffic.counts[kPerformanceCount_DepthUploadBytes];
+      const double warm_copies = traffic.counts[kPerformanceCount_DepthCopyBytes];
       SDL_Surface *held = RenderFacingModels(renderer, sources, count, &style, axes, matrix,
                                              shading, &traffic);
       CHECK(traffic.stages[kPerformance_SimFirst + kSim3DPerformance_DepthVoxel].calls == 0);
@@ -2708,13 +2709,14 @@ static void TestFacingModelReuse(SDL_Renderer *renderer) {
       SDL_Surface *cold = RenderFacingModels(renderer, sources, count, &style, axes, matrix,
                                              shading, &traffic);
       CHECK(Differences(warm, cold) == 0);
-      /* Bridge height/placement retain their face count and GPU offsets. Their
-       * changed span plus windmill must upload less than a complete town. */
-      if (change == 2 || change == 3 || change == 10) {
+      /* Size-changing construction/LOD/insert/remove edits move the retained
+       * tail on the GPU. Height/placement edits keep their GPU offsets. */
+      if (change <= 3 || change == 5 || change == 6 || change == 9 || change == 10) {
         const double cold_bytes = traffic.counts[kPerformanceCount_DepthUploadBytes];
         CHECK(warm_bytes > 0 && warm_bytes < cold_bytes * .5);
         printf("town %u change %u: range %.0f / full %.0f upload bytes\n", town, change,
                warm_bytes * 2, cold_bytes * 2);
+        if (change == 5 || change == 6) CHECK(warm_copies > 0);
       }
       SDL_DestroySurface(warm); SDL_DestroySurface(held); SDL_DestroySurface(cold);
     }
