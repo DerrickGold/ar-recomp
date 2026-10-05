@@ -780,11 +780,22 @@ static void DestroyPlaneTextures(DioramaFrameGenerationPlane *plane) {
   plane->generated_texture = NULL;
 }
 
-void DioramaFrameGeneration_Reset(void) {
-  ResetGpu();
-  memset(s_present_offsets,0,sizeof(s_present_offsets));
+void DioramaFrameGeneration_InvalidateHistory(void) {
+  /* A room/pause/source discontinuity invalidates temporal data, not the GPU
+   * device. Join the producer before dropping its endpoint; queued GPU work
+   * stays ordered and owns its resources until completion. */
+  DioramaFrameGeneration_FinishCapture();
+  if (s_gpu.projection_fence) {
+    SDL_ReleaseGPUFence(s_gpu.motion.device, s_gpu.projection_fence);
+    s_gpu.projection_fence = NULL;
+  }
+  s_gpu.endpoint = s_gpu.resident = false;
+  s_gpu.mask = s_gpu.presented_mask = s_gpu.pending_analysis_mask = 0;
+  s_gpu.phase = 1;
+  for (unsigned i = 0; i < kActionSourcePacketSlots; ++i)
+    s_gpu.effects.packets[i].revision = 0;
+  memset(s_present_offsets, 0, sizeof(s_present_offsets));
   for (int plane = 0; plane < kFrameGenerationPlaneCount; plane++) {
-    DestroyPlaneTextures(&s_planes[plane]);
     s_planes[plane].current_valid = false;
     s_planes[plane].pair_valid = false;
     memset(&s_planes[plane].motion, 0, sizeof(s_planes[plane].motion));
@@ -796,6 +807,13 @@ void DioramaFrameGeneration_Reset(void) {
   s_last_wait_ns = 0;
   s_index_blocks_x = -1;
   s_index_blocks_y = -1;
+}
+
+void DioramaFrameGeneration_Reset(void) {
+  ResetGpu();
+  for (int plane = 0; plane < kFrameGenerationPlaneCount; plane++)
+    DestroyPlaneTextures(&s_planes[plane]);
+  DioramaFrameGeneration_InvalidateHistory();
 }
 
 void DioramaFrameGeneration_Shutdown(void) {

@@ -5,6 +5,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <io.h>
+#define dup _dup
+#define dup2 _dup2
+#define close _close
+#define fileno _fileno
+#else
+#include <unistd.h>
+#endif
 
 #define CHECK(expr)                                                                                \
   do {                                                                                             \
@@ -382,10 +391,61 @@ static void TestBackgroundBatch(void) {
   NEAR(snapshot.stages[kPerformance_SettingsWrite].maximum_ms, 6.0);
 }
 
+/* Exercise the largest report, including every stage and large counters.
+ * Keep the parser-facing records complete when logging is batched. */
+static void TestCompleteReport(void) {
+  FILE *capture = tmpfile();
+  CHECK(capture != NULL);
+  fflush(stderr);
+  const int saved = dup(fileno(stderr));
+  CHECK(saved >= 0 && dup2(fileno(capture), fileno(stderr)) >= 0);
+  Fresh();
+  PerformanceMetrics_Configure(true, true);
+  for (int i = 0; i < kPerformanceStage_Count; ++i)
+    PerformanceMetrics_RecordBatch(PerformanceMetrics_Epoch(),
+        (PerformanceStage)i, UINT64_MAX, UINT64_MAX, UINT64_MAX);
+  for (int i = 0; i < kPerformanceCount_Count; ++i)
+    PerformanceMetrics_Add((PerformanceCount)i, UINT64_MAX);
+  PerformanceMetrics_PresentCompleted(1);
+  PerformanceMetrics_PresentCompleted(UINT64_C(1000000001));
+  fflush(stderr);
+  const long logged_size = ftell(capture);
+  PerformanceMetrics_Configure(true, false);
+  PerformanceMetrics_PresentCompleted(UINT64_C(2000000001));
+  PerformanceMetrics_PresentCompleted(UINT64_C(3000000001));
+  fflush(stderr);
+  const long quiet_size = ftell(capture);
+  CHECK(dup2(saved, fileno(stderr)) >= 0);
+  close(saved);
+  CHECK(logged_size > 0 && quiet_size == logged_size);
+  char *text = calloc((size_t)logged_size + 1, 1);
+  CHECK(text != NULL);
+  rewind(capture);
+  CHECK(fread(text, 1, (size_t)logged_size, capture) == (size_t)logged_size);
+  fclose(capture);
+  CHECK(strstr(text, "[pipeline-perf] scene="));
+  CHECK(strstr(text, "[pipeline-cadence] native="));
+  CHECK(strstr(text, "[pipeline-work] ticks="));
+  CHECK(strstr(text, "[pipeline-traffic] upload-calls="));
+  CHECK(strstr(text, "[pipeline-atlas] reuse="));
+  CHECK(strstr(text, "[pipeline-path] cpu-project="));
+  CHECK(strstr(text, "[effect-projection] fallback-events="));
+  for (int i = 0; i < kPerformanceStage_Count; ++i) {
+    char prefix[160];
+    snprintf(prefix, sizeof(prefix), "[pipeline-stage] %s mean-ms=",
+        PerformanceMetrics_StageName((PerformanceStage)i));
+    const char *line = strstr(text, prefix);
+    CHECK(line && strstr(line, " calls=18446744073709551615"));
+  }
+  CHECK(text[logged_size - 1] == '\n');
+  free(text);
+}
+
 int main(void) {
   TestToggleAndWindow();
   TestParallelAndCapacity();
   TestBackgroundBatch();
+  TestCompleteReport();
   TestOverlayLayout();
   TestOverlayResources();
   PerformanceMetrics_Configure(false, false);

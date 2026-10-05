@@ -778,7 +778,7 @@ uint64_t HostDisplay_CatchupCapNs(uint64_t emulation_frame_interval_ns,
 
 void HostDisplay_InvalidatePresentHistory(void) {
   s_retained_frame.valid = false;
-  DioramaFrameGeneration_Reset();
+  DioramaFrameGeneration_InvalidateHistory();
 }
 
 static void ReportPresentPerformance(uint64_t render_start_ms,

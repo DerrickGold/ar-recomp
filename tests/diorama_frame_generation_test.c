@@ -260,6 +260,10 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
       v.bg2_plane.overflow_handoff_z = .5f; v.bg2_plane.overflow_front_z = .9f;
       v.bg2_plane.overflow_front_drop = .18f; p.origin[1] = 18;
     } else if (scenario >= 7 && scenario < 10) {
+      /* These cases exercise the skybox fallback, selected in production only
+       * when no finite BG2 plane is active. Do not leave the earlier plane
+       * enabled while asking the independent CPU oracle to project a band. */
+      v.bg2_plane.valid = false;
       v.bg2_skybox = (DioramaSkyboxProjection){.count=2,.active_band=scenario==7?1:-1,
           .bands={{0,0,32,8,0,.5f},{-8,8,40,16,.5f,1}}};
       p.origin[1] = scenario == 9 ? 2 : 9;
@@ -663,6 +667,21 @@ int main(void) {
     if (gpu_motion) CHECK(DioramaFrameGeneration_GpuPlaneMask() == expected);
   }
 
+  /* A room transition must discard the old pair even when the new source
+   * reports no changed planes. Reusing GPU allocations must not reuse motion. */
+  DioramaFrameGeneration_InvalidateHistory();
+  CHECK(DioramaFrameGeneration_GpuPlaneMask() == 0);
+  CHECK(DioramaFrameGeneration_GeneratedPlaneMask() == 0);
+  CHECK(!DioramaFrameGeneration_SourceProjectionActive());
+  CHECK(DioramaFrameGeneration_PlaneOffset(test_plane).x == 0);
+  CHECK(DioramaFrameGeneration_PlaneOffset(test_plane).y == 0);
+  slot.timestamp_ns += 16666667;
+  DioramaFrameGeneration_Capture(&render_device, &slot, sources, planes,
+      plane_pitches, 0);
+  CHECK(DioramaFrameGeneration_Prepare(&render_device, &slot, 0.5f, raw,
+      1u << test_plane, resolved) == 0);
+  CHECK(ArRenderTexture_Equals(resolved[test_plane], raw[test_plane]));
+
   /* A changed but uniform pair has no reliable motion. GPU preparation may
    * already have copied its output before confidence reaches the CPU; that
    * private copy must not replace the current image or publish an offset. */
@@ -790,6 +809,7 @@ int main(void) {
         CHECK(DioramaFrameGeneration_SourceProjectionFailed());
         DioramaFrameGeneration_RecoverSourceProjection(&render_device);
         CHECK(!DioramaFrameGeneration_SourceProjectionActive());
+        DioramaFrameGeneration_InvalidateHistory();
         CHECK(DioramaFrameGeneration_SourceProjectionFallback());
         DioramaFrameGeneration_AllowSourceProjection(false);
         CHECK(!DioramaFrameGeneration_SourceProjectionFallback());
@@ -806,6 +826,9 @@ int main(void) {
     slot.timestamp_ns += 16666667;
     DioramaFrameGeneration_CaptureWithSkybox(
         &render_device, &slot, sources, planes, plane_pitches, 0, sky_raw, true);
+    DioramaFrameGeneration_InvalidateHistory();
+    CHECK(DioramaFrameGeneration_PrepareWithSkybox(
+        &render_device, &slot, .5f, raw, 0, resolved, sky_raw, &sky_resolved) == 0);
     DioramaFrameGeneration_Reset();
   }
 

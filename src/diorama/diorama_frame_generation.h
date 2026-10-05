@@ -101,6 +101,11 @@ bool DioramaFrameGeneration_DrawSource(ArRenderDevice *, const ActionEffectSourc
 bool DioramaFrameGeneration_DrawSkybox(ArRenderDevice *, ArRenderTexture,
     const DioramaSkyboxSourceDraw *);
 
+/* Drop source/motion history at room, pause or timeline discontinuities while
+ * retaining device resources. Pending CPU capture is joined; stale endpoints
+ * and effect packets cannot be reused. Failure latches survive until Reset. */
+void DioramaFrameGeneration_InvalidateHistory(void);
+
 /* Drop endpoint history and backend resources. Reset is safe after a render
  * reset event; Shutdown is also used during orderly teardown. */
 void DioramaFrameGeneration_Reset(void);
