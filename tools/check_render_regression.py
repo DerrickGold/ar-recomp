@@ -25,6 +25,8 @@ def main():
     parser.add_argument("--candidate-backend", choices=("direct3d12", "vulkan", "metal"))
     parser.add_argument("--rom", type=Path, default=ROOT / "ar.sfc")
     parser.add_argument("--case", action="append", help="Named case; default: all")
+    parser.add_argument("--profile", type=Path,
+                        help="Presentation profile shared by all selected cases")
     parser.add_argument("--output", type=Path, help="New directory for retained evidence")
     args = parser.parse_args()
     if bool(args.control_backend) != bool(args.candidate_backend):
@@ -50,6 +52,8 @@ def main():
                    "--checkpoint", case["checkpoint"], "--timeout", "600"]
         if "replay" in case:
             command += ["--replay", str(ROOT / case["replay"])]
+        if args.profile:
+            command += ["--profile", str(args.profile.resolve())]
         if args.control_backend:
             command += ["--control-backend", args.control_backend,
                         "--candidate-backend", args.candidate_backend]

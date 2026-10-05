@@ -115,6 +115,19 @@ def resolve(path: str) -> Path:
     return (candidate if candidate.is_absolute() else ROOT / candidate).resolve()
 
 
+def presentation_profile(path: Path) -> dict[str, str]:
+    profile = json.loads(path.read_text())
+    if (not isinstance(profile, dict) or
+            profile.get("schema") != "actraiser-benchmark-presentation-profile-v1"):
+        raise ValueError("Unsupported benchmark presentation profile")
+    environment = profile.get("environment")
+    if not isinstance(environment, dict) or not environment or any(
+            not name.startswith("AR_") or not isinstance(value, str)
+            for name, value in environment.items()):
+        raise ValueError("Presentation profile requires AR_NAME string values")
+    return environment
+
+
 def validate_run_completion(log: str, expected_ticks: int) -> dict:
     """A zero process exit code is not proof that the graphics run completed."""
     failure = re.search(r"\bVK_ERROR_[A-Z_]+\b|Wayland display connection closed", log)
@@ -212,6 +225,8 @@ def main() -> None:
                         default=ROOT / "tests/fixtures/sim3d/checkpoints.json")
     parser.add_argument("--checkpoint", default="D7-voxel-town")
     parser.add_argument("--replay", type=Path, help="Override the checkpoint's controller-input fixture")
+    parser.add_argument("--profile", type=Path,
+                        help="Presentation profile applied after the checkpoint, before --set")
     parser.add_argument("--scene", default="Town 3D")
     parser.add_argument("--control-scene", help="Previous label when comparing an instrumentation rename")
     parser.add_argument("--map", dest="map_id", help="Exact hexadecimal group/room, e.g. 04/04")
@@ -261,8 +276,10 @@ def main() -> None:
     inputs = [*binaries.values(), args.rom.resolve(), args.config.resolve(),
               args.manifest.resolve(), replay, settings, seed_path,
               ROOT / "diorama-layers.ini", Path(__file__).resolve()]
+    if args.profile:
+        inputs.append(args.profile.resolve())
     hashes = {str(path): digest(path) for path in inputs}
-    overrides = {}
+    overrides = presentation_profile(args.profile) if args.profile else {}
     for item in args.set:
         name, separator, value = item.partition("=")
         if not separator or not name.startswith("AR_"):
@@ -296,6 +313,7 @@ def main() -> None:
     results = []
     backends = {"control": args.control_backend, "candidate": args.candidate_backend}
     report = {"schema": "actraiser-pipeline-comparison-v1", "scene": args.scene, "map": map_id,
+              "profile": str(args.profile.resolve()) if args.profile else None,
               "control_scene": args.control_scene or args.scene,
               "input_sha256": hashes, "seed_sha256": seed_hash,
               "environment": {k: v for k, v in env.items() if k.startswith("AR_")},

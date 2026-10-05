@@ -31,6 +31,23 @@ def sample(frames, cost, scene="Town 3D"):
 
 
 class PipelinePerformanceTest(unittest.TestCase):
+    def test_presentation_profile_rejects_malformed_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profile.json"
+            for profile in (
+                    None,
+                    {"schema": "unrecognized", "environment": {"AR_SIM3D": "1"}},
+                    {"schema": "actraiser-benchmark-presentation-profile-v1", "environment": {"PATH": "x"}},
+                    {"schema": "actraiser-benchmark-presentation-profile-v1", "environment": {"AR_SIM3D": True}},
+                    {"schema": "actraiser-benchmark-presentation-profile-v1", "environment": {}}):
+                path.write_text(json.dumps(profile))
+                with self.subTest(profile=profile), self.assertRaises(ValueError):
+                    module.presentation_profile(path)
+        root = Path(__file__).resolve().parents[1]
+        profile = module.presentation_profile(root / "tests/fixtures/benchmark/maximum-quality.json")
+        self.assertEqual(profile["AR_SIM3D_VOXEL_PRESET"], "Quality")
+        self.assertEqual(profile["AR_SIM3D_WORLD_NAV_CLOUD_SHADOWS"], "1")
+
     def test_backend_fallback_or_missing_evidence_invalidates_comparison(self):
         confirmed = "[graphics-capabilities] backend=vulkan device=test"
         module.validate_gpu_backend(confirmed, "vulkan")
