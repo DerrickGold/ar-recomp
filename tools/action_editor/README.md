@@ -68,45 +68,10 @@ viewport, preserving the original water artwork and scrolling animation.
 Authored far-band tiles and stamps feed that image too. B uses its own captured
 completion background and never receives A's face/eye promotion.
 
-B's enhanced completion scene supplies a host 3D world backdrop: a fixed camera
-above Death Heim's northern rim looks north at a low, nearly tangent angle over
-the ocean, with an ActRaiser 2 ending inspired opening in a sky that blends
-from a small deeper-blue halo near the light quickly toward the earlier
-vista's lighter daylight blue farther away. Ocean reflections use the same
-angular gradient; broad opening glow fills the gaps between shafts.
-Palace cloud volumes with bright rims and soft ambient fill frame the central
-opening and the lower ocean horizon. Daylight ambient fill and reflections
-keep the sea bright; the opening's sky direction drives water glints beyond
-the local shaft footprints.
-The native platform, hero and text retain their existing Diorama projection.
-B's GPU ocean material combines eight wave scales, Fresnel sky reflections,
-foam, pearlescent glints and drifting spray. A subtle material layer reuses the
-four native 8x8 world-map water frames as nearest-sampled wavelets, with small
-colour steps and world-anchored pixel detail that fades toward the horizon.
-The moving wave shape, Fresnel reflections, glints and light scattering retain
-their full-resolution shading. Thirteen soft shafts fan out from
-the opening: all shafts have shorter, feathered reaches, with the main pool
-still illuminating the hero's captured OBJ projection. The other shafts fade
-into the air to frame the opening toward the camera. Staggered
-sources, near and far receivers, world-space wisps and distance haze give the
-shafts volume. Ordered projected spreads prevent crossings even where nearer
-shafts continue past distant water patches. Shafts and light
-motes draw after the platform and before the flat HUD. Local water highlights and
-glint particles use the same world-space cones as the airborne light. All
-effects follow native master brightness and run only in B. The bounded,
-coast-masked wave mesh remains the fallback for renderers without custom shaders.
-Sparse sun-glint sparkles also twinkle across the wider sea, shrinking and fading
-toward the horizon. Each brief glint selects a new water-surface position from a
-presentation-only clock/hash, independently of the wave and light-shaft switches.
-The platform's captured BG1 and hero OBJ artwork is projected into a private
-transparent GPU target, excluding BG3 text. It supplies a faint, wave-broken
-reflection and restrained golden edge light. Weak expanding ripples and nearby
-spray connect the plinth to the sea; no framebuffer readback is needed.
-Twelve bounded pixel feathers descend from the opening and fade above the water.
-Five small cherub silhouettes drift in depth inside the opening behind the cloud banks
-and HUD. They flutter through the SIM angel's three genuine frontal wing poses,
-decoded once from immutable ROM characters and composition records. Missing
-or malformed art omits the cherubs; it never reads the action room's OBJ VRAM.
+B's enhanced completion scene surrounds the native platform, hero and text
+with an ocean vista, clouds, light shafts, reflections, cherubs and feathers.
+It preserves the original ending's text, music and timing.
+
 The in-game switch lives under **Action 3D → Scene → Death Heim completion scene**. It
 enables the vista independently of Town 3D and World navigation 3D; it requires
 Action Diorama 3D and applies its own backdrop and enclosure with any skybox
@@ -117,14 +82,8 @@ to on; individual overrides remain available in
 [`settings.ini`](../../docs/manual.md#death-heim-completion-scene).
 Completion clouds and illumination use scene-owned tuning and do not inherit
 SIM preferences. Room B's browser preview is labeled **Native artwork preview**
-with directions to the in-game switch.
-The original game clock, fade controller and transition timing are unchanged.
-The corresponding launch overrides are `AR_DEATH_HEIM_COMPLETION_WORLD`,
-`_WAVES`, `_SUN_GLINTS`, `_PIXEL_WATER`, `_CLOUDS`, `_RAYS`, `_CHERUBS`, `_FEATHERS`, `_PLATFORM`
-and `_RIM` (use the full shared prefix; `0` disables an effect).
-`AR_DEATH_HEIM_COMPLETION_FX=0` selects the earlier mesh prototype for comparisons.
-The browser previews B's native artwork and edits; it does not yet contain the
-host world renderer. Review this prototype through native final-composite captures.
+and shows native artwork and edits, with directions to the in-game switch.
+Its enhanced backdrop cannot be edited in this tool.
 
 In game, final-boss progress becomes 7 before the faces have faded away. The
 completion scene and its overrides activate together when the native script
@@ -168,30 +127,6 @@ Omitted fields inherit defaults. `bands:0` explicitly removes bands;
 `bg1-policy-band` / `bg2-policy-band` records. Fixed extents include the
 corresponding `left`/`right` or `top`/`bottom` caps (0–128).
 
-### Native GPU effect validation
-
-The browser shares the C recipes and reference projection. It does not execute
-the native Metal/Vulkan/D3D12 effect compute shaders, so browser parity alone
-cannot qualify an effect for resident GPU projection. The authored-field unit
-test covers all 16 emitter families through both projection interfaces.
-
-For pixel comparisons, export rooms from the rebuilt editor and run the native
-oracle with an optional effects file (a rejected file fails the run):
-
-```sh
-node tools/action_editor/export_gpu_rooms.mjs build/action-editor/ar-action-layer-editor.html runs/gpu-rooms
-cmake --build build-tests-release --target actraiser_action_room_gpu_compare
-mkdir -p runs/gpu-authored-exposure runs/gpu-authored-particles
-AR_ORACLE_EFFECTS=tests/fixtures/action-effects-gpu-exposure.ini build-tests-release/actraiser_action_room_gpu_compare runs/gpu-authored-exposure diorama-layers.ini runs/gpu-rooms/0102.arscene
-AR_ORACLE_EFFECTS=tests/fixtures/action-effects-gpu-particles.ini build-tests-release/actraiser_action_room_gpu_compare runs/gpu-authored-particles diorama-layers.ini runs/gpu-rooms/0102.arscene
-```
-
-Each run compares 27 combinations of camera pose, backdrop mode and interpolated
-motion. Retain JSONL output and any failure image pairs. Omit `AR_ORACLE_EFFECTS`
-and pass all exported rooms to validate shipped defaults. The game's detailed
-performance overlay and `[effect-projection]` log report exceptional fallback
-events and the fraction of frames still using the latched reference path.
-
 ### Editing and preview
 
 This standalone editor classifies action-room background tiles into virtual
@@ -202,7 +137,7 @@ configuration.
 The effects workspace includes a shared WASM preview. **Shared renderer**
 loads complete rooms directly into the production C PPU and Diorama compositor
 via WASM/WebGL2. No game capture or gameplay session is required. The original
-JavaScript **Diorama 3D** remains available while the shared view is validated.
+JavaScript **Diorama 3D** view also remains available.
 **Original game frame** remains a separate original-background comparison.
 
 Select **Shared renderer**, choose a room/terrain, then use **Camera & animation**
@@ -213,29 +148,16 @@ modes. Camera/clock/coverage changes regenerate visible art from the complete
 room; orbit-only changes reuse rasterized surfaces. Existing tile, pixel, depth,
 alpha, scenery and framing edits feed the production INI resolver.
 
-This increment covers **scenery and environmental sources**, including animated tiles/raster phases, priority
-bands, copied edge tiles, independent vertical clips, bounded and named skyboxes,
+This view covers **scenery and environmental sources**, including animated
+tiles/raster phases, priority bands, copied edge tiles, independent vertical
+clips, bounded and named skyboxes,
 and Aitos's periodic waterfall page. The native forest, cave, marsh, castle and
 Aitos environmental kernels, exposure and camera-local waterfall sections also
 run in this view. Clock-based accent events and optional player/enemy reference
-silhouettes are available. Actual actor artwork/HUD, gameplay-driven transitions, final
-CRT/heat and frame generation remain pending. The preview camera uses auto-fit
-plus its own controls; it does not replay the game's reactive camera. Captures
+silhouettes are available. The preview omits actual actor artwork/HUD,
+gameplay-driven transitions, final CRT/heat and frame generation. The preview
+camera uses auto-fit plus its own controls; it does not replay the game's reactive camera. Captures
 remain developer comparison fixtures, not an authoring requirement.
-
-The dedicated whole-room gate uses a built editor containing local assets:
-
-```sh
-python3 tools/action_editor/check_room.py --sanitize
-```
-
-It compares 900 full-room scanouts across 50 scenery selections × 3 regional terrains
-between native C and WASM, including backwards seeking, varying camera/coverage,
-authored configuration, finite skybox views and animated periodic pages. It also
-checks pixel-mask and band edits, per-layer top clipping, atomic rejection,
-resource reuse and complete teardown. The check also compares resolved native
-effect sources and 150 authored-effect round trips. The browser GPU view still needs matched
-live-scene image review across the remaining room families and target platforms.
 
 ### Environmental authoring
 
@@ -385,7 +307,7 @@ checkboxes are part of the atmosphere/castle definitions. Preserve original
 receivers keeps the existing cave light composition; selecting explicit light
 receivers routes it through the shared receiver path. Older version-1 complete
 fields gain their previous dimming values at import. Torch-flame accents and
-actor/trap responses remain separate migration work.
+actor/trap responses use separate controls.
 
 **Anchor coordinates** is separate from **Draw placement**. Choose **BG1** for
 playfield pixels, **BG2 · fixed point** for a source such as Bloodpool's moon,
@@ -404,12 +326,6 @@ not guess a conversion between independent maps. Previewing a BG2 point keeps
 the current foreground camera, since a static backdrop does not identify one
 unique position along a level. Terrain-supported mist, traced playfield contours
 and dimming regions still require BG1.
-
-Bloodpool's existing moon and cloud markers also appear at their shared BG2
-point `(112,62)`. Their native source position and coupled ray/reflection profiles
-still await complete-definition migration; these catalogue markers currently
-open the family's sparse appearance/receiver controls. A placed fan is not a
-replacement for the native pixel-shadowed moon field.
 
 ```ini
 [emitter:02:01:0:light-fan:00000126]
@@ -552,19 +468,8 @@ which is not a GPU timing or Steam Deck/D3D12 performance measurement. New famil
 costs are bounded at export too: regions reserve 64 cells, fans reserve clipped
 triangles per strand, clouds reserve 37 vertices per lobe and contours reserve
 14 per segment. Smaller actual visible costs appear in the status line.
-An additional development-machine CPU stress fixture (three eight-strand fans,
-two retained receiver batches, 16 object samples) averaged 0.221 ms per frame
-over 1000 iterations. Reproduce with
-`build/actraiser_action_authored_fields_test --benchmark`; it excludes GPU work,
-native scene observation, PPU tinting and end-to-end frame time.
 
-Validation includes native pause-clock ownership, retained frames, malformed
-imports, budgets, unchanged torch flame/embers when reach changes, and native
-presentation of authored-only scenes. Browser smoke tests cover import, invalid
-version rejection, undo/redo and effect geometry. Download completion through
-the automation browser remains unverified; the copyable document is available.
-
-The forest default is now a complete editable grouped `ray-field` recipe.
+The forest default is a complete editable grouped `ray-field` recipe.
 Select a forest family and choose **Edit complete ray-field definition…** to
 extract its entire definition into the effects document. This replaces its
 bundled capture, preserving aggregate rendering. The modal exposes openings,
@@ -584,9 +489,6 @@ recipe tests. Editor builds verify that its checked-in embedding is current.
 Complete field records are version 1 additions; existing source/member/emitter
 documents remain supported. They require every defining property, allow one field
 per room/terrain, and retain the twelve-opening/four-origin/two-profile bounds.
-Native and WASM capture/rendering use the same codec and pure kernels, with no
-runtime INI parsing or new per-frame GPU resources. Fresh config reconstruction
-matches the pinned earlier geometry across the tested cameras and clocks.
 
 Complete definitions are also available for cave water/atmosphere, Bloodpool
 moon/marsh/castle lighting, torch/temple glows, trap/wizard/centaur lightning,
@@ -605,9 +507,8 @@ A placed emitter's modal offers **Attach to an actor or attack**. Choose the
 player or a family from the room picker; custom family IDs and optional parent,
 state, visual-frame, animation and handler filters identify runtime attacks.
 This works for actors without an existing native accent. **Bloodpool boss fire
-preset** selects the Act 1 boss's fire children. The preset is supported by native
-descriptor/handler analysis and observer tests; gameplay appearance still needs
-review. Family IDs describe native game identities, independent of regional art.
+preset** selects the Act 1 boss's fire children. Family IDs describe native game
+identities, independent of regional art.
 
 The optional `actor-parent` filter matches the parent's source captured when the
 child is first observed. That association remains fixed for the child's lifetime,
@@ -646,15 +547,9 @@ BG1/BG2 effects stay in their owning coordinate system. Whole compound fields ar
 edited through their source lists rather than duplicated as map markers. The
 internal effect clipboard is separate from the exported INI clipboard.
 
-Remaining native actor phases, landing dust and spell-controller visuals still
-need complete recipe extraction. Sparse overrides alone cannot reconstruct
-those defaults; exporting an override is not a complete definition of a native
-actor effect.
-Further work includes compound handles, material/slope tools,
-live native reload, actual actor/HUD artwork, final image
-parity and target-hardware acceptance. Camera-aligned editing and detached live
-preview follow the remaining effect migrations. Full volumetric scattering and
-diorama heat/refraction remain separate experiments.
+Native actor phases, landing dust and spell-controller visuals use sparse
+overrides here. Exporting such an override is not a complete definition of a
+native actor effect.
 
 #### Native members and edited light occlusion
 
@@ -753,51 +648,8 @@ build/actraiser_action_scene_replay scene.arscene
 build/actraiser_action_scene_replay --ppm frame.ppm scene.arscene
 ```
 
-Run the shared-renderer gate separately from ordinary editor tests (requires
-the pinned Emscripten compiler, C compiler, Python and Node):
-
-```sh
-python3 tools/action_editor/check_preview.py          # synthetic, no ROM required
-python3 tools/action_editor/check_preview.py ar.sfc   # 50 scenery selections x 3 terrain variants
-```
-
-The larger gate checks 1,200 frames, native export goldens, RGBA upload conversion,
-clock boundaries, phase overrides, invalid input, reset/reload and fixed memory
-across repeated room changes. See [the snapshot contract](scene-snapshot.md) for
-format and comparison scope. Passing this gate does not establish enhanced
-Diorama, browser GPU, Steam Deck or D3D12 parity.
-
-### Shared Diorama compositor validation
-
-The production compositor now receives explicit `DioramaRenderOptions`, captured
-planes, camera/view and scene callbacks. Desktop controls/settings are isolated
-in `diorama_controls.c`; the compositor has no live settings, manifest, WRAM,
-environment or host-clock reads. The desktop build uses this same entry point.
-
-Run its separate **command/projection** gate without a ROM:
-
-```sh
-python3 tools/action_editor/check_compositor.py
-python3 tools/action_editor/check_compositor.py --sanitize
-cmake --build build --target actraiser_diorama_compositor_test
-ctest --test-dir build -R '^actraiser_diorama_compositor$' --output-on-failure
-```
-
-`EMCC` selects pinned Emscripten 5.0.7; `CC` selects the native C compiler. The
-native and WASM harnesses share `compositor_sources.txt`. Their recording backend
-validates draw/resource ownership, geometry, shader parameters and projection
-across 120 aspect/zoom/extension/skybox configurations, including Death Heim
-A/B face skies and independent foreground water. It also checks bounded
-scratch-target reuse/eviction, repeated reset, invalid input and failed draw/target
-restoration. WASM runs in fixed 32 MiB memory. Only failure diagnostics use WASI;
-unexpected host imports fail the test. Native/WASM float agreement allows 0.001
-output pixels for math-library rounding (observed maximum below 0.000184).
-
-This command-recording harness does **not** draw pixels. The UI still
-uses the rendering modes described above, and `.arscene` remains the original
-background-only snapshot format. The separate captured-scene viewer below now
-covers base-compositor pixels; matched live-scene image review and environmental
-effects remain gates before replacing Diorama 3D.
+See [the snapshot contract](scene-snapshot.md) for the format and comparison
+scope. Original-background snapshots do not include enhanced Diorama scenes.
 
 ### Captured scenes through WebGL2
 
@@ -828,15 +680,6 @@ python3 tools/action_editor/build_compositor.py build/action-editor/ar-renderer-
 # Replay precisely those pixels/settings using the native GPU backend.
 cmake --build build --target actraiser_diorama_replay actraiser_diorama_snapshot_test
 build/actraiser_diorama_replay runs/compositor-fillmore/scene.ardi runs/compositor-fillmore/native.bmp
-
-# Export the browser frame using its Export frame / Download PNG controls.
-# Requires Pillow; allows tiny edge-rasterization differences across backends.
-python3 tools/action_editor/compare_compositor.py runs/compositor-fillmore/native.bmp browser.png
-
-# ABI, resource reuse, shader fallback and malformed-load checks with actual captures.
-node tests/diorama_captured_wasm.test.mjs build/action-editor/ar-renderer-preview.wasm \
-  runs/compositor-fillmore/scene.ardi
-python3 tests/action_editor_compositor_build_test.py
 ```
 
 The native capture environment controls are `AR_DIORAMA_SNAPSHOT=/path/scene.ardi`
@@ -846,15 +689,6 @@ after writing. Some interior rooms require a natural-entry seed/replay; the help
 accepts `--seed`, `--replay`, `--warp-at`, `--diorama-at` and `--quit-frames`.
 For the existing Aitos waterfall route use `saves/legacy/aitos-save.srm`,
 `saves/legacy/aitos-waterfall.rec`, warp 1320, Diorama 1700 and quit 3000.
-
-Verified locally: native Metal/WebGL2 pixels in Fillmore, Bloodpool and Aitos,
-changed Bloodpool aspect/camera/skybox policy, all four shader programs, and no
-new texture allocations on repeated frames. These are base-composition fixtures,
-not a claim of complete environmental parity or native Deck/D3D12 validation.
-The compositor's scratch cache belongs to one render device per module; call
-`Diorama_ResetCompositorResources` against that device before destroying it or
-binding a replacement. Native `Diorama_ResetRendererResources` also resets its
-desktop upload and named-skybox caches.
 
 The repository INI is also the release's authored scenery source. Packaging
 ships it as `defaults/diorama-layers.ini`; the first game launch after those
@@ -1397,49 +1231,7 @@ preserved; they are not background-tile authoring targets. The in-game debug
 editor is therefore optional for diagnosis, while this standalone editor owns
 the action-background configuration consumed by the game.
 
-## Source layout and checks
-
-`build.sh` compiles/runs the shared ROM exporter; `build.py` bundles the result.
-`editor.head.html` owns styles and `editor.body.html` owns markup and script order.
-The browser code is authored in ordinary JavaScript files, checked by the local
-`make check-quality` gate:
-
-- `native_frame.js`: room decoding, raster state and native-frame parity.
-- `layer_editor.js`: sparse classification/INI model and the 2D map view.
-- `regional_editor.js`: terrain identity, shared authoring families, and regional keys.
-- `painting.js`: undo/redo and brush gestures.
-- `pixel_editor.js`: partial-cell black masks and magnified pixel painting.
-- `stamp_editor.js`: rectangular clipboard, signed scenery placement, and edge bounds.
-- `editor_feedback.js`: selection actions, applied-state inspection, edit review and export savepoints.
-- `tile_menu.js`: context actions, paste destination, and keyboard menu navigation.
-- `export_editor.js`: room-section modal, clipboard fallback and full INI download.
-- `project_archive.js` / `project_editor.js`: offline ZIP transport, combined load/save and project feedback.
-- `editor_layout.js`: collapsible panels and shared sidebar controls in context-menu settings modals.
-- `framing_editor.js`: saved offsets relative to the room's scroll anchor.
-- `diorama_view.js`: WebGL preview and orbit interaction.
-- `editor.js`: reference actor, UI controls and startup.
-- `help.js`: the embedded help content.
-
-These are ordered classic scripts with shared bindings. The builder embeds them
-verbatim so the exported editor still opens offline as one file. The Python
-bundle tests check script order, missing optional INI input and lossless data
-embedding, including text containing HTML script delimiters.
-
-`python3 tests/action_editor_build_test.py` also checks regional switching,
-shared INI export, selection, pixel undo/round trips, render-cache identity,
-and cross-room undo without a ROM.
-After building with a local ROM, check all 150 C/JavaScript reference frames
-and a single-pixel transparency edit in Kassandora Room 4:
-
-```sh
-node tests/action_editor_terrain.test.mjs build/action-editor/ar-action-layer-editor.html
-```
-
-`make check-quality` checks these classic scripts in their shared browser scope.
-`editor.body.html` is the load-order manifest for both the builder and ESLint;
-diagnostics point back to the individual source file and line. New script files
-must appear in that manifest.
-
+### Complete cave water definitions
 
 The cave water default is also a complete editable `water-field` recipe.
 Choose a cave water, drip, splash-mist or wet-sheen family and **Edit complete
@@ -1459,11 +1251,6 @@ by the native geometry budget. Every scalar and vector is included in exported
 defaults removes that override. The canonical bundled definition is
 `assets/effects/cave-water-field.ini`; regenerate the embedding with
 `python3 tools/generate_effect_defaults.py` after editing it.
-
-Forest and linked cave-water reconstruction now pass independent geometry and
-regional native/WASM gates. The native cave atmosphere, marsh, castle, compound
-flow/glow, actor/contact and exposure definitions still require migration before
-the complete native-default reconstruction milestone is accepted.
 
 ### Complete cave and temple atmosphere definitions
 
@@ -1498,5 +1285,5 @@ properties describe the same layered volume kernel used by splash mist.
 `grit-*` and `grain-*` configure falling grit and its landing burst; actor jump
 and landing event scheduling is still a separate native family.
 
-Atmosphere sub-sources currently use labeled modal vectors; individual drag
-handles for those vectors remain on the editor usability backlog.
+Atmosphere sub-sources are edited through labeled vectors in their configuration
+modal; they have no individual drag handles.

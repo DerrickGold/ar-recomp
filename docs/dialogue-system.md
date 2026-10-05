@@ -320,32 +320,16 @@ Native scrolling can remove early lines from BG3 while the same logical page
 is still active. The visible tile rows therefore do not always contain the
 complete page; Progress Log can scroll its salutation and first line away.
 
-## Runtime ownership
+## Enhanced text pagination
 
-Modern menu labels and help are captured by `src/sim/menu/sim_menu_localization.c`.
-It resolves semantic text through the localization runtime's owned-result API;
-it does not borrow packs or runtime state. `BeginReadOnlyDialogue` creates the
-same `ArDialogueSession` used by native-backed prose, with no gameplay controls.
-
-`src/localization/dialogue_pager.c` owns measured screenful progression for both
-paths: wait for a successfully drawn boundary, reveal to that boundary, accept a
-fresh acknowledgement, then await the next measurement. Authored pages remain
-owned by `ArDialogueSession`. Font shaping and complete-line measurement remain
-in `src/render/localized_text_layout.c` and `localized_text_presenter.c`.
-
-The native execution adapter (`actraiser_localization_schedule.c`) supplies
-input, cancellation and fast-reveal policy. Every scheduled enhanced dialogue
-uses measured screenfuls, including cathedral events and Sky Palace prose;
-paging does not depend on modern SIM menu ownership. A fresh acknowledgement
-advances an overflowing screenful before execution reaches the native page/end
-wait. Acknowledged authored pages are retired even at nonzero message speed.
-Original presentation retains the native scrolling and continuation rules.
+Enhanced text divides each authored page into measured screenfuls. A fresh
+acknowledgement advances an overflowing screenful before the original page/end
+wait, including church audiences and Sky Palace prose. These rules apply to
+both town menu styles and to instant or gradual text. Original presentation
+retains the native scrolling and continuation rules.
 
 The Northwall bow-and-arrows offering (`simulation.event.northwall.slot_31`,
 USA source `$04:9EA7`, selector `$9521`) and bridge knowledge
 (`simulation.event.northwall.slot_02`, source `$04:C260`, selector `$94E7`)
 both enter from `$01:888C` in the cathedral (`00/08`). Each source has one
-native page, but enhanced font metrics can require several screenfuls. The
-opening text is present in extraction; scrolling immediately to the final rows
-at instant text speed loses it from view. These routes are scheduler regression
-cases for both menu styles and instant/nonzero text speeds.
+native page, but enhanced font metrics can require several screenfuls.

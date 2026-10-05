@@ -70,22 +70,9 @@ also builds and renders a candidate before replacing its active scene. Import
 failure leaves the previous scene available. No allocation occurs during load
 or render, memory cannot grow, and the module has no host imports.
 
-## Validation and rollout gates
+## Comparison scope
 
-- C tests cover maximum payload, signed values, complete byte round trips,
-  truncation, unsupported versions/flags, inconsistent dimensions, checksum
-  damage and failure without destination mutation. Run them with sanitizers.
-- The ROM-free WASM test consumes a C-encoded synthetic scene and compares its
-  frame hash with native replay. Reset, repeated load, missing required assets,
-  invalid data and failed module initialization are explicit cases.
-- The optional local-ROM gate covers all 50 scenery selections × three terrain profiles at
-  eight camera/time/phase combinations each. At frame 37 it also checks the
-  exporter's independently loaded native golden. Other cases include room-edge
-  cameras, frames 0/1/511/65535/65536/UINT32_MAX, raster-camera history, entry-frame
-  state, and explicit animation/page/BGSC overrides.
-- Native ARGB hashes and hashes recomputed from WASM's exported RGBA bytes must
-  agree exactly. This integer rasterizer needs no GPU tolerance. A hash check is
-  a regression gate, not a substitute for enhanced-scene visual review.
-- Browser UI, actual `file://` loading and enhanced rendering have separate
-  acceptance checks. Node executes the real WASM and checks its output, but does
-  not prove browser canvas, WebGL, Metal, Vulkan or D3D12 behavior.
+Native ARGB hashes and hashes recomputed from the exported RGBA bytes should
+agree exactly for this integer background rasterizer. The format contains no
+enhanced Diorama scene or GPU state; matching its pixels does not establish
+browser-canvas or enhanced-renderer behavior.

@@ -20,7 +20,7 @@ frame generation rather than combine raw endpoints with generated offsets.
 Named ROM replacement sources are rejected rather than substituted. These need
 new explicitly captured inputs before comparison can claim their parity.
 Snapshots with a host backdrop are rejected because the packet cannot reproduce
-that background; use native final-composite screenshots to review the prototype.
+that background; use native final-composite screenshots to review the enhanced scene.
 
 The native hook is opt-in. It allocates no pixel storage during ordinary play.
 It copies and zero-pads the owned images synchronously during upload, applying
@@ -73,12 +73,6 @@ Keep generated packets, source artwork and screenshots in ignored `runs/` or
 room/terrain and capture route alongside each comparison. The packet identifies
 room/section but does not contain a source revision or ROM hash.
 
-Native Metal versus WebGL2 image checks currently cover Fillmore 01/01,
-Bloodpool 02/01 and Aitos 04/02, plus changed Bloodpool framing/aspect/skybox policy.
-The GLSL ES variants are generated from production GLSL, with explicit std140
-uniforms and a sampling shim for GL render-target orientation. The builder checks
-the uniform interface against the semantic C-to-browser parameter bridge.
-
-These checks do not establish full enhanced-scene parity or validate hardware
-we have not run. Native Vulkan/Steam Deck and Windows/D3D12, all-room captures,
-effect inputs, named replacements and live edit resolution remain pending.
+The format covers the captured base composition only. It does not represent
+environmental effects, named replacements, a flat HUD, CRT processing or live
+map edits. Use native final-composite captures to review those features.

@@ -47,6 +47,12 @@ its failure count and can run in a separate process. Running
 pass a suite name (for example `codec`) to run just that group. CTest registers
 each group as `actraiser_regional_session_<suite>`.
 
+For SIM presentation checkpoints, run `python3 tools/sim3d_demo.py --list` to
+discover scenarios and use `--dry-run` to inspect a launch. Real checkpoints
+require your own ROM; visual comparisons also require a GPU. Each run writes
+its artifacts to an isolated directory. `--config` selects an explicit config;
+otherwise the harness uses the tracked shipping template.
+
 ## Assertions and fixtures
 
 Include `support/test_assert.h` when using `assert()`. It keeps assertions and

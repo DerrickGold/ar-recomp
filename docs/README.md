@@ -66,4 +66,6 @@ and SDK usage, overall project status, and durable reverse-engineering findings.
 Implementation ownership maps, task handovers, plans, benchmark runs and
 validation journals belong in the ignored `development/` tree. Keep native-game
 evidence separate from the port's implementation history; public links must not
-depend on local-only records.
+depend on local-only records. Public guides retain active controls, authoring
+contracts and preview limits; embedded implementation journals belong in the
+archive too.
