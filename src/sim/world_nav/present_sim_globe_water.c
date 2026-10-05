@@ -16,6 +16,8 @@ static struct {
   Sim3DMeshSet mesh;
   SimGlobeMapping map;
   SimWorldNavigationTownGround ground;
+  uint8_t *coverage;
+  uint8_t sources[kSimTownCells * kSimTownCells];
   uint32_t geography;
   bool ready;
   size_t count;
@@ -60,8 +62,50 @@ static bool DestinationMask(const SimWorldNavigationTownGround *ground,
   return true;
 }
 
+static bool CoverageCell(int x, int y) {
+  /* Only the feather and its one-pixel guard read destination coverage.
+   * Interior cells still participate in nearest-source selection below. */
+  return x <= kWaterFeatherCells || y <= kWaterFeatherCells ||
+         x >= kWaterFeatherCells + kSimTownCells - 1 || y >= kWaterFeatherCells + kSimTownCells - 1;
+}
+
+static bool Coverage(const SimGlobeMapping *map, const SimWorldNavigationTownGround *ground,
+                     uint8_t *output, const uint8_t *reference) {
+  for (int y = 0; y < kWaterAxis; ++y)
+    for (int x = 0; x < kWaterAxis; ++x) {
+      if (!CoverageCell(x, y)) continue;
+      uint8_t cell[256];
+      if (!DestinationMask(ground, (int)map->origin_x + x - kWaterFeatherCells,
+                           (int)map->origin_y + y - kWaterFeatherCells, cell))
+        return false;
+      for (int py = 0; py < kSimTownCellPixels; ++py) {
+        const int at =
+            (y * kSimTownCellPixels + py + 1) * kWaterMaskAxis + x * kSimTownCellPixels + 1;
+        if (reference && memcmp(reference + at, cell + py * kSimTownCellPixels, kSimTownCellPixels))
+          return false;
+        if (output) memcpy(output + at, cell + py * kSimTownCellPixels, kSimTownCellPixels);
+      }
+    }
+  return true;
+}
+
+static bool WaterSources(const SimGlobeMapping *map, const SimWorldNavigationTownGround *ground,
+                         uint8_t sources[kSimTownCells * kSimTownCells]) {
+  bool any = false;
+  for (int p = 0; p < kSimTownCells * kSimTownCells; ++p) {
+    sources[p] = NativeWater(ground, map->town, p % kSimTownCells, p / kSimTownCells);
+    any |= sources[p] != 0;
+  }
+  return any;
+}
+
 static float EdgeDistance(float x, float y) {
   return hypotf(fmaxf(0, fmaxf(-x, x - 32)), fmaxf(0, fmaxf(-y, y - 32)));
+}
+
+static bool FeatherCell(int x, int y) {
+  return !(x >= 0 && x < kSimTownCells && y >= 0 && y < kSimTownCells) &&
+         EdgeDistance(x < 0 ? x + 1 : x, y < 0 ? y + 1 : y) < kWaterFeatherCells;
 }
 
 /* A whole-water source keeps live wave/palette updates on the existing native
@@ -81,7 +125,7 @@ typedef struct WaterBuilder {
   const SimGlobeMapping *map;
   const uint8_t *coverage;
   const Sim3DDepthSurfaceVertex *grid;
-  uint8_t sources[32 * 32];
+  int16_t source_cells[kWaterAxis * kWaterAxis];
   Sim3DDepthSurfaceVertex *vertices;
   ArRenderPointF *focus;
   size_t count, capacity;
@@ -164,9 +208,9 @@ static bool EmitRectangle(WaterBuilder *b, int x, int y, int source,
 static bool BuildRectangles(WaterBuilder *b) {
   for (int y = -kWaterFeatherCells; y < 32 + kWaterFeatherCells; ++y)
     for (int x = -kWaterFeatherCells; x < 32 + kWaterFeatherCells; ++x) {
-      if (x >= 0 && x < 32 && y >= 0 && y < 32) continue;
-      if (EdgeDistance(x < 0 ? x + 1 : x, y < 0 ? y + 1 : y) >= kWaterFeatherCells) continue;
-      const int source = SourceCell(b->sources, x, y);
+      if (!FeatherCell(x, y)) continue;
+      const int source =
+          b->source_cells[(y + kWaterFeatherCells) * kWaterAxis + x + kWaterFeatherCells];
       if (source < 0) continue;
       uint16_t rows[16] = {0};
       for (int py = 0; py < 16; ++py) for (int px = 0; px < 16; ++px) {
@@ -197,9 +241,24 @@ static bool BuildRectangles(WaterBuilder *b) {
 
 bool PresentSimGlobeWater_Matches(const SimGlobeMapping *map,
     const SimWorldNavigationTownGround *ground) {
-  return map && ground && s_water.ready && Sim3DMeshSet_Ready(&s_water.mesh) &&
-      s_water.geography == SimWorldMap_GeographySerial() &&
-      !memcmp(map,&s_water.map,sizeof(*map)) && !memcmp(ground,&s_water.ground,sizeof(*ground));
+  if (!map || !ground || !s_water.ready || !Sim3DMeshSet_Ready(&s_water.mesh) ||
+      memcmp(map, &s_water.map, sizeof(*map)))
+    return false;
+  const uint32_t geography = SimWorldMap_GeographySerial();
+  if (s_water.geography == geography && !memcmp(ground, &s_water.ground, sizeof(*ground)))
+    return true;
+  uint8_t sources[kSimTownCells * kSimTownCells];
+  const bool any = WaterSources(map, ground, sources);
+  if (memcmp(sources, s_water.sources, sizeof(sources)) ||
+      (any && !Coverage(map, ground, NULL, s_water.coverage)))
+    return false;
+  /* Cosmetic overview edits and construction on dry land do not change the
+   * feather. Advance the broad input key after proving the source UVs and
+   * protected shoreline coverage are identical. A new parent grid still
+   * calls Prepare unconditionally, so its positions are never retained. */
+  s_water.geography = geography;
+  s_water.ground = *ground;
+  return true;
 }
 
 static bool PrepareWater(const SimGlobeMapping *map,
@@ -211,16 +270,18 @@ static bool PrepareWater(const SimGlobeMapping *map,
   s_water.ready = false;
   uint8_t *coverage = calloc(kWaterMaskAxis * kWaterMaskAxis, 1);
   if (!coverage) return false;
-  bool ok = true;
-  for (int y = 0; y < kWaterAxis && ok; ++y) for (int x = 0; x < kWaterAxis && ok; ++x) {
-    uint8_t cell[256];
-    ok = DestinationMask(ground, (int)map->origin_x + x - kWaterFeatherCells,
-        (int)map->origin_y + y - kWaterFeatherCells, cell);
-    if (ok) for (int py = 0; py < 16; ++py)
-      memcpy(coverage + (y * 16 + py + 1) * kWaterMaskAxis + x * 16 + 1, cell + py * 16, 16);
-  }
+  uint8_t sources[kSimTownCells * kSimTownCells];
+  const bool any = WaterSources(map, ground, sources);
+  bool ok = !any || Coverage(map, ground, coverage, NULL);
   WaterBuilder b = {.map = map, .coverage = coverage, .grid = grid};
-  for (int p = 0; p < 32 * 32; ++p) b.sources[p] = NativeWater(ground, map->town, p % 32, p / 32);
+  /* Counting and emission use the same nearest source, including its stable
+   * row-major tie break. Search once per cell rather than once per pass. */
+  for (int y = 0; y < kWaterAxis; ++y)
+    for (int x = 0; x < kWaterAxis; ++x)
+      b.source_cells[y * kWaterAxis + x] =
+          any && FeatherCell(x - kWaterFeatherCells, y - kWaterFeatherCells)
+              ? SourceCell(sources, x - kWaterFeatherCells, y - kWaterFeatherCells)
+              : -1;
   ok = ok && BuildRectangles(&b) && b.count <= kSim3DMeshSetMaximumQuads;
   if (ok && b.count) {
     b.capacity = b.count;
@@ -232,14 +293,17 @@ static bool PrepareWater(const SimGlobeMapping *map,
   ok = ok && Sim3DMeshSet_UpdateSurface(&s_water.mesh, b.vertices, b.focus, b.count);
   free(b.vertices);
   free(b.focus);
-  free(coverage);
   s_water.ready = ok;
   if (ok) {
+    free(s_water.coverage);
+    s_water.coverage = coverage;
+    memcpy(s_water.sources, sources, sizeof(sources));
     s_water.geography = SimWorldMap_GeographySerial();
     s_water.map = *map;
     s_water.ground = *ground;
     s_water.count = b.count;
-  }
+  } else
+    free(coverage);
   return ok;
 }
 
@@ -271,5 +335,6 @@ size_t PresentSimGlobeWater_QuadCount(void) { return s_water.ready ? s_water.cou
 
 void PresentSimGlobeWater_Reset(void) {
   Sim3DMeshSet_Destroy(&s_water.mesh);
+  free(s_water.coverage);
   memset(&s_water, 0, sizeof(s_water));
 }

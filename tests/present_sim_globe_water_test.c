@@ -16,6 +16,7 @@ static size_t captured_count;
 static bool reject_upload;
 uint64_t HostClock_Nanoseconds(void) { return 0; }
 static unsigned pattern;
+static unsigned uploads;
 static uint32_t geography = 1;
 uint32_t SimWorldMap_GeographySerial(void) { return geography; }
 
@@ -30,6 +31,7 @@ void Sim3DMeshSet_Destroy(Sim3DMeshSet *set) {
 }
 bool Sim3DMeshSet_UpdateSurface(Sim3DMeshSet *set, const Sim3DDepthSurfaceVertex *vertices,
                                 const ArRenderPointF *mask, size_t count) {
+  ++uploads;
   Sim3DMeshSet_Destroy(set);
   if (reject_upload) return false;
   if (count) {
@@ -67,14 +69,12 @@ bool SimWorldMap_OpenWaterMask(int x, int y, uint8_t mask[64]) {
 }
 bool SimTownGroundArt_IsOpenWater(uint8_t town, uint8_t tier, uint8_t tile) {
   (void)town;
-  (void)tier;
-  return tile == 1;
+  return tile == 1 || (tile == 4 && tier == 1);
 }
 bool SimTownGroundArt_OpenWaterMask(uint8_t town, uint8_t tier, uint8_t tile, uint8_t mask[256]) {
   (void)town;
-  (void)tier;
   for (int p = 0; p < 256; ++p)
-    mask[p] = tile == 1 || (tile == 2 && p % 16 < 9);
+    mask[p] = tile == 1 || (tile == 4 && tier == 1) || (tile == 2 && p % 16 < 9);
   return true;
 }
 
@@ -96,6 +96,86 @@ static bool SafePixel(const SimWorldNavigationTownGround *ground, int x, int y) 
 
 static float Cross(ArRenderPointF a, ArRenderPointF b, ArRenderPointF c) {
   return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+static void CheckReuse(const SimGlobeMapping *map, const SimWorldNavigationTownGround *ground,
+                       const Sim3DDepthSurfaceVertex *grid) {
+  const unsigned before = uploads;
+  const size_t count = captured_count;
+  assert(PresentSimGlobeWater_Matches(map, ground) && uploads == before);
+  Sim3DDepthSurfaceVertex *vertices = malloc(count * 4 * sizeof(*vertices));
+  ArRenderPointF *focus = malloc(count * 4 * sizeof(*focus));
+  assert(vertices && focus);
+  memcpy(vertices, captured, count * 4 * sizeof(*vertices));
+  memcpy(focus, coordinates, count * 4 * sizeof(*focus));
+  assert(PresentSimGlobeWater_Prepare(map, ground, grid));
+  assert(captured_count == count && !memcmp(vertices, captured, count * 4 * sizeof(*vertices)) &&
+         !memcmp(focus, coordinates, count * 4 * sizeof(*focus)));
+  free(vertices);
+  free(focus);
+}
+
+static void CheckEdits(const SimGlobeMapping *map, const SimWorldNavigationTownGround *original,
+                       const Sim3DDepthSurfaceVertex *grid) {
+  SimWorldNavigationTownGround ground = *original;
+  const int town = map->town - 1;
+  ground.terrain[town][16 * 32 + 16] = 3;
+  assert(PresentSimGlobeWater_Prepare(map, &ground, grid));
+  ground.object_rows[town][16] |= UINT32_C(1) << 16;
+  CheckReuse(map, &ground, grid); /* Construction on dry land. */
+  ++geography;
+  CheckReuse(map, &ground, grid); /* Cosmetic overview edit. */
+  ground.terrain[(town + 1) % 6][16 * 32 + 16] = 2;
+  CheckReuse(map, &ground, grid); /* Other town, outside the feather. */
+  ++ground.development_tier[town];
+  CheckReuse(map, &ground, grid); /* Tier with identical water art. */
+  ground.terrain[town][16 * 32 + 17] = 4;
+  assert(PresentSimGlobeWater_Prepare(map, &ground, grid));
+  ground.development_tier[town] = 0;
+  assert(!PresentSimGlobeWater_Matches(map, &ground)); /* Tier changes a water source. */
+  assert(PresentSimGlobeWater_Prepare(map, &ground, grid));
+  ground.object_rows[town][17] |= UINT32_C(1) << 17;
+  assert(!PresentSimGlobeWater_Matches(map, &ground)); /* Interior source removed. */
+  assert(PresentSimGlobeWater_Prepare(map, &ground, grid));
+  ground.terrain[town][17 * 32 + 17] = 2;
+  CheckReuse(map, &ground, grid); /* Occupied source stays excluded. */
+  pattern ^= 1;
+  ++geography;
+  assert(!PresentSimGlobeWater_Matches(map, &ground)); /* Equal mapping, changed shoreline. */
+  assert(PresentSimGlobeWater_Prepare(map, &ground, grid));
+  pattern ^= 1;
+  ++geography;
+  assert(!PresentSimGlobeWater_Matches(map, &ground));
+  assert(PresentSimGlobeWater_Prepare(map, &ground, grid));
+  bool neighbor = false;
+  for (uint8_t other = 1; other <= 6 && !neighbor; ++other) {
+    if (other == map->town) continue;
+    int ox, oy;
+    assert(SimWorldMap_OriginForTown(other, &ox, &oy));
+    for (int y = 0; y < 32 && !neighbor; ++y)
+      for (int x = 0; x < 32; ++x) {
+        const int dx = ox + x - (int)map->origin_x, dy = oy + y - (int)map->origin_y;
+        if (dx < -3 || dy < -3 || dx > 34 || dy > 34 || (dx >= 0 && dx < 32 && dy >= 0 && dy < 32))
+          continue;
+        ground.object_rows[other - 1][y] ^= UINT32_C(1) << x;
+        assert(!PresentSimGlobeWater_Matches(map, &ground));
+        assert(PresentSimGlobeWater_Prepare(map, &ground, grid));
+        neighbor = true;
+        break;
+      }
+  }
+  ground.enabled_town_mask &= (uint8_t)~(1u << town);
+  assert(!PresentSimGlobeWater_Matches(map, &ground));
+  assert(PresentSimGlobeWater_Prepare(map, &ground, grid));
+  assert(PresentSimGlobeWater_QuadCount() == 0);
+  pattern ^= 1;
+  ++geography;
+  assert(PresentSimGlobeWater_Matches(map, &ground)); /* No source: no feather. */
+  ground.enabled_town_mask |= (uint8_t)(1u << town);
+  assert(!PresentSimGlobeWater_Matches(map, &ground));
+  pattern ^= 1;
+  ++geography;
+  assert(PresentSimGlobeWater_Prepare(map, original, grid));
 }
 
 static void CheckSurface(const SimGlobeMapping *map, const SimWorldNavigationTownGround *ground,
@@ -183,7 +263,7 @@ int main(void) {
   ground.object_rows[1][20] = UINT32_C(1) << 31;
   Sim3DDepthSurfaceVertex *grid = calloc(129 * 129, sizeof(*grid));
   assert(grid);
-  for (uint8_t town = 1; town <= 5; town += 4)
+  for (uint8_t town = 1; town <= 6; ++town)
     for (pattern = 0; pattern < 2; ++pattern) {
       int ox, oy;
       assert(SimWorldMap_OriginForTown(town, &ox, &oy));
@@ -201,10 +281,19 @@ int main(void) {
       assert(PresentSimGlobeWater_Matches(&map, &ground));
       assert(PresentSimGlobeWater_QuadCount() == captured_count && captured_count > 0);
       CheckSurface(&map, &ground, grid);
-      ++geography; /* Equal terrain coverage can still change shoreline texels. */
-      assert(!PresentSimGlobeWater_Matches(&map, &ground));
+      CheckEdits(&map, &ground, grid);
+      SimGlobeMapping moved = map;
+      moved.radius += 1;
+      assert(!PresentSimGlobeWater_Matches(&moved, &ground));
+      const size_t bytes = captured_count * 4 * sizeof(*captured);
+      Sim3DDepthSurfaceVertex *previous = malloc(bytes);
+      assert(previous);
+      memcpy(previous, captured, bytes);
+      for (int p = 0; p < 129 * 129; ++p) grid[p].elevation[0] += .02f;
+      /* Prepare must republish a new parent grid even with identical keys. */
       assert(PresentSimGlobeWater_Prepare(&map, &ground, grid));
-      assert(PresentSimGlobeWater_Matches(&map, &ground));
+      assert(memcmp(previous, captured, bytes));
+      free(previous);
       const float matrix[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
       const Sim3DDepthSurfaceFocus focus = {0};
       assert(PresentSimGlobeWater_Append(matrix, map.radius, (ArRenderTexture){123}, &focus));

@@ -7,7 +7,8 @@
 /* A bounded water-only transition outside the active town. Uses immutable
  * semantic texels (including mixed coastal tiles) for coastline protection
  * and borrows the live native ground atlas for current water color/animation.
- * Resident sub-cell rectangles are rebuilt only on geography/style changes;
+ * Resident sub-cell rectangles are rebuilt only when their water sources,
+ * protected shoreline coverage, mapping or parent surface change;
  * no per-frame CPU rebake, texture cache, or new shader/backend contract. */
 bool PresentSimGlobeWater_Matches(const SimGlobeMapping *map,
     const SimWorldNavigationTownGround *ground);
