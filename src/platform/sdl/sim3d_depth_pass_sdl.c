@@ -790,11 +790,18 @@ ArRenderTexture Sim3DDepthPass_Submit(
     for (Sim3DDepthMesh *mesh = g_depth_pass_meshes; mesh; mesh = mesh->next) {
       if (!mesh->queued) continue;
       if (mesh->dirty) {
+        const bool partial = mesh->linear_update_count != 0;
+        const Uint32 vertex_bytes = MeshVertexBytes(mesh);
         const SDL_GPUTransferBufferLocation mesh_source = {.transfer_buffer = mesh->transfer};
         const SDL_GPUBufferRegion mesh_destination = {
-          .buffer = mesh->positions, .size = mesh->count * MeshVertexBytes(mesh),
+            .buffer = mesh->positions,
+            .offset = partial ? mesh->linear_update_first * vertex_bytes : 0,
+            .size = (partial ? mesh->linear_update_count : mesh->count) * vertex_bytes,
         };
-        SDL_UploadToGPUBuffer(copy, &mesh_source, &mesh_destination, true);
+        /* Cycling makes the new allocation's untouched bytes undefined. A
+         * partial update must retain them; GPU ordering protects earlier draws
+         * without introducing a CPU fence or readback. */
+        SDL_UploadToGPUBuffer(copy, &mesh_source, &mesh_destination, !partial);
         vertex_upload_bytes += mesh_destination.size;
       }
       if (mesh->selection_dirty && mesh->kind != kMeshSurface) {

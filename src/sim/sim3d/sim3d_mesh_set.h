@@ -24,6 +24,10 @@ bool Sim3DMeshSet_Ready(const Sim3DMeshSet *set);
  * the pass. Sources are copied; no pointers into a frame or model are kept. */
 bool Sim3DMeshSet_UpdateLinear(Sim3DMeshSet *set,
     const Sim3DDepthLinearVertex *vertices, size_t quads);
+/* Optional single-allocation range publication. Same retention contract as
+ * UpdateLinearMeshRange; rejection leaves the set unchanged for full fallback. */
+bool Sim3DMeshSet_UpdateLinearRange(Sim3DMeshSet *set, const Sim3DDepthLinearVertex *vertices,
+                                    size_t first_quad, size_t quad_count, size_t total_quads);
 bool Sim3DMeshSet_UpdateSurface(Sim3DMeshSet *set,
     const Sim3DDepthSurfaceVertex *vertices, const ArRenderPointF *mask_uv, size_t quads);
 /* Sorted, nonoverlapping source ranges. NULL/zero restores the full source.

@@ -445,6 +445,7 @@ static bool PublishTownStatic(const WorldNavigationModelSource *sources, size_t 
   s_town_static.scratch = (TownSourceBuilder){0};
   builder.count = 0;
   size_t at = 0;
+  size_t dirty_first = SIZE_MAX, dirty_end = 0;
   bool ok = true;
   for (size_t i = 0; i < count && ok; ++i) {
     if (sources[i].object.kind == kSimBackgroundVoxel_Windmill) continue;
@@ -469,9 +470,23 @@ static bool PublishTownStatic(const WorldNavigationModelSource *sources, size_t 
       ok = AppendFacingSource(&sources[i], style, shading, 0, &builder);
     }
     entry->count = builder.count - entry->first;
+    /* Matching geometry at its old offset is already resident. Insertions and
+     * removals dirty the shifted tail; equal-size edits need only their span. */
+    if (entry->count && (!cached || cached->first != entry->first)) {
+      if (entry->first < dirty_first) dirty_first = entry->first;
+      dirty_end = builder.count;
+    }
   }
-  if (ok) ok = Sim3DMeshSet_UpdateLinear(&s_town_models.meshes[0],
-                                        builder.vertices, builder.count / 4);
+  if (ok) {
+    if (dirty_first == SIZE_MAX) dirty_first = dirty_end = builder.count;
+    const bool patched =
+        reuse && Sim3DMeshSet_UpdateLinearRange(
+                     &s_town_models.meshes[0],
+                     dirty_end > dirty_first ? builder.vertices + dirty_first : NULL,
+                     dirty_first / 4, (dirty_end - dirty_first) / 4, builder.count / 4);
+    if (!patched)
+      ok = Sim3DMeshSet_UpdateLinear(&s_town_models.meshes[0], builder.vertices, builder.count / 4);
+  }
   /* Never reuse an incomplete or rejected publication. The bound includes
    * spare vertex capacity; source metadata is separately bounded by the town. */
   TownSourceBuilder previous = {

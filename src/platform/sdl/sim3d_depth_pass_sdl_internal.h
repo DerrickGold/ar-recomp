@@ -163,6 +163,7 @@ struct Sim3DDepthMesh {
   SDL_GPUBuffer *positions;
   SDL_GPUTransferBuffer *transfer;
   Uint32 count, capacity;
+  Uint32 linear_update_first, linear_update_count;
   int width, height;
   bool dirty, queued;
   Sim3DMeshKind kind;

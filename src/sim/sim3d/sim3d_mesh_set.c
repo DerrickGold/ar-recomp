@@ -58,6 +58,16 @@ bool Sim3DMeshSet_UpdateLinear(Sim3DMeshSet *set,
   return Update(set, vertices, NULL, quads, true);
 }
 
+bool Sim3DMeshSet_UpdateLinearRange(Sim3DMeshSet *set, const Sim3DDepthLinearVertex *vertices,
+                                    size_t first_quad, size_t quad_count, size_t total_quads) {
+  if (!Sim3DMeshSet_Ready(set) || !set->linear || set->count != 1 ||
+      !Sim3DDepthPass_UpdateLinearMeshRange(set->meshes[0], vertices, first_quad, quad_count,
+                                            total_quads))
+    return false;
+  set->quads = set->selected[0] = total_quads;
+  return true;
+}
+
 bool Sim3DMeshSet_UpdateSurface(Sim3DMeshSet *set,
     const Sim3DDepthSurfaceVertex *vertices, const ArRenderPointF *mask, size_t quads) {
   return Update(set, vertices, mask, quads, false);

@@ -89,6 +89,7 @@ void ReleaseMeshStorage(Sim3DDepthMesh *mesh) {
   mesh->transfer = NULL;
   mesh->device = NULL;
   mesh->count = mesh->capacity = 0;
+  mesh->linear_update_first = mesh->linear_update_count = 0;
   mesh->width = mesh->height = 0;
   mesh->dirty = mesh->queued = false;
 }
@@ -164,6 +165,7 @@ static void PublishMesh(Sim3DDepthMesh *mesh, Uint32 count) {
   mesh->width = g_depth_pass.width;
   mesh->height = g_depth_pass.height;
   mesh->dirty = true;
+  mesh->linear_update_first = mesh->linear_update_count = 0;
 }
 
 bool Sim3DDepthPass_UpdateMesh(Sim3DDepthMesh *mesh,
@@ -420,13 +422,8 @@ bool Sim3DDepthPass_AppendModelMesh(Sim3DDepthMesh *mesh, const float matrix[16]
 }
 #endif
 
-bool Sim3DDepthPass_UpdateLinearMesh(Sim3DDepthMesh *mesh,
-    const Sim3DDepthLinearVertex *vertices, size_t quad_count) {
-  if (!g_depth_pass.collecting || !mesh || mesh->kind != kMeshLinear || !vertices ||
-      !CreateModelPipeline(kModelPipeline_Linear) || !CanUpdateMesh(mesh, quad_count, kMeshLinear))
-    return false;
-  const Uint32 count = (Uint32)quad_count * 4;
-  float extent[5] = {0};
+static bool LinearVerticesExtent(const Sim3DDepthLinearVertex *vertices, Uint32 count,
+                                 float extent[5]) {
   for (Uint32 i = 0; i < count; ++i) {
     const Sim3DDepthLinearVertex *v = &vertices[i];
     if (!ValidSampleColor(v->color) || !isfinite(v->axis) || v->axis < 0 ||
@@ -439,12 +436,54 @@ bool Sim3DDepthPass_UpdateLinearMesh(Sim3DDepthMesh *mesh,
       extent[p] = fmaxf(extent[p], fabsf(values[p]));
     }
   }
+  return true;
+}
+
+bool Sim3DDepthPass_UpdateLinearMesh(Sim3DDepthMesh *mesh, const Sim3DDepthLinearVertex *vertices,
+                                     size_t quad_count) {
+  if (!g_depth_pass.collecting || !mesh || mesh->kind != kMeshLinear || !vertices ||
+      !CreateModelPipeline(kModelPipeline_Linear) || !CanUpdateMesh(mesh, quad_count, kMeshLinear))
+    return false;
+  const Uint32 count = (Uint32)quad_count * 4;
+  float extent[5] = {0};
+  if (!LinearVerticesExtent(vertices, count, extent)) return false;
   if (!ReserveMesh(mesh, count)) return false;
   void *mapped = SDL_MapGPUTransferBuffer(g_depth_pass.device, mesh->transfer, true);
   if (!mapped) return false;
   memcpy(mapped, vertices, count * sizeof(*vertices));
   memcpy(mesh->linear_extent, extent, sizeof(extent));
   PublishMesh(mesh, count);
+  return true;
+}
+
+bool Sim3DDepthPass_UpdateLinearMeshRange(Sim3DDepthMesh *mesh,
+                                          const Sim3DDepthLinearVertex *vertices, size_t first_quad,
+                                          size_t quad_count, size_t total_quads) {
+  if (!Sim3DDepthPass_MeshReady(mesh) || mesh->dirty ||
+      !CanUpdateMesh(mesh, total_quads, kMeshLinear) || total_quads * 4 > mesh->capacity ||
+      first_quad > total_quads || quad_count > total_quads - first_quad ||
+      (quad_count && !vertices))
+    return false;
+  const size_t old_quads = mesh->count / 4;
+  if (total_quads > old_quads && (first_quad > old_quads || first_quad + quad_count != total_quads))
+    return false;
+  if (!quad_count) {
+    mesh->count = (Uint32)total_quads * 4;
+    return true;
+  }
+  const Uint32 count = (Uint32)quad_count * 4;
+  float extent[5];
+  /* Retained vertices keep their old bound. Removing an extremum may leave a
+   * conservative bound until the next full publication, never an unsafe one. */
+  memcpy(extent, mesh->linear_extent, sizeof(extent));
+  if (!LinearVerticesExtent(vertices, count, extent)) return false;
+  void *mapped = SDL_MapGPUTransferBuffer(g_depth_pass.device, mesh->transfer, true);
+  if (!mapped) return false;
+  memcpy(mapped, vertices, count * sizeof(*vertices));
+  memcpy(mesh->linear_extent, extent, sizeof(extent));
+  PublishMesh(mesh, (Uint32)total_quads * 4);
+  mesh->linear_update_first = (Uint32)first_quad * 4;
+  mesh->linear_update_count = count;
   return true;
 }
 

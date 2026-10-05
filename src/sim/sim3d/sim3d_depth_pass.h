@@ -173,6 +173,15 @@ typedef struct Sim3DDepthLinearTransform {
 Sim3DDepthMesh *Sim3DDepthPass_CreateLinearMesh(void);
 bool Sim3DDepthPass_UpdateLinearMesh(Sim3DDepthMesh *mesh,
     const Sim3DDepthLinearVertex *vertices, size_t quad_count);
+/* Replace one contiguous span of an already submitted linear source. Vertices
+ * address only that span; the caller guarantees the retained prefix/suffix are
+ * unchanged. May truncate, or grow within the existing allocation if the span
+ * supplies the entire new tail. NULL/zero permits truncation without upload.
+ * Rejects unsubmitted/queued sources, allocation growth and invalid spans
+ * without changing the published source. Full Update remains the fallback. */
+bool Sim3DDepthPass_UpdateLinearMeshRange(Sim3DDepthMesh *mesh,
+                                          const Sim3DDepthLinearVertex *vertices, size_t first_quad,
+                                          size_t quad_count, size_t total_quads);
 bool Sim3DDepthPass_AppendLinearMesh(Sim3DDepthMesh *mesh,
     const Sim3DDepthLinearTransform *transform);
 
