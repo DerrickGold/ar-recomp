@@ -12,6 +12,10 @@ on Linux, or `ActRaiserRecompBuilder.exe` on Windows to enter the Workshop.
 The generic Linux builder's `run-build` launcher opens the same interface in
 your browser.
 
+**Check for updates** in the sidebar opens the project's GitHub Releases page
+in your system browser. Download a newer Builder there, then rebuild your game
+to apply its changes. **GitHub repository** opens the project source and README.
+
 On the desktop Builder's first launch, **Choose game folder** lets you review
 the exact playable output directory before any game files are initialized.
 The default is a portable `ActRaiserRecomp/` folder beside the Builder. Existing

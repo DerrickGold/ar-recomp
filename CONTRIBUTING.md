@@ -52,6 +52,12 @@ without running repository lint or tests. They need only the
 Ruff, ESLint, ShellCheck, and the game test dependencies belong to the explicit
 developer checks.
 
+`make release-remote <ssh-config-name>` runs packaging on your own SSH build
+host, streams progress, saves local diagnostics, and retrieves verified
+downloads with automatic remote cleanup. See
+[remote packaging](docs/desktop-packaging.md#packaging-on-an-ssh-build-host)
+for prerequisites and options. This target also packages without running checks.
+
 Use `make release-checked` or `make release-checked-<platform>` to run the full
 `check-release` gate before packaging. A failed check stops packaging, and
 multiple checked release targets share a single check run, including with

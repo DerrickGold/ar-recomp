@@ -11,6 +11,7 @@
 <script src="builder/i18n.js" defer></script>
 <script src="builder/feedback.js" defer></script>
 <script src="builder/file-input.js" defer></script>
+<script src="builder/project-links.js" defer></script>
 </head>
 <body>
 <div id="workshop-atmosphere" aria-hidden="true"><canvas id="ambient-scene" width="640" height="420"></canvas></div>
@@ -24,6 +25,11 @@
     <button class="tab" id="tab-localization" role="tab" aria-selected="false" aria-controls="panel-localization" tabindex="-1" disabled data-i18n-title="builder.language.unavailable_title" title="Requires the native US language source"><span class="nav-icon" aria-hidden="true">文</span><span data-i18n="builder.nav.languages">Languages</span></button>
     <button class="tab" id="tab-assets" role="tab" aria-selected="false" aria-controls="panel-assets" tabindex="-1"><span class="nav-icon" aria-hidden="true">♫</span><span data-i18n="builder.nav.assets">Assets</span></button>
     <button class="tab" id="tab-manual" role="tab" aria-selected="false" aria-controls="panel-manual" tabindex="-1"><span class="nav-icon" aria-hidden="true">▤</span><span data-i18n="builder.nav.help">Help &amp; manual</span></button>
+  </div>
+  <div class="project-links">
+    <a href="https://github.com/DerrickGold/ar-recomp/releases" target="_blank" rel="noopener noreferrer" data-project-link="releases"><span data-i18n="builder.links.updates">Check for updates</span><span aria-hidden="true">↗</span></a>
+    <a href="https://github.com/DerrickGold/ar-recomp" target="_blank" rel="noopener noreferrer" data-project-link="repository"><span data-i18n="builder.links.repository">GitHub repository</span><span aria-hidden="true">↗</span></a>
+    <p id="project-link-status" role="status" hidden></p>
   </div>
   <div class="sidebar-bottom">
     <div class="sidebar-tools"><button class="quiet" type="button" id="game-folder-open" hidden data-i18n="builder.output.change">Change game folder…</button>

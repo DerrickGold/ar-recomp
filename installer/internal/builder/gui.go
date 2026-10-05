@@ -410,6 +410,10 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 		serveFrontend(response, request, endpoint)
 		return
 	}
+	if strings.HasPrefix(endpoint, "project-links/") {
+		app.openProjectPage(response, request, strings.TrimPrefix(endpoint, "project-links/"))
+		return
+	}
 	if strings.HasPrefix(endpoint, "localization/") {
 		app.serveLocalization(response, request, strings.TrimPrefix(endpoint, "localization/"))
 		return

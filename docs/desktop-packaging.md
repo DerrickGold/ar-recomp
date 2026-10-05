@@ -219,5 +219,55 @@ if a check fails. `make check-release` also works independently.
 `make release DESKTOP=0` selects archive-only packaging. See the
 [Builder README](https://github.com/DerrickGold/ar-recomp/tree/main/installer) for building and running the CLI locally.
 
+### Packaging on an SSH build host
+
+Configure an SSH alias in your own SSH config, then pass its name to Make.
+For example, if your alias is `build-host`:
+
+```sh
+make release-remote build-host
+make release-remote build-host PLATFORMS="macos-arm64 windows-arm64"
+make release-remote build-host REMOTE_DRY_RUN=1
+```
+
+The local machine needs Git, SSH, Make, and Python 3.9+. The remote machine
+needs Python 3.9+, Make, Go 1.25+, CMake 3.25+, and the same packaging
+prerequisites as a local release. Use macOS for the full desktop release matrix;
+archive-only builds with `DESKTOP=0` also support Linux hosts. SSH must work
+without an interactive password prompt. The alias and credentials stay in your
+local SSH configuration; no machine configuration is saved in the repository.
+
+The command sends the current working tree, including tracked edits and
+non-ignored new files. Deleted files, `.git`, ignored ROMs, local settings,
+build output, and internal archives are omitted. No commit or push is needed.
+The local Git version is passed to packaging so the remote snapshot retains
+the correct version stamp. `REMOTE_DRY_RUN=1` reports the selection without
+connecting or building. Like `make release`, this target packages directly;
+run the developer checks locally when needed.
+
+Build output streams live to the terminal, including individual platform
+configuration, compilation, packaging, and error diagnostics. Each attempt
+also saves a complete log under `runs/release-remote/<attempt>/build.log` and
+prints its path at the start and finish, including on failure. The log records
+the version, selected platforms, local checkout, and remote workspace.
+Temporary remote source paths in diagnostics correspond to the same relative
+paths in the local checkout. Errors return a nonzero exit status; build,
+transfer, or checksum failures preserve existing local release artifacts.
+
+Finished packages and SHA-256 sidecars are verified remotely and again locally,
+then copied into `release/`. Only the selected downloads are replaced; unrelated
+local files remain. The remote host retains reusable dependency downloads,
+host toolchain, and Go compiler caches in
+`~/.cache/actraiser-recomp/release-remote/`. Override this with `REMOTE_DIR=…`
+to choose another dedicated cache directory. An existing directory must have
+been created by this workflow; an unrelated checkout or directory is refused.
+
+Each job's temporary sources, build trees, and artifacts are removed after
+handoff, build failure, or interruption, including with `KEEP_BUILD=1`.
+Abandoned job directories from forced termination are removed on the next run.
+Builds sharing one cache directory run one at a time to protect its caches.
+Local logs remain available independently of remote cleanup and are excluded
+from Git and release packages.
+
 Builder distributions must not include your ROM, generated game, extracted
 content, or private project backups.

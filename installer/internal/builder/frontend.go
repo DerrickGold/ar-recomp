@@ -27,6 +27,7 @@ func serveFrontend(w http.ResponseWriter, r *http.Request, endpoint string) {
 		"builder/feedback.js":       "feedback.js",
 		"builder/feedback.css":      "feedback.css",
 		"builder/file-input.js":     "web/file-input.js",
+		"builder/project-links.js":  "web/project-links.js",
 		"builder/i18n.js":           "web/i18n.js",
 		"builder/scene.js":          "web/scene.js",
 		"builder/encounters.mjs":    "web/encounters.mjs",

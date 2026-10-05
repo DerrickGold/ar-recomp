@@ -598,6 +598,12 @@ For subsequent C/C++ changes, use `cmake --build --preset play`. These commands
 produce a development executable; see [desktop packaging](docs/desktop-packaging.md)
 to turn it into a self-contained `.app` or `.AppImage`.
 
+To package releases on another machine, use `make release-remote <ssh-config-name>`.
+It sends the current source tree, streams build progress, saves a local build
+log, retrieves verified packages into `release/`, and cleans temporary remote
+files. See [remote packaging](docs/desktop-packaging.md#packaging-on-an-ssh-build-host)
+for prerequisites and cache options.
+
 ### Layout and testing
 
 `src/gen/` contains mechanically generated game code, while `src/` holds the

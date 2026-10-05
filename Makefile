@@ -16,6 +16,8 @@
 # Individual platforms: `make release-macos-arm64`, `make release-steam-deck`,
 # etc. Packaging does not run repository lint or tests. Use `make release-checked`
 # or `make release-checked-<platform>` to run `check-release` before packaging.
+# `make release-remote <ssh-config-name>` runs the same packaging on that host
+# and retrieves verified downloads into release/. No host is saved in this tree.
 # Checked targets share one gate per make invocation, including parallel builds.
 # Check dependencies: CONTRIBUTING.md.
 #
@@ -90,6 +92,10 @@ PACKAGING := installer/packaging
 PLATFORMS := macos-arm64 macos-x86_64 linux-x86_64 linux-arm64 windows-x86_64 windows-arm64 steam-deck
 DESKTOP ?= 1
 ROM ?= ar.sfc
+PYTHON ?= python3
+REMOTE_DIR ?= ~/.cache/actraiser-recomp/release-remote
+# Preserve literal arguments when passing Make variables through a shell.
+shell_quote = '$(subst ','"'"',$(1))'
 
 # Regenerable artifacts, grouped. Never lists the ROM, saves/*.srm, recordings,
 # or authored source; only the specific generated sidecars inside saves/.
@@ -97,10 +103,31 @@ CLEAN_BUILD_DIRS := build build-release build-control build-terrain build-asan b
 CLEAN_GENERATED  := src/gen recomp/funcs.h saves/gen_meta.json saves/rts_webs.txt saves/rts_webs.prev.txt
 CLEAN_RELEASE    := release
 
+ifneq ($(filter release-remote,$(MAKECMDGOALS)),)
+ifneq ($(firstword $(MAKECMDGOALS)),release-remote)
+$(error Usage: make release-remote <ssh-config-name> [PLATFORMS="..."])
+endif
+ifneq ($(words $(MAKECMDGOALS)),2)
+$(error Supply exactly one SSH config name: make release-remote <ssh-config-name>)
+endif
+# Dispatch separately so an alias named after another target cannot run it.
+RELEASE_REMOTE_HOST := $(word 2,$(MAKECMDGOALS))
+ifeq ($(RELEASE_REMOTE_HOST),release-remote)
+$(error SSH config name must differ from the release-remote target)
+endif
+.PHONY: release-remote $(RELEASE_REMOTE_HOST)
+release-remote:
+	$(PYTHON) tools/release_remote.py --host $(call shell_quote,$(RELEASE_REMOTE_HOST)) \
+	  --platforms $(call shell_quote,$(PLATFORMS)) --desktop $(if $(filter 0,$(DESKTOP)),0,1) \
+	  --remote-dir $(call shell_quote,$(REMOTE_DIR)) \
+	  $(if $(KEEP_BUILD),--keep-build) $(if $(filter 1,$(REMOTE_DRY_RUN)),--dry-run)
+$(RELEASE_REMOTE_HOST):
+	@:
+else
+
 .PHONY: dev release $(addprefix release-,$(PLATFORMS)) release-checked $(addprefix release-checked-,$(PLATFORMS)) check check-release check-c check-c-release check-c-asan check-go check-shaders check-constants check-appimage check-cross check-localization-roms check-localization-workflow clean clean-all clean-release clean-packaging-mounts
 
 # ROM-free presets use separate trees and never disturb the play/dev presets.
-PYTHON ?= python3
 CHECK_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 GO_MODULES := snesrecomp-go installer installer/desktop-shell
 
@@ -187,6 +214,7 @@ dev: config.ini
 	@echo "Built ./build-release/ActRaiserRecomp — run it with: ./build-release/ActRaiserRecomp $(ROM) --config config.ini"
 
 RELEASE_OPTIONS = -DBUILDER_LEGACY_ARCHIVES=$(if $(filter 0,$(DESKTOP)),ON,OFF) -DBUILDER_KEEP_BUILD=$(if $(KEEP_BUILD),ON,OFF)
+RELEASE_OPTIONS += $(if $(RELEASE_VERSION),$(call shell_quote,-DSNESBUILD_VERSION=$(RELEASE_VERSION)))
 
 release:
 	cmake "-DBUILDER_PLATFORMS=$(PLATFORMS)" $(RELEASE_OPTIONS) -P $(PACKAGING)/release.cmake
@@ -291,3 +319,5 @@ clean-all: clean
 
 clean-release: clean-packaging-mounts
 	rm -rf release $(PACKAGING)/build
+
+endif

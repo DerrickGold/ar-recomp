@@ -577,6 +577,9 @@ if(BUILD_TESTING)
             add_test(NAME actraiser_local_release_gate
                 COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_SOURCE_DIR}/tests/local_release_gate_test.py)
+            add_test(NAME actraiser_remote_release
+                COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_SOURCE_DIR}/tests/remote_release_test.py)
         endif()
         add_test(NAME actraiser_shader_tools
             COMMAND ${Python3_EXECUTABLE}

@@ -201,6 +201,23 @@ code {
 .tab[data-badge=bad] .badge {
   background:var(--bad)
 }
+.project-links {
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-top:20px;
+  font-size:12px
+}
+.project-links a {
+  display:flex;
+  justify-content:space-between;
+  gap:8px
+}
+.project-links p {
+  margin:0;
+  color:var(--muted);
+  font-size:11px
+}
 .sidebar-bottom {
   margin-top:auto;
   padding-top:50px
@@ -1218,6 +1235,12 @@ pre {
     padding-top:16px;
     margin:0;
     flex-wrap:wrap
+  }
+  .project-links {
+    flex-direction:row;
+    flex-wrap:wrap;
+    gap:16px;
+    margin-top:14px
   }
   .sidebar-bottom label {
     margin:0;

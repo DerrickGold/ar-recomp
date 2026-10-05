@@ -377,6 +377,8 @@ See [Language pack authoring](language-pack-format.md) for the v2 format and
 
 ## Builder
 
+- Add sidebar links to check GitHub Releases for updates and visit the project
+  repository, opening in the system browser.
 - Open the desktop Builder faster on repeat launches across Windows, macOS
   and Linux. Unchanged bundled tools no longer need a full check every time;
   the first launch still performs full verification.
@@ -424,6 +426,11 @@ See [Language pack authoring](language-pack-format.md) for the v2 format and
   checks. `make check-release` includes the optimized suite;
   `make release-checked` runs those checks before packaging. Ordinary
   `make release` remains packaging-only. Installer development requires Go 1.25+.
+- Add `make release-remote <ssh-config-name>` to package the current working
+  tree on an SSH build host. It streams build progress, retains local error
+  logs, retrieves verified downloads, reuses remote caches, and cleans up
+  temporary files after failure or handoff. Host configuration stays outside
+  the repository.
 - Expand public regional comparisons, unused-content research, RAM/ROM and
   symbol maps, projectile and native-audio references, and reproducible town
   model comparisons. Archive internal plans, benchmarks, migration reports and
