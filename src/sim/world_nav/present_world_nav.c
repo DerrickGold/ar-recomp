@@ -12,13 +12,20 @@
  * Captured state is the input contract for the present family: no g_ppu, no
  * g_settings, no Settings_Visible*(). State arrives via the `const FrameSlot *`. */
 #include "sim/world_nav/present_world_nav_internal.h"
+#include "actraiser_world_locations.h"
+#include "actraiser_game.h"
+
+static bool HorizonBackdrop(const FrameSlot *slot) {
+  return slot->sim.view == kSimView_SkyPalace || slot->sim.death_heim_completion_world;
+}
 
 /* Presentation choices, not native coordinates or renderer settings. Keep
  * the local tile/relief scale while giving navigation a broader landscape
  * and the Palace backdrop its separately art-directed horizon. */
 float WorldNavigationChartRadius(const FrameSlot *slot) {
   return kSimWorldNavigationGlobeRadiusTiles *
-      (slot->sim.view == kSimView_SkyPalace ? 3.0f : 2.0f);
+      (slot->sim.death_heim_completion_world ? 8.0f
+          : slot->sim.view == kSimView_SkyPalace ? 3.0f : 2.0f);
 }
 
 WorldNavigationArtState g_world_nav_art;
@@ -448,7 +455,8 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
       (detailed || models) && ground->enabled_town_mask && !g_world_nav_art.unavailable
           ? SimTownGroundArt_AnimationPhase(slot->sim.game_frame) : 0;
   const bool uses_sources = detailed || models || g_world_nav_mountains.active;
-  const bool same_sources = !uses_sources || !memcmp(&g_world_nav_art.sources, ground, sizeof(*ground));
+  const bool same_sources =
+      !uses_sources || !memcmp(&g_world_nav_art.sources, ground, sizeof(*ground));
   const bool same_geography = g_world_nav_art.geography == SimWorldMap_GeographySerial();
   const bool same_style =
       g_world_nav_art.cliffs == (g_world_nav_terrain.cliffs.town_mask != 0) &&
@@ -473,7 +481,8 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
     g_world_nav_art.displayed_version = (int)version;
     return true;
   }
-  if (same_style && same_sources && same_geography && same_image && g_world_nav_art.phase == phase) {
+  if (same_style && same_sources && same_geography && same_image &&
+      g_world_nav_art.phase == phase) {
     CaptureWorldNavigationArtVersion(slot, phase);
     return true;
   }
@@ -497,7 +506,8 @@ static bool EnsureWorldNavigationArt(const FrameSlot *slot, float radius_tiles) 
     const Sim3DPerformanceScope animation =
         Sim3DPerformance_Begin(kSim3DPerformance_WorldAnimation);
     uint8_t water_cells[kSimWorldMapBytes];
-    const bool world_ready = snapshot && (same_image || SimWorldMap_WaterAnimationCells(water_cells));
+    const bool world_ready =
+        snapshot && (same_image || SimWorldMap_WaterAnimationCells(water_cells));
     if (!same_image && world_ready)
       for (size_t i = 0; i < sizeof(water_cells); ++i) inputs.cells[i] |= water_cells[i];
     if (trace) stamps[1] = HostClock_Nanoseconds();
@@ -770,6 +780,33 @@ static bool PrepareWorldNavigationProjection(
   if (!slot || !out || viewport.w <= 0 || viewport.h <= 0) return false;
   memset(out, 0, sizeof(*out));
   out->chart_radius_tiles = WorldNavigationChartRadius(slot);
+  if (slot->sim.death_heim_completion_world) {
+    /* Anchor to Death Heim's northern rim so its near terrain stays behind
+     * the low eye. Heading zero is chart north; unlike the Palace, do not
+     * rotate a selected town toward the horizon. */
+    ActRaiserWorldRegion region;
+    if (!ActRaiserWorldLocation_Region(7, &region)) return false;
+    out->clip_frustum = true;
+    out->tile_world = 4.0f / kSimWorldNavigationGlobeRadiusTiles;
+    out->globe_radius_world = out->tile_world * out->chart_radius_tiles;
+    const float landscape = slot->sim.world_navigation_relief
+        ? slot->sim.landscape_height_pct / (float)kPercentScale : 0;
+    out->height_world_per_unit = out->tile_world * landscape;
+    const float x = region.x + 128, y = region.y + 128 - 8 * kSimWorldMapTilePixels;
+    const float ground = WorldNavigationTerrainHeightAt(x, y, NULL) *
+        out->height_world_per_unit;
+    const float altitude = fmaxf(.42f, ground + out->tile_world * 3);
+    out->camera_world[2] = altitude;
+    const float dip = acosf(out->globe_radius_world / (out->globe_radius_world + altitude));
+    const Scene3DCamera camera = {
+      .tilt_x = -(kPi * .5f - dip + .12f), .fov_y = .80f,
+    };
+    Scene3D_BuildViewProjection(&camera, viewport.w, viewport.h, out->matrix);
+    for (int row = 0; row < 4; row++)
+      out->matrix[12 + row] -= out->matrix[8 + row] * altitude;
+    return SimWorldNavigationGlobe_BuildFrameAtRadius(out->chart_radius_tiles,
+        x / kSimWorldMapTilePixels, y / kSimWorldMapTilePixels, 0, &out->globe_frame);
+  }
   if (slot->sim.view == kSimView_SkyPalace)
     return PrepareSkyPalaceProjection(slot, viewport, out);
   /* Navigation's native Palace sprite is top-down. Look radially through
@@ -948,7 +985,21 @@ bool EnsureWorldNavigationResourcesAtRadius(const FrameSlot *slot, float radius_
   return true;
 }
 
+bool PresentWorldNav_PrepareCompletionResources(void) {
+  return PresentWorldNavSky_PrepareCompletion();
+}
+
 static bool EnsureWorldNavigationResources(const FrameSlot *slot) {
+  /* The completion material raycasts the entire ocean and paints its matching
+   * horizon. Baking/drawing the ordinary globe underneath is invisible work;
+   * retain it only for the shader fallback. Clouds have their own atlas/depth. */
+  if (slot->sim.death_heim_completion_world &&
+      CompletionVistaBackend_IsAvailable(&g_render_device)) {
+    const float radius = WorldNavigationChartRadius(slot);
+    EnsureWorldNavigationMountains(slot, radius);
+    EnsureWorldNavigationCliffs(slot, radius);
+    return true;
+  }
   return EnsureWorldNavigationResourcesAtRadius(slot,WorldNavigationChartRadius(slot));
 }
 
@@ -957,7 +1008,8 @@ static bool EnsureWorldNavigationResources(const FrameSlot *slot) {
  * and the Sky Palace backdrop share one mutually exclusive globe instance. */
 static PresentationOutcome DrawWorldNavigationScene(
     const FrameSlot *slot, ArRenderRectI viewport,
-    WorldNavigationProjection *projection) {
+    WorldNavigationProjection *projection, ArRenderPointF completion_player,
+    DeathHeimCompletionArt completion_art) {
   PresentationOutcome outcome = kPresentationOutcome_Complete;
   const Sim3DPerformanceScope projection_performance =
       Sim3DPerformance_Begin(kSim3DPerformance_WorldPrepare);
@@ -967,20 +1019,27 @@ static PresentationOutcome DrawWorldNavigationScene(
   if (!projection_ok) {
     return kPresentationOutcome_CoreFailure;
   }
-  if (slot->sim.view == kSimView_SkyPalace || slot->sim.world_navigation_backdrop) {
+  const bool completion_fx=slot->sim.death_heim_completion_world &&
+      CompletionVistaBackend_IsAvailable(&g_render_device);
+  if (HorizonBackdrop(slot) || slot->sim.world_navigation_backdrop) {
     const Sim3DPerformanceScope backdrop_performance =
         Sim3DPerformance_Begin(kSim3DPerformance_Backdrop);
-    const bool backdrop_ok = slot->sim.view == kSimView_SkyPalace
-        ? PresentWorldNavSky_DrawBackdrop(&g_render_device, viewport,
-                                          slot->sim.world_navigation_backdrop,
-                                          PresentWorldNavSky_Horizon(viewport, projection))
-        : DrawWorldNavigationSpaceBackdrop(viewport);
+    const bool backdrop_ok =
+        completion_fx ? DrawCompletionVista(slot, viewport, projection, kCompletionVistaStage_Sky,
+                            completion_player, completion_art, elapsed_ms) ==
+                            kPresentationOutcome_Complete
+        : HorizonBackdrop(slot)
+            ? PresentWorldNavSky_DrawBackdrop(&g_render_device, viewport,
+                                              slot->sim.death_heim_completion_world ||
+                                                  slot->sim.world_navigation_backdrop,
+                                              PresentWorldNavSky_Horizon(viewport, projection))
+            : DrawWorldNavigationSpaceBackdrop(viewport);
     Sim3DPerformance_End(backdrop_performance);
     if (!backdrop_ok) {
       return kPresentationOutcome_CoreFailure;
     }
   }
-  if (slot->sim.world_navigation_atmosphere) {
+  if (slot->sim.world_navigation_atmosphere && !slot->sim.death_heim_completion_world) {
     const Sim3DPerformanceScope atmosphere_performance =
         Sim3DPerformance_Begin(kSim3DPerformance_WorldAtmosphere);
     const bool atmosphere_ok = DrawWorldNavigationSphereShell(
@@ -990,8 +1049,17 @@ static PresentationOutcome DrawWorldNavigationScene(
       return kPresentationOutcome_CoreFailure;
     }
   }
-  if (!DrawWorldNavigationSurfaceLayers(slot, viewport, projection, elapsed_ms)) {
+  if (!(completion_fx
+          ? Sim3DDepthPass_Begin(&g_render_device, viewport.w, viewport.h, kArRenderFilter_Linear)
+          : DrawWorldNavigationSurfaceLayers(slot, viewport, projection, elapsed_ms))) {
     return kPresentationOutcome_CoreFailure;
+  }
+  if (slot->sim.death_heim_completion_world && !completion_fx &&
+      (slot->sim.death_heim_completion_flags & kDeathHeimCompletion_Waves)) {
+    const Sim3DPerformanceScope waves = Sim3DPerformance_Begin(kSim3DPerformance_WorldOcean);
+    const bool waves_ok = DrawDeathHeimCompletionWaves(viewport, projection, elapsed_ms);
+    Sim3DPerformance_End(waves);
+    if (!waves_ok) return kPresentationOutcome_CoreFailure;
   }
   if (!DrawWorldNavigationActiveRegionHaze(
           slot, viewport, projection)) {
@@ -1022,13 +1090,21 @@ static PresentationOutcome DrawWorldNavigationScene(
   };
   if (!ArRenderTexture_IsValid(composite) ||
       !ArRenderDevice_DrawTextureWithState(&g_render_device, composite, NULL, &destination,
-          slot->sim.view == kSimView_SkyPalace ? &palace_composite : NULL)) {
+          HorizonBackdrop(slot) ? &palace_composite : NULL)) {
     return kPresentationOutcome_CoreFailure;
   }
-  if (slot->sim.view == kSimView_SkyPalace && slot->sim.world_navigation_atmosphere &&
+  if (HorizonBackdrop(slot) && !completion_fx && slot->sim.world_navigation_atmosphere &&
       !PresentWorldNavSky_DrawMist(&g_render_device, viewport,
                                    PresentWorldNavSky_Horizon(viewport, projection)))
     return kPresentationOutcome_CoreFailure;
+  if (completion_fx) {
+    const Sim3DPerformanceScope ocean=Sim3DPerformance_Begin(kSim3DPerformance_WorldOcean);
+    const PresentationOutcome water = DrawCompletionVista(slot, viewport, projection,
+        kCompletionVistaStage_Ocean, completion_player, completion_art, elapsed_ms);
+    Sim3DPerformance_End(ocean);
+    outcome=PresentationOutcome_Combine(outcome,water);
+    if (!PresentationOutcome_IsUsable(water)) return kPresentationOutcome_CoreFailure;
+  }
   if (!DrawWorldNavigationLightTreatment(slot, viewport)) {
     return kPresentationOutcome_CoreFailure;
   }
@@ -1051,9 +1127,53 @@ PresentationOutcome PresentWorldNavigationBackdrop(
       !EnsureWorldNavigationResources(slot))
     return kPresentationOutcome_CoreFailure;
   WorldNavigationProjection projection;
-  const PresentationOutcome outcome = DrawWorldNavigationScene(slot, viewport, &projection);
+  const PresentationOutcome outcome = DrawWorldNavigationScene(
+      slot, viewport, &projection, (ArRenderPointF){.5f, .72f}, (DeathHeimCompletionArt){0});
   Sim3DPerformance_EndPresentation();
   return outcome;
+}
+
+PresentationOutcome PresentDeathHeimCompletionBackdrop(
+    const FrameSlot *slot, ArRenderRectI viewport, ArRenderPointF player,
+    DeathHeimCompletionArt art) {
+  if (!slot || !slot->sim.death_heim_completion_world ||
+      slot->diorama_map_group != kActRaiserMapGroup_DeathHeim ||
+      slot->diorama_map_number != kActRaiserDeathHeimMap_Hub ||
+      slot->diorama_layer_section != kDioramaLayerSection_DeathHeimCompletion ||
+      !slot->sim.world_navigation_scene.valid || viewport.x || viewport.y ||
+      viewport.w <= 0 || viewport.h <= 0 || !EnsureWorldNavigationResources(slot))
+    return kPresentationOutcome_CoreFailure;
+  WorldNavigationProjection projection;
+  const PresentationOutcome outcome =
+      DrawWorldNavigationScene(slot, viewport, &projection, player, art);
+  const PresentationOutcome reflection = PresentationOutcome_IsUsable(outcome) &&
+      CompletionVistaBackend_IsAvailable(&g_render_device)
+      ? DrawCompletionVista(slot, viewport, &projection, kCompletionVistaStage_Reflection,
+                            player, art, HostClock_Milliseconds())
+      : kPresentationOutcome_Complete;
+  Sim3DPerformance_EndPresentation();
+  return PresentationOutcome_Combine(outcome,reflection);
+}
+
+PresentationOutcome PresentDeathHeimCompletionForeground(const FrameSlot *slot,
+    ArRenderRectI viewport, ArRenderPointF player, DeathHeimCompletionArt art) {
+  if (!slot || !slot->sim.death_heim_completion_world ||
+      slot->diorama_map_group!=kActRaiserMapGroup_DeathHeim ||
+      slot->diorama_map_number!=kActRaiserDeathHeimMap_Hub ||
+      slot->diorama_layer_section!=kDioramaLayerSection_DeathHeimCompletion ||
+      !slot->sim.world_navigation_scene.valid ||
+      viewport.w<=0 || viewport.h<=0) return kPresentationOutcome_CoreFailure;
+  WorldNavigationProjection projection;
+  if (!PrepareWorldNavigationProjection(slot, (ArRenderRectI){0, 0, viewport.w, viewport.h},
+                                        &projection))
+    return kPresentationOutcome_CoreFailure;
+  const uint64_t time=HostClock_Milliseconds();
+  const PresentationOutcome rim = DrawCompletionVista(slot, viewport, &projection,
+      kCompletionVistaStage_Rim, player, art, time);
+  if (!PresentationOutcome_IsUsable(rim)) return rim;
+  return PresentationOutcome_Combine(rim,
+      DrawCompletionVista(slot, viewport, &projection, kCompletionVistaStage_Shafts,
+                          player, art, time));
 }
 
 PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
@@ -1115,7 +1235,8 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
     }
   }
   WorldNavigationProjection projection;
-  const PresentationOutcome outcome = DrawWorldNavigationScene(slot, viewport, &projection);
+  const PresentationOutcome outcome = DrawWorldNavigationScene(
+      slot, viewport, &projection, (ArRenderPointF){.5f, .72f}, (DeathHeimCompletionArt){0});
   if (!PresentationOutcome_IsUsable(outcome)) {
     ArRenderOutputFrame_Abort(&output_frame);
     return outcome;
@@ -1155,6 +1276,7 @@ static void ResetWorldNavigationWorkers(void) {
 /* World navigation resource reset. All resource releases
  * stay private to this view; no cache survives a renderer replacement. */
 void PresentWorldNav_ResetResources(void) {
+  ResetCompletionVista();
   ResetWorldNavigationWorkers();
   ResetWorldNavigationGlobeSurfaces();
   ResetWorldNavigationModels();

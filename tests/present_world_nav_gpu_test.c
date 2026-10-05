@@ -43,6 +43,10 @@
 #include "sim/sim3d/present_sim3d_terrain.h"
 #include "sim/sim3d/present_sim3d_clouds.h"
 #include "app/session_fatal.h"
+#include "actraiser_game.h"
+#include "diorama/diorama_layer_manifest.h"
+#include "sim/world_nav/completion_vista_backend.h"
+#include "sim/world_nav/sim_completion_cherubs.h"
 
 enum { kWidth = 800, kHeight = 600, kRomBytes = 0x100000, kWramBytes = 0x20000 };
 #define CHECK(test)                                                                                \
@@ -93,6 +97,8 @@ bool ArLocalizedTextPresenter_DrawWithBrightness(ArRenderDevice *device,
  * motion tests advance just the weather clock while scene/game data stay
  * frozen. Profiling time does not advance with those artificial jumps. */
 static uint64_t weather_time_ms;
+static bool completion_foreground;
+static ArRenderPointF completion_player = {.5f, .72f};
 uint64_t HostClock_Milliseconds(void) { return weather_time_ms; }
 /* Profiling uses real wall time; visual weather still uses the frozen clock. */
 uint64_t HostClock_Nanoseconds(void) { return SDL_GetTicksNS(); }
@@ -138,17 +144,23 @@ static void SaveImage(const SDL_Surface *surface, const char *name) {
   printf("capture %s\n", path);
 }
 
-static SDL_Surface *Render(SDL_Renderer *renderer, const FrameSlot *slot, const char *name) {
-  if (slot->sim.view == kSimView_SkyPalace) {
+static SDL_Surface *RenderWithCompletionArt(SDL_Renderer *renderer, const FrameSlot *slot,
+                                           const char *name, DeathHeimCompletionArt art) {
+  if (slot->sim.view == kSimView_SkyPalace || slot->sim.death_heim_completion_world) {
     const ArRenderColorF black = {0, 0, 0, 1};
     ArRenderOutputFrame output;
     CHECK(ArRenderOutputFrame_BeginAspectFit(&g_render_device, slot->ignore_aspect_ratio,
                                              slot->visible_width * 7, slot->snes_height * 6, black,
                                              black, &output));
-    CHECK(PresentWorldNavigationBackdrop(
-              slot, (ArRenderRectI){0, 0, output.viewport.w, output.viewport.h}) ==
-          kPresentationOutcome_Complete);
+    const ArRenderRectI viewport = {0, 0, output.viewport.w, output.viewport.h};
+    CHECK((slot->sim.death_heim_completion_world
+        ? PresentDeathHeimCompletionBackdrop(slot, viewport, completion_player, art)
+        : PresentWorldNavigationBackdrop(slot, viewport)) == kPresentationOutcome_Complete);
+    const ArRenderRectI output_viewport=output.viewport;
     CHECK(ArRenderOutputFrame_Finish(&output));
+    if (slot->sim.death_heim_completion_world && completion_foreground)
+      CHECK(PresentDeathHeimCompletionForeground(slot,output_viewport,
+          completion_player,art)==kPresentationOutcome_Complete);
   } else {
     CHECK(PresentWorldNavigation3D(slot) == kPresentationOutcome_Complete);
   }
@@ -165,6 +177,10 @@ static SDL_Surface *Render(SDL_Renderer *renderer, const FrameSlot *slot, const 
   CHECK(SDL_RenderPresent(renderer));
   SaveImage(surface, name);
   return surface;
+}
+
+static SDL_Surface *Render(SDL_Renderer *renderer, const FrameSlot *slot, const char *name) {
+  return RenderWithCompletionArt(renderer, slot, name, (DeathHeimCompletionArt){0});
 }
 
 static int Differences(const SDL_Surface *a, const SDL_Surface *b) {
@@ -619,6 +635,296 @@ static void InitSlot(FrameSlot *slot) {
       .zoom_current = kSimWorldNavigationZoomMiddle,
       .zoom_target = kSimWorldNavigationZoomMiddle};
   BuildScene(slot);
+}
+
+static void TestDeathHeimCompletion(SDL_Renderer *renderer, const FrameSlot *slot) {
+  CHECK(CompletionVistaBackend_IsAvailable(&g_render_device));
+  CHECK(PresentWorldNav_PrepareCompletionResources());
+  CHECK(PresentWorldNav_PrepareCompletionResources());
+  FrameSlot *probe = malloc(sizeof(*probe));
+  CHECK(probe);
+  *probe = *slot;
+  probe->ignore_aspect_ratio = true;
+  probe->sim.view = kSimView_None;
+  probe->sim.death_heim_completion_world = true;
+  probe->sim.death_heim_completion_flags =
+      kDeathHeimCompletion_All & ~kDeathHeimCompletion_Feathers;
+  probe->diorama_map_group = kActRaiserMapGroup_DeathHeim;
+  probe->diorama_map_number = kActRaiserDeathHeimMap_Hub;
+  probe->diorama_layer_section = kDioramaLayerSection_DeathHeimCompletion;
+  probe->sim.world_navigation_clouds = true;
+  probe->sim.sky_palace_volumetric_clouds = true;
+  probe->sim.cloud_drift_pct = 0;
+  CHECK(SimWorldNavigationScene_BuildSkyPalace(
+      &probe->sim.world_navigation_scene, 768, 128, 7, SimWorldMap_Serial()));
+  const int sizes[][2] = {{640,480}, {720,450}, {960,540}};
+  for (int gpu = 0; gpu < 2; gpu++) {
+    CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_GRID", gpu ? "1" : "0", 1));
+    PresentWorldNav_ResetResources();
+    CHECK(PresentWorldNav_PrepareCompletionResources());
+    for (unsigned i = 0; i < SDL_arraysize(sizes); i++) {
+      ResizeTestOutput(renderer, sizes[i][0], sizes[i][1]);
+      weather_time_ms = 0;
+      probe->sim.death_heim_completion_flags &= ~kDeathHeimCompletion_Waves;
+      SDL_Surface *quiet = Render(renderer, probe, NULL);
+      probe->sim.death_heim_completion_flags |= kDeathHeimCompletion_Waves;
+      char name[96];
+      snprintf(name, sizeof(name), "death-heim-completion-%dx%d-%s", quiet->w, quiet->h,
+          gpu ? "gpu" : "compatibility");
+      SDL_Surface *waves = Render(renderer, probe, name);
+      CHECK(Differences(quiet, waves) > 100);
+      probe->sim.death_heim_completion_flags &= ~kDeathHeimCompletion_PixelWater;
+      SDL_Surface *smooth_water = Render(renderer, probe, NULL);
+      CHECK(Differences(waves, smooth_water) > 100);
+      for (int y = 0; y < waves->h / 2; y++)
+        for (int x = 0; x < waves->w; x++)
+          CHECK(Pixel(waves,x,y) == Pixel(smooth_water,x,y));
+      probe->sim.death_heim_completion_flags |= kDeathHeimCompletion_PixelWater;
+      SDL_Surface *pixel_water_restored = Render(renderer, probe, NULL);
+      CHECK(Differences(waves, pixel_water_restored) == 0);
+      SDL_DestroySurface(pixel_water_restored);
+      SDL_DestroySurface(smooth_water);
+      for (int y = 0; y < waves->h / 4; y++)
+        for (int x = 0; x < waves->w; x++) CHECK(Pixel(quiet,x,y) == Pixel(waves,x,y));
+      weather_time_ms = 3000;
+      SDL_Surface *moving = Render(renderer, probe, NULL);
+      CHECK(Differences(waves, moving) > 100);
+      for (int y = 0; y < waves->h / 4; y++)
+        for (int x = 0; x < waves->w; x++) CHECK(Pixel(waves,x,y) == Pixel(moving,x,y));
+      for (int x = 0; x < waves->w; x++) {
+        const uint32_t water = Pixel(waves, x, waves->h - 1);
+        CHECK((water & 0xffffff)!=0);
+        if (x<waves->w/4 || x>waves->w*3/4) {
+          CHECK(((water>>8)&255)>((water>>16)&255)+15);
+          CHECK((water&255)>((water>>16)&255)+15);
+        }
+      }
+      probe->sim.world_navigation_brightness = 0;
+      SDL_Surface *dark = Render(renderer, probe, NULL);
+      CHECK(ColorCount(dark, 0xff000000) == dark->w * dark->h);
+      probe->sim.world_navigation_brightness = 15;
+      weather_time_ms = 0;
+      SDL_Surface *restored = Render(renderer, probe, NULL);
+      CHECK(Differences(waves, restored) == 0);
+      completion_foreground=true;
+      SDL_Surface *lit=Render(renderer,probe,NULL);
+      CHECK(Differences(waves,lit)>100);
+      /* The beam must reach its player anchor with visible strength, rather
+       * than changing only distant sky pixels. */
+      const int player_x=lit->w/2, player_y=(int)(lit->h*.72f);
+      CHECK(((Pixel(lit,player_x,player_y)>>16)&255)>
+            ((Pixel(waves,player_x,player_y)>>16)&255)+30);
+      probe->sim.world_navigation_brightness=0;
+      SDL_Surface *lit_dark=Render(renderer,probe,NULL);
+      CHECK(ColorCount(lit_dark,0xff000000)==lit_dark->w*lit_dark->h);
+      probe->sim.world_navigation_brightness=15;
+      completion_foreground=false;
+      completion_player=(ArRenderPointF){.3f,.62f};
+      SDL_Surface *reflection_moved=Render(renderer,probe,NULL);
+      CHECK(Differences(waves,reflection_moved)>100);
+      for(int y=0;y<waves->h/4;y++)
+        for(int x=0;x<waves->w;x++) CHECK(Pixel(waves,x,y)==Pixel(reflection_moved,x,y));
+      completion_player=(ArRenderPointF){-.7f,.45f};
+      SDL_Surface *offscreen_player=Render(renderer,probe,NULL);
+      CHECK(ColorCount(offscreen_player,0xff000000)<offscreen_player->w*offscreen_player->h/10);
+      completion_player=(ArRenderPointF){.5f,.72f};
+      CHECK(!Test_SDLSetEnv("AR_DEATH_HEIM_COMPLETION_FX","0",1));
+      SDL_Surface *fallback=Render(renderer,probe,NULL);
+      CHECK(Differences(waves,fallback)>1000);
+      /* Presentation consumes captured controls. A changed process setting
+       * cannot retroactively alter an already published frame. */
+      CHECK(!Test_SDLSetEnv("AR_DEATH_HEIM_COMPLETION_WAVES", "0", 1));
+      SDL_Surface *retained_fallback = Render(renderer, probe, NULL);
+      CHECK(Differences(fallback, retained_fallback) == 0);
+      SDL_DestroySurface(retained_fallback);
+      CHECK(!Test_SDLUnsetEnv("AR_DEATH_HEIM_COMPLETION_WAVES"));
+      probe->sim.death_heim_completion_flags &= ~kDeathHeimCompletion_Waves;
+      SDL_Surface *quiet_fallback=Render(renderer,probe,NULL);
+      CHECK(Differences(fallback,quiet_fallback)>100);
+      probe->sim.death_heim_completion_flags |= kDeathHeimCompletion_Waves;
+      SDL_Surface *fallback_restored=Render(renderer,probe,NULL);
+      CHECK(Differences(fallback,fallback_restored)==0);
+      SDL_DestroySurface(fallback_restored);
+      SDL_DestroySurface(quiet_fallback);
+      CHECK(!Test_SDLUnsetEnv("AR_DEATH_HEIM_COMPLETION_FX"));
+      SDL_Surface *shader_restored=Render(renderer,probe,NULL);
+      CHECK(Differences(waves,shader_restored)==0);
+      SDL_DestroySurface(shader_restored);
+      SDL_DestroySurface(fallback);
+      SDL_DestroySurface(lit_dark);
+      SDL_DestroySurface(lit);
+      SDL_DestroySurface(reflection_moved);
+      SDL_DestroySurface(offscreen_player);
+      SDL_DestroySurface(restored);
+      SDL_DestroySurface(dark);
+      SDL_DestroySurface(moving);
+      SDL_DestroySurface(waves);
+      SDL_DestroySurface(quiet);
+    }
+  }
+  /* Broad sun twinkles remain water-only with waves and shafts disabled.
+   * Check both ocean sides over several births, held-frame determinism and
+   * the native black fade independently of the water material's animation. */
+  const unsigned saved_flags = probe->sim.death_heim_completion_flags;
+  const unsigned glint_clocks[] = {0,137,769,1901,4513,9000};
+  unsigned left_glints = 0, right_glints = 0, near_glints = 0;
+  for (unsigned i = 0; i < SDL_arraysize(glint_clocks); i++) {
+    weather_time_ms = glint_clocks[i];
+    probe->sim.death_heim_completion_flags = 0;
+    SDL_Surface *without_glints = Render(renderer,probe,NULL);
+    probe->sim.death_heim_completion_flags = kDeathHeimCompletion_SunGlints;
+    SDL_Surface *sun_glints =
+        Render(renderer, probe, i == 3 ? "death-heim-completion-sun-glints" : NULL);
+    SDL_Surface *held_glints = Render(renderer,probe,NULL);
+    CHECK(Differences(sun_glints,held_glints)==0);
+    for (int y = 0; y < sun_glints->h; y++) for (int x = 0; x < sun_glints->w; x++) {
+      const bool changed = Pixel(sun_glints,x,y)!=Pixel(without_glints,x,y);
+      if (y < sun_glints->h/2) CHECK(!changed);
+      if (changed && x < sun_glints->w/4) left_glints++;
+      if (changed && x > sun_glints->w*3/4) right_glints++;
+      if (changed && y > sun_glints->h*3/4) near_glints++;
+    }
+    probe->sim.world_navigation_brightness = 0;
+    SDL_Surface *black_glints = Render(renderer,probe,NULL);
+    CHECK(ColorCount(black_glints,0xff000000)==black_glints->w*black_glints->h);
+    probe->sim.world_navigation_brightness = 15;
+    probe->sim.death_heim_completion_flags = 0;
+    SDL_Surface *glints_disabled = Render(renderer,probe,NULL);
+    CHECK(Differences(without_glints,glints_disabled)==0);
+    SDL_DestroySurface(glints_disabled);
+    SDL_DestroySurface(black_glints);
+    SDL_DestroySurface(held_glints);
+    SDL_DestroySurface(sun_glints);
+    SDL_DestroySurface(without_glints);
+  }
+  CHECK(left_glints>20 && right_glints>20 && near_glints>100);
+  probe->sim.death_heim_completion_flags = saved_flags;
+  /* Animated ROM silhouettes are sky artwork, not live OAM. Exercise their
+   * upload, pose clock, fade and cold recreation independently of the
+   * frozen-sky checks above, which intentionally have no cherub artwork. */
+  weather_time_ms = 0;
+  SDL_Surface *without_cherubs = Render(renderer, probe, NULL);
+  uint8_t *cherub_rom = calloc(0x6c000, 1);
+  CHECK(cherub_rom);
+  const unsigned poses[] = {0xA627,0xA63C,0xA651};
+  const uint8_t parts[4][5] = {
+      {0,0,0,0,0}, {0,8,0,0,0}, {0,0,8,0,0}, {0,8,8,0,0}};
+  for (unsigned frame = 0; frame < 3; frame++) {
+    cherub_rom[poses[frame]] = 4;
+    memcpy(cherub_rom + poses[frame] + 1, parts, sizeof(parts));
+    for (unsigned part = 0; part < 4; part++)
+      cherub_rom[poses[frame] + 4 + part * 5] = frame;
+    for (unsigned row = 0; row < 8; row++)
+      cherub_rom[0x68000 + frame * 32 + row * 2] = frame ? (frame == 1 ? 0xaa : 0x55) : 0xff;
+  }
+  CHECK(SimCompletionCherubs_Init(cherub_rom, 0x6c000));
+  SDL_Surface *cherubs = Render(renderer, probe, NULL);
+  CHECK(Differences(without_cherubs, cherubs) > 100);
+  SDL_Surface *held_cherubs = Render(renderer, probe, NULL);
+  CHECK(Differences(cherubs, held_cherubs) == 0);
+  weather_time_ms = 250;
+  SDL_Surface *fluttering_cherubs = Render(renderer, probe, NULL);
+  unsigned sky_changes = 0;
+  for (int y = 0; y < cherubs->h / 4; y++)
+    for (int x = 0; x < cherubs->w; x++)
+      sky_changes += Pixel(cherubs,x,y) != Pixel(fluttering_cherubs,x,y);
+  CHECK(sky_changes > 100);
+  probe->sim.world_navigation_brightness = 0;
+  completion_foreground = true;
+  SDL_Surface *dark_cherubs = Render(renderer, probe, NULL);
+  CHECK(ColorCount(dark_cherubs, 0xff000000) == dark_cherubs->w * dark_cherubs->h);
+  completion_foreground = false;
+  probe->sim.world_navigation_brightness = 15;
+  weather_time_ms = 0;
+  PresentWorldNav_ResetResources();
+  UploadWorldNavigationComposition(probe);
+  SDL_Surface *cold_cherubs = Render(renderer, probe, NULL);
+  CHECK(Differences(cherubs, cold_cherubs) == 0);
+  CHECK(!SimCompletionCherubs_Init(NULL, 0));
+  SDL_Surface *retired_cherubs = Render(renderer, probe, NULL);
+  CHECK(Differences(without_cherubs, retired_cherubs) == 0);
+  SDL_DestroySurface(retired_cherubs);
+  SDL_DestroySurface(cold_cherubs);
+  SDL_DestroySurface(dark_cherubs);
+  SDL_DestroySurface(fluttering_cherubs);
+  SDL_DestroySurface(held_cherubs);
+  SDL_DestroySurface(cherubs);
+  SDL_DestroySurface(without_cherubs);
+  free(cherub_rom);
+  /* Presentation-only feathers obey their switch, held clock and native fade. */
+  completion_foreground=true;
+  weather_time_ms=0;
+  SDL_Surface *plain=Render(renderer,probe,NULL);
+  probe->sim.death_heim_completion_flags |= kDeathHeimCompletion_Feathers;
+  SDL_Surface *feathers=Render(renderer,probe,NULL);
+  CHECK(Differences(plain,feathers)>20);
+  SDL_Surface *held_feathers=Render(renderer,probe,NULL);
+  CHECK(Differences(feathers,held_feathers)==0);
+  probe->sim.world_navigation_brightness=0;
+  SDL_Surface *black_feathers=Render(renderer,probe,NULL);
+  CHECK(ColorCount(black_feathers,0xff000000)==black_feathers->w*black_feathers->h);
+  probe->sim.world_navigation_brightness=15;
+  probe->sim.death_heim_completion_flags &= ~(kDeathHeimCompletion_Feathers |
+      kDeathHeimCompletion_Platform | kDeathHeimCompletion_Rim);
+  SDL_Surface *without_native=Render(renderer,probe,NULL);
+  uint32_t *native_pixels=calloc((size_t)without_native->w*without_native->h,sizeof(uint32_t));
+  CHECK(native_pixels);
+  for(int y=without_native->h*2/3;y<without_native->h*4/5;y++)
+    for(int x=without_native->w*9/20;x<without_native->w*11/20;x++)
+      native_pixels[y*without_native->w+x]=0xffbba244;
+  ArRenderTexture native_art;
+  const ArRenderTextureDesc native_desc = {without_native->w,
+                                           without_native->h,
+                                           kArRenderPixelFormat_Argb8888,
+                                           kArRenderTextureUsage_Static,
+                                           kArRenderFilter_Nearest,
+                                           kArRenderBlendMode_Alpha};
+  CHECK(ArRenderDevice_CreateTexture(&g_render_device,&native_desc,&native_art));
+  CHECK(ArRenderDevice_UpdateTexture(&g_render_device, native_art, NULL, native_pixels,
+                                     without_native->w * 4));
+  const DeathHeimCompletionArt art = {native_art, {.5f, .82f}};
+  probe->sim.death_heim_completion_flags |= kDeathHeimCompletion_Platform;
+  SDL_Surface *reflected = RenderWithCompletionArt(renderer, probe, NULL, art);
+  unsigned reflected_pixels=0;
+  for(int y=reflected->h*82/100;y<reflected->h;y++) for(int x=0;x<reflected->w;x++)
+    reflected_pixels += Pixel(reflected,x,y)!=Pixel(without_native,x,y);
+  CHECK(reflected_pixels>100);
+  probe->sim.death_heim_completion_flags &= ~kDeathHeimCompletion_Platform;
+  probe->sim.death_heim_completion_flags |= kDeathHeimCompletion_Rim;
+  SDL_Surface *rim = RenderWithCompletionArt(renderer, probe, NULL, art);
+  CHECK(Differences(without_native,rim)>100);
+  for(int y=0;y<rim->h;y++) for(int x=0;x<rim->w;x++)
+    if(!native_pixels[y*rim->w+x]) CHECK(Pixel(rim,x,y)==Pixel(without_native,x,y));
+  probe->sim.world_navigation_brightness=0;
+  SDL_Surface *black_rim = RenderWithCompletionArt(renderer, probe, NULL, art);
+  CHECK(ColorCount(black_rim,0xff000000)==black_rim->w*black_rim->h);
+  probe->sim.world_navigation_brightness=15;
+  SDL_Surface *retired_native=Render(renderer,probe,NULL);
+  CHECK(Differences(without_native,retired_native)==0);
+  /* An empty draw must neither retain the old borrowed artwork nor prevent
+   * a subsequent draw from using it again. No setter/reset is needed. */
+  SDL_Surface *restored_rim = RenderWithCompletionArt(renderer, probe, NULL, art);
+  CHECK(Differences(rim, restored_rim) == 0);
+  SDL_DestroySurface(restored_rim);
+  ArRenderDevice_DestroyTexture(&g_render_device, native_art);
+  free(native_pixels);
+  SDL_DestroySurface(retired_native);
+  SDL_DestroySurface(black_rim);
+  SDL_DestroySurface(rim);
+  SDL_DestroySurface(reflected);
+  SDL_DestroySurface(without_native);
+  SDL_DestroySurface(black_feathers);
+  SDL_DestroySurface(held_feathers);
+  SDL_DestroySurface(feathers);
+  SDL_DestroySurface(plain);
+  completion_foreground=false;
+  CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_GRID", "0", 1));
+  PresentWorldNav_ResetResources();
+  ResizeTestOutput(renderer, kWidth, kHeight);
+  UploadWorldNavigationComposition(slot);
+  free(probe);
+  puts("Death Heim completion: horizon, ocean coverage, animated waves, frozen sky and master fade "
+       "PASS");
 }
 
 static void TestSelectedTownFocus(SDL_Renderer *renderer, const FrameSlot *slot) {
@@ -2877,7 +3183,8 @@ static SDL_Surface *RenderVoxelShadowProbeOnce(SDL_Renderer *renderer,
     bool town_mask, const char *name) {
   CHECK(ArRenderDevice_Clear(&g_render_device, (ArRenderColorF){1, 1, 1, 1}));
   if (town_mask)
-    SimBackgroundVoxelRenderer_DrawTownShadowMask(&g_render_device, params, params, light_x, light_y);
+    SimBackgroundVoxelRenderer_DrawTownShadowMask(&g_render_device, params, params, light_x,
+                                                  light_y);
   else
     SimBackgroundVoxelRenderer_DrawShadowMask(&g_render_device, params, light_x, light_y);
   SDL_Surface *readback = SDL_RenderReadPixels(renderer, NULL);
@@ -2964,19 +3271,23 @@ static void RenderVoxelShadowPreview(SDL_Renderer *renderer,
   params.viewport = (ArRenderRectI){0, 0, kWidth, kHeight};
   params.source = rocks ? (ArRenderRectI){24, 48, 112, 48} : (ArRenderRectI){48, 48, 48, 48};
   params.detail = kSimBackgroundVoxelDetail_Ultra;
-  params.light_elevation_deg = (uint8_t)lroundf(atan2f(1, hypotf(light_x, light_y)) * 180 / 3.14159265f);
-  params.light_azimuth_deg = (uint16_t)((int)lroundf(atan2f(light_y, light_x) * 180 / 3.14159265f) + 360) % 360;
+  params.light_elevation_deg =
+      (uint8_t)lroundf(atan2f(1, hypotf(light_x, light_y)) * 180 / 3.14159265f);
+  params.light_azimuth_deg =
+      (uint16_t)((int)lroundf(atan2f(light_y, light_x) * 180 / 3.14159265f) + 360) % 360;
   ArRenderTexture mask;
   const ArRenderTextureDesc desc = {.width = kWidth, .height = kHeight,
       .format = kArRenderPixelFormat_Argb8888, .usage = kArRenderTextureUsage_Target,
       .filter = kArRenderFilter_Linear, .blend = kArRenderBlendMode_Alpha};
   CHECK(ArRenderDevice_CreateTexture(&g_render_device, &desc, &mask));
   ArRenderTargetState previous;
-  CHECK(ArRenderDevice_BeginTarget(&g_render_device, mask, &previous) == kArRenderTargetBegin_Ready);
+  CHECK(ArRenderDevice_BeginTarget(&g_render_device, mask, &previous) ==
+        kArRenderTargetBegin_Ready);
   CHECK(ArRenderDevice_Clear(&g_render_device, (ArRenderColorF){0, 0, 0, 0}));
   SimBackgroundVoxelRenderer_DrawShadowMask(&g_render_device, &params, light_x, light_y);
   CHECK(ArRenderDevice_EndTarget(&g_render_device, &previous));
-  CHECK(ArRenderDevice_Clear(&g_render_device, (ArRenderColorF){112.f/255, 128.f/255, 32.f/255, 1}));
+  CHECK(ArRenderDevice_Clear(&g_render_device,
+                             (ArRenderColorF){112.f / 255, 128.f / 255, 32.f / 255, 1}));
   const ArRenderDrawState tint = {.flags = kArRenderDrawState_Tint,
       .tint = {1, 1, 1, .35f}};
   CHECK(ArRenderDevice_DrawTextureWithState(&g_render_device, mask, NULL, NULL, &tint));
@@ -3064,7 +3375,8 @@ static void TestVoxelShadows(SDL_Renderer *renderer) {
   RenderVoxelShadowPreview(renderer, params, true, .8f, -.4f, "rocks-without-shadows");
   BuildVoxelShadowScene(kVoxelShadowScene_Tree, false);
   params.serial = SimBackgroundVoxels_Serial();
-  SDL_Surface *overhead = RenderVoxelShadowProbe(renderer, &params, 0, 0, false, "tree-overhead-mask");
+  SDL_Surface *overhead =
+      RenderVoxelShadowProbe(renderer, &params, 0, 0, false, "tree-overhead-mask");
   int area = ColorCount(overhead, 0xff000000);
   CHECK(area > 65 && area < 145);
   CHECK(Pixel(overhead, 104, 104) == 0xff000000);
@@ -3181,7 +3493,7 @@ static void TestVoxelShadows(SDL_Renderer *renderer) {
 }
 
 static void TestSynthetic(SDL_Renderer *renderer, bool captured_motion_only,
-    bool ground_atlas_only, bool town_lod_only) {
+    bool ground_atlas_only, bool town_lod_only, bool completion_only) {
   /* Legacy projected-geometry/cache oracles intentionally use compatibility.
    * TestGpuGridRevisions below explicitly clears this to verify the default. */
   const char *incoming_grid = SDL_getenv("AR_SIM3D_WORLD_GPU_GRID");
@@ -3216,6 +3528,10 @@ static void TestSynthetic(SDL_Renderer *renderer, bool captured_motion_only,
   FrameSlot *slot = malloc(sizeof(*slot));
   CHECK(slot);
   InitSlot(slot);
+  if (completion_only) {
+    TestDeathHeimCompletion(renderer, slot);
+    goto cleanup;
+  }
   if (town_lod_only) {
     /* This fixture checks exact CPU projected-cache reuse counters. */
     CHECK(!Test_SDLSetEnv("AR_SIM3D_WORLD_GPU_MODELS", "0", 1));
@@ -4954,18 +5270,23 @@ int main(int argc, char **argv) {
   bool shadow_cache_only = argc == 3 && !strcmp(argv[1], "--shadow-cache");
   bool captured_motion_only = argc == 3 && !strcmp(argv[1], "--captured-motion");
   bool ground_atlas_only = argc == 3 && !strcmp(argv[1], "--ground-atlas");
-  if (!town_lod_only && !resize_only && !voxel_shadows_only && !shadow_cache_only && !captured_motion_only && !ground_atlas_only &&
-      argc != 1 && (argc < 4 || argc > 10)) {
-    fprintf(stderr,
-            "usage: %s [--resize-output|--town-lod] | [--voxel-shadows|--shadow-cache|--captured-motion|--ground-atlas "
-            "existing-output-directory] | "
-            "[ROM WRAM existing-output-directory [--weather-sequence] [--town-matrix] "
-            "[--sim-globe-prototype] | --sim-town SIM-snapshot-prefix [--sim-height-sweep | "
-            "--sim-landscape-height 0..150] [--sim-radius-scale 1..4]]\n",
-            argv[0]);
+  bool completion_only = argc == 3 && !strcmp(argv[1], "--death-heim-completion");
+  if (!town_lod_only && !resize_only && !voxel_shadows_only && !shadow_cache_only &&
+      !captured_motion_only && !ground_atlas_only && !completion_only && argc != 1 &&
+      (argc < 4 || argc > 10)) {
+    fprintf(
+        stderr,
+        "usage: %s [--resize-output|--town-lod] | "
+        "[--voxel-shadows|--shadow-cache|--captured-motion|--ground-atlas|--death-heim-completion "
+        "existing-output-directory] | "
+        "[ROM WRAM existing-output-directory [--weather-sequence] [--town-matrix] "
+        "[--sim-globe-prototype] | --sim-town SIM-snapshot-prefix [--sim-height-sweep | "
+        "--sim-landscape-height 0..150] [--sim-radius-scale 1..4]]\n",
+        argv[0]);
     return 1;
   }
-  if (voxel_shadows_only || shadow_cache_only || captured_motion_only || ground_atlas_only)
+  if (voxel_shadows_only || shadow_cache_only || captured_motion_only || ground_atlas_only ||
+      completion_only)
     output_directory = argv[2];
   else if (argc >= 4) output_directory = argv[3];
   bool radius_requested = false;
@@ -5069,9 +5390,11 @@ int main(int argc, char **argv) {
     for (unsigned i = 0; i < SDL_arraysize(sizes); ++i)
       ResizeTestOutput(renderer, sizes[i][0], sizes[i][1]);
   } else if (!sim_town_snapshot && !voxel_shadows_only && !shadow_cache_only)
-    TestSynthetic(renderer, captured_motion_only, ground_atlas_only, town_lod_only);
+    TestSynthetic(renderer, captured_motion_only, ground_atlas_only, town_lod_only,
+                  completion_only);
   if (shadow_cache_only) TestShadowHullCameraChanges(renderer);
-  else if (!town_lod_only && !resize_only && !sim_town_snapshot && !captured_motion_only && !ground_atlas_only)
+  else if (!town_lod_only && !resize_only && !sim_town_snapshot && !captured_motion_only &&
+           !ground_atlas_only && !completion_only)
     TestVoxelShadows(renderer);
   if (argc >= 4) TestCaptured(renderer, argv[1], argv[2]);
   if (ordered_output)

@@ -7,6 +7,7 @@
 #include "sim/world_nav/present_world_nav_model_mesh.h"
 #include "sim/world_nav/present_world_nav_test.h"
 #include "actraiser/actraiser_localization_world_navigation.h"
+#include "actraiser_game.h"
 #include "render/render_device.h"
 #include "render/localized_text_presenter.h"
 #include "app/settings.h"
@@ -72,6 +73,7 @@ typedef struct FakeBackend {
   bool require_frustum_clipped;
   int sky_backdrop_draws;
   ArRenderVertex2D sky_backdrop_vertices[10];
+  float sky_horizon_min, sky_horizon_max;
   bool track_palace_focus;
   int palace_focus_vertices;
   ArRenderPointF palace_focus_uv, palace_focus_position;
@@ -94,6 +96,8 @@ static uint64_t depth_world_mountain_hash;
 static bool depth_begin_failure;
 static int depth_fail_ocean_batch;
 static int depth_ocean_batches, depth_ocean_quads;
+static uint64_t ocean_hash, weather_time_ms;
+static bool hash_completion_ocean;
 static int depth_volume_faces, volume_uploads;
 static bool volume_upload_failure;
 static float volume_previous_depth;
@@ -247,6 +251,7 @@ bool Sim3DDepthPass_Begin(ArRenderDevice *device, int width, int height, ArRende
   depth_solid_faces = depth_terrain_faces = 0;
   depth_world_mountain_faces = 0;
   depth_ocean_batches = depth_ocean_quads = 0;
+  ocean_hash = UINT64_C(14695981039346656037);
   depth_volume_faces = 0;
   depth_near_volume_faces = 0;
   depth_upper_volume_faces = 0;
@@ -309,7 +314,12 @@ bool Sim3DDepthPass_AppendQuad(Sim3DDepthPassLayer layer, const Sim3DDepthVertex
     } else
       far_volume_min_depth = fminf(far_volume_min_depth, vertices[0].depth);
   }
-  if (layer == kSim3DDepthPass_Ground && vertices[0].uv.x < 0) depth_ocean_quads++;
+  if (layer == kSim3DDepthPass_Ground && vertices[0].uv.x < 0) {
+    depth_ocean_quads++;
+    const uint8_t *bytes = (const uint8_t *)vertices;
+    for (size_t i = 0; hash_completion_ocean && i < sizeof(*vertices) * 4; i++)
+      ocean_hash = (ocean_hash ^ bytes[i]) * UINT64_C(1099511628211);
+  }
   if (layer == kSim3DDepthPass_CloudShadow || layer == kSim3DDepthPass_Cloud) {
     assert(QuadTouchesViewport(vertices));
     if (layer == kSim3DDepthPass_Cloud)
@@ -682,7 +692,7 @@ bool ArLocalizedTextPresenter_DrawWithBrightness(ArRenderDevice *device,
   return true;
 }
 
-uint64_t HostClock_Milliseconds(void) { return 0; }
+uint64_t HostClock_Milliseconds(void) { return weather_time_ms; }
 uint64_t HostClock_Nanoseconds(void) { return 0; }
 
 static bool CreateTexture(void *context, const ArRenderTextureDesc *desc,
@@ -805,8 +815,10 @@ static bool DrawGeometry(void *context, ArRenderTexture texture, const ArRenderV
       assert(vertices[row * 2].color.b >= vertices[(row - 1) * 2].color.b);
       assert(vertices[row * 2].color.r >= vertices[(row - 1) * 2].color.r);
     }
-    assert(vertices[6].position.y > vertices[8].position.y * .51f);
-    assert(vertices[6].position.y < vertices[8].position.y * .54f);
+    assert(vertices[6].position.y > vertices[8].position.y *
+        (backend->sky_horizon_min ? backend->sky_horizon_min : .51f));
+    assert(vertices[6].position.y < vertices[8].position.y *
+        (backend->sky_horizon_max ? backend->sky_horizon_max : .54f));
     /* Keep the rich upper blue in the visible windows, not behind the HUD. */
     assert(vertices[2].position.y > vertices[8].position.y * .19f);
     assert(!memcmp(&vertices[0].color, &vertices[2].color, sizeof(vertices[0].color)));
@@ -2428,6 +2440,52 @@ static void TestAtmosphereDrawCache(void) {
   PresentWorldNav_ResetResources();
 }
 
+static void TestDeathHeimCompletionBackdrop(void) {
+  PresentWorldNav_ResetResources();
+  FakeBackend backend = {.output_width = 1280, .output_height = 720,
+      .require_frustum_clipped = true, .sky_horizon_min=.64f, .sky_horizon_max=.70f};
+  assert(ArRenderDevice_Init(&g_render_device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
+  FrameSlot slot = WorldNavigationSlot();
+  slot.sim.view = kSimView_None;
+  slot.sim.death_heim_completion_world = true;
+  hash_completion_ocean = true;
+  slot.diorama_map_group = 7;
+  slot.diorama_map_number = 1;
+  slot.diorama_layer_section = kDioramaLayerSection_DeathHeimCompletion;
+  slot.sim.world_navigation_clouds = true;
+  slot.sim.sky_palace_volumetric_clouds = true;
+  slot.sim.cloud_opacity_pct = 35;
+  assert(SimWorldNavigationScene_BuildSkyPalace(&slot.sim.world_navigation_scene,
+      768, 128, 7, SimWorldMap_Serial()));
+  const ArRenderRectI views[] = {{0,0,640,480}, {0,0,720,450}, {0,0,960,540}};
+  for (unsigned i = 0; i < sizeof(views) / sizeof(*views); i++) {
+    slot.sim.death_heim_completion_flags &= ~kDeathHeimCompletion_Waves;
+    assert(PresentDeathHeimCompletionBackdrop(&slot, views[i],
+        (ArRenderPointF){.5f,.72f}, (DeathHeimCompletionArt){0}) == kPresentationOutcome_Complete);
+    const int quiet_quads = depth_ocean_quads;
+    assert(quiet_quads > 0 && depth_volume_faces > 0 && depth_volume_faces <= 6 * 16 * 14);
+    assert(!depth_cloud_faces && !depth_shadow_ocean_faces);
+    slot.sim.death_heim_completion_flags |= kDeathHeimCompletion_Waves;
+    assert(PresentDeathHeimCompletionBackdrop(&slot, views[i],
+        (ArRenderPointF){.5f,.72f}, (DeathHeimCompletionArt){0}) == kPresentationOutcome_Complete);
+    assert(depth_ocean_quads > quiet_quads);
+    const uint64_t initial = ocean_hash;
+    weather_time_ms = 3000;
+    assert(PresentDeathHeimCompletionBackdrop(&slot, views[i],
+        (ArRenderPointF){.5f,.72f}, (DeathHeimCompletionArt){0}) == kPresentationOutcome_Complete);
+    assert(ocean_hash != initial);
+    weather_time_ms = 0;
+    assert(!backend.set_viewport_count && !backend.clear_count && !backend.ui_draws);
+  }
+  slot.diorama_layer_section = kDioramaLayerSection_Room;
+  assert(PresentDeathHeimCompletionBackdrop(&slot, views[0],
+      (ArRenderPointF){.5f,.72f}, (DeathHeimCompletionArt){0}) == kPresentationOutcome_CoreFailure);
+  assert(PresentDeathHeimCompletionForeground(&slot, views[0],
+      (ArRenderPointF){.5f,.72f}, (DeathHeimCompletionArt){0}) == kPresentationOutcome_CoreFailure);
+  PresentWorldNav_ResetResources();
+  hash_completion_ocean = false;
+}
+
 static void TestSkyPalaceClippingAndOwnership(void) {
   PresentWorldNav_ResetResources();
   FakeBackend backend = {
@@ -3095,6 +3153,7 @@ int main(void) {
   TestAdventAuthoredModelClearance();
   TestTallModelViewportClearance();
   TestSkyPalaceClippingAndOwnership();
+  TestDeathHeimCompletionBackdrop();
   TestAtmosphereDrawCache();
   TestMapEdgeLandOpacity();
   AssertPerformanceScopeRestored();

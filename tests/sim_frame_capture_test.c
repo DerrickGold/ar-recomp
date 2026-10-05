@@ -6,6 +6,7 @@
 
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
+#include "render/presentation_options.h"
 #include "regional/presentation/regional_artwork.h"
 #include "sim/voxels/sim_background_voxel_types.h"
 #include "app/performance_metrics.h"
@@ -36,11 +37,15 @@ uint8_t ActRaiserRegional_LastTownArtworkSnapshot(void) { return active_artwork;
 uint8_t ActRaiserRegionalMedia_AvailableArtwork(void) { return available_artwork; }
 static SrRunnerHandle *const runner = (SrRunnerHandle *)(uintptr_t)1;
 static bool needs_ppu, owned_capture;
+static bool completion_capture;
+static uint8_t completion_bg1 = 0x60, completion_bg2 = 0x70;
 static uint16_t live_vram[SR_PPU_VRAM_WORD_COUNT], live_cgram[SR_PPU_CGRAM_WORD_COUNT];
 static SrResult QueryPpu(SrRunnerHandle *actual, SrPpuStateSnapshot *ppu) {
   assert(actual == runner);
   *ppu = (SrPpuStateSnapshot){.struct_size = sizeof(*ppu),
       .lifetime_generation = 42, .brightness = 13};
+  ppu->background_tilemap_control[0] = completion_bg1;
+  ppu->background_tilemap_control[1] = completion_bg2;
   return SR_RESULT_OK;
 }
 static SrResult BorrowMemory(SrRunnerHandle *actual, SrMemoryRegion region,
@@ -86,7 +91,7 @@ const SnesRunnerApi *sr_runner_get_api(uint32_t version) {
     .capabilities = SR_RUNNER_CAP_PPU_STATE | SR_RUNNER_CAP_BORROWED_U16_SPANS,
     .query_ppu_state = QueryPpu, .borrow_u16_memory = BorrowMemory,
   };
-  return owned_capture ? &api : NULL; /* Also exercise the safe missing-view fallback. */
+  return owned_capture || completion_capture ? &api : NULL;
 }
 SimRenderFeatureMask Settings_Sim3DRequestedFeatures(void) { return kSimFeature_All; }
 SimRenderFeatureMask Sim3D_ImplementedFeatures(void) { return kSimFeature_GroundProjection; }
@@ -133,6 +138,13 @@ void SimRenderMetadata_CaptureSkyPalaceFrame(SimFrameData *dst, const uint8 *wra
   assert(enabled == (g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace));
   Event('S');
 }
+void SimWorldMap_BuildForDeathHeimCompletion(void) { assert(completion_capture); Event('B'); }
+void SimRenderMetadata_CaptureDeathHeimCompletionFrame(
+    SimFrameData *dst, const uint8 *wram, uint8_t brightness) {
+  assert(completion_capture && dst == &frame && wram == g_ram && brightness == 13);
+  dst->death_heim_completion_world = true;
+  Event('E');
+}
 void ActRaiser_SimSpriteMargins(int *left, int *right, int *top, int *bottom) {
   *left = 23;
   *right = 29;
@@ -154,7 +166,13 @@ void Sim3D_AnnotateFrame(SimFrameData *dst, const Sim3DTuning *tuning) {
   assert(tuning->sprite_margin_left == 23 && tuning->sprite_margin_right == 29);
   assert(tuning->sprite_margin_top == 13 && tuning->sprite_margin_bottom == 19);
   assert(tuning->voxel_detail == g_settings.sim3d_voxel_detail);
-  assert(tuning->cloud_opacity_pct == g_settings.sim3d_cloud_opacity_pct);
+  assert(tuning->cloud_opacity_pct == (dst->death_heim_completion_world
+      ? kSimCloudOpacityDefaultPct : g_settings.sim3d_cloud_opacity_pct));
+  if (dst->death_heim_completion_world) {
+    assert(tuning->world_navigation_clouds == g_settings.death_heim_completion_clouds);
+    assert(tuning->cloud_drift_pct == kSimCloudDriftDefaultPct);
+    assert(tuning->world_navigation_lighting && !tuning->world_navigation_models);
+  }
   dst->projection_pitch_mrad = (int16_t)tuning->pitch_mrad;
   Event('A');
 }
@@ -287,6 +305,50 @@ int main(void) {
   assert(worker_creates == 2);
   SimFrameCapture_Shutdown();
   assert(worker_destroys == 2);
+  /* Progress alone must not reveal B before the native black-fade page swap. */
+  completion_capture = true;
+  g_settings.death_heim_completion_world = true;
+  g_settings.death_heim_completion_waves = true;
+  g_settings.death_heim_completion_cherubs = true;
+  g_settings.death_heim_completion_feathers = true;
+  g_settings.death_heim_completion_clouds = true;
+  g_settings.death_heim_completion_sun_glints = true;
+  g_settings.diorama_mode = true;
+  g_settings.diorama_skybox = kDioramaSky_Only;
+  g_ram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_DeathHeim;
+  g_ram[kActRaiserWram_CurrentMap] = kActRaiserDeathHeimMap_Hub;
+  g_ram[kActRaiserWram_DeathHeimProgress] = 7;
+  SimFrameCapture_RefreshMetadata(&frame);
+  ExpectEvents("CSAN");
+  assert(!frame.death_heim_completion_world);
+  completion_bg1 = 0x64;
+  completion_bg2 = 0x74;
+  SimFrameCapture_RefreshMetadata(&frame);
+  ExpectEvents("CSBEAN");
+  assert(frame.death_heim_completion_world);
+  assert(frame.death_heim_completion_flags ==
+         (kDeathHeimCompletion_Waves | kDeathHeimCompletion_Cherubs |
+          kDeathHeimCompletion_Feathers | kDeathHeimCompletion_SunGlints));
+  /* The B scene remains available with both SIM master switches off. */
+  g_settings.sim3d_mode = g_settings.sim3d_world_navigation = false;
+  SimFrameCapture_RefreshMetadata(&frame);
+  ExpectEvents("CSBEAN");
+  assert(frame.death_heim_completion_world);
+  g_settings.death_heim_completion_sun_glints = false;
+  SimFrameCapture_RefreshMetadata(&frame);
+  ExpectEvents("CSBEAN");
+  assert(!(frame.death_heim_completion_flags & kDeathHeimCompletion_SunGlints));
+  g_settings.death_heim_completion_world = false;
+  SimFrameCapture_RefreshMetadata(&frame);
+  ExpectEvents("CSAN");
+  assert(!frame.death_heim_completion_world);
+  g_settings.death_heim_completion_world = true;
+  g_settings.diorama_skybox = kDioramaSky_Off;
+  SimFrameCapture_RefreshMetadata(&frame);
+  ExpectEvents("CSAN");
+  assert(!frame.death_heim_completion_world);
+  completion_capture = false;
+  memset(g_ram, 0, sizeof(g_ram));
   /* No world/canvas/inspector or camera access on the owned producer path.
    * Mutating every live source before preparation cannot change this frame. */
   owned_capture = true;

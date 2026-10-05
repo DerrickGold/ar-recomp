@@ -53,6 +53,7 @@
 #include "sim/sim_world_map_build.h"
 #include "sim/town/sim_town_ground_art.h"
 #include "sim/world_nav/sim_world_navigation_towns.h"
+#include "sim/world_nav/sim_completion_cherubs.h"
 #include "snesrecomp/game/bootstrap.h"
 #include "snesrecomp/game/cpu.h"
 #include "snesrecomp/game/runtime.h"
@@ -78,6 +79,7 @@ static void PrepareSubsystems(const GameSessionConfig *config) {
   /* The world-map image and pure development-builder tables are immutable ROM
    * data. Failure is not fatal: consumers retain the authentic presentation. */
   (void)ChurchArt_Init(config->rom_data, config->rom_size);
+  (void)SimCompletionCherubs_Init(config->rom_data, config->rom_size);
   if (SimWorldMap_Init(config->rom_data, config->rom_size))
     SimWorldMapBuild_Init(config->rom_data, config->rom_size);
   if (!SimTownGroundArt_Init(config->rom_data, config->rom_size))
@@ -266,6 +268,7 @@ static GameSessionResult StopSession(void) {
   PresentRendererResources_Reset();
   PresentChurch_Reset(&g_render_device);
   (void)ChurchArt_Init(NULL, 0);
+  (void)SimCompletionCherubs_Init(NULL, 0);
   SimTownGroundArt_Shutdown();
   SimWorldNavigationTowns_Shutdown();
   DioramaFrameGeneration_Shutdown();

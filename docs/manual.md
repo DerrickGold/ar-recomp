@@ -316,14 +316,35 @@ Video, Action 3D, Town 3D, Audio, Controls, Cheats, and System. Enabling
 | Defaults | `A` (SNES Y) restores the selected setting |
 | Back/close | `X` (SNES A) returns to navigation, then closes; Escape or F1 closes anywhere |
 
-Every tab also ends with `Reset <section> defaults`; pressing it twice restores
+Most tabs also end with `Reset <section> defaults`; pressing it twice restores
 every tab in that top-level section, including hidden developer controls,
 without changing other sections. For example, resetting Town 3D restores Scene,
 Camera, Light, and Weather together.
+The **Action 3D → Death Heim** tab instead has **Reset completion effects**,
+which restores only the completion scene controls. It keeps the camera and
+other Action settings; press it twice to confirm.
 
 F2 remains available for a full snapshot while the overlay is open. The game and
 SNES input stay frozen until the overlay closes. Accepted setting changes are
 written atomically to `settings.ini`; action rows are not persisted.
+
+### Death Heim completion scene
+
+Enable **Action 3D → Scene → Diorama 3D**, then set **Skybox** to **Skybox only**.
+The **Death Heim** tab shows whether this setup is ready. Its **Completion ocean
+scene** control replaces room 1 B's native background with a bright ocean and
+opening in the clouds. Town 3D and World 3D can remain off.
+
+The tab also controls ocean waves, sun glints, pixel water detail, heavenly
+clouds, light shafts, cherubs, floating feathers, platform water effects and
+golden rim light. Turn off **Completion ocean scene** to return to the native
+completion artwork. Changes save automatically to `settings.ini`.
+
+The original platform, hero, text, music timing and ending pace are preserved.
+Room 1 A's faces and room 1 B's completion scenery switch during the original
+black fade. In the action editor they have separate scenery, depth, framing and
+background policies. Room 1 B's browser preview shows native artwork; view the
+enhanced ocean scene in game.
 
 ### Authentic/enhanced comparison control
 

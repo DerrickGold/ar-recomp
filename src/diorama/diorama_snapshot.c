@@ -108,7 +108,7 @@ void DioramaSnapshot_Bind(DioramaSnapshot *s) {
 bool DioramaSnapshot_Describe(DioramaSnapshot *out,
     const DioramaCapture *c, const DioramaView *v, const DioramaScene *scene,
     uint32_t plane_mask, int skybox_width, int skybox_height) {
-  if (!out || !c || !v || !scene || !scene->render || c->bg2_dynamic ||
+  if (!out || !c || !v || !scene || !scene->render || scene->backdrop || c->bg2_dynamic ||
       (c->skybox && c->skybox->dynamic)) return false;
   DioramaSnapshot s = {0};
   s.capture = *c;

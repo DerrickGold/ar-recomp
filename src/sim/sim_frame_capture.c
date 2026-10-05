@@ -2,11 +2,13 @@
 
 #include <limits.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 #include "sim/sim_world_map.h"
 
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
+#include "render/presentation_options.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
 #include "actraiser/regional/actraiser_regional_media.h"
 #include "regional/presentation/regional_artwork.h"
@@ -90,6 +92,35 @@ static Sim3DTuning CaptureTuning(bool owned) {
       .sprite_margin_bottom = sim_margin_bottom };
 }
 
+static bool CompletionBackdropRequested(void) {
+  if (!g_settings.death_heim_completion_world || !g_settings.diorama_mode ||
+      g_settings.diorama_skybox != kDioramaSky_Only ||
+      g_ram[kActRaiserWram_MapGroup] != kActRaiserMapGroup_DeathHeim ||
+      g_ram[kActRaiserWram_CurrentMap] != kActRaiserDeathHeimMap_Hub ||
+      g_ram[kActRaiserWram_DeathHeimProgress] < kActRaiserDeathHeimProgress_FinalBossBeaten)
+    return false;
+  return true;
+}
+
+static bool CaptureCompletionBackdrop(SimFrameData *sim) {
+  if (!CompletionBackdropRequested()) return false;
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  SrRunnerHandle *runner = RtlGameRunner();
+  SrPpuStateSnapshot ppu = {.struct_size = SR_PPU_STATE_SNAPSHOT_V2_SIZE};
+  if (!api || !runner || api->struct_size < SNES_RUNNER_API_PPU_STATE_SIZE ||
+      !(api->capabilities & SR_RUNNER_CAP_PPU_STATE) || !api->query_ppu_state ||
+      api->query_ppu_state(runner, &ppu) != SR_RESULT_OK ||
+      !ActRaiser_IsDeathHeimCompletionScene(
+          g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
+          g_ram[kActRaiserWram_DeathHeimProgress],
+          ppu.background_tilemap_control[0], ppu.background_tilemap_control[1]))
+    return false;
+  SimWorldMap_BuildForDeathHeimCompletion();
+  SimRenderMetadata_CaptureDeathHeimCompletionFrame(sim, g_ram,
+      ppu.display_control & 0x80 ? 0 : ppu.brightness);
+  return sim->death_heim_completion_world;
+}
+
 static void CaptureMetadata(SimFrameData *sim, bool owned, uint32_t underlay_serial) {
   if (owned) SimRenderMetadata_CaptureFrameWithUnderlay(
       sim, g_ram, g_settings.sim3d_mode, false,
@@ -102,8 +133,35 @@ static void CaptureMetadata(SimFrameData *sim, bool owned, uint32_t underlay_ser
       g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
   if (!owned) SimRenderMetadata_CaptureSkyPalaceFrame(sim, g_ram,
       g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
+  if (!owned) (void)CaptureCompletionBackdrop(sim);
   if (!owned && sim->view != kSimView_None) Sim3DCamera_SetPresentationScene(sim);
   Sim3DTuning tuning = CaptureTuning(owned || sim->view == kSimView_None);
+  if (sim->death_heim_completion_world) {
+    sim->death_heim_completion_flags =
+        (g_settings.death_heim_completion_waves ? kDeathHeimCompletion_Waves : 0) |
+        (g_settings.death_heim_completion_pixel_water ? kDeathHeimCompletion_PixelWater : 0) |
+        (g_settings.death_heim_completion_cherubs ? kDeathHeimCompletion_Cherubs : 0) |
+        (g_settings.death_heim_completion_feathers ? kDeathHeimCompletion_Feathers : 0) |
+        (g_settings.death_heim_completion_platform_details ? kDeathHeimCompletion_Platform : 0) |
+        (g_settings.death_heim_completion_rim_light ? kDeathHeimCompletion_Rim : 0) |
+        (g_settings.death_heim_completion_light_shafts ? kDeathHeimCompletion_Shafts : 0) |
+        (g_settings.death_heim_completion_sun_glints ? kDeathHeimCompletion_SunGlints : 0);
+    /* Fixed scene tuning plus its own switches: SIM preferences cannot change
+     * the completion camera, cloud density, illumination or terrain. */
+    tuning.landscape_height_pct = tuning.height_scale_x100 = 100;
+    tuning.light_azimuth_deg = 225;
+    tuning.light_elevation_deg = 70;
+    tuning.cloud_opacity_pct = kSimCloudOpacityDefaultPct;
+    tuning.cloud_drift_pct = kSimCloudDriftDefaultPct;
+    tuning.world_navigation_lighting = true;
+    tuning.world_navigation_clouds = g_settings.death_heim_completion_clouds;
+    tuning.sky_palace_volumetric_clouds = true;
+    tuning.world_navigation_cloud_shadows = false;
+    tuning.world_navigation_atmosphere = tuning.world_navigation_haze = false;
+    tuning.world_navigation_models = tuning.world_navigation_mountains = false;
+    tuning.world_navigation_ground_detail = tuning.world_navigation_relief = false;
+    tuning.underlay_haze_pct = tuning.underlay_defocus_pct = 0;
+  }
   Sim3D_AnnotateFrame(sim, &tuning);
   /* Match the visit's active selection AND donor availability. Requested
    * settings may be pending, and a missing donor leaves the native BG plain. */
@@ -196,8 +254,9 @@ void SimFrameCapture_Produce(SimFrameData *sim) {
    * and towns both reuse as unrelated scratch. This runs only on the game
    * thread, after an emulated tick reached a stable frame boundary. */
   PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_WorldMap);
-  SimWorldMap_BuildIfNeeded(
-      g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
+  if (!CompletionBackdropRequested())
+    SimWorldMap_BuildIfNeeded(
+        g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
   PerformanceMetrics_End(pipeline);
   pipeline = PerformanceMetrics_Begin(kPerformance_Metadata);
   SimPhase0Trace_Frame((uint32)snes_frame_counter, g_ram,

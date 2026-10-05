@@ -44,6 +44,63 @@ viewport, preserving the original water artwork and scrolling animation.
 Authored far-band tiles and stamps feed that image too. B uses its own captured
 completion background and never receives A's face/eye promotion.
 
+B's **Skybox only** mode now prototypes a host 3D world backdrop: a fixed camera
+above Death Heim's northern rim looks north at a low, nearly tangent angle over
+the ocean, with an ActRaiser 2 ending inspired opening in a sky that blends
+from a small deeper-blue halo near the light quickly toward the earlier
+vista's lighter daylight blue farther away. Ocean reflections use the same
+angular gradient; broad opening glow fills the gaps between shafts.
+Palace cloud volumes with bright rims and soft ambient fill frame the central
+opening and the lower ocean horizon. Daylight ambient fill and reflections
+keep the sea bright; the opening's sky direction drives water glints beyond
+the local shaft footprints.
+The native platform, hero and text retain their existing Diorama projection.
+B's GPU ocean material combines eight wave scales, Fresnel sky reflections,
+foam, pearlescent glints and drifting spray. A subtle material layer reuses the
+four native 8x8 world-map water frames as nearest-sampled wavelets, with small
+colour steps and world-anchored pixel detail that fades toward the horizon.
+The moving wave shape, Fresnel reflections, glints and light scattering retain
+their full-resolution shading. Thirteen soft shafts fan out from
+the opening: all shafts have shorter, feathered reaches, with the main pool
+still illuminating the hero's captured OBJ projection. The other shafts fade
+into the air to frame the opening toward the camera. Staggered
+sources, near and far receivers, world-space wisps and distance haze give the
+shafts volume. Ordered projected spreads prevent crossings even where nearer
+shafts continue past distant water patches. Shafts and light
+motes draw after the platform and before the flat HUD. Local water highlights and
+glint particles use the same world-space cones as the airborne light. All
+effects follow native master brightness and run only in B. The bounded,
+coast-masked wave mesh remains the fallback for renderers without custom shaders.
+Sparse sun-glint sparkles also twinkle across the wider sea, shrinking and fading
+toward the horizon. Each brief glint selects a new water-surface position from a
+presentation-only clock/hash, independently of the wave and light-shaft switches.
+The platform's captured BG1 and hero OBJ artwork is projected into a private
+transparent GPU target, excluding BG3 text. It supplies a faint, wave-broken
+reflection and restrained golden edge light. Weak expanding ripples and nearby
+spray connect the plinth to the sea; no framebuffer readback is needed.
+Twelve bounded pixel feathers descend from the opening and fade above the water.
+Five small cherub silhouettes drift in depth inside the opening behind the cloud banks
+and HUD. They flutter through the SIM angel's three genuine frontal wing poses,
+decoded once from immutable ROM characters and composition records. Missing
+or malformed art omits the cherubs; it never reads the action room's OBJ VRAM.
+In-game controls live under **Action 3D → Death Heim**. **Completion ocean scene**
+enables the vista independently of Town 3D and World navigation 3D; it requires
+Action Diorama 3D with **Skybox only**. Turning it off restores B's captured
+skybox. Waves, sun glint sparkles, pixel water, clouds, shafts, cherubs, feathers, platform water
+effects and golden rim light each have their own saved switch. Completion
+clouds and illumination use scene-owned tuning and do not inherit SIM preferences.
+The tab displays its setup requirements. **Reset completion effects** restores
+only these ten controls, leaving the camera and other Action settings intact;
+press it twice to confirm. Room B's browser preview is labeled **Native artwork
+preview** with directions to these in-game controls.
+The original game clock, fade controller and transition timing are unchanged.
+The corresponding launch overrides are `AR_DEATH_HEIM_COMPLETION_WORLD`,
+`_WAVES`, `_SUN_GLINTS`, `_PIXEL_WATER`, `_CLOUDS`, `_RAYS`, `_CHERUBS`, `_FEATHERS`, `_PLATFORM`
+and `_RIM` (use the full shared prefix; `0` disables an effect).
+`AR_DEATH_HEIM_COMPLETION_FX=0` selects the earlier mesh prototype for comparisons.
+The browser previews B's native artwork and edits; it does not yet contain the
+host world renderer. Review this prototype through native final-composite captures.
+
 In game, final-boss progress becomes 7 before the faces have faded away. The
 completion scene and its overrides activate together when the native script
 switches BG1SC/BG2SC to `$64/$74` at `$00:F5F0–F619`, after waiting for the

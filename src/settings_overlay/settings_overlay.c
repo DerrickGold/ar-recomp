@@ -108,6 +108,7 @@ static const MenuTab kTabsVideo[] = {
 static const MenuTab kTabsDiorama[] = {
   TAB(Presentation, "overlay.tab.scene"),
   TAB(DioramaCamera, "overlay.tab.camera"),
+  TAB(ActionCompletion, "overlay.tab.death_heim"),
 };
 static const MenuTab kTabsTown[] = {
   TAB(Simulation, "overlay.tab.scene"),
@@ -184,7 +185,7 @@ static const MenuTab kTabsLayers[] = {
   TAB(Presentation, "Aitos"),
   TAB(Presentation, "Marahna"),
   TAB(Presentation, "Northwall"),
-  TAB(Presentation, "Death Heim"),
+  TAB(Presentation, "overlay.tab.death_heim"),
   TAB(Presentation, "overlay.tab.bg_extents"),
 };
 _Static_assert((int)(sizeof(kTabsLayers) / sizeof(kTabsLayers[0])) ==
@@ -540,6 +541,18 @@ static bool ActiveSectionIsCustom(void) {
 
 static bool ActiveTabIsRegional(void) { return ActiveTab()->regional_rules; }
 
+static bool ActiveTabIsCompletion(void) {
+  return !ActiveSectionIsCustom() && !ActiveTabIsRegional() &&
+         ActiveTab()->category == kSettingCat_ActionCompletion;
+}
+
+static void FormatResetMessage(char *out, size_t capacity, const char *section_key,
+                               const char *completion_key) {
+  if (ActiveTabIsCompletion())
+    snprintf(out, capacity, "%s", Ui(completion_key));
+  else
+    FormatSectionMessage(out, capacity, section_key, ActiveSection()->label);
+}
 
 /* System > Game is the one registry-backed tab with semantic subsections.
  * Descriptor metadata owns the classification; this menu layer only chooses
@@ -618,11 +631,12 @@ static int TabSettingRowCount(void) {
   return RegistryMenuRowCount();
 }
 
-/* Every populated tab ends with the same section-scoped action. Town 3D's
+/* Ordinary tabs end with a section-scoped action. Town 3D's
  * button therefore restores Scene + Camera + Light + Weather together no
  * matter which tab the player happens to be viewing.
  *
- * The layer editor is the exception: its rows are not registry descriptors, so
+ * Completion effects reset only their own category. The layer editor's rows
+ * are not registry descriptors, so
  * "reset this section's settings to defaults" has nothing to act on. It carries
  * its own per-room reset row instead, built into the list. */
 static int TabRowCount(void) {
@@ -718,7 +732,7 @@ static void SaveAcceptedChange(SettingChangeResult result) {
   PersistChange(result);
 }
 
-/* Reset every registry category represented by the active top-level section.
+/* Reset completion effects alone, or every category in an ordinary section.
  * Repeated paging tabs (Save, keyboard/gamepad bindings) deliberately collapse
  * to one category reset each. Hidden debug rows are registry rows too, so this
  * produces the shipped configuration rather than merely resetting what the
@@ -730,7 +744,8 @@ static void ConfirmOrResetActiveSection(void) {
     s_reset_armed_section = s_section;
     s_reset_armed_until = now + kSectionResetConfirmMs;
     char status[sizeof(s_status)];
-    FormatSectionMessage(status, sizeof(status), "overlay.confirm_reset", section->label);
+    FormatResetMessage(status, sizeof(status), "overlay.confirm_reset",
+                       "overlay.completion.confirm_reset");
     SetStatus(status);
     s_status_until = s_reset_armed_until;
     return;
@@ -738,8 +753,11 @@ static void ConfirmOrResetActiveSection(void) {
 
   ClearSectionResetArm();
   bool categories[kSettingCat_Count] = {false};
-  for (int tab = 0; tab < section->tab_count; tab++)
-    categories[section->tabs[tab].category] = true;
+  if (ActiveTabIsCompletion())
+    categories[kSettingCat_ActionCompletion] = true;
+  else
+    for (int tab = 0; tab < section->tab_count; tab++)
+      categories[section->tabs[tab].category] = true;
 
   SettingChangeResult aggregate = kSettingChange_Unchanged;
   for (int category = 0; category < kSettingCat_Count; category++) {
@@ -748,7 +766,8 @@ static void ConfirmOrResetActiveSection(void) {
         Settings_ResetCategory((SettingCategory)category);
     if (result > aggregate) aggregate = result;
   }
-  fprintf(stderr, "[settings-menu] reset %s section to built-in defaults\n",
+  fprintf(stderr, "[settings-menu] reset %s to built-in defaults\n",
+          ActiveTabIsCompletion() ? "completion effects" :
           ArUiCatalog_Text(kArUiLocale_English, section->label, section->label));
   SaveAcceptedChange(aggregate);
 }
@@ -1303,7 +1322,8 @@ const char *SettingsOverlay_SelectedKey(void) {
   if(SaveSlotMenu_Active() || SaveSlotMenu_DecisionActive())return SaveSlotMenu_SelectedKey();
   if (ActiveTabIsRegional()) return RegionalMenu_Key(ActiveTab()->regional_page, s_row);
   if (ActiveSectionIsCustom()) return LayerMenu_Key(ActiveTabIndex(), s_row);
-  if (SelectedRowIsSectionReset()) return kSectionResetKey;
+  if (SelectedRowIsSectionReset())
+    return ActiveTabIsCompletion() ? "reset_completion_effects" : kSectionResetKey;
   const SettingDesc *desc = SelectedDesc();
   return desc && desc->key ? desc->key : "";
 }
@@ -1970,8 +1990,7 @@ static int DrawMenuHeader(const MenuLayout *layout, const MenuChrome *c,
 }
 
 static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
-                         const MenuSection *section, int rule_y,
-                         bool custom_rows) {
+                         int rule_y, bool custom_rows) {
   const int right_x = c->right_x;
   const int right_width = c->right_width;
   const int top_y = c->top_y;
@@ -1983,7 +2002,17 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
   const uint32_t structure_dim = kSteelDim;
 
   /* ── Rows ─────────────────────────────────────────────────────────────── */
-  const int first_row_y = rule_y + 6;
+  int first_row_y = rule_y + 6;
+  if (ActiveTabIsCompletion()) {
+    const bool ready = g_settings.diorama_mode &&
+                       g_settings.diorama_skybox == kDioramaSky_Only;
+    int lines = DrawWrappedSmallText(
+        layout, right_text_x, first_row_y,
+        Ui(ready ? "overlay.completion.setup_ready" : "overlay.completion.setup_required"),
+        (right_width - 24) / kDebugGlyphWidth, 3,
+        ready ? kSteelBlue : kGameGold);
+    first_row_y += lines * kSmallLineHeight + 6;
+  }
   const int selector_x = right_x + 12;
   const int label_x = right_x + 22;
   /* Save-state/item labels need up to 18 characters (for example
@@ -2107,7 +2136,8 @@ static void DrawMenuRows(const MenuLayout *layout, const MenuChrome *c,
                   kText_Warning);
       }
       char label[256];
-      FormatSectionMessage(label, sizeof(label), "overlay.reset_section", section->label);
+      FormatResetMessage(label, sizeof(label), "overlay.reset_section",
+                         "overlay.completion.reset");
       int restart_x = value_right - 5 * kGlyphSize - 12;
       int label_chars = (restart_x - label_x - 4) / kGlyphSize;
       if (label_chars < 1) label_chars = 1;
@@ -2173,8 +2203,10 @@ static void DrawMenuFooter(const MenuLayout *layout, const MenuChrome *c,
                               description_x, header_y, bottom_width - 24);
   } else if (reset_selected) {
     char label[256], help[1024];
-    FormatSectionMessage(label, sizeof(label), "overlay.reset_section", section->label);
-    FormatSectionMessage(help, sizeof(help), "overlay.reset_section.help", section->label);
+    FormatResetMessage(label, sizeof(label), "overlay.reset_section",
+                       "overlay.completion.reset");
+    FormatResetMessage(help, sizeof(help), "overlay.reset_section.help",
+                       "overlay.completion.reset.help");
     DrawSmallText(layout, description_x, header_y, label, structure);
     DrawSmallTextN(layout,
                    panel_right - 12 - SmallTextWidth(Ui("overlay.apply.4")), header_y,
@@ -2324,7 +2356,7 @@ static void DrawMenu(const MenuLayout *layout) {
         (chrome.top_height-68)/kSmallLineHeight,kSteelBlue);
   } else {
     const int rule_y = DrawMenuHeader(layout, &chrome, section);
-    DrawMenuRows(layout, &chrome, section, rule_y, custom_rows);
+    DrawMenuRows(layout, &chrome, rule_y, custom_rows);
   }
   DrawMenuFooter(layout, &chrome, section);
 }

@@ -959,6 +959,12 @@ static bool Sim3DCloudShroudEnabled(void) {
 static bool WorldNavigation3DEnabled(void) {
   return g_settings.sim3d_world_navigation;
 }
+static bool CompletionSceneAvailable(void) {
+  return g_settings.diorama_mode && g_settings.diorama_skybox == kDioramaSky_Only;
+}
+static bool CompletionEffectsAvailable(void) {
+  return CompletionSceneAvailable() && g_settings.death_heim_completion_world;
+}
 static bool SkyPalaceCloudsAvailable(void) {
   return WorldNavigation3DEnabled() && g_settings.sim3d_sky_palace &&
       g_settings.sim3d_world_navigation_clouds;
@@ -2009,6 +2015,47 @@ const SettingDesc g_setting_descs[] = {
     kDioramaSky_Off, kDioramaSky_Both, 1, false,
     kDioramaSkyModeLabels, kDioramaSky_Count, Diorama_ModeIsOn, NULL,
     NULL, NULL },
+    BOOL_SETTING_MODERN(
+        death_heim_completion_world, "AR_DEATH_HEIM_COMPLETION_WORLD", "Completion ocean scene",
+        "Replace Death Heim's completion background with a heavenly ocean vista. "
+        "Requires Action Diorama 3D and Skybox only. Independent of Town and "
+        "World navigation 3D; preserves the original platform, hero and game timing.",
+        kSettingCat_ActionCompletion, 1, false, CompletionSceneAvailable, NULL),
+    BOOL_SETTING_MODERN(death_heim_completion_waves, "AR_DEATH_HEIM_COMPLETION_WAVES",
+                        "Ocean waves", "Animate the completion ocean's waves and spray.",
+                        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
+    BOOL_SETTING_MODERN(death_heim_completion_sun_glints, "AR_DEATH_HEIM_COMPLETION_SUN_GLINTS",
+                        "Sun glint sparkles",
+                        "Scatter brief sunlight twinkles across the completion ocean, with smaller "
+                        "glints near the horizon.",
+                        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
+    BOOL_SETTING_MODERN(death_heim_completion_pixel_water, "AR_DEATH_HEIM_COMPLETION_PIXEL_WATER",
+                        "Pixel water detail",
+                        "Add subtle animated 16-bit water texture beneath the ocean lighting.",
+                        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
+    BOOL_SETTING_MODERN(death_heim_completion_clouds, "AR_DEATH_HEIM_COMPLETION_CLOUDS",
+                        "Heavenly clouds",
+                        "Draw the luminous cloud arch and foreground wisps around the opening.",
+                        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
+    BOOL_SETTING_MODERN(death_heim_completion_light_shafts, "AR_DEATH_HEIM_COMPLETION_RAYS",
+                        "Light shafts", "Scatter light from the opening toward the hero and ocean.",
+                        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
+    BOOL_SETTING_MODERN(death_heim_completion_cherubs, "AR_DEATH_HEIM_COMPLETION_CHERUBS",
+                        "Cherubs", "Animate distant angel silhouettes within the cloud opening.",
+                        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
+    BOOL_SETTING_MODERN(death_heim_completion_feathers, "AR_DEATH_HEIM_COMPLETION_FEATHERS",
+                        "Floating feathers",
+                        "Let a few softly lit pixel feathers drift down from the opening.",
+                        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
+    BOOL_SETTING_MODERN(
+        death_heim_completion_platform_details, "AR_DEATH_HEIM_COMPLETION_PLATFORM",
+        "Platform water effects",
+        "Add gentle ripples, a broken reflection and light-catching spray around the platform.",
+        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
+    BOOL_SETTING_MODERN(
+        death_heim_completion_rim_light, "AR_DEATH_HEIM_COMPLETION_RIM", "Golden rim light",
+        "Add restrained warm highlights to the hero and platform's illuminated edges.",
+        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
   /* One switch for all three parts of the widescreen margin fix,
    * so the black wedge at a level bound can be A/B'd live: stand at the level
    * start and toggle. Default on; Off restores every pre-fix path byte for
@@ -3223,6 +3270,7 @@ const char *Settings_CategoryName(SettingCategory category) {
     case kSettingCat_Widescreen: return "Widescreen";
     case kSettingCat_Display: return "Display";
     case kSettingCat_Presentation: return "Diorama";
+    case kSettingCat_ActionCompletion: return "Death Heim completion";
     case kSettingCat_DioramaCamera: return "Diorama camera";
     case kSettingCat_Simulation: return "Simulation";
     case kSettingCat_SimCamera: return "Town camera";

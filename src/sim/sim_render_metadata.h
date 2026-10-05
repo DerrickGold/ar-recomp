@@ -947,6 +947,18 @@ typedef struct SimSunMiracle {
   uint16_t target_x, target_y; /* Square origin, in town pixels. */
 } SimSunMiracle;
 
+enum {
+  kDeathHeimCompletion_Waves = 1u << 0,
+  kDeathHeimCompletion_PixelWater = 1u << 1,
+  kDeathHeimCompletion_Cherubs = 1u << 2,
+  kDeathHeimCompletion_Feathers = 1u << 3,
+  kDeathHeimCompletion_Platform = 1u << 4,
+  kDeathHeimCompletion_Rim = 1u << 5,
+  kDeathHeimCompletion_Shafts = 1u << 6,
+  kDeathHeimCompletion_SunGlints = 1u << 7,
+  kDeathHeimCompletion_All = (1u << 8) - 1,
+};
+
 typedef struct SimFrameData {
   SimViewKind view;
   SimViewReason view_reason;
@@ -979,6 +991,10 @@ typedef struct SimFrameData {
    * host world before drawing Palace/plaque/label pixels that the PPU has
    * already brightness-adjusted. */
   uint8_t world_navigation_brightness;
+  /* Action completion backdrop; leaves view=None so Diorama still owns the
+   * platform, actors and HUD. Captured with the native B-page identity. */
+  bool death_heim_completion_world;
+  uint8_t death_heim_completion_flags;
   /* Full-world scene derived during capture from the state above and the owned
    * developed-map serial. Presentation consumes this value copy; invalid means
    * authentic Mode 7 must own the frame. */
@@ -1251,6 +1267,8 @@ void SimRenderMetadata_CaptureFrameWithUnderlay(
  * borrowed by presentation. Other map kinds are unchanged. */
 void SimRenderMetadata_CaptureSkyPalaceFrame(
     SimFrameData *dst, const uint8 *wram, bool enabled);
+void SimRenderMetadata_CaptureDeathHeimCompletionFrame(
+    SimFrameData *dst, const uint8 *wram, uint8_t brightness);
 
 /* Deterministic metadata evidence.  The trace is inert unless
  * AR_SIM3D_D1_TRACE names an output JSONL file. */

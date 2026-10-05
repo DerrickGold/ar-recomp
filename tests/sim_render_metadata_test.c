@@ -183,7 +183,9 @@ static void TestWorldNavigationAllTownObjects(void) {
   CHECK(FindNavigationTownObject(&towns, 3, kSimBackgroundVoxel_House, 1, 1) != NULL);
 
   uint8 *aitos = wram + kStructureRecordsWram + 3 * kStructureRecordsPerTownBytes;
-  aitos[0] = 16; aitos[1] = 24; aitos[2] = 0x85;
+  aitos[0] = 16;
+  aitos[1] = 24;
+  aitos[2] = 0x85;
   SimWorldNavigationTowns_Capture(wram, &towns);
   CHECK(!FindNavigationTownObject(&towns, 4, kSimBackgroundVoxel_AnimalPen, 16, 24));
   Write16(wram, kDevelopmentTiersWram + 6, 1);
@@ -1858,6 +1860,33 @@ static void TestSkyPalaceFrameContract(void) {
   SimRenderMetadata_CaptureSkyPalaceFrame(&frame, wram, true);
   CHECK(frame.view == kSimView_WorldNavigation);
   SimWorldMap_Shutdown();
+  free(wram);
+}
+
+static void TestDeathHeimCompletionFrameContract(void) {
+  uint8 *wram = calloc(1, kActRaiserWramSize);
+  CHECK(wram);
+  MakeDevelopedWorldMapAvailable();
+  wram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_DeathHeim;
+  wram[kActRaiserWram_CurrentMap] = kActRaiserDeathHeimMap_Hub;
+  /* Action WRAM contains unrelated camera/Mode-7 scratch. The fixed world
+   * location and captured brightness must own this backdrop. */
+  Write16(wram, kActRaiserWram_WorldFocusX, 999);
+  Write16(wram, kActRaiserWram_WorldFocusY, 888);
+  SimFrameData frame;
+  SimRenderMetadata_CaptureFrame(&frame, wram, false, false, 0, 0, 0);
+  CHECK(frame.view == kSimView_None && !frame.death_heim_completion_world);
+  SimRenderMetadata_CaptureDeathHeimCompletionFrame(&frame, wram, 9);
+  CHECK(frame.view == kSimView_None && frame.death_heim_completion_world);
+  CHECK(frame.world_navigation.focus_x == 768 && frame.world_navigation.focus_y == 128);
+  CHECK(frame.world_navigation.active_location == 7 && frame.world_navigation_scene.valid);
+  CHECK(frame.world_navigation_brightness == 9 && frame.underlay_serial == SimWorldMap_Serial());
+  CHECK(!frame.world_navigation_scene.composition.valid);
+  SimRenderMetadata_CaptureFrame(&frame, wram, false, false, 0, 0, 0);
+  CHECK(!frame.death_heim_completion_world); /* No stale publication on exit. */
+  SimWorldMap_Shutdown();
+  SimRenderMetadata_CaptureDeathHeimCompletionFrame(&frame, wram, 15);
+  CHECK(!frame.death_heim_completion_world && !frame.world_navigation_scene.valid);
   free(wram);
 }
 
@@ -3820,6 +3849,7 @@ int main(int argc, char **argv) {
   TestWorldNavigationFrameContract();
   TestConnectedWorldFrameContract();
   TestSkyPalaceFrameContract();
+  TestDeathHeimCompletionFrameContract();
   TestWorldNavigationCloudCeiling();
   TestWorldNavigationOwnership();
   if (argc == 4 && strcmp(argv[1], "--fixtures") == 0)

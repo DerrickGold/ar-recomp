@@ -13,11 +13,14 @@ shapes, bounds/framing/camera, per-plane offsets, BG2 row spans and periodic or
 captured skybox pixels, transparent fills, additive-plane policy, BG1 exposure
 and the four compositor shader settings. Tilted BG3 is included when captured.
 
-Excluded: environmental and actor-effect callbacks/inputs, simulation, a flat
+Excluded: host world backdrops (including the Death Heim B prototype),
+environmental and actor-effect callbacks/inputs, simulation, a flat
 HUD, heat/final CRT passes and live map edits. The native capture hook rejects
 frame generation rather than combine raw endpoints with generated offsets.
 Named ROM replacement sources are rejected rather than substituted. These need
 new explicitly captured inputs before comparison can claim their parity.
+Snapshots with a host backdrop are rejected because the packet cannot reproduce
+that background; use native final-composite screenshots to review the prototype.
 
 The native hook is opt-in. It allocates no pixel storage during ordinary play.
 It copies and zero-pads the owned images synchronously during upload, applying

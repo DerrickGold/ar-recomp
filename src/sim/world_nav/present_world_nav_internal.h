@@ -3,12 +3,22 @@
 /* PresentWorldNav internals: what the world-navigation presenter's parts
  * share: the resource-owner state (defined in present_world_nav.c), the shared
  * types and constants, and the helpers one part calls in another. Not a public
- * API; only present_world_nav*.c and present_sim_globe.c include it.
+ * API; only present_world_nav*.c, present_sim_globe.c and
+ * present_completion_vista.c include it.
  * Phase: present (FrameSlot only). */
 #include "sim/world_nav/present_world_nav_geometry.h"
 #include "sim/world_nav/present_world_nav_composition.h"
 #include "sim/world_nav/present_world_nav_sky.h"
 #include "sim/world_nav/present_world_nav_model_mesh.h"
+
+bool DrawDeathHeimCompletionWaves(ArRenderRectI viewport,
+    const WorldNavigationProjection *projection, uint64_t elapsed_ms);
+#include "sim/world_nav/completion_vista_backend.h"
+#include "sim/world_nav/present_world_nav.h"
+PresentationOutcome DrawCompletionVista(const FrameSlot *slot, ArRenderRectI viewport,
+    const WorldNavigationProjection *projection, CompletionVistaStage stage, ArRenderPointF player,
+    DeathHeimCompletionArt art, uint64_t elapsed_ms);
+void ResetCompletionVista(void);
 #include "sim/world_nav/present_sim_globe_focus.h"
 #include "sim/world_nav/present_world_nav_test.h"
 #include "host/parallel_work.h"

@@ -590,6 +590,7 @@ function setLayer(i) {
   bgIndex = i;changeCache=null;
   $('#roomSceneInfo').textContent=room.sceneLabel
     ? 'Room 1 A and 1 B have separate scenery, depth, framing and background policies. Effects settings are shared by room 1.' : '';
+  $('#roomPreviewInfo').hidden=room.section!=='completion';
   if(!planeToken.startsWith(`bg${i+1}`))planeToken=`bg${i+1}`;
   $('#bg1').classList.toggle('on', i===0); $('#bg2').classList.toggle('on', i===1);
   L = decodeLayer(room, i); st = bucket(room, i);

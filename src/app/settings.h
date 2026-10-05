@@ -179,6 +179,7 @@ typedef enum {
   kSettingCat_Localization,
   kSettingCat_LocalizationFont,
   kSettingCat_Interface,
+  kSettingCat_ActionCompletion,
   kSettingCat_Count,
 } SettingCategory;
 
@@ -502,6 +503,12 @@ typedef struct Settings {
   bool sim3d_world_navigation;
   bool sim3d_sky_palace; /* Globe behind the native Palace; navigation gate required. */
   bool sim3d_sky_palace_volumetric;
+  /* Action-room presentation, independent of the SIM/world feature switches. */
+  bool death_heim_completion_world, death_heim_completion_waves;
+  bool death_heim_completion_pixel_water, death_heim_completion_clouds;
+  bool death_heim_completion_light_shafts, death_heim_completion_cherubs;
+  bool death_heim_completion_feathers, death_heim_completion_platform_details;
+  bool death_heim_completion_rim_light, death_heim_completion_sun_glints;
   /* World-navigation effects have their own stage gates. They share compatible
    * numeric tuning with town 3D, but never inherit its master or its
    * sprite-window/cull assumptions. */

@@ -869,6 +869,113 @@ static bool DrawWorldNavigationCompatibilityGround(
       WorldNavigationAppendCliffLayer(kSim3DDepthPass_Ground, slot, projection, viewport);
 }
 
+/* A small, camera-local ocean patch is sufficient for the completion vista.
+ * Raised crests share the real globe's depth and curvature; coast masks keep
+ * them off land. No wave mesh, atlas or shader is submitted in other scenes. */
+bool DrawDeathHeimCompletionWaves(ArRenderRectI viewport,
+    const WorldNavigationProjection *projection, uint64_t elapsed_ms) {
+  enum { kColumns = 48, kRows = 64, kAxis = kColumns + 1,
+         kPoints = kAxis * (kRows + 1), kBatch = 64 };
+  static struct {
+    bool ready, ocean[kPoints];
+    uint32_t geography;
+    float radius, height_scale, local[kPoints][2], normal[kPoints][3], surface_radius[kPoints];
+    SimWorldNavigationGlobeFrame frame;
+  } grid;
+  const float radius = projection->globe_radius_world;
+  if (!grid.ready || grid.geography != SimWorldMap_TerrainSerial() || grid.radius != radius ||
+      grid.height_scale != projection->height_world_per_unit ||
+      memcmp(&grid.frame, &projection->globe_frame, sizeof(grid.frame))) {
+    for (int row = 0; row <= kRows; row++) for (int col = 0; col <= kColumns; col++) {
+      const int at = row * kAxis + col;
+      /* Spend more vertices on the near water where ripples occupy pixels.
+       * The patch widens toward the horizon to cover widescreen frusta. */
+      const float y = .6f + 6 * powf(row / (float)kRows, 1.5f);
+      const float x = (-1 + 2.0f * col / kColumns) * (.65f + .8f * y);
+      grid.local[at][0] = x;
+      grid.local[at][1] = y;
+      const float distance = hypotf(x, y), scale = sinf(distance / radius) / distance;
+      float *n = grid.normal[at];
+      n[0] = x * scale;
+      n[1] = y * scale;
+      n[2] = cosf(distance / radius);
+      float source[3];
+      for (int c = 0; c < 3; c++)
+        source[c] = n[0] * projection->globe_frame.right[c] +
+            n[1] * projection->globe_frame.up[c] + n[2] * projection->globe_frame.outward[c];
+      float sx, sy;
+      grid.ocean[at] = false;
+      grid.surface_radius[at] = radius * .9975f;
+      if (SimWorldNavigationGlobe_SourceAtRadius(
+              projection->chart_radius_tiles, source, &sx, &sy)) {
+        uint8_t mask[64];
+        if (sx < 0 || sy < 0 || sx >= kSimWorldMapTiles || sy >= kSimWorldMapTiles)
+          grid.ocean[at] = true; /* The uncharted hemisphere is open ocean. */
+        else {
+          /* Charted water belongs to the terrain grid, which sits above the
+           * uncharted ocean shell. Match its elevation before adding crests
+           * so native water artwork cannot cover the wave patch. */
+          grid.surface_radius[at] = radius + WorldNavigationTerrainHeightAt(
+              sx * kSimWorldMapTilePixels, sy * kSimWorldMapTilePixels, NULL) *
+              projection->height_world_per_unit;
+          grid.ocean[at] = SimWorldMap_OpenWaterMask((int)floorf(sx), (int)floorf(sy), mask);
+          for (int i = 0; grid.ocean[at] && i < 64; i++) grid.ocean[at] = mask[i] != 0;
+        }
+      }
+    }
+    grid.radius = radius;
+    grid.height_scale = projection->height_world_per_unit;
+    grid.frame = projection->globe_frame;
+    grid.geography = SimWorldMap_TerrainSerial();
+    grid.ready = true;
+  }
+  /* Reduce each phase independently to retain smooth motion across long
+   * sessions without introducing a discontinuity at a timer wrap. */
+  const float long_phase = (float)fmod((double)elapsed_ms * .0016, 2 * (double)kPi);
+  const float cross_phase = (float)fmod((double)elapsed_ms * .0021, 2 * (double)kPi);
+  Sim3DDepthVertex points[kPoints];
+  Scene3DClipPoint clips[kPoints];
+  for (int row = 0; row <= kRows; row++) for (int col = 0; col <= kColumns; col++) {
+    const int at = row * kAxis + col;
+    const float x = grid.local[at][0], y = grid.local[at][1];
+    const float long_wave = sinf(y * 12 + x * .8f - long_phase);
+    const float cross_wave = sinf(x * 8.6f - y * 1.8f - cross_phase);
+    const float rise = .014f + .008f * long_wave + .004f * cross_wave;
+    const float r = grid.surface_radius[at] + rise;
+    float world[3] = {r * grid.normal[at][0], r * grid.normal[at][1],
+        r * grid.normal[at][2] - radius};
+    Scene3DPoint screen;
+    if (!WorldNavigationProjectPoint(projection, viewport, world, &screen,
+            &points[at].depth, &clips[at])) return false;
+    const float crest = powf(fmaxf(0, long_wave * .8f + cross_wave * .2f), 4);
+    const float gain = .72f + .22f * grid.normal[at][2];
+    points[at].x = screen.x;
+    points[at].y = screen.y;
+    points[at].color = (ArRenderColorF){.05f * gain + crest * .12f,
+        .15f * gain + crest * .23f, .84f * gain + crest * .08f, 1};
+    points[at].uv = (ArRenderPointF){-1, -1};
+  }
+  Sim3DDepthVertex vertices[kBatch * 4];
+  Scene3DClipPoint quad_clips[kBatch * 4];
+  size_t used = 0;
+  for (int row = 0; row < kRows; row++) for (int col = 0; col < kColumns; col++) {
+    const int at = row * kAxis + col, corners[4] = {at, at + 1, at + kAxis + 1, at + kAxis};
+    if (!grid.ocean[corners[0]] || !grid.ocean[corners[1]] ||
+        !grid.ocean[corners[2]] || !grid.ocean[corners[3]]) continue;
+    for (int p = 0; p < 4; p++) {
+      vertices[used * 4 + p] = points[corners[p]];
+      quad_clips[used * 4 + p] = clips[corners[p]];
+    }
+    if (++used == kBatch) {
+      if (!WorldNavigationAppendProjectedQuads(kSim3DDepthPass_Ground, vertices,
+              quad_clips, used, viewport)) return false;
+      used = 0;
+    }
+  }
+  return !used || WorldNavigationAppendProjectedQuads(kSim3DDepthPass_Ground, vertices,
+      quad_clips, used, viewport);
+}
+
 bool DrawWorldNavigationSurfaceLayers(const FrameSlot *slot, ArRenderRectI viewport,
     const WorldNavigationProjection *projection, uint64_t elapsed_ms) {
   bool ok = Sim3DDepthPass_Begin(&g_render_device, viewport.w, viewport.h, kArRenderFilter_Linear);

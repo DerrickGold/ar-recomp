@@ -189,6 +189,7 @@ typedef struct DioramaProjection {
   DioramaPlaneProjection bg1_plane;
   DioramaPlaneProjection bg2_plane;
   DioramaPlaneProjection bg1_high_plane;
+  DioramaPlaneProjection bg1_far_plane;
   DioramaPlaneProjection bg2_high_plane;
   DioramaSkyboxProjection bg2_skybox;
   DioramaPlaneProjection object_planes[kDioramaObjectPriorityCount];
@@ -261,6 +262,11 @@ bool Diorama_ProjectCapturedBg1Point(const DioramaProjection *projection,
 
 /* Same mapping for BG1's priority-1 tile band. */
 bool Diorama_ProjectCapturedBg1HighPoint(
+    const DioramaProjection *projection,
+    float capture_x, float capture_y, ArRenderPointF *point,
+    float *scale_x, float *scale_y);
+
+bool Diorama_ProjectCapturedBg1FarPoint(
     const DioramaProjection *projection,
     float capture_x, float capture_y, ArRenderPointF *point,
     float *scale_x, float *scale_y);
@@ -345,6 +351,11 @@ typedef struct DioramaScene {
   uint32_t effect_bg_plane_mask;
   DioramaPlaneEffectFn plane_effect;
   void *plane_effect_userdata;
+  /* Draw a host-owned background in the current local viewport before all
+   * native planes. Restore the caller's render target before returning; the
+   * compositor restores its viewport. The caller suppresses replaced planes. */
+  PresentationOutcome (*backdrop)(void *userdata, ArRenderRectI viewport);
+  void *backdrop_userdata;
 } DioramaScene;
 
 /* Resolve the same painter order/shapes used by Composite. The output holds

@@ -14,4 +14,5 @@ bool PresentWorldNavSky_DrawClouds(ArRenderDevice *device, const FrameSlot *slot
                                    const WorldNavigationProjection *projection, uint64_t elapsed_ms,
                                    float drift, float opacity);
 void PresentWorldNavSky_Reset(void);
+bool PresentWorldNavSky_PrepareCompletion(void);
 #endif

@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "actraiser_world_locations.h"
 #include "constants.h"
 #include "sim/sim_world_map.h"
 
@@ -2232,6 +2233,22 @@ void SimRenderMetadata_CaptureSkyPalaceFrame(
       dst->underlay_serial) ? kSimView_SkyPalace : kSimView_AuthenticFallback;
   dst->view_reason = dst->view == kSimView_SkyPalace
       ? kSimViewReason_Enabled : kSimViewReason_InvalidPalaceScene;
+}
+
+void SimRenderMetadata_CaptureDeathHeimCompletionFrame(
+    SimFrameData *dst, const uint8 *wram, uint8_t brightness) {
+  if (!dst || !wram) return;
+  ActRaiserWorldRegion region;
+  if (!ActRaiserWorldLocation_Region(7, &region)) return;
+  const uint16_t x = region.x + 128, y = region.y + 128;
+  dst->underlay_serial = SimWorldMap_DevelopedAvailable() ? SimWorldMap_Serial() : 0;
+  dst->death_heim_completion_world = SimWorldNavigationScene_BuildSkyPalace(
+      &dst->world_navigation_scene, x, y, 7, dst->underlay_serial);
+  dst->world_navigation.focus_x = x;
+  dst->world_navigation.focus_y = y;
+  dst->world_navigation.active_location = 7;
+  dst->world_navigation_brightness = brightness;
+  SimWorldNavigationTowns_CaptureCached(wram, &dst->world_navigation_towns);
 }
 
 void SimRenderMetadata_CaptureFrame(

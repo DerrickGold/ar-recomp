@@ -4,12 +4,15 @@
 #include "sim/sim3d/sim3d_depth_pass.h"
 #include "sim/sim3d/sim_cloud_effect_backend.h"
 #include "sim/sim3d/sim_shadow_effect_backend.h"
+#include "sim/world_nav/completion_vista_backend.h"
+#include "sim/world_nav/present_world_nav.h"
 #include "support/test_assert.h"
 #include <stdio.h>
 
 /* Fault-injected portable boundary: no GPU, settings globals or game state. */
 static bool available = true, fail_create, fail_clear, fail_end, fatal;
 static int creates, destroys, ends, shader_calls;
+static int completion_prepares;
 static ArRenderTargetBeginResult begin_result = kArRenderTargetBegin_Ready;
 static ArRenderBlendMode rejected_blend = kArRenderBlendMode_Opaque;
 static Sim3DPreparedPipelines pipelines = {
@@ -49,6 +52,15 @@ bool SimShadowEffectBackend_IsAvailable(ArRenderDevice *device) {
   (void)device;
   ++shader_calls;
   return available;
+}
+bool CompletionVistaBackend_IsAvailable(ArRenderDevice *device) {
+  (void)device;
+  ++shader_calls;
+  return available;
+}
+bool PresentWorldNav_PrepareCompletionResources(void) {
+  ++completion_prepares;
+  return true;
 }
 bool ArRenderDevice_CreateTexture(ArRenderDevice *device, const ArRenderTextureDesc *desc,
                                   ArRenderTexture *out) {
@@ -103,13 +115,14 @@ int main(void) {
   assert(!RenderPreparation_Prepare(NULL, &features));
   assert(!RenderPreparation_Prepare(&device, NULL));
   assert(RenderPreparation_Prepare(&device, &features));
-  assert(features == kRenderFeature_All && shader_calls == 7 && ends == 1);
+  assert(features == kRenderFeature_All && shader_calls == 8 && ends == 1);
+  assert(completion_prepares == 1);
   assert(creates == destroys);
   /* Linear meshes are an acceleration, not a distinct visual setting. A
    * prepared rejection retains ordinary SIM geometry and unrelated features. */
   pipelines.linear_models = false;
   assert(RenderPreparation_Prepare(&device, &features));
-  assert(features == kRenderFeature_All && shader_calls == 14 && ends == 2 && creates == destroys);
+  assert(features == kRenderFeature_All && shader_calls == 16 && ends == 2 && creates == destroys);
   pipelines.linear_models = true;
   available = false;
   pipelines.radial = false;
@@ -117,7 +130,8 @@ int main(void) {
   assert(RenderPreparation_Prepare(&device, &features));
   assert(features ==
          (kRenderFeature_Depth | kRenderFeature_Effects | kRenderFeature_SimSoftShadows));
-  assert(shader_calls == 21 && creates == destroys);
+  assert(shader_calls == 24 && creates == destroys);
+  assert(completion_prepares == 2); /* Unavailable shader needs no cloud bake. */
   fail_clear = true;
   assert(!RenderPreparation_Prepare(&device, &features));
   assert(ends == 4 && creates == destroys); /* clear failure still restores */

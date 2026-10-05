@@ -2,6 +2,17 @@
  * The full GPU fixture links the real SIM providers. Unexpected entry here
  * must fail loudly rather than accidentally validate a partial town scene. */
 #include "support/test_assert.h"
+#include "sim/world_nav/completion_vista_backend.h"
+bool CompletionVistaBackend_IsAvailable(ArRenderDevice *device) {(void)device;return false;}
+PresentationOutcome CompletionVistaBackend_Draw(ArRenderDevice *device,
+    ArRenderRectI viewport,const CompletionVistaParams *params) {
+  (void)device;
+  (void)viewport;
+  (void)params;
+  assert(!"Unexpected completion shader draw");
+  return kPresentationOutcome_CoreFailure;
+}
+void CompletionVistaBackend_Reset(ArRenderDevice *device) {(void)device;}
 #include "sim/sim3d/present_sim3d_project.h"
 #include "sim/world_nav/present_sim_globe_mountains.h"
 #include "sim/world_nav/present_sim_globe_terrain.h"

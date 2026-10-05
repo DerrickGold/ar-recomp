@@ -53,6 +53,7 @@ typedef enum SimWorldMapBuildConsumer {
   kBuildConsumer_Town,
   kBuildConsumer_WorldNavigation,
   kBuildConsumer_SkyPalace,
+  kBuildConsumer_DeathHeimCompletion,
 } SimWorldMapBuildConsumer;
 
 static SimWorldMapRomTables s_rom_tables;
@@ -223,7 +224,7 @@ static void CacheInputs(const uint8_t *wram) {
 }
 
 static void BuildFromWram(const uint8_t *wram, bool sky_palace_enabled,
-                          bool compare_oracle) {
+                          bool completion_enabled, bool compare_oracle) {
   const uint8 map_group = wram[kActRaiserWram_MapGroup];
   const uint8 map_number = wram[kActRaiserWram_CurrentMap];
   SimWorldMapBuildConsumer consumer = kBuildConsumer_None;
@@ -235,6 +236,9 @@ static void BuildFromWram(const uint8_t *wram, bool sky_palace_enabled,
   else if (sky_palace_enabled && map_group == kActRaiserMapGroup_NonAction &&
            map_number == kActRaiserNonActionMap_SkyPalace)
     consumer = kBuildConsumer_SkyPalace;
+  else if (completion_enabled && map_group == kActRaiserMapGroup_DeathHeim &&
+           map_number == kActRaiserDeathHeimMap_Hub)
+    consumer = kBuildConsumer_DeathHeimCompletion;
 
   if (consumer == kBuildConsumer_None) {
     s_previous_consumer = kBuildConsumer_None;
@@ -285,7 +289,9 @@ static void BuildFromWram(const uint8_t *wram, bool sky_palace_enabled,
   if (entry)
     reason = consumer == kBuildConsumer_WorldNavigation
         ? "world-navigation entry"
-        : consumer == kBuildConsumer_SkyPalace ? "Sky Palace entry" : "town entry";
+        : consumer == kBuildConsumer_SkyPalace ? "Sky Palace entry"
+        : consumer == kBuildConsumer_DeathHeimCompletion ? "Death Heim completion entry"
+                                                       : "town entry";
   fprintf(stderr,
           "[sim-worldmap] HLE built from sim state at gf=%u after %s "
           "(%d tile%s changed)\n",
@@ -296,9 +302,13 @@ static void BuildFromWram(const uint8_t *wram, bool sky_palace_enabled,
 }
 
 void SimWorldMap_BuildIfNeeded(bool sky_palace_enabled) {
-  BuildFromWram(g_ram, sky_palace_enabled, OracleComparisonEnabled());
+  BuildFromWram(g_ram, sky_palace_enabled, false, OracleComparisonEnabled());
+}
+
+void SimWorldMap_BuildForDeathHeimCompletion(void) {
+  BuildFromWram(g_ram, false, true, false);
 }
 
 void SimWorldMap_BuildFromSnapshot(const uint8_t *wram) {
-  if (wram) BuildFromWram(wram, false, false);
+  if (wram) BuildFromWram(wram, false, false, false);
 }

@@ -37,7 +37,8 @@ RULES = {
         'src/actraiser/actraiser_rtl.c', 'src/actraiser/actraiser_cheats.c',
         'src/actraiser/enhancements/*'],
     'sim/world_nav/present_world_nav_internal.h': [
-        'src/sim/world_nav/present_world_nav*.c', 'src/sim/world_nav/present_sim_globe.c'],
+        'src/sim/world_nav/present_world_nav*.c', 'src/sim/world_nav/present_sim_globe.c',
+        'src/sim/world_nav/present_completion_vista.c'],
     'action/action_environment_capture_internal.h': [
         'src/action/action_effects.c', 'src/action/action_*_effect_capture.c',
         'src/action/action_environment_scene.c', 'src/action/action_map_effect_scene.c',

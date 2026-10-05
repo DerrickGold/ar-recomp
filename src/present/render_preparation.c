@@ -7,6 +7,8 @@
 #include "sim/sim3d/sim3d_depth_pass.h"
 #include "sim/sim3d/sim_cloud_effect_backend.h"
 #include "sim/sim3d/sim_shadow_effect_backend.h"
+#include "sim/world_nav/completion_vista_backend.h"
+#include "sim/world_nav/present_world_nav.h"
 
 static bool ProbeBlend(ArRenderDevice *device, ArRenderTexture texture,
                        ArRenderBlendMode blend) {
@@ -46,6 +48,13 @@ bool RenderPreparation_Prepare(ArRenderDevice *device, RenderFeatureMask *suppor
   if (SessionFatal_Requested()) return false;
   const bool shadow_shader = SimShadowEffectBackend_IsAvailable(device);
   if (SessionFatal_Requested()) return false;
+  /* Materialize the ending's custom blend pipelines at boot/reset. Lazy
+   * preparation here otherwise stalls the native A-to-B reveal. The ordinary
+   * globe remains usable when this optional material is unavailable. */
+  const bool completion_shader = CompletionVistaBackend_IsAvailable(device);
+  if (SessionFatal_Requested()) return false;
+  const bool completion_clouds = completion_shader &&
+      PresentWorldNav_PrepareCompletionResources();
 
   ArRenderTexture sample = ArRenderTexture_Invalid(), target = ArRenderTexture_Invalid();
   const ArRenderTextureDesc sample_desc = {
@@ -76,10 +85,12 @@ bool RenderPreparation_Prepare(ArRenderDevice *device, RenderFeatureMask *suppor
   ArRenderDevice_DestroyTexture(device, sample);
   ArRenderDevice_DestroyTexture(device, target);
   const ArRenderCapabilities *caps = ArRenderDevice_Capabilities(device);
-  fprintf(stderr, "[graphics-prepare] features=$%x texture-limit=%dx%d "
-      "depth=%d linear-models=%d radial=%d surface=%d body=%d cloud-shader=%d shadow-shader=%d\n",
-      *supported, caps->maximum_texture_width, caps->maximum_texture_height,
-      depth.depth, depth.linear_models, depth.radial, depth.surfaces, depth.spherical_body,
-      cloud_shader, shadow_shader);
+  fprintf(stderr,
+          "[graphics-prepare] features=$%x texture-limit=%dx%d "
+          "depth=%d linear-models=%d radial=%d surface=%d body=%d cloud-shader=%d shadow-shader=%d "
+          "completion-shader=%d completion-clouds=%d\n",
+          *supported, caps->maximum_texture_width, caps->maximum_texture_height, depth.depth,
+          depth.linear_models, depth.radial, depth.surfaces, depth.spherical_body, cloud_shader,
+          shadow_shader, completion_shader, completion_clouds);
   return ok && !SessionFatal_Requested();
 }

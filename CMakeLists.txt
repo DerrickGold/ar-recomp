@@ -1308,6 +1308,8 @@ if(BUILD_TESTING)
         src/sim/world_nav/present_world_nav_model_mesh.c
         src/sim/voxels/sim_background_voxel_project.c
         src/sim/world_nav/present_world_nav_sky.c
+        src/sim/world_nav/present_completion_vista.c
+        src/sim/world_nav/sim_completion_cherubs.c
         src/sim/world_nav/sim_world_navigation_globe.c
         src/sim/world_nav/sim_world_navigation_mountains.c
         src/sim/world_nav/sim_world_navigation_mountain_transition.c
@@ -1431,6 +1433,7 @@ if(BUILD_TESTING)
         src/sim/voxels/sim_background_voxel_terrain_depth.c
         src/sim/mountains/sim_background_mountain_render.c
         src/platform/sdl/sim_cloud_effect_backend_sdl.c
+        src/platform/sdl/completion_vista_backend_sdl.c
         src/platform/sdl/sim3d_depth_pass_sdl.c
         src/platform/sdl/sim3d_depth_pass_pipelines_sdl.c
         src/platform/sdl/sim3d_depth_pass_meshes_sdl.c)
@@ -1449,6 +1452,8 @@ if(BUILD_TESTING)
         COMMAND actraiser_present_world_nav_gpu_test)
     add_test(NAME actraiser_present_world_nav_ground_atlas_gpu
         COMMAND actraiser_present_world_nav_gpu_test --ground-atlas ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME actraiser_death_heim_completion_gpu
+        COMMAND actraiser_present_world_nav_gpu_test --death-heim-completion ${CMAKE_CURRENT_BINARY_DIR})
     add_test(NAME actraiser_present_world_nav_lod_gpu
         COMMAND actraiser_present_world_nav_gpu_test --town-lod)
     add_test(NAME actraiser_present_world_nav_resize_gpu
@@ -1459,7 +1464,7 @@ if(BUILD_TESTING)
         ENVIRONMENT "SDL_AUDIODRIVER=dummy;AR_TEST_VISIBLE_WINDOW=1" SKIP_RETURN_CODE 77)
     set_tests_properties(actraiser_present_world_nav_gpu
         actraiser_present_world_nav_ground_atlas_gpu actraiser_present_world_nav_resize_gpu
-        actraiser_present_world_nav_lod_gpu PROPERTIES
+        actraiser_present_world_nav_lod_gpu actraiser_death_heim_completion_gpu PROPERTIES
         ENVIRONMENT "SDL_AUDIODRIVER=dummy" SKIP_RETURN_CODE 77)
 
     add_executable(actraiser_parallel_work_test tests/parallel_work_test.c
@@ -1540,6 +1545,14 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_sim_world_navigation_globe_test PRIVATE actraiser_math)
     add_test(NAME actraiser_sim_world_navigation_globe
         COMMAND actraiser_sim_world_navigation_globe_test)
+
+    add_executable(actraiser_sim_completion_cherubs_test
+        tests/sim_completion_cherubs_test.c
+        src/sim/world_nav/sim_completion_cherubs.c)
+    target_include_directories(actraiser_sim_completion_cherubs_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_sim_completion_cherubs
+        COMMAND actraiser_sim_completion_cherubs_test)
 
     add_executable(actraiser_sim_world_navigation_terrain_test
         tests/sim_world_navigation_terrain_test.c

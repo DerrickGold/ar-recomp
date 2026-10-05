@@ -113,7 +113,8 @@ static void TestDefaultsAndMetadata(void) {
    * Seeded regional rolls add two options; save slots add two entry actions.
    * Remember last town adds a native/enhanced QoL preference; native menu
    * quick use adds an independent QoL toggle. Save editing adds Apply and restart. */
-  const int expected_descriptors = 307;
+  /* Ten independent Death Heim completion presentation controls. */
+  const int expected_descriptors = 317;
   if (g_setting_desc_count != expected_descriptors)
     fprintf(stderr, "Setting descriptors: expected %d, got %d\n",
             expected_descriptors, g_setting_desc_count);
@@ -2435,6 +2436,38 @@ static void TestAutoBootPreservesDisplayPreferences(void) {
   remove(path);
 }
 
+static void TestCompletionSettings(void) {
+  ClearSettingsEnv();
+  Settings_Init();
+  const char *keys[]={"death_heim_completion_world","death_heim_completion_waves",
+    "death_heim_completion_pixel_water","death_heim_completion_clouds",
+    "death_heim_completion_light_shafts","death_heim_completion_cherubs",
+    "death_heim_completion_feathers","death_heim_completion_platform_details",
+    "death_heim_completion_rim_light","death_heim_completion_sun_glints"};
+  for (unsigned i=0;i<sizeof(keys)/sizeof(keys[0]);i++) {
+    const SettingDesc *desc=Settings_Find(keys[i]);
+    CHECK(desc && desc->category==kSettingCat_ActionCompletion && desc->type==kSettingType_Bool);
+    CHECK(!Settings_IsDebugOnly(desc));
+    CHECK(*(bool *)desc->field && !Settings_IsAvailable(desc));
+  }
+  g_settings.diorama_mode = true;
+  g_settings.diorama_skybox = kDioramaSky_Only;
+  g_settings.sim3d_mode=g_settings.sim3d_world_navigation=false;
+  for(unsigned i=0;i<sizeof(keys)/sizeof(keys[0]);i++)
+    CHECK(Settings_IsAvailable(Settings_Find(keys[i])));
+  CHECK(Settings_SetLong(Settings_Find(keys[6]),0)==kSettingChange_Applied);
+  CHECK(Settings_SetLong(Settings_Find(keys[9]),0)==kSettingChange_Applied);
+  const char *path="actraiser-completion-settings-test.ini";
+  CHECK(Settings_Save(path));
+  Settings_InitWithFile(path);
+  CHECK(g_settings.death_heim_completion_world && !g_settings.death_heim_completion_feathers);
+  CHECK(!g_settings.death_heim_completion_sun_glints);
+  CHECK(!g_settings.sim3d_mode && !g_settings.sim3d_world_navigation);
+  CHECK(Settings_SetLong(Settings_Find(keys[0]),0)==kSettingChange_Applied);
+  CHECK(!Settings_IsAvailable(Settings_Find(keys[1])));
+  remove(path);
+}
+
 int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--dump-ui-catalog")) {
     DumpInterfaceInventory();
@@ -2451,6 +2484,7 @@ int main(int argc, char **argv) {
   TestDefaultsAndMetadata();
   TestRememberTownPreference();
   TestConnectedWorldDefaults();
+  TestCompletionSettings();
   TestVideoSettingAudit();
   TestSupportedAspectTransitions();
   TestSim3DEnvironmentLabels();

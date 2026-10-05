@@ -16,8 +16,8 @@
  *   2. The selectable entrypoint name differs for SPIR-V and MSL: glslc leaves
  *      SPIR-V at `main`, while spirv-cross emits Metal `main0`. Swapping them
  *      is checked in SPIR-V metadata; live pipelines validate linkage.
- *      Vulkan module creation need not resolve an entrypoint. DXIL is already a single compiled stage container and D3D12
- *      implementations may ignore this field, so only its positive case is
+ *      Vulkan module creation need not resolve an entrypoint. DXIL is already a single compiled
+ * stage container and D3D12 implementations may ignore this field, so only its positive case is
  *      meaningful.
  *
  * Needs a real GPU device, so it is skipped (exit 0) wherever one cannot be
@@ -55,6 +55,7 @@ typedef struct {
 #include "shaders/sim3d_shadow_batch_frag.h"
 #include "shaders/sim_shadow_blur_frag.h"
 #include "shaders/sim_cloud_frag.h"
+#include "shaders/completion_vista_frag.h"
 #include "shaders/sim3d_model_clipped_frag.h"
 
 static int s_failures;
@@ -66,8 +67,8 @@ static int s_failures;
     }                                                                                              \
   } while (0)
 
-/* Representative shaders from each graphics interface the game ships. Adding a .frag.glsl without adding it here
- * would leave it unguarded, so keep this list in step with the platform effect
+/* Representative shaders from each graphics interface the game ships. Adding a .frag.glsl without
+ * adding it here would leave it unguarded, so keep this list in step with the platform effect
  * implementations. */
 typedef struct ShaderCase {
   const char *name;
@@ -153,6 +154,10 @@ static const ShaderCase kShaders[] = {
      SDL_GPU_SHADERSTAGE_FRAGMENT,
      1,
      1},
+    {"completion_vista",
+     {kCompletionVistaFragMSL,kCompletionVistaFragMSLSize,kCompletionVistaFragSPV,
+      kCompletionVistaFragSPVSize,kCompletionVistaFragDXIL,kCompletionVistaFragDXILSize},
+     SDL_GPU_SHADERSTAGE_FRAGMENT,1,1},
     {"sim_cloud",
      {kSimCloudFragMSL, kSimCloudFragMSLSize, kSimCloudFragSPV, kSimCloudFragSPVSize,
       kSimCloudFragDXIL, kSimCloudFragDXILSize},
@@ -259,18 +264,23 @@ static void CheckPipeline(SDL_GPUDevice *device, const ShaderCase *test, const c
     if (model) attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
     if (count == 3) attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
     const SDL_GPUVertexBufferDescription buffer = {
-      .slot = 0, .pitch = count * 16,
-      .input_rate = shadow || spherical ? SDL_GPU_VERTEXINPUTRATE_INSTANCE : SDL_GPU_VERTEXINPUTRATE_VERTEX,
+        .slot = 0,
+        .pitch = count * 16,
+        .input_rate =
+            shadow || spherical ? SDL_GPU_VERTEXINPUTRATE_INSTANCE : SDL_GPU_VERTEXINPUTRATE_VERTEX,
     };
     const SDL_GPUColorTargetDescription color = {.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM};
     const SDL_GPUGraphicsPipelineCreateInfo info = {
-      .vertex_shader = vs, .fragment_shader = fs,
-      .vertex_input_state = {&buffer, 1, attributes, count},
-      .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
-      .rasterizer_state = {.fill_mode = SDL_GPU_FILLMODE_FILL, .cull_mode = SDL_GPU_CULLMODE_NONE,
-                          .front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE, .enable_depth_clip = true},
-      .multisample_state = {.sample_count = SDL_GPU_SAMPLECOUNT_1},
-      .target_info = {.color_target_descriptions = &color, .num_color_targets = 1},
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .vertex_input_state = {&buffer, 1, attributes, count},
+        .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+        .rasterizer_state = {.fill_mode = SDL_GPU_FILLMODE_FILL,
+                             .cull_mode = SDL_GPU_CULLMODE_NONE,
+                             .front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE,
+                             .enable_depth_clip = true},
+        .multisample_state = {.sample_count = SDL_GPU_SAMPLECOUNT_1},
+        .target_info = {.color_target_descriptions = &color, .num_color_targets = 1},
     };
     SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
     CHECK(pipeline);
@@ -286,8 +296,10 @@ int main(void) {
     CHECK(HasSpirvEntryPoint(&kShaders[i].blobs, kShaders[i].stage, "main"));
     CHECK(!HasSpirvEntryPoint(&kShaders[i].blobs, kShaders[i].stage, "main0"));
     CHECK(!HasSpirvEntryPoint(&kShaders[i].blobs,
-        kShaders[i].stage == SDL_GPU_SHADERSTAGE_VERTEX ? SDL_GPU_SHADERSTAGE_FRAGMENT : SDL_GPU_SHADERSTAGE_VERTEX,
-        "main"));
+                              kShaders[i].stage == SDL_GPU_SHADERSTAGE_VERTEX
+                                  ? SDL_GPU_SHADERSTAGE_FRAGMENT
+                                  : SDL_GPU_SHADERSTAGE_VERTEX,
+                              "main"));
   }
   if (s_failures) return 1;
   if (!SDL_Init(SDL_INIT_VIDEO)) {

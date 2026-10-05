@@ -318,6 +318,17 @@ static void PlaneEffect(void *data, int plane, const DioramaProjection *projecti
   Record(plane);
 }
 
+static PresentationOutcome Backdrop(void *data, ArRenderRectI viewport) {
+  Recorder *r = data;
+  assert(r->bound_effect == -1 && r->state.viewport_set);
+  assert(viewport.x == 0 && viewport.y == 0 && viewport.w > 0 && viewport.h > 0);
+  assert(viewport.w == r->state.viewport.w && viewport.h == r->state.viewport.h);
+  Record(15);
+  Record(viewport.w);
+  Record(viewport.h);
+  return kPresentationOutcome_Complete;
+}
+
 static ArRenderTexture Skybox(void *data, ArRenderDevice *d, int source,
                              bool fill, uint32_t color, bool *failed) {
   (void)d;
@@ -433,7 +444,8 @@ unsigned DioramaFixture_Run(unsigned scenario) {
     .layer_section = room->section,
     .bg1_dimming = 0.23f, .bg1_dimming_ramp = {0.1f,0.2f,0.2f,0.1f},
     .effect_obj_priority_mask = 15, .effect_bg_plane_mask = 3,
-    .plane_effect = PlaneEffect, .plane_effect_userdata = &r};
+    .plane_effect = PlaneEffect, .plane_effect_userdata = &r,
+    .backdrop = completion ? Backdrop : NULL, .backdrop_userdata = &r};
   DioramaProjection projection;
   r.capture = &capture;
   r.projection = &projection;

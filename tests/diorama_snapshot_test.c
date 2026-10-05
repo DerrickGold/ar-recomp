@@ -26,6 +26,11 @@ static void Reject(size_t size) {
   assert(!DioramaSnapshot_Decode(packet,size,&out));
   for (size_t i=0;i<sizeof(out);i++) assert(((uint8_t *)&out)[i]==0xa5);
 }
+static PresentationOutcome HostBackdrop(void *userdata, ArRenderRectI viewport) {
+  (void)userdata;
+  (void)viewport;
+  return kPresentationOutcome_Complete;
+}
 int main(void) {
   const DioramaRenderOptions options={.visible_planes=1,.skybox=kDioramaSky_Off};
   const DioramaScene scene={.render=&options,.map_group=1,.map_number=1};
@@ -34,6 +39,11 @@ int main(void) {
       .viewport={0,0,960,600}};
   DioramaSnapshot snapshot, decoded;
   assert(DioramaSnapshot_Describe(&snapshot,&capture,&view,&scene,1,0,0));
+  DioramaScene host_scene=scene;
+  host_scene.backdrop=HostBackdrop;
+  memset(&decoded,0xa5,sizeof(decoded));
+  assert(!DioramaSnapshot_Describe(&decoded,&capture,&view,&host_scene,1,0,0));
+  for (size_t i=0;i<sizeof(decoded);i++) assert(((uint8_t *)&decoded)[i]==0xa5);
   for (int i=0;i<640*352;i++) pixels[i]=0x7f000000u | (uint32_t)i;
   DioramaSnapshotImage images[kDioramaSnapshotImageCount]={0};
   images[0]=(DioramaSnapshotImage){(const uint8_t *)pixels,640*4};

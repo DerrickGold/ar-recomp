@@ -19,6 +19,8 @@
 #include "present/presentation_surface.h"
 #include "present/presentation_upload_mirror.h"
 #include "render/present_hud.h"
+#include "sim/world_nav/present_world_nav.h"
+#include "sim/world_nav/completion_vista_backend.h"
 
 static ArRenderTexture s_plane_textures[kDioramaPlane_Count];
 static ArRenderTexture s_resolved_textures[kDioramaPlane_Count];
@@ -30,11 +32,16 @@ static DioramaSkyboxView s_diorama_skybox_view;
 static ArRenderTexture s_diorama_skybox_texture;
 static bool s_diorama_skybox_texture_periodic;
 static PresentationUploadMirror s_diorama_skybox_mirror;
+static ArRenderTexture s_completion_art;
+static int s_completion_art_width, s_completion_art_height;
 
 /* Session history survives retained frames, room changes and GPU resets. */
 static DioramaCameraPresenter s_diorama_camera = DIORAMA_CAMERA_PRESENTER_INIT;
 
 void PresentDiorama_DestroyPlanes(ArRenderDevice *device) {
+  ArRenderDevice_DestroyTexture(device, s_completion_art);
+  s_completion_art = ArRenderTexture_Invalid();
+  s_completion_art_width = s_completion_art_height = 0;
   DioramaFrameGeneration_FinishCapture();
   for (int i = 0; i < kDioramaPlane_Count; i++) {
     ArRenderDevice_DestroyTexture(device, s_plane_textures[i]);
@@ -128,7 +135,8 @@ static void MaterializeBackgrounds(const SrPpuBgPacket *packet, uint32_t mask,
     if (!s_bg_fallback[plane]) continue;
     for (unsigned y = 0; y < packet->words[1]; ++y)
       for (unsigned x = 0; x < packet->words[0]; ++x)
-        s_bg_fallback[plane][y * packet->words[0] + x] = SrPpuBgPacket_Color(packet, bg, band, x, y);
+        s_bg_fallback[plane][y * packet->words[0] + x] =
+            SrPpuBgPacket_Color(packet, bg, band, x, y);
     pixels[plane] = (const uint8_t *)s_bg_fallback[plane];
     pitches[plane] = packet->words[0] * sizeof(uint32_t);
   }
@@ -144,12 +152,15 @@ static DioramaCoverageMask BackgroundPacketCoverage(const SrPpuBgPacket *packet,
     const unsigned y0 = (gy * height + kDioramaCoverageRows - 1) / kDioramaCoverageRows;
     const unsigned y1 = ((gy + 1) * height + kDioramaCoverageRows - 1) / kDioramaCoverageRows;
     for (unsigned gx = 0; gx < kDioramaCoverageColumns; ++gx) {
-      const unsigned x0 = apron + (gx * width + kDioramaCoverageColumns - 1) / kDioramaCoverageColumns;
-      const unsigned x1 = apron + ((gx + 1) * width + kDioramaCoverageColumns - 1) / kDioramaCoverageColumns;
+      const unsigned x0 =
+          apron + (gx * width + kDioramaCoverageColumns - 1) / kDioramaCoverageColumns;
+      const unsigned x1 =
+          apron + ((gx + 1) * width + kDioramaCoverageColumns - 1) / kDioramaCoverageColumns;
       bool found = false;
       for (unsigned y = y0; y < y1 && !found; ++y) {
         const unsigned row = SrPpuBgPacket_Row(source, y);
-        const uint32_t *meta = packet->words + SR_PPU_BG_PACKET_HEADER_WORDS + row * SR_PPU_BG_PACKET_ROW_WORDS;
+        const uint32_t *meta =
+            packet->words + SR_PPU_BG_PACKET_HEADER_WORDS + row * SR_PPU_BG_PACKET_ROW_WORDS;
         if (meta[0] >= 3 && meta[7]) {
           /* Conservative tile coverage is sufficient for mesh culling; avoid
            * expanding the GPU-owned image just to find occupied grid cells. */
@@ -185,7 +196,8 @@ static DioramaCoverageMask BackgroundPacketCoverage(const SrPpuBgPacket *packet,
               if (at >= meta[2] && at < meta[3] && !(cell[2] & (1u << ((at & 7u) + 16))))
                 covered |= 1u << (at & 7u);
           }
-          found = (covered & mask) != 0; x = end;
+          found = (covered & mask) != 0;
+          x = end;
         }
       }
       if (found) occupied |= UINT64_C(1) << (gy * kDioramaCoverageColumns + gx);
@@ -288,7 +300,8 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
   for (unsigned plane = 0; plane < kDioramaPlane_Count; ++plane)
     if (!(gpu_mask & (1u << plane))) s_resolved_textures[plane] = s_plane_textures[plane];
   SrPpuSurfaceView skybox_storage = slot->diorama_skybox_surface;
-  const bool owned_skybox = slot->background_packet && (slot->background_packet->owned_sources & 4u);
+  const bool owned_skybox =
+      slot->background_packet && (slot->background_packet->owned_sources & 4u);
   const bool skybox_diagnostic = getenv("AR_DIORAMA_SNAPSHOT") || getenv("AR_PLANESTAT");
   if (owned_skybox && (!ArRenderTexture_IsValid(gpu_skybox) || skybox_diagnostic)) {
     const SrPpuBgPacket *packet = slot->background_packet;
@@ -297,7 +310,8 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
     if (s_bg_fallback[kDioramaPlane_Count]) {
       for (unsigned y = 0; y < packet->words[5]; ++y)
         for (unsigned x = 0; x < packet->words[4]; ++x)
-          s_bg_fallback[kDioramaPlane_Count][y * packet->words[4] + x] = SrPpuBgPacket_Color(packet, 2, 0, x, y);
+          s_bg_fallback[kDioramaPlane_Count][y * packet->words[4] + x] =
+              SrPpuBgPacket_Color(packet, 2, 0, x, y);
       skybox_storage.data = (uint8_t *)s_bg_fallback[kDioramaPlane_Count];
     }
   }
@@ -381,8 +395,10 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
     if ((gpu_mask & (1u << plane)) && DioramaPlaneUsesSparseCoverage((int)plane)) {
       if ((gpu_changed & (1u << plane)) || !s_diorama_coverage_masks[plane]) {
         const bool bg2 = plane == kDioramaPlane_Bg2Hi || plane == kDioramaPlane_Bg2Far;
-        const unsigned band = plane == kDioramaPlane_Bg1Hi || plane == kDioramaPlane_Bg2Hi ? 1u : 2u;
-        s_diorama_coverage_masks[plane] = BackgroundPacketCoverage(slot->background_packet, bg2 ? 1u : 0u, band, (unsigned)slot->obj_apron);
+        const unsigned band =
+            plane == kDioramaPlane_Bg1Hi || plane == kDioramaPlane_Bg2Hi ? 1u : 2u;
+        s_diorama_coverage_masks[plane] = BackgroundPacketCoverage(
+            slot->background_packet, bg2 ? 1u : 0u, band, (unsigned)slot->obj_apron);
       }
     } else s_diorama_coverage_masks[plane] = upload.coverage_masks[plane];
   }
@@ -406,6 +422,135 @@ void PresentDiorama_Upload(ArRenderDevice *device, const FrameSlot *slot) {
       device, slot, s_resolved_textures, pixels, pitch_bytes,
       upload.changed_plane_mask, s_diorama_skybox_view.texture, skybox_changed);
   DioramaPerformance_End(frame_analysis);
+}
+
+static ArRenderPointF CompletionPlayer(const FrameSlot *slot,
+                                      const DioramaProjection *projection) {
+  ArRenderPointF player = {.5f, .72f};
+  if (!projection->valid || projection->output_width <= 0 || projection->output_height <= 0)
+    return player;
+  for (unsigned i = 0; i < slot->action_scene_effects.actor_count; i++) {
+    const ActionEffectActor *actor = &slot->action_scene_effects.actors[i];
+    if (!actor->player) continue;
+    ArRenderPointF point;
+    const float x = actor->x - slot->bg1_camera_x + slot->ws_extra;
+    const float y = actor->y - slot->bg1_camera_y + slot->ws_extra_top - 14;
+    if (Diorama_ProjectCapturedPoint(projection, x, y, actor->priority, &point, NULL, NULL))
+      player = (ArRenderPointF){(point.x - projection->output_x) / projection->output_width,
+                                (point.y - projection->output_y) / projection->output_height};
+    break;
+  }
+  return player;
+}
+
+typedef struct CompletionBackdropContext {
+  const FrameSlot *slot;
+  const DioramaProjection *projection;
+  const DioramaCapture *capture;
+  uint32_t visible_planes;
+  ArRenderDevice *device;
+  DeathHeimCompletionArt art;
+} CompletionBackdropContext;
+
+static PresentationOutcome CaptureCompletionArt(CompletionBackdropContext *context,
+                                                ArRenderRectI viewport) {
+  ArRenderDevice *device = context->device;
+  context->art = (DeathHeimCompletionArt){0};
+  const FrameSlot *slot = context->slot;
+  if (!(slot->sim.death_heim_completion_flags &
+        (kDeathHeimCompletion_Platform | kDeathHeimCompletion_Rim)) ||
+      !CompletionVistaBackend_IsAvailable(device))
+    return kPresentationOutcome_Complete;
+  if (s_completion_art_width != viewport.w || s_completion_art_height != viewport.h) {
+    ArRenderDevice_DestroyTexture(device, s_completion_art);
+    s_completion_art = ArRenderTexture_Invalid();
+  }
+  if (!ArRenderTexture_IsValid(s_completion_art)) {
+    const ArRenderTextureDesc desc = {viewport.w, viewport.h, kArRenderPixelFormat_Argb8888,
+        kArRenderTextureUsage_Target, kArRenderFilter_Nearest,
+        kArRenderBlendMode_AlphaPremultiplied};
+    if (!ArRenderDevice_CreateTexture(device, &desc, &s_completion_art))
+      return kPresentationOutcome_OptionalOmitted;
+    s_completion_art_width = viewport.w;
+    s_completion_art_height = viewport.h;
+  }
+  ArRenderTargetState saved;
+  const ArRenderTargetBeginResult begun =
+      ArRenderDevice_BeginTarget(device, s_completion_art, &saved);
+  if (begun != kArRenderTargetBegin_Ready)
+    return begun == kArRenderTargetBegin_StateLost ? kPresentationOutcome_CoreFailure
+                                                  : kPresentationOutcome_OptionalOmitted;
+  bool ready = ArRenderDevice_Clear(device, (ArRenderColorF){0});
+  DioramaProjection projection = *context->projection;
+  projection.output_x = projection.output_y = 0;
+  enum { kColumns = 8, kRows = 12, kVertices = (kColumns + 1) * (kRows + 1) };
+  ArRenderVertex2D vertices[kVertices];
+  int32_t indices[kColumns * kRows * 6];
+  int used = 0;
+  for (int y = 0; y < kRows; y++) for (int x = 0; x < kColumns; x++) {
+    const int a = y * (kColumns + 1) + x;
+    const int32_t cell[6] = {a, a+1, a+kColumns+2, a, a+kColumns+2, a+kColumns+1};
+    memcpy(indices + used, cell, sizeof(cell));
+    used += 6;
+  }
+  const int planes[] = {kDioramaPlane_Bg1Far, SR_PPU_OVERLAY_BG1, kDioramaPlane_Bg1Hi,
+      SR_PPU_OVERLAY_OBJ, kDioramaPlane_Obj1, kDioramaPlane_Obj2, kDioramaPlane_Obj3};
+  for (unsigned p = 0; ready && p < sizeof(planes)/sizeof(planes[0]); p++) {
+    const int plane = planes[p], priority = DioramaPlaneObjectPriority(plane);
+    const ArRenderTexture texture = context->capture->textures[plane];
+    if (!(context->visible_planes & (1u << plane)) ||
+        !context->capture->pixels[plane] || !ArRenderTexture_IsValid(texture)) continue;
+    const DioramaPlaneProjection *shape = priority >= 0 ? &projection.object_planes[priority]
+        : plane == SR_PPU_OVERLAY_BG1 ? &projection.bg1_plane
+        : plane == kDioramaPlane_Bg1Far ? &projection.bg1_far_plane : &projection.bg1_high_plane;
+    if (!shape->valid) continue;
+    bool projected = true;
+    for (int y = 0; projected && y <= kRows; y++) for (int x = 0; x <= kColumns; x++) {
+      const float sx = shape->u0 + (shape->u1-shape->u0)*x/kColumns;
+      const float sy = shape->v0 + (shape->v1-shape->v0)*y/kRows;
+      const float cx =
+          sx * projection.texture_width - projection.texture_x_origin - shape->capture_offset.x;
+      const float cy = sy*projection.texture_height - shape->capture_offset.y;
+      ArRenderVertex2D *v = &vertices[y*(kColumns+1)+x];
+      projected = priority >= 0
+          ? Diorama_ProjectCapturedPoint(&projection,cx,cy,priority,&v->position,NULL,NULL)
+          : plane == SR_PPU_OVERLAY_BG1
+              ? Diorama_ProjectCapturedBg1Point(&projection,cx,cy,&v->position,NULL,NULL)
+              : plane == kDioramaPlane_Bg1Far
+                  ? Diorama_ProjectCapturedBg1FarPoint(&projection,cx,cy,&v->position,NULL,NULL)
+                  : Diorama_ProjectCapturedBg1HighPoint(&projection,cx,cy,&v->position,NULL,NULL);
+      if (!projected) break;
+      v->color = (ArRenderColorF){1,1,1,1}; v->tex_coord = (ArRenderPointF){sx,sy};
+    }
+    if (projected)
+      ready = ArRenderDevice_DrawGeometry(device, texture, vertices, kVertices, indices, used);
+  }
+  if (!ArRenderDevice_EndTarget(device, &saved)) return kPresentationOutcome_CoreFailure;
+  if (!ready) return kPresentationOutcome_OptionalOmitted;
+  ArRenderPointF waterline = CompletionPlayer(slot, &projection);
+  waterline.y += .24f;
+  for (unsigned i = 0; i < slot->action_scene_effects.actor_count; i++) {
+    const ActionEffectActor *actor = &slot->action_scene_effects.actors[i];
+    if (!actor->player) continue;
+    ArRenderPointF point;
+    /* The native completion plinth extends 36 original pixels below the
+     * standing actor. Project that contact through BG1, including camera tilt. */
+    if (Diorama_ProjectCapturedBg1Point(&projection,
+        actor->x-slot->bg1_camera_x+slot->ws_extra,
+        actor->y-slot->bg1_camera_y+slot->ws_extra_top+36,&point,NULL,NULL))
+      waterline = (ArRenderPointF){point.x/viewport.w,point.y/viewport.h};
+    break;
+  }
+  context->art = (DeathHeimCompletionArt){s_completion_art, waterline};
+  return kPresentationOutcome_Complete;
+}
+
+static PresentationOutcome DrawCompletionBackdrop(void *userdata, ArRenderRectI viewport) {
+  CompletionBackdropContext *context = userdata;
+  const PresentationOutcome art = CaptureCompletionArt(context,viewport);
+  if (!PresentationOutcome_IsUsable(art)) return art;
+  return PresentationOutcome_Combine(art,PresentDeathHeimCompletionBackdrop(
+      context->slot, viewport, CompletionPlayer(context->slot, context->projection), context->art));
 }
 
 void PresentDiorama_Draw(ArRenderDevice *device, const FrameSlot *slot, float alpha) {
@@ -593,6 +738,21 @@ retry_projection:;
   DioramaRenderOptions render;
   Diorama_CaptureRenderOptions(&render);
   if (source_draw) render.draw_resident_skybox = DioramaFrameGeneration_DrawSkybox;
+  const bool completion_world = slot->sim.death_heim_completion_world &&
+      slot->diorama_layer_section == kDioramaLayerSection_DeathHeimCompletion &&
+      render.skybox == kDioramaSky_Only;
+  if (completion_world) {
+    render.skybox = kDioramaSky_Off;
+    render.shoebox = false;
+    render.visible_planes &= ~((1u << SR_PPU_OVERLAY_BG2) |
+        (1u << kDioramaPlane_Bg2Hi) | (1u << kDioramaPlane_Bg2Far) |
+        (1u << kDioramaPlane_Backdrop));
+  }
+  /* The compositor publishes the resolved player plane before this callback.
+   * Water reflections and foreground shafts therefore share the same anchor. */
+  CompletionBackdropContext completion = {
+      .slot = slot, .projection = &action_projection, .capture = &capture,
+      .visible_planes = render.visible_planes, .device = device};
   const DioramaScene scene = {
       .render = &render,
       .map_group = slot->diorama_map_group,
@@ -606,6 +766,8 @@ retry_projection:;
       .effect_bg_plane_mask = effect_bg_plane_mask,
       .plane_effect = PresentActionEffects_DrawDioramaPlane,
       .plane_effect_userdata = &plane_effect,
+      .backdrop = completion_world ? DrawCompletionBackdrop : NULL,
+      .backdrop_userdata = &completion,
   };
   DioramaSnapshotCapture_Write(slot, &capture, &view, &scene);
   const PresentationOutcome diorama = Diorama_Composite(
@@ -641,6 +803,20 @@ retry_projection:;
     goto retry_projection;
   }
   PresentActionHeat_End(device, slot, output_viewport);
+  if (completion_world) {
+    const PresentationOutcome foreground =
+        PresentDeathHeimCompletionForeground(slot, output_viewport,
+                                             CompletionPlayer(slot, &action_projection),
+                                             completion.art);
+    if (!PresentationOutcome_IsUsable(foreground)) {
+      DioramaPerformance_End(presentation_performance);
+      DioramaPerformance_PresentCompleted();
+      SessionFatal_Request(
+          "The completion light effects could not restore their renderer state (%s).",
+          ArRenderDevice_LastError(device));
+      return;
+    }
+  }
   /* Count once after recovery, including the first frame that fell back. */
   if (DioramaFrameGeneration_SourceProjectionFallback())
     PerformanceMetrics_Add(kPerformanceCount_EffectProjectionFallbackFrames, 1);
@@ -665,9 +841,13 @@ retry_projection:;
 }
 
 void PresentDiorama_Reset(ArRenderDevice *device) {
+  ArRenderDevice_DestroyTexture(device,s_completion_art);
+  s_completion_art=ArRenderTexture_Invalid();
+  s_completion_art_width=s_completion_art_height=0;
   DioramaFrameGeneration_Reset();
   for (unsigned plane = 0; plane <= kDioramaPlane_Count; ++plane) {
-    free(s_bg_fallback[plane]); s_bg_fallback[plane] = NULL;
+    free(s_bg_fallback[plane]);
+    s_bg_fallback[plane] = NULL;
   }
   DioramaBgGpu_Reset(device);
   DioramaSnapshotCapture_Reset();

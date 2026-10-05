@@ -1,6 +1,7 @@
 /* Palace-only backdrop, mist and density banks. Owns its atlas publication
  * state, but neither the caller's output/depth pass nor native foreground. */
 #include "sim/world_nav/present_world_nav_sky.h"
+#include "sim/world_nav/completion_vista_backend.h"
 #include "sim/sim3d/present_sim3d_environment.h"
 #include "sim/world_nav/sim_world_navigation_sky_clouds.h"
 #include "sim/sim3d/sim3d_performance.h"
@@ -13,6 +14,34 @@ static struct {
   float light[3];
   SimSkyCloudBounds bounds[kSimSkyCloudBanks][kSimSkyCloudSlices + 1];
 } s_clouds;
+
+/* The ending has fixed illumination. Retain its CPU atlas independently of
+ * the Palace's mutable GPU atlas so a prior Palace visit cannot force another
+ * density bake during the A-to-B reveal. About 1.4 MiB, released on reset. */
+static struct {
+  uint32_t *pixels;
+  SimSkyCloudBounds bounds[kSimSkyCloudBanks][kSimSkyCloudSlices + 1];
+} s_completion_clouds;
+static const float kCompletionCloudLight[3] = {0, -.90f, -.43589f};
+
+bool PresentWorldNavSky_PrepareCompletion(void) {
+  if (s_completion_clouds.pixels) return true;
+  uint32_t *pixels = malloc((size_t)kSimSkyCloudAtlasWidth * kSimSkyCloudAtlasHeight *
+                           sizeof(*pixels));
+  if (!pixels) return false;
+  bool ready = SimWorldNavigationSkyClouds_Bake(
+      pixels, kSimSkyCloudAtlasWidth, kCompletionCloudLight, true);
+  for (int bank = 0; ready && bank < kSimSkyCloudBanks; ++bank)
+    for (int slice = 0; ready && slice <= kSimSkyCloudSlices; ++slice)
+      ready = SimWorldNavigationSkyClouds_Bounds(pixels, kSimSkyCloudAtlasWidth,
+          bank, slice, &s_completion_clouds.bounds[bank][slice]);
+  if (!ready) {
+    free(pixels);
+    return false;
+  }
+  s_completion_clouds.pixels = pixels;
+  return true;
+}
 
 static bool CloudBoundsEnabled(void) {
   static int enabled = -1;
@@ -97,10 +126,17 @@ static bool EnsureSkyPalaceCloudAtlas(ArRenderDevice *device, const float light[
   s_clouds.ready = false;
   s_clouds.lighting = lighting;
   memcpy(s_clouds.light, light, sizeof(s_clouds.light));
+  const ArRenderRectI region = {0, 0, kSimSkyCloudAtlasWidth, kSimSkyCloudAtlasHeight};
+  if (lighting && !memcmp(light, kCompletionCloudLight, sizeof(kCompletionCloudLight)) &&
+      PresentWorldNavSky_PrepareCompletion()) {
+    memcpy(s_clouds.bounds, s_completion_clouds.bounds, sizeof(s_clouds.bounds));
+    return s_clouds.ready = Sim3DDepthPass_UploadAtlasRegions(
+        device, kSim3DDepthPass_VolumeCloud, s_completion_clouds.pixels,
+        region.w, region.h, region.w * (int)sizeof(uint32_t), &region, 1);
+  }
   uint32_t *pixels = malloc((size_t)kSimSkyCloudAtlasWidth * kSimSkyCloudAtlasHeight *
       sizeof(*pixels));
   if (!pixels) return false;
-  const ArRenderRectI region = {0, 0, kSimSkyCloudAtlasWidth, kSimSkyCloudAtlasHeight};
   bool ready = SimWorldNavigationSkyClouds_Bake(
       pixels, kSimSkyCloudAtlasWidth, light, lighting);
   for (int bank = 0; ready && bank < kSimSkyCloudBanks; ++bank)
@@ -117,10 +153,11 @@ bool PresentWorldNavSky_DrawClouds(ArRenderDevice *device, const FrameSlot *slot
                                    ArRenderRectI viewport,
                                    const WorldNavigationProjection *projection, uint64_t elapsed_ms,
                                    float drift, float opacity) {
-  static const struct {
+  typedef struct SkyCloudBank {
     float x, y, depth, width, height, thickness, speed, opacity;
     int bank;
-  } banks[] = {
+  } SkyCloudBank;
+  static const SkyCloudBank palace_banks[] = {
     {.12f, -.035f, 7.5f, .60f, .24f, 1.1f, .012f, 1, 0},
     {.54f, -.065f, 8.0f, .62f, .23f, 1.2f, .009f, 1, 1},
     {.93f, -.020f, 7.0f, .56f, .27f, 1.2f, .014f, 1, 2},
@@ -140,7 +177,32 @@ bool PresentWorldNavSky_DrawClouds(ArRenderDevice *device, const FrameSlot *slot
     {.80f, .36f, 1.3f, 1.02f, .49f, .18f, .015f, .90f, 3},
     {1.57f, .33f, 1.1f, .96f, .47f, .18f, .015f, .90f, 1},
   };
-  enum { kBanks = sizeof(banks) / sizeof(banks[0]), kSlices = kSimSkyCloudSlices };
+  /* Reuse the Palace's density volumes as a luminous cloud arch around the
+   * completion sky's luminous opening, with low wisps framing the ocean. */
+  static const SkyCloudBank heaven_banks[] = {
+    {.03f,-.025f,8.0f,.62f,.38f,1.0f,.0010f,1,0},
+    {.97f,-.020f,8.1f,.62f,.39f,1.0f,.0012f,1,2},
+    {.13f,.115f,7.5f,.46f,.29f,.9f,.0008f,1,1},
+    {.87f,.130f,7.6f,.45f,.28f,.9f,.0009f,1,3},
+    {.27f,.225f,7.2f,.44f,.22f,.8f,.0007f,1,2},
+    {.73f,.225f,7.3f,.44f,.22f,.8f,.0008f,1,0},
+    {.47f,.285f,7.0f,.43f,.17f,.7f,.0005f,.9f,1},
+    {.65f,.260f,7.1f,.32f,.16f,.7f,.0006f,.9f,3},
+    {.04f,.540f,5.0f,.42f,.13f,.4f,.0016f,.65f,0},
+    {.96f,.525f,5.1f,.44f,.12f,.4f,.0014f,.65f,2},
+    {.21f,.630f,4.8f,.40f,.11f,.3f,.0019f,.60f,3},
+    {.80f,.610f,4.9f,.41f,.10f,.3f,.0017f,.60f,1},
+    /* Small, nearer translucent wisps cross the distant angel silhouettes.
+     * Their independent speed and depth keep the opening spacious. */
+    {.38f,.095f,4.3f,.18f,.065f,.16f,.0030f,.28f,3},
+    {.60f,.055f,4.5f,.16f,.055f,.14f,.0020f,.22f,1},
+    {.53f,.155f,4.1f,.20f,.050f,.12f,.0026f,.24f,0},
+  };
+  enum { kBanks = sizeof(heaven_banks) / sizeof(heaven_banks[0]), kSlices = kSimSkyCloudSlices };
+  const bool completion = slot->sim.death_heim_completion_world;
+  const bool heavens=completion && CompletionVistaBackend_IsAvailable(device);
+  const SkyCloudBank *banks=heavens ? heaven_banks : palace_banks;
+  const int bank_count=heavens ? kBanks : sizeof(palace_banks)/sizeof(palace_banks[0]);
   float right[3], down[3], forward[3];
   float scale_x = 0, scale_y = 0;
   for (int c = 0; c < 3; c++) {
@@ -164,6 +226,9 @@ bool PresentWorldNavSky_DrawClouds(ArRenderDevice *device, const FrameSlot *slot
     local_light[1] += sun[c] * down[c];
     local_light[2] += sun[c] * forward[c];
   }
+  if(heavens) {
+    memcpy(local_light, kCompletionCloudLight, sizeof(local_light));
+  }
   if (!EnsureSkyPalaceCloudAtlas(device, local_light, slot->sim.world_navigation_lighting))
     return false;
   const bool volume = slot->sim.sky_palace_volumetric_clouds;
@@ -171,12 +236,12 @@ bool PresentWorldNavSky_DrawClouds(ArRenderDevice *device, const FrameSlot *slot
   struct Slice { float depth; int bank, tile; };
   /* Depth and bank layout are immutable. Wind translates the banks laterally
    * but never changes this global back-to-front ordering. */
-  static struct { struct Slice items[kBanks * kSlices]; int count; } orders[2];
-  struct Slice *ordered = orders[volume].items;
-  const bool prepare_order = orders[volume].count == 0;
+  static struct { struct Slice items[kBanks * kSlices]; int count; } orders[2][2];
+  struct Slice *ordered = orders[heavens][volume].items;
+  const bool prepare_order = orders[heavens][volume].count == 0;
   float centre_x[kBanks];
-  int count = orders[volume].count;
-  for (int b = 0; b < kBanks; b++) {
+  int count = orders[heavens][volume].count;
+  for (int b = 0; b < bank_count; b++) {
     const float shift = Scene3D_WrappedTextureOffset(elapsed_ms, banks[b].speed, drift);
     /* A .65 viewport margin encloses even the widest nearest slice.
      * Advection is per bank, not redundantly recomputed for every slice. */
@@ -194,7 +259,7 @@ bool PresentWorldNavSky_DrawClouds(ArRenderDevice *device, const FrameSlot *slot
       ordered[at] = slice;
     }
   }
-  orders[volume].count = count;
+  orders[heavens][volume].count = count;
   const float horizon = PresentWorldNavSky_Horizon(viewport, projection);
   Sim3DPerformance_AddPath(kSim3DPath_CpuProject);
   Sim3DDepthVertex vertices[kBanks * kSlices * 4];
@@ -203,13 +268,14 @@ bool PresentWorldNavSky_DrawClouds(ArRenderDevice *device, const FrameSlot *slot
   const bool trim = CloudBoundsEnabled();
   for (int i = 0; i < count; i++) {
     const int b = ordered[i].bank, tile = ordered[i].tile;
+    if (completion && !heavens && b >= 6) continue;
     /* Crop positions AND UVs in the same original slice coordinates. Keep
      * its centre, depth, density samples and global ordering unchanged. */
     const SimSkyCloudBounds bounds = trim ? s_clouds.bounds[banks[b].bank][tile]
         : (SimSkyCloudBounds){0, 0, kSimSkyCloudWidth - 1, kSimSkyCloudHeight - 1};
     if (bounds.x0 == bounds.x1 || bounds.y0 == bounds.y1) continue;
     const float x = centre_x[b];
-    const float y = horizon + banks[b].y;
+    const float y = heavens ? banks[b].y : horizon + banks[b].y - (completion ? .14f : 0);
     for (int p = 0; p < 4; p++) {
       const float texel_x = p == 1 || p == 2 ? bounds.x1 : bounds.x0;
       const float texel_y = p >= 2 ? bounds.y1 : bounds.y0;
@@ -230,6 +296,18 @@ bool PresentWorldNavSky_DrawClouds(ArRenderDevice *device, const FrameSlot *slot
       v->x = screen.x;
       v->y = screen.y;
       v->color = (ArRenderColorF){1, 1, 1, fminf(1, opacity * 2) * banks[b].opacity};
+      if(heavens) {
+        const float cloud_x=x+(dx-.5f)*banks[b].width;
+        const float cloud_y=y+(dy-.5f)*banks[b].height;
+        const float sx=(cloud_x-.5f)/.36f, sy=(cloud_y+.055f)/.30f;
+        const float radius=sqrtf(sx*sx+sy*sy);
+        const float rim=expf(-powf((radius-.95f)*1.8f,2));
+        /* Lift the ambient fill outside the opening's bright rim so the
+         * arch keeps its volume without becoming a dark storm ceiling. */
+        v->color.r=.60f+.40f*rim;
+        v->color.g=.66f+.31f*rim;
+        v->color.b=.74f+.26f*rim;
+      }
       v->uv = (ArRenderPointF){
         (tile % kSimSkyCloudColumns * kSimSkyCloudWidth + .5f +
             texel_x) / kSimSkyCloudAtlasWidth,
@@ -246,4 +324,6 @@ bool PresentWorldNavSky_DrawClouds(ArRenderDevice *device, const FrameSlot *slot
 
 void PresentWorldNavSky_Reset(void) {
   s_clouds.ready = s_clouds.attempted = false;
+  free(s_completion_clouds.pixels);
+  s_completion_clouds.pixels = NULL;
 }

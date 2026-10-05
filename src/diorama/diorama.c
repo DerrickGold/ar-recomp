@@ -1520,7 +1520,8 @@ static PresentationOutcome DrawDioramaSkybox(
       float *band = draw.mapping.bands[i];
       DioramaSkyboxUvRange(source_width, spans[i].x0, spans[i].x1, blur_radius, &band[0], &band[1]);
       if (spans[i].x1 <= spans[i].x0) band[0] = band[1] = 0;
-      band[2] = spans[i].y0; band[3] = spans[i].y1;
+      band[2] = spans[i].y0;
+      band[3] = spans[i].y1;
     }
     if (vertical_valid) {
       const ArRenderVertex2D verts[] = {
@@ -2359,6 +2360,9 @@ static void PublishDioramaPlanes(const DioramaCapture *capture,
       if (resolved[i].plane == kDioramaPlane_Bg1Hi) {
         out_projection->bg1_high_plane = plane;
       }
+      if (resolved[i].plane == kDioramaPlane_Bg1Far) {
+        out_projection->bg1_far_plane = plane;
+      }
       if (resolved[i].plane == kDioramaPlane_Bg2Hi) {
         out_projection->bg2_high_plane = plane;
       }
@@ -3176,8 +3180,18 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
   PublishDioramaView(capture, view, &geometry, out_projection);
   PublishDioramaPlanes(capture, scene, &geometry, textures, resolved,
                        resolved_count, out_projection);
-  PresentationOutcome outcome = DrawResolvedDioramaSkybox(
+  PresentationOutcome outcome = scene->backdrop
+      ? scene->backdrop(scene->backdrop_userdata,
+          (ArRenderRectI){0, 0, geometry.width, geometry.height})
+      : kPresentationOutcome_Complete;
+  /* Background passes can bind their own depth targets. Re-establish the
+   * output frame before any native platform or actor geometry is submitted. */
+  if (!PresentationOutcome_IsUsable(outcome) ||
+      (scene->backdrop && !ArRenderOutputFrame_RestoreViewport(&output_frame)))
+    goto failed;
+  const PresentationOutcome skybox = DrawResolvedDioramaSkybox(
       device, capture, scene, &geometry, textures, resolved, resolved_count, out_projection);
+  outcome = PresentationOutcome_Combine(outcome, skybox);
   if (!PresentationOutcome_IsUsable(outcome))
     goto failed;
 

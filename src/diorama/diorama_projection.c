@@ -448,6 +448,16 @@ bool Diorama_ProjectCapturedBg1HighPoint(
       &projection->bg1_high_plane, point, scale_x, scale_y);
 }
 
+bool Diorama_ProjectCapturedBg1FarPoint(
+    const DioramaProjection *projection,
+    float capture_x, float capture_y, ArRenderPointF *point,
+    float *scale_x, float *scale_y) {
+  if (!projection || !point) return false;
+  return ProjectCapturedPlanePoint(
+      projection, capture_x, capture_y,
+      &projection->bg1_far_plane, point, scale_x, scale_y);
+}
+
 bool Diorama_ProjectCapturedBg2HighPoint(
     const DioramaProjection *projection,
     float capture_x, float capture_y, ArRenderPointF *point,

@@ -793,10 +793,6 @@ PresentationOutcome DrawWorldNavigationWeather(
   if (!slot->sim.world_navigation_clouds ||
       !slot->sim.cloud_opacity_pct)
     return kPresentationOutcome_Complete;
-  if (!EnsureWorldNavigationCloudTexture())
-    return OmitWorldNavigationWeather(
-        ArRenderDevice_LastError(&g_render_device));
-
   const float opacity =
       (float)slot->sim.cloud_opacity_pct / (float)kPercentScale;
   const float body_visibility = slot->sim.view == kSimView_SkyPalace ? 1.0f
@@ -805,6 +801,16 @@ PresentationOutcome DrawWorldNavigationWeather(
       slot->sim.cloud_altitude_px);
   const float drift =
       (float)slot->sim.cloud_drift_pct / (float)kPercentScale;
+  /* Completion looks out over the northern ocean from below the globe's
+   * weather shell. Reuse Palace's sky banks without its close lower decks,
+   * spherical shroud or world-wide shadow receiver work. */
+  if (slot->sim.death_heim_completion_world)
+    return PresentWorldNavSky_DrawClouds(&g_render_device, slot, viewport, projection,
+        elapsed_ms, drift, opacity) ? kPresentationOutcome_Complete
+        : OmitWorldNavigationWeather(ArRenderDevice_LastError(&g_render_device));
+  if (!EnsureWorldNavigationCloudTexture())
+    return OmitWorldNavigationWeather(
+        ArRenderDevice_LastError(&g_render_device));
 
   /* A cloud's altitude is invisible to an orthographic top-down camera until
    * it casts a displaced shadow. Reuse the town light's world-space shear so

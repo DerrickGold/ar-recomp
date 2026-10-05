@@ -107,6 +107,21 @@ See [Modern SIM menu](manual.md#modern-sim-menu) and
   **Use the included HD title** enabled.
 - Show HD title artwork throughout the animated title intro.
 
+## Widescreen and Diorama rooms
+
+- Give Death Heim room 1 separate A (faces) and B (completion) scenery and
+  background policies, switching during the original black fade.
+- Add an optional completion ocean scene with luminous clouds, light shafts,
+  waves, sun glints, subtle pixel water, cherubs and feathers. Preserve the
+  native platform, hero, text, music timing and ending pace. Its controls live
+  under **Action 3D → Death Heim**, independently of Town/World 3D, with visible
+  setup guidance and a reset that restores only completion effects.
+
+## Action scene and effects editor
+
+- Label Death Heim room 1 B's browser preview as native artwork, with directions
+  to the enhanced completion scene's in-game controls.
+
 ## Performance and fixes
 
 - Add **Screen ratio → Auto** for action stages. It adapts extra rows or
