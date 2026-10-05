@@ -212,81 +212,41 @@ static void RowToKey(const char *key) {
   CHECK(!"row not reachable");
 }
 
-static void TestCompletionReset(SDL_Renderer *renderer, SDL_Surface *surface,
-                                 const char *settings_path) {
+static void TestCompletionToggle(const char *settings_path) {
   const char *protected_keys[] = {
-    "diorama_mode", "diorama_skybox", "diorama_camera_mode",
-    "diorama_tilt_x_mrad", "diorama_distance_x100", "hud_scale_percent",
-    "sim3d_mode", "sim3d_world_navigation", "audio_master_volume",
+    "diorama_mode", "diorama_skybox", "diorama_shoebox",
+    "death_heim_completion_world", "death_heim_completion_feathers",
+    "death_heim_completion_sun_glints",
   };
-  const long custom_values[] = {1, kDioramaSky_Only, kDioramaCam_Dynamic,
-                                75, 375, 225, 0, 0, 75};
   long previous[sizeof(protected_keys) / sizeof(protected_keys[0])];
-  for (size_t i = 0; i < sizeof(previous) / sizeof(previous[0]); i++) {
-    const SettingDesc *desc = Settings_Find(protected_keys[i]);
-    CHECK(Settings_GetLong(desc, &previous[i]));
-    CHECK(Settings_SetLong(desc, custom_values[i]) >= kSettingChange_Unchanged);
-  }
+  for (size_t i = 0; i < sizeof(previous) / sizeof(previous[0]); i++)
+    CHECK(Settings_GetLong(Settings_Find(protected_keys[i]), &previous[i]));
+  CHECK(Settings_SetLong(Settings_Find("diorama_mode"), 1) >= kSettingChange_Unchanged);
+  CHECK(Settings_SetLong(Settings_Find("diorama_shoebox"), 1) >= kSettingChange_Unchanged);
+  CHECK(Settings_SetLong(Settings_Find("death_heim_completion_world"), 1) >=
+        kSettingChange_Unchanged);
+  /* Explicit INI effect overrides survive editing the single menu switch. */
+  CHECK(Settings_SetLong(Settings_Find("death_heim_completion_feathers"), 0) >=
+        kSettingChange_Unchanged);
+  CHECK(Settings_SetLong(Settings_Find("death_heim_completion_sun_glints"), 0) >=
+        kSettingChange_Unchanged);
   NavToSection(kSection_Action3D);
-  NavToTab(2);
+  int tabs = 0;
+  CHECK(SettingsOverlay_GetTabState(NULL, &tabs) && tabs == 2);
+  NavToTab(0);
   CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
-  for (int setup = 0; setup < 2; setup++) {
-    /* Reset remains usable when Diorama and skybox prerequisites are off. */
-    CHECK(Settings_SetLong(Settings_Find("diorama_mode"), setup == 0) >=
+  for (int skybox = kDioramaSky_Off; skybox < kDioramaSky_Count; skybox++) {
+    CHECK(Settings_SetLong(Settings_Find("diorama_skybox"), skybox) >=
           kSettingChange_Unchanged);
-    CHECK(Settings_SetLong(Settings_Find("diorama_skybox"),
-                           setup == 0 ? kDioramaSky_Only : kDioramaSky_Off) >=
-          kSettingChange_Unchanged);
-    int effect_count = 0;
-    for (int i = 0; i < g_setting_desc_count; i++) {
-      const SettingDesc *desc = &g_setting_descs[i];
-      if (desc->category != kSettingCat_ActionCompletion) continue;
-      effect_count++;
-      CHECK(Settings_SetLong(desc, !desc->defval) >= kSettingChange_Unchanged);
-    }
-    CHECK(effect_count == 10);
-    const char *preview_dir = getenv("AR_OVERLAY_COMPLETION_PREVIEW_DIR");
-    if (renderer && surface && preview_dir && preview_dir[0]) {
-      RowToKey("death_heim_completion_world");
-      HostClockStub_SetMilliseconds(HostClock_Milliseconds() + 5000);
-      SettingsOverlay_Tick();
-      SDL_SetRenderDrawColor(renderer, 32, 24, 16, 255);
-      SDL_RenderClear(renderer);
-      SettingsOverlay_Render((ArRenderRectI){0, 0, surface->w, surface->h});
-      SDL_RenderPresent(renderer);
-      char path[kHostPathCapacity];
-      snprintf(path, sizeof(path), "%s/completion-%s.bmp", preview_dir,
-               setup == 0 ? "ready" : "setup-required");
-      CHECK(SDL_SaveBMP(surface, path));
-    }
-    RowToKey("reset_completion_effects");
-    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false)); /* arm */
+    RowToKey("death_heim_completion_world");
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
     CHECK(!g_settings.death_heim_completion_world);
-    if (setup == 0) {
-      NavToTab(0); /* a different reset scope cannot inherit confirmation */
-      RowToKey("reset_section_defaults");
-      CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
-      CHECK(g_settings.diorama_mode);
-      CHECK(g_settings.diorama_distance_x100 == 375);
-      NavToTab(2);
-      RowToKey("reset_completion_effects");
-      CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
-      CHECK(!g_settings.death_heim_completion_world);
-    }
-    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false)); /* confirm */
-    CHECK(Settings_Load(settings_path)); /* persisted defaults */
-    for (int i = 0; i < g_setting_desc_count; i++) {
-      const SettingDesc *desc = &g_setting_descs[i];
-      if (desc->category != kSettingCat_ActionCompletion) continue;
-      long value = -1;
-      CHECK(Settings_GetLong(desc, &value) && value == desc->defval);
-    }
-    for (size_t i = 0; i < sizeof(previous) / sizeof(previous[0]); i++) {
-      long value = -1;
-      const long expected = i == 0 ? setup == 0 : i == 1 ?
-          (setup == 0 ? kDioramaSky_Only : kDioramaSky_Off) : custom_values[i];
-      CHECK(Settings_GetLong(Settings_Find(protected_keys[i]), &value) && value == expected);
-    }
+    CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+    CHECK(g_settings.death_heim_completion_world);
+    CHECK(Settings_Load(settings_path));
+    CHECK(g_settings.diorama_skybox == skybox && g_settings.diorama_shoebox);
+    CHECK(!g_settings.death_heim_completion_feathers);
+    CHECK(!g_settings.death_heim_completion_sun_glints);
   }
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
   for (size_t i = 0; i < sizeof(previous) / sizeof(previous[0]); i++)
@@ -3346,7 +3306,7 @@ int main(int argc, char **argv) {
   CHECK(Settings_Reset(volume) == kSettingChange_Applied);
   CHECK(SettingsOverlay_HandleKey(SDLK_X, true, false));
 
-  TestCompletionReset(renderer, surface, settings_path);
+  TestCompletionToggle(settings_path);
 
   /* Audio frequency is a bounded preset selector, not an arbitrary integer
    * editor. Audio starts with Enable audio, then Audio frequency. The

@@ -113,7 +113,7 @@ static void TestDefaultsAndMetadata(void) {
    * Seeded regional rolls add two options; save slots add two entry actions.
    * Remember last town adds a native/enhanced QoL preference; native menu
    * quick use adds an independent QoL toggle. Save editing adds Apply and restart. */
-  /* Ten independent Death Heim completion presentation controls. */
+  /* One completion scene switch plus nine internal effect overrides. */
   const int expected_descriptors = 317;
   if (g_setting_desc_count != expected_descriptors)
     fprintf(stderr, "Setting descriptors: expected %d, got %d\n",
@@ -149,6 +149,7 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(g_settings.hud_scale_percent == 0);
   CHECK(g_settings.menu_scale_percent == 0);
   CHECK(g_settings.extended_aspect == 0);
+  CHECK(g_settings.diorama_vertical_extend == 64);
   CHECK(g_settings.pixel_aspect == kPixelAspect_Crt43);
   CHECK(g_settings.window_scale == 3);
   CHECK(g_settings.window_mode == kWindowMode_Windowed);
@@ -2446,23 +2447,42 @@ static void TestCompletionSettings(void) {
     "death_heim_completion_rim_light","death_heim_completion_sun_glints"};
   for (unsigned i=0;i<sizeof(keys)/sizeof(keys[0]);i++) {
     const SettingDesc *desc=Settings_Find(keys[i]);
-    CHECK(desc && desc->category==kSettingCat_ActionCompletion && desc->type==kSettingType_Bool);
+    CHECK(desc && desc->category==kSettingCat_Presentation && desc->type==kSettingType_Bool);
     CHECK(!Settings_IsDebugOnly(desc));
     CHECK(*(bool *)desc->field && !Settings_IsAvailable(desc));
+    for (int debug = 0; debug < 2; debug++) {
+      g_settings.show_debug_settings = debug != 0;
+      CHECK(Settings_IsMenuVisible(desc) == (i == 0));
+    }
   }
   g_settings.diorama_mode = true;
-  g_settings.diorama_skybox = kDioramaSky_Only;
   g_settings.sim3d_mode=g_settings.sim3d_world_navigation=false;
-  for(unsigned i=0;i<sizeof(keys)/sizeof(keys[0]);i++)
-    CHECK(Settings_IsAvailable(Settings_Find(keys[i])));
+  for (int skybox = kDioramaSky_Off; skybox < kDioramaSky_Count; skybox++) {
+    g_settings.diorama_skybox = skybox;
+    for(unsigned i=0;i<sizeof(keys)/sizeof(keys[0]);i++)
+      CHECK(Settings_IsAvailable(Settings_Find(keys[i])));
+    CHECK(g_settings.diorama_skybox == skybox);
+  }
+  g_settings.diorama_skybox = kDioramaSky_Off;
   CHECK(Settings_SetLong(Settings_Find(keys[6]),0)==kSettingChange_Applied);
   CHECK(Settings_SetLong(Settings_Find(keys[9]),0)==kSettingChange_Applied);
   const char *path="actraiser-completion-settings-test.ini";
+  CHECK(WriteTextFile(path, "diorama_mode = On\n"
+                            "diorama_skybox = Off\n"
+                            "death_heim_completion_feathers = Off\n"
+                            "death_heim_completion_sun_glints = Off\n"));
+  Settings_InitWithFile(path);
+  for (unsigned i = 0; i < sizeof(keys)/sizeof(keys[0]); i++) {
+    long value = -1;
+    CHECK(Settings_GetLong(Settings_Find(keys[i]), &value));
+    CHECK(value == (i != 6 && i != 9));
+  }
   CHECK(Settings_Save(path));
   Settings_InitWithFile(path);
   CHECK(g_settings.death_heim_completion_world && !g_settings.death_heim_completion_feathers);
   CHECK(!g_settings.death_heim_completion_sun_glints);
   CHECK(!g_settings.sim3d_mode && !g_settings.sim3d_world_navigation);
+  CHECK(g_settings.diorama_skybox == kDioramaSky_Off);
   CHECK(Settings_SetLong(Settings_Find(keys[0]),0)==kSettingChange_Applied);
   CHECK(!Settings_IsAvailable(Settings_Find(keys[1])));
   remove(path);

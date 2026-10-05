@@ -2,7 +2,7 @@
 
 Unreleased changes since **v0494** (September 16, 2026).
 The next version number and release date are not assigned yet.
-Reviewed through **141fbf89** (October 5, 2026), covering all 184 commits
+Reviewed through **cd0380a8** (October 5, 2026), covering all 187 commits
 after the tag, including merged work. Related changes are grouped below.
 
 **A major milestone for this release: the full USA campaign has been
@@ -197,8 +197,6 @@ See [Modern SIM menu](manual.md#modern-sim-menu) and
 - Correct native Japanese title-edge coverage without shifting or stretching
   replacement artwork.
 
-## Optional 3D church interiors
-
 - Enable **Town 3D → Scene → Church interior 3D** to meet the people and receive
   offerings inside a lit stone church with a view of the surrounding town.
   It defaults to **Off** and requires **Simulation town 3D**.
@@ -218,19 +216,27 @@ See [Modern SIM menu](manual.md#modern-sim-menu) and
 - Add an optional completion ocean scene with luminous clouds, light shafts,
   waves, sun glints, subtle pixel water, cherubs and feathers. Preserve the
   native platform, hero, text, music timing and ending pace. Its controls live
-  under **Action 3D → Death Heim** and require **Diorama 3D** with **Skybox** set
-  to **Skybox only**. Add platform reflections, ripples, spray and golden rim
-  light. Each effect has its own saved switch, independently of Town/World 3D,
-  with visible setup guidance and a reset that restores only completion effects.
+  under **Action 3D → Scene → Death Heim completion scene** and require
+  **Diorama 3D**. The scene applies its own backdrop and enclosure regardless
+  of the player's skybox preference, without changing saved settings. Add
+  platform reflections, ripples, spray and golden rim light, independently of
+  Town/World 3D. A single on/off switch controls the scene; individual effects
+  default to on and can be overridden in `settings.ini`.
 - Add authored scenery tiles and regional room extensions for wider views.
   Every level has now been play-tested in Diorama mode, with extensive
   presentation corrections still to address across tile maps, background
   policies and skybox rendering.
+- Extend Death Heim rooms 1–6 with authored scenery tiles, pixel masks, depth
+  layers and background policies across US, Japanese and European terrain.
+- Apply editor pixel edits and pasted tiles to native single-page backgrounds,
+  including BG2, so authored backdrop changes appear in Diorama captures.
 - Fix 16:9 edge capture, finite BG2 skybox bounds, skybox pixel aspect and
   early sprite clipping at the sides of wider Action 3D views.
 - Keep more upper and lower room artwork visible within the vertical capture
   budget, preserve parallax at vertical limits, and stop automatic framing at
   projected horizontal room edges. Free Cam remains freely adjustable.
+- Default Diorama mode to **Dynamic Cam**. Existing saved camera preferences
+  continue to take priority.
 - Let temporary Dynamic Cam orbit and zoom return smoothly to the authored
   pose, including held input and edge framing during streamed rendering.
 - Fix animated Aitos waterfall skyboxes and their foreground alignment,
@@ -251,6 +257,12 @@ See [Modern SIM menu](manual.md#modern-sim-menu) and
   `diorama-layers.ini` and `action-effects.ini`; the individual INI tools remain
   available. The **Unsaved changes** badge tracks scenery and effects together,
   including Undo/Redo. Invalid projects are rejected before replacing your work.
+- Fix repeated project downloads, including saves of unchanged projects.
+  Pending background-policy drafts identify their room/BG and require applying
+  or discarding before saving, preserving other rooms' tile edits.
+- Collapse the sidebar, toolbars or individual settings sections for more
+  preview space. Open the same live settings through **Settings…** or right-click
+  menus, with keyboard navigation and preserved policy drafts.
 - Author BG1/BG2 edge fill, scroll motion, horizontal and vertical extents,
   and row-band policies through **Background policy**. Apply an undoable edit,
   preview it in **Shared renderer**, or restore the room's defaults. Policies

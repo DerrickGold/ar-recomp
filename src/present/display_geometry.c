@@ -14,14 +14,13 @@ bool DisplayGeometry_ResolveAutoCanvas(
   const int64_t width = drawable_width;
   const int64_t height = drawable_height;
   *canvas = (ActRaiserAutoCanvas){0};
-  /* Nearest symmetric whole-pixel budget. Aspect fit absorbs rounding; never
-   * stretch the native image, crop it, or exceed the capture/streaming caps. */
+  /* Share horizontal rounding with explicit ratios so Auto reveals the same
+   * columns on a matching drawable. Aspect fit absorbs whole-pixel rounding;
+   * never stretch, crop, or exceed the capture/streaming caps. */
   if (width * 224 * par_y > height * 256 * par_x) {
-    const int64_t denominator = 2 * height * par_x;
-    int64_t extra = (width * 224 * par_y - height * 256 * par_x +
-                     denominator / 2) / denominator;
-    canvas->extra_columns = extra > kActRaiserWidescreenExtraMax
-        ? kActRaiserWidescreenExtraMax : (int)extra;
+    canvas->extra_columns = DisplayGeometry_CalculateHorizontal(
+        kActRaiserAuthenticHeight, drawable_width, drawable_height,
+        crt_pixel_aspect, false).display_extra;
   } else {
     const int64_t denominator = 2 * width * par_y;
     int64_t extra = (height * 256 * par_x - width * 224 * par_y +

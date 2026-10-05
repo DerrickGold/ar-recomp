@@ -960,7 +960,7 @@ static bool WorldNavigation3DEnabled(void) {
   return g_settings.sim3d_world_navigation;
 }
 static bool CompletionSceneAvailable(void) {
-  return g_settings.diorama_mode && g_settings.diorama_skybox == kDioramaSky_Only;
+  return g_settings.diorama_mode;
 }
 static bool CompletionEffectsAvailable(void) {
   return CompletionSceneAvailable() && g_settings.death_heim_completion_world;
@@ -1167,6 +1167,14 @@ static bool RandoEnemyTypesOn(void) {
   { #id, env_name, text, help, kSettingType_Bool, kApply_Passive, cat, \
     &g_settings.id, def, 0, 1, 1, is_sticky, NULL, 0, active, changed, \
     NULL, NULL, true }
+/* The completion scene has one player-facing switch. Individual effects are
+ * default-on INI overrides, retained when ordinary menu changes save settings. */
+#define COMPLETION_EFFECT_SETTING(id, env_name, text, help) \
+  { .key = #id, .env = env_name, .label = text, .tooltip = help, \
+    .type = kSettingType_Bool, .apply = kApply_Passive, \
+    .category = kSettingCat_Presentation, .field = &g_settings.id, \
+    .defval = 1, .maxval = 1, .step = 1, \
+    .available = CompletionEffectsAvailable, .modern_env = true, .menu_hidden = true }
 #define INT_SETTING(id, env_name, text, help, cat, def, lo, hi, parser, active) \
   { #id, env_name, text, help, kSettingType_Int, kApply_Passive, cat, \
     &g_settings.id, def, lo, hi, 1, false, NULL, 0, active, NULL, \
@@ -1974,7 +1982,7 @@ const SettingDesc g_setting_descs[] = {
     "leans with gameplay motion and reacts to impacts around its own baseline. "
     "Manual orbit and zoom return to this baseline after input stops.",
     kSettingType_Enum, kApply_Passive, kSettingCat_DioramaCamera,
-    &g_settings.diorama_camera_mode, kDioramaCam_Free,
+    &g_settings.diorama_camera_mode, kDioramaCam_Dynamic,
     kDioramaCam_Free, kDioramaCam_Dynamic, 1, false,
     kDioramaCamModeLabels, kDioramaCam_Count, Diorama_ModeIsOn, NULL,
     NULL, NULL },
@@ -2016,46 +2024,37 @@ const SettingDesc g_setting_descs[] = {
     kDioramaSkyModeLabels, kDioramaSky_Count, Diorama_ModeIsOn, NULL,
     NULL, NULL },
     BOOL_SETTING_MODERN(
-        death_heim_completion_world, "AR_DEATH_HEIM_COMPLETION_WORLD", "Completion ocean scene",
+        death_heim_completion_world, "AR_DEATH_HEIM_COMPLETION_WORLD", "Death Heim completion scene",
         "Replace Death Heim's completion background with a heavenly ocean vista. "
-        "Requires Action Diorama 3D and Skybox only. Independent of Town and "
+        "Requires Action Diorama 3D; applies its own backdrop settings. Independent of Town and "
         "World navigation 3D; preserves the original platform, hero and game timing.",
-        kSettingCat_ActionCompletion, 1, false, CompletionSceneAvailable, NULL),
-    BOOL_SETTING_MODERN(death_heim_completion_waves, "AR_DEATH_HEIM_COMPLETION_WAVES",
-                        "Ocean waves", "Animate the completion ocean's waves and spray.",
-                        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
-    BOOL_SETTING_MODERN(death_heim_completion_sun_glints, "AR_DEATH_HEIM_COMPLETION_SUN_GLINTS",
+        kSettingCat_Presentation, 1, false, CompletionSceneAvailable, NULL),
+    COMPLETION_EFFECT_SETTING(death_heim_completion_waves, "AR_DEATH_HEIM_COMPLETION_WAVES",
+                        "Ocean waves", "Animate the completion ocean's waves and spray."),
+    COMPLETION_EFFECT_SETTING(death_heim_completion_sun_glints, "AR_DEATH_HEIM_COMPLETION_SUN_GLINTS",
                         "Sun glint sparkles",
                         "Scatter brief sunlight twinkles across the completion ocean, with smaller "
-                        "glints near the horizon.",
-                        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
-    BOOL_SETTING_MODERN(death_heim_completion_pixel_water, "AR_DEATH_HEIM_COMPLETION_PIXEL_WATER",
+                        "glints near the horizon."),
+    COMPLETION_EFFECT_SETTING(death_heim_completion_pixel_water, "AR_DEATH_HEIM_COMPLETION_PIXEL_WATER",
                         "Pixel water detail",
-                        "Add subtle animated 16-bit water texture beneath the ocean lighting.",
-                        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
-    BOOL_SETTING_MODERN(death_heim_completion_clouds, "AR_DEATH_HEIM_COMPLETION_CLOUDS",
+                        "Add subtle animated 16-bit water texture beneath the ocean lighting."),
+    COMPLETION_EFFECT_SETTING(death_heim_completion_clouds, "AR_DEATH_HEIM_COMPLETION_CLOUDS",
                         "Heavenly clouds",
-                        "Draw the luminous cloud arch and foreground wisps around the opening.",
-                        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
-    BOOL_SETTING_MODERN(death_heim_completion_light_shafts, "AR_DEATH_HEIM_COMPLETION_RAYS",
-                        "Light shafts", "Scatter light from the opening toward the hero and ocean.",
-                        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
-    BOOL_SETTING_MODERN(death_heim_completion_cherubs, "AR_DEATH_HEIM_COMPLETION_CHERUBS",
-                        "Cherubs", "Animate distant angel silhouettes within the cloud opening.",
-                        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
-    BOOL_SETTING_MODERN(death_heim_completion_feathers, "AR_DEATH_HEIM_COMPLETION_FEATHERS",
+                        "Draw the luminous cloud arch and foreground wisps around the opening."),
+    COMPLETION_EFFECT_SETTING(death_heim_completion_light_shafts, "AR_DEATH_HEIM_COMPLETION_RAYS",
+                        "Light shafts", "Scatter light from the opening toward the hero and ocean."),
+    COMPLETION_EFFECT_SETTING(death_heim_completion_cherubs, "AR_DEATH_HEIM_COMPLETION_CHERUBS",
+                        "Cherubs", "Animate distant angel silhouettes within the cloud opening."),
+    COMPLETION_EFFECT_SETTING(death_heim_completion_feathers, "AR_DEATH_HEIM_COMPLETION_FEATHERS",
                         "Floating feathers",
-                        "Let a few softly lit pixel feathers drift down from the opening.",
-                        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
-    BOOL_SETTING_MODERN(
+                        "Let a few softly lit pixel feathers drift down from the opening."),
+    COMPLETION_EFFECT_SETTING(
         death_heim_completion_platform_details, "AR_DEATH_HEIM_COMPLETION_PLATFORM",
         "Platform water effects",
-        "Add gentle ripples, a broken reflection and light-catching spray around the platform.",
-        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
-    BOOL_SETTING_MODERN(
+        "Add gentle ripples, a broken reflection and light-catching spray around the platform."),
+    COMPLETION_EFFECT_SETTING(
         death_heim_completion_rim_light, "AR_DEATH_HEIM_COMPLETION_RIM", "Golden rim light",
-        "Add restrained warm highlights to the hero and platform's illuminated edges.",
-        kSettingCat_ActionCompletion, 1, false, CompletionEffectsAvailable, NULL),
+        "Add restrained warm highlights to the hero and platform's illuminated edges."),
   /* One switch for all three parts of the widescreen margin fix,
    * so the black wedge at a level bound can be A/B'd live: stand at the level
    * start and toggle. Default on; Off restores every pre-fix path byte for
@@ -2109,17 +2108,14 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.diorama_distance_x100, 0, 0, 2000, 25, false, NULL, 0,
     DioramaFreeCameraAvailable, NULL, NULL, NULL },
   /* Scanlines of real world revealed on EACH side of the authentic viewport,
-   * the vertical counterpart of the widescreen side margins. Defaults to 0
-   * (authentic framing) because the band is where the level's vertical tilemap
-   * streaming shows its seams: column strips decode only a 512px-tall window,
-   * and rows outside it hold filler until a row strip covers them
-   * (rendering-engine.md §4). 64 covers the measured 48px camera jump while
-   * exact signed OBJ positions avoid the 8-bit OAM Y ambiguity. */
+   * the vertical counterpart of the widescreen side margins. 64 covers the
+   * measured 48px camera jump while exact signed OBJ positions avoid the
+   * 8-bit OAM Y ambiguity. Auto uses the same Diorama capture budget. */
   { "diorama_vertical_extend", NULL, "Vertical extend",
-    "Manual Diorama extra rows per side. 0 keeps the authentic 224-line frame. "
-    "Screen ratio Auto chooses its own budget.",
+    "Diorama extra rows per side, including Screen ratio Auto. "
+    "0 keeps the authentic 224-line frame.",
     kSettingType_Int, kApply_Passive, kSettingCat_Presentation,
-    &g_settings.diorama_vertical_extend, 0, 0, 64, 4, false, NULL, 0,
+    &g_settings.diorama_vertical_extend, 64, 0, 64, 4, false, NULL, 0,
     Diorama_ModeIsOn, NULL, NULL, NULL },
   INT_SETTING(diorama_depth_shade, NULL, "Depth shading",
               "Strength of the atmospheric darkening applied to farther planes.",
@@ -3270,7 +3266,6 @@ const char *Settings_CategoryName(SettingCategory category) {
     case kSettingCat_Widescreen: return "Widescreen";
     case kSettingCat_Display: return "Display";
     case kSettingCat_Presentation: return "Diorama";
-    case kSettingCat_ActionCompletion: return "Death Heim completion";
     case kSettingCat_DioramaCamera: return "Diorama camera";
     case kSettingCat_Simulation: return "Simulation";
     case kSettingCat_SimCamera: return "Town camera";

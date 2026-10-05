@@ -331,9 +331,6 @@ Most tabs also end with `Reset <section> defaults`; pressing it twice restores
 every tab in that top-level section, including hidden developer controls,
 without changing other sections. For example, resetting Town 3D restores Scene,
 Camera, Light, and Weather together.
-The **Action 3D → Death Heim** tab instead has **Reset completion effects**,
-which restores only the completion scene controls. It keeps the camera and
-other Action settings; press it twice to confirm.
 
 F2 remains available for a full snapshot while the overlay is open. The game and
 SNES input stay frozen until the overlay closes. Accepted setting changes are
@@ -341,15 +338,28 @@ written atomically to `settings.ini`; action rows are not persisted.
 
 ### Death Heim completion scene
 
-Enable **Action 3D → Scene → Diorama 3D**, then set **Skybox** to **Skybox only**.
-The **Death Heim** tab shows whether this setup is ready. Its **Completion ocean
-scene** control replaces room 1 B's native background with a bright ocean and
-opening in the clouds. Town 3D and World 3D can remain off.
+Enable **Action 3D → Scene → Diorama 3D**. The **Death Heim completion scene**
+switch in the same tab replaces room 1 B's native background with a bright
+ocean and opening in the clouds. It applies its own backdrop and enclosure
+while active, with any **Skybox** setting. Your saved skybox and shoebox
+preferences remain unchanged. Town 3D and World 3D can remain off.
 
-The tab also controls ocean waves, sun glints, pixel water detail, heavenly
-clouds, light shafts, cherubs, floating feathers, platform water effects and
-golden rim light. Turn off **Completion ocean scene** to return to the native
-completion artwork. Changes save automatically to `settings.ini`.
+All completion effects are enabled by default. Turn off **Death Heim completion
+scene** to return to the native completion artwork with your normal Diorama
+settings. The switch saves automatically to `settings.ini`. To disable an
+individual effect, set its INI key to `Off` and restart:
+
+| Effect | `settings.ini` key |
+|---|---|
+| Ocean waves | `death_heim_completion_waves` |
+| Sun glints | `death_heim_completion_sun_glints` |
+| Pixel water detail | `death_heim_completion_pixel_water` |
+| Heavenly clouds | `death_heim_completion_clouds` |
+| Light shafts | `death_heim_completion_light_shafts` |
+| Cherubs | `death_heim_completion_cherubs` |
+| Floating feathers | `death_heim_completion_feathers` |
+| Platform water effects | `death_heim_completion_platform_details` |
+| Golden rim light | `death_heim_completion_rim_light` |
 
 The original platform, hero, text, music timing and ending pace are preserved.
 Room 1 A's faces and room 1 B's completion scenery switch during the original

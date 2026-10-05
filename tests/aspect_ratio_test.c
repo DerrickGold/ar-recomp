@@ -79,6 +79,13 @@ static void CheckSupportedRatios(void) {
         CHECK(g.extra_top == 0 && g.extra_bottom == 0);
         CHECK(g.display_extra <= g.render_extra);
         CHECK(g.render_extra <= kActRaiserWidescreenExtraMax);
+        if (ratios[i].x > 0) {
+          ActRaiserAutoCanvas canvas;
+          CHECK(DisplayGeometry_ResolveAutoCanvas(
+              ratios[i].x * 120, ratios[i].y * 120, crt, &canvas));
+          CHECK(canvas.extra_columns == g.display_extra);
+          CHECK(canvas.extra_rows == 0);
+        }
         CheckViewport(256 + 2 * extra, crt);
         CheckScrollLimits(render);
       }

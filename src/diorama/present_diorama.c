@@ -739,9 +739,11 @@ retry_projection:;
   Diorama_CaptureRenderOptions(&render);
   if (source_draw) render.draw_resident_skybox = DioramaFrameGeneration_DrawSkybox;
   const bool completion_world = slot->sim.death_heim_completion_world &&
-      slot->diorama_layer_section == kDioramaLayerSection_DeathHeimCompletion &&
-      render.skybox == kDioramaSky_Only;
+      slot->diorama_layer_section == kDioramaLayerSection_DeathHeimCompletion;
   if (completion_world) {
+    /* The vista owns its backdrop and enclosure for this draw. Keep the
+     * player's saved skybox/shoebox choices intact for ordinary rooms and
+     * for the native completion scene when this enhancement is disabled. */
     render.skybox = kDioramaSky_Off;
     render.shoebox = false;
     render.visible_planes &= ~((1u << SR_PPU_OVERLAY_BG2) |

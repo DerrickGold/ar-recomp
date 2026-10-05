@@ -21,7 +21,7 @@ and rebindable controls. The in-game settings menu explains each option.
 
 [![GitHub downloads (all assets, all releases)](https://img.shields.io/github/downloads/DerrickGold/ar-recomp/total)](https://github.com/DerrickGold/ar-recomp/releases)
 ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads-pre/DerrickGold/ar-recomp/latest/total)
-![GitHub commits since tagged version](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0494)
+![GitHub commits since tagged version](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0800)
 
 
 > **For visitors from Japan / 日本語でご覧の皆さまへ**
@@ -46,7 +46,7 @@ start to finish.** Development and visual improvements remain active.
 | | |
 |---|---|
 | ✅ | **Native graphics:** All six towns, all 12 acts, Death Heim, and the ending have been play-tested, including overlay access at The End. The full USA campaign is verified completable end to end. |
-| 🟡 | **Action Mode Enhancements:** Extensive presentation work remains in 3D Diorama mode: manually extending tile maps to fill widescreen space, correcting background policies, and fixing skybox rendering. Adding unique environmental effects is an ongoing per-level effort, currently implemented for Fillmore Acts 1/2 and Bloodpool Acts 1/2. |
+| 🟡 | **Action Mode Enhancements:** Extensive presentation work remains in 3D Diorama mode: manually extending tile maps to fill widescreen space, correcting background policies, and fixing skybox rendering. Adding unique environmental effects is an ongoing per-level effort, with treatments for Fillmore Acts 1/2, Bloodpool Acts 1/2, and Death Heim's completion scene. |
 | ✅ | **Platforms:** Windows, macOS arm64, and Steam Deck have been tested and boot successfully. macOS x86_64 and generic Linux still need representative launch testing. |
 | ✅ | **Localization:** Language packs, enhanced fonts, and Workshop authoring are ready. Players can create and distribute their own translations. |
 | 🔵 | **Regionalization:** Implementation is complete and ready for testing. [US, Japanese, and European gameplay presets](docs/regional-settings.md) support per-campaign customization, with independent [regional artwork and music](docs/regional-media.md). |
@@ -246,6 +246,12 @@ stretching or cropping the original view. Press `F9` to cycle among authentic
 4:3, widescreen raw, and widescreen full, which places the HUD in an
 independently scaled overlay.
 
+**Screen ratio → Auto** adapts the view to the window's shape, including when
+resizing while paused. Wider windows reveal extra columns; taller windows can
+reveal extra rows in action stages and enhanced 3D towns and world navigation.
+The selected pixel aspect and HUD proportions are retained. See
+[display and scaling](docs/manual.md#display-and-scaling) for coverage limits.
+
 ![Bloodpool Act 2 in authentic 4:3 above the same scene in 16:9, with the background extending symmetrically into the extra width](/assets/widescreen-comparison.png)
 
 ### Diorama 3D for action stages
@@ -258,10 +264,14 @@ Rooms can be tuned independently:
 
 - **Layer layout:** Each room defines its own depths and can use a stable
   backdrop from the ROM when the live PPU view is too narrow.
-- **Camera modes:** Free Cam supports manual orbit and zoom, while Dynamic Cam
-  leans and reacts around an authored pose.
+- **Camera modes:** Dynamic Cam is the default, leaning and reacting around
+  an authored pose. Free Cam supports manual orbit and zoom.
 - **Framing:** Vertical extension reveals more of the stage above and below the
   original 224 lines. Skybox and Shoebox walls enclose finite backdrops.
+- **Enhanced completion:** An optional Death Heim ocean vista adds clouds,
+  light shafts, water reflections, cherubs and drifting feathers around the
+  original platform and hero. One switch under **Action 3D → Scene** enables
+  it with any skybox preference, preserving the original ending's timing.
 
 ![Aitos Act 2 gameplay with separated 3D layers and the dynamic diorama camera](/assets/gameplay-diorama.gif)
 
@@ -270,6 +280,21 @@ then shows enhanced widescreen with the camera tilting and pulling back to
 reveal the layers.
 
 ![Fillmore Act 1 in original 4:3, followed by enhanced widescreen with a tilted and zoomed-out diorama camera](/assets/fillmore-rendering-comparison.gif)
+
+### Action scene and effects editor
+
+The offline [action editor](tools/action_editor/README.md) lets creators extend
+room scenery for widescreen, paint tile pixels, adjust depth and framing, and
+author background policies and environmental effects. **Shared renderer**
+previews rooms through the game's C renderer with regional terrain, animation,
+and camera controls.
+
+**Save project** or **Ctrl/Cmd-S** keeps scenery and effects together in one
+`action-project.zip`, with Undo/Redo and an **Unsaved changes** indicator.
+Collapsible panels and **Settings…** provide more room for the preview; settings
+are also accessible through right-click menus. To use a project in the game,
+extract its two INI files beside `settings.ini` and restart. See the editor guide
+for preview scope and authoring details.
 
 ### 3D simulation towns
 
@@ -287,6 +312,10 @@ Simulation mode rebuilds each town as an oblique 3D scene:
   optional soft blur and rim lighting. Miracles and enemy attacks add local
   lighting and particles. A connected globe continues beyond the town's borders,
   and building placement and miracle targeting work in the tilted view.
+- **Church interiors:** An optional modeled stone church adds an altar, soft
+  light, drifting dust and a view of the town during audiences and offerings.
+  Enable **Church interior 3D** under **Town 3D → Scene**; dialogue and controls
+  retain their original behavior.
 
 ![Aitos during a volcanic eruption, with fireball trails and haze, ending with a low-angle view of the voxel buildings and raised terrain](/assets/sim3d-town.gif)
 
@@ -318,6 +347,12 @@ The GPU renderer provides individually adjustable effects:
   field softens distant layers, and edge anti-aliasing smooths tilted planes.
 - **Spell effects:** Particles and local illumination follow action-stage
   magic in both flat and 3D views.
+- **Environmental effects:** Fillmore's forest and caves gain canopy light,
+  leaves, mist, drips, and water accents; Bloodpool gains moonlight, water
+  reflections, castle window light, and torch glow. These work in flat and
+  Diorama views and are controlled separately under
+  **Video → Effects → Environmental effects** (on by default). Adding unique
+  treatments across the remaining levels is ongoing.
 - **CRT presentation:** Curved glass, scanlines, and a phosphor mask can be
   applied to any view, including authentic rendering. **Video → CRT** also
   controls colour fringing, signal softness, corner shading, and brightness.
@@ -382,8 +417,10 @@ to translated dialogue.
   with full-resolution, low-resolution, or mosaic rendering independent of
   the game graphics. The original US script can also use its native font.
 - **Create and share:** Start a translation from the US script, edit messages
-  alongside a reference, check font coverage, and export a language pack from
-  the Workshop. Install a new project explicitly; later saves refresh its
+  alongside a reference, and check font coverage and side-by-side playback.
+  The v2 text format supports mixed fonts, colors, sizes, and emphasis within
+  a message, with a styling toolbar in the Workshop. Export a language pack
+  to share it. Install a new project explicitly; later saves refresh its
   installed copy. Restart the game to load the updated text.
 
 The Workshop interface supports English, French, German, and Japanese;
@@ -475,6 +512,9 @@ Each setting includes an explanation. If you install an instruction manual in th
 Builder, a Manual section appears in-game to read it; without one the section is
 simply absent.
 Settings are saved automatically to `settings.ini`.
+Most sections offer a reset that restores that section's defaults after two
+confirmation presses. The settings overlay remains available on **The End**
+and **Best Player** screens to restart or exit after finishing the game.
 
 ![An illustrative tour of the settings overlay using the original dialog font; the current menu also includes localization controls](/assets/overlay.gif)
 
@@ -510,10 +550,14 @@ randomized campaign has not yet been play-tested.
 | **Rebindable controls** | Bind every keyboard and gamepad control independently in Settings → Controls. Keyboard bindings use physical key positions, so they remain in place when the keyboard layout changes. |
 | **Full gamepad support** | The default mapping follows a SNES-on-Xbox layout, with support for multiple hotpluggable pads and `gamecontrollerdb.txt`. Bind controls for the menu, pause, turbo, camera reset, and rendering comparison. |
 | **Modern town menu** | An optional categorized command menu remembers selections and lets you read descriptions without using a miracle or offering. It has its own scale control and works with or without 3D towns. See [Modern SIM menu](docs/manual.md#modern-sim-menu). |
+| **Native menu quick use** | Keep the Original town menu while skipping optional command explanations. Confirmations and outcomes remain, and the remappable Describe control runs the full explanation. Enable it under System → Game → Quality of life; it is off by default. See [quick use](docs/manual.md#native-sim-menu-quick-use). |
+| **Remember last town** | Continue positions the Sky Palace over the last town visited by that campaign. It works in native and enhanced views and is on by default under System → Game → Quality of life. |
+| **Restart in the same window** | Switch save slots, restart the game, or apply save edits and restart without relaunching the application. Save gameplay with the Progress Log before switching campaigns. Restart and exit controls remain available after the ending. |
 | **Steam Deck** | The dedicated bundle includes Valve's Steam Runtime SDL3. It works with the default Steam Input mapping, or with SDL's HIDAPI Steam driver in desktop mode. L3 opens the menu. |
 | **Camera controls** | The right stick orbits, the triggers zoom, and R3 recentres the view. Sensitivity, deadzone, and invert-Y are configurable, and orbit speed remains consistent across frame rates. |
 | **Turbo** | Press `T` to fast-forward at eight game frames per rendered frame, configurable from 2 to 64. |
 | **Render scale and refresh** | Choose an internal render scale from 1× to 8×, downsampled to the window. Presentation modes include renderer-paced VSync, display-relative Uncapped, a selected FPS limit, and unthrottled Unlimited, with windowed, borderless, and exclusive fullscreen options. |
+| **Automatic screen ratio** | Auto fits action stages, towns, world navigation, and the Sky Palace to the window, recalculating the view even while paused. It retains the selected pixel aspect and keeps HUD and menus at their own proportions. See [display and scaling](docs/manual.md#display-and-scaling). |
 | **Graphics API selection** | Choose an available graphics API to troubleshoot slow rendering or display problems. Changes take effect after restart, with automatic fallback if the selected API cannot start. |
 | **Independent HUD and menu scaling** | The promoted widescreen HUD and settings menu can be scaled independently of the game framebuffer, from 25–400% and 100–800% respectively. |
 | **Save editor** | Inspect town states, unlocks, levels, magic, items, and scores, then enable an explicit safety switch to apply changes. The editor preserves unedited data and maintains save checksums. |
@@ -593,6 +637,8 @@ For benchmark definitions and development details, see
 |---|---|
 | [`docs/README.md`](docs/README.md) | Curated game-documentation index |
 | [`docs/manual.md`](docs/manual.md) | Player and power-user reference |
+| [`docs/release-notes.md`](docs/release-notes.md) | Upcoming release changes, upgrade instructions, and remaining testing |
+| [`tools/action_editor/README.md`](tools/action_editor/README.md) | Offline action scenery, background policy, and effects authoring |
 | [`docs/builder-workshop.md`](docs/builder-workshop.md) | Builder and Workshop user guide |
 | [`docs/language-pack-format.md`](docs/language-pack-format.md) | UTF-8 translation pack authoring and validation contract |
 | [`docs/language-packs.md`](docs/language-packs.md) | Direct `.arlang` installation, sharing, and editor-free/AI authoring |

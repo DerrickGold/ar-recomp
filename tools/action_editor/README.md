@@ -68,7 +68,7 @@ viewport, preserving the original water artwork and scrolling animation.
 Authored far-band tiles and stamps feed that image too. B uses its own captured
 completion background and never receives A's face/eye promotion.
 
-B's **Skybox only** mode now prototypes a host 3D world backdrop: a fixed camera
+B's enhanced completion scene supplies a host 3D world backdrop: a fixed camera
 above Death Heim's northern rim looks north at a low, nearly tangent angle over
 the ocean, with an ActRaiser 2 ending inspired opening in a sky that blends
 from a small deeper-blue halo near the light quickly toward the earlier
@@ -107,16 +107,17 @@ Five small cherub silhouettes drift in depth inside the opening behind the cloud
 and HUD. They flutter through the SIM angel's three genuine frontal wing poses,
 decoded once from immutable ROM characters and composition records. Missing
 or malformed art omits the cherubs; it never reads the action room's OBJ VRAM.
-In-game controls live under **Action 3D → Death Heim**. **Completion ocean scene**
+The in-game switch lives under **Action 3D → Scene → Death Heim completion scene**. It
 enables the vista independently of Town 3D and World navigation 3D; it requires
-Action Diorama 3D with **Skybox only**. Turning it off restores B's captured
-skybox. Waves, sun glint sparkles, pixel water, clouds, shafts, cherubs, feathers, platform water
-effects and golden rim light each have their own saved switch. Completion
-clouds and illumination use scene-owned tuning and do not inherit SIM preferences.
-The tab displays its setup requirements. **Reset completion effects** restores
-only these ten controls, leaving the camera and other Action settings intact;
-press it twice to confirm. Room B's browser preview is labeled **Native artwork
-preview** with directions to these in-game controls.
+Action Diorama 3D and applies its own backdrop and enclosure with any skybox
+preference. Turning it off restores B's captured artwork using the player's
+unchanged Diorama settings. Waves, sun glint sparkles, pixel water, clouds,
+shafts, cherubs, feathers, platform water effects and golden rim light default
+to on; individual overrides remain available in
+[`settings.ini`](../../docs/manual.md#death-heim-completion-scene).
+Completion clouds and illumination use scene-owned tuning and do not inherit
+SIM preferences. Room B's browser preview is labeled **Native artwork preview**
+with directions to the in-game switch.
 The original game clock, fade controller and transition timing are unchanged.
 The corresponding launch overrides are `AR_DEATH_HEIM_COMPLETION_WORLD`,
 `_WAVES`, `_SUN_GLINTS`, `_PIXEL_WATER`, `_CLOUDS`, `_RAYS`, `_CHERUBS`, `_FEATHERS`, `_PLATFORM`

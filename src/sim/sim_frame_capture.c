@@ -94,7 +94,6 @@ static Sim3DTuning CaptureTuning(bool owned) {
 
 static bool CompletionBackdropRequested(void) {
   if (!g_settings.death_heim_completion_world || !g_settings.diorama_mode ||
-      g_settings.diorama_skybox != kDioramaSky_Only ||
       g_ram[kActRaiserWram_MapGroup] != kActRaiserMapGroup_DeathHeim ||
       g_ram[kActRaiserWram_CurrentMap] != kActRaiserDeathHeimMap_Hub ||
       g_ram[kActRaiserWram_DeathHeimProgress] < kActRaiserDeathHeimProgress_FinalBossBeaten)

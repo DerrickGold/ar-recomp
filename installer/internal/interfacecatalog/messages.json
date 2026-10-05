@@ -1,11 +1,6 @@
 [
-  {"key":"overlay.completion.setup_required","text":["Requires Scene > Diorama 3D: On + Skybox: Skybox only.","Dans Scène : Diorama 3D activé + Ciel panoramique seul.","Unter Szene: 3D-Diorama ein + Nur Skybox erforderlich.","シーンで3Dジオラマをオン、スカイボックスを「スカイボックスのみ」に設定してください。"]},
-  {"key":"overlay.completion.setup_ready","text":["Ready: Diorama 3D + Skybox only. Town/World 3D optional.","Prêt : Diorama 3D + Ciel panoramique seul. Ville/Monde 3D facultatifs.","Bereit: 3D-Diorama + Nur Skybox. Stadt/Welt 3D optional.","準備完了：3Dジオラマ＋スカイボックスのみ。町と世界の3D表示は任意です。"]},
-  {"key":"overlay.completion.reset","text":["Reset completion effects","Rétablir les effets de fin","Abschlusseffekte zurücksetzen","クリア演出を初期化"]},
-  {"key":"overlay.completion.reset.help","text":["Restore only the Death Heim completion scene and its effects to the shipped defaults. Camera and other Action settings stay as they are. Press B twice to confirm.","Rétablit seulement la scène de fin de Death Heim et ses effets. La caméra et les autres réglages Action sont conservés. Appuyez deux fois sur B pour confirmer.","Setzt nur die Death-Heim-Abschlussszene und ihre Effekte zurück. Kamera und andere Action-Einstellungen bleiben erhalten. Drücke zur Bestätigung zweimal B.","デスヘイムのクリアシーンと演出だけを初期値に戻します。カメラと他のアクション設定は保持されます。Bを2回押すと確定します。"]},
-  {"key":"overlay.completion.confirm_reset","text":["B AGAIN: RESET COMPLETION EFFECTS","ENCORE B : RÉTABLIR LES EFFETS DE FIN","NOCHMALS B: ABSCHLUSSEFFEKTE ZURÜCKSETZEN","もう一度Bでクリア演出を初期化"]},
-  {"key":"setting.death_heim_completion_world.label","text":["Completion ocean scene","Océan de fin","Abschluss-Ozean","クリア後の海"]},
-  {"key":"setting.death_heim_completion_world.help","text":["Replace Death Heim's completion background with a heavenly ocean vista. Requires Action Diorama 3D and Skybox only. Independent of Town and World navigation 3D; preserves the original platform, hero and game timing.","Remplace le fond de fin de Death Heim par un océan céleste. Nécessite Diorama d’action 3D et Ciel seul. Indépendant des villes et de la navigation 3D ; conserve la plateforme, le héros et le rythme d’origine.","Ersetzt Death Heims Abschlusskulisse durch einen himmlischen Ozean. Benötigt Action-Diorama 3D und Nur Himmel. Unabhängig von Stadt und Weltnavigation in 3D; Plattform, Held und ursprüngliches Spieltempo bleiben erhalten.","デスヘイムのクリア後の背景を天空の海に置き換えます。アクションの3Dジオラマと「空のみ」が必要です。町や世界の3D表示とは独立し、元の足場、主人公、進行速度を保ちます。"]},
+  {"key":"setting.death_heim_completion_world.label","text":["Death Heim completion scene","Scène de fin de Death Heim","Death-Heim-Abschlussszene","デスヘイムのクリアシーン"]},
+  {"key":"setting.death_heim_completion_world.help","text":["Replace Death Heim's completion background with a heavenly ocean vista. Requires Action Diorama 3D; applies its own backdrop settings. Independent of Town and World navigation 3D; preserves the original platform, hero and game timing.","Remplace le fond de fin de Death Heim par un océan céleste. Nécessite Diorama d’action 3D ; applique ses propres réglages de fond. Indépendant des villes et de la navigation 3D ; conserve la plateforme, le héros et le rythme d’origine.","Ersetzt Death Heims Abschlusskulisse durch einen himmlischen Ozean. Benötigt Action-Diorama 3D; verwendet eigene Hintergrund-Einstellungen. Unabhängig von Stadt und Weltnavigation in 3D; Plattform, Held und ursprüngliches Spieltempo bleiben erhalten.","デスヘイムのクリア後の背景を天空の海に置き換えます。アクションの3Dジオラマが必要です。背景設定はシーンが自動で適用します。町や世界の3D表示とは独立し、元の足場、主人公、進行速度を保ちます。"]},
   {"key":"setting.death_heim_completion_waves.label","text":["Ocean waves","Vagues","Meereswellen","波"]},
   {"key":"setting.death_heim_completion_waves.help","text":["Animate the completion ocean's waves and spray.","Anime les vagues et les embruns de l’océan de fin.","Animiert Wellen und Gischt des Abschluss-Ozeans.","クリア後の海の波としぶきを動かします。"]},
   {"key":"setting.death_heim_completion_sun_glints.label","text":["Sun glint sparkles","Reflets scintillants","Sonnenfunkeln","水面のきらめき"]},
@@ -2968,10 +2963,10 @@
   {
     "key": "setting.diorama_vertical_extend.help",
     "text": [
-      "Manual Diorama extra rows per side. 0 keeps the authentic 224-line frame. Screen ratio Auto chooses its own budget.",
-      "Lignes supplémentaires par côté pour le Diorama manuel. 0 conserve les 224 lignes d’origine. Le format Auto choisit sa propre limite.",
-      "Manuelle zusätzliche Diorama-Zeilen je Seite. 0 behält die originalen 224 Zeilen bei. Bildschirmformat Auto wählt seine eigene Grenze.",
-      "ジオラマで手動追加する上下各側の行数。0は本来の224行を保ちます。画面比率が自動の場合は別の行数を使います。"
+      "Diorama extra rows per side, including Screen ratio Auto. 0 keeps the authentic 224-line frame.",
+      "Lignes supplémentaires par côté pour le Diorama, y compris avec le format Auto. 0 conserve les 224 lignes d’origine.",
+      "Zusätzliche Diorama-Zeilen je Seite, auch bei Bildschirmformat Auto. 0 behält die originalen 224 Zeilen bei.",
+      "ジオラマで追加する上下各側の行数。画面比率が自動の場合も適用されます。0は本来の224行を保ちます。"
     ]
   },
   {

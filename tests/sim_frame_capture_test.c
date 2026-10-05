@@ -343,7 +343,24 @@ int main(void) {
   ExpectEvents("CSAN");
   assert(!frame.death_heim_completion_world);
   g_settings.death_heim_completion_world = true;
-  g_settings.diorama_skybox = kDioramaSky_Off;
+  /* The enhanced scene owns its backdrop regardless of the player's skybox
+   * preference. Capture never changes that preference, even across A/B. */
+  g_settings.diorama_shoebox = true;
+  for (int skybox = kDioramaSky_Off; skybox < kDioramaSky_Count; skybox++) {
+    g_settings.diorama_skybox = skybox;
+    SimFrameCapture_RefreshMetadata(&frame);
+    ExpectEvents("CSBEAN");
+    assert(frame.death_heim_completion_world);
+    completion_bg1 = 0x60;
+    completion_bg2 = 0x70;
+    SimFrameCapture_RefreshMetadata(&frame);
+    ExpectEvents("CSAN");
+    assert(!frame.death_heim_completion_world);
+    assert(g_settings.diorama_skybox == skybox && g_settings.diorama_shoebox);
+    completion_bg1 = 0x64;
+    completion_bg2 = 0x74;
+  }
+  g_settings.diorama_mode = false;
   SimFrameCapture_RefreshMetadata(&frame);
   ExpectEvents("CSAN");
   assert(!frame.death_heim_completion_world);

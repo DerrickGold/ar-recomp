@@ -179,7 +179,6 @@ typedef enum {
   kSettingCat_Localization,
   kSettingCat_LocalizationFont,
   kSettingCat_Interface,
-  kSettingCat_ActionCompletion,
   kSettingCat_Count,
 } SettingCategory;
 

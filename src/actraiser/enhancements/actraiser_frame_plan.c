@@ -298,14 +298,18 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
   DisplayGeometry_SetVertical(0, 0);
   if (!frame_policy) return;
 
-  const bool automatic = g_settings.extended_aspect == kScreenAspect_Auto;
+  const bool diorama = Diorama_IsActiveThisFrame();
+  /* Auto chooses the flat presentation canvas. Diorama still captures the
+   * configured extra world rows, just as it does with an explicit ratio. */
+  const bool automatic =
+      g_settings.extended_aspect == kScreenAspect_Auto && !diorama;
   int budget = automatic
       ? g_actraiser_display_geometry->auto_vertical_budget
       : g_settings.diorama_vertical_extend;
   const int primary_layer =
       ActionBgPlan_PrimaryLayer(&s_pending_action_bg_plan);
   const int playfield = ActionBgPlan_PlayfieldLayer(&s_pending_action_bg_plan);
-  if (Diorama_IsActiveThisFrame() && g_ws_active && playfield >= 0) {
+  if (diorama && g_ws_active && playfield >= 0) {
     const ActionBgLayerPlan *layer = &s_pending_action_bg_plan.layer[playfield];
     if (layer->source == kActionBgSource_WorldMap && !layer->wrap_world_x &&
         layer->default_edge == kActionBgEdge_LiveWorld && !layer->band_count &&
@@ -315,7 +319,7 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
           &s_pending_diorama_world_x0, &s_pending_diorama_world_width);
   }
   const uint32_t ppu_display = RtlGamePpuDisplayState();
-  if (budget > 0 && (automatic || Diorama_IsActiveThisFrame()) &&
+  if (budget > 0 && (automatic || diorama) &&
       (RTL_GAME_PPU_BG_MODE_CONTROL(ppu_display) & 7u) != 7u &&
       ActRaiser_IsActionMapGroup(map_group) &&
       !ActRaiser_IsSimulationTown(map_group, map_number) &&
