@@ -1,4 +1,5 @@
 #include "app/input_map.h"
+#include "actraiser/actraiser_angel_input.h"
 #include "host/gamepad_poll.h"
 
 #include <stddef.h>
@@ -53,6 +54,15 @@ static uint32 s_menu_axis_held;
 static uint32 s_host_key_held;
 
 static InputMapActionFn s_action_handler;
+static bool s_angel_controls_active;
+static const uint32 kDirectionButtons = (1u << kInputAction_Up) |
+    (1u << kInputAction_Down) | (1u << kInputAction_Left) | (1u << kInputAction_Right);
+
+void InputMap_SetAngelControlsActive(bool active) { s_angel_controls_active = active; }
+
+static bool AnalogAngelActive(void) {
+  return s_angel_controls_active && g_settings.input_analog_angel;
+}
 
 int InputMap_GamepadCount(void) { return s_pad_count; }
 
@@ -167,6 +177,7 @@ void InputMap_SetActionHandler(InputMapActionFn handler) {
 }
 
 void InputMap_Init(void) {
+  s_angel_controls_active = false;
   s_steam_deck_detected = false;
   if (IsSteamDeckHardware()) MarkSteamDeckDetected();
   /* The Steam Deck's built-in gamepad is driven by SDL's HIDAPI Steam Deck
@@ -216,6 +227,7 @@ void InputMap_Init(void) {
 }
 
 void InputMap_Shutdown(void) {
+  s_angel_controls_active = false;
   HostGamepadPoll_Shutdown();
   for (int i = 0; i < s_pad_count; i++) SDL_CloseGamepad(s_pads[i].pad);
   s_pad_count = 0;
@@ -712,9 +724,13 @@ void InputMap_Clear(void) {
 
 uint32 InputMap_State(void) {
   const InputDeviceMode mode = InputMap_DeviceMode();
+  /* An explicit direction binding takes priority over the left stick. In
+   * particular, switching to D-pad movement must not combine opposing inputs. */
+  const uint32 stick = AnalogAngelActive() && (s_pad_bits & kDirectionButtons) ?
+      s_stick_bits & ~kDirectionButtons : s_stick_bits;
   return InputMap_ArbitrateState(mode, s_pad_count > 0,
                                  mode == kInputDevice_Auto && InputMap_GamepadIsActive(),
-                                 s_key_bits, s_pad_bits | s_stick_bits);
+                                 s_key_bits, s_pad_bits | stick);
 }
 
 static void SetActionBit(uint32 *bits, InputAction action, bool pressed) {
@@ -783,6 +799,11 @@ bool InputMap_GamepadIsActive(void) {
 
   for (int button = 0; button < SDL_GAMEPAD_BUTTON_COUNT; button++)
     if (s_pad_button_down[button]) return true;
+  if (AnalogAngelActive() &&
+      ActRaiserAngel_EncodeStick(s_pad_axis_value[SDL_GAMEPAD_AXIS_LEFTX],
+                                s_pad_axis_value[SDL_GAMEPAD_AXIS_LEFTY],
+                                g_settings.input_angel_deadzone) != AR_ANGEL_STICK_ENABLED)
+    return true;
   const int stick_deadzone = StickDeadzone();
   for (int axis = 0; axis < SDL_GAMEPAD_AXIS_COUNT; axis++) {
     int value = s_pad_axis_value[axis];
@@ -831,6 +852,15 @@ InputClass InputMap_GameInputClass(void) {
   const bool keyboard = InputMap_ShouldAcceptKeyboard(
       mode, s_pad_count > 0, mode == kInputDevice_Auto && InputMap_GamepadIsActive());
   return keyboard ? kInputClass_Keyboard : kInputClass_Gamepad;
+}
+
+uint32 InputMap_AnalogAngel(void) {
+  if (!AnalogAngelActive() || !s_pad_count ||
+      InputMap_GameInputClass() != kInputClass_Gamepad || (s_pad_bits & kDirectionButtons))
+    return 0;
+  return ActRaiserAngel_EncodeStick(s_pad_axis_value[SDL_GAMEPAD_AXIS_LEFTX],
+                                   s_pad_axis_value[SDL_GAMEPAD_AXIS_LEFTY],
+                                   g_settings.input_angel_deadzone);
 }
 
 uint32 InputMap_ArbitrateState(InputDeviceMode mode, bool gamepad_connected, bool gamepad_active,

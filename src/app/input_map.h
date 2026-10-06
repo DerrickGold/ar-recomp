@@ -172,6 +172,13 @@ bool InputMap_GamepadIsActive(void);
 /* Current joypad word in runner bit order, already arbitrated under the
  * configured device mode and selected pad slot. */
 uint32 InputMap_State(void);
+/* Main-thread scene policy, published by GameLoop before handling events.
+ * Only live town play enables angel deadzone arbitration and D-pad priority;
+ * action stages and recordings retain the original digital input rules. */
+void InputMap_SetAngelControlsActive(bool active);
+/* Packed game-owned analog angel sample. Explicit directional bindings take
+ * precedence; keyboard, disconnected pads and disabled analog return zero. */
+uint32 InputMap_AnalogAngel(void);
 /* Drops every held bit — used wherever host input freezes the game (menu open,
  * inspector selection) so a held direction cannot leak across the freeze. */
 void InputMap_Clear(void);

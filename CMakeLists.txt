@@ -25,6 +25,8 @@ endif()
 include(CTest)
 
 if(BUILD_TESTING)
+    add_library(actraiser_angel_input STATIC src/actraiser/actraiser_angel_input.c)
+    target_link_libraries(actraiser_angel_input PUBLIC actraiser_math)
     add_test(NAME actraiser_runner_private_boundary
     COMMAND ${CMAKE_COMMAND}
             -DGAME_SOURCE_ROOT=${CMAKE_SOURCE_DIR}/src
@@ -2606,7 +2608,7 @@ if(BUILD_TESTING)
     # settings.c owns the input-binding descriptors, so the registry test now
     # links the SDL-backed key/button naming they serialize through.
     target_link_libraries(actraiser_settings_test PRIVATE
-        SDL3::SDL3 actraiser_math)
+        SDL3::SDL3 actraiser_math actraiser_angel_input)
     target_include_directories(actraiser_settings_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
@@ -2830,7 +2832,8 @@ if(BUILD_TESTING)
         src/action/action_bg_tuner.c)
     target_link_libraries(actraiser_settings_overlay_test PRIVATE
         actraiser_render_sdl_test_support actraiser_text_test_support actraiser_rom_decode_test_support actraiser_campaign_test_support)
-    target_link_libraries(actraiser_settings_overlay_test PRIVATE actraiser_regional_rules)
+    target_link_libraries(actraiser_settings_overlay_test PRIVATE
+        actraiser_regional_rules actraiser_angel_input)
     target_include_directories(actraiser_settings_overlay_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/diorama
@@ -3716,6 +3719,14 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_recovery_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_recovery COMMAND actraiser_recovery_test)
+
+    add_executable(actraiser_angel_test tests/actraiser_angel_test.c
+        src/actraiser/actraiser_angel.c src/actraiser/actraiser_native_call.c)
+    target_link_libraries(actraiser_angel_test PRIVATE
+        actraiser_cpu_hle_test_support actraiser_angel_input)
+    target_include_directories(actraiser_angel_test PRIVATE src
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_angel COMMAND actraiser_angel_test)
 
     add_executable(actraiser_quake_test tests/actraiser_quake_test.c
         src/actraiser/actraiser_quake.c src/actraiser/actraiser_native_call.c

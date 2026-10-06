@@ -7,6 +7,7 @@
 #include <SDL3/SDL.h>
 
 #include "actraiser/actraiser_rtl.h"
+#include "actraiser/actraiser_angel.h"
 #include "actraiser_game.h"
 #include "app/input_replay.h"
 #include "app/input_map.h"
@@ -65,7 +66,7 @@ static void RtlDrawPpuFrame(void) {
  * the emulated frame, post-frame diagnostics, and replay completion must stay
  * indivisible so turbo and ordinary pacing cannot acquire different ordering
  * as new per-frame services are added. */
-static bool RunOneRecompiledFrame(uint32 live_inputs, bool *stop_running) {
+static bool RunOneRecompiledFrame(uint32 live_inputs, uint32 angel_stick, bool *stop_running) {
   InputReplayFrameResult replay = InputReplay_Resolve(live_inputs);
   if (InputReplay_Failed()) {
     SessionFatal_Request("Input replay failed: %s",
@@ -75,6 +76,10 @@ static bool RunOneRecompiledFrame(uint32 live_inputs, bool *stop_running) {
   }
   if (replay.stop_requested) *stop_running = true;
 
+  /* Canonical recordings currently carry buttons only. Diagnostic runs must
+   * never consume unrecorded live axes, including replay's live handoff. */
+  ActRaiserAngel_SetInput(InputReplay_PolicyChangesAllowed() ? angel_stick : 0,
+      g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap]);
   (void)RtlRunFrame(replay.inputs);
   OracleTrace_CompleteTick();
   if (SessionFatal_Requested()) {
@@ -98,7 +103,7 @@ static bool RunOneRecompiledFrame(uint32 live_inputs, bool *stop_running) {
  * it (§3.5 — "wrap the per-tick RtlRunFrame"). Called once per outer
  * iteration by the headless loop (§3.6) and 0-N times per outer iteration by
  * the non-headless fixed-timestep accumulator loop (§3.1). */
-static void RunOneEmulatedTickWork(uint32 live_inputs, int multiplier,
+static void RunOneEmulatedTickWork(uint32 live_inputs, uint32 angel_stick, int multiplier,
                                    bool *stop_running) {
   const HostRuntimeTickProfile profile = HostRuntimeDiagnostics_BeginTick();
 
@@ -114,7 +119,7 @@ static void RunOneEmulatedTickWork(uint32 live_inputs, int multiplier,
    * DSP ring buffered. It also pinned scheduled port-write latency at the
    * produced+3-quanta ceiling (~50 ms) because `produced` could not
    * advance while the game thread held the lock. */
-  if (!RunOneRecompiledFrame(live_inputs, stop_running)) return;
+  if (!RunOneRecompiledFrame(live_inputs, angel_stick, stop_running)) return;
   /* TURBO ('t' toggle): real fast-forward = run extra game frames per
    * emulated TICK (not per rendered/present frame — that decoupling is
    * M5's job). Same input word each sub-frame (level-held buttons repeat;
@@ -123,7 +128,7 @@ static void RunOneEmulatedTickWork(uint32 live_inputs, int multiplier,
   if (multiplier > 1 && !*stop_running) {
     for (int tf = 1; tf < multiplier && !SessionFatal_Requested() &&
          !*stop_running; tf++) {
-      if (!RunOneRecompiledFrame(live_inputs, stop_running)) break;
+      if (!RunOneRecompiledFrame(live_inputs, angel_stick, stop_running)) break;
     }
     if (SessionFatal_Requested()) {
       *stop_running = true;
@@ -135,6 +140,7 @@ static void RunOneEmulatedTickWork(uint32 live_inputs, int multiplier,
 
 typedef struct TickJob {
   uint32 inputs;
+  uint32 angel_stick;
   int multiplier;
   bool stop_requested;
 } TickJob;
@@ -142,13 +148,14 @@ typedef struct TickJob {
 static void RunTickOnOwner(void *context) {
   TickJob *job = context;
   const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_Emulation);
-  RunOneEmulatedTickWork(job->inputs, job->multiplier, &job->stop_requested);
+  RunOneEmulatedTickWork(job->inputs, job->angel_stick, job->multiplier, &job->stop_requested);
   PerformanceMetrics_End(performance);
 }
 
 static TickJob LatchTickJob(void) {
   return (TickJob){
     .inputs = HostInput_SampleLiveInputs(),
+    .angel_stick = InputMap_AnalogAngel(),
     .multiplier = HostInput_IsTurbo() ? g_settings.turbo_multiplier : 1,
   };
 }
@@ -177,7 +184,8 @@ static void DestroyProducerCoroutine(void *unused) {
 
 typedef struct StreamJob {
   HostFrameQueue *queue;
-  atomic_uint_fast64_t input_sample; /* low 32 input bits, high 32 sample ms */
+  atomic_uint_fast64_t input_sample; /* buttons and stick in one immutable sample */
+  atomic_uint_fast32_t input_time_ms; /* diagnostic age, independent of gameplay */
   uint64_t next_ns, interval_ns, service_deadline_ns;
   HostFramePlayout playout;
   uint8_t map_group, map_number;
@@ -186,6 +194,12 @@ typedef struct StreamJob {
   unsigned frames, full_waits;
   bool stopped, transition, maintenance, measure_cpu;
 } StreamJob;
+
+static void PublishStreamInput(StreamJob *stream) {
+  const uint64_t sample = ((uint64_t)InputMap_AnalogAngel() << 32) | InputMap_State();
+  atomic_store_explicit(&stream->input_time_ms, (uint32_t)SDL_GetTicks(), memory_order_relaxed);
+  atomic_store_explicit(&stream->input_sample, sample, memory_order_release);
+}
 
 static void ProduceFrameStream(void *context) {
   StreamJob *stream = context;
@@ -204,9 +218,12 @@ static void ProduceFrameStream(void *context) {
     const uint64_t cpu_start = stream->measure_cpu ? HostFrameProducer_ThreadCpuTimeNs() : 0;
     packet->source_ns = stream->next_ns;
     const uint64_t sample = atomic_load_explicit(&stream->input_sample, memory_order_acquire);
-    const uint32_t age_ms = (uint32_t)SDL_GetTicks() - (uint32_t)(sample >> 32);
+    const uint32_t input_time_ms =
+        (uint32_t)atomic_load_explicit(&stream->input_time_ms, memory_order_relaxed);
+    const uint32_t age_ms = (uint32_t)SDL_GetTicks() - input_time_ms;
     packet->input_ns = packet->started_ns - (uint64_t)age_ms * 1000000;
     TickJob tick = {.inputs = HostInput_ResolveActionInputs((uint32_t)sample),
+        .angel_stick = (uint32_t)(sample >> 32),
         .multiplier = 1};
     RunTickOnOwner(&tick);
     AudioSession_AfterTicks();
@@ -475,6 +492,9 @@ void GameLoop_Run(const GameSessionConfig *config) {
    * Unsupported scenes retain the synchronous fixed-timestep accumulator. */
 
   bool running = true;
+  /* Session input mode is fixed before this loop and remains immutable while
+   * the producer runs. Do not inspect live replay state from the main thread. */
+  const bool live_controls = InputReplay_PolicyChangesAllowed();
   unsigned delay_permille = kHostFramePlayoutDefaultDelayPermille;
   /* A zero override retains the old newest-completed policy for A/B traces. */
   int native_delay_us = -1;
@@ -511,6 +531,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
       (!sim_metadata_trace || !sim_metadata_trace[0]);
   StreamJob stream = {0};
   atomic_init(&stream.input_sample, 0);
+  atomic_init(&stream.input_time_ms, 0);
   bool stream_pending = false;
   bool stream_done = false;
   /* Diagnostic isolation of periodic ownership handoffs. Host events and
@@ -588,6 +609,12 @@ void GameLoop_Run(const GameSessionConfig *config) {
       HostDisplay_EmulatedFramePresentMode(
           config->headless, config->headless_video);
   while (running) {
+    /* Stream metadata is fixed until ownership returns. Runner memory is only
+     * read on the synchronous path, after the producer has acknowledged pause. */
+    const uint8 map_group = stream_pending ? stream.map_group : g_ram[kActRaiserWram_MapGroup];
+    const uint8 map_number = stream_pending ? stream.map_number : g_ram[kActRaiserWram_CurrentMap];
+    InputMap_SetAngelControlsActive(live_controls &&
+        ActRaiser_IsSimulationTown(map_group, map_number));
     if (stream_pending) {
       const uint64_t trace_loop_ns = pacing_trace ? SDL_GetTicksNS() : 0;
       if (SessionFatal_Requested()) {
@@ -629,8 +656,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
         }
         SDL_PeepEvents(&pending_event, 1, SDL_GETEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST);
       }
-      atomic_store_explicit(&stream.input_sample,
-          ((uint64_t)(uint32_t)SDL_GetTicks() << 32) | InputMap_State(), memory_order_release);
+      PublishStreamInput(&stream);
       /* Only the classified event above requests ownership. A second peek
        * races asynchronously posted gamepad updates: even an ignored sensor
        * or update-complete notification could otherwise pause the stream. */
@@ -990,8 +1016,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
         stream.next_ns = now;
         ++stream_epoch;
       }
-      atomic_store_explicit(&stream.input_sample,
-          ((uint64_t)(uint32_t)SDL_GetTicks() << 32) | InputMap_State(), memory_order_release);
+      PublishStreamInput(&stream);
       stream.stopped = stream.transition = false;
       stream_owner_service_ns = now;
       stream.service_deadline_ns = service_interval_ns ? now + service_interval_ns : 0;
@@ -1157,4 +1182,5 @@ void GameLoop_Run(const GameSessionConfig *config) {
   free(sync_trace_buffer);
   HostDisplay_SetProducerPacing(false);
   HostDisplay_InvalidatePresentHistory();
+  InputMap_SetAngelControlsActive(false);
 }

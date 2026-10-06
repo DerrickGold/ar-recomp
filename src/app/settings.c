@@ -9,6 +9,7 @@
 #include "actraiser_game.h"   /* kActRaiserAuthenticWidth */
 #include "present/display_geometry.h"
 #include "app/input_map.h"
+#include "actraiser/actraiser_angel_input.h"
 #include "host/atomic_replace.h"
 #include "sim/sim3d/sim3d_camera_limits.h"
 #include "sim/town/sim_town_terrain.h"
@@ -2343,6 +2344,16 @@ const SettingDesc g_setting_descs[] = {
               kInputStickDeadzoneDefaultPercent,
               kInputStickDeadzoneMinimumPercent,
               kInputStickDeadzoneMaximumPercent, NULL, NULL),
+  BOOL_SETTING(input_analog_angel, NULL, "Analog angel movement",
+               "Use left-stick direction and deflection for angel movement in towns. "
+               "Hold fire to keep one of four facing directions while moving; "
+               "release fire to turn. Movement follows fixed map axes. "
+               "Input recording and replay use digital controls.",
+               kSettingCat_Input, 1, false, NULL, NULL),
+  INT_SETTING(input_angel_deadzone, NULL, "Angel stick deadzone",
+              "Radial deadzone for analog angel movement, as a percent of full travel.",
+              kSettingCat_Input, kAngelDeadzoneDefaultPercent, 0,
+              kAngelDeadzoneMaximumPercent, NULL, NULL),
   INT_SETTING(input_cam_sensitivity, NULL, "Camera sensitivity",
               "Speed of stick-driven camera orbit and zoom in the diorama and "
               "3D town, as a percent of the base rate.",

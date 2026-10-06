@@ -3,6 +3,7 @@
 #include "app/config.h"
 #include "present/display_geometry.h"
 #include "app/input_map.h"
+#include "actraiser/actraiser_angel_input.h"
 #include "render/render_capabilities.h"
 #include "app/settings.h"
 #include "randomizer/randomizer.h"
@@ -114,7 +115,7 @@ static void TestDefaultsAndMetadata(void) {
    * Remember last town adds a native/enhanced QoL preference; native menu
    * quick use adds an independent QoL toggle. Save editing adds Apply and restart. */
   /* One completion scene switch plus nine internal effect overrides. */
-  const int expected_descriptors = 317;
+  const int expected_descriptors = 319;
   if (g_setting_desc_count != expected_descriptors)
     fprintf(stderr, "Setting descriptors: expected %d, got %d\n",
             expected_descriptors, g_setting_desc_count);
@@ -183,6 +184,8 @@ static void TestDefaultsAndMetadata(void) {
   CHECK(!g_settings.audio_extended_channels);
   CHECK(g_settings.audio_dialog_blip);
   CHECK(g_settings.turbo_multiplier == 8);
+  CHECK(g_settings.input_analog_angel);
+  CHECK(g_settings.input_angel_deadzone == kAngelDeadzoneDefaultPercent);
   CHECK(g_settings.warp_target == 0x0101);
   CHECK(!g_settings.scene_inspector);
   CHECK(!g_settings.sim3d_mode);
@@ -1458,6 +1461,86 @@ static void TestInputHintDeviceRetention(void) {
   SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
 }
 
+static void TestAnalogAngelInput(void) {
+  Settings_Init();
+  InputMap_Clear();
+  CHECK(SDL_InitSubSystem(SDL_INIT_GAMEPAD));
+  SDL_VirtualJoystickDesc desc;
+  SDL_INIT_INTERFACE(&desc);
+  desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+  desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
+  desc.axis_mask = (1u << SDL_GAMEPAD_AXIS_COUNT) - 1;
+  desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+  desc.button_mask = (1u << SDL_GAMEPAD_BUTTON_COUNT) - 1;
+  desc.name = "Analog angel test";
+  const SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
+  CHECK(id != 0);
+  if (!id) {
+    SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    return;
+  }
+  SDL_Event event = {.type = SDL_EVENT_GAMEPAD_ADDED};
+  event.gdevice.which = id;
+  InputMap_HandleEvent(&event);
+  g_settings.input_device = kInputDevice_Gamepad;
+  CHECK(InputMap_AnalogAngel() == 0); /* Inactive outside live town play. */
+  InputMap_SetAngelControlsActive(true);
+  CHECK(InputMap_AnalogAngel() == AR_ANGEL_STICK_ENABLED);
+  event.type = SDL_EVENT_GAMEPAD_AXIS_MOTION;
+  event.gaxis.which = id;
+  event.gaxis.axis = SDL_GAMEPAD_AXIS_LEFTX;
+  event.gaxis.value = 1000;
+  InputMap_HandleEvent(&event);
+  CHECK(InputMap_AnalogAngel() == AR_ANGEL_STICK_ENABLED);
+  event.gaxis.value = 5000; /* Analog motion below the digital stick threshold. */
+  InputMap_HandleEvent(&event);
+  CHECK(InputMap_AnalogAngel() != AR_ANGEL_STICK_ENABLED);
+  CHECK(InputMap_State() == 0);
+  g_settings.input_device = kInputDevice_Auto;
+  CHECK(InputMap_GameInputClass() == kInputClass_Gamepad);
+  InputMap_SetAngelControlsActive(false);
+  InputMap_HandleKey(SDL_SCANCODE_Z, true, false);
+  CHECK(InputMap_GameInputClass() == kInputClass_Keyboard);
+  CHECK(InputMap_State() == (1u << kInputAction_B));
+  CHECK(InputMap_AnalogAngel() == 0);
+  InputMap_SetAngelControlsActive(true);
+  CHECK(InputMap_GameInputClass() == kInputClass_Gamepad);
+  CHECK(InputMap_State() == 0);
+  InputMap_HandleKey(SDL_SCANCODE_Z, false, false);
+  g_settings.input_device = kInputDevice_Keyboard;
+  CHECK(InputMap_AnalogAngel() == 0);
+  g_settings.input_device = kInputDevice_Gamepad;
+  event.gaxis.value = 32767;
+  InputMap_HandleEvent(&event);
+  CHECK(InputMap_AnalogAngel() == ActRaiserAngel_EncodeStick(32767, 0, 12));
+  event.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+  event.gbutton.which = id;
+  event.gbutton.button = SDL_GAMEPAD_BUTTON_DPAD_LEFT;
+  InputMap_HandleEvent(&event);
+  CHECK(InputMap_AnalogAngel() == 0);
+  CHECK(InputMap_State() == (1u << kInputAction_Left));
+  InputMap_SetAngelControlsActive(false);
+  CHECK(InputMap_State() == ((1u << kInputAction_Left) | (1u << kInputAction_Right)));
+  InputMap_SetAngelControlsActive(true);
+  event.type = SDL_EVENT_GAMEPAD_BUTTON_UP;
+  InputMap_HandleEvent(&event);
+  CHECK(InputMap_AnalogAngel() == ActRaiserAngel_EncodeStick(32767, 0, 12));
+  CHECK(Settings_SetText(Settings_Find("input_analog_angel"), "Off") == kSettingChange_Applied);
+  CHECK(InputMap_AnalogAngel() == 0);
+  CHECK(InputMap_State() == (1u << kInputAction_Right));
+  CHECK(Settings_SetText(Settings_Find("input_angel_deadzone"), "30") == kSettingChange_Applied);
+  CHECK(g_settings.input_angel_deadzone == 30);
+  InputMap_Clear();
+  CHECK(InputMap_State() == 0);
+  event.type = SDL_EVENT_GAMEPAD_REMOVED;
+  event.gdevice.which = id;
+  InputMap_HandleEvent(&event);
+  CHECK(InputMap_AnalogAngel() == 0);
+  InputMap_Shutdown();
+  SDL_DetachVirtualJoystick(id);
+  SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+}
+
 static void TestSteamDeckInputPolicy(void) {
   Settings_Init();
   CHECK(SDL_InitSubSystem(SDL_INIT_GAMEPAD));
@@ -2615,6 +2698,7 @@ int main(int argc, char **argv) {
   TestInputBindings();
   TestInputBindingHints();
   TestInputHintDeviceRetention();
+  TestAnalogAngelInput();
   TestSteamDeckInputPolicy();
   TestHardwareCapabilities();
   TestGpuBackendChoice();

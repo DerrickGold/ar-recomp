@@ -10,6 +10,7 @@
 #include "actraiser/actraiser_localization_schedule.h"
 #include "actraiser/enhancements/actraiser_world_resume.h"
 #include "app/input_replay.h"
+#include "actraiser/actraiser_angel.h"
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -130,6 +131,7 @@ bool ActRaiser_InitializeGame(
   ActRaiserCredits_Reset();
   ActRaiserLocalizationText_ResetObservation();
   ActRaiserSimMenu_Reset();
+  ActRaiserAngel_Reset();
   ActRaiserBg3Upload_Reset();
   ActRaiserSpriteOwnership_Reset();
   s_rom_setup_result = (ActRaiserRomSetupResult){0};

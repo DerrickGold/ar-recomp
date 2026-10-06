@@ -692,6 +692,8 @@ typedef struct Settings {
   int input_bind_page;        /* which class the Input category lists */
   int input_stick_deadzone;   /* percent of full stick travel */
   bool input_stick_as_dpad;
+  bool input_analog_angel;
+  int input_angel_deadzone;
   int input_cam_deadzone;     /* percent, for the analog camera actions */
   int input_cam_sensitivity;  /* percent of the base orbit/zoom rate */
   bool input_cam_invert_y;

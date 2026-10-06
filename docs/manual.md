@@ -207,6 +207,15 @@ to B/A/Y/X, shoulders to L/R, Menu/View to Start/Select, and D-pad to D-pad.
 The left stick also acts as the D-pad by default, with an adjustable deadzone.
 The right stick and triggers control the camera.
 
+In simulation towns, **Analog angel movement** uses the left stick for free
+movement angles and speed proportional to its deflection. **Angel stick
+deadzone** sets its radial deadzone independently of the D-pad threshold.
+Movement follows the fixed map axes and does not rotate the world. The angel
+keeps four facing directions. Hold fire to keep the current facing while
+moving, and release fire to turn with the stick. The D-pad and keyboard retain
+digital movement. Disable the setting to restore stick-as-D-pad movement in
+towns. Input recording and replay currently use digital controls.
+
 Set the *Gamepad* row to pick between several connected controllers; it names
 each one, and *First connected* follows hotplug. If SDL does not recognise a
 pad, drop a `gamecontrollerdb.txt` next to the executable (or in `assets/`)
