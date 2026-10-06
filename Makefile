@@ -9,7 +9,7 @@
 # macOS can cross-build all release targets without a VM.
 # See docs/desktop-packaging.md for Builder distribution prerequisites.
 # DESKTOP=0 explicitly requests legacy archives instead of the default matrix.
-# Steam Deck enforces glibc 2.36; full device/game qualification is separate.
+# Steam Deck enforces glibc 2.35; full device/game qualification is separate.
 #
 # The lower-level packaging-only CMake command (run from the packaging directory) is:
 #   cd installer/packaging && cmake --workflow --preset release

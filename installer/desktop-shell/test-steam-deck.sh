@@ -12,8 +12,8 @@ glibc=$(getconf GNU_LIBC_VERSION)
 version=${glibc#glibc }
 major=${version%%.*}
 minor=${version#*.}; minor=${minor%%.*}
-if test "$major" -lt 2 || { test "$major" -eq 2 && test "$minor" -lt 36; }; then
-    echo "This Builder requires glibc 2.36 or newer; found $glibc. Update SteamOS normally, not individual system libraries." >&2
+if test "$major" -lt 2 || { test "$major" -eq 2 && test "$minor" -lt 35; }; then
+    echo "This Builder requires glibc 2.35 or newer; found $glibc. Update SteamOS normally, not individual system libraries." >&2
     exit 1
 fi
 source_image=$(realpath "$1")
@@ -51,7 +51,7 @@ unset APPIMAGE_EXTRACT_AND_RUN
 run_probe portable-mounted
 test -f "$test_root/Portable Builder/Builder Data/.builder-workspace"
 test ! -e "$test_root/Portable Builder/Builder Data/utils"
-test -f "$test_root/Portable Builder/ActRaiserRecomp/.actraiser-import.json"
+test -d "$test_root/Portable Builder/ActRaiserRecomp/game-assets"
 test ! -e "$XDG_DATA_HOME/ActRaiserRecomp/installer"
 unset AR_BUILDER_SMOKE_ROM
 mv "$test_root/Portable Builder" "$test_root/Relocated Builder"

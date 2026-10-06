@@ -40,8 +40,10 @@ var client = &http.Client{Timeout: 5 * time.Minute}
 
 // Keep the whole runtime closure on this baseline, not just the Go/CGO shell.
 // Explicit lock refreshes continue to pick up this suite's security updates.
+// One below bookworm's own glibc: AppImageHub tests on Ubuntu 22.04 (2.35).
+// A bundled library that starts requiring 2.36 fails the audit, not players.
 const Distribution = "debian-bookworm"
-const GLIBCBaseline = "2.36"
+const GLIBCBaseline = "2.35"
 
 // Resolve is an explicit maintainer update, not part of ordinary release builds.
 // Normal builds consume a reviewed lock and check every downloaded package hash.

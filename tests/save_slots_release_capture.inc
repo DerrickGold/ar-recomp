@@ -62,7 +62,8 @@ static void CaptureSaveSlotsReleaseTour(SDL_Renderer *renderer, SDL_Surface *sur
   TOUR_KEY(SDLK_UP);
   TOUR_FRAME(400);
   TOUR_KEY(SDLK_Z);
-  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_type"));
+  /* Standard-game setup; randomizer stays hidden. */
+  CHECK(!strcmp(SettingsOverlay_SelectedKey(), "slot_regions"));
   TOUR_FRAME(1400);
   TOUR_KEY(SDLK_X);
   TOUR_FRAME(250);

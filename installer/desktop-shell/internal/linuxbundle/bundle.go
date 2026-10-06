@@ -81,8 +81,11 @@ func command(program string, args ...string) (string, error) {
 // Mesa also imports newer Wayland client symbols, even for some X11 launches.
 // Do not shadow its client with our older GUI SDK's copy. See
 // https://github.com/AppImageCommunity/pkg2appimage/pull/559.
+// expat is on AppImage's excludelist: host Mesa links it as well, and every
+// XML_* call our stack makes predates expat 2.1. The SDK's copy also requires
+// GLIBC_2.36 (arc4random), which fails before any window on glibc 2.35 hosts.
 func HostLibrary(soname string) bool {
-	for _, exact := range []string{"libc.so.6", "libm.so.6", "libdl.so.2", "libpthread.so.0", "librt.so.1", "libresolv.so.2", "libutil.so.1", "libanl.so.1", "libstdc++.so.6", "libgcc_s.so.1", "libwayland-client.so.0"} {
+	for _, exact := range []string{"libc.so.6", "libm.so.6", "libdl.so.2", "libpthread.so.0", "librt.so.1", "libresolv.so.2", "libutil.so.1", "libanl.so.1", "libstdc++.so.6", "libgcc_s.so.1", "libwayland-client.so.0", "libexpat.so.1"} {
 		if soname == exact {
 			return true
 		}
@@ -336,6 +339,10 @@ func (b *builder) tree(source, destination string, elfs bool) error {
 		switch d.Name() {
 		case "gschemas.compiled", "icon-theme.cache", "giomodule.cache", "immodules.cache", "loaders.cache":
 			return nil
+		case "libprintbackend-cups.so":
+			// The Builder never prints, and this module alone pulls in libcups,
+			// whose bookworm build requires GLIBC_2.36. Print-to-file remains.
+			return nil
 		}
 		rel, err := filepath.Rel(source, path)
 		if err != nil {
@@ -553,8 +560,12 @@ trap 'rm -f "$cache/pixbuf.cache" "$cache/immodules.cache" "$cache/gstreamer.bin
 export GDK_PIXBUF_MODULE_FILE="$cache/pixbuf.cache"
 export GTK_IM_MODULE_FILE="$cache/immodules.cache"
 export GST_REGISTRY_1_0="$cache/gstreamer.bin"
-"$APPDIR/usr/bin/gdk-pixbuf-query-loaders" "$GDK_PIXBUF_MODULEDIR/"*.so > "$GDK_PIXBUF_MODULE_FILE"
-"$APPDIR/usr/bin/gtk-query-immodules-3.0" "$APPDIR/usr/lib/gtk-3.0/3.0.0/immodules/"*.so > "$GTK_IM_MODULE_FILE"
+# A helper that cannot run costs image/input-method plugins, not the launch;
+# the Builder itself still reports any loader error that affects it too.
+"$APPDIR/usr/bin/gdk-pixbuf-query-loaders" "$GDK_PIXBUF_MODULEDIR/"*.so > "$GDK_PIXBUF_MODULE_FILE" ||
+    echo "Builder: image loader cache unavailable; continuing" >&2
+"$APPDIR/usr/bin/gtk-query-immodules-3.0" "$APPDIR/usr/lib/gtk-3.0/3.0.0/immodules/"*.so > "$GTK_IM_MODULE_FILE" ||
+    echo "Builder: input method cache unavailable; continuing" >&2
 cd "$APPDIR/usr"
 "$APPDIR/usr/bin/ActRaiserRecompBuilder" "$@"
 `

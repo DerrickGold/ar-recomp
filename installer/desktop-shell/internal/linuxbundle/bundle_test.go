@@ -3,7 +3,9 @@ package linuxbundle
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -17,6 +19,35 @@ func TestLauncherIncludesOriginalIcon(t *testing.T) {
 	}
 	if err := appicons.Builder.ValidateAppDir(root); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLauncherSurvivesCacheHelperFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX launcher")
+	}
+	root := t.TempDir()
+	if err := writeLauncher(root, "lib/x86_64-linux-gnu/webkit2gtk-4.1"); err != nil {
+		t.Fatal(err)
+	}
+	stub := func(name, body string) {
+		path := filepath.Join(root, "usr/bin", name)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// As when a bundled library cannot load on the host: the loader exits 127.
+	stub("gdk-pixbuf-query-loaders", "exit 127")
+	stub("gtk-query-immodules-3.0", "exit 127")
+	stub(name, `echo "launched $*"`)
+	cmd := exec.Command("/bin/sh", filepath.Join(root, "AppRun"), "--verify-bundle")
+	cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "launched --verify-bundle") {
+		t.Fatalf("a cache helper failure stopped the launch: %v\n%s", err, out)
 	}
 }
 
@@ -56,7 +87,7 @@ func TestDependencyClosureKeepsWebviewAndExcludesSystemABI(t *testing.T) {
 	if paths, err := Dependencies("libwayland-client.so.0 => /lib/libwayland-client.so.0 (0xffff)"); err != nil || len(paths) != 0 {
 		t.Fatal("bundled Wayland client can break host Mesa", paths, err)
 	}
-	for _, system := range []string{"libstdc++.so.6", "libgcc_s.so.1", "libwayland-client.so.0"} {
+	for _, system := range []string{"libstdc++.so.6", "libgcc_s.so.1", "libwayland-client.so.0", "libexpat.so.1"} {
 		if !HostLibrary(system) {
 			t.Fatalf("must not shadow graphics-driver runtime: %s", system)
 		}
@@ -75,7 +106,7 @@ func TestDependencyClosureKeepsWebviewAndExcludesSystemABI(t *testing.T) {
 }
 
 func TestFinishedGUITreeCannotShadowHostLibraries(t *testing.T) {
-	for _, leaf := range []string{"libwayland-client.so.0", "private/libwayland-client.so.0", "libstdc++.so.6", "libEGL.so.1", "libgtk-3.so.0"} {
+	for _, leaf := range []string{"libwayland-client.so.0", "private/libwayland-client.so.0", "libstdc++.so.6", "libEGL.so.1", "libexpat.so.1", "libgtk-3.so.0"} {
 		t.Run(leaf, func(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, "usr/lib", leaf)

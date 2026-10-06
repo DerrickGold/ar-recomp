@@ -17,7 +17,7 @@ file(STRINGS "${BUILDER_DIST_BUILD}/CMakeCache.txt" _target_arch REGEX "^SNESBUI
 file(STRINGS "${BUILDER_DIST_BUILD}/CMakeCache.txt" _target_deck REGEX "^SNESBUILD_STEAM_DECK:BOOL=")
 set(_abi_options)
 if(_target_deck STREQUAL "SNESBUILD_STEAM_DECK:BOOL=ON")
-    set(_abi_options --glibc-max 2.36)
+    set(_abi_options --glibc-max 2.35)
 endif()
 execute_process(COMMAND "${_go}" env GOHOSTARCH OUTPUT_VARIABLE _host_arch
     OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
