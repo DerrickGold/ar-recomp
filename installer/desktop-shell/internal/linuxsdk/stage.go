@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -96,29 +97,58 @@ func download(p Package, cache string) (string, error) {
 	}
 	defer os.Remove(f.Name())
 	defer f.Close()
-	response, err := client.Get(p.URL)
-	if err != nil {
-		return "", err
+	urls := []string{p.URL}
+	var lastError error
+	for index := 0; index < len(urls); index++ {
+		response, err := client.Get(urls[index])
+		if err != nil {
+			lastError = err
+			continue
+		}
+		if index == 0 && (response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusGone) {
+			response.Body.Close()
+			archived, err := archivedPackageURLs(p)
+			if err != nil {
+				return "", err
+			}
+			fmt.Fprintf(os.Stderr, "SDK archive: recovering locked %s %s (%s)\n", p.Name, p.Version, p.Architecture)
+			urls = append(urls, archived...)
+			continue
+		}
+		if response.StatusCode != http.StatusOK {
+			response.Body.Close()
+			lastError = fmt.Errorf("%s: HTTP %d", urls[index], response.StatusCode)
+			continue
+		}
+		if err = f.Truncate(0); err == nil {
+			_, err = f.Seek(0, io.SeekStart)
+		}
+		if err != nil {
+			response.Body.Close()
+			return "", err
+		}
+		h := sha256.New()
+		n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(response.Body, p.Size+1))
+		response.Body.Close()
+		if err != nil {
+			return "", err
+		}
+		if n != p.Size || hex.EncodeToString(h.Sum(nil)) != p.SHA256 {
+			lastError = fmt.Errorf("package checksum/size mismatch: %s", p.Name)
+			if index == 0 {
+				return "", lastError
+			}
+			continue
+		}
+		if err = f.Close(); err != nil {
+			return "", err
+		}
+		if err = os.Rename(f.Name(), name); err != nil {
+			return "", err
+		}
+		return name, nil
 	}
-	defer response.Body.Close()
-	if response.StatusCode != 200 {
-		return "", fmt.Errorf("%s: HTTP %d; refresh SDK lock if the pinned package left its mirror", p.URL, response.StatusCode)
-	}
-	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(response.Body, p.Size+1))
-	if err != nil {
-		return "", err
-	}
-	if n != p.Size || hex.EncodeToString(h.Sum(nil)) != p.SHA256 {
-		return "", fmt.Errorf("package checksum/size mismatch: %s", p.Name)
-	}
-	if err = f.Close(); err != nil {
-		return "", err
-	}
-	if err = os.Rename(f.Name(), name); err != nil {
-		return "", err
-	}
-	return name, nil
+	return "", lastError
 }
 
 // Stage uses an immutable lock-keyed cache directory; no package scripts run.

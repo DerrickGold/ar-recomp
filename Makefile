@@ -16,8 +16,10 @@
 # Individual platforms: `make release-macos-arm64`, `make release-steam-deck`,
 # etc. Packaging does not run repository lint or tests. Use `make release-checked`
 # or `make release-checked-<platform>` to run `check-release` before packaging.
-# `make release-remote <ssh-config-name>` runs the same packaging on that host
-# and retrieves verified downloads into release/. No host is saved in this tree.
+# `make release-remote <host> [<host> ...]` splits targets across SSH aliases and
+# optional localhost, then retrieves verified downloads into release/.
+# Idle hosts take queued targets as they finish; each target is built once.
+# No host configuration is saved in this tree.
 # Checked targets share one gate per make invocation, including parallel builds.
 # Check dependencies: CONTRIBUTING.md.
 #
@@ -105,23 +107,23 @@ CLEAN_RELEASE    := release
 
 ifneq ($(filter release-remote,$(MAKECMDGOALS)),)
 ifneq ($(firstword $(MAKECMDGOALS)),release-remote)
-$(error Usage: make release-remote <ssh-config-name> [PLATFORMS="..."])
+$(error Usage: make release-remote <host> [<host> ...] [PLATFORMS="..."])
 endif
-ifneq ($(words $(MAKECMDGOALS)),2)
-$(error Supply exactly one SSH config name: make release-remote <ssh-config-name>)
+ifeq ($(words $(MAKECMDGOALS)),1)
+$(error Supply at least one SSH config name or localhost: make release-remote <host> [<host> ...])
 endif
 # Dispatch separately so an alias named after another target cannot run it.
-RELEASE_REMOTE_HOST := $(word 2,$(MAKECMDGOALS))
-ifeq ($(RELEASE_REMOTE_HOST),release-remote)
+RELEASE_REMOTE_HOSTS := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
+ifneq ($(filter release-remote,$(RELEASE_REMOTE_HOSTS)),)
 $(error SSH config name must differ from the release-remote target)
 endif
-.PHONY: release-remote $(RELEASE_REMOTE_HOST)
+.PHONY: release-remote $(RELEASE_REMOTE_HOSTS)
 release-remote:
-	$(PYTHON) tools/release_remote.py --host $(call shell_quote,$(RELEASE_REMOTE_HOST)) \
+	$(PYTHON) tools/release_remote.py $(foreach host,$(RELEASE_REMOTE_HOSTS),--host $(call shell_quote,$(host))) \
 	  --platforms $(call shell_quote,$(PLATFORMS)) --desktop $(if $(filter 0,$(DESKTOP)),0,1) \
 	  --remote-dir $(call shell_quote,$(REMOTE_DIR)) \
 	  $(if $(KEEP_BUILD),--keep-build) $(if $(filter 1,$(REMOTE_DRY_RUN)),--dry-run)
-$(RELEASE_REMOTE_HOST):
+$(RELEASE_REMOTE_HOSTS):
 	@:
 else
 

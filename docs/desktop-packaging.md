@@ -219,54 +219,92 @@ if a check fails. `make check-release` also works independently.
 `make release DESKTOP=0` selects archive-only packaging. See the
 [Builder README](https://github.com/DerrickGold/ar-recomp/tree/main/installer) for building and running the CLI locally.
 
-### Packaging on an SSH build host
+### Packaging across build hosts
 
 Configure an SSH alias in your own SSH config, then pass its name to Make.
 For example, if your alias is `build-host`:
 
 ```sh
 make release-remote build-host
+make release-remote build-host other-host localhost
 make release-remote build-host PLATFORMS="macos-arm64 windows-arm64"
-make release-remote build-host REMOTE_DRY_RUN=1
+make release-remote build-host other-host localhost REMOTE_DRY_RUN=1
 ```
 
-The local machine needs Git, SSH, Make, and Python 3.9+. The remote machine
+Supply one or more SSH config names, with optional `localhost` to build on the
+current machine directly without SSH. Each active host starts with one target
+in the order listed in `PLATFORMS`. Remaining targets enter a shared queue:
+whenever a host finishes, it takes the next queued target, so faster machines
+can pick up work while slower machines are still building. Active builds remain
+on their original host. Each target is assigned exactly once; its desktop and
+portable artifacts stay together. Repeated host names or targets are rejected,
+and hosts beyond the number of selected targets remain idle. Use
+`REMOTE_DRY_RUN=1` to inspect the initial assignments and shared queue. Later
+assignments depend on which host finishes first and are printed as they happen.
+
+The coordinating machine needs Git, SSH (when using remote hosts), Make, and
+Python 3.9+. Each build host, including `localhost` when selected,
 needs Python 3.9+, Make, Go 1.25+, CMake 3.25+, and the same packaging
 prerequisites as a local release. Use macOS for the full desktop release matrix;
-archive-only builds with `DESKTOP=0` also support Linux hosts. SSH must work
-without an interactive password prompt. The alias and credentials stay in your
+archive-only builds with `DESKTOP=0` also support Linux hosts. Each active host
+must support all selected targets, since it may take any target from the queue;
+host capabilities are not detected automatically.
+SSH must work without an interactive password prompt. The alias and credentials stay in your
 local SSH configuration; no machine configuration is saved in the repository.
+
+Install the build prerequisites on the remote host itself. For a macOS host,
+connect with `ssh build-host` and run the `brew install …` command above there.
+A successful SSH connection only establishes access; it does not supply Go,
+CMake, or the native packaging tools. Missing prerequisites include an install
+hint, and remote build failures retain their cause in the final error message.
+SSH connection and transport failures are reported separately.
 
 The command sends the current working tree, including tracked edits and
 non-ignored new files. Deleted files, `.git`, ignored ROMs, local settings,
 build output, and internal archives are omitted. No commit or push is needed.
-The local Git version is passed to packaging so the remote snapshot retains
-the correct version stamp. `REMOTE_DRY_RUN=1` reports the selection without
-connecting or building. Like `make release`, this target packages directly;
+One source snapshot is uploaded once per active host. A worker session stays
+open to build and return each newly assigned target, reusing that source copy
+and the host's caches. The local Git version is shared by every build host,
+so all artifacts retain the same source and version stamp. `REMOTE_DRY_RUN=1`
+reports the selection without connecting or building. Like `make release`, this target packages directly;
 run the developer checks locally when needed.
 
-Build output streams live to the terminal, including individual platform
-configuration, compilation, packaging, and error diagnostics. Each attempt
+Build output streams live to the terminal, prefixed with its host name,
+including individual platform configuration, compilation, packaging, and error
+diagnostics. Frequent download updates are throttled in the terminal while the
+logs retain every update. Each attempt
 also saves a complete log under `runs/release-remote/<attempt>/build.log` and
-prints its path at the start and finish, including on failure. The log records
-the version, selected platforms, local checkout, and remote workspace.
-Temporary remote source paths in diagnostics correspond to the same relative
-paths in the local checkout. Errors return a nonzero exit status; build,
-transfer, or checksum failures preserve existing local release artifacts.
+separate host logs under `hosts/<host>.log`. Every log entry and live logged
+message includes an ISO 8601 UTC timestamp with millisecond precision, such as
+`[2026-10-06T00:39:12.345Z] [build-host] Building linux-arm64`. Host output uses
+the coordinator's receipt time, with the same timestamp in both logs, so entries
+can be compared across hosts without depending on their clock settings.
+Carriage-return download updates are saved as individual timestamped lines.
+Log paths are printed at
+the start and the combined log path at finish, including on failure. The logs
+record the version, target assignments, local checkout, and build workspaces.
+Temporary source paths in diagnostics correspond to the same relative paths
+in the local checkout. A failed host stops the remaining workers and returns a
+nonzero exit status. Build, transfer, or checksum failures preserve existing
+local release artifacts; nothing is published until every active host succeeds.
 
-Finished packages and SHA-256 sidecars are verified remotely and again locally,
-then copied into `release/`. Only the selected downloads are replaced; unrelated
-local files remain. The remote host retains reusable dependency downloads,
+Finished packages and SHA-256 sidecars are verified on their build host and
+again by the coordinator, then copied into `release/`. Returned target manifests
+must match their assignments, and duplicate artifact names are rejected.
+Only the selected downloads are replaced; unrelated local files remain.
+Each build host retains reusable dependency downloads,
 host toolchain, and Go compiler caches in
 `~/.cache/actraiser-recomp/release-remote/`. Override this with `REMOTE_DIR=…`
-to choose another dedicated cache directory. An existing directory must have
+to choose another dedicated cache directory on each host, including `localhost`.
+Local builds use an isolated copy of the snapshot, leaving the checkout's
+packaging build trees untouched. An existing cache directory must have
 been created by this workflow; an unrelated checkout or directory is refused.
 
 Each job's temporary sources, build trees, and artifacts are removed after
 handoff, build failure, or interruption, including with `KEEP_BUILD=1`.
 Abandoned job directories from forced termination are removed on the next run.
 Builds sharing one cache directory run one at a time to protect its caches.
-Local logs remain available independently of remote cleanup and are excluded
+Local logs remain available independently of build host cleanup and are excluded
 from Git and release packages.
 
 Builder distributions must not include your ROM, generated game, extracted

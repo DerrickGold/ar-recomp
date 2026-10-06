@@ -68,11 +68,25 @@ func runtimeCompileArgs(runtimeDir, zigPath, target, optimize string, simd bool,
 	// checkout or Zig installation. Mapping their roots also normalizes system
 	// header paths recorded through Zig's target libc.
 	prefixes := [][2]string{{filepath.Dir(runtimeDir), "snesrecomp-sdk"}}
+	if resolved, err := filepath.EvalSymlinks(runtimeDir); err == nil {
+		prefixes = append(prefixes, [2]string{filepath.Dir(resolved), "snesrecomp-sdk"})
+	}
 	if absoluteZig, err := filepath.Abs(zigPath); err == nil {
 		prefixes = append(prefixes,
 			[2]string{filepath.Dir(absoluteZig), "zig-toolchain"})
+		// Shared release caches are symlinked into temporary build trees.
+		// Clang records libc headers using the physical compiler location,
+		// which must be mapped as well as the path used to invoke Zig.
+		if resolved, err := filepath.EvalSymlinks(absoluteZig); err == nil {
+			prefixes = append(prefixes, [2]string{filepath.Dir(resolved), "zig-toolchain"})
+		}
 	}
+	seenPrefixes := make(map[[2]string]bool)
 	for _, prefix := range prefixes {
+		if seenPrefixes[prefix] {
+			continue
+		}
+		seenPrefixes[prefix] = true
 		args = append(args,
 			"-ffile-prefix-map="+prefix[0]+"="+prefix[1],
 			"-fdebug-prefix-map="+prefix[0]+"="+prefix[1])

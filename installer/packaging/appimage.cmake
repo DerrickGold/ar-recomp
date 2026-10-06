@@ -1,34 +1,35 @@
 # Packaging tools run on the player's Linux machine after recompilation. They
 # are carried unmodified; no FUSE mount or network fetch is needed at build time.
-# Pins observed from upstream release asset digests on 2026-09-10.
+# Named release asset digests verified against downloaded bytes on 2026-10-05.
 # appimagetool source: 8c8c91f762b412a19f4e8d2c4b35afb98f2d7c81
-# type2-runtime source: 75849dce7cc37e4319b633df1f116ca895c71a12
+# type2-runtime source: dd6cebedcbddde9c82f89b011e8e1d40b6e43868
 if(NOT SNESBUILD_GOOS STREQUAL "linux")
     return()
 endif()
 
 if(SNESBUILD_GOARCH STREQUAL "amd64")
     set(_appimage_arch x86_64)
-    set(_appimage_tool_sha a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0)
-    set(_appimage_runtime_sha 1cc49bcf1e2ccd593c379adb17c9f85a36d619088296504de95b1d06215aebbf)
+    set(_appimage_tool_sha ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0)
+    set(_appimage_runtime_sha 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d)
 elseif(SNESBUILD_GOARCH STREQUAL "arm64")
     set(_appimage_arch aarch64)
-    set(_appimage_tool_sha 1b00524ba8c6b678dc15ef88a5c25ec24def36cdfc7e3abb32ddcd068e8007fe)
-    set(_appimage_runtime_sha 7d5d772b7c32f0c84caf0a452a3072a5709027d7eac5856feb89a7a7a8881372)
+    set(_appimage_tool_sha f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158)
+    set(_appimage_runtime_sha 00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444)
 else()
     message(FATAL_ERROR "No AppImage toolchain for ${SNESBUILD_GOARCH}")
 endif()
 
-# The upstream continuous URLs are mutable; hashes make a replaced release
-# fail closed. Preserve the cache or update URL + digest together on a pin bump.
+# Never pin checksums to mutable continuous builds. Update the named release
+# and digest together; existing caches and fresh machines use the same bytes.
+include("${CMAKE_CURRENT_LIST_DIR}/appimage-download.cmake")
 set(ACTRAISER_APPIMAGE_TOOL "${_cache_dir}/appimagetool-${_appimage_arch}-${_appimage_tool_sha}.AppImage")
 set(ACTRAISER_APPIMAGE_RUNTIME "${_cache_dir}/runtime-${_appimage_arch}-${_appimage_runtime_sha}")
-file(DOWNLOAD
-    "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${_appimage_arch}.AppImage"
-    "${ACTRAISER_APPIMAGE_TOOL}" EXPECTED_HASH SHA256=${_appimage_tool_sha})
-file(DOWNLOAD
-    "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-${_appimage_arch}"
-    "${ACTRAISER_APPIMAGE_RUNTIME}" EXPECTED_HASH SHA256=${_appimage_runtime_sha})
+appimage_download(
+    "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-${_appimage_arch}.AppImage"
+    "${ACTRAISER_APPIMAGE_TOOL}" "${_appimage_tool_sha}")
+appimage_download(
+    "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-${_appimage_arch}"
+    "${ACTRAISER_APPIMAGE_RUNTIME}" "${_appimage_runtime_sha}")
 
 install(PROGRAMS "${ACTRAISER_APPIMAGE_TOOL}" DESTINATION utils/tools RENAME appimagetool)
 install(PROGRAMS "${ACTRAISER_APPIMAGE_RUNTIME}" DESTINATION utils/tools RENAME appimage-runtime)

@@ -347,7 +347,7 @@ body[data-scene-motion=off] #workshop-atmosphere { visibility:hidden }
 .hero-copy {
   position:relative;
   z-index:1;
-  padding:26px 0
+  padding:26px 24px
 }
 .hero-copy h1 {
   font:normal clamp(36px,3.9vw,60px)/1.08 Georgia,"Times New Roman",serif;
@@ -1311,7 +1311,7 @@ pre {
     margin-top:0
   }
   .hero-copy {
-    padding:18px 0 0
+    padding:18px 18px 0
   }
   .hero-copy h1 {
     font-size:43px

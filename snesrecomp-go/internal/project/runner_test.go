@@ -161,6 +161,64 @@ func TestRuntimeArchiveSelectsCxx20ForAccuracySources(t *testing.T) {
 	}
 }
 
+func TestRuntimeArchiveMapsPhysicalPathsThroughSymlinkedCaches(t *testing.T) {
+	for _, mode := range []string{"directory-link", "executable-link"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			sdk := filepath.Join(root, "physical-sdk")
+			compiler := filepath.Join(root, "physical-compiler")
+			for _, path := range []string{filepath.Join(sdk, "runtime"), compiler} {
+				if err := os.MkdirAll(path, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			zig := filepath.Join(compiler, "zig")
+			if err := os.WriteFile(zig, []byte("compiler fixture"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			linkedSDK := filepath.Join(root, "job-sdk")
+			if err := os.Symlink(sdk, linkedSDK); err != nil {
+				t.Skip(err)
+			}
+			linkedCompiler := filepath.Join(root, "job-compiler")
+			linkedZig := filepath.Join(linkedCompiler, "zig")
+			if mode == "directory-link" {
+				if err := os.Symlink(compiler, linkedCompiler); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.Mkdir(linkedCompiler, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(zig, linkedZig); err != nil {
+					t.Fatal(err)
+				}
+			}
+			physicalSDK, err := filepath.EvalSymlinks(sdk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			physicalCompiler, err := filepath.EvalSymlinks(compiler)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := runtimeCompileArgs(filepath.Join(linkedSDK, "runtime"), linkedZig,
+				"x86_64-linux-gnu", "-O2", true, RunnerManifest{})
+			joined := strings.Join(args, "\x00")
+			for path, replacement := range map[string]string{
+				linkedSDK: "snesrecomp-sdk", physicalSDK: "snesrecomp-sdk",
+				linkedCompiler: "zig-toolchain", physicalCompiler: "zig-toolchain",
+			} {
+				for _, flag := range []string{"-ffile-prefix-map=", "-fdebug-prefix-map="} {
+					if !strings.Contains(joined, flag+path+"="+replacement) {
+						t.Errorf("unmapped compiler/source path %s: %#v", path, args)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestRuntimeArchiveUsesStableWindowsDebugObjectNames(t *testing.T) {
 	runtimeDir := filepath.FromSlash("/checkout/snesrecomp-go/runtime")
 	source := filepath.FromSlash("/checkout/snesrecomp-go/runtime/src/runner/runner.c")

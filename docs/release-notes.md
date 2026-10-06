@@ -426,11 +426,22 @@ See [Language pack authoring](language-pack-format.md) for the v2 format and
   checks. `make check-release` includes the optimized suite;
   `make release-checked` runs those checks before packaging. Ordinary
   `make release` remains packaging-only. Installer development requires Go 1.25+.
-- Add `make release-remote <ssh-config-name>` to package the current working
-  tree on an SSH build host. It streams build progress, retains local error
-  logs, retrieves verified downloads, reuses remote caches, and cleans up
-  temporary files after failure or handoff. Host configuration stays outside
-  the repository.
+- Add `make release-remote <host> [<host> ...]` to split release targets across
+  SSH build hosts and optional `localhost` without SSH. Hosts build concurrently
+  from the same working-tree snapshot, uploaded once per host. Idle hosts take
+  the next target from a shared queue, with each target assigned exactly once.
+  It streams progress by host, retains combined and individual host error logs
+  with consistent UTC timestamps from the coordinator,
+  retrieves verified downloads, reuses caches, and cleans up temporary files
+  after failure or handoff. A failed host stops its peers and preserves existing
+  local releases. Host configuration stays outside the repository.
+- Pin AppImage tools and runtimes to named upstream releases with verified
+  checksums, so fresh build hosts do not depend on mutable continuous builds.
+  Reuse valid cached downloads and discard failed or invalid transfers.
+- Strip physical source and compiler cache paths from runtime archives when
+  remote builds use symlinked caches, while retaining their debug symbols.
+- Recover pinned Linux SDK packages from Debian's official archive when they
+  leave a live mirror, verifying the original locked version, checksum, and size.
 - Expand public regional comparisons, unused-content research, RAM/ROM and
   symbol maps, projectile and native-audio references, and reproducible town
   model comparisons. Archive internal plans, benchmarks, migration reports and
