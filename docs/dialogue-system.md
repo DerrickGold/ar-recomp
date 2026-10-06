@@ -325,8 +325,23 @@ complete page; Progress Log can scroll its salutation and first line away.
 Enhanced text divides each authored page into measured screenfuls. A fresh
 acknowledgement advances an overflowing screenful before the original page/end
 wait, including church audiences and Sky Palace prose. These rules apply to
-both town menu styles and to instant or gradual text. Original presentation
-retains the native scrolling and continuation rules.
+both town menu styles and to instant or gradual text. Authored continuations
+follow the native message-speed rule: speed zero clears, while nonzero speed
+retains earlier rows and scrolls them upward as new text appears. Retained
+history is excluded from the next page's overflow measurement, so it cannot
+create another acknowledgement. Previously acknowledged overflow screenfuls
+remain outside the viewport. Explicit cursor-reset controls still clear text.
+
+Enhanced glyph blips follow the revealed nonblank graphemes, including text
+drained at native page/control/end boundaries. The original `$01:902D` glyph
+requests are suppressed while enhanced reveal owns their timing; extra native
+glyphs and dictionary expansion cannot emit duplicate or delayed blips.
+The player's dialogue-blip preference applies to the replacement requests.
+Authored requests use the shared audio/event dispatcher with an explicit
+origin, without synthesizing CPU execution or interrupt trace entries. The
+subsequent native COP alone consumes its glyph's pending suppression marker,
+which survives presentation changes during a delay and is retired when the
+interpreter exits.
 
 The Northwall bow-and-arrows offering (`simulation.event.northwall.slot_31`,
 USA source `$04:9EA7`, selector `$9521`) and bridge knowledge

@@ -94,6 +94,10 @@ void ActRaiser_FullSnapshot(const char *prefix);
 void RunOneFrameOfGame(void);
 void ActRaiser_OnInidispWrite(uint8 value);
 void ActRaiser_OnApuPortPace(uint8 port, uint8 value);
+/* Game-thread authored glyph request. Uses the native event/audio routing and
+ * dialogue-blip preference without changing CPU registers or execution history.
+ * The original native glyph's suppression marker remains for its own COP. */
+void ActRaiser_RequestDialogueBlip(CpuState *cpu);
 /* Release the game coroutine's stack (guard-page mapping) / fiber at shutdown,
  * on its owning thread, before that thread exits. Safe when none was created. */
 void ActRaiser_DestroyGameCoroutine(void);

@@ -1,4 +1,10 @@
 # Original test wording; no retail text or assets.
+:: sim.miracle.lightning.description
+@anchor reset_text_cursor.00
+First screen. Second screen. Final screen.
+@page
+Tail.
+
 :: sim.miracle.rain.description
 @anchor reset_text_cursor.00
 First screen. Second screen. Final screen.

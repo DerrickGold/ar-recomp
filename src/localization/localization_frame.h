@@ -16,7 +16,7 @@
 #include "localization/text_cell_record.h"
 #include "localization/text_boundaries.h"
 
-#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(33)
+#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(34)
 
 enum {
   kArLocalizationFrameTextCapacity = 16 * 1024,
@@ -330,6 +330,10 @@ typedef struct ArLocalizationFrame {
   uint64_t dialogue_ticket;
   uint32_t dialogue_surface_id;
   uint32_t dialogue_page_start;
+  /* Retained context scrolls with reveal on the first screenful of appended
+   * text. Earlier acknowledged screenfuls remain outside the viewport. */
+  uint32_t dialogue_retained_start;
+  bool dialogue_retains_rows;
   bool dialogue_paged;
 } ArLocalizationFrame;
 

@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_localization_schedule.h"
+#include "actraiser/actraiser_rtl.h"
 #include "actraiser/actraiser_sim_menu.h"
 #include "actraiser/actraiser_miracle_text.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
@@ -14,6 +15,9 @@ static bool s_entering_reader;
 static bool s_entering_continuation;
 static bool s_skipping_menu_text;
 static bool s_native_glyph_delay;
+/* Owned by the in-flight native glyph, across presentation changes at yields.
+ * Only its subsequent COP consumes this marker. Authored sounds bypass it. */
+static bool s_pending_native_blip_suppression;
 
 extern RecompReturn bank_01_8E29_M0X0(CpuState *cpu);
 extern RecompReturn bank_01_8E29_M0X1(CpuState *cpu);
@@ -128,10 +132,22 @@ static bool FastReveal(void *context) {
   return ActRaiserSimMenu_FastReveal();
 }
 
+bool ActRaiser_LocalizationConsumeNativeBlipSuppression(void) {
+  const bool suppress = s_pending_native_blip_suppression || s_skipping_menu_text ||
+      ActRaiserSimMenu_DescriptionAborted() ||
+      ActRaiserLocalizationRuntime_DialogueScheduled();
+  s_pending_native_blip_suppression = false;
+  return suppress;
+}
+
+static void GlyphSound(void *context) {
+  ActRaiser_RequestDialogueBlip(context);
+}
+
 static ActRaiserLocalizationDialogueHost Host(CpuState *cpu) {
   return (ActRaiserLocalizationDialogueHost){
       .context=cpu, .wait_frame=WaitFrame, .confirm_page=ConfirmPage,
-      .cancelled=Cancelled, .fast_reveal=FastReveal};
+      .cancelled=Cancelled, .fast_reveal=FastReveal, .glyph_sound=GlyphSound};
 }
 
 static bool EnhancedGlyphDelay(void) {
@@ -152,6 +168,9 @@ RecompReturn ActRaiser_LocalizationGlyphDelay(CpuState *cpu) {
    * after adapting the verified price digit; enhanced text keeps its own clock. */
   ArRegionalCostSnapshot prices;
   if (ActRaiserRegional_CopyPrices(&prices)) ActRaiserMiracle_UpdateNativeDigit(cpu, &prices);
+  s_pending_native_blip_suppression = s_skipping_menu_text ||
+      ActRaiserSimMenu_DescriptionAborted() ||
+      ActRaiserLocalizationRuntime_DialogueScheduled();
   if (!EnhancedGlyphDelay()) {
     s_native_glyph_delay = true;
     const RecompReturn result = bank_01_9278_M1X0(cpu);
@@ -198,6 +217,7 @@ RecompReturn ActRaiser_LocalizationRunDialogue(CpuState *cpu) {
   static NativeRoutine const routines[] = {bank_01_8E29_M0X0, bank_01_8E29_M0X1,
                                            bank_01_8E29_M1X0,
                                            bank_01_8E29_M1X1};
+  s_pending_native_blip_suppression = false;
   s_skipping_menu_text = ActRaiserSimMenu_SkipDialogue(cpu);
   if (s_skipping_menu_text) ActRaiserLocalizationRuntime_ReturnDialogue();
   s_entering_native = true;
@@ -205,6 +225,7 @@ RecompReturn ActRaiser_LocalizationRunDialogue(CpuState *cpu) {
       routines[((cpu->m_flag & 1u) << 1) | (cpu->x_flag & 1u)](cpu);
   s_entering_native = false;
   s_skipping_menu_text = false;
+  s_pending_native_blip_suppression = false;
   if (result == RECOMP_RETURN_NORMAL) {
     ActRaiserLocalizationText_ObserveReturn();
     ActRaiserLocalizationRuntime_ReturnDialogue();

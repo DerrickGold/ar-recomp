@@ -130,10 +130,11 @@ static void TestDialogueObservationIsReadOnly(void) {
   CHECK(!observation.continuation_cell_valid);
   CHECK(!observation.terminal);
 
-  /* Nonzero native text-state keeps rows across the same $02 command. */
-  s_wram[0x0200] = 1;
+  /* The speed is sampled after the wait: a change from zero to nonzero while
+   * awaiting confirmation must keep rows across the same $02 command. */
   s_bank01[0xFA6B] = 0x02;
   CHECK(!ActRaiser_LocalizationObserveTextByte(&cpu));
+  s_wram[0x0200] = 1;
   s_bank01[0xFA6B] = 'B';
   CHECK(!ActRaiser_LocalizationObserveTextByte(&cpu));
   CHECK(ActRaiserLocalizationText_CopyObservation(&observation));

@@ -13,6 +13,9 @@ typedef struct ActRaiserLocalizationDialogueHost {
   /* Optional live input policy, rechecked after yielding to native work. */
   bool (*cancelled)(void *context);
   bool (*fast_reveal)(void *context);
+  /* One native blip per revealed nonblank enhanced grapheme, including text
+   * drained at native controls. The original glyph request is then retired. */
+  void (*glyph_sound)(void *context);
 } ActRaiserLocalizationDialogueHost;
 
 /* Every enhanced dialogue uses acknowledged screenfuls, regardless of scene
@@ -36,6 +39,9 @@ void ActRaiserLocalizationRuntime_RevealGlyph(
 /* Only $901C's call to $9278 is replaced, never the shared delay's other users. */
 bool ActRaiser_LocalizationScheduleGlyphDelay(CpuState *cpu);
 RecompReturn ActRaiser_LocalizationGlyphDelay(CpuState *cpu);
+/* Called only for $01902D / COP $07. Consumes the native glyph's ownership
+ * marker, including when a live presentation switch occurred during reveal. */
+bool ActRaiser_LocalizationConsumeNativeBlipSuppression(void);
 
 /* Conditional HLE seams: interpreter/reader wrappers always execute the
  * original bodies. Enhanced glyph timing and continuation waits are adapted. */

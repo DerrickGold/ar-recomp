@@ -12,7 +12,7 @@ static void Present(const ArDialoguePager *pager, uint32_t end, bool drawn) {
 
 int main(void) {
   ArDialoguePager pager;
-  ArDialoguePager_Begin(&pager, true);
+  ArDialoguePager_Begin(&pager, true, 0);
   assert(ArDialoguePager_Update(&pager, 40, 40) == kArDialoguePage_Measuring);
   assert(!ArDialoguePager_Advance(&pager, pager.ticket));
   Present(&pager, 16, true);
@@ -32,22 +32,37 @@ int main(void) {
   assert(!ArDialoguePager_Advance(&pager, pager.ticket));
 
   const uint64_t retired = pager.ticket;
-  ArDialoguePager_Begin(&pager, true);
+  ArDialoguePager_Begin(&pager, true, 0);
   Present(&pager, 16, true);
   assert(ArDialoguePager_Update(&pager, 40, 40) == kArDialoguePage_AwaitingInput);
   assert(!ArDialoguePager_Advance(&pager, retired));
   assert(pager.start == 0);
-  ArDialoguePager_Begin(&pager, true);
+  ArDialoguePager_Begin(&pager, true, 0);
   Present(&pager, 16, false);
   assert(ArDialoguePager_Update(&pager, 40, 40) == kArDialoguePage_Failed);
   assert(!ArDialoguePager_Advance(&pager, pager.ticket));
-  ArDialoguePager_Begin(&pager, false);
+  ArDialoguePager_Begin(&pager, false, 0);
   assert(!pager.ticket && !pager.start);
   assert(ArDialoguePager_Update(&pager, 40, 40) == kArDialoguePage_Revealing);
-  ArDialoguePager_Begin(&pager, true);
+  ArDialoguePager_Begin(&pager, true, 0);
   assert(ArDialoguePager_Update(&pager, 0, 0) == kArDialoguePage_Revealing);
   Present(&pager, 8, true);
   assert(ArDialoguePager_Update(&pager, 8, 8) == kArDialoguePage_Revealing);
+  /* An empty authored page can follow retained text. Its history requires
+   * neither font feedback nor another acknowledgement. */
+  ArDialoguePager_Begin(&pager, true, 8);
+  assert(ArDialoguePager_Update(&pager, 8, 8) == kArDialoguePage_Revealing);
+  assert(!ArDialoguePager_Advance(&pager, pager.ticket));
+  /* New text after retained history still measures and waits at its own
+   * boundaries; acknowledging it cannot revisit the preceding bytes. */
+  ArDialoguePager_Begin(&pager, true, 8);
+  assert(ArDialoguePager_Update(&pager, 40, 8) == kArDialoguePage_Measuring);
+  Present(&pager, 24, true);
+  assert(ArDialoguePager_Update(&pager, 40, 23) == kArDialoguePage_Revealing);
+  assert(ArDialoguePager_Update(&pager, 40, 24) == kArDialoguePage_AwaitingInput);
+  assert(ArDialoguePager_Advance(&pager, pager.ticket));
+  Present(&pager, 40, true);
+  assert(ArDialoguePager_Update(&pager, 40, 40) == kArDialoguePage_Revealing);
   puts("Dialogue paging preserves reveal, acknowledgements and window identity");
   return 0;
 }

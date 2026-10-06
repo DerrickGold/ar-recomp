@@ -538,6 +538,48 @@ static void ExerciseScreenText(ArRenderDevice *device) {
   CHECK(!ArLocalizedTextPresenter_PrepareScreenText(device, &blank, 99, bounds, &prepared));
 }
 
+static void ExerciseRetainedDialogue(ArRenderDevice *device) {
+  test_case = "retained dialogue scrolls only with new reveal";
+  const char history[] = "First retained line.\nSecond retained line.\nThird retained line.\n";
+  const char text[] = "First retained line.\nSecond retained line.\nThird retained line.\n"
+                      "New opening.\nNext line.\nFinal line.";
+  const uint32_t start = sizeof(history) - 1u, bytes = sizeof(text) - 1u;
+  const ArRenderRectI bounds = {120, 80, 528, 168};
+  for (int size = 80; size <= 140; size += 60) {
+    ArLocalizationFrame frame;
+    ArLocalizationFrame_Reset(&frame);
+    frame.settings.size_percent = size;
+    CHECK(ArLocalizationFrame_SetFont(&frame, "en-US", "test", s_test_font, 1, &frame.settings));
+    CHECK(ArLocalizationFrame_AddScreenText(
+        &frame, 700, 40, 156, 176, 56, text, bytes, start, bytes, 1,
+        kArTextDirection_LeftToRight, 8, kArLocalizationTextLayout_DialogueWindow));
+    frame.dialogue_ticket = 123;
+    frame.dialogue_surface_id = 700;
+    frame.dialogue_paged = true;
+    frame.dialogue_page_start = start;
+    ArLocalizedPreparedFrame prepared;
+    CHECK(ArLocalizedTextPresenter_PrepareScreenText(device, &frame, 700, bounds, &prepared));
+    CHECK(prepared.text_count == 1);
+    if (!prepared.text_count) continue;
+    const int cleared_y = prepared.texts[0].destination.y;
+    const uint32_t end = prepared.dialogue_page_end;
+    CHECK(end == bytes); /* Only new text is measured, regardless of history. */
+    frame.dialogue_retains_rows = true;
+    CHECK(ArLocalizedTextPresenter_PrepareScreenText(device, &frame, 700, bounds, &prepared));
+    const int retained_y = prepared.texts[0].destination.y;
+    CHECK(retained_y > cleared_y); /* Previous lines remain visible at the wait. */
+    CHECK(prepared.dialogue_page_end == end);
+    frame.snapshots[0].revealed_utf8_bytes = bytes;
+    CHECK(ArLocalizedTextPresenter_PrepareScreenText(device, &frame, 700, bounds, &prepared));
+    CHECK(prepared.texts[0].destination.y <= retained_y);
+    CHECK(prepared.texts[0].destination.y >= cleared_y);
+    /* History before an acknowledged overflow screenful cannot reappear. */
+    frame.dialogue_retained_start = start;
+    CHECK(ArLocalizedTextPresenter_PrepareScreenText(device, &frame, 700, bounds, &prepared));
+    CHECK(prepared.texts[0].destination.y == cleared_y);
+  }
+}
+
 static void ExerciseScreenDialogue(ArRenderDevice *device) {
   test_case = "screen dialogue: normal wrapping, stable font and logical reveal";
   const char *pages[] = {"Choose a place in town to plant wheat. The selected terrain and the "
@@ -1987,6 +2029,7 @@ int main(void) {
   ExerciseLabelBreaks(&device);
   ExerciseScreenText(&device);
   ExerciseScreenDialogue(&device);
+  ExerciseRetainedDialogue(&device);
   const int sizes[] = {80, 110, 140};
   for (int scale = 2; scale <= 6; scale += 2) {
     for (size_t size = 0; size < 3; ++size) {

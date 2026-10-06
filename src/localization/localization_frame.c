@@ -83,6 +83,8 @@ void ArLocalizationFrame_ReleaseText(ArLocalizationFrame *frame,
     frame->dialogue_ticket = 0;
     frame->dialogue_paged = false;
     frame->dialogue_page_start = 0;
+    frame->dialogue_retained_start = 0;
+    frame->dialogue_retains_rows = false;
   }
 }
 

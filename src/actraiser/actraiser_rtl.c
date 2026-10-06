@@ -7,6 +7,7 @@
 #define _DARWIN_C_SOURCE 1
 #endif
 #include "actraiser/actraiser_rtl_internal.h"
+#include "actraiser/actraiser_localization_schedule.h"
 #include "actraiser/enhancements/actraiser_world_resume.h"
 #include "app/input_replay.h"
 #ifdef _WIN32
@@ -851,6 +852,58 @@ uint32 ActRaiser_LastBlockPc(void) {
   return sr_block_history(&pc, 1) == 1 ? pc : 0;
 }
 
+enum {
+  kDialogueBlipRequest = 0x07,
+  kDialogueBlipSite = 0x01902D,
+};
+
+/* Both native COPs and authored glyphs post through the same audio/event
+ * routing. An authored request carries its origin explicitly; it does not
+ * execute a CPU block or software interrupt. */
+static void PostCopRequest(CpuState *cpu, uint8 id, uint32 site,
+                           const char *source, bool suppress_native_blip) {
+  /* $01:901C is the message composer's per-glyph pacing helper. Its
+   * non-space path at $01:902D posts COP #$07 after drawing each character.
+   * Suppress only this exact site: id 07 also drives unrelated game events. */
+  const bool suppress_dialog_blip =
+      id == kDialogueBlipRequest && site == kDialogueBlipSite &&
+      (suppress_native_blip ||
+       !AudioPresentationPolicy_ShouldEmitDialogBlip(
+           g_settings.audio_dialog_blip));
+  const uint64_t trace_serial = NativeAudioTrace_OnCpuRequest(
+      kNativeAudioRequest_Event, id, !suppress_dialog_blip,
+      source, site,
+      ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+      (uint16_t)cpu->X, (uint16_t)cpu->Y);
+  if (suppress_dialog_blip)
+    NativeAudioExtension_ObserveGameState(g_ram, kSnesWramSize);
+  const bool extended = !suppress_dialog_blip &&
+      NativeAudioExtension_QueueGameRequest(
+          g_ram, kSnesWramSize, true, id, site,
+          ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
+          (uint16_t)cpu->X, (uint16_t)cpu->Y, trace_serial);
+  if (!suppress_dialog_blip && !extended)
+    cpu_write8(cpu, 0x00, kActRaiserWram_CopRequest, id);
+  /* AR_COPLOG=1: log every COP-posted event id + game-frame + calling recomp
+   * function, so a Death-Heim stuck-state capture shows whether the
+   * boss-defeat/next-encounter event ever posts at all, vs posting an id whose
+   * consumer is unreached (see [[cop-syscall-hook-fix]] -- $C3DA consumer was
+   * previously suspected still-unreached for a different event id). */
+  if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_CopLog)) {
+    unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
+    fprintf(stderr, "[cop] gf=%u fn=%s site=%06x id=%02x%s $18=%02x $19=%02x\n",
+            game_frame, source ? source : "?",
+            site, id, suppress_dialog_blip ? " suppressed-dialog-blip" : "",
+            g_ram[kActRaiserWram_MapGroup],
+            g_ram[kActRaiserWram_CurrentMap]);
+  }
+}
+
+void ActRaiser_RequestDialogueBlip(CpuState *cpu) {
+  PostCopRequest(cpu, kDialogueBlipRequest, kDialogueBlipSite,
+                 "enhanced-dialogue", false);
+}
+
 /* ActRaiser COP syscall — the SECOND software interrupt, structurally identical
  * to BRK. The ROM's COP vector ($00:FFE4 -> $8526) is:
  *   PHP; SEP #$20; STA $00035A; PLP; RTI
@@ -871,40 +924,10 @@ static void ActRaiser_CopHook(CpuState *cpu) {
         SR_INTERRUPT_COP, SR_EVENT_INTERRUPT_ENTER, site, vector,
         SR_INTERRUPT_SCANLINE_UNKNOWN, "cop");
   }
-  /* $01:901C is the message composer's per-glyph pacing helper. Its
-   * non-space path at $01:902D posts COP #$07 after drawing each character.
-   * Suppress only this exact site: id 07 also drives unrelated game events. */
-  const bool suppress_dialog_blip =
-      !AudioPresentationPolicy_ShouldEmitDialogBlip(
-          g_settings.audio_dialog_blip) &&
-      id == 0x07 && site == 0x01902D;
-  const uint64_t trace_serial = NativeAudioTrace_OnCpuRequest(
-      kNativeAudioRequest_Event, id, !suppress_dialog_blip,
-      g_last_recomp_func, site,
-      ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
-      (uint16_t)cpu->X, (uint16_t)cpu->Y);
-  if (suppress_dialog_blip)
-    NativeAudioExtension_ObserveGameState(g_ram, kSnesWramSize);
-  const bool extended = !suppress_dialog_blip &&
-      NativeAudioExtension_QueueGameRequest(
-          g_ram, kSnesWramSize, true, id, site,
-          ActRaiser_ReadWram16(kActRaiserWram_GameFrame),
-          (uint16_t)cpu->X, (uint16_t)cpu->Y, trace_serial);
-  if (!suppress_dialog_blip && !extended)
-    cpu_write8(cpu, 0x00, kActRaiserWram_CopRequest, id);
-  /* AR_COPLOG=1: log every COP-posted event id + game-frame + calling recomp
-   * function, so a Death-Heim stuck-state capture shows whether the
-   * boss-defeat/next-encounter event ever posts at all, vs posting an id whose
-   * consumer is unreached (see [[cop-syscall-hook-fix]] -- $C3DA consumer was
-   * previously suspected still-unreached for a different event id). */
-  if (ActRaiser_DeveloperFlagEnabled(kActRaiserDeveloperFlag_CopLog)) {
-    unsigned game_frame = ActRaiser_ReadWram16(kActRaiserWram_GameFrame);
-    fprintf(stderr, "[cop] gf=%u fn=%s site=%06x id=%02x%s $18=%02x $19=%02x\n",
-            game_frame, g_last_recomp_func ? g_last_recomp_func : "?",
-            site, id, suppress_dialog_blip ? " suppressed-dialog-blip" : "",
-            g_ram[kActRaiserWram_MapGroup],
-            g_ram[kActRaiserWram_CurrentMap]);
-  }
+  const bool suppress_native_blip =
+      id == kDialogueBlipRequest && site == kDialogueBlipSite &&
+      ActRaiser_LocalizationConsumeNativeBlipSuppression();
+  PostCopRequest(cpu, id, site, g_last_recomp_func, suppress_native_blip);
   if (observe_interrupt) {
     ActRaiser_EmitInterrupt(
         SR_INTERRUPT_COP, SR_EVENT_INTERRUPT_EXIT, site, vector,

@@ -135,7 +135,7 @@ bool SimMenuLocalization_PrepareHelp(
   memset(&s_menu_help_style, 0, sizeof(s_menu_help_style));
   memset(&s_menu_help_bidi, 0, sizeof(s_menu_help_bidi));
   if (!source || !help || help->source_end > source->utf8_bytes) return false;
-  ArDialoguePager_Begin(&help->pager, help->enhanced);
+  ArDialoguePager_Begin(&help->pager, help->enhanced, 0);
   const size_t bytes = help->source_end - help->source_start;
   uint16_t *offsets = calloc(bytes + 1, sizeof(*offsets));
   if (!offsets) return false;

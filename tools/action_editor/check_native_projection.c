@@ -7,7 +7,7 @@
 #include "room_preview_native.h"
 #include "action/action_scene_snapshot.h"
 #include "platform/sdl/action_effect_source_sdl.h"
-#include "platform/sdl/render_sdl_internal.h"
+#include "platform/sdl/render_sdl_interop.h"
 
 static uint8_t s_input[1024*1024+1];
 static ArRenderDevice s_device;
@@ -44,27 +44,27 @@ int main(int argc,char **argv) {
   if(!SDL_Init(SDL_INIT_VIDEO))return 77;
   SDL_Window *window=SDL_CreateWindow("Complete-room GPU projection comparison",720,448,SDL_WINDOW_HIDDEN);
   if(!window || !ArSdlRenderBackend_CreateForWindow(&s_device,window,NULL))return 77;
-  ArSdlRenderBackend *backend=s_device.context;
-  if(!ArGpuEffectSource_Init(&s_source,backend->gpu_device)) {
+  SDL_GPUDevice *gpu_device=ArSdlRenderBackend_GpuDevice(&s_device);
+  if(!gpu_device || !ArGpuEffectSource_Init(&s_source,gpu_device)) {
     fprintf(stderr,"shader initialization: %s\n",SDL_GetError());return 1;
   }
   const SDL_GPUBufferCreateInfo info={.size=256,.usage=SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ|SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ};
-  s_motion=SDL_CreateGPUBuffer(backend->gpu_device,&info);
+  s_motion=SDL_CreateGPUBuffer(gpu_device,&info);
   if(!s_motion)return 1;
   const SDL_GPUTransferBufferCreateInfo upload_info={.usage=SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,.size=256};
-  SDL_GPUTransferBuffer *upload=SDL_CreateGPUTransferBuffer(backend->gpu_device,&upload_info);
-  int32_t *vectors=upload?SDL_MapGPUTransferBuffer(backend->gpu_device,upload,false):NULL;
+  SDL_GPUTransferBuffer *upload=SDL_CreateGPUTransferBuffer(gpu_device,&upload_info);
+  int32_t *vectors=upload?SDL_MapGPUTransferBuffer(gpu_device,upload,false):NULL;
   if(!vectors)return 1;
   memset(vectors,0,256);
   for(unsigned i=0;i<8;++i){vectors[i*8]=3;vectors[i*8+1]=-3;vectors[i*8+2]=-2;vectors[i*8+3]=2;vectors[i*8+4]=1;}
-  SDL_UnmapGPUTransferBuffer(backend->gpu_device,upload);
-  SDL_GPUCommandBuffer *cmd=SDL_AcquireGPUCommandBuffer(backend->gpu_device);
+  SDL_UnmapGPUTransferBuffer(gpu_device,upload);
+  SDL_GPUCommandBuffer *cmd=SDL_AcquireGPUCommandBuffer(gpu_device);
   SDL_GPUCopyPass *copy=SDL_BeginGPUCopyPass(cmd);
   const SDL_GPUTransferBufferLocation from={.transfer_buffer=upload};
   const SDL_GPUBufferRegion to={.buffer=s_motion,.size=256};
   SDL_UploadToGPUBuffer(copy,&from,&to,false);SDL_EndGPUCopyPass(copy);
   if(!SDL_SubmitGPUCommandBuffer(cmd))return 1;
-  SDL_ReleaseGPUTransferBuffer(backend->gpu_device,upload);
+  SDL_ReleaseGPUTransferBuffer(gpu_device,upload);
   unsigned failures=0;
   for(int room=3;room<argc;++room) {
     unsigned n=Read(argv[room]);
@@ -124,7 +124,7 @@ int main(int argc,char **argv) {
     RoomPreview_Reset();
   }
   Diorama_ResetCompositorResources(&s_device);
-  ArGpuEffectSource_Destroy(&s_source);SDL_ReleaseGPUBuffer(backend->gpu_device,s_motion);
+  ArGpuEffectSource_Destroy(&s_source);SDL_ReleaseGPUBuffer(gpu_device,s_motion);
   ArSdlRenderBackend_Destroy(&s_device);SDL_DestroyWindow(window);SDL_Quit();
   return failures?1:0;
 }

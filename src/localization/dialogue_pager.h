@@ -23,8 +23,10 @@ typedef struct ArDialoguePager {
 } ArDialoguePager;
 
 /* Each new window retires the previous ticket, even across game resets. A
- * disabled pager permits native reveal without waiting for font feedback. */
-void ArDialoguePager_Begin(ArDialoguePager *pager, bool enhanced);
+ * disabled pager permits native reveal without waiting for font feedback.
+ * start is the UTF-8 byte offset of new text; preceding retained history is
+ * excluded from measurement and acknowledgements. */
+void ArDialoguePager_Begin(ArDialoguePager *pager, bool enhanced, uint32_t start);
 ArDialoguePageState ArDialoguePager_Update(
     ArDialoguePager *pager, uint32_t text_bytes, uint32_t revealed_bytes);
 /* Supply the ticket captured before yielding to input. A replacement window

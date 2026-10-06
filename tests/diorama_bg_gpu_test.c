@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "diorama/diorama_bg_gpu.h"
-#include "platform/sdl/render_sdl_internal.h"
+#include "platform/sdl/render_sdl_interop.h"
 #include "support/test_assert.h"
 
 static void Fill(SrPpuBgPacket *p, unsigned width, unsigned height, unsigned phase) {

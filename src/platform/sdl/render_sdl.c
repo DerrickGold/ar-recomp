@@ -668,6 +668,12 @@ SDL_Renderer *ArSdlRenderBackend_Renderer(const ArRenderDevice *device) {
   return ((ArSdlRenderBackend *)device->context)->renderer;
 }
 
+SDL_GPUDevice *ArSdlRenderBackend_GpuDevice(const ArRenderDevice *device) {
+  if (!device || device->ops != &kSdlRenderOps || !device->context)
+    return NULL;
+  return ((const ArSdlRenderBackend *)device->context)->gpu_device;
+}
+
 bool ArSdlRenderBackend_SubmitPending(const ArRenderDevice *device) {
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   if (!renderer) return false;

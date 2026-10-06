@@ -1740,13 +1740,24 @@ static int DialogueOffset(const ArLocalizationFrame *frame,
     return ArLocalizedTextLayout_ScrollOffset(surface, snapshot->revealed_utf8_bytes,
                                                viewport_height, revealed);
   uint32_t end;
-  const int offset = ArLocalizedTextLayout_PageOffset(surface,
+  int offset = ArLocalizedTextLayout_PageOffset(surface,
       frame->dialogue_page_start, snapshot->utf8_bytes, viewport_height, &end);
   const uint32_t limit = snapshot->revealed_utf8_bytes < end
       ? snapshot->revealed_utf8_bytes : end;
   *revealed = 0;
   while (*revealed < surface->reveal_cluster_count &&
          surface->reveal_clusters[*revealed].end_utf8_byte <= limit) ++*revealed;
+  if (frame->dialogue_retains_rows) {
+    uint32_t ignored;
+    const int scroll = ArLocalizedTextLayout_ScrollOffset(
+        surface, limit, viewport_height, &ignored);
+    if (scroll < offset || frame->dialogue_page_start == snapshot->utf8_bytes)
+      offset = scroll;
+    const int retained_top = ArLocalizedTextLayout_PageOffset(
+        surface, frame->dialogue_retained_start, snapshot->utf8_bytes,
+        viewport_height, &ignored);
+    if (offset < retained_top) offset = retained_top;
+  }
   prepared->dialogue_page_start = frame->dialogue_page_start;
   prepared->dialogue_page_end = end;
   return offset;

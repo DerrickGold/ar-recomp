@@ -3,8 +3,9 @@
 
 static uint64_t s_next_ticket;
 
-void ArDialoguePager_Begin(ArDialoguePager *pager, bool enhanced) {
-  *pager = (ArDialoguePager){.ticket = enhanced ? ++s_next_ticket : 0};
+void ArDialoguePager_Begin(ArDialoguePager *pager, bool enhanced, uint32_t start) {
+  *pager = (ArDialoguePager){
+      .ticket = enhanced ? ++s_next_ticket : 0, .start = start, .end = start};
 }
 
 ArDialoguePageState ArDialoguePager_Update(
@@ -13,11 +14,11 @@ ArDialoguePageState ArDialoguePager_Update(
   if (!pager->ticket) return pager->state;
   if (ArTextPresentation_Failed(pager->ticket))
     pager->state = kArDialoguePage_Failed;
-  else if (text_bytes &&
+  else if (text_bytes > pager->start &&
            (!ArTextPresentation_PageEnd(pager->ticket, pager->start, &pager->end) ||
             pager->end <= pager->start || pager->end > text_bytes))
     pager->state = kArDialoguePage_Measuring;
-  else if (text_bytes && pager->end < text_bytes && revealed_bytes >= pager->end)
+  else if (text_bytes > pager->start && pager->end < text_bytes && revealed_bytes >= pager->end)
     pager->state = kArDialoguePage_AwaitingInput;
   return pager->state;
 }

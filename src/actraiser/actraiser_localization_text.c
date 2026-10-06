@@ -206,6 +206,7 @@ bool ActRaiser_LocalizationObserveTextByte(CpuState *cpu) {
   }
   if (s_pending_page_advance) {
     ++s_text.page_index;
+    s_pending_page_retains_rows = cpu_read8(cpu, 0, 0x0200) != 0;
     if (!s_pending_page_retains_rows) {
       s_text.window_start_page = s_text.page_index;
       s_text.window_start_control_count = 0;

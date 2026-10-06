@@ -1,4 +1,5 @@
 #include "actraiser/actraiser_localization_schedule.h"
+#include "actraiser/actraiser_rtl.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,6 +57,7 @@ static bool s_prefix_seen, s_suffix_seen;
 static bool s_check_cadence;
 static unsigned s_cadence_frames;
 static unsigned s_cadence_speed;
+static unsigned s_glyph_sounds;
 static void (*s_frame_hook)(void);
 static void (*s_native_byte_hook)(CpuState *cpu, uint8_t code);
 static void (*s_native_page_hook)(void);
@@ -85,6 +87,11 @@ static void ReleasePack(void *context, ArLanguagePackBlob *blob) {
       ++s_failures;                                                                                \
     }                                                                                              \
   } while (0)
+
+void ActRaiser_RequestDialogueBlip(CpuState *cpu) {
+  (void)cpu;
+  ++s_glyph_sounds;
+}
 
 /* A complete USA-shaped source made only from synthetic prose and the public
  * semantic contract. Test runtime activation without requiring a retail dump
@@ -194,8 +201,9 @@ static void CaptureWithTransform(bool mode7_transformed) {
     for (unsigned i = 0; i < s_frame.snapshot_count; ++i) {
       const ArLocalizationTextSnapshot *text = &s_frame.snapshots[i];
       if (text->surface_id != s_frame.dialogue_surface_id) continue;
-      uint32_t end = s_frame.dialogue_page_start + s_page_span;
-      if (end > text->utf8_bytes) end = text->utf8_bytes;
+      uint32_t end = text->utf8_bytes;
+      if (s_page_span < end - s_frame.dialogue_page_start)
+        end = s_frame.dialogue_page_start + s_page_span;
       CHECK(text->revealed_utf8_bytes <= end);
       ArTextPresentation_BeginFrame(s_frame.dialogue_ticket);
       ArTextPresentation_ReportPage(s_frame.dialogue_ticket, s_frame.dialogue_page_start, end);
@@ -281,6 +289,9 @@ static void ExpandedGlyph(CpuState *cpu) {
     CHECK(cpu->S == saved.S && cpu->X == saved.X && cpu->Y == saved.Y);
     CHECK(cpu->A == (saved.A & 0xff00u) && cpu->_flag_C && cpu->_flag_Z && !cpu->_flag_N);
   }
+  /* $901C emits its original request even when enhanced reveal was blocked
+   * on an authored page/control. Only the owning reveal may sound. */
+  if (!ActRaiser_LocalizationConsumeNativeBlipSuppression()) ++s_glyph_sounds;
   *cpu = saved;
 }
 
@@ -355,6 +366,7 @@ static void Run(uint16_t source, uint16_t caller, const uint8_t *bytes, size_t l
   ActRaiserLocalizationText_ResetObservation();
   s_frames = s_confirms = s_resets = s_native_entries = s_seen_pages = 0;
   s_polls = 0;
+  s_glyph_sounds = 0;
   s_native_confirms = 0;
   s_prefix_seen = s_suffix_seen = false;
   g_ram[kActRaiserWram_CurrentMap] = kActRaiserNonActionMap_SkyPalace;
@@ -393,6 +405,11 @@ static void DisableOnce(void) {
   CHECK(!ActRaiserLocalizationRuntime_DialogueScheduled());
 }
 
+static void DisableDuringGlyphDelay(void) {
+  if (!s_frame.snapshot_count || !s_frame.snapshots[0].revealed_utf8_bytes) return;
+  DisableOnce();
+}
+
 static void RoundTripOnce(void) {
   s_frame_hook = NULL;
   const uint32_t count = s_frame.snapshot_count;
@@ -419,6 +436,18 @@ static void EnableDuringNativePage(void) {
 
 static void DisableAtPage(void) {
   if (ActRaiserLocalizationRuntime_PageConfirmationPending()) DisableOnce();
+}
+
+static void ClearSpeedAtPage(void) {
+  if (!ActRaiserLocalizationRuntime_PageConfirmationPending()) return;
+  s_frame_hook = NULL;
+  g_ram[0x0200] = 0;
+}
+
+static void RetainSpeedAtPage(void) {
+  if (!ActRaiserLocalizationRuntime_PageConfirmationPending()) return;
+  s_frame_hook = NULL;
+  g_ram[0x0200] = 2;
 }
 
 static void SelectContent(int content) {
@@ -1331,6 +1360,37 @@ static void TestMenuHelp(void) {
   }
 }
 
+static void TestRetainedOverflow(void) {
+  /* Appending after a measured overflow must keep only the last acknowledged
+   * screenful as context, with no input wait for already-read history. */
+  ActRaiserLocalizationRuntime_Shutdown();
+  g_settings.localization_presentation = 1;
+  g_settings.localization_content = 1;
+  s_page_span = 16;
+  for (unsigned speed = 0; speed <= 2; speed += 2) {
+    memset(g_ram, 0, sizeof(g_ram));
+    g_ram[kActRaiserWram_CurrentMap] = 1;
+    g_ram[kActRaiserWram_DialogueSpeed] = speed;
+    ActRaiserLocalizationText_ResetObservation();
+    s_frames = s_confirms = s_polls = s_native_entries = s_resets = 0;
+    const uint8_t script[] = {5, 'a', 0};
+    memcpy(s_rom + 0xfc9c, script, sizeof(script));
+    CpuState cpu = {.Y = 0xfc9c, .S = 0x1e0, .PB = 1, .DB = 1,
+                    .P = 0x20, .m_flag = 1, .ram = g_ram};
+    cpu_write16(&cpu, 0, cpu.S + 1, 0x8295);
+    CHECK(ActRaiser_LocalizationScheduleEntry(&cpu));
+    CHECK(ActRaiser_LocalizationRunDialogue(&cpu) == RECOMP_RETURN_NORMAL);
+    CHECK(s_confirms == 3 && s_polls == 6);
+    Capture();
+    CHECK(strstr(s_frame.text, "Tail."));
+    CHECK(s_frame.dialogue_retains_rows == (speed != 0));
+    CHECK(s_frame.dialogue_retained_start == (speed ? 32 : 0));
+    CHECK(s_frame.dialogue_page_start == (speed ? 43 : 0));
+  }
+  s_page_span = UINT32_MAX;
+  ActRaiserLocalizationRuntime_Shutdown();
+}
+
 static void TestMenuDialogueKinds(void) {
   /* Menu placement must not turn a scheduled question or acknowledgement into
    * a fitted label. Every kind supports authored pages/waits before returning
@@ -1637,8 +1697,17 @@ int main(void) {
       Run(0xf854, 0x8794, cadence_sources[i], sizeof(cadence_sources[i]), speeds[j]);
       s_check_cadence = false;
       CHECK(s_cadence_frames == 4 * speeds[j] && s_frames == 4 * speeds[j] + 2 && s_confirms == 0);
+      CHECK(s_glyph_sounds == 4); /* Compression and drainage cannot add blips. */
     }
   }
+
+  /* A presentation switch during the first glyph's delay retires authored
+   * work, but its pending native blip remains suppressed exactly once. */
+  s_frame_hook = DisableDuringGlyphDelay;
+  Run(0xf854, 0x8794, cadence_sources[0], sizeof(cadence_sources[0]), 1);
+  CHECK(!s_frame_hook && s_glyph_sounds == 5);
+  CHECK(!ActRaiser_LocalizationConsumeNativeBlipSuppression());
+  SelectPresentation(1);
 
   s_first_poll_held = true;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
@@ -1647,11 +1716,33 @@ int main(void) {
 
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 1);
   CHECK(s_confirms == 2 && s_frames > 10 && s_seen_pages == 7);
-  CHECK(!strstr(s_frame.text, "Première") && strstr(s_frame.text, "Dernière"));
+  CHECK(strstr(s_frame.text, "Première") && strstr(s_frame.text, "Dernière"));
+  CHECK(s_frame.dialogue_retains_rows && s_frame.dialogue_page_start > 0);
+  CHECK(s_frame.dialogue_retained_start == 0);
 
   const uint8_t dictionary_pages[] = {5, 0x80, 0x81, 2, 0x82, 1};
   Run(0xfa7b, 0x8afb, dictionary_pages, sizeof(dictionary_pages), 0);
   CHECK(s_confirms == 2 && s_frames == 16 && s_seen_pages == 7);
+
+  /* Each authored page fits this viewport separately; the combined history
+   * does not. Retained history never adds a third confirmation or extra blip. */
+  s_page_span = 16;
+  for (unsigned speed = 0; speed <= 9; ++speed) {
+    Run(0xfa7b, 0x8afb, dictionary_pages, sizeof(dictionary_pages), speed);
+    CHECK(s_confirms == 2 && s_polls == 4 && s_glyph_sounds == 39);
+    CHECK(strstr(s_frame.text, "Dernière"));
+    CHECK((strstr(s_frame.text, "Première") != NULL) == (speed != 0));
+    CHECK(s_frame.dialogue_retains_rows == (speed != 0));
+    CHECK(s_frame.dialogue_retained_start == 0);
+  }
+  /* Like native $8F97, the decision uses speed after the yielding wait. */
+  s_frame_hook = ClearSpeedAtPage;
+  Run(0xfa7b, 0x8afb, dictionary_pages, sizeof(dictionary_pages), 1);
+  CHECK(!s_frame_hook && s_confirms == 2 && !strstr(s_frame.text, "Première"));
+  s_frame_hook = RetainSpeedAtPage;
+  Run(0xfa7b, 0x8afb, dictionary_pages, sizeof(dictionary_pages), 0);
+  CHECK(!s_frame_hook && s_confirms == 2 && strstr(s_frame.text, "Première"));
+  s_page_span = UINT32_MAX;
 
   s_frame_hook = FailPresentationOnce;
   Run(0xfa7b, 0x8afb, one_page, sizeof(one_page), 0);
@@ -1763,6 +1854,7 @@ int main(void) {
   TestHudSceneParity();
   TestPartialRtlSources();
   TestMenuDialogueKinds();
+  TestRetainedOverflow();
   TestMenuViewportPaging();
   TestChurchViewportPaging();
   TestLegacySelectionGate(pack_host);

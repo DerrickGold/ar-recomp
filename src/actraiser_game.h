@@ -125,6 +125,9 @@ enum {
   kActRaiserWram_MagicCastState = 0x00F8,
   kActRaiserWram_TransitionRequest = 0x00FB,
 
+  /* Glyph delay and $02 continuation clear-versus-retained-row policy. */
+  kActRaiserWram_DialogueSpeed = 0x0200,
+
   kActRaiserWram_SelectedMagic = 0x02AC,
   kActRaiserWram_AngelCurrentSp = 0x0282,
   kActRaiserWram_AngelMaximumSp = 0x0284,

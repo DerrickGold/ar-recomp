@@ -86,6 +86,7 @@ typedef struct LocalizationRuntime {
   uint64_t observation_serial;
   uint64_t failed_observation_serial;
   ArDialoguePager pager;
+  uint32_t retained_display_start;
   bool scheduled_dialogue;
   uint16_t scheduled_window_first_page;
   uint16_t scheduled_window_clear_control;
@@ -508,18 +509,27 @@ static bool BuildDialogueWindow(
     const ArDialoguePageSnapshot *current,
     const ActRaiserLocalizationTextObservation *observation) {
   ActRaiserDialogueWindow *window = &s_runtime.dialogue_window;
-  const bool unchanged =
+  const bool same_history =
       window->valid && window->revision == current->source_revision &&
       window->native_first_page == observation->window_start_page &&
       window->native_clear_control_count ==
-          observation->window_start_control_count &&
-      window->current_page == current->page_index;
+          observation->window_start_control_count;
+  const bool unchanged = same_history && window->current_page == current->page_index;
+  const size_t previous_page_offset = window->current_page_offset;
+  const bool appended = same_history && window->current_page < current->page_index;
   if (!ActRaiserDialogueWindow_Build(window, &s_runtime.session, current,
                                      observation->window_start_page,
                                      observation->window_start_control_count))
     return false;
   if (!unchanged) {
-    ArDialoguePager_Begin(&s_runtime.pager, s_runtime.scheduled_dialogue);
+    /* An appended authored page measures only its new text. Keep the last
+     * acknowledged screenful as context, without paging through it again. */
+    if (!appended)
+      s_runtime.retained_display_start = 0;
+    else if (s_runtime.pager.start > previous_page_offset)
+      s_runtime.retained_display_start = s_runtime.pager.start;
+    ArDialoguePager_Begin(&s_runtime.pager, s_runtime.scheduled_dialogue,
+                         (uint32_t)window->current_page_offset);
   }
   return true;
 }
@@ -980,7 +990,7 @@ bool ActRaiserLocalizationRuntime_PageConfirmationPending(void) {
 bool ActRaiserLocalizationRuntime_BeginDialogue(
     const ActRaiserLocalizationTextObservation *observation) {
   s_runtime.scheduled_dialogue = false;
-  ArDialoguePager_Begin(&s_runtime.pager, false);
+  ArDialoguePager_Begin(&s_runtime.pager, false, 0);
   s_runtime.failed_observation_serial = 0;
   s_runtime.native_handoff_valid = false;
   s_runtime.inherited_native_page_wait = false;
@@ -1027,11 +1037,13 @@ static void ScheduleFailed(const char *reason) {
 
 static bool AdvanceScheduledPage(void) {
   if (!ArDialogueSession_AdvancePage(&s_runtime.session)) return false;
-  /* The player acknowledged the previous screenful. Retaining its rows would
-   * ask them to read it again when the native text speed is nonzero. */
-  s_runtime.scheduled_window_first_page =
-      (uint16_t)s_runtime.session.state.authored_page_index;
-  s_runtime.scheduled_window_clear_control = 0;
+  /* $8F97 samples speed after confirmation: zero clears, nonzero keeps rows.
+   * The display pager excludes that retained history from new input waits. */
+  if (!g_ram[kActRaiserWram_DialogueSpeed]) {
+    s_runtime.scheduled_window_first_page =
+        (uint16_t)s_runtime.session.state.authored_page_index;
+    s_runtime.scheduled_window_clear_control = 0;
+  }
   return true;
 }
 
@@ -1131,6 +1143,7 @@ static bool PumpDialogue(bool one_glyph, bool cross_pages, uint8_t text_speed,
           if (!ActRaiserLocalizationRuntime_DialogueScheduled())
             return false;
         }
+        if (host->glyph_sound) host->glyph_sound(host->context);
         if (one_glyph) return true;
       }
       break;
@@ -1542,6 +1555,9 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
     frame->dialogue_surface_id = route->surface_id;
     frame->dialogue_paged = true;
     frame->dialogue_page_start = s_runtime.pager.start;
+    frame->dialogue_retains_rows = window->current_page_offset &&
+        s_runtime.pager.start == window->current_page_offset;
+    frame->dialogue_retained_start = s_runtime.retained_display_start;
   }
   if (added && (reveal_bytes == window->bytes ||
                 s_runtime.pager.state == kArDialoguePage_AwaitingInput) &&
