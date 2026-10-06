@@ -1544,6 +1544,61 @@ static void CheckMenuDeviceGateTruthTable(void) {
   CHECK(InputMap_ArbitrateState(kInputDevice_Gamepad, false, false, keyboard, gamepad) == keyboard);
 }
 
+static void CheckSteamDeckMenuInput(void) {
+  const Settings saved = g_settings;
+  g_settings.input_device = kInputDevice_Auto;
+  for (int device = 0; device < kInputClass_Count; ++device)
+    for (int action = 0; action < kInputAction_Count; ++action)
+      g_settings.input_bind[device][action] = InputMap_DefaultBinding(action, device);
+  CHECK(SDL_InitSubSystem(SDL_INIT_GAMEPAD));
+  SDL_VirtualJoystickDesc desc;
+  SDL_INIT_INTERFACE(&desc);
+  desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+  desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+  desc.button_mask = (1u << SDL_GAMEPAD_BUTTON_COUNT) - 1;
+  desc.vendor_id = 0x28DE;
+  desc.product_id = 0x1205;
+  desc.name = "Steam Deck";
+  const SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
+  CHECK(id != 0);
+  if (!id) {
+    SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    g_settings = saved;
+    return;
+  }
+  SDL_Event event = {.type = SDL_EVENT_GAMEPAD_ADDED};
+  event.gdevice.which = id;
+  InputMap_HandleEvent(&event);
+  SettingsOverlay_Open();
+  CHECK(InputMap_DeviceMode() == kInputDevice_Gamepad);
+  CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Gamepad);
+  CHECK(!InputMap_ShouldAcceptKeyboard(InputMap_DeviceMode(), true, false));
+  int before = -1, after = -1;
+  CHECK(SettingsOverlay_GetNavigationState(&before, NULL, NULL, NULL));
+  event.gbutton.which = id;
+  event.gbutton.button = SDL_GAMEPAD_BUTTON_DPAD_DOWN;
+  for (int tap = 0; tap < 4; ++tap) {
+    event.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+    CHECK(SettingsOverlay_HandleGamepadEvent(&event));
+    event.type = SDL_EVENT_GAMEPAD_BUTTON_UP;
+    CHECK(SettingsOverlay_HandleGamepadEvent(&event));
+    CHECK(SettingsOverlay_GetNavigationState(&after, NULL, NULL, NULL));
+    CHECK(after != before);
+    before = after;
+  }
+  g_settings.input_device = kInputDevice_Keyboard;
+  CHECK(SettingsOverlay_MenuInputDevice() == kInputClass_Keyboard);
+  CHECK(SettingsOverlay_HandleKey(SDLK_DOWN, true, false));
+  CHECK(SettingsOverlay_GetNavigationState(&after, NULL, NULL, NULL));
+  CHECK(after != before);
+  SettingsOverlay_Close();
+  InputMap_Shutdown();
+  CHECK(SDL_DetachVirtualJoystick(id));
+  SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+  g_settings = saved;
+  SettingsOverlay_Refresh();
+}
+
 /* ── Layer editor harness ────────────────────────────────────────────────
  *
  * The overlay reaches the override table through injected hooks precisely so
@@ -3790,6 +3845,7 @@ int main(int argc, char **argv) {
   CheckLayerEditorSection();
   SettingsOverlay_Close();
   CheckRegionalControls(renderer, surface);
+  CheckSteamDeckMenuInput();
   CheckMenuHintDevice(renderer, surface);
   CaptureRegionalReview(renderer, surface);
 

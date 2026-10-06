@@ -16,7 +16,11 @@ _Static_assert(kInputAction_Count <= sizeof(uint32) * CHAR_BIT,
 
 /* --- Device registry ------------------------------------------------------ */
 
-enum { kMaxGamepads = 8 };
+enum {
+  kMaxGamepads = 8,
+  kValveUsbVendorId = 0x28DE,
+  kSteamDeckUsbProductId = 0x1205,
+};
 
 typedef struct {
   SDL_JoystickID id;
@@ -26,6 +30,7 @@ typedef struct {
 
 static GamepadSlot s_pads[kMaxGamepads];
 static int s_pad_count;
+static bool s_steam_deck_detected;
 static InputClass s_hint_class = kInputClass_Keyboard;
 
 /* Held state, tracked per source so the device-mode row can gate them
@@ -50,6 +55,43 @@ static uint32 s_host_key_held;
 static InputMapActionFn s_action_handler;
 
 int InputMap_GamepadCount(void) { return s_pad_count; }
+
+InputDeviceMode InputMap_DeviceMode(void) {
+  if (g_settings.input_device == kInputDevice_Auto && s_steam_deck_detected)
+    return kInputDevice_Gamepad;
+  return (InputDeviceMode)g_settings.input_device;
+}
+
+static void MarkSteamDeckDetected(void) {
+  if (s_steam_deck_detected) return;
+  s_steam_deck_detected = true;
+  fprintf(stderr, "[input] Steam Deck detected; Auto uses gamepad input\n");
+}
+
+static bool IsSteamDeckHardware(void) {
+#ifdef __linux__
+  /* The SteamOS controller updater uses these board identities for LCD/OLED.
+   * Read hardware rather than a Steam launch variable so desktop launches and
+   * Steam's virtual Xbox-style gamepad receive the same policy. */
+  const char *const paths[] = {
+      "/sys/class/dmi/id/board_vendor",
+      "/sys/class/dmi/id/board_name",
+  };
+  char identity[2][64];
+  for (int i = 0; i < 2; ++i) {
+    FILE *file = fopen(paths[i], "r");
+    if (!file) return false;
+    const bool read = fgets(identity[i], sizeof(identity[i]), file) != NULL;
+    fclose(file);
+    if (!read) return false;
+    identity[i][strcspn(identity[i], "\r\n")] = 0;
+  }
+  return !strcmp(identity[0], "Valve") &&
+         (!strcmp(identity[1], "Jupiter") || !strcmp(identity[1], "Galileo"));
+#else
+  return false;
+#endif
+}
 
 const char *InputMap_GamepadName(int slot) {
   if (slot < 0 || slot >= s_pad_count) return "";
@@ -85,17 +127,21 @@ static void AddGamepad(SDL_JoystickID id) {
   if (s_pad_count >= kMaxGamepads) return;
   SDL_Gamepad *pad = SDL_OpenGamepad(id);
   if (!pad) {
-    fprintf(stderr, "[input] could not open gamepad %u: %s\n",
-            (unsigned)id, SDL_GetError());
+    fprintf(stderr, "[input] could not open gamepad %u: %s\n", (unsigned)id, SDL_GetError());
     return;
   }
   GamepadSlot *slot = &s_pads[s_pad_count++];
   slot->id = id;
   slot->pad = pad;
+  /* Native SDL access also identifies the Deck when DMI is unavailable.
+   * Steam Virtual Gamepad's ID is shared with desktop PCs and is not evidence
+   * of Deck hardware. */
+  if (SDL_GetGamepadVendor(pad) == kValveUsbVendorId &&
+      SDL_GetGamepadProduct(pad) == kSteamDeckUsbProductId)
+    MarkSteamDeckDetected();
   const char *name = SDL_GetGamepadName(pad);
   snprintf(slot->name, sizeof(slot->name), "%s", name ? name : "Gamepad");
-  fprintf(stderr, "[input] gamepad %d connected: %s\n",
-          s_pad_count, slot->name);
+  fprintf(stderr, "[input] gamepad %d connected: %s\n", s_pad_count, slot->name);
 }
 
 static void RemoveGamepad(SDL_JoystickID id) {
@@ -121,6 +167,8 @@ void InputMap_SetActionHandler(InputMapActionFn handler) {
 }
 
 void InputMap_Init(void) {
+  s_steam_deck_detected = false;
+  if (IsSteamDeckHardware()) MarkSteamDeckDetected();
   /* The Steam Deck's built-in gamepad is driven by SDL's HIDAPI Steam Deck
    * driver, which is enabled by the default HIDAPI joystick hint, so a
    * desktop-mode launch already sees its sticks/D-pad/face buttons with no
@@ -171,6 +219,7 @@ void InputMap_Shutdown(void) {
   HostGamepadPoll_Shutdown();
   for (int i = 0; i < s_pad_count; i++) SDL_CloseGamepad(s_pads[i].pad);
   s_pad_count = 0;
+  s_steam_deck_detected = false;
   s_hint_class = kInputClass_Keyboard;
   memset(s_pads, 0, sizeof(s_pads));
   InputMap_Clear();
@@ -473,10 +522,10 @@ int InputMap_ActionHintForDevice(char *buffer, int buffer_size, InputAction acti
 }
 
 int InputMap_GameActionHint(char *buffer, int buffer_size, InputAction action) {
-  if (!s_pad_count || g_settings.input_device == kInputDevice_Keyboard)
+  const InputDeviceMode mode = InputMap_DeviceMode();
+  if (!s_pad_count || mode == kInputDevice_Keyboard)
     s_hint_class = kInputClass_Keyboard;
-  else if (g_settings.input_device == kInputDevice_Gamepad ||
-           InputMap_GamepadIsActive())
+  else if (InputMap_GameInputClass() == kInputClass_Gamepad)
     s_hint_class = kInputClass_Gamepad;
   else if (s_key_bits || s_host_key_held)
     s_hint_class = kInputClass_Keyboard;
@@ -662,9 +711,10 @@ void InputMap_Clear(void) {
 }
 
 uint32 InputMap_State(void) {
-  return InputMap_ArbitrateState(
-      (InputDeviceMode)g_settings.input_device, s_pad_count > 0,
-      InputMap_GamepadIsActive(), s_key_bits, s_pad_bits | s_stick_bits);
+  const InputDeviceMode mode = InputMap_DeviceMode();
+  return InputMap_ArbitrateState(mode, s_pad_count > 0,
+                                 mode == kInputDevice_Auto && InputMap_GamepadIsActive(),
+                                 s_key_bits, s_pad_bits | s_stick_bits);
 }
 
 static void SetActionBit(uint32 *bits, InputAction action, bool pressed) {
@@ -674,13 +724,19 @@ static void SetActionBit(uint32 *bits, InputAction action, bool pressed) {
 }
 
 void InputMap_HandleKey(int scancode, bool pressed, bool repeated) {
-  if (scancode >= 0 && scancode < SDL_SCANCODE_COUNT)
-    s_key_down[scancode] = pressed;
+  if (scancode < 0 || scancode >= SDL_SCANCODE_COUNT) return;
+  /* A repeat after Clear (menu/focus handoff) cannot start a new hold. */
+  if (pressed && repeated && !s_key_down[scancode]) return;
+  /* Deck Auto rejects keyboard button events regardless of pad activity. */
+  if (pressed && g_settings.input_device == kInputDevice_Auto &&
+      InputMap_DeviceMode() == kInputDevice_Gamepad && s_pad_count)
+    return;
+  s_key_down[scancode] = pressed;
   uint32 want = INPUT_BIND_MAKE(kInputBind_Key, scancode, false);
   for (int a = 0; a < kInputAction_Count; a++) {
     if (g_settings.input_bind[kInputClass_Keyboard][a] != want) continue;
     if (a < kInputAction_PadCount) {
-      SetActionBit(&s_key_bits, (InputAction)a, pressed);
+      if (!repeated) SetActionBit(&s_key_bits, (InputAction)a, pressed);
     } else if (INPUT_ACTION_IS_ANALOG(a)) {
       /* Polled, not dispatched — see InputMap_AnalogAction. */
     } else {
@@ -770,14 +826,18 @@ bool InputMap_ShouldAcceptKeyboard(InputDeviceMode mode,
   return !gamepad_active;
 }
 
-uint32 InputMap_ArbitrateState(InputDeviceMode mode, bool gamepad_connected,
-                               bool gamepad_active, uint32 keyboard_state,
-                               uint32 gamepad_state) {
-  if (mode == kInputDevice_Keyboard || !gamepad_connected)
-    return keyboard_state & 0xFFFu;
-  if (mode == kInputDevice_Gamepad || gamepad_active)
-    return gamepad_state & 0xFFFu;
-  return keyboard_state & 0xFFFu;
+InputClass InputMap_GameInputClass(void) {
+  const InputDeviceMode mode = InputMap_DeviceMode();
+  const bool keyboard = InputMap_ShouldAcceptKeyboard(
+      mode, s_pad_count > 0, mode == kInputDevice_Auto && InputMap_GamepadIsActive());
+  return keyboard ? kInputClass_Keyboard : kInputClass_Gamepad;
+}
+
+uint32 InputMap_ArbitrateState(InputDeviceMode mode, bool gamepad_connected, bool gamepad_active,
+                               uint32 keyboard_state, uint32 gamepad_state) {
+  const bool keyboard = InputMap_ShouldAcceptKeyboard(mode, gamepad_connected, gamepad_active);
+  const uint32 state = keyboard ? keyboard_state : gamepad_state;
+  return state & 0xFFFu;
 }
 
 void InputMap_HandlePadButton(SDL_GamepadButton button, bool pressed) {
@@ -875,22 +935,7 @@ static float BindingMagnitude(uint32 binding) {
 
 float InputMap_AnalogAction(InputAction action) {
   if (action < 0 || action >= kInputAction_Count) return 0.0f;
-  float keyboard = 0.0f;
-  if (g_settings.input_device != kInputDevice_Gamepad || !s_pad_count) {
-    keyboard = BindingMagnitude(
-        g_settings.input_bind[kInputClass_Keyboard][action]);
-  }
-  float gamepad = 0.0f;
-  if (g_settings.input_device != kInputDevice_Keyboard) {
-    gamepad = BindingMagnitude(
-        g_settings.input_bind[kInputClass_Gamepad][action]);
-  }
-  if (g_settings.input_device == kInputDevice_Keyboard || !s_pad_count)
-    return keyboard;
-  if (g_settings.input_device == kInputDevice_Gamepad ||
-      InputMap_GamepadIsActive())
-    return gamepad;
-  return keyboard;
+  return BindingMagnitude(g_settings.input_bind[InputMap_GameInputClass()][action]);
 }
 
 static bool BindingIsHeld(uint32 binding, bool was_held) {
@@ -924,12 +969,9 @@ bool InputMap_ActionHeld(InputAction action) {
 
 bool InputMap_GameActionHeld(InputAction action) {
   if (action < 0 || action >= kInputAction_Count) return false;
-  const bool pad = g_settings.input_device != kInputDevice_Keyboard &&
-      s_pad_count && (g_settings.input_device == kInputDevice_Gamepad ||
-                      InputMap_GamepadIsActive());
-  return BindingIsHeld(g_settings.input_bind[
-      pad ? kInputClass_Gamepad : kInputClass_Keyboard][action],
-      pad && (s_host_axis_held & (1u << action)) != 0);
+  const InputClass device = InputMap_GameInputClass();
+  return BindingIsHeld(g_settings.input_bind[device][action],
+                       device == kInputClass_Gamepad && (s_host_axis_held & (1u << action)) != 0);
 }
 
 void InputMap_HandleEvent(const SDL_Event *event) {

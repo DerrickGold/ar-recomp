@@ -130,6 +130,13 @@ enum {
  * gamecontrollerdb.txt sitting next to the ROM. Safe to call headless. */
 void InputMap_Init(void);
 void InputMap_Shutdown(void);
+/* Resolve Auto to Gamepad on Steam Deck without changing the saved setting.
+ * Explicit Keyboard/Gamepad choices are retained; disconnected-pad fallback
+ * is still handled by the shared input arbiter. */
+InputDeviceMode InputMap_DeviceMode(void);
+/* Current gameplay source under the resolved mode, pad activity and keyboard
+ * fallback. Modal hints use this when opening, then retain their own history. */
+InputClass InputMap_GameInputClass(void);
 
 /* Feeds one SDL event. Returns true when the event was a device/binding event
  * this layer owns (the caller may still want to look at it for other reasons;

@@ -44,27 +44,29 @@ static bool s_logged_key_down;
 static bool s_logged_mouse_down;
 static bool s_logged_suppressed_key;
 
-void HostInput_LogStatus(const char *reason) {
+static const char *DeviceModeName(int mode) {
   static const char *const kDeviceNames[] = {"Auto", "Keyboard", "Gamepad"};
-  const int mode = g_settings.input_device;
+  return mode >= 0 && mode < kInputDevice_Count ? kDeviceNames[mode] : "Unknown";
+}
+
+void HostInput_LogStatus(const char *reason) {
   SDL_Window *keyboard = SDL_GetKeyboardFocus();
   SDL_Window *mouse = SDL_GetMouseFocus();
   fprintf(stderr,
-      "[input] %s: ms=%llu window=%u keyboard-focus=%u mouse-focus=%u flags=$%llx "
-      "mode=%s gamepads=%d pad-active=%d key-suppressed=%d "
-      "overlay=%d capture=%d paused=%d inspector=%d inspector-selection=%d "
-      "inspector-owns-pause=%d key-seen=%d mouse-click-seen=%d\n",
-      reason, (unsigned long long)SDL_GetTicks(),
-      g_window ? (unsigned)SDL_GetWindowID(g_window) : 0,
-      keyboard ? (unsigned)SDL_GetWindowID(keyboard) : 0,
-      mouse ? (unsigned)SDL_GetWindowID(mouse) : 0,
-      (unsigned long long)(g_window ? SDL_GetWindowFlags(g_window) : 0),
-      mode >= 0 && mode < kInputDevice_Count ? kDeviceNames[mode] : "Unknown",
-      InputMap_GamepadCount(), InputMap_GamepadIsActive(),
-      HostInput_KeyboardIsSuppressed(), SettingsOverlay_IsOpen(),
-      SettingsOverlay_IsCapturing(), s_paused, g_settings.scene_inspector,
-      SceneInspector_HasSelection(), s_inspector_owns_pause,
-      s_logged_key_down, s_logged_mouse_down);
+          "[input] %s: ms=%llu window=%u keyboard-focus=%u mouse-focus=%u flags=$%llx "
+          "mode=%s resolved-mode=%s gamepads=%d pad-active=%d key-suppressed=%d "
+          "overlay=%d capture=%d paused=%d inspector=%d inspector-selection=%d "
+          "inspector-owns-pause=%d key-seen=%d mouse-click-seen=%d\n",
+          reason, (unsigned long long)SDL_GetTicks(),
+          g_window ? (unsigned)SDL_GetWindowID(g_window) : 0,
+          keyboard ? (unsigned)SDL_GetWindowID(keyboard) : 0,
+          mouse ? (unsigned)SDL_GetWindowID(mouse) : 0,
+          (unsigned long long)(g_window ? SDL_GetWindowFlags(g_window) : 0),
+          DeviceModeName(g_settings.input_device), DeviceModeName(InputMap_DeviceMode()),
+          InputMap_GamepadCount(), InputMap_GamepadIsActive(), HostInput_KeyboardIsSuppressed(),
+          SettingsOverlay_IsOpen(), SettingsOverlay_IsCapturing(), s_paused,
+          g_settings.scene_inspector, SceneInspector_HasSelection(), s_inspector_owns_pause,
+          s_logged_key_down, s_logged_mouse_down);
 }
 
 void HostInput_HandleKeyboard(int scancode, bool pressed, bool repeated) {
@@ -95,20 +97,18 @@ uint32_t HostInput_ResolveActionInputs(uint32_t input) {
 }
 
 bool HostInput_MenuGamepadIsActive(void) {
-  return g_settings.input_device != kInputDevice_Keyboard &&
-         InputMap_GamepadCount() > 0;
+  return InputMap_DeviceMode() != kInputDevice_Keyboard && InputMap_GamepadCount() > 0;
 }
 
 bool HostInput_MenuKeyboardIsActive(void) {
   const bool gamepad_connected = InputMap_GamepadCount() > 0;
-  return InputMap_ShouldAcceptKeyboard(
-      (InputDeviceMode)g_settings.input_device, gamepad_connected,
-      gamepad_connected && InputMap_GamepadIsActive());
+  return InputMap_ShouldAcceptKeyboard(InputMap_DeviceMode(), gamepad_connected,
+                                       gamepad_connected && InputMap_GamepadIsActive());
 }
 
 bool HostInput_KeyboardIsSuppressed(void) {
-  return g_settings.input_device == kInputDevice_Auto &&
-         InputMap_GamepadCount() > 0 && InputMap_GamepadIsActive();
+  /* Explicit device modes retain desktop host hotkeys outside modal menus. */
+  return g_settings.input_device == kInputDevice_Auto && !HostInput_MenuKeyboardIsActive();
 }
 
 bool HostInput_IsPaused(void) {
@@ -629,7 +629,6 @@ bool HostInput_HandleEvent(const SDL_Event *event) {
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
     case SDL_EVENT_GAMEPAD_BUTTON_UP:
     case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-
       if (SettingsOverlay_IsOpen() &&
           SettingsOverlay_HandleCaptureEvent(event))
         break;
@@ -643,8 +642,8 @@ bool HostInput_HandleEvent(const SDL_Event *event) {
       break;
     case SDL_EVENT_KEY_UP:
       if (SettingsOverlay_IsOpen()) {
-        if (HostInput_MenuKeyboardIsActive())
-          (void)SettingsOverlay_HandleKey(event->key.key, false, false);
+        /* A pad taking ownership must not strand a keyboard value hold. */
+        (void)SettingsOverlay_HandleKey(event->key.key, false, false);
       } else {
         HostInput_HandleKeyboard((int)event->key.scancode, false, false);
       }

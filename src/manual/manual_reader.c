@@ -196,14 +196,8 @@ bool ManualReader_Open(void) {
    * input event of its own. A connected pad is not enough: Keyboard mode disables
    * it, and in Auto the control that invoked the action is the useful answer. On
    * a handheld Gamepad mode still gives the only-present controls immediately. */
-  const bool gamepad_connected = InputMap_GamepadCount() > 0;
-  const bool gamepad_preferred =
-      gamepad_connected &&
-      (g_settings.input_device == kInputDevice_Gamepad ||
-       (g_settings.input_device == kInputDevice_Auto &&
-        InputMap_GamepadIsActive()));
-  s_hint_device = gamepad_preferred ? kManualHintDevice_Gamepad
-                                    : kManualHintDevice_Keyboard;
+  s_hint_device = InputMap_GameInputClass() == kInputClass_Gamepad
+      ? kManualHintDevice_Gamepad : kManualHintDevice_Keyboard;
   /* Cleared, or a stick held as the reader opened would pan on the first frame
    * from a position nobody has touched since. */
   s_stick_x = s_stick_y = 0.0f;

@@ -291,9 +291,23 @@ a bad rebind cannot lock a desktop player out of the menu.
 ### Steam Deck
 
 Launched through Steam, Steam Input presents a standard pad and everything
-works with the defaults. Launched from desktop mode, SDL's HIDAPI Steam driver
+works with the defaults. Launched from desktop mode, SDL's HIDAPI Steam Deck driver
 is enabled at startup so the built-in sticks, D-pad, and face buttons are
 picked up directly. Either way, L3 opens the settings menu.
+
+On a detected Steam Deck, the default Auto setting uses Gamepad automatically.
+Keyboard button events are ignored while a controller is connected, including
+when it is idle, so Steam's desktop keyboard mappings cannot double dialogue
+confirmations or menu movement. Controller taps still register individually.
+Detection works for both LCD and OLED models, including desktop launches.
+
+Choose Keyboard under Controls → Devices to use an external keyboard. Explicit
+device choices are respected, and the saved Auto setting stays Auto. If no
+controller is detected, keyboard controls remain available. Binding capture
+and text entry also remain available.
+
+On other computers, Auto accepts keyboard controls while the selected pad is
+idle. Gamepad mode selects controller gameplay and menu navigation.
 
 ## Host hotkeys
 

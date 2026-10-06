@@ -1458,6 +1458,99 @@ static void TestInputHintDeviceRetention(void) {
   SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
 }
 
+static void TestSteamDeckInputPolicy(void) {
+  Settings_Init();
+  CHECK(SDL_InitSubSystem(SDL_INIT_GAMEPAD));
+  SDL_VirtualJoystickDesc desc;
+  SDL_INIT_INTERFACE(&desc);
+  desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+  desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+  desc.button_mask = (1u << SDL_GAMEPAD_BUTTON_COUNT) - 1;
+  desc.vendor_id = 0x28DE;
+  desc.product_id = 0x11FF;
+  desc.name = "Steam Virtual Gamepad";
+  SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
+  CHECK(id != 0);
+  if (!id) {
+    SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    return;
+  }
+  SDL_Event event = {.type = SDL_EVENT_GAMEPAD_ADDED};
+  event.gdevice.which = id;
+  InputMap_HandleEvent(&event);
+  /* Steam's generic virtual controller also exists on ordinary desktop PCs. */
+  CHECK(InputMap_DeviceMode() == kInputDevice_Auto);
+  CHECK(InputMap_GameInputClass() == kInputClass_Keyboard);
+  InputMap_HandleKey(SDL_SCANCODE_Z, true, false);
+  CHECK(InputMap_State() == (1u << kInputAction_B));
+  InputMap_Shutdown();
+  CHECK(SDL_DetachVirtualJoystick(id));
+
+  desc.product_id = 0x1205;
+  desc.name = "Steam Deck";
+  id = SDL_AttachVirtualJoystick(&desc);
+  CHECK(id != 0);
+  if (!id) {
+    SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    return;
+  }
+  /* Boot enumeration detects the built-in controller before its first press. */
+  InputMap_Init();
+  CHECK(g_settings.input_device == kInputDevice_Auto);
+  CHECK(InputMap_DeviceMode() == kInputDevice_Gamepad);
+  CHECK(InputMap_GameInputClass() == kInputClass_Gamepad);
+  CHECK(InputMap_GamepadCount() == 1 && !InputMap_GamepadIsActive());
+  CHECK(!InputMap_ShouldAcceptKeyboard(InputMap_DeviceMode(), true, false));
+  char hint[64];
+  CHECK(InputMap_GameActionHint(hint, sizeof(hint), kInputAction_B));
+  CHECK(!strcmp(hint, "A"));
+  g_settings.input_bind[kInputClass_Keyboard][kInputAction_CamYawRight] =
+      INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_UP, false);
+  InputMap_HandleKey(SDL_SCANCODE_UP, true, false);
+  InputMap_HandleKey(SDL_SCANCODE_S, true, false);
+  CHECK(InputMap_AnalogAction(kInputAction_CamYawRight) == 0.0f);
+  CHECK(!InputMap_GameActionHeld(kInputAction_SimDescribe));
+  InputMap_Clear();
+  event.gbutton.which = id;
+  event.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
+  for (int tap = 0; tap < 4; ++tap) {
+    /* Neither a keyboard-first twin nor a repeat after release adds a press. */
+    InputMap_HandleKey(SDL_SCANCODE_Z, true, false);
+    CHECK(InputMap_State() == 0);
+    event.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+    InputMap_HandleEvent(&event);
+    CHECK(InputMap_State() == (1u << kInputAction_B));
+    event.type = SDL_EVENT_GAMEPAD_BUTTON_UP;
+    InputMap_HandleEvent(&event);
+    InputMap_HandleKey(SDL_SCANCODE_Z, true, true);
+    CHECK(InputMap_State() == 0);
+    InputMap_HandleKey(SDL_SCANCODE_Z, false, false);
+  }
+  CHECK(!InputMap_GamepadIsActive());
+  InputMap_HandleKey(SDL_SCANCODE_Z, true, false);
+  CHECK(InputMap_State() == 0); /* Deck policy has no timing dependency. */
+  InputMap_HandleKey(SDL_SCANCODE_Z, false, false);
+  g_settings.input_device = kInputDevice_Keyboard;
+  CHECK(InputMap_DeviceMode() == kInputDevice_Keyboard);
+  CHECK(InputMap_GameInputClass() == kInputClass_Keyboard);
+  CHECK(InputMap_ShouldAcceptKeyboard(InputMap_DeviceMode(), true, false));
+  InputMap_HandleKey(SDL_SCANCODE_Z, true, false);
+  CHECK(InputMap_State() == (1u << kInputAction_B));
+  InputMap_HandleKey(SDL_SCANCODE_Z, false, false);
+  g_settings.input_device = kInputDevice_Auto;
+  event.type = SDL_EVENT_GAMEPAD_REMOVED;
+  event.gdevice.which = id;
+  InputMap_HandleEvent(&event);
+  CHECK(InputMap_ShouldAcceptKeyboard(InputMap_DeviceMode(), false, false));
+  CHECK(InputMap_GameInputClass() == kInputClass_Keyboard);
+  InputMap_HandleKey(SDL_SCANCODE_Z, true, false);
+  CHECK(InputMap_State() == (1u << kInputAction_B));
+  InputMap_Shutdown();
+  CHECK(InputMap_DeviceMode() == kInputDevice_Auto);
+  CHECK(SDL_DetachVirtualJoystick(id));
+  SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+}
+
 static void TestInputBindings(void) {
   ClearSettingsEnv();
   Settings_Init();
@@ -2522,6 +2615,7 @@ int main(int argc, char **argv) {
   TestInputBindings();
   TestInputBindingHints();
   TestInputHintDeviceRetention();
+  TestSteamDeckInputPolicy();
   TestHardwareCapabilities();
   TestGpuBackendChoice();
   TestRandomizerDraftEdits();

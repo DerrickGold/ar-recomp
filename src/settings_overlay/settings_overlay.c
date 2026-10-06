@@ -350,10 +350,9 @@ static SDL_Keycode s_input_key;
 static InputClass s_menu_input_device;
 
 InputClass SettingsOverlay_MenuInputDevice(void) {
-  if (!InputMap_GamepadCount() || g_settings.input_device == kInputDevice_Keyboard)
-    return kInputClass_Keyboard;
-  return g_settings.input_device == kInputDevice_Gamepad ? kInputClass_Gamepad
-                                                         : s_menu_input_device;
+  const InputDeviceMode mode = InputMap_DeviceMode();
+  if (!InputMap_GamepadCount() || mode == kInputDevice_Keyboard) return kInputClass_Keyboard;
+  return mode == kInputDevice_Gamepad ? kInputClass_Gamepad : s_menu_input_device;
 }
 /* Binding capture: the row is armed and the NEXT physical input on the
  * matching device becomes its binding. Held separately from s_editing because
@@ -1222,10 +1221,7 @@ void SettingsOverlay_Open(void) {
   if (s_decision.result == kOverlayDecision_Pending) return;
   s_details.open = false;
   RegionalMenu_Open();
-  s_menu_input_device = InputMap_GamepadCount() &&
-      (g_settings.input_device == kInputDevice_Gamepad ||
-       (g_settings.input_device != kInputDevice_Keyboard && InputMap_GamepadIsActive()))
-          ? kInputClass_Gamepad : kInputClass_Keyboard;
+  s_menu_input_device = InputMap_GameInputClass();
   StopEditing();
   EndValueHold();
   ClearSectionResetArm();

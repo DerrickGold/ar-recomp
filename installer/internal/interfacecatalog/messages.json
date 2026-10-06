@@ -3296,10 +3296,10 @@
   {
     "key": "setting.input_device.help",
     "text": [
-      "Which device drives the game. Auto keeps the keyboard and the selected gamepad both live.",
-      "Périphérique qui contrôle le jeu. Auto garde actifs le clavier et la manette sélectionnée.",
-      "Gerät zur Spielsteuerung. Auto lässt Tastatur und ausgewähltes Gamepad gleichzeitig aktiv.",
-      "ゲームを操作するデバイス。自動ではキーボードと選択中のゲームパッドを両方使えます。"
+      "Which device drives the game. Auto uses Gamepad on Steam Deck. Elsewhere, it accepts the keyboard while the selected gamepad is idle.",
+      "Périphérique qui contrôle le jeu. Auto utilise la manette sur Steam Deck. Ailleurs, le clavier est accepté lorsque la manette sélectionnée est inactive.",
+      "Gerät zur Spielsteuerung. Auto verwendet auf Steam Deck das Gamepad. Auf anderen Geräten ist die Tastatur bei inaktivem ausgewähltem Gamepad verfügbar.",
+      "ゲームを操作するデバイス。自動ではSteam Deckのゲームパッドを使用します。ほかの機器では、選択中のゲームパッドが使われていないときにキーボードを受け付けます。"
     ]
   },
   {

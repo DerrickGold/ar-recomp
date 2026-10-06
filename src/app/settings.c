@@ -2315,8 +2315,8 @@ const SettingDesc g_setting_descs[] = {
    * save editor uses, so the category stays readable instead of showing 34
    * rows at once. */
   { "input_device", NULL, "Input device",
-    "Which device drives the game. Auto keeps the keyboard and the selected "
-    "gamepad both live.",
+    "Which device drives the game. Auto uses Gamepad on Steam Deck. Elsewhere, it "
+    "accepts the keyboard while the selected gamepad is idle.",
     kSettingType_Enum, kApply_Passive, kSettingCat_Input,
     &g_settings.input_device, kInputDevice_Auto, kInputDevice_Auto,
     kInputDevice_Gamepad, 1, false, kInputDeviceLabels, kInputDevice_Count,

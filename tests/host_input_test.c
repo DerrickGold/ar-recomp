@@ -35,6 +35,7 @@
 #include <string.h>
 
 static bool s_overlay, s_capture, s_pad_active, s_manual, s_diorama;
+static InputDeviceMode s_device_mode = kInputDevice_Auto;
 static bool s_close_menu, s_diorama_drag, s_sim_drag;
 static bool s_inspector_selection;
 static int s_pads, s_keys, s_pad_events, s_menu_keys, s_menu_pads;
@@ -150,6 +151,7 @@ void InputMap_Shutdown(void) {
 bool InputMap_GameActionHeld(InputAction action) {
   return 0;
 }
+InputDeviceMode InputMap_DeviceMode(void) { return s_device_mode; }
 int InputMap_GamepadCount(void) {
   return s_pads;
 }
@@ -169,7 +171,8 @@ void InputMap_SetActionHandler(InputMapActionFn handler) {
 }
 bool InputMap_ShouldAcceptKeyboard(InputDeviceMode mode, bool gamepad_connected,
                                    bool gamepad_active) {
-  return mode == kInputDevice_Keyboard || (mode == kInputDevice_Auto && !gamepad_active);
+  return mode == kInputDevice_Keyboard || !gamepad_connected ||
+         (mode == kInputDevice_Auto && !gamepad_active);
 }
 uint32 InputMap_State(void) {
   return 0;
@@ -383,6 +386,23 @@ int main(void) {
   Key(SDL_EVENT_KEY_DOWN, SDLK_A);
   assert(s_keys == 2);
 
+  /* Deck Auto suppresses desktop keyboard twins even with an idle pad. */
+  s_device_mode = kInputDevice_Gamepad;
+  assert(!HostInput_MenuKeyboardIsActive() && HostInput_KeyboardIsSuppressed());
+  Key(SDL_EVENT_KEY_DOWN, SDLK_A);
+  assert(s_keys == 2);
+  Key(SDL_EVENT_KEY_DOWN, SDLK_ESCAPE);
+  assert(!s_overlay && s_clears == 0);
+  g_settings.input_device = kInputDevice_Keyboard;
+  s_device_mode = kInputDevice_Keyboard;
+  assert(HostInput_MenuKeyboardIsActive() && !HostInput_KeyboardIsSuppressed());
+  g_settings.input_device = kInputDevice_Auto;
+  s_device_mode = kInputDevice_Gamepad;
+  s_pads = 0;
+  assert(HostInput_MenuKeyboardIsActive() && !HostInput_KeyboardIsSuppressed());
+  s_pads = 1;
+  s_device_mode = kInputDevice_Auto;
+
   /* Menus receive keys first; closing a menu releases held gameplay input. */
   s_overlay = true;
   s_close_menu = true;
@@ -528,6 +548,10 @@ int main(void) {
   assert(HostInput_TryHandleStreamEvent(&event, false));
   assert(s_keys == keys_before_stream + 3); /* Releases still get through. */
   s_overlay = true;
+  const int menu_keys_before_release = s_menu_keys;
+  assert(HostInput_HandleEvent(&event));
+  /* End a keyboard hold even during pad ownership. */
+  assert(s_menu_keys == menu_keys_before_release + 1);
   assert(!HostInput_TryHandleStreamEvent(&event, false));
   s_overlay = false;
   const int runner_reads = s_runner_camera_reads;
