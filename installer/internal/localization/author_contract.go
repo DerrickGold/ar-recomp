@@ -215,8 +215,9 @@ func authorProfile(profile string) bool {
 }
 
 type AuthorPlaceholder struct {
-	Name string `json:"name"`
-	Kind string `json:"kind"`
+	Name          string `json:"name"`
+	Kind          string `json:"kind"`
+	SourceMessage string `json:"source_message,omitempty"`
 }
 
 type AuthorReference struct {
@@ -249,7 +250,7 @@ func AuthorReferences(profile string) ([]AuthorReference, error) {
 		entry := AuthorReference{ID: route.ID, Anchors: append([]string{}, anchors...), NativeInProfile: native, RequiredForComplete: native && !route.Optional, Placeholders: []AuthorPlaceholder{}, Presentation: route.presentation(profile).detached()}
 		entry.USRuntimeUsage = route.USRuntimeUsage
 		for _, name := range route.Allowed {
-			entry.Placeholders = append(entry.Placeholders, AuthorPlaceholder{name, authorContracts.placeholders[name]})
+			entry.Placeholders = append(entry.Placeholders, AuthorPlaceholder{Name: name, Kind: authorContracts.placeholders[name], SourceMessage: AbilityNameSource(name)})
 		}
 		result = append(result, entry)
 	}

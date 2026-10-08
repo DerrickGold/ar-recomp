@@ -129,6 +129,7 @@ static int FormatLocalizationContent(char *buffer, int size, const void *field) 
 static const char *const kLocalizationPresentationLabels[] = {
   "Native", "Enhanced",
 };
+static const char *const kLocalizationButtonPromptLabels[] = {"Text", "Button glyphs"};
 static const char *const kLocalizationSamplingLabels[] = {"Crisp", "Smooth"};
 static const char *const kLocalizationPixelationLabels[] = {
   "None", "Low resolution", "Mosaic",
@@ -1253,6 +1254,13 @@ const SettingDesc g_setting_descs[] = {
     kLocalizationPresentationLabels, 2, TextPresentationSelectable, NULL, NULL,
     FormatLocalizationPresentation, true,
     .serialize = SerializeLocalizationPresentation },
+  { "localization_button_prompts", "AR_LOCALIZATION_BUTTON_PROMPTS", "Button prompts",
+    "Text displays the current binding as letters, preserving the game’s text style. "
+    "Button glyphs displays artwork for the active controller. Keyboard bindings use text. "
+    "Applies when the next dialogue begins.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Localization,
+    &g_settings.localization_button_prompts, 0, 0, 1, 1, false,
+    kLocalizationButtonPromptLabels, 2, EnhancedTextSelected, NULL, NULL, NULL, true },
   { "localization_font_scale_percent", "AR_LOCALIZATION_FONT_SCALE_PERCENT",
     "Font size (%)", "Enhanced text size. Layout fits within its safe box.",
     kSettingType_Int, kApply_Passive, kSettingCat_LocalizationFont,

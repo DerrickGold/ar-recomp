@@ -48,7 +48,7 @@ func playbackScenario(p, source *lk.AuthorPack, id string, given *textpreview.Sc
 			continue
 		}
 		for _, op := range ops {
-			if op.Op == "placeholder" {
+			if op.Op == "placeholder" && lk.AbilityNameSource(op.Name) == "" {
 				scenario.Values[op.Name] = playbackSample(p, source, id, kinds[op.Name])
 			}
 		}
@@ -120,6 +120,10 @@ func (work *localizationWork) playback(ctx context.Context, q localizationDraftR
 	sourceScenario, err := playbackScenario(source.Pack(), source.Pack(), q.ID, q.SourceScenario)
 	if err != nil {
 		return nil, err
+	}
+	if q.ButtonGlyphs != nil {
+		scenario.ButtonGlyphs = *q.ButtonGlyphs
+		sourceScenario.ButtonGlyphs = *q.ButtonGlyphs
 	}
 	// Each worker has its own immutable pack, fonts, reveal clock and output.
 	// A cancelled request kills both children without holding the editor lock.

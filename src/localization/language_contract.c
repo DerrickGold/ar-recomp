@@ -45,7 +45,7 @@ typedef struct ArGeneratedLegacyLayout {
 
 _Static_assert(ARRAY_COUNT(kGeneratedRoutes) == 602,
                "v1 semantic route count changed");
-_Static_assert(ARRAY_COUNT(kGeneratedPlaceholders) == 67,
+_Static_assert(ARRAY_COUNT(kGeneratedPlaceholders) == 102,
                "v1 placeholder count changed");
 
 static void SetError(ArLanguagePackError *error, const char *format, ...) {

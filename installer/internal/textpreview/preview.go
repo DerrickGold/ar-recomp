@@ -26,14 +26,15 @@ import (
 const maxResultBytes = 48 << 20
 
 type Scenario struct {
-	Page       uint32            `json:"page"`
-	Delay      uint32            `json:"delay"`
-	Size       uint32            `json:"size"`
-	Sampling   uint32            `json:"sampling"`
-	Pixelation uint32            `json:"pixelation"`
-	PixelSize  uint32            `json:"pixelSize"`
-	Values     map[string]string `json:"values"`
-	Inks       map[string]string `json:"inks"`
+	ButtonGlyphs bool              `json:"buttonGlyphs"`
+	Page         uint32            `json:"page"`
+	Delay        uint32            `json:"delay"`
+	Size         uint32            `json:"size"`
+	Sampling     uint32            `json:"sampling"`
+	Pixelation   uint32            `json:"pixelation"`
+	PixelSize    uint32            `json:"pixelSize"`
+	Values       map[string]string `json:"values"`
+	Inks         map[string]string `json:"inks"`
 }
 
 type Frame struct {
@@ -82,6 +83,24 @@ func Defaults() Scenario {
 
 // Samples are visible scenario inputs, never claims about the current game.
 func ValueSample(value lk.AuthorPlaceholder) string {
+	if name := lk.AbilityNameDefault(value.Name); name != "" {
+		return name
+	}
+	if strings.HasPrefix(value.Name, "icon.button.") {
+		key := strings.TrimPrefix(value.Name, "icon.button.")
+		symbols := map[string]string{"select": "back", "describe": "x"}
+		if symbol := symbols[key]; symbol != "" {
+			key = symbol
+		}
+		return "button.glyph.nintendo." + key
+	}
+	if strings.HasPrefix(value.Name, "button.") {
+		key := strings.TrimPrefix(value.Name, "button.")
+		if key == "describe" {
+			return "X"
+		}
+		return strings.ToUpper(key)
+	}
 	switch value.Kind {
 	case "number":
 		return "123"
@@ -103,6 +122,24 @@ func ValueSample(value lk.AuthorPlaceholder) string {
 	return "Sample"
 }
 
+func buttonGlyphText(value string) string {
+	if !strings.HasPrefix(value, "button.glyph.") {
+		return value
+	}
+	parts := strings.Split(value, ".")
+	if len(parts) != 4 {
+		return value
+	}
+	names := map[string]string{"cross": "Cross", "circle": "Circle", "square": "Square", "triangle": "Triangle",
+		"back": "Select", "start": "Start", "guide": "Home", "up": "Up", "down": "Down", "left": "Left", "right": "Right",
+		"left_stick": "LS", "right_stick": "RS"}
+	label := names[parts[3]]
+	if label == "" {
+		label = strings.ToUpper(parts[3])
+	}
+	return "text:" + label
+}
+
 func encodeScenario(s Scenario) ([]byte, error) {
 	if s.Page >= 64 || s.Delay > 9 || s.Size < 80 || s.Size > 140 || s.Size%5 != 0 || s.Sampling > 1 || s.Pixelation > 2 ||
 		(s.Pixelation == 0 && s.PixelSize != 0) || (s.Pixelation != 0 && s.PixelSize != 2 && s.PixelSize != 4 && s.PixelSize != 6 && s.PixelSize != 8) || len(s.Values) > 32 {
@@ -120,7 +157,11 @@ func encodeScenario(s Scenario) ([]byte, error) {
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		for i, value := range []string{key, s.Values[key]} {
+		value := s.Values[key]
+		if !s.ButtonGlyphs && strings.HasPrefix(key, "icon.button.") {
+			value = buttonGlyphText(value)
+		}
+		for i, value := range []string{key, value} {
 			limit := 1023
 			if i == 0 {
 				limit = 127

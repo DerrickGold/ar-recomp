@@ -517,11 +517,11 @@ func TestLocalizationGUIRetailExtraction(t *testing.T) {
 		messages      int
 		hud           [5]string
 	}{
-		{"ar.sfc", "us", 527, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
-		{"ar-eu.sfc", "eu-en", 528, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
-		{"ar-ger.sfc", "de", 528, [5]string{"ACT", "FEIND", "SPIELER", "PUNKTE", "ZEIT"}},
-		{"ar-fra.sfc", "fr", 526, [5]string{"ACT", "ENNEMI", "JOUEUR", "SCORE", "TEMPS"}},
-		{"ar-jp.sfc", "jp", 524, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
+		{"ar.sfc", "us", 565, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
+		{"ar-eu.sfc", "eu-en", 530, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
+		{"ar-ger.sfc", "de", 530, [5]string{"ACT", "FEIND", "SPIELER", "PUNKTE", "ZEIT"}},
+		{"ar-fra.sfc", "fr", 528, [5]string{"ACT", "ENNEMI", "JOUEUR", "SCORE", "TEMPS"}},
+		{"ar-jp.sfc", "jp", 526, [5]string{"ACT", "ENEMY", "PLAYER", "SCORE", "TIME"}},
 	} {
 		t.Run(tc.profile, func(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join(root, tc.file))
@@ -603,6 +603,7 @@ func TestLocalizationGUIRetailExtraction(t *testing.T) {
 	q = locIdentity(app)
 	q.ConfirmRights = true
 	locJSON(t, app, "publish", q, 200)
+	q.ConfirmRights = false
 	locJSON(t, app, "install", q, 200)
 }
 

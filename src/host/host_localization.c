@@ -8,6 +8,7 @@
 #include "actraiser/actraiser_localization_runtime.h"
 #include "actraiser/regional/actraiser_regional_media.h"
 #include "app/settings.h"
+#include "app/input_map.h"
 #include "host/font_resources.h"
 #include "host/host_video.h"
 #include "host/regional_media_files.h"
@@ -161,6 +162,7 @@ void HostLocalization_Install(bool headless) {
       .legacy_pack = ExplainLegacyLanguagePack,
   };
   ActRaiserLocalizationRuntime_SetPackHost(&pack_host);
+  ActRaiserLocalizationRuntime_SetButtonPromptHost(InputMap_CaptureButtonPrompts, NULL);
   const ArTextPresentationHost text_host = {
       .struct_size = sizeof(text_host),
       .abi_version = AR_TEXT_PRESENTATION_ABI_VERSION,
@@ -227,6 +229,7 @@ void HostLocalization_Shutdown(void) {
   ActRaiserLocalizationRuntime_Shutdown();
   ActRaiserLocalizationRuntime_SetPresentationHost(NULL);
   ActRaiserLocalizationRuntime_SetPackHost(NULL);
+  ActRaiserLocalizationRuntime_SetButtonPromptHost(NULL, NULL);
 }
 
 void HostLocalization_ReleaseFonts(void) {

@@ -1,6 +1,7 @@
 #include "snesrecomp/support/utf8_fs.h"
 
 #include "platform/sdl/text_preview_cli.h"
+#include "localization/ability_name.h"
 
 #include <SDL3/SDL.h>
 #include <errno.h>
@@ -161,13 +162,29 @@ static void JsonString(FILE *out, const char *value) {
 static bool Resolve(void *context, const char *name,
                     ArLanguagePlaceholderKind kind, ArDialogueValue *value,
                     char *error, size_t capacity) {
-  PreviewInput *input = context;
+  Preview *preview = context;
+  PreviewInput *input = &preview->input;
+  if (ArAbilityName_Find(name)) {
+    memset(value,0,sizeof(*value)); value->kind=kind;
+    return kind==kArLanguagePlaceholder_LocalizedText && ArAbilityName_Copy(
+        &preview->pack,&preview->fallback,name,value->text,sizeof(value->text));
+  }
   for (uint32_t i = 0; i < input->count; ++i) {
     if (strcmp(name, input->values[i].name))
       continue;
     if (kind != input->values[i].kind)
       return false;
     *value = input->values[i];
+    return true;
+  }
+  /* Common button values need no scenario field when unused. Used values
+   * normally arrive from the editor; standalone workers retain SNES defaults. */
+  bool icon=false;
+  const int button=ArButtonPrompt_Index(name,&icon);
+  if (button>=0) {
+    ArButtonPrompts prompts; ArButtonPrompts_Default(&prompts);
+    memset(value,0,sizeof(*value)); value->kind=kind;
+    snprintf(value->text,sizeof(value->text),"%s",icon?prompts.buttons[button].icon:prompts.buttons[button].label);
     return true;
   }
   snprintf(error, capacity, "Supply a preview scenario value for %s", name);
@@ -296,7 +313,7 @@ static bool Begin(Preview *p, const char *manifest, const char *fallback,
   ArDialogueValueResolver resolver = {
       .struct_size = sizeof(resolver),
       .abi_version = AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,
-      .context = &p->input,
+      .context = p,
       .resolve = Resolve};
   if (!ArDialogueSession_BeginSource(&p->session, &source, &contract, id,
                                      &resolver,
@@ -366,14 +383,14 @@ static bool BuildDialogueFrame(Preview *p, const ArDialoguePageSnapshot *page) {
       : page->direction == kArLanguageDirection_LeftToRight
           ? kArTextDirection_LeftToRight
           : kArTextDirection_Auto;
-  return ArLocalizationFrame_AddStructuredDialogueWindow(
+  return ArLocalizationFrame_AddStructuredDialogueWindowWithObjects(
              &p->frame, 1,
              (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
              p->region, w->text, w->bytes,
              ActRaiserDialogueWindow_RevealedBytes(w,
                                                    page->revealed_utf8_bytes),
              w->clusters, page->source_revision, direction,
-             p->native_font_pixels, w->structural_boundaries) &&
+             p->native_font_pixels, w->structural_boundaries,w->inline_objects,w->inline_object_count) &&
          PublishAppearance(p, page, &w->bidi, &w->styles);
 }
 

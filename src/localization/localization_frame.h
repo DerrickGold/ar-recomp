@@ -16,7 +16,9 @@
 #include "localization/text_cell_record.h"
 #include "localization/text_boundaries.h"
 
-#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(34)
+#include "localization/button_prompt.h"
+
+#define AR_LOCALIZATION_FRAME_ABI_VERSION UINT32_C(35)
 
 enum {
   kArLocalizationFrameTextCapacity = 16 * 1024,
@@ -88,12 +90,14 @@ typedef enum ArLocalizationInlineObjectKind {
   kArLocalizationInlineObject_StatusPopulation,
   kArLocalizationInlineObject_SpeedDirection,
   kArLocalizationInlineObject_NameFieldUnderline,
+  kArLocalizationInlineObject_Button,
 } ArLocalizationInlineObjectKind;
 
 typedef struct ArLocalizationInlineObjectSnapshot {
   ArLocalizationInlineObjectKind kind;
   /* UTF-8 byte offset immediately after the width-reserving shaped cluster. */
   uint32_t end_utf8_byte;
+  ArButtonGlyph button;
 } ArLocalizationInlineObjectSnapshot;
 
 /* How the renderer presents a surface. These are rendering shapes, not game
@@ -370,6 +374,15 @@ bool ArLocalizationFrame_AddStructuredDialogueWindow(
     uint32_t cluster_count, uint64_t source_revision,
     ArTextDirection direction, uint8_t native_font_pixels,
     const uint8_t *structural_boundaries);
+bool ArLocalizationFrame_AddStructuredDialogueWindowWithObjects(
+    ArLocalizationFrame *frame, uint32_t surface_id,
+    ArTextCellDestination destination, ArTextCellRegion region,
+    const char *utf8, size_t utf8_bytes, uint32_t revealed_utf8_bytes,
+    uint32_t cluster_count, uint64_t source_revision,
+    ArTextDirection direction, uint8_t native_font_pixels,
+    const uint8_t *structural_boundaries,
+    const ArLocalizationInlineObjectSnapshot *objects,uint8_t object_count);
+
 bool ArLocalizationFrame_SetFont(ArLocalizationFrame *frame,
                                  const char *locale,
                                  const char *font_stack_id,
@@ -430,6 +443,15 @@ bool ArLocalizationFrame_AddScreenText(
     uint32_t revealed_cluster_count, uint32_t cluster_count,
     uint64_t source_revision, ArTextDirection direction,
     uint8_t native_font_pixels, ArLocalizationTextLayoutKind layout);
+bool ArLocalizationFrame_AddScreenTextWithObjects(
+    ArLocalizationFrame *frame, uint32_t surface_id,
+    uint16_t x, uint16_t y, uint16_t width, uint16_t height,
+    const char *utf8, size_t utf8_bytes,
+    uint32_t revealed_cluster_count, uint32_t cluster_count,
+    uint64_t source_revision, ArTextDirection direction,
+    uint8_t native_font_pixels, ArLocalizationTextLayoutKind layout,
+    const ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count);
+
 /* Grid layouts publish their own cell geometry: the renderer positions cells
  * from `grid` and never needs to know which menu it is drawing. The grid is
  * copied and interned; identical grids share one table entry. Boundaries are

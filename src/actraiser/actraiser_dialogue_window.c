@@ -39,6 +39,7 @@ bool ActRaiserDialogueWindow_Build(ActRaiserDialogueWindow *window,
   if (first_page > current->page_index)
     first_page = current->page_index;
   window->bytes = 0;
+  window->inline_object_count = 0;
   memset(window->structural_boundaries, 0,
          sizeof(window->structural_boundaries));
   window->bidi.count = 0;
@@ -58,10 +59,21 @@ bool ActRaiserDialogueWindow_Build(ActRaiserDialogueWindow *window,
     const size_t offset = window->bytes;
     size_t bytes = 0;
     uint8_t object_count = 0;
+    ArDialogueInlineObject source_objects[kArLocalizationFrameInlineObjectCapacity];
+    size_t source_object_count=0;
+    for (size_t i=0;i<page.inline_object_count;++i) {
+      ArDialogueInlineObject object=page.inline_objects[i];
+      if (object.end_utf8_byte<=source_offset) continue;
+      if (source_object_count>=kArLocalizationFrameInlineObjectCapacity) return false;
+      object.end_utf8_byte-=source_offset;
+      source_objects[source_object_count++]=object;
+    }
     if (!ActRaiserLocalizationText_Normalize(
-            page.utf8 + source_offset, page.utf8_bytes - source_offset, NULL, 0,
+            page.utf8 + source_offset, page.utf8_bytes - source_offset, source_objects, source_object_count,
             true, window->text + offset, sizeof(window->text) - offset, &bytes,
-            NULL, 0, &object_count, window->reveal_offsets) ||
+            window->inline_objects+window->inline_object_count,
+            kArLocalizationFrameInlineObjectCapacity-window->inline_object_count,
+            &object_count, window->reveal_offsets) ||
         !ActRaiserLocalizationText_MapBidiSpans(
             page.bidi_spans, page.bidi_span_count, source_offset,
             page.utf8_bytes - source_offset, window->reveal_offsets,
@@ -83,6 +95,9 @@ bool ActRaiserDialogueWindow_Build(ActRaiserDialogueWindow *window,
         ArTextBoundary_Set(window->structural_boundaries, offset + mapped,
                            true);
     }
+    for (uint8_t i=0;i<object_count;++i)
+      window->inline_objects[window->inline_object_count+i].end_utf8_byte+=(uint32_t)offset;
+    window->inline_object_count+=object_count;
     window->bytes += bytes;
     if (index == current->page_index) {
       window->current_page_offset = offset;

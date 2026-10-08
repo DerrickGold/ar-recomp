@@ -21,6 +21,8 @@ typedef struct ActRaiserDialogueWindow {
   uint8_t structural_boundaries[AR_TEXT_BOUNDARY_BYTES(
       kArLocalizationFrameTextCapacity)];
   uint32_t clusters;
+  ArLocalizationInlineObjectSnapshot inline_objects[kArLocalizationFrameInlineObjectCapacity];
+  uint8_t inline_object_count;
   char text[kArLocalizationFrameTextCapacity];
 } ActRaiserDialogueWindow;
 

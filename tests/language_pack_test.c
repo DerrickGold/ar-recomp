@@ -659,7 +659,7 @@ static void TestSemanticContracts(void) {
   CHECK(ArLanguageContract_RouteAvailable("dialogue.offering.slot_20",
                                           kArLanguageSourceProfile_Japanese));
   CHECK(ArLanguageContract_AllowedPlaceholderCount("dialogue.event.wrapper_00.call_03.source_00") ==
-        2);
+        28);
   CHECK(ArLanguageContract_PlaceholderKind("town_name") == kArLanguagePlaceholder_LocalizedText);
   CHECK(ArLanguageContract_PlaceholderKind("lair_count") == kArLanguagePlaceholder_Number);
   CHECK(ArLanguageContract_PlaceholderKind("not_a_value") == kArLanguagePlaceholder_Unknown);

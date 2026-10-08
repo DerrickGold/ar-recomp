@@ -1,6 +1,8 @@
 #include "actraiser/actraiser_dialogue_adapter.h"
 #include "fixtures/keyboard_body.h"
 #include "localization/language_contract.h"
+#include "localization/button_prompt.h"
+#include "localization/ability_name.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -480,6 +482,15 @@ static bool ResolveValue(void *context, const char *name, ArLanguagePlaceholderK
   ResolverState *state = (ResolverState *)context;
   state->calls++;
   value->kind = expected;
+  bool icon=false; int index=ArButtonPrompt_Index(name,&icon);
+  if (index>=0) {
+    ArButtonPrompts prompts; ArButtonPrompts_Default(&prompts);
+    snprintf(value->text,sizeof(value->text),"%s",icon?prompts.buttons[index].icon:prompts.buttons[index].label);
+    return true;
+  }
+  if (ArAbilityName_Find(name)) {
+    return ArAbilityName_Copy(NULL,NULL,name,value->text,sizeof(value->text));
+  }
   if (strcmp(name, "master_name") == 0) {
     snprintf(value->text, sizeof(value->text), "%s",
              state->master_name ? state->master_name : "Élise");
@@ -792,7 +803,7 @@ static void TestControlsValuesAndIcons(void) {
   ArDialogueSession_Init(&session);
   CHECK(ArDialogueSession_Begin(&session, &first_selection, "sky.action_mode.confirm", &resolver,
                                 &error));
-  CHECK(resolver_state.calls == 1);
+  CHECK((uint32_t)resolver_state.calls == ArLanguageContract_AllowedPlaceholderCount("sky.action_mode.confirm"));
   ArDialogueToken token;
   CHECK(ArDialogueSession_Next(&session, &token, &error));
   CHECK(token.kind == kArDialogueToken_Control);
@@ -802,7 +813,7 @@ static void TestControlsValuesAndIcons(void) {
   /* Switching before native execution/acknowledgement must not lose the
    * pending control. */
   CHECK(ArDialogueSession_Switch(&session, &second_selection, &error));
-  CHECK(resolver_state.calls == 1);
+  CHECK((uint32_t)resolver_state.calls == ArLanguageContract_AllowedPlaceholderCount("sky.action_mode.confirm"));
   CHECK(ArDialogueSession_Next(&session, &token, &error));
   CHECK(token.kind == kArDialogueToken_Control && token.control_ordinal == 0);
   ArDialogueStableState pending;
@@ -1110,13 +1121,35 @@ static void TestPresentationBudget(void) {
   ArDialogueSession_Init(&session);
   CHECK(!ArDialogueSession_BeginBounded(&session, &selection, "sky.action_mode.confirm", &resolver,
                                         1, &error));
-  CHECK(strstr(error.message, "presentation budget") && state.calls == 1);
+  CHECK(strstr(error.message, "presentation budget") && (uint32_t)state.calls == ArLanguageContract_AllowedPlaceholderCount("sky.action_mode.confirm"));
   CHECK(!session.state.message_id[0] && !session.state.wait_frames_remaining);
   ArDialogueSession_Destroy(&session);
   ArLanguagePack_Destroy(&pack);
 }
 
+static void TestAbilityNameSnapshot(void) {
+  ArLanguagePack pack;ArLanguagePack_Init(&pack);ArLanguagePackError error={{0}};
+  CHECK(LoadPackVersion(&pack,"ability.snapshot","fr",
+      ":: sim.menu.lightning\nTempête\n@end\n"
+      ":: sim.help.category.2\nName {miracle.lightning.name}.\n@end\n",2,&error));
+  const ArDialogueSource source={.effective_pack=&pack,
+      .message=ArLanguagePack_FindMessage(&pack,"sim.help.category.2"),
+      .resolved_source=kArDialogueResolvedSource_SelectedPack,.presentation=kArDialoguePresentation_Enhanced};
+  ArDialogueContract contract={.value_count=1};
+  snprintf(contract.values[0].name,sizeof(contract.values[0].name),"miracle.lightning.name");
+  contract.values[0].kind=kArLanguagePlaceholder_LocalizedText;
+  ArDialogueSession session;ArDialogueSession_Init(&session);
+  CHECK(ArDialogueSession_BeginSource(&session,&source,&contract,"sim.help.category.2",NULL,16384,&error));
+  ArLanguagePack_Destroy(&pack);
+  ArDialoguePageSnapshot page;
+  CHECK(ArDialogueSession_GetPage(&session,&page));
+  CHECK(!strcmp(page.utf8,"Name Tempête."));
+  CHECK(page.bidi_span_count==1);
+  ArDialogueSession_Destroy(&session);
+}
+
 int main(void) {
+  TestAbilityNameSnapshot();
   TestOptionalHudRoute();
   TestPresentationBudget();
   TestLongerShorterAndNativeSwitch();

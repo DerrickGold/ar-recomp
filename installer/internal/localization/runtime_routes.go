@@ -148,10 +148,9 @@ func (d *Decoder) USRuntimeDialogueRoutes() (IRObject, error) {
 				width = 4
 			}
 			r.caller, r.context = wrapperCalls[forwardedIndex]+3, forwardedCall+width
-			r.city = slices.Index(cities, route.ID[strings.LastIndexByte(route.ID, '.')+1:]) + 1
-			if r.city == 0 {
-				return nil, fmt.Errorf("unknown relay city")
-			}
+			// These six calls test development-condition bits and can run in
+			// any town. Keep the historical IDs, but match by source/context
+			// rather than interpreting their ordinal town suffix as a guard.
 		case strings.HasPrefix(route.ID, "dialogue.event.wrapper_"):
 			index, err := strconv.Atoi(strings.Split(strings.TrimPrefix(route.ID, "dialogue.event.wrapper_"), ".")[0])
 			if err != nil || index < 0 || index >= len(wrappers) {

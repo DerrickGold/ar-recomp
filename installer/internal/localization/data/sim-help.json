@@ -1,0 +1,146 @@
+[
+  {
+    "id": "sim.help.category.0",
+    "text": "Return to the Sky Palace or move the palace to another region."
+  },
+  {
+    "id": "sim.help.category.1",
+    "text": "Guide the development of your people, or listen to their requests."
+  },
+  {
+    "id": "sim.help.category.2",
+    "text": "Use SP to perform a miracle. Press {icon.button.describe} to describe a miracle without using it."
+  },
+  {
+    "id": "sim.help.category.3",
+    "text": "Receive offerings at the cathedral, or choose an offering you already hold to use."
+  },
+  {
+    "id": "sim.help.category.4",
+    "text": "View the status of the Master or compare the cities."
+  },
+  {
+    "id": "sim.help.category.5",
+    "text": "Record your progress or adjust the speed of messages."
+  },
+  {
+    "id": "sim.help.action.01",
+    "text": "Leave the town and return to the Sky Palace."
+  },
+  {
+    "id": "sim.help.action.02",
+    "text": "Enter the world view to move the Sky Palace to another region."
+  },
+  {
+    "id": "sim.help.action.03",
+    "text": "Choose a direction for your people to develop. Select the next part of town where you want them to build."
+  },
+  {
+    "id": "sim.help.action.04",
+    "text": "Listen to the current message or request from your people."
+  },
+  {
+    "id": "sim.help.action.10",
+    "text": "Visit the cathedral to receive an offering from your people. Choose what to take from the offerings available there."
+  },
+  {
+    "id": "sim.help.action.11",
+    "text": "Choose an offering you hold. Some take effect after a message; others ask you to choose a place in town."
+  },
+  {
+    "id": "sim.help.action.12",
+    "text": "View the level, life, magic and possessions of the Master."
+  },
+  {
+    "id": "sim.help.action.13",
+    "text": "View the cities and their populations."
+  },
+  {
+    "id": "sim.help.action.14",
+    "text": "Record your progress and choose whether to continue playing."
+  },
+  {
+    "id": "sim.help.action.15",
+    "text": "Choose how quickly messages appear."
+  },
+  {
+    "id": "sim.help.item.01",
+    "text": "Use this magic during action stages. It cannot be used from the offering menu in town."
+  },
+  {
+    "id": "sim.help.item.02",
+    "text": "Use this magic during action stages. It cannot be used from the offering menu in town."
+  },
+  {
+    "id": "sim.help.item.03",
+    "text": "Use this magic during action stages. It cannot be used from the offering menu in town."
+  },
+  {
+    "id": "sim.help.item.04",
+    "text": "Use this magic during action stages. It cannot be used from the offering menu in town."
+  },
+  {
+    "id": "sim.help.item.05",
+    "text": "Increases the maximum life of the Master when received."
+  },
+  {
+    "id": "sim.help.item.06",
+    "text": "Increases the magic of the Master when received."
+  },
+  {
+    "id": "sim.help.item.07",
+    "text": "Choose a place in town to offer bread. It is used only at a suitable location. Cancelling the selection leaves it in your inventory."
+  },
+  {
+    "id": "sim.help.item.08",
+    "text": "Choose a place in town to plant wheat. The selected terrain and the situation in town determine whether it can be planted. An invalid place or cancellation leaves the offering in your inventory."
+  },
+  {
+    "id": "sim.help.item.09",
+    "text": "Use the herb in the town where it is needed. Your people will explain its effect before using it."
+  },
+  {
+    "id": "sim.help.item.10",
+    "text": "Help your people build a bridge. It can be used when the town needs this help."
+  },
+  {
+    "id": "sim.help.item.11",
+    "text": "Play music for your people. Its effect depends on the current situation in town."
+  },
+  {
+    "id": "sim.help.item.12",
+    "text": "Keep this ancient tablet among your possessions. It has no effect when used directly in town."
+  },
+  {
+    "id": "sim.help.item.13",
+    "text": "Give this ancient tablet to your people. Their message will explain its effect."
+  },
+  {
+    "id": "sim.help.item.14",
+    "text": "Choose a lair in town for the effect of the skull. Cancelling the selection leaves it in your inventory."
+  },
+  {
+    "id": "sim.help.item.15",
+    "text": "Give the fleece to your people to trigger its effect in town."
+  },
+  {
+    "id": "sim.help.item.16",
+    "text": "Keep this bomb among your possessions. It cannot be used directly in town."
+  },
+  {
+    "id": "sim.help.item.17",
+    "text": "Keep this bomb among your possessions. It cannot be used directly in town."
+  },
+  {
+    "id": "sim.help.item.18",
+    "text": "Use this bomb against the monsters in town. It takes effect immediately and is consumed when used."
+  },
+  {
+    "id": "sim.help.item.19",
+    "text": "Use the compass in the town where it is needed."
+  },
+  {
+    "id": "sim.help.item.20",
+    "text": "Strengthen the angel for combat. The offering is consumed as its effect is applied."
+  }
+]

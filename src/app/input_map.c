@@ -544,6 +544,8 @@ int InputMap_GameActionHint(char *buffer, int buffer_size, InputAction action) {
   return InputMap_ActionHintForDevice(buffer, buffer_size, action, s_hint_class);
 }
 
+#include "app/input_button_prompts.inc"
+
 static bool EqualsIgnoreCase(const char *a, const char *b) {
   for (; *a && *b; a++, b++) {
     char ca = *a >= 'A' && *a <= 'Z' ? (char)(*a + 32) : *a;

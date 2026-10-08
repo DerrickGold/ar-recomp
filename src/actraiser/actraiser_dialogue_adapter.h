@@ -48,4 +48,6 @@ bool ArDialogueSession_Restore(ArDialogueSession *session,
                                const ArDialogueValueResolver *resolver,
                                ArLanguagePackError *error);
 
+bool ActRaiserDialogue_RouteContract(const char *id, ArDialogueContract *contract, ArLanguagePackError *error);
+
 #endif

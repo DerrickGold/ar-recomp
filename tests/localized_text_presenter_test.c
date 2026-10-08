@@ -538,6 +538,56 @@ static void ExerciseScreenText(ArRenderDevice *device) {
   CHECK(!ArLocalizedTextPresenter_PrepareScreenText(device, &blank, 99, bounds, &prepared));
 }
 
+static void ExerciseScreenButtonGlyphs(ArRenderDevice *device) {
+  test_case = "screen-space Help and labels retain button artwork";
+  const char text[] = "Press \xe2\x80\x83 then \xe2\x80\x83";
+  const ArLocalizationInlineObjectSnapshot objects[] = {
+      {.kind = kArLocalizationInlineObject_Button, .end_utf8_byte = 9,
+       .button = {kArButtonGlyphFamily_Xbox, kArButtonGlyphSymbol_A}},
+      {.kind = kArLocalizationInlineObject_Button, .end_utf8_byte = 18,
+       .button = {kArButtonGlyphFamily_PlayStation, kArButtonGlyphSymbol_Cross}}};
+  const ArLocalizationTextLayoutKind layouts[] = {
+      kArLocalizationTextLayout_DialogueWindow, kArLocalizationTextLayout_SingleLineLabel};
+  for (size_t layout = 0; layout < 3; ++layout) {
+    for (unsigned visible = 0; visible <= 2; ++visible) {
+      ArLocalizationFrame frame;
+      ArLocalizationFrame_Reset(&frame);
+      CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", s_test_font, 1, &frame.settings));
+      const unsigned clusters = visible == 0 ? 6 : visible == 1 ? 7 : 14;
+      if (layout < 2)
+        CHECK(ArLocalizationFrame_AddScreenTextWithObjects(
+            &frame, 700, 40, 156, 176, 56, text, sizeof(text) - 1, clusters, 14, 1,
+            kArTextDirection_LeftToRight, 7, layouts[layout], objects, 2));
+      else
+        CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(
+            &frame, 700, (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+            (ArTextCellRegion){5, 19, 22, 6}, text, sizeof(text) - 1, clusters, 14, 1,
+            kArTextDirection_LeftToRight, 7, kArLocalizationTextLayout_SingleLineLabel,
+            NULL, 0, objects, 2));
+      frame.snapshots[0].revealed_utf8_bytes = visible == 0 ? 6 : visible == 1 ? 9 : 18;
+      ArLocalizedPreparedFrame prepared;
+      if (layout < 2)
+        CHECK(ArLocalizedTextPresenter_PrepareScreenText(
+            device, &frame, 700, (ArRenderRectI){120, 468, 528, 168}, &prepared));
+      else {
+        const HudPresentationChunk chunk = {
+            .inspector_kind = kInspectorPresentation_HudBg,
+            .screen_source = {0, 0, 256, 224}, .texture_source = {0, 0, 256, 224},
+            .output_destination = {0, 0, 768, 672}};
+        ArLocalizedTextPresenter_Prepare(device, &frame, true, 0, 32, 32, 0, 0, 256, 224,
+                                        &chunk, 1, &prepared);
+      }
+      CHECK(prepared.text_count == 1 && prepared.inline_object_count == visible);
+      for (unsigned i = 0; i < prepared.inline_object_count; ++i) {
+        CHECK(ArRenderTexture_IsValid(prepared.inline_objects[i].texture));
+        CHECK(prepared.inline_objects[i].destination.w > 0);
+        CHECK(prepared.inline_objects[i].destination.h > 0);
+      }
+      CHECK(ArLocalizedTextPresenter_Draw(device, &prepared));
+    }
+  }
+}
+
 static void ExerciseRetainedDialogue(ArRenderDevice *device) {
   test_case = "retained dialogue scrolls only with new reveal";
   const char history[] = "First retained line.\nSecond retained line.\nThird retained line.\n";
@@ -2028,6 +2078,7 @@ int main(void) {
   ExerciseRtlDialogue(&device);
   ExerciseLabelBreaks(&device);
   ExerciseScreenText(&device);
+  ExerciseScreenButtonGlyphs(&device);
   ExerciseScreenDialogue(&device);
   ExerciseRetainedDialogue(&device);
   const int sizes[] = {80, 110, 140};

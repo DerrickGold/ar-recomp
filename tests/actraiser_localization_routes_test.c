@@ -172,15 +172,26 @@ int main(void) {
   observation.context_pc24 = 0x0185DA;
   CHECK(ActRaiserLocalizationRoute_ResolveDialogue(&observation));
 
-  /* Relay routes share wrapper context and use the current town identity. */
-  observation = Observation(0x0492E2, 0x019390);
+  /* Development reasons share wrapper context and are valid in every town.
+   * The historical translation-ID suffixes do not describe map ownership. */
+  const uint32_t relay_sources[] = {0x0492E2, 0x0492F4, 0x049308,
+                                    0x04931E, 0x04932E, 0x049347};
+  const char *const relay_ids[] = {"dialogue.event.relay.fillmore",
+      "dialogue.event.relay.bloodpool", "dialogue.event.relay.kasandora",
+      "dialogue.event.relay.aitos", "dialogue.event.relay.marahna",
+      "dialogue.event.relay.northwall"};
+  for (unsigned reason = 0; reason < 6; ++reason) {
+    for (unsigned town = 1; town <= 6; ++town) {
+      observation = Observation(relay_sources[reason], 0x019390);
+      observation.context_pc24 = 0x03868B;
+      observation.map_number = town;
+      route = ActRaiserLocalizationRoute_ResolveDialogue(&observation);
+      CHECK(route && !strcmp(route->semantic_id, relay_ids[reason]));
+    }
+    observation.context_pc24 = 0;
+    CHECK(!ActRaiserLocalizationRoute_ResolveDialogue(&observation));
+  }
   observation.context_pc24 = 0x03868B;
-  observation.map_number = 1;
-  route = ActRaiserLocalizationRoute_ResolveDialogue(&observation);
-  CHECK(route && !strcmp(route->semantic_id,
-                          "dialogue.event.relay.fillmore"));
-  observation.map_number = 2;
-  CHECK(!ActRaiserLocalizationRoute_ResolveDialogue(&observation));
 
   observation.map_group = 1;
   CHECK(!ActRaiserLocalizationRoute_ResolveDialogue(&observation));

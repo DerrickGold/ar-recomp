@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/DerrickGold/ar-recomp/installer/internal/texttemplate"
 )
@@ -83,7 +84,8 @@ func InstallNativeUSSource(directory string, pack *AuthorPack) (*AuthorPack, err
 	} else if old != nil {
 		var supplemental []AuthorMessage
 		for _, route := range authorContracts.ordered {
-			if view, found := old.workspace.Message(route.ID); found && view.Present {
+			if view, found := old.workspace.Message(route.ID); found && view.Present &&
+				!strings.HasPrefix(route.ID, "dialogue.event.relay.") {
 				continue
 			}
 			if view, found := pack.workspace.Message(route.ID); !found || !view.Present {
@@ -114,8 +116,25 @@ func InstallNativeUSSource(directory string, pack *AuthorPack) (*AuthorPack, err
 
 func supplementNativeUSSource(directory string, old *AuthorPack, supplemental ...AuthorMessage) (*AuthorPack, error) {
 	pack := old
-	for _, label := range append(append(append(nativeHUDLabels("us"), nativeHUDValues()...), nativeWorldLabel()), supplemental...) {
+	for _, label := range append(append(append(append(nativeHUDLabels("us"), nativeHUDValues()...), nativeWorldLabel()), nativeHelpMessages()...), supplemental...) {
 		if view, found := pack.workspace.Message(label.ID); found && view.Present {
+			if strings.HasPrefix(label.ID, "dialogue.event.relay.") {
+				original, err := pack.ResolvedMessage(label.ID)
+				if err != nil {
+					return nil, err
+				}
+				if changed, ok := nativeRelaySpacingUpgrade(original, label); ok {
+					script, err := EmitAuthorScriptVersion([]AuthorMessage{changed}, "native-spacing.artext", pack.manifest.Version())
+					if err != nil {
+						return nil, err
+					}
+					body, _ := script.Body(label.ID)
+					pack, err = pack.EditMessage(label.ID, body, view.Status)
+					if err != nil {
+						return nil, err
+					}
+				}
+			}
 			continue
 		}
 		if pack.manifest.Version() == 2 {
@@ -135,6 +154,32 @@ func supplementNativeUSSource(directory string, old *AuthorPack, supplemental ..
 			body, TranslationNotStarted)
 		if err != nil {
 			return nil, err
+		}
+	}
+	for _, route := range authorContracts.ordered {
+		id := route.ID
+		if id != "dialogue.event.wrapper_05.call_00.source_00" && id != "title.start_prompt" &&
+			!slices.ContainsFunc(route.Allowed, func(name string) bool { return AbilityNameSource(name) != "" }) {
+			continue
+		}
+		if view, found := pack.workspace.Message(id); found && view.Present {
+			message, err := pack.ResolvedMessage(id)
+			if err != nil {
+				return nil, err
+			}
+			changed := nativeAbilityReferences(nativeButtonReferences(message.Operations, id), id)
+			if !slices.EqualFunc(changed, message.Operations, func(a, b AuthorOperation) bool { return a == b }) {
+				message.Operations = changed
+				script, err := EmitAuthorScriptVersion([]AuthorMessage{message}, "native-references.artext", pack.manifest.Version())
+				if err != nil {
+					return nil, err
+				}
+				body, _ := script.Body(id)
+				pack, err = pack.EditMessage(id, body, view.Status)
+				if err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 	if pack.manifest.Version() == 1 {
@@ -157,6 +202,42 @@ func supplementNativeUSSource(directory string, old *AuthorPack, supplemental ..
 		return nil, err
 	}
 	return OpenNativeUSSource(directory)
+}
+
+// Repair only the old, single-run relay export when a fresh ROM extraction
+// supplies verified fragment separators. Preserve edited wording, explicit
+// layout, default appearance, inline treatment and translation progress.
+func nativeRelaySpacingUpgrade(original, fresh AuthorMessage) (AuthorMessage, bool) {
+	if len(original.Operations) != 2 || original.Operations[0].Op != "text" || original.Operations[1].Op != "end" {
+		return AuthorMessage{}, false
+	}
+	var joined strings.Builder
+	ops := slices.Clone(fresh.Operations)
+	for i := range ops {
+		switch ops[i].Op {
+		case "text":
+			joined.WriteString(ops[i].Value)
+			ops[i].Style = original.Operations[0].Style
+		case "preferred_line":
+		case "end":
+			ops[i] = original.Operations[1]
+		default:
+			return AuthorMessage{}, false
+		}
+	}
+	withoutSpaces := func(text string) string {
+		return strings.Map(func(r rune) rune {
+			if sourceSpace(r) {
+				return -1
+			}
+			return r
+		}, text)
+	}
+	if withoutSpaces(original.Operations[0].Value) != withoutSpaces(joined.String()) || slices.Equal(original.Operations, ops) {
+		return AuthorMessage{}, false
+	}
+	original.Operations = ops
+	return original, true
 }
 
 func addNativeTreatmentDefinitions(pack *AuthorPack, message AuthorMessage) (*AuthorPack, error) {

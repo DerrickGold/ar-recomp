@@ -1,4 +1,6 @@
 #include "localization/dialogue_session.h"
+#include "localization/button_prompt.h"
+#include "localization/ability_name.h"
 
 #include "localization/unicode_grapheme.h"
 
@@ -454,6 +456,12 @@ static bool AppendValue(const ArDialogueSource *source,
                               sizeof(formatted), &direction, error))
       return false;
     text = formatted;
+  } else if (value->kind == kArLanguagePlaceholder_Icon &&
+             !strncmp(value->text, "text:", 5)) {
+    /* The host has no artwork for this binding (for example a keyboard key).
+     * Keep its display name literal and isolated, just like a numeric value. */
+    text = value->text + 5;
+    direction = kArTextDirection_LeftToRight;
   } else if (value->kind == kArLanguagePlaceholder_Icon) {
     static const char replacement_object[] = "\xEF\xBF\xBC"; /* U+FFFC */
     if (!AppendBytes(page, replacement_object,
@@ -811,6 +819,7 @@ static bool ValidateSource(const ArDialogueSource *source,
 }
 
 static bool SnapshotValues(ArDialogueStableState *state,
+                           const ArDialogueSource *source,
                            const ArDialogueContract *contract,
                            const ArDialogueValueResolver *resolver,
                            ArLanguagePackError *error) {
@@ -819,17 +828,37 @@ static bool SnapshotValues(ArDialogueStableState *state,
     SetError(error, "%s requires too many dynamic values", state->message_id);
     return false;
   }
-  if (count &&
+  bool needs_resolver=false;
+  for (uint32_t i=0;i<count;++i) {
+    bool icon=false;
+    if (ArButtonPrompt_Index(contract->values[i].name,&icon)<0 &&
+        !ArAbilityName_Find(contract->values[i].name)) needs_resolver=true;
+  }
+  if (count && (resolver || needs_resolver) &&
       !ValidateResolver(resolver, true, error)) {
     SetError(error, "%s requires a dialogue value resolver", state->message_id);
     return false;
   }
+  ArButtonPrompts default_buttons;
+  if (!resolver) ArButtonPrompts_Default(&default_buttons);
   state->value_count = count;
   for (uint32_t i = 0; i < count; i++) {
     const char *name = contract->values[i].name;
     ArDialogueValue value = {0};
     const ArLanguagePlaceholderKind kind = contract->values[i].kind;
-    if (!resolver->resolve(resolver->context, name, kind, &value,
+    bool icon=false;
+    const int button=ArButtonPrompt_Index(name,&icon);
+    if (!resolver && button>=0) {
+      value.kind=icon ? kArLanguagePlaceholder_Icon : kArLanguagePlaceholder_LocalizedText;
+      snprintf(value.text,sizeof(value.text),"%s",icon?default_buttons.buttons[button].icon:default_buttons.buttons[button].label);
+    } else if (!resolver && ArAbilityName_Find(name)) {
+      value.kind=kArLanguagePlaceholder_LocalizedText;
+      if (!ArAbilityName_Copy(source ? source->effective_pack : NULL,
+              source ? source->term_fallback_pack : NULL,name,value.text,sizeof(value.text))) {
+        SetError(error,"%s: ability name '%s' is unavailable",state->message_id,name);
+        return false;
+      }
+    } else if (!resolver->resolve(resolver->context, name, kind, &value,
                            error ? error->message : NULL,
                            error ? sizeof(error->message) : 0)) {
       if (error && !error->message[0])
@@ -1168,7 +1197,7 @@ bool ArDialogueSession_BeginSource(ArDialogueSession *session,
   };
   if (!CopyBounded(stable.message_id, sizeof(stable.message_id), semantic_id,
                    "semantic message id", error) ||
-      !SnapshotValues(&stable, contract, resolver, error))
+      !SnapshotValues(&stable, source, contract, resolver, error))
     return false;
 
   ArDialogueSession scratch;

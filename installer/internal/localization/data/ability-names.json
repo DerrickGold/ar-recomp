@@ -1,0 +1,190 @@
+[
+  {
+    "placeholder": "miracle.earthquake.name",
+    "message_id": "sim.menu.earthquake",
+    "native_name": "Earthquake",
+    "patterns": [
+      "earthquake"
+    ],
+    "routes": [
+      "sim.miracle.earthquake.*",
+      "sim.help.category.2",
+      "simulation.event.kasandora.slot_27",
+      "simulation.event.kasandora.slot_28",
+      "simulation.event.kasandora.slot_29"
+    ]
+  },
+  {
+    "placeholder": "miracle.lightning.name",
+    "message_id": "sim.menu.lightning",
+    "native_name": "Lightning",
+    "patterns": [
+      "lightning\\s+bolt",
+      "lightning"
+    ],
+    "routes": [
+      "sim.miracle.lightning.*",
+      "sim.help.category.2",
+      "dialogue.offering.slot_00",
+      "simulation.event.aitos.slot_13",
+      "simulation.event.fillmore.slot_05",
+      "simulation.event.aitos.slot_14",
+      "simulation.event.aitos.slot_15",
+      "simulation.event.aitos.slot_16",
+      "simulation.event.aitos.slot_17",
+      "simulation.event.aitos.slot_18",
+      "simulation.event.aitos.slot_19",
+      "simulation.event.aitos.slot_20",
+      "simulation.event.aitos.slot_21",
+      "simulation.event.aitos.slot_22",
+      "simulation.event.aitos.slot_23",
+      "simulation.event.aitos.slot_24"
+    ]
+  },
+  {
+    "placeholder": "miracle.rain.name",
+    "message_id": "sim.menu.rain",
+    "native_name": "Rain",
+    "patterns": [
+      "rain"
+    ],
+    "routes": [
+      "sim.miracle.rain.*",
+      "sim.help.category.2",
+      "simulation.event.aitos.slot_02",
+      "simulation.event.fillmore.slot_03",
+      "simulation.event.kasandora.slot_13",
+      "simulation.event.kasandora.slot_14",
+      "simulation.event.kasandora.slot_15",
+      "simulation.event.kasandora.slot_16",
+      "simulation.event.kasandora.slot_17",
+      "simulation.event.kasandora.slot_18",
+      "simulation.event.kasandora.slot_19",
+      "simulation.event.kasandora.slot_20",
+      "simulation.event.kasandora.slot_21",
+      "simulation.event.kasandora.slot_22",
+      "simulation.event.kasandora.slot_23",
+      "simulation.event.kasandora.slot_24"
+    ]
+  },
+  {
+    "placeholder": "miracle.sun.name",
+    "message_id": "sim.menu.sun",
+    "native_name": "Sun",
+    "patterns": [
+      "sunlight",
+      "sun"
+    ],
+    "routes": [
+      "sim.miracle.sun.*",
+      "sim.help.category.2",
+      "simulation.event.bloodpool.slot_11",
+      "simulation.event.northwall.slot_06",
+      "simulation.event.bloodpool.slot_12",
+      "simulation.event.bloodpool.slot_13",
+      "simulation.event.bloodpool.slot_14",
+      "simulation.event.bloodpool.slot_15",
+      "simulation.event.bloodpool.slot_16",
+      "simulation.event.bloodpool.slot_17",
+      "simulation.event.bloodpool.slot_18",
+      "simulation.event.bloodpool.slot_19",
+      "simulation.event.bloodpool.slot_20",
+      "simulation.event.bloodpool.slot_21",
+      "simulation.event.bloodpool.slot_22",
+      "simulation.event.bloodpool.slot_23",
+      "simulation.event.bloodpool.slot_24",
+      "simulation.event.northwall.slot_07",
+      "simulation.event.northwall.slot_08",
+      "simulation.event.northwall.slot_09",
+      "simulation.event.northwall.slot_10",
+      "simulation.event.northwall.slot_11",
+      "simulation.event.northwall.slot_12",
+      "simulation.event.northwall.slot_13",
+      "simulation.event.northwall.slot_14",
+      "simulation.event.northwall.slot_15",
+      "simulation.event.northwall.slot_16",
+      "simulation.event.northwall.slot_17",
+      "simulation.event.northwall.slot_18",
+      "simulation.event.northwall.slot_19",
+      "simulation.event.northwall.slot_20",
+      "simulation.event.northwall.slot_21",
+      "simulation.event.northwall.slot_22",
+      "simulation.event.northwall.slot_23",
+      "simulation.event.northwall.slot_24"
+    ]
+  },
+  {
+    "placeholder": "miracle.wind.name",
+    "message_id": "sim.menu.wind",
+    "native_name": "Wind",
+    "patterns": [
+      "wind"
+    ],
+    "routes": [
+      "sim.miracle.wind.*",
+      "sim.help.category.2",
+      "simulation.event.aitos.slot_06"
+    ]
+  },
+  {
+    "placeholder": "spell.aura.name",
+    "message_id": "sky.menu.magic.aura",
+    "native_name": "Magical Aura",
+    "patterns": [
+      "Magical\\s+Aura"
+    ],
+    "routes": [
+      "sky.magic.selected.aura",
+      "sky.magic.choose",
+      "sim.help.category.3",
+      "sim.help.action.11",
+      "sim.help.item.03"
+    ]
+  },
+  {
+    "placeholder": "spell.fire.name",
+    "message_id": "sky.menu.magic.fire",
+    "native_name": "Magical Fire",
+    "patterns": [
+      "Magical\\s+Fire"
+    ],
+    "routes": [
+      "sky.magic.selected.fire",
+      "sky.magic.choose",
+      "sim.help.category.3",
+      "sim.help.action.11",
+      "sim.help.item.01",
+      "dialogue.offering.slot_00"
+    ]
+  },
+  {
+    "placeholder": "spell.light.name",
+    "message_id": "sky.menu.magic.light",
+    "native_name": "Magical Light",
+    "patterns": [
+      "Magical\\s+Light"
+    ],
+    "routes": [
+      "sky.magic.selected.light",
+      "sky.magic.choose",
+      "sim.help.category.3",
+      "sim.help.action.11",
+      "sim.help.item.04"
+    ]
+  },
+  {
+    "placeholder": "spell.stardust.name",
+    "message_id": "sky.menu.magic.stardust",
+    "native_name": "Magical Stardust",
+    "patterns": [
+      "Magical\\s+Stardust"
+    ],
+    "routes": [
+      "sky.magic.selected.stardust",
+      "sky.magic.choose",
+      "sim.help.category.3",
+      "sim.help.action.11",
+      "sim.help.item.02"
+    ]
+  }
+]

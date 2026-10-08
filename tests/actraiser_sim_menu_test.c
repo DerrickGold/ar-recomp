@@ -102,6 +102,13 @@ bool ActRaiserLocalizationRuntime_BeginReadOnlyDialogue(ArDialogueSession *s, co
   (void)fallback;
   return false;
 }
+size_t SimMenuLocalization_HelpRevealOffset(const SimMenuHelpPage *help,size_t source) {
+  if(source<=help->source_start) return 0;
+  size_t bytes=source-help->source_start; return bytes<help->bytes?bytes:help->bytes;
+}
+size_t SimMenuLocalization_HelpSourceOffset(const SimMenuHelpPage *help,size_t normalized) {
+  return help->source_start+normalized;
+}
 bool SimMenuLocalization_PrepareHelp(const ArDialoguePageSnapshot *s, SimMenuHelpPage *p) {
   (void)s;
   (void)p;

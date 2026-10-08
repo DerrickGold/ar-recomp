@@ -3,12 +3,26 @@
 #include "actraiser/actraiser_localization_style.h"
 #include "actraiser/actraiser_localization_text_style.h"
 #include "localization/unicode_grapheme.h"
+#include "actraiser/actraiser_localization_text_normalize.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static ActRaiserTextStylePlan s_menu_help_style;
 static ArTextBidiSpans s_menu_help_bidi;
+static uint16_t s_menu_help_offsets[kSimMenuHelpTextCapacity+1];
+static ArLocalizationInlineObjectSnapshot s_menu_help_objects[kArLocalizationFrameInlineObjectCapacity];
+static uint8_t s_menu_help_object_count;
+size_t SimMenuLocalization_HelpRevealOffset(const SimMenuHelpPage *help,size_t source) {
+  if (source<=help->source_start) return 0;
+  if (source>=help->source_end) return help->bytes;
+  return s_menu_help_offsets[source-help->source_start];
+}
+size_t SimMenuLocalization_HelpSourceOffset(const SimMenuHelpPage *help,size_t normalized) {
+  size_t at=0,bytes=help->source_end-help->source_start;
+  while(at<bytes && s_menu_help_offsets[at]<normalized) ++at;
+  return help->source_start+at;
+}
 
 static void MenuLabelSingleLine(ActRaiserResolvedText *text) {
   /* Modern labels have one wide row. Keep style/bidi byte offsets intact
@@ -137,11 +151,28 @@ bool SimMenuLocalization_PrepareHelp(
   if (!source || !help || help->source_end > source->utf8_bytes) return false;
   ArDialoguePager_Begin(&help->pager, help->enhanced, 0);
   const size_t bytes = help->source_end - help->source_start;
-  uint16_t *offsets = calloc(bytes + 1, sizeof(*offsets));
-  if (!offsets) return false;
-  /* Help retains the authored source slice exactly. Native-only soft wraps
-   * never enter this text, so style and bidi offsets remain byte-for-byte. */
+  if (bytes>=kSimMenuHelpTextCapacity) return false;
+  uint16_t *offsets=s_menu_help_offsets;
+  s_menu_help_object_count=0;
+  /* Native soft wraps retain source offsets. Enhanced layout maps collapsed
+   * whitespace and icon reservations before publishing styles and reveal. */
   for (size_t at = 0; at <= bytes; ++at) offsets[at]=(uint16_t)at;
+  if (help->enhanced) {
+    ArDialogueInlineObject objects[kArLocalizationFrameInlineObjectCapacity];
+    size_t count=0;
+    for (size_t i=0;i<source->inline_object_count;++i) {
+      ArDialogueInlineObject object=source->inline_objects[i];
+      if (object.end_utf8_byte<=help->source_start || object.end_utf8_byte>help->source_end) continue;
+      if (count>=kArLocalizationFrameInlineObjectCapacity) return false;
+      object.end_utf8_byte-=help->source_start;
+      objects[count++]=object;
+    }
+    size_t normalized;
+    if (!ActRaiserLocalizationText_Normalize(source->utf8+help->source_start,bytes,
+        objects,count,true,help->text,sizeof(help->text),&normalized,
+        s_menu_help_objects,kArLocalizationFrameInlineObjectCapacity,&s_menu_help_object_count,offsets)) return false;
+    help->bytes=(uint32_t)normalized;
+  }
   char error[256];
   bool valid = ActRaiserTextStyle_AppendPage(&s_menu_help_style, source,
       help->source_start, bytes, offsets, help->text, help->bytes, 0,
@@ -158,7 +189,6 @@ bool SimMenuLocalization_PrepareHelp(
       else s_menu_help_bidi.spans[s_menu_help_bidi.count++] = span;
     }
   }
-  free(offsets);
   return valid;
 }
 
@@ -175,12 +205,12 @@ void SimMenuLocalization_AppendHelp(
     if (next <= revealed) ++visible;
     at = next;
   }
-  if(!ArLocalizationFrame_AddScreenText(frame,700,40,156,176,56,
+  if(!ArLocalizationFrame_AddScreenTextWithObjects(frame,700,40,156,176,56,
     help->text,help->bytes,visible,total,
     /* Zero is an invalid snapshot revision; page zero at byte zero is the
      * most common Help page and must be published too. */
     (((uint64_t)help->authored_page<<32) | help->source_start)+1,
-    help->direction,7,kArLocalizationTextLayout_DialogueWindow)) return;
+    help->direction,7,kArLocalizationTextLayout_DialogueWindow,s_menu_help_objects,s_menu_help_object_count)) return;
   ArLocalizationTextLanguage language={.direction=help->direction};
   snprintf(language.locale,sizeof(language.locale),"%s",help->locale);
   ArLocalizationFrame_SetTextLanguage(frame,&language);

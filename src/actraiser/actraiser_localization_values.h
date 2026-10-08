@@ -11,10 +11,11 @@
 #include <stdint.h>
 
 #include "localization/dialogue_session.h"
+#include "localization/button_prompt.h"
 #include "localization/language_pack.h"
 #include "regional/regional_costs.h"
 
-#define ACTRAISER_LOCALIZATION_VALUES_ABI_VERSION UINT32_C(5)
+#define ACTRAISER_LOCALIZATION_VALUES_ABI_VERSION UINT32_C(6)
 
 enum {
   kActRaiserLocalizationMasterNameCapacity =
@@ -35,6 +36,7 @@ typedef struct ActRaiserLocalizationValues {
   const ArLanguagePack *pack;
   const ArLanguagePack *fallback_pack;
   ArRegionalCostSnapshot prices; /* captured quote, never a live policy pointer */
+  ArButtonPrompts buttons; /* captured once with the message, including its device */
   char master_name[kActRaiserLocalizationMasterNameCapacity];
 } ActRaiserLocalizationValues;
 

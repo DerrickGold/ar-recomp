@@ -25,6 +25,7 @@ type localizationDraftRequest struct {
 	Fonts          lk.PackFonts         `json:"fonts"`
 	FontPaths      []string             `json:"fontPaths"`
 	fontUploads    map[string][]byte
+	ButtonGlyphs   *bool                 `json:"buttonGlyphs"`
 	Scenario       *textpreview.Scenario `json:"scenario"`
 	SourceScenario *textpreview.Scenario `json:"sourceScenario"`
 }

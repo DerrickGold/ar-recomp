@@ -122,6 +122,8 @@ static void WriteNativeFixture(bool oversized) {
   for (uint32_t i = 0; i < ArLanguageContract_RouteCount(); ++i) {
     const char *id = ArLanguageContract_RouteId(i);
     if (!ArLanguageContract_RouteAvailable(id, kArLanguageSourceProfile_Us)) continue;
+    /* Older native fixtures omit added Help so read-only English fallback is exercised. */
+    if (!strncmp(id,"sim.help.",9)) continue;
     fprintf(file, ":: %s\n", id);
     const bool speed = !strcmp(id, "system.message_speed.choose");
     if (!strcmp(id, "title.save_choice.labels"))
@@ -138,6 +140,8 @@ static void WriteNativeFixture(bool oversized) {
       fputs("- Credits fixture -\n@line\nA contributor\n", file);
     else if (!strncmp(id, "sim.menu.", 9))
       fputs("Menu label fixture\n", file);
+    else if (!strncmp(id, "sky.menu.magic.", 15))
+      fputs("Spell label fixture\n", file);
     else if (!strcmp(id, "system.choice.yes_no"))
       fputs("Yes\n@line\nNo\n", file);
     else if (!speed)
@@ -1300,6 +1304,46 @@ static void TestMenuLabelCapacity(void) {
   CHECK(!memcmp(&source, &before, sizeof(source)));
 }
 
+static void CaptureTestButtons(void *context,ArButtonPrompts *prompts) {
+  (void)context;
+  ArButtonPrompts_Default(prompts);
+  snprintf(prompts->buttons[0].label,sizeof(prompts->buttons[0].label),"Cross");
+  snprintf(prompts->buttons[0].icon,sizeof(prompts->buttons[0].icon),"button.glyph.playstation.cross");
+}
+static void TestMenuHelpButtons(void) {
+  ActRaiserLocalizationRuntime_SetButtonPromptHost(CaptureTestButtons,NULL);
+  for (unsigned mode=0;mode<2;++mode) {
+    g_settings.localization_button_prompts=mode;
+    ArDialogueSession session; ArDialogueSession_Init(&session);
+    CHECK(ActRaiserLocalizationRuntime_BeginReadOnlyDialogue(&session,"sim.help.category.2",
+        "Press {icon.button.b} to continue; {button.describe} describes."));
+    ArDialoguePageSnapshot page; CHECK(ArDialogueSession_GetPage(&session,&page));
+    CHECK(page.inline_object_count==mode);
+    if (!mode) CHECK(strstr(page.utf8,"Cross"));
+    else CHECK(!strcmp(page.inline_objects[0].id,"button.glyph.playstation.cross"));
+    SimMenuHelpPage help;
+    CHECK(SimMenuHelp_Build(&help,page.utf8,page.utf8_bytes,0,false,true));
+    CHECK(SimMenuLocalization_PrepareHelp(&page,&help));
+    help.revealed_bytes=help.bytes; help.active=true;
+    CHECK(SimMenuLocalization_HelpRevealOffset(&help,page.utf8_bytes)==help.bytes);
+    Capture(); const uint16_t palette[]={0,0,0x7f33,0x7fff};
+    SimMenuLocalization_AppendHelp(&s_frame,&help,palette,4);
+    const ArLocalizationScreenTextRecord *record=ArLocalizationFrame_FindScreenText(&s_frame,700);
+    CHECK(record);
+    if(record) {
+      const ArLocalizationTextSnapshot *snapshot=&s_frame.snapshots[record->snapshot_slot];
+      CHECK(snapshot->inline_object_count==mode);
+      if(mode) {
+        const ArLocalizationInlineObjectSnapshot *object=&s_frame.inline_objects[snapshot->inline_object_offset];
+        CHECK(object->kind==kArLocalizationInlineObject_Button && object->button.symbol==kArButtonGlyphSymbol_Cross);
+      }
+    }
+    ArDialogueSession_Destroy(&session);
+  }
+  g_settings.localization_button_prompts=0;
+  ActRaiserLocalizationRuntime_SetButtonPromptHost(NULL,NULL);
+}
+
 static void TestMenuHelp(void) {
   for (unsigned item = 7; item <= 8; ++item) {
     ArDialogueSession session;
@@ -1655,6 +1699,7 @@ int main(void) {
   CHECK(strstr(s_frame.text, "Dernière") && !strstr(s_frame.text, "Première"));
   CHECK(s_font_preflights == 2); /* No probing on glyph/reveal/frame ticks. */
   TestMenuHelp();
+  TestMenuHelpButtons();
   TestMenuOpeningLabels();
   TestMenuLabelCapacity();
   s_frame_hook = RejectFontSwitchOnce;

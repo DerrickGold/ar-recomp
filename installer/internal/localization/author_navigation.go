@@ -66,6 +66,8 @@ var authorNavigationCaptions = map[string]string{
 	"group.sky_menus":      "Menus",
 	"group.sky_dialogue":   "Dialogue — magic & battles",
 	"group.sim_menus":      "Simulation menus",
+	"group.help":           "Help — categories, actions & offerings",
+	"context.help":         "Read-only descriptions opened with Describe in the simulation menu. Miracle descriptions are in Miracles.",
 	"group.miracles":       "Miracles",
 	"group.offerings":      "Gifts & inventory",
 	"group.terms":          "Town & monster terms",
@@ -104,7 +106,7 @@ func AuthorNavigationCaptions() map[string]string {
 }
 
 var authorTitleWords = strings.NewReplacer("_", " ", ".", " / ")
-var authorCategoryOrder = []string{"start", "story", "menus", "dialogue", "miracles", "offerings", "responses", "reports", "speed", "save", "confirmations", "names", "terms", "action", "references"}
+var authorCategoryOrder = []string{"start", "story", "menus", "dialogue", "miracles", "help", "offerings", "responses", "reports", "speed", "save", "confirmations", "names", "terms", "action", "references"}
 
 func AuthorMessageLocation(id string) AuthorLocation {
 	return AuthorMessageLocations(id)[0]
@@ -180,6 +182,8 @@ func AuthorMessageLocations(id string) []AuthorLocation {
 		return root("sky", "dialogue", "group.sky_dialogue", "sky.", "")
 	case strings.HasPrefix(id, "sim.menu."):
 		return makeLocations(towns, "menus", "group.sim_menus", "sim.menu.", "")
+	case strings.HasPrefix(id, "sim.help."):
+		return makeLocations(towns, "help", "group.help", "sim.help.", "context.help")
 	case strings.HasPrefix(id, "sim.miracle."):
 		return makeLocations(towns, "miracles", "group.miracles", "sim.miracle.", "")
 	case strings.HasPrefix(id, "dialogue.offering."), strings.HasPrefix(id, "sim.offerings."), strings.HasPrefix(id, "sim.inventory."):

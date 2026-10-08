@@ -63,6 +63,9 @@
     speed.value = "1";
     const zoom = select("zoom", [[0, "i18n:fit"], [1, "1×"], [2, "2×"], [3, "3×"]], toolbar);
     zoom.value = "0";
+    const buttonPrompts = select("button_prompts", [[0, "i18n:button_text"], [1, "i18n:button_glyphs"]], toolbar);
+    buttonPrompts.value = "0";
+    buttonPrompts.addEventListener("change", () => { if (result) refresh(); });
     const rebuild = button("render", toolbar, () => refresh());
     const advanced = make("details");
     localized("summary", "scenario", advanced);
@@ -118,6 +121,7 @@
       const value = structuredClone(result[which === "source" ? "sourceScenario" : "scenario"]);
       const parent = which === "source" ? sourceFields : draftFields;
       value.values = Object.fromEntries(Array.from(parent.querySelectorAll("input"), input => [input.name, input.value]));
+      value.buttonGlyphs = buttonPrompts.value === "1";
       value.size = Number(size.value);
       value.delay = Number(delay.value);
       value.sampling = Number(smoothing.value);
@@ -146,6 +150,7 @@
       window.workshopFeedback?.clear(status);
       try {
         const body = {...capture()};
+        body.buttonGlyphs = buttonPrompts.value === "1";
         const uploads = body.fontUploads || [];
         delete body.fontUploads;
         if (result) {
@@ -171,6 +176,7 @@
         const images = await Promise.all([loadImages(next.source), loadImages(next.draft)]);
         if (ownGeneration !== generation || abort.signal.aborted) return;
         result = next;
+        buttonPrompts.value = next.scenario.buttonGlyphs ? "1" : "0";
         size.value = String(next.scenario.size);
         delay.value = String(next.scenario.delay);
         smoothing.value = String(next.scenario.sampling);

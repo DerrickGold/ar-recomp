@@ -1719,6 +1719,9 @@ static bool PlanFlowingText(const ArLocalizationFrame *frame,
     request.minimum_font_pixels = request.font_pixels;
     request.flags &= ~kArTextRasterFlag_CropHorizontalWhitespace;
   }
+  /* Blank reservations at either edge still belong to inline artwork. */
+  if (snapshot->inline_object_count)
+    request.flags &= ~kArTextRasterFlag_CropHorizontalWhitespace;
   *plan = (TextFlowPlan){
       .request = request,
       .viewport = viewport,
@@ -2087,6 +2090,9 @@ bool ArLocalizedTextPresenter_PrepareScreenText(ArRenderDevice *device,
     if (snapshot->italic) request.flags |= kArTextRasterFlag_Italic;
   }
 
+  if (snapshot->inline_object_count)
+    request.flags &= ~kArTextRasterFlag_CropHorizontalWhitespace;
+
   /* No other prepared frame is live on the mutually exclusive navigation
    * branch. Rotate retained cache references before acquiring this label. */
   ArTextSurfaceCache_EndFrame(&s_presenter.fonts.cache);
@@ -2110,10 +2116,29 @@ bool ArLocalizedTextPresenter_PrepareScreenText(ArRenderDevice *device,
   uint32_t revealed=snapshot->revealed_cluster_count;
   const int scroll=dialogue
       ? DialogueOffset(frame,snapshot,&surface,viewport.h,&revealed,prepared):0;
+  const ArRenderRectI destination = {
+      x, dialogue ? bounds.y - scroll : bounds.y + (bounds.h - surface.height) / 2,
+      surface.width, surface.height};
+  if (snapshot->inline_object_offset > frame->inline_object_count ||
+      snapshot->inline_object_count > frame->inline_object_count - snapshot->inline_object_offset)
+    return false;
+  for (uint8_t i = 0; i < snapshot->inline_object_count; ++i) {
+    const ArLocalizationInlineObjectSnapshot *object =
+        &frame->inline_objects[snapshot->inline_object_offset + i];
+    size_t reveal_index = 0;
+    const ArTextRevealCluster *cluster =
+        FindRevealCluster(&surface, object->end_utf8_byte, &reveal_index);
+    if (!cluster) return false;
+    if (reveal_index >= revealed) continue;
+    if (!ArLocalizedTextArtwork_PrepareInlineObject(
+            device, frame, snapshot, object, &surface, utf8, utf8_bytes, cluster,
+            destination, 0, &prepared->inline_objects[prepared->inline_object_count]))
+      return false;
+    ++prepared->inline_object_count;
+  }
   prepared->texts[0] = (ArLocalizedPreparedText){
       .surface = surface,
-      .destination = {x, dialogue?bounds.y-scroll:bounds.y+(bounds.h-surface.height)/2,
-                      surface.width, surface.height},
+      .destination = destination,
       .viewport = viewport,
       .revealed_cluster_count = revealed,
       .cluster_count = snapshot->cluster_count,

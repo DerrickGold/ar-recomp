@@ -271,9 +271,7 @@ static void RevealHelp(const ArDialoguePageSnapshot *page) {
   while(s_help.revealed_glyphs<s_help.glyph_count &&
         s_help.source_ends[s_help.revealed_glyphs]<=page->revealed_utf8_bytes)
     ++s_help.revealed_glyphs;
-  s_help.revealed_bytes=page->revealed_utf8_bytes>s_help.source_start
-      ? page->revealed_utf8_bytes-s_help.source_start : 0;
-  if (s_help.revealed_bytes>s_help.bytes) s_help.revealed_bytes=s_help.bytes;
+  s_help.revealed_bytes=SimMenuLocalization_HelpRevealOffset(&s_help,page->revealed_utf8_bytes);
 }
 
 static void DescribeNeutral(CpuState *c, const char *id,const char *fallback) {
@@ -290,7 +288,7 @@ static void DescribeNeutral(CpuState *c, const char *id,const char *fallback) {
     if(!ArDialogueSession_GetPage(&session,&page)) break;
     const bool enhanced=g_settings.localization_presentation!=0;
     if (!build && s_help.enhanced!=enhanced) {
-      start=s_help.source_start+s_help.pager.start;
+      start=SimMenuLocalization_HelpSourceOffset(&s_help,s_help.pager.start);
       build=true;
     }
     if(build) {

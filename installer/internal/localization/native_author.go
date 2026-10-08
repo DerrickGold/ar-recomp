@@ -57,6 +57,9 @@ func (d *Decoder) buildNativeAuthorPackV1(metadata PackMetadata) (*AuthorPack, e
 	labels := append(nativeHUDLabels(d.profile.ID), nativeCreditsMessages(catalog.Credits)...)
 	labels = append(labels, nativeHUDValues()...)
 	labels = append(labels, nativeWorldLabel())
+	if d.profile.ID == "us" {
+		labels = append(labels, nativeHelpMessages()...)
+	}
 	return nativeAuthorPack(manifest, catalog.SemanticRoutes.Routes, catalog.source.NativeDialogueLayout, labels...)
 }
 
@@ -104,7 +107,7 @@ func nativeAuthorMessages(routes []*NativeSemanticRoute, layout IRObject) ([]Aut
 		if i > 0 && ordered[i-1].ID == route.ID {
 			return nil, fmt.Errorf("duplicate native route %s", route.ID)
 		}
-		ops, err := nativeAuthorOperations(route, layout)
+		ops, err := nativeAuthorOperations(nativeAuthorFragmentBoundaries(route, ordered, layout), layout)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", route.ID, err)
 		}
@@ -127,6 +130,53 @@ func nativeAuthorMessages(routes []*NativeSemanticRoute, layout IRObject) ([]Aut
 		messages = append(messages, m)
 	}
 	return messages, nil
+}
+
+// Relay sources enter a packed record at several fragment boundaries. The
+// native reader and its fixed-cell layout retain those entry points, but a
+// single proportional-flow string joins the adjacent words. Materialize only
+// boundaries proved by another consumer's offset and identical decoded suffix.
+// Keep the raw catalog operations intact, and let the ordinary reflow policy
+// choose spaces or preferred line breaks rather than forcing native-width rows.
+func nativeAuthorFragmentBoundaries(route *NativeSemanticRoute, routes []*NativeSemanticRoute, layout IRObject) *NativeSemanticRoute {
+	if layout["space_delimited_words"] != true || !nativeReflow(route.Category) ||
+		!strings.HasPrefix(route.ID, "dialogue.event.relay.") || route.RecordID == "" ||
+		len(route.Operations) != 2 || route.Operations[0]["op"] != "text" || route.Operations[1]["op"] != "end" {
+		return route
+	}
+	text, ok := route.Operations[0]["value"].(string)
+	if !ok {
+		return route
+	} // Normal operation validation reports unresolved text.
+	var cuts []int
+	for _, peer := range routes {
+		if peer.RecordID != route.RecordID || peer.SourceOffset <= route.SourceOffset ||
+			len(peer.Operations) != 2 || peer.Operations[0]["op"] != "text" || peer.Operations[1]["op"] != "end" {
+			continue
+		}
+		suffix, ok := peer.Operations[0]["value"].(string)
+		if !ok || suffix == "" || !strings.HasSuffix(text, suffix) {
+			continue
+		}
+		cut := len(text) - len(suffix)
+		if cut > 0 && utf8.ValidString(text[:cut]) {
+			cuts = append(cuts, cut)
+		}
+	}
+	if len(cuts) == 0 {
+		return route
+	}
+	slices.Sort(cuts)
+	cuts = slices.Compact(cuts)
+	copy := *route
+	copy.Operations = make([]Operation, 0, 2*len(cuts)+2)
+	start := 0
+	for _, cut := range cuts {
+		copy.Operations = append(copy.Operations, Operation{"op": "text", "value": text[start:cut]}, Operation{"op": "line_break"})
+		start = cut
+	}
+	copy.Operations = append(copy.Operations, Operation{"op": "text", "value": text[start:]}, route.Operations[1])
+	return &copy
 }
 
 func nativeReflow(category string) bool {
@@ -278,7 +328,11 @@ func nativeAuthorOperations(route *NativeSemanticRoute, layout IRObject) ([]Auth
 	if len(ops) > 0 && strings.HasPrefix(route.ID, "status.report.") && ops[len(ops)-1].Op != "end" && ops[len(ops)-1].Op != "line" {
 		return nil, fmt.Errorf("unterminated native report row")
 	}
-	return nativeMiraclePrice(stripNativePadding(nativeAuthorTable(ops, route.ID)), route.ID)
+	ops, err := nativeMiraclePrice(stripNativePadding(nativeAuthorTable(ops, route.ID)), route.ID)
+	if err != nil {
+		return nil, err
+	}
+	return nativeAbilityReferences(nativeButtonReferences(ops, route.ID), route.ID), nil
 }
 
 // Blank native cell runs clear the retail tilemap; they are not a paragraph or

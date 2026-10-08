@@ -13,6 +13,8 @@
 void SimMenuLocalization_CaptureLabels(
     ArLocalizationFrame *labels, const ArLocalizationFrame *source,
     const SimMenuModel *menu, const uint16_t *cgram, size_t cgram_count);
+size_t SimMenuLocalization_HelpRevealOffset(const SimMenuHelpPage *help,size_t source);
+size_t SimMenuLocalization_HelpSourceOffset(const SimMenuHelpPage *help,size_t normalized);
 bool SimMenuLocalization_PrepareHelp(
     const ArDialoguePageSnapshot *source, SimMenuHelpPage *help);
 void SimMenuLocalization_AppendHelp(

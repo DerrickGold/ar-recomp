@@ -1,6 +1,7 @@
 #include "sim/menu/sim_menu_help.h"
 #include "localization/unicode_grapheme.h"
 #include <string.h>
+#include <stdio.h>
 
 bool SimMenuHelp_Build(SimMenuHelpPage *p,const char *s,size_t bytes,
                        size_t start,bool more_authored_pages,bool enhanced) {
@@ -90,65 +91,14 @@ bool SimMenuHelp_Build(SimMenuHelpPage *p,const char *s,size_t bytes,
   return true;
 }
 
-const char *SimMenuHelp_Category(unsigned category) {
-  static const char *const text[]={
-    "Return to the Sky Palace or move the palace to another region.",
-    "Guide the development of your people, or listen to their requests.",
-    "Use SP to perform a miracle. Describe explains a miracle without using it.",
-    "Receive offerings at the cathedral, or choose an offering you already hold to use.",
-    "View the status of the Master or compare the cities.",
-    "Record your progress or adjust the speed of messages."};
-  return category<6?text[category]:"";
+#include "sim/menu/sim_menu_help_data.inc"
+static const char *HelpText(const char *kind, unsigned value) {
+  char id[64];
+  snprintf(id, sizeof(id), !strcmp(kind,"category") ? "sim.help.%s.%u" : "sim.help.%s.%02u", kind,value);
+  for (size_t i=0;i<sizeof(kSimMenuHelpText)/sizeof(kSimMenuHelpText[0]);++i)
+    if (!strcmp(id,kSimMenuHelpText[i].id)) return kSimMenuHelpText[i].text;
+  return "";
 }
-const char *SimMenuHelp_Action(unsigned action) {
-  static const char *const text[] = {
-    "Leave the town and return to the Sky Palace.",
-    "Enter the world view to move the Sky Palace to another region.",
-    "Choose a direction for your people to develop. Select the next part of town where you want them to build.",
-    "Listen to the current message or request from your people.",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "Visit the cathedral to receive an offering from your people. Choose what to take from the offerings available there.",
-    "Choose an offering you hold. Some take effect after a message; others ask you to choose a place in town.",
-    "View the level, life, magic and possessions of the Master.",
-    "View the cities and their populations.",
-    "Record your progress and choose whether to continue playing.",
-    "Choose how quickly messages appear."
-  };
-  return action>=1 && action<=15?text[action-1]:"";
-}
-const char *SimMenuHelp_Item(unsigned item) {
-  if (item >= 1 && item <= 4)
-    return "Use this magic during action stages. It cannot be used from the offering menu in town.";
-  switch(item) {
-    case 5:return "Increases the maximum life of the Master when received.";
-    case 6:return "Increases the magic of the Master when received.";
-    case 7:
-      return "Choose a place in town to offer bread. It is used only at a suitable location. Cancelling the selection leaves it in your inventory.";
-    case 8:
-      return "Choose a place in town to plant wheat. The selected terrain and the situation in town determine whether it can be planted. An invalid place or cancellation leaves the offering in your inventory.";
-    case 9:
-      return "Use the herb in the town where it is needed. Your people will explain its effect before using it.";
-    case 10:return "Help your people build a bridge. It can be used when the town needs this help.";
-    case 11:
-      return "Play music for your people. Its effect depends on the current situation in town.";
-    case 12:
-      return "Keep this ancient tablet among your possessions. It has no effect when used directly in town.";
-    case 13:
-      return "Give this ancient tablet to your people. Their message will explain its effect.";
-    case 14:
-      return "Choose a lair in town for the effect of the skull. Cancelling the selection leaves it in your inventory.";
-    case 15:return "Give the fleece to your people to trigger its effect in town.";
-    case 16:
-    case 17: return "Keep this bomb among your possessions. It cannot be used directly in town.";
-    case 18:
-      return "Use this bomb against the monsters in town. It takes effect immediately and is consumed when used.";
-    case 19:return "Use the compass in the town where it is needed.";
-    case 20:
-      return "Strengthen the angel for combat. The offering is consumed as its effect is applied.";
-    default:return "";
-  }
-}
+const char *SimMenuHelp_Category(unsigned category) { return HelpText("category",category); }
+const char *SimMenuHelp_Action(unsigned action) { return HelpText("action",action); }
+const char *SimMenuHelp_Item(unsigned item) { return HelpText("item",item); }

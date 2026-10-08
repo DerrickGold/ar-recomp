@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "localization/ability_name.h"
 
 enum {
   kWramLairEnemyIndex = 0x0002,
@@ -222,6 +223,7 @@ bool ActRaiserLocalizationValues_Capture(
       .pack = pack,
       .fallback_pack = fallback_pack,
   };
+  ArButtonPrompts_Default(&captured.buttons);
   ArRegionalCostPolicy baseline;
   ArRegionalCosts_Init(&baseline, kArRegionalSource_US);
   ArRegionalCosts_Resolve(&baseline, &captured.prices);
@@ -247,7 +249,17 @@ bool ActRaiserLocalizationValues_Resolve(
   value->kind = expected_kind;
 
   bool resolved = false;
-  if (expected_kind == kArLanguagePlaceholder_Icon) {
+  bool button_icon = false;
+  const int button = ArButtonPrompt_Index(name, &button_icon);
+  if (button >= 0) {
+    resolved = expected_kind == (button_icon ? kArLanguagePlaceholder_Icon :
+        kArLanguagePlaceholder_LocalizedText) && SetText(value, button_icon ?
+        values->buttons.buttons[button].icon : values->buttons.buttons[button].label);
+  } else if (ArAbilityName_Find(name)) {
+    resolved = expected_kind == kArLanguagePlaceholder_LocalizedText &&
+        ArAbilityName_Copy(values->pack, values->fallback_pack, name,
+                            value->text, sizeof(value->text));
+  } else if (expected_kind == kArLanguagePlaceholder_Icon) {
     resolved = !strncmp(name, "icon.", 5) && SetText(value, name);
   } else if (!strcmp(name, "hud_value")) {
     resolved = expected_kind == kArLanguagePlaceholder_LocalizedText &&

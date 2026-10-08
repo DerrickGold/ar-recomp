@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -35,6 +36,62 @@ func TestNativeROMCoverageAndAuthorRuntime(t *testing.T) {
 			pack, err := d.BuildNativeAuthorPack(d.NativeSourceMetadata())
 			if err != nil {
 				t.Fatal(err)
+			}
+			ops, err := pack.MessageOperations("dialogue.event.wrapper_05.call_00.source_00")
+			if err != nil {
+				t.Fatal(err)
+			}
+			buttons := map[string]int{}
+			for _, op := range ops {
+				if op.Op == "placeholder" {
+					buttons[op.Name]++
+				}
+			}
+			for _, name := range []string{"icon.button.b", "icon.button.y", "icon.button.start"} {
+				if buttons[name] != 1 {
+					t.Fatalf("%s: native button reference missing or duplicated: %s (%d)", d.ReleaseID(), name, buttons[name])
+				}
+			}
+			if view, found := pack.workspace.Message("title.start_prompt"); found && view.Present {
+				ops, err := pack.MessageOperations("title.start_prompt")
+				if err != nil {
+					t.Fatal(err)
+				}
+				count := 0
+				for _, op := range ops {
+					if op.Op == "placeholder" && op.Name == "icon.button.start" {
+						count++
+					}
+				}
+				if count != 1 {
+					t.Fatal("title Start reference missing", d.ReleaseID(), count)
+				}
+			}
+			if d.ReleaseID() == "us" {
+				for _, name := range abilityNames {
+					id := "sky.magic.selected." + strings.Split(name.Placeholder, ".")[1]
+					if strings.HasPrefix(name.Placeholder, "miracle.") {
+						id = "sim.miracle." + strings.Split(name.Placeholder, ".")[1] + ".confirm"
+					}
+					ops, err := pack.MessageOperations(id)
+					if err != nil {
+						t.Fatal(err)
+					}
+					found := false
+					for _, op := range ops {
+						if op.Op == "placeholder" && op.Name == name.Placeholder {
+							found = true
+						}
+					}
+					if !found {
+						t.Fatal("US ability name remains literal", id, name.Placeholder)
+					}
+				}
+				for _, help := range nativeHelpMessages() {
+					if view, found := pack.workspace.Message(help.ID); !found || !view.Present {
+						t.Fatal("missing Help reference", help.ID)
+					}
+				}
 			}
 			dir := t.TempDir()
 			writeAuthorTestFiles(t, dir, pack.Files())

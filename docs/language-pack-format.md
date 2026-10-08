@@ -819,6 +819,59 @@ older message lacking its price placeholder falls back to compatible native
 enhanced text, or to the original font with corrected digits if that enhanced
 fallback is also old. Other messages and the selected language stay unchanged.
 
+All flow dialogue and Help routes accept button references. `{button.b}` inserts
+its current binding name; `{icon.button.b}` inserts controller artwork or the
+keyboard key name when artwork is unavailable. The player’s **Button prompts**
+setting chooses **Text** (the default) or **Button glyphs** for icon references;
+text references always display letters. Dialogue playback has the same toggle. The logical button suffixes are
+`a`, `b`, `x`, `y`, `l`, `r`, `select`, `start`, `up`, `down`, `left`, `right`,
+and `describe` (the modern menu's Describe action). Use the logical game button,
+not a physical controller label: with default controls, `icon.button.b` displays
+Xbox **A**, PlayStation **Cross**, Nintendo **B**, or keyboard **Z**. Rebinding
+changes both kinds of reference. Controller artwork follows the active device;
+unknown bindings display their text label. Values are captured when a dialogue
+begins so its prompts remain consistent while it is open.
+
+Native extractions use button references in the name-entry instructions and
+the title screen’s Start prompt. The title prompt accepts the two Start
+references despite its fixed single-line layout. Existing
+native US baselines gain those references and the 36 project-authored `sim.help.*`
+entries when refreshed, preserving message styling and progress. In the editor,
+Help entries appear under **Help — categories, actions & offerings** for each town.
+Miracle descriptions, including `sim.miracle.lightning.description`, remain under
+**Miracles**; action spell descriptions use `sky.magic.selected.*` in Sky Palace
+**Dialogue — magic & battles**. Regional references fall back to the English Help
+baseline because this added Help has no retail translation.
+
+Spell and miracle names are shared with their translated menu labels. Use
+`{miracle.lightning.name}`, `{miracle.rain.name}`, `{miracle.sun.name}`,
+`{miracle.wind.name}`, `{miracle.earthquake.name}`, `{spell.fire.name}`,
+`{spell.stardust.name}`, `{spell.aura.name}`, or `{spell.light.name}` on the
+routes that offer them in the placeholder picker. Miracle names come from
+`sim.menu.<miracle>`; spell names come from `sky.menu.magic.<spell>` (the
+native spell labels alias the corresponding inventory entries). Changing that
+label updates dialogue references when the next dialogue begins. The inserted
+name inherits the dialogue's styling; menu padding and line breaks become
+single spaces. Partial packs use the Native US name when the label is omitted.
+The playback preview resolves names from the actual draft and fallback labels.
+
+Native US extraction and baseline refresh replace named ability mentions in
+miracle dialogue, spell descriptions and the audited town requests and gift
+messages. Natural weather prose and verbs such as “stars rain down” remain
+literal text. References use the label's spelling and capitalization; authors
+may use literal wording when a language needs an inflected or grammatical form.
+The reference JSON's `source_message` identifies the label behind each name.
+
+Relay source entries (`dialogue.event.relay.*`) share a packed native text
+record. Extraction uses verified consumer entry points to restore fragment
+separators, then applies the normal flow policy: a separator is a space or a
+preferred line break, not a forced break at a fixed character count. A Native
+US refresh with the ROM repairs older joined relay text when its wording is
+unchanged, preserving styling and progress. Native spelling remains verbatim.
+The town suffixes of these six legacy IDs reflect extraction order; the native
+calls select development conditions and can occur in any town. Runtime matching
+uses their source and wrapper context, retaining the IDs for existing packs.
+
 Number placeholders may request a minimum digit count: `{master_level:02}`
 or `{city_northwall_population:03}`. These display `02` and `002` for a value
 of 2. Formats `01` through `09` are supported; larger values are never

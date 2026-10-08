@@ -9,6 +9,7 @@
 #include "localization/text_presentation.h"
 #include "actraiser/actraiser_localization_resolved_text.h"
 #include "localization/dialogue_session.h"
+#include "localization/button_prompt.h"
 
 #define ACTRAISER_LOCALIZATION_PACK_HOST_ABI_VERSION UINT32_C(2)
 
@@ -44,6 +45,10 @@ void ActRaiserLocalizationRuntime_SetPresentationHost(
 /* Bind only while the runtime is shut down. NULL detaches the host. An invalid
  * binding leaves enhanced localization unavailable rather than falling back
  * to process environment variables or the current working directory. */
+/* The host captures device/binding names on the game thread. The callback
+ * survives Shutdown, like the other host bindings; NULL detaches it. */
+void ActRaiserLocalizationRuntime_SetButtonPromptHost(ArCaptureButtonPrompts capture,
+                                                       void *context);
 void ActRaiserLocalizationRuntime_SetPackHost(
     const ActRaiserLocalizationPackHost *host);
 /* Resolve source changes synchronously before the overlay saves preferences.

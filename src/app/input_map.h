@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 
 #include "app/settings.h"
+#include "localization/button_prompt.h"
 #include "snesrecomp/game/types.h"
 
 /* Host input mapping: the single owner of "what the player physically did" ->
@@ -254,6 +255,9 @@ int InputMap_ActionHintForDevice(char *buffer, int buffer_size, InputAction acti
                                  InputClass device);
 /* Retains the last active input device after release, respecting forced mode
  * and the disconnected-gamepad keyboard fallback. Call during frame capture. */
+/* Capture all logical game button prompts once, using one active device. */
+void InputMap_FormatButtonPrompt(ArButtonPrompt *prompt,uint32 binding,SDL_GamepadType type);
+void InputMap_CaptureButtonPrompts(void *context, ArButtonPrompts *prompts);
 int InputMap_GameActionHint(char *buffer, int buffer_size, InputAction action);
 /* Borrowed display name without device prefix; NULL for an unknown control.
  * Hosts may localize a controller's typed kind/code, but key names originate

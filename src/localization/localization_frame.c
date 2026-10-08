@@ -258,6 +258,19 @@ bool ArLocalizationFrame_AddScreenText(
     uint32_t revealed_cluster_count, uint32_t cluster_count,
     uint64_t source_revision, ArTextDirection direction,
     uint8_t native_font_pixels, ArLocalizationTextLayoutKind layout) {
+  return ArLocalizationFrame_AddScreenTextWithObjects(frame,surface_id,x,y,width,height,
+      utf8,utf8_bytes,revealed_cluster_count,cluster_count,source_revision,direction,
+      native_font_pixels,layout,NULL,0);
+}
+
+bool ArLocalizationFrame_AddScreenTextWithObjects(
+    ArLocalizationFrame *frame, uint32_t surface_id,
+    uint16_t x, uint16_t y, uint16_t width, uint16_t height,
+    const char *utf8, size_t utf8_bytes,
+    uint32_t revealed_cluster_count, uint32_t cluster_count,
+    uint64_t source_revision, ArTextDirection direction,
+    uint8_t native_font_pixels, ArLocalizationTextLayoutKind layout,
+    const ArLocalizationInlineObjectSnapshot *objects, uint8_t object_count) {
   if (!FrameStorageValid(frame) || !frame->font_revision || !surface_id ||
       !width || !height || !utf8 || !source_revision ||
       (!utf8_bytes && cluster_count) || (utf8_bytes && !cluster_count) ||
@@ -276,12 +289,21 @@ bool ArLocalizationFrame_AddScreenText(
       ArLocalizationFrame_FindScreenText(frame, surface_id))
     return false;
 
+  if ((object_count && !objects) || object_count > kArLocalizationFrameInlineObjectCapacity-frame->inline_object_count) return false;
+  for (uint8_t i=0;i<object_count;++i) {
+    if (objects[i].kind<=kArLocalizationInlineObject_None || objects[i].kind>kArLocalizationInlineObject_Button ||
+        (objects[i].kind==kArLocalizationInlineObject_Button && !ArButtonGlyph_IsValid(objects[i].button)) ||
+        !objects[i].end_utf8_byte || objects[i].end_utf8_byte>utf8_bytes ||
+        (i && objects[i].end_utf8_byte<objects[i-1].end_utf8_byte)) return false;
+  }
   const uint8_t slot = frame->snapshot_count;
   const uint32_t offset = frame->text_bytes;
   memcpy(frame->text + offset, utf8, utf8_bytes);
   frame->text[offset + utf8_bytes] = 0;
   frame->text_bytes += (uint32_t)utf8_bytes + 1u;
   frame->snapshots[slot] = (ArLocalizationTextSnapshot){
+      .inline_object_offset = frame->inline_object_count,
+      .inline_object_count = object_count,
       .style_id = kArTextStyle_RetailBlueWhiteBands,
       .surface_id = surface_id,
       .utf8_offset = offset,
@@ -304,6 +326,8 @@ bool ArLocalizationFrame_AddScreenText(
           .height = height,
           .snapshot_slot = slot,
       };
+  if (object_count) memcpy(frame->inline_objects+frame->inline_object_count,objects,object_count*sizeof(*objects));
+  frame->inline_object_count+=object_count;
   frame->snapshot_count++;
   return true;
 }
@@ -502,7 +526,8 @@ bool ArLocalizationFrame_IsValid(const ArLocalizationFrame *frame) {
       const ArLocalizationInlineObjectSnapshot *entry =
           &frame->inline_objects[snapshot->inline_object_offset + object];
       if (entry->kind <= kArLocalizationInlineObject_None ||
-          entry->kind > kArLocalizationInlineObject_NameFieldUnderline ||
+          entry->kind > kArLocalizationInlineObject_Button ||
+          (entry->kind == kArLocalizationInlineObject_Button && !ArButtonGlyph_IsValid(entry->button)) ||
           entry->end_utf8_byte < previous_end ||
           entry->end_utf8_byte > snapshot->utf8_bytes)
         return false;
@@ -614,7 +639,8 @@ static bool AddTextInternal(
     const ArLocalizationInlineObjectSnapshot *object =
         &inline_objects[index];
     if (object->kind <= kArLocalizationInlineObject_None ||
-        object->kind > kArLocalizationInlineObject_NameFieldUnderline ||
+        object->kind > kArLocalizationInlineObject_Button ||
+        (object->kind == kArLocalizationInlineObject_Button && !ArButtonGlyph_IsValid(object->button)) ||
         object->end_utf8_byte < previous_end ||
         object->end_utf8_byte > utf8_bytes)
       return false;
@@ -794,6 +820,19 @@ bool ArLocalizationFrame_AddStructuredDialogueWindow(
     uint32_t cluster_count, uint64_t source_revision,
     ArTextDirection direction, uint8_t native_font_pixels,
     const uint8_t *structural_boundaries) {
+  return ArLocalizationFrame_AddStructuredDialogueWindowWithObjects(frame,surface_id,
+      destination,region,utf8,utf8_bytes,revealed_utf8_bytes,cluster_count,
+      source_revision,direction,native_font_pixels,structural_boundaries,NULL,0);
+}
+
+bool ArLocalizationFrame_AddStructuredDialogueWindowWithObjects(
+    ArLocalizationFrame *frame, uint32_t surface_id,
+    ArTextCellDestination destination, ArTextCellRegion region,
+    const char *utf8, size_t utf8_bytes, uint32_t revealed_utf8_bytes,
+    uint32_t cluster_count, uint64_t source_revision,
+    ArTextDirection direction, uint8_t native_font_pixels,
+    const uint8_t *structural_boundaries,
+    const ArLocalizationInlineObjectSnapshot *objects,uint8_t object_count) {
   if (!utf8 || revealed_utf8_bytes > utf8_bytes ||
       (revealed_utf8_bytes < utf8_bytes &&
        ((uint8_t)utf8[revealed_utf8_bytes] & 0xc0u) == 0x80u))
@@ -802,7 +841,7 @@ bool ArLocalizationFrame_AddStructuredDialogueWindow(
           frame, surface_id, destination, region, utf8, utf8_bytes,
           cluster_count, cluster_count, source_revision, direction,
           native_font_pixels, kArLocalizationTextLayout_DialogueWindow,
-          NULL, 0, NULL, 0))
+          NULL, 0, objects, object_count))
     return false;
   frame->snapshots[frame->snapshot_count - 1u].revealed_utf8_bytes =
       revealed_utf8_bytes;

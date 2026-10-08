@@ -26,6 +26,7 @@
 #include "actraiser/actraiser_localization_world_navigation.h"
 #include "actraiser_game.h"
 #include "deterministic_hash.h"
+#include "localization/ability_name.h"
 #include "localization/language_contract.h"
 #include "localization/language_pack.h"
 #include "save/save_system.h"
@@ -109,6 +110,23 @@ static ArTextPresentationHost s_presentation_host;
 static ArLanguagePackIo s_pack_io;
 static char s_native_manifest[kManifestPathCapacity];
 static ActRaiserLocalizationPackHost s_pack_host;
+static ArCaptureButtonPrompts s_capture_buttons;
+static void *s_button_context;
+
+void ActRaiserLocalizationRuntime_SetButtonPromptHost(ArCaptureButtonPrompts capture,
+                                                       void *context) {
+  s_capture_buttons = capture;
+  s_button_context = context;
+}
+
+static void CaptureButtons(ArButtonPrompts *buttons) {
+  ArButtonPrompts_Default(buttons);
+  if (s_capture_buttons) s_capture_buttons(s_button_context, buttons);
+  if (!s_runtime.presentation || !g_settings.localization_button_prompts)
+    for (unsigned i = 0; i < kArButtonPromptCount; ++i)
+      snprintf(buttons->buttons[i].icon, sizeof(buttons->buttons[i].icon),
+               "text:%s", buttons->buttons[i].label);
+}
 
 static void ScheduleFailed(const char *reason);
 static bool CopyPath(char *destination, size_t capacity, const char *source);
@@ -494,6 +512,7 @@ static bool CaptureValuesForPack(const ArLanguagePack *pack) {
       &s_runtime.values, g_ram, kActRaiserWramSize,
       pack, s_runtime.native_pack.content_revision
           ? &s_runtime.native_pack : NULL, master_name);
+  if (captured) CaptureButtons(&s_runtime.values.buttons);
   if (captured && !ActRaiserRegional_CopyPrices(&s_runtime.values.prices)) return false;
   memset(&s_runtime.name_entry, 0, sizeof(s_runtime.name_entry));
   (void)ActRaiserLocalizationNameEntry_Capture(
@@ -1533,11 +1552,11 @@ void ActRaiserLocalizationRuntime_CaptureFrame(
     trace_bytes = reveal_bytes;
   }
   const bool added =
-      ArLocalizationFrame_AddStructuredDialogueWindow(
+      ArLocalizationFrame_AddStructuredDialogueWindowWithObjects(
           frame, route->surface_id, destination, route->region, window->text,
           window->bytes, (uint32_t)reveal_bytes, window->clusters,
           page.source_revision, language.direction, route->native_font_pixels,
-          window->structural_boundaries) &&
+          window->structural_boundaries,window->inline_objects,window->inline_object_count) &&
       ArLocalizationFrame_SetTextLanguage(frame, &language) &&
       ArLocalizationFrame_SetTextBidiSpans(frame, &window->bidi) &&
       ActRaiserTextStyle_Publish(&window->styles, 0, &inks, frame);
@@ -1596,20 +1615,60 @@ bool ActRaiserLocalizationRuntime_ResolveText(
   return s_runtime.presentation && ResolveComposeText(NULL, id, text, error, capacity);
 }
 
+typedef struct ReadOnlyValues {
+  ArButtonPrompts buttons;
+  const ArLanguagePack *selected, *fallback;
+} ReadOnlyValues;
+
+static bool ResolveReadOnlyValue(void *context,const char *name,ArLanguagePlaceholderKind kind,
+    ArDialogueValue *value,char *error,size_t capacity) {
+  const ReadOnlyValues *captured=context;
+  if (ArAbilityName_Find(name)) {
+    memset(value,0,sizeof(*value)); value->kind=kind;
+    return kind==kArLanguagePlaceholder_LocalizedText && ArAbilityName_Copy(
+        captured->selected,captured->fallback,name,value->text,sizeof(value->text));
+  }
+  bool icon=false;
+  const int index=ArButtonPrompt_Index(name,&icon);
+  if (index<0 || kind!=(icon?kArLanguagePlaceholder_Icon:kArLanguagePlaceholder_LocalizedText)) {
+    if (error && capacity) snprintf(error,capacity,"invalid Help value");
+    return false;
+  }
+  const ArButtonPrompts *prompts=&captured->buttons;
+  memset(value,0,sizeof(*value)); value->kind=kind;
+  snprintf(value->text,sizeof(value->text),"%s",icon?prompts->buttons[index].icon:prompts->buttons[index].label);
+  return true;
+}
+
 bool ActRaiserLocalizationRuntime_BeginReadOnlyDialogue(
     ArDialogueSession *session, const char *id, const char *fallback) {
   if (!session || !id || !fallback) return false;
   ArLanguagePackError error={{0}};
   ArDialogueContract contract={0};
-  /* Optional read-only prose has no gameplay controls or dynamic values. A pack
-   * can supply it without changing the contracts of any native action. */
-  if (EnsureConfigured() && s_runtime.presentation) {
+  if (!ActRaiserDialogue_RouteContract(id,&contract,&error) || contract.control_count) return false;
+  const bool configured=EnsureConfigured();
+  ReadOnlyValues values={.selected=s_runtime.presentation?s_runtime.pack:NULL,
+      .fallback=s_runtime.native_pack.content_revision?&s_runtime.native_pack:NULL};
+  CaptureButtons(&values.buttons);
+  ArDialogueValueResolver resolver={.struct_size=sizeof(resolver),
+    .abi_version=AR_DIALOGUE_VALUE_RESOLVER_ABI_VERSION,.context=&values,.resolve=ResolveReadOnlyValue};
+  if (configured && s_runtime.presentation) {
     const ArLanguageMessage *message=ArLanguagePack_FindMessage(&s_runtime.selected_pack,id);
     if (message) {
       const ArDialogueSource source={.effective_pack=&s_runtime.selected_pack,
         .message=message,.resolved_source=kArDialogueResolvedSource_SelectedPack,
         .presentation=kArDialoguePresentation_Enhanced};
-      if (ArDialogueSession_BeginSource(session,&source,&contract,id,NULL,
+      if (ArDialogueSession_BeginSource(session,&source,&contract,id,&resolver,
+          kArLocalizationFrameTextCapacity,&error)) return true;
+    }
+  }
+  if (s_runtime.native_pack.content_revision) {
+    const ArLanguageMessage *message=ArLanguagePack_FindMessage(&s_runtime.native_pack,id);
+    if (message) {
+      const ArDialogueSource source={.effective_pack=&s_runtime.native_pack,
+        .message=message,.resolved_source=kArDialogueResolvedSource_NativeEnhanced,
+        .presentation=kArDialoguePresentation_Enhanced};
+      if (ArDialogueSession_BeginSource(session,&source,&contract,id,&resolver,
           kArLocalizationFrameTextCapacity,&error)) return true;
     }
   }
@@ -1630,7 +1689,7 @@ bool ActRaiserLocalizationRuntime_BeginReadOnlyDialogue(
       .message=ArLanguagePack_FindMessage(&pack,id),
       .resolved_source=kArDialogueResolvedSource_NativeEnhanced,
       .presentation=kArDialoguePresentation_Enhanced};
-    valid=ArDialogueSession_BeginSource(session,&source,&contract,id,NULL,
+    valid=ArDialogueSession_BeginSource(session,&source,&contract,id,&resolver,
                                         kArLocalizationFrameTextCapacity,&error);
   }
   ArLanguagePack_Destroy(&pack);

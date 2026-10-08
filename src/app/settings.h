@@ -328,6 +328,7 @@ typedef struct Settings {
    * the development-pack choice without changing the presentation contract. */
   int localization_content;
   int localization_presentation;
+  int localization_button_prompts;
   int localization_font_scale_percent;
   int localization_font_sampling;
   int localization_font_pixelation;

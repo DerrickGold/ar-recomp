@@ -17,7 +17,7 @@ static void SetError(ArLanguagePackError *error, const char *format, ...) {
   va_end(args);
 }
 
-static bool RouteContract(const char *id, ArDialogueContract *contract,
+bool ActRaiserDialogue_RouteContract(const char *id, ArDialogueContract *contract,
                           ArLanguagePackError *error) {
   if (!id ||
       !ArLanguageContract_RouteAvailable(id, kArLanguageSourceProfile_Us)) {
@@ -147,7 +147,7 @@ bool ArDialogueSession_BeginBounded(ArDialogueSession *session,
     error->message[0] = 0;
   ArDialogueContract contract;
   ArDialogueSource source;
-  return RouteContract(id, &contract, error) &&
+  return ActRaiserDialogue_RouteContract(id, &contract, error) &&
          SelectSource(selection, id, &source, error) &&
          ArDialogueSession_BeginSource(session, &source, &contract, id,
                                        resolver, budget, error);
@@ -190,7 +190,7 @@ bool ArDialogueSession_Restore(ArDialogueSession *session,
   }
   ArDialogueContract contract;
   ArDialogueSource source;
-  return RouteContract(state->message_id, &contract, error) &&
+  return ActRaiserDialogue_RouteContract(state->message_id, &contract, error) &&
          SelectSource(selection, state->message_id, &source, error) &&
          ArDialogueSession_RestoreSource(session, &source, &contract, state,
                                          resolver, error);

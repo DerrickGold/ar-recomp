@@ -251,7 +251,24 @@ static void TestParsedTemplateToFrame(void) {
   CHECK(ArLocalizationFrame_IsValid(&frame));
 }
 
+static void TestButtonObjectNormalization(void) {
+  const char source[]="  Press  \xEF\xBF\xBC now.  ";
+  ArDialogueInlineObject object={.end_utf8_byte=12,.id="button.glyph.playstation.triangle"};
+  char text[128]; size_t bytes;
+  uint16_t offsets[sizeof(source)]; uint8_t count;
+  ArLocalizationInlineObjectSnapshot rendered[1];
+  CHECK(ActRaiserLocalizationText_Normalize(source,sizeof(source)-1,&object,1,true,
+      text,sizeof(text),&bytes,rendered,1,&count,offsets));
+  CHECK(!strcmp(text,"Press \xE2\x80\x83 now."));
+  CHECK(count==1 && rendered[0].kind==kArLocalizationInlineObject_Button);
+  CHECK(rendered[0].button.family==kArButtonGlyphFamily_PlayStation &&
+      rendered[0].button.symbol==kArButtonGlyphSymbol_Triangle);
+  CHECK(offsets[9]==offsets[10] && offsets[10]==offsets[11]);
+  CHECK(offsets[12]==rendered[0].end_utf8_byte);
+}
+
 int main(void) {
+  TestButtonObjectNormalization();
   TestParsedTemplateToFrame();
   TestOwnedStylesAndPalettes();
   TestNormalizedAndEditedRanges();

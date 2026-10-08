@@ -114,8 +114,8 @@ static void TestDefaultsAndMetadata(void) {
    * Seeded regional rolls add two options; save slots add two entry actions.
    * Remember last town adds a native/enhanced QoL preference; native menu
    * quick use adds an independent QoL toggle. Save editing adds Apply and restart. */
-  /* One completion scene switch plus nine internal effect overrides. */
-  const int expected_descriptors = 319;
+  /* One completion scene switch plus nine internal effect overrides; one button-prompt representation preference. */
+  const int expected_descriptors = 320;
   if (g_setting_desc_count != expected_descriptors)
     fprintf(stderr, "Setting descriptors: expected %d, got %d\n",
             expected_descriptors, g_setting_desc_count);
@@ -1373,6 +1373,42 @@ static void TestInputBindingHints(void) {
   g_settings.input_bind[kInputClass_Keyboard][kInputAction_SimDescribe] = 0;
   InputMap_GameActionHint(hint, sizeof(hint), kInputAction_SimDescribe);
   CHECK(!hint[0]);
+}
+
+static void TestButtonPrompts(void) {
+  Settings_Init(); InputMap_Clear();
+  const SettingDesc *mode=Settings_Find("localization_button_prompts");
+  CHECK(mode && g_settings.localization_button_prompts==0);
+  CHECK(Settings_SetText(mode,"Button glyphs")==kSettingChange_Applied);
+  CHECK(g_settings.localization_button_prompts==1);
+  CHECK(Settings_SetText(mode,"Text")==kSettingChange_Applied);
+  CHECK(g_settings.localization_button_prompts==0);
+  const uint32 south=INPUT_BIND_MAKE(kInputBind_PadButton,SDL_GAMEPAD_BUTTON_SOUTH,false);
+  const uint32 north=INPUT_BIND_MAKE(kInputBind_PadButton,SDL_GAMEPAD_BUTTON_NORTH,false);
+  ArButtonPrompt prompt;
+  InputMap_FormatButtonPrompt(&prompt,south,SDL_GAMEPAD_TYPE_XBOXONE);
+  CHECK(!strcmp(prompt.label,"A") && !strcmp(prompt.icon,"button.glyph.xbox.a"));
+  InputMap_FormatButtonPrompt(&prompt,south,SDL_GAMEPAD_TYPE_PS5);
+  CHECK(!strcmp(prompt.label,"Cross") && !strcmp(prompt.icon,"button.glyph.playstation.cross"));
+  InputMap_FormatButtonPrompt(&prompt,north,SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO);
+  CHECK(!strcmp(prompt.label,"X") && !strcmp(prompt.icon,"button.glyph.nintendo.x"));
+  InputMap_FormatButtonPrompt(&prompt,INPUT_BIND_MAKE(kInputBind_PadAxis,SDL_GAMEPAD_AXIS_LEFT_TRIGGER,false),SDL_GAMEPAD_TYPE_PS4);
+  CHECK(!strcmp(prompt.icon,"button.glyph.playstation.l2"));
+  InputMap_FormatButtonPrompt(&prompt,INPUT_BIND_MAKE(kInputBind_PadAxis,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER,false),SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO);
+  CHECK(!strcmp(prompt.icon,"button.glyph.nintendo.zr"));
+  InputMap_FormatButtonPrompt(&prompt,INPUT_BIND_MAKE(kInputBind_Key,SDL_SCANCODE_F1,false),SDL_GAMEPAD_TYPE_STANDARD);
+  CHECK(!strcmp(prompt.label,"F1") && !strcmp(prompt.icon,"text:F1"));
+  InputMap_FormatButtonPrompt(&prompt,0,SDL_GAMEPAD_TYPE_STANDARD);
+  CHECK(!strcmp(prompt.icon,"text:—"));
+  ArButtonPrompts prompts;
+  g_settings.input_device=kInputDevice_Keyboard;
+  g_settings.input_bind[kInputClass_Keyboard][kInputAction_B]=INPUT_BIND_MAKE(kInputBind_Key,SDL_SCANCODE_F2,false);
+  InputMap_CaptureButtonPrompts(NULL,&prompts);
+  CHECK(!strcmp(prompts.buttons[kInputAction_B].label,"F2"));
+  CHECK(!strcmp(prompts.buttons[kInputAction_B].icon,"text:F2"));
+  CHECK(!strcmp(prompts.buttons[12].label,"S"));
+  for(unsigned i=0;i<kArButtonPromptCount;++i) CHECK(prompts.buttons[i].label[0] && prompts.buttons[i].icon[0]);
+  Settings_Init(); InputMap_Clear();
 }
 
 static void TestInputHintDeviceRetention(void) {
@@ -2697,6 +2733,7 @@ int main(int argc, char **argv) {
   TestAutoBootPreservesDisplayPreferences();
   TestInputBindings();
   TestInputBindingHints();
+  TestButtonPrompts();
   TestInputHintDeviceRetention();
   TestAnalogAngelInput();
   TestSteamDeckInputPolicy();

@@ -67,7 +67,50 @@ static bool Resolve(ActRaiserLocalizationValues *values, const char *name,
   return resolved;
 }
 
+static void TestAbilityNames(void) {
+  static const char script[] =
+      ":: sim.menu.lightning\nTempête\n@end\n"
+      ":: sky.menu.magic.fire\n@alias sim.menu.possession.slot_00\n"
+      ":: sim.menu.possession.slot_00\nFlamme   \n@line\n   sacrée\n@end\n"
+      ":: sim.help.category.2\nName {miracle.lightning.name}.\n@end\n";
+  const ArTextDocumentSource source={"names.artext",script,sizeof(script)-1};
+  const ArTextDocumentConfig config={.id="ability.test",.locale="fr",
+      .format_version=2,.sources=&source,.source_count=1};
+  ArLanguagePack pack;ArLanguagePack_Init(&pack);ArLanguagePackError error={{0}};
+  CHECK(ArLanguagePack_ParseDocument(&pack,&config,&error));
+  ActRaiserLocalizationValues values;
+  CHECK(ActRaiserLocalizationValues_Capture(&values,wram,sizeof(wram),&pack,NULL,"Master"));
+  ArDialogueValue value;
+  CHECK(Resolve(&values,"miracle.lightning.name",kArLanguagePlaceholder_LocalizedText,&value));
+  CHECK(!strcmp(value.text,"Tempête"));
+  CHECK(Resolve(&values,"spell.fire.name",kArLanguagePlaceholder_LocalizedText,&value));
+  CHECK(!strcmp(value.text,"Flamme sacrée"));
+  CHECK(Resolve(&values,"miracle.rain.name",kArLanguagePlaceholder_LocalizedText,&value));
+  CHECK(!strcmp(value.text,"Rain"));
+  CHECK(!Resolve(&values,"spell.fire.name",kArLanguagePlaceholder_Icon,&value));
+  static const char fallback_text[]=":: sim.menu.rain\nBaseline Rain\n@end\n";
+  const ArTextDocumentSource fallback_source={"fallback.artext",fallback_text,sizeof(fallback_text)-1};
+  ArTextDocumentConfig fallback_config=config;fallback_config.id="ability.fallback";
+  fallback_config.sources=&fallback_source;
+  ArLanguagePack fallback;ArLanguagePack_Init(&fallback);
+  CHECK(ArLanguagePack_ParseDocument(&fallback,&fallback_config,&error));
+  values.fallback_pack=&fallback;
+  CHECK(Resolve(&values,"miracle.rain.name",kArLanguagePlaceholder_LocalizedText,&value));
+  CHECK(!strcmp(value.text,"Baseline Rain"));
+  CHECK(Resolve(&values,"miracle.lightning.name",kArLanguagePlaceholder_LocalizedText,&value));
+  CHECK(!strcmp(value.text,"Tempête"));
+  ArLanguagePack_Destroy(&pack);
+  static const char blank_text[]=":: sim.menu.rain\n@empty\n@end\n";
+  const ArTextDocumentSource blank_source={"blank.artext",blank_text,sizeof(blank_text)-1};
+  ArTextDocumentConfig blank_config=config;blank_config.id="ability.blank";blank_config.sources=&blank_source;
+  ArLanguagePack_Init(&pack);CHECK(ArLanguagePack_ParseDocument(&pack,&blank_config,&error));
+  values.pack=&pack;
+  CHECK(!Resolve(&values,"miracle.rain.name",kArLanguagePlaceholder_LocalizedText,&value));
+  ArLanguagePack_Destroy(&pack);ArLanguagePack_Destroy(&fallback);
+}
+
 int main(void) {
+  TestAbilityNames();
   static const char manifest[] = "[pack]\n"
                                  "format = actraiser-language-pack\n"
                                  "version = 1\n"
@@ -137,6 +180,20 @@ int main(void) {
   ActRaiserLocalizationValues values;
   CHECK(ActRaiserLocalizationValues_Capture(&values, wram, sizeof(wram), &pack, NULL, "Maître"));
   ArDialogueValue value;
+  for (unsigned i=0;i<kArButtonPromptCount;++i) {
+    char name[64];
+    snprintf(name,sizeof(name),"button.%s",kArButtonPromptKeys[i]);
+    CHECK(Resolve(&values,name,kArLanguagePlaceholder_LocalizedText,&value));
+    CHECK(!strcmp(value.text,values.buttons.buttons[i].label));
+    snprintf(name,sizeof(name),"icon.button.%s",kArButtonPromptKeys[i]);
+    CHECK(Resolve(&values,name,kArLanguagePlaceholder_Icon,&value));
+    ArButtonGlyph glyph;
+    CHECK(ArButtonGlyph_Parse(value.text,&glyph));
+    CHECK(glyph.family==kArButtonGlyphFamily_Nintendo);
+  }
+  snprintf(values.buttons.buttons[0].icon,sizeof(values.buttons.buttons[0].icon),"text:F1");
+  CHECK(Resolve(&values,"icon.button.b",kArLanguagePlaceholder_Icon,&value));
+  CHECK(!strcmp(value.text,"text:F1"));
   CHECK(Resolve(&values, "miracle_earthquake_sp", kArLanguagePlaceholder_Number, &value));
   CHECK(value.number == 160);
   ArRegionalCostPolicy jp;

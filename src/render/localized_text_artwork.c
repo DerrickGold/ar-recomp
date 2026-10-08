@@ -83,6 +83,8 @@ static float SquaredDistanceToSegment(float px, float py, float ax, float ay,
   return ex * ex + ey * ey;
 }
 
+#include "render/button_glyph_artwork.inc"
+
 /* Smooth enlargement of a captured native icon.
  *
  * The game's icons are 8x8 tiles, so beside HD text they are visibly coarse.
@@ -335,7 +337,9 @@ bool ArLocalizedTextArtwork_PrepareInlineObject(
 
   ArRenderTexture texture = ArRenderTexture_Invalid();
   int object_height = extent;
-  if (name_cursor) {
+  if (kind == kArLocalizationInlineObject_Button) {
+    if (!PrepareButtonTexture(device,object->button,&texture)) return false;
+  } else if (name_cursor) {
     object_height = cluster->height;
     if (surface->line_advance > 0 && object_height > surface->line_advance)
       object_height = surface->line_advance;
@@ -413,6 +417,11 @@ ArRenderRectI ArLocalizedTextArtwork_Ink(ArLocalizationArtworkKind kind) {
 }
 
 void ArLocalizedTextArtwork_Reset(ArRenderDevice *device) {
+  for (unsigned family=0;family<kArButtonGlyphFamily_Count;++family)
+    for (unsigned symbol=0;symbol<kArButtonGlyphSymbol_Count;++symbol) {
+      ArRenderDevice_DestroyTexture(device,s_button_textures[family][symbol]);
+      s_button_textures[family][symbol]=ArRenderTexture_Invalid();
+    }
   for (unsigned i = 0; i < kArLocalizationArtwork_Count; ++i) {
     ArRenderDevice_DestroyTexture(device, s_artwork.artwork_textures[i]);
     s_artwork.artwork_textures[i] = ArRenderTexture_Invalid();

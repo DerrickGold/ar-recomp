@@ -7,6 +7,8 @@
  * preserve explicit authored line breaks. */
 static ArLocalizationInlineObjectKind InlineObjectKind(const char *id) {
   if (!id) return kArLocalizationInlineObject_None;
+  ArButtonGlyph button;
+  if (ArButtonGlyph_Parse(id, &button)) return kArLocalizationInlineObject_Button;
   if (!strcmp(id, "icon.status.life"))
     return kArLocalizationInlineObject_StatusLife;
   if (!strcmp(id, "icon.status.population"))
@@ -90,11 +92,17 @@ bool ActRaiserLocalizationText_NormalizeStructured(
       pending_space = false;
       pending_boundary = false;
       memcpy(destination + written,
-             kind == kArLocalizationInlineObject_StatusLife ? kEmSpace : kFigureSpace,
+             (kind == kArLocalizationInlineObject_StatusLife || kind == kArLocalizationInlineObject_Button) ? kEmSpace : kFigureSpace,
              sizeof(kFigureSpace));
       written += sizeof(kFigureSpace);
       destination_objects[object_index] =
           (ArLocalizationInlineObjectSnapshot){kind, (uint32_t)written};
+      if (kind == kArLocalizationInlineObject_Button)
+        ArButtonGlyph_Parse(source_objects[object_index].id, &destination_objects[object_index].button);
+      if (reveal_offsets) {
+        reveal_offsets[index+1] = reveal_offsets[index];
+        reveal_offsets[index+2] = reveal_offsets[index];
+      }
       ++object_index;
       index += sizeof(kObjectMarker) - 1u;
       continue;
