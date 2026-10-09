@@ -21,20 +21,7 @@ and rebindable controls. The in-game settings menu explains each option.
 
 [![GitHub downloads (all assets, all releases)](https://img.shields.io/github/downloads/DerrickGold/ar-recomp/total)](https://github.com/DerrickGold/ar-recomp/releases)
 ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads-pre/DerrickGold/ar-recomp/latest/total)
-![GitHub commits since tagged version](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0800)
-
-
-> **For visitors from Japan / 日本語でご覧の皆さまへ**
->
-> Thank you for taking an interest in the project and for sharing it with
-> others. The current build is based on the USA release, which differs from the
-> Japanese version in many ways beyond the language itself. Language packs and
-> Japanese gameplay rules are now available, with supported regional artwork
-> and music extracted locally from your own ROMs. Players can create and share
-> their own translations. Regional play-testing is still in progress; language
-> packs alone do not change the game mechanics.
->
-> 本プロジェクトに関心を寄せていただき、ありがとうございます。また、本作を広めてくださった皆さまにも心より御礼申し上げます。現在のビルドは北米版をベースとしており、日本版とは言語以外にも多くの違いがあります。日本語のテキストに対応した言語パックに加え、日本版のゲームルールも選べるようになりました。対応する画像や音楽は、お持ちのROMから抽出して使用できます。プレイヤー自身で翻訳を作成し、配布することもできます。各地域のルールでのプレイ検証は引き続き進めています。なお、言語パックだけではゲームの仕様は日本版に変わりません。
+![GitHub commits since tagged version](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0801)
 
 ---
 
