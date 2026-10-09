@@ -1906,7 +1906,7 @@ static void PrepareCellText(ArRenderDevice *device, const ArLocalizationFrame *f
       objects_valid = false;
       break;
     }
-    if (reveal_index >= snapshot->revealed_cluster_count) continue;
+    if (reveal_index >= revealed_clusters) continue;
     /* Objects hang off a cluster, so one that sits on a key follows it
      * onto its column instead of staying where the key was shaped. */
     ArRenderRectI object_destination = destination;
@@ -1919,6 +1919,8 @@ static void PrepareCellText(ArRenderDevice *device, const ArLocalizationFrame *f
       objects_valid = false;
       break;
     }
+    prepared_objects[prepared_object_count].viewport =
+        scrolling ? viewport : (ArRenderRectI){0};
     ++prepared_object_count;
   }
   if (!objects_valid) return;
@@ -2134,6 +2136,7 @@ bool ArLocalizedTextPresenter_PrepareScreenText(ArRenderDevice *device,
             device, frame, snapshot, object, &surface, utf8, utf8_bytes, cluster,
             destination, 0, &prepared->inline_objects[prepared->inline_object_count]))
       return false;
+    prepared->inline_objects[prepared->inline_object_count].viewport = viewport;
     ++prepared->inline_object_count;
   }
   prepared->texts[0] = (ArLocalizedPreparedText){

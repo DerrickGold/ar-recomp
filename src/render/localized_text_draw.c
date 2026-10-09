@@ -36,10 +36,35 @@ static bool DrawInlineObject(
       object->destination.h <= 0)
     return false;
   const ArRenderRectI bounds = object->destination;
+  ArRenderRectI visible = bounds;
+  ArRenderRectI source = {0, 0, bounds.w, bounds.h};
+  if (object->viewport.w > 0 &&
+      !ArLocalizedTextLayout_Clip(object->viewport, &source, &visible))
+    return true;
   /* An object that carries native artwork draws it; the shapes below are the
    * fallback for the objects the game has no tile for, and for a keyboard
    * whose glyphs were not on screen to capture. */
   if (ArRenderTexture_IsValid(object->texture)) {
+    if (visible.x != bounds.x || visible.y != bounds.y ||
+        visible.w != bounds.w || visible.h != bounds.h) {
+      /* The artwork texture may have a different resolution from its shaped
+       * cluster. Clip in destination pixels, then map the retained portion to
+       * normalized texture coordinates without rescaling the visible ink. */
+      const float u = (float)source.x / bounds.w;
+      const float v = (float)source.y / bounds.h;
+      const float right = (float)(source.x + source.w) / bounds.w;
+      const float bottom = (float)(source.y + source.h) / bounds.h;
+      const ArRenderColorF color = {brightness, brightness, brightness, 1};
+      const ArRenderVertex2D vertices[] = {
+          {{visible.x, visible.y}, color, {u, v}},
+          {{visible.x + visible.w, visible.y}, color, {right, v}},
+          {{visible.x + visible.w, visible.y + visible.h}, color, {right, bottom}},
+          {{visible.x, visible.y + visible.h}, color, {u, bottom}},
+      };
+      const int32_t indices[] = {0, 1, 2, 0, 2, 3};
+      return ArRenderDevice_DrawGeometry(device, object->texture, vertices, 4,
+                                         indices, 6);
+    }
     const ArRenderRectF destination = {
       (float)bounds.x, (float)bounds.y, (float)bounds.w, (float)bounds.h,
     };

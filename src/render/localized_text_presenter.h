@@ -38,6 +38,8 @@ typedef struct ArLocalizedPreparedInlineObject {
   ArLocalizationInlineObjectKind kind;
   ArRenderRectI destination;
   ArRenderTexture texture;
+  /* Dialogue artwork uses the same software clipping window as its text. */
+  ArRenderRectI viewport;
 } ArLocalizedPreparedInlineObject;
 
 typedef struct ArLocalizedPreparedText {

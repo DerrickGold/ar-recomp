@@ -39,9 +39,26 @@ typedef struct TextureSink {
   const int *verify_shifts;
   ArRenderTextureDesc last_descriptor;
   ArRenderRectF draw_source[kRecordedDraws];
+  ArRenderTexture glyph_textures[3];
+  unsigned glyph_texture_count, glyph_draws[3];
+  ArRenderRectF glyph_destination[3], glyph_uv[3];
+  ArRenderRectI glyph_viewport;
   bool fail_create, fail_upload;
   bool alive[65536];
 } TextureSink;
+static void RecordGlyphDraw(TextureSink *sink, ArRenderTexture texture,
+                            ArRenderRectF destination, ArRenderRectF uv) {
+  for (unsigned i = 0; i < sink->glyph_texture_count; ++i) {
+    if (texture.value != sink->glyph_textures[i].value) continue;
+    ++sink->glyph_draws[i];
+    sink->glyph_destination[i] = destination;
+    sink->glyph_uv[i] = uv;
+    const ArRenderRectI viewport = sink->glyph_viewport;
+    CHECK(destination.x >= viewport.x && destination.y >= viewport.y);
+    CHECK(destination.x + destination.w <= viewport.x + viewport.w);
+    CHECK(destination.y + destination.h <= viewport.y + viewport.h);
+  }
+}
 static bool Create(void *context, const ArRenderTextureDesc *desc, ArRenderTexture *out) {
   TextureSink *sink = context;
   if (desc) sink->last_descriptor = *desc;
@@ -101,7 +118,7 @@ static bool Draw(void *context, ArRenderTexture texture, const ArRenderRectF *sr
   if (sink->draws < kRecordedDraws)
     sink->draw_source[sink->draws] = src ? *src : (ArRenderRectF){0, 0, 0, 0};
   ++sink->draws;
-  (void)dst;
+  if (dst) RecordGlyphDraw(sink, texture, *dst, (ArRenderRectF){0, 0, 1, 1});
   return true;
 }
 static bool Geometry(void *context, ArRenderTexture texture, const ArRenderVertex2D *vertices,
@@ -111,6 +128,14 @@ static bool Geometry(void *context, ArRenderTexture texture, const ArRenderVerte
   if (texture.value) {
     CHECK(texture.value < sizeof(sink->alive) && sink->alive[texture.value]);
     CHECK(count % 4 == 0 && index_count == count / 4 * 6);
+    if (count == 4)
+      RecordGlyphDraw(sink, texture,
+          (ArRenderRectF){vertices[0].position.x, vertices[0].position.y,
+              vertices[2].position.x - vertices[0].position.x,
+              vertices[2].position.y - vertices[0].position.y},
+          (ArRenderRectF){vertices[0].tex_coord.x, vertices[0].tex_coord.y,
+              vertices[2].tex_coord.x - vertices[0].tex_coord.x,
+              vertices[2].tex_coord.y - vertices[0].tex_coord.y});
     for (int i = 0; i < count; i += 4) {
       if (sink->verify_text) {
         const ArLocalizedPreparedText *text = sink->verify_text;
@@ -586,6 +611,146 @@ static void ExerciseScreenButtonGlyphs(ArRenderDevice *device) {
       CHECK(ArLocalizedTextPresenter_Draw(device, &prepared));
     }
   }
+}
+
+static bool PrepareButtonDialogue(ArRenderDevice *device, ArLocalizationFrame *frame,
+                                   bool screen, int scale, ArLocalizedPreparedFrame *prepared) {
+  if (screen)
+    return ArLocalizedTextPresenter_PrepareScreenText(device, frame, 700,
+        (ArRenderRectI){40 * scale, 152 * scale, 176 * scale, 56 * scale}, prepared);
+  const HudPresentationChunk chunk = {
+      .inspector_kind = kInspectorPresentation_HudBg,
+      .screen_source = {0, 0, 256, 224}, .texture_source = {0, 0, 256, 224},
+      .output_destination = {0, 0, 256 * scale, 224 * scale}};
+  ArLocalizedTextPresenter_Prepare(device, frame, true, 0, 32, 32, 0, 0, 256, 224,
+                                  &chunk, 1, prepared);
+  return prepared->text_count == 1;
+}
+
+/* Fully revealed source text can span several acknowledged screenfuls. A
+ * button must wait for its owning cluster, use the measured page limit, and
+ * leave the clip window with that cluster when previous lines scroll away. */
+static void ExerciseDialogueButtonPaging(ArRenderDevice *device) {
+  test_case = "dialogue buttons follow cluster reveal, paging and scroll clipping";
+  TextureSink *sink = device->context;
+  const char text[] = "Press \xe2\x80\x83 Button\nLine 2.\nLine 3.\nLine 4.\n"
+      "Line 5.\nLine 6.\nLine 7.\nPress \xe2\x80\x83 Button\n"
+      "Line 9.\nLine 10.\nLine 11.\nLine 12.\nLine 13.\nLine 14.\n"
+      "Press \xe2\x80\x83 Button\nLine 16.\nLine 17.";
+  const uint32_t bytes = sizeof(text) - 1u, clusters = bytes - 6u;
+  ArLocalizationInlineObjectSnapshot objects[3];
+  const char *at = text;
+  for (unsigned i = 0; i < 3; ++i) {
+    at = strstr(at, "\xe2\x80\x83");
+    CHECK(at != NULL);
+    if (!at) return;
+    at += 3;
+    objects[i] = (ArLocalizationInlineObjectSnapshot){
+        .kind = kArLocalizationInlineObject_Button,
+        .end_utf8_byte = (uint32_t)(at - text),
+        .button = {kArButtonGlyphFamily_Generic,
+            i == 0 ? kArButtonGlyphSymbol_A : i == 1 ? kArButtonGlyphSymbol_X : kArButtonGlyphSymbol_Y}};
+  }
+  for (int size = 80; size <= 140; size += 60)
+    for (int scale = 1; scale <= 3; scale += 2)
+      for (unsigned screen = 0; screen < 2; ++screen) {
+        test_size = size;
+        test_scale = scale;
+        test_example = screen;
+        ArLocalizationFrame frame;
+        ArLocalizationFrame_Reset(&frame);
+        frame.settings.size_percent = size;
+        CHECK(ArLocalizationFrame_SetFont(&frame, "en", "test", s_test_font, 1, &frame.settings));
+        if (screen)
+          CHECK(ArLocalizationFrame_AddScreenTextWithObjects(&frame, 700, 40, 152, 176, 56,
+              text, bytes, clusters, clusters, 1, kArTextDirection_LeftToRight, 8,
+              kArLocalizationTextLayout_DialogueWindow, objects, 3));
+        else
+          CHECK(ArLocalizationFrame_AddTextWithObjectsAndLayout(&frame, 700,
+              (ArTextCellDestination){3, kArTextCellScreen_Composited, 0},
+              (ArTextCellRegion){5, 19, 22, 7}, text, bytes, clusters, clusters, 1,
+              kArTextDirection_LeftToRight, 8, kArLocalizationTextLayout_DialogueWindow,
+              NULL, 0, objects, 3));
+        frame.snapshots[0].revealed_utf8_bytes = bytes;
+        ArLocalizedPreparedFrame prepared;
+        CHECK(PrepareButtonDialogue(device, &frame, screen, scale, &prepared));
+        CHECK(prepared.inline_object_count == 3);
+        if (prepared.inline_object_count != 3) continue;
+        for (unsigned i = 0; i < 3; ++i) sink->glyph_textures[i] = prepared.inline_objects[i].texture;
+        sink->glyph_texture_count = 3;
+        sink->glyph_viewport = prepared.texts[0].viewport;
+        memset(sink->glyph_draws, 0, sizeof(sink->glyph_draws));
+        CHECK(ArLocalizedTextPresenter_Draw(device, &prepared));
+        CHECK(sink->glyph_draws[0] == 0 && sink->glyph_draws[1] == 0 && sink->glyph_draws[2] == 1);
+
+        frame.dialogue_paged = true;
+        frame.dialogue_surface_id = 700;
+        frame.dialogue_ticket = 123;
+        /* Leave the source cluster count complete, as the runtime does. The
+         * glyph reveal must use the effective byte/page-limited text count. */
+        frame.snapshots[0].revealed_utf8_bytes = objects[0].end_utf8_byte - 3u;
+        CHECK(PrepareButtonDialogue(device, &frame, screen, scale, &prepared));
+        CHECK(prepared.inline_object_count == 0);
+        frame.snapshots[0].revealed_utf8_bytes = objects[0].end_utf8_byte;
+        CHECK(PrepareButtonDialogue(device, &frame, screen, scale, &prepared));
+        CHECK(prepared.inline_object_count == 1);
+        sink->glyph_viewport = prepared.texts[0].viewport;
+        memset(sink->glyph_draws, 0, sizeof(sink->glyph_draws));
+        CHECK(ArLocalizedTextPresenter_Draw(device, &prepared));
+        CHECK(sink->glyph_draws[0] == 1 && sink->glyph_draws[1] == 0 && sink->glyph_draws[2] == 0);
+
+        const ArLocalizedPreparedInlineObject first = prepared.inline_objects[0];
+        frame.snapshots[0].revealed_utf8_bytes = bytes;
+        unsigned windows = 0, drawn[3] = {0};
+        while (frame.dialogue_page_start < bytes && windows++ < 20) {
+          CHECK(PrepareButtonDialogue(device, &frame, screen, scale, &prepared));
+          const uint32_t end = prepared.dialogue_page_end;
+          CHECK(end > frame.dialogue_page_start && end <= bytes);
+          if (end <= frame.dialogue_page_start) break;
+          unsigned prepared_count = 0;
+          for (unsigned i = 0; i < 3; ++i)
+            prepared_count += objects[i].end_utf8_byte <= end;
+          CHECK(prepared.inline_object_count == prepared_count);
+          sink->glyph_viewport = prepared.texts[0].viewport;
+          memset(sink->glyph_draws, 0, sizeof(sink->glyph_draws));
+          CHECK(ArLocalizedTextPresenter_Draw(device, &prepared));
+          for (unsigned i = 0; i < 3; ++i) {
+            const unsigned expected = objects[i].end_utf8_byte > frame.dialogue_page_start &&
+                objects[i].end_utf8_byte <= end;
+            CHECK(sink->glyph_draws[i] == expected);
+            drawn[i] += sink->glyph_draws[i];
+          }
+          frame.dialogue_page_start = end;
+        }
+        CHECK(windows > 1 && frame.dialogue_page_start == bytes);
+        for (unsigned i = 0; i < 3; ++i) CHECK(drawn[i] == 1);
+
+        /* Clip part of a glyph at a window edge. Its surviving portion keeps
+         * its original scale and samples only the matching texture portion. */
+        memset(&prepared, 0, sizeof(prepared));
+        prepared.inline_objects[0] = first;
+        prepared.inline_object_count = 1;
+        const ArRenderRectI glyph = first.destination;
+        const ArRenderRectI crop = {glyph.x + glyph.w / 4, glyph.y + glyph.h / 3,
+                                    glyph.w / 2, glyph.h / 2};
+        prepared.inline_objects[0].viewport = crop;
+        sink->glyph_viewport = crop;
+        memset(sink->glyph_draws, 0, sizeof(sink->glyph_draws));
+        CHECK(ArLocalizedTextPresenter_DrawWithBrightness(device, &prepared, 0.5f));
+        CHECK(sink->glyph_draws[0] == 1);
+        CHECK(sink->glyph_destination[0].x == crop.x && sink->glyph_destination[0].y == crop.y);
+        CHECK(sink->glyph_destination[0].w == crop.w && sink->glyph_destination[0].h == crop.h);
+        CHECK(fabsf(sink->glyph_uv[0].x - (float)(crop.x - glyph.x) / glyph.w) < .001f);
+        CHECK(fabsf(sink->glyph_uv[0].y - (float)(crop.y - glyph.y) / glyph.h) < .001f);
+        CHECK(fabsf(sink->glyph_uv[0].w - (float)crop.w / glyph.w) < .001f);
+        CHECK(fabsf(sink->glyph_uv[0].h - (float)crop.h / glyph.h) < .001f);
+        CHECK(fabsf(sink->last_tint.r - 0.5f) < .001f);
+        prepared.inline_objects[0].destination.y = crop.y - glyph.h;
+        memset(sink->glyph_draws, 0, sizeof(sink->glyph_draws));
+        CHECK(ArLocalizedTextPresenter_Draw(device, &prepared));
+        CHECK(sink->glyph_draws[0] == 0);
+        sink->glyph_texture_count = 0;
+      }
 }
 
 static void ExerciseRetainedDialogue(ArRenderDevice *device) {
@@ -2079,6 +2244,7 @@ int main(void) {
   ExerciseLabelBreaks(&device);
   ExerciseScreenText(&device);
   ExerciseScreenButtonGlyphs(&device);
+  ExerciseDialogueButtonPaging(&device);
   ExerciseScreenDialogue(&device);
   ExerciseRetainedDialogue(&device);
   const int sizes[] = {80, 110, 140};
