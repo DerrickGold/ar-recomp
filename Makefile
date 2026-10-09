@@ -301,8 +301,13 @@ check-localization-workflow: check-localization-roms
 	  go -C installer test -race ./internal/builder \
 	    -run 'TestLocalizationRelocatedBuilderGameWorkflow|TestHeadlessDebugStateRejectionExits|TestHeadlessReplayEndExitsBeforeSafetyCap' -count=1
 
+# Once every cache image is detached, an interrupted Linux SDK build's empty
+# mountpoint and lock are stale. rmdir refuses anything that is not empty.
 clean-packaging-mounts:
 	@/bin/sh "$(PACKAGING)/scripts/detach-macos-dmgs.sh" "$(abspath $(PACKAGING)/cache)"
+	@for d in $(PACKAGING)/cache/desktop/linux-sdk-volume $(PACKAGING)/cache/desktop/linux-sdk.lock; do \
+	  if [ -d "$$d" ]; then rmdir "$$d" || exit 1; echo "  rm stale $$d"; fi; \
+	done
 
 clean: clean-packaging-mounts
 	@removed=""; \

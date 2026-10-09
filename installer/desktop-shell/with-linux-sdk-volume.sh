@@ -15,14 +15,17 @@ for path in "$image" "$volume" "$lock"; do
 done
 mkdir "$lock" 2>/dev/null || {
     echo "Linux SDK is in use, or a previous build was interrupted: $lock" >&2
-    echo 'Check for an active build/mount before removing a stale lock.' >&2
+    echo "If no build is running, 'make clean-packaging-mounts' detaches the image and clears the stale lock." >&2
     exit 1
 }
 attached=0
 made_volume=0
 cleanup() {
     result=$?
-    trap - EXIT HUP INT TERM
+    # Ctrl-C kills the parent CMake first, leaving stdout/stderr unread: never
+    # let SIGPIPE or a repeated signal turn a good detach into a stale lock.
+    trap - EXIT
+    trap '' HUP INT TERM PIPE
     if test "$attached" = 1; then
         if ! hdiutil detach "$volume"; then
             echo "Could not detach $volume; keeping the lock. Close processes using it, detach it, then remove the empty mountpoint and lock directories." >&2
