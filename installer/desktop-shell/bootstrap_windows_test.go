@@ -12,7 +12,7 @@ import (
 
 // These need a native Windows host and its actual ACL-capable filesystem.
 // Cross-compiling the test executable is not an execution result.
-func TestRuntimeCacheOwnershipAndACLPreparation(t *testing.T) {
+func TestRuntimeCacheOwnership(t *testing.T) {
 	root := t.TempDir()
 	unmanaged := filepath.Join(root, "existing")
 	if err := os.Mkdir(unmanaged, 0700); err != nil {
@@ -27,16 +27,6 @@ func TestRuntimeCacheOwnershipAndACLPreparation(t *testing.T) {
 	}
 	if err := ensureRuntimeCache(cache); err != nil {
 		t.Fatal("warm cache:", err)
-	}
-	webview := filepath.Join(cache, "test runtime")
-	if err := os.Mkdir(webview, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(webview, "fixture.txt"), []byte("test"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := grantWebviewReadAccess(webview); err != nil {
-		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(cache, ".builder-runtime-cache"), []byte("different owner"), 0600); err != nil {
 		t.Fatal(err)
@@ -88,7 +78,9 @@ func readRuntimeGrants(t *testing.T, directory string) map[string]windows.ACCESS
 	return grants
 }
 
-func TestWebviewACLHandlesLongPathsAndPreservesPrivateCache(t *testing.T) {
+// The cache holds only the Builder's own tools now; no AppContainer (WebView2
+// sandbox) grant is needed or wanted anywhere in it.
+func TestRuntimeCacheStaysPrivateOnLongPaths(t *testing.T) {
 	for _, longRoot := range []bool{false, true} {
 		name := "long child"
 		if longRoot {
@@ -105,36 +97,22 @@ func TestWebviewACLHandlesLongPathsAndPreservesPrivateCache(t *testing.T) {
 			if err := ensureRuntimeCache(cache); err != nil {
 				t.Fatal(err)
 			}
-			webview := filepath.Join(cache, "stage", "webview")
-			deep := webview
+			deep := filepath.Join(cache, "stage", "payload")
 			for len(deep) < 350 {
-				deep = filepath.Join(deep, strings.Repeat("runtime resource ", 3)+"folder")
+				deep = filepath.Join(deep, strings.Repeat("bundled tool ", 3)+"folder")
 			}
 			if err := os.MkdirAll(deep, 0700); err != nil {
 				t.Fatal(err)
 			}
-			existing := filepath.Join(deep, "FloatingComposerPageStyles.xbf")
-			if err := os.WriteFile(existing, []byte("synthetic runtime"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			payload := filepath.Join(cache, "stage", "payload")
-			if err := os.Mkdir(payload, 0700); err != nil {
-				t.Fatal(err)
-			}
-			for i := 0; i < 2; i++ {
-				if err := grantWebviewReadAccess(webview); err != nil {
-					t.Fatalf("grant attempt %d: %v", i, err)
-				}
-			}
-			future := filepath.Join(deep, "new-runtime-file.txt")
-			if err := os.WriteFile(future, []byte("inherits permissions"), 0600); err != nil {
+			file := filepath.Join(deep, "zig.exe")
+			if err := os.WriteFile(file, []byte("synthetic tool"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			user, err := windows.GetCurrentProcessToken().GetTokenUser()
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, path := range []string{cache, filepath.Dir(webview), payload, webview, deep, existing, future} {
+			for _, path := range []string{cache, filepath.Join(cache, "stage"), deep, file} {
 				grants := readRuntimeGrants(t, path)
 				ownerAccess := windows.ACCESS_MASK(windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE | windows.FILE_GENERIC_EXECUTE | windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER)
 				for _, sid := range []string{user.User.Sid.String(), "S-1-5-18"} {
@@ -142,18 +120,11 @@ func TestWebviewACLHandlesLongPathsAndPreservesPrivateCache(t *testing.T) {
 						t.Errorf("lost owner/SYSTEM access at %s: %v", path, grants)
 					}
 				}
-				want := windows.ACCESS_MASK(0)
-				if path == webview || strings.HasPrefix(path, webview+string(filepath.Separator)) {
-					want = windows.FILE_GENERIC_READ | windows.FILE_GENERIC_EXECUTE
-				}
 				for _, sid := range []string{"S-1-15-2-2", "S-1-15-2-1"} {
-					if grants[sid] != want {
-						t.Errorf("sandbox grants at %s = %#x; want %#x", path, grants[sid], want)
+					if grants[sid] != 0 {
+						t.Errorf("unexpected sandbox grant at %s: %#x", path, grants[sid])
 					}
 				}
-			}
-			if content, err := os.ReadFile(existing); err != nil || string(content) != "synthetic runtime" {
-				t.Fatalf("permission update modified runtime bytes: %q %v", content, err)
 			}
 		})
 	}

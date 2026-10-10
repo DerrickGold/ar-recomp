@@ -89,6 +89,8 @@ if(NOT SNESBUILD_VERSION)
         set(SNESBUILD_VERSION "0.0.0-dev")
     endif()
 endif()
+# Desktop packagers run as separate cmake -P scripts and read this back.
+set(SNESBUILD_VERSION_STAMP "${SNESBUILD_VERSION}" CACHE INTERNAL "Version stamped into the binaries")
 
 set(_os_name "${SNESBUILD_GOOS}")
 if(_os_name STREQUAL "darwin")
@@ -213,7 +215,15 @@ message(STATUS
 file(DOWNLOAD ${_zig_url} ${_cache_dir}/${_zig_archive}
     EXPECTED_HASH SHA256=${_zig_sha} SHOW_PROGRESS)
 string(REGEX REPLACE "\\.(tar\\.xz|zip)$" "" _zig_release "${_zig_archive}")
-set(_zig_stage ${CMAKE_BINARY_DIR}/deps)
+# Bundles keep only the parts of Zig's lib/ that this platform's builds read;
+# `snesbuild toolchain trim` owns the list. OFF ships the whole release, for
+# example to compare a game build against the untrimmed compiler.
+option(SNESBUILD_TRIM_ZIG "Bundle only the target platform's part of the Zig library" ON)
+if(SNESBUILD_TRIM_ZIG)
+    set(_zig_stage ${CMAKE_BINARY_DIR}/deps/zig-trimmed)
+else()
+    set(_zig_stage ${CMAKE_BINARY_DIR}/deps/zig-full)
+endif()
 if(NOT IS_DIRECTORY ${_zig_stage}/${_zig_release})
     file(MAKE_DIRECTORY ${_zig_stage})
     message(STATUS "Extracting ${_zig_archive}")
@@ -222,6 +232,17 @@ if(NOT IS_DIRECTORY ${_zig_stage}/${_zig_release})
     if(NOT _zig_extract EQUAL 0)
         file(REMOVE_RECURSE ${_zig_stage}/${_zig_release})
         message(FATAL_ERROR "extracting ${_zig_archive} failed")
+    endif()
+endif()
+if(SNESBUILD_TRIM_ZIG)
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E env GOCACHE=${_go_cache}
+            ${GO_EXECUTABLE} -C ${SNESBUILD_MODULE_DIR} run ./cmd/snesbuild
+            toolchain trim --goos ${SNESBUILD_GOOS} --goarch ${SNESBUILD_GOARCH}
+            --dir ${_zig_stage}/${_zig_release}
+        RESULT_VARIABLE _zig_trim)
+    if(NOT _zig_trim EQUAL 0)
+        message(FATAL_ERROR "trimming ${_zig_release} for ${SNESBUILD_GOOS}/${SNESBUILD_GOARCH} failed")
     endif()
 endif()
 

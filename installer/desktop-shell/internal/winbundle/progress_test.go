@@ -28,13 +28,13 @@ func TestStartupProgressAndCancellation(t *testing.T) {
 	}
 	defer a.Close()
 	dest := filepath.Join(t.TempDir(), "runtime")
-	if err := a.ExtractContext(context.Background(), dest, func(string) error { return nil }, report); err != nil {
+	if err := a.ExtractContext(context.Background(), dest, report); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.VerifyDirectoryContext(context.Background(), dest, report); err != nil {
 		t.Fatal(err)
 	}
-	for _, stage := range []string{"Checking bundled package", "Extracting bundled tools and browser", "Applying browser permissions", "Verifying prepared files"} {
+	for _, stage := range []string{"Checking bundled package", "Extracting bundled tools", "Verifying prepared files"} {
 		started, finished := false, false
 		for _, p := range updates {
 			if p.Stage == stage {
@@ -57,7 +57,13 @@ func TestStartupProgressAndCancellation(t *testing.T) {
 		parent := t.TempDir()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := a.ExtractContext(ctx, filepath.Join(parent, "runtime"), func(string) error { cancel(); return nil }, report)
+		// Cancel once every file is written, just before the tree is published.
+		err := a.ExtractContext(ctx, filepath.Join(parent, "runtime"), func(p Progress) {
+			report(p)
+			if p.Stage == "Extracting bundled tools" && p.Total > 0 && p.Completed == p.Total {
+				cancel()
+			}
+		})
 		if !errors.Is(err, context.Canceled) {
 			t.Fatal(err)
 		}

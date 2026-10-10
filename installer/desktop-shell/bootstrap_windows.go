@@ -15,7 +15,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func prepareEmbedded(ctx context.Context, payload, workspace, browser *string, forceVerify bool, progress winbundle.ProgressFunc) (*host.VerifiedPayload, error) {
+func prepareEmbedded(ctx context.Context, payload, workspace *string, forceVerify bool, progress winbundle.ProgressFunc) (*host.VerifiedPayload, error) {
 	if *payload != "" {
 		return nil, nil
 	} // Explicit developer mode retains the existing path.
@@ -48,7 +48,7 @@ func prepareEmbedded(ctx context.Context, payload, workspace, browser *string, f
 		return nil, err
 	}
 	if windows.GetDriveType(drive) == windows.DRIVE_REMOTE {
-		return nil, errors.New("Fixed WebView2 cannot run from a mapped network drive; choose a local workspace")
+		return nil, errors.New("The Builder workspace and its WebView2 profile cannot be on a mapped network drive; choose a local workspace")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -68,13 +68,12 @@ func prepareEmbedded(ctx context.Context, payload, workspace, browser *string, f
 	}
 	defer release()
 	dir := filepath.Join(cache, a.ID)
-	verified, err := a.PrepareDirectoryContext(ctx, dir, grantWebviewReadAccess, progress)
+	verified, err := a.PrepareDirectoryContext(ctx, dir, progress)
 	if err != nil {
 		return nil, err
 	}
 	*payload = filepath.Join(dir, "payload")
 	*workspace = work
-	*browser = filepath.Join(dir, "webview")
 	// WebView2 environment variables can supersede the API's explicit paths.
 	// Do not inherit debugging/runtime-selection overrides into this package.
 	for _, entry := range os.Environ() {
@@ -84,9 +83,6 @@ func prepareEmbedded(ctx context.Context, payload, workspace, browser *string, f
 				return nil, err
 			}
 		}
-	}
-	if err = os.Setenv("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", *browser); err != nil {
-		return nil, err
 	}
 	if err = os.Setenv("WEBVIEW2_USER_DATA_FOLDER", host.AuxiliaryDirectory(work, "webview")); err != nil {
 		return nil, err
@@ -139,6 +135,18 @@ func ensureRuntimeCache(directory string) error {
 		return fmt.Errorf("runtime cache needs a local filesystem supporting Windows ACLs: %w", err)
 	}
 	return os.WriteFile(filepath.Join(directory, ".builder-runtime-cache"), []byte(cacheMarker), 0600)
+}
+
+// The bootstrap accepts only absolute local-drive paths. Give native ACL APIs
+// the extended-length form explicitly; unlike Go's os functions, these wrappers
+// do not add it automatically. This needs no system-wide long-path setting.
+func localSecurityPath(directory string) (string, error) {
+	directory = filepath.Clean(directory)
+	volume := filepath.VolumeName(directory)
+	if !filepath.IsAbs(directory) || len(volume) != 2 || volume[1] != ':' {
+		return "", errors.New("runtime permissions require an absolute local-drive path")
+	}
+	return `\\?\` + directory, nil
 }
 
 func showStartupError(err error) {

@@ -24,7 +24,9 @@ import (
 
 func main() {
 	if err := runDesktop(); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, errAlreadyRunning) {
-		showStartupError(err)
+		if !errors.Is(err, errWebview2Missing) {
+			showStartupError(err)
+		}
 		os.Exit(1)
 	}
 }
@@ -33,13 +35,16 @@ func runDesktop() error {
 	payload := flag.String("payload", "", "development-only: clean manifested installer tree")
 	workspace := flag.String("workspace", "", "dedicated writable workspace; default: sidecar or per-user app data")
 	outputDir := flag.String("output-dir", "", "playable game folder (default: ActRaiserRecomp beside this Builder)")
-	webview := flag.String("webview-runtime", "", "Windows development: fixed WebView2 runtime directory")
+	webview := flag.String("webview-runtime", "", "Windows development: Fixed Version WebView2 runtime directory instead of the system runtime")
 	jobs := flag.Int("jobs", 0, "build workers (0 uses builder default; use 1 on low-memory machines)")
 	verifyBundle := flag.Bool("verify-bundle", false, "fully verify bundled files instead of reusing unchanged-file checks")
 	flag.Parse()
 	developmentPayload := *payload != ""
 	if *jobs < 0 {
 		return fmt.Errorf("--jobs must not be negative")
+	}
+	if err := requireWebview2(*webview); err != nil {
+		return err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -48,7 +53,7 @@ func runDesktop() error {
 		return err
 	}
 	defer splash.Close()
-	verifiedPayload, err := prepareEmbedded(ctx, payload, workspace, webview, *verifyBundle, splash.Update)
+	verifiedPayload, err := prepareEmbedded(ctx, payload, workspace, *verifyBundle, splash.Update)
 	if err != nil {
 		return err
 	}

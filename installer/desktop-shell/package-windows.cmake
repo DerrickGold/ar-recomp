@@ -15,72 +15,18 @@ if(NOT _target_os STREQUAL "SNESBUILD_GOOS:STRING=windows" OR
     message(FATAL_ERROR "Builder requires a configured windows/amd64 or windows/arm64 installer payload")
 endif()
 set(_arch "${CMAKE_MATCH_1}")
-set(_lock "${CMAKE_CURRENT_LIST_DIR}/windows-webview2.json")
-file(READ "${_lock}" _pins)
-string(JSON _schema GET "${_pins}" schema)
-if(NOT _schema EQUAL 1)
-    message(FATAL_ERROR "Unsupported WebView2 runtime lock schema")
+# The executable's version information uses the version its bundled tools carry.
+file(STRINGS "${BUILDER_DIST_BUILD}/CMakeCache.txt" _version REGEX "^SNESBUILD_VERSION_STAMP:INTERNAL=.")
+if(NOT _version)
+    message(FATAL_ERROR "Reconfigure the Windows installer preset; its build records no release version")
 endif()
-string(JSON _version GET "${_pins}" runtimes "${_arch}" version)
-string(JSON _url GET "${_pins}" runtimes "${_arch}" url)
-string(JSON _sha GET "${_pins}" runtimes "${_arch}" sha256)
-if(NOT _version MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$" OR
-   NOT _url MATCHES "^https://msedge\\.sf\\.dl\\.delivery\\.mp\\.microsoft\\.com/.*\\.cab$")
-    message(FATAL_ERROR "WebView2 lock must name an exact version and official HTTPS CAB")
-endif()
+string(REGEX REPLACE "^SNESBUILD_VERSION_STAMP:INTERNAL=" "" _version "${_version}")
 
-# A provided CAB supports offline maintainer builds; it is ALWAYS checked
-# against the same pin. Players never download/extract a CAB themselves.
-if(BUILDER_WEBVIEW_CAB)
-    get_filename_component(_cab "${BUILDER_WEBVIEW_CAB}" ABSOLUTE)
-    file(SHA256 "${_cab}" _actual_sha)
-    if(NOT _actual_sha STREQUAL _sha)
-        message(FATAL_ERROR "Provided WebView2 CAB does not match ${_arch} SHA-256 pin")
-    endif()
-else()
-    if(NOT BUILDER_DOWNLOAD_CACHE)
-        set(BUILDER_DOWNLOAD_CACHE "${CMAKE_CURRENT_LIST_DIR}/../packaging/cache/desktop")
-    endif()
-    file(MAKE_DIRECTORY "${BUILDER_DOWNLOAD_CACHE}")
-    set(_cab "${BUILDER_DOWNLOAD_CACHE}/webview2-${_arch}-${_sha}.cab")
-    if(EXISTS "${_cab}")
-        file(SHA256 "${_cab}" _actual_sha)
-        if(NOT _actual_sha STREQUAL _sha)
-            message(FATAL_ERROR "Cached WebView2 CAB hash mismatch: ${_cab}")
-        endif()
-    else()
-        file(DOWNLOAD "${_url}" "${_cab}.partial" EXPECTED_HASH "SHA256=${_sha}"
-            TLS_VERIFY ON SHOW_PROGRESS STATUS _download)
-        list(GET _download 0 _download_status)
-        if(NOT _download_status EQUAL 0)
-            message(FATAL_ERROR "Could not download pinned WebView2 runtime: ${_download}")
-        endif()
-        file(RENAME "${_cab}.partial" "${_cab}")
-    endif()
-endif()
-if(CMAKE_HOST_WIN32)
-    find_program(_expand expand.exe PATHS "$ENV{SystemRoot}/System32" NO_DEFAULT_PATH REQUIRED)
-else()
-    find_program(_7zip NAMES 7zz 7z REQUIRED)
-endif()
+# WebView2 is not bundled: the Builder uses the Evergreen runtime included with
+# Windows 10/11 and explains how to install it when it is missing.
 string(RANDOM LENGTH 12 ALPHABET abcdef0123456789 _suffix)
 set(_stage "${BUILDER_DIST_BUILD}/builder-shell-${_suffix}")
-file(MAKE_DIRECTORY "${_stage}/runtime")
-if(CMAKE_HOST_WIN32)
-    execute_process(COMMAND "${_expand}" "${_cab}" "-F:*" "${_stage}/runtime"
-        OUTPUT_VARIABLE _extract_log COMMAND_ERROR_IS_FATAL ANY)
-else()
-    execute_process(COMMAND "${_7zip}" x -y "${_cab}" "-o${_stage}/runtime"
-        OUTPUT_VARIABLE _extract_log COMMAND_ERROR_IS_FATAL ANY)
-endif()
-set(_runtime_arch "${_arch}")
-if(_arch STREQUAL "amd64")
-    set(_runtime_arch x64)
-endif()
-set(_runtime "${_stage}/runtime/Microsoft.WebView2.FixedVersionRuntime.${_version}.${_runtime_arch}")
-if(NOT EXISTS "${_runtime}/msedgewebview2.exe")
-    message(FATAL_ERROR "Unexpected CAB layout; review the updated runtime pin before packaging")
-endif()
+file(MAKE_DIRECTORY "${_stage}")
 execute_process(COMMAND "${CMAKE_COMMAND}" --build "${BUILDER_DIST_BUILD}" --parallel 2
     COMMAND_ERROR_IS_FATAL ANY)
 execute_process(COMMAND "${CMAKE_COMMAND}" --install "${BUILDER_DIST_BUILD}" --prefix "${_stage}/payload"
@@ -96,8 +42,8 @@ execute_process(COMMAND "${CMAKE_COMMAND}" -E env "GOOS=windows" "GOARCH=${_arch
 # inherit cross-compilation variables into go run.
 execute_process(COMMAND "${CMAKE_COMMAND}" -E env --unset=GOOS --unset=GOARCH --unset=CGO_ENABLED
     "${_go}" -C "${CMAKE_CURRENT_LIST_DIR}" run ./cmd/windows-package
-    --payload "${_stage}/payload" --shell "${_stage}/shell.exe" --runtime "${_runtime}"
-    --runtime-lock "${_lock}" --arch "${_arch}" --output "${BUILDER_OUTPUT}"
+    --payload "${_stage}/payload" --shell "${_stage}/shell.exe" --arch "${_arch}"
+    --version "${_version}" --output "${BUILDER_OUTPUT}"
     COMMAND_ERROR_IS_FATAL ANY)
 message(STATUS "Windows Builder artifact: ${BUILDER_OUTPUT}")
 message(STATUS "Unsigned prototype. Perform native Windows acceptance tests before distribution; sign only AFTER packaging.")

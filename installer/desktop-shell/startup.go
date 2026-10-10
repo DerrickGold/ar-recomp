@@ -8,8 +8,11 @@ import (
 
 var errAlreadyRunning = errors.New("Builder already running for this workspace")
 
-// The Windows implementation uses only native controls: WebView2 is itself
-// part of the payload whose preparation this window must precede.
+// errWebview2Missing has already been explained to the user in its own dialog.
+var errWebview2Missing = errors.New("WebView2 runtime is not installed")
+
+// The Windows implementation uses only native controls: it is shown while the
+// payload is prepared, before Wails starts WebView2.
 type startupWindow interface {
 	Update(winbundle.Progress)
 	Handoff()

@@ -133,7 +133,7 @@ Commands:
               (--hermetic compiles with the pinned Zig toolchain, no CMake)
   all         Regenerate, configure, and compile in one command
   install     Install an explicitly named built game, ROM, and launcher
-  toolchain   Report, fetch, or pin the hermetic C toolchain (Zig)
+  toolchain   Report, fetch, pin, or trim the hermetic C toolchain (Zig)
   runtime     Build a target-specific vended runner archive
   sdl         Stage a cross-target SDK; 'sdl resolve' selects stable 3.x installer inputs
   doctor      Report host tools and project inputs
@@ -1160,8 +1160,9 @@ func runToolchain(args []string) error {
 	flags := flag.NewFlagSet("toolchain", flag.ContinueOnError)
 	root := flags.String("root", ".", "game project root")
 	cacheDir := flags.String("cache-dir", "", "toolchain cache directory (default <root>/build/toolchain)")
-	goos := flags.String("goos", runtime.GOOS, "target OS for `pin`")
-	goarch := flags.String("goarch", runtime.GOARCH, "target architecture for `pin`")
+	goos := flags.String("goos", runtime.GOOS, "target OS for `pin` and `trim`")
+	goarch := flags.String("goarch", runtime.GOARCH, "target architecture for `pin` and `trim`")
+	zigDir := flags.String("dir", "", "extracted Zig release for `trim` (its lib/ is trimmed in place)")
 	sdl := flags.Bool("sdl", false, "print the SDL3 pin (url sha archive kind) instead of the Zig pin")
 	sdlTtf := flags.Bool("sdl-ttf", false, "print the SDL3_ttf pin (url sha archive kind)")
 	eventFormat := flags.String("event-format", "human", "output contract: human or jsonl")
@@ -1232,6 +1233,19 @@ func runToolchain(args []string) error {
 		fmt.Fprintf(output, "%s %s %s\n", url, sha, archive)
 		return nil
 	}
+	if subcommand == "trim" {
+		if *zigDir == "" {
+			return sink.fail("toolchain", fmt.Errorf("trim requires --dir"))
+		}
+		result, err := toolchain.TrimLib(*zigDir, *goos, *goarch)
+		if err != nil {
+			return sink.fail("toolchain", err)
+		}
+		fmt.Fprintf(output, "trimmed Zig for %s/%s: removed %d files (%.1f MB), kept %d files (%.1f MB)\n",
+			*goos, *goarch, result.RemovedFiles, float64(result.RemovedBytes)/1e6,
+			result.KeptFiles, float64(result.KeptBytes)/1e6)
+		return nil
+	}
 	cache := *cacheDir
 	if cache == "" {
 		cache = toolchainCacheDir(*root)
@@ -1272,7 +1286,7 @@ func runToolchain(args []string) error {
 		}
 		return nil
 	default:
-		return sink.fail("toolchain", fmt.Errorf("unknown toolchain subcommand %q (expected status, fetch, or pin)", subcommand))
+		return sink.fail("toolchain", fmt.Errorf("unknown toolchain subcommand %q (expected status, fetch, pin, or trim)", subcommand))
 	}
 }
 

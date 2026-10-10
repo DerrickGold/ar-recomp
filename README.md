@@ -97,10 +97,13 @@ build data goes into the adjacent `BuilderData` folder. App-only downloads
 are also available for macOS, Windows, and Steam Deck and use per-user storage.
 The generic Linux launcher opens the same Workshop in your browser.
 
-On Windows, a startup window shows progress while the bundled tools and browser
-are prepared or checked. The first launch can take a few minutes on slower
-machines. You can cancel safely; opening the Builder again for the same workspace
-brings the existing window forward instead of starting another copy.
+On Windows, a startup window shows progress while the bundled tools are prepared
+or checked. The first launch can take a few minutes on slower machines. You can
+cancel safely; opening the Builder again for the same workspace brings the
+existing window forward instead of starting another copy. The Builder window
+uses the Microsoft Edge WebView2 Runtime that Windows 10 and 11 already include;
+if it is missing, the Builder offers to open
+[Microsoft's download page](docs/desktop-packaging.md#windows-webview2-runtime).
 
 Desktop Builders on all platforms cache successful verification so later launches
 check metadata and changed files instead of rereading every bundled tool.

@@ -19,16 +19,12 @@ import (
 )
 
 type Options struct {
-	Shell, Payload, WebView, Output, Arch string
-	Runtime                               Runtime
+	Shell, Payload, Output, Arch string
 }
 
 // Create appends a ZIP and checked footer to an unsigned GUI PE. It can run on
 // macOS/Linux/Windows, but every embedded executable must match the target.
 func Create(o Options) error {
-	if err := validateRuntime(o.Runtime); err != nil {
-		return err
-	}
 	if o.Arch != "amd64" && o.Arch != "arm64" {
 		return fmt.Errorf("unsupported Windows architecture %s", o.Arch)
 	}
@@ -43,7 +39,7 @@ func Create(o Options) error {
 	if _, err = os.Lstat(o.Output); !os.IsNotExist(err) {
 		return fmt.Errorf("output exists or cannot be checked: %s", o.Output)
 	}
-	if err = host.ValidateWorkspace(o.Output, o.Payload, o.WebView); err != nil {
+	if err = host.ValidateWorkspace(o.Output, o.Payload); err != nil {
 		return err
 	}
 	shell, err := os.Open(o.Shell)
@@ -68,7 +64,7 @@ func Create(o Options) error {
 	} else if err != ErrNoBundle {
 		return err
 	}
-	for _, executable := range []string{filepath.Join(o.Payload, "utils/tools/actraiser-builder.exe"), filepath.Join(o.Payload, "utils/tools/snesbuild.exe"), filepath.Join(o.WebView, "msedgewebview2.exe")} {
+	for _, executable := range []string{filepath.Join(o.Payload, "utils/tools/actraiser-builder.exe"), filepath.Join(o.Payload, "utils/tools/snesbuild.exe")} {
 		f, err := os.Open(executable)
 		if err != nil {
 			return err
@@ -90,51 +86,49 @@ func Create(o Options) error {
 	if err = host.WriteManifest(o.Payload, "windows", o.Arch); err != nil {
 		return err
 	}
-	m := Manifest{Schema: 1, Arch: o.Arch, WebView: o.Runtime}
+	m := Manifest{Schema: manifestSchema, Arch: o.Arch}
 	inputs := map[string]string{}
-	for _, tree := range []struct{ root, prefix string }{{o.Payload, "payload"}, {o.WebView, "webview"}} {
-		err = filepath.WalkDir(tree.root, func(name string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			rel, err := filepath.Rel(tree.root, name)
-			if err != nil {
-				return err
-			}
-			if rel == "." {
-				return nil
-			}
-			entryPath := tree.prefix + "/" + filepath.ToSlash(rel)
-			if !host.WindowsPath(entryPath) || d.Type()&os.ModeSymlink != 0 || d.Name() == ".DS_Store" || strings.HasPrefix(d.Name(), "._") {
-				return fmt.Errorf("unsafe Windows package input: %s", name)
-			}
-			if d.IsDir() {
-				return nil
-			}
-			stat, err := d.Info()
-			if err != nil {
-				return err
-			}
-			if !stat.Mode().IsRegular() {
-				return fmt.Errorf("non-regular input: %s", name)
-			}
-			f, err := os.Open(name)
-			if err != nil {
-				return err
-			}
-			h := sha256.New()
-			_, err = io.Copy(h, f)
-			f.Close()
-			if err != nil {
-				return err
-			}
-			m.Files = append(m.Files, host.File{Path: entryPath, SHA256: hex.EncodeToString(h.Sum(nil)), Size: stat.Size(), Mode: uint32(stat.Mode().Perm() & 0755)})
-			inputs[entryPath] = name
-			return nil
-		})
+	err = filepath.WalkDir(o.Payload, func(name string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+		rel, err := filepath.Rel(o.Payload, name)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		entryPath := "payload/" + filepath.ToSlash(rel)
+		if !host.WindowsPath(entryPath) || d.Type()&os.ModeSymlink != 0 || d.Name() == ".DS_Store" || strings.HasPrefix(d.Name(), "._") {
+			return fmt.Errorf("unsafe Windows package input: %s", name)
+		}
+		if d.IsDir() {
+			return nil
+		}
+		stat, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if !stat.Mode().IsRegular() {
+			return fmt.Errorf("non-regular input: %s", name)
+		}
+		f, err := os.Open(name)
+		if err != nil {
+			return err
+		}
+		h := sha256.New()
+		_, err = io.Copy(h, f)
+		f.Close()
+		if err != nil {
+			return err
+		}
+		m.Files = append(m.Files, host.File{Path: entryPath, SHA256: hex.EncodeToString(h.Sum(nil)), Size: stat.Size(), Mode: uint32(stat.Mode().Perm() & 0755)})
+		inputs[entryPath] = name
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	if err = os.MkdirAll(filepath.Dir(o.Output), 0755); err != nil {
 		return err

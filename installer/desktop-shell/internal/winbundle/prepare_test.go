@@ -20,11 +20,7 @@ func TestPrepareRuntimeScansFilesOnceOnColdAndWarmLaunch(t *testing.T) {
 			t.Fatal(err)
 		}
 		var stages []string
-		permissions := 0
-		verified, err := a.PrepareDirectoryContext(context.Background(), directory, func(string) error {
-			permissions++
-			return nil
-		}, func(p Progress) {
+		verified, err := a.PrepareDirectoryContext(context.Background(), directory, func(p Progress) {
 			if p.Completed == 0 && p.Total > 0 {
 				stages = append(stages, p.Stage)
 			}
@@ -33,12 +29,12 @@ func TestPrepareRuntimeScansFilesOnceOnColdAndWarmLaunch(t *testing.T) {
 		if err != nil || verified == nil {
 			t.Fatal("runtime preparation failed", err)
 		}
-		want, wantPermissions := "Extracting bundled tools and browser", 1
+		want := "Extracting bundled tools"
 		if warm {
-			want, wantPermissions = "Verifying prepared files", 0
+			want = "Verifying prepared files"
 		}
-		if len(stages) != 1 || stages[0] != want || permissions != wantPermissions {
-			t.Fatalf("warm=%t: redundant/missing pass: %v, permissions=%d", warm, stages, permissions)
+		if len(stages) != 1 || stages[0] != want {
+			t.Fatalf("warm=%t: redundant/missing pass: %v", warm, stages)
 		}
 	}
 }
@@ -56,13 +52,13 @@ func TestPrepareRuntimeRechecksCacheAndPreservesInvalidFiles(t *testing.T) {
 			}
 			defer a.Close()
 			directory := filepath.Join(t.TempDir(), "runtime")
-			if _, err := a.PrepareDirectoryContext(context.Background(), directory, nil, nil); err != nil {
+			if _, err := a.PrepareDirectoryContext(context.Background(), directory, nil); err != nil {
 				t.Fatal(err)
 			}
 			name, contents := "payload/utils/snesbuild.ini", "changed"
 			switch mode {
 			case "extra file":
-				name = "webview/injected.dll"
+				name = "payload/injected.dll"
 			case "missing file", "symlink":
 				if err := os.Remove(filepath.Join(directory, name)); err != nil {
 					t.Fatal(err)
@@ -78,7 +74,7 @@ func TestPrepareRuntimeRechecksCacheAndPreservesInvalidFiles(t *testing.T) {
 			if mode != "missing file" && mode != "symlink" {
 				put(t, directory, name, []byte(contents))
 			}
-			verified, err := a.PrepareDirectoryContext(context.Background(), directory, nil, nil)
+			verified, err := a.PrepareDirectoryContext(context.Background(), directory, nil)
 			if err == nil || verified != nil {
 				t.Fatal("reused old verification for changed cache")
 			}
@@ -103,7 +99,7 @@ func TestPrepareRuntimeFailureNeverReturnsVerification(t *testing.T) {
 	}
 	defer a.Close()
 	directory := filepath.Join(t.TempDir(), "runtime")
-	if verified, err := a.PrepareDirectoryContext(context.Background(), directory, nil, nil); err == nil || verified != nil {
+	if verified, err := a.PrepareDirectoryContext(context.Background(), directory, nil); err == nil || verified != nil {
 		t.Fatal("corrupt extraction returned verification")
 	}
 	if _, err := os.Lstat(directory); !os.IsNotExist(err) {
@@ -120,12 +116,12 @@ func TestPrepareRuntimeFailureNeverReturnsVerification(t *testing.T) {
 	defer a.Close()
 	for _, warm := range []bool{false, true} {
 		if warm {
-			if _, err := a.PrepareDirectoryContext(context.Background(), directory, nil, nil); err != nil {
+			if _, err := a.PrepareDirectoryContext(context.Background(), directory, nil); err != nil {
 				t.Fatal(err)
 			}
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		verified, err := a.PrepareDirectoryContext(ctx, directory, nil, func(Progress) { cancel() })
+		verified, err := a.PrepareDirectoryContext(ctx, directory, func(Progress) { cancel() })
 		cancel()
 		if !errors.Is(err, context.Canceled) || verified != nil {
 			t.Fatal("cancelled startup returned verification", err)

@@ -8,8 +8,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 )
 
-// prepareEmbedded resolves a packaged Fixed Runtime before Wails starts.
-// Explicit --payload/--webview-runtime paths remain useful for development.
+// Wails uses the system's Evergreen WebView2 runtime. An explicit
+// --webview-runtime Fixed Version folder remains useful for development.
 func webviewOptions(override, payload, browser string) (*windows.Options, error) {
 	executable, err := os.Executable()
 	if err != nil {

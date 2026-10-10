@@ -1,6 +1,6 @@
 // Package winbundle stores a checked ZIP overlay in an ordinary Windows GUI
 // PE executable. It is stdlib-only apart from the shared host package, and all
-// archive/extraction tests can run without Windows or WebView2.
+// archive/extraction tests can run without Windows.
 package winbundle
 
 import (
@@ -28,18 +28,16 @@ const footerSize = 16 + 8 + 8 + 32
 const manifestName = "windows-bundle.json"
 const maxExpanded = int64(6 << 30)
 
+// Schema 2 carries only the Builder payload. Schema 1 also bundled a Fixed
+// Version WebView2 runtime; the Builder now uses the system Evergreen runtime.
+const manifestSchema = 2
+
 var ErrNoBundle = errors.New("no embedded Windows Builder payload")
 
-type Runtime struct {
-	Version string `json:"version"`
-	URL     string `json:"url"`
-	SHA256  string `json:"sha256"`
-}
 type Manifest struct {
-	Schema  int         `json:"schema"`
-	Arch    string      `json:"arch"`
-	WebView Runtime     `json:"webview"`
-	Files   []host.File `json:"files"`
+	Schema int         `json:"schema"`
+	Arch   string      `json:"arch"`
+	Files  []host.File `json:"files"`
 }
 type Archive struct {
 	Manifest       Manifest
@@ -241,11 +239,8 @@ func openContext(ctx context.Context, filename, cache string, force bool, progre
 	if err = json.Unmarshal(data, &m); err != nil {
 		return nil, err
 	}
-	if m.Schema != 1 || m.Arch != arch || len(m.Files)+1 != len(z.File) {
+	if m.Schema != manifestSchema || m.Arch != arch || len(m.Files)+1 != len(z.File) {
 		return nil, errors.New("inconsistent Windows bundle manifest")
-	}
-	if err = validateRuntime(m.WebView); err != nil {
-		return nil, err
 	}
 	seen := map[string]bool{}
 	var total int64
@@ -256,7 +251,7 @@ func openContext(ctx context.Context, filename, cache string, force bool, progre
 		key := strings.ToLower(entry.Path)
 		item := entries[key]
 		digest, hashErr := hex.DecodeString(entry.SHA256)
-		if !host.WindowsPath(entry.Path) || (!strings.HasPrefix(entry.Path, "payload/") && !strings.HasPrefix(entry.Path, "webview/")) || seen[key] || item == nil || item.Name != entry.Path || entry.Size < 0 || uint64(entry.Size) != item.UncompressedSize64 || hashErr != nil || len(digest) != 32 || entry.Mode&^0755 != 0 {
+		if !host.WindowsPath(entry.Path) || !strings.HasPrefix(entry.Path, "payload/") || seen[key] || item == nil || item.Name != entry.Path || entry.Size < 0 || uint64(entry.Size) != item.UncompressedSize64 || hashErr != nil || len(digest) != 32 || entry.Mode&^0755 != 0 {
 			return nil, fmt.Errorf("invalid manifest entry %s", entry.Path)
 		}
 		if entry.Size > maxExpanded-total {
@@ -272,7 +267,7 @@ func openContext(ctx context.Context, filename, cache string, force bool, progre
 			}
 		}
 	}
-	for _, name := range []string{"payload/builder-payload.json", "payload/utils/tools/actraiser-builder.exe", "payload/utils/tools/snesbuild.exe", "webview/msedgewebview2.exe", "webview/msedge.dll", "webview/icudtl.dat", "webview/resources.pak", "webview/locales/en-us.pak"} {
+	for _, name := range []string{"payload/builder-payload.json", "payload/utils/tools/actraiser-builder.exe", "payload/utils/tools/snesbuild.exe"} {
 		if !seen[name] {
 			return nil, fmt.Errorf("missing bundled component %s", name)
 		}
@@ -281,35 +276,17 @@ func openContext(ctx context.Context, filename, cache string, force bool, progre
 		receiptPath: receiptPath, receipt: receipt, packageStamp: stampFile(info), manifestSHA256: manifestDigest}, nil
 }
 
-func validateRuntime(r Runtime) error {
-	h, err := hex.DecodeString(r.SHA256)
-	if err != nil || len(h) != 32 || !strings.HasPrefix(r.URL, "https://msedge.sf.dl.delivery.mp.microsoft.com/") || !strings.HasSuffix(r.URL, ".cab") {
-		return errors.New("runtime provenance requires an official HTTPS CAB URL and SHA-256")
-	}
-	parts := strings.Split(r.Version, ".")
-	if len(parts) != 4 {
-		return errors.New("runtime version must be exact")
-	}
-	for _, part := range parts {
-		if part == "" || strings.Trim(part, "0123456789") != "" {
-			return errors.New("invalid runtime version")
-		}
-	}
-	return nil
-}
-
 // Extract publishes only a complete verified directory, never overwriting a
-// prior destination. The optional callback grants Windows runtime permissions
-// on the new staging tree, not on any pre-existing user directory.
-func (a *Archive) Extract(destination string, prepare func(string) error) error {
-	return a.ExtractContext(context.Background(), destination, prepare, nil)
+// prior destination.
+func (a *Archive) Extract(destination string) error {
+	return a.ExtractContext(context.Background(), destination, nil)
 }
 
-func (a *Archive) ExtractContext(ctx context.Context, destination string, prepare func(string) error, progress ProgressFunc) error {
+func (a *Archive) ExtractContext(ctx context.Context, destination string, progress ProgressFunc) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	m := newMeter(ctx, progress, "Extracting bundled tools and browser", a.expandedSize())
+	m := newMeter(ctx, progress, "Extracting bundled tools", a.expandedSize())
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
 		return fmt.Errorf("extraction destination exists or cannot be checked: %s", destination)
 	}
@@ -362,18 +339,6 @@ func (a *Archive) ExtractContext(ctx context.Context, destination string, prepar
 		}
 	}
 	m.report(true)
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if prepare != nil {
-		newMeter(ctx, progress, "Applying browser permissions", 0)
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err = prepare(filepath.Join(stage, "webview")); err != nil {
-			return err
-		}
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

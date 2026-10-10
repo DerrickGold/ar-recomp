@@ -1,6 +1,7 @@
 # Run a TEST-ONLY packaged Builder on a disposable Windows player VM.
 # No downloads, software installation, elevation or network changes. For an
 # offline acceptance run, disconnect the VM network first (loopback still works).
+# The VM needs the system (Evergreen) WebView2 Runtime that Windows 10/11 include.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Builder,
@@ -42,39 +43,58 @@ function Invoke-Probe([string]$Label, [string]$Executable, [string]$Workspace, [
     $process = Start-Process -FilePath $Executable -ArgumentList $arguments `
         -WorkingDirectory $unrelated -RedirectStandardOutput $stdout `
         -RedirectStandardError $stderr -PassThru
+    # Windows PowerShell 5.1 reports no ExitCode unless the handle is opened
+    # while the process is still running.
+    $null = $process.Handle
     $deadline = (Get-Date).AddMinutes(10)
     if ($env:AR_BUILDER_SMOKE_ROM) { $deadline = (Get-Date).AddMinutes(30) }
-    $runtimeSeen = $false
-    $expectedRuntime = [IO.Path]::GetFullPath("$Workspace-runtime") + '\'
+    $browserSeen = $false
+    $webview = @{} # Every WebView2 process started under this Builder.
+    $runtimeCache = [IO.Path]::GetFullPath("$Workspace-runtime") + '\'
     $expectedProfile = "$Workspace-webview"
     if ($Workspace -eq (Join-Path $env:LOCALAPPDATA 'ActRaiserRecomp/installer/workspace')) {
-        $expectedRuntime = [IO.Path]::GetFullPath((Join-Path (Split-Path $Workspace) 'runtime')) + '\'
+        $runtimeCache = [IO.Path]::GetFullPath((Join-Path (Split-Path $Workspace) 'runtime')) + '\'
         $expectedProfile = Join-Path (Split-Path $Workspace) 'webview'
     }
     try {
         while (-not $process.WaitForExit(250)) {
-            # Confirm the renderer came from OUR extracted Fixed Runtime, not
-            # an installed Evergreen runtime. Do not log process command lines.
-            foreach ($renderer in @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'")) {
-                if ($renderer.ExecutablePath -and $renderer.ExecutablePath.StartsWith($expectedRuntime, [StringComparison]::OrdinalIgnoreCase)) {
-                    $runtimeSeen = $true
+            # WebView2's browser process is a direct child of the Builder. It
+            # must come from the system runtime, never from the Builder's tool
+            # cache. Do not log process command lines.
+            foreach ($browser in @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'")) {
+                if ($browser.ParentProcessId -eq $process.Id) {
+                    $webview[[int]$browser.ProcessId] = $true
+                    if ($browser.ExecutablePath -and -not $browser.ExecutablePath.StartsWith($runtimeCache, [StringComparison]::OrdinalIgnoreCase)) {
+                        $browserSeen = $true
+                    }
+                } elseif ($webview.ContainsKey([int]$browser.ParentProcessId)) {
+                    $webview[[int]$browser.ProcessId] = $true # Renderer, GPU, crash handler...
                 }
             }
             if ((Get-Date) -gt $deadline) { throw "$Label timed out; inspect $stdout and $stderr" }
         }
         $process.WaitForExit()
+        # After a profile's first run, WebView2's browser and crash handler can
+        # stay alive for about a minute after the Builder exits, keeping the
+        # profile open. The next probe moves this folder, so wait for them.
+        $shutdown = [Diagnostics.Stopwatch]::StartNew()
+        foreach ($id in @($webview.Keys)) {
+            $browser = Get-Process -Id $id -ErrorAction SilentlyContinue
+            if ($browser -and -not $browser.WaitForExit(120000)) { throw "$Label left WebView2 running" }
+        }
+        Write-Host ("{0}: {1} WebView2 processes finished {2:N1}s after the Builder" -f $Label, $webview.Count, $shutdown.Elapsed.TotalSeconds)
         if ($process.ExitCode -ne 0) { throw "$Label exited $($process.ExitCode); inspect $stderr" }
         $log = Get-Content -LiteralPath $stdout -Raw
         if ($log -notmatch '(?m)^BUILDER_RENDERER_SMOKE PASS ' -or $log -match '(?m)^BUILDER_RENDERER_SMOKE FAIL ') {
             throw "$Label did not explicitly PASS; use a smoketest package and inspect $stdout"
         }
         if ($env:AR_BUILDER_SMOKE_ROM -and $log -notmatch 'PASS .*full game build') { throw 'Full build did not PASS.' }
-        if (-not $runtimeSeen) { throw 'Did not observe the bundled WebView2 process; runtime selection is unverified.' }
+        if (-not $browserSeen) { throw 'Did not observe the system WebView2 browser process; runtime selection is unverified.' }
         if (-not (Test-Path -LiteralPath (Join-Path $Workspace '.builder-workspace'))) { throw 'Wrong workspace or missing ownership marker.' }
         if (Test-Path -LiteralPath (Join-Path $Workspace 'utils')) { throw 'Bundled inputs were copied into the workspace.' }
         if (-not (Test-Path -LiteralPath $expectedProfile)) { throw 'Expected separate WebView2 profile was not created.' }
         if (-not (Test-Path -LiteralPath (Join-Path $GameOutput 'game-assets'))) { throw 'Game output was not initialized in the selected folder.' }
-        Write-Host "PASS: $Label renderer, bundled runtime and workspace"
+        Write-Host "PASS: $Label renderer, system WebView2 runtime and workspace"
     } finally {
         if (-not $process.HasExited) {
             # Only this test's process and descendants, never a name-wide kill.
@@ -101,6 +121,7 @@ function Invoke-GameProbe([string]$GameOutput) {
         $process = Start-Process -FilePath $game -ArgumentList $arguments -WorkingDirectory $unrelated `
             -RedirectStandardOutput (Join-Path $root 'game.log') `
             -RedirectStandardError (Join-Path $root 'game.stderr.log') -PassThru
+        $null = $process.Handle # See Invoke-Probe: keeps ExitCode readable.
         if (-not $process.WaitForExit(60000)) { throw 'Generated game timed out; inspect game.stderr.log.' }
         $process.WaitForExit()
         if ($process.ExitCode -ne 0) { throw "Generated game exited $($process.ExitCode); inspect game.stderr.log." }
@@ -141,7 +162,7 @@ try {
         Invoke-Probe 'cross-drive' $exe $global $crossOutput
     } else { Write-Host 'SKIP: real cross-drive initialization (supply -OtherDriveRoot)' }
     if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ne $originalHash) { throw 'Builder modified its own executable.' }
-    Write-Host 'PASS: portable, relocation/edit preservation, global, Fixed WebView2, unchanged executable'
+    Write-Host 'PASS: portable, relocation/edit preservation, global, system WebView2, unchanged executable'
     Write-Host 'Still requires human checks: visual layout, ROM picker, audible audio, console flashes, and visible game rendering.'
 } finally {
     foreach ($key in $savedEnv.Keys) { [Environment]::SetEnvironmentVariable($key, $savedEnv[$key], 'Process') }

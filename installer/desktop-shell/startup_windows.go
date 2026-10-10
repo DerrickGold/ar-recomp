@@ -217,7 +217,7 @@ func (s *nativeStartup) run(name string, ready chan<- error) {
 	controls := struct{ Size, Classes uint32 }{8, 0x20} // ICC_PROGRESS_CLASS
 	windows.NewLazySystemDLL("comctl32.dll").NewProc("InitCommonControlsEx").Call(uintptr(unsafe.Pointer(&controls)))
 	s.bar = add("msctls_progress32", "", 0, 24, 110, 462, 16, 0)
-	help := add("STATIC", "The first launch prepares the bundled tools and browser.\r\nThis can take a few minutes. There is no need to open another copy.", 0x80, 24, 146, 462, 42, 0)
+	help := add("STATIC", "The first launch prepares the bundled tools.\r\nThis can take a few minutes. There is no need to open another copy.", 0x80, 24, 146, 462, 42, 0)
 	s.elapsed = add("STATIC", "Starting…", 0x80, 24, 227, 350, 24, 0)
 	s.button = add("BUTTON", "Cancel", 0x10000, 398, 218, 88, 30, 1) // WS_TABSTOP
 	if title == 0 || s.status == 0 || s.bar == 0 || help == 0 || s.elapsed == 0 || s.button == 0 {

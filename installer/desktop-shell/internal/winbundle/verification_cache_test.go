@@ -56,7 +56,7 @@ func TestLaunchCacheSkipsArchiveAndContentsThenRechecksOnlyTouchedFile(t *testin
 			}
 			defer a.Close()
 			directory = filepath.Join(cache, a.ID)
-			if _, err := a.PrepareDirectoryContext(context.Background(), directory, nil, report); err != nil {
+			if _, err := a.PrepareDirectoryContext(context.Background(), directory, report); err != nil {
 				t.Fatal(err)
 			}
 			var archive, contents, changed int
@@ -97,7 +97,7 @@ func TestLaunchCacheDoesNotAcceptChangedContentsOrReplaceReceiptOnFailure(t *tes
 				t.Fatal(err)
 			}
 			directory := filepath.Join(cache, a.ID)
-			if _, err := a.PrepareDirectoryContext(context.Background(), directory, nil, nil); err != nil {
+			if _, err := a.PrepareDirectoryContext(context.Background(), directory, nil); err != nil {
 				t.Fatal(err)
 			}
 			a.Close()
@@ -123,7 +123,7 @@ func TestLaunchCacheDoesNotAcceptChangedContentsOrReplaceReceiptOnFailure(t *tes
 					t.Fatal(err)
 				}
 			case "extra file":
-				put(t, directory, "webview/injected.dll", []byte("extra"))
+				put(t, directory, "payload/injected.dll", []byte("extra"))
 			case "missing file":
 				if err := os.Remove(name); err != nil {
 					t.Fatal(err)
@@ -143,7 +143,7 @@ func TestLaunchCacheDoesNotAcceptChangedContentsOrReplaceReceiptOnFailure(t *tes
 			a, err = OpenForLaunch(ctx, o.Output, cache, mode == "forced same-metadata corruption", nil)
 			if err == nil {
 				defer a.Close()
-				_, err = a.PrepareDirectoryContext(ctx, directory, nil, func(Progress) {
+				_, err = a.PrepareDirectoryContext(ctx, directory, func(Progress) {
 					if mode == "cancelled" {
 						cancel()
 					}
@@ -173,7 +173,7 @@ func BenchmarkLaunchVerification(b *testing.B) {
 			b.Fatal(err)
 		}
 		defer a.Close()
-		if _, err := a.PrepareDirectoryContext(context.Background(), filepath.Join(cache, a.ID), nil, nil); err != nil {
+		if _, err := a.PrepareDirectoryContext(context.Background(), filepath.Join(cache, a.ID), nil); err != nil {
 			b.Fatal(err)
 		}
 	}

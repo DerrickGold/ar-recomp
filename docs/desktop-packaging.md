@@ -116,6 +116,16 @@ tampering that also restores file timestamps, or corruption that leaves
 metadata unchanged. Use `--verify-bundle` to check file contents in those cases.
 Platform security checks such as Gatekeeper and Application Control still apply.
 
+### Windows WebView2 Runtime
+
+The Windows Builder draws its window with the Microsoft Edge WebView2 Runtime
+that Windows 11 includes and up-to-date Windows 10 PCs receive automatically;
+the download does not bundle its own copy. If the runtime is missing or out of
+date, the Builder says so before preparing anything and offers to open
+[Microsoft's WebView2 page](https://developer.microsoft.com/microsoft-edge/webview2/).
+Install the **Evergreen** runtime there, then start the Builder again. On a
+managed device, ask your administrator to install it.
+
 ### Windows Application Control
 
 Windows releases include unsigned executables. Windows can allow the outer
@@ -218,6 +228,16 @@ if a check fails. `make check-release` also works independently.
 
 `make release DESKTOP=0` selects archive-only packaging. See the
 [Builder README](https://github.com/DerrickGold/ar-recomp/tree/main/installer) for building and running the CLI locally.
+
+Each download bundles the pinned Zig compiler with only the parts of its
+library that the platform's game builds read: the compiler's support code and
+that platform's own C library headers and sources. Every license and notice
+file from the Zig release is kept (see `installer/THIRD_PARTY_NOTICES.md`).
+`snesbuild toolchain trim`
+holds the per-platform list and stops packaging if a listed folder is missing,
+so a Zig update that reorganizes its library fails instead of shipping an
+incomplete compiler. `make release TRIM_ZIG=0` bundles the complete Zig
+release, for example to compare a game build against the untrimmed compiler.
 
 ### Packaging across build hosts
 

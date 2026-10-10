@@ -31,3 +31,17 @@ Enhanced text uses unmodified SheenBidi 3.0.0 for Unicode bidirectional
 resolution and script itemization, Copyright (C) 2014–2026 Muhammad Tayyab
 Akram, under the Apache License 2.0. Its source and license ship under
 `utils/third_party/sheenbidi` and `utils/licenses/SheenBidi`.
+
+## Zig compiler
+
+Distributions bundle the pinned Zig compiler under `utils/tools/toolchain` to
+build the game locally. Zig is under the MIT license, in that folder's
+`LICENSE`. The zig executable includes LLVM and Clang, and Zig's
+`lib/include` headers come from Clang; both are under the Apache License 2.0
+with LLVM Exceptions, whose text is in `lib/libcxx/LICENSE.TXT`. Each
+distribution keeps only the parts of Zig's library that its platform's builds
+use, including that platform's C library headers and sources: mingw-w64 on
+Windows (`lib/libc/mingw/COPYING`), glibc on Linux (`lib/libc/glibc/LICENSES`),
+and Apple's headers, whose license terms are in the files, on macOS. Every
+license and notice file from the Zig release is kept, including those of
+components the distribution leaves out.

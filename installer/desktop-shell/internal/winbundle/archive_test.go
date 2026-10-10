@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -34,9 +33,6 @@ func fakePE(arch string) []byte {
 	copy(data[128:], b.Bytes())
 	return data
 }
-func pin() Runtime {
-	return Runtime{Version: "152.0.4191.62", URL: "https://msedge.sf.dl.delivery.mp.microsoft.com/test.cab", SHA256: strings.Repeat("a", 64)}
-}
 func put(t *testing.T, root, name string, data []byte) {
 	t.Helper()
 	file := filepath.Join(root, filepath.FromSlash(name))
@@ -50,17 +46,13 @@ func put(t *testing.T, root, name string, data []byte) {
 func fixture(t *testing.T, arch string) Options {
 	t.Helper()
 	root := t.TempDir()
-	o := Options{Arch: arch, Shell: filepath.Join(root, "shell.exe"), Payload: filepath.Join(root, "payload"), WebView: filepath.Join(root, "webview"), Output: filepath.Join(root, "Builder.exe"), Runtime: pin()}
+	o := Options{Arch: arch, Shell: filepath.Join(root, "shell.exe"), Payload: filepath.Join(root, "payload"), Output: filepath.Join(root, "Builder.exe")}
 	put(t, root, "shell.exe", fakePE(arch))
 	for _, name := range []string{"utils/tools/actraiser-builder.exe", "utils/tools/snesbuild.exe"} {
 		put(t, o.Payload, name, fakePE(arch))
 	}
 	for _, name := range []string{"utils/snesbuild.ini", "utils/defaults/config.ini", "utils/tools/sdl3/include/SDL3/SDL.h"} {
 		put(t, o.Payload, name, []byte("fixture"))
-	}
-	put(t, o.WebView, "msedgewebview2.exe", fakePE(arch))
-	for _, name := range []string{"msedge.dll", "icudtl.dat", "resources.pak", "Locales/en-US.pak"} {
-		put(t, o.WebView, name, []byte("runtime fixture"))
 	}
 	return o
 }
@@ -80,26 +72,16 @@ func TestRoundTripAndCachedBytes(t *testing.T) {
 				t.Fatal(a.Manifest)
 			}
 			dest := filepath.Join(t.TempDir(), "path with spaces", "extracted")
-			callback := false
-			if err = a.Extract(dest, func(path string) error {
-				callback = true
-				if filepath.Base(path) != "webview" {
-					t.Fatal(path)
-				}
-				return nil
-			}); err != nil {
+			if err = a.Extract(dest); err != nil {
 				t.Fatal(err)
-			}
-			if !callback {
-				t.Fatal("missing permissions callback")
 			}
 			if err = a.VerifyDirectory(dest); err != nil {
 				t.Fatal(err)
 			}
-			if err = a.Extract(dest, nil); err == nil {
+			if err = a.Extract(dest); err == nil {
 				t.Fatal("overwrote existing extraction")
 			}
-			put(t, dest, "webview/msedge.dll", []byte("tampered"))
+			put(t, dest, "payload/utils/snesbuild.ini", []byte("tampered"))
 			if err = a.VerifyDirectory(dest); err == nil {
 				t.Fatal("trusted stale stamp over changed bytes")
 			}
@@ -111,7 +93,7 @@ func TestRoundTripAndCachedBytes(t *testing.T) {
 }
 func TestPackageRejectsMixedArchitectureAndPrivateInputs(t *testing.T) {
 	o := fixture(t, "amd64")
-	put(t, o.WebView, "msedgewebview2.exe", fakePE("arm64"))
+	put(t, o.Payload, "utils/tools/snesbuild.exe", fakePE("arm64"))
 	if err := Create(o); err == nil {
 		t.Fatal("mixed architectures accepted")
 	}
@@ -182,11 +164,11 @@ type zipInput struct {
 func customArchive(t *testing.T, extra []zipInput, badFileHash bool) string {
 	t.Helper()
 	files := []zipInput{}
-	for _, name := range []string{"payload/builder-payload.json", "payload/utils/tools/actraiser-builder.exe", "payload/utils/tools/snesbuild.exe", "webview/msedgewebview2.exe", "webview/msedge.dll", "webview/icudtl.dat", "webview/resources.pak", "webview/locales/en-us.pak"} {
+	for _, name := range []string{"payload/builder-payload.json", "payload/utils/tools/actraiser-builder.exe", "payload/utils/tools/snesbuild.exe"} {
 		files = append(files, zipInput{name, []byte("fixture"), 0644})
 	}
 	files = append(files, extra...)
-	m := Manifest{Schema: 1, Arch: "amd64", WebView: pin()}
+	m := Manifest{Schema: manifestSchema, Arch: "amd64"}
 	for _, item := range files {
 		sum := sha256.Sum256(item.data)
 		m.Files = append(m.Files, host.File{Path: item.name, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(item.data)), Mode: 0644})
@@ -223,7 +205,8 @@ func customArchive(t *testing.T, extra []zipInput, badFileHash bool) string {
 	return file
 }
 func TestUnsafeArchivePathsNeverExtract(t *testing.T) {
-	for _, name := range []string{"../escape", "/absolute", "webview/CON.txt", "webview/file:stream", "webview/trailing.", "webview/bad\\path", "webview/MSedge.dll", "webview/locales"} {
+	// webview/ held the retired Fixed Version runtime; schema 2 accepts only payload/.
+	for _, name := range []string{"../escape", "/absolute", "payload/CON.txt", "payload/file:stream", "payload/trailing.", "payload/bad\\path", "payload/utils/tools/SNESBUILD.exe", "payload/utils/tools", "webview/msedge.dll"} {
 		t.Run(name, func(t *testing.T) {
 			file := customArchive(t, []zipInput{{name, []byte("bad"), 0644}}, false)
 			if a, err := Open(file); err == nil {
@@ -232,7 +215,7 @@ func TestUnsafeArchivePathsNeverExtract(t *testing.T) {
 			}
 		})
 	}
-	file := customArchive(t, []zipInput{{"webview/link", []byte("../outside"), fs.ModeSymlink | 0777}}, false)
+	file := customArchive(t, []zipInput{{"payload/link", []byte("../outside"), fs.ModeSymlink | 0777}}, false)
 	if a, err := Open(file); err == nil {
 		a.Close()
 		t.Fatal("symlink archive accepted")
@@ -245,11 +228,14 @@ func TestFailedExtractionDoesNotPublishAndExtraCacheFileRejected(t *testing.T) {
 	}
 	defer a.Close()
 	dest := filepath.Join(t.TempDir(), "output")
-	if err = a.Extract(dest, nil); err == nil {
+	if err = a.Extract(dest); err == nil {
 		t.Fatal("bad per-file checksum accepted")
 	}
 	if _, err = os.Lstat(dest); !os.IsNotExist(err) {
 		t.Fatal("partial extraction published")
+	}
+	if entries, err := os.ReadDir(filepath.Dir(dest)); err != nil || len(entries) != 0 {
+		t.Fatal("failed extraction left staging files behind", entries, err)
 	}
 	o := fixture(t, "amd64")
 	if err = Create(o); err != nil {
@@ -260,20 +246,10 @@ func TestFailedExtractionDoesNotPublishAndExtraCacheFileRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer good.Close()
-	permissionsErr := errors.New("synthetic runtime permission failure")
-	if err = good.Extract(dest, func(string) error { return permissionsErr }); !errors.Is(err, permissionsErr) {
-		t.Fatal("permission failure was not returned", err)
-	}
-	if _, err = os.Lstat(dest); !os.IsNotExist(err) {
-		t.Fatal("runtime with incomplete permissions was published", err)
-	}
-	if entries, err := os.ReadDir(filepath.Dir(dest)); err != nil || len(entries) != 0 {
-		t.Fatal("failed extraction left staging files behind", entries, err)
-	}
-	if err = good.Extract(dest, nil); err != nil {
+	if err = good.Extract(dest); err != nil {
 		t.Fatal(err)
 	}
-	put(t, dest, "webview/injected.dll", []byte("unexpected"))
+	put(t, dest, "payload/utils/tools/injected.dll", []byte("unexpected"))
 	if err = good.VerifyDirectory(dest); err == nil {
 		t.Fatal("extra executable cache content accepted")
 	}

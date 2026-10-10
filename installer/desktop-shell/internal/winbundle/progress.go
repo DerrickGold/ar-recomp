@@ -16,7 +16,7 @@ type Progress struct {
 type ProgressFunc func(Progress)
 
 // A meter is confined to the extraction goroutine. Reading through it keeps
-// cancellation responsive even when a single compiler/browser file is large.
+// cancellation responsive even when a single file, such as the compiler, is large.
 type meter struct {
 	ctx      context.Context
 	progress ProgressFunc

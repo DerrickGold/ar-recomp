@@ -12,14 +12,14 @@ import (
 
 // PrepareDirectoryContext verifies new/changed files and reuses unchanged file
 // checks from a successful prior launch. The caller holds the runtime-cache lock.
-func (a *Archive) PrepareDirectoryContext(ctx context.Context, directory string, prepare func(string) error, progress ProgressFunc) (*host.VerifiedPayload, error) {
+func (a *Archive) PrepareDirectoryContext(ctx context.Context, directory string, progress ProgressFunc) (*host.VerifiedPayload, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	extracted := false
 	if _, err := os.Lstat(directory); os.IsNotExist(err) {
-		if err := a.ExtractContext(ctx, directory, prepare, progress); err != nil {
-			return nil, fmt.Errorf("prepare bundled tools/WebView2: %w", err)
+		if err := a.ExtractContext(ctx, directory, progress); err != nil {
+			return nil, fmt.Errorf("prepare bundled tools: %w", err)
 		}
 		extracted = true
 	} else if err != nil {
