@@ -21,7 +21,7 @@ and rebindable controls. The in-game settings menu explains each option.
 
 [![GitHub downloads (all assets, all releases)](https://img.shields.io/github/downloads/DerrickGold/ar-recomp/total)](https://github.com/DerrickGold/ar-recomp/releases)
 ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads-pre/DerrickGold/ar-recomp/latest/total)
-![GitHub commits since tagged version](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0801)
+![GitHub commits since tagged version](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0802)
 
 ---
 
@@ -37,6 +37,7 @@ start to finish.** Development and visual improvements remain active.
 | ✅ | **Platforms:** Windows, macOS arm64, and Steam Deck have been tested and boot successfully. macOS x86_64 and generic Linux still need representative launch testing. |
 | ✅ | **Localization:** Language packs, enhanced fonts, and Workshop authoring are ready. Players can create and distribute their own translations. |
 | 🔵 | **Regionalization:** Implementation is complete and ready for testing. [US, Japanese, and European gameplay presets](docs/regional-settings.md) support per-campaign customization, with independent [regional artwork and music](docs/regional-media.md). |
+| 🟡  | **Full Decompilation:** In progress. The goal is to produce human readable code, and decouple the game mechanics from the SNES' 60.0988 hz processing cycle for proper variable frame rate support (i.e. proper pacing at 45fps for steam deck, or at higher frame rates on more powerful machines), and remove limitations from the games memory/object management to remove limitations like max number of objects drawn/managed, increased play field handling, etc|
 | 📋 | **Achievements:** In planning. |
 
 ---
