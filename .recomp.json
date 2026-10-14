@@ -1,0 +1,37 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "ActRaiser",
+  "wikidata": "Q343033",
+  "system": "SNES",
+  "type": "recomp",
+  "original": {
+    "region": "USA",
+    "sha1": "e8365852cc20178d42c93cd188a7ae9af45369d7"
+  },
+  "project": "ActRaiser Recomp",
+  "status": "released",
+  "targets": ["Windows", "Linux", "macOS", "Steam Deck"],
+  "toolchain": "snesrecomp-go",
+  "approach": "Static recompilation of 65816 machine code to C with an SDL3 runtime.",
+  "maintainers": [
+    {
+      "name": "DerrickGold",
+      "link": "https://github.com/DerrickGold"
+    }
+  ],
+  "links": [
+    {
+      "label": "Manual",
+      "url": "https://github.com/DerrickGold/ar-recomp/blob/main/docs/manual.md"
+    },
+    {
+      "label": "Issue tracker",
+      "url": "https://github.com/DerrickGold/ar-recomp/issues"
+    }
+  ],
+  "help": [
+    "Language packs and translations"
+  ],
+  "tags": ["widescreen", "3d", "localization"],
+  "notes": "The full USA campaign is verified completable with native graphics. Windows, macOS arm64 and Steam Deck have been launch-tested; macOS x86_64 and generic Linux still need representative launch testing. Diorama presentation and visual improvements remain in progress."
+}
