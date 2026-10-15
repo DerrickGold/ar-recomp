@@ -22,9 +22,14 @@ typedef struct Recorder {
   int bound_effect;
   const DioramaCapture *capture;
   const DioramaProjection *projection;
-  unsigned checked_object_meshes;
+  unsigned checked_object_meshes, exposure_samples;
   uint32_t skybox_inputs;
 } Recorder;
+
+static float Exposure(void *context,float u,float v) {
+  Recorder *r=context;++r->exposure_samples;
+  return .6f+.2f*fmaxf(0,fminf(1,u+v));
+}
 
 static void Record(float value) {
   assert(isfinite(value) && s_count < TRACE_CAPACITY);
@@ -443,6 +448,7 @@ unsigned DioramaFixture_Run(unsigned scenario) {
     .map_group = room->map_group, .map_number = room->map_number,
     .layer_section = room->section,
     .bg1_dimming = 0.23f, .bg1_dimming_ramp = {0.1f,0.2f,0.2f,0.1f},
+    .scenery_exposure = scenario==0?Exposure:NULL, .scenery_exposure_userdata=&r,
     .effect_obj_priority_mask = 15, .effect_bg_plane_mask = 3,
     .plane_effect = PlaneEffect, .plane_effect_userdata = &r,
     .backdrop = completion ? Backdrop : NULL, .backdrop_userdata = &r};
@@ -456,6 +462,7 @@ unsigned DioramaFixture_Run(unsigned scenario) {
         &device, &capture, &view, &scene, &projection);
     assert(PresentationOutcome_IsUsable(outcome));
     assert(projection.valid && r.draws && r.bound_effect == -1);
+    if(scenario==0)assert(r.exposure_samples>0);
     if (death_heim) {
       assert(projection.bg2_plane.valid == (sky != kDioramaSky_Only || !completion));
       if (sky != kDioramaSky_Off && !completion) {

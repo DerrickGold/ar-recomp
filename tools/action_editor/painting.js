@@ -249,6 +249,7 @@ cvs.addEventListener('mousedown', ev => {
     return;
   }
   if(brush==='contour'){const r=cvs.getBoundingClientRect();drag={contour:true,points:[{x:Math.round((ev.clientX-r.left-view.x)/view.scale),y:Math.round((ev.clientY-r.top-view.y)/view.scale)}]};draw();return;}
+  if(brush==='lightBox'){drag={lightBox:true,x0:cx,y0:cy,x1:cx,y1:cy};draw();return;}
   if(brush==='particleArea'){drag={particleArea:true,x0:cx,y0:cy,x1:cx,y1:cy};draw();return;}
   if(brush==='floorMist'||brush==='floorErase'){drag={floorMist:true,erase:brush==='floorErase',x0:cx,y0:cy,x1:cx,y1:cy};draw();return;}
   if(brush==='stamp'){stampTiles(cx,cy);return;}
@@ -314,12 +315,15 @@ window.addEventListener('mousemove', ev => {
     paintCell(cx, cy, drag.value);
     glDirty = true; tally(); draw();
   }
-  else if (drag.rect||drag.selectRect||drag.floorMist||drag.particleArea) { drag.x1=cx; drag.y1=cy; draw(); }
+  else if (drag.rect||drag.selectRect||drag.floorMist||drag.particleArea||drag.lightBox) { drag.x1=cx; drag.y1=cy; draw(); }
 });
 window.addEventListener('mouseup', () => {
   if(finishFramingDrag())return;
   if(drag?.effects){drag=null;EmitterMapTools.finish();draw();return;}
   if(drag?.contour){EffectEditor.paintContour(drag.points);drag=null;draw();return;}
+  if(drag?.lightBox){
+    const box=drag;drag=null;EffectEditor.paintExposureRect(box.x0,box.y0,box.x1,box.y1);draw();return;
+  }
   if(drag?.particleArea){
     EffectEditor.paintParticleRect(drag.x0,drag.y0,drag.x1,drag.y1);drag=null;draw();return;
   }
@@ -382,7 +386,7 @@ function deselect() {
   commitOp(); if(drag?.effects)EmitterMapTools.cancel();drag = null;
   selectedCells.clear();selectedStampKeys.clear();selectionRect=null;stampHover=null;
   selectionAnchor=null;
-  if(['stamp','floorMist','floorErase','effects','effectPlace','effectPaste','particleArea'].includes(brush)){$('#bSelect').onclick();}
+  if(['stamp','floorMist','floorErase','effects','effectPlace','effectPaste','particleArea','lightBox'].includes(brush)){$('#bSelect').onclick();}
   lastEntry = null; pixelCell = null;pixelStamp=null;
   refreshSelectionControls(); draw();
 }

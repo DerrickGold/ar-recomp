@@ -91,7 +91,7 @@ const EditorLayout=(()=>{
   // click. Ordinary setting edits keep the dialog open.
   const leaveSettings=new Set(['pixelPick','framingAdjust','coverageFit','bgPolicyPreview',
     'previewProbesHere','previewEventHere','effectInspectorOpen','emitterAdd','emitterMapEdit',
-    'emitterMapPlace','particleAreaDraw','floorMistDraw','floorMistErase','export',
+    'emitterMapPlace','particleAreaDraw','lightBoxDraw','floorMistDraw','floorMistErase','export',
     'effectDocumentOpen','bClass','bCell','bRect','bSelect','bPan','bSelectRect','stampTool']);
   content.addEventListener('click',event=>{
     const button=event.target.closest('button');

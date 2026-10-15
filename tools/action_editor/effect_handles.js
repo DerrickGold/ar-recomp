@@ -57,7 +57,7 @@ const EmitterMapTools=(()=>{
     const picked=found.entry,corner=found.corner;
     if(ev.ctrlKey||ev.metaKey){EffectEditor.selectEmitter(picked.id,true);draw();return true;}
     if(ev.shiftKey){if(picked.movable!==false)EffectEditor.resetHandle(picked,corner?.rotate?'rotate':corner?'size':'position');draw();return true;}
-    if(picked.movable===false){EffectEditor.openModal(picked.id);return true;}
+    if(picked.movable===false){EffectEditor.openModal(picked.id,picked.x,picked.y);return true;}
     EffectEditor.selectEmitter(picked.id);
     gesture={scope:sceneKey(room),layer:bgIndex,initial:picked,draft:picked,start:p,corner};
     draw();return true;
@@ -136,12 +136,17 @@ const EmitterMapTools=(()=>{
         ctx.beginPath();points.forEach((p,i)=>ctx[i?'lineTo':'moveTo'](view.x+p.x*view.scale,view.y+p.y*view.scale));
         if(closed)ctx.closePath();ctx.stroke();
       };
-      if(selected||!e.family) {
+      if(selected||!e.family||e.kind==='floor-mist') {
         ctx.setLineDash(e.enabled?(selected?[]:[3,5]):[4,4]);line(path,true);ctx.setLineDash([]);
         if(EffectGeometry.isRay(e)) {
           const sides=e.kind==='light-fan'?[-.5,0,.5]:[0];
           for(const side of sides)line([EffectGeometry.rayPoint(e,0,side),EffectGeometry.rayPoint(e,1,side)]);
         }
+      }
+      if(e.kind==='exposure'&&selected) {
+        const f=e.fade||[0,0,0,0],sx=Math.min(1,e.width/(f[0]+f[2]||1)),sy=Math.min(1,e.height/(f[1]+f[3]||1));
+        ctx.setLineDash([2,4]);ctx.strokeRect(x+f[0]*sx*view.scale,y+f[1]*sy*view.scale,
+          Math.max(0,e.width-(f[0]+f[2])*sx)*view.scale,Math.max(0,e.height-(f[1]+f[3])*sy)*view.scale);ctx.setLineDash([]);
       }
       const cx=view.x+e.x*view.scale,cy=view.y+e.y*view.scale;
       ctx.fillStyle=e.enabled?'#151b29':'#454951';ctx.fillRect(cx-6,cy-6,12,12);
@@ -161,14 +166,14 @@ const EmitterMapTools=(()=>{
           ctx.beginPath();ctx.arc(rx,ry,6,0,Math.PI*2);ctx.fillStyle='#131722';ctx.fill();ctx.stroke();
           ctx.fillText(`${Math.round(e.angle||0)}°`,rx+10,ry+4);
         }
-        ctx.fillStyle='#fff19b';ctx.fillText(`${e.kind} · BG${bgIndex+1} · ${Math.round(e.x)}, ${Math.round(e.y)} · ${Math.round(e.width)}×${Math.round(e.height)}`,x,y-8);
+        ctx.fillStyle='#fff19b';ctx.fillText(`${e.kind==='exposure'?`Light box · ${Math.round(e.brightness*100)}%`:e.kind} · BG${bgIndex+1} · ${Math.round(e.x)}, ${Math.round(e.y)} · ${Math.round(e.width)}×${Math.round(e.height)}`,x,y-8);
       }
     }
     ctx.restore();
   }
   cvs.addEventListener('dblclick',ev=>{
     if(mode!=='2d')return;
-    const found=hit(ev);if(found){ev.preventDefault();cancel();drag=null;EffectEditor.openModal(found.entry.id);}
+    const found=hit(ev);if(found){ev.preventDefault();cancel();drag=null;EffectEditor.openModal(found.entry.id,found.entry.x,found.entry.y);}
   });
   return {point,hit,hits,begin,move,finish,cancel,draw:drawGuides};
 })();

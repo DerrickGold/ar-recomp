@@ -162,6 +162,44 @@ static int CompareTimberGuides(const void *a, const void *b) {
   return (left->x > right->x) - (left->x < right->x);
 }
 
+/* Refresh bounded region sources on recipe edits, without rescanning the room
+ * or touching the live render frame. Disabled fields keep editable guides. */
+static bool RegionSource(unsigned kind) {
+  return kind==kActionEffect_TempleGroundMist || kind==kActionEffect_TempleDust ||
+      kind==kActionEffect_CaveAmbientLight || kind==kActionEffect_TempleGrit ||
+      kind==kActionEffect_TowerWindowLight || kind==kActionEffect_CastleLight ||
+      kind==kActionEffect_CastleMist || kind==kActionEffect_CastleSky || kind==kActionEffect_CastleWater;
+}
+static void RefreshRegionSources(EditorRoomScene *r) {
+  const unsigned group=r->assets.scene.group, room=r->assets.scene.map;
+  const ActionAtmosphereField *atmosphere=group==1?ActionAtmosphereField_Bundled(room):NULL;
+  const ActionCastleField *castle=group==2?ActionCastleField_Bundled(room):NULL;
+  uint32_t atmosphere_id=0xc2000000u|(room<<8),castle_id=0xca000000u|room;
+  for(unsigned i=0;i<r->recipes.count;++i) {
+    const ActionEffectRecipe *e=&r->recipes.records[i];
+    if(e->group!=group||e->room!=room||e->terrain!=r->assets.terrain_profile)continue;
+    if(e->atmosphere_field){atmosphere=&r->recipes.atmosphere_fields[e->atmosphere_field-1];atmosphere_id=e->source;}
+    if(e->castle_field){castle=&r->recipes.castle_fields[e->castle_field-1];castle_id=e->source;}
+  }
+  unsigned count=0;
+  for(unsigned i=0;i<r->default_source_count;++i)
+    if(!RegionSource(r->default_sources[i].effect.kind))r->default_sources[count++]=r->default_sources[i];
+  r->default_source_count=count;
+  if(!atmosphere&&!castle)return;
+  ActionRoomSceneFrameRequest request=r->assets.frame;
+  request.camera_x=request.camera_y=request.game_frame=0;
+  ActionRoomSceneFrameState frame;
+  ActionEnvironmentScene scene;
+  if(!ActionRoomScene_BuildFrameState(&r->assets.scene,&request,&frame)||
+      !ActionEnvironmentScene_FromRoom(&scene,&r->assets.scene,&frame))return;
+  ActionSceneEffectFrame sample={0};
+  if(atmosphere)ActionAtmosphereField_Capture(&scene,&sample,atmosphere,atmosphere_id);
+  if(castle)ActionCastleField_Capture(&scene,&sample,castle,castle_id);
+  for(unsigned i=0;i<sample.decoration_count&&r->default_source_count<1024;++i)
+    r->default_sources[r->default_source_count++]=(EditorRoomEffectSource){
+        .effect=sample.decorations[i],.map_scale_x=1,.map_scale_y=1};
+}
+
 unsigned EditorRoomScene_DefaultSourceCount(EditorRoomScene *r) {
   if (!r) return 0;
   if (r->default_sources_ready) return r->default_source_count;
@@ -180,6 +218,8 @@ unsigned EditorRoomScene_DefaultSourceCount(EditorRoomScene *r) {
         if (positions[plane] > 0) map_scale[plane][axis] = 256 / positions[plane];
     }
   ActionSceneEffectFrame sample = {0};
+  const ActionSurfaceField *surfaces[kActionSurfaceFieldKinds];
+  ActionEffectRecipes_SurfaceFields(&r->recipes,r->assets.scene.group,r->assets.scene.map,r->assets.terrain_profile,surfaces);
   for (unsigned y = 0; y < height; y += 224)
     for (unsigned x = 0; x < width; x += 256) {
       ActionRoomSceneFrameRequest request = r->assets.frame;
@@ -192,6 +232,7 @@ unsigned EditorRoomScene_DefaultSourceCount(EditorRoomScene *r) {
           !ActionEnvironmentScene_FromRoom(&scene, &r->assets.scene, &frame))
         continue;
       memset(&sample, 0, sizeof(sample));
+      memcpy(scene.surface_fields,surfaces,sizeof(surfaces));
       ActionMapEnvironmentScene_Capture(&scene, &sample, NULL);
       ActionEnvironmentScene_Capture(&scene, &sample);
       /* Capture only once while inventorying the room. These silhouettes are
@@ -241,6 +282,7 @@ unsigned EditorRoomScene_DefaultSourceCount(EditorRoomScene *r) {
     else r->timber_guides[count++] = next;
   }
   r->timber_guide_count = count;
+  RefreshRegionSources(r);
   return r->default_source_count;
 }
 const EditorRoomEffectSource *EditorRoomScene_DefaultSource(EditorRoomScene *r, unsigned index) {
@@ -258,6 +300,15 @@ unsigned EditorRoomScene_DefaultGuideCount(EditorRoomScene *r, unsigned index) {
   case kActionEffect_BloodpoolTimber: return r->timber_guide_count;
   case kActionEffect_BloodpoolMoonlight: case kActionEffect_BloodpoolMoonReflection:
   case kActionEffect_BloodpoolCloud: return 1;
+  case kActionEffect_TempleGroundMist: return 1;
+  case kActionEffect_ForestLeaves: return 1;
+  case kActionEffect_TempleDust: return (unsigned)EditorRoomScene_AtmosphereField(r)->Counts[1];
+  case kActionEffect_CaveAmbientLight: return (unsigned)EditorRoomScene_AtmosphereField(r)->Counts[0];
+  case kActionEffect_TempleGrit: return (unsigned)EditorRoomScene_AtmosphereField(r)->Counts[2];
+  case kActionEffect_TowerWindowLight: return (unsigned)EditorRoomScene_AtmosphereField(r)->Counts[3];
+  case kActionEffect_CastleMist: case kActionEffect_CastleSky: return 1;
+  case kActionEffect_CastleWater: return (unsigned)EditorRoomScene_CastleField(r)->WaterSurface[3];
+  case kActionEffect_AitosLavaPit: case kActionEffect_AitosLavaReservoir: return 1;
   default: return 0;
   }
 }
@@ -265,6 +316,59 @@ bool EditorRoomScene_DefaultGuide(EditorRoomScene *r, unsigned index, unsigned g
                                   ArRenderRectF *bounds) {
   if (!bounds || guide >= EditorRoomScene_DefaultGuideCount(r, index)) return false;
   const unsigned kind = r->default_sources[index].effect.kind;
+  if (kind == kActionEffect_TempleGroundMist || kind == kActionEffect_AitosLavaPit ||
+      kind == kActionEffect_AitosLavaReservoir) {
+    const ActionEffectInstance *e = &r->default_sources[index].effect;
+    const ActionEffectLocalRect *rect = &e->geometry.data.rect;
+    *bounds = (ArRenderRectF){e->world_x + rect->x0, e->world_y + rect->y0,
+        rect->x1 - rect->x0, rect->y1 - rect->y0};
+    return true;
+  }
+  if (kind == kActionEffect_ForestLeaves) {
+    const ActionRayField *f = EditorRoomScene_RayField(r);
+    const float top = fmaxf(f->bounds[1], f->values[kActionRay_OriginY]+f->values[kActionRay_LeafOriginY]);
+    const float bottom = fminf(f->bounds[3], f->values[kActionRay_OriginY]+f->values[kActionRay_LeafOriginY]+f->values[kActionRay_LeafTravelY]);
+    *bounds = (ArRenderRectF){f->bounds[0], top, f->bounds[2]-f->bounds[0], fmaxf(0,bottom-top)};
+    return bounds->w > 0 && bounds->h > 0;
+  }
+  if (kind == kActionEffect_TempleDust || kind == kActionEffect_CaveAmbientLight ||
+      kind == kActionEffect_TempleGrit || kind == kActionEffect_TowerWindowLight) {
+    const ActionAtmosphereField *f = EditorRoomScene_AtmosphereField(r);
+    if (kind == kActionEffect_TempleDust) {
+      const float *a = ActionAtmosphereField_Area(f,guide);
+      const float left=fmaxf(0,a[0]), top=fmaxf(0,a[1]);
+      *bounds=(ArRenderRectF){left,top,fmaxf(0,fminf(EditorRoomScene_Width(r),a[2])-left),
+          fmaxf(0,fminf(EditorRoomScene_Height(r),a[3])-top)};
+    } else if (kind == kActionEffect_CaveAmbientLight) {
+      const float *a = ActionAtmosphereField_Ambient(f,guide);
+      const float radius=a[2]+fabsf(a[4])*a[3];
+      *bounds=(ArRenderRectF){a[0]-radius,a[1]-a[3],radius*2,a[3]*2};
+    } else if (kind == kActionEffect_TempleGrit) {
+      const float *a = ActionAtmosphereField_Grit(f,guide);
+      *bounds=(ArRenderRectF){a[0]-4,a[1],8,fmaxf(1,a[2]-a[1])};
+    } else {
+      const float *a = ActionAtmosphereField_Tower(f,guide);
+      float left=INFINITY,right=-INFINITY,top=INFINITY,bottom=-INFINITY;
+      for(unsigned row=0;row<5;++row) {
+        const float y=f->TowerRows[row],x=a[0]+(y-a[1])*a[2],radius=f->TowerWidths[row];
+        left=fminf(left,x-radius);right=fmaxf(right,x+radius);top=fminf(top,y);bottom=fmaxf(bottom,y);
+      }
+      *bounds=(ArRenderRectF){left,top,right-left,bottom-top};
+    }
+    return bounds->w > 0 && bounds->h > 0;
+  }
+  if (kind == kActionEffect_CastleMist || kind == kActionEffect_CastleWater || kind == kActionEffect_CastleSky) {
+    const ActionCastleField *f=EditorRoomScene_CastleField(r);
+    if(kind==kActionEffect_CastleMist)
+      *bounds=(ArRenderRectF){f->Floor[0],f->Floor[2]-18,f->Floor[1]-f->Floor[0],18};
+    else if(kind==kActionEffect_CastleSky)
+      *bounds=(ArRenderRectF){f->SkyAnchor[0]-f->SkyShape[0],f->SkyAnchor[1]-f->SkyShape[1],f->SkyShape[0]*2,f->SkyShape[1]*2};
+    else {
+      if(!(r->default_sources[index].effect.source_mask & (1u<<guide)))return false;
+      *bounds=(ArRenderRectF){f->WaterSurface[0]+guide*f->WaterSurface[2],f->WaterSurface[1],f->WaterSurface[2],16};
+    }
+    return bounds->w > 0 && bounds->h > 0;
+  }
   const ActionMarshField *m = EditorRoomScene_MarshField(r);
   const ActionMoonField *f = EditorRoomScene_MoonField(r);
   if (kind == kActionEffect_BloodpoolTimber) *bounds = r->timber_guides[guide];
@@ -736,7 +840,18 @@ const DioramaCapture *EditorRoomScene_Capture(const EditorRoomScene *r) { return
 const DioramaScene *EditorRoomScene_Scene(const EditorRoomScene *r) { return &r->scene; }
 const SrSceneSurfaces *EditorRoomScene_Surfaces(const EditorRoomScene *r) { return &r->surfaces; }
 bool EditorRoomScene_ConfigureEffects(EditorRoomScene *r, const char *text, size_t size, unsigned *line) {
-  return r && ActionEffectRecipes_Parse(&r->recipes,text,size,line);
+  if (!r) return false;
+  const ActionSurfaceField *surfaces[kActionSurfaceFieldKinds];
+  uint32_t before[kActionSurfaceFieldKinds];
+  ActionEffectRecipes_SurfaceFields(&r->recipes,r->assets.scene.group,r->assets.scene.map,r->assets.terrain_profile,surfaces);
+  for(unsigned i=0;i<kActionSurfaceFieldKinds;++i)before[i]=surfaces[i]?surfaces[i]->hash:0;
+  if (!ActionEffectRecipes_Parse(&r->recipes,text,size,line)) return false;
+  ActionEffectRecipes_SurfaceFields(&r->recipes,r->assets.scene.group,r->assets.scene.map,r->assets.terrain_profile,surfaces);
+  for(unsigned i=0;i<kActionSurfaceFieldKinds;++i)if(before[i]!=(surfaces[i]?surfaces[i]->hash:0)) {
+    r->default_sources_ready=false;r->default_source_count=0;r->timber_guide_count=0;break;
+  }
+  if (r->default_sources_ready) RefreshRegionSources(r);
+  return true;
 }
 const ActionSceneEffectFrame *EditorRoomScene_Effects(const EditorRoomScene *r) { return &r->effects; }
 const ActionEnvironmentScene *EditorRoomScene_Environment(const EditorRoomScene *r) { return &r->environment; }

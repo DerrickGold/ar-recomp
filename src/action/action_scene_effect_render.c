@@ -1,4 +1,5 @@
 #include "action/action_effect_receivers.h"
+#include "action/action_exposure.h"
 /* ActionSceneEffectRender: geometry for the effects placed in action scenes
  * (lava pits and reservoirs, molten rock, water splashes, waterfalls and their
  * mist, wall torches, statue fire, fireballs, the flaming wheel, projectiles),
@@ -2116,7 +2117,18 @@ bool ActionSceneDecorationRender_Build(
       shadow_prepared = true;
     }
     bool ok;
-    if(e->kind==kActionEffect_AuthoredTorch) {
+    if(e->kind==kActionEffect_AuthoredExposure) {
+      const ActionEffectProjectionContext *projection=writer.source?&writer.source->context:
+          project_point==ActionEffectProjection_ProjectPoint?project_userdata:NULL;
+      if(projection&&projection->scenery_exposure_in_mesh)continue;
+      if(!(e->tuning.dim_receivers&kActionReceiver_Scenery))continue;
+      bool previous=false;
+      for(unsigned j=0;j<i;++j)if(ActionExposure_Matches(e,&frame->authored[j],kActionReceiver_Scenery))previous=true;
+      if(previous)continue;
+      const ActionEffectInstance *boxes[kActionAuthoredMaxInstances];unsigned count=0;
+      for(unsigned j=i;j<frame->authored_count;++j)if(ActionExposure_Matches(e,&frame->authored[j],kActionReceiver_Scenery))boxes[count++]=&frame->authored[j];
+      ok=AppendExposureGroup(&writer,boxes,count,project_point,clip_bounds,project_userdata);
+    }else if(e->kind==kActionEffect_AuthoredTorch) {
       const ActionGlowField *field=frame->glow_field_valid?&frame->glow_field:ActionGlowField_Bundled(2,3);
       ActionEffectInstance torch=*e;torch.kind=kActionEffect_WallTorch;torch.phase=kActionEffectPhase_WallTorch;
       torch.geometry.data.rect=(ActionEffectLocalRect){field->Geometry[0],field->Geometry[1],field->Geometry[2],field->Geometry[3]};

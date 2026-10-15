@@ -3,6 +3,7 @@
 #include "action_effect_members.h"
 #include "action_floor_support.h"
 #include "action_authored_particles.h"
+#include "action_exposure.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -171,10 +172,33 @@ static unsigned RecipeCost(const ActionEffectRecipe *r) {
     case kActionEffect_AuthoredFan: return 56*r->field_style.strands+336;
     case kActionEffect_AuthoredWater: return 112+4*r->particles;
     case kActionEffect_AuthoredCloud: return 37*r->field_style.strands;
-    case kActionEffect_AuthoredExposure: return 4;
+    case kActionEffect_AuthoredExposure: return 0; /* union is budgeted once per room below */
     case kActionEffect_AuthoredContour: return 14*(r->field_style.point_count-1);
     default: return 8*37;
   }
+}
+static bool ExposureCostQuad(void *context,const float xs[2],const float ys[2],const float factors[4]) {
+  (void)xs;(void)ys;(void)factors;unsigned *vertices=context;
+  *vertices+=14;return *vertices<=kActionAuthoredMaxVertices;
+}
+static bool ExposureCost(const ActionEffectRecipes *table,const ActionEffectRecipe *scope,unsigned *vertices) {
+  ActionEffectInstance effects[kActionAuthoredMaxInstances];unsigned n=0;
+  for(unsigned i=0;i<table->count;++i) {
+    const ActionEffectRecipe *r=&table->records[i];
+    if(!r->enabled||!r->emitter||r->kind!=kActionEffect_AuthoredExposure||!(r->tuning.dim_receivers&kActionReceiver_Scenery)||
+       r->group!=scope->group||r->room!=scope->room||r->terrain!=scope->terrain)continue;
+    if(n==kActionAuthoredMaxInstances)return false;
+    effects[n++]=(ActionEffectInstance){.kind=r->kind,.flags=kActionEffectFlag_Visible,.world_x=(int16_t)r->x,.world_y=(int16_t)r->y,
+      .tuning=r->tuning,.field_style=r->field_style,.geometry={.kind=kActionEffectGeometry_Rect,.data.rect={-r->width/2,-r->height/2,r->width/2,r->height/2}}};
+  }
+  for(unsigned i=0;i<n;++i) {
+    bool previous=false;for(unsigned j=0;j<i;++j)if(ActionExposure_Matches(&effects[i],&effects[j],kActionReceiver_Scenery))previous=true;
+    if(previous||ActionExposure_Brightness(&effects[i])==1)continue;
+    const ActionEffectInstance *boxes[kActionAuthoredMaxInstances];unsigned count=0;
+    for(unsigned j=i;j<n;++j)if(ActionExposure_Matches(&effects[i],&effects[j],kActionReceiver_Scenery))boxes[count++]=&effects[j];
+    if(!ActionExposure_Visit(boxes,count,NULL,ExposureCostQuad,vertices))return false;
+  }
+  return true;
 }
 static unsigned Kind(const char *name) {
   for (unsigned i = 0; i < sizeof(kSources)/sizeof(kSources[0]); ++i)
@@ -428,6 +452,14 @@ bool ActionEffectRecipes_Parse(ActionEffectRecipes *table, const char *text,
         current->lifetime = (uint16_t)value_number;
       } else if (!strcmp(key,"points") && current->kind==kActionEffect_AuthoredContour) {
         bit=UINT64_C(1)<<33;ok=Points(value,&current->field_style);
+      } else if (!strcmp(key,"brightness") && current->kind==kActionEffect_AuthoredExposure) {
+        bit=UINT64_C(1)<<40;ok=Number(value,0,2,&current->field_style.brightness);
+        current->field_style.brightness_set=1;
+      } else if (!strncmp(key,"fade-",5) && current->kind==kActionEffect_AuthoredExposure) {
+        const char *edges[]={"left","top","right","bottom"};ok=false;
+        for(unsigned i=0;i<4;++i)if(!strcmp(key+5,edges[i])) {
+          bit=UINT64_C(1)<<(41+i);ok=Number(value,0,16384,&current->field_style.fade[i]);break;
+        }
       } else if (!strcmp(key,"anchor")) {
         bit=UINT64_C(1)<<39;ok=false;
         const char *names[]={"bg1","bg2-point","bg2-raster"};
@@ -533,7 +565,7 @@ bool ActionEffectRecipes_Parse(ActionEffectRecipes *table, const char *text,
       instances+=copies; vertices+=copies*RecipeCost(other);
     }
     if (members > kActionNativeMemberMax || instances > kActionAuthoredMaxInstances ||
-        vertices > kActionAuthoredMaxVertices)
+        vertices > kActionAuthoredMaxVertices || !ExposureCost(next,r,&vertices))
       ok = false;
   }
   if (ok) *table = *next;
@@ -760,7 +792,8 @@ void ActionEffectRecipes_Apply(const ActionEffectRecipes *table, unsigned group,
           (alpha?kActionEffectRenderLayer_WorldDust:kActionEffectRenderLayer_WorldOverlay);
     }
     if(r->kind==kActionEffect_AuthoredExposure) {
-      e->render_layer=kActionEffectRenderLayer_Bg1Mist;e->tuning.dim_receivers_set=1;
+      e->render_layer=ActionExposure_Brightness(e)>1?kActionEffectRenderLayer_Bg1Light:kActionEffectRenderLayer_Bg1Mist;
+      e->tuning.dim_receivers_set=1;
     }
     if (r->kind == kActionEffect_AuthoredFloorMist) {
       const ActionEffectLocalRect area={r->x-r->width/2,r->y-r->height/2,r->x+r->width/2,r->y+r->height/2};

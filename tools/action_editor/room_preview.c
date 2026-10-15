@@ -8,6 +8,8 @@
 #include "diorama/diorama_rom_backdrop.h"
 #include "action/action_decoration_pass.h"
 #include "action/action_environment_exposure.h"
+#include "action/action_exposure.h"
+#include "render/scenery_dimming.h"
 #include "action/action_effect_projection.h"
 #include "action/action_effect_render.h"
 #include <math.h>
@@ -298,13 +300,30 @@ unsigned RoomPreview_SourceValue(unsigned index, unsigned field) {
     default: return 0;
   }
 }
-/* Catalogue coordinates are independent of the camera and recipe overrides. */
+/* Catalogue coordinates are independent of the camera. Complete definitions
+ * own their member bases; sparse transforms remain relative to those bases. */
+static unsigned MemberCount(unsigned kind) {
+  if(kind==kActionEffect_CastleLight)return (unsigned)EditorRoomScene_CastleField(s_room)->SourceCount[0];
+  const ActionEnvironmentScene *scene=EditorRoomScene_Environment(s_room);
+  return ActionEffectMembers_Count(kind,scene->group,scene->room);
+}
+static bool MemberSource(unsigned kind,unsigned id,ActionNativeMemberSource *out,bool *angled) {
+  if(kind==kActionEffect_CastleLight) {
+    const ActionCastleField *f=EditorRoomScene_CastleField(s_room);
+    if(!id||id>(unsigned)f->SourceCount[0])return false;
+    const ActionCastleSource *s=&f->sources[id-1];
+    *out=(ActionNativeMemberSource){s->x,s->y,s->width*2,s->length};
+    *angled=s->kind!=kActionCastleSource_Torch;return true;
+  }
+  const ActionEnvironmentScene *scene=EditorRoomScene_Environment(s_room);
+  *angled=ActionEffectMembers_Angled(kind,scene->group,scene->room,id);
+  return ActionEffectMembers_Source(kind,scene->group,scene->room,id,out);
+}
 unsigned RoomPreview_MemberCount(unsigned index) {
   if (!s_room) return 0;
   const ActionSceneEffectFrame *f = EditorRoomScene_Effects(s_room);
   if (index >= f->decoration_count) return 0;
-  const ActionEnvironmentScene *s = EditorRoomScene_Environment(s_room);
-  return ActionEffectMembers_Count(f->decorations[index].kind, s->group, s->room);
+  return MemberCount(f->decorations[index].kind);
 }
 unsigned RoomPreview_CatalogueCount(void) { return EditorRoomScene_DefaultSourceCount(s_room); }
 unsigned RoomPreview_CatalogueGuideCount(unsigned index) {
@@ -325,7 +344,6 @@ double RoomPreview_CatalogueValue(unsigned index, unsigned field) {
   const EditorRoomEffectSource *s = EditorRoomScene_DefaultSource(s_room, index);
   if (!s) return 0;
   const ActionEffectInstance *e = &s->effect;
-  const ActionEnvironmentScene *scene = EditorRoomScene_Environment(s_room);
   switch (field) {
   case 0:
     return e->generation;
@@ -342,7 +360,7 @@ double RoomPreview_CatalogueValue(unsigned index, unsigned field) {
   case 6:
     return ActionEffectMembers_MovableSource(e->kind);
   case 7:
-    return ActionEffectMembers_Count(e->kind, scene->group, scene->room);
+    return MemberCount(e->kind);
   case 8:
     return s->map_scale_x;
   case 9:
@@ -387,10 +405,9 @@ static double MemberGuideValue(unsigned kind, unsigned member, unsigned field) {
 }
 double RoomPreview_CatalogueMemberValue(unsigned index, unsigned member, unsigned field) {
   const EditorRoomEffectSource *s = EditorRoomScene_DefaultSource(s_room, index);
-  const ActionEnvironmentScene *scene = EditorRoomScene_Environment(s_room);
-  ActionNativeMemberSource source;
+  ActionNativeMemberSource source;bool angled;
   if (!s ||
-      !ActionEffectMembers_Source(s->effect.kind, scene->group, scene->room, member + 1, &source))
+      !MemberSource(s->effect.kind, member + 1, &source,&angled))
     return 0;
   switch (field) {
   case 0:
@@ -404,17 +421,16 @@ double RoomPreview_CatalogueMemberValue(unsigned index, unsigned member, unsigne
   case 4:
     return source.height;
   case 5:
-    return ActionEffectMembers_Angled(s->effect.kind, scene->group, scene->room, member + 1);
+    return angled;
   default:
     return MemberGuideValue(s->effect.kind, member, field);
   }
 }
 double RoomPreview_MemberValue(unsigned index, unsigned member, unsigned field) {
   if (member >= RoomPreview_MemberCount(index)) return 0;
-  const ActionEnvironmentScene *s = EditorRoomScene_Environment(s_room);
   const ActionEffectInstance *e = &EditorRoomScene_Effects(s_room)->decorations[index];
-  ActionNativeMemberSource source;
-  if (!ActionEffectMembers_Source(e->kind, s->group, s->room, member + 1, &source)) return 0;
+  ActionNativeMemberSource source;bool angled;
+  if (!MemberSource(e->kind, member + 1, &source,&angled)) return 0;
   switch (field) {
   case 0:
     return member + 1;
@@ -427,7 +443,7 @@ double RoomPreview_MemberValue(unsigned index, unsigned member, unsigned field) 
   case 4:
     return source.height;
   case 5:
-    return ActionEffectMembers_Angled(e->kind, s->group, s->room, member + 1);
+    return angled;
   default:
     return MemberGuideValue(e->kind, member, field);
   }
@@ -598,13 +614,19 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   RoomEffectPass effects = {.frame = EditorRoomScene_Effects(s_room), .valid = true,
     .projection = {.bg1_camera_x = environment->camera_x[0], .bg1_camera_y = environment->camera_y[0],
       .bg2_camera_x = environment->camera_x[1], .bg2_camera_y = environment->camera_y[1],
-      .ws_extra = extra, .ws_extra_top = capture.authentic_y0,
+      .ws_extra = extra, .ws_extra_top = capture.authentic_y0, .scenery_exposure_in_mesh=true,
       .visible_width = capture.width, .snes_height = capture.height, .viewport = view.viewport}};
   if(s_probes && !ActionEffectReceivers_Prepare(effects.frame,environment->group,environment->room,
       environment->camera_x[0],environment->camera_y[0],environment->camera_x[1],environment->camera_y[1],s_effects_enabled,&s_receiver))return 0;
+  ActionExposureLighting exposure={.origin_x=environment->camera_x[0]-extra-capture.obj_apron,
+      .origin_y=environment->camera_y[0]-capture.authentic_y0,
+      .width=SR_PPU_SURFACE_MAX_WIDTH,.height=SR_PPU_SURFACE_MAX_HEIGHT};
+  ActionExposure_Prepare(&exposure,s_effects_enabled?effects.frame:NULL);
+  scene.scenery_exposure=exposure.count?ActionExposure_Scenery:NULL;scene.scenery_exposure_userdata=&exposure;
   if (s_effects_enabled || s_probes) {
     scene.bg1_dimming = s_effects_enabled ? ActionEnvironment_Bg1Dimming(effects.frame, environment->group, environment->room) : 0;
-    scene.bg1_dimming_ramp = ActionEnvironment_Bg1DimmingRamp(effects.frame,environment->group, environment->room);
+    scene.bg1_dimming_ramp = SceneryDimming_ToUv(ActionEnvironment_Bg1DimmingRamp(effects.frame,environment->group, environment->room),
+        exposure.origin_x,exposure.origin_y,exposure.width,exposure.height);
     scene.effect_obj_priority_mask = ActionEffectProjection_RequiredObjPriorityMask(NULL, effects.frame) | (s_probes?1u<<2:0);
     scene.effect_bg_plane_mask = ActionEffectProjection_RequiredBgPlaneMask(NULL, effects.frame);
     scene.plane_effect = DrawPlaneEffects; scene.plane_effect_userdata = &effects;

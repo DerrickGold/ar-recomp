@@ -877,7 +877,8 @@ atmosRun(`loadIniText('','atmosphere.ini');setLayer(0);SharedRoomPreview.validat
  SharedRoomPreview.atmosphereFieldDefinition=()=>${JSON.stringify(atmosphereData)};
  const atmosphereBuffer=new ArrayBuffer(40);new Uint8Array(atmosphereBuffer).set(new TextEncoder().encode('cave-light\0'),1);
  EffectEditor.updateCatalogue({memory:{buffer:atmosphereBuffer},RoomPreview_KindName:()=>1,RoomPreview_ReachSupported:()=>0,
- RoomPreview_CatalogueCount:()=>1,RoomPreview_CatalogueValue:(i,f)=>[0xc2000200,1,0,0,768,544,0,0,1,1][f]});
+ RoomPreview_CatalogueCount:()=>1,RoomPreview_CatalogueValue:(i,f)=>[0xc2000200,1,0,0,768,544,0,0,1,1][f],
+ RoomPreview_CatalogueGuideCount:()=>1,RoomPreview_CatalogueGuideValue:(i,g,f)=>[640,320,384,256][f]});
  EffectEditor.openModal('source:01:01:0:cave-light:c2000200');$('#effectDefinitionCreate').onclick();`);
 assert.match(atmosRun('EffectEditor.text()'),/\[field:01:01:0:atmosphere-field:c2000200\]/);
 assert.match(atmosRun('EffectEditor.text()'),/floor-area=880 1120 1760 1248/);
@@ -891,6 +892,39 @@ atmosRun(`undo();EffectEditor.selectEmitter('field:01:01:0:atmosphere-field:c200
 assert.match(atmosRun('EffectEditor.text()'),/counts=1 1 0 0 0/);assert.match(atmosRun('EffectEditor.text()'),/ambient-1=640 320 128 96 0 0.5 0.5 0/);
 assert.match(atmosRun('EffectEditor.text()'),/components=5/);assert.match(atmosRun('EffectEditor.text()'),/area-1=512 224 768 416/);
 console.log('Complete atmosphere extraction, modal apply/cancel/undo, source disable/reset and generic placement passed');
+
+/* Native dimming is spatially selectable and extracts atomically into a box. */
+const exposureEditor=editor(fixture()),exr=exposureEditor.run;
+exr(`loadIniText('','exposure.ini');setLayer(0);room.map=2;room.bg[0].pagesWide=8;room.bg[0].pagesHigh=5;
+ SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
+ const exposureBuffer=new ArrayBuffer(16384),exposureBytes=new Uint8Array(exposureBuffer);
+ exposureBytes.set(new TextEncoder().encode('cave-light\\0'),1);
+ exposureBytes.set(new TextEncoder().encode(${JSON.stringify(atmosphereData)}+'\\0'),64);
+ const exposureApi={memory:{buffer:exposureBuffer},RoomPreview_KindName:()=>1,RoomPreview_ReachSupported:()=>0,
+ RoomPreview_AtmosphereFieldText:()=>64,RoomPreview_CatalogueCount:()=>1,
+ RoomPreview_CatalogueValue:(i,f)=>[0xc2000200,1,0,0,768,544,0,0,1,1][f]};
+ EffectEditor.updateCatalogue(exposureApi);
+ const nativeBox=EffectEditor.mapEmitters().find(e=>e.kind==='exposure');`);
+assert.deepEqual(JSON.parse(exr('JSON.stringify([nativeBox.x,nativeBox.y,nativeBox.width,nativeBox.height,nativeBox.fade])')),[1424,960,1248,640,[320,448,0,0]]);
+assert.equal(exr('EffectEditor.text()'),'[effects]\nversion=1\n');
+exr(`EffectEditor.openModal(nativeBox.id);`);
+assert.match(exr('EffectEditor.text()'),/^dimming=0$/m);assert.match(exr('EffectEditor.text()'),/^brightness=0.55$/m);
+exr(`EffectEditor.editEmitter(nativeBox.id,{brightness:.3});$('#effectInspectorClose').onclick();`);
+assert.equal(exr('EffectEditor.text()'),'[effects]\nversion=1\n');assert.equal(exr('undoStack.length'),0);
+exr(`EffectEditor.openModal(nativeBox.id);$('#exposureBrightness').onchange({target:{value:'60'}});$('#effectInspectorApply').onclick();`);
+assert.equal(exr('undoStack.length'),1);assert.match(exr('EffectEditor.text()'),/^brightness=0.6$/m);
+assert.match(exr('EffectEditor.text()'),/floor-area=880 1120 1760 1248/);
+exr('undo()');assert.equal(exr('EffectEditor.text()'),'[effects]\nversion=1\n');
+assert.equal(exr("EffectEditor.mapEmitters().filter(e=>e.kind==='exposure').length"),1);
+exr('redo()');assert.equal(exr("EffectEditor.mapEmitters().filter(e=>e.kind==='exposure').length"),1);
+exr(`EffectEditor.paintExposureRect(2,3,9,14);$('#effectInspectorClose').onclick();`);
+assert.equal(exr('undoStack.length'),1,'cancel drawing leaves no box');
+exr(`EffectEditor.paintExposureRect(2,3,9,14);$('#effectInspectorApply').onclick();`);
+assert.equal(exr('undoStack.length'),2);
+assert.match(exr('EffectEditor.text()'),/width=128/);assert.match(exr('EffectEditor.text()'),/height=192/);
+exr(`EffectEditor.editEmitter(EffectEditor.selected(),{'fade-top':8});EffectEditor.resetValues(EffectEditor.selected(),['fade-top']);`);
+assert.equal(exr("EffectEditor.mapEmitters().find(e=>e.id===EffectEditor.selected()).fade[1]"),64);
+console.log('Native dimming guides, light-box extraction, brightness, drawn areas, cancel/undo and fade reset passed');
 
 /* The point-and-click workflow is independent of the effects brush and does
  * not require visiting a source in the preview before configuring it. */
@@ -964,7 +998,7 @@ ur(`let catalogueCalls=0;
   EffectEditor.updateCatalogue(catalogue);EffectEditor.updateCatalogue(catalogue);
   EffectEditor.selectEmitter('member:01:01:0:forest-forward:00000001');`);
 assert.equal(ur('catalogueCalls'),3,'one count per loop and one termination check, then cached');
-assert.equal(ur('EffectEditor.mapEmitters().filter(e=>e.native).length'),4,'parent families and members have markers');
+assert.equal(ur('EffectEditor.mapEmitters().filter(e=>e.native).length'),2,'only spatial members have markers; family controls stay in the inspector');
 uopen(800,100);ur(`$('#tileActionEditEffect').onclick()`);
 assert.equal(ui.elements.get('#effectFamilyOpen').hidden,false);
 uchange('nativeAngle','12');ur(`$('#effectFamilyOpen').onclick()`);
@@ -2734,6 +2768,47 @@ sr(`$('#effectInspectorApply').onclick();EffectEditor.removeEffect('field:01:01:
 assert(sr('EffectEditor.mapEmitters(0).every(e=>!e.enabled)'),'linked field disable affects every terrain guide');
 sr('undo()');assert(sr('EffectEditor.mapEmitters(0).every(e=>e.enabled)'));
 console.log('Spatial shoreline, insect, timber and BG2 guides, field refresh and linked controls passed');
+const floorGuideEditor=editor(fixture()),fgr=floorGuideEditor.run;
+fgr(`loadIniText('','floor-guides.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+ const buffer=new TextEncoder().encode('\\0floor-mist\\0').buffer;
+ globalThis.floorGuideY=1199;
+ globalThis.floorApi={memory:{buffer},RoomPreview_KindName:()=>1,RoomPreview_ReachSupported:()=>0,
+ RoomPreview_CatalogueCount:()=>2,RoomPreview_CatalogueMemberValue:()=>0,
+ RoomPreview_CatalogueValue:(i,f)=>[0xc3020370+i,i,880+i*64,1216,64,34,0,0,1,1,0][f],
+ RoomPreview_CatalogueGuideCount:()=>1,RoomPreview_CatalogueGuideValue:(i,g,f)=>[912+i*64,floorGuideY,64,34][f]};
+ EffectEditor.updateCatalogue(floorApi);`);
+assert.deepEqual(JSON.parse(fgr('JSON.stringify(EffectEditor.mapEmitters().map(e=>[e.x,e.y,e.width,e.height]))')),
+ [[912,1199,64,34],[976,1199,64,34]],'native floor markers use supported span centres and height');
+fgr(`EffectEditor.selectEmitter(EffectEditor.mapEmitters()[0].id);`);
+assert.match(fgr("$('#effectSourceInfo').textContent"),/Collision-supported mist span/);
+assert.match(fgr("$('#effectSourceInfo').textContent"),/912, 1199/);
+fgr(`$('#effectEnabled').onchange({target:{checked:false}});floorGuideY=1183;EffectEditor.updateCatalogue(floorApi);`);
+assert.equal(fgr('EffectEditor.mapEmitters()[0].enabled'),false);
+assert.equal(fgr('EffectEditor.mapEmitters()[0].y'),1183,'refreshed floor guides replace stale catalogue positions');
+assert.equal(fgr('EffectEditor.mapEmitters(1).length'),0,'floor mist is BG1 anchored');
+console.log('Floor-mist supported footprints, refresh and per-span controls passed');
+const regionGuideEditor=editor(fixture()),rgr=regionGuideEditor.run;
+rgr(`loadIniText('','region-guides.ini');setLayer(0);room.bg[0].pagesWide=8;room.bg[0].pagesHigh=5;
+ SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
+ const bytes=new Uint8Array(160),names=['cave-light','castle-sky','forest-leaves','forest-canopy'];
+ names.forEach((name,i)=>bytes.set(new TextEncoder().encode(name+'\\0'),i*32+1));
+ const api={memory:{buffer:bytes.buffer},RoomPreview_KindName:k=>k*32+1,RoomPreview_ReachSupported:()=>0,
+ RoomPreview_CatalogueCount:()=>4,RoomPreview_CatalogueValue:(i,f)=>[100+i,i,0,0,768,544,0,0,i===2?2:1,1,i===1?2:0][f],
+ RoomPreview_CatalogueGuideCount:i=>i===0?2:i===3?0:1,
+ RoomPreview_CatalogueGuideValue:(i,g,f)=>(i===0?[400+g*500,600,300,200]:i===1?[112,62,68,56]:[512,256,1024,512])[f]};
+ EffectEditor.updateCatalogue(api);`);
+assert.equal(rgr('EffectEditor.mapEmitters(0).length'),3,'region guides replace camera-window marker origins');
+assert.equal(rgr('EffectEditor.mapEmitters(1).length'),1,'castle sky is only on BG2');
+assert.deepEqual(JSON.parse(rgr('JSON.stringify(EffectEditor.mapEmitters(1).map(e=>[e.kind,e.x,e.y]))')),
+ [['castle-sky',112,62]]);
+assert.deepEqual(JSON.parse(rgr('JSON.stringify(EffectEditor.mapEmitters(0).filter(e=>e.kind==="forest-leaves").map(e=>[e.x,e.width]))')),
+ [[1024,2048]],'leaf guides retain native layer-to-map scale');
+rgr(`EffectEditor.openModal('source:01:01:0:cave-light:00000064',905,600)`);
+assert.match(rgr("$('#effectSourceInfo').textContent"),/900, 600/,'inspector describes the clicked region');
+rgr(`$('#effectInspectorPreview').onclick()`);
+assert.equal(rgr('nativeCamera.x'),772,'preview uses the clicked region, not the first member of its group');
+assert.equal(rgr('nativeCamera.y'),488);
+console.log('Atmosphere, leaf and BG2 region guides, no placeholder family markers and clicked-region preview passed');
 const placedMarshEditor=editor(fixture()),pmr=placedMarshEditor.run;
 pmr(`loadIniText('','placed-marsh.ini');SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
  SharedRoomPreview.marshFieldDefinition=()=>${JSON.stringify(marshData)};EffectEditor.placeEmitter('marsh-field',96,160);`);

@@ -28,6 +28,7 @@ typedef struct ActionEffectProjectionContext {
   int capture_height; /* 0 retains legacy full-canvas clipping. */
   ArRenderRectI viewport;
   const DioramaProjection *diorama_projection;
+  bool scenery_exposure_in_mesh; /* no duplicate alpha/light overlay */
 } ActionEffectProjectionContext;
 
 /* Owned value snapshot for optional retained CPU work. Never key a cache by a

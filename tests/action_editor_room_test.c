@@ -98,6 +98,16 @@ int main(int argc, char **argv) {
     const EditorRoomEffectSource *source = EditorRoomScene_DefaultSource(room, i);
     assert(source && isfinite(source->map_scale_x) && source->map_scale_x > 0);
     assert(isfinite(source->map_scale_y) && source->map_scale_y > 0);
+    if (source->effect.kind == kActionEffect_TempleGroundMist) {
+      const ActionEffectInstance *e = &source->effect;
+      ArRenderRectF guide;
+      assert(EditorRoomScene_DefaultGuideCount(room, i) == 1);
+      assert(EditorRoomScene_DefaultGuide(room, i, 0, &guide));
+      assert(guide.x == e->world_x + e->geometry.data.rect.x0);
+      assert(guide.y == e->world_y + e->geometry.data.rect.y0);
+      assert(guide.x + guide.w == e->world_x + e->geometry.data.rect.x1);
+      assert(guide.y + guide.h == e->world_y);
+    }
     for (unsigned j = 0; j < i; ++j) {
       const ActionEffectInstance *prior = &EditorRoomScene_DefaultSource(room, j)->effect;
       assert(prior->kind != source->effect.kind || prior->generation != source->effect.generation);

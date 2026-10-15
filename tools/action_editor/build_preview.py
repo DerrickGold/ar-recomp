@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the offline shared-C baseline module with the pinned Emscripten SDK."""
+"""Build the offline shared-C baseline module with a validated Emscripten SDK."""
 import argparse
 import os
 from pathlib import Path
@@ -7,7 +7,7 @@ import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-EMSCRIPTEN_VERSION = "5.0.7"
+EMSCRIPTEN_VERSIONS = ("5.0.7", "6.0.12")
 EXPORTS = ["ActionPreview_" + name for name in
            ("Version", "Input", "Capacity", "Hash", "Reset", "Load", "Render")]
 
@@ -16,8 +16,14 @@ def compiler_environment(compiler):
     env = dict(os.environ)
     env.setdefault("EM_CACHE", str(ROOT / "build/action-editor/emscripten-cache"))
     version = subprocess.check_output([compiler, "--version"], env=env, text=True)
-    if not re.search(r"\b" + re.escape(EMSCRIPTEN_VERSION) + r"\b", version.splitlines()[0]):
-        raise RuntimeError(f"Shared preview requires Emscripten {EMSCRIPTEN_VERSION}: {version.splitlines()[0]}")
+    banner = version.splitlines()[0] if version else "(no version output)"
+    # Homebrew's release compiler reports a -git suffix. Keep the numeric
+    # version explicit: newer SDKs need native/WASM parity checks before use.
+    match = re.search(r"^emcc .*? (\d+\.\d+\.\d+)(?:-git)?(?:\s|$)", banner)
+    if not match or match[1] not in EMSCRIPTEN_VERSIONS:
+        supported = " or ".join(EMSCRIPTEN_VERSIONS)
+        raise RuntimeError(f"Shared preview requires Emscripten {supported}; found {banner}. "
+                           "Set EMCC to a supported emcc executable.")
     return env
 
 

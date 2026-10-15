@@ -2,7 +2,8 @@
  * deltas as the toolbar. A paste destination is independent of the selection. */
 const tileMenu=$('#tileMenu');
 tileMenu.hidden=true;
-const tileMenuButtons=['AddEffect','EditEffect','DeleteEffect','CopyEffect','PasteEffect','Preview','Settings','Priority','Far','ResetBand','Pixels','Fill','FlipH','FlipV','MirrorH','MirrorV','Copy','Paste','Stamp','Delete','Reset','Remove','Deselect']
+const effectMenuNames=['AddEffect','LightBox','EditEffect','DeleteEffect','CopyEffect','PasteEffect','Preview','Settings'];
+const tileMenuButtons=[...effectMenuNames,'Priority','Far','ResetBand','Pixels','Fill','FlipH','FlipV','MirrorH','MirrorV','Copy','Paste','Stamp','Delete','Reset','Remove','Deselect']
   .map(name=>$(`#tileAction${name}`));
 let tileMenuTarget=null;
 const macControlClick=ev=>ev.button===0&&ev.ctrlKey&&/Mac/.test(window.navigator?.platform||'');
@@ -39,6 +40,7 @@ function openTileMenu(cx,cy,clientX,clientY) {
   const sameClipboard=tileClipboard?.key===keyOf(room,bgIndex);
   tileMenuTarget={cx,cy,key:keyOf(room,bgIndex),priority:allHigh?1:2,effect:effect?.id,x:point.x,y:point.y};
   $('#tileActionAddEffect').disabled=false;
+  $('#tileActionLightBox').disabled=bgIndex!==0||!hasSelection;
   $('#tileActionAddEffect').title=`Place an effect anchored to this BG${bgIndex+1} map point.`;
   $('#tileActionCopyEffect').hidden=!effect;$('#tileActionPasteEffect').hidden=!EffectEditor.hasClipboard();
   $('#tileActionEditEffect').hidden=$('#tileActionDeleteEffect').hidden=!effect;
@@ -51,7 +53,7 @@ function openTileMenu(cx,cy,clientX,clientY) {
     choices.append(option);
   }
   choices.value=effect?.id??'';$('#tileEffectChoiceRow').hidden=overlaps.length<2;
-  for(const button of tileMenuButtons.slice(7))button.hidden=!!effect;
+  for(const button of tileMenuButtons.slice(effectMenuNames.length))button.hidden=!!effect;
   $('#tileMenuTitle').textContent=effect?`${effect.kind} · ${Math.round(effect.x)}, ${Math.round(effect.y)}`:`${positions.length} tile${positions.length===1?'':'s'} selected · BG${bgIndex+1}`;
   $('#tileMenuDestination').hidden=!!effect;
   $('#tileMenuDestination').textContent=`Paste destination: ${cx}, ${cy} · Diorama only`;
@@ -93,8 +95,12 @@ function runTileAction(action) {
 }
 $('#tileActionCopyEffect').onclick=()=>runTileAction(()=>EffectEditor.copyEffects());
 $('#tileActionPasteEffect').onclick=()=>runTileAction(({x,y})=>EffectEditor.pasteEffects(x,y));
+$('#tileActionLightBox').onclick=()=>runTileAction(()=>{
+  const points=tileSelectionPositions(),xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);
+  if(bgIndex===0&&points.length)EffectEditor.paintExposureRect(Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys));
+});
 $('#tileActionAddEffect').onclick=()=>runTileAction(({x,y})=>EffectEditor.openModal(null,x,y));
-$('#tileActionEditEffect').onclick=()=>runTileAction(({effect})=>EffectEditor.openModal(effect));
+$('#tileActionEditEffect').onclick=()=>runTileAction(({effect,x,y})=>EffectEditor.openModal(effect,x,y));
 $('#tileActionDeleteEffect').onclick=()=>runTileAction(({effect})=>EffectEditor.removeEffect(effect));
 $('#tileActionPreview').onclick=()=>runTileAction(({x,y})=>EffectEditor.previewAt(x,y));
 $('#tileActionPriority').onclick=()=>runTileAction(({priority})=>{

@@ -116,6 +116,8 @@ bool DioramaSnapshot_Describe(DioramaSnapshot *out,
   s.scene = *scene;
   s.scene.plane_effect = NULL;
   s.scene.plane_effect_userdata = NULL;
+  s.scene.scenery_exposure = NULL;
+  s.scene.scenery_exposure_userdata = NULL;
   s.scene.effect_bg_plane_mask = 0;
   s.scene.effect_obj_priority_mask = 0;
   s.options = *scene->render;

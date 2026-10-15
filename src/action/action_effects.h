@@ -335,6 +335,9 @@ typedef struct ActionEffectFieldStyle {
   float angle, fan, softness, drift, amplitude;
   uint8_t strands, pattern, placement, point_count;
   struct {float x,y;} points[kActionContourMaxPoints];
+  /* Exposure boxes keep legacy intensity-based dimming when unset. */
+  float brightness, fade[4]; /* left, top, right, bottom; world pixels */
+  uint8_t brightness_set;
 } ActionEffectFieldStyle;
 
 typedef struct ActionEffectInstance {

@@ -9,7 +9,20 @@ const [htmlFile,wasmFile,replay,directory]=process.argv.slice(2);
 const html=fs.readFileSync(htmlFile,'utf8');
 const data=JSON.parse(html.match(/window\.__ACTION_BG__=(.*?);<\/script>/s)[1]);
 const ini=JSON.parse(html.match(/window\.__DIORAMA_LAYERS__=(.*?);window\.__DIORAMA_LAYERS_NAME__/s)[1]);
-const iniFile=path.join(directory,'layers.ini');fs.writeFileSync(iniFile,ini);
+const iniFile=path.join(directory,'layers.ini');
+// The UI sends only the selected room to the bounded WASM configuration API.
+// A complete project's unrelated rooms can exceed its 1 MiB transport limit.
+// Keep named sections too, and send the same room document to the native oracle.
+function roomConfiguration(base) {
+ let keep=false;
+ return ini.split(/\r?\n/).filter(line=>{
+   if(/^\s*\[/.test(line)) {
+     const section=line.match(/^\s*\[layers:([\da-f]+):([\da-f]+)(?::[^\]]+)?\]/i);
+     keep=!!section&&parseInt(section[1],16)===base.group&&parseInt(section[2],16)===base.map;
+   }
+   return keep;
+ }).join('\n');
+}
 const encoder=vm.createContext({window:{},Uint8Array,Uint32Array,DataView});
 vm.runInContext(fs.readFileSync('tools/action_editor/shared_preview.js','utf8'),encoder);
 const encode=vm.runInContext('SharedActionPreview.encode',encoder);
@@ -33,12 +46,18 @@ const instance=await WebAssembly.instantiate(fs.readFileSync(wasmFile),{ar:impor
 api=instance.instance.exports;api._initialize?.();assert.equal(api.DioramaPreview_Init(16384),1);
 const memory=api.memory.buffer;
 function send(bytes,fn){new Uint8Array(memory,api.DioramaPreview_Input(),bytes.length).set(bytes);return fn(bytes.length);}
+function cstring(pointer) {
+ const bytes=new Uint8Array(memory);let end=pointer;while(bytes[end])end++;
+ return new TextDecoder().decode(bytes.subarray(pointer,end));
+}
 const stagePresets=JSON.parse(html.match(/window\.__ACTION_EFFECT_PRESETS__=(.*?);window\.__ACTION_VIEW__/s)[1]);
 let scenes=0,frames=0,presetChecks=0;
 for(const base of data.rooms)for(const terrain of base.terrainVariants){
+ const roomIni=roomConfiguration(base);
+ fs.writeFileSync(iniFile,roomIni);
  const room={...base,bg:[terrain.bg1,base.bg[1]],terrainProfile:terrain.profile};
  const packet=encode(data,blobs,room);assert.equal(send(packet,api.RoomPreview_Load),1);
- assert.equal(send(Buffer.from(ini),api.RoomPreview_Configure),1,`configuration ${base.group}:${base.map}`);
+ assert.equal(send(Buffer.from(roomIni),api.RoomPreview_Configure),1,`configuration ${base.group}:${base.map}`);
  const beforeCatalogue=[api.RoomPreview_Hash(),api.RoomPreview_EffectHash(),creates,updates,draws];
  const catalogueCount=api.RoomPreview_CatalogueCount(),catalogueKeys=new Set();
  assert(catalogueCount<1024);
@@ -47,6 +66,20 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
    assert(!catalogueKeys.has(key));catalogueKeys.add(key);
    for(const field of [2,3,4,5,8,9])assert(Number.isFinite(api.RoomPreview_CatalogueValue(i,field)));
    for(const field of [8,9])assert(api.RoomPreview_CatalogueValue(i,field)>0);
+   const name=cstring(api.RoomPreview_KindName(api.RoomPreview_CatalogueValue(i,1)));
+   const guides=Array.from({length:api.RoomPreview_CatalogueGuideCount(i)},(_,g)=>
+     [0,1,2,3].map(f=>api.RoomPreview_CatalogueGuideValue(i,g,f)));
+   assert(guides.flat().every(Number.isFinite));
+   if(!api.RoomPreview_CatalogueValue(i,6)&&!api.RoomPreview_CatalogueValue(i,7))
+     assert(guides.some(g=>g[2]>0&&g[3]>0),`${base.group}:${base.map} ${name} must have a real spatial guide`);
+   if(name==='temple-dust')assert(guides.every(([x,y,w,h])=>x-w/2>=0&&y-h/2>=0&&
+     x+w/2<=room.bg[0].pagesWide*256&&y+h/2<=room.bg[0].pagesHigh*256),'dust sentinel bounds are clipped to the room');
+   if(name==='castle-sky')assert.equal(api.RoomPreview_CatalogueValue(i,10),2,'castle sky follows the BG2 raster');
+   if(name==='lava-pit'||name==='lava-lake') {
+     const [x,y,w,h]=guides[0];
+     assert(w>0&&h>0);assert(Math.abs(x-api.RoomPreview_CatalogueValue(i,2))<=w/2);
+     assert(Math.abs(y-api.RoomPreview_CatalogueValue(i,3))<=h/2);
+   }
    for(let m=0;m<api.RoomPreview_CatalogueValue(i,7);m++) {
      assert.equal(api.RoomPreview_CatalogueMemberValue(i,m,0),m+1);
      for(const field of [1,2,3,4,6,7,8,9,10])assert(Number.isFinite(api.RoomPreview_CatalogueMemberValue(i,m,field)));
@@ -56,6 +89,35 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
  assert.deepEqual([api.RoomPreview_Hash(),api.RoomPreview_EffectHash(),creates,updates,draws],beforeCatalogue,
    'whole-room inventory never renders, allocates textures or mutates the live frame');
  if(base.group===1&&[1,2].includes(base.map))assert(catalogueCount>0);
+ if(base.group===1&&[2,3].includes(base.map)) {
+   const floorGuides=()=>{
+     const spans=[];
+     for(let i=0;i<api.RoomPreview_CatalogueCount();++i) {
+       if(cstring(api.RoomPreview_KindName(api.RoomPreview_CatalogueValue(i,1)))!=='floor-mist')continue;
+       assert.equal(api.RoomPreview_CatalogueGuideCount(i),1);
+       const [x,y,w,h]=[0,1,2,3].map(f=>api.RoomPreview_CatalogueGuideValue(i,0,f));
+       assert.equal(x-w/2,api.RoomPreview_CatalogueValue(i,2),'guide starts at the native mist span');
+       assert.equal(y+h/2,api.RoomPreview_CatalogueValue(i,3),'guide bottom rests on the supporting floor');
+       assert.equal(w,api.RoomPreview_CatalogueValue(i,4));
+       assert.equal(h,api.RoomPreview_CatalogueValue(i,5));
+       spans.push([x,y,w,h]);
+     }
+     return spans;
+   };
+   const original=floorGuides();assert(original.length>0,'lower palace has supported mist spans');
+   const definition=cstring(api.RoomPreview_AtmosphereFieldText());
+   const area=definition.match(/^floor-area=(.*)$/m)[1].split(/\s+/).map(Number);area[0]+=16;
+   const modified=definition.replace(/^floor-style=.*$/m,'floor-style=40 0.2 12')
+     .replace(/^floor-area=.*$/m,'floor-area='+area.join(' '));
+   const header=`[effects]\nversion=1\n[field:01:0${base.map}:${terrain.profile}:atmosphere-field:c2000${base.map}00]\n`;
+   assert.equal(send(Buffer.from(header+modified),api.RoomPreview_ConfigureEffects),1);
+   const changed=floorGuides();assert(changed.length>0);
+   assert(changed.every(([x,y,w,h])=>h===40&&x-w/2>=area[0]),'guide height and floor coverage follow the active recipe');
+   assert.equal(send(Buffer.from(header+modified.replace('floor-style=40','floor-style=nan')),api.RoomPreview_ConfigureEffects),0);
+   assert.deepEqual(floorGuides(),changed,'invalid recipe leaves guide inventory intact');
+   assert.equal(send(Buffer.from('[effects]\nversion=1\n'),api.RoomPreview_ConfigureEffects),1);
+   assert.deepEqual(floorGuides(),original,'removing the override restores native floor guides');
+ }
  if(base.group===2&&base.map===1) {
    const anchored=[];
    for(let i=0;i<catalogueCount;++i)if(api.RoomPreview_CatalogueValue(i,10)===1)
@@ -137,7 +199,7 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
      assert.deepEqual(Array.from(new Int32Array(memory,api.DioramaPreview_Input(),98)),defaults,
        'A edits do not become B defaults when B has no authored section');
    }
-   assert.equal(send(Buffer.from(ini),api.RoomPreview_Configure),1);
+   assert.equal(send(Buffer.from(roomIni),api.RoomPreview_Configure),1);
  }
 
  // Saved policies use the planner, affect pixels, and survive native replay.
@@ -176,7 +238,7 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
      assert.equal(api.RoomPreview_Hash()>>>0,painted);
    }
    assert.deepEqual(policy(true),canonical,'defaults remain available after authoring');
-   assert.equal(send(Buffer.from(ini),api.RoomPreview_Configure),1);
+   assert.equal(send(Buffer.from(roomIni),api.RoomPreview_Configure),1);
  }
 
  // Aitos surfaces use the same bounded capture and mesh kernels from complete data.
@@ -197,6 +259,16 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
    const configured=execFileSync(replay,[path.join(directory,'room.arscene'),iniFile,file],
      {input:requests.map(r=>r.join(' ')).join('\n')+'\n',encoding:'utf8'}).trim().split('\n').map(n=>n.split(' ').map(v=>parseInt(v,16)));
    assert.deepEqual(configured,native,'Aitos surface native/WASM round trip');
+   if(base.map===1) {
+     const custom=scoped.replace(/^mode=0$/m,'mode=1').replace(/^source-count=0$/m,'source-count=1')
+       .replace(/^source-1=.*$/m,'source-1=480 320 -32 -8 64 16 1');
+     assert.equal(send(Buffer.from(custom),api.RoomPreview_ConfigureEffects),1);
+     const lava=[];
+     for(let i=0;i<api.RoomPreview_CatalogueCount();++i)
+       if(cstring(api.RoomPreview_KindName(api.RoomPreview_CatalogueValue(i,1)))==='lava-pit')
+         lava.push([0,1,2,3].map(f=>api.RoomPreview_CatalogueGuideValue(i,0,f)));
+     assert.deepEqual(lava,[[496,324,96,24]],'surface recipe changes refresh source capture and local bounds');
+   }
    assert.equal(send(Buffer.from('[effects]\nversion=1\n'),api.RoomPreview_ConfigureEffects),1);
  }
  if(base.group===2&&base.map===1){
@@ -276,6 +348,25 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
    assert.equal(send(Buffer.from(scoped.replace(/^upper-color=.*$/m,'upper-color=.1 .2 .3')),api.RoomPreview_ConfigureEffects),1);
    assert.equal(api.RoomPreview_Render(...requests[1],960,600,1,0,0,1,0),1);
    assert.notEqual(api.RoomPreview_EffectHash()>>>0,effectHashes[1]);
+   if(base.map===3) {
+     const moved=scoped.replace(/^source-count=.*$/m,'source-count=1').replace(/^source-1=(.*)$/m,(_,values)=>{
+       const v=values.split(/\s+/);v[6]='530';return 'source-1='+v.join(' ');
+     }).replace(/^sky-anchor=.*$/m,'sky-anchor=140 80');
+     assert.equal(send(Buffer.from(moved),api.RoomPreview_ConfigureEffects),1);
+     let lights=0,skies=0;
+     for(let i=0;i<api.RoomPreview_CatalogueCount();++i) {
+       const name=cstring(api.RoomPreview_KindName(api.RoomPreview_CatalogueValue(i,1)));
+       if(name==='castle-light') {
+         lights++;assert.equal(api.RoomPreview_CatalogueValue(i,7),1);
+         assert.deepEqual([1,2].map(f=>api.RoomPreview_CatalogueMemberValue(i,0,f)),[168,530],
+           'window member bases use the edited definition');
+       }
+       if(name==='castle-sky') {
+         skies++;assert.deepEqual([0,1].map(f=>api.RoomPreview_CatalogueGuideValue(i,0,f)),[140,80]);
+       }
+     }
+     assert.equal(lights,1);assert.equal(skies,1);
+   }
    assert.equal(send(Buffer.from('[effects]\nversion=1\n'),api.RoomPreview_ConfigureEffects),1);
  }
  // The complete linked moon field retains aggregate source and layer order.
@@ -383,7 +474,7 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
    if(kind==='light-fan')recipes+='strands=4\nangle=12\nlight-player=1\n';
    if(kind==='cloud-bank')recipes+='strands=4\ndrift=12\namplitude=4\n';
    if(['water-surface','drips','waterfall-spray'].includes(kind))recipes+='particles=8\n';
-   if(kind==='exposure')recipes+='dim-player=1\ndim-enemies=0\nintensity=.2\n';
+   if(kind==='exposure')recipes+='dim-player=1\ndim-enemies=0\nbrightness=.8\nfade-left=16\nfade-top=24\n';
    if(kind==='wet-contour')recipes+='points=-32,12 0,-12 32,12\n';
  }
  // Individual native member IDs stay independent of camera and recipe state.

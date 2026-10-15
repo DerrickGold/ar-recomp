@@ -5,14 +5,37 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools/action_editor'))
 from build_compositor import shader_variants, SHADERS
+from build_preview import compiler_environment
 from build import build_document
 
 
 class CompositorBuildTest(unittest.TestCase):
+    def test_supported_compilers_and_workspace_cache(self):
+        for version in ('5.0.7', '6.0.12', '6.0.12-git'):
+            with self.subTest(version=version), patch.dict('os.environ', {}, clear=True), \
+                    patch('build_preview.subprocess.check_output', return_value=
+                          f'emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) {version}\n') as probe:
+                env = compiler_environment('/sdk/emcc')
+                self.assertEqual(env['EM_CACHE'], str(ROOT / 'build/action-editor/emscripten-cache'))
+                probe.assert_called_once_with(['/sdk/emcc', '--version'], env=env, text=True)
+
+        with patch.dict('os.environ', {'EM_CACHE': '/custom-cache'}), \
+                patch('build_preview.subprocess.check_output', return_value='emcc (Emscripten) 6.0.12\n'):
+            self.assertEqual(compiler_environment('emcc')['EM_CACHE'], '/custom-cache')
+
+    def test_unvalidated_compilers_report_how_to_select_supported_sdk(self):
+        for banner in ('emcc (Emscripten) 6.0.13\n', 'emcc (Emscripten) 6.0.12.1\n',
+                       'clang version 6.0.12\n', ''):
+            with self.subTest(banner=banner), \
+                    patch('build_preview.subprocess.check_output', return_value=banner):
+                with self.assertRaisesRegex(RuntimeError, r'5\.0\.7 or 6\.0\.12.*Set EMCC'):
+                    compiler_environment('emcc')
+
     def test_generated_shaders(self):
         sources = shader_variants()
         self.assertEqual(len(sources), 4)

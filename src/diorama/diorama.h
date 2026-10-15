@@ -346,6 +346,10 @@ typedef struct DioramaScene {
   float bg1_dimming;
   /* Optional source-UV ramp for depth-dependent scenery exposure. */
   ArRenderRectF bg1_dimming_ramp;
+  /* Optional synchronous source-UV brightness modifier for BG1 low/high/far.
+   * Borrowed only during Composite, like plane_effect; not snapshot state. */
+  float (*scenery_exposure)(void *userdata, float u, float v);
+  void *scenery_exposure_userdata;
   /* Current effects retain projection on an intentionally empty plane. */
   uint8_t effect_obj_priority_mask;
   uint32_t effect_bg_plane_mask;

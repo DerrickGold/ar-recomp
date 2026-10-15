@@ -606,7 +606,7 @@ sh tools/action_editor/build.sh
 sh tools/action_editor/build.sh ar.sfc out.html path/to/diorama-layers.ini
 ```
 
-The default build needs a C compiler, Python 3 and Emscripten **5.0.7**. Its
+The default build needs a C compiler, Python 3 and Emscripten **5.0.7 or 6.0.12**. Its
 output is a self-contained HTML file that can open from `file://`. The default output is
 `build/action-editor/ar-action-layer-editor.html`, keeping the generated editor
 out of the source tree and Git. By default it embeds the repository ROM and
@@ -621,13 +621,14 @@ does not write game settings.
 
 ### Shared original-background comparison
 
-The build defaults to `ACTION_EDITOR_WASM=on`, requiring Emscripten **5.0.7**
+The build defaults to `ACTION_EDITOR_WASM=on`, requiring Emscripten **5.0.7 or 6.0.12**
 and embedding both the original-background comparison and shared renderer WASM
 modules directly in the HTML. Opening the editor requires no compiler, server,
 adjacent files, or network access. `ACTION_EDITOR_WASM=off` builds the existing
 JavaScript-only editor with just a C compiler and Python 3.
 `ACTION_EDITOR_WASM=auto` builds shared previews when `emcc` is available;
-a different compiler version reports an error. `EMCC` selects the compiler and
+a different compiler version reports an error. Homebrew's `6.0.12-git` release
+banner is supported. `EMCC` selects the compiler and
 `EM_CACHE` can override the workspace-local build cache.
 
 **Original game frame** uses shared C for original BG1/BG2 decoding, regional
@@ -667,7 +668,7 @@ a flat HUD or CRT processing. It cannot apply unsaved map edits. See the
 [compositor snapshot contract](compositor-snapshot.md) for supported inputs.
 
 ```sh
-# Build the browser compositor alone (pinned Emscripten 5.0.7).
+# Build the browser compositor alone (Emscripten 5.0.7 or 6.0.12).
 python3 tools/action_editor/build_compositor.py build/action-editor/ar-renderer-preview.html
 
 # Capture a real scene with isolated copies of the seed/settings/input replay.
@@ -1282,8 +1283,50 @@ base. The region is limited to 880 pixels wide and a 128-pixel vertical search;
 fragmentation beyond the existing native mist-span budget omits only floor mist.
 `floor-style` controls volume height and ambient-light response. The `mist-*`
 properties describe the same layered volume kernel used by splash mist.
+Native **floor-mist** markers sit at the centre of each collision-supported
+span, with an outline extending up from its floor by the configured mist height.
+These guides refresh after floor-area/height changes and Undo; they do not use
+the generic room-family marker row. Click a span to edit its appearance or open
+the complete atmosphere definition to change its floor search area.
 `grit-*` and `grain-*` configure falling grit and its landing burst; actor jump
 and landing event scheduling is still a separate native family.
 
 Atmosphere sub-sources are edited through labeled vectors in their configuration
 modal; they have no individual drag handles.
+
+Other native regions also have spatial guides: cave light pools, dust areas,
+falling-grit paths, tower-window light, forest leaf coverage, castle floor mist
+and water, and Aitos lava surfaces. Castle sky-light guides live on BG2. Guides
+use the active definition and native layer-to-map scale; lava capture refreshes
+when its surface definition changes. Castle-window members likewise use the
+active source positions and count. Group controls without their own spatial
+region stay in the source selector instead of adding placeholder map markers.
+Clicking a linked region keeps **Apply & Preview** centred on that region.
+
+### Light boxes and native dimming
+
+**Draw light box** lets you drag a rectangular area on BG1 and configure its
+brightness (0–200%, with 100% unchanged), four inward edge fades in map pixels,
+and scenery/player/enemy receivers. Boxes can be moved, resized, copied, pasted,
+and reset with the existing map controls. The dotted inner guide shows where
+full brightness is reached. Opposing fades scale down together on small boxes.
+Boxes with the same brightness merge using their strongest coverage, including
+feathers; overlapping them never darkens or brightens the overlap twice.
+Different brightness values multiply. Flat rendering uses bounded, world-anchored
+union geometry in the existing alpha/light batches, including deferred GPU
+submission. Diorama samples exposure on its existing BG1 low/high/far scenery
+meshes, preserving texture alpha and avoiding extra draws. Like native dimming,
+its fades are interpolated at the scenery mesh resolution.
+The C parser checks the combined geometry budget before accepting an edit.
+
+Native atmosphere/castle dimming now has a selectable **Light box** guide over
+its actual area. Opening it drafts an ordinary exposure emitter and removes
+only the parent field's dimming, preserving all other atmosphere properties.
+Apply commits both together; Cancel and Undo restore the original definition.
+Fillmore Act 2's lower cave/palace zone spans (800,640) to (2048,1280), at 55%
+brightness, fading in over 320 pixels from the left and 448 from the top.
+
+Exposure INI records use `brightness=0.55` and `fade-left`, `fade-top`,
+`fade-right`, `fade-bottom`. Old `intensity`-based exposure records retain their
+hard-edged dimming when the new keys are absent; an explicit brightness takes
+precedence over intensity.

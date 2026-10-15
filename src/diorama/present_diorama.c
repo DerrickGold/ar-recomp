@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "action/action_effect_projection.h"
+#include "action/action_exposure.h"
+#include "render/scenery_dimming.h"
 #include "action/present_action_effects.h"
 #include "app/session_fatal.h"
 #include "app/performance_metrics.h"
@@ -726,15 +728,13 @@ retry_projection:;
       .visible_height = FrameSlot_VisibleHeight(slot),
       .viewport = viewport,
   };
-  ArRenderRectF dimming_ramp = PresentActionEffects_Bg1DimmingRamp(slot);
-  if (dimming_ramp.w > 0 && dimming_ramp.h > 0) {
-    dimming_ramp.x = (dimming_ramp.x-slot->bg1_camera_x+slot->ws_extra+slot->obj_apron) /
-        kFrameSlotLayerTextureWidth;
-    dimming_ramp.y = (dimming_ramp.y-slot->bg1_camera_y+slot->ws_extra_top) /
-        kFrameSlotLayerTextureHeight;
-    dimming_ramp.w /= kFrameSlotLayerTextureWidth;
-    dimming_ramp.h /= kFrameSlotLayerTextureHeight;
-  }
+  const float exposure_x=slot->bg1_camera_x-slot->ws_extra-slot->obj_apron;
+  const float exposure_y=slot->bg1_camera_y-slot->ws_extra_top;
+  ArRenderRectF dimming_ramp = SceneryDimming_ToUv(PresentActionEffects_Bg1DimmingRamp(slot),
+      exposure_x,exposure_y,kFrameSlotLayerTextureWidth,kFrameSlotLayerTextureHeight);
+  ActionExposureLighting exposure={.origin_x=exposure_x,.origin_y=exposure_y,
+      .width=kFrameSlotLayerTextureWidth,.height=kFrameSlotLayerTextureHeight};
+  ActionExposure_Prepare(&exposure,slot->action_environmental_effects?&slot->action_scene_effects:NULL);
   DioramaRenderOptions render;
   Diorama_CaptureRenderOptions(&render);
   if (source_draw) render.draw_resident_skybox = DioramaFrameGeneration_DrawSkybox;
@@ -762,6 +762,8 @@ retry_projection:;
       .layer_section = slot->diorama_layer_section,
       .bg1_dimming = PresentActionEffects_Bg1Dimming(slot),
       .bg1_dimming_ramp = dimming_ramp,
+      .scenery_exposure = exposure.count?ActionExposure_Scenery:NULL,
+      .scenery_exposure_userdata = &exposure,
       .additive_plane_mask =
           slot->diorama_plane_additive_mask & s_diorama_uploaded_plane_mask,
       .effect_obj_priority_mask = effect_obj_priority_mask,

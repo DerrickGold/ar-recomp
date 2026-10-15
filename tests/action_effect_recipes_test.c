@@ -91,7 +91,7 @@ static void TestFloorSupport(void) {
 static void TestFieldsAndReceivers(void) {
   assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-area:1]\nx=8000\ny=8000\nwidth=16000\nheight=16000\nparticles=8\npattern=snow\n"));
   before=table;
-  const char *bad[]={"[emitter:01:02:0:particle-area:1]\nparticles=17\n", "[emitter:01:02:0:exposure:1]\nintensity=1.01\n",
+  const char *bad[]={"[emitter:01:02:0:exposure:1]\nbrightness=2.1\n", "[emitter:01:02:0:exposure:1]\nfade-top=-1\n", "[emitter:01:02:0:exposure:1]\nfade-top=nan\n", "[emitter:01:02:0:motes:1]\nbrightness=.5\n", "[emitter:01:02:0:exposure:1]\nfade-top=20\nfade-top=40\n","[emitter:01:02:0:particle-area:1]\nparticles=17\n", "[emitter:01:02:0:exposure:1]\nintensity=1.01\n",
     "[emitter:01:02:0:light-fan:1]\nstrands=33\n", "[emitter:01:02:0:light-fan:1]\nangle=nan\n",
     "[emitter:01:02:0:wet-contour:1]\npoints=-32,0 500,0\n", "[emitter:01:02:0:wet-contour:1]\npoints=0,0 0,0\n",
     "[emitter:01:02:0:wet-contour:1]\npoints=0,0\n", "[source:01:02:0:temple-dust:0]\nlight-player=1\n",

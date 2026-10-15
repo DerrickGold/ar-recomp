@@ -2,7 +2,51 @@
  * no native actor allocation, simulation state, texture or extra GPU resolve. */
 #include "action_effect_render_internal.h"
 #include "action_authored_particles.h"
+#include "action_exposure.h"
 
+typedef struct ExposureWriter {
+  ActionEffectGeometryWriter *writer;
+  ActionEffectInstance mesh;
+  ActionEffectLocalRect clip;
+  ActionEffectProjectPointFn project;
+  void *context;
+} ExposureWriter;
+static bool ExposureQuad(void *context,const float xs[2],const float ys[2],const float factors[4]) {
+  ExposureWriter *out=context;
+  const bool bright=ActionExposure_Brightness(&out->mesh)>1;
+  const float points[4][2]={{xs[0],ys[0]},{xs[1],ys[0]},{xs[1],ys[1]},{xs[0],ys[1]}};
+  ArRenderVertex2D vertices[4];int mapped[4]={-1,-1,-1,-1};
+  for(unsigned i=0;i<4;++i) {
+    const float delta=factors[i]-1;
+    vertices[i]=(ArRenderVertex2D){.position={points[i][0]-out->mesh.world_x,points[i][1]-out->mesh.world_y},
+      .color=bright?(ArRenderColorF){delta,delta,delta,1}:(ArRenderColorF){0,0,0,-delta}};
+  }
+  const int indices[]={0,1,2,0,2,3};
+  for(unsigned t=0;t<6;t+=3)if(!AppendSceneClippedTriangle(out->writer,&out->mesh,vertices,mapped,indices+t,&out->clip,out->project,out->context))return false;
+  return true;
+}
+bool AppendExposureGroup(ActionEffectGeometryWriter *writer,const ActionEffectInstance *const *boxes,unsigned count,
+    ActionEffectProjectPointFn project,ActionEffectClipBoundsFn clip_fn,void *context) {
+  if(!count)return true;
+  ExposureWriter out={.writer=writer,.mesh=*boxes[0],.project=project,.context=context};
+  ActionEffectLocalRect bounds=boxes[0]->geometry.data.rect;
+  bounds.x0+=out.mesh.world_x;bounds.x1+=out.mesh.world_x;bounds.y0+=out.mesh.world_y;bounds.y1+=out.mesh.world_y;
+  for(unsigned i=0;i<count;++i) {
+    const ActionEffectInstance *e=boxes[i];const ActionEffectLocalRect *r=&e->geometry.data.rect;
+    const float brightness=ActionExposure_Brightness(e);
+    if(!isfinite(brightness)||brightness<0||brightness>2)return false;
+    for(unsigned j=0;j<4;++j)if(!isfinite(e->field_style.fade[j])||e->field_style.fade[j]<0||e->field_style.fade[j]>16384)return false;
+    bounds.x0=fminf(bounds.x0,e->world_x+r->x0);bounds.x1=fmaxf(bounds.x1,e->world_x+r->x1);
+    bounds.y0=fminf(bounds.y0,e->world_y+r->y0);bounds.y1=fmaxf(bounds.y1,e->world_y+r->y1);
+  }
+  if(ActionExposure_Brightness(&out.mesh)==1)return true;
+  out.mesh.flags|=kActionEffectFlag_ClippedMesh;
+  out.clip=(ActionEffectLocalRect){bounds.x0-out.mesh.world_x,bounds.y0-out.mesh.world_y,bounds.x1-out.mesh.world_x,bounds.y1-out.mesh.world_y};
+  out.mesh.geometry.data.rect=out.clip;
+  if(clip_fn&&!clip_fn(context,&out.mesh,&out.clip))return true;
+  bounds=(ActionEffectLocalRect){out.clip.x0+out.mesh.world_x,out.clip.y0+out.mesh.world_y,out.clip.x1+out.mesh.world_x,out.clip.y1+out.mesh.world_y};
+  return ActionExposure_Visit(boxes,count,&bounds,ExposureQuad,&out);
+}
 static ArRenderColorF FieldColor(uint32_t color) {
   return (ArRenderColorF){((color>>16)&255)/255.f,((color>>8)&255)/255.f,(color&255)/255.f,1};
 }
@@ -245,18 +289,8 @@ bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstanc
     case kActionEffect_AuthoredExposure: {
       if(!lighting&&!particles)return true;
       if(!(e->tuning.dim_receivers&kActionReceiver_Scenery))return true;
-      if(e->tuning.intensity>1)return false;
-      ActionEffectInstance mesh=*e;mesh.flags|=kActionEffectFlag_ClippedMesh;
-      const float points[4][2]={{r->x0,r->y0},{r->x1,r->y0},{r->x1,r->y1},{r->x0,r->y1}};
-      ArRenderVertex2D vertices[4];int mapped[4]={-1,-1,-1,-1};
-      for(unsigned i=0;i<4;++i) {
-        vertices[i]=(ArRenderVertex2D){.position={points[i][0],points[i][1]},
-            .color={0,0,0,e->tuning.intensity}};
-      }
-      const int indices[]={0,1,2,0,2,3};
-      for(unsigned t=0;t<6;t+=3)
-        if(!AppendSceneClippedTriangle(w,&mesh,vertices,mapped,indices+t,&visible,project,context))return false;
-      return true;
+      const ActionEffectInstance *boxes[]={e};
+      return AppendExposureGroup(w,boxes,1,project,clip_fn,context);
     }
     case kActionEffect_AuthoredHalo: return !lighting || Halo(w,e,&visible,project,context);
     case kActionEffect_AuthoredGradient: return !lighting || LightGradient(w,e,&visible,project,context);

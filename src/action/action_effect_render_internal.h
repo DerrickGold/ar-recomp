@@ -109,6 +109,8 @@ bool AppendSceneSoftCloud(ActionEffectGeometryWriter *writer, const ActionEffect
     ActionEffectProjectPointFn project_point, void *userdata);
 bool SceneActorHeading(const ActionEffectInstance *effect,
                               float *x, float *y);
+bool AppendExposureGroup(ActionEffectGeometryWriter *writer,const ActionEffectInstance *const *boxes,unsigned count,
+    ActionEffectProjectPointFn project,ActionEffectClipBoundsFn clip_fn,void *context);
 bool AppendAuthoredField(ActionEffectGeometryWriter *w,const ActionEffectInstance *e,bool lighting,bool particles,
     ActionEffectProjectPointFn project,ActionEffectClipBoundsFn clip,void *context);
 bool AppendAuthoredEnvironment(ActionEffectGeometryWriter *writer,

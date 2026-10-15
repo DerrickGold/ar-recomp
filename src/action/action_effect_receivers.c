@@ -1,5 +1,6 @@
 #include "action_effect_receivers.h"
 #include "action_environment_exposure.h"
+#include "action_exposure.h"
 #include "action_light_kinds.h"
 #include "render/scenery_dimming.h"
 #include <math.h>
@@ -120,10 +121,14 @@ void ActionEffectReceivers_Sample(const ActionReceiverLighting *lighting,unsigne
     if(lighting->dim_receivers&receiver)factor*=1-SceneryDimming_Amount(lighting->dimming,lighting->ramp,x,y);
     const ActionSceneEffectFrame *frame=lighting->frame;
     for(unsigned i=0;i<frame->authored_count;++i) {
-      const ActionEffectInstance *e=&frame->authored[i];const ActionEffectLocalRect *r=&e->geometry.data.rect;
-      if(e->kind==kActionEffect_AuthoredExposure&&(e->flags&kActionEffectFlag_Visible)&&(e->tuning.dim_receivers&receiver)&&
-          x>=e->world_x+r->x0&&x<e->world_x+r->x1&&y>=e->world_y+r->y0&&y<e->world_y+r->y1)
-        factor*=1-e->tuning.intensity;
+      const ActionEffectInstance *e=&frame->authored[i];
+      if(!ActionExposure_Matches(e,e,receiver))continue;
+      bool previous=false;
+      for(unsigned j=0;j<i;++j)if(ActionExposure_Matches(e,&frame->authored[j],receiver))previous=true;
+      if(previous)continue;
+      const ActionEffectInstance *boxes[kActionAuthoredMaxInstances];unsigned count=0;
+      for(unsigned j=i;j<frame->authored_count;++j)if(ActionExposure_Matches(e,&frame->authored[j],receiver))boxes[count++]=&frame->authored[j];
+      factor*=ActionExposure_Union(boxes,count,x,y);
     }
     const unsigned role=receiver==kActionReceiver_Player?0:1;
     Sample(role?&lighting->enemies:&lighting->player,lighting->light_start[role],x,y,add,light);

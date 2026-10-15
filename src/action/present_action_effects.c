@@ -501,7 +501,7 @@ typedef struct ActionSourcePacketCache {
   ActionEffectSourceLightJob *lights;
   unsigned count, capacity, light_count, light_capacity;
   uint64_t revision;
-  bool valid, failed, lighting, particles;
+  bool valid, failed, lighting, particles, scenery_exposure_in_mesh;
   uint32_t particle_mask;
   ActionEffectLocalRect particle_bounds[kActionAuthoredMaxInstances];
 } ActionSourcePacketCache;
@@ -582,7 +582,8 @@ static bool DrawSourcePacket(ArRenderDevice *device, const FrameSlot *slot,
   if (particles && cache->particle_mask &&
       UpdateSourceParticleBounds(cache, &slot->action_scene_effects, projection))
     cache->valid = false;
-  if (!cache->valid || cache->lighting != lighting || cache->particles != particles) {
+  if (!cache->valid || cache->lighting != lighting || cache->particles != particles ||
+      cache->scenery_exposure_in_mesh != projection->scenery_exposure_in_mesh) {
     ActionEffectSourceBatch source = {.context = *projection,
         .primitives = s_source_primitives, .capacity = kActionSourceMaximumPrimitives,
         .lights = s_source_lights, .light_capacity = kActionSourceMaxLightJobs};
@@ -598,6 +599,7 @@ static bool DrawSourcePacket(ArRenderDevice *device, const FrameSlot *slot,
       built = ActionEffectRender_Build(&slot->action_effects, lighting, particles,
           ActionEffectSource_ProjectPoint, &source, &s_action_effect_render_scratch.spell);
     cache->failed = !built || !RetainSourcePacket(cache, &source);
+    cache->scenery_exposure_in_mesh=projection->scenery_exposure_in_mesh;
     cache->lighting = lighting;
     cache->particles = particles;
     cache->valid = true;
@@ -820,6 +822,7 @@ static ActionEffectProjectionContext DecorationProjection(
     .visible_x0 = slot->visible_x0, .visible_width = slot->visible_width,
     .snes_height = FrameSlot_VisibleHeight(slot), .visible_top = slot->visible_top,
     .capture_height = FrameSlot_CaptureHeight(slot), .diorama_projection = diorama,
+    .scenery_exposure_in_mesh = diorama != NULL,
     /* Flat geometry is target-local; its submission restores viewport offset. */
     .viewport = {diorama ? viewport.x : 0, diorama ? viewport.y : 0,
                  viewport.w, viewport.h},

@@ -2,6 +2,8 @@
 #include "action/action_effect_receivers.h"
 #include "action/action_effect_preview.h"
 #include "action/action_environment_exposure.h"
+#include "action/action_exposure.h"
+#include "render/scenery_dimming.h"
 #include "action/action_effect_projection.h"
 #include "action/action_effect_source.h"
 #include "diorama/diorama.h"
@@ -71,7 +73,8 @@ static void DeferredAuthored(void) {
     {"soft-light",""},{"motes",""},{"free-mist",""},{"ground-mist","mist-height=26\n"},
     {"particle-area","particles=8\npattern=snow\n"},{"light-fan",""},{"water-surface",""},
     {"drips",""},{"waterfall-spray",""},{"cloud-bank",""},
-    {"exposure","intensity=.5\ndim-scenery=1\n"},{"wet-contour","points=0,0 40,10 80,0\n"},
+    {"exposure","brightness=.5\nfade-left=32\nfade-top=24\nfade-right=32\nfade-bottom=24\ndim-scenery=1\n"},
+    {"exposure","brightness=1.6\nfade-top=40\ndim-scenery=1\n"},{"wet-contour","points=0,0 40,10 80,0\n"},
     {"halo",""},{"light-gradient",""},{"flame",""},{"torch",""}};
   ActionEffectProjectionContext context={.visible_width=512,.snes_height=448,
       .capture_height=448,.viewport={0,0,1024,896}};
@@ -166,6 +169,52 @@ static void Receivers(void) {
   assert(ActionEffectReceivers_Layer(&e)==kActionEffectRenderLayer_ForegroundLight);
   e.tuning.light_receivers_set=1;assert(ActionEffectReceivers_Layer(&e)==kActionEffectRenderLayer_Bg1Light);
   frame.decoration_count=255;assert(!ActionEnvironment_Bg1Dimming(&frame,1,2));
+}
+static void ExposureBoxes(void) {
+  frame=(ActionSceneEffectFrame){0};
+  Parse("[effects]\nversion=1\n[emitter:01:02:0:exposure:1]\nx=100\ny=100\nwidth=200\nheight=200\nbrightness=.5\nfade-left=40\nfade-top=40\ndim-player=1\n"
+        "[emitter:01:02:0:exposure:2]\nx=180\ny=180\nwidth=200\nheight=200\nbrightness=.5\nfade-left=40\nfade-top=40\ndim-player=1\n");
+  assert(ActionEffectReceivers_Prepare(&frame,1,2,0,0,0,0,true,&receiver));float multiply[3],add[3];
+  ActionEffectReceivers_Sample(&receiver,kActionReceiver_Player,150,150,multiply,add);
+  assert(multiply[0]==.5f); /* overlap is .5, never .25 */
+  ActionEffectReceivers_Sample(&receiver,kActionReceiver_Player,20,20,multiply,add);
+  assert(fabsf(multiply[0]-.875f)<.00001f);
+  ActionEffectReceivers_Sample(&receiver,kActionReceiver_Enemies,150,150,multiply,add);assert(multiply[0]==1);
+  ActionEffectLocalRect clip={-50,-50,400,400};
+  assert(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1Mist,true,true,Project,Clip,&clip,&a));Valid(&a);
+  // Every interior sample belongs to at most one emitted triangle, even where
+  // boxes and their feathered corners overlap. Verify actual alpha blending.
+  for(float y=1.37f;y<280;y+=9.1f)for(float x=1.19f;x<280;x+=9.3f) {
+    float transmission=1;unsigned hits=0;
+    for(int i=0;i<a.index_count;i+=3) {
+      const ArRenderVertex2D *v0=&a.vertices[a.indices[i]],*v1=&a.vertices[a.indices[i+1]],*v2=&a.vertices[a.indices[i+2]];
+      const float ax=v1->position.x-v0->position.x,ay=v1->position.y-v0->position.y,bx=v2->position.x-v0->position.x,by=v2->position.y-v0->position.y;
+      const float det=ax*by-ay*bx;if(fabsf(det)<.00001f)continue;
+      const float u=((x-v0->position.x)*by-(y-v0->position.y)*bx)/det;
+      const float v=(ax*(y-v0->position.y)-ay*(x-v0->position.x))/det;
+      if(u<0||v<0||u+v>=1)continue;
+      transmission*=1-(v0->color.a*(1-u-v)+v1->color.a*u+v2->color.a*v);++hits;
+    }
+    const ActionEffectInstance *boxes[]={&frame.authored[0],&frame.authored[1]};
+    assert(hits<=1);assert(fabsf(transmission-ActionExposure_Union(boxes,2,x,y))<.02f);
+  }
+  const int vertices=a.vertex_count;
+  ActionExposureLighting exposure={.origin_x=0,.origin_y=0,.width=400,.height=400};
+  ActionExposure_Prepare(&exposure,&frame);
+  assert(exposure.count==1&&exposure.counts[0]==2);
+  assert(ActionExposure_Scenery(&exposure,.375f,.375f)==.5f);
+  const ArRenderRectF ramp=SceneryDimming_ToUv((ArRenderRectF){800,640,320,448},500,600,640,512);
+  assert(fabsf(SceneryDimming_Amount(.45f,ramp,(1500-500)/640.f,(864-600)/512.f)-.225f)<.00001f);
+  ActionEffectProjectionContext context={.visible_width=512,.snes_height=448,.capture_height=448,.viewport={0,0,512,448}};
+  assert(SourceBuild(kActionEffectRenderLayer_Bg1Mist,true,true,&context)>0);
+  context.scenery_exposure_in_mesh=true;
+  assert(SourceBuild(kActionEffectRenderLayer_Bg1Mist,true,true,&context)==0); /* no double dimming */
+  frame.authored[1].field_style.brightness=1.5f;frame.authored[1].render_layer=kActionEffectRenderLayer_Bg1Light;
+  ActionEffectReceivers_Sample(&receiver,kActionReceiver_Player,150,150,multiply,add);assert(multiply[0]==.75f);
+  assert(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1Light,true,true,Project,Clip,&clip,&a));Valid(&a);
+  const clock_t start=clock();
+  for(unsigned i=0;i<1000;++i)assert(ActionSceneDecorationRender_Build(&frame,kActionEffectRenderLayer_Bg1Mist,true,true,Project,Clip,&clip,&a));
+  printf("Light boxes: non-stacking union, receiver masks, feathering and deferred GPU geometry passed (%d union vertices; %.3f ms/build).\n",vertices,1000.0*(clock()-start)/CLOCKS_PER_SEC/1000);
 }
 static void Events(void) {
   ActionEffectPreviewEvent event={.start=65530,.duration=96,.x=128,.y=128,.velocity_x=-1,.velocity_y=1,.seed=123};
@@ -433,7 +482,7 @@ int main(int argc, char **argv) {
   DeferredAuthored();DeferredParticleArea();
   LayerAnchors();
   Geometry();HaloAndGradient();
-  Receivers();
+  Receivers();ExposureBoxes();
   Events();
   MovingLightReceivers();
   NativeMembers();

@@ -2405,15 +2405,18 @@ typedef struct DioramaLayerDraw {
   ArRenderColorF shade;
   float dimming;
   ArRenderRectF dimming_ramp;
+  float (*exposure)(void *,float,float);
+  void *exposure_userdata;
   ArRenderBlendMode blend;
 } DioramaLayerDraw;
 
 static void ShadeDioramaVertices(const DioramaLayerDraw *layer,
     ArRenderVertex2D *vertices, int count) {
-  if (layer->dimming <= 0) return;
+  if (layer->dimming <= 0 && !layer->exposure) return;
   for (int i = 0; i < count; i++) {
-    const float light = 1-SceneryDimming_Amount(layer->dimming,layer->dimming_ramp,
+    float light = 1-SceneryDimming_Amount(layer->dimming,layer->dimming_ramp,
         vertices[i].tex_coord.x,vertices[i].tex_coord.y);
+    if(layer->exposure)light*=layer->exposure(layer->exposure_userdata,vertices[i].tex_coord.x,vertices[i].tex_coord.y);
     vertices[i].color.r *= light;
     vertices[i].color.g *= light;
     vertices[i].color.b *= light;
@@ -3092,6 +3095,8 @@ static PresentationOutcome DrawResolvedDioramaLayer(
           },
       .dimming = dimming,
       .dimming_ramp = scene->bg1_dimming_ramp,
+      .exposure = scenery ? scene->scenery_exposure : NULL,
+      .exposure_userdata = scene->scenery_exposure_userdata,
       .blend = description->plane == kDioramaPlane_Backdrop
                    ? kArRenderBlendMode_Opaque
                : additive ? kArRenderBlendMode_Add

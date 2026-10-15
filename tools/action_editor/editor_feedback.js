@@ -168,6 +168,7 @@ function refreshEditorFeedback() {
   else if(brush==='effects')hint='Ctrl/Cmd-click markers to select multiple effects; Shift-click resets a handle; Ctrl/Cmd-C copies. Click an emitter area; drag its body/centre to move, a corner to resize, or its round handle to turn directional light. Alt snaps to 16 px. Esc returns to tiles.';
   else if(brush==='effectPaste')hint='Click to paste copied effects repeatedly. Relative spacing and settings are preserved. Esc finishes.';
   else if(brush==='effectPlace')hint='Click to place the selected emitter preset. Middle-drag pans; wheel zooms. Esc returns to tiles.';
+  else if(brush==='lightBox')hint='Drag a rectangular light zone, then configure brightness and fades. Matching-brightness boxes merge without stacking. Esc returns to tiles.';
   else if(brush==='floorMist')hint='Drag up to 512 × 512 pixels around supported floors. Cyan edges support mist; wheel zooms; middle-drag pans.';
   else if(brush==='floorErase')hint='Drag across authored ground-mist areas to remove them. Undo restores the complete areas.';
   else if(brush==='stamp')hint='Click places the stamp shown in Tiles. Keep clicking to repeat; Esc finishes.';

@@ -4,6 +4,7 @@ const EffectEditor=(()=>{
   const empty='[effects]\nversion=1\n';
   let documentText=window.__ACTION_EFFECTS__||empty, saved=documentText;
   let selected='', sources=[], sourceKey='', sourceScope='', catalogueSources=[], catalogueScope='', catalogueDocument='', modal=null, records=new Map();
+  let exposureDefaults=new Map(),exposureScope="";
   const mapSelection=new Set();let effectClipboard=null,clipboardActive=false;
   const status=message=>{$('#effectStatus').textContent=message;$('#effectDocumentStatus').textContent=message;if(modal)$('#effectInspectorStatus').textContent=message;};
   function decode(text) {
@@ -46,12 +47,21 @@ const EffectEditor=(()=>{
   }
   function markSaved() {saved=documentText;status('Effects match the loaded/saved document.');refreshEditorFeedback();}
   function loadDocument(text) {
+    exposureDefaults.clear();exposureScope='';
     resetRecords.clear();mapSelection.clear();effectClipboard=null;clipboardActive=false;
     selected='';sources=[];sourceKey='';sourceScope='';catalogueSources=[];catalogueScope='';catalogueDocument='';
     saved=text;restore(text);
   }
   function change(text,label) {
     try {
+      // Editing a native dimming guide extracts just its exposure into a box.
+      // The complete parent keeps every other atmosphere setting unchanged.
+      const next=decode(text);let extracted=false;
+      for(const source of sources.filter(s=>s.nativeExposure&&next.has(s.id))) {
+        next.set(source.id,{...source.record,...next.get(source.id)});
+        next.set(source.owner,{...source.definition,dimming:'0'});extracted=true;
+      }
+      if(extracted)text=encode(next);
       SharedRoomPreview.validateEffects(text);
       if(text===documentText)return true;
       if(modal){restore(text);$('#effectInspectorStatus').textContent='Draft only. Apply to keep these changes; Cancel restores the previous effect.';return true;}
@@ -75,6 +85,7 @@ const EffectEditor=(()=>{
   const fieldFields=[['emitterPlacement','placement','foreground'],['emitterPattern','pattern','motes'],
     ['emitterAngle','angle','0'],['emitterFan','fan','36'],['emitterStrands','strands','8'],
     ['emitterSoftness','softness','0.35'],['emitterDrift','drift','0'],['emitterAmplitude','amplitude','2']];
+  const exposureFields=[['exposureBrightness','brightness'],...['left','top','right','bottom'].map(edge=>['exposureFade'+edge,'fade-'+edge])];
   const nativeFields=[['nativeOffsetX','offset-x',0],['nativeOffsetY','offset-y',0],
     ['nativeWidth','width-scale',1],['nativeLength','length-scale',1],['nativeAngle','angle',0]];
   function nativeCapabilities(source) {
@@ -91,7 +102,7 @@ const EffectEditor=(()=>{
   const moonNames=['moonlight','moon-reflection','moon-cloud'];
   const waterNames=['cave-water','cave-drips','cave-mist','cave-sheen'];
   function refreshInspector() {
-    const source=sources.find(s=>s.id===selected), record=records.get(selected)||{};
+    const source=sources.find(s=>s.id===selected), record=records.get(selected)||source?.record||{};
     const definition=!!source?.field;
     $('#effectDefinitionCreate').hidden=!!source?.member||![...Object.keys(surfaceNames),...Object.keys(projectileNames),...Object.keys(arcNames),'torch','wall-torch',...castleNames,...marshNames,...moonNames,...atmosphereNames,...waterNames,'forest-canopy','forest-forward','forest-leaves'].includes(source?.name);
     $('#effectDefinitionCreate').textContent=surfaceNames[source?.name]?'Edit complete lava / waterfall definition…':projectileNames[source?.name]?'Edit complete fireball response…':arcNames[source?.name]?'Edit complete lightning response…':['torch','wall-torch'].includes(source?.name)?'Edit complete flame and glow definition…':castleNames.includes(source?.name)?'Edit complete castle-field definition…':marshNames.includes(source?.name)?'Edit complete marsh-field definition…':moonNames.includes(source?.name)?'Edit complete moon-field definition…':atmosphereNames.includes(source?.name)?'Edit complete atmosphere definition…':waterNames.includes(source?.name)?'Edit complete water-field definition…':'Edit complete ray-field definition…';
@@ -135,7 +146,9 @@ const EffectEditor=(()=>{
     document.querySelector('label[for="emitterx"]').textContent=attached?'Actor offset X':`${anchor==='bg1'?'BG1':'BG2'} anchor X`;
     document.querySelector('label[for="emittery"]').textContent=attached?'Actor offset Y':`${anchor==='bg1'?'BG1':'BG2'} anchor Y`;
     $('#effectColor').disabled=disabled||definition||name==='exposure';
-    $('#effectIntensity').disabled=disabled||definition;
+    $('#effectIntensity').disabled=disabled||definition||name==='exposure';
+    $('#exposureControls').hidden=name!=='exposure';
+    for(const [id,key] of exposureFields)$('#'+id).value=key==='brightness'?Math.round(100*Number(record.brightness??(1-Number(record.intensity??.35)))):record[key]??0;
     $('#emitterlifetime').disabled=['exposure','soft-light','halo','light-gradient'].includes(name);
     $('#receiverControls').hidden=!!source?.member||!lightNames.includes(name)&&!dimNames.includes(name);
     $('#effectFamilyOpen').hidden=!source?.member;
@@ -192,15 +205,18 @@ const EffectEditor=(()=>{
     $('#effectReach').value=record.reach??'1';
     $('#effectColor').value='#'+(record.color??'ffffff');
     $('#effectSourceId').textContent=source?.id??'';
-    const marker=source&&mapEmitters().find(e=>e.id===source.id);
-    $('#effectSourceInfo').textContent=source?
-      `${source.name.replaceAll('-',' ')}${source.name==='moon-field'?` · BG2 source at ${Math.round(marker?.x??source.x)}, ${Math.round(marker?.y??source.y)}`:source.catalogue&&!source.movable?' · room family':` at ${Math.round(marker?.x??source.x)}, ${Math.round(marker?.y??source.y)} map pixels`}. `+
+    const markers=source?mapEmitters().filter(e=>e.id===source.id):[];
+    const marker=markers.find(e=>e.guideIndex===modal?.guideIndex)||markers[0];
+    $('#effectSourceInfo').textContent=source?.nativeExposure?'Native light box. Editing extracts this dimming zone from its atmosphere definition. Apply saves both changes together; Cancel leaves the original intact.':source?
+      `${source.name.replaceAll('-',' ')}${source.name==='moon-field'?` · BG2 source at ${Math.round(marker?.x??source.x)}, ${Math.round(marker?.y??source.y)}`:source.catalogue&&!source.movable&&!source.guides?.length?' · room family':` at ${Math.round(marker?.x??source.x)}, ${Math.round(marker?.y??source.y)} map pixels`}. `+
       (source.name==='ground-mist'?(source.support===undefined?'Preview to inspect supported spans.':source.support?`${source.support} supported spans. No surfaces outside the painted area are used.`:'No supported floor inside this area. Move or expand it to include a cyan floor edge.'):
+      source.name==='floor-mist'?'Collision-supported mist span. The outline ends at the supporting floor, including spike bottoms. Edit the complete atmosphere definition to change the floor search area or mist height.':
       attached?'Actor attachment. Applies to every matching visible actor; the marker previews its offset at the reference actor.':source.field?'Complete definition. Edit the source contacts, shapes, profiles and motion below.':source.member?'Individual catalogue member. Move, tint or disable this member independently.':source.movable?'Individual source: move its anchor or scale its area.':source.actor?'Actor family override. Applies to all recognized actors of this kind in this room and terrain.':source.emitter?`Placed emitter in ${anchor==='bg1'?'BG1':'BG2'} coordinates.`:source.reach?'Reach changes the spill radius without brightening its centre.':'Compound source: tint/intensity affect the whole group.'):
       'Select an effect marker on the map, or right-click to add an effect.';
     for(const row of document.querySelectorAll('#effectInspector .ctl'))
       row.hidden=!!row.querySelector('input,select')?.disabled;
   }
+  for(const [id,key] of exposureFields)$('#'+id).onchange=e=>editEmitter(selected,{[key]:key==='brightness'?Number(e.target.value)/100:e.target.value});
   $('#effectSource').onchange=e=>{selected=e.target.value;refreshInspector();};
   for(const [id,key] of [['effectEnabled','enabled'],['effectIntensity','intensity'],['effectReach','reach'],['effectColor','color']])
     $('#'+id).onchange=e=>{
@@ -282,7 +298,7 @@ const EffectEditor=(()=>{
       ...(bgIndex===1&&!terrainNames.includes(name)?{anchor:name==='water-surface'?'bg2-raster':'bg2-point',placement:'background'}:{}),
       color:name.endsWith('mist')||['drips','waterfall-spray','water-surface'].includes(name)?'91bedf':
         ['flame','motes','particle-area'].includes(name)?'ffe6bb':'dde6ff',
-      ...(name==='particle-area'?{particles:'4',width:'512',height:'512','travel-y':'-96'}:name==='exposure'?{intensity:'.35',width:'512',height:'512'}:{}),
+      ...(name==='particle-area'?{particles:'4',width:'512',height:'512','travel-y':'-96'}:name==='exposure'?{brightness:'.65',width:'512',height:'512','fade-left':'64','fade-top':'64','fade-right':'64','fade-bottom':'64'}:{}),
       ...(name==='torch'?{width:'32',height:'32',color:'ffffff',placement:bgIndex===1?'background':'playfield'}:{}),
       ...(name==='flame'?{width:'64',height:'96',color:'ff6628','color-end':'ffe6a0',particles:'12',lifetime:'80','travel-y':'-64',wander:'5',spread:'.25','size-min':'.4','size-max':'1.2'}:{}),
       ...(preset?{...(preset==='halo'?{}:{pattern:preset}),...presets[preset]}:{})});
@@ -311,7 +327,7 @@ const EffectEditor=(()=>{
       const anchor=records.get(id).anchor.split(/\s+/).map(Number);
       patch={anchor:`${Math.round(patch.x??anchor[0])} ${Math.round(patch.y??anchor[1])}`};
     }
-    const next=new Map(records),record={...next.get(id)};
+    const next=new Map(records),record={...(source?.nativeExposure?source.record:{}),...next.get(id)};
     if(source?.field&&id.includes(':ray-field:'))for(const [countKey,prefix] of [['ray-count','ray'],['fan-count','fan'],['profile-count','profile'],['witness-count','witness']]) {
       if(patch[countKey]===undefined)continue;
       const count=Number(patch[countKey]),previous=Number(record[countKey]);
@@ -1188,11 +1204,12 @@ const EffectEditor=(()=>{
     const field=[...records].find(([id])=>id.startsWith(fieldPrefix()+'ray-field:'))?.[1];
     const water=[...records].find(([id])=>id.startsWith(fieldPrefix()+'water-field:'))?.[1];
     const atmosphere=[...records].find(([id])=>id.startsWith(fieldPrefix()+'atmosphere-field:'))?.[1];
+    const castle=[...records].find(([id])=>id.startsWith(fieldPrefix()+'castle-field:'))?.[1];
     const marshEntry=[...records].find(([id])=>id.startsWith(fieldPrefix()+'marsh-field:'));
     const marsh=marshEntry?.[1];
     const moon=[...records].find(([id])=>id.startsWith(fieldPrefix()+'moon-field:'));
-    const native=sources.filter(s=>s.name!=='moon-field'&&s.name!=='marsh-field'&&(!moon||s.name!=='moonlight')&&!s.emitter&&!s.actor&&(s.movable||s.catalogue)&&
-      (moonNames.includes(s.name)?layer===1:layer===0||s.anchor===1&&!s.member)).flatMap(original=>{
+    const native=sources.filter(s=>s.name!=='moon-field'&&s.name!=='marsh-field'&&(!moon||s.name!=='moonlight')&&!s.emitter&&!s.actor&&(s.movable||s.guides?.length)&&
+      (moonNames.includes(s.name)||s.name==='castle-sky'?layer===1:layer===0||s.anchor===1&&!s.member)).flatMap(original=>{
       const s=layer===1?{...original,baseX:original.anchorX,baseY:original.anchorY,mapScaleX:1,mapScaleY:1}:original;
       const r=records.get(s.id)||{},cap=nativeCapabilities(s);
       const sx=s.mapScaleX||1,sy=s.mapScaleY||1;
@@ -1204,6 +1221,7 @@ const EffectEditor=(()=>{
         baseX:s.baseX*sx,baseY:s.baseY*sy,baseWidth:s.baseWidth*sx,baseHeight:s.baseHeight*sy,
         offsetLimitX:512*sx,offsetLimitY:512*sy,
         resizeWidth:cap.width,resizeHeight:cap.length,enabled:r.enabled!=='0'&&records.get(s.parent)?.enabled!=='0'&&
+          (!castleNames.includes(s.name)||!castle||castle.enabled!=='0'&&(Number(castle.components)&({'castle-light':1,'castle-mist':2,'castle-sky':4,'castle-water':8}[s.name]))!==0)&&
           (!marshNames.includes(s.name)||!marsh||marsh.enabled!=='0'&&(Number(marsh.components)&({'blood-water':1,'blood-mist':2,'wet-timber':4,'marsh-air':8}[s.name]))!==0)&&
           (!moonNames.includes(s.name)||!moon||moon[1].enabled!=='0'&&(Number(moon[1].components)&({'moonlight':1,'moon-reflection':10,'moon-cloud':4}[s.name]))!==0)&&
           (!atmosphereNames.includes(s.name)||atmosphere?.enabled!=='0'&&(!atmosphere||(Number(atmosphere.components)&({'temple-dust':1,'tower-window':2,'cave-light':4,'temple-grit':8,'floor-mist':16}[s.name]))!==0))&&
@@ -1214,10 +1232,12 @@ const EffectEditor=(()=>{
       if(!s.guides?.length)return [entry];
       // Several terrain contacts can edit one bounded field. Keep the guides
       // at those contacts and say explicitly that their settings are linked.
-      return s.guides.map((g,guide)=>({...entry,guide,x:g.x*sx,y:g.y*sy,width:g.width*sx,height:g.height*sy,
+      return s.guides.map((g,guideIndex)=>({...entry,guideIndex,x:g.x*sx,y:g.y*sy,width:g.width*sx,height:g.height*sy,
         label:s.name==='wet-timber'?'Wet timber · terrain contact':s.name==='marsh-air'?'Bank insects / drips · linked field':
           s.name==='blood-mist'?'Shoreline mist · linked span':s.name==='blood-water'?'Water light · linked span':
-          s.name==='moon-cloud'?'Moon cloud · BG2':s.name==='moon-reflection'?'Water reflections · BG2':'Moon source · BG2'}));
+          s.name==='floor-mist'?'Floor mist · supported span':
+          s.name==='moon-cloud'?'Moon cloud · BG2':s.name==='moon-reflection'?'Water reflections · BG2':s.name==='moonlight'?'Moon source · BG2':
+          `${s.name.replaceAll('-',' ')} · ${s.name==='castle-sky'?'BG2 source':'linked region'}`}));
     });
     // A newly placed marsh in another room has no native catalogue parent.
     // Keep its editable field reachable at its declared shoreline as well.
@@ -1235,9 +1255,9 @@ const EffectEditor=(()=>{
       native.push({id,layer,kind:'moon-field',movable:true,resizeWidth:false,resizeHeight:false,
         x,y,width:24,height:24,enabled:r.enabled!=='0'&&Number(r.components)!==0});
     }
-    return native.concat([...records].filter(([id,r])=>id.startsWith(emitterPrefix())&&
+    return native.concat([...records,...sources.filter(s=>s.nativeExposure).map(s=>[s.id,s.record])].filter(([id,r])=>id.startsWith(emitterPrefix())&&
       Number((r.anchor??'bg1')!=='bg1')===layer).map(([id,r])=>({id,layer,
-      kind:id.split(':')[4],angle:Number(r.angle??0),fan:Number(r.fan??36),strands:Number(r.strands??8),rotatable:['light-fan','light-gradient'].includes(id.split(':')[4]),attached:!!r['actor-target'],actorX:r['actor-target']?actor.x:0,actorY:r['actor-target']?actor.y:0,movable:true,resizeWidth:id.split(':')[4]!=='torch',resizeHeight:id.split(':')[4]!=='torch',x:Number(r.x??0)+(r['actor-target']?actor.x:0),y:Number(r.y??0)+(r['actor-target']?actor.y:0),points:r.points??(id.split(':')[4]==='wet-contour'?'-32,0 32,0':''),width:Number(r.width??96),
+      label:id.includes(':exposure:')?'Light box':undefined,brightness:Number(r.brightness??(1-Number(r.intensity??.35))),fade:['left','top','right','bottom'].map(edge=>Number(r['fade-'+edge]??0)),kind:id.split(':')[4],angle:Number(r.angle??0),fan:Number(r.fan??36),strands:Number(r.strands??8),rotatable:['light-fan','light-gradient'].includes(id.split(':')[4]),attached:!!r['actor-target'],actorX:r['actor-target']?actor.x:0,actorY:r['actor-target']?actor.y:0,movable:true,resizeWidth:id.split(':')[4]!=='torch',resizeHeight:id.split(':')[4]!=='torch',x:Number(r.x??0)+(r['actor-target']?actor.x:0),y:Number(r.y??0)+(r['actor-target']?actor.y:0),points:r.points??(id.split(':')[4]==='wet-contour'?'-32,0 32,0':''),width:Number(r.width??96),
       height:Number(r.height??64),enabled:r.enabled!=='0'})));
   }
   function selectEmitter(id,additive=false) {
@@ -1251,8 +1271,8 @@ const EffectEditor=(()=>{
     const copied=[];
     for(const id of ids) {
       const entry=entries.find(e=>e.id===id);if(!entry)continue;
-      const r=records.get(id)||{};
-      if(id.startsWith('emitter:'))copied.push({kind:entry.kind,record:{...r},x:entry.x,y:entry.y});
+      const source=sources.find(s=>s.id===id),r=records.get(id)||source?.record||{};
+      if(id.startsWith('emitter:'))copied.push({kind:entry.kind,record:{...r},extract:source?.nativeExposure?id:null,x:entry.x,y:entry.y});
       else if(entry.kind==='wall-torch'&&!entry.family)copied.push({kind:'torch',x:entry.x,y:entry.y,
         record:{x:String(entry.x),y:String(entry.y),width:'32',height:'32',color:r.color??'ffffff',intensity:r.intensity??'1',reach:r.reach??'1',placement:'playfield',enabled:r.enabled??'1',
           ...Object.fromEntries(Object.entries(r).filter(([key])=>key.startsWith('light-')))}});
@@ -1267,6 +1287,7 @@ const EffectEditor=(()=>{
     if(bgIndex!==effectClipboard.layer){status(`This selection uses BG${effectClipboard.layer+1}. Switch to that map before pasting.`);return false;}
     const next=new Map(records),ids=[];
     for(const entry of effectClipboard.entries){let id;
+      if(entry.extract&&sources.some(s=>s.id===entry.extract&&s.nativeExposure))next.set(entry.extract,{...entry.record});
       do{id=newEmitterId(entry.kind);}while(next.has(id));
       const record={...entry.record};
       // A binding duplicates its selector and actor-local offsets. Map placement
@@ -1347,10 +1368,46 @@ const EffectEditor=(()=>{
       rebuildSources(catalogueSources.concat(found.filter(s=>!ids.has(s.id))));
     } else rebuildSources(found);
   }
+  function cacheExposureDefaults(api) {
+    if(exposureScope!==sceneKey(room)){exposureDefaults.clear();exposureScope=sceneKey(room);}
+    for(const [kind,getter] of [['atmosphere-field','RoomPreview_AtmosphereFieldText'],['castle-field','RoomPreview_CastleFieldText']]) {
+      if(exposureDefaults.has(kind)||[...records.keys()].some(id=>id.startsWith(fieldPrefix()+kind+':')))continue;
+      const pointer=api[getter]?.();if(!pointer)continue;
+      const bytes=new Uint8Array(api.memory.buffer);let end=pointer;while(end<bytes.length&&bytes[end])end++;
+      const record=Object.fromEntries(new TextDecoder().decode(bytes.subarray(pointer,end)).trim().split('\n').map(line=>{
+        const at=line.indexOf('=');return [line.slice(0,at),line.slice(at+1)];
+      }));
+      exposureDefaults.set(kind,record);
+    }
+  }
+  function nativeExposureSources(found) {
+    const result=[];
+    for(const [kind,parentName] of [['atmosphere-field','cave-light'],['castle-field','castle-light']]) {
+      const parent=found.find(s=>s.name===parentName&&!s.member);if(!parent)continue;
+      const existing=[...records].find(([id])=>id.startsWith(fieldPrefix()+kind+':'));
+      const definition=existing?.[1]||(exposureScope===sceneKey(room)?exposureDefaults.get(kind):null);
+      if(!definition||!(Number(definition.dimming)>0))continue;
+      const [rx,ry,rw,rh]=(definition['dimming-ramp']||'0 0 0 0').split(/\s+/).map(Number);
+      const ramp=rw>0&&rh>0,width=room.bg[0].pagesWide*256,height=room.bg[0].pagesHigh*256;
+      const left=ramp?Math.max(0,rx):0,top=ramp?Math.max(0,ry):0;
+      if(left>=width||top>=height)continue;
+      const owner=existing?.[0]||fieldPrefix()+kind+':'+(kind==='atmosphere-field'?(0xc2000000+room.map*256)>>>0:(0xca000000+room.map)>>>0).toString(16);
+      let serial=parseInt(owner.split(':').at(-1),16),id;
+      do{id=emitterPrefix()+'exposure:'+(serial++>>>0).toString(16).padStart(8,'0');}while(records.has(id));
+      const receiver=Number((definition.receivers||'1').split(/\s+/)[0]);
+      const overrides=records.get(parent.id)||{};
+      const record={x:String((left+width)/2),y:String((top+height)/2),width:String(width-left),height:String(height-top),
+        brightness:String(1-Number(definition.dimming)),'fade-left':String(ramp?rw:0),'fade-top':String(ramp?rh:0),'fade-right':'0','fade-bottom':'0',
+        enabled:definition.enabled==='0'||overrides.enabled==='0'||!(Number(definition.components)&(kind==='atmosphere-field'?4:1))?'0':'1'};
+      for(const [target,mask] of [['scenery',1],['player',2],['enemies',4]])record['dim-'+target]=overrides['dim-'+target]??String(!!(receiver&mask)?1:0);
+      result.push({id,name:'exposure',emitter:true,nativeExposure:true,owner,definition,record,x:Number(record.x),y:Number(record.y)});
+    }
+    return result;
+  }
   function updateCatalogue(api) {
     if(catalogueScope===sceneKey(room)&&catalogueDocument===documentText)return;
+    cacheExposureDefaults(api);
     const bytes=new Uint8Array(api.memory.buffer),decoder=new TextDecoder(),found=[];
-    let familySlot=0;
     for(let i=0;i<api.RoomPreview_CatalogueCount();++i) {
       const kind=api.RoomPreview_CatalogueValue(i,1),p=api.RoomPreview_KindName(kind);if(!p)continue;
       let end=p;while(bytes[end])end++;
@@ -1358,20 +1415,18 @@ const EffectEditor=(()=>{
       const movable=!!api.RoomPreview_CatalogueValue(i,6),members=api.RoomPreview_CatalogueValue(i,7);
       const source={id,name,catalogue:true,movable,members,reach:!!api.RoomPreview_ReachSupported(kind),
         anchor:api.RoomPreview_CatalogueValue(i,10),anchorX:api.RoomPreview_CatalogueValue(i,2),anchorY:api.RoomPreview_CatalogueValue(i,3),
-        baseX:movable?api.RoomPreview_CatalogueValue(i,2):24+32*(familySlot%8),
-        baseY:movable?api.RoomPreview_CatalogueValue(i,3):24+32*Math.floor(familySlot/8),
+        baseX:api.RoomPreview_CatalogueValue(i,2),baseY:api.RoomPreview_CatalogueValue(i,3),
         baseWidth:api.RoomPreview_CatalogueValue(i,4),baseHeight:api.RoomPreview_CatalogueValue(i,5),
         mapScaleX:api.RoomPreview_CatalogueValue(i,8),mapScaleY:api.RoomPreview_CatalogueValue(i,9)};
       source.guides=Array.from({length:api.RoomPreview_CatalogueGuideCount?.(i)||0},(_,g)=>({
         x:api.RoomPreview_CatalogueGuideValue(i,g,0),y:api.RoomPreview_CatalogueGuideValue(i,g,1),
-        width:api.RoomPreview_CatalogueGuideValue(i,g,2),height:api.RoomPreview_CatalogueGuideValue(i,g,3)}));
+        width:api.RoomPreview_CatalogueGuideValue(i,g,2),height:api.RoomPreview_CatalogueGuideValue(i,g,3)})).filter(g=>g.width>0&&g.height>0);
       if(source.guides.length){source.baseX=source.guides[0].x;source.baseY=source.guides[0].y;}
       source.x=source.baseX;source.y=source.baseY;found.push(source);
-      if(!movable){familySlot++;source.mapScaleX=source.mapScaleY=1;}
       for(let m=0;m<members;++m) {
         const value=f=>api.RoomPreview_CatalogueMemberValue(i,m,f),ordinal=value(0);
         found.push({...source,id:id.replace(/^source:/,'member:').replace(/:[^:]+$/,':'+ordinal.toString(16).padStart(8,'0')),
-          parent:id,members:0,member:ordinal,movable:true,angled:!!value(5),guide:Array.from({length:5},(_,f)=>value(f+6)||0),
+          parent:id,members:0,member:ordinal,movable:true,guides:[],angled:!!value(5),guide:Array.from({length:5},(_,f)=>value(f+6)||0),
           baseX:value(1),baseY:value(2),x:value(1),y:value(2),baseWidth:value(3),baseHeight:value(4),
           mapScaleX:api.RoomPreview_CatalogueValue(i,8),mapScaleY:api.RoomPreview_CatalogueValue(i,9)});
       }
@@ -1384,7 +1439,8 @@ const EffectEditor=(()=>{
       const ids=new Set(catalogueSources.map(s=>s.id));
       found=catalogueSources.concat(found.filter(s=>!ids.has(s.id)));
     }
-    found=found.filter(s=>!s.field||records.has(s.id));
+    found=found.filter(s=>!s.nativeExposure&&(!s.field||records.has(s.id)));
+    found.push(...nativeExposureSources(found));
     // A complete recipe owns the base ray geometry. Sparse member overrides
     // remain relative to those bases and retain their stable numbered IDs.
     const field=[...records].find(([id])=>id.startsWith(fieldPrefix()+'ray-field:'))?.[1];
@@ -1432,7 +1488,7 @@ const EffectEditor=(()=>{
     if(key===sourceKey){$('#effectSource').value=selected;return;}sourceKey=key;
     const select=$('#effectSource');select.replaceChildren();
     for(const source of sources){const option=document.createElement('option');option.value=source.id;
-      option.textContent=`${source.name}${source.member?" #"+source.member:""} · ${source.x}, ${source.y}`;select.append(option);}
+      option.textContent=`${source.name==='exposure'?'Light box'+(source.nativeExposure?' (native)':''):source.name}${source.member?" #"+source.member:""} · ${source.catalogue&&!source.movable&&!source.guides?.length?'room controls':`${source.x}, ${source.y}`}`;select.append(option);}
     if(!found.some(s=>s.id===selected))selected=found[0]?.id??'';
     select.value=selected;refreshInspector();
   }
@@ -1463,6 +1519,20 @@ const EffectEditor=(()=>{
       particles:'4',pattern:'motes',color:'ffe6bb','travel-y':'-96'});
     return change(encode(next),'draw particle region');
   }
+  function paintExposureRect(x0,y0,x1,y1) {
+    const left=Math.min(x0,x1)*16,top=Math.min(y0,y1)*16;
+    const width=(Math.abs(x1-x0)+1)*16,height=(Math.abs(y1-y0)+1)*16;
+    $('#emitterPreset').value='exposure';
+    if(!openModal(null,left+width/2,top+height/2))return false;
+    return editEmitter(selected,{width,height,'fade-left':Math.min(64,width/4),'fade-right':Math.min(64,width/4),
+      'fade-top':Math.min(64,height/4),'fade-bottom':Math.min(64,height/4)},'draw light box');
+  }
+  $('#lightBoxDraw').onclick=()=>{
+    if(modal&&!finishModal(true))return;
+    finishFramingDrag();setMode('2d');setLayer(0);$('#bSelect').onclick();
+    brush='lightBox';cvs.style.cursor='crosshair';$('#effectGuides').checked=true;
+    refreshEditorFeedback();status('Drag a light box, then set brightness and edge fades. Matching brightness boxes merge without stacking.');draw();
+  };
   function paintContour(points) {
     if(points.length<2)return false;
     const xs=points.map(p=>p.x),ys=points.map(p=>p.y),left=Math.min(...xs),top=Math.min(...ys);
@@ -1521,7 +1591,7 @@ const EffectEditor=(()=>{
       ctx.strokeStyle='#85c6ef';ctx.beginPath();
       drag.points.forEach((p,i)=>ctx[i?'lineTo':'moveTo'](view.x+p.x*view.scale,view.y+p.y*view.scale));ctx.stroke();
     }
-    if(drag?.floorMist||drag?.particleArea) {
+    if(drag?.floorMist||drag?.particleArea||drag?.lightBox) {
       ctx.strokeStyle=drag.erase?'#ff857e':'#fff19b';
       ctx.strokeRect(view.x+Math.min(drag.x0,drag.x1)*size,view.y+Math.min(drag.y0,drag.y1)*size,
         (Math.abs(drag.x1-drag.x0)+1)*size,(Math.abs(drag.y1-drag.y0)+1)*size);
@@ -1538,15 +1608,20 @@ const EffectEditor=(()=>{
   }
   function removeEffect(id) {
     const next=new Map(records);
-    if(id.startsWith('emitter:'))next.delete(id);
+    if(sources.find(s=>s.id===id)?.nativeExposure)next.set(id,{enabled:'0'});
+    else if(id.startsWith('emitter:'))next.delete(id);
     else next.set(id,{...next.get(id),enabled:'0'});
     return change(encode(next),id.startsWith('emitter:')?'delete effect':'disable default effect');
   }
-  function openModal(id,x=0,y=0) {
+  function openModal(id,x,y) {
     if(modal)finishModal(false);
     if(pendingOp)commitOp();
     if(id&&!selectEmitter(id))return false;
-    modal={before:documentText,scope:sceneKey(room),isNew:!id,x,y,id,layer:bgIndex};
+    const entries=id?mapEmitters().filter(e=>e.id===id):[];
+    const entry=Number.isFinite(x)&&Number.isFinite(y)?entries.sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y))[0]:entries[0];
+    x=entry?.x??x??0;y=entry?.y??y??0;
+    modal={before:documentText,scope:sceneKey(room),isNew:!id,x,y,id,layer:bgIndex,guideIndex:entry?.guideIndex};
+    if(id&&sources.find(s=>s.id===id)?.nativeExposure&&!editEmitter(id,{},'extract light box')){modal=null;return false;}
     if(!id) {
       for(const option of $('#emitterPreset').options??[])
         option.disabled=bgIndex===1&&requiresTerrain(option.value);
@@ -1559,7 +1634,7 @@ const EffectEditor=(()=>{
     const preset=stagePresets.find(p=>'stage:'+p.id===$('#emitterPreset').value);
     const source=sources.find(s=>s.id===id);
     $('#effectInspectorHelp').textContent=source?.guides?.length?
-      'These guides show the actual affected terrain or BG2 source. Settings are shared by this field. Use “Edit complete definition” to change its shoreline spans, source position, coverage and motion. Timber contacts follow the map artwork.':
+      'These guides show the field’s source regions or terrain contacts. Appearance settings are shared by this field. Use “Edit complete definition” to change source positions, coverage and motion. Terrain-linked contacts follow the map.':
       !id&&preset?preset.description+' Adds '+preset.members.length+' separately editable markers.':id?'Change the selected effect. Apply saves one undoable edit. Default effects stay tied to their native source art.':`Add an effect at ${Math.round(x)}, ${Math.round(y)} game pixels. Choose a type, adjust its area and appearance, then add it.`;
     $('#effectInspectorApply').textContent=id?'Apply changes':'Add effect';
     $('#effectInspectorDelete').hidden=!id;
@@ -1571,7 +1646,7 @@ const EffectEditor=(()=>{
     if(!modal)return false;
     const session=modal,after=documentText,id=selected;
     const layer=id.startsWith('emitter:')?Number((records.get(id)?.anchor??'bg1')!=='bg1'):session.layer;
-    const entry=mapEmitters(layer).find(e=>e.id===id);
+    const entry=mapEmitters(layer).find(e=>e.id===id&&(session.guideIndex===undefined||e.guideIndex===session.guideIndex));
     modal=null;restore(session.before);
     const ok=!commit||session.scope===sceneKey(room)&&change(after,session.isNew?'add effect':'configure effect');
     $('#effectInspector').close();
@@ -1601,11 +1676,11 @@ const EffectEditor=(()=>{
     const session=modal;restore(session.before);
     if(placeEmitter($('#emitterPreset').value,session.x,session.y))modal.id=selected;
   };
-  for(const [id,key] of [...nativeFields,...moteFields,...fieldFields,
+  for(const [id,key] of [...exposureFields,...nativeFields,...moteFields,...fieldFields,
       ...['x','y','width','height','particles','lifetime','mist-height'].map(k=>['emitter'+k,k]),
       ['effectIntensity','intensity'],['effectReach','reach'],['effectColor','color'],
       ['emitterColorEnd','color-end'],['emitterAnchor','anchor'],['emitterPoints','points'],
       ...actorFields.map(([id,key])=>['actorBinding'+id,key])])resetControl($('#'+id),[key]);
   refreshInspector();
-  return {resetValues,resetHandle,copyEffects,pasteEffects,startEffectPaste,clearMapSelection,hasClipboard:()=>clipboardActive&&!!effectClipboard,deactivateClipboard:()=>{clipboardActive=false;},isMapSelected:id=>mapSelection.has(id),hasMapSelection:()=>mapEmitters().some(e=>mapSelection.has(e.id)),openModal,finishModal,previewAt,removeEffect,updateCatalogue,modalOpen:()=>!!modal,placeEmitter,editEmitter,mapEmitters,paintContour,selectEmitter,selected:()=>selected,paintFloorRect,paintParticleRect,drawMapOverlay,text:()=>documentText,restore,loadDocument,markSaved,updateSources,dirty:()=>documentText!==saved};
+  return {resetValues,resetHandle,copyEffects,pasteEffects,startEffectPaste,clearMapSelection,hasClipboard:()=>clipboardActive&&!!effectClipboard,deactivateClipboard:()=>{clipboardActive=false;},isMapSelected:id=>mapSelection.has(id),hasMapSelection:()=>mapEmitters().some(e=>mapSelection.has(e.id)),openModal,finishModal,previewAt,removeEffect,updateCatalogue,modalOpen:()=>!!modal,placeEmitter,editEmitter,mapEmitters,paintContour,selectEmitter,selected:()=>selected,paintFloorRect,paintParticleRect,paintExposureRect,drawMapOverlay,text:()=>documentText,restore,loadDocument,markSaved,updateSources,dirty:()=>documentText!==saved};
 })();

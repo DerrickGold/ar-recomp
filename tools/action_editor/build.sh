@@ -3,7 +3,7 @@
 #
 #   sh tools/action_editor/build.sh [rom] [out.html] [diorama-layers.ini] [settings.ini]
 #
-# Default build needs a C compiler, python3 and the pinned Emscripten compiler.
+# Default build needs a C compiler, python3 and a supported Emscripten compiler.
 # ACTION_EDITOR_WASM=off skips shared previews; auto includes them when available.
 # The exporter links the shared immutable
 # ActionRoomScene decoder used by the game, so it owns no separate ROM logic.
