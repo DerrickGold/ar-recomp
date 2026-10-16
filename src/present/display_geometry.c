@@ -42,7 +42,8 @@ ActRaiserAutoCanvas DisplayGeometry_ConstrainAutoCanvas(
     return requested;
   }
   if (map_group == kActRaiserMapGroup_NonAction &&
-      map_number == kActRaiserNonActionMap_SkyPalace)
+      (map_number == kActRaiserNonActionMap_SkyPalace ||
+       map_number == kActRaiserNonActionMap_Temple))
     return (ActRaiserAutoCanvas){.extra_columns = requested.extra_columns};
   return (ActRaiserAutoCanvas){0};
 }

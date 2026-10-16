@@ -45,8 +45,7 @@ void ActRaiser_HudIconPrepare(void) {
              frame->frame.hud_left_only_y == kActRaiserSimulationHudHeight &&
              map_group == kActRaiserMapGroup_NonAction &&
              map_number >= kActRaiserSimulationTown_First &&
-             (map_number <= kActRaiserNonActionMap_SkyPalace ||
-              (map_number == kActRaiserNonActionMap_Temple && Sim3D_ChurchIsOn()))) {
+             map_number <= kActRaiserNonActionMap_Temple) {
     capture_height = kActRaiserSimulationHudHeight;
   } else {
     return;

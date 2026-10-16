@@ -508,8 +508,7 @@ void ActRaiser_ApplyWidescreenPolicy(void) {
       hud_left_only_y = kActRaiserActionHudEnemyRowY;
     } else if (map_group == kActRaiserMapGroup_NonAction &&
                map_number >= kActRaiserSimulationTown_First &&
-               (map_number <= kActRaiserNonActionMap_SkyPalace ||
-                (map_number == kActRaiserNonActionMap_Temple && Sim3D_ChurchIsOn()))) {
+               map_number <= kActRaiserNonActionMap_Temple) {
       hud_split_height = kActRaiserSimulationHudHeight;
       hud_split_left_end = kActRaiserSimulationHudSplit;
       hud_split_right_start = kActRaiserSimulationHudSplit;
@@ -653,14 +652,17 @@ void ActRaiser_ApplyWidescreenPolicy(void) {
       }
 
       case kActRaiserNonActionMap_Temple:
-      // Temple cut scenes don't need wide screen support
-      // background is black
-        wide = 0;
+        /* Wide so the HUD split above has margins to move into; the 3D
+         * church also paints the whole viewport. The native scene stays its
+         * authentic 256 columns: BG1 (floor and pillars) still holds the
+         * previous town's tiles beyond them and BG2 repeats the menu panels,
+         * so both are center-clamped and the margins stay black. */
+        wide = g_settings.extended_aspect == kScreenAspect_Auto ||
+            g_settings.ws_sim;
+        clamp = kActRaiserBgLayerMask_Bg1AndBg2;
         break;
 
-      default:              /* title(00), temple cutscene(08),
-                               transitions, unknown: pillarbox (the temple is a
-                               black backdrop with no wide-worthy layer). */
+      default:              /* transitions, unknown: pillarbox. */
         wide = 0;
         break;
     }

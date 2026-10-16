@@ -57,7 +57,8 @@ static void TestSceneCanvasLimits(void) {
         const bool town_or_world =
             (map>=kActRaiserSimulationTown_First && map<=kActRaiserSimulationTown_Last) ||
             map==kActRaiserNonActionMap_WorldMap;
-        const bool wide = town_or_world || map==kActRaiserNonActionMap_SkyPalace;
+        const bool wide = town_or_world || map==kActRaiserNonActionMap_SkyPalace ||
+            map==kActRaiserNonActionMap_Temple;
         assert(result.extra_columns==(wide ? requested.extra_columns : 0));
         assert(result.extra_rows==(town_or_world && projected ? requested.extra_rows : 0));
       }

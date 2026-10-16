@@ -1887,7 +1887,13 @@ bool ChurchScene_Draw(ArRenderDevice *device, ArRenderRectI viewport,
   sky.r *= view.brightness;
   sky.g *= view.brightness;
   sky.b *= view.brightness;
-  if (!ArRenderDevice_Clear(device, sky) || !DaylightSky(device, &view) ||
+  /* Fill only the viewport. A clear covers the entire target, viewport or
+   * not, which painted the letterbox margins sky blue on any output whose
+   * aspect differs from the picture (Steam Deck, phones); CRT curvature then
+   * pulled that blue into a seam along the curved edge. */
+  const ArRenderRectF backdrop = {0, 0, (float)viewport.w, (float)viewport.h};
+  if (!ArRenderDevice_DrawSolidRect(device, &backdrop, sky, kArRenderBlendMode_Opaque) ||
+      !DaylightSky(device, &view) ||
       !Sim3DDepthPass_Begin(device, viewport.w, viewport.h, kArRenderFilter_Linear))
     return false;
   const bool rebuild = DetailChanged(&view, town);
