@@ -1,6 +1,7 @@
 #include "snesrecomp/support/utf8_fs.h"
 
 #include "app/run_dir.h"
+#include "platform/android/android_platform.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -67,6 +68,10 @@ void RunDirRecordTraceStatus(const char *status) {
  * kernel closes our end and tee flushes what it already received, so the
  * log survives SIGSEGV/SIGBUS. */
 static void tee_console(const char *log_path) {
+#ifdef __ANDROID__
+  AndroidPlatform_TeeConsole(log_path);
+  return;
+#endif
   char cmd[300];
   snprintf(cmd, sizeof cmd, "exec tee '%s'", log_path);
   FILE *p = popen(cmd, "w");

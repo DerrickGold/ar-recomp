@@ -1,0 +1,41 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Spike packaging (development/specs/ar-recomp-android-target.md, P0). The
+// native code is prebuilt by `snesbuild build --hermetic --target
+// aarch64-linux-android.29`; Gradle only packages it. build-apk.sh stages
+// libs/ (SDL's Java classes) and src/main/{jniLibs,assets} before running.
+android {
+    namespace = "io.github.derrickgold.arrecomp"
+    compileSdk 35
+    // Only used to strip the prebuilt .so files; must match build-apk.sh.
+    ndkVersion = "28.2.13676358"
+    defaultConfig {
+        applicationId "io.github.derrickgold.arrecomp"
+        minSdk 29
+        targetSdk 35
+        versionCode 1
+        versionName "0.1.0-spike"
+        ndk { abiFilters 'arm64-v8a' }
+    }
+    buildTypes {
+        debug {
+            // Native code is already -O2; debuggable only enables run-as/logs.
+            debuggable true
+        }
+    }
+    packagingOptions {
+        // Stripped in the APK; build/hermetic keeps the symbolized copy.
+        jniLibs { useLegacyPackaging = false }
+    }
+    androidResources {
+        // The ROM and seed data must reach SDL_LoadFile byte-for-byte.
+        noCompress += ['sfc', 'ini', 'ttf', 'otf', 'txt', 'armedia']
+    }
+    lint { abortOnError = false }
+}
+
+dependencies {
+    implementation files('libs/sdl3-classes.jar')
+}

@@ -11,10 +11,18 @@
 #include "actraiser/enhancements/actraiser_world_resume.h"
 #include "app/input_replay.h"
 #include "actraiser/actraiser_angel.h"
+#if defined(__ANDROID__) && defined(__aarch64__)
+/* Bionic declares ucontext_t but implements none of getcontext/makecontext/
+ * swapcontext, so Android switches stacks with the small AArch64 routine
+ * below. Desktop POSIX keeps ucontext; Windows keeps Fibers. */
+#define AR_COROUTINE_ASM 1
+#endif
 #ifdef _WIN32
 #include <windows.h>
 #else
+#if !AR_COROUTINE_ASM
 #include <ucontext.h>
+#endif
 #include <sys/mman.h>   /* mmap: guard page below the coroutine stack */
 #include <unistd.h>
 /* _XOPEN_SOURCE (needed for ucontext) hides MAP_ANONYMOUS on some libcs;
@@ -436,8 +444,70 @@ void ActRaiser_PpuShapeTraceLine(
 static void *s_host_fiber;   /* ConvertThreadToFiber result (driver thread) */
 static void *s_game_fiber;   /* CreateFiber result (game coroutine) */
 #else
+#if AR_COROUTINE_ASM
+/* Saved stack pointers. A suspended side's callee-saved registers (AAPCS64:
+ * x19-x30 and d8-d15) sit in a 160-byte frame at its saved sp. */
+static void *s_host_sp;
+static void *s_game_sp;
+void ArCoroutine_Switch(void **save_sp, void *load_sp);
+void ArCoroutine_Entry(void);
+__asm__(
+    ".text\n"
+    ".p2align 2\n"
+    ".global ArCoroutine_Switch\n"
+    ".hidden ArCoroutine_Switch\n"
+    ".type ArCoroutine_Switch, %function\n"
+    "ArCoroutine_Switch:\n"
+    "  sub sp, sp, #160\n"
+    "  stp x19, x20, [sp, #0]\n"
+    "  stp x21, x22, [sp, #16]\n"
+    "  stp x23, x24, [sp, #32]\n"
+    "  stp x25, x26, [sp, #48]\n"
+    "  stp x27, x28, [sp, #64]\n"
+    "  stp x29, x30, [sp, #80]\n"
+    "  stp d8, d9, [sp, #96]\n"
+    "  stp d10, d11, [sp, #112]\n"
+    "  stp d12, d13, [sp, #128]\n"
+    "  stp d14, d15, [sp, #144]\n"
+    "  mov x9, sp\n"
+    "  str x9, [x0]\n"
+    "  mov sp, x1\n"
+    "  ldp x19, x20, [sp, #0]\n"
+    "  ldp x21, x22, [sp, #16]\n"
+    "  ldp x23, x24, [sp, #32]\n"
+    "  ldp x25, x26, [sp, #48]\n"
+    "  ldp x27, x28, [sp, #64]\n"
+    "  ldp x29, x30, [sp, #80]\n"
+    "  ldp d8, d9, [sp, #96]\n"
+    "  ldp d10, d11, [sp, #112]\n"
+    "  ldp d12, d13, [sp, #128]\n"
+    "  ldp d14, d15, [sp, #144]\n"
+    "  add sp, sp, #160\n"
+    "  ret\n"
+    ".size ArCoroutine_Switch, .-ArCoroutine_Switch\n"
+    /* First resume of a fresh stack "returns" here with the entry function
+     * in x20. The game coroutine never returns; trap if it ever does. */
+    ".global ArCoroutine_Entry\n"
+    ".hidden ArCoroutine_Entry\n"
+    ".type ArCoroutine_Entry, %function\n"
+    "ArCoroutine_Entry:\n"
+    "  blr x20\n"
+    "  brk #0\n"
+    ".size ArCoroutine_Entry, .-ArCoroutine_Entry\n");
+
+/* Builds the frame ArCoroutine_Switch pops on the first resume. */
+static void *PrepareCoroutineStack(char *stack, size_t size, void (*entry)(void)) {
+  uintptr_t top = ((uintptr_t)stack + size) & ~(uintptr_t)15;
+  void **frame = (void **)(top - 160);
+  memset(frame, 0, 160);
+  frame[1] = (void *)entry;              /* x20 */
+  frame[11] = (void *)ArCoroutine_Entry; /* x30 */
+  return frame;
+}
+#else
 static ucontext_t s_host_ctx;
 static ucontext_t s_game_ctx;
+#endif
 static char *s_game_stack;        /* usable stack (guard page excluded) */
 static void  *s_game_stack_map;   /* mmap base, including the guard page */
 static size_t s_game_stack_map_len;
@@ -452,6 +522,8 @@ static void SuspendGameCoroutine(void *unused) {
   (void)unused;
 #ifdef _WIN32
   SwitchToFiber(s_host_fiber);
+#elif AR_COROUTINE_ASM
+  ArCoroutine_Switch(&s_game_sp, s_host_sp);
 #else
   /* swapcontext can fail with ENOMEM ("Insufficient stack space left"). An
    * unchecked failure would silently return and keep running on a stack the
@@ -1446,6 +1518,10 @@ static bool CreateGameCoroutine(void) {
    * re-running makecontext over the SAME buffer resets the entry point, so no
    * unmap/remap is needed (and none would be safe while the old context's
    * frames still nominally live there). */
+#if AR_COROUTINE_ASM
+  s_game_sp = PrepareCoroutineStack(s_game_stack, kGameCoroutineStackReserveBytes,
+                                    game_coroutine);
+#else
   if (getcontext(&s_game_ctx) != 0) {
     fprintf(stderr, "Failed to capture game coroutine context\n");
     return false;
@@ -1454,6 +1530,7 @@ static bool CreateGameCoroutine(void) {
   s_game_ctx.uc_stack.ss_size = kGameCoroutineStackReserveBytes;
   s_game_ctx.uc_link = &s_host_ctx;
   makecontext(&s_game_ctx, game_coroutine, 0);
+#endif
 #endif
   return true;
 }
@@ -1575,6 +1652,8 @@ void RunOneFrameOfGame(void) {
   s_game_coroutine_executing = true;
 #ifdef _WIN32
   SwitchToFiber(s_game_fiber);
+#elif AR_COROUTINE_ASM
+  ArCoroutine_Switch(&s_host_sp, s_game_sp);
 #else
   if (swapcontext(&s_host_ctx, &s_game_ctx) != 0) {
     s_game_coroutine_executing = false;

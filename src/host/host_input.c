@@ -27,6 +27,7 @@
 #include "constants.h"
 #include "host/host_display.h"
 #include "host/host_video.h"
+#include "host/touch_controls.h"
 #include "app/user_data_dir.h"
 #include "manual/manual_reader.h"
 #include "actraiser_game.h"
@@ -600,6 +601,7 @@ static void HandleMouse(const SDL_Event *event) {
 }
 
 bool HostInput_HandleEvent(const SDL_Event *event) {
+  if (TouchControls_HandleEvent(event)) return true;
   switch (event->type) {
     case SDL_EVENT_KEY_DOWN:
       if (!s_logged_key_down) {
@@ -655,6 +657,8 @@ bool HostInput_HandleEvent(const SDL_Event *event) {
 }
 
 bool HostInput_TryHandleStreamEvent(const SDL_Event *event, bool sim_town) {
+  /* Touches only queue key events, which are classified on their own. */
+  if (event && TouchControls_HandleEvent(event)) return true;
   if (!event || s_paused || ManualReader_IsOpen() || SettingsOverlay_IsOpen() ||
       SettingsOverlay_IsCapturing() || g_settings.scene_inspector ||
       RenderComparison_FreezesGameplay()) return false;

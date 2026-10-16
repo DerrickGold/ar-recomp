@@ -589,6 +589,9 @@ For subsequent C/C++ changes, use `cmake --build --preset play`. These commands
 produce a development executable; see [desktop packaging](docs/desktop-packaging.md)
 to turn it into a self-contained `.app` or `.AppImage`.
 
+To test the Android preview, `make android ROM=…` builds a debug APK for USB
+installation without the Builder; see [Android preview builds](docs/android.md).
+
 To package releases on another machine, use `make release-remote <ssh-config-name>`.
 It sends the current source tree, streams build progress, saves a local build
 log, retrieves verified packages into `release/`, and cleans temporary remote
@@ -637,6 +640,7 @@ For benchmark definitions and development details, see
 | [`docs/release-notes.md`](docs/release-notes.md) | Upcoming release changes, upgrade instructions, and remaining testing |
 | [`tools/action_editor/README.md`](tools/action_editor/README.md) | Offline action scenery, background policy, and effects authoring |
 | [`docs/builder-workshop.md`](docs/builder-workshop.md) | Builder and Workshop user guide |
+| [`docs/android.md`](docs/android.md) | Building and testing the Android preview without the Builder |
 | [`docs/language-pack-format.md`](docs/language-pack-format.md) | UTF-8 translation pack authoring and validation contract |
 | [`docs/language-packs.md`](docs/language-packs.md) | Direct `.arlang` installation, sharing, and editor-free/AI authoring |
 | [`docs/regional-settings.md`](docs/regional-settings.md) | Regional gameplay presets, independent options, and campaign saving |

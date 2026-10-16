@@ -15,6 +15,7 @@
 #include "app/session_recovery.h"
 #include "app/settings.h"
 #include "app/user_data_dir.h"
+#include "platform/android/android_platform.h"
 #include "constants.h"
 #include "dev/host_runtime_diagnostics.h"
 #include "host/host_display.h"
@@ -80,6 +81,16 @@ static int Application_ParseArgs(Application *app, int argc, char **argv) {
       app->rom_path = argv[i];
     }
   }
+
+#ifdef __ANDROID__
+  /* No launcher and no argv: the APK supplies the ROM and the data root. */
+  static char android_rom[kHostPathCapacity];
+  if (!AndroidPlatform_PrepareStorage(android_rom, sizeof android_rom)) {
+    fprintf(stderr, "[storage] Android data directory could not be prepared\n");
+    return 1;
+  }
+  if (!app->rom_path) app->rom_path = android_rom;
+#endif
 
   /* Desktop launchers resolve portable/custom/global storage once and pass
    * AR_USER_DATA_DIR. Honor it before folder-bundle anchoring; application

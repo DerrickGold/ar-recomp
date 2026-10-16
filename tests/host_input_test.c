@@ -61,6 +61,7 @@ uint8 g_ram[0x20000];
 Settings g_settings;
 SDL_Window *g_window;
 bool Sim3DTextures_Ready(void) { return false; }
+bool TouchControls_HandleEvent(const SDL_Event *event) { (void)event; return false; }
 int snes_frame_counter;
 
 bool ActRaiserSimMenu_OwnsInput(void) {

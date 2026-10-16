@@ -58,6 +58,10 @@ func runtimeCompileArgs(runtimeDir, zigPath, target, optimize string, simd bool,
 		"-DSNESRECOMP_WATCHDOG=0",
 		"-DSNESRECOMP_REVERSE_DEBUG=0",
 		"-fdebug-compilation-dir=snesrecomp-runtime")
+	if IsAndroidTarget(target) {
+		// The runtime links into SDLActivity's libmain.so (android_target.go).
+		args = append(args, "-fPIC")
+	}
 	if TargetOS(target) == "windows" {
 		// CodeView embeds Clang's expanded command line, including absolute
 		// source and toolchain paths that prefix maps cannot rewrite. Suppress

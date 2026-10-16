@@ -11,11 +11,15 @@ float sky_shift(EffectPlane p) {
     return clamp(settings.follow.w + (settings.follow.z + dy), settings.follow.x, settings.follow.y) -
            clamp(settings.follow.w + settings.follow.z, settings.follow.x, settings.follow.y);
 }
+// settings.sky_mapping read in place; see AR_RESOLVE_SKY_BAND_BODY.
+bool resolve_effect_sky_band(int index, float dy, out vec4 uv, out vec2 rows) {
+    AR_RESOLVE_SKY_BAND_BODY(settings.sky_mapping)
+}
 SkyBand sky_band(int index) {
     SkyBand band = settings.sky_bands[index];
     if(settings.sky_mapping.meta.x>0) {
         vec4 uv; vec2 rows;
-        bool valid=resolve_sky_band(settings.sky_mapping,index,
+        bool valid=resolve_effect_sky_band(index,
             motion_offset(int(settings.planes[2].offset.z)).y,uv,rows);
         band.bounds=valid ? uv*settings.sky_mapping.meta.yzyz-settings.sky_mapping.output_size.zwzw : vec4(0);
         band.rows.xy=rows;

@@ -127,7 +127,7 @@ $(RELEASE_REMOTE_HOSTS):
 	@:
 else
 
-.PHONY: dev release $(addprefix release-,$(PLATFORMS)) release-checked $(addprefix release-checked-,$(PLATFORMS)) check check-release check-c check-c-release check-c-asan check-go check-shaders check-constants check-appimage check-cross check-localization-roms check-localization-workflow clean clean-all clean-release clean-packaging-mounts
+.PHONY: dev android release $(addprefix release-,$(PLATFORMS)) release-checked $(addprefix release-checked-,$(PLATFORMS)) check check-release check-c check-c-release check-c-asan check-go check-shaders check-constants check-appimage check-cross check-localization-roms check-localization-workflow clean clean-all clean-release clean-packaging-mounts
 
 # ROM-free presets use separate trees and never disturb the play/dev presets.
 CHECK_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
@@ -214,6 +214,20 @@ dev: config.ini
 	cmake --preset play
 	cmake --build --preset play
 	@echo "Built ./build-release/ActRaiserRecomp — run it with: ./build-release/ActRaiserRecomp $(ROM) --config config.ini"
+
+# Android preview build (docs/android.md): a debug APK for USB testing, built
+# without the Builder. Needs JDK 17 and the Android SDK/NDK listed in
+# tools/android/build-apk.sh. INSTALL=1 also installs and launches it over adb.
+android:
+	go -C installer run ./cmd/actraiser-builder native-source --root .. --rom $(ROM)
+	@if [ -z "$$(ls src/gen/*.c 2>/dev/null)" ]; then \
+	  echo "=== regenerating (src/gen is empty) ==="; \
+	  go -C snesrecomp-go run ./cmd/snesbuild regen --root .. --rom $(ROM) --allow-stubs; \
+	fi
+	go -C snesrecomp-go build -o build/snesbuild ./cmd/snesbuild
+	@snesrecomp-go/build/snesbuild toolchain status --root . >/dev/null 2>&1 || \
+	  snesrecomp-go/build/snesbuild toolchain fetch --root .
+	tools/android/build-apk.sh --rom $(ROM) $(if $(filter 1,$(INSTALL)),--install)
 
 RELEASE_OPTIONS = -DBUILDER_LEGACY_ARCHIVES=$(if $(filter 0,$(DESKTOP)),ON,OFF) -DBUILDER_KEEP_BUILD=$(if $(KEEP_BUILD),ON,OFF)
 RELEASE_OPTIONS += $(if $(RELEASE_VERSION),$(call shell_quote,-DSNESBUILD_VERSION=$(RELEASE_VERSION)))

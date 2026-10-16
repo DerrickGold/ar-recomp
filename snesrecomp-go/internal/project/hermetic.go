@@ -46,8 +46,11 @@ type HermeticOptions struct {
 	// the real ones, and only the run is missing. It never auto-discovers the
 	// host SDL3 (linking macOS SDL into a Windows binary would fail in a way
 	// that teaches nothing) -- see CrossSDL3Dir.
-	Target  string
-	Verbose bool
+	Target string
+	// AndroidSysroot is the NDK-layout sysroot for *-linux-android targets
+	// (see android_target.go). Empty falls back to $SNESBUILD_ANDROID_SYSROOT.
+	AndroidSysroot string
+	Verbose        bool
 	// Progress receives completed and total translation-unit counts. Cached
 	// objects are included in completed. It is optional and independent of the
 	// human build log so external drivers never need to parse prose.
@@ -282,6 +285,11 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	}
 	compileArgs = append(compileArgs, "-std="+manifest.Std, options.Optimize, "-g",
 		"-w", "-Wno-implicit-function-declaration")
+	if IsAndroidTarget(options.Target) {
+		// libmain.so is a shared library; Zig otherwise compiles Android
+		// objects for a PIE executable (local-exec TLS, absolute relocations).
+		compileArgs = append(compileArgs, "-fPIC")
+	}
 	for _, define := range manifest.Defines {
 		compileArgs = append(compileArgs, "-D"+define)
 	}
@@ -303,6 +311,14 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	objectDir := filepath.Join(outputDir, "obj")
 	if err := os.MkdirAll(objectDir, 0o755); err != nil {
 		return "", err
+	}
+	var toolEnv []string
+	androidCRTDir := ""
+	if IsAndroidTarget(options.Target) {
+		toolEnv, androidCRTDir, err = androidToolEnv(options, outputDir)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	// Runtime-private include roots and flags invalidate only runtime objects.
@@ -407,6 +423,9 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		args = append(append([]string(nil), args...), depfileArgs(item.object)...)
 		compileStarted := time.Now()
 		command := subprocess.CommandContext(ctx, options.ZigPath, append(args, "-c", item.source, "-o", item.object)...)
+		if toolEnv != nil {
+			command.Env = append(os.Environ(), toolEnv...)
+		}
 		output, err := command.CombinedOutput()
 		// Emitted whether or not the unit failed -- -w keeps a healthy
 		// compile silent, so anything a tool does say here is worth reading.
@@ -465,6 +484,8 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	binary := filepath.Join(outputDir, manifest.Name)
 	if targetOS == "windows" {
 		binary += ".exe"
+	} else if androidCRTDir != "" {
+		binary = filepath.Join(outputDir, androidLibraryName)
 	}
 	objects := make([]string, 0, len(sources))
 	for _, source := range sources {
@@ -525,8 +546,14 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		linkArgs = append(linkArgs, "-L"+ttfLibDir)
 	}
 	linkArgs = append(linkArgs, manifest.Link...)
+	if androidCRTDir != "" {
+		linkArgs = append(linkArgs, androidLinkArgs(androidCRTDir)...)
+	}
 	tools.printf("hermetic: linking %s\n", binary)
 	command := subprocess.CommandContext(ctx, options.ZigPath, linkArgs...)
+	if toolEnv != nil {
+		command.Env = append(os.Environ(), toolEnv...)
+	}
 	output, err := command.CombinedOutput()
 	tools.block("link "+filepath.Base(binary), output)
 	if err != nil {

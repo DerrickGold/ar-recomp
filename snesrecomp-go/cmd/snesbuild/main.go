@@ -221,6 +221,7 @@ type buildFlags struct {
 	cmakeArgs                                                          stringList
 	hermetic                                                           bool
 	zig, sdlInclude, sdlLib, optimize, target                          string
+	androidSysroot                                                     string
 	verbose                                                            bool
 	memoryBudget                                                       string
 }
@@ -236,6 +237,8 @@ func addHermeticFlags(flags *flag.FlagSet, values *buildFlags) {
 	flags.StringVar(&values.optimize, "optimize", "-O2", "hermetic optimization level")
 	flags.StringVar(&values.target, "target", "",
 		"cross-compile to a Zig target triple, e.g. x86_64-windows-gnu (default: host)")
+	flags.StringVar(&values.androidSysroot, "android-sysroot", "",
+		"NDK sysroot for *-linux-android targets (default: $SNESBUILD_ANDROID_SYSROOT)")
 	flags.BoolVar(&values.verbose, "verbose", false, "print each hermetic compile command")
 	flags.StringVar(&values.memoryBudget, "memory-budget", "auto",
 		"hermetic compiles start only while their summed ESTIMATED peak memory fits this budget: "+
@@ -279,7 +282,8 @@ func (values *buildFlags) hermeticOptionsWithWriters(stdout, stderr io.Writer) (
 		InputID: values.inputID,
 		Paths:   paths, ZigPath: zigPath, Jobs: values.jobs, Optimize: values.optimize,
 		SDLIncludeDir: values.sdlInclude, SDLLibDir: values.sdlLib, Target: values.target,
-		Verbose: values.verbose, MemoryBudget: memoryBudget,
+		AndroidSysroot: values.androidSysroot,
+		Verbose:        values.verbose, MemoryBudget: memoryBudget,
 		Stdout: stdout, Stderr: stderr,
 	}, nil
 }

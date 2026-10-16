@@ -48,6 +48,7 @@
 #include "render/render_output.h"
 #include "render/present_hud.h"
 #include "host/host_video.h"
+#include "host/touch_controls.h"
 #include "present/presentation_textures.h"
 
 /* Streaming textures retain their last successfully uploaded pixels. Exact CPU
@@ -384,6 +385,8 @@ void PresentHostUi(const FrameSlot *slot, ArRenderRectI viewport,
   const PerformanceScope settings = PerformanceMetrics_Begin(kPerformance_SettingsUi);
   SettingsOverlay_Render(viewport);
   PerformanceMetrics_End(settings);
+  /* Above the menu: touch is how a phone player navigates it. */
+  TouchControls_Draw(output_size);
   PresentFpsCounter(slot, output_size, presentation_fps);
   if (slot->performance_overlay) {
     const PerformanceScope overlay = PerformanceMetrics_Begin(kPerformance_Overlay);

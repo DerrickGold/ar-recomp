@@ -23,6 +23,8 @@ highlighting player-facing changes and Builder fixes.
   artwork, music, and text.
 - [Desktop packages and user data](desktop-packaging.md) — portable installs,
   save locations, and packaging a local build.
+- [Android preview builds](android.md) — building a test APK from source,
+  installing it over USB, touch controls, and where data lives.
 - [Language packs](language-packs.md) — authoring, validating, installing, and
   sharing translations.
 - [Language pack format](language-pack-format.md) — UTF-8 scripts, placeholders,

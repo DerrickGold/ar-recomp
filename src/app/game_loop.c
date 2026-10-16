@@ -187,6 +187,7 @@ typedef struct StreamJob {
   atomic_uint_fast64_t input_sample; /* buttons and stick in one immutable sample */
   atomic_uint_fast32_t input_time_ms; /* diagnostic age, independent of gameplay */
   uint64_t next_ns, interval_ns, service_deadline_ns;
+  uint64_t stall_ns; /* lag that ended the stream, for the service log */
   HostFramePlayout playout;
   uint8_t map_group, map_number;
   uint32_t underlay_serial;
@@ -204,6 +205,7 @@ static void PublishStreamInput(StreamJob *stream) {
 static void ProduceFrameStream(void *context) {
   StreamJob *stream = context;
   stream->frames = stream->full_waits = 0;
+  stream->stall_ns = 0;
   stream->maintenance = false;
   while (!HostFrameQueue_PauseRequested(stream->queue)) {
     const uint64_t now = SDL_GetTicksNS();
@@ -211,6 +213,17 @@ static void ProduceFrameStream(void *context) {
       const uint64_t left = stream->next_ns - now;
       SDL_DelayNS(left < 1000000 ? left : 1000000);
       continue;
+    }
+    /* A host stall (a first-use GPU pipeline compile, a blocked present)
+     * keeps every slot full while real time runs on. Producing that backlog
+     * back to back would replay the stall at up to double speed. End the
+     * stream instead: the owner's transition path drops the old timeline and
+     * restarts from a fresh synchronous frame, the same rule it applies to a
+     * long interruption between streams. */
+    if (now > stream->next_ns + 3 * stream->interval_ns) {
+      stream->stall_ns = now - stream->next_ns;
+      stream->transition = true;
+      break;
     }
     HostFramePacket *packet = HostFrameQueue_BeginWrite(stream->queue);
     if (!packet) { ++stream->full_waits; SDL_Delay(1); continue; }
@@ -835,9 +848,12 @@ void GameLoop_Run(const GameSessionConfig *config) {
         continue;
       }
       stream_pending = false;
-      fprintf(stderr, "[stream-service] frames=%u full-waits=%u event=%u elapsed-ms=%.3f\n",
+      fprintf(stderr, "[stream-service] frames=%u full-waits=%u event=%u elapsed-ms=%.3f%s",
           stream.frames, stream.full_waits, stream_event,
-          (double)(SDL_GetTicksNS() - stream_owner_service_ns) / 1e6);
+          (double)(SDL_GetTicksNS() - stream_owner_service_ns) / 1e6,
+          stream.stall_ns ? "" : "\n");
+      if (stream.stall_ns)
+        fprintf(stderr, " stall-dropped-ms=%.3f\n", (double)stream.stall_ns / 1e6);
       stream_event = 0;
       RunPostTickHousekeeping();
       HostInput_MarkFrameDrawn();

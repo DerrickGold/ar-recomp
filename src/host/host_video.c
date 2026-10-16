@@ -127,6 +127,11 @@ void HostVideo_Create(const char *title, bool hidden_capture) {
       (hidden_capture ? SDL_WINDOW_HIDDEN : 0) |
       (g_settings.window_mode != kWindowMode_Windowed
            ? SDL_WINDOW_FULLSCREEN : 0);
+#ifdef __ANDROID__
+  /* Android windows always fill the display; the flag hides the status and
+   * navigation bars (immersive mode). Window mode has no other meaning. */
+  window_flags |= SDL_WINDOW_FULLSCREEN;
+#endif
   /* SDL3 SDL_CreateWindow no longer takes an x,y position; it is created at
    * a default (centered) position. */
   g_window = SDL_CreateWindow(
