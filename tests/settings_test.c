@@ -114,8 +114,9 @@ static void TestDefaultsAndMetadata(void) {
    * Seeded regional rolls add two options; save slots add two entry actions.
    * Remember last town adds a native/enhanced QoL preference; native menu
    * quick use adds an independent QoL toggle. Save editing adds Apply and restart. */
-  /* One completion scene switch plus nine internal effect overrides; one button-prompt representation preference. */
-  const int expected_descriptors = 320;
+  /* One completion scene switch plus nine internal effect overrides; one button-prompt representation preference.
+   * Diorama adds its skybox scroll choice. */
+  const int expected_descriptors = 321;
   if (g_setting_desc_count != expected_descriptors)
     fprintf(stderr, "Setting descriptors: expected %d, got %d\n",
             expected_descriptors, g_setting_desc_count);

@@ -94,6 +94,9 @@ enum {
   kActRaiserWram_Bg1Height = 0x0030,
   kActRaiserWram_Bg2Width = 0x0032,
   kActRaiserWram_Bg2Height = 0x0034,
+  /* `$02:B9A3`: BG2 X = BG1 X * numerator / denominator. */
+  kActRaiserWram_Bg2HorizontalNumerator = 0x003E,
+  kActRaiserWram_Bg2HorizontalDenominator = 0x003F,
   kActRaiserWram_Bg2VerticalNumerator = 0x0040,
   kActRaiserWram_Bg2VerticalDenominator = 0x0041,
   /* Action background decoder state, indexed by

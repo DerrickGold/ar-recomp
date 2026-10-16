@@ -1061,7 +1061,12 @@ typedef struct SrPpuScanoutRequest {
  * normal scanout still completes. Each row observes the same live palette,
  * characters and HDMA state as normal scanout. Caller-owned storage is borrowed
  * only during the call, must not alias any bound PPU output, and is publishable
- * only when READY is returned. No new fields are added to V2 scanout records. */
+ * only when READY is returned. No new fields are added to V2 scanout records.
+ *
+ * screen_x0 places the view's left edge relative to the live camera and may
+ * be anywhere within +/-world_width: columns the primary capture does not
+ * cover are decoded from the virtual tilemap, so a view need not overlap the
+ * screen (a slower-scrolling skybox, for example). */
 typedef struct SrPpuBackgroundViewRequest {
     uint32_t struct_size;
     uint32_t layer;

@@ -157,6 +157,7 @@ void Diorama_ResetCamera(void) {
     "diorama_layer_obj",
     "diorama_layer_bg3",
     "diorama_skybox",
+    "diorama_skybox_scroll",
     "diorama_shoebox",
   };
   for (size_t i = 0; i < sizeof(kResetKeys) / sizeof(kResetKeys[0]); i++) {

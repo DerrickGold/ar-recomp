@@ -589,9 +589,11 @@ retry_projection:;
       DioramaFrameGeneration_PlaneOffset(kDioramaFrameGenerationSkybox);
   /* Canonical source mapping belongs to the captured pixels; frame generation
    * contributes only its presentation translation. */
-  if (!skybox_view.periodic && ArRenderTexture_IsValid(skybox_view.texture))
+  if (!skybox_view.periodic && ArRenderTexture_IsValid(skybox_view.texture)) {
     skybox_view.capture_offset.x += slot->bg2_camera_x - slot->ws_extra -
         slot->diorama_skybox_world_x;
+    skybox_view.subpixel_x = slot->diorama_skybox_world_x_fraction;
+  }
   DioramaPerformance_End(frame_synthesis);
   /* The existing graphics setting now selects frame-space generation.
    * Prepare fails individual planes closed when either endpoint or pair

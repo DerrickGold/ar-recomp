@@ -13,6 +13,8 @@
 #include "action/action_effect_manifest.h"
 #include "actraiser/actraiser_sprite_ownership.h"
 
+#include <math.h>
+
 static uint8_t s_bg_apron_mask;
 static const ActionReceiverLighting *s_receiver_lighting;
 static DioramaBgSourceBounds s_bg2_source_bounds;
@@ -622,7 +624,9 @@ void ActRaiser_PrepareTownCapture(void) {
 SrPpuBackgroundViewRequest
 ActRaiser_PrepareSkyboxView(const SrPpuFrameTransactionContext *context,
                             const SnesRunnerApi *scanout_api,
-                            bool scanout_ready, bool profile_diorama) {
+                            bool scanout_ready, bool profile_diorama,
+                            float *world_x_fraction) {
+  if (world_x_fraction) *world_x_fraction = 0.0f;
   /* A finite scrolling background needs its own fixed-size view at world
    * edges. The normal BG capture remains registered to the gameplay camera.
    * Named ROM, repeated, mirrored and row-banded skies retain their policies.
@@ -691,6 +695,31 @@ ActRaiser_PrepareSkyboxView(const SrPpuFrameTransactionContext *context,
         .pitch_bytes = width * sizeof(uint32_t),
         .pixel_byte_size = sizeof(s_diorama_skybox_pixels),
     };
+    /* Matched and Full room place the view from the playfield camera, not
+     * BG2's scroll, so the sky moves exactly when the playfield does. The
+     * whole-pixel origin goes to the scanout; the fraction is applied as a
+     * sub-texel shift when the skybox is drawn. */
+    uint16_t travel_min, travel_max;
+    float left_world = 0.0f;
+    DioramaSkyboxScrollInput scroll = {
+        .mode = g_settings.diorama_skybox_scroll,
+        .camera_x = ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX),
+        .ratio_numerator = g_ram[kActRaiserWram_Bg2HorizontalNumerator],
+        .ratio_denominator = g_ram[kActRaiserWram_Bg2HorizontalDenominator],
+        .playfield_to_sky_scale = Diorama_SkyboxPlayfieldScale(),
+        .world_width = sky_layer->world_width,
+        .view_width = (int)width,
+    };
+    if (ActRaiser_ActionCameraTravel(&travel_min, &travel_max)) {
+      scroll.camera_min = travel_min;
+      scroll.camera_max = travel_max;
+      if (DioramaSkyboxScroll_Place(&scroll, &left_world)) {
+        const int whole = (int)floorf(left_world);
+        skybox_view.screen_x0 =
+            whole - (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg2CameraX);
+        if (world_x_fraction) *world_x_fraction = left_world - (float)whole;
+      }
+    }
   }
 
   return skybox_view;

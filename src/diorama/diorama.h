@@ -293,7 +293,14 @@ typedef struct DioramaSkyboxView {
   bool dynamic;
   bool periodic;
   ArRenderPointF capture_offset;
+  /* Sub-texel part of the view's world origin; shifts sampling only. */
+  float subpixel_x;
 } DioramaSkyboxView;
+
+/* On-screen width of a playfield pixel divided by a captured skybox texel's,
+ * as last drawn; 0 until a captured skybox has been drawn. The producer uses
+ * it to place the next frame's view (DioramaSkyboxScroll_Place). */
+float Diorama_SkyboxPlayfieldScale(void);
 
 /* Borrowed for this draw. Width excludes the capture guards; authentic_y0 is
  * the first native row inside the vertically expanded capture. A non-NULL

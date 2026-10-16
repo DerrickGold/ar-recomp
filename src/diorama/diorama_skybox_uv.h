@@ -51,6 +51,32 @@ typedef struct DioramaBgSourceBounds {
   bool valid;
 } DioramaBgSourceBounds;
 
+/* Where a finite skybox view starts in BG2's world for one frame.
+ *
+ * The skybox is drawn larger than the playfield (it fills the viewport's
+ * height), so moving its view 1:1 with BG2's scroll makes it travel faster on
+ * screen than BG2's native parallax. Placing the view from the playfield
+ * camera's position within its travel also makes the sky stop exactly when
+ * the playfield does, and keeps the view inside BG2's world so it is never
+ * pinned at an edge while the playfield still moves. */
+typedef struct DioramaSkyboxScrollInput {
+  int mode;                        /* DioramaSkyScroll */
+  int camera_x;                    /* playfield (BG1) camera */
+  int camera_min, camera_max;      /* the playfield camera's travel */
+  int ratio_numerator;             /* native BG2 = BG1 * numerator / denominator */
+  int ratio_denominator;
+  /* On-screen width of one playfield pixel divided by one skybox texel's;
+   * zero or less when presentation has not measured it yet. */
+  float playfield_to_sky_scale;
+  int world_width;                 /* BG2's world */
+  int view_width;                  /* requested view */
+} DioramaSkyboxScrollInput;
+
+/* Returns false when the original 1:1 placement applies: Original mode, no
+ * camera travel, no room to move, or (Matched) no native parallax. */
+bool DioramaSkyboxScroll_Place(const DioramaSkyboxScrollInput *input,
+                               float *world_left);
+
 /* Accumulate one actually captured live-world row, accounting for its PPU
  * mosaic group (1 when disabled). Unavailable vertical rows and synthetic
  * edge families do not constrain the finite source interval. */

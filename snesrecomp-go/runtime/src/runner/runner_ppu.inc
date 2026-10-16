@@ -1165,8 +1165,8 @@ static bool valid_background_view(const Ppu *ppu,
         view->world_height > UINT16_MAX || view->width == 0u ||
         view->width > kPpuBufWidth || view->width > view->world_width ||
         view->height == 0u || view->height > kPpuBufHeight ||
-        view->screen_x0 < -kPpuExtraLeftRight ||
-        view->screen_x0 > kPpuXPixels ||
+        (int64_t)view->screen_x0 < -(int64_t)view->world_width ||
+        (int64_t)view->screen_x0 > (int64_t)view->world_width ||
         (!native && (view->screen_y0 < -(int)ppu->extraTopCur ||
          (int64_t)view->screen_y0 + view->height >
             kPpuYPixels + ppu->extraBottomCur)) ||

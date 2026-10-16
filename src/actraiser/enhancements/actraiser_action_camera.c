@@ -129,6 +129,23 @@ static RecompReturn ActionCamera_CallPlayerTail(CpuState *cpu) {
   return result;
 }
 
+/* Keyed by room and width so a stale range never outlives its room. */
+static struct {
+  bool valid;
+  uint8_t group, map;
+  uint16_t width, minimum, maximum;
+} s_travel;
+
+bool ActRaiser_ActionCameraTravel(uint16_t *minimum, uint16_t *maximum) {
+  if (!s_travel.valid || s_travel.group != g_ram[kActRaiserWram_MapGroup] ||
+      s_travel.map != g_ram[kActRaiserWram_CurrentMap] ||
+      s_travel.width != ActRaiser_ReadWram16(kActRaiserWram_Bg1Width))
+    return false;
+  if (minimum) *minimum = s_travel.minimum;
+  if (maximum) *maximum = s_travel.maximum;
+  return true;
+}
+
 static bool ActionCamera_DebugEnabled(void) {
   static int enabled = -1;
   if (enabled < 0) {
@@ -193,6 +210,12 @@ RecompReturn ActRaiser_UpdateActionCamera(CpuState *cpu) {
       old_y, requested_delta_y,
       ActionCamera_Read16(cpu, kActRaiserWram_Bg1Height),
       kActRaiserActionCameraViewportHeight, &vertical_bounds);
+  s_travel.valid = true;
+  s_travel.group = g_ram[kActRaiserWram_MapGroup];
+  s_travel.map = g_ram[kActRaiserWram_CurrentMap];
+  s_travel.width = native_width;
+  s_travel.minimum = horizontal_bounds.minimum;
+  s_travel.maximum = horizontal_bounds.maximum;
   const int16_t effective_delta_x =
       ActionCameraAxisBounds_EffectiveDelta(
           &horizontal_bounds, old_x, camera_x, requested_delta_x);

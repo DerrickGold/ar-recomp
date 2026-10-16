@@ -61,7 +61,7 @@ uint8_t ActRaiser_LiveScenerySection(void);
  * until the next tick/reset, like the other FrameSlot surface products.
  * world_x is the canonical left edge resolved from that scanout request. */
 void ActRaiser_LiveDioramaSkybox(SrPpuSurfaceView *out, int32_t *world_x,
-                               bool *periodic);
+                               float *world_x_fraction, bool *periodic);
 const SrPpuBgPacket *ActRaiser_LiveBackgroundPacket(void);
 /* Scanout-owner only. A non-null target must live through frame consumption.
  * Reset before yielding ownership; this retains the last publication for

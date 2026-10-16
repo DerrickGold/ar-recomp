@@ -272,6 +272,7 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
                                  &dst->bg_capture_pad_to_budget);
       ActRaiser_LiveDioramaSkybox(&dst->diorama_skybox_surface,
                                 &dst->diorama_skybox_world_x,
+                                &dst->diorama_skybox_world_x_fraction,
                                 &dst->diorama_skybox_periodic);
       dst->action_bg_extent_guides = ActionBgTuner_GuidesEnabled();
     }

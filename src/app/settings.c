@@ -630,6 +630,12 @@ static const char *const kDioramaSkyModeLabels[] = {
   "Plane + skybox",
 };
 
+static const char *const kDioramaSkyScrollLabels[] = {
+  "Original",
+  "Matched",
+  "Full room",
+};
+
 static const char *const kScreenAspectLabels[] = {
   "4:3",
   "16:9",
@@ -2032,6 +2038,16 @@ const SettingDesc g_setting_descs[] = {
     &g_settings.diorama_skybox, kDioramaSky_Off,
     kDioramaSky_Off, kDioramaSky_Both, 1, false,
     kDioramaSkyModeLabels, kDioramaSky_Count, Diorama_ModeIsOn, NULL,
+    NULL, NULL },
+  { "diorama_skybox_scroll", NULL, "Skybox scroll",
+    "How far the skybox travels as the level scrolls. Original: it moves "
+    "with BG2 and holds still near the level's ends. Matched: BG2's own "
+    "parallax beside the playfield. Full room: all of BG2 across the level. "
+    "Matched and Full room stop exactly when the playfield stops.",
+    kSettingType_Enum, kApply_Passive, kSettingCat_Presentation,
+    &g_settings.diorama_skybox_scroll, kDioramaSkyScroll_Original,
+    kDioramaSkyScroll_Original, kDioramaSkyScroll_FullRoom, 1, false,
+    kDioramaSkyScrollLabels, kDioramaSkyScroll_Count, Diorama_ModeIsOn, NULL,
     NULL, NULL },
     BOOL_SETTING_MODERN(
         death_heim_completion_world, "AR_DEATH_HEIM_COMPLETION_WORLD", "Death Heim completion scene",

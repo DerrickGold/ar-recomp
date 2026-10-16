@@ -74,7 +74,12 @@ void ActRaiser_PrepareTownCapture(void);
 SrPpuBackgroundViewRequest
 ActRaiser_PrepareSkyboxView(const SrPpuFrameTransactionContext *context,
                             const SnesRunnerApi *scanout_api,
-                            bool scanout_ready, bool profile_diorama);
+                            bool scanout_ready, bool profile_diorama,
+                            float *world_x_fraction);
+
+/* ---- defined in actraiser_action_camera.c ---- */
+/* The playfield camera's horizontal travel this room, as last clamped. */
+bool ActRaiser_ActionCameraTravel(uint16_t *minimum, uint16_t *maximum);
 
 /* ---- defined in actraiser_frame_draw.c ---- */
 void ActRaiser_ReportSim3DCaptureContractFailure(void);

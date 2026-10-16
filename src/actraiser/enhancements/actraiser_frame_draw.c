@@ -11,6 +11,9 @@
  * hands out a copy. */
 static SrPpuSurfaceView s_live_diorama_skybox;
 static int32_t s_live_diorama_skybox_world_x;
+/* Sub-texel remainder of the view's world origin (Matched / Full room). */
+static float s_live_diorama_skybox_world_x_fraction;
+static float s_pending_diorama_skybox_world_x_fraction;
 static bool s_live_diorama_skybox_periodic;
 static SrPpuBgPacket s_default_background_packet;
 static SrPpuBgPacket *s_background_packet = &s_default_background_packet;
@@ -119,9 +122,10 @@ static void FinishBackgroundPacket(void) {
 }
 
 void ActRaiser_LiveDioramaSkybox(SrPpuSurfaceView *out, int32_t *world_x,
-                               bool *periodic) {
+                               float *world_x_fraction, bool *periodic) {
   if (out) *out = s_live_diorama_skybox;
   if (world_x) *world_x = s_live_diorama_skybox_world_x;
+  if (world_x_fraction) *world_x_fraction = s_live_diorama_skybox_world_x_fraction;
   if (periodic) *periodic = s_live_diorama_skybox_periodic;
 }
 
@@ -324,6 +328,8 @@ static void ActRaiser_PublishScanout(SrResult scanout_status,
      * not reconstruct margins or finite-world policy from another snapshot. */
     s_live_diorama_skybox_world_x = (int32_t)SrPpuBackgroundView_WorldLeft(
         skybox, (int16_t)ActRaiser_ReadWram16(kActRaiserWram_Bg2CameraX));
+    s_live_diorama_skybox_world_x_fraction =
+        s_pending_diorama_skybox_world_x_fraction;
     s_live_diorama_skybox = (SrPpuSurfaceView){
         .flags = SR_PPU_SURFACE_BOUND | SR_PPU_SURFACE_HAS_CONTENT,
         .pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32,
@@ -503,6 +509,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   if (!context) return SR_RESULT_INVALID_ARGUMENT;
   s_live_diorama_skybox = (SrPpuSurfaceView){0};
   s_live_diorama_skybox_world_x = 0;
+  s_live_diorama_skybox_world_x_fraction = 0.0f;
   s_live_diorama_skybox_periodic = false;
   PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_PpuSetup);
   ppu = &context->state;
@@ -591,7 +598,8 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   ActRaiser_DioramaDeathHeimEyesPrepare();
 
   SrPpuBackgroundViewRequest skybox_view = ActRaiser_PrepareSkyboxView(
-      context, scanout_api, scanout_ready, profile_diorama);
+      context, scanout_api, scanout_ready, profile_diorama,
+      &s_pending_diorama_skybox_world_x_fraction);
 
   DioramaPerformance_End(producer_setup_performance);
   PerformanceMetrics_End(pipeline);

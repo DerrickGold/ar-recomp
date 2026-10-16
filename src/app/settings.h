@@ -626,6 +626,9 @@ typedef struct Settings {
   int diorama_reactive_strength;
   /* DioramaSkyMode selector — see the enum comment. */
   int diorama_skybox;
+  /* DioramaSkyScroll selector: how far a finite skybox travels per playfield
+   * scroll. Original is the 1:1 BG2 behavior kept for A/B comparison. */
+  int diorama_skybox_scroll;
   /* Widescreen edge-margin fix: at a level's start/end the live
    * widescreen margin collapses to 0, but every diorama consumer samples the
    * FIXED capture span — so the never-rendered columns showed as an opaque
@@ -702,7 +705,7 @@ typedef struct Settings {
 
 /* Shared bound for boot-layer storage and menu snapshots. The descriptor
  * definition statically verifies that every registered setting fits. */
-enum { kSettingsMaxDescriptors = 320 };
+enum { kSettingsMaxDescriptors = 352 };
 
 extern Settings g_settings;
 extern const SettingDesc g_setting_descs[];
