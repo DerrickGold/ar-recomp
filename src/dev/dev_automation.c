@@ -210,6 +210,23 @@ void DevAutomation_AfterTicks(void) {
     (void)RuntimeSettings_HandleAction(Settings_Find("warp_now"));
   }
 
+  /* AR_DEATH_HEIM_PROGRESS=<n>: on the first hub frame, set rush progress so
+   * the hub's own stager ($00:F3D4) warps into room 0x0702 + n with the
+   * game's normal staging. A direct warp into a boss room skips that staging
+   * and leaves the fight without its player. */
+  static bool death_heim_progress_applied;
+  if (!death_heim_progress_applied &&
+      g_ram[kActRaiserWram_MapGroup] == kActRaiserMapGroup_DeathHeim &&
+      g_ram[kActRaiserWram_CurrentMap] == kActRaiserDeathHeimMap_Hub) {
+    death_heim_progress_applied = true;
+    const char *value = getenv("AR_DEATH_HEIM_PROGRESS");
+    if (value && value[0]) {
+      g_ram[kActRaiserWram_DeathHeimProgress] = (uint8_t)strtoul(value, NULL, 0);
+      fprintf(stderr, "[warp] Death Heim progress set to %u at gf=%u\n",
+              g_ram[kActRaiserWram_DeathHeimProgress], gf);
+    }
+  }
+
   /* AR_DIORAMA_AT=<gameframe>: flip Diorama 3D on once the game-frame counter
    * reaches the value, through the same descriptor path the D hotkey uses.
    * Booting straight into diorama changes the widescreen margin budget and

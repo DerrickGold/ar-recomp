@@ -4252,11 +4252,13 @@ if(BUILD_TESTING)
 
     # BG2 valid-span classification and the
     # skybox quad's UV range, including the no-op guarantee that a padded
-    # margin reproduces the pre-fix UV values exactly.
+    # margin reproduces the pre-fix UV values exactly, and the raster hold
+    # with the room-scene camera probe that feeds it.
     add_executable(actraiser_diorama_skybox_uv_test
         tests/diorama_skybox_uv_test.c
         src/diorama/diorama_skybox_uv.c
         src/action/action_bg_plan.c
+        src/action/action_room_scene.c
     )
     target_include_directories(actraiser_diorama_skybox_uv_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
@@ -4264,7 +4266,7 @@ if(BUILD_TESTING)
         ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS}
     )
     target_link_libraries(actraiser_diorama_skybox_uv_test PRIVATE
-        actraiser_math)
+        actraiser_math actraiser_rom_decode_test_support)
     add_test(NAME actraiser_diorama_skybox_uv
         COMMAND actraiser_diorama_skybox_uv_test)
 

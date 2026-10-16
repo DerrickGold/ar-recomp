@@ -1,6 +1,7 @@
 #include "actraiser/actraiser_room_profiles.h"
 #include "action_room_scene.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "action/action_bg_metatile.h"
@@ -703,6 +704,95 @@ bool ActionRoomScene_BuildFrameState(
       state->bg_vscroll[bg][line] = base_v[bg] & 0x03ff;
     }
   BuildRasterScroll(scene, request, state);
+  return true;
+}
+
+/* Scratch frames for the sensitivity probe; too large for the stack. */
+static ActionRoomSceneFrameState s_sensitivity_at, s_sensitivity_next,
+    s_sensitivity_coarse;
+
+/* The raster writes each row's whole scroll, replacing BG2's base parallax
+ * on that row, so the row's own motion is the rate (no base subtracted). */
+static int MovedRaster(const ActionRoomSceneFrameState *a,
+                       const ActionRoomSceneFrameState *b, unsigned row) {
+  return ((int)b->bg_hscroll[1][row] - (int)a->bg_hscroll[1][row]) & 1023;
+}
+
+bool ActionRoomScene_RasterCameraSensitivity(
+    const ActionRoomScene *scene,
+    const ActionRoomSceneFrameRequest *request,
+    float rows[kActionRoomSceneFrameHeight]) {
+  if (!scene || !request || !rows || scene->raster_effect == kActionRoomRaster_None)
+    return false;
+  /* One wide step keeps the native integer shifts (camera >> n) exact. Some
+   * tables keep only a row's low scroll byte (perspective floors), so the wide
+   * step knows those rates modulo one; a quarter step finds the whole part. */
+  enum { kStep = 256, kCoarseStep = 64 };
+  ActionRoomSceneFrameRequest at = *request;
+  at.have_raster_camera_x = false;
+  at.raster_entry_frame = false;
+  if (at.camera_x < 0) at.camera_x = 0;
+  ActionRoomSceneFrameRequest next = at, coarse = at;
+  next.camera_x += kStep;
+  coarse.camera_x += kCoarseStep;
+  const ActionRoomSceneFrameState *a = &s_sensitivity_at;
+  if (!ActionRoomScene_BuildFrameState(scene, &at, &s_sensitivity_at) ||
+      !ActionRoomScene_BuildFrameState(scene, &next, &s_sensitivity_next) ||
+      !ActionRoomScene_BuildFrameState(scene, &coarse, &s_sensitivity_coarse))
+    return false;
+  bool any = false;
+  for (unsigned row = 0; row < kActionRoomSceneFrameHeight; ++row) {
+    const int raster = ((MovedRaster(a, &s_sensitivity_next, row) + 512) & 1023) - 512;
+    const int whole = ((MovedRaster(a, &s_sensitivity_coarse, row) + 128) & 255) - 128;
+    const float rate = (float)raster / kStep;
+    rows[row] = rate + roundf((float)whole / kCoarseStep - rate);
+    any |= rows[row] != 0.0f;
+  }
+  return any;
+}
+
+bool ActionRoomScene_RasterSubtexel(
+    const ActionRoomScene *scene,
+    const ActionRoomSceneFrameRequest *request,
+    const float rates[kActionRoomSceneFrameHeight],
+    float subtexel[kActionRoomSceneFrameHeight]) {
+  if (!scene || !request || !rates || !subtexel ||
+      scene->raster_effect == kActionRoomRaster_None)
+    return false;
+  /* Step the raster camera back until each row's scroll changes; the steps
+   * taken place the row within its current whole pixel. Rates down to 1/32
+   * (Northwall's high sky) resolve; slower rows keep floor(rate * camera)'s
+   * phase. Perspective-floor rows are not 1/n rates, so this places them
+   * only to within one rate step; they stay native until a hold starts. */
+  enum { kMaxSteps = 32 };
+  ActionRoomSceneFrameRequest at = *request;
+  const int32_t camera = at.have_raster_camera_x ? at.raster_camera_x : at.camera_x;
+  at.have_raster_camera_x = true;
+  at.raster_camera_x = camera;
+  at.raster_entry_frame = false;
+  if (!ActionRoomScene_BuildFrameState(scene, &at, &s_sensitivity_at)) return false;
+  bool resolved[kActionRoomSceneFrameHeight];
+  for (unsigned row = 0; row < kActionRoomSceneFrameHeight; ++row) {
+    const float rate = rates[row];
+    const float native = rate * (float)camera;
+    subtexel[row] = native - floorf(native);
+    resolved[row] = rate == 0.0f || fabsf(rate) >= 1.0f;
+  }
+  for (int step = 1; step <= kMaxSteps && camera - step >= 0; ++step) {
+    ActionRoomSceneFrameRequest back = at;
+    back.raster_camera_x = camera - step;
+    if (!ActionRoomScene_BuildFrameState(scene, &back, &s_sensitivity_next)) return false;
+    for (unsigned row = 0; row < kActionRoomSceneFrameHeight; ++row) {
+      if (resolved[row] ||
+          s_sensitivity_next.bg_hscroll[1][row] == s_sensitivity_at.bg_hscroll[1][row])
+        continue;
+      const float rate = rates[row];
+      subtexel[row] = rate > 0.0f ? (float)(step - 1) * rate
+                                  : 1.0f + (float)step * rate;
+      subtexel[row] = fminf(fmaxf(subtexel[row], 0.0f), 0.999f);
+      resolved[row] = true;
+    }
+  }
   return true;
 }
 

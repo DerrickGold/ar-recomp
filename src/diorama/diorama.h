@@ -324,6 +324,15 @@ typedef struct DioramaCapture {
   const uint32_t *bg_transparent_fill_argb;
   const DioramaCoverageMask *coverage_masks;
   const DioramaBgValidSpanPlan *bg2_valid_spans;
+  /* Per authentic row, BG2 raster scroll per playfield camera pixel (HDMA
+   * parallax); NULL when no row follows the camera. The playfield camera of
+   * these pixels and the camera the raster table was built from (a frame
+   * earlier in the game) let a held band keep its exact native pixel. */
+  const float *bg2_raster_camera_sensitivity;
+  /* Per row, how far the table was past its last whole pixel; NULL keeps
+   * floor(rate * camera)'s phase. */
+  const float *bg2_raster_subtexel;
+  int bg1_camera_x, bg2_raster_camera_x;
   const DioramaSkyboxView *skybox;
   /* Revision identifies captured pixels; dynamic marks interpolated pixels
    * that cannot reuse an immutable skybox prefilter result. */

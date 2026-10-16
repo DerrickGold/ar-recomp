@@ -237,7 +237,7 @@ void main() {
     gl.blendFuncSeparate(...this.blendFactors[mode]);
   }
 
-  geometry(id, vertices, vertexCount, indices, indexCount, blend, u, v) {
+  geometry(id, vertices, vertexCount, indices, indexCount, blend, u, v, filter = -1) {
     const gl = this.gl;
     if (gl.isContextLost() || (id && id === this.targetId)) return 0;
     const entry = this.textures[id];
@@ -250,7 +250,9 @@ void main() {
     gl.uniform1i(shader.texture, 0);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, entry?.texture || this.white);
-    gl.bindSampler(0, this.samplers[(entry?.filter ? 4 : 0) + (u === 2 ? 2 : 0) + (v === 2 ? 1 : 0)]);
+    // A filter of -1 keeps the texture's own; 0/1 override it for this draw.
+    const linear = filter >= 0 ? filter === 1 : !!entry?.filter;
+    gl.bindSampler(0, this.samplers[(linear ? 4 : 0) + (u === 2 ? 2 : 0) + (v === 2 ? 1 : 0)]);
     this.blend(blend);
     gl.bindVertexArray(this.vertexArray);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);

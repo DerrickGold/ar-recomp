@@ -520,12 +520,34 @@ bool ArGpuEffectSource_Skybox(ArGpuEffectSource *p, ArRenderDevice *device, SDL_
     SDL_EndGPURenderPass(draw);
     goto failed;
   }
+  const bool nearest = scale == SDL_SCALEMODE_NEAREST && !input->linear;
   const SDL_GPUTextureSamplerBinding sample = {
-      source, input->periodic ? (scale == SDL_SCALEMODE_NEAREST ? p->wrap_nearest_sampler : p->wrap_sampler) :
-          (scale == SDL_SCALEMODE_NEAREST ? p->nearest_sampler : p->sampler)};
+      source, input->periodic ? (nearest ? p->wrap_nearest_sampler : p->wrap_sampler) :
+          (nearest ? p->nearest_sampler : p->sampler)};
   SDL_BindGPUFragmentSamplers(draw, 0, &sample, 1);
   SDL_SetGPUScissor(draw, &scissor);
-  SDL_DrawGPUPrimitives(draw, input->index_count, 1, 0, 0);
+  const unsigned spare = (unsigned)input->mapping.meta[0];
+  if (input->row_shifts && input->row_shift_count && !input->periodic &&
+      spare < kDioramaSkyboxSourceBands && input->band < spare) {
+    /* Each run is the band itself, narrowed to its rows and moved by its
+     * shift; one pass, one uniform push per run. */
+    const float *band = input->mapping.bands[input->band];
+    u.mapping.meta[0] = (float)(spare + 1);
+    u.motion[3] = (float)spare;
+    for (unsigned i = 0; i < input->row_shift_count; ++i) {
+      const DioramaSkyboxRowShift *run = &input->row_shifts[i];
+      const float shift = run->texels / input->mapping.meta[1];
+      float *slot = u.mapping.bands[spare];
+      slot[0] = band[0] + shift;
+      slot[1] = band[1] + shift;
+      slot[2] = run->y0;
+      slot[3] = run->y1;
+      SDL_PushGPUVertexUniformData(cmd, 0, &u, sizeof(u));
+      SDL_DrawGPUPrimitives(draw, input->index_count, 1, 0, 0);
+    }
+  } else {
+    SDL_DrawGPUPrimitives(draw, input->index_count, 1, 0, 0);
+  }
   SDL_EndGPURenderPass(draw);
   return SDL_SubmitGPUCommandBuffer(cmd);
 failed:

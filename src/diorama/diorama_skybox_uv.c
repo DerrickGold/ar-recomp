@@ -355,3 +355,206 @@ bool DioramaSkyboxScroll_Place(const DioramaSkyboxScrollInput *input,
   *world_left = fminf((float)room, fmaxf(0.0f, base + rate * (float)offset));
   return true;
 }
+
+static float RowSensitivity(const float sensitivity[224], int row) {
+  return row >= 0 && row < kActRaiserAuthenticHeight ? sensitivity[row] : 0.0f;
+}
+
+/* A row's subtexel: how far its table was past its last whole pixel at the
+ * raster camera. Without one, the table steps where floor(rate * camera) does. */
+static float RowSubtexel(const float *subtexel, const float sensitivity[224],
+                         int row, int raster_camera_x) {
+  if (row < 0 || row >= kActRaiserAuthenticHeight) return 0.0f;
+  if (subtexel) return subtexel[row];
+  const float native = sensitivity[row] * (float)raster_camera_x;
+  return native - floorf(native);
+}
+
+/* The table shows the row's whole pixel at the raster camera; show the band
+ * at the presented camera instead, continuing from where it really was. */
+static float HeldShift(float rate, float subtexel, float presented,
+                       int raster_camera_x) {
+  return rate == 0.0f ? 0.0f : rate * (presented - (float)raster_camera_x) + subtexel;
+}
+
+typedef struct HeldRun {
+  int y0, y1;
+  unsigned span;
+  int anchor_rows;  /* rows of the piece whose rate the run keeps exactly */
+  float rate, subtexel;
+  bool fixed;       /* empty span or rows past the native frame: never merged */
+} HeldRun;
+
+static bool MergeHeldRuns(HeldRun *runs, unsigned *count, unsigned limit) {
+  while (*count > limit) {
+    unsigned best = *count;
+    float best_cost = INFINITY;
+    for (unsigned i = 0; i + 1 < *count; ++i) {
+      const HeldRun *a = &runs[i], *b = &runs[i + 1];
+      if (a->fixed || b->fixed || a->span != b->span) continue;
+      const int shorter = a->y1 - a->y0 < b->y1 - b->y0 ? a->y1 - a->y0 : b->y1 - b->y0;
+      const float cost = fabsf(a->rate - b->rate) * (float)shorter;
+      if (cost < best_cost) { best_cost = cost; best = i; }
+    }
+    if (best == *count) return false;
+    HeldRun *a = &runs[best];
+    const HeldRun *b = &runs[best + 1];
+    a->y1 = b->y1;
+    if (b->anchor_rows > a->anchor_rows) {
+      a->anchor_rows = b->anchor_rows;
+      a->rate = b->rate;
+      a->subtexel = b->subtexel;
+    }
+    for (unsigned i = best + 1; i + 1 < *count; ++i) runs[i] = runs[i + 1];
+    --*count;
+  }
+  return true;
+}
+
+/* Over budget: merge per-rate pieces and hand each row its remainder.
+ * Bands (runs of several rows at one rate) follow the presented camera
+ * continuously, as when they fit. Rows of a per-row gradient (perspective
+ * floors) keep their native table until the playfield is held and ease into
+ * the held rows over its first native pixels: an unheld gradient room stays
+ * exactly native, and a hold starts and ends without a step. */
+enum { kHoldBandRows = 4, kHoldRowsEaseNative = 4 };
+
+static float HeldWeight(const float sensitivity[224], int row, float ease) {
+  if (row < 0 || row >= kActRaiserAuthenticHeight) return 1.0f;
+  int y0 = row, y1 = row + 1;
+  while (y0 > 0 && sensitivity[y0 - 1] == sensitivity[row]) --y0;
+  while (y1 < kActRaiserAuthenticHeight && sensitivity[y1] == sensitivity[row]) ++y1;
+  return y1 - y0 >= kHoldBandRows ? 1.0f : ease;
+}
+
+static bool HoldRasterRows(
+    const DioramaBgValidSpanPlan *spans, int authentic_y0,
+    const float sensitivity[224], const float *subtexel, float presented,
+    int raster_camera_x, float hold_native_x,
+    DioramaBgValidSpanPlan *out, float shift_texels[kDioramaBgMaxValidSpans],
+    DioramaRasterRowShift *rows) {
+  enum { kMaxRuns = 512 };  /* rows of the tallest capture plus span ends */
+  HeldRun runs[kMaxRuns];
+  unsigned count = 0;
+  for (unsigned i = 0; i < spans->count; ++i) {
+    const DioramaBgValidSpan *span = &spans->spans[i];
+    if (span->x1 <= span->x0) {
+      if (count >= kMaxRuns) return false;
+      runs[count++] = (HeldRun){span->y0, span->y1, i, span->y1 - span->y0, 0.0f, 0.0f, true};
+      continue;
+    }
+    for (int y = span->y0; y < span->y1;) {
+      const int row = y - authentic_y0;
+      const bool native = row >= 0 && row < kActRaiserAuthenticHeight;
+      const float rate = RowSensitivity(sensitivity, row);
+      const float sub = RowSubtexel(subtexel, sensitivity, row, raster_camera_x);
+      int end = y + 1;
+      while (end < span->y1 &&
+             (end - authentic_y0 >= 0 &&
+              end - authentic_y0 < kActRaiserAuthenticHeight) == native &&
+             RowSensitivity(sensitivity, end - authentic_y0) == rate &&
+             RowSubtexel(subtexel, sensitivity, end - authentic_y0, raster_camera_x) == sub)
+        ++end;
+      if (count >= kMaxRuns) return false;
+      runs[count++] = (HeldRun){y, end, i, end - y, rate, sub, !native};
+      y = end;
+    }
+  }
+  if (!MergeHeldRuns(runs, &count, kDioramaBgMaxValidSpans - 1)) return false;
+  const float ease = fminf(1.0f, fabsf(hold_native_x) / kHoldRowsEaseNative);
+  DioramaRasterRowShift residual = {0};
+  float shifts[kDioramaBgMaxValidSpans];
+  bool moves = false;
+  for (unsigned i = 0; i < count; ++i) {
+    const HeldRun *run = &runs[i];
+    const DioramaBgValidSpan *span = &spans->spans[run->span];
+    const float anchor = (run->anchor_rows >= kHoldBandRows ? 1.0f : ease) *
+        HeldShift(run->rate, run->subtexel, presented, raster_camera_x);
+    shifts[i] = anchor;
+    const bool drawn = span->x1 > span->x0;
+    moves |= drawn && shifts[i] != 0.0f;
+    for (int y = run->y0; drawn && !run->fixed && y < run->y1; ++y) {
+      const int row = y - authentic_y0;
+      const float texels = HeldWeight(sensitivity, row, ease) *
+          HeldShift(RowSensitivity(sensitivity, row),
+                    RowSubtexel(subtexel, sensitivity, row, raster_camera_x),
+                    presented, raster_camera_x) - anchor;
+      residual.texels[row] = texels;
+      residual.active |= texels != 0.0f;
+    }
+  }
+  if (!moves && !residual.active) return false;
+  out->count = (uint8_t)count;
+  for (unsigned i = 0; i < count; ++i) {
+    const DioramaBgValidSpan *span = &spans->spans[runs[i].span];
+    out->spans[i] = (DioramaBgValidSpan){runs[i].y0, runs[i].y1, span->x0, span->x1};
+    shift_texels[i] = shifts[i];
+  }
+  *rows = residual;
+  return true;
+}
+
+bool DioramaBgValidSpanPlan_HoldRaster(
+    const DioramaBgValidSpanPlan *spans, int authentic_y0,
+    const float sensitivity[224], const float *subtexel,
+    int camera_x, int raster_camera_x, float hold_native_x,
+    DioramaBgValidSpanPlan *out, float shift_texels[kDioramaBgMaxValidSpans],
+    DioramaRasterRowShift *rows) {
+  if (!spans || !sensitivity || !out || !shift_texels ||
+      !isfinite(hold_native_x) || spans->count > kDioramaBgMaxValidSpans)
+    return false;
+  DioramaBgValidSpanPlan split = {0};
+  float shifts[kDioramaBgMaxValidSpans];
+  bool moves = false;
+  const float presented = (float)camera_x - hold_native_x;
+  for (unsigned i = 0; i < spans->count; ++i) {
+    const DioramaBgValidSpan *span = &spans->spans[i];
+    int y = span->y0;
+    while (y < span->y1) {
+      const float rate = RowSensitivity(sensitivity, y - authentic_y0);
+      const float sub = RowSubtexel(subtexel, sensitivity, y - authentic_y0, raster_camera_x);
+      int end = y + 1;
+      while (end < span->y1 && RowSensitivity(sensitivity, end - authentic_y0) == rate &&
+             RowSubtexel(subtexel, sensitivity, end - authentic_y0, raster_camera_x) == sub)
+        ++end;
+      if (split.count >= kDioramaBgMaxValidSpans)
+        return rows && HoldRasterRows(spans, authentic_y0, sensitivity, subtexel,
+                                      presented, raster_camera_x, hold_native_x,
+                                      out, shift_texels, rows);
+      split.spans[split.count] = (DioramaBgValidSpan){y, end, span->x0, span->x1};
+      const float shift = HeldShift(rate, sub, presented, raster_camera_x);
+      shifts[split.count++] = shift;
+      moves |= shift != 0.0f && span->x1 > span->x0;
+      y = end;
+    }
+  }
+  if (!moves) return false;
+  *out = split;
+  for (unsigned i = 0; i < split.count; ++i) shift_texels[i] = shifts[i];
+  if (rows) rows->active = false;
+  return true;
+}
+
+unsigned DioramaRasterRowShift_Runs(
+    const DioramaRasterRowShift *rows, int authentic_y0, int y0, int y1,
+    DioramaRasterRowRun *out, unsigned capacity) {
+  if (!rows || !rows->active || !out || y1 <= y0) return 0;
+  unsigned count = 0;
+  bool shifted = false;
+  for (int y = y0; y < y1;) {
+    const int row = y - authentic_y0;
+    const float texels = row >= 0 && row < kActRaiserAuthenticHeight ? rows->texels[row] : 0.0f;
+    int end = y + 1;
+    while (end < y1) {
+      const int next = end - authentic_y0;
+      const float t = next >= 0 && next < kActRaiserAuthenticHeight ? rows->texels[next] : 0.0f;
+      if (t != texels) break;
+      ++end;
+    }
+    if (count >= capacity) return 0;
+    out[count++] = (DioramaRasterRowRun){y, end, texels};
+    shifted |= texels != 0.0f;
+    y = end;
+  }
+  return shifted ? count : 0;
+}

@@ -1101,6 +1101,93 @@ static void CompareRoomSceneWorld(unsigned layer, uint8_t map_group,
   }
 }
 
+/* The room's persistent raster owns its HDMA channel(s) this frame: same
+ * channel, mode, target register and WRAM table as the native builder. */
+static bool RasterDmaContractMatches(ActionRoomRasterEffect effect) {
+  SrDmaStateSnapshot dma;
+  if (!QueryDmaState(&dma)) return false;
+  uint16_t table = 0x6000;
+  uint8_t target = 0x0f;
+  uint8_t mode = 2;
+  switch (effect) {
+    case kActionRoomRaster_Bg2VerticalRipple:
+      target = 0x10;
+      break;
+    case kActionRoomRaster_Bg2MosaicWave:
+      target = 0x06;
+      mode = 0;
+      break;
+    case kActionRoomRaster_Bg2AcceleratingWave:
+      table = 0x6800;
+      break;
+    case kActionRoomRaster_Bg2CameraParallaxBands:
+      table = 0x7000;
+      break;
+    default: break;
+  }
+  const SrDmaChannelState *channel = &dma.channels[2];
+  if ((channel->flags & SR_DMA_CHANNEL_HDMA_ACTIVE) == 0u ||
+      (channel->flags & SR_DMA_CHANNEL_INDIRECT) != 0u ||
+      channel->mode != mode || channel->b_address != target ||
+      channel->a_bank != 0x7e || channel->a_address != table)
+    return false;
+  if (effect == kActionRoomRaster_DualBgOpposedWaves) {
+    channel = &dma.channels[3];
+    if ((channel->flags & SR_DMA_CHANNEL_HDMA_ACTIVE) == 0u ||
+        (channel->flags & SR_DMA_CHANNEL_INDIRECT) != 0u ||
+        channel->mode != 2 || channel->b_address != 0x0d ||
+        channel->a_bank != 0x7e || channel->a_address != 0x6800)
+      return false;
+  }
+  return true;
+}
+
+/* The persistent table scanned this frame was built during the previous
+ * frame's update, from that frame's camera. Track it once per game frame. */
+static struct {
+  uint16_t frame, camera;
+  uint16_t previous_frame, previous_camera;
+  bool valid, previous_valid;
+} s_raster_camera;
+
+bool ActRaiserActionBg_LiveRasterCameraSensitivity(
+    const uint8_t *wram, size_t wram_size, float rows[kActionRoomSceneFrameHeight],
+    float subtexel[kActionRoomSceneFrameHeight], int32_t *raster_camera_x) {
+  if (!wram || wram_size <= kActRaiserWram_GameFrame + 1u || !rows || !subtexel)
+    return false;
+  const uint16_t frame = ReadWram16(wram, kActRaiserWram_GameFrame);
+  const uint16_t camera = ReadWram16(wram, kActRaiserWram_Bg1CameraX);
+  if (!s_raster_camera.valid || s_raster_camera.frame != frame) {
+    s_raster_camera.previous_frame = s_raster_camera.frame;
+    s_raster_camera.previous_camera = s_raster_camera.camera;
+    s_raster_camera.previous_valid = s_raster_camera.valid;
+    s_raster_camera.frame = frame;
+    s_raster_camera.camera = camera;
+    s_raster_camera.valid = true;
+  }
+  const int32_t table_camera = s_raster_camera.previous_valid &&
+      s_raster_camera.previous_frame == (uint16_t)(frame - 1u)
+      ? s_raster_camera.previous_camera : camera;
+  if (raster_camera_x) *raster_camera_x = table_camera;
+  const uint8_t group = wram[kActRaiserWram_MapGroup];
+  const uint8_t map = wram[kActRaiserWram_CurrentMap];
+  if (!ActRaiser_IsActionMapGroup(group) || !EnsureRoomScene(group, map) ||
+      s_observer.room_scene->raster_effect == kActionRoomRaster_None ||
+      !RasterDmaContractMatches(s_observer.room_scene->raster_effect))
+    return false;
+  const ActionRoomSceneFrameRequest request = {
+    .camera_x = ReadWram16(wram, kActRaiserWram_Bg1CameraX),
+    .camera_y = ReadWram16(wram, kActRaiserWram_Bg1CameraY),
+    .raster_camera_x = table_camera,
+    .game_frame = ReadWram16(wram, kActRaiserWram_GameFrame),
+    .animation_phase = -1,
+    .page_phase = -1,
+    .have_raster_camera_x = true,
+  };
+  return ActionRoomScene_RasterCameraSensitivity(s_observer.room_scene, &request, rows) &&
+      ActionRoomScene_RasterSubtexel(s_observer.room_scene, &request, rows, subtexel);
+}
+
 static bool SyncFrameIdentity(const uint8_t *wram, size_t wram_size) {
   if (!wram || wram_size < kActRaiserWram_GameFrame + 2)
     return false;
@@ -1161,7 +1248,6 @@ static uint16_t ResolveAuthenticActionCameraX(
 void ActRaiserActionBg_BeginRoomSceneFrame(
     const uint8_t *wram, size_t wram_size) {
   SrPpuStateSnapshot ppu;
-  SrDmaStateSnapshot dma;
   s_observer.room_frame_valid = false;
   s_observer.room_frame_uses_previous = false;
   s_observer.room_frame_raster_matches_current = true;
@@ -1252,43 +1338,9 @@ void ActRaiserActionBg_BeginRoomSceneFrame(
    * authentic comparison frame is unavailable; no approximate camera state is
    * installed. This also pins the non-default R7 `$6800` and R9 `$7000` table
    * bases. */
-  if (s_observer.room_scene->raster_effect != kActionRoomRaster_None) {
-    if (!QueryDmaState(&dma)) return;
-    uint16_t table = 0x6000;
-    uint8_t target = 0x0f;
-    uint8_t mode = 2;
-    switch (s_observer.room_scene->raster_effect) {
-      case kActionRoomRaster_Bg2VerticalRipple:
-        target = 0x10;
-        break;
-      case kActionRoomRaster_Bg2MosaicWave:
-        target = 0x06;
-        mode = 0;
-        break;
-      case kActionRoomRaster_Bg2AcceleratingWave:
-        table = 0x6800;
-        break;
-      case kActionRoomRaster_Bg2CameraParallaxBands:
-        table = 0x7000;
-        break;
-      default: break;
-    }
-    const SrDmaChannelState *channel = &dma.channels[2];
-    if ((channel->flags & SR_DMA_CHANNEL_HDMA_ACTIVE) == 0u ||
-        (channel->flags & SR_DMA_CHANNEL_INDIRECT) != 0u ||
-        channel->mode != mode || channel->b_address != target ||
-        channel->a_bank != 0x7e || channel->a_address != table)
-      return;
-    if (s_observer.room_scene->raster_effect ==
-        kActionRoomRaster_DualBgOpposedWaves) {
-      channel = &dma.channels[3];
-      if ((channel->flags & SR_DMA_CHANNEL_HDMA_ACTIVE) == 0u ||
-          (channel->flags & SR_DMA_CHANNEL_INDIRECT) != 0u ||
-          channel->mode != 2 || channel->b_address != 0x0d ||
-          channel->a_bank != 0x7e || channel->a_address != 0x6800)
-        return;
-    }
-  }
+  if (s_observer.room_scene->raster_effect != kActionRoomRaster_None &&
+      !RasterDmaContractMatches(s_observer.room_scene->raster_effect))
+    return;
   bool built_any = false;
   if (compare_room_frame && ActionRoomScene_BuildFrameState(
           s_observer.room_scene, &request, &s_observer.room_frame)) {

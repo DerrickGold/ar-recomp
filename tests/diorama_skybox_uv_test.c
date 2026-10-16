@@ -7,6 +7,7 @@
  * has silently started cropping frames it was never meant to touch.
  */
 #include "diorama_skybox_uv.h"
+#include "action/action_room_scene.h"
 #include "render/presentation_options.h"
 
 #include <math.h>
@@ -756,6 +757,297 @@ static void TestSkyboxScrollPlacement(void) {
   ExpectInt("no room declines", DioramaSkyboxScroll_Place(&in, &left), 0);
 }
 
+/* Death Heim rematches (R9): moon rows still, mountains at camera/4, hills
+ * at camera/2. Holding the playfield 8 native pixels right must move those
+ * rows by -2 and -4 texels and leave the moon and margins alone. */
+static void TestHoldRasterBands(void) {
+  float rows[224];
+  for (int y = 0; y < 224; ++y) rows[y] = y < 0x4f ? 0.0f : y < 0x8f ? 0.25f : 0.5f;
+  const DioramaBgValidSpanPlan spans = {.count = 1, .spans = {{0, 288, 0, 496}}};
+  DioramaBgValidSpanPlan out;
+  float shift[kDioramaBgMaxValidSpans];
+  ExpectInt("hold splits",
+            DioramaBgValidSpanPlan_HoldRaster(
+                &spans, 32, rows, NULL, 136, 136, 8.0f,
+                &out, shift, NULL), 1);
+  ExpectInt("hold piece count", out.count, 4);
+  ExpectInt("moon rows end", out.spans[0].y1, 32 + 0x4f);
+  ExpectInt("mountain rows end", out.spans[1].y1, 32 + 0x8f);
+  ExpectInt("hill rows end", out.spans[2].y1, 32 + 224);
+  ExpectInt("margin keeps width", out.spans[3].x1, 496);
+  ExpectFloat("moon still", shift[0], 0.0f);
+  ExpectFloat("mountains held", shift[1], -2.0f);
+  ExpectFloat("hills held", shift[2], -4.0f);
+  ExpectFloat("lower margin still", shift[3], 0.0f);
+  /* Holding right from camera 186 to 216: the view cancels the camera, the
+   * table lags a frame (raster camera = camera - 2) and the measured hold
+   * carries float noise. Every shown band keeps its stopped native pixel. */
+  for (int camera = 188; camera <= 216; camera += 2) {
+    const float hold = (float)(camera - 186) + (camera % 3 ? 0.03f : -0.04f);
+    const int raster = camera - 2;
+    ExpectInt("held split", DioramaBgValidSpanPlan_HoldRaster(
+        &spans, 32, rows, NULL, camera, raster, hold, &out, shift, NULL), 1);
+    ExpectInt("mountains keep their place",
+              fabsf((float)(raster >> 2) + shift[1] - 186 / 4.0f) < 0.02f, 1);
+    ExpectInt("hills keep their place",
+              fabsf((float)(raster >> 1) + shift[2] - 186 / 2.0f) < 0.03f, 1);
+  }
+  /* Releasing the hold while walking left: the table still holds the
+   * previous (larger) camera, yet the shown band continues from the held
+   * one without stepping back. */
+  for (int camera = 178; camera >= 170; camera -= 2) {
+    const float hold = camera > 175 ? (float)(camera - 175) : 0.0f;
+    const float presented = (float)camera - hold;
+    const bool shifted = DioramaBgValidSpanPlan_HoldRaster(
+        &spans, 32, rows, NULL, camera, camera + 2, hold, &out, shift, NULL);
+    const float shown = (float)((camera + 2) >> 1) + (shifted ? shift[2] : 0.0f);
+    ExpectInt("release follows the presented camera",
+              fabsf(shown - presented / 2.0f) < 1e-3f, 1);
+  }
+  ExpectInt("aligned still camera declines",
+            DioramaBgValidSpanPlan_HoldRaster(
+                &spans, 32, rows, NULL, 136, 136, 0.0f,
+                &out, shift, NULL), 0);
+  for (int y = 0; y < 224; ++y) rows[y] = 0.0f;
+  ExpectInt("static raster declines",
+            DioramaBgValidSpanPlan_HoldRaster(
+                &spans, 32, rows, NULL, 136, 136, 8.0f,
+                &out, shift, NULL), 0);
+  /* Without a row table, a per-row gradient cannot fit the band budget;
+   * fall back unshifted. */
+  for (int y = 0; y < 224; ++y) rows[y] = (float)y / 256.0f;
+  ExpectInt("gradient declines",
+            DioramaBgValidSpanPlan_HoldRaster(
+                &spans, 32, rows, NULL, 136, 136, 8.0f,
+                &out, shift, NULL), 0);
+}
+
+/* Shown position of one row after the hold: what the table holds plus the
+ * band's shift plus the row's own remainder. */
+static float ShownRow(float rate, int raster_camera, float band_shift, float row_texels) {
+  return floorf(rate * (float)raster_camera) + band_shift + row_texels;
+}
+
+/* Northwall (R6): five sky steps and the hills scroll at whole fractions of
+ * the camera, but its floor's 32 rows each take their own rate (2i+1)/64.
+ * Splitting per rate needs 38 bands; holding still has to move every row. */
+static void TestHoldRasterRows(void) {
+  float rows[224];
+  for (int y = 0; y < 224; ++y) {
+    rows[y] = y < 30 ? 0.5f : y < 46 ? 0.25f : y < 62 ? 0.125f : y < 70 ? 0.0625f
+        : y < 78 ? 0.03125f : y < 190 ? 0.5f : (float)(2 * (y < 222 ? y - 190 : 31) + 1) / 64.0f;
+  }
+  const DioramaBgValidSpanPlan spans = {.count = 3, .spans = {
+      {0, 64, 0, 0}, {64, 319, 64, 560}, {319, 352, 0, 0}}};
+  DioramaBgValidSpanPlan out;
+  float shift[kDioramaBgMaxValidSpans];
+  static DioramaRasterRowShift row_shift;
+  ExpectInt("per-rate split overflows without rows",
+            DioramaBgValidSpanPlan_HoldRaster(
+                &spans, 64, rows, NULL, 900, 898, 12.5f,
+                &out, shift, NULL), 0);
+  bool remainders = false;
+  for (int camera = 900; camera <= 960; camera += 3) {
+    const float hold = 4.0f + 0.37f * (float)(camera - 900);
+    const int raster = camera - 2;
+    row_shift = (DioramaRasterRowShift){.active = false};
+    ExpectInt("rows hold", DioramaBgValidSpanPlan_HoldRaster(
+        &spans, 64, rows, NULL, camera, raster, hold, &out, shift, &row_shift), 1);
+    ExpectInt("one band slot stays free", out.count <= kDioramaBgMaxValidSpans - 1, 1);
+    remainders |= row_shift.active;
+    ExpectSpan("empty top kept", &out.spans[0], 0, 64, 0, 0);
+    ExpectSpan("empty bottom kept", &out.spans[out.count - 1], 319, 352, 0, 0);
+    const float presented = (float)camera - hold;
+    for (unsigned i = 0; i < out.count; ++i) {
+      for (int y = out.spans[i].y0; y < out.spans[i].y1; ++y) {
+        if (out.spans[i].x1 <= out.spans[i].x0) continue;
+        const int row = y - 64;
+        const bool native = row >= 0 && row < 224;
+        const float rate = native ? rows[row] : 0.0f;
+        const float texels = native ? row_shift.texels[row] : 0.0f;
+        if (!native) {
+          ExpectFloat("rows past the frame stay put", shift[i], 0.0f);
+          continue;
+        }
+        if (fabsf(ShownRow(rate, raster, shift[i], texels) - rate * presented) > 1e-3f) {
+          printf("FAIL row %d at camera %d: shown %.4f, want %.4f\n", row, camera,
+                 ShownRow(rate, raster, shift[i], texels), rate * presented);
+          s_failures++;
+        }
+      }
+    }
+    /* The long hill band keeps its own slot and exact shift: effects
+     * projected through the band mapping stay on its art. */
+    bool hills = false;
+    for (unsigned i = 0; i < out.count; ++i)
+      hills |= out.spans[i].y0 == 64 + 78 && out.spans[i].y1 == 64 + 190;
+    ExpectInt("hill band kept whole", hills, 1);
+    for (int row = 78; row < 190; ++row)
+      ExpectFloat("hill rows need no remainder", row_shift.texels[row], 0.0f);
+  }
+
+  ExpectInt("floor rows carry remainders", remainders, 1);
+  /* Unheld, the bands still follow the presented camera, but the floor's
+   * per-row gradient keeps its native table; it eases in with the hold. */
+  for (int step = 0; step <= 2; ++step) {
+    const float hold = 2.0f * (float)step, ease = 0.5f * (float)step;
+    const float presented = 900.0f - hold;
+    ExpectInt("bands hold unheld", DioramaBgValidSpanPlan_HoldRaster(
+        &spans, 64, rows, NULL, 900, 898, hold, &out, shift, &row_shift), 1);
+    for (int row = 0; row < 224; ++row) {
+      const float rate = rows[row];
+      const float native = floorf(rate * 898.0f);
+      float band = 0.0f;
+      for (unsigned i = 0; i < out.count; ++i)
+        if (out.spans[i].y0 <= row + 64 && row + 64 < out.spans[i].y1) band = shift[i];
+      const float weight = row >= 190 ? ease : 1.0f;
+      if (fabsf(native + band + row_shift.texels[row] -
+                (native + weight * (rate * presented - native))) > 1e-3f) {
+        printf("FAIL ease row %d hold %.0f\n", row, hold);
+        s_failures++;
+      }
+    }
+  }
+  /* A room that is only a gradient (Bloodpool, R2) stays native unheld. */
+  float gradient[224];
+  for (int y = 0; y < 224; ++y)
+    gradient[y] = y < 127 ? 0.0f : (float)(y < 223 ? y - 126 : 96) / 128.0f;
+  ExpectInt("gradient room unheld stays native", DioramaBgValidSpanPlan_HoldRaster(
+      &spans, 64, gradient, NULL, 900, 898, 0.0f, &out, shift, &row_shift), 0);
+  ExpectInt("gradient room holds", DioramaBgValidSpanPlan_HoldRaster(
+      &spans, 64, gradient, NULL, 900, 898, 9.0f, &out, shift, &row_shift), 1);
+  ExpectInt("held again", DioramaBgValidSpanPlan_HoldRaster(
+      &spans, 64, rows, NULL, 960, 958, 26.0f, &out, shift, &row_shift), 1);
+
+  /* Runs cover one band in rows of equal remainder; a band with none draws
+   * whole. */
+  DioramaRasterRowRun runs[352];
+  const unsigned floor_runs = DioramaRasterRowShift_Runs(
+      &row_shift, 64, 64 + 186, 64 + 224, runs, 352);
+  ExpectInt("floor runs", floor_runs >= 32, 1);
+  ExpectInt("runs start at the band", runs[0].y0, 64 + 186);
+  ExpectInt("runs end at the band", runs[floor_runs - 1].y1, 64 + 224);
+  for (unsigned i = 1; i < floor_runs; ++i)
+    ExpectInt("runs are contiguous", runs[i].y0, runs[i - 1].y1);
+  ExpectInt("hills draw whole", DioramaRasterRowShift_Runs(
+      &row_shift, 64, 64 + 78, 64 + 190, runs, 352), 0);
+  ExpectInt("too many runs draw whole", DioramaRasterRowShift_Runs(
+      &row_shift, 64, 64 + 186, 64 + 224, runs, 8), 0);
+
+  /* Bands that fit the budget never use the row table (Death Heim R9). */
+  for (int y = 0; y < 224; ++y) rows[y] = y < 0x4f ? 0.0f : y < 0x8f ? 0.25f : 0.5f;
+  const DioramaBgValidSpanPlan r9 = {.count = 1, .spans = {{0, 288, 0, 496}}};
+  row_shift.active = true;
+  ExpectInt("R9 still splits", DioramaBgValidSpanPlan_HoldRaster(
+      &r9, 32, rows, NULL, 136, 136, 8.0f, &out, shift, &row_shift), 1);
+  ExpectInt("R9 piece count", out.count, 4);
+  ExpectInt("R9 needs no rows", row_shift.active, 0);
+}
+
+/* The probe must report each row's whole rate even where the table keeps
+ * only the low scroll byte, which wraps whenever the camera crosses a
+ * multiple of 256 / rate. */
+static void TestRasterCameraSensitivity(void) {
+  static ActionRoomScene scene;
+  scene.have_video_profile = true;
+  scene.have_raster_waveform = true;
+  float rows[kActionRoomSceneFrameHeight];
+  for (int camera = 0; camera < 2400; camera += 37) {
+    const ActionRoomSceneFrameRequest request = {
+      .camera_x = camera, .game_frame = (uint16_t)(1000 + camera),
+      .animation_phase = -1, .page_phase = -1};
+    scene.raster_effect = kActionRoomRaster_Bg2ParallaxPerspective;
+    ExpectInt("R6 probes",
+              ActionRoomScene_RasterCameraSensitivity(&scene, &request, rows), 1);
+    ExpectFloat("R6 sky", rows[0], 0.5f);
+    ExpectFloat("R6 high sky", rows[70], 0.03125f);
+    ExpectFloat("R6 hills", rows[150], 0.5f);
+    for (int i = 0; i < 32; ++i)
+      ExpectFloat("R6 floor row", rows[190 + i], (float)(2 * i + 1) / 64.0f);
+    scene.raster_effect = kActionRoomRaster_Bg2LowerPerspective;
+    ActionRoomScene_RasterCameraSensitivity(&scene, &request, rows);
+    ExpectFloat("R2 upper rows", rows[0x7e], 0.0f);
+    for (int i = 0; i < 96; ++i)
+      ExpectFloat("R2 floor row", rows[0x7f + i], (float)(i + 1) / 128.0f);
+    scene.raster_effect = kActionRoomRaster_Bg2CameraParallaxBands;
+    ActionRoomScene_RasterCameraSensitivity(&scene, &request, rows);
+    ExpectFloat("R9 moon", rows[0x4e], 0.0f);
+    ExpectFloat("R9 mountains", rows[0x4f], 0.25f);
+    ExpectFloat("R9 hills", rows[0x8f], 0.5f);
+    /* Aitos (R5) also has BG2 base parallax 1/2; the raster replaces it on
+     * every row, so the bands keep their own rates. */
+    scene.raster_effect = kActionRoomRaster_Bg2LayeredParallax;
+    scene.video_profile[9] = 0x12;
+    ActionRoomScene_RasterCameraSensitivity(&scene, &request, rows);
+    ExpectFloat("R5 sky", rows[0], 0.5f);
+    ExpectFloat("R5 far mountains", rows[87], 0.0625f);
+    ExpectFloat("R5 hills", rows[200], 0.5f);
+    scene.video_profile[9] = 0;
+    scene.raster_effect = kActionRoomRaster_None;
+    ExpectInt("no raster declines",
+              ActionRoomScene_RasterCameraSensitivity(&scene, &request, rows), 0);
+  }
+}
+
+/* Rows of several lines at one rate are held as bands. */
+static bool BandRow(const float rates[224], int row) {
+  int y0 = row, y1 = row + 1;
+  while (y0 > 0 && rates[y0 - 1] == rates[row]) --y0;
+  while (y1 < 224 && rates[y1] == rates[row]) ++y1;
+  return rates[row] != 0.0f && y1 - y0 >= 4;
+}
+
+/* Aitos (R5) horizon clouds scroll (2 * frame + camera / 2) >> n and
+ * Northwall's (R6) high sky (4 * frame + camera / 2) >> n: they step on their
+ * own camera phase, not where floor(rate * camera) does. Each band row's
+ * table plus its subtexel must advance by exactly its rate per camera pixel,
+ * or the held band jumps a whole texel and back. */
+static void TestRasterSubtexel(void) {
+  static ActionRoomScene scene;
+  static ActionRoomSceneFrameState state;
+  scene.have_video_profile = true;
+  scene.have_raster_waveform = true;
+  float rates[kActionRoomSceneFrameHeight], sub[kActionRoomSceneFrameHeight];
+  float previous[kActionRoomSceneFrameHeight];
+  static const struct { int effect; uint8_t base; } kBandRooms[] = {
+    {kActionRoomRaster_Bg2LayeredParallax, 0x12},     /* Aitos */
+    {kActionRoomRaster_Bg2ParallaxPerspective, 0x02}, /* Northwall */
+    {kActionRoomRaster_Bg2CameraParallaxBands, 0x01}, /* Death Heim */
+  };
+  for (unsigned room = 0; room < sizeof kBandRooms / sizeof kBandRooms[0]; ++room) {
+    scene.raster_effect = kBandRooms[room].effect;
+    scene.video_profile[9] = kBandRooms[room].base;
+    for (int frame = 1001; frame <= 1004; ++frame)
+      for (int camera = 600; camera <= 680; ++camera) {
+        const ActionRoomSceneFrameRequest request = {
+          .camera_x = camera, .game_frame = (uint32_t)frame,
+          .animation_phase = -1, .page_phase = -1};
+        ExpectInt("band rates",
+                  ActionRoomScene_RasterCameraSensitivity(&scene, &request, rates), 1);
+        ExpectInt("band subtexel", ActionRoomScene_RasterSubtexel(&scene, &request, rates, sub), 1);
+        ExpectInt("band state", ActionRoomScene_BuildFrameState(&scene, &request, &state), 1);
+        for (int row = 0; row < kActionRoomSceneFrameHeight; ++row) {
+          const float smooth = (float)state.bg_hscroll[1][row] + sub[row];
+          const float moved =
+              fmodf(smooth - previous[row] - rates[row] + 1536.0f, 1024.0f) - 512.0f;
+          if (camera > 600 && BandRow(rates, row))
+            ExpectInt("band row moves at its rate", fabsf(moved) < 1e-3f, 1);
+          previous[row] = smooth;
+        }
+      }
+  }
+  scene.video_profile[9] = 0;
+  /* Holding the band applies that phase. */
+  float rows[224], phase[224];
+  for (int y = 0; y < 224; ++y) { rows[y] = 0.125f; phase[y] = 0.5f; }
+  const DioramaBgValidSpanPlan spans = {.count = 1, .spans = {{0, 224, 0, 496}}};
+  DioramaBgValidSpanPlan out;
+  float shift[kDioramaBgMaxValidSpans];
+  ExpectInt("phased hold", DioramaBgValidSpanPlan_HoldRaster(
+      &spans, 0, rows, phase, 600, 600, 0.0f, &out, shift, NULL), 1);
+  ExpectFloat("phase shows", shift[0], 0.5f);
+}
+
 int main(void) {
   TestWorldLockedSkybox();
   TestFiniteParallaxBounds();
@@ -772,6 +1064,10 @@ int main(void) {
   TestUvRangeNeverInverts();
   TestRomUvRepeatsAcrossDisplayedWidth();
   TestSkyboxScrollPlacement();
+  TestHoldRasterBands();
+  TestHoldRasterRows();
+  TestRasterCameraSensitivity();
+  TestRasterSubtexel();
   if (s_failures) {
     printf("diorama_skybox_uv_test: %d failure(s)\n", s_failures);
     return 1;

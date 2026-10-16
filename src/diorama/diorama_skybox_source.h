@@ -15,6 +15,11 @@ typedef struct DioramaSkyboxSourceMapping {
   float bands[kDioramaSkyboxSourceBands][4]; /* U low/high, raw row low/high */
 } DioramaSkyboxSourceMapping;
 
+/* Capture rows [y0, y1) of the drawn band, sampled `texels` further right. */
+typedef struct DioramaSkyboxRowShift {
+  float y0, y1, texels;
+} DioramaSkyboxRowShift;
+
 typedef struct DioramaSkyboxSourceDraw {
   const ArRenderVertex2D *vertices;
   const int32_t *indices;
@@ -24,7 +29,16 @@ typedef struct DioramaSkyboxSourceDraw {
   float radius;
   int motion_slot; /* -1 = static, 0 = BG1, 3 = BG2, 6 = private capture */
   bool periodic;
+  /* Sample linearly whatever the texture's own filter: the blurred, magnified
+   * sky then follows sub-texel band and camera motion instead of stepping a
+   * whole source pixel (several output pixels) at a time. */
+  bool linear;
   unsigned band;
+  /* When set, the band draws as these row runs instead, each through the
+   * spare slot bands[meta[0]] (same width, so the shared fit is unchanged).
+   * Raster rows the band's single shift cannot follow use it. */
+  const DioramaSkyboxRowShift *row_shifts;
+  unsigned row_shift_count;
   DioramaSkyboxSourceMapping mapping;
 } DioramaSkyboxSourceDraw;
 #endif

@@ -214,6 +214,28 @@ bool ActionRoomScene_BuildFrameState(
     const ActionRoomSceneFrameRequest *request,
     ActionRoomSceneFrameState *state);
 
+/* How far each scanline's BG2 raster scroll moves per pixel of playfield
+ * camera. The raster writes every row's whole scroll, so this is the row's
+ * own rate, whatever BG2's base parallax ratio. Presentation uses it to hold
+ * camera-driven raster bands (HDMA parallax) still while it holds the
+ * playfield still. Returns false for rooms without a raster, or when no
+ * row's raster follows the camera. */
+bool ActionRoomScene_RasterCameraSensitivity(
+    const ActionRoomScene *scene,
+    const ActionRoomSceneFrameRequest *request,
+    float rows[kActionRoomSceneFrameHeight]);
+
+/* How far each row's integer raster scroll had advanced past its last whole
+ * pixel, 0..1, for the table built from the request's raster camera. A row
+ * whose table also follows the game clock (Aitos's horizon clouds) steps on
+ * its own camera phase, not where floor(rate * camera) does. `rates` comes
+ * from ActionRoomScene_RasterCameraSensitivity. False without a raster. */
+bool ActionRoomScene_RasterSubtexel(
+    const ActionRoomScene *scene,
+    const ActionRoomSceneFrameRequest *request,
+    const float rates[kActionRoomSceneFrameHeight],
+    float subtexel[kActionRoomSceneFrameHeight]);
+
 /* Reference two-background Mode-1 compositor for the stable-room authoring
  * baseline. Output pixels are opaque ARGB8888. It implements BG1/BG2 tile
  * priority, flips, transparency, main/subscreen membership, persistent

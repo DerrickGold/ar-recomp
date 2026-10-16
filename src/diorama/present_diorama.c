@@ -713,6 +713,12 @@ retry_projection:;
       .coverage_masks =
           slot->interp_setting_enabled ? NULL : s_diorama_coverage_masks,
       .bg2_valid_spans = &bg2_valid_spans,
+      .bg2_raster_camera_sensitivity = slot->bg2_raster_camera_sensitivity_valid
+          ? slot->bg2_raster_camera_sensitivity : NULL,
+      .bg2_raster_subtexel = slot->bg2_raster_camera_sensitivity_valid
+          ? slot->bg2_raster_subtexel : NULL,
+      .bg1_camera_x = slot->bg1_camera_x,
+      .bg2_raster_camera_x = slot->bg2_raster_camera_x,
       .skybox = &skybox_view,
       .bg2_revision = s_diorama_bg2_content_revision,
       .bg2_dynamic =

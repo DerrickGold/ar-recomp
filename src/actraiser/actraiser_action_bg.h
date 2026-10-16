@@ -17,6 +17,13 @@
 #include "snesrecomp/runner.h"
 
 uint8_t ActRaiserActionBg_TerrainProfile(void);
+/* Per authentic row, how far the current room's live BG2 raster (HDMA)
+ * scroll moves per playfield camera pixel, and how far the scanned table was
+ * past each row's last whole pixel. False when no raster is active or none of
+ * it follows the camera. */
+bool ActRaiserActionBg_LiveRasterCameraSensitivity(
+    const uint8_t *wram, size_t wram_size, float rows[224],
+    float subtexel[224], int32_t *raster_camera_x);
 
 struct DioramaRoomOverride;
 struct ActionEnvironmentScene;

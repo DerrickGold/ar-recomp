@@ -48,6 +48,7 @@ struct EditorRoomScene {
   DioramaRenderOptions options;
   DioramaBgValidSpanPlan spans;
   DioramaSkyboxView skybox;
+  float raster_sensitivity[224], raster_subtexel[224];
   const uint8_t *pixels[kDioramaPlane_Count];
   bool fill_configured[2];
   uint32_t fill_argb[2];
@@ -823,11 +824,17 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
       plan.layer[0].source == kActionBgSource_WorldMap && !plan.layer[0].wrap_world_x &&
       plan.layer[0].default_edge == kActionBgEdge_LiveWorld && !plan.layer[0].band_count &&
       plan.layer[0].horizontal_extent.mode == kActionBgExtent_Available;
+  const bool raster_follows_camera =
+      ActionRoomScene_RasterCameraSensitivity(s, &request, r->raster_sensitivity) &&
+      ActionRoomScene_RasterSubtexel(s, &request, r->raster_sensitivity, r->raster_subtexel);
   r->capture = (DioramaCapture){.skybox = &r->skybox,.width = width, .height = height, .authentic_y0 = top,
     .obj_apron = 64, .bg_apron_mask = 3, .camera_y = y,
     .bg2_camera_x = f->layer_camera_x[1], .bg2_camera_y = f->layer_camera_y[1],
     .bg2_world_height = plan.layer[1].world_height, .bg2_vertical_ratio = s->video_profile[10],
     .bg2_scroll_valid = true, .pixels = r->pixels, .bg2_valid_spans = &r->spans,
+    .bg2_raster_camera_sensitivity = raster_follows_camera ? r->raster_sensitivity : NULL,
+    .bg2_raster_subtexel = raster_follows_camera ? r->raster_subtexel : NULL,
+    .bg1_camera_x = x, .bg2_raster_camera_x = x,
     .bg_transparent_fill_configured = r->fill_configured, .bg_transparent_fill_argb = r->fill_argb,
     .vertical_bounds = playfield == 0 ? DioramaVerticalBounds_Resolve(0, room_y, world_height, top, height)
         : (DioramaVerticalBounds){0},

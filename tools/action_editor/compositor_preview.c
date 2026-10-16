@@ -15,7 +15,7 @@ IMPORT(viewport) extern int WebViewport(int set, int x, int y, int w, int h);
 IMPORT(clip) extern int WebClip(int set, int x, int y, int w, int h);
 IMPORT(clear) extern int WebClear(float r, float g, float b, float a);
 IMPORT(geometry) extern int WebGeometry(int t, const void *v, int nv, const void *i, int ni,
-                                      int blend, int u, int vv);
+                                      int blend, int u, int vv, int filter);
 IMPORT(effect) extern int WebEffect(int kind, const float *params, int count);
 IMPORT(available) extern int WebAvailable(int kind);
 
@@ -101,7 +101,9 @@ static bool Geometry(void *ctx, ArRenderTexture t, const ArRenderVertex2D *v,
   if (s && (s->flags & kArRenderDrawState_Blend)) blend = s->blend;
   int u = s && (s->flags & kArRenderDrawState_Address) ? s->address_u : 0;
   int vv = s && (s->flags & kArRenderDrawState_Address) ? s->address_v : 0;
-  return WebGeometry((int)t.value, v,nv,i,ni,blend,u,vv) != 0;
+  /* -1 keeps the texture's own filter. */
+  int filter = s && (s->flags & kArRenderDrawState_Filter) ? (int)s->filter : -1;
+  return WebGeometry((int)t.value, v,nv,i,ni,blend,u,vv,filter) != 0;
 }
 static bool Texture(void *ctx, ArRenderTexture t, const ArRenderRectF *src,
     const ArRenderRectF *dst, const ArRenderDrawState *s) {

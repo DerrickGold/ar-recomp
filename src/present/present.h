@@ -125,6 +125,14 @@ typedef struct FrameSlot {
   int32_t diorama_skybox_world_x;
   /* Sub-texel part of the skybox view's world origin, 0..1. */
   float diorama_skybox_world_x_fraction;
+  /* Per authentic row, BG2 raster scroll per playfield camera pixel; valid
+   * only while the room's HDMA parallax is live. */
+  float bg2_raster_camera_sensitivity[224];
+  /* Per row, how far that table was past its last whole pixel, 0..1. */
+  float bg2_raster_subtexel[224];
+  bool bg2_raster_camera_sensitivity_valid;
+  /* Playfield camera the live raster table was built from. */
+  int32_t bg2_raster_camera_x;
   bool diorama_skybox_periodic;
 
   /* Geometry, resolved (D3 — never call Settings_Visible*()/live globals from

@@ -51,6 +51,54 @@ typedef struct DioramaBgSourceBounds {
   bool valid;
 } DioramaBgSourceBounds;
 
+/* What a band's single shift cannot carry: each authentic row's own shift
+ * minus its band's, in texels. Only set when the bands could not split per
+ * rate within the span budget (perspective floors change rate every row). */
+typedef struct DioramaRasterRowShift {
+  bool active;
+  float texels[224];
+} DioramaRasterRowShift;
+
+/* Keep camera-driven raster bands with the presented playfield. The native
+ * HDMA scrolls some BG2 rows from the playfield camera (sensitivity: pixels
+ * per camera pixel, authentic rows 0..223), in whole pixels and from the
+ * camera of the frame that built the table (`raster_camera_x`); `subtexel`
+ * (nullable) gives how far each row's table was past its last whole pixel
+ * there, for rows whose steps are not at floor(rate * camera). Presentation
+ * shows the playfield at camera_x - hold_native_x (its edge clamp moves the
+ * view hold_native_x native pixels right). Each band is drawn at exactly
+ * rate * presented camera: continuous and current, so neither the table's
+ * pixel steps nor its one-frame lag can jump when a hold starts or ends.
+ * Splits the spans where sensitivity changes and returns each piece's texel
+ * shift. When that split would not fit, and `rows` is given, neighbouring
+ * pieces of one span merge (closest rates first, the longer piece keeping its
+ * exact rate) into at most kDioramaBgMaxValidSpans - 1 spans, leaving one
+ * band slot free for drawing rows apart, and `rows` carries the remainder.
+ * Rows of a per-row gradient (a perspective floor) keep their native table
+ * while nothing is held and ease into the held rows over the first few native
+ * pixels of hold; runs of several rows at one rate are held like any band.
+ * Returns false (outputs untouched) when no shift is needed or nothing fits;
+ * callers then draw the original spans. */
+bool DioramaBgValidSpanPlan_HoldRaster(
+    const DioramaBgValidSpanPlan *spans, int authentic_y0,
+    const float sensitivity[224], const float *subtexel,
+    int camera_x, int raster_camera_x, float hold_native_x,
+    DioramaBgValidSpanPlan *out, float shift_texels[kDioramaBgMaxValidSpans],
+    DioramaRasterRowShift *rows);
+
+/* Capture rows [y0, y1) split into runs of equal row shift. */
+typedef struct DioramaRasterRowRun {
+  int y0, y1;
+  float texels;
+} DioramaRasterRowRun;
+
+/* Returns 0 when no row in the range is shifted (or the runs would exceed
+ * `capacity`); the band then draws whole. Otherwise the runs cover the
+ * range, unshifted rows included. */
+unsigned DioramaRasterRowShift_Runs(
+    const DioramaRasterRowShift *rows, int authentic_y0, int y0, int y1,
+    DioramaRasterRowRun *out, unsigned capacity);
+
 /* Where a finite skybox view starts in BG2's world for one frame.
  *
  * The skybox is drawn larger than the playfield (it fills the viewport's

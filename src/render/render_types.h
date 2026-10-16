@@ -137,6 +137,10 @@ enum {
    * meaningful only for textured submissions and requires TextureWrap when
    * either axis selects Wrap. */
   kArRenderDrawState_Address = UINT32_C(1) << 2,
+  /* Override the texture's descriptor filter for this draw only, e.g. to
+   * sample a pixel-art texture smoothly where it is drawn magnified and
+   * moved by sub-texel amounts. Meaningful only for textured submissions. */
+  kArRenderDrawState_Filter = UINT32_C(1) << 3,
 };
 
 typedef struct ArRenderDrawState {
@@ -145,6 +149,7 @@ typedef struct ArRenderDrawState {
   ArRenderBlendMode blend;
   ArRenderTextureAddressMode address_u;
   ArRenderTextureAddressMode address_v;
+  ArRenderFilter filter;
 } ArRenderDrawState;
 
 typedef struct ArRenderTextureDesc {

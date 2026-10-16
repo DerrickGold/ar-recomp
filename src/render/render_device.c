@@ -197,8 +197,12 @@ static bool ValidDrawState(const ArRenderDrawState *state,
   if (!state) return true;
   const ArRenderDrawStateFlags known =
       kArRenderDrawState_Tint | kArRenderDrawState_Blend |
-      kArRenderDrawState_Address;
+      kArRenderDrawState_Address | kArRenderDrawState_Filter;
   if (state->flags & ~known) return false;
+  if ((state->flags & kArRenderDrawState_Filter) &&
+      (!textured || (state->filter != kArRenderFilter_Nearest &&
+                     state->filter != kArRenderFilter_Linear)))
+    return false;
   if (geometry && (state->flags & kArRenderDrawState_Tint)) return false;
   if ((state->flags & kArRenderDrawState_Tint) &&
       !NormalizedColor(state->tint))

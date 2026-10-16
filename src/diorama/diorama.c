@@ -1346,7 +1346,8 @@ static PresentationOutcome DrawDioramaSkybox(
     float blur_radius, bool rom_source,
     uint64_t source_revision, bool source_dynamic,
     const DioramaBgValidSpanPlan *valid_spans,
-    ArRenderPointF capture_offset, float subpixel_x,
+    ArRenderPointF capture_offset, float subpixel_x, const float *span_shift_texels,
+    const DioramaRasterRowShift *row_shift,
     float playfield_pixel_width, int motion_source, bool follow_camera,
     int authentic_y0, float camera_delta, float pixel_aspect,
     float face_bottom_y, float foreground_top_y,
@@ -1373,6 +1374,13 @@ static PresentationOutcome DrawDioramaSkybox(
     .blend = rom_source
         ? kArRenderBlendMode_Alpha : kArRenderBlendMode_Opaque,
   };
+  /* The captured sky is blurred and magnified several times over: sample it
+   * linearly so sub-texel band and camera motion stays smooth instead of
+   * stepping a whole source pixel at a time. */
+  if (!rom_source) {
+    draw_state.flags |= kArRenderDrawState_Filter;
+    draw_state.filter = kArRenderFilter_Linear;
+  }
   if (rom_source) {
     draw_state.flags |= kArRenderDrawState_Address;
     draw_state.address_u = kArRenderTextureAddressMode_Wrap;
@@ -1519,7 +1527,7 @@ static PresentationOutcome DrawDioramaSkybox(
     DioramaSkyboxSourceDraw draw = {
       .indices = indices, .vertex_count = 4, .index_count = 6, .blend = draw_state.blend,
       .texture_width = source_width, .texture_height = source_height,
-      .radius = blur_bound ? blur_radius : 0,
+      .radius = blur_bound ? blur_radius : 0, .linear = true,
       .motion_slot = motion_source == 4 ? 5 : motion_source == 3 ? 3 : 6,
       .mapping = {.meta = {span_count, source_width, source_height, pixel_aspect},
         .output = {out_w, out_h, capture_offset.x, capture_offset.y},
@@ -1530,8 +1538,9 @@ static PresentationOutcome DrawDioramaSkybox(
     for (unsigned i = 0; i < span_count; ++i) {
       float *band = draw.mapping.bands[i];
       DioramaSkyboxUvRange(source_width, spans[i].x0, spans[i].x1, blur_radius, &band[0], &band[1]);
-      band[0] += subpixel_u;
-      band[1] += subpixel_u;
+      const float span_u = span_shift_texels ? span_shift_texels[i] / source_width : 0.0f;
+      band[0] += subpixel_u + span_u;
+      band[1] += subpixel_u + span_u;
       if (spans[i].x1 <= spans[i].x0) band[0] = band[1] = 0;
       band[2] = spans[i].y0;
       band[3] = spans[i].y1;
@@ -1542,10 +1551,22 @@ static PresentationOutcome DrawDioramaSkybox(
         {{out_w,out_h},tint,{1,1}}, {{0,out_h},tint,{0,1}}};
       draw.vertices = verts;
       for (unsigned i = 0; i < span_count; ++i) {
+        DioramaRasterRowRun runs[SR_PPU_SURFACE_MAX_HEIGHT];
+        DioramaSkyboxRowShift row_runs[SR_PPU_SURFACE_MAX_HEIGHT];
+        const unsigned run_count = span_count < kDioramaSkyboxSourceBands
+            ? DioramaRasterRowShift_Runs(row_shift, authentic_y0, spans[i].y0, spans[i].y1,
+                                         runs, SR_PPU_SURFACE_MAX_HEIGHT)
+            : 0;
+        for (unsigned r = 0; r < run_count; ++r)
+          row_runs[r] = (DioramaSkyboxRowShift){runs[r].y0, runs[r].y1, runs[r].texels};
         draw.band = i;
+        draw.row_shifts = run_count ? row_runs : NULL;
+        draw.row_shift_count = run_count;
         if (!options->draw_resident_skybox(device, skybox_texture, &draw))
           outcome = kPresentationOutcome_CoreFailure;
       }
+      draw.row_shifts = NULL;
+      draw.row_shift_count = 0;
       if (projection) {
         projection->resident = draw.mapping;
         projection->count = span_count;
@@ -1567,7 +1588,8 @@ static PresentationOutcome DrawDioramaSkybox(
     float y1 = spans[i].y1 > vertical.capture_y1
         ? vertical.capture_y1 : spans[i].y1;
     if (y1 <= y0) continue;
-    const float centre_u = 0.5f * (band_u0[i] + band_u1[i]) + subpixel_u;
+    const float centre_u = 0.5f * (band_u0[i] + band_u1[i]) + subpixel_u +
+        (span_shift_texels ? span_shift_texels[i] / source_width : 0.0f);
     const float half_width_u = 0.5f * fitted_width / source_width;
     const float u0 = centre_u - half_width_u;
     const float u1 = centre_u + half_width_u;
@@ -1575,20 +1597,47 @@ static PresentationOutcome DrawDioramaSkybox(
         &vertical, y0);
     const float vertical_t1 = DioramaSkyboxVerticalMapping_Fraction(
         &vertical, y1);
-    const float draw_y0 = (float)out_h * vertical_t0;
-    const float draw_y1 = (float)out_h * vertical_t1;
     const float v0 = vertical.texture_v0 +
         (vertical.texture_v1 - vertical.texture_v0) * vertical_t0;
     const float v1 = vertical.texture_v0 +
         (vertical.texture_v1 - vertical.texture_v0) * vertical_t1;
-    ArRenderVertex2D verts[4] = {
-      { { 0.0f, draw_y0 },         tint, { u0, v0 } },
-      { { (float)out_w, draw_y0 }, tint, { u1, v0 } },
-      { { (float)out_w, draw_y1 }, tint, { u1, v1 } },
-      { { 0.0f, draw_y1 },         tint, { u0, v1 } },
-    };
+    /* Rows the band's shift cannot follow draw as their own quads, moved by
+     * their remainder; the band publishes one projection either way. */
+    DioramaRasterRowRun runs[SR_PPU_SURFACE_MAX_HEIGHT];
+    unsigned run_count = DioramaRasterRowShift_Runs(
+        row_shift, authentic_y0, (int)floorf(y0), (int)ceilf(y1),
+        runs, SR_PPU_SURFACE_MAX_HEIGHT);
+    if (!run_count) runs[run_count++] = (DioramaRasterRowRun){0, 0, 0.0f};
+    static ArRenderVertex2D verts[4 * SR_PPU_SURFACE_MAX_HEIGHT];
+    static int32_t piece_indices[6 * SR_PPU_SURFACE_MAX_HEIGHT];
+    int pieces = 0;
+    for (unsigned r = 0; r < run_count; ++r) {
+      const bool whole = run_count == 1 && runs[r].y1 <= runs[r].y0;
+      const float piece_y0 = whole ? y0 : fmaxf(y0, (float)runs[r].y0);
+      const float piece_y1 = whole ? y1 : fminf(y1, (float)runs[r].y1);
+      if (piece_y1 <= piece_y0) continue;
+      const float t0 = whole ? vertical_t0
+          : DioramaSkyboxVerticalMapping_Fraction(&vertical, piece_y0);
+      const float t1 = whole ? vertical_t1
+          : DioramaSkyboxVerticalMapping_Fraction(&vertical, piece_y1);
+      const float draw_y0 = (float)out_h * t0;
+      const float draw_y1 = (float)out_h * t1;
+      const float piece_v0 = vertical.texture_v0 +
+          (vertical.texture_v1 - vertical.texture_v0) * t0;
+      const float piece_v1 = vertical.texture_v0 +
+          (vertical.texture_v1 - vertical.texture_v0) * t1;
+      const float du = runs[r].texels / source_width;
+      ArRenderVertex2D *quad = &verts[4 * pieces];
+      quad[0] = (ArRenderVertex2D){ { 0.0f, draw_y0 },         tint, { u0 + du, piece_v0 } };
+      quad[1] = (ArRenderVertex2D){ { (float)out_w, draw_y0 }, tint, { u1 + du, piece_v0 } };
+      quad[2] = (ArRenderVertex2D){ { (float)out_w, draw_y1 }, tint, { u1 + du, piece_v1 } };
+      quad[3] = (ArRenderVertex2D){ { 0.0f, draw_y1 },         tint, { u0 + du, piece_v1 } };
+      for (int k = 0; k < 6; ++k) piece_indices[6 * pieces + k] = 4 * pieces + indices[k];
+      ++pieces;
+    }
+    if (!pieces) continue;
     const bool submitted = SubmitDioramaGeometry(
-        device, skybox_texture, verts, 4, indices, 6, &draw_state);
+        device, skybox_texture, verts, 4 * pieces, piece_indices, 6 * pieces, &draw_state);
     if (!submitted) {
       outcome = kPresentationOutcome_CoreFailure;
     } else if (projection && u1 > u0 && v1 > v0 &&
@@ -1801,6 +1850,9 @@ typedef struct DioramaViewGeometry {
   float aspect_x, height_scale;
   float u0, v0, u1, v1;
   int width, height;
+  /* Native pixels the horizontal edge clamp moved the playfield right on
+   * screen: the presented camera is the native camera minus this. */
+  float clamp_native_x;
 } DioramaViewGeometry;
 
 typedef struct DioramaFocalAperture {
@@ -2086,12 +2138,29 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
          ArRenderTexture_IsValid(capture->skybox->texture))) {
       DioramaRenderOptions skybox_options = *geometry->options;
       if (face_skybox) skybox_options.margin_fix = true;
+      /* Hold HDMA parallax bands with the edge-clamped playfield. */
+      DioramaBgValidSpanPlan held_spans;
+      float held_shift[kDioramaBgMaxValidSpans];
+      static DioramaRasterRowShift held_rows;
+      const float *span_shift = NULL;
+      const DioramaRasterRowShift *row_shift = NULL;
+      if (!rom_skybox && !face_skybox && skybox_valid_spans &&
+          capture->bg2_raster_camera_sensitivity &&
+          DioramaBgValidSpanPlan_HoldRaster(skybox_valid_spans, capture->authentic_y0,
+              capture->bg2_raster_camera_sensitivity, capture->bg2_raster_subtexel,
+              capture->bg1_camera_x,
+              capture->bg2_raster_camera_x, geometry->clamp_native_x,
+              &held_spans, held_shift, &held_rows)) {
+        skybox_valid_spans = &held_spans;
+        span_shift = held_shift;
+        if (held_rows.active) row_shift = &held_rows;
+      }
       const PresentationOutcome skybox = DrawDioramaSkybox(
           device, skybox_texture, skybox_apron, skybox_width, capture->height,
           geometry->width, geometry->height, both,
           both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly, rom_skybox,
           skybox_revision, skybox_dynamic, skybox_valid_spans, capture_offset,
-          skybox_subpixel_x,
+          skybox_subpixel_x, span_shift, row_shift,
           PlayfieldPixelWidth(capture, geometry, resolved, resolved_count),
           skybox_motion_source, !face_skybox && capture->bg2_scroll_valid,
           capture->authentic_y0,
@@ -2259,9 +2328,29 @@ static void PrepareDioramaView(const DioramaCapture *capture,
       if (Diorama_ClampCameraHorizontally(
               clamped, geometry->aspect_x, geometry->height_scale,
               focal->z - 0.5f, focal->rake, focal->bow,
-              &capture->horizontal_bounds))
+              &capture->horizontal_bounds)) {
+        float unclamped[16];
+        memcpy(unclamped, geometry->matrix, sizeof(unclamped));
         for (int c = 0; c < 16; ++c)
           geometry->matrix[c] += framing_weight * (clamped[c] - geometry->matrix[c]);
+        /* Measure the hold at the focal plane's centre row, in that plane's
+         * native pixels, so camera-driven raster scroll can hold with it. */
+        const float z = DioramaTiltedRowDepth(focal->z - 0.5f, focal->rake, focal->bow, 0.5f);
+        const float half = 0.5f * geometry->aspect_x;
+        ArRenderPointF before, after, left, right;
+        if (capture->width > 0 &&
+            ProjectWorldPoint(unclamped, 0.0f, 0.0f, z, geometry->width, geometry->height,
+                              &before) &&
+            ProjectWorldPoint(geometry->matrix, 0.0f, 0.0f, z, geometry->width,
+                              geometry->height, &after) &&
+            ProjectWorldPoint(geometry->matrix, -half, 0.0f, z, geometry->width,
+                              geometry->height, &left) &&
+            ProjectWorldPoint(geometry->matrix, half, 0.0f, z, geometry->width,
+                              geometry->height, &right) &&
+            fabsf(right.x - left.x) > 0.0f)
+          geometry->clamp_native_x = (after.x - before.x) * capture->width /
+                                     fabsf(right.x - left.x);
+      }
     }
   }
 }

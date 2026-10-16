@@ -415,8 +415,10 @@ typedef struct SavedTextureDrawState {
   float tint_g;
   float tint_b;
   float tint_a;
+  SDL_ScaleMode scale;
   bool blend_saved;
   bool tint_saved;
+  bool scale_saved;
 } SavedTextureDrawState;
 
 typedef struct SavedTextureAddressState {
@@ -465,11 +467,19 @@ static bool ApplyTextureDrawState(SDL_Texture *texture,
     if (saved->blend != ToSdlBlendMode(state->blend))
       saved->blend_saved = true;
   }
+  const SDL_ScaleMode desired_scale = state->filter == kArRenderFilter_Linear
+      ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST;
+  if (state->flags & kArRenderDrawState_Filter) {
+    if (!SDL_GetTextureScaleMode(texture, &saved->scale)) return false;
+    if (saved->scale != desired_scale) saved->scale_saved = true;
+  }
 
   if (saved->tint_saved &&
       (!SDL_SetTextureColorModFloat(
           texture, state->tint.r, state->tint.g, state->tint.b) ||
        !SDL_SetTextureAlphaModFloat(texture, state->tint.a)))
+    return false;
+  if (saved->scale_saved && !SDL_SetTextureScaleMode(texture, desired_scale))
     return false;
   if (saved->blend_saved &&
       !SDL_SetTextureBlendMode(texture, ToSdlBlendMode(state->blend)))
@@ -488,6 +498,8 @@ static bool RestoreTextureDrawState(SDL_Texture *texture,
   }
   if (saved->blend_saved &&
       !SDL_SetTextureBlendMode(texture, saved->blend))
+    success = false;
+  if (saved->scale_saved && !SDL_SetTextureScaleMode(texture, saved->scale))
     success = false;
   return success;
 }
