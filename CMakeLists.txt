@@ -95,6 +95,7 @@ if(AR_PPU_GPU_PROBE)
     add_executable(actraiser_ppu_gpu_probe
         tools/ppu_gpu/probe.c tools/ppu_gpu/packet.c tools/ppu_gpu/runner_events_stub.c
         src/platform/sdl/gpu_global_motion_sdl.c
+        src/render/gpu_compile_log.c
         tools/ppu_gpu/motion_checks.c src/present/presentation_frame_generation.c
         src/action/action_scene_snapshot.c src/action/action_room_scene.c src/action/action_bg_world.c
         src/actraiser/quintet_lzss.c
@@ -221,6 +222,7 @@ if(_AR_ENHANCED_TEXT)
     add_executable(actraiser_text_preview
         tools/text_preview_probe.c
         src/platform/sdl/text_preview_cli.c
+        src/render/gpu_compile_log.c
         src/platform/sdl/render_sdl.c
         src/platform/sdl/host_clock_sdl.c
         src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c
@@ -1440,6 +1442,7 @@ if(BUILD_TESTING)
         src/sim/voxels/sim_background_voxel_terrain_depth.c
         src/sim/mountains/sim_background_mountain_render.c
         src/platform/sdl/sim_cloud_effect_backend_sdl.c
+        src/render/gpu_compile_log.c
         src/platform/sdl/completion_vista_backend_sdl.c
         src/platform/sdl/sim3d_depth_pass_sdl.c
         src/platform/sdl/sim3d_depth_pass_pipelines_sdl.c
@@ -1630,7 +1633,8 @@ if(BUILD_TESTING)
     set_tests_properties(actraiser_render_sdl_upload PROPERTIES SKIP_RETURN_CODE 77)
 
     add_executable(actraiser_render_sdl_present_test
-        tests/render_sdl_present_test.c src/platform/sdl/host_clock_sdl.c)
+        tests/render_sdl_present_test.c src/platform/sdl/host_clock_sdl.c
+        src/render/gpu_compile_log.c)
     target_link_libraries(actraiser_render_sdl_present_test PRIVATE
         actraiser_performance_test_support
         actraiser_render_test_support)
@@ -2480,7 +2484,8 @@ if(BUILD_TESTING)
     add_executable(actraiser_diorama_replay
         tools/action_editor/replay_compositor.c tools/action_editor/compositor_profile_stub.c
         src/diorama/diorama_snapshot.c ${_diorama_compositor_sources}
-        src/platform/sdl/diorama_effect_backend_sdl.c src/app/session_fatal.c)
+        src/platform/sdl/diorama_effect_backend_sdl.c
+        src/render/gpu_compile_log.c src/app/session_fatal.c)
     target_include_directories(actraiser_diorama_replay PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     target_link_libraries(actraiser_diorama_replay PRIVATE actraiser_render_sdl_test_support)
@@ -2498,7 +2503,8 @@ if(BUILD_TESTING)
         src/action/action_bg_world.c src/diorama/diorama_capture_blend.c
         src/diorama/diorama_rom_backdrop.c src/diorama/diorama_snapshot.c
         snesrecomp-go/runtime/src/scene_renderer.c snesrecomp-go/runtime/src/snes/ppu.c
-        src/platform/sdl/diorama_effect_backend_sdl.c src/platform/sdl/action_effect_source_sdl.c
+        src/platform/sdl/diorama_effect_backend_sdl.c
+        src/render/gpu_compile_log.c src/platform/sdl/action_effect_source_sdl.c
         src/app/session_fatal.c src/actraiser/quintet_lzss.c
         ${SNESRECOMP_RUNNER_SAVELOAD_SOURCE})
     target_include_directories(actraiser_action_room_gpu_compare PRIVATE
@@ -3089,6 +3095,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_render_effect_backends_sdl_test
         tests/render_effect_backends_sdl_test.c
         src/platform/sdl/crt_post_sdl.c
+        src/render/gpu_compile_log.c
         src/platform/sdl/diorama_effect_backend_sdl.c
         src/platform/sdl/sim_shadow_effect_backend_sdl.c
         src/platform/sdl/sim_cloud_effect_backend_sdl.c
@@ -4000,6 +4007,7 @@ if(BUILD_TESTING)
         src/diorama/diorama_depth_shapes.c
         src/render/scene3d_math.c
         src/platform/sdl/action_scene_pass_sdl.c
+        src/render/gpu_compile_log.c
         src/platform/sdl/diorama_frame_generation_sdl.c
         src/platform/sdl/action_effect_source_sdl.c
         src/platform/sdl/gpu_block_motion_sdl.c
@@ -4012,7 +4020,8 @@ if(BUILD_TESTING)
     add_executable(actraiser_gpu_frame_handoff_test
         tests/gpu_frame_handoff_test.c
         src/platform/sdl/gpu_frame_handoff_sdl.c
-        src/platform/sdl/action_scene_pass_sdl.c)
+        src/platform/sdl/action_scene_pass_sdl.c
+        src/render/gpu_compile_log.c)
     target_include_directories(actraiser_gpu_frame_handoff_test PRIVATE src tests)
     target_link_libraries(actraiser_gpu_frame_handoff_test PRIVATE SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_gpu_frame_handoff COMMAND actraiser_gpu_frame_handoff_test)
@@ -4024,6 +4033,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_action_scene_pass_gpu_test
         tests/action_scene_pass_gpu_test.c
         src/platform/sdl/action_scene_pass_sdl.c
+        src/render/gpu_compile_log.c
         src/platform/sdl/gpu_global_motion_sdl.c
         src/present/presentation_frame_generation.c
         src/diorama/diorama_projection.c
@@ -4035,9 +4045,11 @@ if(BUILD_TESTING)
     set_tests_properties(actraiser_action_scene_pass_gpu PROPERTIES SKIP_RETURN_CODE 77)
     add_executable(actraiser_diorama_bg_gpu_test
         tests/diorama_bg_gpu_test.c src/platform/sdl/diorama_bg_gpu_sdl.c
+        src/render/gpu_compile_log.c
         src/platform/sdl/presentation_geometry_sdl.c src/render/presentation_layout.c)
     add_executable(actraiser_gpu_block_motion_test
         tests/gpu_block_motion_test.c src/platform/sdl/gpu_block_motion_sdl.c
+        src/render/gpu_compile_log.c
         src/present/presentation_frame_generation.c)
     target_include_directories(actraiser_gpu_block_motion_test PRIVATE src)
     target_link_libraries(actraiser_gpu_block_motion_test PRIVATE SDL3::SDL3 actraiser_math)
@@ -4106,6 +4118,7 @@ if(BUILD_TESTING)
         tests/sim3d_depth_pass_gpu_test.c
         src/sim/world_nav/present_world_nav_geometry.c
         src/platform/sdl/sim3d_depth_pass_sdl.c
+        src/render/gpu_compile_log.c
         src/platform/sdl/sim3d_depth_pass_pipelines_sdl.c
         src/platform/sdl/sim3d_depth_pass_meshes_sdl.c
     )
@@ -4175,6 +4188,7 @@ if(BUILD_TESTING)
         src/sim/church/church_lighting.c src/sim/church/church_exterior.c
         src/sim/voxels/sim_background_voxel_project.c
         src/platform/sdl/sim3d_depth_pass_sdl.c
+        src/render/gpu_compile_log.c
         src/platform/sdl/sim3d_depth_pass_pipelines_sdl.c
         src/platform/sdl/sim3d_depth_pass_meshes_sdl.c
         src/sim/voxels/sim_background_voxel_model_cache.c
@@ -4198,6 +4212,7 @@ if(BUILD_TESTING)
         tools/benchmark_model_projection.c
         src/sim/world_nav/present_world_nav_geometry.c
         src/platform/sdl/sim3d_depth_pass_sdl.c
+        src/render/gpu_compile_log.c
         src/platform/sdl/sim3d_depth_pass_pipelines_sdl.c
         src/platform/sdl/sim3d_depth_pass_meshes_sdl.c
         src/platform/sdl/parallel_work_sdl.c

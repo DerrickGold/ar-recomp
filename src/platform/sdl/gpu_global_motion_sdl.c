@@ -17,11 +17,14 @@ bool ArGpuGlobalMotion_Init(ArGpuGlobalMotion *p, SDL_GPUDevice *device) {
   *p = (ArGpuGlobalMotion){.device = device, .plane_count = 6};
   const GpuShaderBlobs bound = BLOBS(MotionGlobalBoundComp), cost = BLOBS(MotionGlobalCostComp), refine = BLOBS(MotionGlobalRefineComp),
       validate = BLOBS(MotionGlobalValidateComp), warp = BLOBS(MotionGlobalWarpComp);
-  p->bound = GpuShaderBlob_CreateCompute(device, &bound, 2, 0, 1, 0, 1, 64, 1);
-  p->cost = GpuShaderBlob_CreateCompute(device, &cost, 2, 1, 1, 0, 1, 64, 1);
-  p->refine = GpuShaderBlob_CreateCompute(device, &refine, 2, 1, 1, 0, 1, 64, 1);
-  p->validate = GpuShaderBlob_CreateCompute(device, &validate, 0, 1, 1, 0, 0, 64, 1);
-  p->warp = GpuShaderBlob_CreateCompute(device, &warp, 2, 1, 0, 1, 1, 8, 8);
+  p->bound = GpuShaderBlob_CreateCompute(device, &bound, "global motion bound",
+      2, 0, 1, 0, 1, 64, 1);
+  p->cost = GpuShaderBlob_CreateCompute(device, &cost, "global motion cost", 2, 1, 1, 0, 1, 64, 1);
+  p->refine = GpuShaderBlob_CreateCompute(device, &refine, "global motion refine",
+      2, 1, 1, 0, 1, 64, 1);
+  p->validate = GpuShaderBlob_CreateCompute(device, &validate, "global motion validate",
+      0, 1, 1, 0, 0, 64, 1);
+  p->warp = GpuShaderBlob_CreateCompute(device, &warp, "global motion warp", 2, 1, 0, 1, 1, 8, 8);
   const SDL_GPUBufferCreateInfo cost_buffer = {
     .usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,
     .size = 16 * 225 * sizeof(uint32_t)};

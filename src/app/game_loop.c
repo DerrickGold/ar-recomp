@@ -889,6 +889,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
       continue;
     }
 
+    RenderPreparation_PrepareSelectedFeatures(&g_render_device);
     HostInput_ApplyAnalogCamera();
     HostPpuOutput_SetAuthenticEnabled(
         HostInput_RenderComparisonCaptureRequired());

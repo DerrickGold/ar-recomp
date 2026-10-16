@@ -2,8 +2,12 @@
 
 #include <stdio.h>
 #include "render/crt_post.h"
+#include "render/gpu_compile_log.h"
 #include "app/session_fatal.h"
+#include "app/settings.h"
+#include "diorama/diorama_bg_gpu.h"
 #include "diorama/diorama_effect_backend.h"
+#include "diorama/diorama_frame_generation.h"
 #include "sim/sim3d/sim3d_depth_pass.h"
 #include "sim/sim3d/sim_cloud_effect_backend.h"
 #include "sim/sim3d/sim_shadow_effect_backend.h"
@@ -23,9 +27,32 @@ static bool ProbeBlend(ArRenderDevice *device, ArRenderTexture texture,
       vertices, 3, indices, 3, &state);
 }
 
+/* Pipelines built for the currently selected optional features. Cleared by
+ * every full preparation, which follows a device reset that released them. */
+static bool s_action_stage_prepared;
+static bool s_interpolation_prepared;
+
+void RenderPreparation_PrepareSelectedFeatures(ArRenderDevice *device) {
+  const bool diorama = Diorama_ModeIsOn();
+  const bool interpolation = Diorama_InterpolationIsOn();
+  if ((s_action_stage_prepared || !diorama) &&
+      (s_interpolation_prepared || !interpolation))
+    return;
+  if (!ArRenderDevice_IsReady(device) || SessionFatal_Requested()) return;
+  /* Diorama action stages: effect projection and background capture.
+   * Unavailable pipelines fall back to the reference path when used, as
+   * before; attempting once is what matters here. */
+  DioramaBgGpu_Prepare(device);
+  DioramaFrameGeneration_PreparePipelines(device, interpolation);
+  s_action_stage_prepared = true;
+  s_interpolation_prepared = interpolation;
+}
+
 bool RenderPreparation_Prepare(ArRenderDevice *device, RenderFeatureMask *supported) {
   if (!supported || !ArRenderDevice_IsReady(device) || SessionFatal_Requested()) return false;
   *supported = 0;
+  GpuCompileLog_BeginPreparation();
+  s_action_stage_prepared = s_interpolation_prepared = false;
   const Sim3DPreparedPipelines depth = Sim3DDepthPass_PreparePipelines(device);
   if (SessionFatal_Requested()) return false;
   if (depth.depth) *supported |= kRenderFeature_Depth;
@@ -55,6 +82,8 @@ bool RenderPreparation_Prepare(ArRenderDevice *device, RenderFeatureMask *suppor
   if (SessionFatal_Requested()) return false;
   const bool completion_clouds = completion_shader &&
       PresentWorldNav_PrepareCompletionResources();
+  RenderPreparation_PrepareSelectedFeatures(device);
+  if (SessionFatal_Requested()) return false;
 
   ArRenderTexture sample = ArRenderTexture_Invalid(), target = ArRenderTexture_Invalid();
   const ArRenderTextureDesc sample_desc = {
@@ -92,5 +121,6 @@ bool RenderPreparation_Prepare(ArRenderDevice *device, RenderFeatureMask *suppor
           *supported, caps->maximum_texture_width, caps->maximum_texture_height, depth.depth,
           depth.linear_models, depth.radial, depth.surfaces, depth.spherical_body, cloud_shader,
           shadow_shader, completion_shader, completion_clouds);
+  GpuCompileLog_EndPreparation();
   return ok && !SessionFatal_Requested();
 }

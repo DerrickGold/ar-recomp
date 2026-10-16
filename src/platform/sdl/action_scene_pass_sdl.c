@@ -77,7 +77,7 @@ bool ArGpuActionScenePass_Init(ArGpuActionScenePass *p, SDL_GPUDevice *device) {
           .front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE, .enable_depth_clip = true},
       .multisample_state = {.sample_count = SDL_GPU_SAMPLECOUNT_1},
       .target_info = {.color_target_descriptions = &color, .num_color_targets = 1}};
-    p->pipelines[i] = SDL_CreateGPUGraphicsPipeline(device, &info);
+    p->pipelines[i] = GpuShaderBlob_CreateGraphicsPipeline(device, &info, "action scene pack");
   }
   if (vs) SDL_ReleaseGPUShader(device, vs);
   if (fs) SDL_ReleaseGPUShader(device, fs);

@@ -20,10 +20,13 @@ bool ArGpuBlockMotion_Init(ArGpuBlockMotion *p, SDL_GPUDevice *device) {
                        validate = BLOBS(MotionBlockValidateComp),
                        vertices = BLOBS(MotionBlockVerticesComp), vert = BLOBS(Sim3dDepthVert),
                        frag = BLOBS(MotionBlockWarpFrag);
-  p->cost = GpuShaderBlob_CreateCompute(device, &cost, 2, 0, 1, 0, 1, 64, 1);
-  p->search = GpuShaderBlob_CreateCompute(device, &search, 0, 1, 1, 0, 1, 64, 1);
-  p->validate = GpuShaderBlob_CreateCompute(device, &validate, 0, 1, 1, 0, 0, 64, 1);
-  p->build_vertices = GpuShaderBlob_CreateCompute(device, &vertices, 0, 1, 1, 0, 1, 64, 1);
+  p->cost = GpuShaderBlob_CreateCompute(device, &cost, "block motion cost", 2, 0, 1, 0, 1, 64, 1);
+  p->search = GpuShaderBlob_CreateCompute(device, &search, "block motion search",
+      0, 1, 1, 0, 1, 64, 1);
+  p->validate = GpuShaderBlob_CreateCompute(device, &validate, "block motion validate",
+      0, 1, 1, 0, 0, 64, 1);
+  p->build_vertices = GpuShaderBlob_CreateCompute(device, &vertices, "block motion vertices",
+      0, 1, 1, 0, 1, 64, 1);
   SDL_GPUShader *vs =
       GpuShaderBlob_Create(device, &vert, "motion mesh", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
   SDL_GPUShader *fs = GpuShaderBlob_CreateFragment(device, &frag, "motion warp", 2, 1);
@@ -48,7 +51,7 @@ bool ArGpuBlockMotion_Init(ArGpuBlockMotion *p, SDL_GPUDevice *device) {
       .multisample_state = {.sample_count = SDL_GPU_SAMPLECOUNT_1},
       .target_info = {.color_target_descriptions = &color, .num_color_targets = 1}};
   if (vs && fs)
-    p->warp = SDL_CreateGPUGraphicsPipeline(device, &pipeline);
+    p->warp = GpuShaderBlob_CreateGraphicsPipeline(device, &pipeline, "block motion warp");
   if (vs)
     SDL_ReleaseGPUShader(device, vs);
   if (fs)

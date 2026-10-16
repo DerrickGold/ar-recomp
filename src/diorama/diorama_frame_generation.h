@@ -108,6 +108,11 @@ void DioramaFrameGeneration_InvalidateHistory(void);
 
 /* Drop endpoint history and backend resources. Reset is safe after a render
  * reset event; Shutdown is also used during orderly teardown. */
+/* Builds the GPU pipelines action stages use, so their driver compiles happen
+ * during preparation instead of on the first stage frame. Interpolation adds
+ * the motion-search set. Repeat calls are free; false means a pipeline is
+ * unavailable and the stage will use its reference path. */
+bool DioramaFrameGeneration_PreparePipelines(ArRenderDevice *device, bool interpolation);
 void DioramaFrameGeneration_Reset(void);
 void DioramaFrameGeneration_Shutdown(void);
 

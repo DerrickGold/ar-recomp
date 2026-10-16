@@ -1,6 +1,10 @@
 #include "present/render_preparation.h"
 #include "render/crt_post.h"
+#include "app/settings.h"
+#include "diorama/diorama_bg_gpu.h"
 #include "diorama/diorama_effect_backend.h"
+#include "diorama/diorama_frame_generation.h"
+#include "render/gpu_compile_log.h"
 #include "sim/sim3d/sim3d_depth_pass.h"
 #include "sim/sim3d/sim_cloud_effect_backend.h"
 #include "sim/sim3d/sim_shadow_effect_backend.h"
@@ -22,6 +26,23 @@ static Sim3DPreparedPipelines pipelines = {
     .surfaces = true,
     .spherical_body = true,
 };
+static bool diorama_on, interpolation_on;
+static int bg_prepares, action_prepares, interpolation_prepares;
+bool Diorama_ModeIsOn(void) { return diorama_on; }
+bool Diorama_InterpolationIsOn(void) { return diorama_on && interpolation_on; }
+bool DioramaBgGpu_Prepare(ArRenderDevice *device) {
+  (void)device;
+  ++bg_prepares;
+  return true;
+}
+bool DioramaFrameGeneration_PreparePipelines(ArRenderDevice *device, bool interpolation) {
+  (void)device;
+  ++action_prepares;
+  interpolation_prepares += interpolation;
+  return true;
+}
+void GpuCompileLog_BeginPreparation(void) {}
+void GpuCompileLog_EndPreparation(void) {}
 bool SessionFatal_Requested(void) { return fatal; }
 bool ArRenderDevice_IsReady(const ArRenderDevice *device) { return device != NULL; }
 const ArRenderCapabilities *ArRenderDevice_Capabilities(const ArRenderDevice *device) {
@@ -153,5 +174,26 @@ int main(void) {
   fail_create = false;
   assert(!RenderPreparation_Prepare(&device, &features));
   assert(creates == destroys);
+  fatal = false;
+  begin_result = kArRenderTargetBegin_Ready;
+
+  /* Optional features: nothing is built while Diorama 3D is off; switching it
+   * on builds the action-stage set once; interpolation adds its set once; a
+   * full preparation (device reset) builds the selected set again. */
+  bg_prepares = action_prepares = interpolation_prepares = 0;
+  RenderPreparation_PrepareSelectedFeatures(&device);
+  assert(bg_prepares == 0 && action_prepares == 0);
+  diorama_on = true;
+  RenderPreparation_PrepareSelectedFeatures(&device);
+  RenderPreparation_PrepareSelectedFeatures(&device);
+  assert(bg_prepares == 1 && action_prepares == 1 && interpolation_prepares == 0);
+  interpolation_on = true;
+  RenderPreparation_PrepareSelectedFeatures(&device);
+  RenderPreparation_PrepareSelectedFeatures(&device);
+  assert(action_prepares == 2 && interpolation_prepares == 1);
+  assert(RenderPreparation_Prepare(&device, &features));
+  assert(action_prepares == 3 && interpolation_prepares == 2);
+  RenderPreparation_PrepareSelectedFeatures(NULL);
+  assert(action_prepares == 3);
   puts("render preparation: PASS");
 }

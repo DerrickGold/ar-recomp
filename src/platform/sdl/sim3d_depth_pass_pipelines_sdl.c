@@ -135,7 +135,8 @@ bool CreateBodyPipeline(void) {
     .target_info = {.color_target_descriptions = &color, .num_color_targets = 1,
       .depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT, .has_depth_stencil_target = true},
   };
-  g_depth_pass.body_pipeline = SDL_CreateGPUGraphicsPipeline(g_depth_pass.device, &info);
+  g_depth_pass.body_pipeline = GpuShaderBlob_CreateGraphicsPipeline(
+      g_depth_pass.device, &info, "town globe body");
   return g_depth_pass.body_pipeline != NULL;
 }
 
@@ -185,13 +186,16 @@ bool CreateSurfacePipelines(void) {
     .target_info = {.color_target_descriptions = &color, .num_color_targets = 1,
       .depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT, .has_depth_stencil_target = true},
   };
-  g_depth_pass.surface_pipeline[0] = SDL_CreateGPUGraphicsPipeline(g_depth_pass.device, &info);
+  g_depth_pass.surface_pipeline[0] = GpuShaderBlob_CreateGraphicsPipeline(
+      g_depth_pass.device, &info, "town surface");
   info.depth_stencil_state.enable_depth_write = false;
-  g_depth_pass.surface_pipeline[1] = SDL_CreateGPUGraphicsPipeline(g_depth_pass.device, &info);
+  g_depth_pass.surface_pipeline[1] = GpuShaderBlob_CreateGraphicsPipeline(
+      g_depth_pass.device, &info, "town surface no depth write");
   info.vertex_shader = g_depth_pass.shadow_batch_vertex;
   info.fragment_shader = g_depth_pass.shadow_batch_fragment;
   info.vertex_input_state.num_vertex_attributes = 8;
-  g_depth_pass.surface_pipeline[2] = SDL_CreateGPUGraphicsPipeline(g_depth_pass.device, &info);
+  g_depth_pass.surface_pipeline[2] = GpuShaderBlob_CreateGraphicsPipeline(
+      g_depth_pass.device, &info, "town shadow batch");
   return g_depth_pass.surface_pipeline[0] && g_depth_pass.surface_pipeline[1] &&
       g_depth_pass.surface_pipeline[2];
 }
@@ -295,7 +299,8 @@ bool CreateModelPipeline(Sim3DModelPipeline variant) {
     .target_info = { .color_target_descriptions = &color, .num_color_targets = 1,
       .depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT, .has_depth_stencil_target = true },
   };
-  g_depth_pass.model_pipeline[variant] = SDL_CreateGPUGraphicsPipeline(g_depth_pass.device, &info);
+  g_depth_pass.model_pipeline[variant] = GpuShaderBlob_CreateGraphicsPipeline(
+      g_depth_pass.device, &info, "town model");
   return g_depth_pass.model_pipeline[variant] != NULL;
 }
 
@@ -478,8 +483,8 @@ static bool CreatePipeline(void) {
   info.target_info.num_color_targets = 1;
   info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
   info.target_info.has_depth_stencil_target = true;
-  g_depth_pass.pipeline = SDL_CreateGPUGraphicsPipeline(
-      g_depth_pass.device, &info);
+  g_depth_pass.pipeline = GpuShaderBlob_CreateGraphicsPipeline(
+      g_depth_pass.device, &info, "town depth");
   if (!g_depth_pass.pipeline) {
     fprintf(stderr, "[sim3d-depth] pipeline creation failed: %s\n",
             SDL_GetError());
@@ -490,8 +495,8 @@ static bool CreatePipeline(void) {
    * D32 without touching the transparent composite's color target. */
   color_target.blend_state.color_write_mask = 0;
   color_target.blend_state.enable_color_write_mask = true;
-  g_depth_pass.depth_occluder_pipeline = SDL_CreateGPUGraphicsPipeline(
-      g_depth_pass.device, &info);
+  g_depth_pass.depth_occluder_pipeline = GpuShaderBlob_CreateGraphicsPipeline(
+      g_depth_pass.device, &info, "town depth occluder");
   if (!g_depth_pass.depth_occluder_pipeline) {
     fprintf(stderr, "[sim3d-depth] depth-only pipeline creation failed: %s\n",
             SDL_GetError());
@@ -499,8 +504,8 @@ static bool CreatePipeline(void) {
   }
   color_target.blend_state.enable_color_write_mask = false;
   info.depth_stencil_state.enable_depth_write = false;
-  g_depth_pass.effect_pipeline = SDL_CreateGPUGraphicsPipeline(
-      g_depth_pass.device, &info);
+  g_depth_pass.effect_pipeline = GpuShaderBlob_CreateGraphicsPipeline(
+      g_depth_pass.device, &info, "town effect");
   if (!g_depth_pass.effect_pipeline) {
     fprintf(stderr, "[sim3d-depth] effect pipeline creation failed: %s\n",
             SDL_GetError());
@@ -514,8 +519,8 @@ static bool CreatePipeline(void) {
   if (!g_depth_pass.billboard_rim_fragment) return false;
   info.fragment_shader = g_depth_pass.billboard_rim_fragment;
   color_target.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-  g_depth_pass.billboard_rim_pipeline = SDL_CreateGPUGraphicsPipeline(
-      g_depth_pass.device, &info);
+  g_depth_pass.billboard_rim_pipeline = GpuShaderBlob_CreateGraphicsPipeline(
+      g_depth_pass.device, &info, "town billboard rim");
   if (!g_depth_pass.billboard_rim_pipeline) {
     fprintf(stderr, "[sim3d-depth] billboard rim pipeline creation failed: %s\n",
             SDL_GetError());
@@ -539,7 +544,8 @@ static bool CreatePipeline(void) {
   info.vertex_input_state.vertex_buffer_descriptions = mesh_buffers;
   info.vertex_input_state.num_vertex_buffers = 3;
   info.vertex_input_state.vertex_attributes = mesh_attributes;
-  g_depth_pass.mesh_pipeline = SDL_CreateGPUGraphicsPipeline(g_depth_pass.device, &info);
+  g_depth_pass.mesh_pipeline = GpuShaderBlob_CreateGraphicsPipeline(
+      g_depth_pass.device, &info, "town mesh");
   /* Optional optimization: unavailable split-input pipelines keep the
    * ordinary append path, without making the whole renderer unavailable. */
 
@@ -559,7 +565,8 @@ static bool CreatePipeline(void) {
     info.vertex_input_state.num_vertex_buffers = 1;
     info.vertex_input_state.vertex_attributes = spherical_attributes;
     info.vertex_input_state.num_vertex_attributes = 10;
-    g_depth_pass.spherical_pipeline = SDL_CreateGPUGraphicsPipeline(g_depth_pass.device, &info);
+    g_depth_pass.spherical_pipeline = GpuShaderBlob_CreateGraphicsPipeline(
+        g_depth_pass.device, &info, "town spherical");
   }
 
   SDL_GPUSamplerCreateInfo sampler;

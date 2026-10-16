@@ -102,7 +102,7 @@ static SDL_GPUGraphicsPipeline *Pipeline(SDL_GPUDevice *gpu, SDL_GPUShader *vs, 
                            .enable_depth_clip = true},
       .multisample_state = {.sample_count = SDL_GPU_SAMPLECOUNT_1},
       .target_info = {.color_target_descriptions = &color, .num_color_targets = 1}};
-  return SDL_CreateGPUGraphicsPipeline(gpu, &info);
+  return GpuShaderBlob_CreateGraphicsPipeline(gpu, &info, sky ? "effect skybox" : "effect draw");
 }
 
 bool ArGpuEffectSource_Init(ArGpuEffectSource *p, SDL_GPUDevice *gpu) {
@@ -111,19 +111,9 @@ bool ArGpuEffectSource_Init(ArGpuEffectSource *p, SDL_GPUDevice *gpu) {
                        shadow = BLOBS(ActionEffectShadowComp), moon = BLOBS(ActionEffectMoonComp), drawvs = BLOBS(ActionEffectDrawVert),
                        drawfs = BLOBS(ActionEffectDrawFrag), skyvs = BLOBS(ActionSkyboxVert),
                        skyfs = BLOBS(ActionSkyboxFrag);
-  /* Driver compiles happen here, on the frame that first needs them. Report
-   * each one: a slow or failing driver compile is otherwise only visible as
-   * an unexplained stall followed by the reference-path fallback. */
-  const Uint64 t0 = SDL_GetTicksNS();
-  p->project = GpuShaderBlob_CreateCompute(gpu, &project, 0, 4, 1, 0, 1, 64, 1);
-  const Uint64 t1 = SDL_GetTicksNS();
-  p->shadow = GpuShaderBlob_CreateCompute(gpu, &shadow, 0, 2, 1, 0, 1, 64, 1);
-  const Uint64 t2 = SDL_GetTicksNS();
-  p->moon = GpuShaderBlob_CreateCompute(gpu, &moon, 0, 3, 3, 0, 1, 64, 1);
-  const Uint64 t3 = SDL_GetTicksNS();
-  SDL_Log("[gpu-effect-source] compute compile ms: project=%.1f%s shadow=%.1f%s moon=%.1f%s",
-          (t1 - t0) / 1e6, p->project ? "" : "(failed)", (t2 - t1) / 1e6,
-          p->shadow ? "" : "(failed)", (t3 - t2) / 1e6, p->moon ? "" : "(failed)");
+  p->project = GpuShaderBlob_CreateCompute(gpu, &project, "effect project", 0, 4, 1, 0, 1, 64, 1);
+  p->shadow = GpuShaderBlob_CreateCompute(gpu, &shadow, "effect shadow", 0, 2, 1, 0, 1, 64, 1);
+  p->moon = GpuShaderBlob_CreateCompute(gpu, &moon, "effect moon", 0, 3, 3, 0, 1, 64, 1);
   SDL_GPUShader *vs = GpuShaderBlob_CreateWithStorage(gpu, &drawvs, "effect projection",
                                                       SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 1);
   SDL_GPUShader *fs = GpuShaderBlob_CreateFragment(gpu, &drawfs, "effect color", 0, 0);

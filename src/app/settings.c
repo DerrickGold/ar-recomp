@@ -776,9 +776,10 @@ static bool FrameLimitActive(void) {
   return g_settings.refresh_mode == kRefreshMode_Limit;
 }
 
-static bool FrameInterpolationActive(void) {
+bool Diorama_InterpolationIsOn(void) {
   return Diorama_ModeIsOn() && g_settings.gpu_interp_enabled;
 }
+static bool FrameInterpolationActive(void) { return Diorama_InterpolationIsOn(); }
 
 /* Sim-town 3D defaults (2026-07-22).
  *

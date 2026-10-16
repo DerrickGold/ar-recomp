@@ -283,8 +283,8 @@ static void ResetGpu(void) {
   memset(&s_gpu, 0, sizeof(s_gpu));
 }
 
-static bool EnsureGpu(ArRenderDevice *device, int width, int height) {
-  if (s_policy.motion == kDioramaGpuMotion_Off || s_gpu.failed) return false;
+static bool PrepareMotion(ArRenderDevice *device) {
+  if (s_gpu.failed) return false;
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   const ArSdlRenderBackend *backend = renderer ? device->context : NULL;
   /* External/legacy renderers cannot submit without also presenting their
@@ -297,7 +297,12 @@ static bool EnsureGpu(ArRenderDevice *device, int width, int height) {
     s_gpu.motion.plane_count = 8;
     s_gpu.motion.input_plane_count = 12;
   }
-  if (!s_gpu.ready) return false;
+  return s_gpu.ready;
+}
+
+static bool EnsureGpu(ArRenderDevice *device, int width, int height) {
+  if (s_policy.motion == kDioramaGpuMotion_Off || !PrepareMotion(device)) return false;
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   if (s_gpu.previous && s_gpu.current && s_gpu.output && s_gpu.motion.height == (unsigned)height && s_gpu.blocks.width == (unsigned)width)
     return true;
   SDL_DestroyTexture(s_gpu.output); s_gpu.output = NULL;
@@ -534,8 +539,8 @@ static void CaptureOwnedNative(ArRenderDevice *device, bool had_previous, int he
 /* Projection is useful without interpolation too. Initialize only its own
  * resources in that mode, not the large motion-search/capture atlas. The zero
  * candidate mask and disabled skybox slot prevent reading identity storage. */
-static bool EnsureSourceProjection(ArRenderDevice *device) {
-  if (!s_source_allowed || !s_policy.resident || s_gpu.effects_disabled) return false;
+static bool PrepareSourceProjection(ArRenderDevice *device) {
+  if (s_gpu.effects_disabled) return false;
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   const ArSdlRenderBackend *backend = renderer ? device->context : NULL;
   if (!backend || !backend->output_window || !backend->gpu_device) return false;
@@ -552,6 +557,10 @@ static bool EnsureSourceProjection(ArRenderDevice *device) {
     }
   }
   return !s_gpu.effects_disabled;
+}
+static bool EnsureSourceProjection(ArRenderDevice *device) {
+  if (!s_source_allowed || !s_policy.resident) return false;
+  return PrepareSourceProjection(device);
 }
 static SDL_GPUBuffer *SourceMotion(void) {
   return s_gpu.presented_mask ? s_gpu.motion.motion : s_gpu.identity_motion;
@@ -807,6 +816,18 @@ void DioramaFrameGeneration_InvalidateHistory(void) {
   s_last_wait_ns = 0;
   s_index_blocks_x = -1;
   s_index_blocks_y = -1;
+}
+
+bool DioramaFrameGeneration_PreparePipelines(ArRenderDevice *device, bool interpolation) {
+  const DioramaGpuPolicy policy = DioramaGpuPolicy_ForActionRooms();
+  bool ok = true;
+  if (policy.resident) ok = PrepareSourceProjection(device) && ok;
+  if (interpolation && policy.motion != kDioramaGpuMotion_Off) {
+    ok = PrepareMotion(device) && ok;
+    if (s_gpu.ready && policy.pack && !s_gpu.pack.device)
+      ok = ArGpuActionScenePass_Init(&s_gpu.pack, s_gpu.motion.device) && ok;
+  }
+  return ok;
 }
 
 void DioramaFrameGeneration_Reset(void) {

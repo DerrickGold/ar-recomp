@@ -27,10 +27,9 @@ static inline bool DioramaGpuPolicy_Is(const char *value, const char *expected) 
   return value && !strcmp(value, expected);
 }
 
-static inline DioramaGpuPolicy DioramaGpuPolicy_Resolve(unsigned group, unsigned room,
+static inline DioramaGpuPolicy DioramaGpuPolicy_ResolveAutomatic(bool automatic,
     const char *pipeline, const char *capture, const char *motion,
     const char *handoff, const char *projection) {
-  const bool automatic = group <= 255 && room <= 255 && ActRaiser_IsActionMap(group, room);
   DioramaGpuPolicy p = {0};
   if (pipeline && *pipeline && !DioramaGpuPolicy_Is(pipeline, "auto")) return p;
   p.capture = capture ?
@@ -52,8 +51,24 @@ static inline DioramaGpuPolicy DioramaGpuPolicy_Resolve(unsigned group, unsigned
   return p;
 }
 
+static inline DioramaGpuPolicy DioramaGpuPolicy_Resolve(unsigned group, unsigned room,
+    const char *pipeline, const char *capture, const char *motion,
+    const char *handoff, const char *projection) {
+  const bool automatic = group <= 255 && room <= 255 && ActRaiser_IsActionMap(group, room);
+  return DioramaGpuPolicy_ResolveAutomatic(automatic, pipeline, capture, motion, handoff,
+                                           projection);
+}
+
 static inline DioramaGpuPolicy DioramaGpuPolicy_ForRoom(unsigned group, unsigned room) {
   return DioramaGpuPolicy_Resolve(group, room, getenv("AR_GPU_PIPELINE"),
+      getenv("AR_GPU_BG_CAPTURE"), getenv("AR_GPU_BG_MOTION"),
+      getenv("AR_GPU_FRAME_HANDOFF"), getenv("AR_GPU_EFFECT_PROJECTION"));
+}
+
+/* What every action room resolves to, for preparing its pipelines before the
+ * first stage. Honors the same AR_GPU_* overrides. */
+static inline DioramaGpuPolicy DioramaGpuPolicy_ForActionRooms(void) {
+  return DioramaGpuPolicy_ResolveAutomatic(true, getenv("AR_GPU_PIPELINE"),
       getenv("AR_GPU_BG_CAPTURE"), getenv("AR_GPU_BG_MOTION"),
       getenv("AR_GPU_FRAME_HANDOFF"), getenv("AR_GPU_EFFECT_PROJECTION"));
 }

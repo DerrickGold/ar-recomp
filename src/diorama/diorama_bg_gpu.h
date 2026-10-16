@@ -9,6 +9,9 @@
 uint32_t DioramaBgGpu_Resolve(ArRenderDevice *device, const SrPpuBgPacket *packet,
     uint32_t requested_mask, ArRenderTexture textures[kDioramaPlane_Count],
     ArRenderTexture *skybox, uint32_t *changed_mask);
+/* Builds the capture decode pipeline ahead of the first stage. Repeat calls
+ * are free; false leaves the CPU path in use. */
+bool DioramaBgGpu_Prepare(ArRenderDevice *device);
 void DioramaBgGpu_Reset(ArRenderDevice *device);
 
 #endif

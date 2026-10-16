@@ -55,7 +55,8 @@ static bool EnsureNative(ArRenderDevice *device) {
   static const GpuShaderBlobs blobs = {kPpuBgCaptureCompMSL, kPpuBgCaptureCompMSLSize,
       kPpuBgCaptureCompSPV, kPpuBgCaptureCompSPVSize,
       kPpuBgCaptureCompDXIL, kPpuBgCaptureCompDXILSize};
-  s_bg.decode = GpuShaderBlob_CreateCompute(s_bg.gpu, &blobs, 0, 1, 0, 3, 1, 8, 8);
+  s_bg.decode = GpuShaderBlob_CreateCompute(s_bg.gpu, &blobs, "BG capture decode",
+      0, 1, 0, 3, 1, 8, 8);
   const SDL_GPUBufferCreateInfo packet = {.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,
       .size = sizeof(s_bg.previous->words)};
   const SDL_GPUTransferBufferCreateInfo upload = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
@@ -204,6 +205,10 @@ static bool Ensure(ArRenderDevice *device) {
   s_bg.ready = SDL_SetTextureBlendMode(s_bg.input, SDL_BLENDMODE_NONE) &&
       SDL_SetTextureScaleMode(s_bg.input, SDL_SCALEMODE_NEAREST);
   return s_bg.ready;
+}
+
+bool DioramaBgGpu_Prepare(ArRenderDevice *device) {
+  return Ensure(device);
 }
 
 static uint32_t ResolveNative(ArRenderDevice *device, const SrPpuBgPacket *p,

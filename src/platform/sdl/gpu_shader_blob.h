@@ -16,6 +16,8 @@
 #include <SDL3/SDL.h>
 #include <stdio.h>
 
+#include "render/gpu_compile_log.h"
+
 typedef struct {
   const unsigned char *msl;
   unsigned int msl_size;
@@ -80,7 +82,9 @@ static inline SDL_GPUShader *GpuShaderBlob_CreateWithStorage(
   info.num_uniform_buffers = num_uniform_buffers;
   info.num_storage_buffers = num_storage_buffers;
 
+  const Uint64 started = SDL_GetTicksNS();
   SDL_GPUShader *shader = SDL_CreateGPUShader(device, &info);
+  GpuCompileLog_Record(label, "shader", SDL_GetTicksNS() - started, shader != NULL);
   if (!shader)
     fprintf(stderr, "[gpu-fx] %s shader compile failed (%s): %s\n", label,
             GpuShaderBlob_FormatName(info.format), SDL_GetError());
@@ -103,7 +107,7 @@ static inline SDL_GPUShader *GpuShaderBlob_CreateFragment(
 }
 
 static inline SDL_GPUComputePipeline *GpuShaderBlob_CreateCompute(SDL_GPUDevice *device,
-    const GpuShaderBlobs *blobs, unsigned samplers, unsigned read_buffers,
+    const GpuShaderBlobs *blobs, const char *label, unsigned samplers, unsigned read_buffers,
     unsigned write_buffers, unsigned write_textures, unsigned uniforms,
     unsigned threads_x, unsigned threads_y) {
   SDL_GPUComputePipelineCreateInfo info = {.num_samplers = samplers,
@@ -122,7 +126,21 @@ static inline SDL_GPUComputePipeline *GpuShaderBlob_CreateCompute(SDL_GPUDevice 
     info.code = blobs->msl; info.code_size = blobs->msl_size;
     info.format = SDL_GPU_SHADERFORMAT_MSL; info.entrypoint = "main0";
   } else return NULL;
-  return SDL_CreateGPUComputePipeline(device, &info);
+  const Uint64 started = SDL_GetTicksNS();
+  SDL_GPUComputePipeline *pipeline = SDL_CreateGPUComputePipeline(device, &info);
+  GpuCompileLog_Record(label, "compute", SDL_GetTicksNS() - started, pipeline != NULL);
+  return pipeline;
+}
+
+/* Every graphics pipeline goes through here so its driver compile is timed
+ * (see render/gpu_compile_log.h). */
+static inline SDL_GPUGraphicsPipeline *GpuShaderBlob_CreateGraphicsPipeline(
+    SDL_GPUDevice *device, const SDL_GPUGraphicsPipelineCreateInfo *info,
+    const char *label) {
+  const Uint64 started = SDL_GetTicksNS();
+  SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(device, info);
+  GpuCompileLog_Record(label, "graphics", SDL_GetTicksNS() - started, pipeline != NULL);
+  return pipeline;
 }
 
 #endif /* AR_GPU_SHADER_BLOB_H */

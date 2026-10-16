@@ -841,6 +841,8 @@ int Settings_VisibleWidth(void);
 /* Diorama availability predicates, shared by the descriptor table and the
  * host render/hotkey paths so the gate has exactly one spelling (§D14). */
 bool Diorama_ModeIsOn(void);
+/* Frame interpolation is a Diorama 3D option; false whenever Diorama is off. */
+bool Diorama_InterpolationIsOn(void);
 bool Sim3D_ModeIsOn(void);
 bool Sim3D_ChurchIsOn(void);
 int Settings_ExtendedAspectX(void);
