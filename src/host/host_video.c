@@ -6,6 +6,8 @@
 #include "app/settings.h"
 #include "host/host_display.h"
 #include "platform/sdl/render_sdl.h"
+#include "platform/sdl/dev_tools_readback_sdl.h"
+#include "present/preparation_indicator.h"
 #include "present/render_preparation.h"
 #include "snesrecomp/game/types.h"
 
@@ -152,6 +154,11 @@ void HostVideo_Create(const char *title, bool hidden_capture) {
           &g_render_device, g_window, SelectGpuDriver()))
     Die("SDL GPU render backend creation failed");
   PublishActiveGpuBackend();
+  const char *indicator_capture = SDL_getenv("AR_PREPARATION_INDICATOR_CAPTURE");
+  if (indicator_capture && indicator_capture[0])
+    PreparationIndicator_SetCapture(
+        (DevToolsReadbackProvider){ArSdlDevTools_CaptureRgb24, &g_render_device},
+        indicator_capture);
   RenderFeatureMask prepared_features = 0;
   const uint64_t preparation_started = SDL_GetTicks();
   if (!RenderPreparation_Prepare(&g_render_device, &prepared_features))

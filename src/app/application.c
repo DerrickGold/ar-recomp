@@ -16,6 +16,7 @@
 #include "app/settings.h"
 #include "app/user_data_dir.h"
 #include "platform/android/android_platform.h"
+#include "present/preparation_indicator.h"
 #include "constants.h"
 #include "dev/host_runtime_diagnostics.h"
 #include "host/host_display.h"
@@ -171,6 +172,8 @@ static int Application_ParseArgs(Application *app, int argc, char **argv) {
     return 1;
   }
   fprintf(stderr, "Loaded ROM: %s (%zu bytes)\n", app->rom_path, app->rom_size);
+  /* Boot preparation shows the ROM's own HUD bar and angel while it compiles. */
+  (void)PreparationIndicator_DecodeRom(app->rom_data, app->rom_size);
   return -1;
 }
 

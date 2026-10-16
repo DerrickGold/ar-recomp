@@ -12,6 +12,8 @@ typedef struct GpuCompileLogState {
   uint64_t slowest_ns;
   const char *slowest_label;
   const char *slowest_stage;
+  GpuCompileLogObserver observer;
+  void *observer_context;
 } GpuCompileLogState;
 
 static GpuCompileLogState s_log;
@@ -29,14 +31,16 @@ void GpuCompileLog_Record(const char *label, const char *stage, uint64_t elapsed
       s_log.slowest_label = label;
       s_log.slowest_stage = stage;
     }
+    if (s_log.observer) s_log.observer(s_log.observer_context);
     if (succeeded && ms < kGpuCompileLogBootThresholdMs) return;
   }
   fprintf(stderr, "[gpu-compile] %s%s %s %.1f ms%s\n", s_log.preparing ? "" : "late ",
           stage, label, ms, succeeded ? "" : " FAILED");
 }
 
-void GpuCompileLog_BeginPreparation(void) {
-  s_log = (GpuCompileLogState){.preparing = true};
+void GpuCompileLog_BeginPreparation(GpuCompileLogObserver observer, void *context) {
+  s_log = (GpuCompileLogState){
+      .preparing = true, .observer = observer, .observer_context = context};
 }
 
 void GpuCompileLog_EndPreparation(void) {

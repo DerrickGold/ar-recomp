@@ -2935,6 +2935,12 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_render_preparation_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME actraiser_render_preparation COMMAND actraiser_render_preparation_test)
 
+    add_executable(actraiser_preparation_indicator_test
+        tests/preparation_indicator_test.c src/present/preparation_indicator.c
+        src/actraiser/quintet_lzss.c)
+    target_include_directories(actraiser_preparation_indicator_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_preparation_indicator COMMAND actraiser_preparation_indicator_test)
+
     add_executable(actraiser_present_frame_order_test
         tests/present_frame_order_test.c
         src/platform/sdl/host_clock_sdl.c

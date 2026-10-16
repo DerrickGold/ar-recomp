@@ -1,6 +1,7 @@
 #include "present/render_preparation.h"
 #include "render/crt_post.h"
 #include "app/settings.h"
+#include "present/preparation_indicator.h"
 #include "diorama/diorama_bg_gpu.h"
 #include "diorama/diorama_effect_backend.h"
 #include "diorama/diorama_frame_generation.h"
@@ -41,8 +42,26 @@ bool DioramaFrameGeneration_PreparePipelines(ArRenderDevice *device, bool interp
   interpolation_prepares += interpolation;
   return true;
 }
-void GpuCompileLog_BeginPreparation(void) {}
+static int indicator_begins, indicator_ticks, indicator_ends;
+void PreparationIndicator_Begin(ArRenderDevice *device) {
+  (void)device;
+  ++indicator_begins;
+}
+void PreparationIndicator_Tick(ArRenderDevice *device) {
+  (void)device;
+  ++indicator_ticks;
+}
+void PreparationIndicator_End(ArRenderDevice *device) {
+  (void)device;
+  ++indicator_ends;
+}
 void GpuCompileLog_EndPreparation(void) {}
+static GpuCompileLogObserver compile_observer;
+static void *compile_observer_context;
+void GpuCompileLog_BeginPreparation(GpuCompileLogObserver observer, void *context) {
+  compile_observer = observer;
+  compile_observer_context = context;
+}
 bool SessionFatal_Requested(void) { return fatal; }
 bool ArRenderDevice_IsReady(const ArRenderDevice *device) { return device != NULL; }
 const ArRenderCapabilities *ArRenderDevice_Capabilities(const ArRenderDevice *device) {
@@ -195,5 +214,18 @@ int main(void) {
   assert(action_prepares == 3 && interpolation_prepares == 2);
   RenderPreparation_PrepareSelectedFeatures(NULL);
   assert(action_prepares == 3);
+
+  /* The indicator brackets every preparation, including one ended early by a
+   * fatal request, ticks between steps, and is the compile log's observer. */
+  indicator_begins = indicator_ticks = indicator_ends = 0;
+  assert(RenderPreparation_Prepare(&device, &features));
+  assert(indicator_begins == 1 && indicator_ends == 1 && indicator_ticks >= 8);
+  const int ticks = indicator_ticks;
+  compile_observer(compile_observer_context);
+  assert(indicator_ticks == ticks + 1);
+  fatal = true;
+  assert(!RenderPreparation_Prepare(&device, &features));
+  assert(indicator_begins == 1 && indicator_ends == 1); /* fatal before Begin */
+  fatal = false;
   puts("render preparation: PASS");
 }

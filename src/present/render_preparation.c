@@ -5,6 +5,7 @@
 #include "render/gpu_compile_log.h"
 #include "app/session_fatal.h"
 #include "app/settings.h"
+#include "present/preparation_indicator.h"
 #include "diorama/diorama_bg_gpu.h"
 #include "diorama/diorama_effect_backend.h"
 #include "diorama/diorama_frame_generation.h"
@@ -25,6 +26,18 @@ static bool ProbeBlend(ArRenderDevice *device, ArRenderTexture texture,
   const ArRenderDrawState state = {.flags = kArRenderDrawState_Blend, .blend = blend};
   return ArRenderDevice_DrawGeometryWithState(device, texture,
       vertices, 3, indices, 3, &state);
+}
+
+static void TickIndicator(void *context) { PreparationIndicator_Tick(context); }
+
+/* Between preparation steps: keep the indicator moving, and close the compile
+ * log's preparation bracket if a fatal error ends preparation early. */
+static bool PreparationContinues(ArRenderDevice *device) {
+  PreparationIndicator_Tick(device);
+  if (!SessionFatal_Requested()) return true;
+  GpuCompileLog_EndPreparation();
+  PreparationIndicator_End(device);
+  return false;
 }
 
 /* Pipelines built for the currently selected optional features. Cleared by
@@ -51,39 +64,40 @@ void RenderPreparation_PrepareSelectedFeatures(ArRenderDevice *device) {
 bool RenderPreparation_Prepare(ArRenderDevice *device, RenderFeatureMask *supported) {
   if (!supported || !ArRenderDevice_IsReady(device) || SessionFatal_Requested()) return false;
   *supported = 0;
-  GpuCompileLog_BeginPreparation();
+  PreparationIndicator_Begin(device);
+  GpuCompileLog_BeginPreparation(TickIndicator, device);
   s_action_stage_prepared = s_interpolation_prepared = false;
   const Sim3DPreparedPipelines depth = Sim3DDepthPass_PreparePipelines(device);
-  if (SessionFatal_Requested()) return false;
+  if (!PreparationContinues(device)) return false;
   if (depth.depth) *supported |= kRenderFeature_Depth;
   if (depth.depth && depth.radial && depth.surfaces && depth.spherical_body)
     *supported |= kRenderFeature_ConnectedGlobe;
   if (DioramaEffectBackend_IsAvailable(device, kDioramaEffect_Blur))
     *supported |= kRenderFeature_DioramaBlur;
-  if (SessionFatal_Requested()) return false;
+  if (!PreparationContinues(device)) return false;
   if (DioramaEffectBackend_IsAvailable(device, kDioramaEffect_RimLight))
     *supported |= kRenderFeature_DioramaRim;
-  if (SessionFatal_Requested()) return false;
+  if (!PreparationContinues(device)) return false;
   if (DioramaEffectBackend_IsAvailable(device, kDioramaEffect_DofEdge))
     *supported |= kRenderFeature_DioramaDof;
-  if (SessionFatal_Requested()) return false;
+  if (!PreparationContinues(device)) return false;
   if (CrtPost_Prepare(device)) *supported |= kRenderFeature_Crt;
-  if (SessionFatal_Requested()) return false;
+  if (!PreparationContinues(device)) return false;
   /* These have equivalent ordinary draw implementations; failure to prepare
    * an acceleration shader does not mean the visual feature is unsupported. */
   const bool cloud_shader = SimCloudEffectBackend_IsAvailable(device);
-  if (SessionFatal_Requested()) return false;
+  if (!PreparationContinues(device)) return false;
   const bool shadow_shader = SimShadowEffectBackend_IsAvailable(device);
-  if (SessionFatal_Requested()) return false;
+  if (!PreparationContinues(device)) return false;
   /* Materialize the ending's custom blend pipelines at boot/reset. Lazy
    * preparation here otherwise stalls the native A-to-B reveal. The ordinary
    * globe remains usable when this optional material is unavailable. */
   const bool completion_shader = CompletionVistaBackend_IsAvailable(device);
-  if (SessionFatal_Requested()) return false;
+  if (!PreparationContinues(device)) return false;
   const bool completion_clouds = completion_shader &&
       PresentWorldNav_PrepareCompletionResources();
   RenderPreparation_PrepareSelectedFeatures(device);
-  if (SessionFatal_Requested()) return false;
+  if (!PreparationContinues(device)) return false;
 
   ArRenderTexture sample = ArRenderTexture_Invalid(), target = ArRenderTexture_Invalid();
   const ArRenderTextureDesc sample_desc = {
@@ -122,5 +136,6 @@ bool RenderPreparation_Prepare(ArRenderDevice *device, RenderFeatureMask *suppor
           depth.linear_models, depth.radial, depth.surfaces, depth.spherical_body, cloud_shader,
           shadow_shader, completion_shader, completion_clouds);
   GpuCompileLog_EndPreparation();
+  PreparationIndicator_End(device);
   return ok && !SessionFatal_Requested();
 }

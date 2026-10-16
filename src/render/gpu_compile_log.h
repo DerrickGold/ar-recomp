@@ -18,8 +18,11 @@ enum { kGpuCompileLogBootThresholdMs = 5 };
 
 void GpuCompileLog_Record(const char *label, const char *stage, uint64_t elapsed_ns,
                           bool succeeded);
-/* Brackets RenderPreparation_Prepare; End prints the summary. */
-void GpuCompileLog_BeginPreparation(void);
+/* Brackets RenderPreparation_Prepare; End prints the summary. The optional
+ * observer runs after every build recorded during preparation, which is the
+ * only point a long preparation can show that it is still working. */
+typedef void (*GpuCompileLogObserver)(void *context);
+void GpuCompileLog_BeginPreparation(GpuCompileLogObserver observer, void *context);
 void GpuCompileLog_EndPreparation(void);
 
 #endif /* AR_GPU_COMPILE_LOG_H */
