@@ -695,18 +695,14 @@ ActRaiser_PrepareSkyboxView(const SrPpuFrameTransactionContext *context,
         .pitch_bytes = width * sizeof(uint32_t),
         .pixel_byte_size = sizeof(s_diorama_skybox_pixels),
     };
-    /* Matched and Full room place the view from the playfield camera, not
-     * BG2's scroll, so the sky moves exactly when the playfield does. The
-     * whole-pixel origin goes to the scanout; the fraction is applied as a
-     * sub-texel shift when the skybox is drawn. */
+    /* Place the view from the playfield camera, not BG2's scroll, so the sky
+     * moves exactly when the playfield does. The whole-pixel origin goes to
+     * the scanout; the fraction is applied as a sub-texel shift when the
+     * skybox is drawn. */
     uint16_t travel_min, travel_max;
     float left_world = 0.0f;
     DioramaSkyboxScrollInput scroll = {
-        .mode = g_settings.diorama_skybox_scroll,
         .camera_x = ActRaiser_ReadWram16(kActRaiserWram_Bg1CameraX),
-        .ratio_numerator = g_ram[kActRaiserWram_Bg2HorizontalNumerator],
-        .ratio_denominator = g_ram[kActRaiserWram_Bg2HorizontalDenominator],
-        .playfield_to_sky_scale = Diorama_SkyboxPlayfieldScale(),
         .world_width = sky_layer->world_width,
         .view_width = (int)width,
     };

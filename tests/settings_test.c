@@ -116,7 +116,7 @@ static void TestDefaultsAndMetadata(void) {
    * quick use adds an independent QoL toggle. Save editing adds Apply and restart. */
   /* One completion scene switch plus nine internal effect overrides; one button-prompt representation preference.
    * Diorama adds its skybox scroll choice. */
-  const int expected_descriptors = 321;
+  const int expected_descriptors = 320;
   if (g_setting_desc_count != expected_descriptors)
     fprintf(stderr, "Setting descriptors: expected %d, got %d\n",
             expected_descriptors, g_setting_desc_count);

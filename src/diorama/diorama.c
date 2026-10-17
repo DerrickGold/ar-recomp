@@ -1335,10 +1335,6 @@ static ArRenderTexture BuildDioramaSkyboxPrefilter(
   return target;
 }
 
-static float s_skybox_playfield_scale;
-
-float Diorama_SkyboxPlayfieldScale(void) { return s_skybox_playfield_scale; }
-
 static PresentationOutcome DrawDioramaSkybox(
     ArRenderDevice *device, ArRenderTexture skybox_texture,
     int obj_apron, int snes_width, int snes_height,
@@ -1348,7 +1344,7 @@ static PresentationOutcome DrawDioramaSkybox(
     const DioramaBgValidSpanPlan *valid_spans,
     ArRenderPointF capture_offset, float subpixel_x, const float *span_shift_texels,
     const DioramaRasterRowShift *row_shift,
-    float playfield_pixel_width, int motion_source, bool follow_camera,
+    int motion_source, bool follow_camera,
     int authentic_y0, float camera_delta, float pixel_aspect,
     float face_bottom_y, float foreground_top_y,
     DioramaSkyboxProjection *projection, const DioramaRenderOptions *options) {
@@ -1494,11 +1490,6 @@ static PresentationOutcome DrawDioramaSkybox(
   const float fitted_width = DioramaSkyboxVerticalMapping_FitAspect(
       &vertical, source_height, available_width,
       out_h > 0 ? (float)out_w / out_h : 0.0f, pixel_aspect);
-  /* fitted_width texels span the output, so a texel is out_w/fitted_width
-   * output pixels wide. */
-  if (!rom_source && playfield_pixel_width > 0.0f && fitted_width > 0.0f &&
-      out_w > 0)
-    s_skybox_playfield_scale = playfield_pixel_width * fitted_width / out_w;
   const float subpixel_u = rom_source ? 0.0f : subpixel_x / source_width;
   if (face_bottom_y > 0.0f && isfinite(foreground_top_y) && fitted_width > 0.0f) {
     /* The horizontal fit makes the faces larger than the water plane. Keep
@@ -1996,25 +1987,6 @@ static float DeathHeimCloudTop(const DioramaCapture *capture,
   return NAN;
 }
 
-/* Output pixels one native playfield pixel covers at BG1's centre row. */
-static float PlayfieldPixelWidth(const DioramaCapture *capture,
-    const DioramaViewGeometry *geometry, const DioramaResolvedLayer *resolved,
-    int resolved_count) {
-  if (capture->width <= 0) return 0.0f;
-  for (int i = 0; i < resolved_count; i++) {
-    const DioramaResolvedLayer *layer = &resolved[i];
-    if (layer->plane != SR_PPU_OVERLAY_BG1 || !layer->alpha) continue;
-    const float z = DioramaTiltedRowDepth(layer->z - 0.5f, layer->rake, layer->bow, 0.5f);
-    ArRenderPointF left, right;
-    if (!ProjectWorldPoint(geometry->matrix, -0.5f * geometry->aspect_x, 0.0f, z,
-            geometry->width, geometry->height, &left) ||
-        !ProjectWorldPoint(geometry->matrix, 0.5f * geometry->aspect_x, 0.0f, z,
-            geometry->width, geometry->height, &right)) return 0.0f;
-    return fabsf(right.x - left.x) / capture->width;
-  }
-  return 0.0f;
-}
-
 /* The skybox draws first. Missing ROM art falls back to current captured
  * BG2; failed renderer restoration is a core failure, never a fallback. */
 static PresentationOutcome DrawResolvedDioramaSkybox(
@@ -2161,7 +2133,6 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
           both ? kSkyboxBlurRadiusBoth : kSkyboxBlurRadiusOnly, rom_skybox,
           skybox_revision, skybox_dynamic, skybox_valid_spans, capture_offset,
           skybox_subpixel_x, span_shift, row_shift,
-          PlayfieldPixelWidth(capture, geometry, resolved, resolved_count),
           skybox_motion_source, !face_skybox && capture->bg2_scroll_valid,
           capture->authentic_y0,
           (geometry->world_y_offset + geometry->bg2_world_y_offset) *

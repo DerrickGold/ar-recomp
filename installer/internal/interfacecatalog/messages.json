@@ -2925,15 +2925,6 @@
     ]
   },
   {
-    "key": "setting.diorama_skybox_scroll.help",
-    "text": [
-      "How far the skybox travels as the level scrolls. Original: it moves with BG2 and holds still near the level's ends. Matched: BG2's own parallax beside the playfield. Full room: all of BG2 across the level. Matched and Full room stop exactly when the playfield stops.",
-      "Distance parcourue par le ciel pendant le défilement. Original : il suit BG2 et s'immobilise près des extrémités du niveau. Ajusté : la parallaxe d'origine de BG2 à côté du décor jouable. Pièce entière : tout BG2 sur la longueur du niveau. Ajusté et Pièce entière s'arrêtent exactement avec le décor jouable.",
-      "Wie weit sich die Skybox beim Scrollen bewegt. Original: Sie folgt BG2 und bleibt nahe den Levelenden stehen. Angepasst: die ursprüngliche BG2-Parallaxe neben dem Spielfeld. Ganzer Raum: ganz BG2 über das Level verteilt. Angepasst und Ganzer Raum halten genau mit dem Spielfeld an.",
-      "スクロール時にスカイボックスが動く量。オリジナル：BG2に合わせて動き、ステージの端付近では止まります。一致：プレイフィールドに対するBG2本来の視差。全体：ステージ全体でBG2全体を使います。一致と全体はプレイフィールドと同時に止まります。"
-    ]
-  },
-  {
     "key": "setting.diorama_margin_fix.help",
     "text": [
       "Fixes the black wedge at a level's start/end: pads captured layers to the full widescreen budget, fills the frame's edge gaps with the scene backdrop instead of black, and crops the skybox to BG2's valid span. Off restores the previous behaviour for comparison.",
@@ -4859,10 +4850,6 @@
   {"key":"setting.diorama_skybox.value.0","text":["Off","Désactivé","Aus","オフ"]},
   {"key":"setting.diorama_skybox.value.1","text":["Skybox only","Ciel panoramique seul","Nur Skybox","スカイボックスのみ"]},
   {"key":"setting.diorama_skybox.value.2","text":["Plane + skybox","Plan + ciel panoramique","Ebene + Skybox","平面＋スカイボックス"]},
-  {"key":"setting.diorama_skybox_scroll.label","text":["Skybox scroll","Défilement du ciel","Skybox-Scrollen","スカイボックスのスクロール"]},
-  {"key":"setting.diorama_skybox_scroll.value.0","text":["Original","Original","Original","オリジナル"]},
-  {"key":"setting.diorama_skybox_scroll.value.1","text":["Matched","Ajusté","Angepasst","一致"]},
-  {"key":"setting.diorama_skybox_scroll.value.2","text":["Full room","Pièce entière","Ganzer Raum","全体"]},
   {"key":"setting.diorama_margin_fix.label","text":["Edge margin fix","Correction des marges","Randkorrektur","端の余白補正"]},
   {"key":"setting.diorama_shoebox.label","text":["Shoebox walls","Parois du diorama","Dioramawände","ジオラマの壁"]},
   {"key":"setting.diorama_tilt_y_mrad.label","text":["Camera yaw","Rotation de caméra","Kameradrehung","カメラのヨー"]},

@@ -690,19 +690,16 @@ static void TestWorldLockedSkybox(void) {
       degenerate, 0, NAN, 1, .5f, .5f, &x, &y), 0);
 }
 
-/* Fillmore act 1, measured: the fitted playfield camera travels 120..3720,
- * BG2 = BG1/2 over a 2304-wide world, and the 496-wide view is drawn about
- * 1/0.745 the size of the playfield on screen. */
+/* Fillmore act 1, measured: the fitted playfield camera travels 120..3720
+ * over BG2's 2304-wide world, seen through a 496-wide view. */
 static void TestSkyboxScrollPlacement(void) {
   DioramaSkyboxScrollInput in = {
-    .mode = kDioramaSkyScroll_FullRoom, .camera_x = 120,
-    .camera_min = 120, .camera_max = 3720,
-    .ratio_numerator = 1, .ratio_denominator = 2,
-    .playfield_to_sky_scale = 0.745f, .world_width = 2304, .view_width = 496,
+    .camera_x = 120, .camera_min = 120, .camera_max = 3720,
+    .world_width = 2304, .view_width = 496,
   };
   float left = -1.0f;
-  /* Full room: BG2's whole width across the travel, ends exactly at its edges,
-   * so nothing pins while the playfield still moves. */
+  /* BG2's whole width across the travel, ending exactly at its edges, so
+   * nothing pins while the playfield still moves. */
   ExpectInt("full room places", DioramaSkyboxScroll_Place(&in, &left), 1);
   ExpectFloat("full room starts at the left edge", left, 0.0f);
   in.camera_x = 3720;
@@ -715,41 +712,11 @@ static void TestSkyboxScrollPlacement(void) {
   in.camera_x = 4000;
   DioramaSkyboxScroll_Place(&in, &left);
   ExpectFloat("holds past the right stop", left, 1808.0f);
+  in.camera_x = 0;
+  DioramaSkyboxScroll_Place(&in, &left);
+  ExpectFloat("holds past the left stop", left, 0.0f);
 
-  /* Matched: native 1/2 parallax at the playfield's scale, centred so the
-   * unused BG2 is split between both ends. */
-  in.mode = kDioramaSkyScroll_Matched;
-  const float rate = 0.5f * 0.745f;
-  const float base = 0.5f * (1808.0f - rate * 3600.0f);
-  in.camera_x = 120;
-  DioramaSkyboxScroll_Place(&in, &left);
-  ExpectFloat("matched starts centred", left, base);
-  in.camera_x = 122;
-  float next = 0.0f;
-  DioramaSkyboxScroll_Place(&in, &next);
-  /* A difference of two values near 233; compare at float precision there. */
-  ExpectInt("matched moves at the scaled parallax",
-            fabsf((next - left) - 2.0f * rate) < 1e-4f, 1);
-  in.camera_x = 3720;
-  DioramaSkyboxScroll_Place(&in, &left);
-  ExpectFloat("matched ends centred", left, base + rate * 3600.0f);
-  /* Unknown scale falls back to the native ratio; a larger one is capped at
-   * the room so the view never reaches an edge early. */
-  in.playfield_to_sky_scale = 0.0f;
-  in.camera_x = 120;
-  DioramaSkyboxScroll_Place(&in, &left);
-  ExpectFloat("unmeasured scale uses the native ratio", left, 4.0f);
-  in.playfield_to_sky_scale = 2.0f;
-  DioramaSkyboxScroll_Place(&in, &left);
-  ExpectFloat("fast scale is capped at the room", left, 0.0f);
-
-  /* Original placement stays with the caller. */
-  in.mode = kDioramaSkyScroll_Original;
-  ExpectInt("original declines", DioramaSkyboxScroll_Place(&in, &left), 0);
-  in.mode = kDioramaSkyScroll_Matched;
-  in.ratio_numerator = 0;
-  ExpectInt("no native parallax declines", DioramaSkyboxScroll_Place(&in, &left), 0);
-  in.ratio_numerator = 1;
+  /* Without travel or room, the caller's BG2 placement stays. */
   in.camera_max = in.camera_min;
   ExpectInt("no travel declines", DioramaSkyboxScroll_Place(&in, &left), 0);
   in.camera_max = 3720;

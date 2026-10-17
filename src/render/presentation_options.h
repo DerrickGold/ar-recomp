@@ -16,15 +16,4 @@ typedef enum {
   kDioramaSky_Count,
 } DioramaSkyMode;
 
-/* How far a finite captured skybox travels as the playfield camera scrolls.
- * Original moves it 1:1 with BG2's scroll and pins it at BG2's world edges.
- * Matched moves it at BG2's native parallax as seen beside the playfield.
- * Full room spreads BG2's whole width across the playfield's travel. */
-typedef enum {
-  kDioramaSkyScroll_Original = 0,
-  kDioramaSkyScroll_Matched = 1,
-  kDioramaSkyScroll_FullRoom = 2,
-  kDioramaSkyScroll_Count,
-} DioramaSkyScroll;
-
 #endif /* AR_PRESENTATION_OPTIONS_H */

@@ -332,27 +332,11 @@ bool DioramaSkyboxWorldPoint(const float m[16], float z,
 bool DioramaSkyboxScroll_Place(const DioramaSkyboxScrollInput *input,
                                float *world_left) {
   if (!input || !world_left) return false;
-  if (input->mode != kDioramaSkyScroll_Matched &&
-      input->mode != kDioramaSkyScroll_FullRoom)
-    return false;
   const int travel = input->camera_max - input->camera_min;
   const int room = input->world_width - input->view_width;
   if (travel <= 0 || room <= 0) return false;
-  const float fit = (float)room / (float)travel;
-  float rate = fit;
-  if (input->mode == kDioramaSkyScroll_Matched) {
-    if (input->ratio_numerator <= 0 || input->ratio_denominator <= 0)
-      return false;
-    const float scale = input->playfield_to_sky_scale > 0.0f &&
-        isfinite(input->playfield_to_sky_scale)
-        ? input->playfield_to_sky_scale : 1.0f;
-    rate = fminf(fit, (float)input->ratio_numerator /
-                          (float)input->ratio_denominator * scale);
-  }
-  /* A slower sky leaves part of BG2 unused; split it between both ends. */
-  const float base = 0.5f * ((float)room - rate * (float)travel);
   const int offset = ClampInt(input->camera_x - input->camera_min, 0, travel);
-  *world_left = fminf((float)room, fmaxf(0.0f, base + rate * (float)offset));
+  *world_left = (float)room * (float)offset / (float)travel;
   return true;
 }
 

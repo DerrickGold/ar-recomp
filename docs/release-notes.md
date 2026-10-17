@@ -7,9 +7,8 @@ with an early Android preview for testers.
 
 ## Presentation
 
-- Add **Skybox scroll** choices for diorama mode: **Original** (the default),
-  **Matched** for native background parallax, and **Full room** to spread the
-  background across the level's camera travel.
+- Spread the diorama skybox across the level's camera travel, so the sky
+  stops exactly when the foreground does instead of running ahead of it.
 - Smooth layered background scrolling in Aitos, Northwall and Death Heim,
   fixing jumps and drift when the camera stops or the foreground reaches
   a level's edge.

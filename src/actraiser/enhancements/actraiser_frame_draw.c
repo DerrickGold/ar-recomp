@@ -11,7 +11,7 @@
  * hands out a copy. */
 static SrPpuSurfaceView s_live_diorama_skybox;
 static int32_t s_live_diorama_skybox_world_x;
-/* Sub-texel remainder of the view's world origin (Matched / Full room). */
+/* Sub-texel remainder of the view's world origin. */
 static float s_live_diorama_skybox_world_x_fraction;
 static float s_pending_diorama_skybox_world_x_fraction;
 static bool s_live_diorama_skybox_periodic;
