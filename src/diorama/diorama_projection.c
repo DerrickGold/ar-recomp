@@ -198,6 +198,68 @@ bool Diorama_ClampCameraHorizontally(
   return true;
 }
 
+bool Diorama_FitCameraToCapture(
+    float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow,
+    const DioramaHorizontalBounds *world,
+    float capture_left, float capture_right) {
+  if (!isfinite(capture_left) || !isfinite(capture_right) ||
+      capture_left >= capture_right ||
+      !CameraProjectionValid(matrix, aspect_x, height_scale, z_world, rake, bow))
+    return false;
+  /* A captured edge only binds where the world continues past it. Where a
+   * finite world edge lies inside the capture it stands in for that side, so
+   * the zoom below covers the screen with world rather than trading the
+   * missing columns for scenery past the other edge. A room whose world is
+   * narrower than the view on both sides keeps the world stop's own fit. */
+  const bool world_edge[2] = {
+    world && world->valid && world->left_reached,
+    world && world->valid && world->right_reached,
+  };
+  if (world_edge[0] && world_edge[1]) return true;
+  const float bound[2] = {
+    world_edge[0] ? world->left : capture_left,
+    world_edge[1] ? world->right : capture_right,
+  };
+  if (!isfinite(bound[0]) || !isfinite(bound[1]) || bound[0] >= bound[1])
+    return false;
+  for (int pass = 0; pass < 2; ++pass) {
+    float lower = -INFINITY, upper = INFINITY;
+    for (int edge = 0; edge < 2; ++edge) {
+      const float x = (bound[edge] - 0.5f) * aspect_x;
+      for (int row = 0; row <= kDioramaPlaneSubdivY; ++row) {
+        const float t = (float)row / kDioramaPlaneSubdivY;
+        Scene3DPoint p;
+        if (!Scene3D_ProjectWorldPoint(matrix, x, (0.5f - t) * height_scale,
+                DioramaTiltedRowDepth(z_world, rake, bow, t), 1, 1, &p))
+          return false;
+        if (edge) lower = fmaxf(lower, 1.0f - p.x);
+        else upper = fminf(upper, -p.x);
+      }
+    }
+    if (lower <= upper || pass) {
+      /* After the zoom both stops coincide up to rounding. */
+      const float shift = lower <= upper
+          ? fmaxf(lower, fminf(0.0f, upper)) : 0.5f * (lower + upper);
+      if (shift != 0.0f)
+        for (int c = 0; c < 4; ++c)
+          matrix[c * 4] += 2.0f * shift * matrix[c * 4 + 3];
+      return true;
+    }
+    /* The captured columns are narrower than the screen at this depth: the
+     * stream budget, not the scenery, ran out. Zoom about the screen centre
+     * until the bounds span it exactly, then place them on the second pass. */
+    const float span = 1.0f - (lower - upper);
+    if (!(span > 0.0f)) return false;
+    const float zoom = 1.0f / span;
+    for (int c = 0; c < 4; ++c) {
+      matrix[c * 4] *= zoom;
+      matrix[c * 4 + 1] *= zoom;
+    }
+  }
+  return true;
+}
+
 bool Diorama_ClampCameraVertically(
     float matrix[16], float aspect_x, float height_scale,
     float z_world, float rake, float bow,

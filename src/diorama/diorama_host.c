@@ -11,6 +11,7 @@
 #include "host/host_ppu_output.h"
 #include "host/host_display.h"
 #include "host/host_input.h"
+#include "present/display_geometry.h"
 #include "snesrecomp/runner.h"
 #include "app/settings.h"
 #include "settings_overlay/settings_overlay.h"
@@ -105,7 +106,13 @@ void Diorama_OnModeChanged(void) {
   if (!g_settings.diorama_mode) g_diorama_frame_active = false;
   if (!RtlGameRunner()) return;
 
+  /* At 4:3 the toggle alone moves the capture between native and wide, so
+   * the display profile follows it exactly as an aspect change would. */
+  const bool was_wide = g_ws_active;
+  const int previous_display_mode = g_settings.display_mode;
   HostDisplay_ResolveVideoGeometry(false);
+  if (g_ws_active != was_wide)
+    Settings_ReconcileDisplayModeAfterGeometryChange(previous_display_mode);
   memset(g_pixels, 0,
          SR_PPU_SURFACE_MAX_WIDTH * 4 * kHostDisplayFramebufferHeight);
   memset(g_hud_bg_pixels, 0,

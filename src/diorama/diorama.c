@@ -2309,9 +2309,15 @@ static void PrepareDioramaView(const DioramaCapture *capture,
 
   /* Capture width is a storage budget, not the perspective viewport. In
    * particular 16:9 can see past a native edge that still covers 16:10. Clamp
-   * after vertical and authored framing so neither can undo the side stop. */
-  if (capture->horizontal_bounds.valid) {
-    const int primary = capture->horizontal_bounds.plane;
+   * after vertical and authored framing so neither can undo the side stop.
+   * The same holds for the captured columns themselves: a wide phone or a
+   * room's authored framing can look past the stream budget while the world
+   * goes on, so the capture is a second, harder stop. */
+  {
+    const int primary = capture->horizontal_bounds.valid
+        ? capture->horizontal_bounds.plane
+        : capture->vertical_bounds.valid ? capture->vertical_bounds.plane
+                                         : SR_PPU_OVERLAY_BG1;
     const int high = primary == SR_PPU_OVERLAY_BG1
         ? kDioramaPlane_Bg1Hi : kDioramaPlane_Bg2Hi;
     const DioramaResolvedLayer *focal = NULL;
@@ -2322,13 +2328,22 @@ static void PrepareDioramaView(const DioramaCapture *capture,
       if (!DioramaLayerIsDrawable(layer, textures, capture->pixels, scene)) continue;
       if (!focal || resolved[i].plane == primary) focal = &resolved[i];
     }
-    if (focal) {
+    if (focal && capture->width > 0) {
       float clamped[16];
       memcpy(clamped, geometry->matrix, sizeof(clamped));
-      if (Diorama_ClampCameraHorizontally(
+      const float apron =
+          DioramaPlaneUsesBgApron(primary, capture->bg_apron_mask)
+              ? (float)capture->obj_apron / (float)capture->width : 0.0f;
+      bool held = capture->horizontal_bounds.valid &&
+          Diorama_ClampCameraHorizontally(
               clamped, geometry->aspect_x, geometry->height_scale,
               focal->z - 0.5f, focal->rake, focal->bow,
-              &capture->horizontal_bounds)) {
+              &capture->horizontal_bounds);
+      held |= Diorama_FitCameraToCapture(
+          clamped, geometry->aspect_x, geometry->height_scale,
+          focal->z - 0.5f, focal->rake, focal->bow,
+          &capture->horizontal_bounds, -apron, 1.0f + apron);
+      if (held) {
         float unclamped[16];
         memcpy(unclamped, geometry->matrix, sizeof(unclamped));
         for (int c = 0; c < 16; ++c)
@@ -2338,8 +2353,7 @@ static void PrepareDioramaView(const DioramaCapture *capture,
         const float z = DioramaTiltedRowDepth(focal->z - 0.5f, focal->rake, focal->bow, 0.5f);
         const float half = 0.5f * geometry->aspect_x;
         ArRenderPointF before, after, left, right;
-        if (capture->width > 0 &&
-            ProjectWorldPoint(unclamped, 0.0f, 0.0f, z, geometry->width, geometry->height,
+        if (ProjectWorldPoint(unclamped, 0.0f, 0.0f, z, geometry->width, geometry->height,
                               &before) &&
             ProjectWorldPoint(geometry->matrix, 0.0f, 0.0f, z, geometry->width,
                               geometry->height, &after) &&

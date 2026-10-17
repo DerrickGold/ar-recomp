@@ -92,6 +92,16 @@ bool Diorama_ClampCameraHorizontally(
     float z_world, float rake, float bow,
     const DioramaHorizontalBounds *bounds);
 
+/* Keep the screen inside the captured columns, in normalized capture
+ * coordinates, wherever the world continues past them. Shifts like the world
+ * stop; when the capture is narrower than the screen at this depth it zooms
+ * about the screen centre first. Run after the world stop. */
+bool Diorama_FitCameraToCapture(
+    float matrix[16], float aspect_x, float height_scale,
+    float z_world, float rake, float bow,
+    const DioramaHorizontalBounds *world,
+    float capture_left, float capture_right);
+
 /* Only captured finite world edges can constrain the presentation camera.
  * The native camera's bottom bound includes its one-row scroll guard. */
 DioramaVerticalBounds DioramaVerticalBounds_Resolve(

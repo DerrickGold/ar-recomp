@@ -488,8 +488,10 @@ static void ResolveVideoGeometry(bool apply_runtime_changes,
     extra_columns = geometry.display_extra;
   }
 
+  /* Diorama's perspective sees past the displayed columns at every ratio,
+   * 4:3 included, so it always captures the full stream budget. */
   const int display_extra = extra_columns;
-  if (g_settings.diorama_mode && (extra_columns > 0 || extra_rows > 0))
+  if (g_settings.diorama_mode && s_widescreen_runtime_allowed)
     extra_columns = kActRaiserWidescreenExtraMax;
 
   DisplayGeometry_SetAutoVerticalBudget(extra_rows);

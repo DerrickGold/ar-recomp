@@ -891,8 +891,97 @@ static void TestHorizontalBoundsRespectSceneryAndSmallRooms(void) {
   CHECK(memcmp(matrix, before, sizeof(matrix)) == 0);
 }
 
+/* Screen X extent of a capture column over every mesh row. */
+static void ProjectedColumn(const float matrix[16], float u, float aspect,
+                            float height, float rake, float bow,
+                            float *min_x, float *max_x) {
+  *min_x = INFINITY;
+  *max_x = -INFINITY;
+  for (int row = 0; row <= kDioramaPlaneSubdivY; ++row) {
+    const float t = (float)row / kDioramaPlaneSubdivY;
+    Scene3DPoint p;
+    CHECK(Scene3D_ProjectWorldPoint(matrix, (u - .5f) * aspect, (.5f - t) * height,
+        DioramaTiltedRowDepth(0, rake, bow, t), 1, 1, &p));
+    *min_x = fminf(*min_x, p.x);
+    *max_x = fmaxf(*max_x, p.x);
+  }
+}
+
+static void TestCameraFitsCapturedColumns(void) {
+  const float aspect = 496.0f / 224, height = 288.0f / 224, apron = 64.0f / 496;
+  const DioramaHorizontalBounds open = DioramaHorizontalBounds_Resolve(
+      SR_PPU_OVERLAY_BG1, 500, 0, 1280, 496, 64);
+  CHECK(open.valid && !open.left_reached && !open.right_reached);
+  float matrix[16], before[16], lo, hi;
+  for (int tilted = 0; tilted < 2; ++tilted) {
+    const float rake = tilted ? .15f : 0, bow = tilted ? -.25f : 0;
+    const Scene3DCamera camera = {tilted ? .12f : 0, tilted ? -.10f : 0, 3.25f, .4f};
+    /* 16:10 sees well inside the capture: nothing moves. */
+    Scene3D_BuildViewProjection(&camera, 360, 224, matrix);
+    memcpy(before, matrix, sizeof(before));
+    CHECK(Diorama_FitCameraToCapture(matrix, aspect, height, 0, rake, bow,
+                                     &open, -apron, 1 + apron));
+    CHECK(memcmp(matrix, before, sizeof(matrix)) == 0);
+    /* Authored framing past the right capture edge is pulled back by X alone. */
+    CHECK(Diorama_OffsetCamera(matrix, 64, 0, 1.0f));
+    CHECK(Diorama_OffsetCamera(matrix, 64, 0, 1.0f));
+    CHECK(Diorama_OffsetCamera(matrix, 64, 0, 1.0f));
+    memcpy(before, matrix, sizeof(before));
+    ProjectedColumn(matrix, 1 + apron, aspect, height, rake, bow, &lo, &hi);
+    CHECK(lo < 1.0f);
+    CHECK(Diorama_FitCameraToCapture(matrix, aspect, height, 0, rake, bow,
+                                     &open, -apron, 1 + apron));
+    ProjectedColumn(matrix, 1 + apron, aspect, height, rake, bow, &lo, &hi);
+    CHECK(lo >= .99999f);
+    for (int c = 0; c < 16; ++c)
+      if (c % 4) CHECK(matrix[c] == before[c]);
+    /* A phone-wide view sees more than the whole capture: zoom until the
+     * captured columns span the screen exactly, keeping square pixels. */
+    Scene3D_BuildViewProjection(&camera, 520, 224, matrix);
+    memcpy(before, matrix, sizeof(before));
+    ProjectedColumn(matrix, -apron, aspect, height, rake, bow, &lo, &hi);
+    CHECK(hi > 0.0f);
+    CHECK(Diorama_FitCameraToCapture(matrix, aspect, height, 0, rake, bow,
+                                     &open, -apron, 1 + apron));
+    ProjectedColumn(matrix, -apron, aspect, height, rake, bow, &lo, &hi);
+    CHECK(hi <= .0001f);
+    ProjectedColumn(matrix, 1 + apron, aspect, height, rake, bow, &lo, &hi);
+    CHECK(lo >= .9999f);
+    const float zoom = matrix[1 * 4 + 1] / before[1 * 4 + 1];
+    CHECK(zoom > 1.0f);
+    /* Untilted, the X shift leaves the X scale alone, so square pixels show. */
+    if (!tilted) CHECK(Near(matrix[0] / before[0], zoom));
+    for (int c = 0; c < 4; ++c) CHECK(matrix[c * 4 + 3] == before[c * 4 + 3]);
+    /* A reached world edge stands in for its side, so the zoom covers the
+     * screen with world instead of exposing past the left edge. */
+    const DioramaHorizontalBounds left_world = DioramaHorizontalBounds_Resolve(
+        SR_PPU_OVERLAY_BG1, 120, 0, 1280, 496, 64);
+    CHECK(left_world.left_reached && !left_world.right_reached);
+    Scene3D_BuildViewProjection(&camera, 520, 224, matrix);
+    CHECK(Diorama_FitCameraToCapture(matrix, aspect, height, 0, rake, bow,
+                                     &left_world, -apron, 1 + apron));
+    ProjectedColumn(matrix, left_world.left, aspect, height, rake, bow, &lo, &hi);
+    CHECK(hi <= .0001f);
+    ProjectedColumn(matrix, 1 + apron, aspect, height, rake, bow, &lo, &hi);
+    CHECK(lo >= .9999f);
+  }
+  /* A room narrower than the view on both sides keeps the world stop's fit. */
+  const DioramaHorizontalBounds small = DioramaHorizontalBounds_Resolve(
+      SR_PPU_OVERLAY_BG1, 0, 0, 256, 496, 64);
+  const Scene3DCamera camera = {0, 0, 3.25f, .4f};
+  Scene3D_BuildViewProjection(&camera, 520, 224, matrix);
+  memcpy(before, matrix, sizeof(before));
+  CHECK(Diorama_FitCameraToCapture(matrix, aspect, height, 0, 0, 0,
+                                   &small, -apron, 1 + apron));
+  CHECK(memcmp(matrix, before, sizeof(matrix)) == 0);
+  CHECK(!Diorama_FitCameraToCapture(matrix, aspect, height, 0, 0, 0,
+                                    &open, 1, 0));
+  CHECK(memcmp(matrix, before, sizeof(matrix)) == 0);
+}
+
 int main(void) {
   TestHorizontalCameraStopsFollowProjectedViewport();
+  TestCameraFitsCapturedColumns();
   TestHorizontalBoundsRespectSceneryAndSmallRooms();
   TestDesignerFramingOffset();
   TestSkyboxProjection();
