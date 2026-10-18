@@ -157,7 +157,7 @@ static const SnesRunnerApi k_runner_api = {
         SR_RUNNER_CAP_EXECUTION_CHECKPOINT | SR_RUNNER_CAP_POLL_WAIT |
         SR_RUNNER_CAP_PPU_BACKGROUND_VIEW | SR_RUNNER_CAP_PPU_CAPTURE_TILES |
         SR_RUNNER_CAP_PPU_CAPTURE_TRANSPARENCY | SR_RUNNER_CAP_PPU_CAPTURE_TILE_CACHE |
-        SR_RUNNER_CAP_PPU_NATIVE_BACKGROUND_VIEW,
+        SR_RUNNER_CAP_PPU_NATIVE_BACKGROUND_VIEW | SR_RUNNER_CAP_PPU_CAPTURE_APRON_RESOLVE,
     get_component,
     query_generations,
     borrow_memory,
@@ -207,6 +207,7 @@ static const SnesRunnerApi k_runner_api = {
     submit_input_device,
     run_ppu_scanout_with_background_view,
     replace_ppu_capture_tiles,
+    resolve_ppu_capture_aprons,
 };
 
 /* Keep synchronized with the source boundary in runner.cmake. */
@@ -248,7 +249,7 @@ static const SrRunnerDescriptor k_runner = {
         SR_RUNNER_CAP_EXECUTION_CHECKPOINT | SR_RUNNER_CAP_POLL_WAIT |
         SR_RUNNER_CAP_PPU_BACKGROUND_VIEW | SR_RUNNER_CAP_PPU_CAPTURE_TILES |
         SR_RUNNER_CAP_PPU_CAPTURE_TRANSPARENCY | SR_RUNNER_CAP_PPU_CAPTURE_TILE_CACHE |
-        SR_RUNNER_CAP_PPU_NATIVE_BACKGROUND_VIEW,
+        SR_RUNNER_CAP_PPU_NATIVE_BACKGROUND_VIEW | SR_RUNNER_CAP_PPU_CAPTURE_APRON_RESOLVE,
     .implementation = "portable",
 };
 

@@ -58,6 +58,7 @@ bool ActRaiser_RasterizePpuObjParts(
     uint32_t *pixels, size_t pitch, size_t byte_size);
 bool ActRaiser_ConfigurePpuObjCapture(
     const SrPpuObjCaptureRequest *request);
+bool ActRaiser_ResolvePpuCaptureAprons(void);
 
 /* ---- defined in actraiser_hud_icon_promotion.c ---- */
 void ActRaiser_HudIconBeginFrame(void);

@@ -522,6 +522,21 @@ unsigned DioramaFixture_Run(unsigned scenario) {
         &device, &capture, &view, &scene, &projection);
     assert(PresentationOutcome_IsUsable(outcome));
     assert(projection.valid && r.draws && r.bound_effect == -1);
+    if (projection.bg1_plane.valid) {
+      const unsigned before = r.draws;
+      ArRenderRectF footprint;
+      assert(Diorama_ResolveCaptureFootprint(&capture, &view, &scene, SR_PPU_OVERLAY_BG1, &footprint));
+      assert(r.draws == before); /* A map guide cannot cause a render pass. */
+      for (int y = 0; y <= capture.height; y += 16)
+        for (int x = -capture.obj_apron; x <= capture.width + capture.obj_apron; x += 16) {
+          ArRenderPointF p;
+          if (!Diorama_ProjectCapturedBg1Point(&projection, x, y, &p, NULL, NULL) ||
+              p.x < view.viewport.x || p.x > view.viewport.x + view.viewport.w ||
+              p.y < view.viewport.y || p.y > view.viewport.y + view.viewport.h) continue;
+          assert(x >= footprint.x - .01f && x <= footprint.x + footprint.w + .01f);
+          assert(y >= footprint.y - .01f && y <= footprint.y + footprint.h + .01f);
+        }
+    }
     /* Culling must cover the same guards as the drawn BG/OBJ meshes, without
      * changing the UV mapping checked against their vertex positions above. */
     const DioramaPlaneProjection *planes[]={&projection.bg1_plane,&projection.bg1_high_plane,

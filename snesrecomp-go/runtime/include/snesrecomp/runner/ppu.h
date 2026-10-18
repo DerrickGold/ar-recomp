@@ -273,6 +273,22 @@ typedef struct SrPpuObjPart {
     uint8_t reserved;
 } SrPpuObjPart;
 
+/* Finish separated full-add capture guards after the host has rasterized its
+ * extra OBJ parts in OAM order. Resolves only the columns outside the ordinary
+ * capture rectangle, using the screen enables/windows, priority mode and math
+ * mask retained for each scanline. No game pixels or hardware state change.
+ * BG and OBJ priority bands must be split, with matching capture geometry.
+ * Call before publishing/uploading the surfaces, on the emulation thread.
+ * Ordinary (non-full-add) captures are a no-op. */
+typedef struct SrPpuCaptureApronResolveRequest {
+    uint32_t struct_size;
+    uint32_t flags;
+    uint64_t lifetime_generation;
+} SrPpuCaptureApronResolveRequest;
+
+#define SR_PPU_CAPTURE_APRON_RESOLVE_REQUEST_SIZE \
+    ((uint32_t)sizeof(SrPpuCaptureApronResolveRequest))
+
 typedef struct SrPpuObjRasterRequest {
     uint32_t struct_size;
     uint32_t flags;

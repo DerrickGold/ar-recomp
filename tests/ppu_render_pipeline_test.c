@@ -2188,6 +2188,274 @@ static void TestFullAddSubscreenWinnerCapture(void) {
   ppu_free(ppu);
 }
 
+static uint32_t apron_test_tile(const void *context, int32_t x, int32_t y, uint16_t *word) {
+  (void)x;
+  const unsigned setting = *(const unsigned *)context, source = setting & 1u;
+  *word = (uint16_t)(1 | ((source + 1) << 10) |
+      (!source && !(setting & 2u) && (y & 1) ? 0x2000 : 0));
+  return kPpuVirtualTilemapLookup_Found;
+}
+
+/* The two halves of a 16px sprite straddle x=376 in the reported Marahna
+ * frame. Scanout exported one TS winner, while the host's guard had both BG1
+ * and OBJ, producing a bright column and a submerged sliver of the boss.
+ * Use identical art on either side so the main capture is the pixel oracle. */
+static void TestFullAddCaptureAprons(void) {
+  enum { margin = 120, apron = 64, width = 624, top = 8, height = kH + 16 };
+  Ppu *ppu = ppu_init(); CHECK(ppu); if (!ppu) return;
+  Snes snes = {.ppu = ppu, .abiLifetimeGeneration = 7};
+  sr_runner_bind_ppu_owner(&snes, ppu, true);
+  const SnesRunnerApi *api = sr_runner_get_api(SR_RUNNER_ABI_VERSION);
+  CHECK(api && (api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_APRON_RESOLVE));
+  static uint32_t fb[width * height], bg[2][3][width * height], obj[4][width * height];
+  static uint32_t attrs[4][width * height], before_bg[sizeof(bg) / 4], before_obj[sizeof(obj) / 4];
+  for (unsigned reference = 0; reference < 2; ++reference)
+  for (unsigned variant = 0; variant < 6; ++variant) {
+    const unsigned sources[2] = {variant == 4 ? 2u : 0u, 1};
+    const unsigned priority = variant == 4 ? 1 : 2;
+    ppu_reset(ppu);
+    memset(bg, 0, sizeof(bg)); memset(obj, 0, sizeof(obj)); memset(attrs, 0, sizeof(attrs));
+    ppu->inidisp = 15; ppu->bgmode = 9;
+    ppu->screenEnabled[0] = 2; ppu->screenEnabled[1] = 0x11;
+    ppu->cgwsel = 2; ppu->cgadsub = variant == 1 ? 0x43 : 3;
+    ppu->cgram[0x11] = bgr555(31, 0, 0);
+    ppu->cgram[0x21] = bgr555(0, 0, 31);
+    ppu->cgram[0x81] = bgr555(0, 31, 0);
+    for (int tile = 0; tile < 18; ++tile) set_solid_4bpp_tile(ppu, tile, 1);
+    if (variant == 4) {
+      /* Mode 2 uses VRAM rather than the Mode-1 virtual tile provider. Keep
+       * its art identical and its BG3 scroll-offset table empty. */
+      ppu->bgXsc[0] = 0x40; ppu->bgXsc[1] = 0x44; ppu->bgXsc[2] = 0x48;
+      for (unsigned i = 0; i < 0x400; ++i) {
+        ppu->vram[0x4000 + i] = 1 | (1 << 10);
+        ppu->vram[0x4400 + i] = 1 | (2 << 10);
+      }
+    }
+    for (unsigned slot = 0; slot < 128; ++slot) ppu->oam[slot * 2] = 0xe000;
+    /* Exact coordinates are necessary at both extended edges. */
+    ppu->oam[0] = (uint16_t)(-128 & 255); ppu->oam[1] = priority << 12;
+    ppu->oam[2] = 368 & 255; ppu->oam[3] = priority << 12;
+    ppu->highOam[0] = 0x0f; /* both large, both high X bit */
+    PpuSetObjExactPosition(ppu, 0, -128, 0);
+    PpuSetObjExactPosition(ppu, 1, 368, 0);
+    PpuSetExtraSpace(ppu, margin); PpuSetExtraVerticalSpace(ppu, top, top);
+    CHECK(PpuBeginDrawingSized(ppu, (uint8_t *)fb, width * 4, height,
+        reference ? kPpuRenderFlags_ReferencePixelRenderer : 0));
+    for (unsigned source = 0; source < 2; ++source) {
+      const PpuVirtualTilemapBinding binding = {.lookup = apron_test_tile,
+          .context = &sources[source], .flags = kPpuVirtualTilemapFlag_IncludeAuthentic};
+      CHECK(PpuSetVirtualTilemap(ppu, source, &binding));
+      CHECK(PpuBindOverlaySurfaceSized(ppu, source, (uint8_t *)bg[source][0], width * 4, height));
+      for (unsigned band = 1; band < 3; ++band)
+        CHECK(PpuBindOverlayPrioSurface(ppu, source, band, (uint8_t *)bg[source][band]));
+      CHECK(PpuSetOverlayCapture(ppu, source, -margin, -top, kW + 2 * margin, height,
+          kPpuOverlayFlag_RemoveFromGame | (!source && variant != 1 ? kPpuOverlayFlag_MarkFullAddSubscreen : 0)));
+      ppu->captureTiles[source].apron = apron;
+    }
+    CHECK(PpuBindOverlaySurfaceSized(ppu, kPpuOverlaySource_Obj, (uint8_t *)obj[0], width * 4, height));
+    for (unsigned band = 1; band < 4; ++band)
+      CHECK(PpuBindOverlayPrioSurface(ppu, kPpuOverlaySource_Obj, band, (uint8_t *)obj[band]));
+    CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Obj, -margin, -top, kW + 2 * margin, height,
+        kPpuOverlayFlag_RemoveFromGame | (variant != 1 ? kPpuOverlayFlag_MarkFullAddSubscreen : 0)));
+    CHECK(PpuSetOverlayOamRange(ppu, 0, 2));
+    for (unsigned band = 0; band < 4; ++band) {
+      ppu->objAttributes.pixels[band] = (uint8_t *)attrs[band];
+      ppu->objAttributes.pixel_byte_size[band] = sizeof(attrs[band]);
+    }
+    ppu_runLine(ppu, 0);
+    for (int y = -top; y < kH + top; ++y) {
+      if (variant == 2) ppu->cgadsub = y < 8 ? 3 : 1; /* main stops selecting math */
+      if (variant == 4) ppu->bgmode = y < 8 ? 9 : 2; /* OBJ1 moves ahead of BG1-low */
+      if (variant == 5) ppu->inidisp = y < 8 ? 15 : 0x80;
+      if (variant == 3) {
+        /* Window hides only right-edge OBJ on the latter scanlines. */
+        ppu->screenWindowed[1] = y < 8 ? 0 : 0x10;
+        ppu->windowsel = 2u << 16; ppu->window1left = 255; ppu->window1right = 255;
+      }
+      if (y < 0 || y >= kH) ppu_runMarginLine(ppu, y + 1); else ppu_runLine(ppu, y + 1);
+    }
+    /* Model the completed first-writer OBJ guard channel. Resolution must not
+     * let a later sprite become visible when this winning one is underwater. */
+    for (int y = 0; y < 16; ++y) for (int dx = 0; dx < 8; ++dx) {
+      const int columns[] = {apron - 8 + dx, width - apron + dx};
+      for (unsigned side = 0; side < 2; ++side) {
+        const int index = (y + top) * width + columns[side];
+        obj[priority][index] = 0xff00ff00u; attrs[priority][index] = 0x804020ffu;
+      }
+    }
+    memcpy(before_bg, bg, sizeof(bg)); memcpy(before_obj, obj, sizeof(obj));
+    const int edge = top * width + width - apron;
+    CHECK(bg[0][0][edge] == 0xffff0000u && obj[priority][edge] == 0xff00ff00u);
+    /* Change the live registers after scanout: late resolve must use each
+     * rendered row, not this unrelated end-of-frame state. */
+    ppu->bgmode = 0; ppu->screenEnabled[0] = ppu->screenEnabled[1] = 0; ppu->cgadsub = 0;
+    SrPpuCaptureApronResolveRequest request = {.struct_size = sizeof(request), .lifetime_generation = 8};
+    CHECK(api->resolve_ppu_capture_aprons(sr_runner_handle(&snes), &request) == SR_RESULT_STALE_VIEW);
+    CHECK(!memcmp(before_bg, bg, sizeof(bg)) && !memcmp(before_obj, obj, sizeof(obj)));
+    request.lifetime_generation = 7;
+    request.flags = 1;
+    CHECK(api->resolve_ppu_capture_aprons(sr_runner_handle(&snes), &request) == SR_RESULT_UNSUPPORTED);
+    CHECK(!memcmp(before_bg, bg, sizeof(bg)) && !memcmp(before_obj, obj, sizeof(obj)));
+    request.flags = 0;
+    CHECK(api->resolve_ppu_capture_aprons(sr_runner_handle(&snes), &request) == SR_RESULT_OK);
+    if (variant == 1) {
+      CHECK(!memcmp(before_bg, bg, sizeof(bg)) && !memcmp(before_obj, obj, sizeof(obj)));
+    } else {
+      CHECK(bg[0][0][edge] == (variant == 4 ? 0xffff0000u : 0));
+      CHECK(obj[priority][edge] == (variant == 4 ? 0 : 0xff00ff00u));
+      for (int y = 0; y < 16; ++y) for (unsigned side = 0; side < 2; ++side) {
+        const int guard = (y + top) * width + (side ? width - apron : apron - 1);
+        const int interior = guard + (side ? -1 : 1);
+        for (unsigned bg_index = 0; bg_index < 2; ++bg_index) for (unsigned band = 0; band < 3; ++band)
+          CHECK(bg[bg_index][band][guard] == bg[bg_index][band][interior]);
+        for (unsigned band = 0; band < 4; ++band) {
+          CHECK(obj[band][guard] == obj[band][interior]);
+          if (!obj[band][guard]) CHECK(attrs[band][guard] == 0);
+        }
+      }
+    }
+    for (unsigned y = 0; y < height; ++y) {
+      for (unsigned source = 0; source < 2; ++source) for (unsigned band = 0; band < 3; ++band)
+        CHECK(!memcmp(bg[source][band] + y * width + apron,
+            before_bg + (source * 3 + band) * width * height + y * width + apron, (width - 2 * apron) * 4));
+      for (unsigned band = 0; band < 4; ++band)
+        CHECK(!memcmp(obj[band] + y * width + apron,
+            before_obj + band * width * height + y * width + apron, (width - 2 * apron) * 4));
+    }
+    ppu_runLine(ppu, 0); /* no stale completion from the preceding frame */
+    CHECK(PpuResolveCaptureAprons(ppu));
+  }
+  sr_runner_bind_ppu_owner(&snes, ppu, false);
+  ppu_free(ppu);
+}
+
+static uint32_t finite_add_tile(const void *context, int32_t x, int32_t y, uint16_t *word) {
+  const unsigned source = *(const unsigned *)context;
+  if (x < 0 || x >= 64) return kPpuVirtualTilemapLookup_Transparent;
+  *word = (uint16_t)(1 | ((source + 1) << 10) | (!source && y >= 4 ? 0x2000 : 0));
+  return kPpuVirtualTilemapLookup_Found;
+}
+
+static uint32_t painted_add_tile(void *context, int32_t x, int32_t y, SrPpuCaptureTile *tile) {
+  const unsigned source = *(const unsigned *)context;
+  if (x < 64 && (x < 24 || x >= 26)) return 0;
+  *tile = (SrPpuCaptureTile){.entry = (uint16_t)(1 | ((source + 1) << 10)),
+      .band = !source && y == 1 ? 2 : 1, .flags = SR_PPU_CAPTURE_TILE_REPLACE};
+  if ((source && y == 2) || (!source && y == 4))
+    memset(tile->transparent_rows, 255, sizeof(tile->transparent_rows));
+  if (source && y == 3) {
+    tile->flags = 0; /* black without replacing the underlying tile */
+    memset(tile->black_rows, 255, sizeof(tile->black_rows));
+  }
+  return 1;
+}
+
+/* A finite room ends at x=372, four pixels before the guard starts at 376.
+ * Painted scenery must participate in the ordinary capture's full-add winner
+ * selection too: otherwise a boss disappears at 372 and reappears at 376.
+ * Repeat the edits inside the native viewport to verify that transparent,
+ * black, and priority-changing edits affect only the presentation capture. */
+static void TestFullAddPaintedScenery(void) {
+  enum { margin = 120, apron = 64, width = 624, height = 48, origin = 184 };
+  static uint32_t fb[width * kH], bg[2][3][width * height], obj[4][width * height];
+  static uint32_t authentic[width * kH], baseline[width * kH];
+  static uint32_t expected_bg[sizeof(bg) / 4], expected_obj[sizeof(obj) / 4];
+  Ppu *ppu = ppu_init(); CHECK(ppu); if (!ppu) return;
+  SrPpuBgPacket *packet = calloc(1, sizeof(*packet)); CHECK(packet); if (!packet) { ppu_free(ppu); return; }
+  const unsigned sources[2] = {0, 1};
+  /* Reordering export by source must preserve windows, both addend BGs,
+   * absent priority surfaces, backing, and the unmodified authentic frame. */
+  for (unsigned scenario = 0; scenario < 6; ++scenario)
+  for (unsigned reference = 0; reference < 2; ++reference)
+  for (unsigned painted = 0; painted < 2; ++painted) {
+    ppu_reset(ppu);
+    memset(bg, 0, sizeof(bg)); memset(obj, 0, sizeof(obj));
+    ppu->inidisp = 15; ppu->bgmode = 9;
+    ppu->screenEnabled[0] = 2; ppu->screenEnabled[1] = 0x11;
+    ppu->cgwsel = 2; ppu->cgadsub = 3;
+    if (scenario == 1 || scenario == 5) {
+      ppu->windowsel = 0x3333;
+      ppu->screenWindowed[0] = 2; ppu->screenWindowed[1] = 0x11;
+      ppu->window1left = 49; ppu->window1right = 63;
+    }
+    if (scenario == 2) ppu->screenEnabled[0] = ppu->screenEnabled[1] = 0x13;
+    if (scenario == 3) {
+      ppu->screenEnabled[0] = 1; ppu->screenEnabled[1] = 0x12;
+    }
+    ppu->cgram[0x11] = bgr555(31, 0, 0);
+    ppu->cgram[0x21] = bgr555(0, 0, 31);
+    ppu->cgram[0x81] = bgr555(0, 31, 0);
+    for (int tile = 0; tile < 18; ++tile) set_solid_4bpp_tile(ppu, tile, 1);
+    for (unsigned slot = 0; slot < 128; ++slot) ppu->oam[slot * 2] = 0xe000;
+    for (unsigned slot = 0; slot < 6; ++slot) {
+      const int x = slot & 1 ? 368 : 52, y = (slot / 2) * 16;
+      ppu->oam[slot * 2] = (uint16_t)((x & 255) | (y << 8));
+      ppu->oam[slot * 2 + 1] = 2 << 12;
+      ppu->highOam[slot / 4] |= (uint8_t)((2 | (x > 255)) << ((slot % 4) * 2));
+      PpuSetObjExactPosition(ppu, slot, x, y);
+    }
+    PpuSetExtraSpace(ppu, margin);
+    CHECK(PpuBeginDrawingSized(ppu, (uint8_t *)fb, width * 4, kH,
+        reference ? kPpuRenderFlags_ReferencePixelRenderer : 0));
+    CHECK(PpuBindAuthenticSurfaceSized(ppu, (uint8_t *)authentic, width * 4, kH));
+    memset(packet, 0, sizeof(*packet));
+    packet->words[0] = width; packet->words[1] = height;
+    ppu->backgroundPacket = packet;
+    for (unsigned source = 0; source < 2; ++source) {
+      const PpuVirtualTilemapBinding binding = {.lookup = finite_add_tile,
+          .context = &sources[source], .camera_x = 140, .camera_y = -1,
+          .flags = kPpuVirtualTilemapFlag_IncludeAuthentic};
+      CHECK(PpuSetVirtualTilemap(ppu, source, &binding));
+      CHECK(PpuBindOverlaySurfaceSized(ppu, source, (uint8_t *)bg[source][0], width * 4, height));
+      if (scenario == 5) CHECK(PpuSetOverlayTransparentFill(ppu, (PpuOverlaySource)source,
+          kPpuOverlayTransparentFill_Black, 0));
+      for (unsigned band = 1; scenario != 4 && band < 3; ++band)
+        CHECK(PpuBindOverlayPrioSurface(ppu, source, band, (uint8_t *)bg[source][band]));
+      CHECK(PpuSetOverlayCapture(ppu, source, -margin, 0, kW + 2 * margin, height,
+          kPpuOverlayFlag_RemoveFromGame | ((!source || scenario == 2 || scenario == 3) ? kPpuOverlayFlag_MarkFullAddSubscreen : 0)));
+      ppu->captureTiles[source] = (SrPpuCaptureTileBinding){.lookup = painted ? painted_add_tile : NULL,
+          .user_data = (void *)&sources[source], .apron = apron};
+    }
+    CHECK(PpuBindOverlaySurfaceSized(ppu, 4, (uint8_t *)obj[0], width * 4, height));
+    for (unsigned band = 1; band < 4; ++band)
+      CHECK(PpuBindOverlayPrioSurface(ppu, 4, band, (uint8_t *)obj[band]));
+    CHECK(PpuSetOverlayCapture(ppu, 4, -margin, 0, kW + 2 * margin, height,
+        kPpuOverlayFlag_RemoveFromGame | kPpuOverlayFlag_MarkFullAddSubscreen));
+    CHECK(PpuSetOverlayOamRange(ppu, 0, 6));
+    ppu_runLine(ppu, 0);
+    for (int y = 0; y < height; ++y) ppu_runLine(ppu, y + 1);
+    if (!painted) { memcpy(baseline, authentic, sizeof(baseline)); continue; }
+    CHECK(!memcmp(baseline, authentic, sizeof(baseline)));
+    for (int y = 0; y < height; ++y) for (int x = 376; x < 384; ++x)
+      obj[2][y * width + origin + x] = 0xff00ff00u;
+    /* Apron resolution requires all bands; scenario 4 deliberately leaves
+     * them unbound to exercise ordinary capture's primary-band fallback. */
+    CHECK(PpuResolveCaptureAprons(ppu) == (scenario != 4));
+    if (scenario == 0) for (int y = 0; y < height; ++y) for (unsigned location = 0; location < 2; ++location)
+    for (int dx = 0; dx < 12; ++dx) {
+      const int x = (location ? 372 : 52) + dx, at = y * width + origin + x;
+      const unsigned pattern = (unsigned)y / 8;
+      const bool high = pattern == 1, no_main = pattern == 2;
+      CHECK(obj[2][at] == (high || no_main ? 0 : 0xff00ff00u));
+      CHECK(bg[0][0][at] == 0);
+      CHECK(bg[0][1][at] == (high ? 0xffff0000u : 0));
+      CHECK(bg[1][0][at] == (no_main ? 0 : pattern == 3 ? 0xff000000u : 0xff0000ffu));
+    }
+    /* Indexed GPU exports must agree with the corrected CPU captures too. */
+    if (!reference) for (unsigned source = 0; source < 2; ++source)
+    for (unsigned y = 0; y < height; ++y) {
+      const unsigned row = SrPpuBgPacket_Row(source, y);
+      if (!packet->words[SR_PPU_BG_PACKET_HEADER_WORDS + row * SR_PPU_BG_PACKET_ROW_WORDS]) continue;
+      for (unsigned band = 0; band < 3; ++band) for (unsigned x = apron; x < width - apron; ++x)
+        CHECK(SrPpuBgPacket_Color(packet, source, band, x, y) == bg[source][band][y * width + x]);
+    }
+    if (!reference) { memcpy(expected_bg, bg, sizeof(bg)); memcpy(expected_obj, obj, sizeof(obj)); }
+    else { CHECK(!memcmp(expected_bg, bg, sizeof(bg))); CHECK(!memcmp(expected_obj, obj, sizeof(obj))); }
+  }
+  ppu->backgroundPacket = NULL;
+  free(packet); ppu_free(ppu);
+}
+
 /* A BG2-stage host effect needs the final main-screen winner, not merely the
  * isolated BG2 pixels. Put BG1 high-priority art over the right half and prove
  * the exported mask is white only where BG2 remains drawable; its untouched
@@ -2716,7 +2984,7 @@ static void TestVerticalMarginLayerClip(void) {
   ppu_free(ppu);
 }
 
-/* Auto's BG3 remains screen-space even while BG1/BG2 capture extra world.
+/* BG3 remains screen-space even while BG1/BG2 capture extra world.
  * Its staged tilemap cells must never wrap into either synthetic band. */
 static void TestVerticalMarginHudClip(void) {
   enum { top=16, bottom=16, rows=224+top+bottom };
@@ -2748,6 +3016,83 @@ static void TestVerticalMarginHudClip(void) {
     if (y<top || y>=top+224) CHECK((capture[y*kW]&0xffffffu)==0);
     else CHECK((capture[y*kW]&0xffffffu)!=0);
   }
+  ppu_free(ppu);
+}
+
+/* Marahna's full-add scene exposes a second HUD after BG3's 256px map wraps
+ * into the extended bottom rows. With a flat HUD, those glyphs are outside
+ * its capture and punch holes in the BG1 addend, even when BG3 is not drawn
+ * as a scene plane. Clipping must fix that AND the tilted-HUD duplicate. */
+static void TestVerticalMarginHudFullAdd(void) {
+  enum { rows = 352, glyph_x = 20, glyph_y = 8, wrapped_y = 264 };
+  static uint32_t framebuffer[kW * rows], bg1[kW * rows],
+      bg2[kW * rows], hud[kW * rows];
+  static const int top_rows[] = {1, 64};
+  Ppu *ppu = ppu_init();
+  CHECK(ppu != NULL);
+  if (!ppu) return;
+
+  for (unsigned reference = 0; reference < 2; ++reference)
+    for (unsigned tilted = 0; tilted < 2; ++tilted)
+      for (unsigned t = 0; t < sizeof(top_rows) / sizeof(*top_rows); ++t)
+        for (unsigned clipped = 0; clipped < 2; ++clipped) {
+          const int top = top_rows[t], bottom = rows - kH - top;
+          ppu_reset(ppu);
+          memset(framebuffer, 0, sizeof(framebuffer));
+          memset(bg1, 0, sizeof(bg1));
+          memset(bg2, 0, sizeof(bg2));
+          memset(hud, 0, sizeof(hud));
+          ppu->inidisp = 15;
+          ppu->bgmode = 9;
+          ppu->screenEnabled[0] = 0x06;
+          ppu->screenEnabled[1] = 0x01;
+          ppu->cgwsel = 0x02;
+          ppu->cgadsub = 0x03;
+          ppu->cgram[0x11] = bgr555(31, 0, 0);
+          ppu->cgram[0x21] = bgr555(0, 0, 31);
+          ppu->cgram[5] = bgr555(31, 31, 31);
+          ppu->bgTileAdr = 0x0500;
+          set_solid_4bpp_tile(ppu, 1, 1);
+          set_solid_2bpp_tile(ppu, 0x5000, 1, 1);
+          ppu->bgXsc[0] = 0x60;
+          ppu->bgXsc[1] = 0x70;
+          ppu->bgXsc[2] = 0x58;
+          ppu->vScroll[2] = 1020;
+          for (unsigned i = 0; i < 0x400; ++i) {
+            ppu->vram[0x6000 + i] = 1 | (1 << 10);
+            ppu->vram[0x7000 + i] = 1 | (2 << 10);
+          }
+          ppu->vram[0x5800 + glyph_x / 8] = 1 | (1 << 10) | (1 << 13);
+          PpuSetExtraVerticalSpace(ppu, top, bottom);
+          if (clipped) PpuSetVerticalMarginLayerClip(ppu, kPpuOverlaySource_Bg3, 0, 0);
+          CHECK(PpuBeginDrawingSized(ppu, (uint8_t *)framebuffer, kW * 4, rows,
+              reference ? kPpuRenderFlags_ReferencePixelRenderer : 0));
+          CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg1, (uint8_t *)bg1, kW * 4));
+          CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg2, (uint8_t *)bg2, kW * 4));
+          CHECK(PpuBindOverlaySurface(ppu, kPpuOverlaySource_Bg3, (uint8_t *)hud, kW * 4));
+          CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg1, 0, -top, kW, rows,
+              kPpuOverlayFlag_RemoveFromGame | kPpuOverlayFlag_MarkFullAddSubscreen));
+          CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg2, 0, -top, kW, rows,
+              kPpuOverlayFlag_RemoveFromGame));
+          CHECK(PpuSetOverlayCapture(ppu, kPpuOverlaySource_Bg3, 0, tilted ? -top : 0,
+              kW, tilted ? rows : kH, kPpuOverlayFlag_RemoveFromGame));
+          ppu_runLine(ppu, 0);
+          for (int line = 1 - top; line <= 0; ++line) ppu_runMarginLine(ppu, line);
+          for (int line = 1; line <= kH; ++line) ppu_runLine(ppu, line);
+          for (int line = kH + 1; line <= kH + bottom; ++line) ppu_runMarginLine(ppu, line);
+
+          const uint32_t red = 0xff000000u | rgb555(31, 0, 0);
+          CHECK(hud[((tilted ? top : 0) + glyph_y) * kW + glyph_x] == 0xffffffffu);
+          CHECK(bg1[(top + glyph_y) * kW + glyph_x] == red);
+          CHECK(bg2[(top + wrapped_y) * kW + glyph_x] ==
+              (0xff000000u | rgb555(0, 0, 31)));
+          CHECK(bg1[(top + wrapped_y) * kW + glyph_x] ==
+              (clipped || tilted ? red : 0));
+          if (tilted) CHECK(hud[(top + wrapped_y) * kW + glyph_x] ==
+              (clipped ? 0 : 0xffffffffu));
+          if (clipped) for (int y = kH; y < kH + bottom; ++y)
+            CHECK(bg1[(top + y) * kW + glyph_x] == red);
+        }
   ppu_free(ppu);
 }
 
@@ -3663,6 +4008,8 @@ int main(void) {
   TestDioramaFixedColorSubtractCapture();
   TestSubscreenOnlyOverlayCapture();
   TestFullAddSubscreenWinnerCapture();
+  TestFullAddCaptureAprons();
+  TestFullAddPaintedScenery();
   TestMainScreenWinnerMask();
   TestVisibleMainWinnerMask(kPpuOverlaySource_Bg1);
   TestVisibleMainWinnerMask(kPpuOverlaySource_Bg2);
@@ -3673,6 +4020,7 @@ int main(void) {
   TestVerticalMarginBottomLayerClip();
   TestUnboundWorldVerticalFallback();
   TestVerticalMarginHudClip();
+  TestVerticalMarginHudFullAdd();
   TestVerticalMarginExactObj();
   TestLayerPresentationExtents();
   TestMovingEdgePoliciesInVerticalMargins();

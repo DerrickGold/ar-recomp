@@ -501,6 +501,11 @@ before writing the appended `transparent_rows` callback field. Its bits cut
 holes in all captured bands, taking precedence over black and replacement art.
 They also suppress opaque transparent-fill backing at those pixels. Older
 callbacks remain compatible and retain their black-only edits.
+In full-add captures, edited BG pixels participate in the captured main/sub
+priority decision, including outside the original virtual tilemap. Only the
+winning subscreen addend is retained; painted backgrounds cannot duplicate it
+or suppress sprites merely because the original room ends there. These edits
+do not change authentic output or the underlying virtual tilemap.
 Hosts may opt into `SR_RUNNER_CAP_PPU_CAPTURE_TILE_CACHE` by passing
 `SR_PPU_CAPTURE_TILE_REQUEST_V2_SIZE` (or larger) and setting `stable_layer_mask`
 for selected layers. This promises that authored callback hits **and misses**
@@ -526,6 +531,21 @@ path supports 4bpp backgrounds. Unsupported formats leave normal capture intact.
 Bindings are validated atomically and cleared by frame reset or virtual tilemap
 replacement. Hosts should cache their resolved tile index and occupied bounds,
 invalidating both when authored content or terrain profiles change.
+
+After writing extra OBJ parts into the guard columns, call
+`resolve_ppu_capture_aprons` before publishing the captured surfaces. Check
+`SR_RUNNER_CAP_PPU_CAPTURE_APRON_RESOLVE` and
+`SNES_RUNNER_API_PPU_CAPTURE_APRON_RESOLVE_SIZE`. This finishes disjoint full-add
+captures with one subscreen winner per guard pixel, using the priority mode,
+screen windows and math designation recorded for each scanline. It prevents a
+guard sprite and the scenery behind it from both being added to the main image.
+The host must finish OBJ/OAM overlap resolution first, bind split BG1/BG2 and
+OBJ priority surfaces with matching geometry, and retain those bindings through
+completion. A virtual far band uses ordinary BG priority. No ordinary capture
+columns, authentic pixels, GPU state or hardware registers are changed;
+non-full-add frames are a no-op. Hidden OBJ receiver attributes are cleared with
+their pixels. The service is synchronous on the emulation thread and validates
+the request's lifetime generation and zero flags.
 
 ### Drive custom composition and high-refresh presentation
 

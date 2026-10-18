@@ -3,7 +3,7 @@
  * no user-generated capture is part of this workflow. */
 function sharedPreviewOutputSize(choice,customWidth,customHeight,areaWidth,areaHeight) {
   let aspect;
-  if(choice==='auto') {
+  if(choice==='auto'||choice==='stretch') {
     aspect=areaWidth>0&&areaHeight>0?areaWidth/areaHeight:16/10;
   } else if(choice==='custom') {
     if(![customWidth,customHeight].every(n=>Number.isInteger(n)&&n>=64&&n<=16384))
@@ -30,7 +30,45 @@ const SharedRoomPreview = (() => {
   const canvas=document.querySelector('#sharedGl'), label=document.querySelector('#sharedRoomStatus');
   let backend=null, api=null, key='', configDirty=true, config='', lost=false, skyboxKey=0, effectsConfig=null, collision=null, eventConfig=null;
   let placingPlayer=false;
+  const measures=new Map();
+  let configVersion=0,configuredRevision=-1;
   const setting=id=>Number(document.querySelector('#shared'+id).value);
+  const savedView=window.__ACTION_VIEW__||{};
+  $('#sharedAspect').value=({'4:3':String(4/3),'16:9':String(16/9),'16:10':'1.6',Auto:'auto',Stretch:'stretch'})[savedView.aspect]||'1.6';
+  $('#sharedPixels').value=savedView.pixelAspect==='crt'?'1':'0';
+  $('#sharedVertical').value=String(savedView.vertical??64);
+  $('#sharedSky').value=String(savedView.skybox??1);
+  function viewArguments(choice=$('#sharedAspect').value) {
+    const auto=choice==='auto'||choice==='stretch';
+    // Use the editor window, not the remaining canvas area: opening tools or
+    // switching modes must not change the simulated monitor/camera limits.
+    const {width,height}=sharedPreviewOutputSize(choice,setting('MonitorWidth'),setting('MonitorHeight'),
+      auto?window.innerWidth:0,auto?window.innerHeight:0);
+    const aspectMode=choice===String(4/3)?0:choice==='stretch'?3:
+      choice==='auto'||choice==='custom'||Number(choice)>16/9?2:1;
+    if(!api.RoomPreview_SetView(framingDistance,savedView.tiltY||0,savedView.tiltX||0,aspectMode,
+        savedView.cameraMode==='free'?0:1))
+      throw Error('Invalid game camera baseline.');
+    return [nativeCamera.x,nativeCamera.y,nativeFrame,
+      Math.max(0,Math.min(128,Math.floor(setting('Extra')))),setting('Vertical'),width,height,
+      setting('Distance'),setting('Yaw'),setting('Pitch'),setting('Sky'),setting('Pixels')];
+  }
+  function measure(bg=0,choice) {
+    if(!api||lost)return null;
+    try {
+      ensureRoom();
+      const args=viewArguments(choice),signature=[key,configVersion,framingDistance,...args,bg].join('|');
+      if(measures.has(signature))return measures.get(signature);
+      const count=api.RoomPreview_Measure(...args,bg);
+      if(count!==16)return null;
+      const a=new Float32Array(api.memory.buffer,api.DioramaPreview_Input(),count);
+      const result={x:a[0],y:a[1],minX:a[2],maxX:a[3],maxY:a[4],
+        rect:{x:a[5],y:a[6],w:a[7]-a[5],h:a[8]-a[6]},fill:a[9],
+        visibleWidth:a[10],visibleHeight:a[11],viewport:{x:a[12],y:a[13],w:a[14],h:a[15]}};
+      if(measures.size>=16)measures.clear();
+      measures.set(signature,result);return result;
+    } catch(error) {label.textContent=error.message;return null;}
+  }
   function send(bytes,call) {
     if(bytes.length>api.DioramaPreview_Capacity())throw Error('Room data exceeds renderer capacity.');
     new Uint8Array(api.memory.buffer,api.DioramaPreview_Input(),bytes.length).set(bytes);
@@ -52,6 +90,8 @@ const SharedRoomPreview = (() => {
   }
   function ensureRoom() {
     if(!api||lost)throw Error('Shared renderer is still loading or unavailable.');
+      const revision=typeof editorRevision==='number'?editorRevision:0;
+      if(revision!==configuredRevision){configDirty=true;configuredRevision=revision;}
       const next=sceneKey(room);
       if(key!==next) {
         send(SharedActionPreview.encode(DATA,BLOBS,room),api.RoomPreview_Load);
@@ -59,7 +99,10 @@ const SharedRoomPreview = (() => {
       }
       if(configDirty) {
         const text=roomIni();
-        if(config!==text) {send(new TextEncoder().encode(text),api.RoomPreview_Configure);config=text;}
+        if(config!==text) {
+          send(new TextEncoder().encode(text),api.RoomPreview_Configure);config=text;
+          ++configVersion;measures.clear();
+        }
         configDirty=false;
       }
   }
@@ -87,19 +130,14 @@ const SharedRoomPreview = (() => {
       const receiverMask=($('#previewReceivers').checked?1:0)|($('#previewEnemyEnabled').checked?2:0);
       if(!api.RoomPreview_SetReceivers(receiverMask,...['previewPlayerX','previewPlayerY','previewEnemyX','previewEnemyY'].map(id=>Number($('#'+id).value)))||
           !api.RoomPreview_ReceiverStyle(Number($('#previewFacing').value),$('#previewRim').checked?1:0))throw Error('Invalid receiver preview settings.');
-      const aspectChoice=$('#sharedAspect').value, autoAspect=aspectChoice==='auto';
-      const {width:w,height:h}=sharedPreviewOutputSize(aspectChoice,
-        setting('MonitorWidth'),setting('MonitorHeight'),
-        autoAspect?canvas.clientWidth:0,autoAspect?canvas.clientHeight:0);
+      const args=viewArguments(),w=args[5],h=args[6];
       if(canvas.width!==w)canvas.width=w;if(canvas.height!==h)canvas.height=h;
       const outputLabel=`Preview ${w} × ${h}`;
       if($('#sharedOutputSize').textContent!==outputLabel)$('#sharedOutputSize').textContent=outputLabel;
       backend.stats.creates=backend.stats.draws=0;
       const start=performance.now();
       api.RoomPreview_EnableEffects($('#sharedEffects').checked ? 1 : 0);
-      const renderFrame=()=>api.RoomPreview_Render(nativeCamera.x,nativeCamera.y,nativeFrame,
-        Math.max(0,Math.min(128,Math.floor(setting('Extra')))),setting('Vertical'),w,h,
-        setting('Distance'),setting('Yaw'),setting('Pitch'),setting('Sky'),setting('Pixels'));
+      const renderFrame=()=>api.RoomPreview_Render(...args);
       let ok=renderFrame();
       let uploads=api.RoomPreview_Uploads();
       // Resolve after the room frame selects camera-local sections (Aitos).
@@ -117,11 +155,7 @@ const SharedRoomPreview = (() => {
       if(!ok||error)throw Error(`Room rendering failed (${error}).`);
       // Use the capture's stopped camera for UI, picking and subsequent drags.
       // Keeping the requested position would accumulate hidden overscroll.
-      const cameraX=api.RoomPreview_CameraX();
-      if(nativeCamera.x!==cameraX) {
-        nativeCamera.x=cameraX;
-        $('#nativeCameraX').value=$('#nativeCameraXv').value=String(cameraX);
-      }
+      refreshNativeCameraControls();
       EffectEditor.updateCatalogue(api);EffectEditor.updateSources(api);
       label.textContent=`Shared C · ${api.RoomPreview_Width()} × ${api.RoomPreview_Height()} room · `+
         `${api.RoomPreview_EffectCount()} sources · ${api.RoomPreview_EffectVertices()} effect vertices · ${backend.stats.draws} draws · ${uploads} uploads · ${backend.stats.creates} allocations · `+
@@ -175,7 +209,14 @@ const SharedRoomPreview = (() => {
   $('#sharedAspect').addEventListener('input',()=>{
     $('#sharedCustomSize').hidden=$('#sharedAspect').value!=='custom';
   });
-  document.querySelector('#sharedControls').addEventListener('input',()=>draw());
+  document.querySelector('#sharedControls').addEventListener('input',()=>{
+    framingPixelAspect=setting('Pixels')?'crt':'square';
+    refreshNativeCameraControls();draw();
+  });
+  $('#sharedResetView').onclick=()=>{
+    $('#sharedDistance').value='1';$('#sharedYaw').value=$('#sharedPitch').value='0';
+    refreshNativeCameraControls();draw();
+  };
   for(const event of ['input','change','click'])document.addEventListener(event,e=>{
     const id=e.target.id;
     if(e.target.closest('#sharedControls')||id.startsWith('native')||id.startsWith('preview')||id==='sharedGl')return;
@@ -244,7 +285,7 @@ const SharedRoomPreview = (() => {
       let offset=0;for(const part of parts){player.set(part,offset);offset+=part.length;}
       send(player,api.RoomPreview_LoadPlayer);
       $('#modeShared').disabled=false;label.textContent='Ready. Select Shared renderer to explore the level.';
-      draw();
+      refreshNativeCameraControls();draw();
     }catch(error){label.textContent=error.message;api=null;backend?.dispose();}
   }
   function validateScenery(text) {
@@ -383,5 +424,5 @@ const SharedRoomPreview = (() => {
     return [api.RoomPreview_RayFieldMapScale(0),api.RoomPreview_RayFieldMapScale(1)];
   }
   initialize();
-  return {placePlayerAt,syncSources,validateScenery,validatePolicyDocument,policyPlan,validateEffects,previewActorBinding,surfaceFieldDefinition,projectileFieldDefinition,arcFieldDefinition,glowFieldDefinition,castleFieldDefinition,marshFieldDefinition,atmosphereFieldDefinition,rayFieldDefinition,rayFieldMapScale,moonFieldDefinition,waterFieldDefinition,waterFieldMapScale,collisionGrid,draw:render,invalidate:()=>{configDirty=true;}};
+  return {measure,placePlayerAt,syncSources,validateScenery,validatePolicyDocument,policyPlan,validateEffects,previewActorBinding,surfaceFieldDefinition,projectileFieldDefinition,arcFieldDefinition,glowFieldDefinition,castleFieldDefinition,marshFieldDefinition,atmosphereFieldDefinition,rayFieldDefinition,rayFieldMapScale,moonFieldDefinition,waterFieldDefinition,waterFieldMapScale,collisionGrid,draw:render,invalidate:()=>{configDirty=true;measures.clear();}};
 })();

@@ -34,13 +34,20 @@ bool EditorRoomScene_BgPolicy(const EditorRoomScene *room, int x, int y,
 /* Resolve once per view, then pass the same policy to scanout. Guard columns
  * and finite skybox placement also depend on the view when X is unchanged. */
 typedef struct EditorRoomCamera {
-  int x;
+  int x, y, maximum_y;
   ActionCameraAxisBounds travel;
   uint8_t bg_apron_mask;
 } EditorRoomCamera;
 bool EditorRoomScene_ResolveCamera(const EditorRoomScene *room, int x, int y,
     uint32_t frame, int extra_x, int vertical_budget, const DioramaView *view,
     DioramaSkyMode skybox, EditorRoomCamera *out);
+/* Pure camera/coverage query: no PPU scanout, effects, uploads or draw calls.
+ * footprint is in BG world pixels; generated policy/skybox fills are reported
+ * separately so the editor does not request unnecessary painted extensions.
+ * fill: 0 finite scenery, 1 policy-generated background, 2 skybox. */
+bool EditorRoomScene_MeasureView(const EditorRoomScene *, uint32_t frame,
+    int extra, int vertical, const DioramaView *, DioramaSkyMode,
+    const EditorRoomCamera *, unsigned bg, ArRenderRectF *footprint, int *fill);
 /* A NULL camera selects the unprojected 16:10 capture policy for raw captures. */
 bool EditorRoomScene_Render(EditorRoomScene *room, int x, int y, uint32_t frame,
                             int extra_x, int vertical_budget, const EditorRoomCamera *camera);

@@ -242,6 +242,13 @@ function refreshNativeCameraControls() {
         maxY=Math.max(maxY,b.y1*16-DATA.frameHeight-1);}
     }
   }
+  if(mode==='shared'||mode==='2d'&&framingProjection==='diorama') {
+    const camera=SharedRoomPreview.measure?.(0);
+    if(camera) {
+      minX=camera.minX;previewMaxX=camera.maxX;maxY=camera.maxY;
+      nativeCamera.x=camera.x;nativeCamera.y=camera.y;
+    }
+  }
   nativeCamera.x=Math.max(minX,Math.min(previewMaxX,nativeCamera.x));
   nativeCamera.y=Math.max(minY,Math.min(maxY,nativeCamera.y));
   $('#nativeCameraX').min=String(minX);$('#nativeCameraY').min=String(minY);

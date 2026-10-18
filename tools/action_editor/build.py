@@ -36,13 +36,15 @@ def preview_settings(settings_path: Path):
 
     return {
         "aspect": values.get("extended_aspect", "16:10")
-        if values.get("extended_aspect", "16:10") in ("16:9", "16:10") else "4:3",
+        if values.get("extended_aspect", "16:10") in ("16:9", "16:10", "Auto", "Stretch") else "4:3",
         "pixelAspect": "crt" if values.get("pixel_aspect") in ("4:3 CRT", "CRT (4:3)") else "square",
         "distance": number(prefix + "distance_x100", 3.25, 100),
         "tiltX": number(prefix + "tilt_x_mrad", 0, 1000),
         "tiltY": number(prefix + "tilt_y_mrad", 0, 1000),
         "cameraMode": "dynamic" if dynamic else "free",
         "rimLight": values.get("gpu_fx_rim", "On") == "On",
+        "vertical": max(0, min(64, int(number("diorama_vertical_extend", 64, 1)))),
+        "skybox": {"Plane only": 0, "Skybox only": 1, "Both": 2}.get(values.get("diorama_skybox"), 1),
         "source": settings_path.name if settings_path.exists() else "defaults",
     }
 

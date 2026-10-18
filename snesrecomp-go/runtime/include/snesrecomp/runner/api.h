@@ -223,7 +223,14 @@ typedef struct SnesRunnerApi {
      * state are unchanged. Requires SR_RUNNER_CAP_PPU_CAPTURE_TILES. */
     SrResult (*replace_ppu_capture_tiles)(
         SrRunnerHandle *runner, const SrPpuCaptureTileRequest *request);
+    /** Resolve additive source overlap in completed capture guard columns. */
+    SrResult (*resolve_ppu_capture_aprons)(
+        SrRunnerHandle *runner, const SrPpuCaptureApronResolveRequest *request);
 } SnesRunnerApi;
+
+#define SNES_RUNNER_API_PPU_CAPTURE_APRON_RESOLVE_SIZE \
+    ((uint32_t)(offsetof(SnesRunnerApi, resolve_ppu_capture_aprons) + \
+                sizeof(((SnesRunnerApi *)0)->resolve_ppu_capture_aprons)))
 
 #define SNES_RUNNER_API_PPU_CAPTURE_TILES_SIZE                            \
     ((uint32_t)(offsetof(SnesRunnerApi, replace_ppu_capture_tiles) +      \

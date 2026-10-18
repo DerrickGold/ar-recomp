@@ -242,6 +242,9 @@ typedef struct PpuNativeLineScratch {
     uint16_t originalMain[kPpuBufWidth], originalSub[kPpuBufWidth];
     uint16_t authenticObjMain[kPpuXPixels], authenticObjSub[kPpuXPixels];
     uint8_t bands[2][kPpuBufWidth];
+    /* Capture-only edits must not overwrite the authentic source rows. */
+    uint16_t editedMain[kPpuBufWidth], editedSub[kPpuBufWidth];
+    uint8_t addendBands[2][kPpuBufWidth];
 } PpuNativeLineScratch;
 
 typedef SrPpuObjPart PpuObjPart;
@@ -269,6 +272,13 @@ typedef struct WindowLayer {
 
 #define PPU_SAVESTATE_REGS_SIZE 0x40
 #define PPU_SAVESTATE_MEM_SIZE 0x10420
+
+/* Presentation-only state for the late guard-column OBJ composition. Keeping
+ * it per scanline avoids applying the last HDMA state to the whole frame. */
+typedef struct PpuCaptureApronLine {
+    uint8_t rank_mode, math, full_add;
+    uint8_t main[2], sub[2];
+} PpuCaptureApronLine;
 
 struct Ppu {
     uint8 inidisp, obsel, oamaddl, oamaddh, bgmode, mosaic;
@@ -309,8 +319,11 @@ struct Ppu {
     SrPpuCaptureTileBinding captureTiles[2];
     uint8_t captureTileStableMask;
     PpuCaptureTileCacheEntry captureTileCache[2][kPpuCaptureTileCacheSize];
-    /* Per-line ownership of capture bands; never part of hardware state. */
+    /* Per-line authored pixels: low four bits own capture bands, bits 4..5
+     * identify the highest owned band, bit 6 marks it opaque. Presentation only. */
     uint8_t captureTileCoverage[2][kPpuSurfaceWidth];
+    PpuCaptureApronLine captureApronLines[kPpuObjScanlineMaskRows];
+    uint64_t captureApronBindingGeneration;
     int16_t objPosX[128], objPosY[128];
     uint8_t objPosValid[128], objCameraRelative[128];
     uint8_t wsHudSplitHeight, wsHudLeftEnd, wsHudRightStart;
@@ -541,6 +554,7 @@ bool PpuBindOverlaySurface(Ppu *, PpuOverlaySource, uint8_t *, size_t);
 bool PpuBindOverlaySurfaceSized(Ppu *, PpuOverlaySource, uint8_t *, size_t,
                                 size_t);
 bool PpuBindOverlayPrioSurface(Ppu *, PpuOverlaySource, int, uint8_t *);
+bool PpuResolveCaptureAprons(Ppu *);
 bool PpuOverlaySurfaceHasContent(const Ppu *, PpuOverlaySource, int);
 void PpuClearOverlayCaptures(Ppu *);
 bool PpuSetOverlayCapture(Ppu *, PpuOverlaySource, int, int, int, int, uint8_t);

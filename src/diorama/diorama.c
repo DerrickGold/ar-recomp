@@ -2486,6 +2486,88 @@ bool Diorama_ResolveCaptureCameraRange(const DioramaCapture *capture,
   return true;
 }
 
+bool Diorama_ResolveCaptureFootprint(const DioramaCapture *capture,
+    const DioramaView *view, const DioramaScene *scene, int plane,
+    ArRenderRectF *out) {
+  if (!capture || !view || !scene || !scene->render || !out ||
+      capture->width <= 0 || capture->height < kActRaiserAuthenticHeight ||
+      view->viewport.w <= 0 || view->viewport.h <= 0 || view->visible_width <= 0 ||
+      !isfinite(view->camera.tilt_x) || !isfinite(view->camera.tilt_y) ||
+      !isfinite(view->camera.distance) || !isfinite(view->distance_offset) ||
+      !isfinite(view->distance_scale) || view->distance_scale <= 0 ||
+      !isfinite(view->camera_framing_weight)) return false;
+  DioramaResolvedLayer resolved[kDioramaLayerCount];
+  const int count = Diorama_ResolveSceneLayers(scene, resolved);
+  const DioramaResolvedLayer *layer = NULL;
+  for (int i = 0; i < count; ++i)
+    if (resolved[i].plane == plane && resolved[i].alpha > 0) layer = &resolved[i];
+  if (!layer) return false;
+  DioramaViewGeometry g = {.width = view->viewport.w, .height = view->viewport.h};
+  PrepareDioramaView(capture, view, scene, resolved, count, &g);
+  double x0 = INFINITY, y0 = INFINITY, x1 = -INFINITY, y1 = -INFINITY;
+  const double offset = plane == SR_PPU_OVERLAY_BG2 || plane == kDioramaPlane_Bg2Hi
+      ? g.bg2_world_y_offset : 0;
+  /* Invert the viewport onto each linear mesh strip, then clip the resulting
+   * quadrilateral to that strip. This includes bow extrema and tilted edges,
+   * which a four-corner inversion of one flat plane would miss. */
+  for (int row = 0; row < kDioramaPlaneSubdivY; ++row) {
+    const float ta = (float)row / kDioramaPlaneSubdivY;
+    const float tb = (float)(row + 1) / kDioramaPlaneSubdivY;
+    const double ya = (0.5 - ta) * g.height_scale;
+    const double yb = (0.5 - tb) * g.height_scale;
+    const double za = DioramaTiltedRowDepth(layer->z - 0.5f, layer->rake, layer->bow, ta);
+    const double zb = DioramaTiltedRowDepth(layer->z - 0.5f, layer->rake, layer->bow, tb);
+    const double slope = (zb - za) / (yb - ya), intercept = za - slope * ya;
+    typedef struct { double x, y; } Point;
+    Point polygon[8], scratch[8];
+    int n = 4;
+    for (int corner = 0; corner < 4; ++corner) {
+      const double nx = corner == 1 || corner == 2 ? 1 : -1;
+      const double ny = corner < 2 ? 1 : -1;
+      const float *m = g.matrix;
+      const double a = m[0] - nx * m[3], d = m[1] - ny * m[3];
+      const double b = m[4] + slope * m[8] - nx * (m[7] + slope * m[11]);
+      const double e = m[5] + slope * m[9] - ny * (m[7] + slope * m[11]);
+      const double c = nx * (m[15] + intercept * m[11] + offset * m[7]) -
+          (m[12] + intercept * m[8] + offset * m[4]);
+      const double f = ny * (m[15] + intercept * m[11] + offset * m[7]) -
+          (m[13] + intercept * m[9] + offset * m[5]);
+      const double determinant = a * e - b * d;
+      if (fabs(determinant) < 1e-12) return false;
+      Point p = {(c * e - b * f) / determinant, (a * f - c * d) / determinant};
+      const double w = m[3] * p.x + m[7] * (p.y + offset) +
+          m[11] * (intercept + slope * p.y) + m[15];
+      if (!isfinite(p.x) || !isfinite(p.y) || w <= 0) return false;
+      polygon[corner] = p;
+    }
+    for (int side = 0; side < 2 && n; ++side) {
+      if ((!side && !row) || (side && row == kDioramaPlaneSubdivY - 1)) continue;
+      const double edge = side ? yb : ya;
+      int next = 0;
+      for (int i = 0; i < n; ++i) {
+        const Point a = polygon[i], b = polygon[(i + 1) % n];
+        const bool in_a = side ? a.y >= edge : a.y <= edge;
+        const bool in_b = side ? b.y >= edge : b.y <= edge;
+        if (in_a) scratch[next++] = a;
+        if (in_a != in_b) {
+          const double t = (edge - a.y) / (b.y - a.y);
+          scratch[next++] = (Point){a.x + t * (b.x - a.x), edge};
+        }
+      }
+      n = next;
+      memcpy(polygon, scratch, (size_t)n * sizeof(*polygon));
+    }
+    for (int i = 0; i < n; ++i) {
+      const double x = (polygon[i].x / g.aspect_x + 0.5) * capture->width;
+      const double y = (0.5 - polygon[i].y / g.height_scale) * capture->height;
+      x0 = fmin(x0, x); x1 = fmax(x1, x); y0 = fmin(y0, y); y1 = fmax(y1, y);
+    }
+  }
+  if (!isfinite(x0) || !isfinite(y0) || !isfinite(x1) || !isfinite(y1)) return false;
+  *out = (ArRenderRectF){(float)x0, (float)y0, (float)(x1 - x0), (float)(y1 - y0)};
+  return true;
+}
+
 /* A's water is a finite moving plane. Lower it to the viewport's bottom;
  * the enlarged faces occupy the space above it. Four native rows of guard
  * keep the captured bottom border and its filter footprint below the output. */

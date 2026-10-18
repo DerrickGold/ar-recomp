@@ -1617,23 +1617,12 @@ wide('undo()');assert.equal(wide('roomSectionIni(room)'),wideIni);
 console.log('16:9/16:10 guide coverage, pixel aspect, toggles, shared drag and preview-only preferences passed');
 
 wide(`$('#framingProjection').value='diorama';$('#framingProjection').onchange();`);
-assert.equal(wide('framingRect(true,16/10).w'),473);
-assert.equal(wide('framingRect(true,16/10).h'),296);
-assert.equal(wide('framingRect(true,16/9).w'),525);
-assert.equal(wide('framingRect().h'),224);
-assert.equal(wide('framingRect().y+framingRect().h/2'),
-  wide('framingRect(true,16/10).y+framingRect(true,16/10).h/2'));
-wide(`$('#framingDistance').value='4';$('#framingDistance').onchange();`);
-assert.equal(wide('framingRect(true,16/10).w'),582);
+assert.equal(wide('framingRect(true,16/10)'),null,'do not invent a camera footprint before WASM loads');
+wide('SharedRoomPreview.measure=()=>({rect:{x:32,y:-16,w:480,h:300}});');
+assert.equal(wide('JSON.stringify(framingRect(true,16/10))'),'{"x":32,"y":-16,"w":480,"h":300}');
 wide(`$('#framingPixelAspect').value='crt';$('#framingPixelAspect').onchange();`);
-assert.equal(wide('framingRect(true,16/10).w'),499);
-wide(`$('#framingDistance').value='NaN';$('#framingDistance').onchange();`);
-assert.equal(wide('framingDistance'),4);
-wide(`$('#framingDistance').value='0';$('#framingDistance').onchange();`);
-assert.equal(wide('framingDistance'),4);
-assert.equal(wide('roomSectionIni(room)'),wideIni);
-assert.equal(wide('undoStack.length'),wideHistory);
-console.log('Diorama coverage estimate follows runtime FOV, distance and pixel aspect without exporting preferences');
+assert.equal(wide("$('#sharedPixels').value"),'1','map and renderer use the same pixel aspect');
+console.log('Diorama guides consume the shared camera footprint without a parallel projection model');
 
 /* Trim only empty authoring margins; artwork, pixel edits and framing survive. */
 const trimEditor=editor(fixture()),trim=trimEditor.run;
@@ -2394,8 +2383,8 @@ assert.equal(oe.get('#tileActionMirrorV').disabled,true);
 assert.equal(oe.get('#tileActionFlipH').disabled,false);
 console.log('Explicit horizontal/vertical range mirroring reverses ABC to flipped CBA, keeps Flip in-place, and preserves signed coordinates, clipboard order and undo');
 
-/* The measured 02:08 minimum is the calibrated default, not the smaller
- * analytical FOV estimate. Workspace cannot satisfy saved scenery coverage. */
+/* Coverage consumes the C renderer's result. Workspace changes remain
+ * independent of painted scenery; no renderer means no guessed recommendation. */
 const coverageData=fixture();
 for(const r of coverageData.rooms) {
   r.bg=r.bg.map(bg=>({...bg,pagesWide:1}));
@@ -2404,99 +2393,45 @@ for(const r of coverageData.rooms) {
 const coverageView={aspect:'16:10',pixelAspect:'square',distance:3.25,
   tiltX:0,tiltY:0,cameraMode:'dynamic',source:'settings.ini'};
 const covEditor=editor(coverageData,{view:coverageView}),cv=covEditor.run,ce=covEditor.elements;
-assert.equal(cv('showCoverageGuide'),true);
-assert.equal(cv('framingPixelAspect'),'square');
-assert.equal(cv('framingDistance'),3.25);
-assert.equal(cv('JSON.stringify(currentCoveragePlan().required)'),'{"x0":-8,"y0":-2,"x1":24,"y1":18}');
+assert.equal(cv('currentCoveragePlan()'),null);
+assert.equal(ce.get('#coverageAddSpace').disabled,true);
+cv(`let measured={x:0,y:0,minX:0,maxX:0,maxY:31,rect:{x:-128,y:-32,w:512,h:320},fill:0};
+  SharedRoomPreview.measure=()=>measured;refreshNativeCameraControls();`);
 assert.equal(cv('JSON.stringify(currentCoveragePlan().missing)'),'{"left":8,"right":8,"top":2,"bottom":2}');
 cv('const coverageBefore=mergeDioramaIni(),coverageBeforeUndo=undoStack.length;');
 assert.equal(cv('addCoverageSpace()'),true);
 assert.equal(cv('undoStack.length'),cv('coverageBeforeUndo')+1);
 assert.equal(cv('currentCoveragePlan().fits'),false);
 assert.equal(cv('coverageFits(currentCoveragePlan().spaceMissing)'),true);
-assert.equal(ce.get('#coverageAddSpace').disabled,true);
-assert.match(ce.get('#coverageWorkspace').textContent,/Workspace is large enough/);
 assert.equal(cv('Object.keys(stampBucket(room,0).cells).length'),0);
 cv('undo()');assert.equal(cv('JSON.stringify(mapBounds(room,0))'),'{"x0":0,"y0":0,"x1":16,"y1":16}');
 cv('redo();tileClipboard={key:keyOf(room,0),w:1,h:1,cells:[blankTile()]};stampTiles(-8,-2);stampTiles(23,17);');
 assert.equal(cv('currentCoveragePlan().fits'),true);
 cv('ctx.strokes=[];drawCoverageGuide();');
 assert.equal(cv('ctx.strokes[0].color'),'#76d19c');
-cv('const coverageSaved=mergeDioramaIni();');
-cv("$('#framingX').value='16';$('#framingY').value='-16';setRoomFraming();");
-assert.equal(cv('JSON.stringify(currentCoveragePlan().required)'),'{"x0":-7,"y0":-3,"x1":25,"y1":17}');
-assert.equal(cv('JSON.stringify(currentCoveragePlan().missing)'),'{"left":0,"right":1,"top":1,"bottom":0}');
-cv('undo();');
-cv("$('#coverageAspect').value='16:9';$('#coverageAspect').onchange();");
-assert.equal(cv('currentCoveragePlan().required.x1-currentCoveragePlan().required.x0'),36);
-assert.equal(cv('JSON.stringify(currentCoveragePlan().missing)'),'{"left":2,"right":2,"top":0,"bottom":0}');
-cv("$('#coverageAspect').value='16:10';$('#coverageAspect').onchange();$('#framingPixelAspect').value='crt';$('#framingPixelAspect').onchange();");
-assert.equal(cv('currentCoveragePlan().required.x1-currentCoveragePlan().required.x0'),28);
-cv("$('#framingPixelAspect').value='square';$('#framingPixelAspect').onchange();$('#framingDistance').value='6.5';$('#framingDistance').onchange();");
-assert.equal(cv('currentCoveragePlan().required.x1-currentCoveragePlan().required.x0'),64);
-assert.equal(cv('currentCoveragePlan().required.y1-currentCoveragePlan().required.y0'),40);
-cv("$('#framingDistance').value='3.25';$('#framingDistance').onchange();$('#coverageBasis').value='projection';$('#coverageBasis').onchange();");
-assert.equal(cv('currentCoveragePlan().required.x1-currentCoveragePlan().required.x0'),30);
-assert.ok(cv('Math.abs((coverageFootprint().y1-coverageFootprint().y0)-2*3.25*Math.tan(.2)*224)<1e-8'));
-cv("$('#coverageBasis').value='calibrated';$('#coverageBasis').onchange();$('#coverageTiltX').value='10';$('#coverageTiltX').onchange();");
-assert.ok(cv('currentCoveragePlan().required.y1-currentCoveragePlan().required.y0>20'));
-cv("$('#coverageTiltX').value='0';$('#coverageTiltX').onchange();window.innerWidth=2560;window.innerHeight=1600;coverageCache=null;");
-assert.equal(cv('JSON.stringify(currentCoveragePlan().required)'),'{"x0":-8,"y0":-2,"x1":24,"y1":18}');
-assert.equal(cv('mergeDioramaIni()'),cv('coverageSaved'));
-cv("$('#coverageQuick').onclick();");
-assert.equal(cv('showCoverageGuide'),false);
-assert.equal(cv('mergeDioramaIni()'),cv('coverageSaved'));
-cv("$('#coverageFit').onclick();setNativeCamera('x',16);");
-assert.equal(cv('currentCoveragePlan().required.x0'),-8); // native 256px room does not scroll X
-cv("setMode('3d');$('#coverageFit').onclick();");
-assert.equal(cv('mode'),'2d');
-cv("selectOnlyTile(-8,-2);applySelectionBand(0);");
-assert.ok(cv('currentCoveragePlan().required.x1-currentCoveragePlan().required.x0>32'));
-cv('undo();');
-cv("$('#terrain').value='1';$('#terrain').onchange();");
-assert.equal(cv('currentCoveragePlan().fits'),false);
-assert.equal(cv('JSON.stringify(currentCoveragePlan().missing)'),'{"left":8,"right":8,"top":2,"bottom":2}');
-cv("$('#framingDistance').value='20';$('#framingDistance').onchange();$('#coverageAspect').value='16:9';$('#coverageAspect').onchange();");
-assert.equal(ce.get('#coverageAddSpace').disabled,false); // big, but still within the coordinate budget
-cv('stampBucket(room,0).bounds={x0:-496,y0:0,x1:16,y1:16};refreshCoverageControls();const coverageLimitBefore=JSON.stringify(stampBucket(room,0));');
-assert.equal(ce.get('#coverageAddSpace').disabled,true);
-assert.equal(cv('addCoverageSpace()'),false);
-assert.equal(cv('JSON.stringify(stampBucket(room,0))'),cv('coverageLimitBefore'));
-cv('stampBucket(room,0).bounds=undefined;refreshCoverageControls();');
-cv("roomConfig(room).planes.bg1={...emptyPlane(),setZ:true,z:4};refreshCoverageControls();");
-assert.equal(cv('currentCoveragePlan()!==null'),true); // far enough camera still sees this depth
-cv("$('#framingDistance').value='3.25';$('#framingDistance').onchange();");
-assert.equal(cv('currentCoveragePlan()'),null);
-assert.equal(ce.get('#coverageAddSpace').disabled,true);
-assert.equal(cv('addCoverageSpace()'),false);
-console.log('Calibrated 32x20 coverage, per-edge deficits, empty workspace, undo, framing, aspect/PAR/distance/tilt/depth, resolution independence and regional isolation passed');
+cv("$('#coverageAspect').value=String(16/9);$('#coverageAspect').onchange();");
+assert.equal(cv("$('#sharedAspect').value"),String(16/9));
+cv('measured={...measured,x:120,minX:120,maxX:152};setNativeCamera("x",1000);');
+assert.equal(cv('nativeCamera.x'),120,'shared policy owns preview travel');
+assert.equal(ce.get('#nativeCameraX').max,'152');
+cv('measured={...measured,fill:2};refreshCoverageControls();');
+assert.match(ce.get('#coverageSummary').textContent,/engine fills/);
+assert.equal(cv('addCoverageSpace()'),false,'skybox coverage does not require painting');
+cv('measured={...measured,fill:1};refreshCoverageControls();');
+assert.match(ce.get('#coverageMissing').textContent,/background policy/);
+console.log('Runtime coverage transport, optional border extensions, workspace/paint distinction, camera bounds and skybox/policy guidance passed');
 
 if(process.argv[3]) {
   const cameras=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
-  const parity=editor(coverageData,{view:coverageView}),cp=parity.run;
-  for(const camera of cameras)for(const par of [1,7/6]) {
-    cp(`coverageTiltX=${camera.tiltX};coverageTiltY=${camera.tiltY};framingDistance=${camera.distance};
-      coverageAspect='${camera.width===1600?'16:10':'16:9'}';coverageBasis='projection';
-      framingPixelAspect='${par===1?'square':'crt'}';
-      roomConfig(room).planes.bg1={...emptyPlane(),setZ:true,z:${camera.depth+.5}};`);
-    const actual=JSON.parse(cp('JSON.stringify(coverageFootprint())'));
-    const points=[];
-    for(const x of [0,1])for(const y of [0,1]) {
-      const matrix=camera.matrix;
-      const p=Array.from(cp(`unprojectToPlane(${JSON.stringify(matrix)},${x},${y},${camera.depth},1,1)`));
-      const clipX=matrix[0]*p[0]+matrix[4]*p[1]+matrix[8]*camera.depth+matrix[12];
-      const clipY=matrix[1]*p[0]+matrix[5]*p[1]+matrix[9]*camera.depth+matrix[13];
-      const clipW=matrix[3]*p[0]+matrix[7]*p[1]+matrix[11]*camera.depth+matrix[15];
-      assert.ok(Math.abs((clipX/clipW+1)/2-x)<1e-6);
-      assert.ok(Math.abs((1-clipY/clipW)/2-y)<1e-6);
-      points.push([p[0]*224/par,-p[1]*224]);
-    }
-    const expected={x0:Math.min(...points.map(p=>p[0])),x1:Math.max(...points.map(p=>p[0])),
-      y0:Math.min(...points.map(p=>p[1])),y1:Math.max(...points.map(p=>p[1]))};
-    for(const key of Object.keys(expected))assert.ok(Math.abs(actual[key]-expected[key])<.002,
-      `C/JS inverse projection ${key}: ${actual[key]} versus ${expected[key]}`);
+  for(const camera of cameras)for(const x of [0,1])for(const y of [0,1]) {
+    const matrix=camera.matrix;
+    const p=Array.from(cv(`unprojectToPlane(${JSON.stringify(matrix)},${x},${y},${camera.depth},1,1)`));
+    const clipX=matrix[0]*p[0]+matrix[4]*p[1]+matrix[8]*camera.depth+matrix[12];
+    const clipY=matrix[1]*p[0]+matrix[5]*p[1]+matrix[9]*camera.depth+matrix[13];
+    const clipW=matrix[3]*p[0]+matrix[7]*p[1]+matrix[11]*camera.depth+matrix[15];
+    assert.ok(Math.abs((clipX/clipW+1)/2-x)<1e-6);
+    assert.ok(Math.abs((1-clipY/clipW)/2-y)<1e-6);
   }
-  console.log(`${cameras.length} C camera matrices match editor inverse-projected coverage for square/CRT pixels`);
 }
 
 if (process.argv[2]) {
@@ -2530,17 +2465,9 @@ if (process.argv[2]) {
   assert.ok(bloodpool>=0);
   const savedCoverage=editor(data,{view,ini});
   savedCoverage.run(`$('#room').value='${bloodpool}';$('#room').onchange();`);
-  assert.equal(savedCoverage.run('coverageAspect'),view.aspect);
   assert.equal(savedCoverage.run('framingPixelAspect'),view.pixelAspect);
   assert.equal(savedCoverage.run('framingDistance'),view.distance);
-  assert.equal(savedCoverage.run('coverageTiltX'),view.tiltX);
-  assert.equal(savedCoverage.run('coverageTiltY'),view.tiltY);
-  // Local settings and room edits can change independently of the measured
-  // reference. Check its geometry with an explicit pose and original artwork.
-  const referenceCoverage=editor(data,{view:coverageView});
-  referenceCoverage.run(`$('#room').value='${bloodpool}';$('#room').onchange();`);
-  assert.equal(referenceCoverage.run('JSON.stringify(currentCoveragePlan().required)'),'{"x0":-8,"y0":-2,"x1":24,"y1":18}');
-  console.log('Built view settings are respected; original Bloodpool 2:8 retains the calibrated 16:10 reference');
+  assert.equal(savedCoverage.run('currentCoveragePlan()'),null,'no fallback estimate in non-WASM unit host');
   actual.run(`$('#room').value='${bloodpool}';$('#room').onchange();openTilePalette();
     const bloodpoolEntries=paletteEntries(L,'metatile');
     const unusedArtwork=bloodpoolEntries.find(({id,used})=>!used&&

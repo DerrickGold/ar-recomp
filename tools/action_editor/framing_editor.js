@@ -4,7 +4,7 @@ const roomFraming=r=>stampBucket(r,0).framing||{x:0,y:0};
 let showFramingGuide=true;
 let framingPixelAspect=window.__ACTION_VIEW__?.pixelAspect||'crt';
 let framingProjection=window.__ACTION_VIEW__?'diorama':'native';
-let framingDistance=window.__ACTION_VIEW__?.distance||3.25;
+let framingDistance=window.__ACTION_VIEW__?.distance??3.25;
 const wideFramingGuides=[
   {id:'framing169',label:'16:9',ratio:16/9,color:'#65dce9',show:true},
   {id:'framing1610',label:'16:10',ratio:16/10,color:'#c49aff',show:true},
@@ -13,13 +13,7 @@ const framingRect=(adjusted=true,ratio=null)=>{
   const f=adjusted?roomFraming(room):{x:0,y:0};
   const par=framingPixelAspect==='crt'?7/6:1;
   if(ratio&&framingProjection==='diorama') {
-    // Runtime FOV is 0.4 radians; one world unit is 224 native pixels.
-    // This is the untilted BG1 plane, before dynamic vertical edge alignment.
-    const depth=Math.max(.01,framingDistance-(resolvedPlane('bg1').z-.5));
-    const height=2*depth*Math.tan(.4/2)*DATA.frameHeight;
-    const w=Math.ceil(height*ratio/par),h=Math.ceil(height);
-    return {x:nativeCamera.x+f.x+(DATA.frameWidth-w)/2,
-      y:nativeCamera.y+1+f.y+(DATA.frameHeight-h)/2,w,h};
+    return SharedRoomPreview.measure?.(0,String(ratio))?.rect||null;
   }
   // Match HostDisplay_ResolveVideoGeometry: expand equally in whole columns.
   const extra=ratio?Math.max(0,Math.ceil((Math.ceil(DATA.frameHeight*ratio/par)-DATA.frameWidth)/2)):0;
@@ -29,6 +23,7 @@ const framingRect=(adjusted=true,ratio=null)=>{
 };
 function framingCoverageRect(adjusted=true) {
   return wideFramingGuides.filter(g=>g.show).map(g=>framingRect(adjusted,g.ratio))
+    .filter(Boolean)
     .reduce((a,b)=>b.w>a.w?b:a,framingRect(adjusted));
 }
 function framingIniLines(r) {
@@ -57,7 +52,7 @@ function refreshFramingControls() {
     +`${nativeCamera.x}, ${nativeCamera.y}. Saved offset ${f.x}, ${f.y} px.`;
   $('#framingViewportInfo').textContent=wideFramingGuides.filter(g=>g.show)
     .map(g=>{const r=framingRect(true,g.ratio);
-      return `${g.label}: ${framingProjection==='diorama'?'≈':''}${r.w}×${r.h} map pixels`;}).join(' · ');
+      return r?`${g.label}: ${Math.ceil(r.w)}×${Math.ceil(r.h)} map pixels`:`${g.label}: loading camera`;}).join(' · ');
   refreshCoverageControls();
 }
 function writeRoomFraming(next) {
@@ -65,6 +60,7 @@ function writeRoomFraming(next) {
   if(JSON.stringify(target.framing)===JSON.stringify(next))return false;
   if(part&&!('framing' in part.before))part.before.framing=target.framing;
   target.framing=next;nativeBandCache=null;glDirty=true;
+  SharedRoomPreview.invalidate();
   refreshFramingControls();draw();return true;
 }
 function setRoomFraming(reset=false) {
@@ -146,7 +142,8 @@ function drawFramingGuide() {
     ctx.fillStyle=color;ctx.fillText(text,lx+8,ly+12);
   };
   for(const guide of wideFramingGuides.filter(g=>g.show)) {
-    const [gx,gy,gw,gh]=rect(framingRect(true,guide.ratio));
+    const footprint=framingRect(true,guide.ratio);if(!footprint)continue;
+    const [gx,gy,gw,gh]=rect(footprint);
     ctx.lineWidth=2;ctx.strokeStyle=guide.color;ctx.setLineDash([]);
     ctx.strokeRect(gx,gy,gw,gh);
     if(gx+gw>=0&&gy+gh>=0&&gx<=canvas.width&&gy<=canvas.height)
@@ -172,7 +169,7 @@ $('#frameTool').onclick=()=>mode==='2d'&&brush==='framing'?$('#bSelect').onclick
 $('#showFraming').onchange=()=>{showFramingGuide=$('#showFraming').checked;
   if(!showFramingGuide&&brush==='framing')$('#bSelect').onclick();draw();};
 function refreshViewportGuides() {
-  finishFramingDrag();refreshFramingControls();
+  finishFramingDrag();refreshNativeCameraControls();
   if(mode==='2d'&&brush==='framing')fitFramingGuides();
   draw();
 }
@@ -180,14 +177,15 @@ for(const guide of wideFramingGuides)$(`#${guide.id}`).onchange=()=>{
   guide.show=$(`#${guide.id}`).checked;refreshViewportGuides();
 };
 $('#framingPixelAspect').onchange=()=>{
-  framingPixelAspect=$('#framingPixelAspect').value==='square'?'square':'crt';refreshViewportGuides();
+  framingPixelAspect=$('#framingPixelAspect').value==='square'?'square':'crt';
+  $('#sharedPixels').value=framingPixelAspect==='crt'?'1':'0';refreshViewportGuides();
 };
 $('#framingProjection').onchange=()=>{
   framingProjection=$('#framingProjection').value==='diorama'?'diorama':'native';refreshViewportGuides();
 };
 $('#framingDistance').onchange=()=>{
   const value=Number($('#framingDistance').value);
-  if(Number.isFinite(value)&&value>=2&&value<=20)framingDistance=value;
+  if(Number.isFinite(value)&&value>=0&&value<=20)framingDistance=value;
   refreshViewportGuides();
 };
 window.addEventListener('blur',()=>finishFramingDrag());

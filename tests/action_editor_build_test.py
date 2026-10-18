@@ -158,6 +158,17 @@ int main(void) {
             self.assertEqual(preview_settings(settings)['aspect'], '4:3')
             settings.write_text(settings.read_text() + 'gpu_fx_rim = Off\n')
             self.assertFalse(preview_settings(settings)['rimLight'])
+            for aspect in ('Auto', 'Stretch'):
+                settings.write_text('extended_aspect = '+aspect+'\n'
+                                    'diorama_camera_mode = Dynamic Cam\n'
+                                    'diorama_dyncam_baseline_distance_x100 = 0\n'
+                                    'diorama_vertical_extend = 32\n'
+                                    'diorama_skybox = Both\n')
+                view = preview_settings(settings)
+                self.assertEqual(view['aspect'], aspect)
+                self.assertEqual(view['distance'], 0)
+                self.assertEqual(view['vertical'], 32)
+                self.assertEqual(view['skybox'], 2)
 
 
 if __name__ == "__main__":

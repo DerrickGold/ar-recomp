@@ -1119,6 +1119,20 @@ static SrResult replace_ppu_capture_tiles(
     return SR_RESULT_OK;
 }
 
+static SrResult resolve_ppu_capture_aprons(
+        SrRunnerHandle *runner, const SrPpuCaptureApronResolveRequest *request) {
+    Snes *snes = runner_from_handle(runner);
+    if (!snes || !request ||
+        request->struct_size < SR_PPU_CAPTURE_APRON_RESOLVE_REQUEST_SIZE)
+        return SR_RESULT_INVALID_ARGUMENT;
+    if (request->flags) return SR_RESULT_UNSUPPORTED;
+    if (request->lifetime_generation != snes->abiLifetimeGeneration)
+        return SR_RESULT_STALE_VIEW;
+    Ppu *ppu = ppu_output_control_target(snes);
+    if (!ppu) return SR_RESULT_UNAVAILABLE;
+    return PpuResolveCaptureAprons(ppu) ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
+}
+
 static SrResult update_ppu_authentic_camera(
         SrRunnerHandle *runner,
         const SrPpuAuthenticCameraRequest *request) {

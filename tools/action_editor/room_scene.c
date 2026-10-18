@@ -659,9 +659,12 @@ bool EditorRoomScene_ResolveCamera(const EditorRoomScene *r, int x, int y,
     DioramaSkyMode skybox, EditorRoomCamera *out) {
   if (!r || !out || x < 0 || y < 0 || x > 65535 || y > 65535 || extra_x < 0 ||
       extra_x > 128 || budget < 0 || budget > 64) return false;
+  const int maximum_y = Max(0, (int)EditorRoomScene_Height(r) - 225);
+  x = Min(x, Max(0, (int)EditorRoomScene_Width(r) - 256));
+  y = Min(y, maximum_y);
   ActionBgPlan plan;
   if (!EditorRoomScene_BgPolicy(r, x, y, frame, false, &plan, NULL)) return false;
-  *out = (EditorRoomCamera){.x = x};
+  *out = (EditorRoomCamera){.x = x, .y = y, .maximum_y = maximum_y};
   for (unsigned bg = 0; bg < 2; ++bg) {
     const bool edits = DioramaCameraPolicy_HasEdits(&r->terrain, bg);
     if (DioramaCameraPolicy_NeedsBgApron(&r->terrain, bg, edits,
@@ -688,6 +691,34 @@ bool EditorRoomScene_ResolveCamera(const EditorRoomScene *r, int x, int y,
   out->x = ActionCameraAxisBounds_Clamp(&out->travel, x);
   return true;
 }
+bool EditorRoomScene_MeasureView(const EditorRoomScene *r, uint32_t frame,
+    int extra, int vertical, const DioramaView *view, DioramaSkyMode skybox,
+    const EditorRoomCamera *camera, unsigned bg, ArRenderRectF *footprint, int *fill) {
+  if (!r || !view || !camera || bg > 1 || !footprint || !fill) return false;
+  ActionBgPlan plan;
+  int camera_x[2];
+  if (!EditorRoomScene_BgPolicy(r, camera->x, camera->y, frame, false, &plan, camera_x)) return false;
+  const ActionBgLayerPlan *layer = &plan.layer[bg];
+  *fill = bg == 1 && skybox == kDioramaSky_Only ? 2 :
+      !DioramaCameraPolicy_FiniteLayer(layer) ? 1 : 0;
+  if (*fill == 2) { *footprint = (ArRenderRectF){0}; return true; }
+  DioramaCapture capture = DioramaCameraPolicy_Capture(&plan, &r->terrain,
+      camera->x, camera->y, extra, vertical, camera->bg_apron_mask);
+  capture.camera_y = camera->y;
+  capture.bg2_camera_y = plan.layer[1].camera_y;
+  capture.bg2_world_height = plan.layer[1].world_height;
+  capture.bg2_vertical_ratio = r->assets.scene.video_profile[10];
+  capture.bg2_scroll_valid = true;
+  DioramaRenderOptions options = r->options;
+  options.skybox = skybox;
+  DioramaScene scene = r->scene;
+  scene.render = &options;
+  if (!Diorama_ResolveCaptureFootprint(&capture, view, &scene,
+      bg ? SR_PPU_OVERLAY_BG2 : SR_PPU_OVERLAY_BG1, footprint)) return false;
+  footprint->x += camera_x[bg] - extra;
+  footprint->y += layer->camera_y + 1 - capture.authentic_y0;
+  return true;
+}
 bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
                             int extra_x, int budget, const EditorRoomCamera *camera) {
   if (!r || x < 0 || y < 0 || x > 65535 || y > 65535 || extra_x < 0 ||
@@ -697,6 +728,9 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
     if (!EditorRoomScene_ResolveCamera(r, x, y, frame, extra_x, budget, NULL, r->options.skybox, &fallback))
       return false;
     camera = &fallback;
+  } else {
+    x = camera->x;
+    y = camera->y;
   }
   ActionRoomSceneFrameRequest request = r->assets.frame;
   request.camera_x = x; request.camera_y = y; request.game_frame = frame;

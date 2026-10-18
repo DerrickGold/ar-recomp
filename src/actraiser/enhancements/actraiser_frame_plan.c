@@ -363,11 +363,10 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
       frame_policy->vertical_clip_bottom_rows[layer] =
           (uint32_t)bottom_rows;
     }
-    /* BG3 is screen-space HUD/title text, not additional world. Auto must
-     * not expose its staged/wrapped tilemap rows above or below the screen. */
-    if (automatic)
-      frame_policy->vertical_clip_layer_mask |=
-          1u << SR_PPU_OVERLAY_BG3; /* Its zero row budgets remain native-only. */
+    /* BG3 is screen-space HUD/title text in both Auto and Diorama. Keep its
+     * zero row budgets native-only: wrapped glyphs outside the HUD capture
+     * can also suppress the world's colour-math addend (Marahna's shadow HUD). */
+    frame_policy->vertical_clip_layer_mask |= 1u << SR_PPU_OVERLAY_BG3;
   }
 
   /* AR_VEXT_TILES=1: dump the primary tilemap ids the band reads next to the

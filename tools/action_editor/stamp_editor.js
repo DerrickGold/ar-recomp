@@ -42,6 +42,7 @@ function recordBounds(key) {
 }
 function sceneryChanged() {
   markEditorChanged();surfacesDirty=compositeDirty=glDirty=true;
+  SharedRoomPreview.invalidate();
   invalidateOther();invalidateGameComposite();refreshNativeCameraControls();
   refreshSelectionControls();draw();
 }

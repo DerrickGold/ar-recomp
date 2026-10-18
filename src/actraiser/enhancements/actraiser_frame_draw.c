@@ -383,6 +383,14 @@ static void ActRaiser_FinishSceneCapture(void) {
    * apron's claimed-set test sees the completed scene planes. */
   const ActionApronGeometry apron_geom = ActRaiser_ObjApronGeometry();
   ActRaiser_DioramaApronFinish(&apron_geom);
+  /* Isolated apron sprites must join the same subscreen winner resolve as
+   * scanout before additive planes are published (notably Marahna's water). */
+  if (apron_geom.apron > 0 && ActRaiser_DioramaBgApronMask() &&
+      !ActRaiser_ResolvePpuCaptureAprons()) {
+    static bool reported;
+    if (!reported) fprintf(stderr, "[ppu-capture] could not resolve additive capture aprons\n");
+    reported = true;
+  }
   FinishBackgroundPacket();
 }
 

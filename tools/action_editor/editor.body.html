@@ -63,30 +63,24 @@
       <option value="square">Square pixels</option></select></div>
   <div class="ctl"><label for="framingProjection">Guide coverage</label>
     <select id="framingProjection"><option value="native">Flat viewport</option>
-      <option value="diorama">Diorama estimate</option></select></div>
+      <option value="diorama">Game camera (shared renderer)</option></select></div>
   <div class="ctl"><label for="framingDistance">Camera distance</label>
-    <input id="framingDistance" type="number" min="2" max="20" step="0.25" value="3.25" disabled></div>
+    <input id="framingDistance" type="number" min="0" max="20" step="0.25" value="3.25" title="Saved baseline distance. Zero selects the game's automatic fit." disabled></div>
   <p class="hint" id="framingViewportInfo"></p>
   <details class="coverage-panel" open><summary>Diorama map coverage</summary>
-    <p class="hint"><label><input id="showCoverage" type="checkbox" checked> Show required tile area and uncovered edges</label></p>
-    <div class="ctl"><label for="coverageAspect">Aspect</label><select id="coverageAspect"><option value="16:10">16:10</option><option value="16:9">16:9</option><option value="4:3">4:3</option></select></div>
-    <div class="ctl"><label for="coverageBasis">Target</label><select id="coverageBasis"><option value="calibrated">Tested minimum</option><option value="projection">Projection only</option></select></div>
-    <div class="ctl"><label for="coverageTiltX">Tilt X °</label><input id="coverageTiltX" type="number" min="-45" max="45" step="0.5" value="0"></div>
-    <div class="ctl"><label for="coverageTiltY">Tilt Y °</label><input id="coverageTiltY" type="number" min="-45" max="45" step="0.5" value="0"></div>
+    <p class="hint"><label><input id="showCoverage" type="checkbox" checked> Show game view and exposed room borders</label></p>
+    <div class="ctl"><label for="coverageAspect">Preview aspect</label><select id="coverageAspect"><option value="auto">Auto (editor window)</option><option value="1.6">16:10</option><option value="1.7777777777777777">16:9</option><option value="1.3333333333333333">4:3</option><option value="2.3333333333333335">21:9</option><option value="3.5555555555555554">32:9</option><option value="custom">Custom monitor</option><option value="stretch">Stretch</option></select></div>
     <p id="coverageSummary" class="coverage-summary" role="status" aria-live="polite"></p>
     <p id="coverageMissing" class="hint"></p>
     <p id="coverageWorkspace" class="hint"></p>
-    <div class="palette-filters"><button id="coverageFit">Fit coverage</button><button id="coverageAddSpace">Add required edge space</button></div>
+    <div class="palette-filters"><button id="coverageFit">Fit guide on map</button><button id="coverageAddSpace">Add edge workspace</button><button id="coveragePreview">Shared preview / view settings</button></div>
     <p class="hint" id="coverageReference"></p>
-    <p class="hint">Uses camera distance and pixel aspect above, selected BG depth, preview scroll and saved framing. Red = uncovered area; green = saved extents fit. Empty workspace is not saved scenery: stamp or paint its tiles. This checks outer bounds, not transparent holes. Free orbit, reactive camera movement and raster effects can show more than this baseline.</p>
+    <p class="hint">Uses the shared renderer's camera stops, fit, framing and current preview zoom/tilt. Green = scenery bounds cover the view; red = exposed borders. Short rooms can intentionally show their borders. Painting extensions is optional and can change camera travel; adding empty workspace cannot. This checks outer bounds on the base plane, not transparent holes, depth stacks or raster bands. Capture limits still apply when zooming out.</p>
   </details>
   <p class="hint">Dashed white = native view. Gold = adjusted native view.
     All colored frames move together. Drag with the Frame tool;
     arrows nudge 1 px, Shift + arrows 16 px.</p>
-  <p class="hint">Flat viewport uses native height. Diorama estimate uses BG1 depth
-    and the game's field of view: match your camera distance and pixel aspect.
-    It assumes zero tilt; dynamic floor alignment can shift the view vertically.
-    Resolution at the same aspect does not change coverage. Guide options are preview-only.</p>
+  <p class="hint">Game camera guides use the same C projection as shared preview. Flat guides show only the 224-row viewport. The map canvas pans freely for painting; preview scroll controls stop at gameplay boundaries. Preview settings are not exported into the level INI.</p>
   <p class="hint" id="framingGuideInfo"></p>
   <div class="ctl"><label for="framingX">View X</label>
     <input id="framingX" type="number" min="-64" max="64" step="1" value="0"></div>
@@ -346,11 +340,11 @@
     <button id="editorSettingsOpen">Settings…</button>
     <button id="mode2d" class="on">Map editor</button>
     <button id="modeNative">Original game frame</button>
-    <button id="mode3d">Diorama 3D</button>
+    <button id="mode3d" title="Free authoring view for inspecting depth. Use Shared renderer for game framing and camera limits.">Depth inspection</button>
     <button id="modeShared" disabled>Shared renderer</button>
     <span id="toolbarExtras" class="toolbar-extras">
     <button id="frameTool" aria-pressed="false" title="Adjust the saved native viewport on the map">Frame</button>
-    <button id="coverageQuick" class="on" aria-pressed="true" title="Show the required Diorama tile area and missing rows/columns">Coverage</button>
+    <button id="coverageQuick" class="on" aria-pressed="true" title="Show the game camera footprint and exposed room borders">Coverage</button>
     <button id="undoBtn" disabled>Undo</button>
     <button id="redoBtn" disabled>Redo</button>
     <button id="navFit" title="Fit the whole layer (f)">Fit</button>
@@ -413,14 +407,15 @@
   <div id="sharedControls" class="bar" hidden>
     <div class="shared-output-controls">
       <label for="sharedAspect">Aspect ratio</label>
-      <select id="sharedAspect" title="Preview a monitor shape using the shared compositor. Auto follows the available preview area.">
-        <option value="auto">Auto (preview area)</option>
+      <select id="sharedAspect" title="Preview a monitor shape using the shared compositor. Auto follows the editor window shape, independent of open tools.">
+        <option value="auto">Auto (editor window)</option>
         <option value="1.3333333333333333">4:3</option>
-        <option value="1.7777777777777778">16:9</option>
+        <option value="1.7777777777777777">16:9</option>
         <option value="1.6" selected>16:10 (Steam Deck)</option>
-        <option value="2.3333333333333333">21:9 (ultrawide)</option>
+        <option value="2.3333333333333335">21:9 (ultrawide)</option>
         <option value="3.5555555555555554">32:9 (super ultrawide)</option>
         <option value="custom">Custom monitor…</option>
+        <option value="stretch">Stretch (editor window)</option>
       </select>
       <span id="sharedCustomSize" hidden>
         <label for="sharedMonitorWidth">Width</label> <input id="sharedMonitorWidth" type="number" min="64" max="16384" step="1" value="3440">
@@ -431,13 +426,14 @@
     <button id="sharedPlacePlayer" type="button" aria-pressed="false">Place player</button>
     <button id="sharedPlayerSettings" type="button">Player settings…</button>
     <label>Pixels <select id="sharedPixels"><option value="0">Square</option><option value="1">CRT 4:3</option></select></label>
-    <label>Extra width <input id="sharedExtra" type="number" min="0" max="128" step="8" value="120" style="width:55px"></label>
-    <label>Extra height <select id="sharedVertical"><option value="0">0</option><option value="32">32</option><option value="64" selected>64</option></select></label>
+    <label title="Captured pixels per side, independent of the display crop. Game default: 120.">Capture width margin <input id="sharedExtra" type="number" min="0" max="128" step="8" value="120" style="width:55px"></label>
+    <label>Capture row budget <select id="sharedVertical"><option value="0">0</option><option value="32">32</option><option value="64" selected>64</option></select></label>
     <label><input id="sharedEffects" type="checkbox" checked> Environmental effects</label>
     <label>Backdrop <select id="sharedSky"><option value="0">Plane only</option><option value="1" selected>Skybox only</option><option value="2">Both</option></select></label>
-    <label>Distance <input id="sharedDistance" type="range" min="0.5" max="2.5" step="0.01" value="1" style="width:80px"></label>
+    <label title="Multiplier relative to the saved game camera baseline. 1 matches normal gameplay.">Inspect zoom <input id="sharedDistance" type="range" min="0.5" max="2.5" step="0.01" value="1" style="width:80px"></label>
     <label>Yaw <input id="sharedYaw" type="range" min="-0.7" max="0.7" step="0.01" value="0" style="width:65px"></label>
     <label>Pitch <input id="sharedPitch" type="range" min="-0.7" max="0.7" step="0.01" value="0" style="width:65px"></label>
+    <button id="sharedResetView">Reset to game view</button>
     <span id="sharedRoomStatus" role="status">Starting renderer…</span>
   </div>
   <div class="view">

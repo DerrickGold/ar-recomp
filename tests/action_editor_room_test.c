@@ -9,6 +9,7 @@
 #include <math.h>
 #include "action/action_effect_render.h"
 #include "diorama/diorama_camera_policy.h"
+#include "render/presentation_layout.h"
 
 static void CameraPolicy(EditorRoomScene *room, const ActionSceneSnapshot *assets) {
   if (assets->scene.group != 1 || assets->scene.map != 1) return;
@@ -166,8 +167,9 @@ int main(int argc, char **argv) {
      * Benchmarks intentionally retain their explicitly requested capture. */
     EditorRoomCamera camera;
     if (!benchmark) {
-      const DioramaView view = {.distance_scale = 1, .camera_framing_weight = 1,
-          .visible_width = 256 + 2 * extra, .viewport = {0, 0, 960, 600}};
+      const DioramaView view = {.camera = {.distance = 3.25f}, .distance_scale = 1, .camera_framing_weight = 1,
+          .visible_width = 360, .visible_height = 224,
+          .viewport = ArPresentationLayout_ResolveViewport(960,600,false,false,360,224)};
       assert(EditorRoomScene_ResolveCamera(room, x, y, frame, extra, vertical, &view, kDioramaSky_Only, &camera));
       x = camera.x;
     }

@@ -10,7 +10,7 @@ const blobs=data.blobs.map(s=>Uint8Array.from(Buffer.from(s,'base64')));
 const context=vm.createContext({window:{},Uint8Array,Uint32Array,DataView});
 vm.runInContext(fs.readFileSync('tools/action_editor/shared_preview.js','utf8'),context);
 const encode=vm.runInContext('SharedActionPreview.encode',context);
-let api,target=0,effect=-1,creates=0,effectParams=null;
+let api,target=0,effect=-1,creates=0,effectParams=null,viewport=[0,0,0,0];
 const textures=new Map(),uploads=[],draws=[];
 const ar={
   create(w,h,usage){let id=1;while(textures.has(id))id++;
@@ -19,10 +19,10 @@ const ar={
   update(id,x,y,w,h,p,pitch){const t=textures.get(id);assert(t&&x>=0&&y>=0&&x+w<=t.w&&y+h<=t.h);
     for(let row=0;row<h;row++)t.pixels.set(new Uint32Array(api.memory.buffer,p+row*pitch,w),(y+row)*t.w+x);
     uploads.push({id,x,y,w,h});return 1;},
-  target(id){target=id;return 1;},viewport(){return 1;},clip(){return 1;},clear(){return 1;},
+  target(id){target=id;return 1;},viewport(set,x,y,w,h){viewport=set?[x,y,w,h]:[0,0,0,0];return 1;},clip(){return 1;},clear(){return 1;},
   geometry(id,p,n,ip,ni){assert(!id||(textures.has(id)&&id!==target));
     const v=new Float32Array(api.memory.buffer,p,n*8).slice();assert(v.every(Number.isFinite));
-    draws.push({id,effect,target,params:effectParams,v,indices:new Int32Array(api.memory.buffer,ip,ni).slice()});return 1;},
+    draws.push({id,effect,target,viewport:[...viewport],params:effectParams,v,indices:new Int32Array(api.memory.buffer,ip,ni).slice()});return 1;},
   effect(kind,p,n){if(kind>=0){assert.equal(effect,-1);assert(new Float32Array(api.memory.buffer,p,n).every(Number.isFinite));}
     effect=kind;effectParams=kind>=0?new Float32Array(api.memory.buffer,p,n).slice():null;return 1;},available(){return 1;}
 };
@@ -66,8 +66,9 @@ for(const [kind,file,width,height] of [
 }
 console.log('Region handles: resized complete fields pass the native/WASM configuration contract.');
 configure(noEffects);
-let camera=[256,160],extra=120,vertical=64;
+let camera=[256,160],extra=120,vertical=64,baselineDistance=0;
 function render(view=[960,600,1,0,0,1,0]) {
+  assert.equal(api.RoomPreview_SetView(baselineDistance,0,0,2,1),1);
   draws.length=uploads.length=0;
   assert.equal(api.RoomPreview_Render(...camera,37,extra,vertical,...view),1);
   assert.equal(effect,-1,'shader bindings restored');
@@ -165,9 +166,9 @@ for(const [newExtra,newVertical] of [[0,0],[120,32],[128,64]]) {
   const mesh=draws.find(d=>d.id===spriteId&&d.effect===1);assert(mesh);
   let checks=0;
   for(let i=0;i<mesh.v.length;i+=8) {
-    const [sx,sy]=mesh.v.subarray(i,i+2),u=mesh.v[i+6],v=mesh.v[i+7];
+    const sx=mesh.v[i]+mesh.viewport[0],sy=mesh.v[i+1]+mesh.viewport[1],u=mesh.v[i+6],v=mesh.v[i+7];
     // Published mesh includes guard edges; pick within a useful editor range.
-    const wx=u*texture.w-extra-64+camera[0],wy=v*texture.h+camera[1]-vertical;
+    const wx=u*texture.w-extra-64+api.RoomPreview_CameraX(),wy=v*texture.h+camera[1]-vertical;
     if(wx<0||wx>400||wy<160||wy>500)continue;
     assert.equal(api.RoomPreview_PickReceiver(sx,sy),2);
     const picked=[...new Int32Array(api.memory.buffer,api.DioramaPreview_Input(),2)];
@@ -213,7 +214,10 @@ for(const tilted of [false,true])for(const margin of [0,120]) {
   if(stopped<1792)fittedViews++;
   const edge=draws.find(d=>d.id===spriteId&&d.effect===1);assert(edge);
   assert.equal(edge.v.length,center.v.length);
-  assert(edge.v.every((v,i)=>Math.abs(v-center.v[i])<.002),'camera travel cannot change sprite scale or projection');
+  const offset=[edge.v[0]-center.v[0],edge.v[1]-center.v[1]];
+  assert(edge.v.every((v,i)=>Math.abs(v-center.v[i]-(i%8<2?offset[i%8]:0))<.002),
+    'camera travel cannot change sprite scale; manual zoom may translate at the world edge');
+  if(distance===1&&!tilted)assert(offset.every(v=>Math.abs(v)<.002),'baseline framing stays fixed at the stop');
   const hash=api.RoomPreview_Hash(),allocations=creates;
   camera[0]=stopped+1;render(view);
   assert.equal(api.RoomPreview_CameraX(),stopped);
@@ -224,7 +228,7 @@ for(const tilted of [false,true])for(const margin of [0,120]) {
   // Pick a mesh point using the STOPPED origin, not the requested overscroll.
   let pickedPoint=false;
   for(let i=0;i<edge.v.length;i+=8) {
-    const [sx,sy]=edge.v.subarray(i,i+2),u=edge.v[i+6],v=edge.v[i+7];
+    const sx=edge.v[i]+edge.viewport[0],sy=edge.v[i+1]+edge.viewport[1],u=edge.v[i+6],v=edge.v[i+7];
     const wx=u*texture.w-extra-64+stopped,wy=v*texture.h+camera[1]-vertical;
     if(wx<stopped||wx>stopped+256||wy<180||wy>350)continue;
     assert.equal(api.RoomPreview_PickReceiver(sx,sy),2);
@@ -295,10 +299,10 @@ for(const h of [720,600,540,402,270])for(const pixel of [0,1])for(const rows of 
   captureViews++;
 }
 camera=[0,0];vertical=64;
-render([960,600,1.25,0,0,1,1]);
+render([960,600,2,0,0,1,1]);
 assert(sceneryEdges().top>0,'deliberate zoom-out can reveal capture edges');
 assert.equal(send(Buffer.from('[layers:02:08]\nbg1-policy = edge:world\n'),api.RoomPreview_Configure),1);
-let shortSpan;
+let shortSpan;baselineDistance=3.25;
 for(const y of [0,15,31]) {
   camera=[0,y];render([960,600,1,0,0,1,1]);
   const edge=sceneryEdges();
@@ -306,6 +310,7 @@ for(const y of [0,15,31]) {
   if(shortSpan!==undefined)assert(Math.abs(edge.span-shortSpan)<.002);
   shortSpan=edge.span;
 }
+baselineDistance=0;
 console.log(`Shared camera: ${captureViews} aspect/pixel/row combinations cover the capture without changing scale during travel.`);
 // The production moon must light materials in plane, skybox-only and combined
 // presentations. Isolate it from the existing wet-water/timber light passes.

@@ -510,6 +510,8 @@ bool PpuOverlaySurfaceHasContent(const Ppu *ppu, PpuOverlaySource source,
 
 void PpuClearOverlayCaptures(Ppu *ppu) {
     if (ppu == NULL) return;
+    ppu->captureApronBindingGeneration = 0;
+    memset(ppu->captureApronLines, 0, sizeof(ppu->captureApronLines));
     ppu->captureTileStableMask = 0;
     memset(ppu->captureTiles, 0, sizeof(ppu->captureTiles));
     memset(ppu->captureTileCoverage, 0, sizeof(ppu->captureTileCoverage));
@@ -1214,7 +1216,14 @@ static void bg_vram_world_position(const Ppu *ppu, int layer,
     }
 }
 
-static uint8_t layer_rank(const Ppu *ppu, int layer, int priority) {
+static unsigned layer_rank_mode(const Ppu *ppu) {
+    unsigned mode = PPU_mode(ppu);
+    if (mode == 1 && PPU_bg3priority(ppu)) mode = 8;
+    if (mode == 7 && PPU_m7extBg(ppu)) mode = 9;
+    return mode;
+}
+
+static uint8_t layer_rank_for_mode(unsigned mode, int layer, int priority) {
     static const uint8_t ranks[10][5][4] = {
         {{9,12,0,0}, {8,11,0,0}, {3,6,0,0}, {2,5,0,0}, {4,7,10,13}},
         {{7,10,0,0}, {6,9,0,0}, {2,4,0,0}, {0,0,0,0}, {3,5,8,11}},
@@ -1227,11 +1236,12 @@ static uint8_t layer_rank(const Ppu *ppu, int layer, int priority) {
         {{6,9,0,0}, {5,8,0,0}, {2,11,0,0}, {0,0,0,0}, {3,4,7,10}},
         {{4,0,0,0}, {2,6,0,0}, {0,0,0,0}, {0,0,0,0}, {3,5,7,8}}
     };
-    int mode = PPU_mode(ppu);
-    if (mode == 1 && PPU_bg3priority(ppu)) mode = 8;
-    if (mode == 7 && PPU_m7extBg(ppu)) mode = 9;
-    if ((unsigned)layer >= 5u || (unsigned)priority >= 4u) return 0u;
+    if (mode >= 10u || (unsigned)layer >= 5u || (unsigned)priority >= 4u) return 0u;
     return ranks[mode][layer][priority];
+}
+
+static uint8_t layer_rank(const Ppu *ppu, int layer, int priority) {
+    return layer_rank_for_mode(layer_rank_mode(ppu), layer, priority);
 }
 
 static bool window_inside(const Ppu *ppu, int layer, int screen_x) {
@@ -2182,6 +2192,234 @@ static bool source_visible_on_screen(const Ppu *ppu, int source, bool sub,
             !window_inside(ppu, source, x));
 }
 
+/* Authored capture pixels are presentation-only, but still take part in the
+ * captured scene's main/sub winner selection. In particular, extending a
+ * finite main-screen BG must not leave a hole in the subscreen OBJ addend.
+ * Read the already decoded rows; never change the authentic source buffers. */
+typedef struct CaptureEditLine {
+    uint32_t *pixels[3], *packet;
+    const uint8_t *coverage;
+    uint8_t rank[3];
+    int origin;
+    bool backing;
+} CaptureEditLine;
+
+enum {
+    kCaptureTileOwnedBands = 15u,
+    kCaptureTileWinnerShift = 4,
+    kCaptureTileOpaque = 64u,
+};
+
+static void capture_edit_line(Ppu *ppu, unsigned source, int y,
+                              CaptureEditLine *line) {
+    *line = (CaptureEditLine){0};
+    const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
+    if (!ppu->captureTiles[source].lookup || !capture_surface_bound(ppu, source) ||
+        y < capture->y0 || y >= capture->y1) return;
+    const size_t pitch = ppu->overlayRenderPitch[source];
+    const size_t offset = (size_t)overlay_row(capture, y) * pitch;
+    line->origin = surface_origin_x(ppu, pitch);
+    line->coverage = ppu->captureTileCoverage[source] + line->origin;
+    line->packet = background_packet_row(ppu, source, y);
+    line->backing = PpuOverlayTransparentFillColor(ppu, (PpuOverlaySource)source) != 0;
+    for (unsigned band = 0; band < 3; ++band) {
+        uint8_t *pixels = band ? ppu->overlayRenderBands[source][band - 1]
+                              : ppu->overlayRenderBuffer[source];
+        line->pixels[band] = pixels ? (uint32_t *)(pixels + offset) : NULL;
+        line->rank[band] = layer_rank(ppu, source, band == 1);
+    }
+}
+
+static unsigned capture_edit_band(const CaptureEditLine *line,
+                                  unsigned rank, uint8_t semantic) {
+    unsigned band = semantic == 0xffu ? (rank == line->rank[1]) :
+        semantic == 1u ? 0u : semantic == 2u ? 1u : 2u;
+    return line->pixels[band] ? band : 0u;
+}
+
+static unsigned capture_edit_rank(const CaptureEditLine *line, int x,
+                                  unsigned rank, uint8_t *semantic) {
+    const unsigned coverage = line->coverage ? line->coverage[x] : 0;
+    if (!coverage) return rank;
+    if ((coverage & kCaptureTileOwnedBands) == kCaptureTileOwnedBands ||
+        (coverage & (1u << capture_edit_band(line, rank, *semantic)))) rank = 0;
+    /* The tile decoder already knows the winning owned band. Keep that small
+     * tag with coverage instead of reading three RGB planes again per pixel. */
+    const unsigned band = (coverage >> kCaptureTileWinnerShift) & 3u;
+    if ((coverage & kCaptureTileOpaque) && line->rank[band] > rank) {
+        rank = line->rank[band];
+        *semantic = band == 0 ? 1u : band == 1 ? 2u : 0u;
+    }
+    return rank;
+}
+
+static void capture_edit_keep_addend(const CaptureEditLine *line, int x,
+                                     bool keep, unsigned rank, uint8_t semantic) {
+    const unsigned coverage = line->coverage ? line->coverage[x] : 0;
+    if (!(coverage & kCaptureTileOpaque)) return;
+    const unsigned winner = keep ? capture_edit_band(line, rank, semantic) : 3u;
+    if (!line->backing) {
+        /* A decoded tile or a black mask writes only one owned band when
+         * there is no extra backing. Usually it already is the winner. */
+        const unsigned band = (coverage >> kCaptureTileWinnerShift) & 3u;
+        if (band != winner) {
+            line->pixels[band][line->origin + x] = 0;
+            if (line->packet) background_packet_write(line->packet,
+                (unsigned)(line->origin + x), band, 0);
+        }
+        return;
+    }
+    for (unsigned band = 0; band < 3; ++band) {
+        if (!(coverage & (1u << band)) || band == winner || !line->pixels[band]) continue;
+        line->pixels[band][line->origin + x] = 0;
+        if (line->packet) background_packet_write(line->packet,
+            (unsigned)(line->origin + x), band, 0);
+    }
+}
+
+static void capture_apron_line_state(Ppu *ppu, int y) {
+    const int index = y + kPpuExtraTopBottom;
+    if ((unsigned)index >= kPpuObjScanlineMaskRows) return;
+    PpuCaptureApronLine *line = &ppu->captureApronLines[index];
+    *line = (PpuCaptureApronLine){0};
+    if (!ppu->captureTiles[0].apron && !ppu->captureTiles[1].apron) return;
+    for (unsigned source = 0; source < kPpuOverlaySource_Count; ++source) {
+        const PpuOverlayCapture *cap = &ppu->overlayCaptures[source];
+        if (capture_surface_bound(ppu, source) && y >= cap->y0 && y < cap->y1 &&
+            (cap->flags & kPpuOverlayFlag_MarkFullAddSubscreen))
+            line->full_add |= 1u << source;
+    }
+    if (!line->full_add) return;
+    ppu->captureApronBindingGeneration = ppu->surfaceBindingGeneration;
+    line->rank_mode = (uint8_t)layer_rank_mode(ppu);
+    if (PPU_forcedBlank(ppu)) return;
+    line->math = PPU_mathEnabled(ppu);
+    for (unsigned side = 0; side < 2; ++side) {
+        /* SNES windows clamp to the native edge throughout each apron. */
+        const int x = side ? kPpuXPixels : -1;
+        for (unsigned source = 0; source < kPpuOverlaySource_Count; ++source) {
+            if (source_visible_on_screen(ppu, source, false, x)) line->main[side] |= 1u << source;
+            if (source_visible_on_screen(ppu, source, true, x)) line->sub[side] |= 1u << source;
+        }
+    }
+}
+
+/* Captured guard tiles and host-rasterized OBJ parts are isolated sources.
+ * Full add needs one subscreen winner, just like the main capture, otherwise
+ * a sprite crossing that boundary suddenly receives both its own colour and
+ * the terrain behind it. Resolve after OAM first-writer ownership is complete:
+ * hiding an early OBJ before that step could incorrectly expose a later OBJ.
+ * This touches only the two guards, never scanout or authentic output. */
+bool PpuResolveCaptureAprons(Ppu *ppu) {
+    if (!ppu) return false;
+    if (!ppu->captureApronBindingGeneration) return true;
+    if (ppu->captureApronBindingGeneration != ppu->surfaceBindingGeneration) return false;
+    int base = ppu->captureTiles[0].apron ? 0 : 1;
+    const PpuOverlayCapture *bounds = &ppu->overlayCaptures[base];
+    const int apron = ppu->captureTiles[base].apron;
+    if (!apron) return true;
+    const int width = (int)(ppu->overlayRenderPitch[base] / sizeof(uint32_t));
+    const int origin = surface_origin_x(ppu, ppu->overlayRenderPitch[base]);
+    if (apron > kPpuObjApron || width > kPpuSurfaceWidth ||
+        bounds->x0 < -ppu->extraLeftRight || bounds->x1 > kPpuXPixels + ppu->extraLeftRight ||
+        bounds->x1 <= bounds->x0 || bounds->x0 - apron + origin < 0 ||
+        bounds->x1 + apron + origin > width) return false;
+
+    /* Guard providers support BG1/BG2; OBJ is supplied by the host. Validate
+     * all participating storage before changing anything. HUD captures may
+     * have independent geometry and do not contribute guard pixels. */
+    const unsigned sources[] = {kPpuOverlaySource_Bg1, kPpuOverlaySource_Bg2, kPpuOverlaySource_Obj};
+    for (unsigned i = 0; i < 3; ++i) {
+        const unsigned source = sources[i];
+        if (!capture_surface_bound(ppu, source)) continue;
+        const PpuOverlayCapture *cap = &ppu->overlayCaptures[source];
+        if (cap->x0 != bounds->x0 || cap->x1 != bounds->x1 ||
+            cap->y0 != bounds->y0 || cap->y1 != bounds->y1 ||
+            ppu->overlayRenderPitch[source] != ppu->overlayRenderPitch[base] ||
+            cap->y1 <= cap->y0 || (ppu->overlayRenderHeight[source] &&
+             overlay_row(cap, cap->y1 - 1) >= (int)ppu->overlayRenderHeight[source]) ||
+            !ppu->overlayRenderBands[source][0] ||
+            (source == kPpuOverlaySource_Obj &&
+             (!ppu->overlayRenderBands[source][1] || !ppu->overlayRenderBands[source][2]))) return false;
+    }
+    for (int y = bounds->y0; y < bounds->y1; ++y) {
+        const int line_index = y + kPpuExtraTopBottom;
+        if ((unsigned)line_index >= kPpuObjScanlineMaskRows) continue;
+        const PpuCaptureApronLine *line = &ppu->captureApronLines[line_index];
+        if (!line->full_add) continue;
+        const int row = overlay_row(bounds, y);
+        if (row < 0) continue;
+        struct Candidate { uint32_t *pixels, *attributes; uint8_t source, rank; } candidates[10];
+        unsigned count = 0;
+        for (unsigned i = 0; i < 3; ++i) {
+            const unsigned source = sources[i];
+            if (!capture_surface_bound(ppu, source)) continue;
+            for (unsigned band = 0; band < (source == kPpuOverlaySource_Obj ? 4u : 3u); ++band) {
+                uint8_t *pixels = band ? ppu->overlayRenderBands[source][band - 1] : ppu->overlayRenderBuffer[source];
+                if (!pixels) continue;
+                const size_t offset = (size_t)row * ppu->overlayRenderPitch[source];
+                uint8_t *attributes = source == kPpuOverlaySource_Obj &&
+                    offset + ppu->overlayRenderPitch[source] <= ppu->objAttributes.pixel_byte_size[band]
+                    ? ppu->objAttributes.pixels[band] : NULL;
+                /* A presentation-only far band has ordinary BG priority. */
+                const unsigned priority = source == kPpuOverlaySource_Obj ? band : band == 1;
+                candidates[count++] = (struct Candidate){
+                    (uint32_t *)(pixels + offset), attributes ? (uint32_t *)(attributes + offset) : NULL,
+                    (uint8_t)source, layer_rank_for_mode(line->rank_mode, source, priority),
+                };
+            }
+        }
+        /* Resolve front to back, so the pixel loop needs no priority lookup
+         * or second sweep. Most guard bands are empty (especially OBJ); the
+         * contiguous OR below lets the compiler skip them a vector at a time. */
+        for (unsigned i = 1; i < count; ++i) {
+            const struct Candidate candidate = candidates[i];
+            unsigned j = i;
+            while (j && candidates[j - 1].rank < candidate.rank) {
+                candidates[j] = candidates[j - 1]; --j;
+            }
+            candidates[j] = candidate;
+        }
+        for (unsigned side = 0; side < 2; ++side) {
+            const int first = origin + (side ? bounds->x1 : bounds->x0 - apron);
+            const int end = first + apron;
+            struct Main { uint32_t *pixels; bool math; } main[10];
+            struct Sub { uint32_t *pixels, *attributes; bool visible, clear; } sub[10];
+            unsigned main_count = 0, sub_count = 0;
+            for (unsigned i = 0; i < count; ++i) {
+                const struct Candidate *c = &candidates[i];
+                const unsigned bit = 1u << c->source;
+                if (!((line->main[side] | line->sub[side] | line->full_add) & bit)) continue;
+                uint32_t occupied = 0;
+                for (int x = first; x < end; ++x) occupied |= c->pixels[x];
+                if (!occupied) continue;
+                if ((line->main[side] & bit) && c->rank > 1)
+                    main[main_count++] = (struct Main){c->pixels, (line->math & bit) != 0};
+                if ((line->sub[side] | line->full_add) & bit)
+                    sub[sub_count++] = (struct Sub){c->pixels, c->attributes,
+                        (line->sub[side] & bit) && c->rank > 1, (line->full_add & bit) != 0};
+            }
+            for (int x = first; x < end; ++x) {
+                bool math = false, found = false;
+                for (unsigned i = 0; i < main_count; ++i) {
+                    if (!main[i].pixels[x]) continue;
+                    math = main[i].math; break;
+                }
+                for (unsigned i = 0; i < sub_count; ++i) {
+                    const struct Sub *c = &sub[i];
+                    if (!c->pixels[x]) continue;
+                    if (math && c->visible && !found) { found = true; continue; }
+                    if (c->clear) {
+                        c->pixels[x] = 0;
+                        if (c->attributes) c->attributes[x] = 0;
+                    }
+                }
+            }
+        }
+    }
+    return true;
+}
+
 /* The packed capture path resolves MarkFullAddSubscreen itself (see the
  * full-add export in render_native_capture_line), so such a line no longer has
  * to be handed to the per-pixel reference sampler. Pure main-winner masks
@@ -2253,7 +2491,7 @@ static void capture_obj_sources(Ppu *ppu, int x, int y, int obj_offset) {
 static SrPpuPixel resolve_screen(Ppu *ppu, int x, int y, bool sub,
         bool capture, int obj_offset, bool honor_removal,
         int excluded_source, bool exclude_relocated_obj,
-        SrPpuPixel *unremoved_out) {
+        SrPpuPixel *unremoved_out, const CaptureEditLine *edits) {
     SrPpuPixel result = {ppu->cgram[0], 1u, 5u, 0u, 0u, 0xffu, true};
     SrPpuPixel unremoved = result;
     for (int layer = 0; layer < 4; ++layer) {
@@ -2264,8 +2502,15 @@ static SrPpuPixel resolve_screen(Ppu *ppu, int x, int y, bool sub,
         enabled = source_visible_on_screen(ppu, layer, sub, x);
         /* Disabled layers cannot win this screen or be exported from it.
          * Reject them before the comparatively expensive tile fetch. */
-        if (!enabled || !sample_bg(ppu, layer, x, y, capture, &pixel))
-            continue;
+        if (!enabled) continue;
+        (void)sample_bg(ppu, layer, x, y, capture, &pixel);
+        if (edits && layer < 2) {
+            pixel.rank = capture_edit_rank(&edits[layer], x,
+                pixel.valid ? pixel.rank : 0u, &pixel.band);
+            pixel.valid = pixel.rank > 1;
+            pixel.layer = (uint8_t)layer;
+        }
+        if (!pixel.valid) continue;
         export_this_pass = enabled &&
             (!sub || (ppu->screenEnabled[0] & (1u << layer)) == 0u);
         if (capture && export_this_pass && capture_active(cap, x, y) &&
@@ -2555,9 +2800,9 @@ static void render_mode7_override_line(Ppu *ppu, int screen_y) {
                 if (!covered && !native_covered) continue;
                 if (!resolved) {
                     main = resolve_screen(ppu, x, screen_y, false,
-                        false, 0, true, 0, false, NULL);
+                        false, 0, true, 0, false, NULL, NULL);
                     sub = resolve_screen(ppu, x, screen_y, true,
-                        false, 0, true, 0, false, NULL);
+                        false, 0, true, 0, false, NULL, NULL);
                     main_hd = on_main && rank > main.rank;
                     sub_hd = on_sub && rank > sub.rank;
                     under = color_rgb(ppu, final_color(ppu, x, &main, &sub));
@@ -4446,14 +4691,14 @@ static void native_capture_tile_run(Ppu *ppu, int layer, int x, int run,
         const bool transparent = (tile->transparent_rows[fine_y] & (0x80u >> px)) != 0u;
         if (transparent) {
             if (packet_row) packet_row[column] = UINT32_C(0x80000000);
-            ppu->captureTileCoverage[layer][column] = 15u;
+            ppu->captureTileCoverage[layer][column] = kCaptureTileOwnedBands;
             plan->primary[column] = 0u;
             for (unsigned priority = 0; priority < 3; ++priority)
                 if (plan->bands[priority]) plan->bands[priority][column] = 0u;
             continue;
         }
         if (!replace && !black) continue;
-        ppu->captureTileCoverage[layer][column] = replace ? 15u : (1u << band);
+        unsigned coverage = replace ? kCaptureTileOwnedBands : (1u << band);
         if (replace) {
             if (packet_row) {
                 packet_row[column] |= UINT32_C(0x80000000);
@@ -4461,7 +4706,10 @@ static void native_capture_tile_run(Ppu *ppu, int layer, int x, int run,
                     backing ? 258u : 0u);
             }
             plan->primary[column] = backing;
-            if (backing) ppu->overlayRenderContentMask[layer] |= 1u;
+            if (backing) {
+                ppu->overlayRenderContentMask[layer] |= 1u;
+                coverage |= kCaptureTileOpaque;
+            }
         }
         unsigned character_x = (tile->entry & 0x4000u) ? 7 - px : px;
         unsigned pixel = (decoded >> (character_x * 4)) & 15u;
@@ -4470,7 +4718,13 @@ static void native_capture_tile_run(Ppu *ppu, int layer, int x, int run,
                 (unsigned)band, black ? 257u : palette + pixel + 1u);
             target[column] = black ? 0xff000000u : native_overlay_color(plan, palette + pixel);
             ppu->overlayRenderContentMask[layer] |= (uint8_t)(1u << band);
+            /* An ordinary opaque backing ties with a far-band edit. High
+             * priority wins over it; otherwise ordinary precedes far. */
+            if (!(coverage & kCaptureTileOpaque) || band != 2)
+                coverage = (coverage & kCaptureTileOwnedBands) | kCaptureTileOpaque |
+                    ((unsigned)band << kCaptureTileWinnerShift);
         }
+        ppu->captureTileCoverage[layer][column] = (uint8_t)coverage;
     }
 }
 
@@ -4604,13 +4858,18 @@ static void native_capture_tiles_line(Ppu *ppu, int layer, int screen_y,
         if (native_visible && (!draw || !(tile.flags & SR_PPU_CAPTURE_TILE_REPLACE)) &&
             (x < capture->x0 || x >= capture->x1)) {
             if (!draw) tile = (SrPpuCaptureTile){0};
-            tile.flags = SR_PPU_CAPTURE_TILE_REPLACE;
-            draw = world->lookup(world->context, tx, ty, &tile.entry) ==
-                kPpuVirtualTilemapLookup_Found;
-            tile.band = (tile.entry & 0x2000u) ? 2u : 1u;
-            if (draw && world->band_lookup)
-                (void)world->band_lookup(world->context, tx, ty, tile.entry, &tile.band);
-            if (tile.band > 2) draw = false;
+            uint16_t entry;
+            if (world->lookup(world->context, tx, ty, &entry) == kPpuVirtualTilemapLookup_Found) {
+                tile.flags = SR_PPU_CAPTURE_TILE_REPLACE;
+                tile.entry = entry;
+                tile.band = (entry & 0x2000u) ? 2u : 1u;
+                draw = true;
+                if (world->band_lookup)
+                    (void)world->band_lookup(world->context, tx, ty, entry, &tile.band);
+                if (tile.band > 2) draw = false;
+            }
+            /* A finite source ending here does not erase an authored black
+             * or transparent pixel mask. It still owns those guard pixels. */
         }
         if (draw && visibility == 1u) {
             native_capture_tile_run(ppu, layer, x, run, fx, fy, step,
@@ -5415,11 +5674,76 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
      * mid-frame BG-mode change makes reachable. */
     if (full_add_mask != 0u) {
         unsigned math_enabled = PPU_mathEnabled(ppu);
+        CaptureEditLine edits[2];
+        for (unsigned source = 0; source < 2; ++source)
+            capture_edit_line(ppu, source, screen_y, &edits[source]);
         const PpuOverlayCapture *bg3_capture =
             &ppu->overlayCaptures[kPpuOverlaySource_Bg3];
         bool bg3_bound = capture_surface_bound(ppu, kPpuOverlaySource_Bg3);
         bool obj_sub_enabled =
             (ppu->screenEnabled[1] & (1u << kPpuOverlaySource_Obj)) != 0u;
+        uint8_t (*addend_bands)[kPpuBufWidth] = scratch->addendBands;
+        uint16_t *edited_main = scratch->editedMain, *edited_sub = scratch->editedSub;
+        const int begin = left + kPpuExtraLeftRight, end = right + kPpuExtraLeftRight;
+        for (int index = begin; index < end; ++index)
+            original_main[index] = original_sub[index] = backdrop;
+        /* Apply edits to scratch rows, then merge in bulk. Keep each source's
+         * semantic bands separately so the packed rank comparison can
+         * vectorize without conditional band writes in the inner loop.
+         * Original source rows remain untouched for authentic output. */
+        for (int layer = 0; layer < kPpuOverlaySource_Obj; ++layer) {
+            if ((source_mask & (1u << layer)) == 0u) continue;
+            NativeLayerWindowPlan visibility;
+            native_layer_window_plan(ppu, layer, true, &visibility);
+            if (!visibility.main_mode && !visibility.sub_mode) continue;
+            const bool exclude_bg3 = layer == kPpuOverlaySource_Bg3 && bg3_bound;
+            const CaptureEditLine *edit = layer < 2 ? &edits[layer] : NULL;
+            const bool painted = edit && edit->coverage;
+            const uint16_t *source_main = layer_main[layer];
+            const uint16_t *source_sub = layer_sub[layer];
+            if (layer < 2)
+                memcpy(addend_bands[layer] + begin, bands[layer] + begin,
+                    (size_t)(end - begin));
+            if (painted) {
+                memcpy(edited_main + begin, source_main + begin,
+                    (size_t)(end - begin) * sizeof(uint16_t));
+                memcpy(edited_sub + begin, source_sub + begin,
+                    (size_t)(end - begin) * sizeof(uint16_t));
+                for (int x = left; x < right; ++x) {
+                    if (!edit->coverage[x]) continue;
+                    const int index = x + kPpuExtraLeftRight;
+                    const uint16_t original = source_main[index] > source_sub[index]
+                        ? source_main[index] : source_sub[index];
+                    const unsigned rank = capture_edit_rank(edit, x,
+                        native_pixel_rank(original), &addend_bands[layer][index]);
+                    const uint16_t pixel = rank > 1
+                        ? native_pack_pixel(original & 0xffu, rank, (unsigned)layer) : 0;
+                    const bool masked = native_window_plan_inside(&visibility, x);
+                    edited_main[index] = visibility.main_mode &&
+                        !(visibility.main_mode == 2u && masked) ? pixel : 0;
+                    edited_sub[index] = visibility.sub_mode &&
+                        !(visibility.sub_mode == 2u && masked) ? pixel : 0;
+                }
+                source_main = edited_main;
+                source_sub = edited_sub;
+            }
+            if (exclude_bg3 && screen_y >= bg3_capture->y0 && screen_y < bg3_capture->y1) {
+                for (int x = left; x < right; ++x) {
+                    const int index = x + kPpuExtraLeftRight;
+                    if ((x < bg3_capture->x0 || x >= bg3_capture->x1) &&
+                        source_main[index] > original_main[index])
+                        original_main[index] = source_main[index];
+                    if (source_sub[index] > original_sub[index])
+                        original_sub[index] = source_sub[index];
+                }
+            } else {
+                native_merge_packed_span(original_main + begin, original_sub + begin,
+                    source_main + begin, source_sub + begin, end - begin, true);
+            }
+        }
+        for (int index = begin; index < end; ++index)
+            if (layer_main[kPpuOverlaySource_Obj][index] > original_main[index])
+                original_main[index] = layer_main[kPpuOverlaySource_Obj][index];
         PpuObjSampleCache *sub_obj_cache = obj_sub_enabled
             ? get_scene_obj_sample_cache(
                   ppu, screen_y, 0, 0, 0,
@@ -5427,44 +5751,39 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                       ? ppu->overlayObjRelocatedFirst : 0u,
                   ppu->overlayObjRelocatedCount)
             : NULL;
+        NativeLayerWindowPlan sub_obj_visibility = obj_visibility;
+        sub_obj_visibility.run = 0;
         for (int x = left; x < right; ++x) {
             int index = x + kPpuExtraLeftRight;
-            uint16_t full_main = backdrop;
-            uint16_t full_sub = backdrop;
-            unsigned main_layer, sub_layer;
-            bool exclude_bg3 = bg3_bound &&
-                capture_active(bg3_capture, x, screen_y);
-            for (int layer = 0; layer < kPpuOverlaySource_Obj; ++layer) {
-                if ((source_mask & (1u << layer)) == 0u) continue;
-                if (exclude_bg3 && layer == kPpuOverlaySource_Bg3) continue;
-                if (layer_main[layer][index] > full_main)
-                    full_main = layer_main[layer][index];
-            }
-            if (layer_main[kPpuOverlaySource_Obj][index] > full_main)
-                full_main = layer_main[kPpuOverlaySource_Obj][index];
-            main_layer = native_pixel_layer(full_main);
-            if (main_layer >= 5u ||
-                (math_enabled & (1u << main_layer)) == 0u) continue;
-            for (int layer = 0; layer < kPpuOverlaySource_Obj; ++layer) {
-                if ((source_mask & (1u << layer)) == 0u) continue;
-                if (layer_sub[layer][index] > full_sub)
-                    full_sub = layer_sub[layer][index];
-            }
-            if (sub_obj_cache != NULL &&
-                source_visible_on_screen(
-                    ppu, kPpuOverlaySource_Obj, true, x)) {
+            uint16_t full_sub = original_sub[index];
+            const unsigned main_layer = native_pixel_layer(original_main[index]);
+            const bool math = main_layer < 5u && (math_enabled & (1u << main_layer)) != 0u;
+            if (sub_obj_cache != NULL && sub_obj_visibility.sub_mode &&
+                !(sub_obj_visibility.sub_mode == 2u && native_window_plan_inside(&sub_obj_visibility, x))) {
                 uint16_t obj = native_obj_cache_pixel(sub_obj_cache, x);
                 if (obj > full_sub) full_sub = obj;
             }
-            sub_layer = native_pixel_layer(full_sub);
-            if (sub_layer >= (unsigned)kPpuOverlaySource_Count ||
-                (full_add_mask & (1u << sub_layer)) == 0u) continue;
-            if (!capture_active(&ppu->overlayCaptures[sub_layer], x,
-                                screen_y)) continue;
-            native_write_overlay_packed(
-                ppu, (int)sub_layer, x, full_sub,
-                sub_layer < 2u ? bands[sub_layer][index] : 0xffu,
-                &overlay_plans[sub_layer]);
+            original_sub[index] = math ? full_sub : native_pack_pixel(0u, 0u, 5u);
+        }
+        /* Export one source at a time. Its routing, edit ownership and OBJ
+         * attribute policy are row-invariant; selecting a different plan for
+         * every winning pixel prevents those checks from being hoisted. */
+        for (unsigned source = 0; source < kPpuOverlaySource_Count; ++source) {
+            if (!(full_add_mask & (1u << source))) continue;
+            const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
+            NativeOverlayLinePlan *plan = &overlay_plans[source];
+            const CaptureEditLine *edit = source < 2 ? &edits[source] : NULL;
+            const uint8_t *source_bands = source < 2 ? addend_bands[source] : NULL;
+            for (int x = left; x < right; ++x) {
+                const int index = x + kPpuExtraLeftRight;
+                const uint16_t winner = original_sub[index];
+                const bool keep = native_pixel_layer(winner) == source;
+                const uint8_t band = keep && source_bands ? source_bands[index] : 0xffu;
+                if (edit)
+                    capture_edit_keep_addend(edit, x, keep, native_pixel_rank(winner), band);
+                if (keep && capture_active(capture, x, screen_y))
+                    native_write_overlay_packed(ppu, (int)source, x, winner, band, plan);
+            }
         }
     }
     if (dual_authentic) {
@@ -5751,6 +6070,7 @@ static bool render_line_to(Ppu *ppu, int screen_y, uint8_t *buffer,
     uint32_t *row;
     bool deferred_capture = false;
     bool full_add_capture = false;
+    CaptureEditLine edits[2] = {0};
     bool dual_authentic = capture && !authentic &&
         authentic_sampling_matches(ppu, screen_y);
     uint32_t *authentic_row = NULL;
@@ -5817,6 +6137,9 @@ static bool render_line_to(Ppu *ppu, int screen_y, uint8_t *buffer,
             native_overlay_line_plan(ppu, layer, screen_y, &colors);
             native_capture_tiles_line(ppu, layer, screen_y, &colors);
         }
+        if (full_add_capture)
+            for (unsigned source = 0; source < 2; ++source)
+                capture_edit_line(ppu, source, screen_y, &edits[source]);
     }
     for (int x = left; x < right; ++x) {
         int obj_offset = authentic ? ppu->authenticObjOffsetX : 0;
@@ -5850,9 +6173,9 @@ static bool render_line_to(Ppu *ppu, int screen_y, uint8_t *buffer,
             if (deferred_capture && (!dual_authentic || obj_handoff_on_line(ppu, screen_y))) {
                 original_main = resolve_screen(ppu, x, screen_y, false, false,
                                                obj_offset, false, -1, false,
-                                               NULL);
+                                               NULL, NULL);
                 original_sub = resolve_screen(ppu, x, screen_y, true, false,
-                                              0, false, -1, false, NULL);
+                                              0, false, -1, false, NULL, NULL);
                 full_main = original_main;
                 full_sub = original_sub;
             } else if (deferred_capture) {
@@ -5866,9 +6189,15 @@ static bool render_line_to(Ppu *ppu, int screen_y, uint8_t *buffer,
                     ? kPpuOverlaySource_Bg3 : -1;
                 full_main = resolve_screen(ppu, x, screen_y, false, false,
                                            obj_offset, false, excluded, false,
-                                           NULL);
+                                           NULL, edits);
                 full_sub = resolve_screen(ppu, x, screen_y, true, false,
-                                          0, false, -1, true, NULL);
+                                          0, false, -1, true, NULL, edits);
+                const bool math = full_main.layer < 5u &&
+                    (PPU_mathEnabled(ppu) & (1u << full_main.layer)) != 0u;
+                for (unsigned source = 0; source < 2; ++source)
+                    if (ppu->overlayCaptures[source].flags & kPpuOverlayFlag_MarkFullAddSubscreen)
+                        capture_edit_keep_addend(&edits[source], x,
+                            math && full_sub.layer == source, full_sub.rank, full_sub.band);
             }
             post_capture_masks(ppu, x, screen_y,
                                &original_main, &original_sub,
@@ -5939,6 +6268,7 @@ static void render_line(Ppu *ppu, int line) {
         ppu->virtualSampleCache[layer].valid = false;
     ppu->mode7SampleCache.valid = false;
     update_brightness(ppu);
+    capture_apron_line_state(ppu, screen_y);
     for (int source = 0; source < kPpuOverlaySource_Count; ++source)
         clear_overlay_row(ppu, source, screen_y, true);
     if (ppu->objRangeCapture.count != 0u && screen_y >= ppu->objRangeCapture.y0 &&
@@ -6212,6 +6542,8 @@ bool PpuRenderNativeBackgroundView(Ppu *ppu,
 void ppu_runLine(Ppu *ppu, int line) {
     if (ppu == NULL) return;
     if (line == 0) {
+        ppu->captureApronBindingGeneration = 0;
+        memset(ppu->captureApronLines, 0, sizeof(ppu->captureApronLines));
         /* No cross-frame promise: a host may update immutable lookup data
          * between frames without rebinding the same callback. */
         if (ppu->captureTileStableMask)

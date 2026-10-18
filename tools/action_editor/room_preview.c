@@ -12,6 +12,8 @@
 #include "action/action_environment_exposure.h"
 #include "action/action_exposure.h"
 #include "render/scenery_dimming.h"
+#include "render/presentation_layout.h"
+#include "present/display_geometry.h"
 #include "action/action_effect_projection.h"
 #include "action/action_effect_render.h"
 #include <math.h>
@@ -36,6 +38,56 @@ static bool s_cached;
 static int s_x, s_y, s_extra, s_vertical;
 static uint32_t s_frame;
 static EditorRoomCamera s_camera;
+static DioramaCameraPose s_baseline = {.distance = 3.25f};
+static int s_aspect_mode = 1;
+static bool s_dynamic_camera = true;
+
+/* 0 native 4:3, 1 fixed wide ratio, 2 Auto/custom monitor, 3 Stretch.
+ * Capture budgets are independent of the display crop, just as in the game. */
+int RoomPreview_SetView(float distance, float yaw, float pitch, int aspect_mode, int dynamic_camera) {
+  if (!isfinite(distance) || distance < 0 || distance > 20 ||
+      !isfinite(yaw) || fabsf(yaw) > 0.8f || !isfinite(pitch) || fabsf(pitch) > 0.8f ||
+      aspect_mode < 0 || aspect_mode > 3 || dynamic_camera < 0 || dynamic_camera > 1) return 0;
+  s_baseline = (DioramaCameraPose){.distance = distance, .tilt_x = pitch, .tilt_y = yaw};
+  s_aspect_mode = aspect_mode;
+  s_dynamic_camera = dynamic_camera != 0;
+  return 1;
+}
+static DioramaView PreviewView(int width, int height, int pixels,
+    float zoom, float yaw, float pitch) {
+  ActRaiserAutoCanvas canvas = {0};
+  if (s_aspect_mode == 2) DisplayGeometry_ResolveAutoCanvas(width, height, pixels == kPixelAspect_Crt43, &canvas);
+  else if (s_aspect_mode != 0) canvas.extra_columns = DisplayGeometry_CalculateHorizontal(
+      224, s_aspect_mode == 3 ? 16 : width, s_aspect_mode == 3 ? 9 : height,
+      pixels == kPixelAspect_Crt43, false).display_extra;
+  DioramaView view = {.camera = s_baseline, .distance_scale = zoom,
+    .camera_framing_weight = s_dynamic_camera ? 1 : 0,
+    .pixel_aspect = pixels, .ignore_aspect_ratio = s_aspect_mode == 3,
+    .visible_width = 256 + 2 * canvas.extra_columns, .visible_height = 224 + 2 * canvas.extra_rows};
+  view.camera.tilt_y += yaw; view.camera.tilt_x += pitch;
+  view.viewport = ArPresentationLayout_ResolveViewport(width, height, view.ignore_aspect_ratio,
+      pixels == kPixelAspect_Crt43, view.visible_width, view.visible_height);
+  return view;
+}
+/* Uses exactly the baseline camera stop used by Render, without doing a
+ * frame capture. Results are borrowed through the existing transport buffer. */
+unsigned RoomPreview_Measure(int x, int y, uint32_t frame, int extra, int vertical,
+    int width, int height, float zoom, float yaw, float pitch, int skybox, int pixels, unsigned bg) {
+  if (!s_room || width < 1 || height < 1 || width > 2048 || height > 2048 ||
+      !isfinite(zoom) || zoom < 0.5f || zoom > 2.5f || !isfinite(yaw) || fabsf(yaw) > 0.7f ||
+      !isfinite(pitch) || fabsf(pitch) > 0.7f || skybox < 0 || skybox > 2 || pixels < 0 || pixels > 1) return 0;
+  const DioramaView baseline = PreviewView(width, height, pixels, 1, 0, 0);
+  const DioramaView view = PreviewView(width, height, pixels, zoom, yaw, pitch);
+  EditorRoomCamera camera;
+  ArRenderRectF rect; int fill;
+  if (!EditorRoomScene_ResolveCamera(s_room, x, y, frame, extra, vertical, &baseline, skybox, &camera) ||
+      !EditorRoomScene_MeasureView(s_room, frame, extra, vertical, &view, skybox, &camera, bg, &rect, &fill)) return 0;
+  const float result[] = {camera.x, camera.y, camera.travel.minimum, camera.travel.maximum, camera.maximum_y,
+    rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, fill, view.visible_width, view.visible_height,
+    view.viewport.x, view.viewport.y, view.viewport.w, view.viewport.h};
+  memcpy(DioramaPreview_Input(), result, sizeof(result));
+  return sizeof(result) / sizeof(*result);
+}
 static unsigned s_uploads;
 static uint64_t s_bg2_revision;
 static ArRenderTexture s_page, s_view;
@@ -619,12 +671,11 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
       width > 2048 || height > 2048) return 0;
   s_uploads = 0; s_effect_vertices = 0;
   s_receiver_projection.valid=false;
-  DioramaView view = {.camera = {.tilt_x = pitch, .tilt_y = yaw},
-    .distance_scale = distance, .camera_framing_weight = 1, .pixel_aspect = pixel_aspect,
-    .visible_width = 256 + 2 * extra, .viewport = {0,0,width,height}};
+  DioramaView view = PreviewView(width, height, pixel_aspect, distance, yaw, pitch);
+  const DioramaView baseline = PreviewView(width, height, pixel_aspect, 1, 0, 0);
   EditorRoomCamera camera;
-  if (!EditorRoomScene_ResolveCamera(s_room, x, y, frame, extra, vertical, &view, skybox, &camera)) return 0;
-  x = camera.x;
+  if (!EditorRoomScene_ResolveCamera(s_room, x, y, frame, extra, vertical, &baseline, skybox, &camera)) return 0;
+  x = camera.x; y = camera.y;
   if (!s_cached || x != s_x || y != s_y || frame != s_frame || extra != s_extra || vertical != s_vertical ||
       camera.bg_apron_mask != s_camera.bg_apron_mask ||
       camera.travel.minimum != s_camera.travel.minimum || camera.travel.maximum != s_camera.travel.maximum) {

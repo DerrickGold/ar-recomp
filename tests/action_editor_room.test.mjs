@@ -49,9 +49,9 @@ const imports={
    }
    return 1;},
  effect(kind,p,n){
-   assert(kind>=-1&&kind<=4);
+   assert(kind>=-1&&kind<=5);
    if(kind>=0){
-     assert.equal(effect,-1);assert.equal(n,[3,3,9,4,17][kind]);
+     assert.equal(effect,-1);assert.equal(n,[3,3,9,4,17,19][kind]);
      const params=new Float32Array(api.memory.buffer,p,n);assert(params.every(Number.isFinite));
      if(kind===4)assert(textures.has(params[16])&&params[16]!==target,'illumination map is a valid separate texture');
    }
@@ -78,6 +78,28 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
  const room={...base,bg:[terrain.bg1,base.bg[1]],terrainProfile:terrain.profile};
  const packet=encode(data,blobs,room);assert.equal(send(packet,api.RoomPreview_Load),1);
  assert.equal(send(Buffer.from(roomIni),api.RoomPreview_Configure),1,`configuration ${base.group}:${base.map}`);
+ // Measurement must be cheap and independent of render history. Cover real
+ // room policies/edits at native, wide and capped ultrawide monitor shapes.
+ const untouched=[api.RoomPreview_Hash(),creates,updates,draws];
+ const nx=room.bg[0].pagesWide*256-256,ny=room.bg[0].pagesHigh*256-225;
+ for(const [w,h,mode] of [[960,720,0],[960,600,1],[960,540,1],[960,411,2],[960,270,2],[540,960,2]])
+ for(const pixels of [0,1]) {
+   assert.equal(api.RoomPreview_SetView(3.25,0,0,mode,1),1);
+   const request=[nx+256,ny+256,37,120,64,w,h,1,0,0,1,pixels];
+   assert.equal(api.RoomPreview_Measure(...request,0),16,`camera footprint ${base.group}:${base.map}`);
+   const a=Array.from(new Float32Array(memory,api.DioramaPreview_Input(),16));
+   assert(a.every(Number.isFinite));assert(a[0]>=0&&a[0]<=nx&&a[0]===a[3]);
+   assert.equal(a[1],ny);assert.equal(a[4],ny);assert(a[7]>a[5]&&a[8]>a[6]);
+   assert(a[14]<=w&&a[15]<=h,'viewport respects capped content and letterboxing');
+   request[7]=1.4;request[8]=.2;request[9]=-.1;
+   assert.equal(api.RoomPreview_Measure(...request,0),16);
+   const inspect=Array.from(new Float32Array(memory,api.DioramaPreview_Input(),16));
+   assert.deepEqual(inspect.slice(0,5),a.slice(0,5),'inspection pose cannot change gameplay travel');
+   assert.equal(api.RoomPreview_Measure(...request,1),16);
+   assert.equal(new Float32Array(memory,api.DioramaPreview_Input(),16)[9],2,'skybox fills without painted extension');
+ }
+ assert.deepEqual([api.RoomPreview_Hash(),creates,updates,draws],untouched,'coverage queries never scan out, upload or draw');
+ assert.equal(api.RoomPreview_SetView(3.25,0,0,1,1),1);
  const beforeCatalogue=[api.RoomPreview_Hash(),api.RoomPreview_EffectHash(),creates,updates,draws];
  const catalogueCount=api.RoomPreview_CatalogueCount(),catalogueKeys=new Set();
  assert(catalogueCount<1024);
@@ -640,15 +662,19 @@ assert.equal(presetChecks,data.rooms.reduce((n,r)=>n+stagePresets.filter(p=>p.ro
 // the world camera stops, shaft dust must stop too, in every backdrop mode.
 const forest=data.rooms.find(r=>r.group===1&&r.map===1);
 assert.equal(send(encode(data,blobs,forest),api.RoomPreview_Load),1);
-// The center can remain fixed while aspect changes both guard capture and
-// finite skybox travel. Cached and freshly configured views must agree.
+// Aspect changes the displayed footprint independently of captured guard
+// pixels. Cached and freshly configured views must agree.
 assert.equal(send(Buffer.from(''),api.RoomPreview_Configure),1);
 assert.equal(api.RoomPreview_Render(1920,300,128,120,64,960,600,1,0,0,1,0),1);
-const narrowHash=api.RoomPreview_Hash();
+assert.equal(api.RoomPreview_Measure(1920,300,128,120,64,960,600,1,0,0,1,0,0),16);
+const narrowFootprint=Array.from(new Float32Array(memory,api.DioramaPreview_Input(),16));
 assert.equal(api.RoomPreview_Render(1920,300,128,120,64,960,540,1,0,0,1,0),1);
 assert.equal(api.RoomPreview_CameraX(),1920);
 const wideHash=api.RoomPreview_Hash();
-assert.notEqual(wideHash,narrowHash,'wide view captures real guard terrain');
+assert.equal(api.RoomPreview_Measure(1920,300,128,120,64,960,540,1,0,0,1,0,0),16);
+const wideFootprint=Array.from(new Float32Array(memory,api.DioramaPreview_Input(),16));
+assert(wideFootprint[7]-wideFootprint[5]>narrowFootprint[7]-narrowFootprint[5],
+  'wide monitor shows more world without changing the capture budget');
 assert.equal(send(Buffer.from(''),api.RoomPreview_Configure),1);
 assert.equal(api.RoomPreview_Render(1920,300,128,120,64,960,540,1,0,0,1,0),1);
 assert.equal(api.RoomPreview_Hash(),wideHash,'view changes invalidate stale capture policy');

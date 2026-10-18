@@ -142,23 +142,26 @@ configuration.
 The effects workspace includes a shared WASM preview. **Shared renderer**
 loads complete rooms directly into the production C PPU and Diorama compositor
 via WASM/WebGL2. No game capture or gameplay session is required. The original
-JavaScript **Diorama 3D** view also remains available.
+JavaScript view remains available as **Depth inspection**, a free authoring
+camera rather than a gameplay-framing preview.
 **Original game frame** remains a separate original-background comparison.
 
 Select **Shared renderer**, choose a room/terrain, then use **Camera & animation**
 to navigate and seek frames (0–65535) in either direction. Drag the preview or use
 arrows to pan. **Aspect ratio** above the shared view offers 4:3, 16:9, 16:10
-(Steam Deck), 21:9 and 32:9. **Auto (preview area)** follows the available editor
-viewport, including sidebar/window resizing. **Custom monitor…** accepts a
+(Steam Deck), 21:9 and 32:9. **Auto (editor window)** follows the browser window
+shape; showing tools or switching modes does not change it. **Stretch** uses
+the game's stretched 16:9 crop. **Custom monitor…** accepts a
 target width and height, such as 3440×1440 or 1080×1920. These control the actual
 shared compositor projection; the image is fitted into the editor without
 stretching. The preview caps its longest side at 960 pixels to keep rendering
 cost bounded. Monitor dimensions set the aspect, not a resolution benchmark.
-Changing output preserves camera position, player placement and authored data;
-pixel aspect and extra tile coverage remain independent controls.
+Changing output preserves player placement and authored data, and clamps the
+camera to the new gameplay limits. Pixel aspect and capture margins remain
+independent controls.
 
 The view bar also controls square/CRT pixel aspect,
-zoom/tilt, horizontal coverage, 0/32/64 vertical budget, and all three backdrop
+inspection zoom/tilt, capture width margin, 0/32/64 row budget, and all three backdrop
 modes. Camera/clock/coverage changes regenerate visible art from the complete
 room; orbit-only changes reuse rasterized surfaces. Existing tile, pixel, depth,
 alpha, scenery and framing edits feed the production INI resolver.
@@ -176,7 +179,9 @@ Aitos environmental kernels, exposure and camera-local waterfall sections also
 run in this view. Clock-based accent events and a placeable ROM player sprite
 are available. The preview omits other actors and HUD,
 gameplay-driven transitions, final CRT/heat and frame generation. The preview
-camera uses auto-fit plus its own controls; it does not replay the game's reactive camera. Captures
+camera uses the saved game baseline and production fit/clamping rules. **Reset
+to game view** clears inspection zoom/tilt. It does not replay transient reactive
+camera motion. Captures
 remain developer comparison fixtures, not an authoring requirement.
 
 ### Environmental authoring
@@ -819,7 +824,8 @@ out of the source tree and Git. By default it embeds the repository ROM and
 **Export level INI** opens a copyable replacement section for the current room.
 The dialog also offers **Download full INI…** for a complete merged file.
 The build also reads `settings.ini` for the Diorama coverage guide's aspect,
-pixel aspect, distance and camera tilt. An optional fourth build argument selects
+pixel aspect, distance, camera tilt/mode, vertical budget and backdrop mode.
+An optional fourth build argument selects
 another settings file. These preferences are embedded for offline use; the editor
 does not write game settings.
 
@@ -1196,38 +1202,30 @@ The same tile and pixel-edit limits apply, with an atomic capacity check.
 
 ### Diorama coverage and missing edge tiles
 
-**Coverage** shows a tile-aligned minimum envelope for the selected BG. Red
-shading shows where saved scenery falls short; green means its outer bounds
-cover the current baseline. **Diorama map coverage** reports the exact extra
-columns needed on the left/right and rows above/below. **Fit** and **Fit coverage**
-include that envelope. **Add required edge space** grows the workspace in one
-Undo step; stamp or paint those empty cells afterward. Workspace alone never
-counts as saved scenery, and this check does not prove that all interior pixels
-are opaque. Added transparent areas may be intentional.
+**Coverage** asks the shared C compositor for the selected BG's viewport
+footprint, using the same camera stops, aspect fit, saved framing, base-plane
+depth/rake/bow and inspection pose as **Shared renderer**. There is no reference
+room calibration or separate JavaScript projection. The query runs without PPU
+scanout, texture uploads or drawing and rounds outward to complete 16px cells.
 
-The **Tested minimum** calibration is `[layers:02:08]` / Bloodpool Act 2 room 8:
-`bounds:-8,-2,24,18`, or **32×20 tiles / 512×320 pixels**. At 16:10, square
-pixels, and Dynamic Cam baseline distance 3.25, this is the author's observed
-minimum at native display resolution. The original map is 16×16 tiles; it needs
-eight columns on each side and two rows above/below. This reference stays fixed
-even when editing or trimming that room later.
+Green means existing scenery covers the footprint's outer bounds. Red marks
+visible finite-room borders and reports optional columns/rows to cover them.
+Short rooms can intentionally show their borders; red is not an invalid-map
+error. Skybox backgrounds require no extra painted tiles. Mirrored, repeated
+or capped backgrounds instead report that their policy controls coverage.
 
-The guide inverse-projects the game's 0.4-radian camera frustum onto each used
-BG depth. It uses the runtime's camera rotation order, includes shaped-row and
-stack depth ranges, and scales the envelope by the measured reference factor
-(about 1.084). It rounds outward to complete 16px cells. **Projection only**
-omits the calibration and shows the smaller geometric estimate. Aspect, pixel
-aspect, camera distance, tilt, selected BG depth, preview scroll and saved
-framing update the counts. Small rooms keep their native vertical center;
-taller rooms anchor at finite vertical scroll edges. Resolution at a fixed
-aspect ratio does not change the source footprint.
+**Fit guide on map** includes this footprint in the authoring view. **Add edge
+workspace** grows the workspace in one Undo step; paint the empty cells afterward.
+Empty workspace never changes gameplay travel. Real painted extensions can
+change horizontal camera stops, within the original gameplay range.
 
-The build seeds controls from `settings.ini`, using Dynamic Cam's baseline
-instead of the inactive Free Cam pose. Controls and visibility are preview-only
-and do not export game settings. This is a baseline extent guide; free orbit,
-reactive camera movement, raster scroll effects and transparent holes can reveal
-more than the displayed area. Review other preview scroll positions for large
-scrolling levels. Other BGs can require more area because they sit farther away.
+The build seeds controls from `settings.ini`, including the selected camera
+mode's baseline. **Preview aspect** is linked to the shared renderer. Camera X/Y
+show its allowed travel and cannot overscroll; the painting canvas still pans
+freely. Controls are preview-only and do not export game settings. Review other
+positions in scrolling levels. This checks outer bounds of the base plane, not
+transparent holes, depth stacks, raster bands or transient reactive camera
+motion. Zooming/orbiting can reveal capture limits that painting alone cannot fix.
 
 ### Saved framing for small rooms
 
@@ -1238,20 +1236,15 @@ gold rectangle to set the saved offsets, or use arrow keys for 1px nudges and
 Shift + arrows for 16px. Each drag is one Undo step; Esc cancels the current
 drag and returns to Select. The guide uses BG1 coordinates; the offset moves
 the whole scene. **Show viewport guides on BG1** toggles the overlay. Switch to
-**Diorama 3D** to check the result with depth and perspective.
+**Shared renderer** to check the result with the game camera.
 
-The **16:9** (cyan) and **16:10** (purple) guides show wider coverage around
-the same center and move with the native frame. Toggle either independently;
-you can drag inside any visible viewport with the Frame tool. **Pixel aspect**
-should match the game's setting: CRT (4:3) covers 342×224 and 308×224 map pixels,
-while Square pixels covers 400×224 and 360×224, respectively. These widths use
-the game's rounding to equal whole-pixel margins. **Guide coverage → Diorama
-estimate** uses the game's 0.4-radian field of view, the BG1 plane depth, and
-**Camera distance** to show the wider projected footprint. Match the distance
-and pixel aspect from your game settings. At distance 3.25 with square pixels
-and BG1 depth 0.50, 16:10 covers roughly 473×296 map pixels. This estimate assumes
-zero tilt; dynamic floor alignment can shift its vertical position. Resolution
-alone does not change coverage at the same aspect ratio.
+The **16:9** (cyan) and **16:10** (purple) guides show the shared compositor's
+footprint at each aspect, including that aspect's camera stop. Toggle either
+independently; drag inside a visible viewport with the Frame tool. **Guide
+coverage → Game camera (shared renderer)** uses production projection, while
+**Flat viewport** shows the native 224-row crop only. **Pixel aspect** and
+**Camera distance** start from the game's settings; distance zero selects
+automatic fit. Resolution alone does not change coverage at a fixed aspect.
 Guide visibility, coverage, distance and pixel aspect are preview options; export still saves one
 shared framing offset for the room's terrain family.
 
@@ -1274,11 +1267,11 @@ terrain shares the setting; different regional layouts can be tuned separately.
 The existing **Native frame controls → Camera X / Y** only move the preview and
 are not exported.
 
-In **Shared renderer**, horizontal panning stops when the projected playfield
-reaches the finite room edge. The camera and captured tiles use the same stop,
-so further dragging or arrow input does not zoom the scene. Aspect ratio,
-distance, tilt, framing and actual pasted edge tiles determine that limit;
-empty editor workspace does not. The Camera X field reports the stopped
+In **Shared renderer** and game-camera map guides, horizontal panning uses the
+game's baseline camera limits; vertical panning stops at the native room bounds.
+Further dragging or arrow input cannot zoom the scene. Aspect ratio, saved
+baseline, framing and actual pasted tiles determine the horizontal limits;
+inspection zoom/tilt and empty workspace do not. Camera X/Y report the stopped
 position. Small rooms retain their existing framing.
 
 **Scenery & edge space → Trim unused edge space** removes unused authoring

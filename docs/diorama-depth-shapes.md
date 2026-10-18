@@ -30,7 +30,7 @@ are clamped to their draw-budget caps.
 
 Connected BG1 art can cross the low/high tile-priority boundary, as the rocks
 and sand do in Kassandora Act 1 (`03/02`) and the upper/lower water tiles do in
-Bloodpool Act 1 (`02/01`) and Marahna Act 1 (`05/01`). Keep both front faces at
+Bloodpool Act 1 (`02/01`) and Marahna Act 1 (`05/01`, `05/03`). Keep both front faces at
 `z:0.5` with matching rake and bow. Tile priority still controls sprite occlusion;
 it does not require separating the front faces in depth.
 

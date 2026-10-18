@@ -10,5 +10,6 @@ src/render/render_device.c
 src/render/render_output.c
 src/render/scene3d_math.c
 src/render/presentation_layout.c
+src/present/display_geometry.c
 src/action/action_bg_plan.c
 src/action/action_camera_bounds.c

@@ -253,3 +253,15 @@ bool ActRaiser_ConfigurePpuObjCapture(
       ActRaiser_RunnerApi()->configure_ppu_obj_capture(
           ActRaiser_Runner(), request) == SR_RESULT_OK;
 }
+
+bool ActRaiser_ResolvePpuCaptureAprons(void) {
+  const SrPpuFrameTransactionContext *frame = ActRaiser_PpuFrame();
+  const SnesRunnerApi *api = ActRaiser_RunnerApi();
+  if (!frame || !api || api->struct_size < SNES_RUNNER_API_PPU_CAPTURE_APRON_RESOLVE_SIZE ||
+      !(api->capabilities & SR_RUNNER_CAP_PPU_CAPTURE_APRON_RESOLVE) ||
+      !api->resolve_ppu_capture_aprons) return false;
+  const SrPpuCaptureApronResolveRequest request = {
+    .struct_size = sizeof(request), .lifetime_generation = frame->lifetime_generation,
+  };
+  return api->resolve_ppu_capture_aprons(ActRaiser_Runner(), &request) == SR_RESULT_OK;
+}

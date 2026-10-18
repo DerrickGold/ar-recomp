@@ -427,6 +427,15 @@ bool Diorama_ResolveCaptureCameraRange(const DioramaCapture *capture,
     const DioramaView *view, const DioramaScene *scene, int camera_x,
     int *minimum, int *maximum);
 
+/* Viewport footprint on a scenery plane, in display-capture pixels. Uses the
+ * same fit, edge stops, framing and piecewise-linear rake/bow as Composite.
+ * Extends the first/last mesh strip to report uncovered edges, rather than
+ * silently clipping the recommendation to the existing capture. Pure math;
+ * false leaves out unchanged for hidden planes or non-finite projections. */
+bool Diorama_ResolveCaptureFootprint(const DioramaCapture *capture,
+    const DioramaView *view, const DioramaScene *scene, int plane,
+    ArRenderRectF *out);
+
 /* Draws in viewport-local coordinates, restoring the full output viewport.
  * Enter without a custom GPU state bound; the compositor owns all effects it
  * binds. Complete/OptionalOmitted produce a usable scene. CoreFailure clears

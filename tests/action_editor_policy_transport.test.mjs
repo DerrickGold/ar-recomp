@@ -33,7 +33,7 @@ const imports={create:()=>++allocations,destroy:()=>{allocations--;},update:()=>
     WebAssembly,Uint8Array,Uint32Array,Int32Array,DataView,TextEncoder,TextDecoder,
     B64:text=>Uint8Array.from(Buffer.from(text,'base64')),
     DATA:data,BLOBS:blobs,room:{...selected,terrainProfile:0},sourceIniText:'',
-    nativeCamera:{x:0,y:0},nativeFrame:37,
+    nativeCamera:{x:0,y:0},nativeFrame:37,refreshNativeCameraControls(){},
     currentIni:'[layers:07:03]\n',
     sceneKey:r=>`${r.group}:${r.map}:${r.section||''}:${r.terrainProfile??0}`,roomKey:r=>`${r.group}:${r.map}${r.section?':'+r.section:''}`,
     roomFromSection:header=>{const m=header.match(/^\[layers:([\da-f]{1,2}):([\da-f]{1,2})(?::(completion))?\]$/i);
