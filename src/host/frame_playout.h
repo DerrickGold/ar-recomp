@@ -141,6 +141,16 @@ static inline bool HostFramePlayout_AwaitEndpoint(
   return false;
 }
 
+/* A software cap has an actual future submission deadline, unlike the native
+ * VSync content clock above. While drawing ahead of that deadline, allow a due
+ * native capture to arrive; at the deadline, hold the last frame as usual. */
+static inline bool HostFramePlayout_AwaitNativeDeadline(
+    HostFramePlayout policy, uint64_t endpoint_ns, uint64_t target_ns,
+    uint64_t now_ns, uint64_t deadline_ns) {
+  return !policy.interpolate && deadline_ns > now_ns && endpoint_ns &&
+      target_ns >= endpoint_ns && target_ns - endpoint_ns >= policy.interval_ns;
+}
+
 static inline float HostFramePlayout_Phase(
     HostFramePlayout policy, uint64_t endpoint_ns, uint64_t target_ns) {
   if (!policy.interpolate) return -1.0f; /* No frame generation. */

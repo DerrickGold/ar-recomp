@@ -35,7 +35,8 @@ bool ArGpuBlockMotion_Init(ArGpuBlockMotion *p, SDL_GPUDevice *device) {
   const SDL_GPUVertexAttribute attributes[] = {{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, 0},
                                                {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, 16},
                                                {2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, 32}};
-  const SDL_GPUColorTargetDescription color = {.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM};
+  const SDL_GPUColorTargetDescription color[2] = {{.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM},
+      {.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM}};
   const SDL_GPUGraphicsPipelineCreateInfo pipeline = {
       .vertex_shader = vs,
       .fragment_shader = fs,
@@ -49,7 +50,7 @@ bool ArGpuBlockMotion_Init(ArGpuBlockMotion *p, SDL_GPUDevice *device) {
                            .front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE,
                            .enable_depth_clip = true},
       .multisample_state = {.sample_count = SDL_GPU_SAMPLECOUNT_1},
-      .target_info = {.color_target_descriptions = &color, .num_color_targets = 1}};
+      .target_info = {.color_target_descriptions = color, .num_color_targets = 2}};
   if (vs && fs)
     p->warp = GpuShaderBlob_CreateGraphicsPipeline(device, &pipeline, "block motion warp");
   if (vs)
@@ -101,6 +102,8 @@ void ArGpuBlockMotion_Destroy(ArGpuBlockMotion *p) {
   SDL_ReleaseGPUSampler(p->device, p->sampler);
   if (p->output)
     SDL_ReleaseGPUTexture(p->device, p->output);
+  if (p->attributes)
+    SDL_ReleaseGPUTexture(p->device, p->attributes);
   *p = (ArGpuBlockMotion){0};
 }
 bool ArGpuBlockMotion_Resize(ArGpuBlockMotion *p, unsigned width, unsigned height) {
@@ -117,10 +120,16 @@ bool ArGpuBlockMotion_Resize(ArGpuBlockMotion *p, unsigned width, unsigned heigh
                                             .layer_count_or_depth = 1,
                                             .num_levels = 1};
   SDL_GPUTexture *output = SDL_CreateGPUTexture(p->device, &texture);
-  if (!output)
+  SDL_GPUTexture *attributes = SDL_CreateGPUTexture(p->device, &texture);
+  if (!output || !attributes) {
+    if(output)SDL_ReleaseGPUTexture(p->device,output);
+    if(attributes)SDL_ReleaseGPUTexture(p->device,attributes);
     return false;
+  }
   if (p->output)
     SDL_ReleaseGPUTexture(p->device, p->output);
+  if(p->attributes)SDL_ReleaseGPUTexture(p->device,p->attributes);
+  p->attributes=attributes;
   p->output = output;
   // A failed index upload must not make a later retry look initialized.
   p->width = p->height = 0;
@@ -235,7 +244,9 @@ bool ArGpuBlockMotion_Warp(ArGpuBlockMotion *p, SDL_GPUCommandBuffer *cmd, SDL_G
                                            .store_op = SDL_GPU_STOREOP_STORE,
                                            .cycle = !cleared,
                                            .clear_color = {0, 0, 0, 0}};
-    SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &target, 1, NULL);
+    SDL_GPUColorTargetInfo targets[2]={target,target};
+    targets[1].texture=p->attributes;
+    SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, targets, 2, NULL);
     if (!pass)
       return false;
     cleared = true;

@@ -395,6 +395,10 @@ typedef struct DioramaScene {
    * current target. Prepared once per presentation after projection; never
    * read back. On success, attached effects omit that surface contribution. */
   bool (*scenery_light)(void *userdata, const DioramaProjection *projection);
+  bool (*actor_light)(void *userdata, const DioramaProjection *, unsigned receiver);
+  /* 0 builds a map; 1 reuses scenery, 2 reuses player. */
+  uint8_t actor_light_reuse[2];
+  ArRenderTexture actor_lightmaps[2];
   ArRenderTexture scenery_lightmap; /* Compositor-owned, not snapshot state. */
   DioramaHeat background_heat; /* Displaces only background texture samples. */
   /* Current effects retain projection on an intentionally empty plane. */

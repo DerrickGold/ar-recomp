@@ -122,6 +122,8 @@ void main() {
         flip: gl.getUniformLocation(program, 'u_flip_source'),
         texture: gl.getUniformLocation(program, 'u_texture'),
         illumination: gl.getUniformLocation(program, 'u_illumination'),
+      attributes: gl.getUniformLocation(program, 'u_attributes'),
+      enemyLight: gl.getUniformLocation(program, 'u_enemy_light'),
       };
     } catch (error) { gl.deleteProgram(program); throw error; }
     finally { for (const shader of shaders) gl.deleteShader(shader); }
@@ -257,6 +259,16 @@ void main() {
       gl.bindTexture(gl.TEXTURE_2D, light.texture);
       gl.bindSampler(1, this.samplers[4]);
     }
+    if(this.effectKind === 5) {
+      for(let i=0;i<3;i++) {
+        const id=this.actorTextureIds[i], texture=this.textures[id];
+        if(!texture || id===this.targetId)return 0;
+        gl.uniform1i(shader[['attributes','illumination','enemyLight'][i]],i+1);
+        gl.activeTexture(gl.TEXTURE0+i+1);
+        gl.bindTexture(gl.TEXTURE_2D,texture.texture);
+        gl.bindSampler(i+1,this.samplers[4]);
+      }
+    }
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, entry?.texture || this.white);
     // A filter of -1 keeps the texture's own; 0/1 override it for this draw.
@@ -283,13 +295,14 @@ void main() {
   }
 
   effect(kind, pointer, count) {
-    if (kind < -1 || kind > 4 || (kind >= 0 && !this.programs[kind + 1])) return 0;
+    if (kind < -1 || kind > 5 || (kind >= 0 && !this.programs[kind + 1])) return 0;
     this.effectKind = kind;
     if (kind >= 0) {
       this.uniforms.fill(0);
       const values = new Float32Array(this.memory.buffer, pointer, count);
       this.uniforms.set(values.subarray(0,16));
       if (kind === 4) this.illuminationId = values[16];
+      if (kind === 5) this.actorTextureIds = Array.from(values.subarray(16,19));
       const gl = this.gl;
       gl.bindBuffer(gl.UNIFORM_BUFFER, this.uniformBuffer);
       gl.bufferSubData(gl.UNIFORM_BUFFER, 0, this.uniforms);

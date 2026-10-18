@@ -169,6 +169,19 @@ static bool DrawSceneryLight(void *userdata, const DioramaProjection *projection
   return true;
 }
 
+static bool DrawActorLight(void *userdata,const DioramaProjection *projection,unsigned receiver) {
+  RoomEffectPass *pass=userdata;
+  pass->projection.diorama_projection=projection;
+  pass->projection.scenery_lighting_only=true;
+  pass->projection.light_receiver=receiver;
+  bool ok=true;
+  for(unsigned layer=0;layer<kActionEffectRenderLayer_Count && ok;++layer)
+    ok=DrawEffectLayer(pass,layer,kArRenderBlendMode_Add,true,false);
+  pass->projection.scenery_lighting_only=false;
+  pass->projection.light_receiver=0;
+  return ok;
+}
+
 int RoomPreview_SkyboxSource(void) {
   if (!s_room) return 0;
   DioramaResolvedLayer layers[kDioramaPlane_Count];
@@ -647,11 +660,12 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
       .ws_extra = extra, .ws_extra_top = capture.authentic_y0, .scenery_exposure_in_mesh=true,
       .visible_width = capture.width, .snes_height = capture.height, .viewport = view.viewport}};
   if(s_receivers.mask && s_effects_enabled && !ActionEffectReceivers_Prepare(effects.frame,environment->group,environment->room,
-      environment->camera_x[0],environment->camera_y[0],environment->camera_x[1],environment->camera_y[1],s_effects_enabled,&s_receiver))return 0;
+      environment->camera_x[0],environment->camera_y[0],environment->camera_x[1],environment->camera_y[1],false,&s_receiver))return 0;
   const int receiver_plane=DioramaPlaneForObjectPriority(2);
   if(!EditorReceiverPreview_Capture(DioramaPreview_Device(),&s_receivers,
       s_effects_enabled?&s_receiver:NULL,environment->camera_x[0],environment->camera_y[0],extra,
-      &capture,&s_textures[receiver_plane],&s_pixels[receiver_plane],&s_uploads))return 0;
+      &capture,&s_textures[receiver_plane],&s_pixels[receiver_plane],
+      &s_textures[kDioramaPlane_ObjAttributes2],&s_pixels[kDioramaPlane_ObjAttributes2],&s_uploads))return 0;
   ActionExposureLighting exposure={.origin_x=environment->camera_x[0]-extra-capture.obj_apron,
       .origin_y=environment->camera_y[0]-capture.authentic_y0,
       .width=SR_PPU_SURFACE_MAX_WIDTH,.height=SR_PPU_SURFACE_MAX_HEIGHT};
@@ -662,6 +676,10 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
       SR_PPU_SURFACE_MAX_WIDTH,SR_PPU_SURFACE_MAX_HEIGHT);
   scene.effect_obj_priority_mask=EditorReceiverPreview_Ready()?1u<<2:0;
   if (s_effects_enabled) {
+    scene.actor_light=DrawActorLight;
+    scene.actor_light_reuse[0]=ActionEffectReceivers_MapsMatch(effects.frame,1,2)?1:0;
+    scene.actor_light_reuse[1]=ActionEffectReceivers_MapsMatch(effects.frame,1,4)?1:
+        ActionEffectReceivers_MapsMatch(effects.frame,2,4)?2:0;
     scene.scenery_light = ActionEffectReceivers_HasSurfaceLights(effects.frame) ? DrawSceneryLight : NULL;
     scene.bg1_dimming = ActionEnvironment_Bg1Dimming(effects.frame, environment->group, environment->room);
     scene.bg1_dimming_ramp = SceneryDimming_ToUv(ActionEnvironment_Bg1DimmingRamp(effects.frame,environment->group, environment->room),

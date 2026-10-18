@@ -61,16 +61,16 @@ int main(void) {
                                            .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
                                            .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER,
                                            .width = W,
-                                           .height = height * N,
+                                           .height = height * N * 2,
                                            .layer_count_or_depth = 1,
                                            .num_levels = 1};
     SDL_GPUTexture *previous = SDL_CreateGPUTexture(gpu, &info),
                    *current = SDL_CreateGPUTexture(gpu, &info);
     assert(previous && current);
     const SDL_GPUTransferBufferCreateInfo ui = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-                                                .size = bytes * 2};
+                                                .size = bytes * 4};
     const SDL_GPUTransferBufferCreateInfo di = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,
-                                                .size = bytes + (4 * B + 4) * 16};
+                                                .size = bytes * 2 + (4 * B + 4) * 16};
     SDL_GPUTransferBuffer *upload = SDL_CreateGPUTransferBuffer(gpu, &ui),
                           *download = SDL_CreateGPUTransferBuffer(gpu, &di);
     assert(upload && download);
@@ -85,17 +85,21 @@ int main(void) {
       uint8_t *mapped = SDL_MapGPUTransferBuffer(gpu, upload, true);
       assert(mapped);
       memcpy(mapped, a, bytes);
-      memcpy(mapped + bytes, b, bytes);
+      // Identical companion data must follow the artwork pixel for pixel,
+      // including transparent edges and the endpoint switch at phase 0.5.
+      memcpy(mapped + bytes, a, bytes);
+      memcpy(mapped + bytes * 2, b, bytes);
+      memcpy(mapped + bytes * 3, b, bytes);
       SDL_UnmapGPUTransferBuffer(gpu, upload);
       SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(gpu);
       assert(cmd);
       SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
       assert(copy);
       SDL_GPUTextureTransferInfo input = {
-          .transfer_buffer = upload, .pixels_per_row = W, .rows_per_layer = height * N};
-      SDL_GPUTextureRegion dest = {.texture = previous, .w = W, .h = height * N, .d = 1};
+          .transfer_buffer = upload, .pixels_per_row = W, .rows_per_layer = height * N * 2};
+      SDL_GPUTextureRegion dest = {.texture = previous, .w = W, .h = height * N * 2, .d = 1};
       SDL_UploadToGPUTexture(copy, &input, &dest, true);
-      input.offset = bytes;
+      input.offset = bytes * 2;
       dest.texture = current;
       SDL_UploadToGPUTexture(copy, &input, &dest, true);
       SDL_EndGPUCopyPass(copy);
@@ -176,6 +180,31 @@ int main(void) {
           }
           SDL_UnmapGPUTransferBuffer(gpu, download);
         }
+        cmd = SDL_AcquireGPUCommandBuffer(gpu);
+        assert(cmd && ArGpuBlockMotion_Warp(&p, cmd, previous, current, phase, 15));
+        copy = SDL_BeginGPUCopyPass(cmd);
+        assert(copy);
+        SDL_GPUTextureRegion image = {.texture = p.output, .w = width, .h = height * N, .d = 1};
+        SDL_GPUTextureTransferInfo io = {.transfer_buffer = download,
+            .pixels_per_row = W, .rows_per_layer = height * N};
+        SDL_DownloadFromGPUTexture(copy, &image, &io);
+        image.texture = p.attributes;
+        io.offset = bytes;
+        SDL_DownloadFromGPUTexture(copy, &image, &io);
+        SDL_EndGPUCopyPass(copy);
+        assert(Wait(gpu, cmd));
+        const uint32_t *paired = SDL_MapGPUTransferBuffer(gpu, download, false);
+        assert(paired);
+        // A different normalized atlas band can round a filtered channel
+        // by one UNORM step, but must preserve footprint and motion.
+        for (unsigned y = 0; y < height * N; ++y)
+          for (unsigned x = 0; x < width; ++x)
+            for (unsigned channel = 0; channel < 4; ++channel) {
+              const int color = (paired[y * W + x] >> (channel * 8)) & 255;
+              const int attribute = (paired[bytes / 4 + y * W + x] >> (channel * 8)) & 255;
+              assert(abs(color - attribute) <= 1);
+            }
+        SDL_UnmapGPUTransferBuffer(gpu, download);
       }
       // The current endpoint must survive the GPU-built warp mesh exactly.
       cmd = SDL_AcquireGPUCommandBuffer(gpu);
@@ -212,6 +241,6 @@ int main(void) {
   ArGpuBlockMotion_Destroy(&p);
   SDL_DestroyGPUDevice(gpu);
   SDL_Quit();
-  puts("GPU actor motion: CPU field parity, fractional mesh parity and endpoint parity passed");
+  puts("GPU actor motion: CPU fields, fractional meshes, companion alignment and endpoints passed");
   return 0;
 }

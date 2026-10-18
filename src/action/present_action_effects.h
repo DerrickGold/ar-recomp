@@ -44,6 +44,7 @@ typedef struct PresentActionPlaneEffectContext {
   PresentActionSourceDraw source_draw;
   bool scenery_lighting_in_material;
 } PresentActionPlaneEffectContext;
+bool PresentActionEffects_DrawActorLight(void *userdata, const DioramaProjection *, unsigned receiver);
 bool PresentActionEffects_DrawSceneryLight(void *userdata,
     const DioramaProjection *diorama_projection);
 void PresentActionEffects_DrawDioramaPlane(
@@ -62,6 +63,9 @@ void PresentActionHeat_End(
 /* Invalidate before uploading/releasing a retained capture, including captures
  * with an unchanged timestamp (save-state loads and editor changes). */
 void PresentActionEffects_InvalidateSourcePackets(void);
+/* Presentation owner, after retaining an immutable capture. Builds source
+ * geometry before drawing; no GPU calls or live game state are consumed. */
+void PresentActionEffects_PrepareSourcePackets(const struct FrameSlot *slot);
 
 /* Called on render-device reset and shutdown, outside any active pass. */
 void PresentActionEffects_Reset(ArRenderDevice *device);

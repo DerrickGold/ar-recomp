@@ -30,6 +30,7 @@ typedef struct ActionEffectProjectionContext {
   const DioramaProjection *diorama_projection;
   bool scenery_exposure_in_mesh; /* no duplicate alpha/light overlay */
   bool scenery_lighting_in_material;
+  uint8_t light_receiver; /* Material target, 0 keeps scenery routing. */
   bool scenery_lighting_only; /* accumulate incoming RGB, without particles */
 } ActionEffectProjectionContext;
 

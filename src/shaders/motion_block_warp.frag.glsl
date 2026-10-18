@@ -2,6 +2,7 @@
 layout(location = 0) in vec4 vertex_color;
 layout(location = 1) in vec2 texture_uv;
 layout(location = 0) out vec4 output_color;
+layout(location = 1) out vec4 output_attributes;
 layout(set = 2, binding = 0) uniform sampler2D previous_texture;
 layout(set = 2, binding = 1) uniform sampler2D current_texture;
 // source plane width, height, input atlas slot, input atlas slot count.
@@ -11,4 +12,8 @@ void main() {
     p.y+=settings.plane.z*settings.plane.y;
     vec2 uv=p/vec2(textureSize(current_texture,0));
     output_color=vertex_color.r>0.5?texture(previous_texture,uv):texture(current_texture,uv);
+    // The companion atlas slots follow the four actor priorities. Reuse the
+    // selected endpoint, mesh and motion field: never search metadata colors.
+    vec2 auv=uv+vec2(0,4.0*settings.plane.y/float(textureSize(current_texture,0).y));
+    output_attributes=vertex_color.r>0.5?texture(previous_texture,auv):texture(current_texture,auv);
 }

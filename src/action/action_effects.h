@@ -315,6 +315,9 @@ enum { kActionReceiver_Scenery=1, kActionReceiver_Player=2, kActionReceiver_Enem
 typedef struct ActionEffectTuning {
   float intensity, reach;
   float illumination; /* Incoming light only; unset inherits the family response. */
+  /* Native source resize also scales motion/puff sizes outside its rectangle.
+   * Zero means the unchanged source, like an absent sparse shape override. */
+  float source_width_scale, source_height_scale;
   uint32_t color;
   uint8_t active;
   uint8_t light_receivers, dim_receivers, light_receivers_set, dim_receivers_set;
@@ -478,6 +481,7 @@ typedef struct ActionEffectFloorField {
 enum { kActionNativeMemberMax = 64 };
 typedef struct ActionNativeMember {
   uint8_t kind, index, enabled;
+  uint8_t light_receivers, light_receivers_set;
   float offset_x, offset_y, width_scale, length_scale, angle;
   float intensity;
   uint32_t color;
@@ -510,6 +514,8 @@ typedef struct ActionFireballSmoke {
 
 typedef struct ActionSceneEffectFrame {
   uint16_t game_frame;
+  /* Nonzero only on the temporary frame used to build one actor light map. */
+  uint8_t light_receiver;
   uint8_t effect_count;
   uint8_t visible_count;
   uint8_t overflow;

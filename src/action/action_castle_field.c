@@ -59,7 +59,7 @@ bool ActionCastleField_Valid(const ActionCastleField *f){
   for(unsigned i=0;i<4;++i)if(!Integer(f->WaterSurface[i],0,i==3?8:16384))return false;
   if(f->WaterSurface[2]<16||f->WaterSurface[2]>144||f->WaterSurface[0]+f->WaterSurface[2]*f->WaterSurface[3]>16384)return false;
   if(!Period(f->WaterMotion[0])||!Period(f->RippleTiming[0])||!Period(f->Breath[0])||!Period(f->MistCells[1])||!Period(f->TorchPulse[0])||!Period(f->TorchShape[3]))return false;
-  if(f->MistCells[0]<48||f->MistCells[0]>128||!Integer(f->MistCells[0],48,128)||f->MistShape[0]+f->MistShape[1]>18)return false;
+  if(f->MistCells[0]<48||f->MistCells[0]>128||!Integer(f->MistCells[0],48,128)||f->MistShape[0]+f->MistShape[1]>63)return false;
   if(f->FanPattern[4]<=0||f->FanPattern[5]<=0||f->FanPattern[8]<=0||f->UpperShape[0]>128||f->UpperShape[2]>128)return false;
   for(unsigned i=0;i<4;++i)if((i&&f->FanDepths[i]<f->FanDepths[i-1])||f->SkyWindow[i]<-768||f->SkyWindow[i]>768)return false;
   return f->SkyWindow[0]<f->SkyWindow[2]&&f->SkyWindow[1]<f->SkyWindow[3]&&f->SkyClip[0]<f->SkyClip[2]&&f->SkyClip[1]<f->SkyClip[3];

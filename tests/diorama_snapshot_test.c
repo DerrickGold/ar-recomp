@@ -55,6 +55,13 @@ int main(void) {
   assert(decoded.scene.render==&decoded.options);
   assert(decoded.capture.textures==decoded.textures && decoded.capture.pixels==decoded.rgba);
   assert(decoded.view.viewport.w==960 && decoded.layers[0].z==0.5f);
+  // V1's thirteen planes end in the same zero-padded header when no companion
+  // slots are populated; its skybox remains the last payload image.
+  Put(4,1); Checksum(size);
+  assert(DioramaSnapshot_Decode(packet,size,&decoded));
+  for (unsigned i=kDioramaPlane_ObjAttributes0;i<kDioramaPlane_Count;++i)
+    assert(!decoded.rgba[i]);
+  Put(4,kDioramaSnapshotVersion); Checksum(size);
   for (int i=0;i<640*352;i++) {
     const uint8_t *p=decoded.rgba[0]+i*4;
     assert(p[0]==(uint8_t)(pixels[i]>>16) && p[1]==(uint8_t)(pixels[i]>>8));

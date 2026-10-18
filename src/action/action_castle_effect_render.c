@@ -2,6 +2,7 @@
  * Pure bounded geometry; shares the existing BG1/BG2 batches and direct masks.
  * No native slots, texture resolves, backend calls or persistent particles. */
 #include "action/action_effect_render_internal.h"
+#include "action_effect_receivers.h"
 #include "action_effect_members.h"
 #include "action_castle_sources.h"
 
@@ -467,6 +468,13 @@ bool AppendCastleEnvironment(const ActionCastleField *f, ActionEffectGeometryWri
     s->length = (int16_t)lroundf(s->length * m->length_scale);
     s->lean += (int16_t)lroundf(tanf(m->angle * .01745329252f) * s->length);
   }
+  /* Filter the shared window join graph as well as individual fans. A window
+   * disabled for this receiver must not contribute its upper fan via a neighbour. */
+  if (writer->light_receiver)
+    for (unsigned i = 0; i < (unsigned)f->SourceCount[0]; ++i)
+      if (!ActionEffectReceivers_Member(effect,
+              ActionEffectMembers_Find(members, effect->kind, i), writer->light_receiver))
+        source_effect.source_mask &= (uint16_t)~(1u << i);
   unsigned index = 0;
   for (unsigned i = 0; i < (unsigned)f->SourceCount[0]; i++) {
     const ActionCastleSource *s = &sources[i];

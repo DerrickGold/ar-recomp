@@ -705,6 +705,17 @@ typedef struct SrPpuFrameResetRequest {
 #define SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS UINT32_C(0x00000008)
 #define SR_PPU_OBJ_COLOR_MULTIPLY_MAX UINT16_C(1024)
 typedef struct SrPpuObjColorTransform { uint16_t multiply[3], add[3]; } SrPpuObjColorTransform;
+/* Optional presentation attributes copied from the exact winning OAM owner.
+ * ARGB words are opaque application data, not palette colors. Four companion
+ * surfaces follow the ordinary OBJ capture rectangle, pitch and priority
+ * routing. They do not alter authentic pixels. Buffers must remain alive until
+ * frame reset/reconfiguration; the 128 owner values are copied immediately. */
+#define SR_PPU_OBJ_CAPTURE_ATTRIBUTES UINT32_C(0x00000020)
+typedef struct SrPpuObjAttributeCapture {
+    uint32_t values[128];
+    uint8_t *pixels[4];
+    uint64_t pixel_byte_size[4];
+} SrPpuObjAttributeCapture;
 typedef struct SrPpuObjCaptureRequest {
     uint32_t struct_size;
     uint32_t flags;
@@ -725,13 +736,17 @@ typedef struct SrPpuObjCaptureRequest {
     const SrPpuObjColorTransform *color_transforms;
     uint32_t color_transform_count;
     uint32_t color_reserved;
+    /* Optional v4 facet. NULL clears the attribute export. */
+    const SrPpuObjAttributeCapture *attributes;
 } SrPpuObjCaptureRequest;
 
 #define SR_PPU_OBJ_CAPTURE_REQUEST_V2_SIZE                              \
     ((uint32_t)(offsetof(SrPpuObjCaptureRequest, reserved) +             \
                 sizeof(((SrPpuObjCaptureRequest *)0)->reserved)))
 
-#define SR_PPU_OBJ_CAPTURE_REQUEST_V3_SIZE ((uint32_t)sizeof(SrPpuObjCaptureRequest))
+#define SR_PPU_OBJ_CAPTURE_REQUEST_V3_SIZE \
+    ((uint32_t)(offsetof(SrPpuObjCaptureRequest, color_reserved) + sizeof(uint32_t)))
+#define SR_PPU_OBJ_CAPTURE_REQUEST_V4_SIZE ((uint32_t)sizeof(SrPpuObjCaptureRequest))
 
 /* One sparse, host-native VRAM word replacement. Transactions compare every
  * expected value before applying any replacement, so a game-side producer

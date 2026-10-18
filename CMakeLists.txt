@@ -2281,6 +2281,16 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_action_authored_fields_test PRIVATE actraiser_math)
     add_test(NAME actraiser_action_authored_fields COMMAND actraiser_action_authored_fields_test)
 
+    add_executable(actraiser_action_effect_manifest_test
+        tests/action_effect_manifest_test.c ${AR_ACTION_EFFECT_TEST_SOURCES}
+        src/action/action_effect_manifest.c src/action/action_effect_recipes.c
+        src/action/action_scenery_occlusion.c)
+    target_include_directories(actraiser_action_effect_manifest_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_action_effect_manifest_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_action_effect_manifest COMMAND actraiser_action_effect_manifest_test
+        ${CMAKE_CURRENT_BINARY_DIR}/action-effects-test.ini)
+
     add_executable(actraiser_action_water_recipe_test
         tests/action_water_recipe_test.c ${AR_ACTION_EFFECT_TEST_SOURCES}
         src/action/action_effect_recipes.c src/action/action_floor_support.c src/action/action_scenery_occlusion.c

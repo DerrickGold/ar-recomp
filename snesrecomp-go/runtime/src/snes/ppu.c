@@ -113,6 +113,7 @@ static void update_brightness(Ppu *ppu) {
 }
 
 static uint32_t transform_obj_color(Ppu *, int, int, uint32_t);
+static void write_obj_attribute(Ppu *, int, int, unsigned, int, int);
 
 static uint32_t color_argb(const Ppu *ppu, uint16_t color) {
     return 0xff000000u |
@@ -517,6 +518,7 @@ void PpuClearOverlayCaptures(Ppu *ppu) {
     memset(&ppu->objRangeCapture, 0, sizeof(ppu->objRangeCapture));
     memset(&ppu->objWinnerCapture, 0, sizeof(ppu->objWinnerCapture));
     ppu->objColorTransformsActive=false;
+    memset(&ppu->objAttributes, 0, sizeof(ppu->objAttributes));
     memset(&ppu->m7Override, 0, sizeof(ppu->m7Override));
 }
 
@@ -2097,6 +2099,13 @@ static void clear_overlay_row(Ppu *ppu, int source, int screen_y, bool defer) {
         memset(ppu->overlayRenderBands[source][band] +
                (size_t)row * ppu->overlayRenderPitch[source], 0,
                ppu->overlayRenderPitch[source]);
+    if (source == kPpuOverlaySource_Obj)
+        for (unsigned band = 0; band < 4; ++band)
+            if (ppu->objAttributes.pixels[band] &&
+                ((uint64_t)row+1)*ppu->overlayRenderPitch[source] <= ppu->objAttributes.pixel_byte_size[band])
+                memset(ppu->objAttributes.pixels[band] +
+                    (size_t)row * ppu->overlayRenderPitch[source], 0,
+                    ppu->overlayRenderPitch[source]);
     if (screen_y < capture->y0 || screen_y >= capture->y1) return;
     fill = (capture->flags & (kPpuOverlayFlag_MarkMainScreenWinner |
                               kPpuOverlayFlag_MarkOwningScreenWinner |
@@ -2160,6 +2169,8 @@ static void write_overlay(Ppu *ppu, int source, int x, int y,
         color = (color & 0x00ffffffu) | 0x80000000u;
     ((uint32_t *)(surface + (size_t)row * ppu->overlayRenderPitch[source]))
         [origin + x] = color;
+    if (source == kPpuOverlaySource_Obj && !override_color)
+        write_obj_attribute(ppu, x, y, (unsigned)band, row, origin);
     ppu->overlayRenderContentMask[source] |= (uint8_t)(1u << band);
 }
 
@@ -4225,6 +4236,21 @@ static uint32_t transform_obj_color(Ppu *ppu,int x,int y,uint32_t argb) {
     return result;
 }
 
+static void write_obj_attribute(Ppu *ppu, int x, int y, unsigned band,
+                                int row, int origin) {
+    if (!ppu->objAttributes.pixels[band] || row<0 ||
+        ((uint64_t)row+1)*ppu->overlayRenderPitch[kPpuOverlaySource_Obj] > ppu->objAttributes.pixel_byte_size[band] ||
+        ppu->overlayCaptures[kPpuOverlaySource_Obj].oamFirst != 0 ||
+        ppu->overlayCaptures[kPpuOverlaySource_Obj].oamCount != 128) return;
+    PpuObjSampleCache *cache = get_scene_obj_sample_cache(ppu,y,0,0,0,0,0);
+    if (!cache || !native_obj_cache_pixel(cache,x)) return;
+    const unsigned slot = cache->slots[x+kPpuExtraLeftRight];
+    if (slot >= 128) return;
+    uint32_t *out = (uint32_t *)(ppu->objAttributes.pixels[band] +
+        (size_t)row * ppu->overlayRenderPitch[kPpuOverlaySource_Obj]);
+    out[origin+x] = ppu->objAttributes.values[slot];
+}
+
 static void native_merge_packed_span(
         uint16_t *SR_RESTRICT main_pixels,
         uint16_t *SR_RESTRICT sub_pixels,
@@ -4253,6 +4279,8 @@ typedef struct NativeOverlayLinePlan {
     uint8_t slot_for_rank[16];
     uint8_t slot_for_semantic[4];
     uint32_t *destinations[4];
+    uint32_t *attributes[4];
+    const PpuObjSampleCache *obj_samples;
     const uint8_t *coverage;
     bool transform_obj;
     const uint32_t *colors;
@@ -4274,6 +4302,8 @@ static void native_overlay_line_plan(Ppu *ppu, int source, int screen_y,
     plan->packet_row = background_packet_row(ppu, (unsigned)source, screen_y);
     plan->origin = 0;
     memset(plan->bands, 0, sizeof(plan->bands));
+    memset(plan->attributes, 0, sizeof(plan->attributes));
+    plan->obj_samples = NULL;
     if (ppu->overlayRenderBuffer[source] == NULL ||
         screen_y < capture->y0 || screen_y >= capture->y1) return;
     row = overlay_row(capture, screen_y);
@@ -4282,6 +4312,21 @@ static void native_overlay_line_plan(Ppu *ppu, int source, int screen_y,
         ppu, ppu->overlayRenderPitch[source]);
     plan->primary = (uint32_t *)(ppu->overlayRenderBuffer[source] +
         (size_t)row * ppu->overlayRenderPitch[source]);
+    /* Attribute destinations and OAM ownership are scanline invariants. The
+     * pixel loop only needs the already-resolved winner and its value. Keep
+     * this generic: the caller assigns the meaning of each attribute. */
+    if (source == kPpuOverlaySource_Obj && capture->oamFirst == 0 &&
+        capture->oamCount == 128) {
+        const size_t pitch = ppu->overlayRenderPitch[source];
+        for (unsigned band = 0; band < 4; ++band) {
+            if (!ppu->objAttributes.pixels[band] ||
+                ((uint64_t)row + 1) * pitch > ppu->objAttributes.pixel_byte_size[band])
+                continue;
+            plan->attributes[band] = (uint32_t *)(ppu->objAttributes.pixels[band] + row * pitch);
+            if (!plan->obj_samples)
+                plan->obj_samples = get_scene_obj_sample_cache(ppu, screen_y, 0, 0, 0, 0, 0);
+        }
+    }
     for (int band = 0; band < 3; ++band) {
         if (ppu->overlayRenderBands[source][band] != NULL)
             plan->bands[band] = (uint32_t *)(
@@ -4364,6 +4409,12 @@ static void native_write_overlay_packed(
     if (plan->transform_obj)
         color = transform_obj_color(ppu, x, plan->screen_y, color);
     plan->destinations[band][plan->origin + x] = color;
+    if (plan->attributes[band] && plan->obj_samples &&
+        native_obj_cache_pixel(plan->obj_samples, x)) {
+        const unsigned slot = plan->obj_samples->slots[x + kPpuExtraLeftRight];
+        if (slot < 128)
+            plan->attributes[band][plan->origin + x] = ppu->objAttributes.values[slot];
+    }
     ppu->overlayRenderContentMask[source] |= bit;
 }
 

@@ -95,7 +95,8 @@ void ActionCastleField_Capture(const ActionEnvironmentScene *scene,ActionSceneEf
     mist.world_x = (int16_t)floor[0];
     mist.world_y = (int16_t)floor[2];
     mist.source_mask = 0;
-    mist.geometry.data.rect = (ActionEffectLocalRect){0,-18,floor[1]-floor[0],0};
+    const float height = 2 * (f->MistShape[0] + f->MistShape[1]) + 2;
+    mist.geometry.data.rect = (ActionEffectLocalRect){0,-height,floor[1]-floor[0],0};
     mist.clip_rect = mist.geometry.data.rect;
     (void)SceneDecorationAppend(dst,&mist);
   }

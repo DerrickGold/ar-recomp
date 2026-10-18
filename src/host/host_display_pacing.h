@@ -48,6 +48,11 @@ typedef struct HostDisplayFpsCounter {
   bool initialized;
 } HostDisplayFpsCounter;
 
+/* Software caps schedule submission, so drawing starts ahead of the deadline.
+ * The measured draw estimate excludes sleeping and VSync. Bound the lead to
+ * this output interval; no extra frame is queued or added to content delay. */
+uint64_t HostDisplayPacing_DrawLeadNs(uint64_t draw_ns, uint64_t interval_ns);
+
 /* Select the emulation/source cadence independently from host presentation.
  * Test30 is intentionally scoped to an active interpolated Diorama frame. */
 uint64_t HostDisplayPacing_SourceFrameIntervalNs(

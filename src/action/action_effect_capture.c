@@ -28,23 +28,27 @@ uint16_t ActionEffectCapture_VisualClock(void) {
   return (uint16_t)(s_action_effect_observer.scene_clock+ActionEffectTickClock_Capture(&pending));
 }
 
+/* A PPU transaction and its following snapshot observe the same completed
+ * gameplay pass. Receiver classification borrows this pending capture; only
+ * publication commits its clock and history. Explicit invalidation at the
+ * next transaction also covers save loads and native paused frames. */
+static struct {
+  bool valid;
+  ActionEffectObserver observer;
+  ActionEffectTickClock clock;
+  ActionEffectFrame spells;
+  ActionSceneEffectFrame scene;
+  uint8_t section;
+} s_pending;
+
+void ActionEffectCapture_BeginFrame(void) { s_pending.valid = false; }
+
+static void PreparePendingFrame(void);
+
 void ActionEffectCapture_PeekScene(ActionSceneEffectFrame *frame) {
-  if(!frame)return;
-  ActionEffectObserver observer=s_action_effect_observer;
-  ActionEffectTickClock pending=s_action_effect_tick_clock;
-  const ActionSurfaceField *surfaces[kActionSurfaceFieldKinds];
-  ActionEffectManifest_SurfaceFields(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap],surfaces);
-  ActionSceneEffects_CaptureFrameFiltered(&observer,frame,g_ram,kActRaiserWramSize,ActionEffectTickClock_Capture(&pending),!ActionEffectManifest_ReplacesGlowField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),surfaces);
-  if(g_settings.action_environmental_effects)
-    ActionEnvironmentalEffects_CaptureFrameFiltered(&observer,frame,g_ram,kActRaiserWramSize,
-      !ActionEffectManifest_ReplacesRayField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
-      !ActionEffectManifest_ReplacesWaterField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
-        !ActionEffectManifest_ReplacesAtmosphereField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
-        !ActionEffectManifest_ReplacesMoonField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
-        !ActionEffectManifest_ReplacesMarshField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
-        !ActionEffectManifest_ReplacesCastleField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]));
-  if(!g_settings.action_effect_lighting)
-    for(unsigned i=0;i<frame->effect_count;++i)frame->effects[i].flags|=kActionEffectFlag_LightingOff;
+  if (!frame) return;
+  PreparePendingFrame();
+  *frame = s_pending.scene;
 }
 
 static void ReportCapturedActionEffects(const FrameSlot *dst) {
@@ -148,23 +152,26 @@ static void ReportCapturedActionEffects(const FrameSlot *dst) {
   }
 }
 
-void ActionEffectCapture_CaptureFrame(FrameSlot *dst) {
+static void PreparePendingFrame(void) {
+  if (s_pending.valid) return;
+  s_pending.observer = s_action_effect_observer;
+  s_pending.clock = s_action_effect_tick_clock;
   /* $00:8C98 publishes only completed gameplay/OAM passes and is skipped by
    * native pause/freeze. Capture through the shared adapter so production and
    * its regression consume the identical publisher/read/delta chain. */
   const unsigned action_effect_ticks =
-      ActionEffectTickClock_Capture(&s_action_effect_tick_clock);
-  ActionEffects_CaptureFrame(&s_action_effect_observer, &dst->action_effects,
+      ActionEffectTickClock_Capture(&s_pending.clock);
+  ActionEffects_CaptureFrame(&s_pending.observer, &s_pending.spells,
                              g_ram,
                              kActRaiserWramSize, action_effect_ticks);
   const ActionSurfaceField *surfaces[kActionSurfaceFieldKinds];
   ActionEffectManifest_SurfaceFields(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap],surfaces);
-  ActionSceneEffects_CaptureFrameFiltered(&s_action_effect_observer,
-                                  &dst->action_scene_effects, g_ram,
+  ActionSceneEffects_CaptureFrameFiltered(&s_pending.observer,
+                                  &s_pending.scene, g_ram,
                                   kActRaiserWramSize, action_effect_ticks,!ActionEffectManifest_ReplacesGlowField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),surfaces);
   if (g_settings.action_environmental_effects)
     ActionEnvironmentalEffects_CaptureFrameFiltered(
-        &s_action_effect_observer, &dst->action_scene_effects,
+        &s_pending.observer, &s_pending.scene,
         g_ram, kActRaiserWramSize, !ActionEffectManifest_ReplacesRayField(
           g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
         !ActionEffectManifest_ReplacesWaterField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
@@ -173,39 +180,43 @@ void ActionEffectCapture_CaptureFrame(FrameSlot *dst) {
         !ActionEffectManifest_ReplacesMarshField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]),
         !ActionEffectManifest_ReplacesCastleField(g_ram[kActRaiserWram_MapGroup],g_ram[kActRaiserWram_CurrentMap]));
   else
-    memset(&s_action_effect_observer.landing_dust, 0,
-        sizeof(s_action_effect_observer.landing_dust));
-  dst->diorama_map_group = g_ram[kActRaiserWram_MapGroup];
-  dst->diorama_map_number = g_ram[kActRaiserWram_CurrentMap];
-  dst->diorama_layer_section = ActRaiser_LiveScenerySection();
-  if (dst->diorama_layer_section == kDioramaLayerSection_Room &&
-      !dst->action_scene_effects.decoration_overflow) {
-    for (unsigned i = 0;
-         i < dst->action_scene_effects.decoration_count; i++) {
-      if (dst->action_scene_effects.decorations[i].kind ==
-          kActionEffect_AitosWaterfall) {
-        dst->diorama_layer_section =
-            kDioramaLayerSection_AitosWaterfall;
+    memset(&s_pending.observer.landing_dust, 0,
+        sizeof(s_pending.observer.landing_dust));
+  s_pending.section = ActRaiser_LiveScenerySection();
+  if (s_pending.section == kDioramaLayerSection_Room && !s_pending.scene.decoration_overflow)
+    for (unsigned i = 0; i < s_pending.scene.decoration_count; ++i)
+      if (s_pending.scene.decorations[i].kind == kActionEffect_AitosWaterfall) {
+        s_pending.section = kDioramaLayerSection_AitosWaterfall;
         break;
       }
-    }
+  if (!g_settings.action_environmental_effects) {
+    s_pending.scene.decoration_count = 0;
+    s_pending.scene.decoration_visible_count = 0;
+  } else if (s_pending.observer.scene_map_valid) {
+    ActionEffectManifest_Apply(g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap],
+        s_pending.observer.scene_clock, g_ram, kActRaiserWramSize, &s_pending.scene);
   }
+  if (!g_settings.action_effect_lighting)
+    for (unsigned i = 0; i < s_pending.scene.effect_count; ++i)
+      s_pending.scene.effects[i].flags |= kActionEffectFlag_LightingOff;
+  s_pending.valid = true;
+}
+
+void ActionEffectCapture_CaptureFrame(FrameSlot *dst) {
+  PreparePendingFrame();
+  s_action_effect_observer = s_pending.observer;
+  s_action_effect_tick_clock = s_pending.clock;
+  dst->action_effects = s_pending.spells;
+  dst->action_scene_effects = s_pending.scene;
+  dst->diorama_layer_section = s_pending.section;
+  s_pending.valid = false;
+  dst->diorama_map_group = g_ram[kActRaiserWram_MapGroup];
+  dst->diorama_map_number = g_ram[kActRaiserWram_CurrentMap];
   Diorama_PublishLiveLayerSection(
       dst->diorama_map_group, dst->diorama_map_number,
       dst->diorama_layer_section);
   dst->action_effect_lighting = g_settings.action_effect_lighting;
   dst->action_effect_particles = g_settings.action_effect_particles;
   dst->action_environmental_effects = g_settings.action_environmental_effects;
-  /* Source observation and waterfall section selection remain live while
-   * accents are disabled. Presentation must not change the room's geometry,
-   * rewind its effect clock, or retain decorations from an earlier capture. */
-  if (!dst->action_environmental_effects) {
-    dst->action_scene_effects.decoration_count = 0;
-    dst->action_scene_effects.decoration_visible_count = 0;
-  }
-  if (dst->action_environmental_effects && s_action_effect_observer.scene_map_valid) ActionEffectManifest_Apply(dst->diorama_map_group, dst->diorama_map_number,
-      s_action_effect_observer.scene_clock, g_ram, kActRaiserWramSize, &dst->action_scene_effects);
-  if(!dst->action_effect_lighting)
-    for(unsigned i=0;i<dst->action_scene_effects.effect_count;++i)dst->action_scene_effects.effects[i].flags|=kActionEffectFlag_LightingOff;
   ReportCapturedActionEffects(dst);
 }

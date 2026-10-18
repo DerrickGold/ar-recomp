@@ -3,6 +3,7 @@
 #include "action_ray_field.h"
 #define P(name) field->values[kActionRay_##name]
 #include "action_effect_members.h"
+#include "action_effect_receivers.h"
 
 enum {
   kForestVisibleRays = kActionRayFieldMaxRays,
@@ -163,6 +164,7 @@ bool AppendForestRays(ActionEffectGeometryWriter *writer, const ActionEffectInst
     const ActionRayProfile *profile=&field->profiles[opening->profile];
     const float across[kForestRayColumns] = {0, opening->shoulder, 1, opening->shoulder, 0};
     const ForestRayState ray = rays[i];
+    if (!ActionEffectReceivers_Member(effect, ray.member, writer->light_receiver)) continue;
     const int first_vertex = writer->vertex_count;
     if (!ForestRayIntersectsField(effect, field, ray)) continue;
     if (++visible > kForestVisibleRays) return false;

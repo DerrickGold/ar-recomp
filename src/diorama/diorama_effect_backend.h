@@ -60,6 +60,9 @@ typedef struct DioramaPrioritySurfaceEffectParams {
  * with ambient + local light, retaining alpha and the normal layer filtering. */
 typedef struct DioramaSceneryLightEffectParams {
   ArRenderTexture illumination;
+  ArRenderTexture attributes, enemy_illumination;
+  ArRenderRectF attributes_uv;
+  float rim_strength;
   float texel_width, texel_height, blur_radius, lower_content_v_max;
   DioramaPrioritySurfaceEffectParams priority;
   ArRenderColorF shade;

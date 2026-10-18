@@ -9,10 +9,11 @@ static uint32_t s_art[2][kArtSize * kArtSize];
 static ArRenderRectI s_art_bounds[2];
 static bool s_ready, s_cached;
 static uint32_t s_pixels[SR_PPU_SURFACE_MAX_WIDTH * SR_PPU_SURFACE_MAX_HEIGHT];
+static uint32_t s_attributes[SR_PPU_SURFACE_MAX_WIDTH * SR_PPU_SURFACE_MAX_HEIGHT];
 static ArRenderRectI s_previous_bounds;
 typedef struct ReceiverPixels {
   int x, y;
-  uint16_t multiply[3], add[3];
+  uint32_t attribute;
 } ReceiverPixels;
 static struct PreviewKey {
   ReceiverPixels roles[2];
@@ -71,6 +72,7 @@ bool EditorReceiverPreview_Load(const uint8_t *bytes, size_t size) {
 bool EditorReceiverPreview_Ready(void) { return s_ready; }
 void EditorReceiverPreview_Reset(void) {
   memset(s_pixels,0,sizeof(s_pixels));
+  memset(s_attributes,0,sizeof(s_attributes));
   s_previous_bounds=(ArRenderRectI){0}; s_cached=false;
 }
 
@@ -90,8 +92,8 @@ static ArRenderRectI Clip(ArRenderRectI r,int width,int height) {
 bool EditorReceiverPreview_Capture(ArRenderDevice *device,
     const EditorReceiverPreviewSettings *settings, const ActionReceiverLighting *lighting,
     int camera_x,int camera_y,int extra,const DioramaCapture *capture,
-    ArRenderTexture *texture,const uint8_t **pixels,unsigned *uploads) {
-  *pixels=NULL;
+    ArRenderTexture *texture,const uint8_t **pixels,ArRenderTexture *attribute_texture,const uint8_t **attributes,unsigned *uploads) {
+  *pixels=NULL;*attributes=NULL;
   if (!settings->mask) return true;
   if (!s_ready) return false;
   struct PreviewKey key={.mask=settings->mask, .facing=settings->flipped,
@@ -104,30 +106,28 @@ bool EditorReceiverPreview_Capture(ArRenderDevice *device,
     ReceiverPixels *r=&key.roles[role];
     r->x=settings->x[role]-camera_x+extra+capture->obj_apron-kArtAnchor;
     r->y=settings->feet_y[role]-camera_y+capture->authentic_y0-feet;
-    float multiply[3]={1,1,1},add[3]={0};
-    if (lighting) ActionEffectReceivers_Sample(lighting,
+    r->attribute=ActionEffectReceivers_Attribute(lighting,
         role?kActionReceiver_Enemies:kActionReceiver_Player,
-        settings->x[role],settings->feet_y[role]-(feet-kArtAnchor),multiply,add);
-    for (unsigned c=0; c<3; ++c) {
-      r->multiply[c]=(uint16_t)(multiply[c]*256+.5f);
-      r->add[c]=(uint16_t)(add[c]*255+.5f);
-    }
+        settings->x[role],settings->feet_y[role]-(feet-kArtAnchor));
     bounds[role]=Clip((ArRenderRectI){r->x+art.x,r->y+art.y,art.w,art.h},key.width,key.height);
     combined=Union(combined,bounds[role]);
   }
-  const bool created=!ArRenderTexture_IsValid(*texture);
+  const bool created=!ArRenderTexture_IsValid(*texture)||!ArRenderTexture_IsValid(*attribute_texture);
   if (created) {
     const ArRenderTextureDesc desc={.width=SR_PPU_SURFACE_MAX_WIDTH,.height=SR_PPU_SURFACE_MAX_HEIGHT,
         .format=kArRenderPixelFormat_Argb8888,.usage=kArRenderTextureUsage_Streaming,
         .filter=kArRenderFilter_Nearest,.blend=kArRenderBlendMode_Alpha};
-    if (!ArRenderDevice_CreateTexture(device,&desc,texture)) return false;
+    if (!ArRenderTexture_IsValid(*texture) && !ArRenderDevice_CreateTexture(device,&desc,texture)) return false;
+    if (!ArRenderTexture_IsValid(*attribute_texture) && !ArRenderDevice_CreateTexture(device,&desc,attribute_texture)) return false;
   }
   if (created || !s_cached || memcmp(&key,&s_key,sizeof(key))) {
     const int pitch=SR_PPU_SURFACE_MAX_WIDTH;
     const ArRenderRectI dirty=created
         ? (ArRenderRectI){0,0,pitch,SR_PPU_SURFACE_MAX_HEIGHT} : Union(combined,s_previous_bounds);
-    for (int y=dirty.y; y<dirty.y+dirty.h; ++y)
+    for (int y=dirty.y; y<dirty.y+dirty.h; ++y) {
       memset(s_pixels+y*pitch+dirty.x,0,(size_t)dirty.w*4);
+      memset(s_attributes+y*pitch+dirty.x,0,(size_t)dirty.w*4);
+    }
     /* Player wins overlaps, as the earlier native OAM owner does. */
     for (int role=1; role>=0; --role) {
       const ReceiverPixels *r=&key.roles[role];
@@ -135,26 +135,23 @@ bool EditorReceiverPreview_Capture(ArRenderDevice *device,
       for (int y=box.y; y<box.y+box.h; ++y) for (int x=box.x; x<box.x+box.w; ++x) {
         const uint32_t source=s_art[key.facing][(y-r->y)*kArtSize+x-r->x];
         if (!source) continue;
-        uint32_t result=source&0xff000000u;
-        /* Exact full-brightness OBJ capture transform, including integer
-         * quantization/saturation. Rim samples these already-lit pixels. */
-        for (unsigned c=0; c<3; ++c) {
-          const unsigned shift=16-8*c;
-          unsigned v=((source>>shift)&255u)*r->multiply[c]/256u+r->add[c];
-          result|=(v>255?255:v)<<shift;
-        }
-        s_pixels[y*pitch+x]=result;
+        s_pixels[y*pitch+x]=source;
+        s_attributes[y*pitch+x]=r->attribute;
       }
     }
     if (dirty.w && dirty.h) {
-      if (!ArRenderDevice_UpdateTexture(device,*texture,&dirty,s_pixels+dirty.y*pitch+dirty.x,pitch*4)) {
+      if (!ArRenderDevice_UpdateTexture(device,*texture,&dirty,s_pixels+dirty.y*pitch+dirty.x,pitch*4) ||
+          !ArRenderDevice_UpdateTexture(device,*attribute_texture,&dirty,s_attributes+dirty.y*pitch+dirty.x,pitch*4)) {
         s_cached=false; s_previous_bounds=dirty; return false;
       }
-      ++*uploads;
+      *uploads+=2;
     }
     s_key=key; s_previous_bounds=combined; s_cached=true;
   }
-  if (combined.w && combined.h) *pixels=(const uint8_t *)s_pixels;
+  if (combined.w && combined.h) {
+    *pixels=(const uint8_t *)s_pixels;
+    *attributes=(const uint8_t *)s_attributes;
+  }
   return true;
 }
 

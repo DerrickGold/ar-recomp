@@ -91,6 +91,8 @@ static const SrPpuSurfaceView *DioramaPpuSurface(
   if (!slot) return NULL;
   if (plane >= SR_PPU_OVERLAY_BG1 && plane <= SR_PPU_OVERLAY_OBJ)
     return &slot->ppu_surfaces.overlays[plane][0];
+  if (DioramaPlaneIsObjectAttributes(plane))
+    return &slot->diorama_obj_attributes[plane-kDioramaPlane_ObjAttributes0];
   if (plane == kDioramaPlane_Backdrop)
     return &slot->ppu_surfaces.main;
   size_t band_count;
@@ -776,6 +778,11 @@ retry_projection:;
       .scenery_light = slot->action_environmental_effects &&
           ActionEffectReceivers_HasSurfaceLights(&slot->action_scene_effects)
           ? PresentActionEffects_DrawSceneryLight : NULL,
+      .actor_light = slot->action_environmental_effects ? PresentActionEffects_DrawActorLight : NULL,
+      .actor_light_reuse = {
+        slot->action_effect_lighting&&ActionEffectReceivers_MapsMatch(&slot->action_scene_effects,1,2)?1:0,
+        slot->action_effect_lighting&&ActionEffectReceivers_MapsMatch(&slot->action_scene_effects,1,4)?1:
+          ActionEffectReceivers_MapsMatch(&slot->action_scene_effects,2,4)?2:0},
       .background_heat = ActionHeat_Prepare(slot->action_environmental_effects&&slot->action_effect_particles?&slot->action_scene_effects:NULL,
           slot->bg2_camera_x-slot->ws_extra-slot->obj_apron,slot->bg2_camera_y-slot->ws_extra_top,
           kFrameSlotLayerTextureWidth,kFrameSlotLayerTextureHeight),

@@ -12,6 +12,14 @@ enum {
   kVsyncGuardMinimumMaximumRateHz = 240,
 };
 
+uint64_t HostDisplayPacing_DrawLeadNs(uint64_t draw_ns, uint64_t interval_ns) {
+  if (!interval_ns) return 0;
+  const uint64_t maximum = interval_ns - interval_ns / 4;
+  const uint64_t margin = 750000;
+  if (draw_ns >= maximum || maximum - draw_ns <= margin) return maximum;
+  return draw_ns + margin;
+}
+
 uint64_t HostDisplayPacing_SourceFrameIntervalNs(
     uint64_t native_interval_ns, bool diorama_active,
     bool interpolation_enabled, InterpolationSourceRate source_rate) {

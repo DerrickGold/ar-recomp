@@ -42,34 +42,17 @@ bool ActionEffectManifest_NeedsBg1Mask(unsigned group,unsigned room) {
 bool ActionEffectManifest_NeedsBg2Mask(unsigned group,unsigned room) {
   return ActionEffectRecipes_NeedsBgMask(&s_recipes,group,room,ActRaiserActionBg_TerrainProfile(),1);
 }
-const ActionReceiverLighting *ActionEffectManifest_PrepareReceivers(unsigned group,unsigned room,const uint8_t *ram,size_t size) {
-  bool needed=false;
-  for(unsigned i=0;i<s_recipes.count;++i) {
-    const ActionEffectRecipe *r=&s_recipes.records[i];
-    if(r->group==group&&r->room==room&&r->terrain==ActRaiserActionBg_TerrainProfile()&&r->enabled&&
-        ((r->tuning.light_receivers_set&&(r->tuning.light_receivers&6))||
-         ((r->tuning.dim_receivers_set||r->kind==kActionEffect_AuthoredExposure)&&(r->tuning.dim_receivers&6))))needed=true;
-  }
-  for(unsigned i=0;i<s_recipes.count;++i){const ActionEffectRecipe *r=&s_recipes.records[i];
-    if(r->group!=group||r->room!=room||r->terrain!=ActRaiserActionBg_TerrainProfile()||!r->enabled)continue;
-    if(r->surface_field&&((unsigned)s_recipes.surface_fields[r->surface_field-1].Receivers[0]&6))needed=true;
-    if(r->projectile_field&&((unsigned)s_recipes.projectile_fields[r->projectile_field-1].Receivers[0]&6))needed=true;
-    if(r->arc_field&&((unsigned)s_recipes.arc_fields[r->arc_field-1].Receivers[0]&6))needed=true;
-    if(r->glow_field&&((unsigned)s_recipes.glow_fields[r->glow_field-1].Receivers[0]&6))needed=true;
-    const float *receivers=r->castle_field?s_recipes.castle_fields[r->castle_field-1].Receivers:
-      r->atmosphere_field?s_recipes.atmosphere_fields[r->atmosphere_field-1].Receivers:NULL;
-    if(receivers&&(((unsigned)receivers[0]&6)||((unsigned)receivers[1]&6)))needed=true;
-  }
-  if(!needed||!ram||size<kActRaiserWramSize)return NULL;
+const ActionReceiverLighting *ActionEffectManifest_PrepareReceivers(unsigned group,unsigned room,const uint8_t *ram,size_t size,bool projected) {
+  if(!ram||size<kActRaiserWramSize)return NULL;
   const uint16_t clock=ActionEffectCapture_VisualClock();
   ActionEnvironmentScene scene;
   if(!ActionEnvironmentScene_FromWram(&scene,ram,size,clock))return NULL;
-  (void)ActRaiserActionBg_BindEnvironmentScenery(&scene);
-  scene.scenery_cache = &s_scenery_cache;
   ActionEffectCapture_PeekScene(&s_receiver_frame);
-  ActionEffectRecipes_Apply(&s_recipes,group,room,ActRaiserActionBg_TerrainProfile(),clock,&scene,&s_receiver_frame);
+  /* Test the resolved scene, not just INI overrides. Native ray defaults,
+   * complete fields and individual members all participate in this decision. */
+  if(!ActionEffectReceivers_HasActors(&s_receiver_frame,g_settings.action_effect_lighting))return NULL;
   return ActionEffectReceivers_Prepare(&s_receiver_frame,group,room,scene.camera_x[0],scene.camera_y[0],
-      scene.camera_x[1],scene.camera_y[1],g_settings.action_effect_lighting,&s_receiver_lighting)?&s_receiver_lighting:NULL;
+      scene.camera_x[1],scene.camera_y[1],g_settings.action_effect_lighting&&!projected,&s_receiver_lighting)?&s_receiver_lighting:NULL;
 }
 bool ActionEffectManifest_Load(void) {
   char path[kHostPathCapacity];

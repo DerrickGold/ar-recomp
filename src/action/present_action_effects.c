@@ -502,7 +502,7 @@ typedef struct ActionSourcePacketCache {
   ActionEffectSourceLightJob *lights;
   unsigned count, capacity, light_count, light_capacity;
   uint64_t revision;
-  bool valid, failed, lighting, particles, scenery_exposure_in_mesh, scenery_lighting_in_material;
+  bool valid, failed, requested, lighting, particles, scenery_exposure_in_mesh, scenery_lighting_in_material;
   unsigned particle_count;
   uint8_t particle_indices[kActionAuthoredMaxInstances];
   ActionEffectLocalRect particle_bounds[kActionAuthoredMaxInstances];
@@ -513,6 +513,7 @@ _Static_assert(kActionAuthoredMaxInstances <= UINT8_MAX, "source particle index 
 static ActionSourcePacketCache s_source_packets[kActionSourcePacketSlots];
 static const FrameSlot *s_source_slot;
 static uint64_t s_source_timestamp, s_source_revision;
+static unsigned s_source_group, s_source_room;
 
 void PresentActionEffects_InvalidateSourcePackets(void) {
   for (unsigned i = 0; i < sizeof(s_source_packets) / sizeof(s_source_packets[0]); ++i)
@@ -563,15 +564,22 @@ static bool UpdateSourceParticleBounds(ActionSourcePacketCache *cache,
   return changed;
 }
 
-static bool DrawSourcePacket(ArRenderDevice *device, const FrameSlot *slot,
+static ActionSourcePacketCache *PrepareSourcePacket(const FrameSlot *slot,
     const ActionEffectProjectionContext *projection, unsigned pass,
-    bool lighting, bool particles, ArRenderBlendMode blend, PresentActionSourceDraw submit) {
+    bool lighting, bool particles) {
   if (s_source_slot != slot || s_source_timestamp != slot->timestamp_ns) {
     PresentActionEffects_InvalidateSourcePackets();
     s_source_slot = slot;
     s_source_timestamp = slot->timestamp_ns;
+    if (s_source_group != slot->diorama_map_group || s_source_room != slot->diorama_map_number) {
+      for (unsigned i = 0; i < kActionSourcePacketSlots; ++i) s_source_packets[i].requested = false;
+      s_source_group = slot->diorama_map_group;
+      s_source_room = slot->diorama_map_number;
+    }
   }
-  const unsigned packet_slot = pass + (projection->scenery_lighting_only ? kActionSourceCompositePacketSlots : 0);
+  const unsigned category = projection->light_receiver == kActionReceiver_Player ? 2 :
+      projection->light_receiver == kActionReceiver_Enemies ? 3 : projection->scenery_lighting_only ? 1 : 0;
+  const unsigned packet_slot = pass + category * kActionSourceCompositePacketSlots;
   ActionSourcePacketCache *cache = &s_source_packets[packet_slot];
   if (!cache->valid) {
     cache->particle_count = 0;
@@ -611,6 +619,15 @@ static bool DrawSourcePacket(ArRenderDevice *device, const FrameSlot *slot,
     if (++s_source_revision == 0) ++s_source_revision;
     cache->revision = s_source_revision;
   }
+  return cache;
+}
+
+static bool DrawSourcePacket(ArRenderDevice *device, const FrameSlot *slot,
+    const ActionEffectProjectionContext *projection, unsigned pass,
+    bool lighting, bool particles, ArRenderBlendMode blend, PresentActionSourceDraw submit) {
+  ActionSourcePacketCache *cache = PrepareSourcePacket(slot, projection, pass, lighting, particles);
+  cache->requested = true;
+  const unsigned packet_slot = (unsigned)(cache - s_source_packets);
   /* Never retain the stack-owned projection. Every repaint supplies its current
    * transform, brightness and motion; packet construction failures still request
    * the owner's full-frame reference recovery. */
@@ -835,6 +852,36 @@ static ActionEffectProjectionContext DecorationProjection(
   };
 }
 
+void PresentActionEffects_PrepareSourcePackets(const FrameSlot *slot) {
+  if (!slot || !slot->diorama_active) return;
+  /* Prepare the passes actually consumed by the previous presentation of this
+   * room. Their source geometry depends on the immutable capture, not screen
+   * projection. First-use passes still build lazily. Particle birth cells need
+   * the current full projection, so leave those passes to the normal builder. */
+  if (s_source_group != slot->diorama_map_group || s_source_room != slot->diorama_map_number) return;
+  for (unsigned i = 0; i < kActionSourcePacketSlots; ++i) {
+    ActionSourcePacketCache *cache = &s_source_packets[i];
+    if (!cache->requested) continue;
+    const unsigned pass = i % kActionSourceCompositePacketSlots;
+    const unsigned category = i / kActionSourceCompositePacketSlots;
+    bool view_dependent = false;
+    if (cache->particles)
+      for (unsigned j = 0; j < slot->action_scene_effects.authored_count && j < kActionAuthoredMaxInstances; ++j) {
+        const ActionEffectInstance *e = &slot->action_scene_effects.authored[j];
+        view_dependent |= e->kind == kActionEffect_AuthoredParticleArea && e->render_layer == pass;
+      }
+    if (!view_dependent) {
+      ActionEffectProjectionContext context = DecorationProjection(slot, (ArRenderRectI){0}, NULL);
+      context.scenery_exposure_in_mesh = cache->scenery_exposure_in_mesh;
+      context.scenery_lighting_in_material = cache->scenery_lighting_in_material;
+      context.scenery_lighting_only = category != 0;
+      context.light_receiver = category == 2 ? kActionReceiver_Player : category == 3 ? kActionReceiver_Enemies : 0;
+      (void)PrepareSourcePacket(slot, &context, pass, cache->lighting, cache->particles);
+    }
+    cache->requested = false;
+  }
+}
+
 static EffectBatch SceneBatchView(ActionSceneEffectRenderBatch *geometry) {
   return (EffectBatch){
     .vertices = geometry->vertices, .indices = geometry->indices,
@@ -855,21 +902,26 @@ static bool DecorationAttachmentVisible(int plane, const DioramaProjection *proj
   }
 }
 
-bool PresentActionEffects_DrawSceneryLight(void *userdata, const DioramaProjection *diorama) {
-  PresentActionPlaneEffectContext *context = userdata;
+static bool DrawMaterialLight(PresentActionPlaneEffectContext *context,
+    const DioramaProjection *diorama, unsigned receiver) {
+  if (!context->slot->action_effect_lighting) return true;
   ActionEffectProjectionContext projection = DecorationProjection(context->slot, context->viewport, diorama);
   projection.scenery_lighting_only = true;
+  projection.light_receiver = receiver;
   ActionSceneEffectRenderBatch *geometry = &s_action_effect_render_scratch.scene;
-  const unsigned layers[] = {kActionEffectRenderLayer_Bg1Light,
-      kActionEffectRenderLayer_Bg1Plane, kActionEffectRenderLayer_Bg1HighPlane};
-  for (unsigned i = 0; i < sizeof(layers)/sizeof(layers[0]); ++i) {
+  for (unsigned layer = 0; layer < kActionEffectRenderLayer_Count; ++layer) {
+    /* Scenery contributions are attached to BG1 materials. Actor receivers
+     * also sample lights whose authored volume lives at another depth. */
+    if (!receiver && layer != kActionEffectRenderLayer_Bg1Light &&
+        layer != kActionEffectRenderLayer_Bg1Plane && layer != kActionEffectRenderLayer_Bg1HighPlane)
+      continue;
     if (context->source_draw) {
       /* An empty retained packet is successful; the frame-generation owner
        * separately records any GPU failure and performs full-frame recovery. */
       (void)DrawSourceDecoration(context->device, context->slot, &projection,
-          layers[i], true, false, kArRenderBlendMode_Add, context->source_draw);
+          layer, true, false, kArRenderBlendMode_Add, context->source_draw);
     } else {
-      if (!ActionSceneDecorationRender_Build(&context->slot->action_scene_effects, layers[i],
+      if (!ActionSceneDecorationRender_Build(&context->slot->action_scene_effects, layer,
           true, false, ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
           &projection, geometry)) return false;
       for (int v = 0; v < geometry->vertex_count; ++v) {
@@ -881,8 +933,18 @@ bool PresentActionEffects_DrawSceneryLight(void *userdata, const DioramaProjecti
       if (!EffectRenderer_Submit(context->device, &batch, kArRenderBlendMode_Add)) return false;
     }
   }
+  return true;
+}
+
+bool PresentActionEffects_DrawSceneryLight(void *userdata, const DioramaProjection *diorama) {
+  PresentActionPlaneEffectContext *context = userdata;
+  if (!DrawMaterialLight(context, diorama, 0)) return false;
   context->scenery_lighting_in_material = true;
   return true;
+}
+
+bool PresentActionEffects_DrawActorLight(void *userdata, const DioramaProjection *diorama, unsigned receiver) {
+  return DrawMaterialLight(userdata, diorama, receiver);
 }
 
 void PresentActionEffects_DrawDioramaPlane(

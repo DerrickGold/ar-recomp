@@ -772,7 +772,7 @@ static void NativeMembers(void) {
                        "[member:02:03:0:castle-light:9]\nangle=15\n",
                        "[member:01:01:0:forest-forward:1]\nangle=31\n",
                        "[member:01:01:0:forest-forward:1]\noffset-x=513\n",
-                       "[member:01:01:0:forest-forward:1]\nlight-player=1\n"};
+                       "[member:01:01:0:forest-forward:1]\nlight-player=2\n"};
   char invalid[512];
   for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i) {
     snprintf(invalid, sizeof(invalid), "[effects]\nversion=1\n%s", bad[i]);
@@ -1227,7 +1227,87 @@ static void LightResponseAudit(void) {
   assert(families==18);
   puts("Light response: 6 authored and 18 actor/attack families retain geometry, falloff and additive effects; CPU/GPU receiver gains agree.");
 }
+static void NativeSourceOverrides(void) {
+  frame=(ActionSceneEffectFrame){.decoration_count=1};
+  frame.decorations[0]=(ActionEffectInstance){.generation=1,.kind=kActionEffect_CaveAmbientLight,
+      .flags=kActionEffectFlag_Visible,.tuning={.light_receivers=6,.light_receivers_set=1,
+      .dim_receivers=5,.dim_receivers_set=1}};
+  Parse("[effects]\nversion=1\n[source:01:02:0:cave-light:1]\nintensity=2\n");
+  assert(frame.decorations[0].tuning.light_receivers==6 && frame.decorations[0].tuning.light_receivers_set);
+  assert(frame.decorations[0].tuning.dim_receivers==5 && frame.decorations[0].tuning.dim_receivers_set);
+  assert(ActionEffectReceivers_HasActors(&frame,true));
+  assert(ActionEffectReceivers_HasActors(&frame,false)); /* Dimming is independent. */
+  Parse("[effects]\nversion=1\n[source:01:02:0:cave-light:1]\nlight-scenery=1\nlight-player=0\nlight-enemies=0\n"
+      "dim-scenery=1\ndim-player=0\ndim-enemies=0\n");
+  assert(!ActionEffectReceivers_HasActors(&frame,true));
+
+  const ActionSurfaceField *f=ActionSurfaceField_Bundled(4);
+  frame=(ActionSceneEffectFrame){.decoration_count=1};
+  frame.decorations[0]=(ActionEffectInstance){.generation=1,.kind=kActionEffect_AitosWaterfallMist,
+      .phase=kActionEffectPhase_AitosWaterfallMist,.pulse_ticks=37,
+      .flags=kActionEffectFlag_Visible,.render_layer=kActionEffectRenderLayer_Bg2Alpha,
+      .projection_plane=kActionEffectProjectionPlane_Bg2,
+      .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={f->Bounds[0],f->Bounds[1],f->Bounds[2],f->Bounds[3]}}};
+  const unsigned layer=frame.decorations[0].render_layer;
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,false,Project,NULL,NULL,&a));assert(a.vertex_count);
+  Parse("[effects]\nversion=1\n[source:01:02:0:waterfall-mist:1]\nwidth-scale=1.5\nlength-scale=2\n");
+  assert(ActionSceneDecorationRender_Build(&frame,layer,true,false,Project,NULL,NULL,&b));
+  assert(a.vertex_count==b.vertex_count&&a.index_count==b.index_count);
+  for(int i=0;i<a.vertex_count;++i) {
+    assert(fabsf(b.vertices[i].position.x-a.vertices[i].position.x*1.5f)<.001f);
+    assert(fabsf(b.vertices[i].position.y-a.vertices[i].position.y*2)<.001f);
+  }
+  puts("Source overrides: inherited receivers survive tint edits; waterfall mist resizes real clouds with unchanged geometry counts.");
+}
+static void NativeMemberReceivers(void) {
+  ActionEffectProjectionContext context={.visible_width=768,.snes_height=544,
+      .capture_height=544,.viewport={0,0,768,544},.scenery_lighting_only=true};
+  for(unsigned castle=0;castle<2;++castle)for(unsigned mask=0;mask<8;++mask) {
+    frame=(ActionSceneEffectFrame){0};
+    const unsigned group=castle?2:1,room=castle?8:1;
+    const char *name=castle?"castle-light":"forest-forward";
+    if(castle) {
+      frame.castle_field=*ActionCastleField_Bundled(room);frame.castle_field_valid=true;
+      frame.castle_field.SourceCount[0]=1;
+      frame.decoration_count=1;
+      frame.decorations[0]=(ActionEffectInstance){.generation=1,.kind=kActionEffect_CastleLight,
+          .phase=kActionEffectPhase_CastleEnvironment,.environment_room=8,.source_mask=1,
+          .flags=kActionEffectFlag_Visible,.render_layer=kActionEffectRenderLayer_Bg1Plane,
+          .projection_plane=kActionEffectProjectionPlane_Bg1,
+          .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={0,0,768,544}}};
+    }else{
+      ActionRayField forest=*ActionRayField_Bundled();
+      memset(forest.dimensions,0,sizeof(forest.dimensions));forest.witness_count=0;
+      forest.ray_count=1;forest.rays[0].x=240;forest.components=8;
+      const ActionEnvironmentScene scene={.group=1,.room=1,.clock=37};
+      ActionRayField_Capture(&scene,&frame,&forest,1);
+    }
+    char text[512];unsigned line;
+    snprintf(text,sizeof(text),"[effects]\nversion=1\n[source:%02x:%02x:0:%s:1]\n"
+        "light-scenery=0\nlight-player=0\nlight-enemies=0\n"
+        "[member:%02x:%02x:0:%s:1]\nlight-scenery=%u\nlight-player=%u\nlight-enemies=%u\n",
+        group,room,name,group,room,name,!!(mask&1),!!(mask&2),!!(mask&4));
+    assert(ActionEffectRecipes_Parse(&recipes,text,strlen(text),&line));
+    ActionEffectRecipes_Apply(&recipes,group,room,0,37,NULL,&frame);
+    assert(frame.members.count==1&&frame.members.records[0].light_receivers==mask);
+    assert(ActionEffectReceivers_Prepare(&frame,group,room,0,0,0,0,true,&receiver));
+    assert(!!receiver.player.vertex_count==!!(mask&2));
+    assert(!!receiver.enemies.vertex_count==!!(mask&4));
+    assert(!!SourceBuild(castle?kActionEffectRenderLayer_Bg1Plane:kActionEffectRenderLayer_Bg1Light,
+        true,false,&context)==!!(mask&1));
+    if(mask==6)assert(receiver.player.vertex_count==receiver.enemies.vertex_count&&
+        !memcmp(receiver.player.vertices,receiver.enemies.vertices,receiver.player.vertex_count*sizeof(ArRenderVertex2D)));
+    /* Turning a member off still defeats an enabled parent for that member. */
+    frame.decorations[0].tuning.light_receivers=7;
+    assert(ActionEffectReceivers_Prepare(&frame,group,room,0,0,0,0,true,&receiver));
+    assert(!!receiver.player.vertex_count==!!(mask&2));
+    assert(!!receiver.enemies.vertex_count==!!(mask&4));
+  }
+  puts("Native rays/windows: all eight member receiver masks override/inherit parent routing on CPU and GPU.");
+}
 int main(int argc, char **argv) {
+  NativeSourceOverrides();
+  NativeMemberReceivers();
   BillboardExtents();
   SoftLightScroll();
   NativeDaylightReceivers();

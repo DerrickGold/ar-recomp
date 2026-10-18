@@ -700,7 +700,7 @@ nr(`loadIniText('','native.ini');setLayer(0);SharedRoomPreview.validatePolicyDoc
   $('#effectSource').value='member:01:01:0:forest-forward:00000001';$('#effectSource').onchange({target:$('#effectSource')});
   $('#emitterMapEdit').onclick();`);
 assert.equal(nativeEditor.elements.get('#nativeShapeControls').hidden,false);
-assert.equal(nativeEditor.elements.get('#receiverControls').hidden,true);
+assert.equal(nativeEditor.elements.get('#receiverControls').hidden,false);
 const nativeScenery=nr('mergeDioramaIni()'),nativeBefore=nr('EffectEditor.text()');
 const np=(x,y)=>({button:0,clientX:nr(`view.x+${x}*view.scale`),clientY:nr(`view.y+${y}*view.scale`)});
 nc.listeners.mousedown(np(200,180));for(const fn of nr('window.listeners.mousemove'))fn(np(232,196));
@@ -3032,3 +3032,70 @@ assert.equal(pathUi.elements.get('#emitterAmplitude').disabled,false);
 assert.equal(pathUi.elements.get('#effectColor').disabled,true);
 assert.match(pathRun('EffectEditor.text()'),/anchor=bg2-point/);
 console.log('Particle routes preserve tracing order, resize/copy/undo; shared gusts, torch shadows and BG2 heat controls passed');
+
+// Region handles edit the same complete fields consumed by native and WASM.
+const resizeRegions=editor(fixture()),rsize=resizeRegions.run;
+rsize(`loadIniText('','resize-regions.ini');setLayer(0);
+ SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
+ SharedRoomPreview.castleFieldDefinition=()=>${JSON.stringify(castleData.replace('floor=0 0 0','floor=160 640 208'))};
+ SharedRoomPreview.atmosphereFieldDefinition=()=>${JSON.stringify(atmosphereData)};
+ const regionBytes=new Uint8Array(80);
+ ['castle-mist','cave-light'].forEach((s,i)=>regionBytes.set(new TextEncoder().encode(s+'\\0'),1+32*i));
+ const regionApi={memory:{buffer:regionBytes.buffer},RoomPreview_KindName:k=>1+32*k,RoomPreview_ReachSupported:()=>0,
+ RoomPreview_CatalogueCount:()=>2,RoomPreview_CatalogueValue:(i,f)=>[100+i,i,0,0,768,544,0,0,1,1,0][f],
+ RoomPreview_CatalogueGuideCount:i=>i?2:1,RoomPreview_CatalogueGuideValue:(i,g,f)=>[100,100,100,100][f]};
+ EffectEditor.updateCatalogue(regionApi);`);
+const regionBefore=rsize('EffectEditor.text()'),regionMapBefore=rsize('mergeDioramaIni()');
+const mistBounds=JSON.parse(rsize('JSON.stringify(EffectEditor.mapEmitters().find(e=>e.kind==="castle-mist"))'));
+assert.equal(mistBounds.anchorY,1);assert.equal(mistBounds.height,18);
+assert(mistBounds.resizeWidth&&mistBounds.resizeHeight&&mistBounds.movable);
+rsize(`EffectEditor.editEmitter('${mistBounds.id}',{height:50,width:640},'resize castle mist')`);
+const mistResized=JSON.parse(rsize('JSON.stringify(EffectEditor.mapEmitters().find(e=>e.kind==="castle-mist"))'));
+assert.equal(mistResized.y,mistBounds.y,'enlarging mist cannot lift it off its floor');
+assert.equal(mistResized.height,50);assert.equal(mistResized.width,640);
+assert.match(rsize('EffectEditor.text()'),/\[field:01:01:0:castle-field:/);
+assert.equal(rsize('mergeDioramaIni()'),regionMapBefore);
+rsize('undo()');assert.equal(rsize('EffectEditor.text()'),regionBefore);
+rsize('redo()');
+rsize(`EffectEditor.openModal('${mistBounds.id}',${mistBounds.x},${mistBounds.y});`);
+assert.equal(resizeRegions.elements.get('#effectRegionControls').hidden,false);
+rsize(`$('#effectRegionHeight').value='66';$('#effectRegionHeight').onchange({target:$('#effectRegionHeight')});`);
+assert.equal(rsize('EffectEditor.mapEmitters().find(e=>e.kind==="castle-mist").height'),66);
+rsize(`$('#effectInspectorClose').onclick();`);
+assert.equal(rsize('EffectEditor.mapEmitters().find(e=>e.kind==="castle-mist").height'),50,'Cancel restores the whole linked field');
+rsize(`EffectEditor.resetHandle(EffectEditor.mapEmitters().find(e=>e.kind==='castle-mist'),'size')`);
+assert.equal(rsize('EffectEditor.mapEmitters().find(e=>e.kind==="castle-mist").height'),18);
+const lightRegions=JSON.parse(rsize('JSON.stringify(EffectEditor.mapEmitters().filter(e=>e.kind==="cave-light"))'));
+assert.equal(lightRegions.length,2);
+rsize(`EffectEditor.selectEmitter('${lightRegions[1].id}',false,1);
+ EffectEditor.editEmitter('${lightRegions[1].id}',{width:${lightRegions[1].width*1.5},height:${lightRegions[1].height*1.5}});`);
+const lightAfter=JSON.parse(rsize('JSON.stringify(EffectEditor.mapEmitters().filter(e=>e.kind==="cave-light"))'));
+assert.equal(lightAfter[0].width,lightRegions[0].width,'second-region handles must not modify the first region');
+assert(Math.abs(lightAfter[1].width-lightRegions[1].width*1.5)<.01);
+assert.equal(lightAfter[1].height,lightRegions[1].height*1.5);
+assert.equal(rsize('EffectEditor.selectedGuide()'),1);
+rsize(`regionApi.RoomPreview_CatalogueGuideValue=(i,g,f)=>[100,100,i===1&&g===0?0:100,100][f];
+ EffectEditor.updateCatalogue(regionApi);`);
+assert.equal(rsize('EffectEditor.mapEmitters().filter(e=>e.kind==="cave-light")[0].guideIndex'),1,
+ 'filtered-out source guides cannot renumber the surviving editable region');
+
+const contours=editor(fixture()),ctr=contours.run;
+ctr(`loadIniText('','wet-contour-resize.ini');setLayer(0);SharedRoomPreview.validateEffects=()=>{};
+ EffectEditor.placeEmitter('wet-contour',128,160);EffectEditor.editEmitter(EffectEditor.selected(),{width:192,height:128});`);
+assert.match(ctr('EffectEditor.text()'),/points=-64,0 64,0/,'resizing the wet contour changes its actual path');
+ctr(`EffectEditor.resetHandle(EffectEditor.mapEmitters()[0],'size')`);
+assert.doesNotMatch(ctr('EffectEditor.text()'),/points=/,'reset restores the inherited contour');
+console.log('Field-region resizing: floor anchoring, complete-field export, numeric controls, cancel/reset/undo, independent guides and wet-contour paths passed.');
+
+nr(`EffectEditor.restore('[effects]\\nversion=1\\n[source:01:01:0:forest-forward:0]\\nlight-scenery=0\\nlight-player=1\\nlight-enemies=0\\n');
+ EffectEditor.selectEmitter('member:01:01:0:forest-forward:00000001');`);
+assert.equal(nr("$('#effectLightTargets').checked"),false);
+assert.equal(nr("$('#effectLightPlayer').checked"),true);
+assert.equal(nr("$('#effectLightEnemies').checked"),false);
+nr(`$('#effectLightTargets').checked=true;$('#effectLightTargets').onchange();
+ $('#effectLightEnemies').checked=true;$('#effectLightEnemies').onchange();`);
+const savedMember=nr('EffectEditor.text()').split('[member:')[1];
+assert.match(savedMember,/light-scenery=0\nlight-player=1\nlight-enemies=1/);
+nr(`$('#effectLightTargets').checked=false;$('#effectLightTargets').onchange()`);
+assert.equal(nr("$('#effectLightEnemies').checked"),false,'clearing member override restores the parent target mask');
+console.log('Individual ray receiver controls inherit, override, export and restore the parent mask.');

@@ -17,10 +17,11 @@ static FrameSlot frame;
 static ActionSceneEffectFrame scene;
 static ActionEffectObserver *seen_observer;
 static unsigned expected_ticks, spell_calls, scene_calls, publications;
+static unsigned committed_generation;
 static unsigned environment_calls, manifest_calls;
 static uint16_t expected_scene_clock;
 static uint8_t published_group, published_map, published_section;
-static bool peeking;
+static bool pending_peek;
 static uint8_t scenery_section;
 uint8_t ActRaiser_LiveScenerySection(void) { return scenery_section; }
 
@@ -31,19 +32,15 @@ void ActionEffects_CaptureFrame(ActionEffectObserver *observer, ActionEffectFram
   assert(observer == seen_observer);
   /* The same observer survives successive captures and is shared with scene
    * observation, even while lighting and particles are disabled. */
-  assert(observer->next_generation == spell_calls);
-  observer->next_generation = ++spell_calls;
+  assert(observer->next_generation == committed_generation);
+  ++observer->next_generation;
+  ++spell_calls;
   *dst = (ActionEffectFrame){.game_frame = g_ram[kActRaiserWram_GameFrame]};
 }
 void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer, ActionSceneEffectFrame *dst,
     const uint8_t *wram, size_t size, unsigned ticks) {
   assert(wram == g_ram && size == sizeof(g_ram) && ticks == expected_ticks);
-  if(peeking) {
-    assert(observer!=seen_observer&&observer->next_generation==spell_calls);
-    observer->scene_clock=(uint16_t)(observer->scene_clock+ticks);
-    *dst=scene;return;
-  }
-  assert(observer == seen_observer && observer->next_generation == spell_calls);
+  assert(observer == seen_observer && observer->next_generation == committed_generation + 1);
   scene_calls++;
   assert(spell_calls == scene_calls);
   observer->scene_map_valid = wram[kActRaiserWram_MapGroup] != kActRaiserMapGroup_NonAction;
@@ -51,6 +48,7 @@ void ActionSceneEffects_CaptureFrame(ActionEffectObserver *observer, ActionScene
   observer->scene_clock = (uint16_t)(observer->scene_clock + ticks);
   observer->scene_clock_valid=1;
   expected_scene_clock = observer->scene_clock;
+  observer->landing_dust.valid = 1;
   *dst = scene;
 }
 void ActionSceneEffects_CaptureFrameFiltered(ActionEffectObserver *observer,
@@ -62,11 +60,7 @@ void ActionEffectManifest_SurfaceFields(unsigned group,unsigned room,const Actio
 bool ActionEffectManifest_ReplacesGlowField(unsigned group,unsigned room) {(void)group;(void)room;return false;}
 void ActionEnvironmentalEffects_CaptureFrame(ActionEffectObserver *observer,
     ActionSceneEffectFrame *dst, const uint8_t *wram, size_t size) {
-  if(peeking) {
-    assert(observer!=seen_observer&&dst!=&frame.action_scene_effects);
-    assert(wram==g_ram&&size==sizeof(g_ram));return;
-  }
-  assert(observer == seen_observer && dst == &frame.action_scene_effects);
+  assert(observer == seen_observer && dst != &frame.action_scene_effects);
   assert(wram == g_ram && size == sizeof(g_ram));
   assert(g_settings.action_environmental_effects);
   environment_calls++;
@@ -98,8 +92,8 @@ void ActionEffectManifest_Apply(unsigned group, unsigned room, uint16_t clock, c
   assert(ram == g_ram && size == kActRaiserWramSize);
   assert(clock == expected_scene_clock);
   manifest_calls++;
-  assert(group == published_group && room == published_map);
-  assert(value == &frame.action_scene_effects);
+  assert(group == g_ram[kActRaiserWram_MapGroup] && room == g_ram[kActRaiserWram_CurrentMap]);
+  assert(value != &frame.action_scene_effects);
 }
 
 static void Capture(unsigned ticks, uint8_t section) {
@@ -107,8 +101,12 @@ static void Capture(unsigned ticks, uint8_t section) {
   const unsigned previous_calls = spell_calls;
   const unsigned previous_environment_calls = environment_calls;
   const unsigned previous_manifest_calls = manifest_calls;
+  const unsigned builds = pending_peek ? 0 : 1;
+  const unsigned previous_publications = publications;
   ActionEffectCapture_CaptureFrame(&frame);
-  assert(spell_calls == previous_calls + 1 && publications == spell_calls);
+  committed_generation = seen_observer->next_generation;
+  pending_peek = false;
+  assert(spell_calls == previous_calls + builds && publications == previous_publications + 1);
   assert(frame.action_effects.game_frame == g_ram[kActRaiserWram_GameFrame]);
   assert(frame.action_scene_effects.decoration_count ==
       (g_settings.action_environmental_effects ? scene.decoration_count : 0));
@@ -119,9 +117,9 @@ static void Capture(unsigned ticks, uint8_t section) {
   assert(frame.action_effect_particles == g_settings.action_effect_particles);
   assert(frame.action_environmental_effects == g_settings.action_environmental_effects);
   assert(environment_calls == previous_environment_calls +
-      (g_settings.action_environmental_effects ? 1 : 0));
+      (g_settings.action_environmental_effects ? builds : 0));
   assert(manifest_calls == previous_manifest_calls +
-      (g_settings.action_environmental_effects && seen_observer->scene_map_valid ? 1 : 0));
+      (g_settings.action_environmental_effects && seen_observer->scene_map_valid ? builds : 0));
   assert(published_group == g_ram[kActRaiserWram_MapGroup]);
   assert(published_map == g_ram[kActRaiserWram_CurrentMap]);
   assert(published_section == section);
@@ -150,17 +148,35 @@ int main(void) {
   scene.decorations[1].kind = kActionEffect_AitosWaterfall;
   /* Repeated read-only receiver preparation must neither consume pending
    * ticks nor perturb native identity, dust or velocity observation. */
-  const ActionEffectObserver original_observer=*seen_observer;
-  ActionSceneEffectFrame peek,repeat;expected_ticks=3;peeking=true;
+  const unsigned before_peek = spell_calls;
+  ActionSceneEffectFrame peek,repeat;expected_ticks=3;
+  ActionEffectCapture_BeginFrame();
   assert(ActionEffectCapture_VisualClock()==3);
   ActionEffectCapture_PeekScene(&peek);ActionEffectCapture_PeekScene(&repeat);
   assert(!memcmp(&peek,&repeat,sizeof(peek)));
-  assert(!memcmp(seen_observer,&original_observer,sizeof(original_observer)));
-  assert(ActionEffectCapture_VisualClock()==3);peeking=false;
+  assert(spell_calls == before_peek + 1); /* one build shared by both reads */
+  assert(ActionEffectCapture_VisualClock()==3); /* pending ticks not consumed */
+  pending_peek = true;
   g_ram[kActRaiserWram_CurrentMap]=3;
   assert(ActionEffectCapture_VisualClock()==99); /* Handoff reseeds from ROM time. */
   g_ram[kActRaiserWram_CurrentMap]=2;
   Capture(3, kDioramaLayerSection_AitosWaterfall);
+  /* A discarded transaction cannot commit observer history or consume ticks.
+   * The next transaction must see edited/restored state even at the same ROM
+   * game-frame counter. Only the subsequently published snapshot commits it. */
+  ActionEffectGameplayClock_CompletePass();
+  expected_ticks = 1;
+  ActionEffectCapture_BeginFrame();
+  ActionEffectCapture_PeekScene(&peek);
+  assert(ActionEffectCapture_VisualClock() == 4);
+  scene.decorations[0].world_x = 300;
+  ActionEffectCapture_BeginFrame();
+  ActionEffectCapture_PeekScene(&repeat);
+  assert(repeat.decorations[0].world_x == 300 && peek.decorations[0].world_x != 300);
+  assert(ActionEffectCapture_VisualClock() == 4);
+  pending_peek = true;
+  Capture(1, kDioramaLayerSection_AitosWaterfall);
+  assert(ActionEffectCapture_VisualClock() == 4);
   /* Off removes only ambient accents, keeps actor effects and still selects
    * the waterfall's authored layout. Re-enabling restores the current list. */
   scene.effect_count = scene.visible_count = 1;

@@ -10,7 +10,7 @@ typedef struct ArGpuBlockMotion {
   SDL_GPUGraphicsPipeline *warp;
   SDL_GPUBuffer *costs, *directions, *motion, *vertices, *indices;
   SDL_GPUSampler *sampler;
-  SDL_GPUTexture *output;
+  SDL_GPUTexture *output, *attributes; /* Same winner/warp, companion material data. */
   unsigned width, height;
   float extents[4][4]; /* width, height, source atlas slot, analyze flag */
 } ArGpuBlockMotion;

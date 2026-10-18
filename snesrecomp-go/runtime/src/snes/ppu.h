@@ -350,6 +350,7 @@ struct Ppu {
     PpuObjRangeCapture objWinnerCapture;
     bool objColorTransformsActive;
     SrPpuObjColorTransform objColorTransforms[128];
+    SrPpuObjAttributeCapture objAttributes;
     uint32_t renderPitch;
     uint32_t renderHeight;
     uint8_t *renderBuffer;

@@ -10,7 +10,7 @@ const blobs=data.blobs.map(s=>Uint8Array.from(Buffer.from(s,'base64')));
 const context=vm.createContext({window:{},Uint8Array,Uint32Array,DataView});
 vm.runInContext(fs.readFileSync('tools/action_editor/shared_preview.js','utf8'),context);
 const encode=vm.runInContext('SharedActionPreview.encode',context);
-let api,target=0,effect=-1,creates=0;
+let api,target=0,effect=-1,creates=0,effectParams=null;
 const textures=new Map(),uploads=[],draws=[];
 const ar={
   create(w,h,usage){let id=1;while(textures.has(id))id++;
@@ -22,9 +22,9 @@ const ar={
   target(id){target=id;return 1;},viewport(){return 1;},clip(){return 1;},clear(){return 1;},
   geometry(id,p,n,ip,ni){assert(!id||(textures.has(id)&&id!==target));
     const v=new Float32Array(api.memory.buffer,p,n*8).slice();assert(v.every(Number.isFinite));
-    draws.push({id,effect,target,v,indices:new Int32Array(api.memory.buffer,ip,ni).slice()});return 1;},
+    draws.push({id,effect,target,params:effectParams,v,indices:new Int32Array(api.memory.buffer,ip,ni).slice()});return 1;},
   effect(kind,p,n){if(kind>=0){assert.equal(effect,-1);assert(new Float32Array(api.memory.buffer,p,n).every(Number.isFinite));}
-    effect=kind;return 1;},available(){return 1;}
+    effect=kind;effectParams=kind>=0?new Float32Array(api.memory.buffer,p,n).slice():null;return 1;},available(){return 1;}
 };
 const wasi={fd_close:()=>0,fd_seek:()=>0,fd_write:()=>0,proc_exit:n=>{throw Error(`exit ${n}`);}};
 ({instance:{exports:api}}=await WebAssembly.instantiate(fs.readFileSync(wasmFile),{ar,wasi_snapshot_preview1:wasi}));
@@ -39,6 +39,32 @@ const room=data.rooms.find(r=>r.group===3&&r.map===3);
 assert.equal(send(encode(data,blobs,room),api.RoomPreview_Load),1);
 const noEffects='[effects]\nversion=1\n';
 const configure=text=>assert.equal(send(Buffer.from(text),api.RoomPreview_ConfigureEffects),1);
+// Region handles serialize complete fields. Exercise the actual C validator,
+// rather than the editor unit test's permissive configuration stub.
+vm.runInContext(fs.readFileSync('tools/action_editor/effect_regions.js','utf8'),context);
+const regions=vm.runInContext('EffectRegions',context);
+for(const [kind,file,width,height] of [
+  ['castle-mist','castle-6',400,50],['castle-sky','castle-6',80,60],
+  ['temple-dust','cave-atmosphere',600,300],['cave-light','cave-atmosphere',360,520],
+  ['moon-cloud','moon',200,48],
+  ['blood-mist','marsh',640,60],['blood-water','marsh',640,24]
+]) {
+  const text=fs.readFileSync(`assets/effects/${file}-field.ini`,'utf8');
+  const record=Object.fromEntries(text.split('\n').filter(l=>l.includes('=')).map(l=>l.split('=')));
+  const range=regions.limits(kind,record,0),sizes=[{width,height}];
+  if(['castle-mist','castle-sky','moon-cloud','blood-mist','blood-water'].includes(kind))
+    sizes.push({width:kind==='castle-mist'?width:range.maxWidth,height:range.maxHeight});
+  for(const size of sizes) {
+    const updated=regions.patch(kind,record,0,size);
+    if(kind==='blood-water')assert(!('surface' in updated),'shoreline width edits preserve the native water band');
+    const exported=text.split('\n').map(line=>{
+      const key=line.split('=')[0];return key in updated?`${key}=${updated[key]}`:line;
+    }).join('\n');
+    assert.equal(send(Buffer.from(exported),api.RoomPreview_ConfigureEffects),1,
+      `${kind} resized field ${JSON.stringify(size)} must be accepted by native/WASM: line ${api.RoomPreview_RecipeErrorLine()}`);
+  }
+}
+console.log('Region handles: resized complete fields pass the native/WASM configuration contract.');
 configure(noEffects);
 let camera=[256,160],extra=120,vertical=64;
 function render(view=[960,600,1,0,0,1,0]) {
@@ -53,8 +79,17 @@ render();
 // The first OBJ may also grow a compositor scratch target: BG guard columns
 // are conditional, whereas the actor surface always retains its apron.
 const added=[...textures.keys()].filter(id=>!prior.has(id)&&textures.get(id).w===640&&textures.get(id).h===352);
-assert.equal(added.length,1);
-const spriteId=added[0],texture=textures.get(spriteId);
+assert.equal(added.length,2);
+const spriteId=added.find(id=>new Set(textures.get(id).pixels).size>10),texture=textures.get(spriteId);
+const attributeId=added.find(id=>id!==spriteId),attributes=textures.get(attributeId);
+function receiverDraw() {const d=draws.find(d=>d.effect===5&&d.params[16]===attributeId);assert(d,'projected actor material bound');return d;}
+function energy(id) {
+  return draws.filter(d=>d.target===id&&!d.id).reduce((sum,d)=>{
+    for(let i=0;i<d.v.length;i+=8)sum+=(d.v[i+2]+d.v[i+3]+d.v[i+4])*d.v[i+5];
+    return sum;
+  },0);
+}
+function roleEnergy(d,role) {return energy(d.params[17+role]);}
 const original=texture.pixels.slice();
 assert(original.filter(Boolean).length>500,'complete multi-part player, not a geometric placeholder');
 assert(new Set(original).size>10,'native palette is retained');
@@ -67,71 +102,53 @@ assert.equal(uploads.filter(u=>u.id===spriteId).length,0,'orbit/aspect/pixel-asp
 const exposure=targets=>noEffects+'[emitter:03:03:0:exposure:00000001]\n'+
   'x=256\ny=256\nwidth=1024\nheight=1024\nbrightness=.25\ndim-scenery=0\n'+targets;
 api.RoomPreview_EnableEffects(1);configure(exposure('dim-player=1\ndim-enemies=0\n'));render();
-const dimmed=texture.pixels.slice();
-for(let i=0;i<original.length;i++)if(original[i]) {
-  assert.equal(dimmed[i]>>>24,255);
-  for(const shift of [0,8,16])assert.equal(dimmed[i]>>>shift&255,(original[i]>>>shift&255)>>2);
-}
+assert.deepEqual(texture.pixels,original,'source palette stays intact for projected lighting');
+for(let i=0;i<original.length;i++)if(original[i])assert.equal(attributes.pixels[i],0xff10ff00);
+assert.equal(receiverDraw().params[16],attributeId,'winning receiver attributes reach the material');
 assert.equal(api.RoomPreview_ReceiverStyle(0,1),1);render();
-assert(draws.some(d=>d.id===spriteId&&d.effect===1),'production rim shader binds to the lit sprite plane');
-assert.equal(uploads.length,0,'rim toggle reuses already-lit pixels');
-assert.deepEqual(texture.pixels,dimmed,'rim does not overwrite lighting on CPU');
+assert(receiverDraw().params[3]>0,'rim is composed after material illumination');
+assert.equal(uploads.length,0,'rim toggle reuses captured data');
 assert.equal(api.RoomPreview_ReceiverStyle(0,0),1);
 
-// Both role masks on identical art at adjacent world positions.
+// Separate role/ambient data for adjacent identical art, without baking light
+// into the shared palette. Native GPU tests verify the final shader pixels.
 assert.equal(api.RoomPreview_SetReceivers(3,128,352,192,352),1);render();
-for(let i=0;i<original.length;i++)if(original[i])assert.equal(texture.pixels[i+64],original[i],
-  'enemy comparison ignores player-only dimming');
+for(let i=0;i<original.length;i++)if(original[i]) {
+  assert.equal(attributes.pixels[i],0xff10ff00);
+  assert.equal(attributes.pixels[i+64],0xff4000ff);
+}
 configure(exposure('dim-player=0\ndim-enemies=1\n'));render();
 for(let i=0;i<original.length;i++)if(original[i]) {
-  assert.equal(texture.pixels[i],original[i]);assert.equal(texture.pixels[i+64],dimmed[i]);
+  assert.equal(attributes.pixels[i],0xff40ff00);
+  assert.equal(attributes.pixels[i+64],0xff1000ff);
 }
 assert.equal(api.RoomPreview_SetReceivers(1,128,352,192,352),1);
 const torch=targets=>noEffects+'[emitter:03:03:0:torch:00000002]\n'+
   'x=128\ny=320\nwidth=220\nheight=176\ncolor=ff6020\nlight-scenery=0\n'+targets;
 configure(torch('light-player=1\nlight-enemies=0\n'));render();
-const lit=texture.pixels.slice();
-assert(lit.some((p,i)=>original[i]&&((p>>>16&255)>(original[i]>>>16&255))), 'torch adds warm illumination to artwork');
+assert.deepEqual(texture.pixels,original);
+let d=receiverDraw(),torchEnergy=roleEnergy(d,0);
+assert(torchEnergy>0&&roleEnergy(d,1)===0,'torch targets player map only');
 configure(torch('light-player=0\nlight-enemies=1\n'));render();
-assert.deepEqual(texture.pixels,original,'player ignores a torch configured for enemies');
+d=receiverDraw();assert.equal(roleEnergy(d,0),0);assert.equal(roleEnergy(d,1),torchEnergy);
+assert.equal(uploads.length,0,'changing light targets does not reupload sprite artwork or attributes');
 assert.equal(api.RoomPreview_SetReceivers(2,128,352,128,352),1);render();
-assert.deepEqual(texture.pixels,lit,'enemy receiver gets exactly the same torch lighting');
-api.RoomPreview_EnableEffects(0);render();assert.deepEqual(texture.pixels,original);
+for(let i=0;i<original.length;i++)if(original[i])assert.equal(attributes.pixels[i],0xff4000ff);
 
-// Room dimming reduces ambient illumination. Local lights restore the native
-// palette, instead of adding a flat tint over dimmed pixels or multiplying
-// the incoming light by the room's darkness a second time.
+// Moving/intensifying light updates the projected field, not the sprite
+// hotpoint. Identical receiver masks share one target instead of two passes.
 const fill=(color,intensity=4)=>'[emitter:03:03:0:light-gradient:00000003]\n'+
   `x=128\ny=320\nwidth=1024\nheight=1024\nsoftness=0\nillumination=1\nintensity=${intensity}\n`+
   `color=${color}\ncolor-end=${color}\nlight-scenery=0\nlight-player=1\nlight-enemies=1\n`;
 const darkRoom=exposure('dim-player=1\ndim-enemies=1\n').replace('brightness=.25','brightness=.28');
-api.RoomPreview_EnableEffects(1);configure(darkRoom+fill('ffffff'));
-for(const role of [1,2]) {
-  assert.equal(api.RoomPreview_SetReceivers(role,128,352,128,352),1);render();
-  assert.deepEqual(texture.pixels,original,'28% ambient + 72% white light restores every palette entry');
-}
-configure(darkRoom+fill('ff8040'));render();
-for(let i=0;i<original.length;i++)if(original[i]) {
-  const result=texture.pixels[i];
-  assert.equal(result>>>24,255);
-  assert.equal(result>>>16&255,original[i]>>>16&255,'warm light restores the red channel');
-  for(const shift of [0,8,16]) {
-    const source=original[i]>>>shift&255,value=result>>>shift&255;
-    assert(value>=Math.floor(source*.28),'colored light also reveals dimmed detail');
-    if(!source)assert.equal(value,0,'lighting cannot wash color into black palette channels');
-  }
-}
-const recolored=texture.pixels.slice();render();
-assert.equal(uploads.length,0,'stable combined lighting reuses sprite pixels');
-assert.deepEqual(texture.pixels,recolored);
-for(const intensity of [8,16])for(const role of [1,2]) {
-  configure(darkRoom+fill('ff8040',intensity));
-  assert.equal(api.RoomPreview_SetReceivers(role,128,352,128,352),1);render();
-  const gains=[1,128/255,64/255].map(t=>Math.round(Math.min(4,.28+.18*intensity*t)*256));
-  for(let i=0;i<original.length;i++)if(original[i])for(const [c,shift] of [16,8,0].entries())
-    assert.equal(texture.pixels[i]>>>shift&255,Math.min(255,Math.floor((original[i]>>>shift&255)*gains[c]/256)),
-      'high intensity preserves the palette, source tint, receiver roles and saturation');
-  render();assert.equal(uploads.length,0,'high intensity does not add recurring uploads');
+let lastEnergy=0;
+for(const intensity of [4,8,16]) {
+  configure(darkRoom+fill('ff8040',intensity));render();d=receiverDraw();
+  assert.equal(d.params[17],d.params[18],'identical player/enemy fields reuse one target');
+  const e=roleEnergy(d,0);assert(e>lastEnergy);lastEnergy=e;
+  assert.deepEqual(texture.pixels,original,'all incoming intensities preserve original palette');
+  for(let i=0;i<original.length;i++)if(original[i])assert.equal(attributes.pixels[i],0xff1200ff);
+  render();assert.equal(uploads.length,0,'animated lighting needs no receiver reuploads');
 }
 api.RoomPreview_EnableEffects(0);render();assert.deepEqual(texture.pixels,original);
 
@@ -305,14 +322,35 @@ for(const mode of [0,1,2]) {
   assert.equal(api.RoomPreview_SetReceivers(3,640,400,720,400),1);
   render([960,600,1,0,0,mode,0]);
   assert(draws.some(d=>d.target&&d.id===0),'native moon produces a material light map even without a BG2 plane');
-  const receiverDraw=draws.find(d=>d.effect===1&&d.id);
-  assert(receiverDraw,'visible native moonlight receivers submitted');
-  const t=textures.get(receiverDraw.id),bright=t.pixels.slice();
+  const moonDraw=draws.find(d=>d.effect===5&&d.id);
+  assert(moonDraw,'visible native moonlight receivers submitted');
+  const bright=roleEnergy(moonDraw,0);assert(bright>0);
   configure(moonOnly+'[source:02:01:0:moonlight:b1000002]\nillumination=0\n');
   render([960,600,1,0,0,mode,0]);
-  assert(bright.some((p,i)=>p!==t.pixels[i]),'moon calibration reaches actual sprite palettes');
+  const unlit=draws.find(d=>d.effect===5&&d.id);assert(unlit);
+  assert(bright>roleEnergy(unlit,0),'moon calibration reaches the projected sprite light field');
 }
 console.log('Native moon: material illumination and sprite receivers work with plane, skybox-only and combined backgrounds.');
+// Native forest rays use the same projected field for both receiver roles,
+// including the vertical descent into the boss pit and skybox-only mode.
+const fillmore=data.rooms.find(r=>r.group===1&&r.map===1);
+assert.equal(send(encode(data,blobs,fillmore),api.RoomPreview_Load),1);
+assert.equal(send(Buffer.from('[layers:01:01]\n'),api.RoomPreview_Configure),1);
+assert.equal(send(art,api.RoomPreview_LoadPlayer),1);
+const noForestLight=noEffects+'[source:01:01:0:forest-forward:46000000]\nillumination=0\n';
+for(const cam of [[0,0],[3584,384]])for(const mode of [0,1,2]) {
+  camera=cam;
+  configure(noEffects);
+  assert.equal(api.RoomPreview_SetReceivers(3,cam[0]+128,cam[1]+280,cam[0]+192,cam[1]+280),1);
+  render([960,600,1,0,0,mode,0]);
+  const lit=draws.find(d=>d.effect===5&&d.id);assert(lit);
+  assert.equal(lit.params[17],lit.params[18],'forest roles share the same projected illumination');
+  const litEnergy=roleEnergy(lit,0);assert(litEnergy>0);
+  configure(noForestLight);render([960,600,1,0,0,mode,0]);
+  const unlit=draws.find(d=>d.effect===5&&d.id);assert(unlit);
+  assert(litEnergy>roleEnergy(unlit,0),'forest brightness reaches the material field, not baked sprite pixels');
+}
+console.log('Native forest: projected player/enemy illumination follows boss descent in all background modes.');
 // The lower soft light in Kassandora 2/5 previously vanished until its centre
 // entered the capture at camera Y=1137, despite already lighting visible rows.
 const softRoom=data.rooms.find(r=>r.group===3&&r.map===5);

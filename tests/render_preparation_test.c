@@ -27,14 +27,15 @@ static Sim3DPreparedPipelines pipelines = {
     .surfaces = true,
     .spherical_body = true,
 };
-static bool diorama_on, interpolation_on;
+Settings g_settings;
+static bool diorama_on;
 static int bg_prepares, action_prepares, interpolation_prepares;
 bool DioramaEffectBackend_PrepareSceneryLight(ArRenderDevice *device) {
   (void)device;
   return available;
 }
 bool Diorama_ModeIsOn(void) { return diorama_on; }
-bool Diorama_InterpolationIsOn(void) { return diorama_on && interpolation_on; }
+bool Diorama_InterpolationIsOn(void) { return diorama_on && g_settings.gpu_interp_enabled; }
 bool DioramaBgGpu_Prepare(ArRenderDevice *device) {
   (void)device;
   ++bg_prepares;
@@ -159,14 +160,14 @@ int main(void) {
   assert(!RenderPreparation_Prepare(NULL, &features));
   assert(!RenderPreparation_Prepare(&device, NULL));
   assert(RenderPreparation_Prepare(&device, &features));
-  assert(features == kRenderFeature_All && shader_calls == 8 && ends == 1);
+  assert(features == kRenderFeature_All && shader_calls == 9 && ends == 1);
   assert(completion_prepares == 1);
   assert(creates == destroys);
   /* Linear meshes are an acceleration, not a distinct visual setting. A
    * prepared rejection retains ordinary SIM geometry and unrelated features. */
   pipelines.linear_models = false;
   assert(RenderPreparation_Prepare(&device, &features));
-  assert(features == kRenderFeature_All && shader_calls == 16 && ends == 2 && creates == destroys);
+  assert(features == kRenderFeature_All && shader_calls == 18 && ends == 2 && creates == destroys);
   pipelines.linear_models = true;
   available = false;
   pipelines.radial = false;
@@ -174,7 +175,7 @@ int main(void) {
   assert(RenderPreparation_Prepare(&device, &features));
   assert(features ==
          (kRenderFeature_Depth | kRenderFeature_Effects | kRenderFeature_SimSoftShadows));
-  assert(shader_calls == 24 && creates == destroys);
+  assert(shader_calls == 27 && creates == destroys);
   assert(completion_prepares == 2); /* Unavailable shader needs no cloud bake. */
   fail_clear = true;
   assert(!RenderPreparation_Prepare(&device, &features));
@@ -200,24 +201,33 @@ int main(void) {
   fatal = false;
   begin_result = kArRenderTargetBegin_Ready;
 
-  /* Optional features: nothing is built while Diorama 3D is off; switching it
-   * on builds the action-stage set once; interpolation adds its set once; a
-   * full preparation (device reset) builds the selected set again. */
+  /* Boot prepares action projection even from a flat menu. Enabling
+   * Diorama reuses it; interpolation adds its pipelines once, under the
+   * preparation indicator. Device reset rebuilds both sets. */
   bg_prepares = action_prepares = interpolation_prepares = 0;
   RenderPreparation_PrepareSelectedFeatures(&device);
   assert(bg_prepares == 0 && action_prepares == 0);
   diorama_on = true;
   RenderPreparation_PrepareSelectedFeatures(&device);
   RenderPreparation_PrepareSelectedFeatures(&device);
-  assert(bg_prepares == 1 && action_prepares == 1 && interpolation_prepares == 0);
-  interpolation_on = true;
+  assert(bg_prepares == 0 && action_prepares == 0 && interpolation_prepares == 0);
+  g_settings.gpu_interp_enabled = true;
   RenderPreparation_PrepareSelectedFeatures(&device);
   RenderPreparation_PrepareSelectedFeatures(&device);
-  assert(action_prepares == 2 && interpolation_prepares == 1);
+  assert(action_prepares == 1 && interpolation_prepares == 1);
   assert(RenderPreparation_Prepare(&device, &features));
-  assert(action_prepares == 3 && interpolation_prepares == 2);
+  assert(action_prepares == 2 && interpolation_prepares == 2);
   RenderPreparation_PrepareSelectedFeatures(NULL);
-  assert(action_prepares == 3);
+  assert(action_prepares == 2);
+
+  /* A flat boot must also prepare the saved interpolation preference; action
+   * entry must not introduce a second compilation bracket. */
+  diorama_on = false;
+  assert(RenderPreparation_Prepare(&device, &features));
+  assert(action_prepares == 3 && interpolation_prepares == 3);
+  diorama_on = true;
+  RenderPreparation_PrepareSelectedFeatures(&device);
+  assert(action_prepares == 3 && interpolation_prepares == 3);
 
   /* The indicator brackets every preparation, including one ended early by a
    * fatal request, ticks between steps, and is the compile log's observer. */

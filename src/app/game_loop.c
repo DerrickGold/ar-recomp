@@ -774,15 +774,20 @@ void GameLoop_Run(const GameSessionConfig *config) {
       if (!stream_done || HostFrameQueue_Read(stream.queue)) {
         const uint64_t trace_ready_ns = pacing_trace ? SDL_GetTicksNS() : 0;
         const uint64_t sample_now_ns = SDL_GetTicksNS();
+        const uint64_t present_deadline_ns = HostDisplay_NextPresentationDeadline();
         const uint64_t sample_ns =
-            !stream.playout.interpolate && stream.playout.delay_ns ? preparation_ns : sample_now_ns;
+            !stream.playout.interpolate && stream.playout.delay_ns ? preparation_ns :
+                HostFramePlayout_PreparationTime(stream.playout, sample_now_ns,
+                    present_deadline_ns);
         const uint64_t present_target_ns = HostFramePlayout_Target(stream.playout, sample_ns);
         /* An early draw must not clamp an old pair just because the producer
          * has not reached the output-time endpoint yet. Keep servicing it
          * until that endpoint arrives or the output deadline itself is due. */
         const bool await_endpoint = HostFramePlayout_AwaitEndpoint(
             stream.playout, stream_endpoint_ns, present_target_ns,
-            sample_now_ns, sample_ns);
+            sample_now_ns, sample_ns) ||
+            HostFramePlayout_AwaitNativeDeadline(stream.playout, stream_endpoint_ns,
+                present_target_ns, sample_now_ns, present_deadline_ns);
         const float phase = HostFramePlayout_Phase(
             stream.playout, stream_endpoint_ns, present_target_ns);
         const bool presented = !await_endpoint && HostDisplay_TryRepresentFrame(

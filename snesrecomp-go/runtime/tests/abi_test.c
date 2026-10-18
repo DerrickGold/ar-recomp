@@ -3283,6 +3283,42 @@ int main(void) {
                     "invalid PPU OBJ capture partially applied");
     obj_capture_request.range_pixel_byte_size = sizeof(s_overlay_surface);
 
+    {
+        static uint8_t companion[4][384u * 352u * 4u];
+        SrPpuObjAttributeCapture attributes = {0};
+        for (unsigned i = 0; i < 4; ++i) {
+            attributes.pixels[i] = companion[i];
+            attributes.pixel_byte_size[i] = sizeof(companion[i]);
+        }
+        attributes.values[0] = 0xff10ff00u;
+        failed |= check(PpuBindOverlaySurface(snes->ppu, kPpuOverlaySource_Obj,
+                            (uint8_t *)s_overlay_surface, 384u * 4u) &&
+                        PpuSetOverlayCapture(snes->ppu, kPpuOverlaySource_Obj, 0, 0, 256, 224, 0) &&
+                        PpuSetOverlayOamRange(snes->ppu, 0, 128), "OBJ attribute fixture binding failed");
+        SrPpuObjCaptureRequest request = {.struct_size = sizeof(request),
+            .flags = SR_PPU_OBJ_CAPTURE_ATTRIBUTES,
+            .lifetime_generation = ppu_state.lifetime_generation, .attributes = &attributes};
+        request.struct_size = SR_PPU_OBJ_CAPTURE_REQUEST_V3_SIZE;
+        failed |= check(api->configure_ppu_obj_capture(runner, &request) == SR_RESULT_INVALID_ARGUMENT,
+                        "short OBJ attribute request was accepted");
+        request.struct_size = sizeof(request);
+        attributes.pixel_byte_size[3] = 1;
+        failed |= check(api->configure_ppu_obj_capture(runner, &request) == SR_RESULT_INVALID_ARGUMENT &&
+                        !snes->ppu->objAttributes.pixels[0], "undersized attribute surface partially applied");
+        attributes.pixel_byte_size[3] = sizeof(companion[3]);
+        failed |= check(api->configure_ppu_obj_capture(runner, &request) == SR_RESULT_OK &&
+                        snes->ppu->objAttributes.values[0] == 0xff10ff00u, "OBJ attributes not configured");
+        attributes.values[0] = 0;
+        failed |= check(snes->ppu->objAttributes.values[0] == 0xff10ff00u, "attribute values were not copied");
+        request.attributes = NULL;
+        ++request.lifetime_generation;
+        failed |= check(api->configure_ppu_obj_capture(runner, &request) == SR_RESULT_STALE_VIEW &&
+                        snes->ppu->objAttributes.pixels[0], "stale attribute clear partially applied");
+        --request.lifetime_generation;
+        failed |= check(api->configure_ppu_obj_capture(runner, &request) == SR_RESULT_OK &&
+                        !snes->ppu->objAttributes.pixels[0], "attribute clear failed");
+    }
+
     mode7_override_request = (SrPpuMode7OverrideRequest) {
         .struct_size = sizeof(mode7_override_request),
         .pixels = s_mode7_art,

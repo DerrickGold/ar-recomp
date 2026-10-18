@@ -2,7 +2,7 @@
 #define AR_GPU_FRAME_HANDOFF_SDL_H
 #include "action_scene_pass_sdl.h"
 
-enum { kArGpuFrameHandoffMaximumPlanes = 12 };
+enum { kArGpuFrameHandoffMaximumPlanes = 16 };
 
 /* Native, presenter-owned resources for one frame pair. Pack normalizes
  * sampled RGBA/BGRA sources into an RGBA8 atlas in one render pass. Unpack

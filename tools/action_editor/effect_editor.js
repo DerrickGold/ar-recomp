@@ -5,6 +5,8 @@ const EffectEditor=(()=>{
   let documentText=window.__ACTION_EFFECTS__||empty, saved=documentText;
   let selected='', sources=[], sourceKey='', sourceScope='', catalogueSources=[], catalogueScope='', catalogueDocument='', modal=null, records=new Map();
   let exposureDefaults=new Map(),exposureScope="",contourTarget=null;
+  const regionDefinitions=new Map();
+  let selectedGuideIndex;
   const mapSelection=new Set();let effectClipboard=null,clipboardActive=false;
   const status=message=>{$('#effectStatus').textContent=message;$('#effectDocumentStatus').textContent=message;if(modal)$('#effectInspectorStatus').textContent=message;};
   const mapStatus=message=>{status(message);tileActionStatus(message);};
@@ -37,6 +39,7 @@ const EffectEditor=(()=>{
     if(drag?.effects){EmitterMapTools.cancel();drag=null;}
     const previous=records;
     documentText=text;records=decode(text);
+    regionDefinitions.clear();
     for(const [id,r] of records)if(/^(emitter|field):/.test(id)&&!resetRecords.has(id))resetRecords.set(id,{...r});
     const added=[...records.keys()].find(id=>!previous.has(id));
     if(added)selected=added;
@@ -78,6 +81,10 @@ const EffectEditor=(()=>{
   const particleNames=['particle-path','flame','motes','particle-area','water-surface','drips','waterfall-spray','cloud-bank','torch'];
   const lightDefaults=window.__ACTION_LIGHT_RESPONSE__;
   const lightNames=Object.keys(lightDefaults);
+  // The distant castle sky is atmospheric scattering behind masonry. The
+  // window light owns illumination entering the room; promoting the sky to
+  // object/material maps would bypass the wall and recreate light leaks.
+  const receiverNames=lightNames.filter(name=>name!=='castle-sky');
   const sourceDefault=(name,key,member=false)=>member?1:(lightDefaults[name]?.[key]??1);
   const dimNames=['exposure','cave-light','castle-light'];
   const fieldNames=['particle-path','heat-haze','torch','halo','light-gradient','particle-area','light-fan','water-surface','drips','waterfall-spray','cloud-bank','wet-contour'];
@@ -102,6 +109,23 @@ const EffectEditor=(()=>{
   const marshNames=['blood-water','blood-mist','wet-timber','marsh-air'];
   const moonNames=['moonlight','moon-reflection','moon-cloud'];
   const waterNames=['cave-water','cave-drips','cave-mist','cave-sheen'];
+  function inheritedReceiverMask(source,mode) {
+    const name=source?.name,kindDefault=mode==='Light'?(lightDefaults[name]?.receivers??1):1;
+    const owner=castleNames.includes(name)?'castle-field':atmosphereNames.includes(name)?'atmosphere-field':
+      surfaceNames[name]?.[0]||projectileNames[name]?.[0]||arcNames[name]?.[0]||
+      (['torch','wall-torch'].includes(name)?'glow-field':null);
+    const definition=owner&&[...records].find(([id])=>id.startsWith(fieldPrefix()+owner+':'))?.[1];
+    const slot=['castle-field','atmosphere-field'].includes(owner)?mode==='Light'?1:0:0;
+    const fieldMask=Number(definition?.receivers?.split(/\s+/)[slot]??8);
+    let mask=fieldMask<8?fieldMask:kindDefault;
+    if(source?.member) {
+      const parent=records.get(source.parent)||{},prefix=mode.toLowerCase();
+      if(['scenery','player','enemies'].some(target=>parent[`${prefix}-${target}`]!==undefined))mask=kindDefault;
+      for(const [target,bit] of [['scenery',1],['player',2],['enemies',4]])
+        if(parent[`${prefix}-${target}`]!==undefined)mask=parent[`${prefix}-${target}`]==='1'?mask|bit:mask&~bit;
+    }
+    return mask;
+  }
   function refreshInspector() {
     const source=sources.find(s=>s.id===selected), record=records.get(selected)||source?.record||{};
     const definition=!!source?.field;
@@ -151,18 +175,19 @@ const EffectEditor=(()=>{
     $('#exposureControls').hidden=name!=='exposure';
     for(const [id,key] of exposureFields)$('#'+id).value=key==='brightness'?Math.round(100*Number(record.brightness??(1-Number(record.intensity??.35)))):record[key]??0;
     $('#emitterlifetime').disabled=['exposure','soft-light','halo','light-gradient'].includes(name);
-    $('#receiverControls').hidden=!!source?.member||!lightNames.includes(name)&&!dimNames.includes(name);
+    $('#receiverControls').hidden=!receiverNames.includes(name)&&!dimNames.includes(name);
     $('#effectFamilyOpen').hidden=!source?.member;
-    for(const [mode,names] of [['Light',lightNames],['Dim',dimNames]]) {
-      const available=names.includes(name),prefix=mode.toLowerCase();
+    for(const [mode,names] of [['Light',receiverNames],['Dim',dimNames]]) {
+      const available=names.includes(name)&&!(source?.member&&mode==='Dim'),prefix=mode.toLowerCase();
       $('#effect'+mode+'Group').hidden=!available;
       const active=['scenery','player','enemies'].some(target=>record[`${prefix}-${target}`]!==undefined);
       $('#effect'+mode+'Targets').checked=active||name==='exposure'&&mode==='Dim';
       $('#effect'+mode+'Targets').disabled=!available||name==='exposure'&&mode==='Dim';
       for(const target of ['Scenery','Player','Enemies']) {
         const element=$('#effect'+mode+target);element.disabled=!available||!$('#effect'+mode+'Targets').checked;
-        const defaults=mode==='Light'?(lightDefaults[name]?.receivers??1):1;
-        element.checked=record[`${prefix}-${target.toLowerCase()}`]!==undefined?record[`${prefix}-${target.toLowerCase()}`]==='1':!!(defaults&{Scenery:1,Player:2,Enemies:4}[target]);
+        const key=`${prefix}-${target.toLowerCase()}`;
+        element.checked=record[key]!==undefined?record[key]==='1':
+          !!((active?(mode==='Light'?(lightDefaults[name]?.receivers??1):1):inheritedReceiverMask(source,mode))&{Scenery:1,Player:2,Enemies:4}[target]);
       }
     }
     $('#effectIntensity').max=name==='exposure'?1:lightNames.includes(name)?16:4;
@@ -213,14 +238,24 @@ const EffectEditor=(()=>{
     $('#effectIntensity').value=record.intensity??sourceDefault(name,'intensity',source?.member);
     $('#effectReach').value=record.reach??sourceDefault(name,'reach',source?.member);
     $('#effectIllumination').value=record.illumination??sourceDefault(name,'illumination');
-    $('#effectIllumination').disabled=disabled||definition||!!source?.member||!lightNames.includes(name);
+    $('#effectIllumination').disabled=disabled||definition||!!source?.member||!receiverNames.includes(name);
     $('#effectColor').value='#'+(record.color??'ffffff');
     $('#effectSourceId').textContent=source?.id??'';
     const markers=source?mapEmitters().filter(e=>e.id===source.id):[];
-    const marker=markers.find(e=>e.guideIndex===modal?.guideIndex)||markers[0];
+    const marker=markers.find(e=>e.guideIndex===(modal?.guideIndex??selectedGuideIndex))||markers[0];
+    $('#effectRegionControls').hidden=!marker?.region;
+    for(const key of ['X','Y','Width','Height'])$('#effectRegion'+key).value=marker?.[key.toLowerCase()]??0;
+    $('#effectRegionY').disabled=marker?.moveY===false;$('#effectRegionHeight').disabled=marker?.resizeHeight===false;
+    $('#effectRegionWidth').max=marker?.maxWidth??16384;$('#effectRegionHeight').max=marker?.maxHeight??16384;
+    $('#effectRegionWidth').min=marker?.minWidth??4;
+    $('#effectRegionHint').textContent=name==='castle-mist'?
+      'Y is the supporting floor. Drag the upper corners to change mist height without lifting it off the floor. Width must stay over a contiguous supported floor.':
+      name==='blood-water'?'Drag horizontally to resize the shoreline span. Its height and Y remain on the native water band; edit the complete field for water depth and motion.':
+      'Handles edit the complete field definition. Shared shoreline heights and atmosphere styles also affect linked regions. Source witnesses and collision remain required.';
     $('#effectSourceInfo').textContent=source?.nativeExposure?'Native light box. Editing extracts this dimming zone from its atmosphere definition. Apply saves both changes together; Cancel leaves the original intact.':source?
       `${source.name.replaceAll('-',' ')}${source.name==='moon-field'?` · BG2 source at ${Math.round(marker?.x??source.x)}, ${Math.round(marker?.y??source.y)}`:source.catalogue&&!source.movable&&!source.guides?.length?' · room family':` at ${Math.round(marker?.x??source.x)}, ${Math.round(marker?.y??source.y)} map pixels`}. `+
       (source.name==='ground-mist'?(source.support===undefined?'Preview to inspect supported spans.':source.support?`${source.support} supported spans. No surfaces outside the painted area are used.`:'No supported floor inside this area. Move or expand it to include a cyan floor edge.'):
+      source.name==='castle-sky'?'Distant sky scattering stays behind the castle wall. Configure scenery/player/enemy illumination on the castle window lights.':
       source.name==='floor-mist'?'Collision-supported mist span. The outline ends at the supporting floor, including spike bottoms. Edit the complete atmosphere definition to change the floor search area or mist height.':
       attached?'Actor attachment. Applies to every matching visible actor; the marker previews its offset at the reference actor.':source.field?'Complete definition. Edit the source contacts, shapes, profiles and motion below.':source.member?'Individual catalogue member. Move, tint or disable this member independently.':source.movable?'Individual source: move its anchor or scale its area.':source.actor?'Actor family override. Applies to all recognized actors of this kind in this room and terrain.':source.emitter?`Placed emitter in ${anchor==='bg1'?'BG1':'BG2'} coordinates.`:source.reach?'Reach changes the spill radius without brightening its centre.':'Compound source: tint/intensity affect the whole group.'):
       'Select an effect marker on the map, or right-click to add an effect.';
@@ -327,8 +362,23 @@ const EffectEditor=(()=>{
       bgIndex===1?layer.pagesHigh*128:nativeCamera.y+112);
   };
   for(const [id,key] of nativeFields)$('#'+id).onchange=e=>editEmitter(selected,{[key]:e.target.value},'edit native effect member');
+  for(const key of ['X','Y','Width','Height']) {
+    const input=$('#effectRegion'+key);
+    input.onchange=e=>editEmitter(selected,{[key.toLowerCase()]:e.target.value},'edit effect region');
+    input.title='Shift-click to restore the loaded region value';
+    input.addEventListener('pointerdown',ev=>{
+      if(!ev.shiftKey)return;ev.preventDefault();ev.stopPropagation();
+      const source=sources.find(s=>s.id===selected),definition=regionDefinition(source.name);
+      const original=EffectRegions.bounds(source.name,resetRecords.get(definition.id)||definition.record,modal?.guideIndex??selectedGuideIndex??0);
+      const axis=['X','Width'].includes(key)?'X':'Y',scale=bgIndex===1?1:source['mapScale'+axis]||1;
+      editEmitter(selected,{[key.toLowerCase()]:original[key.toLowerCase()]*scale},'reset effect region value');
+    });
+  }
   function editEmitter(id,patch,label='edit emitter') {
     const source=sources.find(s=>s.id===id);
+    if(source&&!source.member&&!source.movable&&EffectRegions.owner(source.name)&&
+        ['x','y','width','height'].some(key=>patch[key]!==undefined))
+      return editRegion(source,patch,label,patch.guideIndex??modal?.guideIndex??selectedGuideIndex??0);
     if(!id.startsWith(emitterPrefix())&&!source?.movable&&!source?.field)return false;
     if(source?.movable) {
       const converted={...patch};
@@ -345,7 +395,8 @@ const EffectEditor=(()=>{
       patch={anchor:`${Math.round(patch.x??anchor[0])} ${Math.round(patch.y??anchor[1])}`};
     }
     const next=new Map(records),record={...(source?.nativeExposure?source.record:{}),...next.get(id)};
-    if((id.includes(':cloud-bank:')||id.includes(':particle-path:'))&&record.points&&patch.points===undefined&&(patch.width!==undefined||patch.height!==undefined)) {
+    if(id.includes(':wet-contour:')&&!record.points&&(patch.width!==undefined||patch.height!==undefined))record.points='-32,0 32,0';
+    if(['cloud-bank','particle-path','wet-contour'].some(kind=>id.includes(':'+kind+':'))&&record.points&&patch.points===undefined&&(patch.width!==undefined||patch.height!==undefined)) {
       const sx=Number(patch.width===null?96:patch.width??record.width??96)/Number(record.width??96),sy=Number(patch.height===null?64:patch.height??record.height??64)/Number(record.height??64);
       patch={...patch,points:record.points.split(/\s+/).map(pair=>{const [x,y]=pair.split(',').map(Number);return `${x*sx},${y*sy}`;}).join(' ')};
     }
@@ -388,7 +439,7 @@ const EffectEditor=(()=>{
           if(defaults[`${prefix}-${i}`]!==undefined)patch[`${prefix}-${i}`]=defaults[`${prefix}-${i}`];
       }
       ok=editEmitter(id,patch,'reset field count');
-    } else if((id.includes(':cloud-bank:')||id.includes(':particle-path:'))&&keys.some(k=>k==='width'||k==='height')) {
+    } else if(['cloud-bank','particle-path','wet-contour'].some(kind=>id.includes(':'+kind+':'))&&keys.some(k=>k==='width'||k==='height')) {
       ok=editEmitter(id,Object.fromEntries(keys.map(k=>[k,record[k]??null])),'reset cloud bounds');
     } else ok=change(encode(next),'reset effect value');
     // A focused input may contain an uncommitted value while the document is
@@ -408,8 +459,18 @@ const EffectEditor=(()=>{
     input.addEventListener('click',reset);
   }
   function resetHandle(entry,handle) {
+    if(entry.region) {
+      const source=sources.find(s=>s.id===entry.id),definition=regionDefinition(source.name);
+      const base=resetRecords.get(definition.id)||definition.record;
+      const original=EffectRegions.bounds(source.name,base,entry.guideIndex);
+      const current=EffectRegions.bounds(source.name,definition.record,entry.guideIndex);
+      const desired=handle==='size'?{...current,width:original.width,height:original.height}:
+          {...current,x:original.x,y:original.y};
+      const sx=bgIndex===1?1:source.mapScaleX||1,sy=bgIndex===1?1:source.mapScaleY||1;
+      return editRegion(source,{x:desired.x*sx,y:desired.y*sy,width:desired.width*sx,height:desired.height*sy},'reset effect region',entry.guideIndex);
+    }
     const keys=handle==='rotate'?['angle']:handle==='size'?
-      (entry.native?['width-scale','length-scale']:['cloud-bank','particle-path'].includes(entry.kind)&&entry.points?['width','height','points']:['width','height']):
+      (entry.native?['width-scale','length-scale']:['cloud-bank','particle-path','wet-contour'].includes(entry.kind)&&entry.points?['width','height','points']:['width','height']):
       entry.kind==='moon-field'?['anchor']:entry.native?['offset-x','offset-y']:['x','y'];
     return resetValues(entry.id,keys);
   }
@@ -1224,6 +1285,37 @@ const EffectEditor=(()=>{
   function emitterPrefix() {
     return ['emitter',room.group.toString(16).padStart(2,'0'),room.map.toString(16).padStart(2,'0'),terrainProfile].join(':')+':';
   }
+  function regionDefinition(kind) {
+    const owner=EffectRegions.owner(kind);if(!owner)return null;
+    const key=sceneKey(room)+':'+terrainProfile+':'+owner;
+    if(regionDefinitions.has(key))return regionDefinitions.get(key);
+    const existing=[...records].find(([id])=>id.startsWith(fieldPrefix()+owner+'-field:'));
+    let definition;
+    if(existing)definition={id:existing[0],record:existing[1]};
+    else try {
+      const record={enabled:'1'};
+      for(const line of SharedRoomPreview[owner+'FieldDefinition']().trim().split('\n')) {
+        const at=line.indexOf('=');if(at>0)record[line.slice(0,at)]=line.slice(at+1);
+      }
+      const source=owner==='castle'?0xca000000+room.map:owner==='moon'?0xb1000002:
+          owner==='marsh'?0xb1000000:0xc2000000+((room.group===1&&room.map>=2&&room.map<=4?room.map:2)<<8);
+      definition={id:fieldPrefix()+owner+'-field:'+source.toString(16).padStart(8,'0'),record};
+    } catch {return null;}
+    regionDefinitions.set(key,definition);return definition;
+  }
+  function editRegion(source,patch,label,index=0) {
+    try {
+      const definition=regionDefinition(source.name);if(!definition)return false;
+      const sx=bgIndex===1?1:source.mapScaleX||1,sy=bgIndex===1?1:source.mapScaleY||1,draft={};
+      for(const key of ['x','y','width','height'])if(patch[key]!==undefined)
+        draft[key]=Number(patch[key])/(['x','width'].includes(key)?sx:sy);
+      const updates=EffectRegions.patch(source.name,definition.record,index,draft),next=new Map(records);
+      if(!resetRecords.has(definition.id))resetRecords.set(definition.id,{...definition.record});
+      next.set(definition.id,{...definition.record,...updates});
+      if(!change(encode(next),label))return false;
+      selected=source.id;selectedGuideIndex=index;refreshInspector();draw();return true;
+    } catch(error){status(error.message);return false;}
+  }
   function mapEmitters(layer=bgIndex) {
     const field=[...records].find(([id])=>id.startsWith(fieldPrefix()+'ray-field:'))?.[1];
     const water=[...records].find(([id])=>id.startsWith(fieldPrefix()+'water-field:'))?.[1];
@@ -1256,7 +1348,16 @@ const EffectEditor=(()=>{
       if(!s.guides?.length)return [entry];
       // Several terrain contacts can edit one bounded field. Keep the guides
       // at those contacts and say explicitly that their settings are linked.
-      return s.guides.map((g,guideIndex)=>({...entry,guideIndex,x:g.x*sx,y:g.y*sy,width:g.width*sx,height:g.height*sy,
+      const definition=EffectRegions.owner(s.name)&&regionDefinition(s.name);
+      if(definition)return s.guides.map((g,ordinal)=>{
+        const guideIndex=g.index??ordinal;
+        const b=EffectRegions.bounds(s.name,definition.record,guideIndex);
+        const limits=EffectRegions.limits(s.name,definition.record,guideIndex);
+        return {...entry,guideIndex,region:true,native:false,family:false,movable:true,
+          x:b.x*sx,y:b.y*sy,width:b.width*sx,height:b.height*sy,anchorY:b.anchorY??.5,
+          ...limits,resizeWidth:true,minWidth:(limits.minWidth??4)*sx,maxWidth:limits.maxWidth*sx,maxHeight:limits.maxHeight*sy};
+      });
+      return s.guides.map((g,ordinal)=>({...entry,guideIndex:g.index??ordinal,x:g.x*sx,y:g.y*sy,width:g.width*sx,height:g.height*sy,
         label:s.name==='wet-timber'?'Wet timber · terrain contact':s.name==='marsh-air'?'Bank insects / drips · linked field':
           s.name==='blood-mist'?'Shoreline mist · linked span':s.name==='blood-water'?'Water light · linked span':
           s.name==='floor-mist'?'Floor mist · supported span':
@@ -1284,11 +1385,11 @@ const EffectEditor=(()=>{
       label:id.includes(':exposure:')?'Light box':undefined,brightness:Number(r.brightness??(1-Number(r.intensity??.35))),fade:['left','top','right','bottom'].map(edge=>Number(r['fade-'+edge]??0)),kind:id.split(':')[4],angle:Number(r.angle??0),fan:Number(r.fan??36),strands:Number(r.strands??8),amplitude:Number(r.amplitude??2),carry:Number(r.carry??0),drift:Number(r.drift??0),rotatable:['light-fan','light-gradient'].includes(id.split(':')[4]),attached:!!r['actor-target'],actorX:r['actor-target']?actor.x:0,actorY:r['actor-target']?actor.y:0,movable:true,resizeWidth:id.split(':')[4]!=='torch',resizeHeight:id.split(':')[4]!=='torch',x:Number(r.x??0)+(r['actor-target']?actor.x:0),y:Number(r.y??0)+(r['actor-target']?actor.y:0),points:r.points??(id.split(':')[4]==='wet-contour'?'-32,0 32,0':id.split(':')[4]==='particle-path'?'0,-24 0,24':''),width:Number(r.width??96),
       height:Number(r.height??64),enabled:r.enabled!=='0'})));
   }
-  function selectEmitter(id,additive=false) {
+  function selectEmitter(id,additive=false,guideIndex) {
     if(!sources.some(s=>s.id===id)&&(!records.has(id)||!id.startsWith(emitterPrefix())))return false;
     if(!additive)mapSelection.clear();
     if(additive&&mapSelection.has(id))mapSelection.delete(id);else mapSelection.add(id);
-    selected=id;rebuildSources(sources.filter(s=>!s.emitter));refreshInspector();draw();return true;
+    selected=id;selectedGuideIndex=guideIndex;rebuildSources(sources.filter(s=>!s.emitter));refreshInspector();draw();return true;
   }
   function copyEffects() {
     const entries=mapEmitters(),ids=mapSelection.size?[...mapSelection]:[selected];
@@ -1390,7 +1491,7 @@ const EffectEditor=(()=>{
     }
     for(let i=0;i<api.RoomPreview_EffectCount();i++)for(let m=0;m<api.RoomPreview_MemberCount(i);m++) {
       const parent=parents.get(i),ordinal=api.RoomPreview_MemberValue(i,m,0),id=parent.id.replace(/^source:/,'member:').replace(/:[^:]+$/,':'+ordinal.toString(16).padStart(8,'0'));
-      found.push({id,name:parent.name,member:ordinal,movable:true,angled:!!api.RoomPreview_MemberValue(i,m,5),baseX:api.RoomPreview_MemberValue(i,m,1),baseY:api.RoomPreview_MemberValue(i,m,2),
+      found.push({id,name:parent.name,parent:parent.id,member:ordinal,movable:true,angled:!!api.RoomPreview_MemberValue(i,m,5),baseX:api.RoomPreview_MemberValue(i,m,1),baseY:api.RoomPreview_MemberValue(i,m,2),
         guide:Array.from({length:5},(_,f)=>api.RoomPreview_MemberValue(i,m,f+6)||0),
         baseWidth:api.RoomPreview_MemberValue(i,m,3),baseHeight:api.RoomPreview_MemberValue(i,m,4),x:api.RoomPreview_MemberValue(i,m,1),y:api.RoomPreview_MemberValue(i,m,2)});
     }
@@ -1450,7 +1551,7 @@ const EffectEditor=(()=>{
         baseWidth:api.RoomPreview_CatalogueValue(i,4),baseHeight:api.RoomPreview_CatalogueValue(i,5),
         mapScaleX:api.RoomPreview_CatalogueValue(i,8),mapScaleY:api.RoomPreview_CatalogueValue(i,9)};
       source.guides=Array.from({length:api.RoomPreview_CatalogueGuideCount?.(i)||0},(_,g)=>({
-        x:api.RoomPreview_CatalogueGuideValue(i,g,0),y:api.RoomPreview_CatalogueGuideValue(i,g,1),
+        index:g,x:api.RoomPreview_CatalogueGuideValue(i,g,0),y:api.RoomPreview_CatalogueGuideValue(i,g,1),
         width:api.RoomPreview_CatalogueGuideValue(i,g,2),height:api.RoomPreview_CatalogueGuideValue(i,g,3)})).filter(g=>g.width>0&&g.height>0);
       if(source.guides.length){source.baseX=source.guides[0].x;source.baseY=source.guides[0].y;}
       source.x=source.baseX;source.y=source.baseY;found.push(source);
@@ -1656,6 +1757,7 @@ const EffectEditor=(()=>{
     const entry=Number.isFinite(x)&&Number.isFinite(y)?entries.sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y))[0]:entries[0];
     x=entry?.x??x??0;y=entry?.y??y??0;
     modal={before:documentText,scope:sceneKey(room),isNew:!id,x,y,id,layer:bgIndex,guideIndex:entry?.guideIndex};
+    selectedGuideIndex=entry?.guideIndex;
     if(id&&sources.find(s=>s.id===id)?.nativeExposure&&!editEmitter(id,{},'extract light box')){modal=null;return false;}
     if(!id) {
       for(const option of $('#emitterPreset').options??[])
@@ -1669,7 +1771,7 @@ const EffectEditor=(()=>{
     const preset=stagePresets.find(p=>'stage:'+p.id===$('#emitterPreset').value);
     const source=sources.find(s=>s.id===id);
     $('#effectInspectorHelp').textContent=source?.guides?.length?
-      'These guides show the field’s source regions or terrain contacts. Appearance settings are shared by this field. Use “Edit complete definition” to change source positions, coverage and motion. Terrain-linked contacts follow the map.':
+      'These guides show the field’s source regions or terrain contacts. Resize supported regions with their map corners or the region controls below. Appearance settings are shared; the complete definition also exposes motion and terrain rules.':
       !id&&preset?preset.description+' Adds '+preset.members.length+' separately editable markers.':id?'Change the selected effect. Apply saves one undoable edit. Default effects stay tied to their native source art.':`Add an effect at ${Math.round(x)}, ${Math.round(y)} game pixels. Choose a type, adjust its area and appearance, then add it.`;
     $('#effectInspectorApply').textContent=id?'Apply changes':'Add effect';
     $('#effectInspectorDelete').hidden=!id;
@@ -1717,5 +1819,5 @@ const EffectEditor=(()=>{
       ['emitterColorEnd','color-end'],['emitterAnchor','anchor'],['emitterPoints','points'],
       ...actorFields.map(([id,key])=>['actorBinding'+id,key])])resetControl($('#'+id),[key]);
   refreshInspector();
-  return {resetValues,resetHandle,copyEffects,pasteEffects,startEffectPaste,clearMapSelection,hasClipboard:()=>clipboardActive&&!!effectClipboard,deactivateClipboard:()=>{clipboardActive=false;},isMapSelected:id=>mapSelection.has(id),hasMapSelection:()=>mapEmitters().some(e=>mapSelection.has(e.id)),openModal,finishModal,previewAt,removeEffect,updateCatalogue,modalOpen:()=>!!modal,placeEmitter,editEmitter,mapEmitters,paintContour,selectEmitter,selected:()=>selected,paintFloorRect,paintParticleRect,paintExposureRect,drawMapOverlay,text:()=>documentText,restore,loadDocument,markSaved,updateSources,dirty:()=>documentText!==saved};
+  return {resetValues,resetHandle,copyEffects,pasteEffects,startEffectPaste,clearMapSelection,hasClipboard:()=>clipboardActive&&!!effectClipboard,deactivateClipboard:()=>{clipboardActive=false;},isMapSelected:id=>mapSelection.has(id),hasMapSelection:()=>mapEmitters().some(e=>mapSelection.has(e.id)),openModal,finishModal,previewAt,removeEffect,updateCatalogue,modalOpen:()=>!!modal,placeEmitter,editEmitter,mapEmitters,paintContour,selectEmitter,selected:()=>selected,selectedGuide:()=>selectedGuideIndex,paintFloorRect,paintParticleRect,paintExposureRect,drawMapOverlay,text:()=>documentText,restore,loadDocument,markSaved,updateSources,dirty:()=>documentText!==saved};
 })();

@@ -186,6 +186,7 @@ static ArRenderTexture s_diorama_priority_texture;
 static int s_diorama_priority_w, s_diorama_priority_h;
 static DioramaScratchPool s_diorama_dof_source;
 static DioramaScratchPool s_diorama_lightmap;
+static DioramaScratchPool s_diorama_actor_lightmaps[2];
 static bool s_diorama_dof_source_unavailable;
 static ArRenderTexture s_diorama_stack_group_texture;
 static int s_diorama_stack_group_w, s_diorama_stack_group_h;
@@ -3199,6 +3200,7 @@ static PresentationOutcome DrawDioramaLayerFace(
   lighting.lower_content_v_max = draw_lower_content_v_max;
   lighting.priority = (DioramaPrioritySurfaceEffectParams){(float)capture->width, (float)capture->height,
       layer->description->plane == kDioramaPlane_Bg1Hi, layer->blend == kArRenderBlendMode_Add};
+  lighting.rim_strength = rim_light ? .33f : 0;
   lighting.mode = priority_surface ? 2 : use_dof_shader ? 1 : 0;
   const bool material_lighting = ArRenderTexture_IsValid(lighting.illumination);
   bool layer_shader_bound = false;
@@ -3215,7 +3217,7 @@ static PresentationOutcome DrawDioramaLayerFace(
       (void)DioramaEffectBackend_Unbind(device);
       return kPresentationOutcome_CoreFailure;
     }
-  } else if (rim_light) {
+  } else if (!material_lighting && rim_light) {
     const DioramaRimLightEffectParams params = {
         .texel_width = 1.0f / (float)SR_PPU_SURFACE_MAX_WIDTH,
         .texel_height = 1.0f / (float)SR_PPU_SURFACE_MAX_HEIGHT,
@@ -3250,6 +3252,7 @@ static PresentationOutcome DrawDioramaLayerFace(
           (float)capture->width/SR_PPU_SURFACE_MAX_WIDTH,
           (float)capture->height/SR_PPU_SURFACE_MAX_HEIGHT}
       : (ArRenderRectF){0,0,1,1};
+  lighting.attributes_uv = source_uv;
   bool main_submitted = false;
   if (attached->vertex_count > 0) {
     const int host_vertex_base = attached->vertex_count;
@@ -3354,6 +3357,10 @@ static PresentationOutcome DrawResolvedDioramaLayer(
       geometry->options->depth_shade;
   const bool scenery = description->plane == SR_PPU_OVERLAY_BG1 ||
       description->plane == kDioramaPlane_Bg1Hi || description->plane == kDioramaPlane_Bg1Far;
+  const int priority=DioramaPlaneObjectPriority(description->plane);
+  const bool actor=priority>=0 && scene->actor_light &&
+      capture->pixels[kDioramaPlane_ObjAttributes0+priority] &&
+      ArRenderTexture_IsValid(textures[kDioramaPlane_ObjAttributes0+priority]);
   const float dimming = scenery ? fminf(1, fmaxf(0, scene->bg1_dimming)) : 0;
   const bool additive =
       (scene->additive_plane_mask & (1u << (unsigned)description->plane)) != 0;
@@ -3374,7 +3381,9 @@ static PresentationOutcome DrawResolvedDioramaLayer(
       .dimming = dimming,
       .dimming_ramp = scene->bg1_dimming_ramp,
       .exposure = scenery ? scene->scenery_exposure : NULL,
-      .lighting = {.illumination = scenery ? scene->scenery_lightmap : ArRenderTexture_Invalid(),
+      .lighting = {.illumination = scenery ? scene->scenery_lightmap : actor ? scene->actor_lightmaps[0] : ArRenderTexture_Invalid(),
+          .attributes = actor ? textures[kDioramaPlane_ObjAttributes0+priority] : ArRenderTexture_Invalid(),
+          .enemy_illumination = scene->actor_lightmaps[1],
           .shade = {1 + (description->shade.r - 1) * shade_mix,
               1 + (description->shade.g - 1) * shade_mix,
               1 + (description->shade.b - 1) * shade_mix, 1}},
@@ -3511,6 +3520,28 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
     if (!drawn || !restored) goto failed;
     illuminated.scenery_lightmap = lightmap;
   }
+  memset(illuminated.actor_lightmaps,0,sizeof(illuminated.actor_lightmaps));
+  bool actor_attributes=false;
+  for(unsigned p=0;p<4;++p)actor_attributes |= capture->pixels[kDioramaPlane_ObjAttributes0+p]!=NULL;
+  if(scene->actor_light && actor_attributes && out_projection &&
+      ArRenderCapabilities_Has(ArRenderDevice_Capabilities(device),
+          kArRenderCapability_CustomShaders | kArRenderCapability_ScopedRenderTargets)) {
+    int width,height;
+    if(!ArRenderDevice_GetOutputSize(device,&width,&height))goto failed;
+    for(unsigned role=0;role<2;++role) {
+      ArRenderTexture reuse=scene->actor_light_reuse[role]==1 ? illuminated.scenery_lightmap :
+          role && scene->actor_light_reuse[role]==2 ? illuminated.actor_lightmaps[0] : ArRenderTexture_Invalid();
+      if(ArRenderTexture_IsValid(reuse)) { illuminated.actor_lightmaps[role]=reuse;continue; }
+      const ArRenderTexture map=EnsureDioramaScratchTarget(device,&s_diorama_actor_lightmaps[role],width,height,kArRenderFilter_Linear);
+      ArRenderTargetState saved;
+      if(!ArRenderTexture_IsValid(map)||ArRenderDevice_BeginTarget(device,map,&saved)!=kArRenderTargetBegin_Ready)goto failed;
+      const bool drawn=ArRenderDevice_Clear(device,(ArRenderColorF){0,0,0,1})&&
+          scene->actor_light(scene->plane_effect_userdata,out_projection,2u<<role);
+      const bool restored=ArRenderDevice_EndTarget(device,&saved);
+      if(!drawn||!restored)goto failed;
+      illuminated.actor_lightmaps[role]=map;
+    }
+  }
   scene = &illuminated;
 
   if (out_projection && !out_projection->bg2_plane.valid &&
@@ -3576,6 +3607,7 @@ void Diorama_ResetCompositorResources(ArRenderDevice *device) {
   /* Materials borrow the map's native handle, so release their states first. */
   DioramaEffectBackend_Reset(device);
   ResetDioramaScratchPool(device, &s_diorama_lightmap);
+  for(unsigned role=0;role<2;++role)ResetDioramaScratchPool(device, &s_diorama_actor_lightmaps[role]);
   ResetDioramaSupersample(device);
   ResetDioramaPrioritySurface(device);
   ResetDioramaDofSource(device);

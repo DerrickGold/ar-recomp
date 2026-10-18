@@ -9,6 +9,7 @@
 #include "diorama/diorama_effect_backend.h"
 #include "platform/sdl/render_sdl_internal.h"
 #include "app/session_fatal.h"
+#include "app/performance_metrics.h"
 #include "sim/sim3d/sim_shadow_effect_backend.h"
 #include "sim/sim3d/sim_cloud_effect_backend.h"
 
@@ -155,8 +156,130 @@ static void TestRimExposure(ArRenderDevice *device, SDL_Renderer *renderer) {
   printf("rim exposure: dimming, warm/cool tint, black, partial alpha and disabled parity checked\n");
 }
 
-/* Lighting restores the original palette before tinting it, including at
- * zero ambient. Check the light-map coordinates on full and cropped targets. */
+/* Projected incoming light is sampled at the fragment, independent of the
+ * object's hotpoint/UV. Move the same art through a thin diagonal light map. */
+static void TestActorIllumination(ArRenderDevice *device,SDL_Renderer *renderer) {
+  const ArRenderTextureDesc desc={.width=32,.height=32,.format=kArRenderPixelFormat_Argb8888,
+      .usage=kArRenderTextureUsage_Streaming,.filter=kArRenderFilter_Nearest,.blend=kArRenderBlendMode_Alpha};
+  ArRenderTexture art={0},attributes={0},light={0},dark={0};
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&art));
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&attributes));
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&light));
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&dark));
+  uint32_t pixels[1024],roles[1024],rays[1024],black[1024];
+  for(unsigned y=0;y<32;++y)for(unsigned x=0;x<32;++x) {
+    const unsigned i=y*32+x;
+    pixels[i]=0xff806040;black[i]=0xff000000;
+    rays[i]=x+y>=26&&x+y<32?0xff302418:0xff000000;
+  }
+  CHECK(ArRenderDevice_UpdateTexture(device,art,NULL,pixels,128));
+  CHECK(ArRenderDevice_UpdateTexture(device,light,NULL,rays,128));
+  CHECK(ArRenderDevice_UpdateTexture(device,dark,NULL,black,128));
+  for(unsigned role=0;role<3;++role) for(unsigned moved=0;moved<2;++moved) {
+    for(unsigned i=0;i<1024;++i)roles[i]=0xff100000|(role==1?0xff00:role==2?0xff:0);
+    CHECK(ArRenderDevice_UpdateTexture(device,attributes,NULL,roles,128));
+    CHECK(ArRenderDevice_Clear(device,(ArRenderColorF){0,0,0,0}));
+    const DioramaSceneryLightEffectParams p={.attributes=attributes,.illumination=light,.enemy_illumination=dark,
+        .attributes_uv={0,0,1,1},.texel_width=1.f/32,.texel_height=1.f/32};
+    CHECK(DioramaEffectBackend_BindSceneryLight(device,&p));
+    const ArRenderRectF dst={moved?8:0,0,moved?16:32,32};
+    const ArRenderDrawState state={.flags=kArRenderDrawState_Blend,.blend=kArRenderBlendMode_Alpha};
+    CHECK(ArRenderDevice_DrawTextureWithState(device,art,NULL,&dst,&state));
+    CHECK(DioramaEffectBackend_Unbind(device));
+    SDL_Surface *image=SDL_RenderReadPixels(renderer,NULL);CHECK(image!=NULL);
+    if(image)for(unsigned y=1;y<31;y+=3)for(unsigned x=9;x<23;x+=3) {
+      Uint8 actual[4];CHECK(SDL_ReadSurfacePixel(image,x,y,actual,actual+1,actual+2,actual+3));
+      const uint32_t ray=role==1?rays[y*32+x]:0;
+      for(unsigned c=0;c<3;++c) {
+        const unsigned shift=16-8*c;
+        const int expected=(int)lroundf(((pixels[0]>>shift)&255)*(.25f+4*((ray>>shift)&255)/255.f));
+        CHECK(abs(actual[c]-expected)<=2);
+      }
+    }
+    SDL_DestroySurface(image);
+  }
+  DioramaEffectBackend_Reset(device);
+  ArRenderDevice_DestroyTexture(device,art);ArRenderDevice_DestroyTexture(device,attributes);
+  ArRenderDevice_DestroyTexture(device,light);ArRenderDevice_DestroyTexture(device,dark);
+  puts("actor illumination: diagonal per-pixel light, moving art, ambient and receiver isolation passed");
+}
+
+static void TestActorBlurExposure(ArRenderDevice *device, SDL_Renderer *renderer) {
+  const ArRenderTextureDesc desc = {32,32,kArRenderPixelFormat_Argb8888,
+      kArRenderTextureUsage_Streaming,kArRenderFilter_Nearest,kArRenderBlendMode_Alpha};
+  ArRenderTexture art={0}, attributes={0}, dark={0};
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&art));
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&attributes));
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&dark));
+  uint32_t pixels[1024]={0}, roles[1024]={0}, black[1024]={0};
+  for(int y=8;y<24;++y)for(int x=14;x<18;++x)pixels[y*32+x]=0xff806040;
+  CHECK(ArRenderDevice_UpdateTexture(device,art,NULL,pixels,128));
+  CHECK(ArRenderDevice_UpdateTexture(device,dark,NULL,black,128));
+  Uint8 samples[2][3][4]={0};
+  for(unsigned dim=0;dim<2;++dim) {
+    for(unsigned i=0;i<1024;++i)roles[i]=pixels[i]?(dim?0xff10ff00:0xff40ff00):0;
+    CHECK(ArRenderDevice_UpdateTexture(device,attributes,NULL,roles,128));
+    CHECK(ArRenderDevice_Clear(device,(ArRenderColorF){0,0,0,0}));
+    const DioramaSceneryLightEffectParams p={.attributes=attributes,.illumination=dark,.enemy_illumination=dark,
+        .texel_width=1.f/32,.texel_height=1.f/32,.blur_radius=2,.mode=1};
+    CHECK(DioramaEffectBackend_BindSceneryLight(device,&p));
+    const ArRenderRectF dst={0,0,32,32};
+    CHECK(ArRenderDevice_DrawTexture(device,art,NULL,&dst));
+    CHECK(DioramaEffectBackend_Unbind(device));
+    SDL_Surface *image=SDL_RenderReadPixels(renderer,NULL);CHECK(image);
+    if(image)for(unsigned i=0;i<3;++i) {
+      Uint8 *sample=samples[dim][i];
+      CHECK(SDL_ReadSurfacePixel(image,12+3*i,16,sample,sample+1,sample+2,sample+3));
+    }
+    SDL_DestroySurface(image);
+  }
+  /* The blurred fringe lies outside the unfiltered owner mask. It must keep
+   * the same exposure as the body, not revert to identity illumination. */
+  for(unsigned i=0;i<3;++i)for(unsigned c=0;c<3;++c) {
+    CHECK(samples[0][i][c]>0);
+    CHECK(abs(samples[0][i][c]-4*samples[1][i][c])<=3);
+  }
+  DioramaEffectBackend_Reset(device);
+  ArRenderDevice_DestroyTexture(device,art);
+  ArRenderDevice_DestroyTexture(device,attributes);
+  ArRenderDevice_DestroyTexture(device,dark);
+  puts("actor blur: dimmed body and transparent fringes keep identical exposure");
+}
+
+static void TestPreparedLightBindings(ArRenderDevice *device) {
+  CHECK(DioramaEffectBackend_PrepareSceneryLight(device));
+  const ArRenderTextureDesc desc={1,1,kArRenderPixelFormat_Argb8888,
+      kArRenderTextureUsage_Static,kArRenderFilter_Nearest,kArRenderBlendMode_Alpha};
+  ArRenderTexture textures[10]={0};
+  const uint32_t pixel=0xff40ff00;
+  for(unsigned i=0;i<10;++i) {
+    CHECK(ArRenderDevice_CreateTexture(device,&desc,&textures[i]));
+    CHECK(ArRenderDevice_UpdateTexture(device,textures[i],NULL,&pixel,4));
+  }
+  PerformanceMetrics_Configure(false,false);
+  PerformanceMetrics_Configure(true,false);
+  PerformanceMetrics_PresentCompleted(0);
+  for(unsigned i=0;i<10;++i) {
+    DioramaSceneryLightEffectParams p={.illumination=textures[i],.shade={1,1,1,1}};
+    CHECK(DioramaEffectBackend_BindSceneryLight(device,&p));
+    CHECK(DioramaEffectBackend_Unbind(device));
+    p.attributes=p.enemy_illumination=textures[i];
+    CHECK(DioramaEffectBackend_BindSceneryLight(device,&p));
+    CHECK(DioramaEffectBackend_Unbind(device));
+  }
+  PerformanceMetrics_PresentCompleted(1000000000);
+  PerformanceSnapshot snapshot;
+  PerformanceMetrics_Snapshot(&snapshot);
+  CHECK(snapshot.ready);
+  /* Texture bindings change without changing the shader pipelines. Rebinding
+   * must not allocate/upload scratch pixels or submit warm-up draws. */
+  CHECK(snapshot.counts[kPerformanceCount_UploadCalls]==0);
+  PerformanceMetrics_Configure(false,false);
+  DioramaEffectBackend_Reset(device);
+  for(unsigned i=0;i<10;++i)ArRenderDevice_DestroyTexture(device,textures[i]);
+  puts("prepared lighting: changing material bindings performs no warm-up uploads");
+}
+
 static void TestSceneryIllumination(ArRenderDevice *device, SDL_Renderer *renderer) {
   CHECK(DioramaEffectBackend_PrepareSceneryLight(device));
   const ArRenderTextureDesc desc = {.width=2,.height=2,.format=kArRenderPixelFormat_Argb8888,
@@ -650,6 +773,9 @@ int main(void) {
   CHECK(ArSdlRenderBackend_Bind(&device, &backend, renderer));
   TestDioramaEffects(&device);
   TestRimExposure(&device, renderer);
+  TestActorIllumination(&device,renderer);
+  TestActorBlurExposure(&device,renderer);
+  TestPreparedLightBindings(&device);
   TestSceneryIllumination(&device, renderer);
   TestPrioritySurface(&device, renderer, false);
   TestPrioritySurface(&device, renderer, true);
@@ -671,6 +797,9 @@ int main(void) {
     renderer = ArSdlRenderBackend_Renderer(&device);
     TestDioramaEffects(&device);
     TestRimExposure(&device, renderer);
+    TestActorIllumination(&device,renderer);
+    TestActorBlurExposure(&device,renderer);
+    TestPreparedLightBindings(&device);
     TestSceneryIllumination(&device, renderer);
     TestPrioritySurface(&device, renderer, false);
     TestPrioritySurface(&device, renderer, true);

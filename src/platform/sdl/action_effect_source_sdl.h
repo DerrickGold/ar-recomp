@@ -4,9 +4,17 @@
 #include "action/action_effect_source.h"
 #include "action/action_effect_render.h"
 
+typedef struct ArGpuEffectLight {
+  SDL_GPUBuffer *data, *occluders;
+  unsigned point_count, occluder_count, kind, occluder_index;
+} ArGpuEffectLight;
+
 typedef struct ArGpuEffectPacket {
-  SDL_GPUBuffer *primitives;
-  uint64_t revision;
+  SDL_GPUBuffer *primitives, *occluders;
+  ArGpuEffectLight lights[kActionSourceMaxLightJobs];
+  uint64_t revision, input_revision;
+  unsigned light_count;
+  int origin_x, origin_y;
   unsigned capacity, shadow_count;
   float brightness;
 } ArGpuEffectPacket;
@@ -15,10 +23,10 @@ typedef struct ArGpuEffectSource {
   SDL_GPUDevice *device;
   SDL_GPUComputePipeline *project, *shadow, *moon;
   SDL_GPUGraphicsPipeline *draw[2][3], *skybox[2][2];
-  SDL_GPUBuffer *primitives, *vertices, *occluders, *coverage, *sky_vertices;
-  SDL_GPUBuffer *moon_job, *moon_work, *moon_mask, *moon_light;
+  SDL_GPUBuffer *vertices, *coverage, *sky_vertices;
+  SDL_GPUBuffer *moon_work, *moon_mask, *moon_light;
   SDL_GPUTransferBuffer *upload;
-  ArGpuEffectPacket packets[kActionSourcePacketSlots];
+  ArGpuEffectPacket packets[kActionSourcePacketSlots], transient;
   SDL_GPUSampler *sampler, *nearest_sampler, *wrap_sampler, *wrap_nearest_sampler;
 } ArGpuEffectSource;
 

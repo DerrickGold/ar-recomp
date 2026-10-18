@@ -362,7 +362,8 @@ bool EditorRoomScene_DefaultGuide(EditorRoomScene *r, unsigned index, unsigned g
   if (kind == kActionEffect_CastleMist || kind == kActionEffect_CastleWater || kind == kActionEffect_CastleSky) {
     const ActionCastleField *f=EditorRoomScene_CastleField(r);
     if(kind==kActionEffect_CastleMist)
-      *bounds=(ArRenderRectF){f->Floor[0],f->Floor[2]-18,f->Floor[1]-f->Floor[0],18};
+      *bounds=(ArRenderRectF){f->Floor[0],f->Floor[2]-(2*(f->MistShape[0]+f->MistShape[1])+2),
+          f->Floor[1]-f->Floor[0],2*(f->MistShape[0]+f->MistShape[1])+2};
     else if(kind==kActionEffect_CastleSky)
       *bounds=(ArRenderRectF){f->SkyAnchor[0]-f->SkyShape[0],f->SkyAnchor[1]-f->SkyShape[1],f->SkyShape[0]*2,f->SkyShape[1]*2};
     else {
@@ -1009,7 +1010,7 @@ uint32_t EditorRoomScene_EffectHash(const EditorRoomScene *r) {
         memcpy(&bits,&e->field_style.points[j].y,4);h=DeterministicHash_Fnv1a32Word(h,bits);
       }
       const float values[]={e->geometry.data.rect.x0,e->geometry.data.rect.y0,
-        e->geometry.data.rect.x1,e->geometry.data.rect.y1,e->clip_rect.x0,e->clip_rect.y0,
+        e->geometry.data.rect.x1,e->geometry.data.rect.y1,e->tuning.source_width_scale,e->tuning.source_height_scale,e->clip_rect.x0,e->clip_rect.y0,
         e->clip_rect.x1,e->clip_rect.y1,e->tuning.intensity,e->tuning.reach,
         e->particle_style.size_min,e->particle_style.size_max,e->particle_style.travel_x,
         e->particle_style.travel_y,e->particle_style.wander,e->particle_style.spread,e->field_style.angle,e->field_style.fan,

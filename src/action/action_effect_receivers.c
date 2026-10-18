@@ -18,6 +18,23 @@ uint8_t ActionEffectReceivers_Mask(const ActionEffectInstance *e) {
   return e->tuning.light_receivers_set ? e->tuning.light_receivers :
       ActionLightKind_DefaultReceivers(e->kind);
 }
+uint8_t ActionEffectReceivers_FamilyMask(const ActionEffectInstance *e,
+    const ActionNativeMembers *members) {
+  uint8_t mask = ActionEffectReceivers_Mask(e);
+  if (e->kind == kActionEffect_CastleSky) return mask;
+  if (members && members->count <= kActionNativeMemberMax)
+    for (unsigned i = 0; i < members->count; ++i) {
+      const ActionNativeMember *m = &members->records[i];
+      if (m->kind == e->kind && m->enabled && m->light_receivers_set)
+        mask |= m->light_receivers;
+    }
+  return mask;
+}
+bool ActionEffectReceivers_Member(const ActionEffectInstance *e,
+    const ActionNativeMember *member, unsigned receiver) {
+  return !receiver || ((member && member->light_receivers_set
+      ? member->light_receivers : ActionEffectReceivers_Mask(e)) & receiver);
+}
 uint8_t ActionEffectReceivers_Layer(const ActionEffectInstance *e) {
   if(ActionEffectReceivers_IsLight(e->kind)) {
     /* Multiplicative light belongs to receiving artwork, never the final
@@ -55,13 +72,61 @@ bool ActionEffectReceivers_HasSurfaceLights(const ActionSceneEffectFrame *frame)
     const ActionEffectInstance *entries = list == 2 ? frame->effects : list ? frame->authored : frame->decorations;
     const unsigned count = list == 2 ? frame->effect_count : list ? frame->authored_count : frame->decoration_count;
     for (unsigned i = 0; i < count; ++i) {
-      const ActionEffectInstance *e = &entries[i];
+      ActionEffectInstance effective = entries[i];
+      effective.tuning.light_receivers = ActionEffectReceivers_FamilyMask(&entries[i], &frame->members);
+      effective.tuning.light_receivers_set |= effective.tuning.light_receivers != ActionEffectReceivers_Mask(&entries[i]);
+      const ActionEffectInstance *e = &effective;
       if ((e->flags & kActionEffectFlag_Visible) && !(e->flags & kActionEffectFlag_LightingOff) &&
           (ActionEffectReceivers_Mask(e) & kActionReceiver_Scenery) &&
           ActionEffectReceivers_SurfaceLight(e)) return true;
     }
   }
   return false;
+}
+bool ActionEffectReceivers_HasActors(const ActionSceneEffectFrame *frame, bool lighting_enabled) {
+  if (!frame || frame->decoration_count > kActionSceneDecorationMaxInstances ||
+      frame->authored_count > kActionAuthoredMaxInstances || frame->effect_count > kActionSceneEffectMaxInstances)
+    return false;
+  const unsigned actors = kActionReceiver_Player | kActionReceiver_Enemies;
+  for (unsigned list = 0; list < 3; ++list) {
+    const ActionEffectInstance *entries = list == 2 ? frame->effects : list ? frame->authored : frame->decorations;
+    const unsigned count = list == 2 ? frame->effect_count : list ? frame->authored_count : frame->decoration_count;
+    for (unsigned i = 0; i < count; ++i) {
+      const ActionEffectInstance *e = &entries[i];
+      if (!(e->flags & kActionEffectFlag_Visible)) continue;
+      if (e->tuning.dim_receivers_set && (e->tuning.dim_receivers & actors) &&
+          (e->kind == kActionEffect_AuthoredExposure || e->kind == kActionEffect_CaveAmbientLight ||
+           e->kind == kActionEffect_CastleLight)) return true;
+      if (lighting_enabled && !(e->flags & kActionEffectFlag_LightingOff) &&
+          ActionEffectReceivers_IsLight(e->kind) &&
+          (ActionEffectReceivers_FamilyMask(e, &frame->members) & actors)) return true;
+    }
+  }
+  return false;
+}
+bool ActionEffectReceivers_MapsMatch(const ActionSceneEffectFrame *frame, unsigned a, unsigned b) {
+  if (!frame || frame->decoration_count > kActionSceneDecorationMaxInstances ||
+      frame->authored_count > kActionAuthoredMaxInstances || frame->effect_count > kActionSceneEffectMaxInstances ||
+      frame->members.count > kActionNativeMemberMax) return false;
+  for(unsigned list=0;list<3;++list) {
+    const ActionEffectInstance *entries=list==2?frame->effects:list?frame->authored:frame->decorations;
+    const unsigned count=list==2?frame->effect_count:list?frame->authored_count:frame->decoration_count;
+    for(unsigned i=0;i<count;++i) {
+      const ActionEffectInstance *e=&entries[i];
+      if(!(e->flags&kActionEffectFlag_Visible)||(e->flags&kActionEffectFlag_LightingOff)||
+          !ActionEffectReceivers_IsLight(e->kind))continue;
+      const unsigned mask=ActionEffectReceivers_Mask(e);
+      if (!!(mask&a)!=!!(mask&b))return false;
+      if ((a==kActionReceiver_Scenery||b==kActionReceiver_Scenery) &&
+          (mask&(a|b)) && !ActionEffectReceivers_SurfaceLight(e))return false;
+      for(unsigned j=0;j<frame->members.count;++j) {
+        const ActionNativeMember *m=&frame->members.records[j];
+        if(m->enabled&&m->kind==e->kind&&m->light_receivers_set &&
+            !!(m->light_receivers&a)!=!!(m->light_receivers&b))return false;
+      }
+    }
+  }
+  return true;
 }
 typedef struct ReceiverProjection {int x,y,bg2_x,bg2_y;} ReceiverProjection;
 bool ActionEffectReceivers_ProjectPoint(void *context,const ActionEffectInstance *e,float x,float y,ArRenderPointF *point) {
@@ -96,11 +161,17 @@ bool ActionEffectReceivers_Prepare(const ActionSceneEffectFrame *frame,
       if(!(e->flags&kActionEffectFlag_Visible))continue;
       if(e->tuning.dim_receivers_set&&(e->kind==kActionEffect_CaveAmbientLight||e->kind==kActionEffect_CastleLight))out->dim_receivers|=e->tuning.dim_receivers;
       if(ActionEffectReceivers_IsLight(e->kind)) {
-        const unsigned mask=ActionEffectReceivers_Mask(e);
+        const unsigned mask=ActionEffectReceivers_FamilyMask(e,&frame->members);
         light_receivers|=mask;
         if(!!(mask&kActionReceiver_Player)!=!!(mask&kActionReceiver_Enemies))same_receivers=false;
       }
     }
+  }
+  for (unsigned i = 0; i < frame->members.count && i < kActionNativeMemberMax; ++i) {
+    const ActionNativeMember *m = &frame->members.records[i];
+    if (m->enabled && m->light_receivers_set &&
+        !!(m->light_receivers & kActionReceiver_Player) != !!(m->light_receivers & kActionReceiver_Enemies))
+      same_receivers = false;
   }
   for(unsigned role=0;role<2;++role) {
     ActionSceneEffectRenderBatch *batch=role?&out->enemies:&out->player;
@@ -117,14 +188,14 @@ bool ActionEffectReceivers_Prepare(const ActionSceneEffectFrame *frame,
      * when this role receives light. Scenery-only scenes skip both the copy
      * and all object-receiver geometry work. */
     ActionSceneEffectFrame selected=*frame;
+    selected.light_receiver = receiver;
     for(unsigned list=0;list<3;++list) {
       ActionEffectInstance *entries=list==2?selected.effects:list?selected.authored:selected.decorations;
       const unsigned count=list==2?selected.effect_count:list?selected.authored_count:selected.decoration_count;
       for(unsigned i=0;i<count;++i) {
         ActionEffectInstance *e=&entries[i];
-        if(!ActionEffectReceivers_IsLight(e->kind)||!(ActionEffectReceivers_Mask(e)&receiver))
+        if(!ActionEffectReceivers_IsLight(e->kind)||!(ActionEffectReceivers_FamilyMask(e,&frame->members)&receiver))
           e->flags&=(uint8_t)~kActionEffectFlag_Visible;
-        else {e->tuning.light_receivers_set=1;e->tuning.light_receivers=7;}
       }
     }
     /* Each supported source owns one pass. Both retained results borrow this
@@ -172,10 +243,8 @@ static void Sample(const ActionSceneEffectRenderBatch *batch,float x,float y,flo
   }
 }
 
-void ActionEffectReceivers_Sample(const ActionReceiverLighting *lighting,unsigned receiver,
-    float x,float y,float multiply[3],float add[3]) {
-  float factor=1,light[3]={0};
-  add[0]=add[1]=add[2]=0;
+float ActionEffectReceivers_Ambient(const ActionReceiverLighting *lighting, unsigned receiver, float x, float y) {
+  float factor=1;
   if(lighting&&lighting->frame) {
     if(lighting->dim_receivers&receiver)factor*=1-SceneryDimming_Amount(lighting->dimming,lighting->ramp,x,y);
     const ActionSceneEffectFrame *frame=lighting->frame;
@@ -189,9 +258,23 @@ void ActionEffectReceivers_Sample(const ActionReceiverLighting *lighting,unsigne
       for(unsigned j=i;j<frame->authored_count;++j)if(ActionExposure_Matches(e,&frame->authored[j],receiver))boxes[count++]=&frame->authored[j];
       factor*=ActionExposure_Union(boxes,count,x,y);
     }
-    const unsigned role=receiver==kActionReceiver_Player?0:1;
-    Sample(role?&lighting->enemies:&lighting->player,x,y,light);
   }
+  return factor;
+}
+uint32_t ActionEffectReceivers_Attribute(const ActionReceiverLighting *lighting,
+    unsigned receiver, float x, float y) {
+  const float ambient = receiver ? ActionEffectReceivers_Ambient(lighting,receiver,x,y) : 1;
+  const unsigned code = (unsigned)lroundf(fmaxf(0,fminf(255,ambient*64)));
+  return 0xff000000u | (code<<16) |
+      (receiver==kActionReceiver_Player ? 0xff00u : receiver==kActionReceiver_Enemies ? 0xffu : 0);
+}
+void ActionEffectReceivers_Sample(const ActionReceiverLighting *lighting,unsigned receiver,
+    float x,float y,float multiply[3],float add[3]) {
+  const float factor = ActionEffectReceivers_Ambient(lighting,receiver,x,y);
+  float light[3]={0};
+  add[0]=add[1]=add[2]=0;
+  if(lighting&&lighting->frame)
+    Sample(receiver==kActionReceiver_Player?&lighting->player:&lighting->enemies,x,y,light);
   /* Room exposure attenuates ambient light, not the source palette or the
    * incoming local light. A 25% room plus 75% white light restores the native
    * colors exactly. Colored sources restore brightness with their own tint;

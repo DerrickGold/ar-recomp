@@ -178,6 +178,7 @@ typedef struct FrameSlot {
    * PPU scanout and marks destinations that received a nontransparent pixel.
    * PresentUpload intersects them without reading live settings or rescanning
    * the CPU surfaces. */
+  SrPpuSurfaceView diorama_obj_attributes[4];
   uint32_t diorama_plane_request_mask;
   uint32_t diorama_plane_content_mask;
   /* Planes containing the resolved TS input to a full SNES colour add. The

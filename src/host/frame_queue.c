@@ -189,6 +189,9 @@ bool HostFramePacket_OwnPixels(HostFramePacket *p) {
     for (unsigned band = 0; band < SR_PPU_SURFACE_BAND_COUNT; ++band)
       if (!CopyView(p, &f->ppu_surfaces.overlays[source][band], needed[source][band]))
         return false;
+  for(unsigned band=0;band<4;++band)
+    if(!CopyView(p,&f->diorama_obj_attributes[band],
+        (mask & (1u<<(kDioramaPlane_ObjAttributes0+band)))!=0))return false;
   f->ppu_surfaces.authentic = (SrPpuSurfaceView){0};
   f->ppu_surfaces.mode7 = (SrPpuSurfaceView){0};
   f->authentic_frame_serial = 0;

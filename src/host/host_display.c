@@ -9,6 +9,7 @@
  * deadline; capturing again would refresh its timestamp and break pair
  * continuity. */
 #include "host_display.h"
+#include "action/present_action_effects.h"
 #include "dev/dev_automation.h"
 
 #include <inttypes.h>
@@ -68,6 +69,7 @@ typedef struct RetainedPresentFrame {
 
 static RetainedPresentFrame s_retained_frame;
 static uint64_t s_present_deadline_ns;
+static uint64_t s_draw_estimate_ns = 2000000;
 static unsigned long s_tick_present_count;
 static unsigned long s_represent_count;
 static float s_maximum_represent_alpha;
@@ -706,6 +708,7 @@ void HostDisplay_ResetVsyncPacing(void) {
   HostDisplayPacing_ResetVsyncGuard(&s_vsync_guard);
   s_refresh_clock = (HostFrameRefreshClock){0};
   s_present_deadline_ns = 0;
+  s_draw_estimate_ns = 2000000;
 }
 
 uint64_t HostDisplay_CatchupCapNs(uint64_t emulation_frame_interval_ns,
@@ -833,6 +836,7 @@ static bool StagePreparedFrame(const FrameSlot *slot) {
   const PerformanceScope upload = PerformanceMetrics_Begin(kPerformance_Upload);
   PresentUpload(slot);
   RetainFrame(slot);
+  PresentActionEffects_PrepareSourcePackets(&s_retained_frame.slot);
   PerformanceMetrics_End(upload);
   return s_retained_frame.valid;
 }
@@ -863,14 +867,19 @@ bool HostDisplay_TryRepresentFrame(float alpha,
     return false;
   }
 
+  uint64_t draw_deadline = 0;
+  const uint64_t interval = s_producer_pacing
+      ? PresentIntervalNs(kHostDisplayPresent_GameTick) : 0;
   if (s_producer_pacing) {
-    const uint64_t interval = PresentIntervalNs(kHostDisplayPresent_GameTick);
     const uint64_t now = SDL_GetTicksNS();
     if (s_present_trace_enabled) s_present_trace.deadline_ns = s_present_deadline_ns;
-    if (interval && s_present_deadline_ns && now < s_present_deadline_ns) return false;
+    const uint64_t lead = HostDisplayPacing_DrawLeadNs(s_draw_estimate_ns, interval);
+    if (interval && s_present_deadline_ns > now && s_present_deadline_ns - now > lead)
+      return false;
     if (!s_present_deadline_ns || !interval ||
         now > s_present_deadline_ns + kDeadlineResyncIntervalCount * interval)
       s_present_deadline_ns = now;
+    draw_deadline = interval ? s_present_deadline_ns : 0;
     s_present_deadline_ns += interval;
   }
 
@@ -905,7 +914,8 @@ bool HostDisplay_TryRepresentFrame(float alpha,
   const PerformanceScope pipeline = PerformanceMetrics_Begin(kPerformance_Presentation);
   const uint64_t draw_cpu_start = s_present_trace_enabled
       ? HostFrameProducer_ThreadCpuTimeNs() : 0;
-  if (s_present_trace_enabled) s_present_trace.draw_start_ns = SDL_GetTicksNS();
+  const uint64_t draw_started_ns = SDL_GetTicksNS();
+  if (s_present_trace_enabled) s_present_trace.draw_start_ns = draw_started_ns;
   PresentFrame(&s_retained_frame.slot,
                use_interpolation
                    ? alpha : kPresentationFrameGenerationPhaseNone,
@@ -917,6 +927,19 @@ bool HostDisplay_TryRepresentFrame(float alpha,
     s_present_trace.draw_cpu_ns = draw_cpu_start && cpu_end >= draw_cpu_start
         ? cpu_end - draw_cpu_start : 0;
     s_present_trace.vector_wait_ns = DioramaFrameGeneration_LastWaitNs();
+  }
+  if (interval) {
+    const uint64_t draw_ns = SDL_GetTicksNS() - draw_started_ns;
+    /* Follow cost increases immediately; decay gradually across cheap repeats
+     * so the next new endpoint keeps enough preparation time. */
+    s_draw_estimate_ns = draw_ns > s_draw_estimate_ns ? draw_ns :
+        s_draw_estimate_ns - (s_draw_estimate_ns - draw_ns) / 32;
+    const uint64_t now = SDL_GetTicksNS();
+    if (draw_deadline > now) {
+      const PerformanceScope pacing = PerformanceMetrics_Begin(kPerformance_Pacing);
+      SDL_DelayPrecise(draw_deadline - now);
+      PerformanceMetrics_End(pacing);
+    }
   }
   PerformanceMetrics_Add(kPerformanceCount_Represents, 1);
   const uint64_t vsync_start_ms =

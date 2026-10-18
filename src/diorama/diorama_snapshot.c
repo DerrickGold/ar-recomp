@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-_Static_assert(kDioramaPlane_Count == 13 && SR_PPU_SURFACE_MAX_WIDTH == 640 &&
+_Static_assert(kDioramaPlane_Count == 17 && SR_PPU_SURFACE_MAX_WIDTH == 640 &&
                SR_PPU_SURFACE_MAX_HEIGHT == 352,
                "update the compositor snapshot version when capture planes/extents change");
 _Static_assert(sizeof(float) == 4 && FLT_RADIX == 2 && FLT_MANT_DIG == 24,
@@ -27,7 +27,7 @@ static uint32_t Hash(const uint8_t *p, size_t size) {
 
 /* One checked field codec for both directions; bools and small integers are
  * validated BEFORE assignment, so narrowing cannot hide an invalid packet. */
-static bool Fields(DioramaSnapshot *s, uint8_t *header, bool decode) {
+static bool Fields(DioramaSnapshot *s, uint8_t *header, bool decode, unsigned wire_plane_count) {
   size_t at = 16;
 #define FIELD(TYPE, LO, HI, VALUE, TO_BITS, FROM_BITS) do { \
     if (at > kDioramaSnapshotHeaderBytes - 4) return false; \
@@ -118,6 +118,8 @@ bool DioramaSnapshot_Describe(DioramaSnapshot *out,
   s.scene.plane_effect_userdata = NULL;
   s.scene.scenery_exposure = NULL;
   s.scene.scenery_light = NULL;
+  s.scene.actor_light = NULL;
+  memset(s.scene.actor_lightmaps,0,sizeof(s.scene.actor_lightmaps));
   s.scene.scenery_lightmap = ArRenderTexture_Invalid();
   s.scene.effect_bg_plane_mask = 0;
   s.scene.effect_obj_priority_mask = 0;
@@ -142,7 +144,7 @@ bool DioramaSnapshot_Describe(DioramaSnapshot *out,
   if (c->bg_transparent_fill_argb)
     memcpy(s.fill_argb, c->bg_transparent_fill_argb, sizeof(s.fill_argb));
   uint8_t header[kDioramaSnapshotHeaderBytes] = {0};
-  if (!Fields(&s, header, false)) return false;
+  if (!Fields(&s, header, false, kDioramaPlane_Count)) return false;
   *out = s;
   DioramaSnapshot_Bind(out);
   return true;
@@ -161,7 +163,7 @@ bool DioramaSnapshot_Encode(const DioramaSnapshot *snapshot,
   if (!snapshot || !images || !packet || !size) return false;
   DioramaSnapshot s = *snapshot;
   uint8_t header[kDioramaSnapshotHeaderBytes] = {0};
-  if (!Fields(&s, header, false)) return false;
+  if (!Fields(&s, header, false, kDioramaPlane_Count)) return false;
   size_t total = kDioramaSnapshotHeaderBytes;
   for (int i = 0; i < kDioramaSnapshotImageCount; i++) {
     size_t bytes = ImageSize(&s, i);
@@ -197,12 +199,14 @@ bool DioramaSnapshot_Encode(const DioramaSnapshot *snapshot,
 bool DioramaSnapshot_Decode(const uint8_t *packet, size_t size, DioramaSnapshot *out) {
   if (!packet || !out || size < kDioramaSnapshotHeaderBytes ||
       size > kDioramaSnapshotCapacity || Read32(packet) != SNAPSHOT_MAGIC ||
-      Read32(packet+4) != kDioramaSnapshotVersion || Read32(packet+8) != size ||
+      (Read32(packet+4) != 1 && Read32(packet+4) != kDioramaSnapshotVersion) || Read32(packet+8) != size ||
       Read32(packet+12) != Hash(packet, size)) return false;
   uint8_t header[kDioramaSnapshotHeaderBytes];
   memcpy(header, packet, sizeof(header));
   DioramaSnapshot s = {0};
-  if (!Fields(&s, header, true)) return false;
+  // V1 has thirteen planes and no OBJ attributes. Empty companion slots in
+  // the in-memory view preserve its image order, including the final skybox.
+  if (!Fields(&s, header, true, Read32(packet+4) == 1 ? 13 : kDioramaPlane_Count)) return false;
   size_t at = sizeof(header);
   for (int i = 0; i < kDioramaSnapshotImageCount; i++) {
     size_t bytes = ImageSize(&s, i);

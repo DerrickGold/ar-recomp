@@ -10,7 +10,7 @@ import re
 import subprocess
 from build_preview import ROOT, compiler_environment
 
-SHADERS = ('blur', 'rim', 'dof_edge', 'priority_surface', 'scenery_light')
+SHADERS = ('blur', 'rim', 'dof_edge', 'priority_surface', 'scenery_light', 'actor_light')
 # Matches the semantic parameter bridge in compositor_preview.c. Refuse a
 # silent uniform-layout drift if production shader interfaces change.
 UNIFORMS = (
@@ -20,6 +20,7 @@ UNIFORMS = (
                                   'u_max', 'v_min', 'v_max', 'edge_feather', 'lower_content_v_max')],
     [('vec2', 'size'), ('float', 'high_band'), ('float', 'additive')],
     [('vec4', name) for name in ('filter_info', 'priority_info', 'light_info', 'shade')],
+    [('vec4', name) for name in ('filter_info', 'light_info', 'attribute_info', 'bounds')],
 )
 
 
@@ -33,7 +34,7 @@ def shader_variants():
         text = text.replace('#version 450', '#version 300 es\nprecision highp float;')
         text = re.sub(r'layout\(location = \d+\) in ', 'in ', text)
         text = re.sub(r'layout\(set = 2, binding = 0\) ', '', text)
-        text = re.sub(r'layout\(set = 2, binding = 1\) ', '', text)
+        text = re.sub(r'layout\(set = 2, binding = [123]\) ', '', text)
         text = text.replace('layout(set = 3, binding = 0)', 'layout(std140)')
         if 'layout(set' in text:
             raise ValueError(f'Unsupported shader binding in {name}')
@@ -74,7 +75,9 @@ def build(output, compiler='emcc', scene=None):
                'snesrecomp-go/runtime/src/snes/ppu.c',
                'tools/action_editor/compositor_profile_stub.c', 'src/diorama/diorama_snapshot.c',
                *sources, '--no-entry', '-sSTANDALONE_WASM=1', '-sFILESYSTEM=0',
-               '-sSTACK_SIZE=1048576', '-sINITIAL_MEMORY=67108864', '-sALLOW_MEMORY_GROWTH=0',
+               # Fixed memory keeps JS views stable. Include the V2 snapshot
+               # companions and simultaneous old/new rooms during atomic load.
+               '-sSTACK_SIZE=1048576', '-sINITIAL_MEMORY=100663296', '-sALLOW_MEMORY_GROWTH=0',
                *['-Wl,--export=DioramaPreview_' + x for x in exports],
                *['-Wl,--export=RoomPreview_' + x for x in
                  ('Load', 'Configure', 'Policy', 'Render', 'Reset', 'Width', 'Height', 'CameraX', 'Uploads', 'Hash', 'SkyboxSource', 'SkyboxRoom', 'LoadSkybox', 'EnableEffects', 'EffectCount', 'EffectHash', 'EffectVertices', 'ConfigureEffects', 'RecipeErrorLine', 'RecipeError', 'SourceValue', 'MemberCount', 'MemberValue', 'CatalogueCount', 'CatalogueValue', 'CatalogueMemberValue', 'CatalogueGuideCount', 'CatalogueGuideValue', 'KindName', 'RayFieldText', 'RayFieldMapScale', 'AtmosphereFieldText', 'CastleFieldText', 'GlowFieldText', 'ArcFieldText', 'ProjectileFieldText', 'SurfaceFieldText', 'MarshFieldText', 'MoonFieldText', 'WaterFieldText', 'WaterFieldMapScale', 'ReachSupported', 'CollisionGrid', 'SetReceivers', 'LoadPlayer', 'ReceiverStyle', 'PickReceiver', 'EventCount', 'EventKind', 'SetEvent', 'PreviewBinding')],

@@ -23,7 +23,7 @@ const EmitterMapTools=(()=>{
     if(EffectGeometry.isRay(e))return [-1,1].map(sx=>({...EffectGeometry.rayPoint(e,1,sx),sx,sy:1,ray:true}));
     const axes=e.resizeWidth&&e.resizeHeight?[[-1,-1],[1,-1],[-1,1],[1,1]]:
       e.resizeWidth?[[-1,0],[1,0]]:e.resizeHeight?[[0,-1],[0,1]]:[];
-    return axes.filter(([,sy])=>e.anchorY!==0||sy>=0).map(([sx,sy])=>
+    return axes.filter(([,sy])=>(e.anchorY!==0||sy>=0)&&(e.anchorY!==1||sy<=0)).map(([sx,sy])=>
       ({x:e.x+sx*e.width/2,y:e.y+((sy+1)/2-(e.anchorY??.5))*e.height,sx,sy}));
   }
   function hits(ev) {
@@ -36,7 +36,8 @@ const EmitterMapTools=(()=>{
   function hit(ev,body=false) {
     if(!$('#effectGuides').checked)return null;
     const p=point(ev),entries=EffectEditor.mapEmitters(),radius=8/view.scale;
-    const selected=entries.find(e=>e.id===EffectEditor.selected());
+    const selected=entries.find(e=>e.id===EffectEditor.selected()&&e.guideIndex===EffectEditor.selectedGuide())||
+      entries.find(e=>e.id===EffectEditor.selected());
     const rotation=selected&&EffectGeometry.rotation(selected,view.scale);
     if(rotation&&Math.hypot(rotation.x-p.x,rotation.y-p.y)<=radius)return {entry:selected,corner:rotation};
     const corner=selected&&corners(selected).find(c=>Math.abs(c.x-p.x)<=radius&&Math.abs(c.y-p.y)<=radius);
@@ -55,10 +56,10 @@ const EmitterMapTools=(()=>{
     const found=hit(ev,brush==='effects');
     if(!found)return brush==='effects';
     const picked=found.entry,corner=found.corner;
-    if(ev.ctrlKey||ev.metaKey){EffectEditor.selectEmitter(picked.id,true);draw();return true;}
+    if(ev.ctrlKey||ev.metaKey){EffectEditor.selectEmitter(picked.id,true,picked.guideIndex);draw();return true;}
     if(ev.shiftKey){if(picked.movable!==false)EffectEditor.resetHandle(picked,corner?.rotate?'rotate':corner?'size':'position');draw();return true;}
     if(picked.movable===false){EffectEditor.openModal(picked.id,picked.x,picked.y);return true;}
-    EffectEditor.selectEmitter(picked.id);
+    EffectEditor.selectEmitter(picked.id,false,picked.guideIndex);
     gesture={scope:sceneKey(room),layer:bgIndex,initial:picked,draft:picked,start:p,corner};
     draw();return true;
   }
@@ -85,9 +86,9 @@ const EmitterMapTools=(()=>{
       p.x=snapped(p.x,ev);p.y=snapped(p.y,ev);
       const c=gesture.corner,anchorY=e.anchorY??.5;
       const fixed={x:e.x-c.sx*e.width/2,y:e.y+((1-c.sy)/2-anchorY)*e.height};
-      const limit=e.native?32768:['particle-area','exposure'].includes(e.kind)?16384:512;
-      let width=e.resizeWidth?Math.max(4,Math.min(limit,2*Math.round(Math.abs(p.x-fixed.x)/2))):e.width;
-      let height=e.resizeHeight?Math.max(4,Math.min(limit,2*Math.round(Math.abs(p.y-fixed.y)/2))):e.height;
+      const limit=e.native?32768:['particle-area','exposure','light-gradient','heat-haze'].includes(e.kind)?16384:512;
+      let width=e.resizeWidth?Math.max(e.minWidth??4,Math.min(e.maxWidth||limit,2*Math.round(Math.abs(p.x-fixed.x)/2))):e.width;
+      let height=e.resizeHeight?Math.max(4,Math.min(e.maxHeight||limit,2*Math.round(Math.abs(p.y-fixed.y)/2))):e.height;
       if(e.native) {
         width=e.resizeWidth?Math.max(e.baseWidth*.25,Math.min(e.baseWidth*2,width)):e.width;
         height=e.resizeHeight?Math.max(e.baseHeight*.25,Math.min(e.baseHeight*2,height)):e.height;
@@ -95,8 +96,8 @@ const EmitterMapTools=(()=>{
       gesture.draft={...e,width,height,x:e.resizeWidth?bounded(fixed.x+(p.x<fixed.x?-1:1)*width/2):e.x,
         y:e.resizeHeight?bounded(fixed.y-(p.y<fixed.y?height:0)+anchorY*height):e.y};
     } else gesture.draft={...e,x:bounded(snapped(e.x+p.x-gesture.start.x,ev)),
-      y:bounded(snapped(e.y+p.y-gesture.start.y,ev))};
-    if(['cloud-bank','particle-path'].includes(e.kind)&&e.points&&gesture.corner) {
+      y:e.moveY===false?e.y:bounded(snapped(e.y+p.y-gesture.start.y,ev))};
+    if(['cloud-bank','particle-path','wet-contour'].includes(e.kind)&&e.points&&gesture.corner) {
       const d=gesture.draft;
       d.points=e.points.split(/\s+/).map(pair=>{const [x,y]=pair.split(',').map(Number);return `${x*d.width/e.width},${y*d.height/e.height}`;}).join(' ');
     }
@@ -115,7 +116,8 @@ const EmitterMapTools=(()=>{
     if(scope!==sceneKey(room)||layer!==bgIndex)return;
     if(['x','y','width','height','angle'].every(key=>draft[key]===initial[key]))return;
     if(initial.angle!==draft.angle){EffectEditor.editEmitter(initial.id,{angle:draft.angle},'rotate effect');return;}
-    EffectEditor.editEmitter(initial.id,{x:draft.x-(initial.actorX||0),y:draft.y-(initial.actorY||0),width:draft.width,height:draft.height},
+    EffectEditor.editEmitter(initial.id,{x:draft.x-(initial.actorX||0),y:draft.y-(initial.actorY||0),width:draft.width,height:draft.height,
+        ...(initial.region?{guideIndex:initial.guideIndex}:{})},
       'move or resize emitter');
   }
   function cancel(){gesture=null;draw();}
@@ -125,12 +127,12 @@ const EmitterMapTools=(()=>{
     if(gesture&&(gesture.scope!==sceneKey(room)||gesture.layer!==bgIndex))gesture=null;
     ctx.save();ctx.lineWidth=1.5;
     for(const original of EffectEditor.mapEmitters()) {
-      const e=gesture?.initial.id===original.id?gesture.draft:original;
+      const e=gesture?.initial.id===original.id&&gesture.initial.guideIndex===original.guideIndex?gesture.draft:original;
       const x=view.x+(e.x-e.width/2)*view.scale,y=view.y+(e.y-(e.anchorY??.5)*e.height)*view.scale;
       const w=e.width*view.scale,h=e.height*view.scale;
       const path=EffectGeometry.outline(e),xs=path.map(p=>view.x+p.x*view.scale),ys=path.map(p=>view.y+p.y*view.scale);
       if(Math.max(...xs)<0||Math.max(...ys)<0||Math.min(...xs)>viewport.width||Math.min(...ys)>viewport.height)continue;
-      const selected=e.id===EffectEditor.selected()||EffectEditor.isMapSelected(e.id);
+      const selected=e.id===EffectEditor.selected()?(e.guideIndex??0)===(EffectEditor.selectedGuide()??0):EffectEditor.isMapSelected(e.id);
       if(e.points) {
         ctx.beginPath();ctx.strokeStyle='#85c6ef';
         e.points.split(/\s+/).forEach((pair,i)=>{const [px,py]=pair.split(',').map(Number);ctx[i?'lineTo':'moveTo'](view.x+(e.x+px)*view.scale,view.y+(e.y+py)*view.scale);});ctx.stroke();

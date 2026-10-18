@@ -523,7 +523,8 @@ static SrResult configure_ppu_obj_capture(
     Snes *snes = runner_from_handle(runner);
     const uint32_t supported = SR_PPU_OBJ_CAPTURE_RANGE |
         SR_PPU_OBJ_CAPTURE_RELOCATED | SR_PPU_OBJ_CAPTURE_WINNERS |
-        SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS | SR_PPU_OBJ_CAPTURE_HANDOFF;
+        SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS | SR_PPU_OBJ_CAPTURE_HANDOFF |
+        SR_PPU_OBJ_CAPTURE_ATTRIBUTES;
     Ppu *ppu;
     bool range_clear = false;
     bool relocated_clear = false;
@@ -541,6 +542,24 @@ static SrResult configure_ppu_obj_capture(
     ppu = ppu_output_control_target(snes);
     if (ppu == NULL) return SR_RESULT_UNAVAILABLE;
 
+    if (request->flags & SR_PPU_OBJ_CAPTURE_ATTRIBUTES) {
+        if (request->struct_size < SR_PPU_OBJ_CAPTURE_REQUEST_V4_SIZE)
+            return SR_RESULT_INVALID_ARGUMENT;
+        if (request->attributes) {
+            const unsigned source = kPpuOverlaySource_Obj;
+            const uint64_t pitch = ppu->overlayRenderPitch[source];
+            const uint64_t required = pitch * kPpuBufHeight;
+            if (!ppu->overlayRenderBuffer[source] || !pitch ||
+                ppu->overlayCaptures[source].oamFirst != 0 ||
+                ppu->overlayCaptures[source].oamCount != 128)
+                return SR_RESULT_INVALID_ARGUMENT;
+            for (unsigned band = 0; band < 4; ++band)
+                if (!request->attributes->pixels[band] ||
+                    (uintptr_t)request->attributes->pixels[band] % sizeof(uint32_t) ||
+                    request->attributes->pixel_byte_size[band] < required)
+                    return SR_RESULT_INVALID_ARGUMENT;
+        }
+    }
     if(request->flags & SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS) {
         if(request->struct_size<SR_PPU_OBJ_CAPTURE_REQUEST_V3_SIZE || request->color_reserved ||
            (request->color_transform_count!=0 && request->color_transform_count!=128) ||
@@ -633,6 +652,10 @@ static SrResult configure_ppu_obj_capture(
     }
     if(request->flags & SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS)
         (void)PpuSetObjColorTransforms(ppu,request->color_transforms,request->color_transform_count);
+    if (request->flags & SR_PPU_OBJ_CAPTURE_ATTRIBUTES) {
+        if (request->attributes) ppu->objAttributes = *request->attributes;
+        else memset(&ppu->objAttributes, 0, sizeof(ppu->objAttributes));
+    }
     return SR_RESULT_OK;
 }
 

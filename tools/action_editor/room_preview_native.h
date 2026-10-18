@@ -9,6 +9,8 @@ void RoomPreview_SetProjectionOffsets(const ArRenderPointF *planes, ArRenderPoin
 unsigned RoomPreview_SkyboxRoom(void);
 int RoomPreview_LoadSkybox(unsigned size);
 int RoomPreview_Load(unsigned size);
+int RoomPreview_LoadPlayer(unsigned size);
+int RoomPreview_SetReceivers(int mask, int player_x, int player_y, int enemy_x, int enemy_y);
 int RoomPreview_Configure(unsigned size);
 int RoomPreview_ConfigureEffects(unsigned size);
 void RoomPreview_Reset(void);

@@ -1,4 +1,4 @@
-/* Ordered v1 wire fields: type, allowed inclusive range, scalar expression.
+/* Ordered wire fields: type, allowed inclusive range, scalar expression.
  * This is the format definition, not a dump of the C structure layout. */
 U(0, (1u << kDioramaPlane_Count)-1, s->plane_mask)
 I(1, kDioramaPlane_Count-1, s->layer_count)
@@ -80,7 +80,7 @@ for (unsigned i = 0; i < kDioramaBgMaxValidSpans; i++) {
   I(0, 640, s->spans.spans[i].x0)
   I(0, 640, s->spans.spans[i].x1)
 }
-for (unsigned i = 0; i < kDioramaPlane_Count; i++) {
+for (unsigned i = 0; i < wire_plane_count; i++) {
   F(-65536, 65536, s->offsets[i].x)
   F(-65536, 65536, s->offsets[i].y)
   Q(s->coverage[i])

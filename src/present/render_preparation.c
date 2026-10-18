@@ -45,6 +45,15 @@ static bool PreparationContinues(ArRenderDevice *device) {
 static bool s_action_stage_prepared;
 static bool s_interpolation_prepared;
 
+static void PrepareActionStage(ArRenderDevice *device, bool interpolation) {
+  DioramaBgGpu_Prepare(device);
+  DioramaEffectBackend_IsAvailable(device, kDioramaEffect_PrioritySurface);
+  DioramaEffectBackend_PrepareSceneryLight(device);
+  DioramaFrameGeneration_PreparePipelines(device, interpolation);
+  s_action_stage_prepared = true;
+  s_interpolation_prepared = interpolation;
+}
+
 void RenderPreparation_PrepareSelectedFeatures(ArRenderDevice *device) {
   const bool diorama = Diorama_ModeIsOn();
   const bool interpolation = Diorama_InterpolationIsOn();
@@ -52,14 +61,14 @@ void RenderPreparation_PrepareSelectedFeatures(ArRenderDevice *device) {
       (s_interpolation_prepared || !interpolation))
     return;
   if (!ArRenderDevice_IsReady(device) || SessionFatal_Requested()) return;
-  /* Diorama action stages: effect projection and background capture.
-   * Unavailable pipelines fall back to the reference path when used, as
-   * before; attempting once is what matters here. */
-  DioramaBgGpu_Prepare(device);
-  DioramaEffectBackend_PrepareSceneryLight(device);
-  DioramaFrameGeneration_PreparePipelines(device, interpolation);
-  s_action_stage_prepared = true;
-  s_interpolation_prepared = interpolation;
+  /* A newly enabled feature must finish preparation before revealing its
+   * first frame, just like boot/device reset. Keep the indicator and compile
+   * accounting active here too. */
+  PreparationIndicator_Begin(device);
+  GpuCompileLog_BeginPreparation(TickIndicator, device);
+  PrepareActionStage(device, interpolation);
+  GpuCompileLog_EndPreparation();
+  PreparationIndicator_End(device);
 }
 
 bool RenderPreparation_Prepare(ArRenderDevice *device, RenderFeatureMask *supported) {
@@ -97,7 +106,12 @@ bool RenderPreparation_Prepare(ArRenderDevice *device, RenderFeatureMask *suppor
   if (!PreparationContinues(device)) return false;
   const bool completion_clouds = completion_shader &&
       PresentWorldNav_PrepareCompletionResources();
-  RenderPreparation_PrepareSelectedFeatures(device);
+  /* Action entry can enable Diorama after the last settings-service pass.
+   * Prepare its shared projection/lighting pipelines even when boot starts
+   * in a flat menu. Otherwise the first upload compiles them during gameplay. */
+  /* The active-mode getter is false in menus even when interpolation is
+   * enabled in settings. Its pipelines also need to be ready for action entry. */
+  PrepareActionStage(device, g_settings.gpu_interp_enabled);
   if (!PreparationContinues(device)) return false;
 
   ArRenderTexture sample = ArRenderTexture_Invalid(), target = ArRenderTexture_Invalid();

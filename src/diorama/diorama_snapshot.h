@@ -6,7 +6,7 @@
 #include "diorama.h"
 
 enum {
-  kDioramaSnapshotVersion = 1,
+  kDioramaSnapshotVersion = 2,
   kDioramaSnapshotHeaderBytes = 4096,
   kDioramaSnapshotWidth = 640,
   kDioramaSnapshotHeight = 352,

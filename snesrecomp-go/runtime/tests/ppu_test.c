@@ -2767,7 +2767,67 @@ static void test_obj_handoff(void) {
       }
 }
 
+/* Attributes are opaque host data. Both scanout implementations must export
+ * the exact winning OAM owner's value, independently of palette/priority. */
+static void test_obj_attributes(void) {
+    enum { W = 288, H = 352 };
+    static uint32_t output[W * H], art[2][4][W * H], attributes[2][4][W * H];
+    for (int implementation = 0; implementation < 2; ++implementation) {
+        Ppu *p = ppu_init();
+        CHECK(p != NULL);
+        if (!p) return;
+        ppu_reset(p);
+        p->inidisp = 15;
+        p->screenEnabled[0] = 16;
+        p->cgram[129] = 0x7fff;
+        for (int slot = 0; slot < 128; ++slot) p->oam[slot * 2] = 0xe000;
+        p->oam[0] = 8; p->oam[1] = 1 << 12;
+        p->oam[2] = 12; p->oam[3] = 3 << 12;
+        for (int y = 0; y < 8; ++y) p->vram[y] = 0xff;
+        PpuSetExtraSpace(p, 16);
+        PpuBeginDrawing(p, (uint8_t *)output, W * 4,
+            implementation ? kPpuRenderFlags_ReferencePixelRenderer : 0);
+        CHECK(PpuBindOverlaySurface(p, kPpuOverlaySource_Obj, (uint8_t *)art[implementation][0], W * 4));
+        for (unsigned band = 1; band < 4; ++band)
+            CHECK(PpuBindOverlayPrioSurface(p, kPpuOverlaySource_Obj, band, (uint8_t *)art[implementation][band]));
+        CHECK(PpuSetOverlayCapture(p, kPpuOverlaySource_Obj, -16, 0, W, 224, kPpuOverlayFlag_RemoveFromGame));
+        CHECK(PpuSetOverlayOamRange(p, 0, 128));
+        for (unsigned band = 0; band < 4; ++band) {
+            memset(attributes[implementation][band], 0xcd, sizeof(attributes[implementation][band]));
+            p->objAttributes.pixels[band] = (uint8_t *)attributes[implementation][band];
+            p->objAttributes.pixel_byte_size[band] = sizeof(attributes[implementation][band]);
+        }
+        p->objAttributes.values[0] = 0xff10ff00;
+        p->objAttributes.values[1] = 0xff2000ff;
+        ppu_runLine(p, 0);
+        for (int line = 1; line <= 10; ++line) {
+            ppu_write(p, 0, line == 4 ? 0x8f : 15);
+            ppu_runLine(p, line);
+            const int y = line - 1;
+            for (int band = 0; band < 4; ++band) for (int x = 0; x < W; ++x) {
+                const int world_x = x - 16;
+                uint32_t expected = 0;
+                if (line != 4 && y < 8) {
+                    if (band == 1 && world_x >= 8 && world_x < 12) expected = 0xff10ff00;
+                    if (band == 3 && world_x >= 12 && world_x < 20) expected = 0xff2000ff;
+                }
+                CHECK(attributes[implementation][band][y * W + x] == expected);
+                CHECK(art[implementation][band][y * W + x] == (expected ? 0xffffffff : 0));
+            }
+        }
+        PpuClearOverlayCaptures(p);
+        CHECK(!p->objAttributes.pixels[0] && !p->objAttributes.values[0]);
+        ppu_free(p);
+    }
+    CHECK(!memcmp(art[0], art[1], sizeof(art[0])));
+    CHECK(!memcmp(attributes[0], attributes[1], sizeof(attributes[0])));
+}
+
 int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "--obj-attributes")) {
+        test_obj_attributes();
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && !strcmp(argv[1], "--rgb-spans")) {
         test_rgb_spans_and_guards();
         return failures ? 1 : 0;
@@ -2801,6 +2861,7 @@ int main(int argc, char **argv) {
         test_native_capture_path_parity();
         test_obj_winner_capture();
         test_obj_handoff();
+        test_obj_attributes();
         test_sparse_obj_export();
         test_rgb_spans_and_guards();
         test_main_winner_masks();

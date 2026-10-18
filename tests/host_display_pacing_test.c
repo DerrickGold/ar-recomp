@@ -396,6 +396,10 @@ static void TestWindowAxisToOutput(void) {
 }
 
 int main(void) {
+  CHECK(HostDisplayPacing_DrawLeadNs(2000000, 0) == 0);
+  CHECK(HostDisplayPacing_DrawLeadNs(2000000, 11111111) == 2750000);
+  CHECK(HostDisplayPacing_DrawLeadNs(10000000, 11111111) < 11111111);
+  CHECK(HostDisplayPacing_DrawLeadNs(UINT64_MAX, 1000000) == 750000);
   TestInterpolationSourceCadence();
   TestExplicitFrameLimits();
   TestOnlyExplicitLimitOwnsFrameLimitInterval();

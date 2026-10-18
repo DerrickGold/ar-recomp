@@ -54,6 +54,7 @@ typedef struct ActionEffectGeometryWriter {
   int index_capacity;
   const ActionSceneryShadow *shadow;
   ActionEffectSourceBatch *source;
+  unsigned light_receiver; /* Zero for visible atmospheric volume. */
 } ActionEffectGeometryWriter;
 bool ActionSceneryShadow_Prepare(ActionSceneryShadow *shadow, ActionSceneryShadowCache *cache,
                                  const ActionMoonlightOcclusion *occlusion,

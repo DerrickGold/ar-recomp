@@ -38,6 +38,23 @@ enum {
       kActionSourceMaxLightJobs * (sizeof(ActionEffectSourceLightData) + kOccluderBytes)
 };
 
+static void DestroyPacket(SDL_GPUDevice *device, ArGpuEffectPacket *packet) {
+  SDL_ReleaseGPUBuffer(device, packet->primitives);
+  SDL_ReleaseGPUBuffer(device, packet->occluders);
+  for (unsigned i = 0; i < kActionSourceMaxLightJobs; ++i) {
+    SDL_ReleaseGPUBuffer(device, packet->lights[i].data);
+    SDL_ReleaseGPUBuffer(device, packet->lights[i].occluders);
+  }
+}
+
+static bool EnsureReadBuffer(SDL_GPUDevice *device, SDL_GPUBuffer **buffer, unsigned bytes) {
+  if (*buffer) return true;
+  const SDL_GPUBufferCreateInfo info = {
+      .usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ, .size = bytes};
+  *buffer = SDL_CreateGPUBuffer(device, &info);
+  return *buffer != NULL;
+}
+
 void ArGpuEffectSource_Destroy(ArGpuEffectSource *p) {
   if (!p || !p->device) return;
   for (unsigned f = 0; f < 2; ++f) {
@@ -49,15 +66,13 @@ void ArGpuEffectSource_Destroy(ArGpuEffectSource *p) {
   SDL_ReleaseGPUComputePipeline(p->device, p->project);
   SDL_ReleaseGPUComputePipeline(p->device, p->shadow);
   SDL_ReleaseGPUComputePipeline(p->device, p->moon);
-  SDL_ReleaseGPUBuffer(p->device, p->moon_job);
   SDL_ReleaseGPUBuffer(p->device, p->moon_work);
   SDL_ReleaseGPUBuffer(p->device, p->moon_mask);
   SDL_ReleaseGPUBuffer(p->device, p->moon_light);
-  SDL_ReleaseGPUBuffer(p->device, p->primitives);
   for (unsigned i = 0; i < kActionSourcePacketSlots; ++i)
-    SDL_ReleaseGPUBuffer(p->device, p->packets[i].primitives);
+    DestroyPacket(p->device, &p->packets[i]);
+  DestroyPacket(p->device, &p->transient);
   SDL_ReleaseGPUBuffer(p->device, p->vertices);
-  SDL_ReleaseGPUBuffer(p->device, p->occluders);
   SDL_ReleaseGPUBuffer(p->device, p->coverage);
   SDL_ReleaseGPUBuffer(p->device, p->sky_vertices);
   SDL_ReleaseGPUTransferBuffer(p->device, p->upload);
@@ -139,11 +154,6 @@ bool ArGpuEffectSource_Init(ArGpuEffectSource *p, SDL_GPUDevice *gpu) {
   SDL_ReleaseGPUShader(gpu, sf);
   SDL_GPUBufferCreateInfo buffer = {.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,
                                     .size = kPrimitiveBytes};
-  p->primitives = SDL_CreateGPUBuffer(gpu, &buffer);
-  buffer.size = kOccluderBytes;
-  p->occluders = SDL_CreateGPUBuffer(gpu, &buffer);
-  buffer.size = sizeof(ActionEffectSourceLightData);
-  p->moon_job = SDL_CreateGPUBuffer(gpu, &buffer);
   buffer.usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
   buffer.size = (400 * 176 + 4) * 4;
   p->coverage = SDL_CreateGPUBuffer(gpu, &buffer);
@@ -176,8 +186,8 @@ bool ArGpuEffectSource_Init(ArGpuEffectSource *p, SDL_GPUDevice *gpu) {
   p->wrap_nearest_sampler = SDL_CreateGPUSampler(gpu, &sampler);
   sampler.min_filter = sampler.mag_filter = SDL_GPU_FILTER_LINEAR;
   p->wrap_sampler = SDL_CreateGPUSampler(gpu, &sampler);
-  if (ok && p->wrap_sampler && p->wrap_nearest_sampler && p->primitives && p->occluders && p->coverage && p->vertices && p->sky_vertices &&
-      p->upload && p->sampler && p->nearest_sampler && p->moon_job && p->moon_work &&
+  if (ok && p->wrap_sampler && p->wrap_nearest_sampler && p->coverage && p->vertices && p->sky_vertices &&
+      p->upload && p->sampler && p->nearest_sampler && p->moon_work &&
       p->moon_mask && p->moon_light)
     return true;
   ArGpuEffectSource_Destroy(p);
@@ -288,45 +298,83 @@ bool ArGpuEffectSource_Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GP
       !Uniform(view, width, height, batch->count, mask, phase, &u))
     return false;
   const unsigned bytes = batch->count * sizeof(*batch->primitives);
-  ArGpuEffectPacket *packet = batch->revision && batch->packet_slot < kActionSourcePacketSlots
-      ? &p->packets[batch->packet_slot] : NULL;
-  const bool upload_primitives = !packet || packet->revision != batch->revision ||
+  const bool retained = batch->revision && batch->packet_slot < kActionSourcePacketSlots;
+  ArGpuEffectPacket *packet = retained
+      ? &p->packets[batch->packet_slot] : &p->transient;
+  const int ox = batch->context.ws_extra - batch->context.bg1_camera_x;
+  const int oy = batch->context.ws_extra_top - batch->context.bg1_camera_y;
+  const bool upload_primitives = !retained || packet->revision != batch->revision ||
       packet->brightness != brightness;
-  unsigned shadow_count = packet && !upload_primitives ? packet->shadow_count : 0;
-  if (upload_primitives) {
+  const bool upload_inputs = !retained || packet->input_revision != batch->revision ||
+      packet->light_count != batch->light_count || packet->origin_x != ox || packet->origin_y != oy;
+  unsigned shadow_count = packet->shadow_count;
+  if (upload_primitives || upload_inputs) {
+    shadow_count = 0;
     for (unsigned i = 0; i < batch->count; ++i) {
       const ActionEffectSourcePrimitive *s = &batch->primitives[i];
       if (s->meta[0] > kActionSourceFloorTriangle || s->meta[1] > 8) return false;
       if (s->meta[3] && scenery && scenery->valid) shadow_count = scenery->count;
     }
     if (shadow_count > kActionMoonlightMaxOccluders) return false;
-    if (packet && bytes > packet->capacity) {
-      /* Grow geometrically within the existing hard bound. SDL defers release
-       * while prior submissions still reference the old allocation. */
-      unsigned capacity = packet->capacity ? packet->capacity * 2 : 4096;
-      if (capacity < bytes) capacity = bytes;
-      if (capacity > kPrimitiveBytes) capacity = kPrimitiveBytes;
-      const SDL_GPUBufferCreateInfo info = {
-          .usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ, .size = capacity};
-      SDL_GPUBuffer *buffer = SDL_CreateGPUBuffer(p->device, &info);
-      if (!buffer) return false;
-      SDL_ReleaseGPUBuffer(p->device, packet->primitives);
-      packet->primitives = buffer;
-      packet->capacity = capacity;
-      packet->revision = 0;
+  }
+  if (bytes > packet->capacity) {
+    unsigned capacity = packet->capacity ? packet->capacity * 2 : 4096;
+    if (capacity < bytes) capacity = bytes;
+    if (capacity > kPrimitiveBytes) capacity = kPrimitiveBytes;
+    SDL_GPUBuffer *buffer = NULL;
+    if (!EnsureReadBuffer(p->device, &buffer, capacity)) return false;
+    SDL_ReleaseGPUBuffer(p->device, packet->primitives);
+    packet->primitives = buffer;
+    packet->capacity = capacity;
+  }
+  if (!EnsureReadBuffer(p->device, &packet->occluders, kOccluderBytes)) return false;
+  unsigned light_offset[kActionSourceMaxLightJobs] = {0};
+  unsigned caster_offset[kActionSourceMaxLightJobs] = {0};
+  const unsigned primitive_upload_bytes = upload_primitives ? bytes : 0;
+  const unsigned shadow_bytes = upload_inputs && shadow_count ? (shadow_count + 1) * 16 : 0;
+  unsigned upload_end = primitive_upload_bytes + shadow_bytes;
+  if (upload_inputs) {
+    packet->input_revision = 0;
+    for (unsigned i = 0; i < batch->light_count; ++i) {
+      const ActionEffectSourceLightJob *job = &batch->lights[i];
+      ArGpuEffectLight *light = &packet->lights[i];
+      const unsigned count = job->occlusion && job->occlusion->valid ? job->occlusion->count : 0;
+      if (count > kActionMoonlightMaxOccluders || !isfinite(job->data.meta[0]) ||
+          job->data.meta[0] < 0 || job->data.meta[0] > kActionSourceMaxLightPoints ||
+          floorf(job->data.meta[0]) != job->data.meta[0] || !isfinite(job->data.meta[1]) ||
+          job->data.meta[1] < 0 || job->data.meta[1] > 3 || floorf(job->data.meta[1]) != job->data.meta[1])
+        return false;
+      light->point_count = (unsigned)job->data.meta[0];
+      light->kind = (unsigned)job->data.meta[1];
+      light->occluder_count = count;
+      light->occluder_index = i;
+      if (!EnsureReadBuffer(p->device, &light->data, sizeof(job->data))) return false;
+      light_offset[i] = upload_end;
+      upload_end += sizeof(job->data);
+      /* Moon rays, reflections and glints often share the same castle/terrain
+       * mask. Retain one copy per distinct input, not one per receiver job. */
+      for (unsigned j = 0; j < i; ++j)
+        if (batch->lights[j].occlusion == job->occlusion) {
+          light->occluder_index = packet->lights[j].occluder_index;
+          break;
+        }
+      if (count && light->occluder_index == i) {
+        if (!EnsureReadBuffer(p->device, &light->occluders, kOccluderBytes)) return false;
+        caster_offset[i] = upload_end;
+        upload_end += count * 16;
+      }
     }
   }
-  SDL_GPUBuffer *primitives = packet ? packet->primitives : p->primitives;
-  const unsigned primitive_upload_bytes = upload_primitives ? bytes : 0;
-  unsigned char *mapped = SDL_MapGPUTransferBuffer(p->device, p->upload, true);
-  if (!mapped) return false;
-  /* Upload storage can be write-combined on D3D12. Read/modify only CPU
-   * locals, then copy the finished data once; never read the mapped buffer. */
-  if (upload_primitives) {
-    if (brightness == 1.0f) {
-      memcpy(mapped, batch->primitives, bytes);
-    } else {
-      for (unsigned i = 0; i < batch->count; ++i) {
+  if (upload_end) {
+    unsigned char *mapped = SDL_MapGPUTransferBuffer(p->device, p->upload, true);
+    if (!mapped) return false;
+    /* Upload heaps may be write-combined on D3D12: only write finished CPU
+     * values, never read/modify mapped storage. Repeated presentations map
+     * nothing when their immutable capture and brightness have not changed. */
+    if (upload_primitives) {
+      packet->revision = 0;
+      if (brightness == 1.0f) memcpy(mapped, batch->primitives, bytes);
+      else for (unsigned i = 0; i < batch->count; ++i) {
         ActionEffectSourcePrimitive primitive = batch->primitives[i];
         for (unsigned c = 0; c < (primitive.meta[0] == kActionSourceQuad ? 4u : 3u); ++c)
           for (unsigned rgb = 0; rgb < 3; ++rgb)
@@ -334,60 +382,63 @@ bool ArGpuEffectSource_Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GP
         memcpy(mapped + i * sizeof(primitive), &primitive, sizeof(primitive));
       }
     }
-  }
-  unsigned char *rects = mapped + primitive_upload_bytes;
-  float bounds[4] = {INFINITY, INFINITY, -INFINITY, -INFINITY};
-  const int ox = batch->context.ws_extra - batch->context.bg1_camera_x;
-  const int oy = batch->context.ws_extra_top - batch->context.bg1_camera_y;
-  for (unsigned i = 0; i < shadow_count; ++i) {
-    const ActionMoonlightOccluder *r = &scenery->rectangles[i];
-    const float rect[4] = {r->x0 + ox, r->y0 + oy, r->x1 + ox, r->y1 + oy};
-    bounds[0] = fminf(bounds[0], rect[0]);
-    bounds[1] = fminf(bounds[1], rect[1]);
-    bounds[2] = fmaxf(bounds[2], rect[2]);
-    bounds[3] = fmaxf(bounds[3], rect[3]);
-    memcpy(rects + (i + 1) * sizeof(rect), rect, sizeof(rect));
-  }
-  memcpy(rects, bounds, sizeof(bounds));
-  unsigned light_offset[kActionSourceMaxLightJobs], light_occluders[kActionSourceMaxLightJobs];
-  unsigned upload_end = primitive_upload_bytes + (shadow_count + 1) * 16;
-  for (unsigned i = 0; i < batch->light_count; ++i) {
-    const ActionEffectSourceLightJob *job = &batch->lights[i];
-    const unsigned count = job->occlusion && job->occlusion->valid ? job->occlusion->count : 0;
-    if (count > kActionMoonlightMaxOccluders || job->data.meta[0] < 0 ||
-        job->data.meta[0] > kActionSourceMaxLightPoints ||
-        !isfinite(job->data.meta[0]) || floorf(job->data.meta[0]) != job->data.meta[0] ||
-        !isfinite(job->data.meta[1]) || job->data.meta[1] < 0 || job->data.meta[1] > 3 ||
-        floorf(job->data.meta[1]) != job->data.meta[1]) {
-      SDL_UnmapGPUTransferBuffer(p->device, p->upload); return false;
+    if (shadow_bytes) {
+      unsigned char *rects = mapped + primitive_upload_bytes;
+      float bounds[4] = {INFINITY, INFINITY, -INFINITY, -INFINITY};
+      for (unsigned i = 0; i < shadow_count; ++i) {
+        const ActionMoonlightOccluder *r = &scenery->rectangles[i];
+        const float rect[4] = {r->x0 + ox, r->y0 + oy, r->x1 + ox, r->y1 + oy};
+        bounds[0] = fminf(bounds[0], rect[0]); bounds[1] = fminf(bounds[1], rect[1]);
+        bounds[2] = fmaxf(bounds[2], rect[2]); bounds[3] = fmaxf(bounds[3], rect[3]);
+        memcpy(rects + (i + 1) * sizeof(rect), rect, sizeof(rect));
+      }
+      memcpy(rects, bounds, sizeof(bounds));
     }
-    light_offset[i] = upload_end; light_occluders[i] = count;
-    memcpy(mapped + upload_end, &job->data, sizeof(job->data));
-    upload_end += sizeof(job->data);
-    float (*caster)[4] = (float (*)[4])(mapped + upload_end);
-    for (unsigned j = 0; j < count; ++j) {
-      const ActionMoonlightOccluder *r = &job->occlusion->rectangles[j];
-      caster[j][0] = r->x0 + ox; caster[j][1] = r->y0 + oy;
-      caster[j][2] = r->x1 + ox; caster[j][3] = r->y1 + oy;
+    if (upload_inputs) for (unsigned i = 0; i < batch->light_count; ++i) {
+      const ActionEffectSourceLightJob *job = &batch->lights[i];
+      const ArGpuEffectLight *light = &packet->lights[i];
+      memcpy(mapped + light_offset[i], &job->data, sizeof(job->data));
+      if (light->occluder_index != i) continue;
+      for (unsigned j = 0; j < light->occluder_count; ++j) {
+        const ActionMoonlightOccluder *r = &job->occlusion->rectangles[j];
+        const float rect[4] = {r->x0 + ox, r->y0 + oy, r->x1 + ox, r->y1 + oy};
+        memcpy(mapped + caster_offset[i] + j * sizeof(rect), rect, sizeof(rect));
+      }
     }
-    upload_end += count * 16;
+    SDL_UnmapGPUTransferBuffer(p->device, p->upload);
   }
-  SDL_UnmapGPUTransferBuffer(p->device, p->upload);
   if (!ArSdlRenderBackend_SubmitPending(device)) return false;
   SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(p->device);
   if (!cmd) return false;
-  SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
-  if (!copy) goto failed;
-  if (upload_primitives) {
-    const SDL_GPUTransferBufferLocation from = {.transfer_buffer = p->upload};
-    const SDL_GPUBufferRegion to = {.buffer = primitives, .size = bytes};
-    SDL_UploadToGPUBuffer(copy, &from, &to, true);
+  /* All immutable inputs upload together. The compute jobs retain their
+   * original ordering and scratch ownership; only the repeated copy passes
+   * and redundant per-presentation transfers disappear. */
+  if (upload_end) {
+    SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
+    if (!copy) goto failed;
+    if (upload_primitives) {
+      const SDL_GPUTransferBufferLocation from = {.transfer_buffer = p->upload};
+      const SDL_GPUBufferRegion to = {.buffer = packet->primitives, .size = bytes};
+      SDL_UploadToGPUBuffer(copy, &from, &to, true);
+    }
+    if (shadow_bytes) {
+      const SDL_GPUTransferBufferLocation from = {.transfer_buffer=p->upload,.offset=primitive_upload_bytes};
+      const SDL_GPUBufferRegion to = {.buffer=packet->occluders,.size=shadow_bytes};
+      SDL_UploadToGPUBuffer(copy,&from,&to,true);
+    }
+    if (upload_inputs) for (unsigned i = 0; i < batch->light_count; ++i) {
+      const ArGpuEffectLight *light = &packet->lights[i];
+      const SDL_GPUTransferBufferLocation from = {.transfer_buffer=p->upload,.offset=light_offset[i]};
+      const SDL_GPUBufferRegion to = {.buffer=light->data,.size=sizeof(ActionEffectSourceLightData)};
+      SDL_UploadToGPUBuffer(copy,&from,&to,true);
+      if (light->occluder_count && light->occluder_index == i) {
+        const SDL_GPUTransferBufferLocation caster = {.transfer_buffer=p->upload,.offset=caster_offset[i]};
+        const SDL_GPUBufferRegion target = {.buffer=light->occluders,.size=light->occluder_count*16};
+        SDL_UploadToGPUBuffer(copy,&caster,&target,true);
+      }
+    }
+    SDL_EndGPUCopyPass(copy);
   }
-  const SDL_GPUTransferBufferLocation rect_from = {
-      .transfer_buffer = p->upload, .offset = primitive_upload_bytes};
-  const SDL_GPUBufferRegion rect_to = {.buffer = p->occluders, .size = (shadow_count + 1) * 16};
-  SDL_UploadToGPUBuffer(copy, &rect_from, &rect_to, true);
-  SDL_EndGPUCopyPass(copy);
   u.clock[2] = shadow_count;
   if (shadow_count)
     for (unsigned stage = 0; stage < 2; ++stage) {
@@ -397,30 +448,19 @@ bool ArGpuEffectSource_Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GP
       SDL_GPUComputePass *compute = SDL_BeginGPUComputePass(cmd, NULL, 0, &out, 1);
       if (!compute) goto failed;
       SDL_BindGPUComputePipeline(compute, p->shadow);
-      SDL_GPUBuffer *inputs[] = {p->occluders, motion};
+      SDL_GPUBuffer *inputs[] = {packet->occluders, motion};
       SDL_BindGPUComputeStorageBuffers(compute, 0, inputs, 2);
       SDL_DispatchGPUCompute(compute, stage ? shadow_count : (400 * 176 + 63) / 64, 1, 1);
       SDL_EndGPUComputePass(compute);
     }
   bool light_cycled = false;
   for (unsigned i = 0; i < batch->light_count; ++i) {
-    copy = SDL_BeginGPUCopyPass(cmd);
-    if (!copy) goto failed;
-    const SDL_GPUTransferBufferLocation job_from = {.transfer_buffer=p->upload,.offset=light_offset[i]};
-    const SDL_GPUBufferRegion job_to = {.buffer=p->moon_job,.size=sizeof(ActionEffectSourceLightData)};
-    SDL_UploadToGPUBuffer(copy,&job_from,&job_to,true);
-    if (light_occluders[i]) {
-      const SDL_GPUTransferBufferLocation caster_from = {.transfer_buffer=p->upload,
-          .offset=light_offset[i]+sizeof(ActionEffectSourceLightData)};
-      const SDL_GPUBufferRegion caster_to = {.buffer=p->occluders,.size=light_occluders[i]*16};
-      SDL_UploadToGPUBuffer(copy,&caster_from,&caster_to,true);
-    }
-    SDL_EndGPUCopyPass(copy);
-    u.moon[0] = i*kActionSourceMaxLightPoints; u.moon[1] = light_occluders[i];
-    const unsigned count = (unsigned)batch->lights[i].data.meta[0];
+    const ArGpuEffectLight *light = &packet->lights[i];
+    u.moon[0] = i*kActionSourceMaxLightPoints; u.moon[1] = light->occluder_count;
+    const unsigned count = light->point_count;
     if (!count) continue;
     for (unsigned stage=0; stage<3; ++stage) {
-      if (stage==1 && !light_occluders[i]) continue;
+      if (stage==1 && !light->occluder_count) continue;
       u.clock[3] = stage;
       SDL_PushGPUComputeUniformData(cmd,0,&u,sizeof(u));
       const SDL_GPUStorageBufferReadWriteBinding outputs[] = {
@@ -429,10 +469,11 @@ bool ArGpuEffectSource_Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GP
       SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(cmd,NULL,0,outputs,3);
       if (!pass) goto failed;
       SDL_BindGPUComputePipeline(pass,p->moon);
-      SDL_GPUBuffer *inputs[] = {p->moon_job,motion,p->occluders};
+      SDL_GPUBuffer *inputs[] = {light->data, motion, light->occluder_count ?
+          packet->lights[light->occluder_index].occluders : packet->occluders};
       SDL_BindGPUComputeStorageBuffers(pass,0,inputs,3);
-      const unsigned groups = stage==0 ? (batch->lights[i].data.meta[1]==3 ? 1 : (800*224+63)/64) :
-          stage==1 ? light_occluders[i] : (count+63)/64;
+      const unsigned groups = stage==0 ? (light->kind==3 ? 1 : (800*224+63)/64) :
+          stage==1 ? light->occluder_count : (count+63)/64;
       SDL_DispatchGPUCompute(pass,groups,1,1);SDL_EndGPUComputePass(pass);
     }
     light_cycled = true;
@@ -442,7 +483,7 @@ bool ArGpuEffectSource_Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GP
   SDL_GPUComputePass *compute = SDL_BeginGPUComputePass(cmd, NULL, 0, &out, 1);
   if (!compute) goto failed;
   SDL_BindGPUComputePipeline(compute, p->project);
-  SDL_GPUBuffer *inputs[] = {primitives, motion, p->coverage, p->moon_light};
+  SDL_GPUBuffer *inputs[] = {packet->primitives, motion, p->coverage, p->moon_light};
   SDL_BindGPUComputeStorageBuffers(compute, 0, inputs, 4);
   SDL_DispatchGPUCompute(compute, (batch->count + 63) / 64, 1, 1);
   SDL_EndGPUComputePass(compute);
@@ -458,11 +499,12 @@ bool ArGpuEffectSource_Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GP
   SDL_DrawGPUPrimitives(draw, batch->count * 15, 1, 0, 0);
   SDL_EndGPURenderPass(draw);
   if (!SDL_SubmitGPUCommandBuffer(cmd)) return false;
-  if (packet) {
-    packet->revision = batch->revision;
-    packet->brightness = brightness;
-    packet->shadow_count = shadow_count;
-  }
+  packet->revision = batch->revision;
+  packet->brightness = brightness;
+  packet->shadow_count = shadow_count;
+  packet->input_revision = batch->revision;
+  packet->light_count = batch->light_count;
+  packet->origin_x = ox; packet->origin_y = oy;
   return true;
 failed:
   SDL_CancelGPUCommandBuffer(cmd);

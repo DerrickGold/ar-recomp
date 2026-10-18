@@ -11,6 +11,9 @@ Settings g_settings;
 bool g_diorama_frame_active;
 static FrameSlot slot;
 static SrPpuFrameSnapshot ppu;
+uint8_t *g_diorama_layer_pixels[kDioramaPlane_Count];
+static bool receiver_attributes;
+bool ActRaiser_DioramaReceiverAttributes(void) {return receiver_attributes;}
 static bool faces_promoted;
 static int promotion_queries;
 bool ActRaiser_DioramaDeathHeimHubFacesPromoted(void) {
@@ -97,11 +100,24 @@ int main(void) {
   g_settings.diorama_layer_bg1 = g_settings.diorama_layer_bg2 = true;
   g_settings.diorama_layer_bg3 = g_settings.diorama_layer_obj = true;
   Capture(NULL);
-  const uint32_t all = ((1u << kDioramaPlane_Count) - 1u) & ~Bit(SR_PPU_OVERLAY_BG4);
+  const uint32_t all = ((1u << kDioramaPlane_ObjAttributes0) - 1u) & ~Bit(SR_PPU_OVERLAY_BG4);
   assert(slot.diorama_plane_request_mask == all);
   g_settings.diorama_hud_flat = true;
   Capture(NULL);
   assert(slot.diorama_plane_request_mask == (all & ~Bit(SR_PPU_OVERLAY_BG3)));
+  receiver_attributes=true;
+  g_settings.diorama_layer_obj=true;
+  ppu.overlays[SR_PPU_OVERLAY_OBJ].content_band_mask=4;
+  uint8_t attribute=1;
+  g_diorama_layer_pixels[kDioramaPlane_ObjAttributes2]=&attribute;
+  slot.ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][2]=(SrPpuSurfaceView){.pitch_bytes=2560,.height_pixels=352};
+  Capture(&ppu);
+  assert(slot.diorama_plane_content_mask & Bit(kDioramaPlane_ObjAttributes2));
+  assert(slot.diorama_plane_request_mask & Bit(kDioramaPlane_ObjAttributes2));
+  assert(slot.diorama_obj_attributes[2].data==&attribute);
+  assert(slot.diorama_obj_attributes[2].pitch_bytes==2560);
+  g_settings.diorama_layer_obj=false;Capture(&ppu);
+  assert(!slot.diorama_obj_attributes[2].data);
   puts("Diorama capture: shared band mapping, source masks and missing-view gates passed");
   return 0;
 }

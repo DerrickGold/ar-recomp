@@ -195,10 +195,10 @@ selection to move it; select it and drag a corner to resize its supported ranges
 Double-click or right-click a marker to configure it. When markers overlap, the
 context menu offers **Effects at this point** to pick the intended source.
 Deleting an authored effect removes it; deleting a default disables it, leaving
-a grey marker available for re-enabling or **Restore source defaults**. Room-wide
-families have fixed markers near the map origin, with position/size editing
-limited to their individual members. **Apply and configure family lighting…**
-opens the member's parent controls for shared receiver settings.
+a grey marker available for re-enabling or **Restore source defaults**. Grouped
+fields show their source regions or terrain contacts. **Apply and configure family
+lighting…** opens the parent controls; individual rays and windows can also
+override their inherited scenery/player/enemy receivers in their own inspector.
 
 **Environmental sources** remains an optional source picker and import/export
 panel. Select **Configure selected effect…** to open the same modal. Change a
@@ -213,8 +213,34 @@ unavailable: drips keep their particle size, water keeps its surface depth, and
 torches use **Light reach** for their spill instead of scaling their flame.
 Ceiling drip and forest ray length handles keep the upper source anchor fixed.
 Single wall torches and Aitos waterfall/splash sources also expose anchor offsets.
-Receiver choices belong to the parent source family; members inherit them.
+Members inherit receiver choices until **Override light receivers** is enabled.
+Tint, intensity and position edits preserve receiver settings from a complete field.
 Use placed fans, contours and particle fields for additional authored structures.
+
+Region handles also edit castle floor mist/sky glow, temple dust, cave ambient
+light, moon clouds and foreground blood-water/mist spans. These
+edits update the existing complete field in `action-effects.ini`; they do not
+add another rendering layer. Castle mist's Y coordinate stays on its supporting
+floor: upper corners resize its height, up to 128 pixels, and width must remain
+over a contiguous supported floor. Multiple region guides retain independent
+selection; shared field parameters such as shoreline height remain linked.
+Foreground water handles resize horizontally and remain on the native water
+band. Shoreline mist height stays within the renderer's shallow mist apron.
+Moon reflections expose glow, reflection-row spacing and wave shapes separately
+in the complete moon field; a single glow rectangle would misrepresent that effect.
+
+Resizing follows the source's meaning:
+
+| Source | Size control |
+| --- | --- |
+| Placed lights, fans, haze, particles, free mist and clouds | Width/height handles and inspector. Room gradients, heat and large particle/exposure areas allow up to 16384 pixels per axis. |
+| Wet contours, ground-cloud paths and particle routes | Resizing scales the actual local path points as well as the guide. |
+| Forest rays, castle windows, cave mist and wet sheen | Individual member width/length scales; direction handles where supported. |
+| Castle floor mist and other region fields listed above | Region handles or numeric bounds; edits retain source and collision validation. |
+| Torches | Light reach changes spill radius independently of the flame. |
+| Drips and water surfaces | Drip length or water span width; particle size/surface depth are separate properties. |
+| Aitos waterfall/splash/mist | Source width/length scales. Mist scales its puff sizes and motion, not only its capture bounds. |
+| Terrain-selected floor mist, wet timber, insects and lava; grouped leaves, tower rays and grit | Complete field controls expose search spans, dimensions and motion. Their terrain/source guides are not freely stretched copies of the detected art. |
 
 **Add effect…** also works from the sidebar at the preview centre. It offers these families:
 
@@ -270,6 +296,10 @@ light on scenery, player and enemies by default. Rear forest rays keep their
 atmospheric volume without adding the same sunlight twice. The inspector shows
 these inherited targets even when the override is off. Overrides still allow
 each receiver group to be selected independently.
+The native runtime checks the resolved scene, including built-in defaults;
+an explicit INI receiver override is not required to activate sprite lighting.
+The distant castle sky fan remains atmospheric behind masonry. Its window
+sources own the configurable illumination entering the room.
 
 On sprites, dimming sets the ambient illumination and nearby lights add colored
 illumination before the result multiplies the original palette. For example,
@@ -505,9 +535,13 @@ also retain their additive glow and phase envelopes. Alpha waterfall mist
 keeps a neutral response. Forest and moon material light use a 2x response;
 their atmospheric volumes keep their authored intensity. The skybox projection
 is published before building the shared material light map, so BG2-anchored moon
-light also illuminates foreground scenery in skybox-only mode. Matching player
-and enemy targets share one receiver geometry build. This uses the existing
-lighting passes with no GPU readback. Shift-click the
+light also illuminates foreground scenery in skybox-only mode. Matching scenery,
+player and enemy targets share their projected illumination map. Sprite lighting
+samples that map per pixel after projection, so a narrow angled ray lights the
+part of a sprite actually crossing it. The PPU exports owner/ambient attributes
+beside each OBJ band; interpolation transports them with the artwork in the same
+GPU pass and motion field. Flat mode retains object-space sampling. There is no
+extra motion search or GPU readback. Shift-click the
 Illumination control to restore the family default (or the loaded project value).
 
 Emitter positions

@@ -624,7 +624,15 @@
     <div class="ctl"><label for="nativeWidth">Width scale</label><input id="nativeWidth" type="number" min="0.25" max="2" step="0.05"></div>
     <div class="ctl"><label for="nativeLength">Length scale</label><input id="nativeLength" type="number" min="0.25" max="2" step="0.05"></div>
     <div class="ctl"><label for="nativeAngle">Direction offset</label><input id="nativeAngle" type="number" min="-30" max="30" step="1"></div>
-    <p class="hint">Offsets use the effect's own layer pixels; map handles account for its parallax. Scale 1 keeps its original size, and direction 0 keeps its original angle. Source art remains required. These edits do not move terrain or gameplay objects. Receiver controls belong to the parent source family.</p>
+    <p class="hint">Offsets use the effect's own layer pixels; map handles account for its parallax. Scale 1 keeps its original size, and direction 0 keeps its original angle. Source art remains required. Individual light receivers inherit the parent family until overridden above.</p>
+  </div>
+  <div id="effectRegionControls" hidden>
+    <h4>Effect region (map pixels)</h4>
+    <div class="ctl"><label for="effectRegionX">Centre X</label><input id="effectRegionX" type="number" step="1"></div>
+    <div class="ctl"><label for="effectRegionY">Centre / floor Y</label><input id="effectRegionY" type="number" step="1"></div>
+    <div class="ctl"><label for="effectRegionWidth">Width</label><input id="effectRegionWidth" type="number" min="4" step="1"></div>
+    <div class="ctl"><label for="effectRegionHeight">Height</label><input id="effectRegionHeight" type="number" min="4" step="1"></div>
+    <p class="hint" id="effectRegionHint"></p>
   </div>
   <div id="actorBindingControls" hidden>
     <h4>Attach to an actor or attack</h4>
@@ -728,6 +736,7 @@
 <script src="coverage_editor.js"></script>
 <script src="diorama_view.js"></script>
 <script src="webgl2_backend.js"></script>
+<script src="effect_regions.js"></script>
 <script src="effect_editor.js"></script>
 <script src="effect_geometry.js"></script>
 <script src="effect_handles.js"></script>

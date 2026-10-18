@@ -9,8 +9,10 @@ typedef struct FrameSlot FrameSlot;
 typedef struct ActionSceneEffectFrame ActionSceneEffectFrame;
 /* Pending completed-pass time without consuming the capture clock. */
 uint16_t ActionEffectCapture_VisualClock(void);
-/* Read-only preview of the pending native observation. Does not consume
- * completed ticks or update identity/velocity history. */
+/* Invalidate the pending observation at the start of each PPU transaction. */
+void ActionEffectCapture_BeginFrame(void);
+/* Read-only preview of the resolved pending observation, including authored
+ * recipes. Does not consume completed ticks or commit observation history. */
 void ActionEffectCapture_PeekScene(ActionSceneEffectFrame *frame);
 
 /* Called on the game thread after PPU drawing. Fills spell/scene effects,

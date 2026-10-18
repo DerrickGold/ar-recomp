@@ -23,6 +23,11 @@ const blobs = data.blobs.map(s => Uint8Array.from(Buffer.from(s, 'base64')));
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const manifest = {editor: path.resolve(htmlFile), editor_sha256: hash(html), profile, rooms: []};
 fs.mkdirSync(output, {recursive: true});
+if (data.player) {
+  const art=Buffer.concat([data.player.characters,data.player.palette,data.player.picture].map(i=>Buffer.from(blobs[i])));
+  fs.writeFileSync(path.join(output,'player.bin'),art);
+  manifest.player={file:'player.bin',bytes:art.length,sha256:hash(art)};
+}
 for (const base of data.rooms) {
   const terrain = base.terrainVariants.find(t => t.profile === profile);
   if (!terrain) throw Error(`Missing terrain profile ${profile} for ${base.group}:${base.map}`);

@@ -24,7 +24,7 @@ bool EditorReceiverPreview_Capture(ArRenderDevice *device,
     const EditorReceiverPreviewSettings *settings,
     const ActionReceiverLighting *lighting, int camera_x, int camera_y, int extra,
     const DioramaCapture *capture, ArRenderTexture *texture,
-    const uint8_t **pixels, unsigned *uploads);
+    const uint8_t **pixels, ArRenderTexture *attribute_texture, const uint8_t **attributes, unsigned *uploads);
 
 /* Invert the published OBJ projection for click/drag placement. Returns capture
  * coordinates, including the extended rows, with no parallel camera model. */

@@ -436,7 +436,7 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
     } else if (!strcmp(key, "color")) {
       bit = 8;
       ok = Color(value, &current->tuning.color);
-    } else if (current->member ||
+    } else if ((current->member && strncmp(key, "light-", 6)) ||
                (!current->emitter && ActionEffectMembers_MovableSource(current->kind) &&
                 (!strcmp(key, "offset-x") || !strcmp(key, "offset-y") ||
                  !strcmp(key, "width-scale") || !strcmp(key, "length-scale") ||
@@ -578,6 +578,8 @@ bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *
          r->kind==kActionEffect_AuthoredParticleArea || r->kind==kActionEffect_AuthoredHeat))) {ok=false;break;}
     r->shape.intensity = r->tuning.intensity;
     r->shape.color = r->tuning.color;
+    r->shape.light_receivers = r->tuning.light_receivers;
+    r->shape.light_receivers_set = r->tuning.light_receivers_set;
     if(r->kind==kActionEffect_AuthoredExposure && r->tuning.intensity>1){ok=false;break;}
     /* Collision-supported mist, exposure regions and traced playfield edges
      * require the terrain coordinate system. Reject incompatible bindings. */
@@ -916,7 +918,21 @@ void ActionEffectRecipes_Apply(const ActionEffectRecipes *table, unsigned group,
           rect->y0 *= r->shape.length_scale;
           rect->y1 *= r->shape.length_scale;
         }
-        effect->tuning=r->tuning;if(!r->enabled)effect->flags&=(uint8_t)~kActionEffectFlag_Visible;break;
+        const ActionEffectTuning inherited=effect->tuning;
+        effect->tuning=r->tuning;
+        if(ActionEffectMembers_MovableSource(effect->kind)) {
+          effect->tuning.source_width_scale=r->shape.width_scale;
+          effect->tuning.source_height_scale=r->shape.length_scale;
+        }
+        if(!r->tuning.light_receivers_set) {
+          effect->tuning.light_receivers=inherited.light_receivers;
+          effect->tuning.light_receivers_set=inherited.light_receivers_set;
+        }
+        if(!r->tuning.dim_receivers_set) {
+          effect->tuning.dim_receivers=inherited.dim_receivers;
+          effect->tuning.dim_receivers_set=inherited.dim_receivers_set;
+        }
+        if(!r->enabled)effect->flags&=(uint8_t)~kActionEffectFlag_Visible;break;
       }
       if(effect->flags&kActionEffectFlag_Visible)++visible;
     }

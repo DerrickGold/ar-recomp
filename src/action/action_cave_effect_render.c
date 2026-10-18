@@ -4,6 +4,7 @@
  * Phase: pure. Tests: tests/action_effect_render_test.c. */
 #include "action/action_effect_render_internal.h"
 #include "action_effect_members.h"
+#include "action_effect_receivers.h"
 #include "action_water_field.h"
 
 /* One aggregate record per family; all bounds include the entire source map,
@@ -362,6 +363,7 @@ static bool CaveSheen(ActionEffectGeometryWriter *writer, const ActionEffectInst
   for (unsigned i = 0; i < (unsigned)p->Counts[2]; i++) {
     const ActionNativeMember *member = ActionEffectMembers_Find(members, effect->kind, i);
     if (member && !member->enabled) continue;
+    if (!ActionEffectReceivers_Member(effect, member, writer->light_receiver)) continue;
     const int first_vertex = writer->vertex_count;
     ActionCaveWetSource edited = ActionWaterField_Wet(p,i);
     if (member) {

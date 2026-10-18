@@ -169,6 +169,12 @@ static void TestNativeNeverWaitsForFutureCapture(void) {
   const uint64_t target = HostFramePlayout_Target(p, sample);
   assert(endpoint + period > now && target >= endpoint + period);
   assert(!HostFramePlayout_AwaitEndpoint(p, endpoint, target, now, sample));
+  assert(!HostFramePlayout_AwaitNativeDeadline(p, endpoint, target, now, 0));
+  /* A real software deadline permits waiting only within the draw-ahead
+   * window. A capture that is not due yet cannot delay submission. */
+  assert(HostFramePlayout_AwaitNativeDeadline(p, endpoint, target, now, now + 3000000));
+  assert(!HostFramePlayout_AwaitNativeDeadline(p, endpoint, target, now, now));
+  assert(!HostFramePlayout_AwaitNativeDeadline(p, endpoint, endpoint + period - 1, now, sample));
   /* Even a late capture holds the image; it cannot stall the presenter.
    * Once production catches up, coalesce all due captures on the next slot. */
   const uint64_t later = now + 3 * period;

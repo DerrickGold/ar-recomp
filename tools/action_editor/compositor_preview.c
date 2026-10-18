@@ -158,6 +158,13 @@ bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *d, const DioramaScene
   int w,h;
   if (!ArRenderDevice_GetOutputSize(d,&w,&h) || w<=0 || h<=0) return false;
   const ArRenderRectF uv = p->light_uv.w>0 ? p->light_uv : (ArRenderRectF){0,0,1,1};
+  if(ArRenderTexture_IsValid(p->attributes)) {
+    const ArRenderRectF source=p->attributes_uv.w>0?p->attributes_uv:(ArRenderRectF){0,0,1,1};
+    const float a[19]={p->texel_width,p->texel_height,p->blur_radius,p->rim_strength,
+        uv.w/w,uv.h/h,uv.x,1-uv.y-uv.h,source.x,source.y,source.w,source.h,p->lower_content_v_max,0,0,0,
+        (float)p->attributes.value,(float)p->illumination.value,(float)p->enemy_illumination.value};
+    return WebEffect(5,a,19)!=0;
+  }
   const float a[17]={p->texel_width,p->texel_height,p->blur_radius,p->lower_content_v_max,
       p->priority.width,p->priority.height,p->priority.high_band,p->priority.additive,
       uv.w/w,uv.h/h,uv.x,1-uv.y-uv.h,p->shade.r,p->shade.g,p->shade.b,p->mode,(float)p->illumination.value};

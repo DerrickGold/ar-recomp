@@ -458,6 +458,8 @@ static void EnvironmentalEffectsIndependence(void) {
   PresentActionEffects_Reset(&device);
 }
 
+static void CheckStagedSourceParity(ArRenderDevice *, const DioramaProjection *);
+
 static void ForestFoliageComposition(void) {
   Backend b;
   ArRenderDevice device;
@@ -552,6 +554,15 @@ static void ForestFoliageComposition(void) {
   assert(b.geometries == 7); /* No second multiplicative pass. */
   PresentActionEffects_DrawDioramaPlane(&material, SR_PPU_OVERLAY_BG2, &projection);
   assert(b.geometries == 9); /* Rear rays and alpha foliage keep their depth. */
+  CheckStagedSourceParity(&device, &projection);
+  CheckStagedSourceParity(&device, &sky);
+  /* Disabled illumination leaves material maps black for every receiver;
+   * the compositor can still apply independent ambient dimming. */
+  frame.action_effect_lighting = false;
+  assert(PresentActionEffects_DrawSceneryLight(&material, &projection));
+  assert(PresentActionEffects_DrawActorLight(&material, &projection, kActionReceiver_Player));
+  assert(PresentActionEffects_DrawActorLight(&material, &projection, kActionReceiver_Enemies));
+  assert(b.geometries == 9);
   frame.action_environmental_effects = false;
   PresentActionEffects_Draw(&device, &frame, viewport, &projection);
   PresentActionEffects_DrawDioramaPlane((void *)&context, SR_PPU_OVERLAY_BG2, &projection);
@@ -987,6 +998,8 @@ static void BloodpoolComposition(void) {
   assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
   assert(b.geometries == 11); /* Five submissions; details share existing water/mist batches. */
   assert(b.created == 2 && b.updated == 2 && !b.resolves && !b.restores);
+  CheckStagedSourceParity(&device, &projection);
+  CheckStagedSourceParity(&device, &sky);
   frame.action_environmental_effects = false;
   assert(PresentActionEffects_DrawFlatPlanes(&device,&frame,viewport));
   PresentActionEffects_DrawDioramaPlane(&context,SR_PPU_OVERLAY_BG2,&projection);
@@ -1280,6 +1293,53 @@ static bool InspectSourcePacket(ArRenderDevice *device, const ActionEffectSource
   return true;
 }
 
+static uint64_t staging_hash;
+static unsigned staging_primitives;
+static void HashStagedBytes(const void *data, size_t size) {
+  const uint8_t *bytes = data;
+  for (size_t i = 0; i < size; ++i) {
+    staging_hash ^= bytes[i];
+    staging_hash *= UINT64_C(1099511628211);
+  }
+}
+static bool InspectStagedPacket(ArRenderDevice *device, const ActionEffectSourceBatch *batch,
+    const DioramaProjection *projection, const ActionMoonlightOcclusion *scenery,
+    ArRenderBlendMode blend, float brightness) {
+  (void)device; (void)projection; (void)scenery; (void)blend; (void)brightness;
+  assert(!batch->failed);
+  HashStagedBytes(&batch->packet_slot, sizeof(batch->packet_slot));
+  HashStagedBytes(batch->primitives, batch->count * sizeof(*batch->primitives));
+  for (unsigned i = 0; i < batch->light_count; ++i)
+    HashStagedBytes(&batch->lights[i].data, sizeof(batch->lights[i].data));
+  staging_primitives += batch->count;
+  return true;
+}
+static uint64_t DrawStagingFixture(ArRenderDevice *device, const DioramaProjection *projection) {
+  staging_hash = UINT64_C(14695981039346656037);
+  staging_primitives = 0;
+  PresentActionPlaneEffectContext context = {device, &frame, viewport, InspectStagedPacket};
+  assert(PresentActionEffects_DrawSceneryLight(&context, projection));
+  assert(PresentActionEffects_DrawActorLight(&context, projection, kActionReceiver_Player));
+  assert(PresentActionEffects_DrawActorLight(&context, projection, kActionReceiver_Enemies));
+  const int planes[] = {SR_PPU_OVERLAY_BG1, kDioramaPlane_Bg1Hi, SR_PPU_OVERLAY_BG2, kDioramaPlane_Bg2Hi};
+  for (unsigned i = 0; i < sizeof(planes)/sizeof(planes[0]); ++i)
+    PresentActionEffects_DrawDioramaPlane(&context, planes[i], projection);
+  PresentActionEffects_DrawWithSource(device, &frame, viewport, projection, InspectStagedPacket);
+  assert(staging_primitives);
+  return staging_hash;
+}
+static void CheckStagedSourceParity(ArRenderDevice *device, const DioramaProjection *projection) {
+  const bool active = frame.diorama_active, lighting = frame.action_effect_lighting;
+  frame.diorama_active = frame.action_effect_lighting = true;
+  PresentActionEffects_InvalidateSourcePackets();
+  const uint64_t reference = DrawStagingFixture(device, projection);
+  ++frame.timestamp_ns;
+  PresentActionEffects_PrepareSourcePackets(&frame);
+  assert(DrawStagingFixture(device, projection) == reference);
+  frame.diorama_active = active;
+  frame.action_effect_lighting = lighting;
+}
+
 static void SourcePacketCaptureLifetime(void) {
   Backend b;
   ArRenderDevice device;
@@ -1312,14 +1372,27 @@ static void SourcePacketCaptureLifetime(void) {
   PresentActionEffects_InvalidateSourcePackets();
   PresentActionEffects_DrawWithSource(&device, &frame, viewport, &a, InspectSourcePacket);
   assert(source_submissions == 3 && source_hash != original_hash);
+  const uint32_t edited_hash = source_hash;
   e->world_x -= 17;
   ++frame.timestamp_ns;
   PresentActionEffects_DrawWithSource(&device, &frame, viewport, &a, InspectSourcePacket);
   assert(source_submissions == 4 && source_hash == original_hash);
+  /* Upload staging prepares the previous presentation's passes using the new
+   * immutable capture. A later draw must reuse that exact geometry; changing
+   * projection/fade must not rebuild it on the presentation deadline. */
+  frame.diorama_active = true;
+  e->world_x += 17;
+  ++frame.timestamp_ns;
+  PresentActionEffects_PrepareSourcePackets(&frame);
+  e->world_x += 31; /* Detect an accidental lazy rebuild during draw. */
+  PresentActionEffects_DrawWithSource(&device, &frame, viewport, &next_band, InspectSourcePacket);
+  assert(source_submissions == 5 && source_hash == edited_hash);
+  assert(source_projection == &next_band && source_brightness == 7.0f / 15.0f);
+  e->world_x -= 48;
   PresentActionEffects_Reset(&device);
   e->world_x += 23;
   PresentActionEffects_DrawWithSource(&device, &frame, viewport, &a, InspectSourcePacket);
-  assert(source_submissions == 5 && source_hash != original_hash);
+  assert(source_submissions == 6 && source_hash != original_hash);
   PresentActionEffects_Reset(&device);
 }
 

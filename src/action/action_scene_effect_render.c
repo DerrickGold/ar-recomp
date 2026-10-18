@@ -27,10 +27,19 @@ static bool HasLightVolume(unsigned kind) {
 }
 
 static bool IncludeSurfaceLighting(const ActionEffectInstance *effect, unsigned layer,
-    ActionEffectProjectPointFn project, void *userdata) {
+    ActionEffectProjectPointFn project, void *userdata, const ActionSceneEffectFrame *frame) {
+  const unsigned mask = ActionEffectReceivers_FamilyMask(effect, &frame->members);
   const ActionEffectProjectionContext *context = project == ActionEffectSource_ProjectPoint
       ? &((ActionEffectSourceBatch *)userdata)->context
       : project == ActionEffectProjection_ProjectPoint ? userdata : NULL;
+  const unsigned receiver = frame->light_receiver ? frame->light_receiver : context ? context->light_receiver : 0;
+  if (receiver)
+    return ActionEffectReceivers_IsLight(effect->kind) &&
+        (mask & receiver) && ActionEffectReceivers_Layer(effect) == layer;
+  ActionEffectInstance routed = *effect;
+  routed.tuning.light_receivers_set |= mask != ActionEffectReceivers_Mask(effect);
+  routed.tuning.light_receivers = mask;
+  effect = &routed;
   const bool material = context && context->scenery_lighting_only;
   const bool volume = HasLightVolume(effect->kind);
   /* Scattering stays at the authored depth even when no foreground material
@@ -137,6 +146,8 @@ static bool AppendWaterfallMistCloudVolume(
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
   const float span = rect->x1 - rect->x0;
   const unsigned ticks = (unsigned)f->Clock[0] * (unsigned)effect->pulse_ticks;
+  const float sx=effect->tuning.source_width_scale>0?effect->tuning.source_width_scale:1;
+  const float sy=effect->tuning.source_height_scale>0?effect->tuning.source_height_scale:1;
 
   /* Back to front: broad cool banks establish depth, rising mid-tier puffs
    * break their upper silhouette, and the compact bright tier reads as fresh
@@ -158,8 +169,8 @@ static bool AppendWaterfallMistCloudVolume(
     const float jitter_x = (HashUnit(seed ^ 0x53u) - 0.5f) * f->CloudJitter[0];
     const float jitter_y = (HashUnit(seed ^ 0xB5u) - 0.5f) *
         (tier == 3u ? f->CloudJitter[2] : f->CloudJitter[1]);
-    float x = rect->x0 + span * lane + f->tiers[tier][4] +
-        jitter_x + x_wave * (f->CloudJitter[3] + f->CloudJitter[4] * (float)tier);
+    float x = rect->x0 + span * lane + sx*(f->tiers[tier][4] +
+        jitter_x + x_wave * (f->CloudJitter[3] + f->CloudJitter[4] * (float)tier));
     float y = f->tiers[tier][0] + jitter_y -
         y_wave * (f->CloudJitter[5] + f->CloudJitter[6] * (float)tier);
     /* A fixed first anchor gives the production projection regression one
@@ -168,6 +179,7 @@ static bool AppendWaterfallMistCloudVolume(
       x = rect->x0 + span * lane;
       y = f->tiers[tier][0];
     }
+    y *= sy;
     const float size_jitter = f->CloudShape[0] + f->CloudShape[1] * HashUnit(seed ^ 0x71u);
     const float breathe = f->CloudShape[2] + f->CloudShape[3] * TriangleWave(
         ticks + (seed >> 16) % (unsigned)f->CloudPeriods[6], (unsigned)f->CloudPeriods[6]);
@@ -176,8 +188,8 @@ static bool AppendWaterfallMistCloudVolume(
         (f->CloudShape[6] + f->CloudShape[7] * HashUnit(seed ^ 0xA7u));
     if (!AppendSceneSoftCloud(
             writer, effect, x, y,
-            f->tiers[tier][1] * size_jitter * breathe,
-            f->tiers[tier][2] * size_jitter / breathe,
+            sx * f->tiers[tier][1] * size_jitter * breathe,
+            sy * f->tiers[tier][2] * size_jitter / breathe,
             ((ArRenderColorF){f->tiers[tier][5],f->tiers[tier][6],f->tiers[tier][7],f->tiers[tier][8]}), opacity, seed,
             project_point, userdata))
       return false;
@@ -709,6 +721,8 @@ static bool AppendWaterfallMistParticles(
   const ArRenderColorF hot={f->Hot[0],f->Hot[1],f->Hot[2],f->Hot[3]};
   const ArRenderColorF cool={f->Cool[0],f->Cool[1],f->Cool[2],f->Cool[3]};
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
+  const float sx=effect->tuning.source_width_scale>0?effect->tuning.source_width_scale:1;
+  const float sy=effect->tuning.source_height_scale>0?effect->tuning.source_height_scale:1;
   const unsigned visual_ticks =
       (unsigned)f->Clock[0] * (unsigned)effect->pulse_ticks;
   for (unsigned i = 0; i < count; ++i) {
@@ -723,14 +737,14 @@ static bool AppendWaterfallMistParticles(
      * static bright seam over the gap. */
     const float span = rect->x1 - rect->x0;
     const float lane = ((float)i + HashUnit(seed ^ 0x53u)) / (float)count;
-    const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * f->Motion[0];
+    const float drift = (HashUnit(seed ^ 0x37u) - 0.5f) * f->Motion[0] * sx;
     const float base_y = f->Motion[1] + (HashUnit(seed ^ 0xB5u) - 0.5f) * f->Motion[2];
     x = rect->x0 + span * lane + drift * t;
-    y = base_y - f->Motion[3] * t - f->Motion[4] * t * t;
+    y = sy*(base_y - f->Motion[3] * t - f->Motion[4] * t * t);
     previous_x = rect->x0 + span * lane + drift * previous_t;
-    previous_y = base_y - f->Motion[3] * previous_t - f->Motion[4] * previous_t * previous_t;
-    width = f->Shape[0] + f->Shape[1] * (1.0f - t);
-    reach = f->Shape[2] + f->Shape[3] * t;
+    previous_y = sy*(base_y - f->Motion[3] * previous_t - f->Motion[4] * previous_t * previous_t);
+    width = sx*(f->Shape[0] + f->Shape[1] * (1.0f - t));
+    reach = sy*(f->Shape[2] + f->Shape[3] * t);
 
     const ArRenderColorF color = SceneParticleColor(hot, cool, clock);
     if (!AppendSceneParticle(writer, effect, x, y, previous_x, previous_y,
@@ -1794,9 +1808,15 @@ BuildSceneEffectList(const ActionEffectInstance *effects, uint8_t effect_count,
     const ActionSurfaceField *surface_field=surface_index<0?NULL:
       (field_frame->surface_fields_valid&(1u<<surface_index))?&field_frame->surface_fields[surface_index]:ActionSurfaceField_Bundled((unsigned)surface_index);
     if(surface_index>=0&&!surface_field)return false;
-    const bool lighting_enabled=want_lighting && IncludeSurfaceLighting(effect,render_layer,project_point,project_userdata) && !(effect->flags&kActionEffectFlag_LightingOff);
+    const bool lighting_enabled=want_lighting && IncludeSurfaceLighting(effect,render_layer,project_point,project_userdata,field_frame) && !(effect->flags&kActionEffectFlag_LightingOff);
     const bool particles_enabled=want_particles && effect->render_layer==render_layer;
     const int first_vertex = writer.vertex_count;
+    const ActionEffectProjectionContext *projection = writer.source ? &writer.source->context :
+        project_point == ActionEffectProjection_ProjectPoint ? project_userdata : NULL;
+    writer.light_receiver = field_frame->light_receiver ? field_frame->light_receiver :
+        projection && projection->light_receiver ? projection->light_receiver :
+        (projection && projection->scenery_lighting_only) || !HasLightVolume(effect->kind)
+            ? kActionReceiver_Scenery : 0;
     if (!(effect->flags & kActionEffectFlag_Visible) ||
         effect->geometry.kind != kActionEffectGeometry_Rect ||
         !RectIsSane(&effect->geometry.data.rect) ||
@@ -2090,7 +2110,7 @@ bool ActionSceneDecorationRender_Build(
   bool shadow_prepared = false;
   for (unsigned i=0;i<frame->authored_count;++i) {
     const ActionEffectInstance *e=&frame->authored[i];
-    const bool light=lighting_enabled&&IncludeSurfaceLighting(e,render_layer,project_point,project_userdata);
+    const bool light=lighting_enabled&&IncludeSurfaceLighting(e,render_layer,project_point,project_userdata,frame);
     const bool particles=particles_enabled&&e->render_layer==render_layer;
     if(!(e->flags&kActionEffectFlag_Visible)||(!light&&!particles))continue;
     const int first_vertex=writer.vertex_count;

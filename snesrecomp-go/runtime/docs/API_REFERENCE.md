@@ -155,6 +155,19 @@ the specific entry you call.
 
 ## Memory-region operation matrix
 
+`configure_ppu_obj_capture` also accepts the optional V4
+`SR_PPU_OBJ_CAPTURE_ATTRIBUTES` facet. Bind a full-OAM OBJ overlay first, then
+provide four companion buffers in `SrPpuObjAttributeCapture`, one per OBJ
+priority. Each must hold the overlay pitch times `SR_PPU_SURFACE_MAX_HEIGHT`
+bytes. Scanout writes the winning OAM slot's host-supplied ARGB value at the
+same coordinates as its artwork, clearing transparent pixels and guard rows.
+The runtime assigns no game-specific meaning to these values. This can carry
+material or ownership data alongside sprites without changing their palette.
+The descriptor and 128 values are copied synchronously; buffers remain
+caller-owned and must survive scanout. Invalid requests fail atomically. A
+NULL descriptor clears the facet, as does the next frame's capture reset.
+Existing V2 and V3 requests retain their previous layout and behavior.
+
 `SrMemoryRegion` identifies storage across several APIs; it does not promise
 that every region is borrowable through every accessor.
 

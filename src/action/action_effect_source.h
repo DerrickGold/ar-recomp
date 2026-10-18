@@ -22,7 +22,7 @@ enum {
   kActionSourceMaximumPrimitives = 16384,
   kActionSourceVerticesPerPrimitive = 15,
   kActionSourceCompositePacketSlots = kActionEffectRenderLayer_Count + 2,
-  kActionSourcePacketSlots = kActionSourceCompositePacketSlots * 2,
+  kActionSourcePacketSlots = kActionSourceCompositePacketSlots * 4,
 };
 
 /* Thirteen 16-byte words; mirrored by action_effect_project.comp.glsl. */

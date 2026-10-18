@@ -5,6 +5,7 @@
 #include "diorama/diorama.h"
 #include "diorama/diorama_planes.h"
 #include "present/present.h"
+#include "host/host_frame_surfaces.h"
 
 static const uint8_t kPrimarySources[] = {
   SR_PPU_OVERLAY_BG1, SR_PPU_OVERLAY_BG2, SR_PPU_OVERLAY_BG3, SR_PPU_OVERLAY_OBJ,
@@ -41,6 +42,7 @@ static uint32_t RequestedPlanes(void) {
 }
 
 void DioramaCapture_CaptureFrame(FrameSlot *frame, const SrPpuFrameSnapshot *ppu) {
+  for(unsigned p=0;p<4;++p)frame->diorama_obj_attributes[p]=(SrPpuSurfaceView){0};
   frame->diorama_active = g_diorama_frame_active;
   frame->diorama_plane_request_mask = 0;
   frame->diorama_plane_content_mask = 0;
@@ -70,6 +72,15 @@ void DioramaCapture_CaptureFrame(FrameSlot *frame, const SrPpuFrameSnapshot *ppu
    * result supplements the PPU's own content bits. */
   if (ActRaiser_DioramaDeathHeimHubFacesPromoted())
     content |= PlaneBit(kDioramaPlane_Bg2Far);
+  if (ActRaiser_DioramaReceiverAttributes())
+    for(unsigned p=0;p<4;++p) {
+      const unsigned parent=DioramaPlaneForObjectPriority(p),plane=kDioramaPlane_ObjAttributes0+p;
+      if (!(content & frame->diorama_plane_request_mask & PlaneBit(parent))) continue;
+      frame->diorama_obj_attributes[p]=frame->ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][p];
+      frame->diorama_obj_attributes[p].data=g_diorama_layer_pixels[plane];
+      content|=PlaneBit(plane);
+      frame->diorama_plane_request_mask|=PlaneBit(plane);
+    }
   frame->diorama_plane_content_mask = content;
   frame->diorama_plane_additive_mask = additive;
 }

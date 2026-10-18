@@ -83,9 +83,8 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
 struct FrameSlot;
 bool HostDisplay_StageOwnedFrame(const struct FrameSlot *frame);
 bool HostDisplay_CanPresentDuringProduction(void);
-/* Software-paced producer: test deadlines before drawing rather
- * than sleeping inside present, so the loop can service a completed producer.
- * VSync retains its normal blocking policy; this never changes a setting. */
+/* Software-paced producer: prepare captures early, draw with measured lead,
+ * then wait for the submission deadline. VSync keeps backend pacing. */
 void HostDisplay_SetProducerPacing(bool enabled);
 /* Recompose the retained frame between emulation ticks at the selected host
  * cadence. Visual interpolation is optional: with it disabled, the exact

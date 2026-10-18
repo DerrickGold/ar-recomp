@@ -90,6 +90,7 @@ HudIconFrame ActRaiser_HudIconFrame(void);
  * publish that plane. */
 bool ActRaiser_DioramaDeathHeimHubFacesPromoted(void);
 uint8_t ActRaiser_DioramaBgApronMask(void);
+bool ActRaiser_DioramaReceiverAttributes(void);
 void ActRaiser_FullSnapshot(const char *prefix);
 void RunOneFrameOfGame(void);
 void ActRaiser_OnInidispWrite(uint8 value);

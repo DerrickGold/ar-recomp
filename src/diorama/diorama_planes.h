@@ -22,6 +22,11 @@ enum {
   kDioramaPlane_Obj3,                                /* sprites, priority 3 */
   kDioramaPlane_Bg1Far,                              /* editor virtual band 0 */
   kDioramaPlane_Bg2Far,                              /* editor virtual band 0 */
+  /* Companion data follows each OBJ band's exact interpolation, never draws. */
+  kDioramaPlane_ObjAttributes0,
+  kDioramaPlane_ObjAttributes1,
+  kDioramaPlane_ObjAttributes2,
+  kDioramaPlane_ObjAttributes3,
   kDioramaPlane_Count
 };
 
@@ -78,6 +83,14 @@ static inline int DioramaPlaneForObjectPriority(unsigned priority) {
   }
 }
 
+static inline bool DioramaPlaneIsObjectAttributes(int plane) {
+  return plane >= kDioramaPlane_ObjAttributes0 && plane <= kDioramaPlane_ObjAttributes3;
+}
+static inline int DioramaPlaneMotionSource(int plane) {
+  return DioramaPlaneIsObjectAttributes(plane)
+      ? DioramaPlaneForObjectPriority((unsigned)(plane-kDioramaPlane_ObjAttributes0)) : plane;
+}
+
 static inline bool DioramaPlaneIsObjectPriority(int plane) {
   return DioramaPlaneObjectPriority(plane) >= 0;
 }
@@ -105,7 +118,7 @@ static inline bool DioramaPlaneUsesSparseCoverage(int plane) {
  * when a saved horizontal framing offset is active and their provider has
  * verified the current terrain. All other padding stays outside the upload. */
 static inline bool DioramaPlaneCanCarryApron(int plane) {
-  return DioramaPlaneIsObjectPriority(plane);
+  return DioramaPlaneIsObjectPriority(plane) || DioramaPlaneIsObjectAttributes(plane);
 }
 
 static inline bool DioramaPlaneUsesBgApron(int plane, unsigned bg_apron_mask) {

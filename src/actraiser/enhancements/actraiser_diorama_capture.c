@@ -1,3 +1,4 @@
+#include "action/action_effect_capture.h"
 #include "diorama/diorama_camera_policy.h"
 #include "diorama/diorama_layer_manifest.h"
 /* ActRaiser diorama capture: prepares the diorama's captures each frame: HUD
@@ -18,6 +19,8 @@
 
 static uint8_t s_bg_apron_mask;
 static const ActionReceiverLighting *s_receiver_lighting;
+static bool s_projected_receivers;
+bool ActRaiser_DioramaReceiverAttributes(void) { return s_projected_receivers; }
 static DioramaBgSourceBounds s_bg2_source_bounds;
 static bool s_track_bg2_source_bounds;
 
@@ -153,8 +156,12 @@ void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
     float multiply[3]={1,1,1},add[3]={0};
     const unsigned receiver=receivers[i].role==kActRaiserSprite_Player?kActionReceiver_Player:
         receivers[i].role==kActRaiserSprite_Enemy?kActionReceiver_Enemies:0;
-    const bool tinted=receiver&&s_receiver_lighting;
+    const bool tinted=receiver&&s_receiver_lighting&&!s_projected_receivers;
     if(tinted)ActionEffectReceivers_Sample(s_receiver_lighting,receiver,receivers[i].x,receivers[i].y,multiply,add);
+    const uint32_t attribute=ActionEffectReceivers_Attribute(s_receiver_lighting,
+        receiver,receivers[i].x,receivers[i].y);
+    uint32_t *attributes=s_projected_receivers ? (uint32_t *)g_diorama_layer_pixels[
+        kDioramaPlane_ObjAttributes0+priority] : NULL;
     const SrPpuObjColorTransform transform=ReceiverTransform(multiply,add);
     const unsigned brightness=255u*(ActRaiser_PpuFrame()->state.display_control&15u)/15u;
 
@@ -210,6 +217,7 @@ void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom) {
           if (color_math)
             pixel = (pixel & 0x00ffffffu) | 0x80000000u;
           plane[index] = pixel;
+          if(attributes)attributes[index]=attribute;
         }
       }
     }
@@ -469,15 +477,47 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
 }
 
 void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number) {
+  ActionEffectCapture_BeginFrame();
   const SrPpuFrameTransactionContext *frame = ActRaiser_PpuFrame();
   const SrPpuStateSnapshot *ppu = frame ? &frame->state : NULL;
   s_receiver_lighting=NULL;
+  s_projected_receivers=false;
   if(g_settings.action_environmental_effects) {
     const ActRaiserSpriteOwnership ownership=ActRaiserSpriteOwnership_Presented(map_group,map_number);
     const ActionReceiverLighting *lighting=ownership.valid?
-        ActionEffectManifest_PrepareReceivers(map_group,map_number,g_ram,kActRaiserWramSize):NULL;
+        ActionEffectManifest_PrepareReceivers(map_group,map_number,g_ram,kActRaiserWramSize,g_diorama_frame_active):NULL;
     s_receiver_lighting=lighting;
-    if(lighting) {
+    if(lighting && g_diorama_frame_active) {
+      SrPpuObjAttributeCapture attributes={0};
+      bool ready=true;
+      for(unsigned band=0;band<4;++band) {
+        attributes.pixels[band]=HostFrameSurfaces_DioramaPlane(kDioramaPlane_ObjAttributes0+band);
+        attributes.pixel_byte_size[band]=kHostFrameSurfaceBytes;
+        ready &= attributes.pixels[band]!=NULL;
+      }
+      for(unsigned slot=0;slot<128;++slot) {
+        const unsigned receiver=ownership.slots[slot]==kActRaiserSprite_Player?kActionReceiver_Player:
+            ownership.slots[slot]==kActRaiserSprite_Enemy?kActionReceiver_Enemies:0;
+        /* Multipart actors repeat the same exposure sample for each OAM
+         * piece. Reuse adjacent owners just as the flat tint path does. */
+        if(slot && ownership.slots[slot]==ownership.slots[slot-1] &&
+            (!receiver || (ownership.world_x[slot]==ownership.world_x[slot-1] &&
+                          ownership.world_y[slot]==ownership.world_y[slot-1])))
+          attributes.values[slot]=attributes.values[slot-1];
+        else
+          attributes.values[slot]=ActionEffectReceivers_Attribute(lighting,receiver,
+              ownership.world_x[slot],ownership.world_y[slot]);
+      }
+      const SrPpuObjCaptureRequest request={.struct_size=sizeof(request),
+          .flags=SR_PPU_OBJ_CAPTURE_ATTRIBUTES,.lifetime_generation=frame->lifetime_generation,
+          .attributes=&attributes};
+      s_projected_receivers=ready && ActRaiser_ConfigurePpuObjCapture(&request);
+    }
+    if(lighting && !s_projected_receivers) {
+      if(g_diorama_frame_active) {
+        lighting=ActionEffectManifest_PrepareReceivers(map_group,map_number,g_ram,kActRaiserWramSize,false);
+        s_receiver_lighting=lighting;
+      }
       SrPpuObjColorTransform transforms[128];
       unsigned last_receiver=0;int last_x=0,last_y=0;float cached_multiply[3]={1,1,1},cached_add[3]={0};
       for(unsigned slot=0;slot<128;++slot) {
