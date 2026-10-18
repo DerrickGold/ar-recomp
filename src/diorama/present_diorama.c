@@ -749,7 +749,10 @@ retry_projection:;
   ActionExposure_Prepare(&exposure,slot->action_environmental_effects?&slot->action_scene_effects:NULL);
   DioramaRenderOptions render;
   Diorama_CaptureRenderOptions(&render);
-  if (source_draw) render.draw_resident_skybox = DioramaFrameGeneration_DrawSkybox;
+  if (source_draw) {
+    render.draw_resident_skybox = DioramaFrameGeneration_DrawSkybox;
+    render.source_effect_batch = DioramaFrameGeneration_SourceEffectBatch;
+  }
   const bool completion_world = slot->sim.death_heim_completion_world &&
       slot->diorama_layer_section == kDioramaLayerSection_DeathHeimCompletion;
   if (completion_world) {
@@ -820,7 +823,10 @@ retry_projection:;
   }
   DioramaPerformanceScope callback_performance =
       DioramaPerformance_Begin(kDioramaPerformance_Callback);
-  PresentActionEffects_DrawWithSource(device, slot, viewport, &action_projection, source_draw);
+  if (!source_draw || DioramaFrameGeneration_SourceEffectBatch(device, true)) {
+    PresentActionEffects_DrawWithSource(device, slot, viewport, &action_projection, source_draw);
+    if (source_draw) (void)DioramaFrameGeneration_SourceEffectBatch(device, false);
+  }
   DioramaPerformance_End(callback_performance);
   if (source_draw && DioramaFrameGeneration_SourceProjectionFailed() && !retried_projection) {
     PresentActionHeat_Cancel(device);

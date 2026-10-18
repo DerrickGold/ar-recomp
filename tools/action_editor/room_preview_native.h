@@ -5,6 +5,7 @@
 /* Optional native projection adapter for the same complete-room preview used
  * by the browser. NULL callbacks preserve the portable reference renderer. */
 void RoomPreview_SetSourceProjection(PresentActionSourceDraw effects, DioramaSkyboxDraw skybox);
+void RoomPreview_SetSourceEffectBatch(DioramaSourceEffectBatch batch);
 void RoomPreview_SetProjectionOffsets(const ArRenderPointF *planes, ArRenderPointF skybox);
 unsigned RoomPreview_SkyboxRoom(void);
 int RoomPreview_LoadSkybox(unsigned size);

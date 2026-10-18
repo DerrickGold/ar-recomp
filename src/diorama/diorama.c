@@ -1885,18 +1885,22 @@ static PresentationOutcome DioramaSubmitPlaneEffect(
     ArRenderOutputFrame *output_frame,
     DioramaPlaneEffectFn plane_effect,
     void *plane_effect_userdata, int plane,
-    const DioramaProjection *projection) {
+    const DioramaProjection *projection, DioramaSourceEffectBatch batch) {
   if (!output_frame || !plane_effect || !projection || !projection->valid)
     return kPresentationOutcome_Complete;
   if (!ArRenderOutputFrame_EnterFullOutput(output_frame))
     return kPresentationOutcome_OptionalOmitted;
   DioramaPerformanceScope callback_performance =
       DioramaPerformance_Begin(kDioramaPerformance_Callback);
-  plane_effect(plane_effect_userdata, plane, projection);
+  bool submitted = !batch || batch(output_frame->device, true);
+  if (submitted) {
+    plane_effect(plane_effect_userdata, plane, projection);
+    submitted = !batch || batch(output_frame->device, false);
+  }
   DioramaPerformance_End(callback_performance);
   if (!ArRenderOutputFrame_RestoreViewport(output_frame))
     return kPresentationOutcome_CoreFailure;
-  return kPresentationOutcome_Complete;
+  return submitted ? kPresentationOutcome_Complete : kPresentationOutcome_CoreFailure;
 }
 
 static PresentationOutcome DioramaCompositeCoreFailure(
@@ -3350,7 +3354,7 @@ static PresentationOutcome DrawResolvedDioramaLayer(
       return kPresentationOutcome_Complete;
     return DioramaSubmitPlaneEffect(output_frame, scene->plane_effect,
                                     scene->plane_effect_userdata,
-                                    description->plane, out_projection);
+                                    description->plane, out_projection, scene->render->source_effect_batch);
   }
 
   const float shade_mix =
@@ -3431,7 +3435,7 @@ static PresentationOutcome DrawResolvedDioramaLayer(
     return outcome;
   const PresentationOutcome effect = DioramaSubmitPlaneEffect(
       output_frame, scene->plane_effect, scene->plane_effect_userdata,
-      description->plane, out_projection);
+      description->plane, out_projection, scene->render->source_effect_batch);
   return PresentationOutcome_Combine(outcome, effect);
 }
 
@@ -3514,8 +3518,13 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
     if (!ArRenderTexture_IsValid(lightmap) ||
         ArRenderDevice_BeginTarget(device, lightmap, &saved) != kArRenderTargetBegin_Ready)
       goto failed;
-    const bool drawn = ArRenderDevice_Clear(device, (ArRenderColorF){0,0,0,1}) &&
-        scene->scenery_light(scene->plane_effect_userdata, out_projection);
+    const DioramaSourceEffectBatch batch = scene->render->source_effect_batch;
+    bool drawn = ArRenderDevice_Clear(device, (ArRenderColorF){0,0,0,1}) &&
+        (!batch || batch(device, true));
+    if (drawn) {
+      drawn = scene->scenery_light(scene->plane_effect_userdata, out_projection);
+      if (batch) drawn = batch(device, false) && drawn;
+    }
     const bool restored = ArRenderDevice_EndTarget(device, &saved);
     if (!drawn || !restored) goto failed;
     illuminated.scenery_lightmap = lightmap;
@@ -3535,8 +3544,13 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
       const ArRenderTexture map=EnsureDioramaScratchTarget(device,&s_diorama_actor_lightmaps[role],width,height,kArRenderFilter_Linear);
       ArRenderTargetState saved;
       if(!ArRenderTexture_IsValid(map)||ArRenderDevice_BeginTarget(device,map,&saved)!=kArRenderTargetBegin_Ready)goto failed;
-      const bool drawn=ArRenderDevice_Clear(device,(ArRenderColorF){0,0,0,1})&&
-          scene->actor_light(scene->plane_effect_userdata,out_projection,2u<<role);
+      const DioramaSourceEffectBatch batch = scene->render->source_effect_batch;
+      bool drawn=ArRenderDevice_Clear(device,(ArRenderColorF){0,0,0,1})&&
+          (!batch || batch(device, true));
+      if (drawn) {
+        drawn=scene->actor_light(scene->plane_effect_userdata,out_projection,2u<<role);
+        if (batch) drawn = batch(device, false) && drawn;
+      }
       const bool restored=ArRenderDevice_EndTarget(device,&saved);
       if(!drawn||!restored)goto failed;
       illuminated.actor_lightmaps[role]=map;
@@ -3554,7 +3568,7 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
       out_projection->bg2_skybox.active_band = (int)i;
       const PresentationOutcome effect = DioramaSubmitPlaneEffect(
           &output_frame, scene->plane_effect, scene->plane_effect_userdata,
-          SR_PPU_OVERLAY_BG2, out_projection);
+          SR_PPU_OVERLAY_BG2, out_projection, scene->render->source_effect_batch);
       outcome = PresentationOutcome_Combine(outcome,effect);
       if (!PresentationOutcome_IsUsable(effect)) goto failed;
     }

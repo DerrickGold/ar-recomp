@@ -55,8 +55,70 @@ static bool EnsureReadBuffer(SDL_GPUDevice *device, SDL_GPUBuffer **buffer, unsi
   return *buffer != NULL;
 }
 
+static void InvalidateInputs(ArGpuEffectSource *p) {
+  for (unsigned i = 0; i < kActionSourcePacketSlots; ++i)
+    p->packets[i].revision = p->packets[i].input_revision = 0;
+  p->transient.revision = p->transient.input_revision = 0;
+}
+
+static void CancelCommands(ArGpuEffectSource *p) {
+  if (p->commands) SDL_CancelGPUCommandBuffer(p->commands);
+  p->commands = NULL;
+  p->pending_draws = 0;
+  p->batch_failed = true;
+  InvalidateInputs(p);
+}
+
+static bool SubmitCommands(ArGpuEffectSource *p) {
+  if (p->batch_failed) return false;
+  if (!p->commands) return true;
+  SDL_GPUCommandBuffer *commands = p->commands;
+  p->commands = NULL; /* Submit consumes the handle even on failure. */
+  if (!SDL_SubmitGPUCommandBuffer(commands)) {
+    CancelCommands(p);
+    return false;
+  }
+  ++p->submissions;
+  if (p->pending_draws > p->largest_batch) p->largest_batch = p->pending_draws;
+  p->pending_draws = 0;
+  return true;
+}
+
+bool ArGpuEffectSource_BeginBatch(ArGpuEffectSource *p) {
+  if (!p->device || p->batch_open || p->commands) return false;
+  p->batch_open = true;
+  p->batch_failed = false;
+  return true;
+}
+
+bool ArGpuEffectSource_EndBatch(ArGpuEffectSource *p) {
+  if (!p->batch_open) return false;
+  const bool ok = SubmitCommands(p);
+  p->batch_open = false;
+  return ok;
+}
+
+static SDL_GPUCommandBuffer *Commands(ArGpuEffectSource *p, ArRenderDevice *device) {
+  if (p->commands) return p->commands;
+  if (!ArSdlRenderBackend_SubmitPending(device)) return NULL;
+  p->commands = SDL_AcquireGPUCommandBuffer(p->device);
+  return p->commands;
+}
+
+static bool FinishDraw(ArGpuEffectSource *p, bool ok) {
+  if (!ok) {
+    CancelCommands(p);
+    return false;
+  }
+  if (!p->commands) return true; /* Empty packet. */
+  ++p->draws;
+  ++p->pending_draws;
+  return (p->batch_open && p->batching_enabled) || SubmitCommands(p);
+}
+
 void ArGpuEffectSource_Destroy(ArGpuEffectSource *p) {
   if (!p || !p->device) return;
+  CancelCommands(p);
   for (unsigned f = 0; f < 2; ++f) {
     for (unsigned b = 0; b < 3; ++b)
       SDL_ReleaseGPUGraphicsPipeline(p->device, p->draw[f][b]);
@@ -121,7 +183,11 @@ static SDL_GPUGraphicsPipeline *Pipeline(SDL_GPUDevice *gpu, SDL_GPUShader *vs, 
 }
 
 bool ArGpuEffectSource_Init(ArGpuEffectSource *p, SDL_GPUDevice *gpu) {
-  *p = (ArGpuEffectSource){.device = gpu};
+  const char *batching = SDL_getenv("AR_GPU_EFFECT_BATCHING");
+  /* Prototype: lowers submission CPU cost, but Deck VSync tail pacing still
+   * needs work. Keep immediate submission as the production default. */
+  *p = (ArGpuEffectSource){.device = gpu,
+      .batching_enabled = batching && strcmp(batching, "1") == 0};
   const GpuShaderBlobs project = BLOBS(ActionEffectProjectComp),
                        shadow = BLOBS(ActionEffectShadowComp), moon = BLOBS(ActionEffectMoonComp), drawvs = BLOBS(ActionEffectDrawVert),
                        drawfs = BLOBS(ActionEffectDrawFrag), skyvs = BLOBS(ActionSkyboxVert),
@@ -277,7 +343,7 @@ static bool Uniform(const DioramaProjection *v, unsigned width, unsigned height,
   return true;
 }
 
-bool ArGpuEffectSource_Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *motion,
+static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *motion,
                             uint32_t mask, float phase, const ActionEffectSourceBatch *batch,
                             const DioramaProjection *view, const ActionMoonlightOcclusion *scenery,
                             ArRenderBlendMode blend, float brightness) {
@@ -407,8 +473,7 @@ bool ArGpuEffectSource_Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GP
     }
     SDL_UnmapGPUTransferBuffer(p->device, p->upload);
   }
-  if (!ArSdlRenderBackend_SubmitPending(device)) return false;
-  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(p->device);
+  SDL_GPUCommandBuffer *cmd = Commands(p, device);
   if (!cmd) return false;
   /* All immutable inputs upload together. The compute jobs retain their
    * original ordering and scratch ownership; only the repeated copy passes
@@ -498,7 +563,8 @@ bool ArGpuEffectSource_Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GP
   SDL_SetGPUScissor(draw, &scissor);
   SDL_DrawGPUPrimitives(draw, batch->count * 15, 1, 0, 0);
   SDL_EndGPURenderPass(draw);
-  if (!SDL_SubmitGPUCommandBuffer(cmd)) return false;
+  /* These cache keys are usable by later packets in the same ordered scope.
+   * A failed/cancelled submission invalidates every speculative key. */
   packet->revision = batch->revision;
   packet->brightness = brightness;
   packet->shadow_count = shadow_count;
@@ -507,11 +573,21 @@ bool ArGpuEffectSource_Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GP
   packet->origin_x = ox; packet->origin_y = oy;
   return true;
 failed:
-  SDL_CancelGPUCommandBuffer(cmd);
   return false;
 }
 
-bool ArGpuEffectSource_Skybox(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *motion,
+bool ArGpuEffectSource_Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *motion,
+    uint32_t mask, float phase, const ActionEffectSourceBatch *batch,
+    const DioramaProjection *view, const ActionMoonlightOcclusion *scenery,
+    ArRenderBlendMode blend, float brightness) {
+  if (!p->batch_open) p->batch_failed = false;
+  if (p->batch_failed) return false;
+  const bool ok = Draw(p, device, motion, mask, phase, batch, view, scenery, blend, brightness);
+  if (ok && !batch->count) return true;
+  return FinishDraw(p, ok);
+}
+
+static bool Skybox(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *motion,
                               int slot, float phase, ArRenderTexture image,
                               const DioramaSkyboxSourceDraw *input) {
   const ArRenderVertex2D *vertices = input->vertices;
@@ -539,8 +615,7 @@ bool ArGpuEffectSource_Skybox(ArGpuEffectSource *p, ArRenderDevice *device, SDL_
   for (unsigned i = 0; i < input->index_count; ++i)
     mapped[i] = vertices[input->indices[i]];
   SDL_UnmapGPUTransferBuffer(p->device, p->upload);
-  if (!ArSdlRenderBackend_SubmitPending(device)) return false;
-  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(p->device);
+  SDL_GPUCommandBuffer *cmd = Commands(p, device);
   if (!cmd) return false;
   SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
   if (!copy) goto failed;
@@ -599,8 +674,14 @@ bool ArGpuEffectSource_Skybox(ArGpuEffectSource *p, ArRenderDevice *device, SDL_
     SDL_DrawGPUPrimitives(draw, input->index_count, 1, 0, 0);
   }
   SDL_EndGPURenderPass(draw);
-  return SDL_SubmitGPUCommandBuffer(cmd);
+  return true;
 failed:
-  SDL_CancelGPUCommandBuffer(cmd);
   return false;
+}
+
+bool ArGpuEffectSource_Skybox(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *motion,
+    int slot, float phase, ArRenderTexture image, const DioramaSkyboxSourceDraw *input) {
+  if (!p->batch_open) p->batch_failed = false;
+  if (p->batch_failed) return false;
+  return FinishDraw(p, input && Skybox(p, device, motion, slot, phase, image, input));
 }

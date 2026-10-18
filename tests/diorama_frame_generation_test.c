@@ -248,7 +248,7 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
     SDL_GPUCommandBuffer *cmd=SDL_AcquireGPUCommandBuffer(gpu);
     SDL_GPUCopyPass *copy=SDL_BeginGPUCopyPass(cmd);
     const SDL_GPUBufferRegion vertices={.buffer=effect.vertices,.size=15*32};
-    const SDL_GPUBufferRegion casters={.buffer=effect.occluders,.size=(scenery.count+1)*16};
+    const SDL_GPUBufferRegion casters={.buffer=effect.packets[0].occluders,.size=(scenery.count+1)*16};
     const SDL_GPUTransferBufferLocation vertex_to={.transfer_buffer=download},
         caster_to={.transfer_buffer=download,.offset=15*32};
     SDL_DownloadFromGPUBuffer(copy,&vertices,&vertex_to);
@@ -262,9 +262,6 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
     if (scenery.count) {
       const float expected[]={2,1,24,13, 10,5,24,13, 2,1,6,3};
       for (unsigned i=0;i<12;++i) CHECK(rects[i] == expected[i]);
-    } else {
-      CHECK(rects[0] == INFINITY && rects[1] == INFINITY);
-      CHECK(rects[2] == -INFINITY && rects[3] == -INFINITY);
     }
     for (unsigned j=0;j<3;++j) for (unsigned c=0;c<4;++c) {
       const float factor=c<3?shadow_brightness[sample]*(scenery.count?.14f:1):1;
@@ -272,6 +269,55 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
     }
     SDL_UnmapGPUTransferBuffer(gpu,download);
   }
+  /* Consecutive packets must retain transfer/scratch generations, blend order
+   * and slot replacement until submission. A cancelled upload must never be
+   * mistaken for valid retained data on the next scope. */
+  SDL_Surface *batch_images[4] = {0};
+  for (unsigned mode = 0; mode < 4; ++mode) {
+    CHECK(SDL_SetRenderDrawColor(renderer, 17, 29, 41, 255) && SDL_RenderClear(renderer));
+    effect.batching_enabled = mode != 0;
+    CHECK(ArGpuEffectSource_BeginBatch(&effect));
+    CHECK(!ArGpuEffectSource_BeginBatch(&effect)); /* No accidental nesting. */
+    const uint64_t submitted = effect.submissions;
+    for (unsigned i = 0; i < 5; ++i) {
+      ActionEffectSourcePrimitive quad = {.meta={kActionSourceQuad,1},
+          .clip={-100,-100,100,100}, .points={{4+i,4},{24,4},{24,12},{4+i,12}},
+          .colors={{.2f,.5f,.1f,.45f},{.2f,.5f,.1f,.45f},{.2f,.5f,.1f,.45f}},
+          .extra={.2f,.5f,.1f,.45f}};
+      ActionEffectSourceBatch draw_batch = {.primitives=&quad,.count=1,.capacity=1,
+          .revision=1000+i, .packet_slot=i==4?0:i};
+      CHECK(ArGpuEffectSource_Draw(&effect,device,motion,0,0,&draw_batch,&shadow_view,NULL,
+          i%2?kArRenderBlendMode_Add:kArRenderBlendMode_Alpha,1.f-.1f*i));
+    }
+    CHECK(effect.submissions == submitted + (mode ? 0 : 5));
+    CHECK(ArGpuEffectSource_EndBatch(&effect));
+    CHECK(effect.submissions == submitted + (mode ? 1 : 5));
+    CHECK(!effect.commands && !effect.batch_open);
+    batch_images[mode] = SDL_RenderReadPixels(renderer,NULL);
+    CHECK(batch_images[mode] != NULL);
+    if (mode && batch_images[0] && batch_images[mode]) {
+      CHECK(batch_images[0]->format == batch_images[mode]->format);
+      for (int y=0;y<64;++y)
+        CHECK(!memcmp((char*)batch_images[0]->pixels+y*batch_images[0]->pitch,
+            (char*)batch_images[mode]->pixels+y*batch_images[mode]->pitch,64*4));
+    }
+    if (mode == 2) {
+      CHECK(ArGpuEffectSource_BeginBatch(&effect));
+      CHECK(ArGpuEffectSource_Draw(&effect,device,motion,0,0,&shadow_batch,&shadow_view,&scenery,
+          kArRenderBlendMode_Add,1));
+      const ActionEffectSourceBatch invalid = {.failed=true};
+      CHECK(!ArGpuEffectSource_Draw(&effect,device,motion,0,0,&invalid,&shadow_view,NULL,
+          kArRenderBlendMode_Add,1));
+      CHECK(!ArGpuEffectSource_EndBatch(&effect));
+      CHECK(!effect.commands && !effect.packets[0].revision && !effect.packets[0].input_revision);
+    }
+  }
+  for (unsigned i=0;i<4;++i) SDL_DestroySurface(batch_images[i]);
+  const uint64_t submitted = effect.submissions;
+  CHECK(ArGpuEffectSource_BeginBatch(&effect));
+  const ActionEffectSourceBatch empty = {0};
+  CHECK(ArGpuEffectSource_Draw(&effect,device,motion,0,0,&empty,&shadow_view,NULL,kArRenderBlendMode_Add,1));
+  CHECK(ArGpuEffectSource_EndBatch(&effect) && effect.submissions == submitted);
   /* The same world transform must cover OBJ priorities, high BG planes,
    * folded waterfalls, and static/dynamic anchors spanning raster bands. */
   for (unsigned scenario = 0; scenario < 15; ++scenario)

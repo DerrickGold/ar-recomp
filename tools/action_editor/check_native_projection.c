@@ -51,6 +51,10 @@ static bool Effects(ArRenderDevice *device,const ActionEffectSourceBatch *batch,
 static bool Skybox(ArRenderDevice *device,ArRenderTexture texture,const DioramaSkyboxSourceDraw *draw) {
   return ArGpuEffectSource_Skybox(&s_source,device,s_motion,s_motion_mask?draw->motion_slot:-1,s_phase,texture,draw);
 }
+static bool EffectBatch(ArRenderDevice *device, bool begin) {
+  (void)device;
+  return begin ? ArGpuEffectSource_BeginBatch(&s_source) : ArGpuEffectSource_EndBatch(&s_source);
+}
 static unsigned Read(const char *path) {
   size_t n=0;void *data=SDL_LoadFile(path,&n);
   if(!data || n>=sizeof(s_input)){SDL_free(data);return 0;}
@@ -93,6 +97,7 @@ int main(int argc,char **argv) {
   if(!gpu_device || !ArGpuEffectSource_Init(&s_source,gpu_device)) {
     fprintf(stderr,"shader initialization: %s\n",SDL_GetError());return 1;
   }
+  RoomPreview_SetSourceEffectBatch(EffectBatch);
   const SDL_GPUBufferCreateInfo info={.size=256,.usage=SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ|SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ};
   s_motion=SDL_CreateGPUBuffer(gpu_device,&info);
   if(!s_motion)return 1;

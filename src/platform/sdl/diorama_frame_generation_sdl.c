@@ -266,6 +266,10 @@ static void StartNativeCapture(void) {
 
 static void ResetGpu(void) {
   StopNativeCapture();
+  if (s_gpu.effects.draws)
+    SDL_Log("[gpu-effect-commands] batching=%d draws=%llu submissions=%llu largest-batch=%u",
+        s_gpu.effects.batching_enabled, (unsigned long long)s_gpu.effects.draws,
+        (unsigned long long)s_gpu.effects.submissions, s_gpu.effects.largest_batch);
   if (s_gpu.resident_captures || s_gpu.metadata_downloads)
     SDL_Log("[gpu-effect-projection] resident-captures=%u metadata-downloads=%u bytes=%u source-draws=%u primitives=%u",
         s_gpu.resident_captures, s_gpu.metadata_downloads, s_gpu.metadata_downloads * 256,
@@ -1463,6 +1467,15 @@ static uint32_t SourceMotionSlots(void) {
   for (unsigned i = 0; i < 8; ++i)
     if (s_gpu.presented_mask & (1u << kGpuPlanes[i])) slots |= 1u << i;
   return slots;
+}
+
+bool DioramaFrameGeneration_SourceEffectBatch(ArRenderDevice *device, bool begin) {
+  (void)device;
+  if (begin && (!s_gpu.resident || s_gpu.effects_failed)) return false;
+  const bool ok = begin ? ArGpuEffectSource_BeginBatch(&s_gpu.effects)
+                        : ArGpuEffectSource_EndBatch(&s_gpu.effects);
+  if (!ok) s_gpu.effects_failed = true;
+  return ok;
 }
 
 bool DioramaFrameGeneration_DrawSource(ArRenderDevice *device, const ActionEffectSourceBatch *batch,

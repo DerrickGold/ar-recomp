@@ -28,10 +28,19 @@ typedef struct ArGpuEffectSource {
   SDL_GPUTransferBuffer *upload;
   ArGpuEffectPacket packets[kActionSourcePacketSlots], transient;
   SDL_GPUSampler *sampler, *nearest_sampler, *wrap_sampler, *wrap_nearest_sampler;
+  SDL_GPUCommandBuffer *commands;
+  bool batch_open, batch_failed, batching_enabled;
+  uint64_t draws, submissions;
+  unsigned pending_draws, largest_batch;
 } ArGpuEffectSource;
 
 bool ArGpuEffectSource_Init(ArGpuEffectSource *, SDL_GPUDevice *);
 void ArGpuEffectSource_Destroy(ArGpuEffectSource *);
+/* Owner-thread scope containing only this source's draws. End submits before
+ * any SDL draw, target change, resource mutation or readback. No nested scopes.
+ * Failed draws discard the scope and invalidate speculative input caches. */
+bool ArGpuEffectSource_BeginBatch(ArGpuEffectSource *);
+bool ArGpuEffectSource_EndBatch(ArGpuEffectSource *);
 bool ArGpuEffectSource_Draw(ArGpuEffectSource *, ArRenderDevice *, SDL_GPUBuffer *motion,
                             uint32_t motion_slots, float phase, const ActionEffectSourceBatch *,
                             const DioramaProjection *, const ActionMoonlightOcclusion *,

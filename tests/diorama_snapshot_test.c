@@ -31,14 +31,21 @@ static PresentationOutcome HostBackdrop(void *userdata, ArRenderRectI viewport) 
   (void)viewport;
   return kPresentationOutcome_Complete;
 }
+static bool NativeBatch(ArRenderDevice *device, bool begin) {
+  (void)device; (void)begin;
+  assert(!"snapshot must not retain native command callbacks");
+  return false;
+}
 int main(void) {
-  const DioramaRenderOptions options={.visible_planes=1,.skybox=kDioramaSky_Off};
+  const DioramaRenderOptions options={.visible_planes=1,.skybox=kDioramaSky_Off,
+      .source_effect_batch=NativeBatch};
   const DioramaScene scene={.render=&options,.map_group=1,.map_number=1};
   const DioramaCapture capture={.width=360,.height=352,.authentic_y0=64,.obj_apron=32};
   const DioramaView view={.visible_width=360,.distance_scale=1,.camera_framing_weight=1,
       .viewport={0,0,960,600}};
   DioramaSnapshot snapshot, decoded;
   assert(DioramaSnapshot_Describe(&snapshot,&capture,&view,&scene,1,0,0));
+  assert(!snapshot.options.source_effect_batch && !snapshot.options.draw_resident_skybox);
   DioramaScene host_scene=scene;
   host_scene.backdrop=HostBackdrop;
   memset(&decoded,0xa5,sizeof(decoded));

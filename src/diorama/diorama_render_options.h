@@ -15,6 +15,10 @@ typedef ArRenderTexture (*DioramaSkyboxResolver)(
 
 typedef bool (*DioramaSkyboxDraw)(ArRenderDevice *, ArRenderTexture,
     const DioramaSkyboxSourceDraw *);
+/* Optional native scope for consecutive effect-only callbacks. Begin records
+ * no work; End submits before SDL rendering or target/viewport restoration.
+ * Every successful Begin must be paired with End, including callback failure. */
+typedef bool (*DioramaSourceEffectBatch)(ArRenderDevice *, bool begin);
 
 typedef struct DioramaRenderOptions {
   uint32_t visible_planes;
@@ -36,6 +40,7 @@ typedef struct DioramaRenderOptions {
   /* Optional native draw for generated capture motion. NULL retains
    * the portable renderer used by the editor and reference comparisons. */
   DioramaSkyboxDraw draw_resident_skybox;
+  DioramaSourceEffectBatch source_effect_batch;
 } DioramaRenderOptions;
 
 /* Desktop adapter: snapshot the current settings and manifest for one draw. */

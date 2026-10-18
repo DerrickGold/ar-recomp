@@ -127,6 +127,8 @@ bool DioramaSnapshot_Describe(DioramaSnapshot *out,
   s.options.layers = NULL;
   s.options.resolve_skybox = NULL;
   s.options.skybox_userdata = NULL;
+  s.options.draw_resident_skybox = NULL;
+  s.options.source_effect_batch = NULL;
   s.options.waterfall_diagnostics = false;
   s.layer_count = Diorama_ResolveSceneLayers(scene, s.layers);
   s.plane_mask = plane_mask;

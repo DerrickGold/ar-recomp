@@ -25,6 +25,8 @@ typedef struct Recorder {
   const DioramaProjection *projection;
   unsigned checked_object_meshes, exposure_samples;
   unsigned light_preparations;
+  unsigned batch_begins, batch_ends;
+  bool batch_open, fail_light, fail_submit;
   DioramaSkyboxProjection light_skybox;
   float exposure_u0, exposure_u1;
   uint32_t skybox_inputs;
@@ -115,6 +117,7 @@ static bool Update(void *ctx, ArRenderTexture t, const ArRenderRectI *rect,
 
 static bool Target(void *ctx, ArRenderTexture texture) {
   Recorder *r = ctx;
+  assert(!r->batch_open);
   r->state.target = texture;
   Record(3);
   Record(texture.value);
@@ -133,6 +136,7 @@ static bool Size(void *ctx, int *w, int *h) {
 
 static bool Viewport(void *ctx, const ArRenderRectI *rect) {
   Recorder *r = ctx;
+  assert(!r->batch_open);
   r->state.viewport_set = rect != NULL;
   if (rect) r->state.viewport = *rect;
   Record(5);
@@ -157,6 +161,7 @@ static bool Capture(void *ctx, ArRenderTargetState *state) {
 
 static bool Restore(void *ctx, const ArRenderTargetState *state) {
   Recorder *r = ctx;
+  assert(!r->batch_open);
   Record(7);
   Record(state->target.value);
   if (r->fail_restore) {
@@ -346,6 +351,7 @@ void DioramaPerformance_AddDraw(bool ok, const ArRenderVertex2D *v, int nv,
 
 static void PlaneEffect(void *data, int plane, const DioramaProjection *projection) {
   Recorder *r = data;
+  assert(r->batch_open);
   assert(r->bound_effect == -1 && projection->valid);
   assert(!r->state.target.value && !r->state.viewport_set);
   Record(13);
@@ -353,13 +359,23 @@ static void PlaneEffect(void *data, int plane, const DioramaProjection *projecti
 }
 static bool SceneryLight(void *data, const DioramaProjection *projection) {
   Recorder *r = data;
+  assert(r->batch_open);
   assert(r->bound_effect == -1 && projection->valid && r->state.target.value);
   assert(!r->state.viewport_set && !r->state.clip_enabled);
   const ArRenderTextureDesc *target = &r->textures[r->state.target.value];
   assert(target->width == r->width && target->height == r->height);
   ++r->light_preparations;
   r->light_skybox = projection->bg2_skybox;
-  return true;
+  return !r->fail_light;
+}
+
+static bool SourceBatch(ArRenderDevice *device, bool begin) {
+  Recorder *r = device->context;
+  assert(r->batch_open != begin);
+  r->batch_open = begin;
+  if (begin) ++r->batch_begins;
+  else ++r->batch_ends;
+  return begin || !r->fail_submit;
 }
 
 static PresentationOutcome Backdrop(void *data, ArRenderRectI viewport) {
@@ -426,6 +442,7 @@ unsigned DioramaFixture_Run(unsigned scenario) {
     .skybox_prefilter = true, .priority_surface = true,
     .layers = &s_layers, .resolve_skybox = Skybox,
     .skybox_userdata = &textures[SR_PPU_OVERLAY_BG2],
+    .source_effect_batch = SourceBatch,
   };
   if (scenario % 4 == 0) options.visible_planes &= ~(1u << kDioramaPlane_Bg1Far);
   s_layers.count = 1;
@@ -580,6 +597,19 @@ unsigned DioramaFixture_Run(unsigned scenario) {
     for (int i = 0; i < 16; ++i) Record(projection.matrix[i]);
     Record(projection.aspect_x);
     Record(projection.height_scale);
+  }
+  assert(!r.batch_open && r.batch_begins == r.batch_ends);
+  if (r.shaders) {
+    /* Failure inside a callback still closes its scope before the compositor
+     * restores the target. Submission failure must also reject the frame. */
+    r.fail_light = true;
+    assert(Diorama_Composite(&device,&capture,&view,&scene,&projection) == kPresentationOutcome_CoreFailure);
+    assert(!r.batch_open && r.batch_begins == r.batch_ends);
+    r.fail_light = false;
+    r.fail_submit = true;
+    assert(Diorama_Composite(&device,&capture,&view,&scene,&projection) == kPresentationOutcome_CoreFailure);
+    assert(!r.batch_open && r.batch_begins == r.batch_ends);
+    r.fail_submit = false;
   }
   if (scenario == 0) {
     const DioramaCapture good_capture = capture;

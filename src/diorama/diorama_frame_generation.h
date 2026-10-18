@@ -100,6 +100,7 @@ bool DioramaFrameGeneration_DrawSource(ArRenderDevice *, const ActionEffectSourc
     const DioramaProjection *, const ActionMoonlightOcclusion *, ArRenderBlendMode, float);
 bool DioramaFrameGeneration_DrawSkybox(ArRenderDevice *, ArRenderTexture,
     const DioramaSkyboxSourceDraw *);
+bool DioramaFrameGeneration_SourceEffectBatch(ArRenderDevice *, bool begin);
 
 /* Drop source/motion history at room, pause or timeline discontinuities while
  * retaining device resources. Pending CPU capture is joined; stale endpoints

@@ -51,6 +51,7 @@ static bool s_named_uploaded;
 static ActionSceneEffectRenderBatch s_effect_batch;
 static PresentActionSourceDraw s_source_draw;
 static DioramaSkyboxDraw s_skybox_draw;
+static DioramaSourceEffectBatch s_source_batch;
 static const ArRenderPointF *s_projection_offsets;
 static ArRenderPointF s_skybox_offset;
 static ActionEffectSourcePrimitive s_source_primitives[kActionSourceMaximumPrimitives];
@@ -58,6 +59,7 @@ static ActionEffectSourceLightJob s_source_lights[kActionSourceMaxLightJobs];
 void RoomPreview_SetSourceProjection(PresentActionSourceDraw effects, DioramaSkyboxDraw skybox) {
   s_source_draw = effects; s_skybox_draw = skybox;
 }
+void RoomPreview_SetSourceEffectBatch(DioramaSourceEffectBatch batch) { s_source_batch = batch; }
 void RoomPreview_SetProjectionOffsets(const ArRenderPointF *planes, ArRenderPointF skybox) {
   s_projection_offsets=planes;s_skybox_offset=skybox;
 }
@@ -652,6 +654,7 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
   options.rim_light=s_receiver_rim;
   options.resolve_skybox = ResolveSkybox;
   options.draw_resident_skybox = s_skybox_draw;
+  options.source_effect_batch = s_source_draw ? s_source_batch : NULL;
   options.skybox = (DioramaSkyMode)skybox; scene.render = &options;
   const ActionEnvironmentScene *environment = EditorRoomScene_Environment(s_room);
   RoomEffectPass effects = {.frame = EditorRoomScene_Effects(s_room), .valid = true,
@@ -708,7 +711,10 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
     if(!ArRenderDevice_DrawGeometryWithState(DioramaPreview_Device(),ArRenderTexture_Invalid(),s_effect_batch.vertices,s_effect_batch.vertex_count,s_effect_batch.indices,s_effect_batch.index_count,&state))return 0;
   }
   }
-  return DrawEffectLayer(&effects, kActionEffectRenderLayer_WorldOverlay, kArRenderBlendMode_Add, true, true) &&
+  if (options.source_effect_batch && !options.source_effect_batch(DioramaPreview_Device(), true)) return 0;
+  bool drawn = DrawEffectLayer(&effects, kActionEffectRenderLayer_WorldOverlay, kArRenderBlendMode_Add, true, true) &&
       DrawEffectLayer(&effects, kActionEffectRenderLayer_WorldDust, kArRenderBlendMode_Alpha, false, true) &&
       DrawEffectLayer(&effects, kActionEffectRenderLayer_ForegroundLight, kArRenderBlendMode_Light, true, false);
+  if (options.source_effect_batch) drawn = options.source_effect_batch(DioramaPreview_Device(), false) && drawn;
+  return drawn;
 }
