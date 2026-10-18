@@ -15,6 +15,7 @@ typedef struct ActRaiserDisplayGeometry {
   int extra_top;
   int extra_bottom;
   int auto_vertical_budget; /* Requested canvas; not the bounded capture. */
+  int output_width, output_height; /* Host-latched drawable; no GPU query on producer. */
 } ActRaiserDisplayGeometry;
 
 typedef struct ActRaiserAutoCanvas {
@@ -34,6 +35,7 @@ ActRaiserAutoCanvas DisplayGeometry_ConstrainAutoCanvas(
     ActRaiserAutoCanvas requested, int map_group, int map_number, int bg_mode,
     bool projected_sim);
 void DisplayGeometry_SetAutoVerticalBudget(int budget);
+void DisplayGeometry_SetOutputSize(int width, int height);
 
 /* Consumers receive a read-only process-lifetime view. Horizontal mutation is
  * owned by the host display policy; vertical mutation is owned by the

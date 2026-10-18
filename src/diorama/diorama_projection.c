@@ -116,7 +116,7 @@ DioramaVerticalBounds DioramaVerticalBounds_Resolve(
   if ((plane != SR_PPU_OVERLAY_BG1 && plane != SR_PPU_OVERLAY_BG2) ||
       world_height < kActRaiserActionCameraViewportHeight ||
       camera_y < 0 || camera_y > world_height - kActRaiserActionCameraViewportHeight ||
-      authentic_y0 < 0 || authentic_y0 > camera_y ||
+      authentic_y0 < 0 || authentic_y0 > camera_y + 1 ||
       capture_height < kActRaiserAuthenticHeight ||
       authentic_y0 > capture_height - kActRaiserAuthenticHeight)
     return bounds;
@@ -127,7 +127,9 @@ DioramaVerticalBounds DioramaVerticalBounds_Resolve(
   if (bottom_rows > available_bottom) return bounds;
   bounds.valid = true;
   bounds.plane = plane;
-  bounds.top_reached = authentic_y0 == camera_y;
+  /* Scanline 1 samples camera_y + 1. The first world row is captured in
+   * the upper margin, including when the native camera is already at 0. */
+  bounds.top_reached = authentic_y0 == camera_y + 1;
   bounds.bottom_reached = bottom_rows == available_bottom;
   return bounds;
 }
@@ -207,22 +209,15 @@ bool Diorama_FitCameraToCapture(
       capture_left >= capture_right ||
       !CameraProjectionValid(matrix, aspect_x, height_scale, z_world, rake, bow))
     return false;
-  /* A captured edge only binds where the world continues past it. Where a
-   * finite world edge lies inside the capture it stands in for that side, so
-   * the zoom below covers the screen with world rather than trading the
-   * missing columns for scenery past the other edge. A room whose world is
-   * narrower than the view on both sides keeps the world stop's own fit. */
-  const bool world_edge[2] = {
-    world && world->valid && world->left_reached,
-    world && world->valid && world->right_reached,
-  };
-  if (world_edge[0] && world_edge[1]) return true;
-  const float bound[2] = {
-    world_edge[0] ? world->left : capture_left,
-    world_edge[1] ? world->right : capture_right,
-  };
-  if (!isfinite(bound[0]) || !isfinite(bound[1]) || bound[0] >= bound[1])
-    return false;
+  /* Fit the storage budget independently of finite room edges. Substituting
+   * a world edge here makes the useful span shrink as the camera approaches
+   * it, producing an unwanted zoom. Producers stop capture travel first;
+   * the caller's finite-world stop only translates the presentation. */
+  /* Small rooms deliberately expose their borders. Decide from the constant
+   * room width, never whether the moving capture happens to touch both ends. */
+  if (world && world->valid &&
+      world->right - world->left <= capture_right - capture_left) return true;
+  const float bound[2] = {capture_left, capture_right};
   for (int pass = 0; pass < 2; ++pass) {
     float lower = -INFINITY, upper = INFINITY;
     for (int edge = 0; edge < 2; ++edge) {
@@ -270,7 +265,6 @@ bool Diorama_ClampCameraVertically(
   if (!clamp_top && !clamp_bottom) return true;
   float lower = -INFINITY, upper = INFINITY;
   for (int edge = 0; edge < 2; edge++) {
-    if (edge ? !clamp_bottom : !clamp_top) continue;
     const float t = (float)edge;
     const float target = edge ? -1.0f : 1.0f;
     const float slope = matrix[5] - target * matrix[7];
@@ -288,12 +282,20 @@ bool Diorama_ClampCameraVertically(
       else lower = fmaxf(lower, shift);
     }
   }
-  /* A small room or deliberate zoom-out cannot satisfy both edges by moving
-   * the camera alone. Keep its existing fit rather than stretching the art. */
+  /* Easing into a finite edge must not uncover the opposite capture edge.
+   * At a tight automatic fit there may be less guard space than the easing
+   * distance. Keep this hard limit separate from the finite-world stop. */
+  const float capture_lower = lower, capture_upper = upper;
+  if (!clamp_top) lower = -INFINITY;
+  if (!clamp_bottom) upper = INFINITY;
+  /* A small room or deliberate zoom-out cannot satisfy both world edges by
+   * moving the camera alone. Keep its existing fit rather than stretching. */
   if (lower > upper) return true;
   float shift = clamp_top ? CameraEdgeCorrection(lower) : 0.0f;
   if (clamp_bottom) shift -= CameraEdgeCorrection(-upper);
   shift = fmaxf(lower, fminf(shift, upper));
+  if (capture_lower <= capture_upper)
+    shift = fmaxf(capture_lower, fminf(shift, capture_upper));
   Diorama_TranslateCameraWorldY(matrix, shift);
   if (world_y_offset) *world_y_offset = shift;
   return true;
@@ -414,6 +416,30 @@ uint32_t Diorama_FilterBgEffectProjectionMask(
       (1u << kDioramaPlane_Bg1Hi) | (1u << kDioramaPlane_Bg2Hi);
   const uint32_t failed_content = content_planes & ~uploaded_planes;
   return required_planes & valid_planes & requested_planes & ~failed_content;
+}
+
+bool Diorama_PlaneCaptureBounds(const DioramaProjection *projection,
+    const DioramaPlaneProjection *plane, float *x0, float *y0, float *x1, float *y1) {
+  if (!projection || !projection->valid || !plane || !plane->valid ||
+      projection->texture_width <= 0 || projection->texture_height <= 0 ||
+      plane->capture_apron < 0 || !x0 || !y0 || !x1 || !y1)
+    return false;
+  /* Round back to texture pixels before subtracting the capture origin.
+   * Fusing uv * width - origin can turn the exact edge 64/640 back into a
+   * small positive number and reject an effect at display x=0. The explicit
+   * float stores keep this contract identical on native and WASM compilers. */
+  const volatile float left = fminf(plane->u0, plane->u1) * projection->texture_width;
+  const volatile float right = fmaxf(plane->u0, plane->u1) * projection->texture_width;
+  const volatile float top = fminf(plane->v0, plane->v1) * projection->texture_height;
+  const volatile float bottom = fmaxf(plane->v0, plane->v1) * projection->texture_height;
+  *x0 = left -
+      projection->texture_x_origin - plane->capture_offset.x - plane->capture_apron;
+  *x1 = right -
+      projection->texture_x_origin - plane->capture_offset.x + plane->capture_apron;
+  *y0 = top - plane->capture_offset.y;
+  *y1 = bottom - plane->capture_offset.y;
+  return isfinite(*x0) && isfinite(*y0) && isfinite(*x1) && isfinite(*y1) &&
+      *x0 < *x1 && *y0 < *y1;
 }
 
 static bool ProjectCapturedPlanePoint(
@@ -665,4 +691,36 @@ bool Diorama_ProjectCapturedBg2Point(const DioramaProjection *projection,
   return ProjectCapturedPlanePoint(
       projection, capture_x, capture_y,
       &projection->bg2_plane, point, scale_x, scale_y);
+}
+
+DioramaPlaneProjection Diorama_BetweenBackgroundsPlane(const DioramaProjection *projection) {
+  if (!projection) return (DioramaPlaneProjection){0};
+  DioramaPlaneProjection plane = projection->bg2_skybox.world_plane.valid
+      ? projection->bg2_skybox.world_plane : projection->bg2_plane;
+  plane.capture_offset.x += projection->between_backgrounds_capture_offset.x;
+  plane.capture_offset.y += projection->between_backgrounds_capture_offset.y;
+  plane.world_y_offset += projection->between_backgrounds_world_y_offset;
+  return plane;
+}
+
+ArRenderPointF Diorama_BetweenBackgroundsSkyboxOffset(const DioramaProjection *projection) {
+  if (!projection) return (ArRenderPointF){0};
+  ArRenderPointF offset = projection->between_backgrounds_capture_offset;
+  /* The skybox publishes source rectangles rather than a world matrix.
+   * Express the same midpoint camera correction in captured pixels. */
+  offset.y -= projection->between_backgrounds_world_y_offset * kActRaiserAuthenticHeight;
+  return offset;
+}
+
+bool Diorama_ProjectCapturedBetweenBackgroundsPoint(const DioramaProjection *projection,
+    float x, float y, float anchor_y, bool anchored, ArRenderPointF *point) {
+  if (!projection || !point) return false;
+  if (projection->bg2_skybox.count && !projection->bg2_skybox.world_plane.valid) {
+    const ArRenderPointF offset = Diorama_BetweenBackgroundsSkyboxOffset(projection);
+    return anchored ? Diorama_ProjectSkyboxAnchorPoint(projection,
+        anchor_y + offset.y, x + offset.x, y + offset.y, point)
+        : ProjectSkyboxPoint(projection, x + offset.x, y + offset.y, point, NULL, NULL);
+  }
+  const DioramaPlaneProjection plane = Diorama_BetweenBackgroundsPlane(projection);
+  return ProjectCapturedPlanePoint(projection, x, y, &plane, point, NULL, NULL);
 }

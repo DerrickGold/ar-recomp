@@ -55,6 +55,28 @@ const imports={create:()=>++allocations,destroy:()=>{allocations--;},update:()=>
     })]);
   } finally {clearTimeout(readyTimeout);}
   const run=code=>vm.runInContext(code,context);
+  const outputSize=(choice,width=3440,height=1440,areaWidth=1200,areaHeight=700)=>
+    JSON.parse(run(`JSON.stringify(sharedPreviewOutputSize(${JSON.stringify(choice)},${width},${height},${areaWidth},${areaHeight}))`));
+  for(const [aspect,width,height] of [[4/3,960,720],[16/9,960,540],[16/10,960,600],
+      [21/9,960,411],[32/9,960,270]])
+    assert.deepEqual(outputSize(String(aspect)),{width,height});
+  assert.deepEqual(outputSize('custom'),{width:960,height:402},'actual 3440x1440 monitor shape');
+  assert.deepEqual(outputSize('custom',1080,1920),{width:540,height:960},'portrait keeps a bounded render target');
+  assert.deepEqual(outputSize('auto'),{width:960,height:560});
+  assert.deepEqual(outputSize('auto',3440,1440,700,1200),{width:560,height:960},'Auto follows the available area');
+  assert.deepEqual(outputSize('auto',3440,1440,0,0),{width:960,height:600},'hidden canvas has a safe initial shape');
+  for(const dimensions of [[0,1440],[3440,0],[16385,1080],[1920.5,1080]])
+    assert.throws(()=>outputSize('custom',...dimensions),/monitor width and height/);
+  assert.throws(()=>outputSize('invalid'),/valid preview aspect/);
+  // Object-fit letterboxing is not part of the rendered coordinate system.
+  const fittedPoint=(rect,clientX,clientY)=>JSON.parse(run(`JSON.stringify(sharedPreviewCanvasPoint(
+    {width:960,height:600,getBoundingClientRect:()=>(${JSON.stringify(rect)})},
+    {clientX:${clientX},clientY:${clientY}}))`));
+  assert.deepEqual(fittedPoint({left:250,top:200,width:1200,height:1800},1000,1225),{x:600,y:400});
+  assert.equal(fittedPoint({left:250,top:200,width:1200,height:1800},850,500),null);
+  assert.deepEqual(fittedPoint({left:0,top:0,width:1920,height:600},720,150),{x:240,y:150});
+  assert.equal(fittedPoint({left:0,top:0,width:1920,height:600},240,150),null);
+  assert.equal(fittedPoint({left:0,top:0,width:0,height:0},0,0),null);
   const read=()=>JSON.parse(run('JSON.stringify(SharedRoomPreview.policyPlan())'));
   const canonical=JSON.parse(run('JSON.stringify(SharedRoomPreview.policyPlan(true))'));
   assert.equal(read()[0].edge,'mirror');assert.equal(canonical[0].horizontal.left,80);

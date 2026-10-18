@@ -42,6 +42,7 @@ def preview_settings(settings_path: Path):
         "tiltX": number(prefix + "tilt_x_mrad", 0, 1000),
         "tiltY": number(prefix + "tilt_y_mrad", 0, 1000),
         "cameraMode": "dynamic" if dynamic else "free",
+        "rimLight": values.get("gpu_fx_rim", "On") == "On",
         "source": settings_path.name if settings_path.exists() else "defaults",
     }
 
@@ -53,6 +54,8 @@ def build_document(rooms_path: Path, layers_path: Path, settings_path=None, wasm
     effects = effects_path.read_text() if effects_path.exists() else '[effects]\nversion=1\n'
     actors = json.loads((SOURCES.parent.parent / "assets/effects/actor-families.json").read_text())
     presets = json.loads((SOURCES.parent.parent / 'assets/effects/stage-presets.json').read_text())
+    lights = {row['kind']: {key: row.get(key, 1) for key in ('illumination', 'intensity', 'reach', 'receivers')}
+              for row in json.loads((SOURCES.parent.parent / 'assets/effects/light-response.json').read_text())}
     preview = preview_settings(settings_path or layers_path.parent / "settings.ini")
     wasm = base64.b64encode(wasm_path.read_bytes()).decode('ascii') if wasm_path else None
     shared = base64.b64encode(compositor_wasm.read_bytes()).decode('ascii') if compositor_wasm else None
@@ -71,7 +74,8 @@ def build_document(rooms_path: Path, layers_path: Path, settings_path=None, wasm
         lambda match: "<script>" + (SOURCES / match[1]).read_text() + "</script>", body)
     return ((SOURCES / "editor.head.html").read_text()
             + "\n<script>window.__ACTION_BG__=" + data + ";</script>\n"
-            + "<script>window.__DIORAMA_LAYERS__=" + script_json(layers) + ";"
+            + "<script>window.__ACTION_LIGHT_RESPONSE__=" + script_json(lights) + ";"
+            + "window.__DIORAMA_LAYERS__=" + script_json(layers) + ";"
             + "window.__DIORAMA_LAYERS_NAME__=" + script_json(layers_path.name) + ";"
             + "window.__ACTION_EFFECTS__=" + script_json(effects) + ";"
             + "window.__ACTION_ACTORS__=" + script_json(actors) + ";window.__ACTION_EFFECT_PRESETS__=" + script_json(presets) + ";"

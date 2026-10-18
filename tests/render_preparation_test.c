@@ -29,6 +29,10 @@ static Sim3DPreparedPipelines pipelines = {
 };
 static bool diorama_on, interpolation_on;
 static int bg_prepares, action_prepares, interpolation_prepares;
+bool DioramaEffectBackend_PrepareSceneryLight(ArRenderDevice *device) {
+  (void)device;
+  return available;
+}
 bool Diorama_ModeIsOn(void) { return diorama_on; }
 bool Diorama_InterpolationIsOn(void) { return diorama_on && interpolation_on; }
 bool DioramaBgGpu_Prepare(ArRenderDevice *device) {

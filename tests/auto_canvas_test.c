@@ -35,6 +35,12 @@ static void TestGeometry(void) {
   assert(!DisplayGeometry_ResolveAutoCanvas(1240,-1,true,&kept));
   assert(kept.extra_columns == 43 && kept.extra_rows == 0);
   assert(!DisplayGeometry_ResolveAutoCanvas(1,1,true,NULL));
+  /* Minimized/unavailable drawables must not replace the producer's last
+   * usable projection dimensions with a zero-sized viewport. */
+  DisplayGeometry_SetOutputSize(1920,1080);
+  DisplayGeometry_SetOutputSize(0,0);
+  assert(g_actraiser_display_geometry->output_width==1920);
+  assert(g_actraiser_display_geometry->output_height==1080);
 }
 
 static void TestSceneCanvasLimits(void) {

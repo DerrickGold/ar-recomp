@@ -13,6 +13,7 @@
 #include "diorama_performance.h"
 #include "render/scene3d_math.h"
 #include "render/scenery_dimming.h"
+#include "render/scenery_shading.h"
 #include "render/render_output.h"
 #include <limits.h>
 #include <math.h>
@@ -184,6 +185,7 @@ static bool s_diorama_ss_unavailable;
 static ArRenderTexture s_diorama_priority_texture;
 static int s_diorama_priority_w, s_diorama_priority_h;
 static DioramaScratchPool s_diorama_dof_source;
+static DioramaScratchPool s_diorama_lightmap;
 static bool s_diorama_dof_source_unavailable;
 static ArRenderTexture s_diorama_stack_group_texture;
 static int s_diorama_stack_group_w, s_diorama_stack_group_h;
@@ -1060,6 +1062,40 @@ static bool RenderDioramaGeometry(
       device, texture, vertices, num_vertices, indices, num_indices, &state);
 }
 
+typedef struct DioramaShadingSubmit {
+  ArRenderDevice *device;
+  ArRenderTexture texture;
+  ArRenderBlendMode blend;
+  DioramaPerformanceScope performance;
+} DioramaShadingSubmit;
+
+static bool SubmitShadedDioramaGeometry(void *context,
+    const ArRenderVertex2D *vertices,int nv,const int32_t *indices,int ni) {
+  DioramaShadingSubmit *draw=context;
+  DioramaPerformance_End(draw->performance);
+  const bool ok=RenderDioramaGeometry(draw->device,draw->texture,vertices,nv,indices,ni,draw->blend);
+  draw->performance=DioramaPerformance_Begin(kDioramaPerformance_Mesh);
+  return ok;
+}
+
+static bool RenderShadedDioramaGeometry(
+    ArRenderDevice *device, ArRenderTexture texture,
+    const ArRenderVertex2D *vertices, int nv, const int32_t *indices, int ni,
+    ArRenderBlendMode blend, const SceneryShadingField *field, ArRenderRectF source_uv,
+    const DioramaSceneryLightEffectParams *lighting) {
+  const bool lit = lighting && ArRenderTexture_IsValid(lighting->illumination);
+  if (lit && !DioramaEffectBackend_BindSceneryLight(device, lighting)) {
+    (void)DioramaEffectBackend_Unbind(device);
+    return false;
+  }
+  DioramaShadingSubmit draw={device,texture,blend,DioramaPerformance_Begin(kDioramaPerformance_Mesh)};
+  const bool ok=SceneryShading_Draw(field,source_uv,vertices,nv,indices,ni,
+      SubmitShadedDioramaGeometry,&draw);
+  DioramaPerformance_End(draw.performance);
+  const bool restored = !lit || DioramaEffectBackend_Unbind(device);
+  return ok && restored;
+}
+
 static void RecordOptionalDioramaDraw(
     PresentationOutcome *outcome, bool succeeded) {
   if (outcome && !succeeded)
@@ -1077,16 +1113,18 @@ static PresentationOutcome RenderDioramaStackBatch(
     const ArRenderVertex2D *vertices, int vertex_count,
     const int32_t *indices, int index_count,
     ArRenderBlendMode blend, const DioramaStackGroupPlan *plan,
-    int output_width, int output_height, bool stack_grouping) {
+    int output_width, int output_height, bool stack_grouping,
+    const SceneryShadingField *exposure, const DioramaSceneryLightEffectParams *lighting,
+    ArRenderRectF light_viewport) {
   if (!vertices || vertex_count <= 0 || !indices || index_count <= 0)
     return kPresentationOutcome_Complete;
 
   const bool use_group = stack_grouping && plan &&
       plan->use_intermediate;
   if (!use_group) {
-    return RenderDioramaGeometry(
+    return RenderShadedDioramaGeometry(
                device, source, vertices, vertex_count, indices, index_count,
-               blend)
+               blend, exposure, (ArRenderRectF){0,0,1,1}, lighting)
         ? kPresentationOutcome_Complete
         : kPresentationOutcome_OptionalOmitted;
   }
@@ -1094,9 +1132,9 @@ static PresentationOutcome RenderDioramaStackBatch(
   const ArRenderTexture target = EnsureDioramaStackGroupTexture(
       device, plan->target_width, plan->target_height);
   if (!ArRenderTexture_IsValid(target)) {
-    return RenderDioramaGeometry(
+    return RenderShadedDioramaGeometry(
                device, source, vertices, vertex_count, indices, index_count,
-               blend)
+               blend, exposure, (ArRenderRectF){0,0,1,1}, lighting)
         ? kPresentationOutcome_Complete
         : kPresentationOutcome_OptionalOmitted;
   }
@@ -1108,9 +1146,9 @@ static PresentationOutcome RenderDioramaStackBatch(
     return kPresentationOutcome_CoreFailure;
   if (begin == kArRenderTargetBegin_Omitted) {
     DisableDioramaStackGroup(device);
-    return RenderDioramaGeometry(
+    return RenderShadedDioramaGeometry(
                device, source, vertices, vertex_count, indices, index_count,
-               blend)
+               blend, exposure, (ArRenderRectF){0,0,1,1}, lighting)
         ? kPresentationOutcome_Complete
         : kPresentationOutcome_OptionalOmitted;
   }
@@ -1126,18 +1164,20 @@ static PresentationOutcome RenderDioramaStackBatch(
   bool target_ready = ArRenderDevice_Clear(
       device, (ArRenderColorF){0.0f, 0.0f, 0.0f, 0.0f});
   if (target_ready) {
-    target_ready = RenderDioramaGeometry(
+    DioramaSceneryLightEffectParams target_lighting = *lighting;
+    target_lighting.light_uv = light_viewport;
+    target_ready = RenderShadedDioramaGeometry(
         device, source, s_diorama_stack_target_vertices, vertex_count,
-        indices, index_count, blend);
+        indices, index_count, blend, exposure, (ArRenderRectF){0,0,1,1}, &target_lighting);
   }
   const bool restored = ArRenderDevice_EndTarget(device, &target_state);
   DioramaPerformance_SetRasterViewport(output_width, output_height);
   if (!restored) return kPresentationOutcome_CoreFailure;
   if (!target_ready) {
     DisableDioramaStackGroup(device);
-    return RenderDioramaGeometry(
+    return RenderShadedDioramaGeometry(
                device, source, vertices, vertex_count, indices, index_count,
-               blend)
+               blend, exposure, (ArRenderRectF){0,0,1,1}, lighting)
         ? kPresentationOutcome_Complete
         : kPresentationOutcome_OptionalOmitted;
   }
@@ -1335,6 +1375,26 @@ static ArRenderTexture BuildDioramaSkyboxPrefilter(
   return target;
 }
 
+/* A fixed background grid displaces UVs, not foreground pixels. The resident
+ * shader uses the same samples after resolving generated-frame camera motion. */
+enum { kHeatVertices=(kDioramaHeatColumns+1)*(kDioramaHeatRows+1),
+       kHeatIndices=kDioramaHeatColumns*kDioramaHeatRows*6 };
+static void HeatQuad(ArRenderVertex2D *vertices,int32_t *indices,
+    const ArRenderVertex2D quad[4],const DioramaHeat *heat) {
+  for(unsigned y=0;y<=kDioramaHeatRows;++y)for(unsigned x=0;x<=kDioramaHeatColumns;++x) {
+    const float u=(float)x/kDioramaHeatColumns,v=(float)y/kDioramaHeatRows;
+    ArRenderVertex2D *out=&vertices[y*(kDioramaHeatColumns+1)+x];
+    *out=quad[0];out->position.x+=u*(quad[1].position.x-quad[0].position.x);
+    out->position.y+=v*(quad[3].position.y-quad[0].position.y);
+    out->tex_coord.x+=u*(quad[1].tex_coord.x-quad[0].tex_coord.x);
+    out->tex_coord.y+=v*(quad[3].tex_coord.y-quad[0].tex_coord.y);
+    if(heat)out->tex_coord=DioramaHeat_Uv(heat,out->tex_coord);
+    out->tex_coord.x=fmaxf(quad[0].tex_coord.x,fminf(quad[1].tex_coord.x,out->tex_coord.x));
+    out->tex_coord.y=fmaxf(quad[0].tex_coord.y,fminf(quad[3].tex_coord.y,out->tex_coord.y));
+  }
+  int count;
+  TriangulateGrid(kDioramaHeatColumns,kDioramaHeatRows,indices,&count);
+}
 static PresentationOutcome DrawDioramaSkybox(
     ArRenderDevice *device, ArRenderTexture skybox_texture,
     int obj_apron, int snes_width, int snes_height,
@@ -1347,10 +1407,12 @@ static PresentationOutcome DrawDioramaSkybox(
     int motion_source, bool follow_camera,
     int authentic_y0, float camera_delta, float pixel_aspect,
     float face_bottom_y, float foreground_top_y,
-    DioramaSkyboxProjection *projection, const DioramaRenderOptions *options) {
+    DioramaSkyboxProjection *projection, const DioramaRenderOptions *options, const DioramaHeat *heat) {
   if (!ArRenderTexture_IsValid(skybox_texture) || snes_height <= 0)
     return kPresentationOutcome_CoreFailure;
   PresentationOutcome outcome = kPresentationOutcome_Complete;
+  const bool heated=!rom_source&&DioramaHeat_Active(heat);
+  ArRenderVertex2D heat_vertices[kHeatVertices];int32_t heat_indices[kHeatIndices];
   /* Valid spans use surface columns, including the OBJ apron. Blur-safe UV
    * insets keep the kernel out of uncaptured texels; the aspect crop stays
    * inside those intervals. */
@@ -1541,6 +1603,11 @@ static PresentationOutcome DrawDioramaSkybox(
         {{0,0},tint,{0,0}}, {{out_w,0},tint,{1,0}},
         {{out_w,out_h},tint,{1,1}}, {{0,out_h},tint,{0,1}}};
       draw.vertices = verts;
+      if(heated) {
+        HeatQuad(heat_vertices,heat_indices,verts,NULL);
+        draw.vertices=heat_vertices;draw.indices=heat_indices;
+        draw.vertex_count=kHeatVertices;draw.index_count=kHeatIndices;draw.heat=*heat;
+      }
       for (unsigned i = 0; i < span_count; ++i) {
         DioramaRasterRowRun runs[SR_PPU_SURFACE_MAX_HEIGHT];
         DioramaSkyboxRowShift row_runs[SR_PPU_SURFACE_MAX_HEIGHT];
@@ -1624,10 +1691,15 @@ static PresentationOutcome DrawDioramaSkybox(
       quad[2] = (ArRenderVertex2D){ { (float)out_w, draw_y1 }, tint, { u1 + du, piece_v1 } };
       quad[3] = (ArRenderVertex2D){ { 0.0f, draw_y1 },         tint, { u0 + du, piece_v1 } };
       for (int k = 0; k < 6; ++k) piece_indices[6 * pieces + k] = 4 * pieces + indices[k];
+      if(heated) {
+        HeatQuad(heat_vertices,heat_indices,quad,heat);
+        if(!SubmitDioramaGeometry(device,skybox_texture,heat_vertices,kHeatVertices,heat_indices,kHeatIndices,&draw_state))
+          outcome=kPresentationOutcome_CoreFailure;
+      }
       ++pieces;
     }
     if (!pieces) continue;
-    const bool submitted = SubmitDioramaGeometry(
+    const bool submitted = heated || SubmitDioramaGeometry(
         device, skybox_texture, verts, 4 * pieces, piece_indices, 6 * pieces, &draw_state);
     if (!submitted) {
       outcome = kPresentationOutcome_CoreFailure;
@@ -2141,7 +2213,7 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
           face_skybox ? capture->authentic_y0 + kDeathHeimFaceRows : 0,
           face_skybox ? DeathHeimCloudTop(capture, geometry, resolved, resolved_count) : NAN,
           projection && (face_skybox || !projection->bg2_plane.valid)
-              ? &projection->bg2_skybox : NULL, &skybox_options);
+              ? &projection->bg2_skybox : NULL, &skybox_options, &scene->background_heat);
       outcome = PresentationOutcome_Combine(outcome, skybox);
       if (!PresentationOutcome_IsUsable(skybox)) {
         return kPresentationOutcome_CoreFailure;
@@ -2151,13 +2223,32 @@ static PresentationOutcome DrawResolvedDioramaSkybox(
   return outcome;
 }
 
+static const DioramaResolvedLayer *CameraFocalLayer(
+    int primary, const DioramaScene *scene,
+    const DioramaResolvedLayer *resolved, int count) {
+  const int high = primary == SR_PPU_OVERLAY_BG1
+      ? kDioramaPlane_Bg1Hi : kDioramaPlane_Bg2Hi;
+  const DioramaResolvedLayer *focal = NULL;
+  for (int i = 0; i < count; ++i) {
+    const DioramaResolvedLayer *layer = &resolved[i];
+    if ((layer->plane != primary && layer->plane != high) || !layer->alpha ||
+        !Diorama_PlaneEligible(layer->plane,
+            (scene->render->visible_planes & (1u << layer->plane)) != 0,
+            true, true, scene->render->hud_flat,
+            SkyboxReplacesPlane(scene, layer->plane), scene->additive_plane_mask)) continue;
+    if (!focal || layer->plane == primary) focal = layer;
+  }
+  /* Camera limits must not change when an otherwise enabled priority band
+   * happens to have no pixels in this capture. Also usable before scanout. */
+  return focal;
+}
+
 /* UVs describe the displayed capture inside the allocation. World size
  * remains normalized to 224 native rows so margins extend the scene rather
  * than shrinking the playfield. Resolve auto-fit before applying zoom. */
 static void PrepareDioramaView(const DioramaCapture *capture,
                                const DioramaView *view,
                                const DioramaScene *scene,
-                               const ArRenderTexture *textures,
                                const DioramaResolvedLayer *resolved,
                                int resolved_count,
                                DioramaViewGeometry *geometry) {
@@ -2193,6 +2284,25 @@ static void PrepareDioramaView(const DioramaCapture *capture,
   static const float kDioramaZ_Hud = 0.95f;
   geometry->auto_distance =
       fmaxf(fit_h, fit_w) * 1.02f + (kDioramaZ_Hud - 0.5f);
+
+  /* Width fitting (especially with CRT pixels) can back the camera beyond
+   * the captured rows even when more painted scenery exists in the world.
+   * Limit the automatic baseline by the fixed vertical storage budget, not
+   * the remaining distance to a room edge: redistributing upper/lower rows
+   * must not zoom the scene as it scrolls. Fully captured short rooms retain
+   * their borders. User zoom/orbit is applied afterwards. */
+  if (capture->vertical_bounds.valid &&
+      !(capture->vertical_bounds.top_reached && capture->vertical_bounds.bottom_reached)) {
+    const DioramaResolvedLayer *focal = CameraFocalLayer(
+        capture->vertical_bounds.plane, scene, resolved, resolved_count);
+    if (focal) {
+      /* One native row at either end keeps the filtered texture boundary
+       * outside the view instead of exposing a subpixel seam. */
+      const float fit_capture = 0.5f * (tex_h - 2.0f) /
+          ((float)kActRaiserAuthenticHeight * tan_half) + focal->z - 0.5f;
+      geometry->auto_distance = fminf(geometry->auto_distance, fit_capture);
+    }
+  }
 
   geometry->camera = (DioramaCamera){view->camera.tilt_x, view->camera.tilt_y,
                                      view->camera.distance, kDioramaFovY};
@@ -2240,19 +2350,8 @@ static void PrepareDioramaView(const DioramaCapture *capture,
    * Free-camera orbit/zoom remains an explicit view chosen by the player. */
   if (capture->vertical_bounds.valid) {
     const int primary = capture->vertical_bounds.plane;
-    const int high = primary == SR_PPU_OVERLAY_BG1
-        ? kDioramaPlane_Bg1Hi : kDioramaPlane_Bg2Hi;
-    const DioramaResolvedLayer *focal = NULL;
-    for (int i = 0; i < resolved_count; i++) {
-      if ((resolved[i].plane != primary && resolved[i].plane != high) ||
-          !resolved[i].alpha)
-        continue;
-      const DioramaLayerDesc *layer = DioramaDescForPlane(resolved[i].plane);
-      if (!DioramaLayerIsDrawable(layer, textures, capture->pixels, scene))
-        continue;
-      /* Priority splitting can leave the ordinary band entirely empty. */
-      if (!focal || resolved[i].plane == primary) focal = &resolved[i];
-    }
+    const DioramaResolvedLayer *focal =
+        CameraFocalLayer(primary, scene, resolved, resolved_count);
     if (focal)
       Diorama_ClampCameraVertically(
           geometry->matrix, geometry->aspect_x, geometry->height_scale,
@@ -2289,31 +2388,23 @@ static void PrepareDioramaView(const DioramaCapture *capture,
         ? capture->horizontal_bounds.plane
         : capture->vertical_bounds.valid ? capture->vertical_bounds.plane
                                          : SR_PPU_OVERLAY_BG1;
-    const int high = primary == SR_PPU_OVERLAY_BG1
-        ? kDioramaPlane_Bg1Hi : kDioramaPlane_Bg2Hi;
-    const DioramaResolvedLayer *focal = NULL;
-    for (int i = 0; i < resolved_count; ++i) {
-      if ((resolved[i].plane != primary && resolved[i].plane != high) ||
-          !resolved[i].alpha) continue;
-      const DioramaLayerDesc *layer = DioramaDescForPlane(resolved[i].plane);
-      if (!DioramaLayerIsDrawable(layer, textures, capture->pixels, scene)) continue;
-      if (!focal || resolved[i].plane == primary) focal = &resolved[i];
-    }
+    const DioramaResolvedLayer *focal =
+        CameraFocalLayer(primary, scene, resolved, resolved_count);
     if (focal && capture->width > 0) {
       float clamped[16];
       memcpy(clamped, geometry->matrix, sizeof(clamped));
       const float apron =
           DioramaPlaneUsesBgApron(primary, capture->bg_apron_mask)
               ? (float)capture->obj_apron / (float)capture->width : 0.0f;
-      bool held = capture->horizontal_bounds.valid &&
+      bool held = Diorama_FitCameraToCapture(
+          clamped, geometry->aspect_x, geometry->height_scale,
+          focal->z - 0.5f, focal->rake, focal->bow,
+          &capture->horizontal_bounds, -apron, 1.0f + apron);
+      held |= capture->horizontal_bounds.valid &&
           Diorama_ClampCameraHorizontally(
               clamped, geometry->aspect_x, geometry->height_scale,
               focal->z - 0.5f, focal->rake, focal->bow,
               &capture->horizontal_bounds);
-      held |= Diorama_FitCameraToCapture(
-          clamped, geometry->aspect_x, geometry->height_scale,
-          focal->z - 0.5f, focal->rake, focal->bow,
-          &capture->horizontal_bounds, -apron, 1.0f + apron);
       if (held) {
         float unclamped[16];
         memcpy(unclamped, geometry->matrix, sizeof(unclamped));
@@ -2338,6 +2429,56 @@ static void PrepareDioramaView(const DioramaCapture *capture,
       }
     }
   }
+}
+
+bool Diorama_ResolveCaptureCameraRange(const DioramaCapture *capture,
+    const DioramaView *view, const DioramaScene *scene, int camera_x,
+    int *minimum, int *maximum) {
+  if (!capture || !view || !scene || !scene->render || !minimum || !maximum ||
+      !capture->horizontal_bounds.valid || capture->width <= 0 ||
+      capture->height < kActRaiserAuthenticHeight || view->viewport.w <= 0 ||
+      view->viewport.h <= 0 || view->camera_framing_weight <= 0.0f) return false;
+  DioramaResolvedLayer resolved[kDioramaLayerCount];
+  const int count = Diorama_ResolveSceneLayers(scene, resolved);
+  const DioramaResolvedLayer *focal =
+      CameraFocalLayer(capture->horizontal_bounds.plane, scene, resolved, count);
+  if (!focal) return false;
+  /* Resolve the projection before either finite edge is reached. Its scale
+   * and source footprint then stay independent of horizontal camera travel. */
+  DioramaCapture open = *capture;
+  open.horizontal_bounds.left_reached = open.horizontal_bounds.right_reached = false;
+  DioramaViewGeometry g = {.width = view->viewport.w, .height = view->viewport.h};
+  PrepareDioramaView(&open, view, scene, resolved, count, &g);
+  float left = INFINITY, right = -INFINITY;
+  for (int row = 0; row <= kDioramaPlaneSubdivY; ++row) {
+    const float t = (float)row / kDioramaPlaneSubdivY;
+    const float y = (0.5f - t) * g.height_scale;
+    const float z = DioramaTiltedRowDepth(focal->z - 0.5f, focal->rake, focal->bow, t);
+    for (int side = 0; side < 2; ++side) {
+      const float ndc = side ? 1.0f : -1.0f;
+      const float denominator = g.matrix[0] - ndc * g.matrix[3];
+      if (!(denominator > 0.0f)) return false;
+      const float x = ((ndc * g.matrix[7] - g.matrix[4]) * y +
+          (ndc * g.matrix[11] - g.matrix[8]) * z +
+          ndc * g.matrix[15] - g.matrix[12]) / denominator;
+      const float pixel = (x / g.aspect_x + 0.5f) * capture->width;
+      left = fminf(left, pixel); right = fmaxf(right, pixel);
+    }
+  }
+  const float margin = 0.5f * (capture->width - kActRaiserAuthenticWidth);
+  /* World boundaries are integral native pixels. Recover them before taking
+   * the difference, avoiding one-pixel ceil/floor jitter from normalized
+   * bounds at different camera positions. */
+  const float world_left = roundf(camera_x - margin + capture->horizontal_bounds.left * capture->width);
+  const float world_right = roundf(camera_x - margin + capture->horizontal_bounds.right * capture->width);
+  const float lo = world_left + margin - left;
+  const float hi = world_right + margin - right;
+  /* A room narrower than this view retains its ordinary small-room framing.
+   * Round inward so fractional perspective never exposes a missing column. */
+  if (!isfinite(lo) || !isfinite(hi) || lo < -65535 || hi > 65535 ||
+      ceilf(lo) > floorf(hi)) return false;
+  *minimum = (int)ceilf(lo); *maximum = (int)floorf(hi);
+  return true;
 }
 
 /* A's water is a finite moving plane. Lower it to the viewport's bottom;
@@ -2385,6 +2526,15 @@ static void PublishDioramaView(const DioramaCapture *capture,
     out_projection->aspect_x = geometry->aspect_x;
     out_projection->height_scale = geometry->height_scale;
     out_projection->auto_distance = geometry->auto_distance;
+    out_projection->between_backgrounds_world_y_offset =
+        -0.5f * geometry->bg2_world_y_offset;
+    out_projection->between_backgrounds_capture_offset = (ArRenderPointF){0};
+    if (capture->plane_capture_offsets) {
+      const ArRenderPointF front = capture->plane_capture_offsets[SR_PPU_OVERLAY_BG1];
+      const ArRenderPointF back = capture->plane_capture_offsets[SR_PPU_OVERLAY_BG2];
+      out_projection->between_backgrounds_capture_offset = (ArRenderPointF){
+          0.5f * (front.x - back.x), 0.5f * (front.y - back.y)};
+    }
 
     out_projection->texture_x_origin = capture->obj_apron;
     out_projection->texture_width = SR_PPU_SURFACE_MAX_WIDTH;
@@ -2431,6 +2581,12 @@ static void PrepareDioramaAperture(const DioramaCapture *capture,
   }
 }
 
+/* Draw and effect culling share the same captured guard columns. */
+static bool DioramaUsesCaptureApron(const DioramaCapture *capture, int plane) {
+  return capture->obj_apron > 0 && (DioramaPlaneIsObjectPriority(plane) ||
+      DioramaPlaneUsesBgApron(plane, capture->bg_apron_mask));
+}
+
 /* An attached effect may retain a transform on an intentionally empty
  * source band. Publish the exact authored geometry used by layer drawing. */
 static void PublishDioramaPlanes(const DioramaCapture *capture,
@@ -2448,6 +2604,8 @@ static void PublishDioramaPlanes(const DioramaCapture *capture,
         continue;
       DioramaPlaneProjection plane = {
           .valid = true,
+          .capture_apron = DioramaUsesCaptureApron(capture, resolved[i].plane)
+              ? capture->obj_apron : 0,
           .u0 = geometry->u0,
           .v0 = geometry->v0,
           .u1 = geometry->u1,
@@ -2515,18 +2673,18 @@ typedef struct DioramaLayerDraw {
   ArRenderColorF shade;
   float dimming;
   ArRenderRectF dimming_ramp;
-  float (*exposure)(void *,float,float);
-  void *exposure_userdata;
+  const SceneryShadingField *exposure;
+  DioramaSceneryLightEffectParams lighting;
+  ArRenderRectF light_viewport;
   ArRenderBlendMode blend;
 } DioramaLayerDraw;
 
 static void ShadeDioramaVertices(const DioramaLayerDraw *layer,
     ArRenderVertex2D *vertices, int count) {
-  if (layer->dimming <= 0 && !layer->exposure) return;
+  if (layer->dimming <= 0) return;
   for (int i = 0; i < count; i++) {
     float light = 1-SceneryDimming_Amount(layer->dimming,layer->dimming_ramp,
         vertices[i].tex_coord.x,vertices[i].tex_coord.y);
-    if(layer->exposure)light*=layer->exposure(layer->exposure_userdata,vertices[i].tex_coord.x,vertices[i].tex_coord.y);
     vertices[i].color.r *= light;
     vertices[i].color.g *= light;
     vertices[i].color.b *= light;
@@ -2864,7 +3022,8 @@ DrawDioramaLayerDepth(ArRenderDevice *device, const DioramaCapture *capture,
       const PresentationOutcome stack_outcome = RenderDioramaStackBatch(
           device, layer->texture, s_diorama_stack_vertices, stack_batch_nv,
           s_diorama_stack_indices, stack_batch_ni, layer->blend, &stack_plan,
-          geometry->width, geometry->height, geometry->options->stack_grouping);
+          geometry->width, geometry->height, geometry->options->stack_grouping, layer->exposure,
+          &layer->lighting, layer->light_viewport);
       outcome = PresentationOutcome_Combine(outcome, stack_outcome);
       if (!PresentationOutcome_IsUsable(stack_outcome))
         return kPresentationOutcome_CoreFailure;
@@ -2886,8 +3045,8 @@ DrawDioramaLayerDepth(ArRenderDevice *device, const DioramaCapture *capture,
     if (skirt_nv > 0) {
       RecordOptionalDioramaDraw(
           &outcome,
-          RenderDioramaGeometry(device, layer->texture, skirt_verts, skirt_nv,
-                                skirt_indices, skirt_ni, layer->blend));
+          RenderShadedDioramaGeometry(device, layer->texture, skirt_verts, skirt_nv,
+              skirt_indices, skirt_ni, layer->blend, layer->exposure, (ArRenderRectF){0,0,1,1}, &layer->lighting));
     }
   }
 
@@ -3033,8 +3192,17 @@ static PresentationOutcome DrawDioramaLayerFace(
     }
   }
 
+  DioramaSceneryLightEffectParams lighting = layer->lighting;
+  lighting.texel_width = draw_texel_width;
+  lighting.texel_height = draw_texel_height;
+  lighting.blur_radius = dof_radius;
+  lighting.lower_content_v_max = draw_lower_content_v_max;
+  lighting.priority = (DioramaPrioritySurfaceEffectParams){(float)capture->width, (float)capture->height,
+      layer->description->plane == kDioramaPlane_Bg1Hi, layer->blend == kArRenderBlendMode_Add};
+  lighting.mode = priority_surface ? 2 : use_dof_shader ? 1 : 0;
+  const bool material_lighting = ArRenderTexture_IsValid(lighting.illumination);
   bool layer_shader_bound = false;
-  if (priority_surface) {
+  if (!material_lighting && priority_surface) {
     const DioramaPrioritySurfaceEffectParams params = {
       (float)capture->width, (float)capture->height,
       layer->description->plane == kDioramaPlane_Bg1Hi,
@@ -3054,7 +3222,7 @@ static PresentationOutcome DrawDioramaLayerFace(
         .strength = 0.33f,
     };
     layer_shader_bound = DioramaEffectBackend_BindRimLight(device, &params);
-  } else if (use_dof_shader) {
+  } else if (!material_lighting && use_dof_shader) {
     const DioramaDofEdgeEffectParams params = {
         .texel_width = draw_texel_width,
         .texel_height = draw_texel_height,
@@ -3069,7 +3237,7 @@ static PresentationOutcome DrawDioramaLayerFace(
     };
     layer_shader_bound = DioramaEffectBackend_BindDofEdge(device, &params);
   }
-  if ((rim_light || use_dof_shader) && !layer_shader_bound) {
+  if (!material_lighting && (rim_light || use_dof_shader) && !layer_shader_bound) {
     outcome = PresentationOutcome_Combine(outcome,
                                           kPresentationOutcome_OptionalOmitted);
     if (!DioramaEffectBackend_Unbind(device)) {
@@ -3077,6 +3245,11 @@ static PresentationOutcome DrawDioramaLayerFace(
     }
   }
 
+  const ArRenderRectF source_uv = compact_scale > 0
+      ? (ArRenderRectF){(float)capture->obj_apron/SR_PPU_SURFACE_MAX_WIDTH,0,
+          (float)capture->width/SR_PPU_SURFACE_MAX_WIDTH,
+          (float)capture->height/SR_PPU_SURFACE_MAX_HEIGHT}
+      : (ArRenderRectF){0,0,1,1};
   bool main_submitted = false;
   if (attached->vertex_count > 0) {
     const int host_vertex_base = attached->vertex_count;
@@ -3101,9 +3274,9 @@ static PresentationOutcome DrawDioramaLayerFace(
             outcome, kPresentationOutcome_OptionalOmitted);
       }
     }
-    main_submitted = RenderDioramaGeometry(
+    main_submitted = RenderShadedDioramaGeometry(
         device, draw_texture, attached->vertices, attached->vertex_count,
-        attached->indices, attached->index_count, layer->blend);
+        attached->indices, attached->index_count, layer->blend, layer->exposure, source_uv, &lighting);
   } else if (want_edge) {
     ArRenderVertex2D aa_vertices[DIORAMA_AA_VERTS];
     int32_t aa_indices[DIORAMA_AA_INDICES];
@@ -3121,13 +3294,13 @@ static PresentationOutcome DrawDioramaLayerFace(
       outcome = PresentationOutcome_Combine(
           outcome, kPresentationOutcome_OptionalOmitted);
     }
-    main_submitted = RenderDioramaGeometry(device, draw_texture, aa_vertices,
+    main_submitted = RenderShadedDioramaGeometry(device, draw_texture, aa_vertices,
                                            aa_vertex_count, aa_indices,
-                                           aa_index_count, layer->blend);
+                                           aa_index_count, layer->blend, layer->exposure, source_uv, &lighting);
   } else {
-    main_submitted = RenderDioramaGeometry(device, draw_texture, draw_verts,
+    main_submitted = RenderShadedDioramaGeometry(device, draw_texture, draw_verts,
                                            mesh->vertex_count, mesh->indices,
-                                           mesh->index_count, layer->blend);
+                                           mesh->index_count, layer->blend, layer->exposure, source_uv, &lighting);
   }
   if (layer_shader_bound && !DioramaEffectBackend_Unbind(device)) {
     return kPresentationOutcome_CoreFailure;
@@ -3141,11 +3314,6 @@ static PresentationOutcome DrawDioramaLayerFace(
 /* The perspective viewport can see beyond the ordinary scanout window.
  * Draw captured OBJ guards as well as verified BG guards, scaling both UVs
  * and world width so every existing pixel retains its position and size. */
-static bool DioramaUsesCaptureApron(const DioramaCapture *capture, int plane) {
-  return capture->obj_apron > 0 && (DioramaPlaneIsObjectPriority(plane) ||
-      DioramaPlaneUsesBgApron(plane, capture->bg_apron_mask));
-}
-
 static void DioramaExpandCaptureApron(DioramaCapture *capture,
                                      DioramaViewGeometry *geometry, int plane) {
   const int width = capture->width + 2 * capture->obj_apron;
@@ -3206,7 +3374,14 @@ static PresentationOutcome DrawResolvedDioramaLayer(
       .dimming = dimming,
       .dimming_ramp = scene->bg1_dimming_ramp,
       .exposure = scenery ? scene->scenery_exposure : NULL,
-      .exposure_userdata = scene->scenery_exposure_userdata,
+      .lighting = {.illumination = scenery ? scene->scenery_lightmap : ArRenderTexture_Invalid(),
+          .shade = {1 + (description->shade.r - 1) * shade_mix,
+              1 + (description->shade.g - 1) * shade_mix,
+              1 + (description->shade.b - 1) * shade_mix, 1}},
+      .light_viewport = {(float)output_frame->viewport.x/output_frame->output_width,
+          (float)output_frame->viewport.y/output_frame->output_height,
+          (float)output_frame->viewport.w/output_frame->output_width,
+          (float)output_frame->viewport.h/output_frame->output_height},
       .blend = description->plane == kDioramaPlane_Backdrop
                    ? kArRenderBlendMode_Opaque
                : additive ? kArRenderBlendMode_Add
@@ -3230,6 +3405,9 @@ static PresentationOutcome DrawResolvedDioramaLayer(
     geometry = &layer_geometry;
   }
   PrepareDioramaLayerMesh(capture, geometry, aperture, &layer, &mesh);
+  if((description->plane==SR_PPU_OVERLAY_BG2||description->plane==kDioramaPlane_Bg2Hi||description->plane==kDioramaPlane_Bg2Far)&&
+      DioramaHeat_Active(&scene->background_heat))
+    for(int i=0;i<mesh.vertex_count;++i)mesh.vertices[i].tex_coord=DioramaHeat_Uv(&scene->background_heat,mesh.vertices[i].tex_coord);
   DioramaAttachedMesh attached;
   PrepareDioramaWaterfall(capture, scene, geometry, &layer, &attached,
                           out_projection);
@@ -3289,7 +3467,7 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
   DioramaPerformance_SetViewport(geometry.width, geometry.height);
   DioramaResolvedLayer resolved[kDioramaLayerCount];
   const int resolved_count = Diorama_ResolveSceneLayers(scene, resolved);
-  PrepareDioramaView(capture, view, scene, textures, resolved, resolved_count,
+  PrepareDioramaView(capture, view, scene, resolved, resolved_count,
                      &geometry);
   PlaceDeathHeimWater(capture, scene, textures, resolved, resolved_count, &geometry);
   PublishDioramaView(capture, view, &geometry, out_projection);
@@ -3309,6 +3487,31 @@ PresentationOutcome Diorama_Composite(ArRenderDevice *device,
   outcome = PresentationOutcome_Combine(outcome, skybox);
   if (!PresentationOutcome_IsUsable(outcome))
     goto failed;
+
+  /* Skybox-anchored lights need the exact UV-band projection published by
+   * the skybox draw, including aspect fit and raster scroll. Build their
+   * material map now, before any foreground surfaces or volume callbacks. */
+  DioramaScene illuminated = *scene;
+  illuminated.scenery_lightmap = ArRenderTexture_Invalid();
+  if (scene->scenery_light && out_projection &&
+      ArRenderCapabilities_Has(ArRenderDevice_Capabilities(device),
+          kArRenderCapability_CustomShaders | kArRenderCapability_ScopedRenderTargets)) {
+    int width, height;
+    if (!ArRenderDevice_GetOutputSize(device, &width, &height))
+      goto failed;
+    const ArRenderTexture lightmap = EnsureDioramaScratchTarget(
+        device, &s_diorama_lightmap, width, height, kArRenderFilter_Linear);
+    ArRenderTargetState saved;
+    if (!ArRenderTexture_IsValid(lightmap) ||
+        ArRenderDevice_BeginTarget(device, lightmap, &saved) != kArRenderTargetBegin_Ready)
+      goto failed;
+    const bool drawn = ArRenderDevice_Clear(device, (ArRenderColorF){0,0,0,1}) &&
+        scene->scenery_light(scene->plane_effect_userdata, out_projection);
+    const bool restored = ArRenderDevice_EndTarget(device, &saved);
+    if (!drawn || !restored) goto failed;
+    illuminated.scenery_lightmap = lightmap;
+  }
+  scene = &illuminated;
 
   if (out_projection && !out_projection->bg2_plane.valid &&
       out_projection->bg2_skybox.count &&
@@ -3370,10 +3573,12 @@ failed:
 }
 
 void Diorama_ResetCompositorResources(ArRenderDevice *device) {
+  /* Materials borrow the map's native handle, so release their states first. */
+  DioramaEffectBackend_Reset(device);
+  ResetDioramaScratchPool(device, &s_diorama_lightmap);
   ResetDioramaSupersample(device);
   ResetDioramaPrioritySurface(device);
   ResetDioramaDofSource(device);
   ResetDioramaStackGroup(device);
   ResetDioramaSkyboxPrefilter(device);
-  DioramaEffectBackend_Reset(device);
 }

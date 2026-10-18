@@ -703,9 +703,13 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
           ws_scan_axis_visible(world_x, left_extent, right_extent,
                                camera_x, draw_l, draw_r,
                                kActRaiserAuthenticWidth);
-      int activation = vertical_activation && ws_scan_axis_visible(
+      /* A fitted diorama camera can stop before the authentic camera does.
+       * Wide activation must still contain the native gameplay window: $0400
+       * also drives player death and can otherwise beat a room's door trigger.
+       * Keep this union independent of drawing and vertical OAM extensions. */
+      int activation = authentic || (vertical_activation && ws_scan_axis_visible(
           world_x, left_extent, right_extent, activation_camera_x,
-          activation_l, activation_r, kActRaiserAuthenticWidth);
+          activation_l, activation_r, kActRaiserAuthenticWidth));
 
       if (vertical_draw && !vertical)
         s_vext_unlocked++;   /* object the band exposes that 224 would cull */
@@ -1023,8 +1027,7 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
           const ActionApronReceiver receiver = {
               .x = (int16_t)cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_WorldX),
               .y = (int16_t)cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_WorldY),
-              .role = (uint8_t)ActRaiserSpriteOwnership_ActionRole(object_address,
-                  cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_Flags))};
+              .role = (uint8_t)ActRaiserSpriteOwnership_ActionRole(object_address)};
           (void)ActionApron_AddOwnedPart(
               &apron_geom, exact_x, exact_y, rendered_attributes, size, receiver);
         }
@@ -1127,7 +1130,6 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
 
   ActRaiserSpriteOwnership_RecordActionObject(cpu_read16(cpu, cpu->DB,
       object_address + kActRaiserActionObject_SourceDescriptor),object_address,
-      cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_Flags),
       (int16_t)cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_WorldX),
       (int16_t)cpu_read16(cpu,cpu->DB,object_address+kActRaiserActionObject_WorldY),
       oam_before, oam_offset);

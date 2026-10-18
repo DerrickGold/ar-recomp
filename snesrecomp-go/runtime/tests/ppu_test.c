@@ -1348,13 +1348,15 @@ static void test_rgb_spans_and_guards(void) {
                     q->oam[slot * 2] = slot < 32 ? slot * 8 : 0xe000;
                     q->oam[slot * 2 + 1] = (4 << 9) | (3 << 12);
                     for (int c = 0; c < 3; ++c)
-                        transforms[slot].multiply[c] = slot & 1 ? 128 : 256;
+                        transforms[slot].multiply[c] = slot & 1 ? 128 : c==0 ? 1024 : c==1 ? 768 : 256;
                 }
                 for (int y = 0; y < 8; ++y) {
                     q->vram[y] = 0x00ff;
                     q->vram[y + 8] = 0;
                 }
                 CHECK(PpuSetObjColorTransforms(q, transforms, 128));
+                transforms[0].multiply[0]=SR_PPU_OBJ_COLOR_MULTIPLY_MAX+1;
+                CHECK(!PpuSetObjColorTransforms(q, transforms, 128));
             }
             PpuSetExtraSpace(q, kExtra);
             PpuBeginDrawing(q, (uint8_t *)pixels[implementation], kWidth * 4,
@@ -2212,13 +2214,16 @@ typedef struct CaptureTileFixture {
     unsigned calls;
     bool merged;
     bool masks;
+    bool interior_only;
+    bool complete;
 } CaptureTileFixture;
 
 static uint32_t capture_tile_lookup(void *context, int32_t x, int32_t y,
                                     SrPpuCaptureTile *tile) {
     CaptureTileFixture *fixture = context;
     ++fixture->calls;
-    if ((x & 3) == 0 && !fixture->masks) return 0;
+    if (fixture->interior_only && (x < 16 || x >= 40)) return 0;
+    if ((x & 3) == 0 && !fixture->masks && !fixture->complete) return 0;
     *tile = (SrPpuCaptureTile){
         .entry = (uint16_t)(2u | ((x & 4) ? 0x4000u : 0u) |
                            ((y & 1) ? 0x8000u : 0u)),
@@ -2267,11 +2272,17 @@ static void test_native_capture_tiles(void) {
     if (!sources[0] || !sources[1] || !sources[2] || !sources[3]) goto cleanup;
     /* The oracle is the ordinary BG renderer with a merged tile provider,
      * independently exercising native scalar and tile-span paths. */
-    for (int variant = 0; variant < 16; ++variant) {
-        const int bg = variant / 8, mode = variant % 8;
+    for (int variant = 0; variant < 24; ++variant) {
+        const int bg = variant / 12, mode = variant % 12;
         CaptureTileFixture fixtures[4] = {{0}, {.masks = mode == 7},
             {.merged = true, .masks = mode == 7}, {.masks = mode == 7}};
         for (int i = 0; i < 4; ++i) {
+            /* Existing interior edits still appear in mirrored fallback.
+             * Complete painted extensions instead use their own coordinates;
+             * compare them with ordinary live-world rendering, not another
+             * invocation of the capture-edit path. */
+            fixtures[i].interior_only = mode == 4;
+            fixtures[i].complete = mode >= 8;
             Ppu *ppu = sources[i];
             ppu_reset(ppu);
             ppu->inidisp = 15;
@@ -2311,7 +2322,12 @@ static void test_native_capture_tiles(void) {
                 ppu->windowsel = 2u << (bg * 4);
                 ppu->window1left = 30; ppu->window1right = 90;
             }
-            if (mode == 4) ppu->wsLayerMirror = 1u << bg;
+            if (mode == 4 || (mode == 8 && i != 2)) ppu->wsLayerMirror = 1u << bg;
+            if (mode == 9 && i != 2) ppu->wsLayerRepeat = 1u << bg;
+            if (mode == 10 && i != 2) ppu->wsLayerClamp = 1u << bg;
+            if (mode == 11 && i != 2)
+                memset(ppu->wsBandFill[bg], kPpuWidescreenBandFill_Transparent,
+                    sizeof(ppu->wsBandFill[bg]));
             if (mode == 6) ppu->renderFlags |= kPpuRenderFlags_ReferencePixelRenderer;
             PpuBeginDrawing(ppu, (uint8_t *)main_pixels[i], kWidth * 4, ppu->renderFlags);
             CHECK(PpuBindAuthenticSurfaceSized(ppu, (uint8_t *)authentic[i], kWidth * 4, kPpuYPixels));
@@ -2349,7 +2365,7 @@ static void test_native_capture_tiles(void) {
         }
         CHECK(memcmp(main_pixels[0], main_pixels[1], sizeof(main_pixels[0])) == 0);
         CHECK(memcmp(authentic[0], authentic[1], sizeof(authentic[0])) == 0);
-        CHECK(fixtures[1].calls <= (kWidth / 8 + 4) * kRows);
+        CHECK(fixtures[1].calls <= (kWidth / 8 + 4) * kRows * (mode == 4 ? 2u : 1u));
         for (int band = 0; band < 3; ++band)
             for (int row = 0; row < kRows; ++row)
                 CHECK(memcmp(&planes[1][band][row * kWidth + kApron],

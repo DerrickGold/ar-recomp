@@ -10,7 +10,7 @@ import re
 import subprocess
 from build_preview import ROOT, compiler_environment
 
-SHADERS = ('blur', 'rim', 'dof_edge', 'priority_surface')
+SHADERS = ('blur', 'rim', 'dof_edge', 'priority_surface', 'scenery_light')
 # Matches the semantic parameter bridge in compositor_preview.c. Refuse a
 # silent uniform-layout drift if production shader interfaces change.
 UNIFORMS = (
@@ -19,6 +19,7 @@ UNIFORMS = (
     [('float', name) for name in ('texel_w', 'texel_h', 'blur_radius', 'u_min',
                                   'u_max', 'v_min', 'v_max', 'edge_feather', 'lower_content_v_max')],
     [('vec2', 'size'), ('float', 'high_band'), ('float', 'additive')],
+    [('vec4', name) for name in ('filter_info', 'priority_info', 'light_info', 'shade')],
 )
 
 
@@ -27,18 +28,21 @@ def shader_variants():
     for name, expected in zip(SHADERS, UNIFORMS):
         text = (ROOT / f'src/shaders/{name}.frag.glsl').read_text()
         block = re.search(r'uniform Context \{(.*?)\};', text, re.S)
-        if not block or re.findall(r'(vec2|float)\s+(\w+)\s*;', block[1]) != expected:
+        if not block or re.findall(r'(vec[24]|float)\s+(\w+)\s*;', block[1]) != expected:
             raise ValueError(f'Update the WASM uniform bridge for {name}')
         text = text.replace('#version 450', '#version 300 es\nprecision highp float;')
         text = re.sub(r'layout\(location = \d+\) in ', 'in ', text)
         text = re.sub(r'layout\(set = 2, binding = 0\) ', '', text)
+        text = re.sub(r'layout\(set = 2, binding = 1\) ', '', text)
         text = text.replace('layout(set = 3, binding = 0)', 'layout(std140)')
         if 'layout(set' in text:
             raise ValueError(f'Unsupported shader binding in {name}')
         # Same shader math, with a sampling shim for GL render-target orientation.
         # Uploaded pixels have v=0 at the top; FBOs have v=0 at the bottom.
         text = text.replace('texture(u_texture,', 'sample_source(')
-        pos = text.index('void ')
+        # The material's light map and GL fragment coordinates are both bottom
+        # up, so their screen-space lookup needs no uploaded-image flip.
+        pos = re.search(r'^(?:void|vec[234]|float)\s+\w+\s*\(', text, re.M).start()
         text = text[:pos] + '''uniform bool u_flip_source;
 vec4 sample_source(vec2 uv) {
     return texture(u_texture, vec2(uv.x, u_flip_source ? 1.0-uv.y : uv.y));
@@ -61,6 +65,7 @@ def build(output, compiler='emcc', scene=None):
                '-I', str(ROOT / 'snesrecomp-go/runtime/src/core'),
                'tools/action_editor/compositor_preview.c',
                'tools/action_editor/room_preview.c', 'tools/action_editor/room_scene.c',
+               'tools/action_editor/receiver_preview.c',
                    *(ROOT / 'tools/action_editor/environment_sources.txt').read_text().splitlines(),
                'src/action/action_scene_snapshot.c', 'src/action/action_room_scene.c',
                'src/action/action_bg_world.c', 'src/diorama/diorama_capture_blend.c',
@@ -72,7 +77,7 @@ def build(output, compiler='emcc', scene=None):
                '-sSTACK_SIZE=1048576', '-sINITIAL_MEMORY=67108864', '-sALLOW_MEMORY_GROWTH=0',
                *['-Wl,--export=DioramaPreview_' + x for x in exports],
                *['-Wl,--export=RoomPreview_' + x for x in
-                 ('Load', 'Configure', 'Policy', 'Render', 'Reset', 'Width', 'Height', 'Uploads', 'Hash', 'SkyboxSource', 'SkyboxRoom', 'LoadSkybox', 'EnableEffects', 'EffectCount', 'EffectHash', 'EffectVertices', 'ConfigureEffects', 'RecipeErrorLine', 'SourceValue', 'MemberCount', 'MemberValue', 'CatalogueCount', 'CatalogueValue', 'CatalogueMemberValue', 'CatalogueGuideCount', 'CatalogueGuideValue', 'KindName', 'RayFieldText', 'RayFieldMapScale', 'AtmosphereFieldText', 'CastleFieldText', 'GlowFieldText', 'ArcFieldText', 'ProjectileFieldText', 'SurfaceFieldText', 'MarshFieldText', 'MoonFieldText', 'WaterFieldText', 'WaterFieldMapScale', 'ReachSupported', 'CollisionGrid', 'SetReceivers', 'EventCount', 'EventKind', 'SetEvent', 'PreviewBinding')],
+                 ('Load', 'Configure', 'Policy', 'Render', 'Reset', 'Width', 'Height', 'CameraX', 'Uploads', 'Hash', 'SkyboxSource', 'SkyboxRoom', 'LoadSkybox', 'EnableEffects', 'EffectCount', 'EffectHash', 'EffectVertices', 'ConfigureEffects', 'RecipeErrorLine', 'RecipeError', 'SourceValue', 'MemberCount', 'MemberValue', 'CatalogueCount', 'CatalogueValue', 'CatalogueMemberValue', 'CatalogueGuideCount', 'CatalogueGuideValue', 'KindName', 'RayFieldText', 'RayFieldMapScale', 'AtmosphereFieldText', 'CastleFieldText', 'GlowFieldText', 'ArcFieldText', 'ProjectileFieldText', 'SurfaceFieldText', 'MarshFieldText', 'MoonFieldText', 'WaterFieldText', 'WaterFieldMapScale', 'ReachSupported', 'CollisionGrid', 'SetReceivers', 'LoadPlayer', 'ReceiverStyle', 'PickReceiver', 'EventCount', 'EventKind', 'SetEvent', 'PreviewBinding')],
                '-o', str(wasm)]
     subprocess.run(command, cwd=ROOT, env=compiler_environment(compiler), check=True)
     template = (ROOT / 'tools/action_editor/compositor_preview.html').read_text()

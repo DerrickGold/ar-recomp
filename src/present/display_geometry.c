@@ -87,6 +87,12 @@ void DisplayGeometry_SetAutoVerticalBudget(int budget) {
   s_geometry.auto_vertical_budget = budget;
 }
 
+void DisplayGeometry_SetOutputSize(int width, int height) {
+  if (width <= 0 || height <= 0) return;
+  s_geometry.output_width = width;
+  s_geometry.output_height = height;
+}
+
 void DisplayGeometry_SetVertical(int extra_top, int extra_bottom) {
   s_geometry.extra_top = extra_top;
   s_geometry.extra_bottom = extra_bottom;

@@ -699,9 +699,11 @@ typedef struct SrPpuFrameResetRequest {
 #define SR_PPU_OBJ_CAPTURE_WINNERS UINT32_C(0x00000004)
 #define SR_PPU_OBJ_CAPTURE_RELOCATED UINT32_C(0x00000002)
 
-/* Presentation-only per-OAM-owner transform. 256 is identity; addition is
+/* Presentation-only per-OAM-owner transform. Multiply spans 0..1024 (0..4x),
+ * with 256 as identity; addition is
  * an 8-bit channel amount, scaled by the current display brightness. */
 #define SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS UINT32_C(0x00000008)
+#define SR_PPU_OBJ_COLOR_MULTIPLY_MAX UINT16_C(1024)
 typedef struct SrPpuObjColorTransform { uint16_t multiply[3], add[3]; } SrPpuObjColorTransform;
 typedef struct SrPpuObjCaptureRequest {
     uint32_t struct_size;
@@ -890,7 +892,9 @@ typedef struct SrPpuVirtualTilemapRequest {
 
 /* Presentation-only 8x8 edits. Coordinates use the corresponding virtual
  * tilemap's camera and live raster scroll. A zero lookup result keeps the
- * ordinary tile. REPLACE supplies a tile (or BLANK); otherwise only black
+ * ordinary tile. REPLACE supplies a tile (or BLANK) at its actual world
+ * position, taking precedence over mirror/repeat/clamp edge filling;
+ * unpainted positions retain their configured fallback. Otherwise only black
  * mask bits change. Transparent bits suppress artwork in all captured bands,
  * including replacement/black pixels. Masks are in displayed tile coordinates, MSB at left,
  * before character flips. Bands are 0=far, 1=ordinary, 2=high.

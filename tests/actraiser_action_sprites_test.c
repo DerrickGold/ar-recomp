@@ -219,6 +219,36 @@ static void Scan(void) {
   assert(ActRaiser_ObjectVisibilityScanWide(&cpu) == RECOMP_RETURN_NORMAL);
   assert(cpu.S == 0x201);
 }
+static void TestReceiverOwnership(void) {
+  /* The real emitter must retain non-attacking enemies/props in both native
+   * OAM and the extended apron. These are flags observed in Kassandora. */
+  const uint16_t flags[] = {0, 0x10, 0x30, 0x400, 0x410, 0x430};
+  for (unsigned i = 0; i < sizeof(flags) / sizeof(flags[0]); ++i) {
+    Reset(64);
+    s_ppu.margin_left = s_ppu.margin_right = 120;
+    s_apron = (ActionApronGeometry){120, 64};
+    Object(8, 40, 2, 1); /* Player. */
+    const unsigned obj = Object(9, 40, 2, 2);
+    Write(obj + kActRaiserActionObject_WorldX, 370);
+    Write(obj + kActRaiserActionObject_Flags, flags[i]);
+    Scan();
+    ActRaiserSpriteOwnership_Upload(1, 1, g_ram + kActRaiserOamShadow);
+    const ActRaiserSpriteOwnership owner = ActRaiserSpriteOwnership_Presented(1, 1);
+    assert(owner.valid);
+    unsigned player = 0, objects = 0;
+    for (unsigned slot = 0; slot < kActRaiserSpriteSlots; ++slot) {
+      if (owner.slots[slot] == kActRaiserSprite_Player) ++player;
+      if (owner.slots[slot] != kActRaiserSprite_Enemy) continue;
+      ++objects;
+      assert(owner.world_x[slot] == 370 && owner.world_y[slot] == 168);
+    }
+    assert(player == 2 && objects == 2);
+    assert(ActionApron_Count() == 2);
+    const ActionApronReceiver *apron = ActionApron_Receivers();
+    for (int part = 0; part < ActionApron_Count(); ++part)
+      assert(apron[part].role == kActRaiserSprite_Enemy && apron[part].x == 370 && apron[part].y == 168);
+  }
+}
 static void TestCaptureGuardParts(void) {
   /* Includes Aitos' X=370 large bamboo tile straddling the 376px scanout
    * edge, wholly outside parts, left-edge straddlers and finite guard limits. */
@@ -271,6 +301,46 @@ static void TestFullPoolStillUpdatesActivation(void) {
         !(Read(filling + kActRaiserActionObject_Flags) & kActRaiserObjectFlag_OutsideActivation));
     assert(Read(outside + kActRaiserActionObject_Flags) & kActRaiserObjectFlag_OutsideActivation);
     assert(!(Read(inside + kActRaiserActionObject_Flags) & kActRaiserObjectFlag_OutsideActivation));
+  }
+}
+static void TestFittedCameraPreservesAuthenticActivation(void) {
+  /* Bloodpool 02:06 fits the wide view inside the room before the player
+   * reaches its right-hand door. $0400 kills the player before the door can
+   * trigger if activation follows only that displaced presentation window.
+   * Exercise both edges, other actors, and the independent fidelity switch. */
+  for (unsigned right = 0; right < 2; ++right)
+  for (unsigned wide = 0; wide < 2; ++wide) {
+    Reset(64);
+    g_settings.ws_margin_activation = wide;
+    g_ram[kActRaiserWram_MapGroup] = kActRaiserMapGroup_Bloodpool;
+    g_ram[kActRaiserWram_CurrentMap] = 6;
+    s_ppu.margin_left = s_ppu.margin_right = 120;
+    Write(kActRaiserWram_Bg1Width, 768);
+    Write(kActRaiserWram_Bg1CameraX, right ? 354 : 158);
+    const unsigned player = Object(8, 40, 1, 1);
+    const unsigned native = Object(9, 40, 1, 2);
+    const unsigned margin = Object(10, 40, 1, 3);
+    const unsigned outside = Object(11, 40, 1, 4);
+    const unsigned above = Object(12, -40, 1, 5);
+    Write(kActRaiserWram_ActionCameraSubject, player);
+    Write(kActRaiserWram_PlayerHandler, 0x9832);
+    Write(player + kActRaiserActionObject_WorldX, right ? 746 : 22);
+    Write(native + kActRaiserActionObject_WorldX, right ? 748 : 20);
+    Write(margin + kActRaiserActionObject_WorldX, right ? 250 : 500);
+    Write(outside + kActRaiserActionObject_WorldX, right ? 900 : (uint16_t)-132);
+    Write(above + kActRaiserActionObject_WorldX, right ? 746 : 22);
+    const unsigned objects[] = {player, native, margin, outside, above};
+    for (unsigned i = 0; i < 5; ++i)
+      Write(objects[i] + kActRaiserActionObject_Flags,
+          0x20 | kActRaiserObjectFlag_OutsideActivation);
+    Scan();
+    for (unsigned i = 0; i < 5; ++i) {
+      const bool active = i < 2 || (i == 2 && wide);
+      assert(Read(objects[i] + kActRaiserActionObject_Flags) ==
+          (0x20 | (active ? 0 : kActRaiserObjectFlag_OutsideActivation)));
+    }
+    /* Gameplay activation must not expand the drawing/OAM window. */
+    assert(s_position_count == 1 && Read(kActRaiserOamShadow + 2) == 3);
   }
 }
 static void TestVerticalPartsCannotDisplaceNativeParts(void) {
@@ -422,6 +492,8 @@ static void TestAutoDrawIgnoresManualProfile(void) {
 }
 
 int main(int argc, char **argv) {
+  TestFittedCameraPreservesAuthenticActivation();
+  TestReceiverOwnership();
   TestAutoDrawIgnoresManualProfile();
   TestCaptureGuardParts();
   if (argc == 2 && !strcmp(argv[1], "sim-bubbles")) {

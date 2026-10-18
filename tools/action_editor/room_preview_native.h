@@ -14,6 +14,7 @@ int RoomPreview_ConfigureEffects(unsigned size);
 void RoomPreview_Reset(void);
 unsigned RoomPreview_Width(void);
 unsigned RoomPreview_Height(void);
+int RoomPreview_CameraX(void);
 int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
     int width, int height, float distance, float yaw, float pitch, int skybox, int pixel_aspect);
 #endif

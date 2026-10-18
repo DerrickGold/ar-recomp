@@ -96,6 +96,10 @@ const EmitterMapTools=(()=>{
         y:e.resizeHeight?bounded(fixed.y-(p.y<fixed.y?height:0)+anchorY*height):e.y};
     } else gesture.draft={...e,x:bounded(snapped(e.x+p.x-gesture.start.x,ev)),
       y:bounded(snapped(e.y+p.y-gesture.start.y,ev))};
+    if(['cloud-bank','particle-path'].includes(e.kind)&&e.points&&gesture.corner) {
+      const d=gesture.draft;
+      d.points=e.points.split(/\s+/).map(pair=>{const [x,y]=pair.split(',').map(Number);return `${x*d.width/e.width},${y*d.height/e.height}`;}).join(' ');
+    }
     if(e.native) {
       const d=gesture.draft;
       d.x=Math.max(e.baseX-(e.offsetLimitX||512),Math.min(e.baseX+(e.offsetLimitX||512),d.x));d.y=Math.max(e.baseY-(e.offsetLimitY||512),Math.min(e.baseY+(e.offsetLimitY||512),d.y));
@@ -130,6 +134,17 @@ const EmitterMapTools=(()=>{
       if(e.points) {
         ctx.beginPath();ctx.strokeStyle='#85c6ef';
         e.points.split(/\s+/).forEach((pair,i)=>{const [px,py]=pair.split(',').map(Number);ctx[i?'lineTo':'moveTo'](view.x+(e.x+px)*view.scale,view.y+(e.y+py)*view.scale);});ctx.stroke();
+        if(e.kind==='particle-path') {
+          const points=e.points.split(/\s+/).map(pair=>pair.split(',').map(Number));
+          const end=points.at(-1),before=points.at(-2),start=points[0];
+          if(before) {
+            const angle=Math.atan2(end[1]-before[1],end[0]-before[0]);
+            const x=view.x+(e.x+end[0])*view.scale,y=view.y+(e.y+end[1])*view.scale;
+            ctx.beginPath();ctx.moveTo(x-7*Math.cos(angle-.5),y-7*Math.sin(angle-.5));ctx.lineTo(x,y);
+            ctx.lineTo(x-7*Math.cos(angle+.5),y-7*Math.sin(angle+.5));ctx.stroke();
+            ctx.fillStyle='#85c6ef';ctx.fillRect(view.x+(e.x+start[0])*view.scale-2,view.y+(e.y+start[1])*view.scale-2,4,4);
+          }
+        }
       }
       ctx.strokeStyle=selected?'#fff19b':colors[e.kind]||'#ffe6a0';
       const line=(points,closed=false)=>{

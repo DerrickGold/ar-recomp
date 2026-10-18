@@ -105,6 +105,11 @@ This selects Live world and Available extents, and removes row-band fills so you
 can supply the scenery with tiles. **Reset to room defaults** removes all authored
 policy overrides and restores the room's built-in mirror policy.
 
+Explicit painted tiles (including blank stamps) always take precedence at their
+actual map coordinates, before mirror/repeat/clamp filling. The policy still
+controls unpainted gaps. Use **Live world / painted scenery** when those gaps
+should remain empty instead of being filled from the original room.
+
 Screen bands use half-open rows within 0–224. World bands use this BG's world
 rows and move with its camera. The native planner rejects overlapping bands,
 including screen/world bands that would cross later during camera travel.
@@ -142,19 +147,34 @@ JavaScript **Diorama 3D** view also remains available.
 
 Select **Shared renderer**, choose a room/terrain, then use **Camera & animation**
 to navigate and seek frames (0–65535) in either direction. Drag the preview or use
-arrows to pan. Its view bar controls 4:3/16:9/16:10 output, square/CRT pixel aspect,
+arrows to pan. **Aspect ratio** above the shared view offers 4:3, 16:9, 16:10
+(Steam Deck), 21:9 and 32:9. **Auto (preview area)** follows the available editor
+viewport, including sidebar/window resizing. **Custom monitor…** accepts a
+target width and height, such as 3440×1440 or 1080×1920. These control the actual
+shared compositor projection; the image is fitted into the editor without
+stretching. The preview caps its longest side at 960 pixels to keep rendering
+cost bounded. Monitor dimensions set the aspect, not a resolution benchmark.
+Changing output preserves camera position, player placement and authored data;
+pixel aspect and extra tile coverage remain independent controls.
+
+The view bar also controls square/CRT pixel aspect,
 zoom/tilt, horizontal coverage, 0/32/64 vertical budget, and all three backdrop
 modes. Camera/clock/coverage changes regenerate visible art from the complete
 room; orbit-only changes reuse rasterized surfaces. Existing tile, pixel, depth,
 alpha, scenery and framing edits feed the production INI resolver.
+
+Automatic distance fits within the captured vertical rows as well as the
+requested width, including CRT pixel aspect. Painting farther above or below
+the room does not increase that row budget. Fully captured short rooms keep
+their framing; deliberate zoom-out or orbit can still reveal the scene edges.
 
 This view covers **scenery and environmental sources**, including animated
 tiles/raster phases, priority bands, copied edge tiles, independent vertical
 clips, bounded and named skyboxes,
 and Aitos's periodic waterfall page. The native forest, cave, marsh, castle and
 Aitos environmental kernels, exposure and camera-local waterfall sections also
-run in this view. Clock-based accent events and optional player/enemy reference
-silhouettes are available. The preview omits actual actor artwork/HUD,
+run in this view. Clock-based accent events and a placeable ROM player sprite
+are available. The preview omits other actors and HUD,
 gameplay-driven transitions, final CRT/heat and frame generation. The preview
 camera uses auto-fit plus its own controls; it does not replay the game's reactive camera. Captures
 remain developer comparison fixtures, not an authoring requirement.
@@ -236,13 +256,28 @@ offscreen cells do not consume the native actor/decoration pools. Increase
 density and radius independently, or change the pattern/age tint in the inspector.
 
 Lights expose **Override light receivers**, and exposure/cave/castle sources
-expose **Override dimming receivers**. Select scenery, player and enemies
-independently. Clearing an override restores inherited behavior. Explicit light
+expose **Override dimming receivers**. Select scenery, player and **Enemies &
+objects** independently. Clearing an override restores inherited behavior. Explicit light
 receivers move scenery illumination under actors and sample selected objects at
 their native hot point; every OAM part and extended-apron part receives the same
 object tint. This is not per-pixel shadow tracing. Native ownership identifies
-players and attacking enemy objects without guessing from artwork. Unowned
-decorations, pickups and other objects keep their original color.
+the player and non-player action objects without guessing from artwork or
+combat flags. The enemies/objects receiver includes pickups and sprite-based
+scenery props; HUD icons, spell controller slots and unowned UI remain unchanged.
+
+Fillmore's front forest rays and Bloodpool's moon rays receive the calibrated
+light on scenery, player and enemies by default. Rear forest rays keep their
+atmospheric volume without adding the same sunlight twice. The inspector shows
+these inherited targets even when the override is off. Overrides still allow
+each receiver group to be selected independently.
+
+On sprites, dimming sets the ambient illumination and nearby lights add colored
+illumination before the result multiplies the original palette. For example,
+25% ambient plus 75% white light restores the original colors. A warm torch
+both brightens and tints the artwork without filling its dark details with a
+flat color wash. Player, enemy and extended-apron sprites use the same rule in
+the game and shared preview, with the existing strength, falloff and receiver
+controls. Shared Diorama scenery uses the same illumination rule.
 
 Authored dimming regions apply a BG1-plane wash; higher priority scenery is
 painted afterward. Native cave/castle dimming retains its existing BG1 coverage
@@ -250,15 +285,31 @@ and distance ramp. Independent object dimming uses the same region or ramp.
 Receiver effects require Environmental effects; moving accent lights also obey
 Action lighting, and their trails retain Action particles ownership.
 
-**Receiver & event preview** offers movable blue player/orange enemy reference
-silhouettes for testing these choices. **Actor accent** selects one of 19
+**Player & receiver preview** uses the actual idle player, extracted automatically
+from the ROM when building the editor. The production PPU decodes both facings;
+the normal OBJ layer then supplies depth, priority occlusion, filtering and the
+game's rim shader. Lighting samples the native sprite hot point, with the same
+integer color transform as gameplay. **Rim lighting** starts from the bundled
+game setting and can be toggled independently. Turning **Environmental effects**
+off provides an unlit comparison.
+
+Right-click a BG1 map point and choose **Preview player here**, or choose **Place
+player** above the shared view and click where its feet should go. Shift-click
+or Shift-drag also positions the player directly in that view, respecting zoom,
+tilt and aspect. **Player settings…** opens the modal for exact coordinates,
+facing and visibility. The optional second player sprite uses **Enemies &
+objects** receiver settings for an artwork-identical comparison; Alt+Shift-click
+or drag places it. These are temporary stand-ins, with no collision, physics or
+game AI. Stationary artwork is cached; only changed sprite rectangles upload.
+
+**Actor accent** selects one of 19
 recognized families, with event position, velocity, start frame, duration and
 seed. **Start in current view** positions it and starts its clock. Seek or play
 to inspect one representative native flight, charge, strike or landing phase.
 It does not run enemy AI, spawn game actors, or show their sprite artwork.
 Selecting the resulting source exposes enable/tint/intensity and, where present,
 light receiver controls. Actor source ID zero targets that family throughout
-the selected room/terrain, including future native generations. Event/probe
+the selected room/terrain, including future native generations. Event/player
 positions are temporary; source edits persist in the effects document.
 
 **Place on map** uses the selected BG and places the chosen preset at a click.
@@ -437,10 +488,32 @@ dim-player=1
 dim-enemies=1
 ```
 
-`enabled` is 0/1; intensity is 0–4; torch reach is 0.25–4. Emitter positions
+`enabled` is 0/1; intensity is 0–16 for lights and 0–4 for particles;
+torch reach is 0.25–4. Above intensity 4, light radiance increases while the
+falloff stays intact. Torches (native sconces and placed emitters) default to
+**intensity 4, reach 2**; explicit values still override these defaults.
+
+`illumination` (0–16) controls light received by scenery, the player and enemies,
+independently of visible rays, additive attack glow and particles. When absent,
+it inherits the response in `assets/effects/light-response.json`, shared by the
+native renderer and editor. Torch response is 1 so its 4/2 tuning is applied
+once. Other material lights use family-specific gains: local glows 3, broad
+daylight/window light 2, lava 2.5, wet reflections 1.5. Actor glows use 3 and
+lightning/sword beams 2 when receiver lighting is enabled; their default
+additive overlays keep the original brightness. The four native player spells
+also retain their additive glow and phase envelopes. Alpha waterfall mist
+keeps a neutral response. Forest and moon material light use a 2x response;
+their atmospheric volumes keep their authored intensity. The skybox projection
+is published before building the shared material light map, so BG2-anchored moon
+light also illuminates foreground scenery in skybox-only mode. Matching player
+and enemy targets share one receiver geometry build. This uses the existing
+lighting passes with no GPU readback. Shift-click the
+Illumination control to restore the family default (or the loaded project value).
+
+Emitter positions
 are integer pixels (−2048 to 16384), width/height 4–512 (up to 16384 for particle
 and dimming regions), mote count 1–128 (region density 1–16),
-and lifetime 16–4096 frames. Defaults are enabled, intensity/reach 1, white tint,
+and lifetime 16–4096 frames. Other defaults are enabled, intensity/reach 1, white tint,
 position 0,0, area 96×64, 24 motes and a 240-frame cycle. Unknown versions,
 properties, kinds, duplicate records and non-finite values are rejected.
 Optional mote fields preserve those defaults when absent: `size-min`/`size-max`
@@ -454,14 +527,15 @@ Actor/projectile accents retain their existing settings and native bindings.
 Overrides are terrain-specific even where scenery edits share
 equivalent US/EU layouts.
 
-Each room/terrain permits 16 enabled emitters and at most 4096 added vertices;
+Each room/terrain permits 96 enabled emitters and at most 4096 added vertices;
 the file holds at most 256 records/128 KiB. Conservative costs are 97 vertices
 per light, four per mote and 296 per free-mist volume. Ground mist reserves
 `(ceil(width / 16) + 1) × 45` vertices for the worst support fragmentation,
 independent of the current camera. Each span uses three density slices and at
-most 144 indices. Over-budget documents are
-rejected as a whole. The separate authored list cannot consume the 16 native
-actor accents or 27 native decoration slots. Geometry shares retained pass
+most 144 indices. Over-budget documents are rejected as a whole, with the
+affected room, required count and limit shown beside the map. The separate
+authored list cannot consume the 16 native actor accents or 27 native decoration
+slots. Geometry shares retained pass
 batches; emitters create no textures or per-frame heap allocations. The status
 line reports actual submitted geometry/draws/uploads/allocations and CPU time,
 which is not a GPU timing or Steam Deck/D3D12 performance measurement. New family
@@ -529,6 +603,22 @@ Terrain effects and large particle regions stay attached to terrain rather than
 actors. Receiver checkboxes independently control scenery, player and enemy
 lighting; excluding scenery light does not suppress companion particles.
 
+In the shared Diorama renderer, scenery and actor receivers apply ambient
+brightness plus incoming colored light to the original artwork. A white light
+can restore the original palette in a dimmed area; a colored torch both reveals
+detail and tints it. BG1 normal, priority and far tiles share a resident GPU
+illumination map. Filtering and lighting run in the same material draw, while
+explicit ray volumes and particles retain their depth passes. No CPU pixel
+readback is required. Renderers without custom shaders keep the legacy overlays.
+
+Light sources accept **Intensity 0–16** in the effect modal and exported INI.
+Values through 4 retain their established opacity curve; above 4, brightness
+increases while the falloff keeps its shape. Scenery, player and enemy receivers
+allow up to 4x illumination before output colors saturate. Try 4–8 for stronger
+torch spill or chamber lighting, then tune the tint and reach independently.
+Particle-only effects keep their 0–4 range. Raising intensity does not add
+geometry, passes, texture memory or readbacks.
+
 Use **Flame / fire with embers** for a reusable warm fire, or **Torch** for the
 shared native flame profile with independent spill reach. **Cloud bank** supplies
 layered moving clouds. All can be configured without new C code. Later-stage
@@ -537,10 +627,13 @@ they are authoring starting points, not final art approval for those stages.
 
 #### Copy and repeat placement
 
-Select an effect marker; Shift-click adds more markers. Ctrl/Cmd-C copies the
+Select an effect marker; Ctrl/Cmd-click adds more markers. Ctrl/Cmd-C copies the
 selection. Ctrl/Cmd-V enters repeat placement: click to paste, Escape to finish.
-The right-click menu also offers copy/paste. Each paste gets fresh identities,
-preserves spacing/settings and is one undoable operation. Individual native
+The right-click menu also offers copy/paste. The first copied marker lands at
+the clicked world position; the remaining markers retain their relative spacing.
+Copy, placement and validation feedback appears beside the map. Pasted markers
+are selected and their guides made visible. Each paste gets fresh identities,
+preserves settings and is one undoable operation. Individual native
 torches copy into authored torches; their flame profile comes from the destination
 room's shared glow field. Actor attachments copy their selector and local offset.
 BG1/BG2 effects stay in their owning coordinate system. Whole compound fields are
@@ -598,6 +691,83 @@ can stop that native effect even though its default marker remains available.
 Keep `action-effects.ini` beside `settings.ini`. It stores semantic effect
 recipes and sparse overrides; `diorama-layers.ini` stores the room's layer,
 framing and scenery edits. Preserve both files when moving an authored room.
+Kassandora rooms `03/01`–`03/06` ship ordinary emitter and glow-field definitions
+in this document for all three terrain profiles. Their sand areas, haze banks,
+light boxes, bounced light, overhead fans, dust and brazier sources appear on the
+map and use the same modal/drag/copy controls as newly placed effects. Act 2
+(`03/03`–`03/06`) lights and dimming include the player and enemies/objects by
+default in every terrain profile, as do the temple and Pharaoh presets. Act 1
+keeps its scenery-only lighting. Receiver controls remain independently editable.
+The stage presets also provide desert, temple and Pharaoh compositions.
+
+**Rolling ground dust** is a cloud bank with an optional `points` contour.
+Trace the ground in its effect modal, or edit up to 16 local X,Y pairs in
+increasing X order. The map shows the path and the maximum lift above it.
+Gusts build on rising slopes and carry across crests before settling. `carry`
+controls the downwind settling distance (0 hugs the ground); drift controls
+wind direction and travel, and amplitude controls lift. Optional `particles`
+lift small grains from this same path with a mix of hops and longer flights.
+Their count, size, wander, end tint and seed are editable; zero disables grains.
+Lifetime, strand count, tint and intensity control the cloud underneath them.
+Resizing scales the path, and size reset restores the loaded path and bounds.
+These are authored BG1 guides, so redraw them when changing the terrain.
+Clearing the points also clears carry and grains, returning the bank to its
+original airborne cloud behavior.
+The shared renderer uses a bounded mesh without terrain scans or GPU readbacks.
+
+**Torch motes** are optional particles on an ordinary placed `torch`. They
+float within its spill-light ellipse and fade toward the edge. Set the mote
+count, size, end tint, travel, wander and lifetime in the emitter modal; use
+Reach and the shared glow definition to change the light pool. The mote area
+follows that radius (up to 256 pixels per axis). Existing torch embers remain
+independent. Older torch recipes have zero ambient motes and keep their look.
+Kassandora sconces use wider amber spill profiles and slow golden motes.
+Act 1's soft sun glare uses an ordinary BG2 light gradient with clipped edges.
+
+**Particle paths** trace ordered local X,Y points from source to destination.
+Use them for crest sand, downhill slides and ceiling grit. Unlike ground-cloud
+contours, routes may travel in either direction or vertically. Dust accelerates
+along the route; the `glints` pattern stays at fixed points on the traced art.
+`activity` controls the active fraction of each cycle, leaving quiet intervals.
+Count, lifetime, grain size, wander, seed and start/end tint remain editable.
+Trace on the map, drag or resize its bounds, copy/paste, and reset like other
+emitters. Attached paths use actor-local points; map tracing is disabled while
+attached. `gust` links path density and ground-cloud density to a shared smooth
+room wind envelope without changing particle positions when scrubbing.
+`twinkle` (Grain glint strength, 0–1) briefly brightens the existing moving
+grains on paths, particle areas and ground-cloud contours. It adds no geometry
+or draw passes; zero preserves the previous appearance. Clearing a cloud's
+contour also clears its glints. This differs from the stationary `glints`
+pattern used on temple decorations.
+
+The **Antlion emergence dust** preset attaches an ordinary cloud bank to
+family `C66F`, parent `C66F`, animation `5000`, state 5 and visuals 4–6. These
+identify the native sand-mound child, not the moving boss body or its shots.
+The native mound origin stays at ground Y720 and retires when its parent enters
+buried state 2 (`$00:C7A0–C7D6`). The cloud therefore follows the mound's
+position and visibility without writing game memory or allocating game objects.
+Its offset, area, tint, density and billow use the existing actor attachment
+controls and preview; the shipped definition covers all three terrain profiles.
+
+**Background heat shimmer** is a `heat-haze` region placed on BG2. It displaces
+the existing background UV samples in the shared diorama renderer, including
+skybox-only mode; actors and foreground textures remain sharp. Amplitude and
+intensity control displacement (capped at four native pixels), lifetime sets
+the cycle, and the rectangle feathers the edges. Up to four regions are
+supported; overlapping envelopes take the strongest displacement. This uses
+a fixed mesh and the resident skybox shader, with no scene readback or extra
+render target. The flat game view does not apply these BG2-only regions.
+
+Placed torches expose **Moving torch shadows**. Their spill uses the shared
+scenery coverage field with a slight source sway. The direct spill is softly
+occluded while bounced light and the flame core stay bright. Kassandora also
+ships ordinary cloud-bank layers, ceiling-grit paths and sparse gold-glint paths. These are available through the stage presets;
+paths should be retraced if their supporting artwork changes.
+
+Release packages carry `defaults/action-effects.ini`. It follows the same
+backed-up content upgrade policy as `diorama-layers.ini` below. Source checkouts
+use the root document directly.
+
 The game reads these files on launch. Exported recipes contain settings and
 source identities, rather than rendered vertices or particle states.
 
@@ -1069,6 +1239,13 @@ Framing changes use Undo/Redo and appear in **Export level INI**. Matching BG1
 terrain shares the setting; different regional layouts can be tuned separately.
 The existing **Native frame controls → Camera X / Y** only move the preview and
 are not exported.
+
+In **Shared renderer**, horizontal panning stops when the projected playfield
+reaches the finite room edge. The camera and captured tiles use the same stop,
+so further dragging or arrow input does not zoom the scene. Aspect ratio,
+distance, tilt, framing and actual pasted edge tiles determine that limit;
+empty editor workspace does not. The Camera X field reports the stopped
+position. Small rooms retain their existing framing.
 
 **Scenery & edge space → Trim unused edge space** removes unused authoring
 margins while preserving the original map and all added tiles. If no tiles

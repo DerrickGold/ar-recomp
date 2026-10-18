@@ -213,7 +213,7 @@ bool AppendForestRays(ActionEffectGeometryWriter *writer, const ActionEffectInst
       const float source_y = opening->fan ? field->fans[opening->fan].y : P(IsolatedOriginY);
       const float root_x = opening->x - ray.slope * source_y + ray.sway;
       ActionSceneryShadow_Apply(writer, first_vertex, effect, root_x - effect->world_x,
-                                source_y + ray.root_y - effect->world_y, true, project_point,
+                                source_y + ray.root_y - effect->world_y, true, 1, project_point,
                                 userdata);
     }
     if (ray.member) {

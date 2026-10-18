@@ -96,6 +96,8 @@ typedef enum ActionEffectKind {
   kActionEffect_AuthoredGradient,
   kActionEffect_AuthoredFlame,
   kActionEffect_AuthoredTorch,
+  kActionEffect_AuthoredParticlePath,
+  kActionEffect_AuthoredHeat,
   kActionEffect_KindCount,
 } ActionEffectKind;
 
@@ -275,7 +277,10 @@ enum {
    * seven ambient fields and six contact bursts. These host records never
    * consume native objects or the separate 16-record actor-effect budget. */
   kActionSceneDecorationMaxInstances = 27,
-  kActionAuthoredMaxInstances = 16,
+  /* Room-wide authored sources need editing headroom beyond the shipped
+   * compositions. Geometry stays independently bounded below, so additional
+   * small sources do not enlarge the per-room render budget. */
+  kActionAuthoredMaxInstances = 96,
   kActionAuthoredMaxVertices = 4096,
   kActionAuthoredMaxIndices = 24576,
   kActionSceneEffectObserverTrackCount = 80,
@@ -309,9 +314,11 @@ enum {
 enum { kActionReceiver_Scenery=1, kActionReceiver_Player=2, kActionReceiver_Enemies=4 };
 typedef struct ActionEffectTuning {
   float intensity, reach;
+  float illumination; /* Incoming light only; unset inherits the family response. */
   uint32_t color;
   uint8_t active;
   uint8_t light_receivers, dim_receivers, light_receivers_set, dim_receivers_set;
+  uint8_t illumination_set;
 } ActionEffectTuning;
 
 /* Authored motes only. Travel is world pixels per particle cycle; spread is
@@ -328,11 +335,15 @@ typedef struct ActionEffectParticleStyle {
 typedef enum ActionParticlePattern {
   kActionParticle_Motes, kActionParticle_Dust, kActionParticle_Leaves,
   kActionParticle_Snow, kActionParticle_Sand, kActionParticle_Insects,
-  kActionParticle_Scarabs, kActionParticle_Sparks, kActionParticle_Count,
+  kActionParticle_Scarabs, kActionParticle_Sparks, kActionParticle_Glints, kActionParticle_Count,
 } ActionParticlePattern;
 enum { kActionParticleCellSize=256, kActionParticleMaxCells=64, kActionContourMaxPoints=16 };
 typedef struct ActionEffectFieldStyle {
   float angle, fan, softness, drift, amplitude;
+  float carry; /* Ground dust: downwind distance over which lifted dust settles. */
+  float gust, activity; /* Shared wind envelope; active fraction of a particle cycle. */
+  float twinkle; /* Brief highlights on existing grains; does not change their motion. */
+  uint8_t shadows; /* Placed torch spill uses the scenery shadow mask. */
   uint8_t strands, pattern, placement, point_count;
   struct {float x,y;} points[kActionContourMaxPoints];
   /* Exposure boxes keep legacy intensity-based dimming when unset. */

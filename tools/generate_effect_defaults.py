@@ -2,6 +2,8 @@
 """Embed canonical effect text without introducing another source of defaults."""
 import argparse
 import json
+import math
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +32,29 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
+    lights = json.loads((ROOT / 'assets/effects/light-response.json').read_text())
+    names, symbols = set(), set()
+    lines = ['/* Generated from assets/effects/light-response.json. */\n']
+    for light in lights:
+        name, symbol, gain = light['kind'], light['symbol'], light['illumination']
+        intensity, reach = light.get('intensity', 1), light.get('reach', 1)
+        receivers = light.get('receivers', 1)
+        if (not re.fullmatch(r'[a-z-]+', name) or not re.fullmatch(r'[A-Za-z]+', symbol)
+                or name in names or symbol in symbols or type(receivers) is not int or not 0 <= receivers <= 7 or any(
+                    type(value) not in (int, float) or not math.isfinite(value)
+                    or not low <= value <= high
+                    for value, low, high in ((gain, 0, 16), (intensity, 0, 16), (reach, .25, 4)))):
+            parser.error('Invalid or duplicate light-response entry')
+        names.add(name); symbols.add(symbol)
+        lines.append(f'ACTION_LIGHT_RESPONSE({symbol}, "{name}", {float(gain)}f, '
+                     f'{float(intensity)}f, {float(reach)}f, {receivers})\n')
+    target = ROOT / 'src/action/action_light_response.inc'
+    expected = ''.join(lines)
+    if args.check:
+        if not target.exists() or target.read_text() != expected:
+            parser.error('Bundled light response is stale; run tools/generate_effect_defaults.py')
+    else:
+        target.write_text(expected)
     documents = [
         ('marsh-field', 'action_marsh_field', '[field:02:01:0:marsh-field:B1000000]'),
         ('moon-field', 'action_moon_field', '[field:02:01:0:moon-field:B1000002]'),

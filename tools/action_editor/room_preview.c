@@ -1,8 +1,10 @@
+#include "action/action_heat.h"
 #include "action/action_floor_support.h"
 #include "action/action_effect_members.h"
 #include "action/action_effect_receivers.h"
 #include "room_scene.h"
 #include "room_preview_native.h"
+#include "receiver_preview.h"
 #include "action/action_effect_source.h"
 #include "diorama/diorama_snapshot.h"
 #include "diorama/diorama_rom_backdrop.h"
@@ -33,6 +35,7 @@ static const int kPlanes[] = {kDioramaPlane_Backdrop, SR_PPU_OVERLAY_BG1,
 static bool s_cached;
 static int s_x, s_y, s_extra, s_vertical;
 static uint32_t s_frame;
+static EditorRoomCamera s_camera;
 static unsigned s_uploads;
 static uint64_t s_bg2_revision;
 static ArRenderTexture s_page, s_view;
@@ -60,13 +63,32 @@ void RoomPreview_SetProjectionOffsets(const ArRenderPointF *planes, ArRenderPoin
 }
 static bool s_effects_enabled = true;
 static unsigned s_effect_vertices;
-static bool s_probes;
-static int s_probe_x[2],s_probe_y[2];
+static EditorReceiverPreviewSettings s_receivers;
+static bool s_receiver_rim;
+static DioramaProjection s_receiver_projection;
 static ActionReceiverLighting s_receiver;
-int RoomPreview_SetReceivers(int enabled,int player_x,int player_y,int enemy_x,int enemy_y) {
-  if(player_x<-2048||player_x>16384||player_y<-2048||player_y>16384||
+int RoomPreview_LoadPlayer(unsigned size) {
+  return size<=DioramaPreview_Capacity() && EditorReceiverPreview_Load(DioramaPreview_Input(),size);
+}
+int RoomPreview_ReceiverStyle(unsigned flipped,unsigned rim) {
+  if(flipped>1||rim>1)return 0;
+  s_receivers.flipped=flipped!=0;s_receiver_rim=rim!=0;return 1;
+}
+int RoomPreview_SetReceivers(int mask,int player_x,int player_y,int enemy_x,int enemy_y) {
+  if(mask<0||mask>3||player_x<-2048||player_x>16384||player_y<-2048||player_y>16384||
       enemy_x<-2048||enemy_x>16384||enemy_y<-2048||enemy_y>16384)return 0;
-  s_probes=enabled!=0;s_probe_x[0]=player_x;s_probe_y[0]=player_y;s_probe_x[1]=enemy_x;s_probe_y[1]=enemy_y;return 1;
+  s_receivers.mask=(unsigned)mask;
+  s_receivers.x[0]=player_x;s_receivers.feet_y[0]=player_y;
+  s_receivers.x[1]=enemy_x;s_receivers.feet_y[1]=enemy_y;return 1;
+}
+int RoomPreview_PickReceiver(float screen_x,float screen_y) {
+  ArRenderPointF point;
+  if(!s_room||!EditorReceiverPreview_Pick(&s_receiver_projection,screen_x,screen_y,&point))return 0;
+  const DioramaCapture *capture=EditorRoomScene_Capture(s_room);
+  point.x+=s_x-s_extra;point.y+=s_y-capture->authentic_y0;
+  if(point.x<-2048||point.x>16384||point.y<-2048||point.y>16384)return 0;
+  const int32_t world[2]={(int32_t)lroundf(point.x),(int32_t)lroundf(point.y)};
+  memcpy(DioramaPreview_Input(),world,sizeof(world));return 2;
 }
 unsigned RoomPreview_EventCount(void){return ActionEffectPreview_Count();}
 unsigned RoomPreview_EventKind(unsigned index){return ActionEffectPreview_Kind(index);}
@@ -101,45 +123,28 @@ static bool DrawEffectLayer(RoomEffectPass *pass, uint8_t layer,
         ActionEffectSource_ProjectPoint,ActionEffectSource_ClipBounds,&source,&s_effect_batch)) return false;
     s_effect_vertices += source.count;
     return s_source_draw(DioramaPreview_Device(),&source,pass->projection.diorama_projection,
-        &pass->frame->scenery,blend,1);
+        &pass->frame->scenery,blend,pass->projection.scenery_lighting_only?1.f/kActionReceiverMaxIllumination:1);
   }
   if (!ActionSceneDecorationRender_Build(pass->frame, layer, lighting, particles,
           ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
           &pass->projection, &s_effect_batch)) return false;
   if (!s_effect_batch.index_count) return true;
+  if (pass->projection.scenery_lighting_only)
+    for (int i=0;i<s_effect_batch.vertex_count;++i) {
+      s_effect_batch.vertices[i].color.r/=kActionReceiverMaxIllumination;
+      s_effect_batch.vertices[i].color.g/=kActionReceiverMaxIllumination;
+      s_effect_batch.vertices[i].color.b/=kActionReceiverMaxIllumination;
+    }
   s_effect_vertices += s_effect_batch.vertex_count;
   const ArRenderDrawState state = {.flags = kArRenderDrawState_Blend, .blend = blend};
   return ArRenderDevice_DrawGeometryWithState(DioramaPreview_Device(),
       ArRenderTexture_Invalid(), s_effect_batch.vertices, s_effect_batch.vertex_count,
       s_effect_batch.indices, s_effect_batch.index_count, &state);
 }
-static bool DrawProbes(RoomEffectPass *pass) {
-  ArRenderVertex2D vertices[32];int32_t indices[48];
-  static const float boxes[4][4]={{-3,-28,3,-22},{-6,-21,6,-10},{-5,-9,-1,0},{1,-9,5,0}};
-  for(unsigned role=0;role<2;++role) {
-    ActionEffectInstance e={.world_x=s_probe_x[role],.world_y=s_probe_y[role],
-      .obj_priority=2,.projection_plane=kActionEffectProjectionPlane_Obj};
-    float multiply[3]={1,1,1},add[3]={0};
-    if(s_effects_enabled)ActionEffectReceivers_Sample(&s_receiver,role?kActionReceiver_Enemies:kActionReceiver_Player,e.world_x,e.world_y,multiply,add);
-    const float base[2][3]={{.24f,.48f,.78f},{.75f,.32f,.16f}};
-    ArRenderColorF color={fminf(1,base[role][0]*multiply[0]+add[0]),fminf(1,base[role][1]*multiply[1]+add[1]),fminf(1,base[role][2]*multiply[2]+add[2]),1};
-    for(unsigned box=0;box<4;++box) {
-      const unsigned n=role*16+box*4;
-      for(unsigned corner=0;corner<4;++corner) {
-        vertices[n+corner]=(ArRenderVertex2D){.color=color};
-        if(!ActionEffectProjection_ProjectPoint(&pass->projection,&e,boxes[box][corner&1?2:0],boxes[box][corner&2?3:1],&vertices[n+corner].position))return false;
-      }
-      const int local[]={0,1,2,1,3,2};for(unsigned i=0;i<6;++i)indices[role*24+box*6+i]=n+local[i];
-    }
-  }
-  const ArRenderDrawState state={.flags=kArRenderDrawState_Blend,.blend=kArRenderBlendMode_Alpha};
-  return ArRenderDevice_DrawGeometryWithState(DioramaPreview_Device(),ArRenderTexture_Invalid(),vertices,32,indices,48,&state);
-}
 static void DrawPlaneEffects(void *userdata, int plane, const DioramaProjection *projection) {
   RoomEffectPass *context = userdata;
   if (!context->valid) return;
   context->projection.diorama_projection = projection;
-  if(s_probes && plane==DioramaPlaneForObjectPriority(2) && !DrawProbes(context)){context->valid=false;return;}
   if(!s_effects_enabled)return;
   for (unsigned i = 0; i < sizeof(kDecorationPasses)/sizeof(kDecorationPasses[0]); ++i) {
     const ActionDecorationPass *pass = &kDecorationPasses[i];
@@ -149,6 +154,19 @@ static void DrawPlaneEffects(void *userdata, int plane, const DioramaProjection 
       context->valid = false; return;
     }
   }
+}
+
+static bool DrawSceneryLight(void *userdata, const DioramaProjection *projection) {
+  RoomEffectPass *pass = userdata;
+  pass->projection.diorama_projection = projection;
+  pass->projection.scenery_lighting_only = true;
+  const unsigned layers[] = {kActionEffectRenderLayer_Bg1Light,
+      kActionEffectRenderLayer_Bg1Plane, kActionEffectRenderLayer_Bg1HighPlane};
+  for (unsigned i = 0; i < sizeof(layers)/sizeof(layers[0]); ++i)
+    if (!DrawEffectLayer(pass, layers[i], kArRenderBlendMode_Add, true, false)) return false;
+  pass->projection.scenery_lighting_only = false;
+  pass->projection.scenery_lighting_in_material = true;
+  return true;
 }
 
 int RoomPreview_SkyboxSource(void) {
@@ -204,6 +222,7 @@ uint32_t RoomPreview_EffectHash(void) { return EditorRoomScene_EffectHash(s_room
 uint32_t RoomPreview_Hash(void) { return EditorRoomScene_Hash(s_room); }
 unsigned RoomPreview_Width(void) { return s_room ? EditorRoomScene_Width(s_room) : 0; }
 unsigned RoomPreview_Height(void) { return s_room ? EditorRoomScene_Height(s_room) : 0; }
+int RoomPreview_CameraX(void) { return s_cached ? s_x : 0; }
 unsigned RoomPreview_Uploads(void) { return s_uploads; }
 void RoomPreview_Reset(void) {
   ArRenderDevice *device = DioramaPreview_Device();
@@ -218,6 +237,7 @@ void RoomPreview_Reset(void) {
   ArRenderDevice_DestroyTexture(device, s_named_texture);
   s_named_texture = ArRenderTexture_Invalid(); s_named_source = 0; s_named_uploaded = false;
   EditorRoomScene_Destroy(s_room); s_room = NULL; s_cached = false;
+  EditorReceiverPreview_Reset();s_receiver_projection=(DioramaProjection){0};
   memset(s_storage, 0, sizeof(s_storage));
 }
 int RoomPreview_Load(unsigned size) {
@@ -267,6 +287,7 @@ unsigned RoomPreview_Policy(int x, int y, uint32_t frame, unsigned defaults) {
 }
 static unsigned s_recipe_error_line;
 unsigned RoomPreview_RecipeErrorLine(void) { return s_recipe_error_line; }
+const char *RoomPreview_RecipeError(void) { return EditorRoomScene_RecipeError(s_room); }
 int RoomPreview_ConfigureEffects(unsigned size) {
   if (!s_room || size > kActionEffectRecipeMaxBytes ||
       !EditorRoomScene_ConfigureEffects(s_room,(char *)DioramaPreview_Input(),size,&s_recipe_error_line)) return 0;
@@ -578,13 +599,24 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
     int width, int height, float distance, float yaw, float pitch, int skybox, int pixel_aspect) {
   if (!s_room || !(distance >= 0.5f && distance <= 2.5f) || !(yaw >= -0.7f && yaw <= 0.7f) ||
       !(pitch >= -0.7f && pitch <= 0.7f) || skybox < 0 || skybox > 2 ||
-      pixel_aspect < 0 || pixel_aspect > 1 || width < 1 || height < 1 ||
+      pixel_aspect < 0 || pixel_aspect > 1 || extra < 0 || extra > 128 ||
+      vertical < 0 || vertical > 64 || width < 1 || height < 1 ||
       width > 2048 || height > 2048) return 0;
   s_uploads = 0; s_effect_vertices = 0;
-  if (!s_cached || x != s_x || y != s_y || frame != s_frame || extra != s_extra || vertical != s_vertical) {
+  s_receiver_projection.valid=false;
+  DioramaView view = {.camera = {.tilt_x = pitch, .tilt_y = yaw},
+    .distance_scale = distance, .camera_framing_weight = 1, .pixel_aspect = pixel_aspect,
+    .visible_width = 256 + 2 * extra, .viewport = {0,0,width,height}};
+  EditorRoomCamera camera;
+  if (!EditorRoomScene_ResolveCamera(s_room, x, y, frame, extra, vertical, &view, skybox, &camera)) return 0;
+  x = camera.x;
+  if (!s_cached || x != s_x || y != s_y || frame != s_frame || extra != s_extra || vertical != s_vertical ||
+      camera.bg_apron_mask != s_camera.bg_apron_mask ||
+      camera.travel.minimum != s_camera.travel.minimum || camera.travel.maximum != s_camera.travel.maximum) {
     s_cached = false;
-    if (!EditorRoomScene_Render(s_room, x, y, frame, extra, vertical) || !Upload()) return 0;
+    if (!EditorRoomScene_Render(s_room, x, y, frame, extra, vertical, &camera) || !Upload()) return 0;
     s_x = x; s_y = y; s_frame = frame; s_extra = extra; s_vertical = vertical; s_cached = true;
+    s_camera = camera;
   }
   if (!DioramaPreview_Begin(width, height)) return 0;
   DioramaCapture capture = *EditorRoomScene_Capture(s_room);
@@ -604,36 +636,44 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
     capture.skybox = &page;
   DioramaScene scene = *EditorRoomScene_Scene(s_room);
   DioramaRenderOptions options = *scene.render;
+  options.rim_light=s_receiver_rim;
   options.resolve_skybox = ResolveSkybox;
   options.draw_resident_skybox = s_skybox_draw;
   options.skybox = (DioramaSkyMode)skybox; scene.render = &options;
-  DioramaView view = {.camera = {.tilt_x = pitch, .tilt_y = yaw},
-    .distance_scale = distance, .camera_framing_weight = 1, .pixel_aspect = pixel_aspect,
-    .visible_width = capture.width, .viewport = {0,0,width,height}};
   const ActionEnvironmentScene *environment = EditorRoomScene_Environment(s_room);
   RoomEffectPass effects = {.frame = EditorRoomScene_Effects(s_room), .valid = true,
     .projection = {.bg1_camera_x = environment->camera_x[0], .bg1_camera_y = environment->camera_y[0],
       .bg2_camera_x = environment->camera_x[1], .bg2_camera_y = environment->camera_y[1],
       .ws_extra = extra, .ws_extra_top = capture.authentic_y0, .scenery_exposure_in_mesh=true,
       .visible_width = capture.width, .snes_height = capture.height, .viewport = view.viewport}};
-  if(s_probes && !ActionEffectReceivers_Prepare(effects.frame,environment->group,environment->room,
+  if(s_receivers.mask && s_effects_enabled && !ActionEffectReceivers_Prepare(effects.frame,environment->group,environment->room,
       environment->camera_x[0],environment->camera_y[0],environment->camera_x[1],environment->camera_y[1],s_effects_enabled,&s_receiver))return 0;
+  const int receiver_plane=DioramaPlaneForObjectPriority(2);
+  if(!EditorReceiverPreview_Capture(DioramaPreview_Device(),&s_receivers,
+      s_effects_enabled?&s_receiver:NULL,environment->camera_x[0],environment->camera_y[0],extra,
+      &capture,&s_textures[receiver_plane],&s_pixels[receiver_plane],&s_uploads))return 0;
   ActionExposureLighting exposure={.origin_x=environment->camera_x[0]-extra-capture.obj_apron,
       .origin_y=environment->camera_y[0]-capture.authentic_y0,
       .width=SR_PPU_SURFACE_MAX_WIDTH,.height=SR_PPU_SURFACE_MAX_HEIGHT};
   ActionExposure_Prepare(&exposure,s_effects_enabled?effects.frame:NULL);
-  scene.scenery_exposure=exposure.count?ActionExposure_Scenery:NULL;scene.scenery_exposure_userdata=&exposure;
-  if (s_effects_enabled || s_probes) {
-    scene.bg1_dimming = s_effects_enabled ? ActionEnvironment_Bg1Dimming(effects.frame, environment->group, environment->room) : 0;
+  scene.scenery_exposure=exposure.count?&exposure.field:NULL;
+  scene.background_heat=ActionHeat_Prepare(s_effects_enabled?effects.frame:NULL,
+      environment->camera_x[1]-extra-capture.obj_apron,environment->camera_y[1]-capture.authentic_y0,
+      SR_PPU_SURFACE_MAX_WIDTH,SR_PPU_SURFACE_MAX_HEIGHT);
+  scene.effect_obj_priority_mask=EditorReceiverPreview_Ready()?1u<<2:0;
+  if (s_effects_enabled) {
+    scene.scenery_light = ActionEffectReceivers_HasSurfaceLights(effects.frame) ? DrawSceneryLight : NULL;
+    scene.bg1_dimming = ActionEnvironment_Bg1Dimming(effects.frame, environment->group, environment->room);
     scene.bg1_dimming_ramp = SceneryDimming_ToUv(ActionEnvironment_Bg1DimmingRamp(effects.frame,environment->group, environment->room),
         exposure.origin_x,exposure.origin_y,exposure.width,exposure.height);
-    scene.effect_obj_priority_mask = ActionEffectProjection_RequiredObjPriorityMask(NULL, effects.frame) | (s_probes?1u<<2:0);
+    scene.effect_obj_priority_mask |= ActionEffectProjection_RequiredObjPriorityMask(NULL, effects.frame);
     scene.effect_bg_plane_mask = ActionEffectProjection_RequiredBgPlaneMask(NULL, effects.frame);
     scene.plane_effect = DrawPlaneEffects; scene.plane_effect_userdata = &effects;
   }
   DioramaProjection projection;
   if (!PresentationOutcome_IsUsable(Diorama_Composite(
       DioramaPreview_Device(), &capture, &view, &scene, &projection)) || !effects.valid) return 0;
+  s_receiver_projection=projection;
   if (!s_effects_enabled) return 1;
   effects.projection.diorama_projection = &projection;
   if(s_source_draw) {

@@ -491,108 +491,30 @@ bool AppendGlowAtTicks(ActionEffectGeometryWriter *writer,
     kSegments = kActionEffectGlowSegments,
     kRings = kActionEffectGlowRings,
   };
-  if (writer->source) {
-    float corners[kActionEffectGlowVertices][4] = {{0}};
-    ArRenderColorF colors[kRings + 1];
-    colors[0] = style->centre;
-    colors[0].a *= strength;
-    for (int r = 0; r < kRings; ++r) {
-      colors[r + 1] = style->ring[r];
-      colors[r + 1].a *= strength;
-      const float outerness = (float)r / (float)(kRings - 1);
-      const float scale = style->ring_scale[r];
-      const float lift = style->rise * outerness * scale;
-      for (int s = 0; s < kSegments; ++s) {
-        const float shape = 1 + style->flare * outerness *
-            FlameSilhouette(style->seed, visual_ticks, s);
-        const float x = kCircle32[s][0] * scale * shape;
-        const float y = kCircle32[s][1] * scale * shape;
-        float *c = corners[1 + r * kSegments + s];
-        c[0] = x * style->axis_x;
-        c[1] = -y * style->axis_y + style->lift_x * lift;
-        c[2] = x * style->axis_y;
-        c[3] = y * style->axis_x + style->lift_y * lift;
-      }
-    }
-    return AppendSourceBillboard(writer, effect, local_x, local_y,
-        style->radius_x, style->radius_y, 3, 2, kSegments, corners, colors);
-  }
-  ArRenderPointF anchor;
-  float scale_x, scale_y;
-  if (!ProjectWithScale(effect, project_point, userdata, local_x, local_y,
-                        &anchor, &scale_x, &scale_y))
-    return true;
-  if (!Reserve(writer, kActionEffectGlowVertices, kActionEffectGlowIndices))
-    return false;
-
-  int centre = writer->vertex_count;
-  ArRenderColorF centre_color = style->centre;
-  centre_color.a *= strength;
-  writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
-    anchor, centre_color, { 0.0f, 0.0f },
-  };
-
-  float radius_x = fmaxf(3.0f, style->radius_x * scale_x);
-  float radius_y = fmaxf(2.0f, style->radius_y * scale_y);
-
-  int ring_base[kRings];
-  for (int r = 0; r < kRings; r++) {
-    ring_base[r] = writer->vertex_count;
-    ArRenderColorF color = style->ring[r];
-    color.a *= strength;
-    float scale = style->ring_scale[r];
-    /* Only the outer rings writhe and lift. Perturbing the core would make
-     * the bright middle jitter, which reads as a rendering fault rather than
-     * as flame; the turbulence belongs where the fire meets the air.
-     *
-     * The weighting is LINEAR in outerness, not squared. Squared put almost
-     * all of the movement on the outermost ring — which is the fully
-     * transparent one, so the flame silhouette was being computed and then
-     * not shown. The visible edge is the mid ring, and it has to move. */
-    float outerness = (float)r / (float)(kRings - 1);
-    float wobble = style->flare * outerness;
-    float lift = style->rise * outerness * radius_y * scale;
-    /* Rotation by the style's axis. Because the axis arrives as a UNIT vector
-     * it is already (cos, sin) — the whole orientation path stays free of
-     * trigonometry, and so keeps the bit-identical determinism the batch is
-     * tested for. */
-    float ax = style->axis_x, ay = style->axis_y;
-    for (int s = 0; s < kSegments; s++) {
-      float shape = 1.0f + wobble * FlameSilhouette(
-          style->seed,
-          visual_ticks, s);
-      float ux = kCircle32[s][0] * radius_x * scale * shape;
-      float uy = kCircle32[s][1] * radius_y * scale * shape;
-      writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
-        { anchor.x + ux * ax - uy * ay + style->lift_x * lift,
-          anchor.y + ux * ay + uy * ax + style->lift_y * lift },
-        color, { 0.0f, 0.0f },
-      };
+  float corners[kActionEffectGlowVertices][4] = {{0}};
+  ArRenderColorF colors[kRings + 1];
+  colors[0] = style->centre;
+  colors[0].a *= strength;
+  for (int r = 0; r < kRings; ++r) {
+    colors[r + 1] = style->ring[r];
+    colors[r + 1].a *= strength;
+    const float outerness = (float)r / (float)(kRings - 1);
+    const float scale = style->ring_scale[r];
+    const float lift = style->rise * outerness * scale;
+    for (int s = 0; s < kSegments; ++s) {
+      const float shape = 1 + style->flare * outerness *
+          FlameSilhouette(style->seed, visual_ticks, s);
+      const float x = kCircle32[s][0] * scale * shape;
+      const float y = kCircle32[s][1] * scale * shape;
+      float *c = corners[1 + r * kSegments + s];
+      c[0] = x * style->axis_x;
+      c[1] = -y * style->axis_y + style->lift_x * lift;
+      c[2] = x * style->axis_y;
+      c[3] = y * style->axis_x + style->lift_y * lift;
     }
   }
-
-  /* Centre fan out to ring 0. */
-  for (int s = 0; s < kSegments; s++) {
-    writer->indices[writer->index_count++] = centre;
-    writer->indices[writer->index_count++] = ring_base[0] + s;
-    writer->indices[writer->index_count++] =
-        ring_base[0] + (s + 1) % kSegments;
-  }
-  /* Quad strips between consecutive rings, two triangles per segment. */
-  for (int r = 0; r + 1 < kRings; r++) {
-    for (int s = 0; s < kSegments; s++) {
-      int next = (s + 1) % kSegments;
-      int inner0 = ring_base[r] + s, inner1 = ring_base[r] + next;
-      int outer0 = ring_base[r + 1] + s, outer1 = ring_base[r + 1] + next;
-      writer->indices[writer->index_count++] = inner0;
-      writer->indices[writer->index_count++] = outer0;
-      writer->indices[writer->index_count++] = outer1;
-      writer->indices[writer->index_count++] = inner0;
-      writer->indices[writer->index_count++] = outer1;
-      writer->indices[writer->index_count++] = inner1;
-    }
-  }
-  return true;
+  return AppendBillboard(writer, effect, local_x, local_y,
+      style->radius_x, style->radius_y, 3, 2, kSegments, corners, colors, project_point, userdata);
 }
 
 bool AppendGlow(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,

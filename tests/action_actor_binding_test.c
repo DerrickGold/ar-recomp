@@ -17,7 +17,33 @@ static bool Render(bool light,bool particles){
  }
  batch.vertex_count=vertices;return true;
 }
+static void AntlionMound(void) {
+ FILE *f=fopen("action-effects.ini","rb");assert(f);
+ static char text[131073];const size_t length=fread(text,1,sizeof(text)-1,f);assert(!ferror(f)&&feof(f));fclose(f);
+ unsigned line;assert(ActionEffectRecipes_Parse(&recipes,text,length,&line));
+ for(unsigned terrain=0;terrain<3;++terrain) {
+   frame=(ActionSceneEffectFrame){0};ActionEffectRecipes_Apply(&recipes,3,2,terrain,100,NULL,&frame);
+   const unsigned placed=frame.authored_count;
+   /* ROM $C7A0 places the mound at Y720; $C7C2 loops state 5 / visuals 4..6
+    * until the root enters buried state 2. Body (0..4/12) and shots (6..8)
+    * share the family, so source alone is not a sufficient selector. */
+   frame.actor_count=3;
+   frame.actors[0]=(ActionEffectActor){.source=0xc66f,.animation=0x5000,.state=0,.visual=0,.visible=1,.x=2656,.y=814};
+   frame.actors[1]=(ActionEffectActor){.source=0xc66f,.parent_source=0xc66f,.animation=0x5000,.state=5,.visual=4,.visible=1,.x=2656,.y=720,.age=32,.priority=2};
+   frame.actors[2]=frame.actors[1];frame.actors[2].state=6;frame.actors[2].visual=7;
+   ActionEffectRecipes_Apply(&recipes,3,2,terrain,100,NULL,&frame);assert(frame.authored_count==placed+1);
+   unsigned at=0;while(at<frame.authored_count&&frame.authored_sources[at]!=0xd3000273)++at;
+   assert(at<frame.authored_count);assert(frame.authored[at].world_x==2656&&frame.authored[at].world_y==704);
+   assert(Render(false,true)&&batch.vertex_count>0);
+   frame.actors[0].y=670;frame.actors[1].x+=16;frame.actors[1].visual=6;
+   ActionEffectRecipes_Apply(&recipes,3,2,terrain,120,NULL,&frame);
+   assert(frame.authored_count==placed+1&&frame.authored[at].world_x==2672&&frame.authored[at].world_y==704);
+   frame.actors[1].visible=0;ActionEffectRecipes_Apply(&recipes,3,2,terrain,130,NULL,&frame);
+   assert(frame.authored_count==placed); /* Mound retirement cannot leave a permanent cloud. */
+ }
+}
 int main(void){
+ AntlionMound();
  const char *header="[effects]\nversion=1\n[emitter:02:01:0:flame:123]\n";
  char text[2048];
  snprintf(text,sizeof(text),"%sactor-target=family\nactor-source=B786\nactor-parent=B786\nactor-state=0,1\nactor-animation=5000\nactor-limit=2\nx=4\ny=-8\nwidth=64\nheight=96\nparticles=12\nlifetime=80\ncolor=ff6628\ncolor-end=ffe6a0\nlight-scenery=1\nlight-player=1\nlight-enemies=1\n",header);

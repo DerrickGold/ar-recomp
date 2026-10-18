@@ -1,5 +1,6 @@
 #include "action/action_effect_receivers.h"
 #include "action/action_exposure.h"
+#include "action/action_light_kinds.h"
 /* ActionSceneEffectRender: geometry for the effects placed in action scenes
  * (lava pits and reservoirs, molten rock, water splashes, waterfalls and their
  * mist, wall torches, statue fire, fireballs, the flaming wheel, projectiles),
@@ -8,6 +9,67 @@
  * Phase: pure.
  * Tests: tests/action_effect_render_test.c */
 #include "action/action_effect_render_internal.h"
+
+/* These families include light scattered through air. Keep that volume at
+ * its authored depth as well as illuminating the artwork it passes across.
+ * Soft lights, gradients and torch spill only belong to the material. */
+static bool HasLightVolume(unsigned kind) {
+  switch (kind) {
+    case kActionEffect_AuthoredFan:
+    case kActionEffect_ForestCanopyLight:
+    case kActionEffect_TowerWindowLight:
+    case kActionEffect_BloodpoolMoonlight:
+    case kActionEffect_CastleLight:
+    case kActionEffect_CastleSky:
+      return true;
+    default: return false;
+  }
+}
+
+static bool IncludeSurfaceLighting(const ActionEffectInstance *effect, unsigned layer,
+    ActionEffectProjectPointFn project, void *userdata) {
+  const ActionEffectProjectionContext *context = project == ActionEffectSource_ProjectPoint
+      ? &((ActionEffectSourceBatch *)userdata)->context
+      : project == ActionEffectProjection_ProjectPoint ? userdata : NULL;
+  const bool material = context && context->scenery_lighting_only;
+  const bool volume = HasLightVolume(effect->kind);
+  /* Scattering stays at the authored depth even when no foreground material
+   * receives it. Receiver sampling has already selected the relevant lights. */
+  if (ActionEffectReceivers_IsLight(effect->kind) &&
+      !(ActionEffectReceivers_Mask(effect) & kActionReceiver_Scenery) &&
+      (material || !volume)) return false;
+  if (material) return ActionEffectReceivers_SurfaceLayer(effect) == layer;
+  if (ActionEffectReceivers_Layer(effect) != layer) return false;
+  if (!context) return true;
+  const bool surface = ActionEffectReceivers_SurfaceLight(effect);
+  /* ForegroundLight/Bg1Light use a multiplicative blend, not visible airborne
+   * scattering. Once in the material map they must not brighten the final
+   * scene a second time. Rear additive ray volumes still draw normally. */
+  return !(context->scenery_lighting_in_material && surface &&
+      (!volume || layer == kActionEffectRenderLayer_ForegroundLight || layer == kActionEffectRenderLayer_Bg1Light));
+}
+
+/* Calibrate incoming light independently of the visible volume/particles.
+ * This scales the retained geometry for the existing material/receiver pass;
+ * it adds no draw, texture, GPU synchronization or per-pixel operation. */
+static bool ApplyIllumination(ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect, int begin,
+    ActionEffectProjectPointFn project, void *userdata) {
+  if (!ActionLightKind_Supported(effect->kind)) return true;
+  const ActionEffectProjectionContext *context = project == ActionEffectSource_ProjectPoint
+      ? &((ActionEffectSourceBatch *)userdata)->context
+      : project == ActionEffectProjection_ProjectPoint ? userdata : NULL;
+  if (project != ActionEffectReceivers_ProjectPoint &&
+      (!context || !context->scenery_lighting_only)) return true;
+  const float gain = effect->tuning.illumination_set ? effect->tuning.illumination
+      : ActionLightKind_Illumination(effect->kind);
+  if (!isfinite(gain) || gain < 0 || gain > kActionLightIntensityMax) return false;
+  if (gain != 1) {
+    const ActionNativeMember tint = {.color=0xffffff,.intensity=gain};
+    TintEffectMember(writer,&tint,begin,writer->vertex_count,true);
+  }
+  return true;
+}
 
 static float SurfacePulse(const ActionEffectInstance *effect,const ActionSurfaceField *f){
   const unsigned ticks=(unsigned)f->Clock[0]*effect->phase_ticks;
@@ -48,97 +110,22 @@ bool AppendSceneSoftCloud(
     kSegments = kActionSceneEffectWaterfallMistCloudSegments,
     kRings = kActionEffectGlowRings,
   };
-  if (writer->source) {
-    float corners[kActionSceneEffectWaterfallMistCloudVertices][4] = {{0}};
-    const ArRenderColorF white = {1, 1, 1, opacity};
-    ArRenderColorF colors[4] = {MixColor(tint, white, .42f),
-        MixColor(tint, white, .24f), tint, tint};
-    colors[0].a = opacity; colors[1].a = opacity * .84f;
-    colors[2].a = opacity * .34f; colors[3].a = 0;
-    const float scales[3] = {.24f, .70f, 1};
-    const unsigned ticks = EffectVisualTicks(effect, (unsigned)effect->pulse_ticks) / 4u;
-    for (int r = 0; r < kRings; ++r) for (int s = 0; s < kSegments; ++s) {
-      const float shape = 1 + (.035f + .055f * r) *
-          FlameSilhouette(seed, ticks, s * kActionEffectGlowSegments / kSegments);
-      corners[1 + r * kSegments + s][0] = kMistCircle12[s][0] * scales[r] * shape;
-      corners[1 + r * kSegments + s][3] = kMistCircle12[s][1] * scales[r] * shape;
-    }
-    return AppendSourceBillboard(writer, effect, local_x, local_y,
-        local_radius_x, local_radius_y, 4, 3, kSegments, corners, colors);
+  float corners[kActionSceneEffectWaterfallMistCloudVertices][4] = {{0}};
+  const ArRenderColorF white = {1, 1, 1, opacity};
+  ArRenderColorF colors[4] = {MixColor(tint, white, .42f),
+      MixColor(tint, white, .24f), tint, tint};
+  colors[0].a = opacity; colors[1].a = opacity * .84f;
+  colors[2].a = opacity * .34f; colors[3].a = 0;
+  const float scales[3] = {.24f, .70f, 1};
+  const unsigned ticks = EffectVisualTicks(effect, (unsigned)effect->pulse_ticks) / 4u;
+  for (int r = 0; r < kRings; ++r) for (int s = 0; s < kSegments; ++s) {
+    const float shape = 1 + (.035f + .055f * r) *
+        FlameSilhouette(seed, ticks, s * kActionEffectGlowSegments / kSegments);
+    corners[1 + r * kSegments + s][0] = kMistCircle12[s][0] * scales[r] * shape;
+    corners[1 + r * kSegments + s][3] = kMistCircle12[s][1] * scales[r] * shape;
   }
-  ArRenderPointF anchor;
-  float scale_x, scale_y;
-  if (!ProjectWithScale(effect, project_point, userdata, local_x, local_y,
-                        &anchor, &scale_x, &scale_y))
-    return true;
-  if (!Reserve(writer,
-               kActionSceneEffectWaterfallMistCloudVertices,
-               kActionSceneEffectWaterfallMistCloudIndices))
-    return false;
-
-  const ArRenderColorF white = {1.0f, 1.0f, 1.0f, opacity};
-  ArRenderColorF centre_color = MixColor(tint, white, 0.42f);
-  centre_color.a = opacity;
-  const int centre = writer->vertex_count;
-  writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
-    anchor, centre_color, {0.0f, 0.0f},
-  };
-
-  const float radius_x = fmaxf(4.0f, local_radius_x * scale_x);
-  const float radius_y = fmaxf(3.0f, local_radius_y * scale_y);
-  static const float kRingScale[kRings] = {0.24f, 0.70f, 1.0f};
-  ArRenderColorF ring_color[kRings] = {
-    MixColor(tint, white, 0.24f), tint, tint,
-  };
-  ring_color[0].a = opacity * 0.84f;
-  ring_color[1].a = opacity * 0.34f;
-  ring_color[2].a = 0.0f;
-  const unsigned ticks = EffectVisualTicks(
-      effect, (unsigned)effect->pulse_ticks) / 4u;
-
-  int ring_base[kRings];
-  for (int ring = 0; ring < kRings; ring++) {
-    ring_base[ring] = writer->vertex_count;
-    const float wobble = 0.035f + 0.055f * (float)ring;
-    for (int segment = 0; segment < kSegments; segment++) {
-      const int silhouette_segment =
-          segment * kActionEffectGlowSegments / kSegments;
-      const float shape = 1.0f + wobble * FlameSilhouette(
-          seed, ticks, silhouette_segment);
-      writer->vertices[writer->vertex_count++] = (ArRenderVertex2D){
-        {
-          anchor.x + kMistCircle12[segment][0] * radius_x *
-              kRingScale[ring] * shape,
-          anchor.y + kMistCircle12[segment][1] * radius_y *
-              kRingScale[ring] * shape,
-        },
-        ring_color[ring], {0.0f, 0.0f},
-      };
-    }
-  }
-
-  for (int segment = 0; segment < kSegments; segment++) {
-    const int next = (segment + 1) % kSegments;
-    writer->indices[writer->index_count++] = centre;
-    writer->indices[writer->index_count++] = ring_base[0] + segment;
-    writer->indices[writer->index_count++] = ring_base[0] + next;
-  }
-  for (int ring = 0; ring + 1 < kRings; ring++) {
-    for (int segment = 0; segment < kSegments; segment++) {
-      const int next = (segment + 1) % kSegments;
-      const int inner0 = ring_base[ring] + segment;
-      const int inner1 = ring_base[ring] + next;
-      const int outer0 = ring_base[ring + 1] + segment;
-      const int outer1 = ring_base[ring + 1] + next;
-      writer->indices[writer->index_count++] = inner0;
-      writer->indices[writer->index_count++] = outer0;
-      writer->indices[writer->index_count++] = outer1;
-      writer->indices[writer->index_count++] = inner0;
-      writer->indices[writer->index_count++] = outer1;
-      writer->indices[writer->index_count++] = inner1;
-    }
-  }
-  return true;
+  return AppendBillboard(writer, effect, local_x, local_y,
+      local_radius_x, local_radius_y, 4, 3, kSegments, corners, colors, project_point, userdata);
 }
 
 static bool AppendWaterfallMistCloudVolume(
@@ -791,7 +778,8 @@ static bool AppendWallTorchLighting(ActionEffectGeometryWriter *writer,
     ActionEffectProjectPointFn project_point, void *userdata) {
   if (!((unsigned)f->Components[0]&1)) return true;
   const ActionEffectLocalRect *rect = &effect->geometry.data.rect;
-  const float mid_x = (rect->x0 + rect->x1) * 0.5f;
+  const float sway=effect->field_style.shadows?sinf(effect->pulse_ticks*.071f+effect->generation%31)*.8f:0;
+  const float mid_x = (rect->x0 + rect->x1) * 0.5f+sway;
   const float mid_y = (rect->y0 + rect->y1) * 0.5f;
   const unsigned ticks=(unsigned)f->Clock[0]*effect->phase_ticks;
   const unsigned glow_ticks=(unsigned)f->Clock[0]*effect->pulse_ticks;
@@ -804,8 +792,11 @@ static bool AppendWallTorchLighting(ActionEffectGeometryWriter *writer,
     spill.radius_y *= effect->tuning.reach;
   }
   spill.seed=effect->generation;body.seed=effect->pulse_generation;
-  return AppendGlowAtTicks(writer,effect,&spill,pulse,mid_x,mid_y,project_point,userdata,glow_ticks)&&
-      AppendGlowAtTicks(writer,effect,&body,pulse,mid_x+f->BodyOffset[0],f->BodyOffset[1],project_point,userdata,glow_ticks);
+  const int begin=writer->vertex_count;
+  if(!AppendGlowAtTicks(writer,effect,&spill,pulse,mid_x,mid_y,project_point,userdata,glow_ticks))return false;
+  /* Retain broad bounced light; only the direct spill casts a moving shadow. */
+  if(effect->field_style.shadows)ActionSceneryShadow_Apply(writer,begin,effect,mid_x,mid_y,false,.35f,project_point,userdata);
+  return AppendGlowAtTicks(writer,effect,&body,pulse,mid_x+f->BodyOffset[0],f->BodyOffset[1],project_point,userdata,glow_ticks);
 }
 
 static bool AppendStatueFireParticles(ActionEffectGeometryWriter *writer,
@@ -1803,9 +1794,7 @@ BuildSceneEffectList(const ActionEffectInstance *effects, uint8_t effect_count,
     const ActionSurfaceField *surface_field=surface_index<0?NULL:
       (field_frame->surface_fields_valid&(1u<<surface_index))?&field_frame->surface_fields[surface_index]:ActionSurfaceField_Bundled((unsigned)surface_index);
     if(surface_index>=0&&!surface_field)return false;
-    const bool lighting_enabled=want_lighting && !(effect->flags&kActionEffectFlag_LightingOff) && ActionEffectReceivers_Layer(effect)==render_layer &&
-        (!effect->tuning.light_receivers_set || !ActionEffectReceivers_IsLight(effect->kind) ||
-         (effect->tuning.light_receivers&kActionReceiver_Scenery));
+    const bool lighting_enabled=want_lighting && IncludeSurfaceLighting(effect,render_layer,project_point,project_userdata) && !(effect->flags&kActionEffectFlag_LightingOff);
     const bool particles_enabled=want_particles && effect->render_layer==render_layer;
     const int first_vertex = writer.vertex_count;
     if (!(effect->flags & kActionEffectFlag_Visible) ||
@@ -1936,18 +1925,14 @@ BuildSceneEffectList(const ActionEffectInstance *effects, uint8_t effect_count,
       return false;
     if (effect->tuning.active) {
       const ActionEffectTuning *t = &effect->tuning;
-      if (!isfinite(t->intensity) || t->intensity < 0 || t->intensity > 4 ||
+      if (!isfinite(t->intensity) || t->intensity < 0 || t->intensity > ActionLightKind_MaxIntensity(effect->kind) ||
           !isfinite(t->reach) || t->reach < .25f || t->reach > 4) return false;
-      const float red = ((t->color >> 16) & 255) / 255.0f;
-      const float green = ((t->color >> 8) & 255) / 255.0f;
-      const float blue = (t->color & 255) / 255.0f;
-      if (writer.source) ActionEffectSource_Tint(writer.source, first_vertex, t->color, t->intensity, false);
-      else for (int v = first_vertex; v < writer.vertex_count; ++v) {
-        ArRenderColorF *c = &writer.vertices[v].color;
-        c->r *= red; c->g *= green; c->b *= blue;
-        c->a = fminf(1,c->a * t->intensity);
-      }
+      const ActionNativeMember tint = {.color=t->color,.intensity=t->intensity};
+      TintEffectMember(&writer,&tint,first_vertex,writer.vertex_count,false);
     }
+    if (lighting_enabled && !particles_enabled &&
+        !ApplyIllumination(&writer,effect,first_vertex,project_point,project_userdata))
+      return false;
   }
   batch->vertex_count = writer.vertex_count;
   batch->index_count = writer.index_count;
@@ -2105,11 +2090,11 @@ bool ActionSceneDecorationRender_Build(
   bool shadow_prepared = false;
   for (unsigned i=0;i<frame->authored_count;++i) {
     const ActionEffectInstance *e=&frame->authored[i];
-    const bool light=lighting_enabled&&ActionEffectReceivers_Layer(e)==render_layer&&
-      (!e->tuning.light_receivers_set||!ActionEffectReceivers_IsLight(e->kind)||(e->tuning.light_receivers&kActionReceiver_Scenery));
+    const bool light=lighting_enabled&&IncludeSurfaceLighting(e,render_layer,project_point,project_userdata);
     const bool particles=particles_enabled&&e->render_layer==render_layer;
     if(!(e->flags&kActionEffectFlag_Visible)||(!light&&!particles))continue;
-    if (!writer.source && e->kind == kActionEffect_AuthoredFan && light && !shadow_prepared) {
+    const int first_vertex=writer.vertex_count;
+    if (!writer.source && (e->kind == kActionEffect_AuthoredFan || (e->kind==kActionEffect_AuthoredTorch&&e->field_style.shadows)) && light && !shadow_prepared) {
       if (!ActionSceneryShadow_Prepare(&shadow, &batch->shadow, &frame->scenery,
                                        project_point, clip_bounds, project_userdata))
         return false;
@@ -2135,11 +2120,20 @@ bool ActionSceneDecorationRender_Build(
       const int begin=writer.vertex_count;
       ok=(!light||AppendWallTorchLighting(&writer,&torch,field,project_point,project_userdata))&&
          (!particles||AppendWallTorchParticles(&writer,&torch,field,project_point,project_userdata));
-      if (writer.source) ActionEffectSource_Tint(writer.source, begin, e->tuning.color, e->tuning.intensity, false);
-      else for(int v=begin;v<writer.vertex_count;++v){ArRenderColorF *c=&writer.vertices[v].color;
-        c->r*=((e->tuning.color>>16)&255)/255.f;c->g*=((e->tuning.color>>8)&255)/255.f;c->b*=(e->tuning.color&255)/255.f;
-        c->a=fminf(1,c->a*e->tuning.intensity);}
+      const ActionNativeMember tint = {.color=e->tuning.color,.intensity=e->tuning.intensity};
+      TintEffectMember(&writer,&tint,begin,writer.vertex_count,false);
+      if(ok&&particles&&e->particle_count) {
+        ActionEffectInstance motes=*e;
+        const float rx=fminf(256,field->spill.radius_x*e->tuning.reach);
+        const float ry=fminf(256,field->spill.radius_y*e->tuning.reach);
+        if(rx>=2&&ry>=2) {
+          motes.geometry.data.rect=(ActionEffectLocalRect){-rx,-ry,rx,ry};
+          ok=AppendAuthoredEnvironment(&writer,&motes,NULL,false,true,project_point,clip_bounds,project_userdata);
+        }
+      }
     }else ok=AppendAuthoredEnvironment(&writer,e,&frame->authored_floor[i],light,particles,project_point,clip_bounds,project_userdata);
+    if (ok && light && !particles)
+      ok=ApplyIllumination(&writer,e,first_vertex,project_point,project_userdata);
     if (!ok || (!writer.source &&
         (writer.vertex_count-base_vertices>kActionAuthoredMaxVertices ||
          writer.index_count-base_indices>kActionAuthoredMaxIndices))) {

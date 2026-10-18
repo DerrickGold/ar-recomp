@@ -21,7 +21,8 @@ enum {
   kActionSourceMaxLightPoints = 129 * 17,
   kActionSourceMaximumPrimitives = 16384,
   kActionSourceVerticesPerPrimitive = 15,
-  kActionSourcePacketSlots = kActionEffectRenderLayer_Count + 2,
+  kActionSourceCompositePacketSlots = kActionEffectRenderLayer_Count + 2,
+  kActionSourcePacketSlots = kActionSourceCompositePacketSlots * 2,
 };
 
 /* Thirteen 16-byte words; mirrored by action_effect_project.comp.glsl. */
@@ -29,9 +30,9 @@ typedef struct ActionEffectSourcePrimitive {
   uint32_t meta[4]; /* kind, projection plane, object priority, shadow enabled */
   float origin[4];  /* capture XY; flags: atmosphere=1, static=2, clipped=4, grid=8 */
   float clip[4];    /* effect-local authored bounds, before motion */
-  float points[6][4]; /* Grid triangles: points[5] = world X, cell X, spacing. */
+  float points[6][4]; /* Grid: points[5] = world X, cell X, spacing; glow: coefficient extent. */
   float colors[3][4];
-  float extra[4]; /* particle width/reach OR local shadow origin XY */
+  float extra[4]; /* particle width/reach OR local shadow origin XY + strength */
 } ActionEffectSourcePrimitive;
 
 /* One finite moon transport field. Each job owns its sample coordinates; the
@@ -100,7 +101,7 @@ bool ActionEffectSource_GlowTriangle(ActionEffectSourceBatch *, const ActionEffe
 ActionEffectSourceLightJob *ActionEffectSource_BeginLight(ActionEffectSourceBatch *,
     const ActionEffectInstance *, const ActionEffectInstance *, const ActionMoonField *,
     const ActionMoonlightOcclusion *, unsigned, const ActionEffectLocalRect *);
-void ActionEffectSource_Shadow(ActionEffectSourceBatch *, unsigned begin, float, float, bool);
+void ActionEffectSource_Shadow(ActionEffectSourceBatch *, unsigned begin, float, float, bool, float strength);
 void ActionEffectSource_TintRange(ActionEffectSourceBatch *, unsigned begin, unsigned end, uint32_t, float, bool);
 void ActionEffectSource_Tint(ActionEffectSourceBatch *, unsigned begin, uint32_t, float, bool);
 

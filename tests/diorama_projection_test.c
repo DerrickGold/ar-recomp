@@ -218,7 +218,7 @@ static void TestScrollContinuesAcrossRedistributedMargins(void) {
   for (int span = 0; span < 2; span++) {
     ArRenderPointF previous = {0};
     for (int y = starts[span]; y <= ends[span]; y++) {
-      const int top = y < 64 ? y : y > 223 ? y - 159 : 64;
+      const int top = y < 64 ? y + 1 : y > 223 ? y - 159 : 64;
       DioramaProjection projection = CaptureProjection(&camera, 352, top);
       CenterCapture(&projection, top);
       DioramaVerticalBounds bounds = DioramaVerticalBounds_Resolve(
@@ -324,9 +324,18 @@ static void TestCapturedWorldVerticalBounds(void) {
   bounds = DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG2, 143, 512, 64, 288);
   CHECK(bounds.valid && !bounds.top_reached && !bounds.bottom_reached);
   bounds = DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 0, 512, 0, 288);
+  CHECK(bounds.valid && !bounds.top_reached && !bounds.bottom_reached);
+  bounds = DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 0, 512, 1, 352);
   CHECK(bounds.valid && bounds.top_reached && !bounds.bottom_reached);
   bounds = DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 0, 225, 0, 224);
+  CHECK(bounds.valid && !bounds.top_reached && bounds.bottom_reached);
+  bounds = DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 0, 225, 1, 225);
   CHECK(bounds.valid && bounds.top_reached && bounds.bottom_reached);
+  /* A fully captured short room remains fully captured throughout travel. */
+  for (int y = 0; y <= 31; ++y) {
+    bounds = DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, y, 256, y + 1, 256);
+    CHECK(bounds.valid && bounds.top_reached && bounds.bottom_reached);
+  }
   CHECK(!DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 287, 512, 64, 352).valid);
   CHECK(!DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 288, 512, 64, 288).valid);
   CHECK(!DioramaVerticalBounds_Resolve(SR_PPU_OVERLAY_BG1, 0, 512, 64, 288).valid);
@@ -426,7 +435,7 @@ static void TestParallaxSharesTheCameraStop(void) {
   const float pitches[] = {-.15f, 0, .15f};
   for (unsigned pose = 0; pose < sizeof(pitches) / sizeof(*pitches); pose++) {
     const Scene3DCamera camera = {pitches[pose], .1f, 3.25f, .4f};
-    ArRenderPointF previous_bg = {0}, previous_actor = {0};
+    ArRenderPointF previous_bg = {0}, previous_actor = {0}, previous_mote = {0};
     for (int y = 480; y <= 543; y++) {
       const int top = y - 415;
       DioramaProjection projection = CaptureProjection(&camera, 352, top);
@@ -437,11 +446,19 @@ static void TestParallaxSharesTheCameraStop(void) {
           0, 0, 0, false, true, &shift));
       projection.bg2_plane.world_y_offset =
           Diorama_BackgroundClampOffset(y, y / 3, 0x13, 512, shift);
-      ArRenderPointF background, actor;
+      projection.between_backgrounds_world_y_offset =
+          -0.5f * projection.bg2_plane.world_y_offset;
+      ArRenderPointF background, actor, mote;
       CHECK(Diorama_ProjectCapturedBg2Point(
           &projection, 50, 299 - y / 3 + top, &background, NULL, NULL));
       CHECK(Diorama_ProjectCapturedPoint(
           &projection, 50, 650 - y + top, 0, &actor, NULL, NULL));
+      /* Fillmore's fine shaft dust scrolls halfway between BG1 and BG2.
+       * Inheriting BG2's full correction used to slide it into the boss pit
+       * after the world camera had stopped. Freeze its world position. */
+      CHECK(Diorama_ProjectCapturedBetweenBackgroundsPoint(
+          &projection, 50, 430 - 0.5f * (y + y / 3) + top,
+          0, false, &mote));
       if (y > 480) CHECK(background.y <= previous_bg.y + .001f);
       /* Past the eased stop, static scenery and objects at all depths stop
        * together. The old screen-space clamp reversed BG2's 1/3-rate scroll. */
@@ -450,9 +467,12 @@ static void TestParallaxSharesTheCameraStop(void) {
         CHECK(Near(background.y, previous_bg.y));
         CHECK(Near(actor.x, previous_actor.x));
         CHECK(Near(actor.y, previous_actor.y));
+        CHECK(Near(mote.x, previous_mote.x));
+        CHECK(Near(mote.y, previous_mote.y));
       }
       previous_bg = background;
       previous_actor = actor;
+      previous_mote = mote;
     }
   }
   /* A stationary backdrop and a background that reached its own native
@@ -952,18 +972,20 @@ static void TestCameraFitsCapturedColumns(void) {
     /* Untilted, the X shift leaves the X scale alone, so square pixels show. */
     if (!tilted) CHECK(Near(matrix[0] / before[0], zoom));
     for (int c = 0; c < 4; ++c) CHECK(matrix[c * 4 + 3] == before[c * 4 + 3]);
-    /* A reached world edge stands in for its side, so the zoom covers the
-     * screen with world instead of exposing past the left edge. */
+    /* World stops translate only; fitting the capture must not magnify a
+     * shrinking slice of the room as the native camera approaches its end. */
     const DioramaHorizontalBounds left_world = DioramaHorizontalBounds_Resolve(
         SR_PPU_OVERLAY_BG1, 120, 0, 1280, 496, 64);
     CHECK(left_world.left_reached && !left_world.right_reached);
     Scene3D_BuildViewProjection(&camera, 520, 224, matrix);
     CHECK(Diorama_FitCameraToCapture(matrix, aspect, height, 0, rake, bow,
                                      &left_world, -apron, 1 + apron));
+    CHECK(Near(matrix[5] / before[5], zoom));
+    const float scale = matrix[5];
+    CHECK(Diorama_ClampCameraHorizontally(matrix, aspect, height, 0, rake, bow, &left_world));
+    CHECK(Near(matrix[5], scale));
     ProjectedColumn(matrix, left_world.left, aspect, height, rake, bow, &lo, &hi);
     CHECK(hi <= .0001f);
-    ProjectedColumn(matrix, 1 + apron, aspect, height, rake, bow, &lo, &hi);
-    CHECK(lo >= .9999f);
   }
   /* A room narrower than the view on both sides keeps the world stop's fit. */
   const DioramaHorizontalBounds small = DioramaHorizontalBounds_Resolve(

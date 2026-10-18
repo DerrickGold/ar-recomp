@@ -48,6 +48,10 @@ float coverage(vec2 point) {
                 min(shadows.values[at+400],255u),min(shadows.values[at+401],255u));
     return mix(mix(p.x,p.y,f.x),mix(p.z,p.w,f.x),f.y)/255;
 }
+float shadow_visibility(vec2 light,vec2 point,float strength) {
+    float blocked=coverage(light+(point-light)*.74)+coverage(light+(point-light)*.85)+coverage(light+(point-light)*.96);
+    return 1-.86*strength*blocked/3;
+}
 void emit_vertex(uint at,vec2 point,vec4 color) {
     vertices.values[at*2]=vec4(point,0,0);
     vertices.values[at*2+1]=color;
@@ -60,15 +64,12 @@ bool local_point(Primitive p, vec4 bounds, vec2 point, out vec2 screen) {
         if(plane.sky.z!=0) {
             if(any(lessThan(point,bounds.xy)) || any(greaterThan(point,bounds.zw)))return false;
         } else {
-            // Match the reference's normalized point predicate. Multiplying a
-            // UV edge back into pixels can round inward and drop a whole glow
-            // exactly at that edge (e.g. 64/640 == .1 in Marahna's torch room).
-            precise vec2 source=p.origin.xy+point+motion_offset(int(plane.offset.z))+plane.offset.xy;
-            vec2 uv=vec2(rounded_divide(source.x+settings.capture.z,settings.capture.x),
-                         rounded_divide(source.y,settings.capture.y));
-            if(any(lessThan(uv,min(plane.uv.xy,plane.uv.zw))) ||
-               uv.x>max(plane.uv.x,plane.uv.z) ||
-               (uv.y>max(plane.uv.y,plane.uv.w) && plane.fold.x==0))return false;
+            // The drawable source includes guard columns outside the original
+            // UV mapping. Match the reference's capture-pixel bounds; changing
+            // the mapping itself would shift/stretch lights on the scenery.
+            precise vec2 source=p.origin.xy+point+effect_motion(int(p.meta.y));
+            if(any(lessThan(source,plane.bounds.xy)) || source.x>plane.bounds.z ||
+               (source.y>plane.bounds.w && plane.fold.x==0))return false;
         }
     }
     return project_effect(int(p.meta.y), p.origin.xy+point, p.origin.y, (flags&2u)!=0u, screen);
@@ -124,9 +125,9 @@ void main() {
         if(p.meta.w!=0u&&settings.clock.z>0) {
             vec2 light;
             if(project_effect(plane,p.origin.xy+p.extra.xy,p.origin.y,(uint(p.origin.z)&2u)!=0u,light))for(int j=0;j<n;j++) {
-                float blocked=coverage(light+(screen[j]-light)*.74)+coverage(light+(screen[j]-light)*.85)+coverage(light+(screen[j]-light)*.96);
-                if(p.meta.w==1u)a[j].color.rgb*=1-.86*blocked/3;
-                else a[j].color.a*=1-.86*blocked/3;
+                float visibility=shadow_visibility(light,screen[j],p.extra.z);
+                if(p.meta.w==1u)a[j].color.rgb*=visibility;
+                else a[j].color.a*=visibility;
             }
         }
         for(int j=1;j<n-1;j++) {
@@ -173,16 +174,35 @@ void main() {
         }
     } else if(p.meta.x==4u || p.meta.x==5u) {
         vec2 centre,sx,sy;
-        if(!local_point(p,bounds,p.points[0].xy,centre) ||
-           !local_point(p,bounds,p.points[0].xy+vec2(1,0),sx) ||
-           !local_point(p,bounds,p.points[0].xy+vec2(0,1),sy))return;
+        if(p.meta.x==5u) {
+            bool anchored=(uint(p.origin.z)&2u)!=0u;
+            vec2 source=p.origin.xy+p.points[0].xy;
+            if(!project_effect(plane,source,p.origin.y,anchored,centre) ||
+               !project_effect(plane,source+vec2(1,0),p.origin.y,anchored,sx) ||
+               !project_effect(plane,source+vec2(0,1),p.origin.y,anchored,sy))return;
+        } else if(!local_point(p,bounds,p.points[0].xy,centre) ||
+                  !local_point(p,bounds,p.points[0].xy+vec2(1,0),sx) ||
+                  !local_point(p,bounds,p.points[0].xy+vec2(0,1),sy))return;
         vec2 lengths=vec2(length(sx-centre),length(sy-centre));
         if(any(lessThanEqual(lengths,vec2(0))))return;
         if(p.meta.x==5u) {
             vec2 radius=max(p.points[1].zw,p.points[1].xy*lengths);
+            vec2 extent=vec2(dot(p.points[5].xy,radius),dot(p.points[5].zw,radius))/lengths;
+            if(any(lessThan(p.points[0].xy+extent,bounds.xy)) ||
+               any(greaterThan(p.points[0].xy-extent,bounds.zw)))return;
+            vec2 light;
+            bool shadowed=p.meta.w!=0u && settings.clock.z>0 &&
+                project_effect(plane,p.origin.xy+p.extra.xy,p.origin.y,(uint(p.origin.z)&2u)!=0u,light);
             for(uint j=0;j<3;j++) {
                 vec4 c=p.points[2+j];
-                emit_vertex(base+j,centre+vec2(dot(c.xy,radius),dot(c.zw,radius)),p.colors[j]);
+                vec2 point=centre+vec2(dot(c.xy,radius),dot(c.zw,radius));
+                vec4 color=p.colors[j];
+                if(shadowed) {
+                    float visibility=shadow_visibility(light,point,p.extra.z);
+                    if(p.meta.w==1u)color.rgb*=visibility;
+                    else color.a*=visibility;
+                }
+                emit_vertex(base+j,point,color);
             }
         } else {
             if(any(lessThan(lengths,vec2(.001))))return;

@@ -84,7 +84,7 @@ function editor(data,options={}) {
       this.activeElement.listeners.copy?.({defaultPrevented:false});return true;
     }};
   const context = vm.createContext({
-    window:{__ACTION_EFFECT_PRESETS__:JSON.parse(fs.readFileSync(path.join(root,'assets/effects/stage-presets.json'),'utf8')),__ACTION_BG__:data,__ACTION_VIEW__:options.view,__DIORAMA_LAYERS__:options.ini,
+    window:{__ACTION_LIGHT_RESPONSE__:Object.fromEntries(JSON.parse(fs.readFileSync(path.join(root,'assets/effects/light-response.json'),'utf8')).map(r=>[r.kind,{illumination:r.illumination,intensity:r.intensity??1,reach:r.reach??1,receivers:r.receivers??1}])),__ACTION_EFFECT_PRESETS__:JSON.parse(fs.readFileSync(path.join(root,'assets/effects/stage-presets.json'),'utf8')),__ACTION_BG__:data,__ACTION_VIEW__:options.view,__DIORAMA_LAYERS__:options.ini,
       innerWidth:960,innerHeight:640,listeners:{}, addEventListener(name,callback) {
       (this.listeners[name]??=[]).push(callback);
     }},
@@ -2659,8 +2659,8 @@ console.log('Complete flame/glow placement, parameters, modal apply/cancel and u
 
 const stageEditor=editor(fixture()),spr=stageEditor.run;
 spr(`loadIniText('','stage.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};$('#emitterPreset').value='stage:desert-sky';EffectEditor.openModal(null,256,192)`);
-assert.equal(spr('EffectEditor.mapEmitters().filter(e=>!e.native).length'),3);
-assert.match(spr('EffectEditor.text()'),/light-gradient/);assert.match(spr('EffectEditor.text()'),/^pattern=sand$/m);
+assert.equal(spr('[...EffectEditor.mapEmitters(0),...EffectEditor.mapEmitters(1)].filter(e=>!e.native).length'),3);
+assert.match(spr('EffectEditor.text()'),/light-gradient/);assert.match(spr('EffectEditor.text()'),/^carry=156$/m);
 spr(`$('#effectInspectorClose').onclick()`);assert.doesNotMatch(spr('EffectEditor.text()'),/emitter:/);
 spr(`$('#emitterPreset').value='stage:desert-sky';EffectEditor.openModal(null,256,192);$('#effectInspectorApply').onclick()`);
 assert.equal(spr('undoStack.length'),1);const stageSaved=spr('EffectEditor.text()');
@@ -2702,6 +2702,63 @@ const copySaved=cpr('EffectEditor.text()');cpr('undo()');assert.equal(cpr('Effec
 cpr('EffectEditor.pasteEffects(400,200)');assert.equal(cpr('EffectEditor.mapEmitters().filter(e=>!e.native).length'),6);
 cpr(`setLayer(1)`);assert.equal(cpr('EffectEditor.pasteEffects(100,100)'),false);
 console.log('Multi-effect copy/paste preserves spacing and settings, repeats with fresh identities, isolates BG coordinates and undoes atomically');
+
+// Use the context menu and keyboard/mouse handlers at a scrolled, zoomed map
+// with a sidebar offset. A rejected paste must be visible beside the map.
+const pasteEditor=editor(fixture()),psr=pasteEditor.run;
+psr(`loadIniText('','paste-events.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
+ EffectEditor.placeEmitter('soft-light',520,1424);EffectEditor.selectEmitter(EffectEditor.selected());
+ EffectEditor.editEmitter(EffectEditor.selected(),{width:512,height:224,intensity:3,color:'bb9977'});
+ view.x=110;view.y=-650;view.scale=.5;
+ cvs.getBoundingClientRect=()=>({left:250,top:120,width:960,height:640});
+ globalThis.mapEvent=(x,y,button=0)=>({clientX:250+view.x+x*view.scale,clientY:120+view.y+y*view.scale,
+   button,target:cvs,preventDefault(){},stopPropagation(){}});
+ cvs.listeners.contextmenu(mapEvent(520,1424,2));$('#tileActionCopyEffect').onclick();
+ globalThis.originalPasteText=EffectEditor.text();globalThis.pasteUndo=undoStack.length;`);
+assert.match(psr("$('#tileActionStatus').textContent"),/Copied 1 effect/);
+psr(`cvs.listeners.contextmenu(mapEvent(752,1392,2));$('#effectGuides').checked=false;$('#tileActionPasteEffect').onclick();`);
+assert.equal(psr('EffectEditor.mapEmitters().find(e=>e.id===EffectEditor.selected()).x'),752);
+assert.equal(psr('EffectEditor.mapEmitters().find(e=>e.id===EffectEditor.selected()).y'),1392);
+assert.equal(psr('undoStack.length'),psr('pasteUndo')+1);
+assert.equal(psr("$('#effectGuides').checked"),true);
+assert.equal(psr("$('#effectSource').value"),psr('EffectEditor.selected()'));
+assert.match(psr("$('#tileActionStatus').textContent"),/Pasted 1 effect at BG1 752, 1392/);
+psr('undo()');assert.equal(psr('EffectEditor.text()'),psr('originalPasteText'));psr('redo()');
+psr(`for(const listener of window.listeners.keydown)listener({key:'v',metaKey:true,target:cvs,preventDefault(){}});`);
+assert.equal(psr('brush'),'effectPaste');
+assert.match(psr("$('#tileActionStatus').textContent"),/Click to place/);
+psr(`cvs.listeners.mousedown(mapEvent(688,1280));for(const listener of window.listeners.mouseup)listener(mapEvent(688,1280));`);
+assert.equal(psr('EffectEditor.mapEmitters().find(e=>e.id===EffectEditor.selected()).x'),688);
+assert.equal(psr('EffectEditor.mapEmitters().find(e=>e.id===EffectEditor.selected()).y'),1280);
+assert.equal(psr('EffectEditor.mapEmitters().filter(e=>!e.native).length'),3);
+psr(`globalThis.savedPasteText=EffectEditor.text();globalThis.savedPasteUndo=undoStack.length;
+ SharedRoomPreview.validateEffects=()=>{throw Error('Room 03:05 (US) needs 4100 reserved effect vertices; the limit is 4096.');};
+ cvs.listeners.contextmenu(mapEvent(400,1100,2));$('#tileActionPasteEffect').onclick();`);
+assert.equal(psr('EffectEditor.text()'),psr('savedPasteText'));
+assert.equal(psr('undoStack.length'),psr('savedPasteUndo'));
+assert.equal(psr('EffectEditor.hasClipboard()'),true);
+assert.match(psr("$('#tileActionStatus').textContent"),/Room 03:05.*limit is 4096/);
+console.log('Context-menu and Cmd-V paste land at the clicked world point, reveal markers, undo atomically and show budget failures on the map');
+
+const lightEditor=editor(fixture()),lir=lightEditor.run;
+lir(`loadIniText('','lights.ini');setLayer(0);SharedRoomPreview.validatePolicyDocument=()=>{};SharedRoomPreview.validateEffects=()=>{};
+ EffectEditor.placeEmitter('torch',80,120);EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(Number(lir("$('#effectIntensity').value")),4);
+assert.equal(Number(lir("$('#effectReach').value")),2);
+assert.equal(Number(lir("$('#effectIllumination').value")),1,'torch 4/2 is not multiplied again');
+lir(`EffectEditor.editEmitter(EffectEditor.selected(),{intensity:2,reach:1,illumination:3});
+ EffectEditor.resetValues(EffectEditor.selected(),['intensity','reach','illumination']);`);
+assert.equal(Number(lir("$('#effectIntensity').value")),4);
+assert.equal(Number(lir("$('#effectReach').value")),2);
+assert.equal(Number(lir("$('#effectIllumination').value")),1);
+lir(`EffectEditor.placeEmitter('soft-light',160,120);EffectEditor.selectEmitter(EffectEditor.selected());`);
+assert.equal(Number(lir("$('#effectIllumination').value")),3);
+lir(`$('#effectIllumination').onchange({target:{value:'0'}});`);
+assert.match(lir('EffectEditor.text()'),/^illumination=0$/m,'explicit zero survives export');
+lir('EffectEditor.copyEffects();EffectEditor.pasteEffects(240,120)');
+assert.equal(Number(lir("$('#effectIllumination').value")),0,'copy retains the override');
+lir('undo()');assert.equal(lir('EffectEditor.mapEmitters().filter(e=>e.kind==="soft-light").length'),1);
+console.log('Shared light defaults, torch 4/2, independent illumination, reset, export and copying passed');
 
 const surfaceEditor=editor(fixture()),sur=surfaceEditor.run;
 const surfaceData=fs.readFileSync(path.join(root,'assets/effects/lava-lake-field.ini'),'utf8')
@@ -2866,3 +2923,112 @@ assert.equal(Number(shapes.elements.get('#emitterwidth').value),96,'reset discar
 fr(`EffectEditor.editEmitter(EffectEditor.selected(),{'ray-count':2});EffectEditor.resetValues(EffectEditor.selected(),['ray-count']);`);
 assert.match(fr('EffectEditor.text()'),/^ray-count=12$/m);
 assert.match(fr('EffectEditor.text()'),new RegExp('^'+fieldData.match(/^ray-12=.*$/m)[0]+'$','m'));
+
+/* Shipped compositions use ordinary map markers, not room-control placeholders.
+ * Their untouched document survives import, and each brazier remains independently
+ * movable/resettable instead of disappearing inside a complete field definition. */
+const kassandoraEffects=fs.readFileSync(path.join(root,'action-effects.ini'),'utf8');
+const shippedEmitters=[...kassandoraEffects.matchAll(/^\[(emitter:03:([\da-f]+):(\d+):([a-z-]+):[\da-f]+)\]\n([^[]*)/gm)]
+ .map(m=>({id:m[1],room:parseInt(m[2],16),terrain:Number(m[3]),kind:m[4],
+  values:Object.fromEntries([...m[5].matchAll(/^([\w-]+)=(.*)$/gm)].map(v=>[v[1],v[2]]))}));
+for(let map=1;map<=6;++map)for(let terrain=0;terrain<3;++terrain) {
+ const data=fixture();data.rooms=[{...data.rooms[0],group:3,map}];
+ const {run}=editor(data);
+ run(`SharedRoomPreview.validateEffects=()=>{};terrainProfile=${terrain};room=terrainRoom(DATA.rooms[0]);
+  EffectEditor.loadDocument(${JSON.stringify(kassandoraEffects)});`);
+ const markers=JSON.parse(run('JSON.stringify([...EffectEditor.mapEmitters(0),...EffectEditor.mapEmitters(1)])'));
+ const expected=shippedEmitters.filter(e=>e.room===map&&e.terrain===terrain);
+ assert.equal(markers.length,expected.length,`Kassandora ${map}/${terrain}: every emitter has a marker`);
+ for(const e of expected) {
+  const marker=markers.find(m=>m.id===e.id);assert(marker);
+  const attached=!!e.values['actor-target'];
+  const reference=attached?JSON.parse(run('JSON.stringify(actor)')):{x:0,y:0};
+  assert.deepEqual([marker.x,marker.y],[Number(e.values.x)+reference.x,Number(e.values.y)+reference.y]);
+  assert.equal(marker.attached,attached);
+  assert.equal(marker.layer,e.values.anchor==='bg2-point'?1:0);
+  assert(marker.movable);
+ }
+ assert.equal(run('EffectEditor.text()'),kassandoraEffects);
+ const torch=markers.find(m=>m.kind==='torch');
+ if(torch) {
+  run(`EffectEditor.editEmitter(${JSON.stringify(torch.id)},{x:${torch.x+17},y:${torch.y-9}})`);
+  assert.equal(run(`EffectEditor.mapEmitters(0).find(e=>e.id===${JSON.stringify(torch.id)}).x`),torch.x+17);
+  run(`EffectEditor.resetHandle(EffectEditor.mapEmitters(0).find(e=>e.id===${JSON.stringify(torch.id)}),'position')`);
+  assert.equal(run(`EffectEditor.mapEmitters(0).find(e=>e.id===${JSON.stringify(torch.id)}).x`),torch.x);
+  run('undo()');assert.equal(run(`EffectEditor.mapEmitters(0).find(e=>e.id===${JSON.stringify(torch.id)}).x`),torch.x+17);
+ }
+}
+console.log('Kassandora shipped effects: all six rooms/three terrains have exact layer/position markers; braziers move, reset and undo independently');
+
+const moundUi=editor(fixture()),moundRun=moundUi.run;
+moundRun(`SharedRoomPreview.validateEffects=()=>{};EffectEditor.loadDocument('[effects]\\nversion=1\\n');
+ EffectEditor.placeEmitter('stage:antlion-dust',2656,720);`);
+assert.match(moundRun('EffectEditor.text()'),/^x=0$/m);
+assert.match(moundRun('EffectEditor.text()'),/^y=-16$/m);
+assert.match(moundRun('EffectEditor.text()'),/^actor-state=5,5$/m);
+assert.equal(moundRun('EffectEditor.mapEmitters(0)[0].attached'),true);
+
+// Ground cloud paths remain ordinary editable, copyable recipes. Drawing
+// replaces the selected cloud path rather than creating an unrelated wet edge.
+const groundUi=editor(fixture()),gr=groundUi.run;
+gr(`SharedRoomPreview.validateEffects=()=>{};SharedRoomPreview.validatePolicyDocument=()=>{};
+ EffectEditor.loadDocument('[effects]\\nversion=1\\n');EffectEditor.placeEmitter('preset:ground-dust',160,128);
+ EffectEditor.selectEmitter(EffectEditor.mapEmitters(0).find(e=>e.kind==='cloud-bank').id);`);
+assert.equal(groundUi.elements.get('#contourControls').hidden,false);
+assert.equal(groundUi.elements.get('#emitterCarry').disabled,false);
+assert.equal(groundUi.elements.get('#emitterTwinkle').disabled,false);
+assert.equal(groundUi.elements.get('#emitterparticles').disabled,false);
+assert.equal(groundUi.elements.get('#emitterTravelX').disabled,true);
+const groundId=gr('EffectEditor.selected()'),groundInitial=gr('EffectEditor.text()');
+assert.equal(gr('EffectGeometry.outline(EffectEditor.mapEmitters(0).find(e=>e.id===EffectEditor.selected())).length'),22);
+gr(`EffectEditor.editEmitter(EffectEditor.selected(),{width:160});`);
+assert.match(gr('EffectEditor.text()'),/points=-80,24 -64,24/);
+gr(`EffectEditor.resetHandle(EffectEditor.mapEmitters(0).find(e=>e.id===EffectEditor.selected()),'size');`);
+assert.equal(gr('EffectEditor.text()'),groundInitial);
+gr(`$('#contourDraw').onclick();EffectEditor.paintContour([{x:240,y:120},{x:160,y:96},{x:80,y:144}]);`);
+assert.equal(gr('EffectEditor.mapEmitters(0).length'),1);
+assert.equal(gr('EffectEditor.selected()'),groundId);
+assert.match(gr('EffectEditor.text()'),/points=-80,24 0,-24 80,0/);
+assert.doesNotMatch(gr('EffectEditor.text()'),/wet-contour:/);
+gr('undo()');assert.equal(gr('EffectEditor.text()'),groundInitial);
+gr(`EffectEditor.copyEffects();EffectEditor.pasteEffects(400,128);`);
+assert.equal(gr('EffectEditor.mapEmitters(0).filter(e=>e.kind==="cloud-bank").length'),2);
+gr(`$('#emitterPoints').onchange({target:{value:''}});`);
+assert.equal(gr('EffectEditor.mapEmitters(0).find(e=>e.id===EffectEditor.selected()).points'),'');
+assert.equal(groundUi.elements.get('#emitterCarry').disabled,true);
+assert.equal(groundUi.elements.get('#emitterparticles').disabled,true);
+gr('undo()');assert.equal(groundUi.elements.get('#emitterCarry').disabled,false);
+assert.equal(gr('EffectEditor.mapEmitters(0).find(e=>e.id===EffectEditor.selected()).carry'),140);
+gr(`EffectEditor.placeEmitter('torch',96,128);EffectEditor.selectEmitter(EffectEditor.mapEmitters(0).find(e=>e.kind==='torch').id);`);
+assert.equal(groundUi.elements.get('#emitterparticles').disabled,false);
+assert.equal(Number(groundUi.elements.get('#emitterparticles').value),0);
+assert.equal(groundUi.elements.get('#emitterTravelX').disabled,false);
+gr(`EffectEditor.editEmitter(EffectEditor.selected(),{particles:12,lifetime:480,'color-end':'d9a35c'});EffectEditor.copyEffects();EffectEditor.pasteEffects(256,128);`);
+assert.equal(gr('EffectEditor.mapEmitters(0).filter(e=>e.kind==="torch").length'),2);
+assert.equal((gr('EffectEditor.text()').match(/^particles=12$/gm)||[]).length,2);
+console.log('Ground dust: visible path guides, tracing, resize/reset, copy/paste and free-cloud conversion passed');
+
+const pathUi=editor(fixture()),pathRun=pathUi.run;
+pathRun(`SharedRoomPreview.validateEffects=()=>{};SharedRoomPreview.validatePolicyDocument=()=>{};
+ EffectEditor.loadDocument('[effects]\\nversion=1\\n');EffectEditor.placeEmitter('particle-path',160,128);
+ EffectEditor.selectEmitter(EffectEditor.mapEmitters(0).find(e=>e.kind==='particle-path').id);`);
+assert.equal(pathUi.elements.get('#emitterActivity').disabled,false);
+assert.equal(pathUi.elements.get('#emitterGust').disabled,false);
+assert.equal(pathUi.elements.get('#emitterTravelX').disabled,true);
+const pathInitial=pathRun('EffectEditor.text()');
+pathRun(`$('#contourDraw').onclick();EffectEditor.paintContour([{x:240,y:100},{x:160,y:128},{x:80,y:150}]);`);
+assert.equal(pathRun('EffectEditor.mapEmitters(0).length'),1);
+assert.match(pathRun('EffectEditor.text()'),/points=80,-25 0,3 -80,25/);
+pathRun(`EffectEditor.editEmitter(EffectEditor.selected(),{width:82});`);
+assert.match(pathRun('EffectEditor.text()'),/points=40,-25 0,3 -40,25/);
+pathRun('undo();undo()');assert.equal(pathRun('EffectEditor.text()'),pathInitial);
+pathRun(`EffectEditor.copyEffects();EffectEditor.pasteEffects(400,128);`);
+assert.equal(pathRun('EffectEditor.mapEmitters(0).filter(e=>e.kind==="particle-path").length'),2);
+pathRun(`EffectEditor.placeEmitter('torch',96,128);EffectEditor.selectEmitter(EffectEditor.mapEmitters(0).find(e=>e.kind==='torch').id);`);
+assert.equal(pathUi.elements.get('#emitterShadows').disabled,false);
+pathRun(`EffectEditor.editEmitter(EffectEditor.selected(),{shadows:1});`);assert.match(pathRun('EffectEditor.text()'),/shadows=1/);
+pathRun(`setLayer(1);EffectEditor.placeEmitter('heat-haze',256,192);EffectEditor.selectEmitter(EffectEditor.mapEmitters(1).find(e=>e.kind==='heat-haze').id);`);
+assert.equal(pathUi.elements.get('#emitterAmplitude').disabled,false);
+assert.equal(pathUi.elements.get('#effectColor').disabled,true);
+assert.match(pathRun('EffectEditor.text()'),/anchor=bg2-point/);
+console.log('Particle routes preserve tracing order, resize/copy/undo; shared gusts, torch shadows and BG2 heat controls passed');

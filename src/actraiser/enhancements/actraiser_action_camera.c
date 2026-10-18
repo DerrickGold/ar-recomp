@@ -17,11 +17,15 @@
 
 #include "action/action_camera_bounds.h"
 #include "actraiser/actraiser_action_bg.h"
-#include "actraiser/enhancements/actraiser_enhancements_internal.h"
+#include "actraiser/enhancements/actraiser_camera_internal.h"
 #include "actraiser_game.h"
 #include "present/display_geometry.h"
 #include "snesrecomp/game/cpu.h"
 #include "app/settings.h"
+#include "diorama/diorama.h"
+#include "diorama/diorama_camera_policy.h"
+#include "diorama/diorama_layer_manifest.h"
+#include "render/presentation_layout.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,38 +59,34 @@ static inline void ActionCamera_Write16(
   g_ram[(uint16_t)(address + 1)] = (uint8_t)(value >> 8);
 }
 
-static bool ActionCamera_ResolvePlayfield(ActionBgLayerPlan *playfield) {
-  if (playfield) *playfield = (ActionBgLayerPlan){ 0 };
-  if (!g_ws_active || !g_settings.ws_action ||
+static bool ActionCamera_ResolvePlayfield(ActionBgPlan *plan) {
+  if (plan) *plan = (ActionBgPlan){ 0 };
+  const bool automatic = g_settings.extended_aspect == kScreenAspect_Auto;
+  if (!g_ws_active || (!automatic && (!g_settings.ws_action ||
       g_settings.display_mode == kDisplayMode_43 ||
-      g_settings.display_mode == kDisplayMode_WideRaw ||
+      g_settings.display_mode == kDisplayMode_WideRaw)) ||
       !ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]) ||
-      !ActRaiserActionBg_HleEnabled() || !playfield)
+      !ActRaiserActionBg_HleEnabled() || !plan)
     return false;
 
   /* Consume the same canonical classification as the renderer. In
    * particular, Death Heim's hub/final authored scenes set no finite canvas;
    * treating every action group as a streamed playfield would shift those
    * cameras even though their presentation intentionally wraps/clamps. The
-   * tuner cannot alter roles, sources, or canvas ownership. The camera uses
-   * the baked canonical policy; Diorama's authored scenery can supply its
-   * horizontal padding without enlarging the native gameplay world. */
-  ActionBgPlan plan;
+   * saved policies cannot alter roles, sources, or canvas ownership. Apply
+   * their edge/extent choices just as rendering does. Transient diagnostic
+   * tuner overrides do not become gameplay policy. */
   ActionBgPresentationPolicy presentation;
   if (!ActRaiserActionBg_BuildCurrentPlan(
           g_ram, kActRaiserWramSize,
-          g_settings.ws_bg2_padding, &plan, &presentation) ||
-      ActionBgPlan_CanvasOwner(&plan) != 0)
+          g_settings.ws_bg2_padding, plan, &presentation) ||
+      ActionBgPlan_CanvasOwner(plan) != 0)
     return false;
-  *playfield = plan.layer[0];
+  const DioramaRoomOverride *room = ActRaiser_CurrentVirtualLayerRoom();
+  /* Atomic rejection leaves the canonical plan intact, matching frame-plan
+   * rendering when an edited policy is invalid for the current topology. */
+  if (room) DioramaBgPolicy_Apply(room->bg_policy, plan);
   return true;
-}
-
-static int ActionCamera_LimitMargin(
-    int available, ActionBgExtentMode mode, uint16_t fixed) {
-  if (available <= 0) return 0;
-  return mode == kActionBgExtent_Fixed && (int)fixed < available
-      ? (int)fixed : available;
 }
 
 static void ActionCamera_RequestStrip(
@@ -155,6 +155,54 @@ static bool ActionCamera_DebugEnabled(void) {
   return enabled != 0;
 }
 
+/* The producer uses the saved dynamic-camera baseline, never the presenter's
+ * transient orbit/hit animation. A camera response must not feed back into
+ * gameplay travel. Capture and presentation share the projection calculation;
+ * the drawable is latched by the host rather than queried from this thread. */
+static bool ActionCamera_DioramaMargins(const ActionBgPlan *plan,
+    const DioramaRoomOverride *room, int native_width,
+    int x, int y, int *before, int *after) {
+  const ActionBgLayerPlan *playfield = &plan->layer[0];
+  if (g_settings.diorama_camera_mode != kDioramaCam_Dynamic ||
+      !DioramaCameraPolicy_FiniteLayer(playfield)) return false;
+  const bool edits = DioramaCameraPolicy_HasEdits(room, 0);
+  const bool bg_apron = ActRaiser_DioramaNeedsBgApron(room, 0, edits,
+      DioramaCameraPolicy_WorldApron(playfield));
+  const DioramaCapture capture = DioramaCameraPolicy_Capture(plan, room, x, y,
+      g_ws_extra, g_settings.diorama_vertical_extend, bg_apron ? 1 : 0);
+  const bool crt = g_settings.pixel_aspect == kPixelAspect_Crt43;
+  const int visible_width = Settings_VisibleWidth();
+  const int visible_height = 224 + (g_settings.extended_aspect == kScreenAspect_Auto
+      ? 2 * g_actraiser_display_geometry->auto_vertical_budget : 0);
+  int output_width = g_actraiser_display_geometry->output_width;
+  int output_height = g_actraiser_display_geometry->output_height;
+  if (output_width <= 0 || output_height <= 0) {
+    output_width = visible_width * (crt ? 7 : 1);
+    output_height = visible_height * (crt ? 6 : 1);
+  }
+  const bool stretch = Settings_IgnoreAspectRatio();
+  const DioramaView view = {.camera = {
+      .tilt_x = (float)g_settings.diorama_dyncam_baseline_tilt_x_mrad / 1000.0f,
+      .tilt_y = (float)g_settings.diorama_dyncam_baseline_tilt_y_mrad / 1000.0f,
+      .distance = (float)g_settings.diorama_dyncam_baseline_distance_x100 / 100.0f},
+    .distance_scale = 1, .camera_framing_weight = 1, .pixel_aspect = g_settings.pixel_aspect,
+    .ignore_aspect_ratio = stretch, .visible_width = visible_width, .visible_height = visible_height,
+    .viewport = ArPresentationLayout_ResolveViewport(output_width, output_height,
+        stretch, crt, visible_width, visible_height)};
+  const DioramaRenderOptions options = {.layers = DioramaLayerManifest_Table(),
+    .visible_planes = g_settings.diorama_layer_bg1 ? (1u << SR_PPU_OVERLAY_BG1) | (1u << kDioramaPlane_Bg1Hi) : 0,
+    .skybox = g_settings.diorama_skybox};
+  const DioramaScene scene = {.render = &options,
+    .map_group = g_ram[kActRaiserWram_MapGroup], .map_number = g_ram[kActRaiserWram_CurrentMap],
+    .layer_section = room ? room->section : kDioramaLayerSection_Room};
+  int minimum, maximum;
+  if (!Diorama_ResolveCaptureCameraRange(&capture, &view, &scene, x, &minimum, &maximum)) return false;
+  *before = minimum > 0 ? minimum : 0;
+  *after = native_width - 256 - maximum;
+  if (*after < 0) *after = 0;
+  return true;
+}
+
 RecompReturn ActRaiser_UpdateActionCamera(CpuState *cpu) {
   const uint8_t saved_p = cpu->P;
   cpu_write8(cpu, 0x00, cpu->S, saved_p);
@@ -162,29 +210,16 @@ RecompReturn ActRaiser_UpdateActionCamera(CpuState *cpu) {
   cpu->P = (uint8_t)(cpu->P & ~0x20);
   cpu_p_to_mirrors(cpu);
 
-  ActionBgLayerPlan playfield;
-  const bool wide = ActionCamera_ResolvePlayfield(&playfield);
-  int horizontal_before = wide
-      ? ActionCamera_LimitMargin(
-            g_ws_extra, playfield.horizontal_extent.mode,
-            playfield.horizontal_extent.left)
-      : 0;
-  int horizontal_after = wide
-      ? ActionCamera_LimitMargin(
-            g_ws_extra, playfield.horizontal_extent.mode,
-            playfield.horizontal_extent.right)
-      : 0;
+  ActionBgPlan plan;
+  const bool wide = ActionCamera_ResolvePlayfield(&plan);
+  const DioramaRoomOverride *room = g_settings.diorama_mode ? ActRaiser_CurrentVirtualLayerRoom() : NULL;
+  int horizontal_before, horizontal_after;
+  DioramaCameraPolicy_HorizontalMargins(&plan, room, wide ? g_ws_extra : 0,
+      &horizontal_before, &horizontal_after);
   const uint16_t native_width = ActionCamera_Read16(
       cpu, kActRaiserWram_Bg1Width);
-  if (wide && g_settings.diorama_mode) {
-    int scenery_start, scenery_width;
-    ActRaiserActionBg_ResolveDioramaHorizontalExtent(
-        ActRaiser_CurrentVirtualLayerRoom(), 0, native_width,
-        &scenery_start, &scenery_width);
-    ActionCameraAxisBounds_ApplySceneryPadding(
-        native_width, scenery_start, scenery_width,
-        &horizontal_before, &horizontal_after);
-  }
+  const uint16_t native_height = ActionCamera_Read16(
+      cpu, kActRaiserWram_Bg1Height);
   const uint16_t old_x = ActionCamera_Read16(
       cpu, kActRaiserWram_Bg1CameraX);
   const uint16_t old_y = ActionCamera_Read16(
@@ -195,11 +230,6 @@ RecompReturn ActRaiser_UpdateActionCamera(CpuState *cpu) {
       (int16_t)ActionCamera_Read16(cpu, kActionCameraDeltaY);
   ActionCameraAxisBounds horizontal_bounds = { 0 };
   ActionCameraAxisBounds vertical_bounds = { 0 };
-  const uint16_t camera_x = ActionCameraAxisBounds_UpdateCamera(
-      old_x, requested_delta_x,
-      native_width,
-      kActRaiserAuthenticWidth, horizontal_before, horizontal_after,
-      &horizontal_bounds);
   /* Do not fit the gameplay camera to Diorama's vertical capture budget.
    * ActRaiser_ApplyVerticalMarginPolicy independently resolves the real rows
    * available above and below this native camera, and the compositor already
@@ -207,9 +237,18 @@ RecompReturn ActRaiser_UpdateActionCamera(CpuState *cpu) {
    * so presentation cannot accidentally push required action objects outside
    * the authentic activation/collision window while still drawing them. */
   const uint16_t camera_y = ActionCameraAxisBounds_UpdateNativeCamera(
-      old_y, requested_delta_y,
-      ActionCamera_Read16(cpu, kActRaiserWram_Bg1Height),
+      old_y, requested_delta_y, native_height,
       kActRaiserActionCameraViewportHeight, &vertical_bounds);
+  if (wide && g_settings.diorama_mode) {
+    ActionCamera_DioramaMargins(&plan, room, native_width,
+        old_x, camera_y,
+        &horizontal_before, &horizontal_after);
+  }
+  const uint16_t camera_x = ActionCameraAxisBounds_UpdateCamera(
+      old_x, requested_delta_x,
+      native_width,
+      kActRaiserAuthenticWidth, horizontal_before, horizontal_after,
+      &horizontal_bounds);
   s_travel.valid = true;
   s_travel.group = g_ram[kActRaiserWram_MapGroup];
   s_travel.map = g_ram[kActRaiserWram_CurrentMap];

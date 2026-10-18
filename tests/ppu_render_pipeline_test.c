@@ -828,12 +828,16 @@ static void TestVramBackgroundPacketOwnership(void) {
   Ppu *ppu = ppu_init(); CHECK(ppu);
   SrPpuBgPacket *packet = calloc(1, sizeof(*packet)); CHECK(packet);
   static uint32_t fb[width * height], bands[3][width * height], expected[3][width * height];
+  static uint32_t expected_fb[width * height];
+  uint32_t owned_words = 0;
   /* Compare owned and validation packets against the independent CPU capture
    * path, including HBlank changes, mirrored/repeated margins and both vertical
-   * margins. 16x16 tiles and mosaic must retain CPU ownership. */
+   * margins, including synthesized padding beyond collapsed live margins.
+   * 16x16 tiles and mosaic must retain CPU ownership, including a mixed frame
+   * whose CPU rows invalidate the export while its other rows remain owned. */
   for (unsigned layer = 0; layer < 2; ++layer)
   for (unsigned screen = 0; screen < 2; ++screen)
-  for (unsigned scenario = 0; scenario < 11; ++scenario)
+  for (unsigned scenario = 0; scenario < 15; ++scenario)
   for (unsigned owner = 0; owner < 3; ++owner) {
     setup_virtual_bg(ppu, extra, (uint8_t *)fb, width * 4);
     CHECK(PpuBindOverlaySurface(ppu, 1u - layer, NULL, 0));
@@ -859,11 +863,19 @@ static void TestVramBackgroundPacketOwnership(void) {
     if (scenario == 6) ppu->mosaic = (3u << 4) | (1u << layer);
     if (scenario == 7) PpuSetWidescreenLayerMirror(ppu, 1u << layer);
     if (scenario == 8) PpuSetWidescreenLayerRepeat(ppu, 1u << layer);
-    if (scenario >= 9) {
+    if (scenario == 9 || scenario == 10 || scenario == 13) {
       PpuSetWidescreenLayerBand(ppu, layer, 0, scenario == 9 ? kH : kH / 2,
           kPpuWidescreenBandFill_Mirror, kPpuWidescreenMotion_NormalScroll);
-      if (scenario == 10) PpuSetWidescreenLayerBand(ppu, layer, kH / 2, kH,
+      if (scenario != 9) PpuSetWidescreenLayerBand(ppu, layer, kH / 2, kH,
           kPpuWidescreenBandFill_Repeat, kPpuWidescreenMotion_FillRelative);
+    }
+    if (scenario >= 11) {
+      if (scenario == 11 || scenario == 14) PpuSetWidescreenLayerMirror(ppu, 1u << layer);
+      if (scenario == 12) PpuSetWidescreenLayerRepeat(ppu, 1u << layer);
+      PpuSetWidescreenPadCapturedToBudget(ppu, 1);
+      PpuSetExtraSideSpace(ppu, scenario == 11 ? 0 : scenario == 12 ? extra : 3,
+          scenario == 12 ? 0 : scenario == 11 ? extra : 7, 0);
+      if (scenario == 13) PpuSetWidescreenLayerExtent(ppu, layer, 11, 13, 7, 9);
     }
     CHECK(PpuBindOverlaySurfaceSized(ppu, layer, (uint8_t *)bands[0], width * 4, height));
     for (unsigned band = 1; band < 3; ++band)
@@ -876,6 +888,8 @@ static void TestVramBackgroundPacketOwnership(void) {
     ppu_runLine(ppu, 0);
     for (unsigned y = 0; y < height; ++y) {
       const int screen_y = (int)y - extra;
+      if (scenario == 14)
+        ppu->mosaic = screen_y >= 36 && screen_y < 48 ? (3u << 4) | (1u << layer) : 0;
       ppu->hScroll[layer] = (uint16_t)(y * 5 + 249);
       ppu->vScroll[layer] = (uint16_t)(y * 3 + 503);
       ppu->fixedColor = bgr555(y & 7, y & 3, y & 15);
@@ -894,23 +908,39 @@ static void TestVramBackgroundPacketOwnership(void) {
       if (screen_y < 0 || screen_y >= kH) ppu_runMarginLine(ppu, screen_y + 1);
       else ppu_runLine(ppu, screen_y + 1);
     }
-    if (!owner) memcpy(expected, bands, sizeof(expected));
+    if (!owner) {
+      memcpy(expected, bands, sizeof(expected));
+      memcpy(expected_fb, fb, sizeof(expected_fb));
+    }
     else {
       const bool eligible = scenario != 5 && scenario != 6;
       const bool owned = owner == 1 && eligible;
+      CHECK(memcmp(fb, expected_fb, sizeof(expected_fb)) == 0);
+      if (owner == 1) owned_words = packet->words[3];
+      /* CPU validation must reuse the tile row allocation. Allocating an
+       * indexed fallback as well can exhaust the arena in full-height rooms. */
+      else CHECK(packet->words[3] == owned_words);
       CHECK(packet->owned_sources == (owned ? 1u << layer : 0u));
       CHECK(SrPpuBgPacket_Meta(packet, layer, extra)[0] ==
-          (!eligible ? 1u : scenario == 7 || scenario >= 9 ? 2u : 3u));
-      for (unsigned band = 0; band < 3; ++band) for (unsigned y = 0; y < height; ++y)
+          (!eligible ? 1u : scenario == 7 ||
+              (scenario >= 9 && scenario != 12) ? 2u : 3u));
+      for (unsigned band = 0; band < 3; ++band) for (unsigned y = 0; y < height; ++y) {
+        const bool fallback = scenario == 14 && y >= extra + 36 && y < extra + 48;
+        const unsigned format = SrPpuBgPacket_Meta(packet, layer, y)[0];
+        CHECK((format >= 2) == (eligible && !fallback));
         for (unsigned x = 0; x < width; ++x) {
           const uint32_t want = expected[band][y * width + x];
-          const uint32_t got = SrPpuBgPacket_Color(packet, layer, band, x, y);
-          if (got != want || bands[band][y * width + x] != (owned ? 0xa5a5a5a5u : want)) {
+          /* FinishBackgroundPacket materializes tile rows and retains CPU
+           * fallback rows when any unsupported row rejects the whole source. */
+          const uint32_t got = fallback && !format ? bands[band][y * width + x] :
+              SrPpuBgPacket_Color(packet, layer, band, x, y);
+          if (got != want || bands[band][y * width + x] != (owned && !fallback ? 0xa5a5a5a5u : want)) {
             fprintf(stderr, "VRAM layer=%u screen=%u scenario=%u owner=%u band=%u (%u,%u) packet=%08x CPU=%08x expected=%08x\n",
                 layer, screen, scenario, owner, band, x, y, got, bands[band][y * width + x], want);
             CHECK(false); ppu->backgroundPacket = NULL; free(packet); ppu_free(ppu); return;
           }
         }
+      }
     }
     ppu->backgroundPacket = NULL;
   }
@@ -992,9 +1022,15 @@ static void TestAuthoredTilesBeyondNativeVerticalClip(void) {
   /* Bloodpool has a painted row below the native map. The camera correctly
    * includes that row, so discarding it at the native clip exposes the skybox
    * under the floor. Keep native apron wrapping clipped but render explicit
-   * stamps both inside the capture and in its guard columns. */
+   * stamps both inside the capture and in its guard columns. Horizontal
+   * mirror/repeat/clamp fill must not remap or discard those painted columns.
+   * GPU tile packets must agree with both CPU rendering implementations. */
+  const unsigned fills[] = {kPpuWidescreenBandFill_RawWrap, kPpuWidescreenBandFill_Mirror,
+      kPpuWidescreenBandFill_Repeat, kPpuWidescreenBandFill_Clamp, kPpuWidescreenBandFill_Transparent};
+  for (unsigned fill = 0; fill < sizeof(fills)/sizeof(fills[0]); ++fill)
   for (unsigned renderer = 0; renderer < 3; ++renderer) {
     setup_virtual_bg(ppu, 16, (uint8_t *)fb, width * 4);
+    memset(ppu->wsBandFill[0], fills[fill], sizeof(ppu->wsBandFill[0]));
     PpuSetExtraVerticalSpace(ppu, extra, extra);
     CHECK(PpuBeginDrawingSized(ppu, (uint8_t *)fb, width * 4, height,
         renderer == 0 ? kPpuRenderFlags_ReferencePixelRenderer : 0));
@@ -1022,15 +1058,17 @@ static void TestAuthoredTilesBeyondNativeVerticalClip(void) {
       for (unsigned y = 0; y < height; ++y) {
         CHECK(pixels[y * width] == 0xff00ff00u); /* authored apron */
         CHECK(pixels[y * width + 32] == 0xff00ff00u); /* authored centre */
-        CHECK(pixels[y * width + 8] == (y < extra || y >= extra + kH ? 0u : 0xff0000ffu));
+        CHECK(pixels[y * width + 8] == (fill >= 3 || y < extra || y >= extra + kH ? 0u : 0xff0000ffu));
         CHECK(pixels[y * width + 40] == (y < extra || y >= extra + kH ? 0u : 0xff0000ffu));
       }
     } else if (renderer == 1) CHECK(!memcmp(expected, pixels, sizeof(expected)));
     else {
-      CHECK(packet->owned_sources == 1u);
+      /* Mirrored/repeated virtual worlds retain the existing CPU fallback. */
+      const bool gpu_owned = fill != 1 && fill != 2;
+      CHECK(packet->owned_sources == (gpu_owned ? 1u : 0u));
       for (unsigned y = 0; y < height; ++y) for (unsigned x = 0; x < width; ++x) {
         CHECK(SrPpuBgPacket_Color(packet, 0, 0, x, y) == expected[y * width + x]);
-        CHECK(pixels[y * width + x] == 0xa5a5a5a5u);
+        CHECK(pixels[y * width + x] == (gpu_owned ? 0xa5a5a5a5u : expected[y * width + x]));
       }
     }
     ppu->backgroundPacket = NULL;
@@ -3559,11 +3597,12 @@ static void TestObjReceiverTransforms(void) {
     ppu_reset(ppu);memset(main_pixels,0,sizeof(main_pixels));memset(authentic,0,sizeof(authentic));memset(overlay,0,sizeof(overlay));
     ppu->inidisp=15;ppu->bgmode=1;ppu->screenEnabled[0]=1u<<kPpuOverlaySource_Obj;
     ppu->cgram[0x81]=bgr555(31,0,0);ppu->cgram[0x82]=bgr555(0,0,31);
+    ppu->cgram[0x83]=bgr555(7,7,7);set_solid_4bpp_tile(ppu,2,3);
     set_solid_4bpp_tile(ppu,0,1);set_solid_4bpp_tile(ppu,1,2);
     for(unsigned i=0;i<128;++i)ppu->oam[i*2]=0xe000;
     ppu->oam[0]=24|(20<<8);ppu->oam[1]=2<<12;
     ppu->oam[2]=24|(20<<8);ppu->oam[3]=1|(2<<12);
-    ppu->oam[4]=0;ppu->oam[5]=2<<12;
+    ppu->oam[4]=0;ppu->oam[5]=2|(2<<12);
     if(rotated){ppu->oamaddh=0x80;ppu->oamaddl=2;}
     PpuSetExtraSpace(ppu,64);
     CHECK(PpuBeginDrawingSized(ppu,(uint8_t *)main_pixels,width*4,rows,reference?kPpuRenderFlags_ReferencePixelRenderer:0));
@@ -3578,11 +3617,11 @@ static void TestObjReceiverTransforms(void) {
     for(unsigned i=0;i<128;++i)transforms[i]=(SrPpuObjColorTransform){.multiply={256,256,256}};
     transforms[0]=(SrPpuObjColorTransform){.multiply={128,256,256},.add={0,64,0}};
     transforms[1]=(SrPpuObjColorTransform){.multiply={256,256,64},.add={32,0,0}};
-    transforms[2]=transforms[0];
+    transforms[2]=(SrPpuObjColorTransform){.multiply={1024,768,256}};
     SrPpuObjCaptureRequest request={.struct_size=sizeof(request),.lifetime_generation=1,
       .flags=SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS,.color_transforms=transforms,.color_transform_count=128};
     CHECK(api->configure_ppu_obj_capture(runner,&request)==SR_RESULT_OK&&ppu->objColorTransformsActive);
-    transforms[0].multiply[0]=513;request.flags|=SR_PPU_OBJ_CAPTURE_RELOCATED;request.relocated_first=3;request.relocated_count=1;
+    transforms[0].multiply[0]=SR_PPU_OBJ_COLOR_MULTIPLY_MAX+1;request.flags|=SR_PPU_OBJ_CAPTURE_RELOCATED;request.relocated_first=3;request.relocated_count=1;
     CHECK(api->configure_ppu_obj_capture(runner,&request)==SR_RESULT_INVALID_ARGUMENT);
     CHECK(ppu->objColorTransforms[0].multiply[0]==128&&ppu->overlayObjRelocatedCount==0);
     request.flags=SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS;request.struct_size=SR_PPU_OBJ_CAPTURE_REQUEST_V2_SIZE;
@@ -3592,7 +3631,7 @@ static void TestObjReceiverTransforms(void) {
     const size_t at=(20+64)*width+64+24;
     const uint32_t wanted=rotated?0x0020003fu:0x007f4000u;
     CHECK((overlay[at]&0xffffff)==wanted);CHECK((main_pixels[at]&0xffffff)==wanted);
-    CHECK((overlay[(16)*width+52]&0xffffff)==0x7f4000u);
+    CHECK((overlay[(16)*width+52]&0xffffff)==0xe4ab39u); /* 4x/3x/1x on extended OBJ */
     if(!reference){native_main=main_pixels[at];native_overlay=overlay[at];}
     else {CHECK(native_main==main_pixels[at]);CHECK(native_overlay==overlay[at]);}
     CHECK((authentic[at]&0xffffff)==(rotated?0xffu:0xff0000u));

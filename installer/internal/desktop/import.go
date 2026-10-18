@@ -16,7 +16,7 @@ import (
 
 const importStateName = ".actraiser-import.json"
 
-var importLeaves = []string{"config.ini", "settings.ini", "diorama-layers.ini", "saves", "game-assets"}
+var importLeaves = []string{"config.ini", "settings.ini", "diorama-layers.ini", "action-effects.ini", "saves", "game-assets"}
 
 type ImportDecision struct {
 	Schema  int      `json:"schema"`

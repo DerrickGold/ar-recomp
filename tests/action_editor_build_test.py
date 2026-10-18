@@ -111,6 +111,8 @@ int main(void) {
                 ["node", "-e", program, json.dumps("\n".join(scripts.bodies[:2]))], text=True)
             self.assertEqual(json.loads(result), {
                 "__ACTION_BG__": data, "__DIORAMA_LAYERS__": text,
+                "__ACTION_LIGHT_RESPONSE__": {r["kind"]: {k: r.get(k, 1) for k in ("illumination", "intensity", "reach", "receivers")}
+                    for r in json.loads((ROOT / "assets/effects/light-response.json").read_text())},
                 "__DIORAMA_LAYERS_NAME__": layers.name,
                 "__ACTION_EFFECTS__": "[effects]\nversion=1\n",
                 "__ACTION_VIEW__": preview_settings(root / "settings.ini"),
@@ -145,6 +147,7 @@ int main(void) {
             self.assertEqual(dynamic['pixelAspect'], 'square')
             self.assertEqual(dynamic['tiltX'], 0)
             self.assertEqual(dynamic['tiltY'], .025)
+            self.assertTrue(dynamic['rimLight'])
             settings.write_text(settings.read_text().replace('Dynamic Cam', 'Free Cam'))
             free = preview_settings(settings)
             self.assertEqual(free['distance'], 5.5)
@@ -153,6 +156,8 @@ int main(void) {
             settings.write_text(settings.read_text() + 'pixel_aspect = 4:3 CRT\nextended_aspect = off\n')
             self.assertEqual(preview_settings(settings)['pixelAspect'], 'crt')
             self.assertEqual(preview_settings(settings)['aspect'], '4:3')
+            settings.write_text(settings.read_text() + 'gpu_fx_rim = Off\n')
+            self.assertFalse(preview_settings(settings)['rimLight'])
 
 
 if __name__ == "__main__":

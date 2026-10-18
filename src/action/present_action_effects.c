@@ -14,6 +14,7 @@
 #include "action/action_effect_projection.h"
 #include "action/action_effect_render.h"
 #include "action/action_effect_source.h"
+#include "action/action_effect_receivers.h"
 #include "actraiser/actraiser_room_profiles.h"
 #include "app/session_fatal.h"
 #include "diorama/diorama.h"
@@ -501,12 +502,13 @@ typedef struct ActionSourcePacketCache {
   ActionEffectSourceLightJob *lights;
   unsigned count, capacity, light_count, light_capacity;
   uint64_t revision;
-  bool valid, failed, lighting, particles, scenery_exposure_in_mesh;
-  uint32_t particle_mask;
+  bool valid, failed, lighting, particles, scenery_exposure_in_mesh, scenery_lighting_in_material;
+  unsigned particle_count;
+  uint8_t particle_indices[kActionAuthoredMaxInstances];
   ActionEffectLocalRect particle_bounds[kActionAuthoredMaxInstances];
 } ActionSourcePacketCache;
 
-_Static_assert(kActionAuthoredMaxInstances <= 32, "source particle mask capacity");
+_Static_assert(kActionAuthoredMaxInstances <= UINT8_MAX, "source particle index capacity");
 
 static ActionSourcePacketCache s_source_packets[kActionSourcePacketSlots];
 static const FrameSlot *s_source_slot;
@@ -548,8 +550,8 @@ static bool RetainSourcePacket(ActionSourcePacketCache *cache,
 static bool UpdateSourceParticleBounds(ActionSourcePacketCache *cache,
     const ActionSceneEffectFrame *frame, const ActionEffectProjectionContext *projection) {
   bool changed = false;
-  for (unsigned i = 0; i < kActionAuthoredMaxInstances; ++i) {
-    if (!(cache->particle_mask & (1u << i))) continue;
+  for (unsigned p = 0; p < cache->particle_count; ++p) {
+    const unsigned i = cache->particle_indices[p];
     ActionEffectLocalRect bounds;
     if (!ActionEffectSource_ParticleViewBounds(projection, &frame->authored[i], &bounds))
       bounds = (ActionEffectLocalRect){0};
@@ -569,21 +571,23 @@ static bool DrawSourcePacket(ArRenderDevice *device, const FrameSlot *slot,
     s_source_slot = slot;
     s_source_timestamp = slot->timestamp_ns;
   }
-  ActionSourcePacketCache *cache = &s_source_packets[pass];
+  const unsigned packet_slot = pass + (projection->scenery_lighting_only ? kActionSourceCompositePacketSlots : 0);
+  ActionSourcePacketCache *cache = &s_source_packets[packet_slot];
   if (!cache->valid) {
-    cache->particle_mask = 0;
+    cache->particle_count = 0;
     if (pass < kActionEffectRenderLayer_Count)
       for (unsigned i = 0; i < slot->action_scene_effects.authored_count && i < kActionAuthoredMaxInstances; ++i) {
         const ActionEffectInstance *effect = &slot->action_scene_effects.authored[i];
         if (effect->kind == kActionEffect_AuthoredParticleArea && effect->render_layer == pass)
-          cache->particle_mask |= 1u << i;
+          cache->particle_indices[cache->particle_count++] = (uint8_t)i;
       }
   }
-  if (particles && cache->particle_mask &&
+  if (particles && cache->particle_count &&
       UpdateSourceParticleBounds(cache, &slot->action_scene_effects, projection))
     cache->valid = false;
   if (!cache->valid || cache->lighting != lighting || cache->particles != particles ||
-      cache->scenery_exposure_in_mesh != projection->scenery_exposure_in_mesh) {
+      cache->scenery_exposure_in_mesh != projection->scenery_exposure_in_mesh ||
+      cache->scenery_lighting_in_material != projection->scenery_lighting_in_material) {
     ActionEffectSourceBatch source = {.context = *projection,
         .primitives = s_source_primitives, .capacity = kActionSourceMaximumPrimitives,
         .lights = s_source_lights, .light_capacity = kActionSourceMaxLightJobs};
@@ -600,6 +604,7 @@ static bool DrawSourcePacket(ArRenderDevice *device, const FrameSlot *slot,
           ActionEffectSource_ProjectPoint, &source, &s_action_effect_render_scratch.spell);
     cache->failed = !built || !RetainSourcePacket(cache, &source);
     cache->scenery_exposure_in_mesh=projection->scenery_exposure_in_mesh;
+    cache->scenery_lighting_in_material=projection->scenery_lighting_in_material;
     cache->lighting = lighting;
     cache->particles = particles;
     cache->valid = true;
@@ -613,9 +618,10 @@ static bool DrawSourcePacket(ArRenderDevice *device, const FrameSlot *slot,
       .primitives = cache->primitives, .count = cache->count, .capacity = cache->capacity,
       .lights = cache->lights, .light_count = cache->light_count,
       .light_capacity = cache->light_capacity, .failed = cache->failed,
-      .revision = cache->revision, .packet_slot = pass};
+      .revision = cache->revision, .packet_slot = packet_slot};
   if (!submit(device, &source, projection->diorama_projection,
-          &slot->action_scene_effects.scenery, blend, ActionEffectBrightness(slot))) return false;
+          &slot->action_scene_effects.scenery, blend,
+          projection->scenery_lighting_only ? 1.f/kActionReceiverMaxIllumination : ActionEffectBrightness(slot))) return false;
   return source.count != 0;
 }
 
@@ -849,6 +855,36 @@ static bool DecorationAttachmentVisible(int plane, const DioramaProjection *proj
   }
 }
 
+bool PresentActionEffects_DrawSceneryLight(void *userdata, const DioramaProjection *diorama) {
+  PresentActionPlaneEffectContext *context = userdata;
+  ActionEffectProjectionContext projection = DecorationProjection(context->slot, context->viewport, diorama);
+  projection.scenery_lighting_only = true;
+  ActionSceneEffectRenderBatch *geometry = &s_action_effect_render_scratch.scene;
+  const unsigned layers[] = {kActionEffectRenderLayer_Bg1Light,
+      kActionEffectRenderLayer_Bg1Plane, kActionEffectRenderLayer_Bg1HighPlane};
+  for (unsigned i = 0; i < sizeof(layers)/sizeof(layers[0]); ++i) {
+    if (context->source_draw) {
+      /* An empty retained packet is successful; the frame-generation owner
+       * separately records any GPU failure and performs full-frame recovery. */
+      (void)DrawSourceDecoration(context->device, context->slot, &projection,
+          layers[i], true, false, kArRenderBlendMode_Add, context->source_draw);
+    } else {
+      if (!ActionSceneDecorationRender_Build(&context->slot->action_scene_effects, layers[i],
+          true, false, ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
+          &projection, geometry)) return false;
+      for (int v = 0; v < geometry->vertex_count; ++v) {
+        geometry->vertices[v].color.r /= kActionReceiverMaxIllumination;
+        geometry->vertices[v].color.g /= kActionReceiverMaxIllumination;
+        geometry->vertices[v].color.b /= kActionReceiverMaxIllumination;
+      }
+      EffectBatch batch = SceneBatchView(geometry);
+      if (!EffectRenderer_Submit(context->device, &batch, kArRenderBlendMode_Add)) return false;
+    }
+  }
+  context->scenery_lighting_in_material = true;
+  return true;
+}
+
 void PresentActionEffects_DrawDioramaPlane(
     void *userdata, int plane, const DioramaProjection *diorama_projection) {
   PresentActionPlaneEffectContext *context = userdata;
@@ -860,6 +896,7 @@ void PresentActionEffects_DrawDioramaPlane(
   const FrameSlot *slot = context->slot;
   ActionEffectProjectionContext projection =
       DecorationProjection(slot, context->viewport, diorama_projection);
+  projection.scenery_lighting_in_material = context->scenery_lighting_in_material;
   ActionSceneEffectRenderBatch *geometry = &s_action_effect_render_scratch.scene;
   static bool announced[kActionEffectRenderLayer_Count];
   for (unsigned i = 0; i < sizeof(kDecorationPasses)/sizeof(kDecorationPasses[0]); i++) {

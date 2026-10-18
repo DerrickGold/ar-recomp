@@ -23,6 +23,12 @@ const EffectGeometry=(()=>{
     return {x:o.x+side*e.width*.5+Math.sin(a)*e.height*t,y:o.y+Math.cos(a)*e.height*t};
   }
   function outline(e) {
+    if(e.kind==='cloud-bank'&&e.points) {
+      const path=e.points.split(/\s+/).map(pair=>{const [x,y]=pair.split(',').map(Number);return {x:e.x+x,y:e.y+y};});
+      const lift=8+2*(e.amplitude??2);
+      const carried=p=>e.carry>0&&e.drift?Math.min(p.y,...path.filter(q=>(p.x-q.x)*Math.sign(e.drift)>0).map(q=>q.y+lift*((p.x-q.x)/e.carry)**2)):p.y;
+      return [...path,...path.slice().reverse().map(p=>({x:p.x,y:carried(p)-lift*1.5}))];
+    }
     if(isRay(e))return [rayPoint(e,0,-1),rayPoint(e,0,1),rayPoint(e,1,1),rayPoint(e,1,-1)];
     if(['soft-light','halo','free-mist','waterfall-spray','cloud-bank','torch','wall-torch'].includes(e.kind))
       return Array.from({length:24},(_,i)=>({x:e.x+Math.cos(i*Math.PI/12)*e.width/2,y:e.y+Math.sin(i*Math.PI/12)*e.height/2}));

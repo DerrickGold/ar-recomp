@@ -1,4 +1,5 @@
 #include "action_environment_capture_internal.h"
+#include "action_light_kinds.h"
 
 static bool CaptureGlowSource(ActionSceneEffectFrame *dst,const ActionEnvironmentScene *scene,
     const ActionGlowField *field,uint32_t source,int x,int y,uint32_t identity){
@@ -11,6 +12,8 @@ static bool CaptureGlowSource(ActionSceneEffectFrame *dst,const ActionEnvironmen
     .age_ticks=scene->clock,.phase_ticks=scene->clock,.pulse_ticks=scene->clock,
     .kind=kActionEffect_WallTorch,.phase=kActionEffectPhase_WallTorch,.role=kActionEffectRole_Body,
     .flags=kActionEffectFlag_Visible,.render_layer=kActionEffectRenderLayer_Bg1Plane,.projection_plane=kActionEffectProjectionPlane_Bg1,
+    .tuning={.active=1,.intensity=ActionLightKind_DefaultIntensity(kActionEffect_WallTorch),
+      .reach=ActionLightKind_DefaultReach(kActionEffect_WallTorch),.color=0xffffff},
     .geometry={.kind=kActionEffectGeometry_Rect,.data.rect={field->Geometry[0],field->Geometry[1],field->Geometry[2],field->Geometry[3]}},
   };
   if(field->Receivers[0]<8){effect.tuning.light_receivers_set=1;effect.tuning.light_receivers=(uint8_t)field->Receivers[0];}

@@ -2,6 +2,7 @@
  * particle simulation or GPU allocation. All backends consume these batches. */
 #include "action_effect_render_internal.h"
 #include "action_authored_particles.h"
+#include "action_light_kinds.h"
 
 /* Three density slices over fixed world-space samples. Clip the grid in local
  * space before projection; never clamp projected beam/mesh vertices to screen
@@ -62,24 +63,25 @@ static bool FloorMist(ActionEffectGeometryWriter *w, const ActionEffectInstance 
   return true;
 }
 
-bool AppendAuthoredEnvironment(ActionEffectGeometryWriter *writer,
+static bool AppendAuthoredEnvironmentBase(ActionEffectGeometryWriter *writer,
     const ActionEffectInstance *effect, const ActionEffectFloorField *floor, bool lighting, bool particles,
     ActionEffectProjectPointFn project, ActionEffectClipBoundsFn clip, void *context) {
   if (!writer || !effect || !project) return false;
   const ActionEffectLocalRect *r = &effect->geometry.data.rect;
   if (effect->geometry.kind != kActionEffectGeometry_Rect || !RectIsSane(r) ||
-      r->x1-r->x0 > ((effect->kind==kActionEffect_AuthoredParticleArea||effect->kind==kActionEffect_AuthoredExposure||effect->kind==kActionEffect_AuthoredGradient)?16384:512) ||
-      r->y1-r->y0 > ((effect->kind==kActionEffect_AuthoredParticleArea||effect->kind==kActionEffect_AuthoredExposure||effect->kind==kActionEffect_AuthoredGradient)?16384:512) || effect->particle_count > 128 ||
+      r->x1-r->x0 > ((effect->kind==kActionEffect_AuthoredParticleArea||effect->kind==kActionEffect_AuthoredExposure||effect->kind==kActionEffect_AuthoredGradient||effect->kind==kActionEffect_AuthoredHeat)?16384:512) ||
+      r->y1-r->y0 > ((effect->kind==kActionEffect_AuthoredParticleArea||effect->kind==kActionEffect_AuthoredExposure||effect->kind==kActionEffect_AuthoredGradient||effect->kind==kActionEffect_AuthoredHeat)?16384:512) || effect->particle_count > 128 ||
       effect->particle_lifetime < 16 || effect->particle_lifetime > 4096 ||
       !isfinite(effect->tuning.intensity) || effect->tuning.intensity < 0 || effect->tuning.intensity > 4)
     return false;
-  if(effect->kind>=kActionEffect_AuthoredParticleArea&&effect->kind!=kActionEffect_AuthoredFlame)
+  const bool torch_motes=effect->kind==kActionEffect_AuthoredTorch;
+  if(effect->kind>=kActionEffect_AuthoredParticleArea&&effect->kind!=kActionEffect_AuthoredFlame&&!torch_motes)
     return AppendAuthoredField(writer,effect,lighting,particles,project,clip,context);
   ActionEffectParticleStyle style=effect->particle_style.active ? effect->particle_style :
       ActionAuthoredParticles_Default(r->y1-r->y0,effect->generation);
   if (!effect->particle_style.active) style.color_end=effect->tuning.color;
   ActionEffectInstance motion=*effect;
-  if (effect->kind==kActionEffect_AuthoredMotes||effect->kind==kActionEffect_AuthoredFlame) {
+  if (effect->kind==kActionEffect_AuthoredMotes||effect->kind==kActionEffect_AuthoredFlame||torch_motes) {
     if (!ActionAuthoredParticles_Valid(&style)) return false;
     motion.geometry.data.rect=ActionAuthoredParticles_Bounds(r,&style);
     motion.pulse_generation=style.seed;
@@ -91,7 +93,13 @@ bool AppendAuthoredEnvironment(ActionEffectGeometryWriter *writer,
     }
   }
   ActionEffectLocalRect visible=motion.geometry.data.rect;
-  if (clip && !clip(context,&motion,&visible)) return true;
+  /* Billboards own their full extent test, including animated shape and
+   * minimum screen size. Their birth region is not a visibility bound. Keep
+   * the independent receiver sampler's world-window cull for CPU work. */
+  const bool billboard=effect->kind==kActionEffect_AuthoredLight ||
+      effect->kind==kActionEffect_AuthoredMist || effect->kind==kActionEffect_AuthoredFlame;
+  const bool extent_cull=writer->source || project==ActionEffectProjection_ProjectPoint;
+  if ((!billboard || !extent_cull) && clip && !clip(context,&motion,&visible)) return true;
   const uint32_t color = effect->tuning.color;
   const ArRenderColorF tint = {((color>>16)&255)/255.0f,((color>>8)&255)/255.0f,
       (color&255)/255.0f,1};
@@ -115,15 +123,15 @@ bool AppendAuthoredEnvironment(ActionEffectGeometryWriter *writer,
     if(!AppendGlow(writer,effect,&glow,pulse,0,-height*.15f,project,context))return false;
     const uint32_t hot=style.color_end;
     glow.radius_x=width*.13f;glow.radius_y=height*.32f;glow.flare=.34f;glow.rise=.5f;
-    glow.centre=(ArRenderColorF){((hot>>16)&255)/255.f,((hot>>8)&255)/255.f,(hot&255)/255.f,.8f*intensity};
-    glow.ring[0]=glow.centre;glow.ring[0].a=.6f*intensity;glow.ring[1]=tint;glow.ring[1].a=.15f*intensity;
+    glow.centre=(ArRenderColorF){((hot>>16)&255)/255.f,((hot>>8)&255)/255.f,(hot&255)/255.f,fminf(1,.8f*intensity)};
+    glow.ring[0]=glow.centre;glow.ring[0].a=fminf(1,.6f*intensity);glow.ring[1]=tint;glow.ring[1].a=.15f*intensity;
     if(!AppendGlow(writer,effect,&glow,pulse,0,-height*.16f,project,context))return false;
   }
   if (!particles) return true;
   if (effect->kind == kActionEffect_AuthoredFloorMist)
     return FloorMist(writer,effect,floor,&visible,tint,project,context);
   const unsigned ticks=EffectVisualTicks(effect,effect->pulse_ticks);
-  if (effect->kind == kActionEffect_AuthoredMotes || effect->kind==kActionEffect_AuthoredFlame) {
+  if (effect->kind == kActionEffect_AuthoredMotes || effect->kind==kActionEffect_AuthoredFlame || torch_motes) {
     const ArRenderColorF end={((style.color_end>>16)&255)/255.0f,
       ((style.color_end>>8)&255)/255.0f,(style.color_end&255)/255.0f,1};
     for (unsigned i=0;i<effect->particle_count;++i) {
@@ -132,11 +140,15 @@ bool AppendAuthoredEnvironment(ActionEffectGeometryWriter *writer,
           (SceneParticleLifetime){effect->particle_lifetime,0,0});
       const float x=(r->x0+r->x1)*.5f+width*style.spread*(HashUnit(seed)-.5f)+
           style.travel_x*clock.t+sinf(clock.t*6.283185f+HashUnit(seed^71)*6)*style.wander;
-      const float y=style.travel_y < 0 ? (effect->kind==kActionEffect_AuthoredFlame?0:r->y1)+style.travel_y*clock.t :
+      const float y=torch_motes ? r->y0+height*HashUnit(seed^91)+style.travel_y*clock.t :
+          style.travel_y < 0 ? (effect->kind==kActionEffect_AuthoredFlame?0:r->y1)+style.travel_y*clock.t :
           style.travel_y > 0 ? r->y0+style.travel_y*clock.t : r->y0+height*HashUnit(seed^91);
       const float size=style.size_min+(style.size_max-style.size_min)*HashUnit(seed^27);
       ArRenderColorF c=MixColor(tint,end,clock.t);
       c.a=fmaxf(0,fminf(1,intensity*.6f*sinf(clock.t*3.141593f)));
+      /* Motes become visible inside the light pool and fade out toward its
+       * edge. They share the torch's marker and never consume actor slots. */
+      if(torch_motes)c.a*=fmaxf(0,1-4*x*x/(width*width)-4*y*y/(height*height));
       if (!AppendSceneParticle(writer,&motion,x,y,x-style.travel_x*.003f,y-style.travel_y*.003f,
           size,fmaxf(.6f,size*.8f),c,project,context)) return false;
     }
@@ -155,4 +167,20 @@ bool AppendAuthoredEnvironment(ActionEffectGeometryWriter *writer,
     return true;
   }
   return false;
+}
+
+bool AppendAuthoredEnvironment(ActionEffectGeometryWriter *writer,
+    const ActionEffectInstance *effect, const ActionEffectFloorField *floor, bool lighting, bool particles,
+    ActionEffectProjectPointFn project, ActionEffectClipBoundsFn clip, void *context) {
+  if (!writer || !effect || !isfinite(effect->tuning.intensity) || effect->tuning.intensity < 0 ||
+      effect->tuning.intensity > ActionLightKind_MaxIntensity(effect->kind)) return false;
+  const float gain=ActionLightIntensity_Gain(effect->tuning.intensity);
+  if (gain==1) return AppendAuthoredEnvironmentBase(writer,effect,floor,lighting,particles,project,clip,context);
+  ActionEffectInstance base=*effect;
+  base.tuning.intensity=kActionEffectOpacityIntensityMax;
+  const int begin=writer->vertex_count;
+  if (!AppendAuthoredEnvironmentBase(writer,&base,floor,lighting,particles,project,clip,context)) return false;
+  const ActionNativeMember tint={.color=0xffffff,.intensity=gain};
+  TintEffectMember(writer,&tint,begin,writer->vertex_count,true);
+  return true;
 }

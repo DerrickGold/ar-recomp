@@ -1,3 +1,4 @@
+#include "action/action_effect_receivers.h"
 #include "action/action_effect_source.h"
 #include <math.h>
 #include <stdlib.h>
@@ -1988,13 +1989,13 @@ static void TestForestClippingPreservesField(int16_t world_x, int16_t world_y) {
     effect->render_layer = foreground ? kActionEffectRenderLayer_ForegroundLight :
                                        kActionEffectRenderLayer_Bg2Plane;
     effect->flags = kActionEffectFlag_Visible;
-    CHECK(ActionSceneDecorationRender_Build(&frame, effect->render_layer, true, false,
+    CHECK(ActionSceneDecorationRender_Build(&frame, ActionEffectReceivers_Layer(effect), true, false,
         IdentityProjection, NULL, NULL, &reference));
     for (int crop = 0; crop < 8; crop++) {
       effect->flags |= kActionEffectFlag_ClipToRect;
       effect->clip_rect = (ActionEffectLocalRect){-320 + crop * 41.3f, 37.2f + crop * 19,
                                                  345.7f - crop * 22, 530.1f - crop * 13};
-      CHECK(ActionSceneDecorationRender_Build(&frame, effect->render_layer, true, false,
+      CHECK(ActionSceneDecorationRender_Build(&frame, ActionEffectReceivers_Layer(effect), true, false,
           IdentityProjection, NULL, NULL, &clipped));
       CHECK(clipped.vertex_count > 0 && clipped.vertex_count <= 1680);
       const ActionEffectLocalRect r = {effect->world_x + effect->clip_rect.x0,
@@ -2018,13 +2019,13 @@ static void TestForestClippingPreservesField(int16_t world_x, int16_t world_y) {
     }
     /* Fully hidden rays vanish instead of collapsing onto a border. */
     effect->clip_rect = (ActionEffectLocalRect){500,0,600,544};
-    CHECK(ActionSceneDecorationRender_Build(&frame, effect->render_layer, true, false,
+    CHECK(ActionSceneDecorationRender_Build(&frame, ActionEffectReceivers_Layer(effect), true, false,
         IdentityProjection, NULL, NULL, &clipped));
     CHECK(clipped.vertex_count == 0 && clipped.index_count == 0);
     effect->flags = kActionEffectFlag_Visible;
     frame.decorations[1] = *effect;
     frame.decoration_count = 2;
-    CHECK(!ActionSceneDecorationRender_Build(&frame, effect->render_layer, true, false,
+    CHECK(!ActionSceneDecorationRender_Build(&frame, ActionEffectReceivers_Layer(effect), true, false,
         IdentityProjection, NULL, NULL, &clipped));
     CHECK(clipped.vertex_count == 0 && clipped.index_count == 0);
     frame.decoration_count = 1;
@@ -2049,7 +2050,7 @@ static void TestDeferredForestRecipes(void) {
     e->render_layer = i == 1 ? kActionEffectRenderLayer_Bg2Alpha :
         i == 2 ? kActionEffectRenderLayer_ForegroundLight : kActionEffectRenderLayer_Bg2Plane;
     ActionEffectSourceBatch source = {.primitives = primitives, .capacity = kActionSourceMaximumPrimitives};
-    CHECK(ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+    CHECK(ActionSceneDecorationRender_Build(&frame, ActionEffectReceivers_Layer(e), true, true,
         ActionEffectSource_ProjectPoint, ActionEffectSource_ClipBounds, &source, &scratch));
     CHECK(!source.failed && source.count > 0);
     unsigned triangles = 0, particles = 0, leaves = 0, shadows = 0;
@@ -2063,7 +2064,7 @@ static void TestDeferredForestRecipes(void) {
     if (i == 1) CHECK(leaves && !triangles && !particles);
     if (i == 2) CHECK(triangles && shadows == triangles);
     source.count = 0; source.capacity = 1;
-    CHECK(!ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+    CHECK(!ActionSceneDecorationRender_Build(&frame, ActionEffectReceivers_Layer(e), true, true,
         ActionEffectSource_ProjectPoint, ActionEffectSource_ClipBounds, &source, &scratch));
     CHECK(source.failed && source.count <= source.capacity);
   }
@@ -2291,7 +2292,7 @@ static void TestForestParticles(void) {
   CHECK(repeat.vertex_count == 0); /* Silhouettes cannot enter the additive batch. */
   frame.decorations[0].kind = kActionEffect_ForestForwardLight;
   frame.decorations[0].render_layer = kActionEffectRenderLayer_ForegroundLight;
-  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_ForegroundLight,
+  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg1Light,
       true, false, IdentityProjection, NULL, NULL, &repeat));
   CHECK(repeat.vertex_count >= 30 && repeat.vertex_count <= 150);
   CHECK(repeat.index_count <= 600);
@@ -2319,7 +2320,7 @@ static void TestForestBossClearingLight(void) {
   static ActionSceneEffectRenderBatch batch;
   for (int ticks = 0; ticks < 2048; ticks += 512) {
     frame.decorations[0].phase_ticks = (uint16_t)ticks;
-    CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_ForegroundLight,
+    CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg1Light,
         true, false, IdentityProjection, NULL, NULL, &batch));
     for (int i = 0; i < batch.vertex_count; i++) {
       const ArRenderVertex2D *v = &batch.vertices[i];
@@ -2364,11 +2365,11 @@ static void TestForestLayerScroll(void) {
   };
   static ActionSceneEffectRenderBatch first, moved;
   for (int foreground = 0; foreground < 2; foreground++) {
-    const uint8_t layer = foreground ? kActionEffectRenderLayer_ForegroundLight :
+    const uint8_t layer = foreground ? kActionEffectRenderLayer_Bg1Light :
                                       kActionEffectRenderLayer_Bg2Plane;
     frame.decorations[0].kind = foreground ? kActionEffect_ForestForwardLight :
                                             kActionEffect_ForestCanopyLight;
-    frame.decorations[0].render_layer = layer;
+    frame.decorations[0].render_layer = foreground ? kActionEffectRenderLayer_ForegroundLight : layer;
     CHECK(ActionSceneDecorationRender_Build(&frame, layer, true, false,
         ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds, &context, &first));
     /* A mean-camera movement of 16 must move each light left by 16. The old
@@ -2438,6 +2439,18 @@ static void TestBetweenBackgroundsProjection(void) {
       &expected, NULL, NULL));
   CHECK(fabsf(actual.x - expected.x) < .0001f);
   CHECK(fabsf(actual.y - expected.y) < .0001f);
+  /* CPU and deferred source geometry must preserve half-pixel midpoint
+   * motion in both axes instead of taking a second integer camera step. */
+  context.bg1_camera_x++;
+  context.bg1_camera_y++;
+  const ArRenderPointF origin = ActionEffectProjection_CaptureOrigin(&context, &light);
+  CHECK(origin.x == 177.5f && origin.y == 13.5f);
+  CHECK(ActionEffectProjection_ProjectPoint(&context, &light, 20, 100, &actual));
+  CHECK(Diorama_ProjectCapturedBg2Point(&projection, 197.5f, 113.5f,
+      &expected, NULL, NULL));
+  CHECK(fabsf(actual.x - expected.x) < .0001f && fabsf(actual.y - expected.y) < .0001f);
+  context.bg1_camera_x--;
+  context.bg1_camera_y--;
   projection.bg2_plane.valid = false;
   CHECK(!ActionEffectProjection_ProjectPoint(&context, &light, 20, 100, &actual));
   context.diorama_projection = NULL;
@@ -2531,7 +2544,7 @@ static void TestCaveEnvironmentGeometry(void) {
         e->world_x = (int16_t)x;
         e->world_y = (int16_t)y;
         e->phase_ticks = (uint16_t)(x + y);
-        CHECK(ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+        CHECK(ActionSceneDecorationRender_Build(&frame, ActionEffectReceivers_Layer(e), true, true,
             IdentityProjection, NULL, NULL, &first));
         total += first.vertex_count;
         CHECK(first.vertex_count <= vertices[family] && first.index_count <= indices[family]);
@@ -2540,7 +2553,7 @@ static void TestCaveEnvironmentGeometry(void) {
           CHECK(first.vertices[i].color.a >= 0 && first.vertices[i].color.a <= 1);
         }
         e->phase_ticks = (uint16_t)(e->phase_ticks + 4096);
-        CHECK(ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+        CHECK(ActionSceneDecorationRender_Build(&frame, ActionEffectReceivers_Layer(e), true, true,
             IdentityProjection, NULL, NULL, &again));
         CHECK(SceneBatchesEqual(&first, &again)); /* Also covers the 16-bit clock seam. */
       }
@@ -2548,7 +2561,7 @@ static void TestCaveEnvironmentGeometry(void) {
     CHECK(total > 0);
     frame.decorations[1] = *e;
     frame.decoration_count = 2;
-    CHECK(!ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+    CHECK(!ActionSceneDecorationRender_Build(&frame, ActionEffectReceivers_Layer(e), true, true,
         IdentityProjection, NULL, NULL, &first));
     CHECK(!first.vertex_count && !first.index_count);
     frame.decoration_count = 1;
@@ -2575,14 +2588,14 @@ static void TestCaveEnvironmentGeometry(void) {
   e->world_x = 128;
   e->world_y = 0;
   e->geometry.data.rect = (ActionEffectLocalRect){-384,0,384,544};
-  CHECK(ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+  CHECK(ActionSceneDecorationRender_Build(&frame, ActionEffectReceivers_Layer(e), true, true,
       IdentityProjection, NULL, NULL, &first));
   CHECK(SampleForestLight(&first, 112, 90, true) < .02f);
   CHECK(SampleForestLight(&first, 130, 180, true) > .20f);
   CHECK(SampleForestLight(&first, 130, 240, true) == 0);
   e->flags |= kActionEffectFlag_ClipToRect;
   e->clip_rect = (ActionEffectLocalRect){-10,120,100,201};
-  CHECK(ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+  CHECK(ActionSceneDecorationRender_Build(&frame, ActionEffectReceivers_Layer(e), true, true,
       IdentityProjection, NULL, NULL, &again));
   CHECK(again.vertex_count > 0);
   for (float y = 120.1f; y < 201; y += 7.1f)
@@ -2597,7 +2610,7 @@ static void TestCaveEnvironmentGeometry(void) {
   e->world_y = 1440;
   e->flags = kActionEffectFlag_Visible;
   e->render_layer = kActionEffectRenderLayer_ForegroundLight;
-  CHECK(ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+  CHECK(ActionSceneDecorationRender_Build(&frame, ActionEffectReceivers_Layer(e), true, true,
       IdentityProjection, NULL, NULL, &first));
   CHECK(SampleForestLight(&first, 856,1590,true) > .12f);
   CHECK(SampleForestLight(&first, 856,1590,true) < .26f);
@@ -2605,7 +2618,7 @@ static void TestCaveEnvironmentGeometry(void) {
               SampleForestLight(&first, 906,1590,true)) < .056f);
   e->flags |= kActionEffectFlag_ClipToRect;
   e->clip_rect = (ActionEffectLocalRect){-48,110,20,210};
-  CHECK(ActionSceneDecorationRender_Build(&frame, e->render_layer, true, true,
+  CHECK(ActionSceneDecorationRender_Build(&frame, ActionEffectReceivers_Layer(e), true, true,
       IdentityProjection, NULL, NULL, &again));
   CHECK(again.vertex_count > 0);
   for (float y = 1551.1f; y < 1649; y += 6.1f)
@@ -2629,7 +2642,7 @@ static void TestCaveAmbientScroll(void) {
     .visible_width = 384, .snes_height = 224, .viewport = {0,0,384,224},
   };
   static ActionSceneEffectRenderBatch first, moved;
-  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_ForegroundLight,
+  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg1Light,
       true, false, ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
       &context, &first));
   /* The aggregate follows the camera, but its illumination must stay fixed
@@ -2638,7 +2651,7 @@ static void TestCaveAmbientScroll(void) {
   context.bg1_camera_y += 37;
   frame.decorations[0].world_x += 23;
   frame.decorations[0].world_y += 37;
-  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_ForegroundLight,
+  CHECK(ActionSceneDecorationRender_Build(&frame, kActionEffectRenderLayer_Bg1Light,
       true, false, ActionEffectProjection_ProjectPoint, ActionEffectProjection_ClipBounds,
       &context, &moved));
   float peak = 0;
@@ -2840,7 +2853,7 @@ static void TestCavePolishGeometry(void) {
     .projection_plane = kActionEffectProjectionPlane_Bg1,
     .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,544}},
   };
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
       IdentityProjection,NULL,NULL,&first));
   CHECK(first.vertex_count > 0);
   float low = 10000, high = -10000;
@@ -2852,7 +2865,7 @@ static void TestCavePolishGeometry(void) {
   }
   CHECK(high-low > 8); /* The glint climbs the actual slope instead of floating flat. */
   e->source_mask = 0;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
       IdentityProjection,NULL,NULL,&next));
   CHECK(!next.vertex_count);
   *e = (ActionEffectInstance){
@@ -2866,7 +2879,7 @@ static void TestCavePolishGeometry(void) {
   unsigned changed_counts = 0;
   for (unsigned generation = 1; generation <= 32; generation++) {
     e->generation = generation;
-    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+    CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,true,
         IdentityProjection,NULL,NULL,&next));
     CHECK(next.vertex_count > 0);
     if (generation > 1) {
@@ -2966,7 +2979,7 @@ static void TestBloodpoolMoonlight(void) {
   };
   static ActionSceneEffectRenderBatch lit, repeat;
   frame.moonlight.valid = true;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&lit) && lit.vertex_count);
   CHECK(lit.vertex_count < 6000 && lit.index_count < 16000);
   for (int i = 0; i < lit.vertex_count; i++) {
@@ -2977,14 +2990,14 @@ static void TestBloodpoolMoonlight(void) {
     CHECK(v->color.a >= 0 && v->color.a <= 1);
   }
   e->phase_ticks = 16384;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&repeat) && SceneBatchesEqual(&lit,&repeat));
   const float clear = MoonAlphaAt(&lit,112,187.75f);
   const float clear_mid = MoonAlphaAt(&lit,112,142.25f);
   CHECK(clear > 0);
   frame.moonlight.count = 1;
   frame.moonlight.rectangles[0] = (ActionMoonlightOccluder){0,128,4096,136};
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&repeat));
   /* A ledge locally shadows the middle fan, while distant light survives
    * beneath it. It cannot extinguish the lower beam as an infinite 2D blocker. */
@@ -2999,7 +3012,7 @@ static void TestBloodpoolMoonlight(void) {
   frame.moonlight.count = 2;
   frame.moonlight.rectangles[0].x1 = 110;
   frame.moonlight.rectangles[1] = (ActionMoonlightOccluder){114,128,4096,136};
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&repeat));
   CHECK(MoonAlphaAt(&repeat,112,142.25f) > solid_mid+.01f);
   CHECK(MoonAlphaAt(&repeat,112,187.75f) > clear*.99f);
@@ -3007,7 +3020,7 @@ static void TestBloodpoolMoonlight(void) {
    * of the source, not illumination throughout the haze behind the post. */
   frame.moonlight.count = 1;
   frame.moonlight.rectangles[0] = (ActionMoonlightOccluder){106,56,118,68};
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&repeat));
   CHECK(MoonAlphaAt(&repeat,112,142.25f) > clear_mid*.99f);
   CHECK(MoonAlphaAt(&repeat,112,187.75f) > clear*.99f);
@@ -3018,7 +3031,7 @@ static void TestBloodpoolMoonlight(void) {
   float previous = 0;
   for (int step = 0; step <= 200; step++) {
     const float offset = step*.1f;
-    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+    CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
         MoonTestProjection,NULL,(void *)&offset,&repeat));
     const float alpha = MoonAlphaAt(&repeat,112,142.25f)/clear_mid;
     if (step) CHECK(fabsf(alpha-previous) < .08f);
@@ -3030,15 +3043,15 @@ static void TestBloodpoolMoonlight(void) {
       CHECK(!memcmp(&lit.vertices[i].position,&repeat.vertices[i].position,sizeof(ArRenderPointF)));
   }
   frame.moonlight.valid = false;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&repeat) && !repeat.vertex_count);
   frame.moonlight.valid = true;
   frame.moonlight.count = kActionMoonlightMaxOccluders+1;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&repeat) && !repeat.vertex_count);
   frame.moonlight.count = 1;
   frame.moonlight.rectangles[0].x1 = -1;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&repeat) && !repeat.vertex_count);
   /* Sweep clipping across both fan edges, including thin edge slivers. The
    * shared workspace also has to retain room for the reflection batch. */
@@ -3046,7 +3059,7 @@ static void TestBloodpoolMoonlight(void) {
   for (int x = -384; x < 384; x += 47) {
     for (int y = 0; y < 194; y += 37) {
       e->clip_rect = (ActionEffectLocalRect){x,y,fminf(384,x+181),fminf(194,y+97)};
-      CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+      CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
           IdentityProjection,NULL,NULL,&repeat));
       CHECK(repeat.vertex_count < kActionSceneEffectRenderMaxVertices-1400);
       CHECK(repeat.index_count < kActionSceneEffectRenderMaxIndices-3000);
@@ -3057,17 +3070,17 @@ static void TestBloodpoolMoonlight(void) {
   e->projection_plane = kActionEffectProjectionPlane_Bg2;
   /* Cut through glints to exercise edge clipping. */
   e->clip_rect = (ActionEffectLocalRect){-17,90,31,180};
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,true,
       IdentityProjection,NULL,NULL,&lit) && lit.vertex_count);
   for (int i = 0; i < lit.vertex_count; i++) {
     CHECK(lit.vertices[i].position.x >= 95 && lit.vertices[i].position.x <= 143);
     CHECK(lit.vertices[i].position.y >= 152 && lit.vertices[i].position.y <= 242);
   }
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,false,
       IdentityProjection,NULL,NULL,&lit) && !lit.vertex_count);
   frame.decorations[1] = *e;
   frame.decoration_count = 2;
-  CHECK(!ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+  CHECK(!ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
       IdentityProjection,NULL,NULL,&lit));
 }
 
@@ -3082,19 +3095,19 @@ static void TestDistantWaveCapsFollowRaster(void) {
     .geometry = {.kind = kActionEffectGeometry_Rect, .data.rect = {-384,0,384,194}},
   };
   static ActionSceneEffectRenderBatch baseline, waves, changed;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,true,
       IdentityProjection,NULL,NULL,&baseline));
   frame.bloodpool.water_scroll_valid = true;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,true,
       IdentityProjection,NULL,NULL,&waves));
   const int wave_vertices = waves.vertex_count-baseline.vertex_count;
   CHECK(wave_vertices > 0 && wave_vertices <= 12*4*4*7);
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,true,
       IdentityProjection,NULL,NULL,&changed) && SceneBatchesEqual(&waves,&changed));
   /* Only the first water row advances; its caps move left by exactly seven
    * native pixels. Other rows stay put, independent of the effect clock. */
   frame.bloodpool.water_scroll[147-kActionBloodpoolWaterScrollFirstRow] = 7;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,true,
       IdentityProjection,NULL,NULL,&changed));
   const int changed_vertices = changed.vertex_count-baseline.vertex_count;
   unsigned checked = 0;
@@ -3113,10 +3126,10 @@ static void TestDistantWaveCapsFollowRaster(void) {
   CHECK(checked > 60);
   /* A native 256px wrap repeats the same CHR and cap positions exactly. */
   frame.bloodpool.water_scroll[147-kActionBloodpoolWaterScrollFirstRow] = 256;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,true,
       IdentityProjection,NULL,NULL,&changed) && SceneBatchesEqual(&waves,&changed));
   e->phase_ticks++;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,true,
       IdentityProjection,NULL,NULL,&changed));
   CHECK(!SceneBatchesEqual(&waves,&changed));
   for (int i = 0; i < wave_vertices; i++)
@@ -3127,7 +3140,7 @@ static void TestDistantWaveCapsFollowRaster(void) {
   frame.decorations[1].kind = kActionEffect_BloodpoolMoonlight;
   frame.decoration_count = 2;
   frame.moonlight.valid = true;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
       IdentityProjection,NULL,NULL,&changed));
   CHECK(changed.vertex_count < kActionSceneEffectRenderMaxVertices);
 }
@@ -3186,7 +3199,7 @@ static void TestBloodpoolGeometry(void) {
     for (int x = -128; x <= 4224; x += 157) {
       e->world_x = (int16_t)x;
       e->phase_ticks = (uint16_t)(x*17);
-      CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,true,
           IdentityProjection,NULL,NULL,&first));
       CHECK(first.vertex_count < 1500 && first.index_count < 5000);
       for (int v = 0; v < first.vertex_count; v++) {
@@ -3201,20 +3214,20 @@ static void TestBloodpoolGeometry(void) {
         CHECK(on_water); /* No drifting patches over dry gaps, even at camera edges. */
       }
       e->phase_ticks = (uint16_t)(e->phase_ticks+2048);
-      CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+      CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,true,
           IdentityProjection,NULL,NULL,&again));
       CHECK(SceneBatchesEqual(&first,&again)); /* Paused/periodic clock, no new RNG. */
     }
     e->world_x = 512;
-    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,false,
+    CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,false,
         IdentityProjection,NULL,NULL,&again) && !again.vertex_count);
     e->source_mask = 0;
-    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+    CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,true,
         IdentityProjection,NULL,NULL,&again) && !again.vertex_count);
     e->source_mask = 0xFF;
     frame.decorations[1] = *e;
     frame.decoration_count = 2;
-    CHECK(!ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+    CHECK(!ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,true,
         IdentityProjection,NULL,NULL,&again));
     frame.decoration_count = 1;
   }
@@ -3513,7 +3526,7 @@ static void TestCastleStackedRays(void) {
   for (unsigned s = 0; s < sizeof(stacks)/sizeof(stacks[0]); s++) {
     e->visual = (uint16_t)stacks[s].room;
     e->source_mask = (uint16_t)stacks[s].mask;
-    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+    CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
         IdentityProjection,NULL,NULL,&joined));
     float previous = 0;
     unsigned lit_rows = 0, sampled_rows = 0;
@@ -3535,7 +3548,7 @@ static void TestCastleStackedRays(void) {
     CHECK(lit_rows*5 >= sampled_rows*4); /* Shorter washes retain most of the join. */
     const float middle = (stacks[s].top+stacks[s].bottom)*.5f+.137f;
     const ActionEffectLocalRect clip = {stacks[s].x-48,middle-3,stacks[s].x+48,middle+3};
-    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+    CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
         IdentityProjection,CastleTestClip,(void *)&clip,&clipped));
     for (float x = clip.x0+1.137f; x < clip.x1; x += .5f) {
       float full_alpha, clipped_alpha;
@@ -3555,7 +3568,7 @@ static void TestCastleStackedRays(void) {
     if (fabsf(x-776) > 4) CHECK(alpha == 0);
   }
   e->source_mask = 1u<<3;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&single));
   float isolated_peak = 0;
   for (float x = 712.137f; x <= 840; x += .5f) {
@@ -3579,7 +3592,7 @@ static void TestCastleWaterGeometry(void) {
   };
   for (unsigned phase = 0; phase < 512; phase += 17) {
     e->phase_ticks = (uint16_t)phase;
-    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+    CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
         IdentityProjection,NULL,NULL,&batch));
     CHECK(batch.index_count > 0);
     for (int i = 0; i < batch.vertex_count; i++) {
@@ -3588,14 +3601,14 @@ static void TestCastleWaterGeometry(void) {
     }
   }
   e->phase_ticks += 512;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
       IdentityProjection,NULL,NULL,&repeat));
   CHECK(SceneBatchesEqual(&batch,&repeat));
   /* Camera-local negative coordinates must not wrap through unsigned strip
    * arithmetic and silently discard the water to the left of the camera. */
   e->world_x = 1200;
   e->geometry.data.rect = e->clip_rect = (ActionEffectLocalRect){-608,0,544,16};
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
       IdentityProjection,NULL,NULL,&repeat));
   CHECK(batch.vertex_count == repeat.vertex_count && batch.index_count == repeat.index_count);
   for (int i = 0; i < batch.vertex_count && i < repeat.vertex_count; i++) {
@@ -3604,11 +3617,11 @@ static void TestCastleWaterGeometry(void) {
     CHECK(fabsf(batch.vertices[i].color.a-repeat.vertices[i].color.a) < .0001f);
   }
   e->source_mask = 1;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
       IdentityProjection,NULL,NULL,&batch));
   for (int i = 0; i < batch.vertex_count; i++) CHECK(batch.vertices[i].position.x <= 736);
   e->source_mask = 0;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
       IdentityProjection,NULL,NULL,&batch));
   CHECK(batch.index_count == 0);
   /* Water joins the complete interior light field and three native torches
@@ -3625,7 +3638,7 @@ static void TestCastleWaterGeometry(void) {
     frame.decorations[i].render_layer = kActionEffectRenderLayer_Bg1Plane;
     frame.decorations[i].projection_plane = kActionEffectProjectionPlane_Bg1;
   }
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
       IdentityProjection,NULL,NULL,&batch));
 }
 
@@ -3644,7 +3657,7 @@ static void TestCastleGeometry(void) {
     .clip_rect = {0,0,256,256},
   };
   ActionEffectLocalRect clip = {100,100,170,220};
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
       IdentityProjection,CastleTestClip,&clip,&batch));
   CHECK(batch.vertex_count > 0);
   for (int i = 0; i < batch.vertex_count; i++) {
@@ -3654,16 +3667,16 @@ static void TestCastleGeometry(void) {
     CHECK(isfinite(v->color.a) && v->color.a >= 0 && v->color.a <= 1);
   }
   e->phase_ticks += 4096;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
       IdentityProjection,CastleTestClip,&clip,&again));
   CHECK(SceneBatchesEqual(&batch,&again));
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,true,
       IdentityProjection,NULL,NULL,&batch));
   CHECK(batch.index_count > 0); /* Dust remains independently renderable. */
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,true,
       IdentityProjection,NULL,NULL,&again) && SceneBatchesEqual(&batch,&again));
   e->phase_ticks += 30;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,false,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),false,true,
       IdentityProjection,NULL,NULL,&again));
   CHECK(batch.vertex_count == again.vertex_count);
   float travel = 0;
@@ -3674,13 +3687,13 @@ static void TestCastleGeometry(void) {
   e->phase_ticks -= 30;
 
   e->source_mask = 0;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
       IdentityProjection,NULL,NULL,&batch));
   CHECK(batch.index_count == 0);
   e->source_mask = 1;
   /* Separate arch/sill scattering must not recreate a curtain through the
    * boss opening. The short upper flare is narrower than the lower spill. */
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&batch));
   float upper_width = 0, lower_width = 0;
   unsigned above_arch = 0, below_sill = 0;
@@ -3754,7 +3767,7 @@ static void TestCastleGeometry(void) {
   for (unsigned s = 0; s < sizeof(sills)/sizeof(sills[0]); s++) {
     e->visual = (uint16_t)sills[s].room;
     e->source_mask = (uint16_t)(1u<<sills[s].source);
-    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+    CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
         IdentityProjection,NULL,NULL,&batch));
     unsigned roots = 0;
     for (int i = 0; i < batch.vertex_count; i++) {
@@ -3794,7 +3807,7 @@ static void TestCastleGeometry(void) {
    * an authored lean or interpolation bias. */
   e->visual = 5;
   e->source_mask = 1u<<4;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&batch));
   for (float offset = 2.137f; offset < 24; offset += 2) {
     float left, right;
@@ -3807,7 +3820,7 @@ static void TestCastleGeometry(void) {
   e->visual = 5;
   e->source_mask = 1u<<5;
   e->geometry.data.rect = e->clip_rect = (ActionEffectLocalRect){0,0,1792,1024};
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&batch));
   bool wide_torch = false;
   for (int i = 0; i < batch.vertex_count; i++)
@@ -3819,14 +3832,14 @@ static void TestCastleGeometry(void) {
     e->visual = (uint16_t)room;
     e->phase_ticks = (uint16_t)phase;
     e->geometry.data.rect = e->clip_rect = (ActionEffectLocalRect){0,0,1792,1024};
-    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+    CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
         IdentityProjection,NULL,NULL,&batch));
   }
   /* Full gallery and cropped strips stress both horizontal and vertical
    * clipping with all eleven sources enabled and animated dust. */
   e->visual = 7;
   e->source_mask = 0x7FF;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&batch));
   for (int x = 384; x <= 784; x += 40) {
     float floor, rim_left, rim_right, pillar, gap;
@@ -3839,7 +3852,7 @@ static void TestCastleGeometry(void) {
     CHECK(pillar < .001f && gap < .001f); /* The pillars keep their dark intervals. */
   }
   e->source_mask &= ~(1u<<6); /* Authored opening at x=544 is now missing. */
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&again));
   float missing_floor;
   SceneAdditiveAlphaAt(&again,544.137f,210.173f,&missing_floor);
@@ -3847,15 +3860,15 @@ static void TestCastleGeometry(void) {
   e->source_mask = 0x7FF;
   for (int left = 336; left < 816; left += 31) {
     const ActionEffectLocalRect cropped = {left,90.173f,left+53,221.137f};
-    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+    CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
         IdentityProjection,CastleTestClip,(void *)&cropped,&batch));
   }
   /* Cropping the same field may clip geometry, but must not move or reweight
    * its floor pools and column highlights. */
   const ActionEffectLocalRect gallery_clip = {493,132,623,225};
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,CastleTestClip,(void *)&gallery_clip,&batch));
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&again));
   for (float x = 494.137f; x < 622; x += 3) for (float y = 133.173f; y < 224; y += 9) {
     float full, clipped;
@@ -3871,7 +3884,7 @@ static void TestCastleGeometry(void) {
   for (unsigned room = 0; room < sizeof(moon_rooms)/sizeof(moon_rooms[0]); room++) {
     e->visual = (uint16_t)moon_rooms[room];
     e->phase_ticks = 127;
-    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+    CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
         IdentityProjection,NULL,NULL,&batch));
     CHECK(batch.vertex_count > 500); /* Both Act 1 ray families, no occluder catalogue needed. */
     bool left_ray = false, right_ray = false;
@@ -3883,17 +3896,17 @@ static void TestCastleGeometry(void) {
     }
     CHECK(left_ray && right_ray);
     e->phase_ticks += 16384;
-    CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+    CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
         IdentityProjection,NULL,NULL,&again));
     CHECK(SceneBatchesEqual(&batch,&again));
   }
   /* Gallery exposure changes only brightness. The moon, ray silhouettes and
    * occlusion geometry remain the same as the exterior/boss sky treatment. */
   e->visual = 2;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&batch));
   e->visual = 7;
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
       IdentityProjection,NULL,NULL,&again));
   CHECK(batch.vertex_count == again.vertex_count && batch.index_count == again.index_count);
   unsigned boosted = 0;
@@ -3914,7 +3927,7 @@ static void TestCastleGeometry(void) {
   e->world_x = 32;
   e->world_y = 224;
   e->geometry.data.rect = e->clip_rect = (ActionEffectLocalRect){0,-18,192,0};
-  CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+  CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
       IdentityProjection,NULL,NULL,&batch));
   CHECK(batch.index_count > 0);
   for (int i = 0; i < batch.vertex_count; i++) {
@@ -3923,7 +3936,7 @@ static void TestCastleGeometry(void) {
   }
   frame.decorations[1] = *e;
   frame.decoration_count = 2;
-  CHECK(!ActionSceneDecorationRender_Build(&frame,e->render_layer,true,true,
+  CHECK(!ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,true,
       IdentityProjection,NULL,NULL,&batch));
   CHECK(batch.index_count == 0); /* Duplicated aggregate cannot exhaust a batch. */
 }
@@ -4284,16 +4297,16 @@ static void TestRetainedShadowParity(void) {
       if (step==7) { frame.scenery.count=0;frame.moonlight.count=0; }
       if (step==11) frame.moon_field.Shadow[0]*=.8f;
       if (step==13) { e->flags|=kActionEffectFlag_ClipToRect;e->clip_rect=(ActionEffectLocalRect){-160,20,300,490}; }
-      CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+      CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
           ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,&context,&warm));
-      CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+      CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
           UncachedNativeProjection,ActionEffectProjection_ClipBounds,&context,&reference));
       CHECK(warm.vertex_count>0 && SceneBatchesEqual(&warm,&reference));
       CHECK(family?warm.moonlight.cache.ready:warm.shadow.ready);
       /* An unrelated pass can overwrite scratch without altering cached visibility. */
       memset(warm.moonlight.visibility,0,sizeof(warm.moonlight.visibility));
       memset(warm.moonlight.coverage,255,sizeof(warm.moonlight.coverage));
-      CHECK(ActionSceneDecorationRender_Build(&frame,e->render_layer,true,false,
+      CHECK(ActionSceneDecorationRender_Build(&frame,ActionEffectReceivers_Layer(e),true,false,
           ActionEffectProjection_ProjectPoint,ActionEffectProjection_ClipBounds,&context,&warm));
       CHECK(SceneBatchesEqual(&warm,&reference));
     }
@@ -4339,7 +4352,47 @@ static void TestAutoFlatProjection(void) {
   CHECK(ActionEffectProjection_IntersectsFlatViewport(&context,&effect));
 }
 
+static void TestDioramaEffectsUseDrawnGuards(void) {
+  DioramaProjection projection=RakedApronProjection();
+  projection.texture_width=640;projection.texture_height=352;projection.texture_x_origin=64;
+  projection.bg1_plane=(DioramaPlaneProjection){.valid=true,.u0=64.f/640,.u1=560.f/640,
+      .v1=1,.capture_apron=64,.capture_offset={-1.25f,.5f}};
+  projection.object_planes[2]=projection.bg1_plane;
+  ActionEffectProjectionContext context={.bg1_camera_x=752,.bg1_camera_y=144,
+      .ws_extra=120,.ws_extra_top=64,.diorama_projection=&projection};
+  ActionEffectInstance effect=SceneEffect(kActionEffect_WallTorch,632);
+  effect.world_y=256;
+  ArRenderPointF point,expected;
+  ActionEffectLocalRect bounds;
+  for(unsigned object=0;object<2;++object) {
+    effect.projection_plane=object?kActionEffectProjectionPlane_Obj:kActionEffectProjectionPlane_Bg1;
+    effect.obj_priority=2;
+    CHECK(ActionEffectProjection_ViewBounds(&context,&effect,&bounds));
+    CHECK(bounds.x0==-62.75f && bounds.x1==561.25f);
+    CHECK(bounds.y0==-176.5f && bounds.y1==175.5f);
+    for(int x=-60;x<0;++x) {
+      CHECK(ActionEffectProjection_ProjectPoint(&context,&effect,(float)x,0,&point));
+      if(object)CHECK(Diorama_ProjectCapturedPoint(&projection,(float)x,176,2,&expected,NULL,NULL));
+      else CHECK(Diorama_ProjectCapturedBg1Point(&projection,(float)x,176,&expected,NULL,NULL));
+      CHECK(fabsf(point.x-expected.x)<.001f && fabsf(point.y-expected.y)<.001f);
+    }
+    CHECK(!ActionEffectProjection_ProjectPoint(&context,&effect,-64,0,&point));
+    CHECK(!ActionEffectProjection_ProjectPoint(&context,&effect,563,0,&point));
+    CHECK(!ActionEffectProjection_ProjectPoint(&context,&effect,0,177,&point));
+  }
+  effect.projection_plane=kActionEffectProjectionPlane_Bg1;
+  projection.bg1_plane.capture_apron=0;
+  CHECK(!ActionEffectProjection_ProjectPoint(&context,&effect,-10,0,&point));
+  projection.bg1_plane.capture_apron=64;
+  CHECK(ActionEffectProjection_ProjectPoint(&context,&effect,-10,0,&point));
+  /* Clipping meshes and particle birth cells must agree with point effects. */
+  effect.geometry=(ActionEffectGeometry){.kind=kActionEffectGeometry_Rect,.data.rect={-80,-200,600,200}};
+  CHECK(ActionEffectProjection_ClipBounds(&context,&effect,&bounds));
+  CHECK(bounds.x0==-62.75f && bounds.x1==561.25f);
+}
+
 int main(void) {
+  TestDioramaEffectsUseDrawnGuards();
   TestAutoFlatProjection();
   TestRetainedShadowParity();
   TestAuthoredTorchReach();

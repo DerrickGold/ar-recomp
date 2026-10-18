@@ -464,12 +464,14 @@ static void ResolveVideoGeometry(bool apply_runtime_changes,
   g_active_pixel_aspect = g_settings.pixel_aspect;
 
   const bool automatic = g_settings.extended_aspect == kScreenAspect_Auto;
+  int width = 0, height = 0;
+  const bool have_output = ArRenderDevice_GetOutputSize(&g_render_device, &width, &height);
+  if (have_output) DisplayGeometry_SetOutputSize(width, height);
   int extra_rows = 0;
   int extra_columns = 0;
   if (automatic && s_widescreen_runtime_allowed) {
-    int width = 0, height = 0;
     ActRaiserAutoCanvas canvas;
-    if (ArRenderDevice_GetOutputSize(&g_render_device, &width, &height) &&
+    if (have_output &&
         DisplayGeometry_ResolveAutoCanvas(
             width, height, g_active_pixel_aspect == kPixelAspect_Crt43,
             &canvas)) {

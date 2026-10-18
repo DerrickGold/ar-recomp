@@ -64,7 +64,7 @@ func PreparePortableData(source, destination string, embedded ...fs.FS) error {
 		}
 	}
 	if fresh {
-		for _, leaf := range []string{"config.ini", "settings.ini", "diorama-layers.ini", "saves"} {
+		for _, leaf := range []string{"config.ini", "settings.ini", "diorama-layers.ini", "action-effects.ini", "saves"} {
 			if err := copyMissingTree(filepath.Join(source, leaf), filepath.Join(destination, leaf)); err != nil {
 				return err
 			}
@@ -115,7 +115,7 @@ func importLegacyGlobalData(destination string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	for _, leaf := range []string{"config.ini", "settings.ini", "diorama-layers.ini", "saves", "game-assets", "defaults", seedStateName} {
+	for _, leaf := range []string{"config.ini", "settings.ini", "diorama-layers.ini", "action-effects.ini", "saves", "game-assets", "defaults", seedStateName} {
 		if err := copyMissingTree(filepath.Join(legacy, leaf), filepath.Join(destination, leaf)); err != nil {
 			return fmt.Errorf("import previous global game data (originals are unchanged): %w", err)
 		}

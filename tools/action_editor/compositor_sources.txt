@@ -11,3 +11,4 @@ src/render/render_output.c
 src/render/scene3d_math.c
 src/render/presentation_layout.c
 src/action/action_bg_plan.c
+src/action/action_camera_bounds.c

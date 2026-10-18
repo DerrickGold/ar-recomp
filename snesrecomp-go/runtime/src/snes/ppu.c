@@ -620,7 +620,7 @@ bool PpuSetObjColorTransforms(Ppu *ppu,const SrPpuObjColorTransform *transforms,
     if(!ppu || (count!=0 && count!=128) || (!!transforms != !!count))return false;
     bool active=false;
     for(unsigned i=0;i<count;++i)for(unsigned c=0;c<3;++c) {
-        if(transforms[i].multiply[c]>512 || transforms[i].add[c]>255)return false;
+        if(transforms[i].multiply[c]>SR_PPU_OBJ_COLOR_MULTIPLY_MAX || transforms[i].add[c]>255)return false;
         active|=transforms[i].multiply[c]!=256 || transforms[i].add[c]!=0;
     }
     if(count)memcpy(ppu->objColorTransforms,transforms,sizeof(ppu->objColorTransforms));
@@ -2076,7 +2076,11 @@ static void clear_overlay_row(Ppu *ppu, int source, int screen_y, bool defer) {
     uint32_t fill;
     if (ppu->overlayRenderBuffer[source] == NULL ||
         (!active && !ppu->overlayRenderMaybeDirty[source])) return;
-    background_packet_begin_row(ppu, (unsigned)source, screen_y, defer);
+    /* Validation clears CPU pixels alongside an already allocated tile row.
+     * Reinitializing that row as indexed data would discard its offsets and
+     * allocate twice, exhausting the packet arena in extended captures. */
+    if (defer || source >= 2 || !(ppu->backgroundTileSources & (1u << source)))
+        background_packet_begin_row(ppu, (unsigned)source, screen_y, defer);
     row = overlay_row(capture, screen_y);
     if (last_line) ppu->overlayRenderMaybeDirty[source] = active;
     if (row < 0 || row >= kPpuBufHeight) return;
@@ -2829,7 +2833,7 @@ static bool native_window_plan_inside(NativeLayerWindowPlan *plan, int x) {
 }
 
 static void native_resolve_vram_bg_span(Ppu *SR_RESTRICT ppu, int layer,
-        int screen_y, bool want_sub, int left, int right, int origin,
+        int screen_y, bool want_sub, bool capture_padding, int left, int right, int origin,
         uint16_t *SR_RESTRICT main_pixels,
         uint16_t *SR_RESTRICT sub_pixels);
 
@@ -3124,7 +3128,7 @@ static void native_resolve_virtual_bg_span(Ppu *SR_RESTRICT ppu, int layer,
         if (result == kPpuVirtualTilemapLookup_FallbackAuthentic) {
             ppu->backgroundTileSources &= (uint8_t)~(1u << layer);
             native_resolve_vram_bg_span(
-                ppu, layer, screen_y, want_sub, x, x + run, origin,
+                ppu, layer, screen_y, want_sub, false, x, x + run, origin,
                 main_pixels, sub_pixels);
             x += run;
             continue;
@@ -3241,7 +3245,7 @@ static bool native_virtual_bg_span_eligible(const Ppu *ppu, int layer) {
  * tile-row work to the span while retaining the exact display-to-source map
  * used by the reference renderer. */
 static void native_resolve_vram_bg_span(Ppu *SR_RESTRICT ppu, int layer,
-        int screen_y, bool want_sub, int left, int right, int origin,
+        int screen_y, bool want_sub, bool capture_padding, int left, int right, int origin,
         uint16_t *SR_RESTRICT main_pixels,
         uint16_t *SR_RESTRICT sub_pixels) {
     NativeLayerWindowPlan plan;
@@ -3290,7 +3294,12 @@ static void native_resolve_vram_bg_span(Ppu *SR_RESTRICT ppu, int layer,
         if (right > kPpuXPixels) right = kPpuXPixels;
     }
     if (left >= right) return;
-    native_layer_window_plan(ppu, layer, want_sub, &plan);
+    if (capture_padding) {
+        /* Padding is a presentation copy of the source, independent of the
+         * main/subscreen windows, just like sample_bg(..., true). */
+        plan.main_mode = plan.sub_mode = 1u;
+        plan.run = 0u;
+    } else native_layer_window_plan(ppu, layer, want_sub, &plan);
     if (plan.main_mode == 0u && plan.sub_mode == 0u) return;
     policy = PpuResolveWidescreenLayerPolicy(
         ppu, (uint8_t)layer, screen_y);
@@ -4444,8 +4453,11 @@ static void native_capture_tiles_line(Ppu *ppu, int layer, int screen_y,
     NativeLayerWindowPlan windows;
     PpuWidescreenLayerPolicy policy;
     SrPpuCaptureTile cached = {0};
+    SrPpuCaptureTile authored = {0};
     int last_tx = INT_MIN, last_ty = INT_MIN;
+    int last_authored_tx = INT_MIN;
     bool found = false;
+    bool authored_found = false;
     if ((!edits->lookup && !edits->apron) || !world->lookup ||
         PPU_forcedBlank(ppu) || bpp_for_mode(PPU_mode(ppu), layer) != 4 ||
         !capture_surface_bound(ppu, layer) ||
@@ -4492,29 +4504,52 @@ static void native_capture_tiles_line(Ppu *ppu, int layer, int screen_y,
     for (int x = left; x < right;) {
         if (!edits->lookup && x == capture->x0) x = capture->x1;
         if (x >= right) break;
-        int fetch_x = x - ((x % mosaic) + mosaic) % mosaic;
-        int source_x;
-        if (!PpuMapWidescreenLayerXWithPolicy(ppu, (uint8_t)layer,
-                fetch_x, &source_x, &policy)) { ++x; continue; }
-        int wx = dx + source_x, tx = floor_div8(wx), fx = wx - tx * 8;
-        int step = mosaic > 1 ? 0 :
-            (x < 0 || x >= kPpuXPixels) &&
-            policy.fill == kPpuWidescreenBandFill_Mirror ? -1 : 1;
-        int run = mosaic > 1 ? mosaic - (((x % mosaic) + mosaic) % mosaic) :
-            step > 0 ? 8 - fx : fx + 1;
         int end = x < capture->x0 ? capture->x0 :
             x < capture->x1 ? capture->x1 : right;
         if (x < 0 && end > 0) end = 0;
         if (x < kPpuXPixels && end > kPpuXPixels) end = kPpuXPixels;
+        int fetch_x = x - ((x % mosaic) + mosaic) % mosaic;
+        int source_x = fetch_x;
+        const bool mapped = PpuMapWidescreenLayerXWithPolicy(ppu, (uint8_t)layer,
+                fetch_x, &source_x, &policy);
+        bool authored_replace = false;
+        int authored_run = INT_MAX;
+        if (edits->lookup && (!mapped || source_x != fetch_x)) {
+            /* Explicit scenery belongs to its unreflected world position.
+             * The edge policy fills gaps only; folding first would replace
+             * painted extensions with a copy of the original room. Cache
+             * misses too, and stop at the next authored tile boundary even
+             * when the fallback's reflected tile ends somewhere else. */
+            const int wx = dx + fetch_x, tx = floor_div8(wx);
+            authored_run = mosaic > 1 ? mosaic - (((x % mosaic) + mosaic) % mosaic) :
+                8 - (wx - tx * 8);
+            if (tx != last_authored_tx) {
+                authored_found = native_capture_tile_lookup(ppu, (unsigned)layer, tx, ty, &authored);
+                last_authored_tx = tx;
+            }
+            authored_replace = authored_found && (authored.flags & SR_PPU_CAPTURE_TILE_REPLACE);
+            if (authored_replace) source_x = fetch_x;
+        }
+        if (!mapped && !authored_replace) {
+            x += authored_run < end - x ? authored_run : end - x;
+            continue;
+        }
+        int wx = dx + source_x, tx = floor_div8(wx), fx = wx - tx * 8;
+        int step = mosaic > 1 ? 0 :
+            !authored_replace && (x < 0 || x >= kPpuXPixels) &&
+            policy.fill == kPpuWidescreenBandFill_Mirror ? -1 : 1;
+        int run = mosaic > 1 ? mosaic - (((x % mosaic) + mosaic) % mosaic) :
+            step > 0 ? 8 - fx : fx + 1;
+        if (run > authored_run) run = authored_run;
         if (run > end - x) run = end - x;
         if (step < 0 && policy.motion == kPpuWidescreenMotion_NormalScroll &&
             run > source_x + 1) run = source_x + 1;
-        if (tx != last_tx || ty != last_ty) {
+        if (!authored_replace && (tx != last_tx || ty != last_ty)) {
             found = native_capture_tile_lookup(ppu, (unsigned)layer, tx, ty, &cached);
             last_tx = tx; last_ty = ty;
         }
-        SrPpuCaptureTile tile = cached;
-        bool draw = found;
+        SrPpuCaptureTile tile = authored_replace ? authored : cached;
+        bool draw = authored_replace || found;
         if (native_visible && (!draw || !(tile.flags & SR_PPU_CAPTURE_TILE_REPLACE)) &&
             (x < capture->x0 || x >= capture->x1)) {
             if (!draw) tile = (SrPpuCaptureTile){0};
@@ -4819,14 +4854,7 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
     for (unsigned layer = 0; layer < 2; ++layer) {
         if (!(ppu->backgroundDeferredClear & (1u << layer))) continue;
         if (!(ppu->backgroundTileSources & (1u << layer)) || (ppu->backgroundCpuSources & (1u << layer))) {
-            const unsigned format = SrPpuBgPacket_Meta(ppu->backgroundPacket, layer,
-                (unsigned)overlay_row(&ppu->overlayCaptures[layer], screen_y))[0];
             clear_overlay_row(ppu, (int)layer, screen_y, false);
-            /* Clearing initializes the indexed fallback format. Validation
-             * still records the tile format alongside those CPU pixels. */
-            if (ppu->backgroundTileSources & (1u << layer))
-                SrPpuBgPacket_Meta(ppu->backgroundPacket, layer,
-                    (unsigned)overlay_row(&ppu->overlayCaptures[layer], screen_y))[0] = format;
         } else {
             const uint32_t *meta = SrPpuBgPacket_Meta(ppu->backgroundPacket, layer,
                 (unsigned)overlay_row(&ppu->overlayCaptures[layer], screen_y));
@@ -4899,11 +4927,11 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                     if (policy.fill == kPpuWidescreenBandFill_Mirror ||
                         policy.fill == kPpuWidescreenBandFill_Repeat) {
                         native_resolve_vram_bg_span(
-                            ppu, layer, screen_y, source_needs_sub[layer],
+                            ppu, layer, screen_y, source_needs_sub[layer], false,
                             left, 0, kPpuExtraLeftRight,
                             layer_main[layer], layer_sub[layer]);
                         native_resolve_vram_bg_span(
-                            ppu, layer, screen_y, source_needs_sub[layer],
+                            ppu, layer, screen_y, source_needs_sub[layer], false,
                             kPpuXPixels, right, kPpuExtraLeftRight,
                             layer_main[layer], layer_sub[layer]);
                     } else {
@@ -4939,7 +4967,7 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                 bool mosaic = PPU_mosaicEnabled(ppu, layer) &&
                     PPU_mosaicSize(ppu) > 1;
                 if (ppu->backgroundTileSources & (1u << layer)) {
-                    native_resolve_vram_bg_span(ppu, layer, screen_y, source_needs_sub[layer],
+                    native_resolve_vram_bg_span(ppu, layer, screen_y, source_needs_sub[layer], false,
                         left, right, kPpuExtraLeftRight, layer_main[layer], layer_sub[layer]);
                 } else if (authentic_y) {
                     native_resolve_bg(
@@ -4949,18 +4977,18 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                         layer < 2 ? bands[layer] + kPpuExtraLeftRight : NULL);
                     if (!mosaic) {
                         native_resolve_vram_bg_span(
-                            ppu, layer, screen_y, source_needs_sub[layer],
+                            ppu, layer, screen_y, source_needs_sub[layer], false,
                             left, 0,
                             kPpuExtraLeftRight, layer_main[layer],
                             layer_sub[layer]);
                         native_resolve_vram_bg_span(
-                            ppu, layer, screen_y, source_needs_sub[layer],
+                            ppu, layer, screen_y, source_needs_sub[layer], false,
                             kPpuXPixels, right, kPpuExtraLeftRight,
                             layer_main[layer], layer_sub[layer]);
                     }
                 } else if (!mosaic) {
                     native_resolve_vram_bg_span(
-                        ppu, layer, screen_y, source_needs_sub[layer],
+                        ppu, layer, screen_y, source_needs_sub[layer], false,
                         left, right,
                         kPpuExtraLeftRight, layer_main[layer],
                         layer_sub[layer]);
@@ -5820,6 +5848,37 @@ static void render_authentic(Ppu *ppu, int screen_y) {
     ppu->extraLeftRight = saved_budget;
 }
 
+/* Complete a GPU-owned source through the fixed capture budget. Appending
+ * reference pixels would invalidate its packet after CPU scanout was skipped,
+ * leaving an incomplete fallback image at a collapsed live margin. */
+static void native_capture_vram_padding(Ppu *ppu, int source, int screen_y,
+        int left, int right) {
+    const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
+    if (screen_y < capture->y0 || screen_y >= capture->y1) return;
+    if (left < capture->x0) left = capture->x0;
+    if (right > capture->x1) right = capture->x1;
+    if (left >= right) return;
+    uint16_t *main = ppu->nativeLineScratch.layerMain[source];
+    uint16_t *sub = ppu->nativeLineScratch.layerSub[source];
+    const bool cpu = (ppu->backgroundCpuSources & (1u << source)) != 0u;
+    const bool owner_sub = (ppu->screenEnabled[0] & (1u << source)) == 0u;
+    if (cpu) {
+        memset(main + kPpuExtraLeftRight + left, 0, (size_t)(right - left) * sizeof(*main));
+        memset(sub + kPpuExtraLeftRight + left, 0, (size_t)(right - left) * sizeof(*sub));
+    }
+    native_resolve_vram_bg_span(ppu, source, screen_y, owner_sub, true,
+        left, right, kPpuExtraLeftRight, main, sub);
+    if (cpu) {
+        NativeOverlayLinePlan plan;
+        native_overlay_line_plan(ppu, source, screen_y, &plan);
+        const uint16_t *pixels = owner_sub ? sub : main;
+        for (int x = left; x < right; ++x) {
+            const uint16_t pixel = pixels[kPpuExtraLeftRight + x];
+            if (pixel) native_write_overlay_packed(ppu, source, x, pixel, 0xffu, &plan);
+        }
+    }
+}
+
 static void render_line(Ppu *ppu, int line) {
     int screen_y = line - 1;
     ppu->backgroundTileSources = ppu->backgroundCpuSources = ppu->backgroundDeferredClear = 0;
@@ -5865,6 +5924,13 @@ static void render_line(Ppu *ppu, int line) {
              * wrapped HUD tiles into a side that has collapsed to black. */
             if (policy.fill != kPpuWidescreenBandFill_Mirror &&
                 policy.fill != kPpuWidescreenBandFill_Repeat) continue;
+            if (source < 2 && (ppu->backgroundTileSources & (1u << source))) {
+                native_capture_vram_padding(ppu, source, screen_y,
+                    -ppu->extraLeftRight, -ppu->extraLeftCur);
+                native_capture_vram_padding(ppu, source, screen_y,
+                    kPpuXPixels + ppu->extraRightCur, kPpuXPixels + ppu->extraLeftRight);
+                continue;
+            }
             for (int x = -ppu->extraLeftRight; x < -ppu->extraLeftCur; ++x) {
                 SrPpuPixel pixel = {0};
                 if (capture_active(capture, x, screen_y) &&

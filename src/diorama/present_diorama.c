@@ -1,3 +1,4 @@
+#include "action/action_heat.h"
 #include "diorama/diorama_gpu_policy.h"
 #include "diorama/present_diorama.h"
 
@@ -6,6 +7,7 @@
 #include <string.h>
 #include "action/action_effect_projection.h"
 #include "action/action_exposure.h"
+#include "action/action_effect_receivers.h"
 #include "render/scenery_dimming.h"
 #include "action/present_action_effects.h"
 #include "app/session_fatal.h"
@@ -770,8 +772,13 @@ retry_projection:;
       .layer_section = slot->diorama_layer_section,
       .bg1_dimming = PresentActionEffects_Bg1Dimming(slot),
       .bg1_dimming_ramp = dimming_ramp,
-      .scenery_exposure = exposure.count?ActionExposure_Scenery:NULL,
-      .scenery_exposure_userdata = &exposure,
+      .scenery_exposure = exposure.count?&exposure.field:NULL,
+      .scenery_light = slot->action_environmental_effects &&
+          ActionEffectReceivers_HasSurfaceLights(&slot->action_scene_effects)
+          ? PresentActionEffects_DrawSceneryLight : NULL,
+      .background_heat = ActionHeat_Prepare(slot->action_environmental_effects&&slot->action_effect_particles?&slot->action_scene_effects:NULL,
+          slot->bg2_camera_x-slot->ws_extra-slot->obj_apron,slot->bg2_camera_y-slot->ws_extra_top,
+          kFrameSlotLayerTextureWidth,kFrameSlotLayerTextureHeight),
       .additive_plane_mask =
           slot->diorama_plane_additive_mask & s_diorama_uploaded_plane_mask,
       .effect_obj_priority_mask = effect_obj_priority_mask,

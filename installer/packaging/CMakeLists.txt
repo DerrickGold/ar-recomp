@@ -452,6 +452,7 @@ install(FILES
 # overrides are the project's work and are meant to ship as they are.
 install(FILES
     ${GAME_ROOT}/diorama-layers.ini
+    ${GAME_ROOT}/action-effects.ini
     DESTINATION utils/defaults)
 # The manifest ships from the TEMPLATE, not from the working copy at
 # ${GAME_ROOT}/game-assets/manifest.ini. That file is live and user-edited --

@@ -1,0 +1,249 @@
+[
+  {
+    "kind": "halo",
+    "symbol": "AuthoredHalo",
+    "illumination": 3,
+    "reason": "Restore useful local illumination without changing the authored falloff or atmospheric opacity."
+  },
+  {
+    "kind": "light-gradient",
+    "symbol": "AuthoredGradient",
+    "illumination": 3,
+    "reason": "Restore useful local illumination without changing the authored falloff or atmospheric opacity."
+  },
+  {
+    "kind": "flame",
+    "symbol": "AuthoredFlame",
+    "illumination": 3,
+    "reason": "Restore useful local illumination without changing the authored falloff or atmospheric opacity."
+  },
+  {
+    "kind": "torch",
+    "symbol": "AuthoredTorch",
+    "illumination": 1,
+    "reason": "User-validated torch appearance: intensity 4, spill reach 2; no additional illumination multiplier.",
+    "intensity": 4,
+    "reach": 2
+  },
+  {
+    "kind": "soft-light",
+    "symbol": "AuthoredLight",
+    "illumination": 3,
+    "reason": "Restore useful local illumination without changing the authored falloff or atmospheric opacity."
+  },
+  {
+    "kind": "light-fan",
+    "symbol": "AuthoredFan",
+    "illumination": 2,
+    "reason": "Lift received daylight or ambient illumination while retaining the visible ray volume and room exposure."
+  },
+  {
+    "kind": "wall-torch",
+    "symbol": "WallTorch",
+    "illumination": 1,
+    "reason": "User-validated torch appearance: intensity 4, spill reach 2; no additional illumination multiplier.",
+    "intensity": 4,
+    "reach": 2
+  },
+  {
+    "kind": "forest-canopy",
+    "symbol": "ForestCanopyLight",
+    "illumination": 2,
+    "reason": "Rear atmospheric scattering; the matching foreground rays provide surface illumination without counting the same sunlight twice.",
+    "receivers": 0
+  },
+  {
+    "kind": "forest-forward",
+    "symbol": "ForestForwardLight",
+    "illumination": 2,
+    "reason": "Illuminate scenery, player and enemies with the calibrated daylight; preserve the separate atmospheric beam layer.",
+    "receivers": 7
+  },
+  {
+    "kind": "cave-sheen",
+    "symbol": "CaveSheen",
+    "illumination": 1.5,
+    "reason": "Restrained reflected highlights; avoid turning wet surfaces into broad light sources."
+  },
+  {
+    "kind": "cave-light",
+    "symbol": "CaveAmbientLight",
+    "illumination": 2,
+    "reason": "Lift received daylight or ambient illumination while retaining the visible ray volume and room exposure."
+  },
+  {
+    "kind": "tower-window",
+    "symbol": "TowerWindowLight",
+    "illumination": 2,
+    "reason": "Lift received daylight or ambient illumination while retaining the visible ray volume and room exposure."
+  },
+  {
+    "kind": "moonlight",
+    "symbol": "BloodpoolMoonlight",
+    "illumination": 2,
+    "reason": "Illuminate scenery, player and enemies with the calibrated daylight; preserve the separate atmospheric beam layer.",
+    "receivers": 7
+  },
+  {
+    "kind": "blood-water",
+    "symbol": "BloodpoolWater",
+    "illumination": 1.5,
+    "reason": "Restrained reflected highlights; avoid turning wet surfaces into broad light sources."
+  },
+  {
+    "kind": "wet-timber",
+    "symbol": "BloodpoolTimber",
+    "illumination": 1.5,
+    "reason": "Restrained reflected highlights; avoid turning wet surfaces into broad light sources."
+  },
+  {
+    "kind": "castle-light",
+    "symbol": "CastleLight",
+    "illumination": 2,
+    "reason": "Lift received daylight or ambient illumination while retaining the visible ray volume and room exposure."
+  },
+  {
+    "kind": "castle-sky",
+    "symbol": "CastleSky",
+    "illumination": 2,
+    "reason": "Lift received daylight or ambient illumination while retaining the visible ray volume and room exposure."
+  },
+  {
+    "kind": "lava-pit",
+    "symbol": "AitosLavaPit",
+    "illumination": 2.5,
+    "reason": "Warm emissive illumination while preserving the lava body and animation."
+  },
+  {
+    "kind": "lava-lake",
+    "symbol": "AitosLavaReservoir",
+    "illumination": 2.5,
+    "reason": "Warm emissive illumination while preserving the lava body and animation."
+  },
+  {
+    "kind": "water-splash",
+    "symbol": "AitosWaterSplash",
+    "illumination": 1.5,
+    "reason": "Restrained reflected highlights; avoid turning wet surfaces into broad light sources."
+  },
+  {
+    "kind": "waterfall",
+    "symbol": "AitosWaterfall",
+    "illumination": 1.5,
+    "reason": "Restrained reflected highlights; avoid turning wet surfaces into broad light sources."
+  },
+  {
+    "kind": "waterfall-mist",
+    "symbol": "AitosWaterfallMist",
+    "illumination": 1,
+    "reason": "Alpha mist is not a material light; retain its existing scattering appearance."
+  },
+  {
+    "kind": "enemy-fireball",
+    "symbol": "EnemyFireball",
+    "illumination": 3,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "statue-orb",
+    "symbol": "FillmoreStatueOrb",
+    "illumination": 3,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "lightning-trap",
+    "symbol": "LightningTrap",
+    "illumination": 2,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "sword-beam",
+    "symbol": "SwordBeam",
+    "illumination": 2,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "jungle-fireball",
+    "symbol": "MarahnaFireball",
+    "illumination": 3,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "lightning-link",
+    "symbol": "MarahnaLightningLink",
+    "illumination": 2,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "viper-lightning",
+    "symbol": "MarahnaBossLightning",
+    "illumination": 2,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "lava-fireball",
+    "symbol": "AitosLavaFireball",
+    "illumination": 3,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "statue-fire",
+    "symbol": "AitosStatueFire",
+    "illumination": 3,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "molten-rock",
+    "symbol": "AitosMoltenRock",
+    "illumination": 3,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "minotaur-axe",
+    "symbol": "MinotaurAxe",
+    "illumination": 3,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "flaming-wheel",
+    "symbol": "FlamingWheel",
+    "illumination": 3,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "wheel-projectile",
+    "symbol": "FlamingWheelProjectile",
+    "illumination": 3,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "ice-ball",
+    "symbol": "IceDragonIceBall",
+    "illumination": 3,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "tanzara-projectile",
+    "symbol": "TanzaraProjectile",
+    "illumination": 3,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "centaur-lightning",
+    "symbol": "CentaurLightning",
+    "illumination": 2,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "boss-lightning",
+    "symbol": "BloodpoolBossLightning",
+    "illumination": 2,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  },
+  {
+    "kind": "northwall-magic",
+    "symbol": "NorthwallBossMagic",
+    "illumination": 3,
+    "reason": "Calibrate received light when receivers are enabled; preserve the existing additive attack glow and phase envelopes."
+  }
+]

@@ -546,7 +546,7 @@ static SrResult configure_ppu_obj_capture(
            (request->color_transform_count!=0 && request->color_transform_count!=128) ||
            (!!request->color_transforms != !!request->color_transform_count))return SR_RESULT_INVALID_ARGUMENT;
         for(unsigned i=0;i<request->color_transform_count;++i)for(unsigned c=0;c<3;++c)
-            if(request->color_transforms[i].multiply[c]>512 || request->color_transforms[i].add[c]>255)
+            if(request->color_transforms[i].multiply[c]>SR_PPU_OBJ_COLOR_MULTIPLY_MAX || request->color_transforms[i].add[c]>255)
                 return SR_RESULT_INVALID_ARGUMENT;
     }
     if ((request->flags & (SR_PPU_OBJ_CAPTURE_RANGE | SR_PPU_OBJ_CAPTURE_WINNERS)) != 0u) {

@@ -59,6 +59,8 @@ int main(void){
       .maps={{.map=map,.map_size=sizeof(map),.world_width=256,.world_height=256,.pages_wide=1}}};
     memset(&native_frame,0,sizeof(native_frame));ActionGlowField_Capture(&scene,&native_frame,f,0x54000000);
     assert(native_frame.glow_field_valid&&native_frame.decoration_count==1);
+    assert(native_frame.decorations[0].tuning.active);
+    assert(native_frame.decorations[0].tuning.intensity==4&&native_frame.decorations[0].tuning.reach==2);
     assert(native_frame.decorations[0].world_x==32+f->Anchor[0]);assert(native_frame.decorations[0].world_y==48+f->Anchor[1]);
     assert(native_frame.decorations[0].generation==(0x54000000u^(3u<<16)^2));
     memset(&frame,0,sizeof(frame));ActionEffectRecipes_Apply(&recipes,group,room,0,731,&scene,&frame);

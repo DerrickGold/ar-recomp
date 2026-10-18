@@ -191,6 +191,37 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
     CHECK(fabsf(out[77*8+1]-((6+dy)*4+8))<.0001f);
     SDL_UnmapGPUTransferBuffer(gpu,download);
   }
+  /* A retained billboard survives an offscreen anchor while its halo still
+   * intersects the capture. Exercise all four edges, including screen-sized
+   * radius minima, and reject only the completely outside cases. */
+  const float centres[][2]={{-1,6},{33,6},{8,-1},{8,17},{-20,6},{52,6},{8,-20},{8,36}};
+  ActionEffectSourcePrimitive halo=primitives[5];
+  halo.points[5][0]=halo.points[5][3]=1;
+  ActionEffectSourceBatch halo_batch={.primitives=&halo,.count=1,.capacity=1};
+  for(unsigned sample=0;sample<8;++sample) for(unsigned phase=0;phase<5;++phase) {
+    halo.origin[0]=centres[sample][0]-halo.points[0][0];
+    halo.origin[1]=centres[sample][1]-halo.points[0][1];
+    halo_batch.revision=1000+sample;
+    CHECK(ArGpuEffectSource_Draw(&effect,device,motion,1u<<6,phases[phase],&halo_batch,&view,NULL,kArRenderBlendMode_Add,1));
+    SDL_GPUCommandBuffer *cmd=SDL_AcquireGPUCommandBuffer(gpu);
+    SDL_GPUCopyPass *copy=SDL_BeginGPUCopyPass(cmd);
+    const SDL_GPUBufferRegion vertices={.buffer=effect.vertices,.size=15*32};
+    const SDL_GPUTransferBufferLocation dest={.transfer_buffer=download};
+    SDL_DownloadFromGPUBuffer(copy,&vertices,&dest);SDL_EndGPUCopyPass(copy);
+    SDL_GPUFence *fence=SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+    CHECK(fence&&SDL_WaitForGPUFences(gpu,true,&fence,1));SDL_ReleaseGPUFence(gpu,fence);
+    const float *out=SDL_MapGPUTransferBuffer(gpu,download,false);CHECK(out);
+    if(!out)continue;
+    const float dx=phases[phase]<.5f?-2+3*phases[phase]:-2*(1-phases[phase]);
+    const float x=centres[sample][0]+dx,y=centres[sample][1]-dx;
+    const bool visible=x>=-1.5f&&x<=33.5f&&y>=-2&&y<=18;
+    if(visible) {
+      CHECK(fabsf(out[0]-x*2)<.0001f);
+      CHECK(fabsf(out[1]-y*4)<.0001f);
+      CHECK(out[7]==1&&out[15]==.5f);
+    } else for(unsigned i=0;i<15;++i)CHECK(out[i*8+7]==0);
+    SDL_UnmapGPUTransferBuffer(gpu,download);
+  }
   /* World-space casters have independent camera/apron offsets. Verify both
    * their uploaded bounds and the resulting shadow, including retained
    * packets, fades, and removal of all casters after a populated upload. */
@@ -200,6 +231,7 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
       .bg1_plane={.valid=true,.u1=1,.v1=1}};
   ActionEffectSourcePrimitive shadow_primitive = {.meta={kActionSourceTriangle,1,0,1},
       .origin={16,0},.clip={-100,-100,100,100},.points={{0,8},{1,8},{0,9}},
+      .extra={0,0,1,0}, /* Full-strength shadow transport. */
       .colors={{1,.4f,.2f,.6f},{1,.4f,.2f,.6f},{1,.4f,.2f,.6f}}};
   const ActionEffectSourcePrimitive original_shadow = shadow_primitive;
   ActionMoonlightOcclusion scenery = {.valid=true,.rectangles={{5,8,19,16},{-3,4,1,6}}};
@@ -242,7 +274,8 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
   }
   /* The same world transform must cover OBJ priorities, high BG planes,
    * folded waterfalls, and static/dynamic anchors spanning raster bands. */
-  for (unsigned scenario = 0; scenario < 11; ++scenario) {
+  for (unsigned scenario = 0; scenario < 15; ++scenario)
+    for (unsigned phase = 0; phase < (scenario >= 11 ? 5u : 1u); ++phase) {
     DioramaProjection v = {.valid = true, .texture_width = 32, .texture_height = 16,
         .output_width = 64, .output_height = 64, .aspect_x = 2, .height_scale = 2,
         .matrix = {1,0,0,0, 0,1,0,0, .1f,.1f,1,.2f, 0,0,0,1}};
@@ -276,8 +309,41 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
       p.origin[0]=0;
       for(unsigned j=0;j<4;++j)p.points[j][0]-=1;
     }
+    uint32_t motion_mask = 0;
+    float dx = 0, dy = 0;
+    if (scenario >= 11) {
+      /* Atmospheric rays/dust use midpoint parallax, including both capture
+       * offsets and GPU-only interpolated motion. Cover plane, skybox,
+       * anchored raster bands and a world-projected skybox. */
+      p.meta[1] = 5;
+      v.bg2_plane.capture_offset = (ArRenderPointF){-.5f,.75f};
+      v.between_backgrounds_capture_offset = (ArRenderPointF){1,-.25f};
+      v.between_backgrounds_world_y_offset = -.02f;
+      if (scenario >= 12) {
+        v.bg2_skybox = (DioramaSkyboxProjection){.count=2,.active_band=-1,
+            .motion_source=3,.bands={{0,0,32,8,0,.5f},{-8,8,40,16,.5f,1}}};
+        if (scenario == 14) v.bg2_skybox.world_plane = v.bg2_plane;
+        v.bg2_plane.valid = false;
+        if (scenario == 13) p.origin[2] = 2;
+      }
+      int32_t *vectors = SDL_MapGPUTransferBuffer(gpu, upload, true);
+      CHECK(vectors != NULL); if (!vectors) continue;
+      memset(vectors,0,256);
+      const int32_t front[] = {4,-8,-2,4,1}, back[] = {2,-4,-1,2,1};
+      memcpy(vectors,front,sizeof(front)); memcpy(vectors+3*8,back,sizeof(back));
+      SDL_UnmapGPUTransferBuffer(gpu,upload);
+      SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(gpu);
+      SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
+      const SDL_GPUTransferBufferLocation from = {.transfer_buffer=upload};
+      const SDL_GPUBufferRegion to = {.buffer=motion,.size=256};
+      SDL_UploadToGPUBuffer(copy,&from,&to,true); SDL_EndGPUCopyPass(copy);
+      CHECK(SDL_SubmitGPUCommandBuffer(cmd));
+      motion_mask = (1u<<0)|(1u<<3);
+      dx = phases[phase] < .5f ? -1.5f + 3*phases[phase] : -1.5f*(1-phases[phase]);
+      dy = -2*dx;
+    }
     const ActionEffectSourceBatch b = {.primitives=&p,.count=1,.capacity=1};
-    CHECK(ArGpuEffectSource_Draw(&effect,device,motion,0,.5f,&b,&v,NULL,kArRenderBlendMode_Add,1));
+    CHECK(ArGpuEffectSource_Draw(&effect,device,motion,motion_mask,phases[phase],&b,&v,NULL,kArRenderBlendMode_Add,1));
     SDL_GPUCommandBuffer *cmd=SDL_AcquireGPUCommandBuffer(gpu);
     SDL_GPUCopyPass *copy=SDL_BeginGPUCopyPass(cmd);
     const SDL_GPUBufferRegion from={.buffer=effect.vertices,.size=15*32};
@@ -289,14 +355,19 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
     if(!out)continue;
     const unsigned corners[]={0,1,2,0,2,3};
     for(unsigned i=0;i<6;++i) {
-      const float x=p.origin[0]+p.points[corners[i]][0], y=p.origin[1]+p.points[corners[i]][1];
+      const float x=p.origin[0]+p.points[corners[i]][0]+dx, y=p.origin[1]+p.points[corners[i]][1]+dy;
       ArRenderPointF expected;
-      const bool ok=scenario<4?Diorama_ProjectCapturedPoint(&v,x,y,scenario,&expected,NULL,NULL):
+      const bool ok=scenario>=11?Diorama_ProjectCapturedBetweenBackgroundsPoint(
+          &v,x,y,p.origin[1]+dy,scenario==13,&expected):
+          scenario<4?Diorama_ProjectCapturedPoint(&v,x,y,scenario,&expected,NULL,NULL):
           scenario==4?Diorama_ProjectCapturedBg1HighPoint(&v,x,y,&expected,NULL,NULL):
           scenario==5?Diorama_ProjectCapturedBg2HighPoint(&v,x,y,&expected,NULL,NULL):
           scenario==9?Diorama_ProjectSkyboxAnchorPoint(&v,p.origin[1],x,y,&expected):
           Diorama_ProjectCapturedBg2Point(&v,x,y,&expected,NULL,NULL);
       CHECK(ok);
+      if (fabsf(out[i*8]-expected.x)>=.001f || fabsf(out[i*8+1]-expected.y)>=.001f)
+        fprintf(stderr,"projection scenario=%u phase=%u corner=%u actual=(%g,%g) expected=(%g,%g)\n",
+            scenario,phase,i,out[i*8],out[i*8+1],expected.x,expected.y);
       CHECK(fabsf(out[i*8]-expected.x)<.001f && fabsf(out[i*8+1]-expected.y)<.001f);
     }
     SDL_UnmapGPUTransferBuffer(gpu,download);

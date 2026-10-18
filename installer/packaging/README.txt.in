@@ -139,6 +139,11 @@ Local authoring survives ordinary launches and reinstalling identical content;
 a changed bundled version wins on the next update. Source checkouts without
 defaults/ continue to use their manually edited INI directly.
 
+"action-effects.ini" ships editable environmental recipes, including Kassandora.
+It follows the same backed-up content update policy: local changes survive
+ordinary launches; a changed release preserves them in .pre-update-N before
+installing its new defaults. Keep it with diorama-layers.ini when moving edits.
+
 You will need your ROM again only if you want to REBUILD. If you just want to
 keep playing, the game is already built and nothing else is needed.
 

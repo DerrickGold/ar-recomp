@@ -18,7 +18,7 @@
  * THE UPGRADE PATH. A user extracts a new bundle over their existing install.
  * The bundle ships its copies to `defaults/`, never to the live names, so
  * extraction cannot touch anything the user has edited. This then merges each
- * settings default forward. Diorama's authored content instead replaces the
+ * settings default forward. Authored scenery/effects content instead replaces the
  * live manifest when its shipped bytes change, after preserving a backup.
  *
  * Runs in the GAME rather than only in the builder GUI, because `run-game`
@@ -34,10 +34,10 @@
 /* Files carried as shipped defaults. Each lives at `defaults/<leaf>` in the
  * bundle and is applied to `<leaf>` beside it.
  *
- * These are exactly the three the old packaging shipped as LIVE files, which is
- * why they were the three an upgrade destroyed. settings.ini and saves/ are
- * absent on purpose: nothing ships them, so nothing can overwrite them, and they
- * have no defaults to merge. */
+ * The original three used to ship as live files, so an upgrade destroyed edits.
+ * Authored effects use the same backed-up content policy as authored scenery.
+ * settings.ini and saves/ are absent on purpose: nothing ships them, so nothing
+ * can overwrite them, and they have no defaults to merge. */
 typedef struct {
   const char *leaf;
   /* Whether this file's sections are key namespaces or records -- see
@@ -55,6 +55,7 @@ static const IniUpgradeLeaf kUpgradeLeaves[] = {
   /* Corrected tiles, framing and removed patches must reach existing rooms.
    * Local authoring survives launches until different release content arrives. */
   { "diorama-layers.ini", kIniUpgrade_Records, true },
+  { "action-effects.ini", kIniUpgrade_Records, true },
   /* [replace:*] / [music:*] : one section per replacement. Both parsers start a
      fresh entry at every '[', so a per-key append would fabricate a one-key stub
      that fails validation on every launch. */

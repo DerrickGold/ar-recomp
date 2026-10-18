@@ -85,12 +85,155 @@ static void TestDioramaEffects(ArRenderDevice *device) {
   DioramaEffectBackend_Reset(device);
 }
 
+/* Receiver lighting is baked into OBJ pixels before the rim shader. Dimming
+ * those pixels must dim the whole result, including its edge; colored light
+ * must not acquire an unrelated yellow/white outline. Check the real shader
+ * against that relationship rather than duplicating its edge formula. */
+static void TestRimExposure(ArRenderDevice *device, SDL_Renderer *renderer) {
+  ArRenderTexture texture = ArRenderTexture_Invalid();
+  const ArRenderTextureDesc desc = {
+    .width = 8, .height = 8, .format = kArRenderPixelFormat_Argb8888,
+    .usage = kArRenderTextureUsage_Streaming,
+    .filter = kArRenderFilter_Nearest, .blend = kArRenderBlendMode_Alpha,
+  };
+  CHECK(ArRenderDevice_CreateTexture(device, &desc, &texture));
+  if (!ArRenderTexture_IsValid(texture)) return;
+  const uint32_t colors[] = {0x806040, 0x204080, 0x008000, 0};
+  const int locations[][2] = {{9, 13}, {13, 13}, {1, 1}}; // edge, body, outside
+  const ArRenderRectF destination = {0, 0, 32, 32};
+  for (unsigned color = 0; color < sizeof(colors)/sizeof(colors[0]); ++color)
+  for (unsigned partial = 0; partial < 2; ++partial) {
+    Uint8 samples[2][3][3][4] = {0};
+    for (unsigned dim = 0; dim < 2; ++dim) {
+      uint32_t pixels[64] = {0}, rgb = 0;
+      for (unsigned channel = 0; channel < 3; ++channel) {
+        const unsigned shift = channel * 8;
+        rgb |= (((colors[color] >> shift) & 255) / (dim ? 4 : 1)) << shift;
+      }
+      for (int y = 2; y < 6; ++y) for (int x = 2; x < 6; ++x)
+        pixels[y*8+x] = rgb | (partial ? 0x80000000u : 0xff000000u);
+      CHECK(ArRenderDevice_UpdateTexture(device, texture, NULL, pixels, 8*sizeof(uint32_t)));
+      for (unsigned mode = 0; mode < 3; ++mode) {
+        CHECK(ArRenderDevice_Clear(device, (ArRenderColorF){0, 0, 0, 0}));
+        if (mode) {
+          const DioramaRimLightEffectParams rim = {1.0f/8, 1.0f/8, mode == 2 ? .33f : 0};
+          CHECK(DioramaEffectBackend_BindRimLight(device, &rim));
+        }
+        const ArRenderDrawState state = {
+          .flags = kArRenderDrawState_Blend | kArRenderDrawState_Tint,
+          .blend = kArRenderBlendMode_Opaque,
+          .tint = partial ? (ArRenderColorF){.75f, .5f, 1, .5f} : (ArRenderColorF){1, 1, 1, 1},
+        };
+        CHECK(ArRenderDevice_DrawTextureWithState(device, texture, NULL, &destination, &state));
+        CHECK(DioramaEffectBackend_Unbind(device));
+        SDL_Surface *image = SDL_RenderReadPixels(renderer, NULL);
+        CHECK(image != NULL);
+        if (image) for (unsigned point = 0; point < 3; ++point) {
+          Uint8 *rgba = samples[dim][mode][point];
+          CHECK(SDL_ReadSurfacePixel(image, locations[point][0], locations[point][1],
+              rgba, rgba+1, rgba+2, rgba+3));
+        }
+        SDL_DestroySurface(image);
+      }
+      for (unsigned point = 0; point < 3; ++point) for (unsigned channel = 0; channel < 4; ++channel) {
+        CHECK(samples[dim][0][point][channel] == samples[dim][1][point][channel]);
+        if (point || channel == 3) // only edge RGB may change
+          CHECK(samples[dim][0][point][channel] == samples[dim][2][point][channel]);
+      }
+      for (unsigned channel = 0; channel < 3; ++channel) {
+        const int base = samples[dim][0][0][channel], rim = samples[dim][2][0][channel];
+        CHECK(rim >= base);
+        if (!base) CHECK(rim == 0); // no light added to black or absent tint channels
+        if (!partial && !dim && base) CHECK(rim > base); // still visibly enhances a lit edge
+      }
+    }
+    for (unsigned channel = 0; channel < 3; ++channel)
+      CHECK(abs(4*samples[1][2][0][channel]-samples[0][2][0][channel]) <= 4);
+  }
+  ArRenderDevice_DestroyTexture(device, texture);
+  DioramaEffectBackend_Reset(device);
+  printf("rim exposure: dimming, warm/cool tint, black, partial alpha and disabled parity checked\n");
+}
+
+/* Lighting restores the original palette before tinting it, including at
+ * zero ambient. Check the light-map coordinates on full and cropped targets. */
+static void TestSceneryIllumination(ArRenderDevice *device, SDL_Renderer *renderer) {
+  CHECK(DioramaEffectBackend_PrepareSceneryLight(device));
+  const ArRenderTextureDesc desc = {.width=2,.height=2,.format=kArRenderPixelFormat_Argb8888,
+      .usage=kArRenderTextureUsage_Streaming,.filter=kArRenderFilter_Nearest,.blend=kArRenderBlendMode_Alpha};
+  ArRenderTexture art=ArRenderTexture_Invalid(),light=ArRenderTexture_Invalid();
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&art));
+  CHECK(ArRenderDevice_CreateTexture(device,&desc,&light));
+  const uint32_t pixels[]={0xff805020,0xff000000,0x80805020,0x00805020};
+  CHECK(ArRenderDevice_UpdateTexture(device,art,NULL,pixels,8));
+  const uint32_t lights[]={0xff000000,0xff303030,0xff30180c,0xffc06030,0xffffffff};
+  const float ambient[]={.25f,0,1};
+  for(unsigned source=0;source<sizeof(lights)/sizeof(lights[0]);++source) {
+    const uint32_t map[]={lights[source],lights[source],lights[source],lights[source]};
+    CHECK(ArRenderDevice_UpdateTexture(device,light,NULL,map,8));
+    for(unsigned dim=0;dim<3;++dim) for(unsigned mode=0;mode<2;++mode) {
+      CHECK(ArRenderDevice_Clear(device,(ArRenderColorF){0,0,0,0}));
+      const DioramaSceneryLightEffectParams params={.illumination=light,.texel_width=.5f,
+          .texel_height=.5f,.shade={1,1,1,1},.mode=mode};
+      CHECK(DioramaEffectBackend_BindSceneryLight(device,&params));
+      const ArRenderRectF dst={0,0,32,32};
+      const ArRenderDrawState state={.flags=kArRenderDrawState_Blend|kArRenderDrawState_Tint,
+          .blend=kArRenderBlendMode_Alpha,.tint={ambient[dim],ambient[dim],ambient[dim],1}};
+      CHECK(ArRenderDevice_DrawTextureWithState(device,art,NULL,&dst,&state));
+      CHECK(DioramaEffectBackend_Unbind(device));
+      SDL_Surface *image=SDL_RenderReadPixels(renderer,NULL);
+      CHECK(image!=NULL);
+      if(image) for(unsigned p=0;p<4;++p) {
+        Uint8 actual[4];
+        CHECK(SDL_ReadSurfacePixel(image,(p%2)*16+8,(p/2)*16+8,actual,actual+1,actual+2,actual+3));
+        for(unsigned c=0;c<3;++c) {
+          const unsigned shift=16-8*c;
+          const float illumination=fminf(4,ambient[dim]+4*((lights[source]>>shift)&255)/255.0f);
+          const float alpha=(pixels[p]>>24)/255.0f;
+          const int expected=(int)lroundf(fminf(255,((pixels[p]>>shift)&255)*illumination)*alpha);
+          CHECK(abs(actual[c]-expected)<=2);
+        }
+      }
+      SDL_DestroySurface(image);
+    }
+  }
+  /* A nonuniform map catches axis flips and cropped intermediate targets.
+   * The right/bottom quadrant is unlit even when its draw fills the target. */
+  const uint32_t gray[]={0xff808080,0xff808080,0xff808080,0xff808080};
+  const uint32_t spatial[]={0xff300000,0xff003000,0xff000030,0xff000000};
+  CHECK(ArRenderDevice_UpdateTexture(device,art,NULL,gray,8));
+  CHECK(ArRenderDevice_UpdateTexture(device,light,NULL,spatial,8));
+  for (unsigned crop=0;crop<2;++crop) {
+    CHECK(ArRenderDevice_Clear(device,(ArRenderColorF){0,0,0,0}));
+    const DioramaSceneryLightEffectParams p={.illumination=light,.shade={1,1,1,1},
+        .light_uv=crop?(ArRenderRectF){.75f,.75f,.25f,.25f}:(ArRenderRectF){0,0,1,1}};
+    CHECK(DioramaEffectBackend_BindSceneryLight(device,&p));
+    const ArRenderRectF dst={0,0,32,32};
+    const ArRenderDrawState state={.flags=kArRenderDrawState_Tint|kArRenderDrawState_Blend,
+        .tint={0,0,0,1},.blend=kArRenderBlendMode_Alpha};
+    CHECK(ArRenderDevice_DrawTextureWithState(device,art,NULL,&dst,&state));
+    CHECK(DioramaEffectBackend_Unbind(device));
+    SDL_Surface *image=SDL_RenderReadPixels(renderer,NULL);
+    CHECK(image!=NULL);
+    if(image) for(unsigned point=0;point<4;++point) {
+      Uint8 rgb[4];
+      CHECK(SDL_ReadSurfacePixel(image,point%2?30:1,point/2?30:1,rgb,rgb+1,rgb+2,rgb+3));
+      for(unsigned c=0;c<3;++c) CHECK(abs(rgb[c]-(!crop&&point==c?96:0))<=1);
+    }
+    SDL_DestroySurface(image);
+  }
+  DioramaEffectBackend_Reset(device);
+  ArRenderDevice_DestroyTexture(device,light);
+  ArRenderDevice_DestroyTexture(device,art);
+  puts("scenery illumination: original palette restoration, colored light, zero ambient, saturation and transparency checked");
+}
+
 /* Compare filtered priority bands with a native per-pixel priority resolve.
  * The low and high submissions surround a solid sprite, just like OBJ2 in
  * Kassandora. In particular, identical opaque terrain on opposite sides of a
  * priority boundary must stay opaque; two independently filtered .5 alphas
  * leave .25 background showing through. */
-static void TestPrioritySurface(ArRenderDevice *device, SDL_Renderer *renderer) {
+static void TestPrioritySurface(ArRenderDevice *device, SDL_Renderer *renderer, bool illumination) {
   CHECK(DioramaEffectBackend_IsAvailable(device, kDioramaEffect_PrioritySurface));
   ArRenderTexture atlas = ArRenderTexture_Invalid();
   const ArRenderTextureDesc desc = {
@@ -99,6 +242,12 @@ static void TestPrioritySurface(ArRenderDevice *device, SDL_Renderer *renderer) 
     .filter = kArRenderFilter_Nearest, .blend = kArRenderBlendMode_Alpha,
   };
   CHECK(ArRenderDevice_CreateTexture(device, &desc, &atlas));
+  ArRenderTexture light=ArRenderTexture_Invalid();
+  if (illumination) {
+    CHECK(ArRenderDevice_CreateTexture(device,&desc,&light));
+    const uint32_t black[8]={0};
+    CHECK(ArRenderDevice_UpdateTexture(device,light,NULL,black,8));
+  }
   const uint32_t patterns[][8] = {
     // Red terrain split vertically; the reported dark seam.
     {0xffff0000, 0, 0xffff0000, 0, 0, 0xffff0000, 0, 0xffff0000},
@@ -142,7 +291,11 @@ static void TestPrioritySurface(ArRenderDevice *device, SDL_Renderer *renderer) 
         CHECK(ArRenderDevice_Clear(device, (ArRenderColorF){0, 0, 1, 1}));
         for (int band = 0; band < 2; band++) {
           const DioramaPrioritySurfaceEffectParams params = {2, 2, band != 0};
-          CHECK(DioramaEffectBackend_BindPrioritySurface(device, &params));
+          if (illumination) {
+            const DioramaSceneryLightEffectParams lit={.illumination=light,
+                .priority=params,.mode=2,.shade={1,1,1,1}};
+            CHECK(DioramaEffectBackend_BindSceneryLight(device,&lit));
+          } else CHECK(DioramaEffectBackend_BindPrioritySurface(device, &params));
           CHECK(ArRenderDevice_DrawGeometryWithState(
               device, atlas, verts, 4, indices, 6, &blend));
           CHECK(DioramaEffectBackend_Unbind(device));
@@ -198,9 +351,10 @@ static void TestPrioritySurface(ArRenderDevice *device, SDL_Renderer *renderer) 
       }
     }
   }
-  printf("priority surface max-channel-delta=%d\n", maximum_error);
+  printf("priority surface (illumination=%d) max-channel-delta=%d\n", illumination, maximum_error);
   ArRenderDevice_DestroyTexture(device, atlas);
   DioramaEffectBackend_Reset(device);
+  if (illumination) ArRenderDevice_DestroyTexture(device,light);
 }
 
 /* Full-add scenes resolve the subscreen winner before splitting its captures.
@@ -495,7 +649,10 @@ int main(void) {
   ArSdlRenderBackend backend = {0};
   CHECK(ArSdlRenderBackend_Bind(&device, &backend, renderer));
   TestDioramaEffects(&device);
-  TestPrioritySurface(&device, renderer);
+  TestRimExposure(&device, renderer);
+  TestSceneryIllumination(&device, renderer);
+  TestPrioritySurface(&device, renderer, false);
+  TestPrioritySurface(&device, renderer, true);
   TestPrioritySurfaceAdditive(&device, renderer);
   TestSimShadowEffect(&device);
   TestSimCloudEffect(&device, renderer);
@@ -513,7 +670,10 @@ int main(void) {
   if (ArRenderDevice_IsReady(&device)) {
     renderer = ArSdlRenderBackend_Renderer(&device);
     TestDioramaEffects(&device);
-    TestPrioritySurface(&device, renderer);
+    TestRimExposure(&device, renderer);
+    TestSceneryIllumination(&device, renderer);
+    TestPrioritySurface(&device, renderer, false);
+    TestPrioritySurface(&device, renderer, true);
     TestPrioritySurfaceAdditive(&device, renderer);
     TestSimShadowEffect(&device);
     TestSimCloudEffect(&device, renderer);

@@ -60,7 +60,7 @@ func WriteManifest(root, goos, arch string) error {
 			return fmt.Errorf("macOS transfer metadata in payload: %s; restage without extended attributes", rel)
 		}
 		lower := strings.ToLower(rel)
-		for _, prohibited := range []string{"utils/src/gen", "utils/saves", "utils/config.ini", "utils/settings.ini", "utils/diorama-layers.ini", "utils/game-assets/manifest.ini", "utils/build"} {
+		for _, prohibited := range []string{"utils/src/gen", "utils/saves", "utils/config.ini", "utils/settings.ini", "utils/diorama-layers.ini", "utils/action-effects.ini", "utils/game-assets/manifest.ini", "utils/build"} {
 			if rel == prohibited || strings.HasPrefix(rel, prohibited+"/") {
 				return fmt.Errorf("mutable/private payload input %s", rel)
 			}

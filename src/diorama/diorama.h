@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "diorama_coverage.h"
+#include "diorama_heat.h"
 #include "diorama_camera.h"
 #include "diorama_render_options.h"
 #include "diorama_planes.h"
@@ -92,10 +93,8 @@ bool Diorama_ClampCameraHorizontally(
     float z_world, float rake, float bow,
     const DioramaHorizontalBounds *bounds);
 
-/* Keep the screen inside the captured columns, in normalized capture
- * coordinates, wherever the world continues past them. Shifts like the world
- * stop; when the capture is narrower than the screen at this depth it zooms
- * about the screen centre first. Run after the world stop. */
+/* Fit the fixed capture budget, independent of finite world edges. Run before
+ * the world stop, whose correction must never change the projection scale. */
 bool Diorama_FitCameraToCapture(
     float matrix[16], float aspect_x, float height_scale,
     float z_world, float rake, float bow,
@@ -103,7 +102,8 @@ bool Diorama_FitCameraToCapture(
     float capture_left, float capture_right);
 
 /* Only captured finite world edges can constrain the presentation camera.
- * The native camera's bottom bound includes its one-row scroll guard. */
+ * Scanline 1 samples camera + 1: world row 0 belongs to the upper margin,
+ * and the native bottom camera bound includes its one-row scroll guard. */
 DioramaVerticalBounds DioramaVerticalBounds_Resolve(
     int plane, int camera_y, int world_height,
     int authentic_y0, int capture_height);
@@ -136,6 +136,9 @@ typedef struct DioramaPlaneProjection {
   ArRenderPointF capture_offset;
   /* Camera-space parallax correction; distinct from texture/clip coordinates. */
   float world_y_offset;
+  /* Extra captured columns drawn beyond the mapping below. Keep the mapping
+   * unchanged: widening its UVs would move/stretch attached effects. */
+  int capture_apron;
   float u0, v0, u1, v1;
   float z_world;
   float rake;
@@ -202,8 +205,24 @@ typedef struct DioramaProjection {
   DioramaPlaneProjection bg1_far_plane;
   DioramaPlaneProjection bg2_high_plane;
   DioramaSkyboxProjection bg2_skybox;
+  /* Midpoint BG1/BG2 parallax relative to BG2's published transform. Keep
+   * the backdrop geometry, but blend its camera stop and generated motion. */
+  ArRenderPointF between_backgrounds_capture_offset;
+  float between_backgrounds_world_y_offset;
   DioramaPlaneProjection object_planes[kDioramaObjectPriorityCount];
 } DioramaProjection;
+
+/* Atmosphere shares BG2's depth/shape, with its own midpoint camera stop.
+ * Raster skyboxes express that correction in source pixels instead. */
+DioramaPlaneProjection Diorama_BetweenBackgroundsPlane(const DioramaProjection *);
+ArRenderPointF Diorama_BetweenBackgroundsSkyboxOffset(const DioramaProjection *);
+bool Diorama_ProjectCapturedBetweenBackgroundsPoint(const DioramaProjection *,
+    float x, float y, float anchor_y, bool anchored, ArRenderPointF *);
+
+/* Finite drawable source in display-capture pixels, including guard columns
+ * and generated-frame offsets. Projection UVs describe placement, not culling. */
+bool Diorama_PlaneCaptureBounds(const DioramaProjection *, const DioramaPlaneProjection *,
+    float *x0, float *y0, float *x1, float *y1);
 
 bool Diorama_SkyboxCaptureBounds(const DioramaProjection *projection,
                                  float *x0, float *y0, float *x1, float *y1);
@@ -358,6 +377,8 @@ typedef struct DioramaView {
   ArRenderRectI viewport;
 } DioramaView;
 
+struct SceneryShadingField;
+
 typedef struct DioramaScene {
   const DioramaRenderOptions *render; /* Required immutable policy for this draw. */
   uint8_t map_group, map_number, layer_section;
@@ -369,8 +390,13 @@ typedef struct DioramaScene {
   ArRenderRectF bg1_dimming_ramp;
   /* Optional synchronous source-UV brightness modifier for BG1 low/high/far.
    * Borrowed only during Composite, like plane_effect; not snapshot state. */
-  float (*scenery_exposure)(void *userdata, float u, float v);
-  void *scenery_exposure_userdata;
+  const struct SceneryShadingField *scenery_exposure;
+  /* Draw only incident BG1 light, at half strength, into the compositor's
+   * current target. Prepared once per presentation after projection; never
+   * read back. On success, attached effects omit that surface contribution. */
+  bool (*scenery_light)(void *userdata, const DioramaProjection *projection);
+  ArRenderTexture scenery_lightmap; /* Compositor-owned, not snapshot state. */
+  DioramaHeat background_heat; /* Displaces only background texture samples. */
   /* Current effects retain projection on an intentionally empty plane. */
   uint8_t effect_obj_priority_mask;
   uint32_t effect_bg_plane_mask;
@@ -387,6 +413,15 @@ typedef struct DioramaScene {
  * at least kDioramaPlane_Count entries. No game state or GPU work is read. */
 int Diorama_ResolveSceneLayers(const DioramaScene *scene,
                                DioramaResolvedLayer *resolved);
+
+/* Before scanout: horizontal camera interval containing the projected view
+ * inside finite scenery. Uses the compositor's exact framing/zoom/plane shape,
+ * without pixels, textures, allocation or GPU calls. camera_x is the native
+ * camera used to resolve capture->horizontal_bounds. False leaves outputs
+ * unchanged (unbounded/hidden playfield, free camera, or room too narrow). */
+bool Diorama_ResolveCaptureCameraRange(const DioramaCapture *capture,
+    const DioramaView *view, const DioramaScene *scene, int camera_x,
+    int *minimum, int *maximum);
 
 /* Draws in viewport-local coordinates, restoring the full output viewport.
  * Enter without a custom GPU state bound; the compositor owns all effects it

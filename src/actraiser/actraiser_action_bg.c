@@ -1,3 +1,4 @@
+#include "diorama/diorama_camera_policy.h"
 #include "actraiser_action_bg.h"
 #include "diorama/diorama_scene_extent.h"
 
@@ -308,29 +309,7 @@ void ActRaiserActionBg_ResolveDioramaHorizontalExtent(
 void ActRaiserActionBg_ResolveVerticalCaptureMargins(
     int camera_y, int world_height, int budget,
     int *top, int *bottom) {
-  const int maximum_budget = (int)SR_PPU_VERTICAL_MARGIN_TOTAL_MAX / 2;
-  if (budget < 0) budget = 0;
-  if (budget > maximum_budget) budget = maximum_budget;
-  int top_rows = 0, bottom_rows = 0;
-  ActRaiserActionBg_ResolveVerticalMargins(
-      camera_y, world_height, budget, &top_rows, &bottom_rows);
-  const int remaining = budget * 2 - top_rows - bottom_rows;
-  if (remaining > 0) {
-    int available_top = 0, available_bottom = 0;
-    ActRaiserActionBg_ResolveVerticalMargins(
-        camera_y, world_height, budget * 2, &available_top, &available_bottom);
-    if (bottom_rows < budget) {
-      int added = available_top - top_rows;
-      if (added > remaining) added = remaining;
-      top_rows += added;
-    } else if (top_rows < budget) {
-      int added = available_bottom - bottom_rows;
-      if (added > remaining) added = remaining;
-      bottom_rows += added;
-    }
-  }
-  if (top) *top = top_rows;
-  if (bottom) *bottom = bottom_rows;
+  DioramaCameraPolicy_VerticalMargins(camera_y, world_height, budget, top, bottom);
 }
 
 bool ActRaiserActionBg_CaptureLayer(
@@ -2257,10 +2236,8 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
     s_provider[layer].hscroll_anchor = ppu.backgrounds[layer].h_scroll & 0x3ffu;
     s_provider[layer].vscroll_anchor = ppu.backgrounds[layer].v_scroll & 0x3ffu;
     s_provider[layer].pixel_cell_x = s_provider[layer].pixel_cell_y = -1;
-    s_provider[layer].pixel_edits_active = include_authentic && virtual_room &&
-        (virtual_room->pixel_layers[layer].count != 0 ||
-         virtual_room->stamp_layers[layer].count != 0 ||
-         virtual_room->framing[0].x != 0);
+    s_provider[layer].pixel_edits_active = include_authentic &&
+        DioramaCameraPolicy_HasEdits(virtual_room, layer);
     s_provider[layer].horizontal_bounds_available = !layer_plan->wrap_world_x;
     ActRaiserActionBg_ResolveDioramaHorizontalExtent(
         s_provider[layer].pixel_edits_active ? virtual_room : NULL, layer,
@@ -2271,10 +2248,7 @@ uint8_t ActRaiserActionBg_BindPlanWithVirtualLayers(
      * and explicit extent; only ordinary live-world layers can continue.
      * A lagging authentic ring does not invalidate its world-backed margins. */
     s_provider[layer].world_apron_available =
-        layer_plan->default_edge == kActionBgEdge_LiveWorld &&
-        layer_plan->horizontal_extent.mode == kActionBgExtent_Available &&
-        layer_plan->vertical_extent.mode == kActionBgExtent_Available &&
-        layer_plan->band_count == 0;
+        DioramaCameraPolicy_WorldApron(layer_plan);
     const SrPpuVirtualTilemapBinding binding = {
       .lookup = ProviderLookup,
       .lookup_span = ProviderLookupSpan,

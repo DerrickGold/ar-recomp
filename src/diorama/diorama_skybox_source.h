@@ -1,6 +1,7 @@
 #ifndef AR_DIORAMA_SKYBOX_SOURCE_H
 #define AR_DIORAMA_SKYBOX_SOURCE_H
 #include "render/render_device.h"
+#include "diorama_heat.h"
 
 /* Raw capture bands shared by native skybox sampling and effect projection.
  * std140-compatible; all values are captured before generated camera motion.
@@ -40,5 +41,6 @@ typedef struct DioramaSkyboxSourceDraw {
   const DioramaSkyboxRowShift *row_shifts;
   unsigned row_shift_count;
   DioramaSkyboxSourceMapping mapping;
+  DioramaHeat heat;
 } DioramaSkyboxSourceDraw;
 #endif

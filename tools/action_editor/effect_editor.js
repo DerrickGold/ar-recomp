@@ -4,9 +4,10 @@ const EffectEditor=(()=>{
   const empty='[effects]\nversion=1\n';
   let documentText=window.__ACTION_EFFECTS__||empty, saved=documentText;
   let selected='', sources=[], sourceKey='', sourceScope='', catalogueSources=[], catalogueScope='', catalogueDocument='', modal=null, records=new Map();
-  let exposureDefaults=new Map(),exposureScope="";
+  let exposureDefaults=new Map(),exposureScope="",contourTarget=null;
   const mapSelection=new Set();let effectClipboard=null,clipboardActive=false;
   const status=message=>{$('#effectStatus').textContent=message;$('#effectDocumentStatus').textContent=message;if(modal)$('#effectInspectorStatus').textContent=message;};
+  const mapStatus=message=>{status(message);tileActionStatus(message);};
   function decode(text) {
     const map=new Map();let record=null;
     for(const raw of text.split(/\r?\n/)) {
@@ -69,22 +70,22 @@ const EffectEditor=(()=>{
       undoStack.push({label,effects:{before:documentText,after:text}});
       if(undoStack.length>kMaxUndo)undoStack.shift();redoStack.length=0;
       restore(text);refreshHistoryButtons();return true;
-    }catch(error){status(error.message);refreshInspector();return false;}
+    }catch(error){status(error.message);if(!modal)tileActionStatus(error.message);refreshInspector();return false;}
   }
   const moteFields=[['emitterSizeMin','size-min','0.35'],['emitterSizeMax','size-max','0.75'],
     ['emitterTravelX','travel-x','0'],['emitterTravelY','travel-y',''],['emitterWander','wander','2'],
     ['emitterSpread','spread','1'],['emitterSeed','seed','']];
-  const particleNames=['flame','motes','particle-area','water-surface','drips','waterfall-spray'];
-  const lightNames=['torch','flame','halo','light-gradient','soft-light','light-fan','wall-torch','forest-canopy','forest-forward','cave-sheen','cave-light','tower-window','moonlight','blood-water','wet-timber','castle-light','castle-sky',
-    'lava-pit','lava-lake','water-splash','waterfall','waterfall-mist','enemy-fireball','statue-orb','lightning-trap','sword-beam','jungle-fireball','lightning-link','viper-lightning','lava-fireball',
-    'statue-fire','molten-rock','minotaur-axe','flaming-wheel','wheel-projectile','ice-ball','tanzara-projectile','centaur-lightning','boss-lightning','northwall-magic'];
+  const particleNames=['particle-path','flame','motes','particle-area','water-surface','drips','waterfall-spray','cloud-bank','torch'];
+  const lightDefaults=window.__ACTION_LIGHT_RESPONSE__;
+  const lightNames=Object.keys(lightDefaults);
+  const sourceDefault=(name,key,member=false)=>member?1:(lightDefaults[name]?.[key]??1);
   const dimNames=['exposure','cave-light','castle-light'];
-  const fieldNames=['halo','light-gradient','particle-area','light-fan','water-surface','drips','waterfall-spray','cloud-bank','wet-contour'];
+  const fieldNames=['particle-path','heat-haze','torch','halo','light-gradient','particle-area','light-fan','water-surface','drips','waterfall-spray','cloud-bank','wet-contour'];
   const terrainNames=['ground-mist','wet-contour','exposure'];
   const requiresTerrain=name=>name.startsWith('stage:')||terrainNames.includes(name)||name.endsWith('-field')&&name!=='moon-field';
   const fieldFields=[['emitterPlacement','placement','foreground'],['emitterPattern','pattern','motes'],
     ['emitterAngle','angle','0'],['emitterFan','fan','36'],['emitterStrands','strands','8'],
-    ['emitterSoftness','softness','0.35'],['emitterDrift','drift','0'],['emitterAmplitude','amplitude','2']];
+    ['emitterSoftness','softness','0.35'],['emitterDrift','drift','0'],['emitterAmplitude','amplitude','2'],['emitterCarry','carry','0'],['emitterGust','gust','0'],['emitterTwinkle','twinkle','0'],['emitterActivity','activity','1'],['emitterShadows','shadows','0']];
   const exposureFields=[['exposureBrightness','brightness'],...['left','top','right','bottom'].map(edge=>['exposureFade'+edge,'fade-'+edge])];
   const nativeFields=[['nativeOffsetX','offset-x',0],['nativeOffsetY','offset-y',0],
     ['nativeWidth','width-scale',1],['nativeLength','length-scale',1],['nativeAngle','angle',0]];
@@ -120,11 +121,11 @@ const EffectEditor=(()=>{
         key==='length-scale'&&!capability.length||key==='angle'&&!capability.angle;
     }
     $('#effectReset').textContent=source?.emitter?'Remove emitter':'Restore source defaults';
+    const name=source?.name,area=name==='particle-area',large=area||name==='exposure'||name==='light-gradient'||name==='heat-haze';
     for(const key of ['x','y','width','height','particles','lifetime','mist-height'])
-      $('#emitter'+key).value=record[key]??({width:96,height:64,particles:24,lifetime:240,'mist-height':26}[key]??0);
-    const name=source?.name,area=name==='particle-area',large=area||name==='exposure'||name==='light-gradient';
+      $('#emitter'+key).value=record[key]??({width:96,height:64,particles:['cloud-bank','torch'].includes(name)?0:24,lifetime:240,'mist-height':26}[key]??0);
     const attached=!!record['actor-target'];
-    $('#actorBindingControls').hidden=!source?.emitter||['ground-mist','exposure','wet-contour','water-surface','particle-area'].includes(name);
+    $('#actorBindingControls').hidden=!source?.emitter||['ground-mist','exposure','wet-contour','water-surface','particle-area','heat-haze'].includes(name);
     $('#actorBindingTarget').value=record['actor-target']??'';
     const family=$('#actorBindingFamily');family.replaceChildren();
     const custom=document.createElement('option');custom.value='';custom.textContent='Custom family ID';family.append(custom);
@@ -137,7 +138,7 @@ const EffectEditor=(()=>{
     $('#actorBindingPreview').disabled=!attached;
     const anchor=record.anchor??'bg1';
     $('#emitterAnchor').value=anchor;
-    $('#emitterAnchor').disabled=attached||terrainNames.includes(name);
+    $('#emitterAnchor').disabled=attached||terrainNames.includes(name)||name==='heat-haze';
     $('#emitterAnchorHint').textContent=attached?'X/Y are offsets from each matching actor. The map marker and attachment preview use the reference actor position.':terrainNames.includes(name)?'This effect uses BG1 terrain coordinates.':
       anchor==='bg2-point'?'X/Y is a fixed point in the BG2 map. The whole effect follows that point as BG2 scrolls, without bending at water raster bands. Draw placement controls which objects cover it.':
       anchor==='bg2-raster'?'X/Y uses BG2 pixels. Each row follows BG2 raster motion; use this for effects attached to moving water.':
@@ -145,7 +146,7 @@ const EffectEditor=(()=>{
     $('#emitterLocate').textContent=attached?'Apply and show at reference actor':`Apply and show anchor on ${anchor==='bg1'?'BG1':'BG2'} map`;
     document.querySelector('label[for="emitterx"]').textContent=attached?'Actor offset X':`${anchor==='bg1'?'BG1':'BG2'} anchor X`;
     document.querySelector('label[for="emittery"]').textContent=attached?'Actor offset Y':`${anchor==='bg1'?'BG1':'BG2'} anchor Y`;
-    $('#effectColor').disabled=disabled||definition||name==='exposure';
+    $('#effectColor').disabled=disabled||definition||['exposure','heat-haze'].includes(name);
     $('#effectIntensity').disabled=disabled||definition||name==='exposure';
     $('#exposureControls').hidden=name!=='exposure';
     for(const [id,key] of exposureFields)$('#'+id).value=key==='brightness'?Math.round(100*Number(record.brightness??(1-Number(record.intensity??.35)))):record[key]??0;
@@ -160,49 +161,59 @@ const EffectEditor=(()=>{
       $('#effect'+mode+'Targets').disabled=!available||name==='exposure'&&mode==='Dim';
       for(const target of ['Scenery','Player','Enemies']) {
         const element=$('#effect'+mode+target);element.disabled=!available||!$('#effect'+mode+'Targets').checked;
-        element.checked=record[`${prefix}-${target.toLowerCase()}`]!==undefined?record[`${prefix}-${target.toLowerCase()}`]==='1':target==='Scenery';
+        const defaults=mode==='Light'?(lightDefaults[name]?.receivers??1):1;
+        element.checked=record[`${prefix}-${target.toLowerCase()}`]!==undefined?record[`${prefix}-${target.toLowerCase()}`]==='1':!!(defaults&{Scenery:1,Player:2,Enemies:4}[target]);
       }
     }
-    $('#effectIntensity').max=name==='exposure'?1:4;
-    $('#contourControls').hidden=name!=='wet-contour';
-    $('#emitterPoints').value=record.points??'-32,0 32,0';
-    $('#emitterparticles').disabled=!particleNames.includes(name);
+    $('#effectIntensity').max=name==='exposure'?1:lightNames.includes(name)?16:4;
+    $('#effectIntensity').title=lightNames.includes(name)?
+      'Overall effect strength; 0 hides the effect. Torches default to 4; other light families default to 1. Above 4, brightness increases without flattening the light falloff. Maximum 16.':
+      'Brightness multiplier: 1 keeps the default brightness; 0 hides the effect. Maximum 4.';
+    $('#contourDraw').disabled=attached;
+    $('#contourControls').hidden=!['wet-contour','cloud-bank','particle-path'].includes(name);
+    $('#emitterPoints').value=record.points??(name==='wet-contour'?'-32,0 32,0':name==='particle-path'?'0,-24 0,24':'');
+    $('#contourDraw').textContent=name==='cloud-bank'?'Trace ground path on map':name==='particle-path'?'Trace particle route on map':'Trace wet edge on map';
+    $('#emitterparticles').disabled=!particleNames.includes(name)||(name==='cloud-bank'&&!record.points);
+    $('#emitterparticles').min=['cloud-bank','torch'].includes(name)?0:1;
     $('#emitterparticles').max=area?16:128;
-    document.querySelector('label[for="emitterparticles"]').textContent=area?'Density / 256px cell':'Particle count';
+    document.querySelector('label[for="emitterparticles"]').textContent=area?'Density / 256px cell':name==='torch'?'Motes in light pool':name==='cloud-bank'?'Lifted dust grains':'Particle count';
     for(const key of ['width','height']){$('#emitter'+key).max=large?16384:512;$('#emitter'+key).disabled=name==='torch';}
     $('#fieldControls').hidden=!fieldNames.includes(name);
     for(const [id,key,fallback] of fieldFields) {
       const element=$('#'+id);element.value=record[key]??fallback;
-      element.disabled=key==='placement'?['ground-mist','exposure'].includes(name):key==='pattern'? !area : key==='angle'?!['light-fan','light-gradient'].includes(name):key==='fan'?name!=='light-fan':
+      element.disabled=key==='placement'?['ground-mist','exposure','heat-haze'].includes(name):key==='pattern'? !(area||name==='particle-path') : key==='angle'?!['light-fan','light-gradient'].includes(name):key==='fan'?name!=='light-fan':
         key==='strands'?!['light-fan','cloud-bank'].includes(name):key==='softness'?!['light-fan','cloud-bank','halo','light-gradient'].includes(name):
-        ['drift','amplitude'].includes(key)?!['water-surface','cloud-bank'].includes(name):false;
+        key==='twinkle'?!(area||name==='particle-path'||name==='cloud-bank'&&record.points):
+        key==='gust'?!['cloud-bank','particle-path'].includes(name):key==='activity'?name!=='particle-path':key==='shadows'?name!=='torch':key==='carry'?name!=='cloud-bank'||!record.points:key==='drift'?!['water-surface','cloud-bank'].includes(name):key==='amplitude'?!['water-surface','cloud-bank','heat-haze'].includes(name):false;
     }
     $('#emitterStrands').max=name==='cloud-bank'?24:32;
-    document.querySelector('label[for="emitterAmplitude"]').textContent=name==='cloud-bank'?'Vertical billow':'Wave height';
-    $('#fieldHint').textContent=area?'One region covers the room. Density is particles per 256px world cell; only nearby cells are generated. Seeds stay fixed as you scroll.':
+    document.querySelector('label[for="emitterAmplitude"]').textContent=name==='cloud-bank'?'Vertical billow':name==='heat-haze'?'Heat displacement (pixels)':'Wave height';
+    $('#fieldHint').textContent=name==='heat-haze'?'BG2-only heat distortion. Width/height locate the heated air; amplitude sets displacement, lifetime the cycle. Supported by the shared diorama renderer, including skybox-only mode.':name==='particle-path'?'Ordered local X,Y points describe the particle route. Trace from source to destination; a smaller activity fraction leaves quiet gaps. Glints stay fixed on the route. Gust links sand to the room wind.':area?'One region covers the room. Density is particles per 256px world cell; only nearby cells are generated. Seeds stay fixed as you scroll.':
       name==='halo'?'Width and height define the outer ring. Softness widens its corona; the centre remains clear. End tint colors the outer edge.':
       name==='light-gradient'?'A room-sized color wash. 0° blends from top to bottom, 90° from left to right. Softness fades the outer edges. Choose BG2 for distant sky, or scenery/player/enemy light receivers.':
       name==='light-fan'?'X/Y is the opening centre. Width spreads origins across the sill or arch; height is ray length. 0° points down. Rays are clipped, never bent at screen edges.':
       name==='water-surface'?'X/Y is the area centre; its top edge is the water surface. Ripples and glints share the wave clock. This adds surface geometry, not refraction.':
       name==='drips'?'Drops fall from the top edge toward the bottom edge. Place this on a verified wet ceiling.':
       name==='waterfall-spray'?'Spray rises from the bottom edge. Anchor this edge to the native waterfall splash.':
-      name==='cloud-bank'?'Layered cloud lobes drift over one area; use a blue tint for damp mist or grey for sky clouds.':'';
+      name==='cloud-bank'?'Trace a BG1 ground path. Carry is the downwind settling distance: 0 hugs slopes; larger values carry dust over crests. Drift sets wind direction/travel, billow sets lift, and lifetime sets the gust cycle. Optional grains lift from this path; size, wander, tint and seed vary them. Clearing points also clears carry and grains for a free cloud.':'';
     $('#emittermist-height').disabled=source?.name!=='ground-mist';
     $('#mistHint').hidden=!['ground-mist','free-mist'].includes(name);
-    $('#moteControls').hidden=!particleNames.includes(name);
-    $('#effectTintControls').hidden=!particleNames.includes(name)&&!['halo','light-gradient'].includes(name);
+    $('#moteControls').hidden=!particleNames.includes(name)||(name==='cloud-bank'&&!record.points);
+    $('#effectTintControls').hidden=(!particleNames.includes(name)&&!['halo','light-gradient'].includes(name))||(name==='cloud-bank'&&!record.points);
     for(const [id,key,fallback] of moteFields) {
       $('#'+id).value=record[key]??fallback;
-      $('#'+id).disabled=['water-surface','drips','waterfall-spray'].includes(name)&&['travel-x','travel-y','wander','spread'].includes(key);
+      $('#'+id).disabled=(['water-surface','drips','waterfall-spray'].includes(name)&&['travel-x','travel-y','wander','spread'].includes(key))||(['cloud-bank','particle-path'].includes(name)&&['travel-x','travel-y','spread'].includes(key));
     }
-    $('#emitterAutoRise').disabled=!['flame','motes','particle-area'].includes(name);
+    $('#emitterAutoRise').disabled=!['flame','motes','particle-area','torch'].includes(name);
     $('#emitterColorEndEnabled').disabled=false;
     $('#emitterColorEndEnabled').checked=record['color-end']!==undefined;
     $('#emitterColorEnd').disabled=record['color-end']===undefined;
     $('#emitterColorEnd').value='#'+(record['color-end']??record.color??'ffffff');
     $('#effectEnabled').checked=record.enabled!=='0';
-    $('#effectIntensity').value=record.intensity??'1';
-    $('#effectReach').value=record.reach??'1';
+    $('#effectIntensity').value=record.intensity??sourceDefault(name,'intensity',source?.member);
+    $('#effectReach').value=record.reach??sourceDefault(name,'reach',source?.member);
+    $('#effectIllumination').value=record.illumination??sourceDefault(name,'illumination');
+    $('#effectIllumination').disabled=disabled||definition||!!source?.member||!lightNames.includes(name);
     $('#effectColor').value='#'+(record.color??'ffffff');
     $('#effectSourceId').textContent=source?.id??'';
     const markers=source?mapEmitters().filter(e=>e.id===source.id):[];
@@ -218,7 +229,7 @@ const EffectEditor=(()=>{
   }
   for(const [id,key] of exposureFields)$('#'+id).onchange=e=>editEmitter(selected,{[key]:key==='brightness'?Number(e.target.value)/100:e.target.value});
   $('#effectSource').onchange=e=>{selected=e.target.value;refreshInspector();};
-  for(const [id,key] of [['effectEnabled','enabled'],['effectIntensity','intensity'],['effectReach','reach'],['effectColor','color']])
+  for(const [id,key] of [['effectEnabled','enabled'],['effectIntensity','intensity'],['effectReach','reach'],['effectIllumination','illumination'],['effectColor','color']])
     $('#'+id).onchange=e=>{
       if(!selected)return;
       const next=new Map(records),value=id==='effectEnabled'?(e.target.checked?'1':'0'):
@@ -263,7 +274,9 @@ const EffectEditor=(()=>{
     for(const member of preset.members) {
       const {kind,x:dx=0,y:dy=0,...properties}=member,id=newEmitterId(kind);
       if(!first)first=id;
-      next.set(id,{...properties,x:String(Math.round(x+dx)),y:String(Math.round(y+dy))});
+      const attached=!!properties['actor-target'];
+      next.set(id,{...properties,x:String(Math.round((attached?0:x)+Number(dx))),
+        y:String(Math.round((attached?0:y)+Number(dy)))});
     }
     if(!change(encode(next),'add '+preset.title))return false;
     selected=first;refreshInspector();status(preset.description+' Each marker can be edited separately.');return true;
@@ -283,9 +296,11 @@ const EffectEditor=(()=>{
     if(name==='moon-field')return createMoonDefinition(x,y,false);
     if(name==='atmosphere-field')return createAtmosphereDefinition(x,y,false);
     if(name==='water-field')return createWaterDefinition(x,y,false);
+    if(name==='heat-haze'&&bgIndex!==1){status('Place heat shimmer on the BG2 map. It only distorts background scenery.');return false;}
     const preset=name.startsWith('preset:')?name.slice(7):null;
-    if(preset)name=preset==='halo'?'halo':'particle-area';
-    const presets={halo:{width:'160',height:'160',color:'efe4ff','color-end':'7256b8',intensity:'1.4',softness:'.55'},
+    if(preset==='ground-dust'&&bgIndex!==0){status('Ground dust paths use BG1.');return false;}
+    if(preset)name=preset==='halo'?'halo':preset==='ground-dust'?'cloud-bank':'particle-area';
+    const presets={'ground-dust':{width:'320',height:'64',color:'e6c99a',intensity:'2.6',strands:'5',amplitude:'18',drift:'100',carry:'140',particles:'32','size-min':'.25','size-max':'.75',wander:'4',lifetime:'320',softness:'.9',placement:'foreground',points:'-160,24 -128,24 -96,24 -64,24 -32,24 0,24 32,24 64,24 96,24 128,24 160,24'},halo:{width:'160',height:'160',color:'efe4ff','color-end':'7256b8',intensity:'1.4',softness:'.55'},
       dust:{color:'d5b990','travel-y':'-32',wander:'12','size-min':'.7','size-max':'1.8',lifetime:'480'},
       leaves:{color:'739644','travel-y':'160',wander:'24','size-min':'1','size-max':'2.5',lifetime:'360'},
       snow:{color:'d5e8ff','travel-x':'32','travel-y':'224',wander:'12',lifetime:'480'},
@@ -299,9 +314,11 @@ const EffectEditor=(()=>{
       color:name.endsWith('mist')||['drips','waterfall-spray','water-surface'].includes(name)?'91bedf':
         ['flame','motes','particle-area'].includes(name)?'ffe6bb':'dde6ff',
       ...(name==='particle-area'?{particles:'4',width:'512',height:'512','travel-y':'-96'}:name==='exposure'?{brightness:'.65',width:'512',height:'512','fade-left':'64','fade-top':'64','fade-right':'64','fade-bottom':'64'}:{}),
+      ...(name==='heat-haze'?{anchor:'bg2-point',placement:'background',width:'512',height:'256',amplitude:'1.5',lifetime:'720'}:{}),
+      ...(name==='particle-path'?{points:'0,-24 0,24',pattern:'sand',particles:'24',wander:'2',activity:'.6',lifetime:'240',color:'e8c38a'}:{}),
       ...(name==='torch'?{width:'32',height:'32',color:'ffffff',placement:bgIndex===1?'background':'playfield'}:{}),
       ...(name==='flame'?{width:'64',height:'96',color:'ff6628','color-end':'ffe6a0',particles:'12',lifetime:'80','travel-y':'-64',wander:'5',spread:'.25','size-min':'.4','size-max':'1.2'}:{}),
-      ...(preset?{...(preset==='halo'?{}:{pattern:preset}),...presets[preset]}:{})});
+      ...(preset?{...(['halo','ground-dust'].includes(preset)?{}:{pattern:preset}),...presets[preset]}:{})});
     return change(encode(next),'add emitter');
   }
   $('#emitterAdd').onclick=()=>{
@@ -328,6 +345,10 @@ const EffectEditor=(()=>{
       patch={anchor:`${Math.round(patch.x??anchor[0])} ${Math.round(patch.y??anchor[1])}`};
     }
     const next=new Map(records),record={...(source?.nativeExposure?source.record:{}),...next.get(id)};
+    if((id.includes(':cloud-bank:')||id.includes(':particle-path:'))&&record.points&&patch.points===undefined&&(patch.width!==undefined||patch.height!==undefined)) {
+      const sx=Number(patch.width===null?96:patch.width??record.width??96)/Number(record.width??96),sy=Number(patch.height===null?64:patch.height??record.height??64)/Number(record.height??64);
+      patch={...patch,points:record.points.split(/\s+/).map(pair=>{const [x,y]=pair.split(',').map(Number);return `${x*sx},${y*sy}`;}).join(' ')};
+    }
     if(source?.field&&id.includes(':ray-field:'))for(const [countKey,prefix] of [['ray-count','ray'],['fan-count','fan'],['profile-count','profile'],['witness-count','witness']]) {
       if(patch[countKey]===undefined)continue;
       const count=Number(patch[countKey]),previous=Number(record[countKey]);
@@ -367,6 +388,8 @@ const EffectEditor=(()=>{
           if(defaults[`${prefix}-${i}`]!==undefined)patch[`${prefix}-${i}`]=defaults[`${prefix}-${i}`];
       }
       ok=editEmitter(id,patch,'reset field count');
+    } else if((id.includes(':cloud-bank:')||id.includes(':particle-path:'))&&keys.some(k=>k==='width'||k==='height')) {
+      ok=editEmitter(id,Object.fromEntries(keys.map(k=>[k,record[k]??null])),'reset cloud bounds');
     } else ok=change(encode(next),'reset effect value');
     // A focused input may contain an uncommitted value while the document is
     // already at its default. Discard that text too, without making an undo.
@@ -386,7 +409,7 @@ const EffectEditor=(()=>{
   }
   function resetHandle(entry,handle) {
     const keys=handle==='rotate'?['angle']:handle==='size'?
-      (entry.native?['width-scale','length-scale']:['width','height']):
+      (entry.native?['width-scale','length-scale']:['cloud-bank','particle-path'].includes(entry.kind)&&entry.points?['width','height','points']:['width','height']):
       entry.kind==='moon-field'?['anchor']:entry.native?['offset-x','offset-y']:['x','y'];
     return resetValues(entry.id,keys);
   }
@@ -409,7 +432,8 @@ const EffectEditor=(()=>{
     catch(error){status(error.message);}
   };
   $('#actorBindingStop').onclick=()=>{try{SharedRoomPreview.previewActorBinding(null,0,0,0);}catch(error){status(error.message);}};
-  $('#emitterPoints').onchange=e=>editEmitter(selected,{points:e.target.value});
+  $('#emitterPoints').onchange=e=>editEmitter(selected,{points:e.target.value.trim()||null,
+    ...(!e.target.value.trim()&&selected.includes(':cloud-bank:')?{carry:null,particles:null,twinkle:null}:{})});
   for(const [id,key] of fieldFields)$('#'+id).onchange=e=>editEmitter(selected,{[key]:e.target.value});
   for(const [id,key] of moteFields)$('#'+id).onchange=e=>
     editEmitter(selected,{[key]:e.target.value===''?null:e.target.value});
@@ -952,7 +976,7 @@ const EffectEditor=(()=>{
       if(property==='receivers') {
         const masks=value.split(/\s+/).map(Number);
         for(let target=0;target<((glow||arc||projectile||surface!==undefined)?1:2);++target) {
-          const names=(glow||arc||projectile||surface!==undefined||target)?[[8,'Light: preserve original receivers'],[1,'Light scenery'],[2,'Light player'],[4,'Light enemies']]:[[1,'Dim scenery'],[2,'Dim player'],[4,'Dim enemies']];
+          const names=(glow||arc||projectile||surface!==undefined||target)?[[8,'Light: preserve original receivers'],[1,'Light scenery'],[2,'Light player'],[4,'Light enemies & objects']]:[[1,'Dim scenery'],[2,'Dim player'],[4,'Dim enemies & objects']];
           for(const [bit,name] of names){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';label.className='recipe-component';
             input.checked=!!(masks[target]&bit);input.setAttribute('aria-label',name);
             input.onchange=()=>{const next=[...masks];next[target]=bit===8?(input.checked?8:1):input.checked?(masks[target]&7)|bit:(masks[target]&7)&~bit;
@@ -1257,7 +1281,7 @@ const EffectEditor=(()=>{
     }
     return native.concat([...records,...sources.filter(s=>s.nativeExposure).map(s=>[s.id,s.record])].filter(([id,r])=>id.startsWith(emitterPrefix())&&
       Number((r.anchor??'bg1')!=='bg1')===layer).map(([id,r])=>({id,layer,
-      label:id.includes(':exposure:')?'Light box':undefined,brightness:Number(r.brightness??(1-Number(r.intensity??.35))),fade:['left','top','right','bottom'].map(edge=>Number(r['fade-'+edge]??0)),kind:id.split(':')[4],angle:Number(r.angle??0),fan:Number(r.fan??36),strands:Number(r.strands??8),rotatable:['light-fan','light-gradient'].includes(id.split(':')[4]),attached:!!r['actor-target'],actorX:r['actor-target']?actor.x:0,actorY:r['actor-target']?actor.y:0,movable:true,resizeWidth:id.split(':')[4]!=='torch',resizeHeight:id.split(':')[4]!=='torch',x:Number(r.x??0)+(r['actor-target']?actor.x:0),y:Number(r.y??0)+(r['actor-target']?actor.y:0),points:r.points??(id.split(':')[4]==='wet-contour'?'-32,0 32,0':''),width:Number(r.width??96),
+      label:id.includes(':exposure:')?'Light box':undefined,brightness:Number(r.brightness??(1-Number(r.intensity??.35))),fade:['left','top','right','bottom'].map(edge=>Number(r['fade-'+edge]??0)),kind:id.split(':')[4],angle:Number(r.angle??0),fan:Number(r.fan??36),strands:Number(r.strands??8),amplitude:Number(r.amplitude??2),carry:Number(r.carry??0),drift:Number(r.drift??0),rotatable:['light-fan','light-gradient'].includes(id.split(':')[4]),attached:!!r['actor-target'],actorX:r['actor-target']?actor.x:0,actorY:r['actor-target']?actor.y:0,movable:true,resizeWidth:id.split(':')[4]!=='torch',resizeHeight:id.split(':')[4]!=='torch',x:Number(r.x??0)+(r['actor-target']?actor.x:0),y:Number(r.y??0)+(r['actor-target']?actor.y:0),points:r.points??(id.split(':')[4]==='wet-contour'?'-32,0 32,0':id.split(':')[4]==='particle-path'?'0,-24 0,24':''),width:Number(r.width??96),
       height:Number(r.height??64),enabled:r.enabled!=='0'})));
   }
   function selectEmitter(id,additive=false) {
@@ -1274,17 +1298,18 @@ const EffectEditor=(()=>{
       const source=sources.find(s=>s.id===id),r=records.get(id)||source?.record||{};
       if(id.startsWith('emitter:'))copied.push({kind:entry.kind,record:{...r},extract:source?.nativeExposure?id:null,x:entry.x,y:entry.y});
       else if(entry.kind==='wall-torch'&&!entry.family)copied.push({kind:'torch',x:entry.x,y:entry.y,
-        record:{x:String(entry.x),y:String(entry.y),width:'32',height:'32',color:r.color??'ffffff',intensity:r.intensity??'1',reach:r.reach??'1',placement:'playfield',enabled:r.enabled??'1',
+        record:{x:String(entry.x),y:String(entry.y),width:'32',height:'32',color:r.color??'ffffff',intensity:r.intensity??String(sourceDefault('wall-torch','intensity')),reach:r.reach??String(sourceDefault('wall-torch','reach')),
+          ...(r.illumination!==undefined?{illumination:r.illumination}:{}),placement:'playfield',enabled:r.enabled??'1',
           ...Object.fromEntries(Object.entries(r).filter(([key])=>key.startsWith('light-')))}});
-      else {status('Copy placed emitters or individual torches. A complete room definition is edited as one field.');return false;}
+      else {mapStatus('Copy placed emitters or individual torches. A complete room definition is edited as one field.');return false;}
     }
-    if(!copied.length)return false;
+    if(!copied.length){mapStatus('Select an effect marker to copy first.');return false;}
     effectClipboard={entries:copied,layer:bgIndex,x:copied[0].x,y:copied[0].y};clipboardActive=true;
-    status(`Copied ${copied.length} effect${copied.length===1?'':'s'}. Right-click to paste, or Ctrl/Cmd-V then click repeatedly. Ctrl/Cmd-click selects multiple markers. Shift-click resets a handle.`);return true;
+    mapStatus(`Copied ${copied.length} effect${copied.length===1?'':'s'}. Right-click the destination and choose Paste effects here, or Ctrl/Cmd-V then click to place.`);return true;
   }
   function pasteEffects(x,y) {
-    if(!clipboardActive||!effectClipboard)return false;
-    if(bgIndex!==effectClipboard.layer){status(`This selection uses BG${effectClipboard.layer+1}. Switch to that map before pasting.`);return false;}
+    if(!clipboardActive||!effectClipboard){mapStatus('Copy one or more effect markers first.');return false;}
+    if(bgIndex!==effectClipboard.layer){mapStatus(`This selection uses BG${effectClipboard.layer+1}. Switch to that map before pasting.`);return false;}
     const next=new Map(records),ids=[];
     for(const entry of effectClipboard.entries){let id;
       if(entry.extract&&sources.some(s=>s.id===entry.extract&&s.nativeExposure))next.set(entry.extract,{...entry.record});
@@ -1296,12 +1321,18 @@ const EffectEditor=(()=>{
       next.set(id,record);ids.push(id);
     }
     if(!change(encode(next),`paste ${ids.length} effects`))return false;
-    mapSelection.clear();for(const id of ids)mapSelection.add(id);selected=ids[0];refreshInspector();draw();return true;
+    mapSelection.clear();for(const id of ids)mapSelection.add(id);selected=ids[0];
+    $('#effectSource').value=selected;$('#effectGuides').checked=true;
+    refreshInspector();draw();
+    const attached=effectClipboard.entries.every(e=>e.record['actor-target']);
+    mapStatus(`Pasted ${ids.length} effect${ids.length===1?'':'s'} ${attached?'with the same actor attachment':`at BG${bgIndex+1} ${Math.round(x)}, ${Math.round(y)}`}. Ctrl/Cmd-Z undoes this paste.`);
+    return true;
   }
   function clearMapSelection(){mapSelection.clear();}
   function startEffectPaste(){
     if(!clipboardActive||!effectClipboard)return false;
-    EmitterMapTools.cancel();setMode('2d');brush='effectPaste';cvs.style.cursor='crosshair';$('#effectGuides').checked=true;refreshEditorFeedback();draw();return true;
+    EmitterMapTools.cancel();setMode('2d');brush='effectPaste';cvs.style.cursor='crosshair';$('#effectGuides').checked=true;refreshEditorFeedback();draw();
+    mapStatus(`Click to place the copied effect${effectClipboard.entries.length===1?'':'s'} on BG${effectClipboard.layer+1}. The first marker lands at your click; Esc finishes.`);return true;
   }
   $('#emitterDuplicate').onclick=()=>{
     const entry=mapEmitters().find(e=>e.id===selected);if(!entry)return;
@@ -1534,20 +1565,24 @@ const EffectEditor=(()=>{
     refreshEditorFeedback();status('Drag a light box, then set brightness and edge fades. Matching brightness boxes merge without stacking.');draw();
   };
   function paintContour(points) {
+    const target=contourTarget?.scope===sceneKey(room)&&records.has(contourTarget.id)?contourTarget.id:null;
+    const cloud=target?.includes(':cloud-bank:');
+    if(cloud)points=[...points].sort((a,b)=>a.x-b.x).filter((p,i,a)=>!i||p.x!==a[i-1].x);
     if(points.length<2)return false;
     const xs=points.map(p=>p.x),ys=points.map(p=>p.y),left=Math.min(...xs),top=Math.min(...ys);
     const width=Math.max(4,Math.max(...xs)-left+4),height=Math.max(4,Math.max(...ys)-top+4);
-    if(width>512||height>512){status('Split a long wet contour into strokes of at most 512px.');return false;}
-    const x=Math.round(left+(width-4)/2),y=Math.round(top+(height-4)/2),next=new Map(records),id=newEmitterId('wet-contour');
-    next.set(id,{x:String(x),y:String(y),width:String(width),height:String(height),color:'91bedf',placement:'playfield',
-      points:points.map(p=>`${Math.round(p.x-x)},${Math.round(p.y-y)}`).join(' ')});
-    return change(encode(next),'trace wet contour');
+    if(width>512||height>512){status('Split a long contour into strokes of at most 512px.');return false;}
+    const x=Math.round(left+(width-4)/2),y=Math.round(top+(height-4)/2),next=new Map(records),id=target||newEmitterId('wet-contour');
+    next.set(id,{...(target?records.get(id):{color:'91bedf',placement:'playfield'}),x:String(x),y:String(y),width:String(width),height:String(height),
+      ...(cloud?{anchor:'bg1'}:{}),points:points.map(p=>`${Math.round(p.x-x)},${Math.round(p.y-y)}`).join(' ')});
+    return change(encode(next),cloud?'trace ground dust path':'trace wet contour');
   }
   $('#contourDraw').onclick=()=>{
     if(modal&&!finishModal(true))return;
+    contourTarget=(selected.includes(':cloud-bank:')||selected.includes(':particle-path:'))?{id:selected,scope:sceneKey(room)}:null;
     finishFramingDrag();setMode('2d');setLayer(0);$('#bSelect').onclick();
     brush='contour';cvs.style.cursor='crosshair';$('#effectGuides').checked=true;
-    refreshEditorFeedback();status('Trace a visible edge. One stroke creates one contour; Esc cancels.');draw();
+    refreshEditorFeedback();status(contourTarget?'Trace the effect route from source to destination. The stroke replaces its path; Esc cancels.':'Trace a visible edge. One stroke creates one contour; Esc cancels.');draw();
   };
   $('#particleAreaDraw').onclick=()=>{
     finishFramingDrag();setMode('2d');setLayer(0);$('#bSelect').onclick();
@@ -1678,7 +1713,7 @@ const EffectEditor=(()=>{
   };
   for(const [id,key] of [...exposureFields,...nativeFields,...moteFields,...fieldFields,
       ...['x','y','width','height','particles','lifetime','mist-height'].map(k=>['emitter'+k,k]),
-      ['effectIntensity','intensity'],['effectReach','reach'],['effectColor','color'],
+      ['effectIntensity','intensity'],['effectReach','reach'],['effectIllumination','illumination'],['effectColor','color'],
       ['emitterColorEnd','color-end'],['emitterAnchor','anchor'],['emitterPoints','points'],
       ...actorFields.map(([id,key])=>['actorBinding'+id,key])])resetControl($('#'+id),[key]);
   refreshInspector();

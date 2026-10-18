@@ -28,6 +28,7 @@ vm.runInContext(fs.readFileSync('tools/action_editor/shared_preview.js','utf8'),
 const encode=vm.runInContext('SharedActionPreview.encode',encoder);
 const blobs=data.blobs.map(s=>Uint8Array.from(Buffer.from(s,'base64')));
 const textures=new Map();let api,target=0,creates=0,draws=0,effect=-1,updates=0;
+let shaftMotes=null;
 const imports={
  create(w,h,usage){let id=1;while(textures.has(id))id++;assert(id<128);textures.set(id,{w,h,usage});creates++;return id;},
  destroy(id){assert(textures.delete(id));},
@@ -37,8 +38,25 @@ const imports={
  viewport(){return 1;},clip(){return 1;},clear(){return 1;},
  geometry(id,p,n,ip,ni){assert(!id||(textures.has(id)&&id!==target));
    assert(n>0&&ni>0&&new Float32Array(api.memory.buffer,p,n*8).every(Number.isFinite));
-   assert(new Int32Array(api.memory.buffer,ip,ni).every(i=>i>=0&&i<n));draws++;return 1;},
- effect(kind,p,n){assert(kind>=-1&&kind<4);if(kind>=0){assert.equal(effect,-1);assert(new Float32Array(api.memory.buffer,p,n).every(Number.isFinite));}effect=kind;return 1;},
+   assert(new Int32Array(api.memory.buffer,ip,ni).every(i=>i>=0&&i<n));draws++;
+   if(shaftMotes&&id===0&&target===0) {
+     const vertices=new Float32Array(api.memory.buffer,p,n*8);
+     for(let i=0;i+31<vertices.length;i+=8) {
+       if(Math.abs(vertices[i+2]-1)>1e-5||Math.abs(vertices[i+3]-.95)>1e-5||Math.abs(vertices[i+4]-.72)>1e-5)continue;
+       shaftMotes.set(vertices[i+5].toFixed(7),[(vertices[i]+vertices[i+16])/2,(vertices[i+1]+vertices[i+17])/2]);
+       i+=24;
+     }
+   }
+   return 1;},
+ effect(kind,p,n){
+   assert(kind>=-1&&kind<=4);
+   if(kind>=0){
+     assert.equal(effect,-1);assert.equal(n,[3,3,9,4,17][kind]);
+     const params=new Float32Array(api.memory.buffer,p,n);assert(params.every(Number.isFinite));
+     if(kind===4)assert(textures.has(params[16])&&params[16]!==target,'illumination map is a valid separate texture');
+   }
+   effect=kind;return 1;
+ },
  available(){return 1;}
 };
 const wasi={fd_close:()=>0,fd_seek:()=>0,fd_write:()=>0,proc_exit:n=>{throw Error(`exit ${n}`);}};
@@ -46,6 +64,8 @@ const instance=await WebAssembly.instantiate(fs.readFileSync(wasmFile),{ar:impor
 api=instance.instance.exports;api._initialize?.();assert.equal(api.DioramaPreview_Init(16384),1);
 const memory=api.memory.buffer;
 function send(bytes,fn){new Uint8Array(memory,api.DioramaPreview_Input(),bytes.length).set(bytes);return fn(bytes.length);}
+assert.equal(send(Buffer.concat([data.player.characters,data.player.palette,data.player.picture]
+  .map(index=>Buffer.from(blobs[index]))),api.RoomPreview_LoadPlayer),1);
 function cstring(pointer) {
  const bytes=new Uint8Array(memory);let end=pointer;while(bytes[end])end++;
  return new TextDecoder().decode(bytes.subarray(pointer,end));
@@ -151,15 +171,17 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
  for(const [i,request] of requests.entries()){
    assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1,`render ${base.group}:${base.map}/${terrain.profile}/${i}`);
    hashes.push(api.RoomPreview_Hash()>>>0);effectHashes.push(api.RoomPreview_EffectHash()>>>0);
-   const allocations=creates,uploadCount=updates;
+   const allocations=creates;
    assert.equal(api.RoomPreview_Render(...request,960,540,1.1,0.1,-0.1,i%3,i%2),1);
-   // Targets can resize with presentation, but the CPU surfaces must not upload again.
-   assert.equal(api.RoomPreview_Uploads(),0,'orbit/aspect must reuse source pixels');
-   assert.equal(updates,uploadCount);
-   const warm=creates;
+   // Aspect/orbit can change guard capture or skybox placement even without
+   // moving the camera. Repeating that resolved policy must reuse all pixels.
+   const warm=creates,viewHash=api.RoomPreview_Hash(),viewUploads=updates;
    assert.equal(api.RoomPreview_Render(...request,960,540,1.1,0.1,-0.1,i%3,i%2),1);
    assert.equal(creates,warm,'repeat draw creates no textures');
-   assert.equal(api.RoomPreview_Hash()>>>0,hashes.at(-1));
+   assert.equal(api.RoomPreview_Uploads(),0,'repeat draw reuses source pixels');
+   assert.equal(updates,viewUploads);assert.equal(api.RoomPreview_Hash(),viewHash);
+   assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
+   assert.equal(api.RoomPreview_Hash()>>>0,hashes.at(-1),'returning to the original view restores the capture');
    assert(creates>=allocations);assert.equal(target,0);assert.equal(effect,-1);
  }
  assert.equal(hashes[1],hashes[3],'reverse time is deterministic');
@@ -171,6 +193,64 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
  const file=path.join(directory,'room.arscene');fs.writeFileSync(file,packet);
  const native=execFileSync(replay,[file,iniFile],{input:requests.map(r=>r.join(' ')).join('\n')+'\n',encoding:'utf8'}).trim().split('\n').map(n=>n.split(' ').map(v=>parseInt(v,16)));
  assert.deepEqual(hashes.map((h,i)=>[h,effectHashes[i]]),native,`native surfaces ${base.group}:${base.map}/${terrain.profile}`);
+
+
+ // The distributed room compositions must use exactly the same recipes in
+ // native rendering and the editor, across regional terrain and camera edges.
+ if(base.group===3) {
+   const shipped=JSON.parse(html.match(/window\.__ACTION_EFFECTS__=(.*?);window\.__ACTION_ACTORS__/s)[1]);
+   assert.equal(shipped,fs.readFileSync('action-effects.ini','utf8'),'editor embeds the shipped effects document');
+   const effectsFile=path.join(directory,'shipped-effects.ini');fs.writeFileSync(effectsFile,shipped);
+   assert.equal(send(Buffer.from(shipped),api.RoomPreview_ConfigureEffects),1,'shipped recipes fit their instance/geometry budgets');
+   const enhanced=[];
+   for(const request of requests) {
+     assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
+     enhanced.push([api.RoomPreview_Hash()>>>0,api.RoomPreview_EffectHash()>>>0]);
+     for(const sky of [0,2])assert.equal(api.RoomPreview_Render(...request,720,450,1,0,0,sky,0),1);
+   }
+   const nativeEffects=execFileSync(replay,[file,iniFile,effectsFile],{
+     input:requests.map(r=>r.join(' ')).join('\n')+'\n',encoding:'utf8'
+   }).trim().split('\n').map(n=>n.split(' ').map(v=>parseInt(v,16)));
+   assert.deepEqual(enhanced,nativeEffects,`shipped Kassandora effects ${base.map}/${terrain.profile}`);
+   assert(enhanced.some((h,i)=>h[1]!==effectHashes[i]),'every Kassandora room receives its composition');
+   assert.deepEqual(enhanced[1],enhanced[3],'authored animation is deterministic when scrubbing backwards');
+   if(base.map===5) {
+     const original=[...shipped.matchAll(new RegExp(`\\[emitter:03:05:${terrain.profile}:soft-light:[^\\]]+\\]([^\\[]+)`,'g'))]
+       .find(match=>/^y=1424$/m.test(match[1]))[1];
+     const copies=[[752,1392],[688,1280]].map(([x,y],i)=>
+       `[emitter:03:05:${terrain.profile}:soft-light:${(0xf0000000+i).toString(16)}]\n`+
+       original.replace(/^x=.*$/m,`x=${x}`).replace(/^y=.*$/m,`y=${y}`));
+     const pasted=shipped+'\n'+copies[0];
+     assert.equal(send(Buffer.from(pasted),api.RoomPreview_ConfigureEffects),1,
+       `Kassandora room 5 accepts copied soft lights beyond the old 16-instance limit: ${cstring(api.RoomPreview_RecipeError())}`);
+     fs.writeFileSync(effectsFile,pasted);
+     const pastedHashes=[];
+     for(const request of requests) {
+       assert.equal(api.RoomPreview_Render(...request,960,600,1,0,0,1,0),1);
+       pastedHashes.push([api.RoomPreview_Hash()>>>0,api.RoomPreview_EffectHash()>>>0]);
+     }
+     const nativePasted=execFileSync(replay,[file,iniFile,effectsFile],{
+       input:requests.map(r=>r.join(' ')).join('\n')+'\n',encoding:'utf8'
+     }).trim().split('\n').map(n=>n.split(' ').map(v=>parseInt(v,16)));
+     assert.deepEqual(pastedHashes,nativePasted,'pasted soft lights render identically in native and WASM');
+     assert.equal(send(Buffer.from(pasted+'\n'+copies[1]),api.RoomPreview_ConfigureEffects),0);
+     assert.match(cstring(api.RoomPreview_RecipeError()),/4100 reserved effect vertices; the limit is 4096/);
+     assert.equal(api.RoomPreview_Render(...requests.at(-1),960,600,1,0,0,1,0),1);
+     assert.deepEqual([api.RoomPreview_Hash()>>>0,api.RoomPreview_EffectHash()>>>0],pastedHashes.at(-1),
+       'geometry-budget failure preserves the last accepted room');
+     const dense=count=>'[effects]\nversion=1\n'+Array.from({length:count},(_,i)=>
+       `[emitter:03:05:${terrain.profile}:motes:${i.toString(16)}]\nparticles=1\n`).join('');
+     assert.equal(send(Buffer.from(dense(96)),api.RoomPreview_ConfigureEffects),1);
+     assert.equal(api.RoomPreview_Render(0,0,37,128,64,960,600,1,0,0,1,0),1);
+     const authored=Array.from({length:api.RoomPreview_EffectCount()},(_,i)=>i)
+       .filter(i=>api.RoomPreview_SourceValue(i,5));
+     assert.equal(authored.length,96,'all 96 authored slots reach the shared renderer');
+     assert.equal(api.RoomPreview_SourceValue(authored.at(-1),0),95);
+     assert.equal(send(Buffer.from(dense(97)),api.RoomPreview_ConfigureEffects),0);
+     assert.match(cstring(api.RoomPreview_RecipeError()),/97 active effects; the limit is 96/);
+   }
+   assert.equal(send(Buffer.from('[effects]\nversion=1\n'),api.RoomPreview_ConfigureEffects),1);
+ }
 
  // Faces and completion select separate authored scopes and native policies.
  if(base.group===7&&base.map===1) {
@@ -556,6 +636,41 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
  frames+=requests.length;scenes++;
 }
 assert.equal(presetChecks,data.rooms.reduce((n,r)=>n+stagePresets.filter(p=>p.rooms.some(([g,m])=>g===r.group&&m===r.map)).length,0)*3);assert.equal(scenes,150);assert.equal(api.memory.buffer,memory);
+// Freeze animation during the last part of Fillmore's boss-pit descent. Once
+// the world camera stops, shaft dust must stop too, in every backdrop mode.
+const forest=data.rooms.find(r=>r.group===1&&r.map===1);
+assert.equal(send(encode(data,blobs,forest),api.RoomPreview_Load),1);
+// The center can remain fixed while aspect changes both guard capture and
+// finite skybox travel. Cached and freshly configured views must agree.
+assert.equal(send(Buffer.from(''),api.RoomPreview_Configure),1);
+assert.equal(api.RoomPreview_Render(1920,300,128,120,64,960,600,1,0,0,1,0),1);
+const narrowHash=api.RoomPreview_Hash();
+assert.equal(api.RoomPreview_Render(1920,300,128,120,64,960,540,1,0,0,1,0),1);
+assert.equal(api.RoomPreview_CameraX(),1920);
+const wideHash=api.RoomPreview_Hash();
+assert.notEqual(wideHash,narrowHash,'wide view captures real guard terrain');
+assert.equal(send(Buffer.from(''),api.RoomPreview_Configure),1);
+assert.equal(api.RoomPreview_Render(1920,300,128,120,64,960,540,1,0,0,1,0),1);
+assert.equal(api.RoomPreview_Hash(),wideHash,'view changes invalidate stale capture policy');
+assert.equal(api.RoomPreview_Uploads(),0,'rebuilding an identical policy reuses uploaded pixels');
+assert.equal(send(Buffer.from(roomConfiguration(forest)),api.RoomPreview_Configure),1);
+assert.equal(send(Buffer.from('[effects]\nversion=1\n'),api.RoomPreview_ConfigureEffects),1);
+for(const [width,height] of [[960,600],[960,540],[800,600]])for(const vertical of [32,64])for(const sky of [0,1,2]) {
+ const positions=[];
+ for(const y of [536,543,536]) {
+   shaftMotes=new Map();
+   assert.equal(api.RoomPreview_Render(3720,y,128,120,vertical,width,height,1,0,0,sky,0),1);
+   positions.push(shaftMotes);
+ }
+ let compared=0;
+ for(const [key,a] of positions[0]) {
+   const b=positions[1].get(key),c=positions[2].get(key);if(!b||!c)continue;
+   assert(Math.hypot(b[0]-a[0],b[1]-a[1])<.002,`shaft dust slid at camera stop: ${width}x${height}, rows=${vertical}, sky=${sky}`);
+   assert(Math.hypot(c[0]-a[0],c[1]-a[1])<.002,'reverse scrub restores the same frozen mote');compared++;
+ }
+ assert(compared>=8,'real fine shaft particles remain visible throughout the stop');
+}
+shaftMotes=null;
 api.RoomPreview_Reset();assert.equal(textures.size,0);api.RoomPreview_Reset();
 assert.equal(api.RoomPreview_Hash(),0);
 console.log(`Whole-room renderer: ${scenes} regional rooms, ${frames} native/WASM surface + source matches, ${scenes} authored round trips, ${presetChecks} stage preset reconstructions, ${draws} valid draws; reverse time, atomic edits/loads, resource reuse and teardown passed.`);

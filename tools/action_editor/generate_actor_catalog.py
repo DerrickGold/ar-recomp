@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def generate(rom):
     if len(rom) != 0x100000 or rom[0x7fc0:0x7fc9] != b'ACTRAISER':
         raise ValueError('Expected the unheadered canonical ActRaiser US ROM')
+    labels = {0xb786: 'Bloodpool Act 1 boss', 0xc66f: 'Kassandora Act 1 boss (Antlion)'}
     catalog = []
     for group, base in enumerate([0x96AF, 0xA8F6, 0xB449, 0xC11E, 0xCD9B, 0xD928, 0xE722, 0xF39A]):
         if not group:
@@ -27,7 +28,7 @@ def generate(rom):
                 continue
             catalog.append(dict(group=group, type=actor_type, source=f'{source:04X}',
                 animation=f'{int.from_bytes(data[:2], "little"):04X}',
-                label='Bloodpool Act 1 boss' if source == 0xb786 else f'Actor type {actor_type:02X}'))
+                label=labels.get(source, f'Actor type {actor_type:02X}')))
     return json.dumps(catalog, indent=2) + '\n'
 
 if __name__ == '__main__':

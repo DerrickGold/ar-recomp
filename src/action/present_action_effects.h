@@ -42,7 +42,10 @@ typedef struct PresentActionPlaneEffectContext {
   const FrameSlot *slot;
   ArRenderRectI viewport;
   PresentActionSourceDraw source_draw;
+  bool scenery_lighting_in_material;
 } PresentActionPlaneEffectContext;
+bool PresentActionEffects_DrawSceneryLight(void *userdata,
+    const DioramaProjection *diorama_projection);
 void PresentActionEffects_DrawDioramaPlane(
     void *userdata, int plane, const DioramaProjection *diorama_projection);
 

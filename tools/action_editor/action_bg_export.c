@@ -69,6 +69,26 @@ static void WriteBackground(FILE *out, const ActionRoomSceneBg *layer) {
           InternBlob(layer->map, layer->map_size), layer->pages_wide, layer->pages_high);
 }
 
+static bool WritePlayer(FILE *out, const uint8_t *rom, size_t size) {
+  /* Same reviewed common-player art profile as workshopart/master.go. Only
+   * the idle picture is needed; pixel decoding remains in the production PPU. */
+  const size_t base=0x30000, end=base+0x2000;
+  if (size<0x3d0a0) return false;
+  const size_t table=base+rom[base]+((size_t)rom[base+1]<<8);
+  if (table>end-10) return false;
+  const size_t picture=base+rom[table+8]+((size_t)rom[table+9]<<8);
+  if (picture>end-5) return false;
+  const unsigned count=rom[picture+4];
+  const size_t bytes=5+count*7;
+  if (!count || count>64 || bytes>end-picture) return false;
+  const int chr=InternBlob(rom+0x38000,8192), palette=InternBlob(rom+0x3d040,96);
+  const int composition=InternBlob(rom+picture,bytes);
+  if (chr<0 || palette<0 || composition<0) return false;
+  fprintf(out,"\"player\":{\"characters\":%d,\"palette\":%d,\"picture\":%d},\n",
+      chr,palette,composition);
+  return true;
+}
+
 static bool NativeGoldenHash(const ActionRoomScene *scene, bool completion,
     uint32_t *pixels, uint32_t *hash) {
   const ActionRoomSceneFrameRequest request = {
@@ -263,10 +283,15 @@ int main(int argc, char **argv) {
           "\n],\n\"tileWordMask\":%u,\"bg1Attributes\":%u,"
           "\"bg2Attributes\":%u,\"rasterWaveform\":%d,"
           "\"rasterR4Window\":%d,"
-          "\"frameWidth\":%u,\"frameHeight\":%u,\n\"blobs\":[\n",
+          "\"frameWidth\":%u,\"frameHeight\":%u,\n",
           kActionRoomSceneTileWordMask, kActionRoomSceneBg1AttributeByte,
           kActionRoomSceneBg2AttributeByte, raster_waveform_blob, raster_mosaic_wave_window_blob,
           kActionRoomSceneFrameWidth, kActionRoomSceneFrameHeight);
+  if (!WritePlayer(out,rom,(size_t)rom_size)) {
+    fprintf(stderr,"[export] common player artwork is invalid\n");
+    failures++;
+  }
+  fprintf(out,"\"blobs\":[\n");
   size_t blob_bytes = 0;
   for (int i = 0; i < s_blob_count; i++) {
     if (i) fprintf(out, ",\n");

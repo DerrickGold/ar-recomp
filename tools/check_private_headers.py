@@ -33,6 +33,8 @@ RULES = {
         'src/settings_overlay/*', 'tests/settings_overlay_test.c'],
     'actraiser/enhancements/actraiser_enhancements_internal.h': [
         'src/actraiser/enhancements/*'],
+    'actraiser/enhancements/actraiser_camera_internal.h': [
+        'src/actraiser/enhancements/*'],
     'actraiser/actraiser_rtl_internal.h': [
         'src/actraiser/actraiser_rtl.c', 'src/actraiser/actraiser_cheats.c',
         'src/actraiser/enhancements/*'],
@@ -57,7 +59,10 @@ RULES = {
         'src/action/action_bloodpool_detail_render.c',
         'src/action/action_castle_effect_render.c',
         'src/action/action_ray_field_render.c', 'src/action/action_environment_geometry.c',
-        'src/action/action_scene_lightning_render.c'],
+        'src/action/action_scene_lightning_render.c',
+        # Direct geometry-writer regression coverage, like the focused
+        # renderer/camera tests allowed for the other private families.
+        'tests/action_authored_fields_test.c'],
     'platform/sdl/sim3d_depth_pass_sdl_internal.h': [
         'src/platform/sdl/sim3d_depth_pass*_sdl.c'],
     'actraiser/actraiser_action_room_hle_internal.h': [

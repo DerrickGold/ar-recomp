@@ -211,16 +211,15 @@ static bool Target(ArRenderDevice *device, SDL_GPUTexture **out, unsigned *width
 
 static EffectPlaneUniform Plane(const DioramaProjection *v, const DioramaPlaneProjection *p,
                                 int slot) {
-  return (EffectPlaneUniform){
+  EffectPlaneUniform result = {
       .fold = {p->overflow_valid, p->overflow_fold_t, p->overflow_height, p->overflow_overlap_t},
       .front = {p->overflow_handoff_z, p->overflow_front_z, p->overflow_front_drop, 0},
       .uv = {p->u0, p->v0, p->u1, p->v1},
       .shape = {p->z_world, p->rake, p->bow, p->world_y_offset},
-      .offset = {p->capture_offset.x, p->capture_offset.y, (float)slot, p->valid ? 1 : 0},
-      .bounds = {p->u0 * v->texture_width - v->texture_x_origin - p->capture_offset.x,
-                 p->v0 * v->texture_height - p->capture_offset.y,
-                 p->u1 * v->texture_width - v->texture_x_origin - p->capture_offset.x,
-                 p->v1 * v->texture_height - p->capture_offset.y}};
+      .offset = {p->capture_offset.x, p->capture_offset.y, (float)slot, 0}};
+  if (Diorama_PlaneCaptureBounds(v, p, &result.bounds[0], &result.bounds[1],
+          &result.bounds[2], &result.bounds[3])) result.offset[3] = 1;
+  return result;
 }
 
 static bool Uniform(const DioramaProjection *v, unsigned width, unsigned height, unsigned count,
@@ -250,13 +249,21 @@ static bool Uniform(const DioramaProjection *v, unsigned width, unsigned height,
     if (sky->world_plane.valid) {
       u->planes[2] = Plane(v, &sky->world_plane, motion_slot);
       u->planes[2].sky[2] = 2;
-    } else u->planes[2] = (EffectPlaneUniform){.offset = {0, 0, motion_slot, 1}, .sky = {0, 1, 1, 1}};
+    } else u->planes[2] = (EffectPlaneUniform){.offset = {0, 0, motion_slot, 1}, .sky = {0, 0, 1, 1}};
     for (unsigned i = 0; i < sky->count; ++i) {
       memcpy(u->sky_bands[i], &sky->bands[i], sizeof(sky->bands[i]));
     }
     memcpy(u->follow, sky->motion_follow, sizeof(u->follow));
   }
   u->planes[5] = u->planes[2];
+  if (u->planes[2].sky[2] == 1) {
+    const ArRenderPointF offset = Diorama_BetweenBackgroundsSkyboxOffset(v);
+    u->planes[5].sky[0] = offset.x;
+    u->planes[5].sky[1] = offset.y;
+  } else {
+    const DioramaPlaneProjection atmosphere = Diorama_BetweenBackgroundsPlane(v);
+    u->planes[5] = Plane(v, &atmosphere, (int)u->planes[2].offset[2]);
+  }
   return true;
 }
 
@@ -510,8 +517,9 @@ bool ArGpuEffectSource_Skybox(ArGpuEffectSource *p, ArRenderDevice *device, SDL_
   struct {
     float target[4], motion[4];
     DioramaSkyboxSourceMapping mapping;
+    DioramaHeat heat;
   } u = {.target = {width, height, viewport.x, viewport.y},
-         .motion = {slot, phase, input->periodic, input->band}, .mapping = input->mapping};
+         .motion = {slot, phase, input->periodic, input->band}, .mapping = input->mapping, .heat=input->heat};
   SDL_PushGPUVertexUniformData(cmd, 0, &u, sizeof(u));
   const float f[4] = {1.f / texture_width, 1.f / texture_height, input->radius, 0};
   SDL_PushGPUFragmentUniformData(cmd, 0, f, sizeof(f));

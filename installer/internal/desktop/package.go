@@ -183,6 +183,7 @@ func stageSeed(root, resources string, embedded ...fs.FS) error {
 		for _, item := range [][2]string{
 			{"installer/packaging/templates/config.ini", "config.ini"},
 			{"diorama-layers.ini", "diorama-layers.ini"},
+			{"action-effects.ini", "action-effects.ini"},
 			{"installer/internal/builder/assets/manifest.ini", "game-assets/manifest.ini"},
 		} {
 			if err := copyFileAtomic(filepath.Join(root, item[0]), filepath.Join(seed, "defaults", item[1]), 0644); err != nil {

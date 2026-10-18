@@ -55,6 +55,21 @@ typedef struct DioramaPrioritySurfaceEffectParams {
   bool additive;
 } DioramaPrioritySurfaceEffectParams;
 
+/* Incoming light is stored at half strength in an RGBA8 target (range 0..2).
+ * Ambient exposure remains in vertex RGB. The material shades original art
+ * with ambient + local light, retaining alpha and the normal layer filtering. */
+typedef struct DioramaSceneryLightEffectParams {
+  ArRenderTexture illumination;
+  float texel_width, texel_height, blur_radius, lower_content_v_max;
+  DioramaPrioritySurfaceEffectParams priority;
+  ArRenderColorF shade;
+  ArRenderRectF light_uv; /* Region of the full-output map; zero means all. */
+  unsigned mode; /* 0: ordinary texture, 1: DOF, 2: priority pair */
+} DioramaSceneryLightEffectParams;
+bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *device,
+    const DioramaSceneryLightEffectParams *params);
+bool DioramaEffectBackend_PrepareSceneryLight(ArRenderDevice *device);
+
 /* Availability may lazily create backend resources. Successful Bind calls
  * affect subsequent submissions until Unbind and must be paired with it.
  * Failed binds do not promise a clean native state, so callers also Unbind

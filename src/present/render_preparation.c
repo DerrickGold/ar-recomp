@@ -56,6 +56,7 @@ void RenderPreparation_PrepareSelectedFeatures(ArRenderDevice *device) {
    * Unavailable pipelines fall back to the reference path when used, as
    * before; attempting once is what matters here. */
   DioramaBgGpu_Prepare(device);
+  DioramaEffectBackend_PrepareSceneryLight(device);
   DioramaFrameGeneration_PreparePipelines(device, interpolation);
   s_action_stage_prepared = true;
   s_interpolation_prepared = interpolation;

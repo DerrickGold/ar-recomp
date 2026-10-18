@@ -681,6 +681,16 @@ static void TestReleaseContentUpdatesAndRetries(void) {
   CHECK(sr_mkdir(baseline_path) == 0);
   IniUpgrade_ApplyShippedDefaults();
   CHECK(FileTextEquals(live_path, third));
+  /* Effects use the same release-content contract, including first adoption
+   * of an existing editor-authored document. */
+  CHECK(WriteFileText("action-effects.ini", "[effects]\nversion=1\n; local effects\n"));
+  CHECK(WriteFileText("defaults/action-effects.ini", "[effects]\nversion=1\n; release effects\n"));
+  IniUpgrade_ApplyShippedDefaults();
+  CHECK(FileTextEquals("action-effects.ini", "[effects]\nversion=1\n; release effects\n"));
+  CHECK(FileTextEquals("action-effects.ini.pre-update-1", "[effects]\nversion=1\n; local effects\n"));
+  CHECK(WriteFileText("action-effects.ini", "[effects]\nversion=1\n; edited effects\n"));
+  IniUpgrade_ApplyShippedDefaults();
+  CHECK(FileTextEquals("action-effects.ini", "[effects]\nversion=1\n; edited effects\n"));
   CHECK(chdir(original) == 0);
 }
 

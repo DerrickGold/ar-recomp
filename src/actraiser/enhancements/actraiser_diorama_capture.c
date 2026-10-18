@@ -1,3 +1,4 @@
+#include "diorama/diorama_camera_policy.h"
 #include "diorama/diorama_layer_manifest.h"
 /* ActRaiser diorama capture: prepares the diorama's captures each frame: HUD
  * and priority-band bindings, the OBJ apron, scene masks, and the town and
@@ -31,6 +32,12 @@ static SrPpuObjColorTransform ReceiverTransform(const float multiply[3],const fl
 
 uint8_t ActRaiser_DioramaBgApronMask(void) {
   return s_bg_apron_mask;
+}
+
+bool ActRaiser_DioramaNeedsBgApron(const DioramaRoomOverride *room,
+    unsigned bg, bool pixel_edits, bool world_available) {
+  return DioramaCameraPolicy_NeedsBgApron(room, bg, pixel_edits,
+      world_available && g_ws_active, Settings_ExtendedAspectX(), Settings_ExtendedAspectY());
 }
 
 bool ActRaiser_DioramaBoundsTrackingActive(void) {
@@ -309,20 +316,11 @@ void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu) {
   const bool pixel_edits_active = want_capture &&
       ActRaiserActionBg_PixelEditsActive();
   const DioramaRoomOverride *room = ActRaiser_CurrentVirtualLayerRoom();
-  /* Added scenery needs the same guard columns even at zero framing. A
-   * perspective camera can see beyond the ordinary widescreen capture. */
-  if (pixel_edits_active && room)
-    for (unsigned bg = 0; bg < 2; bg++)
-      if ((room->framing[0].x || room->stamp_layers[bg].count) &&
-          ActRaiserActionBg_PixelLayerHasEdits(bg)) s_bg_apron_mask |= (uint8_t)(1u << bg);
-  /* At 16:9 the perspective view can expose a column beyond each end of the
-   * 496px capture. Stream real terrain into the existing guard allocation;
-   * keep the gameplay camera, flat view and working 16:10 capture unchanged. */
-  if (active && g_ws_active &&
-      Settings_ExtendedAspectX() * 10 > Settings_ExtendedAspectY() * 16)
-    for (unsigned bg = 0; bg < 2; bg++)
-      if (ActRaiserActionBg_WorldApronAvailable(bg))
-        s_bg_apron_mask |= (uint8_t)(1u << bg);
+  for (unsigned bg = 0; bg < 2; bg++)
+    if (ActRaiser_DioramaNeedsBgApron(room, bg,
+            pixel_edits_active && ActRaiserActionBg_PixelLayerHasEdits(bg),
+            active && ActRaiserActionBg_WorldApronAvailable(bg)))
+      s_bg_apron_mask |= (uint8_t)(1u << bg);
   g_diorama_frame_active = active;
   if (want_capture) {
     int width = kActRaiserAuthenticWidth + 2 * g_ws_extra;

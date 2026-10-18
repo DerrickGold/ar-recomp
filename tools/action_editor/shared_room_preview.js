@@ -1,9 +1,35 @@
 /* UI/transport only. Whole-room sampling, animation, edits and compositing live
  * in C. Asset packets are built from the embedded level catalogue automatically;
  * no user-generated capture is part of this workflow. */
+function sharedPreviewOutputSize(choice,customWidth,customHeight,areaWidth,areaHeight) {
+  let aspect;
+  if(choice==='auto') {
+    aspect=areaWidth>0&&areaHeight>0?areaWidth/areaHeight:16/10;
+  } else if(choice==='custom') {
+    if(![customWidth,customHeight].every(n=>Number.isInteger(n)&&n>=64&&n<=16384))
+      throw Error('Enter a monitor width and height between 64 and 16384 pixels.');
+    aspect=customWidth/customHeight;
+  } else aspect=Number(choice);
+  if(!Number.isFinite(aspect)||aspect<=0)throw Error('Choose a valid preview aspect ratio.');
+  // Monitor dimensions describe the shape, not a full-resolution render target.
+  // Bound both axes so portrait/Auto cannot exceed the shared renderer's budget.
+  return aspect>=1?{width:960,height:Math.max(1,Math.round(960/aspect))}:
+    {width:Math.max(1,Math.round(960*aspect)),height:960};
+}
+function sharedPreviewCanvasPoint(canvas,event) {
+  // The canvas uses object-fit:contain. Its DOM box includes letterboxing;
+  // clicks must address the fitted image, not stretch across those margins.
+  const rect=canvas.getBoundingClientRect();
+  const scale=Math.min(rect.width/canvas.width,rect.height/canvas.height);
+  if(!(scale>0))return null;
+  const x=(event.clientX-rect.left-(rect.width-canvas.width*scale)/2)/scale;
+  const y=(event.clientY-rect.top-(rect.height-canvas.height*scale)/2)/scale;
+  return x>=0&&y>=0&&x<canvas.width&&y<canvas.height?{x,y}:null;
+}
 const SharedRoomPreview = (() => {
   const canvas=document.querySelector('#sharedGl'), label=document.querySelector('#sharedRoomStatus');
   let backend=null, api=null, key='', configDirty=true, config='', lost=false, skyboxKey=0, effectsConfig=null, collision=null, eventConfig=null;
+  let placingPlayer=false;
   const setting=id=>Number(document.querySelector('#shared'+id).value);
   function send(bytes,call) {
     if(bytes.length>api.DioramaPreview_Capacity())throw Error('Room data exceeds renderer capacity.');
@@ -58,9 +84,16 @@ const SharedRoomPreview = (() => {
         if(!api.RoomPreview_SetEvent(...eventValues))throw Error('Invalid event preview parameters.');
         eventConfig=nextEvent;
       }
-      if(!api.RoomPreview_SetReceivers($('#previewReceivers').checked?1:0,...['previewPlayerX','previewPlayerY','previewEnemyX','previewEnemyY'].map(id=>Number($('#'+id).value))))throw Error('Invalid receiver probe positions.');
-      const w=960,h=Math.round(w/setting('Aspect'));
+      const receiverMask=($('#previewReceivers').checked?1:0)|($('#previewEnemyEnabled').checked?2:0);
+      if(!api.RoomPreview_SetReceivers(receiverMask,...['previewPlayerX','previewPlayerY','previewEnemyX','previewEnemyY'].map(id=>Number($('#'+id).value)))||
+          !api.RoomPreview_ReceiverStyle(Number($('#previewFacing').value),$('#previewRim').checked?1:0))throw Error('Invalid receiver preview settings.');
+      const aspectChoice=$('#sharedAspect').value, autoAspect=aspectChoice==='auto';
+      const {width:w,height:h}=sharedPreviewOutputSize(aspectChoice,
+        setting('MonitorWidth'),setting('MonitorHeight'),
+        autoAspect?canvas.clientWidth:0,autoAspect?canvas.clientHeight:0);
       if(canvas.width!==w)canvas.width=w;if(canvas.height!==h)canvas.height=h;
+      const outputLabel=`Preview ${w} × ${h}`;
+      if($('#sharedOutputSize').textContent!==outputLabel)$('#sharedOutputSize').textContent=outputLabel;
       backend.stats.creates=backend.stats.draws=0;
       const start=performance.now();
       api.RoomPreview_EnableEffects($('#sharedEffects').checked ? 1 : 0);
@@ -82,12 +115,20 @@ const SharedRoomPreview = (() => {
       skyboxKey=source;
       const error=backend.gl.getError();
       if(!ok||error)throw Error(`Room rendering failed (${error}).`);
+      // Use the capture's stopped camera for UI, picking and subsequent drags.
+      // Keeping the requested position would accumulate hidden overscroll.
+      const cameraX=api.RoomPreview_CameraX();
+      if(nativeCamera.x!==cameraX) {
+        nativeCamera.x=cameraX;
+        $('#nativeCameraX').value=$('#nativeCameraXv').value=String(cameraX);
+      }
       EffectEditor.updateCatalogue(api);EffectEditor.updateSources(api);
       label.textContent=`Shared C · ${api.RoomPreview_Width()} × ${api.RoomPreview_Height()} room · `+
         `${api.RoomPreview_EffectCount()} sources · ${api.RoomPreview_EffectVertices()} effect vertices · ${backend.stats.draws} draws · ${uploads} uploads · ${backend.stats.creates} allocations · `+
         `${(performance.now()-start).toFixed(1)} ms CPU`;
       $('#hud').textContent=`Camera ${nativeCamera.x}, ${nativeCamera.y} · frame ${nativeFrame}. `+
-        'Drag to pan; arrows move. Shared scenery/effects; optional reference probes and clock-based actor accents.';
+        (placingPlayer?'Click to place the player’s feet. Esc cancels.':
+          'Drag to pan; arrows move. Shift-click/drag places the player; Alt+Shift places the comparison sprite.');
     } catch(error) { label.textContent=error.message; }
   }
   $('#previewProbesHere').onclick=()=>{
@@ -95,14 +136,49 @@ const SharedRoomPreview = (() => {
     $('#previewPlayerY').value=$('#previewEnemyY').value=nativeCamera.y+192;
     $('#previewReceivers').checked=true;setMode('shared');draw();
   };
+  for(const id of ['previewReceivers','previewEnemyEnabled','previewPlayerX','previewPlayerY',
+      'previewEnemyX','previewEnemyY','previewFacing','previewRim'])$('#'+id).addEventListener('input',()=>draw());
+  $('#previewRim').checked=!!window.__ACTION_VIEW__?.rimLight;
+  $('#sharedPlayerSettings').onclick=()=>EditorLayout.openSettings('receivers');
+  function placementMode(enabled) {
+    placingPlayer=enabled;canvas.style.cursor=enabled?'crosshair':'';
+    $('#sharedPlacePlayer').setAttribute('aria-pressed',String(enabled));
+    $('#sharedPlacePlayer').textContent=enabled?'Click scene…':'Place player';
+  }
+  $('#sharedPlacePlayer').onclick=()=>{placementMode(!placingPlayer);canvas.focus();draw();};
+  function placePlayerAt(x,y,center=false,enemy=false) {
+    try {
+      ensureRoom();
+      const prefix=enemy?'previewEnemy':'previewPlayer';
+      $('#'+prefix+'X').value=Math.max(-2048,Math.min(16384,Math.round(x)));
+      $('#'+prefix+'Y').value=Math.max(-2048,Math.min(16384,Math.round(y)));
+      $(enemy?'#previewEnemyEnabled':'#previewReceivers').checked=true;
+      if(center) {
+        setNativeCamera('x',Math.max(0,x-128));setNativeCamera('y',Math.max(0,y-160));
+        setMode('shared');
+      }
+      draw();
+    }catch(error){label.textContent=error.message;}
+  }
+  function placeAtPointer(event,enemy) {
+    const point=sharedPreviewCanvasPoint(canvas,event);
+    if(!point||!api||lost||api.RoomPreview_PickReceiver(point.x,point.y)!==2)return false;
+    const [x,y]=new Int32Array(api.memory.buffer,api.DioramaPreview_Input(),2);
+    if(placingPlayer)placementMode(false);
+    placePlayerAt(x,y,false,enemy);
+    return true;
+  }
   $('#previewEventHere').onclick=()=>{
     $('#previewEventX').value=nativeCamera.x+128;$('#previewEventY').value=nativeCamera.y+160;
     $('#previewEventStart').value=nativeFrame;setMode('shared');draw();
   };
+  $('#sharedAspect').addEventListener('input',()=>{
+    $('#sharedCustomSize').hidden=$('#sharedAspect').value!=='custom';
+  });
   document.querySelector('#sharedControls').addEventListener('input',()=>draw());
   for(const event of ['input','change','click'])document.addEventListener(event,e=>{
     const id=e.target.id;
-    if(e.target.closest('#sharedControls')||id.startsWith('native')||id==='sharedGl')return;
+    if(e.target.closest('#sharedControls')||id.startsWith('native')||id.startsWith('preview')||id==='sharedGl')return;
     configDirty=true;
   });
   document.addEventListener('keydown',e=>{if(e.ctrlKey||e.metaKey)configDirty=true;});
@@ -110,15 +186,26 @@ const SharedRoomPreview = (() => {
   canvas.addEventListener('pointerdown',e=>{
     if(e.button===2||macControlClick(e))return;
     canvas.focus();canvas.setPointerCapture(e.pointerId);
+    if(placingPlayer||e.shiftKey) {
+      drag={receiver:true,enemy:e.altKey};e.preventDefault();
+      placeAtPointer(e,drag.enemy);
+      return;
+    }
     drag={x:e.clientX,y:e.clientY,cx:nativeCamera.x,cy:nativeCamera.y};
   });
   canvas.addEventListener('pointermove',e=>{
     if(!drag)return;
-    const scale=224/Math.min(canvas.clientHeight,canvas.clientWidth/setting('Aspect'));
-    setNativeCamera('x',Math.round(drag.cx-(e.clientX-drag.x)*scale));
+    if(drag.receiver){placeAtPointer(e,drag.enemy);return;}
+    const scale=224/Math.min(canvas.clientHeight,canvas.clientWidth/(canvas.width/canvas.height));
+    const requestedX=Math.round(drag.cx-(e.clientX-drag.x)*scale);
+    setNativeCamera('x',requestedX);
+    if(nativeCamera.x!==requestedX){drag.cx=nativeCamera.x;drag.x=e.clientX;}
     setNativeCamera('y',Math.round(drag.cy-(e.clientY-drag.y)*scale));
   });
   for(const name of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(name,()=>{drag=null;});
+  canvas.addEventListener('keydown',e=>{
+    if(e.key==='Escape'&&placingPlayer){placementMode(false);draw();}
+  });
   canvas.addEventListener('webglcontextlost',event=>{
     event.preventDefault();lost=true;label.textContent='Graphics context lost. Effects and map edits are retained while the renderer recovers.';
   });
@@ -150,6 +237,12 @@ const SharedRoomPreview = (() => {
       }
       if(api.DioramaPreview_Version()!==1||!api.DioramaPreview_Init(backend.gl.getParameter(backend.gl.MAX_TEXTURE_SIZE)))
         throw Error('Unsupported renderer version or device.');
+      const art=DATA.player;
+      if(!art)throw Error('Player artwork is missing. Rebuild the editor with tools/action_editor/build.sh.');
+      const parts=[art.characters,art.palette,art.picture].map(index=>BLOBS[index]);
+      const player=new Uint8Array(parts.reduce((size,part)=>size+part.length,0));
+      let offset=0;for(const part of parts){player.set(part,offset);offset+=part.length;}
+      send(player,api.RoomPreview_LoadPlayer);
       $('#modeShared').disabled=false;label.textContent='Ready. Select Shared renderer to explore the level.';
       draw();
     }catch(error){label.textContent=error.message;api=null;backend?.dispose();}
@@ -202,8 +295,12 @@ const SharedRoomPreview = (() => {
     const bytes=new TextEncoder().encode(text);
     if(bytes.length>131072)throw Error('Effect document exceeds 128 KiB.');
     new Uint8Array(api.memory.buffer,api.DioramaPreview_Input(),bytes.length).set(bytes);
-    if(!api.RoomPreview_ConfigureEffects(bytes.length))
-      throw Error(`Effects rejected at line ${api.RoomPreview_RecipeErrorLine()}. Previous effects retained.`);
+    if(!api.RoomPreview_ConfigureEffects(bytes.length)) {
+      const start=api.RoomPreview_RecipeError(),memory=new Uint8Array(api.memory.buffer);
+      let end=start;while(memory[end])end++;
+      const reason=new TextDecoder().decode(memory.subarray(start,end));
+      throw Error(`${reason||`Effects rejected at line ${api.RoomPreview_RecipeErrorLine()}.`} Previous effects retained.`);
+    }
     effectsConfig=text;
   }
   function syncSources() {
@@ -286,5 +383,5 @@ const SharedRoomPreview = (() => {
     return [api.RoomPreview_RayFieldMapScale(0),api.RoomPreview_RayFieldMapScale(1)];
   }
   initialize();
-  return {syncSources,validateScenery,validatePolicyDocument,policyPlan,validateEffects,previewActorBinding,surfaceFieldDefinition,projectileFieldDefinition,arcFieldDefinition,glowFieldDefinition,castleFieldDefinition,marshFieldDefinition,atmosphereFieldDefinition,rayFieldDefinition,rayFieldMapScale,moonFieldDefinition,waterFieldDefinition,waterFieldMapScale,collisionGrid,draw:render,invalidate:()=>{configDirty=true;}};
+  return {placePlayerAt,syncSources,validateScenery,validatePolicyDocument,policyPlan,validateEffects,previewActorBinding,surfaceFieldDefinition,projectileFieldDefinition,arcFieldDefinition,glowFieldDefinition,castleFieldDefinition,marshFieldDefinition,atmosphereFieldDefinition,rayFieldDefinition,rayFieldMapScale,moonFieldDefinition,waterFieldDefinition,waterFieldMapScale,collisionGrid,draw:render,invalidate:()=>{configDirty=true;}};
 })();

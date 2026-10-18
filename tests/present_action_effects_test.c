@@ -540,24 +540,23 @@ static void ForestFoliageComposition(void) {
   frame.action_scene_effects.decorations[2].render_layer = kActionEffectRenderLayer_ForegroundLight;
   frame.action_scene_effects.decoration_count = 3;
   frame.action_scene_effects.decoration_visible_count = 3;
+  /* Forest surface light is consumed with BG1 materials, never applied to
+   * the final image over already-lit sprites or HUD. */
   PresentActionEffects_Draw(&device, &frame, viewport, &projection);
-  assert(b.geometries == 7 && b.geometry_blends[6] == kArRenderBlendMode_Light);
-  b.fail_surface_light = true;
-  PresentActionEffects_Draw(&device, &frame, viewport, &projection);
-  assert(b.geometries == 8 && EffectRenderer_Available());
-  PresentActionEffects_Draw(&device, &frame, viewport, &projection);
-  assert(b.geometries == 8); /* Unsupported custom blend is tried only once. */
-  PresentActionEffects_DrawDioramaPlane((void *)&context, SR_PPU_OVERLAY_BG2, &projection);
-  assert(b.geometries == 10); /* Ordinary alpha/additive effects still work. */
-  PresentActionEffects_Reset(&device);
-  b.fail_surface_light = false;
-  PresentActionEffects_Draw(&device, &frame, viewport, &projection);
-  assert(b.geometries == 11); /* A new device may support the blend. */
+  assert(b.geometries == 6);
+  PresentActionPlaneEffectContext material = context;
+  assert(PresentActionEffects_DrawSceneryLight(&material, &projection));
+  assert(b.geometries == 7 && b.geometry_blends[6] == kArRenderBlendMode_Add);
+  assert(material.scenery_lighting_in_material);
+  PresentActionEffects_DrawDioramaPlane(&material, SR_PPU_OVERLAY_BG1, &projection);
+  assert(b.geometries == 7); /* No second multiplicative pass. */
+  PresentActionEffects_DrawDioramaPlane(&material, SR_PPU_OVERLAY_BG2, &projection);
+  assert(b.geometries == 9); /* Rear rays and alpha foliage keep their depth. */
   frame.action_environmental_effects = false;
   PresentActionEffects_Draw(&device, &frame, viewport, &projection);
   PresentActionEffects_DrawDioramaPlane((void *)&context, SR_PPU_OVERLAY_BG2, &projection);
   assert(PresentActionEffects_DrawFlatPlanes(&device, &frame, viewport));
-  assert(b.geometries == 11);
+  assert(b.geometries == 9);
   PresentActionEffects_Reset(&device);
   assert(b.created == b.destroyed && !fatal_count);
 }
@@ -1324,15 +1323,15 @@ static void SourcePacketCaptureLifetime(void) {
   PresentActionEffects_Reset(&device);
 }
 
-static void SourceParticleViewLifetime(void) {
+static void SourceParticleViewLifetime(unsigned index) {
   Backend b;
   ArRenderDevice device;
   Init(&b, &device);
   LavaFrame();
   frame.action_effects = (ActionEffectFrame){0};
-  frame.action_scene_effects = (ActionSceneEffectFrame){.authored_count=1};
+  frame.action_scene_effects = (ActionSceneEffectFrame){.authored_count=index+1};
   frame.bg2_camera_x = frame.bg2_camera_y = 7000;
-  frame.action_scene_effects.authored[0] = (ActionEffectInstance){
+  frame.action_scene_effects.authored[index] = (ActionEffectInstance){
     .world_x=8000,.world_y=8000,.kind=kActionEffect_AuthoredParticleArea,
     .flags=kActionEffectFlag_Visible|kActionEffectFlag_StaticAnchor,
     .render_layer=kActionEffectRenderLayer_WorldOverlay,
@@ -1429,7 +1428,11 @@ int main(void) {
   DetachedFireballSmokeComposition();
   AutoExpandedMask();
   SourcePacketCaptureLifetime();
-  SourceParticleViewLifetime();
+  /* Particle visibility must work across the old 32-bit mask boundaries and
+   * through the last authored slot, without rebuilding for pure reprojection. */
+  const unsigned particle_slots[]={0,31,32,63,64,kActionAuthoredMaxInstances-1};
+  for(unsigned i=0;i<sizeof(particle_slots)/sizeof(particle_slots[0]);++i)
+    SourceParticleViewLifetime(particle_slots[i]);
   AuthoredOnlyComposition();
   TestEffectMasterBrightness();
   SkyboxWaterfallComposition();

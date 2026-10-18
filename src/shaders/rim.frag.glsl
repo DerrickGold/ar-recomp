@@ -32,8 +32,10 @@ void main() {
     float min_neighbor = min(min(a_up, a_down), min(a_left, a_right));
     float edge = c.a * max(0.0, c.a - min_neighbor);
 
-    vec3 rim_color = vec3(1.0, 0.95, 0.7);
-    vec3 glow = c.rgb + rim_color * (edge * strength);
+    // Object capture already includes receiver lighting, exposure and game
+    // brightness. Boost that lit color so the rim follows the same darkness
+    // and tint. Adding a constant here made even unlit sprites glow yellow.
+    vec3 glow = c.rgb * (1.0 + edge * strength);
 
     vec4 vc = v_color;
     o_color = vec4(glow * vc.rgb, c.a * vc.a);

@@ -1,3 +1,4 @@
+#include "diorama/diorama_camera_policy.h"
 #include "diorama/diorama_layer_manifest.h"
 /* ActRaiser frame plan: the per-frame presentation decisions for widescreen
  * and diorama (action-BG plans, canvas and vertical margins), the widescreen
@@ -311,9 +312,7 @@ static void ActRaiser_ResolveVerticalMarginPolicy(
   const int playfield = ActionBgPlan_PlayfieldLayer(&s_pending_action_bg_plan);
   if (diorama && g_ws_active && playfield >= 0) {
     const ActionBgLayerPlan *layer = &s_pending_action_bg_plan.layer[playfield];
-    if (layer->source == kActionBgSource_WorldMap && !layer->wrap_world_x &&
-        layer->default_edge == kActionBgEdge_LiveWorld && !layer->band_count &&
-        layer->horizontal_extent.mode == kActionBgExtent_Available)
+    if (DioramaCameraPolicy_FiniteLayer(layer))
       ActRaiserActionBg_ResolveDioramaHorizontalExtent(
           room, (unsigned)playfield, layer->world_width,
           &s_pending_diorama_world_x0, &s_pending_diorama_world_width);

@@ -1,6 +1,7 @@
 /* Shared environment mesh clipping and soft light patches. Phase: pure. */
 #include "action/action_effect_render_internal.h"
 #include "action_effect_members.h"
+#include "action_light_kinds.h"
 
 typedef struct SceneClipVertex {
   ArRenderVertex2D vertex; /* Position is still effect-local, before projection. */
@@ -226,21 +227,12 @@ static ActionEffectSourcePrimitive *SourcePrimitive(ActionEffectSourceBatch *b,
     b->failed = true;
     return NULL;
   }
-  const ActionEffectProjectionContext *c = &b->context;
-  int cx = c->bg1_camera_x, cy = c->bg1_camera_y;
-  if (e->projection_plane == kActionEffectProjectionPlane_BetweenBackgrounds) {
-    cx = (int16_t)((cx + c->bg2_camera_x) / 2);
-    cy = (int16_t)((cy + c->bg2_camera_y) / 2);
-  } else if (e->projection_plane == kActionEffectProjectionPlane_Bg2 ||
-             e->projection_plane == kActionEffectProjectionPlane_Bg2High) {
-    cx = c->bg2_camera_x; cy = c->bg2_camera_y;
-  }
+  const ArRenderPointF origin = ActionEffectProjection_CaptureOrigin(&b->context, e);
   ActionEffectSourcePrimitive *p = &b->primitives[b->count++];
   *p = (ActionEffectSourcePrimitive){
     .meta = {kind, e->projection_plane == kActionEffectProjectionPlane_Obj ?
         (e->obj_priority ? 5u + e->obj_priority : 0u) : e->projection_plane, e->obj_priority, 0},
-    .origin = {c->ws_extra + (int16_t)(uint16_t)(e->world_x - cx),
-               c->ws_extra_top + (int16_t)(uint16_t)(e->world_y - cy),
+    .origin = {origin.x, origin.y,
                (e->render_layer == kActionEffectRenderLayer_Atmosphere ? 1 : 0) |
                (e->flags & kActionEffectFlag_StaticAnchor ? 2 : 0) |
                (e->flags & kActionEffectFlag_ClippedMesh ? 4 : 0)},
@@ -293,10 +285,11 @@ bool ActionEffectSource_Leaf(ActionEffectSourceBatch *b, const ActionEffectInsta
   return true;
 }
 
-void ActionEffectSource_Shadow(ActionEffectSourceBatch *b, unsigned begin, float x, float y, bool multiply) {
+void ActionEffectSource_Shadow(ActionEffectSourceBatch *b, unsigned begin, float x, float y, bool multiply, float strength) {
   for (unsigned i = begin; i < b->count; ++i) {
     b->primitives[i].meta[3] = multiply ? 1 : 2;
     b->primitives[i].extra[0] = x; b->primitives[i].extra[1] = y;
+    b->primitives[i].extra[2] = strength;
   }
 }
 
@@ -336,18 +329,22 @@ bool ActionEffectSource_GlowTriangle(ActionEffectSourceBatch *b, const ActionEff
 void ActionEffectSource_TintRange(ActionEffectSourceBatch *b, unsigned begin, unsigned end, uint32_t color,
     float intensity, bool multiply) {
   if (end > b->count) { b->failed = true; return; }
+  const float gain = multiply ? intensity : ActionLightIntensity_Gain(intensity);
+  const float opacity = ActionLightIntensity_Opacity(intensity);
   for (unsigned i = begin; i < end; ++i) for (unsigned j = 0;
       j < (b->primitives[i].meta[0] == kActionSourceQuad ? 4u : 3u); ++j) {
     float *c = j < 3 ? b->primitives[i].colors[j] : b->primitives[i].extra;
     c[0] *= ((color >> 16) & 255) / 255.f;
     c[1] *= ((color >> 8) & 255) / 255.f;
     c[2] *= (color & 255) / 255.f;
-    if (multiply) { c[0] *= intensity; c[1] *= intensity; c[2] *= intensity; }
-    else if (b->primitives[i].meta[0] == kActionSourceLitTriangle) {
-      c[3] *= intensity;
-      b->primitives[i].points[j][3] *= intensity;
-      if (j == 0) b->primitives[i].extra[0] = fminf(1, b->primitives[i].extra[0] * intensity);
-    } else c[3] = fminf(1, c[3] * intensity);
+    if (gain != 1) { c[0] *= gain; c[1] *= gain; c[2] *= gain; }
+    if (!multiply) {
+      if (b->primitives[i].meta[0] == kActionSourceLitTriangle) {
+        c[3] *= opacity;
+        b->primitives[i].points[j][3] *= opacity;
+        if (j == 0) b->primitives[i].extra[0] = fminf(1, b->primitives[i].extra[0] * opacity);
+      } else c[3] = fminf(1, c[3] * opacity);
+    }
   }
 }
 
@@ -364,17 +361,52 @@ void TintEffectMember(ActionEffectGeometryWriter *writer, const ActionNativeMemb
   else ActionEffectMembers_Tint(member, writer->vertices, begin, end, multiply);
 }
 
-/* Ring geometry and colors come from the same recipe as the reference path.
- * The GPU supplies only the anchor and projected radii, including screen minima. */
-bool AppendSourceBillboard(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
+/* Glows and cloud puffs are finite areas, not points. Keep their complete
+ * animated extent when testing a capture edge; the anchor and unit sizing
+ * probes may lie outside it. The shared coefficients retain the same shape,
+ * screen minima and vertex budget on the CPU and resident GPU paths. */
+bool AppendBillboard(ActionEffectGeometryWriter *writer, const ActionEffectInstance *effect,
     float x, float y, float rx, float ry, float min_x, float min_y, unsigned segments,
-    const float (*corners)[4], const ArRenderColorF *colors) {
+    const float (*corners)[4], const ArRenderColorF *colors,
+    ActionEffectProjectPointFn project, void *context) {
+  const unsigned count = 1+kActionEffectGlowRings*segments;
+  float extent[4] = {0};
+  for (unsigned i=0;i<count;++i) for (unsigned j=0;j<4;++j)
+    extent[j]=fmaxf(extent[j],fabsf(corners[i][j]));
+  const int base=writer->vertex_count;
+  if (!writer->source) {
+    ArRenderPointF anchor;
+    float sx,sy;
+    const bool native=project==ActionEffectProjection_ProjectPoint;
+    if (!ProjectWithScale(effect,native?ActionEffectProjection_ProjectBillboardPoint:project,
+            context,x,y,&anchor,&sx,&sy)) return true;
+    const float radius_x=fmaxf(min_x,rx*sx),radius_y=fmaxf(min_y,ry*sy);
+    if (native) {
+      ActionEffectLocalRect bounds;
+      if (!ActionEffectProjection_BillboardBounds(context,effect,&bounds)) return true;
+      const float ex=(extent[0]*radius_x+extent[1]*radius_y)/sx;
+      const float ey=(extent[2]*radius_x+extent[3]*radius_y)/sy;
+      if (x+ex<bounds.x0 || x-ex>bounds.x1 || y+ey<bounds.y0 || y-ey>bounds.y1) return true;
+    }
+    if (!Reserve(writer,count,segments*3*(2*kActionEffectGlowRings-1))) return false;
+    for (unsigned i=0;i<count;++i) {
+      const float *c=corners[i];
+      writer->vertices[writer->vertex_count++]=(ArRenderVertex2D){
+        .position={anchor.x+c[0]*radius_x+c[1]*radius_y,
+                   anchor.y+c[2]*radius_x+c[3]*radius_y},
+        .color=colors[i?1+(i-1)/segments:0]};
+    }
+  }
   for (unsigned r = 0; r < kActionEffectGlowRings; ++r) for (unsigned s = 0; s < segments; ++s) {
     const unsigned next = (s + 1) % segments;
     const unsigned outer0 = 1 + r * segments + s, outer1 = 1 + r * segments + next;
     const unsigned inner0 = r ? outer0 - segments : 0, inner1 = r ? outer1 - segments : 0;
     const unsigned triangles[6] = {inner0, outer0, outer1, inner0, outer1, inner1};
     for (unsigned t = 0; t < (r ? 2u : 1u); ++t) {
+      if (!writer->source) {
+        for (unsigned j=0;j<3;++j) writer->indices[writer->index_count++]=base+triangles[t*3+j];
+        continue;
+      }
       float coefficients[3][4];
       ArRenderColorF palette[3];
       for (unsigned j = 0; j < 3; ++j) {
@@ -386,9 +418,10 @@ bool AppendSourceBillboard(ActionEffectGeometryWriter *writer, const ActionEffec
               coefficients, palette)) return false;
       ActionEffectSourcePrimitive *p = &writer->source->primitives[writer->source->count - 1];
       p->points[1][2] = min_x; p->points[1][3] = min_y;
+      memcpy(p->points[5],extent,sizeof(extent));
     }
   }
-  writer->vertex_count = (int)writer->source->count;
+  if (writer->source) writer->vertex_count = (int)writer->source->count;
   return true;
 }
 

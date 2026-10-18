@@ -2474,6 +2474,15 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_diorama_compositor_test PRIVATE actraiser_math)
     add_test(NAME actraiser_diorama_compositor COMMAND actraiser_diorama_compositor_test)
 
+    add_executable(actraiser_action_camera_test tests/actraiser_action_camera_test.c
+        src/actraiser/enhancements/actraiser_action_camera.c
+        tests/diorama_compositor_test.c ${_diorama_compositor_sources})
+    target_compile_definitions(actraiser_action_camera_test PRIVATE AR_COMPOSITOR_WASM=1)
+    target_include_directories(actraiser_action_camera_test PRIVATE src tests
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_action_camera_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_action_camera COMMAND actraiser_action_camera_test)
+
     add_executable(actraiser_diorama_snapshot_test
         tests/diorama_snapshot_test.c src/diorama/diorama_snapshot.c)
     target_include_directories(actraiser_diorama_snapshot_test PRIVATE
@@ -2497,6 +2506,7 @@ if(BUILD_TESTING)
     add_executable(actraiser_action_room_gpu_compare
         tools/ppu_gpu/runner_events_stub.c
         tools/action_editor/check_native_projection.c tools/action_editor/room_preview.c
+        tools/action_editor/receiver_preview.c
         tools/action_editor/room_scene.c tools/action_editor/compositor_profile_stub.c
         ${_room_environment_sources} ${_diorama_compositor_sources}
         src/action/action_scene_snapshot.c src/action/action_room_scene.c

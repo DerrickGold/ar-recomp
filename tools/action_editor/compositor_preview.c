@@ -154,6 +154,16 @@ bool DioramaEffectBackend_BindPrioritySurface(ArRenderDevice *d,
   float a[] = {p->width,p->height,p->high_band,p->additive};
   return WebEffect(3,a,4) != 0;
 }
+bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *d, const DioramaSceneryLightEffectParams *p) {
+  int w,h;
+  if (!ArRenderDevice_GetOutputSize(d,&w,&h) || w<=0 || h<=0) return false;
+  const ArRenderRectF uv = p->light_uv.w>0 ? p->light_uv : (ArRenderRectF){0,0,1,1};
+  const float a[17]={p->texel_width,p->texel_height,p->blur_radius,p->lower_content_v_max,
+      p->priority.width,p->priority.height,p->priority.high_band,p->priority.additive,
+      uv.w/w,uv.h/h,uv.x,1-uv.y-uv.h,p->shade.r,p->shade.g,p->shade.b,p->mode,(float)p->illumination.value};
+  return WebEffect(4,a,17) != 0;
+}
+bool DioramaEffectBackend_PrepareSceneryLight(ArRenderDevice *d) { (void)d; return WebAvailable(4) != 0; }
 bool DioramaEffectBackend_Unbind(ArRenderDevice *d) { (void)d; return WebEffect(-1,NULL,0) != 0; }
 void DioramaEffectBackend_Reset(ArRenderDevice *d) { (void)DioramaEffectBackend_Unbind(d); }
 

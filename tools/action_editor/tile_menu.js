@@ -2,7 +2,7 @@
  * deltas as the toolbar. A paste destination is independent of the selection. */
 const tileMenu=$('#tileMenu');
 tileMenu.hidden=true;
-const effectMenuNames=['AddEffect','LightBox','EditEffect','DeleteEffect','CopyEffect','PasteEffect','Preview','Settings'];
+const effectMenuNames=['AddEffect','LightBox','EditEffect','DeleteEffect','CopyEffect','PasteEffect','Preview','PreviewPlayer','Settings'];
 const tileMenuButtons=[...effectMenuNames,'Priority','Far','ResetBand','Pixels','Fill','FlipH','FlipV','MirrorH','MirrorV','Copy','Paste','Stamp','Delete','Reset','Remove','Deselect']
   .map(name=>$(`#tileAction${name}`));
 let tileMenuTarget=null;
@@ -41,6 +41,8 @@ function openTileMenu(cx,cy,clientX,clientY) {
   tileMenuTarget={cx,cy,key:keyOf(room,bgIndex),priority:allHigh?1:2,effect:effect?.id,x:point.x,y:point.y};
   $('#tileActionAddEffect').disabled=false;
   $('#tileActionLightBox').disabled=bgIndex!==0||!hasSelection;
+  $('#tileActionPreviewPlayer').disabled=bgIndex!==0||$('#modeShared').disabled;
+  $('#tileActionPreviewPlayer').title=bgIndex===0?'Place the player’s feet at this map point in Shared renderer.':'Place the player on the BG1 playfield map.';
   $('#tileActionAddEffect').title=`Place an effect anchored to this BG${bgIndex+1} map point.`;
   $('#tileActionCopyEffect').hidden=!effect;$('#tileActionPasteEffect').hidden=!EffectEditor.hasClipboard();
   $('#tileActionEditEffect').hidden=$('#tileActionDeleteEffect').hidden=!effect;
@@ -103,6 +105,7 @@ $('#tileActionAddEffect').onclick=()=>runTileAction(({x,y})=>EffectEditor.openMo
 $('#tileActionEditEffect').onclick=()=>runTileAction(({effect,x,y})=>EffectEditor.openModal(effect,x,y));
 $('#tileActionDeleteEffect').onclick=()=>runTileAction(({effect})=>EffectEditor.removeEffect(effect));
 $('#tileActionPreview').onclick=()=>runTileAction(({x,y})=>EffectEditor.previewAt(x,y));
+$('#tileActionPreviewPlayer').onclick=()=>runTileAction(({x,y})=>SharedRoomPreview.placePlayerAt(x,y,true));
 $('#tileActionPriority').onclick=()=>runTileAction(({priority})=>{
   applySelectionBand(priority);tileActionStatus(`Priority ${priority===2?'on':'off'} for selected tiles.`);
 });

@@ -7,6 +7,7 @@
  * Phase: game (frame transaction). */
 #include "actraiser/actraiser_rtl_internal.h"
 #include "actraiser/actraiser_death_heim_hub.h"
+#include "actraiser/enhancements/actraiser_camera_internal.h"
 
 typedef struct ActRaiserPpuFrameAccess {
   const SrPpuFrameTransactionContext *context;
@@ -19,7 +20,6 @@ const ActionBgPlan *ActRaiser_PendingActionBgPlan(void);
 void ActRaiser_ClearWidescreenMarginGaps(
     bool bounded_world_margins,
     const SrPpuFrameTransactionContext *context);
-const DioramaRoomOverride *ActRaiser_CurrentVirtualLayerRoom(void);
 void ActRaiser_ApplyWidescreenPolicy(void);
 
 /* ---- defined in actraiser_ppu_frame_access.c ---- */
@@ -69,6 +69,7 @@ bool ActRaiser_DioramaBoundsTrackingActive(void);
 void ActRaiser_DioramaSampleBg2Bounds(const SrPpuStateSnapshot *ppu, int screen_y);
 void ActRaiser_DioramaApronFinish(const ActionApronGeometry *geom);
 void ActRaiser_PrepareDioramaCapture(const SrPpuStateSnapshot *ppu);
+/* Shared by capture setup and the pre-capture camera stop. */
 void ActRaiser_PrepareSceneMasks(uint8_t map_group, uint8_t map_number);
 void ActRaiser_PrepareTownCapture(void);
 SrPpuBackgroundViewRequest
@@ -76,10 +77,6 @@ ActRaiser_PrepareSkyboxView(const SrPpuFrameTransactionContext *context,
                             const SnesRunnerApi *scanout_api,
                             bool scanout_ready, bool profile_diorama,
                             float *world_x_fraction);
-
-/* ---- defined in actraiser_action_camera.c ---- */
-/* The playfield camera's horizontal travel this room, as last clamped. */
-bool ActRaiser_ActionCameraTravel(uint16_t *minimum, uint16_t *maximum);
 
 /* ---- defined in actraiser_frame_draw.c ---- */
 void ActRaiser_ReportSim3DCaptureContractFailure(void);

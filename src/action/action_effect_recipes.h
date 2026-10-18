@@ -69,6 +69,14 @@ const char *ActionEffectRecipes_PatternName(unsigned pattern);
  * error_line receives the first failing line (zero for an allocation failure). */
 bool ActionEffectRecipes_Parse(ActionEffectRecipes *table, const char *text,
     size_t size, unsigned *error_line);
+/* Authoring diagnostics are produced by the same validator as the game.
+ * Whole-room limits report the affected room instead of an unrelated EOF. */
+typedef struct ActionEffectRecipeError {
+  unsigned line;
+  char message[192];
+} ActionEffectRecipeError;
+bool ActionEffectRecipes_ParseWithError(ActionEffectRecipes *table, const char *text,
+    size_t size, ActionEffectRecipeError *error);
 void ActionEffectRecipes_Apply(const ActionEffectRecipes *table, unsigned group,
     unsigned room, unsigned terrain, uint16_t clock, const ActionEnvironmentScene *scene, ActionSceneEffectFrame *frame);
 #endif

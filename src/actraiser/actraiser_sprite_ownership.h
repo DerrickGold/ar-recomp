@@ -17,6 +17,8 @@ typedef enum ActRaiserSpriteRole {
   kActRaiserSprite_WorldPlaque,
   kActRaiserSprite_WorldPalace,
   kActRaiserSprite_Player,
+  /* Non-player action objects, including enemies, pickups and scenery props.
+   * Their receiver membership must not depend on transient combat flags. */
   kActRaiserSprite_Enemy,
 } ActRaiserSpriteRole;
 
@@ -38,8 +40,8 @@ void ActRaiserSpriteOwnership_Record(ActRaiserSpriteRole role,
                                     unsigned first_byte, unsigned end_byte);
 void ActRaiserSpriteOwnership_RecordAction(uint16_t source,
     unsigned first_byte, unsigned end_byte);
-ActRaiserSpriteRole ActRaiserSpriteOwnership_ActionRole(uint16_t record,uint16_t flags);
-void ActRaiserSpriteOwnership_RecordActionObject(uint16_t source,uint16_t record,uint16_t flags,
+ActRaiserSpriteRole ActRaiserSpriteOwnership_ActionRole(uint16_t record);
+void ActRaiserSpriteOwnership_RecordActionObject(uint16_t source,uint16_t record,
     int16_t world_x,int16_t world_y,unsigned first_byte,unsigned end_byte);
 void ActRaiserSpriteOwnership_RecordSim(uint16_t record, uint16_t family,
     unsigned first_byte, unsigned end_byte);

@@ -8,6 +8,46 @@
 #include <time.h>
 #include <math.h>
 #include "action/action_effect_render.h"
+#include "diorama/diorama_camera_policy.h"
+
+static void CameraPolicy(EditorRoomScene *room, const ActionSceneSnapshot *assets) {
+  if (assets->scene.group != 1 || assets->scene.map != 1) return;
+  assert(EditorRoomScene_Configure(room, ""));
+  const int outputs[][2] = {{960,600},{960,540},{800,600},{1260,540}};
+  const int positions[] = {0,1,960,1921,2880,3840};
+  for (unsigned v = 0; v < sizeof(outputs)/sizeof(*outputs); ++v) {
+    const DioramaView view = {.distance_scale = 1, .camera_framing_weight = 1,
+      .visible_width = 496, .viewport = {0,0,outputs[v][0],outputs[v][1]}};
+    for (unsigned i = 0; i < sizeof(positions)/sizeof(*positions); ++i) {
+      EditorRoomCamera camera;
+      assert(EditorRoomScene_ResolveCamera(room, positions[i], 300, 37, 120, 64,
+          &view, kDioramaSky_Only, &camera));
+      const bool wide = outputs[v][0] * 10 > outputs[v][1] * 16;
+      /* Fillmore BG2 has an explicit 128px extent, so it must not grow an
+       * apron even when the ordinary live-world BG1 does. */
+      assert(camera.bg_apron_mask == (wide ? 1 : 0));
+      assert(EditorRoomScene_Render(room, camera.x, 300, 37, 120, 64, &camera));
+      const DioramaCapture *capture = EditorRoomScene_Capture(room);
+      const SrSceneSurfaces *surface = EditorRoomScene_Surfaces(room);
+      assert(surface->background_view && surface->view_width == 496);
+      assert(capture->bg_apron_mask == camera.bg_apron_mask);
+      /* Independently check the whole-room BG1 -> BG2 mapping, including the
+       * fractional origin. A BG2-scroll-minus-margin implementation fails. */
+      const float expected = (assets->scene.bg[1].pages_wide * 256 - 496) *
+          (float)(camera.x - camera.travel.minimum) / (camera.travel.maximum - camera.travel.minimum);
+      const float actual = capture->bg2_camera_x - 120 - capture->skybox->capture_offset.x +
+          capture->skybox->subpixel_x;
+      assert(fabsf(actual - expected) < .001f);
+      if (!wide) {
+        for (unsigned bg = 0; bg < 2; ++bg) for (unsigned band = 0; band < 3; ++band)
+          for (int y = 0; y < surface->height; ++y) for (int x = 0; x < 64; ++x) {
+            assert(!surface->bands[bg][band][y * surface->pitch_pixels + x]);
+            assert(!surface->bands[bg][band][y * surface->pitch_pixels + 64 + surface->width + x]);
+          }
+      }
+    }
+  }
+}
 
 static char *Read(const char *path, size_t *size) {
   FILE *f = fopen(path, "rb"); if (!f) return NULL;
@@ -48,7 +88,7 @@ static void Benchmark(EditorRoomScene *room, int x, int y, unsigned frame_clock,
   clock_t capture_ticks = 0;
   static ActionMoonlightOcclusion capture_scratch;
   for (unsigned i = 0; i < iterations; ++i) {
-    assert(EditorRoomScene_Render(room, x, y, frame_clock + i, extra, vertical));
+    assert(EditorRoomScene_Render(room, x, y, frame_clock + i, extra, vertical, NULL));
     const clock_t before = clock();
     const ActionSceneEffectFrame *frame = EditorRoomScene_Effects(room);
     const ActionEnvironmentScene *scene = EditorRoomScene_Environment(room);
@@ -122,7 +162,16 @@ int main(int argc, char **argv) {
   }
   int x, y, extra, vertical; unsigned frame;
   while (scanf("%d %d %u %d %d", &x, &y, &frame, &extra, &vertical) == 5) {
-    assert(EditorRoomScene_Render(room, x, y, frame, extra, vertical));
+    /* Match the browser oracle's default view, including its room-edge stop.
+     * Benchmarks intentionally retain their explicitly requested capture. */
+    EditorRoomCamera camera;
+    if (!benchmark) {
+      const DioramaView view = {.distance_scale = 1, .camera_framing_weight = 1,
+          .visible_width = 256 + 2 * extra, .viewport = {0, 0, 960, 600}};
+      assert(EditorRoomScene_ResolveCamera(room, x, y, frame, extra, vertical, &view, kDioramaSky_Only, &camera));
+      x = camera.x;
+    }
+    assert(EditorRoomScene_Render(room, x, y, frame, extra, vertical, benchmark ? NULL : &camera));
     const ActionSceneEffectFrame *effects = EditorRoomScene_Effects(room);
     bool directional = false;
     for (unsigned i = 0; i < effects->decoration_count; ++i)
@@ -139,14 +188,15 @@ int main(int argc, char **argv) {
       break;
     }
     const uint32_t hash = EditorRoomScene_Hash(room);
-    assert(!EditorRoomScene_Render(room, -1, y, frame, extra, vertical));
+    assert(!EditorRoomScene_Render(room, -1, y, frame, extra, vertical, NULL));
     assert(!EditorRoomScene_Configure(room, "[unterminated"));
     assert(EditorRoomScene_Hash(room) == hash);
     printf("%08x %08x\n", hash, EditorRoomScene_EffectHash(room));
   }
+  CameraPolicy(room, &assets);
   if (assets.scene.group == 1 && assets.scene.map == 1 && !assets.terrain_profile) {
     assert(EditorRoomScene_Configure(room, ""));
-    assert(EditorRoomScene_Render(room, 0, 400, 0, 0, 0));
+    assert(EditorRoomScene_Render(room, 0, 400, 0, 0, 0, NULL));
     uint32_t original = EditorRoomScene_Hash(room), pixel = 0;
     const SrSceneSurfaces *surface = EditorRoomScene_Surfaces(room);
     int sx = 0, sy = 0;
@@ -161,22 +211,22 @@ int main(int argc, char **argv) {
     char edits[256];
     snprintf(edits, sizeof(edits), "[layers:01:01]\nbg1-virtual = cells:%d,%d-%d,%d band:0\n", cx, cy, cx, cy);
     assert(EditorRoomScene_Configure(room, edits));
-    assert(EditorRoomScene_Render(room, 0, 400, 0, 0, 0));
+    assert(EditorRoomScene_Render(room, 0, 400, 0, 0, 0, NULL));
     size_t at = (size_t)sy * surface->pitch_pixels + sx;
     assert(surface->bands[0][2][at] == pixel);
     assert(!surface->bands[0][0][at] && !surface->bands[0][1][at]);
     snprintf(edits, sizeof(edits), "[layers:01:01]\nbg1-pixels = cell:%d,%d transparent:"
         "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\n", cx, cy);
     assert(EditorRoomScene_Configure(room, edits));
-    assert(EditorRoomScene_Render(room, 0, 400, 0, 0, 0));
+    assert(EditorRoomScene_Render(room, 0, 400, 0, 0, 0, NULL));
     for (int band = 0; band < 3; ++band) assert(!surface->bands[0][band][at]);
     assert(EditorRoomScene_Configure(room, ""));
-    assert(EditorRoomScene_Render(room, 0, 400, 0, 0, 0));
+    assert(EditorRoomScene_Render(room, 0, 400, 0, 0, 0, NULL));
     assert(EditorRoomScene_Hash(room) == original);
   }
   if (assets.scene.group == 2 && assets.scene.map == 1) {
     assert(EditorRoomScene_Configure(room, ""));
-    assert(EditorRoomScene_Render(room, 1152, 240, 37, 120, 64));
+    assert(EditorRoomScene_Render(room, 1152, 240, 37, 120, 64, NULL));
     const SrSceneSurfaces *surface = EditorRoomScene_Surfaces(room);
     assert(EditorRoomScene_Capture(room)->authentic_y0 > 0);
     /* BG2 is at its own top even though the foreground can expose extra rows.
@@ -184,6 +234,36 @@ int main(int argc, char **argv) {
     for (int band = 0; band < 3; ++band)
       for (int col = 0; col < surface->pitch_pixels; ++col)
         assert(surface->bands[1][band][col] == 0);
+  }
+  if (assets.scene.group == 2 && assets.scene.map == 8) {
+    /* Painted boss-room extensions must use their real map coordinates even
+     * when the original room's mirror policy is retained. Compare each pixel
+     * with the same two wall stamps under live-world fill, in every terrain. */
+    const char *fills[] = {"world", "mirror", "repeat", "clamp", "transparent"};
+    uint32_t expected[2][16][16];
+    for (unsigned fill = 0; fill < sizeof(fills)/sizeof(fills[0]); ++fill) {
+      char config[512];
+      snprintf(config, sizeof(config), "[layers:02:08]\n"
+          "bg1-policy = edge:%s\n"
+          "bg1-stamp:us+jp+eu = cell:-3,8 metatile:34 words:58AB,58AA,58BB,58BA bands:1,1,1,1\n"
+          "bg1-stamp:us+jp+eu = cell:18,8 metatile:33 words:18AA,18AB,18BA,18BB bands:1,1,1,1\n", fills[fill]);
+      assert(EditorRoomScene_Configure(room, config));
+      assert(EditorRoomScene_Render(room, 0, 0, 0, 120, 32, NULL));
+      const SrSceneSurfaces *surface = EditorRoomScene_Surfaces(room);
+      const DioramaCapture *capture = EditorRoomScene_Capture(room);
+      unsigned opaque = 0;
+      for (int side = 0; side < 2; ++side)
+        for (int row = 0; row < 16; ++row)
+          for (int col = 0; col < 16; ++col) {
+            const int sx = 64 + 120 + (side ? 18 : -3) * 16 + col;
+            const int sy = capture->authentic_y0 + 8 * 16 - 1 + row;
+            const uint32_t pixel = surface->bands[0][0][sy * surface->pitch_pixels + sx];
+            if (!fill) expected[side][row][col] = pixel;
+            else assert(expected[side][row][col] == pixel);
+            opaque += (pixel >> 24) != 0;
+          }
+      assert(opaque > 256);
+    }
   }
   if (assets.scene.group == 7 && assets.scene.map == 5) {
     /* Death Heim's solid ceiling extension meets native map row 0. The PPU
@@ -194,7 +274,7 @@ int main(int argc, char **argv) {
         "bg1-stamp:us+jp+eu = cell:0,-1 metatile:06 "
         "words:3072,3072,3072,3072 bands:2,2,2,2\n"));
     for (int camera_y = 0; camera_y <= 3; ++camera_y) {
-      assert(EditorRoomScene_Render(room, 0, camera_y, 0, 0, 8));
+      assert(EditorRoomScene_Render(room, 0, camera_y, 0, 0, 8, NULL));
       const SrSceneSurfaces *surface = EditorRoomScene_Surfaces(room);
       const int top = EditorRoomScene_Capture(room)->authentic_y0;
       const int handoff = top - camera_y - 1;

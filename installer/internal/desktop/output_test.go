@@ -97,6 +97,7 @@ func TestExistingGameFolderIsReusedWithoutImport(t *testing.T) {
 		"config.ini":                         "player config",
 		"settings.ini":                       "player settings",
 		"diorama-layers.ini":                 "player room",
+		"action-effects.ini":                 "player effects",
 		"user-rom.sfc":                       "synthetic ROM",
 		"saves/save.srm":                     "player save",
 		"game-assets/manifest.ini":           "player assets",

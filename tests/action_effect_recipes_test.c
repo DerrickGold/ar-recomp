@@ -1,5 +1,6 @@
 #include "action/action_effect_recipes.h"
 #include "action/action_floor_support.h"
+#include "action/action_light_kinds.h"
 #include <math.h>
 #include "support/test_assert.h"
 #include <stdio.h>
@@ -89,11 +90,61 @@ static void TestFloorSupport(void) {
   assert(!Parse("[effects]\nversion=1\n[emitter:01:02:0:free-mist:1]\nmist-height=26\n"));
 }
 static void TestFieldsAndReceivers(void) {
+  /* Every catalog light is editable through the same validated INI path.
+   * Zero is an explicit override, not an instruction to inherit. */
+  unsigned lights_checked=0;
+  for(unsigned kind=1;kind<kActionEffect_KindCount;++kind) {
+    if(!ActionLightKind_Supported(kind))continue;
+    const char *name=ActionEffectRecipes_KindName(kind);assert(name);
+    char text[256];
+    snprintf(text,sizeof(text),"[effects]\nversion=1\n[%s:01:02:0:%s:1]\n",
+        ActionEffectRecipes_IsEmitter(kind)?"emitter":"source",name);
+    assert(Parse(text));
+    assert(!table.records[0].tuning.illumination_set);
+    assert(table.records[0].tuning.light_receivers==ActionLightKind_DefaultReceivers(kind));
+    if(ActionEffectRecipes_ReachSupported(kind)) {
+      assert(table.records[0].tuning.intensity==4 && table.records[0].tuning.reach==2);
+      assert(ActionLightKind_Illumination(kind)==1); /* user's 4/2, exactly once */
+    }
+    strcat(text,"illumination=0\nintensity=1\n");
+    assert(Parse(text));assert(table.records[0].tuning.illumination_set);
+    assert(table.records[0].tuning.illumination==0&&table.records[0].tuning.intensity==1);
+    ++lights_checked;
+  }
+  assert(lights_checked==40);
+  const char *lights[]={"[emitter:01:02:0:soft-light:1]","[emitter:01:02:0:light-gradient:1]",
+      "[emitter:01:02:0:torch:1]","[source:01:02:0:wall-torch:0]","[member:01:01:0:forest-forward:1]"};
+  for(unsigned i=0;i<sizeof(lights)/sizeof(lights[0]);++i) {
+    char text[256];snprintf(text,sizeof(text),"[effects]\nversion=1\n%s\nintensity=16\n",lights[i]);
+    assert(Parse(text));assert(table.records[0].tuning.intensity==16);
+    before=table;
+    snprintf(text,sizeof(text),"[effects]\nversion=1\n%s\nintensity=16.01\n",lights[i]);
+    assert(!Parse(text));assert(!memcmp(&table,&before,sizeof(table)));
+  }
   assert(Parse("[effects]\nversion=1\n[emitter:01:02:0:particle-area:1]\nx=8000\ny=8000\nwidth=16000\nheight=16000\nparticles=8\npattern=snow\n"));
   before=table;
   const char *bad[]={"[emitter:01:02:0:exposure:1]\nbrightness=2.1\n", "[emitter:01:02:0:exposure:1]\nfade-top=-1\n", "[emitter:01:02:0:exposure:1]\nfade-top=nan\n", "[emitter:01:02:0:motes:1]\nbrightness=.5\n", "[emitter:01:02:0:exposure:1]\nfade-top=20\nfade-top=40\n","[emitter:01:02:0:particle-area:1]\nparticles=17\n", "[emitter:01:02:0:exposure:1]\nintensity=1.01\n",
+    "[emitter:01:02:0:soft-light:1]\nillumination=nan\n", "[emitter:01:02:0:soft-light:1]\nillumination=-1\n",
+    "[emitter:01:02:0:soft-light:1]\nillumination=16.01\n", "[emitter:01:02:0:soft-light:1]\nillumination=1\nillumination=2\n",
+    "[emitter:01:02:0:motes:1]\nillumination=2\n", "[member:01:01:0:forest-forward:1]\nillumination=2\n",
+    "[emitter:01:02:0:motes:1]\nintensity=4.01\n", "[emitter:01:02:0:light-fan:1]\nintensity=nan\n",
     "[emitter:01:02:0:light-fan:1]\nstrands=33\n", "[emitter:01:02:0:light-fan:1]\nangle=nan\n",
     "[emitter:01:02:0:wet-contour:1]\npoints=-32,0 500,0\n", "[emitter:01:02:0:wet-contour:1]\npoints=0,0 0,0\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=32,0 -32,0\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=0,0 0,8\n",
+    "[emitter:01:02:0:cloud-bank:1]\ncarry=156\n",
+    "[emitter:01:02:0:cloud-bank:1]\nparticles=32\n",
+    "[emitter:01:02:0:cloud-bank:1]\ntwinkle=.8\n",
+    "[emitter:01:02:0:particle-path:1]\ntwinkle=1.1\n",
+    "[emitter:01:02:0:particle-area:1]\ntwinkle=nan\n",
+    "[emitter:01:02:0:particle-area:1]\ntwinkle=.5\ntwinkle=.8\n",
+    "[emitter:01:02:0:light-gradient:1]\ntwinkle=.5\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\ncarry=513\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\ncarry=nan\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nparticles=129\n",
+    "[emitter:01:02:0:torch:1]\nparticles=129\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nanchor=bg2-point\n",
+    "[emitter:01:02:0:cloud-bank:1]\npoints=-32,0 32,0\nactor-target=player\n",
     "[emitter:01:02:0:wet-contour:1]\npoints=0,0\n", "[source:01:02:0:temple-dust:0]\nlight-player=1\n",
     "[emitter:01:02:0:soft-light:1]\nlight-player=2\n", "[emitter:01:02:0:soft-light:1]\nlight-player=1\nlight-player=1\n"};
   for(unsigned i=0;i<sizeof(bad)/sizeof(bad[0]);++i){char text[512];snprintf(text,sizeof(text),"[effects]\nversion=1\n%s",bad[i]);assert(!Parse(text));assert(!memcmp(&table,&before,sizeof(table)));}
@@ -205,17 +256,29 @@ int main(int argc,char **argv) {
   ActionEffectRecipes_Apply(&table,1,2,0,37,NULL,&frame);
   assert(frame.authored[0].pulse_ticks==37);
   char dense[8192]="[effects]\nversion=1\n";
-  for(unsigned i=0;i<17;++i) {
-    char line[128];snprintf(line,sizeof(line),"[emitter:01:02:0:soft-light:%08x]\n",i);
+  for(unsigned i=0;i<kActionAuthoredMaxInstances;++i) {
+    char line[128];snprintf(line,sizeof(line),"[emitter:01:02:0:motes:%08x]\nparticles=1\n",i);
     strcat(dense,line);
   }
-  before=table;assert(!Parse(dense));assert(!memcmp(&table,&before,sizeof(table)));
+  assert(Parse(dense));
+  ActionEffectRecipes_Apply(&table,1,2,0,37,NULL,&frame);
+  assert(frame.authored_count==kActionAuthoredMaxInstances);
+  assert(frame.authored_sources[kActionAuthoredMaxInstances-1]==kActionAuthoredMaxInstances-1);
+  before=table;
+  strcat(dense,"[emitter:01:02:0:motes:ffffffff]\nparticles=1\n");
+  ActionEffectRecipeError error;
+  assert(!ActionEffectRecipes_ParseWithError(&table,dense,strlen(dense),&error));
+  char limit[64];snprintf(limit,sizeof(limit),"%u active effects; the limit is %u",kActionAuthoredMaxInstances+1,kActionAuthoredMaxInstances);
+  assert(strstr(error.message,"Room 01:02 (US)") && strstr(error.message,limit));
+  assert(!memcmp(&table,&before,sizeof(table)));
   strcpy(dense,"[effects]\nversion=1\n");
   for(unsigned i=0;i<9;++i) {
     char line[128];snprintf(line,sizeof(line),"[emitter:01:02:0:motes:%08x]\nparticles=128\n",i);
     strcat(dense,line);
   }
-  assert(!Parse(dense));assert(!memcmp(&table,&before,sizeof(table)));
+  assert(!ActionEffectRecipes_ParseWithError(&table,dense,strlen(dense),&error));
+  assert(strstr(error.message,"reserved effect vertices; the limit is 4096"));
+  assert(!memcmp(&table,&before,sizeof(table)));
   puts("Effect recipes: atomic validation, sparse overrides, mote parameters, source identity, terrain scope, retained frames passed.");
   if(argc==2&&!strcmp(argv[1],"--benchmark"))BenchmarkStorage();
   return 0;

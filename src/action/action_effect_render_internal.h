@@ -60,7 +60,7 @@ bool ActionSceneryShadow_Prepare(ActionSceneryShadow *shadow, ActionSceneryShado
                                  ActionEffectProjectPointFn project, ActionEffectClipBoundsFn clip,
                                  void *context);
 void ActionSceneryShadow_Apply(ActionEffectGeometryWriter *writer, int begin,
-                               const ActionEffectInstance *effect, float x, float y, bool multiply,
+                               const ActionEffectInstance *effect, float x, float y, bool multiply, float strength,
                                ActionEffectProjectPointFn project, void *context);
 
 typedef struct SceneParticleClock {
@@ -138,8 +138,9 @@ static inline float SceneSoftFalloff(float distance) {
 }
 
 /* ---- defined in action_environment_geometry.c ---- */
-bool AppendSourceBillboard(ActionEffectGeometryWriter *, const ActionEffectInstance *,
-    float, float, float, float, float, float, unsigned, const float (*)[4], const ArRenderColorF *);
+bool AppendBillboard(ActionEffectGeometryWriter *, const ActionEffectInstance *,
+    float, float, float, float, float, float, unsigned, const float (*)[4], const ArRenderColorF *,
+    ActionEffectProjectPointFn, void *);
 void TintEffectMember(ActionEffectGeometryWriter *, const ActionNativeMember *, int, int, bool);
 bool AppendSceneClippedTriangle(
     ActionEffectGeometryWriter *writer, const ActionEffectInstance *mesh,

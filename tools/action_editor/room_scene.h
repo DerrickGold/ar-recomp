@@ -6,6 +6,7 @@
 #include "action/action_effect_preview.h"
 #include "diorama/diorama.h"
 #include "snesrecomp/runner/scene_renderer.h"
+#include "action/action_camera_bounds.h"
 
 typedef struct EditorRoomScene EditorRoomScene;
 /* Stable default source inventory, independent of the preview camera or edits. */
@@ -30,12 +31,24 @@ bool EditorRoomScene_Configure(EditorRoomScene *room, const char *text);
 /* Query the production planner before/after saved overrides at this camera. */
 bool EditorRoomScene_BgPolicy(const EditorRoomScene *room, int x, int y,
                               uint32_t frame, bool defaults, ActionBgPlan *out, int camera_x[2]);
+/* Resolve once per view, then pass the same policy to scanout. Guard columns
+ * and finite skybox placement also depend on the view when X is unchanged. */
+typedef struct EditorRoomCamera {
+  int x;
+  ActionCameraAxisBounds travel;
+  uint8_t bg_apron_mask;
+} EditorRoomCamera;
+bool EditorRoomScene_ResolveCamera(const EditorRoomScene *room, int x, int y,
+    uint32_t frame, int extra_x, int vertical_budget, const DioramaView *view,
+    DioramaSkyMode skybox, EditorRoomCamera *out);
+/* A NULL camera selects the unprojected 16:10 capture policy for raw captures. */
 bool EditorRoomScene_Render(EditorRoomScene *room, int x, int y, uint32_t frame,
-                            int extra_x, int vertical_budget);
+                            int extra_x, int vertical_budget, const EditorRoomCamera *camera);
 const DioramaCapture *EditorRoomScene_Capture(const EditorRoomScene *room);
 const DioramaScene *EditorRoomScene_Scene(const EditorRoomScene *room);
 const SrSceneSurfaces *EditorRoomScene_Surfaces(const EditorRoomScene *room);
 bool EditorRoomScene_ConfigureEffects(EditorRoomScene *room, const char *text, size_t size, unsigned *line);
+const char *EditorRoomScene_RecipeError(const EditorRoomScene *room);
 const ActionSceneEffectFrame *EditorRoomScene_Effects(const EditorRoomScene *room);
 const ActionEnvironmentScene *EditorRoomScene_Environment(const EditorRoomScene *room);
 const ActionAtmosphereField *EditorRoomScene_AtmosphereField(const EditorRoomScene *room);

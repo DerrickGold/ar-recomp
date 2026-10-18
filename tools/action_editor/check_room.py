@@ -10,6 +10,8 @@ from build_preview import ROOT
 
 
 def check(html, wasm, sanitize):
+    subprocess.run(['node', str(ROOT / 'tests/action_editor_receivers.test.mjs'),
+                    str(html.resolve()), str(wasm.resolve())], cwd=ROOT, check=True)
     subprocess.run(['node', str(ROOT / 'tests/action_editor_policy_transport.test.mjs'),
                     str(html.resolve()), str(wasm.resolve())], cwd=ROOT, check=True)
     with tempfile.TemporaryDirectory(prefix='action-room-') as directory:
@@ -24,7 +26,8 @@ def check(html, wasm, sanitize):
                    *(ROOT / 'tools/action_editor/environment_sources.txt').read_text().splitlines(),
                    'src/action/action_scene_snapshot.c', 'src/action/action_room_scene.c',
                    'src/action/action_bg_world.c', 'src/action/action_bg_plan.c',
-                   'src/diorama/diorama_capture_blend.c', 'src/diorama/diorama_layer_order.c',
+                   'src/action/action_camera_bounds.c',
+                   'src/diorama/diorama.c', 'src/diorama/diorama_capture_blend.c', 'src/diorama/diorama_layer_order.c',
                    'src/diorama/diorama_projection.c', 'src/diorama/diorama_skybox_uv.c',
                    'src/diorama/diorama_depth_shapes.c',
                    'src/render/scene3d_math.c', 'src/render/presentation_layout.c',

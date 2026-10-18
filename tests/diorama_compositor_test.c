@@ -1,6 +1,7 @@
 /* Runs the actual compositor against a validating command recorder. The same
  * fixture is linked natively and as WASM; shader math/pixels are a separate gate. */
 #include "diorama/diorama.h"
+#include "render/scenery_shading.h"
 #include "diorama/diorama_effect_backend.h"
 #include "diorama/diorama_performance.h"
 #include "support/test_assert.h"
@@ -23,11 +24,18 @@ typedef struct Recorder {
   const DioramaCapture *capture;
   const DioramaProjection *projection;
   unsigned checked_object_meshes, exposure_samples;
+  unsigned light_preparations;
+  DioramaSkyboxProjection light_skybox;
+  float exposure_u0, exposure_u1;
   uint32_t skybox_inputs;
 } Recorder;
 
-static float Exposure(void *context,float u,float v) {
-  Recorder *r=context;++r->exposure_samples;
+static float Exposure(void *context,float u,float v,float inside_u,float inside_v) {
+  (void)inside_u;(void)inside_v;
+  Recorder *r=context;
+  if(!r->exposure_samples)r->exposure_u0=r->exposure_u1=u;
+  r->exposure_u0=fminf(r->exposure_u0,u);r->exposure_u1=fmaxf(r->exposure_u1,u);
+  ++r->exposure_samples;
   return .6f+.2f*fmaxf(0,fminf(1,u+v));
 }
 
@@ -293,6 +301,27 @@ bool DioramaEffectBackend_Unbind(ArRenderDevice *d) {
   Record(12);
   return true;
 }
+bool DioramaEffectBackend_BindSceneryLight(ArRenderDevice *d,
+    const DioramaSceneryLightEffectParams *p) {
+  Recorder *r = d->context;
+  assert(p && p->illumination.value < 128 &&
+      r->textures[p->illumination.value].width > 0);
+  assert(p->illumination.value != r->state.target.value);
+  Bind(d, kDioramaEffect_Count);
+  Record(p->illumination.value);
+  Record(p->mode);
+  Color(p->shade);
+  Rectangle(&p->light_uv);
+  if (r->state.target.value) {
+    /* Grouped thickness draws cover only the viewport. They must sample the
+     * matching subregion of the light map, including letterbox offsets. */
+    assert(fabsf(p->light_uv.x-8.0f/r->width)<.00001f);
+    assert(fabsf(p->light_uv.y-10.0f/r->height)<.00001f);
+    assert(fabsf(p->light_uv.w-(r->width-16.0f)/r->width)<.00001f);
+    assert(fabsf(p->light_uv.h-(r->height-20.0f)/r->height)<.00001f);
+  }
+  return true;
+}
 void DioramaEffectBackend_Reset(ArRenderDevice *d) {
   assert(((Recorder *)d->context)->bound_effect == -1);
 }
@@ -321,6 +350,16 @@ static void PlaneEffect(void *data, int plane, const DioramaProjection *projecti
   assert(!r->state.target.value && !r->state.viewport_set);
   Record(13);
   Record(plane);
+}
+static bool SceneryLight(void *data, const DioramaProjection *projection) {
+  Recorder *r = data;
+  assert(r->bound_effect == -1 && projection->valid && r->state.target.value);
+  assert(!r->state.viewport_set && !r->state.clip_enabled);
+  const ArRenderTextureDesc *target = &r->textures[r->state.target.value];
+  assert(target->width == r->width && target->height == r->height);
+  ++r->light_preparations;
+  r->light_skybox = projection->bg2_skybox;
+  return true;
 }
 
 static PresentationOutcome Backdrop(void *data, ArRenderRectI viewport) {
@@ -444,13 +483,17 @@ unsigned DioramaFixture_Run(unsigned scenario) {
   if (!death_heim && scenario % 4 == 0) capture.skybox = &skybox;
   if (scenario % 5 == 0) capture.bg_apron_mask = 3;
   if (scenario % 6 == 0) capture.vertical_bounds.top_reached = true;
+  const float exposure_cuts[]={.1f,.3f,.8f};
+  const SceneryShadingField exposure={.x=exposure_cuts,.y=exposure_cuts,
+      .nx=3,.ny=3,.sample=Exposure,.userdata=&r};
   DioramaScene scene = {.render = &options,
     .map_group = room->map_group, .map_number = room->map_number,
     .layer_section = room->section,
     .bg1_dimming = 0.23f, .bg1_dimming_ramp = {0.1f,0.2f,0.2f,0.1f},
-    .scenery_exposure = scenario==0?Exposure:NULL, .scenery_exposure_userdata=&r,
+    .scenery_exposure = scenario==0?&exposure:NULL,
     .effect_obj_priority_mask = 15, .effect_bg_plane_mask = 3,
     .plane_effect = PlaneEffect, .plane_effect_userdata = &r,
+    .scenery_light = r.shaders ? SceneryLight : NULL,
     .backdrop = completion ? Backdrop : NULL, .backdrop_userdata = &r};
   DioramaProjection projection;
   r.capture = &capture;
@@ -462,7 +505,29 @@ unsigned DioramaFixture_Run(unsigned scenario) {
         &device, &capture, &view, &scene, &projection);
     assert(PresentationOutcome_IsUsable(outcome));
     assert(projection.valid && r.draws && r.bound_effect == -1);
-    if(scenario==0)assert(r.exposure_samples>0);
+    /* Culling must cover the same guards as the drawn BG/OBJ meshes, without
+     * changing the UV mapping checked against their vertex positions above. */
+    const DioramaPlaneProjection *planes[]={&projection.bg1_plane,&projection.bg1_high_plane,
+      &projection.bg1_far_plane,&projection.bg2_plane,&projection.bg2_high_plane,
+      &projection.object_planes[0],&projection.object_planes[1],
+      &projection.object_planes[2],&projection.object_planes[3]};
+    for(unsigned i=0;i<sizeof(planes)/sizeof(*planes);++i) {
+      const DioramaPlaneProjection *p=planes[i];if(!p->valid)continue;
+      const bool guard=i>=5 || ((capture.bg_apron_mask>>(i<3?0:1))&1);
+      assert(p->capture_apron==(guard?capture.obj_apron:0));
+      float x0,y0,x1,y1;
+      assert(Diorama_PlaneCaptureBounds(&projection,p,&x0,&y0,&x1,&y1));
+      assert(fabsf(x0+p->capture_offset.x+(guard?capture.obj_apron:0))<.001f);
+      assert(fabsf(x1+p->capture_offset.x-capture.width-(guard?capture.obj_apron:0))<.001f);
+    }
+    if(scenario==0) {
+      assert(r.exposure_samples>0);
+      /* Dimming must shade the guards too, using their real texture/world
+       * coordinates rather than clamping at the ordinary viewport edges. */
+      assert(r.exposure_u0<=.001f);
+      assert(r.exposure_u1+0.001f >=
+          (float)(capture.width+2*capture.obj_apron)/SR_PPU_SURFACE_MAX_WIDTH);
+    }
     if (death_heim) {
       assert(projection.bg2_plane.valid == (sky != kDioramaSky_Only || !completion));
       if (sky != kDioramaSky_Off && !completion) {
@@ -501,7 +566,14 @@ unsigned DioramaFixture_Run(unsigned scenario) {
     }
     if (r.shaders) assert(r.checked_object_meshes >= (unsigned)(frame+1)*4);
     assert(!r.state.target.value && !r.state.viewport_set && !r.state.clip_enabled);
-    assert(r.live <= base_resources + 7); /* Two SS, two DOF, priority, stack, skybox. */
+    assert(r.light_preparations == (r.shaders ? (unsigned)frame+1 : 0));
+    if(r.shaders) {
+      assert(r.light_skybox.count == projection.bg2_skybox.count);
+      assert(r.light_skybox.motion_source == projection.bg2_skybox.motion_source);
+      assert(!memcmp(r.light_skybox.bands,projection.bg2_skybox.bands,
+          projection.bg2_skybox.count*sizeof(projection.bg2_skybox.bands[0])));
+    }
+    assert(r.live <= base_resources + 8); /* Two SS/DOF, priority, stack, skybox, illumination. */
     if (frame) assert(r.creates == creates); /* Retained intermediates, no churn. */
     Record(15);
     Record(outcome);

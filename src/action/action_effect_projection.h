@@ -29,6 +29,8 @@ typedef struct ActionEffectProjectionContext {
   ArRenderRectI viewport;
   const DioramaProjection *diorama_projection;
   bool scenery_exposure_in_mesh; /* no duplicate alpha/light overlay */
+  bool scenery_lighting_in_material;
+  bool scenery_lighting_only; /* accumulate incoming RGB, without particles */
 } ActionEffectProjectionContext;
 
 /* Owned value snapshot for optional retained CPU work. Never key a cache by a
@@ -68,6 +70,18 @@ uint32_t ActionEffectProjection_RequiredBgPlaneMask(
 bool ActionEffectProjection_ProjectPoint(
     void *userdata, const ActionEffectInstance *effect,
     float local_x, float local_y, ArRenderPointF *point);
+
+/* Billboard anchors may be outside their plane while the halo/cloud still
+ * overlaps it. Only extent-checked billboard builders use this projection. */
+bool ActionEffectProjection_ProjectBillboardPoint(void *, const ActionEffectInstance *,
+    float, float, ArRenderPointF *);
+bool ActionEffectProjection_BillboardBounds(const ActionEffectProjectionContext *,
+    const ActionEffectInstance *, ActionEffectLocalRect *);
+
+/* Source origin before presentation transforms. Midpoint parallax retains
+ * half pixels; truncating it produces a second staircase during scrolling. */
+ArRenderPointF ActionEffectProjection_CaptureOrigin(const ActionEffectProjectionContext *,
+    const ActionEffectInstance *);
 
 /* Finite source view in effect-local space, before intersecting the effect's
  * geometry or authored clip. Shared by reference clipping and GPU generation. */

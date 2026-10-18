@@ -121,14 +121,17 @@
     <input id="nativeCameraYv" aria-label="Camera Y pixels" type="number" value="0"></div>
 
   </details>
-  <details class="side-section" data-settings="receivers"><summary>Receiver &amp; event preview</summary>
-  <label><input id="previewReceivers" type="checkbox"> Show player/enemy reference probes</label>
+  <details class="side-section" data-settings="receivers"><summary>Player &amp; receiver preview</summary>
+  <label><input id="previewReceivers" type="checkbox"> Show player sprite</label>
   <div class="ctl"><label for="previewPlayerX">Player X</label><input id="previewPlayerX" type="number" min="-2048" max="16384" value="128"></div>
   <div class="ctl"><label for="previewPlayerY">Player Y (feet)</label><input id="previewPlayerY" type="number" min="-2048" max="16384" value="192"></div>
+  <div class="ctl"><label for="previewFacing">Facing</label><select id="previewFacing"><option value="0">Right</option><option value="1">Left</option></select></div>
+  <label><input id="previewRim" type="checkbox"> Rim lighting (same shader as game)</label>
+  <label><input id="previewEnemyEnabled" type="checkbox"> Compare enemies &amp; objects using a second player sprite</label>
   <div class="ctl"><label for="previewEnemyX">Enemy X</label><input id="previewEnemyX" type="number" min="-2048" max="16384" value="180"></div>
   <div class="ctl"><label for="previewEnemyY">Enemy Y (feet)</label><input id="previewEnemyY" type="number" min="-2048" max="16384" value="192"></div>
-  <button id="previewProbesHere">Place probes in current view</button>
-  <p class="hint">Blue = player; orange = enemy. These reference silhouettes use shared object tint and depth; they do not simulate actors or preview sprite artwork.</p>
+  <button id="previewProbesHere">Place player in current view</button>
+  <p class="hint">The ROM's idle player uses the game's sprite layer, receiver lighting, dimming, and rim shader. The optional second sprite uses the enemies &amp; objects receiver settings. Shift-click or Shift-drag in Shared renderer to position the player's feet; add Alt for the comparison sprite. Positions are temporary; no game physics or AI runs.</p>
   <label for="previewEvent">Actor accent</label><select id="previewEvent"><option value="0">None</option></select>
   <div class="ctl"><label for="previewEventX">Event X</label><input id="previewEventX" type="number" min="-2048" max="16384" value="128"></div>
   <div class="ctl"><label for="previewEventY">Event Y</label><input id="previewEventY" type="number" min="-2048" max="16384" value="160"></div>
@@ -408,7 +411,25 @@
     <button id="selectChanges" disabled>Select edited tiles</button>
   </div>
   <div id="sharedControls" class="bar" hidden>
-    <label>Output <select id="sharedAspect"><option value="1.6">16:10</option><option value="1.7777777778">16:9</option><option value="1.3333333333">4:3</option></select></label>
+    <div class="shared-output-controls">
+      <label for="sharedAspect">Aspect ratio</label>
+      <select id="sharedAspect" title="Preview a monitor shape using the shared compositor. Auto follows the available preview area.">
+        <option value="auto">Auto (preview area)</option>
+        <option value="1.3333333333333333">4:3</option>
+        <option value="1.7777777777777778">16:9</option>
+        <option value="1.6" selected>16:10 (Steam Deck)</option>
+        <option value="2.3333333333333333">21:9 (ultrawide)</option>
+        <option value="3.5555555555555554">32:9 (super ultrawide)</option>
+        <option value="custom">Custom monitor…</option>
+      </select>
+      <span id="sharedCustomSize" hidden>
+        <label for="sharedMonitorWidth">Width</label> <input id="sharedMonitorWidth" type="number" min="64" max="16384" step="1" value="3440">
+        <label for="sharedMonitorHeight">Height</label> <input id="sharedMonitorHeight" type="number" min="64" max="16384" step="1" value="1440">
+      </span>
+      <span id="sharedOutputSize" title="Preview resolution is capped at 960 pixels on its longest side. Monitor dimensions set the aspect ratio; pixel aspect and extra tile coverage remain separate."></span>
+    </div>
+    <button id="sharedPlacePlayer" type="button" aria-pressed="false">Place player</button>
+    <button id="sharedPlayerSettings" type="button">Player settings…</button>
     <label>Pixels <select id="sharedPixels"><option value="0">Square</option><option value="1">CRT 4:3</option></select></label>
     <label>Extra width <input id="sharedExtra" type="number" min="0" max="128" step="8" value="120" style="width:55px"></label>
     <label>Extra height <select id="sharedVertical"><option value="0">0</option><option value="32">32</option><option value="64" selected>64</option></select></label>
@@ -422,7 +443,7 @@
   <div class="view">
     <canvas id="map2d" tabindex="0" aria-label="Tile map. Right-click or Shift-F10 for tile actions."></canvas>
     <canvas id="gl" tabindex="0" aria-label="Diorama preview. Right-click or Shift-F10 for editor settings."></canvas>
-    <canvas id="sharedGl" tabindex="0" style="display:none" aria-label="Shared level renderer. Drag to pan; arrows move the camera."></canvas>
+    <canvas id="sharedGl" tabindex="0" style="display:none" aria-label="Shared level renderer. Drag to pan; arrows move the camera. Shift-click or Shift-drag to place the player."></canvas>
     <div class="hud" id="hud"></div>
     <div class="legend" id="legend"></div>
     <section id="tilePalette" class="pixel-inspector tile-palette" aria-label="Loaded tile palette" hidden>
@@ -503,6 +524,7 @@
   <button id="tileActionCopyEffect" role="menuitem" tabindex="-1">Copy selected effects</button>
   <button id="tileActionPasteEffect" role="menuitem" tabindex="-1">Paste effects here</button>
   <button id="tileActionPreview" role="menuitem" tabindex="-1">Preview here</button>
+  <button id="tileActionPreviewPlayer" role="menuitem" tabindex="-1">Preview player here</button>
   <button id="tileActionSettings" role="menuitem" tabindex="-1">Editor settings…</button>
   <div class="tile-menu-separator" role="separator"></div>
   <button id="tileActionPriority" role="menuitemcheckbox" aria-checked="false" tabindex="-1"
@@ -559,7 +581,7 @@
 <div class="dlg-b effect-inspector-body">
 <p class="hint">Shift-click a control or map handle to reset it. Native overrides return to game defaults; placed/loaded definitions return to their starting values. Ctrl/Cmd-click markers to select several. Outlines show approximate coverage; preview shows motion, fading and occlusion.</p>
 <p id="effectInspectorHelp">Adjust this effect, then apply. Changes remain a draft until you apply them.</p>
-<div id="effectTypeControls">  <label for="emitterPreset">New emitter</label><select id="emitterPreset"><option value="halo">Portal / eclipse halo</option><option value="light-gradient">Sky / atmosphere light gradient</option><option value="torch">Torch (shared native flame profile)</option><option value="flame">Flame / fire with embers</option><option value="soft-light">Soft light</option><option value="motes">Motes</option><option value="free-mist">Free mist</option><option value="ground-mist">Ground mist</option><option value="particle-area">Particle region</option><option value="ray-field">Grouped rays with leaves / motes</option><option value="lava-pit-field">Lava pit glow and sparks</option><option value="lava-lake-field">Lava lake glow and sparks</option><option value="splash-field">Water impact splash</option><option value="waterfall-field">Waterfall flow and veil</option><option value="waterfall-mist-field">Waterfall cloud and mist</option><option value="fireball-field">Fireball response (existing actors)</option><option value="orb-field">Statue orb response (existing actors)</option><option value="jungle-fire-field">Jungle fire response (existing actors)</option><option value="lava-fire-field">Lava fireball response (existing actors)</option><option value="trap-field">Electric trap response (existing actors)</option><option value="bolt-field">Wizard lightning response (existing actors)</option><option value="centaur-field">Centaur lightning response (existing actors)</option><option value="glow-field">Flame, glow and embers</option><option value="castle-field">Windows, torch bounce, gallery and moat</option><option value="marsh-field">Linked foreground water, shoreline mist, timber and insects</option><option value="moon-field">Linked moon, cloud veil and water glints (BG2)</option><option value="atmosphere-field">Atmosphere: light, dust, mist and grit</option><option value="water-field">Linked water, wet rock and splash field</option><option value="light-fan">Light fan / window opening</option><option value="water-surface">Water ripples / glints</option><option value="drips">Water drips</option><option value="waterfall-spray">Waterfall spray</option><option value="cloud-bank">Cloud bank</option><option value="exposure">Light box / dimming area</option><option value="wet-contour">Wet rock contour</option><option value="preset:halo">Eclipse halo</option><option value="preset:dust">Temple dust region</option><option value="preset:leaves">Falling leaves</option><option value="preset:snow">Snow region</option><option value="preset:sand">Blowing sand</option><option value="preset:insects">Jungle insects</option><option value="preset:scarabs">Scarab swarm</option><option value="preset:sparks">Lava embers</option></select>
+<div id="effectTypeControls">  <label for="emitterPreset">New emitter</label><select id="emitterPreset"><option value="halo">Portal / eclipse halo</option><option value="light-gradient">Sky / atmosphere light gradient</option><option value="torch">Torch (shared native flame profile)</option><option value="flame">Flame / fire with embers</option><option value="soft-light">Soft light</option><option value="motes">Motes</option><option value="free-mist">Free mist</option><option value="ground-mist">Ground mist</option><option value="particle-area">Particle region</option><option value="particle-path">Particle path / sand stream / grit / glints</option><option value="heat-haze">Background heat shimmer</option><option value="ray-field">Grouped rays with leaves / motes</option><option value="lava-pit-field">Lava pit glow and sparks</option><option value="lava-lake-field">Lava lake glow and sparks</option><option value="splash-field">Water impact splash</option><option value="waterfall-field">Waterfall flow and veil</option><option value="waterfall-mist-field">Waterfall cloud and mist</option><option value="fireball-field">Fireball response (existing actors)</option><option value="orb-field">Statue orb response (existing actors)</option><option value="jungle-fire-field">Jungle fire response (existing actors)</option><option value="lava-fire-field">Lava fireball response (existing actors)</option><option value="trap-field">Electric trap response (existing actors)</option><option value="bolt-field">Wizard lightning response (existing actors)</option><option value="centaur-field">Centaur lightning response (existing actors)</option><option value="glow-field">Flame, glow and embers</option><option value="castle-field">Windows, torch bounce, gallery and moat</option><option value="marsh-field">Linked foreground water, shoreline mist, timber and insects</option><option value="moon-field">Linked moon, cloud veil and water glints (BG2)</option><option value="atmosphere-field">Atmosphere: light, dust, mist and grit</option><option value="water-field">Linked water, wet rock and splash field</option><option value="light-fan">Light fan / window opening</option><option value="water-surface">Water ripples / glints</option><option value="drips">Water drips</option><option value="waterfall-spray">Waterfall spray</option><option value="cloud-bank">Cloud bank</option><option value="exposure">Light box / dimming area</option><option value="wet-contour">Wet rock contour</option><option value="preset:halo">Eclipse halo</option><option value="preset:dust">Temple dust region</option><option value="preset:leaves">Falling leaves</option><option value="preset:snow">Snow region</option><option value="preset:sand">Blowing sand</option><option value="preset:ground-dust">Rolling ground dust</option><option value="preset:insects">Jungle insects</option><option value="preset:scarabs">Scarab swarm</option><option value="preset:sparks">Lava embers</option></select>
 </div>
 <div id="effectInspectorFields">  <p class="hint" id="effectSourceInfo"></p>
   <details class="effect-source-id"><summary>Source identifier</summary><code id="effectSourceId"></code></details>
@@ -582,17 +604,18 @@
   </div>
   <div class="ctl"><label for="effectIntensity">Intensity</label><input id="effectIntensity" type="number" min="0" max="4" step="0.05" value="1" title="Brightness multiplier: 1 keeps the default brightness; 0 hides the effect."></div>
   <div class="ctl"><label for="effectReach">Light reach</label><input id="effectReach" type="number" min="0.25" max="4" step="0.1" value="1" title="Spill radius multiplier. Increasing reach covers more area without brightening the centre."></div>
+  <div class="ctl"><label for="effectIllumination">Illumination</label><input id="effectIllumination" type="number" min="0" max="16" step="0.1" value="1" title="Strength of light received by scenery, player and enemies. Does not change visible rays, flame shapes or particles. 1 uses the original response; Shift-click restores this light family's default."></div>
   <div class="ctl"><label for="effectColor">Tint</label><input id="effectColor" type="color" value="#ffffff"></div>
   <div id="receiverControls" hidden>
     <h4>What receives light and dimming</h4>
     <div id="effectLightGroup">
     <label><input id="effectLightTargets" type="checkbox"> Override light receivers</label>
-    <p><label><input id="effectLightScenery" type="checkbox" checked> Scenery</label> <label><input id="effectLightPlayer" type="checkbox"> Player</label> <label><input id="effectLightEnemies" type="checkbox"> Enemies</label></p>
+    <p><label><input id="effectLightScenery" type="checkbox" checked> Scenery</label> <label><input id="effectLightPlayer" type="checkbox"> Player</label> <label><input id="effectLightEnemies" type="checkbox"> Enemies &amp; objects</label></p>
     </div><div id="effectDimGroup">
     <label><input id="effectDimTargets" type="checkbox"> Override dimming receivers</label>
-    <p><label><input id="effectDimScenery" type="checkbox" checked> Scenery</label> <label><input id="effectDimPlayer" type="checkbox"> Player</label> <label><input id="effectDimEnemies" type="checkbox"> Enemies</label></p>
+    <p><label><input id="effectDimScenery" type="checkbox" checked> Scenery</label> <label><input id="effectDimPlayer" type="checkbox"> Player</label> <label><input id="effectDimEnemies" type="checkbox"> Enemies &amp; objects</label></p>
     </div>
-    <p class="hint">Object lighting follows each object's position, consistently across its sprite parts. Dimming can affect scenery, the player and enemies independently. Unchecked override controls keep inherited behavior.</p>
+    <p class="hint">Object lighting follows each object's position, consistently across its sprite parts. Dimming can affect scenery, the player and enemies/objects independently. Unchecked override controls keep inherited behavior.</p>
   </div>
   <div id="nativeShapeControls" hidden>
     <h4>Position and shape</h4>
@@ -632,16 +655,21 @@
     <div class="ctl"><label for="emitterheight">Area height</label><input id="emitterheight" type="number" min="4" max="512" step="4"></div>
     <div class="ctl"><label for="emitterparticles">Particle count</label><input id="emitterparticles" type="number" min="1" max="128" step="1"></div>
     <div class="ctl"><label for="emitterlifetime">Cycle frames</label><input id="emitterlifetime" type="number" min="16" max="4096" step="16"></div>
-    <div id="contourControls" hidden><label for="emitterPoints">Contour points (local X,Y pairs)</label><input id="emitterPoints" type="text" style="width:100%"><button id="contourDraw">Trace wet edge on map</button><p class="hint">Drag along the visible rock edge. Up to 16 points per stroke, within 512px. Explicit points let you avoid soft background details. Check tile depth and collision before tracing.</p></div>
+    <div id="contourControls" hidden><label for="emitterPoints">Contour points (local X,Y pairs)</label><input id="emitterPoints" type="text" style="width:100%"><button id="contourDraw">Trace wet edge on map</button><p class="hint">Trace the visible surface, up to 16 points within 512px. Cloud ground paths run left to right; leave their points empty for airborne clouds. Paths are authored guides: redraw them after changing the terrain.</p></div>
     <div class="ctl"><label for="emitterPlacement">Draw placement</label><select id="emitterPlacement"><option value="background">Behind playfield</option><option value="playfield">On playfield surfaces</option><option value="foreground">In front of playfield</option></select></div>
     <div id="fieldControls" hidden>
-      <div class="ctl"><label for="emitterPattern">Particle pattern</label><select id="emitterPattern"><option value="motes">Motes</option><option value="dust">Dust</option><option value="leaves">Leaves</option><option value="snow">Snow</option><option value="sand">Sand</option><option value="insects">Insects</option><option value="scarabs">Scarabs</option><option value="sparks">Sparks</option></select></div>
+      <div class="ctl"><label for="emitterGust">Shared wind influence</label><input id="emitterGust" type="number" min="0" max="1" step=".05" title="Zero is steady. One follows the room's shared gust envelope."></div>
+      <div class="ctl"><label for="emitterTwinkle">Grain glint strength</label><input id="emitterTwinkle" type="number" min="0" max="1" step=".05" title="Brief highlights on moving grains. Zero disables glints; positions and particle count stay unchanged."></div>
+      <div class="ctl"><label for="emitterActivity">Active fraction of cycle</label><input id="emitterActivity" type="number" min=".05" max="1" step=".05"></div>
+      <div class="ctl"><label for="emitterShadows">Moving torch shadows</label><select id="emitterShadows"><option value="0">Off</option><option value="1">On</option></select></div>
+      <div class="ctl"><label for="emitterPattern">Particle pattern</label><select id="emitterPattern"><option value="motes">Motes</option><option value="dust">Dust</option><option value="leaves">Leaves</option><option value="snow">Snow</option><option value="sand">Sand</option><option value="insects">Insects</option><option value="scarabs">Scarabs</option><option value="sparks">Sparks</option><option value="glints">Glints (fixed on particle paths)</option></select></div>
       <div class="ctl"><label for="emitterAngle">Direction (degrees)</label><input id="emitterAngle" type="number" min="-180" max="180" step="1"></div>
       <div class="ctl"><label for="emitterFan">Fan angle</label><input id="emitterFan" type="number" min="0" max="120" step="1"></div>
       <div class="ctl"><label for="emitterStrands">Rays / cloud lobes</label><input id="emitterStrands" type="number" min="1" max="32" step="1"></div>
       <div class="ctl"><label for="emitterSoftness">Soft backdrop</label><input id="emitterSoftness" type="number" min="0" max="1" step="0.05"></div>
       <div class="ctl"><label for="emitterDrift">Cloud drift / wave phase</label><input id="emitterDrift" type="number" min="-128" max="128" step="1"></div>
       <div class="ctl"><label for="emitterAmplitude">Wave height</label><input id="emitterAmplitude" type="number" min="0" max="32" step="0.5"></div>
+      <div class="ctl"><label for="emitterCarry">Dust carry distance</label><input id="emitterCarry" type="number" min="0" max="512" step="1" title="Pixels downwind over which dust settles after a crest. Zero follows the ground."></div>
       <p class="hint" id="fieldHint"></p>
     </div>
     <div id="moteControls" hidden>

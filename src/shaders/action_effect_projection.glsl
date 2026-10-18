@@ -5,6 +5,13 @@ vec2 motion_offset(int slot) {
     vec4 m = vec4(motion.values[slot*2]);
     return settings.clock.x < .5 ? m.zw + m.xy * settings.clock.x : m.zw * (1-settings.clock.x);
 }
+vec2 effect_motion(int plane) {
+    vec2 offset = motion_offset(int(settings.planes[plane].offset.z));
+    // Midpoint parallax must also blend generated frames, not inherit BG2's
+    // motion alone. CPU capture offsets and clamp corrections are in the plane.
+    if (plane == 5) offset += .5 * (motion_offset(0) - motion_offset(3));
+    return offset;
+}
 float sky_shift(EffectPlane p) {
     if (p.sky.w == 0) return 0;
     float dy = motion_offset(int(p.offset.z)).y;
@@ -60,23 +67,26 @@ vec4 sky_bounds(float anchor, bool anchored) {
 vec4 source_bounds(int plane) {
     EffectPlane p = settings.planes[plane];
     vec4 bounds = p.sky.z != 0 ? sky_bounds(0,false) : p.bounds;
-    return bounds - motion_offset(int(p.offset.z)).xyxy;
+    if (p.sky.z == 1) bounds -= p.sky.xyxy;
+    return bounds - effect_motion(plane).xyxy;
 }
 vec4 effect_bounds(int plane, vec2 origin, uint flags, bool clipping) {
     EffectPlane p=settings.planes[plane];
     if(!clipping && (flags&5u)!=0u)return vec4(-1e9,-1e9,1e9,1e9);
-    vec2 motion=motion_offset(int(p.offset.z));
-    vec4 bounds=p.sky.z!=0?sky_bounds(origin.y+motion.y,(flags&2u)!=0u):p.bounds;
+    vec2 motion=effect_motion(plane);
+    vec4 bounds=p.sky.z!=0?sky_bounds(origin.y+motion.y+p.sky.y,(flags&2u)!=0u):p.bounds;
+    if (p.sky.z == 1) bounds -= p.sky.xyxy;
     if(!clipping && p.sky.z==0 && p.fold.x!=0)bounds.w=1e9;
     return bounds-motion.xyxy-origin.xyxy;
 }
 bool project_effect(int plane, vec2 source, float anchor, bool anchored, out vec2 pixel) {
     EffectPlane p = settings.planes[plane];
     if (p.offset.w == 0) return false;
-    vec2 motion=motion_offset(int(p.offset.z));
+    vec2 motion=effect_motion(plane);
     source += motion;
     if (p.sky.z == 1) {
-        int selected=anchored?sky_band_at(anchor+motion.y):
+        source += p.sky.xy;
+        int selected=anchored?sky_band_at(anchor+motion.y+p.sky.y):
             (settings.sky_meta.y<0?sky_band_at(source.y):int(settings.sky_meta.y));
         SkyBand band=sky_band(selected);
         if(band.rows.y<=band.rows.x)return false;

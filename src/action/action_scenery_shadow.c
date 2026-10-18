@@ -126,10 +126,10 @@ static float Coverage(const ActionSceneryShadow *s, float x, float y) {
   return (a + (b - a) * fy) / 255;
 }
 void ActionSceneryShadow_Apply(ActionEffectGeometryWriter *w, int begin,
-                               const ActionEffectInstance *e, float x, float y, bool multiply,
+                               const ActionEffectInstance *e, float x, float y, bool multiply, float strength,
                                ActionEffectProjectPointFn project, void *context) {
   if (w->source) {
-    ActionEffectSource_Shadow(w->source, (unsigned)begin, x, y, multiply);
+    ActionEffectSource_Shadow(w->source, (unsigned)begin, x, y, multiply, strength);
     return;
   }
   const ActionSceneryShadow *s = w->shadow;
@@ -145,7 +145,7 @@ void ActionSceneryShadow_Apply(ActionEffectGeometryWriter *w, int begin,
     for (unsigned j = 0; j < 3; ++j)
       blocked += Coverage(s, origin.x + (v->position.x - origin.x) * transport[j],
                           origin.y + (v->position.y - origin.y) * transport[j]);
-    const float visibility = 1 - .86f * blocked / 3;
+    const float visibility = 1 - .86f * strength * blocked / 3;
     if (multiply) {
       v->color.r *= visibility;
       v->color.g *= visibility;

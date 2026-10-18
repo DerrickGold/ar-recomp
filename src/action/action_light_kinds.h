@@ -1,25 +1,63 @@
 #ifndef AR_ACTION_LIGHT_KINDS_H
 #define AR_ACTION_LIGHT_KINDS_H
 #include "action_effects.h"
+#include <math.h>
+enum { kActionEffectOpacityIntensityMax = 4, kActionLightIntensityMax = 16 };
+/* Preserve the established opacity curve through 4x. Stronger sources gain
+ * radiance instead of flattening their falloff against an alpha clamp. */
+static inline float ActionLightIntensity_Opacity(float intensity) {
+  return fminf(intensity, kActionEffectOpacityIntensityMax);
+}
+static inline float ActionLightIntensity_Gain(float intensity) {
+  return fmaxf(1, intensity / kActionEffectOpacityIntensityMax);
+}
 /* Families that actually submit lighting geometry. Keep data validation and
  * receiver sampling on the same catalog; particle-only sources stay excluded. */
 static inline bool ActionLightKind_Supported(unsigned kind) {
   switch(kind) {
-    case kActionEffect_AuthoredHalo:case kActionEffect_AuthoredGradient:case kActionEffect_AuthoredFlame:case kActionEffect_AuthoredTorch:
-    case kActionEffect_AuthoredLight:case kActionEffect_AuthoredFan:case kActionEffect_WallTorch:
-    case kActionEffect_ForestCanopyLight:case kActionEffect_ForestForwardLight:
-    case kActionEffect_CaveSheen:case kActionEffect_CaveAmbientLight:case kActionEffect_TowerWindowLight:
-    case kActionEffect_BloodpoolMoonlight:case kActionEffect_BloodpoolWater:case kActionEffect_BloodpoolTimber:
-    case kActionEffect_CastleLight:case kActionEffect_CastleSky:
-    case kActionEffect_AitosLavaPit:case kActionEffect_AitosLavaReservoir:
-    case kActionEffect_AitosWaterSplash:case kActionEffect_AitosWaterfall:case kActionEffect_AitosWaterfallMist:
-    case kActionEffect_EnemyFireball:case kActionEffect_FillmoreStatueOrb:case kActionEffect_LightningTrap:
-    case kActionEffect_SwordBeam:case kActionEffect_MarahnaFireball:case kActionEffect_MarahnaLightningLink:
-    case kActionEffect_MarahnaBossLightning:case kActionEffect_AitosLavaFireball:case kActionEffect_AitosStatueFire:
-    case kActionEffect_AitosMoltenRock:case kActionEffect_MinotaurAxe:case kActionEffect_FlamingWheel:
-    case kActionEffect_FlamingWheelProjectile:case kActionEffect_IceDragonIceBall:case kActionEffect_TanzaraProjectile:
-    case kActionEffect_CentaurLightning:case kActionEffect_BloodpoolBossLightning:case kActionEffect_NorthwallBossMagic:return true;
+#define ACTION_LIGHT_RESPONSE(symbol,name,gain,intensity,reach,receivers) case kActionEffect_##symbol: return true;
+#include "action_light_response.inc"
+#undef ACTION_LIGHT_RESPONSE
     default:return false;
   }
+}
+static inline float ActionLightKind_Illumination(unsigned kind) {
+  switch(kind) {
+#define ACTION_LIGHT_RESPONSE(symbol,name,gain,intensity,reach,receivers) case kActionEffect_##symbol: return gain;
+#include "action_light_response.inc"
+#undef ACTION_LIGHT_RESPONSE
+    default:return 1;
+  }
+}
+
+static inline float ActionLightKind_DefaultIntensity(unsigned kind) {
+  switch(kind) {
+#define ACTION_LIGHT_RESPONSE(symbol,name,gain,intensity,reach,receivers) case kActionEffect_##symbol: return intensity;
+#include "action_light_response.inc"
+#undef ACTION_LIGHT_RESPONSE
+    default:return 1;
+  }
+}
+static inline float ActionLightKind_DefaultReach(unsigned kind) {
+  switch(kind) {
+#define ACTION_LIGHT_RESPONSE(symbol,name,gain,intensity,reach,receivers) case kActionEffect_##symbol: return reach;
+#include "action_light_response.inc"
+#undef ACTION_LIGHT_RESPONSE
+    default:return 1;
+  }
+}
+
+/* Default receiving surfaces are data, shared with the editor. */
+static inline uint8_t ActionLightKind_DefaultReceivers(unsigned kind) {
+  switch(kind) {
+#define ACTION_LIGHT_RESPONSE(symbol,name,gain,intensity,reach,receivers) case kActionEffect_##symbol: return receivers;
+#include "action_light_response.inc"
+#undef ACTION_LIGHT_RESPONSE
+    default:return kActionReceiver_Scenery;
+  }
+}
+
+static inline float ActionLightKind_MaxIntensity(unsigned kind) {
+  return ActionLightKind_Supported(kind) ? kActionLightIntensityMax : kActionEffectOpacityIntensityMax;
 }
 #endif
