@@ -27,6 +27,7 @@
 #include "constants.h"
 #include "actraiser/actraiser_action_bg.h"
 #include "actraiser/actraiser_rtl.h"
+#include "actraiser/actraiser_church_capture.h"
 #include "snesrecomp/game_runtime.h"
 #include "sim/sim_render_atlas.h"
 #include "snesrecomp/game/runtime.h" /* g_ram */
@@ -168,6 +169,9 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
   if (dst->church_enabled && g_ram[kActRaiserWram_MapGroup] == kActRaiserMapGroup_NonAction &&
       g_ram[kActRaiserWram_CurrentMap] == kActRaiserNonActionMap_Temple) {
     dst->church_town = g_ram[kActRaiserWram_WorldLocation];
+    dst->church_actors = ActRaiserChurchCapture_Mask();
+    if (dst->church_actors.lifetime_generation != dst->ppu_surfaces.lifetime_generation)
+      dst->church_actors.valid = false;
   }
 
   dst->snes_width = g_snes_width;
@@ -262,6 +266,11 @@ void FrameSlot_Capture(FrameSlot *dst, const SimFrameData *annotated_sim) {
     dst->hud_right_start = ppu_frame->hud_right_start;
     dst->hud_player_row_y = ppu_frame->hud_player_row_y;
     dst->hud_left_only_y = ppu_frame->hud_left_only_y;
+    dst->hud_right_align_content = ppu_frame->hud_split_height == kActRaiserSimulationHudHeight &&
+                                   ppu_frame->hud_left_end == kActRaiserSimulationHudSplit &&
+                                   ppu_frame->hud_right_start == kActRaiserSimulationHudSplit &&
+                                   ppu_frame->hud_player_row_y == kActRaiserSimulationHudHeight &&
+                                   ppu_frame->hud_left_only_y == kActRaiserSimulationHudHeight;
     dst->extra_left_right = ppu_frame->margin_budget;
     /* Fix B: from the latch, NOT g_ppu — see the field comment in present.h and
      * the latch in ActRaiserDrawPpuFrame. */

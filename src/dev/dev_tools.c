@@ -18,6 +18,7 @@
 #include "host/host_display.h"
 #include "replacements/music_replacements.h"
 #include "present/present.h"
+#include "render/present_hud.h"
 #include "app/run_dir.h"
 #include "snesrecomp/runner.h"
 #include "scene_asset_dump.h"
@@ -362,6 +363,7 @@ bool DevTools_InspectWindowPoint(const DevToolsContext *context,
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
   const int chunk_count =
       ArHudLayout_BuildPresentationChunks(viewport, &hud_inputs, chunks);
+  PresentHud_ApplyPresentedAlignment(viewport, chunks, chunk_count);
   bool selected = false;
   for (int i = chunk_count - 1; i >= 0 && !selected; i--) {
     const HudPresentationChunk *chunk = &chunks[i];

@@ -21,8 +21,11 @@ static struct {
   ArRenderRectI upload[2];
   uint32_t first_pixel[2];
   float brightness;
+  ArRenderRectI text_destinations[5];
+  ArRenderRectF icon_destination, body_destination;
 } backend;
 static bool menu_active;
+static bool enhanced_hud, native_sp_fallback;
 static ArRenderRectF s_backdrop_body;
 static int s_backdrop_draws;
 
@@ -52,12 +55,31 @@ void ArLocalizedTextPresenter_Prepare(
   (void)hscroll;
   (void)vscroll;
   *out = (ArLocalizedPreparedFrame){.ready_dialogue_ticket = 42};
+  if (enhanced_hud) {
+    const ArRenderRectI fields[] = {
+        {184, 11, 32, 8}, {192, 19, 28, 8}, {168, 19, 12, 8}, {48, 11, 64, 8}, {40, 80, 144, 16},
+    };
+    for (unsigned i = 0; i < 5; i++) {
+      for (size_t j = 0; j < count; j++) {
+        if (chunks[j].inspector_kind == kInspectorPresentation_HudObj) continue;
+        if (ArTextCellComposite_ProjectToOutput(&chunks[j], fields[i], &out->texts[i].destination))
+          break;
+      }
+    }
+    out->text_count = 5;
+    out->masks[0] = (ArRenderRectI){184, 11, 64, 8};
+    out->masks[1] = (ArRenderRectI){184, 19, 64, 8};
+    out->mask_count = native_sp_fallback ? 1 : 2;
+    if (native_sp_fallback) out->texts[1].destination = (ArRenderRectI){0};
+  }
 }
 bool ArLocalizedTextPresenter_DrawWithBrightness(
     ArRenderDevice *device, const ArLocalizedPreparedFrame *prepared, float brightness) {
   assert(device == &s_device && prepared->ready_dialogue_ticket == 42);
   assert(backend.target.value);
   backend.brightness = brightness;
+  for (unsigned i = 0; i < prepared->text_count && i < 5; i++)
+    backend.text_destinations[i] = prepared->texts[i].destination;
   return !backend.fail_text;
 }
 
@@ -148,6 +170,10 @@ static bool Draw(void *context, ArRenderTexture texture, const ArRenderRectF *so
     return !backend.fail_flatten;
   }
   assert(source && source->w > 0 && source->h > 0);
+  if (texture.value == PresentHud_ObjectTexture().value) backend.icon_destination = *dest;
+  if (texture.value == PresentHud_BackgroundTexture().value && source->y == slot.hud_split_height &&
+      source->h == 224 - slot.hud_split_height)
+    backend.body_destination = *dest;
   if (texture.value == 999) {
     s_backdrop_draws++;
     assert(source->x >= 0 && source->x + source->w <= 256);
@@ -175,6 +201,7 @@ static void ResetCase(void) {
   memset(&backend, 0, sizeof(backend));
   memset(&slot, 0, sizeof(slot));
   menu_active = false;
+  enhanced_hud = native_sp_fallback = false;
   slot.snes_width = 512;
   slot.snes_height = 224;
   slot.visible_width = 256;
@@ -297,6 +324,105 @@ static void SourceLifetimeAndFailures(void) {
   assert(backend.source_created == backend.source_destroyed);
 }
 
+static void SimRightAlignment(void) {
+  const int widths[] = {640, 1024, 1984};
+  const int scales[] = {0, 225, 450};
+  for (unsigned w = 0; w < 3; w++) {
+    for (unsigned s = 0; s < 3; s++) {
+      for (int par = 0; par <= 1; par++) {
+        ResetCase();
+        const ArRenderRectI output = {100, 50, widths[w], 896};
+        slot.visible_width = w == 0 ? 256 : 342;
+        slot.hud_scale_percent = scales[s];
+        slot.pixel_aspect = par ? kPixelAspect_Crt43 : kPixelAspect_Square;
+        slot.hud_split_height = slot.hud_player_row_y = slot.hud_left_only_y = 32;
+        slot.hud_left_end = slot.hud_right_start = 168;
+        slot.hud_right_align_content = true;
+        slot.overlay_captures[kFrameSlotOverlay_Bg3].y1 = 224;
+        memset(bg_pixels, 0, sizeof(bg_pixels));
+        /* Native population icon and both value fields; their ink ends one
+         * pixel before the last tile's edge, even in a padded capture. */
+        bg_pixels[11 * 512 + 128 + 170] = 0xffabcdef;
+        bg_pixels[11 * 512 + 128 + 246] = 0xffabcdef;
+        bg_pixels[19 * 512 + 128 + 246] = 0xffabcdef;
+        slot.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG3][0] = Surface(bg_pixels, 224);
+        slot.hud_icon = (HudIconFrame){
+            .surface = Surface(icon_pixels, 32),
+            .scene_removed = true,
+            .count = 1,
+            .x = 148,
+            .y = 11,
+            .width = 16,
+            .height = 16,
+        };
+        slot.hud_icon.surface.origin_x = 128;
+        assert(UploadFrame() > 0);
+        HudPresentationChunk native[kHudPresentationChunkCapacity],
+            aligned[kHudPresentationChunkCapacity];
+        assert(PresentHud_BuildChunks(&slot, output, native) == 4);
+        ArRenderRectI native_edge, sp, population, left, dialogue;
+        assert(ArTextCellComposite_ProjectToOutput(&native[1], (ArRenderRectI){246, 11, 1, 1},
+                                                   &native_edge));
+        assert(
+            ArTextCellComposite_ProjectToOutput(&native[1], (ArRenderRectI){192, 19, 28, 8}, &sp));
+        assert(ArTextCellComposite_ProjectToOutput(&native[1], (ArRenderRectI){184, 11, 32, 8},
+                                                   &population));
+        assert(
+            ArTextCellComposite_ProjectToOutput(&native[0], (ArRenderRectI){48, 11, 64, 8}, &left));
+        assert(ArTextCellComposite_ProjectToOutput(&native[2], (ArRenderRectI){40, 80, 144, 16},
+                                                   &dialogue));
+        const int shift = native_edge.x + native_edge.w - sp.x - sp.w;
+        assert(shift > 0);
+        enhanced_hud = true;
+        PresentHud_DrawComposited(&s_device, &slot, output);
+        assert(backend.text_destinations[0].x + output.x == population.x + shift);
+        assert(backend.text_destinations[1].x + output.x == sp.x + shift);
+        assert(backend.text_destinations[3].x + output.x == left.x);
+        assert(backend.text_destinations[4].x + output.x == dialogue.x);
+        assert(backend.icon_destination.x + output.x == native[3].output_destination.x + shift);
+        assert(backend.body_destination.x + output.x == native[2].output_destination.x);
+        memcpy(aligned, native, sizeof(native));
+        PresentHud_ApplyPresentedAlignment(output, aligned, 4);
+        assert(aligned[1].output_destination.x == native[1].output_destination.x + shift);
+        assert(aligned[3].output_destination.x == native[3].output_destination.x + shift);
+        assert(aligned[0].output_destination.x == native[0].output_destination.x);
+        assert(aligned[2].output_destination.x == native[2].output_destination.x);
+        memcpy(aligned, native, sizeof(native));
+        ArRenderRectI resized = output;
+        resized.w++;
+        PresentHud_ApplyPresentedAlignment(resized, aligned, 4);
+        assert(aligned[1].output_destination.x == native[1].output_destination.x);
+
+        /* Eligibility comes from the captured game policy, not inferred by
+         * the renderer from a coincidentally matching split rectangle. */
+        slot.hud_right_align_content = false;
+        PresentHud_DrawComposited(&s_device, &slot, output);
+        assert(backend.text_destinations[0].x + output.x == population.x);
+        assert(backend.icon_destination.x + output.x == native[3].output_destination.x);
+        slot.hud_right_align_content = true;
+
+        /* A failed value replacement retains its native ink. It must prevent
+         * shifting that field off screen, and clear the inspector adjustment. */
+        native_sp_fallback = true;
+        PresentHud_DrawComposited(&s_device, &slot, output);
+        assert(backend.text_destinations[0].x + output.x == population.x);
+        assert(backend.icon_destination.x + output.x == native[3].output_destination.x);
+        memcpy(aligned, native, sizeof(native));
+        PresentHud_ApplyPresentedAlignment(output, aligned, 4);
+        assert(aligned[1].output_destination.x == native[1].output_destination.x);
+        native_sp_fallback = false;
+        PresentHud_DrawComposited(&s_device, &slot, output);
+        backend.fail_text = true;
+        PresentHud_DrawComposited(&s_device, &slot, output);
+        assert(backend.icon_destination.x == native[3].output_destination.x);
+        memcpy(aligned, native, sizeof(native));
+        PresentHud_ApplyPresentedAlignment(output, aligned, 4);
+        assert(aligned[1].output_destination.x == native[1].output_destination.x);
+      }
+    }
+  }
+}
+
 int main(void) {
   /* Use the real device scopes and layout; only backend I/O and text preparation
    * are substituted so loss of a target can be exercised on every platform. */
@@ -306,6 +432,7 @@ int main(void) {
                                kArRenderCapability_ScopedRenderTargets}};
   SourceSelectionAndExtents();
   SourceLifetimeAndFailures();
+  SimRightAlignment();
   ResetCase();
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
   assert(PresentHud_BuildChunks(&slot, viewport, chunks) == 7);

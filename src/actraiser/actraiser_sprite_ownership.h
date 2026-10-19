@@ -20,6 +20,7 @@ typedef enum ActRaiserSpriteRole {
   /* Non-player action objects, including enemies, pickups and scenery props.
    * Their receiver membership must not depend on transient combat flags. */
   kActRaiserSprite_Enemy,
+  kActRaiserSprite_ChurchVisitor,
 } ActRaiserSpriteRole;
 
 enum { kActRaiserSpriteSlots = 128, kActRaiserSpriteShadowBytes = 544 };

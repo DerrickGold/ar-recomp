@@ -4201,6 +4201,14 @@ if(BUILD_TESTING)
     target_include_directories(actraiser_present_church_test PRIVATE ${CMAKE_SOURCE_DIR}/tests)
     add_test(NAME actraiser_present_church COMMAND actraiser_present_church_test)
 
+    add_executable(actraiser_church_capture_test
+        tests/actraiser_church_capture_test.c
+        src/actraiser/actraiser_church_capture.c
+        src/actraiser/actraiser_sprite_ownership.c)
+    target_include_directories(actraiser_church_capture_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_church_capture COMMAND actraiser_church_capture_test)
+
     add_executable(actraiser_church_lighting_test
         tests/church_lighting_test.c src/sim/church/church_lighting.c)
     target_link_libraries(actraiser_church_lighting_test PRIVATE

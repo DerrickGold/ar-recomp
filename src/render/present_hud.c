@@ -1,5 +1,7 @@
 #include "render/present_hud.h"
 
+#include <string.h>
+
 #include "app/settings.h"  /* Pixel-aspect enum only; no live settings. */
 #include "app/session_fatal.h"
 #include "present/present.h"
@@ -11,11 +13,18 @@
 
 static ArRenderTexture s_background_texture, s_object_texture;
 static PresentationUploadMirror s_background_mirror, s_object_mirror;
+/* Inspection follows the last successful composite, including text fitting.
+ * Coordinates are local to the viewport; native fallback clears the shift. */
+static struct {
+  int width, height, shift;
+  HudPresentationChunk right;
+} s_presented_alignment;
 
 ArRenderTexture PresentHud_BackgroundTexture(void) { return s_background_texture; }
 ArRenderTexture PresentHud_ObjectTexture(void) { return s_object_texture; }
 
 void PresentHud_DestroySources(ArRenderDevice *device) {
+  s_presented_alignment.shift = 0;
   ArRenderDevice_DestroyTexture(device, s_object_texture);
   ArRenderDevice_DestroyTexture(device, s_background_texture);
   s_object_texture = ArRenderTexture_Invalid();
@@ -172,8 +181,140 @@ int PresentHud_BuildChunks(const FrameSlot *slot, ArRenderRectI viewport,
   return count;
 }
 
+static bool ContainsRect(ArRenderRectI outer, ArRenderRectI inner) {
+  return inner.w > 0 && inner.h > 0 && inner.x >= outer.x && inner.y >= outer.y &&
+         inner.x + inner.w <= outer.x + outer.w && inner.y + inner.h <= outer.y + outer.h;
+}
+
+static int FindRightChunk(const HudPresentationChunk *chunks, int count, ArRenderRectI source) {
+  for (int i = 0; i < count; i++) {
+    const ArRenderRectI candidate = chunks[i].screen_source;
+    if (chunks[i].inspector_kind == kInspectorPresentation_HudBg && candidate.x == source.x &&
+        candidate.y == source.y && candidate.w == source.w && candidate.h == source.h)
+      return i;
+  }
+  return -1;
+}
+
+static void ShiftRightChunks(HudPresentationChunk *chunks, int count, int right, int shift) {
+  const ArRenderRectI group = chunks[right].screen_source;
+  chunks[right].output_destination.x += shift;
+  for (int i = 0; i < count; i++) {
+    if (chunks[i].inspector_kind == kInspectorPresentation_HudObj &&
+        chunks[i].screen_source.y >= group.y &&
+        chunks[i].screen_source.y + chunks[i].screen_source.h <= group.y + group.h)
+      chunks[i].output_destination.x += shift;
+  }
+}
+
+void PresentHud_ApplyPresentedAlignment(ArRenderRectI viewport, HudPresentationChunk *chunks,
+                                        int count) {
+  if (!s_presented_alignment.shift || viewport.w != s_presented_alignment.width ||
+      viewport.h != s_presented_alignment.height)
+    return;
+  const int right = FindRightChunk(chunks, count, s_presented_alignment.right.screen_source);
+  if (right < 0) return;
+  const HudPresentationChunk *previous = &s_presented_alignment.right;
+  const ArRenderRectI destination = chunks[right].output_destination;
+  if (chunks[right].texture.value != previous->texture.value ||
+      chunks[right].texture_source.x != previous->texture_source.x ||
+      destination.x - viewport.x != previous->output_destination.x ||
+      destination.y - viewport.y != previous->output_destination.y ||
+      destination.w != previous->output_destination.w ||
+      destination.h != previous->output_destination.h)
+    return;
+  ShiftRightChunks(chunks, count, right, s_presented_alignment.shift);
+}
+
+/* Measure the pixels actually uploaded, subtracting only successful enhanced
+ * replacements. A failed field still contributes its native right edge. */
+static int NativeRightEdge(const HudPresentationChunk *chunk, const ArRenderRectI *masks,
+                           size_t mask_count) {
+  const PresentationUploadMirror *mirror = &s_background_mirror;
+  const ArRenderRectI source = chunk->texture_source;
+  const ArRenderRectI uploaded = {
+      mirror->destination_x,
+      mirror->destination_y,
+      mirror->width,
+      mirror->height,
+  };
+  if (!mirror->valid || mirror->texture.value != chunk->texture.value ||
+      !ContainsRect(uploaded, source))
+    return 0;
+  for (int x = source.w - 1; x >= 0; x--) {
+    for (int y = 0; y < source.h; y++) {
+      uint32_t pixel;
+      const size_t offset =
+          (size_t)(source.y + y - uploaded.y) * mirror->width + source.x + x - uploaded.x;
+      memcpy(&pixel, mirror->pixels + offset * sizeof(pixel), sizeof(pixel));
+      if (!(pixel >> 24)) continue;
+      const ArRenderRectI sample = {
+          chunk->screen_source.x + x,
+          chunk->screen_source.y + y,
+          1,
+          1,
+      };
+      bool masked = false;
+      for (size_t i = 0; i < mask_count && !masked; i++)
+        masked = ContainsRect(masks[i], sample);
+      ArRenderRectI output;
+      if (!masked && ArTextCellComposite_ProjectToOutput(chunk, sample, &output))
+        return output.x + output.w;
+    }
+  }
+  return chunk->output_destination.x;
+}
+
+static int IncludeRightEdge(ArRenderRectI group, ArRenderRectI part, int right) {
+  return ContainsRect(group, part) && part.x + part.w > right ? part.x + part.w : right;
+}
+
+static void ShiftGroupRect(ArRenderRectI group, ArRenderRectI *part, int shift) {
+  if (ContainsRect(group, *part)) part->x += shift;
+}
+
+static int AlignRightGroup(HudPresentationChunk *chunks, int count, int right,
+                           ArLocalizedPreparedFrame *localized) {
+  if (right < 0 || !localized->mask_count || !localized->text_count) return 0;
+  const HudPresentationChunk *chunk = &chunks[right];
+  const ArRenderRectI group = chunk->output_destination;
+  const int native_edge = NativeRightEdge(chunk, NULL, 0);
+  int edge = NativeRightEdge(chunk, localized->masks, localized->mask_count);
+  if (native_edge <= group.x || edge < group.x) return 0;
+  for (unsigned i = 0; i < localized->text_count; i++)
+    edge = IncludeRightEdge(group, localized->texts[i].destination, edge);
+  for (unsigned i = 0; i < localized->inline_object_count; i++)
+    edge = IncludeRightEdge(group, localized->inline_objects[i].destination, edge);
+  for (unsigned i = 0; i < localized->indicator_count; i++)
+    edge = IncludeRightEdge(group, localized->indicators[i].destination, edge);
+  for (unsigned i = 0; i < localized->decoration_count; i++)
+    edge = IncludeRightEdge(group, localized->decorations[i].destination, edge);
+  const int shift = native_edge - edge;
+  if (shift <= 0) return 0;
+
+  /* Proportional text leaves unused space inside the native fields.
+   * Move the complete status group by that space, keeping
+   * its internal gaps, HUD scale and native edge inset. Body/menu coordinates
+   * and the left status group retain their independent projections. */
+  ShiftRightChunks(chunks, count, right, shift);
+  for (unsigned i = 0; i < localized->text_count; i++) {
+    ShiftGroupRect(group, &localized->texts[i].destination, shift);
+    ShiftGroupRect(group, &localized->texts[i].viewport, shift);
+  }
+  for (unsigned i = 0; i < localized->inline_object_count; i++) {
+    ShiftGroupRect(group, &localized->inline_objects[i].destination, shift);
+    ShiftGroupRect(group, &localized->inline_objects[i].viewport, shift);
+  }
+  for (unsigned i = 0; i < localized->indicator_count; i++)
+    ShiftGroupRect(group, &localized->indicators[i].destination, shift);
+  for (unsigned i = 0; i < localized->decoration_count; i++)
+    ShiftGroupRect(group, &localized->decorations[i].destination, shift);
+  return shift;
+}
+
 static void PresentHudChunksDirect(ArRenderDevice *device, const FrameSlot *slot,
                                    ArRenderRectI viewport) {
+  s_presented_alignment.shift = 0;
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
   int count = PresentHud_BuildChunks(slot, viewport, chunks);
   for (int i = 0; i < count; i++)
@@ -242,6 +383,7 @@ void PresentHud_DrawComposited(ArRenderDevice *device, const FrameSlot *slot,
 
 void PresentHud_DrawCompositedWithBackdrop(ArRenderDevice *device, const FrameSlot *slot,
                                            ArRenderRectI viewport, ArRenderTexture backdrop) {
+  s_presented_alignment.shift = 0;
   ArRenderTexture composite = EnsureHudCompositeTexture(
       device, viewport.w, viewport.h);
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
@@ -262,6 +404,17 @@ void PresentHud_DrawCompositedWithBackdrop(ArRenderDevice *device, const FrameSl
       slot->bg3_hscroll, slot->bg3_vscroll,
       kFrameSlotAuthenticWidth, kFrameSlotAuthenticHeight,
       chunks, (size_t)count, &localized);
+  const ArRenderRectI right_source = {
+      slot->hud_right_start,
+      0,
+      kFrameSlotAuthenticWidth - slot->hud_right_start,
+      slot->hud_split_height,
+  };
+  const int right =
+      slot->hud_right_align_content ? FindRightChunk(chunks, count, right_source) : -1;
+  const HudPresentationChunk original_right =
+      right >= 0 ? chunks[right] : (HudPresentationChunk){0};
+  const int right_shift = AlignRightGroup(chunks, count, right, &localized);
 
   ArRenderTargetState target_state;
   const ArRenderTargetBeginResult begin = ArRenderDevice_BeginTarget(
@@ -342,6 +495,10 @@ void PresentHud_DrawCompositedWithBackdrop(ArRenderDevice *device, const FrameSl
   };
   if (ArRenderDevice_DrawTextureWithState(
           device, composite, NULL, &destination, &over)) {
+    s_presented_alignment.width = viewport.w;
+    s_presented_alignment.height = viewport.h;
+    s_presented_alignment.right = original_right;
+    s_presented_alignment.shift = right_shift;
     if (localized_drawn) {
       ArTextPresentation_ReportPage(localized.ready_dialogue_ticket,
           localized.dialogue_page_start,localized.dialogue_page_end);
@@ -354,6 +511,7 @@ void PresentHud_DrawCompositedWithBackdrop(ArRenderDevice *device, const FrameSl
 }
 
 void PresentHud_Reset(ArRenderDevice *device) {
+  s_presented_alignment.shift = 0;
   PresentationUploadMirror_Reset(&s_background_mirror);
   PresentationUploadMirror_Reset(&s_object_mirror);
   ArRenderDevice_DestroyTexture(device, s_hud_composite_texture);

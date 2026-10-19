@@ -60,6 +60,7 @@ static bool FindSelectedHudChunk(const FrameSlot *slot,
     return false;
   HudPresentationChunk chunks[kHudPresentationChunkCapacity];
   int count = PresentHud_BuildChunks(slot, viewport, chunks);
+  PresentHud_ApplyPresentedAlignment(viewport, chunks, count);
   for (int i = count - 1; i >= 0; i--) {
     const ArRenderRectI source = chunks[i].screen_source;
     if (chunks[i].inspector_kind != slot->inspector_selection.kind ||

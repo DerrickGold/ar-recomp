@@ -6,6 +6,7 @@
 #include "host/host_ppu_output.h"
 #include "host/host_frame_surfaces.h"
 #include "diorama/diorama_gpu_policy.h"
+#include "actraiser/actraiser_church_capture.h"
 
 /* The diorama skybox view the last frame published; ActRaiser_LiveDioramaSkybox
  * hands out a copy. */
@@ -422,6 +423,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
     const SrPpuFrameTransactionContext *context);
 
 void ActRaiserDrawPpuFrame(void) {
+  ActRaiserChurchCapture_BeginFrame();
   s_live_background_packet = NULL;
   s_background_packet->words[2] = 0;
   ActRaiserSimMenu_ObserveScene(ActRaiser_ReadWram16(kActRaiserWram_MapGroup));
@@ -604,6 +606,12 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
    * writes the selected range to the HUD surface while each line is fetched. */
   ActRaiser_HudIconPrepare();
   ActRaiser_DioramaDeathHeimEyesPrepare();
+  if (Sim3D_ChurchIsOn() && map_group == kActRaiserMapGroup_NonAction &&
+      map_number == kActRaiserNonActionMap_Temple) {
+    const ActRaiserSpriteOwnership ownership =
+        ActRaiserSpriteOwnership_Presented(map_group, map_number);
+    ActRaiserChurchCapture_Prepare(scanout_api, scanout_runner, context, &ownership);
+  }
 
   SrPpuBackgroundViewRequest skybox_view = ActRaiser_PrepareSkyboxView(
       context, scanout_api, scanout_ready, profile_diorama,
@@ -625,6 +633,7 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
   DioramaPerformance_End(scanout_performance);
   PerformanceMetrics_End(pipeline);
   ActRaiser_HudIconComplete(scanout_status, &scanout_result);
+  ActRaiserChurchCapture_Complete(scanout_status, &scanout_result);
   ActRaiser_PublishScanout(scanout_status, &scanout_result, &skybox_view,
                            action);
   pipeline = PerformanceMetrics_Begin(kPerformance_PpuFinish);

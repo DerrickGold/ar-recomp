@@ -9,6 +9,8 @@ static uint32_t s_ground[512 * 512], s_objects[256 * 224], s_panels[256 * 224];
 static uint32_t s_actor_pixel, s_ui_pixel, s_removed_pixel;
 static uint32_t s_column_pixel, s_column_corner;
 static unsigned s_next_texture, s_draws;
+static ArRenderTexture s_people_texture, s_panel_texture;
+static uint32_t s_uploaded_people[256 * 512], s_uploaded_panels[256 * 224];
 static uint32_t s_columns[28 * 144];
 const uint32_t *ChurchArt_ColumnPixels(void) { return s_columns; }
 static ArRenderRectI s_actor_bounds[2];
@@ -60,6 +62,8 @@ static bool Create(void *context, const ArRenderTextureDesc *desc, ArRenderTextu
   (void)context;
   assert(desc->width == 256 && (desc->height == 512 || desc->height == 224));
   *out = (ArRenderTexture){++s_next_texture};
+  if (desc->height == 512) s_people_texture = *out;
+  else s_panel_texture = *out;
   return true;
 }
 static void Destroy(void *context, ArRenderTexture texture) {
@@ -74,12 +78,16 @@ static bool Update(void *context, ArRenderTexture texture, const ArRenderRectI *
   assert(pitch == 256 * 4);
   if (s_reject_upload) return false;
   const uint32_t *p = pixels;
-  if (texture.value == 1) {
+  if (texture.value == s_people_texture.value) {
+    memcpy(s_uploaded_people, pixels, sizeof(s_uploaded_people));
     s_actor_pixel = p[224 * 256];
     s_column_pixel = p[300 * 256 + 10];
     s_column_corner = p[272 * 256];
     s_removed_pixel = p[72 * 256 + 96];
     s_ui_pixel = p[112 * 256 + 160];
+  } else {
+    assert(texture.value == s_panel_texture.value);
+    memcpy(s_uploaded_panels, pixels, sizeof(s_uploaded_panels));
   }
   return true;
 }
@@ -102,6 +110,61 @@ static SrPpuSurfaceView Surface(uint32_t *pixels) {
                             .flags = SR_PPU_SURFACE_BOUND,
                             .pixel_format = SR_PPU_PIXEL_FORMAT_ARGB8888_U32};
 }
+
+static void ExerciseOfferingMenu(ArRenderDevice *device, FrameSlot *slot) {
+  /* The Yes icon straddles the right actor cell's x=160 edge. No is below
+   * both actor cells. Opaque black is the native BG2 panel interior. */
+  for (int y = 64; y < 136; y++)
+    for (int x = 136; x < 240; x++)
+      s_panels[y * 256 + x] = 0xff000000;
+  s_panels[72 * 256 + 96] = 0x00ffffff; /* Transparent RGB is not a panel. */
+  for (int selection = 0; selection < 2; selection++) {
+    /* Sprite identity, not the presence or color of a panel, controls removal. */
+    if (selection)
+      memset(s_panels, 0, sizeof(s_panels));
+    for (int choice = 0; choice < 2; choice++)
+      for (int y = 0; y < 16; y++)
+        for (int x = 0; x < 16; x++) {
+          const uint32_t color = choice == selection ? 0xff00aa00 : 0xff888888;
+          s_objects[(88 + choice * 24 + y) * 256 + 152 + x] = color | (y * 16 + x);
+        }
+    PresentChurch_Upload(device, slot);
+    assert(PresentChurch_Active(slot));
+    for (int choice = 0; choice < 2; choice++)
+      for (int y = 0; y < 16; y++)
+        for (int x = 0; x < 16; x++) {
+          const int at = (88 + choice * 24 + y) * 256 + 152 + x;
+          assert(s_uploaded_panels[at] == s_objects[at]);
+        }
+    /* Menu ink must not become a visitor or give an absent visitor a shadow. */
+    for (int y = 0; y < 32; y++)
+      for (int x = 0; x < 32; x++)
+        assert(s_uploaded_people[(224 + y) * 256 + 32 + x] == 0);
+    assert(s_actor_pixel == 0xffeecc88 && s_removed_pixel == 0);
+    assert(s_uploaded_panels[64 * 256 + 136] == (selection ? 0 : 0xff000000));
+    assert(s_uploaded_panels[72 * 256 + 96] == (selection ? 0 : 0x00ffffff));
+    assert(PresentChurch_Draw(device, slot, (ArRenderRectI){0, 0, 1280, 800}) ==
+           kPresentationOutcome_Complete);
+  }
+  /* A visitor behind an opaque menu stays out of the foreground texture.
+   * The 3D scene receives that sprite; the menu panel then covers it. */
+  const int overlap = 80 * 256 + 140;
+  s_objects[overlap] = 0xffeecc88;
+  s_panels[overlap] = 0xff000000;
+  slot->church_actors.rows[1][8] = 1u << 12;
+  PresentChurch_Upload(device, slot);
+  assert(s_uploaded_panels[overlap] == 0xff000000);
+  assert(s_uploaded_people[232 * 256 + 44] == 0xffeecc88);
+  slot->church_actors.rows[1][8] = 0;
+  for (int y = 64; y < 136; y++)
+    for (int x = 136; x < 240; x++)
+      s_objects[y * 256 + x] = s_panels[y * 256 + x] = 0;
+  s_panels[72 * 256 + 96] = 0;
+  s_objects[112 * 256 + 160] = 0xff2255aa;
+  PresentChurch_Upload(device, slot);
+  s_draws = 0;
+}
+
 int main(void) {
   const ArRenderBackendOps ops = {.struct_size = sizeof(ops),
                                   .create_texture = Create,
@@ -148,6 +211,8 @@ int main(void) {
   slot.church_town = 1;
   slot.ppu_surfaces.overlays[SR_PPU_OVERLAY_OBJ][0] = Surface(s_objects);
   slot.ppu_surfaces.overlays[SR_PPU_OVERLAY_BG2][0] = Surface(s_panels);
+  slot.church_actors.valid = true;
+  slot.church_actors.rows[0][0] = 1;
   /* The 3D altar must not require a captured native church background. */
   s_objects[72 * 256 + 96] = 0xffeecc88;
   s_actor_bounds[0] = (ArRenderRectI){0, 0, 1, 1};
@@ -156,6 +221,7 @@ int main(void) {
   assert(PresentChurch_Active(&slot));
   assert(s_actor_pixel == 0xffeecc88 && s_removed_pixel == 0 && s_ui_pixel == 0xff2255aa);
   assert(s_column_pixel == 0xffb5a584 && s_column_corner == 0);
+  ExerciseOfferingMenu(&device, &slot);
   /* The room has no SIM parameters; the exterior must retain those from town. */
   slot.sim.light_azimuth_deg = slot.sim.light_elevation_deg = 0;
   slot.sim.background_voxel_shading = slot.sim.background_voxel_style = 0;
@@ -174,12 +240,20 @@ int main(void) {
   s_objects[72 * 256 + 96] = 0x00ffffff;
   s_objects[80 * 256 + 132] = 0xff7788aa;
   s_objects[100 * 256 + 143] = 0xff99bbcc;
+  slot.church_actors.rows[0][0] = 0;
+  slot.church_actors.rows[1][8] = 1u << 4;
+  slot.church_actors.rows[1][28] = 1u << 15;
   s_actor_bounds[0] = (ArRenderRectI){0};
   s_actor_bounds[1] = (ArRenderRectI){4, 8, 12, 21};
   PresentChurch_Upload(&device, &slot);
   assert(PresentChurch_Draw(&device, &slot, (ArRenderRectI){0, 0, 1280, 800}) ==
          kPresentationOutcome_Complete);
   assert(s_ui_pixel == 0xff2255aa && s_draws == 3);
+  /* If capture cannot establish ownership, preserve the complete native scene. */
+  slot.church_actors.valid = false;
+  PresentChurch_Upload(&device, &slot);
+  assert(!PresentChurch_Active(&slot));
+  slot.church_actors.valid = true;
   /* Borrowed surfaces expire each emulated tick; the owned town survives. */
   slot.ppu_surfaces.lifetime_generation++;
   PresentChurch_Upload(&device, &slot);

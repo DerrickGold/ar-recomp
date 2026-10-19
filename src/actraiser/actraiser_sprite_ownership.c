@@ -95,6 +95,13 @@ void ActRaiserSpriteOwnership_RecordSim(uint16_t record, uint16_t family,
       }
     }
   }
+  /* The temple's two world records are the entire church UI block list.
+   * Fixed menu records, including Yes/No, remain ordinary foreground sprites
+   * even when their pixels overlap a visitor's presentation cell. */
+  if (s_build.group == kActRaiserMapGroup_NonAction &&
+      s_build.map == kActRaiserNonActionMap_Temple &&
+      (record == 0x0f0c || record == 0x0f32))
+    role = kActRaiserSprite_ChurchVisitor;
   ActRaiserSpriteOwnership_Record(role, first_byte, end_byte);
 }
 

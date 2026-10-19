@@ -27,9 +27,13 @@ typedef struct PresentHudUploadResult {
  * report zero. Shared by flat, diorama and SIM views. */
 PresentHudUploadResult PresentHud_Upload(ArRenderDevice *device, const FrameSlot *slot);
 
-/* The inspector uses the same chunks as drawing to locate visible HUD parts. */
+/* Native projection before enhanced text is fitted. */
 int PresentHud_BuildChunks(const FrameSlot *slot, ArRenderRectI viewport,
                            HudPresentationChunk chunks[kHudPresentationChunkCapacity]);
+/* Inspector-only adjustment to the last successfully drawn enhanced layout.
+ * A changed viewport/projection or a native fallback leaves chunks untouched. */
+void PresentHud_ApplyPresentedAlignment(ArRenderRectI viewport, HudPresentationChunk *chunks,
+                                        int count);
 /* Flat presentation composes only when the captured BG3 includes a body below
  * the status bar. Diorama/SIM callers request a single composite explicitly. */
 void PresentHud_Draw(ArRenderDevice *device, const FrameSlot *slot, ArRenderRectI viewport);

@@ -28,25 +28,29 @@ static bool UploadForeground(ArRenderDevice *device, const FrameSlot *slot) {
   const uint8_t *bg = PresentationSurface_Region(panels, panels ? panels->origin_x : -1,
                                                  panels ? panels->origin_y : -1, 256, 224);
   const uint32_t *columns = ChurchArt_ColumnPixels();
-  if (!obj || !bg || !columns) return false;
+  if (!obj || !bg || !columns || !slot->church_actors.valid) return false;
   memset(s_sprite_pixels, 0, sizeof(s_sprite_pixels));
   for (int y = 0; y < 224; y++)
     memcpy(s_sprite_pixels + y * 256, obj + y * objects->pitch_bytes, 256 * sizeof(uint32_t));
-  /* The temple's original 32-square actor cells. The source is the separate
-   * OBJ plane: no floor, spotlight, or menu frame becomes part of a sprite. */
-  for (int actor = 0; actor < 2; actor++) {
-    int left = 32, top = 32, right = 0, bottom = 0;
-    for (int y = 0; y < 32; y++) {
-      uint32_t *source = s_sprite_pixels + (72 + y) * 256 + 96 + actor * 32;
-      for (int x = 0; x < 32; x++) {
-        if (!(source[x] >> 24)) continue;
+  /* Block only the native visitors from the UI plane. Screen rectangles alone
+   * also capture half of the Yes icon at x=152..167, y=88..103. The mask records
+   * actual OAM winners, so menu ink stays even if it overlaps a visitor. */
+  for (int actor = 0; actor < kChurchActorCount; actor++) {
+    int left = kChurchActorSize, top = kChurchActorSize, right = 0, bottom = 0;
+    for (int y = 0; y < kChurchActorSize; y++) {
+      uint32_t *source = s_sprite_pixels + (kChurchActorY + y) * 256 +
+                         kChurchActorX + actor * kChurchActorSize;
+      for (int x = 0; x < kChurchActorSize; x++) {
+        if (!(slot->church_actors.rows[actor][y] & (UINT32_C(1) << x))) continue;
+        const uint32_t pixel = source[x];
+        s_sprite_pixels[(224 + y) * 256 + actor * kChurchActorSize + x] = pixel;
+        source[x] = 0;
+        if (!(pixel >> 24)) continue;
         if (x < left) left = x;
         if (y < top) top = y;
         if (x + 1 > right) right = x + 1;
         if (y + 1 > bottom) bottom = y + 1;
       }
-      memcpy(s_sprite_pixels + (224 + y) * 256 + actor * 32, source, 32 * sizeof(uint32_t));
-      memset(source, 0, 32 * sizeof(uint32_t));
     }
     s_options.actor_bounds[actor] =
         right > left ? (ArRenderRectI){left, top, right - left, bottom - top} : (ArRenderRectI){0};

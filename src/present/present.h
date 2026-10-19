@@ -14,6 +14,7 @@
 #include "render/hud_layout.h"
 #include "render/hud_icon_frame.h"
 #include "sim/menu/sim_menu_art.h"
+#include "sim/church/church_art.h"
 #include "render/render_device.h"
 #include "localization/localization_frame.h"
 #include "snesrecomp/runner.h"
@@ -214,6 +215,7 @@ typedef struct FrameSlot {
   uint64_t church_reset_generation, church_load_generation;
   bool church_reference_altar;
   uint8_t church_town;
+  ChurchActorMask church_actors;
 
   /* Immutable enhanced-text payload captured beside the PPU pixels whose BG3
    * cells it may replace. Empty means native presentation is untouched. */
@@ -279,6 +281,8 @@ typedef struct FrameSlot {
   uint8_t hud_right_start;
   uint8_t hud_player_row_y;
   uint8_t hud_left_only_y;
+  /* Game-owned eligibility; the renderer aligns content without scene knowledge. */
+  bool hud_right_align_content;
   uint8_t extra_left_right;
   /* The LIVE per-side margins the frame was
    * rendered with (extra_left_right above is the fixed budget, which does not
