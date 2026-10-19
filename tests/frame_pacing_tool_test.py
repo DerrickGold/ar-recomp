@@ -146,6 +146,15 @@ class PacingTraceTest(unittest.TestCase):
         self.assertEqual(result['draw_work_ms']['mean'], 1)
         self.assertEqual(result['vector_wait_ms']['mean'], .25)
         self.assertEqual(result['deadline_over_1ms'], 0)
+        with_upload = result['intervals_by_upload']['with_upload']
+        self.assertEqual(with_upload['complete_interval_ms']['samples'], 119)
+        self.assertEqual(with_upload['upload_work_ms']['mean'], 2)
+        self.assertEqual(with_upload['fresh_source_presents'], 119)
+        self.assertEqual(result['intervals_by_upload']['without_upload']['complete_interval_ms']['samples'], 0)
+        worst = result['worst_intervals'][0]
+        self.assertEqual(worst['upload_ms'], 0)  # Staged on the preceding idle loop.
+        self.assertEqual(worst['uploads_between_presents'], 1)
+        self.assertEqual(worst['upload_work_between_presents_ms'], 2)
 
     def test_draw_cpu_excludes_idle_and_unavailable_samples(self):
         rows = self.rows()
@@ -157,6 +166,21 @@ class PacingTraceTest(unittest.TestCase):
         self.assertAlmostEqual(result['draw_cpu_ms']['mean'], .6)
         self.assertAlmostEqual(result['draw_unaccounted_wall_ms']['mean'], .4)
         self.assertEqual(self.report(self.rows())['draw_cpu_ms']['samples'], 0)
+
+    def test_interval_upload_groups_keep_repeated_frames_and_multiple_uploads(self):
+        rows = self.rows()
+        for i in range(1, 120, 2):
+            rows[i*2].update(uploads=0, upload_ns=0)
+            rows[i*2+1]['tick'] = rows[i*2-1]['tick']
+        rows[4]['uploads'] = 2
+        report = self.report(rows)
+        with_upload = report['intervals_by_upload']['with_upload']
+        without_upload = report['intervals_by_upload']['without_upload']
+        self.assertEqual(with_upload['complete_interval_ms']['samples'], 59)
+        self.assertEqual(without_upload['complete_interval_ms']['samples'], 60)
+        self.assertEqual(without_upload['upload_work_ms']['max'], 0)
+        self.assertEqual(without_upload['fresh_source_presents'], 0)
+        self.assertEqual(report['worst_intervals'][1]['uploads_between_presents'], 2)
 
     def test_no_deadline_does_not_report_absolute_clock_as_lateness(self):
         rows = self.rows()
@@ -189,6 +213,7 @@ class PacingTraceTest(unittest.TestCase):
         self.assertEqual(result['complete_interval_ms']['samples'], 118)
         self.assertEqual(result['all_complete_interval_ms']['samples'], 119)
         self.assertEqual(result['epoch_boundaries'], 1)
+        self.assertEqual(result['intervals_by_upload']['with_upload']['complete_interval_ms']['samples'], 118)
 
     def test_warmup_uses_actual_stream_start(self):
         rows = self.rows()
@@ -218,6 +243,18 @@ class PacingTraceTest(unittest.TestCase):
         self.assertNotIn('submit_wait_ms', result)
         self.assertNotIn('submit_late_ms', result)
         self.assertEqual(result['worst_intervals'][0]['backend_present_ms'], .3)
+
+    def test_completion_tail_separates_submission_from_backend_variation(self):
+        rows = self.rows()
+        for row in rows:
+            row['submit_start_ns'] = row['complete_ns'] - 300_000 if row['presented'] else 0
+        rows[101]['complete_ns'] += 700_000
+        result = self.report(rows)
+        worst = result['worst_intervals'][0]
+        self.assertEqual(worst['submit_interval_ms'], 16)
+        self.assertAlmostEqual(worst['backend_present_delta_ms'], .7)
+        self.assertAlmostEqual(worst['interval_ms'],
+            worst['submit_interval_ms'] + worst['backend_present_delta_ms'])
 
     def test_separate_scheduled_wait_from_backend_present(self):
         rows = self.rows()

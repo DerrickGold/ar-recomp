@@ -22,6 +22,9 @@ const encode = vm.runInContext('SharedActionPreview.encode', context);
 const blobs = data.blobs.map(s => Uint8Array.from(Buffer.from(s, 'base64')));
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const manifest = {editor: path.resolve(htmlFile), editor_sha256: hash(html), profile, rooms: []};
+const roomKey = room => [room.group, room.map].map(n => n.toString(16).padStart(2, '0')).join('');
+const totals = new Map(), seen = new Map();
+for (const room of data.rooms) totals.set(roomKey(room), (totals.get(roomKey(room)) || 0) + 1);
 fs.mkdirSync(output, {recursive: true});
 if (data.player) {
   const art=Buffer.concat([data.player.characters,data.player.palette,data.player.picture].map(i=>Buffer.from(blobs[i])));
@@ -33,7 +36,12 @@ for (const base of data.rooms) {
   if (!terrain) throw Error(`Missing terrain profile ${profile} for ${base.group}:${base.map}`);
   const room = {...base, bg: [terrain.bg1, base.bg[1]], terrainProfile: profile};
   const bytes = encode(data, blobs, room);
-  const file = [base.group, base.map].map(n => n.toString(16).padStart(2, '0')).join('') + '.arscene';
+  // The DeathHeim hub has two catalogue states with the same room ID. Keep
+  // both instead of silently overwriting one; retain the historical canonical
+  // filename for the last state used by named-room cross references.
+  const key = roomKey(base), index = seen.get(key) || 0;
+  seen.set(key, index + 1);
+  const file = key + (index + 1 < totals.get(key) ? `-variant${index}` : '') + '.arscene';
   fs.writeFileSync(path.join(output, file), bytes);
   manifest.rooms.push({file, bytes: bytes.length, sha256: hash(bytes)});
 }

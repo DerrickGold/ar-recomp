@@ -8,6 +8,7 @@ import tempfile
 import json
 import struct
 import hashlib
+from types import SimpleNamespace
 from unittest import mock
 
 spec = importlib.util.spec_from_file_location(
@@ -21,6 +22,11 @@ retained_spec = importlib.util.spec_from_file_location(
     "tools/compare_retained_solids.py")
 retained = importlib.util.module_from_spec(retained_spec)
 retained_spec.loader.exec_module(retained)
+action_spec = importlib.util.spec_from_file_location(
+    "compare_action", Path(__file__).resolve().parents[1] /
+    "tools/compare_action_gpu_frames.py")
+action = importlib.util.module_from_spec(action_spec)
+action_spec.loader.exec_module(action)
 
 
 def sample(frames, cost, scene="Town 3D"):
@@ -31,6 +37,42 @@ def sample(frames, cost, scene="Town 3D"):
 
 
 class PipelinePerformanceTest(unittest.TestCase):
+    def test_action_scroll_gate_rejects_stuck_or_inactive_full_add_route(self):
+        # A successful process and changing sprites are not evidence of a
+        # scrolling full-add path. Validate the gate before accepting captures.
+        args = SimpleNamespace(frames=1500, variant='gpu', full_add='default',
+            bg_decode='fragment', handoff='0', phase='source', effect_projection='reference',
+            prepare_worker=False, start=1000, end=1001, every=1, room='0501',
+            minimum_camera_travel=[100, 40], require_full_add=True)
+        provenance = dict(command=['binary', 'ar.sfc'], inputs={}, binary_sha256='hash')
+        images = {'shot_1000.ppm': 'image0', 'shot_1001.ppm': 'image1'}
+        def log(x, y, rows, owned):
+            return (f'[gpu-bg-capture] frames=300 rejected-sources=0 mismatch-frames=0 mask=3 owned={owned} full-add-rows={rows}\n'
+                    '[shot-state] gf=1000 room=0501 bg1=98,287 bg2=98,287 phase=-1.000 generated=000 gpu=000\n'
+                    f'[shot-state] gf=1001 room=0501 bg1={x},{y} bg2={x},{y} phase=-1.000 generated=000 gpu=000\n')
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            with mock.patch.object(action, 'validate_run_completion'), \
+                 mock.patch.object(action, 'run_evidence', return_value={'run_dir': directory}), \
+                 mock.patch.object(action, 'capture_evidence', return_value=images), \
+                 mock.patch.object(action, 'sha', return_value='hash'), \
+                 mock.patch('builtins.print'):
+                for x, y, rows, owned in [(98,287,352,3), (250,287,352,3),
+                                           (250,200,0,3), (250,200,352,0), (250,200,352,7)]:
+                    (work/'test.log').write_text(log(x,y,rows,owned))
+                    with self.subTest(x=x,y=y,rows=rows,owned=owned), self.assertRaises(RuntimeError):
+                        action.validate_capture(args, work, provenance)
+                    self.assertFalse((work/'capture.json').exists())
+                (work/'test.log').write_text(log(250,200,352,3))
+                action.validate_capture(args, work, provenance)
+                report = json.loads((work/'capture.json').read_text())
+                self.assertEqual(report['camera_ranges']['bg1'], [152,87])
+                # The deliberately disabled control may legitimately retain
+                # complete CPU ownership while the rest of the pipeline runs.
+                args.full_add = '0'; args.require_full_add = False
+                (work/'test.log').write_text(log(250,200,0,0))
+                action.validate_capture(args, work, provenance)
+
     def test_presentation_profile_rejects_malformed_environment(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "profile.json"

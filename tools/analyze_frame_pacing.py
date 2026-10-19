@@ -133,6 +133,26 @@ def analyze_sync(rows, path, start, end, refresh, warmup_seconds):
         multi_tick_presents=sum(r['tick_delta'] > 1 for r in rows))
 
 
+def presentation_intervals(rows):
+    """Include staged uploads from idle iterations between two completions.
+
+    Same-loop upload time alone misses work deliberately prepared ahead of the
+    next present. These owner scopes still overlap independent producer work.
+    """
+    previous, uploads, upload_ns = None, 0, 0
+    for row in rows:
+        if previous and row['epoch'] != previous['epoch']:
+            previous, uploads, upload_ns = None, 0, 0
+        if previous and row['uploads']:
+            uploads += row['uploads']
+            upload_ns += row['upload_ns']
+        if not row['presented']:
+            continue
+        if previous:
+            yield previous, row, uploads, upload_ns
+        previous, uploads, upload_ns = row, 0, 0
+
+
 def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_native=False):
     if refresh <= 0 or end < start or warmup_seconds < 0:
         raise ValueError('Invalid timing range or warmup')
@@ -241,16 +261,24 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_nat
         if key in rows[0]: result[key.replace('_ns','_ms')] = stats(durations(key, presents))
     # Preserve the worst intervals with their stage evidence for causal inspection.
     worst = []
-    for a,b in zip(presents,presents[1:]):
-        if a['epoch'] != b['epoch']: continue
+    for a,b,upload_count,upload_ns in presentation_intervals(rows):
         evidence = dict(tick=b['tick'], interval_ms=(b['complete_ns']-a['complete_ns'])/1e6,
                           upload_ms=b['upload_ns']/1e6, draw_ms=b['draw_work_ns']/1e6,
                           swap_ms=b['swap_ns']/1e6, wait_ms=b['vector_wait_ns']/1e6,
-                          source_age_ms=(b['draw_ns']-b['source_ns'])/1e6)
+                          source_age_ms=(b['draw_ns']-b['source_ns'])/1e6,
+                          fresh_source=b['tick'] != a['tick'],
+                          uploads_between_presents=upload_count,
+                          upload_work_between_presents_ms=upload_ns/1e6)
         if b['deadline_ns']:
             evidence['deadline_late_ms'] = max(0,b['draw_ns']-b['deadline_ns'])/1e6
         if 'submit_start_ns' in b:
             evidence['backend_present_ms'] = (b['complete_ns']-b['submit_start_ns'])/1e6
+            evidence['submit_interval_ms'] = (b['submit_start_ns']-a['submit_start_ns'])/1e6
+            # Completion spacing = submission spacing + change in backend
+            # duration. This is an exact host-time decomposition, not GPU time.
+            evidence['backend_present_delta_ms'] = (
+                b['complete_ns']-b['submit_start_ns'] -
+                (a['complete_ns']-a['submit_start_ns']))/1e6
             if b.get('submit_deadline_ns', 0):
                 evidence['submit_late_ms'] = max(0,b['submit_start_ns']-b['submit_deadline_ns'])/1e6
                 # Signed slack: negative means the producer itself finished
@@ -262,6 +290,15 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_nat
             evidence['draw_cpu_ms'] = b['draw_cpu_ns']/1e6
             evidence['draw_unaccounted_wall_ms'] = max(0, b['draw_work_ns']-b['draw_cpu_ns'])/1e6
         worst.append(evidence)
+    result['intervals_by_upload'] = {
+        name: dict(
+            complete_interval_ms=stats([r['interval_ms'] for r in group]),
+            upload_work_ms=stats([r['upload_work_between_presents_ms'] for r in group]),
+            fresh_source_presents=sum(r['fresh_source'] for r in group))
+        for name, group in (
+            ('with_upload', [r for r in worst if r['uploads_between_presents']]),
+            ('without_upload', [r for r in worst if not r['uploads_between_presents']]))
+    }
     result['worst_intervals'] = sorted(worst,key=lambda r:r['interval_ms'],reverse=True)[:12]
     return result
 

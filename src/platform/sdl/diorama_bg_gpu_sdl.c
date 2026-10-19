@@ -24,10 +24,33 @@ static struct {
   SDL_GPUTexture *native_planes[3][3];
   SrPpuBgPacket *previous;
   uint32_t valid_mask;
-  bool attempted, ready;
+  bool attempted, ready, reuse_equal_data;
 } s_bg;
 
 static uint32_t SourceMask(unsigned bg);
+
+/* Only equality is needed for these naturally aligned integer packets. Some
+ * cross-toolchain C runtimes implement variable-size memcmp byte by byte.
+ * Bounded word reductions let the compiler vectorize without ISA intrinsics,
+ * wider pointer casts, hash collisions, or reads outside the validated span.
+ * Stop at a changed block so scrolling rows do not require a full scan. */
+static bool PacketWordsEqual(const uint32_t *a, const uint32_t *b, unsigned count) {
+  if (!s_bg.reuse_equal_data) return memcmp(a, b, count * sizeof(*a)) == 0;
+  while (count >= 16) {
+    uint32_t difference = 0;
+    for (unsigned i = 0; i < 16; ++i) difference |= a[i] ^ b[i];
+    if (difference) return false;
+    a += 16; b += 16; count -= 16;
+  }
+  for (unsigned i = 0; i < count; ++i) if (a[i] != b[i]) return false;
+  return true;
+}
+
+static void RetainPacket(const SrPpuBgPacket *packet) {
+  const PerformanceScope scope = PerformanceMetrics_Begin(kPerformance_BgCacheCopy);
+  memcpy(s_bg.previous, packet, SrPpuBgPacket_Size(packet));
+  PerformanceMetrics_End(scope);
+}
 
 static void ReleaseNative(void) {
   if (!s_bg.gpu) return;
@@ -115,57 +138,44 @@ static uint32_t SourceMask(unsigned bg) {
   return (1u << kPlanes[bg][0]) | (1u << kPlanes[bg][1]) | (1u << kPlanes[bg][2]);
 }
 
-static bool PacketBoundsValid(const SrPpuBgPacket *p) {
-  const unsigned used = p->words[3];
-  if (used < SR_PPU_BG_PACKET_ARENA_BASE || used > SR_PPU_BG_PACKET_WORDS ||
-      (p->words[2] & ~7u)) return false;
-  for (unsigned source = 0; source < 3; ++source) {
-    const unsigned height = p->words[source == 2 ? 5 : 1];
-    const unsigned width = p->words[source == 2 ? 4 : 0];
-    if (width > SR_PPU_BG_PACKET_WIDTH || height > SR_PPU_BG_PACKET_HEIGHT) return false;
-    for (unsigned y = 0; y < height; ++y) {
-      const uint32_t *row = p->words + SR_PPU_BG_PACKET_HEADER_WORDS +
-          SrPpuBgPacket_Row(source, y) * SR_PPU_BG_PACKET_ROW_WORDS;
-      if (!row[0]) continue;
-      if (row[0] > 4 || (row[0] >= 3 && row[4] > 7) || (source == 2 && row[0] != 2) ||
-          row[6] < SR_PPU_BG_PACKET_ARENA_BASE || row[6] > used - 256 ||
-          (row[7] && (row[7] < SR_PPU_BG_PACKET_ARENA_BASE ||
-              row[7] > used - SrPpuBgPacket_RowWords(row, source))) ||
-          (row[0] == 4 && row[5] && (row[5] < SR_PPU_BG_PACKET_ARENA_BASE ||
-              row[5] > used - SR_PPU_BG_PACKET_PIXEL_STRIDE))) return false;
-      if (source == 2 && row[4]) {
-        const unsigned first = row[4] & 65535u, end = row[4] >> 16;
-        const int64_t start = (int32_t)row[5] + (int64_t)first;
-        const int64_t last = (int32_t)row[5] + (int64_t)end - 1;
-        if (p->words[6] > 1 || first >= end || end > width || start < 0 ||
-            last >= (int64_t)p->words[1] * SR_PPU_BG_PACKET_WIDTH) return false;
-        for (unsigned alias_y = (unsigned)start / SR_PPU_BG_PACKET_WIDTH;
-             alias_y <= (unsigned)last / SR_PPU_BG_PACKET_WIDTH; ++alias_y)
-          if (!p->words[SR_PPU_BG_PACKET_HEADER_WORDS +
-              SrPpuBgPacket_Row(p->words[6], alias_y) * SR_PPU_BG_PACKET_ROW_WORDS]) return false;
-      }
-    }
-  }
-  return true;
-}
-
 static bool SourceChanged(const SrPpuBgPacket *p, unsigned bg) {
   const SrPpuBgPacket *old = s_bg.previous;
   if (!s_bg.valid_mask || p->words[0] != old->words[0] || p->words[1] != old->words[1] ||
       ((p->words[2] ^ old->words[2]) & (1u << bg))) return true;
-  if (bg == 2 && memcmp(p->words + 4, old->words + 4, 3 * sizeof(uint32_t))) return true;
+  if (bg == 2 && !PacketWordsEqual(p->words + 4, old->words + 4, 3)) return true;
   const unsigned height = p->words[bg == 2 ? 5 : 1];
+  unsigned palette = 0, old_palette = 0;
   for (unsigned y = 0; y < height; ++y) {
     const unsigned index = SR_PPU_BG_PACKET_HEADER_WORDS + SrPpuBgPacket_Row(bg, y) * SR_PPU_BG_PACKET_ROW_WORDS;
     const uint32_t *now = p->words + index, *before = old->words + index;
-    if (memcmp(now, before, 6 * sizeof(uint32_t))) return true;
+    if (!PacketWordsEqual(now, before, 6)) return true;
     if (!now[0]) continue;
-    if (!now[6] || !before[6] || memcmp(p->words + now[6], old->words + before[6], 256 * sizeof(uint32_t))) return true;
+    if (!now[6] || !before[6]) return true;
+    /* Palettes are immutable within a packet and usually shared by hundreds
+     * of rows. Recheck when either offset changes (including HDMA), not once
+     * per row. Never compare offsets alone across successive packets. */
+    if (!s_bg.reuse_equal_data || now[6] != palette || before[6] != old_palette) {
+      if (!PacketWordsEqual(p->words + now[6], old->words + before[6], 256)) return true;
+      palette = now[6]; old_palette = before[6];
+    }
     if (!!now[7] != !!before[7]) return true;
-    if (now[7] && memcmp(p->words + now[7], old->words + before[7],
-        SrPpuBgPacket_RowWords(now, bg) * sizeof(uint32_t))) return true;
-    if (now[0] == 4 && now[5] && memcmp(p->words + now[5], old->words + before[5],
-        SR_PPU_BG_PACKET_PIXEL_STRIDE * sizeof(uint32_t))) return true;
+    if (now[7] && !PacketWordsEqual(p->words + now[7], old->words + before[7],
+        SrPpuBgPacket_RowWords(now, bg))) return true;
+    if (now[0] == 4 && now[5] && !PacketWordsEqual(p->words + now[5], old->words + before[5],
+        SR_PPU_BG_PACKET_PIXEL_STRIDE)) return true;
+  }
+  return false;
+}
+
+static bool FullAddChanged(const SrPpuBgPacket *p) {
+  const SrPpuBgPacket *old = s_bg.previous;
+  if (!!p->words[7] != !!old->words[7] || p->words[0] != old->words[0] || p->words[1] != old->words[1])
+    return true;
+  if (!p->words[7]) return false;
+  for (unsigned y = 0; y < p->words[1]; ++y) {
+    const unsigned now = p->words[p->words[7] + y], before = old->words[old->words[7] + y];
+    if (!!now != !!before || (now && !PacketWordsEqual(p->words + now, old->words + before,
+        4 + p->words[0]))) return true;
   }
   return false;
 }
@@ -188,7 +198,9 @@ static bool Ensure(ArRenderDevice *device) {
   if (!renderer || (s_bg.renderer && s_bg.renderer != renderer)) return false;
   if (s_bg.attempted) return s_bg.ready;
   s_bg.attempted = true; s_bg.renderer = renderer;
-  s_bg.previous = malloc(sizeof(*s_bg.previous));
+  const char *cache = getenv("AR_GPU_BG_PACKET_CACHE");
+  s_bg.reuse_equal_data = !cache || strcmp(cache, "0");
+  s_bg.previous = calloc(1, sizeof(*s_bg.previous));
   if (!s_bg.previous) return false;
   if (EnsureNative(device)) { s_bg.ready = true; return true; }
   static const GpuShaderBlobs blobs = {kPpuBgCaptureFragMSL, kPpuBgCaptureFragMSLSize,
@@ -232,8 +244,9 @@ static uint32_t ResolveNative(ArRenderDevice *device, const SrPpuBgPacket *p,
   }
   if (bands[0] || bands[1] || bands[2]) {
     const Uint32 size = p->words[3] * (Uint32)sizeof(uint32_t);
+    const PerformanceScope transfer = PerformanceMetrics_Begin(kPerformance_BgTransferWrite);
     uint32_t *data = SDL_MapGPUTransferBuffer(s_bg.gpu, s_bg.upload, true);
-    if (!data) return 0;
+    if (!data) { PerformanceMetrics_End(transfer); return 0; }
     /* The packet is already in GPU byte order on little-endian hosts. A
      * word-at-a-time loop cannot assume this mapped pointer doesn't alias p,
      * and compiled to scalar stores plus a size reload on every word on Deck.
@@ -245,7 +258,11 @@ static uint32_t ResolveNative(ArRenderDevice *device, const SrPpuBgPacket *p,
     for (unsigned i = 0; i < words; ++i) data[i] = SDL_Swap32LE(p->words[i]);
 #endif
     SDL_UnmapGPUTransferBuffer(s_bg.gpu, s_bg.upload);
-    if (!ArSdlRenderBackend_SubmitPending(device)) return 0;
+    PerformanceMetrics_End(transfer);
+    const PerformanceScope pending = PerformanceMetrics_Begin(kPerformance_BgSubmitPending);
+    const bool submitted = ArSdlRenderBackend_SubmitPending(device);
+    PerformanceMetrics_End(pending);
+    if (!submitted) return 0;
     SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(s_bg.gpu);
     if (!cmd) return 0;
     SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
@@ -280,16 +297,17 @@ static uint32_t ResolveNative(ArRenderDevice *device, const SrPpuBgPacket *p,
     }
   }
   s_bg.valid_mask |= requested;
-  memcpy(s_bg.previous, p, SrPpuBgPacket_Size(p));
   return requested;
 }
 
-uint32_t DioramaBgGpu_Resolve(ArRenderDevice *device, const SrPpuBgPacket *p,
+static uint32_t Resolve(ArRenderDevice *device, const SrPpuBgPacket *p,
     uint32_t requested, ArRenderTexture textures[kDioramaPlane_Count], ArRenderTexture *skybox, uint32_t *changed) {
   if (changed) *changed = 0;
-  if (!p || !textures || !p->words[2] || p->words[0] > SR_PPU_BG_PACKET_WIDTH ||
-      !p->words[0] || !p->words[1] || p->words[1] > SR_PPU_BG_PACKET_HEIGHT ||
-      !PacketBoundsValid(p)) return 0;
+  if (!p || !textures || !p->words[2]) return 0;
+  const PerformanceScope validation = PerformanceMetrics_Begin(kPerformance_BgValidate);
+  const bool valid = p->words[0] && p->words[1] && SrPpuBgPacket_Valid(p);
+  PerformanceMetrics_End(validation);
+  if (!valid) return 0;
   if (skybox) { *skybox = ArRenderTexture_Invalid(); requested |= SourceMask(2); }
   uint32_t eligible = 0;
   for (unsigned bg = 0; bg < 3; ++bg) {
@@ -303,11 +321,17 @@ uint32_t DioramaBgGpu_Resolve(ArRenderDevice *device, const SrPpuBgPacket *p,
   }
   requested &= eligible;
   if (!requested || !Ensure(device)) return 0;
+  const PerformanceScope comparison = PerformanceMetrics_Begin(kPerformance_BgCompare);
   uint32_t dirty_mask = 0;
   for (unsigned bg = 0; bg < 3; ++bg)
     if (SourceChanged(p, bg)) dirty_mask |= SourceMask(bg);
+  /* A BG or OBJ change can alter the other BG's winning pixels. */
+  if ((p->words[7] || s_bg.previous->words[7]) &&
+      ((dirty_mask & (SourceMask(0) | SourceMask(1))) || FullAddChanged(p)))
+    dirty_mask |= SourceMask(0) | SourceMask(1);
   if ((p->words[2] & 4u) && p->words[6] < 2 && (dirty_mask & SourceMask(p->words[6])))
     dirty_mask |= SourceMask(2);
+  PerformanceMetrics_End(comparison);
   const bool dirty = (dirty_mask & requested) != 0 || (requested & ~s_bg.valid_mask) != 0;
   if (s_bg.gpu) {
     s_bg.valid_mask &= ~dirty_mask;
@@ -317,6 +341,7 @@ uint32_t DioramaBgGpu_Resolve(ArRenderDevice *device, const SrPpuBgPacket *p,
       s_bg.valid_mask = 0;
       s_bg.ready = false; // Use the caller's CPU fallback until renderer reset.
     }
+    if (resolved && (!s_bg.reuse_equal_data || dirty_mask)) RetainPacket(p);
     return resolved;
   }
   if (dirty) {
@@ -386,6 +411,18 @@ uint32_t DioramaBgGpu_Resolve(ArRenderDevice *device, const SrPpuBgPacket *p,
   const bool restored = SDL_SetRenderTarget(renderer, target);
   ArSdlPresentation_PopFullOutput(renderer, &state);
   if (!unbound || !restored) { s_bg.valid_mask = 0; return 0; }
-  memcpy(s_bg.previous, p, SrPpuBgPacket_Size(p));
+  /* Equal packets may use different arena offsets. Retain the prior packet
+   * and its offsets together until any source changes, including sources not
+   * requested this frame. No producer-owned pointers survive this call. */
+  if (!s_bg.reuse_equal_data || dirty_mask) RetainPacket(p);
+  return resolved;
+}
+
+uint32_t DioramaBgGpu_Resolve(ArRenderDevice *device, const SrPpuBgPacket *p,
+    uint32_t requested, ArRenderTexture textures[kDioramaPlane_Count],
+    ArRenderTexture *skybox, uint32_t *changed) {
+  const PerformanceScope scope = PerformanceMetrics_Begin(kPerformance_BgResolve);
+  const uint32_t resolved = Resolve(device, p, requested, textures, skybox, changed);
+  PerformanceMetrics_End(scope);
   return resolved;
 }

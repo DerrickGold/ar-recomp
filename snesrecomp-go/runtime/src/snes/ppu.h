@@ -383,6 +383,7 @@ struct Ppu {
     uint8_t overlayRenderContentMask[kPpuOverlaySource_Count];
     SrPpuBgPacket *backgroundPacket; /* Borrowed only inside scanout. */
     uint8_t backgroundTileSources, backgroundCpuSources, backgroundDeferredClear;
+    bool backgroundFullAdd;
     uint16_t backgroundPaletteCgram[3][256];
     uint32_t backgroundPaletteKey[3];
     uint8_t m7OverlayMaybeDirty;
@@ -555,6 +556,7 @@ bool PpuBindOverlaySurfaceSized(Ppu *, PpuOverlaySource, uint8_t *, size_t,
                                 size_t);
 bool PpuBindOverlayPrioSurface(Ppu *, PpuOverlaySource, int, uint8_t *);
 bool PpuResolveCaptureAprons(Ppu *);
+bool PpuResolveCaptureApronsWithPacket(Ppu *, SrPpuBgPacket *);
 bool PpuOverlaySurfaceHasContent(const Ppu *, PpuOverlaySource, int);
 void PpuClearOverlayCaptures(Ppu *);
 bool PpuSetOverlayCapture(Ppu *, PpuOverlaySource, int, int, int, int, uint8_t);

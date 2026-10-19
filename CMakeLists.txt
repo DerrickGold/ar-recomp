@@ -2513,6 +2513,27 @@ if(BUILD_TESTING)
     # Complete room assets exercise every environmental family without relying
     # on raw warps into intermediate rooms that require natural game setup.
     file(STRINGS "${CMAKE_SOURCE_DIR}/tools/action_editor/environment_sources.txt" _room_environment_sources)
+    # Interpose only the editor's scanout call so the same production room
+    # planner feeds native, reference and packet oracles. No test hooks in the
+    # runtime or editor, and no ROM-derived fixtures in the repository.
+    add_library(actraiser_room_capture_oracle OBJECT tools/action_editor/room_scene.c)
+    target_compile_definitions(actraiser_room_capture_oracle PRIVATE
+        sr_scene_renderer_render=TestRoomCapture_Render)
+    target_include_directories(actraiser_room_capture_oracle PRIVATE src
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_executable(actraiser_action_room_capture_test tests/action_room_capture_test.c
+        $<TARGET_OBJECTS:actraiser_room_capture_oracle>
+        ${_room_environment_sources}
+        src/action/action_scene_snapshot.c src/action/action_room_scene.c
+        src/action/action_bg_world.c src/action/action_bg_plan.c src/action/action_camera_bounds.c
+        src/diorama/diorama.c src/diorama/diorama_capture_blend.c src/diorama/diorama_layer_order.c
+        src/diorama/diorama_projection.c src/diorama/diorama_skybox_uv.c src/diorama/diorama_depth_shapes.c
+        src/render/scene3d_math.c src/render/presentation_layout.c
+        snesrecomp-go/runtime/src/scene_renderer.c snesrecomp-go/runtime/src/snes/ppu.c)
+    target_include_directories(actraiser_action_room_capture_test PRIVATE src tests tools/action_editor
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS} snesrecomp-go/runtime/src
+        snesrecomp-go/runtime/src/runner snesrecomp-go/runtime/src/core)
+    target_link_libraries(actraiser_action_room_capture_test PRIVATE actraiser_math)
     add_executable(actraiser_action_room_gpu_compare
         tools/ppu_gpu/runner_events_stub.c
         tools/action_editor/check_native_projection.c tools/action_editor/room_preview.c
@@ -2534,17 +2555,19 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/snesrecomp-go/runtime/src/core)
     target_link_libraries(actraiser_action_room_gpu_compare PRIVATE actraiser_render_sdl_test_support)
 
-    if(MSVC)
-        target_compile_options(actraiser_action_room_gpu_compare PRIVATE /Gy)
-        target_link_options(actraiser_action_room_gpu_compare PRIVATE /OPT:REF)
-    else()
-        target_compile_options(actraiser_action_room_gpu_compare PRIVATE -ffunction-sections -fdata-sections)
-        if(APPLE)
-            target_link_options(actraiser_action_room_gpu_compare PRIVATE -Wl,-dead_strip)
+    foreach(_room_oracle IN ITEMS actraiser_action_room_gpu_compare actraiser_action_room_capture_test)
+        if(MSVC)
+            target_compile_options(${_room_oracle} PRIVATE /Gy)
+            target_link_options(${_room_oracle} PRIVATE /OPT:REF)
         else()
-            target_link_options(actraiser_action_room_gpu_compare PRIVATE -Wl,--gc-sections)
+            target_compile_options(${_room_oracle} PRIVATE -ffunction-sections -fdata-sections)
+            if(APPLE)
+                target_link_options(${_room_oracle} PRIVATE -Wl,-dead_strip)
+            else()
+                target_link_options(${_room_oracle} PRIVATE -Wl,--gc-sections)
+            endif()
         endif()
-    endif()
+    endforeach()
 
     add_executable(actraiser_diorama_projection_test
         tests/diorama_projection_test.c
@@ -4027,6 +4050,11 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_diorama_depth_shapes
         COMMAND actraiser_diorama_depth_shapes_test)
 
+    add_executable(actraiser_diorama_gpu_policy_test tests/diorama_gpu_policy_test.c)
+    target_include_directories(actraiser_diorama_gpu_policy_test PRIVATE src tests
+        ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_test(NAME actraiser_diorama_gpu_policy COMMAND actraiser_diorama_gpu_policy_test)
+
     add_executable(actraiser_diorama_frame_generation_test
         tests/diorama_frame_generation_test.c
         src/diorama/diorama_projection.c
@@ -4085,7 +4113,8 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_diorama_bg_gpu_test PRIVATE
         actraiser_render_sdl_test_support SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_diorama_bg_gpu COMMAND actraiser_diorama_bg_gpu_test)
-    set_tests_properties(actraiser_diorama_bg_gpu PROPERTIES SKIP_RETURN_CODE 77)
+    set_tests_properties(actraiser_diorama_bg_gpu PROPERTIES SKIP_RETURN_CODE 77
+        ENVIRONMENT "AR_GPU_BG_DECODE=fragment" TIMEOUT 30)
     add_test(NAME actraiser_diorama_bg_gpu_native COMMAND actraiser_diorama_bg_gpu_test)
     set_tests_properties(actraiser_diorama_bg_gpu_native PROPERTIES SKIP_RETURN_CODE 77
         ENVIRONMENT "AR_GPU_BG_DECODE=native" TIMEOUT 30)

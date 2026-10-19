@@ -115,9 +115,14 @@ static void FinishBackgroundPacket(void) {
     if (mismatches) { p->words[2] &= ~4u; p->owned_sources &= ~4u; }
   }
   if (mismatches) ++mismatch_frames;
-  if (++frames % 300 == 0) fprintf(stderr,
-      "[gpu-bg-capture] frames=%u rejected-sources=%u mismatch-frames=%u mask=%u owned=%u\n",
-      frames, rejected, mismatch_frames, p->words[2], p->owned_sources);
+  if (++frames % 300 == 0) {
+    unsigned full_add_rows = 0;
+    if (p->words[7]) for (unsigned y = 0; y < p->words[1]; ++y)
+      full_add_rows += p->words[p->words[7] + y] != 0;
+    fprintf(stderr,
+        "[gpu-bg-capture] frames=%u rejected-sources=%u mismatch-frames=%u mask=%u owned=%u full-add-rows=%u\n",
+        frames, rejected, mismatch_frames, p->words[2], p->owned_sources, full_add_rows);
+  }
   if (p->words[2]) s_live_background_packet = p;
 }
 
@@ -386,7 +391,7 @@ static void ActRaiser_FinishSceneCapture(void) {
   /* Isolated apron sprites must join the same subscreen winner resolve as
    * scanout before additive planes are published (notably Marahna's water). */
   if (apron_geom.apron > 0 && ActRaiser_DioramaBgApronMask() &&
-      !ActRaiser_ResolvePpuCaptureAprons()) {
+      !ActRaiser_ResolvePpuCaptureAprons(BackgroundPacketEnabled() ? s_background_packet : NULL)) {
     static bool reported;
     if (!reported) fprintf(stderr, "[ppu-capture] could not resolve additive capture aprons\n");
     reported = true;
@@ -577,13 +582,8 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
       ActRaiser_DioramaBoundsTrackingActive() || scanout_context.shape_trace ||
       ActRaiserActionBg_RoomSceneFrameObserverActive();
   const DioramaGpuCaptureMode bg_packet_mode = BackgroundPacketMode();
-  s_background_packet->request_flags = 0;
-  if (bg_packet_mode == kDioramaGpuCapture_Owned ||
-      bg_packet_mode == kDioramaGpuCapture_TilesValidate) {
-    s_background_packet->request_flags = SR_PPU_BG_PACKET_TILES;
-    if (bg_packet_mode == kDioramaGpuCapture_TilesValidate)
-      s_background_packet->request_flags |= SR_PPU_BG_PACKET_VALIDATE_TILES;
-  }
+  s_background_packet->request_flags = DioramaGpuPolicy_CaptureFlags(
+      bg_packet_mode, getenv("AR_GPU_BG_FULL_ADD"));
   /* This native-only room promotes statue sprites into BG2 after scanout. */
   if (g_ram[kActRaiserWram_MapGroup] == kActRaiserMapGroup_DeathHeim &&
       g_ram[kActRaiserWram_CurrentMap] == kActRaiserDeathHeimMap_Hub)

@@ -2050,7 +2050,8 @@ static void background_packet_begin_row(Ppu *ppu, unsigned source, int screen_y,
     uint32_t *meta = packet->words + SR_PPU_BG_PACKET_HEADER_WORDS +
         row * SR_PPU_BG_PACKET_ROW_WORDS;
     const unsigned allowed = kPpuOverlayFlag_RemoveFromGame |
-        kPpuOverlayFlag_MarkBgHalfAdd | kPpuOverlayFlag_ApplyBgFixedColorSubtract;
+        kPpuOverlayFlag_MarkBgHalfAdd | kPpuOverlayFlag_ApplyBgFixedColorSubtract |
+        ((packet->request_flags & SR_PPU_BG_PACKET_FULL_ADD) ? kPpuOverlayFlag_MarkFullAddSubscreen : 0);
     if ((capture->flags & ~allowed) || PPU_mode(ppu) != 1 ||
         packet->words[0] > SR_PPU_BG_PACKET_WIDTH ||
         ppu->overlayRenderPitch[source] / 4 != packet->words[0] ||
@@ -2221,6 +2222,7 @@ static void capture_edit_line(Ppu *ppu, unsigned source, int y,
     line->origin = surface_origin_x(ppu, pitch);
     line->coverage = ppu->captureTileCoverage[source] + line->origin;
     line->packet = background_packet_row(ppu, source, y);
+    if (ppu->backgroundTileSources & (1u << source)) line->packet = NULL;
     line->backing = PpuOverlayTransparentFillColor(ppu, (PpuOverlaySource)source) != 0;
     for (unsigned band = 0; band < 3; ++band) {
         uint8_t *pixels = band ? ppu->overlayRenderBands[source][band - 1]
@@ -2310,7 +2312,7 @@ static void capture_apron_line_state(Ppu *ppu, int y) {
  * the terrain behind it. Resolve after OAM first-writer ownership is complete:
  * hiding an early OBJ before that step could incorrectly expose a later OBJ.
  * This touches only the two guards, never scanout or authentic output. */
-bool PpuResolveCaptureAprons(Ppu *ppu) {
+bool PpuResolveCaptureApronsWithPacket(Ppu *ppu, SrPpuBgPacket *packet) {
     if (!ppu) return false;
     if (!ppu->captureApronBindingGeneration) return true;
     if (ppu->captureApronBindingGeneration != ppu->surfaceBindingGeneration) return false;
@@ -2320,6 +2322,9 @@ bool PpuResolveCaptureAprons(Ppu *ppu) {
     if (!apron) return true;
     const int width = (int)(ppu->overlayRenderPitch[base] / sizeof(uint32_t));
     const int origin = surface_origin_x(ppu, ppu->overlayRenderPitch[base]);
+    if (packet && packet->words[7] &&
+        (!SrPpuBgPacket_Valid(packet) || packet->words[0] != (unsigned)width ||
+         packet->words[1] < (unsigned)overlay_row(bounds, bounds->y1))) return false;
     if (apron > kPpuObjApron || width > kPpuSurfaceWidth ||
         bounds->x0 < -ppu->extraLeftRight || bounds->x1 > kPpuXPixels + ppu->extraLeftRight ||
         bounds->x1 <= bounds->x0 || bounds->x0 - apron + origin < 0 ||
@@ -2349,6 +2354,39 @@ bool PpuResolveCaptureAprons(Ppu *ppu) {
         if (!line->full_add) continue;
         const int row = overlay_row(bounds, y);
         if (row < 0) continue;
+        uint32_t *gpu = packet ? SrPpuBgPacket_FullAddRow(packet, (unsigned)row) : NULL;
+        if (gpu && gpu[0]) {
+            const bool validate = (packet->request_flags & SR_PPU_BG_PACKET_VALIDATE_TILES) != 0;
+            for (unsigned side = 0; side < 2; ++side) {
+                const int first = origin + (side ? bounds->x1 : bounds->x0 - apron), end = first + apron;
+                for (int x = first; x < end; ++x) {
+                    unsigned object = 0;
+                    for (unsigned band = 0; band < 4; ++band) {
+                        const uint8_t *pixels = band ? ppu->overlayRenderBands[kPpuOverlaySource_Obj][band - 1]
+                            : ppu->overlayRenderBuffer[kPpuOverlaySource_Obj];
+                        if (pixels && ((const uint32_t *)(pixels + row * ppu->overlayRenderPitch[kPpuOverlaySource_Obj]))[x]) {
+                            const unsigned key = (layer_rank_for_mode(line->rank_mode, kPpuOverlaySource_Obj, band) << 3) | kPpuOverlaySource_Obj;
+                            if (key > object) object = key;
+                        }
+                    }
+                    const unsigned main = object && (line->main[side] & 16u) ? object : 13u;
+                    const unsigned sub = object && (line->sub[side] & 16u) ? object : 13u;
+                    gpu[4 + x] = main | (sub << 8) | ((line->main[side] & 3u) << 16) | ((line->sub[side] & 3u) << 18);
+                    if (!validate && object && (line->full_add & 16u) &&
+                        (SrPpuBgPacket_FullAddWinner(packet, gpu, (unsigned)x, (unsigned)row) & 7u) != kPpuOverlaySource_Obj) {
+                        for (unsigned band = 0; band < 4; ++band) {
+                            uint8_t *pixels = band ? ppu->overlayRenderBands[kPpuOverlaySource_Obj][band - 1]
+                                : ppu->overlayRenderBuffer[kPpuOverlaySource_Obj];
+                            const size_t offset = (size_t)row * ppu->overlayRenderPitch[kPpuOverlaySource_Obj];
+                            if (pixels) ((uint32_t *)(pixels + offset))[x] = 0;
+                            if (ppu->objAttributes.pixels[band] && offset + ppu->overlayRenderPitch[kPpuOverlaySource_Obj] <= ppu->objAttributes.pixel_byte_size[band])
+                                ((uint32_t *)(ppu->objAttributes.pixels[band] + offset))[x] = 0;
+                        }
+                    }
+                }
+            }
+            if (!validate) continue;
+        }
         struct Candidate { uint32_t *pixels, *attributes; uint8_t source, rank; } candidates[10];
         unsigned count = 0;
         for (unsigned i = 0; i < 3; ++i) {
@@ -2418,6 +2456,10 @@ bool PpuResolveCaptureAprons(Ppu *ppu) {
         }
     }
     return true;
+}
+
+bool PpuResolveCaptureAprons(Ppu *ppu) {
+    return PpuResolveCaptureApronsWithPacket(ppu, ppu ? ppu->backgroundPacket : NULL);
 }
 
 /* The packed capture path resolves MarkFullAddSubscreen itself (see the
@@ -3106,12 +3148,13 @@ static uint32_t reverse_byte_bits(uint32_t v) {
  * pixels. Shared by the general writer and the prepared virtual-row path. */
 static void background_packet_native_tile(uint32_t *pixels, uint32_t *meta,
         unsigned column, int run, int fine_x, uint32_t raw,
-        uint16_t entry, unsigned band, uint8_t *content_mask) {
+        uint16_t entry, unsigned band, unsigned rank, uint8_t *content_mask) {
     meta[4] = ((unsigned)fine_x - column) & 7u;
     uint32_t *tile = pixels + ((column + meta[4]) / 8u) * 2u;
     tile[0] = raw;
     tile[1] = (tile[1] & 0xff00u) | ((entry >> 10) & 7u) |
         (band << 3) | ((entry & 0x4000u) ? 32u : 0u) |
+        (rank << 16) |
         (((1u << run) - 1u) << (fine_x + 8));
     const unsigned signal = (raw | (raw >> 8) | (raw >> 16) | (raw >> 24)) & 255u;
     if (signal) *content_mask |= (uint8_t)(1u << band);
@@ -3133,7 +3176,8 @@ static void background_packet_tile_to(Ppu *ppu, int layer, unsigned source_row, 
         source_row % SR_PPU_BG_PACKET_HEIGHT);
     if (meta[0] >= 3u && !edit) {
         background_packet_native_tile(pixels, meta, (unsigned)(origin + x),
-            run, fine_x, raw, entry, band, &ppu->overlayRenderContentMask[layer]);
+            run, fine_x, raw, entry, band, layer_rank(ppu, layer, (entry >> 13) & 1u),
+            &ppu->overlayRenderContentMask[layer]);
         return;
     }
     if (meta[0] == 4u) {
@@ -3297,7 +3341,9 @@ static void native_resolve_virtual_bg_span(Ppu *SR_RESTRICT ppu, int layer,
     native_layer_window_plan(ppu, layer, want_sub, &plan);
     if (plan.main_mode == 0u && plan.sub_mode == 0u) return;
     const bool owner_sub = (ppu->screenEnabled[0] & (1u << layer)) == 0u;
-    const unsigned visibility = owner_sub ? plan.sub_mode : plan.main_mode;
+    const unsigned visibility = ppu->backgroundFullAdd
+        ? (plan.sub_mode || plan.main_mode ? 1u : 0u)
+        : owner_sub ? plan.sub_mode : plan.main_mode;
     uint32_t *packet_pixels = NULL, *packet_meta = NULL;
     int packet_origin = 0;
     if ((ppu->backgroundTileSources & (1u << layer)) && visibility == 1u) {
@@ -3410,7 +3456,8 @@ static void native_resolve_virtual_bg_span(Ppu *SR_RESTRICT ppu, int layer,
                     ((uint32_t)ppu->vram[(address + 8u) & 0x7fffu] << 16);
                 background_packet_native_tile(packet_pixels, packet_meta,
                     (unsigned)(packet_origin + x), run, fine_x, raw, entry,
-                    band_slot, &ppu->overlayRenderContentMask[layer]);
+                    band_slot, layer_rank(ppu, layer, (entry >> 13) & 1u),
+                    &ppu->overlayRenderContentMask[layer]);
             } else {
                 for (int at = 0; at < run;) {
                     if (!visibility || (visibility == 2u && native_window_plan_inside(&plan, x + at))) {
@@ -3623,7 +3670,9 @@ static void native_resolve_vram_bg_span(Ppu *SR_RESTRICT ppu, int layer,
              * bitplane packet as a virtual map. Preserve each scanline's VRAM,
              * scroll and owner-window state; do not expand its pixels on CPU. */
             const bool owner_sub = (ppu->screenEnabled[0] & (1u << layer)) == 0u;
-            const unsigned visibility = owner_sub ? plan.sub_mode : plan.main_mode;
+            const unsigned visibility = ppu->backgroundFullAdd
+                ? (plan.sub_mode || plan.main_mode ? 1u : 0u)
+                : owner_sub ? plan.sub_mode : plan.main_mode;
             const unsigned saved_window_run = plan.run;
             const unsigned band = background_packet_band(ppu, layer, entry, 0xffu);
             for (int at = 0; at < run;) {
@@ -5134,9 +5183,20 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
         for (int source = 0; source < kPpuOverlaySource_Count; ++source)
             source_needs_sub[source] = true;
     ppu->backgroundTileSources = ppu->backgroundCpuSources = 0;
+    ppu->backgroundFullAdd = ppu->backgroundPacket &&
+        (ppu->backgroundPacket->request_flags & SR_PPU_BG_PACKET_FULL_ADD) &&
+        (full_add_mask & 3u) && !(full_add_mask & ~0x13u) &&
+        !(main_winner_mask | sub_winner_mask | visible_winner_mask) &&
+        !authentic && !dual_authentic && PPU_mode(ppu) == 1;
+    if (ppu->backgroundFullAdd) for (unsigned source = 0; source < 2; ++source) {
+        NativeLayerWindowPlan windows;
+        native_layer_window_plan(ppu, (int)source, true, &windows);
+        if (windows.main_mode == 2u || windows.sub_mode == 2u) ppu->backgroundFullAdd = false;
+    }
     if (ppu->backgroundPacket && (ppu->backgroundPacket->request_flags & SR_PPU_BG_PACKET_TILES) &&
         !authentic && !dual_authentic &&
-        !(full_add_mask | main_winner_mask | sub_winner_mask | visible_winner_mask)) {
+        (!(full_add_mask | main_winner_mask | sub_winner_mask | visible_winner_mask) ||
+         ppu->backgroundFullAdd)) {
         for (unsigned layer = 0; layer < 2; ++layer) {
             const PpuOverlayCapture *cap = &ppu->overlayCaptures[layer];
             const PpuWidescreenLayerPolicy policy = PpuResolveWidescreenLayerPolicy(ppu, layer, screen_y);
@@ -5159,6 +5219,24 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
             uint32_t *meta = ppu->backgroundPacket->words + SR_PPU_BG_PACKET_HEADER_WORDS +
                 packet_row * SR_PPU_BG_PACKET_ROW_WORDS;
             if (meta[0] < 3u) meta[0] = 2;
+        }
+    }
+    if (ppu->backgroundFullAdd) {
+        bool supported = ppu->backgroundTileSources == 3;
+        const PpuOverlayCapture *first = &ppu->overlayCaptures[0];
+        for (unsigned source = 0; supported && source < 2; ++source) {
+            const PpuOverlayCapture *cap = &ppu->overlayCaptures[source];
+            const unsigned row = (unsigned)overlay_row(cap, screen_y);
+            supported = SrPpuBgPacket_Meta(ppu->backgroundPacket, source, row)[0] >= 3 &&
+                cap->x0 == first->x0 && cap->x1 == first->x1 && cap->y0 == first->y0 &&
+                ppu->overlayRenderPitch[source] == ppu->overlayRenderPitch[0] &&
+                ppu->overlayRenderBands[source][0];
+        }
+        if (supported) supported = SrPpuBgPacket_AllocateFullAdd(ppu->backgroundPacket,
+            (unsigned)overlay_row(first, screen_y)) != NULL;
+        if (!supported) {
+            ppu->backgroundFullAdd = false;
+            ppu->backgroundTileSources = ppu->backgroundCpuSources = 0;
         }
     }
     for (unsigned layer = 0; layer < 2; ++layer) {
@@ -5321,6 +5399,25 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
                 ppu->backgroundPacket->owned_sources |= 1u << layer;
             }
         }
+    }
+    if (ppu->backgroundFullAdd && ppu->backgroundTileSources != 3) {
+        /* A provider can fall back halfway through a row. Both competing BGs
+         * must then be re-resolved on CPU, even if the other already emitted
+         * valid tiles. The request bit bounds this retry to one attempt. */
+        const uint32_t flags = ppu->backgroundPacket->request_flags;
+        ppu->backgroundPacket->request_flags &= ~SR_PPU_BG_PACKET_FULL_ADD;
+        ppu->backgroundPacket->words[ppu->backgroundPacket->words[7] +
+            (unsigned)overlay_row(&ppu->overlayCaptures[0], screen_y)] = 0;
+        ppu->backgroundTileSources = 0;
+        for (unsigned source = 0; source < 2; ++source) {
+            SrPpuBgPacket_Meta(ppu->backgroundPacket, source,
+                (unsigned)overlay_row(&ppu->overlayCaptures[source], screen_y))[0] = 0;
+            clear_overlay_row(ppu, (int)source, screen_y, false);
+        }
+        const bool result = render_native_capture_line(ppu, screen_y, row, origin,
+            authentic, dual_authentic, authentic_row, authentic_origin);
+        ppu->backgroundPacket->request_flags = flags;
+        return result;
     }
     if (authentic_y) {
         native_resolve_obj(ppu, screen_y, obj_offset,
@@ -5657,6 +5754,72 @@ static bool render_native_capture_line(Ppu *ppu, int screen_y,
             native_write_overlay_packed(ppu, (int)source, x, winner,
                 source < 2u ? bands[source][index] : 0xffu,
                 &overlay_plans[source]);
+        }
+    }
+    if (ppu->backgroundFullAdd) {
+        SrPpuBgPacket *packet = ppu->backgroundPacket;
+        const unsigned y = (unsigned)overlay_row(&ppu->overlayCaptures[0], screen_y);
+        uint32_t *state = SrPpuBgPacket_FullAddRow(packet, y);
+        const int capture_origin = surface_origin_x(ppu, ppu->overlayRenderPitch[0]);
+        state[0] = full_add_mask | (PPU_mathEnabled(ppu) << 8);
+        state[1] = layer_rank(ppu, 0, 0) | (layer_rank(ppu, 0, 1) << 4) |
+            (layer_rank(ppu, 1, 0) << 8) | (layer_rank(ppu, 1, 1) << 12);
+        state[2] = (unsigned)(capture_origin + left) | ((unsigned)(capture_origin + right) << 16);
+        unsigned visibility = 0;
+        state[3] = (~ppu->screenEnabled[0]) & 3u;
+        for (unsigned source = 0; source < 2; ++source) {
+            NativeLayerWindowPlan windows;
+            native_layer_window_plan(ppu, (int)source, true, &windows);
+            if (windows.main_mode == 1u) visibility |= 1u << (16 + source);
+            if (windows.sub_mode == 1u) visibility |= 1u << (18 + source);
+        }
+        const unsigned empty = (1u << 3) | 5u;
+        for (unsigned x = 0; x < packet->words[0]; ++x)
+            state[4 + x] = empty | (empty << 8) | visibility;
+        PpuObjSampleCache *objects = (ppu->screenEnabled[1] & (1u << kPpuOverlaySource_Obj))
+            ? get_scene_obj_sample_cache(ppu, screen_y, 0, 0, 0,
+                ppu->overlayObjRelocatedCount ? ppu->overlayObjRelocatedFirst : 0,
+                ppu->overlayObjRelocatedCount) : NULL;
+        NativeLayerWindowPlan obj_windows = obj_visibility;
+        obj_windows.run = 0;
+        for (int x = left; x < right; ++x) {
+            const int index = x + kPpuExtraLeftRight;
+            uint16_t main = backdrop, sub = backdrop;
+            for (unsigned source = 2; source < kPpuOverlaySource_Obj; ++source) {
+                if (!(source_mask & (1u << source))) continue;
+                const bool exclude = source == kPpuOverlaySource_Bg3 &&
+                    capture_surface_bound(ppu, source) && capture_active(&ppu->overlayCaptures[source], x, screen_y);
+                if (!exclude && layer_main[source][index] > main) main = layer_main[source][index];
+                if (layer_sub[source][index] > sub) sub = layer_sub[source][index];
+            }
+            if (layer_main[kPpuOverlaySource_Obj][index] > main) main = layer_main[kPpuOverlaySource_Obj][index];
+            if (objects && obj_windows.sub_mode &&
+                !(obj_windows.sub_mode == 2u && native_window_plan_inside(&obj_windows, x))) {
+                const uint16_t pixel = native_obj_cache_pixel(objects, x);
+                if (pixel > sub) sub = pixel;
+            }
+            state[4 + capture_origin + x] = visibility |
+                (native_pixel_rank(main) << 3) | native_pixel_layer(main) |
+                (((native_pixel_rank(sub) << 3) | native_pixel_layer(sub)) << 8);
+        }
+        if (!ppu->backgroundCpuSources) {
+            /* OBJ still supplies attributes and interpolation pixels on CPU.
+             * Sample competing BG keys only at occupied OBJ pixels; no full
+             * background image or per-pixel BG scanout is produced here. */
+            if (objects && (full_add_mask & (1u << kPpuOverlaySource_Obj))) {
+                int begin = objects->opaque_left > left ? objects->opaque_left : left;
+                int end = objects->opaque_right < right ? objects->opaque_right : right;
+                for (int x = begin; x < end; ++x) {
+                    const uint16_t pixel = native_obj_cache_pixel(objects, x);
+                    if (!pixel || !capture_active(obj_capture, x, screen_y)) continue;
+                    const unsigned winner = SrPpuBgPacket_FullAddWinner(packet, state,
+                        (unsigned)(capture_origin + x), y);
+                    if ((winner & 7u) == kPpuOverlaySource_Obj)
+                        native_write_overlay_packed(ppu, kPpuOverlaySource_Obj, x, pixel,
+                            0xffu, &overlay_plans[kPpuOverlaySource_Obj]);
+                }
+            }
+            full_add_mask = 0;
         }
     }
     /* MarkFullAddSubscreen: export whichever source wins the COMPLETE
@@ -6262,6 +6425,7 @@ static void native_capture_vram_padding(Ppu *ppu, int source, int screen_y,
 static void render_line(Ppu *ppu, int line) {
     int screen_y = line - 1;
     ppu->backgroundTileSources = ppu->backgroundCpuSources = ppu->backgroundDeferredClear = 0;
+    ppu->backgroundFullAdd = false;
     for (int slot = 0; slot < kPpuObjSampleCacheCount; ++slot)
         ppu->objSampleCache[slot].valid = false;
     for (int layer = 0; layer < 2; ++layer)

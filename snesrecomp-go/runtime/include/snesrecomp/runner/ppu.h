@@ -284,9 +284,14 @@ typedef struct SrPpuCaptureApronResolveRequest {
     uint32_t struct_size;
     uint32_t flags;
     uint64_t lifetime_generation;
+    /* Optional: the owned packet from this completed scanout, borrowed for
+     * this call only. Late OBJ guard pixels participate in GPU BG ownership. */
+    SrPpuBgPacket *background_packet;
 } SrPpuCaptureApronResolveRequest;
 
 #define SR_PPU_CAPTURE_APRON_RESOLVE_REQUEST_SIZE \
+    ((uint32_t)offsetof(SrPpuCaptureApronResolveRequest, background_packet))
+#define SR_PPU_CAPTURE_APRON_RESOLVE_PACKET_SIZE \
     ((uint32_t)sizeof(SrPpuCaptureApronResolveRequest))
 
 typedef struct SrPpuObjRasterRequest {

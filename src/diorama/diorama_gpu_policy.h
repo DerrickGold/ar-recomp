@@ -5,6 +5,7 @@
 #include "actraiser_game.h"
 #include <stdlib.h>
 #include <string.h>
+#include "snesrecomp/runner/ppu_bg_packet.h"
 
 /* One policy shared by producer and presenter. All action rooms use the same
  * pipeline. Configuration is read-only; per-stage overrides are diagnostics.
@@ -25,6 +26,21 @@ typedef struct DioramaGpuPolicy {
 
 static inline bool DioramaGpuPolicy_Is(const char *value, const char *expected) {
   return value && !strcmp(value, expected);
+}
+
+/* Full-add ownership uses the existing decoder. The PPU still proves each
+ * row eligible; unsupported policies retain CPU pixels. Explicit 0 (or an
+ * unknown diagnostic value) disables this extension without disabling the
+ * rest of the GPU pipeline. */
+static inline uint32_t DioramaGpuPolicy_CaptureFlags(DioramaGpuCaptureMode mode,
+                                                    const char *full_add) {
+  if (mode != kDioramaGpuCapture_Owned && mode != kDioramaGpuCapture_TilesValidate)
+    return 0;
+  uint32_t flags = SR_PPU_BG_PACKET_TILES;
+  if (mode == kDioramaGpuCapture_TilesValidate) flags |= SR_PPU_BG_PACKET_VALIDATE_TILES;
+  if (!full_add || !*full_add || DioramaGpuPolicy_Is(full_add, "auto") ||
+      DioramaGpuPolicy_Is(full_add, "1")) flags |= SR_PPU_BG_PACKET_FULL_ADD;
+  return flags;
 }
 
 static inline DioramaGpuPolicy DioramaGpuPolicy_ResolveAutomatic(bool automatic,

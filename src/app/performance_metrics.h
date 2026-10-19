@@ -30,6 +30,9 @@ typedef enum PerformanceStage {
   kPerformance_ShadowBlur, kPerformance_ShadowTarget, kPerformance_ShadowHulls,
   /* Nested upload diagnostics; do not add these to the top-level CPU total. */
   kPerformance_TextureUpdate, kPerformance_DioramaUploadPrepare,
+  kPerformance_BgResolve, kPerformance_BgValidate, kPerformance_BgCompare,
+  kPerformance_BgTransferWrite, kPerformance_BgSubmitPending,
+  kPerformance_BgCacheCopy, kPerformance_BgCoverage,
   kPerformanceStage_Count,
 } PerformanceStage;
 

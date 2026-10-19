@@ -43,6 +43,8 @@ static const char *const kNames[kPerformanceStage_Count] = {
   "globe surface", "globe water", "voxel atlas upload", "voxel palettes",
   "shadow actors", "shadow voxels", "shadow blur", "shadow target", "shadow hulls",
   "SDL texture update", "diorama upload prepare",
+  "BG resolve", "BG validate", "BG compare", "BG transfer write",
+  "BG submit pending", "BG cache copy", "BG coverage",
 };
 
 const char *PerformanceMetrics_StageName(PerformanceStage stage) {

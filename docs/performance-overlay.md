@@ -78,6 +78,12 @@ lines (not additional rows in the on-screen panel):
 | `terrain rebuild` | Cold world height preparation, including owner-side prior preparation and joined row workers. |
 | `terrain samples` | Cold globe position/normal/height sampling, including worker join. |
 | `globe grid bake` | SIM globe grid source construction and curved embedding, including worker join. |
+| `BG resolve` | Background packet validation, comparison, staging and decode submission, including cache retention. CPU wall time, not shader execution time. |
+| `BG validate` / `BG compare` | Packet bounds/offset validation and exact content change detection. |
+| `BG transfer write` | Mapping, writing and unmapping the GPU upload buffer. No reads from upload memory. |
+| `BG submit pending` | Submission of preceding renderer work before background decode. |
+| `BG cache copy` | Retaining a changed packet in ordinary CPU memory; equal packets reuse the retained copy. |
+| `BG coverage` | Conservative mesh coverage derived from GPU-owned background packets. |
 
 Use `peak-call-ms` to find spikes. `mean-ms` is accumulated work divided by
 presentations, not average duration per invocation. Background completions are
@@ -125,6 +131,15 @@ swapchain wait. That wait can include both earlier GPU work completing and a
 display image becoming available. A large acquisition scope alone does not
 identify GPU execution time, compositor delay, or a driver fault. Separate those
 boundaries before choosing a fix.
+
+The analyzer's `intervals_by_upload` groups complete presentation intervals by
+whether any upload occurred between their two completions, including uploads
+staged during idle iterations. `worst_intervals` retains that total separately
+from the final loop's `upload_ms`. It also separates completion spacing into
+submission spacing plus the change in backend duration. A long completion
+interval with ordinary submission spacing can therefore be distinguished from
+a late submission. These are host timestamps; they do not establish physical
+scanout timing or GPU execution time.
 
 The Metal pending-presentation skip prototype and drawable-pool experiments
 remain outside production. They improved uncapped submission throughput in

@@ -1130,7 +1130,9 @@ static SrResult resolve_ppu_capture_aprons(
         return SR_RESULT_STALE_VIEW;
     Ppu *ppu = ppu_output_control_target(snes);
     if (!ppu) return SR_RESULT_UNAVAILABLE;
-    return PpuResolveCaptureAprons(ppu) ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
+    SrPpuBgPacket *packet = request->struct_size >= SR_PPU_CAPTURE_APRON_RESOLVE_PACKET_SIZE
+        ? request->background_packet : NULL;
+    return PpuResolveCaptureApronsWithPacket(ppu, packet) ? SR_RESULT_OK : SR_RESULT_INVALID_ARGUMENT;
 }
 
 static SrResult update_ppu_authentic_camera(

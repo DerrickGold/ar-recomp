@@ -2336,6 +2336,12 @@ static uint32_t finite_add_tile(const void *context, int32_t x, int32_t y, uint1
   return kPpuVirtualTilemapLookup_Found;
 }
 
+/* A provider may discover a native VRAM patch halfway through a tile row. */
+static uint32_t fallback_add_tile(const void *context, int32_t x, int32_t y, uint16_t *word) {
+  if (y == 2 && x == 30) return kPpuVirtualTilemapLookup_FallbackAuthentic;
+  return finite_add_tile(context, x, y, word);
+}
+
 static uint32_t painted_add_tile(void *context, int32_t x, int32_t y, SrPpuCaptureTile *tile) {
   const unsigned source = *(const unsigned *)context;
   if (x < 64 && (x < 24 || x >= 26)) return 0;
@@ -2365,8 +2371,8 @@ static void TestFullAddPaintedScenery(void) {
   const unsigned sources[2] = {0, 1};
   /* Reordering export by source must preserve windows, both addend BGs,
    * absent priority surfaces, backing, and the unmodified authentic frame. */
-  for (unsigned scenario = 0; scenario < 6; ++scenario)
-  for (unsigned reference = 0; reference < 2; ++reference)
+  for (unsigned scenario = 0; scenario < 12; ++scenario)
+  for (unsigned reference = 0; reference < 4; ++reference)
   for (unsigned painted = 0; painted < 2; ++painted) {
     ppu_reset(ppu);
     memset(bg, 0, sizeof(bg)); memset(obj, 0, sizeof(obj));
@@ -2382,6 +2388,11 @@ static void TestFullAddPaintedScenery(void) {
     if (scenario == 3) {
       ppu->screenEnabled[0] = 1; ppu->screenEnabled[1] = 0x12;
     }
+    if (scenario == 7) { /* Uniform inverted windows are still GPU eligible. */
+      ppu->windowsel = 0x3333;
+      ppu->screenWindowed[0] = 2; ppu->screenWindowed[1] = 0x11;
+      ppu->window1left = 0; ppu->window1right = 255;
+    }
     ppu->cgram[0x11] = bgr555(31, 0, 0);
     ppu->cgram[0x21] = bgr555(0, 0, 31);
     ppu->cgram[0x81] = bgr555(0, 31, 0);
@@ -2396,20 +2407,24 @@ static void TestFullAddPaintedScenery(void) {
     }
     PpuSetExtraSpace(ppu, margin);
     CHECK(PpuBeginDrawingSized(ppu, (uint8_t *)fb, width * 4, kH,
-        reference ? kPpuRenderFlags_ReferencePixelRenderer : 0));
-    CHECK(PpuBindAuthenticSurfaceSized(ppu, (uint8_t *)authentic, width * 4, kH));
+        reference == 1 ? kPpuRenderFlags_ReferencePixelRenderer : 0));
+    if (reference < 2) CHECK(PpuBindAuthenticSurfaceSized(ppu, (uint8_t *)authentic, width * 4, kH));
+    else CHECK(PpuBindAuthenticSurfaceSized(ppu, NULL, 0, 0));
     memset(packet, 0, sizeof(*packet));
-    packet->words[0] = width; packet->words[1] = height;
+    SrPpuBgPacket_Begin(packet, width, height);
+    if (reference >= 2) packet->request_flags = SR_PPU_BG_PACKET_TILES | SR_PPU_BG_PACKET_FULL_ADD |
+        (reference == 3 ? SR_PPU_BG_PACKET_VALIDATE_TILES : 0);
     ppu->backgroundPacket = packet;
     for (unsigned source = 0; source < 2; ++source) {
-      const PpuVirtualTilemapBinding binding = {.lookup = finite_add_tile,
+      const PpuVirtualTilemapBinding binding = {.lookup = scenario >= 10 && source == scenario - 10
+              ? fallback_add_tile : finite_add_tile,
           .context = &sources[source], .camera_x = 140, .camera_y = -1,
           .flags = kPpuVirtualTilemapFlag_IncludeAuthentic};
       CHECK(PpuSetVirtualTilemap(ppu, source, &binding));
       CHECK(PpuBindOverlaySurfaceSized(ppu, source, (uint8_t *)bg[source][0], width * 4, height));
-      if (scenario == 5) CHECK(PpuSetOverlayTransparentFill(ppu, (PpuOverlaySource)source,
+      if (scenario == 5 || scenario == 6) CHECK(PpuSetOverlayTransparentFill(ppu, (PpuOverlaySource)source,
           kPpuOverlayTransparentFill_Black, 0));
-      for (unsigned band = 1; scenario != 4 && band < 3; ++band)
+      for (unsigned band = 1; scenario != 4 && band < (scenario == 9 || (scenario == 8 && source) ? 2u : 3u); ++band)
         CHECK(PpuBindOverlayPrioSurface(ppu, source, band, (uint8_t *)bg[source][band]));
       CHECK(PpuSetOverlayCapture(ppu, source, -margin, 0, kW + 2 * margin, height,
           kPpuOverlayFlag_RemoveFromGame | ((!source || scenario == 2 || scenario == 3) ? kPpuOverlayFlag_MarkFullAddSubscreen : 0)));
@@ -2425,12 +2440,38 @@ static void TestFullAddPaintedScenery(void) {
     ppu_runLine(ppu, 0);
     for (int y = 0; y < height; ++y) ppu_runLine(ppu, y + 1);
     if (!painted) { memcpy(baseline, authentic, sizeof(baseline)); continue; }
-    CHECK(!memcmp(baseline, authentic, sizeof(baseline)));
+    if (reference < 2) CHECK(!memcmp(baseline, authentic, sizeof(baseline)));
     for (int y = 0; y < height; ++y) for (int x = 376; x < 384; ++x)
       obj[2][y * width + origin + x] = 0xff00ff00u;
+    if (reference >= 2 && scenario == 0) {
+      const uint32_t table = packet->words[7];
+      packet->words[7] = packet->words[3];
+      CHECK(!PpuResolveCaptureApronsWithPacket(ppu, packet));
+      packet->words[7] = table;
+      CHECK(SrPpuBgPacket_Valid(packet));
+    }
     /* Apron resolution requires all bands; scenario 4 deliberately leaves
      * them unbound to exercise ordinary capture's primary-band fallback. */
     CHECK(PpuResolveCaptureAprons(ppu) == (scenario != 4));
+    if (reference >= 2 && (scenario == 0 || scenario == 2 || scenario == 3 || scenario >= 6)) {
+      CHECK(SrPpuBgPacket_FullAddRow(packet, 0) != NULL);
+      if (!SrPpuBgPacket_FullAddRow(packet, 0)) goto full_add_done;
+
+      CHECK((packet->owned_sources & 3u) == (reference == 2 ? 3u : 0u));
+    }
+    if (reference >= 2) {
+      for (unsigned source = 0; source < 2; ++source) for (unsigned band = 0; band < 3; ++band)
+      for (unsigned y = 0; y < height; ++y) for (unsigned x = 0; x < width; ++x) {
+        if (!SrPpuBgPacket_Meta(packet, source, y)[0]) continue;
+        uint32_t color = SrPpuBgPacket_Color(packet, source, band, x, y);
+        if (reference == 2) bg[source][band][y * width + x] = color;
+        else if (color != bg[source][band][y * width + x]) {
+          fprintf(stderr, "full-add packet scenario=%u bg=%u band=%u xy=%u,%u got=%08x expected=%08x\n",
+              scenario, source, band, x, y, color, bg[source][band][y * width + x]);
+          CHECK(false); goto full_add_done;
+        }
+      }
+    }
     if (scenario == 0) for (int y = 0; y < height; ++y) for (unsigned location = 0; location < 2; ++location)
     for (int dx = 0; dx < 12; ++dx) {
       const int x = (location ? 372 : 52) + dx, at = y * width + origin + x;
@@ -2450,8 +2491,18 @@ static void TestFullAddPaintedScenery(void) {
         CHECK(SrPpuBgPacket_Color(packet, source, band, x, y) == bg[source][band][y * width + x]);
     }
     if (!reference) { memcpy(expected_bg, bg, sizeof(bg)); memcpy(expected_obj, obj, sizeof(obj)); }
-    else { CHECK(!memcmp(expected_bg, bg, sizeof(bg))); CHECK(!memcmp(expected_obj, obj, sizeof(obj))); }
+    else {
+      if (memcmp(expected_bg, bg, sizeof(bg))) {
+        for (unsigned i = 0; i < sizeof(bg) / 4; ++i) if (expected_bg[i] != ((uint32_t *)bg)[i]) {
+          fprintf(stderr, "full-add renderer=%u scenario=%u BG index=%u got=%08x expected=%08x\n",
+              reference, scenario, i, ((uint32_t *)bg)[i], expected_bg[i]); break;
+        }
+        CHECK(false); goto full_add_done;
+      }
+      CHECK(!memcmp(expected_obj, obj, sizeof(obj)));
+    }
   }
+full_add_done:
   ppu->backgroundPacket = NULL;
   free(packet); ppu_free(ppu);
 }

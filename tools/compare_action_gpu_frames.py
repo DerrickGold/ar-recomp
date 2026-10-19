@@ -8,8 +8,10 @@ numpy accelerates image analysis; Pillow adds PNG previews. Keep raw evidence un
 been reviewed. Use the same executable/backend and settings for both variants;
 --allow-binary-change explicitly permits a comparison between builds. Free Cam
 isolates rendering by default; use --camera-mode 'Dynamic Cam' to check framing.
-The comparison binding stays enabled to exercise the separate authentic pass
+The comparison binding stays enabled by default to exercise the separate authentic pass
 at camera clamps, even though the walkthrough never opens comparison mode.
+Full-add ownership checks must use --no-compare-binding; --require-full-add and
+--minimum-camera-travel reject inactive paths and stuck scripted routes.
 """
 from __future__ import annotations
 
@@ -44,8 +46,9 @@ def capture(a):
         shutil.copy2(root / name, work / name)
     # Shared boot recording followed by a deterministic right/jump/attack route.
     records = dict(struct.iter_unpack('<II', (root / 'input.rec').read_bytes()))
-    for frame in range(900, a.frames + 1):
-        records[frame] = 0 if a.stationary else 128 | (1 if frame % 100 < 22 else 0) | (2 if frame % 40 < 10 else 0)
+    if not a.keep_replay:
+        for frame in range(900, a.frames + 1):
+            records[frame] = 0 if a.stationary else 128 | (1 if frame % 100 < 22 else 0) | (2 if frame % 40 < 10 else 0)
     (work / 'input.rec').write_bytes(b''.join(
         struct.pack('<II', f, records.get(f, 0)) for f in range(a.frames + 1)))
     (work / 'settings.ini').write_text('''save_backend = native-srm
@@ -74,6 +77,8 @@ bind_key_render_compare = Key 43 Tab
     .replace('diorama_tilt_x_mrad = 0', f'diorama_tilt_x_mrad = {a.tilt_x}')
     .replace('diorama_tilt_y_mrad = 0', f'diorama_tilt_y_mrad = {a.tilt_y}')
     .replace('diorama_distance_x100 = 325', f'diorama_distance_x100 = {a.distance}')
+    .replace('bind_key_render_compare = Key 43 Tab',
+             'bind_key_render_compare = Key 43 Tab' if a.compare_binding else 'bind_key_render_compare = Unbound')
     + f'gpu_interp_enabled = {"Off" if a.phase == "source" else "On"}\n')
     env = {k: v for k, v in os.environ.items() if not k.startswith(('AR_', 'SNESRECOMP_'))}
     env.update(SDL_AUDIODRIVER='dummy', AR_USER_DATA_DIR=str(work),
@@ -93,6 +98,12 @@ bind_key_render_compare = Key 43 Tab
                AR_GPU_BG_MOTION='owned' if a.variant == 'gpu' else '0',
                AR_FRAME_CAPTURE_TICK_CLOCK='1', AR_SHOT_FROM=str(a.start), AR_SHOT_TO=str(a.end),
                AR_SHOT_EVERY=str(a.every), AR_SHOT_REQUIRE_COMPOSITE='1')
+    if a.full_add != 'default':
+        env['AR_GPU_BG_FULL_ADD'] = a.full_add
+    if a.packet_cache != 'default':
+        env['AR_GPU_BG_PACKET_CACHE'] = a.packet_cache
+    if a.moonjump_speed:
+        env.update(AR_MOONJUMP='1', AR_MOONJUMP_SPEED=str(a.moonjump_speed))
     if a.phase != 'source':
         env['AR_SHOT_PHASE'] = a.phase
     if sys.platform.startswith('linux'):
@@ -104,7 +115,9 @@ bind_key_render_compare = Key 43 Tab
                            k in ('XDG_RUNTIME_DIR', 'WAYLAND_DISPLAY', 'LD_LIBRARY_PATH')},
                       replay_sha256=sha(work / 'input.rec'), settings_sha256=sha(work / 'settings.ini'),
                       variant=a.variant, effect_projection=a.effect_projection, handoff=a.handoff, prepare_worker=a.prepare_worker, bg_decode=a.bg_decode,
-                      phase=a.phase, start=a.start, end=a.end, every=a.every)
+                      phase=a.phase, start=a.start, end=a.end, every=a.every,
+                      minimum_camera_travel=a.minimum_camera_travel,
+                      require_full_add=a.require_full_add)
     (work / 'provenance.json').write_text(json.dumps(provenance, indent=2))
     with (work / 'test.log').open('w') as log:
         result = subprocess.run(command, cwd=work, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=600)
@@ -117,7 +130,7 @@ def validate_capture(a, work, provenance, returncode=0):
     root = Path(provenance['command'][1]).parent
     inputs = provenance['inputs']
     log = (work / 'test.log').read_text()
-    if returncode or re.search(r'\[fatal-session\]|\[missing-mx-variant\]|\[dispatch-oob\]|VK_ERROR_|\[gpu-bg-decode\] native resolve failed', log):
+    if returncode or re.search(r'\[fatal-session\]|\[missing-mx-variant\]|\[dispatch-oob\]|VK_ERROR_|\[gpu-bg-decode\] native resolve failed|\[gpu-bg-capture\] (?:mismatch |skybox mismatch)', log):
         raise RuntimeError(f'Replay failed: {work / "test.log"}')
     validate_run_completion(log, a.frames)
     if a.variant == 'gpu':
@@ -125,7 +138,8 @@ def validate_capture(a, work, provenance, returncode=0):
         # Some PPU sources still publish decoded pixels (color math or native
         # post-scanout edits). Confirm actual tile ownership without claiming
         # every source is eligible, and retain each observed mask as evidence.
-        if not ownership or not all(int(owned, 16) and not (int(owned, 16) & ~int(mask, 16)) for mask, owned in ownership):
+        if (not ownership or any(int(owned, 16) & ~int(mask, 16) for mask, owned in ownership) or
+                (a.full_add != '0' and not any(int(owned, 16) for _, owned in ownership))):
             raise RuntimeError('GPU background ownership was not confirmed')
     if a.variant == 'gpu' and a.bg_decode == 'native' and '[gpu-bg-decode] native storage-buffer compute active' not in log:
         raise RuntimeError('Native background decode was not exercised')
@@ -151,6 +165,11 @@ def validate_capture(a, work, provenance, returncode=0):
         raise RuntimeError('Missing camera evidence or wrong room')
     ranges = {bg: [max(s[bg][i] for s in states.values()) - min(s[bg][i] for s in states.values())
                    for i in range(2)] for bg in ('bg1', 'bg2')}
+    if any(got < required for got, required in zip(ranges['bg1'], a.minimum_camera_travel)):
+        raise RuntimeError(f'Camera did not traverse the required distance: {ranges}')
+    full_add_rows = [int(n) for n in re.findall(r'full-add-rows=(\d+)', log)]
+    if a.require_full_add and (not full_add_rows or not any(full_add_rows)):
+        raise RuntimeError('Full-add background ownership was not exercised')
     if a.phase != 'source' and not any(s['generated'] for s in states.values()):
         raise RuntimeError('Interpolation was never exercised')
     if a.variant == 'gpu' and a.phase != 'source' and not any(s['gpu'] for s in states.values()):
@@ -158,7 +177,8 @@ def validate_capture(a, work, provenance, returncode=0):
     if sha(binary) != provenance['binary_sha256'] or any(sha(root / k) != v for k, v in inputs.items()):
         raise RuntimeError('Inputs changed during run')
     report = dict(**provenance, **evidence, images=images, states=states, camera_ranges=ranges,
-                  background_ownership=ownership if a.variant == 'gpu' else [])
+                  background_ownership=ownership if a.variant == 'gpu' else [],
+                  full_add_rows=full_add_rows)
     (work / 'capture.json').write_text(json.dumps(report, indent=2))
     print(json.dumps(dict(output=str(work), frames=len(images), camera_ranges=ranges,
                           generated_frames=sum(bool(s['generated']) for s in states.values()),
@@ -253,6 +273,18 @@ def main():
     p.add_argument('--variant', choices=('cpu', 'gpu'), default='cpu')
     p.add_argument('--room', default='0101')
     p.add_argument('--stationary', action='store_true', help='Remain at the room entrance after the boot recording')
+    p.add_argument('--keep-replay', action='store_true', help='Preserve the staged input.rec route instead of replacing it')
+    p.add_argument('--full-add', choices=('default', '0', '1'), default='default',
+                   help='Compare full-add ownership independently of the rest of the GPU pipeline')
+    p.add_argument('--packet-cache', choices=('default', '0', '1'), default='default',
+                   help='Compare packet preparation while preserving the GPU capture and shaders')
+    p.add_argument('--require-full-add', action='store_true', help='Fail if the full-add packet path was not exercised')
+    p.add_argument('--minimum-camera-travel', type=int, nargs=2, default=[0, 0], metavar=('X', 'Y'),
+                   help='Reject stuck routes using actual captured BG1 camera positions')
+    p.add_argument('--compare-binding', action=argparse.BooleanOptionalAction, default=True,
+                   help='Disable for owned-capture tests; the authentic comparison pass requires CPU pixels')
+    p.add_argument('--moonjump-speed', type=int, default=0,
+                   help='Optional assisted renderer traversal; holding jump lifts the player this many pixels per tick')
     p.add_argument('--camera-mode', choices=('Free Cam', 'Dynamic Cam'), default='Free Cam',
                    help='Free Cam isolates rendering; Dynamic Cam exercises the gameplay framing clamps')
     p.add_argument('--skybox', choices=('Skybox only', 'Plane + skybox', 'Off'), default='Skybox only')
@@ -279,6 +311,9 @@ def main():
         provenance = json.loads((work / 'provenance.json').read_text())
         for key in ('variant', 'effect_projection', 'handoff', 'prepare_worker', 'bg_decode', 'phase', 'start', 'end', 'every'):
             setattr(a, key, provenance[key])
+        a.minimum_camera_travel = provenance.get('minimum_camera_travel', [0, 0])
+        a.require_full_add = provenance.get('require_full_add', False)
+        a.full_add = provenance['env'].get('AR_GPU_BG_FULL_ADD', 'default')
         a.room = provenance['env']['AR_WARP']
         a.frames = int(provenance['env']['AR_QUIT_FRAMES'])
         if (sha(work / 'input.rec') != provenance['replay_sha256'] or
