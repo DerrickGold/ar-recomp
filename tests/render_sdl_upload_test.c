@@ -1,4 +1,4 @@
-/* Real GPU ordering/readback test for retained texture upload staging. */
+/* Real GPU ordering/readback tests for upload reuse and split presentation. */
 #include "platform/sdl/render_sdl_internal.h"
 #include "support/test_assert.h"
 #include "support/test_sdl_environment.h"
@@ -59,6 +59,67 @@ static void CheckUploads(ArRenderDevice *device, ArRenderPixelFormat format) {
   assert(ArRenderDevice_SetRenderTarget(device,ArRenderTexture_Invalid()));
   SDL_DestroyTexture(target);
 }
+
+static void CheckPreparedPresentation(ArRenderDevice *device, SDL_Window *window) {
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
+  const ArRenderTextureDesc desc = {.width=W, .height=H,
+    .format=kArRenderPixelFormat_Argb8888, .usage=kArRenderTextureUsage_Streaming,
+    .filter=kArRenderFilter_Nearest, .blend=kArRenderBlendMode_Opaque};
+  ArRenderTexture source;
+  assert(ArRenderDevice_CreateTexture(device, &desc, &source));
+  assert(ArRenderDevice_SetRenderTarget(device, ArRenderTexture_Invalid()));
+  Uint32 pixels[H][W];
+  for (unsigned frame=0; frame<32; ++frame) {
+    if (frame & 1) assert(SDL_ShowWindow(window));
+    else assert(SDL_HideWindow(window));
+    SDL_PumpEvents();
+    SDL_Surface *reference = NULL;
+    for (unsigned prepared=0; prepared<2; ++prepared) {
+      /* Exercise upload reuse/order hazards before submitting. The
+       * second upload must not overwrite the texture used by the first draw. */
+      for (int y=0; y<H; ++y) for (int x=0; x<W; ++x)
+        pixels[y][x]=Color(frame,x,y);
+      assert(ArRenderDevice_UpdateTexture(device, source, NULL, pixels, sizeof(pixels[0])));
+      const SDL_FRect left={0,0,W,H}, right={W,0,W,H};
+      SDL_Texture *native = ArSdlRenderBackend_UnwrapTexture(source);
+      assert(SDL_RenderTexture(renderer, native, NULL, &left));
+      for (int y=0; y<H; ++y) for (int x=0; x<W; ++x)
+        pixels[y][x]=Color(frame+1,x,y);
+      assert(ArRenderDevice_UpdateTexture(device, source, NULL, pixels, sizeof(pixels[0])));
+      assert(SDL_RenderTexture(renderer, native, NULL, &right));
+      const SDL_FRect overlay={17,2,47,4};
+      assert(SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND));
+      assert(SDL_SetRenderDrawColor(renderer, 231, 91, 15, 93));
+      assert(SDL_RenderFillRect(renderer, &overlay));
+      if (prepared) {
+        assert(ArSdlRenderBackend_PreparePresent(device));
+        SDL_Delay(1); /* Only a wait between prepare and present, as in host. */
+        assert(ArSdlRenderBackend_PresentPrepared(device));
+      } else assert(ArRenderDevice_Present(device));
+      /* Read only AFTER the terminal submission: a readback before it would
+       * accidentally serialize the sequence we are trying to validate. */
+      SDL_Surface *raw = SDL_RenderReadPixels(renderer, NULL);
+      assert(raw);
+      SDL_Surface *actual = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+      SDL_DestroySurface(raw);
+      assert(actual && actual->w == W*2 && actual->h == H);
+      Uint32 first;
+      memcpy(&first, actual->pixels, sizeof(first));
+      assert(first == Color(frame,0,0)); /* Cannot pass by retaining old pixels. */
+      if (!prepared) reference = actual;
+      else {
+        for (int y=0; y<H; ++y)
+          assert(!memcmp((Uint8 *)reference->pixels+y*reference->pitch,
+                         (Uint8 *)actual->pixels+y*actual->pitch, W*2*4));
+        SDL_DestroySurface(actual);
+      }
+    }
+    SDL_DestroySurface(reference);
+  }
+  ArRenderDevice_DestroyTexture(device, source);
+  puts("split presentation: 32 pixel-exact pairs, visible and hidden windows");
+}
+
 int main(void) {
   if (!SDL_Init(SDL_INIT_VIDEO)) return 77;
   SDL_Window *window=SDL_CreateWindow("Upload staging test",W*2,H,SDL_WINDOW_HIDDEN);
@@ -73,6 +134,7 @@ int main(void) {
   assert(((ArSdlRenderBackend *)device.context)->reuse_texture_uploads);
   CheckUploads(&device,kArRenderPixelFormat_Argb8888);
   CheckUploads(&device,kArRenderPixelFormat_Abgr8888);
+  CheckPreparedPresentation(&device,window);
   ArSdlRenderBackend_Destroy(&device);SDL_DestroyWindow(window);SDL_Quit();
   puts("render_sdl_upload_test: PASS");return 0;
 }

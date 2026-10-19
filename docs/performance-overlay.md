@@ -132,6 +132,15 @@ display image becoming available. A large acquisition scope alone does not
 identify GPU execution time, compositor delay, or a driver fault. Separate those
 boundaries before choosing a fix.
 
+New traces split that scope into `backend_command_ns` (native texture lookup
+and command-buffer setup) and `backend_swapchain_ns` (the swapchain acquisition
+call). They also split `backend_submit_ns` into `backend_blit_ns` (encoding)
+and `backend_queue_submit_ns` (the terminal submit/present API). These are
+nested CPU scopes, not four additional costs; the analyzer checks their sums.
+They add no timestamp calls when tracing is disabled. For actual Metal command
+execution and OS-reported drawable presentation, see the separate, opt-in
+[GPU and presentation timing diagnostic](gpu-presentation-timing.md).
+
 The analyzer's `intervals_by_upload` groups complete presentation intervals by
 whether any upload occurred between their two completions, including uploads
 staged during idle iterations. `worst_intervals` retains that total separately
@@ -141,13 +150,26 @@ interval with ordinary submission spacing can therefore be distinguished from
 a late submission. These are host timestamps; they do not establish physical
 scanout timing or GPU execution time.
 
-The Metal pending-presentation skip prototype and drawable-pool experiments
-remain outside production. They improved uncapped submission throughput in
-short windowed samples, but did not demonstrate smoother delivery of distinct
-native game states. Their native interception is diagnostic instrumentation,
-not a supported application readiness API. The game retains ordinary backend
-presentation and its existing frame limiter; it has no SDL patch or native
-presentation interception.
+The opt-in `AR_GPU_EARLY_SUBMIT=1` prototype moves final offscreen submission
+before the software deadline wait. Its `offscreen_submit_ns` trace is nested in
+`draw_work_ns`; do not add it a second time. `offscreen_complete_ns` is when the
+CPU submission call returned, not when the GPU finished. The analyzer reports
+the available overlap window separately. See
+[early submission](gpu-early-submission-prototype.md) for scope and measurements.
+
+Native GPU interpolation now synthesizes images into their final layer
+textures by default, avoiding atlas unpack copies and their intermediate
+allocations. `AR_GPU_DIRECT_LAYERS=0` selects the reference path; unavailable
+direct output falls back automatically. See [production integration](gpu-rendering-integration.md)
+for controls, parity checks and the remaining pacing validation.
+
+The Metal pending-presentation skip prototype remains outside production.
+The drawable-pool policy is integrated separately: two drawables under Mac
+VSync, three otherwise. `AR_METAL_DRAWABLE_COUNT=2|3|auto` overrides or restores
+that policy for diagnosis. It accesses SDL's documented Cocoa view and the
+public layer property; it does not intercept native methods or patch SDL.
+Vulkan/DX12 retain their existing swapchain policy. The ordinary backend
+presentation and frame limiter remain in charge of scheduling.
 
 The optional threshold fails the command if source cadence exceeds the stated
 percentage. The analyzer fits one constant source/display phase per epoch and

@@ -257,8 +257,30 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_nat
         if 'submit_deadline_ns' in rows[0]:
             result['submit_late_ms'] = stats([max(0,r['submit_start_ns']-r['submit_deadline_ns'])/1e6
                                              for r in presents if r['submit_deadline_ns']])
-    for key in ('backend_flush_ns', 'backend_acquire_ns', 'backend_submit_ns'):
+    backend_scopes = ('backend_flush_ns', 'backend_acquire_ns', 'backend_submit_ns',
+                      'backend_command_ns', 'backend_swapchain_ns',
+                      'backend_blit_ns', 'backend_queue_submit_ns')
+    for parent, parts in [('backend_acquire_ns', ('backend_command_ns', 'backend_swapchain_ns')),
+                          ('backend_submit_ns', ('backend_blit_ns', 'backend_queue_submit_ns'))]:
+        if any(key in rows[0] for key in parts):
+            if not all(key in rows[0] for key in (parent, *parts)):
+                raise ValueError('Incomplete backend timing breakdown')
+            if any(any(r[key] < 0 for key in parts) or sum(r[key] for key in parts) != r[parent]
+                   for r in presents):
+                raise ValueError('Inconsistent backend timing breakdown')
+    for key in backend_scopes:
         if key in rows[0]: result[key.replace('_ns','_ms')] = stats(durations(key, presents))
+    early = [r for r in presents if r.get('offscreen_complete_ns', 0)]
+    for r in early:
+        start = r['offscreen_complete_ns'] - r['offscreen_submit_ns']
+        if not (r['draw_ns'] <= start <= r['offscreen_complete_ns'] <=
+                r['draw_ns'] + r['draw_work_ns'] <= r['submit_start_ns']):
+            raise ValueError('Inconsistent early offscreen submission timestamps')
+    # Nested CPU wall time already included in draw_work_ms. The gap is an
+    # opportunity for GPU overlap, not a measurement of GPU execution time.
+    result['offscreen_submit_ms'] = stats(durations('offscreen_submit_ns', early))
+    result['offscreen_overlap_window_ms'] = stats([
+        (r['submit_start_ns'] - r['offscreen_complete_ns']) / 1e6 for r in early])
     # Preserve the worst intervals with their stage evidence for causal inspection.
     worst = []
     for a,b,upload_count,upload_ns in presentation_intervals(rows):
@@ -284,8 +306,11 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_nat
                 # Signed slack: negative means the producer itself finished
                 # after this output deadline, before owner-side preparation.
                 evidence['source_ready_slack_ms'] = (b['submit_deadline_ns']-b['producer_complete_ns'])/1e6
-        for key in ('backend_flush_ns', 'backend_acquire_ns', 'backend_submit_ns'):
+        for key in backend_scopes:
             if key in b: evidence[key.replace('_ns','_ms')] = b[key]/1e6
+        if b.get('offscreen_complete_ns', 0):
+            evidence['offscreen_submit_ms'] = b['offscreen_submit_ns'] / 1e6
+            evidence['offscreen_overlap_window_ms'] = (b['submit_start_ns'] - b['offscreen_complete_ns']) / 1e6
         if b.get('draw_cpu_ns', 0):
             evidence['draw_cpu_ms'] = b['draw_cpu_ns']/1e6
             evidence['draw_unaccounted_wall_ms'] = max(0, b['draw_work_ns']-b['draw_cpu_ns'])/1e6

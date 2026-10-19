@@ -41,7 +41,7 @@ class PipelinePerformanceTest(unittest.TestCase):
         # A successful process and changing sprites are not evidence of a
         # scrolling full-add path. Validate the gate before accepting captures.
         args = SimpleNamespace(frames=1500, variant='gpu', full_add='default',
-            bg_decode='fragment', handoff='0', phase='source', effect_projection='reference',
+            bg_decode='fragment', handoff='0', direct_layers='0', phase='source', effect_projection='reference',
             prepare_worker=False, start=1000, end=1001, every=1, room='0501',
             minimum_camera_travel=[100, 40], require_full_add=True)
         provenance = dict(command=['binary', 'ar.sfc'], inputs={}, binary_sha256='hash')

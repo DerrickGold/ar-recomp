@@ -18,8 +18,19 @@ typedef struct ArGpuBlockMotion {
 bool ArGpuBlockMotion_Init(ArGpuBlockMotion *, SDL_GPUDevice *);
 void ArGpuBlockMotion_Destroy(ArGpuBlockMotion *);
 bool ArGpuBlockMotion_Resize(ArGpuBlockMotion *, unsigned width, unsigned height);
+/* Allocate atlas color/material output only for reference/fallback synthesis. */
+bool ArGpuBlockMotion_EnsureOutput(ArGpuBlockMotion *);
 bool ArGpuBlockMotion_Analyze(ArGpuBlockMotion *, SDL_GPUCommandBuffer *, SDL_GPUTexture *previous,
                               SDL_GPUTexture *current);
 bool ArGpuBlockMotion_Warp(ArGpuBlockMotion *, SDL_GPUCommandBuffer *, SDL_GPUTexture *previous,
                            SDL_GPUTexture *current, float phase, unsigned mask);
+/* Final layer targets: color and companion metadata use the same capture
+ * rectangle at (x, 0). The whole target is cleared each warp, including padding. */
+typedef struct ArGpuBlockMotionTarget {
+  SDL_GPUTexture *color, *attributes;
+  unsigned width, height, x;
+} ArGpuBlockMotionTarget;
+bool ArGpuBlockMotion_WarpLayers(ArGpuBlockMotion *, SDL_GPUCommandBuffer *,
+    SDL_GPUTexture *previous, SDL_GPUTexture *current, float phase, unsigned mask,
+    const ArGpuBlockMotionTarget targets[4]);
 #endif

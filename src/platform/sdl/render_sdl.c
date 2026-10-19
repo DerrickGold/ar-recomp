@@ -1,6 +1,7 @@
 #include "render_sdl_internal.h"
 #include "app/performance_metrics.h"
 #include "platform/sdl/gpu_texture_upload_layout.h"
+#include "platform/sdl/metal_drawable_sdl.h"
 
 #include <limits.h>
 #include <stddef.h>
@@ -585,22 +586,47 @@ static bool DrawGeometry(void *context, ArRenderTexture texture,
   return rendered && restored && address_restored;
 }
 
-static bool PresentWindow(ArSdlRenderBackend *backend) {
+static void ConfigureMetalDrawables(ArSdlRenderBackend *backend) {
+  if (!backend->metal_drawable_policy) return;
+  /* This pool is independent of SDL's GPU frames-in-flight limit. Keep the
+   * immediate-mode default: only VSync has demonstrated a cadence-safe win.
+   * Re-resolve the current view before acquisition to cover layer replacement
+   * during fullscreen/resize without retaining an unowned native pointer. */
+  const unsigned count = backend->metal_drawable_override ? backend->metal_drawable_override :
+      backend->output_present_mode == SDL_GPU_PRESENTMODE_VSYNC ? 2 : 3;
+  const unsigned actual = ArSdlMetalDrawable_Configure(backend->output_window, count);
+  if (actual != count) {
+    if (!backend->metal_drawable_warning)
+      SDL_Log("[render] Metal drawable policy unavailable; retaining platform defaults");
+    backend->metal_drawable_warning = true;
+  } else if (backend->reported_metal_drawables != actual) {
+    backend->reported_metal_drawables = actual;
+    SDL_Log("[render] Metal drawable pool=%u (%s)", actual,
+        backend->metal_drawable_override ? "override" : "automatic");
+  }
+}
+
+static bool PresentWindow(ArSdlRenderBackend *backend, bool prepared) {
   const bool trace = backend->present_trace_enabled;
   if (trace) backend->present_trace = (ArSdlPresentTrace){0};
   const uint64_t started = trace ? SDL_GetTicksNS() : 0;
+  ConfigureMetalDrawables(backend);
   if (SDL_GetRenderTarget(backend->renderer) != backend->output_target)
     return SDL_SetError("ordered GPU present requires the default output target");
-  /* RenderPresent itself does not propagate its internal flush failure. */
-  if (!SDL_FlushRenderer(backend->renderer)) return false;
-  if (!SDL_RenderPresent(backend->renderer)) return false;
-  const uint64_t flushed = trace ? SDL_GetTicksNS() : 0;
+  if (!prepared) {
+    /* RenderPresent itself does not propagate its internal flush failure. */
+    if (!SDL_FlushRenderer(backend->renderer)) return false;
+    if (!SDL_RenderPresent(backend->renderer)) return false;
+  }
+  const uint64_t flushed = trace && !prepared ? SDL_GetTicksNS() : started;
   if (trace) backend->present_trace.flush_ns = flushed - started;
   SDL_GPUTexture *source = SDL_GetPointerProperty(SDL_GetTextureProperties(backend->output_target),
       SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, NULL);
   if (!source) return SDL_SetError("ordered GPU output target has no native texture");
   SDL_GPUCommandBuffer *commands = SDL_AcquireGPUCommandBuffer(backend->gpu_device);
   if (!commands) return false;
+  const uint64_t command_acquired = trace ? SDL_GetTicksNS() : 0;
+  if (trace) backend->present_trace.command_ns = command_acquired - flushed;
   SDL_GPUTexture *swapchain = NULL;
   Uint32 width = 0, height = 0;
   if (!SDL_WaitAndAcquireGPUSwapchainTexture(commands, backend->output_window,
@@ -609,7 +635,10 @@ static bool PresentWindow(ArSdlRenderBackend *backend) {
     return false;
   }
   const uint64_t acquired = trace ? SDL_GetTicksNS() : 0;
-  if (trace) backend->present_trace.acquire_ns = acquired - flushed;
+  if (trace) {
+    backend->present_trace.acquire_ns = acquired - flushed;
+    backend->present_trace.swapchain_ns = acquired - command_acquired;
+  }
   /* A hidden/minimized window can acquire successfully without an image.
    * Still submit: SDL's Vulkan backend uses this swapchain-requesting buffer
    * to retire preceding offscreen work and recycle its resources. Cancelling
@@ -626,15 +655,21 @@ static bool PresentWindow(ArSdlRenderBackend *backend) {
   }
   /* Submission consumes the command buffer even on failure. Keep acquisition,
    * blit recording and terminal submission inside this owner-thread call. */
+  const uint64_t encoded = trace ? SDL_GetTicksNS() : 0;
   const bool submitted = SDL_SubmitGPUCommandBuffer(commands);
-  if (trace) backend->present_trace.submit_ns = SDL_GetTicksNS() - acquired;
+  if (trace) {
+    const uint64_t completed = SDL_GetTicksNS();
+    backend->present_trace.submit_ns = completed - acquired;
+    backend->present_trace.blit_ns = encoded - acquired;
+    backend->present_trace.queue_submit_ns = completed - encoded;
+  }
   return submitted;
 }
 
 static bool Present(void *context) {
   ArSdlRenderBackend *backend = context;
   if (!backend->output_window) return SDL_RenderPresent(backend->renderer);
-  return PresentWindow(backend);
+  return PresentWindow(backend, false);
 }
 
 static const char *LastError(void *context) {
@@ -694,6 +729,24 @@ bool ArSdlRenderBackend_SubmitPending(const ArRenderDevice *device) {
    * RenderPresent does not propagate its internal command-flush result. */
   if (!SDL_FlushRenderer(renderer)) return false;
   return !backend->output_window || SDL_RenderPresent(renderer);
+}
+
+bool ArSdlRenderBackend_PreparePresent(const ArRenderDevice *device) {
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
+  if (!renderer) return false;
+  const ArSdlRenderBackend *backend = device->context;
+  if (backend->output_window && SDL_GetRenderTarget(renderer) != backend->output_target)
+    return SDL_SetError("ordered GPU present requires the default output target");
+  return ArSdlRenderBackend_SubmitPending(device);
+}
+
+bool ArSdlRenderBackend_PresentPrepared(const ArRenderDevice *device) {
+  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
+  if (!renderer) return false;
+  ArSdlRenderBackend *backend = device->context;
+  /* Legacy adapters only flushed during preparation; they still own their
+   * normal window present. The ordered path has already submitted its draws. */
+  return backend->output_window ? PresentWindow(backend, true) : SDL_RenderPresent(renderer);
 }
 
 bool ArSdlRenderBackend_WindowOutputSize(const ArRenderDevice *device,
@@ -870,6 +923,15 @@ static bool CreateForWindowWithDriver(ArRenderDevice *device,
     backend->reuse_texture_uploads = SDL_GetHintBoolean("AR_SDL_GPU_UPLOAD_REUSE",
         !strcmp(SDL_GetGPUDeviceDriver(gpu), "direct3d12"));
     backend->output_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
+    backend->metal_drawable_policy = !strcmp(SDL_GetGPUDeviceDriver(gpu), "metal");
+    if (backend->metal_drawable_policy) {
+      const char *count = getenv("AR_METAL_DRAWABLE_COUNT");
+      if (count && (!strcmp(count, "2") || !strcmp(count, "3")))
+        backend->metal_drawable_override = (unsigned)(count[0] - '0');
+      else if (count && *count && strcmp(count, "auto"))
+        SDL_Log("[render] invalid AR_METAL_DRAWABLE_COUNT; using automatic policy");
+      ConfigureMetalDrawables(backend);
+    }
     backend->owns_renderer = backend->owns_context = backend->owns_gpu_device = true;
     if (!EnsureOutputTarget(backend) || !SetRenderTarget(backend, ArRenderTexture_Invalid())) {
       ArSdlRenderBackend_Destroy(device);
@@ -993,7 +1055,10 @@ bool ArSdlRenderBackend_SetVSync(ArRenderDevice *device, int requested,
       mode = SDL_GPU_PRESENTMODE_MAILBOX;
     const bool applied = SDL_SetGPUSwapchainParameters(backend->gpu_device, backend->output_window,
         SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode);
-    if (applied) backend->output_present_mode = mode;
+    if (applied) {
+      backend->output_present_mode = mode;
+      ConfigureMetalDrawables(backend);
+    }
     if (active) *active = backend->output_present_mode == SDL_GPU_PRESENTMODE_VSYNC;
     return applied;
   }

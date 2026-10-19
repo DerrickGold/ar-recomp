@@ -18,6 +18,7 @@ ar_test_support(actraiser_render_test_support
 
 ar_test_support(actraiser_render_sdl_test_support
     src/platform/sdl/render_sdl.c
+    src/platform/sdl/metal_drawable_sdl.c
     src/render/gpu_compile_log.c
     src/platform/sdl/host_clock_sdl.c)
 

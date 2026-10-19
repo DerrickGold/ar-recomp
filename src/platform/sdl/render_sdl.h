@@ -30,9 +30,21 @@ const char *ArSdlRenderBackend_GpuDriver(const ArRenderDevice *device);
  * waiting for a fence/readback. Legacy adapters retain their Flush behavior. */
 bool ArSdlRenderBackend_SubmitPending(const ArRenderDevice *device);
 
+/* Split the final offscreen submission from window presentation. Both calls
+ * run on the renderer/window owner thread. After a successful PreparePresent,
+ * the caller may wait for its deadline, then MUST call PresentPrepared without
+ * drawing, changing targets, or resizing in between. No swapchain image or
+ * command buffer is held across that wait; no fence/readback is introduced.
+ * Failed preparation must not be followed by PresentPrepared. */
+bool ArSdlRenderBackend_PreparePresent(const ArRenderDevice *device);
+bool ArSdlRenderBackend_PresentPrepared(const ArRenderDevice *device);
+
 /* Opt-in owner-thread CPU scopes, not GPU timestamps or scanout timings. */
 typedef struct ArSdlPresentTrace {
   uint64_t flush_ns, acquire_ns, submit_ns;
+  /* Nested breakdowns: command setup + swapchain = acquire;
+   * blit recording + queue submit/present API = submit. All are CPU scopes. */
+  uint64_t command_ns, swapchain_ns, blit_ns, queue_submit_ns;
 } ArSdlPresentTrace;
 void ArSdlRenderBackend_EnablePresentTrace(const ArRenderDevice *device, bool enabled);
 ArSdlPresentTrace ArSdlRenderBackend_LastPresentTrace(const ArRenderDevice *device);

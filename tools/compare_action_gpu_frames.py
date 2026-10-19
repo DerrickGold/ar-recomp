@@ -91,6 +91,7 @@ bind_key_render_compare = Key 43 Tab
                AR_NO_KNOCKBACK='0' if a.allow_hits else '1', AR_ACTION_BG_HLE='1', AR_RENDER_WORKERS='3', AR_AUDIO_VOLUME='0',
                AR_HEADLESS='1', AR_HEADLESS_VIDEO='1', AR_MUSIC_REPLACEMENTS='0', AR_FRAME_STREAM='0',
                AR_GPU_FRAME_HANDOFF=a.handoff,
+               AR_GPU_DIRECT_LAYERS=a.direct_layers,
                AR_GPU_EFFECT_PROJECTION=a.effect_projection,
                AR_GPU_BG_DECODE=a.bg_decode,
                AR_GPU_PREPARE_WORKER=str(int(a.prepare_worker)),
@@ -145,6 +146,9 @@ def validate_capture(a, work, provenance, returncode=0):
         raise RuntimeError('Native background decode was not exercised')
     if a.handoff != '0' and a.phase != 'source' and '[gpu-frame-handoff] native ' not in log:
         raise RuntimeError('Native handoff was not exercised')
+    if a.direct_layers == '1' and a.phase != 'source' and (
+            'direct layer synthesis, no unpack copies' not in log or '[gpu-direct-layers]' in log):
+        raise RuntimeError('Direct layer synthesis was not exercised or fell back')
     if a.effect_projection == 'resident':
         counts = re.findall(r'\[gpu-effect-projection\] resident-captures=(\d+) metadata-downloads=(\d+) bytes=(\d+) source-draws=(\d+) primitives=(\d+)', log)
         if not counts or not any(int(c[0]) > 0 and int(c[3]) > 0 and int(c[4]) > 0 for c in counts):
@@ -293,6 +297,8 @@ def main():
     p.add_argument('--distance', type=int, default=325)
     p.add_argument('--effect-projection', choices=('reference', 'resident'), default='reference')
     p.add_argument('--handoff', choices=('0', 'unpack', 'all'), default='0')
+    p.add_argument('--direct-layers', choices=('0', '1'), default='0',
+                   help='Select direct synthesis; this comparison harness defaults to the atlas reference')
     p.add_argument('--prepare-worker', action='store_true')
     p.add_argument('--bg-decode', choices=('fragment', 'native'), default='fragment')
     p.add_argument('--phase', choices=('source', '0.25', '0.5', '0.75'), default='source')
@@ -314,6 +320,7 @@ def main():
         a.minimum_camera_travel = provenance.get('minimum_camera_travel', [0, 0])
         a.require_full_add = provenance.get('require_full_add', False)
         a.full_add = provenance['env'].get('AR_GPU_BG_FULL_ADD', 'default')
+        a.direct_layers = provenance['env'].get('AR_GPU_DIRECT_LAYERS', '0')
         a.room = provenance['env']['AR_WARP']
         a.frames = int(provenance['env']['AR_QUIT_FRAMES'])
         if (sha(work / 'input.rec') != provenance['replay_sha256'] or

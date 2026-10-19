@@ -43,6 +43,8 @@ typedef struct DioramaFrameGenerationPlane {
   bool pair_valid;
   bool gpu_only;
   bool generated_padding_valid;
+  SDL_GPUTexture *generated_native; /* Owned only for direct compute output. */
+  SDL_GPUDevice *generated_device;
 } DioramaFrameGenerationPlane;
 
 typedef struct DioramaFrameGenerationKey {
@@ -111,7 +113,8 @@ static struct {
   SDL_GPUFence *projection_fence;
   uint32_t pending_analysis_mask;
   unsigned checks, errors;
-  bool attempted, ready, endpoint;
+  uint64_t direct_frames, unpack_frames, unpack_bytes_avoided;
+  bool attempted, ready, endpoint, layers_attempted, direct_layers;
 } s_gpu;
 static bool s_source_allowed;
 void DioramaFrameGeneration_AllowSourceProjection(bool allowed) { s_source_allowed = allowed; }
@@ -264,8 +267,23 @@ static void StartNativeCapture(void) {
   else SDL_Log("[gpu-prepare-worker] native packing/analysis worker active");
 }
 
+static void DestroyAtlasWrappers(void) {
+  SDL_DestroyTexture(s_gpu.output); s_gpu.output = NULL;
+  SDL_DestroyTexture(s_gpu.block_output); s_gpu.block_output = NULL;
+  SDL_DestroyTexture(s_gpu.attribute_output); s_gpu.attribute_output = NULL;
+}
+
 static void ResetGpu(void) {
   StopNativeCapture();
+  if (s_gpu.direct_frames || s_gpu.unpack_frames)
+    SDL_Log("[gpu-layer-output] direct-frames=%llu unpack-frames=%llu "
+        "unpack-bytes-avoided=%llu atlas-output-bytes=%llu",
+        (unsigned long long)s_gpu.direct_frames, (unsigned long long)s_gpu.unpack_frames,
+        (unsigned long long)s_gpu.unpack_bytes_avoided,
+        (unsigned long long)((s_gpu.motion.output ? (uint64_t)s_gpu.motion.width *
+            s_gpu.motion.height * s_gpu.motion.configured_plane_count * 4 : 0) +
+            (s_gpu.blocks.output ?
+                (uint64_t)s_gpu.blocks.width * s_gpu.blocks.height * 4 * 8 : 0)));
   if (s_gpu.effects.draws)
     SDL_Log("[gpu-effect-commands] batching=%d draws=%llu submissions=%llu largest-batch=%u",
         s_gpu.effects.batching_enabled, (unsigned long long)s_gpu.effects.draws,
@@ -279,9 +297,7 @@ static void ResetGpu(void) {
   if (s_gpu.projection_fence) SDL_ReleaseGPUFence(s_gpu.motion.device, s_gpu.projection_fence);
   SDL_DestroyTexture(s_gpu.previous);
   SDL_DestroyTexture(s_gpu.current);
-  SDL_DestroyTexture(s_gpu.output);
-  SDL_DestroyTexture(s_gpu.block_output);
-  SDL_DestroyTexture(s_gpu.attribute_output);
+  DestroyAtlasWrappers();
   ArGpuBlockMotion_Destroy(&s_gpu.blocks);
   ArGpuActionScenePass_Destroy(&s_gpu.pack);
   if (s_gpu.validation) SDL_ReleaseGPUTransferBuffer(s_gpu.motion.device, s_gpu.validation);
@@ -289,7 +305,7 @@ static void ResetGpu(void) {
   memset(&s_gpu, 0, sizeof(s_gpu));
 }
 
-static bool PrepareMotion(ArRenderDevice *device) {
+static bool PrepareMotion(ArRenderDevice *device, bool native_output) {
   if (s_gpu.failed) return false;
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
   const ArSdlRenderBackend *backend = renderer ? device->context : NULL;
@@ -303,17 +319,29 @@ static bool PrepareMotion(ArRenderDevice *device) {
     s_gpu.motion.plane_count = 8;
     s_gpu.motion.input_plane_count = 16;
   }
+  /* Prewarming precedes the first room capture and its live policy. Keep
+   * capability preparation independent of that not-yet-initialized state. */
+  if (s_gpu.ready && native_output && !s_gpu.layers_attempted) {
+    s_gpu.layers_attempted = true;
+    const char *direct = getenv("AR_GPU_DIRECT_LAYERS");
+    if (!direct || !*direct || !strcmp(direct, "auto") || !strcmp(direct, "1")) {
+      s_gpu.direct_layers = ArGpuGlobalMotion_PrepareLayerWarp(&s_gpu.motion);
+      if (!s_gpu.direct_layers)
+        SDL_Log("[gpu-direct-layers] pipeline unavailable; retaining atlas output: %s", SDL_GetError());
+    }
+  }
   return s_gpu.ready;
 }
 
 static bool EnsureGpu(ArRenderDevice *device, int width, int height) {
-  if (s_policy.motion == kDioramaGpuMotion_Off || !PrepareMotion(device)) return false;
+  if (s_policy.motion == kDioramaGpuMotion_Off ||
+      !PrepareMotion(device, NativeHandoff(false))) return false;
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
-  if (s_gpu.previous && s_gpu.current && s_gpu.output && s_gpu.motion.height == (unsigned)height && s_gpu.blocks.width == (unsigned)width)
+  if (s_gpu.previous && s_gpu.current && s_gpu.motion.height == (unsigned)height &&
+      s_gpu.blocks.width == (unsigned)width)
     return true;
-  SDL_DestroyTexture(s_gpu.output); s_gpu.output = NULL;
-  SDL_DestroyTexture(s_gpu.block_output); s_gpu.block_output = NULL;
-  SDL_DestroyTexture(s_gpu.attribute_output); s_gpu.attribute_output = NULL;
+  /* Release wrappers before their borrowed native atlas storage on resize. */
+  DestroyAtlasWrappers();
   SDL_DestroyTexture(s_gpu.previous); s_gpu.previous = NULL;
   SDL_DestroyTexture(s_gpu.current); s_gpu.current = NULL;
   s_gpu.endpoint = false;
@@ -323,32 +351,44 @@ static bool EnsureGpu(ArRenderDevice *device, int width, int height) {
       SDL_TEXTUREACCESS_TARGET, kFrameSlotLayerTextureWidth, height * 16);
   s_gpu.current = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
       SDL_TEXTUREACCESS_TARGET, kFrameSlotLayerTextureWidth, height * 16);
+  const bool configured = s_gpu.previous && s_gpu.current;
+  if (!configured) {
+    ResetGpu();
+    s_gpu.attempted = true;
+  }
+  return configured;
+}
+
+static bool EnsureAtlasOutput(SDL_Renderer *renderer) {
+  if (!ArGpuGlobalMotion_EnsureOutput(&s_gpu.motion) ||
+      !ArGpuBlockMotion_EnsureOutput(&s_gpu.blocks)) return false;
+  /* Native unpack reads the atlases directly. Renderer wrappers are needed
+   * only by the diagnostic SDL-copy fallback, never by direct synthesis. */
+  if (NativeHandoff(false)) return true;
+  if (s_gpu.output && s_gpu.block_output && s_gpu.attribute_output) return true;
+  DestroyAtlasWrappers();
   SDL_PropertiesID props = SDL_CreateProperties();
+  if (!props) return false;
   SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_FORMAT_NUMBER, SDL_PIXELFORMAT_RGBA32);
-  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, kFrameSlotLayerTextureWidth);
-  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, height * 8);
+  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, s_gpu.motion.width);
+  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, s_gpu.motion.height * 8);
   SDL_SetPointerProperty(props, SDL_PROP_TEXTURE_CREATE_GPU_TEXTURE_POINTER, s_gpu.motion.output);
   s_gpu.output = SDL_CreateTextureWithProperties(renderer, props);
-  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, width);
-  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, height * 4);
+  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, s_gpu.blocks.width);
+  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, s_gpu.blocks.height * 4);
   SDL_SetPointerProperty(props, SDL_PROP_TEXTURE_CREATE_GPU_TEXTURE_POINTER, s_gpu.blocks.output);
   s_gpu.block_output = SDL_CreateTextureWithProperties(renderer, props);
   SDL_SetPointerProperty(props, SDL_PROP_TEXTURE_CREATE_GPU_TEXTURE_POINTER, s_gpu.blocks.attributes);
   s_gpu.attribute_output = SDL_CreateTextureWithProperties(renderer, props);
   SDL_DestroyProperties(props);
-  const bool configured = s_gpu.previous && s_gpu.current && s_gpu.output && s_gpu.block_output && s_gpu.attribute_output &&
+  const bool configured = s_gpu.output && s_gpu.block_output && s_gpu.attribute_output &&
       SDL_SetTextureBlendMode(s_gpu.attribute_output, SDL_BLENDMODE_NONE) &&
       SDL_SetTextureScaleMode(s_gpu.attribute_output, SDL_SCALEMODE_NEAREST) &&
       SDL_SetTextureBlendMode(s_gpu.block_output, SDL_BLENDMODE_NONE) &&
       SDL_SetTextureScaleMode(s_gpu.block_output, SDL_SCALEMODE_NEAREST) &&
       SDL_SetTextureBlendMode(s_gpu.output, SDL_BLENDMODE_NONE) &&
       SDL_SetTextureScaleMode(s_gpu.output, SDL_SCALEMODE_NEAREST);
-  if (!configured) {
-    /* Never reuse partially configured targets on the next capture. Latch
-     * failure until renderer reset, as with unsupported compute pipelines. */
-    ResetGpu();
-    s_gpu.attempted = true;
-  }
+  if (!configured) DestroyAtlasWrappers();
   return configured;
 }
 
@@ -708,33 +748,93 @@ static bool UnpackGpuPlanes(SDL_GPUCommandBuffer *cmd, uint32_t mask) {
   return ArGpuFrameHandoff_EncodeUnpack(cmd, planes, count);
 }
 
+static bool EnsureDirectLayerTextures(SDL_Renderer *renderer);
+
+static bool WarpDirectLayers(SDL_GPUCommandBuffer *cmd, float phase, unsigned actor_mask) {
+  ArGpuGlobalMotionTarget backgrounds[8] = {0};
+  ArGpuBlockMotionTarget actors[4] = {0};
+  unsigned background_mask = 0;
+  for (unsigned i = 0; i < 8; ++i) {
+    const DioramaFrameGenerationPlane *p = &s_planes[kGpuPlanes[i]];
+    backgrounds[i] = (ArGpuGlobalMotionTarget){.texture = p->generated_native,
+        .width = kFrameSlotLayerTextureWidth, .height = kFrameSlotLayerTextureHeight,
+        .x = (unsigned)p->output_x, .clear_padding = !p->generated_padding_valid};
+    if (s_gpu.mask & (1u << kGpuPlanes[i])) background_mask |= 1u << i;
+  }
+  for (unsigned i = 0; i < 4; ++i) {
+    if (!(actor_mask & (1u << i))) continue;
+    const DioramaFrameGenerationPlane *p = &s_planes[kGpuPlanes[8+i]];
+    const DioramaFrameGenerationPlane *a = &s_planes[kGpuPlanes[12+i]];
+    if ((s_gpu.mask & (1u << kGpuPlanes[12+i])) &&
+        (a->output_x != p->output_x || a->texture_width != p->texture_width ||
+         a->texture_height != p->texture_height))
+      return SDL_SetError("actor/metadata capture regions differ for priority %u", i);
+    actors[i] = (ArGpuBlockMotionTarget){.color = NativeGpuTexture(p->generated_texture),
+        .attributes = NativeGpuTexture(a->generated_texture),
+        .width = kFrameSlotLayerTextureWidth, .height = kFrameSlotLayerTextureHeight,
+        .x = (unsigned)p->output_x};
+  }
+  return ArGpuGlobalMotion_WarpLayers(&s_gpu.motion, cmd, NativeGpuTexture(s_gpu.previous),
+          NativeGpuTexture(s_gpu.current), phase, backgrounds, background_mask) &&
+      ArGpuBlockMotion_WarpLayers(&s_gpu.blocks, cmd, NativeGpuTexture(s_gpu.previous),
+          NativeGpuTexture(s_gpu.current), phase, actor_mask, actors);
+}
+
 static uint32_t PrepareGpu(ArRenderDevice *device, float phase) {
   const char *option = getenv("AR_GPU_PROJECTION_PREPARE_FIRST");
   const bool prepare_first = !option || strcmp(option, "0") != 0;
   if (!prepare_first) ResolveGpuProjection();
   if (!s_gpu.mask || !ArSdlRenderBackend_SubmitPending(device)) return 0;
+  bool direct = s_gpu.direct_layers && NativeHandoff(false) &&
+      EnsureDirectLayerTextures(ArSdlRenderBackend_Renderer(device));
+  if (!direct && !EnsureAtlasOutput(ArSdlRenderBackend_Renderer(device))) return 0;
   SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(s_gpu.motion.device);
   if (!cmd) return 0;
-  if (!ArGpuGlobalMotion_Warp(&s_gpu.motion, cmd, NativeGpuTexture(s_gpu.previous),
+  unsigned actor_mask = 0;
+  for (unsigned i = 0; i < 4; ++i) if (s_gpu.mask & (1u << kGpuPlanes[8+i])) actor_mask |= 1u << i;
+  if (direct) {
+    if (!WarpDirectLayers(cmd, phase, actor_mask)) {
+      SDL_CancelGPUCommandBuffer(cmd);
+      /* Cycling happens while encoding: cancelling may leave an actor wrapper
+       * on an uninitialized backing. Force padding clears in the fallback. */
+      for (int i = 0; i < 16; ++i) s_planes[kGpuPlanes[i]].generated_padding_valid = false;
+      s_gpu.direct_layers = false;
+      SDL_Log("[gpu-direct-layers] encode failed; retaining atlas output: %s", SDL_GetError());
+      if (!EnsureAtlasOutput(ArSdlRenderBackend_Renderer(device))) return 0;
+      cmd = SDL_AcquireGPUCommandBuffer(s_gpu.motion.device);
+      if (!cmd) return 0;
+      direct = false;
+    }
+  }
+  if (!direct && !ArGpuGlobalMotion_Warp(&s_gpu.motion, cmd, NativeGpuTexture(s_gpu.previous),
           NativeGpuTexture(s_gpu.current), phase)) {
     SDL_CancelGPUCommandBuffer(cmd); return 0;
   }
-  unsigned actor_mask = 0;
-  for (unsigned i = 0; i < 4; ++i) if (s_gpu.mask & (1u << kGpuPlanes[8+i])) actor_mask |= 1u << i;
-  if (!ArGpuBlockMotion_Warp(&s_gpu.blocks, cmd, NativeGpuTexture(s_gpu.previous),
+  if (!direct && !ArGpuBlockMotion_Warp(&s_gpu.blocks, cmd, NativeGpuTexture(s_gpu.previous),
       NativeGpuTexture(s_gpu.current), phase, actor_mask)) { SDL_CancelGPUCommandBuffer(cmd); return 0; }
   if (NativeHandoff(false)) {
     const uint32_t copied = s_gpu.mask;
-    if (!UnpackGpuPlanes(cmd, copied)) { SDL_CancelGPUCommandBuffer(cmd); return 0; }
-    if (!SDL_SubmitGPUCommandBuffer(cmd)) return 0;
-    for (int i = 0; i < 16; ++i)
-      if (copied & (1u << kGpuPlanes[i])) s_planes[kGpuPlanes[i]].generated_padding_valid = true;
+    if (!direct && !UnpackGpuPlanes(cmd, copied)) { SDL_CancelGPUCommandBuffer(cmd); return 0; }
+    if (!SDL_SubmitGPUCommandBuffer(cmd)) {
+      for (int i = 0; i < 16; ++i) s_planes[kGpuPlanes[i]].generated_padding_valid = false;
+      return 0;
+    }
+    if (direct) ++s_gpu.direct_frames;
+    else ++s_gpu.unpack_frames;
+    for (int i = 0; i < 16; ++i) {
+      if (!(copied & (1u << kGpuPlanes[i]))) continue;
+      DioramaFrameGenerationPlane *p = &s_planes[kGpuPlanes[i]];
+      p->generated_padding_valid = true;
+      if (direct) s_gpu.unpack_bytes_avoided += (uint64_t)p->texture_width * p->texture_height * 4;
+    }
     if (prepare_first) ResolveGpuProjection();
     static bool reported_native;
     if (!reported_native) {
       reported_native = true;
-      SDL_Log("[gpu-frame-handoff] native %s active; retained padding, one copy pass; projection=%s",
-          NativeHandoff(true) ? "pack/unpack" : "unpack", s_gpu.resident ? "GPU" : "CPU");
+      SDL_Log("[gpu-frame-handoff] native %s active; %s; projection=%s",
+          NativeHandoff(true) ? "pack/unpack" : "unpack",
+          direct ? "direct layer synthesis, no unpack copies" : "retained padding, one copy pass",
+          s_gpu.resident ? "GPU" : "CPU");
     }
     return copied & s_gpu.mask;
   }
@@ -798,6 +898,10 @@ static void DestroyPlaneTextures(DioramaFrameGenerationPlane *plane) {
   DestroyPlaneEndpoints(plane);
   SDL_DestroyTexture(plane->generated_texture);
   plane->generated_texture = NULL;
+  if (plane->generated_native)
+    SDL_ReleaseGPUTexture(plane->generated_device, plane->generated_native);
+  plane->generated_native = NULL;
+  plane->generated_device = NULL;
 }
 
 void DioramaFrameGeneration_InvalidateHistory(void) {
@@ -834,7 +938,7 @@ bool DioramaFrameGeneration_PreparePipelines(ArRenderDevice *device, bool interp
   bool ok = true;
   if (policy.resident) ok = PrepareSourceProjection(device) && ok;
   if (interpolation && policy.motion != kDioramaGpuMotion_Off) {
-    ok = PrepareMotion(device) && ok;
+    ok = PrepareMotion(device, policy.unpack) && ok;
     if (s_gpu.ready && policy.pack && !s_gpu.pack.device)
       ok = ArGpuActionScenePass_Init(&s_gpu.pack, s_gpu.motion.device) && ok;
   }
@@ -888,6 +992,71 @@ static SDL_Texture *CreatePlaneTexture(SDL_Renderer *renderer,
   return texture;
 }
 
+static SDL_Texture *CreateGeneratedTexture(SDL_Renderer *renderer, int index) {
+  bool global = false;
+  for (unsigned i = 0; i < 8; ++i) global |= index == kGpuPlanes[i];
+  if (!global || !s_gpu.direct_layers)
+    return CreatePlaneTexture(renderer, SDL_TEXTUREACCESS_TARGET, SDL_SCALEMODE_NEAREST,
+        kFrameSlotLayerTextureWidth, kFrameSlotLayerTextureHeight, index, true);
+  DioramaFrameGenerationPlane *plane = &s_planes[index];
+  const SDL_GPUTextureCreateInfo info = {.type = SDL_GPU_TEXTURETYPE_2D,
+      .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+      .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET |
+          SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE,
+      .width = kFrameSlotLayerTextureWidth, .height = kFrameSlotLayerTextureHeight,
+      .layer_count_or_depth = 1, .num_levels = 1};
+  SDL_GPUTexture *native = SDL_GPUTextureSupportsFormat(s_gpu.motion.device, info.format,
+      info.type, info.usage) ? SDL_CreateGPUTexture(s_gpu.motion.device, &info) : NULL;
+  if (!native) {
+    s_gpu.direct_layers = false;
+    SDL_Log("[gpu-direct-layers] target unavailable; retaining atlas output: %s", SDL_GetError());
+    return CreatePlaneTexture(renderer, SDL_TEXTUREACCESS_TARGET, SDL_SCALEMODE_NEAREST,
+        kFrameSlotLayerTextureWidth, kFrameSlotLayerTextureHeight, index, true);
+  }
+  SDL_PropertiesID props = SDL_CreateProperties();
+  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_FORMAT_NUMBER, SDL_PIXELFORMAT_RGBA32);
+  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_ACCESS_NUMBER, SDL_TEXTUREACCESS_TARGET);
+  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, info.width);
+  SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, info.height);
+  SDL_SetPointerProperty(props, SDL_PROP_TEXTURE_CREATE_GPU_TEXTURE_POINTER, native);
+  SDL_Texture *texture = SDL_CreateTextureWithProperties(renderer, props);
+  SDL_DestroyProperties(props);
+  if (!texture || !SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST) ||
+      !SDL_SetTextureBlendMode(texture, index == kDioramaPlane_Backdrop ? SDL_BLENDMODE_NONE : SDL_BLENDMODE_BLEND)) {
+    SDL_DestroyTexture(texture);
+    SDL_ReleaseGPUTexture(s_gpu.motion.device, native);
+    s_gpu.direct_layers = false;
+    return CreatePlaneTexture(renderer, SDL_TEXTUREACCESS_TARGET, SDL_SCALEMODE_NEAREST,
+        kFrameSlotLayerTextureWidth, kFrameSlotLayerTextureHeight, index, true);
+  }
+  plane->generated_native = native;
+  plane->generated_device = s_gpu.motion.device;
+  return texture;
+}
+
+static bool EnsureDirectLayerTextures(SDL_Renderer *renderer) {
+  /* The compute pipeline needs eight valid output bindings even when some
+   * bands are absent. Allocate them once, never fabricate live capture data. */
+  for (unsigned i = 0; i < 8; ++i) {
+    DioramaFrameGenerationPlane *p = &s_planes[kGpuPlanes[i]];
+    if (!p->generated_texture) p->generated_texture = CreateGeneratedTexture(renderer, kGpuPlanes[i]);
+    if (!p->generated_native) {
+      s_gpu.direct_layers = false;
+      SDL_Log("[gpu-direct-layers] final layer has no storage binding; retaining atlas output");
+      return false;
+    }
+  }
+  /* A color pair can precede its material companion by a capture, or the
+   * caller may not request material lighting. MRT still needs a valid second
+   * destination. Unrequested companion data stays private and unpublished. */
+  for (unsigned i = 12; i < 16; ++i) {
+    DioramaFrameGenerationPlane *p = &s_planes[kGpuPlanes[i]];
+    if (!p->generated_texture) p->generated_texture = CreateGeneratedTexture(renderer, kGpuPlanes[i]);
+    if (!p->generated_texture) return false;
+  }
+  return true;
+}
+
 static bool EnsurePlaneTextures(SDL_Renderer *renderer, int plane_index,
                                 const DioramaPlaneCaptureRegion *region) {
   DioramaFrameGenerationPlane *plane = &s_planes[plane_index];
@@ -913,11 +1082,7 @@ static bool EnsurePlaneTextures(SDL_Renderer *renderer, int plane_index,
                            SDL_SCALEMODE_LINEAR,
                            region->width, region->height, plane_index, false);
   if (!plane->generated_texture)
-    plane->generated_texture =
-        CreatePlaneTexture(renderer, SDL_TEXTUREACCESS_TARGET,
-                           SDL_SCALEMODE_NEAREST,
-                           kFrameSlotLayerTextureWidth,
-                           kFrameSlotLayerTextureHeight, plane_index, true);
+    plane->generated_texture = CreateGeneratedTexture(renderer, plane_index);
   const bool ready = plane->generated_texture &&
       (plane->gpu_only || (plane->previous_texture && plane->current_texture));
   if (ready) {

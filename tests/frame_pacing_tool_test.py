@@ -294,6 +294,43 @@ class PacingTraceTest(unittest.TestCase):
         self.assertEqual(result['worst_intervals'][0]['backend_flush_ms'], .2)
         self.assertEqual(result['complete_interval_ms']['mean'], 16)
 
+    def test_backend_breakdown_keeps_nested_scopes_separate(self):
+        rows = self.rows()
+        for r in rows:
+            r.update(backend_acquire_ns=300_000, backend_command_ns=100_000,
+                     backend_swapchain_ns=200_000, backend_submit_ns=50_000,
+                     backend_blit_ns=10_000, backend_queue_submit_ns=40_000)
+        result = self.report(rows)
+        self.assertEqual(result['backend_acquire_ms']['mean'], .3)
+        self.assertEqual(result['backend_swapchain_ms']['mean'], .2)
+        self.assertEqual(result['worst_intervals'][0]['backend_queue_submit_ms'], .04)
+        rows[1]['backend_swapchain_ns'] += 1
+        with self.assertRaisesRegex(ValueError, 'Inconsistent backend'):
+            self.report(rows)
+        for r in rows:
+            del r['backend_swapchain_ns']
+        with self.assertRaisesRegex(ValueError, 'Incomplete backend'):
+            self.report(rows)
+
+    def test_early_offscreen_submission_is_nested_in_draw(self):
+        rows = self.rows()
+        for row in rows:
+            row.update(submit_start_ns=0, offscreen_submit_ns=0, offscreen_complete_ns=0)
+            if row['presented']:
+                row.update(submit_start_ns=row['complete_ns']-100_000,
+                           offscreen_submit_ns=200_000,
+                           offscreen_complete_ns=row['draw_ns']+row['draw_work_ns'])
+        result = self.report(rows)
+        self.assertEqual(result['offscreen_submit_ms']['mean'], .2)
+        self.assertEqual(result['offscreen_overlap_window_ms']['mean'], .4)
+        self.assertEqual(result['draw_work_ms']['mean'], 1)
+        self.assertEqual(result['backend_present_ms']['mean'], .1)
+        self.assertEqual(result['complete_interval_ms']['mean'], 16)
+        self.assertEqual(self.report(self.rows())['offscreen_submit_ms']['samples'], 0)
+        rows[1]['offscreen_complete_ns'] = rows[1]['complete_ns']
+        with self.assertRaises(ValueError):
+            self.report(rows)
+
 
 if __name__ == '__main__':
     unittest.main()

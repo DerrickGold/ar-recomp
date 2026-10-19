@@ -101,6 +101,10 @@ typedef struct HostDisplayPresentTrace {
   uint64_t draw_cpu_ns;
   uint64_t submit_start_ns;
   uint64_t backend_flush_ns, backend_acquire_ns, backend_submit_ns;
+  uint64_t backend_command_ns, backend_swapchain_ns, backend_blit_ns, backend_queue_submit_ns;
+  /* Early submission is nested inside draw_ns/draw_cpu_ns, not extra work to
+   * add to them. Completion is a CPU timestamp, not GPU execution completion. */
+  uint64_t offscreen_submit_ns, offscreen_complete_ns;
 } HostDisplayPresentTrace;
 void HostDisplay_EnablePresentTrace(bool enabled);
 HostDisplayPresentTrace HostDisplay_LastPresentTrace(void);

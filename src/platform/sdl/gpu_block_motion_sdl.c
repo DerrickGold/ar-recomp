@@ -111,26 +111,10 @@ bool ArGpuBlockMotion_Resize(ArGpuBlockMotion *p, unsigned width, unsigned heigh
     return false;
   if (width == p->width && height == p->height)
     return true;
-  const SDL_GPUTextureCreateInfo texture = {.type = SDL_GPU_TEXTURETYPE_2D,
-                                            .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
-                                            .usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET |
-                                                     SDL_GPU_TEXTUREUSAGE_SAMPLER,
-                                            .width = width,
-                                            .height = height * 4,
-                                            .layer_count_or_depth = 1,
-                                            .num_levels = 1};
-  SDL_GPUTexture *output = SDL_CreateGPUTexture(p->device, &texture);
-  SDL_GPUTexture *attributes = SDL_CreateGPUTexture(p->device, &texture);
-  if (!output || !attributes) {
-    if(output)SDL_ReleaseGPUTexture(p->device,output);
-    if(attributes)SDL_ReleaseGPUTexture(p->device,attributes);
-    return false;
-  }
   if (p->output)
     SDL_ReleaseGPUTexture(p->device, p->output);
-  if(p->attributes)SDL_ReleaseGPUTexture(p->device,p->attributes);
-  p->attributes=attributes;
-  p->output = output;
+  if (p->attributes) SDL_ReleaseGPUTexture(p->device, p->attributes);
+  p->attributes = p->output = NULL;
   // A failed index upload must not make a later retry look initialized.
   p->width = p->height = 0;
   for (unsigned i = 0; i < 4; ++i) {
@@ -182,6 +166,25 @@ bool ArGpuBlockMotion_Resize(ArGpuBlockMotion *p, unsigned width, unsigned heigh
   }
   return ok;
 }
+bool ArGpuBlockMotion_EnsureOutput(ArGpuBlockMotion *p) {
+  if (p->output && p->attributes) return true;
+  if (!p->width || !p->height) return false;
+  const SDL_GPUTextureCreateInfo texture = {.type = SDL_GPU_TEXTURETYPE_2D,
+      .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+      .usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER,
+      .width = p->width, .height = p->height * 4,
+      .layer_count_or_depth = 1, .num_levels = 1};
+  SDL_GPUTexture *output = SDL_CreateGPUTexture(p->device, &texture);
+  SDL_GPUTexture *attributes = SDL_CreateGPUTexture(p->device, &texture);
+  if (!output || !attributes) {
+    if (output) SDL_ReleaseGPUTexture(p->device, output);
+    if (attributes) SDL_ReleaseGPUTexture(p->device, attributes);
+    return false;
+  }
+  p->output = output;
+  p->attributes = attributes;
+  return true;
+}
 bool ArGpuBlockMotion_Analyze(ArGpuBlockMotion *p, SDL_GPUCommandBuffer *cmd,
                               SDL_GPUTexture *previous, SDL_GPUTexture *current) {
   const SDL_GPUTextureSamplerBinding pair[] = {{previous, p->sampler}, {current, p->sampler}};
@@ -212,8 +215,8 @@ bool ArGpuBlockMotion_Analyze(ArGpuBlockMotion *p, SDL_GPUCommandBuffer *cmd,
   SDL_EndGPUComputePass(pass);
   return true;
 }
-bool ArGpuBlockMotion_Warp(ArGpuBlockMotion *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *previous,
-                           SDL_GPUTexture *current, float phase, unsigned mask) {
+static bool Warp(ArGpuBlockMotion *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *previous,
+    SDL_GPUTexture *current, float phase, unsigned mask, const ArGpuBlockMotionTarget *layers) {
   const SDL_GPUTextureSamplerBinding pair[] = {{previous, p->sampler}, {current, p->sampler}};
   bool cleared = false;
   for (unsigned plane = 0; plane < 4; ++plane) {
@@ -225,10 +228,10 @@ bool ArGpuBlockMotion_Warp(ArGpuBlockMotion *p, SDL_GPUCommandBuffer *cmd, SDL_G
                               (float)p->height,
                               (float)plane,
                               phase,
-                              (float)p->width,
-                              (float)(p->height * 4),
-                              0,
-                              0};
+                              (float)(layers ? layers[plane].width : p->width),
+                              (float)(layers ? layers[plane].height : p->height * 4),
+                              layers ? (float)layers[plane].x : 0,
+                              layers ? 0 : (float)(plane * p->height)};
     SDL_PushGPUComputeUniformData(cmd, 0, uniform, sizeof(uniform));
     const SDL_GPUStorageBufferReadWriteBinding vertices = {.buffer = p->vertices, .cycle = true};
     SDL_GPUComputePass *compute = SDL_BeginGPUComputePass(cmd, NULL, 0, &vertices, 1);
@@ -238,20 +241,21 @@ bool ArGpuBlockMotion_Warp(ArGpuBlockMotion *p, SDL_GPUCommandBuffer *cmd, SDL_G
     SDL_BindGPUComputeStorageBuffers(compute, 0, &p->motion, 1);
     SDL_DispatchGPUCompute(compute, ((bx + 1) * (by + 1) + 63) / 64, 1, 1);
     SDL_EndGPUComputePass(compute);
-    const SDL_GPUColorTargetInfo target = {.texture = p->output,
+    const SDL_GPUColorTargetInfo target = {.texture = layers ? layers[plane].color : p->output,
                                            .load_op =
-                                               cleared ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR,
+                                               cleared && !layers ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR,
                                            .store_op = SDL_GPU_STOREOP_STORE,
-                                           .cycle = !cleared,
+                                           .cycle = layers || !cleared,
                                            .clear_color = {0, 0, 0, 0}};
     SDL_GPUColorTargetInfo targets[2]={target,target};
-    targets[1].texture=p->attributes;
+    targets[1].texture=layers ? layers[plane].attributes : p->attributes;
     SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, targets, 2, NULL);
     if (!pass)
       return false;
     cleared = true;
     const SDL_GPUBufferBinding vb = {p->vertices, 0}, ib = {p->indices, 0};
-    const SDL_Rect clip = {0, (int)(plane * p->height), (int)p->width, (int)p->height};
+    const SDL_Rect clip = {layers ? (int)layers[plane].x : 0,
+        layers ? 0 : (int)(plane * p->height), (int)p->width, (int)p->height};
     const float sampling[4] = {(float)p->width, (float)p->height, p->extents[plane][2], 0};
     SDL_PushGPUFragmentUniformData(cmd, 0, sampling, sizeof(sampling));
     SDL_BindGPUGraphicsPipeline(pass, p->warp);
@@ -263,4 +267,30 @@ bool ArGpuBlockMotion_Warp(ArGpuBlockMotion *p, SDL_GPUCommandBuffer *cmd, SDL_G
     SDL_EndGPURenderPass(pass);
   }
   return true;
+}
+
+bool ArGpuBlockMotion_Warp(ArGpuBlockMotion *p, SDL_GPUCommandBuffer *cmd,
+    SDL_GPUTexture *previous, SDL_GPUTexture *current, float phase, unsigned mask) {
+  if (!ArGpuBlockMotion_EnsureOutput(p)) return false;
+  return Warp(p, cmd, previous, current, phase, mask, NULL);
+}
+
+bool ArGpuBlockMotion_WarpLayers(ArGpuBlockMotion *p, SDL_GPUCommandBuffer *cmd,
+    SDL_GPUTexture *previous, SDL_GPUTexture *current, float phase, unsigned mask,
+    const ArGpuBlockMotionTarget targets[4]) {
+  if (!targets || mask > 15 || !(phase >= 0.0f && phase <= 1.0f)) return false;
+  for (unsigned i = 0; i < 4; ++i) {
+    if (!(mask & (1u << i))) continue;
+    const ArGpuBlockMotionTarget *t = &targets[i];
+    if (!t->color || !t->attributes || t->color == t->attributes ||
+        t->color == previous || t->color == current ||
+        t->attributes == previous || t->attributes == current ||
+        t->x > t->width || p->width > t->width - t->x || p->height > t->height) return false;
+    for (unsigned j = 0; j < i; ++j) {
+      if (!(mask & (1u << j))) continue;
+      if (t->color == targets[j].color || t->color == targets[j].attributes ||
+          t->attributes == targets[j].color || t->attributes == targets[j].attributes) return false;
+    }
+  }
+  return Warp(p, cmd, previous, current, phase, mask, targets);
 }

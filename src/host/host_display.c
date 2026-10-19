@@ -101,6 +101,17 @@ static bool FixedRefreshTimeline(void) {
   return enabled != 0;
 }
 
+static bool EarlyOffscreenSubmitEnabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *value = getenv("AR_GPU_EARLY_SUBMIT");
+    enabled = value && !strcmp(value, "1");
+    if (enabled)
+      fprintf(stderr, "[display] early offscreen submission prototype enabled (software-paced stream only)\n");
+  }
+  return enabled != 0;
+}
+
 static uint64_t PreciseRefreshIntervalNs(uint64_t fallback_ns) {
   const uint64_t interval_ns = HostDisplayRefreshCache_IntervalNs(
       &s_display_refresh_cache, s_active_display_id);
@@ -320,24 +331,27 @@ static uint64_t PresentIntervalNs(HostDisplayPresentMode mode) {
  * reason for the outer loop to skip its anti-spin yield. Sampling is dormant
  * while the overlay is hidden, and restarts across cadence changes so the
  * first visible result cannot mix menu/paused/old-refresh timing. */
-static bool CompletePresent(HostDisplayPresentMode mode) {
+static bool ReportPresentFailure(void) {
+  PerformanceMetrics_Add(kPerformanceCount_FailedPresents, 1);
+  if (!s_present_failure_reported) {
+    fprintf(stderr, "[display] frame present failed: %s\n",
+            ArRenderDevice_LastError(&g_render_device));
+    s_present_failure_reported = true;
+  }
+  return false;
+}
+
+static bool CompletePresent(HostDisplayPresentMode mode, bool prepared) {
   const PerformanceScope pacing = PerformanceMetrics_Begin(kPerformance_Pacing);
   if (!s_producer_pacing)
     ThrottlePresent(s_vsync_guard.probing ? 0 : PresentIntervalNs(mode));
   PerformanceMetrics_End(pacing);
   const PerformanceScope swap = PerformanceMetrics_Begin(kPerformance_Swap);
   if (s_present_trace_enabled) s_present_trace.submit_start_ns = SDL_GetTicksNS();
-  const bool swapped = ArRenderDevice_Present(&g_render_device);
+  const bool swapped = prepared ? ArSdlRenderBackend_PresentPrepared(&g_render_device)
+                                : ArRenderDevice_Present(&g_render_device);
   PerformanceMetrics_End(swap);
-  if (!swapped) {
-    PerformanceMetrics_Add(kPerformanceCount_FailedPresents, 1);
-    if (!s_present_failure_reported) {
-      fprintf(stderr, "[display] frame present failed: %s\n",
-              ArRenderDevice_LastError(&g_render_device));
-      s_present_failure_reported = true;
-    }
-    return false;
-  }
+  if (!swapped) return ReportPresentFailure();
   s_present_failure_reported = false;
 
   const uint64_t completed_at_ns = SDL_GetTicksNS();
@@ -824,7 +838,7 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
 
   const uint64_t vsync_start_ms =
       performance_enabled ? SDL_GetTicks() : 0;
-  const bool presented = CompletePresent(mode);
+  const bool presented = CompletePresent(mode, false);
   if (presented && game_tick) s_tick_present_count++;
   if (presented && performance_enabled)
     ReportPresentPerformance(render_start_ms, vsync_start_ms);
@@ -920,6 +934,20 @@ bool HostDisplay_TryRepresentFrame(float alpha,
                use_interpolation
                    ? alpha : kPresentationFrameGenerationPhaseNone,
                HostDisplay_FramesPerSecond());
+  /* Software pacing leaves a small GPU execution window before the deadline.
+   * Submit the final draws now, while keeping acquisition/blit/presentation at
+   * the original deadline. The selected frame, phase and queue depth stay the
+   * same. Include submission's CPU cost in preparation and the draw lead. */
+  const bool prepared = interval && EarlyOffscreenSubmitEnabled();
+  bool prepared_ok = true;
+  if (prepared) {
+    const uint64_t submit_start = s_present_trace_enabled ? SDL_GetTicksNS() : 0;
+    prepared_ok = ArSdlRenderBackend_PreparePresent(&g_render_device);
+    if (s_present_trace_enabled) {
+      s_present_trace.offscreen_complete_ns = SDL_GetTicksNS();
+      s_present_trace.offscreen_submit_ns = s_present_trace.offscreen_complete_ns - submit_start;
+    }
+  }
   PerformanceMetrics_End(pipeline);
   if (s_present_trace_enabled) {
     s_present_trace.draw_ns = SDL_GetTicksNS() - s_present_trace.draw_start_ns;
@@ -928,6 +956,7 @@ bool HostDisplay_TryRepresentFrame(float alpha,
         ? cpu_end - draw_cpu_start : 0;
     s_present_trace.vector_wait_ns = DioramaFrameGeneration_LastWaitNs();
   }
+  if (!prepared_ok) return ReportPresentFailure();
   if (interval) {
     const uint64_t draw_ns = SDL_GetTicksNS() - draw_started_ns;
     /* Follow cost increases immediately; decay gradually across cheap repeats
@@ -945,13 +974,17 @@ bool HostDisplay_TryRepresentFrame(float alpha,
   const uint64_t vsync_start_ms =
       performance_enabled ? SDL_GetTicks() : 0;
   const uint64_t swap_start = s_present_trace_enabled ? SDL_GetTicksNS() : 0;
-  const bool completed = CompletePresent(kHostDisplayPresent_GameTick);
+  const bool completed = CompletePresent(kHostDisplayPresent_GameTick, prepared);
   if (s_present_trace_enabled) {
     s_present_trace.swap_ns = SDL_GetTicksNS() - swap_start;
     const ArSdlPresentTrace backend = ArSdlRenderBackend_LastPresentTrace(&g_render_device);
     s_present_trace.backend_flush_ns = backend.flush_ns;
     s_present_trace.backend_acquire_ns = backend.acquire_ns;
     s_present_trace.backend_submit_ns = backend.submit_ns;
+    s_present_trace.backend_command_ns = backend.command_ns;
+    s_present_trace.backend_swapchain_ns = backend.swapchain_ns;
+    s_present_trace.backend_blit_ns = backend.blit_ns;
+    s_present_trace.backend_queue_submit_ns = backend.queue_submit_ns;
   }
   if (!completed) return false;
   s_represent_count++;

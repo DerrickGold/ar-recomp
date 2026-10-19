@@ -586,7 +586,9 @@ void GameLoop_Run(const GameSessionConfig *config) {
             "work_ns,swap_ns,vector_wait_ns,queue_before,queue_after,presented,tick,epoch,source_"
             "ns,producer_start_ns,producer_complete_ns,input_ns,pump_ns,input_events_ns,owner_poll_"
             "ns,submit_start_ns,backend_flush_ns,backend_acquire_ns,backend_submit_ns,producer_cpu_"
-            "ns,playout_target_ns,sample_ns,interval_ns,interpolation,pacing_source,draw_cpu_ns\n");
+            "ns,playout_target_ns,sample_ns,interval_ns,interpolation,pacing_source,draw_cpu_ns,"
+            "offscreen_submit_ns,offscreen_complete_ns,backend_command_ns,backend_swapchain_ns,"
+            "backend_blit_ns,backend_queue_submit_ns\n");
   }
   uint64_t trace_producer_start = 0, trace_producer_complete = 0, trace_input = 0;
   uint64_t trace_producer_cpu = 0;
@@ -823,7 +825,8 @@ void GameLoop_Run(const GameSessionConfig *config) {
           fprintf(
               pacing_trace,
               "%llu,%llu,%llu,%llu,%llu,%llu,%llu,%u,%llu,%llu,%llu,%u,%u,%d,%d,%llu,%llu,%llu,%"
-              "llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%d,%d,%llu\n",
+              "llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%d,%d,%llu,%llu,%llu,"
+              "%llu,%llu,%llu,%llu\n",
               (unsigned long long)trace_loop_ns, (unsigned long long)present_start_ns,
               (unsigned long long)trace_ready_ns, (unsigned long long)trace.draw_start_ns,
               (unsigned long long)trace_complete_ns, (unsigned long long)trace.deadline_ns,
@@ -841,7 +844,13 @@ void GameLoop_Run(const GameSessionConfig *config) {
               (unsigned long long)trace.backend_submit_ns, (unsigned long long)trace_producer_cpu,
               (unsigned long long)present_target_ns, (unsigned long long)sample_ns,
               (unsigned long long)stream.interval_ns, stream.playout.interpolate,
-              HostDisplay_PacingSource(), (unsigned long long)trace.draw_cpu_ns);
+              HostDisplay_PacingSource(), (unsigned long long)trace.draw_cpu_ns,
+              (unsigned long long)trace.offscreen_submit_ns,
+              (unsigned long long)trace.offscreen_complete_ns,
+              (unsigned long long)trace.backend_command_ns,
+              (unsigned long long)trace.backend_swapchain_ns,
+              (unsigned long long)trace.backend_blit_ns,
+              (unsigned long long)trace.backend_queue_submit_ns);
         }
         if (trace_complete_ns) {
           const uint64_t trace_write_ns = SDL_GetTicksNS() - trace_complete_ns;

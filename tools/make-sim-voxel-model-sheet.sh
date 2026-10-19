@@ -23,6 +23,7 @@ cc -std=c11 -O2 -Isrc -Isnesrecomp-go/runtime/include -I/opt/homebrew/include \
   src/render/scene3d_math.c \
   src/render/render_device.c \
   src/platform/sdl/render_sdl.c \
+  src/platform/sdl/metal_drawable_sdl.c \
   src/platform/sdl/sim3d_depth_pass_sdl.c \
   src/platform/sdl/sim3d_depth_pass_pipelines_sdl.c \
   src/platform/sdl/sim3d_depth_pass_meshes_sdl.c \

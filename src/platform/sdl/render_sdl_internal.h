@@ -21,6 +21,8 @@ typedef struct ArSdlRenderBackend {
   SDL_GPUPresentMode output_present_mode;
   uint32_t applied_frames_in_flight;
   bool frames_in_flight_applied;
+  bool metal_drawable_policy, metal_drawable_warning;
+  unsigned metal_drawable_override, reported_metal_drawables;
   bool reuse_texture_uploads; /* Ordered output only; staging owned by each texture. */
   bool owns_renderer;
   bool owns_context;

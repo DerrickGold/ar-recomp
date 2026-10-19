@@ -224,6 +224,7 @@ if(_AR_ENHANCED_TEXT)
         src/platform/sdl/text_preview_cli.c
         src/render/gpu_compile_log.c
         src/platform/sdl/render_sdl.c
+        src/platform/sdl/metal_drawable_sdl.c
         src/platform/sdl/host_clock_sdl.c
         src/platform/sdl/text_rasterizer_sdl.c src/platform/sdl/text_fonts_sdl.c
         src/localization/dialogue_session.c src/localization/language_pack.c
@@ -599,6 +600,9 @@ if(BUILD_TESTING)
         add_test(NAME actraiser_frame_pacing_tool
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_SOURCE_DIR}/tests/frame_pacing_tool_test.py)
+        add_test(NAME actraiser_metal_presentation_tool
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/metal_presentation_tool_test.py)
         set_tests_properties(actraiser_pipeline_performance_tool PROPERTIES
             ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
         add_test(NAME actraiser_action_editor_build
@@ -1632,8 +1636,14 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_render_sdl_upload COMMAND actraiser_render_sdl_upload_test)
     set_tests_properties(actraiser_render_sdl_upload PROPERTIES SKIP_RETURN_CODE 77)
 
+    add_executable(actraiser_metal_drawable_policy_test tests/metal_drawable_policy_test.c)
+    target_link_libraries(actraiser_metal_drawable_policy_test PRIVATE actraiser_render_sdl_test_support)
+    add_test(NAME actraiser_metal_drawable_policy COMMAND actraiser_metal_drawable_policy_test)
+    set_tests_properties(actraiser_metal_drawable_policy PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
+
     add_executable(actraiser_render_sdl_present_test
         tests/render_sdl_present_test.c src/platform/sdl/host_clock_sdl.c
+        src/platform/sdl/metal_drawable_sdl.c
         src/render/gpu_compile_log.c)
     target_link_libraries(actraiser_render_sdl_present_test PRIVATE
         actraiser_performance_test_support
@@ -4109,6 +4119,14 @@ if(BUILD_TESTING)
     target_link_libraries(actraiser_gpu_block_motion_test PRIVATE SDL3::SDL3 actraiser_math)
     add_test(NAME actraiser_gpu_block_motion COMMAND actraiser_gpu_block_motion_test)
     set_tests_properties(actraiser_gpu_block_motion PROPERTIES SKIP_RETURN_CODE 77)
+    add_executable(actraiser_gpu_motion_layers_test tests/gpu_motion_layers_test.c
+        src/platform/sdl/gpu_global_motion_sdl.c src/platform/sdl/gpu_block_motion_sdl.c
+        src/platform/sdl/gpu_frame_handoff_sdl.c src/platform/sdl/action_scene_pass_sdl.c
+        src/render/gpu_compile_log.c)
+    target_include_directories(actraiser_gpu_motion_layers_test PRIVATE src tests)
+    target_link_libraries(actraiser_gpu_motion_layers_test PRIVATE SDL3::SDL3 actraiser_math)
+    add_test(NAME actraiser_gpu_motion_layers COMMAND actraiser_gpu_motion_layers_test)
+    set_tests_properties(actraiser_gpu_motion_layers PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
     target_include_directories(actraiser_diorama_bg_gpu_test PRIVATE src)
     target_link_libraries(actraiser_diorama_bg_gpu_test PRIVATE
         actraiser_render_sdl_test_support SDL3::SDL3 actraiser_math)
@@ -4151,7 +4169,16 @@ if(BUILD_TESTING)
         COMMAND actraiser_diorama_frame_generation_test)
     set_tests_properties(actraiser_diorama_frame_generation_resident PROPERTIES
         SKIP_RETURN_CODE 77 TIMEOUT 30
-        ENVIRONMENT "AR_REQUIRE_GPU_RENDERER=1;AR_GPU_BG_MOTION=owned;AR_GPU_FRAME_HANDOFF=all;AR_GPU_EFFECT_PROJECTION=resident")
+        FAIL_REGULAR_EXPRESSION "unpack-frames=[1-9];atlas-output-bytes=[1-9]"
+        ENVIRONMENT "AR_REQUIRE_GPU_RENDERER=1;AR_GPU_BG_MOTION=owned;AR_GPU_FRAME_HANDOFF=all;AR_GPU_EFFECT_PROJECTION=resident;AR_GPU_DIRECT_LAYERS=auto")
+    add_test(NAME actraiser_diorama_frame_generation_direct_layers COMMAND actraiser_diorama_frame_generation_test)
+    set_tests_properties(actraiser_diorama_frame_generation_direct_layers PROPERTIES
+        SKIP_RETURN_CODE 77 TIMEOUT 60
+        ENVIRONMENT "AR_REQUIRE_GPU_RENDERER=1;AR_GPU_BG_MOTION=owned;AR_GPU_FRAME_HANDOFF=all;AR_GPU_EFFECT_PROJECTION=resident;AR_GPU_DIRECT_LAYERS=1")
+    add_test(NAME actraiser_diorama_frame_generation_atlas COMMAND actraiser_diorama_frame_generation_test)
+    set_tests_properties(actraiser_diorama_frame_generation_atlas PROPERTIES
+        SKIP_RETURN_CODE 77 TIMEOUT 60
+        ENVIRONMENT "AR_REQUIRE_GPU_RENDERER=1;AR_GPU_BG_MOTION=owned;AR_GPU_FRAME_HANDOFF=all;AR_GPU_EFFECT_PROJECTION=resident;AR_GPU_DIRECT_LAYERS=0")
     add_test(NAME actraiser_diorama_frame_generation_native_worker
         COMMAND actraiser_diorama_frame_generation_test)
     set_tests_properties(actraiser_diorama_frame_generation_native_worker PROPERTIES

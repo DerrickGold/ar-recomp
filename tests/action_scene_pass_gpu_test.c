@@ -241,6 +241,8 @@ int main(void) {
   ArGpuActionScenePass pass; assert(ArGpuActionScenePass_Init(&pass, gpu));
   ArGpuGlobalMotion motion; assert(ArGpuGlobalMotion_Init(&motion, gpu));
   motion.plane_count=N; assert(ArGpuGlobalMotion_Resize(&motion, W, H));
+  /* This test binds the atlas before its first reference warp. */
+  assert(ArGpuGlobalMotion_EnsureOutput(&motion));
   SDL_GPUTexture *previous=Texture(gpu,W,H*N,false), *current=Texture(gpu,W,H*N,false);
   const SDL_GPUTransferBufferCreateInfo ui={.usage=SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,.size=W*H*N*4*2};
   SDL_GPUTransferBuffer *upload=SDL_CreateGPUTransferBuffer(gpu,&ui); assert(upload);

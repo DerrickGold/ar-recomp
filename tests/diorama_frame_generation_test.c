@@ -605,6 +605,10 @@ int main(void) {
   slot.diorama_plane_request_mask = 1u << test_plane;
   slot.diorama_plane_content_mask = slot.diorama_plane_request_mask;
   slot.timestamp_ns = 1000000;
+  /* Startup prepares shaders before any capture initializes the live room
+   * policy. The direct-output CTest also verifies this uses no output atlas. */
+  if (gpu_motion)
+    CHECK(DioramaFrameGeneration_PreparePipelines(&render_device, true));
   CHECK(SDL_UpdateTexture(
       current, &source_rect, &previous_pixels[kApron],
       kSurfaceWidth * sizeof(uint32_t)));
