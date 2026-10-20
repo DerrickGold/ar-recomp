@@ -372,6 +372,7 @@ static void OnGamepadHostAction(InputAction action) {
 }
 
 void HostInput_BeginSession(void) {
+  TouchControls_Init();
   InputMap_Init();
   s_paused = s_turbo = s_inspector_owns_pause = s_paused_redraw_pending = false;
   HostInput_ClearHeld();
@@ -384,6 +385,7 @@ void HostInput_EndSession(void) {
   InputMap_SetActionHandler(NULL);
   HostInput_ClearHeld();
   InputMap_Shutdown();
+  TouchControls_Shutdown();
 }
 
 /* Capture wins over hotkeys; then the active menu device gets first use.
@@ -602,6 +604,24 @@ static void HandleMouse(const SDL_Event *event) {
 
 bool HostInput_HandleEvent(const SDL_Event *event) {
   if (TouchControls_HandleEvent(event)) return true;
+  if (TouchControls_IsMenuEvent(event)) {
+    if (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+      /* The touch Menu button is always available, even if its gamepad
+       * bindings or the selected input mode have changed. Escape cancels a
+       * pending capture before the ordinary close/open behavior. */
+      SDL_Event escape = {.type = SDL_EVENT_KEY_DOWN};
+      escape.key.scancode = SDL_SCANCODE_ESCAPE;
+      escape.key.key = SDLK_ESCAPE;
+      if (!SettingsOverlay_HandleCaptureEvent(&escape)) {
+        if (SettingsOverlay_IsOpen())
+          (void)SettingsOverlay_HandleKey(SDLK_ESCAPE, true, false);
+        else
+          SettingsOverlay_Open();
+        HostInput_ClearHeld();
+      }
+    }
+    return true;
+  }
   switch (event->type) {
     case SDL_EVENT_KEY_DOWN:
       if (!s_logged_key_down) {
@@ -657,8 +677,9 @@ bool HostInput_HandleEvent(const SDL_Event *event) {
 }
 
 bool HostInput_TryHandleStreamEvent(const SDL_Event *event, bool sim_town) {
-  /* Touches only queue key events, which are classified on their own. */
+  /* Touches only publish gamepad events, which are classified on their own. */
   if (event && TouchControls_HandleEvent(event)) return true;
+  if (TouchControls_IsMenuEvent(event)) return false;
   if (!event || s_paused || ManualReader_IsOpen() || SettingsOverlay_IsOpen() ||
       SettingsOverlay_IsCapturing() || g_settings.scene_inspector ||
       RenderComparison_FreezesGameplay()) return false;

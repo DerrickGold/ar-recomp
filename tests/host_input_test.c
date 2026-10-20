@@ -62,6 +62,14 @@ Settings g_settings;
 SDL_Window *g_window;
 bool Sim3DTextures_Ready(void) { return false; }
 bool TouchControls_HandleEvent(const SDL_Event *event) { (void)event; return false; }
+void TouchControls_Init(void) {}
+void TouchControls_Shutdown(void) {}
+bool TouchControls_IsMenuEvent(const SDL_Event *event) {
+  return event && (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
+                   event->type == SDL_EVENT_GAMEPAD_BUTTON_UP) &&
+      event->gbutton.which == (SDL_JoystickID)-1 &&
+      event->gbutton.button == SDL_GAMEPAD_BUTTON_MISC1;
+}
 int snes_frame_counter;
 
 bool ActRaiserSimMenu_OwnsInput(void) {
@@ -233,6 +241,11 @@ void SettingsOverlay_DragDebugPanel(int output_x, int output_y) {
 void SettingsOverlay_EndDebugPanelDrag(void) {
 }
 bool SettingsOverlay_HandleCaptureEvent(const SDL_Event * event) {
+  if (s_capture && event->type == SDL_EVENT_KEY_DOWN &&
+      event->key.scancode == SDL_SCANCODE_ESCAPE) {
+    s_capture = false;
+    return true;
+  }
   return s_capture;
 }
 bool SettingsOverlay_HandleGamepadEvent(const SDL_Event * event) {
@@ -579,6 +592,31 @@ int main(void) {
   assert(!HostInput_TryHandleStreamEvent(&event, false));
   s_manual = false;
   assert(s_runner_camera_reads == runner_reads);
+
+  /* Touch Menu cannot be rebound away or suppressed by device arbitration.
+   * It also requires a runner handoff and cancels capture without closing. */
+  event = (SDL_Event){.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN};
+  event.gbutton.which = (SDL_JoystickID)-1;
+  event.gbutton.button = SDL_GAMEPAD_BUTTON_MISC1;
+  for (int mode = kInputDevice_Auto; mode <= kInputDevice_Gamepad; ++mode) {
+    s_device_mode = mode;
+    g_settings.input_device = mode;
+    s_pad_active = true;
+    assert(!HostInput_TryHandleStreamEvent(&event, false));
+    assert(!HostInput_TryHandleStreamEvent(&event, true));
+    assert(!s_overlay);
+    assert(HostInput_HandleEvent(&event) && s_overlay);
+    s_capture = true;
+    const int clears = s_clears;
+    assert(HostInput_HandleEvent(&event) && s_overlay && !s_capture);
+    assert(s_clears == clears);
+    s_close_menu = true;
+    assert(HostInput_HandleEvent(&event) && !s_overlay);
+    s_close_menu = false;
+    event.type = SDL_EVENT_GAMEPAD_BUTTON_UP;
+    assert(HostInput_HandleEvent(&event) && !s_overlay);
+    event.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+  }
   HostInput_EndSession();
   puts("host input: modal routing, device arbitration and releases passed");
   return 0;

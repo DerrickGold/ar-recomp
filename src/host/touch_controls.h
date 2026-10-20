@@ -6,18 +6,23 @@
 
 #include "render/render_types.h"
 
-/* On-screen SNES pad for touchscreens. Fingers on the drawn D-pad, face
- * buttons, shoulders, Select/Start and Menu become the player's own keyboard
- * bindings, delivered as ordinary SDL key events. Gameplay, the settings menu
- * and rebinding therefore see exactly what a keyboard player produces, and no
- * consumer needs to know touch exists.
+/* On-screen SNES pad for touchscreens. The D-pad, face buttons, shoulders and
+ * Select/Start report fixed buttons on an SDL virtual gamepad. Gameplay,
+ * settings navigation and rebinding all use the ordinary gamepad bindings.
+ * Menu remains a reserved host control so rebinding cannot strand the player.
  *
  * Shown on Android always, and on any other platform after the first direct
  * touch. Hidden while a gamepad is connected. */
 
-/* Consumes finger events (returns true for them). Safe on any thread that
- * pumps SDL events; pushes the translated key events back onto the queue. */
+/* Main-thread session lifetime, around InputMap's lifetime. */
+void TouchControls_Init(void);
+void TouchControls_Shutdown(void);
+
+/* Consumes finger events (returns true for them), publishing gamepad events
+ * back onto the SDL queue. Also observes hotplug and focus loss. */
 bool TouchControls_HandleEvent(const SDL_Event *event);
+/* Reserved Menu button events bypass device gating and binding capture. */
+bool TouchControls_IsMenuEvent(const SDL_Event *event);
 
 /* Draws in physical output pixels; call from the host UI pass. */
 void TouchControls_Draw(ArRenderExtentI output_size);

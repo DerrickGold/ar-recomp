@@ -4,7 +4,6 @@
 #include <string.h>
 
 #include "app/input_map.h"
-#include "app/settings.h"
 #include "host/host_video.h"
 #include "render/render_device.h"
 #include "settings_overlay/settings_overlay_render.h"
@@ -12,10 +11,11 @@
 enum {
   kTouchMaxFingers = 10,
   kTouchCircleSegments = 28,
-  /* Host-only button beyond the twelve pad actions: opens the settings menu
-   * through the same Escape key a desktop player uses. */
+  /* Host-only button beyond the twelve pad actions. */
   kTouchMenu = kInputAction_PadCount,
   kTouchButtonCount,
+  /* Guide delays release in SDL; use an ordinary button for immediate taps. */
+  kTouchMenuButton = SDL_GAMEPAD_BUTTON_MISC1,
 };
 
 typedef enum { kFinger_Free = 0, kFinger_Pad, kFinger_Button } FingerRole;
@@ -37,6 +37,9 @@ typedef struct Layout {
 static Finger s_fingers[kTouchMaxFingers];
 static uint32_t s_held;        /* bit per kTouchButtonCount entry */
 static bool s_touch_seen;
+static bool s_external_gamepad;
+static SDL_Gamepad *s_gamepad;
+static SDL_JoystickID s_gamepad_id;
 static ArRenderExtentI s_output;
 
 static bool ControlsEnabled(void) {
@@ -45,7 +48,74 @@ static bool ControlsEnabled(void) {
 #else
   const bool platform_touch = false;
 #endif
-  return (platform_touch || s_touch_seen) && InputMap_GamepadCount() == 0;
+  return (platform_touch || s_touch_seen) && !s_external_gamepad;
+}
+
+static void DisconnectGamepad(void) {
+  memset(s_fingers, 0, sizeof s_fingers);
+  s_held = 0;
+  if (s_gamepad) SDL_CloseGamepad(s_gamepad);
+  if (s_gamepad_id) SDL_DetachVirtualJoystick(s_gamepad_id);
+  s_gamepad = NULL;
+  s_gamepad_id = 0;
+}
+
+static void RefreshGamepad(void) {
+  if (!(SDL_WasInit(SDL_INIT_GAMEPAD) & SDL_INIT_GAMEPAD)) return;
+  int count = 0;
+  SDL_JoystickID *ids = SDL_GetGamepads(&count);
+  s_external_gamepad = false;
+  for (int i = 0; i < count; ++i)
+    if (ids[i] != s_gamepad_id) s_external_gamepad = true;
+  SDL_free(ids);
+  if (!ControlsEnabled()) {
+    DisconnectGamepad();
+    return;
+  }
+  if (s_gamepad) return;
+
+  SDL_VirtualJoystickDesc desc;
+  SDL_INIT_INTERFACE(&desc);
+  desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+  desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+  desc.button_mask = (1u << SDL_GAMEPAD_BUTTON_COUNT) - 1;
+  desc.name = "Touch controls";
+  s_gamepad_id = SDL_AttachVirtualJoystick(&desc);
+  /* SNES face labels follow Nintendo's B/A/Y/X order. Declare that layout
+   * so menu and gameplay prompts match the letters drawn on the screen. */
+  char *mapping = s_gamepad_id ? SDL_GetGamepadMappingForID(s_gamepad_id) : NULL;
+  char *labeled_mapping = NULL;
+  /* Open before the first finger press: InputMap receives the queued ADDED
+   * event later, but SDL needs an open gamepad to produce button events. */
+  if (mapping && SDL_asprintf(&labeled_mapping, "%stype:%s,", mapping,
+          SDL_GetGamepadStringForType(SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO)) >= 0 &&
+      SDL_SetGamepadMapping(s_gamepad_id, labeled_mapping))
+    s_gamepad = SDL_OpenGamepad(s_gamepad_id);
+  SDL_free(labeled_mapping);
+  SDL_free(mapping);
+  if (!s_gamepad) {
+    SDL_Log("Could not create touch controller: %s", SDL_GetError());
+    DisconnectGamepad();
+  }
+}
+
+void TouchControls_Init(void) {
+  TouchControls_Shutdown();
+  RefreshGamepad();
+}
+
+void TouchControls_Shutdown(void) {
+  DisconnectGamepad();
+  s_touch_seen = s_external_gamepad = false;
+  s_output = (ArRenderExtentI){0};
+}
+
+bool TouchControls_IsMenuEvent(const SDL_Event *event) {
+  return event && s_gamepad_id &&
+      (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
+       event->type == SDL_EVENT_GAMEPAD_BUTTON_UP) &&
+      event->gbutton.which == s_gamepad_id &&
+      event->gbutton.button == kTouchMenuButton;
 }
 
 static void ComputeLayout(float w, float h, Layout *l) {
@@ -146,29 +216,6 @@ static uint32_t PadBits(const Layout *l, float x, float y) {
   return kSectorBits[sector];
 }
 
-static SDL_Scancode ScancodeFor(int button) {
-  if (button == kTouchMenu) return SDL_SCANCODE_ESCAPE;
-  uint32 binding = g_settings.input_bind[kInputClass_Keyboard][button];
-  if (INPUT_BIND_KIND(binding) != kInputBind_Key)
-    binding = InputMap_DefaultBinding((InputAction)button, kInputClass_Keyboard);
-  return INPUT_BIND_KIND(binding) == kInputBind_Key ?
-      (SDL_Scancode)INPUT_BIND_CODE(binding) : SDL_SCANCODE_UNKNOWN;
-}
-
-static void PushKey(int button, bool down) {
-  const SDL_Scancode scancode = ScancodeFor(button);
-  if (scancode == SDL_SCANCODE_UNKNOWN) return;
-  SDL_Event key;
-  SDL_zero(key);
-  key.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
-  key.key.timestamp = SDL_GetTicksNS();
-  key.key.windowID = g_window ? SDL_GetWindowID(g_window) : 0;
-  key.key.scancode = scancode;
-  key.key.key = SDL_GetKeyFromScancode(scancode, SDL_KMOD_NONE, false);
-  key.key.down = down;
-  SDL_PushEvent(&key);
-}
-
 static void PublishHeld(void) {
   uint32_t held = 0;
   for (int i = 0; i < kTouchMaxFingers; i++) {
@@ -176,8 +223,22 @@ static void PublishHeld(void) {
     else if (s_fingers[i].role == kFinger_Button) held |= 1u << s_fingers[i].button;
   }
   const uint32_t changed = held ^ s_held;
-  for (int b = 0; b < kTouchButtonCount; b++)
-    if (changed & (1u << b)) PushKey(b, (held >> b) & 1u);
+  if (changed && s_gamepad) {
+    SDL_Joystick *joystick = SDL_GetGamepadJoystick(s_gamepad);
+    SDL_LockJoysticks();
+    for (int b = 0; b < kTouchButtonCount; b++) {
+      if (!(changed & (1u << b))) continue;
+      /* Physical identity must stay fixed when a mapping changes, including
+       * between a finger's press and release during binding capture. */
+      const int button = b == kTouchMenu ? kTouchMenuButton :
+          INPUT_BIND_CODE(InputMap_DefaultBinding((InputAction)b, kInputClass_Gamepad));
+      SDL_SetJoystickVirtualButton(joystick, button, (held >> b) & 1u);
+    }
+    /* Flush each transition: DOWN and UP can arrive in the same event pump,
+     * and a later poll would otherwise collapse a short tap to no input. */
+    SDL_UpdateJoysticks();
+    SDL_UnlockJoysticks();
+  }
   s_held = held;
 }
 
@@ -198,13 +259,27 @@ static void CurrentOutput(float *w, float *h) {
 }
 
 bool TouchControls_HandleEvent(const SDL_Event *event) {
+  if (!event) return false;
+  if (event->type == SDL_EVENT_GAMEPAD_ADDED || event->type == SDL_EVENT_GAMEPAD_REMOVED) {
+    RefreshGamepad();
+    return false;
+  }
+  if (event->type == SDL_EVENT_WINDOW_FOCUS_LOST ||
+      event->type == SDL_EVENT_WILL_ENTER_BACKGROUND) {
+    memset(s_fingers, 0, sizeof s_fingers);
+    PublishHeld();
+    return false;
+  }
   if (event->type != SDL_EVENT_FINGER_DOWN && event->type != SDL_EVENT_FINGER_MOTION &&
       event->type != SDL_EVENT_FINGER_UP && event->type != SDL_EVENT_FINGER_CANCELED)
     return false;
   if (SDL_GetTouchDeviceType(event->tfinger.touchID) != SDL_TOUCH_DEVICE_DIRECT)
     return true;   /* trackpads are not screens */
-  s_touch_seen = true;
-  if (!ControlsEnabled()) return true;
+  if (!s_touch_seen) {
+    s_touch_seen = true;
+    RefreshGamepad();
+  }
+  if (!ControlsEnabled() || !s_gamepad) return true;
   float w, h;
   CurrentOutput(&w, &h);
   Layout layout;

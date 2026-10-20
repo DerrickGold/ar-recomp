@@ -2877,6 +2877,7 @@ if(BUILD_TESTING)
         src/render/render_output.c
         tests/host_clock_stub.c
         src/host/host_display_status.c
+        src/host/touch_controls.c
         src/app/input_map.c
         src/platform/sdl/gamepad_poll_sdl.c
         src/app/user_data_dir.c
@@ -2915,6 +2916,8 @@ if(BUILD_TESTING)
             "AR_OVERLAY_UI_HE_FONT=\"${CMAKE_SOURCE_DIR}/game-assets/fonts/noto/NotoSansHebrew-Bold.ttf\"")
     endif()
     target_compile_definitions(actraiser_settings_overlay_test PRIVATE
+        # Stub the touchscreen query without interposing a symbol in SDL itself.
+        SDL_GetTouchDeviceType=Test_TouchDeviceType
         AR_SIM3D_TERRAIN_ELEVATION=${AR_SIM3D_TERRAIN_ELEVATION_VALUE})
     add_test(NAME actraiser_settings_overlay COMMAND actraiser_settings_overlay_test)
     set_tests_properties(actraiser_settings_overlay PROPERTIES

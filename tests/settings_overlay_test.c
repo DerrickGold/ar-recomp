@@ -7,6 +7,7 @@
 #include "present/display_geometry.h"
 #include "app/input_map.h"
 #include "host/host_display_status.h"
+#include "host/touch_controls.h"
 #include "render/render_capabilities.h"
 #include "app/settings.h"
 #include "randomizer/randomizer.h"
@@ -40,6 +41,8 @@ uint8 g_ram[0x20000];
  * (host_video.c's real runtime state); this harness has no renderer, so it's
  * never actually true here. */
 bool g_gpu_shaders_active;
+SDL_Window *g_window;
+ArRenderDevice g_render_device;
 /* W4-2: present.c owns the real value (latched when a renderer rejects the rim
  * mask blend mode); stubbed true here so the row's availability is exercised. */
 bool Present_SimRimMaskSupported(void) { return true; }
@@ -2826,6 +2829,7 @@ static void TestSaveSlotLocales(SDL_Renderer *renderer, SDL_Surface *surface) {
 }
 
 #include "save_slots_release_capture.inc"
+#include "touch_controls_test.inc"
 
 #ifdef AR_OVERLAY_UI_FONT
 static void CheckEnhancedComparisonLabels(SDL_Renderer *renderer, SDL_Surface *surface) {
@@ -3556,6 +3560,7 @@ int main(int argc, char **argv) {
   CHECK(!SettingsOverlay_IsCapturing());
   CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_Up] ==
         INPUT_BIND_MAKE(kInputBind_PadButton, SDL_GAMEPAD_BUTTON_NORTH, false));
+  CheckTouchControls();
   NavToTab(1);
   CHECK(g_settings.input_bind_page == kInputClass_Keyboard);
   /* Read-only diagnostics must not re-synchronize a page selector behind the

@@ -76,8 +76,11 @@ a different computer requires uninstalling first, which **deletes your saves**
 - **Touch controls** appear over the game: a D-pad on the left, the SNES
   **A/B/X/Y** buttons on the right, **L/R** at the top corners, and
   **Select/Start** at the bottom. **MENU** opens the settings overlay. The
-  buttons send your keyboard bindings, so the menus work exactly as they do
-  with a keyboard.
+  pad appears as **Touch controls** under Controls → Devices. Rebind its
+  buttons under **Controls → Gamepad**: select an action, then tap the touch
+  button you want to use. Touch and physical controllers share these saved
+  bindings; use **Auto** or **Gamepad** as the input device. **MENU** always
+  opens settings or cancels an active rebind.
 - **Gamepads** work as on desktop. The touch controls hide while one is
   connected.
 - The game runs full screen in landscape.
