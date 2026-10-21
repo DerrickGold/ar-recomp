@@ -69,12 +69,24 @@ typedef enum {
   kInputAction_CamPitchDown,
   kInputAction_CamZoomIn,
   kInputAction_CamZoomOut,
+  /* Town twin-stick shooting, also polled: while held, the angel fires in
+   * that cardinal direction and movement stays on the stick or D-pad. Order
+   * matches the native facing byte (up/right/down/left). Unbound by default;
+   * a shoot row may share a control with an SNES button row, which is then
+   * masked during live town play only. */
+  kInputAction_ShootUp,
+  kInputAction_ShootRight,
+  kInputAction_ShootDown,
+  kInputAction_ShootLeft,
   kInputAction_Count,
 } InputAction;
 
-/* Analog actions are excluded from the edge-dispatch path; a bound trigger
- * must not also fire a one-shot every time it crosses the threshold. */
+/* Analog (and shoot) actions are excluded from the edge-dispatch path; a
+ * bound trigger must not also fire a one-shot every time it crosses the
+ * threshold. */
 #define INPUT_ACTION_IS_ANALOG(a) ((a) >= kInputAction_EdgeEnd)
+#define INPUT_ACTION_IS_SHOOT(a) \
+  ((a) >= kInputAction_ShootUp && (a) <= kInputAction_ShootLeft)
 
 /* Which physical device a binding row belongs to. Bindings are stored per
  * class, so a keyboard and a pad can be bound simultaneously and the
@@ -177,6 +189,13 @@ uint32 InputMap_State(void);
  * Only live town play enables angel deadzone arbitration and D-pad priority;
  * action stages and recordings retain the original digital input rules. */
 void InputMap_SetAngelControlsActive(bool active);
+/* Main-thread policy: live town flight with no modern menu owning input.
+ * Only then do shoot bindings fire and mask the SNES buttons they share. */
+void InputMap_SetTwinStickActive(bool active);
+/* Held twin-stick direction for this tick: 0 for none, otherwise the native
+ * facing plus one (1 up, 2 right, 3 down, 4 left). The newest press wins; a
+ * still-held direction is kept through diagonals so it cannot chatter. */
+uint8_t InputMap_TwinStickShot(void);
 /* Packed game-owned analog angel sample. Explicit directional bindings take
  * precedence; keyboard, disconnected pads and disabled analog return zero. */
 uint32 InputMap_AnalogAngel(void);

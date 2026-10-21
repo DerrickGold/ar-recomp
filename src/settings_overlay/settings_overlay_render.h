@@ -6,6 +6,7 @@
 
 #include "render/render_types.h"
 #include "localization/ui_catalog.h"
+#include "render/ui_text_renderer.h"
 
 /* Portable drawing surface shared by terminal host UI, comparison views, and
  * the manual. Window ownership and input events remain in settings_overlay.h.
@@ -32,6 +33,11 @@ void SettingsOverlay_DrawGameText(int x, int y, int scale, uint8_t alpha,
  * caller can use its native fallback. Measurement and drawing share a run. */
 bool SettingsOverlay_DrawEnhancedLabel(ArRenderRectI bounds, uint8_t alpha,
                                         const char *text);
+/* Same run with an explicit horizontal alignment, still vertically centered.
+ * Lets a host row sit beside game-localized menu labels. */
+bool SettingsOverlay_DrawEnhancedLabelAligned(ArRenderRectI bounds, uint8_t alpha,
+                                               const char *text,
+                                               ArUiTextAlignment alignment);
 /* Draw the ROM dialog frame. Dimensions must be divisible by 8*scale. */
 bool SettingsOverlay_DrawGameFrame(ArRenderRectI rect, int scale);
 

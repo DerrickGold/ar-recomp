@@ -66,7 +66,8 @@ static void RtlDrawPpuFrame(void) {
  * the emulated frame, post-frame diagnostics, and replay completion must stay
  * indivisible so turbo and ordinary pacing cannot acquire different ordering
  * as new per-frame services are added. */
-static bool RunOneRecompiledFrame(uint32 live_inputs, uint32 angel_stick, bool *stop_running) {
+static bool RunOneRecompiledFrame(uint32 live_inputs, uint32 angel_stick, uint8 angel_shot,
+                                  bool *stop_running) {
   InputReplayFrameResult replay = InputReplay_Resolve(live_inputs);
   if (InputReplay_Failed()) {
     SessionFatal_Request("Input replay failed: %s",
@@ -77,8 +78,10 @@ static bool RunOneRecompiledFrame(uint32 live_inputs, uint32 angel_stick, bool *
   if (replay.stop_requested) *stop_running = true;
 
   /* Canonical recordings currently carry buttons only. Diagnostic runs must
-   * never consume unrecorded live axes, including replay's live handoff. */
-  ActRaiserAngel_SetInput(InputReplay_PolicyChangesAllowed() ? angel_stick : 0,
+   * never consume unrecorded live axes or twin-stick shots, including
+   * replay's live handoff. */
+  const bool live_policy = InputReplay_PolicyChangesAllowed();
+  ActRaiserAngel_SetInput(live_policy ? angel_stick : 0, live_policy ? angel_shot : 0,
       g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap]);
   (void)RtlRunFrame(replay.inputs);
   OracleTrace_CompleteTick();
@@ -103,8 +106,8 @@ static bool RunOneRecompiledFrame(uint32 live_inputs, uint32 angel_stick, bool *
  * it (§3.5 — "wrap the per-tick RtlRunFrame"). Called once per outer
  * iteration by the headless loop (§3.6) and 0-N times per outer iteration by
  * the non-headless fixed-timestep accumulator loop (§3.1). */
-static void RunOneEmulatedTickWork(uint32 live_inputs, uint32 angel_stick, int multiplier,
-                                   bool *stop_running) {
+static void RunOneEmulatedTickWork(uint32 live_inputs, uint32 angel_stick, uint8 angel_shot,
+                                   int multiplier, bool *stop_running) {
   const HostRuntimeTickProfile profile = HostRuntimeDiagnostics_BeginTick();
 
   /* Do not hold the APU lock for a whole frame. Every APU-touching path takes
@@ -119,7 +122,7 @@ static void RunOneEmulatedTickWork(uint32 live_inputs, uint32 angel_stick, int m
    * DSP ring buffered. It also pinned scheduled port-write latency at the
    * produced+3-quanta ceiling (~50 ms) because `produced` could not
    * advance while the game thread held the lock. */
-  if (!RunOneRecompiledFrame(live_inputs, angel_stick, stop_running)) return;
+  if (!RunOneRecompiledFrame(live_inputs, angel_stick, angel_shot, stop_running)) return;
   /* TURBO ('t' toggle): real fast-forward = run extra game frames per
    * emulated TICK (not per rendered/present frame — that decoupling is
    * M5's job). Same input word each sub-frame (level-held buttons repeat;
@@ -128,7 +131,7 @@ static void RunOneEmulatedTickWork(uint32 live_inputs, uint32 angel_stick, int m
   if (multiplier > 1 && !*stop_running) {
     for (int tf = 1; tf < multiplier && !SessionFatal_Requested() &&
          !*stop_running; tf++) {
-      if (!RunOneRecompiledFrame(live_inputs, angel_stick, stop_running)) break;
+      if (!RunOneRecompiledFrame(live_inputs, angel_stick, angel_shot, stop_running)) break;
     }
     if (SessionFatal_Requested()) {
       *stop_running = true;
@@ -138,9 +141,12 @@ static void RunOneEmulatedTickWork(uint32 live_inputs, uint32 angel_stick, int m
   HostRuntimeDiagnostics_EndTick(profile);
 }
 
+enum { kStreamShotShift = 16 };
+
 typedef struct TickJob {
   uint32 inputs;
   uint32 angel_stick;
+  uint8 angel_shot;
   int multiplier;
   bool stop_requested;
 } TickJob;
@@ -148,7 +154,8 @@ typedef struct TickJob {
 static void RunTickOnOwner(void *context) {
   TickJob *job = context;
   const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_Emulation);
-  RunOneEmulatedTickWork(job->inputs, job->angel_stick, job->multiplier, &job->stop_requested);
+  RunOneEmulatedTickWork(job->inputs, job->angel_stick, job->angel_shot, job->multiplier,
+                         &job->stop_requested);
   PerformanceMetrics_End(performance);
 }
 
@@ -156,6 +163,7 @@ static TickJob LatchTickJob(void) {
   return (TickJob){
     .inputs = HostInput_SampleLiveInputs(),
     .angel_stick = InputMap_AnalogAngel(),
+    .angel_shot = InputMap_TwinStickShot(),
     .multiplier = HostInput_IsTurbo() ? g_settings.turbo_multiplier : 1,
   };
 }
@@ -197,7 +205,9 @@ typedef struct StreamJob {
 } StreamJob;
 
 static void PublishStreamInput(StreamJob *stream) {
-  const uint64_t sample = ((uint64_t)InputMap_AnalogAngel() << 32) | InputMap_State();
+  /* Buttons occupy the low 12 bits; the twin-stick shot rides above them. */
+  const uint64_t sample = ((uint64_t)InputMap_AnalogAngel() << 32) |
+      ((uint64_t)InputMap_TwinStickShot() << kStreamShotShift) | InputMap_State();
   atomic_store_explicit(&stream->input_time_ms, (uint32_t)SDL_GetTicks(), memory_order_relaxed);
   atomic_store_explicit(&stream->input_sample, sample, memory_order_release);
 }
@@ -235,8 +245,9 @@ static void ProduceFrameStream(void *context) {
         (uint32_t)atomic_load_explicit(&stream->input_time_ms, memory_order_relaxed);
     const uint32_t age_ms = (uint32_t)SDL_GetTicks() - input_time_ms;
     packet->input_ns = packet->started_ns - (uint64_t)age_ms * 1000000;
-    TickJob tick = {.inputs = HostInput_ResolveActionInputs((uint32_t)sample),
+    TickJob tick = {.inputs = HostInput_ResolveActionInputs((uint32_t)sample & 0xFFFu),
         .angel_stick = (uint32_t)(sample >> 32),
+        .angel_shot = (uint8_t)((sample >> kStreamShotShift) & 7u),
         .multiplier = 1};
     RunTickOnOwner(&tick);
     AudioSession_AfterTicks();
@@ -630,6 +641,9 @@ void GameLoop_Run(const GameSessionConfig *config) {
     const uint8 map_number = stream_pending ? stream.map_number : g_ram[kActRaiserWram_CurrentMap];
     InputMap_SetAngelControlsActive(live_controls &&
         ActRaiser_IsSimulationTown(map_group, map_number));
+    InputMap_SetTwinStickActive(live_controls &&
+        ActRaiser_IsSimulationTown(map_group, map_number) &&
+        ActRaiserAngel_PlayerControlled());
     if (stream_pending) {
       const uint64_t trace_loop_ns = pacing_trace ? SDL_GetTicksNS() : 0;
       if (SessionFatal_Requested()) {
@@ -908,6 +922,7 @@ void GameLoop_Run(const GameSessionConfig *config) {
     HostPpuOutput_SetAuthenticEnabled(
         HostInput_RenderComparisonCaptureRequired());
     HostInput_UpdateRenderComparison();
+    HostInput_ServiceSimMenuRequests();
 
     /* Host-owned pauses do not issue the game's native SPC $F2 command. The
      * coordinator above freezes authentic music, replacement music, and SFX. */
@@ -1214,4 +1229,5 @@ void GameLoop_Run(const GameSessionConfig *config) {
   HostDisplay_SetProducerPacing(false);
   HostDisplay_InvalidatePresentHistory();
   InputMap_SetAngelControlsActive(false);
+  InputMap_SetTwinStickActive(false);
 }

@@ -26,6 +26,9 @@ bool ActRaiserSimMenu_Describing(void);
 bool ActRaiserSimMenu_FastReveal(void);
 bool ActRaiser_SimMenuObserveFrame(CpuState *cpu);
 void ActRaiserSimMenu_DescriptionWait(void);
+/* True once per selection of the modern menu's System row. The host opens the
+ * settings overlay; the town menu keeps its place underneath. */
+bool ActRaiserSimMenu_TakeSystemMenuRequest(void);
 
 bool ActRaiser_SimMenuBrowseEntry(CpuState *cpu);
 RecompReturn ActRaiser_SimMenuBrowse(CpuState *cpu);

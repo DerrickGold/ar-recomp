@@ -1136,6 +1136,15 @@ static int FormatGamepadSlot(char *buffer, int buffer_size,
   BINDING_SETTING(action_enum, kInputClass_Gamepad, "bind_pad_" id_suffix, \
                   text, "Diorama / 3D town Free Cam only. Push the stick or " \
                   "press the button to bind. Y resets it to the default.")
+/* Town twin-stick rows. Unbound by default; a pad row may take a camera
+ * stick direction, and either row may share an SNES button (input_map.c). */
+#define BINDING_SHOOT_SETTINGS(action_enum, id_suffix, text) \
+  BINDING_SETTING(action_enum, kInputClass_Keyboard, "bind_key_" id_suffix, \
+                  text, "Town twin-stick: hold to fire this way while you " \
+                  "steer. Press Enter, then the key to bind."), \
+  BINDING_SETTING(action_enum, kInputClass_Gamepad, "bind_pad_" id_suffix, \
+                  text, "Town twin-stick: hold to fire this way while you " \
+                  "steer. A right-stick direction replaces its camera control.")
 /* Gamepad-only host action: no keyboard twin. */
 #define BINDING_HOST_SETTING(action_enum, id_suffix, text) \
   BINDING_SETTING(action_enum, kInputClass_Gamepad, "bind_pad_" id_suffix, \
@@ -2438,6 +2447,10 @@ const SettingDesc g_setting_descs[] = {
                   "Click to swap authentic and enhanced. Hold to toggle a "
                   "persistent authentic picture-in-picture."),
   BINDING_SETTINGS(kInputAction_SimDescribe, "sim_describe", "Describe menu item"),
+  BINDING_SHOOT_SETTINGS(kInputAction_ShootUp, "shoot_up", "Shoot up"),
+  BINDING_SHOOT_SETTINGS(kInputAction_ShootRight, "shoot_right", "Shoot right"),
+  BINDING_SHOOT_SETTINGS(kInputAction_ShootDown, "shoot_down", "Shoot down"),
+  BINDING_SHOOT_SETTINGS(kInputAction_ShootLeft, "shoot_left", "Shoot left"),
 
   /* This is an optional gameplay enhancement rather than a bug fix: the
    * original 128-record structure cap is authentic. Completed bridges move

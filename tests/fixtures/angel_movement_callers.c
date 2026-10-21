@@ -62,7 +62,7 @@ static unsigned Word(unsigned at) { return g_ram[at] | g_ram[at + 1] << 8; }
 static void Move(int x, int y, unsigned expected_x, unsigned expected_y) {
   Begin(0);
   for (unsigned n = 0; n < 60; ++n) {
-    ActRaiserAngel_SetInput(ActRaiserAngel_EncodeStick(x, y, 0), 0, 1);
+    ActRaiserAngel_SetInput(ActRaiserAngel_EncodeStick(x, y, 0), 0, 0, 1);
     Dispatch(0x01b21b, true, 0, 1);
   }
   assert(Word(0x0aee) == expected_x && Word(0x0af0) == expected_y);
@@ -90,7 +90,7 @@ int main(int argc, char **argv) {
     unsigned shots = 0;
     for (unsigned n = 0; n < 60; ++n) {
       g_ram[0xa1] = 0x40;
-      ActRaiserAngel_SetInput(ActRaiserAngel_EncodeStick(32767, 0, 0), 0, 1);
+      ActRaiserAngel_SetInput(ActRaiserAngel_EncodeStick(32767, 0, 0), 0, 0, 1);
       Dispatch(0x01b21b, true, 0, 1);
       assert(g_ram[0x0b06] == facing);
       assert(Word(0x0af0) == 128 && Word(0x0aee) == 130 + 2 * n);
@@ -104,14 +104,14 @@ int main(int argc, char **argv) {
     assert(shots);
     g_ram[0xa1] = 0;
     for (unsigned n = 0; n < 30; ++n) {
-      ActRaiserAngel_SetInput(ActRaiserAngel_EncodeStick(32767, 0, 0), 0, 1);
+      ActRaiserAngel_SetInput(ActRaiserAngel_EncodeStick(32767, 0, 0), 0, 0, 1);
       Dispatch(0x01b21b, true, 0, 1);
     }
     assert(g_ram[0x0b06] == 1);
   }
   Begin(0);
   cpu_write16(&g_cpu, 0x7f, 0x9750, 1);
-  ActRaiserAngel_SetInput(ActRaiserAngel_EncodeStick(32767, 0, 0), 0, 1);
+  ActRaiserAngel_SetInput(ActRaiserAngel_EncodeStick(32767, 0, 0), 0, 0, 1);
   Dispatch(0x01b21b, true, CPU_P_M | CPU_P_C, 0);
   assert(g_cpu.P == (CPU_P_M | CPU_P_C) && Word(0x0aee) == 128);
   puts("Generated angel audit: analog speed, cardinal strafing, arrows and dialog ABI passed");

@@ -1,5 +1,6 @@
 #include "actraiser/actraiser_sim_menu.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,6 +44,13 @@ static bool s_description_aborted, s_description_fast, s_description_released;
  * the accepted command's explanation policy crosses into its action body. */
 static bool s_native_browse, s_native_browse_guard;
 static bool s_native_command, s_native_full_flow;
+/* Raised on the game fiber, consumed by the host loop between ticks. */
+static atomic_bool s_system_menu_requested;
+
+bool ActRaiserSimMenu_TakeSystemMenuRequest(void) {
+  return atomic_exchange_explicit(&s_system_menu_requested, false,
+                                  memory_order_acq_rel);
+}
 
 static bool NativeQuickUseEnabled(void) {
   return g_settings.sim_menu_style == 0 && g_settings.native_menu_quick_use;
@@ -442,6 +450,8 @@ RecompReturn ActRaiser_SimMenuBrowse(CpuState *c) {
               event,SimMenuModel_Selection(&s_menu),SimMenuModel_Action(&s_menu),s_menu.phase);
     if (event == kSimMenuEvent_Describe) { Describe(c); Redraw(c); }
     else if (event == kSimMenuEvent_Changed) Redraw(c);
+    else if (event == kSimMenuEvent_System)
+      atomic_store_explicit(&s_system_menu_requested, true, memory_order_release);
     else if (event == kSimMenuEvent_Close || event == kSimMenuEvent_Use) {
       c->X=SimMenuModel_Selection(&s_menu);
       c->A=(c->A & 0xff00) | SimMenuModel_Action(&s_menu);

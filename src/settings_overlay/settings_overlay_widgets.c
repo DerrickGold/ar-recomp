@@ -379,12 +379,19 @@ int SettingsOverlay_GameTextWidth(const char *text, int scale) {
 
 bool SettingsOverlay_DrawEnhancedLabel(ArRenderRectI bounds, uint8_t alpha,
                                         const char *text) {
+  return SettingsOverlay_DrawEnhancedLabelAligned(bounds, alpha, text,
+                                                  kArUiTextAlignment_Center);
+}
+
+bool SettingsOverlay_DrawEnhancedLabelAligned(ArRenderRectI bounds, uint8_t alpha,
+                                               const char *text,
+                                               ArUiTextAlignment alignment) {
   if (!text || !text[0] || !alpha) return true;
   const ArUiTextRun run = {
       .struct_size = sizeof(run),
       .abi_version = AR_UI_TEXT_RUN_ABI_VERSION,
       .utf8 = text, .utf8_bytes = strlen(text),
-      .bounds = bounds, .alignment = kArUiTextAlignment_Center,
+      .bounds = bounds, .alignment = alignment,
       .tint = RenderColor(ARGB(alpha, 255, 255, 255)),
       .style_id = kArTextStyle_RetailPaletteBands,
       .band_rgb = kTextPalettes[kText_Normal][2] & UINT32_C(0xffffff),

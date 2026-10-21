@@ -55,10 +55,27 @@ static uint32 s_host_key_held;
 
 static InputMapActionFn s_action_handler;
 static bool s_angel_controls_active;
+static bool s_twin_stick_active;
+static uint8_t s_shot_held, s_shot_direction;
 static const uint32 kDirectionButtons = (1u << kInputAction_Up) |
     (1u << kInputAction_Down) | (1u << kInputAction_Left) | (1u << kInputAction_Right);
 
 void InputMap_SetAngelControlsActive(bool active) { s_angel_controls_active = active; }
+
+void InputMap_SetTwinStickActive(bool active) { s_twin_stick_active = active; }
+
+/* SNES buttons in `klass` whose control is also a shoot binding. */
+static uint32 TwinStickMask(InputClass klass) {
+  if (!s_twin_stick_active) return 0;
+  uint32 mask = 0;
+  for (int shoot = kInputAction_ShootUp; shoot <= kInputAction_ShootLeft; ++shoot) {
+    const uint32 binding = g_settings.input_bind[klass][shoot];
+    if (!binding) continue;
+    for (int a = 0; a < kInputAction_PadCount; ++a)
+      if (g_settings.input_bind[klass][a] == binding) mask |= 1u << a;
+  }
+  return mask;
+}
 
 static bool AnalogAngelActive(void) {
   return s_angel_controls_active && g_settings.input_analog_angel;
@@ -312,6 +329,12 @@ static const struct {
                                   SDL_GAMEPAD_AXIS_RIGHT_TRIGGER },
   [kInputAction_CamZoomOut]   = { "Camera zoom out", 0, kInputBind_PadAxis,
                                   SDL_GAMEPAD_AXIS_LEFT_TRIGGER },
+  /* Explicit opt-in: the right stick keeps orbiting the camera until the
+   * player binds these, which takes the matching camera directions. */
+  [kInputAction_ShootUp]    = { "Shoot up", 0, kInputBind_None, 0 },
+  [kInputAction_ShootRight] = { "Shoot right", 0, kInputBind_None, 0 },
+  [kInputAction_ShootDown]  = { "Shoot down", 0, kInputBind_None, 0 },
+  [kInputAction_ShootLeft]  = { "Shoot left", 0, kInputBind_None, 0 },
 };
 
 /* The four stick-orbit defaults share an axis and differ only in sign, which
@@ -698,6 +721,13 @@ SettingChangeResult InputMap_ApplyBinding(const SettingDesc *desc,
        * the scoped Describe binding may share a control independently. */
       if ((action == kInputAction_SimDescribe && i == kInputAction_X) ||
           (action == kInputAction_X && i == kInputAction_SimDescribe)) continue;
+      /* Shooting only exists in live town flight, where the shared SNES
+       * button is masked. Action stages and menus keep that button. */
+      if ((INPUT_ACTION_IS_SHOOT(action) &&
+           (i < kInputAction_PadCount || i == kInputAction_SimDescribe)) ||
+          (INPUT_ACTION_IS_SHOOT(i) &&
+           ((int)action < kInputAction_PadCount ||
+            action == kInputAction_SimDescribe))) continue;
       if (g_settings.input_bind[klass][i] != binding) continue;
       for (int d = 0; d < g_setting_desc_count; d++) {
         const SettingDesc *other = &g_setting_descs[d];
@@ -719,6 +749,7 @@ void InputMap_Clear(void) {
   s_key_bits = s_pad_bits = s_stick_bits = 0;
   s_host_axis_held = 0;
   s_host_key_held = 0;
+  s_shot_held = s_shot_direction = 0;
   memset(s_key_down, 0, sizeof(s_key_down));
   memset(s_pad_button_down, 0, sizeof(s_pad_button_down));
   memset(s_pad_axis_value, 0, sizeof(s_pad_axis_value));
@@ -726,13 +757,15 @@ void InputMap_Clear(void) {
 
 uint32 InputMap_State(void) {
   const InputDeviceMode mode = InputMap_DeviceMode();
+  const uint32 pad = s_pad_bits & ~TwinStickMask(kInputClass_Gamepad);
   /* An explicit direction binding takes priority over the left stick. In
    * particular, switching to D-pad movement must not combine opposing inputs. */
-  const uint32 stick = AnalogAngelActive() && (s_pad_bits & kDirectionButtons) ?
+  const uint32 stick = AnalogAngelActive() && (pad & kDirectionButtons) ?
       s_stick_bits & ~kDirectionButtons : s_stick_bits;
   return InputMap_ArbitrateState(mode, s_pad_count > 0,
                                  mode == kInputDevice_Auto && InputMap_GamepadIsActive(),
-                                 s_key_bits, s_pad_bits | stick);
+                                 s_key_bits & ~TwinStickMask(kInputClass_Keyboard),
+                                 pad | stick);
 }
 
 static void SetActionBit(uint32 *bits, InputAction action, bool pressed) {
@@ -858,7 +891,8 @@ InputClass InputMap_GameInputClass(void) {
 
 uint32 InputMap_AnalogAngel(void) {
   if (!AnalogAngelActive() || !s_pad_count ||
-      InputMap_GameInputClass() != kInputClass_Gamepad || (s_pad_bits & kDirectionButtons))
+      InputMap_GameInputClass() != kInputClass_Gamepad ||
+      (s_pad_bits & ~TwinStickMask(kInputClass_Gamepad) & kDirectionButtons))
     return 0;
   return ActRaiserAngel_EncodeStick(s_pad_axis_value[SDL_GAMEPAD_AXIS_LEFTX],
                                    s_pad_axis_value[SDL_GAMEPAD_AXIS_LEFTY],
@@ -997,6 +1031,29 @@ bool InputMap_ActionHeld(InputAction action) {
    * the ordinary game-input arbiter must not cancel a keyboard hold merely
    * because a connected pad is active (or vice versa). */
   return keyboard || gamepad;
+}
+
+uint8_t InputMap_TwinStickShot(void) {
+  if (!s_twin_stick_active) {
+    s_shot_held = s_shot_direction = 0;
+    return 0;
+  }
+  const InputClass device = InputMap_GameInputClass();
+  uint8_t held = 0;
+  for (unsigned d = 0; d < 4; ++d)
+    if (BindingIsHeld(g_settings.input_bind[device][kInputAction_ShootUp + d],
+                      (s_shot_held & (1u << d)) != 0))
+      held |= (uint8_t)(1u << d);
+  const uint8_t pressed = held & ~s_shot_held;
+  s_shot_held = held;
+  for (unsigned d = 0; d < 4; ++d)
+    if (pressed & (1u << d)) { s_shot_direction = (uint8_t)(d + 1); break; }
+  if (s_shot_direction && !(held & (1u << (s_shot_direction - 1)))) {
+    s_shot_direction = 0;
+    for (unsigned d = 0; d < 4 && !s_shot_direction; ++d)
+      if (held & (1u << d)) s_shot_direction = (uint8_t)(d + 1);
+  }
+  return s_shot_direction;
 }
 
 bool InputMap_GameActionHeld(InputAction action) {

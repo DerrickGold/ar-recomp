@@ -67,6 +67,9 @@ void HostInput_ApplySimPresentationCamera(void);
 void HostInput_UpdateRenderComparison(void);
 bool HostInput_RenderComparisonOwnsPause(void);
 bool HostInput_RenderComparisonCaptureRequired(void);
+/* Opens the settings overlay when the modern SIM menu's System row asked for
+ * it. Runs between ticks, before the frame decides whether the host pauses. */
+void HostInput_ServiceSimMenuRequests(void);
 
 /* Owns InputMap's lifetime, clears pause/turbo/held controls on each begin,
  * and installs the gamepad edge-action bridge. Pair once per game session. */

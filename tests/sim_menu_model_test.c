@@ -52,7 +52,7 @@ int main(void) {
     SimMenuModel_Open(&m, 21, kSimMenuCategoryPointers[category]);
     assert(m.submenu && m.row[category] == 0);
     assert(Press(&m, kSimMenuInput_Up) == kSimMenuEvent_Changed);
-    assert(m.submenu && m.row[category] == kSimMenuCategoryActionCounts[category] - 1);
+    assert(m.submenu && m.row[category] == SimMenuModel_RowCount(category) - 1);
     const uint16_t last = SimMenuModel_Selection(&m);
     Press(&m, kSimMenuInput_Right);
     assert(m.submenu);
@@ -62,6 +62,26 @@ int main(void) {
     assert(m.submenu && m.row[category] == 0);
     assert(Press(&m, kSimMenuInput_Back | kSimMenuInput_Use) == kSimMenuEvent_Close);
   }
+  /* "Other" ends with the host System row: no native node or action, Use
+   * asks for the overlay and keeps the menu open, Describe stays inert. */
+  for (unsigned category = 0; category < kSimMenuCategoryCount; ++category)
+    assert(SimMenuModel_RowCount(category) == kSimMenuCategoryActionCounts[category] +
+           (category == kSimMenuSystemCategory));
+  SimMenuModel_Open(&m, 22, 0xf347);
+  assert(!SimMenuModel_SystemSelected(&m));
+  assert(Press(&m, kSimMenuInput_Down) == kSimMenuEvent_Changed);
+  assert(SimMenuModel_SystemSelected(&m) && SimMenuModel_Action(&m) == 0);
+  assert(SimMenuModel_Selection(&m) == kSimMenuCategoryPointers[kSimMenuSystemCategory]);
+  assert(Press(&m, kSimMenuInput_Describe) == kSimMenuEvent_None);
+  assert(m.phase == kSimMenu_Browse);
+  assert(Press(&m, kSimMenuInput_Use) == kSimMenuEvent_System);
+  assert(m.phase == kSimMenu_Browse && SimMenuModel_SystemSelected(&m));
+  /* A fresh release is required before the overlay's closing press counts. */
+  assert(SimMenuModel_Poll(&m, kSimMenuInput_Back) == kSimMenuEvent_None);
+  assert(SimMenuModel_Poll(&m, 0) == kSimMenuEvent_None);
+  assert(Press(&m, kSimMenuInput_Down) == kSimMenuEvent_Changed && m.row[5] == 0);
+  assert(Press(&m, kSimMenuInput_Up) == kSimMenuEvent_Changed);
+  assert(Press(&m, kSimMenuInput_Back) == kSimMenuEvent_Close);
   /* Help never dispatches; restore the exact Sun node after every page. */
   SimMenuModel_Open(&m, 2, 0xf339);
   assert(Press(&m, kSimMenuInput_Describe) == kSimMenuEvent_Describe);

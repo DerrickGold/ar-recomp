@@ -1027,6 +1027,14 @@ static void ResetSelectedValue(void) {
     SetStatus(Ui("overlay.status.unavailable"));
     return;
   }
+  InputAction action;
+  InputClass klass;
+  if (InputMap_DescribeRow(desc, &action, &klass)) {
+    /* A reset binding reclaims its default control from whichever row took
+     * it, e.g. a camera direction back from a twin-stick shoot row. */
+    SaveAcceptedChange(InputMap_ApplyBinding(desc, InputMap_DefaultBinding(action, klass)));
+    return;
+  }
   SaveAcceptedChange(Settings_Reset(desc));
 }
 

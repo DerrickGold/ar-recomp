@@ -17,5 +17,8 @@ enum {
 uint32_t ActRaiserAngel_EncodeStick(int x, int y, int deadzone_percent);
 int ActRaiserAngel_StickX(uint32_t stick);
 int ActRaiserAngel_StickY(uint32_t stick);
+/* Full-scale stick for a native D-pad nibble (Up 8, Down 4, Left 2, Right 1).
+ * Each axis is unit speed, matching the native diagonal; opposites cancel. */
+uint32_t ActRaiserAngel_DigitalStick(unsigned dpad);
 
 #endif

@@ -4,6 +4,7 @@
 #include <string.h>
 #include <math.h>
 #include "settings_overlay/settings_overlay_artwork.h"
+#include "settings_overlay/settings_overlay_render.h"
 #include "app/session_fatal.h"
 #include "render/localized_text_presenter.h"
 #include "render/localized_text_layout.h"
@@ -408,6 +409,22 @@ static bool MenuLabelRightToLeft(const FrameSlot *slot, ArRenderRectI view,
       prepared.texts[0].surface.paragraph_direction==kArTextDirection_RightToLeft;
 }
 
+/* The host System row: the overlay's own System section icon and an
+ * interface-catalog label, since it has no ROM art or game text entry. */
+static void SystemRow(const FrameSlot *slot,ArRenderRectI view,bool selected,
+                      float x,float y,float width) {
+  Texture(SettingsOverlayArtwork_Get()->icons,
+      (ArRenderRectF){kOverlayIcon_System*kIconSize,selected?kIconSize:0,
+                      kIconSize,kIconSize},
+      Rect(view,x+6,y,16,16));
+  const char *text=ArUiCatalog_Text(SettingsOverlay_InterfaceLocale(),
+                                    "sim.menu.system_settings","System Settings");
+  const ArRenderRectF r=Rect(view,x+27,y+3,width,10);
+  if (!SettingsOverlay_DrawEnhancedLabelAligned((ArRenderRectI){r.x,r.y,r.w,r.h},
+          (uint8_t)(255*(slot->inidisp&15)/15),text,kArUiTextAlignment_Left))
+    LabelGlyphs(view,text,x+27,y+4,width);
+}
+
 static void Browse(const FrameSlot *slot,ArRenderRectI view,
                    const SimMenuModel *m) {
   const SimMenuFrame *f=&slot->sim_menu;
@@ -423,7 +440,7 @@ static void Browse(const FrameSlot *slot,ArRenderRectI view,
   }
   if (!m->submenu && m->phase!=kSimMenu_Inventory) return;
   const unsigned count=m->phase==kSimMenu_Inventory?m->item_count:
-      kSimMenuCategoryActionCounts[m->category];
+      SimMenuModel_RowCount(m->category);
   const bool miracle=m->phase!=kSimMenu_Inventory && m->category==2;
   /* Reserve a full label column before the separate SP column, so long
    * miracle names do not need a smaller font than their neighbouring rows. */
@@ -455,6 +472,10 @@ static void Browse(const FrameSlot *slot,ArRenderRectI view,
         if(kSimMenuActions[action].category==m->category &&
            kSimMenuActions[action].row==row) id=6+action;
       selected=row==m->row[m->category];
+      if (m->category==kSimMenuSystemCategory && row==kSimMenuSystemRow) {
+        SystemRow(slot,view,selected,content_x,88+row*row_height,132);
+        continue;
+      }
     }
     Icon(view,id,selected,content_x+6,88+row*row_height);
     Label(slot,view,601+row,f->labels[id],content_x+27,92+row*row_height,132);

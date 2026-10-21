@@ -3920,7 +3920,8 @@ if(BUILD_TESTING)
     add_test(NAME sim_menu_art COMMAND sim_menu_art_test)
     add_executable(present_sim_menu_test tests/present_sim_menu_test.c
         src/sim/menu/present_sim_menu.c src/sim/menu/sim_menu_model.c
-        src/render/text_cell_composite.c src/render/localized_text_layout.c)
+        src/render/text_cell_composite.c src/render/localized_text_layout.c
+        src/localization/ui_catalog.c)
     target_link_libraries(present_sim_menu_test PRIVATE actraiser_render_test_support)
     add_test(NAME present_sim_menu COMMAND present_sim_menu_test)
     add_executable(actraiser_sim_menu_test tests/actraiser_sim_menu_test.c

@@ -55,6 +55,18 @@ uint8_t SimMenuModel_Action(const SimMenuModel *m) {
   return 0;
 }
 
+uint8_t SimMenuModel_RowCount(unsigned category) {
+  if (category >= kSimMenuCategoryCount) return 0;
+  return kSimMenuCategoryActionCounts[category] +
+      (category == kSimMenuSystemCategory);
+}
+
+bool SimMenuModel_SystemSelected(const SimMenuModel *m) {
+  return m->phase == kSimMenu_Browse && m->submenu &&
+      m->category == kSimMenuSystemCategory &&
+      m->row[kSimMenuSystemCategory] == kSimMenuSystemRow;
+}
+
 uint16_t SimMenuModel_Selection(const SimMenuModel *m) {
   const uint8_t action = SimMenuModel_Action(m);
   return m->submenu && action ? kSimMenuActions[action - 1].selection_pointer
@@ -133,6 +145,13 @@ SimMenuEvent SimMenuModel_Poll(SimMenuModel *m, uint8_t buttons) {
     else return kSimMenuEvent_None;
     return kSimMenuEvent_Changed;
   }
+  if (SimMenuModel_SystemSelected(m) &&
+      (edge & (kSimMenuInput_Use | kSimMenuInput_Describe))) {
+    if (!(edge & kSimMenuInput_Use)) return kSimMenuEvent_None;
+    /* The overlay pauses the game; require a fresh press when it returns. */
+    SimMenuModel_ReleaseBarrier(m);
+    return kSimMenuEvent_System;
+  }
   if (edge & kSimMenuInput_Describe) {
     ++m->dialogue_generation;
     m->dialogue_source=0;
@@ -157,11 +176,11 @@ SimMenuEvent SimMenuModel_Poll(SimMenuModel *m, uint8_t buttons) {
     m->category = (m->category + (edge & kSimMenuInput_Left ? 5 : 1)) % 6;
   } else if (edge & kSimMenuInput_Down) {
     m->row[m->category] = (m->row[m->category] + 1) %
-                         kSimMenuCategoryActionCounts[m->category];
+                         SimMenuModel_RowCount(m->category);
   } else if (edge & kSimMenuInput_Up) {
     m->row[m->category] = (m->row[m->category] +
-        kSimMenuCategoryActionCounts[m->category] - 1) %
-        kSimMenuCategoryActionCounts[m->category];
+        SimMenuModel_RowCount(m->category) - 1) %
+        SimMenuModel_RowCount(m->category);
   } else return kSimMenuEvent_None;
   return kSimMenuEvent_Changed;
 }

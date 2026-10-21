@@ -150,7 +150,7 @@ static void TestDigitalDecoder(void) {
 }
 
 static void Tick(CpuState *cpu, uint32_t input) {
-  ActRaiserAngel_SetInput(input, 0, 1);
+  ActRaiserAngel_SetInput(input, 0, 0, 1);
   cpu->S = 0x1ee;
   cpu->X = 0x0ae4;
   assert(ActRaiser_AngelDecodeInput(cpu) == RECOMP_RETURN_TAILCALL);
@@ -196,7 +196,7 @@ static void TestAnalog(void) {
   Put(0x0aee, 200);
   Tick(&cpu, ActRaiserAngel_EncodeStick(10000, 0, 0));
   assert(Word(0x0aee) == 200);
-  ActRaiserAngel_SetInput(input, 0, 2);
+  ActRaiserAngel_SetInput(input, 0, 0, 2);
   Tick(&cpu, ActRaiserAngel_EncodeStick(10000, 0, 0));
   assert(Word(0x0aee) == 200);
 }
@@ -212,7 +212,7 @@ static void TestBoundsAndKnockback(void) {
   Tick(&cpu, ActRaiserAngel_EncodeStick(0, -32768, 0));
   assert(Word(0x0af0) == 0);
   /* Digital movement rejects the native out-of-bounds step rather than clamping. */
-  ActRaiserAngel_SetInput(0, 0, 1);
+  ActRaiserAngel_SetInput(0, 0, 0, 1);
   Put(0x0aee, 495);
   Put(0x0afe, 2);
   cpu.S = 0x1ee;
@@ -241,7 +241,7 @@ static void TestFiringAndFreeze(void) {
     CpuState cpu = Begin();
     Put(0x0af6, (uint16_t)state);
     s_ram[0x0b06] = 0; /* facing up while moving horizontally */
-    ActRaiserAngel_SetInput(ActRaiserAngel_EncodeStick(32767, 0, 0), 0, 1);
+    ActRaiserAngel_SetInput(ActRaiserAngel_EncodeStick(32767, 0, 0), 0, 0, 1);
     assert(ActRaiser_AngelService(&cpu) == RECOMP_RETURN_NORMAL);
     assert(Word(0x0aee) == 130 && Word(0x0af0) == 128);
     assert(s_ram[0x0b06] == 0 && cpu.X == 0x0b0a && cpu.A == 0x4567);
@@ -249,7 +249,7 @@ static void TestFiringAndFreeze(void) {
   }
   CpuState cpu = Begin();
   Put(0x19750, 1);
-  ActRaiserAngel_SetInput(ActRaiserAngel_EncodeStick(32767, 0, 0), 0, 1);
+  ActRaiserAngel_SetInput(ActRaiserAngel_EncodeStick(32767, 0, 0), 0, 0, 1);
   assert(ActRaiser_AngelService(&cpu) == RECOMP_RETURN_NORMAL);
   assert(Word(0x0aee) == 128 && s_arrows == 0 && s_cameras == 0);
   assert(s_animations == 1);
@@ -263,9 +263,97 @@ static void TestFiringAndFreeze(void) {
   assert(cpu.DB == 0 && cpu.P == (CPU_P_M | CPU_P_C) && cpu.S == 0x1f1);
   cpu = Begin();
   Put(0x0af6, 1);
-  ActRaiserAngel_SetInput(ActRaiserAngel_EncodeStick(32767, 0, 0), 1, 1);
+  ActRaiserAngel_SetInput(ActRaiserAngel_EncodeStick(32767, 0, 0), 0, 1, 1);
   assert(ActRaiser_AngelService(&cpu) == RECOMP_RETURN_NORMAL);
   assert(Word(0x0aee) == 128);
+}
+
+static void TestTwinStick(void) {
+  /* Digital Right moves right while a held Up shot owns facing. */
+  CpuState cpu = Begin();
+  s_ram[0xa1] = 1;
+  ActRaiserAngel_SetInput(0, 1, 0, 1);
+  assert(ActRaiser_AngelDecodeInput(&cpu) == RECOMP_RETURN_TAILCALL);
+  CompleteDecoder(&cpu);
+  assert(Word(0x0afe) == 2 && s_ram[0x0b06] == 0);
+  /* The picker override still wins over a shot. */
+  cpu = Begin();
+  s_ram[0xa1] = 1;
+  Put(0x19215, 1);
+  ActRaiserAngel_SetInput(0, 1, 0, 1);
+  assert(ActRaiser_AngelDecodeInput(&cpu) == RECOMP_RETURN_TAILCALL);
+  CompleteDecoder(&cpu);
+  assert(s_ram[0x0b06] == 5);
+  /* Analog movement right, shooting down. */
+  cpu = Begin();
+  for (unsigned i = 0; i < 10; ++i) {
+    ActRaiserAngel_SetInput(ActRaiserAngel_EncodeStick(32767, 0, 0), 3, 0, 1);
+    cpu.S = 0x1ee;
+    cpu.X = 0x0ae4;
+    assert(ActRaiser_AngelDecodeInput(&cpu) == RECOMP_RETURN_TAILCALL);
+    CompleteDecoder(&cpu);
+    cpu.S = 0x1ee;
+    cpu.X = 0x0ae4;
+    assert(ActRaiser_AngelMove(&cpu) == RECOMP_RETURN_NORMAL);
+  }
+  assert(Word(0x0aee) == 148 && s_ram[0x0b06] == 2);
+
+  /* A shot fires without the native fire button and aims facing first. */
+  for (unsigned shot = 0; shot <= 4; ++shot) {
+    cpu = Begin();
+    s_ram[0x0286] = 8;     /* angel HP */
+    s_ram[0x0b06] = 1;     /* facing right */
+    ActRaiserAngel_SetInput(0, (uint8_t)shot, 0, 1);
+    cpu.P |= CPU_P_M;
+    cpu_p_to_mirrors(&cpu);
+    cpu.S = 0x1ec;
+    Put(0x1ed, 0x0ae4);
+    assert(ActRaiser_AngelNormalTail(&cpu) == RECOMP_RETURN_NORMAL);
+    assert(Word(0x0af6) == (shot ? 1 : 0));
+    assert(s_ram[0x0b06] == (shot ? shot - 1 : 1));
+  }
+  /* Standing still behind the native arrow gate still turns to the shot. */
+  cpu = Begin();
+  s_ram[0x0286] = 8;
+  s_ram[0x0b1c] = 1;
+  s_ram[0x0b06] = 0;
+  ActRaiserAngel_SetInput(0, 4, 0, 1);
+  cpu.P |= CPU_P_M;
+  cpu_p_to_mirrors(&cpu);
+  cpu.S = 0x1ec;
+  Put(0x1ed, 0x0ae4);
+  assert(ActRaiser_AngelNormalTail(&cpu) == RECOMP_RETURN_NORMAL);
+  assert(Word(0x0af6) == 0 && s_ram[0x0b06] == 3);
+
+  /* Digital flight keeps steering through the fire animation only while a
+   * shot is held; native firing without one still stands still. */
+  for (unsigned shot = 0; shot <= 1; ++shot) {
+    cpu = Begin();
+    Put(0x0af6, 1);
+    s_ram[0xa1] = 4 | 1; /* Down-Right */
+    ActRaiserAngel_SetInput(0, (uint8_t)(shot ? 2 : 0), 0, 1);
+    assert(ActRaiser_AngelService(&cpu) == RECOMP_RETURN_NORMAL);
+    assert(Word(0x0aee) == (shot ? 130 : 128) && Word(0x0af0) == (shot ? 130 : 128));
+    assert(s_ram[0x0b06] == 0);
+  }
+
+  /* Player control is reported only after a serviced (unfrozen) flight tick,
+   * and only outside towns' frozen dialogue service. */
+  cpu = Begin();
+  ActRaiserAngel_SetInput(0, 0, 0, 1);
+  assert(!ActRaiserAngel_PlayerControlled());
+  assert(ActRaiser_AngelService(&cpu) == RECOMP_RETURN_NORMAL);
+  ActRaiserAngel_SetInput(0, 0, 0, 1);
+  assert(ActRaiserAngel_PlayerControlled());
+  cpu = Begin();
+  ActRaiserAngel_SetInput(0, 0, 0, 1);
+  assert(ActRaiser_AngelService(&cpu) == RECOMP_RETURN_NORMAL);
+  Put(0x19750, 1);
+  ActRaiserAngel_SetInput(0, 0, 0, 1);
+  cpu.S = 0x1ee;
+  assert(ActRaiser_AngelService(&cpu) == RECOMP_RETURN_NORMAL);
+  ActRaiserAngel_SetInput(0, 0, 0, 1);
+  assert(!ActRaiserAngel_PlayerControlled());
 }
 
 int main(void) {
@@ -273,6 +361,8 @@ int main(void) {
   TestAnalog();
   TestBoundsAndKnockback();
   TestFiringAndFreeze();
-  puts("Angel movement: digital tables, analog speed, bounds, firing and freeze passed");
+  TestTwinStick();
+  puts("Angel movement: digital tables, analog speed, bounds, firing, twin-stick "
+       "and freeze passed");
   return 0;
 }

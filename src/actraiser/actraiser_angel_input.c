@@ -12,6 +12,13 @@ static int Component(uint32_t stick, unsigned shift) {
 int ActRaiserAngel_StickX(uint32_t stick) { return Component(stick, 0); }
 int ActRaiserAngel_StickY(uint32_t stick) { return Component(stick, 15); }
 
+uint32_t ActRaiserAngel_DigitalStick(unsigned dpad) {
+  const int x = ((dpad & 1) ? 1 : 0) - ((dpad & 2) ? 1 : 0);
+  const int y = ((dpad & 4) ? 1 : 0) - ((dpad & 8) ? 1 : 0);
+  return AR_ANGEL_STICK_ENABLED | ((uint32_t)(x * kAngelStickScale) & 0x7fffu) |
+      (((uint32_t)(y * kAngelStickScale) & 0x7fffu) << 15);
+}
+
 uint32_t ActRaiserAngel_EncodeStick(int x, int y, int deadzone_percent) {
   if (x < -32767) x = -32767;
   if (x > 32767) x = 32767;

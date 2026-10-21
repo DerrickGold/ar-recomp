@@ -75,6 +75,12 @@ int snes_frame_counter;
 bool ActRaiserSimMenu_OwnsInput(void) {
   return 0;
 }
+static bool s_system_menu_request;
+bool ActRaiserSimMenu_TakeSystemMenuRequest(void) {
+  const bool requested = s_system_menu_request;
+  s_system_menu_request = false;
+  return requested;
+}
 bool HostPpuOutput_AuthenticEnabled(void) {
   return 0;
 }
@@ -416,6 +422,17 @@ int main(void) {
   assert(HostInput_MenuKeyboardIsActive() && !HostInput_KeyboardIsSuppressed());
   s_pads = 1;
   s_device_mode = kInputDevice_Auto;
+
+  /* The modern SIM menu's System row opens the overlay once, between ticks,
+   * releasing held gameplay input exactly as the menu hotkey does. */
+  const int clears_before_request = s_clears;
+  HostInput_ServiceSimMenuRequests();
+  assert(!s_overlay && s_clears == clears_before_request);
+  s_system_menu_request = true;
+  HostInput_ServiceSimMenuRequests();
+  assert(s_overlay && !s_system_menu_request && s_clears == clears_before_request + 1);
+  s_overlay = false;
+  s_clears = clears_before_request;
 
   /* Menus receive keys first; closing a menu releases held gameplay input. */
   s_overlay = true;

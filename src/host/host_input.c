@@ -287,6 +287,13 @@ static bool AuthenticFrameReady(void) {
       PresentAuthenticUploadedFrameSerial() == captured;
 }
 
+void HostInput_ServiceSimMenuRequests(void) {
+  if (!ActRaiserSimMenu_TakeSystemMenuRequest() || SettingsOverlay_IsOpen())
+    return;
+  HostInput_ClearHeld();
+  SettingsOverlay_Open();
+}
+
 void HostInput_UpdateRenderComparison(void) {
   if (RenderComparison_RequiresAuthenticFrame() &&
       !HostPpuOutput_AuthenticEnabled()) {

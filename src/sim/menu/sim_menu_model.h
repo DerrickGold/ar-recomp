@@ -11,7 +11,10 @@
 #include <stdint.h>
 
 enum { kSimMenuCategoryCount = 6, kSimMenuActionCount = 15,
-       kSimMenuInventoryCapacity = 8 };
+       kSimMenuInventoryCapacity = 8,
+       /* Host-only final row of the last category ("Other"): opens the
+        * system settings overlay. It has no native node or action number. */
+       kSimMenuSystemCategory = 5, kSimMenuSystemRow = 2 };
 
 typedef enum SimMenuPhase {
   kSimMenu_Closed, kSimMenu_Browse, kSimMenu_Inventory,
@@ -34,6 +37,8 @@ typedef enum SimMenuInput {
 typedef enum SimMenuEvent {
   kSimMenuEvent_None, kSimMenuEvent_Changed, kSimMenuEvent_Close,
   kSimMenuEvent_Use, kSimMenuEvent_Describe, kSimMenuEvent_Advance,
+  /* Use on the host System row. The menu stays open behind the overlay. */
+  kSimMenuEvent_System,
 } SimMenuEvent;
 
 typedef struct SimMenuAction {
@@ -69,6 +74,9 @@ void SimMenuModel_Open(SimMenuModel *menu, uint64_t generation,
                        uint16_t native_selection);
 void SimMenuModel_Inventory(SimMenuModel *menu, const uint8_t items[8]);
 uint8_t SimMenuModel_Action(const SimMenuModel *menu);
+/* Browse rows in a category: its native actions plus the host System row. */
+uint8_t SimMenuModel_RowCount(unsigned category);
+bool SimMenuModel_SystemSelected(const SimMenuModel *menu);
 uint16_t SimMenuModel_Selection(const SimMenuModel *menu);
 /* Poll once per native game frame. Directions repeat after 18 frames, then
  * every 6 frames, only in Browse/Inventory. Actions never repeat.

@@ -1,5 +1,6 @@
 #include "sim/menu/present_sim_menu.h"
 #include "settings_overlay/settings_overlay_artwork.h"
+#include "settings_overlay/settings_overlay_render.h"
 #include "render/localized_text_presenter.h"
 #include "sim/sim3d/sim3d_textures.h"
 #include "host/host_video.h"
@@ -22,6 +23,18 @@ static ArRenderRectF frame_bounds, choice_bounds[2];
 static bool choice_selected[2];
 
 const SettingsOverlayArtwork *SettingsOverlayArtwork_Get(void) { return &artwork; }
+static unsigned system_labels, system_icons;
+static bool system_icon_selected;
+ArUiLocale SettingsOverlay_InterfaceLocale(void) { return kArUiLocale_English; }
+bool SettingsOverlay_DrawEnhancedLabelAligned(ArRenderRectI bounds, uint8_t alpha,
+                                               const char *text,
+                                               ArUiTextAlignment alignment) {
+  assert(bounds.w>0 && bounds.h>0 && alpha==255);
+  assert(alignment==kArUiTextAlignment_Left);
+  assert(strcmp(text,"System Settings")==0);
+  system_labels++;
+  return true;
+}
 ArRenderTexture PresentHud_BackgroundTexture(void) { return (ArRenderTexture){2}; }
 ArRenderTexture Sim3DTextures_Layer(int plane) { return (ArRenderTexture){10u+plane}; }
 void SessionFatal_Request(const char *format, ...) { (void)format; assert(false); }
@@ -147,6 +160,11 @@ static bool Draw(void *context, ArRenderTexture texture, const ArRenderRectF *so
     choice_selected[index]=source->x==0;
     choice_icons++;
   }
+  if (artwork.icons.value && texture.value==artwork.icons.value) {
+    assert(source && source->x==kOverlayIcon_System*kIconSize && source->w==kIconSize);
+    system_icon_selected=source->y==kIconSize;
+    system_icons++;
+  }
   if (texture.value==10+kSim3DPlane_Bg2Low) {
     assert(source && dest);
     assert(source->x==24 && source->w==208);
@@ -240,6 +258,39 @@ static void TestProgressLog(void) {
         }
       }
 }
+static void TestSystemRow(void) {
+  /* The host System row closes the last category ("Other"), with the
+   * overlay's System icon and an interface-catalog label. */
+  progress=false;
+  artwork.icons=(ArRenderTexture){4};
+  for (unsigned row=0;row<3;++row) {
+    memset(&slot,0,sizeof(slot));
+    system_labels=system_icons=0;
+    slot.snes_width=slot.visible_width=256;
+    slot.snes_height=224;
+    slot.inidisp=15;
+    slot.sim_menu.valid=true;
+    slot.sim_menu.scale_percent=100;
+    SimMenuModel_Open(&slot.sim_menu.model,1,0xf346);
+    slot.sim_menu.model.row[kSimMenuSystemCategory]=(uint8_t)row;
+    PresentSimMenu_Draw(&slot,(ArRenderRectI){0,0,256,224});
+    assert(system_labels==1 && system_icons==1);
+    assert(system_icon_selected==(row==kSimMenuSystemRow));
+  }
+  /* Other categories have no System row. */
+  memset(&slot,0,sizeof(slot));
+  system_labels=system_icons=0;
+  slot.snes_width=slot.visible_width=256;
+  slot.snes_height=224;
+  slot.inidisp=15;
+  slot.sim_menu.valid=true;
+  slot.sim_menu.scale_percent=100;
+  SimMenuModel_Open(&slot.sim_menu.model,1,0xf342);
+  PresentSimMenu_Draw(&slot,(ArRenderRectI){0,0,256,224});
+  assert(system_labels==0 && system_icons==0);
+  artwork.icons=(ArRenderTexture){0};
+}
+
 int main(void) {
   static const ArRenderBackendOps ops={.struct_size=sizeof(ArRenderBackendOps),
       .create_texture=Create,.update_texture=Update,.draw_texture=Draw,
@@ -266,6 +317,7 @@ int main(void) {
       assert(borders==3 && prose==1 && acknowledgements==1);
     }
   TestProgressLog();
+  TestSystemRow();
   puts("SIM descriptions and modern Progress Log retain fixed boxes and dialogue paging");
   return 0;
 }

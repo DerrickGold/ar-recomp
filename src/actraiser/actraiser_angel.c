@@ -1,5 +1,6 @@
 #include "actraiser_angel.h"
 
+#include <stdatomic.h>
 #include <stdlib.h>
 
 #include "actraiser_cpu_hle_internal.h"
@@ -29,6 +30,10 @@ enum {
 };
 
 static uint32_t s_stick;
+static uint8_t s_shot;
+/* Set by this tick's flight service; published at the next tick boundary. */
+static bool s_serviced;
+static atomic_bool s_player_controlled;
 static int s_fraction[2];
 static uint16_t s_expected[2];
 static uint8_t s_map_group, s_map_number;
@@ -41,13 +46,24 @@ static void ResetRemainder(void) {
 
 void ActRaiserAngel_Reset(void) {
   s_stick = 0;
+  s_shot = 0;
+  s_serviced = false;
+  atomic_store_explicit(&s_player_controlled, false, memory_order_relaxed);
   ResetRemainder();
   s_analog_motion = false;
   s_map_group = s_map_number = 0xff;
 }
 
-void ActRaiserAngel_SetInput(uint32_t stick, uint8_t map_group, uint8_t map_number) {
-  if (!ActRaiser_IsSimulationTown(map_group, map_number)) stick = 0;
+bool ActRaiserAngel_PlayerControlled(void) {
+  return atomic_load_explicit(&s_player_controlled, memory_order_relaxed);
+}
+
+void ActRaiserAngel_SetInput(uint32_t stick, uint8_t shot, uint8_t map_group,
+                             uint8_t map_number) {
+  if (!ActRaiser_IsSimulationTown(map_group, map_number)) stick = shot = 0;
+  atomic_store_explicit(&s_player_controlled, s_serviced, memory_order_relaxed);
+  s_serviced = false;
+  s_shot = shot <= 4 ? shot : 0;
   if (!stick || map_group != s_map_group || map_number != s_map_number) ResetRemainder();
   s_stick = stick;
   s_map_group = map_group;
@@ -158,7 +174,8 @@ static RecompReturn Decode(CpuState *cpu, bool controller_input) {
     cpu->X = (uint16_t)direction;
     ActRaiserCpuHle_SetNegativeZero8(cpu, (uint8_t)cpu->X);
     A8(cpu, cpu_read8(cpu, 0x7f, kPicker));
-    A8(cpu, cpu->_flag_Z ? facing[direction] : 5);
+    /* A held twin-stick direction owns facing; movement keeps its velocity. */
+    A8(cpu, !cpu->_flag_Z ? 5 : s_shot ? s_shot - 1 : facing[direction]);
     cpu_write8(cpu, 1, kAngelRecord + kFacing, (uint8_t)cpu->A);
     cpu->Y = 0;
     A8(cpu, (uint8_t)dx[direction]);
@@ -185,12 +202,12 @@ RecompReturn ActRaiser_AngelDecodeDirection(CpuState *cpu) {
   return Decode(cpu, false);
 }
 
-static int Step(CpuState *cpu, unsigned axis) {
+static int Step(CpuState *cpu, unsigned axis, uint32_t stick) {
   const unsigned position = axis ? kPositionY : kPositionX;
   const int current = cpu_read16(cpu, 1, kAngelRecord + position);
   if (!s_position_valid || current != s_expected[axis]) s_fraction[axis] = 0;
-  const int velocity = (axis ? ActRaiserAngel_StickY(s_stick) :
-      ActRaiserAngel_StickX(s_stick)) * kNativeSpeed;
+  const int velocity = (axis ? ActRaiserAngel_StickY(stick) :
+      ActRaiserAngel_StickX(stick)) * kNativeSpeed;
   if (!velocity || (s_fraction[axis] < 0 && velocity > 0) ||
       (s_fraction[axis] > 0 && velocity < 0)) s_fraction[axis] = 0;
   const int total = s_fraction[axis] + velocity;
@@ -206,12 +223,12 @@ static int Step(CpuState *cpu, unsigned axis) {
 
 /* Return the Y-step result, as in the original routine. Knockback ends when
  * Y leaves the map; rejecting an X step alone does not end it. */
-static bool Integrate(CpuState *cpu, bool analog) {
+static bool Integrate(CpuState *cpu, bool analog, uint32_t stick) {
   bool accepted = false;
   for (unsigned axis = 0; axis < 2; ++axis) {
     const unsigned position = axis ? kPositionY : kPositionX;
     const unsigned velocity = axis ? kVelocityY : kVelocityX;
-    const int delta = analog ? Step(cpu, axis) :
+    const int delta = analog ? Step(cpu, axis, stick) :
         (int16_t)cpu_read16(cpu, 1, cpu->X + velocity);
     A16(cpu, cpu_read16(cpu, 1, cpu->X + position));
     Add(cpu, (uint16_t)delta);
@@ -235,7 +252,7 @@ static RecompReturn AnimateAndMove(CpuState *cpu, bool update_facing) {
   }
   result = Call(cpu, bank_01_AC70_M0X0, 0xb2bb, false);
   if (result != RECOMP_RETURN_NORMAL) return Escape(result);
-  Integrate(cpu, s_analog_motion);
+  Integrate(cpu, s_analog_motion, s_stick);
   cpu->S += 2;
   return RECOMP_RETURN_NORMAL;
 }
@@ -251,8 +268,12 @@ RecompReturn ActRaiser_AngelNormalTail(CpuState *cpu) {
   ActRaiserCpuHle_SetNegativeZero16(cpu, cpu->X);
   A8(cpu, cpu_read8(cpu, 0x7f, kPicker));
   if (!cpu->_flag_Z) return AnimateAndMove(cpu, true);
+  /* A held shot owns facing on every flight frame, standing still too, even
+   * while the native arrow gate ($0B1C) delays the next arrow. The arrow and
+   * fire animation below read this same byte. */
+  if (s_shot) cpu_write8(cpu, 1, cpu->X + kFacing, (uint8_t)(s_shot - 1));
   A8(cpu, cpu_read8(cpu, 0, 0xa1));
-  cpu->_flag_Z = !(cpu->A & 0x40);
+  cpu->_flag_Z = !(cpu->A & 0x40) && !s_shot;
   cpu->P = (cpu->P & ~CPU_P_Z) | (cpu->_flag_Z ? CPU_P_Z : 0);
   if (cpu->_flag_Z) return AnimateAndMove(cpu, true);
   A8(cpu, cpu_read8(cpu, 0, 0x0b1c));
@@ -277,7 +298,7 @@ RecompReturn ActRaiser_AngelKnockback(CpuState *cpu) {
   A16(cpu, (uint16_t)(cpu_read16(cpu, 1, cpu->X + 0x18) - 1));
   if (!cpu->_flag_Z) {
     cpu_write16(cpu, 1, cpu->X + 0x18, cpu->A);
-    if (Integrate(cpu, false)) {
+    if (Integrate(cpu, false, 0)) {
       cpu->S += 2;
       return RECOMP_RETURN_NORMAL;
     }
@@ -298,16 +319,21 @@ RecompReturn ActRaiser_AngelService(CpuState *cpu) {
   A16(cpu, cpu_read16(cpu, 0x7f, 0x9750));
   RecompReturn result;
   if (cpu->_flag_Z) {
+    s_serviced = true;
     const unsigned state = cpu_read16(cpu, 1, kAngelRecord + kState) & 0x7fff;
     if (state >= 3) ResetRemainder();
     result = Call(cpu, bank_01_B23B_M0X0, 0xb226, false);
     if (result != RECOMP_RETURN_NORMAL) return Escape(result);
-    if ((state == 1 || state == 2) && (s_stick & AR_ANGEL_STICK_ENABLED)) {
+    /* Native digital flight stands still while firing. Twin-stick fires
+     * continuously, so the D-pad keeps steering through those frames too. */
+    const uint32_t motion = (s_stick & AR_ANGEL_STICK_ENABLED) ? s_stick :
+        s_shot ? ActRaiserAngel_DigitalStick(cpu_read8(cpu, 0, 0xa1) & 15) : 0;
+    if ((state == 1 || state == 2) && motion) {
       /* Fire animation and arrow creation own facing. Only movement changes
        * here; preserve the native callee's complete CPU result and arrow data. */
       const CpuState saved = *cpu;
       cpu->X = kAngelRecord;
-      Integrate(cpu, true);
+      Integrate(cpu, true, motion);
       *cpu = saved;
     }
     result = Call(cpu, bank_01_B41A_M0X0, 0xb229, false);

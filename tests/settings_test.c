@@ -116,7 +116,7 @@ static void TestDefaultsAndMetadata(void) {
    * quick use adds an independent QoL toggle. Save editing adds Apply and restart. */
   /* One completion scene switch plus nine internal effect overrides; one button-prompt representation preference.
    * Diorama adds its skybox scroll choice. */
-  const int expected_descriptors = 320;
+  const int expected_descriptors = 328;
   if (g_setting_desc_count != expected_descriptors)
     fprintf(stderr, "Setting descriptors: expected %d, got %d\n",
             expected_descriptors, g_setting_desc_count);
@@ -1498,6 +1498,68 @@ static void TestInputHintDeviceRetention(void) {
   SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
 }
 
+static void TestTwinStickBindings(void) {
+  Settings_Init();
+  InputMap_Clear();
+  g_settings.input_device = kInputDevice_Keyboard;
+  /* Explicit opt-in: no shoot row has a default on either device. */
+  for (int a = kInputAction_ShootUp; a <= kInputAction_ShootLeft; ++a)
+    CHECK(!g_settings.input_bind[kInputClass_Keyboard][a] &&
+          !g_settings.input_bind[kInputClass_Gamepad][a]);
+  const SettingDesc *key_up = Settings_Find("bind_key_shoot_up");
+  const SettingDesc *key_down = Settings_Find("bind_key_shoot_down");
+  const SettingDesc *key_left = Settings_Find("bind_key_shoot_left");
+  const SettingDesc *pad_left = Settings_Find("bind_pad_shoot_left");
+  const SettingDesc *pad_yaw_left = Settings_Find("bind_pad_cam_yaw_left");
+  CHECK(key_up && key_down && key_left && pad_left && pad_yaw_left);
+  if (!key_up || !key_down || !key_left || !pad_left || !pad_yaw_left) return;
+
+  /* A shoot row shares an SNES button instead of taking it from the action
+   * stages, but still takes a control from another shoot row. */
+  const uint32 z = INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_Z, false);
+  const uint32 i = INPUT_BIND_MAKE(kInputBind_Key, SDL_SCANCODE_I, false);
+  CHECK(InputMap_ApplyBinding(key_down, z) == kSettingChange_Applied);
+  CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_B] == z);
+  CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_ShootDown] == z);
+  CHECK(InputMap_ApplyBinding(key_up, i) == kSettingChange_Applied);
+  CHECK(InputMap_ApplyBinding(key_left, i) == kSettingChange_Applied);
+  CHECK(!g_settings.input_bind[kInputClass_Keyboard][kInputAction_ShootUp]);
+  CHECK(g_settings.input_bind[kInputClass_Keyboard][kInputAction_ShootLeft] == i);
+
+  /* A right-stick direction replaces only its camera direction; resetting the
+   * camera row reclaims it through the same path the overlay uses. */
+  const uint32 stick_left = INPUT_BIND_MAKE(kInputBind_PadAxis, SDL_GAMEPAD_AXIS_RIGHTX, true);
+  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_CamYawLeft] == stick_left);
+  CHECK(InputMap_ApplyBinding(pad_left, stick_left) == kSettingChange_Applied);
+  CHECK(!g_settings.input_bind[kInputClass_Gamepad][kInputAction_CamYawLeft]);
+  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_CamYawRight]);
+  CHECK(InputMap_ApplyBinding(pad_yaw_left,
+        InputMap_DefaultBinding(kInputAction_CamYawLeft, kInputClass_Gamepad)) ==
+        kSettingChange_Applied);
+  CHECK(g_settings.input_bind[kInputClass_Gamepad][kInputAction_CamYawLeft] == stick_left);
+  CHECK(!g_settings.input_bind[kInputClass_Gamepad][kInputAction_ShootLeft]);
+
+  /* Outside live flight the shared key is still SNES B and never shoots. */
+  InputMap_SetTwinStickActive(false);
+  InputMap_HandleKey(SDL_SCANCODE_Z, true, false);
+  CHECK(InputMap_State() & (1u << kInputAction_B));
+  CHECK(InputMap_TwinStickShot() == 0);
+  /* In flight it only shoots; the newest press wins, release falls back. */
+  InputMap_SetTwinStickActive(true);
+  CHECK(!(InputMap_State() & (1u << kInputAction_B)));
+  CHECK(InputMap_TwinStickShot() == 1 + 2);
+  InputMap_HandleKey(SDL_SCANCODE_I, true, false);
+  CHECK(InputMap_TwinStickShot() == 1 + 3);
+  CHECK(InputMap_TwinStickShot() == 1 + 3);
+  InputMap_HandleKey(SDL_SCANCODE_I, false, false);
+  CHECK(InputMap_TwinStickShot() == 1 + 2);
+  InputMap_HandleKey(SDL_SCANCODE_Z, false, false);
+  CHECK(InputMap_TwinStickShot() == 0);
+  InputMap_SetTwinStickActive(false);
+  InputMap_Clear();
+  Settings_Init();
+}
+
 static void TestAnalogAngelInput(void) {
   Settings_Init();
   InputMap_Clear();
@@ -2736,6 +2798,7 @@ int main(int argc, char **argv) {
   TestInputBindingHints();
   TestButtonPrompts();
   TestInputHintDeviceRetention();
+  TestTwinStickBindings();
   TestAnalogAngelInput();
   TestSteamDeckInputPolicy();
   TestHardwareCapabilities();
