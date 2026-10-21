@@ -2,7 +2,7 @@
 layout(local_size_x = 64) in;
 layout(std430, set = 0, binding = 0) readonly buffer Costs { uint values[]; } costs;
 layout(std430, set = 1, binding = 0) writeonly buffer Directions { ivec4 values[]; } output_field;
-// Per OBJ priority: width, height, atlas source slot, analyze flag.
+// Per OBJ priority: width, height, atlas source slot, analyze mode (0 off).
 layout(std140, set = 2, binding = 0) uniform Settings { vec4 planes[4]; } settings;
 shared ivec2 vectors[880];
 shared uint occupied[880];
@@ -33,7 +33,9 @@ void main() {
     // Every dependency is in the preceding diagonal of this one workgroup.
     for(int diagonal=0;enabled && diagonal<blocks.x+blocks.y-1;++diagonal) {
         int bx=tid,by=diagonal-bx,at=by*blocks.x+bx;
-        if(bx<blocks.x && by>=0 && by<blocks.y && occupied[at]!=0u) {
+        // 2 is occupied but cannot pass the confidence threshold. Its zero
+        // vector still participates in neighbour seeding, never empty halos.
+        if(bx<blocks.x && by>=0 && by<blocks.y && occupied[at]==1u) {
             ivec2 best=ivec2(0);int contributors=0;
             if(bx>0){best+=vectors[at-1];++contributors;}
             if(by>0){best+=vectors[at-blocks.x];++contributors;}

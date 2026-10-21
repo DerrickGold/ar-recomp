@@ -91,11 +91,9 @@ static void CheckPreparedPresentation(ArRenderDevice *device, SDL_Window *window
       assert(SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND));
       assert(SDL_SetRenderDrawColor(renderer, 231, 91, 15, 93));
       assert(SDL_RenderFillRect(renderer, &overlay));
-      if (prepared) {
-        assert(ArSdlRenderBackend_PreparePresent(device));
-        SDL_Delay(1); /* Only a wait between prepare and present, as in host. */
-        assert(ArSdlRenderBackend_PresentPrepared(device));
-      } else assert(ArRenderDevice_Present(device));
+      /* Both passes use the single ordered present; the retired early
+       * submission variant is gone, so this checks repeat determinism. */
+      assert(ArRenderDevice_Present(device));
       /* Read only AFTER the terminal submission: a readback before it would
        * accidentally serialize the sequence we are trying to validate. */
       SDL_Surface *raw = SDL_RenderReadPixels(renderer, NULL);

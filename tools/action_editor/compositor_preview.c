@@ -125,9 +125,15 @@ static bool Texture(void *ctx, ArRenderTexture t, const ArRenderRectF *src,
 }
 static bool Present(void *ctx) { (void)ctx; return true; }
 static const char *Error(void *ctx) { (void)ctx; return "WebGL2 backend failed"; }
-static const ArRenderBackendOps kOps = {sizeof(ArRenderBackendOps),
-  Create,Destroy,Update,Target,Coordinates,Size,Viewport,Clip,Capture,Restore,
-  Clear,Texture,Geometry,Present,Error};
+static const ArRenderBackendOps kOps = {
+  .struct_size = sizeof(ArRenderBackendOps),
+  .create_texture = Create, .destroy_texture = Destroy, .update_texture = Update,
+  .set_render_target = Target, .use_output_coordinates = Coordinates,
+  .get_output_size = Size, .set_viewport = Viewport, .set_clip_rect = Clip,
+  .capture_render_target_state = Capture, .restore_render_target_state = Restore,
+  .clear = Clear, .draw_texture = Texture, .draw_geometry = Geometry,
+  .present = Present, .last_error = Error,
+};
 
 bool DioramaEffectBackend_IsAvailable(ArRenderDevice *d, DioramaEffectKind k) {
   (void)d;

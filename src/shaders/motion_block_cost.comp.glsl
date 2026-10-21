@@ -40,6 +40,24 @@ void main() {
     for(uint step=32u;step>0u;step/=2u){if(lane<step)signal_bits[lane]|=signal_bits[lane+step];barrier();}
     if(lane==0u)costs.values[base]=signal_bits[0]!=0u?1u:0u;
     if(signal_bits[0]==0u)return;
+    if(settings.planes[plane].w>1.0) {
+        // All lanes must finish reading occupancy before reusing its scratch.
+        barrier();
+        // All candidate costs are nonnegative. A stationary cost below the
+        // search's minimum accepted improvement (64) can never produce motion.
+        // State 2 is still occupied: treating it as empty would inherit a halo
+        // from moving neighbours and change the result. No candidate costs
+        // are published for these blocks; ordered search must skip them.
+        uint stationary=0u;
+        if(lane<16u) {
+            ivec2 sample_at=ivec2(int(lane)%4,int(lane)/4)*4;
+            stationary=difference(source_samples[lane],
+                pixel(forward,false,origin+sample_at,size,slot));
+        }
+        if(lane<16u)signal_bits[lane]=stationary;barrier();
+        for(uint step=8u;step>0u;step/=2u){if(lane<step)signal_bits[lane]+=signal_bits[lane+step];barrier();}
+        if(signal_bits[0]<64u){if(lane==0u)costs.values[base]=2u;return;}
+    }
     for(uint i=lane;i<729u;i+=64u)
         target_samples[i]=pixel(forward,false,origin+ivec2(int(i)%27-7,int(i)/27-7),size,slot);
     barrier();

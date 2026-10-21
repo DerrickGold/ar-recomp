@@ -447,6 +447,24 @@ static void TestIncompleteBackendIsRejected(void) {
   assert(!ArRenderDevice_IsReady(&device));
 }
 
+static bool RejectPreparation(void *context) {
+  assert(context);
+  return false;
+}
+
+static void TestPreparationBoundary(void) {
+  FakeBackend backend = {0};
+  ArRenderDevice device = {0};
+  assert(!ArRenderDevice_FinishPreparation(&device));
+  assert(ArRenderDevice_Init(&device, &kFakeOps, &backend, (ArRenderCapabilities){0}));
+  assert(ArRenderDevice_FinishPreparation(&device)); /* synchronous backend */
+  ArRenderBackendOps ops = kFakeOps;
+  ops.finish_preparation = RejectPreparation;
+  device.ops = &ops;
+  assert(!ArRenderDevice_FinishPreparation(&device)); /* cannot advertise readiness */
+  assert(backend.present_count == 0);
+}
+
 static void TestOutputFrameScope(void) {
   const ArRenderColorF black = {0.0f, 0.0f, 0.0f, 1.0f};
   const ArRenderColorF navy = {0.1f, 0.1f, 0.2f, 1.0f};
@@ -614,6 +632,7 @@ static void TestDirtyUploadWorksWithoutANativeRenderer(void) {
 }
 
 int main(void) {
+  TestPreparationBoundary();
   TestDeviceDispatchAndCapabilities();
   TestIncompleteBackendIsRejected();
   TestOutputFrameScope();

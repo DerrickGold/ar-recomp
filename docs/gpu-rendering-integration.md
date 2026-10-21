@@ -51,10 +51,25 @@ is unchanged.
 | --- | --- | --- |
 | `AR_GPU_DIRECT_LAYERS` | Unset, empty, `auto`, or `1`: use direct output when available | `0`: atlas synthesis/unpack; unknown values also disable direct output |
 | `AR_METAL_DRAWABLE_COUNT` | Unset, empty, or `auto`: VSync 2, otherwise 3 | `2` or `3`: fixed pool; invalid values log and use automatic policy |
-| `AR_GPU_EARLY_SUBMIT` | Off | `1`: existing diagnostic prototype only |
+| `AR_GPU_CAMERA_MOTION_BOUND` | Unset, empty, or `auto`: on for Metal and Vulkan, reference search on D3D12 | `1`: on for the running backend; `0` or other values: reference search |
+| `AR_GPU_EFFECT_BATCHING` | Unset, empty, or `auto`: on for Metal and Vulkan, immediate submission on D3D12 | `1`: on for the running backend; `0` or other values: immediate submission |
+| `AR_GPU_ACTOR_STATIONARY_REJECT` | Unset, empty, or `auto`: on for Metal and Vulkan, full search on D3D12 | `1`: on for the running backend; `0` or other values: full search |
 
-Early submission has not shown a reliable foreground pacing win. It remains
-off. The rejected multiple-output-texture experiment remains removed.
+The three exact shortcuts share `src/platform/sdl/gpu_prototype_policy.h`.
+They were promoted on October 20, 2026 after 1,152 CPU-oracle checks, 134/134
+whole-game frames with all of them enabled, and 50 minutes of 90 Hz Deck
+presentation feedback without a miss; see
+[the Deck review](frame-pacing-deck-review-20261020.md). D3D12 keeps every
+reference path until a Windows runtime pixel comparison exists.
+
+Retired on the same date, with their switches removed: early offscreen
+submission (`AR_GPU_EARLY_SUBMIT`; no reliable foreground pacing win on any
+platform, only applicable to software-paced streams) and the off-thread
+preparation worker (`AR_GPU_PREPARE_WORKER`; no Deck or Mac game win, a 0.02 ms
+priority effect, and the only observed multi-frame preparation stall). Pacing
+traces no longer carry the `offscreen_*` columns and preparation traces no
+longer carry the `worker` column; the analyzers accept both layouts. The
+rejected multiple-output-texture experiment remains removed.
 
 `[gpu-layer-output]` records direct/unpack counts, avoided copy payload and
 allocated fallback bytes at teardown. `[render] Metal drawable pool=...`

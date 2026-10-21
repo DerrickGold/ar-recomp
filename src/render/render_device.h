@@ -41,6 +41,9 @@ typedef struct ArRenderBackendOps {
                         const ArRenderDrawState *state);
   bool (*present)(void *context);
   const char *(*last_error)(void *context);
+  /* Optional boot/reset boundary: materialize backend-owned drawing variants
+   * and finish queued preparation before gameplay can use the device. */
+  bool (*finish_preparation)(void *context);
 } ArRenderBackendOps;
 
 typedef struct ArRenderDevice {
@@ -143,6 +146,9 @@ bool ArRenderDevice_DrawLine(ArRenderDevice *device,
                              ArRenderColorF color,
                              ArRenderBlendMode blend);
 bool ArRenderDevice_Present(ArRenderDevice *device);
+/* May wait for the GPU. Call only during boot/device-reset preparation, never
+ * per frame. Backends with synchronous preparation can omit the operation. */
+bool ArRenderDevice_FinishPreparation(ArRenderDevice *device);
 const char *ArRenderDevice_LastError(const ArRenderDevice *device);
 
 #endif /* AR_RENDER_DEVICE_H */

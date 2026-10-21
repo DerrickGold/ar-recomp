@@ -606,19 +606,17 @@ static void ConfigureMetalDrawables(ArSdlRenderBackend *backend) {
   }
 }
 
-static bool PresentWindow(ArSdlRenderBackend *backend, bool prepared) {
+static bool PresentWindow(ArSdlRenderBackend *backend) {
   const bool trace = backend->present_trace_enabled;
   if (trace) backend->present_trace = (ArSdlPresentTrace){0};
   const uint64_t started = trace ? SDL_GetTicksNS() : 0;
   ConfigureMetalDrawables(backend);
   if (SDL_GetRenderTarget(backend->renderer) != backend->output_target)
     return SDL_SetError("ordered GPU present requires the default output target");
-  if (!prepared) {
-    /* RenderPresent itself does not propagate its internal flush failure. */
-    if (!SDL_FlushRenderer(backend->renderer)) return false;
-    if (!SDL_RenderPresent(backend->renderer)) return false;
-  }
-  const uint64_t flushed = trace && !prepared ? SDL_GetTicksNS() : started;
+  /* RenderPresent itself does not propagate its internal flush failure. */
+  if (!SDL_FlushRenderer(backend->renderer)) return false;
+  if (!SDL_RenderPresent(backend->renderer)) return false;
+  const uint64_t flushed = trace ? SDL_GetTicksNS() : started;
   if (trace) backend->present_trace.flush_ns = flushed - started;
   SDL_GPUTexture *source = SDL_GetPointerProperty(SDL_GetTextureProperties(backend->output_target),
       SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, NULL);
@@ -669,13 +667,15 @@ static bool PresentWindow(ArSdlRenderBackend *backend, bool prepared) {
 static bool Present(void *context) {
   ArSdlRenderBackend *backend = context;
   if (!backend->output_window) return SDL_RenderPresent(backend->renderer);
-  return PresentWindow(backend, false);
+  return PresentWindow(backend);
 }
 
 static const char *LastError(void *context) {
   (void)context;
   return SDL_GetError();
 }
+
+static bool FinishPreparation(void *context);
 
 static const ArRenderBackendOps kSdlRenderOps = {
   .struct_size = sizeof(ArRenderBackendOps),
@@ -694,6 +694,7 @@ static const ArRenderBackendOps kSdlRenderOps = {
   .draw_geometry = DrawGeometry,
   .present = Present,
   .last_error = LastError,
+  .finish_preparation = FinishPreparation,
 };
 
 void ArSdlRenderBackend_EnablePresentTrace(const ArRenderDevice *device, bool enabled) {
@@ -731,24 +732,6 @@ bool ArSdlRenderBackend_SubmitPending(const ArRenderDevice *device) {
   return !backend->output_window || SDL_RenderPresent(renderer);
 }
 
-bool ArSdlRenderBackend_PreparePresent(const ArRenderDevice *device) {
-  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
-  if (!renderer) return false;
-  const ArSdlRenderBackend *backend = device->context;
-  if (backend->output_window && SDL_GetRenderTarget(renderer) != backend->output_target)
-    return SDL_SetError("ordered GPU present requires the default output target");
-  return ArSdlRenderBackend_SubmitPending(device);
-}
-
-bool ArSdlRenderBackend_PresentPrepared(const ArRenderDevice *device) {
-  SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
-  if (!renderer) return false;
-  ArSdlRenderBackend *backend = device->context;
-  /* Legacy adapters only flushed during preparation; they still own their
-   * normal window present. The ordered path has already submitted its draws. */
-  return backend->output_window ? PresentWindow(backend, true) : SDL_RenderPresent(renderer);
-}
-
 bool ArSdlRenderBackend_WindowOutputSize(const ArRenderDevice *device,
     int *width, int *height) {
   SDL_Renderer *renderer = ArSdlRenderBackend_Renderer(device);
@@ -779,6 +762,73 @@ SDL_GPUShader *ArSdlRenderBackend_FragmentShader(ArRenderDevice *device,
   entry->next = backend->fragment_shaders;
   backend->fragment_shaders = entry;
   return entry->shader;
+}
+
+static bool FinishPreparation(void *context) {
+  ArSdlRenderBackend *backend = context;
+  SDL_Renderer *renderer = backend->renderer;
+  if (!backend->gpu_device) return SDL_FlushRenderer(renderer);
+  /* This adapter always provides scoped render targets (also advertised by
+   * Bind). Reuse the portable save/restore helpers for the scratch draws. */
+  ArRenderDevice device = {.ops = &kSdlRenderOps, .context = backend,
+      .capabilities = {.flags = kArRenderCapability_RenderTargets | kArRenderCapability_ScopedRenderTargets}};
+  const Uint64 started = SDL_GetTicksNS();
+  const SDL_PixelFormat sources[] = {SDL_PIXELFORMAT_ARGB8888, SDL_PIXELFORMAT_XRGB8888};
+  const SDL_PixelFormat targets[] = {SDL_PIXELFORMAT_ARGB8888, SDL_PIXELFORMAT_ABGR8888};
+  const ArRenderVertex2D vertices[] = {
+    {{0,0}, {1,1,1,1}, {0,0}}, {{8,0}, {1,1,1,1}, {1,0}}, {{0,8}, {1,1,1,1}, {0,1}},
+  };
+  const int32_t indices[] = {0,1,2};
+  const uint32_t white = UINT32_C(0xffffffff);
+  SDL_Texture *sample[2] = {NULL, NULL};
+  bool ok = SDL_SetGPURenderState(renderer, NULL);
+  for (unsigned i = 0; ok && i < 2; ++i) {
+    sample[i] = SDL_CreateTexture(renderer, sources[i], SDL_TEXTUREACCESS_STATIC, 1, 1);
+    ok = sample[i] && SDL_UpdateTexture(sample[i], NULL, &white, sizeof(white));
+  }
+  for (unsigned f = 0; ok && f < 2; ++f) {
+    SDL_Texture *target = SDL_CreateTexture(renderer, targets[f], SDL_TEXTUREACCESS_TARGET, 8, 8);
+    ArRenderTargetState saved = {0};
+    ArRenderTargetBeginResult begin = target ? ArRenderDevice_BeginTarget(
+        &device, ArSdlRenderBackend_BorrowTexture(target), &saved) : kArRenderTargetBegin_Omitted;
+    ok = begin == kArRenderTargetBegin_Ready && ArRenderDevice_Clear(&device, (ArRenderColorF){0,0,0,0});
+    /* Both RGB and RGBA sampling, plus untextured triangle geometry. The
+     * portable line/rectangle helpers also use triangles, not native lines. */
+    for (int blend = kArRenderBlendMode_Opaque; ok && blend <= kArRenderBlendMode_Multiply; ++blend) {
+      const ArRenderDrawState state = {.flags = kArRenderDrawState_Blend, .blend = (ArRenderBlendMode)blend};
+      for (unsigned s = 0; ok && s < 3; ++s)
+        ok = ArRenderDevice_DrawGeometryWithState(&device,
+            ArSdlRenderBackend_BorrowTexture(s < 2 ? sample[s] : NULL), vertices, 3, indices, 3, &state);
+    }
+    if (ok) ok = ArSdlRenderBackend_SubmitPending(&device);
+    /* GPU blits have their own SDL-owned pipeline cache, separate from the
+     * 2D renderer. Warm both supported output formats without showing scratch
+     * pixels or relying on a visible swapchain image during startup. */
+    if (ok) {
+      SDL_GPUTexture *source = SDL_GetPointerProperty(SDL_GetTextureProperties(sample[0]),
+          SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, NULL);
+      SDL_GPUTexture *destination = SDL_GetPointerProperty(SDL_GetTextureProperties(target),
+          SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, NULL);
+      SDL_GPUCommandBuffer *commands = source && destination ? SDL_AcquireGPUCommandBuffer(backend->gpu_device) : NULL;
+      ok = commands != NULL;
+      if (ok) {
+        const SDL_GPUBlitInfo blit = {
+          .source = {.texture=source, .w=1, .h=1},
+          .destination = {.texture=destination, .w=8, .h=8},
+          .load_op=SDL_GPU_LOADOP_DONT_CARE, .filter=SDL_GPU_FILTER_LINEAR,
+        };
+        SDL_BlitGPUTexture(commands, &blit);
+        ok = SDL_SubmitGPUCommandBuffer(commands);
+      }
+    }
+    if (begin == kArRenderTargetBegin_Ready && !ArRenderDevice_EndTarget(&device, &saved)) ok = false;
+    SDL_DestroyTexture(target);
+  }
+  for (unsigned i = 0; i < 2; ++i) SDL_DestroyTexture(sample[i]);
+  if (ok) ok = ArSdlRenderBackend_SubmitPending(&device) && SDL_WaitForGPUIdle(backend->gpu_device);
+  GpuCompileLog_Record("SDL built-in drawing and blits", "preparation", SDL_GetTicksNS()-started, ok);
+  if (!ok) SDL_Log("[graphics-prepare] built-in pipeline preparation failed: %s", SDL_GetError());
+  return ok;
 }
 
 bool ArSdlRenderBackend_Bind(ArRenderDevice *device,

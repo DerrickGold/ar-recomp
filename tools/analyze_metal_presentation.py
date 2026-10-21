@@ -95,6 +95,162 @@ def output_resources(events, frames, commands, gpu, offset):
                 metrics={key: stats([r[key] for r in rows if key in r]) for key in keys})
 
 
+def scheduling_events(events, frames, commands):
+    """Separate CPU callback delivery, the actual drawable request and display.
+
+    Native drawable IDs and object identities are both needed: object pointers
+    are reused. Nested public present methods are one request, not two frames.
+    Scheduled handlers have CPU delivery latency; they are not GPU timestamps.
+    """
+    acquired = {e['id']: e for e in events if e['kind'] == 'drawable'}
+    scheduled = {e['id']: e for e in events if e['kind'] == 'scheduled'}
+    acquire_cpu = {e['id']: e for e in events if e['kind'] == 'acquire_cpu'}
+    requests = {}
+    for e in events:
+        if e['kind'] in ('drawable_present', 'drawable_at_time', 'drawable_after_duration'):
+            if e['end_ns'] < e['start_ns']:
+                raise ValueError('Reversed drawable presentation request')
+            requests.setdefault((e['id'], e['value0']), []).append(e)
+    rows = []
+    for f in frames:
+        row = dict(tick=f['tick'], drawable=f['drawable'], command=f['command'])
+        command = commands[f['command']]
+        callback = scheduled.get(f['command'])
+        if callback:
+            row['scheduled_callback_after_commit_ms'] = (callback['start_ns']-command['start_ns'])/1e6
+            row['scheduled_callback_after_gpu_end_ms'] = (callback['start_ns']-f['gpu_end_ns'])/1e6
+        cpu = acquire_cpu.get(f['drawable'])
+        if cpu:
+            row['drawable_wait_cpu_ms'] = cpu['value0']/1e6
+        acq = acquired.get(f['drawable'])
+        if acq:
+            candidates = sorted((e for e in requests.get((acq['end_ns'], acq['value0']), [])
+                                 if e['start_ns'] >= acq['start_ns']), key=lambda e:e['start_ns'])
+            if candidates:
+                request = candidates[0]
+                if any(e['end_ns'] > request['end_ns'] for e in candidates[1:]):
+                    raise ValueError('Multiple nonnested requests for one drawable')
+                row.update(native_drawable=acq['end_ns'],
+                           request_start_ns=request['start_ns'], request_end_ns=request['end_ns'],
+                           request_kind=request['kind'],
+                           request_after_commit_ms=(request['start_ns']-command['start_ns'])/1e6,
+                           request_call_ms=(request['end_ns']-request['start_ns'])/1e6,
+                           request_after_gpu_end_ms=(request['start_ns']-f['gpu_end_ns'])/1e6)
+                if f['display_ns'] is not None:
+                    row['request_return_to_display_ms'] = (f['display_ns']-request['end_ns'])/1e6
+        rows.append(row)
+    metrics = ('scheduled_callback_after_commit_ms', 'scheduled_callback_after_gpu_end_ms',
+               'drawable_wait_cpu_ms', 'request_after_commit_ms', 'request_call_ms',
+               'request_after_gpu_end_ms', 'request_return_to_display_ms')
+    return dict(frames=rows, missing_requests=sum('request_start_ns' not in r for r in rows),
+                missing_scheduled_callbacks=sum('scheduled_callback_after_commit_ms' not in r for r in rows),
+                missing_acquire_cpu_samples=sum('drawable_wait_cpu_ms' not in r for r in rows),
+                metrics={key:stats([r[key] for r in rows if key in r]) for key in metrics})
+
+
+def pipeline_events(events, first, last):
+    """Native creation/binding wall times, including SDL's internal PSOs.
+
+    A successful creation can be a driver cache hit. Bindings identify first
+    use in this process, not a hardware compiler cache miss. Match each bind
+    to the latest completed creation of its kind/address: addresses can recur.
+    Missing coverage stays explicit rather than becoming 'zero compilations'.
+    """
+    creation_kinds = ('library_source', 'library_data', 'pipeline_render', 'pipeline_compute')
+    scopes = [e for e in events if e['kind'] == 'pipeline_scope']
+    if not scopes:
+        raise ValueError('Pipeline tracing was not enabled')
+    if any(e['value1'] != 1 for e in scopes) or last < first:
+        raise ValueError('Unsupported pipeline scope or reversed selection')
+    devices = {e['id'] for e in scopes}
+    calls = [e for e in events if e['kind'] in creation_kinds]
+    binds = sorted((e for e in events if e['kind'] in ('bind_render', 'bind_compute')),
+                   key=lambda e: e['start_ns'])
+    if any(e['end_ns'] < e['start_ns'] for e in calls + binds):
+        raise ValueError('Reversed pipeline timing')
+    overlaps = lambda e: e['start_ns'] <= last and e['end_ns'] >= first
+    histories = {}
+    for i, e in enumerate(calls):
+        if e['id'] and e['kind'].startswith('pipeline_'):
+            histories.setdefault((e['kind'], e['id']), []).append((e['end_ns'], i))
+    for history in histories.values():
+        history.sort()
+    ends = {key: [end for end, _ in history] for key, history in histories.items()}
+    used, first_uses, unmatched = set(), [], []
+    for e in binds:
+        key = (e['kind'].replace('bind_', 'pipeline_'), e['id'])
+        index = bisect.bisect_right(ends.get(key, []), e['start_ns']) - 1
+        if index < 0:
+            unmatched.append(e)
+            continue
+        _, birth = histories[key][index]
+        if birth not in used:
+            used.add(birth)
+            first_uses.append(dict(e, created_ns=calls[birth]['end_ns']))
+    selected_calls = [e for e in calls if overlaps(e)]
+    selected_binds = [e for e in binds if overlaps(e)]
+    selected_first = [e for e in first_uses if overlaps(e)]
+    observed_kinds = {e['kind'] for e in calls}
+    unknown_devices = sum(e['value1'] not in devices for e in calls)
+    return dict(
+        window_start_ns=first, window_end_ns=last,
+        coverage_complete=bool(binds) and not unmatched and not unknown_devices and
+            {'pipeline_render', 'pipeline_compute'} <= observed_kinds and
+            bool({'library_source', 'library_data'} & observed_kinds),
+        creation_calls=len(calls), failed_creations=sum(not e['id'] for e in calls),
+        unscoped_device_calls=unknown_devices,
+        creation_calls_in_window=len(selected_calls), creations_in_window=selected_calls,
+        creation_api_ms={kind: stats([(e['end_ns']-e['start_ns'])/1e6 for e in calls
+                                     if e['kind'] == kind]) for kind in creation_kinds},
+        last_creation_end_ns=max((e['end_ns'] for e in calls), default=None),
+        pipeline_generations_bound=len(used), binding_calls=len(binds),
+        unmatched_bindings=len(unmatched), unmatched_binding_examples=unmatched[:8],
+        first_binds_in_window=selected_first,
+        last_first_bind_ns=max((e['start_ns'] for e in first_uses), default=None),
+        binding_api_ms=stats([(e['end_ns']-e['start_ns'])/1e6 for e in selected_binds]),
+        slow_bindings_in_window=[e for e in selected_binds if e['end_ns']-e['start_ns'] >= 1_000_000],
+        measures_driver_cache_misses=False)
+
+
+def wait_events(events, first, last):
+    """Existing Metal waits/allocations, separating wall time from thread CPU.
+
+    Off-CPU time includes both blocking and descheduling. It is not a GPU busy
+    measurement or proof of a particular kernel dependency.
+    """
+    scopes = [e for e in events if e['kind'] == 'wait_scope']
+    if not scopes or any(e['value1'] != 1 for e in scopes) or last < first:
+        raise ValueError('Missing/unsupported wait scope or reversed selection')
+    kinds = ('wait_complete', 'queue_command', 'render_encoder')
+    calls = [e for e in events if e['kind'] in kinds and
+             e['start_ns'] <= last and e['end_ns'] >= first]
+    if any(e['end_ns'] < e['start_ns'] for e in calls):
+        raise ValueError('Reversed native wait timing')
+    counters = {kind: {(e['id'], e['start_ns'], e['end_ns']): e for e in events if e['kind'] == kind}
+                for kind in ('scope_faults', 'scope_switches')}
+    rows = []
+    for e in calls:
+        row = dict(kind=e['kind'], object=e['id'], thread=e['value1'],
+                   start_ns=e['start_ns'], end_ns=e['end_ns'],
+                   wall_ms=(e['end_ns']-e['start_ns'])/1e6)
+        if e['value0'] != (1 << 64)-1:
+            row['cpu_ms'] = e['value0']/1e6
+            row['off_cpu_ms'] = max(0, row['wall_ms']-row['cpu_ms'])
+        key = (e['id'], e['start_ns'], e['end_ns'])
+        faults, switches = counters['scope_faults'].get(key), counters['scope_switches'].get(key)
+        if faults:
+            row.update(process_major_faults=faults['value0'], process_minor_faults=faults['value1'])
+        if switches:
+            row.update(process_voluntary_switches=switches['value0'],
+                       process_involuntary_switches=switches['value1'])
+        rows.append(row)
+    return dict(calls=len(rows), missing_cpu_samples=sum('cpu_ms' not in r for r in rows),
+                process_memory_observed=any(e['kind'] == 'memory_scope' for e in events),
+                metrics={kind: {key: stats([r[key] for r in rows if r['kind'] == kind and key in r])
+                                for key in ('wall_ms', 'cpu_ms', 'off_cpu_ms')} for kind in kinds},
+                long_calls=[r for r in rows if r['wall_ms'] >= 1])
+
+
 def correlate(events, pacing, start=1600, end=2500):
     # Older probes sampled again after SDL_Quit reset its tick epoch. Ignore
     # teardown samples after the final commit, regardless of their offset.
@@ -200,6 +356,13 @@ def correlate(events, pacing, start=1600, end=2500):
     result['frames'] = frames
     if any(e['kind'] == 'surface' for e in events):
         result['output_resources'] = output_resources(events, frames, commands, gpu, offset)
+    if any(e['kind'] == 'drawable' for e in events):
+        result['scheduling'] = scheduling_events(events, frames, commands)
+    if any(e['kind'] == 'pipeline_scope' for e in events):
+        result['pipelines'] = pipeline_events(events, presents[0].get('loop_ns', first),
+                                             max([last] + [f['display_ns'] for f in shown]))
+    if any(e['kind'] == 'wait_scope' for e in events):
+        result['native_waits'] = wait_events(events, presents[0].get('loop_ns', first), last)
     return result
 
 
@@ -215,7 +378,7 @@ def main():
     result['host'] = analyze(args.pacing, start=args.start, end=args.end)
     args.output.write_text(json.dumps(result, indent=2)+'\n')
     print(json.dumps({k:v for k,v in result.items() if k not in
-                     ('host','frames','worst_drawable_waits','output_resources')},indent=2))
+                     ('host','frames','worst_drawable_waits','output_resources','scheduling')},indent=2))
 
 
 if __name__ == '__main__':

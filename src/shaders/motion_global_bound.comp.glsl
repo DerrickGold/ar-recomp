@@ -1,6 +1,7 @@
 #version 450
-// Nine nearby displacements establish an exact upper bound for pruning. The fixed
-// interior sample grid match PresentationFrameGeneration_Analyze's global path.
+// Nine nearby displacements plus an optional camera hint establish an exact
+// upper bound. A wrong hint cannot weaken the original nine-candidate bound.
+// The sample grid matches PresentationFrameGeneration_Analyze's global path.
 layout(local_size_x = 64) in;
 layout(std140, set = 2, binding = 0) uniform Extents { vec4 planes[8]; } extents;
 layout(set = 0, binding = 0) uniform sampler2D previous_frame;
@@ -14,6 +15,12 @@ void main() {
     ivec2 size = textureSize(previous_frame, 0); size.y = int(extents.planes[plane].z);
     size.x = int(extents.planes[plane].x);
     ivec2 motion = ivec2(int(candidate % 3u) - 1, int(candidate / 3u) - 1);
+    if (candidate == 9u) {
+        int hint = int(extents.planes[plane].w) - 1;
+        if (hint < 0) return; // cost never reads this band's optional slot
+        motion = ivec2(hint % 15 - 7, hint / 15 - 7);
+        if ((direction & 1u) != 0u) motion = -motion;
+    }
     int columns = max(0, (size.x - 14 + 15) / 16);
     int rows = max(0, (size.y - 14 + 15) / 16);
     uint sum = 0u;
@@ -35,6 +42,6 @@ void main() {
         if (lane < stride) partial[lane] += partial[lane + stride];
         barrier();
     }
-    if (lane == 0u) output_costs.costs[direction * 9u + candidate] =
+    if (lane == 0u) output_costs.costs[direction * 10u + candidate] =
         partial[0] + uint(abs(motion.x) + abs(motion.y)) * 12u;
 }

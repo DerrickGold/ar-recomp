@@ -618,6 +618,7 @@ int main(void) {
 
   planes[test_plane] = gpu_owned ? NULL : (uint8_t *)current_pixels;
   slot.timestamp_ns += 16666667;
+  slot.bg1_camera_x = -2; /* Image moved right by two pixels. */
   DioramaFrameGeneration_FinishCapture();
   CHECK(SDL_UpdateTexture(
       current, &source_rect, &current_pixels[kApron],

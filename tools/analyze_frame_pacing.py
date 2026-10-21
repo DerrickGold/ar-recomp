@@ -270,17 +270,20 @@ def analyze(path, start=1200, end=3300, refresh=90, warmup_seconds=0, assume_nat
                 raise ValueError('Inconsistent backend timing breakdown')
     for key in backend_scopes:
         if key in rows[0]: result[key.replace('_ns','_ms')] = stats(durations(key, presents))
-    early = [r for r in presents if r.get('offscreen_complete_ns', 0)]
-    for r in early:
+    # Traces written before the early-submission prototype was removed carry
+    # these columns; current traces do not, so report them only when present.
+    early = [r for r in presents if r.get('offscreen_complete_ns', 0)] if 'offscreen_submit_ns' in rows[0] else None
+    for r in early or []:
         start = r['offscreen_complete_ns'] - r['offscreen_submit_ns']
         if not (r['draw_ns'] <= start <= r['offscreen_complete_ns'] <=
                 r['draw_ns'] + r['draw_work_ns'] <= r['submit_start_ns']):
             raise ValueError('Inconsistent early offscreen submission timestamps')
     # Nested CPU wall time already included in draw_work_ms. The gap is an
     # opportunity for GPU overlap, not a measurement of GPU execution time.
-    result['offscreen_submit_ms'] = stats(durations('offscreen_submit_ns', early))
-    result['offscreen_overlap_window_ms'] = stats([
-        (r['submit_start_ns'] - r['offscreen_complete_ns']) / 1e6 for r in early])
+    if early is not None:
+        result['offscreen_submit_ms'] = stats(durations('offscreen_submit_ns', early))
+        result['offscreen_overlap_window_ms'] = stats([
+            (r['submit_start_ns'] - r['offscreen_complete_ns']) / 1e6 for r in early])
     # Preserve the worst intervals with their stage evidence for causal inspection.
     worst = []
     for a,b,upload_count,upload_ns in presentation_intervals(rows):

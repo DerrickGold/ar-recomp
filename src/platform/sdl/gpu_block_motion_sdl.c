@@ -1,4 +1,5 @@
 #include "platform/sdl/gpu_block_motion_sdl.h"
+#include "platform/sdl/gpu_prototype_policy.h"
 #include "platform/sdl/gpu_shader_blob.h"
 #include "present/presentation_frame_generation.h"
 #include "shaders/motion_block_cost_comp.h"
@@ -15,7 +16,8 @@ _Static_assert(kPresentationFrameGenerationMaximumBlocks == kBlocks &&
                "Update GPU block motion limits with the CPU oracle");
 #define BLOBS(n) {k##n##MSL, k##n##MSLSize, k##n##SPV, k##n##SPVSize, k##n##DXIL, k##n##DXILSize}
 bool ArGpuBlockMotion_Init(ArGpuBlockMotion *p, SDL_GPUDevice *device) {
-  *p = (ArGpuBlockMotion){.device = device};
+  *p = (ArGpuBlockMotion){.device = device,
+      .stationary_reject = ArGpuPrototype_Enabled(device, "AR_GPU_ACTOR_STATIONARY_REJECT")};
   const GpuShaderBlobs cost = BLOBS(MotionBlockCostComp), search = BLOBS(MotionBlockSearchComp),
                        validate = BLOBS(MotionBlockValidateComp),
                        vertices = BLOBS(MotionBlockVerticesComp), vert = BLOBS(Sim3dDepthVert),
@@ -82,8 +84,11 @@ bool ArGpuBlockMotion_Init(ArGpuBlockMotion *p, SDL_GPUDevice *device) {
       .address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
       .address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE};
   p->sampler = SDL_CreateGPUSampler(device, &sampler);
-  return p->cost && p->costs && p->search && p->validate && p->build_vertices && p->warp &&
-         p->directions && p->motion && p->vertices && p->indices && p->sampler;
+  const bool ready = p->cost && p->costs && p->search && p->validate && p->build_vertices &&
+      p->warp && p->directions && p->motion && p->vertices && p->indices && p->sampler;
+  if (ready && p->stationary_reject)
+    SDL_Log("[gpu-actor-motion] stationary confidence rejection enabled");
+  return ready;
 }
 #undef BLOBS
 void ArGpuBlockMotion_Destroy(ArGpuBlockMotion *p) {
@@ -190,7 +195,15 @@ bool ArGpuBlockMotion_Analyze(ArGpuBlockMotion *p, SDL_GPUCommandBuffer *cmd,
   const SDL_GPUTextureSamplerBinding pair[] = {{previous, p->sampler}, {current, p->sampler}};
   const SDL_GPUStorageBufferReadWriteBinding directions = {.buffer = p->directions, .cycle = true};
   const SDL_GPUStorageBufferReadWriteBinding motion = {.buffer = p->motion, .cycle = true};
-  SDL_PushGPUComputeUniformData(cmd, 0, p->extents, sizeof(p->extents));
+  float extents[4][4];
+  SDL_memcpy(extents, p->extents, sizeof(extents));
+  // Shader analysis modes: 0 disabled, 1 reference, 2 confidence-bound reject.
+  // Keep the public per-plane enabled flags unchanged for capture/synthesis.
+  if (p->stationary_reject)
+    for (unsigned i = 0; i < 4; ++i)
+      if (extents[i][3] != 0)
+        extents[i][3] = 2;
+  SDL_PushGPUComputeUniformData(cmd, 0, extents, sizeof(extents));
   const SDL_GPUStorageBufferReadWriteBinding costs = {.buffer = p->costs, .cycle = true};
   SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(cmd, NULL, 0, &costs, 1);
   if (!pass)

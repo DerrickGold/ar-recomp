@@ -171,13 +171,16 @@ void HostVideo_Create(const char *title, bool hidden_capture) {
         (DevToolsReadbackProvider){ArSdlDevTools_CaptureRgb24, &g_render_device},
         indicator_capture);
   RenderFeatureMask prepared_features = 0;
-  const uint64_t preparation_started = SDL_GetTicks();
+  const uint64_t preparation_started = SDL_GetTicksNS();
   if (!RenderPreparation_Prepare(&g_render_device, &prepared_features))
     Die("Graphics startup preparation failed; unable to safely prepare the renderer");
   Settings_ApplyRenderCapabilities(prepared_features);
-  fprintf(stderr, "[graphics-prepare] completed in %llu ms; cpu-cores=%d system-ram=%d MB\n",
-      (unsigned long long)(SDL_GetTicks() - preparation_started),
-      SDL_GetNumLogicalCPUCores(), SDL_GetSystemRAM());
+  const uint64_t preparation_finished = SDL_GetTicksNS();
+  fprintf(stderr, "[graphics-prepare] completed in %llu ms; cpu-cores=%d system-ram=%d MB "
+      "start-ns=%llu end-ns=%llu\n",
+      (unsigned long long)((preparation_finished - preparation_started) / 1000000),
+      SDL_GetNumLogicalCPUCores(), SDL_GetSystemRAM(),
+      (unsigned long long)preparation_started, (unsigned long long)preparation_finished);
   g_gpu_shaders_active = true;
   /* Apply the selected refresh policy after renderer creation. Hidden-video
    * automation requests vsync off and uses no host throttle; a platform

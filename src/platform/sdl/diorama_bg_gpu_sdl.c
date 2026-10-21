@@ -5,6 +5,7 @@
 #include <string.h>
 #include "app/performance_metrics.h"
 #include "platform/sdl/render_sdl_internal.h"
+#include "platform/sdl/gpu_render_preparation.h"
 #include "platform/sdl/presentation_geometry_sdl.h"
 #include "shaders/ppu_bg_capture_frag.h"
 #include "shaders/ppu_bg_capture_comp.h"
@@ -214,8 +215,10 @@ static bool Ensure(ArRenderDevice *device) {
   s_bg.input = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
       SDL_TEXTUREACCESS_STREAMING, kTextureWidth, kTextureHeight);
   if (!s_bg.state || !s_bg.input || !s_bg.previous) return false;
+  const float warm[4] = {0, 0, 1, 1};
   s_bg.ready = SDL_SetTextureBlendMode(s_bg.input, SDL_BLENDMODE_NONE) &&
-      SDL_SetTextureScaleMode(s_bg.input, SDL_SCALEMODE_NEAREST);
+      SDL_SetTextureScaleMode(s_bg.input, SDL_SCALEMODE_NEAREST) &&
+      GpuRenderPreparation_Warm(device, s_bg.state, warm, sizeof(warm), false);
   return s_bg.ready;
 }
 

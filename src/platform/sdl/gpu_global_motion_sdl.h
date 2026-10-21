@@ -15,6 +15,10 @@ typedef struct ArGpuGlobalMotion {
   /* x: width, y: analyze this pair (0 skips unchanged/absent bands).
    * All bands share atlas height. Skipped bands select the current endpoint. */
   float extents[8][4];
+  /* Optional legal forward displacement, encoded as 1 + (dy+7)*15 + dx+7.
+   * Zero keeps the original nine bound candidates. Never forces motion. */
+  unsigned bound_hint[8];
+  bool camera_bound;
 } ArGpuGlobalMotion;
 typedef struct ArGpuGlobalMotionResult {
   int32_t forward_x, forward_y, backward_x, backward_y;
@@ -25,6 +29,9 @@ _Static_assert(sizeof(ArGpuGlobalMotionResult) == 32, "GPU motion result layout"
 bool ArGpuGlobalMotion_Init(ArGpuGlobalMotion *p, SDL_GPUDevice *device);
 void ArGpuGlobalMotion_Destroy(ArGpuGlobalMotion *p); /* Caller must retire in-flight work. */
 bool ArGpuGlobalMotion_Resize(ArGpuGlobalMotion *p, unsigned width, unsigned height);
+/* Forward image displacement (opposite camera delta). Clamped to the search
+ * radius; hints inside the existing 3x3 bound grid need no extra work. */
+void ArGpuGlobalMotion_SetHint(ArGpuGlobalMotion *p, unsigned plane, int dx, int dy);
 /* Resize prepares analysis dimensions; the atlas is allocated only for the
  * reference/fallback warp. Direct layer output never needs this allocation. */
 bool ArGpuGlobalMotion_EnsureOutput(ArGpuGlobalMotion *p);

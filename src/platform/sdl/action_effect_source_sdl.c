@@ -1,4 +1,5 @@
 #include "action_effect_source_sdl.h"
+#include "gpu_prototype_policy.h"
 #include "render_sdl_internal.h"
 #include "gpu_shader_blob.h"
 #include "shaders/action_effect_project_comp.h"
@@ -183,11 +184,9 @@ static SDL_GPUGraphicsPipeline *Pipeline(SDL_GPUDevice *gpu, SDL_GPUShader *vs, 
 }
 
 bool ArGpuEffectSource_Init(ArGpuEffectSource *p, SDL_GPUDevice *gpu) {
-  const char *batching = SDL_getenv("AR_GPU_EFFECT_BATCHING");
-  /* Prototype: lowers submission CPU cost, but Deck VSync tail pacing still
-   * needs work. Keep immediate submission as the production default. */
+  /* Exact submission batching; gpu_prototype_policy.h owns the default. */
   *p = (ArGpuEffectSource){.device = gpu,
-      .batching_enabled = batching && strcmp(batching, "1") == 0};
+      .batching_enabled = ArGpuPrototype_Enabled(gpu, "AR_GPU_EFFECT_BATCHING")};
   const GpuShaderBlobs project = BLOBS(ActionEffectProjectComp),
                        shadow = BLOBS(ActionEffectShadowComp), moon = BLOBS(ActionEffectMoonComp), drawvs = BLOBS(ActionEffectDrawVert),
                        drawfs = BLOBS(ActionEffectDrawFrag), skyvs = BLOBS(ActionSkyboxVert),

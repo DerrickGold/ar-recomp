@@ -326,7 +326,8 @@ class PacingTraceTest(unittest.TestCase):
         self.assertEqual(result['draw_work_ms']['mean'], 1)
         self.assertEqual(result['backend_present_ms']['mean'], .1)
         self.assertEqual(result['complete_interval_ms']['mean'], 16)
-        self.assertEqual(self.report(self.rows())['offscreen_submit_ms']['samples'], 0)
+        # Traces without the retired early-submission columns report nothing for them.
+        self.assertNotIn('offscreen_submit_ms', self.report(self.rows()))
         rows[1]['offscreen_complete_ns'] = rows[1]['complete_ns']
         with self.assertRaises(ValueError):
             self.report(rows)

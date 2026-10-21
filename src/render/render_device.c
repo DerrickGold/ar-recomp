@@ -33,6 +33,11 @@ bool ArRenderDevice_IsReady(const ArRenderDevice *device) {
   return device && device->ops && device->context;
 }
 
+bool ArRenderDevice_FinishPreparation(ArRenderDevice *device) {
+  return ArRenderDevice_IsReady(device) &&
+      (!device->ops->finish_preparation || device->ops->finish_preparation(device->context));
+}
+
 const ArRenderCapabilities *ArRenderDevice_Capabilities(
     const ArRenderDevice *device) {
   return ArRenderDevice_IsReady(device) ? &device->capabilities : NULL;

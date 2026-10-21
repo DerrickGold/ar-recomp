@@ -15,8 +15,9 @@
 #include <stdio.h>
 
 /* Fault-injected portable boundary: no GPU, settings globals or game state. */
-static bool available = true, fail_create, fail_clear, fail_end, fatal;
+static bool available = true, fail_create, fail_clear, fail_end, fail_finish, fatal;
 static int creates, destroys, ends, shader_calls;
+static int finishes;
 static int completion_prepares;
 static ArRenderTargetBeginResult begin_result = kArRenderTargetBegin_Ready;
 static ArRenderBlendMode rejected_blend = kArRenderBlendMode_Opaque;
@@ -69,6 +70,11 @@ void GpuCompileLog_BeginPreparation(GpuCompileLogObserver observer, void *contex
 }
 bool SessionFatal_Requested(void) { return fatal; }
 bool ArRenderDevice_IsReady(const ArRenderDevice *device) { return device != NULL; }
+bool ArRenderDevice_FinishPreparation(ArRenderDevice *device) {
+  assert(device && creates == destroys);
+  ++finishes;
+  return !fail_finish;
+}
 const ArRenderCapabilities *ArRenderDevice_Capabilities(const ArRenderDevice *device) {
   return &device->capabilities;
 }
@@ -162,6 +168,7 @@ int main(void) {
   assert(RenderPreparation_Prepare(&device, &features));
   assert(features == kRenderFeature_All && shader_calls == 9 && ends == 1);
   assert(completion_prepares == 1);
+  assert(finishes == 1 && interpolation_prepares == 1); /* even with the setting off */
   assert(creates == destroys);
   /* Linear meshes are an acceleration, not a distinct visual setting. A
    * prepared rejection retains ordinary SIM geometry and unrelated features. */
@@ -201,9 +208,8 @@ int main(void) {
   fatal = false;
   begin_result = kArRenderTargetBegin_Ready;
 
-  /* Boot prepares action projection even from a flat menu. Enabling
-   * Diorama reuses it; interpolation adds its pipelines once, under the
-   * preparation indicator. Device reset rebuilds both sets. */
+  /* Boot prepares every optional feature even from a flat menu with
+   * interpolation disabled. Setting changes reuse it; reset rebuilds it. */
   bg_prepares = action_prepares = interpolation_prepares = 0;
   RenderPreparation_PrepareSelectedFeatures(&device);
   assert(bg_prepares == 0 && action_prepares == 0);
@@ -214,20 +220,24 @@ int main(void) {
   g_settings.gpu_interp_enabled = true;
   RenderPreparation_PrepareSelectedFeatures(&device);
   RenderPreparation_PrepareSelectedFeatures(&device);
-  assert(action_prepares == 1 && interpolation_prepares == 1);
+  assert(action_prepares == 0 && interpolation_prepares == 0);
   assert(RenderPreparation_Prepare(&device, &features));
-  assert(action_prepares == 2 && interpolation_prepares == 2);
+  assert(action_prepares == 1 && interpolation_prepares == 1);
   RenderPreparation_PrepareSelectedFeatures(NULL);
-  assert(action_prepares == 2);
+  assert(action_prepares == 1);
 
   /* A flat boot must also prepare the saved interpolation preference; action
    * entry must not introduce a second compilation bracket. */
   diorama_on = false;
   assert(RenderPreparation_Prepare(&device, &features));
-  assert(action_prepares == 3 && interpolation_prepares == 3);
+  assert(action_prepares == 2 && interpolation_prepares == 2);
   diorama_on = true;
   RenderPreparation_PrepareSelectedFeatures(&device);
-  assert(action_prepares == 3 && interpolation_prepares == 3);
+  assert(action_prepares == 2 && interpolation_prepares == 2);
+
+  fail_finish = true;
+  assert(!RenderPreparation_Prepare(&device, &features));
+  fail_finish = false;
 
   /* The indicator brackets every preparation, including one ended early by a
    * fatal request, ticks between steps, and is the compile log's observer. */

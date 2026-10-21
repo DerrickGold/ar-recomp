@@ -94,13 +94,18 @@ bind_key_render_compare = Key 43 Tab
                AR_GPU_DIRECT_LAYERS=a.direct_layers,
                AR_GPU_EFFECT_PROJECTION=a.effect_projection,
                AR_GPU_BG_DECODE=a.bg_decode,
-               AR_GPU_PREPARE_WORKER=str(int(a.prepare_worker)),
                AR_GPU_BG_CAPTURE='owned' if a.variant == 'gpu' else '0',
                AR_GPU_BG_MOTION='owned' if a.variant == 'gpu' else '0',
                AR_FRAME_CAPTURE_TICK_CLOCK='1', AR_SHOT_FROM=str(a.start), AR_SHOT_TO=str(a.end),
                AR_SHOT_EVERY=str(a.every), AR_SHOT_REQUIRE_COMPOSITE='1')
     if a.full_add != 'default':
         env['AR_GPU_BG_FULL_ADD'] = a.full_add
+    # 'default' leaves the backend policy in charge (on for Metal/Vulkan, reference on D3D12).
+    for key, value in (('AR_GPU_ACTOR_STATIONARY_REJECT', a.actor_stationary_reject),
+                       ('AR_GPU_CAMERA_MOTION_BOUND', a.camera_motion_bound),
+                       ('AR_GPU_EFFECT_BATCHING', a.effect_batching)):
+        if value != 'default':
+            env[key] = value
     if a.packet_cache != 'default':
         env['AR_GPU_BG_PACKET_CACHE'] = a.packet_cache
     if a.moonjump_speed:
@@ -115,7 +120,7 @@ bind_key_render_compare = Key 43 Tab
                       env={k:v for k,v in env.items() if k.startswith(('AR_', 'SDL_')) or
                            k in ('XDG_RUNTIME_DIR', 'WAYLAND_DISPLAY', 'LD_LIBRARY_PATH')},
                       replay_sha256=sha(work / 'input.rec'), settings_sha256=sha(work / 'settings.ini'),
-                      variant=a.variant, effect_projection=a.effect_projection, handoff=a.handoff, prepare_worker=a.prepare_worker, bg_decode=a.bg_decode,
+                      variant=a.variant, effect_projection=a.effect_projection, handoff=a.handoff, bg_decode=a.bg_decode,
                       phase=a.phase, start=a.start, end=a.end, every=a.every,
                       minimum_camera_travel=a.minimum_camera_travel,
                       require_full_add=a.require_full_add)
@@ -149,14 +154,22 @@ def validate_capture(a, work, provenance, returncode=0):
     if a.direct_layers == '1' and a.phase != 'source' and (
             'direct layer synthesis, no unpack copies' not in log or '[gpu-direct-layers]' in log):
         raise RuntimeError('Direct layer synthesis was not exercised or fell back')
+    if (provenance['env'].get('AR_GPU_ACTOR_STATIONARY_REJECT') == '1' and
+            '[gpu-actor-motion] stationary confidence rejection enabled' not in log):
+        raise RuntimeError('Stationary actor-motion rejection was not enabled')
+    if (provenance['env'].get('AR_GPU_CAMERA_MOTION_BOUND') == '1' and
+            '[gpu-global-motion] camera-guided bound enabled' not in log):
+        raise RuntimeError('Camera-guided background bound was not enabled')
+    if (provenance['env'].get('AR_GPU_EFFECT_BATCHING') == '1' and
+            a.effect_projection == 'resident' and
+            '[gpu-effect-commands] batching=1' not in log):
+        raise RuntimeError('Effect command batching was not exercised')
     if a.effect_projection == 'resident':
         counts = re.findall(r'\[gpu-effect-projection\] resident-captures=(\d+) metadata-downloads=(\d+) bytes=(\d+) source-draws=(\d+) primitives=(\d+)', log)
         if not counts or not any(int(c[0]) > 0 and int(c[3]) > 0 and int(c[4]) > 0 for c in counts):
             raise RuntimeError('Resident effect projection was not exercised')
         if any(int(c[1]) or int(c[2]) for c in counts):
             raise RuntimeError('Resident replay unexpectedly downloaded motion metadata')
-    if a.prepare_worker and '[gpu-prepare-worker] native packing/analysis worker active' not in log:
-        raise RuntimeError('Native preparation worker was not exercised')
     evidence = run_evidence(log, work)
     images = capture_evidence(Path(evidence['run_dir']), a.start, a.end, a.every)
     states = {}
@@ -299,7 +312,12 @@ def main():
     p.add_argument('--handoff', choices=('0', 'unpack', 'all'), default='0')
     p.add_argument('--direct-layers', choices=('0', '1'), default='0',
                    help='Select direct synthesis; this comparison harness defaults to the atlas reference')
-    p.add_argument('--prepare-worker', action='store_true')
+    p.add_argument('--actor-stationary-reject', choices=('default', '0', '1'), default='default',
+                   help='Enable the exact stationary actor-motion rejection prototype')
+    p.add_argument('--camera-motion-bound', choices=('default', '0', '1'), default='default',
+                   help='Enable the exact camera-guided background search bound prototype')
+    p.add_argument('--effect-batching', choices=('default', '0', '1'), default='default',
+                   help='Compare scoped effect command batching against immediate submission')
     p.add_argument('--bg-decode', choices=('fragment', 'native'), default='fragment')
     p.add_argument('--phase', choices=('source', '0.25', '0.5', '0.75'), default='source')
     p.add_argument('--allow-hits', action='store_true',
@@ -315,7 +333,7 @@ def main():
     if a.validate_existing:
         work = a.validate_existing.resolve()
         provenance = json.loads((work / 'provenance.json').read_text())
-        for key in ('variant', 'effect_projection', 'handoff', 'prepare_worker', 'bg_decode', 'phase', 'start', 'end', 'every'):
+        for key in ('variant', 'effect_projection', 'handoff', 'bg_decode', 'phase', 'start', 'end', 'every'):
             setattr(a, key, provenance[key])
         a.minimum_camera_travel = provenance.get('minimum_camera_travel', [0, 0])
         a.require_full_add = provenance.get('require_full_add', False)
@@ -333,8 +351,6 @@ def main():
     if a.compare:
         compare(a)
     elif a.binary and a.assets:
-        if a.prepare_worker and (a.handoff != 'all' or a.variant != 'gpu' or a.phase == 'source'):
-            p.error('Preparation worker requires GPU interpolation and native all handoff')
         if not (0 <= a.start <= a.end <= 65535 and a.every > 0 and a.frames > a.end):
             p.error('Invalid capture frame range')
         capture(a)

@@ -40,8 +40,8 @@ static bool PreparationContinues(ArRenderDevice *device) {
   return false;
 }
 
-/* Pipelines built for the currently selected optional features. Cleared by
- * every full preparation, which follows a device reset that released them. */
+/* Full boot/reset preparation builds both sets regardless of current settings.
+ * These flags also support hosts that only prepare selected features. */
 static bool s_action_stage_prepared;
 static bool s_interpolation_prepared;
 
@@ -109,9 +109,10 @@ bool RenderPreparation_Prepare(ArRenderDevice *device, RenderFeatureMask *suppor
   /* Action entry can enable Diorama after the last settings-service pass.
    * Prepare its shared projection/lighting pipelines even when boot starts
    * in a flat menu. Otherwise the first upload compiles them during gameplay. */
-  /* The active-mode getter is false in menus even when interpolation is
-   * enabled in settings. Its pipelines also need to be ready for action entry. */
-  PrepareActionStage(device, g_settings.gpu_interp_enabled);
+  /* Prepare optional features even when their settings are currently off.
+   * Toggling interpolation during play must reuse already compiled pipelines.
+   * This creates pipelines, not the full-size motion/capture textures. */
+  PrepareActionStage(device, true);
   if (!PreparationContinues(device)) return false;
 
   ArRenderTexture sample = ArRenderTexture_Invalid(), target = ArRenderTexture_Invalid();
@@ -142,6 +143,9 @@ bool RenderPreparation_Prepare(ArRenderDevice *device, RenderFeatureMask *suppor
   }
   ArRenderDevice_DestroyTexture(device, sample);
   ArRenderDevice_DestroyTexture(device, target);
+  /* SDL owns additional pipelines outside the game shader wrappers. Build
+   * those too and wait for submitted warmup draws before ending preparation. */
+  if (ok) ok = ArRenderDevice_FinishPreparation(device);
   const ArRenderCapabilities *caps = ArRenderDevice_Capabilities(device);
   fprintf(stderr,
           "[graphics-prepare] features=$%x texture-limit=%dx%d "

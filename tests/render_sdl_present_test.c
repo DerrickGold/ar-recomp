@@ -84,16 +84,6 @@ static void TestBlit(SDL_GPUCommandBuffer *commands, const SDL_GPUBlitInfo *blit
 #define SDL_GetTicksNS TestTicks
 #include "../src/platform/sdl/render_sdl.c"
 
-static bool PresentFrame(ArRenderDevice *device, bool prepared) {
-  if (!prepared) return ArRenderDevice_Present(device);
-  if (!ArSdlRenderBackend_PreparePresent(device)) return false;
-  /* Preparation must not acquire a window image or retain a command buffer
-   * across the host's deadline wait. One producer submission, not two. */
-  assert(s_test.flushed == 1 && s_test.producers == 1);
-  assert(!s_test.acquired && !s_test.blitted && !s_test.submitted);
-  return ArSdlRenderBackend_PresentPrepared(device);
-}
-
 int main(void) {
   ArSdlRenderBackend backend = {
     .renderer = (SDL_Renderer *)&s_renderer, .gpu_device = (SDL_GPUDevice *)&s_device,
@@ -108,13 +98,6 @@ int main(void) {
   assert(trace.flush_ns == 100 && trace.acquire_ns == 200 && trace.submit_ns == 200);
   assert(trace.command_ns == 100 && trace.swapchain_ns == 100);
   assert(trace.blit_ns == 100 && trace.queue_submit_ns == 100);
-  memset(&s_test, 0, sizeof(s_test));
-  assert(PresentFrame(&device, true));
-  const ArSdlPresentTrace early = ArSdlRenderBackend_LastPresentTrace(&device);
-  assert(early.flush_ns == 0 && early.acquire_ns == 200 && early.submit_ns == 200);
-  assert(early.command_ns + early.swapchain_ns == early.acquire_ns);
-  assert(early.blit_ns + early.queue_submit_ns == early.submit_ns);
-  assert(s_test.flushed == 1 && s_test.producers == 1);
   ArSdlRenderBackend_EnablePresentTrace(&device, false);
   assert(ArSdlRenderBackend_LastPresentTrace(&device).submit_ns == 0);
   /* Repeated hidden/visible transitions always submit the terminal buffer.
@@ -122,47 +105,40 @@ int main(void) {
   for (unsigned frame = 0; frame < 512; ++frame) {
     memset(&s_test, 0, sizeof(s_test));
     s_test.no_swapchain = (frame & 1) != 0;
-    assert(PresentFrame(&device, (frame & 2) != 0));
+    assert(ArRenderDevice_Present(&device));
     assert(s_test.flushed == 1 && s_test.producers == 1 && s_test.acquired == 1);
     assert(s_test.submitted == 1 && s_test.cancelled == 0);
     assert(s_test.blitted == (s_test.no_swapchain ? 0u : 1u));
   }
-  for (unsigned prepared = 0; prepared < 2; ++prepared) {
+  memset(&s_test, 0, sizeof(s_test));
+  s_test.fail_flush = true;
+  assert(!ArRenderDevice_Present(&device));
+  assert(!s_test.producers && !s_test.acquired);
+  for (unsigned hidden = 0; hidden < 2; ++hidden) {
     memset(&s_test, 0, sizeof(s_test));
-    s_test.fail_flush = true;
-    assert(!PresentFrame(&device, prepared != 0));
-    assert(!s_test.producers && !s_test.acquired);
-    for (unsigned hidden = 0; hidden < 2; ++hidden) {
-      memset(&s_test, 0, sizeof(s_test));
-      s_test.no_swapchain = hidden != 0;
-      s_test.fail_submit = true;
-      assert(!PresentFrame(&device, prepared != 0));
-      assert(s_test.submitted == 1 && s_test.cancelled == 0);
-    }
+    s_test.no_swapchain = hidden != 0;
+    s_test.fail_submit = true;
+    assert(!ArRenderDevice_Present(&device));
+    assert(s_test.submitted == 1 && s_test.cancelled == 0);
+  }
+  memset(&s_test, 0, sizeof(s_test));
+  s_test.fail_acquire = true;
+  assert(!ArRenderDevice_Present(&device));
+  assert(s_test.cancelled == 1 && !s_test.submitted && !s_test.blitted);
+  for (unsigned failure = 0; failure < 4; ++failure) {
     memset(&s_test, 0, sizeof(s_test));
-    s_test.fail_acquire = true;
-    assert(!PresentFrame(&device, prepared != 0));
-    assert(s_test.cancelled == 1 && !s_test.submitted && !s_test.blitted);
-    for (unsigned failure = 0; failure < 4; ++failure) {
-      memset(&s_test, 0, sizeof(s_test));
-      s_test.wrong_target = failure == 0;
-      s_test.fail_producer = failure == 1;
-      s_test.no_source = failure == 2;
-      s_test.no_commands = failure == 3;
-      assert(!PresentFrame(&device, prepared != 0));
-      assert(!s_test.cancelled && !s_test.submitted && !s_test.blitted);
-      assert(s_test.acquired == (failure == 3 ? 1u : 0u));
-    }
+    s_test.wrong_target = failure == 0;
+    s_test.fail_producer = failure == 1;
+    s_test.no_source = failure == 2;
+    s_test.no_commands = failure == 3;
+    assert(!ArRenderDevice_Present(&device));
+    assert(!s_test.cancelled && !s_test.submitted && !s_test.blitted);
+    assert(s_test.acquired == (failure == 3 ? 1u : 0u));
   }
   memset(&s_test, 0, sizeof(s_test));
   backend.output_window = NULL; /* Externally bound legacy renderer. */
   assert(ArRenderDevice_Present(&device));
   assert(s_test.producers == 1 && !s_test.acquired && !s_test.submitted);
-  memset(&s_test, 0, sizeof(s_test));
-  assert(ArSdlRenderBackend_PreparePresent(&device));
-  assert(s_test.flushed == 1 && !s_test.producers && !s_test.acquired);
-  assert(ArSdlRenderBackend_PresentPrepared(&device));
-  assert(s_test.flushed == 1 && s_test.producers == 1 && !s_test.acquired);
   puts("render_sdl_present_test: PASS");
   return 0;
 }

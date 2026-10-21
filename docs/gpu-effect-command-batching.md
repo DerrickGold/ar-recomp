@@ -1,7 +1,7 @@
 # GPU effect command batching
 
-The opt-in resident action renderer groups consecutive effect packets into one SDL GPU
-command buffer. Scenery illumination, actor illumination, attached layer effects,
+The resident action renderer groups consecutive effect packets into one SDL GPU
+command buffer (default on for Metal and Vulkan since October 20, 2026). Scenery illumination, actor illumination, attached layer effects,
 and final actor/atmosphere overlays each define their own scope. This changes
 submission granularity, not geometry, shaders, blend order, or interpolation.
 
@@ -30,9 +30,10 @@ compositor has a null batching callback.
 
 ## Diagnostics and validation
 
-`AR_GPU_EFFECT_BATCHING=1` enables the batching prototype for A/B testing;
-unset or `0` retains immediate per-packet submission. This is an initialization-time diagnostic
-override, not a saved setting. `[gpu-effect-commands]` reports draws, submissions,
+`AR_GPU_EFFECT_BATCHING` follows `gpu_prototype_policy.h`: unset, empty or
+`auto` batches on Metal and Vulkan and keeps immediate submission on D3D12;
+`1` forces batching and `0` forces immediate per-packet submission for A/B
+testing. This is an initialization-time override, not a saved setting. `[gpu-effect-commands]` reports draws, submissions,
 and largest batch at shutdown/reset. These are effect/skybox submission counts,
 not total renderer command counts or GPU execution time.
 
@@ -110,3 +111,23 @@ before changing presentation scheduling or extending scopes across targets.
 Raster/compute pass counts and math remain unchanged in this prototype; GPU
 event timings are still needed before attributing any cost to a particular
 shader. Ray tracing remains deferred.
+
+## October 20 presentation-feedback follow-up
+
+The [new Deck validation](steam-deck-prototype-validation.md) changes the
+interpretation of that host-p99 objection. Batching again saves about 0.30 ms
+of owner CPU time. Four additional game replays with Wayland presentation
+feedback all retain an 11.111 ms display p99; neither enabled run misses a
+refresh in its selected window. One unbatched repeat has two ~22.22 ms gaps
+and two discarded submissions, retained in the analysis. A clear-only Vulkan
+control also has a 12.102 ms host p99 while displaying every 11.111 ms.
+
+The small host-p99 excess is therefore insufficient evidence of a display
+pacing regression. Batching is now a strong Vulkan default-promotion candidate,
+with existing Metal/Vulkan pixel validation and repeated CPU savings. This
+does not establish a rare-hitch cure or D3D12 runtime behavior.
+
+**Promoted October 20, 2026** for Metal and Vulkan after the 25-minute Deck
+arms in [the Deck review](frame-pacing-deck-review-20261020.md) showed no
+display miss attributable to the game in either mode; D3D12 keeps immediate
+submission until a Windows runtime pixel comparison exists.

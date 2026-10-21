@@ -12,6 +12,7 @@ typedef struct ArGpuBlockMotion {
   SDL_GPUSampler *sampler;
   SDL_GPUTexture *output, *attributes; /* Same winner/warp, companion material data. */
   unsigned width, height;
+  bool stationary_reject; /* Opt-in exact confidence-bound shortcut. */
   float extents[4][4]; /* width, height, source atlas slot, analyze flag */
 } ArGpuBlockMotion;
 

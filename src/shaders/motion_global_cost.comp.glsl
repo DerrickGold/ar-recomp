@@ -16,7 +16,9 @@ void main() {
     size.x = int(extents.planes[plane].x);
     ivec2 motion = ivec2(int(candidate % 15u) - 7, int(candidate / 15u) - 7);
     uint bound = 0xffffffffu;
-    for (uint i = 0u; i < 9u; ++i) bound = min(bound, input_bounds.costs[direction * 9u + i]);
+    for (uint i = 0u; i < 9u; ++i) bound = min(bound, input_bounds.costs[direction * 10u + i]);
+    if (extents.planes[plane].w != 0.0)
+        bound = min(bound, input_bounds.costs[direction * 10u + 9u]);
     uint penalty = uint(abs(motion.x) + abs(motion.y)) * 12u;
     if (penalty > bound) {
         if (lane == 0u) output_costs.costs[direction * 225u + candidate] = 0xffffffffu;

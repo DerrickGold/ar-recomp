@@ -42,9 +42,9 @@ class PipelinePerformanceTest(unittest.TestCase):
         # scrolling full-add path. Validate the gate before accepting captures.
         args = SimpleNamespace(frames=1500, variant='gpu', full_add='default',
             bg_decode='fragment', handoff='0', direct_layers='0', phase='source', effect_projection='reference',
-            prepare_worker=False, start=1000, end=1001, every=1, room='0501',
+            start=1000, end=1001, every=1, room='0501',
             minimum_camera_travel=[100, 40], require_full_add=True)
-        provenance = dict(command=['binary', 'ar.sfc'], inputs={}, binary_sha256='hash')
+        provenance = dict(command=['binary', 'ar.sfc'], inputs={}, binary_sha256='hash', env={})
         images = {'shot_1000.ppm': 'image0', 'shot_1001.ppm': 'image1'}
         def log(x, y, rows, owned):
             return (f'[gpu-bg-capture] frames=300 rejected-sources=0 mismatch-frames=0 mask=3 owned={owned} full-add-rows={rows}\n'

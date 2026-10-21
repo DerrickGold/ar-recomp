@@ -53,6 +53,7 @@ typedef struct DioramaFrameGenerationKey {
   uint32_t additive_plane_mask;
   int width;
   int height;
+  int camera_x[2], camera_y[2];
   uint8_t bg_mode;
   uint8_t map_group;
   uint8_t map_number;
@@ -130,10 +131,12 @@ static bool NativeHandoff(bool packing) {
   return packing ? s_policy.pack : s_policy.unpack;
 }
 
-/* One immutable native job. Renderer handles and all frame metadata are
- * resolved on main; the worker never reads a FrameSlot, settings or WRAM.
- * Scratch/resources remain borrowed until FinishCapture publishes submission.
- * GPU lifetime is governed by ordered submissions, not semaphore completion. */
+/* One immutable native job, prepared inline on the owner thread. Renderer
+ * handles and all frame metadata are resolved before it runs. Scratch and
+ * resources remain borrowed until FinishCapture publishes the submission; GPU
+ * lifetime is governed by ordered submissions. The off-thread preparation
+ * worker prototype was removed in October 2026: it showed no pacing win on the
+ * Deck or Mac and produced the only observed multi-frame preparation stall. */
 typedef struct NativeCaptureJob {
   ArGpuGlobalMotion motion;
   ArGpuBlockMotion blocks;
@@ -149,10 +152,8 @@ typedef struct NativeCaptureJob {
 } NativeCaptureJob;
 
 static struct {
-  SDL_Thread *thread;
-  SDL_Semaphore *start, *done;
   NativeCaptureJob job;
-  bool attempted, pending, stop;
+  bool attempted, pending;
   FILE *trace;
   unsigned jobs;
 } s_capture;
@@ -198,21 +199,9 @@ finished:
   job->submitted_ns = SDL_GetTicksNS();
 }
 
-static int SDLCALL NativeCaptureWorker(void *unused) {
-  (void)unused;
-  for (;;) {
-    SDL_WaitSemaphore(s_capture.start);
-    if (s_capture.stop) break;
-    RunNativeCapture(&s_capture.job);
-    SDL_SignalSemaphore(s_capture.done);
-  }
-  return 0;
-}
-
 void DioramaFrameGeneration_FinishCapture(void) {
   if (!s_capture.pending) return;
   const uint64_t start = SDL_GetTicksNS();
-  if (s_capture.thread) SDL_WaitSemaphore(s_capture.done);
   const uint64_t complete = SDL_GetTicksNS();
   const NativeCaptureJob *job = &s_capture.job;
   s_gpu.endpoint = job->ok;
@@ -224,8 +213,8 @@ void DioramaFrameGeneration_FinishCapture(void) {
     SDL_Log("[gpu-frame-generation] native capture failed; retaining reference until renderer reset");
   }
   s_gpu.projection_fence = job->fence;
-  if (s_capture.trace) fprintf(s_capture.trace, "%u,%d,%llu,%llu,%llu,%llu,%llu,%u,%d\n",
-      ++s_capture.jobs, s_capture.thread != NULL,
+  if (s_capture.trace) fprintf(s_capture.trace, "%u,%llu,%llu,%llu,%llu,%llu,%u,%d\n",
+      ++s_capture.jobs,
       (unsigned long long)job->queued_ns, (unsigned long long)job->started_ns,
       (unsigned long long)job->submitted_ns, (unsigned long long)start,
       (unsigned long long)complete, job->mask, job->ok);
@@ -234,13 +223,6 @@ void DioramaFrameGeneration_FinishCapture(void) {
 
 static void StopNativeCapture(void) {
   DioramaFrameGeneration_FinishCapture();
-  if (s_capture.thread) {
-    s_capture.stop = true;
-    SDL_SignalSemaphore(s_capture.start);
-    SDL_WaitThread(s_capture.thread, NULL);
-  }
-  if (s_capture.start) SDL_DestroySemaphore(s_capture.start);
-  if (s_capture.done) SDL_DestroySemaphore(s_capture.done);
   if (s_capture.trace) fclose(s_capture.trace);
   memset(&s_capture, 0, sizeof(s_capture));
 }
@@ -254,17 +236,9 @@ static void StartNativeCapture(void) {
     if (s_capture.trace) {
       setvbuf(s_capture.trace, NULL, _IOFBF, 65536);
       if (ftell(s_capture.trace) == 0)
-        fprintf(s_capture.trace, "job,worker,queued_ns,started_ns,submitted_ns,join_ns,joined_ns,mask,ok\n");
+        fprintf(s_capture.trace, "job,queued_ns,started_ns,submitted_ns,join_ns,joined_ns,mask,ok\n");
     }
   }
-  const char *worker = getenv("AR_GPU_PREPARE_WORKER");
-  if (!worker || strcmp(worker, "1")) return;
-  s_capture.start = SDL_CreateSemaphore(0);
-  s_capture.done = SDL_CreateSemaphore(0);
-  if (s_capture.start && s_capture.done)
-    s_capture.thread = SDL_CreateThread(NativeCaptureWorker, "GPU preparation", NULL);
-  if (!s_capture.thread) SDL_Log("[gpu-prepare-worker] unavailable; using inline preparation");
-  else SDL_Log("[gpu-prepare-worker] native packing/analysis worker active");
 }
 
 static void DestroyAtlasWrappers(void) {
@@ -580,11 +554,8 @@ static void CaptureOwnedNative(ArRenderDevice *device, bool had_previous, int he
   job.queued_ns = SDL_GetTicksNS();
   s_capture.job = job;
   s_capture.pending = true;
-  if (s_capture.thread) SDL_SignalSemaphore(s_capture.start);
-  else {
-    RunNativeCapture(&s_capture.job);
-    DioramaFrameGeneration_FinishCapture();
-  }
+  RunNativeCapture(&s_capture.job);
+  DioramaFrameGeneration_FinishCapture();
 }
 
 /* Projection is useful without interpolation too. Initialize only its own
@@ -1181,6 +1152,8 @@ void DioramaFrameGeneration_CaptureWithSkybox(
     .additive_plane_mask = slot->diorama_plane_additive_mask,
     .width = width,
     .height = height,
+    .camera_x = {slot->bg1_camera_x, slot->bg2_camera_x},
+    .camera_y = {slot->bg1_camera_y, slot->bg2_camera_y},
     .bg_mode = slot->bg_mode,
     .map_group = slot->diorama_map_group,
     .map_number = slot->diorama_map_number,
@@ -1361,6 +1334,16 @@ void DioramaFrameGeneration_CaptureWithSkybox(
   }
   if (SDL_GetRenderTarget(renderer) != entry_target)
     (void)SDL_SetRenderTarget(renderer, entry_target);
+  /* The immutable pair already carries both camera positions. These hints
+   * only tighten pixel-derived search bounds; raster effects, animation and
+   * differing skybox policies still choose their own motion from the pixels.
+   * Capture regions must match before a plane can be analyzed. */
+  for (unsigned i = 0; i < 8; ++i) {
+    const unsigned layer = i < 3 ? 0 : 1;
+    ArGpuGlobalMotion_SetHint(&s_gpu.motion, i,
+        continuous && i < 7 ? s_last_key.camera_x[layer] - current.camera_x[layer] : 0,
+        continuous && i < 7 ? s_last_key.camera_y[layer] - current.camera_y[layer] : 0);
+  }
   CaptureGpu(device, width, height, continuous, analyzed_bg_mask, source_textures);
   s_pair_timestamp_ns = s_pair_mask ? slot->timestamp_ns : 0;
   s_last_key = current;

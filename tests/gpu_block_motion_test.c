@@ -17,7 +17,7 @@ static void Fill(uint32_t *pixels, int h, unsigned seed, bool current) {
   for (unsigned plane = 0; plane < N; ++plane) {
     int dx = current ? (int)((seed + plane) % 7) - 3 : 0,
         dy = current ? (int)((seed * 3 + plane) % 5) - 2 : 0;
-    if (!seed)
+    if (!seed || seed == 10)
       dx = dy = 0;
     for (int y = 0; y < h; ++y)
       for (int x = 0; x < W; ++x) {
@@ -26,10 +26,21 @@ static void Fill(uint32_t *pixels, int h, unsigned seed, bool current) {
                       (sx > 130 && sx < 158 && sy > h / 2 && sy < h / 2 + 19);
         if (plane == 3)
           filled = (sx % 123 < 16 && sy % 57 < 17);
+        if (seed >= 10)
+          filled = seed != 12 && ((sx >= 23 && sx < 63 && sy >= 50 && sy < 90) ||
+              (sx > 130 && sx < 158 && sy > h / 2 && sy < h / 2 + 19));
         if (seed == 4 && current && plane == 2)
           filled = false;
         if (filled && sx >= 0 && sx < W && sy >= 0 && sy < h)
           pixels[((size_t)plane * h + y) * W + x] = Pattern(sx, sy);
+        // Occupied stationary columns beside moving art/empty halos. Include
+        // RGB with zero alpha and costs immediately around the rejection bound.
+        if (seed >= 6 && seed <= 9 && (x / 16) % 3 == 0) {
+          uint32_t color = plane == 2 ? 0x00304020u : 0xff304020u;
+          if (current && seed > 6 && x % 16 == 0 && y % 16 == 0)
+            color += seed + 56; // sampled SAD 63, 64 or 65 for the whole block
+          pixels[((size_t)plane * h + y) * W + x] = color;
+        }
       }
   }
 }
@@ -41,12 +52,55 @@ static bool Wait(SDL_GPUDevice *gpu, SDL_GPUCommandBuffer *cmd) {
   SDL_ReleaseGPUFence(gpu, f);
   return ok;
 }
-int main(void) {
+// This measures encoding through completion of batched analysis, not GPU
+// timestamps or game cadence. Uploads, readbacks and shader compilation are
+// outside the timed region. ABBA order exposes drift and extra-check overhead.
+static int CompareTimes(const void *a, const void *b) {
+  const uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+  return (x > y) - (x < y);
+}
+static void Benchmark(SDL_GPUDevice *gpu, ArGpuBlockMotion *p, SDL_GPUTexture *previous,
+    SDL_GPUTexture *current, unsigned seed) {
+  enum { Batch = 8, Samples = 64, Warmup = 8 };
+  const bool modes[] = {false, true, true, false};
+  for (unsigned round = 0; round < 4; ++round) {
+    p->stationary_reject = modes[round];
+    uint64_t total = 0, encode = 0;
+    uint64_t elapsed[Samples];
+    for (unsigned sample = 0; sample < Samples + Warmup; ++sample) {
+      uint64_t start = SDL_GetTicksNS();
+      SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(gpu);
+      assert(cmd);
+      for (unsigned frame = 0; frame < Batch; ++frame)
+        assert(ArGpuBlockMotion_Analyze(p, cmd, previous, current));
+      SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+      uint64_t submitted = SDL_GetTicksNS();
+      assert(fence && SDL_WaitForGPUFences(gpu, true, &fence, 1));
+      SDL_ReleaseGPUFence(gpu, fence);
+      uint64_t end = SDL_GetTicksNS();
+      if (sample >= Warmup) {
+        elapsed[sample - Warmup] = end - start;
+        total += end - start;
+        encode += submitted - start;
+      }
+    }
+    qsort(elapsed, Samples, sizeof(elapsed[0]), CompareTimes);
+    printf("actor-analysis-benchmark reject=%u round=%u seed=%u size=%ux%u frames=%u "
+        "completion-ms=%.6f encode-submit-ms=%.6f batch-p50-ms=%.6f batch-p95-ms=%.6f\n",
+        modes[round], round, seed, p->width, p->height, Samples * Batch,
+        (double)total / (Samples * Batch * 1e6), (double)encode / (Samples * Batch * 1e6),
+        (double)elapsed[Samples / 2] / (Batch * 1e6),
+        (double)elapsed[(Samples - 1) * 95 / 100] / (Batch * 1e6));
+    fflush(stdout);
+  }
+}
+int main(int argc, char **argv) {
+  const bool benchmark = argc == 2 && strcmp(argv[1], "--benchmark") == 0;
   if (!SDL_Init(SDL_INIT_VIDEO))
     return 77;
   SDL_GPUDevice *gpu = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL |
                                                SDL_GPU_SHADERFORMAT_MSL,
-                                           true, NULL);
+                                           !benchmark, NULL);
   if (!gpu) {
     SDL_Quit();
     return 77;
@@ -76,7 +130,9 @@ int main(void) {
     assert(upload && download);
     uint32_t *a = malloc(bytes), *b = malloc(bytes);
     assert(a && b);
-    for (unsigned seed = 0; seed < 6; ++seed) {
+    for (unsigned seed = 0; seed < 13; ++seed) {
+      if (benchmark && (geometry != 2 || (seed != 0 && seed != 1 && seed != 6 && seed < 10)))
+        continue;
       Fill(a, (int)height, seed, false);
       Fill(b, (int)height, seed, true);
       for (unsigned y = 0; y < height * N; ++y)
@@ -107,16 +163,33 @@ int main(void) {
         p.extents[plane][2] = (float)plane;
         p.extents[plane][3] = seed == 5 && plane == 3 ? 0 : 1;
       }
+      if (benchmark) {
+        assert(Wait(gpu, cmd));
+        Benchmark(gpu, &p, previous, current, seed);
+        continue;
+      }
       assert(ArGpuBlockMotion_Analyze(&p, cmd, previous, current));
       copy = SDL_BeginGPUCopyPass(cmd);
       assert(copy);
       const SDL_GPUBufferRegion field = {.buffer = p.motion, .size = (4 * B + 4) * 16};
       const SDL_GPUTransferBufferLocation output = {.transfer_buffer = download};
       SDL_DownloadFromGPUBuffer(copy, &field, &output);
+      if (seed >= 6 && seed <= 9)
+        for (unsigned direction = 0; direction < 8; ++direction) {
+          const SDL_GPUBufferRegion header = {.buffer = p.costs,
+              .offset = direction * B * 226 * 4, .size = 4};
+          const SDL_GPUTransferBufferLocation status = {.transfer_buffer = download,
+              .offset = field.size + direction * 4};
+          SDL_DownloadFromGPUBuffer(copy, &header, &status);
+        }
       SDL_EndGPUCopyPass(copy);
       assert(Wait(gpu, cmd));
       const int32_t *got = SDL_MapGPUTransferBuffer(gpu, download, false);
       assert(got);
+      if (seed >= 6 && seed <= 9)
+        for (unsigned direction = 0; direction < 8; ++direction)
+          assert(got[field.size / 4 + direction] ==
+              (p.stationary_reject && seed <= 7 ? 2 : 1));
       PresentationFrameGenerationMotionField fields[4] = {0};
       for (unsigned plane = 0; plane < 4; ++plane) {
         PresentationFrameGenerationMotionField expected = {0};
@@ -241,6 +314,7 @@ int main(void) {
   ArGpuBlockMotion_Destroy(&p);
   SDL_DestroyGPUDevice(gpu);
   SDL_Quit();
-  puts("GPU actor motion: CPU fields, fractional meshes, companion alignment and endpoints passed");
+  puts(benchmark ? "GPU actor motion benchmark complete" :
+      "GPU actor motion: CPU fields, fractional meshes, companion alignment and endpoints passed");
   return 0;
 }

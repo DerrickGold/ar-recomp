@@ -8,7 +8,9 @@
  * shader is created from source, Vulkan and D3D12 when the pipeline is. One
  * slow or failing compile on the frame that first needs it shows up only as an
  * unexplained stall (an Adreno driver spent 11 s on one compute pipeline), so
- * every creation is reported here, from any backend.
+ * game-owned creations are reported here, from any backend. SDL also owns
+ * internal drawing/blit pipelines: their preparation is reported as a group;
+ * native API tracing is needed to count those individual creations.
  *
  * During boot preparation only builds of kGpuCompileLogBootThresholdMs or
  * more are printed, followed by one summary line; drivers that cache (Metal)

@@ -1,4 +1,5 @@
 #include "platform/sdl/gpu_global_motion_sdl.h"
+#include "platform/sdl/gpu_prototype_policy.h"
 #include "platform/sdl/gpu_shader_blob.h"
 #include "shaders/motion_global_bound_comp.h"
 #include "shaders/motion_global_cost_comp.h"
@@ -16,6 +17,8 @@ _Static_assert(kPresentationFrameGenerationSearchRadius == 7 &&
 #define BLOBS(name) {k##name##MSL, k##name##MSLSize, k##name##SPV, k##name##SPVSize, k##name##DXIL, k##name##DXILSize}
 bool ArGpuGlobalMotion_Init(ArGpuGlobalMotion *p, SDL_GPUDevice *device) {
   *p = (ArGpuGlobalMotion){.device = device, .plane_count = 6};
+  p->camera_bound = ArGpuPrototype_Enabled(device, "AR_GPU_CAMERA_MOTION_BOUND");
+  if (p->camera_bound) SDL_Log("[gpu-global-motion] camera-guided bound enabled");
   const GpuShaderBlobs bound = BLOBS(MotionGlobalBoundComp), cost = BLOBS(MotionGlobalCostComp), refine = BLOBS(MotionGlobalRefineComp),
       validate = BLOBS(MotionGlobalValidateComp), warp = BLOBS(MotionGlobalWarpComp);
   p->bound = GpuShaderBlob_CreateCompute(device, &bound, "global motion bound",
@@ -31,7 +34,7 @@ bool ArGpuGlobalMotion_Init(ArGpuGlobalMotion *p, SDL_GPUDevice *device) {
     .size = 16 * 225 * sizeof(uint32_t)};
   SDL_GPUBufferCreateInfo buffer = cost_buffer;
   p->costs = SDL_CreateGPUBuffer(device, &buffer);
-  buffer.size = 16 * 9 * sizeof(uint32_t); p->bounds = SDL_CreateGPUBuffer(device, &buffer);
+  buffer.size = 16 * 10 * sizeof(uint32_t); p->bounds = SDL_CreateGPUBuffer(device, &buffer);
   buffer.size = 16 * 4 * sizeof(int32_t); p->directions = SDL_CreateGPUBuffer(device, &buffer);
   buffer.size = 8 * sizeof(ArGpuGlobalMotionResult);
   buffer.usage |= SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
@@ -70,11 +73,19 @@ bool ArGpuGlobalMotion_Resize(ArGpuGlobalMotion *p, unsigned width, unsigned hei
   p->output = NULL; p->width = width; p->height = height;
   p->configured_plane_count = p->plane_count;
   for (unsigned i = 0; i < 8; ++i) {
+    p->bound_hint[i] = 0;
     p->extents[i][2] = (float)height;
     p->extents[i][0] = (float)width;
     p->extents[i][1] = i < p->plane_count ? 1.0f : 0.0f;
   }
   return true;
+}
+void ArGpuGlobalMotion_SetHint(ArGpuGlobalMotion *p, unsigned plane, int dx, int dy) {
+  if (plane >= 8) return;
+  dx = SDL_clamp(dx, -7, 7);
+  dy = SDL_clamp(dy, -7, 7);
+  p->bound_hint[plane] = dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1
+      ? 0u : (unsigned)(1 + (dy + 7) * 15 + dx + 7);
 }
 bool ArGpuGlobalMotion_EnsureOutput(ArGpuGlobalMotion *p) {
   if (p->output) return true;
@@ -93,14 +104,22 @@ static void BindPair(ArGpuGlobalMotion *p, SDL_GPUComputePass *pass, SDL_GPUText
   SDL_BindGPUComputeSamplers(pass, 0, bindings, 2);
 }
 bool ArGpuGlobalMotion_Analyze(ArGpuGlobalMotion *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *previous, SDL_GPUTexture *current) {
-  SDL_PushGPUComputeUniformData(cmd, 0, p->extents, sizeof(p->extents));
+  float extents[8][4];
+  SDL_memcpy(extents, p->extents, sizeof(extents));
+  bool hinted = false;
+  for (unsigned i = 0; i < 8; ++i) {
+    extents[i][3] = p->camera_bound && extents[i][1] != 0.0f
+        ? (float)p->bound_hint[i] : 0.0f;
+    hinted |= extents[i][3] != 0.0f;
+  }
+  SDL_PushGPUComputeUniformData(cmd, 0, extents, sizeof(extents));
   const SDL_GPUStorageBufferReadWriteBinding bounds = {.buffer = p->bounds, .cycle = true};
   const SDL_GPUStorageBufferReadWriteBinding outputs[] = {{.buffer = p->costs, .cycle = true},
       {.buffer = p->directions, .cycle = true}, {.buffer = p->motion, .cycle = true}};
   SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(cmd, NULL, 0, &bounds, 1);
   if (!pass) return false;
   SDL_BindGPUComputePipeline(pass, p->bound); BindPair(p, pass, previous, current);
-  SDL_DispatchGPUCompute(pass, 9, 16, 1); SDL_EndGPUComputePass(pass);
+  SDL_DispatchGPUCompute(pass, hinted ? 10 : 9, 16, 1); SDL_EndGPUComputePass(pass);
   pass = SDL_BeginGPUComputePass(cmd, NULL, 0, &outputs[0], 1);
   if (!pass) return false;
   SDL_BindGPUComputePipeline(pass, p->cost); BindPair(p, pass, previous, current);

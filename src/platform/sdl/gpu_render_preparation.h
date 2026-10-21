@@ -15,7 +15,8 @@ static inline bool GpuRenderPreparation_WarmTarget(ArRenderDevice *device,
   ArRenderTexture source = {0}, target = {0};
   ArRenderTextureDesc desc = {1, 1, kArRenderPixelFormat_Argb8888,
       kArRenderTextureUsage_Static, kArRenderFilter_Linear, kArRenderBlendMode_Alpha};
-  const uint32_t pixel = UINT32_C(0xffffffff);
+  /* Zero also represents an empty packet for the background decoder. */
+  const uint32_t pixel = 0;
   bool ok = renderer && shader && ArRenderDevice_CreateTexture(device, &desc, &source) &&
       ArRenderDevice_UpdateTexture(device, source, NULL, &pixel, sizeof(pixel));
   desc.width = desc.height = 8;
@@ -30,11 +31,10 @@ static inline bool GpuRenderPreparation_WarmTarget(ArRenderDevice *device,
     ok = ArRenderDevice_Clear(device, (ArRenderColorF){0, 0, 0, 0}) &&
         SDL_SetGPURenderStateFragmentUniforms(shader, 0, uniforms, uniform_bytes) &&
         SDL_SetGPURenderState(renderer, shader);
-    const ArRenderBlendMode blends[] = {kArRenderBlendMode_Opaque,
-        kArRenderBlendMode_Alpha, kArRenderBlendMode_Add,
-        kArRenderBlendMode_AlphaPremultiplied};
-    for (size_t i = 0; ok && i < sizeof(blends) / sizeof(blends[0]); ++i) {
-      const ArRenderDrawState state = {.flags = kArRenderDrawState_Blend, .blend = blends[i]};
+    /* SDL keys its cached pipelines by shader, target format and blend mode.
+     * Light, mask and premultiplied-add draws must not compile on first use. */
+    for (int blend = kArRenderBlendMode_Opaque; ok && blend <= kArRenderBlendMode_Multiply; ++blend) {
+      const ArRenderDrawState state = {.flags = kArRenderDrawState_Blend, .blend = (ArRenderBlendMode)blend};
       if (geometry) {
         const ArRenderVertex2D vertices[] = {
           {{0, 0}, {1, 1, 1, 1}, {0, 0}}, {{8, 0}, {1, 1, 1, 1}, {1, 0}},
