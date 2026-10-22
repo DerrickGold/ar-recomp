@@ -19,6 +19,9 @@ bool ActRaiserStagePlacements_Fingerprint(const uint8_t previous[32],uint8_t out
  * capacity including the sentinel before any writes. No live-pool rewrite. */
 bool ActRaiser_StagePlacementsEntry(CpuState *cpu);
 RecompReturn ActRaiser_StagePlacements(CpuState *cpu);
+/* Later waves share bounded allocation and visible-survivor retention. US
+ * waves otherwise stay native; regional waves use the captured room program.
+ * Both keep the native gate/checkpoint timing and initializer/return frame. */
 bool ActRaiser_StageWaveEntry(CpuState *cpu);
 RecompReturn ActRaiser_StageWave(CpuState *cpu);
 #endif

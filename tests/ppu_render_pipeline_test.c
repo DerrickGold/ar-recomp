@@ -2372,7 +2372,7 @@ static void TestFullAddPaintedScenery(void) {
   /* Reordering export by source must preserve windows, both addend BGs,
    * absent priority surfaces, backing, and the unmodified authentic frame. */
   for (unsigned scenario = 0; scenario < 12; ++scenario)
-  for (unsigned reference = 0; reference < 4; ++reference)
+  for (unsigned reference = 0; reference < 5; ++reference)
   for (unsigned painted = 0; painted < 2; ++painted) {
     ppu_reset(ppu);
     memset(bg, 0, sizeof(bg)); memset(obj, 0, sizeof(obj));
@@ -2408,7 +2408,11 @@ static void TestFullAddPaintedScenery(void) {
     PpuSetExtraSpace(ppu, margin);
     CHECK(PpuBeginDrawingSized(ppu, (uint8_t *)fb, width * 4, kH,
         reference == 1 ? kPpuRenderFlags_ReferencePixelRenderer : 0));
-    if (reference < 2) CHECK(PpuBindAuthenticSurfaceSized(ppu, (uint8_t *)authentic, width * 4, kH));
+    /* Keeping authentic comparison available forces CPU full-add rows even
+     * when tile packets are requested. Their indexed export must include the
+     * late OBJ guard resolve, just like the GPU-owned full-add rows. */
+    if (reference < 2 || reference == 4)
+      CHECK(PpuBindAuthenticSurfaceSized(ppu, (uint8_t *)authentic, width * 4, kH));
     else CHECK(PpuBindAuthenticSurfaceSized(ppu, NULL, 0, 0));
     memset(packet, 0, sizeof(*packet));
     SrPpuBgPacket_Begin(packet, width, height);
@@ -2440,7 +2444,7 @@ static void TestFullAddPaintedScenery(void) {
     ppu_runLine(ppu, 0);
     for (int y = 0; y < height; ++y) ppu_runLine(ppu, y + 1);
     if (!painted) { memcpy(baseline, authentic, sizeof(baseline)); continue; }
-    if (reference < 2) CHECK(!memcmp(baseline, authentic, sizeof(baseline)));
+    if (reference < 2 || reference == 4) CHECK(!memcmp(baseline, authentic, sizeof(baseline)));
     for (int y = 0; y < height; ++y) for (int x = 376; x < 384; ++x)
       obj[2][y * width + origin + x] = 0xff00ff00u;
     if (reference >= 2 && scenario == 0) {
@@ -2453,7 +2457,8 @@ static void TestFullAddPaintedScenery(void) {
     /* Apron resolution requires all bands; scenario 4 deliberately leaves
      * them unbound to exercise ordinary capture's primary-band fallback. */
     CHECK(PpuResolveCaptureAprons(ppu) == (scenario != 4));
-    if (reference >= 2 && (scenario == 0 || scenario == 2 || scenario == 3 || scenario >= 6)) {
+    if (reference >= 2 && reference < 4 &&
+        (scenario == 0 || scenario == 2 || scenario == 3 || scenario >= 6)) {
       CHECK(SrPpuBgPacket_FullAddRow(packet, 0) != NULL);
       if (!SrPpuBgPacket_FullAddRow(packet, 0)) goto full_add_done;
 
@@ -2464,7 +2469,7 @@ static void TestFullAddPaintedScenery(void) {
       for (unsigned y = 0; y < height; ++y) for (unsigned x = 0; x < width; ++x) {
         if (!SrPpuBgPacket_Meta(packet, source, y)[0]) continue;
         uint32_t color = SrPpuBgPacket_Color(packet, source, band, x, y);
-        if (reference == 2) bg[source][band][y * width + x] = color;
+        if (reference == 2 || reference == 4) bg[source][band][y * width + x] = color;
         else if (color != bg[source][band][y * width + x]) {
           fprintf(stderr, "full-add packet scenario=%u bg=%u band=%u xy=%u,%u got=%08x expected=%08x\n",
               scenario, source, band, x, y, color, bg[source][band][y * width + x]);

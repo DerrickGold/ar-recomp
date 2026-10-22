@@ -2322,7 +2322,7 @@ bool PpuResolveCaptureApronsWithPacket(Ppu *ppu, SrPpuBgPacket *packet) {
     if (!apron) return true;
     const int width = (int)(ppu->overlayRenderPitch[base] / sizeof(uint32_t));
     const int origin = surface_origin_x(ppu, ppu->overlayRenderPitch[base]);
-    if (packet && packet->words[7] &&
+    if (packet &&
         (!SrPpuBgPacket_Valid(packet) || packet->words[0] != (unsigned)width ||
          packet->words[1] < (unsigned)overlay_row(bounds, bounds->y1))) return false;
     if (apron > kPpuObjApron || width > kPpuSurfaceWidth ||
@@ -2387,11 +2387,23 @@ bool PpuResolveCaptureApronsWithPacket(Ppu *ppu, SrPpuBgPacket *packet) {
             }
             if (!validate) continue;
         }
-        struct Candidate { uint32_t *pixels, *attributes; uint8_t source, rank; } candidates[10];
+        struct Candidate {
+            uint32_t *pixels, *attributes, *packet;
+            uint8_t source, rank, band;
+        } candidates[10];
         unsigned count = 0;
         for (unsigned i = 0; i < 3; ++i) {
             const unsigned source = sources[i];
             if (!capture_surface_bound(ppu, source)) continue;
+            /* Authentic comparison and unsupported full-add rows retain CPU
+             * rasterization, but still export indexed BG pixels to the GPU.
+             * Keep that export in sync with the late guard winner resolve.
+             * Tile-owned rows already use the full-add state updated above. */
+            uint32_t *packet_pixels = NULL;
+            if (packet && source < 2) {
+                const uint32_t *meta = SrPpuBgPacket_Meta(packet, source, (unsigned)row);
+                if (meta[0] == 1 && meta[7]) packet_pixels = packet->words + meta[7];
+            }
             for (unsigned band = 0; band < (source == kPpuOverlaySource_Obj ? 4u : 3u); ++band) {
                 uint8_t *pixels = band ? ppu->overlayRenderBands[source][band - 1] : ppu->overlayRenderBuffer[source];
                 if (!pixels) continue;
@@ -2403,7 +2415,8 @@ bool PpuResolveCaptureApronsWithPacket(Ppu *ppu, SrPpuBgPacket *packet) {
                 const unsigned priority = source == kPpuOverlaySource_Obj ? band : band == 1;
                 candidates[count++] = (struct Candidate){
                     (uint32_t *)(pixels + offset), attributes ? (uint32_t *)(attributes + offset) : NULL,
-                    (uint8_t)source, layer_rank_for_mode(line->rank_mode, source, priority),
+                    packet_pixels, (uint8_t)source,
+                    layer_rank_for_mode(line->rank_mode, source, priority), (uint8_t)band,
                 };
             }
         }
@@ -2422,7 +2435,11 @@ bool PpuResolveCaptureApronsWithPacket(Ppu *ppu, SrPpuBgPacket *packet) {
             const int first = origin + (side ? bounds->x1 : bounds->x0 - apron);
             const int end = first + apron;
             struct Main { uint32_t *pixels; bool math; } main[10];
-            struct Sub { uint32_t *pixels, *attributes; bool visible, clear; } sub[10];
+            struct Sub {
+                uint32_t *pixels, *attributes, *packet;
+                uint8_t band;
+                bool visible, clear;
+            } sub[10];
             unsigned main_count = 0, sub_count = 0;
             for (unsigned i = 0; i < count; ++i) {
                 const struct Candidate *c = &candidates[i];
@@ -2434,7 +2451,7 @@ bool PpuResolveCaptureApronsWithPacket(Ppu *ppu, SrPpuBgPacket *packet) {
                 if ((line->main[side] & bit) && c->rank > 1)
                     main[main_count++] = (struct Main){c->pixels, (line->math & bit) != 0};
                 if ((line->sub[side] | line->full_add) & bit)
-                    sub[sub_count++] = (struct Sub){c->pixels, c->attributes,
+                    sub[sub_count++] = (struct Sub){c->pixels, c->attributes, c->packet, c->band,
                         (line->sub[side] & bit) && c->rank > 1, (line->full_add & bit) != 0};
             }
             for (int x = first; x < end; ++x) {
@@ -2450,6 +2467,7 @@ bool PpuResolveCaptureApronsWithPacket(Ppu *ppu, SrPpuBgPacket *packet) {
                     if (c->clear) {
                         c->pixels[x] = 0;
                         if (c->attributes) c->attributes[x] = 0;
+                        if (c->packet) background_packet_write(c->packet, (unsigned)x, c->band, 0);
                     }
                 }
             }

@@ -1,6 +1,7 @@
 /* Exercise the production action scan/emitter with synthetic object records,
  * composition data and a runner metadata sink; no ROM or GPU is required. */
 #include "actraiser/actraiser_rtl.h"
+#include "actraiser/actraiser_action_visibility.h"
 #include "actraiser/actraiser_sprite_ownership.h"
 #include "actraiser/regional/actraiser_actor_art.h"
 #include "actraiser_game.h"
@@ -17,9 +18,9 @@ uint8 g_ram[kActRaiserWramSize];
 Settings g_settings;
 static SrPpuStateSnapshot s_ppu;
 static SrPpuObjPositionUpdate s_positions[128];
-static unsigned s_position_count, s_composition_reads;
+static unsigned s_position_count, s_composition_reads, s_query_count;
 static int s_runner;
-static bool s_sim_test;
+static bool s_sim_test, s_regional_art;
 static SrPpuObjPart s_sim_parts[4];
 static unsigned s_sim_part_count, s_sim_native_count, s_sim_clipped_count;
 static ActRaiserDisplayGeometry s_geometry;
@@ -52,6 +53,7 @@ void cpu_write16(CpuState *cpu, uint8 bank, uint16 at, uint16 v) {
 }
 static SrResult Query(SrRunnerHandle *runner, SrPpuStateSnapshot *out) {
   (void)runner;
+  ++s_query_count;
   *out = s_ppu;
   return SR_RESULT_OK;
 }
@@ -80,7 +82,7 @@ RecompReturn bank_00_923A_M0X0(CpuState *cpu) {
   cpu->S += 2;
   return RECOMP_RETURN_NORMAL;
 }
-bool ActRaiserActorArt_Active(void) { return false; }
+bool ActRaiserActorArt_Active(void) { return s_regional_art; }
 bool ActRaiserActorArt_Draw(uint16_t base, uint16_t composition, unsigned visual,
                             ActRaiserActorArtDraw *out) {
   (void)base;
@@ -177,9 +179,10 @@ SimEruptionFlightPlan SimEruptionScript_ResolveFlight(SimEruptionScriptFetch fet
 static void Reset(unsigned extend) {
   s_apron = (ActionApronGeometry){0};
   s_sim_test = false;
+  s_regional_art = false;
   s_sim_part_count = s_sim_native_count = s_sim_clipped_count = 0;
   memset(g_ram, 0, sizeof(g_ram));
-  s_composition_reads = 0;
+  s_composition_reads = s_query_count = 0;
   s_ppu = (SrPpuStateSnapshot){
       .struct_size = sizeof(s_ppu),
       .lifetime_generation = 1,
@@ -219,6 +222,102 @@ static void Scan(void) {
   assert(ActRaiser_ObjectVisibilityScanWide(&cpu) == RECOMP_RETURN_NORMAL);
   assert(cpu.S == 0x201);
 }
+
+static void TestWaveRetentionWindow(void) {
+  Reset(64);
+  s_ppu.margin_left = s_ppu.margin_right = 120;
+  s_apron.apron = 32;
+  Write(kActRaiserWram_Bg1CameraX, 512);
+  CpuState cpu = {.S = 0x1ff, .ram = g_ram};
+  /* Match object drawing at each edge, including an origin just outside the
+   * window whose extent is still inside. OAM/activation must remain untouched. */
+  static const struct { int x, y; bool visible; } cases[] = {
+      {0, 0, true}, {-160, 0, true}, {-161, 0, false},
+      {407, 0, true}, {408, 0, false}, {0, -72, true},
+      {0, -73, false}, {0, 287, true}, {0, 288, false},
+  };
+  enum { kCases = sizeof(cases) / sizeof(cases[0]) };
+  uint16_t objects[kCases], expected[kCases];
+  unsigned expected_count = 0;
+  for (unsigned i = 0; i < kCases; ++i) {
+    const unsigned obj = Object(i, cases[i].y, 1, 1);
+    objects[i] = (uint16_t)obj;
+    Write(obj + kActRaiserActionObject_WorldX, 512 + cases[i].x);
+    Write(obj, 0x0400); /* visibility must not use the native activation bit */
+    if (cases[i].visible) expected[expected_count++] = (uint16_t)obj;
+  }
+  const CpuState before = cpu;
+  assert(ActRaiser_FilterVisibleWaveObjects(&cpu, objects, kCases) == expected_count);
+  assert(!memcmp(objects, expected, expected_count * sizeof(objects[0])));
+  assert(!memcmp(&before, &cpu, sizeof(cpu)));
+  for (unsigned i = 0; i < kCases; ++i)
+    assert(Read(kActRaiserWram_ActionObjectTable + i * kActRaiserActionObjectStride) == 0x0400);
+  assert(s_query_count == 1 && !s_position_count && !s_composition_reads);
+  /* Empty/disabled batches do not query the renderer. Auto still enables
+   * extended drawing independently of the retained manual preference. */
+  assert(!ActRaiser_FilterVisibleWaveObjects(&cpu, NULL, 0));
+  g_settings.ws_margin_objects = false;
+  assert(!ActRaiser_FilterVisibleWaveObjects(&cpu, objects, expected_count));
+  assert(s_query_count == 1);
+  g_settings.extended_aspect = kScreenAspect_Auto;
+  assert(ActRaiser_FilterVisibleWaveObjects(&cpu, objects, expected_count) == expected_count);
+  assert(s_query_count == 2);
+}
+
+static void TestPharaohPlaceholder(void) {
+  const uint16_t rooms[] = {0x0603, 0x0407};
+  const uint16_t handlers[] = {0xC1AE, 0xC1B1, 0xC1CF, 0xF706};
+  for (unsigned room = 0; room < 2; ++room) {
+    for (unsigned handler = 0; handler < 4; ++handler) {
+      if (!room && handler == 3) continue;
+      for (unsigned coverage = 0; coverage < 3; ++coverage) {
+        Reset(64);
+        Write(kActRaiserWram_MapGroup, rooms[room]);
+        const unsigned obj = Object(0, coverage ? 40 : -40, 2, 0x0078);
+        if (coverage == 2) {
+          s_ppu.margin_left = s_ppu.margin_right = 120;
+          s_apron = (ActionApronGeometry){120, 64};
+          Write(obj + kActRaiserActionObject_WorldX, 400);
+        }
+        Write(obj + kActRaiserActionObject_AnimationAddress, 0x5000);
+        Write(obj + kActRaiserActionObject_SourceDescriptor, room ? 0xF6FA : 0xC1A2);
+        Write(obj + kActRaiserActionObject_Handler, handlers[handler]);
+        Write(obj + kActRaiserActionObject_Flags,
+              coverage == 1 ? 0 : kActRaiserObjectFlag_OutsideActivation);
+        uint8_t before[kActRaiserActionObjectStride];
+        memcpy(before, g_ram + obj, sizeof(before));
+        /* Regional artwork must not turn the hidden native placeholder into
+         * a donor sprite. No picture/CHR read is necessary for either path. */
+        s_regional_art = true;
+        Scan();
+        assert(s_position_count == 0 && ActionApron_Count() == 0);
+        assert(Read(kActRaiserOamShadow) == 0xe080);
+        assert(s_composition_reads == 0);
+        assert(!memcmp(before, g_ram + obj, sizeof(before)));
+
+        s_regional_art = false;
+        /* The native trigger installs the entrance animation. The same slot
+         * must become drawable immediately, including in the extra rows. */
+        Write(obj + kActRaiserActionObject_Handler, 0x8661);
+        Write(obj + kActRaiserActionObject_AnimationState, 7);
+        Write(obj + kActRaiserActionObject_Visual, 14);
+        Scan();
+        assert(s_position_count == (coverage == 2 ? 0u : 2u));
+        assert(ActionApron_Count() == (coverage == 2 ? 2 : 0));
+
+        /* Pharaoh's arrows share its source and picture 0, but have their
+         * own handler. Never hide a real attack as a startup placeholder. */
+        Write(obj + kActRaiserActionObject_Handler, 0xC2D5);
+        Write(obj + kActRaiserActionObject_AnimationState, 0);
+        Write(obj + kActRaiserActionObject_Visual, 0);
+        Scan();
+        assert(s_position_count == (coverage == 2 ? 0u : 2u));
+        assert(ActionApron_Count() == (coverage == 2 ? 2 : 0));
+      }
+    }
+  }
+}
+
 static void TestReceiverOwnership(void) {
   /* The real emitter must retain non-attacking enemies/props in both native
    * OAM and the extended apron. These are flags observed in Kassandora. */
@@ -280,13 +379,43 @@ static void TestCaptureGuardParts(void) {
   Reset(0);
   s_ppu.margin_left = s_ppu.margin_right = 120;
   s_apron = (ActionApronGeometry){120,64};
-  Object(0,40,127,1);
-  const unsigned last = Object(1,40,1,2);
+  Object(8,40,127,1); /* Player fills the preceding slots. */
+  const unsigned last = Object(9,40,1,2);
   Write(last+kActRaiserActionObject_WorldX,370);
-  g_ram[0x4805] = 1;
+  g_ram[0x8805] = 1;
   Scan();
   assert(s_position_count == 128 && ActionApron_Count() == 1);
   assert(ActionApron_Parts()[0].x == 370 && ActionApron_Parts()[0].tile_attr == 2);
+  ActRaiserSpriteOwnership_Upload(1, 1, g_ram + kActRaiserOamShadow);
+  const ActRaiserSpriteOwnership owner = ActRaiserSpriteOwnership_Presented(1, 1);
+  assert(owner.valid && owner.slots[126] == kActRaiserSprite_Player);
+  assert(owner.slots[127] == kActRaiserSprite_Enemy);
+  const ActionApronReceiver receiver = ActionApron_Receivers()[0];
+  assert(receiver.role == kActRaiserSprite_Enemy && receiver.x == 370 && receiver.y == 168);
+}
+static void TestGuardReceiverOverflow(void) {
+  /* Guard-only parts have their own finite ownership channel. Overflow must
+   * neither wrap into a previous actor's lighting nor consume native OAM. */
+  Reset(64);
+  s_ppu.margin_left = s_ppu.margin_right = 120;
+  s_apron = (ActionApronGeometry){120,64};
+  const unsigned player = Object(8,40,kActionApronMaxParts-1,1);
+  const unsigned enemy = Object(9,80,2,2);
+  Write(player+kActRaiserActionObject_WorldX,384);
+  Write(enemy+kActRaiserActionObject_WorldX,400);
+  const int overflow = ActionApron_Overflow();
+  Scan();
+  assert(s_position_count == 0 && ActionApron_Count() == kActionApronMaxParts);
+  assert(ActionApron_Overflow() == overflow+1);
+  const SrPpuObjPart *parts = ActionApron_Parts();
+  const ActionApronReceiver *receivers = ActionApron_Receivers();
+  for (unsigned i = 0; i < kActionApronMaxParts; ++i) {
+    const bool is_enemy = i == kActionApronMaxParts-1;
+    assert(parts[i].tile_attr == (is_enemy ? 2 : 1));
+    assert(receivers[i].role == (is_enemy ? kActRaiserSprite_Enemy : kActRaiserSprite_Player));
+    assert(receivers[i].x == (is_enemy ? 400 : 384));
+    assert(receivers[i].y == (is_enemy ? 208 : 168));
+  }
 }
 static void TestFullPoolStillUpdatesActivation(void) {
   for (unsigned extend = 0; extend <= 64; extend += 64) {
@@ -492,10 +621,13 @@ static void TestAutoDrawIgnoresManualProfile(void) {
 }
 
 int main(int argc, char **argv) {
+  TestWaveRetentionWindow();
+  TestPharaohPlaceholder();
   TestFittedCameraPreservesAuthenticActivation();
   TestReceiverOwnership();
   TestAutoDrawIgnoresManualProfile();
   TestCaptureGuardParts();
+  TestGuardReceiverOverflow();
   if (argc == 2 && !strcmp(argv[1], "sim-bubbles")) {
     TestCompleteBubblesAtWindowEdges();
     puts("SIM bubble edge regression passed");

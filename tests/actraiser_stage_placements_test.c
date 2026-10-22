@@ -1,6 +1,8 @@
 #include "actraiser/actraiser_stage_placements.h"
 #include "actraiser/actraiser_native_call.h"
 #include "actraiser/actraiser_hle_fatal.h"
+#include "actraiser/actraiser_action_visibility.h"
+#include "actraiser_game.h"
 #include "regional/action/regional_terrain.h"
 #include "randomizer/randomizer.h"
 #include "byte_order.h"
@@ -25,6 +27,17 @@ static unsigned target, origin, calls, expected_caller;
 static bool fail_randomizer, alter_randomizer, check_live_flags;
 static const ActionPlacementProgram *replacement_program;
 static RecompReturn leaf_result;
+static bool visible[kActRaiserActionObjectCount];
+unsigned ActRaiser_FilterVisibleWaveObjects(CpuState *cpu, uint16_t *objects, unsigned count) {
+  (void)cpu;
+  unsigned kept = 0;
+  for (unsigned i = 0; i < count; ++i) {
+    const uint16_t object = objects[i];
+    assert(object >= 0x8a0 && object < 0x1aa0 && (object - 0x8a0) % 64 == 0);
+    if (visible[(object - 0x8a0) / 64]) objects[kept++] = object;
+  }
+  return kept;
+}
 bool Randomizer_ApplyPlacementPrograms(const RandomizerPlacementMap *maps, size_t count,
                                        RandomizerSummary *out) {
   assert(maps && count == 49 && !out);
@@ -91,6 +104,7 @@ static void ObjectModel(unsigned x, const ActionPlacement *row) {
   InitRecord(expected, x, row->type, row->parameter);
 }
 static CpuState Setup(const PlacementRoot *root) {
+  memset(visible, 0, sizeof(visible));
   memset(ram, 0x5a, sizeof(ram));
   memset(ram + 0x6a0, 0, 0x1400);
   ByteOrder_WriteLe16(ram + 0x18, root->scene);
@@ -312,6 +326,123 @@ static void Capacity(void) {
     }
   }
 }
+static void Survivor(unsigned at, uint16_t status, uint16_t flags, bool in_view) {
+  memset(ram + at, 0x36, 64);
+  ByteOrder_WriteLe16(ram + at, status);
+  ByteOrder_WriteLe16(ram + at + 0x30, flags);
+  visible[(at - 0x8a0) / 64] = in_view;
+}
+
+static void WaveRetention(void) {
+  /* Put one survivor in the incoming wave's allocation range and one beyond
+   * its ordinary sentinel. Leave a stale would-be survivor past the old end,
+   * plus a collected/inactive and an offscreen statue in the exposed gap. */
+  for (unsigned regional = 0; regional < 2; ++regional) {
+    const ArRegionalPlacementPolicy policy = {regional, regional};
+    assert(ActRaiserStagePlacements_Prepare(0x101, &policy, false, 0, 0));
+    CpuState cpu = Setup(&kRoots[0]);
+    for (unsigned x = 0x8e0; x < 0x1aa0; x += 64)
+      ByteOrder_WriteLe16(ram + x, 0x4000);
+    /* Seventeen ROM rows: distinct values verify the US path reads its actual
+     * stream and preserves row order while skipping retained slots. */
+    for (unsigned i = 0; i < 17; ++i) {
+      unsigned at = (kRoots[0].wave & 0x7fff) + i * 4;
+      rom[at] = i + 1;
+      rom[at + 1] = 30;
+      rom[at + 2] = i;
+      rom[at + 3] = 2;
+    }
+    Survivor(0x8e0, 0, 0x0200, true);
+    Survivor(0x1560, 0, 0x0200, true);
+    Survivor(0x14a0, 0x0400, 0x0200, true); /* not eligible for drawing */
+    Survivor(0x14e0, 0, 0x0200, false);
+    Survivor(0x1520, 0x4000, 0x0200, true);
+    Survivor(0x15e0, 0, 0x0200, true); /* past old end: never resurrect */
+    ByteOrder_WriteLe16(ram + 0x15a0, 0x8000);
+    ByteOrder_WriteLe16(ram + 0x1160, 0x0800);
+    ByteOrder_WriteLe16(ram + 0x1160 + 0x12, 0xa82d);
+    ByteOrder_WriteLe16(ram + 0x1160 + 0x38, kRoots[0].wave);
+    cpu.X = 0x8a0;
+    cpu.Y = kRoots[0].wave;
+    cpu.S = 0x1efc;
+    ByteOrder_WriteLe16(ram + cpu.S + 1, 0x1160);
+    if (!regional) {
+      visible[(0x8e0 - 0x8a0) / 64] = false;
+      visible[(0x1560 - 0x8a0) / 64] = false;
+      assert(!ActRaiser_StageWaveEntry(&cpu)); /* no visible live survivors */
+      visible[(0x8e0 - 0x8a0) / 64] = true;
+      visible[(0x1560 - 0x8a0) / 64] = true;
+    }
+    const CpuState before = cpu;
+    memcpy(expected, ram, sizeof(ram));
+    assert(ActRaiser_StageWaveEntry(&cpu));
+    assert(!memcmp(expected, ram, sizeof(ram)) && !memcmp(&before, &cpu, sizeof(cpu)));
+    expected_caller = 0x9540;
+    assert(ActRaiser_StageWave(&cpu) == RECOMP_RETURN_TAILCALL);
+    assert(target == 0x954d && origin == 0x9500 && cpu.X == 0x15a0);
+    assert(cpu.Y == kRoots[0].end && cpu.S == before.S && cpu.DB == before.DB);
+    assert(!memcmp(ram + 0x8e0, expected + 0x8e0, 64));
+    assert(!memcmp(ram + 0x1560, expected + 0x1560, 64));
+    assert(!memcmp(ram + 0x1160, expected + 0x1160, 64));
+    assert(!memcmp(ram + 0x8a0, expected + 0x8a0, 64));
+    assert(!memcmp(ram + cpu.S, expected + cpu.S, 8));
+    assert(ByteOrder_ReadLe16(ram + 0x14a0) == 0x4000);
+    assert(ByteOrder_ReadLe16(ram + 0x14e0) == 0x4000);
+    assert(ByteOrder_ReadLe16(ram + 0x1520) == 0x4000);
+    /* The original epilogue terminates AFTER both retained statues. */
+    cpu_write16(&cpu, 0, cpu.X, 0x8000);
+    unsigned seen = 0;
+    for (unsigned x = 0x8a0; !(ByteOrder_ReadLe16(ram + x) & 0x8000); x += 64) {
+      assert(x < 0x1aa0);
+      if (x == 0x8e0 || x == 0x1560) ++seen;
+    }
+    assert(seen == 2);
+    assert(!memcmp(ram + 0x15e0, expected + 0x15e0, 64));
+    if (!regional) {
+      assert(calls == 17);
+      for (unsigned i = 0; i < 17; ++i) {
+        unsigned x = 0x920 + i * 64;
+        assert(ByteOrder_ReadLe16(ram + x + 0x34) == (i + 1) * 16);
+        assert(ByteOrder_ReadLe16(ram + x + 0x36) == 480);
+        assert(ByteOrder_ReadLe16(ram + x + 0x38) == i);
+      }
+    }
+  }
+
+  /* A crowded wave gets its native gameplay actors and sentinel even with
+   * more visible survivors than spare slots. Exercise both exact capacity
+   * and the final usable actor slot without writing beyond the 80-record pool. */
+  for (unsigned spare = 0; spare <= 2; ++spare) {
+    ActionPlacementProgram program = {.count = 3, .rows = {
+        {.id = 1, .kind = kActionPlacement_Wave},
+        {.id = 2, .kind = kActionPlacement_Object, .x = 5, .y = 27, .type = 1},
+        {.id = 3, .kind = kActionPlacement_End}}};
+    const ArRegionalPlacementPolicy jp = {1, 1};
+    replacement_program = &program;
+    assert(ActRaiserStagePlacements_Prepare(0x101, &jp, false, 0, 0));
+    replacement_program = NULL;
+    CpuState cpu = Setup(&kRoots[0]);
+    for (unsigned x = 0x8a0; x < 0x1aa0; x += 64)
+      ByteOrder_WriteLe16(ram + x, 0x0800);
+    for (unsigned i = 0; i < spare + 1; ++i)
+      Survivor(0x1a20 - i * 64, 0, 0x0200, true);
+    ByteOrder_WriteLe16(ram + 0x1a60, 0x8000);
+    ByteOrder_WriteLe16(ram + 0xae0 + 0x12, 0xa82d);
+    ByteOrder_WriteLe16(ram + 0xae0 + 0x38, kRoots[0].wave);
+    cpu.X = 0x8a0;
+    cpu.Y = kRoots[0].wave;
+    cpu.S = 0x1efc;
+    ByteOrder_WriteLe16(ram + cpu.S + 1, 0xae0);
+    expected_caller = 0x9540;
+    memcpy(expected, ram, sizeof(ram));
+    assert(ActRaiser_StageWave(&cpu) == RECOMP_RETURN_TAILCALL);
+    assert(calls == 1 && cpu.X == 0x1a60);
+    for (unsigned i = 1; i <= spare; ++i)
+      assert(!memcmp(ram + 0x1a20 - i * 64, expected + 0x1a20 - i * 64, 64));
+    for (unsigned at = 0x1aa0; at < 0x1ae2; ++at) assert(ram[at] == 0x5a);
+  }
+}
+
 int main(void) {
   uint8_t seed[32] = {0}, hash[32], copy[32];
   bool native = false;
@@ -391,6 +522,7 @@ int main(void) {
   leaf_result = RECOMP_RETURN_SKIP_1;
   assert(ActRaiser_StagePlacements(&cpu) == RECOMP_RETURN_SKIP_1 && calls == 1 && !target);
   Capacity();
+  WaveRetention();
   ActRaiserStagePlacements_Reset();
   assert(!ActRaiser_StagePlacementsEntry(&cpu) && !ActRaiser_StageWaveEntry(&cpu));
   memcpy(copy, seed, 32);

@@ -22,6 +22,7 @@
 #include "action/action_effect_clock.h"
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
+#include "actraiser/actraiser_action_visibility.h"
 #include "actraiser/actraiser_sprite_ownership.h"
 #include "actraiser/actraiser_rtl.h"
 #include "actraiser/regional/actraiser_actor_art.h"
@@ -431,6 +432,30 @@ static int ws_margin_activation_enabled(void) {
   return g_settings.ws_margin_activation;
 }
 
+typedef struct ActionObjectDrawWindow {
+  int left, right, top, bottom;
+} ActionObjectDrawWindow;
+
+static ActionObjectDrawWindow ws_action_object_draw_window(const SrPpuStateSnapshot *ppu) {
+  ActionObjectDrawWindow window = {0};
+  if (!ws_margin_objects_enabled()) return window;
+  const ActionApronGeometry apron = ActRaiser_ObjApronGeometry();
+  window.left = window.right = apron.apron;
+  if (!ppu || !ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) return window;
+  window.left += ppu->margin_left;
+  window.right += ppu->margin_right;
+  static int vertical_draw = -1;
+  if (vertical_draw < 0) {
+    const char *e = getenv("AR_VEXT_OBJDRAW");
+    vertical_draw = !(e && e[0] == '0');
+  }
+  if (vertical_draw) {
+    window.top = ppu->margin_top;
+    window.bottom = ppu->margin_bottom;
+  }
+  return window;
+}
+
 static int ws_scan_axis_visible(uint16 pos, uint16 leading, uint16 trailing,
                                 uint16 camera, int left, int right,
                                 uint16 limit) {
@@ -444,6 +469,33 @@ static int ws_scan_axis_visible(uint16 pos, uint16 leading, uint16 trailing,
       return 1;
   }
   return 0;
+}
+
+unsigned ActRaiser_FilterVisibleWaveObjects(CpuState *cpu, uint16_t *objects, unsigned count) {
+  SrPpuStateSnapshot ppu;
+  if (!cpu || !objects || !count || count > kActRaiserActionObjectCount ||
+      !ws_margin_objects_enabled() ||
+      !ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup]) ||
+      !ws_query_ppu_state(&ppu)) return 0;
+  const ActionObjectDrawWindow window = ws_action_object_draw_window(&ppu);
+  const uint16 camera_x = ws_dp16(cpu, kActRaiserWram_Bg1CameraX);
+  const uint16 camera_y = ws_dp16(cpu, kActRaiserWram_Bg1CameraY);
+  unsigned visible = 0;
+  for (unsigned i = 0; i < count; ++i) {
+    const uint16 object = objects[i];
+    if (ws_scan_axis_visible(
+            cpu_read16(cpu, 0, object + kActRaiserActionObject_WorldX),
+            cpu_read16(cpu, 0, object + kActRaiserActionObject_LeftExtent),
+            cpu_read16(cpu, 0, object + kActRaiserActionObject_RightExtent),
+            camera_x, window.left, window.right, kActRaiserAuthenticWidth) &&
+        ws_scan_axis_visible(
+            cpu_read16(cpu, 0, object + kActRaiserActionObject_WorldY),
+            cpu_read16(cpu, 0, object + kActRaiserActionObject_TopExtent),
+            cpu_read16(cpu, 0, object + kActRaiserActionObject_BottomExtent),
+            camera_y, window.top, window.bottom, kActRaiserAuthenticHeight))
+      objects[visible++] = object;
+  }
+  return visible;
 }
 
 static uint16 ws_authentic_action_camera_x(CpuState *cpu,
@@ -575,10 +627,10 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
    * only by this widening has every part REJECTED and parks its slot instead of
    * consuming one. ACTIVATION is deliberately untouched (see below) -- how long
    * an object lives is game logic, not presentation. */
-  const ActionApronGeometry scan_apron = ActRaiser_ObjApronGeometry();
   ActionApron_BeginFrame();
-  int draw_l = ws_margin_objects_enabled() ? live_l + scan_apron.apron : 0;
-  int draw_r = ws_margin_objects_enabled() ? live_r + scan_apron.apron : 0;
+  const ActionObjectDrawWindow draw_window = ws_action_object_draw_window(
+      s_action_ppu_state_valid ? &s_action_ppu_state : NULL);
+  const int draw_l = draw_window.left, draw_r = draw_window.right;
   /* Vertical draw window (diorama vertical extend). The horizontal axis has
    * threaded real margins through this scan since Stage D1; the vertical one
    * passed 0,0, so an object above the viewport failed the `vertical` test, the
@@ -593,19 +645,7 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
    * ambiguous wrapped OAM Y byte cannot alias an offscreen part into the wrong
    * band.
    * AR_VEXT_OBJDRAW=0 disables it independently of ws_margin_objects. */
-  int live_t = 0, live_b = 0;
-  if (s_action_ppu_state_valid &&
-      ActRaiser_IsActionMapGroup(g_ram[kActRaiserWram_MapGroup])) {
-    live_t = s_action_ppu_state.margin_top;
-    live_b = s_action_ppu_state.margin_bottom;
-  }
-  static int vext_obj_draw = -1;
-  if (vext_obj_draw < 0) {
-    const char *e = getenv("AR_VEXT_OBJDRAW");
-    vext_obj_draw = !(e && e[0] == '0');
-  }
-  int draw_t = (vext_obj_draw && ws_margin_objects_enabled()) ? live_t : 0;
-  int draw_b = (vext_obj_draw && ws_margin_objects_enabled()) ? live_b : 0;
+  const int draw_t = draw_window.top, draw_b = draw_window.bottom;
   /* Extra rows share the finite OAM table. Emit native-height components
    * first, in their original object order, then spend only the remaining
    * slots on vertical margins. Deferring whole objects would still let a
@@ -856,6 +896,25 @@ RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
   return ws_build_action_object_sprites(cpu, kActionSpritePass_All);
 }
 
+static bool ws_pharaoh_placeholder_pose(CpuState *cpu, uint16 object) {
+  /* Pharaoh waits above the native screen in state/picture 0 (an arrow),
+   * then $C1CF selects the real entrance pose when the player reaches X=192.
+   * Extra rows expose that otherwise invisible placeholder. Suppress only
+   * the root's startup/wait draw, without waking it or changing its script.
+   * Children share the descriptor and can legitimately use picture 0. */
+  const uint16 room = ws_dp16(cpu, kActRaiserWram_MapGroup);
+  if (room != 0x0603 && room != 0x0407) return false;
+  if (cpu_read16(cpu, cpu->DB, object + kActRaiserActionObject_SourceDescriptor) !=
+      (room == 0x0603 ? 0xC1A2 : 0xF6FA)) return false;
+  const uint16 handler = cpu_read16(cpu, cpu->DB, object + kActRaiserActionObject_Handler);
+  if (handler != 0xC1AE && handler != 0xC1B1 && handler != 0xC1CF &&
+      !(room == 0x0407 && handler == 0xF706)) return false;
+  return cpu_read16(cpu, cpu->DB, object + kActRaiserActionObject_AnimationAddress) == 0x5000 &&
+      cpu_read8(cpu, cpu->DB, object + kActRaiserActionObject_AnimationBank) == 0x7E &&
+      cpu_read16(cpu, cpu->DB, object + kActRaiserActionObject_AnimationState) == 0 &&
+      cpu_read16(cpu, cpu->DB, object + kActRaiserActionObject_Visual) == 0;
+}
+
 static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePass pass) {
   uint16 object_address = cpu->X;
   uint16 oam_offset = cpu->Y;
@@ -900,11 +959,13 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
   /* A newly exposed dormant object may not have selected a picture yet.
    * Never interpret direct-page scratch as a composition, or let an empty
    * picture wrap its count to 65535 and walk unrelated data into OAM. */
-  uint16 component_count = composition ? cpu_read8(cpu, definition_bank, definition_address) : 0;
+  const bool placeholder = ws_pharaoh_placeholder_pose(cpu, object_address);
+  uint16 component_count = composition && !placeholder
+      ? cpu_read8(cpu, definition_bank, definition_address) : 0;
   definition_address++;
   ActRaiserActorArtDraw regional_draw = {0};
   const bool regional =
-      ActRaiserActorArt_Active() && definition_bank == 0x7E &&
+      !placeholder && ActRaiserActorArt_Active() && definition_bank == 0x7E &&
       ActRaiserActorArt_Draw(
           cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_AnimationAddress),
           cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_Composition),

@@ -1,6 +1,7 @@
 #include "actraiser_stage_placements.h"
 #include "actraiser_native_call.h"
 #include "actraiser_hle_fatal.h"
+#include "actraiser_action_visibility.h"
 #include "actraiser_game.h"
 #include "randomizer/randomizer.h"
 #include "regional/action/regional_terrain.h"
@@ -9,14 +10,33 @@
 
 typedef struct PlacementRoot { uint16_t scene, first, wave, end; } PlacementRoot;
 #include "actraiser_stage_placement_roots.inc"
-enum { kRoomCount = sizeof(kRoots)/sizeof(kRoots[0]), kFirstPlacedSlot = 0x0ae0,
-       kFirstWaveSlot = 0x08a0, kSlotEnd = 0x1aa0, kSlotBytes = 0x40 };
+enum {
+  kRoomCount = sizeof(kRoots) / sizeof(kRoots[0]),
+  kFirstPlacedSlot = 0x0ae0,
+  kFirstWaveSlot = kActRaiserWram_PlayerObject,
+  kSlotBytes = kActRaiserActionObjectStride,
+  kSlotEnd = kActRaiserWram_ActionObjectTable + kActRaiserActionObjectCount * kSlotBytes,
+  kWaveSlotCount = (kSlotEnd - kFirstWaveSlot) / kSlotBytes,
+  kNativePlacementBytes = 4,
+  /* $9500 reserves controllers and records with the player flag. $874E also
+   * retains pickups/bosses (the other bits of its $4201 cleanup mask). */
+  kWaveReservedStatus = 0x0800,
+  kWaveReservedFlag = 0x0001,
+  kWaveSurvivorFlags = 0x4200,
+  kWaveReadyHandler = 0xa82d,
+};
 static ActionPlacementProgram s_preparation[kRoomCount];
 static ActionPlacementProgram s_program;
 static const PlacementRoot *s_root;
 static size_t s_after_wave;
 static uint8_t s_digest[32];
 extern RecompReturn bank_00_9557_M0X0(CpuState *cpu);
+
+static size_t RoomIndex(uint16_t scene) {
+  for (size_t i = 0; i < kRoomCount; ++i)
+    if (kRoots[i].scene == scene) return i;
+  return kRoomCount;
+}
 
 void ActRaiserStagePlacements_Reset(void) {
   s_root = NULL;
@@ -39,9 +59,7 @@ bool ActRaiserStagePlacements_Prepare(uint16_t scene,
       (unsigned)policy->enemies >= kArRegionalSource_Count ||
       (unsigned)policy->pickups >= kArRegionalSource_Count) return false;
   RandomizerPlacementMap maps[kRoomCount];
-  size_t selected = kRoomCount;
-  for (size_t i = 0; i < kRoomCount; ++i)
-    if (kRoots[i].scene == scene) selected = i;
+  const size_t selected = RoomIndex(scene);
   if (selected == kRoomCount) return false;
   if (policy->enemies == kArRegionalSource_US && policy->pickups == kArRegionalSource_US) {
     ActRaiserStagePlacements_Reset();
@@ -89,15 +107,15 @@ bool ActRaiserStagePlacements_Prepare(uint16_t scene,
 static bool Slot(unsigned x) {
   return x >= kFirstWaveSlot && x < kSlotEnd && (x-kFirstWaveSlot)%kSlotBytes == 0;
 }
-static bool Context(CpuState *cpu) {
-  return s_root && cpu && !cpu->emulation && !cpu->PB && cpu->DB == 0x0a &&
+static bool RootContext(CpuState *cpu, const PlacementRoot *root) {
+  return root && cpu && !cpu->emulation && !cpu->PB && cpu->DB == 0x0a &&
       !cpu->D && !cpu->m_flag && !cpu->x_flag && !cpu->_flag_D && !(cpu->P & CPU_P_D) &&
-      cpu_read16(cpu,0,kActRaiserWram_MapGroup) == s_root->scene &&
-      cpu_read8(cpu,0x0a,s_root->end) == 0xff &&
-      (!s_root->wave || cpu_read8(cpu,0x0a,s_root->wave-5) == 0xfe);
+      cpu_read16(cpu,0,kActRaiserWram_MapGroup) == root->scene &&
+      cpu_read8(cpu,0x0a,root->end) == 0xff &&
+      (!root->wave || cpu_read8(cpu,0x0a,root->wave-5) == 0xfe);
 }
 bool ActRaiser_StagePlacementsEntry(CpuState *cpu) {
-  if (!Context(cpu) || cpu->Y != s_root->first) return false;
+  if (!RootContext(cpu, s_root) || cpu->Y != s_root->first) return false;
   /* $932E/$9354 initializes one player on ordinary loads, but a statue and
    * descending light when $FC.low != 0 and $0341.word != 7. After $930B's
    * eight reserved slots, $941C therefore starts at $0AE0 or $0B20. Retain
@@ -166,7 +184,7 @@ RecompReturn ActRaiser_StagePlacements(CpuState *cpu) {
       if (!s_root->wave || cpu_read8(cpu,0x0a,s_root->wave-5) != 0xfe)
         ActRaiserHleFatal("Regional wave has no native cursor identity");
       cpu_write16(cpu, 0, x + 0x12, 0xa813);
-      cpu_write16(cpu, 0, x, 0x0800);
+      cpu_write16(cpu, 0, x, kWaveReservedStatus);
       cpu_write16(cpu, 0, x + 0x24, 0);
       cpu_write16(cpu, 0, x + 0x26, 0);
       cpu_write16(cpu, 0, x + 0x30, 0);
@@ -195,35 +213,158 @@ RecompReturn ActRaiser_StagePlacements(CpuState *cpu) {
   }
   ActRaiserHleFatal("Regional placement program has no terminator");
 }
-bool ActRaiser_StageWaveEntry(CpuState *cpu) {
-  if (!Context(cpu) || !s_after_wave || cpu->X != kFirstWaveSlot || cpu->Y != s_root->wave ||
-      cpu->S > 0x1ffbu) return false;
+static const PlacementRoot *WaveContext(CpuState *cpu) {
+  if (!cpu) return NULL;
+  const PlacementRoot *root = s_root;
+  if (!root) {
+    const size_t room = RoomIndex(cpu_read16(cpu, 0, kActRaiserWram_MapGroup));
+    if (room == kRoomCount) return NULL;
+    root = &kRoots[room];
+  }
+  if (!RootContext(cpu, root) || !root->wave || (s_root && !s_after_wave) ||
+      cpu->X != kFirstWaveSlot || cpu->Y != root->wave || cpu->S > 0x1ffbu) return NULL;
   /* PHX in the original prologue retains the real gate owner on the stack. */
   const unsigned owner = cpu_read16(cpu,0,cpu->S+1);
-  return Slot(owner) && cpu_read16(cpu,0,owner+0x12) == 0xa82d &&
-      cpu_read16(cpu,0,owner+0x38) == s_root->wave &&
-      (cpu_read16(cpu,0,owner) & 0x0800);
+  return Slot(owner) && cpu_read16(cpu,0,owner+0x12) == kWaveReadyHandler &&
+      cpu_read16(cpu,0,owner+0x38) == root->wave &&
+      (cpu_read16(cpu,0,owner) & kWaveReservedStatus) ? root : NULL;
 }
-RecompReturn ActRaiser_StageWave(CpuState *cpu) {
-  if (!ActRaiser_StageWaveEntry(cpu)) ActRaiserHleFatal("Invalid regional later-wave entry");
-  /* Preflight the live retained controllers/player before writing any actor.
-   * The terminating sentinel also needs a free slot. */
-  uint16_t available[kActRaiserActionObjectCount];
-  unsigned count = 0;
-  for (unsigned x = kFirstWaveSlot; x < kSlotEnd; x += kSlotBytes)
-    if (!(cpu_read16(cpu, 0, x) & 0x0800) && !(cpu_read16(cpu, 0, x + 0x30) & 1))
-      available[count++] = (uint16_t)x;
-  const size_t needed = s_program.count-s_after_wave;
-  if (needed > count) ActRaiserHleFatal("Regional wave has insufficient free actor slots");
-  for (size_t i = s_after_wave; i < s_program.count; ++i) {
-    const ActionPlacement *row = &s_program.rows[i];
-    cpu->X = available[i - s_after_wave];
-    if (row->kind == kActionPlacement_End) {
-      cpu->Y = s_root->end;
-      return Tail(0x00954d,0x009500); /* original sentinel / PLX / PLB / PLP / RTS */
+
+typedef struct WaveSurvivors {
+  uint16_t objects[kWaveSlotCount];
+  unsigned count, old_end;
+} WaveSurvivors;
+
+/* $874E deliberately retains pickups/bosses, but $9500 can overwrite their
+ * slots and $954D can hide survivors behind the new, shorter list's sentinel.
+ * Retain only live, visible survivors of that cleanup. Never revive enemies
+ * it retired, or stale records beyond the old sentinel. */
+static void CollectWaveSurvivors(CpuState *cpu, WaveSurvivors *out) {
+  *out = (WaveSurvivors){.old_end = kSlotEnd};
+  for (unsigned x = kFirstWaveSlot; x < kSlotEnd; x += kSlotBytes) {
+    const uint16_t status = cpu_read16(cpu, 0, x);
+    if (status & kActRaiserObjectStatus_End) {
+      out->old_end = x;
+      out->count = ActRaiser_FilterVisibleWaveObjects(cpu, out->objects, out->count);
+      return;
     }
-    const RecompReturn result = Object(cpu,row,0x9540);
+    const uint16_t flags = cpu_read16(cpu, 0, x + kActRaiserActionObject_Flags);
+    if (!(status & (kActRaiserObjectStatus_IneligibleMask | kActRaiserObjectStatus_NoDraw)) &&
+        !(flags & kWaveReservedFlag) && (flags & kWaveSurvivorFlags))
+      out->objects[out->count++] = (uint16_t)x;
+  }
+  /* A malformed/unbounded list is not a source of retainable actors. */
+  out->count = 0;
+}
+
+bool ActRaiser_StageWaveEntry(CpuState *cpu) {
+  if (!WaveContext(cpu)) return false;
+  if (s_root) return true;
+  WaveSurvivors survivors;
+  CollectWaveSurvivors(cpu, &survivors);
+  return survivors.count != 0;
+}
+
+typedef enum WaveSlotUse {
+  kWaveSlot_Free,
+  kWaveSlot_Reserved,
+  kWaveSlot_Retained,
+  kWaveSlot_NewObject,
+} WaveSlotUse;
+
+typedef struct WavePlan {
+  uint16_t objects[kWaveSlotCount];
+  uint16_t end;
+  bool retire[kWaveSlotCount];
+} WavePlan;
+
+static uint16_t WaveSlotAddress(unsigned index) {
+  return (uint16_t)(kFirstWaveSlot + index * kSlotBytes);
+}
+
+/* Read-only preflight. No actor writes or native initializers are allowed
+ * until the complete allocation, retained records and end marker fit. */
+static void BuildWavePlan(CpuState *cpu, size_t objects, WavePlan *plan) {
+  *plan = (WavePlan){0};
+  WaveSurvivors survivors;
+  CollectWaveSurvivors(cpu, &survivors);
+  WaveSlotUse slots[kWaveSlotCount];
+  const size_t needed = objects + 1;
+  unsigned last_free = 0, free_count = 0;
+  for (unsigned i = 0; i < kWaveSlotCount; ++i) {
+    const uint16_t x = WaveSlotAddress(i);
+    const bool reserved = (cpu_read16(cpu, 0, x) & kWaveReservedStatus) ||
+        (cpu_read16(cpu, 0, x + kActRaiserActionObject_Flags) & kWaveReservedFlag);
+    slots[i] = reserved ? kWaveSlot_Reserved : kWaveSlot_Free;
+    if (!reserved) { ++free_count; last_free = x; }
+  }
+  if (needed > free_count)
+    ActRaiserHleFatal("Wave has insufficient free actor slots");
+  /* New gameplay objects and an end marker always take precedence over extra
+   * retention. Bound it by spare capacity; reserve a sentinel after survivors
+   * even when their original slots are near the end of a crowded pool. */
+  size_t spare = free_count - needed;
+  unsigned last_kept = 0;
+  for (unsigned i = 0; i < survivors.count && spare; ++i) {
+    const unsigned x = survivors.objects[i];
+    const unsigned index = (x - kFirstWaveSlot) / kSlotBytes;
+    if (x < last_free) {
+      slots[index] = kWaveSlot_Retained;
+      --spare;
+      last_kept = x;
+    }
+  }
+  unsigned count = 0;
+  for (unsigned i = 0; i < kWaveSlotCount; ++i) {
+    if (slots[i] != kWaveSlot_Free) continue;
+    const uint16_t x = WaveSlotAddress(i);
+    if (count < objects) {
+      slots[i] = kWaveSlot_NewObject;
+      plan->objects[count++] = x;
+    } else if (x > last_kept) {
+      plan->end = x; /* native epilogue's end marker */
+      break;
+    }
+  }
+  if (!plan->end) ActRaiserHleFatal("Wave retention lost its reserved end marker");
+  if (last_kept) {
+    for (unsigned i = 0; WaveSlotAddress(i) < plan->end; ++i) {
+      plan->retire[i] = slots[i] == kWaveSlot_Free ||
+          (slots[i] == kWaveSlot_Reserved && WaveSlotAddress(i) >= survivors.old_end);
+    }
+  }
+}
+
+RecompReturn ActRaiser_StageWave(CpuState *cpu) {
+  const PlacementRoot *root = WaveContext(cpu);
+  if (!root) ActRaiserHleFatal("Invalid later-wave entry");
+  /* US still delegates to generated code unless it needs visible retention.
+   * In that case read its exact ROM rows, using the same native initializer
+   * and epilogue as regional waves. No region policy is reread mid-room. */
+  const size_t objects = s_root ? s_program.count - s_after_wave - 1 :
+      (root->end - root->wave) / kNativePlacementBytes;
+  WavePlan plan;
+  BuildWavePlan(cpu, objects, &plan);
+  for (unsigned i = 0; i < kWaveSlotCount; ++i)
+    if (plan.retire[i]) cpu_write16(cpu, 0, WaveSlotAddress(i), kActRaiserObjectStatus_Inactive);
+  for (size_t i = 0; i < objects; ++i) {
+    ActionPlacement native_row;
+    const ActionPlacement *row;
+    if (s_root) row = &s_program.rows[s_after_wave + i];
+    else {
+      cpu->Y = (uint16_t)(root->wave + i * kNativePlacementBytes);
+      native_row = (ActionPlacement){.kind = kActionPlacement_Object,
+          .x = cpu_read8(cpu, 0x0a, cpu->Y),
+          .y = cpu_read8(cpu, 0x0a, cpu->Y + 1),
+          .parameter = cpu_read8(cpu, 0x0a, cpu->Y + 2),
+          .type = cpu_read8(cpu, 0x0a, cpu->Y + 3)};
+      row = &native_row;
+    }
+    cpu->X = plan.objects[i];
+    const RecompReturn result = Object(cpu, row, 0x9540);
     if (result != RECOMP_RETURN_NORMAL) return result;
   }
-  ActRaiserHleFatal("Regional later wave has no terminator");
+  cpu->X = plan.end;
+  cpu->Y = root->end;
+  return Tail(0x00954d,0x009500); /* original sentinel / PLX / PLB / PLP / RTS */
 }
