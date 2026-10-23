@@ -65,6 +65,10 @@ DioramaCameraMotion DioramaCamera_Observe(
     .lean_pitch = CameraVelocity_Normalize(
         input->velocity_y, &observer->velocity_y_average, elapsed_ticks),
   };
+  /* Still observe velocity so changing aspect ratio does not reset its
+   * calibration. In a fixed room, yaw and its compensating edge clamp only
+   * resample the same pixels and make the background appear to flicker. */
+  if (input->horizontal_locked) motion.lean_yaw = 0.0f;
   /* HP decreases identify the damage frame; the native invulnerability flag
    * arrives later. Landing uses the updated recent velocity average. */
   motion.event_hit = input->hp < observer->previous_hp;

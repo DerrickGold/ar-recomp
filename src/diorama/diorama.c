@@ -2483,6 +2483,12 @@ bool Diorama_ResolveCaptureCameraRange(const DioramaCapture *capture,
   if (!isfinite(lo) || !isfinite(hi) || lo < -65535 || hi > 65535 ||
       ceilf(lo) > floorf(hi)) return false;
   *minimum = (int)ceilf(lo); *maximum = (int)floorf(hi);
+  /* A nearly screen-sized room has no useful scenery to reveal in one or
+   * two native pixels of travel. Keep a stable centre instead of crawling
+   * between fractional edge fits. This is layout-dependent, not tied to
+   * the current camera position, and is shared with the editor. */
+  if (*maximum - *minimum <= 2)
+    *minimum = *maximum = *minimum + (*maximum - *minimum) / 2;
   return true;
 }
 

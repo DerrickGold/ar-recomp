@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "actraiser_game.h"
+#include "actraiser/enhancements/actraiser_camera_internal.h"
 #include "actraiser/actraiser_rtl.h"
 #include "snesrecomp/game/runtime.h"
 #include "snesrecomp/game_runtime.h"
@@ -23,11 +24,15 @@ static DioramaCameraObserver s_camera_observer = DIORAMA_CAMERA_OBSERVER_INIT;
 
 void DioramaCamera_CaptureMotion(DioramaCameraFrame *frame, int elapsed_ticks) {
   frame->reactive_strength = g_settings.diorama_reactive_strength;
+  uint16_t minimum, maximum;
+  const bool horizontal_locked = Diorama_IsActiveThisFrame() &&
+      ActRaiser_ActionCameraTravel(&minimum, &maximum) && minimum == maximum;
   const DioramaCameraObservation input = {
     .velocity_x = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_PlayerVelocityX),
     .velocity_y = (int16_t)ActRaiser_ReadWram16(kActRaiserWram_PlayerVelocityY),
     .hp = g_ram[kActRaiserWram_PlayerHp],
     .boost = g_ram[kActRaiserWram_PlayerBoost] != 0,
+    .horizontal_locked = horizontal_locked,
   };
   frame->motion = DioramaCamera_Observe(&s_camera_observer, &input, elapsed_ticks);
 }

@@ -67,6 +67,41 @@ static void CheckCapturedEdges(void) {
   assert(motion.event_boost && !motion.event_hit);
 }
 
+static void CheckFixedRoomMotion(void) {
+  DioramaCameraObserver locked = DIORAMA_CAMERA_OBSERVER_INIT;
+  DioramaCameraObserver scrolling = DIORAMA_CAMERA_OBSERVER_INIT;
+  DioramaCameraFrame frame = Frame(kDioramaCam_Dynamic);
+  for (int tick = 0; tick < 120; ++tick) {
+    DioramaCameraObservation input = {
+      .velocity_x = tick < 60 ? 12 : -12,
+      .velocity_y = tick < 30 ? 8 : 0, .hp = tick < 45 ? 10 : 9,
+    };
+    const DioramaCameraMotion normal = DioramaCamera_Observe(&scrolling, &input, 1);
+    input.horizontal_locked = true;
+    frame.motion = DioramaCamera_Observe(&locked, &input, 1);
+    Near(frame.motion.lean_yaw, 0);
+    Near(frame.motion.lean_pitch, normal.lean_pitch);
+    assert(frame.motion.event_hit == normal.event_hit);
+    assert(frame.motion.event_land == normal.event_land);
+    Near(locked.velocity_x_average, scrolling.velocity_x_average);
+  }
+  DioramaCameraPresenter presenter = DIORAMA_CAMERA_PRESENTER_INIT;
+  DioramaCameraView view = DioramaCamera_Present(&presenter, &frame, 1, 1000000000);
+  Near(view.pose.tilt_y, frame.controls.dynamic_baseline.tilt_y);
+
+  /* Manual orbit is independent of the automatic lean, even in a fixed room. */
+  frame.controls.orbit_yaw = .3f;
+  view = DioramaCamera_Present(&presenter, &frame, 1, 1000000000);
+  Near(view.pose.tilt_y, .3f);
+
+  /* Returning to a narrower view restores the response with its normal history. */
+  const DioramaCameraObservation input = {.velocity_x = -12, .hp = 9};
+  const DioramaCameraMotion restored = DioramaCamera_Observe(&locked, &input, 1);
+  const DioramaCameraMotion normal = DioramaCamera_Observe(&scrolling, &input, 1);
+  assert(restored.lean_yaw < 0);
+  Near(restored.lean_yaw, normal.lean_yaw);
+}
+
 static void CheckFreeControlAndModeChanges(void) {
   DioramaCameraPresenter presenter = DIORAMA_CAMERA_PRESENTER_INIT;
   DioramaCameraFrame frame = Frame(kDioramaCam_Free);
@@ -285,6 +320,7 @@ static void CheckLandingBoostAndStrength(void) {
 int main(void) {
   CheckCaptureTimingAndIsolation();
   CheckCapturedEdges();
+  CheckFixedRoomMotion();
   CheckFreeControlAndModeChanges();
   CheckManualReturn();
   CheckManualPresentation();

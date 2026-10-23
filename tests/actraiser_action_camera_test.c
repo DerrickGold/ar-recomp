@@ -13,8 +13,6 @@
 
 uint8 g_ram[kActRaiserWramSize];
 Settings g_settings;
-static ActRaiserDisplayGeometry s_geometry;
-const ActRaiserDisplayGeometry *const g_actraiser_display_geometry = &s_geometry;
 static DioramaLayerOrderTable s_layers;
 static bool s_hle = true;
 static int s_dx, s_dy, s_calls;
@@ -35,12 +33,12 @@ const DioramaRoomOverride *ActRaiser_CurrentVirtualLayerRoom(void) {
   if (!g_settings.diorama_mode) return NULL;
   return DioramaLayerOrder_Find(&s_layers, g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap]);
 }
-int Settings_VisibleWidth(void) { return 256 + 2 * s_geometry.display_extra; }
+int Settings_VisibleWidth(void) { return 256 + 2 * g_ws_display_extra; }
 bool Settings_IgnoreAspectRatio(void) { return false; }
 bool ActRaiser_DioramaNeedsBgApron(const DioramaRoomOverride *room,
     unsigned bg, bool edits, bool world) {
   return DioramaCameraPolicy_NeedsBgApron(room, bg, edits, world && g_ws_active,
-      s_geometry.output_width, s_geometry.output_height);
+      g_actraiser_display_geometry->output_width, g_actraiser_display_geometry->output_height);
 }
 bool ActRaiserActionBg_BuildCurrentPlan(const uint8_t *wram, size_t size, bool padding,
     ActionBgPlan *out, ActionBgPresentationPolicy *presentation) {
@@ -66,8 +64,10 @@ static void Reset(void) {
     .diorama_camera_mode = kDioramaCam_Dynamic, .diorama_vertical_extend = 64,
     .diorama_dyncam_baseline_distance_x100 = 325, .diorama_layer_bg1 = true,
     .diorama_skybox = kDioramaSky_Only};
-  s_geometry = (ActRaiserDisplayGeometry){.widescreen_active = true,
-    .render_extra = 120, .display_extra = 120, .output_width = 960, .output_height = 600};
+  DisplayGeometry_SetAutoVerticalBudget(0);
+  DisplayGeometry_SetHorizontal(120, 120);
+  DisplayGeometry_SetVertical(0, 0);
+  DisplayGeometry_SetOutputSize(960, 600);
 }
 static void Step(int x, int dx, int dy) {
   Write(kActRaiserWram_Bg1CameraX, x); Write(0x7c, dx); Write(0x7e, dy);
@@ -144,8 +144,55 @@ static void CapturePolicy(void) {
   assert(!DioramaCameraPolicy_FiniteLayer(&plan.layer[0]));
   assert(!DioramaCameraPolicy_WorldApron(&plan.layer[0]));
 }
+
+static void NearlyScreenSizedRoom(void) {
+  /* Marahna 05:03: a 512-pixel room with one painted column on the left.
+   * At the user's 3.25 baseline it just fills 16:9; a slight zoom-in leaves
+   * two pixels of travel. Neither should scroll, while 16:10 must still do so. */
+  const int outputs[][2] = {{960, 540}, {1920, 1080}, {3420, 2140}};
+  const int distances[] = {320, 324, 325};
+  for (unsigned output = 0; output < sizeof(outputs) / sizeof(*outputs); ++output) {
+    for (int aspect = 9; aspect <= 10; ++aspect) {
+      Reset(); g_settings.diorama_mode = true;
+      g_settings.extended_aspect = aspect == 9 ? kScreenAspect_169 : kScreenAspect_1610;
+      Write(0x18, 0x0305);
+      Write(kActRaiserWram_Bg1Width, 512); Write(kActRaiserWram_Bg1Height, 256);
+      Write(kActRaiserWram_Bg1CameraY, 31);
+      DioramaRoomOverride *room = DioramaLayerOrder_FindOrAdd(&s_layers, 5, 3); assert(room);
+      assert(DioramaLayerOrder_ParseLine(room, "bg1-map:us+jp+eu = bounds:-1,-6,32,19", NULL));
+      assert(DioramaLayerOrder_ParseLine(room,
+          "bg1-stamp:us+jp+eu = cell:-1,-6 metatile:4F words:1CBE,1CBE,1CBE,1CBE bands:1,1,1,1", NULL));
+      assert(DioramaLayerOrder_ParseLine(room,
+          "bg1-stamp:us+jp+eu = cell:31,18 metatile:02 words:3466,3466,3466,3466 bands:2,2,2,2", NULL));
+      assert(DioramaLayerOrder_ParseLine(room, "bg1hi = z:0.5", NULL));
+      DisplayGeometry_SetOutputSize(outputs[output][0], outputs[output][1]);
+      const ActRaiserDisplayGeometry geometry =
+          DisplayGeometry_CalculateHorizontal(224, 16, aspect, false, true);
+      DisplayGeometry_SetHorizontal(geometry.render_extra, geometry.display_extra);
+      for (unsigned zoom = 0; zoom < sizeof(distances) / sizeof(*distances); ++zoom) {
+        const int distance = distances[zoom];
+        g_settings.diorama_dyncam_baseline_distance_x100 = distance;
+        uint16_t lo, hi;
+        Step(120, 0, 0); assert(ActRaiser_ActionCameraTravel(&lo, &hi));
+        if (aspect == 9 && distance >= 324) {
+          assert(lo == 120 && hi == 120);
+          for (int x = 0; x <= 256; x += 64) {
+            Step(x, 1, 0); assert(Read(kActRaiserWram_Bg1CameraX) == 120 && s_dx == 0);
+            Step(x, -1, 0); assert(Read(kActRaiserWram_Bg1CameraX) == 120 && s_dx == 0);
+          }
+        } else {
+          assert(hi - lo >= (aspect == 10 ? 50 : 3));
+          Step(120, 1, 0); assert(Read(kActRaiserWram_Bg1CameraX) == 121 && s_dx == 1);
+          Step(120, -1, 0); assert(Read(kActRaiserWram_Bg1CameraX) == 119 && s_dx == -1);
+        }
+        assert(Read(kActRaiserWram_Bg1CameraY) == 31);
+      }
+    }
+  }
+}
 int main(void) {
-  AutoProfiles(); SavedPolicy(); CapturePolicy(); DioramaLayerOrder_ClearTable(&s_layers);
+  AutoProfiles(); SavedPolicy(); CapturePolicy(); NearlyScreenSizedRoom();
+  DioramaLayerOrder_ClearTable(&s_layers);
   puts("Production action camera: Auto/manual policies, saved extents, edge stops, native Y and capture guards passed");
   return 0;
 }

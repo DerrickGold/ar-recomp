@@ -62,6 +62,9 @@ typedef struct DioramaCameraObservation {
   int16_t velocity_y;
   uint8_t hp;
   bool boost;
+  /* The fitted room has no horizontal travel. Suppress automatic yaw only;
+   * manual orbit and vertical/event responses remain available. */
+  bool horizontal_locked;
 } DioramaCameraObservation;
 
 /* One observer per game session, including captures while Diorama is off.

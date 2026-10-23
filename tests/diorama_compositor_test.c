@@ -248,8 +248,13 @@ static bool Geometry(void *ctx, ArRenderTexture t, const ArRenderVertex2D *v,
 static bool Present(void *ctx) { (void)ctx; assert(!"caller owns present"); return false; }
 static const char *Error(void *ctx) { (void)ctx; return "injected recorder failure"; }
 static const ArRenderBackendOps kOps = {
-  sizeof(ArRenderBackendOps), Create, Destroy, Update, Target, Coordinates, Size,
-  Viewport, Clip, Capture, Restore, Clear, Texture, Geometry, Present, Error,
+  .struct_size = sizeof(ArRenderBackendOps),
+  .create_texture = Create, .destroy_texture = Destroy, .update_texture = Update,
+  .set_render_target = Target, .use_output_coordinates = Coordinates,
+  .get_output_size = Size, .set_viewport = Viewport, .set_clip_rect = Clip,
+  .capture_render_target_state = Capture, .restore_render_target_state = Restore,
+  .clear = Clear, .draw_texture = Texture, .draw_geometry = Geometry,
+  .present = Present, .last_error = Error,
 };
 
 /* Record semantic shader parameters; this backend does not claim pixel parity. */
