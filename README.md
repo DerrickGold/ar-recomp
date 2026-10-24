@@ -15,13 +15,16 @@ widescreen rendering, layered 3D action stages, height-mapped towns and a
 3D globe, GPU and CRT effects, replacement art and music, language packs,
 and rebindable controls. The in-game settings menu explains each option.
 
+[Click here for more details on Emulation, Recompilation, and Decompilation with an example
+based on this game's code!](https://derrickgold.github.io/emu-recomp-decomp/)
+
 **[Quick start](#quick-start)** · **[Features](#features)** ·
 **[Manual](docs/manual.md)** · **[Game documentation](docs/README.md)** ·
 **[Status](#progress-at-a-glance)** · **[Development](#development)**
 
 [![GitHub downloads (all assets, all releases)](https://img.shields.io/github/downloads/DerrickGold/ar-recomp/total)](https://github.com/DerrickGold/ar-recomp/releases)
 ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads-pre/DerrickGold/ar-recomp/latest/total)
-![GitHub commits since tagged version](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0802)
+![GitHub commits since tagged version](https://img.shields.io/github/commits-since/DerrickGold/ar-recomp/v0804)
 
 ---
 
@@ -33,7 +36,7 @@ start to finish.** Development and visual improvements remain active.
 | | |
 |---|---|
 | ✅ | **Native graphics:** All six towns, all 12 acts, Death Heim, and the ending have been play-tested, including overlay access at The End. The full USA campaign is verified completable end to end. |
-| 🟡 | **Action Mode Enhancements:** Extensive presentation work remains in 3D Diorama mode: manually extending tile maps to fill widescreen space, correcting background policies, and fixing skybox rendering. Adding unique environmental effects is an ongoing per-level effort, with treatments for Fillmore Acts 1/2, Bloodpool Acts 1/2, and Death Heim's completion scene. |
+| 🟡 | **Action Mode Enhancements:** Extensive presentation work remains in 3D Diorama mode: manually extending tile maps to fill widescreen space, correcting background policies, and fixing skybox rendering. Adding unique environmental effects is an ongoing per-level effort, with treatments for Fillmore Acts 1/2, Bloodpool Acts 1/2, Kassandora Acts 1/2, and Death Heim's completion scene. |
 | ✅ | **Platforms:** Windows, macOS arm64, and Steam Deck have been tested and boot successfully. macOS x86_64 and generic Linux still need representative launch testing. |
 | ✅ | **Localization:** Language packs, enhanced fonts, and Workshop authoring are ready. Players can create and distribute their own translations. |
 | 🔵 | **Regionalization:** Implementation is complete and ready for testing. [US, Japanese, and European gameplay presets](docs/regional-settings.md) support per-campaign customization, with independent [regional artwork and music](docs/regional-media.md). |
