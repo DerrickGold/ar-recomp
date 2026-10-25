@@ -43,6 +43,7 @@ def preview_settings(settings_path: Path):
         "tiltY": number(prefix + "tilt_y_mrad", 0, 1000),
         "cameraMode": "dynamic" if dynamic else "free",
         "rimLight": values.get("gpu_fx_rim", "On") == "On",
+        "finalBattle": values.get("death_heim_final_battle", "Off") == "On",
         "vertical": max(0, min(64, int(number("diorama_vertical_extend", 64, 1)))),
         "skybox": {"Plane only": 0, "Skybox only": 1, "Both": 2}.get(values.get("diorama_skybox"), 1),
         "source": settings_path.name if settings_path.exists() else "defaults",

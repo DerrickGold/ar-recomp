@@ -148,6 +148,7 @@ int main(void) {
             self.assertEqual(dynamic['tiltX'], 0)
             self.assertEqual(dynamic['tiltY'], .025)
             self.assertTrue(dynamic['rimLight'])
+            self.assertFalse(dynamic['finalBattle'])
             settings.write_text(settings.read_text().replace('Dynamic Cam', 'Free Cam'))
             free = preview_settings(settings)
             self.assertEqual(free['distance'], 5.5)
@@ -158,6 +159,8 @@ int main(void) {
             self.assertEqual(preview_settings(settings)['aspect'], '4:3')
             settings.write_text(settings.read_text() + 'gpu_fx_rim = Off\n')
             self.assertFalse(preview_settings(settings)['rimLight'])
+            settings.write_text(settings.read_text() + 'death_heim_final_battle = On\n')
+            self.assertTrue(preview_settings(settings)['finalBattle'])
             for aspect in ('Auto', 'Stretch'):
                 settings.write_text('extended_aspect = '+aspect+'\n'
                                     'diorama_camera_mode = Dynamic Cam\n'

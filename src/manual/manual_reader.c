@@ -19,7 +19,7 @@
 /* For the game's own menu font: the overlay owns the atlases. */
 #include "settings_overlay/settings_overlay_render.h"
 
-/* Declarations only. src/replacements/hd_replacement_host.c owns STB_IMAGE_IMPLEMENTATION
+/* Declarations only. src/render/image_decode.c owns STB_IMAGE_IMPLEMENTATION
  * for the whole binary; this file must not define it again. JPEG support is one
  * more STBI_ONLY_* beside the PNG one there -- the macros are a positive
  * allowlist, so the manual costs a #define rather than a dependency. */

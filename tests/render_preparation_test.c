@@ -30,7 +30,12 @@ static Sim3DPreparedPipelines pipelines = {
 };
 Settings g_settings;
 static bool diorama_on;
-static int bg_prepares, action_prepares, interpolation_prepares;
+static int bg_prepares, action_prepares, interpolation_prepares, rift_prepares;
+bool DioramaAstralRift_Prepare(ArRenderDevice *device) {
+  (void)device;
+  ++rift_prepares;
+  return available;
+}
 bool DioramaEffectBackend_PrepareSceneryLight(ArRenderDevice *device) {
   (void)device;
   return available;
@@ -168,7 +173,8 @@ int main(void) {
   assert(RenderPreparation_Prepare(&device, &features));
   assert(features == kRenderFeature_All && shader_calls == 9 && ends == 1);
   assert(completion_prepares == 1);
-  assert(finishes == 1 && interpolation_prepares == 1); /* even with the setting off */
+  /* Both pipelines and Astral Rift art are ready even with their settings off. */
+  assert(finishes == 1 && interpolation_prepares == 1 && rift_prepares == 1);
   assert(creates == destroys);
   /* Linear meshes are an acceleration, not a distinct visual setting. A
    * prepared rejection retains ordinary SIM geometry and unrelated features. */
@@ -210,7 +216,7 @@ int main(void) {
 
   /* Boot prepares every optional feature even from a flat menu with
    * interpolation disabled. Setting changes reuse it; reset rebuilds it. */
-  bg_prepares = action_prepares = interpolation_prepares = 0;
+  bg_prepares = action_prepares = interpolation_prepares = rift_prepares = 0;
   RenderPreparation_PrepareSelectedFeatures(&device);
   assert(bg_prepares == 0 && action_prepares == 0);
   diorama_on = true;
@@ -221,8 +227,11 @@ int main(void) {
   RenderPreparation_PrepareSelectedFeatures(&device);
   RenderPreparation_PrepareSelectedFeatures(&device);
   assert(action_prepares == 0 && interpolation_prepares == 0);
+  g_settings.death_heim_final_battle = true;
+  RenderPreparation_PrepareSelectedFeatures(&device);
+  assert(rift_prepares == 0); /* Toggle reuses the boot-prepared artwork. */
   assert(RenderPreparation_Prepare(&device, &features));
-  assert(action_prepares == 1 && interpolation_prepares == 1);
+  assert(action_prepares == 1 && interpolation_prepares == 1 && rift_prepares == 1);
   RenderPreparation_PrepareSelectedFeatures(NULL);
   assert(action_prepares == 1);
 
@@ -230,7 +239,7 @@ int main(void) {
    * entry must not introduce a second compilation bracket. */
   diorama_on = false;
   assert(RenderPreparation_Prepare(&device, &features));
-  assert(action_prepares == 2 && interpolation_prepares == 2);
+  assert(action_prepares == 2 && interpolation_prepares == 2 && rift_prepares == 2);
   diorama_on = true;
   RenderPreparation_PrepareSelectedFeatures(&device);
   assert(action_prepares == 2 && interpolation_prepares == 2);

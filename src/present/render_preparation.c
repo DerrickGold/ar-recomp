@@ -7,6 +7,7 @@
 #include "app/settings.h"
 #include "present/preparation_indicator.h"
 #include "diorama/diorama_bg_gpu.h"
+#include "diorama/diorama_astral_rift.h"
 #include "diorama/diorama_effect_backend.h"
 #include "diorama/diorama_frame_generation.h"
 #include "sim/sim3d/sim3d_depth_pass.h"
@@ -46,6 +47,9 @@ static bool s_action_stage_prepared;
 static bool s_interpolation_prepared;
 
 static void PrepareActionStage(ArRenderDevice *device, bool interpolation) {
+  /* Astral Rift uses the built-in triangle pipelines warmed by FinishPreparation.
+   * Decode/upload its art here too, so enabling it or entering 07:08 is cheap. */
+  DioramaAstralRift_Prepare(device);
   DioramaBgGpu_Prepare(device);
   DioramaEffectBackend_IsAvailable(device, kDioramaEffect_PrioritySurface);
   DioramaEffectBackend_PrepareSceneryLight(device);

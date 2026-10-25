@@ -19,6 +19,7 @@ unsigned RoomPreview_Width(void);
 unsigned RoomPreview_Height(void);
 int RoomPreview_CameraX(void);
 int RoomPreview_SetView(float distance, float yaw, float pitch, int aspect_mode, int dynamic_camera);
+void RoomPreview_FinalBattle(int enabled);
 unsigned RoomPreview_Measure(int x, int y, uint32_t frame, int extra, int vertical,
     int width, int height, float zoom, float yaw, float pitch, int skybox, int pixels, unsigned bg);
 int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,

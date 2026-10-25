@@ -359,6 +359,36 @@ F2 remains available for a full snapshot while the overlay is open. The game and
 SNES input stay frozen until the overlay closes. Accepted setting changes are
 written atomically to `settings.ini`; action rows are not persisted.
 
+### Death Heim final battle
+
+With **Action 3D → Scene → Diorama 3D** enabled, turn on **Death Heim final
+battle** to replace room `07:08`'s two native nebula planes with the Astral Rift.
+This optional backdrop adds detailed blue/violet/magenta nebula currents,
+distant ruined celestial arches, tumbling fragments and a cosmic stone floor.
+Independent cloud layers pass in front of the rotating ruins and debris;
+slow light blooms and traveling filaments illuminate small regions inside them.
+The main nebula ribbon flows through separate blue and magenta eddies, with
+faster billowing wisps in front and calmer distant space behind the fighters.
+Energy follows the floor's luminous cracks while the standing surface stays fixed.
+Rolling vapor skims the ledge, while moving clouds and drifting fragments show
+through the dark cavities underneath. A much larger, dim ruin slowly passes
+behind the cloud banks. These ambient cycles run independently of attacks,
+character movement and boss phases.
+The floor follows the player's projection and native standing height through
+camera tilt and zoom. The original sprites and projectiles remain intact.
+
+The setting defaults to **Off** and saves as `death_heim_final_battle` in
+`settings.ini`. It follows native pause and brightness fades. Other rooms,
+flat mode, combat and the separate completion-scene preference are unchanged.
+The scene temporarily overrides skybox/shoebox drawing without changing their
+saved settings. If its textures cannot be prepared, the native backdrop remains.
+
+In the action editor, select **Death Heim · Room 8**, open **Shared renderer**
+and check **Astral Rift (07:08)**. The preview uses the same C renderer, including
+frame scrubbing and camera orbit. This checkbox previews the game preference;
+it does not add a tile/effect record to exported project INIs. Enable the game
+preference separately. The existing player-preview controls work here too.
+
 ### Death Heim completion scene
 
 Enable **Action 3D → Scene → Diorama 3D**. The **Death Heim completion scene**

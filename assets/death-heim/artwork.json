@@ -1,0 +1,31 @@
+{
+  "tool": "Built-in image_gen (imagegen skill)",
+  "reference": "User-provided ChatGPT Image Oct 24, 2026, 06_33_17 PM.png",
+  "usage": "Original artwork derived from the approved reference. No Bayonetta game assets are included.",
+  "packing": "Run python3 tools/build_astral_rift_art.py after replacing an asset. PNGs are decoded/uploaded once; native/WASM consume identical embedded pixels.",
+  "animation_assets_manifest": "activity-prompts.json",
+  "runtime_assets": ["astral-nebula.png", "astral-clouds.png", "astral-ruins.png", "astral-floor.png"],
+  "reference_only_assets": ["astral-arches.png"],
+  "images": [
+    {
+      "path": "assets/death-heim/astral-nebula.png",
+      "transparent_background": false,
+      "prompt": "Use case: precise-object-edit. Asset type: production sky texture for a 3D side-view fantasy boss arena. Input image is the visual target: preserve its exact rich, highly detailed painterly/rendered nebula aesthetic, blue/cyan left through violet to magenta right, contrast, massive scale and lighting. Remove BOTH characters completely, remove the horizontal ground/platform along the bottom completely, and remove ALL gold celestial rings/arches and suspended rock fragments. Fill those removed regions naturally with space and flowing nebula clouds. The result is ONLY the richly textured deep-space environment: towering blue-lit clouds at upper left, huge diagonal ribbon of cobalt/violet cloud dust crossing the middle, radiant magenta storm clouds on the right, small stars and quieter dark indigo negative space at lower center. Keep the nebula as detailed, three-dimensional and luminous as the reference, with dramatic bright filaments and dark cloud interiors, no flat smooth blobs. Wide 16:9 landscape composition. No floor or horizon line, no characters, no rings, no letters, no labels, no border. This is one background texture, not a concept board."
+    },
+    {
+      "path": "assets/death-heim/astral-arches.png",
+      "transparent_background": true,
+      "prompt": "Use case: background-extraction. Asset type: transparent celestial architecture layer for a fantasy game. Input image is the edit/reference target. Extract/reconstruct ONLY the huge ruined golden celestial arches in the upper half of the reference, in exactly the same landscape 16:9 composition and perspective. They are monumental bands of broken ancient gold and bronze with jagged crumbling edges, missing fragments, dark pitted weathered faces, irregular bright ivory-gold illuminated edges and warm glowing fractures. The largest upright tilted arc enters from the top center, sweeps down into the middle right. A second immense oblique ring crosses it horizontally around the upper-middle right, continuing out of the top right. Keep their massive scale and broken three-dimensional stony/metallic structure, not thin clean lines or smooth jewelry. Reconstruct any obscured arc parts naturally but keep large gaps and a ruined silhouette. Include a few tiny floating golden chunks close to the arcs. Background must be actually transparent. No nebula, no sky, no stars, no dust clouds, no floor, no characters, no black backdrop, no text. Keep the lower third entirely transparent. Preserve the reference's arch positions, scale, material and warm lighting."
+    },
+    {
+      "path": "assets/death-heim/astral-floor.png",
+      "transparent_background": true,
+      "prompt": "Use case: precise-object-edit. Asset type: transparent foreground floor strip for a side-view fantasy game, based on the provided reference. Recreate ONLY the empty cosmic stone battle platform along the bottom of the reference. Absolutely no characters or creatures. A long flat walkable horizontal lip, dark indigo rough fractured cosmic stone catching electric blue light on its left, violet at center, fuchsia-magenta on its right. Thin ethereal vapor on the horizon. Beneath the lip, a broad dark jagged rock face threaded with tiny star points and glowing purple mineral cracks, dissolving into a starry void at the bottom. Composition: wide landscape 16:9 image; the perfectly horizontal top of the walkable surface is at exactly 70% of image height, nothing above it apart from a VERY thin delicate mist wisp at the surface; the floor extends edge-to-edge horizontally, the upper 70% of image is empty transparent alpha. At the bottom it tapers/fades to transparent, not a rectangular block. Keep the reference's incredibly detailed crystalline cloud/rock texture and sense of depth, no big boulders breaking the flat walking line. Background actually transparent. No nebula sky, celestial rings, objects, people, letters, text, HUD or border. Intended for compositing behind existing pixel-art fighters."
+    }
+  ],
+  "inspiration_sources": [
+    "https://www.platinumgames.com/official-blog/article/1813",
+    "https://www.platinumgames.com/official-blog/article/1385",
+    "https://www.platinumgames.co.jp/dev-bayonetta/article/27"
+  ]
+}

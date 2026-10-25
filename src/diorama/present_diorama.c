@@ -14,6 +14,7 @@
 #include "app/performance_metrics.h"
 #include "dev/diorama_snapshot_capture.h"
 #include "diorama/diorama.h"
+#include "diorama/diorama_astral_rift.h"
 #include "diorama/diorama_frame_generation.h"
 #include "diorama/diorama_performance.h"
 #include "diorama/diorama_upload.h"
@@ -43,6 +44,7 @@ static int s_completion_art_width, s_completion_art_height;
 static DioramaCameraPresenter s_diorama_camera = DIORAMA_CAMERA_PRESENTER_INIT;
 
 void PresentDiorama_DestroyPlanes(ArRenderDevice *device) {
+  DioramaAstralRift_Reset(device);
   ArRenderDevice_DestroyTexture(device, s_completion_art);
   s_completion_art = ArRenderTexture_Invalid();
   s_completion_art_width = s_completion_art_height = 0;
@@ -772,7 +774,7 @@ retry_projection:;
   CompletionBackdropContext completion = {
       .slot = slot, .projection = &action_projection, .capture = &capture,
       .visible_planes = render.visible_planes, .device = device};
-  const DioramaScene scene = {
+  DioramaScene scene = {
       .render = &render,
       .map_group = slot->diorama_map_group,
       .map_number = slot->diorama_map_number,
@@ -800,6 +802,12 @@ retry_projection:;
       .backdrop = completion_world ? DrawCompletionBackdrop : NULL,
       .backdrop_userdata = &completion,
   };
+  DioramaAstralRiftFrame rift = {.device=device, .yaw=view.camera.tilt_y,
+      .pitch=view.camera.tilt_x, .tick=slot->death_heim_final_battle_tick,
+      .inidisp=slot->inidisp, .projection=&action_projection,
+      .floor_capture_x=128-slot->bg1_camera_x+slot->ws_extra,
+      .floor_capture_y=kDioramaAstralFloorWorldY-slot->bg1_camera_y+slot->ws_extra_top};
+  DioramaAstralRift_Attach(slot->death_heim_final_battle, &scene, &render, &rift);
   DioramaSnapshotCapture_Write(slot, &capture, &view, &scene);
   const PresentationOutcome diorama = Diorama_Composite(
       device, &capture, &view, &scene, &action_projection);

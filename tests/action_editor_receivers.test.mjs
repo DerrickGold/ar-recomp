@@ -67,10 +67,10 @@ for(const [kind,file,width,height] of [
 console.log('Region handles: resized complete fields pass the native/WASM configuration contract.');
 configure(noEffects);
 let camera=[256,160],extra=120,vertical=64,baselineDistance=0;
-function render(view=[960,600,1,0,0,1,0]) {
+function render(view=[960,600,1,0,0,1,0],tick=37) {
   assert.equal(api.RoomPreview_SetView(baselineDistance,0,0,2,1),1);
   draws.length=uploads.length=0;
-  assert.equal(api.RoomPreview_Render(...camera,37,extra,vertical,...view),1);
+  assert.equal(api.RoomPreview_Render(...camera,tick,extra,vertical,...view),1);
   assert.equal(effect,-1,'shader bindings restored');
 }
 api.RoomPreview_EnableEffects(0);render();
@@ -372,6 +372,71 @@ for(const view of [[960,600,1,0,0,1,0],[960,540,1,0,0,0,0],[800,600,1.2,.15,-.1,
   assert(visible,`soft light must cover the visible floor before its centre enters: ${view} y=${y}`);
  }
 console.log('Kassandora 2/5 soft light: continuous partial visibility across camera-edge entry, three aspects, tilt and background modes.');
+// The optional final backdrop shares the live renderer and must not alter the
+// player stand-in, camera projection, or the return to native room rendering.
+const finalRoom=data.rooms.find(r=>r.group===7&&r.map===8);
+assert.equal(send(encode(data,blobs,finalRoom),api.RoomPreview_Load),1);
+assert.equal(send(Buffer.from('[layers:07:08]\n'),api.RoomPreview_Configure),1);
+assert.equal(send(art,api.RoomPreview_LoadPlayer),1);
+api.RoomPreview_EnableEffects(0);
+assert.equal(api.RoomPreview_ReceiverStyle(0,0),1);
+assert.equal(api.RoomPreview_SetReceivers(1,96,200,0,0),1);
+camera=[0,0];baselineDistance=3.25;
+for (const view of [[800,600,1,0,0,0,0],[960,540,1,0,0,1,0],[960,600,1.4,.3,-.2,2,0]]) {
+  api.RoomPreview_FinalBattle(0);render(view);render(view);
+  const native=structuredClone(draws);
+  api.RoomPreview_FinalBattle(1);render(view);
+  assert(draws.some(d=>d.v.length>=600*8&&d.indices.length>d.v.length/2),
+    'shared preview draws indexed nebula geometry');
+  const allocated=creates;render(view);
+  assert.equal(creates,allocated,'retained rift preview creates no resources');
+  assert.equal(uploads.length,0,'retained rift preview uploads no textures');
+  const background=structuredClone(draws.filter(d=>d.indices.length>100));
+  const nebula=structuredClone(draws.find(d=>d.indices.length===48*27*6));
+  assert(nebula,'main nebula has its own retained surface');
+  const uv=v=>v.filter((_,i)=>i%8>=6);
+  const nebulaUV=uv(nebula.v);
+  const floor=draws.find(d=>d.indices.length===48*10*6);
+  assert(floor,'floor is projected with the scene');
+  const floorArt=textures.get(floor.id);
+  const alphaRow=fraction=>Array.from(floorArt.pixels.subarray(
+    Math.floor(floorArt.h*fraction)*floorArt.w,(Math.floor(floorArt.h*fraction)+1)*floorArt.w),p=>p>>>24);
+  assert(alphaRow(.68).reduce((a,b)=>a+b,0)/floorArt.w>240,'walking ledge stays opaque');
+  assert(alphaRow(.78).filter(a=>a<128).length>floorArt.w/4,
+    'dark underside cavities reveal the moving space beneath the rock');
+  const position=v=>v.filter((_,i)=>i%8<2);
+  const standingSurface=position(floor.v);
+  render(view,157);
+  const movingNebula=draws.find(d=>d.id===nebula.id);
+  assert.deepEqual(position(movingNebula.v),position(nebula.v),
+    'nebula currents move inside a fixed screen surface');
+  const movedUV=uv(movingNebula.v);
+  assert(Math.max(...movedUV.map((v,i)=>Math.abs(v-nebulaUV[i])))>.004,
+    'main nebula must visibly flow within two seconds, not only its foreground wisps');
+  assert(movedUV.every(v=>v>0&&v<1),'currents retain artwork coverage at every edge');
+  render(view,600);
+  assert.notDeepEqual(draws.filter(d=>d.indices.length>100),background,'celestial geometry animates');
+  assert.deepEqual(position(draws.find(d=>d.id===floor.id).v),standingSurface,
+    'floor energy must never move the standing surface');
+  assert.equal(creates,allocated,'animation creates no resources');
+  const pause=structuredClone(draws);render(view,600);
+  assert.deepEqual(draws,pause,'same paused/scrubbed tick reproduces every draw');
+  assert.equal(uploads.length,0,'paused animation uploads no textures');
+  const environmentIds=new Set(draws.filter(d=>d.indices.length>=100&&d.effect===-1).map(d=>d.id));
+  const environment=structuredClone(draws.filter(d=>environmentIds.has(d.id)&&d.effect===-1));
+  assert.equal(api.RoomPreview_SetReceivers(1,192,144,0,0),1);render(view,600);
+  assert.deepEqual(draws.filter(d=>environmentIds.has(d.id)&&d.effect===-1),environment,
+    'ambient spectacle must run independently of character position');
+  assert.equal(api.RoomPreview_SetReceivers(1,96,200,0,0),1);render(view,600);
+  render(view,65535);
+  const endUV=uv(draws.find(d=>d.id===nebula.id).v);
+  render(view,0);
+  assert(Math.max(...uv(draws.find(d=>d.id===nebula.id).v)
+    .map((v,i)=>Math.abs(v-endUV[i])))<.001,'nebula remains continuous when its clock wraps');
+  api.RoomPreview_FinalBattle(0);render(view);render(view);
+  assert.deepEqual(draws,native,'disabling the rift restores identical native geometry and player');
+}
+console.log('Astral Rift: native fallback, player, aspect/orbit, and allocation/upload reuse passed.');
 assert.equal(api.RoomPreview_SetReceivers(0,0,0,0,0),1);api.RoomPreview_Reset();
 assert.equal(textures.size,0,'room reset releases all preview textures');
 console.log('Shared player preview: native art, receiver masks, dimming/torch/rim, picking, mirroring and upload reuse passed.');

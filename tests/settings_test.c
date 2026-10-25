@@ -115,8 +115,8 @@ static void TestDefaultsAndMetadata(void) {
    * Remember last town adds a native/enhanced QoL preference; native menu
    * quick use adds an independent QoL toggle. Save editing adds Apply and restart. */
   /* One completion scene switch plus nine internal effect overrides; one button-prompt representation preference.
-   * Diorama adds its skybox scroll choice. */
-  const int expected_descriptors = 328;
+   * Diorama adds its skybox scroll choice and opt-in final-battle scene. */
+  const int expected_descriptors = 329;
   if (g_setting_desc_count != expected_descriptors)
     fprintf(stderr, "Setting descriptors: expected %d, got %d\n",
             expected_descriptors, g_setting_desc_count);
@@ -2715,6 +2715,9 @@ static void TestAutoBootPreservesDisplayPreferences(void) {
 static void TestCompletionSettings(void) {
   ClearSettingsEnv();
   Settings_Init();
+  const SettingDesc *battle=Settings_Find("death_heim_final_battle");
+  CHECK(battle && !g_settings.death_heim_final_battle && !Settings_IsAvailable(battle));
+  CHECK(Settings_IsMenuVisible(battle) && !Settings_IsDebugOnly(battle));
   const char *keys[]={"death_heim_completion_world","death_heim_completion_waves",
     "death_heim_completion_pixel_water","death_heim_completion_clouds",
     "death_heim_completion_light_shafts","death_heim_completion_cherubs",
@@ -2731,6 +2734,8 @@ static void TestCompletionSettings(void) {
     }
   }
   g_settings.diorama_mode = true;
+  CHECK(Settings_IsAvailable(battle));
+  CHECK(Settings_SetLong(battle,1)==kSettingChange_Applied);
   g_settings.sim3d_mode=g_settings.sim3d_world_navigation=false;
   for (int skybox = kDioramaSky_Off; skybox < kDioramaSky_Count; skybox++) {
     g_settings.diorama_skybox = skybox;
@@ -2743,6 +2748,7 @@ static void TestCompletionSettings(void) {
   CHECK(Settings_SetLong(Settings_Find(keys[9]),0)==kSettingChange_Applied);
   const char *path="actraiser-completion-settings-test.ini";
   CHECK(WriteTextFile(path, "diorama_mode = On\n"
+                            "death_heim_final_battle = On\n"
                             "diorama_skybox = Off\n"
                             "death_heim_completion_feathers = Off\n"
                             "death_heim_completion_sun_glints = Off\n"));
@@ -2755,6 +2761,7 @@ static void TestCompletionSettings(void) {
   CHECK(Settings_Save(path));
   Settings_InitWithFile(path);
   CHECK(g_settings.death_heim_completion_world && !g_settings.death_heim_completion_feathers);
+  CHECK(g_settings.death_heim_final_battle);
   CHECK(!g_settings.death_heim_completion_sun_glints);
   CHECK(!g_settings.sim3d_mode && !g_settings.sim3d_world_navigation);
   CHECK(g_settings.diorama_skybox == kDioramaSky_Off);

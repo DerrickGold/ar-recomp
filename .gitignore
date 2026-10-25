@@ -65,6 +65,7 @@ game-assets/manifest.ini
 # example. All user publications and ROM-derived backups remain ignored.
 !examples/example.fr-ca.arlang
 !assets/*.png
+!assets/death-heim/astral-*.png
 !installer/internal/builder/assets/title-logo.png
 !installer/internal/builder/assets/title-logo-ja.png
 

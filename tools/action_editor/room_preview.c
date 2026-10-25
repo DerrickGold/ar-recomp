@@ -7,6 +7,7 @@
 #include "receiver_preview.h"
 #include "action/action_effect_source.h"
 #include "diorama/diorama_snapshot.h"
+#include "diorama/diorama_astral_rift.h"
 #include "diorama/diorama_rom_backdrop.h"
 #include "action/action_decoration_pass.h"
 #include "action/action_environment_exposure.h"
@@ -41,6 +42,9 @@ static EditorRoomCamera s_camera;
 static DioramaCameraPose s_baseline = {.distance = 3.25f};
 static int s_aspect_mode = 1;
 static bool s_dynamic_camera = true;
+static bool s_final_battle;
+
+void RoomPreview_FinalBattle(int enabled) { s_final_battle = enabled != 0; }
 
 /* 0 native 4:3, 1 fixed wide ratio, 2 Auto/custom monitor, 3 Stretch.
  * Capture budgets are independent of the display crop, just as in the game. */
@@ -293,6 +297,7 @@ int RoomPreview_CameraX(void) { return s_cached ? s_x : 0; }
 unsigned RoomPreview_Uploads(void) { return s_uploads; }
 void RoomPreview_Reset(void) {
   ArRenderDevice *device = DioramaPreview_Device();
+  DioramaAstralRift_Reset(device);
   Diorama_ResetCompositorResources(device);
   for (unsigned i = 0; i < kDioramaPlane_Count; ++i) {
     ArRenderDevice_DestroyTexture(device, s_textures[i]);
@@ -743,6 +748,12 @@ int RoomPreview_Render(int x, int y, uint32_t frame, int extra, int vertical,
     scene.plane_effect = DrawPlaneEffects; scene.plane_effect_userdata = &effects;
   }
   DioramaProjection projection;
+  DioramaAstralRiftFrame rift = {.device=DioramaPreview_Device(),
+      .yaw=view.camera.tilt_y, .pitch=view.camera.tilt_x,
+      .tick=(uint16_t)frame, .inidisp=15, .projection=&projection,
+      .floor_capture_x=128-environment->camera_x[0]+extra,
+      .floor_capture_y=kDioramaAstralFloorWorldY-environment->camera_y[0]+capture.authentic_y0};
+  DioramaAstralRift_Attach(s_final_battle,&scene,&options,&rift);
   if (!PresentationOutcome_IsUsable(Diorama_Composite(
       DioramaPreview_Device(), &capture, &view, &scene, &projection)) || !effects.valid) return 0;
   s_receiver_projection=projection;

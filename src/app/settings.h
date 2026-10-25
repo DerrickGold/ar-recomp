@@ -504,6 +504,7 @@ typedef struct Settings {
   bool sim3d_sky_palace; /* Globe behind the native Palace; navigation gate required. */
   bool sim3d_sky_palace_volumetric;
   /* Action-room presentation, independent of the SIM/world feature switches. */
+  bool death_heim_final_battle;
   bool death_heim_completion_world, death_heim_completion_waves;
   bool death_heim_completion_pixel_water, death_heim_completion_clouds;
   bool death_heim_completion_light_shafts, death_heim_completion_cherubs;
