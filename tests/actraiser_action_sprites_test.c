@@ -1,6 +1,7 @@
 /* Exercise the production action scan/emitter with synthetic object records,
  * composition data and a runner metadata sink; no ROM or GPU is required. */
 #include "actraiser/actraiser_rtl.h"
+#include "actraiser/actraiser_ar2_master.h"
 #include "actraiser/actraiser_action_visibility.h"
 #include "actraiser/actraiser_sprite_ownership.h"
 #include "actraiser/regional/actraiser_actor_art.h"
@@ -81,6 +82,14 @@ RecompReturn bank_00_923A_M0X0(CpuState *cpu) {
   cpu->Y = 0;
   cpu->S += 2;
   return RECOMP_RETURN_NORMAL;
+}
+void ActRaiserAr2Master_UpdatePresentation(const CpuState *cpu) { (void)cpu; }
+bool ActRaiserAr2Master_DrawObject(const CpuState *cpu, uint16_t object,
+                                   ActRaiserAr2MasterDraw *out) {
+  (void)cpu;
+  (void)object;
+  if (out) out->count = 0;
+  return false;
 }
 bool ActRaiserActorArt_Active(void) { return s_regional_art; }
 bool ActRaiserActorArt_Draw(uint16_t base, uint16_t composition, unsigned visual,

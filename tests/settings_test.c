@@ -116,7 +116,7 @@ static void TestDefaultsAndMetadata(void) {
    * quick use adds an independent QoL toggle. Save editing adds Apply and restart. */
   /* One completion scene switch plus nine internal effect overrides; one button-prompt representation preference.
    * Diorama adds its skybox scroll choice and opt-in final-battle scene. */
-  const int expected_descriptors = 329;
+  const int expected_descriptors = 330; /* Optional AR2 Master. */
   if (g_setting_desc_count != expected_descriptors)
     fprintf(stderr, "Setting descriptors: expected %d, got %d\n",
             expected_descriptors, g_setting_desc_count);
@@ -2770,11 +2770,28 @@ static void TestCompletionSettings(void) {
   remove(path);
 }
 
+static void TestAr2MasterSetting(void) {
+  Settings_Init();
+  const SettingDesc *desc = Settings_Find("ar2_master");
+  CHECK(desc && desc->category == kSettingCat_Enhancements);
+  CHECK(desc->apply == kApply_Passive && !g_settings.ar2_master);
+  Settings_SetAr2MasterAvailable(false);
+  CHECK(!Settings_IsAvailable(desc));
+  Settings_SetAr2MasterAvailable(true);
+  CHECK(Settings_IsAvailable(desc) && Settings_IsMenuVisible(desc));
+  CHECK(Settings_SetLong(desc, 1) == kSettingChange_Applied);
+  CHECK(g_settings.ar2_master);
+  CHECK(Settings_SetLong(desc, 0) == kSettingChange_Applied);
+  CHECK(!g_settings.ar2_master);
+  Settings_SetAr2MasterAvailable(false);
+}
+
 int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--dump-ui-catalog")) {
     DumpInterfaceInventory();
     return 0;
   }
+  TestAr2MasterSetting();
   TestLocalizationPackIdentity();
   TestLocalizationPreferences();
   TestPersistenceCanBeDisabled();

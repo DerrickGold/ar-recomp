@@ -440,6 +440,7 @@ typedef struct Settings {
    * deliberately kept private to ActRaiser_ApplyCheats, not stored here. */
   bool cheat_all_magic;
   bool cheat_ranged_sword;
+  bool ar2_master; /* Optional Workshop character; switches in the current act. */
   int  cheat_inf_mp;
   bool cheat_inf_sp;
   bool cheat_angel_hp;
@@ -854,6 +855,7 @@ int Settings_AudioFrequencyHz(void);
 /* HD replacements are only actionable when at least one manifest image was
  * decoded and uploaded. The host publishes that resource state after load. */
 void Settings_SetHdReplacementsAvailable(bool available);
+void Settings_SetAr2MasterAvailable(bool available);
 
 /* Backing pixels per window point for the window's current display
  * (SDL_GetWindowPixelDensity), pushed from host_display.c. */

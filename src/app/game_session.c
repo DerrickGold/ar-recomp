@@ -1,3 +1,4 @@
+#include "actraiser/actraiser_ar2_master.h"
 #include "app/game_session.h"
 #include "action/action_effect_manifest.h"
 #include "app/game_loop.h"
@@ -136,6 +137,8 @@ static void StartRunner(const GameSessionConfig *config) {
   /* Runtime clocks are process globals; a replacement runner starts at the
    * same power-on boundary as the initial session. SRAM is loaded below. */
   RtlReset(1);
+  ActRaiserAr2Master_Load("game-assets/imports/ar2-master.armaster");
+  Settings_SetAr2MasterAvailable(ActRaiserAr2Master_Available());
   if (!RuntimeDiagnostics_Bind(RtlGameRunner()))
     Die("runner diagnostics observer bind failed");
   if (!NativeAudioTrace_Init(RtlGameRunner()))
@@ -281,6 +284,8 @@ static GameSessionResult StopSession(void) {
   ActRaiser_DestroyGameCoroutine();
   HostInput_EndSession();
   RuntimeDiagnostics_Unbind();
+  ActRaiserAr2Master_Shutdown();
+  Settings_SetAr2MasterAvailable(false);
   SnesShutdown();
   PresentationTextures_Destroy();
   HostFrameSurfaces_ReleaseDioramaPlanes();

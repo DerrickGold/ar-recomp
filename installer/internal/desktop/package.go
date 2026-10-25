@@ -191,7 +191,7 @@ func stageSeed(root, resources string, embedded ...fs.FS) error {
 			}
 		}
 	}
-	for _, leaf := range []string{"fonts", "hd", "audio", "languages/native-us", "languages/packs"} {
+	for _, leaf := range []string{"fonts", "hd", "audio", "imports", "languages/native-us", "languages/packs"} {
 		source := filepath.Join(root, "game-assets", leaf)
 		if _, err := os.Stat(source); errors.Is(err, os.ErrNotExist) {
 			continue

@@ -23,6 +23,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RULES = {
+    'actraiser/actraiser_ar2_master_internal.h': [
+        'src/actraiser/actraiser_ar2_master.c',
+        'src/actraiser/actraiser_ar2_master_presentation.c'],
     'render/localized_text_resources_internal.h': [
         'src/render/localized_text_resources.c', 'src/render/localized_text_presenter.c'],
     'present/present_internal.h': [

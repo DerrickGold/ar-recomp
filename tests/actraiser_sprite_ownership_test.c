@@ -1,3 +1,4 @@
+#include "actraiser/actraiser_ar2_master.h"
 #include "actraiser/actraiser_sprite_ownership.h"
 #include "actraiser_game.h"
 #include "snesrecomp/game/cpu.h"
@@ -5,7 +6,7 @@
 #include <string.h>
 
 uint8 g_ram[kActRaiserWramSize];
-static unsigned failures, builds, uploads;
+static unsigned failures, builds, uploads, ar2_uploads;
 static RecompReturn native_result = RECOMP_RETURN_NORMAL;
 static CpuState native_input;
 #define CHECK(x)                                                                                   \
@@ -37,6 +38,11 @@ RecompReturn bank_01_ACD9_M0X0(CpuState *cpu) {
   return native_result;
 }
 RecompReturn bank_01_ACD9_M1X0(CpuState *cpu) { return bank_01_ACD9_M0X0(cpu); }
+/* The AR2 master streams its tiles in the same vblank as a completed upload. */
+void ActRaiserAr2Master_UploadVideo(CpuState *cpu) {
+  CHECK(cpu != NULL);
+  ++ar2_uploads;
+}
 RecompReturn bank_02_ACA3_M1X0(CpuState *cpu) {
   ++uploads;
   CHECK(!ActRaiser_SpriteUploadEntry(cpu));
@@ -60,7 +66,7 @@ static void TestNativeWrappers(void) {
     native_input = cpu;
     CHECK(ActRaiser_SpriteUploadEntry(&cpu));
     CHECK(ActRaiser_SpriteUpload(&cpu) == RECOMP_RETURN_NORMAL);
-    CHECK(cpu.S == 0x1e2 && uploads == m + 1);
+    CHECK(cpu.S == 0x1e2 && uploads == m + 1 && ar2_uploads == m + 1);
     Expect(0, 7, kActRaiserSprite_HudIcon, 6, 4);
   }
   CHECK(!ActRaiser_SpriteUploadEntry(NULL));
@@ -87,6 +93,10 @@ static void TestNativeWrappers(void) {
   native_result = RECOMP_RETURN_TAILCALL;
   CHECK(ActRaiser_SimSpriteBuild(&cpu) == native_result);
   Expect(0, 7, kActRaiserSprite_HudIcon, 0, 0);
+  cpu = (CpuState){.PB = 2, .m_flag = 1, .S = 0x1e0};
+  native_input = cpu;
+  CHECK(ActRaiser_SpriteUpload(&cpu) == native_result);
+  CHECK(ar2_uploads == 2); /* an unfinished upload streams nothing */
   native_result = RECOMP_RETURN_NORMAL;
 }
 

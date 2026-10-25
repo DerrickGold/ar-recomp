@@ -390,6 +390,10 @@ typedef enum ActRaiserActionObjectField {
   kActRaiserActionObject_Visual = 0x22,
   kActRaiserActionObject_Wait = 0x24,
   kActRaiserActionObject_FlipAttributes = 0x28,
+  /* Contact damage dealt to the player and hit points, copied from spawn
+   * record bytes +7/+8 by $00:95F0; $8538 children start with zero HP. */
+  kActRaiserActionObject_Attack = 0x2A,
+  kActRaiserActionObject_HitPoints = 0x2C,
   kActRaiserActionObject_Flags = 0x30,
   kActRaiserActionObject_SourceDescriptor = 0x32,
   kActRaiserActionObject_LocalCounter = 0x38,

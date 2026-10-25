@@ -139,7 +139,7 @@
 
   <section class="panel" id="panel-assets" role="tabpanel" aria-labelledby="tab-assets" hidden>
     <div class="page-heading"><div><p class="eyebrow" data-i18n="builder.assets.eyebrow">SET THE STAGE</p><h1 data-i18n="builder.assets.title">Sights &amp; sounds</h1><p data-i18n="builder.assets.intro">Choose the title treatment, audition music from every realm, and save the arrangement for your next journey.</p></div></div>
-      <div class="asset-categories" aria-label="Asset categories" data-i18n-aria="builder.assets.categories"><button type="button" data-asset-category="music" aria-pressed="true"><span data-i18n="builder.assets.music">Music</span> <span class="count">17</span></button><button type="button" data-asset-category="title" aria-pressed="false" data-i18n="builder.assets.title_art">Title artwork</button><button type="button" data-asset-category="regions" aria-pressed="false" data-i18n="builder.media.category">Regional media</button></div>
+      <div class="asset-categories" aria-label="Asset categories" data-i18n-aria="builder.assets.categories"><button type="button" data-asset-category="music" aria-pressed="true"><span data-i18n="builder.assets.music">Music</span> <span class="count">17</span></button><button type="button" data-asset-category="title" aria-pressed="false" data-i18n="builder.assets.title_art">Title artwork</button><button type="button" data-asset-category="regions" aria-pressed="false" data-i18n="builder.media.category">Regional media</button><button type="button" data-asset-category="imports" aria-pressed="false" data-i18n="builder.imports.category">Game imports</button></div>
     <form id="assets-form">
       <div class="asset-bar" id="asset-bar" data-dirty="false">
         <div class="asset-bar-text">
@@ -198,6 +198,18 @@
 
       <div id="asset-state" role="status" hidden></div>
       <p class="section-note" data-i18n="builder.assets.restart_note">Saved changes take effect the next time the game starts.</p>
+    </form>
+    <form id="game-imports-form" class="regional-media-card" hidden>
+      <h2 data-i18n="builder.imports.title">Import game content</h2>
+      <p data-i18n="builder.imports.help">Choose a supported content set to add from a ROM you provide. Imports add assets and features to your local game.</p>
+      <label for="game-imports-content" data-i18n="builder.imports.content">Content to import</label>
+      <select id="game-imports-content" required></select>
+      <p id="game-imports-help"></p>
+      <label for="game-imports-file" data-i18n="builder.imports.file">Source game ROM</label>
+      <input id="game-imports-file" type="file" accept=".sfc,.smc" required>
+      <div class="regional-media-actions"><button type="submit" data-i18n="builder.media.install">Extract &amp; install</button><button id="game-imports-refresh" type="button" class="secondary" data-i18n="builder.media.refresh">Refresh installed files</button></div>
+      <p id="game-imports-status" role="status" aria-live="polite"></p>
+      <p id="game-imports-next" class="section-note"></p>
     </form>
     <form id="regional-media-form" class="regional-media-card" hidden>
       <h2 data-i18n="builder.media.title">Bring another region’s sights and sounds along</h2>
@@ -272,6 +284,7 @@
 </dialog>
 <script src="builder/app.js" defer></script>
 <script src="builder/regional-media.js" defer></script>
+<script src="builder/game-imports.js" defer></script>
 <script src="builder/install-import.js" defer></script>
 <dialog id="game-folder-dialog" aria-labelledby="game-folder-title"><h2 id="game-folder-title" data-i18n="builder.output.change">Change game folder…</h2><p data-i18n="builder.output.next_launch">Changes take effect after you close and reopen the Builder. This session keeps its current folder.</p><iframe id="game-folder-frame" title="Choose game folder" data-i18n-title="builder.output.choose"></iframe><div class="dialog-actions"><button class="secondary" type="button" id="game-folder-dismiss" data-i18n="builder.output.close">Close</button></div></dialog>
 <script src="builder/game-folder.js" defer></script>

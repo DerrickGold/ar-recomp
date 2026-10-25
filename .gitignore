@@ -61,6 +61,7 @@ game-assets/manifest.ini
 *.arlang
 # Private, validated regional graphics extracted from the player's own ROMs.
 *.armedia
+*.armaster
 # Two independently authored demo messages, validated against the source
 # example. All user publications and ROM-derived backups remain ignored.
 !examples/example.fr-ca.arlang

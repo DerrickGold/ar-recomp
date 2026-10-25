@@ -279,7 +279,8 @@ document.querySelectorAll("[data-asset-category]").forEach(button=>button.addEve
   document.querySelectorAll("[data-asset-category]").forEach(b=>b.setAttribute("aria-pressed",String(b===button)));
   document.querySelector("#asset-music-view").hidden=category!=="music";
   document.querySelector("#asset-title-view").hidden=category!=="title";
-  assetForm.hidden=category==="regions";
+  assetForm.hidden=category==="regions"||category==="imports";
+  document.querySelector("#game-imports-form").hidden=category!=="imports";
   document.querySelector("#regional-media-form").hidden=category!=="regions";
   if(category!=="music") assetForm.querySelectorAll("audio").forEach(audio=>audio.pause());
 }));

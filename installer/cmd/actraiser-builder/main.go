@@ -57,6 +57,8 @@ func run(args []string) error {
 		return tooling.RunLocalizationExtractCommand(args[1:], ".", os.Stdout)
 	case "localization-graphics":
 		return tooling.RunLocalizationGraphicsCommand(args[1:], ".", os.Stdout)
+	case "game-import":
+		return runGameImport(args[1:])
 	case "regional-media":
 		return tooling.RunRegionalMediaCommand(args[1:], ".", os.Stdout)
 	case "native-source":
@@ -90,6 +92,7 @@ Commands:
   language               Validate, author, package, install, or prepare .arlang packs
   localization-extract   Extract a private source pack or localization evidence
   localization-graphics  Extract regional graphical references to a private ZIP
+  game-import            Import a supported content set from a local game ROM
   regional-media         Extract reviewed regional assets to a private .armedia file
   native-source          Ensure the runtime Native US source from a local ROM
   audio-preview          Render local ActRaiser soundtrack preview WAVs

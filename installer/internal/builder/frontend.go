@@ -24,6 +24,7 @@ func serveFrontend(w http.ResponseWriter, r *http.Request, endpoint string) {
 		"builder/install-import.js": "web/install-import.js",
 		"builder/game-folder.js":    "web/game-folder.js",
 		"builder/regional-media.js": "web/regional-media.js",
+		"builder/game-imports.js":   "web/game-imports.js",
 		"builder/feedback.js":       "feedback.js",
 		"builder/feedback.css":      "feedback.css",
 		"builder/file-input.js":     "web/file-input.js",

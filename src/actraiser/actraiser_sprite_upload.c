@@ -1,3 +1,4 @@
+#include "actraiser/actraiser_ar2_master.h"
 #include "actraiser/actraiser_sprite_ownership.h"
 #include "actraiser_game.h"
 #include "snesrecomp/game/cpu.h"
@@ -40,10 +41,14 @@ RecompReturn ActRaiser_SpriteUpload(CpuState *cpu) {
   s_entering_upload = true;
   const RecompReturn result = bank_02_ACA3_M1X0(cpu);
   s_entering_upload = false;
-  if (result == RECOMP_RETURN_NORMAL)
+  if (result == RECOMP_RETURN_NORMAL) {
     ActRaiserSpriteOwnership_Upload(g_ram[kActRaiserWram_MapGroup],
         g_ram[kActRaiserWram_CurrentMap], g_ram + kActRaiserOamShadow);
-  else
+    /* Same vblank as the OAM it belongs to; later NMI transfers set their
+     * own VRAM and CGRAM addresses. */
+    ActRaiserAr2Master_UploadVideo(cpu);
+  } else {
     ActRaiserSpriteOwnership_Reset();
+  }
   return result;
 }

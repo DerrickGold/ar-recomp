@@ -23,6 +23,7 @@
 #include "action/action_obj_apron.h"
 #include "actraiser_game.h"
 #include "actraiser/actraiser_action_visibility.h"
+#include "actraiser/actraiser_ar2_master.h"
 #include "actraiser/actraiser_sprite_ownership.h"
 #include "actraiser/actraiser_rtl.h"
 #include "actraiser/regional/actraiser_actor_art.h"
@@ -608,6 +609,7 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
   }
 
   ActRaiserSpriteOwnership_Record(kActRaiserSprite_HudIcon, 0, cpu->Y);
+  ActRaiserAr2Master_UpdatePresentation(cpu);
 
   uint16 object_address = kActRaiserWram_ActionObjectTable;
   uint16 oam_offset = cpu->Y;
@@ -893,6 +895,8 @@ RecompReturn ActRaiser_ObjectVisibilityScanWide(CpuState *cpu) {
  * M=0, X=0, X=object base, Y=next OAM-shadow byte offset. Return preserves
  * the object in X, advances Y, and reports OAM-full through carry. */
 RecompReturn ActRaiser_BuildObjectSprites(CpuState *cpu) {
+  if (cpu->X == kActRaiserWram_PlayerObject)
+    ActRaiserAr2Master_UpdatePresentation(cpu);
   return ws_build_action_object_sprites(cpu, kActionSpritePass_All);
 }
 
@@ -972,6 +976,9 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
           cpu_read16(cpu, cpu->DB, object_address + kActRaiserActionObject_Visual), &regional_draw);
   if (regional && !regional_draw.attributes_only)
     component_count = (uint16)regional_draw.picture.count;
+  ActRaiserAr2MasterDraw ar2_draw;
+  const bool ar2_master = ActRaiserAr2Master_DrawObject(cpu, object_address, &ar2_draw);
+  if (ar2_master) component_count = (uint16)ar2_draw.count;
   unsigned component_index = 0;
   ws_dp16w(cpu, kSpriteDp_ComponentCount, component_count);
 
@@ -1024,7 +1031,13 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
     const bool flip_x = (flip_attributes & kDefinitionFlipHorizontal) != 0;
     const bool flip_y = (flip_attributes & kDefinitionFlipVertical) != 0;
     ActRaiserActorArtPart part = {0};
-    if (!regional || regional_draw.attributes_only) {
+    if (ar2_master) {
+      const ActRaiserAr2MasterPart *source = &ar2_draw.parts[component_index];
+      part.x = source->x[flip_x];
+      part.y = source->y[flip_y];
+      part.attributes = source->attributes;
+      part.large = source->large;
+    } else if (!regional || regional_draw.attributes_only) {
       part.x = cpu_read8(cpu, definition_bank,
           (uint16)(definition_address + kActionPartXOffsets + flip_x));
       part.y = cpu_read8(cpu, definition_bank,
@@ -1034,7 +1047,7 @@ static RecompReturn ws_build_action_object_sprites(CpuState *cpu, ActionSpritePa
       part.large = (cpu_read8(cpu, definition_bank,
           (uint16)(definition_address + kActionPartFlags)) & 1) != 0;
     }
-    if (regional)
+    if (regional && !ar2_master)
       ActRaiserActorArt_ResolvePart(&regional_draw, component_index, flip_x,
           flip_y, native_left, native_top, &part);
     const int component_offset_y = part.y;

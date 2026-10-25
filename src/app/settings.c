@@ -757,6 +757,10 @@ static bool WindowScaleAvailable(void) {
   return g_settings.window_mode == kWindowMode_Windowed;
 }
 
+static bool s_ar2_master_available;
+static bool Ar2MasterAvailable(void) { return s_ar2_master_available; }
+void Settings_SetAr2MasterAvailable(bool available) { s_ar2_master_available = available; }
+
 static bool s_hd_replacements_available;
 static bool HdReplacementsAvailable(void) {
   return s_hd_replacements_available;
@@ -2469,6 +2473,15 @@ const SettingDesc g_setting_descs[] = {
                "inspector. Off keeps the menu to the master toggles and major "
                "on/off effects.",
                kSettingCat_Extras, 0, false, NULL, NULL),
+  { .key = "ar2_master", .env = "AR_AR2_MASTER", .label = "ActRaiser 2 Master",
+    .tooltip = "Switch between the original Master and ActRaiser 2's Master, including "
+               "gliding, diving and sword moves. Applies during the current level. "
+               "Import an ActRaiser 2 (USA) ROM in Workshop > Sights & sounds > "
+               "Game imports first.",
+    .type = kSettingType_Bool, .apply = kApply_Passive,
+    .category = kSettingCat_Enhancements, .field = &g_settings.ar2_master,
+    .defval = 0, .maxval = 1, .step = 1, .available = Ar2MasterAvailable,
+    .modern_env = true, .game_change_kind = kSettingGameChange_QualityOfLife },
   GAME_CHANGE_BOOL_SETTING(
       native_menu_quick_use, "AR_NATIVE_MENU_QUICK_USE", "Native menu quick use",
       "In the Original SIM menu, Use skips optional explanations and goes to the "

@@ -3836,6 +3836,23 @@ if(BUILD_TESTING)
         ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
     add_test(NAME actraiser_magic_gesture COMMAND actraiser_magic_gesture_test)
 
+    # Shared pure character-pack validation; all ordinary fixtures are synthetic.
+    add_library(actraiser_ar2_master_test_support STATIC
+        src/actraiser/actraiser_ar2_master_assets.c
+        src/actraiser/actraiser_ar2_master_pack.c
+        ${SNESRECOMP_RUNNER_ROOT}/src/support/sha256.c)
+    target_link_libraries(actraiser_ar2_master_test_support PUBLIC actraiser_rom_decode_test_support)
+    target_include_directories(actraiser_ar2_master_test_support PUBLIC
+        ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/tests ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    add_executable(actraiser_ar2_master_test tests/actraiser_ar2_master_test.c)
+    target_link_libraries(actraiser_ar2_master_test PRIVATE actraiser_ar2_master_test_support)
+    add_test(NAME actraiser_ar2_master COMMAND actraiser_ar2_master_test)
+    add_executable(actraiser_ar2_master_runtime_test tests/actraiser_ar2_master_runtime_test.c
+        src/actraiser/actraiser_ar2_master.c
+        src/actraiser/actraiser_ar2_master_presentation.c)
+    target_link_libraries(actraiser_ar2_master_runtime_test PRIVATE actraiser_ar2_master_test_support)
+    add_test(NAME actraiser_ar2_master_runtime COMMAND actraiser_ar2_master_runtime_test)
+
     add_executable(actraiser_speed_selector_test tests/actraiser_speed_selector_test.c
         src/actraiser/actraiser_speed_selector.c
        )

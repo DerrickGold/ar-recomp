@@ -261,6 +261,7 @@ type application struct {
 	// second request from rebuilding a manifest from stale text.
 	assetMu           sync.Mutex
 	regionalMediaMu   sync.Mutex
+	gameImportMu      sync.Mutex
 	directoryPickerMu sync.Mutex
 	interfaceMu       sync.Mutex
 	localization      localizationSession
@@ -416,6 +417,10 @@ func (app *application) ServeHTTP(response http.ResponseWriter, request *http.Re
 	}
 	if strings.HasPrefix(endpoint, "localization/") {
 		app.serveLocalization(response, request, strings.TrimPrefix(endpoint, "localization/"))
+		return
+	}
+	if endpoint == "game-imports" {
+		app.serveGameImports(response, request)
 		return
 	}
 	if endpoint == "regional-media" {
