@@ -102,6 +102,15 @@ func Package(ctx context.Context, options PackageOptions) (Artifact, error) {
 		}
 	}
 	manifest, _ := json.MarshalIndent(Manifest{Format: 1, Product: Name, Version: options.Version}, "", "  ")
+	modules, err := nativeModules(options.Binary)
+	if err != nil {
+		return Artifact{}, err
+	}
+	for _, module := range modules {
+		if err := copyFileAtomic(module, filepath.Join(bin, filepath.Base(module)), 0755); err != nil {
+			return Artifact{}, err
+		}
+	}
 	if err := atomicWrite(filepath.Join(resources, markerName), manifest, 0644); err != nil {
 		return Artifact{}, err
 	}
@@ -191,7 +200,7 @@ func stageSeed(root, resources string, embedded ...fs.FS) error {
 			}
 		}
 	}
-	for _, leaf := range []string{"fonts", "hd", "audio", "imports", "languages/native-us", "languages/packs"} {
+	for _, leaf := range []string{"fonts", "hd", "audio", "imports", "regions", "languages/native-us", "languages/packs"} {
 		source := filepath.Join(root, "game-assets", leaf)
 		if _, err := os.Stat(source); errors.Is(err, os.ErrNotExist) {
 			continue

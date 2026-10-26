@@ -1,6 +1,7 @@
 /* Supported display contracts, including the camera/capture distinction.
  * Exercise the production sizing function without a window or ROM. */
 #include <stdint.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -18,7 +19,8 @@
 static void CheckViewport(int width, bool crt) {
   const int outputs[][2] = {
     {640, 480}, {1920, 1080}, {1920, 1200}, {3840, 2160},
-    {800, 1200}, {997, 613},
+    {2560, 1080}, {3440, 1440}, {5120, 1440},
+    {1080, 1080}, {800, 1200}, {997, 613},
   };
   for (unsigned i = 0; i < sizeof(outputs) / sizeof(outputs[0]); i++) {
     const int w = outputs[i][0], h = outputs[i][1];
@@ -108,9 +110,72 @@ static void CheckLimits(void) {
   CHECK(!g.widescreen_active);
 }
 
+static void CheckProducerCoverage(void) {
+  const struct {
+    int width, height;
+    int square_columns, crt_columns;
+    int square_rows, crt_rows;
+  } cases[] = {
+    {1920, 1080, 72, 43, 0, 0},
+    {1920, 1200, 52, 26, 0, 0},
+    {2520, 1080, 134, 96, 0, 0}, /* exact 21:9 */
+    {3440, 1440, 140, 102, 0, 0},
+    {5120, 1440, 271, 214, 0, 0},
+    {1080, 1080, 0, 0, 16, 37},
+    {1080, 1920, 0, 0, 116, 153},
+  };
+  /* A future world producer can supply more coverage without changing
+   * viewport math. These budgets do not certify current AR1/AR2 streaming. */
+  const int budgets[] = {0, 120, 128, 320};
+  for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    for (int crt = 0; crt <= 1; ++crt) {
+      const int columns = crt ? cases[i].crt_columns : cases[i].square_columns;
+      const int rows = crt ? cases[i].crt_rows : cases[i].square_rows;
+      for (unsigned b = 0; b < sizeof(budgets) / sizeof(budgets[0]); ++b) {
+        ArPresentationCanvas resolved;
+        ArPresentationCanvasLimits limits = {256, 224, budgets[b], 64};
+        CHECK(ArPresentationLayout_ResolveCanvas(
+            cases[i].width, cases[i].height, crt, limits, &resolved));
+        CHECK(resolved.extra_columns == (columns > budgets[b] ? budgets[b] : columns));
+        CHECK(resolved.extra_rows == (rows > 64 ? 64 : rows));
+        CHECK(resolved.coverage_limited == (columns > budgets[b] || rows > 64));
+        const int width = 256 + 2 * resolved.extra_columns;
+        const int height = 224 + 2 * resolved.extra_rows;
+        ArRenderRectI viewport = ArPresentationLayout_ResolveViewport(
+            cases[i].width, cases[i].height, false, crt, width, height);
+        CHECK(viewport.w > 0 && viewport.h > 0);
+        CHECK(viewport.x >= 0 && viewport.y >= 0);
+        CHECK(viewport.x + viewport.w <= cases[i].width);
+        CHECK(viewport.y + viewport.h <= cases[i].height);
+        if (resolved.coverage_limited) {
+          CHECK(viewport.w < cases[i].width || viewport.h < cases[i].height);
+        }
+        CheckViewport(width, crt);
+      }
+    }
+  }
+  /* Game/scene dimensions are supplied by the adapter, not assumed SNES 224. */
+  ArPresentationCanvas resolved = {43, 0, true};
+  const ArPresentationCanvasLimits tall_native = {256, 240, 320, 64};
+  CHECK(ArPresentationLayout_ResolveCanvas(1920, 1080, false, tall_native, &resolved));
+  CHECK(resolved.extra_columns == 86 && !resolved.coverage_limited);
+  CHECK(!ArPresentationLayout_ResolveCanvas(0, 1080, false, tall_native, &resolved));
+  CHECK(resolved.extra_columns == 86 && !resolved.coverage_limited);
+  CHECK(!ArPresentationLayout_ResolveCanvas(1, 1, false, tall_native, NULL));
+  CHECK(!ArPresentationLayout_ResolveCanvas(1, 1, false,
+      (ArPresentationCanvasLimits){256, 224, -1, 0}, &resolved));
+  CHECK(!ArPresentationLayout_ResolveCanvas(1, 1, false,
+      (ArPresentationCanvasLimits){INT_MAX, 224, 0, 0}, &resolved));
+  CHECK(ArPresentationLayout_ResolveCanvas(INT_MAX, 1, true, tall_native, &resolved));
+  CHECK(resolved.extra_columns == 320 && resolved.coverage_limited);
+  CHECK(ArPresentationLayout_ResolveCanvas(1, INT_MAX, true, tall_native, &resolved));
+  CHECK(resolved.extra_rows == 64 && resolved.coverage_limited);
+}
+
 int main(void) {
   CheckSupportedRatios();
   CheckLimits();
+  CheckProducerCoverage();
   puts("aspect_ratio_test: PASS");
   return 0;
 }

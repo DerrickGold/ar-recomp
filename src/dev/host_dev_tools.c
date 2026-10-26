@@ -19,6 +19,7 @@
 #include "host/host_video.h"
 #include "render/present_hud.h"
 #include "host/host_frame_surfaces.h"
+#include "host/imported_world_travel.h"
 
 /* What the renderer highlights for the inspector selection. The developer
  * tools write it through their context; FrameSlot_Capture copies it.
@@ -125,6 +126,10 @@ bool HostDevTools_DumpSceneAssets(void) {
 }
 
 void HostDevTools_TakeFullSnapshot(void) {
+  if (ImportedWorldTravel_Active()) {
+    ImportedWorldTravel_RequestSnapshot();
+    return;
+  }
   HostInput_RedrawPausedFrameIfNeeded();
   const DevToolsContext context = CurrentContext();
   DevTools_TakeFullSnapshot(&context);

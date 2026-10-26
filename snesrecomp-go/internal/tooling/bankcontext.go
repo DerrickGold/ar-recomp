@@ -201,7 +201,7 @@ func attachShadowBankContexts(image romimage.Image, banks []shadowBank, results 
 				own[pc] = struct{}{}
 			}
 		}
-		g, err := decoder.DecodeFunction(image, b, uint16(v.Address), v.M, v.X, decoder.Options{End: r.bankRecipe.end, DataRegions: r.bankRecipe.regions, CalleeExitMX: r.bankRecipe.exitMX, HLEDispatch: cfg.HLEDispatch, SiblingEntryPCs: own})
+		g, err := decoder.DecodeFunction(image, b, uint16(v.Address), v.M, v.X, decoder.Options{End: r.bankRecipe.end, DataRegions: r.bankRecipe.regions, CalleeExitMX: r.bankRecipe.exitMX, HLEDispatch: cfg.HLEDispatch, CopDispatch: cfg.CopDispatch, SiblingEntryPCs: own})
 		if err != nil {
 			continue
 		}

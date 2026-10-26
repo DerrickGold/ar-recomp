@@ -407,7 +407,11 @@ func loadRepository(romPath, configDir string) (*repository, error) {
 			if repo.canonical[address] == nil {
 				repo.canonical[address] = make(map[[2]uint8]struct{})
 			}
-			repo.canonical[address][[2]uint8{entry.EntryMX.M & 1, entry.EntryMX.X & 1}] = struct{}{}
+			mx := [2]uint8{entry.EntryMX.M & 1, entry.EntryMX.X & 1}
+			if _, exists := repo.canonical[address][mx]; exists {
+				return nil, fmt.Errorf("%s: duplicate function entry $%06X M%dX%d", path, address, mx[0], mx[1])
+			}
+			repo.canonical[address][mx] = struct{}{}
 		}
 		for _, region := range cfg.DataRegions {
 			repo.allDataRegions = append(repo.allDataRegions, decoder.DataRegion{Bank: region.Bank, Start: region.Start, End: region.End})
@@ -906,6 +910,21 @@ func (repo *repository) recordUnresolvedEmittedDemands(
 			pc := uint16(address)
 			offset, offsetErr := repo.image.Offset(byte(address>>16), pc)
 			bankID := canonicalBank(repo.byBank, byte(address>>16))
+			if bank := repo.byBank[bankID]; bank != nil && bank.Config != nil && bank.Config.HLEFunctions[pc] != "" {
+				// An explicitly authored RAM-code replacement already has a real
+				// body. Do not define a second, unresolved body for the same exact
+				// variant merely because the bus address is outside ROM.
+				authored := false
+				for _, entry := range bank.Config.Entries {
+					if entry.Start == pc && entry.EntryMX.M == demand.M && entry.EntryMX.X == demand.X {
+						authored = true
+						break
+					}
+				}
+				if authored {
+					continue
+				}
+			}
 			if offsetErr != nil || offset < 0 || offset >= len(repo.image) ||
 				repo.byBank[bankID] == nil || repo.inDataRegion(bankID, pc) {
 				repo.unresolved[demand] = struct{}{}

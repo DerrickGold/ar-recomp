@@ -195,7 +195,18 @@ add_custom_command(
     DEPENDS ${_runtime_archive_inputs}
     COMMENT "Cross-building runner SDK archive for ${_runtime_zig_target} with packaging-host Zig"
     VERBATIM)
-add_custom_target(runtime_archive ALL DEPENDS ${_runtime_archive})
+string(REPLACE ".a" "_module.a" _module_archive_name "${_runtime_archive_name}")
+string(REPLACE ".lib" "_module.lib" _module_archive_name "${_module_archive_name}")
+set(_module_archive "${_runtime_sdk_stage}/lib/${_runtime_zig_target}/${_module_archive_name}")
+add_custom_command(OUTPUT ${_module_archive}
+    COMMAND ${CMAKE_COMMAND} -E env GOCACHE=${_go_cache}
+        ${GO_EXECUTABLE} -C ${SNESBUILD_MODULE_DIR} run ./cmd/snesbuild runtime archive
+        --runtime-dir ${SNESBUILD_MODULE_DIR}/runtime --output ${_module_archive}
+        --target ${_runtime_zig_target} --private-module
+        --cache-dir ${CMAKE_CURRENT_SOURCE_DIR}/build/host-toolchain --optimize=-O2
+    DEPENDS ${_runtime_archive_inputs}
+    COMMENT "Building isolated runtime SDK for optional native games" VERBATIM)
+add_custom_target(runtime_archive ALL DEPENDS ${_runtime_archive} ${_module_archive})
 
 # ── Bundled Zig toolchain (pin comes from the Go source of truth) ────────────
 execute_process(
@@ -466,7 +477,8 @@ install(FILES ${INSTALLER_MODULE_DIR}/internal/builder/assets/manifest.ini
 
 # Buildable project source (authored input only; generated C is excluded and
 # regenerated locally from the user's ROM).
-install(DIRECTORY ${GAME_ROOT}/recomp/ DESTINATION utils/recomp FILES_MATCHING PATTERN "*.cfg")
+install(DIRECTORY ${GAME_ROOT}/recomp/ DESTINATION utils/recomp FILES_MATCHING
+    PATTERN "*.cfg" PATTERN "module.ini")
 install(DIRECTORY ${GAME_ROOT}/src/ DESTINATION utils/src
     PATTERN "gen" EXCLUDE
     PATTERN ".DS_Store" EXCLUDE)
@@ -542,7 +554,7 @@ install(FILES
     ${SNESBUILD_MODULE_DIR}/runtime/docs/GAME_ENHANCEMENT_INTEGRATION.md
     ${SNESBUILD_MODULE_DIR}/runtime/docs/INPUT_AND_BOOT.md
     DESTINATION utils/snesrecomp-go/runtime/docs)
-install(FILES ${_runtime_archive}
+install(FILES ${_runtime_archive} ${_module_archive}
     DESTINATION utils/snesrecomp-go/runtime/lib/${_runtime_zig_target})
 
 # Licensed interface/game fonts are redistributed with their notices. Retail

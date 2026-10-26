@@ -76,6 +76,11 @@ func DecodeFunction(image rom.Image, bank byte, start uint16, entryM, entryX uin
 			return nil, fmt.Errorf("v2 decoder: unknown opcode $%02X at $%02X:%04X entry_mx=(%d,%d)", image[offset], bank, pc, item.Key.M, item.Key.X)
 		}
 		instruction.M, instruction.X = item.Key.M, item.Key.X
+		if instruction.Mnemonic == "COP" && options.CopDispatch != "" {
+			// A game-owned interrupt may rewrite the return PC or status. Other
+			// exits in this prefix cannot prove the eventual continuation M/X.
+			instruction.DispatchOpen = true
+		}
 		if options.NativeReturnTables && decodeNativeReturnTable(image, instruction, options) {
 			graph.record(&DecodedInstruction{Key: item.Key, Instruction: instruction})
 			continue // the bytes after JSL are table data, not a continuation

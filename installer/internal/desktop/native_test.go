@@ -27,7 +27,31 @@ func TestNativeApplicationSurvivesRelocationAndMissingBuildLibraries(t *testing.
 	root, source, destination := t.TempDir(), t.TempDir(), t.TempDir()
 	put(t, filepath.Join(source, "base.c"), "int base(void) { return 40; }\n")
 	put(t, filepath.Join(source, "middle.c"), "extern int base(void); int middle(void) { return base()+2; }\n")
-	put(t, filepath.Join(source, "main.c"), "#include <stdio.h>\nextern int middle(void); int main(void) { printf(\"%d\\n\", middle()); return 0; }\n")
+	put(t, filepath.Join(source, "moduledep.c"), "int module_dependency(void) { return 7; }\n")
+	put(t, filepath.Join(source, "module.c"), "extern int module_dependency(void); int module_value(void) { return module_dependency(); }\n")
+	put(t, filepath.Join(source, "main.c"), `#include <stdio.h>
+#include <string.h>
+#include <dlfcn.h>
+extern int middle(void);
+int main(int argc, char **argv) {
+  char path[4096];
+  snprintf(path, sizeof(path), "%s", argv[0]);
+  char *leaf = strrchr(path, '/');
+  if (!leaf) return 1;
+#ifdef __APPLE__
+  strcpy(leaf + 1, "actraiser2-native.dylib");
+#else
+  strcpy(leaf + 1, "actraiser2-native.so");
+#endif
+  void *module = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+  if (!module) { fprintf(stderr, "%s\n", dlerror()); return 2; }
+  int (*value)(void) = (int (*)(void))dlsym(module, "module_value");
+  if (!value) return 3;
+  printf("%d %d\n", middle(), value());
+  dlclose(module);
+  return 0;
+}
+`)
 	build := func(args ...string) {
 		t.Helper()
 		command := exec.Command(cc, args...)
@@ -39,11 +63,15 @@ func TestNativeApplicationSurvivesRelocationAndMissingBuildLibraries(t *testing.
 	if runtime.GOOS == "darwin" {
 		build("-dynamiclib", "base.c", "-o", "libbase.dylib", "-Wl,-install_name,@rpath/libbase.dylib")
 		build("-dynamiclib", "middle.c", "-L.", "-lbase", "-o", "libmiddle.dylib", "-Wl,-install_name,@rpath/libmiddle.dylib")
+		build("-dynamiclib", "moduledep.c", "-o", "libmoduledep.dylib", "-Wl,-install_name,@rpath/libmoduledep.dylib")
+		build("-dynamiclib", "module.c", "-L.", "-lmoduledep", "-o", "actraiser2-native.dylib", "-Wl,-rpath,"+source)
 	} else {
 		build("-shared", "-fPIC", "base.c", "-o", "libbase.so", "-Wl,-soname,libbase.so")
 		build("-shared", "-fPIC", "middle.c", "-L.", "-lbase", "-o", "libmiddle.so", "-Wl,-soname,libmiddle.so", "-Wl,-rpath,"+source)
+		build("-shared", "-fPIC", "moduledep.c", "-o", "libmoduledep.so", "-Wl,-soname,libmoduledep.so")
+		build("-shared", "-fPIC", "module.c", "-L.", "-lmoduledep", "-o", "actraiser2-native.so", "-Wl,-rpath,"+source)
 	}
-	build("main.c", "-L.", "-lmiddle", "-Wl,-rpath,"+source, "-o", Name)
+	build("main.c", "-L.", "-lmiddle", "-ldl", "-Wl,-rpath,"+source, "-o", Name)
 	if runtime.GOOS == "linux" {
 		// An inherited path must not replace the SDK the binary was built with.
 		wrong := t.TempDir()
@@ -100,7 +128,7 @@ func TestNativeApplicationSurvivesRelocationAndMissingBuildLibraries(t *testing.
 		command.Env = append(os.Environ(), "LD_LIBRARY_PATH="+libs)
 	}
 	output, err := command.CombinedOutput()
-	if err != nil || strings.TrimSpace(string(output)) != "42" {
+	if err != nil || strings.TrimSpace(string(output)) != "42 7" {
 		t.Fatalf("relocated app: %v: %s", err, output)
 	}
 }

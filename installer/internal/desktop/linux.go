@@ -23,7 +23,11 @@ func packageLinux(ctx context.Context, options PackageOptions, app, bin, librari
 	if linuxArchitecture() == "" {
 		return fmt.Errorf("unsupported AppImage architecture %s", runtime.GOARCH)
 	}
-	for _, binary := range []string{options.Binary, options.Builder} {
+	modules, err := nativeModules(options.Binary)
+	if err != nil {
+		return err
+	}
+	for _, binary := range append([]string{options.Binary, options.Builder}, modules...) {
 		imports, err := inspectLinuxBinary(binary)
 		if err != nil {
 			return err

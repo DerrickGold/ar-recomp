@@ -165,6 +165,9 @@ func buildGameFromGUI(ctx context.Context, values guiFlags, root, outputDir, rom
 	if err != nil {
 		return builder.Result{}, err
 	}
+	if err := buildImportedGames(values, root, dataRoot, scratch, snesbuild, binary, run, output); err != nil {
+		return builder.Result{}, err
+	}
 	if runtime.GOOS == "windows" {
 		if err := appicons.Game.ApplyEXE(binary); err != nil {
 			return builder.Result{}, err

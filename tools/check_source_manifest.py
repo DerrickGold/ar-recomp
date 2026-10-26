@@ -57,16 +57,22 @@ def main():
     if not manifest.is_file():
         sys.exit(f'check_source_manifest: {manifest} is missing')
 
-    entries = read_manifest(manifest)
+    entries = {'source': [], 'include': []}
     problems = []
-    seen = {}
-    for number, value in entries['source']:
-        if not (root / value).is_file():
-            problems.append(f'snesbuild.ini:{number}: source {value} does not exist')
-        if value in seen:
-            problems.append(f'snesbuild.ini:{number}: source {value} is already '
-                            f'listed on line {seen[value]}')
-        seen.setdefault(value, number)
+    # Shared helpers may be compiled once into each isolated link unit.
+    # Reject duplicates within a manifest, not across the host and modules.
+    for path in [manifest, *sorted((root / 'recomp').glob('*/module.ini'))]:
+        local = read_manifest(path)
+        seen = {}
+        for number, value in local['source']:
+            label = f'{path.relative_to(root)}:{number}'
+            if not (root / value).is_file():
+                problems.append(f'{label}: source {value} does not exist')
+            if value in seen:
+                problems.append(f'{label}: source {value} is already listed on line {seen[value]}')
+            seen.setdefault(value, number)
+        for key in entries:
+            entries[key].extend(local[key])
     for number, value in entries['include']:
         if not (root / value).is_dir():
             problems.append(f'snesbuild.ini:{number}: include {value} is not a directory')

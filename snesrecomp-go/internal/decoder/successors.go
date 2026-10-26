@@ -28,6 +28,11 @@ func labeledSuccessors(image rom.Image, instruction *cpu65816.Instruction, key D
 		return nil
 	case "BRK":
 		return []labeledSuccessor{{makeKey(nextPC, post.M, post.X, true), "fall_brk"}}
+	case "COP":
+		if options.CopDispatch != "" {
+			return nil
+		}
+		return []labeledSuccessor{{makeKey(nextPC, post.M, post.X, true), "fall"}}
 	case "BRA", "BRL":
 		return []labeledSuccessor{{makeKey(uint16(instruction.Operand), post.M, post.X, true), "jump"}}
 	case "BPL", "BMI", "BVC", "BVS", "BCC", "BCS", "BNE", "BEQ":

@@ -83,7 +83,19 @@ type runtimeSelection struct {
 // remain a development and unsupported-target fallback, but a present corrupt
 // archive is an error instead of silently changing the build model.
 func selectRuntimeInputs(runtimeDir, target string) (runtimeSelection, error) {
+	return selectRuntimeInputsForModule(runtimeDir, target, false)
+}
+
+func moduleRuntimePath(path string) string {
+	extension := filepath.Ext(path)
+	return strings.TrimSuffix(path, extension) + "_module" + extension
+}
+
+func selectRuntimeInputsForModule(runtimeDir, target string, module bool) (runtimeSelection, error) {
 	archivePath, targetErr := VendedRuntimeArchivePath(runtimeDir, target)
+	if module {
+		archivePath = moduleRuntimePath(archivePath)
+	}
 	if targetErr == nil {
 		if info, err := os.Stat(archivePath); err == nil {
 			if !info.Mode().IsRegular() || info.Size() == 0 {

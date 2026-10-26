@@ -19,7 +19,8 @@ func TestGameFolderPublishesOnlyRuntimeAndPreservesSettings(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		library = "libSDL3.dylib"
 	}
-	for path, data := range map[string]string{name: "game", helper: "runtime helper", library: "SDL", "input.sfc": "ROM", "main.c": "not an output", "game.o": "not an output"} {
+	module := "actraiser2-native" + map[string]string{"darwin": ".dylib", "linux": ".so", "windows": ".dll"}[runtime.GOOS]
+	for path, data := range map[string]string{name: "game", helper: "runtime helper", library: "SDL", module: "optional game", "input.sfc": "ROM", "main.c": "not an output", "game.o": "not an output"} {
 		put(t, filepath.Join(source, path), data)
 	}
 	put(t, filepath.Join(output, "settings.ini"), "user settings")
@@ -28,7 +29,7 @@ func TestGameFolderPublishesOnlyRuntimeAndPreservesSettings(t *testing.T) {
 	if err != nil || installed != filepath.Join(output, name) {
 		t.Fatal(installed, err)
 	}
-	for path, want := range map[string]string{name: "game", library: "SDL", "user-rom.sfc": "ROM", filepath.Join("tools", helper): "runtime helper", "settings.ini": "user settings", "saves/save.srm": "save"} {
+	for path, want := range map[string]string{name: "game", library: "SDL", module: "optional game", "user-rom.sfc": "ROM", filepath.Join("tools", helper): "runtime helper", "settings.ini": "user settings", "saves/save.srm": "save"} {
 		if got := read(t, filepath.Join(output, filepath.FromSlash(path))); got != want {
 			t.Fatalf("%s: %q", path, got)
 		}

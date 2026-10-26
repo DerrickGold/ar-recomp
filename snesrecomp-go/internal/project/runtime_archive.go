@@ -21,15 +21,16 @@ const runtimeArchiveObjectCacheVersion = "4"
 // RuntimeArchiveOptions builds the source runner into the same target-keyed
 // static-library artifact consumed by source-free hermetic distributions.
 type RuntimeArchiveOptions struct {
-	RuntimeDir string
-	OutputPath string
-	ZigPath    string
-	Target     string
-	Optimize   string
-	Jobs       int
-	SIMD       bool
-	Verbose    bool
-	Stdout     io.Writer
+	RuntimeDir    string
+	OutputPath    string
+	ZigPath       string
+	Target        string
+	Optimize      string
+	Jobs          int
+	SIMD          bool
+	Verbose       bool
+	PrivateModule bool
+	Stdout        io.Writer
 }
 
 // runtimeCompileArgs is deliberately independent of a game's manifest. A
@@ -255,6 +256,9 @@ func BuildRuntimeArchive(options RuntimeArchiveOptions) (string, error) {
 	outputPath := options.OutputPath
 	if outputPath == "" {
 		outputPath, err = VendedRuntimeArchivePath(runtimeDir, options.Target)
+		if options.PrivateModule {
+			outputPath = moduleRuntimePath(outputPath)
+		}
 		if err != nil {
 			return "", err
 		}
@@ -268,11 +272,17 @@ func BuildRuntimeArchive(options RuntimeArchiveOptions) (string, error) {
 	compileArgs := runtimeCompileArgs(
 		runtimeDir, options.ZigPath, options.Target, options.Optimize,
 		options.SIMD, manifest)
+	if options.PrivateModule {
+		compileArgs = append(compileArgs, privateModuleCompileArgs...)
+	}
 	flagsDigest := sha256.Sum256([]byte(runtimeArchiveObjectCacheVersion + "\x00" +
 		options.ZigPath + "\x00" +
 		strings.Join(compileArgs, "\x00")))
 	flagsHash := hex.EncodeToString(flagsDigest[:])
 	objectDir := filepath.Join(filepath.Dir(outputPath), ".runtime-obj")
+	if options.PrivateModule {
+		objectDir = filepath.Join(filepath.Dir(outputPath), ".runtime-module-obj")
+	}
 	if err := os.MkdirAll(objectDir, 0o755); err != nil {
 		return "", err
 	}

@@ -702,7 +702,7 @@ func runShadowDecodePass(image romimage.Image, banks []shadowBank, entries map[b
 				}
 				options := decoder.Options{
 					End: item.entry.End, DataRegions: regions,
-					HLEDispatch:     item.bank.Config.HLEDispatch,
+					HLEDispatch: item.bank.Config.HLEDispatch, CopDispatch: item.bank.Config.CopDispatch,
 					HLEEntryPCs:     config.HLEEntryPoints(item.bank.Config),
 					CalleeExitMX:    calleeExitMX,
 					SiblingEntryPCs: item.siblings,
@@ -2109,7 +2109,7 @@ func collectReachableRTSSites(image romimage.Image, bankConfigs map[byte]*config
 		return nil
 	}
 	pc := uint16(target)
-	options := decoder.Options{DataRegions: regions, HLEDispatch: cfg.HLEDispatch, CalleeExitMX: calleeExitMX}
+	options := decoder.Options{DataRegions: regions, HLEDispatch: cfg.HLEDispatch, CopDispatch: cfg.CopDispatch, CalleeExitMX: calleeExitMX}
 	graph, err := decoder.DecodeFunction(image, bank, pc, state.M&1, state.X&1, options)
 	if err != nil || graph == nil {
 		return nil

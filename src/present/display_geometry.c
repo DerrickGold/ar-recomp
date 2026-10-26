@@ -1,32 +1,22 @@
 #include "present/display_geometry.h"
 
-#include <stdint.h>
-
 #include "constants.h"
 #include "actraiser_game.h"
+#include "render/presentation_layout.h"
 
 bool DisplayGeometry_ResolveAutoCanvas(
     int drawable_width, int drawable_height, bool crt_pixel_aspect,
     ActRaiserAutoCanvas *canvas) {
-  if (!canvas || drawable_width <= 0 || drawable_height <= 0) return false;
-  const int64_t par_x = crt_pixel_aspect ? 7 : 1;
-  const int64_t par_y = crt_pixel_aspect ? 6 : 1;
-  const int64_t width = drawable_width;
-  const int64_t height = drawable_height;
-  *canvas = (ActRaiserAutoCanvas){0};
-  /* Share horizontal rounding with explicit ratios so Auto reveals the same
-   * columns on a matching drawable. Aspect fit absorbs whole-pixel rounding;
-   * never stretch, crop, or exceed the capture/streaming caps. */
-  if (width * 224 * par_y > height * 256 * par_x) {
-    canvas->extra_columns = DisplayGeometry_CalculateHorizontal(
-        kActRaiserAuthenticHeight, drawable_width, drawable_height,
-        crt_pixel_aspect, false).display_extra;
-  } else {
-    const int64_t denominator = 2 * width * par_y;
-    int64_t extra = (height * 256 * par_x - width * 224 * par_y +
-                     denominator / 2) / denominator;
-    canvas->extra_rows = extra > 64 ? 64 : (int)extra;
-  }
+  if (!canvas) return false;
+  ArPresentationCanvas resolved;
+  const ArPresentationCanvasLimits limits = {
+    kActRaiserAuthenticWidth, kActRaiserAuthenticHeight,
+    kActRaiserWidescreenExtraMax, 64,
+  };
+  if (!ArPresentationLayout_ResolveCanvas(
+          drawable_width, drawable_height, crt_pixel_aspect, limits, &resolved))
+    return false;
+  *canvas = (ActRaiserAutoCanvas){resolved.extra_columns, resolved.extra_rows};
   return true;
 }
 
@@ -56,18 +46,9 @@ const ActRaiserDisplayGeometry *const g_actraiser_display_geometry =
 ActRaiserDisplayGeometry DisplayGeometry_CalculateHorizontal(
     int height, int aspect_x, int aspect_y,
     bool crt_pixel_aspect, bool diorama_mode) {
-  int extra = 0;
-  if (height > 0 && aspect_x > 0 && aspect_y > 0) {
-    const int64_t numerator =
-        (int64_t)height * aspect_x * (crt_pixel_aspect ? 6 : 7);
-    const int64_t denominator = 7LL * aspect_y;
-    const int64_t width = (numerator + denominator - 1) / denominator;
-    if (width > kActRaiserAuthenticWidth) {
-      const int64_t requested = (width - kActRaiserAuthenticWidth + 1) / 2;
-      extra = requested > kActRaiserWidescreenExtraMax
-          ? kActRaiserWidescreenExtraMax : (int)requested;
-    }
-  }
+  const int extra = ArPresentationLayout_ResolveHorizontalMargin(
+      kActRaiserAuthenticWidth, height, aspect_x, aspect_y,
+      crt_pixel_aspect, kActRaiserWidescreenExtraMax);
   return (ActRaiserDisplayGeometry){
     .widescreen_active = extra > 0,
     .render_extra = diorama_mode && extra > 0

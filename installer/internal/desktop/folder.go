@@ -21,7 +21,7 @@ func InstallGameFolder(binary, helper, rom, destination string) (string, error) 
 	helperLeaf := filepath.Join("tools", helperName)
 	files := map[string]string{name: binary, helperLeaf: helper, "user-rom.sfc": rom}
 	order := []string{"user-rom.sfc", helperLeaf}
-	patterns := map[string][]string{"darwin": {"libSDL3*.dylib"}, "windows": {"SDL3*.dll"}, "linux": {"libSDL3*.so*"}}[runtime.GOOS]
+	patterns := map[string][]string{"darwin": {"libSDL3*.dylib", "actraiser2-native.dylib"}, "windows": {"SDL3*.dll", "actraiser2-native.dll"}, "linux": {"libSDL3*.so*", "actraiser2-native.so"}}[runtime.GOOS]
 	for _, pattern := range patterns {
 		libraries, err := filepath.Glob(filepath.Join(filepath.Dir(binary), pattern))
 		if err != nil {

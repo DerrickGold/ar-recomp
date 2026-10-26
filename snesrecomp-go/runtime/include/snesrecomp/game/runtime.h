@@ -79,6 +79,13 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels);
  * the audio lock between bounded production chunks. Presentation-only frames
  * must never call this operation. */
 void RtlAdvanceApuTimeline(void);
+/* Finish a game-identified synchronous APU transfer that ran ahead of the
+ * frame clock while polling hardware. Anchor subsequent ticks at the current
+ * APU cycle and discard the transfer's stale PCM backlog. This changes host
+ * timing/transport only: SPC/DSP state and queued port writes are preserved.
+ * Call on the game thread at an explicit upload-completion boundary, never
+ * once per frame or from an audio callback. */
+void RtlFinishSynchronousApuTransfer(void);
 /* Read the monotonic semantic APU clock under the runner's audio lock. This
  * is an observation only; loading or resetting emulated state may move the
  * value backwards between calls. Audio-trace callbacks must use the event's

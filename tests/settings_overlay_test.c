@@ -3911,6 +3911,28 @@ int main(int argc, char **argv) {
   TestSaveAdvancedActions(renderer, surface);
   TestSaveSlotLocales(renderer, surface);
   CaptureSaveSlotsReleaseTour(renderer, surface);
+  /* Imported gameplay uses the same preference descriptors without exposing
+   * the suspended game's save/editor actions. Restore the full menu on exit. */
+  SettingsOverlay_Close();
+  SettingsOverlay_Open();
+  int full_sections = 0, host_sections = 0;
+  CHECK(SettingsOverlay_GetNavigationState(NULL, NULL, NULL, &full_sections));
+  SettingsOverlay_SetHostSettingsOnly(true);
+  CHECK(SettingsOverlay_GetNavigationState(NULL, NULL, NULL, &host_sections));
+  CHECK(host_sections == 6);
+  CHECK(!SettingsOverlay_OpenSaveSlots(false));
+  NavToSection(1); /* Action settings in the reduced navigation. */
+  CHECK(SettingsOverlay_HandleKey(SDLK_Z, true, false));
+  RowToKey("diorama_mode");
+  const bool previous_diorama = g_settings.diorama_mode;
+  CHECK(SettingsOverlay_HandleKey(SDLK_RIGHT, true, false));
+  CHECK(g_settings.diorama_mode != previous_diorama);
+  SettingsOverlay_Close();
+  SettingsOverlay_SetHostSettingsOnly(false);
+  SettingsOverlay_Open();
+  CHECK(SettingsOverlay_GetNavigationState(NULL, NULL, NULL, &host_sections));
+  CHECK(host_sections == full_sections);
+  SettingsOverlay_Close();
   SettingsOverlay_SetManualHooks(NULL);
   SettingsOverlay_Destroy();
 #ifdef AR_OVERLAY_UI_FONT

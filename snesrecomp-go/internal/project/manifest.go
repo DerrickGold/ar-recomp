@@ -27,6 +27,7 @@ type Manifest struct {
 	Defines  []string // NAME or NAME=VALUE
 	Link     []string // extra linker arguments, e.g. -lm
 	UseSDL3  bool     // discover SDL3 headers/libs and link -lSDL3
+	Module   bool     // private runtime in a shared library with an explicit exported C API
 }
 
 // ManifestFileName is the expected file name at the project root.
@@ -71,6 +72,8 @@ func LoadManifest(path string) (Manifest, error) {
 			manifest.Link = append(manifest.Link, value)
 		case "sdl3":
 			manifest.UseSDL3 = value == "true" || value == "1" || value == "on"
+		case "module":
+			manifest.Module = value == "true" || value == "1" || value == "on"
 		default:
 			return Manifest{}, fmt.Errorf("%s:%d: unknown key %q", path, lineNumber, key)
 		}

@@ -92,6 +92,7 @@ type Config struct {
 	HLEFunctions     map[uint16]string        `json:"hle_functions,omitempty"`
 	HLEFunctionsIf   map[uint16]HLEFunctionIf `json:"hle_functions_if,omitempty"`
 	HLEDispatch      map[uint16]string        `json:"hle_dispatch,omitempty"`
+	CopDispatch      string                   `json:"cop_dispatch,omitempty"`
 	ForceVariantAt   map[uint32]MX            `json:"force_variant_at,omitempty"`
 }
 
@@ -144,6 +145,14 @@ func Load(path string) (*Config, error) {
 			// v2 intentionally ignores this v1 directive.
 		case "auto_vectors":
 			cfg.AutoVectors = true
+		case "cop_dispatch":
+			if len(fields) != 2 || !isCIdentifier(fields[1]) {
+				return nil, fail("cop_dispatch needs one valid C function identifier")
+			}
+			if cfg.CopDispatch != "" {
+				return nil, fail("duplicate cop_dispatch")
+			}
+			cfg.CopDispatch = fields[1]
 		case "hle_spc_upload":
 			if len(fields) != 2 {
 				return nil, fail("hle_spc_upload needs exactly one <pc> argument")

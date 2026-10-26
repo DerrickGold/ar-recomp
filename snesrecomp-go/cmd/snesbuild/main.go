@@ -154,12 +154,16 @@ type regenFlags struct {
 	jobs, maxUnitKiB                                                   int
 	allowStubs, runTests, noTests                                      bool
 	exactDirectCallMX                                                  bool
+	provenAnalysis, storedTargets, internalTails                       bool
 }
 
 func addRegenFlags(flags *flag.FlagSet) *regenFlags {
 	values := &regenFlags{}
 	flags.StringVar(&values.root, "root", ".", "game project root")
 	flags.StringVar(&values.rom, "rom", "game.sfc", "ROM path, relative to project root")
+	flags.BoolVar(&values.provenAnalysis, "experimental-proven-analysis", false, "apply closed static dispatch and continuation facts (isolated output required)")
+	flags.BoolVar(&values.storedTargets, "experimental-stored-targets", false, "infer stored code targets (isolated output required)")
+	flags.BoolVar(&values.internalTails, "experimental-internal-tails", false, "expose internal tail entries (isolated output required)")
 	flags.StringVar(&values.cfgDir, "cfg-dir", "recomp", "bank config directory")
 	flags.StringVar(&values.genDir, "out-dir", "src/gen", "generated C directory")
 	flags.StringVar(&values.funcs, "funcs-out", "recomp/funcs.h", "generated function header")
@@ -187,6 +191,7 @@ func (values *regenFlags) options() project.RegenOptions {
 	paths.ToolchainDir = values.toolchainDir
 	return project.RegenOptions{
 		Paths: paths, Jobs: values.jobs, AllowStubs: values.allowStubs,
+		ExperimentalProvenAnalysis: values.provenAnalysis, ExperimentalStoredTargets: values.storedTargets, ExperimentalInternalTails: values.internalTails,
 		AnalysisDBPath: values.analysisDB, ExperimentalExactDirectCallMX: values.exactDirectCallMX,
 		RunTests: values.runTests && !values.noTests, GoCommand: values.goCommand,
 		Stdout: os.Stdout, Stderr: os.Stderr,
@@ -214,6 +219,7 @@ func (values *stringList) Set(value string) error {
 
 type buildFlags struct {
 	generatedDir, funcsHeader, inputID                                 string
+	manifest                                                           string
 	root, buildDir, toolchainDir, cmake, config, generator, prefixPath string
 	rom                                                                string
 	jobs                                                               int
@@ -227,6 +233,7 @@ type buildFlags struct {
 }
 
 func addHermeticFlags(flags *flag.FlagSet, values *buildFlags) {
+	flags.StringVar(&values.manifest, "manifest", "", "optional source manifest, relative to project root")
 	flags.StringVar(&values.generatedDir, "generated-dir", "src/gen", "generated C directory, separate from read-only source")
 	flags.StringVar(&values.funcsHeader, "funcs-header", "recomp/funcs.h", "generated function declarations used by the compiler")
 	flags.StringVar(&values.inputID, "input-id", "", "verified immutable input identity supplied by the desktop host")
@@ -279,8 +286,9 @@ func (values *buildFlags) hermeticOptionsWithWriters(stdout, stderr io.Writer) (
 		zigPath = located.Path
 	}
 	return project.HermeticOptions{
-		InputID: values.inputID,
-		Paths:   paths, ZigPath: zigPath, Jobs: values.jobs, Optimize: values.optimize,
+		InputID:      values.inputID,
+		ManifestPath: resolveProjectOptional(paths.Root, values.manifest),
+		Paths:        paths, ZigPath: zigPath, Jobs: values.jobs, Optimize: values.optimize,
 		SDLIncludeDir: values.sdlInclude, SDLLibDir: values.sdlLib, Target: values.target,
 		AndroidSysroot: values.androidSysroot,
 		Verbose:        values.verbose, MemoryBudget: memoryBudget,
@@ -1305,6 +1313,7 @@ func runRuntime(args []string) error {
 	cacheDir := flags.String("cache-dir", "", "host Zig cache directory")
 	optimize := flags.String("optimize", "-O2", "optimization level")
 	jobs := flags.Int("jobs", runtime.NumCPU(), "parallel compile jobs")
+	privateModule := flags.Bool("private-module", false, "build isolated PIC runtime for native shared modules")
 	portable := flags.Bool("portable", false, "disable target SIMD implementations")
 	verbose := flags.Bool("verbose", false, "print each runner source as it compiles")
 	subcommand := "archive"
@@ -1337,7 +1346,7 @@ func runRuntime(args []string) error {
 	_, err := project.BuildRuntimeArchive(project.RuntimeArchiveOptions{
 		RuntimeDir: *runtimeDir, OutputPath: *output, ZigPath: zig,
 		Target: *target, Optimize: *optimize, Jobs: *jobs,
-		SIMD: !*portable, Verbose: *verbose, Stdout: os.Stdout,
+		SIMD: !*portable, Verbose: *verbose, Stdout: os.Stdout, PrivateModule: *privateModule,
 	})
 	return err
 }

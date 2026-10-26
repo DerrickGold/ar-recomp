@@ -292,7 +292,8 @@ bool Sim3DDepthPass_UploadAtlasRegions(
     int width, int height, int pitch, const ArRenderRectI *regions, int region_count) {
   if (layer != kSim3DDepthPass_Mountain && layer != kSim3DDepthPass_Ground &&
       layer != kSim3DDepthPass_GroundBlur && layer != kSim3DDepthPass_Cloud &&
-      layer != kSim3DDepthPass_WorldMountain && layer != kSim3DDepthPass_VolumeCloud)
+      layer != kSim3DDepthPass_WorldMountain && layer != kSim3DDepthPass_ImportedGround &&
+      layer != kSim3DDepthPass_VolumeCloud)
     return false;
   return UploadAtlasRegions(device, &g_depth_pass.atlases[layer], argb_pixels,
       width, height, pitch, regions, region_count);
@@ -534,6 +535,7 @@ static SDL_GPUTexture *TextureForLayer(
     Sim3DDepthPassLayer layer, SDL_Texture *shadow_texture) {
   switch (layer) {
     case kSim3DDepthPass_Mountain:
+    case kSim3DDepthPass_ImportedGround:
     case kSim3DDepthPass_WorldMountain:
     case kSim3DDepthPass_GroundBlur:
     case kSim3DDepthPass_Cloud:
@@ -579,6 +581,7 @@ static SDL_GPUGraphicsPipeline *PipelineForLayer(Sim3DDepthPassLayer layer) {
     case kSim3DDepthPass_Ground:
     case kSim3DDepthPass_Solid:
     case kSim3DDepthPass_Mountain:
+    case kSim3DDepthPass_ImportedGround:
     case kSim3DDepthPass_WorldMountain:
       return g_depth_pass.pipeline;
     case kSim3DDepthPassLayerCount:
@@ -915,7 +918,7 @@ ArRenderTexture Sim3DDepthPass_Submit(
       pass, &index_binding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
   SDL_GPUGraphicsPipeline *bound = NULL;
   static const Sim3DDepthPassLayer order[] = {
-    kSim3DDepthPass_DepthOccluder, kSim3DDepthPass_Ground,
+    kSim3DDepthPass_DepthOccluder, kSim3DDepthPass_Ground, kSim3DDepthPass_ImportedGround,
     kSim3DDepthPass_GroundBlur, kSim3DDepthPass_GroundHaze,
     kSim3DDepthPass_CloudShadow,
     kSim3DDepthPass_Solid, kSim3DDepthPass_Mountain, kSim3DDepthPass_WorldMountain,

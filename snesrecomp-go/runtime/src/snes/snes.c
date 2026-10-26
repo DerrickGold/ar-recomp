@@ -21,6 +21,7 @@ enum {
     SNES_VBLANK_START = 225,
     SNES_OVERSCAN_VBLANK_START = 240,
     SNES_STATUS_READ_STEP = 64,
+    SNES_AUTO_JOYPAD_MASTER_CYCLES = 4224,
     SNES_APU_CATCHUP_LIMIT = 10000
 };
 
@@ -231,6 +232,17 @@ void snes_setBeamPosition(
     snes->hPos = (uint16_t)(h_master_cycles % SNES_SCANLINE_MASTER_CYCLES);
     snes->vPos = (uint16_t)(v_line % SNES_FRAME_SCANLINES);
     snes->inVblank = snes->vPos >= snes_vblank_start(snes);
+    /* Frame-sliced execution samples input once at the game boundary. The
+     * busy flag still follows the shared beam: native code may wait for both
+     * edges of $4212 bit 0 (including with NMI disabled). Polling must not
+     * resample input or consume another relative-device packet. */
+    const uint32_t joy_elapsed = snes->inVblank
+        ? (uint32_t)(snes->vPos - snes_vblank_start(snes)) *
+            SNES_SCANLINE_MASTER_CYCLES + snes->hPos
+        : SNES_AUTO_JOYPAD_MASTER_CYCLES;
+    snes->autoJoyTimer = snes->autoJoyRead &&
+            joy_elapsed < SNES_AUTO_JOYPAD_MASTER_CYCLES
+        ? (uint16_t)(SNES_AUTO_JOYPAD_MASTER_CYCLES - joy_elapsed) : 0u;
     /* The PPU reloads its OAM address at the visible-to-vblank edge unless
      * forced blank is active. Scanout, polling and game-slice positioning
      * share this transition; repeated positioning within vblank must not

@@ -1,3 +1,4 @@
+#include "actraiser2/ar2_content.h"
 #include "actraiser/actraiser_ar2_master.h"
 #include "app/game_session.h"
 #include "action/action_effect_manifest.h"
@@ -36,6 +37,7 @@
 #include "host/host_localization.h"
 #include "host/host_ppu_output.h"
 #include "host/host_video.h"
+#include "host/imported_world_travel.h"
 #include "manual/manual_reader.h"
 #include "present/present.h"
 #include "present/presentation_textures.h"
@@ -54,6 +56,7 @@
 #include "sim/sim_world_map_build.h"
 #include "sim/town/sim_town_ground_art.h"
 #include "sim/world_nav/sim_world_navigation_towns.h"
+#include "sim/world_nav/world_navigation_travel.h"
 #include "sim/world_nav/sim_completion_cherubs.h"
 #include "snesrecomp/game/bootstrap.h"
 #include "snesrecomp/game/cpu.h"
@@ -137,6 +140,8 @@ static void StartRunner(const GameSessionConfig *config) {
   /* Runtime clocks are process globals; a replacement runner starts at the
    * same power-on boundary as the initial session. SRAM is loaded below. */
   RtlReset(1);
+  Ar2Content_Load();
+  WorldNavigationTravel_Reset();
   ActRaiserAr2Master_Load("game-assets/imports/ar2-master.armaster");
   Settings_SetAr2MasterAvailable(ActRaiserAr2Master_Available());
   if (!RuntimeDiagnostics_Bind(RtlGameRunner()))
@@ -240,6 +245,7 @@ static void StartRunner(const GameSessionConfig *config) {
  * before the process-owned render device. The next session uses the same boot
  * path while SDL, the window and the render device remain alive. */
 static GameSessionResult StopSession(void) {
+  ImportedWorldTravel_EndSession();
   const bool fatal_session = SessionFatal_Requested();
   const bool settings_flush_failed = !SettingsSession_Finish(fatal_session);
   bool save_flush_failed = !SaveSlotHost_FlushBatterySave();
@@ -284,6 +290,7 @@ static GameSessionResult StopSession(void) {
   ActRaiser_DestroyGameCoroutine();
   HostInput_EndSession();
   RuntimeDiagnostics_Unbind();
+  Ar2Content_Close();
   ActRaiserAr2Master_Shutdown();
   Settings_SetAr2MasterAvailable(false);
   SnesShutdown();

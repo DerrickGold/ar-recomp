@@ -12,6 +12,7 @@ func TestLoadRepresentativeConfig(t *testing.T) {
 	text := `
 bank = 1
 auto_vectors
+cop_dispatch GameCop
 func Foo 8123 end:8234 entry_mx:0,1 exit_mx:1,0 tail_call:9000 entry_s_offset:-2
 name 018999 NamedTarget
 indirect_dispatch B8C0 26 idx:A tables:B8D0 transfer:call ret:B8C2 sep:20
@@ -34,6 +35,9 @@ exclude_range B000 B100
 		t.Fatalf("bank/entries mismatch: bank=%d entries=%d", cfg.Bank, len(cfg.Entries))
 	}
 	entry := cfg.Entries[0]
+	if cfg.CopDispatch != "GameCop" {
+		t.Fatalf("COP adapter not retained: %#v", cfg.CopDispatch)
+	}
 	if entry.Name != "Foo" || entry.Start != 0x8123 || entry.End == nil || *entry.End != 0x8234 || entry.EntryMX != (MX{M: 0, X: 1}) {
 		t.Fatalf("entry mismatch: %#v", entry)
 	}
@@ -46,6 +50,21 @@ exclude_range B000 B100
 	conditional := cfg.HLEFunctionsIf[0x8234]
 	if conditional.Function != "HostConditional" || conditional.Predicate != "HostConditionalEnabled" {
 		t.Fatalf("conditional HLE mismatch: %#v", conditional)
+	}
+}
+
+func TestCopDispatchRejectsInvalidDeclarations(t *testing.T) {
+	for _, declaration := range []string{
+		"cop_dispatch", "cop_dispatch invalid-name", "cop_dispatch A B",
+		"cop_dispatch A\ncop_dispatch B",
+	} {
+		path := filepath.Join(t.TempDir(), "bank00.cfg")
+		if err := os.WriteFile(path, []byte("bank = 00\n"+declaration+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil {
+			t.Fatalf("accepted invalid declaration %q", declaration)
+		}
 	}
 }
 

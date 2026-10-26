@@ -15,8 +15,11 @@ import (
 	"time"
 )
 
-func TestBuilderAcceptsROMAndReportsSuccess(t *testing.T) {
+func TestBuilderReusesROMAndReportsSuccess(t *testing.T) {
 	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "user-rom.sfc"), []byte("test-rom"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	built := make(chan string, 1)
 	options := Options{
 		ProjectRoot: root,
@@ -37,11 +40,7 @@ func TestBuilderAcceptsROMAndReportsSuccess(t *testing.T) {
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("rom", "ActRaiser.SFC")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = io.WriteString(part, "test-rom")
+	_ = writer.WriteField("reuseROM", "true")
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}

@@ -330,7 +330,7 @@ static bool ReportPresentFailure(void) {
   return false;
 }
 
-static bool CompletePresent(HostDisplayPresentMode mode) {
+bool HostDisplay_PresentCompositedFrame(HostDisplayPresentMode mode) {
   const PerformanceScope pacing = PerformanceMetrics_Begin(kPerformance_Pacing);
   if (!s_producer_pacing)
     ThrottlePresent(s_vsync_guard.probing ? 0 : PresentIntervalNs(mode));
@@ -826,7 +826,7 @@ bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
 
   const uint64_t vsync_start_ms =
       performance_enabled ? SDL_GetTicks() : 0;
-  const bool presented = CompletePresent(mode);
+  const bool presented = HostDisplay_PresentCompositedFrame(mode);
   if (presented && game_tick) s_tick_present_count++;
   if (presented && performance_enabled)
     ReportPresentPerformance(render_start_ms, vsync_start_ms);
@@ -947,7 +947,7 @@ bool HostDisplay_TryRepresentFrame(float alpha,
   const uint64_t vsync_start_ms =
       performance_enabled ? SDL_GetTicks() : 0;
   const uint64_t swap_start = s_present_trace_enabled ? SDL_GetTicksNS() : 0;
-  const bool completed = CompletePresent(kHostDisplayPresent_GameTick);
+  const bool completed = HostDisplay_PresentCompositedFrame(kHostDisplayPresent_GameTick);
   if (s_present_trace_enabled) {
     s_present_trace.swap_ns = SDL_GetTicksNS() - swap_start;
     const ArSdlPresentTrace backend = ArSdlRenderBackend_LastPresentTrace(&g_render_device);

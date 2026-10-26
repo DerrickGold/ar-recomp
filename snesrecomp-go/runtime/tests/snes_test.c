@@ -112,9 +112,19 @@ static void test_internal_registers(Snes *snes) {
 
 static void test_synthetic_beam(Snes *snes) {
     uint16_t latched_v;
+    snes_writeReg(snes, 0x4200u, 1u);
     snes_beginVblank(snes);
     check(snes->hPos == 0u && snes->vPos == 225u && snes->inVblank,
           "frame timing enters deterministic vblank");
+    check((snes_readReg(snes, 0x4212u) & 1u) != 0u,
+          "auto joypad read becomes busy in vblank without NMI");
+    unsigned polls = 0u;
+    while ((snes_readReg(snes, 0x4212u) & 1u) && ++polls < 100u) {}
+    check(polls > 0u && polls < 100u, "auto joypad read finishes while polling");
+    snes_writeReg(snes, 0x4200u, 0u);
+    snes_beginVblank(snes);
+    check(!(snes_readReg(snes, 0x4212u) & 1u), "disabled auto joypad never becomes busy");
+    snes_beginVblank(snes);
 
     (void)snes_readBBus(snes, 0x37u);
     latched_v = (uint16_t)snes_readBBus(snes, 0x3du);

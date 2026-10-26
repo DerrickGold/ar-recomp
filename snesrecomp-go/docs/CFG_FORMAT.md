@@ -149,6 +149,28 @@ Routes a dispatch site to a project-provided C function.
 
 Marks a verified SPC upload routine for the bundled upload HLE path.
 
+### `cop_dispatch C_FUNCTION`
+
+Opts this bank into game-owned COP continuation dispatch. The helper has the
+signature `RecompReturn C_FUNCTION(CpuState *cpu, uint32 source_pc24,
+uint32 *resume_pc24)`. It executes the software interrupt's verified semantics.
+On `RECOMP_RETURN_NORMAL`, it fills the actual 24-bit resume PC, with CPU
+registers, status, hardware stack and program bank set as the original
+interrupt left them. Native nonlocal return/scheduler results propagate
+unchanged without reading the resume PC. The helper must retain the caller's
+host return context and must not pop generated activations.
+
+This is useful for games whose COP handler consumes inline arguments or
+rewrites the return frame to schedule scripts. Decoding stops at COP;
+`PC + 2` is not presumed to be code. Resuming uses the existing paired tail
+driver, preserving the current caller without accumulating C activations.
+The continuation is an open target: declare or discover the required native
+entries separately and retain live M/X. Observed targets establish coverage,
+not a complete target set. A missing target remains a dispatch failure.
+
+Without this directive, COP retains the existing `g_cpu_cop_hook` behavior
+and the ordinary two-byte fall-through. BRK behavior is unchanged.
+
 ## Compatibility behavior
 
 Unknown and historical v1-only directives are ignored so cfg files can be

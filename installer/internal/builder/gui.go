@@ -594,9 +594,10 @@ func (app *application) startBuild(response http.ResponseWriter, request *http.R
 		return
 	}
 	defer request.MultipartForm.RemoveAll()
-	input, header, err := request.FormFile("rom")
 	var romPath string
-	if errors.Is(err, http.ErrMissingFile) && request.FormValue("reuseROM") == "true" {
+	var err error
+	files := request.MultipartForm.File["rom"]
+	if len(files) == 0 && request.FormValue("reuseROM") == "true" {
 		romPath, err = reusableBuildROM(app.options.ProjectRoot)
 		if err != nil {
 			app.mu.Lock()
@@ -608,16 +609,11 @@ func (app *application) startBuild(response http.ResponseWriter, request *http.R
 			return
 		}
 	} else {
-		if err != nil {
-			app.rejectBuild(response, "select a .sfc or .smc ROM")
+		if len(request.MultipartForm.File) != 1 {
+			app.rejectBuild(response, "select supported ROM files in the main selector")
 			return
 		}
-		defer input.Close()
-		if !validROMName(header.Filename) {
-			app.rejectBuild(response, "the selected file must end in .sfc or .smc")
-			return
-		}
-		romPath, err = storeROM(app.options.ProjectRoot, input)
+		romPath, err = app.prepareBuildROMs(files)
 		if err != nil {
 			app.rejectBuild(response, err.Error())
 			return

@@ -38,6 +38,10 @@ The game-data references describe the US ROM unless stated otherwise. Entries
 marked uncertain should not be treated as verified offsets or behavior.
 
 - [RAM map](ram-map.md) and [ROM map](rom-map.md) — known state and data regions.
+- [ActRaiser 2 scene and task formats](actraiser-2-data-formats.md) — partial
+  USA-format findings and the distinction between assets and executable tasks.
+- [ActRaiser 2 main-game prototype](actraiser-2-prototype.md) — multi-ROM builds,
+  continent travel, native module ownership, controls and current limits.
 - [Projectile identity and lifetime](ram-map.md#projectile-identity-and-lifetime)
   — retained source/backlink semantics, native phase continuity, and effect ownership.
 - [Regional differences: technical evidence](regional-differences-technical.md)

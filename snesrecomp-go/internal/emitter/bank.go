@@ -217,6 +217,7 @@ func defaultBankHeader(bank byte) string {
 
 func DecodeOptionsFromConfig(bank byte, bankConfig *config.Config) decoder.Options {
 	options := decoder.Options{
+		CopDispatch:      bankConfig.CopDispatch,
 		HLEDispatch:      make(map[uint16]string, len(bankConfig.HLEDispatch)),
 		HLEEntryPCs:      config.HLEEntryPoints(bankConfig),
 		IndirectDispatch: make(map[uint32]decoder.DispatchAuth),

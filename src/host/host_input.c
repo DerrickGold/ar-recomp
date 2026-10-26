@@ -685,6 +685,12 @@ bool HostInput_HandleEvent(const SDL_Event *event) {
 
 bool HostInput_TryHandleStreamEvent(const SDL_Event *event, bool sim_town) {
   /* Touches only publish gamepad events, which are classified on their own. */
+  /* Imported travel requests must be handled after the producer acknowledges
+   * pause, even if their gameplay binding would otherwise stay on the stream. */
+  if (event && ((event->type == SDL_EVENT_KEY_DOWN &&
+                 event->key.scancode == SDL_SCANCODE_C) ||
+                (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+                 event->gbutton.button == SDL_GAMEPAD_BUTTON_BACK))) return false;
   if (event && TouchControls_HandleEvent(event)) return true;
   if (TouchControls_IsMenuEvent(event)) return false;
   if (!event || s_paused || ManualReader_IsOpen() || SettingsOverlay_IsOpen() ||

@@ -326,7 +326,7 @@ func collectShadowReturnQueries(image romimage.Image, banks []shadowBank, result
 			}
 		}
 		recipe := result.bankRecipe
-		g, err := decoder.DecodeFunction(image, byte(v.Address>>16), uint16(v.Address), v.M, v.X, decoder.Options{End: recipe.end, DataRegions: recipe.regions, CalleeExitMX: recipe.exitMX, HLEDispatch: cfg.HLEDispatch, SiblingEntryPCs: own})
+		g, err := decoder.DecodeFunction(image, byte(v.Address>>16), uint16(v.Address), v.M, v.X, decoder.Options{End: recipe.end, DataRegions: recipe.regions, CalleeExitMX: recipe.exitMX, HLEDispatch: cfg.HLEDispatch, CopDispatch: cfg.CopDispatch, SiblingEntryPCs: own})
 		if err != nil {
 			errors[v] = "exact_variant_redecode_failed"
 			return nil, cfg, errors[v]

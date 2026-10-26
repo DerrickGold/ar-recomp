@@ -110,6 +110,9 @@ void SettingsOverlay_SetManualHooks(const SettingsOverlayManualHooks *hooks);
 bool SettingsOverlay_IsOpen(void);
 void SettingsOverlay_Open(void);
 void SettingsOverlay_Close(void);
+/* Imported sessions share host preferences while their campaign/save/editor
+ * adapters are not yet installed. Restoring false restores normal navigation. */
+void SettingsOverlay_SetHostSettingsOnly(bool enabled);
 
 /* One host-owned decision at a time. Keys are copied from the interface
  * catalogue; no game state or callback is retained. Cancel is selected first.

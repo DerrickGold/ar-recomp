@@ -377,6 +377,7 @@ add_executable(ActRaiserRecomp
     # recompiled banks (generated)
     ${ACTRAISER_GEN_SOURCES}
 )
+include(cmake/ImportedGames.cmake)
 target_link_libraries(ActRaiserRecomp PRIVATE actraiser_regional_rules)
 
 # Use the same original sword artwork as Builder-produced game executables.
@@ -1302,6 +1303,13 @@ if(BUILD_TESTING)
     add_test(NAME actraiser_sim_world_navigation_palace
         COMMAND actraiser_sim_world_navigation_palace_test)
 
+    add_executable(actraiser_world_navigation_travel_test
+        tests/world_navigation_travel_test.c src/sim/world_nav/world_navigation_travel.c)
+    target_include_directories(actraiser_world_navigation_travel_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${SNESRECOMP_RUNNER_PUBLIC_INCLUDE_DIRS})
+    target_link_libraries(actraiser_world_navigation_travel_test PRIVATE actraiser_math)
+    add_test(NAME actraiser_world_navigation_travel COMMAND actraiser_world_navigation_travel_test)
+
     set(AR_WORLD_NAV_TEST_SOURCES
         src/present/presentation_upload_mirror.c
         src/sim/sim_render_visibility.c
@@ -1310,6 +1318,8 @@ if(BUILD_TESTING)
         src/sim/sim3d/sim3d_performance.c
         src/sim/sim3d/present_sim3d_environment.c
         src/sim/world_nav/present_world_nav.c
+        src/sim/world_nav/present_world_nav_imports.c
+        tests/support/world_nav_text_stubs.c
         src/sim/world_nav/present_world_nav_terrain.c
         src/sim/world_nav/present_world_nav_ground.c
         src/sim/world_nav/present_world_nav_models.c
@@ -1352,6 +1362,7 @@ if(BUILD_TESTING)
         ${AR_WORLD_NAV_TEST_SOURCES})
     target_link_libraries(actraiser_present_world_nav_test PRIVATE
         actraiser_performance_test_support actraiser_render_test_support actraiser_scene_math_test_support actraiser_town_model_test_support)
+    target_link_libraries(actraiser_present_world_nav_test PRIVATE actraiser_ar2_world_test_support)
     add_executable(actraiser_present_sim_globe_mapping_test
         tests/present_sim_globe_mapping_test.c src/sim/world_nav/present_sim_globe_mapping.c
         src/sim/world_nav/sim_world_navigation_globe.c)
@@ -1452,7 +1463,7 @@ if(BUILD_TESTING)
         src/platform/sdl/sim3d_depth_pass_pipelines_sdl.c
         src/platform/sdl/sim3d_depth_pass_meshes_sdl.c)
     target_link_libraries(actraiser_present_world_nav_gpu_test PRIVATE
-        actraiser_scene_math_test_support actraiser_town_model_test_support)
+        actraiser_scene_math_test_support actraiser_town_model_test_support actraiser_ar2_world_test_support)
     target_link_libraries(actraiser_present_world_nav_gpu_test PRIVATE
         actraiser_render_sdl_test_support)
     target_include_directories(actraiser_present_world_nav_gpu_test PRIVATE
@@ -2665,6 +2676,7 @@ if(BUILD_TESTING)
         src/app/config.c
         src/app/settings.c
         src/present/display_geometry.c
+        src/render/presentation_layout.c
         src/host/atomic_replace.c
         # settings.c's randomizer rows call into the transform for their
         # availability gate and their on-change refresh. It is pure ROM-buffer
@@ -4576,6 +4588,21 @@ if(BUILD_TESTING)
     )
     add_test(NAME actraiser_quintet_lzss
         COMMAND actraiser_quintet_lzss_test)
+
+    add_executable(actraiser_ar2_world_test
+        tests/ar2_world_test.c src/actraiser2/module/ar2_world.c)
+    target_include_directories(actraiser_ar2_world_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_ar2_world COMMAND actraiser_ar2_world_test)
+
+    add_executable(actraiser_ar2_world_atlas_test
+        tests/ar2_world_atlas_test.c
+    )
+    target_link_libraries(actraiser_ar2_world_atlas_test PRIVATE
+        actraiser_ar2_world_test_support)
+    target_include_directories(actraiser_ar2_world_atlas_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME actraiser_ar2_world_atlas
+        COMMAND actraiser_ar2_world_atlas_test)
 
     # CPU-facing contract for the $02:C5C9 whole-body HLE: output and ring
     # bytes plus all caller-visible DP scratch, registers, and RTL stack pop.

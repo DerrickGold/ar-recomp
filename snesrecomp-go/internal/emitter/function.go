@@ -455,6 +455,20 @@ func EmitFunction(image rom.Image, bank byte, start uint16, entryM, entryX uint8
 						}
 						lines = append(lines, emitted...)
 					}
+				case ir.Break:
+					if op.COP && options.Decode.CopDispatch != "" {
+						helper := options.Decode.CopDispatch
+						lines = append(lines, fmt.Sprintf("{ extern RecompReturn %s(CpuState *cpu, uint32 source_pc24, uint32 *resume_pc24); uint32 _resume; RecompReturn _interrupt = %s(cpu, ((uint32)cpu->PB << 16) | 0x%04xu, &_resume);", helper, helper, uint16(instruction.Address)),
+							"  if (_interrupt != RECOMP_RETURN_NORMAL) { RecompStackPop(); return _interrupt; } /* retain native scheduler/unwind results */")
+						lines = append(lines, runtimeTailStatement("_resume", fmt.Sprintf("0x%06xu", instruction.Address&0xffffff), "/* game-owned COP continuation, live M/X and hardware frame */"), "}")
+						terminated = true
+					} else {
+						emitted, emitErr := codegen.EmitOperation(context, op)
+						if emitErr != nil {
+							return result, emitErr
+						}
+						lines = append(lines, emitted...)
+					}
 				case ir.Return:
 					op.OwnFrameWord = wordShuttle != nil
 					if instruction.DispatchKind == "rts_trick" {

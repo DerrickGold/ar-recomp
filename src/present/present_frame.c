@@ -14,7 +14,7 @@
 #include "host/host_video.h"
 
 
-static CrtPostConfig CurrentCrtConfig(void) {
+CrtPostConfig Present_CaptureCrtConfig(void) {
   const float scale = (float)kPercentScale;
   return (CrtPostConfig){
     .enabled = g_settings.crt_enabled,
@@ -29,7 +29,7 @@ static CrtPostConfig CurrentCrtConfig(void) {
 }
 
 static bool BeginCrtPost(void) {
-  const CrtPostConfig config = CurrentCrtConfig();
+  const CrtPostConfig config = Present_CaptureCrtConfig();
   const PerformanceScope performance = PerformanceMetrics_Begin(kPerformance_PostProcess);
   const bool result = CrtPost_Begin(&g_render_device, &config);
   PerformanceMetrics_End(performance);

@@ -143,7 +143,7 @@ func packageMacOS(ctx context.Context, options PackageOptions, app, bin, librari
 				}
 			}
 			newPath := "@executable_path/../Frameworks/" + leaf
-			if library {
+			if library && filepath.Dir(target) == libraries {
 				newPath = "@loader_path/" + leaf
 			}
 			changes[dependency] = newPath
@@ -172,6 +172,17 @@ func packageMacOS(ctx context.Context, options PackageOptions, app, bin, librari
 		return err
 	}
 	var code []string
+	modules, err := nativeModules(options.Binary)
+	if err != nil {
+		return err
+	}
+	for _, module := range modules {
+		target := filepath.Join(bin, filepath.Base(module))
+		if err := rewrite(module, target, true, paths); err != nil {
+			return err
+		}
+		code = append(code, target)
+	}
 	for leaf := range installed {
 		code = append(code, filepath.Join(libraries, leaf))
 	}

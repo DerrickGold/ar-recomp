@@ -36,6 +36,14 @@ ar_test_support(actraiser_text_test_support
 ar_test_support(actraiser_rom_decode_test_support
     src/actraiser/quintet_lzss.c)
 
+# Optional content remains unloaded in ROM-free fixtures. Link its real
+# provider so both navigation presenters share the production dependency set.
+ar_test_support(actraiser_ar2_world_test_support
+    src/actraiser2/ar2_content.c
+    src/actraiser2/ar2_world_atlas.c)
+target_link_libraries(actraiser_ar2_world_test_support PUBLIC
+    actraiser_ar2_master_test_support)
+
 ar_test_support(actraiser_campaign_test_support
     src/randomizer/randomizer_config.c
     src/host/campaign_identity.c)

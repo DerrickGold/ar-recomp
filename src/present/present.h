@@ -16,8 +16,12 @@
 #include "sim/menu/sim_menu_art.h"
 #include "sim/church/church_art.h"
 #include "render/render_device.h"
+#include "render/crt_post.h"
 #include "localization/localization_frame.h"
 #include "snesrecomp/runner.h"
+
+/* Shared final display treatment for native and imported game sessions. */
+CrtPostConfig Present_CaptureCrtConfig(void);
 
 /* FrameSlot is the sole game-state contract for presentation. FrameSlot_Capture
  * populates it immediately after RtlDrawPpuFrame; presentation consumes the

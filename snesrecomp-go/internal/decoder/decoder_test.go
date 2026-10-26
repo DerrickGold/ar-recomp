@@ -50,6 +50,26 @@ func TestExplicitDispatchTransferMustMatchInstruction(t *testing.T) {
 	}
 }
 
+func TestCopDispatchStopsInlineDataAndKeepsExitModesOpen(t *testing.T) {
+	image := bank0(map[uint16][]byte{
+		0x8000: {0xd0, 0x01, 0x60, 0x02, 0x9c, 0xe8, 0x60}, // BNE COP; RTS; COP; inline data
+	})
+	for _, helper := range []string{"", "GameCop"} {
+		graph, err := DecodeFunction(image, 0, 0x8000, 0, 0, Options{CopDispatch: helper})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, decodedData := graph.Instructions[DecodeKey{PC: 0x8005, M: 0, X: 0}]
+		if decodedData != (helper == "") {
+			t.Fatalf("helper %q: decoded inline data=%t", helper, decodedData)
+		}
+		modes, ok := AnalyzeExitModes(graph, nil)
+		if !ok || len(modes) != map[bool]int{false: 1, true: 4}[helper != ""] {
+			t.Fatalf("helper %q: exit modes=%v, known=%t", helper, modes, ok)
+		}
+	}
+}
+
 func TestAutoDispatchTableRetainsZeroHolesUntilStructuralBoundary(t *testing.T) {
 	table := make([]byte, 72*2)
 	for index := 0; index < 72; index++ {

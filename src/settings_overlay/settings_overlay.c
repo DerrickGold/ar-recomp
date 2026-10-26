@@ -277,6 +277,12 @@ static const char kSectionResetKey[] = "reset_section_defaults";
 
 static SDL_Window *s_window;      /* SDL input service only; never renders */
 static bool s_open;
+static bool s_host_settings_only;
+
+void SettingsOverlay_SetHostSettingsOnly(bool enabled) {
+  s_host_settings_only = enabled;
+  SettingsOverlay_Refresh();
+}
 static bool s_submenu_open;
 static int s_section;
 /* Per-section tab memory: leaving Town 3D on its Weather tab and coming back
@@ -423,6 +429,11 @@ static int CursorBlinkOffset(void) {
 static bool SectionHidden(int section) {
   if (section < 0 || section >= kSectionCount) return true;
   const MenuSection *candidate = &kSections[section];
+  if (s_host_settings_only && candidate->tabs != kTabsVideo &&
+      candidate->tabs != kTabsDiorama && candidate->tabs != kTabsTown &&
+      candidate->tabs != kTabsAudio && candidate->tabs != kTabsControls &&
+      candidate->tabs != kTabsSystem)
+    return true;
   if (candidate->debug_only && !g_settings.show_debug_settings) return true;
   return candidate->requires_manual && !ManualAvailable();
 }
@@ -443,13 +454,23 @@ static const MenuSection *ActiveSection(void) {
  * Light/Weather tabs and the System Inspector tab collapse this way). Page tabs
  * (Save pages, Controls binding pages) share always-visible rows, so they never
  * collapse and are cheap to short-circuit. */
+static bool ContextAllowsSetting(const SettingDesc *desc) {
+  if (!s_host_settings_only) return true;
+  if (desc->category == kSettingCat_Enhancements || desc->category == kSettingCat_Inspector)
+    return false;
+  if (desc->category != kSettingCat_Extras) return true;
+  return desc->action == kSettingAction_TogglePause || desc->action == kSettingAction_Restart ||
+         desc->action == kSettingAction_Exit;
+}
+
 static bool RawTabHidden(int section, int tab) {
   const MenuTab *menu_tab = &kSections[section].tabs[tab];
   /* Campaign-owned rows are independent of the global settings registry. */
   if (menu_tab->regional_rules || menu_tab->page_key) return false;
   for (int i = 0; i < g_setting_desc_count; i++) {
     const SettingDesc *desc = &g_setting_descs[i];
-    if (desc->category == menu_tab->category && Settings_IsMenuVisible(desc))
+    if (desc->category == menu_tab->category && ContextAllowsSetting(desc) &&
+        Settings_IsMenuVisible(desc))
       return false;
   }
   return true;
@@ -528,7 +549,7 @@ static void SyncActiveTabPage(void) {
 
 static bool RowBelongsToActiveTab(const SettingDesc *desc) {
   return desc->category == ActiveTab()->category &&
-         Settings_IsMenuVisible(desc);
+         ContextAllowsSetting(desc) && Settings_IsMenuVisible(desc);
 }
 
 static bool ActiveSectionIsCustom(void) {
@@ -625,7 +646,8 @@ static int TabSettingRowCount(void) {
  * "reset this section's settings to defaults" has nothing to act on. It carries
  * its own per-room reset row instead, built into the list. */
 static int TabRowCount(void) {
-  if (ActiveSectionIsCustom() || ActiveTabIsRegional()) return TabSettingRowCount();
+  if (ActiveSectionIsCustom() || ActiveTabIsRegional() ||
+      (s_host_settings_only && ActiveSection()->tabs == kTabsSystem)) return TabSettingRowCount();
   return TabSettingRowCount() + 1;
 }
 
@@ -673,7 +695,8 @@ static bool SelectedRowIsSectionReset(void) {
   /* The layer editor has no registry rows for a section reset to act on, and
    * carries its own per-room reset instead. Without this guard the synthetic row
    * would appear one past the end of its list and reset nothing. */
-  if (ActiveSectionIsCustom() || ActiveTabIsRegional()) return false;
+  if (ActiveSectionIsCustom() || ActiveTabIsRegional() ||
+      (s_host_settings_only && ActiveSection()->tabs == kTabsSystem)) return false;
   return s_submenu_open && s_row == TabSettingRowCount();
 }
 
@@ -1179,7 +1202,7 @@ void SettingsOverlay_SetSaveSlotHooks(const SettingsOverlaySaveSlotHooks *hooks)
 }
 
 bool SettingsOverlay_OpenSaveSlots(bool randomized) {
-  if (!s_open || !SaveSlotMenu_Available() ||
+  if (s_host_settings_only || !s_open || !SaveSlotMenu_Available() ||
       (randomized && !g_settings.show_debug_settings)) return false;
   if (!randomized && SaveSlotMenu_ReturnFromEditor()) {
     s_status[0] = 0;
@@ -1213,6 +1236,7 @@ void SettingsOverlay_Destroy(void) {
   SettingsOverlayWidgets_Destroy();
   s_window = NULL;
   s_open = false;
+  s_host_settings_only = false;
   memset(&s_decision, 0, sizeof(s_decision));
   memset(&s_details, 0, sizeof(s_details));
   s_submenu_open = false;

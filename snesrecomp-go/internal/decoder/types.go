@@ -147,6 +147,10 @@ type Options struct {
 	IndirectCallTables   map[uint32]IndirectCallTable
 	IndirectDispatch     map[uint32]DispatchAuth
 	HLEDispatch          map[uint16]string
+	// CopDispatch transfers COP execution to a game-owned interrupt adapter.
+	// Its live return PC is not necessarily PC+2: inline operands and scheduler
+	// continuations must not be decoded as ordinary fall-through instructions.
+	CopDispatch string
 	// HLEEntryPCs are native function/prefix interceptions. Every incoming
 	// edge from another root must dispatch through the generated wrapper,
 	// including fall-through, conditional branches and BRK continuations.

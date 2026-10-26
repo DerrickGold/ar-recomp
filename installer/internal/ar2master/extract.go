@@ -8,11 +8,12 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/DerrickGold/ar-recomp/installer/internal/ar2rom"
 	"github.com/DerrickGold/ar-recomp/installer/internal/quintet"
 )
 
 const (
-	ROMBytes       = 0x180000
+	ROMBytes       = ar2rom.Size
 	MaximumBytes   = 256 << 10
 	MotionBytes    = 0x109c
 	AnimationCount = 37
@@ -20,17 +21,13 @@ const (
 	Filename       = "ar2-master.armaster"
 )
 
-var romDigest = [32]byte{0x71, 0xbd, 0xd4, 0x48, 0xa3, 0x0b, 0x88, 0x72, 0x58, 0x64, 0xe5, 0x55, 0x94, 0xeb, 0xb6, 0x7a, 0x11, 0x8b, 0x1f, 0x19, 0x7a, 0x3f, 0x9e, 0x5d, 0xd3, 0x9d, 0xbf, 0x23, 0x39, 0x9e, 0xfa, 0x15}
-
 // Extract accepts the supported USA release, with or without a copier header.
 func Extract(rom []byte) ([]byte, error) {
-	if len(rom) == ROMBytes+512 {
-		rom = rom[512:]
+	normalized, err := ar2rom.Normalize(rom)
+	if err != nil {
+		return nil, err
 	}
-	if len(rom) != ROMBytes || sha256.Sum256(rom) != romDigest {
-		return nil, fmt.Errorf("select an unmodified ActRaiser 2 (USA) ROM (.sfc or .smc); this release is not supported")
-	}
-	return extract(rom)
+	return extract(normalized)
 }
 
 func extract(rom []byte) ([]byte, error) {

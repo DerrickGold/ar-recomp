@@ -45,6 +45,8 @@ typedef enum Sim3DDepthPassLayer {
   /* Caller-ordered pixel-art billboards. Test opaque world depth, never write
    * it: transparent texels and multipart sprites must not occlude later art. */
   kSim3DDepthPass_Billboard,
+  /* Optional continent atlas, opaque depth with transparent ocean cutouts. */
+  kSim3DDepthPass_ImportedGround,
   kSim3DDepthPassLayerCount,
 } Sim3DDepthPassLayer;
 

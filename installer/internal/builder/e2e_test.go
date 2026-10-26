@@ -8,6 +8,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,9 +18,13 @@ import (
 // Drive the real endpoints with structured updates and assert the bar advances
 // and finishes. Log text is deliberately unrelated to progress.
 func TestEndToEndProgressAdvances(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "user-rom.sfc"), []byte("test-rom"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	release := make(chan struct{})
 	app := newApplication(context.Background(), Options{
-		ProjectRoot: t.TempDir(),
+		ProjectRoot: root,
 		Build: func(_ context.Context, _ string, out io.Writer) (Result, error) {
 			io.WriteString(out, "arbitrary diagnostics that contain no phase grammar\n")
 			ReportBuildProgress(out, BuildProgress{PhaseID: "regen", Completed: 1, Total: 1})
@@ -32,8 +38,7 @@ func TestEndToEndProgressAdvances(t *testing.T) {
 
 	var body bytes.Buffer
 	w := multipart.NewWriter(&body)
-	part, _ := w.CreateFormFile("rom", "ar.sfc")
-	io.WriteString(part, "rom")
+	_ = w.WriteField("reuseROM", "true")
 	w.Close()
 	req := httptest.NewRequest(http.MethodPost, "/tok/build", &body)
 	req.Header.Set("Content-Type", w.FormDataContentType())

@@ -64,6 +64,33 @@ build/v2regen regen \
 build/v2regen stub-census --gen-dir src/gen
 ```
 
+## Optional native modules
+
+An authored manifest with `module = true` builds a desktop shared library
+instead of an executable. Pass it to `snesbuild build --hermetic --manifest
+path/to/module.ini`, with separate `--generated-dir`, `--funcs-header` and
+`--build-dir` paths. Source and include entries remain relative to the project
+root. A module is reported as the `game-binary` artifact, using the target's
+`.dll`, `.dylib` or `.so` extension and no `lib` prefix.
+
+Modules use PIC and hidden symbols. The game must explicitly export its host
+ABI and implement `sr_native_module_abort` for the module's generated/runtime
+abort boundary. Linux also binds internal references locally. Keep runtime
+objects and generated symbols private: sharing the executable's mutable
+runtime state would mix the two games.
+
+Binary SDK distributions must also include the runtime archive produced by
+`snesbuild runtime archive --private-module`; its filename has `_module`
+before the archive extension. A module never links the ordinary executable
+runtime archive. Development builds can fall back to runtime sources, but a
+source-free SDK needs this separate private archive and the public headers.
+
+The experimental `regen` flags `--experimental-proven-analysis`,
+`--experimental-stored-targets` and `--experimental-internal-tails` are
+available for isolated module generation. They require a generated output
+directory separate from the canonical `src/gen`; established game generation
+does not opt into them automatically.
+
 ## Machine process contract
 
 External project installers must request `--event-format jsonl` on `regen`,
@@ -253,6 +280,12 @@ does not supply a complete application. A game project owns:
    state. Doctor uses `snesbuild.ini`'s actual source list. Ordinary definitions
    are verified; unusual macro-authored definitions are reported as unverified
    and left to the native linker instead of being rejected heuristically.
+   Games whose COP handlers rewrite the interrupted PC can opt into
+   [`cop_dispatch`](CFG_FORMAT.md#cop_dispatch-c_function). Its helper takes
+   the CPU, source PC and a resume-PC output, executes the interrupt, and
+   preserves native nonlocal return results; it is also checked by Doctor.
+   This avoids decoding inline script
+   arguments as instructions while retaining the original caller's stack.
 7. **Game-specific hardware workarounds.** Put ROM-address policy in the game
    layer. `RtlGameExecutionApi.read_rdnmi` may override a `$4210` read (return
    `-1` for shared behavior), and `recover_dispatch_miss` may opt verified

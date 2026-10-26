@@ -191,14 +191,17 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	// object files later or a silently different binary from the developer
 	// build. Both are far more expensive to read than this. `doctor` reports
 	// the same drift as a warning; here it stops the build.
-	if drift := ManifestDriftWarnings(paths.Root, manifest); len(drift) > 0 {
+	if drift := ManifestDriftWarnings(paths.Root, manifest); !manifest.Module && len(drift) > 0 {
 		return "", fmt.Errorf("%s and CMakeLists.txt disagree on the game source list:\n  %s\n"+
 			"add the missing entries to whichever file is behind, then build again",
 			ManifestFileName, strings.Join(drift, "\n  "))
 	}
 
 	runnerDirectory := RunnerDirectory(paths.ToolchainDir)
-	runner, err := selectRuntimeInputs(runnerDirectory, options.Target)
+	if manifest.Module && IsAndroidTarget(options.Target) {
+		return "", fmt.Errorf("native modules currently require a desktop target")
+	}
+	runner, err := selectRuntimeInputsForModule(runnerDirectory, options.Target, manifest.Module)
 	if err != nil {
 		return "", err
 	}
@@ -285,6 +288,9 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	}
 	compileArgs = append(compileArgs, "-std="+manifest.Std, options.Optimize, "-g",
 		"-w", "-Wno-implicit-function-declaration")
+	if manifest.Module {
+		compileArgs = append(compileArgs, privateModuleCompileArgs...)
+	}
 	if IsAndroidTarget(options.Target) {
 		// libmain.so is a shared library; Zig otherwise compiles Android
 		// objects for a PIE executable (local-exec TLS, absolute relocations).
@@ -300,6 +306,9 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	if runnerSourceCount > 0 {
 		runnerCompileArgs = runtimeCompileArgs(runnerDirectory, options.ZigPath,
 			options.Target, options.Optimize, true, runner.SourceManifest)
+		if manifest.Module {
+			runnerCompileArgs = append(runnerCompileArgs, privateModuleCompileArgs...)
+		}
 	}
 
 	// Each target gets its own output tree. Sharing one would be worse than
@@ -482,7 +491,9 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 	}
 
 	binary := filepath.Join(outputDir, manifest.Name)
-	if targetOS == "windows" {
+	if manifest.Module {
+		binary = filepath.Join(outputDir, nativeModuleName(manifest.Name, targetOS))
+	} else if targetOS == "windows" {
 		binary += ".exe"
 	} else if androidCRTDir != "" {
 		binary = filepath.Join(outputDir, androidLibraryName)
@@ -521,6 +532,12 @@ func HermeticBuild(options HermeticOptions) (string, error) {
 		linkArgs = append(linkArgs, "-target", options.Target)
 	}
 	linkArgs = append(linkArgs, "-o", binary)
+	if manifest.Module {
+		linkArgs = append(linkArgs, "-shared")
+		if targetOS == "linux" {
+			linkArgs = append(linkArgs, "-Wl,-Bsymbolic")
+		}
+	}
 	linkArgs = append(linkArgs, forceLoadArchiveArgs(targetOS, gameArchive)...)
 	linkArgs = append(linkArgs, runtimeArchive)
 	if manifest.UseSDL3 {

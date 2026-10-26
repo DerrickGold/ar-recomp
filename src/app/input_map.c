@@ -193,6 +193,8 @@ void InputMap_SetActionHandler(InputMapActionFn handler) {
   s_action_handler = handler;
 }
 
+InputMapActionFn InputMap_GetActionHandler(void) { return s_action_handler; }
+
 void InputMap_Init(void) {
   s_angel_controls_active = false;
   s_steam_deck_detected = false;

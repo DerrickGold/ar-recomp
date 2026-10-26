@@ -81,6 +81,9 @@ struct SimFrameData;
 bool HostDisplay_SubmitFrame(HostDisplayPresentMode mode, float alpha,
                              const struct SimFrameData *annotated_sim);
 struct FrameSlot;
+/* Present an already composited scene using the common refresh policy and
+ * completed-frame accounting. Imported sessions own their capture/clock. */
+bool HostDisplay_PresentCompositedFrame(HostDisplayPresentMode mode);
 bool HostDisplay_StageOwnedFrame(const struct FrameSlot *frame);
 bool HostDisplay_CanPresentDuringProduction(void);
 /* Software-paced producer: prepare captures early, draw with measured lead,

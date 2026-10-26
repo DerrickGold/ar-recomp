@@ -16,7 +16,8 @@ func TestCollectHleObligationsUsesCfgGrammar(t *testing.T) {
 		"func Entry 8000\n" +
 		"hle_func 8000 HostFrame\n" +
 		"hle_func_if 8010 HostConditional HostConditionalEnabled\n" +
-		"hle_dispatch 8020 HostDispatch\n"
+		"hle_dispatch 8020 HostDispatch\n" +
+		"cop_dispatch HostCop\n"
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +30,7 @@ func TestCollectHleObligationsUsesCfgGrammar(t *testing.T) {
 		symbols = append(symbols, obligation.symbol)
 	}
 	want := []string{
-		"HostConditional", "HostConditionalEnabled", "HostDispatch", "HostFrame",
+		"HostConditional", "HostConditionalEnabled", "HostCop", "HostDispatch", "HostFrame",
 	}
 	if !reflect.DeepEqual(symbols, want) {
 		t.Fatalf("symbols = %#v, want %#v", symbols, want)

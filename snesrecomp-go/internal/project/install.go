@@ -103,11 +103,11 @@ func installAdjacentLibraries(sourceDir, destinationDir string) ([]string, error
 	var patterns []string
 	switch runtime.GOOS {
 	case "darwin":
-		patterns = []string{"libSDL3*.dylib"}
+		patterns = []string{"libSDL3*.dylib", "actraiser2-native.dylib"}
 	case "windows":
-		patterns = []string{"SDL3*.dll"}
+		patterns = []string{"SDL3*.dll", "actraiser2-native.dll"}
 	default:
-		patterns = []string{"libSDL3*.so*"}
+		patterns = []string{"libSDL3*.so*", "actraiser2-native.so"}
 	}
 	seen := make(map[string]struct{})
 	var installed []string

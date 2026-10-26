@@ -222,6 +222,7 @@ bool InputMap_AxisBindingHeld(uint32 binding, int value, bool was_held);
  * press edge. */
 typedef void (*InputMapActionFn)(InputAction action);
 void InputMap_SetActionHandler(InputMapActionFn handler);
+InputMapActionFn InputMap_GetActionHandler(void);
 
 /* --- Binding rows -------------------------------------------------------- */
 

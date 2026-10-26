@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -49,9 +50,13 @@ func TestBuildFailureReportsAndClearsGuidance(t *testing.T) {
 	failure := fmt.Errorf("start snesbuild regen: %w", &os.PathError{
 		Op: "fork/exec", Path: `C:\Builder\snesbuild.exe`, Err: syscall.Errno(4551),
 	})
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "user-rom.sfc"), []byte("test-rom"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	builds := 0
 	app := newApplication(context.Background(), Options{
-		ProjectRoot: t.TempDir(),
+		ProjectRoot: root,
 		Build: func(context.Context, string, io.Writer) (Result, error) {
 			builds++
 			if builds == 1 {
@@ -62,7 +67,7 @@ func TestBuildFailureReportsAndClearsGuidance(t *testing.T) {
 	}, "tok")
 	for _, wantState := range []string{"failed", "succeeded"} {
 		response := httptest.NewRecorder()
-		app.ServeHTTP(response, rebuildRequest(t, false, "test.sfc", "test-rom"))
+		app.ServeHTTP(response, rebuildRequest(t, true, "", ""))
 		if response.Code != 202 {
 			t.Fatal(response.Code, response.Body.String())
 		}

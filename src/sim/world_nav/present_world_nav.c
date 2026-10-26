@@ -1,3 +1,5 @@
+#include "sim/world_nav/present_world_nav_imports.h"
+#include "actraiser2/ar2_content.h"
 #include "sim/world_nav/present_world_nav.h"
 /* Standalone world-navigation composition over the shared authored town
  * models and portable globe terrain/art. Camera-dependent memoization lives
@@ -639,7 +641,7 @@ static void ResetWorldNavigationArt(void) {
   g_world_nav_art.pixels = NULL;
 }
 
-static bool WorldNavigationFlatOutputPoint(
+bool WorldNavigationFlatOutputPoint(
     const FrameSlot *slot, ArRenderRectI viewport,
     float source_x, float source_y, ArRenderPointF *out) {
   float authentic_x = 0.0f, authentic_y = 0.0f;
@@ -828,14 +830,28 @@ static bool PrepareWorldNavigationProjection(
   for (int i = 0; i < 3; i++)
     out->camera_world[i] = -camera.distance * out->matrix[i * 4 + 3];
 
-  const float focus_x = slot->sim.world_navigation.focus_x;
-  const float focus_y = slot->sim.world_navigation.focus_y;
+  const WorldNavigationTravelFrame *travel = &slot->sim.world_travel;
+  const bool travelling = travel->imported || travel->turning;
+  const float focus_x = travelling ? travel->focus_x : slot->sim.world_navigation.focus_x;
+  const float focus_y = travelling ? travel->focus_y : slot->sim.world_navigation.focus_y;
   const float *affine = slot->sim.world_navigation_scene.source_to_screen;
   const float heading = atan2f(-affine[3], affine[0]);
   if (!SimWorldNavigationGlobe_BuildFrameAtRadius(out->chart_radius_tiles,
           focus_x / kSimWorldMapTilePixels,
           focus_y / kSimWorldMapTilePixels, heading, &out->globe_frame))
     return false;
+  /* Rotate the chart in planet space before applying the shared inspection
+   * camera. Both continents retain their positions on the same globe. */
+  if (travelling) {
+    const float angle = travel->turn * 3.14159265f;
+    const float c = cosf(angle), s = sinf(angle);
+    float *rows[] = {out->globe_frame.right, out->globe_frame.up, out->globe_frame.outward};
+    for (int i = 0; i < 3; i++) {
+      const float x = rows[i][0], z = rows[i][2];
+      rows[i][0] = x * c + z * s;
+      rows[i][2] = -x * s + z * c;
+    }
+  }
   if (!SimWorldNavigationGlobe_OrbitFrame(&out->globe_frame,
           slot->sim_camera.orbit_yaw, slot->sim_camera.orbit_pitch)) return false;
   ArRenderPointF centre, east, south;
@@ -864,7 +880,7 @@ static bool PrepareWorldNavigationProjection(
       ? (float)slot->sim.landscape_height_pct / kPercentScale : 0.0f;
   out->height_world_per_unit = out->tile_world *
       landscape_scale;
-  out->reference_height_units = landscape_scale > 0.0f
+  out->reference_height_units = landscape_scale > 0.0f && !travelling
       ? WorldNavigationTerrainHeightAt(focus_x, focus_y, NULL) : 0.0f;
   out->globe_radius_world = fmaxf(
       0.25f, out->tile_world * out->chart_radius_tiles);
@@ -909,13 +925,16 @@ static bool DrawWorldNavigationPalace(
     const FrameSlot *slot, ArRenderRectI viewport,
     const WorldNavigationProjection *projection) {
   ArRenderPointF offset = {0};
-  if (WorldNavigationInspecting(slot)) {
+  if (WorldNavigationInspecting(slot) && !slot->sim.world_travel.turning) {
     /* The native Palace remains the travel marker, not a screen-fixed marker
      * for the inspection direction. Move its authored billboard with the
      * real focus and omit it on the far hemisphere; destination UI stays put. */
     float normal[3], world[3];
-    if (!WorldNavigationSurfaceNormal(projection, slot->sim.world_navigation.focus_x,
-                                      slot->sim.world_navigation.focus_y, normal))
+    if (!(slot->sim.world_travel.imported
+          ? WorldNavigationImports_Normal(projection, slot->sim.world_navigation.focus_x,
+                                          slot->sim.world_navigation.focus_y, normal)
+          : WorldNavigationSurfaceNormal(projection, slot->sim.world_navigation.focus_x,
+                                          slot->sim.world_navigation.focus_y, normal)))
       return false;
     WorldNavigationRadialPoint(projection, normal, 0, world);
     float facing = 0;
@@ -1009,11 +1028,12 @@ static bool EnsureWorldNavigationResources(const FrameSlot *slot) {
 static PresentationOutcome DrawWorldNavigationScene(
     const FrameSlot *slot, ArRenderRectI viewport,
     WorldNavigationProjection *projection, ArRenderPointF completion_player,
-    DeathHeimCompletionArt completion_art) {
+    DeathHeimCompletionArt completion_art, bool projection_prepared) {
   PresentationOutcome outcome = kPresentationOutcome_Complete;
   const Sim3DPerformanceScope projection_performance =
       Sim3DPerformance_Begin(kSim3DPerformance_WorldPrepare);
-  const bool projection_ok = PrepareWorldNavigationProjection(slot, viewport, projection);
+  const bool projection_ok = projection_prepared ||
+      PrepareWorldNavigationProjection(slot, viewport, projection);
   const uint64_t elapsed_ms = HostClock_Milliseconds();
   Sim3DPerformance_End(projection_performance);
   if (!projection_ok) {
@@ -1061,6 +1081,8 @@ static PresentationOutcome DrawWorldNavigationScene(
     Sim3DPerformance_End(waves);
     if (!waves_ok) return kPresentationOutcome_CoreFailure;
   }
+  if (!WorldNavigationImports_Draw(slot, viewport, projection))
+    return kPresentationOutcome_CoreFailure;
   if (!DrawWorldNavigationActiveRegionHaze(
           slot, viewport, projection)) {
     return kPresentationOutcome_CoreFailure;
@@ -1128,7 +1150,7 @@ PresentationOutcome PresentWorldNavigationBackdrop(
     return kPresentationOutcome_CoreFailure;
   WorldNavigationProjection projection;
   const PresentationOutcome outcome = DrawWorldNavigationScene(
-      slot, viewport, &projection, (ArRenderPointF){.5f, .72f}, (DeathHeimCompletionArt){0});
+      slot, viewport, &projection, (ArRenderPointF){.5f, .72f}, (DeathHeimCompletionArt){0}, false);
   Sim3DPerformance_EndPresentation();
   return outcome;
 }
@@ -1145,7 +1167,7 @@ PresentationOutcome PresentDeathHeimCompletionBackdrop(
     return kPresentationOutcome_CoreFailure;
   WorldNavigationProjection projection;
   const PresentationOutcome outcome =
-      DrawWorldNavigationScene(slot, viewport, &projection, player, art);
+      DrawWorldNavigationScene(slot, viewport, &projection, player, art, false);
   const PresentationOutcome reflection = PresentationOutcome_IsUsable(outcome) &&
       CompletionVistaBackend_IsAvailable(&g_render_device)
       ? DrawCompletionVista(slot, viewport, &projection, kCompletionVistaStage_Reflection,
@@ -1206,7 +1228,8 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
   };
   ArLocalizedPreparedFrame localized_label;
   bool localized_label_ready = false;
-  if (!composition->empty_animation && composition->label.visible) {
+  const bool imported = slot->sim.world_travel.imported || slot->sim.world_travel.turning;
+  if (!imported && !composition->empty_animation && composition->label.visible) {
     const ArLocalizationScreenTextRecord *record =
         ArLocalizationFrame_FindScreenText(
             &slot->localization,
@@ -1235,18 +1258,24 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
     }
   }
   WorldNavigationProjection projection;
-  const PresentationOutcome outcome = DrawWorldNavigationScene(
-      slot, viewport, &projection, (ArRenderPointF){.5f, .72f}, (DeathHeimCompletionArt){0});
+  const bool flat = imported && slot->sim.world_travel.flat;
+  const PresentationOutcome outcome = flat
+      ? (WorldNavigationImports_DrawFlat(slot, viewport)
+          ? kPresentationOutcome_Complete : kPresentationOutcome_CoreFailure)
+      : DrawWorldNavigationScene(slot, viewport, &projection,
+          (ArRenderPointF){.5f, .72f}, (DeathHeimCompletionArt){0}, false);
   if (!PresentationOutcome_IsUsable(outcome)) {
     ArRenderOutputFrame_Abort(&output_frame);
     return outcome;
   }
   if (!composition->empty_animation &&
-      (!DrawWorldNavigationPalace(slot, viewport, &projection) ||
+      (!(flat ? WorldNavigationComposition_DrawLayer(slot, viewport, &composition->palace,
+                    WorldNavigationComposition_Get()->palace, (ArRenderPointF){0}, 1)
+              : DrawWorldNavigationPalace(slot, viewport, &projection)) ||
        !WorldNavigationComposition_DrawLayer(
            slot, viewport, &composition->plaque,
            WorldNavigationComposition_Get()->plaque, (ArRenderPointF){0}, 1.0f) ||
-       (!localized_label_ready && composition->label.visible &&
+       (!imported && !localized_label_ready && composition->label.visible &&
         !WorldNavigationComposition_DrawLayer(
             slot, viewport, &composition->label,
             WorldNavigationComposition_Get()->label, (ArRenderPointF){0}, 1.0f)) ||
@@ -1257,6 +1286,7 @@ PresentationOutcome PresentWorldNavigation3D(const FrameSlot *slot) {
     ArRenderOutputFrame_Abort(&output_frame);
     return kPresentationOutcome_CoreFailure;
   }
+  if (imported && !composition->empty_animation) WorldNavigationImports_DrawLabel(slot, viewport);
   if (!ArRenderOutputFrame_Finish(&output_frame))
     return kPresentationOutcome_CoreFailure;
   Sim3DPerformance_EndPresentation();
@@ -1276,6 +1306,7 @@ static void ResetWorldNavigationWorkers(void) {
 /* World navigation resource reset. All resource releases
  * stay private to this view; no cache survives a renderer replacement. */
 void PresentWorldNav_ResetResources(void) {
+  WorldNavigationImports_Reset();
   ResetCompletionVista();
   ResetWorldNavigationWorkers();
   ResetWorldNavigationGlobeSurfaces();

@@ -9,6 +9,7 @@ package gameimports
 import (
 	"fmt"
 
+	"github.com/DerrickGold/ar-recomp/installer/internal/ar2game"
 	"github.com/DerrickGold/ar-recomp/installer/internal/ar2master"
 )
 
@@ -29,6 +30,13 @@ type importer struct {
 }
 
 var importers = []importer{
+	{
+		item:            Item{ID: "ar2-world", LabelKey: "builder.imports.ar2_world.label", HelpKey: "builder.imports.ar2_world.help", NextKey: "builder.imports.ar2_world.next"},
+		maximumROMBytes: ar2master.ROMBytes + 512,
+		extract:         ar2game.Extract,
+		install:         ar2game.Install,
+		status:          ar2game.Status,
+	},
 	{
 		item:            Item{ID: "ar2-master", LabelKey: "builder.imports.ar2_master.label", HelpKey: "builder.imports.ar2_master.help", NextKey: "builder.imports.ar2_master.next"},
 		maximumROMBytes: ar2master.ROMBytes + 512,

@@ -7,6 +7,7 @@
 #define _DARWIN_C_SOURCE 1
 #endif
 #include "actraiser/actraiser_rtl_internal.h"
+#include "dev/snes_snapshot.h"
 #include "actraiser/actraiser_localization_schedule.h"
 #include "actraiser/enhancements/actraiser_world_resume.h"
 #include "app/input_replay.h"
@@ -1009,63 +1010,6 @@ static void ActRaiser_CopHook(CpuState *cpu) {
   }
 }
 
-static void ActRaiser_WritePpuSnapshotMetadata(
-    const char *prefix, const SrPpuStateSnapshot *ppu) {
-  if (!prefix || !ppu) return;
-  char path[384];
-  snprintf(path, sizeof path, "%s.ppu.json", prefix);
-  FILE *file = sr_fopen(path, "w");
-  if (!file) return;
-  fprintf(file,
-          "{\n"
-          "  \"format\": 1,\n"
-          "  \"inidisp\": %u, \"bgmode\": %u, \"mosaic\": %u,\n"
-          "  \"bg_sc\": [%u, %u, %u, %u],\n"
-          "  \"bg_tile_adr\": %u,\n"
-          "  \"hscroll\": [%u, %u, %u, %u],\n"
-          "  \"vscroll\": [%u, %u, %u, %u],\n"
-          "  \"screen_main\": %u, \"screen_sub\": %u,\n"
-          "  \"window_main\": %u, \"window_sub\": %u,\n"
-          "  \"windowsel\": %u, \"wbgobjlog\": %u,\n"
-          "  \"window_edges\": [%u, %u, %u, %u],\n"
-          "  \"cgwsel\": %u, \"cgadsub\": %u, \"setini\": %u,\n"
-          "  \"widescreen\": {\"left\": %u, \"right\": %u, "
-          "\"top\": %u, \"bottom\": %u, \"clamp\": %u, "
-          "\"mirror\": %u, \"repeat\": %u}\n"
-          "}\n",
-          (unsigned)ppu->display_control,
-          (unsigned)ppu->bg_mode_control,
-          (unsigned)ppu->mosaic_control,
-          (unsigned)ppu->background_tilemap_control[0],
-          (unsigned)ppu->background_tilemap_control[1],
-          (unsigned)ppu->background_tilemap_control[2],
-          (unsigned)ppu->background_tilemap_control[3],
-          (unsigned)ppu->background_tile_base_control,
-          (unsigned)ppu->backgrounds[0].h_scroll,
-          (unsigned)ppu->backgrounds[1].h_scroll,
-          (unsigned)ppu->backgrounds[2].h_scroll,
-          (unsigned)ppu->backgrounds[3].h_scroll,
-          (unsigned)ppu->backgrounds[0].v_scroll,
-          (unsigned)ppu->backgrounds[1].v_scroll,
-          (unsigned)ppu->backgrounds[2].v_scroll,
-          (unsigned)ppu->backgrounds[3].v_scroll,
-          (unsigned)ppu->main_screen,
-          (unsigned)ppu->sub_screen,
-          (unsigned)ppu->main_windowed,
-          (unsigned)ppu->sub_windowed,
-          (unsigned)ppu->window_select, (unsigned)ppu->window_logic,
-          (unsigned)ppu->window1_left, (unsigned)ppu->window1_right,
-          (unsigned)ppu->window2_left, (unsigned)ppu->window2_right,
-          (unsigned)ppu->color_math_control,
-          (unsigned)ppu->color_math_designation,
-          (unsigned)ppu->setini_control,
-          (unsigned)ppu->margin_left, (unsigned)ppu->margin_right,
-          (unsigned)ppu->margin_top, (unsigned)ppu->margin_bottom,
-          (unsigned)ppu->layer_clamp_mask,
-          (unsigned)ppu->layer_mirror_mask,
-          (unsigned)ppu->layer_repeat_mask);
-  fclose(file);
-}
 
 bool ActRaiser_QueryInputState(SrInputStateSnapshot *state) {
   if (!state || !s_runner || !s_runner_api ||
@@ -1087,53 +1031,8 @@ bool ActRaiser_QueryInputState(SrInputStateSnapshot *state) {
  * bridge bug, whose tiles live in VRAM, invisible to any WRAM-only diff.
  * Writes <prefix>.{wram,vram,cgram,oam}.bin plus PPU register metadata. */
 void ActRaiser_FullSnapshot(const char *prefix) {
-  SrPpuStateSnapshot ppu_state;
-  SrBorrowedU16Span vram = {.struct_size = sizeof(vram)};
-  SrBorrowedU16Span cgram = {.struct_size = sizeof(cgram)};
-  SrBorrowedU16Span oam = {.struct_size = sizeof(oam)};
-  SrBorrowedSpan high_oam = {.struct_size = sizeof(high_oam)};
-  char path[384];
-  FILE *f;
-  snprintf(path, sizeof path, "%s.wram.bin", prefix);
-  f = sr_fopen(path, "wb");
-  if (f) { fwrite(g_ram, 1, kActRaiserWramSize, f); fclose(f); }
-  if (s_runner && s_runner_api &&
-      ActRaiser_QueryPpuState(&ppu_state) &&
-      s_runner_api->borrow_u16_memory &&
-      s_runner_api->borrow_memory &&
-      s_runner_api->borrow_u16_memory(
-          s_runner, SR_MEMORY_VRAM, &vram) == SR_RESULT_OK &&
-      s_runner_api->borrow_u16_memory(
-          s_runner, SR_MEMORY_CGRAM, &cgram) == SR_RESULT_OK &&
-      s_runner_api->borrow_u16_memory(
-          s_runner, SR_MEMORY_OAM, &oam) == SR_RESULT_OK &&
-      s_runner_api->borrow_memory(
-          s_runner, SR_MEMORY_HIGH_OAM, &high_oam) == SR_RESULT_OK) {
-    snprintf(path, sizeof path, "%s.vram.bin", prefix);
-    f = sr_fopen(path, "wb");
-    if (f) { fwrite(vram.data, sizeof(*vram.data),
-                    vram.element_count, f); fclose(f); }
-    snprintf(path, sizeof path, "%s.cgram.bin", prefix);
-    f = sr_fopen(path, "wb");
-    if (f) { fwrite(cgram.data, sizeof(*cgram.data),
-                    cgram.element_count, f); fclose(f); }
-    snprintf(path, sizeof path, "%s.oam.bin", prefix);
-    f = sr_fopen(path, "wb");
-    if (f) { fwrite(oam.data, sizeof(*oam.data),
-                    oam.element_count, f); fclose(f); }
-    /* The HIGH table, as its own file so the 512-byte .oam.bin layout every
-     * existing parser assumes stays exactly that. Without it a snapshot cannot
-     * place or size a sprite at all: the high table carries each slot's X bit 8
-     * and its size-large bit, so an OAM-only dump silently reads every sprite as
-     * small and as x = (x & 0xff). That is a 256-pixel ambiguity — a sprite
-     * staged off the RIGHT edge decodes as one sitting mid-screen. Cost a
-     * diagnosis on 2026-08-05 (an off-screen staged sprite revealed by the
-     * diorama vertical band could not be located from its snapshot). */
-    snprintf(path, sizeof path, "%s.highoam.bin", prefix);
-    f = sr_fopen(path, "wb");
-    if (f) { fwrite(high_oam.data, 1, high_oam.byte_size, f); fclose(f); }
-    ActRaiser_WritePpuSnapshotMetadata(prefix, &ppu_state);
-  }
+  if (!SnesSnapshot_Write(prefix, s_runner, s_runner_api))
+    fprintf(stderr, "[snap] could not write complete snapshot: %s\n", prefix);
 }
 
 static void game_coroutine(void) {

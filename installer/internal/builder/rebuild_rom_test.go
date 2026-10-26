@@ -123,7 +123,7 @@ func TestRebuildMissingROMIsActionableAndDoesNotChangePlayerData(t *testing.T) {
 	}
 }
 
-func TestRebuildExplicitUploadOverridesSavedROMAndBusyRequestIsRefused(t *testing.T) {
+func TestRebuildInvalidUploadPreservesSavedROMAndBusyRequestIsRefused(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "user-rom.sfc"), []byte("old"), 0600); err != nil {
 		t.Fatal(err)
@@ -138,12 +138,20 @@ func TestRebuildExplicitUploadOverridesSavedROMAndBusyRequestIsRefused(t *testin
 	}}, "tok")
 	w := httptest.NewRecorder()
 	app.ServeHTTP(w, rebuildRequest(t, true, "replacement.SMC", "replacement"))
+	if w.Code != 400 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "user-rom.sfc")); string(data) != "old" {
+		t.Fatal("invalid upload replaced existing ROM")
+	}
+	w = httptest.NewRecorder()
+	app.ServeHTTP(w, rebuildRequest(t, true, "", ""))
 	if w.Code != 202 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	select {
 	case data := <-started:
-		if data != "replacement" {
+		if data != "old" {
 			t.Fatal(data)
 		}
 	case <-time.After(2 * time.Second):
@@ -154,7 +162,7 @@ func TestRebuildExplicitUploadOverridesSavedROMAndBusyRequestIsRefused(t *testin
 	if w.Code != 409 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "user-rom.sfc")); string(data) != "replacement" {
+	if data, _ := os.ReadFile(filepath.Join(root, "user-rom.sfc")); string(data) != "old" {
 		t.Fatal("busy request replaced ROM")
 	}
 }

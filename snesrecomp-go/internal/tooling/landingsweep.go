@@ -146,7 +146,7 @@ func collectShadowLandingCandidates(image romimage.Image, banks []shadowBank, re
 				end := anchor
 				graph, err := decoder.DecodeFunction(image, bank, start, m, x, decoder.Options{
 					End: &end, MaxInstructions: shadowLandingMaxInstructions,
-					DataRegions: regions, HLEDispatch: cfg.HLEDispatch,
+					DataRegions: regions, HLEDispatch: cfg.HLEDispatch, CopDispatch: cfg.CopDispatch,
 					CalleeExitMX: calleeExitMX, SiblingEntryPCs: siblings,
 				})
 				if err != nil {

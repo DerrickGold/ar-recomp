@@ -480,6 +480,8 @@ float WorldNavigationTerrainHeightAt(float source_x, float source_y,
 bool WorldNavigationSurfaceNormal(
     const WorldNavigationProjection *projection,
     float source_x, float source_y, float normal[3]);
+bool WorldNavigationFlatOutputPoint(const FrameSlot *slot, ArRenderRectI viewport,
+    float source_x, float source_y, ArRenderPointF *out);
 void WorldNavigationRadialPoint(
     const WorldNavigationProjection *projection, const float normal[3],
     float radial_height, float out[3]);

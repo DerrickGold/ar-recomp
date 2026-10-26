@@ -1,0 +1,21 @@
+// Package ar2rom identifies the native layout supported by the AR2 adapters.
+package ar2rom
+
+import (
+	"crypto/sha256"
+	"fmt"
+)
+
+const Size = 0x180000
+
+var Digest = [32]byte{0x71, 0xbd, 0xd4, 0x48, 0xa3, 0x0b, 0x88, 0x72, 0x58, 0x64, 0xe5, 0x55, 0x94, 0xeb, 0xb6, 0x7a, 0x11, 0x8b, 0x1f, 0x19, 0x7a, 0x3f, 0x9e, 0x5d, 0xd3, 0x9d, 0xbf, 0x23, 0x39, 0x9e, 0xfa, 0x15}
+
+func Normalize(rom []byte) ([]byte, error) {
+	if len(rom) == Size+512 {
+		rom = rom[512:]
+	}
+	if len(rom) != Size || sha256.Sum256(rom) != Digest {
+		return nil, fmt.Errorf("select an unmodified ActRaiser 2 (USA) ROM (.sfc or .smc); this release is not supported")
+	}
+	return rom, nil
+}

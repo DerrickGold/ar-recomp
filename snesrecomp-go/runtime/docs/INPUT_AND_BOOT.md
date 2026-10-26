@@ -49,6 +49,13 @@ published measured lookup mapping; it is not a calibration of a particular
 host mouse or a reproduction of third-party mouse timing quirks. Large host
 deltas are consumed in bounded steps; pending signed accumulation saturates.
 
+The automatic-read **busy flag** is separate from input sampling. `$4212`
+bit 0 follows the synthetic beam's first 4224 master cycles of vblank when
+automatic reading is enabled. Status polling advances that beam, so waits
+for both busy and completion terminate even with NMI disabled. This does not
+consume additional controller or mouse packets. AR2's native pause routine
+uses both edges before reading `$4219`.
+
 An SDL3 frontend can poll
 [`SDL_GetRelativeMouseState`](https://wiki.libsdl.org/SDL3/SDL_GetRelativeMouseState)
 after pumping events, map left/right button flags, retain fractional motion
@@ -77,6 +84,14 @@ transactions remain available. This firmware implements the documented port
 protocol; it does not promise the vendor firmware's internal PCs or exact
 instruction timing. Uploads which replace the pointer scratch `$00/$01` or
 unmap the executing ROM still have the ordinary SPC memory side effects.
+
+A game adapter that executes a synchronous upload through native port polling
+may call `RtlFinishSynchronousApuTransfer` at its verified upload-completion
+boundary. Polling can advance the APU beyond the host frame clock; this call
+anchors subsequent game ticks at the current APU cycle and discards PCM left
+over from the transfer. It preserves SPC/DSP state, fractional tick timing,
+and scheduled port writes. It is not a per-frame synchronization operation
+and does not replace the game's own command-ready handshake.
 
 Sources: [SPC boot protocol](https://snes.nesdev.org/wiki/Booting_the_SPC700)
 and [S-SMP initialization](https://snes.nesdev.org/wiki/S-SMP).

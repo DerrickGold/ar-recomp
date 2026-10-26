@@ -76,6 +76,9 @@ func collectHleObligations(configDir string) ([]contractObligation, error) {
 		for _, symbol := range cfg.HLEDispatch {
 			appendObligation(symbol, "hle_dispatch", entry.Name())
 		}
+		if cfg.CopDispatch != "" {
+			appendObligation(cfg.CopDispatch, "cop_dispatch", entry.Name())
+		}
 	}
 	sort.Slice(obligations, func(i, j int) bool {
 		if obligations[i].symbol != obligations[j].symbol {

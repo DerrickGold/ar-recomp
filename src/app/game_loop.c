@@ -1,4 +1,7 @@
 #include "app/game_loop.h"
+#include "host/imported_world_travel.h"
+#include "actraiser2/ar2_content.h"
+#include "sim/world_nav/world_navigation_travel.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -83,7 +86,8 @@ static bool RunOneRecompiledFrame(uint32 live_inputs, uint32 angel_stick, uint8 
   const bool live_policy = InputReplay_PolicyChangesAllowed();
   ActRaiserAngel_SetInput(live_policy ? angel_stick : 0, live_policy ? angel_shot : 0,
       g_ram[kActRaiserWram_MapGroup], g_ram[kActRaiserWram_CurrentMap]);
-  (void)RtlRunFrame(replay.inputs);
+  (void)RtlRunFrame(WorldNavigationTravel_Input(
+      g_ram, kSnesWramSize, Ar2Content_Atlas(), replay.inputs));
   OracleTrace_CompleteTick();
   if (SessionFatal_Requested()) {
     *stop_running = true;
@@ -420,10 +424,11 @@ static void AppLoop_HandleGraphicsReset(const GameSessionConfig *config, Uint32 
 static void AppLoop_PumpEvents(const GameSessionConfig *config, bool *running) {
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
-    if (HostInput_HandleEvent(&event))
+    if (ImportedWorldTravel_HandleEvent(&event) || HostInput_HandleEvent(&event))
       continue;
     switch (event.type) {
     case SDL_EVENT_QUIT:
+    case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
       *running = false;
       break;
 
@@ -911,6 +916,26 @@ void GameLoop_Run(const GameSessionConfig *config) {
         RuntimeSettings_LifecycleRequest() != kRuntimeLifecycle_None ||
         SessionFatal_Requested()) {
       running = false;
+      continue;
+    }
+
+    if (!running) continue;
+    if (!ImportedWorldTravel_Active() && ImportedWorldTravel_Pending())
+      ImportedWorldTravel_Begin();
+    if (ImportedWorldTravel_Active()) {
+      HostDisplay_SetProducerPacing(false);
+      running = ImportedWorldTravel_Update(s_window_hidden);
+      if (running && ImportedWorldTravel_DrawWorld()) {
+        RenderPreparation_PrepareSelectedFeatures(&g_render_device);
+        const bool presented = !s_window_hidden &&
+            DrawAndPresentFrame(emulated_frame_present_mode, 0);
+        HostDisplay_YieldIfNoPresent(presented, s_window_hidden, false);
+      }
+      stream.next_ns = stream_endpoint_ns = 0;
+      accumulator = 0;
+      sync_reset = true;
+      last_time_ns = SDL_GetTicksNS();
+      HostInput_RequestPausedRedraw();
       continue;
     }
 

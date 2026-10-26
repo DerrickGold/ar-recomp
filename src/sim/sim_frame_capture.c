@@ -7,6 +7,7 @@
 #include "sim/sim_world_map.h"
 
 #include "action/action_obj_apron.h"
+#include "actraiser2/ar2_content.h"
 #include "actraiser_game.h"
 #include "render/presentation_options.h"
 #include "actraiser/regional/actraiser_regional_runtime.h"
@@ -121,15 +122,20 @@ static bool CaptureCompletionBackdrop(SimFrameData *sim) {
 }
 
 static void CaptureMetadata(SimFrameData *sim, bool owned, uint32_t underlay_serial) {
+  const WorldNavigationTravelFrame travel = owned ? (WorldNavigationTravelFrame){0}
+      : WorldNavigationTravel_Capture(g_ram, kSnesWramSize, Ar2Content_Atlas());
+  const bool imported_navigation = travel.imported || travel.turning;
   if (owned) SimRenderMetadata_CaptureFrameWithUnderlay(
       sim, g_ram, g_settings.sim3d_mode, false,
       Settings_Sim3DRequestedFeatures(), g_settings.sim3d_diagnostic_layers,
       Sim3D_ImplementedFeatures(), underlay_serial);
   else SimRenderMetadata_CaptureFrame(
-      sim, g_ram, g_settings.sim3d_mode,
-      g_settings.sim3d_world_navigation,
+      sim, g_ram, g_settings.sim3d_mode || imported_navigation,
+      g_settings.sim3d_world_navigation || imported_navigation,
       Settings_Sim3DRequestedFeatures(),
       g_settings.sim3d_diagnostic_layers, Sim3D_ImplementedFeatures());
+  sim->world_travel = travel;
+  sim->world_travel.flat = !g_settings.sim3d_world_navigation;
   if (!owned) SimRenderMetadata_CaptureSkyPalaceFrame(sim, g_ram,
       g_settings.sim3d_world_navigation && g_settings.sim3d_sky_palace);
   if (!owned) (void)CaptureCompletionBackdrop(sim);
@@ -181,7 +187,11 @@ static void CaptureMetadata(SimFrameData *sim, bool owned, uint32_t underlay_ser
     if (world_artwork & (1u << kArRegionalArtwork_PyramidDetail))
       object->flags |= kSimBackgroundVoxel_PyramidEye;
   }
-  if (!owned) SimWorldNavigationCapture_Capture(sim, RtlGameRunner());
+  if (!owned) {
+    SimWorldNavigationCapture_Capture(sim, RtlGameRunner());
+    WorldNavigationTravel_ApplyApproach(&travel, &sim->world_navigation_scene,
+                                       &sim->world_navigation_brightness);
+  }
 }
 
 static void CaptureCanvasSerials(SimFrameData *sim) {

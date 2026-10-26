@@ -121,12 +121,41 @@ static void exact_callback_demand(void) {
     }
 }
 
+static void synchronous_transfer(void) {
+    apu_reset(g_snes->apu);
+    consume_on_unlock = false;
+    RtlAdvanceApuTimeline();
+    const uint32_t remainder = g_snes->apu->timelineCycleRemainder;
+    /* Hardware polling can run a long upload between two host ticks. */
+    apu_runCycles(g_snes->apu, 50000u);
+    Apu *apu = g_snes->apu;
+    const uint64_t cycles = apu_cycle_count(apu);
+    const uint16_t pc = apu->spc->pc;
+    const uint32_t produced = apu->dsp->sampleWrite;
+    apu_schedulePortWrite(apu, 0, 0x34, apu->sampleClock + 100u);
+    const unsigned queued = apu->portQTail - apu->portQHead;
+    CHECK(produced > apu->dsp->sampleRead);
+    RtlFinishSynchronousApuTransfer();
+    CHECK(apu_cycle_count(apu) == cycles && apu->spc->pc == pc);
+    CHECK(apu->timelineTargetCycles == cycles);
+    CHECK(apu->timelineCycleRemainder == remainder);
+    CHECK(apu->dsp->sampleWrite == produced && apu->dsp->sampleRead == produced);
+    CHECK(apu->portQTail - apu->portQHead == queued && apu->inPorts[0] != 0x34);
+    uint32_t next_remainder = remainder;
+    const uint32_t next_cycles = RtlAudioNextTickCycles(&next_remainder);
+    RtlAdvanceApuTimeline();
+    CHECK(apu_cycle_count(apu) == cycles + next_cycles);
+    CHECK(apu->timelineCycleRemainder == next_remainder);
+    CHECK(apu->inPorts[0] == 0x34);
+}
+
 int main(void) {
     uint8_t *wram = calloc(1, 0x20000);
     g_snes = snes_init(wram);
     if (!g_snes) return 1;
     continuation();
     exact_callback_demand();
+    synchronous_transfer();
     cadence(60, 44100);
     cadence(90, 48000);
     cadence(120, 48000);

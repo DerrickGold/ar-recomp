@@ -19,17 +19,19 @@ import (
 
 type RegenOptions struct {
 	Paths
-	AnalysisDBPath string
+	AnalysisDBPath             string
+	ExperimentalProvenAnalysis bool
 	// Independent of loading proven entry/dispatch facts. The historical
 	// database path also enabled globally inferred direct-call widths; retain
 	// that experimental behavior only when explicitly requested.
-	ExperimentalExactDirectCallMX bool
-	Jobs                          int
-	AllowStubs                    bool
-	RunTests                      bool
-	GoCommand                     string
-	Stdout                        io.Writer
-	Stderr                        io.Writer
+	ExperimentalExactDirectCallMX                        bool
+	ExperimentalStoredTargets, ExperimentalInternalTails bool
+	Jobs                                                 int
+	AllowStubs                                           bool
+	RunTests                                             bool
+	GoCommand                                            string
+	Stdout                                               io.Writer
+	Stderr                                               io.Writer
 	// MaxUnitBytes is regen.Options.MaxUnitBytes: zero is the default soft
 	// limit on a generated unit's function source, negative disables it.
 	MaxUnitBytes int
@@ -56,8 +58,8 @@ func Regenerate(options RegenOptions) (RegenReport, error) {
 		return RegenReport{}, err
 	}
 	options.Paths = paths
-	if options.ExperimentalExactDirectCallMX && filepath.Base(paths.GeneratedDir) == "gen" && filepath.Base(filepath.Dir(paths.GeneratedDir)) == "src" {
-		return RegenReport{}, errors.New("experimental exact direct-call M/X requires an isolated --out-dir; refusing to replace src/gen")
+	if (options.ExperimentalProvenAnalysis || options.ExperimentalExactDirectCallMX || options.ExperimentalStoredTargets || options.ExperimentalInternalTails) && filepath.Base(paths.GeneratedDir) == "gen" && filepath.Base(filepath.Dir(paths.GeneratedDir)) == "src" {
+		return RegenReport{}, errors.New("experimental generation requires an isolated --out-dir; refusing to replace src/gen")
 	}
 	if options.Jobs <= 0 {
 		options.Jobs = runtime.NumCPU()
@@ -80,6 +82,23 @@ func Regenerate(options RegenOptions) (RegenReport, error) {
 		return RegenReport{}, fmt.Errorf("ROM %s is unavailable: %w", paths.ROM, statErr)
 	}
 	var database tooling.StaticAnalysisDatabase
+	if options.ExperimentalProvenAnalysis {
+		if strings.TrimSpace(options.AnalysisDBPath) != "" {
+			return RegenReport{}, errors.New("experimental proven analysis and analysis-db are mutually exclusive")
+		}
+		shadow, err := tooling.AnalyzeAuthoredShadow(tooling.ShadowAnalysisOptions{
+			ROMPath: paths.ROM, CFGDir: paths.ConfigDir, Jobs: options.Jobs,
+		})
+		if err != nil {
+			return RegenReport{}, err
+		}
+		if shadow.Summary.Conflicts > 0 {
+			return RegenReport{}, fmt.Errorf("experimental analysis conflicts: %s", tooling.FormatShadowConflicts(shadow))
+		}
+		database.DispatchFacts, _ = tooling.SelectStaticProvenAutomaticDispatchFacts(shadow)
+		database.EntryFacts = append(tooling.SelectStaticProvenRoutineEntryFacts(shadow),
+			tooling.SelectStaticProvenContinuationEntryFacts(shadow)...)
+	}
 	if strings.TrimSpace(options.AnalysisDBPath) != "" {
 		analysisPath := resolveUnder(paths.Root, options.AnalysisDBPath)
 		database, err = tooling.LoadStaticAnalysisDatabaseFile(analysisPath, paths.ROM)
@@ -103,6 +122,7 @@ func Regenerate(options RegenOptions) (RegenReport, error) {
 		ProvenEntryTemplates:          database.EntryTemplates,
 		AllowMatchingAuthoredFacts:    strings.TrimSpace(options.AnalysisDBPath) != "",
 		ExperimentalExactDirectCallMX: options.ExperimentalExactDirectCallMX,
+		ExperimentalStoredTargets:     options.ExperimentalStoredTargets, ExperimentalInternalTails: options.ExperimentalInternalTails,
 		Progress: func(format string, values ...any) {
 			fmt.Fprintf(stdout, "v2regen: "+format+"\n", values...)
 		},

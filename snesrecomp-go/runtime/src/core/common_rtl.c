@@ -631,6 +631,17 @@ void RtlAdvanceApuTimeline(void) {
     RtlApuUnlock();
 }
 
+void RtlFinishSynchronousApuTransfer(void) {
+    if (g_snes == NULL || g_snes->apu == NULL || g_snes->apu->dsp == NULL)
+        return;
+    RtlApuLock();
+    Apu *apu = g_snes->apu;
+    apu->timelineTargetCycles = apu_cycle_count(apu);
+    apu->dsp->sampleRead = apu->dsp->sampleWrite;
+    g_audio_phase = 0.0;
+    RtlApuUnlock();
+}
+
 uint64_t RtlApuCycleCount(void) {
     uint64_t cycles;
     RtlApuLock();

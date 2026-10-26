@@ -260,6 +260,44 @@ func TestExperimentalDirectCallDiscoveryDemandsOnlyLiveMX(t *testing.T) {
 	}
 }
 
+func TestAuthoredRamHleDoesNotAlsoEmitUnresolvedStub(t *testing.T) {
+	root := t.TempDir()
+	romPath := filepath.Join(root, "game.sfc")
+	cfgDir := filepath.Join(root, "recomp")
+	outputDir := filepath.Join(root, "gen")
+	image := make([]byte, 0x8000)
+	copy(image, []byte{0x22, 0x02, 0x05, 0x00, 0x60}) // JSL RAM helper; RTS
+	if err := os.WriteFile(romPath, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "bank00.cfg"), []byte(
+		"bank = 00\nfunc Root 8000 entry_mx:1,1\n"+
+			"func bank_00_0502 0502 entry_mx:1,1\nhle_func 0502 HostRamCopy\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(Options{ROMPath: romPath, ConfigDir: cfgDir, OutputDir: outputDir, Jobs: 1})
+	if err != nil || report.StubHits != 0 {
+		t.Fatalf("RAM HLE regeneration: report=%+v err=%v", report, err)
+	}
+	bank, err := os.ReadFile(filepath.Join(outputDir, "bank00_v2.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(bank), "HostRamCopy(cpu)") {
+		t.Fatal("authored RAM replacement was not emitted")
+	}
+	stubs, err := os.ReadFile(filepath.Join(outputDir, "unresolved_stubs_v2.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stubs), "bank_00_0502_M") {
+		t.Fatalf("RAM HLE has a duplicate unresolved body:\n%s", stubs)
+	}
+}
+
 func TestInvalidDiscoveredDirectCallTrapsInlineWithoutDeadStub(t *testing.T) {
 	root := t.TempDir()
 	romPath := filepath.Join(root, "game.sfc")

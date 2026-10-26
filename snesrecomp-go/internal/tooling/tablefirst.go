@@ -546,7 +546,7 @@ func (context shadowTableFirstProbeContext) probe(start uint32) (ShadowLandingCa
 			end := anchor
 			graph, err := decoder.DecodeFunction(context.image, bank, startPC, m, x, decoder.Options{
 				End: &end, MaxInstructions: shadowLandingMaxInstructions,
-				DataRegions: context.regions, HLEDispatch: cfg.HLEDispatch,
+				DataRegions: context.regions, HLEDispatch: cfg.HLEDispatch, CopDispatch: cfg.CopDispatch,
 				CalleeExitMX: context.calleeExitMX, SiblingEntryPCs: siblings,
 			})
 			if err != nil {

@@ -45,7 +45,7 @@ func TestLocalizationPackageGate(t *testing.T) {
 		"utils/licenses/SDL3/LICENSE.txt", "utils/licenses/sdl-sdk.lock.json",
 		"utils/third_party/sheenbidi/Source/SheenBidi.c", "utils/third_party/sheenbidi/Headers/SheenBidi/SheenBidi.h", "utils/src/platform/sdl/bidi_text_sdl.c",
 		"utils/game-assets/fonts/noto/OFL.txt", "utils/snesrecomp-go/runtime/LICENSE", "utils/snesrecomp-go/runtime/NOTICE.md", "utils/snesrecomp-go/runtime/PROVENANCE.md", "utils/snesrecomp-go/runtime/licenses/Snaggletooth-LICENSE.txt",
-		"utils/runtime.a", "utils/tools/sdl3/lib/SDL3.dll", "utils/tools/sdl3/lib/SDL3_ttf.dll", "utils/tools/sdl3/lib/SDL3_ttf.lib", "utils/tools/sdl3/include/SDL3_ttf/SDL_ttf.h", "utils/tools/sdl3/licenses/SDL3_ttf/LICENSE.txt",
+		"utils/runtime.a", "utils/runtime_module.a", "utils/tools/sdl3/lib/SDL3.dll", "utils/tools/sdl3/lib/SDL3_ttf.dll", "utils/tools/sdl3/lib/SDL3_ttf.lib", "utils/tools/sdl3/include/SDL3_ttf/SDL_ttf.h", "utils/tools/sdl3/licenses/SDL3_ttf/LICENSE.txt",
 		"utils/licenses/SDL3_ttf/LICENSE.txt", "utils/licenses/SDL3_ttf/FreeType-FTL.txt", "utils/licenses/SDL3_ttf/HarfBuzz-COPYING.txt", "utils/licenses/SDL3_ttf/PlutoSVG-LICENSE.txt", "utils/licenses/SDL3_ttf/PlutoVG-LICENSE.txt",
 		"utils/tools/actraiser-builder", "utils/tools/snesbuild",
 		"utils/tools/sdl3/include/SDL3/SDL.h", "utils/tools/sdl3/lib/libSDL3.so", "utils/tools/sdl3/lib/libSDL3.so.0",
@@ -70,6 +70,7 @@ func TestLocalizationPackageGate(t *testing.T) {
 	}{
 		{name: "valid"},
 		{name: "valid Linux", goos: "linux"},
+		{name: "missing private runtime", omit: "utils/runtime_module.a"},
 		{name: "missing build identity", omit: "utils/build-inputs.sha256"},
 		{name: "invalid build identity", corruptIdentity: true},
 		{name: "missing SDL lock", omit: "utils/licenses/sdl-sdk.lock.json"},
@@ -151,6 +152,10 @@ func TestLocalizationPackageGate(t *testing.T) {
 			} else if tc.omit == "utils/build-inputs.sha256" || tc.corruptIdentity {
 				if !strings.Contains(string(output), "builder identity check") {
 					t.Fatalf("wrong identity rejection: %s", output)
+				}
+			} else if tc.omit == "utils/runtime_module.a" {
+				if !strings.Contains(string(output), "runner SDK check: missing isolated module archive") {
+					t.Fatalf("wrong private runtime rejection: %s", output)
 				}
 			} else if !strings.Contains(string(output), "bundled SDL check") && !strings.Contains(string(output), "SDL3_ttf package check") && !strings.Contains(string(output), "localization distribution check") && !strings.Contains(string(output), "documentation distribution check") && !strings.Contains(string(output), "interface font check") && !strings.Contains(string(output), "license check") && !strings.Contains(string(output), "AppImage package check") {
 				t.Fatalf("wrong rejection: %s", output)

@@ -8,6 +8,7 @@
 #include "constants.h"
 #include "sim/world_nav/sim_world_navigation_scene.h"
 #include "sim/world_nav/sim_world_navigation_towns.h"
+#include "sim/world_nav/world_navigation_travel.h"
 #include "snesrecomp/runner.h"
 #include "snesrecomp/game/types.h"
 
@@ -986,6 +987,7 @@ typedef struct SimFrameData {
   SimSunMiracle sun_miracle;
   bool world_navigation_state_valid;
   SimWorldNavigationFrame world_navigation;
+  WorldNavigationTravelFrame world_travel;
   /* INIDISP master brightness captured with the navigation OAM composition.
    * Partial values remain enhanced frames: presentation fades the complete
    * host world before drawing Palace/plaque/label pixels that the PPU has

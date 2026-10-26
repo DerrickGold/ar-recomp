@@ -3,6 +3,7 @@
 /* World-map navigation presentation and its resource lifetime. Sky Palace can
  * reuse the globe backdrop without composing the navigation screen's UI. */
 
+#include <stddef.h>
 #include "present/presentation_outcome.h"
 #include "render/render_types.h"
 struct FrameSlot;
