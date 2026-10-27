@@ -54,6 +54,8 @@ bool EditorRoomScene_Render(EditorRoomScene *room, int x, int y, uint32_t frame,
 const DioramaCapture *EditorRoomScene_Capture(const EditorRoomScene *room);
 const DioramaScene *EditorRoomScene_Scene(const EditorRoomScene *room);
 const SrSceneSurfaces *EditorRoomScene_Surfaces(const EditorRoomScene *room);
+/* Diagnostic count of PPU scanouts, excluding reused tile images. */
+unsigned EditorRoomScene_RasterCount(const EditorRoomScene *room);
 bool EditorRoomScene_ConfigureEffects(EditorRoomScene *room, const char *text, size_t size, unsigned *line);
 const char *EditorRoomScene_RecipeError(const EditorRoomScene *room);
 const ActionSceneEffectFrame *EditorRoomScene_Effects(const EditorRoomScene *room);

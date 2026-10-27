@@ -133,6 +133,10 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
       .colors={{1,0,0,1},{0,1,0,.5f},{0,0,1,0}}}
   };
   ActionEffectSourceBatch batch = {.primitives=primitives,.count=6,.capacity=6};
+  const unsigned particle = 15, leaf = effect.packing_enabled ? 21 : 30;
+  const unsigned quad = effect.packing_enabled ? 36 : 45;
+  const unsigned star = effect.packing_enabled ? 42 : 60;
+  const unsigned glow = effect.packing_enabled ? 54 : 75;
   const float phases[]={0,.25f,.5f,.75f,1};
   const float brightnesses[]={1,.5f,.5f,0,1};
   for (unsigned valid=0; valid<2; ++valid) for (unsigned phase=0; phase<5; ++phase) {
@@ -157,6 +161,7 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
     CHECK(ArGpuEffectSource_Draw(&effect,device,motion,1u<<6,phases[phase],&batch,&view,NULL,
         kArRenderBlendMode_Add,brightness));
     CHECK(effect.packets[0].revision == batch.revision);
+    CHECK(effect.packets[0].vertex_count == (effect.packing_enabled ? 57u : 90u));
     CHECK(memcmp(original, primitives, sizeof(original)) == 0);
     cmd=SDL_AcquireGPUCommandBuffer(gpu); copy=SDL_BeginGPUCopyPass(cmd);
     const SDL_GPUBufferRegion source={.buffer=effect.vertices,.size=90*32};
@@ -175,20 +180,20 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
         CHECK(fabsf(out[j*8+4+c]-primitives[0].colors[j][c]*(c<3?brightness:1))<.0001f);
     }
     /* Unit X/Y project to 2/4 pixels, so billboard scale is their mean, 3. */
-    CHECK(fabsf(out[15*8]-(9+dx)*2)<.0001f);
-    CHECK(fabsf(out[15*8+1]-((6+dy)*4+2.1f))<.0001f);
-    CHECK(fabsf(out[16*8]-((9+dx)*2-1.2f))<.0001f);
-    CHECK(fabsf(out[30*8]-(13+dx)*2)<.0001f);
-    CHECK(fabsf(out[44*8]-((14+dx)*2*.72f+(14+dx)*2*.28f))<.0001f);
-    CHECK(fabsf(out[45*8]-(7+dx)*2)<.0001f);
-    CHECK(fabsf(out[50*8+1]-(7+dy)*4)<.0001f);
+    CHECK(fabsf(out[particle*8]-(9+dx)*2)<.0001f);
+    CHECK(fabsf(out[particle*8+1]-((6+dy)*4+2.1f))<.0001f);
+    CHECK(fabsf(out[(particle+1)*8]-((9+dx)*2-1.2f))<.0001f);
+    CHECK(fabsf(out[leaf*8]-(13+dx)*2)<.0001f);
+    CHECK(fabsf(out[(leaf+14)*8]-((14+dx)*2*.72f+(14+dx)*2*.28f))<.0001f);
+    CHECK(fabsf(out[quad*8]-(7+dx)*2)<.0001f);
+    CHECK(fabsf(out[(quad+5)*8+1]-(7+dy)*4)<.0001f);
     for (unsigned c=0;c<4;++c)
-      CHECK(fabsf(out[50*8+4+c]-primitives[3].extra[c]*(c<3?brightness:1))<.0001f);
-    CHECK(fabsf(out[60*8]-((8+dx)*2+1))<.0001f);
-    CHECK(fabsf(out[66*8+1]-((6+dy)*4+2.7f))<.0001f);
-    CHECK(fabsf(out[75*8]-(8+dx)*2)<.0001f);
-    CHECK(fabsf(out[76*8]-((8+dx)*2+3))<.0001f); // screen minimum
-    CHECK(fabsf(out[77*8+1]-((6+dy)*4+8))<.0001f);
+      CHECK(fabsf(out[(quad+5)*8+4+c]-primitives[3].extra[c]*(c<3?brightness:1))<.0001f);
+    CHECK(fabsf(out[star*8]-((8+dx)*2+1))<.0001f);
+    CHECK(fabsf(out[(star+6)*8+1]-((6+dy)*4+2.7f))<.0001f);
+    CHECK(fabsf(out[glow*8]-(8+dx)*2)<.0001f);
+    CHECK(fabsf(out[(glow+1)*8]-((8+dx)*2+3))<.0001f); // screen minimum
+    CHECK(fabsf(out[(glow+2)*8+1]-((6+dy)*4+8))<.0001f);
     SDL_UnmapGPUTransferBuffer(gpu,download);
   }
   /* A retained billboard survives an offscreen anchor while its halo still
@@ -219,7 +224,7 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
       CHECK(fabsf(out[0]-x*2)<.0001f);
       CHECK(fabsf(out[1]-y*4)<.0001f);
       CHECK(out[7]==1&&out[15]==.5f);
-    } else for(unsigned i=0;i<15;++i)CHECK(out[i*8+7]==0);
+    } else for(unsigned i=0;i<(effect.packing_enabled?3u:15u);++i)CHECK(out[i*8+7]==0);
     SDL_UnmapGPUTransferBuffer(gpu,download);
   }
   /* World-space casters have independent camera/apron offsets. Verify both
@@ -276,6 +281,9 @@ static void TestSourcePrimitives(ArRenderDevice *device, SDL_GPUDevice *gpu, SDL
   for (unsigned mode = 0; mode < 4; ++mode) {
     CHECK(SDL_SetRenderDrawColor(renderer, 17, 29, 41, 255) && SDL_RenderClear(renderer));
     effect.batching_enabled = mode != 0;
+    /* Replacing an existing packet's output layout must invalidate its input
+     * upload even when revision and brightness are unchanged. */
+    effect.packing_enabled = mode >= 2;
     CHECK(ArGpuEffectSource_BeginBatch(&effect));
     CHECK(!ArGpuEffectSource_BeginBatch(&effect)); /* No accidental nesting. */
     const uint64_t submitted = effect.submissions;

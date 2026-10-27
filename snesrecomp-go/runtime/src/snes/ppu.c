@@ -329,6 +329,7 @@ void ppu_saveload(Ppu *ppu, SaveLoadInfo *info) {
     if (!info->saving) {
         ppu->objScanlineMasksValid = false;
         ppu->cgramRgbValid = false;
+        ppu->objOverlayClearBindingGeneration = 0;
     }
 }
 
@@ -508,6 +509,47 @@ bool PpuOverlaySurfaceHasContent(const Ppu *ppu, PpuOverlaySource source,
            (ppu->overlayRenderContentMask[source] & (1u << band)) != 0u;
 }
 
+void PpuSetObjAttributeCapture(Ppu *ppu, const SrPpuObjAttributeCapture *attributes) {
+    if (!ppu) return;
+    ppu->objOverlayClearBindingGeneration = 0;
+    if (attributes) ppu->objAttributes = *attributes;
+    else memset(&ppu->objAttributes, 0, sizeof(ppu->objAttributes));
+}
+
+/* Called after line zero only by a scanout owner that grants whole-frame
+ * access. Ordinary component scanout retains its observable per-line writes.
+ * Clear exactly the rows the old path visits, including transparent aprons;
+ * host-written pixels from the previous frame must be erased too. */
+void PpuPreclearObjOverlay(Ppu *ppu) {
+    if (!ppu) return;
+    ppu->objOverlayClearBindingGeneration = 0;
+    const unsigned source = kPpuOverlaySource_Obj;
+    const PpuOverlayCapture *capture = &ppu->overlayCaptures[source];
+    const bool active = capture->x1 > capture->x0 && capture->y1 > capture->y0;
+    const size_t pitch = ppu->overlayRenderPitch[source];
+    if (!ppu->overlayRenderBuffer[source] || !pitch ||
+        !ppu->overlayRenderHeight[source] ||
+        (!active && !ppu->overlayRenderMaybeDirty[source])) return;
+    const int first = clamp_int(overlay_row(capture, -ppu->extraTopCur), 0, kPpuBufHeight);
+    const int end = clamp_int(overlay_row(capture, kPpuYPixels + ppu->extraBottomCur), 0, kPpuBufHeight);
+    if (first >= end || end > (int)ppu->overlayRenderHeight[source]) return;
+    for (unsigned band = 0; band < 4; ++band) {
+        uint8_t *pixels = band ? ppu->overlayRenderBands[source][band - 1]
+                              : ppu->overlayRenderBuffer[source];
+        if (pixels) memset(pixels + (size_t)first * pitch, 0, (size_t)(end - first) * pitch);
+        /* Attribute storage may end before the color surface. The row path
+         * touches only complete rows, so preserve a trailing partial row. */
+        const uint64_t attribute_rows = ppu->objAttributes.pixel_byte_size[band] / pitch;
+        const int attribute_end = attribute_rows < (uint64_t)end ? (int)attribute_rows : end;
+        if (ppu->objAttributes.pixels[band] && attribute_end > first)
+            memset(ppu->objAttributes.pixels[band] + (size_t)first * pitch, 0,
+                   (size_t)(attribute_end - first) * pitch);
+    }
+    memset(ppu->objOverlayPrecleared, 0, sizeof(ppu->objOverlayPrecleared));
+    memset(ppu->objOverlayPrecleared + first, 1, (size_t)(end - first));
+    ppu->objOverlayClearBindingGeneration = ppu->surfaceBindingGeneration;
+}
+
 void PpuClearOverlayCaptures(Ppu *ppu) {
     if (ppu == NULL) return;
     ppu->captureApronBindingGeneration = 0;
@@ -520,7 +562,7 @@ void PpuClearOverlayCaptures(Ppu *ppu) {
     memset(&ppu->objRangeCapture, 0, sizeof(ppu->objRangeCapture));
     memset(&ppu->objWinnerCapture, 0, sizeof(ppu->objWinnerCapture));
     ppu->objColorTransformsActive=false;
-    memset(&ppu->objAttributes, 0, sizeof(ppu->objAttributes));
+    PpuSetObjAttributeCapture(ppu, NULL);
     memset(&ppu->m7Override, 0, sizeof(ppu->m7Override));
 }
 
@@ -2103,20 +2145,27 @@ static void clear_overlay_row(Ppu *ppu, int source, int screen_y, bool defer) {
         return;
     }
     ppu->backgroundDeferredClear &= (uint8_t)~(1u << source);
-    memset(ppu->overlayRenderBuffer[source] +
-           (size_t)row * ppu->overlayRenderPitch[source], 0,
-           ppu->overlayRenderPitch[source]);
-    for (int band = 0; band < 3; ++band) if (ppu->overlayRenderBands[source][band])
-        memset(ppu->overlayRenderBands[source][band] +
+    const bool precleared = source == kPpuOverlaySource_Obj &&
+        ppu->objOverlayClearBindingGeneration != 0 &&
+        ppu->objOverlayClearBindingGeneration == ppu->surfaceBindingGeneration &&
+        ppu->objOverlayPrecleared[row];
+    if (source == kPpuOverlaySource_Obj) ppu->objOverlayPrecleared[row] = 0;
+    if (!precleared) {
+        memset(ppu->overlayRenderBuffer[source] +
                (size_t)row * ppu->overlayRenderPitch[source], 0,
                ppu->overlayRenderPitch[source]);
-    if (source == kPpuOverlaySource_Obj)
-        for (unsigned band = 0; band < 4; ++band)
-            if (ppu->objAttributes.pixels[band] &&
-                ((uint64_t)row+1)*ppu->overlayRenderPitch[source] <= ppu->objAttributes.pixel_byte_size[band])
-                memset(ppu->objAttributes.pixels[band] +
-                    (size_t)row * ppu->overlayRenderPitch[source], 0,
-                    ppu->overlayRenderPitch[source]);
+        for (int band = 0; band < 3; ++band) if (ppu->overlayRenderBands[source][band])
+            memset(ppu->overlayRenderBands[source][band] +
+                   (size_t)row * ppu->overlayRenderPitch[source], 0,
+                   ppu->overlayRenderPitch[source]);
+        if (source == kPpuOverlaySource_Obj)
+            for (unsigned band = 0; band < 4; ++band)
+                if (ppu->objAttributes.pixels[band] &&
+                    ((uint64_t)row+1)*ppu->overlayRenderPitch[source] <= ppu->objAttributes.pixel_byte_size[band])
+                    memset(ppu->objAttributes.pixels[band] +
+                        (size_t)row * ppu->overlayRenderPitch[source], 0,
+                        ppu->overlayRenderPitch[source]);
+    }
     if (screen_y < capture->y0 || screen_y >= capture->y1) return;
     fill = (capture->flags & (kPpuOverlayFlag_MarkMainScreenWinner |
                               kPpuOverlayFlag_MarkOwningScreenWinner |
@@ -6724,6 +6773,7 @@ bool PpuRenderNativeBackgroundView(Ppu *ppu,
 void ppu_runLine(Ppu *ppu, int line) {
     if (ppu == NULL) return;
     if (line == 0) {
+        ppu->objOverlayClearBindingGeneration = 0;
         ppu->captureApronBindingGeneration = 0;
         memset(ppu->captureApronLines, 0, sizeof(ppu->captureApronLines));
         /* No cross-frame promise: a host may update immutable lookup data

@@ -90,8 +90,13 @@ void main() {
     uint id=gl_GlobalInvocationID.x;
     if(id>=uint(settings.geometry.w))return;
     Primitive p=primitives.values[id];
-    uint base=id*15;
-    for(uint i=0;i<15;i++)emit_vertex(base+i,vec2(0),vec4(0));
+    // The upload adapter optionally packs fixed-size primitives in order.
+    // Its private meta.z encodes a marker, output base and vertex count;
+    // unmodified source packets retain the reference fifteen-vertex layout.
+    bool packed=(p.meta.z&0x80000000u)!=0u;
+    uint base=packed?(p.meta.z&0x7fffffffu)>>4:id*15;
+    uint count=packed?p.meta.z&15u:15u;
+    for(uint i=0;i<count;i++)emit_vertex(base+i,vec2(0),vec4(0));
     int plane=int(p.meta.y);
     vec4 bounds=effect_bounds(plane,p.origin.xy,uint(p.origin.z),(p.meta.x==0u || p.meta.x==8u || p.meta.x==9u));
     bounds=vec4(max(bounds.xy,p.clip.xy),min(bounds.zw,p.clip.zw));

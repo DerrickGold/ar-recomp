@@ -2823,7 +2823,111 @@ static void test_obj_attributes(void) {
     CHECK(!memcmp(attributes[0], attributes[1], sizeof(attributes[0])));
 }
 
+/* Compare complete output storage against legacy per-line clearing. Poisoned
+ * transparent rows model host synthesis after the preceding scanout. */
+static void test_bulk_obj_clear(void) {
+    enum { W = kPpuSurfaceWidth, H = kPpuBufHeight, N = W * H };
+    static uint32_t output[2][N], art[2][4][N], attributes[2][4][N];
+    for (unsigned reference = 0; reference < 2; ++reference)
+    for (unsigned geometry = 0; geometry < 3; ++geometry)
+    for (unsigned origin = 0; origin < 3; ++origin) {
+        Ppu *ppus[2] = {ppu_init(), ppu_init()};
+        CHECK(ppus[0] && ppus[1]);
+        if (!ppus[0] || !ppus[1]) { ppu_free(ppus[0]); ppu_free(ppus[1]); return; }
+        for (unsigned frame = 0; frame < 11; ++frame) {
+            const unsigned current_geometry = frame == 4 ? (geometry + 1) % 3 : geometry;
+            const int extra = current_geometry == 2 ? 128 : (int)current_geometry * 16;
+            const int top = (int)current_geometry * 32, bottom = top;
+            const int width = 256 + extra * 2 + (current_geometry == 2 ? 128 : 0);
+            const size_t pitch = (size_t)width * 4;
+            const int y0 = origin == 0 ? -top : origin == 1 ? 0 : 24;
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                Ppu *p = ppus[mode];
+                if (!frame || frame == 8) ppu_reset(p);
+                memset(output[mode], 0xcd, sizeof(output[mode]));
+                /* Some frames leave last-frame pixels intact, others emulate
+                 * extra host sprites scattered throughout all priority bands. */
+                if (!(frame & 1)) {
+                    memset(art[mode], 0xab, sizeof(art[mode]));
+                    memset(attributes[mode], 0xcd, sizeof(attributes[mode]));
+                }
+                p->inidisp = 15; p->bgmode = 1;
+                p->screenEnabled[0] = 16; p->screenEnabled[1] = 0;
+                p->cgram[129] = 0x7fff;
+                for (int slot = 0; slot < 128; ++slot) p->oam[slot * 2] = 0xe000;
+                for (int slot = 0; slot < 4; ++slot) {
+                    p->oam[slot * 2] = (uint16_t)((8 + slot * 47 + frame * 3) | ((10 + slot * 57) << 8));
+                    p->oam[slot * 2 + 1] = (uint16_t)(((slot + frame) & 3) << 12);
+                }
+                if (frame == 3) p->inidisp = 0x8f;
+                for (int y = 0; y < 8; ++y) p->vram[y] = 0xff;
+                PpuSetExtraSpace(p, extra);
+                PpuSetExtraVerticalSpace(p, top, bottom);
+                PpuBeginDrawing(p, (uint8_t *)output[mode], pitch,
+                    reference ? kPpuRenderFlags_ReferencePixelRenderer : 0);
+                CHECK(PpuBindOverlaySurfaceSized(p, kPpuOverlaySource_Obj,
+                    (uint8_t *)art[mode][0], pitch, frame == 9 ? 0 : H));
+                for (unsigned band = 1; band < 4; ++band)
+                    CHECK(PpuBindOverlayPrioSurface(p, kPpuOverlaySource_Obj, band,
+                        frame == 6 && band == 2 ? NULL : (uint8_t *)art[mode][band]));
+                PpuClearOverlayCaptures(p);
+                if (frame != 5) {
+                    CHECK(PpuSetOverlayCapture(p, kPpuOverlaySource_Obj, -extra, y0,
+                        256 + extra * 2, 224 + bottom - y0,
+                        frame == 7 ? kPpuOverlayFlag_MarkMainScreenWinner : kPpuOverlayFlag_RemoveFromGame));
+                    CHECK(PpuSetOverlayOamRange(p, 0, 128));
+                }
+                SrPpuObjAttributeCapture attr = {0};
+                for (unsigned band = 0; band < 4; ++band) {
+                    attr.pixels[band] = frame == 4 && band == 2 ? NULL : (uint8_t *)attributes[mode][band];
+                    attr.pixel_byte_size[band] = band == 1 ? pitch * 91 + 17 : sizeof(attributes[mode][band]);
+                    attr.values[band] = 0xff102030u + band * 0x102;
+                }
+                PpuSetObjAttributeCapture(p, &attr);
+                ppu_runLine(p, 0);
+                if (mode) PpuPreclearObjOverlay(p);
+                if (frame == 10) {
+                    PpuMemoryState saved = {.base = {.func = transfer_state, .saving = true, .portable = true}};
+                    ppu_saveload(p, &saved.base);
+                    memset(art[mode], 0x12, sizeof(art[mode]));
+                    memset(attributes[mode], 0xef, sizeof(attributes[mode]));
+                    saved.base.saving = false; saved.offset = 0;
+                    ppu_saveload(p, &saved.base);
+                    CHECK(!saved.base.failed);
+                }
+                for (int y = -top; y < 224 + bottom; ++y) {
+                    if (frame == 2 && y == 40) {
+                        /* Rebinding and attribute replacement must discard
+                         * prior clearing credit, even for the same address. */
+                        memset(attributes[mode][3], 0xef, sizeof(attributes[mode][3]));
+                        PpuSetObjAttributeCapture(p, &attr);
+                        memset(art[mode][3], 0x12, sizeof(art[mode][3]));
+                        CHECK(PpuBindOverlayPrioSurface(p, kPpuOverlaySource_Obj, 3, (uint8_t *)art[mode][3]));
+                    }
+                    if (y < 0 || y >= 224) ppu_runMarginLine(p, y + 1);
+                    else ppu_runLine(p, y + 1);
+                }
+                /* Re-render an already consumed row after every object goes
+                 * away. Initial clearing credit must not leave old pixels. */
+                for (int slot = 0; slot < 128; ++slot) p->oam[slot * 2] = 0xe000;
+                p->objScanlineMasksValid = false;
+                ppu_runLine(p, 11);
+            }
+            CHECK(!memcmp(output[0], output[1], sizeof(output[0])));
+            CHECK(!memcmp(art[0], art[1], sizeof(art[0])));
+            CHECK(!memcmp(attributes[0], attributes[1], sizeof(attributes[0])));
+            CHECK(!memcmp(ppus[0]->overlayRenderContentMask, ppus[1]->overlayRenderContentMask,
+                          sizeof(ppus[0]->overlayRenderContentMask)));
+        }
+        ppu_free(ppus[0]); ppu_free(ppus[1]);
+    }
+}
+
 int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "--bulk-obj-clear")) {
+        test_bulk_obj_clear();
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && !strcmp(argv[1], "--obj-attributes")) {
         test_obj_attributes();
         return failures ? 1 : 0;
@@ -2862,6 +2966,7 @@ int main(int argc, char **argv) {
         test_obj_winner_capture();
         test_obj_handoff();
         test_obj_attributes();
+        test_bulk_obj_clear();
         test_sparse_obj_export();
         test_rgb_spans_and_guards();
         test_main_winner_masks();

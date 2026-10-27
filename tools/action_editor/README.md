@@ -1667,3 +1667,38 @@ Move the player/enemy stand-ins while the shared preview plays to check wakes. P
 warping, changing rooms and seeking time clear their history. Native projectile children do not stir fog.
 The renderer reuses the shared mask atlas and alpha batch (two quads per bank, at most two wake quads
 per area); there is no fluid solver, per-frame texture generation or additional full-screen pass.
+
+### Shared preview scanout reuse
+
+The native and WASM editors retain the previous tile image when only the
+environmental-effects clock changes. Effects, receiver motion, lighting and
+projection still update normally. The reuse key includes resolved camera and
+capture bounds, every raster-scroll/mosaic row, color-math state, character
+animation phase and BG2 page phase. Successful scenery edits invalidate it;
+invalid edits leave the last accepted image intact. Animated waterfalls and
+wave backgrounds redraw whenever their resolved tile inputs change.
+
+`AR_EDITOR_RASTER_CACHE=0` disables reuse in native comparison tools. The WASM
+module always uses it and gains no process-environment import. The
+`EditorRoomScene_RasterCount` diagnostic counts actual PPU scanouts, and the
+native room oracle prints it when `AR_EDITOR_RASTER_STATS=1` is set.
+
+October 27, 2026 validation compared 5,400 timeline/camera/capture samples across
+all 150 regional room variants: tile and effect hashes matched the uncached
+path, with scanouts reduced from 5,506 to 3,449 including additional regression
+checks. Still-camera previews with animated effects at 1920×1080 on Apple M2
+Metal gave these median run-mean CPU submission times (two runs per mode in
+off/on/on/off order, 600 frames each, excluding the first 30):
+
+| Preview | Uncached (ms) | Reused (ms) | Reduction |
+| --- | ---: | ---: | ---: |
+| Marahna shrine | 2.302 | 1.489 | 35% |
+| Marahna gallery | 3.139 | 1.955 | 38% |
+| Viper chamber | 3.369 | 2.007 | 40% |
+
+Frames that change the tile image still pay the normal scanout cost; this is
+an average editor CPU reduction, not evidence of improved native-game p99 or
+display pacing. Scrolling runs also benefited when consecutive frames shared
+the same resolved tile camera/animation state, but CPU/system variation makes
+their exact percentages less useful. Local scripts and raw results are in
+`runs/effect-packing-20261027/benchmark-cache*.py` and `cache-parity.py`.

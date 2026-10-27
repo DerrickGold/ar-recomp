@@ -56,6 +56,14 @@ struct EditorRoomScene {
   const uint8_t *pixels[kDioramaPlane_Count];
   bool fill_configured[2];
   uint32_t fill_argb[2];
+  /* Retain scanout when only the environmental-effects clock
+   * advances. Assets are immutable, and successful map edits invalidate it. */
+  ActionRoomSceneFrameState raster_frame;
+  EditorRoomCamera raster_camera;
+  int raster_extra, raster_budget;
+  uint8_t raster_section;
+  bool raster_reuse, raster_valid;
+  unsigned raster_count;
 };
 const ActionSurfaceField *EditorRoomScene_SurfaceField(const EditorRoomScene *r,unsigned index){
   if(!r||index>=kActionSurfaceFieldKinds)return NULL;
@@ -504,6 +512,12 @@ EditorRoomScene *EditorRoomScene_Create(const ActionSceneSnapshot *assets) {
   EditorRoomScene *r = calloc(1, sizeof(*r));
   if (!r) return NULL;
   r->assets = *assets;
+  r->raster_reuse = true;
+#ifndef __EMSCRIPTEN__
+  /* Native oracle switch; the offline WASM module has no process environment. */
+  const char *reuse = getenv("AR_EDITOR_RASTER_CACHE");
+  if (reuse && strcmp(reuse, "0") == 0) r->raster_reuse = false;
+#endif
   r->renderer = sr_scene_renderer_create();
   if (!r->renderer) { EditorRoomScene_Destroy(r); return NULL; }
   for (unsigned bg = 0; bg < 2; ++bg) {
@@ -632,6 +646,7 @@ bool EditorRoomScene_Configure(EditorRoomScene *r, const char *text) {
     if (r->table) { DioramaLayerOrder_ClearTable(r->table); free(r->table); }
     DioramaLayerOrder_ClearRoom(&r->terrain);
     r->table = table; r->terrain = *terrain; r->options.layers = table;
+    r->raster_valid = false;
   } else {
     free(bands[0]); free(bands[1]);
     DioramaLayerOrder_ClearTable(table); free(table);
@@ -740,6 +755,25 @@ bool EditorRoomScene_MeasureView(const EditorRoomScene *r, uint32_t frame,
   footprint->y += layer->camera_y + 1 - capture.authentic_y0;
   return true;
 }
+static bool RasterMatches(const EditorRoomScene *r, const ActionRoomSceneFrameState *frame,
+    const EditorRoomCamera *camera, int extra, int budget) {
+  /* BuildFrameState zero-initializes its whole output. Keep every scanline,
+   * mosaic value, palette/color-math register and animation/page phase in the
+   * key; only game_frame itself is irrelevant to the resulting tile image.
+   * Character reconstruction uses this explicit animation_phase, not time.
+   * The camera's travel bounds also affect finite skybox placement. */
+  return r->raster_reuse && r->raster_valid &&
+      r->raster_extra == extra && r->raster_budget == budget &&
+      r->raster_section == r->scene.layer_section &&
+      r->raster_camera.x == camera->x && r->raster_camera.y == camera->y &&
+      r->raster_camera.travel.minimum == camera->travel.minimum &&
+      r->raster_camera.travel.maximum == camera->travel.maximum &&
+      r->raster_camera.bg_apron_mask == camera->bg_apron_mask &&
+      memcmp(&r->raster_frame, frame, sizeof(*frame)) == 0;
+}
+
+unsigned EditorRoomScene_RasterCount(const EditorRoomScene *r) { return r ? r->raster_count : 0; }
+
 bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
                             int extra_x, int budget, const EditorRoomCamera *camera) {
   if (!r || x < 0 || y < 0 || x > 65535 || y > 65535 || extra_x < 0 ||
@@ -889,7 +923,19 @@ bool EditorRoomScene_Render(EditorRoomScene *r, int x, int y, uint32_t frame,
       skybox_fraction = world_left - whole;
     }
   }
-  if (!sr_scene_renderer_render(r->renderer, &input, &r->surfaces)) return false;
+  ActionRoomSceneFrameState raster_frame;
+  memcpy(&raster_frame, f, sizeof(raster_frame));
+  raster_frame.game_frame = 0;
+  if (!RasterMatches(r, &raster_frame, camera, extra_x, budget)) {
+    r->raster_valid = false;
+    if (!sr_scene_renderer_render(r->renderer, &input, &r->surfaces)) return false;
+    memcpy(&r->raster_frame, &raster_frame, sizeof(raster_frame));
+    r->raster_camera = *camera;
+    r->raster_extra = extra_x; r->raster_budget = budget;
+    r->raster_section = r->scene.layer_section;
+    r->raster_valid = true;
+    ++r->raster_count;
+  }
   memset(r->pixels, 0, sizeof(r->pixels));
   r->pixels[kDioramaPlane_Backdrop] = (const uint8_t *)r->surfaces.backdrop;
   static const int planes[2][3] = {{SR_PPU_OVERLAY_BG1, kDioramaPlane_Bg1Hi, kDioramaPlane_Bg1Far},

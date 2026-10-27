@@ -373,6 +373,8 @@ static SrResult run_ppu_scanout(
         if (line > 0 && view_ready)
             view_ready = PpuRenderBackgroundViewLine(ppu, view, line - 1);
         if (line == 0) {
+            if (request->flags & SR_PPU_SCANOUT_BULK_OBJ_CLEAR)
+                PpuPreclearObjOverlay(ppu);
             int margin;
             for (margin = ppu->extraTopCur; margin >= 1; --margin) {
                 ppu_runMarginLine(ppu, 1 - margin);
@@ -452,6 +454,7 @@ static SrResult run_ppu_scanout(
         (void)capture_presentation_digest(snes, out_result);
     if (ppu->backgroundPacket) ppu->backgroundPacket->request_flags = packet_flags;
     ppu->backgroundPacket = NULL;
+    ppu->objOverlayClearBindingGeneration = 0;
     return SR_RESULT_OK;
 }
 

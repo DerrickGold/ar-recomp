@@ -54,6 +54,8 @@ is unchanged.
 | `AR_GPU_CAMERA_MOTION_BOUND` | Unset, empty, or `auto`: on for Metal and Vulkan, reference search on D3D12 | `1`: on for the running backend; `0` or other values: reference search |
 | `AR_GPU_EFFECT_BATCHING` | Unset, empty, or `auto`: on for Metal and Vulkan, immediate submission on D3D12 | `1`: on for the running backend; `0` or other values: immediate submission |
 | `AR_GPU_ACTOR_STATIONARY_REJECT` | Unset, empty, or `auto`: on for Metal and Vulkan, full search on D3D12 | `1`: on for the running backend; `0` or other values: full search |
+| `AR_GPU_EFFECT_PACKING` | Off on every backend; experimental | `1`: pack fixed-size effect output vertices in their existing draw order |
+| `AR_PPU_BULK_OBJ_CLEAR` | On for native diorama scanout when the runtime advertises support; shape tracing retains row clears | `0`: original per-scanline OBJ color/attribute clearing |
 
 The three exact shortcuts share `src/platform/sdl/gpu_prototype_policy.h`.
 They were promoted on October 20, 2026 after 1,152 CPU-oracle checks, 134/134
@@ -151,3 +153,113 @@ observer only records timestamps/resources and does not change the pool.
 The authoritative `snesbuild.ini`, CMake renderer test closures and standalone
 SIM voxel-sheet build all include the native bridge. Production shaders remain
 portable SDL GPU compute/render pipelines with MSL, SPIR-V and DXIL variants.
+
+## Effect output packing experiment, October 27, 2026
+
+The optional packed path reserves 3 output vertices for a glow/floor triangle,
+6 for a particle, ember, quad or ribbon, 12 for a star, and the original 15 for
+a clipped triangle or leaf. The CPU annotates only the GPU upload copy with
+its output base/count; authored packets and the WASM transport stay unchanged.
+Packet retention includes the output count and layout. Brightness reuploads,
+slot replacement and cancelled submissions retain their existing invalidation
+rules. The upload remains write-only, including on D3D12 write-combined heaps.
+
+The compute shader clears and writes only each primitive's reserved range, and
+the draw consumes their concatenation without sorting or changing blending.
+There is no extra pass, allocation, readback or fence in the game. The maximum
+scratch buffer allocation is unchanged: the reduction is in writes and vertex
+invocations, not reserved GPU memory. Glow packing alone removes about 64% of
+the output slots in the tested Marahna gallery composition.
+
+The Mac result does **not** justify enabling this by default. At 1920×1080 on
+Apple M2 Metal, three runs per mode, 600 presentations per run and the first 30
+excluded, repeated identical views produced these medians of run means:
+
+| Retained view | Reference completion (ms) | Packed completion (ms) |
+| --- | ---: | ---: |
+| Marahna shrine, 05:04 | 2.055 | 2.049 |
+| Marahna gallery, 05:06 | 1.917 | 1.897 |
+| Viper, 05:08 | 2.080 | 2.068 |
+
+These are CPU submission through GPU-completion wall times in an isolated
+harness that waits after each draw, **not GPU timestamps or display intervals**.
+Animated/scrolling full-room runs did not show a consistent overall win. The
+extra upload packing and the remaining scene/lighting work can outweigh the
+small saving. Keep the switch opt-in for a future Deck/Vulkan comparison;
+do not extrapolate these numbers into a 90 Hz pacing claim.
+
+Validation covered 1,134 camera/skybox/motion poses in 14 rooms across US, JP and
+EU, with exact GPU hashes between modes. The same poses exercise transient,
+retained, faded and restored packets and invalid retention slots. Existing tiny
+CPU/GPU rounding differences remain identical between modes. Focused Metal
+tests cover mixed primitive layouts, offscreen halos, shadows, cancellation,
+blend order and direct/atlas output. The game replay finishes with the same
+WRAM hash, 1,367 source draws, zero metadata downloads and zero effect fallback
+in both modes. All 72 shader builds finish during preparation, including a cold
+effect-project compile; no new in-game shader builds were logged. MSL, SPIR-V
+and DXIL were regenerated together; Vulkan/D3D12 runtime validation is pending.
+
+Local harnesses, raw timing samples, hashes and logs are in the ignored
+`runs/effect-packing-20261027/` directory (`benchmark.py`,
+`benchmark-frozen.py`, `parity.py`, and `native-smoke.py`).
+
+## OBJ capture clearing, October 27, 2026
+
+Native diorama scanout now grants the portable runtime full-frame ownership of
+its disjoint OBJ color and lighting-attribute buffers. The runtime clears the
+visited rows in contiguous spans before scanout, instead of interleaving eight
+small clears with every scanline. At the maximum 640×352 capture this replaces
+2,816 color/attribute clears with eight; it still erases the same 7.2 MB,
+including transparent aprons and sprites synthesized by the host last frame.
+There are no new textures, passes, allocations, GPU readbacks or fences.
+
+This is an additive SDK capability/scanout flag, not a game-specific PPU rule.
+Ordinary component users retain per-line writes. Each precleared row is consumed
+once, so repeated scanlines clear normally. Surface rebinding, attribute
+replacement, reset, loading a state, and a new scanout invalidate that credit.
+Unsized legacy surfaces use the original path. Partial attribute buffers retain
+the original complete-row bounds checks. The ownership grant ends on return;
+callbacks must not access OBJ output storage during the call. ActRaiser's normal
+line observers only inspect registers; shape tracing keeps the reference path.
+
+On Apple M2/Metal, a 1920×1080 Marahna 05:04 replay with interpolation off and
+all environmental effects on produced the following **PPU scanout CPU wall
+means**, not GPU timestamps or total frame intervals:
+
+| Mode | Run means (ms) | Mean (ms) |
+| --- | --- | ---: |
+| Per-row clear | 1.837, 1.904 | 1.871 |
+| Contiguous clear | 1.653, 1.650 | 1.652 |
+
+The order was reference / optimized / optimized / reference, 3,600 ticks per
+run. The first three Action 3D reporting windows were excluded, leaving
+1,941–1,947 measured presentations per run. The saving is approximately
+**0.219 ms (11.7%)** within scanout. Earlier 8-row and 32-row prototypes saved
+less; only the full-frame strategy remains. Full-game pacing still includes
+presentation/compositor waits, so this does not establish a Deck 90 Hz or p99
+improvement. The Deck was unavailable for this check.
+
+Validation:
+
+- Eight fixed-camera final composites and 72 raw layer captures matched byte
+  for byte, with a repeated reference run also matching. Dynamic-camera shots
+  were not byte-exact, so the comparison locks camera controls as the existing
+  renderer parity harness does. The game background still scrolls vertically.
+- All matched replays produced the same final WRAM hash within their test set.
+- The generic PPU regression compares complete storage for 198 cases across
+  optimized/reference rasterizers, three viewport sizes and capture origins,
+  moving/disappearing sprites, priority changes, forced blank, host-written
+  pixels, resized/rebound storage, partial attribute buffers, repeated lines,
+  resets, and state loads.
+- Mac runtime PPU, tile capture, ABI, diagnostics, save/load, and host PPU
+  pipeline tests passed. Release game rebuilt successfully.
+- x86/WSL clearing regressions passed with SIMD on and off. A separate CPU-only
+  640×352 fixture measured 0.939 ms versus 0.901 ms (medians of three runs,
+  600 measured frames each). This is not Windows D3D12/Vulkan presentation
+  evidence. The broader WSL ABI suite reported four audio-timing failures;
+  all four also occur in the unchanged committed runtime.
+
+Local replay scripts, logs, raw captures, and benchmark results are retained
+under `runs/overlay-clear-20261027/`. The isolated scripts copy settings and saves;
+they do not overwrite normal user data. Use `AR_PPU_BULK_OBJ_CLEAR=0` to compare
+the original scanout path in the rebuilt game.

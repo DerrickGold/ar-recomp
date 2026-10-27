@@ -616,7 +616,9 @@ static int test_public_vertical_margin_scanout(
                                result.presentation.sha256,
                                sizeof(first_presentation_digest)) != 0,
                     "presentation digest ignored moving-camera content");
-    scanout.flags = 0u;
+    failed |= check((api->capabilities & SR_RUNNER_CAP_PPU_BULK_OBJ_CLEAR) != 0,
+                    "bulk OBJ clear capability missing");
+    scanout.flags = SR_PPU_SCANOUT_BULK_OBJ_CLEAR;
     result.struct_size = sizeof(result);
     failed |= check(api->run_ppu_scanout(runner, &scanout, &result) ==
                         SR_RESULT_OK,

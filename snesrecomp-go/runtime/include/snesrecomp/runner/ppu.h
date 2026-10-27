@@ -1016,6 +1016,12 @@ typedef struct SrPpuAuthenticCameraRequest {
 #define SR_PPU_SCANOUT_HDMA_INDIRECT UINT32_C(0x00000002)
 /** Capture the completed logical main canvas into the scanout result. */
 #define SR_PPU_SCANOUT_CAPTURE_PRESENTATION_DIGEST UINT32_C(0x00000001)
+/* Optional full-frame ownership of OBJ color/attribute outputs. The runner
+ * may clear their upcoming rows together before rendering the first row.
+ * These buffers must not alias other outputs, and callbacks must not inspect
+ * or write them during scanout. Completed pixels are identical to row clears.
+ * Requires SR_RUNNER_CAP_PPU_BULK_OBJ_CLEAR; zero preserves per-line clearing. */
+#define SR_PPU_SCANOUT_BULK_OBJ_CLEAR UINT32_C(0x00000002)
 #define SR_PPU_PRESENTATION_SHA256_SIZE 32u
 #define SR_PPU_PRESENTATION_SCHEMA_VERSION 1u
 

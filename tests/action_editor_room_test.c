@@ -162,6 +162,8 @@ int main(int argc, char **argv) {
     assert(effects && EditorRoomScene_ConfigureEffects(room,effects,n,&line));free(effects);
   }
   int x, y, extra, vertical; unsigned frame;
+  const char *reuse = getenv("AR_EDITOR_RASTER_CACHE");
+  const bool raster_reuse = !reuse || strcmp(reuse, "0") != 0;
   while (scanf("%d %d %u %d %d", &x, &y, &frame, &extra, &vertical) == 5) {
     /* Match the browser oracle's default view, including its room-edge stop.
      * Benchmarks intentionally retain their explicitly requested capture. */
@@ -190,6 +192,14 @@ int main(int argc, char **argv) {
       break;
     }
     const uint32_t hash = EditorRoomScene_Hash(room);
+    if (raster_reuse) {
+      const unsigned scans = EditorRoomScene_RasterCount(room);
+      const uint32_t effects_hash = EditorRoomScene_EffectHash(room);
+      assert(EditorRoomScene_Render(room, x, y, frame, extra, vertical, &camera));
+      assert(EditorRoomScene_RasterCount(room) == scans);
+      assert(EditorRoomScene_Hash(room) == hash);
+      assert(EditorRoomScene_EffectHash(room) == effects_hash);
+    }
     assert(!EditorRoomScene_Render(room, -1, y, frame, extra, vertical, NULL));
     assert(!EditorRoomScene_Configure(room, "[unterminated"));
     assert(EditorRoomScene_Hash(room) == hash);
@@ -289,6 +299,8 @@ int main(int argc, char **argv) {
           assert(ceiling[row * surface->pitch_pixels + col] == solid);
     }
   }
+  if (getenv("AR_EDITOR_RASTER_STATS"))
+    fprintf(stderr, "scanouts=%u\n", EditorRoomScene_RasterCount(room));
   EditorRoomScene_Destroy(room);
   return 0;
 }

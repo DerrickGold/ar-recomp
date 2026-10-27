@@ -47,6 +47,16 @@ static bool BackgroundPacketEnabled(void) {
   return BackgroundPacketMode() != kDioramaGpuCapture_Off;
 }
 
+static bool BulkObjClearEnabled(void) {
+  static bool initialized, enabled;
+  if (!initialized) {
+    const char *setting = getenv("AR_PPU_BULK_OBJ_CLEAR");
+    enabled = !setting || strcmp(setting, "0") != 0;
+    initialized = true;
+  }
+  return enabled;
+}
+
 static void FinishBackgroundPacket(void) {
   s_live_background_packet = NULL;
   SrPpuBgPacket *p = s_background_packet;
@@ -592,6 +602,12 @@ static SrResult ActRaiser_DrawPpuFrameTransaction(
     s_background_packet->request_flags = 0;
   const SrPpuScanoutRequest scanout_request = {
       .struct_size = sizeof(scanout_request),
+      /* These dedicated, disjoint planes belong to scanout until it returns.
+       * Host sprite synthesis writes them only afterward. Normal line observers
+       * read registers, not OBJ pixels; shape tracing retains per-line clears. */
+      .flags = profile_diorama && !scanout_context.shape_trace && BulkObjClearEnabled() && scanout_api &&
+          (scanout_api->capabilities & SR_RUNNER_CAP_PPU_BULK_OBJ_CLEAR)
+          ? SR_PPU_SCANOUT_BULK_OBJ_CLEAR : 0u,
       .lifetime_generation = scanout_generations.lifetime_generation,
       .hdma_suppress_mask = 0u,
       .line_callback = observe_lines

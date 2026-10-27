@@ -15,8 +15,9 @@ typedef struct ArGpuEffectPacket {
   uint64_t revision, input_revision;
   unsigned light_count;
   int origin_x, origin_y;
-  unsigned capacity, shadow_count;
+  unsigned capacity, shadow_count, vertex_count;
   float brightness;
+  bool packed;
 } ArGpuEffectPacket;
 
 typedef struct ArGpuEffectSource {
@@ -30,7 +31,7 @@ typedef struct ArGpuEffectSource {
   ArGpuEffectPacket packets[kActionSourcePacketSlots], transient;
   SDL_GPUSampler *sampler, *nearest_sampler, *wrap_sampler, *wrap_nearest_sampler;
   SDL_GPUCommandBuffer *commands;
-  bool batch_open, batch_failed, batching_enabled;
+  bool batch_open, batch_failed, batching_enabled, packing_enabled;
   uint64_t draws, submissions;
   unsigned pending_draws, largest_batch;
 } ArGpuEffectSource;

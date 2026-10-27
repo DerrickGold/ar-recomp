@@ -41,6 +41,9 @@ enum {
 };
 _Static_assert(kUploadBytes >= kActionMaskAtlasWidth*kActionMaskAtlasHeight*sizeof(uint32_t),
                "effect upload buffer holds the startup mask atlas");
+_Static_assert(kActionSourceVerticesPerPrimitive <= 15 &&
+               kActionSourceMaximumPrimitives * kActionSourceVerticesPerPrimitive < (1u << 27),
+               "packed output base/count must fit below the GPU metadata marker");
 
 static void DestroyPacket(SDL_GPUDevice *device, ArGpuEffectPacket *packet) {
   SDL_ReleaseGPUBuffer(device, packet->primitives);
@@ -189,8 +192,10 @@ static SDL_GPUGraphicsPipeline *Pipeline(SDL_GPUDevice *gpu, SDL_GPUShader *vs, 
 
 bool ArGpuEffectSource_Init(ArGpuEffectSource *p, SDL_GPUDevice *gpu) {
   /* Exact submission batching; gpu_prototype_policy.h owns the default. */
+  const char *packing = SDL_getenv("AR_GPU_EFFECT_PACKING");
   *p = (ArGpuEffectSource){.device = gpu,
-      .batching_enabled = ArGpuPrototype_Enabled(gpu, "AR_GPU_EFFECT_BATCHING")};
+      .batching_enabled = ArGpuPrototype_Enabled(gpu, "AR_GPU_EFFECT_BATCHING"),
+      .packing_enabled = packing && SDL_strcmp(packing, "1") == 0};
   const GpuShaderBlobs project = BLOBS(ActionEffectProjectComp),
                        shadow = BLOBS(ActionEffectShadowComp), moon = BLOBS(ActionEffectMoonComp), drawvs = BLOBS(ActionEffectDrawVert),
                        drawfs = BLOBS(ActionEffectDrawFrag), skyvs = BLOBS(ActionSkyboxVert),
@@ -367,6 +372,22 @@ static bool Uniform(const DioramaProjection *v, unsigned width, unsigned height,
   return true;
 }
 
+/* Reserve only the vertices a fixed-shape primitive can emit. Clipped
+ * triangles still need five triangles; leaves use all fifteen vertices.
+ * Packing preserves primitive order, including alpha-blended overlaps. */
+static unsigned PackedVertexCount(unsigned kind) {
+  switch (kind) {
+    case kActionSourceGlowTriangle:
+    case kActionSourceFloorTriangle: return 3;
+    case kActionSourceParticle:
+    case kActionSourceEmber:
+    case kActionSourceQuad:
+    case kActionSourceRibbon: return 6;
+    case kActionSourceStar: return 12;
+    default: return kActionSourceVerticesPerPrimitive;
+  }
+}
+
 static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *motion,
                             uint32_t mask, float phase, const ActionEffectSourceBatch *batch,
                             const DioramaProjection *view, const ActionMoonlightOcclusion *scenery,
@@ -394,10 +415,11 @@ static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *mo
   const int ox = batch->context.ws_extra - batch->context.bg1_camera_x;
   const int oy = batch->context.ws_extra_top - batch->context.bg1_camera_y;
   const bool upload_primitives = !retained || packet->revision != batch->revision ||
-      packet->brightness != brightness;
+      packet->brightness != brightness || packet->packed != p->packing_enabled;
   const bool upload_inputs = !retained || packet->input_revision != batch->revision ||
       packet->light_count != batch->light_count || packet->origin_x != ox || packet->origin_y != oy;
   unsigned shadow_count = packet->shadow_count;
+  unsigned vertex_count = packet->vertex_count;
   if (upload_primitives || upload_inputs) {
     shadow_count = 0;
     for (unsigned i = 0; i < batch->count; ++i) {
@@ -463,12 +485,22 @@ static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *mo
      * nothing when their immutable capture and brightness have not changed. */
     if (upload_primitives) {
       packet->revision = 0;
-      if (brightness == 1.0f) memcpy(mapped, batch->primitives, bytes);
+      vertex_count = p->packing_enabled ? 0 : batch->count * kActionSourceVerticesPerPrimitive;
+      if (brightness == 1.0f && !p->packing_enabled) memcpy(mapped, batch->primitives, bytes);
       else for (unsigned i = 0; i < batch->count; ++i) {
         ActionEffectSourcePrimitive primitive = batch->primitives[i];
-        for (unsigned c = 0; c < (primitive.meta[0] == kActionSourceQuad ? 4u : 3u); ++c)
-          for (unsigned rgb = 0; rgb < 3; ++rgb)
-            (c < 3 ? primitive.colors[c] : primitive.extra)[rgb] *= brightness;
+        if (p->packing_enabled) {
+          const unsigned count = PackedVertexCount(primitive.meta[0]);
+          /* Object priority is already resolved into meta[1]'s projection
+           * plane. Only the GPU copy repurposes meta[2]: flag, base, count.
+           * Keep the shared CPU/WASM source packet immutable. */
+          primitive.meta[2] = UINT32_C(0x80000000) | (vertex_count << 4) | count;
+          vertex_count += count;
+        }
+        if (brightness != 1.0f)
+          for (unsigned c = 0; c < (primitive.meta[0] == kActionSourceQuad ? 4u : 3u); ++c)
+            for (unsigned rgb = 0; rgb < 3; ++rgb)
+              (c < 3 ? primitive.colors[c] : primitive.extra)[rgb] *= brightness;
         memcpy(mapped + i * sizeof(primitive), &primitive, sizeof(primitive));
       }
     }
@@ -587,13 +619,15 @@ static bool Draw(ArGpuEffectSource *p, ArRenderDevice *device, SDL_GPUBuffer *mo
   const float size[4] = {width, height, 0, 0};
   SDL_PushGPUVertexUniformData(cmd, 0, size, sizeof(size));
   SDL_SetGPUScissor(draw, &scissor);
-  SDL_DrawGPUPrimitives(draw, batch->count * 15, 1, 0, 0);
+  SDL_DrawGPUPrimitives(draw, vertex_count, 1, 0, 0);
   SDL_EndGPURenderPass(draw);
   /* These cache keys are usable by later packets in the same ordered scope.
    * A failed/cancelled submission invalidates every speculative key. */
   packet->revision = batch->revision;
   packet->brightness = brightness;
   packet->shadow_count = shadow_count;
+  packet->vertex_count = vertex_count;
+  packet->packed = p->packing_enabled;
   packet->input_revision = batch->revision;
   packet->light_count = batch->light_count;
   packet->origin_x = ox; packet->origin_y = oy;

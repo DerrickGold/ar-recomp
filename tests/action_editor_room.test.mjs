@@ -51,9 +51,9 @@ const imports={
  effect(kind,p,n){
    assert(kind>=-1&&kind<=5);
    if(kind>=0){
-     assert.equal(effect,-1);assert.equal(n,[3,3,9,4,17,19][kind]);
+     assert.equal(effect,-1);assert.equal(n,[3,3,9,4,29,19][kind]);
      const params=new Float32Array(api.memory.buffer,p,n);assert(params.every(Number.isFinite));
-     if(kind===4)assert(textures.has(params[16])&&params[16]!==target,'illumination map is a valid separate texture');
+     if(kind===4)assert(textures.has(params[28])&&params[28]!==target,'illumination map is a valid separate texture');
    }
    effect=kind;return 1;
  },
@@ -239,10 +239,8 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
    if(base.map===5) {
      const original=[...shipped.matchAll(new RegExp(`\\[emitter:03:05:${terrain.profile}:soft-light:[^\\]]+\\]([^\\[]+)`,'g'))]
        .find(match=>/^y=1424$/m.test(match[1]))[1];
-     const copies=[[752,1392],[688,1280]].map(([x,y],i)=>
-       `[emitter:03:05:${terrain.profile}:soft-light:${(0xf0000000+i).toString(16)}]\n`+
-       original.replace(/^x=.*$/m,`x=${x}`).replace(/^y=.*$/m,`y=${y}`));
-     const pasted=shipped+'\n'+copies[0];
+     const pasted=shipped+`\n[emitter:03:05:${terrain.profile}:soft-light:f0000000]\n`+
+       original.replace(/^x=.*$/m,'x=752').replace(/^y=.*$/m,'y=1392');
      assert.equal(send(Buffer.from(pasted),api.RoomPreview_ConfigureEffects),1,
        `Kassandora room 5 accepts copied soft lights beyond the old 16-instance limit: ${cstring(api.RoomPreview_RecipeError())}`);
      fs.writeFileSync(effectsFile,pasted);
@@ -255,8 +253,12 @@ for(const base of data.rooms)for(const terrain of base.terrainVariants){
        input:requests.map(r=>r.join(' ')).join('\n')+'\n',encoding:'utf8'
      }).trim().split('\n').map(n=>n.split(' ').map(v=>parseInt(v,16)));
      assert.deepEqual(pastedHashes,nativePasted,'pasted soft lights render identically in native and WASM');
-     assert.equal(send(Buffer.from(pasted+'\n'+copies[1]),api.RoomPreview_ConfigureEffects),0);
-     assert.match(cstring(api.RoomPreview_RecipeError()),/4100 reserved effect vertices; the limit is 4096/);
+     // Budget validation must not depend on the current artistic composition
+     // happening to be one copied light away from the geometry limit.
+     const oversized='[effects]\nversion=1\n'+Array.from({length:96},(_,i)=>
+       `[emitter:03:05:${terrain.profile}:soft-light:${i.toString(16)}]\n`).join('');
+     assert.equal(send(Buffer.from(oversized),api.RoomPreview_ConfigureEffects),0);
+     assert.match(cstring(api.RoomPreview_RecipeError()),/reserved effect vertices; the limit is 4096/);
      assert.equal(api.RoomPreview_Render(...requests.at(-1),960,600,1,0,0,1,0),1);
      assert.deepEqual([api.RoomPreview_Hash()>>>0,api.RoomPreview_EffectHash()>>>0],pastedHashes.at(-1),
        'geometry-budget failure preserves the last accepted room');

@@ -380,6 +380,10 @@ struct Ppu {
     uint8_t *overlayRenderBuffer[kPpuOverlaySource_Count];
     uint8_t *overlayRenderBands[kPpuOverlaySource_Count][3];
     uint8_t overlayRenderMaybeDirty[kPpuOverlaySource_Count];
+    /* Derived, frame-local clear ownership; never serialized. A row is
+     * consumed on its first render, so repeated lines still clear normally. */
+    uint8_t objOverlayPrecleared[kPpuBufHeight];
+    uint64_t objOverlayClearBindingGeneration;
     uint8_t overlayRenderContentMask[kPpuOverlaySource_Count];
     SrPpuBgPacket *backgroundPacket; /* Borrowed only inside scanout. */
     uint8_t backgroundTileSources, backgroundCpuSources, backgroundDeferredClear;
@@ -551,6 +555,8 @@ bool PpuSetAuthenticCameraFrame(Ppu *, uint8_t, const uint16_t *,
 bool PpuAuthenticCameraFrameReady(const Ppu *, uint8_t);
 void PpuClearAuthenticCameraFrame(Ppu *);
 void PpuClearOverlayBindings(Ppu *);
+void PpuPreclearObjOverlay(Ppu *);
+void PpuSetObjAttributeCapture(Ppu *, const SrPpuObjAttributeCapture *);
 bool PpuBindOverlaySurface(Ppu *, PpuOverlaySource, uint8_t *, size_t);
 bool PpuBindOverlaySurfaceSized(Ppu *, PpuOverlaySource, uint8_t *, size_t,
                                 size_t);

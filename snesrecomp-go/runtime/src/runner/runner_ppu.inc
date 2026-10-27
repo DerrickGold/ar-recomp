@@ -653,8 +653,7 @@ static SrResult configure_ppu_obj_capture(
     if(request->flags & SR_PPU_OBJ_CAPTURE_COLOR_TRANSFORMS)
         (void)PpuSetObjColorTransforms(ppu,request->color_transforms,request->color_transform_count);
     if (request->flags & SR_PPU_OBJ_CAPTURE_ATTRIBUTES) {
-        if (request->attributes) ppu->objAttributes = *request->attributes;
-        else memset(&ppu->objAttributes, 0, sizeof(ppu->objAttributes));
+        PpuSetObjAttributeCapture(ppu, request->attributes);
     }
     return SR_RESULT_OK;
 }
@@ -1251,7 +1250,7 @@ static SrResult run_ppu_scanout_with_background_view(
         request->struct_size < SR_PPU_SCANOUT_REQUEST_V2_SIZE ||
         out_result->struct_size < SR_PPU_SCANOUT_RESULT_V2_SIZE ||
         (request->flags &
-         ~SR_PPU_SCANOUT_CAPTURE_PRESENTATION_DIGEST) != 0u ||
+         ~(SR_PPU_SCANOUT_CAPTURE_PRESENTATION_DIGEST | SR_PPU_SCANOUT_BULK_OBJ_CLEAR)) != 0u ||
         request->hdma_suppress_mask > 0xffu ||
         request->reserved != 0u || request->irq_callback == NULL)
         return SR_RESULT_INVALID_ARGUMENT;

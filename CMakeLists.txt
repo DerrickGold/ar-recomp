@@ -4116,6 +4116,7 @@ if(BUILD_TESTING)
 
     add_executable(actraiser_diorama_frame_generation_test
         tests/diorama_frame_generation_test.c
+        src/action/action_effect_masks.c
         src/diorama/diorama_projection.c
         src/diorama/diorama_depth_shapes.c
         src/render/scene3d_math.c
@@ -4232,6 +4233,12 @@ if(BUILD_TESTING)
         SKIP_RETURN_CODE 77 TIMEOUT 30
         FAIL_REGULAR_EXPRESSION "unpack-frames=[1-9];atlas-output-bytes=[1-9]"
         ENVIRONMENT "AR_REQUIRE_GPU_RENDERER=1;AR_GPU_BG_MOTION=owned;AR_GPU_FRAME_HANDOFF=all;AR_GPU_EFFECT_PROJECTION=resident;AR_GPU_DIRECT_LAYERS=auto")
+    add_test(NAME actraiser_diorama_frame_generation_packed
+        COMMAND actraiser_diorama_frame_generation_test)
+    set_tests_properties(actraiser_diorama_frame_generation_packed PROPERTIES
+        SKIP_RETURN_CODE 77 TIMEOUT 30
+        FAIL_REGULAR_EXPRESSION "unpack-frames=[1-9];atlas-output-bytes=[1-9]"
+        ENVIRONMENT "AR_REQUIRE_GPU_RENDERER=1;AR_GPU_BG_MOTION=owned;AR_GPU_FRAME_HANDOFF=all;AR_GPU_EFFECT_PROJECTION=resident;AR_GPU_DIRECT_LAYERS=auto;AR_GPU_EFFECT_PACKING=1")
     add_test(NAME actraiser_diorama_frame_generation_direct_layers COMMAND actraiser_diorama_frame_generation_test)
     set_tests_properties(actraiser_diorama_frame_generation_direct_layers PROPERTIES
         SKIP_RETURN_CODE 77 TIMEOUT 60
